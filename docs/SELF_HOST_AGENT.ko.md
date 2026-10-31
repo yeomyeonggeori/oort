@@ -2007,19 +2007,43 @@ agent:
 - **Railway:** `infra/railway/railway.json`에 `hermes` 서비스(비공개, digest 고정
   공식 이미지, `/opt/data` 볼륨)와 6~7번의 api·agent-worker 변수가 들어 있어요.
   shared variable `HERMES_API_KEY`(`openssl rand -hex 32`)를 만들고,
-  `infra/hermes/config.yaml`과 `infra/hermes/lockgate.py`를 base64 변수 두 개로
-  붙여 배포한 뒤, hermes 배포 로그에서 `LOCKGATE {"ok": true, …}` 한 줄을 읽어요.
+  `infra/hermes/config.yaml`, `infra/hermes/lockgate.py`, `infra/hermes/plugins/oort-image-guard/`의
+  파일 둘을 base64 변수 네 개로 붙여 배포한 뒤, hermes 배포 로그에서 `LOCKGATE {"ok": true, …}` 한 줄을 읽어요.
   시작 명령이 Hermes 엔트리포인트 앞에서 게이트를 돌리므로, 설정이 거절되면 서비스는
-  아예 listen하지 않아요. `infra/railway/README.md`(Hermes)를 보세요.
+  아예 listen하지 않아요. `infra/railway/README.md`(Hermes)를 보세요. 템플릿은
+  agent-worker와 hermes에 `OORT_SELF_MEDIA_ORIGIN`(이 엣지의 공개 출처)도 같은 값으로
+  둬요. 이 값이 있으면 사진이 붙은 요청에서 에이전트의 그림 도구가 그 사진을 편집할 수
+  있도록 5분짜리 1회용 주소를 받아요. agent-worker 쪽 값이 비면 사진 주소는 건네지 않아요.
+  hermes 쪽 값만 비면 워커는 주소를 건네지만 그림 가드가 거절하므로 그림 도구는 그 주소를
+  내려받지 않고, 편집할 원본이 없어요(#4820).
 - **docker compose:** `scripts/self_host_env.sh --local-build --with-agents`(또는
   `--published-image …`)가 `COMPOSE_PROFILES=agents`, 생성된 `HERMES_API_KEY`,
   `HERMES_BASE_URL=http://hermes:8642/v1`, 정확한 호스트 `hermes`의 로컬 허용,
   `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`을 써요. 이어서
   `scripts/self_host_env.sh --compose up -d --wait`로 나머지와 함께 Hermes가 떠요.
   `hermes` 서비스에는 `ports:`가 없고(호스트에서 닿지 않음), 설정과 게이트를
-  읽기 전용으로 마운트하며, 엔트리포인트 앞에서 `lockgate.py gate`를 돌려요. 기존
+  읽기 전용으로(그림 가드 플러그인도) 마운트하며, 엔트리포인트 앞에서 `lockgate.py gate`를 돌려요. 기존
   env에서는 생성된 키를 다시 만들지 않고 나머지 키를 번들 값으로 맞추며, 이미 다른
-  `HERMES_BASE_URL`을 선언한 env는 거절해요.
+  `HERMES_BASE_URL`을 선언한 env는 거절해요. 요청자가 올린 사진을 에이전트가 편집하게 하려면
+  env에 `OORT_SELF_MEDIA_ORIGIN=https://<공개 호스트>`도 둬요(compose가 agent-worker와
+  hermes에 그대로 넘겨요. 소문자 호스트와 선택적 `:포트`만, 끝 슬래시는 안 돼요). Hermes가 그
+  주소를 직접 내려받으므로 Hermes 쪽에서 공개 주소로 풀려야 해요(Hermes의 사설 주소 필터는
+  계속 켜져 있어요). 비워 두면 아무것도 달라지지 않아요.
+- **에이전트가 사진으로 팀 표현을 만들게 하기(호스팅 문, #4820).** 서버는 같이 도는
+  Hermes가 만든 그림을 Hermes의 답에서 읽어 와요. 그래서 문은 **둘 다 켜야** 열려요.
+  Hermes 쪽은 `HERMES_MEDIA_DELIVERY_STRICT=1`이에요(Hermes의 엄격한 미디어 전달이에요.
+  꺼져 있으면 답에 적힌 `MEDIA:` 줄이 읽을 수 있는 아무 파일이나 내줘요). 템플릿과 compose가
+  알아서 넣고, `lockgate.py`는 그림 도구가 켜진 Hermes에 이 값이 정확히 `1`이 아니면
+  시작을 거절해요(볼륨 `.env`에 이 이름이 있어도 거절해요). 워커 쪽은 agent-worker의
+  `OORT_HOSTED_MEDIA_STRICT=1`이에요. 워커가 연결하는 Hermes가 그 엄격한 Hermes라는
+  운영자의 확인이에요. 템플릿과 compose는 이 값을 **비워서** 보내요. 그래서 기본은 문이
+  닫혀 있고, 사진 메시지는 오류 카드 없이 평소 대화로 처리돼요. Hermes 서비스가 새
+  게이트로 돌고 있을 때만 켜세요. 기존 Railway 프로젝트는 이 순서로 고쳐요. ① hermes에
+  `HERMES_MEDIA_DELIVERY_STRICT=1`을 먼저 더해요. ② 그다음 `HERMES_LOCKGATE_B64`와 시작
+  명령의 체크섬을 함께 다시 배포해요(새 게이트는 ①이 없으면 Hermes를 띄우지 않으니 ②만
+  하면 에이전트가 멈춰요). ③ 배포 로그의 `LOCKGATE` 줄에서 `image_guard` 안의
+  `"media_strict": true`가 보이면 마지막으로 `OORT_HOSTED_MEDIA_STRICT=1`을 켜요.
+  정확히 `1`일 때만 문이 열려요.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 여전히 **운영자 본인의 선언**이에요. 두
   배포 모양 모두 게이트가 뒷받침하지만, 설정·게이트·시작 명령을 고치면 그 뒷받침은
   운영자가 직접 책임져요.

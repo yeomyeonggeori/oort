@@ -10,6 +10,8 @@
     "./*": "./src/*.ts"
   },
   "scripts": {
+    "extract:emoji": "node scripts/extract-emoji-catalog.mjs",
+    "gate:emoji": "node scripts/extract-emoji-catalog.mjs --check",
     "test": "vitest run",
     "i18n:generate": "node src/i18n/tooling/generate.mjs",
     "i18n:check": "node src/i18n/tooling/generate.mjs --check",
@@ -21,6 +23,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@formatjs/icu-messageformat-parser": "3.5.22",
+    "emojibase-data": "18.0.0",
     "eslint": "^9.39.5",
     "typescript": "^5.6.3",
     "typescript-eslint": "^8.65.0",

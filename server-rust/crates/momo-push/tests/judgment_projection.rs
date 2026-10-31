@@ -9,7 +9,7 @@
 //! only the paths the shared functions read: the audience's (`decider_gate`,
 //! `pinned_target_agent`, `reference_execution_host`) and the open-in-app list's
 //! (`opens_in_app`: the tool's name, and whether the profile update carries an avatar
-//! at all — never the avatar).
+//! or displayName at all — never their values).
 //!
 //! This is a source-level pin: a statement text cannot be asked what it selects at
 //! runtime without running a database, and the failure it guards (somebody "simplifies"
@@ -26,7 +26,7 @@ const JUDGMENT: &str = include_str!("../src/judgment.rs");
 
 /// Every path of `approval.payload` the judgment statement may read, as the text that
 /// follows the column reference `a.payload`.
-const ALLOWED_READS: [&str; 7] = [
+const ALLOWED_READS: [&str; 8] = [
     "#>'{action,id}'",
     "#>'{action,pins}'",
     // Presence of one key, never its value — and only on an object, so that the answer
@@ -34,6 +34,7 @@ const ALLOWED_READS: [&str; 7] = [
     // and `jsonb_exists(<this>, 'avatar')`.
     "#>'{action,args}') = 'object'",
     "#>'{action,args}', 'avatar')",
+    "#>'{action,args}', 'displayName')",
     "#>'{tool_call,name}'",
     "->'execution'",
     "->'origin'",
@@ -164,28 +165,27 @@ fn the_approval_row_cannot_be_taken_whole() {
 }
 
 #[test]
-fn the_avatar_is_asked_about_never_selected() {
+fn the_avatar_and_name_are_asked_about_never_selected() {
     // `action.args` holds the card's arguments. The one place the statement may touch it
-    // is the presence test for the avatar key — on an object — and the test's result is
-    // a boolean marker: the avatar object itself is not in the projection.
+    // is the presence test for the avatar/name keys — on an object — and the result is
+    // a boolean marker: neither value is in the projection.
     let sql = statement();
     let args = "a.payload#>'{action,args}'";
     let reads: Vec<usize> = sql.match_indices(args).map(|(at, _)| at).collect();
     assert_eq!(
         reads.len(),
-        2,
-        "exactly two reads of the card's arguments: the object test and the key test"
+        3,
+        "exactly three reads of the card's arguments: the object test and two key tests"
     );
     assert!(
         sql[..reads[0]].ends_with("jsonb_typeof("),
         "the first read of the card's arguments is `jsonb_typeof(…) = 'object'`"
     );
-    assert!(
-        sql[..reads[1]].ends_with("jsonb_exists("),
-        "the second read of the card's arguments is `jsonb_exists(…, 'avatar')`"
-    );
-    assert!(
-        sql[reads[1]..].contains("jsonb_build_object('avatar', true)"),
-        "the avatar presence is carried as a bare marker, not as the avatar"
-    );
+    for (read, key) in reads[1..].iter().zip(["avatar", "displayName"]) {
+        assert!(sql[..*read].ends_with("jsonb_exists("));
+        assert!(
+            sql[*read..].starts_with(&format!("{args}, '{key}') THEN true END")),
+            "{key} presence is carried as a bare marker, never its value"
+        );
+    }
 }

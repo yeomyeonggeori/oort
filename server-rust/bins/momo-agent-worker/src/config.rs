@@ -117,6 +117,26 @@ pub struct WorkerConfig {
     /// alternative to parsing an unexpected fence is printing raw JSON into a
     /// channel — worse than the card the operator declined.
     pub report_protocol_enabled: bool,
+    /// `OORT_SELF_MEDIA_ORIGIN` (#4820 C2a, ADR-0218 증보 G4·G8) — this instance's public origin as the
+    /// co-hosted Hermes' image guard accepts it: `https://<lowercase host>[:<port>]` and nothing more
+    /// ([`momo_messaging::canonical_origin`]). Set, a turn of an agent pinned to the co-hosted Hermes
+    /// whose trigger message carries a picture gets one more `system` line: the requester's photo as a
+    /// short-lived, single-use address under this origin. Unset **or not canonical** it is `None` and
+    /// no address is ever minted. A separate variable on purpose: `MOMO_PUBLIC_BASE_URL` reaches the api
+    /// only (ADR-0205 D1), and the same value goes to the Hermes service as the guard's one allowed origin.
+    pub self_media_origin: Option<String>,
+    /// `OORT_HOSTED_MEDIA_STRICT` (#4820 C2b 2부, ADR-0218 증보 G3.7 (b)·G4) — the operator's attestation
+    /// that the co-hosted Hermes behind this worker runs with `HERMES_MEDIA_DELIVERY_STRICT=1`, which is
+    /// what keeps a `MEDIA:` mark in a final answer from being turned into the bytes of any file the
+    /// model names. This worker cannot see that from here, so the door that harvests a picture from an
+    /// answer opens **only** on an exact `1`; unset (or anything else) the door is **shut and a photo turn
+    /// is an ordinary turn** (no failure card, no photo lookup, the streaming model call it always was).
+    /// Hermes' own enforcement of the flag is `infra/hermes/lockgate.py`, which refuses to start Hermes
+    /// with its picture tool unless `HERMES_MEDIA_DELIVERY_STRICT=1`; both must be on for the door to open.
+    pub hosted_media_strict: bool,
+    /// The assembler child the hosted door runs for a motion (`None` = `momo-expression-assembler` next
+    /// to this executable, the way every picture path finds it). A hook for tests, like `momo-server`'s.
+    pub assembler_program: Option<std::path::PathBuf>,
     /// #3162 — the team-memory summary loop (`MEMORY_*` keys).
     pub memory: MemoryConfig,
     /// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` (#3431, ADR-0193 D18) — read
@@ -587,6 +607,13 @@ fn claude_subscription_agents_switch_on(value: Option<&str>) -> bool {
     value.is_some_and(|value| value.trim() == "true")
 }
 
+/// The operator's strict-media attestation (#4820 C2b 2부): **only an exact `1`**. Not `true`, not `yes`,
+/// not `01`, not a `1` with a space around it — a door that opens a path for the model to name a file
+/// does not open on a guess about what the operator meant.
+fn hosted_media_strict_attested(raw: Option<&str>) -> bool {
+    raw == Some("1")
+}
+
 fn report_protocol_enabled(raw: Option<&str>) -> bool {
     !matches!(
         raw.map(|value| value.trim().to_ascii_lowercase())
@@ -673,6 +700,12 @@ impl WorkerConfig {
             report_protocol_enabled: report_protocol_enabled(
                 env("AGENT_REPORT_PROTOCOL_ENABLED").as_deref(),
             ),
+            self_media_origin: env("OORT_SELF_MEDIA_ORIGIN")
+                .and_then(|raw| momo_messaging::canonical_origin(&raw).map(str::to_string)),
+            hosted_media_strict: hosted_media_strict_attested(
+                env(momo_workspace_actions::hosted_expression::STRICT_ENV).as_deref(),
+            ),
+            assembler_program: None,
             memory: MemoryConfig::from_env()?,
             claude_subscription_agents_enabled: claude_subscription_agents_switch_on(
                 env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref(),
@@ -718,6 +751,9 @@ impl WorkerConfig {
             utc_offset_minutes: 540,
             egress: momo_settings::EgressPolicy::default(),
             report_protocol_enabled: true,
+            self_media_origin: None,
+            hosted_media_strict: false,
+            assembler_program: None,
             memory: MemoryConfig::default(),
             claude_subscription_agents_enabled: false,
             team_ai_daily_token_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_TOKEN_CAP,
@@ -729,6 +765,30 @@ impl WorkerConfig {
             ),
             team_ai_daily_search_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_SEARCH_CAP,
         }
+    }
+
+    /// The same config with the self-media origin set (#4820 C2a) — a value that is not a canonical
+    /// origin leaves it off, exactly as the environment does.
+    pub fn with_self_media_origin(mut self, origin: &str) -> WorkerConfig {
+        self.self_media_origin = momo_messaging::canonical_origin(origin).map(str::to_string);
+        self
+    }
+
+    /// The same config with the operator's strict-media attestation (#4820 C2b 2부) — what an exact
+    /// `OORT_HOSTED_MEDIA_STRICT=1` is in the environment.
+    pub fn with_hosted_media_strict(mut self, strict: bool) -> WorkerConfig {
+        self.hosted_media_strict = strict;
+        self
+    }
+
+    /// The same config with the assembler child to run (#4820 C2b 2부), for tests that provoke a
+    /// refusal or an outage of the assembler.
+    pub fn with_assembler_program(
+        mut self,
+        program: impl Into<std::path::PathBuf>,
+    ) -> WorkerConfig {
+        self.assembler_program = Some(program.into());
+        self
     }
 
     /// The same config with an operator env key (`HERMES_API_KEY`) set — for
@@ -819,6 +879,128 @@ fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String 
 
 #[cfg(test)]
 mod tests {
+
+    /// #4820 C2b 2부: the strict-media attestation is an exact `1` and nothing else.
+    #[test]
+    fn the_strict_media_attestation_is_an_exact_one() {
+        assert!(hosted_media_strict_attested(Some("1")));
+        for wrong in [
+            None,
+            Some(""),
+            Some(" 1"),
+            Some("1 "),
+            Some("01"),
+            Some("11"),
+            Some("0"),
+            Some("true"),
+            Some("TRUE"),
+            Some("yes"),
+            Some("on"),
+        ] {
+            assert!(!hosted_media_strict_attested(wrong), "{wrong:?}");
+        }
+    }
+
+    /// The name the operator types. Pinned as a literal on purpose: the Railway template, the compose
+    /// file and the docs all write it, so renaming the worker's constant must break a test here and
+    /// not every deployment.
+    const STRICT_VAR: &str = "OORT_HOSTED_MEDIA_STRICT";
+    /// Set only by the parent below; without it [`strict_wiring_probe_child`] returns at once.
+    const PROBE_MARKER: &str = "OORT_TEST_STRICT_WIRING_PROBE";
+    /// The one line the probe prints, followed by `true` or `false`.
+    const PROBE_LINE: &str = "OORT_STRICT_WIRING_PROBE hosted_media_strict=";
+
+    /// The child half of [`the_strict_media_value_opens_the_door_switch_only_as_an_exact_one`]: it
+    /// prints what the REAL `WorkerConfig::from_env()` made of the environment it was started with.
+    /// A plain `cargo test` finds no marker and passes without doing anything — the parent is the
+    /// assertion, and it fails unless this printed its line.
+    #[test]
+    fn strict_wiring_probe_child() {
+        if std::env::var_os(PROBE_MARKER).is_none() {
+            return; // the parent test drives this one
+        }
+        let config =
+            WorkerConfig::from_env().expect("the probe's minimal environment is a valid config");
+        // `--nocapture` appends a test's output to the harness's `test … ... ` line: start a new one.
+        println!("\n{PROBE_LINE}{}", config.hosted_media_strict);
+    }
+
+    /// What the real `from_env()` makes of `OORT_HOSTED_MEDIA_STRICT=<value>` (`None`: not in the
+    /// environment at all), asked of a child process — this test binary re-executed — so that the
+    /// environment is the child's alone and no test here ever calls `set_var`, which would race every
+    /// other test of the binary.
+    fn the_door_switch_from_env_in_a_child(value: Option<&str>) -> bool {
+        // libtest names a test by its module path below the crate: `config::tests::<fn>`.
+        let below_the_crate = module_path!().split_once("::").map_or("", |(_, rest)| rest);
+        let test = format!("{below_the_crate}::strict_wiring_probe_child");
+        let mut child =
+            std::process::Command::new(std::env::current_exe().expect("this test binary"));
+        child
+            .args([test.as_str(), "--exact", "--nocapture", "--test-threads=1"])
+            // Nothing the operator's shell or the CI job exported may decide this test (a stray
+            // `OORT_HOSTED_MEDIA_STRICT`, a `DATABASE_URL`, a malformed number): the child starts
+            // empty and gets the one variable `from_env()` insists on — a dummy that is never dialled.
+            .env_clear()
+            .env(PROBE_MARKER, "1")
+            .env("WORKER_DATABASE_URL", "postgres://probe.invalid/probe");
+        if let Some(value) = value {
+            child.env(STRICT_VAR, value);
+        }
+        let out = child.output().expect("spawn the probe");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            out.status.success() && stdout.contains("test result: ok. 1 passed;"),
+            "the probe did not run its one test (a probe that ran 0 tests must not count):\n{stdout}\n{stderr}"
+        );
+        let answers: Vec<&str> = stdout
+            .lines()
+            .filter_map(|line| line.split_once(PROBE_LINE).map(|(_, answer)| answer.trim()))
+            .collect();
+        match answers.as_slice() {
+            ["true"] => true,
+            ["false"] => false,
+            other => panic!(
+                "the probe must print exactly one `true`/`false` answer, got {other:?}:\n{stdout}\n{stderr}"
+            ),
+        }
+    }
+
+    /// #4820 C2b second security review, Medium-1: the seam between the environment and the door
+    /// switch. [`the_strict_media_attestation_is_an_exact_one`] pins the pure rule; this one runs the
+    /// real `from_env()` — the `env()` read, the wiring line, the value exactly as a process gets it —
+    /// so pinning `hosted_media_strict` to a constant, reading another name, or letting `env()` trim
+    /// the value (`" 1"` would become `1`) turns it red. Only an exact `1` opens the switch.
+    #[test]
+    fn the_strict_media_value_opens_the_door_switch_only_as_an_exact_one() {
+        assert!(
+            the_door_switch_from_env_in_a_child(Some("1")),
+            "an exact `1` is the operator's attestation"
+        );
+        for (label, value) in [
+            ("not in the environment", None),
+            ("empty", Some("")),
+            ("blanks only", Some("   ")),
+            ("a leading space", Some(" 1")),
+            ("a trailing space", Some("1 ")),
+            ("a trailing newline", Some("1\n")),
+            ("a leading tab", Some("\t1")),
+            ("a leading newline", Some("\n1")),
+            ("zero-padded", Some("01")),
+            ("doubled", Some("11")),
+            ("zero", Some("0")),
+            ("the word true", Some("true")),
+            ("TRUE", Some("TRUE")),
+            ("yes", Some("yes")),
+            ("on", Some("on")),
+        ] {
+            assert!(
+                !the_door_switch_from_env_in_a_child(value),
+                "{label} ({value:?}) must leave the door switch shut"
+            );
+        }
+    }
+
     /// #3431: the worker reads the Claude opt-in by the server's rule — only an
     /// exact `true` opens it, and the shipped default (`for_target`) is off.
     #[test]

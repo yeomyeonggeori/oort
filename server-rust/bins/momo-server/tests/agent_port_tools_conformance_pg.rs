@@ -32,6 +32,9 @@ const LEGACY_VERSION: &str = "2025-11-25";
 const PATH: &str = "/v1/mcp/agent-port";
 const AUDIENCE: &str = "/v1/mcp/agent-port";
 
+#[path = "agent_port_tools/hosted_approval_connection.rs"]
+mod hosted_approval_connection;
+
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to an isolated PostgreSQL 18 URL")
 }
@@ -675,6 +678,9 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
             "oort_run_complete",
             "oort_action_propose",
             "oort_action_claim_secret",
+            // ADR-0218 G3.7 (a): rides the propose scope, so a hosted credential that may
+            // propose sees it and no other credential does.
+            "oort_expression_assemble",
             "oort_card_suggest",
             "oort_ping",
         ]
@@ -763,7 +769,9 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        13,
+        // The thirteen it had, plus `oort_expression_assemble` (ADR-0218 G3.7 (a)): the propose scope
+        // this token carries opens it.
+        14,
         "a foundation request proves the binding and re-activates it"
     );
     let reactivated: String = sqlx::query_scalar(
@@ -844,7 +852,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        13,
+        14,
         "restoring the connection restores the catalog"
     );
 
@@ -1416,6 +1424,18 @@ async fn the_job_and_run_tools_share_the_gateway_lease_and_terminal_rules() {
     .await
     .unwrap();
     assert_eq!(usage_rows, 1, "a replayed completion must not bill twice");
+    let source: String = sqlx::query_scalar(
+        "SELECT source FROM usage_ledger WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        source, "self_reported",
+        "Agent Port token counts are the agent's own report"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2130,6 +2150,24 @@ async fn a_managed_mention_job_survives_the_whole_rest_gateway_round_trip() {
     assert_eq!(renewed.status().as_u16(), 200, "renew must find the lease");
 
     // ---- complete over REST ------------------------------------------------
+    let invalid = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/agent-runs/{run_id}/gateway/complete",
+            fixture.workspace
+        ))
+        .bearer_auth(&gateway_bearer)
+        .json(
+            &json!({"job_id":job_id,"lease_id":lease_id,"status":"succeeded",
+            "usage":{"promptTokens":-2147483648,"cachedTokens":1}}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        invalid.status().as_u16(),
+        400,
+        "a bad token report must not settle the lease or poison cost reads"
+    );
     let completed = client
         .post(format!(
             "{base}/v1/workspaces/{}/agent-runs/{run_id}/gateway/complete",
@@ -2193,6 +2231,18 @@ async fn a_managed_mention_job_survives_the_whole_rest_gateway_round_trip() {
     .await
     .unwrap();
     assert_eq!(managed_events, 0);
+    let source: String = sqlx::query_scalar(
+        "SELECT source FROM usage_ledger WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        source, "self_reported",
+        "REST callback token counts are the agent's own report"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -3007,26 +3057,26 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
     let messages_after = channel_message_count(&su, fixture.workspace, fixture.channel).await;
     assert_eq!(
         messages_after - messages_before,
-        1,
-        "the rejection must add exactly one message (the tool_result) beside the card"
+        0,
+        "the rejection updates the existing card without another message"
     );
     let (result_author, result_props): (Uuid, Value) = sqlx::query_as(
         "SELECT author_member_id, props FROM message \
-          WHERE workspace_id=$1 AND channel_id=$2 AND type='tool_result' \
+          WHERE workspace_id=$1 AND channel_id=$2 AND type='approval_request' AND props->>'status'='rejected' \
           ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
     .bind(fixture.channel)
     .fetch_one(&su)
     .await
-    .expect("the rejection tool_result is in the channel");
+    .expect("the rejected approval card is in the channel");
     assert_eq!(
         result_author, fixture.hosted_agent,
         "the outcome is authored by the agent whose proposal it was"
     );
     assert_eq!(result_props["approval_id"], json!(approval_id.to_string()));
     assert_eq!(result_props["status"], json!("rejected"));
-    // The card and its outcome are two distinct rows with two distinct keys.
+    // The card retains its proposal key; old result-line keys stay reserved.
     let card_key: Option<Uuid> =
         sqlx::query_scalar("SELECT client_msg_id FROM message WHERE workspace_id=$1 AND id=$2")
             .bind(fixture.workspace)
@@ -3113,8 +3163,8 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
     .await
     .unwrap();
     assert_eq!(
-        expiry_line, 1,
-        "the expiry tool_result must not collide with its own proposal card"
+        expiry_line, 0,
+        "expiry updates the existing card without a tool_result"
     );
 }
 
@@ -3809,7 +3859,7 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
         Option<Uuid>,
     ) = sqlx::query_as(
         "SELECT author_member_id, props, body, client_msg_id FROM message \
-              WHERE workspace_id=$1 AND channel_id=$2 AND type='tool_result' \
+              WHERE workspace_id=$1 AND channel_id=$2 AND type='approval_request' AND props->'result'->>'status'='executed' \
               ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
@@ -3826,7 +3876,7 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
         Some(approval_id),
         "the result line must not take the key the rejection and expiry lines use"
     );
-    let card = &result_props["momo.action_result"];
+    let card = &result_props["result"];
     assert_eq!(card["v"], json!(1));
     assert_eq!(card["action_id"], json!("invite.create"));
     assert_eq!(card["status"], json!("executed"));
@@ -8257,7 +8307,7 @@ async fn an_approved_channel_create_is_one_step_for_channel_membership_and_grant
     // ---- the agent can read the id and then speak in the new channel -------
     let line: (String, Value) = sqlx::query_as(
         "SELECT body, props FROM message WHERE workspace_id=$1 AND channel_id=$2 \
-           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+           AND type='approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
     .bind(fixture.channel)
@@ -8266,7 +8316,7 @@ async fn an_approved_channel_create_is_one_step_for_channel_membership_and_grant
     .unwrap();
     assert!(line.0.contains(&channel_id.to_string()), "{}", line.0);
     assert!(
-        line.1["momo.action_result"].get("next").is_none(),
+        line.1["result"].get("next").is_none(),
         "no dead settings link on a channel result"
     );
     let (status, read) = call(
@@ -10250,7 +10300,7 @@ async fn a_channel_grant_widens_only_the_proposers_own_connection() {
     assert_eq!(status, 200, "{posted}");
     let line: String = sqlx::query_scalar(
         "SELECT body FROM message WHERE workspace_id=$1 AND channel_id=$2 \
-           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+           AND type='approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
     .bind(fixture.channel)
@@ -10714,7 +10764,7 @@ async fn an_approved_settings_update_changes_only_the_two_keys() {
     );
     let line: String = sqlx::query_scalar(
         "SELECT body FROM message WHERE workspace_id=$1 AND channel_id=$2 \
-           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+           AND type='approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
     .bind(fixture.channel)
@@ -15886,6 +15936,7 @@ async fn an_agent_avatar_image_is_staged_pinned_applied_and_served() {
 #[derive(Debug, Default)]
 struct MemDrive3787 {
     files: std::sync::Mutex<std::collections::HashMap<String, Vec<u8>>>,
+    content_reads: std::sync::atomic::AtomicUsize,
 }
 
 #[async_trait::async_trait]
@@ -15921,6 +15972,8 @@ impl momo_drive::DriveArchive for MemDrive3787 {
         file_id: &str,
         _max_bytes: i64,
     ) -> Result<momo_drive::DriveContent, momo_drive::DriveError> {
+        self.content_reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let bytes = self
             .files
             .lock()
@@ -17274,8 +17327,8 @@ async fn an_agent_receives_a_pairing_code_only_when_the_approver_chose_to_hand_i
     assert_eq!(grant["kind"], json!("pairing"));
     assert!(grant.get("claimedAtMs").is_none());
     let result_rows: Value = sqlx::query_scalar(
-        "SELECT props->'momo.action_result'->'rows' FROM message \
-          WHERE workspace_id=$1 AND type='tool_result' ORDER BY seq DESC LIMIT 1",
+        "SELECT props->'result'->'rows' FROM message \
+          WHERE workspace_id=$1 AND type='approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
     .fetch_one(&su)
@@ -19286,10 +19339,10 @@ async fn the_plugin_install_card_installs_as_the_approver_and_equals_the_rest_ro
     assert_eq!(detail["approval_id"], json!(approval.to_string()));
     assert_eq!(detail["plugin_id"], json!(GITHUB));
     assert_eq!(detail["egress_domains"], json!(["api.githubcopilot.com"]));
-    // The outcome line is the helper's, in the channel.
+    // The outcome remains on the helper's existing approval card.
     let outcome: Option<String> = sqlx::query_scalar(
         "SELECT body FROM message WHERE workspace_id = $1 AND author_member_id = $2 \
-         AND type = 'tool_result' ORDER BY seq DESC LIMIT 1",
+         AND type = 'approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(workspace)
     .bind(helper)
@@ -19581,7 +19634,34 @@ async fn propose_member_avatar_4385(
     requester_jwt: &str,
     args: Value,
 ) -> (u16, Value) {
+    propose_requester_action_4791(
+        client,
+        base,
+        su,
+        fixture,
+        requester_jwt,
+        "member.avatar.set",
+        args,
+    )
+    .await
+}
+
+async fn propose_requester_action_4791(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    requester_jwt: &str,
+    action_id: &str,
+    args: Value,
+) -> (u16, Value) {
     let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let words = match action_id {
+        "member.display_name.set" => "내 이름을 바꿔 줘",
+        "agent.rename" => "네 이름을 바꿔 줘",
+        "agent.profile.update" => "네 사진을 이걸로 바꿔 줘",
+        _ => "내 사진을 이걸로 바꿔 줘",
+    };
     let trigger: Value = client
         .post(format!(
             "{base}/v1/workspaces/{}/channels/{}/messages",
@@ -19590,7 +19670,7 @@ async fn propose_member_avatar_4385(
         .bearer_auth(requester_jwt)
         .json(&json!({
             "clientMsgId": Uuid::new_v4(),
-            "body": format!("@{handle_name} 이걸로 내 프로필 사진 바꿔줘")
+            "body": format!("@{handle_name} {words}")
         }))
         .send()
         .await
@@ -19617,7 +19697,7 @@ async fn propose_member_avatar_4385(
         base,
         &fixture.hosted_bearer,
         "oort_action_propose",
-        json!({"handle": handle, "actionId": "member.avatar.set", "args": args}),
+        json!({"handle": handle, "actionId": action_id, "args": args}),
     )
     .await;
     remember_handle_3789(&answer, &handle);
@@ -21735,19 +21815,12 @@ async fn a_refused_tap_leaves_no_agent_run_reference_and_the_decision_after_it_l
     );
 }
 
-/// **The reference's lock order against the message spine, measured as an outcome.** The tap
-/// takes the proposer's connection and inbox counter *before* the channel's counter; the spine
-/// takes the channel first and fans out to the same connection after. Here the spine holds the
-/// channel's counter and then asks for the inbox counter the tap holds — a cycle — and
-/// PostgreSQL aborts the one that has waited longest, the person's tap. The tap must be run again
-/// and succeed (once, one reference, 200), not answer 500.
-///
-/// Timing-shaped: the spine's second statement follows the tap's park within a few tens of
-/// milliseconds, well inside `deadlock_timeout` (1 s), so the tap — the longer waiter — is the one
-/// PostgreSQL aborts. Sabotage: delete the retry in `decide` and this answers 500.
+/// ADR-0186 v6 R-b (#3982): replacing the outcome INSERT with a card
+/// update also removes its channel counter wait. Exercise the former deadlock
+/// fixture and require the decision to finish while a message owns that counter.
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
-async fn a_decision_that_loses_a_deadlock_with_a_message_send_is_run_again_and_succeeds() {
+async fn a_card_settlement_does_not_wait_on_a_message_sends_channel_counter() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
@@ -21778,11 +21851,6 @@ async fn a_decision_that_loses_a_deadlock_with_a_message_send_is_run_again_and_s
         .fetch_one(&mut *spine)
         .await
         .expect("hold the channel counter");
-    let spine_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
-        .fetch_one(&mut *spine)
-        .await
-        .expect("the spine's backend");
-
     let decision = tokio::spawn({
         let client = client.clone();
         let base = base.clone();
@@ -21790,31 +21858,15 @@ async fn a_decision_that_loses_a_deadlock_with_a_message_send_is_run_again_and_s
         async move { decide_as(&client, &base, ws, &jwt, card, true, Uuid::new_v4()).await }
     });
 
-    // Wait for a condition: the tap has written its reference and is parked behind the spine,
-    // waiting for the channel's counter for its outcome line.
-    let mut parked = false;
-    for _ in 0..400 {
-        let waiting: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM pg_stat_activity \
-              WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))",
-        )
-        .bind(spine_pid)
-        .fetch_one(&su)
+    // #3982 removed the result INSERT. The decision must finish even while
+    // a concurrent message send holds channel_seq: the former counter/inbox
+    // deadlock no longer exists, and no transaction replay is needed here.
+    let (status, _h, body) = tokio::time::timeout(std::time::Duration::from_secs(3), decision)
         .await
-        .expect("read pg_stat_activity");
-        if waiting > 0 {
-            parked = true;
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
-    assert!(
-        parked,
-        "the tap never reached its outcome line behind the spine"
-    );
+        .expect("card settlement must not wait for channel_seq")
+        .expect("the decision task");
+    assert_eq!(status, 200, "{body}");
 
-    // The spine fans the message out to the same connection: it wants the inbox counter the tap
-    // holds. PostgreSQL breaks the cycle by aborting the tap, which has waited longest.
     let fan_out = sqlx::query(
         "SELECT last_seq FROM hosted_agent_inbox_counter WHERE connection_id=$1 FOR UPDATE",
     )
@@ -21823,19 +21875,14 @@ async fn a_decision_that_loses_a_deadlock_with_a_message_send_is_run_again_and_s
     .await;
     assert!(
         fan_out.is_ok(),
-        "PostgreSQL aborted the spine, not the tap — the tap had waited longest, so rerun this: {fan_out:?}"
+        "the message fan-out can follow the completed settlement: {fan_out:?}"
     );
     spine.commit().await.expect("the spine commits its message");
 
-    let (status, _h, body) = decision.await.expect("the decision task");
-    assert_eq!(
-        status, 200,
-        "the tap was the deadlock's victim and must have been run again: {body}"
-    );
     assert_eq!(
         agent_run_references(&su, ws, fixture.hosted_connection).await,
         vec![(run, fixture.channel)],
-        "the retry wrote the proposer's reference once"
+        "the settlement wrote the proposer's reference once"
     );
     assert_eq!(approval_status_3708(&su, card).await, "approved");
 }
@@ -22103,7 +22150,7 @@ async fn an_approved_pin_is_the_approvers_own_pin_and_no_audit_row_holds_a_word_
     assert_eq!(leaked, 0, "no audit row holds a word of the message");
     let line: (String, Value) = sqlx::query_as(
         "SELECT body, props FROM message WHERE workspace_id=$1 AND channel_id=$2 \
-           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+           AND type='approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(ws)
     .bind(fixture.channel)
@@ -22115,10 +22162,7 @@ async fn an_approved_pin_is_the_approvers_own_pin_and_no_audit_row_holds_a_word_
         "{}",
         line.0
     );
-    assert_eq!(
-        line.1["momo.action_result"]["ref"]["type"],
-        json!("message")
-    );
+    assert_eq!(line.1["result"]["ref"]["type"], json!("message"));
     assert_eq!(
         agent_job_count(&su, ws, fixture.hosted_agent).await,
         jobs_before,
@@ -22605,7 +22649,7 @@ async fn a_full_channel_refuses_the_tap_without_spending_the_approval_and_a_long
 }
 
 /// **A pin in the owner's 1:1 DM with the agent** — the room this action is most often asked in.
-/// A DM has no name (`channel.name` is NULL there, 001_init.sql), so its card says 「1:1 대화」 and
+/// A DM has no name (`channel.name` is NULL there, 001_init.sql), so its card says 「이 대화」 and
 /// has no 공개 범위 row. Reading that name as text made every proposal in such a room answer 500,
 /// while every other pin test here draws its card in a named channel.
 #[tokio::test]
@@ -22668,7 +22712,7 @@ async fn a_pin_in_the_owners_dm_with_the_agent_is_drawn_without_a_name_and_pins_
     let approval = proposed_approval_3706(&proposed);
     let card = Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap();
     let props = message_props(&su, card).await;
-    assert_eq!(card_row(&props, "채널").as_deref(), Some("1:1 대화"));
+    assert_eq!(card_row(&props, "채널").as_deref(), Some("이 대화"));
     assert!(
         card_row(&props, "공개 범위").is_none(),
         "a DM has no 공개 범위 row"
@@ -26429,5 +26473,5540 @@ async fn a_failing_test_puts_the_slow_deadlock_detection_back() {
         app_role_deadlock_timeout(&su).await,
         None,
         "a panic does not leave the slow detector behind"
+    );
+}
+
+#[path = "support/approval_card_cases.rs"]
+mod approval_card_cases;
+
+// ADR-0186 amendment v7 / #4791: four profile-change conversations. The two existing
+// agent-name/agent-photo scenarios are run alongside these. No live model is needed:
+// real trigger messages, leased Agent Port tools, NOBYPASSRLS HTTP decisions and PG writes.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn requesting_member_display_name_round_trip_4791() {
+    let w = world_4385().await;
+    let ws = w.fixture.workspace;
+    let before: (String, String) =
+        sqlx::query_as("SELECT display_name, handle FROM member WHERE id=$1")
+            .bind(w.requester)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    let past = seed_message_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        "@req 예전 멘션은 그대로",
+    )
+    .await;
+    for key in [
+        "memberId",
+        "targetHandle",
+        "target",
+        "forMemberId",
+        "handle",
+        "workspaceId",
+    ] {
+        let mut args = json!({"displayName":"새 이름"});
+        args[key] = if key == "targetHandle" {
+            json!("other")
+        } else {
+            json!(w.other.to_string())
+        };
+        let (status, _) = propose_requester_action_4791(
+            &w.client,
+            &w.base,
+            &w.su,
+            &w.fixture,
+            &w.requester_jwt,
+            "member.display_name.set",
+            args,
+        )
+        .await;
+        assert_eq!(status, 400, "target injection {key} must be refused");
+    }
+    for raw in ["".to_string(), "  ".to_string(), "가".repeat(101)] {
+        let (status, _) = propose_requester_action_4791(
+            &w.client,
+            &w.base,
+            &w.su,
+            &w.fixture,
+            &w.requester_jwt,
+            "member.display_name.set",
+            json!({"displayName":raw}),
+        )
+        .await;
+        assert_eq!(status, 400, "same normalization as a human's own rename");
+    }
+    let (status, proposed) = propose_requester_action_4791(
+        &w.client,
+        &w.base,
+        &w.su,
+        &w.fixture,
+        &w.requester_jwt,
+        "member.display_name.set",
+        json!({"displayName":"  새 이름  "}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap())
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(card["action"]["required_role"], "requesting_member");
+    assert!(card["action"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["label"] == "바꾸기 전" && r["value"] == before.0));
+    assert!(card["action"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["label"] == "바꾼 뒤" && r["value"] == "새 이름"));
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    for member in [w.requester, w.fixture.human, w.owner, w.other] {
+        let payload = payload.clone();
+        let allowed = momo_db::with_tenant_tx(&w.app, ws, move |conn| {
+            let payload = payload.clone();
+            Box::pin(async move {
+                let card = momo_push::approvers::ApprovalCard {
+                    approval_id: approval,
+                    action_type: "workspace_action".into(),
+                    payload,
+                };
+                momo_push::approvers::CardAudience::resolve(conn, ws, &card)
+                    .await?
+                    .allows(conn, ws, member)
+                    .await
+            })
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            allowed,
+            member == w.requester,
+            "only the requester is woken for this name card"
+        );
+    }
+    for jwt in [
+        &w.fixture.human_jwt,
+        &w.owner_jwt,
+        &w.other_jwt,
+        &w.fixture.hosted_bearer,
+    ] {
+        let (status, _, _) =
+            decide_as(&w.client, &w.base, ws, jwt, approval, true, Uuid::new_v4()).await;
+        assert_eq!(
+            status, 403,
+            "only the requester, even when another human is admin or agent owner"
+        );
+        assert_eq!(approval_status_4385(&w.su, approval).await, "pending");
+    }
+    sqlx::query("UPDATE member SET display_name='카드 이후 이름' WHERE id=$1")
+        .bind(w.requester)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let (status, _, _) = decide_as(
+        &w.client,
+        &w.base,
+        ws,
+        &w.requester_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "stale before-name re-asks");
+    assert_eq!(approval_status_4385(&w.su, approval).await, "pending");
+    sqlx::query("UPDATE member SET display_name=$1 WHERE id=$2")
+        .bind(&before.0)
+        .bind(w.requester)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let (status, _, response) = decide_as(
+        &w.client,
+        &w.base,
+        ws,
+        &w.requester_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{response}");
+    let after: (String, String) =
+        sqlx::query_as("SELECT display_name, handle FROM member WHERE id=$1")
+            .bind(w.requester)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(after, ("새 이름".into(), before.1));
+    let past_body: String = sqlx::query_scalar("SELECT body FROM message WHERE id=$1")
+        .bind(past)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(past_body, "@req 예전 멘션은 그대로");
+    let audit: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='member.renamed' AND actor_member_id=$2 AND subject_member_id=$2 AND detail->>'approval_id'=$3")
+        .bind(ws).bind(w.requester).bind(approval.to_string()).fetch_one(&w.su).await.unwrap();
+    assert_eq!(audit, 1, "one successful rename audit");
+    let broadcasts: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='broadcast' AND payload->'data'->>'type'='member.renamed' AND payload->'data'->'payload'->>'member_id'=$2 AND payload->'data'->'payload'->>'display_name'='새 이름'")
+        .bind(ws).bind(w.requester.to_string().to_uppercase()).fetch_one(&w.su).await.unwrap();
+    assert!(
+        broadcasts > 0,
+        "the shared rename path emits roster broadcasts"
+    );
+    let (again, _, _) = decide_as(
+        &w.client,
+        &w.base,
+        ws,
+        &w.requester_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(again, 409);
+    assert_eq!(audit_count_4385(&w.su, ws, "member.renamed").await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn requesting_member_generated_avatar_round_trip_4791() {
+    let w = world_4385().await;
+    let ws = w.fixture.workspace;
+    let source = tiny_png_3787();
+    let mut bomb = source.clone();
+    bomb[16..20].copy_from_slice(&60000u32.to_be_bytes());
+    let mut oversized = source.clone();
+    oversized.resize(44001, 0);
+    let mut wide = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image::ImageBuffer::from_pixel(
+        4097,
+        1,
+        image::Rgba([20, 40, 60, 255]),
+    ))
+    .write_to(&mut wide, image::ImageFormat::Png)
+    .unwrap();
+    for bytes in [
+        b"<svg><script>1</script></svg>".to_vec(),
+        b"GIF89a".to_vec(),
+        bomb,
+        wide.into_inner(),
+        oversized,
+        source[..40].to_vec(),
+    ] {
+        let (status, _) = propose_member_avatar_4385(
+            &w.client,
+            &w.base,
+            &w.su,
+            &w.fixture,
+            &w.requester_jwt,
+            json!({"avatar":{"source":"generated","dataBase64":b64_3787(&bytes)}}),
+        )
+        .await;
+        assert_eq!(
+            status, 400,
+            "the existing image boundary applies to humans too"
+        );
+    }
+    for key in ["memberId", "targetHandle", "target", "forMemberId"] {
+        let mut args = json!({"avatar":{"source":"generated","dataBase64":b64_3787(&source)}});
+        args[key] = if key == "targetHandle" {
+            json!("other")
+        } else {
+            json!(w.other.to_string())
+        };
+        let (status, _) = propose_member_avatar_4385(
+            &w.client,
+            &w.base,
+            &w.su,
+            &w.fixture,
+            &w.requester_jwt,
+            args,
+        )
+        .await;
+        assert_eq!(status, 400, "generated picture target injection {key}");
+    }
+    assert_eq!(staged_rows_3787(&w.su, ws).await, 0);
+    let (status, proposed) = propose_member_avatar_4385(
+        &w.client,
+        &w.base,
+        &w.su,
+        &w.fixture,
+        &w.requester_jwt,
+        json!({"avatar":{"source":"generated","dataBase64":b64_3787(&source)}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let args = approval_args_3900(&w.su, approval).await;
+    assert_eq!(args["avatar"]["origin"], "generated");
+    assert!(!args.to_string().contains("dataBase64"));
+    let (denied, _, _) = decide_as(
+        &w.client,
+        &w.base,
+        ws,
+        &w.other_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(denied, 403);
+    let (status, _, body) = decide_as(
+        &w.client,
+        &w.base,
+        ws,
+        &w.requester_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let id = Uuid::parse_str(args["avatar"]["imageId"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        member_pointers_4385(&w.su, w.requester).await,
+        (None, Some(id))
+    );
+    assert_eq!(member_pointers_4385(&w.su, w.other).await, (None, None));
+    assert_eq!(audit_count_4385(&w.su, ws, "member.avatar.set").await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_member_avatar_proposal_with_both_sources_is_http_400_4810() {
+    let w = world_4385().await;
+    let ws = w.fixture.workspace;
+    let before = approval_count_3900(&w.su, ws).await;
+    let (status, body) = propose_member_avatar_4385(
+        &w.client,
+        &w.base,
+        &w.su,
+        &w.fixture,
+        &w.requester_jwt,
+        json!({
+            "attachmentId": Uuid::new_v4().to_string(),
+            "avatar": {"source": "generated", "dataBase64": b64_3787(&tiny_png_3787())},
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "two image sources must be refused: {body}");
+    assert_eq!(approval_count_3900(&w.su, ws).await, before);
+    assert_eq!(staged_rows_3787(&w.su, ws).await, 0);
+}
+
+async fn assert_profile_result_broadcast_4791(pool: &PgPool, ws: Uuid, approval: Uuid) {
+    let cards: Vec<(Uuid, Value, String)> = sqlx::query_as(
+        "SELECT id, props, body FROM message WHERE workspace_id=$1 \
+         AND type='approval_request' AND props->>'approval_id'=$2",
+    )
+    .bind(ws)
+    .bind(approval.to_string())
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(cards.len(), 1, "the profile outcome stays on its one card");
+    let (card, props, body) = &cards[0];
+    let request_message: Option<Uuid> = sqlx::query_scalar(
+        "SELECT request_message_id FROM approval WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(approval)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        request_message,
+        Some(*card),
+        "the original request is patched"
+    );
+    assert_eq!(props["status"], "approved");
+    assert_eq!(props["approval_status"], "approved");
+    assert_eq!(props["code"], "approval_approved");
+    assert_eq!(props["result"]["status"], "executed");
+    assert_eq!(props["result"]["approval_id"], approval.to_string());
+    assert_eq!(props["result"]["line"], *body);
+    assert!(!body.trim().is_empty(), "the result is visible on the card");
+    // A refused tap can edit last_attempt while the card is still pending.
+    // Only the terminal edit carries the result that must appear once.
+    let edits: Vec<Value> = sqlx::query_scalar(
+        "SELECT payload->'data'->'payload' FROM outbox \
+         WHERE workspace_id=$1 AND kind='broadcast' \
+         AND payload->'data'->>'type'='message.edited' \
+         AND payload->'data'->'payload'->>'id'=$2 \
+         AND payload->'data'->'payload'->'props'->>'status'='approved'",
+    )
+    .bind(ws)
+    .bind(card.to_string())
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        edits.len(),
+        1,
+        "the profile card settlement is broadcast once"
+    );
+    assert_eq!(edits[0]["props"], *props);
+    assert_eq!(edits[0]["body"], *body);
+    let legacy_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 \
+         AND props->'momo.action_result'->>'approval_id'=$2",
+    )
+    .bind(ws)
+    .bind(approval.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        legacy_rows, 0,
+        "no separate profile result message is written"
+    );
+    let frames: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='broadcast' \
+         AND payload->'data'->>'type'='message.new' \
+         AND payload->'data'->'payload'->'props'->'momo.action_result'->>'approval_id'=$2",
+    )
+    .bind(ws)
+    .bind(approval.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(frames, 0, "no separate profile result message is broadcast");
+}
+
+fn profile_context_4791(
+    workspace: Uuid,
+    run: Uuid,
+    channel: Uuid,
+    agent: Uuid,
+) -> momo_workspace_actions::team_ai::ProposalContext {
+    momo_workspace_actions::team_ai::ProposalContext {
+        workspace_id: workspace,
+        run_id: run,
+        channel_id: channel,
+        agent_member_id: agent,
+        trigger_message_id: None,
+        now_ms: chrono::Utc::now().timestamp_millis(),
+        expires_at: chrono::Utc::now() + chrono::Duration::minutes(30),
+        via: via_ai_3900(),
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn team_ai_four_profile_conversations_4791() {
+    use momo_workspace_actions::{action_resolve, profile_avatar, team_ai};
+    let w = world_4385().await;
+    let f = &w.fixture;
+    let ws = f.workspace;
+    let worker = momo_worker_pool_3900().await;
+    let helper = enable_helper_3900(&w.su, f).await;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("team-own-photo".into(), tiny_png_3787());
+    let photo_message = seed_message_4385(&w.su, ws, f.channel, f.human, "내 사진").await;
+    let photo = seed_attachment_4385(
+        &w.su,
+        ws,
+        f.channel,
+        f.human,
+        Some(photo_message),
+        "team-own-photo",
+        "image/png",
+        "complete",
+    )
+    .await;
+    for (action_id, words, args, event) in [
+        (
+            "member.display_name.set",
+            "내 이름을 새 이름으로 바꿔 줘",
+            json!({"displayName":"부탁한 사람"}),
+            "member.renamed",
+        ),
+        (
+            "member.avatar.set",
+            "내 사진을 이걸로 바꿔 줘",
+            json!({"attachmentId":photo.to_string()}),
+            "member.avatar.set",
+        ),
+        (
+            "agent.rename",
+            "너 이름을 별무리로 바꿔 줘",
+            json!({"displayName":"별무리"}),
+            "member.renamed",
+        ),
+        (
+            "agent.profile.update",
+            "너 사진을 가져온 이미지로 바꿔 줘",
+            json!({"avatar":{"source":"generated","dataBase64":b64_3787(&tiny_png_3787())}}),
+            "agent.avatar.updated",
+        ),
+    ] {
+        let (channel, human) = (f.channel, f.human);
+        let run = momo_db::with_tenant_tx(&w.su, ws, move |conn| Box::pin(async move {
+            let sent = momo_messaging::send_message_in_tx(conn, ws,
+                momo_messaging::NewMessage::text(channel, human, words.to_string())).await?;
+            momo_agent::create_agent_run_in_tx(conn, ws, momo_agent::NewAgentRun {
+                channel_id:channel,
+                trigger:momo_agent::RunTrigger::Mention { message_id:sent.message.id, agent_member_id:helper },
+                parent_run_id:None, max_steps:50, depth:0,
+                input:json!({"schema":"momo.agent_run.input.v0","surface":"mention","prompt":"fixture","depth":0}),
+            }).await
+        })).await.unwrap();
+        let action = momo_agent::actions::action_by_id(action_id).unwrap();
+        let validated = action_resolve::validated_action_args(
+            action,
+            &args,
+            chrono::Utc::now().timestamp_millis(),
+        )
+        .unwrap();
+        let prepared = profile_avatar::prepare(
+            &worker,
+            w.drive.as_ref(),
+            ws,
+            run.id,
+            helper,
+            &validated.args,
+        )
+        .await
+        .unwrap();
+        if let Some(image) = &prepared {
+            let count = approval_count_3900(&w.su, ws).await;
+            for field in ["requester", "run", "origin"] {
+                let mut wrong = image.clone();
+                match field {
+                    "requester" => wrong.requester = w.other,
+                    "run" => wrong.run_id = Uuid::new_v4(),
+                    _ => {
+                        wrong.origin = if image.origin == "generated" {
+                            "attachment"
+                        } else {
+                            "generated"
+                        }
+                    }
+                }
+                let raw = args.clone();
+                let run_id = run.id;
+                let refusal = momo_db::with_tenant_tx(&worker, ws, move |conn| {
+                    let raw = raw.clone();
+                    let wrong = wrong.clone();
+                    Box::pin(async move {
+                        let context = profile_context_4791(ws, run_id, channel, helper);
+                        team_ai::propose_with_avatar_in_tx(
+                            conn,
+                            &context,
+                            action_id,
+                            &raw,
+                            None,
+                            Some(&wrong),
+                        )
+                        .await
+                    })
+                })
+                .await
+                .unwrap()
+                .unwrap_err();
+                assert_eq!(
+                    refusal,
+                    team_ai::ProposalRefusal::InvalidArguments,
+                    "prepared image {field} is bound to this very request"
+                );
+                assert_eq!(approval_count_3900(&w.su, ws).await, count);
+            }
+        }
+        let context = profile_context_4791(ws, run.id, channel, helper);
+        let proposed = momo_db::with_tenant_tx(&worker, ws, move |conn| {
+            let args = args.clone();
+            let prepared = prepared.clone();
+            Box::pin(async move {
+                team_ai::propose_with_avatar_in_tx(
+                    conn,
+                    &context,
+                    action_id,
+                    &args,
+                    None,
+                    prepared.as_ref(),
+                )
+                .await
+            })
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        let card: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+            .bind(proposed.card_message_id)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+        assert_eq!(card["action"]["id"], action_id);
+        assert_eq!(proposed.requester_member_id, human);
+        if matches!(action_id, "member.avatar.set" | "agent.profile.update") {
+            assert_eq!(card["action"]["preview"]["kind"], "avatar_image");
+            assert!(card["action"]["preview"].get("previousAvatarUrl").is_some());
+            assert!(!approval_args_3900(&w.su, proposed.approval_id)
+                .await
+                .to_string()
+                .contains("dataBase64"));
+        }
+        let (denied, _, _) = decide_as(
+            &w.client,
+            &w.base,
+            ws,
+            &w.other_jwt,
+            proposed.approval_id,
+            true,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(denied, 403, "{action_id}: another person cannot decide");
+        let (status, _, body) = decide_as(
+            &w.client,
+            &w.base,
+            ws,
+            &f.human_jwt,
+            proposed.approval_id,
+            true,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 200, "{action_id}: {body}");
+        assert_profile_result_broadcast_4791(&w.su, ws, proposed.approval_id).await;
+        let audits: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action=$2 AND detail->>'approval_id'=$3")
+            .bind(ws).bind(event).bind(proposed.approval_id.to_string()).fetch_one(&w.su).await.unwrap();
+        assert_eq!(
+            audits, 1,
+            "{action_id}: exactly one relevant mutation audit"
+        );
+    }
+    let human_name: String = sqlx::query_scalar("SELECT display_name FROM member WHERE id=$1")
+        .bind(f.human)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    let agent_name: String = sqlx::query_scalar("SELECT display_name FROM member WHERE id=$1")
+        .bind(helper)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(human_name, "부탁한 사람");
+    assert_eq!(agent_name, "별무리");
+    assert!(member_pointers_4385(&w.su, f.human).await.1.is_some());
+    assert!(member_pointers_4385(&w.su, helper).await.1.is_some());
+    // Preparation failures are audited and count toward the same per-person limit.
+    let run_id: Uuid = sqlx::query_scalar("SELECT id FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 ORDER BY created_at DESC LIMIT 1")
+        .bind(ws).bind(helper).fetch_one(&w.su).await.unwrap();
+    let own_photo = momo_agent::actions::action_by_id("member.avatar.set").unwrap();
+    let bad = action_resolve::validated_action_args(
+        own_photo,
+        &json!({"avatar":{"source":"generated","dataBase64":b64_3787(b"<svg/>")}}),
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        profile_avatar::prepare(&worker, w.drive.as_ref(), ws, run_id, helper, &bad.args)
+            .await
+            .err()
+            .unwrap(),
+        "unsupported_type"
+    );
+    let failures: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND subject_member_id=$2 AND action='member.avatar.refused' AND detail->>'reason'='unsupported_type'")
+        .bind(ws).bind(f.human).fetch_one(&w.su).await.unwrap();
+    assert_eq!(failures, 1);
+    let person = f.human;
+    momo_db::with_tenant_tx(&worker, ws, move |conn| {
+        Box::pin(async move {
+            for _ in 0..10 {
+                momo_db::audit::write_audit(
+                    conn,
+                    &momo_db::audit::AuditEntry::new(ws, "member.avatar.refused")
+                        .by(helper)
+                        .about(person)
+                        .with_schema(
+                            "momo.member.avatar.refused.v1",
+                            json!({"reason":"fixture_refusal"}),
+                        ),
+                )
+                .await?;
+            }
+            Ok(())
+        })
+    })
+    .await
+    .unwrap();
+    let good = action_resolve::validated_action_args(
+        own_photo,
+        &json!({"avatar":{"source":"generated","dataBase64":b64_3787(&tiny_png_3787())}}),
+        0,
+    )
+    .unwrap();
+    assert_eq!(
+        profile_avatar::prepare(&worker, w.drive.as_ref(), ws, run_id, helper, &good.args)
+            .await
+            .err()
+            .unwrap(),
+        "rate_limited"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn agent_port_four_profile_conversations_in_dm_4791() {
+    let mut w = world_4385().await;
+    let ws = w.fixture.workspace;
+    let person = w.fixture.human;
+    let agent = w.fixture.hosted_agent;
+    set_agent_owner_3708(&w.su, agent, Some(person)).await;
+    let dm = seed_dm_2915(&w.su, ws, person, &[person, agent]).await;
+    // Only the conversation changes: the connection's channel scope remains exactly
+    // as seeded. The existing owner's DM authorization is what makes the lease exist.
+    w.fixture.channel = dm;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("dm-profile-photo".into(), tiny_png_3787());
+    let message = seed_message_4385(&w.su, ws, dm, person, "이 사진으로 바꿔 줘").await;
+    let photo = seed_attachment_4385(
+        &w.su,
+        ws,
+        dm,
+        person,
+        Some(message),
+        "dm-profile-photo",
+        "image/png",
+        "complete",
+    )
+    .await;
+    for (action_id, args, event, subject) in [
+        (
+            "member.display_name.set",
+            json!({"displayName":"은하수"}),
+            "member.renamed",
+            person,
+        ),
+        (
+            "member.avatar.set",
+            json!({"attachmentId":photo.to_string()}),
+            "member.avatar.set",
+            person,
+        ),
+        (
+            "agent.rename",
+            json!({"displayName":"별지기"}),
+            "member.renamed",
+            agent,
+        ),
+        (
+            "agent.profile.update",
+            json!({"avatar":{"source":"attachment","attachmentId":photo.to_string()}}),
+            "agent.avatar.updated",
+            agent,
+        ),
+    ] {
+        let (status, proposed) = propose_requester_action_4791(
+            &w.client,
+            &w.base,
+            &w.su,
+            &w.fixture,
+            &w.fixture.human_jwt,
+            action_id,
+            args,
+        )
+        .await;
+        assert_eq!(status, 200, "{action_id} must work from the DM: {proposed}");
+        let approval = proposed_approval_3706(&proposed);
+        let (status, _, body) = decide_as(
+            &w.client,
+            &w.base,
+            ws,
+            &w.fixture.human_jwt,
+            approval,
+            true,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 200, "{action_id}: {body}");
+        assert_profile_result_broadcast_4791(&w.su, ws, approval).await;
+        let audit: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action=$2 AND subject_member_id=$3 AND detail->>'approval_id'=$4")
+            .bind(ws).bind(event).bind(subject).bind(approval.to_string()).fetch_one(&w.su).await.unwrap();
+        assert_eq!(audit, 1, "{action_id} applied once");
+    }
+    let words = "이 사진으로 네 사진을 바꿔 줘";
+    say_2915(&w.client, &w.base, &w.fixture.human_jwt, ws, dm, words).await;
+    let (status, claimed) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit":10}),
+    )
+    .await;
+    assert_eq!(status, 200);
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    sqlx::query("UPDATE membership SET left_at=now() WHERE workspace_id=$1 AND channel_id=$2 AND member_id=$3")
+        .bind(ws).bind(dm).bind(agent).execute(&w.su).await.unwrap();
+    let reads_before = w
+        .drive
+        .content_reads
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let (status, _) = call(&w.client, &w.base, &w.fixture.hosted_bearer, "oort_action_propose",
+        json!({"handle":handle,"actionId":"agent.profile.update","args":{"avatar":{"source":"attachment","attachmentId":photo.to_string()}}})).await;
+    assert_eq!(
+        w.drive
+            .content_reads
+            .load(std::sync::atomic::Ordering::Relaxed),
+        reads_before,
+        "a departed agent must not read the DM image before its proposal is refused"
+    );
+    assert_eq!(
+        status, 400,
+        "leaving the DM closes the requester-image read too"
+    );
+    let (human, bot): (String, String) = sqlx::query_as("SELECT (SELECT display_name FROM member WHERE id=$1), (SELECT display_name FROM member WHERE id=$2)")
+        .bind(person).bind(agent).fetch_one(&w.su).await.unwrap();
+    assert_eq!((human.as_str(), bot.as_str()), ("은하수", "별지기"));
+    assert!(member_pointers_4385(&w.su, person).await.1.is_some());
+    assert!(member_pointers_4385(&w.su, agent).await.1.is_some());
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-30 v8 (#4829 stage 2) — expression.create
+//
+// 「에이전트가 찾아 등록하기」: an agent offers 1-4 candidate pictures; a person looks at the
+// STORED pixels, picks one and approves; exactly that one is registered. Sabotage targets
+// (recorded in the stage-2 handoff):
+//   * `adder_allows`: drop the subject arm / the guest arm / the policy arm      → admin
+//     proxy, guest, or a narrowed policy approves (`..._only_the_face_...`);
+//   * `choose_in_tx`: drop the re-hash, the revision check, the membership check, the
+//     name/quota checks, or `reclaim_in_tx`                                       → red below;
+//   * `candidate_row`: drop the channel-membership / approval-pending / adder arm → a
+//     stranger or another room previews the picture;
+//   * `replace_candidate_in_tx`: drop `revision+1` or the adder arm              → stale choice
+//     passes / a stranger replaces;
+//   * `expression_choice_refused`: always None                                   → choice
+//     accepted on a reject / another action / absent on approve;
+//   * `is_expression_create_call` / the 64 KiB bound                              → budget tests.
+// ---------------------------------------------------------------------------
+
+struct Mock4829 {
+    calls: std::sync::Mutex<Vec<String>>,
+    replies: std::sync::Mutex<
+        std::collections::HashMap<String, Result<Vec<u8>, momo_unfurl::FetchError>>,
+    >,
+    /// How long every outside request takes to answer, in milliseconds (0: at once). The
+    /// request is **counted before** it waits, so a test can see a fetch that has begun.
+    delay_ms: std::sync::atomic::AtomicU64,
+}
+
+#[async_trait::async_trait]
+impl momo_unfurl::UnfurlHttp for Mock4829 {
+    async fn fetch(
+        &self,
+        url: &str,
+        _kind: momo_unfurl::FetchKind,
+    ) -> Result<momo_unfurl::Fetched, momo_unfurl::FetchError> {
+        self.calls.lock().unwrap().push(url.to_string());
+        let delay = self.delay_ms.load(std::sync::atomic::Ordering::Relaxed);
+        if delay > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        }
+        let key = url.split('?').next().unwrap_or(url).to_string();
+        match self.replies.lock().unwrap().get(&key).cloned() {
+            Some(Ok(body)) => Ok(momo_unfurl::Fetched {
+                final_url: url.to_string(),
+                content_type: "image/gif".into(),
+                body,
+            }),
+            Some(Err(error)) => Err(error),
+            None => Err(momo_unfurl::FetchError::Failed("unscripted".into())),
+        }
+    }
+}
+
+struct World4829 {
+    su: PgPool,
+    app: PgPool,
+    base: String,
+    client: reqwest::Client,
+    fixture: Fixture,
+    drive: Arc<MemDrive3787>,
+    mock: Arc<Mock4829>,
+    requester: Uuid,
+    requester_jwt: String,
+    face: Uuid,
+    face_jwt: String,
+    guest: Uuid,
+    guest_jwt: String,
+    outsider_jwt: String,
+}
+
+async fn world_4829() -> World4829 {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let drive = Arc::new(MemDrive3787::default());
+    let mock = Arc::new(Mock4829 {
+        calls: Default::default(),
+        replies: Default::default(),
+        delay_ms: Default::default(),
+    });
+    let state = AppState::new(
+        app.clone(),
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_drive(drive.clone())
+    .with_unfurl_http(mock.clone())
+    .with_unfurl_enabled(true)
+    .with_agent_port(AgentPortConfig {
+        external_origin: None,
+        window_seconds: 60,
+        per_token_limit: 0,
+        per_agent_limit: 0,
+        per_ip_limit: 0,
+        hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
+        subscription_agents_enabled: true,
+        claude_subscription_agents_enabled: true,
+        oauth: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let address: SocketAddr = listener.local_addr().expect("address");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            build_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    let (requester, requester_jwt) = seed_human_3708(&su, &fixture, "req", "member").await;
+    let (face, face_jwt) = seed_human_3708(&su, &fixture, "face", "member").await;
+    let (guest, guest_jwt) = seed_human_3708(&su, &fixture, "guest", "guest").await;
+    let (outsider, outsider_jwt) = seed_human_3708(&su, &fixture, "out", "member").await;
+    sqlx::query("DELETE FROM membership WHERE member_id=$1")
+        .bind(outsider)
+        .execute(&su)
+        .await
+        .unwrap();
+    World4829 {
+        su,
+        app,
+        base: format!("http://{address}"),
+        client: reqwest::Client::new(),
+        fixture,
+        drive,
+        mock,
+        requester,
+        requester_jwt,
+        face,
+        face_jwt,
+        guest,
+        guest_jwt,
+        outsider_jwt,
+    }
+}
+
+fn noise_png_4829(side: u32, seed: u32) -> Vec<u8> {
+    let mut state = 0x9E37_79B9u32 ^ seed;
+    let image = image::RgbaImage::from_fn(side, side, |_, _| {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let b = state.to_le_bytes();
+        image::Rgba([b[0], b[1], b[2], 255])
+    });
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
+fn gif_4829() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new_with_speed(&mut bytes, 30);
+        encoder
+            .set_repeat(image::codecs::gif::Repeat::Infinite)
+            .unwrap();
+        for n in 0..3u8 {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(8, 8, image::Rgba([20 + n * 60, 200, 50, 255])),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(80, 1),
+                ))
+                .unwrap();
+        }
+    }
+    bytes
+}
+
+fn candidate_4829(name: &str, subject: Value, image: Value) -> Value {
+    json!({"name": name, "displayName": name, "tags": ["t"], "subjectMemberId": subject, "image": image})
+}
+
+fn generated_4829(bytes: &[u8], prompt: &str) -> Value {
+    json!({"source": "generated", "mime": "image/png", "dataBase64": b64_3787(bytes), "prompt": prompt})
+}
+
+async fn propose_4829(w: &World4829, candidates: Value) -> (u16, Value) {
+    propose_requester_action_4791(
+        &w.client,
+        &w.base,
+        &w.su,
+        &w.fixture,
+        &w.requester_jwt,
+        "expression.create",
+        json!({"candidates": candidates}),
+    )
+    .await
+}
+
+async fn decide_4829(
+    w: &World4829,
+    jwt: &str,
+    approval: Uuid,
+    approve: bool,
+    choice: Option<Value>,
+) -> (u16, Value) {
+    let mut body =
+        json!({"approvalId": approval, "approve": approve, "clientDecisionId": Uuid::new_v4()});
+    if let Some(choice) = choice {
+        body["expressionChoice"] = choice;
+    }
+    let response = w
+        .client
+        .post(format!(
+            "{}/v1/workspaces/{}/approvals/{approval}/decision",
+            w.base, w.fixture.workspace
+        ))
+        .bearer_auth(jwt)
+        .json(&body)
+        .send()
+        .await
+        .expect("decision responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+async fn card_4829(w: &World4829, approval: Uuid) -> Value {
+    sqlx::query_scalar(
+        "SELECT m.props FROM message m JOIN approval a ON a.request_message_id=m.id WHERE a.id=$1",
+    )
+    .bind(approval)
+    .fetch_one(&w.su)
+    .await
+    .unwrap()
+}
+
+/// `{draftId, revision, sha256}` of candidate `index` as the card shows it.
+fn choice_4829(card: &Value, index: usize) -> Value {
+    let draft = &card["action"]["expression"]["candidates"][index];
+    json!({"draftId": draft["draftId"], "revision": draft["revision"], "sha256": draft["media"]["large"]["sha256"]})
+}
+
+async fn draft_get_4829(w: &World4829, jwt: &str, draft: &Value, path: &str) -> reqwest::Response {
+    let id = draft["draftId"].as_str().unwrap();
+    let url = match path {
+        "image" => format!(
+            "{}/v1/workspaces/{}/expression-drafts/{id}/image?size=large&v={}",
+            w.base,
+            w.fixture.workspace,
+            draft["media"]["large"]["sha256"]
+                .as_str()
+                .unwrap_or(&"0".repeat(64))
+        ),
+        _ => format!(
+            "{}/v1/workspaces/{}/expression-drafts/{id}",
+            w.base, w.fixture.workspace
+        ),
+    };
+    w.client.get(url).bearer_auth(jwt).send().await.unwrap()
+}
+
+async fn open_images_4829(w: &World4829, approval: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM expression_draft_image i JOIN expression_draft d ON (d.workspace_id,d.id)=(i.workspace_id,i.draft_id) WHERE d.approval_id=$1")
+        .bind(approval)
+        .fetch_one(&w.su)
+        .await
+        .unwrap()
+}
+
+/// The whole loop with all three sources, a failed link, a direct upload that replaces a
+/// candidate, a stale choice, two decisions racing, and the reclaim of what was not chosen.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_offers_three_sources_and_registers_exactly_the_one_chosen() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    let admin_jwt = w.fixture.human_jwt.clone();
+    // The requester's own attachment in this conversation + a link + a failing link + bytes.
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("mine".into(), tiny_png_3787());
+    let msg = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    let attachment = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(msg),
+        "mine",
+        "image/png",
+        "complete",
+    )
+    .await;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    w.mock.replies.lock().unwrap().insert(
+        "https://cdn.example.test/blocked.gif".into(),
+        Err(momo_unfurl::FetchError::Blocked),
+    );
+    let prompt = "고양이가 춤추는 그림 PROMPT-SECRET";
+    let (status, proposed) = propose_4829(&w, json!([
+        candidate_4829("from_attachment", Value::Null, json!({"source": "attachment", "attachmentId": attachment.to_string()})),
+        candidate_4829("from_link", Value::Null, json!({"source": "url", "url": "https://cdn.example.test/ok.gif?token=Q-SECRET"})),
+        candidate_4829("from_blocked", Value::Null, json!({"source": "url", "url": "https://cdn.example.test/blocked.gif?token=Q-SECRET2"})),
+        candidate_4829("from_agent", Value::Null, generated_4829(&tiny_png_3787(), prompt)),
+    ])).await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    assert!(
+        w.mock
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|c| c.contains("Q-SECRET")),
+        "the query is used to fetch"
+    );
+
+    // ---- what was stored: drafts behind the approval, never bytes/prompt/query in args ----
+    let rows: Vec<(String, Option<String>, i32, bool)> = sqlx::query_as(
+        "SELECT d.state, d.code, d.candidate_index, d.expires_at = a.expires_at FROM expression_draft d JOIN approval a ON (a.workspace_id,a.id)=(d.workspace_id,d.approval_id) WHERE a.id=$1 ORDER BY d.candidate_index")
+        .bind(approval).fetch_all(&w.su).await.unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|r| (r.0.as_str(), r.1.as_deref()))
+            .collect::<Vec<_>>(),
+        [
+            ("ready", None),
+            ("ready", None),
+            ("manual_upload_required", Some("source_blocked")),
+            ("ready", None)
+        ]
+    );
+    assert!(
+        rows.iter().all(|r| r.3),
+        "an action draft follows the approval's own expiry"
+    );
+    let (status_text, payload): (String, Value) =
+        sqlx::query_as("SELECT status::text, payload FROM approval WHERE id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(status_text, "pending");
+    let stored = payload.to_string();
+    assert_eq!(
+        payload["action"]["args"]["drafts"].as_array().map(Vec::len),
+        Some(4),
+        "{payload}"
+    );
+    assert!(payload["action"]["pins"]["subject"].is_null());
+    for secret in ["PROMPT-SECRET", "Q-SECRET", "dataBase64", "mine"] {
+        assert!(
+            !stored.contains(secret),
+            "the stored arguments carry {secret}: {stored}"
+        );
+    }
+    let audits: String = sqlx::query_scalar("SELECT COALESCE(string_agg(detail::text, ' '), '') FROM audit_log WHERE workspace_id=$1 AND action IN ('expression.staged')")
+        .bind(ws).fetch_one(&w.su).await.unwrap();
+    assert!(
+        audits.contains("source_blocked") && audits.contains("cdn.example.test"),
+        "{audits}"
+    );
+    for secret in ["PROMPT-SECRET", "Q-SECRET", "dataBase64"] {
+        assert!(!audits.contains(secret), "audit carries {secret}");
+    }
+    let card = card_4829(&w, approval).await;
+    let candidates = card["action"]["expression"]["candidates"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(candidates.len(), 4);
+    assert_eq!(candidates[2]["state"], "manual_upload_required");
+    assert_eq!(
+        candidates[2]["origin"]["sourceUrl"],
+        "https://cdn.example.test/blocked.gif"
+    );
+    assert_eq!(
+        candidates[3]["origin"]["prompt"], prompt,
+        "the card shows the agent's prompt"
+    );
+    assert!(
+        card.to_string().contains("보관 범위"),
+        "an attachment source widens the keeping scope on the card"
+    );
+    assert!(!card.to_string().contains("Q-SECRET"));
+
+    // ---- preview: the exact stored bytes, to people who may decide, nobody else --------
+    let ready = &candidates[0];
+    let image = draft_get_4829(&w, &w.requester_jwt, ready, "image").await;
+    assert_eq!(image.status(), 200);
+    assert_eq!(image.headers()["cache-control"], "private, no-store");
+    assert_eq!(
+        draft_get_4829(&w, &admin_jwt, ready, "image")
+            .await
+            .status(),
+        200,
+        "an admin may decide a faceless card"
+    );
+    assert_eq!(
+        draft_get_4829(&w, &w.guest_jwt, ready, "image")
+            .await
+            .status(),
+        404,
+        "a guest may not"
+    );
+    assert_eq!(
+        draft_get_4829(&w, &w.outsider_jwt, ready, "image")
+            .await
+            .status(),
+        404,
+        "nor a member of another room"
+    );
+    let foreign = seed(&w.su).await;
+    assert_eq!(
+        draft_get_4829(&w, &foreign.human_jwt, ready, "image")
+            .await
+            .status(),
+        404,
+        "nor another tenant"
+    );
+    let mut wrong = ready.clone();
+    wrong["media"]["large"]["sha256"] = json!("0".repeat(64));
+    assert_eq!(
+        draft_get_4829(&w, &w.requester_jwt, &wrong, "image")
+            .await
+            .status(),
+        404,
+        "a wrong hash is the same 404"
+    );
+
+    // ---- refusals that spend nothing -------------------------------------------------
+    let good = choice_4829(&card, 0);
+    for (label, jwt, approve, choice, want) in [
+        (
+            "no choice",
+            &w.requester_jwt,
+            true,
+            None,
+            (400, "expression_choice_required"),
+        ),
+        (
+            "choice on a rejection",
+            &w.requester_jwt,
+            false,
+            Some(good.clone()),
+            (400, "expression_choice_not_allowed"),
+        ),
+        (
+            "a guest",
+            &w.guest_jwt,
+            true,
+            Some(good.clone()),
+            (403, "role_required"),
+        ),
+        (
+            "the failed link",
+            &w.requester_jwt,
+            true,
+            Some(
+                json!({"draftId": candidates[2]["draftId"], "revision": "1", "sha256": "0".repeat(64)}),
+            ),
+            (409, "expression_preview_stale"),
+        ),
+        (
+            "a wrong hash",
+            &w.requester_jwt,
+            true,
+            Some(json!({"draftId": ready["draftId"], "revision": "1", "sha256": "1".repeat(64)})),
+            (409, "expression_preview_stale"),
+        ),
+        (
+            "a stranger's draft",
+            &w.requester_jwt,
+            true,
+            Some(json!({"draftId": Uuid::new_v4(), "revision": "1", "sha256": "1".repeat(64)})),
+            (409, "expression_preview_stale"),
+        ),
+    ] {
+        let (status, receipt) = decide_4829(&w, jwt, approval, approve, choice).await;
+        assert_eq!(
+            (status, receipt["status"].as_str().unwrap_or("")),
+            want,
+            "{label}: {receipt}"
+        );
+        let pending: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+        assert_eq!(pending, "pending", "{label} must not spend the approval");
+    }
+    // another action's decision rejects the field too, and does not run
+    let (invite, _) = propose_invite(&w.client, &w.base, &w.su, &w.fixture, json!({})).await;
+    let (status, receipt) = decide_4829(&w, &admin_jwt, invite, true, Some(good.clone())).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (400, "expression_choice_not_allowed"),
+        "{receipt}"
+    );
+    assert_eq!(approval_status_4385(&w.su, invite).await, "pending");
+    let (status, _) = decide_4829(&w, &admin_jwt, invite, false, None).await;
+    assert_eq!(
+        status, 200,
+        "the invite card is rejected to free the pending slot"
+    );
+
+    // ---- a direct upload replaces the failed link; a replaced picture makes the old choice stale
+    let put = |jwt: String, draft: String, bytes: Vec<u8>| {
+        let (client, url) = (
+            w.client.clone(),
+            format!(
+                "{}/v1/workspaces/{ws}/expression-drafts/{draft}/file",
+                w.base
+            ),
+        );
+        async move {
+            let boundary = "oort-expr-4829";
+            let mut body = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\nContent-Type: image/png\r\n\r\n").into_bytes();
+            body.extend_from_slice(&bytes);
+            body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+            client
+                .put(url)
+                .bearer_auth(jwt)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        put(
+            w.guest_jwt.clone(),
+            candidates[2]["draftId"].as_str().unwrap().into(),
+            noise_png_4829(20, 1)
+        )
+        .await
+        .status(),
+        403,
+        "a guest cannot replace (the add role)"
+    );
+    assert_eq!(
+        put(
+            w.outsider_jwt.clone(),
+            candidates[2]["draftId"].as_str().unwrap().into(),
+            noise_png_4829(20, 1)
+        )
+        .await
+        .status(),
+        404,
+        "nor another room"
+    );
+    let replaced = put(
+        w.face_jwt.clone(),
+        candidates[2]["draftId"].as_str().unwrap().into(),
+        noise_png_4829(20, 1),
+    )
+    .await;
+    assert_eq!(
+        replaced.status(),
+        200,
+        "any current decider may upload by hand"
+    );
+    let replaced: Value = replaced.json().await.unwrap();
+    assert_eq!(
+        (replaced["state"].as_str(), replaced["revision"].as_str()),
+        (Some("ready"), Some("2"))
+    );
+    assert_eq!(
+        replaced["origin"], candidates[2]["origin"],
+        "the origin is kept, never laundered into an upload"
+    );
+    let card2 = card_4829(&w, approval).await;
+    assert_eq!(
+        card2["action"]["expression"]["candidates"][2]["revision"], "2",
+        "the card shows the new revision"
+    );
+    // The old choice on a candidate whose picture was just replaced is stale; the replaced one is chosen later.
+    // The NEW hash with the OLD revision: only the revision guard can refuse it.
+    let stale_choice = json!({"draftId": candidates[2]["draftId"], "revision": "1",
+        "sha256": card2["action"]["expression"]["candidates"][2]["media"]["large"]["sha256"]});
+    let (status, receipt) =
+        decide_4829(&w, &w.requester_jwt, approval, true, Some(stale_choice)).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (409, "expression_preview_stale"),
+        "{receipt}"
+    );
+    // The preview of the replaced picture is the new one.
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &w.requester_jwt,
+            &card2["action"]["expression"]["candidates"][2],
+            "image"
+        )
+        .await
+        .status(),
+        200
+    );
+
+    // ---- two decisions race (an admin and the requester): exactly one registers -----------
+    let pick = choice_4829(&card2, 1);
+    let (a, b) = tokio::join!(
+        decide_4829(&w, &admin_jwt, approval, true, Some(pick.clone())),
+        decide_4829(&w, &w.requester_jwt, approval, true, Some(pick.clone())),
+    );
+    let mut statuses = [a.0, b.0];
+    statuses.sort_unstable();
+    assert_eq!(
+        statuses,
+        [200, 409],
+        "one wins, the other sees an approved card: {a:?} {b:?}"
+    );
+    let registered: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression WHERE approval_id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(registered, 1, "a row lock registers it once");
+    let (name, created_by, proposed_by): (String, Uuid, Uuid) =
+        sqlx::query_as("SELECT name, created_by, proposed_by FROM expression WHERE approval_id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(name, "from_link");
+    assert_eq!(proposed_by, w.fixture.hosted_agent);
+    assert!(
+        [w.fixture.human, w.requester].contains(&created_by),
+        "the deciding person is the creator"
+    );
+    let images: i64 = sqlx::query_scalar("SELECT count(*) FROM expression_image i JOIN expression e ON (e.workspace_id,e.id)=(i.workspace_id,i.expression_id) WHERE e.approval_id=$1").bind(approval).fetch_one(&w.su).await.unwrap();
+    assert_eq!(images, 3);
+    assert_eq!(
+        open_images_4829(&w, approval).await,
+        0,
+        "every draft's bytes are gone, the chosen one's moved to the expression"
+    );
+    let states: Vec<String> = sqlx::query_scalar(
+        "SELECT state FROM expression_draft WHERE approval_id=$1 ORDER BY candidate_index",
+    )
+    .bind(approval)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(states, ["expired", "activated", "expired", "expired"]);
+    // The card settled in place with the result, and the audit has no bytes/prompt.
+    let settled = card_4829(&w, approval).await;
+    assert_eq!(
+        settled["result"]["expression"]["name"], "from_link",
+        "{settled}"
+    );
+    assert_eq!(settled["result"]["expression"]["token"], ":from_link:");
+    let changed: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox WHERE workspace_id=$1 AND payload->'data'->>'type'='expression.changed'").bind(ws).fetch_one(&w.su).await.unwrap();
+    assert!(changed >= 1);
+    let all_audit: String = sqlx::query_scalar(
+        "SELECT COALESCE(string_agg(detail::text, ' '), '') FROM audit_log WHERE workspace_id=$1",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    for secret in ["PROMPT-SECRET", "Q-SECRET", "dataBase64"] {
+        assert!(!all_audit.contains(secret), "audit carries {secret}");
+    }
+    // The outbox: the agent's prompt is only in the approval CARD's own broadcast (it must be, to
+    // be drawn); the link's query and any base64 are in no outbox row at all, and the
+    // `expression.changed` / decision events never carry a prompt.
+    let card_message: Uuid =
+        sqlx::query_scalar("SELECT request_message_id FROM approval WHERE id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    let prompt_rows: Vec<String> = sqlx::query_scalar(
+        "SELECT payload::text FROM outbox WHERE workspace_id=$1 AND payload::text LIKE '%PROMPT-SECRET%'",
+    )
+    .bind(ws)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert!(
+        !prompt_rows.is_empty(),
+        "the card itself carries the prompt it shows"
+    );
+    for row in &prompt_rows {
+        assert!(
+            row.contains(&card_message.to_string()),
+            "a prompt outside the card's own broadcast: {row}"
+        );
+    }
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND (payload::text LIKE '%Q-SECRET%' OR payload::text LIKE '%dataBase64%')",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0, "no outbox row carries a link query or base64");
+    let created_audit: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='expression.created' AND detail->>'approval_id'=$2").bind(ws).bind(approval.to_string()).fetch_one(&w.su).await.unwrap();
+    assert_eq!(created_audit, 1);
+    // A late replacement on a settled card is gone.
+    assert_eq!(
+        put(
+            w.requester_jwt.clone(),
+            candidates[2]["draftId"].as_str().unwrap().into(),
+            noise_png_4829(20, 2)
+        )
+        .await
+        .status(),
+        404
+    );
+    // And no plain message can dress itself as one of these cards.
+    let forged = w.client.post(format!("{}/v1/workspaces/{ws}/channels/{}/messages", w.base, w.fixture.channel)).bearer_auth(&w.requester_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": ":from_link:", "props": {"action": "x", "result": "y", "expression": "z"}})).send().await.unwrap();
+    assert!(forged.status().is_success());
+    let forged: Value = forged.json().await.unwrap();
+    let stored_props: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1::uuid")
+        .bind(forged["id"].as_str().unwrap())
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    for key in ["action", "result", "expression"] {
+        assert!(
+            stored_props.get(key).is_none(),
+            "{key} survived into {stored_props}"
+        );
+    }
+    assert_eq!(forged["type"].as_str().unwrap_or("text"), "text");
+}
+
+async fn set_policy_4829(w: &World4829, policy: &str) {
+    sqlx::query("INSERT INTO expression_catalog(workspace_id, add_policy) VALUES($1,$2) ON CONFLICT (workspace_id) DO UPDATE SET add_policy=EXCLUDED.add_policy")
+        .bind(w.fixture.workspace)
+        .bind(policy)
+        .execute(&w.su)
+        .await
+        .unwrap();
+}
+
+/// Who the push would wake, by the ONE predicate the decision route asks too.
+async fn may_approve_4829(w: &World4829, approval: Uuid, member: Uuid) -> bool {
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    let mut conn = w.su.acquire().await.unwrap();
+    momo_push::may_approve_in_tx(
+        &mut conn,
+        w.fixture.workspace,
+        &momo_push::ApprovalCard {
+            approval_id: approval,
+            action_type: "workspace_action".into(),
+            payload,
+        },
+        member,
+    )
+    .await
+    .unwrap()
+}
+
+/// What a registration writes **first** (`changed` in `store.rs`): the catalog's version, an
+/// `expression.created` audit row and an `expression.changed` outbox event. A refused decision
+/// commits (it answers a receipt), so anything written before the refusal would stay.
+async fn registration_writes_4829(w: &World4829) -> (i64, i64, i64) {
+    let ws = w.fixture.workspace;
+    let version: i64 = sqlx::query_scalar(
+        "SELECT COALESCE((SELECT version FROM expression_catalog WHERE workspace_id=$1), 0)",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='expression.created'",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND payload->'data'->>'type'='expression.changed'",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    (version, audits, events)
+}
+
+/// A face means that person AND the add policy as it is now: no admin proxy, no guest, and a
+/// policy narrowed after the proposal is read again by the decision, the push audience and the
+/// preview alike.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_only_the_face_who_the_policy_allows_decides() {
+    let w = world_4829().await;
+    let admin = w.fixture.human;
+    let admin_jwt = w.fixture.human_jwt.clone();
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "my_face",
+            json!(w.face.to_string()),
+            generated_4829(&tiny_png_3787(), "p"),
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card = card_4829(&w, approval).await;
+    let choice = choice_4829(&card, 0);
+    assert!(
+        card.to_string().contains("그 본인만"),
+        "the card says only that person approves"
+    );
+    // The push audience and the route agree about every person: only the face.
+    for (who, label, want) in [
+        (admin, "admin", false),
+        (w.requester, "requester", false),
+        (w.guest, "guest", false),
+        (w.face, "face", true),
+    ] {
+        assert_eq!(
+            may_approve_4829(&w, approval, who).await,
+            want,
+            "audience: {label}"
+        );
+    }
+    for (jwt, label) in [
+        (&admin_jwt, "an admin"),
+        (&w.requester_jwt, "the requester"),
+        (&w.guest_jwt, "a guest"),
+    ] {
+        let (status, receipt) = decide_4829(&w, jwt, approval, true, Some(choice.clone())).await;
+        assert_eq!(
+            (status, receipt["status"].as_str().unwrap_or("")),
+            (403, "role_required"),
+            "{label}: {receipt}"
+        );
+    }
+    // Neither does the face's picture preview leak to a non-decider: the admin may preview
+    // only because they are... not the face: 404.
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &admin_jwt,
+            &card["action"]["expression"]["candidates"][0],
+            "image"
+        )
+        .await
+        .status(),
+        404,
+        "an admin who may not decide may not preview a face"
+    );
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &w.face_jwt,
+            &card["action"]["expression"]["candidates"][0],
+            "image"
+        )
+        .await
+        .status(),
+        200
+    );
+    // The policy is narrowed AFTER the proposal: the face (a plain member) is now refused,
+    // and nobody can approve (the admin is not the face).
+    set_policy_4829(&w, "admins").await;
+    let (status, receipt) =
+        decide_4829(&w, &w.face_jwt, approval, true, Some(choice.clone())).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (403, "role_required"),
+        "{receipt}"
+    );
+    assert!(
+        !may_approve_4829(&w, approval, w.face).await,
+        "the push audience reads the policy now"
+    );
+    assert!(
+        !may_approve_4829(&w, approval, admin).await,
+        "an admin is still not the face"
+    );
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &w.face_jwt,
+            &card["action"]["expression"]["candidates"][0],
+            "image"
+        )
+        .await
+        .status(),
+        404,
+        "the preview reads the policy now"
+    );
+    set_policy_4829(&w, "members").await;
+    let (status, receipt) = decide_4829(&w, &w.face_jwt, approval, true, Some(choice)).await;
+    assert_eq!(status, 200, "{receipt}");
+    let subject: Option<Uuid> =
+        sqlx::query_scalar("SELECT subject_member_id FROM expression WHERE approval_id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(subject, Some(w.face));
+    // A faceless card under an admins-only policy: an admin may, a plain member may not.
+    set_policy_4829(&w, "admins").await;
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "no_face",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let faceless = proposed_approval_3706(&proposed);
+    let pick = choice_4829(&card_4829(&w, faceless).await, 0);
+    let before = registration_writes_4829(&w).await;
+    assert_eq!(
+        decide_4829(&w, &w.requester_jwt, faceless, true, Some(pick.clone()))
+            .await
+            .0,
+        403
+    );
+    assert_eq!(
+        registration_writes_4829(&w).await,
+        before,
+        "a refused role wrote nothing"
+    );
+    assert_eq!(
+        decide_4829(&w, &admin_jwt, faceless, true, Some(pick))
+            .await
+            .0,
+        200
+    );
+    // The measurement can see a registration: exactly one version, one audit row, one event.
+    assert_eq!(
+        registration_writes_4829(&w).await,
+        (before.0 + 1, before.1 + 1, before.2 + 1),
+        "a registration is one version, one `expression.created` row and one event"
+    );
+    set_policy_4829(&w, "members").await;
+    // The name is permanent: a second card for a name already registered is refused at the
+    // decision (409), nothing spent, nothing registered.
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "no_face",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let taken = proposed_approval_3706(&proposed);
+    let pick = choice_4829(&card_4829(&w, taken).await, 0);
+    let written = registration_writes_4829(&w).await;
+    let (status, receipt) = decide_4829(&w, &admin_jwt, taken, true, Some(pick)).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (409, "expression_name_reserved"),
+        "{receipt}"
+    );
+    assert_eq!(approval_status_4385(&w.su, taken).await, "pending");
+    // The refusal commits, so anything the registration writes FIRST would still be here: a
+    // version bump, an `expression.created` audit row, an `expression.changed` event for an
+    // expression that was never made. Proofs first, writes after.
+    assert_eq!(
+        registration_writes_4829(&w).await,
+        written,
+        "a reserved name wrote no version, no audit row and no event"
+    );
+    // The library is full at 1,000 (active + hidden): the same card is refused for room.
+    sqlx::query("INSERT INTO expression(workspace_id, name, display_name, tags, origin, created_by, version) SELECT $1, 'fill_' || g, 'f', '[]'::jsonb, '{\"kind\":\"upload\",\"sourceUrl\":null,\"prompt\":null}'::jsonb, $2, 100 + g FROM generate_series(1, 999) g")
+        .bind(w.fixture.workspace)
+        .bind(w.requester)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "one_too_many",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let last = proposed_approval_3706(&proposed);
+    let pick = choice_4829(&card_4829(&w, last).await, 0);
+    let written = registration_writes_4829(&w).await;
+    let (status, receipt) = decide_4829(&w, &admin_jwt, last, true, Some(pick)).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (409, "expression_quota"),
+        "{receipt}"
+    );
+    assert_eq!(
+        approval_status_4385(&w.su, last).await,
+        "pending",
+        "a full library spends nothing"
+    );
+    assert_eq!(
+        registration_writes_4829(&w).await,
+        written,
+        "a full library wrote no version, no audit row and no event"
+    );
+}
+
+/// What the server refuses before it stores anything, and the transport budget that belongs to
+/// this action alone.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_refuses_bad_proposals_and_keeps_its_budget_to_itself() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("theirs".into(), tiny_png_3787());
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("elsewhere".into(), tiny_png_3787());
+    let theirs_msg = seed_message_4385(&w.su, ws, w.fixture.channel, w.face, "남의 사진").await;
+    let theirs = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.face,
+        Some(theirs_msg),
+        "theirs",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let else_msg =
+        seed_message_4385(&w.su, ws, w.fixture.private_channel, w.requester, "다른 방").await;
+    let elsewhere = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.private_channel,
+        w.requester,
+        Some(else_msg),
+        "elsewhere",
+        "image/png",
+        "complete",
+    )
+    .await;
+    w.mock.replies.lock().unwrap().insert(
+        "https://inside.example.test/x.gif".into(),
+        Err(momo_unfurl::FetchError::OriginBlocked),
+    );
+    let outsider: Uuid =
+        sqlx::query_scalar("SELECT id FROM member WHERE workspace_id=$1 AND handle LIKE 'out-%'")
+            .bind(ws)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    let html = b64_3787(b"<html><script>alert(1)</script></html>");
+    let too_big = b64_3787(&vec![0u8; 1024 * 1024 + 1]);
+    let one = |image: Value| json!([candidate_4829("probe", Value::Null, image)]);
+    let png = generated_4829(&tiny_png_3787(), "p");
+    let cases: Vec<(&str, Value)> = vec![
+        (
+            "another person's attachment",
+            one(json!({"source": "attachment", "attachmentId": theirs.to_string()})),
+        ),
+        (
+            "the requester's file in another conversation",
+            one(json!({"source": "attachment", "attachmentId": elsewhere.to_string()})),
+        ),
+        (
+            "an unknown attachment id",
+            one(json!({"source": "attachment", "attachmentId": Uuid::new_v4().to_string()})),
+        ),
+        (
+            "a private literal",
+            one(json!({"source": "url", "url": "https://127.0.0.1/x.gif"})),
+        ),
+        (
+            "plain http",
+            one(json!({"source": "url", "url": "http://cdn.example.test/x.gif"})),
+        ),
+        (
+            "a port other than 443",
+            one(json!({"source": "url", "url": "https://cdn.example.test:8443/x.gif"})),
+        ),
+        (
+            "a name that resolves private at the first hop",
+            one(json!({"source": "url", "url": "https://inside.example.test/x.gif"})),
+        ),
+        (
+            "credentials in the link",
+            one(json!({"source": "url", "url": "https://u:p@cdn.example.test/x.gif"})),
+        ),
+        (
+            "a fifth candidate",
+            json!([0, 1, 2, 3, 4].map(|n| candidate_4829(
+                &format!("n{n}"),
+                Value::Null,
+                png.clone()
+            ))),
+        ),
+        (
+            "two different faces",
+            json!([
+                candidate_4829("a1", Value::Null, png.clone()),
+                candidate_4829("a2", json!(w.face.to_string()), png.clone())
+            ]),
+        ),
+        (
+            "a face outside this conversation",
+            json!([candidate_4829(
+                "a1",
+                json!(outsider.to_string()),
+                png.clone()
+            )]),
+        ),
+        (
+            "an absent face declaration",
+            json!([{"name": "a1", "displayName": "a1", "tags": [], "image": png.clone()}]),
+        ),
+        (
+            "invalid base64",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": "!!!!", "prompt": "p"}),
+            ),
+        ),
+        (
+            "a web page as bytes",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": html, "prompt": "p"}),
+            ),
+        ),
+        (
+            "more than 1 MiB decoded",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": too_big, "prompt": "p"}),
+            ),
+        ),
+        (
+            "an empty prompt",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": b64_3787(&tiny_png_3787()), "prompt": ""}),
+            ),
+        ),
+        (
+            "a bad name",
+            json!([candidate_4829("Bad Name!", Value::Null, png.clone())]),
+        ),
+    ];
+    let count = |sql: &'static str| {
+        let su = w.su.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(sql)
+                .fetch_one(&su)
+                .await
+                .unwrap()
+        }
+    };
+    let (approvals, drafts) = (
+        count("SELECT count(*) FROM approval").await,
+        count("SELECT count(*) FROM expression_draft").await,
+    );
+    for (label, candidates) in cases {
+        let (status, refused) = propose_4829(&w, candidates).await;
+        assert_eq!(status, 400, "{label}: {refused}");
+    }
+    assert_eq!(
+        count("SELECT count(*) FROM approval").await,
+        approvals,
+        "no approval was created"
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM expression_draft").await,
+        drafts,
+        "no draft was stored"
+    );
+
+    // ---- the budget: four ~1 MB candidates make it end to end (> 64 KiB, < 6 MiB) ------------
+    let big: Vec<Value> = (0..4u32)
+        .map(|n| {
+            candidate_4829(
+                &format!("big{n}"),
+                Value::Null,
+                generated_4829(&noise_png_4829(500, n), "p"),
+            )
+        })
+        .collect();
+    let body_len = serde_json::to_vec(&big).unwrap().len();
+    assert!(
+        body_len > 4_000_000 && body_len < 6 * 1024 * 1024,
+        "{body_len}"
+    );
+    let (status, proposed) = propose_4829(&w, json!(big)).await;
+    assert_eq!(status, 200, "four 1 MB candidates round-trip: {proposed}");
+    let big_approval = proposed_approval_3706(&proposed);
+    let ready: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM expression_draft WHERE approval_id=$1 AND state='ready'",
+    )
+    .bind(big_approval)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(ready, 4);
+    // Rejecting it reclaims all four pictures' bytes (and keeps the rows as records).
+    assert!(open_images_4829(&w, big_approval).await >= 12);
+    let (status, _) = decide_4829(&w, &w.requester_jwt, big_approval, false, None).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        open_images_4829(&w, big_approval).await,
+        0,
+        "a rejection reclaims the bytes"
+    );
+    let states: Vec<String> =
+        sqlx::query_scalar("SELECT state FROM expression_draft WHERE approval_id=$1")
+            .bind(big_approval)
+            .fetch_all(&w.su)
+            .await
+            .unwrap();
+    assert!(states.iter().all(|s| s == "expired"), "{states:?}");
+
+    // ---- other actions and other callers keep the 64 KiB ceiling --------------------------------
+    let handle = |bearer: String, extra: Value, name: &'static str| {
+        let (client, url) = (w.client.clone(), format!("{}{PATH}", w.base));
+        async move {
+            let body = modern_body(
+                "tools/call",
+                json!("1"),
+                json!({"name": name, "arguments": extra}),
+            );
+            client
+                .post(url)
+                .header("content-type", "application/json")
+                .header("accept", "application/json, text/event-stream")
+                .header("mcp-protocol-version", MODERN_VERSION)
+                .header("mcp-method", "tools/call")
+                .header("mcp-name", name)
+                .bearer_auth(bearer)
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16()
+        }
+    };
+    let huge = "x".repeat(2 * 1024 * 1024);
+    assert_eq!(handle(w.fixture.hosted_bearer.clone(), json!({"handle": "h", "actionId": "member.avatar.set", "args": {"avatar": {"source": "generated", "dataBase64": huge.clone()}}, "rationale": "expression.create"}), "oort_action_propose").await, 413, "avatar.set cannot borrow the budget");
+    assert_eq!(
+        handle(
+            w.fixture.hosted_bearer.clone(),
+            json!({"pad": huge.clone(), "actionId": "expression.create"}),
+            "oort_ping"
+        )
+        .await,
+        413,
+        "another tool cannot"
+    );
+    assert_eq!(
+        handle(
+            "not-a-token".into(),
+            json!({"handle": "h", "actionId": "expression.create", "args": {"pad": huge.clone()}}),
+            "oort_action_propose"
+        )
+        .await,
+        401,
+        "authentication comes before the large body is collected"
+    );
+    let over = "y".repeat(6 * 1024 * 1024 + 10);
+    assert_eq!(
+        handle(
+            w.fixture.hosted_bearer.clone(),
+            json!({"handle": "h", "actionId": "expression.create", "args": {"pad": over}}),
+            "oort_action_propose"
+        )
+        .await,
+        413,
+        "past 6 MiB is refused"
+    );
+
+    // ---- RLS: another tenant sees no draft of this approval ------------------------------------
+    let foreign = seed(&w.su).await;
+    let seen: i64 = momo_db::with_tenant_tx(&w.app, foreign.workspace, move |conn| {
+        Box::pin(async move {
+            Ok::<_, momo_db::DbError>(
+                sqlx::query_scalar("SELECT count(*) FROM expression_draft WHERE approval_id=$1")
+                    .bind(big_approval)
+                    .fetch_one(&mut *conn)
+                    .await?,
+            )
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(seen, 0);
+    let unprivileged: (bool, bool) =
+        sqlx::query_as("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")
+            .fetch_one(&w.app)
+            .await
+            .unwrap();
+    assert_eq!(
+        unprivileged,
+        (false, false),
+        "the runtime role under test is not privileged"
+    );
+}
+
+/// Every way a card closes takes its candidates' bytes with it: a late tap that settles it as
+/// expired, the TTL sweep, and a run that is cancelled.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_every_close_reclaims_the_candidate_bytes() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    let mut propose = |name: &'static str| {
+        let w = &w;
+        async move {
+            let (status, proposed) = propose_4829(
+                w,
+                json!([candidate_4829(
+                    name,
+                    Value::Null,
+                    generated_4829(&tiny_png_3787(), "p")
+                )]),
+            )
+            .await;
+            assert_eq!(status, 200, "{proposed}");
+            proposed_approval_3706(&proposed)
+        }
+    };
+    // (1) a late tap: the approval is past its expiry, so approving settles it as expired.
+    let late = propose("late_tap").await;
+    let pick = choice_4829(&card_4829(&w, late).await, 0);
+    assert_eq!(open_images_4829(&w, late).await, 3);
+    sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
+        .bind(late)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let (status, receipt) = decide_4829(&w, &w.requester_jwt, late, true, Some(pick)).await;
+    assert_ne!(status, 200, "an expired card registers nothing: {receipt}");
+    assert_eq!(
+        open_images_4829(&w, late).await,
+        0,
+        "the expiry arm reclaims"
+    );
+    let registered: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression WHERE approval_id=$1")
+            .bind(late)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(registered, 0);
+    // (2) the TTL sweep: a draft past its own expiry loses its bytes without any decision.
+    let swept = propose("ttl_sweep").await;
+    let mut clock = w.su.begin().await.unwrap();
+    sqlx::query("ALTER TABLE expression_draft DISABLE TRIGGER expression_draft_identity")
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE expression_draft SET expires_at = clock_timestamp() - interval '1 second' WHERE approval_id=$1").bind(swept).execute(&mut *clock).await.unwrap();
+    sqlx::query("ALTER TABLE expression_draft ENABLE TRIGGER expression_draft_identity")
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    clock.commit().await.unwrap();
+    assert_eq!(open_images_4829(&w, swept).await, 3);
+    momo_expressions::sweep_expired(&w.su, &w.app)
+        .await
+        .unwrap();
+    assert_eq!(open_images_4829(&w, swept).await, 0, "the sweep reclaims");
+    // (3) a run that is cancelled retires its pending card and the candidates with it.
+    let cancelled = propose("cancel_run").await;
+    let run: Uuid = sqlx::query_scalar("SELECT run_id FROM approval WHERE id=$1")
+        .bind(cancelled)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(open_images_4829(&w, cancelled).await, 3);
+    momo_db::with_tenant_tx(&w.app, ws, move |conn| {
+        Box::pin(async move {
+            momo_agent::approval::cancel_pending_approvals_for_run_in_tx(
+                conn,
+                ws,
+                run,
+                chrono::Utc::now(),
+            )
+            .await?;
+            Ok::<_, momo_db::DbError>(())
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        open_images_4829(&w, cancelled).await,
+        0,
+        "a cancelled run reclaims"
+    );
+    let _ = &mut propose;
+}
+
+// ===========================================================================
+// #4820 C1b — `oort_expression_assemble` (ADR-0218 G3.6/G3.7 (a)).
+//
+// The tool puts motion on ONE picture through the isolated assembler child and keeps the
+// candidates for an hour under an `assemblyId` that belongs to the workspace, the requesting
+// agent and the person the run was raised by. Real PG18 (the NOBYPASSRLS `momo_app` role), real
+// HTTP, the real child. Build the child first: `cargo build -p momo-expressions --bins`; run with
+// `--test-threads=1` (one decoder semaphore of two is shared by the whole process).
+//
+// Sabotage map (each line → the test that goes red when it is broken):
+//   * `find_requester_attachment_in_tx`: drop `m.author_member_id = $4` → `…strangers_attachment…`
+//   * the declared-tool check in `routes/agent_port.rs` (`is_none_or(… call_shape …)`)
+//                                                        → `…budget_is_one_tools_and_a_declared_name_must_be_the_real_one`
+//   * `momo_expressions::media::decoder_slots()` in `expression_assemble` replaced by a fresh
+//     semaphore                                          → `…failure_codes_are_results…` (busy)
+//   * `expires_at > clock_timestamp()` / the +1 hour default / `HELD_MAX` → `…twelve_and_the_hour…`
+//   * the closed audit detail of `keep_in_tx`            → `…keeps_what_the_assembler_built…`
+//   * the rate limit spent once: `pre_admission` reuse    → `…the_rate_limit_is_spent_once…`
+//   * the names of `assembly_params_invalid`: `params_failure` (the assembler's own check) or
+//     `assemble_fault_params` (the schema's) returning nothing → `…failure_codes_are_results…`
+// ===========================================================================
+
+fn assembler_4820() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("OORT_EXPRESSION_ASSEMBLER") {
+        return path.into();
+    }
+    let exe = std::env::current_exe().expect("test executable");
+    let mut dir = exe.parent().expect("target dir").to_path_buf();
+    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
+        dir.pop();
+    }
+    let path = dir.join("momo-expression-assembler");
+    assert!(
+        path.is_file(),
+        "build the assembler first: cargo build -p momo-expressions --bins ({path:?})"
+    );
+    path
+}
+
+/// How many content reads have **begun** in a [`SlowDrive4820`] (the wait comes after the count, so
+/// a call is known to be inside its Drive fetch while the Drive is still sleeping). A test that
+/// needs to act between a call's lookup transaction and its keep transaction waits on this
+/// instead of on a clock. One process-wide counter: these tests run `--test-threads=1`.
+static SLOW_DRIVE_ENTERED_4820: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Wait until a call is inside a Drive fetch (more reads have begun than `before`). The lookup
+/// transaction is behind that call and its keep transaction is ahead, as far as the Drive's delay
+/// is long.
+async fn wait_for_fetch_4820(before: usize) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while SLOW_DRIVE_ENTERED_4820.load(std::sync::atomic::Ordering::SeqCst) <= before {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the call never reached its Drive fetch"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
+/// A Drive that makes every content read wait first: the slow part of a call whose clock the
+/// test wants to see running while the picture is fetched.
+#[derive(Debug)]
+struct SlowDrive4820 {
+    inner: Arc<MemDrive3787>,
+    delay: std::time::Duration,
+}
+
+#[async_trait::async_trait]
+impl momo_drive::DriveArchive for SlowDrive4820 {
+    async fn create_resumable_upload(
+        &self,
+        channel_id: Uuid,
+        name: &str,
+        mime: &str,
+        size_bytes: i64,
+    ) -> Result<momo_drive::DriveUploadSession, momo_drive::DriveError> {
+        self.inner
+            .create_resumable_upload(channel_id, name, mime, size_bytes)
+            .await
+    }
+
+    async fn file_metadata(
+        &self,
+        file_id: &str,
+    ) -> Result<momo_drive::DriveFile, momo_drive::DriveError> {
+        self.inner.file_metadata(file_id).await
+    }
+
+    async fn file_content(
+        &self,
+        file_id: &str,
+        max_bytes: i64,
+    ) -> Result<momo_drive::DriveContent, momo_drive::DriveError> {
+        SLOW_DRIVE_ENTERED_4820.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        tokio::time::sleep(self.delay).await;
+        self.inner.file_content(file_id, max_bytes).await
+    }
+}
+
+/// [`world_4829`] with the assembler pinned in the server's own state (no process-wide variable
+/// for concurrent tests to race on) and the token budget the test asks for (0 = none).
+async fn world_4820(per_token_limit: u32, assembler: Option<std::path::PathBuf>) -> World4829 {
+    build_world_4820(per_token_limit, assembler, None).await
+}
+
+async fn build_world_4820(
+    per_token_limit: u32,
+    assembler: Option<std::path::PathBuf>,
+    drive_delay: Option<std::time::Duration>,
+) -> World4829 {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let drive = Arc::new(MemDrive3787::default());
+    let mock = Arc::new(Mock4829 {
+        calls: Default::default(),
+        replies: Default::default(),
+        delay_ms: Default::default(),
+    });
+    let served: Arc<dyn momo_drive::DriveArchive> = match drive_delay {
+        Some(delay) => Arc::new(SlowDrive4820 {
+            inner: drive.clone(),
+            delay,
+        }),
+        None => drive.clone(),
+    };
+    let state = AppState::new(
+        app.clone(),
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_drive(served)
+    .with_unfurl_http(mock.clone())
+    .with_unfurl_enabled(true)
+    .with_assembler_program(assembler.unwrap_or_else(assembler_4820))
+    .with_agent_port(AgentPortConfig {
+        external_origin: None,
+        window_seconds: 60,
+        per_token_limit,
+        per_agent_limit: 0,
+        per_ip_limit: 0,
+        hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
+        subscription_agents_enabled: true,
+        claude_subscription_agents_enabled: true,
+        oauth: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let address: SocketAddr = listener.local_addr().expect("address");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            build_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    let (requester, requester_jwt) = seed_human_3708(&su, &fixture, "req", "member").await;
+    let (face, face_jwt) = seed_human_3708(&su, &fixture, "face", "member").await;
+    let (guest, guest_jwt) = seed_human_3708(&su, &fixture, "guest", "guest").await;
+    let (_outsider, outsider_jwt) = seed_human_3708(&su, &fixture, "out", "member").await;
+    World4829 {
+        su,
+        app,
+        base: format!("http://{address}"),
+        client: reqwest::Client::new(),
+        fixture,
+        drive,
+        mock,
+        requester,
+        requester_jwt,
+        face,
+        face_jwt,
+        guest,
+        guest_jwt,
+        outsider_jwt,
+    }
+}
+
+/// The requester mentions the agent in the fixture channel and the agent claims the job: a
+/// live lease handle of a run raised by that person, in that conversation.
+async fn claim_run_4820(w: &World4829) -> String {
+    let handle_name = hosted_handle(&w.su, w.fixture.hosted_agent).await;
+    let trigger: Value = w
+        .client
+        .post(format!(
+            "{}/v1/workspaces/{}/channels/{}/messages",
+            w.base, w.fixture.workspace, w.fixture.channel
+        ))
+        .bearer_auth(&w.requester_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 움직이는 이모티콘으로 만들어 줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+    let (status, claimed) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a lease handle")
+        .to_string()
+}
+
+async fn assemble_4820(w: &World4829, handle: &str, args: Value) -> (u16, Value) {
+    let mut args = args;
+    args["handle"] = json!(handle);
+    call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_expression_assemble",
+        args,
+    )
+    .await
+}
+
+/// Four colour blocks, so a turned picture can be told from a straight one.
+fn picture_4820(width: u32, height: u32) -> Vec<u8> {
+    let image = image::RgbaImage::from_fn(width, height, |x, y| {
+        if x < width / 2 {
+            image::Rgba([220, 30, 30, 255])
+        } else if y < height / 2 {
+            image::Rgba([30, 30, 220, 255])
+        } else {
+            image::Rgba([30, 180, 60, 255])
+        }
+    });
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
+/// 256 px of 16-level noise: at 240 `pulse` and `bounce` fit, `sparkle` (20 frames) is built under
+/// 1 MiB but breaks the 256 KiB cap of the small rendition → `assembly_output_too_large`.
+fn noise_4820() -> Vec<u8> {
+    let mut state = 0x9E37_79B9u32 ^ 1;
+    let image = image::RgbaImage::from_fn(256, 256, |_, _| {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let b = state.to_le_bytes();
+        let level = |v: u8| ((u32::from(v) % 16) * 15) as u8;
+        image::Rgba([level(b[0]), level(b[1]), level(b[2]), 255])
+    });
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
+fn crc32_4820(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// `png` grown to exactly `total` bytes by one `tEXt` ancillary chunk after the header: a valid
+/// picture with the byte weight of a big one, which decodes as fast as the small one.
+fn padded_png_4820(png: &[u8], total: usize) -> Vec<u8> {
+    let data_len = total - png.len() - 12;
+    let mut data = b"Comment\0".to_vec();
+    data.resize(data_len, b'A');
+    let mut chunk = Vec::with_capacity(data_len + 12);
+    chunk.extend_from_slice(&(data_len as u32).to_be_bytes());
+    chunk.extend_from_slice(b"tEXt");
+    chunk.extend_from_slice(&data);
+    let mut checked = b"tEXt".to_vec();
+    checked.extend_from_slice(&data);
+    chunk.extend_from_slice(&crc32_4820(&checked).to_be_bytes());
+    // 8-byte signature + IHDR (4 length + 4 type + 13 data + 4 crc).
+    let mut out = png[..33].to_vec();
+    out.extend_from_slice(&chunk);
+    out.extend_from_slice(&png[33..]);
+    assert_eq!(out.len(), total);
+    out
+}
+
+/// A `tools/call` of `name` with the transport headers a modern client mirrors, sent as given.
+/// `declared` is the `Mcp-Name` header (None: not sent), `bearer` the credential.
+async fn raw_call_4820(
+    w: &World4829,
+    bearer: &str,
+    declared: Option<&str>,
+    body_tool: &str,
+    arguments: Value,
+) -> reqwest::Response {
+    let body = modern_body(
+        "tools/call",
+        json!("1"),
+        json!({"name": body_tool, "arguments": arguments}),
+    );
+    let mut request = w
+        .client
+        .post(format!("{}{PATH}", w.base))
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-protocol-version", MODERN_VERSION)
+        .header("mcp-method", "tools/call")
+        .bearer_auth(bearer);
+    if let Some(name) = declared {
+        request = request.header("mcp-name", name);
+    }
+    request.json(&body).send().await.expect("responds")
+}
+
+async fn assembly_rows_4820(su: &PgPool, ws: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM expression_assembly WHERE workspace_id=$1")
+        .bind(ws)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+/// How many of the secrets appear in any audit row, outbox row or run-event row of the tenant.
+async fn leaked_4820(su: &PgPool, ws: Uuid, secrets: &[String]) -> Vec<String> {
+    let mut found = Vec::new();
+    for secret in secrets {
+        let in_audit: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND (detail::text LIKE '%'||$2||'%' OR coalesce(target_id::text,'') LIKE '%'||$2||'%')",
+        )
+        .bind(ws)
+        .bind(secret)
+        .fetch_one(su)
+        .await
+        .unwrap();
+        let in_outbox: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND payload::text LIKE '%'||$2||'%'",
+        )
+        .bind(ws)
+        .bind(secret)
+        .fetch_one(su)
+        .await
+        .unwrap();
+        if in_audit + in_outbox > 0 {
+            found.push(secret.clone());
+        }
+    }
+    found
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_keeps_what_the_assembler_built_for_both_sources_and_leaks_nothing() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let agent = w.fixture.hosted_agent;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("mine-4820-drive-id".into(), picture_4820(300, 200));
+    let msg = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    let attachment = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(msg),
+        "mine-4820-drive-id",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let handle = claim_run_4820(&w).await;
+
+    // ---- an attachment of this conversation, two presets ----------------------------------
+    let before = chrono::Utc::now().timestamp_millis();
+    let (status, answer) = assemble_4820(
+        &w,
+        &handle,
+        json!({
+            "source": {"from": "attachment", "attachmentId": attachment},
+            "motion": {"kind": "preset", "presets": ["bounce", "pulse"]},
+            "size": 240,
+            "prompt": "PROMPT-SECRET-4820 빨강 파랑 초록 그림",
+            "sourceAttachmentId": attachment,
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["result"]["isError"], json!(false), "{answer}");
+    let result = structured(&answer);
+    let assembly_id = Uuid::parse_str(result["assemblyId"].as_str().expect("assemblyId")).unwrap();
+    let expires = result["expiresAtMs"].as_i64().expect("expiresAtMs");
+    assert!(
+        (3_590_000..=3_620_000).contains(&(expires - before)),
+        "one hour, got {}ms",
+        expires - before
+    );
+    let candidates = result["candidates"].as_array().expect("candidates");
+    assert_eq!(candidates.len(), 2, "{result}");
+    for (position, (motion, frames, duration)) in
+        [("bounce", 16, 640), ("pulse", 12, 600)].iter().enumerate()
+    {
+        let candidate = &candidates[position];
+        assert_eq!(candidate["index"], json!(position));
+        assert_eq!(candidate["motion"], json!(motion));
+        assert_eq!(candidate["frames"], json!(frames));
+        assert_eq!(candidate["durationMs"], json!(duration));
+        let bytes = candidate["bytes"].as_u64().expect("bytes");
+        assert!((1..=1_048_576).contains(&bytes), "≤ 1 MiB, got {bytes}");
+        assert_eq!(candidate["sha256"].as_str().map(str::len), Some(64));
+        // Exactly the G7 candidate shape and nothing else.
+        assert_eq!(candidate.as_object().unwrap().len(), 6, "{candidate}");
+    }
+    assert_eq!(
+        result.as_object().unwrap().len(),
+        3,
+        "G7 AssembleResult: {result}"
+    );
+
+    // What was stored is what was reported: three renditions each, the large one a GIF89a with
+    // the same hash and size, bound to this agent and this requester.
+    let header: (Uuid, Uuid, String, Option<Uuid>, String) = sqlx::query_as(
+        "SELECT agent_member_id, requester_member_id, prompt, source_attachment_id, state FROM expression_assembly WHERE id=$1",
+    )
+    .bind(assembly_id)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(header.0, agent);
+    assert_eq!(header.1, w.requester);
+    assert!(header.2.contains("PROMPT-SECRET-4820"));
+    assert_eq!(header.3, Some(attachment), "the verified pointer is kept");
+    assert_eq!(header.4, "ready");
+    let images: Vec<(i32, String, String, i32, Vec<u8>)> = sqlx::query_as(
+        "SELECT candidate_index, motion, sha256, octet_length(bytes), substring(bytes from 1 for 6) FROM expression_assembly_image WHERE assembly_id=$1 AND variant='large' ORDER BY candidate_index",
+    )
+    .bind(assembly_id)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(images.len(), 2);
+    for (position, image) in images.iter().enumerate() {
+        assert_eq!(image.2, candidates[position]["sha256"].as_str().unwrap());
+        assert_eq!(
+            image.3 as u64,
+            candidates[position]["bytes"].as_u64().unwrap()
+        );
+        assert_eq!(image.4, b"GIF89a");
+    }
+    let total: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression_assembly_image WHERE assembly_id=$1")
+            .bind(assembly_id)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(total, 6);
+
+    // ---- bytes the agent drew, one sprite sheet (3 poses in a row, played 0,1,2,1) ------------
+    let sheet = picture_4820(300, 100);
+    let b64 = b64_3787(&sheet);
+    let (status, answer) = assemble_4820(
+        &w,
+        &handle,
+        json!({
+            "source": {"from": "base64", "mime": "image/png", "dataBase64": b64},
+            "motion": {"kind": "sprite", "frames": 3, "sequence": [0, 1, 2, 1], "frameMs": 125},
+            "prompt": "스프라이트 시트",
+            "sourceAttachmentId": null,
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let sprite = &structured(&answer)["candidates"][0];
+    assert_eq!(sprite["motion"], json!("sprite"));
+    assert_eq!(sprite["frames"], json!(4));
+    // frameMs counts in 10 ms steps and rounds down: 125 → 120, so 4 steps play 480 ms.
+    assert_eq!(sprite["durationMs"], json!(480), "{sprite}");
+    let sprite_assembly =
+        Uuid::parse_str(structured(&answer)["assemblyId"].as_str().unwrap()).unwrap();
+    let pointer: Option<Uuid> =
+        sqlx::query_scalar("SELECT source_attachment_id FROM expression_assembly WHERE id=$1")
+            .bind(sprite_assembly)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(pointer, None, "null stays null: nothing is invented");
+
+    // ---- nothing the agent sent is anywhere but the assembly's own row -----------------------
+    let secrets = vec![
+        "PROMPT-SECRET-4820".to_string(),
+        attachment.to_string(),
+        "mine-4820-drive-id".to_string(),
+        b64[..120].to_string(),
+    ];
+    assert_eq!(leaked_4820(&w.su, ws, &secrets).await, Vec::<String>::new());
+    assert!(!answer.to_string().contains(&b64[..120]));
+    let audit: String = sqlx::query_scalar("SELECT detail::text FROM audit_log WHERE workspace_id=$1 AND action='expression.assembled' AND target_id=$2")
+        .bind(ws)
+        .bind(assembly_id)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert!(
+        audit.contains(&assembly_id.to_string()) && audit.contains("bounce"),
+        "{audit}"
+    );
+    // The call ledger saw the tool by name, on the run the handle names, and never an argument.
+    let recorded: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_run_event WHERE workspace_id=$1 AND kind='tool_call' AND tool='oort_expression_assemble'")
+        .bind(ws)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(recorded, 2);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_refuses_a_strangers_attachment_and_an_unknown_id_alike_and_writes_nothing() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    for id in ["theirs", "pending", "elsewhere", "gone"] {
+        w.drive
+            .files
+            .lock()
+            .unwrap()
+            .insert(id.into(), picture_4820(300, 200));
+    }
+    let message = |author: Uuid, channel: Uuid| {
+        let su = w.su.clone();
+        async move { seed_message_4385(&su, ws, channel, author, "사진").await }
+    };
+    // A file somebody ELSE put in this very conversation.
+    let theirs = {
+        let m = message(w.face, w.fixture.channel).await;
+        seed_attachment_4385(
+            &w.su,
+            ws,
+            w.fixture.channel,
+            w.face,
+            Some(m),
+            "theirs",
+            "image/png",
+            "complete",
+        )
+        .await
+    };
+    // The requester's own file, not complete yet.
+    let pending = {
+        let m = message(w.requester, w.fixture.channel).await;
+        seed_attachment_4385(
+            &w.su,
+            ws,
+            w.fixture.channel,
+            w.requester,
+            Some(m),
+            "pending",
+            "image/png",
+            "pending",
+        )
+        .await
+    };
+    // The requester's own complete file, in ANOTHER conversation.
+    let other_channel: Uuid = sqlx::query_scalar("SELECT id FROM channel WHERE workspace_id=$1 AND id<>$2 AND kind IN ('public','private') LIMIT 1")
+        .bind(ws)
+        .bind(w.fixture.channel)
+        .fetch_optional(&w.su)
+        .await
+        .unwrap()
+        .unwrap_or_else(Uuid::nil);
+    assert!(
+        !other_channel.is_nil(),
+        "the fixture has a second conversation to put a file in"
+    );
+    let elsewhere = {
+        let m = message(w.requester, other_channel).await;
+        seed_attachment_4385(
+            &w.su,
+            ws,
+            other_channel,
+            w.requester,
+            Some(m),
+            "elsewhere",
+            "image/png",
+            "complete",
+        )
+        .await
+    };
+    // The requester's own file on a message that was deleted.
+    let gone = {
+        let m = message(w.requester, w.fixture.channel).await;
+        let id = seed_attachment_4385(
+            &w.su,
+            ws,
+            w.fixture.channel,
+            w.requester,
+            Some(m),
+            "gone",
+            "image/png",
+            "complete",
+        )
+        .await;
+        sqlx::query("UPDATE message SET state='deleted', deleted_at=now() WHERE id=$1")
+            .bind(m)
+            .execute(&w.su)
+            .await
+            .unwrap();
+        id
+    };
+    let handle = claim_run_4820(&w).await;
+    let motion = json!({"kind": "preset", "presets": ["bounce"]});
+    let mut refusals = Vec::new();
+    let ids = vec![
+        ("a stranger's file", theirs),
+        ("not complete", pending),
+        ("unknown", Uuid::new_v4()),
+        ("deleted message", gone),
+        ("another conversation", elsewhere),
+    ];
+    for (what, id) in &ids {
+        // As the picture itself...
+        let (status, answer) = assemble_4820(
+            &w,
+            &handle,
+            json!({
+            "source": {"from": "attachment", "attachmentId": id}, "motion": motion,
+            "size": 240, "prompt": "p", "sourceAttachmentId": null}),
+        )
+        .await;
+        assert_eq!(status, 400, "{what}: {answer}");
+        refusals.push((what.to_string(), answer["error"].clone()));
+        // ...and as the claimed origin of a picture the agent drew itself.
+        let (status, answer) = assemble_4820(&w, &handle, json!({
+            "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&picture_4820(64, 64))},
+            "motion": motion, "size": 240, "prompt": "p", "sourceAttachmentId": id})).await;
+        assert_eq!(status, 400, "{what} as a pointer: {answer}");
+        refusals.push((format!("{what} (pointer)"), answer["error"].clone()));
+    }
+    // One answer for every refusal: nobody learns which of them exists.
+    let first = refusals[0].1.clone();
+    for (what, error) in &refusals {
+        assert_eq!(error, &first, "{what} reads differently from the others");
+    }
+    assert_eq!(error_code(&json!({"error": first})), -32602);
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        0,
+        "a refusal keeps nothing"
+    );
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='expression.assembled'",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(audited, 0);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_the_6_mib_budget_is_one_tools_and_a_declared_name_must_be_the_real_one() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let handle = claim_run_4820(&w).await;
+    let base = picture_4820(300, 200);
+    let bearer = w.fixture.hosted_bearer.clone();
+    let assemble = "oort_expression_assemble";
+    let args = |bytes: &[u8]| {
+        json!({
+            "handle": handle,
+            "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(bytes)},
+            "motion": {"kind": "preset", "presets": ["pulse"]},
+            "size": 240, "prompt": "p", "sourceAttachmentId": null
+        })
+    };
+
+    // ---- exactly 4 MiB decoded is 5,592,408 characters: carried and assembled -----------------
+    let four_mib = padded_png_4820(&base, 4 * 1024 * 1024);
+    let body = args(&four_mib);
+    assert_eq!(
+        body["source"]["dataBase64"].as_str().unwrap().len(),
+        5_592_408
+    );
+    let response = raw_call_4820(&w, &bearer, Some(assemble), assemble, body).await;
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "a 4 MiB picture rides the 6 MiB budget"
+    );
+    let answer: Value = response.json().await.unwrap();
+    assert_eq!(
+        structured(&answer)["candidates"].as_array().map(Vec::len),
+        Some(1),
+        "{answer}"
+    );
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 1);
+
+    // ---- 4 MiB + 1 byte is the SAME 5,592,408 characters (the bound is a group of three) -------
+    // but it is over the decoded limit: the assembler's own coded refusal, nothing kept.
+    let over = padded_png_4820(&base, 4 * 1024 * 1024 + 1);
+    let body = args(&over);
+    assert_eq!(
+        body["source"]["dataBase64"].as_str().unwrap().len(),
+        5_592_408
+    );
+    let response = raw_call_4820(&w, &bearer, Some(assemble), assemble, body).await;
+    assert_eq!(response.status().as_u16(), 200);
+    let answer: Value = response.json().await.unwrap();
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_source_too_large"}),
+        "{answer}"
+    );
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        1,
+        "a refusal keeps nothing"
+    );
+
+    // ---- one character past the base64 bound never reaches the tool ---------------------------
+    let mut body = args(&base);
+    body["source"]["dataBase64"] = json!("A".repeat(5_592_409));
+    let response = raw_call_4820(&w, &bearer, Some(assemble), assemble, body).await;
+    assert_eq!(
+        response.status().as_u16(),
+        400,
+        "the bulk bound is the picture's, to the character"
+    );
+
+    // ---- the whole request is at most 6 MiB ---------------------------------------------------
+    let mut body = args(&base);
+    body["pad"] = json!("y".repeat(6 * 1024 * 1024 + 10));
+    let response = raw_call_4820(&w, &bearer, Some(assemble), assemble, body).await;
+    assert_eq!(response.status().as_u16(), 413, "past 6 MiB is refused");
+
+    // ---- the header is a claim, the body is the fact ------------------------------------------
+    let medium = args(&padded_png_4820(&base, 100 * 1024)); // a body past 64 KiB
+    for (what, declared, body_tool, arguments) in [
+        ("not declared at all", None, assemble, medium.clone()),
+        (
+            "declared as the other large-budget tool",
+            Some("oort_action_propose"),
+            assemble,
+            medium.clone(),
+        ),
+        (
+            "declared as assemble, another tool inside",
+            Some(assemble),
+            "oort_message_post",
+            json!({"pad": "x".repeat(100 * 1024)}),
+        ),
+        (
+            "declared as ping",
+            Some("oort_ping"),
+            assemble,
+            medium.clone(),
+        ),
+    ] {
+        let response = raw_call_4820(&w, &bearer, declared, body_tool, arguments).await;
+        assert_eq!(
+            response.status().as_u16(),
+            413,
+            "{what} must not get the 6 MiB budget"
+        );
+    }
+    // The other large-budget body, declared as assemble, is refused too; declared as itself it is
+    // not refused for its size.
+    // (A handle that opens nothing: this proposal is judged for its SIZE only and must not park
+    // the run the control call below still needs.)
+    let create = json!({"handle": "not-a-handle", "actionId": "expression.create", "args": {"candidates": [{
+        "name": "aa", "displayName": "a", "tags": [], "subjectMemberId": null,
+        "image": {"source": "generated", "mime": "image/png",
+                  "dataBase64": b64_3787(&padded_png_4820(&base, 100 * 1024)), "prompt": "p"}}]}});
+    let response = raw_call_4820(
+        &w,
+        &bearer,
+        Some(assemble),
+        "oort_action_propose",
+        create.clone(),
+    )
+    .await;
+    assert_eq!(
+        response.status().as_u16(),
+        413,
+        "expression.create's body declared as assemble"
+    );
+    let response = raw_call_4820(
+        &w,
+        &bearer,
+        Some("oort_action_propose"),
+        "oort_action_propose",
+        create,
+    )
+    .await;
+    assert_ne!(
+        response.status().as_u16(),
+        413,
+        "declared as itself, its own budget holds"
+    );
+    // Control: the very body the checks above refused is served when it is what it says it is.
+    let response = raw_call_4820(&w, &bearer, Some(assemble), assemble, medium).await;
+    assert_eq!(response.status().as_u16(), 200);
+
+    // ---- who may read a large body: authenticated callers with the propose scope --------------
+    let response =
+        raw_call_4820(&w, "not-a-token", Some(assemble), assemble, args(&four_mib)).await;
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "authentication comes before the large body"
+    );
+    let response = raw_call_4820(
+        &w,
+        &w.fixture.connect_only_bearer,
+        Some(assemble),
+        assemble,
+        args(&four_mib),
+    )
+    .await;
+    assert_eq!(
+        response.status().as_u16(),
+        413,
+        "without the propose scope the budget stays 64 KiB"
+    );
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        2,
+        "only the two calls that were served"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_the_rate_limit_is_spent_once() {
+    // Two requests in the window: the claim and the assemble. A call that spent the budget twice
+    // (once before its body, once after) would be refused itself.
+    let w = world_4820(2, None).await;
+    let handle = claim_run_4820(&w).await;
+    let assemble = "oort_expression_assemble";
+    let response = raw_call_4820(
+        &w,
+        &w.fixture.hosted_bearer,
+        Some(assemble),
+        assemble,
+        json!({"handle": handle,
+               "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&picture_4820(300, 200))},
+               "motion": {"kind": "preset", "presets": ["pulse"]}, "size": 240, "prompt": "p",
+               "sourceAttachmentId": null}),
+    )
+    .await;
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "the call is charged exactly once"
+    );
+    // The budget really is spent: the very next call is the one that is refused.
+    let response = raw_call_4820(
+        &w,
+        &w.fixture.hosted_bearer,
+        Some("oort_ping"),
+        "oort_ping",
+        json!({}),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 429);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_failure_codes_are_results_parameters_are_call_errors_and_busy_is_the_shared_slots(
+) {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let handle = claim_run_4820(&w).await;
+    let picture = b64_3787(&picture_4820(300, 200));
+    let drawn = json!({"from": "base64", "mime": "image/png", "dataBase64": picture});
+    let one = |motion: Value, source: Value| {
+        let (w, handle) = (&w, handle.clone());
+        async move {
+            assemble_4820(
+                w,
+                &handle,
+                json!({"source": source, "motion": motion, "size": 240,
+                "prompt": "p", "sourceAttachmentId": null}),
+            )
+            .await
+        }
+    };
+    let bounce = json!({"kind": "preset", "presets": ["bounce"]});
+
+    // ---- parameters: a call error (-32602), nothing built, nothing kept ------------------------
+    // ADR-0218 G3.8: the answer names the wrong parameters (the closed list's names, in its
+    // order, never a value) in `error.data`, under the same fixed sentence as any malformed
+    // argument. Two layers find them and answer the same envelope: the published schema (a
+    // range, an enum, a count: it runs first) and the assembler's own check (what a schema
+    // cannot say).
+    let sprite = |frames: u64, sequence: Value, frame_ms: u64| json!({"kind": "sprite", "frames": frames, "sequence": sequence, "frameMs": frame_ms});
+    for (what, motion, size, names, values) in [
+        // The assembler's own check:
+        (
+            "a duplicate preset",
+            json!({"kind": "preset", "presets": ["bounce", "bounce"]}),
+            240,
+            vec!["presets"],
+            vec![],
+        ),
+        (
+            "a cell outside the grid",
+            sprite(2, json!([0, 2]), 100),
+            240,
+            vec!["sequence"],
+            vec![],
+        ),
+        (
+            "a play longer than 10 s",
+            sprite(2, json!(vec![0; 24]), 500),
+            240,
+            vec!["sequence", "frameMs"],
+            vec![],
+        ),
+        (
+            "a size inside the range that is not one of the three",
+            bounce.clone(),
+            301,
+            vec!["size"],
+            vec!["301"],
+        ),
+        // The published schema:
+        (
+            "a size outside the range",
+            bounce.clone(),
+            4711,
+            vec!["size"],
+            vec!["4711"],
+        ),
+        (
+            "five presets",
+            json!({"kind": "preset", "presets": ["bounce", "wobble", "pulse", "sparkle", "bounce"]}),
+            240,
+            vec!["presets"],
+            vec![],
+        ),
+        (
+            "an unknown preset",
+            json!({"kind": "preset", "presets": ["zzspin"]}),
+            240,
+            vec!["presets"],
+            vec!["zzspin"],
+        ),
+        (
+            "frames 5",
+            sprite(5, json!([0, 1]), 100),
+            240,
+            vec!["frames"],
+            vec![],
+        ),
+        (
+            "a sequence of 25",
+            sprite(2, json!(vec![0; 25]), 100),
+            240,
+            vec!["sequence"],
+            vec![],
+        ),
+        (
+            "a frame time far outside the range",
+            sprite(2, json!([0, 1]), 98765),
+            240,
+            vec!["frameMs"],
+            vec!["98765"],
+        ),
+        // The schema runs first: a call both layers would refuse is named by the schema alone
+        // (`sequence` is the assembler's, and comes the next time).
+        (
+            "both layers at fault",
+            sprite(2, json!([0, 2]), 98765),
+            240,
+            vec!["frameMs"],
+            vec!["98765"],
+        ),
+    ] {
+        let (status, answer) = assemble_4820(
+            &w,
+            &handle,
+            json!({"source": drawn, "motion": motion, "size": size,
+            "prompt": "p", "sourceAttachmentId": null}),
+        )
+        .await;
+        assert_eq!(
+            (status, error_code(&answer)),
+            (400, -32602),
+            "{what}: {answer}"
+        );
+        assert!(answer["result"].is_null(), "{what} is not a result");
+        assert_eq!(
+            answer["error"]["message"],
+            json!("invalid tool arguments"),
+            "{what}: the sentence is the fixed one"
+        );
+        assert_eq!(
+            answer["error"]["data"],
+            json!({"code": "assembly_params_invalid", "params": names}),
+            "{what}: the names, and nothing else"
+        );
+        // The error object, not the envelope: the JSON-RPC id of this call is a random uuid.
+        for value in values {
+            assert!(
+                !answer["error"].to_string().contains(value),
+                "{what}: the value {value} is never on the wire: {answer}"
+            );
+        }
+    }
+    // A fault that is none of the five names nothing: the same answer as any malformed argument.
+    for (what, prompt) in [
+        ("an empty prompt", String::new()),
+        ("a control character", "a\u{7}b".into()),
+        ("over 2,000 characters", "가".repeat(2001)),
+    ] {
+        let (status, answer) = assemble_4820(
+            &w,
+            &handle,
+            json!({"source": drawn, "motion": bounce,
+            "size": 240, "prompt": prompt, "sourceAttachmentId": null}),
+        )
+        .await;
+        assert_eq!(
+            (status, error_code(&answer)),
+            (400, -32602),
+            "{what}: {answer}"
+        );
+        assert!(
+            answer["error"].get("data").is_none(),
+            "{what} names no parameter: {answer}"
+        );
+    }
+    let (status, answer) = assemble_4820(
+        &w,
+        &handle,
+        json!({"source": drawn, "motion": bounce, "size": 240,
+        "prompt": "p", "sourceAttachmentId": null, "extra": 1}),
+    )
+    .await;
+    assert_eq!((status, error_code(&answer)), (400, -32602), "{answer}");
+    assert!(
+        answer["error"].get("data").is_none(),
+        "an unknown key names no parameter: {answer}"
+    );
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        0,
+        "a refused call keeps nothing"
+    );
+    // A prompt of 2,000 characters is the limit and is fine, in bytes up to 6,000.
+    let (status, answer) = assemble_4820(
+        &w,
+        &handle,
+        json!({"source": drawn, "motion": bounce,
+        "size": 240, "prompt": "가".repeat(2000), "sourceAttachmentId": null}),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let kept = assembly_rows_4820(&w.su, ws).await;
+    assert_eq!(kept, 1, "only the call that was fine kept anything");
+
+    // ---- a picture that cannot be animated: a coded RESULT, not a protocol error --------------
+    for (what, source) in [
+        (
+            "bytes that are no picture",
+            json!({"from": "base64", "mime": "image/png", "dataBase64": b64_3787(b"not a picture at all")}),
+        ),
+        (
+            "an animated GIF",
+            json!({"from": "base64", "mime": "image/gif", "dataBase64": b64_3787(&gif_4829())}),
+        ),
+    ] {
+        let (status, answer) = one(bounce.clone(), source).await;
+        assert_eq!(status, 200, "{what}: {answer}");
+        assert_eq!(
+            answer["result"]["isError"],
+            json!(false),
+            "{what}: a refusal the card can show is a result"
+        );
+        assert_eq!(
+            structured(&answer),
+            &json!({"code": "assembly_source_invalid"}),
+            "{what}"
+        );
+    }
+
+    // ---- built too large: every candidate → one code with the measured size; some → holes ----
+    let noise =
+        json!({"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&noise_4820())});
+    let (status, answer) = one(
+        json!({"kind": "preset", "presets": ["sparkle"]}),
+        noise.clone(),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let refusal = structured(&answer);
+    assert_eq!(refusal["code"], json!("assembly_output_too_large"));
+    let measured = refusal["bytes"].as_u64().expect("the measured size");
+    assert!(
+        measured > 256 * 1024,
+        "the size that was measured is the animation's own: {measured}"
+    );
+    assert_eq!(refusal.as_object().unwrap().len(), 2);
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        kept,
+        "all too large keeps nothing"
+    );
+    // Partial: pulse and bounce fit, sparkle does not. The hole keeps its index.
+    let (status, answer) = one(
+        json!({"kind": "preset", "presets": ["pulse", "sparkle", "bounce"]}),
+        noise,
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let candidates = structured(&answer)["candidates"].as_array().unwrap();
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|c| (c["index"].as_u64().unwrap(), c["motion"].as_str().unwrap()))
+            .collect::<Vec<_>>(),
+        [(0, "pulse"), (2, "bounce")],
+        "{answer}"
+    );
+    let assembly = Uuid::parse_str(structured(&answer)["assemblyId"].as_str().unwrap()).unwrap();
+    let failed: Value = sqlx::query_scalar("SELECT failed FROM expression_assembly WHERE id=$1")
+        .bind(assembly)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(failed[0]["index"], json!(1));
+    assert_eq!(failed[0]["motion"], json!("sparkle"));
+    assert_eq!(failed[0]["code"], json!("assembly_output_too_large"));
+    assert!(failed[0]["bytes"].as_u64().unwrap() > 256 * 1024);
+    let slots: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression_assembly_image WHERE assembly_id=$1")
+            .bind(assembly)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(
+        slots, 6,
+        "two candidates, three renditions each; the hole holds no bytes"
+    );
+
+    // ---- busy: the decoder's two slots are ONE semaphore for every source ---------------------
+    let slots = momo_expressions::media::decoder_slots();
+    let held = (
+        slots.clone().acquire_owned().await.unwrap(),
+        slots.clone().acquire_owned().await.unwrap(),
+    );
+    let started = std::time::Instant::now();
+    let (status, answer) = one(bounce.clone(), drawn.clone()).await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_busy"}),
+        "busy is not a timeout"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(4),
+        "busy answers at once, it does not queue"
+    );
+    // The same two slots serve a link/upload decode: with them taken, so is that one.
+    assert_eq!(
+        momo_expressions::media::process(picture_4820(8, 8))
+            .await
+            .err(),
+        Some(momo_expressions::media::Rejected::Busy),
+        "the decoder and the assembler are one pool"
+    );
+    drop(held);
+    let (status, answer) = one(bounce, drawn).await;
+    assert_eq!(status, 200, "{answer}");
+    assert!(structured(&answer)["assemblyId"].is_string(), "{answer}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_an_assembler_that_cannot_run_is_a_5xx_and_never_a_card_code() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("assembler-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = |name: &str, body: &str| {
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    };
+    let arguments = |handle: &str| {
+        json!({"handle": handle,
+               "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&picture_4820(64, 64))},
+               "motion": {"kind": "preset", "presets": ["bounce"]}, "size": 240, "prompt": "p",
+               "sourceAttachmentId": null})
+    };
+    for (what, program) in [
+        ("no such binary", dir.join("does-not-exist")),
+        (
+            "a child that exits with an error",
+            script("exits", "exit 3"),
+        ),
+        ("a child that says nothing", script("silent", "exit 0")),
+        (
+            "a child that answers in prose",
+            script("prose", "echo 'sorry, no'"),
+        ),
+    ] {
+        let w = world_4820(0, Some(program)).await;
+        let handle = claim_run_4820(&w).await;
+        let (status, answer) = call(
+            &w.client,
+            &w.base,
+            &w.fixture.hosted_bearer,
+            "oort_expression_assemble",
+            arguments(&handle),
+        )
+        .await;
+        assert_eq!(
+            (status, error_code(&answer)),
+            (500, -32603),
+            "{what}: {answer}"
+        );
+        assert!(
+            answer["result"].is_null(),
+            "{what}: an operator fault is never a result the card could show"
+        );
+        assert!(
+            !answer.to_string().contains("assembly_"),
+            "{what}: {answer}"
+        );
+        assert_eq!(
+            assembly_rows_4820(&w.su, w.fixture.workspace).await,
+            0,
+            "{what}"
+        );
+    }
+    // A child that a limit killed (a signal) is the request's own doing: a time-out, as a result.
+    let w = world_4820(0, Some(script("signalled", "kill -9 $$"))).await;
+    let handle = claim_run_4820(&w).await;
+    let (status, answer) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_expression_assemble",
+        arguments(&handle),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(structured(&answer), &json!({"code": "assembly_timeout"}));
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_one_ten_second_clock_covers_the_fetch_and_the_child_is_killed_and_the_slot_returns(
+) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("assembler-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let pid_file = dir.join("pid");
+    let path = dir.join("never-answers");
+    // Writes its own pid, then becomes `sleep`: the same process, so the pid stays its own.
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\necho $$ > '{}'\nexec sleep 60\n",
+            pid_file.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // The picture takes 4 s to come from Drive: the child is left what is left of ONE 10 s.
+    let w = build_world_4820(0, Some(path), Some(std::time::Duration::from_secs(4))).await;
+    let ws = w.fixture.workspace;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("slow".into(), picture_4820(300, 200));
+    let message = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    let attachment = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(message),
+        "slow",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let handle = claim_run_4820(&w).await;
+    let started = std::time::Instant::now();
+    let (status, answer) = assemble_4820(
+        &w,
+        &handle,
+        json!({
+        "source": {"from": "attachment", "attachmentId": attachment},
+        "motion": {"kind": "preset", "presets": ["bounce"]}, "size": 240, "prompt": "p",
+        "sourceAttachmentId": null}),
+    )
+    .await;
+    let took = started.elapsed();
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_timeout"}),
+        "a result, and not a busy"
+    );
+    assert!(
+        (std::time::Duration::from_secs(9)..std::time::Duration::from_millis(11_500))
+            .contains(&took),
+        "the 4 s fetch and the child share one 10 s, got {took:?}"
+    );
+    // The child is gone (reaped), the pool is whole again, nothing was kept.
+    let pid = std::fs::read_to_string(&pid_file)
+        .expect("the child ran")
+        .trim()
+        .to_string();
+    let alive = std::process::Command::new("kill")
+        .args(["-0", &pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap()
+        .success();
+    assert!(!alive, "the assembler child {pid} outlived its call");
+    assert_eq!(
+        momo_expressions::media::decoder_slots().available_permits(),
+        2,
+        "the slot came back"
+    );
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 0);
+}
+
+/// `jpeg` with an EXIF APP1 segment saying `orientation`, right after SOI.
+fn exif_jpeg_4820(jpeg: &[u8], orientation: u16, little_endian: bool) -> Vec<u8> {
+    let mut tiff = Vec::new();
+    let put16 = |tiff: &mut Vec<u8>, value: u16| {
+        tiff.extend_from_slice(&if little_endian {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        })
+    };
+    let put32 = |tiff: &mut Vec<u8>, value: u32| {
+        tiff.extend_from_slice(&if little_endian {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        })
+    };
+    tiff.extend_from_slice(if little_endian { b"II*\0" } else { b"MM\0*" });
+    put32(&mut tiff, 8); // IFD0 follows the 8-byte header
+    put16(&mut tiff, 1); // one entry
+    put16(&mut tiff, 0x0112); // Orientation
+    put16(&mut tiff, 3); // SHORT
+    put32(&mut tiff, 1); // one value
+    put16(&mut tiff, orientation);
+    tiff.extend_from_slice(&[0, 0]); // the value field is 4 bytes wide
+    put32(&mut tiff, 0); // no next IFD
+    let mut app1 = b"Exif\0\0".to_vec();
+    app1.extend_from_slice(&tiff);
+    let mut out = vec![0xFF, 0xD8, 0xFF, 0xE1];
+    out.extend_from_slice(&((app1.len() + 2) as u16).to_be_bytes());
+    out.extend_from_slice(&app1);
+    out.extend_from_slice(&jpeg[2..]);
+    out
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_applies_the_exif_orientation_of_a_phone_photo() {
+    use image::AnimationDecoder as _;
+    let w = world_4820(0, None).await;
+    let handle = claim_run_4820(&w).await;
+    // 240 x 120: red on the left, blue on the right. A phone stores it lying and says how to turn it.
+    let wide = image::RgbaImage::from_fn(240, 120, |x, _| {
+        if x < 120 {
+            image::Rgba([220, 30, 30, 255])
+        } else {
+            image::Rgba([30, 30, 220, 255])
+        }
+    });
+    let mut jpeg = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(wide).to_rgb8())
+        .write_to(&mut jpeg, image::ImageFormat::Jpeg)
+        .unwrap();
+    let jpeg = jpeg.into_inner();
+    let colour = |p: &image::Rgba<u8>| {
+        if p[0] > 170 && p[2] < 100 {
+            "red"
+        } else if p[2] > 170 && p[0] < 100 {
+            "blue"
+        } else {
+            "margin"
+        }
+    };
+    for (orientation, little_endian, upper, lower) in
+        [(6u16, false, "red", "blue"), (8, true, "blue", "red")]
+    {
+        let (status, answer) = assemble_4820(&w, &handle, json!({
+            "source": {"from": "base64", "mime": "image/jpeg", "dataBase64": b64_3787(&exif_jpeg_4820(&jpeg, orientation, little_endian))},
+            "motion": {"kind": "preset", "presets": ["sparkle"]}, "size": 240, "prompt": "p",
+            "sourceAttachmentId": null})).await;
+        assert_eq!(status, 200, "orientation {orientation}: {answer}");
+        let assembly =
+            Uuid::parse_str(structured(&answer)["assemblyId"].as_str().unwrap()).unwrap();
+        let gif: Vec<u8> = sqlx::query_scalar(
+            "SELECT bytes FROM expression_assembly_image WHERE assembly_id=$1 AND variant='large'",
+        )
+        .bind(assembly)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+        let frame = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(gif))
+            .unwrap()
+            .into_frames()
+            .next()
+            .unwrap()
+            .unwrap()
+            .into_buffer();
+        assert_eq!(
+            colour(frame.get_pixel(120, 60)),
+            upper,
+            "orientation {orientation}: top"
+        );
+        assert_eq!(
+            colour(frame.get_pixel(120, 180)),
+            lower,
+            "orientation {orientation}: bottom"
+        );
+        // The picture stands (192 tall, 96 wide) instead of lying (96 tall, 192 wide).
+        let height = (0..240)
+            .filter(|y| colour(frame.get_pixel(120, *y)) != "margin")
+            .count();
+        let width = (0..240)
+            .filter(|x| colour(frame.get_pixel(*x, 120)) != "margin")
+            .count();
+        assert!(
+            height > width,
+            "orientation {orientation}: {width}x{height}"
+        );
+    }
+}
+
+/// Header and renditions of one held assembly of `candidates` ready candidates, written the way
+/// `keep_in_tx` writes them but without building anything (the arithmetic is the domain suite's;
+/// here it is what the DOOR says about a full agent).
+async fn hold_4820(su: &PgPool, ws: Uuid, agent: Uuid, requester: Uuid, candidates: i32) -> Uuid {
+    let id: Uuid = sqlx::query_scalar("INSERT INTO expression_assembly(workspace_id,agent_member_id,requester_member_id,prompt) VALUES($1,$2,$3,'held') RETURNING id")
+        .bind(ws)
+        .bind(agent)
+        .bind(requester)
+        .fetch_one(su)
+        .await
+        .unwrap();
+    for index in 0..candidates {
+        for (variant, mime, frames, duration) in [
+            ("small", "image/gif", 2, 100),
+            ("large", "image/gif", 2, 100),
+            ("thumb", "image/png", 1, 0),
+        ] {
+            sqlx::query("INSERT INTO expression_assembly_image(workspace_id,assembly_id,candidate_index,motion,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT $1,$2,$3,'bounce',$4,$5,b,encode(sha256(b),'hex'),8,8,$6,$7 FROM (SELECT '\x474946'::bytea AS b) held")
+                .bind(ws)
+                .bind(id)
+                .bind(index)
+                .bind(variant)
+                .bind(mime)
+                .bind(frames)
+                .bind(duration)
+                .execute(su)
+                .await
+                .unwrap();
+        }
+    }
+    id
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_an_agent_holds_twelve_candidates_and_the_hour_gives_the_room_back() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let (agent, requester) = (w.fixture.hosted_agent, w.requester);
+    let handle = claim_run_4820(&w).await;
+    let drawn = json!({"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&picture_4820(300, 200))});
+    let ask = |presets: Value| {
+        let (w, handle, drawn) = (&w, handle.clone(), drawn.clone());
+        async move {
+            assemble_4820(
+                w,
+                &handle,
+                json!({"source": drawn, "size": 240, "prompt": "p",
+                "motion": {"kind": "preset", "presets": presets}, "sourceAttachmentId": null}),
+            )
+            .await
+        }
+    };
+    hold_4820(&w.su, ws, agent, requester, 4).await;
+    hold_4820(&w.su, ws, agent, requester, 4).await;
+    let aging = hold_4820(&w.su, ws, agent, requester, 3).await; // eleven
+                                                                 // 11 held: one more fits; two more would be 13: refused at once, writing nothing.
+    let rows = assembly_rows_4820(&w.su, ws).await;
+    let (status, answer) = ask(json!(["bounce", "pulse"])).await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_busy"}),
+        "the twelve are a G3.8 `busy`"
+    );
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        rows,
+        "a refusal keeps nothing"
+    );
+    let (status, answer) = ask(json!(["bounce"])).await;
+    assert_eq!(status, 200, "{answer}");
+    assert!(structured(&answer)["assemblyId"].is_string(), "{answer}");
+    // 12 held: nothing fits any more.
+    let (_, answer) = ask(json!(["pulse"])).await;
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_busy"}),
+        "{answer}"
+    );
+    // The hour is up for the three-candidate assembly: its room is back, swept or not.
+    let mut tx = w.su.begin().await.unwrap();
+    sqlx::query("ALTER TABLE expression_assembly DISABLE TRIGGER expression_assembly_identity")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE expression_assembly SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1").bind(aging).execute(&mut *tx).await.unwrap();
+    sqlx::query("ALTER TABLE expression_assembly ENABLE TRIGGER expression_assembly_identity")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let (status, answer) = ask(json!(["pulse", "wobble"])).await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        structured(&answer)["candidates"].as_array().map(Vec::len),
+        Some(2),
+        "{answer}"
+    );
+    // Another agent's twelve are its own: nothing here limited it. (Checked through the
+    // domain suite; the door only ever speaks for the credential it authenticated.)
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_needs_the_propose_scope_and_a_handle_that_is_this_agents() {
+    let w = world_4820(0, None).await;
+    let arguments = |handle: &str| {
+        json!({"handle": handle,
+               "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&picture_4820(64, 64))},
+               "motion": {"kind": "preset", "presets": ["bounce"]}, "size": 240, "prompt": "p",
+               "sourceAttachmentId": null})
+    };
+    // A credential without the scope cannot even see the tool: the answer is the unknown tool's.
+    let handle = claim_run_4820(&w).await;
+    let (status, refused) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.connect_only_bearer,
+        "oort_expression_assemble",
+        arguments(&handle),
+    )
+    .await;
+    let (unknown_status, unknown) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.connect_only_bearer,
+        "oort_no_such_tool",
+        arguments(&handle),
+    )
+    .await;
+    assert_eq!(
+        (status, &refused["error"]["message"]),
+        (unknown_status, &unknown["error"]["message"]),
+        "{refused} / {unknown}"
+    );
+    assert!(
+        !list_tools(&w.client, &w.base, &w.fixture.connect_only_bearer)
+            .await
+            .contains(&"oort_expression_assemble".to_string())
+    );
+    // A handle that does not open is the agent's own stale flow, refused as one.
+    for garbage in ["not-a-handle", &"x".repeat(512)] {
+        let (status, answer) = call(
+            &w.client,
+            &w.base,
+            &w.fixture.hosted_bearer,
+            "oort_expression_assemble",
+            arguments(garbage),
+        )
+        .await;
+        assert_eq!((status, error_code(&answer)), (403, -32003), "{answer}");
+    }
+    // A lease that was given back is stale: the run is not this agent's to speak for any more,
+    // however well the handle still opens. (`card_suggest` and `action_propose` answer the same.)
+    let handle = claim_run_4820(&w).await;
+    let (status, released) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_job_release",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "{released}");
+    let (status, answer) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_expression_assemble",
+        arguments(&handle),
+    )
+    .await;
+    assert_eq!(
+        (status, error_code(&answer)),
+        (409, -32005),
+        "a released lease: {answer}"
+    );
+    assert_eq!(assembly_rows_4820(&w.su, w.fixture.workspace).await, 0);
+}
+
+// ---------------------------------------------------------------------------
+// #4820 C1b-fix — what the independent security review (r1) found this suite could not see.
+//
+//   * `assemble_a_busy_decoder_is_refused_before_the_attachment_is_fetched_…`: Medium-1. A busy
+//     decoder is `assembly_busy` BEFORE the picture is read from Drive (the cheap refusal must not
+//     come after the expensive work), and no slot is held while the picture is on its way.
+//   * `assemble_a_parked_or_settled_run_…` and `assemble_the_scope_is_proved_again_…`: Low-2. Two
+//     guards that could be deleted with every other test green.
+//   * the two raw-TCP tests: the order the transport authenticates in. A declared large body is
+//     read only after the caller is known and holds the propose scope, measured with a body that
+//     never finishes (a client library cannot send one).
+//
+// Sabotage map:
+//   * the `decoder_slots().available_permits() == 0` look in `expression_assemble` removed
+//                                                  → `…busy_decoder_is_refused_before…` (Drive read)
+//   * that look taking the permit (`try_acquire_owned`) and keeping it through the fetch
+//                                                  → `…busy_decoder_is_refused_before…` (slot held)
+//   * `run.status.is_approval_held() || run.status.is_terminal()` removed from the lookup
+//                                                  → `…parked_or_settled_run…`
+//   * `authorize_in_tx` removed from the keep transaction
+//                                                  → `…scope_is_proved_again…`
+//   * `routes/agent_port.rs`: the large body read before the credential is proved, or the large
+//     budget given to every admitted principal     → the two raw-TCP tests
+// ---------------------------------------------------------------------------
+
+/// The requester's own picture, in the conversation and in the test Drive under `drive_id`: the
+/// id an `attachment` source names.
+async fn attach_picture_4820(w: &World4829, drive_id: &str) -> Uuid {
+    let ws = w.fixture.workspace;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert(drive_id.into(), picture_4820(300, 200));
+    let message = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(message),
+        drive_id,
+        "image/png",
+        "complete",
+    )
+    .await
+}
+
+/// One `bounce` of the attachment: the smallest call whose source the server has to fetch.
+fn from_attachment_4820(attachment: Uuid) -> Value {
+    json!({
+        "source": {"from": "attachment", "attachmentId": attachment},
+        "motion": {"kind": "preset", "presets": ["bounce"]}, "size": 240, "prompt": "p",
+        "sourceAttachmentId": null})
+}
+
+/// [`assemble_4820`] on its own task, so the test can act while the call is in flight.
+fn spawn_assemble_4820(
+    w: &World4829,
+    handle: &str,
+    args: Value,
+) -> tokio::task::JoinHandle<(u16, Value)> {
+    let (client, base, bearer) = (
+        w.client.clone(),
+        w.base.clone(),
+        w.fixture.hosted_bearer.clone(),
+    );
+    let mut args = args;
+    args["handle"] = json!(handle);
+    tokio::spawn(
+        async move { call(&client, &base, &bearer, "oort_expression_assemble", args).await },
+    )
+}
+
+/// The run the claim holds (the world raises exactly one).
+async fn run_of_4820(su: &PgPool, ws: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        "SELECT id FROM agent_run WHERE workspace_id=$1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(ws)
+    .fetch_one(su)
+    .await
+    .expect("the run the claim holds")
+}
+
+/// Raw TCP: the head of a `tools/call` declared as `declared` (the mirrored transport headers a
+/// modern client sends) with `content_length`, then `body_bytes` bytes of body, then silence with
+/// the connection left open. Returns the first line of the answer and how long it took, or `None`
+/// when nothing came back within `wait`.
+///
+/// The answer is read on its own task while the body is still being written: a server that
+/// answers and closes with request bytes unread resets the connection, and a reader that only
+/// starts after the last write could lose the answer it is there to measure.
+async fn raw_tcp_4820(
+    w: &World4829,
+    bearer: &str,
+    declared: &str,
+    content_length: usize,
+    body_bytes: usize,
+    wait: std::time::Duration,
+) -> Option<(String, std::time::Duration)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let addr = w
+        .base
+        .strip_prefix("http://")
+        .expect("http base")
+        .to_string();
+    let stream = tokio::net::TcpStream::connect(&addr)
+        .await
+        .expect("connect");
+    let (mut read, mut write) = stream.into_split();
+    let started = std::time::Instant::now();
+    let reader = tokio::spawn(async move {
+        let mut buffer = vec![0u8; 512];
+        match read.read(&mut buffer).await {
+            Ok(n) if n > 0 => Some((
+                String::from_utf8_lossy(&buffer[..n])
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
+                started.elapsed(),
+            )),
+            _ => None,
+        }
+    });
+    let head = format!(
+        "POST {PATH} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\n\
+         Accept: application/json, text/event-stream\r\nMCP-Protocol-Version: {MODERN_VERSION}\r\n\
+         Mcp-Method: tools/call\r\nMcp-Name: {declared}\r\nAuthorization: Bearer {bearer}\r\n\
+         Content-Length: {content_length}\r\n\r\n"
+    );
+    write.write_all(head.as_bytes()).await.expect("head");
+    let chunk = vec![b'a'; 16 * 1024];
+    let mut sent = 0usize;
+    while sent < body_bytes {
+        let n = chunk.len().min(body_bytes - sent);
+        if write.write_all(&chunk[..n]).await.is_err() {
+            break;
+        }
+        sent += n;
+    }
+    // `write` stays open until the wait is over: closing it would hand the server the end of an
+    // unfinished body, which is not the stall this measures.
+    let answer = tokio::time::timeout(wait, reader).await;
+    drop(write);
+    match answer {
+        Ok(Ok(answer)) => answer,
+        _ => None,
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_a_busy_decoder_is_refused_before_the_attachment_is_fetched_and_no_slot_is_held_while_it_is(
+) {
+    // The Drive takes 2 s per read, so "refused before the fetch" is a count of zero AND two
+    // seconds the caller does not wait.
+    let w = build_world_4820(0, None, Some(std::time::Duration::from_secs(2))).await;
+    let ws = w.fixture.workspace;
+    let attachment = attach_picture_4820(&w, "busy-first").await;
+    let handle = claim_run_4820(&w).await;
+    let reads = || {
+        w.drive
+            .content_reads
+            .load(std::sync::atomic::Ordering::SeqCst)
+    };
+    let slots = momo_expressions::media::decoder_slots();
+
+    // Both decoder slots are taken by two other pictures. `assembly_busy` is the cheap answer, so
+    // it is given before the expensive work: the picture is not read from Drive for it.
+    let held = (
+        slots.clone().acquire_owned().await.unwrap(),
+        slots.clone().acquire_owned().await.unwrap(),
+    );
+    let (before, started) = (reads(), std::time::Instant::now());
+    let (status, answer) = assemble_4820(&w, &handle, from_attachment_4820(attachment)).await;
+    let took = started.elapsed();
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_busy"}),
+        "{answer}"
+    );
+    assert_eq!(
+        reads(),
+        before,
+        "a busy decoder was refused only after the picture had been read from Drive"
+    );
+    assert!(
+        took < std::time::Duration::from_secs(1),
+        "a busy refusal waited for a 2 s Drive read: {took:?}"
+    );
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 0);
+    drop(held);
+
+    // With the slots free the same call goes through. The slot is NOT held while the picture is on
+    // its way (network time is not decoder time, #4676): the pool is whole during the fetch and
+    // the work takes its slot only afterwards.
+    let entered = SLOW_DRIVE_ENTERED_4820.load(std::sync::atomic::Ordering::SeqCst);
+    let call = spawn_assemble_4820(&w, &handle, from_attachment_4820(attachment));
+    wait_for_fetch_4820(entered).await;
+    assert_eq!(
+        slots.available_permits(),
+        2,
+        "a decoder slot was held across the Drive fetch"
+    );
+    let (status, answer) = call.await.unwrap();
+    assert_eq!(status, 200, "{answer}");
+    assert!(structured(&answer)["assemblyId"].is_string(), "{answer}");
+    assert_eq!(
+        reads(),
+        before + 1,
+        "the control call read the picture once, so the counter is live"
+    );
+    assert_eq!(slots.available_permits(), 2, "the slot came back");
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_a_parked_or_settled_run_is_refused_before_anything_is_fetched_or_kept() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let attachment = attach_picture_4820(&w, "parked-run").await;
+    let handle = claim_run_4820(&w).await;
+    let run = run_of_4820(&w.su, ws).await;
+    let reads = || {
+        w.drive
+            .content_reads
+            .load(std::sync::atomic::Ordering::SeqCst)
+    };
+    // The lease stays live and ours throughout; only the run's own state moves. (A lease failure
+    // answers the same 409, which is why each refusal is also shown to leave the picture unread.)
+    let (original, deadline): (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, deadline_at::text FROM agent_run WHERE id=$1")
+            .bind(run)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    for settled in ["awaiting_approval", "cancelled"] {
+        sqlx::query(&format!(
+            "UPDATE agent_run SET status='{settled}', deadline_at=now() + interval '1 hour' \
+              WHERE id=$1"
+        ))
+        .bind(run)
+        .execute(&w.su)
+        .await
+        .unwrap();
+        let before = reads();
+        let (status, refused) = assemble_4820(&w, &handle, from_attachment_4820(attachment)).await;
+        assert_eq!(
+            status, 409,
+            "{settled}: the call was not refused, the run state is not a guard any more: {refused}"
+        );
+        assert_eq!(error_code(&refused), -32005, "{settled}: {refused}");
+        assert_eq!(reads(), before, "{settled}: the picture was read anyway");
+        assert_eq!(assembly_rows_4820(&w.su, ws).await, 0, "{settled}");
+    }
+    // Control: the run as it was, the same call. It is the state that was refused, not the call.
+    sqlx::query(
+        "UPDATE agent_run SET status=$2::run_status, deadline_at=$3::timestamptz WHERE id=$1",
+    )
+    .bind(run)
+    .bind(&original)
+    .bind(&deadline)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let before = reads();
+    let (status, answer) = assemble_4820(&w, &handle, from_attachment_4820(attachment)).await;
+    assert_eq!(status, 200, "{original}: {answer}");
+    assert!(structured(&answer)["assemblyId"].is_string(), "{answer}");
+    assert_eq!(reads(), before + 1);
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_the_scope_is_proved_again_when_the_result_is_kept() {
+    // The picture takes 3 s to come from Drive: the window between the lookup transaction (which
+    // proved the scope) and the keep transaction (which must prove it again).
+    let w = build_world_4820(0, None, Some(std::time::Duration::from_secs(3))).await;
+    let ws = w.fixture.workspace;
+    let attachment = attach_picture_4820(&w, "scope-moves").await;
+    let handle = claim_run_4820(&w).await;
+    let approved: Vec<String> = sqlx::query_scalar(
+        "SELECT approved_scopes FROM hosted_agent_connection WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(w.fixture.hosted_connection)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert!(
+        approved
+            .iter()
+            .any(|s| s == momo_auth::SCOPE_WORKSPACE_PROPOSE),
+        "the fixture connection holds the propose scope: {approved:?}"
+    );
+    let audited = |su: PgPool| async move {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='expression.assembled'",
+        )
+        .bind(ws)
+        .fetch_one(&su)
+        .await
+        .unwrap()
+    };
+
+    // The scope is withdrawn once the call is inside its Drive fetch: after the lookup, before the
+    // keep. The token and the connection stay valid, so only the scope check can say no.
+    let entered = SLOW_DRIVE_ENTERED_4820.load(std::sync::atomic::Ordering::SeqCst);
+    let call = spawn_assemble_4820(&w, &handle, from_attachment_4820(attachment));
+    wait_for_fetch_4820(entered).await;
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_scopes = array_remove(approved_scopes, $3) \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(w.fixture.hosted_connection)
+    .bind(momo_auth::SCOPE_WORKSPACE_PROPOSE)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let (status, refused) = call.await.unwrap();
+    assert_eq!(
+        status, 403,
+        "a call whose scope was withdrawn while it worked kept its result: {refused}"
+    );
+    assert_eq!(error_code(&refused), -32003, "{refused}");
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 0, "nothing is kept");
+    assert_eq!(audited(w.su.clone()).await, 0, "and nothing is audited");
+
+    // Control: the scope back, the same call keeps its result. It is the scope that was refused.
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_scopes = $3 WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(w.fixture.hosted_connection)
+    .bind(&approved)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let (status, answer) = assemble_4820(&w, &handle, from_attachment_4820(attachment)).await;
+    assert_eq!(status, 200, "{answer}");
+    assert!(structured(&answer)["assemblyId"].is_string(), "{answer}");
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 1);
+    assert_eq!(audited(w.su.clone()).await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_a_fake_token_is_answered_401_before_the_declared_large_body_is_read() {
+    let w = world_4820(0, None).await;
+    // A declared assemble call that promises 6 MiB, sends 1 KiB of it and then says nothing: the
+    // credential is proved before the body is read, so the answer does not wait for the rest.
+    let got = raw_tcp_4820(
+        &w,
+        "not-a-token",
+        "oort_expression_assemble",
+        6 * 1024 * 1024,
+        1024,
+        std::time::Duration::from_secs(3),
+    )
+    .await;
+    let (line, took) = got.expect(
+        "no answer without the rest of the body: the 6 MiB was read before the caller was known",
+    );
+    assert!(line.contains(" 401 "), "{line}");
+    assert!(took < std::time::Duration::from_secs(2), "{took:?}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_a_connect_only_token_is_cut_at_64_kib_and_never_gets_the_large_budget() {
+    let w = world_4820(0, None).await;
+    // A credential that is real but has no propose scope declares the same 6 MiB and sends 70 KiB:
+    // it keeps the 64 KiB ceiling every other request has, so it is told 413 the moment that is
+    // passed, without waiting for the rest.
+    let got = raw_tcp_4820(
+        &w,
+        &w.fixture.connect_only_bearer,
+        "oort_expression_assemble",
+        6 * 1024 * 1024,
+        70 * 1024,
+        std::time::Duration::from_secs(3),
+    )
+    .await;
+    let (line, took) = got.expect("no answer without the rest of the body: the 6 MiB budget was handed to a caller without the scope");
+    assert!(line.contains(" 413 "), "{line}");
+    assert!(took < std::time::Duration::from_secs(2), "{took:?}");
+}
+
+// ---------------------------------------------------------------------------
+// #4829 security review round 1 (planner decisions 10-31).
+//
+//   * the cheap refusals come BEFORE the fetch and the decode: a stale lease, a parked run and a
+//     full agent fetch nothing (`prepare_expression`'s read transaction);
+//   * one preparation per agent at a time;
+//   * the 6 MiB door's guarantees are measured **on the wire**, with raw TCP: it authenticates
+//     before it reads, it opens the budget only to an agent that holds the propose scope, it
+//     spends one rate-limit unit per call, and it reads under a deadline;
+//   * a GIF and a video are sources of an attachment (`find_requester_attachment_for_in_tx`).
+//
+// Sabotage targets (the fix handoff has the RED → GREEN table):
+//   * `prepare_expression`: the cheap gate after the fetch / its lease arm / its run-state arm /
+//     its ceiling arm / the `Preparing` guard      → `..._refuses_the_cheap_things_...`,
+//                                                    `..._prepares_one_proposal_per_agent_...`;
+//   * `media::process_waiting`: the line cap / the wait cap                   → unit tests there;
+//   * `agent_port::post`: the big body read before authentication / the scope check dropped /
+//     authentication asked twice / no deadline     → `the_big_body_...` (below, and
+//                                                    `agent_port_transport.rs`);
+//   * `choose_in_tx`: `changed()` ahead of the proofs → `..._only_the_face_...`;
+//   * the expression use of the attachment judgement → `..._gif_and_a_video_attachment_...`.
+// ---------------------------------------------------------------------------
+
+async fn mention_4829(w: &World4829) {
+    let handle_name = hosted_handle(&w.su, w.fixture.hosted_agent).await;
+    let trigger: Value = w
+        .client
+        .post(format!(
+            "{}/v1/workspaces/{}/channels/{}/messages",
+            w.base, w.fixture.workspace, w.fixture.channel
+        ))
+        .bearer_auth(&w.requester_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 내 사진을 이걸로 바꿔 줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+}
+
+/// Claim every job that can be claimed; the lease handles.
+async fn claim_handles_4829(w: &World4829) -> Vec<String> {
+    let (status, claimed) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    structured(&claimed)["jobs"]
+        .as_array()
+        .expect("jobs")
+        .iter()
+        .map(|job| {
+            job["leaseHandle"]
+                .as_str()
+                .expect("a lease handle")
+                .to_string()
+        })
+        .collect()
+}
+
+/// `expression.create` with an existing lease handle (the proposal helpers above mention,
+/// claim and propose in one go; these tests need to propose again with the same handle).
+async fn propose_with_4829(w: &World4829, handle: &str, candidates: Value) -> (u16, Value) {
+    let (status, answer) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "expression.create", "args": {"candidates": candidates}}),
+    )
+    .await;
+    remember_handle_3789(&answer, handle);
+    (status, answer)
+}
+
+/// How many requests the server has made to an outside address so far.
+fn fetches_4829(w: &World4829) -> usize {
+    w.mock.calls.lock().unwrap().len()
+}
+
+/// A count of this world's own workspace (`$1` in `sql`): the database is shared by every test.
+async fn count_4829(w: &World4829, sql: &'static str) -> i64 {
+    sqlx::query_scalar::<_, i64>(sql)
+        .bind(w.fixture.workspace)
+        .fetch_one(&w.su)
+        .await
+        .unwrap()
+}
+
+/// A picture that is tiny on the wire and slow to decode: 3000 x 3000 grey pixels of one
+/// value. It is inside every limit of the decoder (a side <= 4096, <= 16 MP) and inside the
+/// 1 MiB an agent may send, so only the order of the refusals keeps it from costing anything.
+fn heavy_png_4829() -> Vec<u8> {
+    use image::ImageEncoder;
+    let pixels = vec![127u8; 3000 * 3000];
+    let mut out = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut out)
+        .write_image(&pixels, 3000, 3000, image::ExtendedColorType::L8)
+        .unwrap();
+    out
+}
+
+/// A person's own direct upload (`POST …/expressions/uploads`): the metadata part, then the file.
+async fn upload_4829(w: &World4829, jwt: &str, name: &str, file: &[u8]) -> u16 {
+    let boundary = "oort-4829-upload";
+    let metadata =
+        json!({"name": name, "displayName": name, "tags": [], "subjectMemberId": null}).to_string();
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n").as_bytes(),
+    );
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"image.png\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes(),
+    );
+    body.extend_from_slice(file);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    w.client
+        .post(format!(
+            "{}/v1/workspaces/{}/expressions/uploads",
+            w.base, w.fixture.workspace
+        ))
+        .bearer_auth(jwt)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .expect("upload responds")
+        .status()
+        .as_u16()
+}
+
+/// **The cheap refusals come before the fetch and the decode.** The pending ceiling of three is
+/// the only flood defence this door has; it defends only if what costs something happens after
+/// it. Every refusal below is the answer the proposal's own transaction gives (the same
+/// function), and every one is measured as a number: how many outside requests the server made.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_refuses_the_cheap_things_before_it_fetches_or_decodes() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    let link = |name: &str| {
+        candidate_4829(
+            name,
+            Value::Null,
+            json!({"source": "url", "url": "https://cdn.example.test/ok.gif"}),
+        )
+    };
+    let heavy = heavy_png_4829();
+
+    // (1) A lease that is no longer ours: the job was taken over by a newer claim. The stale
+    // handle still decodes and still binds, and it is refused before a single request goes out.
+    mention_4829(&w).await;
+    let claimed = claim_handles_4829(&w).await;
+    assert_eq!(claimed.len(), 1);
+    let stale = claimed[0].clone();
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '10 minutes', \
+                lease_expires_at = now() - interval '1 minute' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(ws)
+    .bind(w.fixture.hosted_agent)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let reclaimed = claim_handles_4829(&w).await;
+    assert_eq!(reclaimed.len(), 1);
+    let fresh = reclaimed[0].clone();
+    assert_ne!(
+        fresh, stale,
+        "a takeover must mint a new lease, or this proves nothing"
+    );
+    let (status, refused) = propose_with_4829(&w, &stale, json!([link("stale")])).await;
+    assert_eq!((status, error_code(&refused)), (409, -32005), "{refused}");
+    assert_eq!(fetches_4829(&w), 0, "a stale lease fetches nothing");
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        0
+    );
+
+    // (2) The live lease proposes: one fetch, and the run is parked. A parked run refuses
+    // every further proposal on its handle, and it does so before any outside request or
+    // decode: five repeats at once, each carrying a link and a heavy picture, fetch nothing
+    // and leave a person's own upload (sent meanwhile) unhindered.
+    let (status, proposed) = propose_with_4829(&w, &fresh, json!([link("first")])).await;
+    assert_eq!(status, 200, "{proposed}");
+    assert_eq!(fetches_4829(&w), 1);
+    let approvals = count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await;
+    let drafts = count_4829(
+        &w,
+        "SELECT count(*) FROM expression_draft WHERE workspace_id=$1",
+    )
+    .await;
+    let burst = (0..5).map(|n| {
+        propose_with_4829(
+            &w,
+            &fresh,
+            json!([
+                link(&format!("again_{n}")),
+                candidate_4829(
+                    &format!("heavy_{n}"),
+                    Value::Null,
+                    generated_4829(&heavy, "p")
+                )
+            ]),
+        )
+    });
+    let (answers, upload) = tokio::join!(futures::future::join_all(burst), async {
+        // Let the burst get going first: this is the person who arrives in the middle of it.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        upload_4829(&w, &w.requester_jwt, "my_own", &tiny_png_3787()).await
+    });
+    assert_eq!(
+        upload, 201,
+        "a person's own upload is not told 'busy' by an agent's refused repeats"
+    );
+    for (n, (status, answer)) in answers.iter().enumerate() {
+        assert_eq!(
+            (*status, error_code(answer)),
+            (409, -32005),
+            "repeat {n} of a parked run: {answer}"
+        );
+    }
+    assert_eq!(
+        fetches_4829(&w),
+        1,
+        "five refused repeats of a parked run made no outside request"
+    );
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        approvals
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        drafts + 1,
+        "only the person's own upload added a draft"
+    );
+
+    // (3) Three cards waiting is the most an agent may have: the fourth is refused before it
+    // fetches anything.
+    for name in ["second", "third"] {
+        let (status, proposed) = propose_4829(
+            &w,
+            json!([candidate_4829(
+                name,
+                Value::Null,
+                generated_4829(&tiny_png_3787(), "p")
+            )]),
+        )
+        .await;
+        assert_eq!(status, 200, "{proposed}");
+    }
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM approval WHERE workspace_id=$1 AND status::text='pending' AND action_type='workspace_action'"
+        )
+        .await,
+        3
+    );
+    let before = fetches_4829(&w);
+    let (status, refused) = propose_4829(&w, json!([link("fourth")])).await;
+    assert_eq!((status, error_code(&refused)), (409, -32005), "{refused}");
+    assert_eq!(fetches_4829(&w), before, "a full agent fetches nothing");
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        approvals + 2,
+        "the refused fourth wrote no approval"
+    );
+}
+
+/// **One preparation per agent at a time.** Two runs of one agent propose at once with a slow
+/// link: one is prepared, the other is told to come back (409 / -32004) without a request of its
+/// own; when the first is done the agent prepares again at once.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_prepares_one_proposal_per_agent_at_a_time() {
+    let w = world_4829().await;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    w.mock
+        .delay_ms
+        .store(700, std::sync::atomic::Ordering::Relaxed);
+    mention_4829(&w).await;
+    mention_4829(&w).await;
+    let handles = claim_handles_4829(&w).await;
+    assert_eq!(handles.len(), 2, "two mentions, two jobs");
+    let link = |name: &str| {
+        candidate_4829(
+            name,
+            Value::Null,
+            json!({"source": "url", "url": "https://cdn.example.test/ok.gif"}),
+        )
+    };
+    let (a, b) = tokio::join!(
+        propose_with_4829(&w, &handles[0], json!([link("slow_one")])),
+        propose_with_4829(&w, &handles[1], json!([link("slow_two")])),
+    );
+    let code = |answer: &Value| answer["error"]["code"].as_i64().unwrap_or(0);
+    let mut answers = vec![(a.0, code(&a.1)), (b.0, code(&b.1))];
+    answers.sort();
+    assert_eq!(
+        answers,
+        vec![(200, 0), (409, -32004)],
+        "one proposal is prepared, the other is told to come back: {a:?} {b:?}"
+    );
+    assert_eq!(
+        fetches_4829(&w),
+        1,
+        "the one that was told to come back made no outside request"
+    );
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        1
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        1
+    );
+
+    // The place went back with the first preparation: the same agent prepares again at once.
+    w.mock
+        .delay_ms
+        .store(0, std::sync::atomic::Ordering::Relaxed);
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "slow_three",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "the place is given back: {proposed}");
+}
+
+/// One raw HTTP/1.1 POST to the Agent Port: the request head (which declares `content_length`),
+/// then `sent` bytes of the body, then silence. The first line of the answer, if one comes within
+/// `patience`. Raw TCP on purpose: a client library would not stop in the middle of a body.
+async fn raw_post_4829(
+    base: &str,
+    bearer: Option<&str>,
+    declare_propose: bool,
+    content_length: usize,
+    sent: &[u8],
+    patience: std::time::Duration,
+) -> Option<String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let address = base.trim_start_matches("http://");
+    let mut stream = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("connect to the wire server");
+    let mut head = format!(
+        "POST {PATH} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\n\
+         Accept: application/json, text/event-stream\r\nMCP-Protocol-Version: {MODERN_VERSION}\r\n"
+    );
+    if declare_propose {
+        head += "Mcp-Method: tools/call\r\nMcp-Name: oort_action_propose\r\n";
+    }
+    if let Some(bearer) = bearer {
+        head += &format!("Authorization: Bearer {bearer}\r\n");
+    }
+    head += &format!("Content-Length: {content_length}\r\nConnection: close\r\n\r\n");
+    let mut wire = head.into_bytes();
+    wire.extend_from_slice(sent);
+    // The server may answer (and close) before it has read all of this: that is the point.
+    let _ = stream.write_all(&wire).await;
+    let mut answer = vec![0u8; 512];
+    match tokio::time::timeout(patience, stream.read(&mut answer)).await {
+        Ok(Ok(read)) if read > 0 => Some(
+            String::from_utf8_lossy(&answer[..read])
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+/// A server with its own Agent Port limits and body deadline, for the tests that measure the wire.
+async fn start_wire_server_4829(
+    pool: PgPool,
+    per_token_limit: u32,
+    large_body_deadline: std::time::Duration,
+) -> String {
+    let state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_large_body_deadline(large_body_deadline)
+    .with_agent_port(AgentPortConfig {
+        external_origin: None,
+        window_seconds: 60,
+        per_token_limit,
+        per_agent_limit: 0,
+        per_ip_limit: 0,
+        hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
+        subscription_agents_enabled: true,
+        claude_subscription_agents_enabled: true,
+        oauth: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind wire server");
+    let address: SocketAddr = listener.local_addr().expect("wire server address");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            build_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    format!("http://{address}")
+}
+
+const SIX_MIB_4829: usize = 6 * 1024 * 1024;
+
+/// **The 6 MiB door authenticates before it reads, and only an agent that holds the propose scope
+/// is read that far.** A declared `oort_action_propose` whose credential is missing or wrong is
+/// answered `401` from the head alone (the body is never read: 1 KiB of 6 MiB is all that
+/// was sent, and nothing more will come); a live credential **without** the propose scope keeps
+/// the 64 KiB ceiling and is refused `413` at once; the propose-scoped agent is read from (it is
+/// still waiting for the rest of its body).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_big_body_door_reads_only_after_it_knows_who_asks_and_only_for_the_propose_scope() {
+    let w = world_4829().await;
+    let patience = std::time::Duration::from_secs(3);
+    let kib = vec![b'x'; 1024];
+    // (G1) refused from the head alone: no credential, a malformed one, a well-formed unknown one.
+    let unknown = raw_credential(w.fixture.workspace);
+    for (label, bearer) in [
+        ("no credential", None),
+        ("a malformed credential", Some("not-a-token")),
+        ("an unknown agent credential", Some(unknown.as_str())),
+    ] {
+        let answer = raw_post_4829(&w.base, bearer, true, SIX_MIB_4829, &kib, patience).await;
+        assert!(
+            answer.as_deref().is_some_and(|line| line.contains(" 401")),
+            "{label}: the body is not read before the credential is judged: {answer:?}"
+        );
+    }
+    // (G2) a live credential without the propose scope: the budget stays 64 KiB. Two bytes past
+    // it are enough to be refused, without waiting for the other 6 MiB.
+    let past_ceiling = vec![b'x'; momo_mcp::MAX_BODY_BYTES + 2];
+    let answer = raw_post_4829(
+        &w.base,
+        Some(&w.fixture.connect_only_bearer),
+        true,
+        SIX_MIB_4829,
+        &past_ceiling,
+        patience,
+    )
+    .await;
+    assert!(
+        answer.as_deref().is_some_and(|line| line.contains(" 413")),
+        "a credential without the propose scope is held to 64 KiB: {answer:?}"
+    );
+    // …and the propose-scoped agent is read from: the same bytes get no answer, because the
+    // server is waiting for the rest of a body it is allowed to read.
+    let answer = raw_post_4829(
+        &w.base,
+        Some(&w.fixture.hosted_bearer),
+        true,
+        SIX_MIB_4829,
+        &past_ceiling,
+        std::time::Duration::from_millis(1200),
+    )
+    .await;
+    assert_eq!(
+        answer, None,
+        "the propose scope opens the 6 MiB budget, so the server is still reading"
+    );
+    // The same agent's request that does NOT declare itself `oort_action_propose` gets no
+    // budget at all: past 64 KiB it is refused at once, whatever its credential can do.
+    let answer = raw_post_4829(
+        &w.base,
+        Some(&w.fixture.hosted_bearer),
+        false,
+        SIX_MIB_4829,
+        &past_ceiling,
+        patience,
+    )
+    .await;
+    assert!(
+        answer.as_deref().is_some_and(|line| line.contains(" 413")),
+        "an undeclared body keeps the 64 KiB ceiling: {answer:?}"
+    );
+}
+
+/// **One call spends one rate-limit unit.** The credential is asked once, before the big body is
+/// read, and that answer is the one the request carries on: with 4 units a window, the first
+/// four declared proposals are answered and the fifth is `429`. (Asked twice, the second call
+/// would already be refused.) This is the only test that runs with the limit on.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_big_body_door_spends_one_rate_limit_unit_per_call() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let base =
+        start_wire_server_4829(momo_app_pool().await, 4, std::time::Duration::from_secs(15)).await;
+    let client = reqwest::Client::new();
+    let mut statuses = Vec::new();
+    for _ in 0..5 {
+        let (status, _) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_action_propose",
+            json!({"handle": "not-a-lease", "actionId": "expression.create",
+                   "args": {"candidates": []}}),
+        )
+        .await;
+        statuses.push(status);
+    }
+    assert!(
+        statuses[..4].iter().all(|status| *status != 429),
+        "the first four calls fit the limit: {statuses:?}"
+    );
+    assert_eq!(
+        statuses[4], 429,
+        "the fifth is over it, and it is the fifth: {statuses:?}"
+    );
+    // The credential was used four times, not eight: one `used` audit row per call.
+    let used: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action=$2 AND via_token_id=$3",
+    )
+    .bind(fixture.workspace)
+    .bind(momo_auth::AUDIT_ACTION_USED)
+    .bind(fixture.hosted_token)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(used, 4, "one authentication per call");
+}
+
+/// **The 6 MiB body has a deadline.** An authenticated, propose-scoped agent that starts the big
+/// body and then goes quiet is answered `408` when the deadline passes (here 700 ms; 15 s in the
+/// server) instead of holding its connection and the part it sent as long as it likes.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_big_body_has_a_deadline() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_wire_server_4829(
+        momo_app_pool().await,
+        0,
+        std::time::Duration::from_millis(700),
+    )
+    .await;
+    let started = std::time::Instant::now();
+    let answer = raw_post_4829(
+        &base,
+        Some(&fixture.hosted_bearer),
+        true,
+        SIX_MIB_4829,
+        &vec![b'x'; 1024],
+        std::time::Duration::from_secs(5),
+    )
+    .await;
+    let took = started.elapsed();
+    assert!(
+        answer.as_deref().is_some_and(|line| line.contains(" 408")),
+        "a body that stops coming is answered 408: {answer:?}"
+    );
+    assert!(
+        took >= std::time::Duration::from_millis(600) && took < std::time::Duration::from_secs(4),
+        "…when the deadline passes, not before and not much later: {took:?}"
+    );
+}
+
+fn animated_gif_4829(frames: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new_with_speed(&mut bytes, 30);
+        encoder
+            .set_repeat(image::codecs::gif::Repeat::Infinite)
+            .unwrap();
+        for n in 0..frames {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(
+                        8,
+                        8,
+                        image::Rgba([((n * 7) % 200) as u8, 200, 50, 255]),
+                    ),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(80, 1),
+                ))
+                .unwrap();
+        }
+    }
+    bytes
+}
+
+fn mp4_4829() -> Vec<u8> {
+    let mut bytes = vec![0, 0, 0, 0x18];
+    bytes.extend_from_slice(b"ftypisom\0\0\x02\0isomiso2mp41");
+    bytes.extend_from_slice(&[0; 64]);
+    bytes
+}
+
+fn webm_4829() -> Vec<u8> {
+    let mut bytes = vec![0x1a, 0x45, 0xdf, 0xa3, 0x9f];
+    bytes.extend_from_slice(&[0; 64]);
+    bytes
+}
+
+/// **A GIF and a video are sources of an attachment** (ADR-0186 X8-1/X8-2): the media types the
+/// expression use of the attachment judgement accepts. A GIF goes through the decoder's
+/// full-frame check (ADR-0218 D3: 100 frames pass, 101 do not), a video becomes the
+/// `video_processing_unavailable` card (D4 is on hold), and the avatar use of the same judgement
+/// is exactly what it was: neither is a source of a person's avatar.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_takes_a_gif_and_a_video_attachment_as_sources() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    let message =
+        seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "움직이는 그림").await;
+    let attach = |drive_id: &'static str, mime: &'static str, bytes: Vec<u8>| {
+        let w = &w;
+        async move {
+            w.drive.files.lock().unwrap().insert(drive_id.into(), bytes);
+            seed_attachment_4385(
+                &w.su,
+                ws,
+                w.fixture.channel,
+                w.requester,
+                Some(message),
+                drive_id,
+                mime,
+                "complete",
+            )
+            .await
+        }
+    };
+    let source = |id: Uuid| json!({"source": "attachment", "attachmentId": id.to_string()});
+    let reads = || {
+        w.drive
+            .content_reads
+            .load(std::sync::atomic::Ordering::Relaxed)
+    };
+
+    // A GIF within the limits: accepted, and stored as a GIF with its frames.
+    let gif = attach("gif100", "image/gif", animated_gif_4829(100)).await;
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829("moving", Value::Null, source(gif))]),
+    )
+    .await;
+    assert_eq!(status, 200, "a GIF attachment is a source: {proposed}");
+    let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
+    let draft = &card["action"]["expression"]["candidates"][0];
+    assert_eq!(draft["state"], "ready", "{draft}");
+    assert_eq!(draft["media"]["large"]["mime"], "image/gif", "{draft}");
+    assert_eq!(draft["media"]["large"]["frameCount"], 100, "{draft}");
+    assert_eq!(draft["origin"]["kind"], "attachment", "{draft}");
+
+    // One frame over the limit: found, fetched, and refused by the frame check — not by the
+    // lookup. (The read counter is what tells the two apart.)
+    let too_long = attach("gif101", "image/gif", animated_gif_4829(101)).await;
+    let (approvals, drafts) = (
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1",
+        )
+        .await,
+    );
+    let before = reads();
+    let (status, refused) = propose_4829(
+        &w,
+        json!([candidate_4829("too_long", Value::Null, source(too_long))]),
+    )
+    .await;
+    assert_eq!(status, 400, "an animation over the limit: {refused}");
+    assert_eq!(
+        reads(),
+        before + 1,
+        "the file was found and fetched; the frame check refused it"
+    );
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        approvals
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        drafts,
+        "a refused animation leaves no draft"
+    );
+
+    // A video: the manual card, with the source kept as an attachment.
+    for (drive_id, mime, bytes) in [
+        ("video_mp4", "video/mp4", mp4_4829()),
+        ("video_webm", "video/webm", webm_4829()),
+    ] {
+        let video = attach(drive_id, mime, bytes).await;
+        let (status, proposed) = propose_4829(
+            &w,
+            json!([candidate_4829(
+                &format!("clip_{}", &drive_id[6..]),
+                Value::Null,
+                source(video)
+            )]),
+        )
+        .await;
+        assert_eq!(
+            status, 200,
+            "{mime}: a video is a card, not an error: {proposed}"
+        );
+        let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
+        let draft = &card["action"]["expression"]["candidates"][0];
+        assert_eq!(draft["state"], "manual_upload_required", "{mime}: {draft}");
+        assert_eq!(
+            draft["code"], "video_processing_unavailable",
+            "{mime}: {draft}"
+        );
+        assert_eq!(draft["origin"]["kind"], "attachment", "{mime}: {draft}");
+        assert!(draft["media"].is_null(), "{mime}: no picture was made");
+    }
+
+    // The avatar use is exactly what it was: a GIF is not a source of a person's avatar, and the
+    // refusal comes from the lookup (nothing was fetched).
+    let before = reads();
+    let (status, refused) = propose_member_avatar_4385(
+        &w.client,
+        &w.base,
+        &w.su,
+        &w.fixture,
+        &w.requester_jwt,
+        json!({"attachmentId": gif.to_string()}),
+    )
+    .await;
+    assert_eq!(status, 400, "an avatar is never an animation: {refused}");
+    assert_eq!(
+        reads(),
+        before,
+        "the avatar lookup did not even fetch the GIF"
+    );
+}
+
+/// **A link's fetch slot goes back as soon as the bytes are here**, before the wait for a decoder
+/// slot. The eight fetch slots are process-wide and a person's `/import` needs one; holding one
+/// through somebody else's decoding queue would let a slow picture starve them. The picture
+/// here is tiny on the wire and slow to decode, and the slot count is read while it decodes.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_gives_the_fetch_slot_back_before_it_waits_for_the_decoder() {
+    let w = world_4829().await;
+    w.mock.replies.lock().unwrap().insert(
+        "https://cdn.example.test/heavy.png".into(),
+        Ok(heavy_png_4829()),
+    );
+    let slots = momo_expressions::intake::import_slots();
+    assert_eq!(
+        slots.available_permits(),
+        momo_expressions::intake::IMPORTS_IN_FLIGHT,
+        "no fetch is in flight when the test starts"
+    );
+    let ((status, proposed), (during_fetch_done, took_after_fetch)) = tokio::join!(
+        propose_4829(
+            &w,
+            json!([candidate_4829(
+                "heavy_link",
+                Value::Null,
+                json!({"source": "url", "url": "https://cdn.example.test/heavy.png"})
+            )])
+        ),
+        async {
+            // The fetch is made at once (the mock answers at once); what follows is the decode.
+            while fetches_4829(&w) == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            let fetched_at = std::time::Instant::now();
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            (slots.available_permits(), fetched_at.elapsed())
+        }
+    );
+    assert_eq!(status, 200, "{proposed}");
+    let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
+    assert_eq!(
+        card["action"]["expression"]["candidates"][0]["state"], "ready",
+        "the picture was really decoded: {card}"
+    );
+    assert!(
+        took_after_fetch >= std::time::Duration::from_millis(250),
+        "{took_after_fetch:?}"
+    );
+    assert_eq!(
+        during_fetch_done,
+        momo_expressions::intake::IMPORTS_IN_FLIGHT,
+        "250 ms after the fetch, while the picture is still being decoded, the fetch slot is back"
+    );
+}
+
+// ===========================================================================
+// #4820 C2b — `expression.create` takes `{source:"assembled", assemblyId, index}`
+// (ADR-0218 G3.6, G1). Real PG18 (the NOBYPASSRLS `momo_app` role), real HTTP, the real child.
+// Build the child first: `cargo build -p momo-expressions --bins`; run `--test-threads=1`.
+//
+// Sabotage map (each line → the test that goes red when it is broken):
+//   * `held.requester != requester` in `prepare_expression`  → `…refusals_are_one_answer…` (person)
+//   * the agent predicate of `assembly::get_in_tx` / its RLS   → `…refusals_are_one_answer…` (agent, tenant)
+//   * `expires_at > clock_timestamp()` in `get_in_tx`          → `…refusals_are_one_answer…` (expired)
+//   * the cheap refusals before the read transaction           → `…refusals_are_one_answer…` (shape)
+//   * `reclaim_in_tx` after `insert_candidates_in_tx`          → `…become_the_card_as_kept…` (taken once)
+//   * `origin_json` (the pointer key of a generated origin)    → `…become_the_card_as_kept…`, `…hole…`
+// ===========================================================================
+
+/// Assemble `presets` of `picture` for the claimed run, 240 px; the assembly id and the result.
+async fn keep_4820c(
+    w: &World4829,
+    handle: &str,
+    presets: Value,
+    picture: &[u8],
+    pointer: Option<Uuid>,
+    prompt: &str,
+) -> (Uuid, Value) {
+    let (status, answer) = assemble_4820(
+        w,
+        handle,
+        json!({
+            "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(picture)},
+            "motion": {"kind": "preset", "presets": presets},
+            "size": 240,
+            "prompt": prompt,
+            "sourceAttachmentId": pointer,
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["result"]["isError"], json!(false), "{answer}");
+    let result = structured(&answer).clone();
+    let id = Uuid::parse_str(result["assemblyId"].as_str().expect("assemblyId")).unwrap();
+    (id, result)
+}
+
+fn assembled_4820c(name: &str, assembly: Uuid, index: u8) -> Value {
+    candidate_4829(
+        name,
+        Value::Null,
+        json!({"source": "assembled", "assemblyId": assembly, "index": index}),
+    )
+}
+
+/// `(candidate_index, state, code, origin kind, origin prompt, origin pointer)` of one draft.
+type DraftRow4820c = (i32, String, Option<String>, String, String, Option<Uuid>);
+
+fn tag_4820c() -> String {
+    Uuid::new_v4().simple().to_string()[..8].to_string()
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assembled_candidates_become_the_card_as_kept_and_the_pointer_follows_to_the_expression() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("c2b-source-drive-id".into(), picture_4820(300, 200));
+    let msg = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    let attachment = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(msg),
+        "c2b-source-drive-id",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let handle = claim_run_4820(&w).await;
+    let (assembly, kept) = keep_4820c(
+        &w,
+        &handle,
+        json!(["bounce", "pulse"]),
+        &picture_4820(300, 200),
+        Some(attachment),
+        "PROMPT-C2B 빨강 파랑 초록 그림",
+    )
+    .await;
+    let kept_sha: Vec<String> = kept["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["sha256"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(kept_sha.len(), 2, "{kept}");
+    let tag = tag_4820c();
+
+    let (status, answer) = propose_with_4829(
+        &w,
+        &handle,
+        json!([
+            assembled_4820c(&format!("c2b_a_{tag}"), assembly, 0),
+            assembled_4820c(&format!("c2b_b_{tag}"), assembly, 1)
+        ]),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["result"]["isError"], json!(false), "{answer}");
+    let approval = Uuid::parse_str(
+        structured(&answer)["approvalId"]
+            .as_str()
+            .expect("approvalId"),
+    )
+    .unwrap();
+
+    // The drafts: two ready generated candidates, the prompt and the verified pointer the
+    // assembly kept — not anything the proposal said (it named only an id and an index).
+    let drafts: Vec<DraftRow4820c> = sqlx::query_as(
+        "SELECT candidate_index, state, code, origin->>'kind', origin->>'prompt', origin_source_attachment_id \
+           FROM expression_draft WHERE approval_id=$1 ORDER BY candidate_index",
+    )
+    .bind(approval)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(drafts.len(), 2);
+    for (position, draft) in drafts.iter().enumerate() {
+        assert_eq!(
+            (
+                draft.0,
+                draft.1.as_str(),
+                draft.2.as_deref(),
+                draft.3.as_str()
+            ),
+            (position as i32, "ready", None, "generated")
+        );
+        assert!(draft.4.contains("PROMPT-C2B"), "{}", draft.4);
+        assert_eq!(draft.5, Some(attachment), "the pointer is the assembly's");
+    }
+    // The card shows the bytes the assembler built, verbatim (G3.6, X8-2).
+    let stored: Vec<String> = sqlx::query_scalar(
+        "SELECT i.sha256 FROM expression_draft_image i JOIN expression_draft d \
+           ON d.workspace_id=i.workspace_id AND d.id=i.draft_id \
+          WHERE d.approval_id=$1 AND i.variant='large' ORDER BY d.candidate_index",
+    )
+    .bind(approval)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(stored, kept_sha);
+    // The kept copy was taken by this proposal: bytes reclaimed, the row stays as a record.
+    let (state, held_images): (String, i64) = sqlx::query_as(
+        "SELECT a.state, (SELECT count(*) FROM expression_assembly_image i WHERE i.assembly_id=a.id) \
+           FROM expression_assembly a WHERE a.id=$1",
+    )
+    .bind(assembly)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!((state.as_str(), held_images), ("expired", 0));
+    // The card's `Draft` carries the pointer under the contract's key, a uuid string.
+    let card = card_4829(&w, approval).await;
+    let origin = &card["action"]["expression"]["candidates"][0]["origin"];
+    assert_eq!(origin["kind"], json!("generated"), "{origin}");
+    assert_eq!(
+        origin["sourceAttachmentId"],
+        json!(attachment.to_string()),
+        "{origin}"
+    );
+    assert!(origin["prompt"].as_str().unwrap().contains("PROMPT-C2B"));
+
+    // A second proposal on the same assembly — from another run of the same agent — is refused:
+    // it was taken. (Same answer as an unknown id; see the refusals test.)
+    mention_4829(&w).await;
+    let second = claim_handles_4829(&w).await;
+    let (status, answer) = propose_with_4829(
+        &w,
+        &second[0],
+        json!([assembled_4820c(&format!("c2b_c_{tag}"), assembly, 0)]),
+    )
+    .await;
+    assert_eq!((status, error_code(&answer)), (400, -32602), "{answer}");
+
+    // Approve candidate 1: the registered expression records what it was made from.
+    let (status, decided) = decide_4829(
+        &w,
+        &w.requester_jwt,
+        approval,
+        true,
+        Some(choice_4829(&card, 1)),
+    )
+    .await;
+    assert_eq!(status, 200, "{decided}");
+    let (pointer, kind): (Option<Uuid>, String) = sqlx::query_as(
+        "SELECT origin_source_attachment_id, origin->>'kind' FROM expression WHERE approval_id=$1",
+    )
+    .bind(approval)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!((pointer, kind.as_str()), (Some(attachment), "generated"));
+    let list: Value = w
+        .client
+        .get(format!("{}/v1/workspaces/{ws}/expressions", w.base))
+        .bearer_auth(&w.requester_jwt)
+        .send()
+        .await
+        .expect("list responds")
+        .json()
+        .await
+        .expect("list body");
+    assert_eq!(
+        list["items"][0]["origin"]["sourceAttachmentId"],
+        json!(attachment.to_string()),
+        "{list}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assembled_refusals_are_one_answer_and_write_nothing() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let agent = w.fixture.hosted_agent;
+    let handle = claim_run_4820(&w).await;
+    let (kept, _) = keep_4820c(
+        &w,
+        &handle,
+        json!(["bounce"]),
+        &picture_4820(64, 64),
+        None,
+        "refusals",
+    )
+    .await;
+    let tag = tag_4820c();
+    let one = |assembly: Uuid, index: u8| {
+        json!([assembled_4820c(&format!("c2b_r_{tag}"), assembly, index)])
+    };
+
+    // The reference answer: an id nobody ever kept.
+    let (status, reference) = propose_with_4829(&w, &handle, one(Uuid::new_v4(), 0)).await;
+    assert_eq!(
+        (status, error_code(&reference)),
+        (400, -32602),
+        "{reference}"
+    );
+
+    // Expired: the hour is up (its row is still there, `ready`, the clock says no).
+    let (expired, _) = keep_4820c(
+        &w,
+        &handle,
+        json!(["pulse"]),
+        &picture_4820(64, 64),
+        None,
+        "expired",
+    )
+    .await;
+    // The header is immutable to everyone but the `ready → expired` move; the superuser of this
+    // test switches the trigger off for one transaction to age the row, like C1b's TTL test.
+    {
+        let mut tx = w.su.begin().await.unwrap();
+        sqlx::query("ALTER TABLE expression_assembly DISABLE TRIGGER expression_assembly_identity")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE expression_assembly SET expires_at = clock_timestamp() - interval '1 second' WHERE id=$1")
+            .bind(expired)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("ALTER TABLE expression_assembly ENABLE TRIGGER expression_assembly_identity")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    }
+    // Another agent's, another person's, another workspace's.
+    let strangers_agent = hold_4820(&w.su, ws, w.fixture.managed_agent, w.requester, 1).await;
+    let strangers_person = hold_4820(&w.su, ws, agent, w.face, 1).await;
+    let other = seed(&w.su).await;
+    let other_tenant = hold_4820(&w.su, other.workspace, other.hosted_agent, other.human, 1).await;
+
+    let mut refused: Vec<(&str, (u16, Value))> = Vec::new();
+    for (why, assembly, index) in [
+        ("expired", expired, 0u8),
+        ("another agent's", strangers_agent, 0),
+        ("another person's", strangers_person, 0),
+        ("another workspace's", other_tenant, 0),
+        ("an index the assembly has no slot for", kept, 1),
+        ("the last index it could never have", kept, 3),
+    ] {
+        refused.push((
+            why,
+            propose_with_4829(&w, &handle, one(assembly, index)).await,
+        ));
+    }
+    // Shape: two assemblies in one proposal, and one candidate named twice.
+    refused.push((
+        "two assemblies",
+        propose_with_4829(
+            &w,
+            &handle,
+            json!([
+                assembled_4820c(&format!("c2b_s_{tag}"), kept, 0),
+                assembled_4820c(&format!("c2b_t_{tag}"), strangers_person, 0)
+            ]),
+        )
+        .await,
+    ));
+    refused.push((
+        "one candidate twice",
+        propose_with_4829(
+            &w,
+            &handle,
+            json!([
+                assembled_4820c(&format!("c2b_u_{tag}"), kept, 0),
+                assembled_4820c(&format!("c2b_v_{tag}"), kept, 0)
+            ]),
+        )
+        .await,
+    ));
+    for (why, (status, answer)) in &refused {
+        assert_eq!(
+            (*status, error_code(answer)),
+            (400, -32602),
+            "{why}: {answer}"
+        );
+        // Not one word tells these apart from an id nobody kept (the JSON-RPC `id` is the
+        // request's own and differs by call; the error is what the caller learns).
+        assert_eq!(answer["error"], reference["error"], "{why}");
+    }
+    // Nothing was written and nothing was taken.
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        0
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        0
+    );
+    let still: String = sqlx::query_scalar("SELECT state FROM expression_assembly WHERE id=$1")
+        .bind(kept)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(
+        still, "ready",
+        "a refused proposal does not spend the assembly"
+    );
+
+    // The harness is not what refused them: the same assembly, named properly, is taken.
+    let (status, answer) = propose_with_4829(&w, &handle, one(kept, 0)).await;
+    assert_eq!(status, 200, "{answer}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assembled_hole_stays_on_the_card_as_manual_upload_with_its_code() {
+    let w = world_4820(0, None).await;
+    let handle = claim_run_4820(&w).await;
+    // 16-level noise at 240 px: `pulse` fits, `sparkle` is built under 1 MiB but breaks the
+    // 256 KiB cap of the small rendition → a slot with no picture (G3.8, partial failure).
+    let (assembly, kept) = keep_4820c(
+        &w,
+        &handle,
+        json!(["pulse", "sparkle"]),
+        &noise_4820(),
+        None,
+        "a hole",
+    )
+    .await;
+    assert_eq!(kept["candidates"].as_array().unwrap().len(), 1, "{kept}");
+    let tag = tag_4820c();
+    let (status, answer) = propose_with_4829(
+        &w,
+        &handle,
+        json!([
+            assembled_4820c(&format!("c2b_p_{tag}"), assembly, 0),
+            assembled_4820c(&format!("c2b_q_{tag}"), assembly, 1)
+        ]),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let approval = Uuid::parse_str(
+        structured(&answer)["approvalId"]
+            .as_str()
+            .expect("approvalId"),
+    )
+    .unwrap();
+    let card = card_4829(&w, approval).await;
+    let slots = &card["action"]["expression"]["candidates"];
+    assert_eq!(slots[0]["state"], json!("ready"), "{slots}");
+    assert_eq!(
+        slots[1]["state"],
+        json!("manual_upload_required"),
+        "{slots}"
+    );
+    assert_eq!(
+        slots[1]["code"],
+        json!("assembly_output_too_large"),
+        "{slots}"
+    );
+    assert_eq!(slots[1]["media"], Value::Null, "{slots}");
+    // A generated origin always carries its pointer key, `null` for words alone (G7).
+    for slot in [&slots[0], &slots[1]] {
+        let origin = slot["origin"].as_object().unwrap();
+        assert_eq!(origin.get("kind"), Some(&json!("generated")));
+        assert_eq!(
+            origin.get("sourceAttachmentId"),
+            Some(&Value::Null),
+            "{origin:?}"
+        );
+    }
+    let stored: (String, Option<String>) = sqlx::query_as(
+        "SELECT state, code FROM expression_draft WHERE approval_id=$1 AND candidate_index=1",
+    )
+    .bind(approval)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        (stored.0.as_str(), stored.1.as_deref()),
+        ("manual_upload_required", Some("assembly_output_too_large"))
     );
 }

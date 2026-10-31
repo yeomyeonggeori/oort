@@ -49,14 +49,13 @@
 //! `FOR UPDATE`, every rejection is returned through
 //! [`DbRejectable`](crate::routes::shared::DbRejectable) **before the first
 //! write**, and on the write path the approval update, the card patch, the
-//! ledger row, the audit row, the run transition, the resume job (or the
-//! rejection's `tool_result` message) and the broadcast all commit together.
+//! ledger row, the audit row, the run transition, the resume job and the
+//! broadcasts all commit together. ADR-0186 v6 R-b replaces standalone outcome
+//! lines with the existing card's terminal result and body.
 //!
-//! Nothing here contains `outbox` or `message` SQL: the job and the broadcasts
-//! are `momo_outbox::emit_outbox`, the rejection's `tool_result` is
-//! `momo_messaging::send_message_in_tx` (so it takes a real `channel_seq` bump
-//! like any other message), and the card patch is
-//! `momo_messaging::patch_message_props_in_tx`.
+//! Nothing here contains `outbox` or `message` SQL: jobs and decision broadcasts
+//! use `momo_outbox::emit_outbox`; the shared messaging settlement writes the
+//! card, full `message.edited` frame and requester candidate in this transaction.
 
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -69,15 +68,15 @@ use momo_agent::actions::{
     channel_create_result_rows, channel_member_add_result_body, channel_member_add_rows,
     invite_result_body, invite_result_rows, last_attempt_patch, memory_update_result_body,
     memory_update_result_rows, plugin_install_result_body, plugin_install_result_rows,
-    result_client_msg_id, unfurl_update_result_body, unfurl_update_rows,
-    work_tier_update_result_body, work_tier_update_rows, workspace_settings_result_body,
-    ActionResult, ActionResultNext, RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA,
-    ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED,
-    AUDIT_AGENT_AVATAR_UPDATED, AUDIT_AGENT_AVATAR_UPDATED_SCHEMA, AUDIT_AGENT_INVITED,
-    AUDIT_AGENT_INVITED_SCHEMA, AUDIT_AGENT_PROFILE_UPDATED, AUDIT_AGENT_PROFILE_UPDATED_SCHEMA,
-    AUDIT_CHANNELS_GRANTED, AUDIT_CHANNELS_GRANTED_SCHEMA, AUDIT_CHANNEL_CREATED,
-    AUDIT_CHANNEL_CREATED_SCHEMA, AUDIT_CHANNEL_MEMBER_ADDED, AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA,
-    AUDIT_MEMBER_RENAMED, AUDIT_MEMBER_RENAMED_SCHEMA, AUDIT_MEMORY_SETTINGS_UPDATED,
+    unfurl_update_result_body, unfurl_update_rows, work_tier_update_result_body,
+    work_tier_update_rows, workspace_settings_result_body, ActionResult, ActionResultNext,
+    RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
+    ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED, AUDIT_AGENT_AVATAR_UPDATED,
+    AUDIT_AGENT_AVATAR_UPDATED_SCHEMA, AUDIT_AGENT_INVITED, AUDIT_AGENT_INVITED_SCHEMA,
+    AUDIT_AGENT_PROFILE_UPDATED, AUDIT_AGENT_PROFILE_UPDATED_SCHEMA, AUDIT_CHANNELS_GRANTED,
+    AUDIT_CHANNELS_GRANTED_SCHEMA, AUDIT_CHANNEL_CREATED, AUDIT_CHANNEL_CREATED_SCHEMA,
+    AUDIT_CHANNEL_MEMBER_ADDED, AUDIT_CHANNEL_MEMBER_ADDED_SCHEMA, AUDIT_MEMBER_RENAMED,
+    AUDIT_MEMBER_RENAMED_SCHEMA, AUDIT_MEMORY_SETTINGS_UPDATED,
     AUDIT_MEMORY_SETTINGS_UPDATED_SCHEMA, AUDIT_UNFURL_SETTING_UPDATED,
     AUDIT_UNFURL_SETTING_UPDATED_SCHEMA, AUDIT_WORKSPACE_SETTING_UPDATED,
     AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA, AUDIT_WORK_TIER_POLICY_CHANGED,
@@ -95,16 +94,17 @@ use momo_agent::approval::{
     resume_job_payload, selectable_host_ids, validated_limit, validated_status, ApprovalListRow,
     LockedApproval,
 };
+use momo_agent::approval_outcome::approval_card_outcome;
 use momo_agent::decider::{action_required_role, decider_gate, GatePlan};
-use momo_agent::tools::{ToolResult, TOOL_AUDIT_SCHEMA};
+use momo_agent::tools::TOOL_AUDIT_SCHEMA;
 use momo_agent::{
     end_parked_run_in_tx, pinned_target_member, requeue_run_from_approval_in_tx,
     succeed_parked_run_in_tx, RunStatus,
 };
 use momo_auth::{
     active_hosted_connection_in_tx, append_approved_channels_in_tx, grant_hosted_channels_in_tx,
-    lock_active_hosted_connection_in_tx, lock_hosted_connection_in_tx, Principal, PrincipalKind,
-    AUDIT_VIA_PUSH_ACTION, MAX_HOSTED_APPROVED_CHANNELS,
+    hosted_action_connection_in_tx, lock_hosted_connection_in_tx, HostedActionConnection,
+    Principal, PrincipalKind, AUDIT_VIA_PUSH_ACTION, MAX_HOSTED_APPROVED_CHANNELS,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
@@ -114,9 +114,9 @@ use momo_messaging::{
     create_channel_detailed_in_tx, delete_staged_avatar_image_in_tx, emit_message_edited_in_tx,
     lock_agent_card_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
     patch_message_props_in_tx, read_avatar_image_bytes_in_tx, read_avatar_image_in_tx,
-    rename_agent_display_name_in_tx, send_message_in_tx, set_pin_in_tx,
+    rename_agent_display_name_in_tx, set_pin_in_tx, settle_approval_card_in_tx,
     staged_image_matches_pin_in_tx, AgentCard, AgentCardPatch, CardStatusPatch, FieldPatch,
-    MessageType, NewChannel, NewMessage, PinAction,
+    NewChannel, PinAction,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -272,9 +272,6 @@ pub async fn avatar_preview(
         .body(axum::body::Body::from(image.bytes))
         .map_err(|error| ApiError::internal("approvals.avatar_preview.response", error))
 }
-
-/// The body of the `tool_result` a rejection appends (Swift :847).
-const REJECTED_TOOL_RESULT_BODY: &str = "Tool call rejected by human approval.";
 
 /// ADR-0188 D3 (R0) — the receipt `status` a principal that is not a person is
 /// refused with: 「결정 라우트는 사람 principal만 받는다」.
@@ -581,6 +578,26 @@ async fn decide(
         state.agent_port.config.claude_subscription_agents_enabled;
     let operator_scope = has_platform_read_scope(&principal);
     let deliver_secret_to_agent = request.deliver_secret_to_agent == Some(true);
+    // `expressionChoice` is parsed strictly (closed keys) before anything is read: a malformed
+    // one is a 400 of the request, not a verdict on the card.
+    let expression_choice: Option<momo_expressions::Choice> = match request
+        .expression_choice
+        .clone()
+        .map(serde_json::from_value)
+        .transpose()
+    {
+        Ok(choice) => choice,
+        Err(_) => {
+            return respond(refusal(
+                approval_id,
+                member_id,
+                "expression_choice_invalid",
+                "expressionChoice must be {draftId, revision, sha256}",
+                StatusCode::BAD_REQUEST,
+                Utc::now(),
+            ))
+        }
+    };
     let context_max_messages = state.mentions.context_max_messages;
 
     // **A decision that PostgreSQL picks as the victim of a deadlock is run once more.**
@@ -600,6 +617,8 @@ async fn decide(
         let outcome = agent_tenant_tx(&state.pool, workspace_id, {
             let reason = reason.clone();
             let public_origin = public_origin.clone();
+            let admission_state = state.clone();
+            let expression_choice = expression_choice.clone();
             move |conn| {
                 Box::pin(async move {
                     decide_in_tx(
@@ -619,7 +638,9 @@ async fn decide(
                             claude_subscription_agents_enabled,
                             operator_scope,
                             deliver_secret_to_agent,
+                            expression_choice: expression_choice.clone(),
                             context_max_messages,
+                            admission_state: Some(&admission_state),
                         },
                     )
                     .await
@@ -716,9 +737,12 @@ struct DecisionInput<'a> {
     operator_scope: bool,
     /// `deliverSecretToAgent` as sent. Only `Some(true)` matters.
     deliver_secret_to_agent: bool,
+    /// ADR-0186 v8: the picture the person chose on an `expression.create` card.
+    expression_choice: Option<momo_expressions::Choice>,
     /// `MentionSettings::context_max_messages` — the recent-conversation window
     /// of the job an approved in-place channel grant releases (ADR-0162 증보 5 G3).
     context_max_messages: i64,
+    admission_state: Option<&'a AppState>,
 }
 
 /// Name the door a decision came through in one of its OWN audit rows
@@ -775,6 +799,9 @@ fn deliver_flag_refused(
 /// raised unasked (it stands in its owner's one-to-one direct message and says what the agent wants
 /// to do there). One definition for both decision routes' two places that ask.
 fn card_is_hidden_from_outsiders(approval: &LockedApproval) -> bool {
+    if super::dm_agents::is_admission(&approval.payload) {
+        return true;
+    }
     momo_agent::in_place_grant::is_in_place_grant(&approval.payload)
         || momo_agent::initiative::is_unasked_card(approval)
 }
@@ -949,6 +976,29 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         )));
     }
 
+    // **`expressionChoice` belongs to approving an `expression.create` card, and to nothing
+    // else** (ADR-0186 v8 X8-2). Judged here for the reason `deliverSecretToAgent` is: before
+    // the status and expiry arms, so no settlement that writes can outrank it.
+    if let Some(code) = expression_choice_refused(
+        input.expression_choice.is_some(),
+        approval.action_type == ACTION_TYPE_WORKSPACE_ACTION
+            && approval
+                .payload
+                .pointer("/action/id")
+                .and_then(Value::as_str)
+                == Some(momo_agent::actions::ACTION_EXPRESSION_CREATE),
+        input.approve,
+    ) {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            code,
+            "expressionChoice applies only to approving an expression.create card",
+            StatusCode::BAD_REQUEST,
+            now,
+        )));
+    }
+
     if approval.status != "pending" {
         let status = approval.status.clone();
         // The receipt names whoever **settled** it and when — not the person who
@@ -969,9 +1019,92 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
                 decided_at,
                 Some(&format!("approval is already {status}")),
             ),
-            status: StatusCode::CONFLICT,
+            // The server has already stopped this action. Acknowledge the
+            // terminal card without resurrecting work or recording a new vote.
+            status: if status == "cancelled" {
+                StatusCode::OK
+            } else {
+                StatusCode::CONFLICT
+            },
             secret_once: None,
         }));
+    }
+
+    if super::dm_agents::is_admission(&approval.payload) {
+        let Some(state) = input.admission_state else {
+            return Err(protocol_error("missing DM admission settings"));
+        };
+        let status = match super::dm_agents::vote_in_tx(
+            conn,
+            &approval,
+            input.member_id,
+            input.approve,
+            state,
+        )
+        .await?
+        {
+            Ok(status) => status,
+            Err(code) => {
+                return Ok(Ok(refusal(
+                    approval.id,
+                    input.member_id,
+                    code,
+                    "only the named DM participant may decide an unchanged request",
+                    StatusCode::FORBIDDEN,
+                    now,
+                )))
+            }
+        };
+        let decided_by = (status != "expired").then_some(input.member_id);
+        let receipt = decision_receipt(approval.id, status, decided_by, now, input.reason);
+        if let Some(message_id) = approval.request_message_id {
+            patch_and_prune_message_props_in_tx(
+                conn,
+                input.workspace_id,
+                message_id,
+                &decided_props_patch(status, decided_by, now, input.reason),
+                &[LAST_ATTEMPT_PROPS_KEY],
+            )
+            .await?;
+            announce_card_edit(conn, input.workspace_id, message_id).await?;
+        }
+        record_decision_in_tx(
+            conn,
+            input.workspace_id,
+            approval.id,
+            input.client_decision_id,
+            input.member_id,
+            input.approve,
+            status,
+            input.reason,
+            &receipt,
+        )
+        .await?;
+        let event = decision_event_payload(&approval, status, decided_by, now, input.reason);
+        emit_outbox(
+            &mut *conn,
+            input.workspace_id,
+            OutboxKind::Broadcast,
+            "publish",
+            &decision_broadcast_payload(
+                &cent_channel(input.workspace_id, approval.channel_id),
+                &approval,
+                status,
+                &event,
+                now,
+            ),
+            Some(approval.channel_id),
+        )
+        .await?;
+        write_audit(
+            conn,
+            &AuditEntry::new(input.workspace_id, format!("dm.agent.consent.{status}"))
+                .by(input.member_id)
+                .target("approval", approval.id)
+                .via_token(input.via_token_id),
+        )
+        .await?;
+        return Ok(Ok(Decision::ok(receipt)));
     }
 
     // The `work_control` this approval owns, if any (Swift :196). A malformed
@@ -1220,7 +1353,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         input.reason,
     );
 
-    mark_approval_decided_in_tx(
+    if !mark_approval_decided_in_tx(
         conn,
         approval.id,
         desired_status,
@@ -1228,24 +1361,9 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         now,
         input.reason,
     )
-    .await?;
-
-    if let Some(message_id) = approval.request_message_id {
-        // The same prune the executor does, on the arm a person reaches by
-        // saying **no**. A proposal refused for want of authority and then
-        // rejected would otherwise render `status: rejected` beside
-        // `last_attempt: "role_required"` — two answers to "what happened
-        // here". Pruning a key this card never had is a no-op, so the tool-call
-        // face of this route is untouched.
-        patch_and_prune_message_props_in_tx(
-            conn,
-            input.workspace_id,
-            message_id,
-            &decided_props_patch(desired_status, Some(input.member_id), now, input.reason),
-            &[LAST_ATTEMPT_PROPS_KEY],
-        )
-        .await?;
-        announce_card_edit(conn, input.workspace_id, message_id).await?;
+    .await?
+    {
+        return Err(protocol_error("approval is no longer pending"));
     }
 
     record_decision_in_tx(
@@ -1310,6 +1428,20 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         .await?;
     } else {
         reject_run(conn, &approval, input.member_id, input.reason, now).await?;
+    }
+
+    if let Some(message_id) = approval.request_message_id {
+        let outcome =
+            approval_card_outcome(&approval, desired_status, Some(input.member_id), now, None);
+        settle_approval_card_in_tx(
+            conn,
+            input.workspace_id,
+            message_id,
+            &outcome.patch,
+            &outcome.body,
+            outcome.notify_requester,
+        )
+        .await?;
     }
 
     emit_outbox(
@@ -1380,8 +1512,7 @@ async fn approve_run(
 // Everything below happens inside the decision transaction that locked the
 // approval `FOR UPDATE`, with the **approver's** authority. The agent that
 // proposed it is not an admin at any point; it is not even consulted here. What
-// it gets is its own name on the outcome line, because the proposal was its
-// utterance.
+// it gets is the result on its own proposal card (ADR-0186 v6 R-b).
 //
 // The order is the ADR's, and each step's placement is load-bearing:
 //
@@ -1416,6 +1547,8 @@ struct Executed {
     /// nowhere else. `None` for every action but `invite.create`.
     secret_once: Option<SecretOnceDto>,
     next: Option<ActionResultNext>,
+    /// ADR-0218 `Result` of an executed `expression.create` (`props.result.expression`).
+    expression: Option<Value>,
 }
 
 /// An executor either ran, or refused **before its first write**.
@@ -1454,7 +1587,7 @@ async fn announce_card_edit(
 ///
 /// ## Why this exists
 ///
-/// The outcome line is written through the raw spine ([`send_message_in_tx`]),
+/// The terminal card is updated through the messaging spine,
 /// which projects nothing into an inbox, and its author is the proposing agent —
 /// which the inbox would skip anyway. So the outcome of every proposal was visible
 /// only to an agent that happened to wake up and re-read the conversation, and
@@ -1548,11 +1681,14 @@ async fn role_required_refusal(
             Some(RequiredRole::AgentEditor) => {
                 "this workspace action must be approved by the target agent's owner or a workspace admin"
             }
-            Some(RequiredRole::RequestingMember) => {
+            Some(RequiredRole::RequestingMember | RequiredRole::DmParticipant) => {
                 "this workspace action must be approved by the member it changes"
             }
             Some(RequiredRole::WorkspaceOperator) => {
                 "this workspace action must be approved by a workspace operator"
+            }
+            Some(RequiredRole::ExpressionAdder) => {
+                "this workspace action must be approved by a member who may add expressions (the person shown, if a face is)"
             }
             Some(RequiredRole::Admin) | None => {
                 "this workspace action must be approved by a workspace admin"
@@ -1576,6 +1712,19 @@ async fn discard_staged_avatar_in_tx(
 ) -> Result<(), momo_db::DbError> {
     if approval.action_type != ACTION_TYPE_WORKSPACE_ACTION {
         return Ok(());
+    }
+    // An `expression.create` card's candidate pictures are reclaimed in the same
+    // transaction that rejects or expires it (ADR-0186 v8 X8-2): bytes only, the rows
+    // stay as the record of what was offered and why a receive failed.
+    if approval
+        .payload
+        .pointer("/action/id")
+        .and_then(Value::as_str)
+        == Some(momo_agent::actions::ACTION_EXPRESSION_CREATE)
+    {
+        momo_expressions::action::reclaim_in_tx(conn, approval.workspace_id, approval.id)
+            .await
+            .map_err(expression_db_error)?;
     }
     let avatar = approval
         .payload
@@ -1619,6 +1768,50 @@ fn args_invalid_refusal(
     )
 }
 
+/// A connection mismatch is audited even when coverage or a stale target makes
+/// argument resolution fail before the ordinary pins comparison. Call only after
+/// the existing decider gate, so the refusal reveals nothing to an ineligible
+/// decider. Unasked cards keep their existing decision/audit path.
+async fn args_invalid_refusal_in_tx(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+) -> Result<Decision, momo_db::DbError> {
+    if momo_agent::initiative::is_unasked_card(approval) {
+        return Ok(args_invalid_refusal(approval, input, now));
+    }
+    let HostedActionConnection::Standing(connection) =
+        hosted_action_connection_in_tx(conn, input.workspace_id, approval.requested_by).await?
+    else {
+        return Ok(args_invalid_refusal(approval, input, now));
+    };
+    if approval.payload.pointer("/action/pins/hostedConnection") != Some(&json!(connection)) {
+        write_audit(
+            conn,
+            &AuditEntry::new(input.workspace_id, "action.refused")
+                .by(input.member_id)
+                .about(approval.requested_by)
+                .target("approval", approval.id)
+                .via_token(input.via_token_id)
+                .run(approval.run_id)
+                .with_schema(
+                    "momo.action.refused.v1",
+                    stamp_via(
+                        input.credential_via,
+                        json!({
+                            "action_id": approval.payload.pointer("/action/id"),
+                            "approval_id": approval.id.to_string(),
+                            "reason": "hosted_connection_changed",
+                        }),
+                    ),
+                ),
+        )
+        .await?;
+    }
+    Ok(args_invalid_refusal(approval, input, now))
+}
+
 /// Approve a `workspace_action`: run it here, now, as the person who said yes.
 async fn execute_workspace_action(
     conn: &mut PgConnection,
@@ -1657,6 +1850,8 @@ async fn execute_workspace_action(
         GatePlan::TargetAgent => None,
         // Judged against the person the run was raised by, which step 2 resolves too.
         GatePlan::RequestingMember => None,
+        // Judged against the card's face, which step 2 derives from the stored drafts.
+        GatePlan::ExpressionAdder => None,
         GatePlan::Operator => Some(if input.operator_scope {
             Ok(())
         } else {
@@ -1720,7 +1915,9 @@ async fn execute_workspace_action(
     // looser rules of a card a person asked for (security review of #4704, M2).
     let initiated = momo_agent::initiative::is_unasked_card(approval);
     if initiated && !action.initiative {
-        return Ok(Ok(args_invalid_refusal(approval, input, now)));
+        return Ok(Ok(
+            args_invalid_refusal_in_tx(conn, approval, input, now).await?
+        ));
     }
     // **The decision proves the door again** (ADR-0186 증보 v5 U-d 「재증명」): a card may be a day
     // old, and everything that let an agent raise it can have changed since. The switch is on, the
@@ -1747,7 +1944,11 @@ async fn execute_workspace_action(
         .await?
         {
             Some(connection) => Some(connection),
-            None => return Ok(Ok(args_invalid_refusal(approval, input, now))),
+            None => {
+                return Ok(Ok(
+                    args_invalid_refusal_in_tx(conn, approval, input, now).await?
+                ))
+            }
         }
     } else {
         None
@@ -1798,7 +1999,9 @@ async fn execute_workspace_action(
             // to the person it was drawn for, and to nobody else.
             if required_role == Some(RequiredRole::RequestingMember) {
                 if pinned_target == Some(input.member_id) {
-                    return Ok(Ok(args_invalid_refusal(approval, input, now)));
+                    return Ok(Ok(
+                        args_invalid_refusal_in_tx(conn, approval, input, now).await?
+                    ));
                 }
                 return role_required_refusal(conn, approval, input, now, required_role).await;
             }
@@ -1807,7 +2010,9 @@ async fn execute_workspace_action(
                     .await?
                     .is_ok()
                 {
-                    return Ok(Ok(args_invalid_refusal(approval, input, now)));
+                    return Ok(Ok(
+                        args_invalid_refusal_in_tx(conn, approval, input, now).await?
+                    ));
                 }
             }
             return role_required_refusal(conn, approval, input, now, required_role).await;
@@ -1832,7 +2037,9 @@ async fn execute_workspace_action(
             {
                 return role_required_refusal(conn, approval, input, now, required_role).await;
             }
-            return Ok(Ok(args_invalid_refusal(approval, input, now)));
+            return Ok(Ok(
+                args_invalid_refusal_in_tx(conn, approval, input, now).await?
+            ));
         }
     };
 
@@ -1867,7 +2074,9 @@ async fn execute_workspace_action(
                 {
                     return role_required_refusal(conn, approval, input, now, required_role).await;
                 }
-                return Ok(Ok(args_invalid_refusal(approval, input, now)));
+                return Ok(Ok(
+                    args_invalid_refusal_in_tx(conn, approval, input, now).await?
+                ));
             }
             Err(_) => {
                 return role_required_refusal(conn, approval, input, now, required_role).await;
@@ -1891,6 +2100,29 @@ async fn execute_workspace_action(
         }
     }
 
+    if required_role == Some(RequiredRole::ExpressionAdder) {
+        // **`expression_adder` (ADR-0186 v8 X8-3)**: the face comes from the drafts the card
+        // stands on (the resolver read it from the database), never from the payload, and the
+        // person is judged by the ONE predicate the push audience and the preview also ask
+        // (`adder_allows_in_tx`) against the policy as it is now. No admin or owner proxy.
+        let ActionArgs::ExpressionCreate { subject, .. } = &resolved.validated.args else {
+            return Err(protocol_error(
+                "expression_adder action resolved without its candidates",
+            ));
+        };
+        if !momo_expressions::store::adder_allows_in_tx(
+            conn,
+            input.workspace_id,
+            input.member_id,
+            *subject,
+        )
+        .await
+        .map_err(expression_db_error)?
+        {
+            return role_required_refusal(conn, approval, input, now, required_role).await;
+        }
+    }
+
     // The ids this card was drawn from must be the ids the names resolve to now.
     // (After the subject gate above, so a decider who is not eligible learns
     // nothing about whether the target moved.)
@@ -1900,7 +2132,9 @@ async fn execute_workspace_action(
         .and_then(|action| action.get("pins"))
         .unwrap_or(&Value::Null);
     if stored_pins != &resolved.pins {
-        return Ok(Ok(args_invalid_refusal(approval, input, now)));
+        return Ok(Ok(
+            args_invalid_refusal_in_tx(conn, approval, input, now).await?
+        ));
     }
 
     // ---- 3. the action's own executor --------------------------------------
@@ -2101,6 +2335,49 @@ async fn execute_workspace_action(
                 Execution::Refused(decision) => return Ok(Ok(decision)),
             }
         }
+        ActionArgs::MemberDisplayNameSet {
+            display_name,
+            target: Some(person),
+        } => {
+            if person.id != input.member_id {
+                return Err(protocol_error(
+                    "member.display_name.set reached another person",
+                ));
+            }
+            let Some(applied) = momo_messaging::rename_own_display_name_in_tx(
+                conn,
+                input.workspace_id,
+                input.member_id,
+                display_name,
+            )
+            .await?
+            else {
+                return Ok(Ok(
+                    args_invalid_refusal_in_tx(conn, approval, input, now).await?
+                ));
+            };
+            Executed {
+                audits: vec![AuditEntry::new(input.workspace_id, "member.renamed")
+                    .by(input.member_id).about(input.member_id).target("member", input.member_id)
+                    .via_token(input.via_token_id).run(approval.run_id)
+                    .with_schema("momo.member.renamed.v1", json!({
+                        "old": applied.previous_display_name, "new": applied.member.display_name,
+                        "via_agent": approval.requested_by.to_string(), "approval_id": approval.id.to_string(),
+                    }))],
+                ref_type: REF_TYPE_MEMBER, ref_id: input.member_id,
+                result_body: "내 이름을 바꿨어요".to_string(),
+                result_rows: vec![
+                    momo_agent::actions::action_row("바꾸기 전", &person.display_name),
+                    momo_agent::actions::action_row("바꾼 뒤", display_name),
+                ],
+                secret_once: None, next: None, expression: None,
+            }
+        }
+        ActionArgs::MemberDisplayNameSet { target: None, .. } => {
+            return Err(protocol_error(
+                "member.display_name.set resolved without a person",
+            ));
+        }
         ActionArgs::MemberAvatarSet {
             avatar,
             target: Some(person),
@@ -2113,6 +2390,12 @@ async fn execute_workspace_action(
                 "member.avatar.set resolved without a person",
             ));
         }
+        ActionArgs::ExpressionCreate {
+            drafts, subject, ..
+        } => match execute_expression_create(conn, approval, input, now, drafts, *subject).await? {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
         ActionArgs::PluginInstall {
             plugin_id,
             plugin: Some(plugin),
@@ -2263,7 +2546,7 @@ async fn execute_workspace_action(
         );
     }
 
-    mark_approval_decided_in_tx(
+    if !mark_approval_decided_in_tx(
         conn,
         approval.id,
         "approved",
@@ -2271,22 +2554,9 @@ async fn execute_workspace_action(
         now,
         input.reason,
     )
-    .await?;
-
-    if let Some(message_id) = approval.request_message_id {
-        // The prune is what clears an earlier refusal: a card that says 승인됨
-        // must not also still say the last attempt needed an admin — and a
-        // shallow merge cannot delete, so writing a null would have left the
-        // key present for any client reading it by presence.
-        patch_and_prune_message_props_in_tx(
-            conn,
-            input.workspace_id,
-            message_id,
-            &decided_props_patch("approved", Some(input.member_id), now, input.reason),
-            &[LAST_ATTEMPT_PROPS_KEY],
-        )
-        .await?;
-        announce_card_edit(conn, input.workspace_id, message_id).await?;
+    .await?
+    {
+        return Err(protocol_error("approval is no longer pending"));
     }
 
     record_decision_in_tx(
@@ -2312,6 +2582,19 @@ async fn execute_workspace_action(
     // gets `false`, and `false` rolls the whole decision back (grant included):
     // never a widened channel with no work behind it, never a second job.
     if momo_agent::in_place_grant::is_in_place_grant(&approval.payload) {
+        if let Some(message_id) = approval.request_message_id {
+            let outcome =
+                approval_card_outcome(approval, "approved", Some(input.member_id), now, None);
+            settle_approval_card_in_tx(
+                conn,
+                input.workspace_id,
+                message_id,
+                &outcome.patch,
+                &outcome.body,
+                false,
+            )
+            .await?;
+        }
         let Some(run) =
             momo_agent::load_agent_run_in_tx(conn, input.workspace_id, approval.run_id).await?
         else {
@@ -2376,41 +2659,38 @@ async fn execute_workspace_action(
     // `send_message_in_tx` below for the lock order `wake_proposer_in_tx` states.
     wake_proposer_in_tx(conn, approval).await?;
 
-    // ---- the outcome line, authored by the agent ---------------------------
-    //
-    // Same authorship rule as the rejection's (`reject_run`): the proposal was
-    // the agent's utterance, so its outcome belongs to the same speaker. Who
-    // decided is in the props, not in the authorship.
-    send_message_in_tx(
-        conn,
-        input.workspace_id,
-        NewMessage {
-            channel_id: approval.channel_id,
-            author_member_id: approval.requested_by,
-            message_type: MessageType::ToolResult,
-            body: Some(executed.result_body),
-            props: action_result_props(&ActionResult {
-                action_id: action.id,
-                status: ACTION_RESULT_EXECUTED,
-                approval_id: approval.id,
-                decided_by: input.member_id,
-                ref_type: executed.ref_type,
-                ref_id: executed.ref_id,
-                rows: executed.result_rows,
-                secret_shown_once: executed.secret_once.is_some(),
-                next: executed.next,
-            }),
-            root_id: None,
-            reply_to_id: None,
-            // NOT `approval.id` — that key belongs to the rejection and expiry
-            // lines (`momo_agent::actions::result_client_msg_id`).
-            client_msg_id: Some(result_client_msg_id(approval.id)),
-            run_id: Some(approval.run_id),
-            hlc_ts: None,
-            hlc_count: None,
-        },
-    )
-    .await?;
+    // ADR-0186 v6 R-b: the existing card is the durable result. Wake the
+    // proposer first, preserving connection -> card/counter lock order.
+    if let Some(message_id) = approval.request_message_id {
+        let mut result = action_result_props(&ActionResult {
+            action_id: action.id,
+            status: ACTION_RESULT_EXECUTED,
+            approval_id: approval.id,
+            decided_by: input.member_id,
+            ref_type: executed.ref_type,
+            ref_id: executed.ref_id,
+            rows: executed.result_rows,
+            secret_shown_once: executed.secret_once.is_some(),
+            next: executed.next,
+            expression: executed.expression,
+        });
+        let outcome = approval_card_outcome(
+            approval,
+            "approved",
+            Some(input.member_id),
+            now,
+            Some((result["momo.action_result"].take(), executed.result_body)),
+        );
+        settle_approval_card_in_tx(
+            conn,
+            input.workspace_id,
+            message_id,
+            &outcome.patch,
+            &outcome.body,
+            outcome.notify_requester,
+        )
+        .await?;
+    }
 
     // ---- the run ends here, succeeded, with no job behind it ---------------
     if !succeed_parked_run_in_tx(
@@ -2486,6 +2766,8 @@ async fn execute_channel_create(
     // read finds the connection *through the credential's expiry*; for a card that waited a day it
     // finds nothing, and the agent would be seated in a room its connection does not cover with the
     // grant and its audit row skipped (security review of #4704 PR B, round 2, H1).
+    // A requested card proves the proposer's own connection by the same standing rule. Only a
+    // managed proposer has no connection to widen; an ended hosted connection refuses the action.
     let connection = if add_proposer {
         match card_connection {
             Some(card_connection) => {
@@ -2507,9 +2789,37 @@ async fn execute_channel_create(
                 Some((card_connection, covered))
             }
             None => {
-                lock_active_hosted_connection_in_tx(conn, input.workspace_id, approval.requested_by)
-                    .await
-                    .map_err(momo_db::DbError::from)?
+                match hosted_action_connection_in_tx(
+                    conn,
+                    input.workspace_id,
+                    approval.requested_by,
+                )
+                .await
+                .map_err(momo_db::DbError::from)?
+                {
+                    HostedActionConnection::Managed => None,
+                    HostedActionConnection::Standing(connection_id) => {
+                        let Some(covered) = lock_hosted_connection_in_tx(
+                            conn,
+                            input.workspace_id,
+                            approval.requested_by,
+                            connection_id,
+                        )
+                        .await
+                        .map_err(momo_db::DbError::from)?
+                        else {
+                            return Ok(Execution::Refused(args_invalid_refusal(
+                                approval, input, now,
+                            )));
+                        };
+                        Some((connection_id, covered))
+                    }
+                    HostedActionConnection::Unavailable => {
+                        return Ok(Execution::Refused(args_invalid_refusal(
+                            approval, input, now,
+                        )));
+                    }
+                }
             }
         }
     } else {
@@ -2629,6 +2939,7 @@ async fn execute_channel_create(
         result_rows: channel_create_result_rows(name, kind, add_proposer, added),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -2753,6 +3064,7 @@ async fn execute_workspace_settings_update(
         result_rows: rows,
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -2799,6 +3111,7 @@ async fn execute_workspace_unfurl_update(
         result_rows: unfurl_update_rows(before.unwrap_or(!saved.enabled), saved.enabled),
         secret_once: None,
         next: None,
+        expression: None,
     })
 }
 
@@ -2855,6 +3168,7 @@ async fn execute_plugin_install(
             ),
             secret_once: None,
             next: None,
+            expression: None,
         })),
         Err(error) if error.status == StatusCode::FORBIDDEN => Ok(Execution::Refused(refusal(
             approval.id,
@@ -2932,6 +3246,7 @@ async fn execute_workspace_memory_update(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     })
 }
 
@@ -3019,6 +3334,7 @@ async fn execute_workspace_work_tier_update(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3089,6 +3405,7 @@ async fn execute_hosted_channels_grant(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3148,6 +3465,7 @@ async fn execute_agent_rename(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3235,6 +3553,7 @@ async fn execute_agent_invite(
             expires_at_ms: issuance.pairing_expires_at_ms,
         }),
         next: None,
+        expression: None,
     }))
 }
 
@@ -3471,6 +3790,7 @@ async fn execute_agent_profile_update(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3557,7 +3877,132 @@ async fn execute_member_avatar_set(
         ],
         secret_once: None,
         next: None,
+        expression: None,
     }))
+}
+
+/// A database error carried out of `momo-expressions`.
+pub(crate) fn expression_db_error(error: momo_expressions::Error) -> momo_db::DbError {
+    match error {
+        momo_expressions::Error::Db(error) => error,
+        other => protocol_error(&other.to_string()),
+    }
+}
+
+/// `expression.create` (ADR-0186 v8 X8-2): register the ONE candidate the person chose, in
+/// this decision's transaction. Every proof is re-run inside `choose_in_tx` (membership of
+/// the card, revision, TTL, the stored bytes hashed again, name, quota, the add role under
+/// the catalog lock) and happens before the first write; a failure is a 409 receipt that
+/// spends nothing and leaves every candidate as it was.
+async fn execute_expression_create(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    drafts: &[Uuid],
+    subject: Option<Uuid>,
+) -> Result<Execution, momo_db::DbError> {
+    let Some(choice) = input.expression_choice.as_ref() else {
+        // `expression_choice_refused` turns "approve without a choice" into a 400 before
+        // anything else; reaching here would mean a person approved nothing in particular.
+        return Err(protocol_error(
+            "expression.create approved without a choice",
+        ));
+    };
+    let actor = momo_expressions::Actor {
+        workspace: input.workspace_id,
+        member: input.member_id,
+    };
+    match momo_expressions::action::choose_in_tx(
+        conn,
+        actor,
+        approval.id,
+        approval.requested_by,
+        drafts,
+        subject,
+        choice,
+    )
+    .await
+    {
+        Ok(chosen) => Ok(Execution::Ran(Executed {
+            audits: Vec::new(),
+            ref_type: momo_agent::actions::REF_TYPE_EXPRESSION,
+            ref_id: chosen.expression_id,
+            result_body: momo_agent::actions::expression_create_result_body(),
+            result_rows: vec![
+                momo_agent::actions::action_row("이름", format!(":{}:", chosen.name)),
+                momo_agent::actions::action_row("보관", "팀 보관함에 저장했어요"),
+            ],
+            secret_once: None,
+            next: None,
+            expression: Some(json!({
+                "id": chosen.expression_id.to_string(),
+                "name": chosen.name,
+                "token": format!(":{}:", chosen.name),
+            })),
+        })),
+        Err(momo_expressions::Error::Role) => {
+            match role_required_refusal(
+                conn,
+                approval,
+                input,
+                now,
+                Some(RequiredRole::ExpressionAdder),
+            )
+            .await?
+            {
+                Ok(decision) => Ok(Execution::Refused(decision)),
+                Err(_) => Err(protocol_error("role refusal could not be built")),
+            }
+        }
+        Err(momo_expressions::Error::NameReserved) => Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            "expression_name_reserved",
+            "this expression name is already taken",
+            StatusCode::CONFLICT,
+            now,
+        ))),
+        Err(momo_expressions::Error::Quota) => Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            "expression_quota",
+            "the team's expression library is full",
+            StatusCode::CONFLICT,
+            now,
+        ))),
+        // Stale revision/hash, a candidate that is not this card's, an expired or already
+        // reclaimed picture: the person's choice no longer names what is stored.
+        Err(
+            momo_expressions::Error::Stale
+            | momo_expressions::Error::Expired
+            | momo_expressions::Error::NotFound
+            | momo_expressions::Error::Invalid,
+        ) => Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            "expression_preview_stale",
+            "the picture you chose is no longer the one stored",
+            StatusCode::CONFLICT,
+            now,
+        ))),
+        Err(momo_expressions::Error::Db(error)) => Err(error),
+    }
+}
+
+/// `expressionChoice` is meaningful on exactly one request: **approving** an
+/// `expression.create` card, and there it is required (ADR-0186 v8 X8-2). Anywhere else it is
+/// a malformed request; approving without one names no picture. `None` = fine.
+fn expression_choice_refused(
+    present: bool,
+    is_expression_card: bool,
+    approve: bool,
+) -> Option<&'static str> {
+    match (present, is_expression_card && approve) {
+        (true, false) => Some("expression_choice_not_allowed"),
+        (false, true) => Some("expression_choice_required"),
+        _ => None,
+    }
 }
 
 /// `channel.member.add` (증보 V1/V6): seat each resolved member as `member`, as
@@ -3623,6 +4068,7 @@ async fn execute_channel_member_add(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3699,6 +4145,7 @@ async fn execute_message_pin(
         result_rows: momo_agent::actions::message_pin_result_rows(&message.card, pinned_after),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3796,6 +4243,7 @@ async fn execute_invite_create(
             expires_at_ms: created.invite.expires_at_ms,
         }),
         next: Some(INVITE_RESULT_NEXT),
+        expression: None,
     }))
 }
 
@@ -3855,31 +4303,24 @@ fn invite_link_origin(settings: &T3Settings, headers: &HeaderMap) -> Option<Stri
     derive_same_origin_http_base(forwarded_proto, host, None).ok()
 }
 
-/// Rejected: end the run and tell the channel, in that order (Swift
-/// `cancelRunAndAppendToolResult` :813-892).
-///
-/// The `tool_result` message is authored by **the agent** (`requested_by`),
-/// which is Swift's choice and the right one: the tool call was the agent's
-/// utterance, so its outcome belongs to the same speaker. Who decided is in the
-/// props, not in the authorship.
+/// Rejected: end the parked run, wake the proposer, and end the activity rail.
+/// The caller then settles the original card (ADR-0186 v6 R-b), preserving
+/// connection-before-card lock order. No standalone result line is written.
 async fn reject_run(
     conn: &mut PgConnection,
     approval: &LockedApproval,
-    decided_by: Uuid,
+    _decided_by: Uuid,
     reason: Option<&str>,
-    now: chrono::DateTime<Utc>,
+    _now: chrono::DateTime<Utc>,
 ) -> Result<(), momo_db::DbError> {
     // ADR-0162 증보 5 G4 — a rejected in-place channel grant ends the held run
     // with its own code and tells the person who called, in words, why nothing
     // happened; a tool-call rejection keeps its sentence.
     let in_place = momo_agent::in_place_grant::is_in_place_grant(&approval.payload);
-    let (code, body) = if in_place {
-        (
-            momo_agent::in_place_grant::IN_PLACE_GRANT_REJECTED_CODE,
-            momo_agent::in_place_grant::IN_PLACE_GRANT_REJECTED_BODY,
-        )
+    let code = if in_place {
+        momo_agent::in_place_grant::IN_PLACE_GRANT_REJECTED_CODE
     } else {
-        ("approval_rejected", REJECTED_TOOL_RESULT_BODY)
+        "approval_rejected"
     };
     let ended = end_parked_run_in_tx(
         conn,
@@ -3917,43 +4358,6 @@ async fn reject_run(
     )
     .await?;
 
-    let call_id = approval
-        .payload
-        .get("tool_call")
-        .and_then(|call| call.get("call_id"))
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let mut props = ToolResult::error(call_id, body).message_props();
-    if let Some(object) = props.as_object_mut() {
-        object.insert("approval_id".into(), json!(approval.id.to_string()));
-        object.insert("run_id".into(), json!(approval.run_id.to_string()));
-        object.insert("status".into(), json!("rejected"));
-        object.insert("decided_by".into(), json!(decided_by.to_string()));
-        object.insert("decided_at_ms".into(), json!(now.timestamp_millis()));
-        object.insert("reason".into(), json!(reason));
-    }
-
-    send_message_in_tx(
-        conn,
-        approval.workspace_id,
-        NewMessage {
-            channel_id: approval.channel_id,
-            author_member_id: approval.requested_by,
-            message_type: MessageType::ToolResult,
-            body: Some(body.to_string()),
-            props,
-            root_id: None,
-            reply_to_id: None,
-            // One rejection line per approval, whatever a retry does. The spine's
-            // `(channel, author, client_msg_id)` guard is the same one the
-            // agent's reply uses.
-            client_msg_id: Some(approval.id),
-            run_id: Some(approval.run_id),
-            hlc_ts: None,
-            hlc_count: None,
-        },
-    )
-    .await?;
     Ok(())
 }
 
@@ -3994,8 +4398,22 @@ async fn settle_expired(
     let receipt = decision_receipt(approval.id, "expired", None, now, Some(reason));
     let event = decision_event_payload(approval, "expired", None, now, Some(reason));
 
-    mark_approval_expired_in_tx(conn, approval.id, now, reason).await?;
+    if !mark_approval_expired_in_tx(conn, approval.id, now, reason).await? {
+        return Err(protocol_error("approval is no longer pending"));
+    }
     expire_run(conn, approval).await?;
+    if let Some(message_id) = approval.request_message_id {
+        let outcome = approval_card_outcome(approval, "expired", None, now, None);
+        settle_approval_card_in_tx(
+            conn,
+            approval.workspace_id,
+            message_id,
+            &outcome.patch,
+            &outcome.body,
+            outcome.notify_requester,
+        )
+        .await?;
+    }
 
     record_decision_in_tx(
         conn,
@@ -4572,7 +4990,9 @@ mod tests {
             claude_subscription_agents_enabled: false,
             operator_scope: false,
             deliver_secret_to_agent: false,
+            expression_choice: None,
             context_max_messages: 30,
+            admission_state: None,
         }
     }
 

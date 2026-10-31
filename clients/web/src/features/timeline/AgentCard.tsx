@@ -1,3 +1,5 @@
+import { ExpressionApprovalCard } from "@/features/expressions/ExpressionApprovalCard";
+import { expressionApprovalPayload, expressionResultPayload } from "@/features/expressions/cards";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "@/app/session";
 import { seedComposerText } from "@/features/chat/draftStore";
@@ -33,6 +35,7 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import {
   approvalCardNote,
+  waitsForParticipant,
   type ApprovalCardNote,
 } from "@momo/core/features/timeline/approvalNote";
 // 영수증 문장은 **인박스와 같은 함수**가 짓는다 (design-review M-3). 이 카드가
@@ -94,7 +97,7 @@ import {
 } from "./ApprovalActions";
 import { ActionResultBody } from "./ActionResultCard";
 import { AvatarPreviewBlock } from "./AvatarPreviewBlock";
-import { isMemberAvatarSetAction } from "@momo/core/features/approvals/avatarPreview";
+import { hasProfileAvatarPreview } from "@momo/core/features/approvals/avatarPreview";
 import {
   approvalRoleCopy,
   roleRequiredCopy,
@@ -413,10 +416,12 @@ function ApprovalBody({
   card,
   directory,
   onOpenStage,
+  viewerMemberId,
 }: {
   card: AgentApprovalCard;
   directory: Directory;
   onOpenStage?: () => void;
+  viewerMemberId?: string;
 }) {
   const { session, workspaceId } = useSession();
   const [local, setLocal] = useState<{
@@ -505,6 +510,10 @@ function ApprovalBody({
   // 행 하나가 남았다.
   const note = approvalCardNote({
     receiptNote: receipt?.note ?? null,
+    // 참여자 동의 카드(ADR-0217)의 결정자가 아닌 사람. 판정과 문장은 코어 한 곳이 지고, 묶음 카드의
+    // 대기 줄(`bundle.waitingFor`)도 같은 문장을 읽는다.
+    waitingForParticipant: waitsForParticipant(card.action, viewerMemberId),
+    participantName: memberFor(directory, card.action?.targetMemberId)?.displayName,
     isResumeOffer: card.isResumeOffer,
     resumeOfferText: RESUME_OFFER_COPY,
     settled,
@@ -550,7 +559,7 @@ function ApprovalBody({
       // 「내 프로필 사진 바꾸기」(#4394): 사진과 한 문장은 서버 행 아래, 버튼 바로 위에 선다.
       // 결정이 난 카드에는 서지 않는다 — 사진은 결정 전에 보는 것이고 결과는 결과 카드가 말한다.
       note={
-        !settled && isMemberAvatarSetAction(card.action?.id) ? (
+        !settled && hasProfileAvatarPreview(card.action) ? (
           <AvatarPreviewBlock
             card={card}
             agentName={
@@ -565,7 +574,10 @@ function ApprovalBody({
       footer={
         note !== null ? (
           <>
-            <ApprovalNoteLine note={note} />
+            {/* 묶음 카드의 대기 줄이 같은 문장을 이미 말하면 한 번 더 세우지 않는다(#4920).
+                이 줄이 막는 일(결정 컨트롤·오프라인 문장·y/n 키)은 `note !== null`이 이어서
+                맡으므로 보이는 줄만 접는다. */}
+            {note.text !== bundle?.waitingFor && <ApprovalNoteLine note={note} />}
             {/* 버튼이 있던 자리에 링크가 선다 (ADR-0182 ① · ADR-0186 D4).
                 영수증 **아래**인 것은 읽는 순서 때문이다: 방금 무엇이
                 기록됐는지가 먼저이고, 그 결과로 받은 값이 그다음이다. */}
@@ -1427,12 +1439,16 @@ export function CardFrame({
 
 export function AgentCard({
   card,
+  expressionProps,
   directory,
+  viewerMemberId,
   onOpenWorkSession,
   onOpenStage,
 }: {
   card: AgentCardModel;
+  expressionProps?: unknown;
   directory: Directory;
+  viewerMemberId?: string;
   /**
    * 작업 세션 상세로 가는 문. 로그인 핸드오프 카드만 쓴다. 없으면 딥링크 자체가
    * 그려지지 않는다 — 없는 방으로 가는 문을 그리지 않는다는 이 레포의 규율.
@@ -1441,7 +1457,8 @@ export function AgentCard({
   onOpenStage?: () => void;
 }) {
   if (card.kind === "approval") {
-    return <ApprovalBody card={card} directory={directory} onOpenStage={onOpenStage} />;
+    if (card.action?.id === "expression.create") return <ExpressionApprovalCard card={card} payload={expressionApprovalPayload(expressionProps)} result={expressionResultPayload(expressionProps)} />;
+    return <ApprovalBody card={card} directory={directory} onOpenStage={onOpenStage} viewerMemberId={viewerMemberId} />;
   }
   if (card.kind === "login_handoff") {
     return (

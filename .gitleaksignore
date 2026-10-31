@@ -313,3 +313,14 @@ a8378190d76fb74ed6c5df312788691cd5c06521:server-rust/bins/momo-workd/src/project
 # 2026-10-22 #4188(AP-1b) — capture-4188.mjs 의 첫 커밋이 외양 저장 항목 이름을 상수로 둔 줄. 항목 이름이지 자격이 아니다(#4186 의 gate-theme.mjs 줄과 같은 오탐). 다음 커밋에서 상수 이름을 바꿨다.
 #   clients/web/scripts/capture-4188.mjs:177  [generic-api-key]
 0b54620c0b378408742bd88e5453b6a0845617c6:clients/web/scripts/capture-4188.mjs:generic-api-key:177
+
+# 2026-10-31 #4820 C2a(PR #4907) — 원본 사진 자기 주소 시험의 가짜 토큰(43자 URL 안전 문자)과 시험용 uuid 상수.
+# 네 줄 모두 시험 함수나 시험 파일 안의 고정 예시이고 자격이 아니다. 실제 토큰은 실행 때 난수로 만들고 DB에는 해시만 남는다.
+#   server-rust/bins/momo-agent-worker/src/context.rs:592  [generic-api-key]
+0e6f8db3a45de9ffa2ae6f949425baf2d9e87007:server-rust/bins/momo-agent-worker/src/context.rs:generic-api-key:592
+#   server-rust/bins/momo-agent-worker/src/lib.rs:4568  [generic-api-key]
+9d307e6e58cc314c40e444265e476c5362deee96:server-rust/bins/momo-agent-worker/src/lib.rs:generic-api-key:4568
+#   infra/hermes/test_image_guard.py:342  [generic-api-key]
+9d307e6e58cc314c40e444265e476c5362deee96:infra/hermes/test_image_guard.py:generic-api-key:342
+#   server-rust/crates/momo-messaging/src/self_media.rs:457  [generic-api-key]
+9d307e6e58cc314c40e444265e476c5362deee96:server-rust/crates/momo-messaging/src/self_media.rs:generic-api-key:457

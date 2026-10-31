@@ -408,6 +408,30 @@ pub struct RateLimitConfig {
     /// on the excess; it does not slow guessing, which the token's 122 random
     /// bits, single use and one-hour lifetime answer.
     pub drive_upload_per_ip_limit: u32,
+    /// `RATE_LIMIT_SELF_MEDIA_PER_WORKSPACE` (default 30 per window). 0 disables. The public photo
+    /// address `GET /v1/self-media/{ws}/{token}` (#4820 C2a, ADR-0218 G4), which answers anyone who
+    /// knows the path shape.
+    ///
+    /// Its **own** budget, no longer the claim budget it borrowed, and **split by the workspace in
+    /// the path**: the key is the caller's address *and* that workspace id. The co-hosted Hermes
+    /// reaches the api from one address for every workspace, and its picture tool lets any
+    /// well-shaped address through (the guard cannot know whether a token was ever minted), so a
+    /// model that invents addresses can only spend the workspace it names — not every workspace's
+    /// photos (security review L7). Only the route's one 404 spends it and a served picture spends
+    /// nothing. A path whose workspace is not a canonical id has none to charge and shares one
+    /// bucket per address (`rate_limit::per_ip_self_media`).
+    ///
+    /// Because the path names the workspace, a caller can rotate it and never spend the same budget
+    /// twice, so the route also has an address-wide ceiling of ten times this number across all
+    /// workspaces (`rate_limit::per_ip_self_media_ceiling`; 0 here disables both). It keeps the
+    /// unauthenticated transaction rate per address bounded; the cost is that a flood past the
+    /// ceiling is turned away for every workspace until the window passes.
+    ///
+    /// What it does not do: slow guessing (the token's 256 random bits do that) or stop a caller who
+    /// names *another* workspace's id in the path from spending that workspace's budget for their
+    /// own address — the cost is at most that workspace's photo addresses for one window, and it
+    /// takes knowing that workspace's id.
+    pub self_media_per_workspace_limit: u32,
     /// `RATE_LIMIT_MESSAGE_SEND_PER_MEMBER` (default 120 per window). 0 disables.
     /// A **human** member's message sends: `POST …/channels/{ch}/messages` (thread
     /// replies included) and `POST …/scheduled-messages/{id}/send-now`, which is the
@@ -460,6 +484,7 @@ impl Default for RateLimitConfig {
             password_change_per_ip_limit: 30,
             password_guess_per_account_limit: 5,
             drive_upload_per_ip_limit: 120,
+            self_media_per_workspace_limit: 30,
             message_send_per_member_limit: 120,
             message_send_per_agent_limit: 600,
             scheduled_write_per_member_limit: 60,
@@ -503,6 +528,9 @@ impl RateLimitConfig {
             drive_upload_per_ip_limit: lookup("RATE_LIMIT_DRIVE_UPLOAD_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.drive_upload_per_ip_limit),
+            self_media_per_workspace_limit: lookup("RATE_LIMIT_SELF_MEDIA_PER_WORKSPACE")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.self_media_per_workspace_limit),
             message_send_per_member_limit: lookup("RATE_LIMIT_MESSAGE_SEND_PER_MEMBER")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.message_send_per_member_limit),
@@ -3880,6 +3908,47 @@ mod tests {
             RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PASSWORD_CHANGE_PER_MEMBER", "2"))
                 .password_guess_per_account_limit,
             defaults.password_guess_per_account_limit
+        );
+    }
+
+    // -- #4820 C2a security review (L7): the photo address's own budget ------------------
+
+    /// The photo address has a budget of its own: its env name moves only its own field (not the
+    /// claim budget it used to borrow, and not the other way round), 0 is the operator's off switch
+    /// and not a number keeps the default. The default stays at the 30 the claim budget had, so a
+    /// route that was fine before is fine now.
+    #[test]
+    fn the_photo_address_budget_is_its_own_knob() {
+        let lookup = |name: &'static str, value: &'static str| {
+            move |key: &str| (key == name).then(|| value.to_string())
+        };
+        let defaults = RateLimitConfig::default();
+        assert_eq!(defaults.self_media_per_workspace_limit, 30);
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_SELF_MEDIA_PER_WORKSPACE", " 5 ")),
+            RateLimitConfig {
+                self_media_per_workspace_limit: 5,
+                ..defaults
+            },
+            "its own name moves its own field, whitespace trimmed like every knob"
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_CLAIM_PER_IP", "7")),
+            RateLimitConfig {
+                claim_per_ip_limit: 7,
+                ..defaults
+            },
+            "the claim budget no longer moves the photo address's"
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_SELF_MEDIA_PER_WORKSPACE", "0"))
+                .self_media_per_workspace_limit,
+            0
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_SELF_MEDIA_PER_WORKSPACE", "many")),
+            defaults,
+            "an unparseable value keeps the default instead of switching the axis off"
         );
     }
 

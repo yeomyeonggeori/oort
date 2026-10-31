@@ -247,6 +247,14 @@ async fn set_status(
                         // phones registered under those sessions must not come
                         // back to life on reinstatement (#2677).
                         if transition == StatusTransition::Suspend {
+                            super::agent_runs::cancel_agent_runs_in_tx(
+                                conn,
+                                workspace_id,
+                                target_id,
+                                None,
+                                actor_id,
+                            )
+                            .await?;
                             end_member_sessions_in_tx(
                                 conn,
                                 workspace_id,
@@ -319,6 +327,14 @@ pub async fn remove(
                 .await?
                 {
                     Ok(applied) => {
+                        super::agent_runs::cancel_agent_runs_in_tx(
+                            conn,
+                            workspace_id,
+                            target_id,
+                            None,
+                            actor_id,
+                        )
+                        .await?;
                         // Removal revokes every token of the member, and with
                         // them every push registration (#2677) and device key (#3022).
                         end_member_sessions_in_tx(

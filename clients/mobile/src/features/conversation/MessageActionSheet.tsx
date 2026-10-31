@@ -1,3 +1,4 @@
+import {TeamExpressionPicker} from '../expressions/TeamExpressionPicker';
 import type {Message} from '@momo/core/lib/api';
 import {attachmentPreviewLine} from '@momo/core/features/attachments/model';
 import type {MessageActionAvailability} from '@momo/core/features/timeline/model';
@@ -9,11 +10,16 @@ import {
   type ReactionChip,
 } from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useState} from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import {REACTION_GLYPH_MAX_SCALE, Sentence} from '../../design/atoms';
 import {PageSheet, usePageSheetAction} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {ConfirmStep, GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
+import {
+  ConfirmStep,
+  GroupCard,
+  ListRow,
+  SheetScroll,
+} from '../../design/sheetParts';
 import {
   font,
   line,
@@ -24,6 +30,10 @@ import {
   type Palette,
 } from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import { CONV_ICONS, CONV_ICON_SIZE } from '../../design/icons';
+import { EmojiPicker } from '../emoji/EmojiPicker';
+import { emojiFrequency } from '../emoji/preferences';
+import {useEmojiTriggerFocus} from '../emoji/useEmojiTriggerFocus';
 
 /** hh:mm, 24-hour, local. The row's own clock is never used for ordering. */
 export function timeLabel(atMs: number): string {
@@ -74,10 +84,8 @@ export function timeLabel(atMs: number): string {
 // 는 왕복이 도는 동안 시트가 「지우는 중…」을 말해야 한다(성공 뒤에야 부모가 닫는다). 이 닫힘은 부모의
 // `.then(() => setSheetOpen(false))` 라 지금도 스냅이다 - PR 「발견」 참조.
 //
-// ## 이 배치에 없는 것: 전체 이모지 고르기
-//
-// 웹(#1742)의 카탈로그 피커(검색·카테고리·빈도 store·스킨톤)는 웹 로컬이다. 목록을 가져오려면
-// 두 번째 정본을 만들거나 코어에 상수를 새로 세워야 한다. 폰 패리티는 후속 티켓 #1748.
+// 「+」 는 같은 PageSheet 를 큰 단의 전체 이모지 피커로 바꾼다(#4322).
+// 시트를 겹치지 않고, X 는 빠른 행동 목록으로 돌아온다. 고르면 기존 닫는 길 뒤에 반응을 쓴다.
 // =============================================================================
 
 export interface MessageActionSheetProps {
@@ -121,16 +129,25 @@ export interface MessageActionSheetProps {
   onDelete: () => void;
 }
 
-export function MessageActionSheet(sheet: MessageActionSheetProps): React.JSX.Element {
+export function MessageActionSheet(
+  sheet: MessageActionSheetProps,
+): React.JSX.Element {
+  const [pickerOpen, setPickerOpen] = useState(false);
   return (
     <PageSheet
-      height="fit"
+      height={pickerOpen ? 'large' : 'fit'}
       onClose={sheet.onClose}
-      accessibilityLabel="메시지 액션"
+      onNavigateBack={pickerOpen ? () => setPickerOpen(false) : undefined}
+      accessibilityLabel={pickerOpen ? '이모지 고르기' : '메시지 액션'}
       scrimLabel="메시지 액션 닫기"
       scrimTestID="sheet-backdrop"
-      testID="message-action-sheet">
-      <SheetBody {...sheet} />
+      testID="message-action-sheet"
+    >
+      <SheetBody
+        {...sheet}
+        pickerOpen={pickerOpen}
+        setPickerOpen={setPickerOpen}
+      />
     </PageSheet>
   );
 }
@@ -143,6 +160,8 @@ function SheetBody({
   authorLabel,
   deletePending,
   startInDeleteConfirm = false,
+  pickerOpen,
+  setPickerOpen,
   onToggleReaction,
   onReply,
   onQuote,
@@ -150,10 +169,15 @@ function SheetBody({
   onPin,
   onEdit,
   onDelete,
-}: MessageActionSheetProps): React.JSX.Element {
+}: MessageActionSheetProps & {
+  pickerOpen: boolean;
+  setPickerOpen: (open: boolean) => void;
+}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const afterClose = usePageSheetAction();
-  const [confirmingDelete, setConfirmingDelete] = useState(startInDeleteConfirm);
+  const emojiTrigger = useEmojiTriggerFocus(pickerOpen);
+  const [confirmingDelete, setConfirmingDelete] =
+    useState(startInDeleteConfirm);
 
   const isMine = useCallback(
     (emoji: string) => chips.some(chip => chip.emoji === emoji && chip.mine),
@@ -162,7 +186,8 @@ function SheetBody({
 
   // 글 없이 사진·파일만 보낸 메시지는 「내용 없는 메시지」가 아니라 개수로 말한다 (#4294).
   const preview =
-    (message.body ?? '').trim() || (attachmentPreviewLine(message.attachments) ?? '');
+    (message.body ?? '').trim() ||
+    (attachmentPreviewLine(message.attachments) ?? '');
 
   // 두 항목이 나란히 선다. 같은 「답」이지만 가는 곳이 다르다: 「답글 달기」는 대화를 옆으로 치우고
   // (다른 화면이 열린다), 「인용하기」는 여기 남아서 저 줄을 가리킨다(ADR-0148). 낱말을 이 파일이
@@ -218,9 +243,22 @@ function SheetBody({
     ) : null,
   ].filter(Boolean);
 
+  if (pickerOpen)
+    return (
+      <EmojiPicker
+        onClose={() => setPickerOpen(false)}
+        team={{render: ({query}) => <TeamExpressionPicker query={query} onSelect={token => afterClose(() => onToggleReaction(token))} />}}
+        onSelect={glyph => afterClose(() => onToggleReaction(glyph))}
+      />
+    );
+
   return (
     <>
-      <SheetHeader title="메시지 액션" closeLabel="메시지 액션 닫기" closeTestID="sheet-close" />
+      <SheetHeader
+        title="메시지 액션"
+        closeLabel="메시지 액션 닫기"
+        closeTestID="sheet-close"
+      />
       <SheetScroll testID="sheet-scroll">
         <GroupCard>
           <View style={styles.preview}>
@@ -234,7 +272,11 @@ function SheetBody({
                 {timeLabel(message.createdAtMs)}
               </Text>
             </View>
-            <Sentence style={styles.previewBody} numberOfLines={2} testID="sheet-preview-body">
+            <Sentence
+              style={styles.previewBody}
+              numberOfLines={2}
+              testID="sheet-preview-body"
+            >
               {preview === '' ? '내용 없는 메시지' : preview}
             </Sentence>
           </View>
@@ -270,23 +312,49 @@ function SheetBody({
                         accessibilityRole="button"
                         accessibilityState={{selected: already}}
                         accessibilityLabel={
-                          already ? `${emoji} 반응 취소` : `${emoji} 반응 남기기`
+                          already
+                            ? `${emoji} 반응 취소`
+                            : `${emoji} 반응 남기기`
                         }
-                        onPress={() => afterClose(() => onToggleReaction(emoji))}
+                        onPress={() => {
+                          if (!already) emojiFrequency.record(emoji);
+                          afterClose(() => onToggleReaction(emoji));
+                        }}
                         style={({pressed}) => [
                           styles.reaction,
                           already && styles.reactionMine,
                           pressed && styles.pressed,
                         ]}
-                        testID={`quick-reaction-${emoji}`}>
+                        testID={`quick-reaction-${emoji}`}
+                      >
                         <Text
                           style={styles.reactionGlyph}
-                          maxFontSizeMultiplier={REACTION_GLYPH_MAX_SCALE}>
+                          maxFontSizeMultiplier={REACTION_GLYPH_MAX_SCALE}
+                        >
                           {emoji}
                         </Text>
                       </Pressable>
                     );
                   })}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="전체 이모지 고르기"
+                    ref={emojiTrigger}
+                    onPress={() => setPickerOpen(true)}
+                    testID="all-reactions"
+                    style={({ pressed }) => [
+                      styles.reaction,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Image
+                      source={CONV_ICONS.plus}
+                      style={{
+                        width: CONV_ICON_SIZE.plus,
+                        height: CONV_ICON_SIZE.plus,
+                      }}
+                    />
+                  </Pressable>
                 </View>
               </GroupCard>
             ) : null}
@@ -315,7 +383,11 @@ const buildStyles = (color: Palette) =>
       paddingHorizontal: SHEET.cardInset,
       paddingVertical: space.md,
     },
-    previewWho: {flexDirection: 'row', alignItems: 'baseline', columnGap: space.sm},
+    previewWho: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      columnGap: space.sm,
+    },
     // AA: `textFaint` 는 본문 대비 4.5 를 못 지난다 — 작성자·시각은 뜻을 나르는 글자다.
     previewAuthor: {
       flexShrink: 1,
@@ -324,9 +396,14 @@ const buildStyles = (color: Palette) =>
       fontWeight: '600',
     },
     previewTime: {fontSize: font.meta, color: color.textMuted},
-    previewBody: {fontSize: font.label, color: color.text, lineHeight: line.label},
+    previewBody: {
+      fontSize: font.label,
+      color: color.text,
+      lineHeight: line.label,
+    },
     reactionRow: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       justifyContent: 'space-between',
       paddingHorizontal: space.sm,
       paddingVertical: space.sm,
@@ -340,7 +417,10 @@ const buildStyles = (color: Palette) =>
       borderWidth: 1,
       borderColor: 'transparent',
     },
-    reactionMine: {borderColor: color.accent, backgroundColor: color.accentSurface},
+    reactionMine: {
+      borderColor: color.accent,
+      backgroundColor: color.accentSurface,
+    },
     // 이모지 한 글자의 도형 크기 — 역할 표의 「화면·시트 제목」(22)과 같다.
     reactionGlyph: {fontSize: font.title},
     pressed: {opacity: 0.6},

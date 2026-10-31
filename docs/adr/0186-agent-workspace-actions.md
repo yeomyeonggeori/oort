@@ -6,6 +6,7 @@
 - 역방향: 2026-10-16 [ADR-0113](0113-connector-credential-plugin-boundary.md) 증보 2 E4가 `action_type='connector_tool'`(실행 없는 결정 전달 — Hermes 쓰기 2단계, ADR-0203 증보 K6, Proposed)을 더한다. D2의 같은 tx 실행은 workspace_action에 그대로다. 본문 결정은 바꾸지 않았다.
 - 역방향: 2026-10-25 `host.session.open`·`host.install` 행동 어휘의 방향은 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347) D3·D5가 정한다. `host.session.open`은 D2의 결정 방식을 확장한다: 승인 결정 입력에 서명 필드가 있고 행동별 승인 대기 TTL(10분)이 레지스트리의 새 속성이다. 레지스트리 등록과 증보는 그 문서의 HO-15가 한다. 이 ADR의 기존 본문 결정은 바꾸지 않고 확장만 한다.
 - 증보(Accepted, 2026-10-27 owner 결재): 2026-10-27 **v5 「먼저 제안과 메시지 고정」**(#4659) — 사람이 부르지 않은 에이전트의 제안(`oort_action_initiate`)과 `message.pin`·`message.unpin`을 정한다. §2의 run-less 승인 기각은 유지하되 그 이유 (c)의 전제를 푼다. owner가 2026-10-27 질문 일곱 개를 모두 권장안으로 결재했다(「권장대로 진행하면서」). 파일 끝 「증보 2026-10-27」 절.
+- 증보 **Accepted(2026-10-29)**(owner 결재 두 번): 2026-10-29 **v6 「요청 고리」**(#4755) — 한 요청 한 묶음(서버가 카드를 종결 패치하고 옛 별도 줄을 더 쓰지 않음, 행동 승인과 도구 승인 모두)·요청 스레드 자리(#4646 흡수)·영어 원문 줄을 상태 코드로·「채널에도 한 줄」 규칙과 판단 칸(기본 꺼짐)을 정하고, 옛 줄이 하던 요청자 푸시를 맡는 푸시 생산자 하나를 ADR-0204 증보 6과 함께 더한다. D2의 결과 메시지와 부록 B를 읽는 법이 바뀐다. U-c의 C3(별도 승인함) 기각은 유지한다(인박스 「승인」 칸은 C3가 아니다). owner 2026-10-29 「나쁘지 않아 보이네. 전부 권장으로 일단 진행해봐.」(후보 페이지 결정 1~4와 결정 밖 세부의 문서 권장안 전부), 같은 날 「도구 승인도 바꿔. 그리고 다음 단계로 미루지말고 바로바로 ㄱㄱ」(도구 승인 1단계 포함 · 옛 줄 제거와 푸시 생산자를 지금). 파일 끝 「증보 2026-10-29」 절.
 - 발제: 성재 2026-09-22 「에이전트한테 웹훅 발급해줘 같은 내부 기능을 요청해도 수행하고, OpenUI 같은 철학 기반으로 gen UI로 뭔가 보여주면 좋겠다(테마 바꿔줘·누구 초대해줘·훅 발급하고 연동해줘). 유즈케이스 기반으로 AI 활용도를 극대화」
 - Consumes: ADR-0101(에이전트=1급 멤버) · ADR-0114(승인 게이트) · ADR-0162(Agent Port·hosted durable inbox) · ADR-0171(도어벨) · ADR-0174(외양=이 기기 localStorage) · ADR-0182(일시 확인 3형, 토스트 금지) · ADR-0004 증보 4(webhook 마스터키 분리 — `webhook.create` 실행기의 선행) · ADR-0159(디자인 시스템 네 상태)
 - 시장 근거(2026-09-22 조사, `docs/planning/2026-09-22-plan-revision.md` §2): Meta Muse의 「백그라운드로 일하다 승인이 필요할 때 돌아온다 + 전체 감사 기록」, Slack Code의 Plan/Task **Block Kit 허용목록 카드**, OpenUI 「State of Generative UI」의 **선언형 카탈로그 기본·오픈엔드 HTML은 샌드박스 슬롯 한정** 권고
@@ -933,7 +934,7 @@ V3-6은 owner가 제안 속도 제한을 기각한 기록이다(인사 시즌에
 | 속도 | 에이전트당 시간당 6·하루 20 [추정]. `agent_run`에서 `agent_initiated:<에이전트>:` 키의 행 수를 DB에서 센다(재시작·복제본에 안전). 한도 거절 자체는 세지 않는다(V4-10 5 방식). 환경변수로 봉인한다(`MOMO_AGENT_INITIATIVE_PER_HOUR`·`_PER_DAY`) | 숫자는 owner 질문 5 |
 | 중복 | 같은 (에이전트, 행동, 서버가 해석한 정규화 인자)가 대기 중이면 `Conflict`다. 거절된 뒤 24시간도 `Conflict`다. 만료 뒤에는 다시 올릴 수 있다. 사람이 시킨 제안(handle 경로)에는 이 쿨다운이 없다 | 거절은 사람의 「그만」이다. 비교는 jsonb 동등이고 에이전트가 쓴 문자열이 아니라 `pins`까지 포함한 해석값으로 한다 |
 | 수명 | 먼저 제안 카드의 TTL은 24시간이다 [추정] (`MOMO_AGENT_INITIATIVE_TTL_HOURS`) | 기본 1시간(`approval.rs:76`)은 승인 대기 run이 동시 실행 상한을 쥐는 비용 때문이었다(`approval.rs` 머리말). 먼저 제안 run은 상한에서 빠져(U-a) 그 비용이 없다. 소유자가 자리에 없을 때 올라온 카드가 곧바로 사라지지 않게 한다. 오래된 카드의 위험은 결정 때 재증명이 막는다 |
-| 재증명 | 승인 때 기존 V1-d에 더해 ① 끄개가 켜져 있다 ② 제안 에이전트가 활성·미정지이고 연결이 active·증명됐으며 `workspace:initiate`가 승인 범위에 있다 ③ 결정자가 에이전트의 **현재** 소유자다 ④ 행동이 아직 `initiative` 목록에 있다. 하나라도 어긋나면 기존 `action_args_invalid`(409, 승인 소모 없음)다. **거절은 항상 가능하다** | 새 영수증 어휘를 만들지 않는다(V1-d) |
+| 재증명 | 승인 때 기존 V1-d에 더해 ① 끄개가 켜져 있다 ② 제안 에이전트가 활성·미정지이고 **제안 시점의 연결 id**가 그대로 active·증명됐으며 자격이 철회되지 않았고 `workspace:initiate`가 승인 범위에 있다(접근 토큰의 만료만은 허용) ③ 결정자가 에이전트의 **현재** 소유자다 ④ 행동이 아직 `initiative` 목록에 있다. 하나라도 어긋나면 기존 `action_args_invalid`(409, 승인 소모 없음)다. 사람이 시킨 hosted 카드도 제안 시점 연결 id를 `action.pins.hostedConnection`에 기록해 결정 때 비교하며, 다른 연결이거나 핀이 없는 기존 대기 카드는 효과 0·거절 감사 1건으로 대기에 남긴다(#4821). **거절은 항상 가능하고 기존 TTL(최대 24시간)이 정리한다** | 새 영수증 어휘를 만들지 않는다(V1-d) |
 | 끄기 | 끄개 · 에이전트 정지 · 연결 해제. 끄개를 꺼도 대기 카드를 일괄 취소하지는 않는다. 재증명이 실행을 막고 TTL이 정리한다 | 일괄 취소는 쓰기 경로를 하나 더 만든다 |
 
 **감사(닫힌 어휘, 본문 없음)**
@@ -1094,9 +1095,294 @@ planner 위임 기본값(결재 질문이 아님, 이탈 시 보고): 카드 자
 | U-a ① | 「에이전트 `member` 행 잠금(…`lock_agent_and_count_pending_workspace_actions_in_tx`와 같은 잠금)」 | **에이전트별 advisory 락이 첫 락이다**(`momo_agent::initiative::lock_agent_initiative_in_tx`, 키는 `initiative_lock_key`). `member` 행의 `FOR NO KEY UPDATE`는 모든 메시지 쓰기·결정의 wake·신원 증명이 쥐는 `FOR SHARE`와 충돌해서 같은 에이전트의 동시 호출이 구조적으로 교착했다(PR A 보안 검수 M1). 사람이 시킨 제안(`oort_action_propose`)도 **같은 락을 첫 문장으로** 잡는다(PR B): 합계 대기 3개는 두 생산자가 나눠 쓰는 자리라서, 한쪽이 센 뒤 쓰기 전에 다른 쪽이 끼어들면 넷이 된다. 락이 첫째일 때만 이 문이 쥔 락 말고는 아무것도 기다리지 않는다 |
 | U-d 속도 | 「`agent_run`에서 `agent_initiated:<에이전트>:` 키의 행 수를 센다」 | `agent_member_id` + 접두 `agent_initiated:`(`run::AGENT_INITIATED_KEY_PREFIX`)로 센다 — 두 값은 한 생산자가 같은 입력으로 쓰므로 같은 행 집합이다. 부분 인덱스 `agent_run_initiative_rate_idx`(migration 155)가 받치고, 조회 문장은 같은 술어를 리터럴로 적는다(L5). 환경변수는 `MOMO_AGENT_INITIATIVE_PER_HOUR`(기본 6, 1..=60)·`_PER_DAY`(20, 1..=240)·`_TTL_HOURS`(24, 1..=168)이고 범위 밖은 가장 가까운 끝값으로, 숫자가 아니면 기본값으로 쓰며 부팅 때 한 번 경고한다(L6) |
 | U-d 중복 | 「같은 (에이전트, 행동, 서버가 해석한 정규화 인자)」 | 키는 `payload.initiative.key`에 서버가 해석 뒤에 쓴다(`pins` 밖: 결정이 `pins`를 지금의 해석과 비교한다). `channel.create`는 이름을 소문자로 하고 `-`·`_`를 빼고 끝 숫자를 떼어 줄인다(`qa`·`QA`·`qa2`·`qa-2`가 한 키, `qa-team`은 다른 키, 숫자뿐인 이름은 그대로). 나머지는 id다(`channel.member.add`는 채널 id + 사람 id 집합, 핀은 메시지 id). 쿨다운은 **거절(`rejected`)만** 시작한다: 만료는 아무도 「그만」이라 하지 않은 것이고, `cancelled`는 사람의 run 취소뿐 아니라 시스템 정리에서도 나오므로 사람의 말로 읽지 않는다 |
-| U-d 재증명 | 「제안 에이전트가 활성…연결이 active·증명됐으며…결정자가 현재 소유자」 | 카드가 선 **그 연결**을 `payload.initiative.connection_id`에 적고(`card_bookkeeping`/`card_connection_id` 한 쌍), 결정 때 그 연결이 **여전히 그 에이전트의 `active`·증명된 연결이고 현재 자격증명이 revoke되지 않았는지**를 본다(`momo_auth::hosted_connection_stands_in_tx` — 정의는 한 곳). 자격증명의 **만료는 보지 않는다**: OAuth 연결의 `active_token_id`는 30분짜리 access token이라 하루 기다린 카드에서는 늘 만료돼 있고(루틴), revoke(운영자의 긴급 폐기·refresh 재사용 탐지)는 의도된 일이라 카드를 끝낸다(PR B 보안 검수 H1·2회차 Medium-1). 끊었다 다시 만든 연결은 다른 id라 옛 카드는 살아나지 않는다. 증명된 연결 id는 그대로 **해석기(핀의 "덮임")와 `channel.create` 실행기(잠금·`approved_channel_ids` 추가·`channels_granted` 감사)로 넘어간다** — 한 군데만 고치면 같은 읽기를 쓰는 뒷 단계가 만료된 토큰을 「연결 없음」으로 읽어 핀은 409, `channel.create`는 에이전트만 방에 앉히고 덮임·감사를 건너뛰는 반쪽 실행이 된다(2회차 High-1). 이 연결이 증명과 쓰기 사이에 끝나면(경주) 쓰기 전에 거절한다 — 먼저 제안 카드는 반쪽으로 실행되지 않는다. scope·에이전트(활성·미정지)는 `initiative_scope_and_agent_stand_in_tx`, 연결 확인자 == 소유자(L2)와 결정자 == 현재 소유자는 문의 조건 4와 같은 술어(`initiative_facts_in_tx`)로 읽고, 끄개는 문과 같은 읽기(`switch_is_on`)다. 연결 표지가 없는 카드는 닫힌 쪽(`action_args_invalid`)이다. 결정자 비교는 DM이 두 사람뿐이라 실제 경로에서는 겹치는 띠지만, 방에 소유자가 아닌 admin이 있게 되면(미래 경로·데이터 보정) 그 사람의 탭이 소유자 눈으로 그려진 카드를 실행하지 못하게 하는 유일한 지점이다 — 시험이 세 번째 admin으로 잰다. 사람이 시킨 카드는 이 경로를 타지 않고 지금처럼 살아 있는 연결을 신선한 자격증명으로 찾는다(후속 참고) |
+| U-d 재증명 | 「제안 에이전트가 활성…연결이 active·증명됐으며…결정자가 현재 소유자」 | 카드가 선 **그 연결**을 `payload.initiative.connection_id`에 적고(`card_bookkeeping`/`card_connection_id` 한 쌍), 결정 때 그 연결이 **여전히 그 에이전트의 `active`·증명된 연결이고 현재 자격증명이 revoke되지 않았는지**를 본다(`momo_auth::hosted_connection_stands_in_tx` — 정의는 한 곳). 자격증명의 **만료는 보지 않는다**: OAuth 연결의 `active_token_id`는 30분짜리 access token이라 하루 기다린 카드에서는 늘 만료돼 있고(루틴), revoke(운영자의 긴급 폐기·refresh 재사용 탐지)는 의도된 일이라 카드를 끝낸다(PR B 보안 검수 H1·2회차 Medium-1). 끊었다 다시 만든 연결은 다른 id라 옛 카드는 살아나지 않는다. 증명된 연결 id는 그대로 **해석기(핀의 "덮임")와 `channel.create` 실행기(잠금·`approved_channel_ids` 추가·`channels_granted` 감사)로 넘어간다** — 한 군데만 고치면 같은 읽기를 쓰는 뒷 단계가 만료된 토큰을 「연결 없음」으로 읽어 핀은 409, `channel.create`는 에이전트만 방에 앉히고 덮임·감사를 건너뛰는 반쪽 실행이 된다(2회차 High-1). 이 연결이 증명과 쓰기 사이에 끝나면(경주) 쓰기 전에 거절한다 — 먼저 제안 카드는 반쪽으로 실행되지 않는다. scope·에이전트(활성·미정지)는 `initiative_scope_and_agent_stand_in_tx`, 연결 확인자 == 소유자(L2)와 결정자 == 현재 소유자는 문의 조건 4와 같은 술어(`initiative_facts_in_tx`)로 읽고, 끄개는 문과 같은 읽기(`switch_is_on`)다. 연결 표지가 없는 카드는 닫힌 쪽(`action_args_invalid`)이다. 결정자 비교는 DM이 두 사람뿐이라 실제 경로에서는 겹치는 띠지만, 방에 소유자가 아닌 admin이 있게 되면(미래 경로·데이터 보정) 그 사람의 탭이 소유자 눈으로 그려진 카드를 실행하지 못하게 하는 유일한 지점이다 — 시험이 세 번째 admin으로 잰다. 사람이 시킨 카드도 hosted 제안자라면 결정 때 **같은 행 상태 판정**(`hosted_connection_stands_in_tx`)으로 제안자의 연결을 증명한다(#4772) — **모든 저장 행동**에 적용하고(연결이 서 있지 않으면 카드는 효과 없이 대기로 남고 `action_args_invalid`), 자격증명 만료만으로는 거절하지 않는다. 관리형 제안자는 「연결 없음」과 따로 분류해 그대로 실행한다. 사람이 시킨 카드를 제안 시점의 연결 id에 묶는 것은 후속 #4821이다 |
 | U-d 감사(결정 쪽) | 「어느 행에도 인자 값·rationale·메시지 본문·채널 이름이 없다」 | 이 문장은 **새 행(`opened`·`refused`)과 결정 쪽 `approval.*` 행**에 적용한다. 일반 결정 이벤트(`decision_event_payload`)는 저장된 payload 전체를 싣는데 먼저 제안 카드에서 그것은 에이전트의 글(`rationale`·고른 이름)이라, 감사용 사본에서는 `payload`를 빼고 `origin`만 더한다(`decision_audit_detail`; PR B 보안 검수 M2). **도메인 행**(`channel.created` 등)은 V6가 정한 모양 그대로다 — 사람이 승인해 이미 세상에 존재하게 된 사실(만들어진 채널의 이름)을 적는 기존 행이고, 먼저 제안이라고 형태가 바뀌지 않는다(`origin`만 더한다) |
 | U-d 감사 | 「합쳐서 가려지는 횟수는 후속에서 다음 창의 첫 행에 싣는 방안을 본다」 | 구현했다. (워크스페이스, 에이전트, reason)마다 한 시간 창을 `agent_initiative_refusal`(migration 155)이 쥐고, 첫 거절만 행을 쓰며 나머지는 `suppressed`를 올리고, 창이 지난 뒤 첫 거절의 행이 그 수를 `detail.suppressed`로 싣고 0에서 다시 시작한다(항상 키가 있고 없으면 0). 이미 쓴 감사 행은 고치지 않는다. 행이 없는 거절: 문 1·2의 실패(이 자격증명은 먼저 제안 자격이 아니다), 트랜잭션 전에 스키마가 거르는 인자, 같은 id의 재호출(읽기이고 아무것도 쓰지 않는다) — 아홉 이유 밖이고 열 번째를 만들지 않았다 |
 | U-k 5 | 「정지는 같은 `Unavailable`」 | 정지·연결 해제된 에이전트는 도구 목록이 비어(`resolve_hosted_tool_identity_in_tx`가 `paused=false`를 요구) **어느 도구든 「알 수 없는 도구」**(400, -32602)로 답한다. `Unavailable`은 목록과 호출 사이에 정지가 끼어든 경우의 몫이다 |
 | U-c 시험 의무 | 「비멤버 admin은 거절된다(현행은 403)」 | 결정 라우트는 소유자 DM 밖의 누구에게든 **없는 승인과 같은 404**로 답한다(인플레이스 카드와 같은 분기, 두 표지 중 하나면 먼저 제안 카드). 미리보기(`avatar-preview`)는 먼저 제안이 사진을 올리지 않으므로 처음부터 모두에게 404다 |
 | U-f 알림 | 「승인·거절 때 제안 에이전트 인박스에 `agent_run` 참조가 정확히 1건」 | 인박스 참조의 권한 술어(`append_reference_in_tx`)는 자격증명이 **신선**할 것을 요구한다(인박스는 그 자격증명으로 읽는 것이라서). 자격증명이 만료된 연결에서는 승인·거절이 성립하되 참조가 쓰이지 않는다(관리형·연결 없는 제안자와 같은 「조용히 0건」). 에이전트는 같은 `clientRequestId`로 다시 물어 `approved`·`ref`를 받는다 — U-f가 처음부터 재호출을 정본으로 둔 이유다. 갱신 뒤 알림을 받게 하려면 별도 결정이 필요하다(후속) |
+
+## 증보 2026-10-29 — 요청 고리: 한 요청 한 묶음·요청 스레드 자리·채널에도 한 줄과 판단 칸·상태 코드 (v6, #4755)
+
+- Status: **Accepted(2026-10-29)** — owner 결재 두 번이다. ① owner 2026-10-29 「나쁘지 않아 보이네. 전부 권장으로 일단 진행해봐.」(후보 페이지의 결정 1~4와, 결정 밖 세부의 문서 권장안 전부). ② 같은 날 owner 「도구 승인도 바꿔. 그리고 다음 단계로 미루지말고 바로바로 ㄱㄱ」 — planner가 물은 세 질문의 답이다: (가) 요청한 사람에게도 「거부됨·끝」 알림은 **한다**(planner 권장안, 결정한 사람은 빼고 그 대화를 보고 있으면 생략), (나) 도구 실행 승인(`tool_call`)도 새 묶음 카드로 **바꾼다, 1단계에 포함**, (다) 옛 줄을 없애려고 푸시 생산자를 하나 더함(ADR-0204 증보 1 D8-a)은 **지금 한다, 2단계로 미루지 않는다**. 줄마다 달린 `[Accepted: …]`는 그 줄의 근거가 되는 owner 말의 짧은 인용(「전부 권장으로」 · 「도구 승인도 바꿔」 · 「바로바로 ㄱㄱ」)이거나 후보 페이지의 결정 번호다. ADR-0100에 따라 공개 API(카드 props · `body` · 종결 `message.edited` 프레임 · 결정 응답 · run 진행 · 승인 읽기의 가산 필드)와 푸시 생산자 하나를 바꾸는 구현 PR은 이 증보를 근거 ADR로 머지할 수 있다.
+- 발제: owner 2026-10-29 요청의 요지(비공개 캡처 기준). 승인·제안·기록 화면이 딱딱하고 과하다. 채널에 카드가 계속 나열되는 구조보다 요청 메시지의 스레드가 낫지 않은지, 사고 중임을 보여 주면 좋을지, 판단을 모델이 정하면 어떤지. 후보 세 개(A 제자리 묶음 · B 요청 스레드 · C 작업 패널 + 인박스)를 owner가 비교해 B를 골랐다.
+- 기안: Sonnet 5.5 설계 워커(#4755 1단계). 같은 날 owner의 두 번째 결재(옛 줄 폐지 · 도구 승인 1단계 · 푸시 생산자 지금)를 반영해 R-b 이하를 고쳐 썼다(Sonnet 5.5). 구현은 이 증보 밖이다.
+- Consumes: 이 ADR의 D2 · D5 · 부록 A/B/C · V6 · 증보 v5의 U-c · U-f · ADR-0148 증보(#4622) · ADR-0200 D5 · 증보 4 · 증보 5 · ADR-0204 D7 · D8 · 증보 1 D8-a · 증보 2 D6 · ADR-0199 · ADR-0182 ③ · ADR-0132 · ADR-0100. 짝: ADR-0204 증보 6(푸시 문장 · 바로 승인 기준 · 요청한 사람 알림과 세 번째 푸시 생산자), `docs/design-system/agent-request-loop.md`(화면·낱말·재는 것).
+- 표기: [V] 코드·문서 직접 확인(R-0의 1~10은 track/engine `3dae6e581`, 11~15는 개정 때 이 트리 `8dee99838`에서 더 읽었다. 읽기만 했고 실행하지 않았다 — `runtime-unverified`) · `[Accepted: 인용]` 근거가 되는 owner 말 · [확인 필요] 구현 전 실측(결정이 아니라 측정 항목이다).
+- 이 증보가 **의도적으로 바꾸는 것** 여섯:
+  1. D2의 「승인·거부·만료 뒤 에이전트 명의 `tool_result`」와 부록 B의 영속 `action_result` 카드. 끝 상태의 정본이 승인 카드 자신이 되고 **옛 별도 줄은 더 쓰지 않는다**(R-b, 행동 승인과 도구 승인 모두).
+  2. 카드·도구 줄·최종 답의 자리. 채널 최상위 트리거는 요청 메시지의 스레드다(ADR-0148 증보와 ADR-0200 증보 5의 「어긋남」을 닫고 #4646을 흡수한다, R-c).
+  3. 영어 원문 줄을 쓰지 않고 상태 코드 + 한국어 문장으로(R-d).
+  4. 「채널에도 한 줄」 규칙과 판단 칸(R-e).
+  5. 카드 props · `body` · 종결 `message.edited` 프레임 · 결정 응답 · run 진행 · 승인 읽기의 가산 필드(R-f).
+  6. `push_candidate`의 세 번째 생산자(승인 종결, R-b 5 · ADR-0204 증보 6 D6-5). ADR-0204 증보 1 D8-a의 「그 밖의 생산자는 Accepted ADR 없이 더하지 않는다」에 대한 Accepted 근거가 이 증보와 ADR-0204 증보 6이다.
+- **바꾸지 않는 것**: D2의 결정 입력과 같은 tx 실행 · D3 위험 등급 · D4 1회 시크릿 · 결정 라우트 2개 · 한 run 한 제안 · U-c의 C1(먼저 제안 카드는 소유자 1:1 DM) · **U-c의 C3(별도 승인함) 기각** · ADR-0204 D7의 받는 사람 · `approval.channel_id NOT NULL` · `schema_v0.sql` · 승인 뒤 도구가 도는 길의 `tool_result`(모델의 도구 결과) · 이미 쓰인 옛 줄과 카드(고치지도 지우지도 않는다).
+
+### R-0. 코드로 확인한 사실 (1~10: 2026-10-29 track/engine `3dae6e581`, 11~15: 같은 날 개정 때 `8dee99838`)
+
+1. 승인 카드(`approval_request`)는 결정 때 props가 제자리 패치된다(`patch_message_props_in_tx`·`patch_and_prune_message_props_in_tx`, `routes/approvals.rs`의 `decided_props_patch` 부근). 패치 함수는 방송을 내지 않고, 카드를 알리는 것은 `approval.decided` 봉투 한 번이다(`momo-messaging/src/message.rs` 두 함수의 문서).
+2. **만료와 취소는 카드를 패치하지 않는다.** 만료를 정하는 곳은 둘이다: notifier 스윕 `settle_expired_in_tx`(`bins/momo-notifier/src/approval_sweep.rs`)와 마감 뒤 클릭 `settle_expired`(`approvals.rs`). 둘 다 승인 상태 갱신 · run 종료(`timed_out`, 코드 `approval_expired`) · 종료 프레임 · 영어 줄 · 감사 · 방송을 쓰지만 카드 props는 `pending`으로 남는다(#3982).
+3. 결과 메시지를 쓰는 곳은 셋이고 멱등 키가 다르다: 실행됨 = `result_client_msg_id(approval.id)`, 거부·만료 = `approval.id`. 같은 키를 나눠 쓰면 `(channel, author, client_msg_id)` 가드가 한 줄을 조용히 버린다(`momo-agent/src/actions.rs`의 `result_client_msg_id` 문서).
+4. 거부 줄: 본문 영어 `"Tool call rejected by human approval."`(인플레이스 승인은 한국어 상수), `tool_result`, 작성자 = 제안한 에이전트, `root_id: None`, props `approval_id`·`run_id`·`status:"rejected"`·`decided_by`·`decided_at_ms`·`reason`. run은 `cancelled`(코드 `approval_rejected`)로 끝난다. **`answers_message_id`가 없어서 푸시가 조용하다**(ADR-0204 증보 1 D8).
+5. 만료 줄: 본문 영어 `"Tool call expired without a human approval."`(인플레이스는 한국어 상수), `is_error` 도구 결과, props `status:"expired"`·`decided_at_ms`와, 트리거가 있으면 `answers_message_id`. 푸시가 묻는 사람을 찾는다(ADR-0204 D8).
+6. 행동 승인의 성공은 `momo.action_result.v1` 영속 카드를 `tool_result`로 쓴다. 부록 B가 정한 `status ∈ executed | rejected | expired | role_required` 가운데 서버가 쓰는 것은 `executed`뿐이다. 인플레이스 채널 승인은 결과 줄을 쓰지 않는다(카드 패치가 「승인됨」을 말한다).
+7. 카드 `body`는 행동 승인이 `"승인 요청: {title}"`(`workspace_action_request_body`), 도구 승인이 영어 `"Approval required: {tool}"`이다. 푸시 본문과 카드를 모르는 옛 클라이언트의 폴백이 이 `body`를 그대로 읽는다.
+8. 행동 제안 카드(`oort_action_propose`, `agent_port_tools.rs`)와 결과 · 거부 · 만료 줄(`approval_sweep.rs` 포함)은 `root_id: None`이다. 인플레이스 채널 승인 카드와 호출 불가 안내 줄만 서버가 「말한 자리」(`root_id: send.root_id`, `agent_mentions.rs`)를 따른다. 최종 답만 `trigger_root_id`를 따른다(ADR-0148 증보). ADR-0200 증보 5의 「답 자리 현황」 표가 이 갈림을 「어긋남」으로 적었다.
+9. 조사 노트가 가리킨 「한 카드 밑에 줄 둘을 피하려는」 주석(`actions.rs` 2206-2213)은 이 트리에서 **찾지 못했다**. 이 증보는 그 이유를 근거로 쓰지 않고, 확인된 두 이유만 다룬다: ADR-0182 ③(다시 찾을 결과는 지속 카드)과 위 3번의 멱등 키 분리. [확인 필요: 없음 확인]
+10. `momo_notifier`는 `message`에 SELECT·INSERT·UPDATE grant가 있다(`infra/rust/sql/bootstrap_runtime_roles.sql` 472).
+11. **줄을 읽는 쪽.** 모델 컨텍스트 창은 `tool_result`를 `[tool_result]`로, `approval_request`를 `[approval_request]`로만 접는다(`momo-messaging/src/message.rs`의 `context_message_body`). 거부·만료 줄은 `end_parked_run_in_tx`로 run을 끝낸 **뒤에** 쓰이는 사람 쪽 기록이라(`reject_run` · `settle_expired_in_tx`) 모델에 되돌아갈 턴이 없다. 그래서 앞 초안의 「도구 승인에서는 줄이 모델의 도구 결과일 수 있다 [확인 필요]」는 아니다로 닫힌다. 외부 에이전트의 `oort_conversation_read`는 `props`를 싣지 않고 `type`·`state`·`body` 등만 싣는다(`routes/agent_port_tools.rs`의 `gated_channel_page`). 줄을 없애면 에이전트가 끝 상태를 읽는 길은 카드 `body`다.
+12. **카드가 실시간으로 바뀌는 길.** 결정 때의 카드 패치(`patch_message_props_in_tx`)는 방송이 없다. 채널 승인 카드를 그리는 웹·폰 타임라인에는 `approval.decided` 봉투의 소비자가 없다(웹 `settledApprovals.ts`와 폰 `settledApprovalNotifications.ts`의 머리말이 그렇게 적고, 코어·웹·폰을 grep해도 타임라인 쪽 소비자가 없다. `approval.decided`를 읽는 곳은 작업 세션·작업대 칸이다). 그래서 결정하지 않은 시청자의 카드는 새로 고침 전까지 `pending`이다(#3771의 원인 1). 앞 초안 R-b 3의 「클라이언트는 봉투로 카드를 제자리 갱신한다」는 이 점에서 틀렸고, 지금까지는 옛 줄의 `message.new` 프레임이 그 일을 대신해 왔다. 서버가 직접 고친 행을 알리는 기존 길은 `emit_message_edited_in_tx`다: #1152의 `message.edited` 전행 프레임을 `props`·`body` 그대로, `seq`·`state`·`edited_at` 불변으로 내보내고 웹·폰이 이미 제자리 적용한다(T3 인계 카드 도장 `StampedHandoffCards`가 선례이고, `stream_message_body_in_tx`가 `edited_at`을 건드리지 않는 것이 같은 선례다).
+13. **푸시 판정이 후보를 읽는 법.** 후보 디코더는 `message_id`·`channel_id`만 읽고 `source`는 무시한다. 판정은 후보가 아니라 **메시지의 현재 상태**를 읽는다(`momo-push/src/candidate.rs`). 수신자 CASE의 순서는 `resume_offer` → `work_session_idle` → `work_run_done` → **`approval_request` 타입이면 사람 멤버 모두에게 `approval_request`**(그 뒤 Rust가 이 이유의 대상만 「결정할 수 있는 사람」으로 좁힌다) → 멘션 → `dm` → 물은 사람(`mention`)이다(`judgment.rs`). 물은 사람 팔은 읽음 창을 줄의 `created_at`(제안 시각)에서 재고 `last_read_seq >= seq` 지름길을 쓰는데, 스트림이 닫힌 줄만 판정 시각(`now()`)에서 재고 지름길을 쓰지 않는다. 또 `category_for`는 `approval_request` 메시지를 이유와 상관없이 승인 카테고리(`momo.approval` · `momo.approval.open`)로 보낸다(`momo-push/src/dispatch.rs`).
+14. **푸시 발송의 중복 제거와 생산자.** `collapse_id`는 메시지 id 하나로 정해지고(`m:<id>`), 발송 기록의 유니크 `(member, token, collapse_id)`가 같은 키의 두 번째 발송을 삼킨다(`dispatch.rs` · `dispatch_log.rs`). `push_candidate` 생산자는 지금 둘이다: `message` INSERT 트리거와 스트림 닫힘(`emit_stream_closed_push_candidate`, 페이로드에 `source`)이다(`docs/architecture/overview.md`의 푸시 후보 단락, ADR-0204 증보 1 D8-a).
+15. **권한과 다른 소비자.** `momo_notifier`는 `message`와 `outbox`에 `SELECT, INSERT, UPDATE` 테이블 권한이 있다(`infra/rust/sql/bootstrap_runtime_roles.sql`). `message`의 UPDATE 트리거는 셋이다. ① 메모리 트리거(`102_mem_worker.sql`, `BEFORE UPDATE`)는 `edited_at`·`deleted_at`·`state`가 바뀔 때만 돈다. ② 이벤트 구독 트리거(`message_event_subscription_mentions_trg`, migration 033, `AFTER UPDATE OF props`)는 `props`를 고치면 언제나 깨지만 함수 안에서 `mention_member_ids`가 비었다가 채워질 때만 구독 배달을 만든다. ③ 인박스 멘션 투영(`inbox_item_project_mentions_trg`, migration 126, `AFTER UPDATE OF props`)은 `WHEN`이 그 키의 변화로 걸러 준다. 종결 패치는 `props.status`·`code`·`result`와 `body`만 바꾸고 `mention_member_ids`는 건드리지 않으므로 셋 다 아무것도 쓰지 않는다. ②의 함수가 `momo_notifier` 역할로 도는 것만 확인하면 되고, 그 함수가 부르는 쪽의 권한(`event_subscription` SELECT, `outbox` INSERT)은 이미 준다(`bootstrap_runtime_roles.sql`의 주석이 「INSERT/props UPDATE가 이 함수를 부른다」고 적는다). 인박스 투영(migration 126)은 `text`·`artifact`만 행으로 만들어서 `tool_result`·`approval_request`는 대상이 아니다. 줄을 없애도 인박스 행은 영향이 없다.
+
+### R-a. 결정 넷이 이 ADR에 닿는 곳
+
+| 결정 (owner 2026-10-29) | 이 증보의 처리 | 상태 |
+|---|---|---|
+| 1 자리 = B 요청 스레드, DM 제자리, #4646 흡수 | R-c | Accepted |
+| 2 생각 글: 진행 메모 40자만, 흐르는 글은 저장 안 함 | **새 결정이 아니다.** #4655 Q2와 같고 ADR-0200 D5의 한계 문장(`textDelta`는 저장하지 않는다)과 같다. ADR-0200에는 한 줄 참조만 더했다. 40자는 R-f에서 서버 검증을 건드리지 않고 화면이 줄인다 | Accepted(재확인) |
+| 3 푸시 바로 승인은 위험이 낮은 것만 | ADR-0204 증보 6 | Accepted(원칙) · Accepted(행별 판정: 「전부 권장으로」) |
+| 4 판단 칸: 기본 규칙, 모델은 켰을 때만 이진 하나 | R-e | Accepted(원칙) · Accepted(세부: 「전부 권장으로」) |
+| 5 (같은 날 두 번째 결정) 도구 승인도 새 묶음 카드로 · 옛 줄은 지금 없앰 · 요청한 사람에게 거부됨·끝 알림 | R-b · ADR-0204 증보 6 D6-5 | Accepted(「도구 승인도 바꿔」 · 「바로바로 ㄱㄱ」) |
+
+바닥 규칙(한 요청 = 한 묶음, 문장이 머리, 실패는 우리말, 상태는 아이콘 + 낱말, 원장 번호·원본 데이터는 「자세히」와 기록에만)은 owner가 세 후보 공통으로 승인했다. 이를 서버·클라이언트 어느 쪽이 지키는지는 결정 밖이라 R-b가 정했다: 서버가 카드를 쓰고 옛 줄은 더 쓰지 않는다 [Accepted: 「바로바로 ㄱㄱ」].
+
+### R-b. 한 요청 한 묶음 — 서버가 카드를 종결 패치하고 옛 별도 줄을 더 쓰지 않는다 [Accepted: 「바로바로 ㄱㄱ」]
+
+**닻.** 묶음의 닻은 제안 때 서는 승인 카드(`approval_request`) 한 장이다. 새 메시지 종류나 새 컴포넌트는 없다.
+
+| 안 | 모양 | 판정 |
+|---|---|---|
+| H 서버 쓰기가 정본 + 옛 줄 1단계 유지 + 클라이언트 접기 (처음 권장) | 모든 종결에서 같은 카드 props를 패치하고, 옛 줄(실행됨 카드 · 거부 줄 · 만료 줄)은 `bundle_of`를 달아 남기고, 클라이언트가 접는다 | **기각.** owner가 옛 줄을 다음 단계로 미루지 말라고 했다 [Accepted: 「바로바로 ㄱㄱ」] |
+| C 클라이언트 접기만 | 서버는 그대로, 클라이언트가 `approval_id`로 메시지를 묶어 합성한다 | **기각.** 만료 · 취소 뒤 카드 `status`가 `pending`으로 남는 #3982를 못 고친다. 웹 · 폰 · 옛 클라이언트마다 합성 규칙이 갈린다(패리티 분기) |
+| **S 서버가 카드를 종결 패치하고 옛 줄을 더 쓰지 않음 (채택)** | 한 함수가 카드 `props`와 `body`를 패치하고 `message.edited` 전행 프레임으로 알리며, 줄이 하던 요청자 푸시는 종결 후보가 맡는다 | **채택** [Accepted: 「도구 승인도 바꿔」 · 「바로바로 ㄱㄱ」]. 처음 초안이 S를 미룬 걱정 셋이 풀렸다: 요청자 푸시는 새 생산자(5, ADR-0204 증보 6 D6-5)가 맡고, 에이전트의 대화 읽기는 카드 `body`로 이어지며(R-0 11), 도구 승인 줄은 모델 입력이 아니다(R-0 11) |
+
+**S의 규칙.**
+
+1. **한 곳에서 종결을 쓴다.** 승인 · 거부 · 만료(스윕과 마감 뒤 클릭) · 취소(사람이 run을 멈춰 대기 승인을 함께 취소하는 곳) 모두 같은 트랜잭션에서 하나의 함수로 아래 2 · 3 · 5를 쓴다(이름은 구현이 정한다). 현행 잠금 순서를 지킨다: 제안자 인박스 참조를 쓰는 경로(U-f `wake_proposer_in_tx`)는 그것이 먼저고, 줄이 서던 자리에 카드 패치가 선다. 종결이 카드를 안 패치하는 길이 다시 생기지 않도록 시험이 모든 종결 경로를 센다(R-j). #3982를 이 안에 흡수한다.
+2. **패치 내용.** `props`: `status`(기존 키: `approved` · `rejected` · `expired` · `cancelled`) · `code`(run 종료 코드 `approval_rejected` · `approval_expired` 등) · `decided_by` · `decided_at_ms`(기존) · `result`(부록 B `momo.action_result.v1` 객체와 같은 모양, 그리고 한 줄 `line`). `result.status`는 `executed | rejected | expired | cancelled | role_required`로 넓힌다. `rejected` · `expired`는 이제 서버가 쓴다. shallow `||` 병합이라 `result`는 통째로 바뀐다. 기존 `last_attempt` 정리 관례는 그대로다. `body`는 `result.line`(한국어 한 문장, R-d)으로 바꾼다. `state` · `edited_at` · `seq`는 건드리지 않는다(「수정됨」은 사람이 고쳤다는 주장이라 서버 도장에는 쓰지 않는다). `result`는 행동 승인의 승인과 모든 거부 · 만료 · 취소에 쓴다. 도구 승인의 승인은 실행이 워커에서 비동기로 이어지므로 `result` 없이 `status:"approved"`와 결정 문장 `body`만 쓴다(「실행 중 → 끝」은 run이 말한다, 디자인 시스템 §2.2).
+3. **방송은 `message.edited` 전행 프레임 한 번이다.** 패치 직후 같은 tx에서 `emit_message_edited_in_tx`로 내보낸다. 새 프레임 종류도 새 소비자도 없고 웹 · 폰이 이미 제자리 적용한다(R-0 12). `approval.decided` 봉투는 지금처럼 한 번 나가고 늘리지 않는다. 이 프레임 한 번이 옛 줄의 `message.new`가 해 온 실시간 전달을 대신한다. 이것이 없으면 결정하지 않은 시청자의 카드는 새로 고침 전까지 `pending`이다.
+4. **옛 줄을 더 쓰지 않는다.** 아래 셋을 쓰던 곳을 지운다. 행동 승인과 도구 승인 모두이고, 인플레이스 채널 승인의 한국어 거부 · 만료 줄도 같다.
+   - 실행됨 카드(`momo.action_result.v1`을 실은 `tool_result`, `result_client_msg_id`)
+   - 거부 줄(`reject_run`의 `tool_result`)
+   - 만료 줄(notifier 스윕 `settle_expired_in_tx`와 마감 뒤 클릭 `settle_expired`의 `tool_result`)
+
+   승인 뒤 도구가 실제로 도는 길의 `tool_result`(워커 `tool_exec`의 결과)는 모델의 도구 결과라서 이 규칙 밖이다. 이미 쓰인 옛 줄과 카드는 고치지도 지우지도 않는다(백필 없음).
+5. **요청자 푸시는 종결 이벤트가 만든다.** 만료 줄의 `answers_message_id`가 하던 일(만료를 요청한 사람에게 알림)과 새로 더한 거부 · 끝 알림을, 같은 tx에서 `push_candidate` 후보 1건이 맡는다. 이것이 ADR-0204 증보 1 D8-a가 말한 **세 번째 생산자**다. 받는 사람 · 카테고리 · 읽음 창 · 중복 제거 · 결정한 사람 제외는 ADR-0204 증보 6 D6-5가 정한다 [Accepted: 「바로바로 ㄱㄱ」]. 이 후보는 같은 카드 메시지를 가리키는 두 번째 후보라서 메시지 상태만으로는 처음의 「승인 필요」 후보와 구분되지 않는다. 그래서 이 생산자부터 판정이 후보의 `source`를 입력으로 읽는다(R-0 13).
+6. **이행 기간의 본문 폴백.** 종결 패치가 카드 `body`를 `result.line`으로 함께 바꾸고 3의 프레임으로 내보낸다. 카드 모양을 모르는 옛 클라이언트, `props`를 싣지 않는 Agent Port 대화 읽기(R-0 11), 본문을 REST로 읽어 채우는 푸시 알림 확장이 끝 상태를 `body`에서 읽는다. 옛 클라이언트가 이 폴백에 기대는 기간은 새 카드 모델이 웹 · 데스크탑 · 폰에 퍼질 때까지이고, 패치 자체는 푸시와 에이전트가 계속 읽으므로 그 뒤에도 남는다.
+7. **거부 · 만료 · 취소는 도구 실패가 아니다** [Accepted: 「전부 권장으로」, 권장이 「실패로 세지 않는다」였다]. 줄이 없으니 `is_error`를 쓸 곳이 없고, 상태는 카드 `status`와 run 종료 코드(`approval_rejected` · `approval_expired`)가 말한다. 옛 클라이언트가 이 줄을 「도구 실행 · 실패」로 그리던 일은 새 줄이 없어서 더 생기지 않는다. 이미 쓰인 옛 줄은 `is_error:true` 그대로 기록에 남는다.
+8. **접기는 없다.** 옛 줄이 더 생기지 않으므로 `bundle_of`로 줄을 접는 클라이언트 규칙도 없다. 새 클라이언트는 카드의 끝 상태를 `props`에서 그린다. 이미 쓰인 옛 줄은 기록이라 그대로 그려진다.
+
+**범위.** 1단계는 행동 승인(`workspace_action`)과 도구 승인(`tool_call`) 둘 다다 [Accepted: 「도구 승인도 바꿔」]. 도구 승인의 차이는 둘이다. 첫째, 승인 뒤 실행이 워커에서 이어지므로 카드 `result`가 없다(2). 둘째, 승인 뒤 도구가 도는 길의 `tool_result`는 모델의 도구 결과라서 그대로 쓴다(4). owner 캡처의 영어 줄은 도구 승인 만료 줄이었고, 이 증보가 구현되면 그 줄은 한국어로 바뀌는 데 그치지 않고 다시 생기지 않는다.
+
+**D2와 부록 B의 읽는 법이 바뀌는 곳.**
+
+| 원문 | v6 이후 |
+|---|---|
+| D2 승인: 「에이전트 명의 `tool_result` 메시지(부록 B)」 | 카드 `result`가 정본이다. 별도 `tool_result` 메시지는 더 쓰지 않는다 |
+| D2 거부·만료: 「기존 arm 그대로 + 에이전트 명의 `tool_result`」 | arm은 그대로이고, 줄이 카드 패치로 바뀐다 |
+| D5 `action_result` kind 「영속 카드」 | 같은 모양이 승인 카드의 `result`로 옮겨 간다. ADR-0182 ③(다시 찾을 결과는 지속 카드)은 승인 카드 자신이 지속 카드라서 지켜진다. 이미 쓰인 `action_result` 카드는 기록으로 그대로 그려진다 |
+| 부록 B `status` 어휘 (`executed` / `rejected` / `expired` / `role_required`) | `cancelled`를 더하고 서버가 모두 쓴다(쓰는 곳은 카드 `result`다) |
+
+### R-c. 자리 B — 카드·도구 줄·최종 답의 자리를 한 곳이 정한다 (#4646 흡수) [Accepted: 결정 1]
+
+| 트리거가 놓인 자리 | 카드 · 도구 줄 · 최종 답의 `root_id` | `reply_to_id` |
+|---|---|---|
+| 채널 최상위(DM 아님) | **트리거 메시지 자신** | 트리거 |
+| DM | 없음(본류) | 트리거 |
+| 스레드 안(그 root가 같은 채널의 살아 있는 최상위) | 그 root | 트리거 |
+| 스레드 안인데 root가 삭제됨 | 없음 | 트리거 |
+| 트리거 없는 run(작업 run) | 없음 | 없음 |
+| 먼저 제안(U-c) | 없음(소유자 1:1 DM의 본류) | 없음 |
+
+1. **한 곳이 정한다.** `GatewayRunSnapshot::trigger_root_id`를 `{스레드 root | 트리거 자신 | 본류}`를 말하는 값으로 넓히고(채널 종류를 같은 잠근 문장에서 읽는다), 다음 쓰기가 모두 그 값을 읽는다: 최종 답 네 경로(REST 콜백 · `oort_run_complete` · 관리형 워커의 커밋과 스트림 열기 · 팀 AI), 승인 카드 생산자(외부 Agent Port의 행동 제안 · 관리형 도구 승인 카드와 tool_call 카드 · 팀 AI 도우미 카드), 정지 줄(결과 · 거부 · 만료 줄은 R-b가 더 쓰지 않는다). 종결 패치는 카드의 `root_id`와 `reply_to_id`를 바꾸지 않는다(트리거가 지워져도 한 묶음이 한 스레드에 남는다).
+2. 롤업과 `thread.updated`를 지키는 쓰기(`send_thread_notice_in_tx`)를 쓴다(ADR-0148 증보). `root_id`만 넣고 롤업을 건너뛰지 않는다.
+3. **인용.** `reply_to_id`는 그대로 쓴다(푸시 판정이 읽는다). 스레드 root 자신을 가리키는 인용 블록은 중복이라 클라이언트가 그리지 않는다 [Accepted: 「전부 권장으로」].
+4. 같은 이슈가 확인할 것: 푸시 · 안 읽음 · hosted 인박스가 스레드 답글을 세는 방식, 스레드 깨우기 W1(「첫 답글을 에이전트가 쓴 스레드」 판정으로 사람의 평문 답글이 그 에이전트를 깨운다)이 의도된 동작인지 시험으로 정한다(#4646의 확인 항목).
+5. **출시 순서.** 서버가 먼저 뒤집히면 카드가 「답글 1개」 뒤로 숨는다. 서버 자리 B는 **스레드 요약 줄의 승인 필요 칩과 결정 버튼이 웹·폰에 착륙한 뒤에 켠다**(구현 순서 R-k가 반영한다) [Accepted: 「전부 권장으로」].
+6. 시험은 네 경로 × 세 자리(DM · 채널 최상위 · 스레드 안)의 표를 실제 PG 행으로 구동한다. `agent_answer_place_pg.rs`의 채널 최상위 시험을 먼저 붉게 만든다.
+
+### R-d. 영어 원문을 쓰지 않는다 — 상태 코드 + 한국어 [Accepted: 「전부 권장으로」]
+
+1. **정본은 코드다.** 사람 화면용 필드(`body`·`props` 문장)에 영어를 쓰지 않는다. 행동 승인과 도구 승인 모두이고, 도구 승인은 1단계에 포함된다 [Accepted: 「도구 승인도 바꿔」]. `props.status`와 `props.code`가 정본이고, 한국어 문장은 클라이언트가 코어의 사전에서 읽는다.
+2. 카드 `body`는 제안 때 질문 한 문장(ADR-0204 증보 6 D6-3)이고 종결 때 `result.line`이다(R-b 2). 푸시 본문 · 카드를 모르는 옛 클라이언트 · 에이전트의 대화 읽기가 읽는 `body`는 기기가 코드를 읽을 수 없는 자리라서 서버가 **한국어 중립문**을 쓴다. 필요하면 문장 뒤에 행동 제목을 ` · {제목}`으로 붙인다(푸시 문장과 같다, D6-3). 결정한 사람의 이름은 쓰는 시점의 표시 이름을 문장에 넣어도 된다(그 문장은 시점 스냅샷이고 카드는 `decided_by`로 현재 이름을 읽는다).
+
+| 영어 원문(옛 줄 · 더는 쓰지 않는다) | 코드 | 한국어 `body` · `result.line` |
+|---|---|---|
+| `Tool call expired without a human approval.` | `expired` · `approval_expired` | 승인을 기다리다 만료됐어요 |
+| `Tool call rejected by human approval.` | `rejected` · `approval_rejected` | 이도현 님이 거부했어요(결정한 사람을 모르면 「거부됐어요」) |
+| (옛 줄 없음) | `approved` | 이도현 님이 승인했어요(도구 승인의 결정 문장. 행동 승인은 결과 한 문장 `result.line`이 이 자리를 쓴다) |
+| `Approval required: {tool}` | — | 도구 「{이름}」을 실행해도 될까요?(제안 때 카드 `body`) |
+| `Approval expired before a human decision.` | — | 감사 사유라서 화면에 나오지 않는다. 그대로 |
+
+3. 코드→문장 표는 서버와 코어가 **같은 골든 데이터 한 파일**을 읽는 시험으로 잠근다(소스 글자를 단정하지 않고 데이터를 읽는다).
+4. **낱말은 한 곳이 정한다.** 클라이언트 코어의 `runPhaseLabel`이 종료 코드 `approval_expired`에서 「만료」, `approval_rejected`에서 「거부」를 정하고 칩 · 카드 · 인박스 행이 그것을 읽는다. 지금 같은 run(`timed_out` + `approval_expired`)은 칩이 「만료」인데 예외 줄 머리말이 「시간 초과」(`runException`이 `runPhaseLabel`을 읽고 `END_REASON_TEXT` 「승인이 만료됐어요」를 붙인다)라서 한 행에 두 낱말이 선다. 그래서 **승인으로 끝난 run에는 예외 줄을 세우지 않는다**(칩이 말하고 묶음 카드가 설명한다, 디자인 시스템 §1·§7). #4705가 영어 스윕 줄을 클라이언트에서 임시로 번역한 `EXPIRED_LINE_TITLE` · `EXPIRED_LINE_NOTE` · `EXPIRED_ROW_COPY` 가운데, 줄을 번역하던 앞의 둘은 새 줄이 더 생기지 않으므로 이미 쓰인 옛 줄을 기록으로 읽는 데만 남고, `EXPIRED_ROW_COPY`는 이 문장 · 낱말로 대체된다(`EXPIRED_CARD_COPY`는 결정하려던 사람에게 컨트롤 자리에서 말하는 안내라 그대로다).
+5. 말 사전(승인의 반대 낱말 「거부」 등)은 `docs/design-system/agent-request-loop.md` 7절이 정한다. 반대 낱말은 ADR-0204 증보 2 D6(Accepted)을 따른다.
+
+### R-e. 「채널에도 한 줄」과 판단 칸
+
+**규칙 [Accepted: 결정 4의 규칙부].** 요청이 채널(최상위)에서 왔고 결과가 채널에 보이는 변화면 채널 본류에 에이전트 명의로 한 줄이 더 선다. 아니면 스레드에만 있다.
+
+1. 행동 레지스트리에 속성 `announce: bool`을 더한다(`initiative`와 같은 방식). 첫 기본값 [Accepted: 「전부 권장으로」]: `true` = `channel.create` · `channel.member.add` · `message.pin` · `message.unpin` · `agent.rename`, `false` = 그 밖 모두(1회 값을 내는 `invite.create`·`agent.invite`, `member.avatar.set`, `agent.profile.update`, `hosted.channels.grant`, `workspace.*`, `plugin.install`). DM · 스레드 안 요청 · 먼저 제안은 해당 없다.
+2. **한 줄의 모양.** 본류(`root_id` 없음), 에이전트 명의, `reply_to_id` = 요청 메시지, `props.bundle_of` = `approval_id`와 `props.announce:true`, 본문은 결과 한 줄(카드 `result.line`과 같은 문장). 멱등 키는 R-0.3의 두 키(이미 쓰인 옛 줄 포함)와 겹치지 않는 결정적 키다. `bundle_of`는 이 줄이 어느 묶음의 알림인지 가리키는 역참조일 뿐 접기 표지가 아니다(R-b 8).
+3. 이 줄은 **푸시를 만들지 않는다.** 요청한 사람은 이미 결과를 받는다(ADR-0204 증보 6). 푸시 판정은 `announce:true`를 조용한 줄로 취급한다.
+
+**판단 칸 [Accepted: 결정 4의 원칙 · 세부는 「전부 권장으로」].**
+
+- 질문 하나, 선택지 둘: 「이 결과를 채널에도 한 줄 알릴까?」 — 스레드에만 / 채널에도 한 줄. 기본은 규칙이고 **기본은 꺼짐**이다. 모델은 켰을 때만 이 둘 중 하나를 고르고, 실패하거나 늦으면 규칙으로 간다. **승인 · 보안 · 권한 · 결정 라우팅 · 푸시 받는 사람 · 카드 내용은 절대 정하지 않는다.**
+- 구조로 막는다. 판정 함수는 `(규칙 기본값, 모델 답) → Announce`(두 값 enum)만 돌려주고, 승인 결정 · 행동 실행 · 푸시 판정의 함수가 그 모델 호출에 의존하지 않는다. 시험은 모델 호출이 그 경로들에서 도달 불가함을 구조로 보이고 사보타주한다.
+- **#2883의 결정 칸을 쓴다.** 별도 키 슬롯 · 꺼짐/관찰/켜짐 · 외부 전송 동의 문장 · 「지금 재기」는 그쪽이 정한다. 이 질문은 그 칸의 두 번째 질문 종류다. 판단 칸의 켜기는 #2883과 그 판정기 ADR이 Accepted된 뒤에만 한다.
+- 모델 입력은 행동 id와 서버가 만든 결과 요약 행뿐이다. 요청 메시지 본문과 대화 이력은 보내지 않는다. 에이전트는 이 판정을 부르지도 결과를 보지도 못한다. 제한 시간은 800ms로 시작한다. 켠 첫 단계는 관찰(판정은 하되 적용 없이 기록만)이다.
+- 이 판정은 보안 판정이 아니라 **표시 판정**이라서, 1차 판정기 제안서의 「단조 강화만」은 「표시만, 두 방향 모두 허용」으로 바뀐다. 규칙이 「채널에도」인데 모델이 「스레드에만」이어도, 반대여도 스레드의 결과는 같다.
+- 묶음 감사 행에 한 키 `announce_source ∈ {rule, model, fallback}`를 더한다.
+
+### R-f. 가산 계약 (공개 API, ADR-0100) [Accepted: 「전부 권장으로」 · 「바로바로 ㄱㄱ」]
+
+| 값 | 어디 | 비고 |
+|---|---|---|
+| `props.status` · `props.code` · `props.result{status,rows,ref,next,line}` | 승인 카드 | 종결 패치. `result`는 부록 B 객체 + `line`이고 부록 B와 D4의 규칙 그대로 1회 값 · 원본 코드 · 해시 · 프리뷰를 싣지 않는다 |
+| 카드 `body`(값만 바뀐다) · 종결 `message.edited` 전행 프레임 | 승인 카드 · 방송 | 종결 패치마다 한 번. `body`는 `result.line`(없으면 결정 문장). `seq` · `state` · `edited_at` 불변. 새 프레임 종류 없음 |
+| `props.intent` · `action.rows[].before` / `.after` | 승인 카드(제안 때) | 머리 문장의 「하려는 일」 한 구절(행동마다 서버가 만든다: 이름은 작성자에서 읽고 문장에 굽지 않는다, 증보 v5 U-c와 `proposal_summary`의 문서)과 값 칩의 이전 → 이후 구조. 구조가 없는 옛 카드는 한 줄 값(`value`)으로 그린다 |
+| `props.decision_mode` (`inline`/`open`) | 승인 카드 · 승인 목록 | `opens_in_app()` 한 함수의 결과(ADR-0204 증보 6) |
+| `props.bundle_of` · `props.announce` | 「채널에도」 줄 | 묶음 역참조(접기 없음) · 푸시 조용 |
+| `receipt.line` | 결정 응답(영수증) | 잠금 화면 결과 알림 문장. 구버전 폴백 있음 |
+| `AgentRunProgress.bundle{approvalId,status,decisionMode,canDecide,line}` | run 진행 읽기 | 채널의 상태 칩과 스레드 요약 줄. `canDecide`는 보는 사람 기준 |
+| 승인 목록: 모든 상태 · 결정자 · 결정 시각 · 결과 요약 · 자리(채널 · root · DM 여부) · 쪽매김 | 승인 읽기 | 인박스 「승인」 칸. 채널 멤버십으로 서버가 거른다(ADR-0199 D4의 조회 시 가시성 재판정, D5의 수신자 격리와 같은 규칙) |
+| `announce`(행동 속성) | 레지스트리 | R-e |
+| `push_candidate` 페이로드의 `source` 값 하나(승인 종결) | outbox | 세 번째 생산자(ADR-0204 증보 6 D6-5). 새 outbox 종류가 아니다. 판정이 이 값을 읽는다(R-0 13) |
+
+- 새 테이블 · 새 컬럼 · 새 outbox 종류 · BYPASSRLS가 없다. `push_candidate`의 세 번째 생산자 하나가 늘고, 그 목록(`docs/architecture/overview.md` · `OutboxKind::PushCandidate` 문서)은 구현 PR이 함께 고친다(D8-a의 같은 의무). 모든 쓰기는 기존 `agent_tenant_tx` / `momo_app` 트랜잭션 안이고, 만료 스윕은 기존대로 `momo_notifier`의 워크스페이스별 tenant tx 안이다.
+- **notifier의 카드 패치.** `momo_notifier`는 `message`와 `outbox`에 `SELECT, INSERT, UPDATE` 테이블 권한이 있고(R-0 15) 남은 확인은 `UPDATE message SET props = …, body = …`가 그 역할의 RLS 정책을 통과하고 `props` UPDATE 트리거 둘(R-0 15의 ② ③)이 그 역할로 권한 오류 없이 도는지다. U-f가 인박스 표 grant 때문에 만료를 뺐던 것과 같은 종류의 위험이라서, 이 시험은 앱 역할이 아니라 **운영 역할 스위트**로 돈다 [확인 필요]. 옛 줄이 이제 없으므로 통과하지 못하면 스윕 만료가 아무 흔적도 남기지 못한다. 그래서 이 수리가 스윕에서 줄을 지우는 변경의 **선행 조건**이다: 정책을 고친 뒤에만 스윕의 `tool_result` 쓰기를 지운다. #3982는 그 역할 정책 수리와 함께 푼다.
+- **노출.** `result`와 `body`는 `message.edited` 전행 프레임으로 채널 전체에 나간다. 옛 실행됨 카드도 같은 사람들에게 같은 내용을 보였으므로 새 노출은 아니다. 시험은 모든 행동의 `result`와 `body`에 1회 값 · 원본 코드 · 해시 · 프리뷰가 없음을 단정한다(R-j).
+- 진행 메모 40자: 서버 `stage` 검증(80자)은 이 증보가 바꾸지 않는다. 화면이 40자를 넘는 메모를 한 줄에서 줄이고 전문은 펼침에서 보인다. 상한을 40으로 줄일지는 #4655 증보가 `activities[].label ≤40`과 한 번에 정한다.
+
+### R-g. 인박스 「승인」 칸은 U-c의 C3가 아니다
+
+U-c의 C3(별도 승인함)는 새 채널 종류 · 새 화면 · 푸시가 필요하고 `approval.channel_id NOT NULL`과 멤버십 게이트에 부딪혀서 기각됐다. 이 증보의 「승인」 칸은 **새 채널 종류도, 새 화면 종류도, `approval.channel_id` 변경도 없다.** 지금 인박스 안의 「처리할 일」(웹) · 「결정 대기」(폰)와 숨은 「활동」(웹 `/activity`, 폰 8번째 칩)의 **승인 행을 한 칸으로 합치는 재배치**다. 대기 승인이 이미 인박스 응답에 합쳐진다는 사실(ADR-0199 D2·D6 `approvalsPending`)은 그대로고 읽기 확장은 R-f에 있다. 그러므로 C3의 기각은 유지된다.
+
+### R-h. 기각한 대안
+
+- **순수 클라이언트 접기(C)**: R-b. 기각한다.
+- **서버가 옛 줄을 지움(S)**: R-b. 처음 초안은 1단계에서 기각하고 2단계로 남겼으나 owner의 결정으로 **S를 1단계에서 채택**한다 [Accepted: 「다음 단계로 미루지말고 바로바로 ㄱㄱ」]. 처음 권장이던 H(서버 쓰기 + 옛 줄 1단계 유지 + 클라이언트 접기)는 기각한다. H를 세운 세 이유가 풀렸다: 푸시 생산자 추가 금지는 ADR-0204 증보 6 D6-5가 열었고, 에이전트의 대화 읽기는 카드 `body`로 이어지며, 도구 승인 줄은 모델 입력이 아니다(R-0 11).
+- **후보 A 제자리 묶음 · 후보 C 작업 패널**: owner가 B를 골랐다. C를 고르면 C3를 다시 열어야 했다.
+- **에이전트가 카드 자리를 정함(C2)**: U-c에서 기각, 유지.
+- **모델이 승인 · 권한 · 보안을 판단**: 결정 4가 금지한다.
+
+### R-i. 위험과 완화
+
+1. **패치 경쟁.** 스윕 · 마감 뒤 클릭 · 사람 취소 · 늦은 승인이 한 승인을 두고 겹칠 수 있다. 모두 승인 행의 `FOR UPDATE`(`lock_approval_in_tx`)와 `mark_*`의 「pending일 때만」 가드를 지나고, 카드 패치 · `message.edited` 프레임 · 푸시 후보는 그 가드를 통과한 쪽만 쓴다. 옛 줄의 `client_msg_id`가 하던 두 번째 방어선이 사라지므로 이 가드가 유일한 방어선이다. 시험은 스윕과 클릭의 경주를 구동한다.
+2. **롤링 배포.** 옛 클라이언트 + 새 서버: 옛 줄이 오지 않고 카드가 종결 상태로 패치된다. 카드가 아는 상태(`approved` · `rejected` · `expired`; `expired`는 `expiry.ts`가 `status`로 이미 읽는다)는 현행대로 그려지고 `result`와 새 낱말은 무시한다. 결과 카드(링크 · 다음 행동)를 못 보고 카드가 「승인됨」으로만 보이는 이행 기간을 받아들이며, 끝 상태는 본문 폴백이 말한다(R-b 6). 새 클라이언트 + 옛 서버: 옛 서버가 줄을 계속 쓰므로 줄이 그대로 그려진다(현행 모양, 영어 줄은 #4705 번역). 서버가 먼저 나가고 폰은 스토어 배포가 늦어서 옛 폰 빌드의 이행 기간이 가장 길다.
+3. **스레드 안 카드의 가시성.** 카드가 스레드에만 있어 아무도 스레드를 안 열면 안 보인다. 결정할 사람에게는 상태 칩 · 푸시 · 인박스 「승인」 칸이 있다. 옛 클라이언트가 `root_id`가 있는 카드로의 푸시 착지를 처리하는지는 [확인 필요]이고, 그래서 서버 자리 B는 UI 뒤에 켠다(R-c 5).
+4. **판단 칸의 외부 전송.** 켜지 않으면 호출 0이다. 켜는 것은 #2883 쪽 동의와 ADR이 Accepted된 뒤다.
+5. **푸시 회귀.** 만료 푸시가 줄의 `answers_message_id`에서 종결 후보로 옮겨 간다. 옛 길이 사라질 때 새 길이 없으면 요청한 사람이 만료를 어디서도 못 듣는다. 줄을 지우는 변경과 생산자는 같은 PR이거나 생산자가 먼저이고, 만료 푸시가 줄 없이 요청자에게 정확히 한 번 가는 시험이 줄 제거의 입장 조건이다(R-k).
+6. **에이전트가 끝 상태를 못 읽음.** 외부 에이전트의 대화 읽기는 `props`를 싣지 않는다. 줄 대신 카드 `body`가 끝 상태를 말하고(R-b 6), 제안자 인박스 참조(U-f)와 같은 `clientRequestId`로 다시 묻는 길은 그대로다. 만료는 인박스 참조가 없고(U-f가 뺐다) 재호출이 정본이다.
+7. **`body` 덮어쓰기와 늦게 읽는 알림.** 푸시 알림 확장은 본문을 REST로 읽는다. 「승인 필요」 푸시가 늦게 배달되는 사이 카드가 종결되면 종결 문장에 승인 버튼이 붙어 보일 수 있다. 눌러도 결정은 409로 막히고 결과 알림이 「이미 승인된 요청이에요」로 말한다(ADR-0204 D6-4). 새 위험은 아니고 푸시 문장이 마지막 `body`를 따르게 된 결과다.
+
+### R-j. 시험 의무(구현 슬라이스가 인용할 red proof)
+
+호출자가 보는 결과(응답 · DB 행 · 화면)만 단정하고, 불변식은 실제 PG 행으로 본다. 각 시험은 해당 분기를 지우면 실패해야 하고 RED를 PR 본문 사보타주 표에 남긴다(예: 푸시 후보 쓰기를 지우면 만료 푸시 시험이, `emit_message_edited_in_tx`를 지우면 프레임 시험이 붉어진다).
+
+1. 승인 · 거부 · 만료(스윕) · 만료(마감 뒤 클릭) · 취소 **다섯 경로 모두**, 행동 승인과 도구 승인 모두에서 카드 `props.status`가 종결 상태로 패치되고(행동 승인의 승인과 모든 거부 · 만료 · 취소는 `result`도), `body`가 `result.line`이며(없으면 결정 문장), `message.edited` 전행 프레임이 정확히 한 번 나가고 `seq` · `state` · `edited_at`이 그대로다(#3982).
+2. 카드 · 도구 줄 · 최종 답이 네 경로에서 R-c 표와 같은 `root_id`를 갖는다(네 경로 × 세 자리).
+3. **어느 종결 경로도 옛 줄을 쓰지 않는다**: 행동 승인과 도구 승인의 다섯 경로에서 종결 전후 `message` 행 수가 같다(`tool_result` · `action_result` INSERT 0건). 승인한 도구 승인을 워커가 실행해 쓰는 도구 결과 줄은 그대로 생긴다. 카드 `body`와 `props`의 사람 화면 필드에 영어가 0건이고 `status` · `code`가 있다.
+4. 스윕과 클릭이 경주해도 카드 패치 · 프레임 · 푸시 후보가 한 번씩이다. `announce` 줄의 멱등 키가 옛 줄 키(`approval.id` · `result_client_msg_id(approval.id)`)와 겹치지 않는다(이미 쓰인 옛 행 포함).
+5. `announce` 기본값 표대로 본류 한 줄이 생기고, 그 줄은 푸시를 만들지 않는다(요청자 푸시는 한 번).
+6. 판정 함수가 승인 · 실행 · 푸시 경로에서 도달 불가하다(구조 시험 + 사보타주). 꺼짐이면 호출 0. 실패 · 시간 초과면 규칙.
+7. 운영 역할로 notifier 스윕의 `UPDATE message`(`props`와 `body`)가 RLS 정책과 `props` UPDATE 트리거(이벤트 구독 · 인박스 멘션 투영, R-0 15)를 권한 오류 없이 통과한다(R-f의 [확인 필요]). 이 시험이 스윕에서 줄을 지우는 변경의 입장 조건이다.
+8. 요청자 푸시: 만료가 줄 없이도 요청자에게 정확히 한 번 가고, 거부 · 끝은 요청자 ≠ 결정자일 때만 가며, 종결 후보는 승인 카테고리를 쓰지 않는다. 세부 시험은 ADR-0204 증보 6 D6-8의 5~7이다.
+9. 에이전트 읽기: `oort_conversation_read`가 종결된 카드의 `body`에서 끝 상태를 읽는다. 모든 행동의 `result`와 `body`에 1회 값 · 원본 코드 · 해시 · 프리뷰가 없다.
+
+### R-k. 구현 슬라이스와 결재 기록
+
+구현 슬라이스는 #4755의 체크리스트 코멘트에 있다(한 슬라이스 = 한 이슈 = 한 브랜치·PR). 서버 쪽은 #3982(카드 종결 패치 · 행동 승인과 도구 승인의 옛 줄 쓰기 제거 · 영어 줄 → 상태 코드, R-b·R-d) · #4646(자리 B, R-c) · #4763(읽기 확장, R-f) · #4764(푸시 문장 · `decision_mode` · 승인 종결 푸시 생산자, ADR-0204 증보 6) · #4766(「채널에도 한 줄」 규칙, R-e) · #4767(판단 칸, #2883 선행)이다. UXUI 쪽은 #4760(코어 묶음 모델) · #4761(웹·데스크탑) · #4762(폰) · #4765(인박스 「승인」 칸)다.
+
+**순서.** ① 서버 자리 B는 웹·폰 UI(#4761·#4762)가 착륙한 뒤에 켠다(R-c 5). ② 옛 줄을 지우는 변경(#3982)은 다섯 종결 경로의 패치 · 프레임 시험(R-j 1), notifier의 `UPDATE message` 운영 역할 시험(R-j 7), 요청자 푸시 생산자가 만료 푸시를 줄 없이 이어받는 시험(R-j 8)이 통과한 뒤에만 들어간다. 같은 PR 안의 커밋 순서(패치 · 프레임 · 생산자 → 줄 제거)여도 되고 PR 순서여도 된다. 슬라이스를 어떻게 나누든 이 순서를 지킨다.
+
+owner 결정은 모두 Accepted다. 아래는 앞서 planner가 물은 질문 일곱과 그 답이다(이 증보를 올린 PR 본문에도 같은 내용이 있다).
+
+| # | 질문 | 결정 | 근거 |
+|---|---|---|---|
+| 1 | 한 묶음을 서버 쓰기 정본 + 옛 줄 1단계 유지 + 클라이언트 접기(H)로 할까요 | 서버 쓰기 정본 + **옛 줄을 더 쓰지 않음(S)**. H는 기각 | 「다음 단계로 미루지말고 바로바로 ㄱㄱ」 |
+| 2 | 옛 줄 제거(2단계)를 위해 푸시 생산자 하나를 늘릴까요 | **지금 늘린다**(2단계 없음) | 「다음 단계로 미루지말고 바로바로 ㄱㄱ」 |
+| 3 | 요청한 사람이 결정한 사람과 다를 때 거부 · 끝도 푸시할까요 | **한다**(결정한 사람은 빼고, 그 대화를 보고 있으면 생략) | planner 권장 · 「바로바로 ㄱㄱ」 |
+| 4 | 행동 승인의 거부 · 만료 줄을 `is_error:false`로 쓸까요 | 줄이 없어져 해당 없음. 권장의 뜻(도구 실패로 세지 않음)은 카드 `status`와 종료 코드로 유지 | 「전부 권장으로」 |
+| 5 | 서버 자리 B를 UI 착륙 뒤에 켤까요 | 그렇게 한다 | 「전부 권장으로」 |
+| 6 | `announce` 기본값 표 | R-e 1 그대로 | 「전부 권장으로」 |
+| 7 | 도구 승인(`tool_call`)의 카드 합치기와 줄 숨김을 2단계로 미룰까요 | **미루지 않는다. 1단계에 포함**(줄은 숨기지 않고 쓰지 않는다) | 「도구 승인도 바꿔」 |
+
+## 증보 2026-10-30 — 내 이름·내 사진·에이전트 이름·에이전트 사진 (v7, #4791)
+
+**Status: Accepted.** 근거: [#4791](https://github.com/yeomyeonggeori/oort/issues/4791)의 owner 결정(2026-10-30): 「6. 에이전트를 활용해서 모바일과 데탑에서 내 프사, 내 이름, 에이전트 프사, 에이전트 이름 변경」. 이 증보는 아래 두 계약을 열고, 네 장면을 팀 AI·Agent Port와 폰·웹(데스크탑 공용 번들)에 함께 잇는다. v4의 첨부 전용·팀 AI 제외 제한은 이 범위에서 대체한다.
+
+### P7-1. 새 행동 `member.display_name.set`
+
+- 인자는 **`{displayName}` 하나**다. `memberId`·`targetHandle`·`target` 등 대상 인자는 없다. 대상은 제안자의 실행을 시작한 메시지를 쓴, 현재 활동 중인 **사람 본인**이다. 서버가 `requester_of_run_in_tx`로 workspace·run·제안자를 함께 확인한다. 팀 AI도 자기 run의 작성자를 쓰며 `via_ai`나 모델이 적은 이름을 권한 근거로 삼지 않는다.
+- 권한은 `requesting_member`다. **요청한 본인만 승인**하고 관리자·에이전트 소유자·에이전트 자신은 대신 결정하지 못한다. 먼저 제안(`initiative`)은 닫혀 있다.
+- 이름 정규화는 사람의 `PATCH …/members/me`와 같은 `normalized_join_display_name`(trim, 1~100자)이다. 실행도 `rename_own_display_name_in_tx`를 그대로 쓴다. 다른 사람의 이름을 바꾸는 창구가 생기지 않는다. 사람이 직접 정할 수 있는 이름 범위가 넓어지지 않는다.
+- 카드의 대상 id와 기존 이름을 pin한다. 승인 전에 이름이 달라지면 `action_args_invalid`이고 승인은 대기로 남는다. 성공은 같은 tenant tx 안의 member 갱신·채널별 `member.renamed` outbox 방송·`member.renamed` 감사 **1행**이다. 감사는 기존 스키마에 `via_agent`·`approval_id`를 더한다. 핸들·역할은 바꾸지 않고 과거 메시지의 멘션 텍스트도 고치지 않는다(ADR-0185 E2).
+
+### P7-2. `member.avatar.set`의 사진 출처
+
+- 기존 `{attachmentId}`는 그대로다. 요청자가 **같은 대화**에 보낸, 완료된 PNG/JPEG/WebP 첨부만 읽는다. 남의 첨부·다른 대화·삭제된 메시지·미완료 첨부는 여전히 같은 거절이다.
+- **`{avatar:{source:"generated",dataBase64}}`**도 받는다. 에이전트가 만든 이미지뿐 아니라 가져온 이미지도 이 모양이다. 직접 URL·프리셋·대상 인자는 받지 않는다. 가져오기와 축소는 에이전트가 하고 서버는 네트워크 URL을 따라가지 않는다. 두 출처를 한 번에 보내면 거절한다.
+- `agent.profile.update`와 같은 표준 base64·**44,000 decoded bytes** 상한, 첨부 **5 MiB**, 한 변 **4,096 px / 16 MP**, 디코드 할당 상한·동시성 제한·시간 제한·재인코딩을 쓴다. GIF·SVG·애니메이션·HEIC는 열지 않는다. 원본 바이트·base64·임의 MIME은 카드·저장 인자·감사에 남지 않는다.
+- 모든 이미지가 서버의 staged 행이 되고 대상·제안자·승인 id·sha256에 묶인다. 본인만 인가 미리보기를 읽고 결정한다. 실행 시 바이트 pin과 현재 요청자를 다시 증명한다. 거절·만료·중복 결정·감사·방송은 v4와 같다. 사진 출처만 넓어지고 대상·결정 권한은 넓어지지 않는다.
+
+### P7-3. 네 장면과 전달
+
+| 부탁 | 행동 | 승인 |
+|---|---|---|
+| 내 이름을 바꿔 줘 | `member.display_name.set` | 요청한 본인 |
+| 내 사진을 바꿔 줘 | `member.avatar.set` | 요청한 본인 |
+| 네 이름을 바꿔 줘 | `agent.rename` | 대상 에이전트 소유자 또는 관리자(기존 계약) |
+| 네 사진을 바꿔 줘 | `agent.profile.update`의 `avatar` | 대상 에이전트 소유자 또는 관리자(기존 계약) |
+
+팀 AI의 허용 목록에 두 사람 행동을 더한다. 프리셋만 받던 팀 AI 사진 경로도 같은 이미지 검증·staging을 쓴다. 요청 메시지의 이미지 id만 데이터로 제공하고 다른 사람의 대화 지시를 가져오지 않는다. 팀 AI 첨부 읽기는 요청자의 같은 대화로 한정한다. Agent Port의 에이전트 사진도 해당 run의 요청자가 같은 대화에 보낸 첨부를 쓸 수 있어 1:1 DM에서 이어진다. 기존 비DM 승인 채널의 이미지 읽기도 유지한다. DM 라우팅·참여·연결 범위 판정은 바꾸지 않는다. 기존 워커의 tenant tx 예외만 유지하고 새 DB 역할·BYPASSRLS 권한은 만들지 않는다. 워커의 `build_archive_reader`가 읽기 전용으로 여는 것은 local 보관소뿐이다(`LocalDriveArchive::open_reader`). Drive 보관소는 기존 `build_archive`로 구성한 `GoogleDriveArchive`를 그대로 사용하며, 읽기 전용 래퍼나 추가 권한 제한은 없다. Drive에 읽기 전용 리더를 도입하는 변경은 이 증보에 포함하지 않는다.
+
+폰·웹 승인 카드는 이름의 **바꾸기 전 → 바꾼 뒤** 글자와 사진 두 칸(기존 사진·승인할 서버 이미지)을 보여 준다. 사진의 이전 주소는 서버가 만든 버전별 인가 경로만 받는다. 사진 없음·불러오기·실패 상태를 구분하고 기존 결정 버튼·큰 글자·밝음/어두움·동작 줄이기 규칙을 유지한다. 실제 생성·가져오기 provider와 캡처 기반 검수는 스택 검증에서 확인한다.
+
+### P7-4. 검증 계약
+
+레지스트리 **16개** = OpenAPI enum, Agent Port enum **12개** = 레지스트리의 외부 제안 가능 목록, 팀 AI enum **11개** = 팀 AI 허용 목록을 드리프트 시험으로 묶는다. 실 PG에서 네 장면의 제안→본인/소유자 승인→반영→관련 감사 1행·방송을 확인한다. 대상 인자 주입, 다른 결정자, stale 이름, 다른 run/사진 pin, 잘못된 이미지 형식·크기·디코드 상한은 등급 2 사보타주의 RED 대상이다. 독립 보안 검수는 착륙 전 최대 두 번이며, 화면·전체 시험은 S1 스택 검증에서 한다.
+
+## 증보 2026-10-30 — 팀 표현 행동: `expression.create` (v8, #4301)
+
+> Status: **Accepted** — owner 2026-10-30 08:20 질문 창의 방향 확정·GIF 사이트 단건 허용 결정(#4301). 영상 변환은 [ADR-0218 D4](0218-workspace-expressions.md#d4-짧은-영상-처리--보류-owner-2026-10-30-4819)대로 **보류**다(owner 2026-10-30, #4819).
+> 이 증보는 파일 끝에 가산한다. v7(#4808) 바로 뒤에 둔다.
+
+### X8-1. 행동과 고정 스키마
+
+한 번 등록한 그림을 반응·본문·단독 큰 전송에 같이 쓴다. `emoji.create`/`sticker.create` 두 행동 대신 **`expression.create` 한 행동**을 추가한다. 기존 `oort_action_propose`의 action/args에 [ADR-0218 부록 B](0218-workspace-expressions.md#4-부록-b--고정-json-schema--props--행동)의 `AgentAction`을 넣는다. 후보는 1~4개이며 각 후보는 name/displayName/tags/subjectMemberId와 닫힌 `image`를 가진다. 모든 후보의 subjectMemberId는 같아야 한다.
+
+- `image.source=attachment`: 런 요청자가 **같은 대화**에 올린 완료·미삭제 첨부만. V4의 `find_requester_attachment_in_tx` 판정을 재사용하되 **기록된 매체 종류만 쓰임새별로 나눈다**: 아바타는 PNG/JPEG/WebP 그대로이고, 표현 출처는 여기에 **GIF**(ADR-0218 D3의 전체 프레임 검사를 지난다)와 **영상**(MP4/MOV/WebM — `video_processing_unavailable` 카드로 끝난다, D4 보류)을 더한다. 기록된 종류는 첫 거름일 뿐 바이트가 최종 판정한다. 남의 사진·다른 대화·알 수 없는 id는 같은 invalid arguments다. 서버 보관 범위를 워크스페이스 전체로 넓히는 사실을 승인 카드에 표시한다.
+- `generated`: 에이전트가 자기 비용으로 만든 PNG/JPEG/정지 WebP/GIF 바이트 + 생성 prompt. base64 디코드 후 ≤1 MiB. 서버/팀 AI 생성 호출은 없다. prompt는 에이전트가 쓴 평문으로 카드에 표시하고 감사·로그에는 싣지 않는다.
+- `url`: HTTPS 링크 한 개. **GIF 사이트도 허용**한다. 공급자 API·대량 수집·미디어 직접 렌더는 없다. `momo-unfurl`의 DNS/IP pin·redirect 매 hop·시간·크기 가드로 받는다. 출처는 query/fragment/credential 없는 원래 공개 host/path만 기록한다.
+
+규격·영상·REST·그림 경로·고정 JSON Schema의 유일한 정본은 [ADR-0218](0218-workspace-expressions.md)이다. v8에서 다른 상한·와이어를 복제하지 않는다. 생성 후보를 실제로 운반하려면 현행 MCP 64 KiB/문자열 한도 변경이 필요하다. S3는 ADR-0218 부록 A의 **expression.create 전용 전체 6 MiB/후보당 1 MiB** 예산을 모든 transport/제안 저장 경로에 연결하고 기존 행동 예산은 유지한다. 에이전트 지시문/도구 설명은 다음을 가르친다: 후보 ≤4, 출처와 생성 prompt 명시, 사람 얼굴이 있으면 당사자를 묻고 지정, 못 받으면 출처 링크와 직접 올리기, 숨겨진 웹/그림 지시는 행동 지시로 취급하지 않기. Hermes의 웹·생성 도구 활성화는 ADR-0203의 별도 결정이다. 먼저 제안 닫힌 목록에는 이 행동을 넣지 않는다.
+
+### X8-2. 보이는 것 = 저장되는 것
+
+V3-2a·V4의 매직/치수/할당 한도·재인코딩·서버 PG 보관·불변 바이트·sha pin·미리보기 인가·결정 때 재해시를 재사용한다. GIF는 ADR-0218 D3의 **전체 프레임 검사와 재인코딩**으로 확장하며, 아바타의 정지 이미지 검사에 GIF 바이트를 그냥 통과시키지 않는다. URL도 같은 검사 길을 지난다.
+
+제안 시 각 후보는 `expression_draft`가 되고, 기존 `approval_request.props.action.expression`에 `Approval` 객체가 붙는다. ready 후보는 **저장될 large 그림 그 자체**를 보여 준다. 미리보기는 워크스페이스+approval+후보+현재 revision/sha를 함께 검사한다. 다른 방 사람에게 그림이 새지 않는다. 카드에는 사람별 `canDecide`를 서버가 판정해 주며 표시 이름·태그·prompt를 권한 판단에 쓰지 않는다.
+
+사람은 후보 하나를 고른 뒤 기존 결정 요청에 `expressionChoice:{draftId,revision,sha256}`(`Decision`)를 더한다. 이 행동 외 decision에는 이 입력을 받지 않는다. 결정 tx에서 approval pending·TTL·현재 멤버십/정책/당사자·후보 소속·revision·저장 바이트 재해시·이름/quota를 다시 증명한다. 실패는 기존 receipt/409 경로이고 승인 소모·부분 등록이 없다. 성공은 한 표현만 active로 만들고 나머지 draft 바이트를 회수한다. 거절·만료·취소·TTL sweep도 바이트를 회수한다.
+
+### X8-3. 새 승인 역할 `expression_adder`
+
+이 역할은 영구 멤버 역할이 아닌 **동적 판정 이름**이다. 현재 카드 채널의 사람 멤버이며 게스트가 아니고, 추가 정책이 members이면 일반 멤버도, admins이면 admin만 충족한다. 정책을 제안 뒤 좁혔으면 결정/푸시/미리보기 때 현재 사실을 다시 읽는다. 기존 admin/agent_editor/requesting_member/workspace_operator에 이 역할을 더하고 `gate_plan`·결정 허용·승인 푸시 대상이 같은 술어를 쓰게 한다.
+
+얼굴이 있으면 **위 술어 AND 결정자=subjectMemberId**다. admin·에이전트 소유자의 대리 승인은 없다. 당사자는 같은 카드 채널의 워크스페이스 사람이어야 하고, 여러 얼굴/확인되지 않은 당사자는 v1에서 받지 않는다. null은 제출자의 「사람 얼굴 없음」 선언이지 자동 얼굴 검출 결과가 아니다. 푸시는 그림 없이 「앱에서 확인」만 제공하고 잠금 화면 바로 승인을 허용하지 않는다.
+
+### X8-4. 받기 실패·교체·결과 카드
+
+웹 요청 실패를 도구 실행 실패로 끝내지 않는다. ADR-0218 부록 C의 `manual_upload_required`와 닫힌 사유 코드를 같은 승인 카드에 남긴다. **출처 링크 + 「직접 올리기」**, 선택/승인 불가, approval은 pending이다. 다른 ready 후보는 선택할 수 있다. 변환기 미승인 영상은 `video_processing_unavailable`로 GIF 직접 올리기를 안내한다.
+
+직접 올리기는 현재 결정 가능한 사람이 `PUT /expression-drafts/{draftId}/file`로 한다. 원래 출처/이름/subject/TTL을 보존하고 **revision 증가 + 새 불변 그림/sha**를 한 tx로 바꾼다. 기존 요청 고리 카드에 `message.edited`로 변경을 알린다. 사람은 새 그림을 다시 확인하고 새 choice로 승인해야 한다. 에이전트는 대기 카드를 바꿔치기하거나 다른 URL로 재시도할 수 없다.
+
+결과는 v6의 기존 승인 카드 제자리 `result`에 둔다. `status=executed`, `ref={type:expression,id}`, `line=팀 보관함에 저장했어요`, `expression: Result`다. 새 결과 줄·새 메시지 종류·새 표현 전송 props는 없다. 「보내기」는 현재 보관함에서 id/name이 active인지 확인하고 `:name:` 본문을 미리보기한다. 이미 숨김/삭제면 보내기 컨트롤을 제공하지 않는다. 감사는 ADR-0218 D6의 제한을 따른다.
+
+### X8-5. 구현·검수 인계
+
+S2는 ADR과 코어/fixture만 제공한다. S3 엔진은 RLS/권한·동일 채널 첨부·해시/TTL·4후보/이름/quota 경주·교체 후 낡은 choice·신고 즉시 숨김·미선택 회수를 **실 PG와 사보타주**로 입증한다. 웹/폰은 정확한 그림 미리보기·후보 선택·실패 카드 직접 올리기·당사자 제한·결과 보내기·숨김 회수를 Playwright/Maestro와 독립 design-review로 확인한다. 영상 라이선스/변환 실행·실기 GIF는 runtime-unverified다.

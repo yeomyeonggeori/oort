@@ -31,7 +31,8 @@ use momo_agent::actions::{
     INVITE_MAX_USES_CEILING, INVITE_PROPOSABLE_ROLES,
 };
 use momo_auth::{
-    active_hosted_connection_in_tx, lock_active_hosted_connection_in_tx,
+    active_hosted_connection_in_tx, hosted_action_connection_in_tx,
+    lock_active_hosted_connection_in_tx, lock_hosted_connection_in_tx, HostedActionConnection,
     MAX_HOSTED_APPROVED_CHANNELS,
 };
 
@@ -158,6 +159,21 @@ pub enum ActionArgs {
     MemberAvatarSet {
         avatar: AvatarIntent,
         target: Option<ResolvedPerson>,
+    },
+    MemberDisplayNameSet {
+        display_name: String,
+        target: Option<ResolvedPerson>,
+    },
+    /// `expression.create` (ADR-0186 v8, #4829). A **proposal** carries `candidates` (what the
+    /// agent named: the handler fetches/decodes them before the transaction and stores them as
+    /// drafts); the **stored** form carries only `drafts`, the ids of those rows, in candidate
+    /// order. `subject` is the one face of every candidate (`None` = faceless), filled by the
+    /// resolver. Nothing here is ever a byte, a base64 string, a prompt or a link of the stored
+    /// form.
+    ExpressionCreate {
+        candidates: Vec<ExpressionCandidateSpec>,
+        drafts: Vec<Uuid>,
+        subject: Option<Uuid>,
     },
     InviteCreate {
         /// `momo_settings::normalized_invite_role`'s canonical spelling.
@@ -310,6 +326,32 @@ pub struct ResolvedPerson {
 pub enum ArgsOrigin {
     Proposal,
     Stored,
+}
+
+/// ADR-0218 appendix B `AgentImage`, as proposed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExpressionImageSpec {
+    /// An image the run's requester attached in this conversation.
+    Attachment(Uuid),
+    /// One HTTPS link; the raw text lives only as long as the proposal call.
+    Url(String),
+    /// Bytes the agent made (base64 as sent) and the prompt it wrote for the card.
+    Generated {
+        mime: String,
+        data_base64: String,
+        prompt: String,
+    },
+    /// One candidate of a motion assembly the server kept for this agent
+    /// (`oort_expression_assemble`, ADR-0218 G3.6). The picture, the prompt and the original-photo
+    /// pointer are what the server stored at assemble time; the agent names only which one.
+    Assembled { assembly_id: Uuid, index: u8 },
+}
+
+/// One proposed candidate: validated metadata plus its picture source.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpressionCandidateSpec {
+    pub meta: momo_expressions::Metadata,
+    pub image: ExpressionImageSpec,
 }
 
 /// What a proposal does to the agent's picture (ADR-0186 증보 v3 V3-2a).
@@ -486,6 +528,8 @@ pub fn validated_action_args_from(
         actions::ACTION_WORKSPACE_SETTINGS_UPDATE => workspace_settings_update_args(args),
         actions::ACTION_AGENT_PROFILE_UPDATE => agent_profile_update_args(args, origin),
         actions::ACTION_MEMBER_AVATAR_SET => member_avatar_set_args(args, origin),
+        actions::ACTION_MEMBER_DISPLAY_NAME_SET => member_display_name_set_args(args),
+        actions::ACTION_EXPRESSION_CREATE => expression_create_args(args, origin),
         actions::ACTION_MESSAGE_PIN => message_pin_args(args, PinAction::Pinned),
         actions::ACTION_MESSAGE_UNPIN => message_pin_args(args, PinAction::Unpinned),
         actions::ACTION_AGENT_INVITE => agent_invite_args(args),
@@ -1478,18 +1522,28 @@ pub fn member_avatar_set_args(
         .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
     let avatar = match origin {
         ArgsOrigin::Proposal => {
-            closed_keys(object, &["attachmentId"])?;
-            let raw = match object.get("attachmentId") {
-                Some(Value::String(raw)) => raw.as_str(),
-                Some(_) => return Err(ActionRejection::new("attachmentId must be a string")),
-                None => return Err(ActionRejection::new("attachmentId is required")),
-            };
-            if raw.len() as u64 > actions::AVATAR_ID_TEXT_MAX_CHARS {
-                return Err(ActionRejection::new("attachmentId is not allowed"));
+            closed_keys(object, &["attachmentId", "avatar"])?;
+            if object.contains_key("avatar") {
+                if object.contains_key("attachmentId") {
+                    return Err(ActionRejection::new("choose one image source"));
+                }
+                match avatar_intent(object, origin)? {
+                    generated @ AvatarIntent::Generated(_) => generated,
+                    _ => return Err(ActionRejection::new("avatar is not allowed")),
+                }
+            } else {
+                let raw = match object.get("attachmentId") {
+                    Some(Value::String(raw)) => raw.as_str(),
+                    Some(_) => return Err(ActionRejection::new("attachmentId must be a string")),
+                    None => return Err(ActionRejection::new("attachmentId is required")),
+                };
+                if raw.len() as u64 > actions::AVATAR_ID_TEXT_MAX_CHARS {
+                    return Err(ActionRejection::new("attachmentId is not allowed"));
+                }
+                let id = Uuid::parse_str(raw)
+                    .map_err(|_| ActionRejection::new("attachmentId must be an id"))?;
+                AvatarIntent::Attachment(id)
             }
-            let id = Uuid::parse_str(raw)
-                .map_err(|_| ActionRejection::new("attachmentId must be an id"))?;
-            AvatarIntent::Attachment(id)
         }
         ArgsOrigin::Stored => {
             closed_keys(object, &["avatar"])?;
@@ -1501,6 +1555,7 @@ pub fn member_avatar_set_args(
     };
     let normalized = match &avatar {
         AvatarIntent::Attachment(_) => json!({"avatar": {"source": "attachment"}}),
+        AvatarIntent::Generated(_) => json!({"avatar": {"source": "generated"}}),
         AvatarIntent::Staged {
             image_id,
             sha256,
@@ -1516,6 +1571,213 @@ pub fn member_avatar_set_args(
         rows: Vec::new(),
         args: ActionArgs::MemberAvatarSet {
             avatar,
+            target: None,
+        },
+    })
+}
+
+/// `expression.create` arguments (ADR-0218 appendix B `AgentAction.args`). Closed keys
+/// everywhere; the proposal form is the agent's, the stored form is only draft ids.
+pub fn expression_create_args(
+    args: &Value,
+    origin: ArgsOrigin,
+) -> Result<ValidatedActionArgs, ActionRejection> {
+    let bad = |what: &str| ActionRejection::new(format!("expression.create: {what}"));
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    if origin == ArgsOrigin::Stored {
+        closed_keys(object, &["drafts"])?;
+        let list = object
+            .get("drafts")
+            .and_then(Value::as_array)
+            .filter(|list| (1..=4).contains(&list.len()))
+            .ok_or_else(|| bad("drafts"))?;
+        let mut drafts = Vec::with_capacity(list.len());
+        for item in list {
+            let id = item
+                .as_str()
+                .filter(|text| text.len() == 36)
+                .and_then(|text| Uuid::parse_str(text).ok())
+                .ok_or_else(|| bad("draft id"))?;
+            if drafts.contains(&id) {
+                return Err(bad("draft id"));
+            }
+            drafts.push(id);
+        }
+        return Ok(ValidatedActionArgs {
+            normalized: json!({"drafts": drafts.iter().map(Uuid::to_string).collect::<Vec<_>>()}),
+            rows: Vec::new(),
+            args: ActionArgs::ExpressionCreate {
+                candidates: Vec::new(),
+                drafts,
+                subject: None,
+            },
+            summary: None,
+        });
+    }
+    closed_keys(object, &["candidates"])?;
+    let list = object
+        .get("candidates")
+        .and_then(Value::as_array)
+        .filter(|list| (1..=actions::EXPRESSION_CANDIDATES_MAX as usize).contains(&list.len()))
+        .ok_or_else(|| bad("candidates"))?;
+    let mut candidates = Vec::with_capacity(list.len());
+    let mut face: Option<Option<Uuid>> = None;
+    for item in list {
+        let item = item.as_object().ok_or_else(|| bad("candidate"))?;
+        closed_keys(
+            item,
+            &["name", "displayName", "tags", "subjectMemberId", "image"],
+        )?;
+        // The declaration is explicit: `subjectMemberId` must be present (null = no face).
+        let subject = match item.get("subjectMemberId") {
+            Some(Value::Null) => None,
+            Some(Value::String(raw)) if raw.len() == 36 => {
+                Some(Uuid::parse_str(raw).map_err(|_| bad("subjectMemberId"))?)
+            }
+            _ => return Err(bad("subjectMemberId")),
+        };
+        if face.is_some_and(|first| first != subject) {
+            return Err(bad("candidates name different faces"));
+        }
+        face = Some(subject);
+        let meta: momo_expressions::Metadata = serde_json::from_value(json!({
+            "name": item.get("name"),
+            "displayName": item.get("displayName"),
+            "tags": item.get("tags"),
+            "subjectMemberId": subject.map(|id| id.to_string()),
+        }))
+        .map_err(|_| bad("candidate fields"))?;
+        meta.validate().map_err(|_| bad("candidate fields"))?;
+        let image = item
+            .get("image")
+            .and_then(Value::as_object)
+            .ok_or_else(|| bad("image"))?;
+        let image = match image.get("source").and_then(Value::as_str) {
+            Some("attachment") => {
+                closed_keys(image, &["source", "attachmentId"])?;
+                let raw = image
+                    .get("attachmentId")
+                    .and_then(Value::as_str)
+                    .filter(|raw| raw.len() == 36)
+                    .ok_or_else(|| bad("attachmentId"))?;
+                ExpressionImageSpec::Attachment(
+                    Uuid::parse_str(raw).map_err(|_| bad("attachmentId"))?,
+                )
+            }
+            Some("url") => {
+                closed_keys(image, &["source", "url"])?;
+                let url = image
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .filter(|url| {
+                        (8..=actions::EXPRESSION_URL_MAX_BYTES as usize).contains(&url.len())
+                    })
+                    .ok_or_else(|| bad("url"))?;
+                ExpressionImageSpec::Url(url.to_string())
+            }
+            Some("generated") => {
+                closed_keys(image, &["source", "mime", "dataBase64", "prompt"])?;
+                let mime = image
+                    .get("mime")
+                    .and_then(Value::as_str)
+                    .filter(|mime| {
+                        ["image/png", "image/jpeg", "image/gif", "image/webp"].contains(mime)
+                    })
+                    .ok_or_else(|| bad("mime"))?;
+                let data = image
+                    .get("dataBase64")
+                    .and_then(Value::as_str)
+                    .filter(|data| {
+                        (4..=actions::EXPRESSION_GENERATED_B64_MAX_CHARS as usize)
+                            .contains(&data.len())
+                    })
+                    .ok_or_else(|| bad("dataBase64"))?;
+                let prompt = image
+                    .get("prompt")
+                    .and_then(Value::as_str)
+                    .filter(|prompt| {
+                        !prompt.is_empty()
+                            && prompt.chars().count() <= momo_expressions::action::PROMPT_MAX_CHARS
+                            && !prompt
+                                .chars()
+                                .any(|c| c == '\u{7f}' || (c.is_control() && c != '\n'))
+                    })
+                    .ok_or_else(|| bad("prompt"))?;
+                ExpressionImageSpec::Generated {
+                    mime: mime.to_string(),
+                    data_base64: data.to_string(),
+                    prompt: prompt.to_string(),
+                }
+            }
+            Some("assembled") => {
+                closed_keys(image, &["source", "assemblyId", "index"])?;
+                let raw = image
+                    .get("assemblyId")
+                    .and_then(Value::as_str)
+                    .filter(|raw| raw.len() == 36)
+                    .ok_or_else(|| bad("assemblyId"))?;
+                // The contract's pattern is lowercase hyphenated hex; a parser that also took
+                // upper case would accept a spelling the schema refuses.
+                if raw.chars().any(|c| c.is_ascii_uppercase()) {
+                    return Err(bad("assemblyId"));
+                }
+                let index = image
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .filter(|index| *index < actions::EXPRESSION_CANDIDATES_MAX)
+                    .ok_or_else(|| bad("index"))?;
+                ExpressionImageSpec::Assembled {
+                    assembly_id: Uuid::parse_str(raw).map_err(|_| bad("assemblyId"))?,
+                    index: index as u8,
+                }
+            }
+            _ => return Err(bad("image source")),
+        };
+        candidates.push(ExpressionCandidateSpec { meta, image });
+    }
+    // What a card may say before the handler replaces it with the stored form: the source
+    // kind per candidate, never a byte or a link.
+    let kinds: Vec<&str> = candidates
+        .iter()
+        .map(|candidate| match candidate.image {
+            ExpressionImageSpec::Attachment(_) => "attachment",
+            ExpressionImageSpec::Url(_) => "url",
+            ExpressionImageSpec::Generated { .. } => "generated",
+            ExpressionImageSpec::Assembled { .. } => "assembled",
+        })
+        .collect();
+    Ok(ValidatedActionArgs {
+        normalized: json!({"candidates": kinds}),
+        rows: Vec::new(),
+        args: ActionArgs::ExpressionCreate {
+            candidates,
+            drafts: Vec::new(),
+            subject: face.flatten(),
+        },
+        summary: None,
+    })
+}
+
+fn member_display_name_set_args(args: &Value) -> Result<ValidatedActionArgs, ActionRejection> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    closed_keys(object, &["displayName"])?;
+    let raw = object
+        .get("displayName")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ActionRejection::new("displayName is required"))?;
+    // Exactly PATCH /members/me's rules; this changes neither handle nor past mentions.
+    let display_name = momo_settings::normalized_join_display_name(raw)
+        .map_err(|_| ActionRejection::new("display name is not allowed"))?;
+    Ok(ValidatedActionArgs {
+        normalized: json!({"displayName": display_name}),
+        rows: Vec::new(),
+        summary: None,
+        args: ActionArgs::MemberDisplayNameSet {
+            display_name,
             target: None,
         },
     })
@@ -1973,10 +2235,10 @@ pub enum PinScope {
 /// [`resolve_pin_target_in_tx`] with its channel rule named (see [`PinScope`]).
 ///
 /// `covering_connection` names **which connection decides what is "covered"**. `None` is the
-/// proposer's own live connection, found by its fresh credential — right for a card a person asked
-/// for, whose agent was just called. `Some(id)` is a connection the caller has already proved to
+/// proposer's own live connection, found by its fresh credential at proposal time.
+/// `Some(id)` is a connection the caller has already proved to
 /// stand ([`momo_auth::hosted_connection_stands_in_tx`]) and is the one to read: the decision of a
-/// card an agent raised unasked, which waited for its owner past the lifetime of the OAuth access
+/// card, which waited for its approver past the lifetime of the OAuth access
 /// token it was raised under, must be judged by the connection the card stands on and not by
 /// whether the agent happens to hold a fresh credential at the moment a person taps (security
 /// review of #4704 PR B, round 2, H1).
@@ -2314,7 +2576,20 @@ pub async fn resolve_stored_action_in_tx(
     now_ms: i64,
     approval_id: Uuid,
 ) -> ResolveOutcome<ResolvedAction> {
-    resolve_action_with_origin_in_tx(
+    // A person's approval can outlive the access token used to raise the card.
+    // Keep hosted-unavailable separate from managed, and share the proved
+    // connection with every coverage read below, just as unasked cards do.
+    let covering_connection =
+        match hosted_action_connection_in_tx(conn, workspace_id, proposer_member_id).await? {
+            HostedActionConnection::Managed => None,
+            HostedActionConnection::Standing(connection) => Some(connection),
+            HostedActionConnection::Unavailable => {
+                return Ok(Err(ActionRejection::new(
+                    "hosted connection is unavailable",
+                )))
+            }
+        };
+    let resolved = resolve_action_with_origin_in_tx(
         conn,
         workspace_id,
         proposer_member_id,
@@ -2325,14 +2600,27 @@ pub async fn resolve_stored_action_in_tx(
         ArgsOrigin::Stored,
         Some(approval_id),
         CardAudience::RunChannel,
-        None,
+        covering_connection,
     )
-    .await
+    .await?;
+    Ok(resolved.map(|mut resolved| {
+        // Re-prove the identity pinned by the authenticated proposal, including
+        // actions that do not resolve a connection themselves (e.g. channel.create).
+        // A reconnect or a legacy card without this pin fails the caller's pin
+        // comparison; a managed proposal keeps its existing pins.
+        if let Some(connection) = covering_connection {
+            if resolved.pins.is_null() {
+                resolved.pins = json!({});
+            }
+            resolved.pins["hostedConnection"] = json!(connection);
+        }
+        resolved
+    }))
 }
 
 /// The core of every resolution above. `covering_connection` is [`resolve_pin_target_scoped_in_tx`]'s:
 /// `None` finds the proposer's live connection by its fresh credential, `Some(id)` reads the one the
-/// caller has proved (the decision of an unasked card).
+/// caller has proved (a human decision, requested or unasked).
 #[allow(clippy::too_many_arguments)]
 pub async fn resolve_action_with_origin_in_tx(
     conn: &mut PgConnection,
@@ -2566,9 +2854,14 @@ pub async fn resolve_action_with_origin_in_tx(
             // connection before channel and membership rows). Only the
             // proposer's OWN live connection can be found; no argument names
             // another agent's.
-            let Some((connection_id, approved_before)) =
+            let connection_state = if let Some(connection_id) = covering_connection {
+                lock_hosted_connection_in_tx(conn, workspace_id, proposer_member_id, connection_id)
+                    .await?
+                    .map(|count| (connection_id, count))
+            } else {
                 lock_active_hosted_connection_in_tx(conn, workspace_id, proposer_member_id).await?
-            else {
+            };
+            let Some((connection_id, approved_before)) = connection_state else {
                 return Ok(Err(ActionRejection::new("no live hosted connection")));
             };
             let approved: Vec<Uuid> = momo_db::sqlx::query_scalar(
@@ -2817,12 +3110,56 @@ pub async fn resolve_action_with_origin_in_tx(
             *before = Some(card);
             subject
         }
+        ActionArgs::MemberDisplayNameSet {
+            display_name,
+            target,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            let Some(run_id) = run_id else {
+                return Ok(Err(ActionRejection::new("requester did not resolve")));
+            };
+            let Some((requester, _)) = momo_messaging::requester_of_run_in_tx(
+                conn,
+                workspace_id,
+                run_id,
+                proposer_member_id,
+            )
+            .await?
+            else {
+                return Ok(Err(ActionRejection::new("requester did not resolve")));
+            };
+            let person: Option<(String, String)> = sqlx::query_as(
+                "SELECT display_name, handle FROM member WHERE workspace_id=$1 AND id=$2 \
+                 AND EXISTS (SELECT 1 FROM workspace_membership WHERE workspace_id=$1 AND member_id=$2) \
+                 FOR NO KEY UPDATE",
+            ).bind(workspace_id).bind(requester).fetch_optional(&mut *conn).await?;
+            let Some((previous, handle)) = person else {
+                return Ok(Err(ActionRejection::new("requester did not resolve")));
+            };
+            validated.rows = vec![
+                actions::action_row(
+                    "대상",
+                    actions::member_card_label(&previous, &handle, false),
+                ),
+                actions::action_row("바꾸기 전", &previous),
+                actions::action_row("바꾼 뒤", &*display_name),
+            ];
+            *target = Some(ResolvedPerson {
+                id: requester,
+                display_name: previous,
+                handle,
+                had_avatar: false,
+            });
+            GateSubject::Member(requester)
+        }
         ActionArgs::MemberAvatarSet { avatar, target } => {
             if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
                 return Ok(Err(ActionRejection::new("proposer is not an active agent")));
             }
             // **The person is the one who called this agent, found from the run — never
-            // from an argument.** No run (the team AI), another agent's run, a run nobody
+            // from an argument.** No run, another agent's run, a run nobody
             // addressed, a trigger an agent wrote: the same refusal.
             let Some(run_id) = run_id else {
                 return Ok(Err(ActionRejection::new("avatar target did not resolve")));
@@ -2878,6 +3215,7 @@ pub async fn resolve_action_with_origin_in_tx(
                         return Ok(Err(ActionRejection::new("avatar is not allowed")));
                     }
                 }
+                AvatarIntent::Generated(_) if origin == ArgsOrigin::Proposal => {}
                 // A decision: the image the person was shown must still be the proposer's
                 // own staging for **this person**, still `staged`, bound to the approval
                 // being decided, and its stored bytes must still hash to the pin.
@@ -2920,9 +3258,143 @@ pub async fn resolve_action_with_origin_in_tx(
                 &person.handle,
                 person.had_avatar,
             );
+            if matches!(avatar, AvatarIntent::Generated(_))
+                || matches!(avatar, AvatarIntent::Staged { origin, .. } if origin == "generated")
+            {
+                if let Some(row) = validated.rows.last_mut() {
+                    *row = actions::action_row("사진 출처", "에이전트가 가져온 이미지");
+                }
+            }
             let subject = GateSubject::Member(requester);
             *target = Some(person);
             subject
+        }
+        ActionArgs::ExpressionCreate {
+            candidates,
+            drafts,
+            subject,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            // The run was raised by a person (never from an argument): attachments are that
+            // person's, in the conversation the agent was called in.
+            let unresolved = || ActionRejection::new("expression target did not resolve");
+            let Some(run_id) = run_id else {
+                return Ok(Err(unresolved()));
+            };
+            let Some((requester, run_channel)) = momo_messaging::requester_of_run_in_tx(
+                conn,
+                workspace_id,
+                run_id,
+                proposer_member_id,
+            )
+            .await?
+            else {
+                return Ok(Err(unresolved()));
+            };
+            if origin == ArgsOrigin::Proposal {
+                // The face, if any, is a live human of THIS conversation: a card must never be
+                // the first to say that somebody outside the room exists.
+                if let Some(face) = *subject {
+                    let human_in_room: bool = momo_db::sqlx::query_scalar(
+                        "SELECT EXISTS (SELECT 1 FROM member m \
+                           JOIN membership c ON (c.workspace_id, c.member_id) = (m.workspace_id, m.id) \
+                          WHERE m.workspace_id = $1 AND m.id = $2 AND m.kind = 'human' \
+                            AND m.status = 'active' AND m.deleted_at IS NULL \
+                            AND c.channel_id = $3 AND c.left_at IS NULL)",
+                    )
+                    .bind(workspace_id)
+                    .bind(face)
+                    .bind(run_channel)
+                    .fetch_one(&mut *conn)
+                    .await?;
+                    if !human_in_room {
+                        return Ok(Err(unresolved()));
+                    }
+                }
+                // V4's own judgement, reused: the requester's, complete, undeleted, in this
+                // conversation. Another person's photo, another conversation's file and an
+                // unknown id are the same refusal.
+                let mut from_attachment = false;
+                for candidate in candidates.iter() {
+                    if let ExpressionImageSpec::Attachment(attachment_id) = &candidate.image {
+                        from_attachment = true;
+                        // The expression's own use of the judgement: a GIF and a video are
+                        // sources too (ADR-0186 X8-1/X8-2). `prepare_expression` asks for the
+                        // same use, so the two never disagree about which file exists.
+                        let found = momo_messaging::find_requester_attachment_for_in_tx(
+                            conn,
+                            workspace_id,
+                            requester,
+                            run_channel,
+                            *attachment_id,
+                            momo_expressions::INPUT_BYTES as i64,
+                            momo_messaging::RequesterAttachmentUse::ExpressionSource,
+                        )
+                        .await?;
+                        if found.is_none() {
+                            return Ok(Err(unresolved()));
+                        }
+                    }
+                }
+                validated.rows = vec![actions::action_row(
+                    "후보",
+                    format!("{}개 — 저장될 그림을 보고 하나를 골라요", candidates.len()),
+                )];
+                if from_attachment {
+                    validated.rows.push(actions::action_row(
+                        "보관 범위",
+                        "첨부를 원본으로 쓰면 팀 보관함에 저장돼 워크스페이스 전체가 쓸 수 있어요",
+                    ));
+                }
+            } else {
+                // A decision: the drafts the card stands on are this approval's own, made by
+                // this proposer, in candidate order, all naming the same face.
+                let Some(approval_id) = decision_approval_id else {
+                    return Ok(Err(unresolved()));
+                };
+                let rows = momo_db::sqlx::query_as::<_, (Uuid, Option<Uuid>, Uuid)>(
+                    "SELECT id, subject_member_id, creator FROM expression_draft \
+                      WHERE workspace_id = $1 AND approval_id = $2 ORDER BY candidate_index",
+                )
+                .bind(workspace_id)
+                .bind(approval_id)
+                .fetch_all(&mut *conn)
+                .await?;
+                let same_ids = rows.iter().map(|row| row.0).collect::<Vec<_>>() == *drafts;
+                let face = rows.first().and_then(|row| row.1);
+                if !same_ids
+                    || rows
+                        .iter()
+                        .any(|row| row.1 != face || row.2 != proposer_member_id)
+                {
+                    return Ok(Err(unresolved()));
+                }
+                *subject = face;
+            }
+            if let Some(face) = *subject {
+                let person = momo_db::sqlx::query_as::<_, (String, String)>(
+                    "SELECT display_name, handle FROM member WHERE workspace_id = $1 AND id = $2",
+                )
+                .bind(workspace_id)
+                .bind(face)
+                .fetch_optional(&mut *conn)
+                .await?;
+                let label = person
+                    .map(|(name, handle)| actions::member_card_label(&name, &handle, false))
+                    .unwrap_or_else(|| "알 수 없는 멤버".to_string());
+                validated.rows.push(actions::action_row(
+                    "얼굴",
+                    format!("{label} — 그 본인만 승인할 수 있어요"),
+                ));
+            } else {
+                validated.rows.push(actions::action_row(
+                    "얼굴",
+                    "없음 — 사람 얼굴이 없다고 에이전트가 밝혔어요",
+                ));
+            }
+            GateSubject::Workspace
         }
         ActionArgs::PluginInstall { plugin_id, plugin } => {
             if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
@@ -3138,6 +3610,16 @@ pub async fn resolve_action_with_origin_in_tx(
             "target": target.as_ref().map(|person| person.id.to_string()),
             "avatar": avatar_pin(avatar),
         }),
+        ActionArgs::MemberDisplayNameSet { target, .. } => json!({
+            "target": target.as_ref().map(|person| person.id.to_string()),
+            "name": target.as_ref().map(|person| person.display_name.clone()),
+        }),
+        // The face is the whole of this card's role gate (`pinned_expression_subject`); the
+        // candidates' revisions and hashes are deliberately NOT pinned: a replaced picture
+        // must not spend or break the card, the person's choice names the exact one.
+        ActionArgs::ExpressionCreate { subject, .. } => json!({
+            "subject": subject.map(|id| id.to_string()),
+        }),
         ActionArgs::InviteCreate { .. } => Value::Null,
         // What the card said 「현재」 was: a switch flipped in between re-asks.
         ActionArgs::WorkspaceUnfurlUpdate { before, .. } => json!({"enabled": before}),
@@ -3208,6 +3690,77 @@ pub fn bounded_integer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0218 G3.6 (#4820 C2b): `{source:"assembled", assemblyId, index}` is one closed shape. The id is
+    /// the contract's lowercase hyphenated uuid, the index 0..=3, and the proposal says nothing
+    /// else about the picture (its prompt and its original photo are what the assembly kept).
+    #[test]
+    fn an_assembled_source_is_one_closed_shape() {
+        let action = actions::action_by_id(actions::ACTION_EXPRESSION_CREATE).expect("registered");
+        let id = "0000000a-0000-4000-8000-00000000004b";
+        let one = |image: Value| {
+            json!({"candidates": [{"name": "dance_a", "displayName": "춤", "tags": ["t"],
+                "subjectMemberId": null, "image": image}]})
+        };
+        let parsed = validated_action_args(
+            action,
+            &one(json!({"source": "assembled", "assemblyId": id, "index": 3})),
+            0,
+        )
+        .expect("a well-formed assembled source");
+        let ActionArgs::ExpressionCreate { candidates, .. } = parsed.args else {
+            panic!("an expression.create");
+        };
+        assert_eq!(
+            candidates[0].image,
+            ExpressionImageSpec::Assembled {
+                assembly_id: Uuid::parse_str(id).unwrap(),
+                index: 3
+            }
+        );
+        assert_eq!(parsed.normalized, json!({"candidates": ["assembled"]}));
+        for (why, image) in [
+            (
+                "upper case",
+                json!({"source": "assembled", "assemblyId": id.to_uppercase(), "index": 0}),
+            ),
+            (
+                "index 4",
+                json!({"source": "assembled", "assemblyId": id, "index": 4}),
+            ),
+            (
+                "negative",
+                json!({"source": "assembled", "assemblyId": id, "index": -1}),
+            ),
+            (
+                "fractional",
+                json!({"source": "assembled", "assemblyId": id, "index": 1.5}),
+            ),
+            (
+                "a string index",
+                json!({"source": "assembled", "assemblyId": id, "index": "0"}),
+            ),
+            ("no index", json!({"source": "assembled", "assemblyId": id})),
+            ("no id", json!({"source": "assembled", "index": 0})),
+            (
+                "short id",
+                json!({"source": "assembled", "assemblyId": "abc", "index": 0}),
+            ),
+            (
+                "an extra key",
+                json!({"source": "assembled", "assemblyId": id, "index": 0, "prompt": "mine"}),
+            ),
+            (
+                "the pointer",
+                json!({"source": "assembled", "assemblyId": id, "index": 0, "sourceAttachmentId": id}),
+            ),
+        ] {
+            assert!(
+                validated_action_args(action, &one(image), 0).is_err(),
+                "{why} must be refused"
+            );
+        }
+    }
 
     /// ADR-0186 증보 v5 U-b-3 (#4704): the switch that bounds an agent's unasked cards is **not**
     /// something a proposal can write. `workspace.settings.update` takes exactly two keys, and

@@ -33,6 +33,28 @@ use uuid::Uuid;
 
 use crate::channel::ChannelKind;
 
+/// The same seat check as the INSERT trigger, for server notices that can be
+/// omitted after departure. Lock in send/removal order; retain it through the
+/// subsequent INSERT so removal cannot overtake the check.
+pub async fn dm_agent_can_speak_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<bool, DbError> {
+    sqlx::query("SELECT 1 FROM channel_seq WHERE workspace_id=$1 AND channel_id=$2 FOR UPDATE")
+        .bind(workspace_id)
+        .bind(channel_id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(sqlx::query_scalar("SELECT dm_agent_can_speak($1,$2,$3)")
+        .bind(workspace_id)
+        .bind(channel_id)
+        .bind(agent_member_id)
+        .fetch_one(&mut *conn)
+        .await?)
+}
+
 /// The maximum DM list page Swift serves (`DMRoutes.swift:300`).
 pub const DM_LIST_LIMIT: i64 = 500;
 

@@ -1,3 +1,11 @@
+import {useExpressionItems} from '../expressions/ExpressionProvider';
+import {ExpressionImage} from '../expressions/ExpressionImage';
+import {
+  ExpressionText,
+  ExpressionTextContext,
+  prepareExpressionBody,
+  useExpressionLiteral,
+} from '../expressions/ExpressionText';
 import {
   isPlainText,
   parseMarkdown,
@@ -296,7 +304,8 @@ function InlineNode({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const ink = useContext(BubbleInk);
-  if (node.kind === 'text') return <>{node.text}</>;
+  const literal = useExpressionLiteral();
+  if (node.kind === 'text') return <ExpressionText text={node.text} />;
   if (node.kind === 'strong') {
     return (
       <Text style={styles.strong}>
@@ -320,7 +329,7 @@ function InlineNode({
           ink?.mine && {backgroundColor: ink.fg + INLINE_CODE_ALPHA_HEX},
         ]}
         testID="message-inline-code">
-        {node.text}
+        {literal(node.text)}
       </Text>
     );
   }
@@ -357,7 +366,7 @@ function InlineNode({
       // 링크 하나가 행의 탭 스톱을 하나 늘리지 않는다: 행은 접근성 원소 하나이고
       // (`MessageRow` 의 규칙), 링크는 그 문장 안의 낱말로 읽힌다. 누르는 것은
       // `onPress` 가 받는다.
-      onPress={() => openLink(node.href)}
+      onPress={() => openLink(literal(node.href))}
       style={[styles.link, ink?.mine && {color: ink.fg}]}
       testID="message-link">
       <InlineNodes nodes={node.children} mentions={mentions} />
@@ -382,9 +391,14 @@ function EmphasisNodes({
         }
         return (
           <React.Fragment key={index}>
-            {splitItalicRuns(node.text).map((run, runIndex) => (
+            {node.text
+              .split(/(\uE000+\d+\uE001)/)
+              .flatMap(part => /^\uE000/.test(part)
+                ? [{text: part, italic: false}]
+                : splitItalicRuns(part))
+              .map((run, runIndex) => (
               <Text key={runIndex} style={run.italic ? styles.em : undefined}>
-                {run.text}
+                <ExpressionText text={run.text} />
               </Text>
             ))}
           </React.Fragment>
@@ -483,6 +497,7 @@ function BlockNode({
   const styles = useStyles(buildStyles);
   const ink = useContext(BubbleInk);
   const probe = useContext(BubbleProbeContext);
+  const literal = useExpressionLiteral();
   // 말풍선 안 글자는 말풍선 잉크다 — `muted` 보다 뒤에 놓여 이긴다(보내는 중 흐림은 말풍선이 진다).
   const inkStyle = ink ? {color: ink.fg} : null;
   if (block.kind === 'code') {
@@ -495,7 +510,7 @@ function BlockNode({
             // 폰에는 hover 도 개발자도구도 없으므로 보이게 적는다 — 그리고 그것이
             // 「이 상자는 코드다」를 말하는 가장 싼 방법이다.
             <Text style={styles.codeLang} testID="message-code-lang">
-              {block.lang}
+              {literal(block.lang)}
             </Text>
           ) : (
             <View />
@@ -504,7 +519,7 @@ function BlockNode({
               전체를 주는데, 사람이 터미널에 붙여 넣으려는 것은 **이 상자 안의
               것**이고 그 둘은 다르다 — 답 전체를 붙이면 산문까지 따라간다.
               펜스 마커도 안 들어간다: 붙여 넣을 곳은 마크다운을 모른다. */}
-          <CodeCopyButton text={block.text} />
+          <CodeCopyButton text={literal(block.text)} />
         </View>
         <ScrollView
           horizontal
@@ -516,7 +531,7 @@ function BlockNode({
           <Text
             selectable={selectable}
             style={[styles.code, muted && styles.muted]}>
-            {block.text}
+            {literal(block.text)}
           </Text>
         </ScrollView>
       </View>
@@ -637,9 +652,14 @@ export function MessageBody({
   mentionTap?: MentionTap;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const expressions = useExpressionItems();
+  const expressionBody = useMemo(
+    () => prepareExpressionBody(body, expressions),
+    [body, expressions],
+  );
   const blocks = useMemo(
-    () => (isPlainText(body) ? null : parseMarkdown(body)),
-    [body],
+    () => (isPlainText(expressionBody.markdown) ? null : parseMarkdown(expressionBody.markdown)),
+    [expressionBody.markdown],
   );
   const palette = usePalette();
   const probe = useContext(BubbleProbeContext);
@@ -693,23 +713,36 @@ export function MessageBody({
     };
   }, [blocks, directory, selfMemberId, mentionTap]);
 
+  if (expressionBody.replacements.size > 0 && expressionBody.size !== 'inline') {
+    return (
+      <View style={styles.expressionRow} testID={`expression-body-${expressionBody.size}`}>
+        {expressionBody.tokens.map((token, index) => token.type === 'expression'
+          ? <ExpressionImage key={index} expression={token.expression} size={expressionBody.size} />
+          : null)}
+      </View>
+    );
+  }
+
   if (blocks === null || blocks.length === 0) {
     return (
+      <ExpressionTextContext.Provider value={expressionBody.replacements}>
       <BubbleInk.Provider value={ink}>
         {wrapProse(
           <Text
             style={[styles.paragraph, muted && styles.muted, ink && {color: ink.fg}]}
             selectable={selectable}
             {...paragraphProbeProps(probe, '0.0', body)}>
-            {body}
+            <ExpressionText text={expressionBody.markdown} />
           </Text>,
         )}
       </BubbleInk.Provider>
+      </ExpressionTextContext.Provider>
     );
   }
 
   if (tone === null) {
     return (
+      <ExpressionTextContext.Provider value={expressionBody.replacements}>
       <View style={styles.markdown} testID="message-markdown">
         {blocks.map((block, index) => (
           <BlockNode
@@ -723,6 +756,7 @@ export function MessageBody({
           />
         ))}
       </View>
+      </ExpressionTextContext.Provider>
     );
   }
 
@@ -759,15 +793,18 @@ export function MessageBody({
   flush();
 
   return (
+    <ExpressionTextContext.Provider value={expressionBody.replacements}>
     <BubbleInk.Provider value={ink}>
       <View style={styles.markdown} testID="message-markdown">
         {nodes}
       </View>
     </BubbleInk.Provider>
+    </ExpressionTextContext.Provider>
   );
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
+  expressionRow: {flexDirection: 'row', flexWrap: 'wrap', gap: space.xs},
   markdown: {gap: space.sm},
   // 말풍선은 내용 폭까지만 — 짧은 글(「네네」)은 좁다. 가장 넓어도 행 칸(본문 열)을 넘지 않는다.
   bubble: {alignSelf: 'flex-start', maxWidth: '100%'},

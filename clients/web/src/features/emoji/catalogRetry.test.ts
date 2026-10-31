@@ -18,7 +18,7 @@ import { loadCatalog, resetCatalogForTests } from "./catalog";
 // =============================================================================
 
 // 첫 적재의 `import()` 를 실패시킨다. 브라우저의 「청크 404」와 같은 자리다.
-vi.mock("./emojiCatalog.json", () => {
+vi.mock("@momo/core/features/emoji/emojiCatalog.json", () => {
   throw new Error("chunk 404");
 });
 

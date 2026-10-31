@@ -1168,6 +1168,80 @@ fn an_artifacts_schema_refusal_names_the_field_and_matches_the_adapter() {
     assert_eq!(json_body(&adapter_shape), body);
 }
 
+/// ADR-0218 G3.8 — a wrong `oort_expression_assemble` parameter refused at the transport carries
+/// `error.data {code, params}` with the wrong parameters' names from the closed list, under the
+/// fixed `-32602` sentence, never the value; and it is byte-identical to the adapter's own
+/// `InvalidAssembleParams` answer for the same names, so the two layers still cannot be told
+/// apart. A fault that names no parameter stays the plain `invalid tool arguments` with no data.
+#[test]
+fn an_assembly_parameter_refusal_names_the_parameter_and_matches_the_adapter() {
+    let granted = scopes(&["agent:port:connect", "workspace:propose"]);
+    let view = ToolView::intersect(&granted, &granted, ToolCapability::FULL);
+    let call = |arguments: Value| {
+        invoke_with(
+            &modern(
+                "tools/call",
+                json!(6),
+                json!({"name": "oort_expression_assemble", "arguments": arguments}),
+            ),
+            Some(MODERN_PROTOCOL_VERSION),
+            Some("tools/call"),
+            Some("oort_expression_assemble"),
+            &view,
+        )
+    };
+    let good = json!({
+        "handle": "h",
+        "source": {"from": "attachment", "attachmentId": "6f1c2b0e-3a4d-4e5f-8a9b-0c1d2e3f4a5b"},
+        "motion": {"kind": "sprite", "frames": 2, "sequence": [0, 1], "frameMs": 100},
+        "prompt": "p",
+        "size": 360
+    });
+
+    // Two parameters are wrong; both values are ones nobody would send by accident.
+    let mut bad = good.clone();
+    bad["size"] = json!(4711);
+    bad["motion"]["frameMs"] = json!(98765);
+    let refusal = response_of(call(bad));
+    assert_eq!(refusal.status, 400);
+    let body = json_body(&refusal);
+    assert_eq!(body["error"]["code"], json!(-32602));
+    assert_eq!(body["error"]["message"], json!("invalid tool arguments"));
+    assert_eq!(
+        body["error"]["data"],
+        json!({"code": "assembly_params_invalid", "params": ["frameMs", "size"]}),
+        "the names, in the closed list's order, and nothing else"
+    );
+    for value in ["4711", "98765"] {
+        assert!(
+            !body.to_string().contains(value),
+            "the value {value} is never echoed"
+        );
+    }
+    assert_eq!(
+        momo_mcp::refusal_reason(refusal.body.as_deref()),
+        Some("tool_arguments"),
+        "the trace keeps the plain arguments token"
+    );
+
+    let Outcome::Tool(admitted) = call(good.clone()) else {
+        panic!("admitted");
+    };
+    let named = momo_mcp::AssembleParams::from_names(["frameMs", "size"]).expect("closed names");
+    let adapter_shape = tool_failure(&admitted, ToolFailure::InvalidAssembleParams(named));
+    assert_eq!(adapter_shape.status, refusal.status);
+    assert_eq!(json_body(&adapter_shape), body);
+
+    // No parameter is at fault: the same answer as for any malformed argument, no `data`.
+    let mut nameless = good;
+    nameless["extra"] = json!(1);
+    let refusal = response_of(call(nameless));
+    assert_eq!(refusal.status, 400);
+    let body = json_body(&refusal);
+    assert_eq!(body["error"]["message"], json!("invalid tool arguments"));
+    assert!(body["error"].get("data").is_none(), "{body}");
+}
+
 /// Every published constraint is enforced, and every violation is the same
 /// verdict. Table-driven so a new catalog keyword cannot be added without a
 /// case here.

@@ -22,8 +22,11 @@
 //! `10/8`, `100.64/10`, `127/8`, `169.254/16`, `172.16/12`, `192.0.0/24`,
 //! `192.0.2/24`, `192.168/16`, `198.18/16`, `198.19/16`, `198.51/16`,
 //! `203.0.113/24`, and everything from `224/4` up; for v6 the unspecified and
-//! loopback addresses, multicast, unique-local, link-local, the documentation
-//! prefix `2001:db8::/32`, and v4-mapped addresses re-checked as v4.
+//! loopback addresses, multicast, unique-local, link-local, site-local, the
+//! documentation prefixes `2001:db8::/32` and `3fff::/20`, Teredo, the discard
+//! prefix, IPv4-compatible `::/96`, NAT64 local-use `64:ff9b:1::/48`, and every
+//! address that merely carries an IPv4 one (v4-mapped, v4-translated, NAT64
+//! `64:ff9b::/96`, 6to4) re-checked as the v4 address it carries (#4829).
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -302,6 +305,9 @@ fn is_denied_v4(address: &Ipv4Addr) -> bool {
 
 fn is_denied_v6(address: &Ipv6Addr) -> bool {
     let bytes = address.octets();
+    // The IPv4 address an IPv6 form carries at `at` (4 bytes).
+    let embedded =
+        |at: usize| Ipv4Addr::new(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]);
     if bytes.iter().all(|byte| *byte == 0) {
         return true; // ::
     }
@@ -309,17 +315,52 @@ fn is_denied_v6(address: &Ipv6Addr) -> bool {
         return true; // ::1
     }
     if bytes[0] == 0xff || (bytes[0] & 0xfe) == 0xfc {
-        return true; // multicast / unique-local
+        return true; // multicast / unique-local (the AWS IMDS fd00:ec2::254 lives here)
     }
     if bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80 {
         return true; // link-local
     }
+    if bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0xc0 {
+        return true; // fec0::/10 site-local: deprecated, and never a public host
+    }
     if bytes[..4] == [0x20, 0x01, 0x0d, 0xb8] {
         return true; // 2001:db8::/32 documentation
     }
+    if bytes[0] == 0x3f && bytes[1] == 0xff && (bytes[2] & 0xf0) == 0 {
+        return true; // 3fff::/20 documentation (RFC 9637), the twin of 2001:db8::/32
+    }
+    if bytes[..4] == [0x20, 0x01, 0x00, 0x00] {
+        return true; // 2001::/32 Teredo: a tunnel that hides an IPv4 endpoint in the tail
+    }
+    if bytes[..8] == [0x01, 0, 0, 0, 0, 0, 0, 0] {
+        return true; // 100::/64 discard-only
+    }
+    if bytes[..12].iter().all(|byte| *byte == 0) {
+        return true; // ::/96 IPv4-compatible (deprecated): ::127.0.0.1 is not a public host
+    }
+    // From here on the address merely CARRIES an IPv4 address. A name that answers
+    // 64:ff9b::a9fe:a9fe is asking a NAT64 gateway to dial 169.254.169.254, so each
+    // carrier is decided as the IPv4 address it really is. That keeps a public v4
+    // reachable through NAT64/6to4 and refuses a private one dressed as IPv6.
     if bytes[..10].iter().all(|byte| *byte == 0) && bytes[10] == 0xff && bytes[11] == 0xff {
-        // v4-mapped: decide it as the v4 address it really is.
-        return is_denied_v4(&Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]));
+        return is_denied_v4(&embedded(12)); // ::ffff:0:0/96 v4-mapped
+    }
+    if bytes[..8].iter().all(|byte| *byte == 0)
+        && bytes[8] == 0xff
+        && bytes[9] == 0xff
+        && bytes[10] == 0
+        && bytes[11] == 0
+    {
+        return is_denied_v4(&embedded(12)); // ::ffff:0:0:0/96 v4-translated (SIIT)
+    }
+    if bytes[..12] == [0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0] {
+        return is_denied_v4(&embedded(12)); // 64:ff9b::/96 NAT64 well-known prefix
+    }
+    if bytes[..6] == [0x00, 0x64, 0xff, 0x9b, 0x00, 0x01] {
+        return true; // 64:ff9b:1::/48 NAT64 local-use: operator-defined, so private
+    }
+    if bytes[0] == 0x20 && bytes[1] == 0x02 {
+        return is_denied_v4(&embedded(2)); // 2002::/16 6to4
     }
     false
 }
@@ -440,6 +481,106 @@ mod tests {
         let v6 = validated_url("https://[2606:4700::1111]/hook", false).expect("valid");
         assert_eq!(v6.host, "2606:4700::1111");
         assert_eq!(v6.absolute, "https://[2606:4700::1111]/hook");
+    }
+
+    /// #4829: the IPv6 spellings of a private/loopback/link-local/metadata
+    /// destination. One row per rule, so a deleted rule fails by name.
+    #[test]
+    fn ipv6_counterparts_of_private_destinations_are_denied() {
+        let denied: &[(&str, &str)] = &[
+            ("::", "unspecified"),
+            ("::1", "loopback"),
+            ("ff02::1", "multicast"),
+            ("fc00::1", "unique-local"),
+            ("fd00:ec2::254", "AWS metadata (unique-local)"),
+            ("fe80::1", "link-local"),
+            ("febf:ffff::1", "link-local upper edge"),
+            ("fec0::1", "site-local"),
+            ("2001:db8::1", "documentation 2001:db8"),
+            ("3fff::1", "documentation 3fff"),
+            ("3fff:fff:ffff::1", "documentation 3fff upper edge"),
+            ("2001:0:4136:e378:8000:63bf:3fff:fdd2", "Teredo"),
+            ("100::1", "discard-only"),
+            ("::7f00:1", "IPv4-compatible loopback"),
+            ("::5db8:d822", "IPv4-compatible, even with a public tail"),
+            ("::ffff:127.0.0.1", "v4-mapped loopback"),
+            ("::ffff:169.254.169.254", "v4-mapped metadata"),
+            ("::ffff:10.0.0.1", "v4-mapped private"),
+            ("::ffff:0:127.0.0.1", "v4-translated loopback"),
+            ("::ffff:0:169.254.169.254", "v4-translated metadata"),
+            ("64:ff9b::127.0.0.1", "NAT64 loopback"),
+            ("64:ff9b::169.254.169.254", "NAT64 metadata"),
+            ("64:ff9b::10.0.0.1", "NAT64 private"),
+            ("64:ff9b::192.168.1.1", "NAT64 private /16"),
+            ("64:ff9b:1::1", "NAT64 local-use"),
+            ("64:ff9b:1:ffff::1", "NAT64 local-use upper edge"),
+            ("2002:7f00:1::", "6to4 loopback"),
+            ("2002:a9fe:a9fe::1", "6to4 metadata"),
+            ("2002:c0a8:101::1", "6to4 private /16"),
+            ("2002:a00:1::", "6to4 private /8"),
+        ];
+        for (raw, why) in denied {
+            let address: Ipv6Addr = raw.parse().expect("test address");
+            assert!(is_denied_v6(&address), "{raw} ({why}) must be refused");
+            assert!(
+                is_denied_address(raw),
+                "{raw} ({why}) must be refused as a host string"
+            );
+            assert_eq!(
+                validated_url(&format!("https://[{raw}]/x.gif"), false).unwrap_err(),
+                OutboundUrlError::PrivateAddress,
+                "{raw} ({why}) must be refused as a URL literal"
+            );
+        }
+    }
+
+    /// The other half: the rules above must not turn IPv6 off. A public address,
+    /// and a public IPv4 reached through NAT64/6to4/mapping, stays reachable.
+    #[test]
+    fn public_ipv6_and_public_carried_ipv4_stay_reachable() {
+        for raw in [
+            "2606:4700::1111",
+            "2001:4860:4860::8888",
+            "2001:4860::1",
+            "2a00:1450:4001:81d::200e",
+            "2620:fe::fe",
+            "3fff:1000::1",
+            "100:0:0:1::1",
+            "::ffff:93.184.216.34",
+            "::ffff:0:93.184.216.34",
+            "64:ff9b::93.184.216.34",
+            "2002:5db8:d822::1",
+        ] {
+            let address: Ipv6Addr = raw.parse().expect("test address");
+            assert!(
+                !is_denied_v6(&address),
+                "{raw} is public and must stay reachable"
+            );
+        }
+    }
+
+    /// The DNS half of the same: one carried-private answer poisons the name.
+    #[tokio::test]
+    async fn a_nat64_dressed_private_answer_poisons_the_name() {
+        let url = validated_url("https://nat64.example/x.gif", false).expect("public literal");
+        for private in ["64:ff9b::a9fe:a9fe", "2002:7f00:1::", "::ffff:0:a00:1"] {
+            let mixed = FixedResolver(vec![ip("2606:4700::1111"), ip(private)]);
+            assert_eq!(
+                validated_resolved_addresses(&url, &mixed)
+                    .await
+                    .unwrap_err(),
+                OutboundUrlError::PrivateAddress,
+                "{private} must not be a pinnable answer"
+            );
+        }
+        let public = FixedResolver(vec![ip("2606:4700::1111"), ip("64:ff9b::5db8:d822")]);
+        assert_eq!(
+            validated_resolved_addresses(&url, &public)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[test]

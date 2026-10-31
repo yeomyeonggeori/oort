@@ -154,6 +154,10 @@ const PUBLIC_TEMPLATES: &[&str] = &[
     "/v1/integrations/github/webhook",
     "/v1/webhooks/{ws}/{installation}",
     "/hooks/{token}",
+    // #4820 C2a: the photo address the co-hosted Hermes' picture tool downloads. Public by
+    // construction (its caller is Hermes, which holds no oort credential; the one-time token in the
+    // path is the only authority), mounted with the other public routes.
+    "/v1/self-media/{ws}/{token}",
 ];
 
 /// Public only when the Drive archive accepts stub uploads (an in-memory or local archive); the
@@ -2365,7 +2369,6 @@ const MOUNTED_WITHOUT_CONTRACT: Drift = &[
             ("GET", "/v1/workspaces/{}/agents/{}/gateway/jobs/pending"),
             ("GET", "/v1/workspaces/{}/channels/{}/agent-runs"),
             ("GET", "/v1/workspaces/{}/devices"),
-            ("GET", "/v1/workspaces/{}/usage/summary"),
             ("POST", "/v1/agent-runs/{}/approval-decisions"),
             ("POST", "/v1/provider/link/test"),
             ("POST", "/v1/workspaces"),
@@ -2455,6 +2458,10 @@ const MOUNTED_WITHOUT_CONTRACT: Drift = &[
             ("PUT", "/v1/workspaces/{}/inbox/{}/read"),
             ("GET", "/v1/workspaces/{}/work-sessions/{}/reattach"),
         ],
+    ),
+    (
+        "The photo address the co-hosted Hermes' picture tool downloads (#4820 C2a, ADR-0218 G4): a capacity URL like /__momo_stub/drive/uploads/{token} rather than a client API — its caller is Hermes, not a client, and the one-time, hash-only, five-minute token in the path is the only authority — so it is listed in neither contract file this test reads",
+        &[("GET", "/v1/self-media/{}/{}")],
     ),
 ];
 

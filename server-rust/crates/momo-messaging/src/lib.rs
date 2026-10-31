@@ -49,6 +49,7 @@
 
 pub mod agent_avatar;
 pub mod agent_card;
+pub mod approval_card;
 pub mod attachment;
 pub mod attachment_reclaim;
 pub mod avatar_reclaim;
@@ -83,22 +84,28 @@ pub mod reminder;
 /// ADR-0208 / #4214 — scheduled messages: every `scheduled_message` statement (owner-scoped FORCE RLS).
 pub mod scheduled;
 pub mod search;
+/// #4820 C2a — the short-lived, single-use address of the requester's own picture for the co-hosted
+/// Hermes picture tool (ADR-0218 증보 G4·G8): token mint/redeem, the origin grammar, the log scrub.
+pub mod self_media;
 /// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
 pub mod sidebar_prefs;
 pub mod workspace_avatar;
 
+pub use approval_card::settle_approval_card_in_tx;
+
 pub use agent_avatar::{
     apply_avatar_image_in_tx, apply_human_avatar_image_in_tx, bind_staged_image_to_approval_in_tx,
-    clear_avatar_image_in_tx, delete_staged_avatar_image_in_tx, find_requester_attachment_in_tx,
+    clear_avatar_image_in_tx, delete_staged_avatar_image_in_tx,
+    find_requester_attachment_for_in_tx, find_requester_attachment_in_tx,
     find_visible_image_attachment_in_tx, image_attachments_for_messages_in_tx, is_avatar_preset,
     process_avatar_image, purge_stale_staged_avatar_images_in_tx, read_avatar_image_bytes_in_tx,
     read_avatar_image_in_tx, read_current_avatar_image_in_tx, requester_of_run_in_tx,
     stage_avatar_image_in_tx, staged_image_matches_pin_in_tx, AgentAvatarBytes, AgentAvatarImage,
-    AvatarAttachmentSource, AvatarImageRejected, ProcessedAvatar, AGENT_AVATAR_DECODE_ALLOC_LIMIT,
-    AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT, AGENT_AVATAR_IN_MAX_BYTES_GENERATED,
-    AGENT_AVATAR_IN_MAX_DIM, AGENT_AVATAR_IN_MAX_PIXELS, AGENT_AVATAR_OUT_MAX_BYTES,
-    AGENT_AVATAR_OUT_MAX_DIM, AGENT_AVATAR_PRESETS, AGENT_AVATAR_SOURCES,
-    AGENT_AVATAR_STAGED_TTL_HOURS,
+    AvatarAttachmentSource, AvatarImageRejected, ProcessedAvatar, RequesterAttachmentUse,
+    AGENT_AVATAR_DECODE_ALLOC_LIMIT, AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT,
+    AGENT_AVATAR_IN_MAX_BYTES_GENERATED, AGENT_AVATAR_IN_MAX_DIM, AGENT_AVATAR_IN_MAX_PIXELS,
+    AGENT_AVATAR_OUT_MAX_BYTES, AGENT_AVATAR_OUT_MAX_DIM, AGENT_AVATAR_PRESETS,
+    AGENT_AVATAR_SOURCES, AGENT_AVATAR_STAGED_TTL_HOURS,
 };
 pub use agent_card::{
     apply_agent_card_in_tx, lock_agent_card_in_tx, read_agent_card_in_tx, AgentCard,
@@ -201,9 +208,10 @@ pub use memory::{
     MEM_ITEM_SEARCH_LIMIT_MAX, MEM_PROPOSAL_LIMIT_DEFAULT, MEM_PROPOSAL_LIMIT_MAX,
 };
 pub use message::{
-    agent_auto_reply_streak_in_tx, agent_context_window_in_tx, build_broadcast_payload,
-    build_thread_updated_payload, cent_channel, clamp_history_limit, clamp_replies_limit,
-    context_message_body, fetch_thread_rollup_in_tx, find_client_message_in_tx, list_channel_page,
+    agent_auto_reply_streak_in_tx, agent_context_window_for_member_in_tx,
+    agent_context_window_in_tx, build_broadcast_payload, build_thread_updated_payload,
+    cent_channel, clamp_history_limit, clamp_replies_limit, context_message_body,
+    fetch_thread_rollup_in_tx, find_client_message_in_tx, find_message_in_tx, list_channel_page,
     list_messages, list_thread_replies, parse_replies_cursor, patch_and_prune_message_props_in_tx,
     patch_message_props_in_tx, send_message, send_message_in_tx, send_message_with_mentions_in_tx,
     send_message_with_mentions_via_in_tx, send_signed_message_in_tx, send_thread_notice_in_tx,
@@ -270,6 +278,12 @@ pub use search::{
     clamp_search_limit, decode_search_cursor, encode_search_cursor, literal_like_pattern,
     normalize_query, search_messages, SearchCursor, SearchHit, SearchPage, SearchRequestInvalid,
     SearchScope, SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, SEARCH_QUERY_MIN_CHARS,
+};
+pub use self_media::{
+    bytes_match_mime, canonical_origin, mint_for_run_in_tx, mint_with_ttl_in_tx,
+    redact_self_media_urls, redeem_in_tx, self_media_url, token_hash, token_is_well_formed,
+    trigger_photo_in_tx, SelfMediaGrant, SelfMediaSource, TriggerPhoto, SELF_MEDIA_MAX_BYTES,
+    SELF_MEDIA_PATH_PREFIX, SELF_MEDIA_TOKEN_CHARS, SELF_MEDIA_TTL_SECS,
 };
 pub use sidebar_prefs::{
     get_sidebar_prefs_in_tx, set_sidebar_prefs_in_tx, validate_sidebar_prefs, SidebarPrefs,

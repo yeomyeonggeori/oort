@@ -1,4 +1,6 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useContext, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { QueryClientContext } from "@tanstack/react-query";
+import { refreshProfileAfterApproval } from "@momo/core/features/approvals/profileChange";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -254,7 +256,8 @@ export function ApprovalActions({
 }) {
   // workspaceId comes from session context rather than a prop chain: both
   // callers sit several components below the shell.
-  const { workspaceId } = useSession();
+  const { workspaceId, replaceSessionMember } = useSession();
+  const queryClient = useContext(QueryClientContext);
   /** 지금 서버에 나가 있는 결정의 방향. 없으면 `null`. */
   const [sending, setSending] = useState<Direction | null>(null);
   /** 같은 틱의 두 번째 누름을 거르는 동기 문. state 는 다음 렌더에야 바뀐다. */
@@ -330,6 +333,9 @@ export function ApprovalActions({
       // 성공하면 호출자가 이 컨트롤을 영수증 줄로 바꾸면서 언마운트한다. 초점은
       // 호출자가 받는다(카드의 영수증/1회 링크, 목록의 다음 행).
       onSettled(outcome);
+      void refreshProfileAfterApproval(outcome, replaceSessionMember, (workspace, rows) => {
+        queryClient?.setQueryData(["roster", workspace], rows);
+      });
     } finally {
       sendingRef.current = false;
       setSending(null);

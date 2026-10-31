@@ -1,3 +1,4 @@
+import { AgentMonthlyReport } from "./AgentUsage";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
@@ -156,6 +157,8 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
           its own four states: a server that predates ADR-0135 answers 404 here
           and the ledger below still renders, because the two are separate
           contracts and one being absent is not the other failing. */}
+      <AgentMonthlyReport workspaceId={workspaceId} />
+      {query.data?.scope === "visible" && <p className="text-meta text-ink-muted">기존 사용량은 내가 볼 수 있는 범위 기준이에요. 아래 비용은 원장에 기록된 금액이며 월 보고의 등록 가격 상당액과 다를 수 있어요.</p>}
       <ProviderQuotaBlock workspaceId={workspaceId} />
 
       {/* The ledger's controls are the first card of the ledger: a 기간 segment

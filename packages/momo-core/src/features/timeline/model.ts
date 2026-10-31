@@ -6,6 +6,7 @@ import type {
   RosterMember,
 } from "../../lib/api";
 import { threadRollup, uuidEq } from "../../lib/api";
+import type { DmGroupFacts } from "../workspace/directory";
 
 // =============================================================================
 // Timeline ordering model (pure). `seq` is the ONLY ordering authority, never
@@ -104,11 +105,30 @@ const ADD_MEMBER_ACTION: EmptyChannelAction = {
   label: EMPTY_ADD_MEMBER_ACTION_LABEL,
 };
 
+/** 참여자가 정확히 둘인 DM의 안내. 셋 이상(`DmGroupFacts`)에는 쓰지 않는다. */
 const DM_DETAIL = "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다.";
 
+/**
+ * 셋 이상 DM의 안내(#4912, ADR-0217). 「둘만」·「고정」은 이 대화에서 사실이 아니다: 모든 사람의 허락으로 에이전트가
+ * 들어와 있고 사람 누구나 내보낼 수 있다. 말하는 것은 둘이다. 이 대화에 있는 참여자 수(에이전트 포함, 머리의 「· N명」과
+ * 같은 수)와, 에이전트가 있을 때 그 읽기 범위(착석 뒤에 쓴 글, D5). 에이전트가 있는지는 명부로 **아는 때만** 말한다.
+ * 같은 블록의 「이 대화의 시작입니다.」·두 사람 DM 문장과 같은 합쇼체다.
+ */
+function groupDmDetail(group: DmGroupFacts): string {
+  const sees = `여기 쓴 메시지는 이 대화에 있는 ${group.count}명이 함께 봅니다.`;
+  return group.agentCount > 0
+    ? `${sees} 에이전트는 이 대화에 들어온 뒤에 쓴 글만 봅니다.`
+    : sees;
+}
+
+/**
+ * `group`은 DM 참여자가 셋 이상일 때만 채운다(`dmGroupFacts`). `peer === null`은 「그룹」일 수도 「명부 대기」일 수도 있어서
+ * 상대 한 명으로는 이 둘을 가를 수 없다. 생략하거나 둘 이하면 지금까지의 두 사람 DM 문장이다.
+ */
 export function emptyChannelCopy(
   kind: Channel["kind"] | null | undefined,
-  peer: Pick<RosterMember, "displayName" | "kind"> | null
+  peer: Pick<RosterMember, "displayName" | "kind"> | null,
+  group?: DmGroupFacts | null
 ): EmptyChannelCopy {
   if (kind !== "dm") {
     // R-1 §3 asked for [사람 추가] and [에이전트 추가] as equal buttons, to say
@@ -131,12 +151,13 @@ export function emptyChannelCopy(
       secondary: ADD_MEMBER_ACTION,
     };
   }
+  const detail = group && group.count > 2 ? groupDmDetail(group) : DM_DETAIL;
   if (!peer) {
-    // Roster not loaded yet: name nothing rather than name the wrong thing.
+    // 상대를 못 고른 DM: 명부를 아직 못 받았거나(이름을 지어내지 않는다) 셋 이상 그룹이다(`group`이 문구를 가른다).
     return {
       surface: "dm",
       headline: "다이렉트 메시지를 시작하세요.",
-      detail: DM_DETAIL,
+      detail,
       primary: WRITE_ACTION,
       secondary: null,
     };
@@ -147,7 +168,7 @@ export function emptyChannelCopy(
       peer.kind === "agent"
         ? `${peer.displayName}님에게 첫 일을 맡겨보세요.`
         : `${peer.displayName}님과의 대화를 시작하세요.`,
-    detail: DM_DETAIL,
+    detail,
     primary: WRITE_ACTION,
     secondary: null,
   };
