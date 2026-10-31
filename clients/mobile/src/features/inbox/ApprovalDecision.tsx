@@ -13,7 +13,7 @@ import React, {useCallback, useContext, useImperativeHandle, useRef, useState} f
 import {QueryClientContext} from '@tanstack/react-query';
 import {refreshProfileAfterApproval} from '@momo/core/features/approvals/profileChange';
 import {replacePersistedMember} from '../../storage/secureSession';
-import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
+import {AccessibilityInfo, Pressable, StyleSheet, View} from 'react-native';
 import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
@@ -309,9 +309,9 @@ export function ApprovalDecision({
             pressed && !busy && styles.pressed,
           ]}
           testID={`${testIDPrefix}-reject`}>
-          <Text style={styles.buttonQuietLabel}>
+          <Sentence style={styles.buttonQuietLabel}>
             {sending === 'reject' ? '보내는 중' : '거부'}
-          </Text>
+          </Sentence>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -343,13 +343,13 @@ export function ApprovalDecision({
               (pill ? styles.pillCommitPressed : styles.buttonCommitPressed),
           ]}
           testID={`${testIDPrefix}-approve`}>
-          <Text
+          <Sentence
             style={[
               canApprove ? styles.buttonCommitLabel : styles.buttonQuietLabel,
               pill && canApprove && styles.pillCommitLabel,
             ]}>
             {sending === 'approve' ? '보내는 중' : '승인'}
-          </Text>
+          </Sentence>
         </Pressable>
       </View>
       {errorCopy !== null ? (

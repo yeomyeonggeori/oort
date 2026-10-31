@@ -6,9 +6,11 @@ import {
   AGENT_USAGE_COPY as COPY, fetchAgentUsage, saveSubscriptionFee,
   type AgentUsageResponse,
 } from '@momo/core/features/settings/agentUsage';
+import {formatMicroUsd} from '@momo/core/features/timeline/agentCardModel';
 import {AgentMonthlyReport, AgentUsageStatus} from '../src/features/agents/AgentUsage';
 import {SAFE_GUTTER} from '../src/design/tokens';
 import {leftEdge} from './fixtures/leftInset';
+import {sweepHangulWord} from './fixtures/hangulWord';
 
 jest.mock('@momo/core/features/settings/agentUsage', () => ({
   ...jest.requireActual('@momo/core/features/settings/agentUsage'),
@@ -136,4 +138,54 @@ it('keeps the fee editor inside the report on the report gutter alone - the edit
   expect(leftEdge(screen.getByTestId('subscription-a-pill'))).toBe(SAFE_GUTTER);
   expect(leftEdge(screen.getByRole('button', {name: '구독 정액 저장'}))).toBe(SAFE_GUTTER);
   expect(leftEdge(screen.getByText('비워서 저장하면 정액을 지워요.'))).toBe(SAFE_GUTTER);
+});
+
+// ---- 같은 비용은 한 가지로 적힌다 (#4982) -------------------------------------------------------------
+// 스레드 카드·결정 무대는 `formatMicroUsd`(「$1.50」)로 적는데, 사용량 줄은 코어의 둘째 서식(Intl 통화, 「US$1.234567」)으로 적어서
+// 폰 안에서 같은 금액이 두 모양이었다. 줄을 만드는 곳은 코어(`usageLine`)라 폰 쪽에서 바꿀 수 없고, 원인이 둘째 서식이다.
+it('prints every cost on the usage screens with the one notation the thread cards use', async () => {
+  const response = data(true);
+  response.agents[0] = {...response.agents[0], costMicroUsd: 1_234_567, estimatedRuns: 0, source: 'measured',
+    subscriptionFee: {monthlyMicroUsd: 20_000_000, label: null}};
+  response.totals.workspace = {...metrics, costMicroUsd: 12_340_000, estimatedRuns: 0, source: 'measured'};
+  jest.mocked(fetchAgentUsage).mockResolvedValue(response);
+  const report = mount();
+  const loaded = await screen.findByTestId('agent-monthly-report');
+  expect(formatMicroUsd(1_234_567)).toBe('$1.23'); // 이 시험이 헛돌지 않게: 기대값이 실제 서식이다
+  const partial = {exact: false};
+  expect(loaded).toHaveTextContent(`비용 ${formatMicroUsd(12_340_000)}`, partial); // 워크스페이스 합계
+  expect(loaded).toHaveTextContent(`비용 ${formatMicroUsd(1_234_567)}`, partial); // 에이전트 줄
+  expect(loaded).toHaveTextContent(`구독 ${formatMicroUsd(20_000_000)}/월`, partial);
+  expect(loaded).not.toHaveTextContent(/US\$/);
+  report.unmount();
+  // 프로필 줄도 같은 서식이다.
+  jest.mocked(fetchAgentUsage).mockResolvedValue(response);
+  mount(true);
+  await waitFor(() => expect(screen.getByTestId('agent-usage-status')).toHaveTextContent(`비용 ${formatMicroUsd(1_234_567)}`, partial));
+  expect(screen.getByTestId('agent-usage-status')).not.toHaveTextContent(/US\$/);
+});
+
+// ---- 한국어 낱말 끊김 (#4982) -------------------------------------------------------------------------
+it('has every Hangul text of the cost screens on hangul-word: report, rows, fee editor, buttons, states', async () => {
+  jest.mocked(fetchAgentUsage).mockResolvedValue(data(true));
+  const report = mount();
+  const loaded = sweepHangulWord(await screen.findByTestId('agent-monthly-report'));
+  expect(loaded.checked).toBeGreaterThan(8); // 안내·합계·에이전트 이름·줄·정액 머리·단추·안내
+  expect(loaded.missing).toEqual([]);
+  report.unmount();
+  // 프로필 줄(불러온 뒤).
+  jest.mocked(fetchAgentUsage).mockResolvedValue(data());
+  const profile = mount(true);
+  await waitFor(() => expect(screen.getByTestId('agent-usage-status')).toHaveTextContent(/자기 보고/));
+  const line = sweepHangulWord(screen.getByTestId('agent-usage-status'));
+  expect(line.checked).toBeGreaterThan(0);
+  expect(line.missing).toEqual([]);
+  profile.unmount();
+  // 오류: 문장 + 「다시 불러오기」 단추.
+  jest.mocked(fetchAgentUsage).mockRejectedValue(new Error('unavailable'));
+  mount();
+  await screen.findByText(COPY.error);
+  const failed = sweepHangulWord(screen.getByTestId('agent-monthly-report-state'));
+  expect(failed.checked).toBeGreaterThan(1);
+  expect(failed.missing).toEqual([]);
 });

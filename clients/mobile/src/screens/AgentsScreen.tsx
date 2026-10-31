@@ -9,6 +9,7 @@ import {
   NoticeBlock,
   Screen,
   ScreenHeader,
+  Sentence,
   TapRow,
 } from '../design/atoms';
 import {PULL_FILL, usePullRefresh} from '../design/refresh';
@@ -353,7 +354,7 @@ function Row({
         <Text style={styles.rowMeta} numberOfLines={2}>
           {agentRowMeta(row)}
         </Text>
-        {usage && <Text style={styles.rowMeta}>{AGENT_USAGE_COPY.title}: {usage}</Text>}
+        {usage && <Sentence style={styles.rowMeta}>{AGENT_USAGE_COPY.title}: {usage}</Sentence>}
         {/* 「활성」 같은 연결 상태가 아니라 지금 살아 있는가. 서버가 모르는 에이전트에는
             아무것도 서지 않는다. */}
         <AgentLivenessLabel

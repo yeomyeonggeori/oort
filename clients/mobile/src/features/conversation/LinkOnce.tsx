@@ -101,7 +101,7 @@ export function LinkOnce({
           onPress={onCopy}
           style={({pressed}) => [styles.copy, pressed && styles.pressed]}
           testID={`${testIDPrefix}-link-once-copy`}>
-          <Text style={styles.copyLabel}>{copied ? '복사됨' : '복사하기'}</Text>
+          <Sentence style={styles.copyLabel}>{copied ? '복사됨' : '복사하기'}</Sentence>
         </Pressable>
       </View>
     </View>
