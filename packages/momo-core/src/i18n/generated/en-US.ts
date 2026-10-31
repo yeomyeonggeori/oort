@@ -550,6 +550,114 @@ export const catalog: MessageCatalog = {
       "value": "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded."
     }
   ],
+  "mobile.linkCard.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "mobile.linkCard.copied": [
+    {
+      "type": 0,
+      "value": "Link copied"
+    }
+  ],
+  "mobile.linkCard.copy": [
+    {
+      "type": 0,
+      "value": "Copy link"
+    }
+  ],
+  "mobile.linkCard.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t copy the link."
+    }
+  ],
+  "mobile.linkCard.loading": [
+    {
+      "type": 0,
+      "value": "Loading link preview"
+    }
+  ],
+  "mobile.linkCard.remove": [
+    {
+      "type": 0,
+      "value": "Remove preview"
+    }
+  ],
+  "mobile.linkCard.removeConfirm": [
+    {
+      "type": 0,
+      "value": "Remove"
+    }
+  ],
+  "mobile.linkCard.removeDetail": [
+    {
+      "type": 0,
+      "value": "Every link preview on this message disappears for everyone and won’t be made again. The message and its links stay."
+    }
+  ],
+  "mobile.linkCard.removeFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t remove the link preview. Check your connection and try again."
+    }
+  ],
+  "mobile.linkCard.removePending": [
+    {
+      "type": 0,
+      "value": "Removing…"
+    }
+  ],
+  "mobile.linkCard.removeTitle": [
+    {
+      "type": 0,
+      "value": "Remove this link preview?"
+    }
+  ],
+  "mobile.linkCard.share": [
+    {
+      "type": 0,
+      "value": "Share"
+    }
+  ],
+  "mobile.linkCard.sheetClose": [
+    {
+      "type": 0,
+      "value": "Close link actions"
+    }
+  ],
+  "mobile.linkCard.sheetTitle": [
+    {
+      "type": 0,
+      "value": "Link actions"
+    }
+  ],
+  "mobile.linkPreview.compactHint": [
+    {
+      "type": 0,
+      "value": "Shows a small picture on the left, with the address and title on the right."
+    }
+  ],
+  "mobile.linkPreview.richHint": [
+    {
+      "type": 0,
+      "value": "Shows a large picture on top, with the title and description below. Links without a large picture look like Small."
+    }
+  ],
+  "mobile.linkPreview.scopeNote": [
+    {
+      "type": 0,
+      "value": "Applies to this device only. Web and desktop are set separately."
+    }
+  ],
+  "mobile.linkPreview.title": [
+    {
+      "type": 0,
+      "value": "Link previews"
+    }
+  ],
   "mobile.locale.backToSettings": [
     {
       "type": 0,
@@ -566,6 +674,42 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Applying language…"
+    }
+  ],
+  "settings.appearance.linkPreviewCompact": [
+    {
+      "type": 0,
+      "value": "Small"
+    }
+  ],
+  "settings.appearance.linkPreviewCompactHint": [
+    {
+      "type": 0,
+      "value": "Shows a small picture on the left, with the address, a one-line title and a one-line description on the right."
+    }
+  ],
+  "settings.appearance.linkPreviewOff": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
+  "settings.appearance.linkPreviewOffHint": [
+    {
+      "type": 0,
+      "value": "Keeps only the link in the message and draws no card."
+    }
+  ],
+  "settings.appearance.linkPreviewRich": [
+    {
+      "type": 0,
+      "value": "Large"
+    }
+  ],
+  "settings.appearance.linkPreviewRichHint": [
+    {
+      "type": 0,
+      "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
     }
   ],
   "settings.profile.languageBeta": [
@@ -618,6 +762,30 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Use device language"
+    }
+  ],
+  "timeline.unfurl.label": [
+    {
+      "type": 0,
+      "value": "Link preview: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "domain"
+    }
+  ],
+  "timeline.unfurl.video": [
+    {
+      "type": 0,
+      "value": "Video"
     }
   ]
 };

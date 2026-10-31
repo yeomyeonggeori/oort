@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { DEFAULT_UNFURL_SIZE } from "@momo/core/features/timeline/unfurl";
 
 // =============================================================================
 // This-device link-preview layout (BF-A6 / #1903).
@@ -20,14 +21,18 @@ import { useSyncExternalStore } from "react";
 //   new key valid            → as stored
 //   old "true"               → off
 //   old "false" / unknown    → compact  (they were seeing the compact card)
-//   no keys                  → rich
-//     미저장 → rich는 미토글 기존 사용자 포함 의도적 기본 상향
-//     (제품 결정, 오케스트레이터 승인·성재 최종 확인 예정).
-//     "미저장"은 신규 설치가 아니다. 옛 setter는 값이 바뀔 때만 썼으므로
-//     키가 없다는 것은 "이 설정을 한 번도 열지 않았다"이고, 그쪽이 다수다.
+//   no keys                  → compact
+//     #4882 (owner 2026-10-31): 기본은 「작게」다. 한때 미저장 → rich로 올렸던 기본을
+//     되돌린다. 키가 없다는 것은 "이 설정을 한 번도 열지 않았다"(옛 setter는 값이 바뀔
+//     때만 썼다)이고 그쪽이 다수라서, 그 사람들은 큰 카드에서 작은 카드로 바뀐다.
+//     「크게」를 직접 고른 사람은 키가 있어 그대로다.
+//
+// Stored identifiers keep their names (rich, compact, off) so nothing in storage
+// moves; only the words on screen are 크게 / 작게 / 끄기.
 // =============================================================================
 
-export const LINK_PREVIEW_PREFERENCES = ["rich", "compact", "off"] as const;
+// 화면 순서(작게 · 크게 · 끄기)이자 기본값이 앞에 오는 순서다.
+export const LINK_PREVIEW_PREFERENCES = ["compact", "rich", "off"] as const;
 export type LinkPreviewPreference = (typeof LINK_PREVIEW_PREFERENCES)[number];
 
 export const LINK_PREVIEW_STORAGE_KEY = "momo.web.link-preview.v1";
@@ -38,9 +43,8 @@ export const LINK_PREVIEW_STORAGE_KEY = "momo.web.link-preview.v1";
 export const LINK_PREVIEW_FOLDED_STORAGE_KEY =
   "momo.web.link-previews-folded.v1";
 
-export const DEFAULT_LINK_PREVIEW_PREFERENCE: LinkPreviewPreference = "rich";
-
-export type UnfurlCardLayout = "none" | "compact" | "rich";
+// 한 곳: 폰(#4883)도 같은 기본값을 코어에서 읽는다.
+export const DEFAULT_LINK_PREVIEW_PREFERENCE: LinkPreviewPreference = DEFAULT_UNFURL_SIZE;
 
 interface PreferenceStorage {
   getItem(key: string): string | null;
@@ -73,22 +77,6 @@ export function migrateLinkPreviewPreference(
   if (storedFolded === "true") return "off";
   if (storedFolded != null && storedFolded !== "") return "compact";
   return DEFAULT_LINK_PREVIEW_PREFERENCE;
-}
-
-/**
- * What the card actually paints. `showHeroFrame` is the caller's job:
- * preference is rich AND an image URL exists AND fetch/decode has not failed.
- * Bytes may still be loading — the frame is reserved either way (H-1). An
- * empty hero is still forbidden: failure degrades to compact, and a missing
- * URL never opens the frame.
- */
-export function unfurlCardLayout(
-  preference: LinkPreviewPreference,
-  showHeroFrame: boolean
-): UnfurlCardLayout {
-  if (preference === "off") return "none";
-  if (preference === "rich" && showHeroFrame) return "rich";
-  return "compact";
 }
 
 function persistMigrated(
@@ -140,7 +128,7 @@ export function setLinkPreviewPreference(
   storage: PreferenceStorage | null = browserStorage()
 ): void {
   // Always write, even when next equals the in-memory default. Choosing the
-  // default explicitly ("사진 카드" on a fresh store) must persist; otherwise
+  // default explicitly ("작게" on a fresh store) must persist; otherwise
   // the radio looks saved and a later default change would move this device.
   const changed = next !== preference;
   preference = next;

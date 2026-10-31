@@ -68,6 +68,7 @@ pub mod approval_sweep;
 pub mod attachment_reclaim;
 pub mod avatar_reclaim;
 pub mod backoff;
+pub mod bulk;
 pub mod config;
 pub mod control_window_sweep;
 pub mod huddle_sweep;

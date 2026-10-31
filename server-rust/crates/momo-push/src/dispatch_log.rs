@@ -102,6 +102,36 @@ pub async fn claim_dispatch(
     })
 }
 
+/// Has this (member, token, collapse id) already been dispatched and settled? A **read only** — it
+/// claims nothing and leaves no row. The bulk layer (ADR-0206 증보 1 F6) asks it before it counts a
+/// message against a window or spends the server budget, so a redelivered candidate and the messages
+/// folded under an already-sent representative cost neither. A claim that was taken but never settled
+/// (a crashed in-flight send) is *not* settled: [`claim_dispatch`] takes those over.
+pub async fn is_dispatch_settled(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    token_id: Uuid,
+    collapse_id: &str,
+) -> Result<bool, DbError> {
+    let settled: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM push_dispatch_log \
+            WHERE workspace_id = $1 \
+              AND member_id = $2 \
+              AND push_token_id = $3 \
+              AND collapse_id = $4 \
+              AND apns_status IS NOT NULL)",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(token_id)
+    .bind(collapse_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(settled)
+}
+
 /// Record the APNs receipt against a claimed dispatch.
 ///
 /// Settling is what turns the claim into a permanent "already sent" marker, so

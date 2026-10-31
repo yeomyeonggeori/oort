@@ -133,6 +133,12 @@ pub enum InteractionRefused {
     NotAuthorForDelete,
     #[error("deleted messages cannot be edited")]
     EditDeleted,
+    /// An approval card's `body` is the one sentence the lock screen, the notification and a
+    /// card-less client show (ADR-0204 증보 6 D6-3), and the settlement rewrites it
+    /// (`settle_approval_card_in_tx`). Neither edit path writes it — for anyone, its author
+    /// included.
+    #[error("approval cards are written by the server")]
+    ApprovalCardOwned,
     #[error("deleted messages cannot receive reactions")]
     ReactDeleted,
     #[error("message reaction limit reached")]
@@ -173,9 +179,17 @@ pub struct LockedMessage {
     pub seq: i64,
     pub state: String,
     pub deleted_at: Option<DateTime<Utc>>,
+    /// `message.type` as its database label (`text`, `approval_request`, …).
+    pub message_type: String,
 }
 
 impl LockedMessage {
+    /// An approval card — written, and rewritten at settlement, by the server alone
+    /// ([`InteractionRefused::ApprovalCardOwned`]).
+    pub fn is_approval_card(&self) -> bool {
+        self.message_type == crate::message::MessageType::ApprovalRequest.as_db_label()
+    }
+
     /// Both halves of "deleted", because both are written and either alone is a
     /// half-tombstone: Swift's own guards read `state == "deleted" ||
     /// deletedAt != nil` every time.
@@ -194,7 +208,8 @@ pub async fn lock_message_in_tx(
     message_id: Uuid,
 ) -> Result<Option<LockedMessage>, DbError> {
     let row = sqlx::query(
-        "SELECT channel_id, author_member_id, seq, state::text AS state, deleted_at \
+        "SELECT channel_id, author_member_id, seq, state::text AS state, deleted_at, \
+                type::text AS message_type \
            FROM message \
           WHERE id = $1 \
           FOR UPDATE",
@@ -209,6 +224,7 @@ pub async fn lock_message_in_tx(
         seq: row.try_get("seq")?,
         state: row.try_get("state")?,
         deleted_at: row.try_get("deleted_at")?,
+        message_type: row.try_get("message_type")?,
     }))
 }
 
@@ -487,6 +503,11 @@ pub async fn edit_message_in_tx(
     };
     if locked.author_member_id != actor_member_id {
         return Ok(Err(InteractionRefused::NotAuthorForEdit));
+    }
+    // After the authorship check, like the tombstone rule: a non-author learns nothing about
+    // what kind of message it is from the refusal.
+    if locked.is_approval_card() {
+        return Ok(Err(InteractionRefused::ApprovalCardOwned));
     }
     if locked.is_deleted() {
         return Ok(Err(InteractionRefused::EditDeleted));
@@ -964,6 +985,10 @@ pub async fn stream_message_body_in_tx(
     // must not learn from the refusal whether the message is a tombstone.
     if locked.author_member_id != actor_member_id {
         return Ok(Err(InteractionRefused::NotAuthorForEdit));
+    }
+    // An approval card is not a stream to grow: its body is the server's sentence.
+    if locked.is_approval_card() {
+        return Ok(Err(InteractionRefused::ApprovalCardOwned));
     }
     if locked.is_deleted() {
         return Ok(Err(InteractionRefused::EditDeleted));
@@ -2200,8 +2225,15 @@ mod tests {
             seq: 1,
             state: "sent".into(),
             deleted_at: None,
+            message_type: "text".into(),
         };
         assert!(!base.is_deleted());
+        assert!(!base.is_approval_card());
+        assert!(LockedMessage {
+            message_type: "approval_request".into(),
+            ..base.clone()
+        }
+        .is_approval_card());
         assert!(LockedMessage {
             state: "deleted".into(),
             ..base.clone()
@@ -2224,6 +2256,7 @@ mod tests {
             InteractionRefused::NotAuthorForEdit,
             InteractionRefused::NotAuthorForDelete,
             InteractionRefused::EditDeleted,
+            InteractionRefused::ApprovalCardOwned,
             InteractionRefused::ReactDeleted,
             InteractionRefused::ReactionLimit,
             InteractionRefused::EmptyBody,
