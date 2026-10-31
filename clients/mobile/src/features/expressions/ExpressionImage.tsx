@@ -14,11 +14,19 @@ export type PhoneExpressionSize =
   | 'inline'
   | 'medium'
   | 'large'
-  | 'grid';
-const POINTS = {reaction: 20, medium: 48, large: 160, grid: 32} as const;
+  | 'grid'
+  | 'tile';
+// `tile` 은 표현 시트의 이모티콘·GIF 탭이 쓰는 큰 칸이다(#4942) — `grid` 와 같은 정지 그림(thumb)이고 크기만 다르다.
+const POINTS = {
+  reaction: 20,
+  medium: 48,
+  large: 160,
+  grid: 32,
+  tile: 64,
+} as const;
 const REPEATS = 4;
 
-/** Animated files never enter the picker grid or an offscreen/reduced-motion cell. */
+/** Animated files never enter the picker grid/tile or an offscreen/reduced-motion cell. */
 export function ExpressionImage({
   expression,
   size,
@@ -36,7 +44,9 @@ export function ExpressionImage({
   } = useWindowDimensions();
   const reduceMotion = useReduceMotion();
   const native = useRef<Image>(null);
-  const [onScreen, setOnScreen] = useState(size === 'grid');
+  // 고르개의 칸(`grid`·`tile`)은 늘 정지 그림이다 — 움직이는 것은 미리보기와 대화의 줄만.
+  const still = size === 'grid' || size === 'tile';
+  const [onScreen, setOnScreen] = useState(still);
   const [foreground, setForeground] = useState(
     AppState.currentState === 'active',
   );
@@ -52,7 +62,7 @@ export function ExpressionImage({
   );
   const media = live?.media;
   const animate =
-    size !== 'grid' &&
+    !still &&
     (visible ?? onScreen) &&
     foreground &&
     !reduceMotion &&
@@ -67,7 +77,7 @@ export function ExpressionImage({
   const height = points / Math.max(1, ratio);
 
   useEffect(() => {
-    if (size === 'grid') return;
+    if (still) return;
     const check = () =>
       native.current?.measureInWindow?.((x, y, w, h) => {
         setOnScreen(
@@ -88,7 +98,7 @@ export function ExpressionImage({
       clearInterval(timer);
       subscription.remove();
     };
-  }, [size, windowHeight, windowWidth]);
+  }, [still, windowHeight, windowWidth]);
   useEffect(() => {
     let alive = true;
     setLoaded(false);
@@ -121,7 +131,7 @@ export function ExpressionImage({
     <Text
       accessibilityLabel={label}
       onPress={
-        size !== 'grid' && size !== 'reaction' && !reduceMotion
+        !still && size !== 'reaction' && !reduceMotion
           ? () => {
               setStopped(false);
               setPlay(value => value + 1);

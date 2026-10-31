@@ -1,5 +1,7 @@
 import {ExpressionComposerModal} from '../expressions/ExpressionComposerPicker';
 import {useEmojiTriggerFocus} from '../emoji/useEmojiTriggerFocus';
+import {insertExpressionToken} from '../expressions/expressionViews';
+import {useExpressionMessages} from '../expressions/useExpressionMessages';
 import {EXPRESSION_ICONS} from '../../design/icons/expressionIcons';
 import {dmAdmissionCandidates, dmAdmissionHint} from '@momo/core/features/agents/dmAdmission';
 import type {Channel} from '@momo/core/lib/api';
@@ -631,6 +633,13 @@ const AGENT_NOTICE_PAD_TOP = space.sm;
 /** 알약 안 두 원(36)을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
 const ATTACH_SLOP = slopTo(CONV.composerCircle);
 const SEND_SLOP = slopTo(CONV.composerCircle);
+/** 보내기 왼쪽 표현 단추(#4942)의 눌림 여유 — 칸(36)을 엄지 44 로 만든다. */
+const EXPRESSION_SLOP = slopTo(CONV.composerExpression);
+/**
+ * 접힌 알약에서 글 칸 **오른쪽**이 비우는 폭(#4942): 보내기 원 + 그 왼쪽 표현 단추의 칸. 왼쪽은 + 원 하나(`CONV.composerCircle`)다.
+ * 같은 합이 `COMPOSER_CHROME_X`(글 칸 산수)에도 들어 있다 — 시험(`composerPill.test.tsx`)이 둘을 묶는다.
+ */
+const RIGHT_RESERVE = CONV.composerCircle + CONV.composerExpression;
 
 // ---- 두 상태 (#4305 → #4456 → #4518) ------------------------------------------
 // 입력창은 **접힘**(한 줄 알약: + · 글 · 보내기)과 **펼침**(글 칸 위, 도구 줄 아래: + 가 왼쪽 아래,
@@ -1234,6 +1243,8 @@ export function Composer({
   // 답글 대상이 걸려 있으면 입력칸의 안내 글이 「답글 입력」이 되고 보내기의 낭독 이름이 「답글 보내기」가 된다 — 위에 선
   // 머리말이 말하는 곳으로 나간다(#4869). 안내 글은 넘겨받은 문장으로 취급되어 절 예산의 프로브도 서지 않는다.
   const replyCopy = useReplyCopy(directory);
+  // 보내기 왼쪽 표현 단추의 낭독 이름(#4942) — 사전(ko·en)에서만 온다.
+  const expressionCopy = useExpressionMessages();
   const replying = !!replyTarget && onCancelReply !== undefined;
   const placeholder = replying ? replyCopy.placeholder() : placeholderProp;
   const sendLabel = replying ? replyCopy.send() : sendLabelProp;
@@ -2035,6 +2046,17 @@ export function Composer({
       : expanded
         ? 0
         : CONV.composerCircle;
+  // 오른쪽은 한 칸 더 비운다(#4942): 보내기 원 왼쪽에 표현 단추의 칸이 서 있고(`styles.expression` — 접힘·펼침 모두 알약 바닥에
+  // 절대 배치) 글이 그 밑으로 흐르면 안 된다. 펼치면 글 칸이 두 원 **위**로 넓어지므로 양쪽 다 0 이다.
+  const inputInsetRight =
+    shown && !reduceMotion.current
+      ? progress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [RIGHT_RESERVE, 0],
+        })
+      : expanded
+        ? 0
+        : RIGHT_RESERVE;
   const toolsHeight = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [0, COMPOSER_TOOLS_HEIGHT],
@@ -2524,7 +2546,7 @@ export function Composer({
           </Pressable>
         )}
         <Animated.View
-          style={[{marginLeft: inputInset, marginRight: inputInset}, restClipStyle]}
+          style={[{marginLeft: inputInset, marginRight: inputInsetRight}, restClipStyle]}
           testID="composer-field"
           // 누름 (#4518): 입력창에 닿는 터치만 듣는다 — 이 상자는 입력창만 감싼다(+ · 보내기 · 도구 줄은 형제다). 관찰만 하고 응답자를 잡지 않는다.
           onTouchStart={onFieldTouchStart}
@@ -2660,20 +2682,6 @@ export function Composer({
           <Animated.View
             style={[styles.tools, {height: toolsHeight, opacity: progress}]}
             testID="composer-tools">
-            <Pressable
-              ref={expressionTrigger}
-              accessibilityRole="button"
-              accessibilityLabel="이모지 고르기"
-              accessibilityState={{disabled: offline}}
-              disabled={offline}
-              onPress={() => {
-                Keyboard.dismiss();
-                setExpressionPickerOpen(true);
-              }}
-              style={styles.tool}
-              testID="composer-tool-emoji">
-              <Image source={EXPRESSION_ICONS.smile} style={[styles.attachGlyph, {tintColor: palette.icon}]} />
-            </Pressable>
             {TOOL_SLOTS.includes('mention') ? (
               <Pressable
                 accessibilityRole="button"
@@ -2687,6 +2695,29 @@ export function Composer({
             ) : null}
           </Animated.View>
         ) : null}
+        {/* 표현 단추 (#4942) — **보내기 바로 왼쪽**, 접힘·펼침·입력 중 모두 선다. 두 원과 같은 지름의 칸이고 글리프만
+            그린다(원 채움 없음 — 채운 원은 보내기 하나다). 도구 줄이 아니라 알약 바닥에 절대 배치라 도구 줄이 접혀도 안 움직인다. */}
+        <Pressable
+          ref={expressionTrigger}
+          accessibilityRole="button"
+          accessibilityLabel={expressionCopy('expressions.sheet.open')}
+          accessibilityState={{disabled: offline}}
+          disabled={offline}
+          hitSlop={EXPRESSION_SLOP}
+          onPress={() => {
+            Keyboard.dismiss();
+            setExpressionPickerOpen(true);
+          }}
+          style={({pressed}) => [styles.expression, pressed && styles.pressed]}
+          testID="composer-expression">
+          <Image
+            source={EXPRESSION_ICONS.smile}
+            style={[
+              styles.attachGlyph,
+              {tintColor: offline ? palette.textFaint : palette.icon},
+            ]}
+          />
+        </Pressable>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={sendLabel}
@@ -2722,7 +2753,16 @@ export function Composer({
               onChangeText(currentTextRef.current + glyph);
               inputRef.current?.focus();
             }}
-            onSend={body => { if (!offline) onSend(body); }}
+            onInsertExpression={token => {
+              onChangeText(insertExpressionToken(currentTextRef.current, token));
+              inputRef.current?.focus();
+            }}
+            onSend={body => {
+              if (offline) return;
+              // 이모티콘·GIF 도 보내기다 — 보내기 = light 한 번(`submit` 과 같은 규칙, `haptics.ts` 표). 입력칸의 글은 건드리지 않는다.
+              haptics.light();
+              onSend(body);
+            }}
           />
       ) : null}
       <AttachMenu
@@ -2807,6 +2847,19 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderColor: color.border,
   },
   attachDisabled: {backgroundColor: color.surfaceMuted},
+  /**
+   * 보내기 왼쪽 표현 단추의 칸(#4942) — 보내기 원의 **바로 왼쪽**, 같은 바닥선·같은 지름. 글리프만 서고 채움이 없다.
+   */
+  expression: {
+    position: 'absolute',
+    right: BAR_PAD_X + CONV.composerCircle,
+    bottom: BAR_PAD_Y + (TOUCH_TARGET - CONV.composerCircle) / 2,
+    width: CONV.composerExpression,
+    height: CONV.composerCircle,
+    borderRadius: CONV.composerCircle / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   attachGlyph: {width: CONV_ICON_SIZE.plus, height: CONV_ICON_SIZE.plus},
   placeholder: {
     position: 'absolute',

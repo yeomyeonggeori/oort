@@ -71,6 +71,11 @@ export interface EmojiPickerProps {
   /** Return to the action/status editor, preserving its draft. */
   onClose: () => void;
   team?: TeamEmojiSlot;
+  /**
+   * 입력창 표현 시트(#4942)가 머리와 검색을 직접 갖고 이 본문만 쓸 때. 머리·검색 칸·「우리 팀」 탭을 그리지 않고
+   * 검색어를 위에서 받는다 — 분류 칩·피부색·격자·빈/오류 문장은 반응·상태 고르개와 같은 코드다.
+   */
+  embedded?: {query: string};
 }
 
 type Tab = (typeof EMOJI_CATEGORIES)[number]['id'] | 'team';
@@ -82,6 +87,7 @@ export function EmojiPicker({
   onSelect,
   onClose,
   team,
+  embedded,
 }: EmojiPickerProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {width} = useWindowDimensions();
@@ -92,7 +98,8 @@ export function EmojiPicker({
     1,
     Math.min(8, Math.floor((width - SAFE_GUTTER * 2) / TOUCH_TARGET)),
   );
-  const [query, setQuery] = useState('');
+  const [ownQuery, setQuery] = useState('');
+  const query = embedded ? embedded.query : ownQuery;
   const [tab, setTab] = useState<Tab>('frequent');
   const [catalog, setCatalog] = useState<CatalogEmoji[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -163,34 +170,38 @@ export function EmojiPicker({
 
   return (
     <>
-      <SheetHeader
-        title="이모지 고르기"
-        closeLabel="이모지 고르기 닫기"
-        onClose={closePicker}
-        closeTestID="emoji-picker-close"
-      />
-      <View style={styles.controls}>
-        <TextInput
-          accessibilityLabel="이모지 검색"
-          placeholder="이름이나 :code:로 검색"
-          placeholderTextColor={styles.placeholder.color}
-          value={query}
-          onChangeText={setQuery}
-          keyboardAppearance={keyboardAppearance}
-          autoCorrect={false}
-          autoCapitalize="none"
-          returnKeyType="search"
-          onSubmitEditing={Keyboard.dismiss}
-          style={styles.search}
-          testID="emoji-search"
+      {embedded ? null : (
+        <SheetHeader
+          title="이모지 고르기"
+          closeLabel="이모지 고르기 닫기"
+          onClose={closePicker}
+          closeTestID="emoji-picker-close"
         />
+      )}
+      <View style={styles.controls}>
+        {embedded ? null : (
+          <TextInput
+            accessibilityLabel="이모지 검색"
+            placeholder="이름이나 :code:로 검색"
+            placeholderTextColor={styles.placeholder.color}
+            value={query}
+            onChangeText={setQuery}
+            keyboardAppearance={keyboardAppearance}
+            autoCorrect={false}
+            autoCapitalize="none"
+            returnKeyType="search"
+            onSubmitEditing={Keyboard.dismiss}
+            style={styles.search}
+            testID="emoji-search"
+          />
+        )}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           testID="emoji-tabs"
         >
-          {TABS.map(item => (
+          {(embedded ? EMOJI_CATEGORIES : TABS).map(item => (
             <Pressable
               key={item.id}
               accessibilityRole="tab"
