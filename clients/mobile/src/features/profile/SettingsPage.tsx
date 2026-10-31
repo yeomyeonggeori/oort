@@ -107,6 +107,7 @@ import {
 } from './DevToolsPage';
 import {useDevToolsEntry} from './devTools';
 import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSettings';
+import {LinkPreviewSettingRow, LinkPreviewSettingsPage} from './LinkPreviewSettings';
 
 // =============================================================================
 // 「설정」 페이지 — 홈 머리의 내 얼굴이 여는 전체 화면 (#4457, owner 2026-10-25; 옛 `ProfileSheet` 의 자리).
@@ -173,6 +174,7 @@ import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSetti
 /** 설정 페이지 위에 한 겹 더 쌓이는 장. `main` 은 설정 페이지 자신이다. */
 export type SettingsSubPage =
   | 'language'
+  | 'linkPreview'
   | 'usage'
   | 'theme'
   | 'deviceKey'
@@ -185,7 +187,7 @@ export type SettingsPageName = 'main' | SettingsSubPage;
 /** 안쪽 장의 첫 요소 위 여백 — 설정 첫 장·시트와 같은 `space.md`. 스타일(`subContent`)과 기한 장의 펼침 셈(`revealAt`)이 함께 읽는다. */
 const SUB_PAGE_TOP = space.md;
 
-const SUB_PAGE_TITLE: Record<Exclude<SettingsSubPage, 'language'>, string> = {
+const SUB_PAGE_TITLE: Record<Exclude<SettingsSubPage, 'language' | 'linkPreview'>, string> = {
   usage: AGENT_USAGE_COPY.report,
   theme: '테마',
   deviceKey: DEVICE_KEY_TITLE,
@@ -266,6 +268,7 @@ export function SettingsPage({
             onOpenUsage={() => setPage('usage')}
             onOpenTheme={() => setPage('theme')}
             onOpenLanguage={() => setPage('language')}
+            onOpenLinkPreview={() => setPage('linkPreview')}
             onOpenStatus={() => setStatusOpen(true)}
             onOpenDeviceKey={() => setPage('deviceKey')}
             onOpenDevTools={() => setPage('devTools')}
@@ -289,6 +292,8 @@ export function SettingsPage({
           testID="settings-sub-pane">
           {page === 'language' ? (
             <LanguageSettingsPage onBack={backToMain} />
+          ) : page === 'linkPreview' ? (
+            <LinkPreviewSettingsPage onBack={backToMain} />
           ) : (
             <SubPage
               page={page}
@@ -321,7 +326,7 @@ function SubPage({
   directory,
   onBack,
 }: {
-  page: Exclude<SettingsSubPage, 'language'>;
+  page: Exclude<SettingsSubPage, 'language' | 'linkPreview'>;
   workspaceId: string;
   member: Member;
   directory: Directory;
@@ -431,6 +436,7 @@ export function SettingsContent({
   connected,
   onOpenTheme,
   onOpenLanguage,
+  onOpenLinkPreview,
   onOpenStatus,
   onOpenDeviceKey,
   onOpenDevTools,
@@ -448,6 +454,8 @@ export function SettingsContent({
   connected: boolean;
   onOpenTheme: () => void;
   onOpenLanguage?: () => void;
+  /** 「링크 미리보기」 장(작게·크게·끄기, #4883)을 연다. 없으면 행이 서지 않는다(캡처 하네스). */
+  onOpenLinkPreview?: () => void;
   /** 「상태 설정」 바텀시트를 연다. */
   onOpenStatus: () => void;
   onOpenDeviceKey: () => void;
@@ -929,6 +937,7 @@ export function SettingsContent({
           accessibilityHint="화면 모드, 테마, 강조색을 고릅니다."
           testID="profile-theme-row"
         />
+        {onOpenLinkPreview ? <LinkPreviewSettingRow onPress={onOpenLinkPreview} /> : null}
       </GroupCard>
 
       {/* ⑦ 연결. */}

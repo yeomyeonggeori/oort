@@ -182,3 +182,14 @@ export type ViewerIconName = keyof typeof VIEWER_ICONS;
 
 /** 둥근 유리 단추 안 글리프 22 — 뒤로(`CONV_ICON_SIZE.left`)와 같은 크기라 세 단추의 글리프가 한 무게로 읽힌다. */
 export const VIEWER_ICON_SIZE = 22;
+
+// ---- 링크 카드의 지구 (#4883) -------------------------------------------------
+// Lucide `globe`(ISC, 웹이 `lucide-react` 로 쓰는 같은 집합 — 경로 그대로), 같은 레시피(선 1.8, viewBox 24,
+// 24pt 의 1·2·3배). 서버가 사이트 아이콘을 주지 못한 카드의 **기본 아이콘**이다(코어 `unfurlCardModel`:
+// `iconUrl` 이 없으면 지구). 주소 줄에서는 16으로, 그림 칸의 타일에서는 24로 그린다(큰 래스터를 줄여 그린다).
+// 다시 만드는 법: `rsvg-convert -w <24|48|72> -h <24|48|72>`, 경로는
+// `<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>`.
+
+export const LINK_CARD_ICONS = {
+  globe: require('./globe24.png') as ImageSourcePropType,
+} as const;
