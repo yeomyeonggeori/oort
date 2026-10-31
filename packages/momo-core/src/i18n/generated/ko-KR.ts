@@ -137,6 +137,673 @@ export const catalog: MessageCatalog = {
       "value": "윈도우"
     }
   ],
+  "expressions.add.adminsOnly": [
+    {
+      "type": 0,
+      "value": "이 팀은 관리자만 새 그림을 올릴 수 있어요."
+    }
+  ],
+  "expressions.add.back": [
+    {
+      "type": 0,
+      "value": "목록으로"
+    }
+  ],
+  "expressions.add.backLabel": [
+    {
+      "type": 0,
+      "value": "팀 이모지 목록으로 돌아가기"
+    }
+  ],
+  "expressions.add.import": [
+    {
+      "type": 0,
+      "value": "가져오기"
+    }
+  ],
+  "expressions.add.importDetail": [
+    {
+      "type": 0,
+      "value": "내 사진이나 링크로 팀 이모지를 등록해요"
+    }
+  ],
+  "expressions.add.make": [
+    {
+      "type": 0,
+      "value": "AI와 만들기"
+    }
+  ],
+  "expressions.add.makeDetail": [
+    {
+      "type": 0,
+      "value": "사진을 고르면 에이전트가 움직이는 팀 이모티콘을 만들어요"
+    }
+  ],
+  "expressions.add.offlineHint": [
+    {
+      "type": 0,
+      "value": "연결되면 쓸 수 있어요"
+    }
+  ],
+  "expressions.add.trigger": [
+    {
+      "type": 0,
+      "value": "추가하기"
+    }
+  ],
+  "expressions.add.triggerHint": [
+    {
+      "type": 0,
+      "value": "사진이나 링크로 가져오거나 AI와 만들 수 있어요"
+    }
+  ],
+  "expressions.draft.another": [
+    {
+      "type": 0,
+      "value": "다른 그림 고르기"
+    }
+  ],
+  "expressions.draft.approve": [
+    {
+      "type": 0,
+      "value": "팀 보관함에 등록"
+    }
+  ],
+  "expressions.draft.approveFailed": [
+    {
+      "type": 0,
+      "value": "등록하지 못했어요. 이름, 권한과 미리보기를 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "expressions.draft.approving": [
+    {
+      "type": 0,
+      "value": "등록 중"
+    }
+  ],
+  "expressions.draft.previewLabel": [
+    {
+      "type": 0,
+      "value": "등록 전 미리보기 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.draft.replaceFailed": [
+    {
+      "type": 0,
+      "value": "그림을 올리지 못했어요. 파일을 확인하고 다시 올려 주세요."
+    }
+  ],
+  "expressions.draft.replacing": [
+    {
+      "type": 0,
+      "value": "올리는 중"
+    }
+  ],
+  "expressions.draft.rights": [
+    {
+      "type": 0,
+      "value": "이 그림을 팀에 저장할 권한이 있어요. 사람 얼굴이 있다면 지정된 당사자만 승인해요."
+    }
+  ],
+  "expressions.draft.source": [
+    {
+      "type": 0,
+      "value": "출처: "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "expressions.draft.waiting": [
+    {
+      "type": 0,
+      "value": "그림을 불러오는 중이에요. 새 미리보기를 본 뒤 등록해 주세요."
+    }
+  ],
+  "expressions.import.displayName": [
+    {
+      "type": 0,
+      "value": "표시 이름"
+    }
+  ],
+  "expressions.import.displayNamePlaceholder": [
+    {
+      "type": 0,
+      "value": "신나는 춤"
+    }
+  ],
+  "expressions.import.face": [
+    {
+      "type": 0,
+      "value": "사람 얼굴"
+    }
+  ],
+  "expressions.import.faceNone": [
+    {
+      "type": 0,
+      "value": "사람 얼굴이 없어요"
+    }
+  ],
+  "expressions.import.faceOther": [
+    {
+      "type": 0,
+      "value": "다른 사람 또는 여러 명이에요"
+    }
+  ],
+  "expressions.import.faceOtherIssue": [
+    {
+      "type": 0,
+      "value": "내 얼굴 한 명인 그림만 승인할 수 있어요. 다른 사람이나 여러 사람 얼굴은 올리지 말아 주세요."
+    }
+  ],
+  "expressions.import.faceSelf": [
+    {
+      "type": 0,
+      "value": "내 얼굴 한 명이에요"
+    }
+  ],
+  "expressions.import.fileIssue": [
+    {
+      "type": 0,
+      "value": "5 MiB 이하의 PNG, JPEG, WebP 또는 GIF를 골라 주세요."
+    }
+  ],
+  "expressions.import.fixedNote": [
+    {
+      "type": 0,
+      "value": "이름과 그림은 등록 뒤 바꿀 수 없어요. 다른 사람의 얼굴은 당사자에게 직접 올려 달라고 해 주세요."
+    }
+  ],
+  "expressions.import.metadataIssue": [
+    {
+      "type": 0,
+      "value": "이름은 영문 소문자·숫자·밑줄·하이픈 2~30자, 표시 이름은 40자, 태그는 8개 이하로 써 주세요."
+    }
+  ],
+  "expressions.import.name": [
+    {
+      "type": 0,
+      "value": "고정 이름"
+    }
+  ],
+  "expressions.import.namePlaceholder": [
+    {
+      "type": 0,
+      "value": "happy_dance"
+    }
+  ],
+  "expressions.import.nameTaken": [
+    {
+      "type": 0,
+      "value": "표준 이모지와 겹치는 이름이에요. 다른 이름을 써 주세요."
+    }
+  ],
+  "expressions.import.offline": [
+    {
+      "type": 0,
+      "value": "연결되면 다시 시도해 주세요."
+    }
+  ],
+  "expressions.import.photo": [
+    {
+      "type": 0,
+      "value": "직접 올릴 그림"
+    }
+  ],
+  "expressions.import.photoChange": [
+    {
+      "type": 0,
+      "value": "다른 그림 고르기"
+    }
+  ],
+  "expressions.import.photoDenied": [
+    {
+      "type": 0,
+      "value": "사진 접근 권한이 꺼져 있어요. 기기 설정에서 사진 접근을 허용한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "expressions.import.photoPick": [
+    {
+      "type": 0,
+      "value": "앨범에서 고르기"
+    }
+  ],
+  "expressions.import.photoPicked": [
+    {
+      "type": 0,
+      "value": "고른 그림 "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.import.photoUnavailable": [
+    {
+      "type": 0,
+      "value": "앨범을 열지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "expressions.import.prepare": [
+    {
+      "type": 0,
+      "value": "미리보기 만들기"
+    }
+  ],
+  "expressions.import.prepareFailed": [
+    {
+      "type": 0,
+      "value": "미리보기를 만들지 못했어요. 이름, 파일과 연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "expressions.import.preparing": [
+    {
+      "type": 0,
+      "value": "미리보기를 만드는 중"
+    }
+  ],
+  "expressions.import.tags": [
+    {
+      "type": 0,
+      "value": "태그 (쉼표로 구분)"
+    }
+  ],
+  "expressions.import.tagsPlaceholder": [
+    {
+      "type": 0,
+      "value": "축하, 춤"
+    }
+  ],
+  "expressions.import.url": [
+    {
+      "type": 0,
+      "value": "출처 링크 (선택)"
+    }
+  ],
+  "expressions.import.urlIssue": [
+    {
+      "type": 0,
+      "value": "공개 HTTPS 출처 링크를 넣어 주세요."
+    }
+  ],
+  "expressions.import.urlPlaceholder": [
+    {
+      "type": 0,
+      "value": "https://giphy.com/gifs/…"
+    }
+  ],
+  "expressions.make.agent": [
+    {
+      "type": 0,
+      "value": "만들 에이전트"
+    }
+  ],
+  "expressions.make.agentHint": [
+    {
+      "type": 0,
+      "value": "그림 만들기 도구가 없는 에이전트는 만들 수 없다고 답해요."
+    }
+  ],
+  "expressions.make.agentLoading": [
+    {
+      "type": 0,
+      "value": "에이전트 목록을 불러오는 중이에요."
+    }
+  ],
+  "expressions.make.agentMissing": [
+    {
+      "type": 0,
+      "value": "만들 에이전트를 골라 주세요."
+    }
+  ],
+  "expressions.make.agentPaused": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " (잠들어 있어요)"
+    }
+  ],
+  "expressions.make.chipLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "description"
+    }
+  ],
+  "expressions.make.done": [
+    {
+      "type": 0,
+      "value": "확인"
+    }
+  ],
+  "expressions.make.failDm": [
+    {
+      "type": 0,
+      "value": "에이전트와 대화를 열지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "expressions.make.failDmForbidden": [
+    {
+      "type": 0,
+      "value": "이 워크스페이스에서 에이전트와 대화를 열 권한이 없어요. 관리자에게 문의해 주세요."
+    }
+  ],
+  "expressions.make.failDmMissing": [
+    {
+      "type": 0,
+      "value": "이 에이전트를 찾을 수 없어요. 목록을 다시 불러온 뒤 골라 주세요."
+    }
+  ],
+  "expressions.make.failSend": [
+    {
+      "type": 0,
+      "value": "요청을 보내지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "expressions.make.failUpload": [
+    {
+      "type": 0,
+      "value": "사진을 올리지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "expressions.make.failUploadForbidden": [
+    {
+      "type": 0,
+      "value": "이 대화에는 파일을 올릴 수 없어요. 관리자에게 문의해 주세요."
+    }
+  ],
+  "expressions.make.failUploadNoArchive": [
+    {
+      "type": 0,
+      "value": "파일 보관소가 연결되어 있지 않아 사진을 올릴 수 없어요. 서버 관리자에게 알려 주세요."
+    }
+  ],
+  "expressions.make.failUploadTooLarge": [
+    {
+      "type": 0,
+      "value": "사진이 너무 커서 올리지 못했어요. 더 작은 사진을 골라 주세요."
+    }
+  ],
+  "expressions.make.intro": [
+    {
+      "type": 0,
+      "value": "고른 사진으로 에이전트가 팀 이모티콘을 만들고, 결과는 대화에 승인 카드로 와요."
+    }
+  ],
+  "expressions.make.motion": [
+    {
+      "type": 0,
+      "value": "움직임"
+    }
+  ],
+  "expressions.make.motionDuplicate": [
+    {
+      "type": 0,
+      "value": "같은 움직임을 두 번 고를 수 없어요."
+    }
+  ],
+  "expressions.make.motionHint": [
+    {
+      "type": 0,
+      "value": "최대 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지 고를 수 있어요. 미리보기는 비슷한 움직임이고, 실제 결과는 승인 카드에서 확인해요."
+    }
+  ],
+  "expressions.make.motionMissing": [
+    {
+      "type": 0,
+      "value": "움직임을 하나 이상 고르거나 「움직임 없이」를 골라 주세요."
+    }
+  ],
+  "expressions.make.motionStillMixed": [
+    {
+      "type": 0,
+      "value": "「움직임 없이」는 다른 움직임과 함께 고를 수 없어요. 먼저 고른 쪽을 해제해 주세요."
+    }
+  ],
+  "expressions.make.motionTooMany": [
+    {
+      "type": 0,
+      "value": "움직임은 최대 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개까지 고를 수 있어요."
+    }
+  ],
+  "expressions.make.motionUnknown": [
+    {
+      "type": 0,
+      "value": "알 수 없는 움직임이에요. 다시 골라 주세요."
+    }
+  ],
+  "expressions.make.noAgents": [
+    {
+      "type": 0,
+      "value": "아직 에이전트가 없어요"
+    }
+  ],
+  "expressions.make.noAgentsDetail": [
+    {
+      "type": 0,
+      "value": "AI와 만들려면 에이전트가 있어야 해요. 지금은 사진이나 링크로 가져올 수 있어요."
+    }
+  ],
+  "expressions.make.note": [
+    {
+      "type": 0,
+      "value": "요청 메모 (선택)"
+    }
+  ],
+  "expressions.make.noteCount": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    }
+  ],
+  "expressions.make.notePlaceholder": [
+    {
+      "type": 0,
+      "value": "예: 웃는 얼굴로 만들어 주세요"
+    }
+  ],
+  "expressions.make.noteTooLong": [
+    {
+      "type": 0,
+      "value": "요청 메모는 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자까지 쓸 수 있어요."
+    }
+  ],
+  "expressions.make.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겼어요. 연결되면 요청을 보낼 수 있어요."
+    }
+  ],
+  "expressions.make.openConversation": [
+    {
+      "type": 0,
+      "value": "대화 열기"
+    }
+  ],
+  "expressions.make.photo": [
+    {
+      "type": 0,
+      "value": "원본 사진"
+    }
+  ],
+  "expressions.make.photoChange": [
+    {
+      "type": 0,
+      "value": "다른 사진 고르기"
+    }
+  ],
+  "expressions.make.photoDenied": [
+    {
+      "type": 0,
+      "value": "사진 접근 권한이 꺼져 있어요. 기기 설정에서 사진 접근을 허용한 뒤 다시 시도해 주세요."
+    }
+  ],
+  "expressions.make.photoDimensions": [
+    {
+      "type": 0,
+      "value": "사진의 가로세로가 너무 커요. 4096픽셀 이하, 1600만 화소 이하로 줄여 주세요."
+    }
+  ],
+  "expressions.make.photoEmpty": [
+    {
+      "type": 0,
+      "value": "비어 있는 파일이에요. 다른 사진을 골라 주세요."
+    }
+  ],
+  "expressions.make.photoMissing": [
+    {
+      "type": 0,
+      "value": "원본 사진을 골라 주세요."
+    }
+  ],
+  "expressions.make.photoPick": [
+    {
+      "type": 0,
+      "value": "앨범에서 고르기"
+    }
+  ],
+  "expressions.make.photoPreview": [
+    {
+      "type": 0,
+      "value": "고른 원본 사진 미리보기"
+    }
+  ],
+  "expressions.make.photoRule": [
+    {
+      "type": 0,
+      "value": "5 MiB 이하의 움직이지 않는 PNG, JPEG, WebP, GIF를 쓸 수 있어요."
+    }
+  ],
+  "expressions.make.photoSize": [
+    {
+      "type": 0,
+      "value": "사진이 너무 커요. 5 MiB 이하로 골라 주세요."
+    }
+  ],
+  "expressions.make.photoType": [
+    {
+      "type": 0,
+      "value": "PNG, JPEG, WebP 또는 GIF 사진을 골라 주세요."
+    }
+  ],
+  "expressions.make.photoUnavailable": [
+    {
+      "type": 0,
+      "value": "앨범을 열지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "expressions.make.photoUnreadable": [
+    {
+      "type": 0,
+      "value": "이 사진을 열 수 없어요. 다른 사진을 골라 주세요."
+    }
+  ],
+  "expressions.make.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "expressions.make.rosterFailed": [
+    {
+      "type": 0,
+      "value": "에이전트 목록을 불러오지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "expressions.make.sending": [
+    {
+      "type": 0,
+      "value": "요청 보내는 중"
+    }
+  ],
+  "expressions.make.sent": [
+    {
+      "type": 0,
+      "value": "요청을 보냈어요. 에이전트의 답과 승인 카드는 대화에서 볼 수 있어요."
+    }
+  ],
+  "expressions.make.sizeInvalid": [
+    {
+      "type": 0,
+      "value": "크기를 확인해 주세요."
+    }
+  ],
+  "expressions.make.stepDm": [
+    {
+      "type": 0,
+      "value": "에이전트와 대화 여는 중"
+    }
+  ],
+  "expressions.make.stepSend": [
+    {
+      "type": 0,
+      "value": "요청 보내는 중"
+    }
+  ],
+  "expressions.make.stepUpload": [
+    {
+      "type": 0,
+      "value": "사진 올리는 중"
+    }
+  ],
+  "expressions.make.submit": [
+    {
+      "type": 0,
+      "value": "요청 보내기"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,

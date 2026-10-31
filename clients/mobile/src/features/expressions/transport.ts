@@ -1,4 +1,4 @@
-import {File, Paths} from 'expo-file-system';
+import {File, Paths, UploadType} from 'expo-file-system';
 import {authedResponse, rotateAfterUnauthorized} from '@momo/core/lib/api';
 import {REQUEST_TIMEOUT_MS} from '@momo/core/lib/http';
 import {apiBase, coreSession} from '@momo/core/runtime/host';
@@ -7,18 +7,101 @@ import type {
   ExpressionFixtureResponse,
 } from '@momo/core/features/expressions/fixtureServer';
 
+/**
+ * 올릴 그림 한 장. 바이트는 JS 로 읽지 않는다 — 네이티브 업로더가 이 주소에서 바로 읽는다
+ * (사진 첨부의 `putAttachmentBytes` 와 같은 이유로 5 MiB 가 JS heap 에 한 벌 더 서지 않는다).
+ */
+export interface ExpressionUploadFile {
+  uri: string;
+  name: string;
+  mime: string;
+}
+
+/** 코어 fixture 의 요청 모양에 그림 한 장을 더한 것. 그림이 있으면 multipart 이고, 본문은 `metadata` 부분이다. */
+export interface ExpressionRequest extends ExpressionFixtureRequest {
+  file?: ExpressionUploadFile;
+}
+
 /** Both the core fixture and the live server enter through this port. */
 export interface ExpressionTransport {
   request(
-    request: ExpressionFixtureRequest,
+    request: ExpressionRequest,
   ): Promise<ExpressionFixtureResponse & {bytes?: Uint8Array}>;
+}
+
+/** 5 MiB 를 올리는 데 15초(JSON 한도)는 모자랄 수 있다. 넉넉하되 끝이 있다. */
+const UPLOAD_TIMEOUT_MS = 60_000;
+const EXPRESSION_PATH =
+  /^\/v1\/workspaces\/[^/]+\/(?:expressions|expression-drafts)(?:[/?]|$)/;
+
+function parsedJson(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 베어러를 싣는 multipart 한 번 — 서버 경로(`POST …/expressions/uploads`·`PUT …/expression-drafts/{id}/file`)는
+ * 웹과 같다. 401 은 코어의 회전 규칙대로 한 번만 돌려 다시 보낸다.
+ */
+async function uploadFile(
+  request: ExpressionRequest,
+  picked: ExpressionUploadFile,
+): Promise<ExpressionFixtureResponse> {
+  if (request.method !== 'POST' && request.method !== 'PUT') {
+    throw new Error('Invalid expression upload method');
+  }
+  const method = request.method;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+  const send = async () => {
+    const task = new File(picked.uri).createUploadTask(
+      `${apiBase()}${request.path}`,
+      {
+        httpMethod: method,
+        uploadType: UploadType.MULTIPART,
+        fieldName: 'file',
+        mimeType: picked.mime,
+        ...(request.body === undefined
+          ? {}
+          : {parameters: {metadata: JSON.stringify(request.body)}}),
+        headers: {
+          Authorization: `Bearer ${coreSession().getAccessToken() ?? ''}`,
+        },
+        sessionType: 'foreground',
+        signal: controller.signal,
+      },
+    );
+    try {
+      return await task.uploadAsync();
+    } finally {
+      task.release();
+    }
+  };
+  try {
+    let result = await send();
+    if (
+      result.status === 401 &&
+      coreSession().getRefreshToken() &&
+      (await rotateAfterUnauthorized())
+    ) {
+      result = await send();
+    }
+    if (result.status === 401) coreSession().markAuthExpired();
+    return {status: result.status, json: parsedJson(result.body)};
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export const expressionTransport: ExpressionTransport = {
   async request(request) {
-    if (!/^\/v1\/workspaces\/[^/]+\/expressions(?:[/?]|$)/.test(request.path)) {
+    if (!EXPRESSION_PATH.test(request.path)) {
       throw new Error('Invalid expression path');
     }
+    if (request.file) return uploadFile(request, request.file);
     if (!request.path.includes('/image?')) {
       const response = await authedResponse(request.path, {
         method: request.method,

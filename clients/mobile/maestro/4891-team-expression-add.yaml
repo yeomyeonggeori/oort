@@ -1,0 +1,81 @@
+appId: app.momo.ios
+name: 4891-team-expression-add
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID
+---
+# 4891-team-expression-add — 팀 이모지 고르개의 「＋」: 메뉴 두 갈래와 두 장(가져오기·AI와 만들기)이 열리고 닫힌다.
+#
+# 스택 검증용이다(워커는 돌리지 않았다). 서버에 아무것도 쓰지 않는다 — 장을 열고 닫기만 하고 「미리보기 만들기」·
+# 「요청 보내기」는 누르지 않는다. 등록·요청 본문·이어 가기·실패 문장은 폰 jest(`__tests__/expressionAdd.test.tsx`)가
+# 코어 fixture 서버로 재고, 이 흐름은 jest 가 못 재는 것을 본다:
+#   · 시트 안에서 장이 목록을 대신하고 「‹」로 돌아오는가(Modal 위에 Modal 이 쌓이지 않는가)
+#   · 키보드가 올라와도 입력 칸이 키보드 위에 서고 보내기 단추가 스크롤로 닿는가(SE 에서 확인)
+#   · 사진 앨범 시스템 창(PHPicker)이 권한 문구 없이 뜨는가 — 아래 `expression-import-photo`
+#
+# 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼): 「＋」 펼침 · 가져오기 장 · AI와 만들기 장(칩 다섯·미리보기
+# 재생·동작 줄이기 켬/끔). 캡처와 design-review 는 planner 몫이다.
+#
+# 손으로 돌리는 법(레인 밖): 70-composer-newline.yaml 의 머리말과 같다 — 로그인할 수 있는 멤버가 든 격리 스택 + 이
+# 체크아웃의 Metro. 「AI와 만들기」 장의 에이전트 줄은 그 스택에 활성 에이전트가 있어야 서고, 없으면 「아직 에이전트가
+# 없어요」 안내가 선다(그것도 이 흐름이 지나는 길이다).
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-pill"
+    timeout: 30000
+- tapOn:
+    id: "composer-pill"
+- tapOn:
+    id: "composer-tool-emoji"
+- tapOn:
+    id: "emoji-tab-team"
+
+# 「＋」가 두 갈래를 제자리에서 펼친다.
+- assertVisible:
+    id: "expression-add-menu"
+- tapOn:
+    id: "expression-add-menu"
+- assertVisible:
+    id: "expression-add-import"
+- assertVisible:
+    id: "expression-add-make"
+
+# 가져오기 장: 열리고, 입력 칸이 서고, 「‹」로 목록에 돌아온다.
+- tapOn:
+    id: "expression-add-import"
+- assertVisible:
+    id: "expression-import"
+- assertVisible:
+    id: "expression-import-photo"
+- tapOn:
+    id: "expression-import-name"
+- inputText: "happy_dance"
+- assertVisible:
+    id: "expression-import-submit"
+- tapOn:
+    id: "expression-chapter-back"
+- assertVisible:
+    id: "expression-add-menu"
+
+# AI와 만들기 장: 열리고, 움직임 칩을 고르고, 「‹」로 돌아온다.
+- tapOn:
+    id: "expression-add-menu"
+- tapOn:
+    id: "expression-add-make"
+- assertVisible:
+    id: "expression-make"
+- assertVisible:
+    id: "expression-make-chip-bounce"
+- tapOn:
+    id: "expression-make-chip-bounce"
+- assertVisible:
+    id: "expression-make-chip-still"
+- tapOn:
+    id: "expression-chapter-back"
+- assertVisible:
+    id: "expression-add-menu"
