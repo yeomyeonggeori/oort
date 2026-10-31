@@ -28888,12 +28888,28 @@ async fn expression_create_refuses_bad_proposals_and_keeps_its_budget_to_itself(
 }
 
 /// Every way a card closes takes its candidates' bytes with it: a late tap that settles it as
-/// expired, the TTL sweep, and a run that is cancelled.
+/// expired, the TTL sweep, and a run that is cancelled. The rows stay as records, but the words
+/// the agent wrote into them (`origin.prompt`) go with the bytes (#4900, migration 167).
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn expression_create_every_close_reclaims_the_candidate_bytes() {
     let w = world_4829().await;
     let ws = w.fixture.workspace;
+    // (state, JSON type of the prompt) of the one candidate of `approval`.
+    let record_of = |approval: Uuid| {
+        let su = w.su.clone();
+        async move {
+            sqlx::query_as::<_, (String, String)>(
+                "SELECT state, jsonb_typeof(origin -> 'prompt') FROM expression_draft WHERE approval_id=$1",
+            )
+            .bind(approval)
+            .fetch_one(&su)
+            .await
+            .unwrap()
+        }
+    };
+    let words = |state: &str| (state.to_string(), "string".to_string());
+    let blanked = |state: &str| (state.to_string(), "null".to_string());
     let mut propose = |name: &'static str| {
         let w = &w;
         async move {
@@ -28914,6 +28930,11 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
     let late = propose("late_tap").await;
     let pick = choice_4829(&card_4829(&w, late).await, 0);
     assert_eq!(open_images_4829(&w, late).await, 3);
+    assert_eq!(
+        record_of(late).await,
+        words("ready"),
+        "control: it holds the agent's words"
+    );
     sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
         .bind(late)
         .execute(&w.su)
@@ -28925,6 +28946,11 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
         open_images_4829(&w, late).await,
         0,
         "the expiry arm reclaims"
+    );
+    assert_eq!(
+        record_of(late).await,
+        blanked("expired"),
+        "the expiry arm keeps the record and blanks the words"
     );
     let registered: i64 =
         sqlx::query_scalar("SELECT count(*) FROM expression WHERE approval_id=$1")
@@ -28947,10 +28973,16 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
         .unwrap();
     clock.commit().await.unwrap();
     assert_eq!(open_images_4829(&w, swept).await, 3);
+    assert_eq!(record_of(swept).await, words("ready"));
     momo_expressions::sweep_expired(&w.su, &w.app)
         .await
         .unwrap();
     assert_eq!(open_images_4829(&w, swept).await, 0, "the sweep reclaims");
+    assert_eq!(
+        record_of(swept).await,
+        blanked("expired"),
+        "the sweep blanks the words"
+    );
     // (3) a run that is cancelled retires its pending card and the candidates with it.
     let cancelled = propose("cancel_run").await;
     let run: Uuid = sqlx::query_scalar("SELECT run_id FROM approval WHERE id=$1")
@@ -28959,6 +28991,7 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
         .await
         .unwrap();
     assert_eq!(open_images_4829(&w, cancelled).await, 3);
+    assert_eq!(record_of(cancelled).await, words("ready"));
     momo_db::with_tenant_tx(&w.app, ws, move |conn| {
         Box::pin(async move {
             momo_agent::approval::cancel_pending_approvals_for_run_in_tx(
@@ -28977,6 +29010,11 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
         open_images_4829(&w, cancelled).await,
         0,
         "a cancelled run reclaims"
+    );
+    assert_eq!(
+        record_of(cancelled).await,
+        blanked("expired"),
+        "a cancelled run blanks the words"
     );
     let _ = &mut propose;
 }

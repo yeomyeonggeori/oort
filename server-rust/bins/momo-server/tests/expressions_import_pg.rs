@@ -349,7 +349,25 @@ async fn boot() -> World {
     boot_with(true).await
 }
 
+/// Which attachment archive the server under test is given.
+enum Drive {
+    /// The in-memory stub every other test in this file uses.
+    Stub,
+    /// Nothing configured: every attachment route answers 503 (the gate stack before #4900).
+    Unset,
+    /// The ADR-0169 local-volume archive in `dir`, with the capability-URL base the operator named
+    /// (`same-origin` or an absolute URL), built the way `main` builds it from `DriveSettings`.
+    Local {
+        dir: std::path::PathBuf,
+        base: String,
+    },
+}
+
 async fn boot_with(unfurl_enabled: bool) -> World {
+    boot_on(unfurl_enabled, Drive::Stub).await
+}
+
+async fn boot_on(unfurl_enabled: bool, drive: Drive) -> World {
     require_decoder_4947();
     let url = std::env::var("DATABASE_URL").expect("dedicated DATABASE_URL");
     momo_db::migrate::run_migrations(
@@ -394,22 +412,59 @@ async fn boot_with(unfurl_enabled: bool) -> World {
     assert!(!superuser && !bypass, "momo_app must be a plain role");
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let archive = Arc::new(momo_drive::StubDriveArchive::new(&base));
     let mock = Mock::new();
     let state = AppState::new(
         api.clone(),
         SECRET.into(),
         "ws://localhost:8000/connection/websocket".to_string(),
-    )
-    .with_drive(archive)
-    .with_unfurl_http(mock.clone())
-    // The instance's outgoing-request switch is on for this suite (default off, ADR-0170 D3).
-    .with_unfurl_enabled(unfurl_enabled)
-    .with_realtime(RealtimeSettings {
-        cent_token_hmac: Some(SECRET.into()),
-        cent_proxy_secret: Some(SECRET.into()),
-        connection_token_ttl_seconds: 300,
-    });
+    );
+    let state = match drive {
+        Drive::Stub => state.with_drive(Arc::new(momo_drive::StubDriveArchive::new(&base))),
+        Drive::Unset => state,
+        Drive::Local {
+            dir,
+            base: advertised,
+        } => {
+            let port = listener.local_addr().unwrap().port();
+            let local_dir = dir.display().to_string();
+            let settings = momo_server::config::DriveSettings {
+                backend: "local".into(),
+                sa_key_path: None,
+                shared_drive_id: None,
+                local_dir: Some(local_dir.clone()),
+            };
+            assert_eq!(settings.boot_error("local"), None, "the archive boots");
+            // What `DriveSettings::backend_config` and `local_base` make of
+            // `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`, with the value handed in here instead of read
+            // from the process environment (a test does not change that for its neighbours).
+            let stub_base_url = format!("http://127.0.0.1:{port}");
+            let advert =
+                momo_server::DriveLocalBase::from_env_value(Some(&advertised), &stub_base_url);
+            let local_base_url = match &advert {
+                momo_server::DriveLocalBase::SameOrigin => stub_base_url.clone(),
+                momo_server::DriveLocalBase::Fixed(url) => url.clone(),
+            };
+            let archive = momo_drive::build_archive(&momo_drive::DriveBackendConfig {
+                mode: "local".into(),
+                sa_key_path: None,
+                shared_drive_id: None,
+                stub_base_url,
+                local_dir: Some(local_dir),
+                local_base_url,
+            })
+            .await;
+            state.with_drive(archive).with_drive_local_base(advert)
+        }
+    };
+    let state = state
+        .with_unfurl_http(mock.clone())
+        // The instance's outgoing-request switch is on for this suite (default off, ADR-0170 D3).
+        .with_unfurl_enabled(unfurl_enabled)
+        .with_realtime(RealtimeSettings {
+            cent_token_hmac: Some(SECRET.into()),
+            cent_proxy_secret: Some(SECRET.into()),
+            connection_token_ttl_seconds: 300,
+        });
     let server = tokio::spawn(async move {
         axum::serve(listener, build_app(state)).await.unwrap();
     });
@@ -1725,4 +1780,162 @@ async fn a_video_is_a_card_even_when_every_decoder_slot_is_taken() {
         "a video cannot replace a picture, and waiting would not help it"
     );
     drop(held);
+}
+
+/// Removes its directory when the test ends, pass or fail. The directory is this test's own
+/// (a name made from the process and a fresh id under the system temp dir).
+struct OwnDir(std::path::PathBuf);
+impl Drop for OwnDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Run the OpenAPI gate's expression sampler against `w` as `w.member`, in `out`.
+async fn run_gate_sampler(w: &World, channel: Uuid, out: &std::path::Path) -> std::process::Output {
+    let auth = out.join("auth.conf");
+    std::fs::write(
+        &auth,
+        format!("header = \"Authorization: Bearer {}\"\n", w.member.token),
+    )
+    .unwrap();
+    // Not `std::process::Command`: the server under test runs on this very runtime, and a blocked
+    // test thread would be a server that never answers the sampler.
+    tokio::process::Command::new("python3")
+        .arg("-I")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../scripts/sample_expression_contract.py"
+        ))
+        .args(["--base-url", &w.base])
+        .args(["--workspace", &w.ws.to_string()])
+        .args(["--channel", &channel.to_string()])
+        .arg("--auth-config")
+        .arg(&auth)
+        .arg("--out-dir")
+        .arg(out.join("samples"))
+        .arg("--manifest")
+        .arg(out.join("manifest.jsonl"))
+        .output()
+        .await
+        .expect("python3 runs the sampler")
+}
+
+async fn channel_of(w: &World) -> Uuid {
+    momo_messaging::create_channel(
+        &w.api,
+        w.ws,
+        momo_messaging::NewChannel {
+            kind: momo_messaging::ChannelKind::Public,
+            name: unique("sampler"),
+            topic: None,
+            created_by: w.member.actor.member,
+        },
+    )
+    .await
+    .expect("a channel the sampler's person belongs to")
+    .id
+}
+
+/// #4900: the OpenAPI gate's runtime sample (`scripts/sample_expression_contract.py`) runs to its
+/// end on the Drive the gate stack is given. The stack's own lines are read out of
+/// `scripts/verify_openapi_contract_rust.sh` and turned into the server's configuration the way
+/// `main` does it, so changing those lines changes this test. The control is the stack as it was:
+/// without a Drive the sample ended at the first attachment, with a 503, and the operations after
+/// it were never measured by the gate.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn the_gates_expression_sampler_runs_to_its_end_on_the_drive_the_gate_stack_is_given() {
+    let gate_script = include_str!("../../../../scripts/verify_openapi_contract_rust.sh");
+    let gate_setting = |key: &str| {
+        let prefix = format!("{key}=");
+        let found: Vec<&str> = gate_script
+            .lines()
+            .filter_map(|line| line.strip_prefix(prefix.as_str()))
+            .collect();
+        assert_eq!(found.len(), 1, "the gate's env block sets {key} once");
+        found[0].to_string()
+    };
+    assert_eq!(
+        gate_setting("MOMO_DRIVE_ARCHIVE_BACKEND"),
+        "local",
+        "the gate stack runs the local archive: no credential, allowed in a deployed environment"
+    );
+    assert!(
+        gate_setting("MOMO_DRIVE_LOCAL_DIR").starts_with('/'),
+        "a path inside the container"
+    );
+    let advertised = gate_setting("MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL");
+
+    let work = std::env::temp_dir().join(format!(
+        "oort-gate-sampler-{}-{}",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&work).unwrap();
+    let _work = OwnDir(work.clone());
+
+    // The gate stack's Drive: the sample goes all the way through.
+    let drive_dir = work.join("drive");
+    let w = boot_on(
+        false,
+        Drive::Local {
+            dir: drive_dir,
+            base: advertised,
+        },
+    )
+    .await;
+    let channel = channel_of(&w).await;
+    let out = work.join("with-drive");
+    std::fs::create_dir_all(&out).unwrap();
+    let ran = run_gate_sampler(&w, channel, &out).await;
+    let (stdout, stderr) = (
+        String::from_utf8_lossy(&ran.stdout).to_string(),
+        String::from_utf8_lossy(&ran.stderr).to_string(),
+    );
+    assert!(
+        ran.status.success(),
+        "the sampler ran to its end: {stdout} {stderr}"
+    );
+    assert!(
+        stdout.contains("14 live storage operations passed"),
+        "every operation was measured: {stdout}"
+    );
+    // The gate checks the list both ways; this is that check for the expression operations.
+    let recorded: std::collections::BTreeSet<String> =
+        std::fs::read_to_string(out.join("manifest.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|line| {
+                let sample: Value = serde_json::from_str(line).unwrap();
+                format!(
+                    "{} {}",
+                    sample["method"].as_str().unwrap().to_uppercase(),
+                    sample["path"].as_str().unwrap()
+                )
+            })
+            .collect();
+    let listed: std::collections::BTreeSet<String> =
+        include_str!("../../../../scripts/openapi_sampled_on_rust.txt")
+            .lines()
+            .filter(|line| !line.starts_with('#') && line.contains("/expression"))
+            .map(str::to_string)
+            .collect();
+    assert_eq!(
+        recorded, listed,
+        "the sampler measures exactly the expression operations the gate lists"
+    );
+
+    // The control: the same sampler on a stack with no Drive ends at the first attachment.
+    let bare = boot_on(false, Drive::Unset).await;
+    let channel = channel_of(&bare).await;
+    let out = work.join("without-drive");
+    std::fs::create_dir_all(&out).unwrap();
+    let ran = run_gate_sampler(&bare, channel, &out).await;
+    let stderr = String::from_utf8_lossy(&ran.stderr).to_string();
+    assert!(!ran.status.success(), "no Drive, no sample: {stderr}");
+    assert!(
+        stderr.contains("attachments/uploads expected 201, got 503"),
+        "it ends where the gate used to end: {stderr}"
+    );
 }
