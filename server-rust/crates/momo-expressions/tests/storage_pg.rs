@@ -141,6 +141,9 @@ async fn tenant_force_fk_pins_rights_reports_and_transaction_sabotage() {
         "expression_draft",
         "expression_draft_image",
         "expression_report",
+        // ADR-0218 G3.6 (#4820 C1b): what the assembler built, held for an hour.
+        "expression_assembly",
+        "expression_assembly_image",
     ] {
         let row=sqlx::query("SELECT relrowsecurity,relforcerowsecurity,EXISTS(SELECT 1 FROM pg_policy WHERE polrelid=c.oid AND polname='ws_isolation') AS policy FROM pg_class c WHERE c.oid=$1::regclass").bind(t).fetch_one(&api).await.unwrap();
         assert!(
@@ -371,6 +374,33 @@ async fn tenant_force_fk_pins_rights_reports_and_transaction_sabotage() {
     .await
     .unwrap();
     assert_eq!(visible, 1);
+    // A held assembly (ADR-0218 G3.6), so its two tables are populated as well: a foreign
+    // read of an empty table would prove nothing.
+    let held_agent = Uuid::new_v4();
+    let held_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member(id,workspace_id,kind,display_name,handle) VALUES($1,$2,'agent',$3,$3)",
+    )
+    .bind(held_agent)
+    .bind(owner.workspace)
+    .bind(held_agent.to_string())
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO expression_assembly(workspace_id,id,agent_member_id,requester_member_id,prompt) VALUES($1,$2,$3,$4,'p')")
+        .bind(owner.workspace)
+        .bind(held_id)
+        .bind(held_agent)
+        .bind(owner.member)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO expression_assembly_image(workspace_id,assembly_id,candidate_index,motion,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT $1,$2,0,'bounce','large','image/gif',b,encode(sha256(b),'hex'),8,8,2,100 FROM (SELECT '\\x474946'::bytea AS b) fixture")
+        .bind(owner.workspace)
+        .bind(held_id)
+        .execute(&su)
+        .await
+        .unwrap();
     // Every new tenant table has populated source rows at this point. Omit the
     // workspace predicate deliberately so only the real runtime RLS can hide them.
     for table in [
@@ -380,6 +410,8 @@ async fn tenant_force_fk_pins_rights_reports_and_transaction_sabotage() {
         "expression_draft",
         "expression_draft_image",
         "expression_report",
+        "expression_assembly",
+        "expression_assembly_image",
     ] {
         let sql = format!("SELECT count(*) FROM {table}");
         let count = e::transaction(&api, foreign, move |conn| {

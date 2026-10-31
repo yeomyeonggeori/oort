@@ -335,6 +335,11 @@ pub struct AppState {
     /// server makes to an outside address on someone's behalf (ADR-0170 D3). The expression
     /// link import honours it (ADR-0218 D5, planner decision 3).
     pub unfurl_enabled: bool,
+    /// ADR-0218 G3.5 (#4820 C1b): where `oort_expression_assemble` runs the motion assembler
+    /// child from. `None` is the production answer: resolved per call from
+    /// `OORT_EXPRESSION_ASSEMBLER`, else beside this executable (like the decoder). A test sets
+    /// a path here instead of the process-wide variable, which concurrent tests would race on.
+    pub assembler_program: Option<Arc<std::path::PathBuf>>,
     /// The longest an authenticated Agent Port caller may take to send the 6 MiB
     /// `expression.create` body (#4829): `routes::agent_port::LARGE_BODY_DEADLINE` unless a
     /// test shortens it. The ordinary 64 KiB body has no such deadline.
@@ -394,6 +399,7 @@ impl AppState {
             turn: None,
             unfurl_http: Arc::new(momo_unfurl::SafeUnfurlTransport::production(false)),
             unfurl_enabled: momo_unfurl::enabled_from_env(),
+            assembler_program: None,
             large_body_deadline: routes::agent_port::LARGE_BODY_DEADLINE,
             unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
             provider_probe: Arc::new(routes::provider_link::ProviderProbeState::new(Arc::new(
@@ -481,6 +487,13 @@ impl AppState {
     /// Replace the unfurl HTTP hop (conformance tests with a mock origin).
     pub fn with_unfurl_enabled(mut self, enabled: bool) -> Self {
         self.unfurl_enabled = enabled;
+        self
+    }
+
+    /// Run the motion assembler from `program` instead of resolving it per call
+    /// (conformance tests: a built binary, or a path that does not exist).
+    pub fn with_assembler_program(mut self, program: impl Into<std::path::PathBuf>) -> Self {
+        self.assembler_program = Some(Arc::new(program.into()));
         self
     }
 

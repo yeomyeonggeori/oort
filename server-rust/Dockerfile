@@ -204,6 +204,10 @@ RUN set -eux; \
       : > "$dir/src/lib.rs"; \
       printf 'fn main() {}\n' > "$dir/src/main.rs"; \
     done; \
+    # `momo-expression-assembler` is deliberately NOT named in this stub-stage build: its target
+    # file (`src/bin/…`) does not exist among the stubs, and cargo refuses to resolve a selected
+    # `--bin` whose file is missing. It adds no dependency beyond the decoder's crate, so the
+    # dependency cache is the same; the real build below names it.
     cargo build --release --locked \
       --bin momo-server --bin momo-relay --bin momo-agent-worker --bin momo-expression-decoder \
       --bin momo-webhook-sender --bin momo-migrate --bin momo-notifier \
@@ -224,10 +228,12 @@ RUN set -eux; \
     find crates bins -name '*.rs' -exec touch {} +; \
     cargo build --release --locked \
       --bin momo-server --bin momo-relay --bin momo-agent-worker --bin momo-expression-decoder \
+      --bin momo-expression-assembler \
       --bin momo-webhook-sender --bin momo-migrate --bin momo-notifier \
       --bin momo-push-relay; \
     install -Dm755 target/release/momo-server /out/momo-server; \
     install -Dm755 target/release/momo-expression-decoder /out/momo-expression-decoder; \
+    install -Dm755 target/release/momo-expression-assembler /out/momo-expression-assembler; \
     install -Dm755 target/release/momo-relay /out/momo-relay; \
     install -Dm755 target/release/momo-agent-worker /out/momo-agent-worker; \
     install -Dm755 target/release/momo-webhook-sender /out/momo-webhook-sender; \

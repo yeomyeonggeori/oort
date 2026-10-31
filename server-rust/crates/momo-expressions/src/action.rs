@@ -41,6 +41,18 @@ pub struct Candidate {
     pub code: Option<&'static str>,
 }
 
+/// The agent's own plain text that explains a generated picture (`Origin.prompt`): 1 to
+/// [`PROMPT_MAX_CHARS`] characters and no control character but a line break. The one rule for a
+/// `generated` candidate and for `oort_expression_assemble`'s prompt (ADR-0218 G1/G3.6), which
+/// becomes that candidate's origin.
+pub fn valid_prompt(prompt: &str) -> bool {
+    !prompt.is_empty()
+        && prompt.chars().count() <= PROMPT_MAX_CHARS
+        && !prompt
+            .chars()
+            .any(|c| c == '\u{7f}' || (c.is_control() && c != '\n'))
+}
+
 /// Which `(origin, picture, reason)` combinations a **candidate** draft may have. Deliberately
 /// not [`crate::draft_origin_ok`], which is the direct API's and rejects prompts: a candidate
 /// may be `generated` (with the agent's prompt), and only a link may fail with a `source_*`
@@ -52,14 +64,7 @@ pub fn candidate_origin_ok(origin: &Origin, has_media: bool, code: Option<&str>)
         }
         "attachment" => origin.prompt.is_none() && origin.source_url.is_none(),
         "generated" => {
-            origin.source_url.is_none()
-                && origin.prompt.as_deref().is_some_and(|prompt| {
-                    !prompt.is_empty()
-                        && prompt.chars().count() <= PROMPT_MAX_CHARS
-                        && !prompt
-                            .chars()
-                            .any(|c| c == '\u{7f}' || (c.is_control() && c != '\n'))
-                })
+            origin.source_url.is_none() && origin.prompt.as_deref().is_some_and(valid_prompt)
         }
         _ => false,
     };

@@ -445,6 +445,11 @@ BEGIN
   IF to_regclass('public.expression_draft') IS NOT NULL THEN
     GRANT SELECT (workspace_id,state,expires_at) ON expression_draft TO momo_notifier;
   END IF;
+  -- ADR-0218 G3.6 (#4820 C1b): the held assemblies' TTL is swept with the drafts', so the
+  -- notifier discovers the tenants with something expired from the same three columns.
+  IF to_regclass('public.expression_assembly') IS NOT NULL THEN
+    GRANT SELECT (workspace_id,state,expires_at) ON expression_assembly TO momo_notifier;
+  END IF;
   IF to_regclass('public.outbox') IS NOT NULL THEN
     GRANT SELECT, INSERT, UPDATE ON TABLE outbox TO momo_notifier;
   END IF;

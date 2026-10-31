@@ -90,22 +90,32 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
     // cannot be introduced by a client or reverse proxy.
     let query_error = parts.uri.query().is_some();
 
-    // **`expression.create`'s 6 MiB budget is read only after the caller is authenticated and
-    // holds the propose scope** (ADR-0218 appendix A: 인증·scope 검사를 대형 바이트 수집 전에).
-    // Only a call that DECLARES itself `tools/call` of `oort_action_propose` in the mirrored
-    // transport headers is a candidate; any other request keeps the 64 KiB ceiling and the
-    // order it always had. The body's own shape (that it really is an `expression.create`
-    // proposal) is proved by `momo_mcp::dispatch_with_tools` once it is read, so a header alone
-    // never widens anything.
+    // **The 6 MiB budget is read only after the caller is authenticated and holds the propose
+    // scope** (ADR-0218 appendix A: 인증·scope 검사를 대형 바이트 수집 전에). It belongs to two
+    // tools and no others: `oort_action_propose` for `expression.create`, and
+    // `oort_expression_assemble` (G3.2/G3.7: one picture, base64, at most 4 MiB decoded). Only a
+    // call that DECLARES itself `tools/call` of one of them in the mirrored transport headers is a
+    // candidate; any other request keeps the 64 KiB ceiling and the order it always had. The
+    // body's own shape (that it really is that tool, and for `oort_action_propose` that it really
+    // is an `expression.create` proposal) is proved after it is read, so a header alone never
+    // widens anything: a body past 64 KiB must be the very tool the header named.
     let declared_method = unique_named_text_header(&parts.headers, MCP_METHOD);
     let declared_name = unique_named_text_header(&parts.headers, MCP_NAME);
-    let declares_propose = relevant_headers_bounded
+    let declared_large_tool: Option<&'static str> = if relevant_headers_bounded
         && !query_error
         && declared_method.value() == Some("tools/call")
-        && declared_name.value() == Some(momo_mcp::TOOL_ACTION_PROPOSE);
+    {
+        match declared_name.value() {
+            Some(momo_mcp::TOOL_ACTION_PROPOSE) => Some(momo_mcp::TOOL_ACTION_PROPOSE),
+            Some(momo_mcp::TOOL_EXPRESSION_ASSEMBLE) => Some(momo_mcp::TOOL_EXPRESSION_ASSEMBLE),
+            _ => None,
+        }
+    } else {
+        None
+    };
     let mut pre_admission: Option<AgentPortAdmission> = None;
     let mut body_cap = momo_mcp::MAX_BODY_BYTES;
-    if declares_propose {
+    if declared_large_tool.is_some() {
         pre_admission = Some(match &authorization {
             UniqueHeader::Missing => return auth_failure(AgentPortAuthError::MissingCredential),
             UniqueHeader::Invalid => return auth_failure(AgentPortAuthError::InvalidToken),
@@ -176,6 +186,24 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
                 )),
             ),
         }
+    };
+
+    // A body past the standard limit exists only because the header named a large-budget tool, so
+    // it must BE that tool. The header is the caller's claim and the body is the fact: a call
+    // that declared one tool and carries another (or carries no tool call at all) never gets the
+    // larger budget, whatever the body is. Answered like any oversize body, after authentication.
+    let body_limit_error = match body_limit_error {
+        None if bytes.len() > momo_mcp::MAX_BODY_BYTES
+            && declared_large_tool
+                .is_none_or(|declared| momo_mcp::call_shape(&bytes).tool != Some(declared)) =>
+        {
+            Some(protocol_error(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                -32600,
+                MESSAGE_BODY_TOO_LARGE,
+            ))
+        }
+        other => other,
     };
 
     let content_type = unique_text_header(&parts.headers, header::CONTENT_TYPE);

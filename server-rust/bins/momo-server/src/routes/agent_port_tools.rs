@@ -258,6 +258,9 @@ pub(crate) async fn execute(
             action_claim_secret(state, caller, &call.arguments).await
         }
         momo_mcp::TOOL_CARD_SUGGEST => card_suggest(state, caller, &call.arguments).await,
+        momo_mcp::TOOL_EXPRESSION_ASSEMBLE => {
+            expression_assemble(state, caller, &call.arguments).await
+        }
         momo_mcp::TOOL_PING => ping(state, caller, &call.arguments).await,
         _ => Err(ToolFailure::InvalidArguments),
     };
@@ -402,6 +405,7 @@ fn handle_argument(tool: &str) -> Option<&'static str> {
         // ADR-0186 D2 names the field `handle`; the value is the same sealed handle.
         momo_mcp::TOOL_ACTION_PROPOSE
         | momo_mcp::TOOL_ACTION_CLAIM_SECRET
+        | momo_mcp::TOOL_EXPRESSION_ASSEMBLE
         | momo_mcp::TOOL_CARD_SUGGEST => Some("handle"),
         _ => None,
     }
@@ -3457,6 +3461,384 @@ async fn action_claim_secret(
 }
 
 // ---------------------------------------------------------------------------
+// oort_expression_assemble (ADR-0218 G3.7 (a), #4820 C1b)
+// ---------------------------------------------------------------------------
+
+/// The picture an `oort_expression_assemble` call names.
+enum AssembleSource {
+    /// An attachment of the run's conversation; the server fetches it.
+    Attachment(Uuid),
+    /// Bytes the agent sent, strict base64 decoded (at most 4 MiB, G3.2).
+    Bytes(Vec<u8>),
+}
+
+/// What the arguments say once the pure checks passed (nothing has touched the database).
+struct AssembleCall {
+    raw_handle: String,
+    request: momo_expressions::assemble::AssembleRequest,
+    source: AssembleSource,
+    prompt: String,
+    /// G1: the attachment the drawing is based on; verified before it is kept.
+    source_attachment_id: Option<Uuid>,
+}
+
+/// `assembly_params_invalid` (ADR-0218 G3.8) as the call error it is: the same -32602 as any
+/// malformed argument, plus `error.data {code, params}` naming the wrong parameters — the names
+/// of `momo_mcp::ASSEMBLE_PARAMS`, never a value. The names are logged too. A name the closed
+/// list does not hold (the two lists drifting) falls back to the plain `InvalidArguments`: a
+/// name that is not on the list is never said.
+fn params_failure(params: &[momo_expressions::assemble::Param]) -> ToolFailure {
+    let names: Vec<&'static str> = params.iter().map(|param| param.name()).collect();
+    tracing::info!(
+        params = ?names,
+        "oort_expression_assemble refused: assembly_params_invalid"
+    );
+    momo_mcp::AssembleParams::from_names(names.iter().copied()).map_or(
+        ToolFailure::InvalidArguments,
+        ToolFailure::InvalidAssembleParams,
+    )
+}
+
+/// The pure half of the call: shape, strict base64, the prompt rule and the assembler's own
+/// parameter validation. A wrong parameter the published schema cannot say (a duplicate preset, a
+/// sequence cell outside the grid, a play length over 10 s, a size inside the range but not one
+/// of the three) is `InvalidAssembleParams` and names it ([`params_failure`]); any other wrong
+/// shape is the same `InvalidArguments` as any malformed argument and carries no cause (the
+/// closed `ToolFailure` set).
+fn parse_assemble(arguments_value: &Value) -> Result<AssembleCall, ToolFailure> {
+    use base64::Engine as _;
+    use momo_expressions::assemble::AssembleRequest;
+    let args = arguments(arguments_value)?;
+    let raw_handle = required_str(args, "handle", 512)?.to_string();
+    let prompt = required_str(args, "prompt", 8000)?;
+    if !momo_expressions::action::valid_prompt(prompt) {
+        return Err(ToolFailure::InvalidArguments);
+    }
+    let source_attachment_id = optional_uuid(args, "sourceAttachmentId")?;
+    let mut request = Map::new();
+    request.insert(
+        "motion".into(),
+        args.get("motion")
+            .cloned()
+            .ok_or(ToolFailure::InvalidArguments)?,
+    );
+    if let Some(size) = args.get("size").filter(|size| !size.is_null()) {
+        request.insert("size".into(), size.clone());
+    }
+    let request: AssembleRequest = serde_json::from_value(Value::Object(request))
+        .map_err(|_| ToolFailure::InvalidArguments)?;
+    if let Err(error) = request.validate() {
+        return Err(match &error {
+            momo_expressions::assemble::AssembleError::ParamsInvalid { params } => {
+                params_failure(params)
+            }
+            _ => ToolFailure::InvalidArguments,
+        });
+    }
+    let source = args
+        .get("source")
+        .and_then(Value::as_object)
+        .ok_or(ToolFailure::InvalidArguments)?;
+    let source = match source.get("from").and_then(Value::as_str) {
+        Some("attachment") => AssembleSource::Attachment(required_uuid(source, "attachmentId")?),
+        Some("base64") => {
+            let encoded = required_str(source, "dataBase64", momo_mcp::MAX_ASSEMBLE_BASE64_BYTES)?;
+            // 5,592,408 characters is 1,398,102 groups of three: up to 4 MiB + 2 bytes. The
+            // 4 MiB of G3.2 is a limit on the **decoded** picture, so it is judged by the
+            // assembler on the decoded bytes (`assembly_source_too_large`), not here.
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|_| ToolFailure::InvalidArguments)?;
+            AssembleSource::Bytes(bytes)
+        }
+        _ => return Err(ToolFailure::InvalidArguments),
+    };
+    Ok(AssembleCall {
+        raw_handle,
+        request,
+        source,
+        prompt: prompt.to_string(),
+        source_attachment_id,
+    })
+}
+
+/// A refusal the card can show (G3.8): `{code}` and, for a too-large animation, `bytes` — the
+/// size that was measured. A tool **result**, not a protocol fault: nothing was wrong with the
+/// call, and the agent reads the code to tell the person.
+fn assemble_refusal(error: &momo_expressions::assemble::AssembleError) -> Value {
+    use momo_expressions::assemble::AssembleError;
+    match error {
+        AssembleError::OutputTooLarge { bytes } => {
+            json!({"code": "assembly_output_too_large", "bytes": bytes})
+        }
+        other => json!({"code": other.code()}),
+    }
+}
+
+/// What the lookup transaction proved before any work starts.
+struct AssembleLookup {
+    requester: Uuid,
+    /// The attachment to fetch, when the picture is one.
+    source: Option<momo_messaging::AvatarAttachmentSource>,
+    /// This agent already holds as many candidates as the cap allows for what was asked.
+    full: bool,
+}
+
+/// Put motion on one picture and keep the candidates (ADR-0218 G3).
+///
+/// Two short transactions and the work between them, never one transaction across the 10 s:
+///
+/// 1. **Lookup.** The scope and the lease handle are re-proved exactly as `oort_card_suggest`
+///    does (a stale handle cannot speak for a run somebody else holds), the person the run was
+///    raised by is read from the run, an attachment source — and a `sourceAttachmentId` — must
+///    be a complete, live attachment **that person** wrote in **this** conversation (a stranger's
+///    file and an unknown id are the same `InvalidArguments`), and the agent's twelve are
+///    pre-counted so a call that cannot be kept is refused before it costs a decoder slot.
+/// 2. **Work.** With an attachment source the shared decoder semaphore is looked at first (none
+///    free is `assembly_busy`, at once, and nothing is fetched). The attachment is then fetched
+///    from Drive outside any transaction, holding no slot; a slot is taken from the semaphore
+///    after the fetch (none free is `assembly_busy` again, at once, no queue), and the child
+///    builds the candidates inside what is left of the call's one 10 s.
+/// 3. **Keep.** The scope is proved again, then [`momo_expressions::assembly::keep_in_tx`] stores
+///    the result under the agent's own lock.
+///
+/// Answers: a G3.8 code is a **result** (`{code}` / `{code, bytes}`); the assembler's parameter
+/// check is `InvalidArguments`; an assembler that cannot run is `Internal` (5xx), never a card
+/// code. Nothing here writes the prompt, the picture, its base64 or the attachment to a log, an
+/// audit row or the outbox. The rate limit was spent once by the transport, before the body.
+async fn expression_assemble(
+    state: &AppState,
+    caller: HostedCaller,
+    arguments_value: &Value,
+) -> Result<Value, ToolFailure> {
+    use momo_expressions::assemble::{self, AssembleError, SourceFrom};
+    use momo_expressions::assembly;
+    let started = std::time::Instant::now();
+    let call = parse_assemble(arguments_value)?;
+    let secret = state.agent_port.envelope_secret().to_string();
+    let wanted = call.request.slot_kinds().len() as i64;
+    let (attachment, pointer) = (
+        match &call.source {
+            AssembleSource::Attachment(id) => Some(*id),
+            AssembleSource::Bytes(_) => None,
+        },
+        call.source_attachment_id,
+    );
+    let raw_handle = call.raw_handle.clone();
+
+    // ---- 1. lookup --------------------------------------------------------------------
+    let lookup = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            let identity =
+                match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await? {
+                    Ok(identity) => identity,
+                    Err(failure) => return Ok(Err(failure)),
+                };
+            let handle = match bound_handle(&identity, caller, &raw_handle, &secret) {
+                Ok(handle) => handle,
+                Err(failure) => return Ok(Err(failure)),
+            };
+            let Some(run) =
+                momo_agent::lock_gateway_run_in_tx(conn, caller.workspace_id, handle.run_id)
+                    .await?
+            else {
+                return Ok(Err(ToolFailure::Unavailable));
+            };
+            let lease_snapshot = momo_outbox::lock_gateway_lease_in_tx(
+                conn,
+                caller.workspace_id,
+                handle.run_id,
+                run.agent_member_id,
+                GatewayLeaseBinding {
+                    job_id: handle.job_id,
+                    lease_id: handle.lease_id,
+                },
+            )
+            .await
+            .map_err(DbError::from)?;
+            if !momo_outbox::gateway_lease_authorized_hosted(lease_snapshot, handle.lease_id, false)
+            {
+                return Ok(Err(ToolFailure::Conflict));
+            }
+            if run.agent_member_id != caller.agent_member_id || run.channel_id != handle.channel_id
+            {
+                return Ok(Err(ToolFailure::HandleRefused));
+            }
+            if run.status.is_approval_held() || run.status.is_terminal() {
+                return Ok(Err(ToolFailure::Conflict));
+            }
+            let Some((requester, channel_id)) = momo_messaging::requester_of_run_in_tx(
+                conn,
+                caller.workspace_id,
+                handle.run_id,
+                run.agent_member_id,
+            )
+            .await?
+            else {
+                return Ok(Err(ToolFailure::InvalidArguments));
+            };
+            let mut source = None;
+            for (id, is_source) in [(attachment, true), (pointer, false)] {
+                let Some(id) = id else { continue };
+                let found = momo_messaging::find_requester_attachment_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    requester,
+                    channel_id,
+                    id,
+                    momo_expressions::INPUT_BYTES as i64,
+                )
+                .await?;
+                match (found, is_source) {
+                    (Some(found), true) => source = Some(found),
+                    (Some(_), false) => {}
+                    // A stranger's file, another conversation, a pending or deleted one and an
+                    // unknown id are one answer.
+                    (None, _) => return Ok(Err(ToolFailure::InvalidArguments)),
+                }
+            }
+            let held = assembly::held_in_tx(conn, caller.workspace_id, caller.agent_member_id)
+                .await
+                .map_err(crate::routes::approvals::expression_db_error)?;
+            Ok(Ok(AssembleLookup {
+                requester,
+                source,
+                full: held + wanted > assembly::HELD_MAX,
+            }))
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.expression_assemble_lookup", error))??;
+    if lookup.full {
+        return Ok(assemble_refusal(&AssembleError::Busy));
+    }
+
+    // ---- 2. work ----------------------------------------------------------------------
+    // One clock for the whole call: what the Drive fetch and the lookup spent is not the child's.
+    let remaining = || assemble::DEADLINE.saturating_sub(started.elapsed());
+    let (bytes, from) = match call.source {
+        AssembleSource::Bytes(bytes) => (bytes, SourceFrom::Request),
+        AssembleSource::Attachment(_) => {
+            // A call with no decoder slot to run in is refused before it costs a Drive read (up
+            // to 5 MiB of the shared service account's quota and memory): `assembly_busy` is the
+            // cheap answer and must not come after the expensive work. This only LOOKS at the
+            // pool and takes no permit, so none is held while the picture is on its way (network
+            // time is not decoder time, #4676). The slot is taken after the fetch by
+            // `try_assemble_with_program`, whose `try_acquire_owned` stays the authority: a slot
+            // taken in between is still `assembly_busy`, only after the fetch.
+            if momo_expressions::media::decoder_slots().available_permits() == 0 {
+                return Ok(assemble_refusal(&AssembleError::Busy));
+            }
+            let source = lookup.source.ok_or(ToolFailure::InvalidArguments)?;
+            let fetch = async {
+                let content = state
+                    .drive
+                    .file_content(&source.drive_file_id, source.size_bytes)
+                    .await
+                    .map_err(|_| ())?;
+                content
+                    .read_prefix(momo_expressions::INPUT_BYTES + 1)
+                    .await
+                    .map_err(|_| ())
+            };
+            match tokio::time::timeout(remaining(), fetch).await {
+                Err(_) => return Ok(assemble_refusal(&AssembleError::Timeout)),
+                Ok(Err(())) => return Err(ToolFailure::Unavailable),
+                Ok(Ok(bytes)) => (bytes, SourceFrom::Server),
+            }
+        }
+    };
+    let budget = remaining();
+    if budget.is_zero() {
+        return Ok(assemble_refusal(&AssembleError::Timeout));
+    }
+    let program = match &state.assembler_program {
+        Some(program) => program.as_ref().clone(),
+        None => assemble::assembler_path().map_err(|_| ToolFailure::Internal)?,
+    };
+    let answer = assemble::try_assemble_with_program(
+        &program,
+        budget,
+        &call.request,
+        bytes,
+        from,
+        &momo_expressions::media::decoder_slots(),
+    )
+    .await;
+    let outcomes = match answer {
+        Ok(outcomes) => outcomes,
+        // Already proved by `parse_assemble`; the child repeats it, so it can only come back
+        // if the two ever disagree. The agent's call is the thing that is wrong either way, and
+        // it hears the same names as it would have from the door.
+        Err(AssembleError::ParamsInvalid { params }) => return Err(params_failure(&params)),
+        Err(AssembleError::Unavailable) => {
+            // An operator fault (no binary, a child that died for no limit's reason): a 5xx,
+            // never a card code. Nothing of the request is in the log line.
+            tracing::error!("oort_expression_assemble: the assembler is unavailable");
+            return Err(ToolFailure::Internal);
+        }
+        Err(refusal) => return Ok(assemble_refusal(&refusal)),
+    };
+    // Every candidate built too large leaves nothing to keep: the first one's measured size is
+    // the answer.
+    if let Some(Err(first)) = outcomes
+        .first()
+        .filter(|_| outcomes.iter().all(|o| o.is_err()))
+    {
+        return Ok(assemble_refusal(first));
+    }
+
+    // ---- 3. keep ----------------------------------------------------------------------
+    let kinds = call.request.slot_kinds();
+    let prompt = call.prompt;
+    let source_attachment_id = call.source_attachment_id;
+    let requester = lookup.requester;
+    let kept = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            if let Err(failure) =
+                authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await?
+            {
+                return Ok(Err(failure));
+            }
+            let kept = assembly::keep_in_tx(
+                conn,
+                &assembly::Keep {
+                    workspace: caller.workspace_id,
+                    agent: caller.agent_member_id,
+                    requester,
+                    prompt: &prompt,
+                    source_attachment_id,
+                    motions: &kinds,
+                    outcomes: &outcomes,
+                },
+            )
+            .await
+            .map_err(crate::routes::approvals::expression_db_error)?;
+            Ok(Ok(kept))
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.expression_assemble_keep", error))??;
+    let kept = match kept {
+        Ok(kept) => kept,
+        // Another call of this agent took the room while this one was building.
+        Err(assembly::Full { .. }) => return Ok(assemble_refusal(&AssembleError::Busy)),
+    };
+    Ok(json!({
+        "assemblyId": kept.assembly_id,
+        "expiresAtMs": crate::routes::shared::epoch_ms(kept.expires_at),
+        "candidates": kept.candidates.iter().map(|candidate| json!({
+            "index": candidate.index,
+            "motion": candidate.motion,
+            "frames": candidate.frames,
+            "durationMs": candidate.duration_ms,
+            "bytes": candidate.bytes,
+            "sha256": candidate.sha256,
+        })).collect::<Vec<_>>(),
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // oort_card_suggest
 // ---------------------------------------------------------------------------
 
@@ -4100,6 +4482,33 @@ mod tests {
     fn no_human_requester_is_unavailable_on_the_wire() {
         assert_eq!(NO_HUMAN_REQUESTER_FAILURE, ToolFailure::Unavailable);
         assert_eq!(NO_HUMAN_REQUESTER_FAILURE.wire().1, -32004);
+    }
+
+    /// ADR-0218 G3.8: the names an `assembly_params_invalid` answer may carry
+    /// (`momo_mcp::ASSEMBLE_PARAMS`, the adapter's closed list) and the assembler's own
+    /// `Param::ALL` are one list in one order. A parameter the assembler can name and the list
+    /// cannot would turn a wrong call into a nameless refusal, so the two are pinned together;
+    /// and what the door says is exactly the names it was given, in that order, with no value.
+    #[test]
+    fn the_adapters_parameter_names_are_the_assemblers() {
+        use momo_expressions::assemble::Param;
+        assert_eq!(Param::ALL.map(Param::name), momo_mcp::ASSEMBLE_PARAMS);
+        for param in Param::ALL {
+            let ToolFailure::InvalidAssembleParams(named) = params_failure(&[param]) else {
+                panic!("{param:?} is not named");
+            };
+            assert_eq!(named.names().collect::<Vec<_>>(), [param.name()]);
+        }
+        let everything = params_failure(&[Param::Size, Param::Presets, Param::FrameMs]);
+        assert_eq!(
+            everything.data(),
+            Some(json!({
+                "code": "assembly_params_invalid",
+                "params": ["presets", "frameMs", "size"]
+            })),
+            "named once each, in the closed list's order"
+        );
+        assert_eq!(everything.wire(), (400, -32602, "invalid tool arguments"));
     }
 
     /// #4829 review round 1: an agent has one place to prepare an `expression.create` in. It is

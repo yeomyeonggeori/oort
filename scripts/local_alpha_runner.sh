@@ -704,6 +704,7 @@ RELAY_DATABASE_URL=${RELAY_DATABASE_URL:-postgres://momo_relay:momo_relay_dev_pw
 WORKER_DATABASE_URL=${WORKER_DATABASE_URL:-postgres://momo_worker:momo_worker_dev_pw@localhost:${POSTGRES_PORT}/${POSTGRES_DB}}
 
 run_cmd expression-decoder-build cargo build --manifest-path "$REPO_ROOT/server-rust/Cargo.toml" --bin momo-expression-decoder
+run_cmd expression-assembler-build cargo build --manifest-path "$REPO_ROOT/server-rust/Cargo.toml" --bin momo-expression-assembler
 
 SERVER_PID=$(start_bg server env \
   DATABASE_URL="$APP_DATABASE_URL" \
