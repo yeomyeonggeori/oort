@@ -27,15 +27,16 @@
 --   UPDATE ON TABLE message)이라 새 열에도 닿는다. schema_v0.sql 무접촉.
 --
 -- 운영 메모(락): `ALTER TABLE message` 는 ACCESS EXCLUSIVE 를 커밋까지 잡는다. 상수 기본값을 가진
--- 열 추가는 메타데이터만 바꾸지만(PG 11+) CHECK 추가는 기존 행을 한 번 훑는다(message 가 큰 DB 는 점검
--- 창에서 적용). 152 의 `message_sent_via_ck` 와 같은 비용이다.
+-- 열 추가는 메타데이터만 바꾼다(PG 11+). CHECK 는 `NOT VALID` 로 더해 기존 행을 훑지 않는다 — 이 열은
+-- 방금 생겨 기존 행이 모두 false 라 어길 수 없고, 새로 쓰는 행(INSERT·UPDATE)은 NOT VALID 여도 검사된다.
+-- 그래서 큰 message 에서도 잠금이 메타데이터 변경 길이로 끝난다(planner, S4 착륙 검토).
 -- =============================================================================
 
 ALTER TABLE message
   ADD COLUMN also_in_channel boolean NOT NULL DEFAULT false;
 ALTER TABLE message
   ADD CONSTRAINT message_also_in_channel_reply_ck
-  CHECK (NOT also_in_channel OR root_id IS NOT NULL);
+  CHECK (NOT also_in_channel OR root_id IS NOT NULL) NOT VALID;
 
 COMMENT ON COLUMN message.also_in_channel IS
   'ADR-0148 증보 2026-10-31: true = 이 스레드 답글을 보낸 사람이 「대화에도 보내기」를 골랐다(본류에도 보인다). 답글에서만 켤 수 있다(CHECK). 보낼 때 한 번 정해지고 바뀌지 않는다.';
