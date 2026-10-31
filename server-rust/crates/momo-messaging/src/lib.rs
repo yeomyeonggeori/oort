@@ -220,7 +220,7 @@ pub use message::{
     PagedMessage, QuoteTargetInvalid, QuotedMessage, RepliesCursorInvalid, SendExtras,
     SendRejected, SentMessage, SentVia, StoredMessage, ThreadReplyPage, ThreadRollup,
     ThreadRootInvalid, ThreadRootState, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
-    REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX,
+    REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX, THREAD_SUMMARY_PARTICIPANTS,
 };
 pub use notification_rule::{
     get_notification_rule_in_tx, get_push_kinds_in_tx, patch_notification_rule_in_tx,
