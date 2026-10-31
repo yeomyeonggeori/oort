@@ -41,6 +41,7 @@ import {
   channelLabelParts,
   labelRecipientKind,
   dmAutoReplyAgent,
+  dmGroupFacts,
   dmPeer,
   makeDirectory,
   memberFor,
@@ -255,6 +256,8 @@ export function ChatShell() {
     ? channelLabel(channel, directory, session.member.id, labelOptions)
     : "채널";
   const peer = channel ? dmPeer(channel, directory, session.member.id) : null;
+  // 셋 이상 DM의 참여자 사실(ADR-0217). `peer`가 null인 까닭이 「그룹」이라는 것을 소개 문구에 알린다.
+  const dmGroup = channel ? dmGroupFacts(channel, directory) : null;
   // goal B13 (QA H7): 이 채널이 멘션 없이도 답하는 방인가. `peer`와 따로 묻는다
   // — `peer`는 "상대가 누구냐"이고 이쪽은 "서버가 자동으로 부르느냐"라서, 그룹
   // DM이나 사람끼리의 DM에서 둘의 답이 갈린다.
@@ -1471,6 +1474,7 @@ export function ChatShell() {
               channelName={label}
               channelTopic={channel?.topic}
               peer={peer}
+              dmGroup={dmGroup}
               reachedStart={timeline.reachedStart}
               canAddMember={canAddChannelMemberNow(
                 !directoryQuery.isPending,

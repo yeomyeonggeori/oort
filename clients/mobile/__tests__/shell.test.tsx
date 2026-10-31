@@ -399,6 +399,38 @@ describe('opening a conversation', () => {
     expect(screen.queryByTestId('composer-input')).toBeNull();
   });
 
+  it('opens a group DM (an agent seated by everyone’s consent) and never says only two people see it (#4912)', async () => {
+    // 폰의 전 경로: 채널 목록 → 명부 → `ConversationScreen` 이 `dmGroupFacts` 로 판정 → `Timeline` → 코어 문구.
+    // 기록이 없는 그룹은 실서버에서는 드물지만(합류 요청 메시지가 첫 줄이다) 웹과 같은 코어 모델을 쓴다는 사실이 여기서 잰다.
+    installFetch({
+      channels: () =>
+        jsonResponse(200, {
+          channels: [
+            ...CHANNELS,
+            {
+              id: 'ch-dm-group',
+              workspaceId: WS,
+              kind: 'dm',
+              muted: false,
+              memberIds: [
+                SELF_ID,
+                'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb',
+                'dddddddd-1111-4111-8111-dddddddddddd',
+              ],
+            },
+          ],
+        }),
+    });
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('sidebar-row-dm:ch-dm-group'));
+    await waitFor(() => expect(screen.getByTestId('timeline-empty')).toBeTruthy());
+    expect(screen.getByTestId('timeline-empty')).toHaveTextContent(
+      /여기 쓴 메시지는 이 대화에 있는 3명이 함께 봅니다\. 에이전트는 이 대화에 들어온 뒤에 쓴 글만 봅니다\./,
+    );
+    expect(screen.getByTestId('timeline-empty')).not.toHaveTextContent(/둘만 봅니다/);
+  });
+
   it('asks the SERVER which channel an agent DM is, then opens it', async () => {
     const fetchMock = installFetch();
     renderShell();

@@ -89,7 +89,7 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose }: { onPick: (to
           </DropdownMenuContent></DropdownMenu>
         </li>)}</ul>}
     </>}
-    <Dialog open={target !== null} onOpenChange={(open) => { if (!open && !busy) setTarget(null); }}><DialogContent role="alertdialog" opener={target?.opener ?? null}>
+    <Dialog open={target !== null} onOpenChange={(open) => { if (!open && !busy) setTarget(null); }}><DialogContent role="alertdialog" opener={target?.opener ?? null} className="gap-3 p-4">
       <DialogTitle>{target?.action === "delete" ? "팀 그림을 삭제할까요?" : "팀 그림을 신고할까요?"}</DialogTitle>
       <DialogDescription>{target?.action === "delete" ? "지운 이름은 다시 쓸 수 없어요. 예전 메시지와 반응은 이름 문자열로 표시돼요." : "신고하면 팀 전체에서 즉시 숨겨져요. 신고자와 내용은 관리자만 볼 수 있어요."}</DialogDescription>
       {target?.action === "report" && <label className="text-body">신고 사유<Select value={reason} onChange={(event) => setReason(event.target.value)}><option value="copyright">저작권</option><option value="face">사람 얼굴</option><option value="other">기타</option></Select></label>}

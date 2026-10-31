@@ -34,6 +34,7 @@ import {readProjectionPhase} from '@momo/core/features/sidebar/goneDm';
 import {composedUnreadCount} from '@momo/core/features/readState/model';
 import {
   dmAutoReplyAgent,
+  dmGroupFacts,
   dmPeer,
   unreadFor,
 } from '@momo/core/features/workspace/directory';
@@ -459,6 +460,11 @@ export default function ConversationScreen({
   const peer = useMemo(
     () => (channel ? dmPeer(channel, directory, member.id) : null),
     [channel, directory, member.id],
+  );
+  // 셋 이상 DM 의 참여자 사실(ADR-0217). `peer` 가 null 인 까닭이 「그룹」이라는 것을 빈 방 문구에 알린다 — 웹 ChatShell 과 같은 판정.
+  const dmGroup = useMemo(
+    () => (channel ? dmGroupFacts(channel, directory) : null),
+    [channel, directory],
   );
 
   // DM 머리의 상대 상태 점 (#4016). 홈 DM 줄과 같은 core 판정(`dmPeerStatusDot`)이고 같은 쿼리 키
@@ -2041,6 +2047,7 @@ export default function ConversationScreen({
               status={timeline.status}
               channelKind={channel?.kind}
               peer={peer}
+              dmGroup={dmGroup}
               lastReadSeq={boundary?.lastReadSeq ?? null}
               unreadCount={boundary?.unreadCount ?? 0}
               recoveryMarkers={timeline.recoveryMarkers}

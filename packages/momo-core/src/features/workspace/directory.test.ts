@@ -3,6 +3,7 @@ import type { Channel, RosterMember } from "../../lib/api";
 import {
   channelLabel,
   channelLabelParts,
+  dmGroupFacts,
   makeDirectory,
   missingMemberLabel,
 } from "./directory";
@@ -102,5 +103,48 @@ describe("missingMemberLabel · 글쓴이 이름", () => {
   it("명부를 받은 뒤 없는 멤버는 「나간 멤버」, 받기 전에는 「불러오는 중」이며 id 조각이 아니다", () => {
     expect(missingMemberLabel(makeDirectory([self]))).toBe("나간 멤버");
     expect(missingMemberLabel(makeDirectory([]))).toBe("불러오는 중");
+  });
+});
+
+// #4912 (S3 묶음 검증 R3). `dmPeer`가 null이라는 사실만으로는 「셋 이상 DM」과 「명부를 아직 못 받음」을 가를 수 없다.
+// 그룹 판정은 머리 이름(`channelLabelParts`의 「… · N명」)이 쓰는 것과 **같은 판정**이어야, 머리가 3명이라 말하는데
+// 소개 문구가 둘이라 말하는 일이 구조적으로 없다.
+describe("dmGroupFacts · 3명 이상 DM의 참여자 사실", () => {
+  const AGENT = "00000000-0000-7000-8000-00000000000D";
+  const THIRD = "00000000-0000-7000-8000-00000000000E";
+  const dir = makeDirectory([
+    self,
+    member({ id: PEER, displayName: "정하윤", handle: "hayun" }),
+    member({ id: AGENT, kind: "agent", displayName: "코메토", handle: "cometo" }),
+  ]);
+
+  it("셋 이상이면 활성 참여자 전체와 그중 에이전트 수를 센다", () => {
+    expect(dmGroupFacts(dm([ME, PEER, AGENT]), dir)).toEqual({ count: 3, agentCount: 1 });
+    expect(dmGroupFacts(dm([ME, PEER, THIRD, AGENT]), dir)).toEqual({ count: 4, agentCount: 1 });
+  });
+
+  it("실제 1:1(둘 이하)과 DM이 아닌 방은 null이다 - 그쪽은 dmPeer가 말한다", () => {
+    expect(dmGroupFacts(dm([ME, PEER]), dir)).toBeNull();
+    expect(dmGroupFacts(dm([ME]), dir)).toBeNull();
+    expect(dmGroupFacts(dm([]), dir)).toBeNull();
+    const channel = { ...dm([ME, PEER, AGENT]), kind: "public" } as Channel;
+    expect(dmGroupFacts(channel, dir)).toBeNull();
+    expect(dmGroupFacts({ ...dm([ME, PEER, AGENT]), memberIds: undefined } as Channel, dir)).toBeNull();
+  });
+
+  it("명부에 없는 멤버는 에이전트로 세지 않는다 - 모르는 것을 에이전트라 부르지 않는다", () => {
+    expect(dmGroupFacts(dm([ME, PEER, GONE]), dir)).toEqual({ count: 3, agentCount: 0 });
+    expect(dmGroupFacts(dm([ME, PEER, AGENT]), makeDirectory([]))).toEqual({ count: 3, agentCount: 0 });
+  });
+
+  it("머리 이름과 같은 판정·같은 수다: 그룹이라 부르는 때와 「· N명」이 정확히 겹친다", () => {
+    const everyone = [ME, PEER, AGENT, THIRD, GONE];
+    for (let n = 0; n <= everyone.length; n += 1) {
+      const channel = dm(everyone.slice(0, n));
+      const facts = dmGroupFacts(channel, dir);
+      const label = channelLabelParts(channel, dir, ME);
+      expect(facts !== null, `n=${n}`).toBe(label.kind === "group");
+      if (facts) expect(label.text.endsWith(` · ${facts.count}명`), `n=${n}`).toBe(true);
+    }
   });
 });

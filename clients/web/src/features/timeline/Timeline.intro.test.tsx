@@ -11,7 +11,7 @@ import {
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, RosterMember } from "@momo/core/lib/api";
-import { makeDirectory } from "@momo/core/features/workspace/directory";
+import { makeDirectory, type DmGroupFacts } from "@momo/core/features/workspace/directory";
 import {
   EMPTY_ADD_MEMBER_ACTION_LABEL,
   EMPTY_WRITE_ACTION_LABEL,
@@ -128,6 +128,7 @@ function mount(
     canAddMember?: boolean;
     reachedStart?: boolean;
     peer?: RosterMember | null;
+    dmGroup?: DmGroupFacts | null;
     onStartWriting?: () => void;
     onAddMember?: () => void;
     welcomePhase?: "hidden" | "stage" | "exiting" | "backstop";
@@ -151,6 +152,7 @@ function mount(
         canAddMember: over.canAddMember ?? true,
         reachedStart: over.reachedStart,
         peer: over.peer,
+        dmGroup: over.dmGroup,
         onStartWriting: over.onStartWriting,
         onAddMember: over.onAddMember,
         welcomePhase: over.welcomePhase,
@@ -256,6 +258,27 @@ describe("Timeline channel intro leading row", () => {
     expect(intro?.textContent).toContain("여기 쓴 메시지는 둘만 봅니다");
     expect(intro?.textContent).not.toContain("첫");
     expect(root.querySelector("[data-testid='timeline-empty-primary']")).toBeNull();
+  });
+
+  it("tells a group DM who sees it instead of the two-person sentence, with history and when empty (#4912)", () => {
+    const group = { count: 3, agentCount: 1 };
+    const withHistory = mount({
+      channelKind: "dm",
+      channelName: "정하윤, 코메토 · 3명",
+      peer: null,
+      dmGroup: group,
+      messages: [message(1)],
+      reachedStart: true,
+    });
+    const intro = withHistory.querySelector("[data-testid='message-channel-intro']");
+    expect(intro?.textContent).toContain(DM_INTRO_STARTED);
+    expect(intro?.textContent).toContain("여기 쓴 메시지는 이 대화에 있는 3명이 함께 봅니다.");
+    expect(intro?.textContent).not.toContain("둘만 봅니다");
+    expect(intro?.textContent).not.toContain("이 둘로 고정");
+    const empty = mount({ channelKind: "dm", channelName: "정하윤, 코메토 · 3명", peer: null, dmGroup: group, messages: [] });
+    const first = empty.querySelector("[data-testid='timeline-empty']");
+    expect(first?.textContent).toContain("이 대화에 있는 3명이 함께 봅니다.");
+    expect(first?.textContent).not.toContain("둘만 봅니다");
   });
 
   it("focuses the composer when 첫 메시지 쓰기 is pressed", () => {

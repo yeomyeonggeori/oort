@@ -7,6 +7,7 @@ import {
 } from "@momo/core/features/settings/agentUsage";
 import { useSession } from "@/app/session";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import type { components } from "@/lib/usage.generated";
@@ -21,14 +22,22 @@ function useAgentUsage(workspaceId: string) {
   });
 }
 
-export function AgentUsageLine({ agentId }: { agentId: string }) {
+/**
+ * 에이전트 한 명의 이번 달 비용 한 줄.
+ *
+ * **가장자리 여백을 이 부품에 넣지 않는다.** 허브 표의 칸·허브 상세·프로필 대화가 함께 쓰는데, 앞의 둘은 칸이 제
+ * 여백을 주므로 부품이 또 주면 이중 인셋이 된다. 자기 여백이 없는 자리(프로필 대화의 틀)가 `className` 으로 준다
+ * (`InlineBanner`·`EmptyInvite` 의 `className` 과 같은 「자리 조정용」). 줄이 `null` 일 때(사용량 행이 없는 에이전트)
+ * 아무것도 그려지지 않으므로, 줄 자신이 여백을 지면 빈 띠가 남지 않는다.
+ */
+export function AgentUsageLine({ agentId, className }: { agentId: string; className?: string }) {
   const { workspaceId } = useSession();
   const query = useAgentUsage(workspaceId);
   const { directory } = useDirectory(workspaceId);
   const row = query.data && usageForAgent(query.data, agentId);
   if (query.data && !row) return null;
   return (
-    <span className="block whitespace-normal break-words text-meta text-ink-muted" data-testid="agent-month-usage" data-numeric>
+    <span className={cn("block whitespace-normal break-words text-meta text-ink-muted", className)} data-testid="agent-month-usage" data-numeric>
       {COPY.title}: {query.fetchStatus === "paused" ? COPY.offline : query.isError ? COPY.error : query.isPending ? COPY.loading : row ? agentUsageLine(row, memberFor(directory, agentId)?.brain) : COPY.unavailable}
     </span>
   );
