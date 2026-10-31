@@ -846,6 +846,19 @@ pub struct ThreadRepliesPage {
     /// client reads `nextCursor === undefined` as "no more".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<i64>,
+    /// Whether the **caller** follows this thread (ADR-0206 증보 1 F8): `auto` or
+    /// `followed`, never `unfollowed` or no row. Read in the same transaction as
+    /// the page, on every page. Not Swift's: an addition the old clients ignore.
+    pub following: bool,
+}
+
+/// `PUT` / `DELETE …/messages/{root}/follow` response (ADR-0206 증보 1 F8): the
+/// caller's effective follow state after the write. `auto` and `followed` are not
+/// told apart on purpose — no screen needs the difference yet.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadFollowDto {
+    pub following: bool,
 }
 
 /// Query string of the replies page. `limit` is lenient (a bad page size has a
@@ -6091,8 +6104,22 @@ pub struct MessageUnfurlDto {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub domain: Option<String>,
+    /// Proxy path on this origin (`…/unfurls/{id}/image`), never a remote address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<String>,
+    // ADR-0170 amendment 2026-10-31 D6: every key below is optional and absent when unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
+    /// Proxy path on this origin (`…/unfurls/{id}/icon`), never a remote address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_width: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_height: Option<i32>,
+    /// Only ever `true`; absent otherwise.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_video: bool,
 }
 
 #[derive(Debug, Serialize)]

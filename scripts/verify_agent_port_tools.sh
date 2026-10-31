@@ -195,6 +195,9 @@ export PGHOST=127.0.0.1 PGPORT="$PG_PORT" PGDATABASE=momo PGUSER=momo PGPASSWORD
   # Layer 2 — the real Axum router: catalog intersection per lifecycle state,
   # all eight tools, single write path, lease races, terminal rules, the mixed
   # managed+hosted workspace and the inactive-hosted no-fallback proof.
+  # The expression cases spawn the isolated decoder/assembler children
+  # (`momo-expressions` bins); `cargo test -p … --test …` does not build them (#4947).
+  cargo build -p momo-expressions --bins
   cargo test -p momo-server --test agent_port_tools_conformance_pg \
     -- --ignored --test-threads=1 --nocapture
   # Layer 3 — ADR-0162 증보 3 D10 (#3515): a work request to a hosted agent, the

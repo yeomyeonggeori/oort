@@ -8,6 +8,11 @@
 //!   cargo test -p momo-agent-worker --test hosted_door_pg -- --ignored --test-threads=1
 //! ```
 //!
+//! This test does not build the children (they are bins of another package; a `--workspace` or a
+//! `-p momo-expressions` test build does). Without them the door sees "invalid media" or an
+//! operator outage and seven of these tests go red with answers that say nothing of it (`[]`, "no
+//! card for this run", #4947): `require_children_4947` fails first and names the command.
+//!
 //! Real worker iterations (the `momo_worker` role) against a scripted provider that answers the way
 //! Hermes' API server does — a `data:image/…;base64,…` picture and one fenced request block in one
 //! non-streamed answer — and every result read back as the non-bypass `momo_app` under each of two
@@ -517,7 +522,39 @@ struct Opts {
     assembler: Option<PathBuf>,
 }
 
+/// The child programs the door runs must sit beside this test's target directory, found the way
+/// `momo_expressions` finds them: the `OORT_EXPRESSION_DECODER` / `OORT_EXPRESSION_ASSEMBLER`
+/// override, else next to the test executable (one level above a `deps` directory).
+/// `momo-expression-decoder` re-encodes every picture the door takes and
+/// `momo-expression-assembler` builds the motion turns; both belong to `momo-expressions`, so
+/// building this test builds neither (header above, #4947). Fail here, first, and name the
+/// command: left to the door a missing child is "invalid media" or an operator outage, which
+/// these tests report as `[]` or "no card for this run". The assembler is not needed (and not
+/// asked for) when the test stands a program of its own in for it. An explicit override is
+/// trusted.
+fn require_children_4947(real_assembler: bool) {
+    let exe = std::env::current_exe().expect("test executable");
+    let mut dir = exe.parent().expect("target dir").to_path_buf();
+    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
+        dir.pop();
+    }
+    let mut wanted = Vec::new();
+    if std::env::var_os("OORT_EXPRESSION_DECODER").is_none() {
+        wanted.push(dir.join("momo-expression-decoder"));
+    }
+    if real_assembler && std::env::var_os("OORT_EXPRESSION_ASSEMBLER").is_none() {
+        wanted.push(dir.join("momo-expression-assembler"));
+    }
+    let missing: Vec<_> = wanted.iter().filter(|path| !path.is_file()).collect();
+    assert!(
+        missing.is_empty(),
+        "build the child programs first: cargo build -p momo-expressions --bins (missing {missing:?}); \
+         without them the door sees invalid media or an outage and the turn fails without saying so"
+    );
+}
+
 async fn worker(provider: &Arc<Scripted>, opts: &Opts) -> AgentWorker {
+    require_children_4947(opts.assembler.is_none());
     let mut config = WorkerConfig::for_target(database_url());
     config.claim_batch_size = 10;
     config.provider_link_master_key = Some("conformance-4820-b2-master".to_string());
