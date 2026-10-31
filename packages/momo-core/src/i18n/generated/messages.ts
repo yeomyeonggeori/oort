@@ -38,7 +38,11 @@ export const messageKeys = [
   "settings.profile.languageLoadError",
   "settings.profile.languagePartialNotice",
   "settings.profile.languageRetry",
-  "settings.profile.languageSystem"
+  "settings.profile.languageSystem",
+  "timeline.thread.open",
+  "timeline.thread.openUnread",
+  "timeline.thread.replyCount",
+  "timeline.thread.unreadChip"
 ] as const;
 
 export type MessageKey = typeof messageKeys[number];
@@ -88,7 +92,20 @@ export const argumentSpecs = {
   "settings.profile.languageLoadError": {},
   "settings.profile.languagePartialNotice": {},
   "settings.profile.languageRetry": {},
-  "settings.profile.languageSystem": {}
+  "settings.profile.languageSystem": {},
+  "timeline.thread.open": {
+    "count": "number"
+  },
+  "timeline.thread.openUnread": {
+    "count": "number",
+    "unread": "number"
+  },
+  "timeline.thread.replyCount": {
+    "count": "number"
+  },
+  "timeline.thread.unreadChip": {
+    "count": "number"
+  }
 } as const;
 
 export interface MessageArgs {
@@ -131,4 +148,8 @@ export interface MessageArgs {
   "settings.profile.languagePartialNotice": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "timeline.thread.open": { count: number };
+  "timeline.thread.openUnread": { count: number; unread: number };
+  "timeline.thread.replyCount": { count: number };
+  "timeline.thread.unreadChip": { count: number };
 }

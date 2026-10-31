@@ -1,0 +1,6 @@
+{
+  "timeline.thread.replyCount": "답글 {count, number}개",
+  "timeline.thread.unreadChip": "새 답글 {count, number}",
+  "timeline.thread.open": "스레드 열기, 답글 {count, number}개",
+  "timeline.thread.openUnread": "스레드 열기, 답글 {count, number}개, 새 답글 {unread, number}개"
+}
