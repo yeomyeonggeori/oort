@@ -733,7 +733,7 @@
     "clients/web/src/features/settings/settingsFocus.ts": 4,
     "clients/web/src/features/settings/settingsNav.ts": 70,
     "clients/web/src/features/settings/settingsReturn.ts": 1,
-    "clients/web/src/features/settings/shell/ConversationPreview.tsx": 29,
+    "clients/web/src/features/settings/shell/ConversationPreview.tsx": 28,
     "clients/web/src/features/settings/shell/ProfileAvatar.tsx": 12,
     "clients/web/src/features/settings/shell/ProfileHero.tsx": 4,
     "clients/web/src/features/settings/shell/SettingsNav.tsx": 6,

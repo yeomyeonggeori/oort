@@ -73,7 +73,7 @@ function mount(tree: ReactElement): HTMLElement {
   mountedHost = host;
   mountedRoot = createRoot(host);
   act(() => {
-    mountedRoot?.render(createElement(LocaleProvider, { locale: korean }, tree));
+    mountedRoot?.render(<LocaleProvider locale={korean}>{tree}</LocaleProvider>);
   });
   return host;
 }

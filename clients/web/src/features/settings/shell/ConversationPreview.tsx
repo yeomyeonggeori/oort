@@ -3,11 +3,7 @@ import { Eye, Globe, ImageIcon } from "lucide-react";
 import type { LinkPreviewPreference } from "@/features/timeline/linkPreviewPreference";
 import { cn } from "@/design/lib/cn";
 import { MESSAGE_BODY_CLASS, MessageBody } from "@/features/timeline/MessageBody";
-import {
-  UNFURL_CARD_SURFACE_CLASS,
-  UNFURL_HERO_FRAME_CLASS,
-  UNFURL_THUMB_SLOT_CLASS,
-} from "@/features/timeline/UnfurlCards";
+import { UNFURL_HERO_FRAME_CLASS } from "@/features/timeline/UnfurlCards";
 import {
   MESSAGE_AVATAR_GUTTER_CLASS,
   MESSAGE_AVATAR_SIZE_CLASS,
@@ -56,8 +52,9 @@ function LinkCard({ layout }: { layout: Exclude<LinkPreviewPreference, "off"> })
   );
   return (
     <div
-      // `mt-2`는 타임라인의 링크 카드 묶음(`UnfurlCards`)이 본문 아래에서 여는 간격과 같고, 면은 같은 상수다.
-      className={cn("mt-2 max-w-pane min-w-0", UNFURL_CARD_SURFACE_CLASS)}
+      // `mt-2`는 타임라인의 링크 카드 묶음(`UnfurlCards`)이 본문 아래에서 여는 간격과 같다. 면(`relative isolate
+      // flex rounded-md bg-surface-muted`)과 그림 칸은 타임라인 카드와 같은 클래스이고 `ConversationPreview.test.ts`가 소스로 맞대 본다.
+      className="relative isolate mt-2 flex max-w-pane min-w-0 rounded-md bg-surface-muted"
       data-testid="preview-link-card"
       data-layout={layout}
     >
@@ -78,7 +75,7 @@ function LinkCard({ layout }: { layout: Exclude<LinkPreviewPreference, "off"> })
         </span>
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-3 p-2">
-          <span className={UNFURL_THUMB_SLOT_CLASS}>
+          <span className="relative flex h-unfurl-tile w-unfurl-thumb shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted-soft text-icon">
             <ImageIcon className="size-4" aria-hidden="true" />
           </span>
           <span className="flex min-w-0 flex-1 flex-col gap-px">

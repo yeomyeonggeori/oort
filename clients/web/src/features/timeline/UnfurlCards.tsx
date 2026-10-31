@@ -7,6 +7,7 @@ import {
   type MessageUnfurl,
   type UnfurlCardModel,
 } from "@momo/core/features/timeline/unfurl";
+import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import {
   Dialog,
@@ -38,18 +39,6 @@ import { useUnfurlImage, useVisibleOnce } from "./useUnfurlImage";
 /** 크게 카드의 그림 틀. 불러오는 중과 준비됨이 같은 클래스라서 틀이 뛰지 않는다. */
 export const UNFURL_HERO_FRAME_CLASS =
   "relative block aspect-og max-h-unfurl-hero w-full overflow-hidden rounded-md bg-muted-soft";
-
-// 설정의 대화 미리보기(`ConversationPreview`)가 같은 클래스를 읽는다. 눌러 보는 사람이 상자에서
-// 본 카드와 대화의 카드가 다르면 미리보기가 거짓말이 된다.
-/** 테두리 없는 카드의 면. 눌림·호버는 안쪽 링크가 입힌다. */
-export const UNFURL_CARD_SURFACE_CLASS =
-  "relative isolate flex rounded-md bg-surface-muted";
-/** 아이콘 타일과 작거나 정사각형인 그림의 칸(64×64). */
-export const UNFURL_SQUARE_SLOT_CLASS =
-  "relative flex size-unfurl-tile shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted-soft text-icon";
-/** 보통 그림의 칸(104×64, 자른다). */
-export const UNFURL_THUMB_SLOT_CLASS =
-  "relative flex h-unfurl-tile w-unfurl-thumb shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted-soft text-icon";
 
 /** 그림 위의 재생 표시. 카드 자체가 링크라 이 표시는 장식이다. */
 function PlayMark() {
@@ -141,16 +130,16 @@ function AddressLine({
 
 function CardLink({
   model,
+  rich = false,
   label,
   describedBy,
-  className,
   onClick,
   children,
 }: {
   model: UnfurlCardModel;
+  rich?: boolean;
   label: string;
   describedBy?: string | undefined;
-  className: string;
   onClick: (event: { preventDefault: () => void }) => void;
   children: ReactNode;
 }) {
@@ -165,7 +154,12 @@ function CardLink({
       data-row-action=""
       aria-label={label}
       aria-describedby={describedBy}
-      className={className}
+      // 전폭 행이라 눌림은 채움뿐이다(눌림 장부 H5-1). 앞 줄은 두 모양이 같이 쓰는 클래스이고,
+      // 리터럴로 여기 있어야 장부가 채움 눌림을 읽는다.
+      className={cn(
+        "flex w-full min-w-0 flex-1 rounded-md hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring",
+        rich ? "flex-col gap-2 p-3" : "items-center gap-3 p-2"
+      )}
       data-testid="unfurl-card"
       data-layout={model.layout}
       onClick={onClick}
@@ -245,10 +239,10 @@ export function UnfurlCardView({
       {model.layout === "rich" ? (
         <CardLink
           model={model}
+          rich
           label={label}
           describedBy={videoNoteId}
           onClick={open}
-          className="flex w-full min-w-0 flex-1 flex-col gap-2 rounded-md p-3 hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
         >
           {/* 끝 여백은 오른쪽 위 「지우기」 칩 자리다. 칩은 글 위에 서므로 두 모양 모두 비워 둔다. */}
           <span className="flex min-w-0 flex-col gap-px pr-control-lg">
@@ -285,10 +279,12 @@ export function UnfurlCardView({
           label={label}
           describedBy={videoNoteId}
           onClick={open}
-          className="flex w-full min-w-0 flex-1 items-center gap-3 rounded-md p-2 hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
         >
           {picture.kind === "tile" ? (
-            <span className={UNFURL_SQUARE_SLOT_CLASS} data-testid="unfurl-tile">
+            <span
+              className="relative flex size-unfurl-tile shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted-soft text-icon"
+              data-testid="unfurl-tile"
+            >
               {model.isVideo ? (
                 play
               ) : iconSrc ? (
@@ -302,7 +298,10 @@ export function UnfurlCardView({
               )}
             </span>
           ) : picture.shape === "small" ? (
-            <span className={UNFURL_SQUARE_SLOT_CLASS} data-testid="unfurl-thumb">
+            <span
+              className="relative flex size-unfurl-tile shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted-soft text-icon"
+              data-testid="unfurl-thumb"
+            >
               {showImage ? (
                 <PictureImage
                   src={image}
@@ -313,7 +312,10 @@ export function UnfurlCardView({
               {play}
             </span>
           ) : (
-            <span className={UNFURL_THUMB_SLOT_CLASS} data-testid="unfurl-thumb">
+            <span
+              className="relative flex h-unfurl-tile w-unfurl-thumb shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted-soft text-icon"
+              data-testid="unfurl-thumb"
+            >
               {showImage ? (
                 <PictureImage
                   src={image}
@@ -461,7 +463,10 @@ export function UnfurlCards({
           // toolbar into this row's band, the toolbar is the transient thing
           // under the cursor and it wins; the X is furniture on a card.
           // 테두리 없는 카드(#4882): 면은 보조 채움 하나이고, 눌림·호버는 안쪽 링크가 입힌다.
-          <div key={unfurl.id} className={UNFURL_CARD_SURFACE_CLASS}>
+          <div
+            key={unfurl.id}
+            className="relative isolate flex rounded-md bg-surface-muted"
+          >
             <UnfurlCard unfurl={unfurl} preference={preference} />
             {removeControl(index)}
           </div>

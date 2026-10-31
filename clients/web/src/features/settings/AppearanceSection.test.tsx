@@ -220,7 +220,12 @@ describe("AppearanceSection: 링크 미리보기와 대화 미리보기", () => 
   function sample(host: HTMLElement) {
     return host.querySelector<HTMLElement>('[data-testid="preview-link-card"]');
   }
-  const inKorean = () => mount(createElement(LocaleProvider, { locale: korean }, createElement(AppearanceSection)));
+  const inKorean = () =>
+    mount(
+      <LocaleProvider locale={korean}>
+        <AppearanceSection />
+      </LocaleProvider>
+    );
   const labels = (host: HTMLElement) =>
     [...host.querySelectorAll('[data-testid="link-preview-choice"] label')].map((label) => label.textContent);
 
