@@ -3,6 +3,7 @@
   "releaseNotes.page.description": "What changed in each version and how to try it.",
   "releaseNotes.page.empty": "There are no updates to show yet.",
   "releaseNotes.page.openHint": "See what changed in each version.",
+  "releaseNotes.page.back": "Back to settings",
   "releaseNotes.version.label": "Version {version}",
   "releaseNotes.version.current": "Your version",
   "releaseNotes.version.releasedOn": "Released {date}",

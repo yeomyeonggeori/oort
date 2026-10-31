@@ -3,6 +3,7 @@
   "releaseNotes.page.description": "버전마다 바뀐 점과 써 보는 방법을 모았어요.",
   "releaseNotes.page.empty": "아직 보여 줄 업데이트 소식이 없어요.",
   "releaseNotes.page.openHint": "버전별로 바뀐 점을 봐요.",
+  "releaseNotes.page.back": "설정으로 돌아가기",
   "releaseNotes.version.label": "버전 {version}",
   "releaseNotes.version.current": "지금 쓰는 버전",
   "releaseNotes.version.releasedOn": "{date} 공개",

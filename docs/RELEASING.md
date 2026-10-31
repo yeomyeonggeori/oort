@@ -38,6 +38,8 @@ SELF_HOST 문면 확인.**
 
 첫 공개 발행의 빌드 커밋은 `main=45a154d2` 다 (패킷 §G1).
 
+승격 때 통합자가 앱 안 「업데이트 소식」 파일을 쓴다: 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(ko·en, 항목 8개 이하)로 `packages/momo-core/src/features/releaseNotes/notes/v<버전>.ts` 한 파일에 적고 `notes/index.ts`에 더한다(#4937). 그 소식을 처음 담는 폰 빌드 번호와 데스크탑 버전(`phoneBuild`·`desktopFrom`, 다음 채널 빌드가 담으면 `0.1.0-next.N`도)도 그 파일에 적는다. 붙는 규칙은 `releaseNotes/model.ts` 머리말이고, 팀 채널 「업데이트 소식」 게시(#4793)는 같은 글을 쓴다. `CHANGELOG.md`는 개발 기록으로 그대로 둔다.
+
 ---
 
 ## 1.5 프리퍼블리시 체크리스트 (dispatch 전)

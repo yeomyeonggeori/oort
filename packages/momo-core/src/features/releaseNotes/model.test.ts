@@ -69,6 +69,13 @@ describe("어느 소식이 어느 앱 버전에 붙는가", () => {
     expect(noteForDesktopVersion([OLD], "0.1.0-next.12")).toBeNull();
     // 다른 이름의 사전 릴리스 채널은 서로 견주지 않는다.
     expect(noteForDesktopVersion(notes, "0.1.0-beta.99")).toBeNull();
+    // 채널이 다르면 숫자가 더 커도 붙지 않는다: 정식 앱은 다음 채널에만 적힌 소식을 아직 담지 않았고(0.1.5 > 0.1.0-next.20),
+    // 다음 채널 앱은 정식 번호에만 적힌 소식을 담지 않았다(1.0.0-next.1 > 0.1.41).
+    const nextOnly = fake("0.1.43", 3080, ["0.1.0-next.20"]);
+    expect(noteForDesktopVersion([nextOnly], "0.1.0")).toBeNull();
+    expect(noteForDesktopVersion([nextOnly], "0.1.5")).toBeNull();
+    expect(noteForDesktopVersion([nextOnly], "0.1.0-next.20")?.version).toBe("0.1.43");
+    expect(noteForDesktopVersion([OLD], "1.0.0-next.1")).toBeNull();
     // 앱 버전이 없다(브라우저 탭)·읽을 수 없다.
     for (const version of [null, undefined, "", "next", "1.0", "v0.1.41"]) {
       expect(noteForDesktopVersion(notes, version), String(version)).toBeNull();

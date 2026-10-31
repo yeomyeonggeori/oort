@@ -909,6 +909,12 @@ export const catalog: MessageCatalog = {
       "value": "Try it like this"
     }
   ],
+  "releaseNotes.page.back": [
+    {
+      "type": 0,
+      "value": "Back to settings"
+    }
+  ],
   "releaseNotes.page.description": [
     {
       "type": 0,

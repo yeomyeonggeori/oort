@@ -136,6 +136,7 @@ export const messageKeys = [
   "releaseNotes.detail.back",
   "releaseNotes.detail.changed",
   "releaseNotes.detail.tryIt",
+  "releaseNotes.page.back",
   "releaseNotes.page.description",
   "releaseNotes.page.empty",
   "releaseNotes.page.openHint",
@@ -330,6 +331,7 @@ export const argumentSpecs = {
   "releaseNotes.detail.back": {},
   "releaseNotes.detail.changed": {},
   "releaseNotes.detail.tryIt": {},
+  "releaseNotes.page.back": {},
   "releaseNotes.page.description": {},
   "releaseNotes.page.empty": {},
   "releaseNotes.page.openHint": {},
@@ -508,6 +510,7 @@ export interface MessageArgs {
   "releaseNotes.detail.back": Record<string, never>;
   "releaseNotes.detail.changed": Record<string, never>;
   "releaseNotes.detail.tryIt": Record<string, never>;
+  "releaseNotes.page.back": Record<string, never>;
   "releaseNotes.page.description": Record<string, never>;
   "releaseNotes.page.empty": Record<string, never>;
   "releaseNotes.page.openHint": Record<string, never>;

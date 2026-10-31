@@ -888,6 +888,12 @@ export const catalog: MessageCatalog = {
       "value": "이렇게 써 보세요"
     }
   ],
+  "releaseNotes.page.back": [
+    {
+      "type": 0,
+      "value": "설정으로 돌아가기"
+    }
+  ],
   "releaseNotes.page.description": [
     {
       "type": 0,
