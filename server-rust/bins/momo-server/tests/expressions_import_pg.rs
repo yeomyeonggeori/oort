@@ -192,6 +192,17 @@ fn multipart(file: &[u8]) -> Vec<u8> {
     b.extend_from_slice(b"\r\n--oort-import-test--\r\n");
     b
 }
+/// The direct upload's own body: the metadata part, then the file.
+fn multipart_with_metadata(metadata: &Value, file: &[u8]) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(
+        format!("--oort-import-test\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n").as_bytes(),
+    );
+    b.extend_from_slice(b"--oort-import-test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"image.png\"\r\nContent-Type: application/octet-stream\r\n\r\n");
+    b.extend_from_slice(file);
+    b.extend_from_slice(b"\r\n--oort-import-test--\r\n");
+    b
+}
 fn html(body: &str) -> Vec<u8> {
     format!("<!doctype html><html><head><title>{body}</title></head><body></body></html>")
         .into_bytes()
@@ -488,6 +499,22 @@ impl World {
             .post(format!("{}/expressions", self.prefix))
             .bearer_auth(&who.token)
             .json(choice)
+            .send()
+            .await
+            .unwrap()
+    }
+    /// `POST …/expressions/uploads`: a picture of the person's own, no link involved.
+    async fn upload_new(&self, who: &Person, name: &str, file: &[u8]) -> reqwest::Response {
+        let metadata =
+            json!({"name":name,"displayName":"신나는 춤","tags":["춤"],"subjectMemberId":null});
+        self.http
+            .post(format!("{}/expressions/uploads", self.prefix))
+            .bearer_auth(&who.token)
+            .header(
+                "content-type",
+                "multipart/form-data; boundary=oort-import-test",
+            )
+            .body(multipart_with_metadata(&metadata, file))
             .send()
             .await
             .unwrap()
@@ -1548,4 +1575,154 @@ async fn an_instance_with_outgoing_requests_off_never_fetches_an_import() {
         "https://files.example.test/a.gif"
     );
     assert!(w.mock.calls().is_empty(), "no outbound request was made");
+}
+
+/// #4900: both decoder slots taken is the SERVER's retryable state. A person's own upload and a
+/// replacement answer it the way the link import does (503 with `Retry-After`, nothing written),
+/// never as a 415 that says their picture is the wrong format. A picture that really is the wrong
+/// format is still a 415, so the 503 is the busy state and not "every refusal".
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_busy_decoder_is_a_503_for_an_upload_and_a_replacement_never_a_415() {
+    let w = boot().await;
+    // A draft to replace, made while the decoder is free.
+    let draft = w
+        .json(w.upload_new(&w.member, &unique("first"), &png()).await, 201)
+        .await;
+    let id = draft["draftId"].as_str().unwrap().to_string();
+    let drafts_before = w.drafts_of(&w.member).await;
+    assert_eq!(drafts_before, 1);
+
+    let slots = momo_expressions::media::decoder_slots();
+    let held = (
+        slots.clone().acquire_owned().await.unwrap(),
+        slots.clone().acquire_owned().await.unwrap(),
+    );
+    // A new upload.
+    let busy = w.upload_new(&w.member, &unique("busy"), &png()).await;
+    assert_eq!(busy.status(), 503, "an upload met a busy decoder");
+    assert_eq!(
+        busy.headers()
+            .get("retry-after")
+            .and_then(|value| value.to_str().ok()),
+        Some("2"),
+        "and is told when to come back"
+    );
+    let body: Value = busy.json().await.unwrap();
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("busy")),
+        "{body}"
+    );
+    assert_ne!(body["error"]["code"], "expression_media_invalid", "{body}");
+    assert_eq!(
+        w.drafts_of(&w.member).await,
+        drafts_before,
+        "nothing written"
+    );
+    // A replacement.
+    let busy = w.upload_over(&w.member, &id, &png()).await;
+    assert_eq!(busy.status(), 503, "a replacement met a busy decoder");
+    assert!(busy.headers().contains_key("retry-after"));
+    let unchanged = w.json(w.get_draft(&w.member, &id).await, 200).await;
+    assert_eq!(
+        unchanged["revision"], "1",
+        "a refused replacement changed nothing"
+    );
+    drop(held);
+
+    // The slots are free again: the same two requests go through.
+    w.json(w.upload_new(&w.member, &unique("again"), &png()).await, 201)
+        .await;
+    let replaced = w
+        .json(w.upload_over(&w.member, &id, &png()).await, 200)
+        .await;
+    assert_eq!(replaced["revision"], "2");
+    // And a picture that really is the wrong format is still a 415 with the decoder free: the
+    // 503 above is the busy state, not "every refusal".
+    let wrong = w.upload_new(&w.member, &unique("heic"), &heic()).await;
+    assert_eq!(
+        w.code_of(wrong, 415).await,
+        "expression_media_invalid",
+        "a real format problem is still a 415"
+    );
+}
+
+/// #4900: a video source is a card because of what it IS, decided from its first bytes, so it is a
+/// card even when every decoder slot is taken: not a "busy", for something no slot could make.
+/// The control in the same breath: a picture meeting the same two taken slots IS busy (503).
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_video_is_a_card_even_when_every_decoder_slot_is_taken() {
+    let w = boot().await;
+    let slots = momo_expressions::media::decoder_slots();
+    let held = (
+        slots.clone().acquire_owned().await.unwrap(),
+        slots.clone().acquire_owned().await.unwrap(),
+    );
+    // A link whose body is a video: the card, immediately, with the link kept.
+    for (what, bytes) in [("mp4", mp4()), ("webm", webm())] {
+        w.clear_drafts(&w.member).await;
+        w.mock.set(move |_| Reply::Body {
+            content_type: "video/mp4",
+            bytes: bytes.clone(),
+        });
+        let started = Instant::now();
+        let card = w
+            .json(
+                w.import(
+                    &w.member,
+                    &request(&unique("clip"), "https://files.example.test/clip"),
+                )
+                .await,
+                200,
+            )
+            .await;
+        assert_eq!(card["state"], "manual_upload_required", "{what}");
+        assert_eq!(card["code"], "video_processing_unavailable", "{what}");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "{what}: a card is not a wait for a slot: {:?}",
+            started.elapsed()
+        );
+    }
+    // The same video as a person's own upload.
+    w.clear_drafts(&w.member).await;
+    let card = w
+        .json(
+            w.upload_new(&w.member, &unique("own_clip"), &mp4()).await,
+            200,
+        )
+        .await;
+    assert_eq!(card["state"], "manual_upload_required");
+    assert_eq!(card["code"], "video_processing_unavailable");
+    assert_eq!(card["media"], Value::Null);
+    // The control: a picture meets the same two taken slots and IS told to come back.
+    let picture = w.upload_new(&w.member, &unique("ctrl_pic"), &png()).await;
+    assert_eq!(
+        picture.status(),
+        503,
+        "control: a picture meets the busy decoder"
+    );
+    drop(held);
+    // Replacing a draft's file with a video is not a card and not retryable: 415, as ever.
+    let draft = w
+        .json(
+            w.upload_new(&w.member, &unique("to_replace"), &png()).await,
+            201,
+        )
+        .await;
+    let id = draft["draftId"].as_str().unwrap().to_string();
+    let held = (
+        slots.clone().acquire_owned().await.unwrap(),
+        slots.clone().acquire_owned().await.unwrap(),
+    );
+    let refused = w.upload_over(&w.member, &id, &mp4()).await;
+    assert_eq!(
+        w.code_of(refused, 415).await,
+        "expression_media_invalid",
+        "a video cannot replace a picture, and waiting would not help it"
+    );
+    drop(held);
 }

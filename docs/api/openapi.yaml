@@ -273,6 +273,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expressions/import:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -587,6 +596,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expression-drafts/{draftId}:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -628,6 +646,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expression-drafts/{draftId}/image:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
