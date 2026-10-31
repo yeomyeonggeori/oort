@@ -1,4 +1,5 @@
-import type {Message, MessageAttachment, RosterMember} from '@momo/core/lib/api';
+import type {AgentRunProgress, Message, MessageAttachment, RosterMember} from '@momo/core/lib/api';
+import {RequestThinkingLine} from '../src/features/agents/RequestThinkingLine';
 import type {MessageNewEvent, RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import {parseTurnPlaceholderKey, turnPlaceholderKey, type AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {activityDetail, activityLines, MAX_ACTIVITY_LINES, UNKNOWN_AGENT_NAME, type AgentLivenessLookup} from '@momo/core/features/agents/turnCopy';
@@ -1040,6 +1041,81 @@ function Narrow({by, children}: {by: number | null; children: React.ReactNode}):
 }
 
 export function SteadySurface({which}: {which: string}): React.JSX.Element {
+  if (which.split('+')[0] === 'thought') return <ThoughtSteadyScene reserve={!which.split('+').includes('noreserve')} />;
+  return <TimelineSteadySurface which={which} />;
+}
+
+/** DM-STEADY-thought(+noreserve): 실부품의 등장·단계·승인·종결·사라짐을 재요.
+ * baseline은 빈 예약 칸이에요. noreserve는 그 칸만 걷어 같은 y 게이트가 붉어지는 대조군이에요.
+ * 실행·16 Pro/SE·두 스킴의 수치는 스택 검증에서 남겨요(이 칸은 시뮬레이터를 쓰지 않아요).
+ */
+function ThoughtSteadyScene({reserve}: {reserve: boolean}): React.JSX.Element {
+  const anchor = useRef<View | null>(null);
+  const [progress, setProgress] = useState<AgentRunProgress>();
+  const [report, setReport] = useState('생각 줄 이동을 재고 있어요');
+  const startedAtMs = useRef(Date.now()).current;
+  useEffect(() => {
+    let cancelled = false;
+    let sampling = true;
+    const frames: {t: number; y: number | null}[] = [];
+    const events: {t: number; what: string}[] = [];
+    const begin = Date.now();
+    const sample = () => {
+      if (!sampling || cancelled) return;
+      const frame = {t: Date.now() - begin, y: null as number | null};
+      frames.push(frame);
+      void rectOf(anchor.current).then(rect => { frame.y = rect?.y ?? null; });
+      requestAnimationFrame(sample);
+    };
+    const run: AgentRunProgress = {
+      id: 'request-thinking-measure', channelId: CHANNEL, agentMemberId: AGENT,
+      phase: 'running', status: 'running', leaseState: 'live', stepCount: 0, ahead: [],
+      createdAtMs: startedAtMs, updatedAtMs: startedAtMs, startedAtMs,
+    };
+    const phases: [string, AgentRunProgress | undefined][] = [
+      ['reserved', undefined],
+      ['thinking', {...run, latestStage: '프로필 읽는 중'}],
+      ['stage', {...run, latestStage: '소개 문구를 살펴보고 있어요'}],
+      ['approval', {...run, phase: 'awaiting_approval', status: 'awaiting_approval'}],
+      ['done', {...run, phase: 'succeeded', status: 'succeeded', finishedAtMs: startedAtMs + 60_000}],
+      ['hidden', undefined],
+    ];
+    void (async () => {
+      await wait(800);
+      if (cancelled) return;
+      requestAnimationFrame(sample);
+      for (const [what, next] of phases) {
+        if (cancelled) return;
+        events.push({t: Date.now() - begin, what});
+        setProgress(next);
+        await wait(800);
+      }
+      sampling = false;
+      await wait(100);
+      if (cancelled) return;
+      const summary = summarize(frames.map(frame => frame.y));
+      const pass = summary !== null && summary.range === 0 && summary.reversals === 0;
+      const result = {scenario: 'thought', reserve, pass, anchor: summary, events, trace: frames};
+      console.log(`STEADY_REQUEST_THINKING ${JSON.stringify(result)}`);
+      setReport(`${pass ? 'PASS' : 'FAIL'} · y 이동 ${summary?.range ?? '미측정'} · 반전 ${summary?.reversals ?? '미측정'}`);
+      const sink = Settings.get('momoGapSink');
+      if (typeof sink === 'string' && sink !== '') {
+        try { await fetch(`http://${sink}/steady`, {method: 'POST', body: JSON.stringify(result)}); } catch { /* 화면·로그에 증거가 남아요. */ }
+      }
+    })();
+    return () => { cancelled = true; sampling = false; };
+  }, [reserve, startedAtMs]);
+  return <Screen style={NO_TOP}>
+    <View style={thoughtStyles.list}>
+      <View ref={anchor} collapsable={false}><Text>요청한 메시지 · 소개를 바꿔 줘</Text></View>
+      {reserve || progress ? <RequestThinkingLine progress={progress} directory={AGENT_DIRECTORY} nowMs={startedAtMs} /> : null}
+    </View>
+    <Text accessibilityLiveRegion="polite" testID="thought-steady-result">{report}</Text>
+  </Screen>;
+}
+const thoughtStyles = StyleSheet.create({list: {flex: 1, justifyContent: 'flex-end'}});
+
+function TimelineSteadySurface({which}: {which: string}): React.JSX.Element {
   // `type+nobar` 처럼 `+` 뒤는 옵션이다(#4331).
   const [base = '', ...mods] = which.split('+');
   const inputScene = INPUT_SCENES.includes(base);

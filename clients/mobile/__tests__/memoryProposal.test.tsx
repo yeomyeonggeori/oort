@@ -14,9 +14,13 @@ import {
 import React from 'react';
 
 import {MessageRow} from '../src/features/conversation/MessageRow';
-import * as copy from '../src/features/memory/copy';
+import * as copyModule from '../src/features/memory/copy';
+import {cleanupMounts, control, createCopy, member, mount as mountWithQuery} from './testkit';
+
 import {MemoryProposalCard} from '../src/features/memory/MemoryProposalCard';
 import {proposalErrorOutcome, proposalView} from '../src/features/memory/model';
+
+const copy = createCopy(copyModule);
 
 // =============================================================================
 // #3171 MEM-M2 폰 — 「기억해 둘게요」 제안 카드의 상태·게스트 읽기 전용·자기 수락 경고·
@@ -59,10 +63,7 @@ const BOB = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
 const NOW = 1_700_000_100_000;
 
 function rosterMember(over: Partial<RosterMember> & {id: string}): RosterMember {
-  return {
-    workspaceId: WS, kind: 'human', status: 'active', displayName: '이름', handle: 'h',
-    channelCount: 0, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...over,
-  } as RosterMember;
+  return member({workspaceId: WS, handle: 'h', ...over});
 }
 function directoryOf(selfRole: RosterMember['role']) {
   return makeDirectory([
@@ -109,17 +110,16 @@ function mount(
       mutations: {retry: false, gcTime: Infinity},
     },
   });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryProposalCard
-        proposal={p}
-        workspaceId={WS}
-        directory={directoryOf(opts.role)}
-        role={opts.role}
-        nowMs={NOW}
-        onOpenEvidence={opts.onOpenEvidence}
-      />
-    </QueryClientProvider>,
+  return mountWithQuery(
+    <MemoryProposalCard
+      proposal={p}
+      workspaceId={WS}
+      directory={directoryOf(opts.role)}
+      role={opts.role}
+      nowMs={NOW}
+      onOpenEvidence={opts.onOpenEvidence}
+    />,
+    client,
   );
 }
 
@@ -130,7 +130,10 @@ beforeEach(() => {
   mockFetchMessages.mockReset();
   mockFetchMessages.mockResolvedValue({messages: [sourceMessage()]});
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanupMounts();
+  cleanup();
+});
 
 const decided = (status: 'accepted' | 'rejected'): MemoryProposal => ({
   ...proposal({status, evidence: [], evidenceMessageIds: []}),
@@ -171,16 +174,16 @@ describe('제안 카드 — 순수 판정(proposalView)', () => {
 describe('제안 카드 — 화면', () => {
   it('대기: 본문·종류·근거(작성자와 원문)와 두 버튼', async () => {
     mount(proposal());
-    expect(screen.getByText(copy.PROPOSAL_TITLE)).toBeTruthy();
-    expect(screen.getByText(copy.PROPOSAL_KIND_LABEL.decision)).toBeTruthy();
+    expect(screen.getByText(copy('PROPOSAL_TITLE'))).toBeTruthy();
+    expect(screen.getByText(copy('PROPOSAL_KIND_LABEL.decision'))).toBeTruthy();
     expect(screen.getByText('배포는 매주 금요일 오후에 해요.')).toBeTruthy();
     expect(screen.getByText('밥 · #41')).toBeTruthy();
-    expect(screen.getByText(copy.PROPOSAL_EVIDENCE_LOADING)).toBeTruthy();
+    expect(screen.getByText(copy('PROPOSAL_EVIDENCE_LOADING'))).toBeTruthy();
     await waitFor(() => expect(screen.getByText('이번 주부터 금요일 오후 배포로 가요.')).toBeTruthy());
     // 정상 읽기 길: seq 바로 앞을 기준으로 1건.
     expect(mockFetchMessages).toHaveBeenCalledWith(WS, CH, {after: 40, limit: 1});
-    expect(screen.getByTestId('memory-proposal-accept')).toBeTruthy();
-    expect(screen.getByTestId('memory-proposal-reject')).toBeTruthy();
+    expect(control('button', copy('PROPOSAL_ACCEPT_A11Y'))).toBeTruthy();
+    expect(control('button', copy('PROPOSAL_REJECT_A11Y'))).toBeTruthy();
     expect(screen.queryByTestId('memory-proposal-self-warning')).toBeNull();
   });
 
@@ -195,19 +198,19 @@ describe('제안 카드 — 화면', () => {
   it('원문을 못 읽거나 다른 메시지가 오면 줄은 남기고 원문 자리에 이유를 쓴다', async () => {
     mockFetchMessages.mockResolvedValue({messages: [sourceMessage({id: 'other'})]});
     mount(proposal());
-    await waitFor(() => expect(screen.getByText(copy.PROPOSAL_EVIDENCE_UNREADABLE)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(copy('PROPOSAL_EVIDENCE_UNREADABLE'))).toBeTruthy());
     expect(screen.getByText('밥 · #41')).toBeTruthy();
   });
 
   it('수락: 서버에 보내고 「기억해 뒀어요」와 데스크탑 안내로 바뀐다', async () => {
     mockAccept.mockResolvedValue(decided('accepted'));
     mount(proposal());
-    fireEvent.press(screen.getByTestId('memory-proposal-accept'));
+    fireEvent.press(control('button', copy('PROPOSAL_ACCEPT_A11Y')));
     await waitFor(() => expect(screen.getByTestId('memory-proposal-accepted')).toBeTruthy());
     expect(mockAccept).toHaveBeenCalledWith(WS, 'p-1');
     expect(mockReject).not.toHaveBeenCalled();
-    expect(screen.getByText(copy.PROPOSAL_ACCEPTED)).toBeTruthy();
-    expect(screen.getByText(copy.PROPOSAL_DESKTOP_HINT)).toBeTruthy();
+    expect(screen.getByText(copy('PROPOSAL_ACCEPTED'))).toBeTruthy();
+    expect(screen.getByText(copy('PROPOSAL_DESKTOP_HINT'))).toBeTruthy();
     expect(screen.queryByTestId('memory-proposal-accept')).toBeNull();
     expect(screen.queryByTestId('memory-proposal-evidence')).toBeNull();
   });
@@ -215,19 +218,19 @@ describe('제안 카드 — 화면', () => {
   it('거절: 「기억하지 않기로 했어요」', async () => {
     mockReject.mockResolvedValue(decided('rejected'));
     mount(proposal());
-    fireEvent.press(screen.getByTestId('memory-proposal-reject'));
+    fireEvent.press(control('button', copy('PROPOSAL_REJECT_A11Y')));
     await waitFor(() => expect(screen.getByTestId('memory-proposal-rejected')).toBeTruthy());
     expect(mockReject).toHaveBeenCalledWith(WS, 'p-1');
     expect(mockAccept).not.toHaveBeenCalled();
-    expect(screen.getByText(copy.PROPOSAL_REJECTED)).toBeTruthy();
-    expect(screen.queryByText(copy.PROPOSAL_DESKTOP_HINT)).toBeNull();
+    expect(screen.getByText(copy('PROPOSAL_REJECTED'))).toBeTruthy();
+    expect(screen.queryByText(copy('PROPOSAL_DESKTOP_HINT'))).toBeNull();
   });
 
   it('처리 중에는 버튼이 사라지고 요청은 한 번만 나간다', async () => {
     let finish: (value: MemoryProposal) => void = () => {};
     mockAccept.mockReturnValue(new Promise(resolve => { finish = resolve; }));
     mount(proposal());
-    fireEvent.press(screen.getByTestId('memory-proposal-accept'));
+    fireEvent.press(control('button', copy('PROPOSAL_ACCEPT_A11Y')));
     await waitFor(() => expect(screen.getByTestId('memory-proposal-busy')).toBeTruthy());
     expect(screen.queryByTestId('memory-proposal-accept')).toBeNull();
     expect(mockAccept).toHaveBeenCalledTimes(1);
@@ -238,25 +241,25 @@ describe('제안 카드 — 화면', () => {
   it('409(다른 곳에서 정해짐·기한·근거 변경)는 닫힘 문장이고 버튼이 없다', async () => {
     mockAccept.mockRejectedValue(new ApiError(409, 'decided'));
     mount(proposal());
-    fireEvent.press(screen.getByTestId('memory-proposal-accept'));
+    fireEvent.press(control('button', copy('PROPOSAL_ACCEPT_A11Y')));
     await waitFor(() => expect(screen.getByTestId('memory-proposal-stale')).toBeTruthy());
-    expect(screen.getByText(copy.PROPOSAL_STALE)).toBeTruthy();
+    expect(screen.getByText(copy('PROPOSAL_STALE'))).toBeTruthy();
     expect(screen.queryByTestId('memory-proposal-accept')).toBeNull();
     expect(screen.queryByTestId('memory-proposal-error')).toBeNull();
   });
 
   it('기한이 이미 지난 제안은 누르기 전에 닫힌 채로 나온다', () => {
     mount(proposal({expiresAtMs: NOW - 1}));
-    expect(screen.getByText(copy.PROPOSAL_EXPIRED)).toBeTruthy();
+    expect(screen.getByText(copy('PROPOSAL_EXPIRED'))).toBeTruthy();
     expect(screen.queryByTestId('memory-proposal-accept')).toBeNull();
   });
 
   it('403은 읽기 전용(권한 없음) 문장이다', async () => {
     mockReject.mockRejectedValue(new ApiError(403, 'no'));
     mount(proposal());
-    fireEvent.press(screen.getByTestId('memory-proposal-reject'));
+    fireEvent.press(control('button', copy('PROPOSAL_REJECT_A11Y')));
     await waitFor(() => expect(screen.getByTestId('memory-proposal-readonly')).toBeTruthy());
-    expect(screen.getByText(copy.PROPOSAL_FORBIDDEN)).toBeTruthy();
+    expect(screen.getByText(copy('PROPOSAL_FORBIDDEN'))).toBeTruthy();
     expect(screen.queryByTestId('memory-proposal-accept')).toBeNull();
   });
 
@@ -264,10 +267,10 @@ describe('제안 카드 — 화면', () => {
     mockAccept.mockRejectedValueOnce(new Error('offline'));
     mockAccept.mockResolvedValueOnce(decided('accepted'));
     mount(proposal());
-    fireEvent.press(screen.getByTestId('memory-proposal-accept'));
+    fireEvent.press(control('button', copy('PROPOSAL_ACCEPT_A11Y')));
     await waitFor(() => expect(screen.getByTestId('memory-proposal-error')).toBeTruthy());
-    expect(screen.getByText(copy.PROPOSAL_FAILED)).toBeTruthy();
-    fireEvent.press(screen.getByTestId('memory-proposal-accept'));
+    expect(screen.getByText(copy('PROPOSAL_FAILED'))).toBeTruthy();
+    fireEvent.press(control('button', copy('PROPOSAL_ACCEPT_A11Y')));
     await waitFor(() => expect(screen.getByTestId('memory-proposal-accepted')).toBeTruthy());
     expect(screen.queryByTestId('memory-proposal-error')).toBeNull();
   });
@@ -275,14 +278,14 @@ describe('제안 카드 — 화면', () => {
   it('내 질문에서 나온 제안은 경고를 보이지만 버튼은 살아 있다', () => {
     mount(proposal({callerIsRequester: true}));
     expect(screen.getByTestId('memory-proposal-self-warning')).toBeTruthy();
-    expect(screen.getByText(copy.PROPOSAL_SELF_WARNING)).toBeTruthy();
-    expect(screen.getByTestId('memory-proposal-accept')).toBeTruthy();
+    expect(screen.getByText(copy('PROPOSAL_SELF_WARNING'))).toBeTruthy();
+    expect(control('button', copy('PROPOSAL_ACCEPT_A11Y'))).toBeTruthy();
   });
 
   it('게스트는 읽기만 한다: 이유를 말하고 버튼도 요청도 없다', async () => {
     mount(proposal({callerIsRequester: true}), {role: 'guest'});
     expect(screen.getByTestId('memory-proposal-readonly')).toBeTruthy();
-    expect(screen.getByText(copy.PROPOSAL_GUEST)).toBeTruthy();
+    expect(screen.getByText(copy('PROPOSAL_GUEST'))).toBeTruthy();
     expect(screen.queryByTestId('memory-proposal-accept')).toBeNull();
     expect(screen.queryByTestId('memory-proposal-reject')).toBeNull();
     expect(screen.queryByTestId('memory-proposal-self-warning')).toBeNull();

@@ -7,6 +7,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { useRequestThreadLanding } from "@/features/timeline/useRequestThreadLanding";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Hash, Lock, MessageSquare, SquareTerminal } from "lucide-react";
 import {
@@ -78,7 +79,7 @@ import { toggleDock, useDockState } from "@/features/workbench/local/dockState";
 import { isDesktop } from "@/lib/tauri";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { usePersonalCall } from "@/features/chat/usePersonalCall";
-import { useWorkPanelTarget } from "@/features/agents/workLogStore";
+import { closeWorkPanel, useWorkPanelTarget } from "@/features/agents/workLogStore";
 import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
 import { HumanPresenceLabel } from "@/features/presence/HumanPresence";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
@@ -659,6 +660,7 @@ export function ChatShell() {
   const anchorWork = searchParams.get("work");
   const anchorWorkPanel = searchParams.get("work-panel");
   const anchorMsg = searchParams.get("msg");
+  const anchorThread = searchParams.get("thread");
   const anchorSeq = searchParams.get("seq");
   const anchorFirstMention = searchParams.get("firstMention");
 
@@ -748,7 +750,11 @@ export function ChatShell() {
    * 같은 이유로 같은 값을 든다.
    */
   const [urlAnchor, setUrlAnchor] = useState<UrlAnchor | null>(null);
+  const requestThreadMissing = useCallback(() => setAnchorMissed("unknown"), []);
+  const openRequestThread = useCallback((root: Message) => { closeWorkPanel(); setWorkOpen(false); setThread(root); }, []);
+  const requestThreadLanding = useRequestThreadLanding({ workspaceId, channelId, messages, onOpen: openRequestThread, onMissing: requestThreadMissing });
   useEffect(() => {
+    if (anchorThread !== null) return;
     if (anchorMsg === null && anchorSeq === null) return;
     if (channelId === null) return;
     setUrlAnchor((previous) =>
@@ -767,7 +773,7 @@ export function ChatShell() {
       },
       { replace: true }
     );
-  }, [anchorMsg, anchorSeq, channelId, setSearchParams]);
+  }, [anchorMsg, anchorSeq, anchorThread, channelId, setSearchParams]);
   // 방을 옮기면 앞선 주소가 가리키던 자리는 이 화면의 사실이 아니다.
   // 무조건 비우면 콜드 마운트에서 방금 담은 자기 채널 앵커도 죽는다.
   useEffect(() => {
@@ -1591,6 +1597,8 @@ export function ChatShell() {
           workspaceId={workspaceId}
           channelId={channelId}
           root={thread}
+          requestLanding={requestThreadLanding}
+          realtime={realtime}
           directory={directory}
           channels={channelsQuery.groups.channels}
           reactions={timeline.reactions}

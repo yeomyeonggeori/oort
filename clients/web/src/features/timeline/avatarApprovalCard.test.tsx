@@ -205,6 +205,11 @@ function byTestId(host: HTMLElement, id: string): HTMLElement[] {
   return [...host.querySelectorAll(`[data-testid="${id}"]`)] as HTMLElement[];
 }
 
+function openDetails(host: HTMLElement) {
+  const details = host.querySelector<HTMLDetailsElement>('[data-testid="request-bundle-details"]')!;
+  act(() => { details.open = true; details.dispatchEvent(new Event("toggle")); });
+}
+
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 function stubPreviewFetch(status: number): ReturnType<typeof vi.fn> {
@@ -235,7 +240,9 @@ describe("member.avatar.set 승인 카드 (#4394)", () => {
     expect(String(url).endsWith(PREVIEW_PATH)).toBe(true);
     expect(init.headers.get("Authorization")).toBe("Bearer access");
 
-    // 서버 행은 그대로 서고, 사진은 승인·거부 버튼 앞에 있다.
+    // 서버 행은 자세히 안에 있고, 사진은 승인·거부 버튼 앞에 있다.
+    expect(byTestId(host, "approval-action-row")).toHaveLength(0);
+    openDetails(host);
     expect(byTestId(host, "approval-action-row")).toHaveLength(3);
     const preview = byTestId(host, "approval-avatar-preview")[0] as HTMLElement;
     const approve = byTestId(host, "approval-approve")[0] as HTMLElement;
@@ -245,6 +252,7 @@ describe("member.avatar.set 승인 카드 (#4394)", () => {
   it("결정 권한 줄은 관리자가 아니라 사진 주인 본인을 말한다", async () => {
     stubPreviewFetch(200);
     const host = await mountCard(avatarProps());
+    openDetails(host);
     expect(byTestId(host, "approval-action-role")[0]?.textContent).toContain(
       "요청한 본인만 승인할 수 있어요."
     );
@@ -270,6 +278,7 @@ describe("member.avatar.set 승인 카드 (#4394)", () => {
     const host = await mountCard(props);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(byTestId(host, "approval-avatar-caption")[0]?.textContent).toContain("본인만");
+    openDetails(host);
     expect(byTestId(host, "approval-action-row")).toHaveLength(3);
   });
 
@@ -433,7 +442,10 @@ it("DM admission only offers decision controls to the server-named participant",
   const props = avatarProps({ title: "에이전트 들이기", expires_at_ms: Date.now() + 900_000,
     action: { id: "dm.agent.admit", rows: [], required_role: "dm_participant", target_member_id: ME } });
   const host = await mountCardOnly(props, AGENT);
-  expect(host.textContent).toContain("이 카드에 표시된 참여자의 허락을 기다려요.");
+  // 이 장면의 명부에는 결정할 사람이 없어 이름 없이 말한다(#4920). 이름이 풀리는 장면과 요청자·결정자·다른
+  // 참여자 시점은 RequestBundleCard.participant.test.tsx가 잰다.
+  expect(host.textContent).toContain("다른 참여자의 허락을 기다려요");
+  expect(host.textContent).not.toContain("표시된");
   expect(host.querySelector('[data-testid$="-approve"]')).toBeNull();
 });
 
@@ -445,6 +457,7 @@ describe("네 프로필 장면 (#4791)", () => {
       rows: [{ label: "바꾸기 전", value: "하늘" }, { label: "바꾼 뒤", value: "별하늘" }],
     } });
     const host = await mountCard(props);
+    openDetails(host);
     expect(host.textContent).toContain("바꾸기 전하늘");
     expect(host.textContent).toContain("바꾼 뒤별하늘");
     expect(byTestId(host, "approval-action-role")[0]?.textContent).toContain("요청한 본인만 승인할 수 있어요.");

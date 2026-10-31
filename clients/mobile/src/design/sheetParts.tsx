@@ -400,6 +400,7 @@ export function ChoiceRow({
   disabled = false,
   accessibilityLabel,
   accessibilityHint,
+  accessibilityLanguage,
   testID,
   checkTestID,
 }: {
@@ -417,6 +418,8 @@ export function ChoiceRow({
   disabled?: boolean;
   accessibilityLabel?: string;
   accessibilityHint?: string;
+  /** Autonyms retain their own spoken language regardless of the current UI language. */
+  accessibilityLanguage?: string;
   testID?: string;
   /** 고른 줄의 ✓ 에만 붙는다 — 고르지 않은 줄에는 ✓ 가 그려지지 않는다. */
   checkTestID?: string;
@@ -428,6 +431,7 @@ export function ChoiceRow({
       accessibilityRole="radio"
       accessibilityLabel={accessibilityLabel ?? title}
       accessibilityHint={accessibilityHint}
+      accessibilityLanguage={accessibilityLanguage}
       // `false` 를 넘기지 않는다 — Pressable 은 그것도 접근성 상태에 섞는다(옛 `GroupRow` 와 같은 관용구).
       accessibilityState={disabled ? {selected, disabled: true} : {selected}}
       disabled={disabled ? true : undefined}

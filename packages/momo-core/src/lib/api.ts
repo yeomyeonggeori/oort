@@ -31,6 +31,7 @@ import {
 import { apiBase, coreSession, type RefreshDeviceProof } from "../runtime/host";
 import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
+import { tokenExpiresAtMs } from "./tokenLifetime";
 import {
   isUnfurlImagePath,
   messageUnfurlFromWire,
@@ -1737,6 +1738,18 @@ export async function fetchRealtimeToken(): Promise<string> {
     method: "POST",
   });
   return res.token;
+}
+
+/** A foreground handshake must not first spend a round trip on an expired JWT.
+ * Rotation uses the same proof, single flight and session ownership guards as
+ * a 401 recovery. Unknown expiry is refreshed conservatively, never trusted.
+ */
+export async function fetchFreshRealtimeToken(nowMs = Date.now()): Promise<string> {
+  const expiresAt = tokenExpiresAtMs(coreSession().getAccessToken());
+  if (expiresAt === null || expiresAt - nowMs <= 120_000) {
+    if (!(await rotateAfterUnauthorized())) throw new ApiError(401, "Session expired");
+  }
+  return fetchRealtimeToken();
 }
 
 export async function listChannels(workspaceId: string): Promise<Channel[]> {

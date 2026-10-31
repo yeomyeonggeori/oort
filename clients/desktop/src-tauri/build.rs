@@ -27,6 +27,9 @@ fn main() {
 
 /// Every `#[tauri::command]` registered in `src/lib.rs`, desktop and mobile.
 const APP_COMMANDS: &[&str] = &[
+    "locale_preference_read",
+    "locale_preference_write",
+    "locale_menu_set",
     "deep_link_take_pending",
     "discovery_start",
     "discovery_stop",

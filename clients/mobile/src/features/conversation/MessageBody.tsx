@@ -26,6 +26,9 @@ import {
   StyleSheet,
   Text,
   View,
+  type LayoutChangeEvent,
+  type NativeSyntheticEvent,
+  type TextLayoutEventData,
 } from 'react-native';
 import {font, line, radius, space, type Palette} from '../../design/tokens';
 import {useBubbleChoice, usePalette, useStyles} from '../../design/theme';
@@ -223,6 +226,58 @@ const NO_MENTIONS: MentionRendering = {
 /** 말풍선 안 인라인 코드 칩의 채움 — 말풍선 글자색 위 알파 18%(0x2e). */
 const INLINE_CODE_ALPHA_HEX = '2e';
 const BubbleInk = React.createContext<{fg: string; mine: boolean} | null>(null);
+
+// =============================================================================
+// 측정 seam (#4894) — 말풍선·문단이 **네이티브에서 실제로 받은 틀**을 하네스가 읽는 문.
+//
+// 「긴 글이 말풍선에서 잘린다」는 jest 로 못 잰다: jest 에는 Yoga 도 TextKit 도 없어 폭이 전부 0 이다.
+// 재는 곳은 시뮬레이터이고, 잴 것은 세 숫자다 — 말풍선 틀, 그 안 글 상자 틀, 글 상자가 실제로 그린 줄들
+// (`onTextLayout`). 하네스(`measure/bubbleClip.tsx`)가 이 Provider 로 함수를 꽂을 때만 보고한다.
+// 앱에서는 값이 `null` 이라 핸들러가 **아예 붙지 않는다**(`probe === null` → 상수 빈 객체).
+// =============================================================================
+export interface ProbeFrame {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+/**
+ * `key` 는 어느 말풍선·어느 문단인지다: 말풍선 `"<n>"`(코드 블록 앞뒤로 갈리면 n 이 는다), 그 안 문단 `"<n>.<블록>"`,
+ * 목록 항목 `"<n>.<블록>.<항목>"`. 한 문단의 `text`(틀)와 `lines`(그린 줄)는 같은 key 로 짝지어 읽는다.
+ */
+export type BubbleProbeEvent =
+  | {kind: 'bubble'; key: string; frame: ProbeFrame}
+  | {kind: 'text'; key: string; frame: ProbeFrame}
+  | {kind: 'lines'; key: string; lines: (ProbeFrame & {text: string})[]};
+/** 두 번째 인자는 이 말풍선이 담은 **메시지 본문**이다 — 목록 한가운데서 한 Provider 가 여러 행의 보고를 받을 때(`dmConversation.tsx`) 행을 가리는 표지다. */
+export type BubbleProbe = (event: BubbleProbeEvent, body: string) => void;
+export const BubbleProbeContext = React.createContext<BubbleProbe | null>(null);
+
+const NO_PROBE_PROPS = {} as const;
+
+/** 문단 `Text` 에 펼치는 핸들러. 하네스가 없으면 상수 빈 객체라 앱의 Text 에는 아무것도 붙지 않는다. */
+function paragraphProbeProps(
+  probe: BubbleProbe | null,
+  key: string,
+  body: string,
+): {
+  onLayout?: (event: LayoutChangeEvent) => void;
+  onTextLayout?: (event: NativeSyntheticEvent<TextLayoutEventData>) => void;
+} {
+  if (probe === null) return NO_PROBE_PROPS;
+  return {
+    onLayout: event => probe({kind: 'text', key, frame: event.nativeEvent.layout}, body),
+    onTextLayout: event =>
+      probe(
+        {
+          kind: 'lines',
+          key,
+          lines: event.nativeEvent.lines.map(({x, y, width, height, text}) => ({x, y, width, height, text})),
+        },
+        body,
+      ),
+  };
+}
 
 function InlineNodes({
   nodes,
@@ -428,14 +483,20 @@ function BlockNode({
   muted,
   selectable,
   mentions,
+  probeKey,
+  probeBody,
 }: {
   block: Block;
   muted: boolean;
   selectable: boolean;
   mentions: MentionRendering;
+  /** 측정 seam 의 문단 이름(`BubbleProbeEvent.key`)과 메시지 본문. 하네스가 없으면 쓰이지 않는다. */
+  probeKey: string;
+  probeBody: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const ink = useContext(BubbleInk);
+  const probe = useContext(BubbleProbeContext);
   const literal = useExpressionLiteral();
   // 말풍선 안 글자는 말풍선 잉크다 — `muted` 보다 뒤에 놓여 이긴다(보내는 중 흐림은 말풍선이 진다).
   const inkStyle = ink ? {color: ink.fg} : null;
@@ -516,7 +577,8 @@ function BlockNode({
             )}
             <Text
               selectable={selectable}
-              style={[styles.listText, muted && styles.muted, inkStyle]}>
+              style={[styles.listText, muted && styles.muted, inkStyle]}
+              {...paragraphProbeProps(probe, `${probeKey}.${index}`, probeBody)}>
               <InlineNodes nodes={item} mentions={mentions} />
             </Text>
           </View>
@@ -528,7 +590,8 @@ function BlockNode({
   return (
     <Text
       selectable={selectable}
-      style={[styles.paragraph, muted && styles.muted, inkStyle]}>
+      style={[styles.paragraph, muted && styles.muted, inkStyle]}
+      {...paragraphProbeProps(probe, probeKey, probeBody)}>
       {block.lines.map((line, index) => (
         <React.Fragment key={index}>
           {index > 0 ? '\n' : null}
@@ -599,6 +662,7 @@ export function MessageBody({
     [expressionBody.markdown],
   );
   const palette = usePalette();
+  const probe = useContext(BubbleProbeContext);
   const bubbleChoice = useBubbleChoice();
   // 개인 덮어쓰기(#4383): 줄 보기(`layout: 'row'`)·색·모서리. 대비가 모자란 색은 `bubbleFor` 가 버린다.
   const tokens = useMemo(() => bubbleFor(palette, bubbleChoice), [palette, bubbleChoice]);
@@ -614,6 +678,11 @@ export function MessageBody({
       <View
         key={key}
         testID="message-bubble"
+        onLayout={
+          probe === null
+            ? undefined
+            : event => probe({kind: 'bubble', key: String(key ?? 0), frame: event.nativeEvent.layout}, body)
+        }
         style={[
           styles.bubble,
           {
@@ -661,7 +730,8 @@ export function MessageBody({
         {wrapProse(
           <Text
             style={[styles.paragraph, muted && styles.muted, ink && {color: ink.fg}]}
-            selectable={selectable}>
+            selectable={selectable}
+            {...paragraphProbeProps(probe, '0.0', body)}>
             <ExpressionText text={expressionBody.markdown} />
           </Text>,
         )}
@@ -681,6 +751,8 @@ export function MessageBody({
             muted={muted}
             selectable={selectable}
             mentions={mentions}
+            probeKey={`0.${index}`}
+            probeBody={body}
           />
         ))}
       </View>
@@ -706,6 +778,9 @@ export function MessageBody({
         muted={muted}
         selectable={selectable}
         mentions={mentions}
+        // 이 블록이 앉을 말풍선의 이름: 코드 블록이나 앞 말풍선이 `nodes` 에 이미 들어간 만큼이다.
+        probeKey={`${nodes.length}.${index}`}
+        probeBody={body}
       />
     );
     if (block.kind === 'code') {
@@ -843,5 +918,19 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   listBulletCell: {width: 10, height: 22, alignItems: 'center', justifyContent: 'center'},
   listBulletDot: {width: 4, height: 4, borderRadius: 2, backgroundColor: color.textMuted},
   listBulletDotMuted: {backgroundColor: color.textFaint},
-  listText: {flex: 1, fontSize: font.body, color: color.text, lineHeight: line.body},
+  // ===========================================================================
+  // 목록 글은 `flex: 1` 이 아니라 `flexShrink: 1` 이다 (#4894).
+  //
+  // 말풍선은 **내용 폭**(`alignSelf: 'flex-start'` + `maxWidth: '100%'`)이고, 그 안쪽 폭은 자식들의 자연 폭 중 가장 넓은
+  // 것이다. `flex: 1` 은 `flexBasis: 0` 이라 자연 폭에 **0 을 낸다** — 목록 글은 말풍선 폭에 아무 몫도 못 하고, 폭은
+  // 다른 형제(앞 문단)나 마커 칸만으로 정해졌다. 시뮬레이터에서 잰 결과(수리 전, 폭 375~430 모두):
+  //
+  //   - 목록만 있는 글: 말풍선 폭 38pt(= 안쪽 여백 24 + 불릿 칸 14), 글 상자 폭 0pt — 글이 **아예 안 보인다**.
+  //   - 문단 + 목록: 말풍선이 문단 폭(115pt)으로 접히고, 목록 글은 그 77pt 에서 줄바꿈하는데 말풍선 높이(170pt)는
+  //     넓은 폭으로 쟀던 첫 판의 값이라, 글 높이 합 345pt 가 **말풍선 아래로 넘쳐 다음 행을 덮는다**.
+  //
+  // `flexShrink: 1` 은 자연 폭(`AtMost` 로 잰 줄바꿈 폭)을 몫으로 내고, 모자랄 때만 줄어든다. 줄어든 폭에서의 높이는
+  // 가로줄의 교차축이라 마지막 판에서 다시 재어지므로, 말풍선 폭과 글 높이가 같은 폭을 본다.
+  // ===========================================================================
+  listText: {flexShrink: 1, fontSize: font.body, color: color.text, lineHeight: line.body},
 });

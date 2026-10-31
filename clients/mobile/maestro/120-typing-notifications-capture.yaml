@@ -1,0 +1,32 @@
+appId: app.momo.ios
+name: 120-typing-notifications-capture
+---
+# #4797 스택 검증용. 실행하지 않은 흐름이에요.
+# SCENE=typing: planner가 대화를 열고 다른 사람 1명/3명의 작성 신호를 유지해요.
+# SCENE=notifications: planner가 알림이 켜진 대화의 정보 페이지를 열어요.
+# 각 장면을 밝음/어두움, 큰 글자, 동작 줄이기로 다시 확인해요.
+# 예: maestro test -e SCENE=typing -e OUT=typing-one-light <이 파일>
+- runFlow:
+    when:
+      true: ${SCENE == 'typing'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "composer-typing"
+          timeout: 10000
+      - assertVisible: ".*작성 중.*"
+      - takeScreenshot: ${OUT}
+- runFlow:
+    when:
+      true: ${SCENE == 'notifications'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "conversation-info-mute-toggle"
+          timeout: 10000
+      - assertVisible: "알림 켜짐"
+      - takeScreenshot: ${OUT}-on
+      - tapOn:
+          id: "conversation-info-mute-toggle"
+      - assertVisible: "알림 꺼짐"
+      - takeScreenshot: ${OUT}-off

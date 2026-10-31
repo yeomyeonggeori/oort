@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, usePresence, useReducedMotion } from "motion/react";
 import { X } from "lucide-react";
 import { fetchThreadReplies, type Channel, type Message } from "@momo/core/lib/api";
@@ -16,6 +16,15 @@ import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 import { overlayOwnsEscape } from "@/design/ui/escapeLayer";
 import { PANEL_MOTION } from "@/design/motion";
 import { cn } from "@/design/lib/cn";
+import { shouldFoldBundleLine } from "@momo/core/features/timeline/requestBundle";
+import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
+import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
+import { runStatusForMessage } from "./runStatus";
+import type { RequestThreadLanding } from "./useRequestThreadLanding";
+import { watchForMessageId } from "@/features/inbox/anchor";
+import type { RealtimeHandle } from "@/lib/realtime";
+
+const NO_REPLIES: Message[] = [];
 
 // =============================================================================
 // Thread panel (R-1 §3 "스레드 진입 자리", P12: replies live outside the channel
@@ -49,6 +58,8 @@ type ThreadPanelProps = {
   onClose: () => void;
   isPlayEntrance?: (messageId: string) => boolean;
   onEntranceConsumed?: (messageId: string) => void;
+  requestLanding?: RequestThreadLanding | null;
+  realtime?: RealtimeHandle | null;
 };
 
 export function ThreadPanel(props: ThreadPanelProps) {
@@ -102,6 +113,8 @@ function ThreadPanelFrame({
   onClose: closePanel,
   isPlayEntrance,
   onEntranceConsumed,
+  requestLanding,
+  realtime,
 }: ThreadPanelProps & { root: Message }) {
   const [isPresent, safeToRemove] = usePresence();
   const reduceMotion = useReducedMotion();
@@ -137,12 +150,81 @@ function ThreadPanelFrame({
       window.clearTimeout(fallback);
     };
   }, [isPresent, reduceMotion, safeToRemove]);
+  const queryClient = useQueryClient();
+  const queryKey = useMemo(() => ["thread", workspaceId, channelId, root.id], [workspaceId, channelId, root.id]);
   const query = useQuery({
-    queryKey: ["thread", workspaceId, channelId, root.id],
-    queryFn: () => fetchThreadReplies(workspaceId, channelId, root.id),
+    queryKey,
+    queryFn: async () => {
+      let page = await fetchThreadReplies(workspaceId, channelId, root.id);
+      if (!requestLanding || requestLanding.rootId.toLowerCase() !== root.id.toLowerCase()) return page;
+      const messages = [...page.messages];
+      const cursors = new Set<number>();
+      for (let index = 1; index < 8 && !messages.some((message) => message.id.toLowerCase() === requestLanding.messageId.toLowerCase()); index += 1) {
+        if (page.nextCursor === undefined || cursors.has(page.nextCursor)) break;
+        cursors.add(page.nextCursor);
+        page = await fetchThreadReplies(workspaceId, channelId, root.id, page.nextCursor, 200);
+        for (const message of page.messages) if (!messages.some((known) => known.id === message.id)) messages.push(message);
+      }
+      return { ...page, messages };
+    },
   });
+  const refetchReplies = query.refetch;
+  const refreshQueue = useMemo(() => ({ key: queryKey, active: true, running: false, dirty: false }), [queryKey]);
+  useEffect(() => { refreshQueue.active = true; return () => { refreshQueue.active = false; }; }, [refreshQueue]);
+  const refreshReplies = useCallback(() => {
+    refreshQueue.dirty = true;
+    if (refreshQueue.running) return;
+    refreshQueue.running = true;
+    void (async () => {
+      try {
+        // 진행 중 GET의 옛 snapshot에 뒤늦은 프레임이 흡수되지 않게 해요.
+        if (queryClient.getQueryState(refreshQueue.key)?.fetchStatus === "fetching") await refetchReplies({ cancelRefetch: false });
+        while (refreshQueue.active && refreshQueue.dirty) {
+          refreshQueue.dirty = false;
+          await refetchReplies({ cancelRefetch: false });
+        }
+      } finally { refreshQueue.running = false; }
+    })();
+  }, [refreshQueue, queryClient, refetchReplies]);
+  const channelRuns = useChannelRuns(actions ? channelId : null);
+  const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
+  const runStatusFor = (message: Message) => runStatusForMessage({ message, directory, myMemberId: actions?.myMemberId, runsByMessage });
 
-  const replies = query.data?.messages ?? [];
+  const allReplies = query.data?.messages ?? NO_REPLIES;
+  const replyIds = useRef(new Set<string>());
+  replyIds.current = new Set(allReplies.map((message) => message.id.toLowerCase()));
+  const replies = allReplies.filter((message) => !shouldFoldBundleLine(message, allReplies));
+  const [landingMissed, setLandingMissed] = useState(false);
+  const landedTarget = useRef<number | null>(null);
+  useEffect(() => {
+    if (!requestLanding || requestLanding.rootId.toLowerCase() !== root.id.toLowerCase()) return;
+    if (landedTarget.current === requestLanding.token) return;
+    setLandingMissed(false);
+    refreshReplies();
+  }, [requestLanding, root.id, refreshReplies]);
+  useEffect(() => {
+    if (!realtime) return;
+    const refresh = refreshReplies;
+    return realtime.subscribeChannel(workspaceId, channelId, {
+      onSubscribed: refresh,
+      onMessage: (event) => {
+        if (event.payload.root_id?.toLowerCase() === root.id.toLowerCase() || replyIds.current.has(event.payload.id.toLowerCase())) refresh();
+      },
+      onMessageDeleted: refresh,
+    });
+  }, [realtime, workspaceId, channelId, root.id, refreshReplies]);
+  useEffect(() => {
+    if (!requestLanding || requestLanding.rootId.toLowerCase() !== root.id.toLowerCase()) return;
+    if (landedTarget.current === requestLanding.token) return;
+    if (!allReplies.some((message) => message.id.toLowerCase() === requestLanding.messageId.toLowerCase())) return;
+    const row = Array.from(asideRef.current?.querySelectorAll<HTMLElement>("[data-message-id]") ?? []).find((node) => node.dataset.messageId?.toLowerCase() === requestLanding.messageId.toLowerCase());
+    return watchForMessageId(requestLanding.messageId, {
+      nudge: () => row?.scrollIntoView({ block: "center" }),
+      onLand: () => { landedTarget.current = requestLanding.token; },
+      onExpire: () => setLandingMissed(true),
+    });
+  }, [requestLanding, root.id, allReplies]);
+  const targetMissing = requestLanding?.rootId.toLowerCase() === root.id.toLowerCase() && !query.isLoading && !query.isFetching && !query.error && !allReplies.some((message) => message.id.toLowerCase() === requestLanding.messageId.toLowerCase());
 
   /** Per-row actions, with this row's chips and pin state folded in. */
   const rowActions = (message: Message): MessageRowActions | undefined =>
@@ -235,6 +317,8 @@ function ThreadPanelFrame({
           actions={rowActions(root)}
           onOpenWorkSession={onOpenWorkSession}
           showRollup={false}
+          runStatus={runStatusFor(root)}
+          showThought
           playEntrance={isPlayEntrance?.(root.id) ?? false}
           onEntranceConsumed={
             onEntranceConsumed
@@ -246,6 +330,7 @@ function ThreadPanelFrame({
             갈리고, 빈 상태일 때만 그 상태 자체의 조용한 점선 상자가 영역을 말한다.
             이 여백은 루트 툴바가 아래로 뒤집힐 때 쓰는 26px 띠도 함께 비워 둔다. */}
         <div className="pt-8" data-testid="thread-replies">
+          {(landingMissed || targetMissing) && <InlineBanner message="알림의 카드를 찾지 못했어요. 답글을 다시 불러와 주세요." actionLabel="다시 불러오기" onAction={() => void query.refetch()} testId="thread-landing-missing" />}
           <Skeleton ready={!query.isLoading} rows={3} className="p-4">
             {query.error && (
               <InlineBanner
@@ -275,6 +360,8 @@ function ThreadPanelFrame({
                 // 답글에 `thread` 가 실려 오는 날에도 이 화면이 답글 밑에 답글이 있다고
                 // 말하지 않게 하기 위해서다.
                 showRollup={false}
+                runStatus={runStatusFor(reply)}
+                showThought
                 playEntrance={isPlayEntrance?.(reply.id) ?? false}
                 onEntranceConsumed={
                   onEntranceConsumed

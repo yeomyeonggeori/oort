@@ -13,6 +13,7 @@ import {
   PRESS_CLASS,
 } from "./motion";
 import { buttonVariants } from "./ui/button";
+import { browserLaunchBlocked } from "@/testing/agentSandbox";
 
 /**
  * ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10 — 토큰·상수·눌림 단일점·강제 기제.
@@ -52,6 +53,8 @@ const BUTTON_VARIANTS = [
  * package or missing executable → skip (never a silent green: warn + skipIf).
  */
 function detectChromium(): { ok: true } | { ok: false; path: string } {
+  const blocked = browserLaunchBlocked();
+  if (blocked !== null) return { ok: false, path: blocked };
   try {
     const { chromium } = require_("playwright") as typeof import("playwright");
     const exe = chromium.executablePath();

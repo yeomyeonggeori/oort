@@ -1,4 +1,4 @@
-import { Check, CircleAlert, CircleDot, CircleX, Clock, Eye, Hand, ShieldQuestion } from "lucide-react";
+import { Ban, Check, CircleAlert, CircleDot, CircleX, Clock, Eye, Hand, ShieldQuestion, type LucideIcon } from "lucide-react";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 import { nextUncollectedDeadlineMs } from "@momo/core/features/agents/runException";
 import { UNKNOWN_AGENT_NAME } from "@momo/core/features/agents/turnCopy";
@@ -15,6 +15,7 @@ import { CHIP_CLASS } from "@/features/common/chip";
 import { TRIGGER_CHIP_CLASS, TRIGGER_CHIP_TONE_CLASS } from "./triggerChipClasses";
 import { memberNameParts, type Directory } from "@/features/workspace/useWorkspace";
 import { useRerenderAt } from "./useRerenderAt";
+import { runBundleSnapshot } from "@momo/core/features/timeline/requestBundle";
 
 // =============================================================================
 // 에이전트를 부른 메시지의 상태 칩 (#4619, #4577 권장 B).
@@ -62,6 +63,7 @@ function Face({ word, mark }: { word: string; mark: TriggerChipMark }) {
       {mark === "alert" && <CircleAlert aria-hidden="true" className="size-3" />}
       {mark === "clock" && <Clock aria-hidden="true" className="size-3" />}
       {mark === "cross" && <CircleX aria-hidden="true" className="size-3" />}
+      {mark === "ban" && <Ban aria-hidden="true" className="size-3" />}
       {word}
     </span>
   );
@@ -74,28 +76,23 @@ function Face({ word, mark }: { word: string; mark: TriggerChipMark }) {
  * 모두 lucide다(§2.8: 손으로 그린 `<svg>`는 예외 목록 밖이면 `iconSystem.test`가 붉다). 상태 원 셋(작업 중·주의·오류)은
  * 같은 원 계열이라 한 가족으로 읽힌다.
  */
+const MARK_GLYPH: Record<TriggerChipKind, LucideIcon> = {
+  received: Eye,
+  claimed: Hand,
+  // SVG 대체 요소가 다른 글리프와 같은 기준선·줄 높이를 지켜요.
+  working: CircleDot,
+  approval: ShieldQuestion,
+  answered: Check,
+  uncollected: CircleAlert,
+  timed_out: Clock,
+  failed: CircleX,
+  declined: Ban,
+  expired: Clock,
+};
+
 function MarkGlyph({ kind }: { kind: TriggerChipKind }) {
-  const icon = "size-3";
-  switch (kind) {
-    case "received":
-      return <Eye aria-hidden="true" className={icon} />;
-    case "claimed":
-      return <Hand aria-hidden="true" className={icon} />;
-    case "working":
-      // 점도 **SVG 글리프**여야 한다: 다른 글리프와 같은 대체 요소여야 줄 상자의 높이(기준선)가 같다(`<span>` 점은 기준선이
-      // 달라 칩이 2px 낮아졌다, 실제 엔진에서 잰 값). 손으로 그린 `<svg>`는 아이콘 경계(ADR-0172)가 막으므로 lucide의 원 안의 점이다.
-      return <CircleDot aria-hidden="true" className={icon} />;
-    case "approval":
-      return <ShieldQuestion aria-hidden="true" className={icon} />;
-    case "answered":
-      return <Check aria-hidden="true" className={icon} />;
-    case "uncollected":
-      return <CircleAlert aria-hidden="true" className={icon} />;
-    case "timed_out":
-      return <Clock aria-hidden="true" className={icon} />;
-    case "failed":
-      return <CircleX aria-hidden="true" className={icon} />;
-  }
+  const Glyph = MARK_GLYPH[kind];
+  return <Glyph aria-hidden="true" className="size-3" />;
 }
 
 /**
@@ -141,11 +138,13 @@ export function TriggerChipView({
   onJump,
   variant = "word",
   reserve = true,
+  onOpenBundle,
 }: {
   chip: TriggerChip;
   onJump?: (answer: AnswerRef) => void;
   variant?: "word" | "mark";
   reserve?: boolean;
+  onOpenBundle?: (opener: HTMLButtonElement) => void;
 }) {
   const className = cn(CHIP_CLASS, TRIGGER_CHIP_CLASS, TRIGGER_CHIP_TONE_CLASS[chip.tone]);
   const current = `${chip.word}|${chip.mark}`;
@@ -174,15 +173,16 @@ export function TriggerChipView({
       </>
     );
   const answer = chip.answer;
-  if (variant === "word" && answer !== undefined && onJump !== undefined) {
+  const opensBundle = onOpenBundle !== undefined;
+  if (variant === "word" && (opensBundle || (answer !== undefined && onJump !== undefined))) {
     return (
       <button
         type="button"
         data-testid="trigger-chip"
         data-kind={chip.kind}
         data-row-action=""
-        aria-label={`${chip.label} 답 메시지로 이동`}
-        onClick={() => onJump(answer)}
+        aria-label={opensBundle ? `${chip.label} ${chip.kind === "approval" ? "결정 보기" : "요청 스레드 열기"}` : `${chip.label} 답 메시지로 이동`}
+        onClick={(event) => opensBundle ? onOpenBundle(event.currentTarget) : onJump?.(answer!)}
         // 누를 수 있는 면적만 4px씩 키운다(`after`): 20px 칩이 머리 줄에 끼어 있어 칩 자체를 키우면 행 높이가 변한다.
         // 28px로 WCAG 2.5.8의 24 바닥(웹 인라인 컨트롤)을 지키고, 그려지는 칩과 줄 높이는 그대로다.
         className={cn(className, "relative after:absolute after:-inset-1", "press hover:opacity-80 focus-visible:focus-ring")}
@@ -231,6 +231,7 @@ export function MessageTriggerChip({
   directory,
   runAnswers,
   onJump,
+  onOpenBundle,
 }: {
   runs: readonly AgentRunProgress[];
   directory: Directory;
@@ -238,12 +239,17 @@ export function MessageTriggerChip({
   runAnswers?: ReadonlyMap<string, AnswerRef>;
   /** 「답함」을 눌렀을 때 답 메시지로 간다(`onJumpToMessage`). */
   onJump?: (messageId: string, seq: number | null) => void;
+  onOpenBundle?: (opener: HTMLButtonElement, runIds: readonly string[]) => void;
 }) {
   const chip = useTriggerChip(runs, directory, runAnswers);
   if (chip === null) return null;
+  const selectedRun = runs.find((run) => chip.runIds.includes(run.id));
+  const bundle = selectedRun ? runBundleSnapshot(selectedRun) : undefined;
+  const namedChip = bundle?.intent && selectedRun ? { ...chip, label: `${memberNameParts(directory, selectedRun.agentMemberId, UNKNOWN_AGENT_NAME).name} ${chip.word}: ${bundle.intent}` } : chip;
   return (
     <TriggerChipView
-      chip={chip}
+      chip={namedChip}
+      {...((bundle || chip.kind === "approval") && onOpenBundle ? { onOpenBundle: (opener: HTMLButtonElement) => onOpenBundle(opener, chip.runIds) } : {})}
       {...(onJump !== undefined
         ? { onJump: (answer: AnswerRef) => onJump(answer.id, answer.seq) }
         : {})}

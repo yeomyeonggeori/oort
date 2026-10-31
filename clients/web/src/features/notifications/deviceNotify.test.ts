@@ -82,6 +82,29 @@ afterEach(() => {
 });
 
 describe("notifyThisDevice", () => {
+  it("승인 알림은 에이전트 이름과 서버 질문을 읽고 영어·구 서버 본문은 카드 제목으로 폴백한다", () => {
+    const event = approvalEvent();
+    event.payload.props = { ...event.payload.props, title: "소개 바꾸기" };
+    event.payload.body = "소개를 바꿔도 될까요? · 「알림 시험」";
+    const decision = notifyThisDevice(event, context());
+    expect(decision.show).toBe(true);
+    if (decision.show) {
+      expect(decision.notification.title).toBe(context().actorFor(AGENT));
+      expect(decision.notification.body).toBe(event.payload.body);
+    }
+    for (const body of ["Approval required: shell?", "승인 요청"]) {
+      event.payload.body = body;
+      const fallback = notifyThisDevice(event, context());
+      if (!fallback.show) throw new Error("기존 카드 폴백이 사라졌어요");
+      expect(fallback.notification.body).toBe("소개 바꾸기");
+    }
+  });
+
+  it("서버가 결정할 사람이 아니라고 한 카드에는 알림을 보내지 않는다", () => {
+    const event = approvalEvent();
+    event.payload.props = { ...event.payload.props, can_decide: false };
+    expect(notifyThisDevice(event, context())).toEqual({ show: false, skip: "not-notifiable" });
+  });
   it("does not fire a mention when that kind is off on this device", () => {
     const storage = new MemoryStorage();
     reloadDesktopNotificationKindsForTest(storage);

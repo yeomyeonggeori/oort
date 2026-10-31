@@ -18,6 +18,7 @@ import {
 } from "@momo/core/features/timeline/model";
 import { CHANNEL_INTRO_STARTED, DM_INTRO_STARTED } from "./channelIntro";
 import { Timeline } from "./Timeline";
+import { payloadToMessage, type MessageNewEvent } from "@momo/core/lib/realtimeEvents";
 
 const virtuoso = vi.hoisted(() => ({
   data: [] as { kind: string; key: string }[],
@@ -164,6 +165,21 @@ function mount(
 }
 
 describe("Timeline channel intro leading row", () => {
+  it("실시간 프레임에 서버 root가 있는 카드·결과·최종 답은 본류에 없고 root 없는 옛 카드는 남는다", () => {
+    const request = message(1);
+    const legacy = { ...message(2), type: "approval_request", props: { approval_id: "legacy" } } as Message;
+    mount({ messages: [request, legacy] });
+    const replies = ["approval_request", "tool_result", "text"].map((type, index) => payloadToMessage({
+      id: `reply-${index}`, channel_id: CHANNEL, seq: index + 3, type, root_id: request.id, author_member_id: OTHER,
+      hlc_ts: 1, hlc_count: 0, props: { approval_id: "thread-approval", status: "rejected" },
+    } as MessageNewEvent["payload"]));
+    const carrier = { ...message(6), props: { bundle_of: "thread-approval" } };
+    const view = mount({ messages: [request, legacy, ...replies, carrier] });
+    expect(view.querySelector('[data-seq="2"]')).not.toBeNull();
+    for (const seq of [3, 4, 5]) expect(view.querySelector(`[data-seq="${seq}"]`)).toBeNull();
+    // 스레드 안 카드는 같은 본류 목록에 없으므로 본류의 운반체 줄을 지우지 않아요.
+    expect(view.querySelector('[data-seq="6"]')).not.toBeNull();
+  });
   it("renders the intro as the virtuoso's first row on an empty channel", () => {
     const root = mount();
     expect(root.querySelector("[data-testid='timeline-virtuoso']")).not.toBeNull();

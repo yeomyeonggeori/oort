@@ -57,6 +57,8 @@
 
 묶음은 한 요청의 제안·결정·결과예요. 닻은 에이전트 명의의 승인 카드(`approval_request` 메시지) 한 장이고, 새 컴포넌트가 아니라 웹 `AgentCard`와 폰 `MessageRow`의 승인 카드 **문법을 바꾸는 것**이에요.
 
+코어 진입점은 `agentCardModel.agentRequestBundle`·`requestBundle`·`triggerChip`이에요(#4760). owner 10-29 결정에 따라 `workspace_action`과 `tool_call` 모두 같은 카드의 props·상태 코드로 여덟 상태를 읽고, `shouldFoldBundleLine`은 같은 목록의 종결 카드가 설명하는 옛 `bundle_of` 줄만 접어요(아래 1단계의 도구 승인 제외·옛 줄 유지 문구보다 이 결정이 우선해요).
+
 ### 2.1 한 장의 짜임
 
 ```

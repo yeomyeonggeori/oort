@@ -14,7 +14,11 @@ import {color, ds2Radius, SAFE_GUTTER} from '../src/design/tokens';
 import {bubbleFor, BUBBLE_MIN_CONTRAST, otherBubbleFill} from '../src/features/conversation/bubble';
 import {CONV} from '../src/features/conversation/convDesign';
 import {LandedTintFade} from '../src/features/conversation/LandedTintFade';
-import {MessageBody} from '../src/features/conversation/MessageBody';
+import {
+  BubbleProbeContext,
+  MessageBody,
+  type BubbleProbeEvent,
+} from '../src/features/conversation/MessageBody';
 import {MessageRow, PendingRow, rowPressedBackground} from '../src/features/conversation/MessageRow';
 import {
   blendOver,
@@ -482,3 +486,83 @@ describe('LandedTintFade 단독', () => {
     if (fade) expect(flat(fade.props.style).borderRadius).toBe(ROW_FACE.radius);
   });
 });
+
+// -----------------------------------------------------------------------------
+// #4894 — 말풍선 안 글이 잘리거나 말풍선 밖으로 넘치지 않는다.
+//
+// **이 파일의 단정은 보조다.** jest 에는 Yoga 도 TextKit 도 없어 폭이 전부 0 이라, 잘림은 여기서 못 잰다.
+// 재는 곳은 시뮬레이터이고 구동기는 `measure/run-bubble-clip.sh`(→ `bubbleClip.tsx` + `bubble-clip-check.mjs`)다.
+// 여기서는 그 측정이 짚어 낸 **원인 한 줄**(목록 글의 `flex: 1`)이 되돌아오지 않게 하는 것과, 측정 seam 이 앱에서
+// 아무것도 붙이지 않는다는 것만 지킨다.
+// -----------------------------------------------------------------------------
+
+describe('말풍선 안 목록 글 — 내용 폭 말풍선에서 0 폭으로 접히지 않는다 (#4894)', () => {
+  function listText(body: string) {
+    render(<MessageBody bubble="other" body={body} />);
+    return flat(screen.getByText('둘째 항목은 조금 더 길어요').props.style);
+  }
+
+  it('목록 글은 flexShrink 1 이다 — flexBasis 0 인 flex: 1 이 아니다', () => {
+    const style = listText('- 첫째\n- 둘째 항목은 조금 더 길어요');
+    // `flex: 1` 은 flexBasis 0 이라 내용 폭 말풍선(`alignSelf: 'flex-start'`)의 폭에 0 을 낸다. 시뮬레이터 실측(수리 전):
+    // 목록만 있는 글은 말풍선 38pt · 글 상자 0pt(안 보임), 문단 + 목록은 글 높이 합 345pt 가 말풍선 170pt 밖으로 넘쳤다.
+    expect(style.flexShrink).toBe(1);
+    expect(style.flex).toBeUndefined();
+    expect(style.flexGrow).toBeUndefined();
+    // 깨뜨리면: listText 를 `{flex: 1, …}` 로 되돌린다 → 빨강(시뮬레이터 측정은 H·G 가 빨강).
+  });
+
+  it('번호 목록도 같다', () => {
+    const style = listText('1. 첫째\n2. 둘째 항목은 조금 더 길어요');
+    expect(style.flexShrink).toBe(1);
+    expect(style.flex).toBeUndefined();
+  });
+});
+
+describe('측정 seam — 하네스가 없으면 앱에는 아무 핸들러도 붙지 않는다 (#4894)', () => {
+  const BODY = '가운데에 **굵게** 가 든 글이라 마크다운 갈래로 간다.\n\n- 목록 항목';
+
+  it('Provider 가 없으면 말풍선·문단·목록 글에 onLayout / onTextLayout 이 없다', () => {
+    render(<MessageBody bubble="other" body={BODY} />);
+    const bubble = screen.getByTestId('message-bubble');
+    expect(bubble.props.onLayout).toBeUndefined();
+    const paragraph = screen.getByText(/가운데에/);
+    expect(paragraph.props.onLayout).toBeUndefined();
+    expect(paragraph.props.onTextLayout).toBeUndefined();
+    const item = screen.getByText('목록 항목');
+    expect(item.props.onLayout).toBeUndefined();
+    expect(item.props.onTextLayout).toBeUndefined();
+    // 깨뜨리면: probe 가 null 이어도 핸들러를 붙이도록(`paragraphProbeProps` 의 첫 줄을 지움) → 빨강.
+  });
+
+  it('평문 갈래도 같다', () => {
+    render(<MessageBody bubble="other" body="평문 한 줄" />);
+    expect(screen.getByTestId('message-bubble').props.onLayout).toBeUndefined();
+    expect(screen.getByText('평문 한 줄').props.onLayout).toBeUndefined();
+    expect(screen.getByText('평문 한 줄').props.onTextLayout).toBeUndefined();
+  });
+
+  it('Provider 가 있으면 말풍선·문단·목록 글이 key 와 함께 틀을 보고한다', () => {
+    const events: BubbleProbeEvent[] = [];
+    render(
+      <BubbleProbeContext.Provider value={event => events.push(event)}>
+        <MessageBody bubble="other" body={BODY} />
+      </BubbleProbeContext.Provider>,
+    );
+    const frame = {nativeEvent: {layout: {x: 1, y: 2, width: 30, height: 40}}} as never;
+    screen.getByTestId('message-bubble').props.onLayout(frame);
+    screen.getByText(/가운데에/).props.onLayout(frame);
+    screen.getByText('목록 항목').props.onLayout(frame);
+    screen
+      .getByText('목록 항목')
+      .props.onTextLayout({nativeEvent: {lines: [{x: 0, y: 0, width: 5, height: 6, text: '목록'}]}} as never);
+    expect(events.map(e => `${e.kind}:${e.key}`)).toEqual([
+      'bubble:0',
+      'text:0.0',
+      'text:0.1.0',
+      'lines:0.1.0',
+    ]);
+    // 깨뜨리면: 목록 글의 `paragraphProbeProps` 를 지운다 → onLayout 이 undefined 라 TypeError, 빨강.
+  });
+});
+

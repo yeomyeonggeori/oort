@@ -14,7 +14,7 @@ function source(path: string): string {
 describe("트리거 칩·예외 줄 배선 (#4619)", () => {
   it("타임라인은 끝난 run의 답을 한 번 색인해 행에 넘긴다", () => {
     const timeline = source("../timeline/Timeline.tsx");
-    expect(timeline).toContain("runAnswerMap(channelRuns, messages)");
+    expect(timeline).toContain("runAnswerMap(channelRuns, mainMessages)");
     expect(timeline).toContain("runAnswers={runAnswers}");
     // 행에 내려주는 run은 순수 함수 하나가 고른다(누가 불렀든 사람의 메시지면 선다, planner 결정 2): 타임라인은 그 함수를 부를 뿐이다.
     expect(timeline).toContain("runStatusForMessage({ message, myMemberId: myMemberIdForFold, directory, runsByMessage })");
@@ -36,7 +36,8 @@ describe("트리거 칩·예외 줄 배선 (#4619)", () => {
     // 칩이 답으로 가는 길(onJumpToMessage)과 답 지도(runAnswers)를 받는다.
     expect(head).toMatch(/<MessageTriggerChip[\s\S]*?runAnswers[\s\S]*?onJump: onJumpToMessage[\s\S]*?\/>/);
     // 스레드 요약 줄의 칩은 답글(rollup)이 있을 때만이다.
-    expect(row).toMatch(/\{rollup && runStatus !== undefined && runStatus\.length > 0 && \(\s*<ThreadWorkChip/);
+    expect(row).toMatch(/\{rollup && !hasRequestBundle && runStatus !== undefined && runStatus\.length > 0 && \(\s*<ThreadWorkChip/);
+    expect(row).toContain("<ThreadRequestSummary runs={runStatus}");
     expect(row).toContain("<MessageRunStatus");
     // 머리 줄이 없는 이어지는 행의 칩은 시각이 서는 거터 칸에 선다(시각 뒤, 거터 div 안): 행 높이를 움직이지 않는 자리다.
     const gutterStart = row.indexOf('<div className={cn("relative shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)}>');

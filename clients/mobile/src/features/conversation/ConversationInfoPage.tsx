@@ -18,7 +18,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {AVATAR_INITIAL_MAX_SCALE, Screen, Sentence} from '../../design/atoms';
 import {HOME_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {PageHeader} from '../../design/SheetChrome';
-import {ConfirmStep, GroupCard, ListRow} from '../../design/sheetParts';
+import {ConfirmStep, GroupCard, ListRow, RowEmoji} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {EdgeSwipeBack, useLayerClose} from '../../nav/EdgeSwipeBack';
@@ -175,6 +175,8 @@ function InfoBody({
       <ListRow
         key={found.key}
         title={busy && found.busyLabel ? found.busyLabel : found.label}
+        // 알림 상태 표지는 오른쪽 값 자리다. 앞 칸·행 차례·위험색은 #4319 계약을 따른다.
+        trailing={found.icon ? <RowEmoji emoji={found.icon} /> : undefined}
         tone={found.tone === 'danger' ? 'danger' : 'default'}
         accessory={accessory}
         busy={busy}

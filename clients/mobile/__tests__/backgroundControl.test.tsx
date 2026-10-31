@@ -3,7 +3,7 @@ import React from 'react';
 import {AccessibilityInfo, StyleSheet} from 'react-native';
 
 import {ThemeControl} from '../src/design/ThemeControl';
-import {BACKGROUND_FALLBACK_COPY} from '../src/design/background/model';
+import {BACKGROUND_FALLBACK_COPY} from '@momo/core/design/mobileBackground';
 import {IMPORT_FAILURE_COPY, type PhotoPorts} from '../src/design/background/photo';
 import {
   __resetBackgroundStoreForTests,

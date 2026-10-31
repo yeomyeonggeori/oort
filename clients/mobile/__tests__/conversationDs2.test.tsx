@@ -6,7 +6,7 @@ import React from 'react';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {AccessibilityInfo, ActionSheetIOS, Dimensions, StyleSheet} from 'react-native';
 
-import {darkPalette, lightPalette, slopTo, TOUCH_TARGET} from '../src/design/tokens';
+import {darkPalette, font, lightPalette, slopTo, TOUCH_TARGET} from '../src/design/tokens';
 import {FixedScheme} from '../src/design/theme';
 import {Composer} from '../src/features/conversation/Composer';
 import {
@@ -105,6 +105,18 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
     expect(style.height).toBe(42);
     expect(style.borderRadius).toBe(21);
     expect(42 + back.props.hitSlop * 2).toBe(TOUCH_TARGET);
+  });
+
+  it('S1 #4789 머리 단추 셋은 각각 유리이며 투명도 줄이기를 따른다', async () => {
+    const reduce = jest.spyOn(AccessibilityInfo, 'isReduceTransparencyEnabled').mockResolvedValue(true);
+    header({onOpenInfo: () => {}});
+    await act(async () => {});
+    for (const id of ['header-back-glass', 'conversation-info-glass', 'conversation-menu-glass']) {
+      expect(flatten(screen.getByTestId(`${id}-opaque`).props.style).backgroundColor).toBe(darkPalette.surface);
+    }
+    expect(screen.getByTestId('conversation-status-fade').props.pointerEvents).toBe('none');
+    expect(flatten(screen.getByTestId('conversation-header').props.style).backgroundColor).toBeUndefined();
+    reduce.mockResolvedValue(false);
   });
 
   it('DM 머리는 상대 얼굴 + 이름 한 줄이고, 에이전트면 상태 점이 얼굴에 붙는다 (#4016)', () => {
@@ -272,13 +284,14 @@ describe('머리 — 가운데 이름·상태 알약, 정보 페이지의 문 (#
       expect(title.props.accessibilityRole).toBe('header');
     });
 
-    it('`onOpenInfo` 가 없으면 알약은 단추가 아니다 — 이름만 서고 캡슐 모양도 없다(누르면 아무 일도 없는 단추는 없다)', () => {
+    it('`onOpenInfo` 가 없으면 유리 이름은 단추가 아니다 (#4789)', () => {
       pillHeader({onOpenInfo: undefined});
       expect(screen.queryByTestId('conversation-info-button')).toBeNull();
       expect(screen.getByTestId('conversation-title')).toHaveTextContent('agent-lab');
-      // 캡슐(채움·테두리)이 단추의 모양이다 — 단추가 아니면 입지 않는다.
-      const line = flatten(screen.getByTestId('conversation-title-line').props.style);
-      expect(line.backgroundColor === undefined && line.borderWidth === undefined).toBe(true);
+      const name = screen.getByTestId('conversation-title-line');
+      expect(name.props.accessibilityRole).toBeUndefined();
+      expect(name.props.onPress).toBeUndefined();
+      expect(screen.getByTestId('conversation-title-line-fallback')).toBeTruthy();
     });
 
     it('알약도 엄지에는 44 다 — 높이는 원과 같은 42 이고 위아래로 1 씩 눌림을 더한다', () => {
@@ -470,12 +483,16 @@ describe('머리 — 가운데 이름·상태 알약, 정보 페이지의 문 (#
       await act(async () => {});
       const banner = flatten(screen.getByTestId('connection-banner-layer').props.style);
       expect(banner.position).toBe('absolute');
-      expect(banner.top).toBe('100%');
+      fireEvent(screen.getByTestId('conversation-header'), 'layout', {
+        nativeEvent: {layout: {x: 0, y: 0, width: 393, height: CONV.headHeight}},
+      });
+      expect(flatten(screen.getByTestId('connection-banner-layer').props.style).top).toBe(CONV.headHeight);
       expect(JSON.stringify(metrics())).toBe(JSON.stringify(calm));
       // 머리 뿌리의 `zIndex` 는 호출자가 틀로 봉인한다 — 있어야 띠가 목록 위에 뜬다.
       expect(metrics().root.zIndex).toBe(1);
     });
   });
+
 
   describe('색 — 원(뒤로·⋮)과 같은 토큰 가족이고 두 모드에서 읽힌다', () => {
     for (const scheme of ['light', 'dark'] as const) {
@@ -485,7 +502,10 @@ describe('머리 — 가운데 이름·상태 알약, 정보 페이지의 문 (#
         pillHeader(dm(), scheme);
         const pill = flatten(screen.getByTestId('conversation-info-button').props.style);
         const circle = flatten(screen.getByTestId('header-back').props.style);
-        expect(pill.backgroundColor).toBe(palette.surface);
+        expect(pill.backgroundColor).toBeUndefined();
+        for (const id of ['conversation-info-glass-fallback', 'header-back-glass-fallback', 'conversation-menu-glass-fallback']) {
+          expect(flatten(screen.getByTestId(id).props.style).backgroundColor).toBe(palette.glassFallback);
+        }
         for (const key of ['backgroundColor', 'borderColor', 'borderWidth', 'boxShadow']) {
           expect([key, pill[key]]).toEqual([key, circle[key]]);
         }
@@ -493,7 +513,7 @@ describe('머리 — 가운데 이름·상태 알약, 정보 페이지의 문 (#
 
       it(`${scheme}: 이름과 보조 글은 알약 위에서 AA(4.5) 를 넘는다`, () => {
         pillHeader(dm(), scheme);
-        const fill = String(flatten(screen.getByTestId('conversation-info-button').props.style).backgroundColor);
+        const fill = composite(String(flatten(screen.getByTestId('conversation-info-glass-fallback').props.style).backgroundColor), palette.surface);
         const name = String(flatten(screen.getByTestId('conversation-title').props.style).color);
         const word = String(flatten(screen.getByTestId('conversation-title-status').props.style).color);
         expect(contrast(name, fill)).toBeGreaterThanOrEqual(4.5);
@@ -824,12 +844,16 @@ describe('떠 있는 날짜 알약은 스크롤 중에만 선다 (검수 B-1)', 
     expect(begin).toMatch(/\bgrabDayPill\(\);/);
   });
 
-  it('알약 바탕이 불투명이다 — 밑 본문 획과 섞이지 않는다', () => {
+  it('S1 #4789 날짜는 큰 글자의 유리이고 투명도 줄이기에서는 불투명이다', async () => {
+    const reduce = jest.spyOn(AccessibilityInfo, 'isReduceTransparencyEnabled').mockResolvedValue(true);
     const {FloatingDayPill} = jest.requireActual('../src/features/conversation/MessageRow');
     render(<FloatingDayPill atMs={1_760_000_000_000} nowMs={1_760_000_000_000} />);
-    const pill = screen.getByTestId('floating-day', {includeHiddenElements: true});
-    const face = flatten((pill.children[0] as {props: {style: unknown}}).props.style);
-    expect(face.backgroundColor).toBe(darkPalette.surface);
+    await act(async () => {});
+    const hidden = {includeHiddenElements: true};
+    expect(flatten(screen.getByTestId('floating-day-glass-opaque', hidden).props.style).backgroundColor).toBe(darkPalette.surface);
+    expect(flatten(screen.getByText('오늘', hidden).props.style).fontSize).toBe(font.heading);
+    expect(screen.getByTestId('floating-day', hidden).props.pointerEvents).toBe('none');
+    reduce.mockResolvedValue(false);
   });
 });
 
@@ -1083,7 +1107,7 @@ describe('치수가 시안에서 온다', () => {
     expect(CONV.composerRadius).toBe(ds2Radius.composer);
   });
 
-  it('FixedScheme 라이트에서 머리 원 버튼이 surface 를 입는다', () => {
+  it('FixedScheme 라이트에서 머리 원 버튼이 유리 틴트를 입는다', () => {
     render(
       <FixedScheme scheme="light">
         <ConversationHeader
@@ -1095,8 +1119,8 @@ describe('치수가 시안에서 온다', () => {
         />
       </FixedScheme>,
     );
-    expect(flatten(screen.getByTestId('header-back').props.style).backgroundColor).toBe(
-      lightPalette.surface,
+    expect(flatten(screen.getByTestId('header-back-glass-fallback').props.style).backgroundColor).toBe(
+      lightPalette.glassFallback,
     );
     // 열 메뉴가 없으면(`onOpenMenu` 없음) ⋮ 원을 세우지 않는다.
     expect(screen.queryByTestId('conversation-menu')).toBeNull();

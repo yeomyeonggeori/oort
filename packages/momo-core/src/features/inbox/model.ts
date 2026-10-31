@@ -1,3 +1,5 @@
+import { REQUEST_BUNDLE_FACE, requestBundleState, type RequestBundleStateInput } from "../timeline/requestBundle";
+import { REQUEST_WORD } from "../agents/runPhase";
 import type { Approval, AgentRun, Message } from "../../lib/api";
 import { uuidEq } from "../../lib/api";
 import type { SpawnExecutionPlan } from "../../lib/executionPlan";
@@ -323,25 +325,21 @@ export function mentionItem(
 
 // ---- approvals ---------------------------------------------------------
 
-const APPROVAL_OUTCOME: Record<
-  Approval["status"],
-  { label: string | null; tone: OutcomeTone }
-> = {
-  pending: { label: null, tone: "muted" },
-  approved: { label: "승인됨", tone: "ok" },
-  rejected: { label: "거절됨", tone: "danger" },
-  // Absence is not failure: an unanswered request ran out of time (ADR-0132).
-  expired: { label: "만료됨", tone: "warn" },
-  cancelled: { label: "취소됨", tone: "muted" },
-};
-
 export function approvalItem(
   approval: Approval,
   actor: ActorNames,
   channelLabel: string,
-  nowMs: number
+  nowMs: number,
+  context: Pick<RequestBundleStateInput, "run" | "result" | "code"> = {}
 ): FeedItem {
-  const outcome = APPROVAL_OUTCOME[approval.status];
+  const state = requestBundleState({
+    ...context,
+    status: approval.status,
+    actionType: approval.actionType,
+    expiresAtMs: approval.expiresAtMs,
+    nowMs,
+  });
+  const face = REQUEST_BUNDLE_FACE[state];
   const pending = approval.status === "pending";
   // The projection carries no created_at, so a pending row shows its deadline
   // (the number that actually matters) and a settled row shows when it was
@@ -375,8 +373,8 @@ export function approvalItem(
       approval.workspaceActionId
     )} 허가를 요청했어요`,
     detail: approval.decisionReason ?? undefined,
-    outcome: outcome.label,
-    outcomeTone: outcome.tone,
+    outcome: state === "approval" ? null : face.word,
+    outcomeTone: state === "approval" || face.tone === "working" ? "muted" : face.tone,
     note: reversible ? undefined : "되돌릴 수 없음",
     reversible,
     ...(deadlinePassed ? { deadlinePassed: true } : {}),
@@ -403,11 +401,11 @@ const RUN_OUTCOME: Record<
 > = {
   queued: { label: null, tone: "muted" },
   running: { label: null, tone: "muted" },
-  awaiting_approval: { label: "승인 대기", tone: "warn" },
+  awaiting_approval: { label: REQUEST_WORD.approval, tone: "warn" },
   paused: { label: "멈춤", tone: "warn" },
   succeeded: { label: "완료", tone: "ok" },
   failed: { label: "실패", tone: "danger" },
-  cancelled: { label: "취소됨", tone: "muted" },
+  cancelled: { label: REQUEST_WORD.cancelled, tone: "muted" },
   // Silence is stalled, never an error story we did not observe.
   timed_out: { label: "응답 없음", tone: "warn" },
 };

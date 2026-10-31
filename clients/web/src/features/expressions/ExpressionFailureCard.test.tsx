@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, within } from "@testing-library/react";
+import { act, cleanup, render, within } from "@testing-library/react";
 import "@/lib/coreHost";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
@@ -33,13 +33,17 @@ function failureMessage(code: string, status: string, extra: Record<string, unkn
     props: { approval_id: "0199aa11-2222-7000-8000-0000000000a1", run_id: "0199aa11-2222-7000-8000-0000000000b2", channel_id: "00000000-0000-7000-8000-000000000201", status, code, title: "팀 그림 만들기 요청", ...extra },
   } as unknown as Message;
 }
-const DIRECTORY = makeDirectory([{ id: AGENT, workspaceId: WORKSPACE_ID, kind: "agent", status: "active", role: "member", displayName: "달무리봇", handle: "dalmuri", channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0 }] as never);
+const AGENT_ROW = { id: AGENT, workspaceId: WORKSPACE_ID, kind: "agent", status: "active", role: "member", displayName: "달무리봇", handle: "dalmuri", channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0 };
+const DIRECTORY = makeDirectory([AGENT_ROW] as never);
+// The request bundle card keeps raw data for workspace admins, inside its opened details
+// (docs/design-system/agent-request-loop.md section 2.1), so the viewer who reads the honest count is an owner.
+const OWNER_DIRECTORY = makeDirectory([AGENT_ROW, { ...AGENT_ROW, id: ME, kind: "human", role: "owner", displayName: "이도현", handle: "dohyun" }] as never);
 const SESSION = { session: { accessToken: "access", refreshToken: "refresh", member: { id: ME, workspaceId: WORKSPACE_ID, kind: "human", displayName: "이도현", handle: "dohyun" }, realtimeWebSocketUrl: "wss://example.test/connection/websocket" }, workspaceId: WORKSPACE_ID, realtime: null, connStatus: "connected", logout: () => undefined, replaceSessionMember: () => undefined } as unknown as SessionContextValue;
 
-function draw(message: Message) {
+function draw(message: Message, directory = DIRECTORY) {
   const card = agentCardModel(message);
   if (card === null) throw new Error("no card for these props");
-  return render(<SessionProvider value={SESSION}><AgentCard card={card} directory={DIRECTORY} viewerMemberId={ME} /></SessionProvider>);
+  return render(<SessionProvider value={SESSION}><AgentCard card={card} directory={directory} viewerMemberId={ME} /></SessionProvider>);
 }
 
 beforeEach(() => {
@@ -66,8 +70,11 @@ describe("the request loop's failure card for a generated or assembled picture",
     expect(within(view.container).queryByText("지금 다른 그림을 처리하고 있어요. 잠시 뒤에 다시 해 주세요")).toBeNull();
   });
   it("stands with the measured size on the card, and shows that size as a number nowhere", () => {
-    const view = draw(failureMessage("assembly_output_too_large", "cancelled", { bytes: MEASURED }));
+    const view = draw(failureMessage("assembly_output_too_large", "cancelled", { bytes: MEASURED }), OWNER_DIRECTORY);
+    // The sentence stands on the closed face, once, before anything is opened.
     expect(within(view.container).getAllByText("움직이는 그림이 너무 커요")).toHaveLength(1);
+    const details = view.getByTestId("request-bundle-details") as HTMLDetailsElement;
+    act(() => { details.open = true; details.dispatchEvent(new Event("toggle")); });
     // Everything the card does not read is admitted to in one honest count, not dropped.
     expect(view.getByTestId("agent-payload-withheld").textContent).toMatch(/숨김\s*1개/u);
     const text = view.container.textContent ?? "";

@@ -110,14 +110,14 @@ describe("보낸 메시지 아래 상태 줄 (#3824)", () => {
     expect(line.steps[1]?.text).toBe("깨우는 신호가 닿지 않음");
   });
 
-  it("승인 대기는 사람의 일이고 아무도 안 가져간 채 끝난 run에는 가져감이 없다", () => {
+  it("승인 필요는 사람의 일이고 아무도 안 가져간 채 끝난 run에는 가져감이 없다", () => {
     const waiting = runStatusLine(
       progress({ phase: "awaiting_approval", status: "awaiting_approval", claimedAtMs: T, startedAtMs: T }),
       null,
       T + MIN
     );
     expect(waiting.needsHuman).toBe(true);
-    expect(waiting.steps.at(-1)?.text).toBe("승인 대기");
+    expect(waiting.steps.at(-1)?.text).toBe("승인 필요");
     const expired = runStatusLine(
       progress({ phase: "timed_out", status: "timed_out", endReason: "unclaimed_expired", finishedAtMs: T + 30 * MIN }),
       null,

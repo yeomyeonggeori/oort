@@ -10,13 +10,16 @@
 // (`paletteFrom`). 화면은 여전히 `Palette` 역할 이름으로 읽는다.
 // =============================================================================
 
+import {resolveThemeTokens} from './themeCatalog';
+import type {ThemeRef} from '@momo/core/design/themeResolve';
+
 import {
   CANVAS_STOPS,
   MODES,
   THEME_IDS,
-  THEMES,
   type Mode,
   type ThemeId,
+  type ThemeModeTokens,
 } from '@momo/core/design/themes';
 
 export {
@@ -43,8 +46,8 @@ export {
  * 한 테마 × 모드의 색 역할 전부를 평면 표로(역할 이름은 core 그대로 kebab).
  * 바닥 세 정지점, 띠(있으면), 표의 역할, 표 밖 역할을 한 표에 모은다.
  */
-export function ds2Roles(theme: ThemeId, mode: Mode): Readonly<Record<string, string>> {
-  const t = THEMES[theme][mode];
+export function ds2Roles(theme: ThemeRef | ThemeModeTokens, mode: Mode): Readonly<Record<string, string>> {
+  const t = typeof theme === 'string' ? resolveThemeTokens(theme, mode) : theme;
   const out: Record<string, string> = {};
   CANVAS_STOPS.forEach((stop, i) => {
     out[stop] = t.canvas[i];

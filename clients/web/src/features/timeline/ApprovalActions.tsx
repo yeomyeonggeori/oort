@@ -219,6 +219,7 @@ export function ApprovalActions({
   execution = null,
   verbs = APPROVAL_VERBS,
   forbiddenCopy = null,
+  decisionLabel,
 }: {
   approvalId: string;
   onSettled: (outcome: DecisionOutcome) => void;
@@ -250,6 +251,8 @@ export function ApprovalActions({
    * 을 실어 보냈으므로, 이 403 에서 모자란 것은 멤버십이 아니라 **역할**이다.
    */
   forbiddenCopy?: string | null;
+  /** 같은 화면의 제안이 여러 개여도 어떤 결정인지 접근성 이름에 남겨요. */
+  decisionLabel?: string;
 }) {
   // workspaceId comes from session context rather than a prop chain: both
   // callers sit several components below the shell.
@@ -367,7 +370,7 @@ export function ApprovalActions({
       )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         {execution === null ? (
-          <span className="text-meta text-ink-muted">{lead}</span>
+          lead ? <span className="text-meta text-ink-muted">{lead}</span> : null
         ) : (
           // 픽커가 있으면 `lead`는 이미 위에 있다. 자리는 남겨 둬야 버튼이
           // 오른쪽에 붙는다(`justify-between`).
@@ -380,6 +383,7 @@ export function ApprovalActions({
             aria-disabled={busy || undefined}
             data-busy={sending === "reject" ? "" : undefined}
             data-decision="reject"
+            aria-label={decisionLabel ? `${decisionLabel} ${verbs.reject}` : undefined}
             data-testid={`${testIdPrefix}-reject`}
             onKeyDown={swallowRepeat}
             onClick={() => void commit("reject")}
@@ -410,6 +414,7 @@ export function ApprovalActions({
             data-blocked={hostGate.canApprove ? undefined : ""}
             data-busy={sending === "approve" ? "" : undefined}
             data-decision="approve"
+            aria-label={decisionLabel ? `${decisionLabel} ${verbs.approve}` : undefined}
             data-testid={`${testIdPrefix}-approve`}
             onKeyDown={swallowRepeat}
             onClick={() => void commit("approve")}
