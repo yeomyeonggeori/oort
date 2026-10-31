@@ -21,6 +21,107 @@ export const messageKeys = [
   "desktop.menu.undo",
   "desktop.menu.view",
   "desktop.menu.window",
+  "expressions.add.adminsOnly",
+  "expressions.add.back",
+  "expressions.add.backLabel",
+  "expressions.add.import",
+  "expressions.add.importDetail",
+  "expressions.add.make",
+  "expressions.add.makeDetail",
+  "expressions.add.offlineHint",
+  "expressions.add.trigger",
+  "expressions.add.triggerHint",
+  "expressions.draft.another",
+  "expressions.draft.approve",
+  "expressions.draft.approveFailed",
+  "expressions.draft.approving",
+  "expressions.draft.previewLabel",
+  "expressions.draft.replaceFailed",
+  "expressions.draft.replacing",
+  "expressions.draft.rights",
+  "expressions.draft.source",
+  "expressions.draft.waiting",
+  "expressions.import.displayName",
+  "expressions.import.displayNamePlaceholder",
+  "expressions.import.face",
+  "expressions.import.faceNone",
+  "expressions.import.faceOther",
+  "expressions.import.faceOtherIssue",
+  "expressions.import.faceSelf",
+  "expressions.import.fileIssue",
+  "expressions.import.fixedNote",
+  "expressions.import.metadataIssue",
+  "expressions.import.name",
+  "expressions.import.namePlaceholder",
+  "expressions.import.nameTaken",
+  "expressions.import.offline",
+  "expressions.import.photo",
+  "expressions.import.photoChange",
+  "expressions.import.photoDenied",
+  "expressions.import.photoPick",
+  "expressions.import.photoPicked",
+  "expressions.import.photoUnavailable",
+  "expressions.import.prepare",
+  "expressions.import.prepareFailed",
+  "expressions.import.preparing",
+  "expressions.import.tags",
+  "expressions.import.tagsPlaceholder",
+  "expressions.import.url",
+  "expressions.import.urlIssue",
+  "expressions.import.urlPlaceholder",
+  "expressions.make.agent",
+  "expressions.make.agentHint",
+  "expressions.make.agentLoading",
+  "expressions.make.agentMissing",
+  "expressions.make.agentPaused",
+  "expressions.make.chipLabel",
+  "expressions.make.done",
+  "expressions.make.failDm",
+  "expressions.make.failDmForbidden",
+  "expressions.make.failDmMissing",
+  "expressions.make.failSend",
+  "expressions.make.failUpload",
+  "expressions.make.failUploadForbidden",
+  "expressions.make.failUploadNoArchive",
+  "expressions.make.failUploadTooLarge",
+  "expressions.make.intro",
+  "expressions.make.motion",
+  "expressions.make.motionDuplicate",
+  "expressions.make.motionHint",
+  "expressions.make.motionMissing",
+  "expressions.make.motionStillMixed",
+  "expressions.make.motionTooMany",
+  "expressions.make.motionUnknown",
+  "expressions.make.noAgents",
+  "expressions.make.noAgentsDetail",
+  "expressions.make.note",
+  "expressions.make.noteCount",
+  "expressions.make.notePlaceholder",
+  "expressions.make.noteTooLong",
+  "expressions.make.offline",
+  "expressions.make.openConversation",
+  "expressions.make.photo",
+  "expressions.make.photoChange",
+  "expressions.make.photoDenied",
+  "expressions.make.photoDimensions",
+  "expressions.make.photoEmpty",
+  "expressions.make.photoMissing",
+  "expressions.make.photoPick",
+  "expressions.make.photoPreview",
+  "expressions.make.photoRule",
+  "expressions.make.photoSize",
+  "expressions.make.photoType",
+  "expressions.make.photoUnavailable",
+  "expressions.make.photoUnreadable",
+  "expressions.make.retry",
+  "expressions.make.rosterFailed",
+  "expressions.make.sending",
+  "expressions.make.sent",
+  "expressions.make.sizeInvalid",
+  "expressions.make.stepDm",
+  "expressions.make.stepSend",
+  "expressions.make.stepUpload",
+  "expressions.make.submit",
   "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
@@ -69,6 +170,127 @@ export const argumentSpecs = {
   "desktop.menu.undo": {},
   "desktop.menu.view": {},
   "desktop.menu.window": {},
+  "expressions.add.adminsOnly": {},
+  "expressions.add.back": {},
+  "expressions.add.backLabel": {},
+  "expressions.add.import": {},
+  "expressions.add.importDetail": {},
+  "expressions.add.make": {},
+  "expressions.add.makeDetail": {},
+  "expressions.add.offlineHint": {},
+  "expressions.add.trigger": {},
+  "expressions.add.triggerHint": {},
+  "expressions.draft.another": {},
+  "expressions.draft.approve": {},
+  "expressions.draft.approveFailed": {},
+  "expressions.draft.approving": {},
+  "expressions.draft.previewLabel": {
+    "name": "string"
+  },
+  "expressions.draft.replaceFailed": {},
+  "expressions.draft.replacing": {},
+  "expressions.draft.rights": {},
+  "expressions.draft.source": {
+    "host": "string"
+  },
+  "expressions.draft.waiting": {},
+  "expressions.import.displayName": {},
+  "expressions.import.displayNamePlaceholder": {},
+  "expressions.import.face": {},
+  "expressions.import.faceNone": {},
+  "expressions.import.faceOther": {},
+  "expressions.import.faceOtherIssue": {},
+  "expressions.import.faceSelf": {},
+  "expressions.import.fileIssue": {},
+  "expressions.import.fixedNote": {},
+  "expressions.import.metadataIssue": {},
+  "expressions.import.name": {},
+  "expressions.import.namePlaceholder": {},
+  "expressions.import.nameTaken": {},
+  "expressions.import.offline": {},
+  "expressions.import.photo": {},
+  "expressions.import.photoChange": {},
+  "expressions.import.photoDenied": {},
+  "expressions.import.photoPick": {},
+  "expressions.import.photoPicked": {
+    "name": "string"
+  },
+  "expressions.import.photoUnavailable": {},
+  "expressions.import.prepare": {},
+  "expressions.import.prepareFailed": {},
+  "expressions.import.preparing": {},
+  "expressions.import.tags": {},
+  "expressions.import.tagsPlaceholder": {},
+  "expressions.import.url": {},
+  "expressions.import.urlIssue": {},
+  "expressions.import.urlPlaceholder": {},
+  "expressions.make.agent": {},
+  "expressions.make.agentHint": {},
+  "expressions.make.agentLoading": {},
+  "expressions.make.agentMissing": {},
+  "expressions.make.agentPaused": {
+    "name": "string"
+  },
+  "expressions.make.chipLabel": {
+    "description": "string",
+    "label": "string"
+  },
+  "expressions.make.done": {},
+  "expressions.make.failDm": {},
+  "expressions.make.failDmForbidden": {},
+  "expressions.make.failDmMissing": {},
+  "expressions.make.failSend": {},
+  "expressions.make.failUpload": {},
+  "expressions.make.failUploadForbidden": {},
+  "expressions.make.failUploadNoArchive": {},
+  "expressions.make.failUploadTooLarge": {},
+  "expressions.make.intro": {},
+  "expressions.make.motion": {},
+  "expressions.make.motionDuplicate": {},
+  "expressions.make.motionHint": {
+    "max": "number"
+  },
+  "expressions.make.motionMissing": {},
+  "expressions.make.motionStillMixed": {},
+  "expressions.make.motionTooMany": {
+    "max": "number"
+  },
+  "expressions.make.motionUnknown": {},
+  "expressions.make.noAgents": {},
+  "expressions.make.noAgentsDetail": {},
+  "expressions.make.note": {},
+  "expressions.make.noteCount": {
+    "count": "number",
+    "max": "number"
+  },
+  "expressions.make.notePlaceholder": {},
+  "expressions.make.noteTooLong": {
+    "max": "number"
+  },
+  "expressions.make.offline": {},
+  "expressions.make.openConversation": {},
+  "expressions.make.photo": {},
+  "expressions.make.photoChange": {},
+  "expressions.make.photoDenied": {},
+  "expressions.make.photoDimensions": {},
+  "expressions.make.photoEmpty": {},
+  "expressions.make.photoMissing": {},
+  "expressions.make.photoPick": {},
+  "expressions.make.photoPreview": {},
+  "expressions.make.photoRule": {},
+  "expressions.make.photoSize": {},
+  "expressions.make.photoType": {},
+  "expressions.make.photoUnavailable": {},
+  "expressions.make.photoUnreadable": {},
+  "expressions.make.retry": {},
+  "expressions.make.rosterFailed": {},
+  "expressions.make.sending": {},
+  "expressions.make.sent": {},
+  "expressions.make.sizeInvalid": {},
+  "expressions.make.stepDm": {},
+  "expressions.make.stepSend": {},
+  "expressions.make.stepUpload": {},
+  "expressions.make.submit": {},
   "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
@@ -113,6 +335,107 @@ export interface MessageArgs {
   "desktop.menu.undo": Record<string, never>;
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
+  "expressions.add.adminsOnly": Record<string, never>;
+  "expressions.add.back": Record<string, never>;
+  "expressions.add.backLabel": Record<string, never>;
+  "expressions.add.import": Record<string, never>;
+  "expressions.add.importDetail": Record<string, never>;
+  "expressions.add.make": Record<string, never>;
+  "expressions.add.makeDetail": Record<string, never>;
+  "expressions.add.offlineHint": Record<string, never>;
+  "expressions.add.trigger": Record<string, never>;
+  "expressions.add.triggerHint": Record<string, never>;
+  "expressions.draft.another": Record<string, never>;
+  "expressions.draft.approve": Record<string, never>;
+  "expressions.draft.approveFailed": Record<string, never>;
+  "expressions.draft.approving": Record<string, never>;
+  "expressions.draft.previewLabel": { name: string };
+  "expressions.draft.replaceFailed": Record<string, never>;
+  "expressions.draft.replacing": Record<string, never>;
+  "expressions.draft.rights": Record<string, never>;
+  "expressions.draft.source": { host: string };
+  "expressions.draft.waiting": Record<string, never>;
+  "expressions.import.displayName": Record<string, never>;
+  "expressions.import.displayNamePlaceholder": Record<string, never>;
+  "expressions.import.face": Record<string, never>;
+  "expressions.import.faceNone": Record<string, never>;
+  "expressions.import.faceOther": Record<string, never>;
+  "expressions.import.faceOtherIssue": Record<string, never>;
+  "expressions.import.faceSelf": Record<string, never>;
+  "expressions.import.fileIssue": Record<string, never>;
+  "expressions.import.fixedNote": Record<string, never>;
+  "expressions.import.metadataIssue": Record<string, never>;
+  "expressions.import.name": Record<string, never>;
+  "expressions.import.namePlaceholder": Record<string, never>;
+  "expressions.import.nameTaken": Record<string, never>;
+  "expressions.import.offline": Record<string, never>;
+  "expressions.import.photo": Record<string, never>;
+  "expressions.import.photoChange": Record<string, never>;
+  "expressions.import.photoDenied": Record<string, never>;
+  "expressions.import.photoPick": Record<string, never>;
+  "expressions.import.photoPicked": { name: string };
+  "expressions.import.photoUnavailable": Record<string, never>;
+  "expressions.import.prepare": Record<string, never>;
+  "expressions.import.prepareFailed": Record<string, never>;
+  "expressions.import.preparing": Record<string, never>;
+  "expressions.import.tags": Record<string, never>;
+  "expressions.import.tagsPlaceholder": Record<string, never>;
+  "expressions.import.url": Record<string, never>;
+  "expressions.import.urlIssue": Record<string, never>;
+  "expressions.import.urlPlaceholder": Record<string, never>;
+  "expressions.make.agent": Record<string, never>;
+  "expressions.make.agentHint": Record<string, never>;
+  "expressions.make.agentLoading": Record<string, never>;
+  "expressions.make.agentMissing": Record<string, never>;
+  "expressions.make.agentPaused": { name: string };
+  "expressions.make.chipLabel": { description: string; label: string };
+  "expressions.make.done": Record<string, never>;
+  "expressions.make.failDm": Record<string, never>;
+  "expressions.make.failDmForbidden": Record<string, never>;
+  "expressions.make.failDmMissing": Record<string, never>;
+  "expressions.make.failSend": Record<string, never>;
+  "expressions.make.failUpload": Record<string, never>;
+  "expressions.make.failUploadForbidden": Record<string, never>;
+  "expressions.make.failUploadNoArchive": Record<string, never>;
+  "expressions.make.failUploadTooLarge": Record<string, never>;
+  "expressions.make.intro": Record<string, never>;
+  "expressions.make.motion": Record<string, never>;
+  "expressions.make.motionDuplicate": Record<string, never>;
+  "expressions.make.motionHint": { max: number };
+  "expressions.make.motionMissing": Record<string, never>;
+  "expressions.make.motionStillMixed": Record<string, never>;
+  "expressions.make.motionTooMany": { max: number };
+  "expressions.make.motionUnknown": Record<string, never>;
+  "expressions.make.noAgents": Record<string, never>;
+  "expressions.make.noAgentsDetail": Record<string, never>;
+  "expressions.make.note": Record<string, never>;
+  "expressions.make.noteCount": { count: number; max: number };
+  "expressions.make.notePlaceholder": Record<string, never>;
+  "expressions.make.noteTooLong": { max: number };
+  "expressions.make.offline": Record<string, never>;
+  "expressions.make.openConversation": Record<string, never>;
+  "expressions.make.photo": Record<string, never>;
+  "expressions.make.photoChange": Record<string, never>;
+  "expressions.make.photoDenied": Record<string, never>;
+  "expressions.make.photoDimensions": Record<string, never>;
+  "expressions.make.photoEmpty": Record<string, never>;
+  "expressions.make.photoMissing": Record<string, never>;
+  "expressions.make.photoPick": Record<string, never>;
+  "expressions.make.photoPreview": Record<string, never>;
+  "expressions.make.photoRule": Record<string, never>;
+  "expressions.make.photoSize": Record<string, never>;
+  "expressions.make.photoType": Record<string, never>;
+  "expressions.make.photoUnavailable": Record<string, never>;
+  "expressions.make.photoUnreadable": Record<string, never>;
+  "expressions.make.retry": Record<string, never>;
+  "expressions.make.rosterFailed": Record<string, never>;
+  "expressions.make.sending": Record<string, never>;
+  "expressions.make.sent": Record<string, never>;
+  "expressions.make.sizeInvalid": Record<string, never>;
+  "expressions.make.stepDm": Record<string, never>;
+  "expressions.make.stepSend": Record<string, never>;
+  "expressions.make.stepUpload": Record<string, never>;
+  "expressions.make.submit": Record<string, never>;
   "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
