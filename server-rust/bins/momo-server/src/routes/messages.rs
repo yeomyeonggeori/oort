@@ -1183,7 +1183,9 @@ fn interaction_refusal(refused: InteractionRefused) -> ApiError {
         InteractionRefused::NotFound => StatusCode::NOT_FOUND,
         InteractionRefused::NotAMember
         | InteractionRefused::NotAuthorForEdit
-        | InteractionRefused::NotAuthorForDelete => StatusCode::FORBIDDEN,
+        | InteractionRefused::NotAuthorForDelete
+        // The caller authored it and may not rewrite it: the card is the server's.
+        | InteractionRefused::ApprovalCardOwned => StatusCode::FORBIDDEN,
         InteractionRefused::EditDeleted
         | InteractionRefused::ReactDeleted
         | InteractionRefused::PinDeleted
@@ -3014,6 +3016,18 @@ mod tests {
             interaction_refusal(InteractionRefused::NotFound).status,
             StatusCode::NOT_FOUND,
             "404 still outranks 403 for a message that does not exist"
+        );
+    }
+
+    /// An approval card's author is not refused as a stranger but as the one it is: 403, and a
+    /// sentence of its own (ADR-0204 증보 6 D6-3 — the body is the server's).
+    #[test]
+    fn an_approval_card_refusal_is_a_403_with_its_own_sentence() {
+        let error = interaction_refusal(InteractionRefused::ApprovalCardOwned);
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            InteractionRefused::ApprovalCardOwned.to_string(),
+            "approval cards are written by the server"
         );
     }
 

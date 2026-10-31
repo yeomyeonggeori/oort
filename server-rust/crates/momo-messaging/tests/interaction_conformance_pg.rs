@@ -34,8 +34,8 @@ use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{
     channel_pins, channel_reaction_snapshot, delete_message_in_tx, edit_message_in_tx,
-    send_message_in_tx, set_pin_in_tx, InteractionRefused, NewMessage, PinAction, ReactionAction,
-    StoredMessage, CHANNEL_PIN_LIMIT,
+    send_message_in_tx, set_pin_in_tx, stream_message_body_in_tx, InteractionRefused, MessageType,
+    NewMessage, PinAction, ReactionAction, StoredMessage, StreamEdit, CHANNEL_PIN_LIMIT,
 };
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
@@ -696,6 +696,128 @@ async fn b11_only_the_author_edits_and_rls_hides_another_tenants_message() {
         InteractionRefused::NotFound,
         "RLS FORCE must hide the row — a 403 here would confirm it exists"
     );
+}
+
+// ---------------------------------------------------------------------------
+// #4980 — an approval card is the server's to write
+// ---------------------------------------------------------------------------
+
+/// ADR-0204 증보 6 D6-3 (#4980): an approval card's `body` is the one sentence the lock screen,
+/// the notification and a card-less client show, and the settlement rewrites it
+/// (`settle_approval_card_in_tx`). Its author — an agent, here — is a channel member and the
+/// author, and still may neither rewrite it nor grow it as a stream; the same agent's text
+/// message is edited and streamed as before.
+///
+/// Revert: drop the `is_approval_card` check from `edit_message_in_tx` or from
+/// `stream_message_body_in_tx` and the matching refusal below becomes an `Ok` that changed
+/// the sentence.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn an_approval_card_is_not_rewritten_by_its_author_but_a_text_message_still_is() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fx = seed_fixture(&su, "agent").await;
+    let agent = fx.other;
+    let (ws, ch) = (fx.ws, fx.ch);
+
+    let card = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            let new_card = NewMessage {
+                message_type: MessageType::ApprovalRequest,
+                ..NewMessage::text(ch, agent, "채널을 만들어도 될까요? · 「qa」")
+            };
+            Ok::<_, DbError>(send_message_in_tx(conn, ws, new_card).await?.message)
+        })
+    })
+    .await
+    .expect("the agent's card");
+    let answer = seed_sent_message(&app, ws, ch, agent, "answer").await;
+    let (card_id, answer_id) = (card.id, answer.id);
+    let slice = |rev: i64, is_final: bool| StreamEdit {
+        rev,
+        is_final,
+        outcome: None,
+        provisional: false,
+    };
+
+    let (edit, stream) = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            let edit = edit_message_in_tx(conn, ws, card_id, agent, "누르면 모두 지워져요")
+                .await?
+                .expect_err("the author of a card may not rewrite its sentence");
+            let stream = stream_message_body_in_tx(
+                conn,
+                ws,
+                card_id,
+                agent,
+                "누르면 모두 지워져요",
+                slice(1, false),
+            )
+            .await?
+            .expect_err("nor may it grow the card as a stream");
+            Ok::<_, DbError>((edit, stream))
+        })
+    })
+    .await
+    .expect("both refusals");
+    assert_eq!(edit, InteractionRefused::ApprovalCardOwned);
+    assert_eq!(stream, InteractionRefused::ApprovalCardOwned);
+
+    let (body, state, edits): (Option<String>, String, i64) = sqlx::query_as(
+        "SELECT body, state::text, \
+                (SELECT count(*) FROM outbox WHERE partition_key = $2 \
+                    AND payload->'data'->>'type' = 'message.edited') \
+           FROM message WHERE id = $1",
+    )
+    .bind(card_id)
+    .bind(ch)
+    .fetch_one(&su)
+    .await
+    .expect("read the card");
+    assert_eq!(body.as_deref(), Some("채널을 만들어도 될까요? · 「qa」"));
+    assert_eq!(
+        state, "sent",
+        "a refused edit does not mark the card edited"
+    );
+    assert_eq!(edits, 0, "and publishes no frame");
+
+    // A non-author is still told it is not the author — the card kind is not leaked to them.
+    let stranger = fx.author;
+    let stranger_refusal = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            Ok::<_, DbError>(
+                edit_message_in_tx(conn, ws, card_id, stranger, "mine now")
+                    .await?
+                    .expect_err("not the author"),
+            )
+        })
+    })
+    .await
+    .expect("refusal");
+    assert_eq!(stranger_refusal, InteractionRefused::NotAuthorForEdit);
+
+    // The control: the same agent's text message is edited, and streamed, as before.
+    with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            edit_message_in_tx(conn, ws, answer_id, agent, "answer, revised")
+                .await?
+                .expect("an agent edits its own text message");
+            stream_message_body_in_tx(
+                conn,
+                ws,
+                answer_id,
+                agent,
+                "answer, streamed",
+                slice(1, true),
+            )
+            .await?
+            .expect("and streams it");
+            Ok::<_, DbError>(())
+        })
+    })
+    .await
+    .expect("the text message is still the author's to write");
 }
 
 // ---------------------------------------------------------------------------
