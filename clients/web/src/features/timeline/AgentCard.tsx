@@ -9,6 +9,8 @@ import {
   expiryPhase,
   expirySoonCopy,
   reproposeDraft,
+  closedCardReproposeReason,
+  type ReproposeReason,
 } from "@momo/core/features/approvals/expiry";
 import {
   ACCESS_WIDENING_NOTE,
@@ -18,6 +20,7 @@ import {
   WORKSPACE_WIDE_NOTE,
   WORKSPACE_WIDE_VALUE,
 } from "@momo/core/features/approvals/actionRows";
+import { uuidEq } from "@momo/core/lib/api";
 import { attachParticle } from "@momo/core/lib/koreanParticle";
 import { useExpiryNow } from "./useExpiryNow";
 import {
@@ -338,15 +341,85 @@ function ApprovalNoteLine({
 }
 
 /**
- * 만료된 승인 카드가 컨트롤 대신 서는 자리 (#3738).
- *
- * 승인은 죽었고 사람이 할 수 있는 일은 하나다: 그 에이전트에게 다시 제안해 달라고
- * 청하는 것. 버튼은 **입력창에 초안을 넣을 뿐 보내지 않는다** — 멘션 한 줄이라도
- * 사람의 이름으로 나가는 메시지이고, 보내기 전에 한 줄을 덧붙일 수 있어야 한다.
- * 입력창에 쓰던 글이 있으면 덮지 않고 그 사실을 말한다(`seedComposerText`).
- *
- * 올린 이가 에이전트로 풀리지 않으면(디렉터리에 없음) 버튼을 세우지 않는다. 누르면
- * 아무 일도 없는 컨트롤은 고장 난 버튼으로 읽힌다.
+ * 「다시 요청」이 서는 곳: 카드를 올린 이가 에이전트로 풀리고 카드가 선 채널을 알 때만 있다. 올린 이가
+ * 에이전트로 풀리지 않으면(디렉터리에 없음) 단추를 세우지 않는다. 누르면 아무 일도 없는 컨트롤은 고장 난
+ * 버튼으로 읽힌다.
+ */
+function reproposeTarget(card: AgentApprovalCard, directory: Directory) {
+  const requester =
+    card.requestedByMemberId !== undefined
+      ? memberFor(directory, card.requestedByMemberId)
+      : null;
+  const channelId = card.channelId;
+  return requester?.kind === "agent" && channelId !== undefined
+    ? { agent: requester, channelId }
+    : null;
+}
+
+/**
+ * 「다시 요청」 단추 (#3738, #4986). 승인이 죽었거나 일이 안 됐을 때 사람이 할 수 있는 일은 하나다: 그
+ * 에이전트에게 다시 해 달라고 청하는 것. 버튼은 **입력창에 초안을 넣을 뿐 보내지 않는다** — 멘션 한 줄이라도
+ * 사람의 이름으로 나가는 메시지이고, 보내기 전에 한 줄을 덧붙일 수 있어야 한다. 입력창에 쓰던 글이 있으면
+ * 덮지 않고 그 사실을 말한다(`seedComposerText`). 이유(`reason`)마다 초안 문장이 다르고, 생략하면 만료다.
+ */
+function ReproposeButton({
+  target,
+  reason,
+  className,
+}: {
+  target: NonNullable<ReturnType<typeof reproposeTarget>>;
+  reason?: ReproposeReason;
+  className: string;
+}) {
+  const { workspaceId } = useSession();
+  const [result, setResult] = useState<"idle" | "seeded" | "busy">("idle");
+  const { agent, channelId } = target;
+  return (
+    <div className={className}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="tap-target self-start"
+        data-testid="approval-repropose"
+        onClick={() =>
+          setResult(
+            seedComposerText(
+              workspaceId,
+              channelId,
+              reproposeDraft(agent.handle, reason)
+            )
+              ? "seeded"
+              : "busy"
+          )
+        }
+      >
+        {REPROPOSE_LABEL}
+      </Button>
+      {result === "seeded" && (
+        <p
+          role="status"
+          className="text-meta text-ink-muted"
+          data-testid="approval-repropose-note"
+        >
+          입력창에 넣어 뒀어요. 보내면 {attachParticle(agent.displayName, "subject")} 다시 제안해요.
+        </p>
+      )}
+      {result === "busy" && (
+        <p
+          role="status"
+          className="text-meta text-ink-muted"
+          data-testid="approval-repropose-note"
+        >
+          입력창에 쓰던 글이 있어서 넣지 못했어요. 비우고 다시 눌러 주세요.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 만료된 승인 카드가 컨트롤 대신 서는 자리 (#3738). 승인은 죽었으니 이유 문장 아래에 「다시 요청」이 선다.
  */
 function ExpiredApprovalFooter({
   card,
@@ -355,59 +428,36 @@ function ExpiredApprovalFooter({
   card: AgentApprovalCard;
   directory: Directory;
 }) {
-  const { workspaceId } = useSession();
-  const [result, setResult] = useState<"idle" | "seeded" | "busy">("idle");
-  const requester =
-    card.requestedByMemberId !== undefined
-      ? memberFor(directory, card.requestedByMemberId)
-      : null;
-  const agent = requester?.kind === "agent" ? requester : null;
-  const channelId = card.channelId;
+  const target = reproposeTarget(card, directory);
   return (
     <div className="border-t border-line" data-testid="approval-expired">
       <p className="px-3 py-2 text-meta text-ink-muted">{EXPIRED_CARD_COPY}</p>
-      {agent !== null && channelId !== undefined && (
-        <div className="flex flex-col gap-1 px-3 pb-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="tap-target self-start"
-            data-testid="approval-repropose"
-            onClick={() =>
-              setResult(
-                seedComposerText(
-                  workspaceId,
-                  channelId,
-                  reproposeDraft(agent.handle)
-                )
-                  ? "seeded"
-                  : "busy"
-              )
-            }
-          >
-            {REPROPOSE_LABEL}
-          </Button>
-          {result === "seeded" && (
-            <p
-              role="status"
-              className="text-meta text-ink-muted"
-              data-testid="approval-repropose-note"
-            >
-              입력창에 넣어 뒀어요. 보내면 {attachParticle(agent.displayName, "subject")} 다시 제안해요.
-            </p>
-          )}
-          {result === "busy" && (
-            <p
-              role="status"
-              className="text-meta text-ink-muted"
-              data-testid="approval-repropose-note"
-            >
-              입력창에 쓰던 글이 있어서 넣지 못했어요. 비우고 다시 눌러 주세요.
-            </p>
-          )}
-        </div>
+      {target !== null && (
+        <ReproposeButton target={target} className="flex flex-col gap-1 px-3 pb-2" />
       )}
+    </div>
+  );
+}
+
+/**
+ * 거부·실패로 닫힌 카드의 다음 행동 (#4986). 요청 고리 상태표(agent-request-loop §2.2)는 두 상태의 다음
+ * 행동을 「다시 요청」으로 정한다. 무슨 일인지는 카드 본문(`request-bundle-result`)이 이미 말하므로 여기는
+ * 단추만 선다 — 만료처럼 이유 문장을 덧붙이면 같은 카드에 문장이 둘이다. 단추를 세울 수 없으면 서 있을 것이 없다.
+ */
+function ClosedCardNextAction({
+  card,
+  directory,
+  reason,
+}: {
+  card: AgentApprovalCard;
+  directory: Directory;
+  reason: ReproposeReason;
+}) {
+  const target = reproposeTarget(card, directory);
+  if (target === null) return null;
+  return (
+    <div className="border-t border-line" data-testid="approval-closed-next">
+      <ReproposeButton target={target} reason={reason} className="flex flex-col gap-1 px-3 py-2" />
     </div>
   );
 }
@@ -503,6 +553,14 @@ function ApprovalBody({
   const decidedAtMs = receipt?.decidedAtMs ?? card.decidedAtMs;
   const decidedById = receipt?.decidedByMemberId ?? card.decidedByMemberId;
   const decidedBy = decidedById ? memberFor(directory, decidedById) : null;
+  // 거부·실패로 닫힌 카드의 다음 행동은 「다시 요청」이다 (#4986, 요청 고리 상태표 §2.2). 거부는 거부한
+  // 사람 본인에게는 세우지 않는다: 다음 행동은 요청한 쪽의 몫이고, 방금 스스로 닫은 사람에게는 되돌릴 것이 없다.
+  const iDecided = decidedById !== undefined && uuidEq(decidedById, session.member.id);
+  const closedReason = bundle ? closedCardReproposeReason(bundle.state, iDecided) : null;
+  const nextAction =
+    closedReason !== null ? (
+      <ClosedCardNextAction card={card} directory={directory} reason={closedReason} />
+    ) : null;
 
   // 카드가 컨트롤 대신 말할 줄. 판정도 순서도 코어가 진다 (design-review M-3).
   // 이 파일이 삼항 사슬로 들고 있던 동안 폰이 자기 파일에 같은 사슬을 갖고 있었고,
@@ -587,6 +645,7 @@ function ApprovalBody({
                 className="border-t border-line"
               />
             )}
+            {nextAction}
           </>
         ) : expired ? (
           <ExpiredApprovalFooter card={card} directory={directory} />
@@ -595,7 +654,8 @@ function ApprovalBody({
           // 저장소가 몰라도 컨트롤이 서지 않는다. 결정 사실은 아래 원장 줄이 말한다.
           // 이 분기가 없던 때는 영수증(이번 세션의 결정)이 없는 옛 카드가 `note === null`로
           // 떨어져 거부/승인 버튼을 다시 그렸다.
-          null
+          // 다만 거부·실패로 닫힌 카드는 컨트롤 대신 다음 행동(「다시 요청」)이 선다 (#4986).
+          nextAction
         ) : card.approvalId !== null && (bundle?.canDecide ?? true) ? (
           <>
             {phase === "soon" && card.expiresAtMs !== undefined && (

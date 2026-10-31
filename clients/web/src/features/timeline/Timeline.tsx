@@ -64,7 +64,7 @@ import { useEndedRuns } from "@/features/agents/endedRuns";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
 import { runAnswerMap } from "@momo/core/features/agents/triggerChip";
-import { shouldFoldBundleLine } from "@momo/core/features/timeline/requestBundle";
+import { presentableRows } from "@momo/core/features/timeline/toolCallSettle";
 import { runStatusForMessage } from "./runStatus";
 
 import {
@@ -449,7 +449,7 @@ export function Timeline({
 
   const items = useMemo(() => {
     const folded = foldDeletedRuns(
-      buildTimelineItems(mainMessages.filter((message) => !shouldFoldBundleLine(message, mainMessages)), {
+      buildTimelineItems(presentableRows(mainMessages), {
         lastReadSeq,
         unreadCount,
         recoveryMarkers,

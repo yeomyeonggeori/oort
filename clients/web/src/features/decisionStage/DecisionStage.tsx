@@ -205,8 +205,11 @@ export function DecisionStage({ request, open, onClose }: {
       >
         <div ref={hero.backdrop} aria-hidden="true" className={cn("pointer-events-none absolute inset-0 bg-lightbox-stage", (stage.phase === "opening" || stage.phase === "closed") && "opacity-0")} />
         <div className="decision-stage-layout relative min-w-0">
-          <header className="flex items-center justify-between gap-3" data-desktop-shell={IS_TAURI ? "" : undefined}>
-            <DialogTitle className="glass rounded-full px-4 py-2 text-meta">결정 보기</DialogTitle>
+          <header className="flex items-center justify-end gap-3" data-desktop-shell={IS_TAURI ? "" : undefined}>
+            {/* 눌리는 것만 눌리는 모양이다 (#4986). 이 제목은 닫기 단추와 같은 유리 알약이고 동사구(「결정 보기」)라
+                누르는 단추로 읽혔다. 대화상자의 이름은 낭독용으로 두고(사진 라이트박스와 같은 문법), 눈에 보이는
+                첫 줄은 카드의 질문이다. */}
+            <DialogTitle className="sr-only">결정 보기</DialogTitle>
             <Button ref={closeRef} type="button" variant="ghost" size="icon" className="glass tap-target" aria-label="결정 무대 닫기" onClick={requestClose}>
               <X className="size-4" aria-hidden="true" />
             </Button>
@@ -239,7 +242,9 @@ export function DecisionStage({ request, open, onClose }: {
                     </dl>
                     {current.bundle.details.withheld > 0 ? <p className="text-ink-muted">민감한 실행 정보는 표시하지 않아요.</p> : null}
                   </details>
-                  <p className="break-keep text-meta text-ink-muted">{current.bundle.quietLine}</p>
+                  {/* 타임라인 카드의 「자세히」는 펼침 단추다. 무대의 펼침은 위의 「생각 줄 · 자세히」 하나뿐이라, 같은
+                      글자를 눌리지 않는 줄에 또 그리지 않는다(#4986). */}
+                  {current.bundle.remainingLine ? <p className="break-keep text-meta text-ink-muted" data-testid="decision-stage-remaining">{current.bundle.remainingLine}</p> : null}
                   {entry.card.action?.requiredRole ? <p className="text-meta text-ink-muted">{approvalRoleCopy(entry.card.action.requiredRole)}</p> : null}
                   {entry.card.isReversible !== undefined ? <p className="text-meta">{entry.card.isReversible ? "되돌릴 수 있어요" : "실행하면 되돌릴 수 없어요"}</p> : null}
                   {entry.card.estimatedMicroUsd !== undefined ? <p className="text-meta">예상 비용 <span data-numeric="" className="font-mono">{formatMicroUsd(entry.card.estimatedMicroUsd)}</span></p> : null}
@@ -267,18 +272,20 @@ export function DecisionStage({ request, open, onClose }: {
               </div>
             ) : null}
           </div>
-          <nav aria-label="결정 넘겨 보기" className="flex min-w-0 flex-col items-center gap-2">
+          {/* 넘겨 볼 결정이 없으면(로딩·오류·빈 무대) 줄 자체를 세우지 않는다. 눌러도 아무 일 없는 화살표와 「0건」이
+              불러오는 동안 서 있었다 (#4986). */}
+          {model.cards.length > 0 ? <nav aria-label="결정 넘겨 보기" className="flex min-w-0 flex-col items-center gap-2">
             <div className="flex max-w-full items-center gap-2">
-              <Button type="button" variant="ghost" size="icon" className="glass shrink-0" aria-label="이전 결정" aria-disabled={model.index <= 0 || undefined} onClick={() => move("previous")}><ChevronLeft className="size-4" aria-hidden="true" /></Button>
+              <Button type="button" variant="ghost" size="icon" className="decision-stage-step glass shrink-0" aria-label="이전 결정" aria-disabled={model.index <= 0 || undefined} onClick={() => move("previous")}><ChevronLeft className="size-4" aria-hidden="true" /></Button>
               <div className="decision-stage-thumbnails" role="group" aria-label="결정 썸네일">
-                {model.cards.map((card) => <Button key={card.id} type="button" variant="ghost" className={cn("decision-stage-thumbnail glass shrink-0 px-3", card.id === current?.id && "ring-2 ring-inset ring-signal")} aria-label={card.bundle.headline} aria-current={card.id === current?.id ? "true" : undefined} onClick={() => { if (navigable()) setSelection((previous) => ({ ...previous, selectedId: card.id })); }}>
+                {model.cards.map((card) => <Button key={card.id} type="button" variant="ghost" className="decision-stage-thumbnail glass shrink-0 px-3" aria-label={card.bundle.headline} aria-current={card.id === current?.id ? "true" : undefined} onClick={() => { if (navigable()) setSelection((previous) => ({ ...previous, selectedId: card.id })); }}>
                   <span className="truncate">{card.bundle.headline}</span>{card.bundle.state !== "approval" ? <span className="text-timestamp">{card.bundle.word}</span> : null}
                 </Button>)}
               </div>
-              <Button type="button" variant="ghost" size="icon" className="glass shrink-0" aria-label="다음 결정" aria-disabled={model.index >= model.cards.length - 1 || undefined} onClick={() => move("next")}><ChevronRight className="size-4" aria-hidden="true" /></Button>
+              <Button type="button" variant="ghost" size="icon" className="decision-stage-step glass shrink-0" aria-label="다음 결정" aria-disabled={model.index >= model.cards.length - 1 || undefined} onClick={() => move("next")}><ChevronRight className="size-4" aria-hidden="true" /></Button>
             </div>
             <p role="status" data-numeric="" className="glass rounded-full px-3 py-1 font-mono text-meta">{model.positionLabel}</p>
-          </nav>
+          </nav> : null}
         </div>
       </DialogContent>
     </Dialog>
