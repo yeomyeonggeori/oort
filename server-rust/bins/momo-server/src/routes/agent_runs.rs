@@ -70,6 +70,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use chrono::Utc;
 use momo_agent::approval::is_active_channel_member_in_tx;
 use momo_agent::{
     active_run_cursor_in_tx, agent_run_cursor_is_visible_in_tx, assemble_run_progress,
@@ -93,7 +94,7 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    AgentRunActiveCountsDto, AgentRunActivePageResponse, AgentRunActiveQuery,
+    AgentRunActiveCountsDto, AgentRunActivePageResponse, AgentRunActiveQuery, AgentRunBundleDto,
     AgentRunCancelResponse, AgentRunEventDto, AgentRunEventsQuery, AgentRunEventsResponse,
     AgentRunHistoryQuery, AgentRunListQuery, AgentRunPageResponse, AgentRunProgressDto,
     AgentRunProgressPageResponse, AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto,
@@ -101,6 +102,7 @@ use crate::dto::{
     CreateAgentRunRequest,
 };
 use crate::error::ApiError;
+use crate::routes::run_bundle::run_bundles_in_tx;
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, emit_rail_frame, emit_terminal_agent_status, epoch_ms,
     path_uuid, require_human, run_response, settle_db, workspace_scope, DbRejectable,
@@ -788,6 +790,7 @@ pub async fn progress(
     };
     let limit = validated_run_limit(query.limit.as_deref());
     let member_id = principal.member_id;
+    let now = Utc::now();
 
     let rows = settle_db(
         "agent_runs.progress",
@@ -809,6 +812,7 @@ pub async fn progress(
                     workspace_id,
                     member_id,
                     base,
+                    now,
                 )
                 .await?))
             })
@@ -817,7 +821,10 @@ pub async fn progress(
     )?;
 
     Ok(Json(AgentRunProgressPageResponse {
-        runs: rows.iter().map(progress_dto).collect(),
+        runs: rows
+            .into_iter()
+            .map(|(row, bundle)| progress_dto(&row, bundle))
+            .collect(),
     }))
 }
 
@@ -826,12 +833,16 @@ pub async fn progress(
 /// own predicate and handed to the pure assembly as plain facts (momo-agent owns
 /// no outbox SQL). Shared by the channel read and the workspace "running now"
 /// read so a row's `phase`, `leaseState` and `queuePosition` mean one thing.
+///
+/// Each row comes with its `bundle` (ADR-0186 v6 R-f): one approval of the run, read
+/// for `member_id` as of `now` (`routes::run_bundle`).
 async fn assemble_progress_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     base: Vec<RunProgressBase>,
-) -> Result<Vec<RunProgressRow>, momo_db::DbError> {
+    now: chrono::DateTime<Utc>,
+) -> Result<Vec<(RunProgressRow, Option<AgentRunBundleDto>)>, momo_db::DbError> {
     let wanting_job: Vec<(Uuid, Uuid)> = base
         .iter()
         .filter(|run| matches!(run.summary.status, RunStatus::Queued | RunStatus::Running))
@@ -871,7 +882,16 @@ async fn assemble_progress_in_tx(
         .collect();
     let visible = visible_channels_in_tx(conn, workspace_id, member_id, &queue_channels).await?;
 
-    Ok(assemble_run_progress(base, &jobs, &queue, &visible))
+    let rows = assemble_run_progress(base, &jobs, &queue, &visible);
+    let run_ids: Vec<Uuid> = rows.iter().map(|row| row.summary.id).collect();
+    let mut bundles = run_bundles_in_tx(conn, workspace_id, member_id, &run_ids, now).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let bundle = bundles.remove(&row.summary.id);
+            (row, bundle)
+        })
+        .collect())
 }
 
 /// The pending delivery job behind each `(run, agent)`, keyed by run id.
@@ -899,7 +919,7 @@ async fn job_facts_in_tx(
     )
 }
 
-fn progress_dto(row: &RunProgressRow) -> AgentRunProgressDto {
+fn progress_dto(row: &RunProgressRow, bundle: Option<AgentRunBundleDto>) -> AgentRunProgressDto {
     AgentRunProgressDto {
         id: row.summary.id.to_string(),
         channel_id: row.summary.channel_id.to_string(),
@@ -915,6 +935,7 @@ fn progress_dto(row: &RunProgressRow) -> AgentRunProgressDto {
         last_event_at_ms: row.last_event_at.map(epoch_ms),
         approval_id: row.approval_id.map(|id| id.to_string()),
         approval_expires_at_ms: row.approval_expires_at.map(epoch_ms),
+        bundle,
         end_reason: row.end_reason.clone(),
         queue_position: row.queue_position,
         ahead_total: row.queue_position.map(|_| row.ahead_total),
@@ -988,6 +1009,7 @@ pub async fn active(
     };
     let limit = validated_active_run_limit(query.limit.as_deref());
     let member_id = principal.member_id;
+    let now = Utc::now();
 
     let (rows, next_cursor, counts, totals, claimed) = settle_db(
         "agent_runs.active",
@@ -1016,7 +1038,8 @@ pub async fn active(
                     limit,
                 )
                 .await?;
-                let rows = assemble_progress_in_tx(conn, workspace_id, member_id, base).await?;
+                let rows =
+                    assemble_progress_in_tx(conn, workspace_id, member_id, base, now).await?;
 
                 let counts =
                     visible_active_run_counts_in_tx(conn, workspace_id, member_id, scope).await?;
@@ -1075,7 +1098,10 @@ pub async fn active(
         .collect();
 
     Ok(Json(AgentRunActivePageResponse {
-        runs: rows.iter().map(progress_dto).collect(),
+        runs: rows
+            .into_iter()
+            .map(|(row, bundle)| progress_dto(&row, bundle))
+            .collect(),
         agents,
         next_cursor: next_cursor.map(|id| id.to_string()),
     }))

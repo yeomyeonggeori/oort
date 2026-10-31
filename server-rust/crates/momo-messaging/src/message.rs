@@ -255,6 +255,16 @@ pub struct ThreadRollup {
     /// How many **distinct** members have replied (no upper bound), so a client can write "+2"
     /// after the faces. `participant_ids.len()` is `min(participant_count, 3)`.
     pub participant_count: i32,
+    /// #4889 stage 2 — the **viewer's** count of replies they have not read (owner 10-31 23:49):
+    /// `Some(n)` only for a thread the viewer follows (`auto` / `followed`; `0` is a real answer),
+    /// `None` for a thread they do not follow and everywhere the summary is not built for one reader.
+    ///
+    /// **Not part of the shared rollup.** [`thread_rollup`] always leaves it `None`, and the one
+    /// producer that fills it is the history page for a reader
+    /// ([`crate::thread_follow::attach_unread_reply_counts`]). `thread.updated` is one publication on
+    /// the channel for everybody ([`build_thread_updated_payload`]), so it cannot carry a number that
+    /// differs per person and never does — a client that wants the live value re-reads the page.
+    pub unread_reply_count: Option<i64>,
 }
 
 /// Swift `MessageRoutes.threadRollup` (:990-1006): all three parts or nothing.
@@ -279,6 +289,7 @@ fn thread_rollup(
                 reply_count,
                 last_reply_seq,
                 last_reply_at_ms,
+                unread_reply_count: None,
                 participant_count: i32::try_from(participants.len()).unwrap_or(i32::MAX),
                 participant_ids: participants
                     .into_iter()
@@ -2740,6 +2751,7 @@ mod tests {
                 last_reply_at_ms: 1_700_000_000_000,
                 participant_ids: vec![who],
                 participant_count: 1,
+                unread_reply_count: None,
             })
         );
         assert_eq!(thread_rollup(Some(0), Some(9), Some(1), None), None);
@@ -2959,8 +2971,18 @@ mod tests {
             last_reply_at_ms: 1_700_000_000_123,
             participant_ids: vec![newest, older],
             participant_count: 5,
+            // A reader-specific value on the rollup must never leak into the one publication every
+            // member of the channel receives (#4889 stage 2): asserted below.
+            unread_reply_count: Some(3),
         };
         let payload = build_thread_updated_payload(ws, ch, root, &rollup);
+        assert!(
+            payload["data"]["payload"]
+                .get("unread_reply_count")
+                .is_none(),
+            "thread.updated is one frame for the whole channel: it cannot say how many replies \
+             one reader has not read: {payload}"
+        );
 
         assert_eq!(payload["channel"], json!(cent_channel(ws, ch)));
         assert_eq!(payload["data"]["type"], json!("thread.updated"));

@@ -20,9 +20,12 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use momo_auth::Principal;
-use momo_messaging::{set_thread_follow_in_tx, FollowRefused, ThreadRootInvalid};
+use momo_messaging::{
+    mark_thread_read_in_tx, set_thread_follow_in_tx, FollowRefused, ThreadReadState,
+    ThreadRootInvalid,
+};
 
-use crate::dto::ThreadFollowDto;
+use crate::dto::{ThreadFollowDto, ThreadReadRequestDto, ThreadReadStateDto};
 use crate::error::ApiError;
 use crate::routes::shared::{
     agent_tenant_tx, path_uuid, require_human, settle_db, workspace_scope, DbRejectable,
@@ -83,6 +86,64 @@ async fn write(
 
     let following = settle_db("thread_follow.write", outcome)?;
     Ok(Json(ThreadFollowDto { following }))
+}
+
+/// `PUT …/messages/{root}/read` — 「여기까지 읽었어요」 (#4889 stage 2, owner 10-31 23:49): move the
+/// caller's read position in the thread **forward** to `last_read_reply_seq` and answer with where it
+/// now stands (`{following, last_read_reply_seq?, unread_reply_count?}`).
+///
+/// The same door as the follow verbs: human bearer only, the thread read's guard order (workspace scope
+/// → live channel member, the same bytes for a channel that does not exist → the root), nothing
+/// broadcast, audited or rate-budgeted. It writes **no new row**: for a thread the caller does not
+/// follow it changes nothing and answers `{following: false}` — a client may send it without knowing
+/// whether it follows. A DM is the same no-op (there are no follow rows there). A negative position is
+/// `400`.
+pub async fn mark_read(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel, root)): Path<(String, String, String)>,
+    Json(body): Json<ThreadReadRequestDto>,
+) -> Result<Json<ThreadReadStateDto>, ApiError> {
+    require_human(&principal, "thread read requires a human bearer")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    let root_id = path_uuid(&root, "invalid thread root id")?;
+    if body.last_read_reply_seq < 0 {
+        return Err(ApiError::bad_request(
+            "last_read_reply_seq must be non-negative",
+        ));
+    }
+    let member_id = principal.member_id;
+    let requested = body.last_read_reply_seq;
+
+    let outcome: DbRejectable<ThreadReadState> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                Ok(
+                    match mark_thread_read_in_tx(
+                        conn,
+                        workspace_id,
+                        channel_id,
+                        root_id,
+                        member_id,
+                        requested,
+                    )
+                    .await?
+                    {
+                        Ok(read) => Ok(read),
+                        Err(refused) => Err(refusal(refused)),
+                    },
+                )
+            })
+        })
+        .await;
+
+    let read = settle_db("thread_follow.read", outcome)?;
+    Ok(Json(ThreadReadStateDto {
+        following: read.following,
+        last_read_reply_seq: read.last_read_reply_seq,
+        unread_reply_count: read.unread_reply_count,
+    }))
 }
 
 fn refusal(refused: FollowRefused) -> ApiError {

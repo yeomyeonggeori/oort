@@ -7,7 +7,6 @@ import {
   migrateLinkPreviewPreference,
   reloadLinkPreviewPreferenceForTest,
   setLinkPreviewPreference,
-  unfurlCardLayout,
 } from "./linkPreviewPreference";
 
 class MemoryStorage {
@@ -35,11 +34,20 @@ describe("migrateLinkPreviewPreference", () => {
     expect(migrateLinkPreviewPreference(null, "old-value")).toBe("compact");
   });
 
-  it("defaults an unset store to rich, including never-toggled existing users", () => {
-    expect(migrateLinkPreviewPreference(null, null)).toBe("rich");
+  it("defaults an unset store to compact (작게), including never-toggled existing users (#4882)", () => {
+    expect(DEFAULT_LINK_PREVIEW_PREFERENCE).toBe("compact");
+    expect(migrateLinkPreviewPreference(null, null)).toBe("compact");
     expect(migrateLinkPreviewPreference(undefined, undefined)).toBe(
       DEFAULT_LINK_PREVIEW_PREFERENCE
     );
+  });
+
+  it("keeps a person who chose 크게 on it: the stored key wins over the new default", () => {
+    expect(migrateLinkPreviewPreference("rich", null)).toBe("rich");
+    const storage = new MemoryStorage();
+    storage.setItem(LINK_PREVIEW_STORAGE_KEY, "rich");
+    reloadLinkPreviewPreferenceForTest(storage);
+    expect(linkPreviewPreference()).toBe("rich");
   });
 
   it("lets a valid 3-value key win over a leftover boolean key", () => {
@@ -75,31 +83,20 @@ describe("boolean → 3-value round trip", () => {
   it("writes the 3-value key and reloads it", () => {
     const storage = new MemoryStorage();
     reloadLinkPreviewPreferenceForTest(storage);
-    expect(linkPreviewPreference()).toBe("rich");
-
-    setLinkPreviewPreference("compact", storage);
-    expect(storage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBe("compact");
-    reloadLinkPreviewPreferenceForTest(storage);
     expect(linkPreviewPreference()).toBe("compact");
+
+    setLinkPreviewPreference("rich", storage);
+    expect(storage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBe("rich");
+    reloadLinkPreviewPreferenceForTest(storage);
+    expect(linkPreviewPreference()).toBe("rich");
 
     setLinkPreviewPreference("off", storage);
     reloadLinkPreviewPreferenceForTest(storage);
     expect(linkPreviewPreference()).toBe("off");
 
-    setLinkPreviewPreference("rich", storage);
+    setLinkPreviewPreference("compact", storage);
     reloadLinkPreviewPreferenceForTest(storage);
-    expect(linkPreviewPreference()).toBe("rich");
-  });
-});
-
-describe("unfurlCardLayout", () => {
-  it("paints the rich frame when asked, and compact otherwise", () => {
-    expect(unfurlCardLayout("rich", false)).toBe("compact");
-    expect(unfurlCardLayout("rich", true)).toBe("rich");
-    expect(unfurlCardLayout("compact", true)).toBe("compact");
-    expect(unfurlCardLayout("compact", false)).toBe("compact");
-    expect(unfurlCardLayout("off", true)).toBe("none");
-    expect(unfurlCardLayout("off", false)).toBe("none");
+    expect(linkPreviewPreference()).toBe("compact");
   });
 });
 
@@ -107,11 +104,11 @@ describe("setLinkPreviewPreference", () => {
   it("writes even when the chosen value is already the in-memory default", () => {
     const storage = new MemoryStorage();
     reloadLinkPreviewPreferenceForTest(storage);
-    expect(linkPreviewPreference()).toBe("rich");
+    expect(linkPreviewPreference()).toBe("compact");
     expect(storage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBeNull();
 
-    setLinkPreviewPreference("rich", storage);
-    expect(storage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBe("rich");
-    expect(linkPreviewPreference()).toBe("rich");
+    setLinkPreviewPreference("compact", storage);
+    expect(storage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBe("compact");
+    expect(linkPreviewPreference()).toBe("compact");
   });
 });
