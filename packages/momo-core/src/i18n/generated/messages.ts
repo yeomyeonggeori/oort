@@ -195,6 +195,7 @@ export const messageKeys = [
   "settings.profile.languageLabel",
   "settings.profile.languageLoadError",
   "settings.profile.languagePartialNotice",
+  "settings.profile.languageReload",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem"
 ] as const;
@@ -431,6 +432,7 @@ export const argumentSpecs = {
   "settings.profile.languageLabel": {},
   "settings.profile.languageLoadError": {},
   "settings.profile.languagePartialNotice": {},
+  "settings.profile.languageReload": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {}
 } as const;
@@ -631,6 +633,7 @@ export interface MessageArgs {
   "settings.profile.languageLabel": Record<string, never>;
   "settings.profile.languageLoadError": Record<string, never>;
   "settings.profile.languagePartialNotice": Record<string, never>;
+  "settings.profile.languageReload": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
 }
