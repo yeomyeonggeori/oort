@@ -41,9 +41,9 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
     channel_pins, channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit,
-    delete_message_in_tx, edit_message_in_tx, is_channel_member, list_channel_page,
-    list_thread_replies, open_stream_run_id, parse_replies_cursor, set_pin_in_tx,
-    set_reaction_in_tx, stream_message_body_in_tx, validate_harness_refine,
+    delete_message_in_tx, edit_message_in_tx, is_channel_member, is_following_thread_in_tx,
+    list_channel_page, list_thread_replies, open_stream_run_id, parse_replies_cursor,
+    set_pin_in_tx, set_reaction_in_tx, stream_message_body_in_tx, validate_harness_refine,
     validate_reaction_emoji, validate_replies_root_in_tx, AttachmentLinkRejected,
     ChannelRestriction, HarnessRefine, HarnessRefineInvalid, HistoryCursor, InteractionMessage,
     InteractionRefused, MessageAttachment, MessageType, NewMessage, PagedMessage, PinAction,
@@ -121,6 +121,14 @@ pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
             key,
             "origin" | "target_member_id" | "requested_for" | "dm_admission_id"
         )
+        // ADR-0186 증보 v6 R-e: the channel's one-line result of an approval. `announce: true`
+        // is what keeps its push silent (`momo_push` judgment) and `bundle_of` names the approval
+        // it is the notice of — a member who could write either could silence their own
+        // message's push, or dress a message as the notice of somebody's approval.
+        // ADR-0204 증보 6 D6-2: `decision_mode` is the word an approval card's buttons read
+        // (`inline` | `open`), written by the server beside the approval it describes. A message
+        // that carried a forged one would tell a client which way to draw somebody's decision.
+        || matches!(key, "announce" | "bundle_of" | "decision_mode")
         // ADR-0218 appendix B / ADR-0186 v8: `action.expression` (the candidates a person is
         // asked to choose from) and `result.expression` (what was saved) are written only by
         // the server, inside an approval card's own transaction. A plain message can carry
@@ -1022,7 +1030,7 @@ pub async fn replies(
 
     // Guard and read share one transaction, so a caller removed from the
     // channel mid-flight cannot still receive the page their check passed for.
-    let (page, ended_runs) = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+    let replied = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             // ADR-0216 D4 · R11 — the reach is the restriction ∩ today's membership, and
             // a channel outside it takes the non-member branch itself: same status, same
@@ -1049,7 +1057,11 @@ pub async fn replies(
             let ended =
                 terminal_run_ids_in_tx(conn, workspace_id, &open_stream_runs(&page.messages))
                     .await?;
-            Ok((page, ended))
+            // ADR-0206 증보 1 F8 — the caller's own follow state, read beside the page it
+            // annotates (same transaction, one primary-key lookup).
+            let following =
+                is_following_thread_in_tx(conn, workspace_id, root_id, principal.member_id).await?;
+            Ok((page, ended, following))
         })
     })
     .await
@@ -1057,6 +1069,7 @@ pub async fn replies(
         SendFailure::Rejected(rejection) => rejection,
         SendFailure::Db(error) => db_error("messages.replies", error),
     })?;
+    let (page, ended_runs, following) = replied;
 
     Ok(Json(ThreadRepliesPage {
         messages: page
@@ -1065,6 +1078,7 @@ pub async fn replies(
             .map(|paged| paged_dto(paged, true, &ended_runs))
             .collect(),
         next_cursor: page.next_cursor,
+        following,
     }))
 }
 
@@ -2000,7 +2014,21 @@ mod tests {
         for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
             props.insert(key.to_string(), r#"{"kind":"login_lost"}"#.to_string());
         }
+        // ADR-0204 증보 6 D6-5 — a member cannot silence their own message's push with the
+        // channel's quiet-line marker, nor dress a message as the notice of an approval.
+        props.insert("announce".to_string(), "true".to_string());
+        props.insert(
+            "bundle_of".to_string(),
+            "22222222-2222-4222-8222-222222222222".to_string(),
+        );
+        props.insert("decision_mode".to_string(), "inline".to_string());
         let value = props_value(Some(&props));
+        for key in ["announce", "bundle_of", "decision_mode"] {
+            assert!(
+                value.get(key).is_none(),
+                "{key} is server-owned and must be stripped"
+            );
+        }
         for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
             assert!(
                 value.get(key).is_none(),

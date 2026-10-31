@@ -472,6 +472,18 @@ pub struct RateLimitConfig {
     /// request. The gate runs before the Drive call. 60 is three full 20-file
     /// messages' worth of starts in one window.
     pub upload_start_per_member_limit: u32,
+    /// `RATE_LIMIT_UNFURL_PROXY_PER_MEMBER` (default 240 per window). 0 disables.
+    /// Link-card pictures and icons fetched through the proxy (`GET …/unfurls/{id}/image` and
+    /// `…/icon`), counted **only when the request makes this server fetch from the card's remote
+    /// site**: a picture already in memory, and an address that failed lately, cost the remote
+    /// site nothing and spend nothing. Each one that is spent is up to four GETs from this
+    /// server's address to a site a member chose, which is what the budget keeps from becoming a
+    /// probe of other people's servers. 240 is above what opening a channel cold needs (twenty
+    /// cards on a screen is forty fetches, a picture and an icon each, and every one that
+    /// succeeds is then kept) and four a second sustained; it is the figure a developer token
+    /// gets per window. A request refused here is retried by the client after `Retry-After` and
+    /// shows its fallback meanwhile. See ADR-0170 증보 D13.
+    pub unfurl_proxy_per_member_limit: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -489,6 +501,7 @@ impl Default for RateLimitConfig {
             message_send_per_agent_limit: 600,
             scheduled_write_per_member_limit: 60,
             upload_start_per_member_limit: 60,
+            unfurl_proxy_per_member_limit: 240,
         }
     }
 }
@@ -543,6 +556,9 @@ impl RateLimitConfig {
             upload_start_per_member_limit: lookup("RATE_LIMIT_UPLOAD_START_PER_MEMBER")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.upload_start_per_member_limit),
+            unfurl_proxy_per_member_limit: lookup("RATE_LIMIT_UNFURL_PROXY_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.unfurl_proxy_per_member_limit),
         }
     }
 }
@@ -3970,9 +3986,10 @@ mod tests {
                 defaults.message_send_per_agent_limit,
                 defaults.scheduled_write_per_member_limit,
                 defaults.upload_start_per_member_limit,
+                defaults.unfurl_proxy_per_member_limit,
             ),
-            (120, 600, 60, 60),
-            "a default changed: update ADR-0208 증보 1, docs/api/openapi.yaml and infra/.env.example with it"
+            (120, 600, 60, 60, 240),
+            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 for the last one), docs/api/openapi.yaml and infra/.env.example with it"
         );
         for (name, limit) in [
             (
@@ -3982,6 +3999,7 @@ mod tests {
             ("message send, agent", defaults.message_send_per_agent_limit),
             ("scheduled write", defaults.scheduled_write_per_member_limit),
             ("upload start", defaults.upload_start_per_member_limit),
+            ("unfurl proxy", defaults.unfurl_proxy_per_member_limit),
         ] {
             assert!(
                 limit > 0,
@@ -4045,6 +4063,13 @@ mod tests {
                 ..defaults
             },
             "surrounding whitespace is trimmed, as for every other knob"
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_UNFURL_PROXY_PER_MEMBER", "13")),
+            RateLimitConfig {
+                unfurl_proxy_per_member_limit: 13,
+                ..defaults
+            }
         );
         // 0 is the operator's off switch; a value that is not a number is not one.
         assert_eq!(
