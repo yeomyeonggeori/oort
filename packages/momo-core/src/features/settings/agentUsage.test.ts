@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { authedRequest } from "../../lib/api";
 import {
   agentUsageLine, fetchAgentUsage, hiddenUsageLabel, parseAgentUsage,
-  saveSubscriptionFee, subscriptionAmount, usageForAgent, usageLine, usageTags, usageUsd,
+  saveSubscriptionFee, subscriptionAmount, usageForAgent, usageLine, usageTags,
   type AgentUsageMetrics, type AgentUsageResponse,
 } from "./agentUsage";
+import { formatMicroUsd } from "../timeline/agentCardModel";
 
 vi.mock("../../lib/api", async importOriginal => ({
   ...await importOriginal<typeof import("../../lib/api")>(), authedRequest: vi.fn(),
@@ -20,7 +21,15 @@ const response: AgentUsageResponse = {
 
 describe("agent usage model A", () => {
   it("formats micro USD, tokens without cache double counting, and honest source tags", () => {
-    expect(usageUsd(1)).toContain("0.000001");
+    // 한 금액은 한 가지로 적힌다(#4982): 스레드 카드·결정 무대·웹 사용량 쪽이 이미 쓰는 `formatMicroUsd` 와 글자까지 같다.
+    for (const micro of [0, 1, 999, 1_000, 12_345, 999_999, 1_000_000, 1_234_567, 20_000_000, 1_234_567_890]) {
+      expect(usageLine({ ...measured, costMicroUsd: micro })).toContain(`비용 ${formatMicroUsd(micro)} ·`);
+      expect(agentUsageLine({ ...measured, agentMemberId: "a", subscriptionFee: { monthlyMicroUsd: micro, label: null } }))
+        .toContain(`구독 ${formatMicroUsd(micro)}/월`);
+    }
+    expect(usageLine({ ...measured, costMicroUsd: 1 })).toContain("비용 $0.001 미만 ·"); // 진짜 비용은 0 으로 둥글려지지 않는다
+    expect(usageLine(measured)).toContain("비용 $1.23 ·");
+    expect(usageLine(measured)).not.toMatch(/US\$/);
     expect(usageLine(measured)).toContain("토큰 1,250");
     expect(usageLine(measured)).toContain("캐시 토큰 500 (입력에 포함)");
     expect(usageTags(measured)).toEqual(["정확"]);
@@ -28,6 +37,12 @@ describe("agent usage model A", () => {
     expect(usageTags(mixed)).toEqual(["자기 보고", "추정"]);
     expect(usageLine(mixed)).toContain("이상");
     expect(usageLine(mixed)).toContain("가격 미등록 1개 (비용에서 제외)");
+    // 「미만 이상」은 문장이 아니다: 상한을 말한 금액에는 「이상」을 붙이지 않고, 바닥 위의 부분 합계는 「이상」이다.
+    const partial = { ...measured, estimatedRuns: 1 };
+    expect(usageLine({ ...partial, costMicroUsd: 500 })).toContain("비용 $0.001 미만 ·");
+    expect(usageLine({ ...partial, costMicroUsd: 500 })).not.toContain("미만 이상");
+    expect(usageLine({ ...partial, costMicroUsd: 1_500_000 })).toContain("비용 $1.50 이상 ·");
+    expect(usageLine({ ...measured, costMicroUsd: 1_500_000 })).toContain("비용 $1.50 ·");
     expect(usageTags({ ...measured, unpricedRuns: 1 })).not.toContain("정확");
   });
   it("keeps explicit zero distinct from unreported and subscription separate from spend", () => {
@@ -35,7 +50,7 @@ describe("agent usage model A", () => {
     expect(usageLine({ ...measured, reportedRuns: 0, promptTokens: 0, completionTokens: 0 })).toContain("토큰 미보고");
     expect(usageTags({ ...measured, reportedRuns: 1 })).not.toContain("정확");
     const line = agentUsageLine({ ...measured, agentMemberId: "a", subscriptionFee: {monthlyMicroUsd: 20_000_000, label: null} });
-    expect(line).toContain("1.234567"); expect(line).toContain("구독 US$20.00/월");
+    expect(line).toContain("비용 $1.23"); expect(line).toContain("구독 $20.00/월");
     expect(agentUsageLine({...measured, agentMemberId: "a"}, "subscription")).toContain("구독 (정액 정보 없음)");
   });
   it("retains only the server's visible set and count, without synthesizing workspace totals or identities", () => {
