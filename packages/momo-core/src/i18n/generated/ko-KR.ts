@@ -1038,12 +1038,6 @@ export const catalog: MessageCatalog = {
       "value": "설정으로 돌아가기"
     }
   ],
-  "mobile.locale.permissionNotice": [
-    {
-      "type": 0,
-      "value": "권한 요청 창은 iOS 언어 설정을 따라요. 앱 언어를 바꿔도 바로 바뀌지 않을 수 있어요."
-    }
-  ],
   "mobile.locale.saving": [
     {
       "type": 0,
@@ -1108,12 +1102,6 @@ export const catalog: MessageCatalog = {
       "value": "답글 보내기"
     }
   ],
-  "settings.profile.languageBeta": [
-    {
-      "type": 0,
-      "value": "베타"
-    }
-  ],
   "settings.profile.languageCurrent": [
     {
       "type": 0,
@@ -1145,7 +1133,7 @@ export const catalog: MessageCatalog = {
   "settings.profile.languagePartialNotice": [
     {
       "type": 0,
-      "value": "아직 번역되지 않은 화면은 한국어로 보여요."
+      "value": "일부 화면은 아직 한국어예요."
     }
   ],
   "settings.profile.languageRetry": [

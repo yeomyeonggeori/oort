@@ -3,8 +3,7 @@
   "settings.profile.languageHint": "Applies to all accounts and workspaces in this app.",
   "settings.profile.languageSystem": "Use device language",
   "settings.profile.languageCurrent": "Current language: {languageName}",
-  "settings.profile.languageBeta": "Beta",
-  "settings.profile.languagePartialNotice": "Screens that are not yet translated appear in Korean.",
+  "settings.profile.languagePartialNotice": "Some screens are still in Korean.",
   "settings.profile.languageLoadError": "Could not load the language. Please try again.",
   "settings.profile.languageRetry": "Try again"
 }

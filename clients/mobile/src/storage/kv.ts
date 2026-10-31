@@ -157,8 +157,12 @@ export const NON_SECRET_KEYS = {
    * 편의일 뿐이고, 잃으면 기본값 「내 것」으로 열린다.
    */
   workFilter: 'momo.mobile.work.filter.v1',
-  /** Device preference: rich (default), basic or off. No account data. */
-  hapticMode: 'momo.mobile.haptics.v1',
+  /**
+   * 햅틱 단계(`lib/haptics.ts`): 없으면 풍부. **앱은 이 키에 쓰지 않는다** — 설정의 「햅틱」 선택은 owner 10-31(#4936)에
+   * 없앴고 앱 햅틱은 늘 「풍부」다. 이 키는 시험이 기본·끔 경로를 따로 재는 이음새일 뿐이다. 예전 판이 고른 「기본」·「끔」은
+   * `momo.mobile.haptics.v1` 에 남아 있을 수 있으나 **읽지 않는다**(키를 v2로 올려서 되살아나지 않게 했다). 계정 정보 없음.
+   */
+  hapticMode: 'momo.mobile.haptics.v2',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

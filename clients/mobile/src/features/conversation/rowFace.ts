@@ -18,14 +18,16 @@ import {ds2Radius, type Palette} from '../../design/tokens';
 // 관계: `outer + inner = SAFE_GUTTER` — 내용의 x 는 오늘과 같다(`rowAvatarReserve`, 감사
 // H-11). 세 겹은 모두 **그릇 상자**(= 이 면)를 같은 좌표로 채운다: 눌림은 그릇 안의
 // `rowInner`, 착지는 그릇 자신의 배경, 덮개는 그릇을 꽉 채우는 절대 배치.
+//
+// 색(owner 2026-10-31, #4949): 착지 면은 **경고색(`warn`) 10% 이하의 알파 면**이고 테두리가 없다
+// (`landedFace`). 옛 착지는 `warnSurface` + `warnBorder` 1px 였다 — 알림으로 들어올 때 테두리가
+// 진해서 어색하다는 지적으로 테두리를 없애고, 면도 옅게 했다. 뜻은 그대로다: 「여기를 보라」는
+// `warn` 이 맡고 `accent`(「내가 한 것」)는 입지 않는다(`conversationHygiene`).
 // =============================================================================
 export const ROW_FACE = {
   outer: 6,
   inner: 10,
   radius: ds2Radius.row,
-  /** 착지 면의 테두리 — `warnBorder` 1px. 라이트 3테마에서 `warnSurface` 가 바닥과 1.02~1.04:1 이라
-   * 면만으로는 경계가 안 서서 세운다. 절대 배치 덧그림이라 레이아웃을 1px 도 밀지 않는다. */
-  edge: 1,
 } as const;
 
 /** 눌림 틴트의 불투명도 — Buzz `highlightColor: primary 10%`. */
@@ -61,4 +63,23 @@ export function pressFace(p: PressFaceInput): {color: string; fellBack: boolean}
     return {color: p.accent + a, fellBack: false};
   }
   return {color: p.surface, fellBack: true};
+}
+
+/**
+ * 서 있는 착지 면의 불투명도 — 25/255(≈9.8%). owner 의 상한은 「경고색 10% 이하」(2026-10-31, #4949)이고
+ * hex 한 칸으로 옮기면 26/255(10.2%)가 되어 상한을 넘으므로 한 칸 내렸다. 값은 87개 테마 조합에서 쟀다:
+ * 면이 바닥에서 1.10:1 이상 갈리고(테두리 없이 면만으로 선다), 강조색 말풍선과 2.9:1 이상 갈린다.
+ */
+export const LANDED_TINT_ALPHA = 25 / 255;
+
+/** 시험이 `landedFace` 의 알파가 넘지 않음을 재는 상한 — owner 「강조색 10% 이하」. */
+export const LANDED_TINT_MAX_ALPHA = 0.1;
+
+/**
+ * 서 있는 착지의 면 색 — `warn` 위의 알파 hex(`#rrggbbaa`). 그릇의 배경이자 물러나는 덮개의 색이고,
+ * **테두리는 없다**. 알파라 아래에 깔린 것(바닥·사용자 배경)이 비친다. `warnSurface` 는 칩들의 채움이라
+ * 여기서 쓰지 않는다(다크에서 바닥 대비 1.30~1.46:1 로 진했고 라이트에서는 1.02~1.04:1 로 안 보여 테두리가 필요했다).
+ */
+export function landedFace(p: Pick<Palette, 'warn'>): string {
+  return p.warn + Math.round(LANDED_TINT_ALPHA * 255).toString(16).padStart(2, '0');
 }

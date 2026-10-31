@@ -60,7 +60,9 @@ export const BACKGROUND_GRACE_MS = 15_000;
  * timeout (`timeout`, 5 s), so a retry never waits longer than an attempt may
  * take; with full jitter the mean wait at the ceiling is ~2.7 s instead of ~10 s;
  * and at least two attempts fit inside the 10 s the display holds back its outage
- * sentence (`DISPLAY_GRACE_MS`). Load is the cost: while the API or Centrifugo is
+ * sentence (`DISPLAY_GRACE_MS`). That deadline is not the band's quiet first second
+ * (`CONNECTING_BAND_DELAY_MS`, #4949): the 「연결 중…」 sentence waits one second, the
+ * 「연결이 끊겼습니다」 sentence still waits ten. Load is the cost: while the API or Centrifugo is
  * down, every foreground phone retries about four times as often as before, each
  * retry being a token request (and a handshake once the token route answers).
  * Estimated from the formula, not measured: ~36 attempts per second per hundred

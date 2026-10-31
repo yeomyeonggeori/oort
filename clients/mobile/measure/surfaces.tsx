@@ -3144,8 +3144,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'landed': {
       // #1076: 「방금 여기로 왔다」. 물든 행 하나와 물들지 않은 이웃들이 함께
       // 있어야 이 값이 **띠가 아니라 물듦**이라는 주장이 사진에서 확인된다
-      // (1.13:1 — 계산은 `MessageRow` 의 `rowLanded` 주석과
-      // `__tests__/conversationHygiene.test.tsx` 에 있다).
+      // (바닥 대비 1.10~1.29:1 — 경고색 10% 이하의 면이고 테두리가 없다. 계산은 `MessageRow` 의 `rowLanded` 주석과
+      // `__tests__/messageBubble.test.tsx` 에 있다, #4949).
       const at = (min: number) => NOW - (14 - min) * 60_000;
       const rows = [
         ['앞 줄 — 물들지 않는다.', 0, false],
@@ -3184,7 +3184,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     //   decided  결정 뒤   — 「승인됨」 칩과 영수증, 틴트 없음.
     // 성재가 본 모순은 「승인됨」 옆에서 앰버가 남은 것이었다. 두 번째 사진에서 그 모순이
     // 사라졌는지가 논점이라 두 장을 같은 배치로 찍는다. 물러나는 **시간**(이동이 끝난 뒤
-    // 2초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight.test.tsx`
+    // 1.5초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight.test.tsx`
     // 가 가짜 시계로 잰다. 여기 `landed` 는 목록이 건네는 값을 그대로 건넨 것이다.
     //
     // 바닥은 `ConversationFloor` — 실제 대화 화면의 바닥이다. 틴트는 바닥 위의 **상대적인**

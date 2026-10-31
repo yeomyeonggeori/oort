@@ -282,7 +282,7 @@ describe('the 대화 list, end to end', () => {
     expect(screen.getByTestId('sidebar-row-channel:ch-general')).toHaveTextContent(
       /general@1/,
     );
-    expect(screen.getByLabelText('채널 general, 멘션 1개, 안 읽은 메시지 3개')).toBeTruthy();
+    expect(screen.getByLabelText('#general, 멘션 1개, 새 메시지 3개')).toBeTruthy();
   });
 
   it('offers an agent that has no DM yet', async () => {

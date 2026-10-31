@@ -1,0 +1,32 @@
+appId: app.momo.ios
+name: 4949-notification-landing
+---
+# S5 planner only; worker does not run this flow (#4949, owner 10-31).
+# Landing highlight for a message reached from a notification: a faint face
+# (warn colour at 10% or less), no border, gone about 1.5 s after the list stops
+# moving (Reduce Motion: gone at once, no fade).
+#
+# The simulator cannot tap a lock-screen banner, so the notification itself is
+# the planner's step (a push built like `__tests__/pushTap.test.tsx`, sent with
+# `xcrun simctl push <udid> app.momo.ios <payload.json>`, then tapped). Do it
+# twice: with the app in front and after going to the home screen. Run this
+# flow the moment the conversation has landed on the message.
+#
+#   maestro test -e SCENE=landing clients/mobile/maestro/4949-notification-landing.yaml
+#
+# Capture light and dark. EXPECTED, read from the three captures:
+#   4949-landed-0s     the row carries a faint tint and NO outline
+#   4949-landed-0.7s   still there
+#   4949-landed-2.7s   gone (the approval card keeps its own 「승인 대기」 chip and
+#                      buttons - the tint is an arrival cue, not a status)
+- runFlow:
+    when:
+      true: ${SCENE == 'landing'}
+    commands:
+      - assertVisible:
+          id: message-row
+      - takeScreenshot: 4949-landed-0s
+      - evalScript: ${(function () { var end = new Date().getTime() + 700; while (new Date().getTime() < end) {} return 0; })()}
+      - takeScreenshot: 4949-landed-0.7s
+      - evalScript: ${(function () { var end = new Date().getTime() + 2000; while (new Date().getTime() < end) {} return 0; })()}
+      - takeScreenshot: 4949-landed-2.7s

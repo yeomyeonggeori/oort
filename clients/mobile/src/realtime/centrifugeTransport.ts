@@ -16,7 +16,7 @@ import {
   type RealtimePolicyState,
   type RealtimeSignal,
 } from './backgroundPolicy';
-import {createConnectionDisplay} from './connectionDisplay';
+import {createConnectionDisplay, DISPLAY_GRACE_MS} from './connectionDisplay';
 import {recordRealtimeDiagnostic} from './diagnostics';
 
 // =============================================================================
@@ -93,10 +93,17 @@ export interface RealtimeTransportOptions {
    */
   url: string;
   /**
-   * The status to SHOW: recovering reads `connecting` for ten seconds before
-   * admitting an outage (see `./connectionDisplay.ts`, #4783).
+   * The status to SHOW: recovering reads `connecting` until the ten-second outage
+   * deadline admits an outage (see `./connectionDisplay.ts`, #4783).
    */
   onStatus?: (status: RealtimeStatus) => void;
+  /**
+   * What the BAND may say (#4949): `connected` is silence. Same as `onStatus` except that a
+   * gap is silent for its first second (`CONNECTING_BAND_DELAY_MS`) — a reconnect that is
+   * over by then never puts a sentence on the screen. `onStatus` is not delayed: readers
+   * that ask whether the socket is live still hear `connecting` at once.
+   */
+  onBand?: (band: RealtimeStatus) => void;
   /**
    * Called after every policy transition, with the state that resulted (goal
    * RN-T2).
@@ -132,6 +139,7 @@ export function createRealtimeTransport(
   const {
     url,
     onStatus,
+    onBand,
     onPolicy,
     now = Date.now,
     getToken: fetchToken = () => fetchFreshRealtimeToken(now()),
@@ -145,7 +153,11 @@ export function createRealtimeTransport(
   let disposed = false;
   /** When the current connection reached `connected`, null while it is not. */
   let connectedAt: number | null = null;
-  const display = createConnectionDisplay(status => onStatus?.(status));
+  const display = createConnectionDisplay(
+    status => onStatus?.(status),
+    DISPLAY_GRACE_MS,
+    band => onBand?.(band),
+  );
 
   // Every token centrifuge-js presents comes through here — the first connect,
   // a 109 retry and the scheduled refresh alike.
@@ -230,7 +242,8 @@ export function createRealtimeTransport(
   /**
    * Any departure from `connected` — the reconnect loop (`connecting`) and a
    * deliberate close (`disconnected`, e.g. `force-reconnect`) alike. Both used
-   * to reach the screen instantly; both now go through the display grace.
+   * to reach the screen instantly; both now go through the display: the outage
+   * deadline (ten seconds) and, for the band, a quiet first second (#4949).
    */
   function leave(
     status: 'connecting' | 'disconnected',
@@ -315,7 +328,8 @@ export function createRealtimeTransport(
           // ran late after a real suspension most often finds a socket that
           // is dead anyway, and the reconnect that follows is right. What the
           // person used to SEE (「연결이 끊겼습니다」 for the second it took)
-          // is what the display grace now absorbs (#2751).
+          // is what the display grace now absorbs (#2751), and the band says
+          // nothing at all for the first second of the gap (#4949).
           graceTimer = setTimeout(() => {
             graceTimer = null;
             dispatch({kind: 'grace-elapsed'});

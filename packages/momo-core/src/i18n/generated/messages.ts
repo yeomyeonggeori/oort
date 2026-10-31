@@ -161,7 +161,6 @@ export const messageKeys = [
   "mobile.ios.photoLibraryAddUsage",
   "mobile.ios.photoLibraryUsage",
   "mobile.locale.backToSettings",
-  "mobile.locale.permissionNotice",
   "mobile.locale.saving",
   "reply.card.cancel",
   "reply.card.excerptEmpty",
@@ -172,7 +171,6 @@ export const messageKeys = [
   "reply.card.headerSelf",
   "reply.composer.placeholder",
   "reply.composer.send",
-  "settings.profile.languageBeta",
   "settings.profile.languageCurrent",
   "settings.profile.languageHint",
   "settings.profile.languageLabel",
@@ -370,7 +368,6 @@ export const argumentSpecs = {
   "mobile.ios.photoLibraryAddUsage": {},
   "mobile.ios.photoLibraryUsage": {},
   "mobile.locale.backToSettings": {},
-  "mobile.locale.permissionNotice": {},
   "mobile.locale.saving": {},
   "reply.card.cancel": {},
   "reply.card.excerptEmpty": {},
@@ -383,7 +380,6 @@ export const argumentSpecs = {
   "reply.card.headerSelf": {},
   "reply.composer.placeholder": {},
   "reply.composer.send": {},
-  "settings.profile.languageBeta": {},
   "settings.profile.languageCurrent": {
     "languageName": "string"
   },
@@ -557,7 +553,6 @@ export interface MessageArgs {
   "mobile.ios.photoLibraryAddUsage": Record<string, never>;
   "mobile.ios.photoLibraryUsage": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
-  "mobile.locale.permissionNotice": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
   "reply.card.cancel": Record<string, never>;
   "reply.card.excerptEmpty": Record<string, never>;
@@ -568,7 +563,6 @@ export interface MessageArgs {
   "reply.card.headerSelf": Record<string, never>;
   "reply.composer.placeholder": Record<string, never>;
   "reply.composer.send": Record<string, never>;
-  "settings.profile.languageBeta": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
   "settings.profile.languageHint": Record<string, never>;
   "settings.profile.languageLabel": Record<string, never>;

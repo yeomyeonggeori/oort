@@ -271,14 +271,14 @@ describe('unread counts are the server’s', () => {
   it('spells the counts out for VoiceOver rather than leaving a bare number', () => {
     const sections = buildSidebarSections(input({unreadByChannel: unread}));
     expect(section(sections, 'channels')?.data[0]?.accessibilityLabel).toBe(
-      '채널 general, 멘션 1개, 안 읽은 메시지 3개',
+      '#general, 멘션 1개, 새 메시지 3개',
     );
   });
 
   it('names the state of a private, muted channel', () => {
     const sections = buildSidebarSections(input());
     expect(section(sections, 'channels')?.data[1]?.accessibilityLabel).toBe(
-      '채널 release, 비공개, 알림 꺼짐',
+      '#release, 비공개, 알림 꺼짐',
     );
   });
 });

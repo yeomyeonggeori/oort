@@ -40,7 +40,6 @@ function LanguageControl({ locale }: { locale: AppLocale }) {
         </p>
         {english ? (
           <p className="text-meta text-ink-muted" data-testid="language-partial-notice">
-            <span className="font-semibold">{t("settings.profile.languageBeta")}</span>{" "}
             {t("settings.profile.languagePartialNotice")}
           </p>
         ) : null}

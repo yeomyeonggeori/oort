@@ -48,6 +48,9 @@ export interface HuddleSlot {
  * 연결 띠의 문장. 연결됐으면 아무 말도 하지 않는다 — 정상은 문장을 쓰지 않는다.
  * 옛 `railSubtitle` 이 하던 판정 그대로다(2R M3: 한 번 연결된 뒤의 connecting 은
  * `RealtimeProvider` 가 이미 disconnected 로 내려보낸다).
+ *
+ * 받는 값은 소켓 상태가 아니라 **띠가 말해도 되는 상태**(`useRealtime().bandStatus`)다. 끊긴 지 1초가
+ * 안 됐으면 `connected`(= 말없음)로 내려와, 1초 안에 이어지는 재연결은 띠를 세우지 않는다(#4949).
  */
 export function connectionBannerText(status: RealtimeStatus): string | null {
   if (status === 'connected') return null;
