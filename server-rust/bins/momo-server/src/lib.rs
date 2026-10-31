@@ -811,6 +811,12 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/replies",
             get(routes::messages::replies),
         )
+        // ADR-0206 증보 1 F8 (#4889) — follow a thread, or stop following it. A personal
+        // setting, so the caller is always the bearer and nothing is broadcast.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/follow",
+            put(routes::thread_follow::follow).delete(routes::thread_follow::unfollow),
+        )
         // B11 — the things you can do to a message that is already sent.
         // Message-scoped, not channel-scoped: Swift mounts these under
         // `/workspaces/{ws}/messages/{id}` (`MessageRoutes.swift:28-31`) because

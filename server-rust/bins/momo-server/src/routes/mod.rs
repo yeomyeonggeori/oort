@@ -113,6 +113,8 @@ pub mod shared;
 pub mod sidebar_prefs;
 pub mod subscription_agents;
 pub mod terminal_attach;
+/// ADR-0206 증보 1 / #4889 — `PUT`/`DELETE …/messages/{root}/follow`: follow a thread, or stop.
+pub mod thread_follow;
 /// ADR-0170 — link unfurl settings, message-level remove, image proxy.
 pub mod unfurl;
 pub mod usage;

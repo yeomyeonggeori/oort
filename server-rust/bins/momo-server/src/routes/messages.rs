@@ -41,9 +41,9 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
     channel_pins, channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit,
-    delete_message_in_tx, edit_message_in_tx, is_channel_member, list_channel_page,
-    list_thread_replies, open_stream_run_id, parse_replies_cursor, set_pin_in_tx,
-    set_reaction_in_tx, stream_message_body_in_tx, validate_harness_refine,
+    delete_message_in_tx, edit_message_in_tx, is_channel_member, is_following_thread_in_tx,
+    list_channel_page, list_thread_replies, open_stream_run_id, parse_replies_cursor,
+    set_pin_in_tx, set_reaction_in_tx, stream_message_body_in_tx, validate_harness_refine,
     validate_reaction_emoji, validate_replies_root_in_tx, AttachmentLinkRejected,
     ChannelRestriction, HarnessRefine, HarnessRefineInvalid, HistoryCursor, InteractionMessage,
     InteractionRefused, MessageAttachment, MessageType, NewMessage, PagedMessage, PinAction,
@@ -1001,7 +1001,7 @@ pub async fn replies(
 
     // Guard and read share one transaction, so a caller removed from the
     // channel mid-flight cannot still receive the page their check passed for.
-    let (page, ended_runs) = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+    let replied = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             // ADR-0216 D4 · R11 — the reach is the restriction ∩ today's membership, and
             // a channel outside it takes the non-member branch itself: same status, same
@@ -1028,7 +1028,11 @@ pub async fn replies(
             let ended =
                 terminal_run_ids_in_tx(conn, workspace_id, &open_stream_runs(&page.messages))
                     .await?;
-            Ok((page, ended))
+            // ADR-0206 증보 1 F8 — the caller's own follow state, read beside the page it
+            // annotates (same transaction, one primary-key lookup).
+            let following =
+                is_following_thread_in_tx(conn, workspace_id, root_id, principal.member_id).await?;
+            Ok((page, ended, following))
         })
     })
     .await
@@ -1036,6 +1040,7 @@ pub async fn replies(
         SendFailure::Rejected(rejection) => rejection,
         SendFailure::Db(error) => db_error("messages.replies", error),
     })?;
+    let (page, ended_runs, following) = replied;
 
     Ok(Json(ThreadRepliesPage {
         messages: page
@@ -1044,6 +1049,7 @@ pub async fn replies(
             .map(|paged| paged_dto(paged, true, &ended_runs))
             .collect(),
         next_cursor: page.next_cursor,
+        following,
     }))
 }
 
