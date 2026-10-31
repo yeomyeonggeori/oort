@@ -437,6 +437,9 @@ fn cut_pictures(text: &str, marks: &[usize], with: &str) -> (String, usize) {
     // Everything before `cursor` is decided: kept in `out`, or cut.
     let mut cursor = 0usize;
     let mut cuts = 0usize;
+    // Where a search for an image's closing `)` last ran into the end of its line without finding one
+    // (see [`closing_paren`]).
+    let mut no_close_before = 0usize;
     for &at in marks {
         if at < cursor {
             continue;
@@ -455,11 +458,7 @@ fn cut_pictures(text: &str, marks: &[usize], with: &str) -> (String, usize) {
         if head.ends_with("](") {
             let line_start = head.rfind('\n').map_or(0, |i| i + 1);
             if let Some(open) = head[line_start..head.len() - 2].rfind("![") {
-                let close = text[after_token..]
-                    .split('\n')
-                    .next()
-                    .and_then(|line| line.find(')'))
-                    .map(|i| i + 1);
+                let close = closing_paren(text, after_token, &mut no_close_before);
                 if let Some(close) = close {
                     keep_to = cursor + line_start + open;
                     cut_to = after_token + close;
@@ -473,6 +472,33 @@ fn cut_pictures(text: &str, marks: &[usize], with: &str) -> (String, usize) {
     }
     out.push_str(&text[cursor..]);
     (out, cuts)
+}
+
+/// How far the closing `)` of a markdown image ends, counted from `from` (the end of its address): the
+/// first `)` before the end of the line — a title may sit between — or `None` when the line ends first.
+///
+/// `no_close_before` is the memo that keeps [`cut_pictures`] linear in the text instead of in the text
+/// times the number of addresses: a search that ran into a line end (or the end of the text) without a
+/// `)` leaves the position it stopped at, and a later address that starts before it would stop at the same
+/// place without a `)` again — marks come in increasing order — so it does not search at all. (Looking for
+/// the line end first and then for the `)` inside it read the whole rest of a long line for every address
+/// on it: 12 MiB of closed images on one line took over a minute.)
+fn closing_paren(text: &str, from: usize, no_close_before: &mut usize) -> Option<usize> {
+    if from < *no_close_before {
+        return None;
+    }
+    let rest = &text.as_bytes()[from..];
+    match rest.iter().position(|&b| b == b')' || b == b'\n') {
+        Some(i) if rest[i] == b')' => Some(i + 1),
+        Some(i) => {
+            *no_close_before = from + i;
+            None
+        }
+        None => {
+            *no_close_before = text.len();
+            None
+        }
+    }
 }
 
 /// Remove every `data:image/` address from `text` (the hosted door's cut: nothing stands in its place,
@@ -1485,6 +1511,116 @@ mod tests {
         for answer in answers {
             let ordinary = replace_pictures(&answer, "").expect("an address").text;
             assert_eq!(tidy(&ordinary), open(&answer).clean, "{:.80}", answer);
+        }
+    }
+
+    /// The cut as it was before [`closing_paren`] had its memo (#4908): the line is cut out of the rest of
+    /// the text first and the `)` is searched inside it. Kept here as the reference the faster search is
+    /// held against.
+    fn reference_cut(text: &str, marks: &[usize], with: &str) -> (String, usize) {
+        let mut out = String::with_capacity(text.len());
+        let mut cursor = 0usize;
+        let mut cuts = 0usize;
+        for &at in marks {
+            if at < cursor {
+                continue;
+            }
+            let tail = &text[at..];
+            let token_len = tail
+                .char_indices()
+                .find(|(_, c)| c.is_whitespace() || matches!(c, ')' | '"' | '\'' | '<' | '>'))
+                .map_or(tail.len(), |(i, _)| i);
+            let after_token = at + token_len;
+            let head = &text[cursor..at];
+            let mut keep_to = at;
+            let mut cut_to = after_token;
+            if head.ends_with("](") {
+                let line_start = head.rfind('\n').map_or(0, |i| i + 1);
+                if let Some(open) = head[line_start..head.len() - 2].rfind("![") {
+                    let close = text[after_token..]
+                        .split('\n')
+                        .next()
+                        .and_then(|line| line.find(')'))
+                        .map(|i| i + 1);
+                    if let Some(close) = close {
+                        keep_to = cursor + line_start + open;
+                        cut_to = after_token + close;
+                    }
+                }
+            }
+            out.push_str(&text[cursor..keep_to]);
+            out.push_str(with);
+            cursor = cut_to;
+            cuts += 1;
+        }
+        out.push_str(&text[cursor..]);
+        (out, cuts)
+    }
+
+    /// The memo in [`closing_paren`] changes how long the cut takes and nothing it cuts: held against the
+    /// reference on thousands of generated texts made of the fragments the rule looks at (an image opening,
+    /// the scheme in both cases, a title, a `)` or a line end before or after the address) — and on a
+    /// 4 MiB single line of addresses, closed and unclosed, which the reference needs seconds of
+    /// optimized code for (minutes unoptimized) and the memo needs a blink.
+    #[test]
+    fn the_cut_is_what_it_was_and_stays_linear_in_the_text() {
+        let parts = [
+            "![",
+            "](",
+            "![a](",
+            "data:image/",
+            "DATA:IMAGE/",
+            "png;base64,",
+            "AAAA",
+            " ",
+            ")",
+            "\n",
+            " \"t\" ",
+            "x",
+            "가",
+            "(",
+            "]",
+            "<",
+            "'",
+        ];
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as usize
+        };
+        let mut with_marks = 0usize;
+        for _ in 0..30_000 {
+            let count = 1 + next() % 20;
+            let text: String = (0..count).map(|_| parts[next() % parts.len()]).collect();
+            let marks = data_marks(&text);
+            with_marks += usize::from(!marks.is_empty());
+            assert_eq!(
+                cut_pictures(&text, &marks, "S"),
+                reference_cut(&text, &marks, "S"),
+                "{text:?}"
+            );
+        }
+        assert!(
+            with_marks > 5_000,
+            "the generator reaches the rule: {with_marks}"
+        );
+
+        for unit in [
+            "![a](data:image/png;base64,A ",
+            "![a](data:image/png;base64,A) ",
+        ] {
+            let text = unit.repeat(4 * 1024 * 1024 / unit.len());
+            let started = std::time::Instant::now();
+            let (cut, cuts) = cut_pictures(&text, &data_marks(&text), "S");
+            let took = started.elapsed();
+            assert_eq!(cuts, text.len() / unit.len(), "{unit:?}");
+            assert!(cut.len() < text.len());
+            assert!(
+                took < Duration::from_secs(5),
+                "{unit:?}: {cuts} addresses took {took:?}"
+            );
         }
     }
 
