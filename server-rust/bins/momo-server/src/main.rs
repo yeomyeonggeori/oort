@@ -63,6 +63,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_limit_message_send_per_agent = config.rate_limit.message_send_per_agent_limit,
         rate_limit_scheduled_write_per_member = config.rate_limit.scheduled_write_per_member_limit,
         rate_limit_upload_start_per_member = config.rate_limit.upload_start_per_member_limit,
+        rate_limit_photo_draft_per_member = config.rate_limit.photo_draft_per_member_limit,
         agent_port_rate_limit_per_token = config.agent_port.per_token_limit,
         agent_port_rate_limit_per_agent = config.agent_port.per_agent_limit,
         agent_port_rate_limit_per_ip = config.agent_port.per_ip_limit,
@@ -171,6 +172,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "RATE_LIMIT_UPLOAD_START_PER_MEMBER",
             config.rate_limit.upload_start_per_member_limit,
             "attachment upload starts (each one is a Google Drive API call)",
+        ),
+        (
+            "RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER",
+            config.rate_limit.photo_draft_per_member_limit,
+            "picture-from-photo starts (each one can be a call to the team's image model)",
         ),
     ] {
         if limit == 0 {

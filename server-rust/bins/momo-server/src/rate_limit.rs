@@ -816,6 +816,10 @@ pub enum MemberWrite {
     ScheduledWrite,
     /// `POST …/channels/{ch}/attachments/uploads`.
     UploadStart,
+    /// `POST …/expressions/photo-drafts` (ADR-0218 §8 H9, #4941): a start may end in one call
+    /// to the team's image model. A short-window guard on starts, not an allowance: how many
+    /// pictures a team may draw is the team's own decision (#4944).
+    PhotoDraft,
 }
 
 impl MemberWrite {
@@ -826,6 +830,7 @@ impl MemberWrite {
             MemberWrite::MessageSend => "message_send",
             MemberWrite::ScheduledWrite => "scheduled_write",
             MemberWrite::UploadStart => "upload_start",
+            MemberWrite::PhotoDraft => "photo_draft",
         }
     }
 
@@ -836,6 +841,7 @@ impl MemberWrite {
             MemberWrite::MessageSend => "write:send",
             MemberWrite::ScheduledWrite => "write:schedule",
             MemberWrite::UploadStart => "write:upload",
+            MemberWrite::PhotoDraft => "write:photo",
         }
     }
 }
@@ -862,6 +868,7 @@ pub fn member_write_limit(
         }
         (MemberWrite::ScheduledWrite, _) => config.scheduled_write_per_member_limit,
         (MemberWrite::UploadStart, _) => config.upload_start_per_member_limit,
+        (MemberWrite::PhotoDraft, _) => config.photo_draft_per_member_limit,
     }
 }
 
@@ -1462,13 +1469,14 @@ mod tests {
 
     use std::sync::atomic::AtomicUsize;
 
-    /// Four different numbers, so a swapped field cannot pass by coincidence.
+    /// Five different numbers, so a swapped field cannot pass by coincidence.
     fn budget_config() -> RateLimitConfig {
         RateLimitConfig {
             message_send_per_member_limit: 11,
             message_send_per_agent_limit: 22,
             scheduled_write_per_member_limit: 33,
             upload_start_per_member_limit: 44,
+            photo_draft_per_member_limit: 55,
             ..RateLimitConfig::default()
         }
     }
@@ -1495,6 +1503,11 @@ mod tests {
                 44,
                 "an agent bearer cannot reach this route today; if one ever does it is held to a budget, not exempt"
             );
+            assert_eq!(
+                limit(MemberWrite::PhotoDraft, kind),
+                55,
+                "a photo start has one limit whoever asks"
+            );
         }
     }
 
@@ -1507,13 +1520,14 @@ mod tests {
             (MemberWrite::MessageSend, "message_send"),
             (MemberWrite::ScheduledWrite, "scheduled_write"),
             (MemberWrite::UploadStart, "upload_start"),
+            (MemberWrite::PhotoDraft, "photo_draft"),
         ];
         let mut keys = std::collections::HashSet::new();
         for (surface, label) in surfaces {
             assert_eq!(surface.label(), label);
             assert!(keys.insert(member_write_key(surface, member)));
         }
-        assert_eq!(keys.len(), 3);
+        assert_eq!(keys.len(), 4);
         assert_ne!(
             member_write_key(MemberWrite::MessageSend, member),
             member_write_key(MemberWrite::MessageSend, Uuid::from_u128(8)),

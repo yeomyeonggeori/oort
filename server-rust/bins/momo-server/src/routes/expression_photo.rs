@@ -22,8 +22,11 @@
 //!    (`acknowledgedProvider`), and it must be the one the team key reaches *now*; if the
 //!    operator changed the key in between, nothing is sent (`image_model_changed`).
 //! 5. **One call, bounded**: at most [`IN_FLIGHT`] on the instance and one per member, a 120 s
-//!    deadline, a 12 MiB answer, a 5 MiB picture. The key, the photo and the answer are never
-//!    logged and never come back in a response; the failure the member sees is one closed code.
+//!    deadline, a 12 MiB answer, a 5 MiB picture. The places are held by the task that does the
+//!    work, until the call has ended ([`hold_until_done`]); the request only waits for its answer.
+//!    A start is also counted by the per-member write budget (`rate_limit::MemberWrite::PhotoDraft`).
+//!    The key, the photo and the answer are never logged and never come back in a response; the
+//!    failure the member sees is one closed code.
 //! 6. **What comes back is decoded in the isolated child too** (`process_cutout` for a cut-out,
 //!    the ordinary picture path for a caricature) and stored as a draft whose origin is the one
 //!    fixed sentence for the branch. The member sees exactly the picture that would be saved.
@@ -33,11 +36,15 @@
 //! `provider_link` is readable only inside the operator transaction (`app.provider_link_admin`,
 //! migration 039), and the doc of that transaction says it is bound only after the route's
 //! instance-operator gate. This route binds it for a *member's* request, in one function
-//! ([`read_team_key`]), after rule 1, to hand the opened key to the image client and to nobody
-//! else: the key is never a field of a response, a log line, an audit row or an error. ADR-0218
-//! §8 H9 records this as the decision and as the first thing the security review looks at.
+//! ([`read_team_key`]), after rule 1 — for `photo-model` as well as for the photo request, so only
+//! someone who may send a photo is told which company it would go to — to hand the opened key to
+//! the image client and to nobody else: the key is never a field of a response, a log line, an
+//! audit row or an error. The order is a tested property: the key is opened through
+//! [`TeamKeySource`], which a test wraps to count the openings. ADR-0218 §8 H9 records this as the
+//! decision and as the first thing the security review looks at.
 
 use std::collections::HashSet;
+use std::future::Future;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -46,6 +53,7 @@ use axum::extract::{FromRequest, Multipart, Path, Request, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use futures::future::BoxFuture;
 use futures::StreamExt;
 use momo_auth::Principal;
 use momo_db::with_provider_link_admin_tx;
@@ -83,8 +91,9 @@ fn members_in_flight() -> &'static Mutex<HashSet<Uuid>> {
     MEMBERS.get_or_init(Mutex::default)
 }
 
-/// The two slots a request holds from the moment it is admitted to the moment it is answered —
-/// also when the client goes away first, because dropping the future drops this.
+/// The two places a photo request holds from the moment it is admitted until the work it was
+/// admitted for has ended. [`hold_until_done`] puts the guard on the task that does that work, so
+/// the places come back when the call is over, whether or not anyone is still waiting for it.
 struct Admitted {
     member: Uuid,
     _instance: tokio::sync::OwnedSemaphorePermit,
@@ -118,14 +127,46 @@ impl Drop for Admitted {
     }
 }
 
+/// Run `work` — everything after admission — to its end on a task of its own, holding `admitted`
+/// until then. The request only waits for the answer: if nobody is waiting any more the work still
+/// finishes, the draft it makes is kept, and the two places are given back when it ends. A panic in
+/// the work is an internal error and gives them back too.
+async fn hold_until_done<T, F>(admitted: Admitted, work: F) -> Result<T, ApiError>
+where
+    F: Future<Output = Result<T, ApiError>> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::spawn(async move {
+        let _admitted = admitted;
+        work.await
+    })
+    .await
+    .map_err(|error| ApiError::internal("expression_photo.work", error))?
+}
+
 // ---- the team key ----------------------------------------------------------------------------
 
-/// One opened team key that might reach an image model.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One opened team key that might reach an image model. `Debug` is by hand, like the target's: the
+/// key is a live credential.
+#[derive(Clone, PartialEq, Eq)]
 struct KeyCandidate {
     base_url: String,
     key: String,
     mode: ProviderMode,
+}
+
+impl std::fmt::Debug for KeyCandidate {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("KeyCandidate")
+            .field(
+                "base_url",
+                &momo_settings::redacted_endpoint_label(&self.base_url),
+            )
+            .field("key", &"<redacted>")
+            .field("mode", &self.mode)
+            .finish()
+    }
 }
 
 /// The team's keys in cascade order — the head (the operator's database link, or the environment
@@ -179,11 +220,45 @@ fn pick_target(config: &ImageModelConfig, keys: Vec<KeyCandidate>) -> Option<Ima
         })
 }
 
-/// Read and open the team keys, and choose the one the image model is asked with. This is the one
-/// place the route reaches the sealed credential (module docs, 「the one boundary this route
-/// widens」). `Ok(None)` is 「no image model is connected」: no master key to open anything with, no
-/// key, or no key that reaches OpenAI or Gemini.
+/// Where the route opens the team's image key from. The only production source is
+/// [`SealedLink`]; a test wraps it to count how often, and after which refusals, the key is opened.
+pub trait TeamKeySource: Send + Sync {
+    /// `Ok(None)` is 「no image model is connected」.
+    fn open<'a>(
+        &'a self,
+        state: &'a AppState,
+        workspace: Uuid,
+    ) -> BoxFuture<'a, Result<Option<ImageModelTarget>, ApiError>>;
+}
+
+/// The team key as the operator stored it: `provider_link` and its fallback hops opened with the
+/// master key, or the environment trio when there is no link.
+pub struct SealedLink;
+
+impl TeamKeySource for SealedLink {
+    fn open<'a>(
+        &'a self,
+        state: &'a AppState,
+        workspace: Uuid,
+    ) -> BoxFuture<'a, Result<Option<ImageModelTarget>, ApiError>> {
+        Box::pin(read_sealed_link(state, workspace))
+    }
+}
+
+/// Open the team key, and choose the one the image model is asked with. This is the one door the
+/// route reaches the sealed credential through (module docs, 「the one boundary this route
+/// widens」).
 async fn read_team_key(
+    state: &AppState,
+    workspace: Uuid,
+) -> Result<Option<ImageModelTarget>, ApiError> {
+    state.team_keys.open(state, workspace).await
+}
+
+/// Read and open the team keys, and choose the one the image model is asked with. `Ok(None)` is
+/// 「no image model is connected」: no master key to open anything with, no key, or no key that
+/// reaches OpenAI or Gemini.
+async fn read_sealed_link(
     state: &AppState,
     workspace: Uuid,
 ) -> Result<Option<ImageModelTarget>, ApiError> {
@@ -219,8 +294,11 @@ async fn read_team_key(
 
 /// Which company a photo would go to, if the team has connected one. The form asks before it
 /// shows the photo field, so a member never picks a photo for a feature the team has not got.
-/// `canManage` says whether the caller may connect a model (the instance operator), which decides
-/// whether the guidance links to the settings or tells them to ask.
+/// Only someone who may add a picture is told (`preflight_add`, the proof every other way of
+/// adding makes first): a guest, an agent and a member the add policy leaves out are refused
+/// before the team key is opened. `canManage` says whether the caller may connect a model (the
+/// instance operator), which decides whether the guidance links to the settings or tells them to
+/// ask.
 pub async fn availability(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -228,6 +306,9 @@ pub async fn availability(
 ) -> Result<Json<Value>, ApiError> {
     human(&principal)?;
     let actor = actor(&ws, &principal)?;
+    expressions::preflight_add(&state.pool, actor)
+        .await
+        .map_err(failure)?;
     let target = read_team_key(&state, actor.workspace).await?;
     let can_manage = require_instance_operator(&state, &principal).await.is_ok();
     Ok(Json(json!({
@@ -345,16 +426,12 @@ async fn read_form(
 async fn read_attachment(
     state: &AppState,
     actor: Actor,
-    request: &PhotoAttachmentRequest,
+    channel_id: Uuid,
+    attachment_id: Uuid,
 ) -> Result<Vec<u8>, ApiError> {
-    let file = expressions::attachment_source(
-        &state.pool,
-        actor,
-        request.channel_id,
-        request.attachment_id,
-    )
-    .await
-    .map_err(failure)?;
+    let file = expressions::attachment_source(&state.pool, actor, channel_id, attachment_id)
+        .await
+        .map_err(failure)?;
     let content = state
         .drive
         .file_content(&file, expressions::INPUT_BYTES as i64)
@@ -374,14 +451,9 @@ async fn read_attachment(
     })
     .await
     .map_err(|_| media_error(media::Rejected::Timeout))??;
-    expressions::attachment_source(
-        &state.pool,
-        actor,
-        request.channel_id,
-        request.attachment_id,
-    )
-    .await
-    .map_err(failure)?;
+    expressions::attachment_source(&state.pool, actor, channel_id, attachment_id)
+        .await
+        .map_err(failure)?;
     Ok(bytes)
 }
 
@@ -444,7 +516,8 @@ pub async fn create(
     expressions::preflight_import(&state.pool, actor)
         .await
         .map_err(failure)?;
-    // 2. Whose photo it is.
+    // 2. Whose photo it is. A request this route cannot act on is refused before the attachment
+    //    it names is looked up or read.
     let content_type = request
         .headers()
         .get(header::CONTENT_TYPE)
@@ -458,14 +531,32 @@ pub async fn create(
         let bytes = to_bytes(request.into_body(), 64 * 1024)
             .await
             .map_err(|_| invalid())?;
-        let body: PhotoAttachmentRequest = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
-        let photo = read_attachment(&state, actor, &body).await?;
-        (check_request(actor, body.metadata)?, photo)
+        let PhotoAttachmentRequest {
+            metadata,
+            attachment_id,
+            channel_id,
+        } = serde_json::from_slice(&bytes).map_err(|_| invalid())?;
+        let asked = check_request(actor, metadata)?;
+        let photo = read_attachment(&state, actor, channel_id, attachment_id).await?;
+        (asked, photo)
     } else {
         return Err(invalid());
     };
-    // 5. Admitted: from here the team's money is at stake.
-    let _admitted = Admitted::take(actor.member)?;
+    // 5. Admitted: from here the team's money is at stake. What follows runs to its end on a task
+    //    that holds the places, and this request only waits for the answer.
+    let admitted = Admitted::take(actor.member)?;
+    hold_until_done(admitted, finish(state, actor, asked, photo)).await
+}
+
+/// Rules 3 to 6 of the module docs for a request that has been admitted: prepare the photo, open
+/// the team key, ask once, decode what came back and keep it as a draft. It runs through
+/// [`hold_until_done`], so it is not cut short when the request that started it is gone.
+async fn finish(
+    state: AppState,
+    actor: Actor,
+    asked: Asked,
+    photo: Vec<u8>,
+) -> Result<Response, ApiError> {
     // 3. The photo that leaves is a new picture made from the pixels of the one that arrived.
     let prepared = media::prepare_photo(photo)
         .await
@@ -559,6 +650,7 @@ pub async fn create(
 mod tests {
     use super::*;
     use momo_settings::chain::DecryptedChainEntry;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     fn env(base: &str, bearer: &str, mode: ProviderMode) -> ProviderConfig {
         ProviderConfig {
@@ -712,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn a_member_slot_is_returned_when_the_request_is_dropped_and_two_never_overlap() {
+    fn a_member_has_one_place_and_it_comes_back_with_its_holder() {
         let member = Uuid::new_v4();
         let first = Admitted::take(member).expect("admitted");
         assert!(Admitted::take(member).is_err(), "one in flight per member");
@@ -720,9 +812,109 @@ mod tests {
         drop(first);
         assert!(
             Admitted::take(member).is_ok(),
-            "the slot came back with the request"
+            "the place came back with its holder"
         );
         drop(other);
+    }
+
+    /// A place of its own, registered for `member` the way [`Admitted::take`] registers one but
+    /// not one of the instance's four: the unit tests of this file share this process's statics,
+    /// and tests that each took from the four could refuse one another.
+    fn own_place(member: Uuid) -> Admitted {
+        assert!(
+            members_in_flight().lock().expect("members").insert(member),
+            "a new member has no place yet"
+        );
+        Admitted {
+            member,
+            _instance: Arc::new(Semaphore::new(1))
+                .try_acquire_owned()
+                .expect("a place of its own"),
+        }
+    }
+
+    fn holds_a_place(member: Uuid) -> bool {
+        members_in_flight()
+            .lock()
+            .expect("members")
+            .contains(&member)
+    }
+
+    #[tokio::test]
+    async fn the_places_are_held_until_the_work_ends_whether_or_not_anyone_waits_for_it() {
+        let member = Uuid::new_v4();
+        let (entered, gate) = (Arc::new(Semaphore::new(0)), Arc::new(Semaphore::new(0)));
+        let finished = Arc::new(AtomicBool::new(false));
+        let work = {
+            let (entered, gate, finished) = (entered.clone(), gate.clone(), finished.clone());
+            async move {
+                entered.add_permits(1);
+                gate.acquire().await.expect("gate").forget();
+                finished.store(true, Ordering::SeqCst);
+                Ok::<u32, ApiError>(7)
+            }
+        };
+        let waiting = tokio::spawn(hold_until_done(own_place(member), work));
+        entered.acquire().await.expect("entered").forget();
+        // The one waiting for the answer stops waiting.
+        waiting.abort();
+        assert!(waiting.await.expect_err("it was aborted").is_cancelled());
+        assert!(
+            holds_a_place(member),
+            "the place is still the work's while the work runs"
+        );
+        // The work ends: it ran to its end, and only then is the place back.
+        gate.add_permits(1);
+        let mut back = false;
+        for _ in 0..200 {
+            if !holds_a_place(member) {
+                back = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(back, "the place came back when the work ended");
+        assert!(
+            finished.load(Ordering::SeqCst),
+            "and the work had run to its end"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_answer_of_the_work_reaches_the_request_that_waits_and_a_panic_is_a_500() {
+        let member = Uuid::new_v4();
+        let answered =
+            hold_until_done(own_place(member), async { Ok::<_, ApiError>("drawn") }).await;
+        assert_eq!(answered.expect("the work's answer"), "drawn");
+        assert!(!holds_a_place(member), "the place is back after an answer");
+
+        let panicked =
+            hold_until_done::<(), _>(own_place(member), async { panic!("the work failed") }).await;
+        assert_eq!(
+            panicked.expect_err("a panic is an error").status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert!(
+            !holds_a_place(member),
+            "the place is back after a panic too"
+        );
+    }
+
+    #[test]
+    fn a_candidate_prints_without_its_key() {
+        let candidate = KeyCandidate {
+            base_url: "https://user:hunter2@api.openai.com/v1?token=abc".into(),
+            key: REAL.into(),
+            mode: ProviderMode::ExternalHermes,
+        };
+        let shown = format!("{candidate:?} {candidate:#?} {:?}", vec![candidate.clone()]);
+        assert!(!shown.contains(REAL), "the key is printed: {shown}");
+        assert!(
+            !shown.contains("hunter2") && !shown.contains("token=abc"),
+            "the address keeps no secret: {shown}"
+        );
+        assert!(shown.contains("<redacted>"));
+        assert!(shown.contains("api.openai.com"), "it still says where");
     }
 
     #[test]

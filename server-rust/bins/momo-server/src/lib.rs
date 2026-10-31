@@ -341,6 +341,9 @@ pub struct AppState {
     pub image_model: Arc<dyn momo_image_model::ImageModelClient>,
     /// Which team-key hosts are image providers, and which model each one asks for.
     pub image_models: Arc<momo_image_model::ImageModelConfig>,
+    /// Where the photo routes open the team's image key from (ADR-0218 §8 H11 (a)). Default is the
+    /// operator's sealed link; a test wraps it to count the openings.
+    pub team_keys: Arc<dyn routes::expression_photo::TeamKeySource>,
     /// ADR-0218 G3.5 (#4820 C1b): where `oort_expression_assemble` runs the motion assembler
     /// child from. `None` is the production answer: resolved per call from
     /// `OORT_EXPRESSION_ASSEMBLER`, else beside this executable (like the decoder). A test sets
@@ -410,6 +413,7 @@ impl AppState {
                 momo_image_model::DEFAULT_DEADLINE,
             )),
             image_models: Arc::new(momo_image_model::ImageModelConfig::default()),
+            team_keys: Arc::new(routes::expression_photo::SealedLink),
             assembler_program: None,
             large_body_deadline: routes::agent_port::LARGE_BODY_DEADLINE,
             unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
@@ -527,6 +531,15 @@ impl AppState {
     ) -> Self {
         self.image_model = client;
         self.image_models = Arc::new(config);
+        self
+    }
+
+    /// Where the photo routes open the team's image key from (see [`AppState::team_keys`]).
+    pub fn with_team_keys(
+        mut self,
+        source: Arc<dyn routes::expression_photo::TeamKeySource>,
+    ) -> Self {
+        self.team_keys = source;
         self
     }
 
@@ -799,6 +812,7 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/expressions/photo-drafts",
             post(routes::expression_photo::create)
+                .route_layer(member_write(rate_limit::MemberWrite::PhotoDraft))
                 .layer(axum::extract::DefaultBodyLimit::max(momo_expressions::REQUEST_BYTES)),
         )
         .route(

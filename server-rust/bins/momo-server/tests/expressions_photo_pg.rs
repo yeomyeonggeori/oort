@@ -19,10 +19,14 @@ use momo_db::sqlx::{
 };
 use momo_db::PgPool;
 use momo_expressions::{self as e, Actor, PHOTO_PROMPTS};
-use momo_image_model::{GuardedImageModel, ImageModelConfig, ImageProvider};
-use momo_server::{build_app, config::RealtimeSettings, config::SettingsConfig, AppState};
+use momo_image_model::{GuardedImageModel, ImageModelConfig, ImageModelTarget, ImageProvider};
+use momo_server::config::{RateLimitConfig, RealtimeSettings, SettingsConfig};
+use momo_server::error::ApiError;
+use momo_server::routes::expression_photo::{SealedLink, TeamKeySource};
+use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
 use std::io::Cursor;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Semaphore;
@@ -273,7 +277,23 @@ struct World {
     base: String,
     prefix: String,
     fake: Fake,
+    /// How many times the route opened the team key for a request (see [`CountingKeys`]).
+    key_reads: Arc<AtomicUsize>,
     _server: tokio::task::JoinHandle<()>,
+}
+
+/// The production key source, with a count of its openings.
+struct CountingKeys(Arc<AtomicUsize>);
+
+impl TeamKeySource for CountingKeys {
+    fn open<'a>(
+        &'a self,
+        state: &'a AppState,
+        workspace: Uuid,
+    ) -> BoxFuture<'a, Result<Option<ImageModelTarget>, ApiError>> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        SealedLink.open(state, workspace)
+    }
 }
 
 async fn seed(su: &PgPool, ws: Uuid, role: &str, http: &reqwest::Client, base: &str) -> Person {
@@ -359,6 +379,9 @@ fn quick_client(deadline: Duration) -> Arc<GuardedImageModel> {
     ))
 }
 
+/// A budget of photo starts no test here comes near; the one test of the budget asks for its own.
+const GENEROUS_STARTS: u32 = 1_000;
+
 async fn boot() -> World {
     boot_with(Duration::from_secs(20), |config| config).await
 }
@@ -366,6 +389,14 @@ async fn boot() -> World {
 async fn boot_with(
     deadline: Duration,
     tune: impl FnOnce(ImageModelConfig) -> ImageModelConfig,
+) -> World {
+    boot_all(deadline, tune, GENEROUS_STARTS).await
+}
+
+async fn boot_all(
+    deadline: Duration,
+    tune: impl FnOnce(ImageModelConfig) -> ImageModelConfig,
+    photo_starts_per_window: u32,
 ) -> World {
     require_decoder_4947();
     let url = std::env::var("DATABASE_URL").expect("dedicated DATABASE_URL");
@@ -417,6 +448,7 @@ async fn boot_with(
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let archive = Arc::new(momo_drive::StubDriveArchive::new(&base));
+    let key_reads = Arc::new(AtomicUsize::new(0));
     let state = AppState::new(
         api.clone(),
         SECRET.into(),
@@ -428,6 +460,11 @@ async fn boot_with(
         ..SettingsConfig::default()
     })
     .with_image_model(quick_client(deadline), config)
+    .with_team_keys(Arc::new(CountingKeys(key_reads.clone())))
+    .with_rate_limit(RateLimitConfig {
+        photo_draft_per_member_limit: photo_starts_per_window,
+        ..RateLimitConfig::default()
+    })
     .with_realtime(RealtimeSettings {
         cent_token_hmac: Some(SECRET.into()),
         cent_proxy_secret: Some(SECRET.into()),
@@ -490,6 +527,7 @@ async fn boot_with(
         http,
         base,
         fake,
+        key_reads,
         _server: server,
     };
     // `provider_link` is instance-global and this DB outlives the test: start from none.
@@ -1052,11 +1090,28 @@ async fn authority_comes_before_the_body_and_before_the_call() {
         w.code(w.photo(&w.foreign, &meta, &photo).await, 404).await,
         "not_found"
     );
-    // The availability read is authorised the same way.
-    assert_eq!(
-        w.model(&w.guest).await.status().as_u16(),
-        200,
-        "a guest may ask whether a model exists"
+    // The availability read is authorised the way adding is: only someone who may add a picture
+    // is told which company a photo would go to.
+    let guest_read = w.model(&w.guest).await;
+    assert_eq!(guest_read.status().as_u16(), 403, "a guest may not ask");
+    let said = guest_read.text().await.unwrap();
+    assert!(
+        said.contains("expression_role_required")
+            && !said.contains("openai")
+            && !said.contains("provider"),
+        "the refusal names no company: {said}"
+    );
+    let agent_read = w
+        .http
+        .get(format!("{}/expressions/photo-model", w.prefix))
+        .bearer_auth(&w.agent_token)
+        .send()
+        .await
+        .unwrap();
+    assert!(
+        agent_read.status().as_u16() == 403 || agent_read.status().as_u16() == 404,
+        "{}",
+        agent_read.status()
     );
     let foreign_read = w
         .http
@@ -1073,6 +1128,18 @@ async fn authority_comes_before_the_body_and_before_the_call() {
     assert_eq!(
         w.code(w.photo(&w.member, &meta, &photo).await, 403).await,
         "expression_role_required"
+    );
+    let member_read = w.model(&w.member).await;
+    assert_eq!(
+        member_read.status().as_u16(),
+        403,
+        "a member the add policy leaves out is not told either"
+    );
+    assert!(!member_read.text().await.unwrap().contains("openai"));
+    assert_eq!(
+        w.json(w.model(&w.owner).await, 200).await["provider"],
+        "openai",
+        "the owner is"
     );
     // The live-draft limit is proved before the team pays: four drafts, the fifth is refused.
     e::set_policy(&w.api, w.owner.actor, "members".into())
@@ -1467,6 +1534,425 @@ async fn a_member_has_one_photo_in_flight_and_the_instance_four() {
         201,
     )
     .await;
+}
+
+/// A photo request keeps its places for as long as its work runs, whoever is still waiting for
+/// the answer; what the work makes is kept for the member who asked.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_photo_request_keeps_its_places_until_the_provider_has_answered_and_its_draft_is_kept() {
+    let w = boot().await;
+    w.connect_fake().await;
+    let gate = Arc::new(Semaphore::new(0));
+    w.fake.say(Reply::Hold(
+        gate.clone(),
+        Box::new(Reply::Picture(drawn_caricature())),
+    ));
+    let photo = photo_from_home();
+    let url = format!("{}/expressions/photo-drafts", w.prefix);
+    let third = seed(&w.su, w.ws, "member", &w.http, &w.base).await;
+    let fourth = seed(&w.su, w.ws, "member", &w.http, &w.base).await;
+    let fifth = seed(&w.su, w.ws, "member", &w.http, &w.base).await;
+    // Four people each have a photo with the provider, and then each stops waiting for the answer.
+    let askers = [&w.member, &w.owner, &third, &fourth];
+    let mut waiting = Vec::new();
+    for (i, person) in askers.into_iter().enumerate() {
+        let (http, url, token, meta, photo) = (
+            w.http.clone(),
+            url.clone(),
+            person.token.clone(),
+            w.meta("caricature", &unique("kept")),
+            photo.clone(),
+        );
+        waiting.push(tokio::spawn(async move {
+            send(&http, &url, &token, &meta, &photo).await
+        }));
+        wait_for(&w.fake, i + 1).await;
+    }
+    for handle in &waiting {
+        handle.abort();
+    }
+    for handle in waiting {
+        let _ = handle.await;
+    }
+    // Time for the server to notice that nobody is waiting.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // Their places are still theirs: the same member is refused, so is a fifth person, and the
+    // provider hears nothing more. A request let in would wait on the held provider, so the
+    // answer is bounded: being refused is an answer, being admitted is not.
+    let answered = |who: &Person, what: &'static str| {
+        let (who_token, meta, photo) = (
+            who.token.clone(),
+            w.meta("caricature", &unique("refused")),
+            photo.clone(),
+        );
+        let (http, url) = (w.http.clone(), url.clone());
+        async move {
+            let status = tokio::time::timeout(
+                Duration::from_secs(5),
+                send(&http, &url, &who_token, &meta, &photo),
+            )
+            .await;
+            status.unwrap_or_else(|_| panic!("{what} was let in"))
+        }
+    };
+    for _ in 0..8 {
+        assert_eq!(
+            answered(&w.member, "the member's second photo").await,
+            503,
+            "one photo in flight per member"
+        );
+        assert_eq!(
+            answered(&fifth, "a fifth person's photo").await,
+            503,
+            "four in flight on the instance"
+        );
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    assert_eq!(w.fake.count(), 4, "no refused request reached the provider");
+    // The provider answers: every call ran to its end and left a draft for the one who asked.
+    gate.add_permits(100);
+    for person in [&w.member, &w.owner, &third, &fourth] {
+        let mut kept = 0;
+        for _ in 0..400 {
+            kept = w.drafts_of(person).await;
+            if kept > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(kept, 1, "the finished picture is kept as a draft");
+    }
+    // The member can open it without asking again.
+    let draft: Uuid =
+        sqlx::query_scalar("SELECT id FROM expression_draft WHERE workspace_id=$1 AND creator=$2")
+            .bind(w.ws)
+            .bind(w.member.actor.member)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    let opened = w
+        .http
+        .get(format!("{}/expression-drafts/{draft}", w.prefix))
+        .bearer_auth(&w.member.token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(w.json(opened, 200).await["state"], "ready");
+    // And once the work has ended the places are back: a fifth person's photo goes through.
+    w.json(
+        photo_when_a_place_is_free(&w, &fifth, "free", &photo).await,
+        201,
+    )
+    .await;
+}
+
+/// The team key is opened for a request only after the caller is proved to be allowed to add,
+/// the request is one the route can act on and there is room for the result: counted at the one
+/// door the route opens the key through.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn the_team_key_is_opened_only_after_authority_policy_and_room_are_proved() {
+    let w = boot().await;
+    w.connect_fake().await;
+    w.fake.say(Reply::Picture(drawn_caricature()));
+    let photo = photo_from_home();
+    let meta = w.meta("caricature", &unique("keys"));
+    let model_url = format!("{}/expressions/photo-model", w.prefix);
+    let opened = |status: u16, reads: usize| (status, reads);
+
+    // Not allowed to add, or not a person: refused, and the key stays shut.
+    assert_eq!(
+        opened_by(&w, w.photo(&w.guest, &meta, &photo)).await,
+        opened(403, 0),
+        "a guest's photo"
+    );
+    assert_eq!(
+        opened_by(&w, w.model(&w.guest)).await,
+        opened(403, 0),
+        "a guest's availability read"
+    );
+    let agent_post = opened_by(&w, async {
+        w.http
+            .post(format!("{}/expressions/photo-drafts", w.prefix))
+            .bearer_auth(&w.agent_token)
+            .json(&meta)
+            .send()
+            .await
+            .unwrap()
+    })
+    .await;
+    assert!(
+        agent_post == opened(403, 0) || agent_post == opened(404, 0),
+        "an agent's photo: {agent_post:?}"
+    );
+    assert_eq!(
+        opened_by(&w, async {
+            w.http
+                .get(&model_url)
+                .bearer_auth(&w.agent_token)
+                .send()
+                .await
+                .unwrap()
+        })
+        .await,
+        opened(403, 0),
+        "an agent's availability read"
+    );
+    assert_eq!(
+        opened_by(&w, w.photo(&w.foreign, &meta, &photo)).await,
+        opened(404, 0),
+        "another workspace's person"
+    );
+    assert_eq!(
+        opened_by(&w, w.model(&w.foreign)).await,
+        opened(404, 0),
+        "another workspace's availability read"
+    );
+    // Only admins may add.
+    e::set_policy(&w.api, w.owner.actor, "admins".into())
+        .await
+        .unwrap();
+    assert_eq!(
+        opened_by(&w, w.photo(&w.member, &meta, &photo)).await,
+        opened(403, 0),
+        "a member the policy leaves out"
+    );
+    assert_eq!(
+        opened_by(&w, w.model(&w.member)).await,
+        opened(403, 0),
+        "the same member's availability read"
+    );
+    e::set_policy(&w.api, w.owner.actor, "members".into())
+        .await
+        .unwrap();
+
+    // Allowed to add, with a request the route cannot act on.
+    let mut bad_branch = meta.clone();
+    bad_branch["branch"] = json!("watercolour");
+    assert_eq!(
+        opened_by(&w, w.photo(&w.member, &bad_branch, &photo)).await,
+        opened(400, 0),
+        "a branch there is none of"
+    );
+    let html = b"<html><script>alert(1)</script></html>".to_vec();
+    assert_eq!(
+        opened_by(&w, w.photo(&w.member, &meta, &html)).await,
+        opened(415, 0),
+        "not a picture"
+    );
+    let big = vec![0u8; 5 * 1024 * 1024 + 1];
+    assert_eq!(
+        opened_by(&w, w.photo(&w.member, &meta, &big)).await,
+        opened(413, 0),
+        "too large"
+    );
+    let mut someone_elses_face = meta.clone();
+    someone_elses_face["subjectMemberId"] = json!(w.other_member.actor.member);
+    assert_eq!(
+        opened_by(&w, w.photo(&w.member, &someone_elses_face, &photo)).await,
+        opened(403, 0),
+        "a face that is not the caller's"
+    );
+    let owners_photo = w.attach(&w.owner, w.channel, &photo).await;
+    assert_eq!(
+        opened_by(
+            &w,
+            w.photo_of_attachment(&w.member, &meta, owners_photo, w.channel)
+        )
+        .await,
+        opened(404, 0),
+        "a photo that is not the caller's"
+    );
+    {
+        let slots = momo_expressions::media::decoder_slots();
+        let first = slots.clone().acquire_owned().await.unwrap();
+        let second = slots.clone().acquire_owned().await.unwrap();
+        assert_eq!(
+            opened_by(&w, w.photo(&w.member, &meta, &photo)).await,
+            opened(503, 0),
+            "a decoder that is busy"
+        );
+        drop((first, second));
+    }
+
+    // Allowed, and the request is good: the key is opened once per request, for the read and the
+    // photo alike.
+    assert_eq!(
+        opened_by(&w, w.model(&w.member)).await,
+        opened(200, 1),
+        "the availability read of someone who may add"
+    );
+    assert_eq!(
+        opened_by(&w, w.photo(&w.member, &meta, &photo)).await,
+        opened(201, 1),
+        "a photo"
+    );
+    let mut other_company = w.meta("caricature", &unique("keys"));
+    other_company["acknowledgedProvider"] = json!("gemini");
+    assert_eq!(
+        opened_by(&w, w.photo(&w.member, &other_company, &photo)).await,
+        opened(409, 1),
+        "the key is what tells the company apart"
+    );
+    // No room for another draft: refused before the key, like everything above.
+    for _ in 0..3 {
+        w.json(
+            w.photo(&w.member, &w.meta("caricature", &unique("fill")), &photo)
+                .await,
+            201,
+        )
+        .await;
+    }
+    assert_eq!(
+        opened_by(
+            &w,
+            w.photo(&w.member, &w.meta("caricature", &unique("over")), &photo)
+        )
+        .await,
+        opened(409, 0),
+        "no room for another draft"
+    );
+}
+
+/// A start is counted for the member who made it before anything of the request is read; the
+/// count is the member's own, and reading is not a start.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn photo_starts_are_counted_per_member_and_refused_before_anything_is_read() {
+    let w = boot_all(Duration::from_secs(20), |config| config, 3).await;
+    w.connect_fake().await;
+    w.fake.say(Reply::Picture(drawn_caricature()));
+    let photo = photo_from_home();
+    let mut closed = w.meta("caricature", &unique("budget"));
+    closed["branch"] = json!("watercolour");
+    // Three starts that go no further than the check of the request spend the member's budget...
+    for _ in 0..3 {
+        assert_eq!(
+            w.photo(&w.member, &closed, &photo).await.status().as_u16(),
+            400
+        );
+    }
+    // ...and the next, a good one, is refused with a Retry-After before its body is read.
+    let refused = w
+        .photo(&w.member, &w.meta("caricature", &unique("budget")), &photo)
+        .await;
+    assert_eq!(refused.status().as_u16(), 429);
+    let retry_after: u64 = refused.headers()["retry-after"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((1..=60).contains(&retry_after), "{retry_after}");
+    assert_eq!(w.fake.count(), 0, "nothing was sent");
+    assert_eq!(w.drafts_of(&w.member).await, 0);
+    assert_eq!(
+        w.key_reads.load(Ordering::SeqCst),
+        0,
+        "the key was not opened"
+    );
+    // The refusal is audited under its own name, once.
+    let surfaces: Vec<String> = sqlx::query_scalar(
+        "SELECT detail->>'surface' FROM audit_log WHERE workspace_id=$1 AND actor_member_id=$2 AND action='rate_limit.exceeded'",
+    )
+    .bind(w.ws)
+    .bind(w.member.actor.member)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(surfaces, vec!["photo_draft".to_string()]);
+    // The budget is the member's own: someone else still draws, and reading is never a start.
+    w.json(
+        w.photo(&w.owner, &w.meta("caricature", &unique("budget")), &photo)
+            .await,
+        201,
+    )
+    .await;
+    for _ in 0..5 {
+        assert_eq!(w.model(&w.member).await.status().as_u16(), 200);
+    }
+}
+
+/// The request is checked before the attachment it names is looked up, let alone read.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_request_the_route_cannot_act_on_is_refused_before_its_attachment_is_looked_up() {
+    let w = boot().await;
+    w.connect_fake().await;
+    w.fake.say(Reply::Picture(drawn_caricature()));
+    // Nothing by these ids exists: looking either of them up is a 404.
+    let (attachment, channel) = (Uuid::new_v4(), Uuid::new_v4());
+    let good = w.meta("caricature", &unique("order"));
+    assert_eq!(
+        w.code(
+            w.photo_of_attachment(&w.member, &good, attachment, channel)
+                .await,
+            404
+        )
+        .await,
+        "not_found",
+        "a good request for a photo that is not there"
+    );
+    for (field, value, status, code) in [
+        ("branch", json!("watercolour"), 400, "expression_invalid"),
+        (
+            "acknowledgedProvider",
+            json!("anthropic"),
+            400,
+            "expression_invalid",
+        ),
+        ("name", json!("A"), 400, "expression_invalid"),
+        (
+            "subjectMemberId",
+            json!(w.other_member.actor.member),
+            403,
+            "expression_role_required",
+        ),
+    ] {
+        let mut meta = good.clone();
+        meta[field] = value;
+        assert_eq!(
+            w.code(
+                w.photo_of_attachment(&w.member, &meta, attachment, channel)
+                    .await,
+                status
+            )
+            .await,
+            code,
+            "{field}"
+        );
+    }
+    assert_eq!(w.fake.count(), 0);
+}
+
+/// How many times the team key was opened while `response` ran, with the status it ended in.
+async fn opened_by(
+    w: &World,
+    response: impl std::future::Future<Output = reqwest::Response>,
+) -> (u16, usize) {
+    let before = w.key_reads.load(Ordering::SeqCst);
+    let status = response.await.status().as_u16();
+    (status, w.key_reads.load(Ordering::SeqCst) - before)
+}
+
+/// A photo request, repeated while the answer is "busy": the places it waits for are another
+/// request's, and they come back when that request's work ends.
+async fn photo_when_a_place_is_free(
+    w: &World,
+    who: &Person,
+    name: &str,
+    photo: &[u8],
+) -> reqwest::Response {
+    for _ in 0..200 {
+        let response = w
+            .photo(who, &w.meta("caricature", &unique(name)), photo)
+            .await;
+        if response.status().as_u16() != 503 {
+            return response;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the places did not come back");
 }
 
 async fn wait_for(fake: &Fake, n: usize) {
