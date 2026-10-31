@@ -617,6 +617,22 @@ async fn dm_admission_every_person_must_agree_and_one_no_cancels_the_other_cards
     f.propose().await;
     let a = f.card_for(f.peer).await;
     let b = f.card_for(third).await;
+    // ADR-0204 증보 6 D6-2 · D6-3: a consent is read in the conversation, so the app decides it;
+    // the card asks one question and quotes the agent's name after it, never inside it.
+    let (card_body, card_props): (String, Value) = sqlx::query_as(
+        "SELECT m.body, m.props FROM message m JOIN approval a ON a.request_message_id = m.id \
+          WHERE a.id = $1",
+    )
+    .bind(a)
+    .fetch_one(&f.su)
+    .await
+    .expect("the consent card");
+    assert_eq!(card_props["decision_mode"], json!("open"));
+    assert!(
+        card_body.starts_with("에이전트를 이 대화에 들여도 될까요? · 「")
+            && card_body.ends_with('」'),
+        "{card_body}"
+    );
     assert_eq!(f.decide(a, true, &f.peer_token).await.status(), 200);
     assert_eq!(
         f.seats().await,
