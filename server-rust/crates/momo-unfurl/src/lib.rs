@@ -44,8 +44,8 @@ pub use fetch::{
 pub use normalize::normalize_url;
 pub use parse::parse_card;
 pub use proxy::{
-    fetch_record_icon, fetch_record_image, icon_path, image_path, proxy_image_in_tx, CachedImage,
-    ImageCache, ProxyError, ProxyImage, ProxySlot,
+    fetch_record_icon, fetch_record_image, icon_path, image_path, proxy_goes_outbound,
+    proxy_image_in_tx, CachedImage, ImageCache, ProxyError, ProxyImage, ProxyLimits, ProxySlot,
 };
 pub use remove::{remove_unfurls_in_tx, RemoveOutcome};
 pub use settings::{load_setting_in_tx, upsert_setting_in_tx, UnfurlSetting};

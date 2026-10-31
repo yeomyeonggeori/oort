@@ -8,6 +8,11 @@
 //! GET      /v1/workspaces/{ws}/unfurls/{id}/icon        channel member (proxy, 443 only)
 //! ```
 //!
+//! The two proxy routes can make this server GET a site the card names. A request the cache can
+//! answer, or whose address failed lately, costs the site nothing and is free. One that would
+//! fetch spends the member's fetch budget (`MemberWrite::UnfurlProxy`) and a place among the
+//! fetches in flight; either is refused with 429 + `Retry-After` (#4881 security review M-2).
+//!
 //! No SQL here. No reqwest here. Personal render-fold is the client half.
 
 use axum::body::Body;
@@ -20,8 +25,9 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::is_channel_member;
 use momo_unfurl::{
     fetch_record_icon, fetch_record_image, icon_path, image_path, list_unfurls_in_tx,
-    load_setting_in_tx, load_unfurl_in_tx, record_measured_size, remove_unfurls_in_tx,
-    upsert_setting_in_tx, ProxySlot, RemoveOutcome, UnfurlRecord, UnfurlSetting,
+    load_setting_in_tx, load_unfurl_in_tx, proxy_goes_outbound, record_measured_size,
+    remove_unfurls_in_tx, upsert_setting_in_tx, ProxyError, ProxySlot, RemoveOutcome, UnfurlRecord,
+    UnfurlSetting,
 };
 use uuid::Uuid;
 
@@ -30,6 +36,7 @@ use crate::dto::{
     UnfurlSettingsResponse,
 };
 use crate::error::ApiError;
+use crate::rate_limit::{spend_member_write, too_many_requests, MemberWrite};
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, path_uuid, require_human, require_workspace_operator,
     settle_db, workspace_scope, DbRejectable,
@@ -227,6 +234,17 @@ async fn proxy_remote_image(
         })
         .await;
     let record = settle_db("unfurl.image.authorize", outcome)?;
+    // Only a request that would make this server fetch from the remote site spends the member's
+    // budget: a picture already in memory and an address that failed lately are free, so a
+    // timeline of cached cards never meets the limit. A route layer cannot tell the two apart,
+    // which is why this is asked here, after authorization and before the fetch.
+    if proxy_goes_outbound(&record, state.unfurl_cache.as_ref(), slot) {
+        if let Err(retry_after_seconds) =
+            spend_member_write(&state, MemberWrite::UnfurlProxy, &principal).await
+        {
+            return Ok(too_many_requests(retry_after_seconds));
+        }
+    }
     let fetched = match slot {
         ProxySlot::Image => {
             fetch_record_image(
@@ -247,9 +265,12 @@ async fn proxy_remote_image(
     };
     let image = match fetched {
         Ok(image) => image,
-        Err(momo_unfurl::ProxyError::NotFound | momo_unfurl::ProxyError::Unavailable) => {
+        Err(ProxyError::NotFound | ProxyError::Unavailable) => {
             return Err(ApiError::not_found("unfurl image not found"));
         }
+        // The process is already fetching as many remote images as it allows at once. Nothing
+        // is wrong with this card; ask again in a second.
+        Err(ProxyError::Busy) => return Ok(too_many_requests(1)),
     };
 
     // ADR-0170 amendment D12: a picture whose size the page did not declare gets the size read

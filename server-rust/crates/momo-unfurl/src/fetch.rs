@@ -5,7 +5,8 @@
 //! the check and the socket. Redirects are followed by this module, never by
 //! reqwest, because each Location has to go through the same guard.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -13,6 +14,7 @@ use momo_webhook::{
     validated_resolved_addresses, validated_url, HostResolver, OutboundUrl, OutboundUrlError,
     SystemHostResolver,
 };
+use tokio::sync::Semaphore;
 
 pub const HTML_MAX_BYTES: usize = 512 * 1024;
 pub const IMAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
@@ -21,6 +23,13 @@ pub const ICON_MAX_BYTES: usize = 512 * 1024;
 pub const MAX_REDIRECTS: u32 = 3;
 pub const UNFURL_USER_AGENT: &str = "oort-unfurl/1";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+/// A name server that has not answered in this long is as good as down. `getaddrinfo` normally
+/// answers in milliseconds; without a deadline a slow one held a request for as long as it liked
+/// (#4881 security review M-2).
+const DNS_DEADLINE: Duration = Duration::from_secs(3);
+/// Name lookups running at once, **including ones that were given up on at the deadline** but
+/// whose thread is still waiting inside `getaddrinfo`. See [`BoundedResolver`].
+const MAX_DNS_LOOKUPS: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetchKind {
@@ -90,17 +99,38 @@ pub trait UnfurlHttp: Send + Sync {
     async fn fetch(&self, url: &str, kind: FetchKind) -> Result<Fetched, FetchError>;
 }
 
-/// Production transport: OutboundHTTPPolicy + address pin + hop-by-hop redirect.
+/// Production transport: OutboundHTTPPolicy + address pin + hop-by-hop redirect, with a deadline
+/// and a ceiling on name lookups ([`BoundedResolver`]).
 pub struct SafeUnfurlTransport {
     allow_development_http: bool,
     timeout: Duration,
+    resolver: BoundedResolver,
 }
 
 impl SafeUnfurlTransport {
     pub fn new(allow_development_http: bool, timeout: Duration) -> SafeUnfurlTransport {
+        SafeUnfurlTransport::with_lookup(
+            allow_development_http,
+            timeout,
+            Arc::new(SystemLookup),
+            DNS_DEADLINE,
+            MAX_DNS_LOOKUPS,
+        )
+    }
+
+    /// The same transport over any name lookup, so a test can hold one open (or never answer)
+    /// without a network.
+    fn with_lookup(
+        allow_development_http: bool,
+        timeout: Duration,
+        lookup: Arc<dyn NameLookup>,
+        dns_deadline: Duration,
+        max_dns_lookups: usize,
+    ) -> SafeUnfurlTransport {
         SafeUnfurlTransport {
             allow_development_http,
             timeout,
+            resolver: BoundedResolver::new(lookup, dns_deadline, max_dns_lookups),
         }
     }
 
@@ -116,12 +146,78 @@ impl UnfurlHttp for SafeUnfurlTransport {
             url,
             kind,
             self.allow_development_http,
-            &SystemHostResolver,
+            &self.resolver,
             &ReqwestGet {
                 timeout: self.timeout,
             },
         )
         .await
+    }
+}
+
+/// How a name becomes addresses, one level below the guard's [`HostResolver`]. The production
+/// lookup is `getaddrinfo` ([`SystemLookup`]); the trait exists so a lookup can be handed to a
+/// task of its own and so a test can stand one in.
+#[async_trait::async_trait]
+trait NameLookup: Send + Sync + 'static {
+    async fn lookup(&self, authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError>;
+}
+
+struct SystemLookup;
+
+#[async_trait::async_trait]
+impl NameLookup for SystemLookup {
+    async fn lookup(&self, authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError> {
+        SystemHostResolver.resolve(authority).await
+    }
+}
+
+/// The resolver the transport hands the guard: a deadline on every lookup, and a ceiling on how
+/// many run at once (#4881 security review M-2).
+///
+/// `tokio::net::lookup_host` runs `getaddrinfo` on the blocking pool. Dropping its future at the
+/// deadline frees the *request* but not that thread: a name server that never answers would pin
+/// one pool thread for every request that asked, however quickly each request gave up. So the
+/// lookup runs on a task of its own that **owns a permit until `getaddrinfo` really returns**. At
+/// most `max_running` threads can be held that way, abandoned lookups included, and a lookup that
+/// finds no free place fails at once instead of queueing behind them. Both outcomes read to the
+/// guard as an unresolvable name (`Failed("dns")`), which the worker retries and the proxy
+/// remembers for a few minutes.
+///
+/// It wraps the transport's resolver only. `SystemHostResolver` itself is shared with webhook
+/// delivery and the doorbell and is left as it was.
+struct BoundedResolver {
+    lookup: Arc<dyn NameLookup>,
+    deadline: Duration,
+    running: Arc<Semaphore>,
+}
+
+impl BoundedResolver {
+    fn new(lookup: Arc<dyn NameLookup>, deadline: Duration, max_running: usize) -> BoundedResolver {
+        BoundedResolver {
+            lookup,
+            deadline,
+            running: Arc::new(Semaphore::new(max_running)),
+        }
+    }
+}
+
+impl HostResolver for BoundedResolver {
+    async fn resolve(&self, authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError> {
+        let Ok(place) = Arc::clone(&self.running).try_acquire_owned() else {
+            return Err(OutboundUrlError::ResolutionFailed);
+        };
+        let lookup = Arc::clone(&self.lookup);
+        let authority = authority.to_string();
+        let task = tokio::spawn(async move {
+            let _place = place;
+            lookup.lookup(&authority).await
+        });
+        match tokio::time::timeout(self.deadline, task).await {
+            Ok(Ok(answer)) => answer,
+            // The deadline passed (the task carries on, holding its place) or the lookup panicked.
+            Ok(Err(_)) | Err(_) => Err(OutboundUrlError::ResolutionFailed),
+        }
     }
 }
 
@@ -376,6 +472,15 @@ pub(crate) mod guard_fixtures {
             }
         }
 
+        /// Every hostname resolves to `answer`, whatever it is: a name that points inward.
+        pub(crate) fn resolving_to(answer: &str, replies: Vec<ScriptedReply>) -> GuardedScript {
+            GuardedScript {
+                hops: AtomicU32::new(0),
+                replies,
+                resolves_to: vec![answer.parse().expect("an IP literal")],
+            }
+        }
+
         /// Requests that passed the guard and reached the (scripted) socket.
         pub(crate) fn hops(&self) -> u32 {
             self.hops.load(Ordering::SeqCst)
@@ -431,6 +536,7 @@ mod tests {
     use std::net::IpAddr;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
+    use tokio::sync::Semaphore;
 
     struct FixedResolver(Vec<IpAddr>);
 
@@ -1865,5 +1971,111 @@ mod tests {
                 "{answer}: the redirect target was resolved, then refused"
             );
         }
+    }
+
+    // ── #4881 security review r1, M-2: a deadline and a ceiling on name lookups ──────────────
+
+    /// A name lookup that answers one public address once the test opens the gate, and counts
+    /// how many it was asked to start.
+    struct Gate {
+        asked: AtomicU32,
+        gate: Arc<Semaphore>,
+    }
+
+    impl Gate {
+        fn closed() -> Arc<Gate> {
+            Arc::new(Gate {
+                asked: AtomicU32::new(0),
+                gate: Arc::new(Semaphore::new(0)),
+            })
+        }
+        fn open(&self, lookups: usize) {
+            self.gate.add_permits(lookups);
+        }
+        fn asked(&self) -> u32 {
+            self.asked.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl NameLookup for Gate {
+        async fn lookup(&self, _authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError> {
+            self.asked.fetch_add(1, Ordering::SeqCst);
+            self.gate.acquire().await.expect("gate").forget();
+            Ok(vec!["93.184.216.34".parse().unwrap()])
+        }
+    }
+
+    /// The whole production path (`SafeUnfurlTransport::fetch`, the real hop loop and guard) over
+    /// a name server that never answers: the fetch ends at the lookup deadline with the same
+    /// error an unresolvable name gets, and nothing is dialled (the lookup is before the socket).
+    #[tokio::test]
+    async fn a_name_server_that_never_answers_ends_the_fetch_at_the_deadline() {
+        let lookup = Gate::closed();
+        let transport = SafeUnfurlTransport::with_lookup(
+            false,
+            Duration::from_secs(5),
+            lookup.clone(),
+            Duration::from_millis(50),
+            4,
+        );
+        let started = std::time::Instant::now();
+        // The outer timeout makes a lookup with no deadline fail here, not hang the suite.
+        let result = tokio::time::timeout(
+            Duration::from_secs(8),
+            transport.fetch("https://slow.example/favicon.ico", FetchKind::Icon),
+        )
+        .await
+        .expect("the fetch must end by itself at the lookup deadline");
+        assert_eq!(result.unwrap_err(), FetchError::Failed("dns".into()));
+        assert!(
+            started.elapsed() >= Duration::from_millis(50),
+            "it waited for the deadline, not less"
+        );
+        assert_eq!(lookup.asked(), 1);
+    }
+
+    /// A lookup given up on at the deadline is still running (its thread is inside
+    /// `getaddrinfo`), so it keeps its place: the ceiling counts it until it really ends.
+    #[tokio::test]
+    async fn lookups_that_outlive_their_deadline_still_count_against_the_ceiling() {
+        // Every wait is bounded, so a resolver with no deadline fails this test instead of
+        // holding the suite.
+        async fn within<T>(what: &str, work: impl std::future::Future<Output = T>) -> T {
+            tokio::time::timeout(Duration::from_secs(5), work)
+                .await
+                .unwrap_or_else(|_| panic!("{what}: no answer by itself"))
+        }
+        let lookup = Gate::closed();
+        let resolver = BoundedResolver::new(lookup.clone(), Duration::from_millis(30), 2);
+        for host in ["a.example:443", "b.example:443"] {
+            assert_eq!(
+                within(host, resolver.resolve(host)).await,
+                Err(OutboundUrlError::ResolutionFailed),
+                "{host}: not answered by the deadline"
+            );
+        }
+        assert_eq!(lookup.asked(), 2);
+        // Both are abandoned but not finished: a third finds no place and fails at once, without
+        // starting a lookup.
+        assert_eq!(
+            within("c.example", resolver.resolve("c.example:443")).await,
+            Err(OutboundUrlError::ResolutionFailed)
+        );
+        assert_eq!(lookup.asked(), 2, "no third lookup was started");
+        // Let the abandoned ones finish: their places come back and a lookup runs again.
+        lookup.open(2);
+        within("the abandoned lookups ending", async {
+            while resolver.running.available_permits() < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        lookup.open(1);
+        assert_eq!(
+            within("d.example", resolver.resolve("d.example:443")).await,
+            Ok(vec!["93.184.216.34".parse().unwrap()])
+        );
+        assert_eq!(lookup.asked(), 3);
     }
 }

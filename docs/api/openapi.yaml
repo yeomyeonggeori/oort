@@ -11740,6 +11740,11 @@ paths:
         (public addresses only, every redirect hop re-checked) but on port 443
         only, with a 512 KiB cap. Only image/png, jpeg, gif, webp, avif and ICO
         (`image/x-icon`, `image/vnd.microsoft.icon`) are proxied; SVG never is.
+        A 404 for an address that failed (not found, refused, too slow, wrong type)
+        is remembered by the server for a few minutes, so asking again does not
+        reach the remote site. A request that must fetch spends the member's fetch
+        budget and a place among the fetches in flight, and is answered 429 when
+        either is exhausted (see `RateLimited`).
       security:
         - bearerAuth: []
       parameters:
@@ -14798,8 +14803,17 @@ components:
         person and 600 for an agent credential; scheduled-message creates and edits,
         default 60; attachment upload starts, default 60. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
-        use) and every read are not budgeted. Retrying with the same `clientMsgId`
-        after a 429 is safe. `POST /v1/join` also has a per-account password-guess
+        use) and every read except the two below are not budgeted. Retrying with the
+        same `clientMsgId` after a 429 is safe. The link-card proxies
+        (`GET …/unfurls/{id}/image` and `GET …/unfurls/{id}/icon`, ADR-0170 증보 D13,
+        #4881) have a per-member budget of fetches **from the card's remote site**,
+        default 240 per window (`RATE_LIMIT_UNFURL_PROXY_PER_MEMBER`, 0 removes it),
+        shared by both routes and spent only by a request that really would fetch: a
+        picture already held by the server, and an address that failed in the last few
+        minutes, cost the remote site nothing and spend nothing. Those two routes also
+        answer 429 with `Retry-After: 1` when the server is already fetching as many
+        remote images as it allows at once (16), whoever asks; ask again shortly. A
+        client shows its fallback meanwhile. `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
         already has an active account, is spent before the password is compared
         (a right password counts too), and answers 429 without comparing once
