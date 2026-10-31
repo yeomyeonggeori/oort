@@ -114,6 +114,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              no trailing slash); no picture address will be handed to the co-hosted Hermes"
         );
     }
+    // #4820 C2b 2부: a value other than an exact `1` keeps the hosted expression door shut; say so by
+    // name (never the value) instead of letting every photo turn be a silent failure card.
+    if std::env::var(momo_workspace_actions::hosted_expression::STRICT_ENV)
+        .is_ok_and(|raw| !raw.trim().is_empty())
+        && !config.hosted_media_strict
+    {
+        tracing::warn!(
+            "OORT_HOSTED_MEDIA_STRICT is set but is not exactly `1`; the hosted expression door stays \
+             shut and a photo turn of the co-hosted Hermes is answered by a failure card"
+        );
+    }
     let worker = AgentWorker::connect(config).await?;
     worker.run(shutdown_signal()).await;
     Ok(())

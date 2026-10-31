@@ -282,8 +282,8 @@ pub use search::{
 pub use self_media::{
     bytes_match_mime, canonical_origin, mint_for_run_in_tx, mint_with_ttl_in_tx,
     redact_self_media_urls, redeem_in_tx, self_media_url, token_hash, token_is_well_formed,
-    SelfMediaGrant, SelfMediaSource, SELF_MEDIA_MAX_BYTES, SELF_MEDIA_PATH_PREFIX,
-    SELF_MEDIA_TOKEN_CHARS, SELF_MEDIA_TTL_SECS,
+    trigger_photo_in_tx, SelfMediaGrant, SelfMediaSource, TriggerPhoto, SELF_MEDIA_MAX_BYTES,
+    SELF_MEDIA_PATH_PREFIX, SELF_MEDIA_TOKEN_CHARS, SELF_MEDIA_TTL_SECS,
 };
 pub use sidebar_prefs::{
     get_sidebar_prefs_in_tx, set_sidebar_prefs_in_tx, validate_sidebar_prefs, SidebarPrefs,

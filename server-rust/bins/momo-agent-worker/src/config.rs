@@ -125,6 +125,16 @@ pub struct WorkerConfig {
     /// no address is ever minted. A separate variable on purpose: `MOMO_PUBLIC_BASE_URL` reaches the api
     /// only (ADR-0205 D1), and the same value goes to the Hermes service as the guard's one allowed origin.
     pub self_media_origin: Option<String>,
+    /// `OORT_HOSTED_MEDIA_STRICT` (#4820 C2b 2부, ADR-0218 증보 G3.7 (b)·G4) — the operator's attestation
+    /// that the co-hosted Hermes behind this worker runs with `HERMES_MEDIA_DELIVERY_STRICT=1`, which is
+    /// what keeps a `MEDIA:` mark in a final answer from being turned into the bytes of any file the
+    /// model names. This worker cannot see that from here, so the door that harvests a picture from an
+    /// answer opens **only** on an exact `1`; unset (or anything else) a photo turn is answered by one
+    /// failure card and calls no model. Hermes' own enforcement of the flag is the next piece.
+    pub hosted_media_strict: bool,
+    /// The assembler child the hosted door runs for a motion (`None` = `momo-expression-assembler` next
+    /// to this executable, the way every picture path finds it). A hook for tests, like `momo-server`'s.
+    pub assembler_program: Option<std::path::PathBuf>,
     /// #3162 — the team-memory summary loop (`MEMORY_*` keys).
     pub memory: MemoryConfig,
     /// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` (#3431, ADR-0193 D18) — read
@@ -595,6 +605,13 @@ fn claude_subscription_agents_switch_on(value: Option<&str>) -> bool {
     value.is_some_and(|value| value.trim() == "true")
 }
 
+/// The operator's strict-media attestation (#4820 C2b 2부): **only an exact `1`**. Not `true`, not `yes`,
+/// not `01`, not a `1` with a space around it — a door that opens a path for the model to name a file
+/// does not open on a guess about what the operator meant.
+fn hosted_media_strict_attested(raw: Option<&str>) -> bool {
+    raw == Some("1")
+}
+
 fn report_protocol_enabled(raw: Option<&str>) -> bool {
     !matches!(
         raw.map(|value| value.trim().to_ascii_lowercase())
@@ -683,6 +700,10 @@ impl WorkerConfig {
             ),
             self_media_origin: env("OORT_SELF_MEDIA_ORIGIN")
                 .and_then(|raw| momo_messaging::canonical_origin(&raw).map(str::to_string)),
+            hosted_media_strict: hosted_media_strict_attested(
+                env(momo_workspace_actions::hosted_expression::STRICT_ENV).as_deref(),
+            ),
+            assembler_program: None,
             memory: MemoryConfig::from_env()?,
             claude_subscription_agents_enabled: claude_subscription_agents_switch_on(
                 env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref(),
@@ -729,6 +750,8 @@ impl WorkerConfig {
             egress: momo_settings::EgressPolicy::default(),
             report_protocol_enabled: true,
             self_media_origin: None,
+            hosted_media_strict: false,
+            assembler_program: None,
             memory: MemoryConfig::default(),
             claude_subscription_agents_enabled: false,
             team_ai_daily_token_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_TOKEN_CAP,
@@ -746,6 +769,23 @@ impl WorkerConfig {
     /// origin leaves it off, exactly as the environment does.
     pub fn with_self_media_origin(mut self, origin: &str) -> WorkerConfig {
         self.self_media_origin = momo_messaging::canonical_origin(origin).map(str::to_string);
+        self
+    }
+
+    /// The same config with the operator's strict-media attestation (#4820 C2b 2부) — what an exact
+    /// `OORT_HOSTED_MEDIA_STRICT=1` is in the environment.
+    pub fn with_hosted_media_strict(mut self, strict: bool) -> WorkerConfig {
+        self.hosted_media_strict = strict;
+        self
+    }
+
+    /// The same config with the assembler child to run (#4820 C2b 2부), for tests that provoke a
+    /// refusal or an outage of the assembler.
+    pub fn with_assembler_program(
+        mut self,
+        program: impl Into<std::path::PathBuf>,
+    ) -> WorkerConfig {
+        self.assembler_program = Some(program.into());
         self
     }
 
@@ -837,6 +877,27 @@ fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String 
 
 #[cfg(test)]
 mod tests {
+
+    /// #4820 C2b 2부: the strict-media attestation is an exact `1` and nothing else.
+    #[test]
+    fn the_strict_media_attestation_is_an_exact_one() {
+        assert!(hosted_media_strict_attested(Some("1")));
+        for wrong in [
+            None,
+            Some(""),
+            Some(" 1"),
+            Some("1 "),
+            Some("01"),
+            Some("11"),
+            Some("0"),
+            Some("true"),
+            Some("TRUE"),
+            Some("yes"),
+            Some("on"),
+        ] {
+            assert!(!hosted_media_strict_attested(wrong), "{wrong:?}");
+        }
+    }
     /// #3431: the worker reads the Claude opt-in by the server's rule — only an
     /// exact `true` opens it, and the shipped default (`for_target`) is off.
     #[test]

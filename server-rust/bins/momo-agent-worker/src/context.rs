@@ -149,6 +149,13 @@ pub struct SystemBlocks<'a> {
     /// a turn of an agent pinned to that Hermes whose trigger message carries a picture. A fact plus
     /// the one use it is for, so it sits with the rules and before the memory *data* block.
     pub self_media: Option<&'a str>,
+    /// #4820 C2b 2부 (ADR-0218 증보 G6) — the instruction a **photo turn of the co-hosted Hermes** carries:
+    /// how to make the picture (the photo address into `image_url` only), how to show it (a `MEDIA:` line),
+    /// the one `oort-expression` request block, the face rule and the failure rule
+    /// ([`momo_workspace_actions::hosted_expression::DIRECTIVE`]). Present only on a turn that opens the
+    /// hosted door, so every other turn's window is byte-for-byte what it was. A rule about behaviour, so
+    /// it sits with the rules and before the memory *data* block.
+    pub hosted_expression: Option<&'a str>,
     /// Print `#<seq> ` before each **person's** message (#3169): the handle the model cites as
     /// evidence when it calls `memory_suggest`. Off unless that tool is offered — an ordinary
     /// turn's window is byte-for-byte what it was before. The agent's own turns carry no number
@@ -207,6 +214,13 @@ pub fn assemble(
     }
     if let Some(line) = blocks.self_media.map(str::trim).filter(|l| !l.is_empty()) {
         head.push(ChatMessage::system(line));
+    }
+    if let Some(directive) = blocks
+        .hosted_expression
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
+        head.push(ChatMessage::system(directive));
     }
     if let Some(memory) = blocks.memory.map(str::trim).filter(|m| !m.is_empty()) {
         head.push(ChatMessage::system(memory));
@@ -551,6 +565,56 @@ mod tests {
                 .filter(|m| m.content.contains("self-media"))
                 .count(),
             0
+        );
+    }
+
+    /// #4820 C2b 2부: the hosted door's instruction is exactly one more `system` turn, after the photo
+    /// address and before the memory data block, and `None` adds nothing at all.
+    #[test]
+    fn the_hosted_expression_directive_is_exactly_one_more_system_turn() {
+        let window = vec![message(
+            1,
+            Some(5),
+            Some("성재"),
+            "@hermes 이 사진으로 이모티콘 만들어줘",
+        )];
+        let assembled = |hosted_expression: Option<&str>| {
+            assemble(
+                &window,
+                Uuid::from_u128(AGENT),
+                Some(Uuid::from_u128(1)),
+                "unused",
+                Some("you are hermes"),
+                SystemBlocks {
+                    now: Some("현재 시각: 2026-10-31"),
+                    self_media: Some("첨부 사진 주소 — 줄"),
+                    hosted_expression,
+                    memory: Some("memory data"),
+                    ..SystemBlocks::default()
+                },
+                10_000,
+            )
+        };
+        let with = assembled(Some("표현 만들기 안내"));
+        let without = assembled(None);
+        assert_eq!(with.messages.len(), without.messages.len() + 1);
+        let roles: Vec<&str> = with.messages.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(
+            roles,
+            vec![
+                "you are hermes",
+                "현재 시각: 2026-10-31",
+                "첨부 사진 주소 — 줄",
+                "표현 만들기 안내",
+                "memory data",
+                "[성재] @hermes 이 사진으로 이모티콘 만들어줘",
+            ]
+        );
+        let mut stripped = with.messages.clone();
+        stripped.retain(|m| m.content != "표현 만들기 안내");
+        assert_eq!(
+            stripped, without.messages,
+            "the directive is the only difference"
         );
     }
 

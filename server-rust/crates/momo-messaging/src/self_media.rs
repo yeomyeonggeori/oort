@@ -168,15 +168,32 @@ pub async fn mint_for_run_in_tx(
     .await
 }
 
-/// [`mint_for_run_in_tx`] with an explicit TTL (seconds). The table refuses anything over ten
-/// minutes or not positive, so a wrong value here is an error, not a long-lived token.
-pub async fn mint_with_ttl_in_tx(
+/// The photo a run's trigger message carries, as the database proves it: who asked, where, and
+/// the one attachment. Everything is the server's reading of rows; no id comes from outside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TriggerPhoto {
+    /// The live human who wrote the trigger message.
+    pub requester: Uuid,
+    pub channel_id: Uuid,
+    /// The first complete image of the trigger message itself.
+    pub attachment_id: Uuid,
+}
+
+/// The requester's own photo on the run's trigger message, or `None` when there is none or any
+/// rule is not met: a live human wrote the trigger, the agent and that person are both in the
+/// conversation, and the trigger's first complete image passes the one ownership rule every
+/// requester-attachment read follows ([`find_requester_attachment_in_tx`]: complete, an image,
+/// within the size ceiling, on a live message the requester wrote, in this conversation).
+///
+/// **The one definition of "a photo on the trigger"**: the address mint ([`mint_with_ttl_in_tx`]) and
+/// the hosted expression door (`momo_workspace_actions::hosted_expression`) both ask this, so the two
+/// can never disagree about which picture a turn is about.
+pub async fn trigger_photo_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     run_id: Uuid,
     agent_member_id: Uuid,
-    ttl_secs: i64,
-) -> Result<Option<SelfMediaGrant>, DbError> {
+) -> Result<Option<TriggerPhoto>, DbError> {
     // Who asked: the author of the run's trigger message, a live human (the avatar flow's rule).
     let Some((requester, channel_id)) =
         requester_of_run_in_tx(conn, workspace_id, run_id, agent_member_id).await?
@@ -203,8 +220,7 @@ pub async fn mint_with_ttl_in_tx(
     let Some(attachment_id) = attachment_id else {
         return Ok(None);
     };
-    // The one ownership rule every requester-attachment read follows: complete, an image, within the
-    // size ceiling, on a live message the requester wrote, in this conversation.
+    // The one ownership rule every requester-attachment read follows.
     if find_requester_attachment_in_tx(
         conn,
         workspace_id,
@@ -218,6 +234,31 @@ pub async fn mint_with_ttl_in_tx(
     {
         return Ok(None);
     }
+    Ok(Some(TriggerPhoto {
+        requester,
+        channel_id,
+        attachment_id,
+    }))
+}
+
+/// [`mint_for_run_in_tx`] with an explicit TTL (seconds). The table refuses anything over ten
+/// minutes or not positive, so a wrong value here is an error, not a long-lived token.
+pub async fn mint_with_ttl_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    ttl_secs: i64,
+) -> Result<Option<SelfMediaGrant>, DbError> {
+    let Some(photo) = trigger_photo_in_tx(conn, workspace_id, run_id, agent_member_id).await?
+    else {
+        return Ok(None);
+    };
+    let TriggerPhoto {
+        requester,
+        channel_id,
+        attachment_id,
+    } = photo;
     let Some(token) = new_token() else {
         return Ok(None);
     };

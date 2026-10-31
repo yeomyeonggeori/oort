@@ -81,6 +81,8 @@ pub mod context;
 pub mod egress;
 pub mod embed;
 pub mod extract;
+/// #4820 C2b 2부 — the hosted expression door: a photo turn of the co-hosted Hermes is answered without streaming and its one answer becomes a card.
+mod hosted_door;
 pub mod oauth;
 pub mod partial;
 pub mod payload;
@@ -947,6 +949,24 @@ impl AgentWorker {
             }
         }
 
+        // #4820 C2b 2부 — the hosted expression door. A photo turn of the co-hosted Hermes (not a welcome,
+        // not a resume) is decided here, **before** anything costs: the operator's strict-media
+        // attestation, the run's state, the requester and the agent's ceiling of waiting cards are
+        // judged now (#4829's cheap refusals first), and a refusal ends the turn without a model call.
+        // Every other turn takes the `NotAPhotoTurn` arm and is untouched.
+        let door_turn = if cohosted_pin && !payload.is_welcome() && !payload.is_resume() {
+            match self
+                .hosted_door_open(&job, &payload, run_id, &transport.endpoint)
+                .await
+            {
+                hosted_door::DoorOpen::NotAPhotoTurn => None,
+                hosted_door::DoorOpen::Turn(turn) => Some(turn),
+                hosted_door::DoorOpen::Settled(settlement) => return settlement,
+            }
+        } else {
+            None
+        };
+
         let now_context = now_context_block(now_ms(), self.config.utc_offset_minutes);
         // Resolved once: the same list rides the request as `momo_tools` and
         // decides whether the model is told the connection-request rule
@@ -1015,6 +1035,9 @@ impl AgentWorker {
                 memory_suggest: momo_agent::memory_suggest::directive(&momo_tools),
                 cite_seq: momo_agent::memory_suggest::is_offered(&momo_tools),
                 self_media: self_media_line.as_deref(),
+                // #4820 C2b 2부 (G6): the door's instruction rides a door turn and no other.
+                hosted_expression: door_turn
+                    .map(|_| momo_workspace_actions::hosted_expression::DIRECTIVE),
                 memory: memory_block.as_deref(),
             },
             self.config.max_context_chars,
@@ -1082,32 +1105,45 @@ impl AgentWorker {
         // both present `client_msg_id = run_id`, so the commit's `send` returns
         // this row instead of opening a second answer. That is the whole join —
         // there is no handle passed back, and nothing to keep in sync.
-        let (sink, deltas) = partial::delta_channel();
-        let answer = stream::MessageStream::new(
-            self.pool.clone(),
-            job.workspace_id,
-            payload.channel_id,
-            payload.agent_member_id,
-            run_id,
-            quoted_message_id,
-            // #4622 — where the answer is *created*: inside the thread the request
-            // was made in, or in the main flow when it was made there.
-            answer_root_id,
-            // The turn's self-description rides the first slice, because the
-            // commit's deduped `send` cannot supply it later (stream rule 4).
-            success_props(&payload, run_id),
-        );
-        let pump = tokio::spawn(partial::run_partial_pump(
-            self.pool.clone(),
-            started_address,
-            deltas,
-            partial::PARTIAL_WINDOW,
-            answer,
-        ));
-        let mut attempt = self
-            .provider
-            .complete_streaming(&transport.endpoint, &request, &sink)
-            .await;
+        //
+        // #4820 C2b 2부: a **door turn is not streamed**. Hermes turns a `MEDIA:` line into the picture
+        // only in a final, non-streamed answer, and the one answer is taken apart by the door
+        // (`hosted_door`) before any of it may be committed — so there is no pump, no streamed message and
+        // no slice for a picture's MiB to ride. Every other turn takes the `else` arm, unchanged.
+        let mut sink = None;
+        let mut pump = None;
+        let mut attempt = if door_turn.is_some() {
+            self.provider.complete(&transport.endpoint, &request).await
+        } else {
+            let (delta_sink, deltas) = partial::delta_channel();
+            let answer = stream::MessageStream::new(
+                self.pool.clone(),
+                job.workspace_id,
+                payload.channel_id,
+                payload.agent_member_id,
+                run_id,
+                quoted_message_id,
+                // #4622 — where the answer is *created*: inside the thread the request
+                // was made in, or in the main flow when it was made there.
+                answer_root_id,
+                // The turn's self-description rides the first slice, because the
+                // commit's deduped `send` cannot supply it later (stream rule 4).
+                success_props(&payload, run_id),
+            );
+            pump = Some(tokio::spawn(partial::run_partial_pump(
+                self.pool.clone(),
+                started_address,
+                deltas,
+                partial::PARTIAL_WINDOW,
+                answer,
+            )));
+            let attempt = self
+                .provider
+                .complete_streaming(&transport.endpoint, &request, &delta_sink)
+                .await;
+            sink = Some(delta_sink);
+            attempt
+        };
 
         // A rejection on a token whose deadline still looked fine means the
         // provider retired it early — revoked, rotated elsewhere, or our clock
@@ -1142,7 +1178,10 @@ impl AgentWorker {
         // The sink is dropped BEFORE the pump is awaited: closing the channel
         // is what tells the pump the stream is over and to flush its tail.
         drop(sink);
-        let pumped = pump.await.unwrap_or_default();
+        let pumped = match pump {
+            Some(pump) => pump.await.unwrap_or_default(),
+            None => Default::default(),
+        };
         if pumped.frames > 0 || pumped.slices > 0 {
             tracing::debug!(
                 run_id = %run_id,
@@ -1228,11 +1267,50 @@ impl AgentWorker {
         let usage = completion.usage;
         let props = success_props(&payload, run_id);
 
+        // #4820 C2b 2부 — a door turn's answer is taken apart here: a valid request block becomes a card
+        // (or a failure card) and the turn ends; anything else continues below as an ordinary answer, but
+        // with the **cleaned** text — no picture, no `MEDIA:` line, no request block — which is the only
+        // text that may ever be committed. A turn that is not a door turn keeps `completion.text` as it was.
+        let answer_text = if door_turn.is_some() {
+            match self
+                .hosted_door_land(
+                    &job,
+                    &payload,
+                    run_id,
+                    &completion.text,
+                    usage,
+                    self_media_line.is_some(),
+                    &transport.endpoint,
+                )
+                .await
+            {
+                hosted_door::Landed::Settled(settlement) => return settlement,
+                hosted_door::Landed::Answer(text) if text.trim().is_empty() => {
+                    // Everything the model wrote was a picture or a request block: nothing is left to say,
+                    // and an empty answer is not an answer (same rule as an empty completion above).
+                    let reason = "provider returned no text outside the picture and the request";
+                    tracing::warn!(outbox_id = job.id, run_id = %run_id, reason, "empty door answer");
+                    return self
+                        .settle_terminal_failure(
+                            &job,
+                            &payload,
+                            run_id,
+                            reason,
+                            &transport.endpoint,
+                        )
+                        .await;
+                }
+                hosted_door::Landed::Answer(text) => text,
+            }
+        } else {
+            completion.text
+        };
+
         // #1454 — the completion report, if the model wrote one. The fence is
         // cut out of the answer whether or not it parsed, so the committed body
         // is the same text the streaming slices already showed (the cut is
         // `completion_report::visible_prefix` in both places).
-        let (extraction, dropped_actions) = completion_report::extract(&completion.text);
+        let (extraction, dropped_actions) = completion_report::extract(&answer_text);
         if dropped_actions > 0 {
             // Counts only, never the bullets themselves (redaction, L4 §7).
             tracing::warn!(
@@ -1242,7 +1320,7 @@ impl AgentWorker {
             );
         }
         let (body, report) = match extraction {
-            completion_report::Extraction::None => (Some(completion.text), None),
+            completion_report::Extraction::None => (Some(answer_text), None),
             completion_report::Extraction::Refused { body, reason } => {
                 tracing::info!(
                     run_id = %run_id,
@@ -1258,7 +1336,7 @@ impl AgentWorker {
                 // never be shown as text; when there is no card, the model's
                 // literal words are all there is.
                 if body.trim().is_empty() {
-                    (Some(completion.text), None)
+                    (Some(answer_text), None)
                 } else {
                     (Some(body), None)
                 }

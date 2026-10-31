@@ -1798,12 +1798,15 @@ name = "momo-agent-worker"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "chrono",
+ "image",
  "momo-agent",
  "momo-db",
  "momo-drive",
  "momo-egress",
  "momo-embed",
+ "momo-expressions",
  "momo-messaging",
  "momo-outbox",
  "momo-settings",
@@ -2388,6 +2391,7 @@ dependencies = [
  "momo-expressions",
  "momo-messaging",
  "momo-settings",
+ "serde",
  "serde_json",
  "sqlx",
  "tokio",
