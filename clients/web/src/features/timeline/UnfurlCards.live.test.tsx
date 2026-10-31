@@ -2,12 +2,24 @@
 
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
+import { fetchUnfurlImage } from "@momo/core/lib/api";
 import { AppearanceSection } from "@/features/settings/AppearanceSection";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
+import type { AppLocale } from "@/i18n/localeStore";
 import { UnfurlCardView, UnfurlCards } from "./UnfurlCards";
 import { reloadLinkPreviewPreferenceForTest } from "./linkPreviewPreference";
 import { resetUnfurlImagesForTest } from "./useUnfurlImage";
+
+// The picture and icon requests are the thing under test, so the network call is a spy. It never
+// answers unless a test makes it: a card then stays in "loading", like a slow proxy.
+vi.mock("@momo/core/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
+  return { ...actual, fetchUnfurlImage: vi.fn() };
+});
+const requested = vi.mocked(fetchUnfurlImage);
 
 const PIXEL =
   "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
@@ -28,15 +40,19 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
+let korean: AppLocale;
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  korean = await koreanLocaleForTest();
 });
 
 beforeEach(() => {
   localStorage.clear();
   reloadLinkPreviewPreferenceForTest(localStorage);
   resetUnfurlImagesForTest();
+  requested.mockReset();
+  requested.mockImplementation(() => new Promise(() => {}));
 });
 
 afterEach(() => {
@@ -48,6 +64,7 @@ afterEach(() => {
   mountedHost = null;
   reloadLinkPreviewPreferenceForTest(null);
   resetUnfurlImagesForTest();
+  vi.unstubAllGlobals();
 });
 
 function mount(tree: ReactElement): HTMLElement {
@@ -56,7 +73,7 @@ function mount(tree: ReactElement): HTMLElement {
   mountedHost = host;
   mountedRoot = createRoot(host);
   act(() => {
-    mountedRoot?.render(tree);
+    mountedRoot?.render(<LocaleProvider locale={korean}>{tree}</LocaleProvider>);
   });
   return host;
 }
@@ -75,20 +92,26 @@ function Harness() {
 }
 
 describe("link preview live preference", () => {
-  it("hides the unfurl when settings switch to 숨기기, without a reload", () => {
-    const host = mount(createElement(Harness));
-    expect(host.querySelector('[data-testid="unfurl-card"]')).not.toBeNull();
+  const layoutOf = (host: HTMLElement) =>
+    host.querySelector('[data-testid="unfurl-card"]')?.getAttribute("data-layout");
 
-    const off = host.querySelector<HTMLInputElement>('[data-testid="link-preview-choice-off"]');
-    expect(off).not.toBeNull();
+  it("starts on the small card and follows 크게 and 끄기 from settings without a reload", () => {
+    const host = mount(createElement(Harness));
+    expect(layoutOf(host)).toBe("compact");
+
     act(() => {
-      off?.click();
+      host.querySelector<HTMLInputElement>('[data-testid="link-preview-choice-rich"]')?.click();
+    });
+    expect(layoutOf(host)).toBe("rich");
+
+    act(() => {
+      host.querySelector<HTMLInputElement>('[data-testid="link-preview-choice-off"]')?.click();
     });
     expect(host.querySelector('[data-testid="unfurl-card"]')).toBeNull();
     expect(host.querySelector('[data-testid="unfurl-group"]')).toBeNull();
   });
 
-  it("restores the compact card from 숨기기 immediately", () => {
+  it("restores the small card from 끄기 immediately", () => {
     const host = mount(createElement(Harness));
     act(() => {
       host.querySelector<HTMLInputElement>('[data-testid="link-preview-choice-off"]')?.click();
@@ -98,9 +121,7 @@ describe("link preview live preference", () => {
     act(() => {
       host.querySelector<HTMLInputElement>('[data-testid="link-preview-choice-compact"]')?.click();
     });
-    const card = host.querySelector('[data-testid="unfurl-card"]');
-    expect(card).not.toBeNull();
-    expect(card?.getAttribute("data-layout")).toBe("compact");
+    expect(layoutOf(host)).toBe("compact");
   });
 });
 
@@ -125,5 +146,64 @@ describe("rich image decode failure", () => {
     expect(after?.getAttribute("data-layout")).toBe("compact");
     expect(host.querySelector('[data-testid="unfurl-image"]')).toBeNull();
     expect(host.querySelector('[data-testid="unfurl-hero"]')).toBeNull();
+    // The broken picture becomes the icon tile, never an empty frame.
+    expect(host.querySelector('[data-testid="unfurl-tile"]')).not.toBeNull();
+  });
+});
+
+describe("site icon requests", () => {
+  const ICON = "/v1/workspaces/ws/unfurls/u-1/icon";
+  const withIcon: MessageUnfurl = { ...base, imageUrl: undefined, iconUrl: ICON };
+  type Entry = { isIntersecting: boolean };
+  let observers: Array<(entries: Entry[]) => void> = [];
+
+  function stubObserver() {
+    observers = [];
+    class FakeObserver {
+      constructor(callback: (entries: Entry[]) => void) {
+        observers.push(callback);
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal("IntersectionObserver", FakeObserver);
+  }
+  const iconRequests = () => requested.mock.calls.filter(([path]) => path === ICON);
+
+  it("asks for the icon only once the card is on screen", () => {
+    stubObserver();
+    mount(
+      createElement(UnfurlCards, { unfurls: [withIcon], canRemove: false, preference: "compact" })
+    );
+    expect(observers.length).toBeGreaterThan(0);
+    expect(iconRequests()).toHaveLength(0);
+
+    act(() => observers.forEach((notify) => notify([{ isIntersecting: false }])));
+    expect(iconRequests()).toHaveLength(0);
+
+    act(() => observers.forEach((notify) => notify([{ isIntersecting: true }])));
+    expect(iconRequests()).toHaveLength(1);
+  });
+
+  it("does not hold the icon back for good when the engine has no IntersectionObserver", () => {
+    mount(
+      createElement(UnfurlCards, { unfurls: [withIcon], canRemove: false, preference: "compact" })
+    );
+    expect(iconRequests()).toHaveLength(1);
+  });
+
+  it("asks for the picture at once, before the card is on screen", () => {
+    stubObserver();
+    mount(
+      createElement(UnfurlCards, {
+        unfurls: [{ ...withIcon, imageUrl: "/v1/workspaces/ws/unfurls/u-1/image" }],
+        canRemove: false,
+        preference: "compact",
+      })
+    );
+    expect(requested.mock.calls.map(([path]) => path)).toEqual([
+      "/v1/workspaces/ws/unfurls/u-1/image",
+    ]);
   });
 });

@@ -11,6 +11,8 @@
 //!   image are **not a picture** and are never opened; the committed text has no picture, no
 //!   `MEDIA:` line and no request block in it (MiB of base64 must never ride `message`, `outbox`
 //!   or Centrifugo).
+//! * [`replace_pictures`] — the same cut of a `data:image/…` address for a turn that is **not** a door
+//!   turn (#4908): a sentence stands where the address was, and an answer without one is untouched.
 //! * [`prepare`] — the picture becomes candidates through the one pipeline every picture path
 //!   shares (the isolated decoder for a still, the assembler for a motion), with **no re-encode of
 //!   an assembled result** (it already passed D3 once) and every failure mapped by [`fault_card`].
@@ -422,13 +424,23 @@ fn harvest(outside: &str) -> Picture {
     }
 }
 
-/// Remove every `data:image/` address from `text` — the whole markdown image when it is one
-/// (`![alt](data:image/…)`, optional title), the bare token otherwise.
-fn without_pictures(text: &str) -> String {
+/// Cut the `data:image/` addresses at `marks` (the offsets [`data_marks`] gave for `text`) out of
+/// `text`, putting `with` where each one stood — the whole markdown image when the address is one
+/// (`![alt](data:image/…)`, optional title), the bare token otherwise. Returns the text and how many
+/// addresses it cut.
+///
+/// **The one rule of cutting an address**, so the two callers cannot drift apart: the hosted door cuts
+/// with nothing ([`without_pictures`]) and an ordinary turn puts a sentence in the place
+/// ([`replace_pictures`], #4908). Nothing else about the text is touched.
+fn cut_pictures(text: &str, marks: &[usize], with: &str) -> (String, usize) {
     let mut out = String::with_capacity(text.len());
     // Everything before `cursor` is decided: kept in `out`, or cut.
     let mut cursor = 0usize;
-    for at in data_marks(text) {
+    let mut cuts = 0usize;
+    // Where a search for an image's closing `)` last ran into the end of its line without finding one
+    // (see [`closing_paren`]).
+    let mut no_close_before = 0usize;
+    for &at in marks {
         if at < cursor {
             continue;
         }
@@ -446,11 +458,7 @@ fn without_pictures(text: &str) -> String {
         if head.ends_with("](") {
             let line_start = head.rfind('\n').map_or(0, |i| i + 1);
             if let Some(open) = head[line_start..head.len() - 2].rfind("![") {
-                let close = text[after_token..]
-                    .split('\n')
-                    .next()
-                    .and_then(|line| line.find(')'))
-                    .map(|i| i + 1);
+                let close = closing_paren(text, after_token, &mut no_close_before);
                 if let Some(close) = close {
                     keep_to = cursor + line_start + open;
                     cut_to = after_token + close;
@@ -458,10 +466,71 @@ fn without_pictures(text: &str) -> String {
             }
         }
         out.push_str(&text[cursor..keep_to]);
+        out.push_str(with);
         cursor = cut_to;
+        cuts += 1;
     }
     out.push_str(&text[cursor..]);
-    out
+    (out, cuts)
+}
+
+/// How far the closing `)` of a markdown image ends, counted from `from` (the end of its address): the
+/// first `)` before the end of the line — a title may sit between — or `None` when the line ends first.
+///
+/// `no_close_before` is the memo that keeps [`cut_pictures`] linear in the text instead of in the text
+/// times the number of addresses: a search that ran into a line end (or the end of the text) without a
+/// `)` leaves the position it stopped at, and a later address that starts before it would stop at the same
+/// place without a `)` again — marks come in increasing order — so it does not search at all. (Looking for
+/// the line end first and then for the `)` inside it read the whole rest of a long line for every address
+/// on it: 12 MiB of closed images on one line took over a minute.)
+fn closing_paren(text: &str, from: usize, no_close_before: &mut usize) -> Option<usize> {
+    if from < *no_close_before {
+        return None;
+    }
+    let rest = &text.as_bytes()[from..];
+    match rest.iter().position(|&b| b == b')' || b == b'\n') {
+        Some(i) if rest[i] == b')' => Some(i + 1),
+        Some(i) => {
+            *no_close_before = from + i;
+            None
+        }
+        None => {
+            *no_close_before = text.len();
+            None
+        }
+    }
+}
+
+/// Remove every `data:image/` address from `text` (the hosted door's cut: nothing stands in its place,
+/// [`tidy`] closes the gap).
+fn without_pictures(text: &str) -> String {
+    cut_pictures(text, &data_marks(text), "").0
+}
+
+/// What [`replace_pictures`] made of an answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Replaced {
+    /// The answer with the sentence where each address stood; everything else is as it was.
+    pub text: String,
+    /// How many addresses were cut (never 0: an answer with none is `None`, not a `Replaced`).
+    pub cuts: usize,
+}
+
+/// An **ordinary** turn's answer with every `data:image/` address replaced by `with` — the same rule the
+/// hosted door cuts by ([`cut_pictures`]), so MiB of base64 cannot ride `message`, `outbox` or Centrifugo
+/// on a turn that is not a door turn either (#4908).
+///
+/// `None` is "there is no such address": **the caller keeps the text it has, byte for byte** — nothing is
+/// trimmed, squeezed or re-lined, and a `MEDIA:` line, a request block or an `http(s)` image is the
+/// model's own text on such a turn and stays. When there is an address the only change is the cut itself:
+/// no [`tidy`], because a sentence stands in each place and leaves no gap to close.
+pub fn replace_pictures(text: &str, with: &str) -> Option<Replaced> {
+    let marks = data_marks(text);
+    if marks.is_empty() {
+        return None;
+    }
+    let (text, cuts) = cut_pictures(text, &marks, with);
+    Some(Replaced { text, cuts })
 }
 
 /// Remove every line that carries a `MEDIA:` mark (a path Hermes could not turn into a picture, or
@@ -1339,6 +1408,224 @@ mod tests {
         let other = "```json\n{\"a\":1}\n```\n```oort-expression json\n{}\n```";
         assert_eq!(open(other).clean, other);
         assert_eq!(open(other).block, Block::Absent);
+    }
+
+    // ---- an ordinary turn's answer (#4908) -------------------------------------------------------
+
+    /// A stand-in for the worker's sentence (the worker's own is pinned by its end-to-end test).
+    const SAID: &str = "그림은 여기에 못 실어요";
+
+    /// No address, no change: the caller keeps its own text. The table is the texts a tidy-up or a
+    /// trim would have touched, and the shapes that look like a picture and are not one.
+    #[test]
+    fn an_answer_without_a_data_image_address_is_not_touched() {
+        let untouched = [
+            "그냥 답이에요",
+            "",
+            "  앞에 공백과 뒤에 공백  \n\n\n\n세 번 비운 줄\n\n",
+            "첫 줄\r\n둘째 줄\r\n",
+            "MEDIA:/opt/data/a.png\n만들었어요\n",
+            "![x](https://example.com/a.png) file:///etc/hosts",
+            "data:text/plain;base64,QUJD 와 data:application/pdf;base64,QUJD",
+            "image/png 와 data: 와 data:image 와 base64,QUJD",
+            "```oort-expression\n{}\n```\n```json\n{\"a\":1}\n```",
+        ];
+        for text in untouched {
+            assert_eq!(replace_pictures(text, SAID), None, "{text:?}");
+        }
+        // The control: the same function does see an address when there is one.
+        assert!(replace_pictures("data:image/png;base64,QUJD", SAID).is_some());
+    }
+
+    /// Where an address stood there is the sentence, once for each address, and nothing else about
+    /// the text changes — the words around it, the blank lines, the trailing spaces and the rest of
+    /// the markup are the model's own. Every shape the door cuts is cut here.
+    #[test]
+    fn each_address_is_replaced_in_place_and_nothing_else_changes() {
+        let png = png_markdown();
+        let cases: Vec<(&str, String, String)> = vec![
+            (
+                "a markdown image on its own line",
+                format!("앞\n\n{png}\n\n뒤"),
+                format!("앞\n\n{SAID}\n\n뒤"),
+            ),
+            ("only a picture", png.clone(), SAID.to_string()),
+            (
+                "a bare token",
+                format!("앞 data:image/png;base64,{B64} 뒤"),
+                format!("앞 {SAID} 뒤"),
+            ),
+            (
+                "a capital scheme",
+                format!("앞 ![x](DATA:IMAGE/PNG;BASE64,{B64}) 뒤"),
+                format!("앞 {SAID} 뒤"),
+            ),
+            (
+                "a title after the address",
+                format!("앞 ![x](data:image/png;base64,{B64} \"제목\") 뒤"),
+                format!("앞 {SAID} 뒤"),
+            ),
+            (
+                "several, a sentence for each",
+                format!("{png}\n\n그리고\n\n![b](data:image/gif;base64,AAAA) data:image/webp;base64,BBBB"),
+                format!("{SAID}\n\n그리고\n\n{SAID} {SAID}"),
+            ),
+            (
+                "the model's own blank lines and trailing spaces stay",
+                format!("앞  \n\n\n\n{png}  \n\n\n"),
+                format!("앞  \n\n\n\n{SAID}  \n\n\n"),
+            ),
+            (
+                "a MEDIA line and a request block are not cut",
+                format!("MEDIA:/opt/data/a.png\n{png}\n```oort-expression\n{{}}\n```"),
+                format!("MEDIA:/opt/data/a.png\n{SAID}\n```oort-expression\n{{}}\n```"),
+            ),
+        ];
+        for (what, text, want) in cases {
+            let got = replace_pictures(&text, SAID).unwrap_or_else(|| panic!("{what}: no address"));
+            assert_eq!(got.text, want, "{what}");
+            assert_eq!(got.cuts, want.matches(SAID).count(), "{what}");
+        }
+    }
+
+    /// A picture just under the provider layer's 12 MiB read limit is cut whole, however long.
+    #[test]
+    fn a_very_long_address_is_cut_whole() {
+        let huge = "A".repeat(11 * 1024 * 1024);
+        let text = format!("앞\n\n![큰 그림](data:image/png;base64,{huge})\n\n뒤");
+        let got = replace_pictures(&text, SAID).expect("an address");
+        assert_eq!(got.text, format!("앞\n\n{SAID}\n\n뒤"));
+        assert_eq!(got.cuts, 1);
+    }
+
+    /// One rule, two callers: where the door's text has no `MEDIA:` line and no request block, the door's
+    /// committed text is exactly the ordinary turn's cut (with nothing in the place) tidied up. A fork of
+    /// the rule in either caller makes the two disagree on one of these shapes.
+    #[test]
+    fn the_door_and_an_ordinary_turn_cut_by_one_rule() {
+        let huge = "A".repeat(100_000);
+        let answers = [
+            format!("앞\n\n{}\n\n뒤", png_markdown()),
+            format!("앞 ![x](DATA:IMAGE/PNG;BASE64,{B64}) 뒤 ![y](Data:image/gif;base64,AAAA)"),
+            format!("앞 ![x](data:image/png;base64,{B64} \"제목\") 뒤"),
+            format!("앞 data:image/png;base64,{huge} 뒤"),
+            format!("![a](data:image/png;base64,{B64})![b](data:image/gif;base64,{B64})"),
+            "![x](data:image/png;base64,QUJD".to_string(),
+        ];
+        for answer in answers {
+            let ordinary = replace_pictures(&answer, "").expect("an address").text;
+            assert_eq!(tidy(&ordinary), open(&answer).clean, "{:.80}", answer);
+        }
+    }
+
+    /// The cut as it was before [`closing_paren`] had its memo (#4908): the line is cut out of the rest of
+    /// the text first and the `)` is searched inside it. Kept here as the reference the faster search is
+    /// held against.
+    fn reference_cut(text: &str, marks: &[usize], with: &str) -> (String, usize) {
+        let mut out = String::with_capacity(text.len());
+        let mut cursor = 0usize;
+        let mut cuts = 0usize;
+        for &at in marks {
+            if at < cursor {
+                continue;
+            }
+            let tail = &text[at..];
+            let token_len = tail
+                .char_indices()
+                .find(|(_, c)| c.is_whitespace() || matches!(c, ')' | '"' | '\'' | '<' | '>'))
+                .map_or(tail.len(), |(i, _)| i);
+            let after_token = at + token_len;
+            let head = &text[cursor..at];
+            let mut keep_to = at;
+            let mut cut_to = after_token;
+            if head.ends_with("](") {
+                let line_start = head.rfind('\n').map_or(0, |i| i + 1);
+                if let Some(open) = head[line_start..head.len() - 2].rfind("![") {
+                    let close = text[after_token..]
+                        .split('\n')
+                        .next()
+                        .and_then(|line| line.find(')'))
+                        .map(|i| i + 1);
+                    if let Some(close) = close {
+                        keep_to = cursor + line_start + open;
+                        cut_to = after_token + close;
+                    }
+                }
+            }
+            out.push_str(&text[cursor..keep_to]);
+            out.push_str(with);
+            cursor = cut_to;
+            cuts += 1;
+        }
+        out.push_str(&text[cursor..]);
+        (out, cuts)
+    }
+
+    /// The memo in [`closing_paren`] changes how long the cut takes and nothing it cuts: held against the
+    /// reference on thousands of generated texts made of the fragments the rule looks at (an image opening,
+    /// the scheme in both cases, a title, a `)` or a line end before or after the address) — and on a
+    /// 4 MiB single line of addresses, closed and unclosed, which the reference needs seconds of
+    /// optimized code for (minutes unoptimized) and the memo needs a blink.
+    #[test]
+    fn the_cut_is_what_it_was_and_stays_linear_in_the_text() {
+        let parts = [
+            "![",
+            "](",
+            "![a](",
+            "data:image/",
+            "DATA:IMAGE/",
+            "png;base64,",
+            "AAAA",
+            " ",
+            ")",
+            "\n",
+            " \"t\" ",
+            "x",
+            "가",
+            "(",
+            "]",
+            "<",
+            "'",
+        ];
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 33) as usize
+        };
+        let mut with_marks = 0usize;
+        for _ in 0..30_000 {
+            let count = 1 + next() % 20;
+            let text: String = (0..count).map(|_| parts[next() % parts.len()]).collect();
+            let marks = data_marks(&text);
+            with_marks += usize::from(!marks.is_empty());
+            assert_eq!(
+                cut_pictures(&text, &marks, "S"),
+                reference_cut(&text, &marks, "S"),
+                "{text:?}"
+            );
+        }
+        assert!(
+            with_marks > 5_000,
+            "the generator reaches the rule: {with_marks}"
+        );
+
+        for unit in [
+            "![a](data:image/png;base64,A ",
+            "![a](data:image/png;base64,A) ",
+        ] {
+            let text = unit.repeat(4 * 1024 * 1024 / unit.len());
+            let started = std::time::Instant::now();
+            let (cut, cuts) = cut_pictures(&text, &data_marks(&text), "S");
+            let took = started.elapsed();
+            assert_eq!(cuts, text.len() / unit.len(), "{unit:?}");
+            assert!(cut.len() < text.len());
+            assert!(
+                took < Duration::from_secs(5),
+                "{unit:?}: {cuts} addresses took {took:?}"
+            );
+        }
     }
 
     // ---- the request block ---------------------------------------------------------------
