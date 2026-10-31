@@ -1074,8 +1074,8 @@ async fn a_rejection_cancels_the_run_posts_the_tool_result_and_resumes_nothing()
     .await
     .expect("count tool_result");
     assert_eq!(
-        tool_results, 1,
-        "exactly one `tool_result` line tells the channel the call was refused"
+        tool_results, 0,
+        "approval rejection no longer inserts a standalone tool_result"
     );
 }
 

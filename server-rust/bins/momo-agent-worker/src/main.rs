@@ -104,6 +104,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "starting momo-agent-worker"
     );
 
+    // #4820 C2a: a set-but-unusable origin is a silent "no photo address" otherwise. Name the variable,
+    // never print its value.
+    if std::env::var("OORT_SELF_MEDIA_ORIGIN").is_ok_and(|raw| !raw.trim().is_empty())
+        && config.self_media_origin.is_none()
+    {
+        tracing::warn!(
+            "OORT_SELF_MEDIA_ORIGIN is set but is not a canonical origin (https://<lowercase host>[:port], \
+             no trailing slash); no picture address will be handed to the co-hosted Hermes"
+        );
+    }
+    // #4820 C2b 3부: the hosted expression door opens only on an exact `OORT_HOSTED_MEDIA_STRICT=1`.
+    // Without it the door is shut and a photo turn of the co-hosted Hermes is an ordinary turn — say so
+    // once at boot (info, the name only, never the value), so an operator who expected the door can see why.
+    if !config.hosted_media_strict {
+        tracing::info!(
+            "호스팅 문 꺼짐 (hosted expression door off): OORT_HOSTED_MEDIA_STRICT is not exactly `1`; \
+             photo turns of the co-hosted Hermes are ordinary turns"
+        );
+    }
     let worker = AgentWorker::connect(config).await?;
     worker.run(shutdown_signal()).await;
     Ok(())

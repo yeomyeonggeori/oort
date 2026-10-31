@@ -527,6 +527,95 @@ fn fenced(turn: &str) -> String {
 
 // --- behaviour ---------------------------------------------------------------
 
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn an_admitted_helper_reads_only_its_current_dm_seat_through_every_message_tool() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_chat_link(&su, t.owner_id).await;
+    let (dm, dm_name) = channel(&su, t.workspace_id, "dm", &[t.owner_id, t.member_id]).await;
+    let old = post(&pool, t.workspace_id, dm, t.owner_id, "preseatneedle").await;
+    let trigger = post(
+        &pool,
+        t.workspace_id,
+        dm,
+        t.member_id,
+        "please join this conversation",
+    )
+    .await;
+    sqlx::query("INSERT INTO dm_agent_admission (workspace_id, channel_id, agent_member_id, requested_by, trigger_message_id, required_human_ids, expires_at, admitted_at, admitted_after_seq) \
+        SELECT $1,$2,$3,$4,$5,ARRAY[$6::uuid],now()+interval '15 minutes',clock_timestamp(),last_seq FROM channel_seq WHERE channel_id=$2")
+        .bind(t.workspace_id).bind(dm).bind(t.agent_id).bind(t.member_id).bind(trigger).bind(t.owner_id)
+        .execute(&su).await.unwrap();
+    join(&su, t.workspace_id, dm, t.agent_id).await;
+    sqlx::query("UPDATE channel SET dm_key='admitted:' || id::text WHERE id=$1")
+        .bind(dm)
+        .execute(&su)
+        .await
+        .unwrap();
+    post(&pool, t.workspace_id, dm, t.owner_id, "afterseatneedle").await;
+    let (helper_dm, _) = channel(&su, t.workspace_id, "dm", &[t.member_id, t.agent_id]).await;
+
+    // Exercise both Audience::Channels and RequesterView through the actual
+    // worker/provider loop, not a manually bound transaction in the test.
+    for reply_channel in [dm, helper_dm] {
+        let script = Script::new(vec![
+            tools(&[
+                (
+                    "search_messages",
+                    json!({"query":"preseatneedle", "channel":dm_name}),
+                ),
+                ("search_messages", json!({"query":"preseatneedle"})),
+                ("read_channel", json!({"channel":dm_name})),
+                ("read_thread", json!({"channel":dm_name,"messageId":old})),
+                (
+                    "search_messages",
+                    json!({"query":"afterseatneedle", "channel":dm_name}),
+                ),
+            ]),
+            text("확인했어요."),
+        ]);
+        let worker = worker_with(script.clone(), |_| {}).await;
+        let run = enqueue_in(
+            &pool,
+            &t,
+            reply_channel,
+            t.member_id,
+            "@oort find the conversation",
+        )
+        .await;
+        drain(&worker).await;
+        assert_eq!(run_status(&su, run).await.0, "succeeded");
+        let seen = script.seen();
+        assert_eq!(seen.len(), 2, "the read loop reached the provider again");
+        let results = fenced(&last_user_turn(&seen, 1));
+        assert_eq!(
+            results.matches("검색 결과 없음").count(),
+            2,
+            "both searches exclude pre-seat text: {results}"
+        );
+        assert!(
+            !results.contains("preseatneedle"),
+            "no tool exposes pre-seat text: {results}"
+        );
+        assert!(
+            results.contains("afterseatneedle"),
+            "the current seat can still read new text: {results}"
+        );
+        assert!(
+            results.contains("please join this conversation"),
+            "the one trigger exception remains visible: {results}"
+        );
+        assert!(
+            results.contains("not_found"),
+            "the old thread root is not readable: {results}"
+        );
+    }
+}
+
 /// **H13-A5** — an ordinary question gets an answer on the team key, posted with
 /// the model label; the v1 refusal sentence is gone from the prompt.
 #[tokio::test]

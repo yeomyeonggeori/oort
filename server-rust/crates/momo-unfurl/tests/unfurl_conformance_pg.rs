@@ -191,7 +191,8 @@ impl UnfurlHttp for CountingHttp {
                 content_type: "text/html".into(),
                 body: self.html.as_bytes().to_vec(),
             }),
-            FetchKind::Image => Ok(Fetched {
+            // `Source` (an imported picture link) is fetched like an image.
+            FetchKind::Image | FetchKind::Source => Ok(Fetched {
                 final_url: url.to_string(),
                 content_type: "image/png".into(),
                 body: vec![0x89, 0x50, 0x4e, 0x47],

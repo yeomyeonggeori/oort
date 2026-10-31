@@ -683,7 +683,7 @@ pub fn system_prompt(roster: &Roster, web: WebSearch) -> String {
          볼 수 있는 것만 보여 줘. 필요할 때만 써.\n\
          3) 사람이 직접 부탁한 워크스페이스 변경은 `{tool}` 도구로 제안해. 제안은 승인 카드가 되고, \
          사람이 승인해야만 실행돼. 너는 아무것도 직접 바꾸지 못해. 가능한 actionId는 `{ids}`뿐이야. \
-         이 밖의 변경(초대 링크, 권한, 웹훅, 이미지 아바타)은 제안하지 말고 못 한다고 말해.\n\
+         내 이름은 member.display_name.set, 내 사진은 member.avatar.set, 네 이름은 agent.rename, 네 사진은 agent.profile.update avatar로 제안해. 이미지는 첨부 id 또는 generated base64를 써. 이 밖의 변경(초대 링크, 권한, 웹훅)은 제안하지 말고 못 한다고 말해.\n\
          4) {plugin_line}\n\
          5) {web_line}\n\
          \n\
@@ -732,7 +732,7 @@ pub enum ProposalRefusal {
     NotAllowed,
     /// The arguments did not pass the registry's own validators/resolver.
     InvalidArguments,
-    /// An image avatar (or anything beyond a preset) — out of v1 scope.
+    /// An image input without server-processed bytes for staging.
     AvatarNotAllowed,
     /// The trigger's author is not a human who can see this channel.
     NoHumanRequester,
@@ -869,8 +869,14 @@ async fn requester_could_approve_in_tx(
                 false
             }
         }
-        // Only the person the action changes (the team AI cannot propose it today — it is
-        // not on `TEAM_AI_ACTION_IDS` — but the match stays exhaustive and fail-closed).
+        // A DM admission card is decided only by the participant pinned on it (ADR-0217);
+        // the team AI never proposes `dm.agent.admit` (not on `TEAM_AI_ACTION_IDS`), so this
+        // arm stays exhaustive and fail-closed.
+        RequiredRole::DmParticipant => false,
+        // `expression.create` is not a team-AI action (not on `TEAM_AI_ACTION_IDS`); this
+        // arm only keeps the match exhaustive and fail-closed.
+        RequiredRole::ExpressionAdder => false,
+        // Only the human who started this run, for either self-profile action (v7).
         RequiredRole::RequestingMember => {
             matches!(subject, GateSubject::Member(target) if target == requester)
         }
@@ -891,6 +897,17 @@ pub async fn propose_in_tx(
     action_id: &str,
     raw_args: &Value,
     rationale: Option<&str>,
+) -> Result<Result<ProposalOk, ProposalRefusal>, DbError> {
+    propose_with_avatar_in_tx(conn, context, action_id, raw_args, rationale, None).await
+}
+
+pub async fn propose_with_avatar_in_tx(
+    conn: &mut PgConnection,
+    context: &ProposalContext,
+    action_id: &str,
+    raw_args: &Value,
+    rationale: Option<&str>,
+    prepared: Option<&crate::profile_avatar::PreparedAvatar>,
 ) -> Result<Result<ProposalOk, ProposalRefusal>, DbError> {
     let workspace_id = context.workspace_id;
     if !is_team_ai_action(action_id) {
@@ -934,12 +951,20 @@ pub async fn propose_in_tx(
         Ok(validated) => validated,
         Err(_) => return Ok(Err(ProposalRefusal::InvalidArguments)),
     };
-    if let ActionArgs::AgentProfileUpdate { avatar, .. } = &validated.args {
-        // v1: presets only. An attachment/generated image needs the staging path
-        // and the image pipeline, which the team AI does not have (ADR-0201 D3).
-        if !matches!(avatar, AvatarIntent::Unchanged | AvatarIntent::Preset(_)) {
-            return Ok(Err(ProposalRefusal::AvatarNotAllowed));
-        }
+    let expected_image_origin = match &validated.args {
+        ActionArgs::AgentProfileUpdate { avatar, .. }
+        | ActionArgs::MemberAvatarSet { avatar, .. } => match avatar {
+            AvatarIntent::Attachment(_) => Some("attachment"),
+            AvatarIntent::Generated(_) => Some("generated"),
+            _ => None,
+        },
+        _ => None,
+    };
+    if expected_image_origin.is_some() && prepared.is_none() {
+        return Ok(Err(ProposalRefusal::AvatarNotAllowed));
+    }
+    if prepared.is_some_and(|image| Some(image.origin) != expected_image_origin) {
+        return Ok(Err(ProposalRefusal::InvalidArguments));
     }
 
     // Same-target pending check (V4-M-9), before the text is judged.
@@ -967,13 +992,11 @@ pub async fn propose_in_tx(
         }
     }
 
-    let resolved = match action_resolve::resolve_action_in_tx(
+    let mut resolved = match action_resolve::resolve_action_in_tx(
         conn,
         workspace_id,
         context.agent_member_id,
-        // The team AI answers a person in a thread, not inside a hosted agent run:
-        // an action about "whoever called the agent" has no subject here.
-        None,
+        Some(context.run_id),
         action,
         raw_args,
         context.now_ms,
@@ -983,13 +1006,7 @@ pub async fn propose_in_tx(
         Ok(resolved) => resolved,
         Err(_) => return Ok(Err(ProposalRefusal::InvalidArguments)),
     };
-    // The resolver may have refined the typed args (avatar stays preset-only).
-    if let ActionArgs::AgentProfileUpdate { avatar, .. } = &resolved.validated.args {
-        if !matches!(avatar, AvatarIntent::Unchanged | AvatarIntent::Preset(_)) {
-            return Ok(Err(ProposalRefusal::AvatarNotAllowed));
-        }
-    }
-    if let GateSubject::Agent(target) = resolved.subject {
+    if let GateSubject::Agent(target) | GateSubject::Member(target) = resolved.subject {
         if !judges_text_against_roster
             && momo_agent::approval::lock_target_and_find_pending_action_in_tx(
                 conn,
@@ -1014,12 +1031,47 @@ pub async fn propose_in_tx(
         return Ok(Err(ProposalRefusal::RequesterLacksRole));
     }
 
+    if let Some(prepared) = prepared {
+        if prepared.requester != requester.member_id || prepared.run_id != context.run_id {
+            return Ok(Err(ProposalRefusal::InvalidArguments));
+        }
+    }
+
     momo_agent::run::mark_run_started_in_tx(conn, context.run_id).await?;
     if !momo_agent::run::park_run_for_approval_in_tx(conn, context.run_id, context.expires_at)
         .await?
     {
         return Ok(Err(ProposalRefusal::RunNotParkable));
     }
+
+    let staged = if let Some(prepared) = prepared {
+        let target = match resolved.subject {
+            GateSubject::Agent(id) | GateSubject::Member(id) => id,
+            _ => {
+                return Err(DbError::from(sqlx::Error::Protocol(
+                    "avatar without subject".into(),
+                )))
+            }
+        };
+        momo_messaging::purge_stale_staged_avatar_images_in_tx(conn, workspace_id).await?;
+        let image_id = momo_messaging::stage_avatar_image_in_tx(
+            conn,
+            workspace_id,
+            target,
+            context.agent_member_id,
+            prepared.origin,
+            &prepared.image,
+        )
+        .await?;
+        let sha = crate::profile_avatar::hex(&prepared.image.sha256);
+        resolved.validated.normalized["avatar"] = json!({"source":"staged", "imageId":image_id.to_string(), "sha256":sha, "origin":prepared.origin});
+        resolved.pins["avatar"] = json!({"imageId":image_id.to_string(), "sha256":sha});
+        let mut preview = crate::profile_avatar::preview(prepared, image_id);
+        crate::profile_avatar::add_previous_in_tx(conn, workspace_id, target, &mut preview).await?;
+        Some((image_id, preview))
+    } else {
+        None
+    };
 
     let mut payload = actions::workspace_action_payload(
         action.id,
@@ -1047,6 +1099,25 @@ pub async fn propose_in_tx(
     )
     .await?;
 
+    if let Some((image_id, _)) = &staged {
+        if !momo_messaging::bind_staged_image_to_approval_in_tx(
+            conn,
+            workspace_id,
+            *image_id,
+            approval_id,
+        )
+        .await?
+        {
+            return Err(DbError::from(sqlx::Error::RowNotFound));
+        }
+        if action.id == actions::ACTION_MEMBER_AVATAR_SET {
+            audit::write_audit(conn, &audit::AuditEntry::new(workspace_id, actions::AUDIT_MEMBER_AVATAR_STAGED)
+                .by(context.agent_member_id).about(requester.member_id).target("member", requester.member_id)
+                .run(context.run_id).with_schema(actions::AUDIT_MEMBER_AVATAR_STAGED_SCHEMA,
+                    json!({"image_id":image_id.to_string(), "origin":prepared.map(|p|p.origin), "approval_id":approval_id.to_string()}))).await?;
+        }
+    }
+
     let mut props = actions::workspace_action_request_props(
         approval_id,
         context.run_id,
@@ -1055,6 +1126,9 @@ pub async fn propose_in_tx(
         actions::action_block(action, resolved.validated.rows.clone(), rationale),
         context.expires_at,
     );
+    if let Some((_, preview)) = staged {
+        props["action"]["preview"] = preview;
+    }
     if let Some(object) = props.as_object_mut() {
         if let Some(summary) = &resolved.validated.summary {
             object.insert("summary".into(), Value::String(summary.clone()));
@@ -1300,14 +1374,14 @@ mod tests {
     /// is H6-1's eight plus `plugin.install`, each in the registry, and nothing
     /// that returns a secret or widens access is in it.
     #[test]
-    fn the_allow_list_is_the_nine_and_excludes_secret_and_access_actions() {
+    fn the_allow_list_includes_four_profile_scenes_and_excludes_secret_and_access_actions() {
         for id in TEAM_AI_ACTION_IDS {
             assert!(
                 actions::action_by_id(id).is_some(),
                 "{id} is not in the registry"
             );
         }
-        assert_eq!(TEAM_AI_ACTION_IDS.len(), 9);
+        assert_eq!(TEAM_AI_ACTION_IDS.len(), 11);
         assert!(is_team_ai_action(actions::ACTION_WORKSPACE_SETTINGS_UPDATE));
         assert!(is_team_ai_action(actions::ACTION_PLUGIN_INSTALL));
         for banned in [

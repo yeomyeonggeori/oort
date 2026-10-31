@@ -1,3 +1,4 @@
+import { DmAgentsMenu } from "./DmAgentsMenu";
 import {
   useCallback,
   useEffect,
@@ -41,6 +42,7 @@ import {
   channelLabelParts,
   labelRecipientKind,
   dmAutoReplyAgent,
+  dmGroupFacts,
   dmPeer,
   makeDirectory,
   memberFor,
@@ -255,6 +257,8 @@ export function ChatShell() {
     ? channelLabel(channel, directory, session.member.id, labelOptions)
     : "채널";
   const peer = channel ? dmPeer(channel, directory, session.member.id) : null;
+  // 셋 이상 DM의 참여자 사실(ADR-0217). `peer`가 null인 까닭이 「그룹」이라는 것을 소개 문구에 알린다.
+  const dmGroup = channel ? dmGroupFacts(channel, directory) : null;
   // goal B13 (QA H7): 이 채널이 멘션 없이도 답하는 방인가. `peer`와 따로 묻는다
   // — `peer`는 "상대가 누구냐"이고 이쪽은 "서버가 자동으로 부르느냐"라서, 그룹
   // DM이나 사람끼리의 DM에서 둘의 답이 갈린다.
@@ -277,6 +281,14 @@ export function ChatShell() {
     dmAgent,
   });
   const messages = stressCount > 0 ? stressMessages : timeline.state.messages;
+  const refetchChannels = channelsQuery.refetch;
+  const refetchDirectory = directoryQuery.refetch;
+  const membershipRevision = messages.filter((m) => m.type === "system" && m.props?.kind === "dm_agent_membership").map((m) => m.id).join(",");
+  useEffect(() => {
+    if (membershipRevision === "") return;
+    void refetchChannels(); void refetchDirectory();
+  }, [membershipRevision, refetchChannels, refetchDirectory]);
+
   const welcome = useWelcomeKickoff({
     workspaceId,
     memberId: session.member.id,
@@ -1237,6 +1249,7 @@ export function ChatShell() {
                 onRetry={timeline.reloadPins}
               />
             )}
+            {stressCount === 0 && channel?.kind === "dm" && <DmAgentsMenu workspaceId={workspaceId} channel={channel} directory={directory} onChanged={() => Promise.all([channelsQuery.refetch(), directoryQuery.refetch()])} />}
             {stressCount === 0 && channel && channel.kind !== "dm" && (
               <ChannelMemberPanel
                 channelName={channel.name ?? label}
@@ -1467,6 +1480,7 @@ export function ChatShell() {
               channelName={label}
               channelTopic={channel?.topic}
               peer={peer}
+              dmGroup={dmGroup}
               reachedStart={timeline.reachedStart}
               canAddMember={canAddChannelMemberNow(
                 !directoryQuery.isPending,
@@ -1557,6 +1571,7 @@ export function ChatShell() {
         {stressCount === 0 && channelId !== null && <LongPressHint />}
         {stressCount === 0 && channelId !== null && (
           <Composer
+            channel={channel}
             workspaceId={workspaceId}
             channelId={channelId}
             directory={directory}

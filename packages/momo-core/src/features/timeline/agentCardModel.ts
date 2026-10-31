@@ -1,6 +1,7 @@
 import { REQUEST_WORD } from "../agents/runPhase";
 import { parseRequestBundleSnapshot, requestBundleModel, type RequestBundleSnapshot, type RequestBundleContext, type RequestBundleModel } from "./requestBundle";
 import type { Message } from "../../lib/api";
+import { approvalOutcomeLine } from "../approvals/approvalOutcome";
 import {
   parseAvatarImagePreview,
   type AvatarImagePreview,
@@ -211,6 +212,9 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   "summary",
   "status",
   "approval_status",
+  // ADR-0186 v6: translated outcome code and the same card's public result.
+  "code",
+  "result",
   "decided_by",
   "decided_at_ms",
   "decision_reason",
@@ -483,6 +487,8 @@ export function frameSentence(frame: ActionFrame): string {
  * 한 글자도 다르지 않게 그린다.
  */
 export interface AgentApprovalAction {
+  /** ADR-0217: only this named human may decide this admission card. */
+  targetMemberId?: string;
   /** 레지스트리의 행동 id(`invite.create`). 화면에는 그리지 않는다. */
   id: string;
   /** 사람이 판단할 사실. 서버가 이름 붙여 보낸 것만, 보낸 순서대로. */
@@ -562,6 +568,7 @@ export function parseApprovalAction(value: unknown): AgentApprovalAction | null 
       typeof raw.required_role === "string" && raw.required_role !== ""
         ? raw.required_role
         : null,
+    ...(id === "dm.agent.admit" && typeof raw.target_member_id === "string" ? { targetMemberId: raw.target_member_id } : {}),
     ...(preview !== null ? { preview } : {}),
     ...(messagePreview !== null ? { messagePreview } : {}),
   };
@@ -769,7 +776,15 @@ function approvalCard(
     action: parseApprovalAction(props["action"]),
     detail: payloadDetail(props),
   };
-  const summary = readString(props, "summary");
+  // The terminal card replaces the old result/rejection/expiry message. Both
+  // clients already render this summary, including on a message.edited update.
+  const result = props["result"] as Record<string, unknown> | null | undefined;
+  const resultLine = typeof result === "object" && result !== null && !Array.isArray(result)
+    && result.status === "executed" && typeof result.line === "string"
+    ? result.line : undefined;
+  const summary = status !== "pending"
+    ? resultLine ?? approvalOutcomeLine(props["code"]) ?? readString(props, "summary")
+    : readString(props, "summary");
   if (summary !== undefined) card.summary = summary;
   const isReversible = readBoolean(props, "is_reversible");
   if (isReversible !== undefined) card.isReversible = isReversible;

@@ -992,6 +992,8 @@ pub async fn resolve_hosted_tool_identity_in_tx(
 /// that are acting on the agent's behalf rather than as it: there is no bearer
 /// in hand here, so the token half of the check is the connection's own
 /// `active_token_id` rather than a presented credential.
+/// This is a freshness check for live producers, not a managed/hosted classifier;
+/// human action decisions use [`hosted_action_connection_in_tx`] instead.
 pub async fn active_hosted_connection_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -1055,6 +1057,73 @@ pub async fn hosted_connection_stands_in_tx(
     .await
 }
 
+/// A human's pending action must distinguish a non-hosted proposer from a hosted
+/// connection that has ended. Credential expiry alone does not end a connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostedActionConnection {
+    Managed,
+    Standing(Uuid),
+    Unavailable,
+}
+
+/// Find and lock the proposer's own connection before any action writes (ADR-0186
+/// D2/V3). Check its standing, including revoke, without requiring a fresh access
+/// token. A missing connection for a hosted sentinel is unavailable, never managed.
+/// The connection is locked first, following the hosted lock order; a disconnect
+/// that wins this lock is observed before the action can create any rows.
+pub async fn hosted_action_connection_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<HostedActionConnection, sqlx::Error> {
+    // ADR-0198 D7 conversion preserves terminal hosted history on the same
+    // member, but its current runtime is the owner's member-host agent.
+    let member_host: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM agent WHERE workspace_id=$1 AND member_id=$2 \
+          AND config->>'execution_mode'='member_host' \
+          AND invocation_scope='owner_only' AND personal_agent)",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    if member_host {
+        return Ok(HostedActionConnection::Managed);
+    }
+    let connection: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM hosted_agent_connection \
+          WHERE workspace_id=$1 AND agent_member_id=$2 \
+          ORDER BY (status='active') DESC, created_at DESC, id DESC LIMIT 1 FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some(connection_id) = connection {
+        return Ok(
+            if hosted_connection_stands_in_tx(conn, workspace_id, agent_member_id, connection_id)
+                .await?
+            {
+                HostedActionConnection::Standing(connection_id)
+            } else {
+                HostedActionConnection::Unavailable
+            },
+        );
+    }
+    let hosted: Option<bool> = sqlx::query_scalar(
+        "SELECT COALESCE(config->>'execution_mode', '') = 'hosted_dial_in' \
+           FROM agent WHERE workspace_id=$1 AND member_id=$2",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(match hosted {
+        Some(false) => HostedActionConnection::Managed,
+        Some(true) | None => HostedActionConnection::Unavailable,
+    })
+}
+
 /// One hosted connection may name at most this many approved channels
 /// (ADR-0186 증보 V5). `confirm`/`consent` never had a ceiling; the grant paths
 /// that widen a connection *after* the human's confirm do, so a connection's
@@ -1062,8 +1131,9 @@ pub async fn hosted_connection_stands_in_tx(
 pub const MAX_HOSTED_APPROVED_CHANNELS: usize = 50;
 
 /// Lock the agent's live hosted connection `FOR UPDATE` and say how many
-/// channels it already covers. `None` = the agent has no live hosted connection
-/// (a managed or subscription agent — nothing to widen).
+/// channels it already covers. `None` also includes an expired or revoked hosted
+/// credential: it must never mean "managed" in a human decision. Use
+/// [`hosted_action_connection_in_tx`] for those decisions.
 ///
 /// **Lock order.** A connection is the *first* lock of the hosted canon
 /// (`connection → token → member → workspace_membership → agent_profile →

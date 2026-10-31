@@ -38,10 +38,9 @@ use momo_outbox::{
     reclaim_stuck_push_candidates, requeue, ClaimedPushCandidate,
 };
 use momo_push::{
-    claim_dispatch, collapse_id, judge_targets, settle_dispatch_and_invalidate,
-    settle_relay_refusal, unread_badge, DispatchClaim, DispatchOutcome, DispatchTarget,
-    JudgedTarget, PushCandidate, PushDispatch, PushDispatcher, RefusalOutcome, RelayRefusal,
-    SettleOutcome,
+    claim_dispatch, judge_candidate_targets, settle_dispatch_and_invalidate, settle_relay_refusal,
+    unread_badge, DispatchClaim, DispatchOutcome, DispatchTarget, JudgedTarget, PushCandidate,
+    PushDispatch, PushDispatcher, RefusalOutcome, RelayRefusal, SettleOutcome,
 };
 use uuid::Uuid;
 
@@ -145,8 +144,11 @@ impl PushDrain {
         };
 
         let workspace_id = row.workspace_id;
+        let judgment_candidate = candidate.clone();
         let targets = match with_tenant_tx(&self.pool, workspace_id, move |conn| {
-            Box::pin(async move { judge_targets(conn, workspace_id, candidate.message_id).await })
+            Box::pin(async move {
+                judge_candidate_targets(conn, workspace_id, &judgment_candidate).await
+            })
         })
         .await
         {
@@ -165,7 +167,7 @@ impl PushDrain {
             return;
         }
 
-        let collapse = collapse_id(candidate.message_id);
+        let collapse = candidate.collapse_id();
         let mut transient: Vec<String> = Vec::new();
 
         for target in targets {

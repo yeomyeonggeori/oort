@@ -1,3 +1,5 @@
+import { useExpressions } from "@/features/expressions/context";
+import { ExpressionSendPreview } from "@/features/expressions/ExpressionSendPreview";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import {
   clearThreadDraft,
@@ -113,6 +115,7 @@ export function ThreadComposer({
   /** Refetch the thread; the reply also arrives on the realtime rail. */
   onSent: () => void;
 }) {
+  const { store: expressionStore } = useExpressions();
   const [draft, setDraft] = useState(() => readThreadDraft(workspaceId, rootId));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -278,7 +281,8 @@ export function ThreadComposer({
     sendThreadReply(workspaceId, channelId, rootId, crypto.randomUUID(), body, {
       attachmentIds: sent.attachmentIds,
     })
-      .then(() => {
+      .then((message) => {
+        expressionStore?.recordSuccess(body, message.id);
         clearThreadDraft(workspaceId, rootId);
         setDraft("");
         autocomplete.close();
@@ -360,6 +364,7 @@ export function ThreadComposer({
           </p>
         )}
         <div className="relative">
+          <ExpressionSendPreview body={draft} />
           <ComposerAutocompleteList
             id={`thread-${autocomplete.slug}-list`}
             kind={autocomplete.kind}

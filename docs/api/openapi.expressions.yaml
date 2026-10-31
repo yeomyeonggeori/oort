@@ -1,0 +1,82 @@
+# ADR-0218 appendix A, verbatim contract fragment. Import is implemented by #4829.
+openapi: 3.1.0
+info: {title: oort expressions contract fragment, version: '1'}
+components:
+  parameters:
+    ws: {in: path, name: ws, required: true, schema: {type: string, format: uuid}}
+    id: {in: path, name: id, required: true, schema: {type: string, format: uuid}}
+    draftId: {in: path, name: draftId, required: true, schema: {type: string, format: uuid}}
+    size: {in: query, name: size, required: true, schema: {type: string, enum: [small, large, thumb]}}
+    v: {in: query, name: v, required: true, schema: {type: string, pattern: '^[a-f0-9]{64}$'}}
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer}
+  schemas:
+    Expression: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/Expression'}
+    List: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/List'}
+    Metadata: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/Metadata'}
+    Draft: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/Draft'}
+    ImportRequest: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/ImportRequest'}
+    AttachmentRequest: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/AttachmentRequest'}
+    Choice: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/Choice'}
+    Mutation: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/Mutation'}
+    Patch: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/Patch'}
+    ReportRequest: {$ref: '../../packages/momo-core/src/features/expressions/contracts.schema.json#/$defs/ReportRequest'}
+security: [{bearerAuth: []}]
+paths:
+  /v1/workspaces/{ws}/expressions:
+    parameters: [{$ref: '#/components/parameters/ws'}]
+    get:
+      parameters: [{in: query, name: since, schema: {type: string, pattern: '^(0|[1-9][0-9]*)$'}}]
+      responses: {'200': {description: Full or delta, content: {application/json: {schema: {$ref: '#/components/schemas/List'}}}}}
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Choice'}}}}
+      responses: {'201': {description: Registered, content: {application/json: {schema: {$ref: '#/components/schemas/Mutation'}}}}}
+  /v1/workspaces/{ws}/expressions/uploads:
+    parameters: [{$ref: '#/components/parameters/ws'}]
+    post:
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: {type: object, additionalProperties: false, required: [metadata, file], properties: {metadata: {$ref: '#/components/schemas/Metadata'}, file: {type: string, format: binary}}}
+            encoding: {metadata: {contentType: application/json}}
+      responses: {'201': {description: Ready draft, content: {application/json: {schema: {$ref: '#/components/schemas/Draft'}}}}, '200': {description: Manual upload required, content: {application/json: {schema: {$ref: '#/components/schemas/Draft'}}}}}
+  /v1/workspaces/{ws}/expressions/import:
+    parameters: [{$ref: '#/components/parameters/ws'}]
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ImportRequest'}}}}
+      responses: {'201': {description: Ready draft, content: {application/json: {schema: {$ref: '#/components/schemas/Draft'}}}}, '200': {description: Keep source link and upload control, content: {application/json: {schema: {$ref: '#/components/schemas/Draft'}}}}}
+  /v1/workspaces/{ws}/expressions/from-attachment:
+    parameters: [{$ref: '#/components/parameters/ws'}]
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AttachmentRequest'}}}}
+      responses: {'201': {description: Ready draft, content: {application/json: {schema: {$ref: '#/components/schemas/Draft'}}}}, '200': {description: Video unavailable, content: {application/json: {schema: {$ref: '#/components/schemas/Draft'}}}}}
+  /v1/workspaces/{ws}/expression-drafts/{draftId}:
+    parameters: [{$ref: '#/components/parameters/ws'}, {$ref: '#/components/parameters/draftId'}]
+    get:
+      responses: {'200': {description: Current draft, content: {application/json: {schema: {$ref: '#/components/schemas/Draft'}}}}}
+  /v1/workspaces/{ws}/expression-drafts/{draftId}/file:
+    parameters: [{$ref: '#/components/parameters/ws'}, {$ref: '#/components/parameters/draftId'}]
+    put:
+      requestBody: {required: true, content: {multipart/form-data: {schema: {type: object, additionalProperties: false, required: [file], properties: {file: {type: string, format: binary}}}}}}
+      responses: {'200': {description: New revision, content: {application/json: {schema: {$ref: '#/components/schemas/Draft'}}}}}
+  /v1/workspaces/{ws}/expression-drafts/{draftId}/image:
+    parameters: [{$ref: '#/components/parameters/ws'}, {$ref: '#/components/parameters/draftId'}, {$ref: '#/components/parameters/size'}, {$ref: '#/components/parameters/v'}]
+    get:
+      responses: {'200': {description: Pinned authenticated draft bytes, content: {image/png: {schema: {type: string, format: binary}}, image/gif: {schema: {type: string, format: binary}}}}}
+  /v1/workspaces/{ws}/expressions/{id}/image:
+    parameters: [{$ref: '#/components/parameters/ws'}, {$ref: '#/components/parameters/id'}, {$ref: '#/components/parameters/size'}, {$ref: '#/components/parameters/v'}]
+    get:
+      responses: {'200': {description: Active authenticated bytes, content: {image/png: {schema: {type: string, format: binary}}, image/gif: {schema: {type: string, format: binary}}}}}
+  /v1/workspaces/{ws}/expressions/{id}:
+    parameters: [{$ref: '#/components/parameters/ws'}, {$ref: '#/components/parameters/id'}]
+    patch:
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Patch'}}}}
+      responses: {'200': {description: Metadata updated, content: {application/json: {schema: {$ref: '#/components/schemas/Mutation'}}}}}
+    delete:
+      responses: {'200': {description: Deleted tombstone, content: {application/json: {schema: {$ref: '#/components/schemas/Mutation'}}}}}
+  /v1/workspaces/{ws}/expressions/{id}/report:
+    parameters: [{$ref: '#/components/parameters/ws'}, {$ref: '#/components/parameters/id'}]
+    post:
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReportRequest'}}}}
+      responses: {'200': {description: Immediately hidden, content: {application/json: {schema: {$ref: '#/components/schemas/Mutation'}}}}}

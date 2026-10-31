@@ -399,6 +399,113 @@ fn gateway(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
     request.header(momo_server::auth::GATEWAY_SECRET_HEADER, GATEWAY_SECRET)
 }
 
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn usage_completion_limits_preserve_summary_reads() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_channel_agent(&su, &tenant, "usage-limits").await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, tenant.workspace, &tenant.email).await;
+
+    for report in 0..3 {
+        let created = create_work_run(&http, &base, &token, &tenant, agent, Uuid::new_v4()).await;
+        assert_eq!(created.status(), 201);
+        let created: Value = created.json().await.unwrap();
+        let run_id = created["id"].as_str().unwrap();
+        let pending = gateway(http.get(format!(
+            "{base}/v1/workspaces/{}/agents/{agent}/gateway/jobs/pending",
+            tenant.workspace
+        )))
+        .send()
+        .await
+        .unwrap();
+        assert_eq!(pending.status(), 200);
+        let pending: Value = pending.json().await.unwrap();
+        let jobs = pending["jobs"].as_array().unwrap();
+        assert_eq!(jobs.len(), 1);
+        let job = &jobs[0];
+        assert_eq!(job["runId"], run_id);
+        let url = format!(
+            "{base}/v1/workspaces/{}/agent-runs/{run_id}/gateway/complete",
+            tenant.workspace
+        );
+        let mut completion = json!({
+            "job_id": job["id"],
+            "lease_id": job["leaseId"],
+            "status": "succeeded",
+            "body": "Usage reported.",
+        });
+
+        if report == 0 {
+            for (usage, message) in [
+                (
+                    json!({"costMicroUsd": 1_000_000_000_001i64}),
+                    "usage cost must not exceed 1000000000000",
+                ),
+                (
+                    json!({"costMicroUsd": -1}),
+                    "usage counts and cost must be non-negative",
+                ),
+                (
+                    json!({"model": format!("{}m", "é".repeat(64))}),
+                    "usage model must not exceed 128 bytes",
+                ),
+            ] {
+                completion["usage"] = usage;
+                let refused = gateway(http.post(&url))
+                    .json(&completion)
+                    .send()
+                    .await
+                    .unwrap();
+                let status = refused.status();
+                let body: Value = refused.json().await.unwrap();
+                assert_eq!(status, 400, "{body}");
+                assert_eq!(body, json!({"error": {"message": message}}));
+                let rows: i64 =
+                    sqlx::query_scalar("SELECT count(*) FROM usage_ledger WHERE workspace_id = $1")
+                        .bind(tenant.workspace)
+                        .fetch_one(&su)
+                        .await
+                        .unwrap();
+                assert_eq!(rows, 0, "refused completion must not record usage");
+            }
+        }
+
+        completion["usage"] = json!({
+            "model": if report == 0 { "é".repeat(64) } else { "m".repeat(128) },
+            "costMicroUsd": if report == 0 { 0 } else { 1_000_000_000_000i64 },
+            "wasEstimated": false,
+        });
+        let accepted = gateway(http.post(&url))
+            .json(&completion)
+            .send()
+            .await
+            .unwrap();
+        let status = accepted.status();
+        let body = accepted.text().await.unwrap();
+        assert_eq!(status, 200, "{body}");
+    }
+
+    let summary = http
+        .get(format!(
+            "{base}/v1/workspaces/{}/usage/summary",
+            tenant.workspace
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .unwrap();
+    let status = summary.status();
+    let summary: Value = summary.json().await.unwrap();
+    assert_eq!(status, 200, "{summary}");
+    assert_eq!(summary["totals"]["costMicroUsd"], 2_000_000_000_000i64);
+    assert_eq!(summary["byModel"][0]["model"], "m".repeat(128));
+}
+
 async fn rail_frames(su: &PgPool, workspace: Uuid) -> Vec<Value> {
     sqlx::query_scalar(
         "SELECT payload FROM outbox \

@@ -188,6 +188,37 @@ describe("buildChannelIntro", () => {
     expect(intro.body).not.toContain("시작하세요");
   });
 
+  // #4912 (S3 묶음 검증 R3). 머리가 「정하윤, 코메토 · 3명」인 그룹 DM의 소개가 「둘만 봅니다」라고 말하던 자리다.
+  // 비어 있든 기록이 있든 같은 사실을 말한다.
+  it("does not tell a group DM that two people see it, empty or with history (#4912)", () => {
+    for (const empty of [true, false]) {
+      const intro = buildChannelIntro({
+        kind: "dm",
+        name: "정하윤, 코메토 · 3명",
+        peer: null,
+        canAddMember: false,
+        dmGroup: { count: 3, agentCount: 1 },
+        empty,
+      });
+      expect(intro.surface).toBe("dm");
+      expect(intro.title).toBe("정하윤, 코메토 · 3명");
+      expect(intro.body).not.toContain("둘만 봅니다");
+      expect(intro.body).not.toContain("이 둘로 고정");
+      expect(intro.body).toContain("여기 쓴 메시지는 이 대화에 있는 3명이 함께 봅니다.");
+      expect(intro.body).toContain("에이전트는 이 대화에 들어온 뒤에 쓴 글만 봅니다.");
+      expect(intro.body).toContain(empty ? "다이렉트 메시지를 시작하세요." : DM_INTRO_STARTED);
+      expect(intro.actions.map((a) => a.kind)).toEqual(empty ? ["write"] : []);
+    }
+  });
+
+  it("keeps the pair sentence when the group facts say two people or nothing (#4912)", () => {
+    const peer = { displayName: "곽성재", kind: "human" as const };
+    for (const dmGroup of [undefined, null, { count: 2, agentCount: 0 }]) {
+      const intro = buildChannelIntro({ kind: "dm", name: "곽성재", peer, canAddMember: false, dmGroup, empty: false });
+      expect(intro.body).toContain(DM_DETAIL);
+    }
+  });
+
   it("falls back to the header's unnamed-channel label, not a dead '이 채널'", () => {
     const intro = buildChannelIntro({
       kind: "public",

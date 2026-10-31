@@ -1,3 +1,4 @@
+import {PICKER_EMOJI} from "@momo/core/features/emoji/choices";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
 import {
@@ -11,6 +12,9 @@ import {
   PopoverAnchor,
   PopoverContent,
 } from "@/design/ui/popover";
+import { Button } from "@/design/ui/button";
+import { useExpressions } from "@/features/expressions/context";
+import { TeamExpressionsPanel } from "@/features/expressions/TeamExpressionsPanel";
 import type { CatalogEmoji } from "./catalog";
 import { loadCatalog } from "./catalog";
 import { EmojiPickerPanel } from "./EmojiPickerPanel";
@@ -35,13 +39,7 @@ import { useHoverNone } from "./useHoverNone";
 // 정본 프로그래매틱 패턴을 쓴다.
 // =============================================================================
 
-// eslint-disable-next-line react-refresh/only-export-components -- 테스트와 빈도 시드가 닫힌 32종을 직접 센다.
-export const PICKER_EMOJI = [
-  "👍", "👎", "✅", "❌", "🙏", "🎉", "👀", "😄",
-  "😂", "😅", "🤔", "😮", "😭", "🔥", "💯", "✨",
-  "🚀", "🐛", "🛠️", "📌", "📝", "🔍", "⏳", "⚠️",
-  "❤️", "💡", "🙌", "👏", "☕", "🍀", "🥲", "🫡",
-] as const;
+export {PICKER_EMOJI} from "@momo/core/features/emoji/choices";
 
 const COPY = {
   reaction: {
@@ -83,8 +81,11 @@ export function EmojiPickerDialog({
   side?: "top" | "bottom";
 }) {
   const copy = COPY[purpose];
+  const { store: expressions } = useExpressions();
+  const [team, setTeam] = useState(false);
   const isTouch = useHoverNone();
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const [entries, setEntries] = useState<CatalogEmoji[] | null>(null);
   const [error, setError] = useState(false);
@@ -143,7 +144,12 @@ export function EmojiPickerDialog({
   };
 
   const panel = (
-    <EmojiPickerPanel
+    <div ref={panelRef} tabIndex={-1} className="flex min-h-0 flex-col gap-2 focus-visible:focus-ring">
+    {purpose !== "status" && expressions && <div className="flex flex-wrap gap-1" aria-label="이모지 보관함">
+      <Button type="button" variant={team ? "ghost" : "secondary"} size="sm" aria-pressed={!team} onClick={() => { setSkinOpen(false); setTeam(false); }}>기본 이모지</Button>
+      <Button type="button" variant={team ? "secondary" : "ghost"} size="sm" aria-pressed={team} onClick={() => { setSkinOpen(false); setTeam(true); }}>우리 팀</Button>
+    </div>}
+    {team && purpose !== "status" ? <TeamExpressionsPanel purpose={purpose} onPick={(token) => { onPick(token); onOpenChange(false); }} onClose={() => onOpenChange(false)} /> : <EmojiPickerPanel
       itemPrefix={copy.itemPrefix}
       entries={entries}
       loading={open && !error && entries === null}
@@ -155,7 +161,8 @@ export function EmojiPickerDialog({
       skinOpen={skinOpen}
       onSkinOpenChange={setSkinOpen}
       autoFocusSearch={!isTouch}
-    />
+    />}
+    </div>
   );
 
   if (isTouch) {
@@ -198,7 +205,8 @@ export function EmojiPickerDialog({
         onEscapeKeyDown={onEscapeKeyDown}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          searchRef.current?.focus();
+          if (team) panelRef.current?.focus();
+          else searchRef.current?.focus();
         }}
         className="flex max-h-pane-md flex-col"
       >

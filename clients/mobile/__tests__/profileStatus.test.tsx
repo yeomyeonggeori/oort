@@ -32,6 +32,7 @@ import {
   sessionPort,
 } from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import * as phoneEmojiCatalog from '../src/features/emoji/catalog';
 
 // =============================================================================
 // #2848 · #4457 — 설정 페이지에서 상태와 알림을 바로 바꾼다.
@@ -685,11 +686,36 @@ describe('상태 설정 바텀시트 (#2848, ADR-0176, #4457)', () => {
     expect(within(sheet).queryByTestId('status-clear')).toBeNull();
   });
 
+  it('같은 피커를 닫거나 골라도 상태 글과 만료를 보존하고 저장은 한 번만 한다 (#4322)', async () => {
+    jest.spyOn(phoneEmojiCatalog, 'loadPhoneEmojiCatalog').mockResolvedValue([
+      {glyph: '🌈', name: 'rainbow', koreanName: '무지개', category: 'nature', shortcodes: ['rainbow'], keywords: []},
+    ]);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-status-row'));
+    fireEvent.changeText(within(sheet).getByTestId('status-text-input'), '설계 검토 중');
+    fireEvent.press(within(sheet).getByTestId('status-expiry-row'));
+    fireEvent.press(within(sheet).getByTestId('status-expiry-1h'));
+    fireEvent.press(within(sheet).getByTestId('status-emoji-input'));
+    fireEvent.press(within(sheet).getByTestId('emoji-picker-close'));
+    expect(within(sheet).getByTestId('status-text-input').props.value).toBe('설계 검토 중');
+    fireEvent.press(within(sheet).getByTestId('status-emoji-input'));
+    fireEvent.changeText(within(sheet).getByTestId('emoji-search'), '무지개');
+    await waitFor(() => expect(within(sheet).getByTestId('emoji-pick-🌈')).toBeTruthy());
+    fireEvent.press(within(sheet).getByTestId('emoji-pick-🌈'));
+    expect(within(sheet).getByTestId('status-emoji-glyph')).toHaveTextContent('🌈');
+    expect(within(sheet).getByTestId('status-text-input').props.value).toBe('설계 검토 중');
+    expect(within(sheet).getByTestId('status-expiry-row')).toHaveTextContent(/1시간/);
+    expect(presencePuts()).toHaveLength(0);
+    fireEvent.press(confirm(within(sheet)));
+    await waitFor(() => expect(presencePuts()).toHaveLength(1));
+    expect(presencePuts()[0].body).toMatchObject({statusEmoji: '🌈', statusText: '설계 검토 중'});
+  });
+
   it('다 지운 채 ✓ 를 누르면 상태 지우기와 같은 쓰기다', async () => {
     server.self = {...baseSelf(), statusEmoji: '🌴', statusText: '휴가'};
     const sheet = await openSheet();
     fireEvent.press(within(sheet).getByTestId('profile-status-row'));
-    fireEvent.changeText(within(sheet).getByTestId('status-emoji-input'), '');
+    fireEvent.press(within(sheet).getByTestId('status-emoji-clear'));
     fireEvent.changeText(within(sheet).getByTestId('status-text-input'), '');
     expect(confirmDisabled(within(sheet))).toBe(false);
     fireEvent.press(confirm(within(sheet)));
@@ -806,10 +832,12 @@ describe('상태 설정 시트 — design-review r1 반영 (#4457)', () => {
     expect(style.minHeight).toBeGreaterThanOrEqual(TOUCH_TARGET);
     expect(style.alignSelf).toBe('stretch'); // 알약 높이 전체를 쓴다
     // 22pt 칸의 글리프라 큰 글씨에서도 배율을 따라가지 않는다.
-    expect(emoji.props.maxFontSizeMultiplier).toBe(ROW_GLYPH_MAX_SCALE);
+    const glyph = sheet.getByTestId('status-emoji-glyph');
+    expect(glyph.props.maxFontSizeMultiplier).toBe(ROW_GLYPH_MAX_SCALE);
     const text = sheet.getByTestId('status-text-input');
-    expect([lightPalette.icon, darkPalette.icon]).toContain(emoji.props.placeholderTextColor);
-    expect(emoji.props.placeholderTextColor).not.toBe(text.props.placeholderTextColor);
+    expect(emoji.props.accessibilityRole).toBe('button');
+    expect([lightPalette.icon, darkPalette.icon]).toContain(StyleSheet.flatten(glyph.props.style).color);
+    expect(StyleSheet.flatten(glyph.props.style).color).not.toBe(text.props.placeholderTextColor);
   });
 
   it('M4: 기간 행은 펼침 상태를 말하고, 펼치면 ⌄ 가 뒤집히며 고르면 다시 접힌다', async () => {

@@ -9,7 +9,10 @@ import {
   preselectedHostId,
   spawnHostGate,
 } from '@momo/core/features/timeline/spawnHostChoice';
-import React, {useCallback, useImperativeHandle, useRef, useState} from 'react';
+import React, {useCallback, useContext, useImperativeHandle, useRef, useState} from 'react';
+import {QueryClientContext} from '@tanstack/react-query';
+import {refreshProfileAfterApproval} from '@momo/core/features/approvals/profileChange';
+import {replacePersistedMember} from '../../storage/secureSession';
 import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
 import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
@@ -96,11 +99,14 @@ export function ApprovalDecision({
   subject,
   decisionRef,
   onBusyChange,
+  approveDisabled = false,
 }: {
   /** 무대는 요청 중에 장을 바꾸지 않아요. 결정 경로는 이 컴포넌트 한 곳이에요. */
   onBusyChange?: (busy: boolean) => void;
   /** 로터 동작이 같은 결정을 부를 손잡이 (#2595). 인박스는 버튼에 직접 닿으므로 넘기지 않는다. */
   decisionRef?: React.Ref<ApprovalDecisionHandle>;
+  /** 사진이 실제로 표시되기 전에는 승인만 막는다. 거부는 계속 가능하다. */
+  approveDisabled?: boolean;
   /**
    * 버튼 모양. `pill` 은 대화 안 에이전트 카드의 행동 줄(DS2-4, 시안 A `.a-pill`:
    * 주 = 잉크, 보조 = surface2, 반경 알약)이다. 인박스·잠금화면은 `box` 그대로다.
@@ -153,6 +159,7 @@ export function ApprovalDecision({
   const pill = shape === 'pill' || shape === 'request';
   const request = shape === 'request';
   const {workspaceId} = useSession();
+  const queryClient = useContext(QueryClientContext);
   /** 지금 서버에 나가 있는 결정의 방향. 없으면 `null`. */
   const [sending, setSending] = useState<Direction | null>(null);
   /** 같은 틱의 두 번째 탭을 거르는 동기 문. state 는 다음 렌더에야 바뀐다. */
@@ -172,6 +179,7 @@ export function ApprovalDecision({
   const [pickedHostId, setPickedHostId] = useState<string | null>(null);
   const chosenHostId = pickedHostId ?? preselectedHostId(execution);
   const hostGate = spawnHostGate(execution);
+  const canApprove = hostGate.canApprove && !approveDisabled;
   const busy = sending !== null;
 
   const commit = useCallback(
@@ -181,7 +189,7 @@ export function ApprovalDecision({
       // 결정 전에 알고 있고(코어 `spawnHostGate`), 알면서 보내는 것은 헛걸음이다.
       // **거부는 막지 않는다** — 서버도 거부에는 호스트를 묻지 않고, 실행할 수 없는
       // 요청을 정리할 길까지 닫을 이유는 없다.
-      if (direction === 'approve' && !hostGate.canApprove) return;
+      if (direction === 'approve' && !canApprove) return;
       const approve = direction === 'approve';
       keys.current[direction] ??= newDecisionId();
       sendingRef.current = true;
@@ -232,6 +240,9 @@ export function ApprovalDecision({
         // 일은 던지지 않고(`dismissApprovalNotifications`), 화면은 이미 결정을 안다.
         void dismissApprovalNotifications(approvalId);
         onSettled(outcome);
+        void refreshProfileAfterApproval(outcome, replacePersistedMember, (workspace, rows) => {
+          queryClient?.setQueryData(['roster', workspace], rows);
+        });
         // 로터로 결정한 사람에게는 성공도 소리로 말한다(#3854 design-review H-2).
         // 카드에 서는 영수증은 행의 낭독 라벨에 들어가지 않고, 로터의 「승인」·
         // 「거부」는 말없이 사라진다. 낱말은 카드 영수증과 같은 함수가 짓는다.
@@ -249,9 +260,10 @@ export function ApprovalDecision({
       chosenHostId,
       execution,
       forbiddenCopy,
-      hostGate.canApprove,
+      canApprove,
       onSettled,
       onBusyChange,
+      queryClient,
       workspaceId,
     ],
   );
@@ -308,33 +320,33 @@ export function ApprovalDecision({
           // 409로 답한다. 이유는 픽커 아래에 이미 서 있으므로, 꺼진 버튼이 설명
           // 없이 서 있는 경우가 아니다.
           accessibilityState={{
-            disabled: busy || !hostGate.canApprove,
+            disabled: busy || !canApprove,
             busy: sending === 'approve',
           }}
-          disabled={busy || !hostGate.canApprove}
+          disabled={busy || !canApprove}
           onPress={() => void commit('approve')}
           style={({pressed}) => [
             styles.button,
             // 이제 이 탭이 결정이다 — 주 액션은 채움으로 선다(웹 `variant="default"`).
             // 막힌 승인은 조용한 형태로 강등한다: 지금은 이것이 기본 액션이 아니다.
-            hostGate.canApprove ? styles.buttonCommit : styles.buttonQuiet,
+            canApprove ? styles.buttonCommit : styles.buttonQuiet,
             pill && styles.pillButton,
-            pill && (hostGate.canApprove ? styles.pillCommit : styles.pillQuiet),
-            (sending === 'reject' || !hostGate.canApprove) && styles.buttonInert,
+            pill && (canApprove ? styles.pillCommit : styles.pillQuiet),
+            (sending === 'reject' || !canApprove) && styles.buttonInert,
             // 눌림은 **채움의 눌린 값**이다. 옅은 눌림 회색(`surfacePressed`)으로
             // 갈아 끼우면 채움의 흰 글자가 옅은 바탕에 앉는다(#3829 M4 — 라이트
             // 1:1 근처). 상자는 `accentPressed`(atoms `PrimaryButton` 과 같은 값),
             // 알약은 잉크 채움을 지키고 살짝 흐린다(웹 `hover:opacity-90` 의 짝).
             pressed &&
               !busy &&
-              hostGate.canApprove &&
+              canApprove &&
               (pill ? styles.pillCommitPressed : styles.buttonCommitPressed),
           ]}
           testID={`${testIDPrefix}-approve`}>
           <Text
             style={[
-              hostGate.canApprove ? styles.buttonCommitLabel : styles.buttonQuietLabel,
-              pill && hostGate.canApprove && styles.pillCommitLabel,
+              canApprove ? styles.buttonCommitLabel : styles.buttonQuietLabel,
+              pill && canApprove && styles.pillCommitLabel,
             ]}>
             {sending === 'approve' ? '보내는 중' : '승인'}
           </Text>
@@ -411,6 +423,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
  * 그때 "이미 결정되었습니다"만 말하면 사람은 자기가 누른 대로 됐다고 읽는다.
  */
 export function decisionReceiptCopy(outcome: DecisionOutcome): string {
+  if (outcome.kind === 'committed' && outcome.status === 'cancelled') {
+    return '이 요청은 취소되어 있었어요.';
+  }
   if (outcome.kind === 'superseded') {
     if (outcome.status === 'approved') {
       return '이미 승인으로 기록되어 있었어요.';

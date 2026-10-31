@@ -209,6 +209,55 @@ amendments, by kind:
 The model provider or Hermes you choose is a separate trust boundary: oort sends
 it bounded work context directly.
 
+The repository's shared-hosted Hermes default selects Codex subscription web
+search (`web_search`). Search queries can include conversation content and go
+to OpenAI's search processing; returned content is untrusted. We do not promise
+query redaction or no retention. The configured surface excludes Hermes page
+extraction (`web_extract`), and connector configurations disable the whole `web`
+toolset. This describes repository configuration, not a verified live deployment.
+See [ADR-0203 W1–W4](docs/adr/0203-cohosted-agent-detection.md#증보-2026-10-30--codex-구독-웹-검색만-허용-4794),
+the [default config](infra/hermes/config.yaml), and the offline
+[gate](infra/hermes/test_default_config.py) and
+[connector](infra/hermes/test_lockgate_connectors.py) tests.
+
+The same default also selects Codex subscription image generation
+(`image_generate`, provider `openai-codex` only). The image prompt, and any
+picture used as a source, go to OpenAI's image processing. Addresses the model
+chooses are not accepted: an oort-owned Hermes plugin refuses every
+`image_url` / `reference_image_urls` value that is not empty or a small inline
+picture before the tool runs, so Hermes never downloads an address the model
+chose and never reads a path it wrote. There is one owner-approved exception
+(owner decision of 2026-10-30, so that an animated expression can be edited from
+the photo its requester attached): `image_url` alone may also be one short-lived
+address of that requester's own photo on this oort instance. The address is
+single-use, valid for five minutes, bound to the run, the conversation and that one
+attachment, and oort serves the bytes itself (no redirect, no Drive address); every
+refusal is the same 404, and oort's token table stores only a hash of the token
+(that is the table, not every place the token passes: a token the model repeats in
+its reply can still end up in a message). The plugin
+compares the address as exact bytes against the one origin the operator configured
+plus a fixed path and token shape, never parsing or normalizing it. It sees only
+the shape, not whether a token was ever issued, so the workspace and token slots the
+model fills in can travel as the request path to that one origin, which answers
+anything it did not issue with the same constant 404; with no origin
+configured the exception is off. The remaining risks of this path are listed in
+ADR-0218 G4. The photo's bytes then go to OpenAI's image
+processing like the prompt does, faces included. The lock gate requires that plugin (pinned
+bytes, enabled, and exercised with refused and accepted examples, including the
+one allowed address and its bypass variants, at every start),
+refuses the settings and environment variables that turn Hermes' private-address
+filter or the plugin off, refuses a malformed origin (and the origin in the
+volume's `.env`), and refuses other image providers, code execution and
+`web_extract`; connector configurations disable `image_gen` as well. Generated
+pictures are untrusted model output. We do not promise prompt redaction or no
+retention. This describes repository configuration, not a verified live
+deployment: whether the real Hermes downloads that address (its own private-address
+filter applies) is not verified. See [ADR-0203 I1–I4](docs/adr/0203-cohosted-agent-detection.md#증보-2026-10-30--codex-구독-그림-생성만-허용-4820),
+[ADR-0218 G4·G8](docs/adr/0218-workspace-expressions.md), the offline
+[plugin](infra/hermes/test_image_guard.py) and
+[gate](infra/hermes/test_lockgate_image_guard.py) tests, and the in-image proof
+[`scripts/tests/test_hermes_image_guard_docker.sh`](scripts/tests/test_hermes_image_guard_docker.sh).
+
 For deployment, rotation, backup, and incident procedures, follow
 [`docs/SELF_HOST.md`](docs/SELF_HOST.md) and
 [`docs/runbooks/pgbackrest-pitr.md`](docs/runbooks/pgbackrest-pitr.md).

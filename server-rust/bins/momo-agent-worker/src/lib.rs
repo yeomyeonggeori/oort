@@ -81,12 +81,16 @@ pub mod context;
 pub mod egress;
 pub mod embed;
 pub mod extract;
+/// #4820 C2b 2부 — the hosted expression door: a photo turn of the co-hosted Hermes is answered without streaming and its one answer becomes a card.
+mod hosted_door;
 pub mod oauth;
 pub mod partial;
 pub mod payload;
 mod personal;
 pub mod provider;
 pub mod responses;
+/// #4820 C2a — the photo address the co-hosted Hermes' picture tool reads: the worker's half (mint + the one line).
+mod self_media;
 pub mod serving;
 pub mod sse;
 pub mod stream;
@@ -275,7 +279,7 @@ pub fn degraded_provider_message() -> &'static str {
 /// persisted (`outbox.last_error`), shown to a user (the degraded message), or
 /// logged.
 ///
-/// Two shapes are removed, because both can genuinely appear in a provider
+/// Three shapes are removed, because each can genuinely appear in a provider
 /// error string:
 ///
 /// * **the resolved bearer itself** — `reqwest`'s `Display` does not print
@@ -285,6 +289,11 @@ pub fn degraded_provider_message() -> &'static str {
 ///   *do* print the request URL, and an operator may have pasted credentials
 ///   into `provider_link.base_url`.
 ///
+/// * **a self-media address** (`…/v1/self-media/{workspace}/{token}`, #4820 C2a) — the photo address
+///   the turn handed the co-hosted Hermes. A picture tool's error body may echo the URL it failed to
+///   fetch, and that string is about to become `outbox.last_error`, `agent_run.error.reason` or a log
+///   line. The token part becomes `<redacted>` ([`momo_messaging::redact_self_media_urls`]).
+///
 /// This is the last line of defence, not the only one: nothing upstream ever
 /// puts the bearer in a payload, a row, or a log field (ADR-0004 Rules #2/#5).
 pub fn redact_secrets(text: &str, bearer: &str) -> String {
@@ -293,7 +302,7 @@ pub fn redact_secrets(text: &str, bearer: &str) -> String {
     if bearer.len() >= 4 {
         out = out.replace(bearer, "<redacted>");
     }
-    redact_url_userinfo(&out)
+    momo_messaging::redact_self_media_urls(&redact_url_userinfo(&out))
 }
 
 /// Rewrite every `scheme://user:pass@host` to `scheme://<redacted>@host`.
@@ -399,6 +408,7 @@ impl ResolvedTransport {
 
 pub struct AgentWorker {
     pool: PgPool,
+    drive: Arc<dyn momo_drive::DriveArchive>,
     provider: Arc<dyn ChatProvider>,
     /// The OAuth token endpoint client (ADR-0147 결정 2). A seam, so the
     /// conformance suite can point it at its own server rather than the internet.
@@ -437,9 +447,22 @@ impl AgentWorker {
             config.request_timeout,
             config.egress.clone(),
         ));
-        Ok(AgentWorker::with_refresher(
-            pool, provider, refresher, config,
-        ))
+        let value = |key: &str| std::env::var(key).ok().filter(|v| !v.trim().is_empty());
+        let drive = momo_drive::build_archive_reader(&momo_drive::DriveBackendConfig {
+            mode: value("MOMO_DRIVE_ARCHIVE_BACKEND")
+                .or_else(|| value("MOMO_DRIVE_BACKEND"))
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase(),
+            sa_key_path: value("MOMO_DRIVE_SA_KEY_PATH"),
+            shared_drive_id: value("MOMO_DRIVE_SHARED_DRIVE_ID"),
+            local_dir: value("MOMO_DRIVE_LOCAL_DIR"),
+            // Read-only use; no upload capability is minted by the worker.
+            stub_base_url: String::new(),
+            local_base_url: String::new(),
+        })
+        .await;
+        Ok(AgentWorker::with_refresher(pool, provider, refresher, config).with_drive(drive))
     }
 
     /// Build from an existing pool + provider (conformance tests), with the real
@@ -464,6 +487,7 @@ impl AgentWorker {
         let config_memory = config.memory.clone();
         AgentWorker {
             pool,
+            drive: Arc::new(momo_drive::UnavailableDriveArchive),
             provider,
             refresher,
             config,
@@ -482,6 +506,11 @@ impl AgentWorker {
     /// is otherwise built from `MEMORY_EMBED_*` and loads lazily.
     pub fn with_embed_service(mut self, service: embed::EmbedService) -> AgentWorker {
         self.embed = service;
+        self
+    }
+
+    pub fn with_drive(mut self, drive: Arc<dyn momo_drive::DriveArchive>) -> AgentWorker {
+        self.drive = drive;
         self
     }
 
@@ -698,7 +727,11 @@ impl AgentWorker {
         // pair. Hermes ignores a bare `model` on /v1/chat/completions, so the pair
         // is the turn's model and is sent together or not at all.
         let mut pinned_route: Option<PinModelRoute> = None;
-        let mut transport = if let PinOutcome::Applied(pinned_transport, route) = pin {
+        // #4820 C2a: only the agent pinned to the operator's env link — the co-hosted Hermes — can be
+        // handed a photo address. A team link, the team's own resolution or a personal key never is.
+        let mut cohosted_pin = false;
+        let mut transport = if let PinOutcome::Applied(pinned_transport, route, kind) = pin {
+            cohosted_pin = matches!(kind, PinKind::OperatorEnv);
             if let Some(route) = route {
                 payload.model = route.model.clone();
                 pinned_route = Some(route);
@@ -916,6 +949,25 @@ impl AgentWorker {
             }
         }
 
+        // #4820 C2b 2부 — the hosted expression door. A photo turn of the co-hosted Hermes (not a welcome,
+        // not a resume) is decided here, **before** anything costs: first the operator's strict-media
+        // attestation (3부: absent, the door is shut and this is an ordinary turn — the `NotAPhotoTurn` arm,
+        // not even a photo lookup), then the run's state, the requester and the agent's ceiling of waiting
+        // cards (#4829's cheap refusals), and a refusal ends the turn without a model call.
+        // Every other turn takes the `NotAPhotoTurn` arm and is untouched.
+        let door_turn = if cohosted_pin && !payload.is_welcome() && !payload.is_resume() {
+            match self
+                .hosted_door_open(&job, &payload, run_id, &transport.endpoint)
+                .await
+            {
+                hosted_door::DoorOpen::NotAPhotoTurn => None,
+                hosted_door::DoorOpen::Turn(turn) => Some(turn),
+                hosted_door::DoorOpen::Settled(settlement) => return settlement,
+            }
+        } else {
+            None
+        };
+
         let now_context = now_context_block(now_ms(), self.config.utc_offset_minutes);
         // Resolved once: the same list rides the request as `momo_tools` and
         // decides whether the model is told the connection-request rule
@@ -939,6 +991,30 @@ impl AgentWorker {
                 .min(),
         )
         .await;
+        // #4820 C2a — the co-hosted Hermes' picture tool reads its source through `image_url`, so a turn
+        // whose trigger message carries the requester's own photo hands it one short-lived, single-use
+        // address of that photo (nothing else, no other id). Minted here, per turn, and never stored in
+        // the payload: the token must not ride the outbox. A database error is transient — the turn is
+        // retried rather than run without the photo it was asked about.
+        let self_media_line = if cohosted_pin && !payload.is_welcome() {
+            match self
+                .self_media_line(job.workspace_id, payload.agent_member_id, run_id)
+                .await
+            {
+                Ok(line) => line,
+                Err(error) => {
+                    return self
+                        .settle_retryable(
+                            &job,
+                            &format!("self media address not minted: {error}"),
+                            &transport.endpoint,
+                        )
+                        .await;
+                }
+            }
+        } else {
+            None
+        };
         let assembled = assemble(
             &payload.recent_messages,
             payload.agent_member_id,
@@ -959,6 +1035,10 @@ impl AgentWorker {
                 // #3169 — the rule and the `#number` handles ride together with the tool, or not at all.
                 memory_suggest: momo_agent::memory_suggest::directive(&momo_tools),
                 cite_seq: momo_agent::memory_suggest::is_offered(&momo_tools),
+                self_media: self_media_line.as_deref(),
+                // #4820 C2b 2부 (G6): the door's instruction rides a door turn and no other.
+                hosted_expression: door_turn
+                    .map(|_| momo_workspace_actions::hosted_expression::DIRECTIVE),
                 memory: memory_block.as_deref(),
             },
             self.config.max_context_chars,
@@ -1026,32 +1106,45 @@ impl AgentWorker {
         // both present `client_msg_id = run_id`, so the commit's `send` returns
         // this row instead of opening a second answer. That is the whole join —
         // there is no handle passed back, and nothing to keep in sync.
-        let (sink, deltas) = partial::delta_channel();
-        let answer = stream::MessageStream::new(
-            self.pool.clone(),
-            job.workspace_id,
-            payload.channel_id,
-            payload.agent_member_id,
-            run_id,
-            quoted_message_id,
-            // #4622 — where the answer is *created*: inside the thread the request
-            // was made in, or in the main flow when it was made there.
-            answer_root_id,
-            // The turn's self-description rides the first slice, because the
-            // commit's deduped `send` cannot supply it later (stream rule 4).
-            success_props(&payload, run_id),
-        );
-        let pump = tokio::spawn(partial::run_partial_pump(
-            self.pool.clone(),
-            started_address,
-            deltas,
-            partial::PARTIAL_WINDOW,
-            answer,
-        ));
-        let mut attempt = self
-            .provider
-            .complete_streaming(&transport.endpoint, &request, &sink)
-            .await;
+        //
+        // #4820 C2b 2부: a **door turn is not streamed**. Hermes turns a `MEDIA:` line into the picture
+        // only in a final, non-streamed answer, and the one answer is taken apart by the door
+        // (`hosted_door`) before any of it may be committed — so there is no pump, no streamed message and
+        // no slice for a picture's MiB to ride. Every other turn takes the `else` arm, unchanged.
+        let mut sink = None;
+        let mut pump = None;
+        let mut attempt = if door_turn.is_some() {
+            self.provider.complete(&transport.endpoint, &request).await
+        } else {
+            let (delta_sink, deltas) = partial::delta_channel();
+            let answer = stream::MessageStream::new(
+                self.pool.clone(),
+                job.workspace_id,
+                payload.channel_id,
+                payload.agent_member_id,
+                run_id,
+                quoted_message_id,
+                // #4622 — where the answer is *created*: inside the thread the request
+                // was made in, or in the main flow when it was made there.
+                answer_root_id,
+                // The turn's self-description rides the first slice, because the
+                // commit's deduped `send` cannot supply it later (stream rule 4).
+                success_props(&payload, run_id),
+            );
+            pump = Some(tokio::spawn(partial::run_partial_pump(
+                self.pool.clone(),
+                started_address,
+                deltas,
+                partial::PARTIAL_WINDOW,
+                answer,
+            )));
+            let attempt = self
+                .provider
+                .complete_streaming(&transport.endpoint, &request, &delta_sink)
+                .await;
+            sink = Some(delta_sink);
+            attempt
+        };
 
         // A rejection on a token whose deadline still looked fine means the
         // provider retired it early — revoked, rotated elsewhere, or our clock
@@ -1086,7 +1179,10 @@ impl AgentWorker {
         // The sink is dropped BEFORE the pump is awaited: closing the channel
         // is what tells the pump the stream is over and to flush its tail.
         drop(sink);
-        let pumped = pump.await.unwrap_or_default();
+        let pumped = match pump {
+            Some(pump) => pump.await.unwrap_or_default(),
+            None => Default::default(),
+        };
         if pumped.frames > 0 || pumped.slices > 0 {
             tracing::debug!(
                 run_id = %run_id,
@@ -1124,6 +1220,24 @@ impl AgentWorker {
                     reason,
                     "provider call failed"
                 );
+                // #4820 C2b review (High-1, Medium-2): a door turn's over-long answer and its
+                // deadline are the door's to settle (a closed card, a capped number of attempts);
+                // every other failure — of a door turn or of any other — is settled below as ever.
+                if door_turn.is_some() {
+                    if let Some(settlement) = self
+                        .hosted_door_provider_failed(
+                            &job,
+                            &payload,
+                            run_id,
+                            &error,
+                            &reason,
+                            &transport.endpoint,
+                        )
+                        .await
+                    {
+                        return settlement;
+                    }
+                }
                 if error.is_retryable() {
                     return self
                         .settle_retryable(&job, &reason, &transport.endpoint)
@@ -1172,11 +1286,50 @@ impl AgentWorker {
         let usage = completion.usage;
         let props = success_props(&payload, run_id);
 
+        // #4820 C2b 2부 — a door turn's answer is taken apart here: a valid request block becomes a card
+        // (or a failure card) and the turn ends; anything else continues below as an ordinary answer, but
+        // with the **cleaned** text — no picture, no `MEDIA:` line, no request block — which is the only
+        // text that may ever be committed. A turn that is not a door turn keeps `completion.text` as it was.
+        let answer_text = if door_turn.is_some() {
+            match self
+                .hosted_door_land(
+                    &job,
+                    &payload,
+                    run_id,
+                    &completion.text,
+                    usage,
+                    self_media_line.is_some(),
+                    &transport.endpoint,
+                )
+                .await
+            {
+                hosted_door::Landed::Settled(settlement) => return settlement,
+                hosted_door::Landed::Answer(text) if text.trim().is_empty() => {
+                    // Everything the model wrote was a picture or a request block: nothing is left to say,
+                    // and an empty answer is not an answer (same rule as an empty completion above).
+                    let reason = "provider returned no text outside the picture and the request";
+                    tracing::warn!(outbox_id = job.id, run_id = %run_id, reason, "empty door answer");
+                    return self
+                        .settle_terminal_failure(
+                            &job,
+                            &payload,
+                            run_id,
+                            reason,
+                            &transport.endpoint,
+                        )
+                        .await;
+                }
+                hosted_door::Landed::Answer(text) => text,
+            }
+        } else {
+            completion.text
+        };
+
         // #1454 — the completion report, if the model wrote one. The fence is
         // cut out of the answer whether or not it parsed, so the committed body
         // is the same text the streaming slices already showed (the cut is
         // `completion_report::visible_prefix` in both places).
-        let (extraction, dropped_actions) = completion_report::extract(&completion.text);
+        let (extraction, dropped_actions) = completion_report::extract(&answer_text);
         if dropped_actions > 0 {
             // Counts only, never the bullets themselves (redaction, L4 §7).
             tracing::warn!(
@@ -1186,7 +1339,7 @@ impl AgentWorker {
             );
         }
         let (body, report) = match extraction {
-            completion_report::Extraction::None => (Some(completion.text), None),
+            completion_report::Extraction::None => (Some(answer_text), None),
             completion_report::Extraction::Refused { body, reason } => {
                 tracing::info!(
                     run_id = %run_id,
@@ -1202,7 +1355,7 @@ impl AgentWorker {
                 // never be shown as text; when there is no card, the model's
                 // literal words are all there is.
                 if body.trim().is_empty() {
-                    (Some(completion.text), None)
+                    (Some(answer_text), None)
                 } else {
                     (Some(body), None)
                 }
@@ -2248,12 +2401,13 @@ impl AgentWorker {
                     // `totals.estimatedMicroUsd`.
                     was_estimated: Some(usage.is_none()),
                 };
-                let resolved = RunUsageReport::resolve(
+                let mut resolved = RunUsageReport::resolve(
                     Some(&report),
                     &fallback_model,
                     snapshot.requested_effort.as_deref(),
                     snapshot.profile_effort_pref.as_deref(),
                 );
+                resolved.source = momo_agent::UsageSource::Measured;
                 record_run_usage_in_tx(
                     conn,
                     workspace_id,
@@ -3543,7 +3697,7 @@ impl AgentWorker {
                 {
                     return unresolved("operator_env_not_configured", None);
                 }
-                PinOutcome::Applied(Box::new(env), pin.model_route.clone())
+                PinOutcome::Applied(Box::new(env), pin.model_route.clone(), pin.kind)
             }
             PinKind::TeamLink => {
                 let (Some(position), Some(stored_label)) =
@@ -3565,7 +3719,7 @@ impl AgentWorker {
                     if !self.provider_is_configured(&head) {
                         return unresolved("team_link_unusable", Some(now));
                     }
-                    return PinOutcome::Applied(Box::new(head), None);
+                    return PinOutcome::Applied(Box::new(head), None, pin.kind);
                 }
                 let chain = {
                     let mut conn = match self.pool.acquire().await {
@@ -3618,6 +3772,7 @@ impl AgentWorker {
                         link_updated_at_ms: None,
                     }),
                     None,
+                    pin.kind,
                 )
             }
         }
@@ -4157,8 +4312,9 @@ enum PinOutcome {
     NotPinned,
     /// Run on this transport. The team's row is not applied. The second field is
     /// the co-hosted pin's `(provider, model)` pair (#4143); `None` for every
-    /// other pin and for an `operator_env` pin that never chose a model.
-    Applied(Box<ResolvedTransport>, Option<PinModelRoute>),
+    /// other pin and for an `operator_env` pin that never chose a model. The third is the pin's kind:
+    /// `operator_env` is the co-hosted Hermes (#4820 C2a hands only that one a photo address).
+    Applied(Box<ResolvedTransport>, Option<PinModelRoute>, PinKind),
     /// The pin names a link that cannot be called. The turn is refused.
     Unresolved(PinUnresolved),
     /// The pin could not be read (DB trouble): retry, do not guess.
@@ -4499,6 +4655,31 @@ mod tests {
         // A too-short "bearer" must not turn every occurrence of a common
         // substring into <redacted> noise.
         assert_eq!(redact_secrets("abc def", "abc"), "abc def");
+    }
+
+    /// #4820 C2a: a picture tool's error body may echo the address it failed to fetch, and this string
+    /// is about to become `outbox.last_error`, `agent_run.error.reason` or a log line. The token is
+    /// scrubbed; the rest of the sentence stays so support can still read what failed.
+    #[test]
+    fn a_photo_address_echoed_by_the_provider_loses_its_token() {
+        let token = "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWo";
+        let url = format!(
+            "https://oort.example.com/v1/self-media/01234567-89ab-cdef-0123-456789abcdef/{token}"
+        );
+        let echoed = format!("image tool could not fetch {url}: 404");
+        let cleaned = redact_secrets(&echoed, "unrelated-bearer");
+        assert!(!cleaned.contains(token), "{cleaned}");
+        assert_eq!(
+            cleaned,
+            "image tool could not fetch https://oort.example.com/v1/self-media/01234567-89ab-cdef-0123-456789abcdef/<redacted>: 404"
+        );
+        // The bearer scrub and the userinfo scrub still run beside it.
+        let both = format!("key sk-live-abcdefgh then {url}");
+        let cleaned = redact_secrets(&both, "sk-live-abcdefgh");
+        assert!(
+            !cleaned.contains(token) && !cleaned.contains("sk-live-abcdefgh"),
+            "{cleaned}"
+        );
     }
 
     /// `reqwest` transport errors print the request URL, and an operator may

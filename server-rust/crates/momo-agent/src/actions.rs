@@ -64,6 +64,9 @@ pub const ACTION_CHANNEL_CREATE: &str = "channel.create";
 /// can see (ADR-0186 증보 V1-b).
 pub const ACTION_CHANNEL_MEMBER_ADD: &str = "channel.member.add";
 
+/// ADR-0217: server-raised, one card per other human in this DM.
+pub const ACTION_DM_AGENT_ADMIT: &str = "dm.agent.admit";
+
 /// `agent.rename` — change an agent's display name: the proposer's own, or that
 /// of another agent of the same owner (ADR-0186 증보 V4 / V4-M).
 pub const ACTION_AGENT_RENAME: &str = "agent.rename";
@@ -81,8 +84,8 @@ pub const ACTION_WORKSPACE_SETTINGS_UPDATE: &str = "workspace.settings.update";
 /// `agent.profile.update` — change an agent's profile **card**: the proposer's
 /// own or that of an agent of the same owner (V4-M), limited to display name,
 /// tagline, status line and role label (ADR-0186 증보 2026-10-13 v3 V3-2).
-/// Avatar sources arrive with their own slice; `instructions` and everything
-/// that steers behaviour are not reachable from here.
+/// Avatar sources include presets, attachments and generated/retrieved images;
+/// `instructions` and everything that steers behaviour are not reachable here.
 pub const ACTION_AGENT_PROFILE_UPDATE: &str = "agent.profile.update";
 
 /// `agent.invite` — bring another, external agent into the workspace: the approver
@@ -112,12 +115,14 @@ pub const ACTION_WORKSPACE_WORK_TIER_UPDATE: &str = "workspace.work_tier.update"
 /// card — that is the member's own consent (ADR-0113 D2).
 pub const ACTION_PLUGIN_INSTALL: &str = "plugin.install";
 
-/// 「이 사진으로 내 프로필 사진 바꿔줘」 (ADR-0186 증보 2026-10-25 v4, #4385): an agent
-/// proposes that **the person who called it** wear an image **that person attached in
-/// the same conversation** as their own avatar. The target is never an argument — the
-/// server derives it from the run (the author of the message that started it) — and only
-/// that person may approve.
+/// The requesting human's own avatar (ADR-0186 v4 + amendment v7, #4791).
+/// Sources are their image attachment in this conversation or generated/retrieved
+/// image bytes. The run supplies the subject and only that person may approve.
 pub const ACTION_MEMBER_AVATAR_SET: &str = "member.avatar.set";
+
+/// The requesting human's own display name (ADR-0186 amendment v7, #4791).
+/// The run supplies the subject; neither an argument nor an admin may substitute it.
+pub const ACTION_MEMBER_DISPLAY_NAME_SET: &str = "member.display_name.set";
 
 /// `message.pin` — pin one message to the head of the channel it is in, **as the
 /// approver**, through the very function a person's own pin uses (ADR-0186 증보 v5 U-e).
@@ -127,6 +132,12 @@ pub const ACTION_MESSAGE_PIN: &str = "message.pin";
 /// `message.unpin` — take a pin off (ADR-0186 증보 v5 U-e). The same gate and the same
 /// card as [`ACTION_MESSAGE_PIN`]: clearing a pin is as visible to the channel as setting one.
 pub const ACTION_MESSAGE_UNPIN: &str = "message.unpin";
+
+/// `expression.create` — put one picture into the team's expression library after a
+/// person looked at the exact stored picture (ADR-0186 증보 v8 / ADR-0218 부록 B). Up to
+/// four candidates, one is chosen. Not on [`TEAM_AI_ACTION_IDS`] and not an initiative
+/// action: only an external agent a person asked, through `oort_action_propose`.
+pub const ACTION_EXPRESSION_CREATE: &str = "expression.create";
 
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -170,9 +181,17 @@ pub enum RequiredRole {
     /// workspace admin may not put on somebody's face). Judged against a subject the
     /// resolver derives from the run, never from an argument.
     RequestingMember,
+    /// ADR-0217: this card's named other human DM participant.
+    DmParticipant,
     /// `routes::shared::require_workspace_operator`'s set: a workspace
     /// owner/admin, or a principal carrying the platform operator scope.
     WorkspaceOperator,
+    /// ADR-0186 v8 X8-3: a **dynamic** judgement, not a stored role. A live human member
+    /// of the card's channel who is not a guest and satisfies the workspace's *current*
+    /// add policy; when the card names a face (`subjectMemberId`), also that very person.
+    /// No admin or agent-owner proxy. One predicate (`momo_expressions::adder_allows`)
+    /// serves the decision route, the push audience and the preview.
+    ExpressionAdder,
 }
 
 impl RequiredRole {
@@ -181,7 +200,9 @@ impl RequiredRole {
             RequiredRole::Admin => "admin",
             RequiredRole::AgentEditor => "agent_editor",
             RequiredRole::RequestingMember => "requesting_member",
+            RequiredRole::DmParticipant => "dm_participant",
             RequiredRole::WorkspaceOperator => "workspace_operator",
+            RequiredRole::ExpressionAdder => "expression_adder",
         }
     }
 
@@ -191,17 +212,21 @@ impl RequiredRole {
         match self {
             RequiredRole::Admin | RequiredRole::WorkspaceOperator => "관리자",
             RequiredRole::AgentEditor => "대상 에이전트의 소유자 또는 관리자",
-            RequiredRole::RequestingMember => "사진 주인 본인",
+            RequiredRole::RequestingMember => "요청한 본인",
+            RequiredRole::DmParticipant => "카드에 표시된 대화 참여자",
+            RequiredRole::ExpressionAdder => "표현을 추가할 수 있는 멤버(얼굴이 있으면 그 본인)",
         }
     }
 
     /// Every variant, so a test can measure the wire vocabulary against the
     /// OpenAPI enum without a hand-copied list that could omit a new role.
-    pub const ALL: [RequiredRole; 4] = [
+    pub const ALL: [RequiredRole; 6] = [
         RequiredRole::Admin,
         RequiredRole::AgentEditor,
         RequiredRole::RequestingMember,
+        RequiredRole::DmParticipant,
         RequiredRole::WorkspaceOperator,
+        RequiredRole::ExpressionAdder,
     ];
 }
 
@@ -214,6 +239,8 @@ impl RequiredRole {
 /// (「에이전트에게는 문구 2개만」) still holds for the Agent Port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Proposers {
+    /// Only the human DM admission flow; never a model-selected action.
+    ServerOnly,
     /// Any agent that may propose: the Agent Port's `oort_action_propose` and the
     /// team AI (when the id is also on [`TEAM_AI_ACTION_IDS`]).
     Any,
@@ -235,6 +262,7 @@ impl WorkspaceAction {
     /// May a proposal through `door` name this action?
     pub fn proposable_through(&self, door: ProposalDoor) -> bool {
         match (self.proposers, door) {
+            (Proposers::ServerOnly, _) => false,
             (Proposers::Any, _) => true,
             (Proposers::TeamAiOnly, ProposalDoor::TeamAi) => true,
             (Proposers::TeamAiOnly, ProposalDoor::AgentPort) => false,
@@ -259,7 +287,7 @@ pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 /// Still outside (H6-2): `invite.create` and `agent.invite` (one-time secrets),
 /// `hosted.channels.grant` (widens access), and everything declared but not
 /// executable (`webhook.create`, `member.role.set`).
-pub const TEAM_AI_ACTION_IDS: [&str; 9] = [
+pub const TEAM_AI_ACTION_IDS: [&str; 11] = [
     ACTION_AGENT_PROFILE_UPDATE,
     ACTION_AGENT_RENAME,
     ACTION_CHANNEL_CREATE,
@@ -269,6 +297,8 @@ pub const TEAM_AI_ACTION_IDS: [&str; 9] = [
     ACTION_WORKSPACE_MEMORY_UPDATE,
     ACTION_WORKSPACE_WORK_TIER_UPDATE,
     ACTION_PLUGIN_INSTALL,
+    ACTION_MEMBER_AVATAR_SET,
+    ACTION_MEMBER_DISPLAY_NAME_SET,
 ];
 
 /// Whether an action's one-time secret may go to the **proposing agent** instead
@@ -344,6 +374,15 @@ pub fn changes_avatar(payload: &Value) -> bool {
         .is_some_and(|args| args.contains_key("avatar"))
 }
 
+/// Like the avatar marker, only key presence is needed to open a name change.
+fn changes_display_name(payload: &Value) -> bool {
+    payload
+        .get("action")
+        .and_then(|action| action.get("args"))
+        .and_then(Value::as_object)
+        .is_some_and(|args| args.contains_key("displayName"))
+}
+
 /// Must this approval be opened in the app to be decided — i.e. may its push
 /// **not** carry the lock-screen 승인·거절 buttons? (ADR-0204 D7: the category
 /// `momo.approval.open` instead of `momo.approval`.)
@@ -358,8 +397,9 @@ pub fn changes_avatar(payload: &Value) -> bool {
 ///    having looked at the picker;
 /// 3. a tool call the lock screen cannot show ([`OPEN_IN_APP_TOOL_NAMES`] — the login
 ///    handoff, planner decision 2026-10-17);
-/// 4. an `agent.profile.update` that changes the avatar ([`changes_avatar`], same
-///    decision) and every `member.avatar.set` (its whole point is a picture);
+/// 4. an `agent.profile.update` that changes the avatar or name, every
+///    `member.avatar.set`, `member.display_name.set` and `agent.rename`: the person
+///    sees the picture or the before/after name in the app (#4810);
 /// 5. every `message.pin` and `message.unpin` (ADR-0186 증보 v5 U-e): the card names a
 ///    message by its first 120 characters, and a pin endorses all of it;
 /// 6. ADR-0188 D5's work-host permission requests. They are `work_permission_request`
@@ -390,7 +430,7 @@ pub fn changes_avatar(payload: &Value) -> bool {
 ///
 /// ## What it may read
 ///
-/// Only `action.id`, whether `action.args` is an object with an `avatar` key,
+/// Only `action.id`, whether `action.args` is an object with an `avatar` or `displayName` key,
 /// `tool_call.name`, `execution` — the paths the push judgment's payload projection
 /// carries (`momo_push` `judgment.rs`). Never an argument's value. The projection and
 /// this function must say the same thing about the same card: the push judges the
@@ -426,15 +466,24 @@ pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
                     // (ADR-0186 증보 v5 U-c). Reads `origin`, a path the push projection carries.
                     || crate::initiative::is_agent_initiated(payload)
                     || ONE_TIME_SECRET_ACTION_IDS.contains(&id)
-                    || (id == ACTION_AGENT_PROFILE_UPDATE && changes_avatar(payload))
+                    || (id == ACTION_AGENT_PROFILE_UPDATE
+                        && (changes_avatar(payload) || changes_display_name(payload)))
+                    // A name change is decided with the before/after name visible (#4810).
+                    || id == ACTION_MEMBER_DISPLAY_NAME_SET
+                    || id == ACTION_AGENT_RENAME
                     // A picture cannot be judged from a banner — and this card has no
                     // other kind of proposal, so it is always opened (ADR-0186 증보 v4).
                     || id == ACTION_MEMBER_AVATAR_SET
+                    || id == ACTION_DM_AGENT_ADMIT
                     // A message cannot be judged from a banner either: the card shows the
                     // first 120 characters of something that can be thousands (ADR-0186
                     // 증보 v5 U-e, review M4), so the approver reads it in the app.
                     || id == ACTION_MESSAGE_PIN
                     || id == ACTION_MESSAGE_UNPIN
+                    // The picture is the whole point of the card, and the lock screen shows
+                    // none: the push says 「앱에서 확인」 and offers no 승인 button
+                    // (ADR-0186 증보 v8 X8-3).
+                    || id == ACTION_EXPRESSION_CREATE
             }),
         _ => true,
     }
@@ -749,24 +798,115 @@ fn agent_profile_update_args_schema() -> Value {
     })
 }
 
-/// `member.avatar.set` arguments (ADR-0186 증보 v4): **one** key, the id of an image the
-/// person attached in this conversation. There is no target (the person who called the
-/// agent is the target, derived by the server), no URL, no bytes and no preset: the
-/// avatar of a person is theirs to draw, and what an agent may do is carry a picture the
-/// person themselves sent.
+/// Exactly one image source: the requester's attachment in this conversation,
+/// or generated/retrieved base64 (v7). Closed keys; the normalizer also enforces
+/// mutual exclusion. The target always comes from the run.
 fn member_avatar_set_args_schema() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["attachmentId"],
+        "minProperties": 1,
         "properties": {
             "attachmentId": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": AVATAR_ID_TEXT_MAX_CHARS,
                 "description": "The id (imageAttachments[].id from oort_conversation_read) of an image the person who called you attached in THIS conversation."
+            },
+            "avatar": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["source", "dataBase64"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["generated"]},
+                    "dataBase64": {"type": "string", "minLength": 1, "maxLength": AVATAR_GENERATED_B64_MAX_CHARS}
+                },
+                "description": "An image you generated or retrieved, PNG/JPEG/WebP, strict base64, at most 44000 input bytes. No URL; retrieve and downscale it first."
             }
         }
+    })
+}
+
+/// One expression candidate's picture, as the proposal names it (ADR-0218 부록 B
+/// `AgentImage`): the requester's attachment in this conversation, one public HTTPS link,
+/// bytes the agent made itself, or one candidate of a motion assembly the server kept for it
+/// (G3.6). Closed keys; the domain normaliser enforces the rest.
+pub const EXPRESSION_CANDIDATES_MAX: u64 = 4;
+/// base64 of one generated candidate's at most 1 MiB (ADR-0218 D3).
+pub const EXPRESSION_GENERATED_B64_MAX_CHARS: u64 = 1_398_104;
+pub const EXPRESSION_PROMPT_MAX_BYTES: u64 = 8_000;
+pub const EXPRESSION_URL_MAX_BYTES: u64 = 2_048;
+
+fn expression_create_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["candidates"],
+        "properties": {
+            "candidates": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": EXPRESSION_CANDIDATES_MAX,
+                "description": "1-4 candidates for ONE expression; every candidate names the same subjectMemberId. A person picks one after seeing the stored picture.",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["name", "displayName", "tags", "image"],
+                    "properties": {
+                        "name": {"type": "string", "minLength": 2, "maxLength": 30, "description": "[a-z0-9_-], 2-30 characters, permanent once saved."},
+                        "displayName": {"type": "string", "minLength": 1, "maxLength": 160},
+                        "tags": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+                        "subjectMemberId": {"type": ["string", "null"], "maxLength": 36, "description": "REQUIRED to be present: null = nobody's face is in the picture (your declaration); otherwise the one workspace member whose face it is, and only that member can approve."},
+                        "image": {
+                            "type": "object",
+                            "oneOf": [
+                                {"type": "object", "additionalProperties": false, "required": ["source", "attachmentId"],
+                                 "properties": {"source": {"type": "string", "enum": ["attachment"]},
+                                                "attachmentId": {"type": "string", "minLength": 36, "maxLength": 36}}},
+                                {"type": "object", "additionalProperties": false, "required": ["source", "url"],
+                                 "properties": {"source": {"type": "string", "enum": ["url"]},
+                                                "url": {"type": "string", "minLength": 8, "maxLength": EXPRESSION_URL_MAX_BYTES}}},
+                                {"type": "object", "additionalProperties": false, "required": ["source", "mime", "dataBase64", "prompt"],
+                                 "properties": {"source": {"type": "string", "enum": ["generated"]},
+                                                "mime": {"type": "string", "enum": ["image/png", "image/jpeg", "image/gif", "image/webp"]},
+                                                "dataBase64": {"type": "string", "minLength": 4, "maxLength": EXPRESSION_GENERATED_B64_MAX_CHARS},
+                                                "prompt": {"type": "string", "minLength": 1, "maxLength": EXPRESSION_PROMPT_MAX_BYTES}}},
+                                {"type": "object", "additionalProperties": false, "required": ["source", "assemblyId", "index"],
+                                 "description": "One candidate of what oort_expression_assemble kept for you (ADR-0218 G3.6). The picture, prompt and original photo are the ones stored there; yours or another person's assembly, an expired or an unknown one is refused alike.",
+                                 "properties": {"source": {"type": "string", "enum": ["assembled"]},
+                                                "assemblyId": {"type": "string", "minLength": 36, "maxLength": 36},
+                                                "index": {"type": "integer", "minimum": 0, "maximum": 3}}}
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// The outcome line of `expression.create` (ADR-0218 부록 C).
+pub fn expression_create_result_body() -> String {
+    "팀 보관함에 저장했어요".to_string()
+}
+
+/// `ref.type` of an executed `expression.create`: the expression that was saved.
+pub const REF_TYPE_EXPRESSION: &str = "expression";
+
+/// `audit_log.action` / schema of an approved `expression.create`: ids, origin kind and
+/// domain, a sha256 **prefix**, the decider and the approval — never bytes, base64, the
+/// generation prompt or an original link.
+pub const AUDIT_EXPRESSION_CREATED: &str = "expression.created";
+/// A candidate that was staged for the card: origin kind/domain, the closed reason code if
+/// the receive failed, a sha256 prefix if it is a picture. Written for every candidate so
+/// the reason survives the TTL sweep that clears the draft's own `code` (ADR-0218 D6).
+pub const AUDIT_EXPRESSION_STAGED: &str = "expression.staged";
+pub const AUDIT_EXPRESSION_STAGED_SCHEMA: &str = "momo.expression.staged.v1";
+
+fn member_display_name_set_args_schema() -> Value {
+    json!({
+        "type": "object", "additionalProperties": false, "required": ["displayName"],
+        "properties": {"displayName": {"type": "string", "minLength": 1, "maxLength": 400}}
     })
 }
 
@@ -1197,7 +1337,7 @@ fn pin_time_text(at: chrono::DateTime<chrono::Utc>) -> String {
 pub fn message_pin_rows(unpin: bool, message: &PinCardMessage) -> Vec<Value> {
     let mut rows = Vec::new();
     if message.channel_kind == "dm" {
-        rows.push(action_row("채널", "1:1 대화"));
+        rows.push(action_row("채널", "이 대화"));
     } else {
         rows.push(action_row("채널", format!("#{}", message.channel_name)));
         rows.push(action_row(
@@ -1275,7 +1415,7 @@ pub fn message_pin_result_body(unpin: bool, changed: bool, message_id: Uuid) -> 
 /// The result rows of a pin action: where, and how many pins the channel holds after.
 pub fn message_pin_result_rows(message: &PinCardMessage, pinned_after: i64) -> Vec<Value> {
     let mut rows = vec![if message.channel_kind == "dm" {
-        action_row("채널", "1:1 대화")
+        action_row("채널", "이 대화")
     } else {
         action_row("채널", format!("#{}", message.channel_name))
     }];
@@ -1363,7 +1503,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
     WorkspaceAction {
         id: ACTION_AGENT_PROFILE_UPDATE,
         title: "에이전트 프로필 바꾸기",
-        summary: "에이전트 한 명의 이름·소개·상태 문구·역할 라벨을 바꿔요. 자기 자신이나 같은 소유자의 에이전트만 대상이에요.",
+        summary: "에이전트 한 명의 이름·사진·소개·상태 문구·역할 라벨을 바꿔요. 자기 자신이나 같은 소유자의 에이전트만 대상이에요.",
         risk: Risk::Approval,
         required_role: RequiredRole::AgentEditor,
         secret_delivery: SecretDelivery::None,
@@ -1388,7 +1528,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
     WorkspaceAction {
         id: ACTION_MEMBER_AVATAR_SET,
         title: "내 프로필 사진 바꾸기",
-        summary: "내가 이 대화에 보낸 사진으로 내 프로필 사진을 바꿔요. 대상은 말을 건 본인뿐이고, 본인만 승인할 수 있어요.",
+        summary: "이 대화에 보낸 사진이나 에이전트가 가져온 이미지로 내 프로필 사진을 바꿔요. 요청한 본인만 승인할 수 있어요.",
         risk: Risk::Approval,
         required_role: RequiredRole::RequestingMember,
         secret_delivery: SecretDelivery::None,
@@ -1396,6 +1536,18 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         initiative: false,
         effect: "카드에 보이는 이미지로 내 프로필 사진을 바꿔요",
         args_schema: member_avatar_set_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_MEMBER_DISPLAY_NAME_SET,
+        title: "내 이름 바꾸기",
+        summary: "말을 건 본인의 표시 이름을 바꿔요. 요청한 본인만 승인할 수 있고, 핸들과 과거 멘션은 그대로예요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::RequestingMember,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
+        initiative: false,
+        effect: "카드에 보이는 이름으로 내 표시 이름을 바꿔요",
+        args_schema: member_display_name_set_args_schema,
     },
     // ADR-0186 증보 v5 U-e: the pin a person does by hand, done as the approver. Admin, not
     // "any channel member": a new role would grow `RequiredRole`, the gate plan, the push
@@ -1423,6 +1575,19 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         initiative: true,
         effect: "표시된 메시지의 고정을 풀어요",
         args_schema: message_pin_args_schema,
+    },
+    // ADR-0186 증보 v8: a team-library picture, chosen by a person who saw the stored pixels.
+    WorkspaceAction {
+        id: ACTION_EXPRESSION_CREATE,
+        title: "팀 표현 추가",
+        summary: "에이전트가 찾았거나 만든 그림 후보(최대 4개) 중 하나를 팀 보관함에 저장해요. 저장될 그림을 직접 보고 고르며, 얼굴이 있으면 그 본인만 승인할 수 있어요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::ExpressionAdder,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
+        initiative: false,
+        effect: "카드에서 고른 그림 하나를 팀 보관함에 저장해요",
+        args_schema: expression_create_args_schema,
     },
     WorkspaceAction {
         id: ACTION_WORKSPACE_UNFURL_UPDATE,
@@ -1474,6 +1639,18 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         initiative: false,
         effect: PLUGIN_INSTALL_EFFECT,
         args_schema: plugin_install_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_DM_AGENT_ADMIT,
+        title: "에이전트 들이기",
+        summary: "대화의 다른 사람이 모두 허락하면 에이전트가 들어와 이후 대화를 봐요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::DmParticipant,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::ServerOnly,
+        initiative: false,
+        effect: "대화의 다른 사람이 모두 허락하면 에이전트를 이 대화에 들여요",
+        args_schema: || json!({"type": "object", "additionalProperties": false, "properties": {}}),
     },
 ];
 
@@ -2254,13 +2431,10 @@ pub const ACTION_RESULT_PROPS_KEY: &str = "momo.action_result";
 /// `momo.action_result.v1`.
 pub const ACTION_RESULT_VERSION: i64 = 1;
 
-/// 부록 B `status` — the one this executor writes.
-///
-/// The vocabulary is `executed | rejected | expired | role_required`; the other
-/// three belong to arms that already have their own outcome line (the
-/// rejection's and the sweep's `tool_result`, and the card patch a refused
-/// decision leaves), so widening those here would put **two** lines under one
-/// card.
+/// The executed action's result status. ADR-0186 v6 R-b puts this object
+/// inside the existing approval card's `result`; rejection, expiry and human
+/// cancellation use the same card, with their own status. No outcome line is
+/// inserted. `role_required` remains a nonterminal attempt on a pending card.
 pub const ACTION_RESULT_EXECUTED: &str = "executed";
 
 /// The card patch a decision refused for want of authority leaves behind
@@ -2301,7 +2475,9 @@ pub const ACTION_RESULT_NEXT_HREF: &str = "/settings?section=members";
 /// The label beside [`ACTION_RESULT_NEXT_HREF`], spelled as the nav spells it.
 pub const ACTION_RESULT_NEXT_LABEL: &str = "설정 › 멤버와 초대에서 보기";
 
-/// The `client_msg_id` of the `action_result` line an executed action posts.
+/// The reserved `client_msg_id` of legacy executed-action result lines.
+/// New decisions patch the request card (ADR-0186 v6 R-b); keep this key stable
+/// because existing rows and future announcement keys must never collide.
 ///
 /// **Not the approval id, and not the card's id either.** Three messages can now
 /// share `(channel_id, author_member_id)` for one approval — the proposal card
@@ -2353,6 +2529,9 @@ pub struct ActionResult<'a> {
     /// ([`ACTION_RESULT_NEXT_HREF`]); a wrong link on another action's card would
     /// be worse than none (see the 정오표 on that constant).
     pub next: Option<ActionResultNext>,
+    /// ADR-0218 부록 B `Result` (`{id,name,token}`) of an executed `expression.create`: the
+    /// one value that is not generic. `None` for every other action.
+    pub expression: Option<Value>,
 }
 
 /// 부록 B `next` — a fixed in-app path and its label.
@@ -2393,6 +2572,9 @@ pub fn action_result_props(result: &ActionResult<'_>) -> Value {
             "next".into(),
             json!({"label": next.label, "href": next.href}),
         );
+    }
+    if let (Some(expression), Some(object)) = (&result.expression, card.as_object_mut()) {
+        object.insert("expression".into(), expression.clone());
     }
     json!({ ACTION_RESULT_PROPS_KEY: card })
 }
@@ -2458,12 +2640,15 @@ mod tests {
                 "agent.profile.update",
                 "agent.invite",
                 "member.avatar.set",
+                "member.display_name.set",
                 "message.pin",
                 "message.unpin",
+                "expression.create",
                 "workspace.unfurl.update",
                 "workspace.memory.update",
                 "workspace.work_tier.update",
-                "plugin.install"
+                "plugin.install",
+                "dm.agent.admit"
             ]
         );
         assert_eq!(
@@ -2493,6 +2678,8 @@ mod tests {
                 "workspace.memory.update",
                 "workspace.work_tier.update",
                 "plugin.install",
+                "member.avatar.set",
+                "member.display_name.set",
             ]
         );
         for id in TEAM_AI_ACTION_IDS {
@@ -2535,8 +2722,10 @@ mod tests {
                 "agent.profile.update",
                 "agent.invite",
                 "member.avatar.set",
+                "member.display_name.set",
                 "message.pin",
-                "message.unpin"
+                "message.unpin",
+                "expression.create"
             ]
         );
         for id in helper_only {
@@ -2546,7 +2735,19 @@ mod tests {
             );
             assert!(action_by_id(id).is_some(), "{id} is still in the catalog");
         }
-        assert_eq!(proposable_action_ids(ProposalDoor::TeamAi), action_ids());
+        assert_eq!(
+            proposable_action_ids(ProposalDoor::TeamAi),
+            action_ids()
+                .into_iter()
+                .filter(|id| *id != ACTION_DM_AGENT_ADMIT)
+                .collect::<Vec<_>>()
+        );
+        for door in [ProposalDoor::AgentPort, ProposalDoor::TeamAi] {
+            assert!(
+                proposable_action_by_id(ACTION_DM_AGENT_ADMIT, door).is_none(),
+                "only a human DM call may raise consent"
+            );
+        }
     }
 
     /// H6-1: the memory card can only turn memory OFF — `enabled` is `const:false`
@@ -2934,6 +3135,7 @@ mod tests {
             ref_id: Uuid::from_u128(13),
             rows: invite_result_rows("member", "2026-09-29"),
             secret_shown_once: true,
+            expression: None,
             next: Some(INVITE_RESULT_NEXT),
         })
     }
@@ -3127,7 +3329,9 @@ mod tests {
                 "admin",
                 "agent_editor",
                 "requesting_member",
-                "workspace_operator"
+                "dm_participant",
+                "workspace_operator",
+                "expression_adder"
             ]
         );
         wire.sort_unstable();
@@ -3154,6 +3358,7 @@ mod tests {
             ref_id: Uuid::from_u128(3),
             rows: vec![],
             secret_shown_once: false,
+            expression: None,
             next: None,
         });
         assert!(props[ACTION_RESULT_PROPS_KEY].get("next").is_none());
@@ -3367,14 +3572,18 @@ mod tests {
             );
         }
         for action in ACTIONS {
-            // `member.avatar.set` is a picture and the two pin actions are a message the card
-            // only quotes: they open for those reasons (pinned by
+            // Pictures, name changes and the two pin actions require the app's full
+            // preview: they open for those reasons (pinned by
             // `a_member_avatar_card_always_opens_in_the_app` and
             // `a_pin_card_always_opens_in_the_app`).
             if !ONE_TIME_SECRET_ACTION_IDS.contains(&action.id)
                 && action.id != ACTION_MEMBER_AVATAR_SET
+                && action.id != ACTION_MEMBER_DISPLAY_NAME_SET
+                && action.id != ACTION_AGENT_RENAME
+                && action.id != ACTION_DM_AGENT_ADMIT
                 && action.id != ACTION_MESSAGE_PIN
                 && action.id != ACTION_MESSAGE_UNPIN
+                && action.id != ACTION_EXPRESSION_CREATE
             {
                 assert!(
                     !opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(action.id)),
@@ -3446,18 +3655,20 @@ mod tests {
     #[test]
     fn every_registered_action_has_a_recorded_lock_screen_decision() {
         let recorded: &[(&str, bool)] = &[
-            (ACTION_INVITE_CREATE, true), // the invite link is shown once
-            (ACTION_AGENT_INVITE, true),  // the pairing code is shown once
+            (ACTION_DM_AGENT_ADMIT, true), // privacy consent is read in the conversation
+            (ACTION_INVITE_CREATE, true),  // the invite link is shown once
+            (ACTION_AGENT_INVITE, true),   // the pairing code is shown once
             (ACTION_CHANNEL_CREATE, false),
             (ACTION_CHANNEL_MEMBER_ADD, false),
-            (ACTION_AGENT_RENAME, false),
+            (ACTION_AGENT_RENAME, true),
             (ACTION_HOSTED_CHANNELS_GRANT, false),
             (ACTION_WORKSPACE_SETTINGS_UPDATE, false),
-            // False for a card with no `avatar` key; one with it is opened (see
-            // `a_profile_update_that_changes_the_avatar_opens_in_the_app`).
+            // False for a card with neither `avatar` nor `displayName`; see
+            // `a_profile_update_that_changes_the_avatar_or_name_opens_in_the_app`.
             (ACTION_AGENT_PROFILE_UPDATE, false),
             // A picture on a lock-screen banner cannot be judged: always opened.
             (ACTION_MEMBER_AVATAR_SET, true),
+            (ACTION_MEMBER_DISPLAY_NAME_SET, true),
             // A message the card only quotes (120 characters of up to thousands): the approver
             // reads it in the app (ADR-0186 증보 v5 U-e, review M4).
             (ACTION_MESSAGE_PIN, true),
@@ -3468,6 +3679,9 @@ mod tests {
             // Installs one official app; "the token is not stored in oort", so there is
             // no value to show the approver once (ADR-0113 P3, ADR-0201 증보 v2 H7).
             (ACTION_PLUGIN_INSTALL, false),
+            // The picture is the card, and a banner shows none: always opened in the app
+            // (ADR-0186 증보 v8 X8-3; no 승인 button on the lock screen).
+            (ACTION_EXPRESSION_CREATE, true),
         ];
         let registered: std::collections::BTreeSet<&str> =
             ACTIONS.iter().map(|action| action.id).collect();
@@ -3649,21 +3863,18 @@ mod tests {
         assert!(
             proposable_action_by_id(ACTION_MEMBER_AVATAR_SET, ProposalDoor::AgentPort).is_some()
         );
-        assert!(
-            !TEAM_AI_ACTION_IDS.contains(&ACTION_MEMBER_AVATAR_SET),
-            "the helper cannot raise it: it has no run whose caller could be the person"
-        );
+        assert!(TEAM_AI_ACTION_IDS.contains(&ACTION_MEMBER_AVATAR_SET));
         let schema = action.args_schema();
         assert_eq!(schema["additionalProperties"], serde_json::json!(false));
-        assert_eq!(schema["required"], serde_json::json!(["attachmentId"]));
+        assert_eq!(schema["minProperties"], serde_json::json!(1));
         let keys: Vec<&String> = schema["properties"]
             .as_object()
             .expect("properties")
             .keys()
             .collect();
-        assert_eq!(keys, ["attachmentId"]);
+        assert_eq!(keys, ["attachmentId", "avatar"]);
         // The sentence an approver reads names whose authority it is.
-        assert!(proposal_summary(action).contains("사진 주인 본인"));
+        assert!(proposal_summary(action).contains("요청한 본인"));
     }
 
     /// Planner decision 2026-10-17: the login handoff is approved with the card in
@@ -3803,12 +4014,12 @@ mod tests {
         }
     }
 
-    /// Planner decision 2026-10-17: a picture is not approved from a banner. An
+    /// Planner decision 2026-10-17 / #4810: a picture or name is approved in the app. An
     /// `agent.profile.update` that carries an `avatar` key — preset, attachment, a
     /// staged image, or `null` to remove it — is opened; the same action changing only
-    /// words is not.
+    /// words other than its name is not.
     #[test]
-    fn a_profile_update_that_changes_the_avatar_opens_in_the_app() {
+    fn a_profile_update_that_changes_the_avatar_or_name_opens_in_the_app() {
         let update = |args: serde_json::Value| serde_json::json!({"action": {"id": ACTION_AGENT_PROFILE_UPDATE, "args": args}});
         let sha = "a".repeat(64);
         for (label, args) in [
@@ -3834,6 +4045,7 @@ mod tests {
                 "words and a picture",
                 serde_json::json!({"tagline": "새 소개", "avatar": {"source": "preset", "presetId": "p1"}}),
             ),
+            ("a name", serde_json::json!({"displayName": "새 이름"})),
         ] {
             assert!(
                 opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &update(args)),
@@ -3842,7 +4054,6 @@ mod tests {
         }
         for (label, args) in [
             ("words only", serde_json::json!({"tagline": "새 소개"})),
-            ("a name", serde_json::json!({"displayName": "새 이름"})),
             (
                 "a status",
                 serde_json::json!({"statusText": "회의 중", "statusEmoji": "📅"}),

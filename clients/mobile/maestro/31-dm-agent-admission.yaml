@@ -1,0 +1,36 @@
+appId: app.momo.ios
+name: 31-dm-agent-admission
+---
+# S1 stack validation only; do not run from an individual worker.
+# Fixture: two humans in a DM, callable agent absent, requester already sent
+# @agent, this phone is the OTHER human inside that DM. DM_AGENT_APPROVAL_ID
+# names this human's card. Run in light/dark, AX large, reduced motion as well.
+- extendedWaitUntil:
+    visible: "에이전트 들이기"
+    timeout: 30000
+- assertVisible: ".*들어온 뒤의 글과 부른 메시지 하나만.*"
+- tapOn:
+    id: "card-approval-${DM_AGENT_APPROVAL_ID}-approve"
+- assertVisible:
+    id: "card-approval-${DM_AGENT_APPROVAL_ID}-confirm"
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: "card-approval-${DM_AGENT_APPROVAL_ID}-commit"
+- extendedWaitUntil:
+    visible: ".*들어왔어요 · 이후 대화를 봐요.*"
+    timeout: 30000
+- assertVisible: ".*3명.*"
+- tapOn:
+    id: "conversation-info-button"
+- extendedWaitUntil:
+    visible:
+      id: "conversation-info-dm-agents"
+    timeout: 30000
+- tapOn:
+    id: "dm-agent-remove"
+- tapOn:
+    id: "conversation-info-back"
+- extendedWaitUntil:
+    visible: ".*내보냈어요 · 이제 이 대화를 보지 못해요.*"
+    timeout: 30000

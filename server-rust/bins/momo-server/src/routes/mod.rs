@@ -45,6 +45,7 @@ pub mod device_link;
 pub mod devices;
 /// ADR-0165 / LIVE-1 — 관전 라이브 화면: the display half of the attach plane.
 pub mod display_attach;
+pub mod dm_agents;
 /// ADR-0177 증보 D7 / #4227 — `PUT|DELETE …/channels/{ch}/closure`: the member's own DM closure watermark.
 pub mod dm_closure;
 pub mod dms;
@@ -52,6 +53,7 @@ pub mod dms;
 pub mod ephemeral;
 /// #1222 — 이벤트 구독: what leaves the workspace, and who said it could.
 pub mod event_subscriptions;
+pub mod expressions;
 pub mod github_app;
 pub mod github_ingress;
 pub mod health;
@@ -102,6 +104,8 @@ pub mod roster;
 /// ADR-0208 / #4214 — scheduled messages (human-only, owner-scoped, outbox event on every change).
 pub mod scheduled_messages;
 pub mod search;
+/// #4820 C2a — the single-use address of the requester's own picture for the co-hosted Hermes picture tool.
+pub mod self_media;
 /// #1873 — BZ-4e self display-name rename (`PATCH …/members/me`).
 pub mod self_profile;
 pub mod shared;

@@ -41,13 +41,13 @@
 | 변경 | 필수 검증 |
 |---|---|
 | Rust 서버 | workspace `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
-| 웹·폰·공유 코어 | 해당 트리 typecheck/test 및 해당 표면 게이트, `scripts/verify_merge_tree.sh`로 병합 트리 확인 |
+| 웹·폰·공유 코어 | 해당 트리 typecheck/test 및 해당 표면 게이트, `scripts/verify_merge_tree.sh`로 병합 트리 확인(스택 PR은 착륙 때 `--typecheck-only`, 전체는 스택 검증 1회) |
 | SQL·infra·runtime | 실제 적용 가능한 격리 PG/Docker 검증. 외부 의존은 실제 또는 mock으로 범위를 나눠 기록 |
 | 문서·운영 스크립트의 PR/통합 | `scripts/local_gate.sh --profile docs` + 변경된 실행 도구의 관련 시험 |
-| UI | 해당 표면 preflight와 독립 design-review **Blocker 0·High 0**; 미실행 캡처/실기기는 미검증으로 기록 |
+| UI | 해당 표면 preflight와 독립 design-review **Blocker 0·High 0**; 미실행 캡처/실기기는 미검증으로 기록. 스택 PR은 스택 검증에서 한 번에 받고 승격 전에 끝낸다([PIPELINE](docs/planning/PIPELINE.md) §5) |
 
 - 검증하지 않은 runtime은 `runtime-unverified`로 표기한다. 버그 회귀 시험은 실제 실패를 잡는 증거를 낸다. 모든 문장·단정에 일률적인 변조 시험을 요구하지 않는다.
 - PR은 자기 **track/** 대상으로, 통합자만 순차 머지한다. current HEAD의 **PR CI gate·Policy integrity gate**와 local evidence를 확인하고, 머지 직전 **현재 exact canonical base에서 추출한 verifier**로 `scripts/verify_policy_integrity_from_base.sh`를 실행한다. 후보 verifier나 같은 이름의 status만 믿지 않는다.
 - 정책 파일 변경은 지정 owner의 exact-head audit와 승인 라벨 규칙을 유지한다([GITHUB_OPS](docs/GITHUB_OPS.md)). 문서로 게이트를 옮겨도 이 표의 검증 의무는 바뀌지 않는다.
-- **track→main은 성재의 명시 승인 범위에서만**. 이미 기록된 상시 위임은 [TRACKS](docs/TRACKS.md)대로 적용하고 승격+양 트랙 sync를 한 단위로 수행한다. canonical force-push·main 직접 push 금지.
+- **track→main은 성재의 명시 승인 범위에서만**. 이미 기록된 상시 위임은 [TRACKS](docs/TRACKS.md)대로 적용하고 승격+양 트랙 sync를 한 단위로 수행한다. 스택 PR이 든 트랙은 그 스택의 스택 검증 PASS 전에 승격하지 않는다([PIPELINE](docs/planning/PIPELINE.md) §5). canonical force-push·main 직접 push 금지.
 - 배포는 [M7 게이트](docs/cicd/03-store-readiness-gate.md) 등급을 따른다. **내부 등급(M7-I)** PASS 기록과 **배포 건마다의** owner 승인 없이 팀 대상 TestFlight·공증 DMG(직접 전달·next 채널)를 배포하지 않는다. PASS 전 증거 빌드(owner 1인 TestFlight 그룹·owner 기기)도 빌드마다 owner 승인 뒤에만 한다. 데스크탑 next 채널(팀 채널, 공개 URL) 게시도 이 규칙을 따른다. **스토어 등급(M7-S)** PASS 기록과 **배포 건마다의** owner 승인 없이 App Store 제출·external TestFlight·공개 공증 배포를 하지 않는다. M7-S PASS는 제출 빌드 커밋에만 유효하다. M7-I PASS는 「다시 재는 조건」 전까지 유효하되, 빌드마다 I-1 사실·5분 스모크·승인 인용을 남긴다. owner 외 사람이 설치할 빌드는 공증 여부와 무관하게 M7-I를 따른다. release·유료 macOS workflow, 로컬 배포 스크립트(`publish_next_build.sh` 등), Xcode Cloud의 TestFlight 액션은 owner 승인 경계를 유지한다. 구현 권한이 배포 권한으로 확대되지 않는다.

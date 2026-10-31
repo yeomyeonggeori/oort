@@ -1,0 +1,6 @@
+[
+  {"status":"approved","code":"approval_approved","line":"승인됐어요"},
+  {"status":"rejected","code":"approval_rejected","line":"거부됐어요"},
+  {"status":"expired","code":"approval_expired","line":"승인을 기다리다 만료됐어요"},
+  {"status":"cancelled","code":"human_cancelled","line":"요청을 멈췄어요"}
+]

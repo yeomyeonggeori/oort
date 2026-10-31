@@ -125,9 +125,9 @@ use momo_agent::{
     HOSTED_SKIP_NOTICE_THROTTLE_SECONDS,
 };
 use momo_db::audit::{write_audit, AuditEntry};
-use momo_db::{DbError, PgConnection};
+use momo_db::{sqlx, DbError, PgConnection};
 use momo_messaging::{
-    agent_context_window_in_tx, contains_mention_with_aliases, send_message_in_tx,
+    agent_context_window_for_member_in_tx, contains_mention_with_aliases, send_message_in_tx,
     send_thread_notice_in_tx, MessageType, NewMessage,
 };
 use serde_json::Value;
@@ -281,10 +281,10 @@ pub(crate) async fn route_agent_mentions_in_tx(
     // `type='system'` rows (the only thing this function adds to the channel) are
     // excluded from it anyway. Read lazily so a message that mentions only
     // ineligible agents costs nothing.
-    let mut context_window: Option<Vec<Value>> = None;
     let mut queued = Vec::new();
 
     for (agent, addressing) in &addressed {
+        let mut context_window: Option<Vec<Value>> = None;
         if send.author_is_agent {
             // See the module docs: without the source run there is no depth to
             // inherit, and a depth-0 A2A run would make the cap unenforceable.
@@ -298,6 +298,19 @@ pub(crate) async fn route_agent_mentions_in_tx(
             )
             .await?;
             continue;
+        }
+        if in_dm && !agent.is_channel_member && *addressing == Addressing::Mention {
+            let mut proposed = agent.clone();
+            proposed.is_channel_member = true;
+            proposed.hosted_channel_approved = true;
+            if dm_admission_invocable(&proposed, &send) {
+                if let Err(invalid) = resolve_mention_routing(agent, send.routing) {
+                    return Ok(Err(ApiError::bad_request(invalid.to_string())));
+                }
+                if super::dm_agents::propose_in_tx(conn, &send, agent).await? {
+                    continue;
+                }
+            }
         }
         // The gate chain itself lives in [`delivery_gate`] so the thread-reply
         // wake (ADR-0162 증보 5 W1) passes **the same** gates in the same order.
@@ -563,11 +576,12 @@ pub(crate) async fn route_agent_mentions_in_tx(
             {
                 if context_window.is_none() {
                     context_window = Some(
-                        agent_context_window_in_tx(
+                        agent_context_window_for_member_in_tx(
                             &mut *conn,
                             send.channel_id,
                             send.message_id,
                             send.context_max_messages,
+                            Some(agent.member_id),
                         )
                         .await?,
                     );
@@ -912,11 +926,12 @@ async fn enqueue_turn_in_tx(
 
     if context_window.is_none() {
         *context_window = Some(
-            agent_context_window_in_tx(
+            agent_context_window_for_member_in_tx(
                 &mut *conn,
                 send.channel_id,
                 send.message_id,
                 send.context_max_messages,
+                Some(agent.member_id),
             )
             .await?,
         );
@@ -1196,11 +1211,12 @@ async fn wake_thread_opener_in_tx(
     )
     .await?
     {
-        let window = agent_context_window_in_tx(
+        let window = agent_context_window_for_member_in_tx(
             &mut *conn,
             send.channel_id,
             send.message_id,
             send.context_max_messages,
+            Some(agent.member_id),
         )
         .await?;
         let refreshed = momo_outbox::refresh_pending_agent_job_recent_messages_in_tx(
@@ -1669,11 +1685,12 @@ pub(crate) async fn enqueue_granted_mention_job_in_tx(
         body: &body,
         hlc_ts: now_ms,
     };
-    let window = agent_context_window_in_tx(
+    let window = agent_context_window_for_member_in_tx(
         &mut *conn,
         run.channel_id,
         trigger_message_id,
         context_max_messages,
+        Some(agent.member_id),
     )
     .await?;
     let mut payload = mention_job_payload(
@@ -1781,6 +1798,18 @@ async fn subscription_notice(
 ) -> Result<(), DbError> {
     // E3 (#3938): the connector sentence needs only the connector owner's name —
     // an agent that is not `owner_only` has no `OwnerOnlyScope` to read it from.
+    if !momo_messaging::dm::dm_agent_can_speak_in_tx(
+        conn,
+        send.workspace_id,
+        send.channel_id,
+        agent.member_id,
+    )
+    .await?
+    {
+        // ADR-0217: retain the audited skip and the human's message. An alias
+        // outside a consent-managed DM cannot post its subscription notice.
+        return Ok(());
+    }
     let body = if let Some(stop) = kind.connector_trial_stop() {
         // #3948: the trial sentences name nobody; only the owner is ever told.
         momo_agent::connector_trial_notice_body(stop).to_string()
@@ -2046,6 +2075,144 @@ async fn paused(
             .target("message", send.message_id)
             .via_token(send.via_token_id)
             .with_schema(MENTION_DIAGNOSTIC_SCHEMA, detail),
+    )
+    .await?;
+    Ok(())
+}
+
+/// Test the ordinary invocation gates with only the proposed seat/room approval supplied.
+pub(crate) fn dm_admission_invocable(agent: &MentionCandidate, send: &MentionSend<'_>) -> bool {
+    matches!(delivery_gate(agent, send), DeliveryGate::Open { .. })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn admission_send<'a>(
+    state: &'a crate::AppState,
+    ws: Uuid,
+    channel: Uuid,
+    requester: Uuid,
+    message: Uuid,
+    seq: i64,
+    body: &'a str,
+    connector_trial: &'a momo_agent::ConnectorTrialAttest,
+) -> MentionSend<'a> {
+    MentionSend {
+        workspace_id: ws,
+        channel_id: channel,
+        message_id: message,
+        message_seq: seq,
+        root_id: None,
+        author_member_id: requester,
+        author_is_agent: false,
+        author_is_human: true,
+        body,
+        hlc_ts: chrono::Utc::now().timestamp_millis(),
+        via_token_id: None,
+        gateway_enabled: state.agent_gateway.enabled(),
+        hosted_delivery_enabled: state.agent_port.config.hosted_delivery_enabled,
+        subscription_agents_enabled: state.agent_port.config.subscription_agents_enabled,
+        claude_subscription_agents_enabled: state
+            .agent_port
+            .config
+            .claude_subscription_agents_enabled,
+        connector_trial,
+        context_max_messages: state.mentions.context_max_messages,
+        inplace_grant_enabled: false,
+        routing: None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn reprove_dm_admission_in_tx(
+    conn: &mut PgConnection,
+    state: &crate::AppState,
+    ws: Uuid,
+    channel: Uuid,
+    requester: Uuid,
+    target: Uuid,
+    connection: Option<Uuid>,
+) -> Result<bool, DbError> {
+    let candidates = load_mention_candidates_in_tx(conn, ws, channel).await?;
+    let Some(mut agent) = candidates.into_iter().find(|a| a.member_id == target) else {
+        return Ok(false);
+    };
+    if agent.hosted_active_connection_id != connection
+        || (connection.is_some() && !agent.hosted_confirmed_by_owner)
+    {
+        return Ok(false);
+    }
+    agent.is_channel_member = true;
+    agent.hosted_channel_approved = true;
+    let attest = state.cohosted.config.attest();
+    Ok(dm_admission_invocable(
+        &agent,
+        &admission_send(state, ws, channel, requester, Uuid::nil(), 0, "", &attest),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn enqueue_dm_admission_trigger_in_tx(
+    conn: &mut PgConnection,
+    state: &crate::AppState,
+    ws: Uuid,
+    channel: Uuid,
+    requester: Uuid,
+    target: Uuid,
+    message: Uuid,
+    requested: Option<&RequestedRouting>,
+) -> Result<(), DbError> {
+    let row = momo_messaging::find_message_in_tx(conn, channel, message)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    if row.author_member_id != requester || row.state == "deleted" {
+        return Err(sqlx::Error::RowNotFound.into());
+    }
+    let seq = row.seq;
+    let body = row.body.unwrap_or_default();
+    let attest = state.cohosted.config.attest();
+    let mut send = admission_send(state, ws, channel, requester, message, seq, &body, &attest);
+    send.routing = requested;
+    let candidates = load_mention_candidates_in_tx(conn, ws, channel).await?;
+    let agent = candidates
+        .iter()
+        .find(|a| a.member_id == target)
+        .ok_or(sqlx::Error::RowNotFound)?;
+    let DeliveryGate::Open {
+        hosted_connection_id,
+    } = delivery_gate(agent, &send)
+    else {
+        return Err(sqlx::Error::Protocol("admitted agent failed delivery gate".into()).into());
+    };
+    let trigger = MentionTrigger {
+        workspace_id: ws,
+        channel_id: channel,
+        message_id: message,
+        message_seq: seq,
+        author_member_id: requester,
+        body: &body,
+        hlc_ts: send.hlc_ts,
+    };
+    let routing = resolve_mention_routing(agent, requested)
+        .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+    enqueue_turn_in_tx(
+        conn,
+        &send,
+        &trigger,
+        agent,
+        Turn {
+            trigger: RunTrigger::Mention {
+                message_id: message,
+                agent_member_id: target,
+            },
+            addressing: Addressing::Mention,
+            requested,
+            wake_reason: None,
+            queued_action: MENTION_QUEUED_ACTION,
+            announce_offline_queue: false,
+        },
+        hosted_connection_id,
+        &routing,
+        &mut None,
     )
     .await?;
     Ok(())

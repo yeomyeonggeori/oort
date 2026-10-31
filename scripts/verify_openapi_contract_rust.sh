@@ -1348,7 +1348,7 @@ else:
     if set(content) != {"application/json"}:
         errors.append("Agent Port request media type must be exactly application/json")
     responses = post.get("responses") or {}
-    expected_statuses = {"200", "202", "400", "401", "403", "413", "415", "429", "500"}
+    expected_statuses = {"200", "202", "400", "401", "403", "408", "413", "415", "429", "500"}
     if set(responses) != expected_statuses:
         errors.append(
             "Agent Port response status set drifted: "
@@ -1356,6 +1356,8 @@ else:
         )
     if (responses.get("202") or {}).get("content"):
         errors.append("Agent Port 202 notification response must be body-less")
+    if (responses.get("408") or {}).get("content"):
+        errors.append("Agent Port 408 large-body read deadline must be body-less")
     if (responses.get("401") or {}).get("$ref") != "#/components/responses/AgentPortUnauthorized":
         errors.append("Agent Port 401 must use the dedicated empty bearer challenge")
     if (responses.get("403") or {}).get("$ref") != "#/components/responses/AgentPortForbidden":
@@ -2268,6 +2270,22 @@ if [ "$(response_header Cache-Control)" != "no-store" ] || \
 fi
 record_sample agent-credential-create post \
   "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials" 201
+
+# #4781: keep the cost contract covered by the real response-shape gate.
+sample usage-agents get \
+  "/v1/workspaces/{workspaceId}/usage/agents" \
+  "/v1/workspaces/$WS/usage/agents" 200 "" "$ACCESS"
+sample usage-summary get \
+  "/v1/workspaces/{workspaceId}/usage/summary" \
+  "/v1/workspaces/$WS/usage/summary" 200 "" "$ACCESS"
+sample agent-subscription-fee put \
+  "/v1/workspaces/{workspaceId}/agents/{agentMemberId}/subscription-fee" \
+  "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/subscription-fee" 200 \
+  '{"monthlyMicroUsd":30000000,"label":"External plan"}' "$ACCESS"
+sample agent-subscription-fee-clear put \
+  "/v1/workspaces/{workspaceId}/agents/{agentMemberId}/subscription-fee" \
+  "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/subscription-fee" 200 \
+  '{"monthlyMicroUsd":null}' "$ACCESS"
 
 sample agent-credential-list get \
   "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials" \
@@ -4472,6 +4490,15 @@ expect agent-credential-revoke-replay post \
   200 '{"reason":"openapi rust gate complete"}' "$ACCESS"
 guard_jq '.revokedNow == false and .alreadyRevoked == true' \
   "credential revoke replay is idempotent"
+
+# ADR-0218 appendix A — same running deployment image, including binary media
+# and a completed self-uploaded attachment. Credential stays in the gate's
+# registered private file; the sampler only retains expression response data.
+set_curl_bearer "$ACCESS"
+"$PYTHON_BIN" "$SCRIPT_DIR/sample_expression_contract.py" \
+  --base-url "$BASE_URL" --workspace "$WS" --channel "$GENERAL_CHANNEL_ID" \
+  --auth-config "$CURL_AUTH_CONFIG" --out-dir "$TMP_DIR/expression-samples" \
+  --manifest "$MANIFEST"
 
 # 로그아웃은 자기가 쓴 자격증명을 죽이므로 정말 마지막이다.
 sample logout post "/v1/auth/logout" "/v1/auth/logout" 200 \

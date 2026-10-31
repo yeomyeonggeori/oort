@@ -1003,6 +1003,51 @@ describe("요청 묶음", () => {
     expect(line).toMatchObject({ kind: "tool", title: "거부", status: "cancelled", frame: { outcome: "거부됐어요" } });
   });
 
+  // ADR-0218 G3.8, #4914. The six sentences are typed out by hand so this table is the witness,
+  // the same way the web card test and the golden's own test do.
+  it.each([
+    ["generation_failed", "그림을 만들지 못했어요"],
+    ["assembly_source_invalid", "이 그림에는 움직임을 입힐 수 없어요"],
+    ["assembly_source_too_large", "그림이 너무 커서 움직임을 입힐 수 없어요"],
+    ["assembly_output_too_large", "움직이는 그림이 너무 커요"],
+    ["assembly_timeout", "움직임을 입히다가 시간이 다 됐어요"],
+    ["assembly_busy", "지금 다른 그림을 처리하고 있어요. 잠시 뒤에 다시 해 주세요"],
+  ])("%s로 닫힌 카드는 골든 줄이 상태 문장보다 앞서고 상태와 얼굴은 그대로다", (code, line) => {
+    for (const action_type of ["tool_call", "workspace_action"]) {
+      const extra = action_type === "workspace_action" ? { action: { id: "channel.create", rows: [] } } : {};
+      for (const [status, state, word] of [
+        ["cancelled", "cancelled", "취소"], ["rejected", "declined", "거부"], ["expired", "expired", "만료"], ["failed", "failed", "실패"],
+      ] as const) {
+        const model = agentRequestBundle(message({ ...extra, action_type, status, code }), context)!;
+        expect(model, `${action_type}/${status}`).toMatchObject({ state, word, sentence: line, canDecide: false });
+        // The sentence replaces the generic one and does not add to it.
+        expect(model.sentence).not.toBe(agentRequestBundle(message({ ...extra, action_type, status }), context)!.sentence);
+      }
+    }
+    // Only a closed card says it. The same card while it asks for a decision, or after an approval
+    // that is still being carried out, keeps the sentence of that state.
+    const waiting = agentRequestBundle(message({ status: "pending", code }), context)!;
+    expect(waiting.state).toBe("approval");
+    expect(waiting.sentence).not.toBe(line);
+    expect(agentRequestBundle(message({ status: "approved", code }), context)).toMatchObject({ state: "executing", sentence: "승인됐어요 · 이어서 하는 중" });
+  });
+
+  it("표현 실패 코드가 아닌 닫힌 카드의 문장과 상태는 코드 없는 같은 카드와 같다", () => {
+    // `assembly_params_invalid` is a call error that never becomes a card; the rest are not codes at all.
+    for (const code of ["assembly_params_invalid", "a_future_code", "constructor", "__proto__", "toString", ""]) {
+      for (const status of ["cancelled", "rejected", "expired", "failed"]) {
+        const plain = agentRequestBundle(message({ status, decided_by: "human" }), context)!;
+        const coded = agentRequestBundle(message({ status, decided_by: "human", code }), context)!;
+        expect({ state: coded.state, sentence: coded.sentence }, `${code}/${status}`).toEqual({ state: plain.state, sentence: plain.sentence });
+      }
+    }
+    // A settlement code keeps the sentence it always had, with the decider's name.
+    expect(agentRequestBundle(message({ status: "rejected", code: "approval_rejected", decided_by: "human" }), context)).toMatchObject({ state: "declined", sentence: "김인턴 님이 거부했어요" });
+    expect(agentRequestBundle(message({ status: "expired", code: "approval_expired" }), context)).toMatchObject({ state: "expired", sentence: "승인을 기다리다 만료됐어요" });
+    // The server's own one line on a finished card still comes first.
+    expect(agentRequestBundle(message({ status: "failed", code: "assembly_busy", result: { status: "failed", line: "소개를 바꾸지 못했어요" } }), context)).toMatchObject({ state: "failed", sentence: "소개를 바꾸지 못했어요" });
+  });
+
   it("문장이 머리이고 값 칩 둘·넘친 수·조용한 줄·관리자에게만 원장 번호를 낸다", () => {
     const model = agentRequestBundle(message({ intent: "소개를 바꾸려고 해요", expires_at_ms: nowMs + 23 * 3_600_000,
       action: { id: "agent.profile.update", rows: [
@@ -1091,5 +1136,33 @@ describe("요청 묶음", () => {
       expect(particleFor(value, "object")).toBe(object);
       expect(directionParticle(value)).toBe(direction);
     }
+  });
+});
+
+describe("terminal approval card (#3982)", () => {
+  it.each([
+    ["rejected", "approval_rejected", "거부됐어요"],
+    ["expired", "approval_expired", "승인을 기다리다 만료됐어요"],
+    ["cancelled", "human_cancelled", "요청을 멈췄어요"],
+  ])("renders %s from its code on the same card", (status, code, summary) => {
+    const card = agentCardModel(msg({type: "approval_request", props: approvalProps({
+      status, code, summary: "old untranslated server sentence"
+    })}));
+    expect(card?.kind).toBe("approval");
+    if (card?.kind !== "approval") throw new Error("approval card required");
+    expect(card.status).toBe(status);
+    expect(card.summary).toBe(summary);
+  });
+  it("shows the action's result sentence and preserves a body-only fallback", () => {
+    const card = agentCardModel(msg({type: "approval_request", props: approvalProps({
+      status: "approved", code: "approval_approved",
+      result: {status: "executed", line: "소개를 바꿨어요"}
+    })}));
+    expect(card?.kind).toBe("approval");
+    if (card?.kind !== "approval") throw new Error("approval card required");
+    expect(card.summary).toBe("소개를 바꿨어요");
+    const legacy = agentCardModel(msg({type: "approval_request", props: approvalProps({status: "approved"})}));
+    if (legacy?.kind !== "approval") throw new Error("approval card required");
+    expect(card.detail.withheld).toBe(legacy.detail.withheld);
   });
 });

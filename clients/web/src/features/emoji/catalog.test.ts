@@ -11,7 +11,7 @@ import {
 } from "./catalog";
 
 const raw = JSON.parse(
-  readFileSync(fileURLToPath(new URL("./emojiCatalog.json", import.meta.url)), "utf8")
+  readFileSync(fileURLToPath(new URL("../../../../../packages/momo-core/src/features/emoji/emojiCatalog.json", import.meta.url)), "utf8")
 ) as Parameters<typeof parseCatalog>[0];
 
 describe("extracted emoji catalog", () => {
@@ -19,7 +19,7 @@ describe("extracted emoji catalog", () => {
 
   it("stays under the 120kB gzip budget", () => {
     const bytes = gzipSync(
-      readFileSync(fileURLToPath(new URL("./emojiCatalog.json", import.meta.url)))
+      readFileSync(fileURLToPath(new URL("../../../../../packages/momo-core/src/features/emoji/emojiCatalog.json", import.meta.url)))
     ).length;
     expect(bytes).toBeGreaterThan(20_000);
     expect(bytes).toBeLessThanOrEqual(120 * 1024);

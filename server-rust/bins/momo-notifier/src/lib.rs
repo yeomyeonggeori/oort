@@ -800,6 +800,11 @@ impl Notifier {
                                         shares.config.claim_batch_size,
                                     )
                                     .await;
+                                    // ADR-0218 D2: restart-safe draft byte TTL sweep,
+                                    // using this tick's existing NOBYPASSRLS pool.
+                                    if let Err(error) = momo_expressions::sweep_expired(&shares.pool, &write_pool).await {
+                                        tracing::error!(%error, "expression draft reclamation failed");
+                                    }
                                     // ADR-0200 D2 (#3744): the run event ledger, 30 days after
                                     // the run finished. Same tick, same RLS-bound pool, and it
                                     // also runs when the others fail.

@@ -110,12 +110,12 @@ const GATE: ApprovalGate = {
 };
 
 function renderCard(props: {
+  viewerMemberId?: string;
   message?: Message;
   gates?: ReadonlyMap<string, ApprovalGate>;
   receipts?: ReadonlyMap<string, ApprovalReceipt>;
   offline?: boolean;
   approvalsProvided?: boolean;
-  viewerMemberId?: string;
   run?: AgentRunProgress;
 }) {
   const client = new QueryClient({
@@ -221,6 +221,44 @@ describe('요청 묶음 카드', () => {
     const view = renderCard({gates});
     expect(view.queryByTestId('request-bundle-card')).toBeNull();
     expect(view.getByTestId('agent-card')).toBeTruthy();
+  });
+  // ADR-0218 G3.8, #4914: 폰은 웹과 같은 코어 모델을 읽으므로 같은 줄을 말해요. 여섯 줄은 손으로 적어
+  // 표가 증인이 되게 해요.
+  const exact = (text: string) =>
+    new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+  it.each([
+    ['generation_failed', '그림을 만들지 못했어요'],
+    ['assembly_source_invalid', '이 그림에는 움직임을 입힐 수 없어요'],
+    ['assembly_source_too_large', '그림이 너무 커서 움직임을 입힐 수 없어요'],
+    ['assembly_output_too_large', '움직이는 그림이 너무 커요'],
+    ['assembly_timeout', '움직임을 입히다가 시간이 다 됐어요'],
+    ['assembly_busy', '지금 다른 그림을 처리하고 있어요. 잠시 뒤에 다시 해 주세요'],
+  ])('표현 실패 코드 %s로 닫힌 묶음 카드는 코어의 골든 줄을 말하고 결정 단추가 없어요', (code, line) => {
+    for (const [status, state, word] of [
+      ['cancelled', 'cancelled', '취소'], ['rejected', 'declined', '거부'], ['expired', 'expired', '만료'],
+    ]) {
+      const view = renderCard({message: modern({approval_status: status, action_type: 'tool_call', code}), gates, viewerMemberId: SELF});
+      expect(view.getByTestId(`request-state-${state}`)).toHaveTextContent(word);
+      expect(view.getByTestId('request-bundle-sentence')).toHaveTextContent(exact(line));
+      expect(view.queryByTestId('card-approval-ap-1-approve')).toBeNull();
+      view.unmount();
+    }
+    // 같은 카드가 아직 결정을 묻는 중이면 줄 없이 결정 단추가 서요.
+    const waiting = renderCard({message: modern({approval_status: 'pending', action_type: 'tool_call', code}), gates, viewerMemberId: SELF});
+    expect(waiting.queryByTestId('request-bundle-sentence')).toBeNull();
+    expect(waiting.getByTestId('card-approval-ap-1-approve')).toBeTruthy();
+  });
+  it('표현 실패 코드가 아닌 닫힌 묶음 카드는 상태 문장 그대로예요', () => {
+    for (const code of [undefined, 'assembly_params_invalid', 'a_future_code']) {
+      const view = renderCard({message: modern({approval_status: 'cancelled', action_type: 'tool_call', code}), gates, viewerMemberId: SELF});
+      expect(view.getByTestId('request-bundle-sentence')).toHaveTextContent(exact('요청이 취소됐어요'));
+      view.unmount();
+    }
+  });
+  it('묶음 필드가 없는 실패 카드는 현행 카드가 같은 골든 줄을 요약으로 말해요', () => {
+    const view = renderCard({message: card({approval_status: 'cancelled', code: 'assembly_output_too_large'}), gates});
+    expect(view.queryByTestId('request-bundle-card')).toBeNull();
+    expect(view.getByText('움직이는 그림이 너무 커요')).toBeTruthy();
   });
 });
 
@@ -864,5 +902,22 @@ describe('B-1 — 판정 입력 셋이 각자 다른 사실을 나른다', () =>
     for (const key of ['settled:', 'hasTarget:', 'pendingHere:']) {
       expect(code).toContain(key);
     }
+  });
+});
+
+
+describe('DM admission names the person whose consent this card requires', () => {
+  const message = card({action: {id: 'dm.agent.admit', rows: [], required_role: 'dm_participant', target_member_id: SELF}});
+  it('another viewer waits without approval controls', () => {
+    const view = renderCard({message, gates: new Map([['ap-1', GATE]]), viewerMemberId: AGENT});
+    // #4920: 카드는 고정된 결정자의 이름으로 말한다. 요청자·결정자·다른 참여자 시점과 묶음 카드 갈래는
+    // dmAdmissionCard.test.tsx가 잰다.
+    expect(view.getByText('곽성재 님의 허락을 기다려요')).toBeTruthy();
+    expect(view.queryByText(/표시된 참여자/u)).toBeNull();
+    expect(view.queryByTestId('card-approval-ap-1-approve')).toBeNull();
+  });
+  it('the named human can decide on the existing approval control', () => {
+    const view = renderCard({message, gates: new Map([['ap-1', GATE]]), viewerMemberId: SELF});
+    expect(view.getByTestId('card-approval-ap-1-approve')).toBeTruthy();
   });
 });

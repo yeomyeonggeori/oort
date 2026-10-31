@@ -84,6 +84,15 @@ services:
       drive-init:
         condition: service_completed_successfully
 
+  # #4791: image proposal preparation only reads attachments. The worker cannot
+  # overwrite the archive; the API remains its sole file writer.
+  agent-worker:
+    volumes:
+      - drive-archive:${MOMO_DRIVE_LOCAL_DIR:-/var/lib/oort/drive}:ro
+    depends_on:
+      drive-init:
+        condition: service_completed_successfully
+
   # SPA 스테이징 원샷. 이미지 안의 dist를 볼륨으로 **교체 복사**한다(merge 아님):
   # 다운그레이드가 새 청크를 남겨 두면 낡은 index.html이 없는 파일을 부른다.
   web-init:

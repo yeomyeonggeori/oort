@@ -331,6 +331,19 @@ pub struct AppState {
     /// ADR-0170 — the only object in this process that can GET a remote URL.
     /// Default is the SSRF-guarded transport. Tests inject a loopback client.
     pub unfurl_http: Arc<dyn momo_unfurl::UnfurlHttp>,
+    /// `MOMO_UNFURL_ENABLED == 1` at start-up: the instance's switch for every request this
+    /// server makes to an outside address on someone's behalf (ADR-0170 D3). The expression
+    /// link import honours it (ADR-0218 D5, planner decision 3).
+    pub unfurl_enabled: bool,
+    /// ADR-0218 G3.5 (#4820 C1b): where `oort_expression_assemble` runs the motion assembler
+    /// child from. `None` is the production answer: resolved per call from
+    /// `OORT_EXPRESSION_ASSEMBLER`, else beside this executable (like the decoder). A test sets
+    /// a path here instead of the process-wide variable, which concurrent tests would race on.
+    pub assembler_program: Option<Arc<std::path::PathBuf>>,
+    /// The longest an authenticated Agent Port caller may take to send the 6 MiB
+    /// `expression.create` body (#4829): `routes::agent_port::LARGE_BODY_DEADLINE` unless a
+    /// test shortens it. The ordinary 64 KiB body has no such deadline.
+    pub large_body_deadline: std::time::Duration,
     pub unfurl_cache: Arc<momo_unfurl::ImageCache>,
     /// #2960 — 「연결 확인」: the only object in this process that can call a
     /// provider, and all it can do is one guarded read-only GET per hop
@@ -385,6 +398,9 @@ impl AppState {
             ephemeral_grant_key: Arc::new(ephemeral_grant_key),
             turn: None,
             unfurl_http: Arc::new(momo_unfurl::SafeUnfurlTransport::production(false)),
+            unfurl_enabled: momo_unfurl::enabled_from_env(),
+            assembler_program: None,
+            large_body_deadline: routes::agent_port::LARGE_BODY_DEADLINE,
             unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
             provider_probe: Arc::new(routes::provider_link::ProviderProbeState::new(Arc::new(
                 momo_provider_probe::GuardedProviderProbe::new(
@@ -469,6 +485,24 @@ impl AppState {
     }
 
     /// Replace the unfurl HTTP hop (conformance tests with a mock origin).
+    pub fn with_unfurl_enabled(mut self, enabled: bool) -> Self {
+        self.unfurl_enabled = enabled;
+        self
+    }
+
+    /// Run the motion assembler from `program` instead of resolving it per call
+    /// (conformance tests: a built binary, or a path that does not exist).
+    pub fn with_assembler_program(mut self, program: impl Into<std::path::PathBuf>) -> Self {
+        self.assembler_program = Some(Arc::new(program.into()));
+        self
+    }
+
+    /// Shorten (conformance tests) the time an Agent Port caller has for the 6 MiB body.
+    pub fn with_large_body_deadline(mut self, deadline: std::time::Duration) -> Self {
+        self.large_body_deadline = deadline;
+        self
+    }
+
     pub fn with_unfurl_http(mut self, http: Arc<dyn momo_unfurl::UnfurlHttp>) -> Self {
         self.unfurl_http = http;
         self
@@ -718,6 +752,46 @@ pub fn build_app(state: AppState) -> Router {
         axum::middleware::from_fn_with_state((state.clone(), surface), rate_limit::member_write)
     };
     let protected = Router::new()
+        .route(
+            "/v1/workspaces/{ws}/expressions",
+            get(routes::expressions::list).post(routes::expressions::activate),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/uploads",
+            post(routes::expressions::upload).layer(axum::extract::DefaultBodyLimit::max(momo_expressions::REQUEST_BYTES)),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/from-attachment",
+            post(routes::expressions::from_attachment),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/import",
+            post(routes::expressions::import),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expression-drafts/{draftId}",
+            get(routes::expressions::get_draft),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expression-drafts/{draftId}/file",
+            put(routes::expressions::replace).layer(axum::extract::DefaultBodyLimit::max(momo_expressions::REQUEST_BYTES)),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expression-drafts/{draftId}/image",
+            get(routes::expressions::draft_image),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/{id}",
+            patch(routes::expressions::patch).delete(routes::expressions::delete),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/{id}/image",
+            get(routes::expressions::expression_image),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/{id}/report",
+            post(routes::expressions::report),
+        )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/messages",
             // ADR-0216 D4 · R12 (#4660): the developer-token body allow-list, on the send
@@ -1897,6 +1971,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/usage/summary",
             get(routes::usage::summary),
         )
+        .route(
+            "/v1/workspaces/{ws}/usage/agents",
+            get(routes::usage::agents),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/subscription-fee",
+            put(routes::usage::put_subscription_fee),
+        )
         // #1222 (T13) — the two webhook families, both workspace owner/admin.
         //
         // They are mounted together because they are one decision surface even
@@ -1988,6 +2070,10 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/event-subscriptions/{subscription}",
             put(routes::event_subscriptions::update).delete(routes::event_subscriptions::delete),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/channels/{channel}/dm-agents/{agent}",
+            axum::routing::delete(routes::dm_agents::remove),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -2197,6 +2283,26 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/hooks/{token}",
             post(routes::webhook_ingress::receive_slack),
+        )
+        // #4820 C2a — the address the co-hosted Hermes picture tool downloads (ADR-0218 증보 G4·G8).
+        // Public by construction: the caller is Hermes and holds no oort credential; the one-time,
+        // hash-only, five-minute token in the path is the only authority, and the path's workspace
+        // is the tenant the token is looked up in. axum serves HEAD with the GET handler, which would
+        // spend the token with the body dropped, so the handler itself answers 405 to anything but GET.
+        // Its own budget per (address, path workspace) and an address-wide ceiling above it (so a
+        // caller cannot walk around the first by rotating the workspace), both spent only by the
+        // route's one 404.
+        .route(
+            "/v1/self-media/{ws}/{token}",
+            get(routes::self_media::serve)
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    rate_limit::per_ip_self_media,
+                ))
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    rate_limit::per_ip_self_media_ceiling,
+                )),
         )
         .merge(protected)
         .merge(human_mcp);

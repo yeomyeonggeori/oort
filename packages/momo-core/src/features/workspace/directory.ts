@@ -115,10 +115,40 @@ export function dmPeer(
   selfMemberId: string
 ): RosterMember | null {
   if (channel.kind !== "dm") return null;
+  if ((channel.memberIds ?? []).length !== 2) return null;
   const other = (channel.memberIds ?? []).find(
     (id) => idKey(id) !== idKey(selfMemberId)
   );
   return memberFor(directory, other);
+}
+
+/**
+ * 셋 이상이 든 DM의 참여자 사실(ADR-0217: 모든 사람의 허락으로 에이전트가 들어와 그룹이 된 대화).
+ *
+ * `dmPeer`가 null이라는 사실만으로는 「그룹」과 「명부를 아직 못 받음」을 가를 수 없어서(둘 다 상대를 못 고른다) 인원은
+ * 따로 센다. 판정은 머리 이름(`channelLabelParts`의 「… · N명」)이 쓰는 것과 **같은 것**(`memberIds.length > 2`)이고 수도
+ * 같은 `memberIds.length`다: 머리가 3명이라 말하는데 소개 문구가 둘이라 말하는 일이 구조적으로 없다.
+ */
+export interface DmGroupFacts {
+  /** 활성 참여자 전체(나 포함, 에이전트 포함). 채널 DTO의 `memberIds`는 활성 전체다. */
+  count: number;
+  /** 그중 명부로 에이전트임을 아는 수. 명부에 없는 멤버는 세지 않는다: 모르는 것을 에이전트라 부르지 않는다. */
+  agentCount: number;
+}
+
+/** 셋 이상 DM이면 그 사실, 실제 1:1(둘 이하)이거나 DM이 아니면 null이다(그쪽은 `dmPeer`가 말한다). */
+export function dmGroupFacts(
+  channel: Channel,
+  directory: Directory
+): DmGroupFacts | null {
+  if (channel.kind !== "dm") return null;
+  const ids = channel.memberIds ?? [];
+  if (ids.length <= 2) return null;
+  return {
+    count: ids.length,
+    agentCount: ids.filter((id) => memberFor(directory, id)?.kind === "agent")
+      .length,
+  };
 }
 
 /**
@@ -129,12 +159,9 @@ export function dmPeer(
  * written clause for clause against it so the composer never promises something
  * the send path will not do.
  *
- * Two deliberate differences from [`dmPeer`], both of which are the rule rather
- * than a refinement of it:
- *   * `length !== 1` instead of "the first other id" — a group DM is back to
- *     "who did you mean", and `dmPeer` answering with one of three would put the
- *     hint on a channel that ignores it;
- *   * `kind === "agent"` — a human counterpart does not run.
+ * Like [`dmPeer`], this requires an actual pair. The sender must be a human
+ * participant and the counterpart an active agent; a consented group keeps
+ * explicit mentions even when it contains only one agent.
  *
  * The server stays the authority. This is what the client can see of the same
  * decision, which is why the result is a hint and never a control.
@@ -145,11 +172,14 @@ export function dmAutoReplyAgent(
   selfMemberId: string
 ): RosterMember | null {
   if (channel.kind !== "dm") return null;
-  const others = (channel.memberIds ?? []).filter(
-    (id) => idKey(id) !== idKey(selfMemberId)
-  );
-  if (others.length !== 1) return null;
-  const peer = memberFor(directory, others[0]);
+  const memberIds = channel.memberIds ?? [];
+  if (
+    memberIds.length !== 2 ||
+    !memberIds.some((id) => idKey(id) === idKey(selfMemberId))
+  )
+    return null;
+  if (memberFor(directory, selfMemberId)?.kind !== "human") return null;
+  const peer = dmPeer(channel, directory, selfMemberId);
   if (!peer || peer.kind !== "agent" || peer.status !== "active") return null;
   return peer;
 }
@@ -158,6 +188,7 @@ export function dmAutoReplyAgent(
 export type ChannelLabelKind =
   | "channel"
   | "peer"
+  | "group"
   | "self"
   | "pending"
   | "gone";
@@ -237,6 +268,13 @@ export function channelLabelParts(
       isAgent: false,
       kind: "channel",
     };
+  }
+  if ((channel.memberIds ?? []).length > 2) {
+    const names = (channel.memberIds ?? [])
+      .filter((id) => idKey(id) !== idKey(selfMemberId))
+      .map((id) => memberNameParts(directory, id, missingMemberLabel(directory)))
+      .map((part) => part.handle ? `${part.name} ${part.handle}` : part.name);
+    return { text: `${names.join(", ")} · ${channel.memberIds!.length}명`, handle: null, isAgent: false, kind: "group" };
   }
   const member = dmPeer(channel, directory, selfMemberId);
   if (member) {

@@ -1,3 +1,5 @@
+import {AgentUsageStatus, useAgentUsage} from '../features/agents/AgentUsage';
+import {AGENT_USAGE_COPY, agentUsageLine, usageForAgent} from '@momo/core/features/settings/agentUsage';
 import React, {useCallback, useMemo} from 'react';
 import {FlatList, Pressable, StyleSheet, Text, View} from 'react-native';
 import {
@@ -121,6 +123,7 @@ export default function AgentsScreen({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {workspaceId} = useSession();
+  const usageQuery = useAgentUsage(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
   const channelsQuery = useChannels(workspaceId);
   const sessionsQuery = useWorkSessions(workspaceId);
@@ -180,11 +183,12 @@ export default function AgentsScreen({
   const refetchDirectory = directoryQuery.refetch;
   const refetchChannels = channelsQuery.refetch;
   const refetchSessions = sessionsQuery.refetch;
+  const refetchUsage = usageQuery.refetch;
   const {refreshControl, scrollProps, notice} = usePullRefresh(
     useCallback(
       () =>
-        Promise.all([refetchDirectory(), refetchChannels(), refetchSessions()]),
-      [refetchDirectory, refetchChannels, refetchSessions],
+        Promise.all([refetchDirectory(), refetchChannels(), refetchSessions(), refetchUsage()]),
+      [refetchDirectory, refetchChannels, refetchSessions, refetchUsage],
     ),
     'agents-refresh',
     {active},
@@ -228,6 +232,7 @@ export default function AgentsScreen({
 
       {/* 당겨서 새로고침이 실패했다는 한 줄(#3992). 시간으로 사라지지 않는다. */}
       {notice}
+      <AgentUsageStatus />
 
       {loading ? (
         <LoadingState
@@ -258,6 +263,10 @@ export default function AgentsScreen({
           renderItem={({item}) => (
             <Row
               row={item}
+              usage={usageQuery.isError || !usageQuery.data ? null : (() => {
+                const row = usageForAgent(usageQuery.data, item.memberId);
+                return row ? agentUsageLine(row, directoryQuery.directory.members.find(member => member.id.toLowerCase() === item.memberId.toLowerCase())?.brain) : null;
+              })()}
               directory={directoryQuery.directory}
               turn={agentTurnBadgeCopy(
                 agentTurnsForMember(signals, item.memberId, nowMs),
@@ -284,12 +293,14 @@ export default function AgentsScreen({
 
 function Row({
   row,
+  usage,
   directory,
   turn,
   railLive,
   onPress,
 }: {
   row: AgentRow;
+  usage: string | null;
   directory: Directory;
   /** The one open turn this agent has, in words, or null when it has none. */
   turn: ReturnType<typeof agentTurnBadgeCopy>;
@@ -319,7 +330,7 @@ function Row({
     : base;
   return (
     <TapRow
-      accessibilityLabel={label}
+      accessibilityLabel={usage ? `${label}, ${AGENT_USAGE_COPY.title}: ${usage}` : label}
       onPress={onPress}
       testID={`agent-row-${row.memberId}`}>
       {/* The same mark the sidebar uses for an agent: the agent colour, on a
@@ -342,6 +353,7 @@ function Row({
         <Text style={styles.rowMeta} numberOfLines={2}>
           {agentRowMeta(row)}
         </Text>
+        {usage && <Text style={styles.rowMeta}>{AGENT_USAGE_COPY.title}: {usage}</Text>}
         {/* 「활성」 같은 연결 상태가 아니라 지금 살아 있는가. 서버가 모르는 에이전트에는
             아무것도 서지 않는다. */}
         <AgentLivenessLabel

@@ -1,0 +1,31 @@
+appId: app.momo.ios
+name: 4322-emoji-picker-live
+---
+# Stack validation only. Launch the existing SHEETKIT-MESSAGE-LIVE measure surface.
+# Run on 16 Pro and SE, light/dark; the worker does not launch a simulator or capture.
+# The log checks that picking closes the real sheet and calls the reaction once.
+- extendedWaitUntil:
+    visible:
+      id: "all-reactions"
+    timeout: 60000
+- tapOn:
+    id: "all-reactions"
+- assertVisible:
+    id: "emoji-search"
+- tapOn:
+    id: "emoji-picker-close"
+- assertVisible:
+    id: "quick-reactions"
+- tapOn:
+    id: "all-reactions"
+- tapOn:
+    id: "emoji-search"
+- inputText: ":thumbsup:"
+- pressKey: Enter
+- tapOn:
+    id: "emoji-tone-3"
+- tapOn:
+    id: "emoji-pick-👍️"
+- extendedWaitUntil:
+    visible: "기록: close,react"
+    timeout: 10000

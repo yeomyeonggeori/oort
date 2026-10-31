@@ -724,6 +724,42 @@ describe("empty surface copy", () => {
     expect(copy.secondary).toBeNull();
   });
 
+  // #4912 (S3 묶음 검증 R3). ADR-0217 뒤로 DM은 셋 이상이 될 수 있는데 소개 문구는 「둘만 봅니다. 참여자는 이 둘로
+  // 고정됩니다.」 한 벌이었다: 에이전트가 모두의 허락으로 들어온 3명 대화에서 사실과 다른 프라이버시 문구다.
+  // `peer`가 null인 까닭이 둘(그룹, 명부 대기)이라서 인원은 `peer`와 따로 받는다.
+  const PAIR_DETAIL = "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다.";
+  it("never tells a group DM that two people see it or that the pair is fixed", () => {
+    for (const group of [{ count: 3, agentCount: 1 }, { count: 3, agentCount: 0 }, { count: 4, agentCount: 2 }]) {
+      const copy = emptyChannelCopy("dm", null, group);
+      expect(copy.surface).toBe("dm");
+      expect(copy.detail).not.toContain("둘");
+      expect(copy.detail).not.toContain("고정");
+      expect(copy.detail).toContain(`${group.count}명`);
+      expect(copy.detail).not.toBe(PAIR_DETAIL);
+    }
+  });
+
+  it("says what an agent in the group reads, and says nothing about agents when none is known", () => {
+    expect(emptyChannelCopy("dm", null, { count: 3, agentCount: 1 }).detail).toBe(
+      "여기 쓴 메시지는 이 대화에 있는 3명이 함께 봅니다. 에이전트는 이 대화에 들어온 뒤에 쓴 글만 봅니다."
+    );
+    expect(emptyChannelCopy("dm", null, { count: 3, agentCount: 0 }).detail).toBe(
+      "여기 쓴 메시지는 이 대화에 있는 3명이 함께 봅니다."
+    );
+  });
+
+  it("keeps the two-person copy exactly as it was: a pair, an unloaded roster, no group facts at all", () => {
+    for (const group of [undefined, null, { count: 2, agentCount: 0 }, { count: 2, agentCount: 1 }, { count: 1, agentCount: 0 }]) {
+      expect(emptyChannelCopy("dm", { displayName: "곽성재", kind: "human" }, group).detail).toBe(PAIR_DETAIL);
+      expect(emptyChannelCopy("dm", { displayName: "김인턴", kind: "agent" }, group).detail).toBe(PAIR_DETAIL);
+      expect(emptyChannelCopy("dm", null, group).detail).toBe(PAIR_DETAIL);
+    }
+  });
+
+  it("ignores group facts outside a DM", () => {
+    expect(emptyChannelCopy("public", null, { count: 3, agentCount: 1 })).toEqual(emptyChannelCopy("public", null));
+  });
+
   it("keeps the channel copy honest about who reads it later", () => {
     // 혼자 있는 사람이 실제로 망설이는 지점("나 혼자인데 지금 써도 되나")에 답하는
     // 문장이고, 그 답의 근거는 서버 질의다: 채널 히스토리에 가입 시각 절이 없어서
@@ -735,7 +771,7 @@ describe("empty surface copy", () => {
     expect(copy.detail).toContain("같은 자격");
   });
 
-  it("writes no em-dash into any of the four copies, labels included", () => {
+  it("writes no em-dash into any of the empty-surface copies, labels included", () => {
     // 채워 넣는 말(hype)은 여기서 다시 세지 않는다: 그 규칙의 자는
     // `scripts/design_preflight_web.sh`이고, 코어 문자열이 그 스캐너의 사정
     // 범위다. 금지어를 이 파일에 다시 적으면 그 스캐너가 **이 줄을** 위반으로
@@ -744,6 +780,8 @@ describe("empty surface copy", () => {
       emptyChannelCopy("dm", { displayName: "곽성재", kind: "human" }),
       emptyChannelCopy("dm", { displayName: "김인턴", kind: "agent" }),
       emptyChannelCopy("dm", null),
+      emptyChannelCopy("dm", null, { count: 3, agentCount: 1 }),
+      emptyChannelCopy("dm", null, { count: 3, agentCount: 0 }),
       emptyChannelCopy("public", null),
     ];
     for (const copy of copies) {

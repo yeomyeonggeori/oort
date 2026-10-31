@@ -173,6 +173,7 @@ COPY server-rust/crates/momo-egress/Cargo.toml crates/momo-egress/
 COPY server-rust/crates/momo-embed/Cargo.toml crates/momo-embed/
 COPY server-rust/crates/momo-github/Cargo.toml crates/momo-github/
 COPY server-rust/crates/momo-ephemeral/Cargo.toml crates/momo-ephemeral/
+COPY server-rust/crates/momo-expressions/Cargo.toml crates/momo-expressions/
 COPY server-rust/crates/momo-messaging/Cargo.toml crates/momo-messaging/
 COPY server-rust/crates/momo-mcp/Cargo.toml crates/momo-mcp/
 COPY server-rust/crates/momo-outbox/Cargo.toml crates/momo-outbox/
@@ -203,8 +204,12 @@ RUN set -eux; \
       : > "$dir/src/lib.rs"; \
       printf 'fn main() {}\n' > "$dir/src/main.rs"; \
     done; \
+    # `momo-expression-assembler` is deliberately NOT named in this stub-stage build: its target
+    # file (`src/bin/…`) does not exist among the stubs, and cargo refuses to resolve a selected
+    # `--bin` whose file is missing. It adds no dependency beyond the decoder's crate, so the
+    # dependency cache is the same; the real build below names it.
     cargo build --release --locked \
-      --bin momo-server --bin momo-relay --bin momo-agent-worker \
+      --bin momo-server --bin momo-relay --bin momo-agent-worker --bin momo-expression-decoder \
       --bin momo-webhook-sender --bin momo-migrate --bin momo-notifier \
       --bin momo-push-relay; \
     find crates bins -name '*.rs' -delete
@@ -213,6 +218,10 @@ RUN set -eux; \
 # committed Cargo.lock: a build can never silently resolve a different version.
 COPY server-rust/crates crates
 COPY server-rust/bins bins
+COPY packages/momo-core/src/features/emoji/emojiCatalog.json ../packages/momo-core/src/features/emoji/emojiCatalog.json
+# The hosted door's failure-card sentences are the client's golden file, read by
+# `momo-workspace-actions` at compile time (ADR-0218 G3.8, #4911). Only that one file.
+COPY packages/momo-core/src/features/approvals/expression-failure-copy.json ../packages/momo-core/src/features/approvals/expression-failure-copy.json
 RUN set -eux; \
     # cargo rebuild detection is mtime-based and COPY'd files can carry stale
     # timestamps, so the stub-compiled (empty) workspace rlibs would be reused
@@ -221,10 +230,13 @@ RUN set -eux; \
     # always rebuild; the ~200 third-party deps stay cached.
     find crates bins -name '*.rs' -exec touch {} +; \
     cargo build --release --locked \
-      --bin momo-server --bin momo-relay --bin momo-agent-worker \
+      --bin momo-server --bin momo-relay --bin momo-agent-worker --bin momo-expression-decoder \
+      --bin momo-expression-assembler \
       --bin momo-webhook-sender --bin momo-migrate --bin momo-notifier \
       --bin momo-push-relay; \
     install -Dm755 target/release/momo-server /out/momo-server; \
+    install -Dm755 target/release/momo-expression-decoder /out/momo-expression-decoder; \
+    install -Dm755 target/release/momo-expression-assembler /out/momo-expression-assembler; \
     install -Dm755 target/release/momo-relay /out/momo-relay; \
     install -Dm755 target/release/momo-agent-worker /out/momo-agent-worker; \
     install -Dm755 target/release/momo-webhook-sender /out/momo-webhook-sender; \

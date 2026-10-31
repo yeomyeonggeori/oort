@@ -566,6 +566,11 @@ services:
       MOMO_ENV: ${MOMO_ENV:-staging}
       # momo_worker — BYPASSRLS drain across tenants (bootstrap_roles.sql).
       WORKER_DATABASE_URL: postgres://momo_worker:${WORKER_POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
+      # #4791: read requester-owned profile images through the same archive as api.
+      MOMO_DRIVE_ARCHIVE_BACKEND: ${MOMO_DRIVE_ARCHIVE_BACKEND:-}
+      MOMO_DRIVE_SA_KEY_PATH: ${MOMO_DRIVE_SA_KEY_PATH:-}
+      MOMO_DRIVE_SHARED_DRIVE_ID: ${MOMO_DRIVE_SHARED_DRIVE_ID:-}
+      MOMO_DRIVE_LOCAL_DIR: ${MOMO_DRIVE_LOCAL_DIR:-}
       PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:?set PROVIDER_LINK_MASTER_KEY}
       # SH-6a-e / #2215 — same two keys as api. The worker is the process that
       # actually dials the host provider; extra_hosts below makes
@@ -576,6 +581,15 @@ services:
       # `OORT_COHOSTED_AGENT_*` is not given here — api only (ADR-0203 증보 K-S2).
       HERMES_BASE_URL: ${HERMES_BASE_URL:-}
       HERMES_API_KEY: ${HERMES_API_KEY:-}
+      # #4820 C2a (owner 10-30 decision): this instance's own public origin (https://<host>[:port], nothing after
+      # it), the one the Hermes image guard lets `image_url` carry — the worker builds the short-lived photo address
+      # of the requester's attachment under it. Unset = no address is minted. Not MOMO_PUBLIC_BASE_URL: that reaches
+      # api only (ADR-0205 D1). The same value goes to `hermes` below.
+      OORT_SELF_MEDIA_ORIGIN: ${OORT_SELF_MEDIA_ORIGIN:-}
+      # #4820 C2b 3부 (ADR-0218 G3.7 (b)): the operator's attestation that the Hermes behind this worker runs strict media
+      # delivery (the `hermes` service below does, and its lock gate refuses to start without it). The hosted expression door
+      # opens ONLY on an exact `1`; empty or unset = the door is shut and a photo turn is an ordinary turn.
+      OORT_HOSTED_MEDIA_STRICT: ${OORT_HOSTED_MEDIA_STRICT:-}
       # #3431 (ADR-0193 D18): same key and rule as api — the spawn tool keeps Claude
       # Code off shared hosts unless an exact `true`.
       MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED:-}
@@ -585,6 +599,9 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      # API boot initializes the archive directories before the read-only worker opens them.
+      api:
+        condition: service_healthy
     networks:
       - private
     extra_hosts:
@@ -602,6 +619,12 @@ services:
   # before a listener exists. The config is copied from the read-only mount on every
   # start, so editing the volume's config.yaml does nothing.
   #
+  # #4820 review (ADR-0203 I2): the oort image guard (a Hermes user plugin that refuses every image_generate
+  # address, path and non-inline value before the tool runs) is copied from its read-only mount into
+  # /opt/data/plugins/oort-image-guard before the gate. Compose has no sha256sum line in this command, so the
+  # gate is the check: it hashes those two files against the values pinned in lockgate.py, requires the plugin in
+  # plugins.enabled, and exercises it with a canary. The Railway twin pins the same bytes in its start command.
+  #
   # No `ports:` and the `private` network only: reachable as http://hermes:8642 from
   # api and agent-worker, never published on the host. Model auth is not here (#4073):
   # without a model Hermes still starts and answers /health + /v1/models.
@@ -613,7 +636,7 @@ services:
     profiles: ["agents"]
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - set -eu; umask 022; mkdir -p /opt/data; cp /oort/config.yaml /opt/data/config.yaml; /opt/hermes/.venv/bin/python /oort/lockgate.py gate /opt/data/config.yaml; [ -z "$${HERMES_LOGIN_RELAY_KEY:-}" ] || OORT_LOGIN_RELAY_PROBE=/oort/mcp_login_probe.py /opt/hermes/.venv/bin/python -B /oort/login_relay.py launch & unset HERMES_LOGIN_RELAY_KEY; /opt/hermes/.venv/bin/python /oort/lockgate.py report & exec /opt/hermes/docker/entrypoint-dispatch.sh gateway run
+      - set -eu; umask 022; mkdir -p /opt/data/plugins/oort-image-guard; cp /oort/config.yaml /opt/data/config.yaml; cp /oort/plugins/oort-image-guard/__init__.py /oort/plugins/oort-image-guard/plugin.yaml /opt/data/plugins/oort-image-guard/; /opt/hermes/.venv/bin/python /oort/lockgate.py gate /opt/data/config.yaml; [ -z "$${HERMES_LOGIN_RELAY_KEY:-}" ] || OORT_LOGIN_RELAY_PROBE=/oort/mcp_login_probe.py /opt/hermes/.venv/bin/python -B /oort/login_relay.py launch & unset HERMES_LOGIN_RELAY_KEY; /opt/hermes/.venv/bin/python /oort/lockgate.py report & exec /opt/hermes/docker/entrypoint-dispatch.sh gateway run
     mem_limit: ${MOMO_HERMES_MEM_LIMIT:-2g}
     cpus: 1
     labels: *momo-janitor-labels
@@ -629,12 +652,22 @@ services:
       # dedicated uid) and UNSETS it before the Hermes dispatcher, so the gateway and every `hermes` child
       # have no copy. Not the chat key: a leaked HERMES_API_KEY must not carry login authority.
       HERMES_LOGIN_RELAY_KEY: ${HERMES_LOGIN_RELAY_KEY:-}
+      # #4820 C2a: the one origin the image guard lets `image_url` carry (an address under /v1/self-media/ the worker
+      # minted). lockgate.py refuses a value that is not https://<lowercase host>[:port] and refuses the name in the
+      # volume's .env; empty or unset = the exception is off and every address stays refused.
+      OORT_SELF_MEDIA_ORIGIN: ${OORT_SELF_MEDIA_ORIGIN:-}
+      # #4820 C2b 3부: strict media delivery. Without it Hermes turns a `MEDIA:` line of an answer into the bytes of ANY
+      # readable file it names; with it only Hermes' own cache dirs and files made moments ago. lockgate.py requires exactly
+      # `1` here whenever the picture tool is exposed and refuses the name in the volume's .env, so this is a literal and not
+      # an operator choice. The hosted door itself opens only when the worker's OORT_HOSTED_MEDIA_STRICT is `1` as well.
+      HERMES_MEDIA_DELIVERY_STRICT: "1"
       # Deliberately NOT passed: DATABASE_URL, WORKER_DATABASE_URL, PROVIDER_LINK_MASTER_KEY,
       # JWT_HMAC, any other oort secret (ADR-0203 D6-2), HERMES_YOLO_MODE, API_SERVER_CORS_ORIGINS.
     volumes:
       - hermesdata:/opt/data
       - ../hermes/config.yaml:/oort/config.yaml:ro
       - ../hermes/lockgate.py:/oort/lockgate.py:ro
+      - ../hermes/plugins/oort-image-guard:/oort/plugins/oort-image-guard:ro
       - ../hermes/login_relay.py:/oort/login_relay.py:ro
       - ../hermes/mcp_login_probe.py:/oort/mcp_login_probe.py:ro
     healthcheck:

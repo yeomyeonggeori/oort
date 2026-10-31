@@ -110,10 +110,10 @@ const innerBoxes = (h: HTMLElement) =>
   );
 
 describe("설정 › 사용량 (카드 문법, #3578 S5c)", () => {
-  it("정상 응답은 카드 여섯 장을 순서대로 세우고, 카드 안에 상자를 한 겹 더 두르지 않는다", async () => {
+  it("정상 응답은 카드 일곱 장을 순서대로 세우고, 카드 안에 상자를 한 겹 더 두르지 않는다", async () => {
     const h = await render();
     await vi.waitFor(() => expect(byId(h, "usage-quota-provider")).not.toBeNull());
-    expect(h2s(h)).toEqual(["구독 잔여량", "비용 집계", "합계", "예산", "모델별", "에이전트별"]);
+    expect(h2s(h)).toEqual(["에이전트 월 보고", "구독 잔여량", "비용 집계", "합계", "예산", "모델별", "에이전트별"]);
     expect(byId(h, "usage-total-cost")?.textContent).toContain("$18.43");
     expect(byId(h, "usage-estimated")).not.toBeNull();
     expect(innerBoxes(h).map((el) => el.getAttribute("data-testid") ?? el.tagName)).toEqual([]);

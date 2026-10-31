@@ -245,7 +245,8 @@ pub async fn lock_agent_and_count_pending_workspace_actions_in_tx(
 /// [`count_pending_workspace_actions_in_tx`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PendingWorkspaceActions {
-    /// Every pending, unexpired `workspace_action` of the agent except an in-place grant card —
+    /// Every pending, unexpired `workspace_action` of the agent except server-owned
+    /// in-place grant and DM consent cards —
     /// the number [`crate::actions::MAX_PENDING_WORKSPACE_ACTIONS`] caps.
     pub all: i64,
     /// Of those, the ones the agent raised **unasked** (`payload.origin = agent_initiated`,
@@ -270,7 +271,8 @@ pub async fn count_pending_workspace_actions_in_tx(
           WHERE workspace_id = $1 AND requested_by = $2 \
             AND action_type = 'workspace_action' AND status = 'pending' \
             AND (expires_at IS NULL OR expires_at > now()) \
-            AND payload->>'origin' IS DISTINCT FROM 'server_in_place'",
+            AND payload->>'origin' IS DISTINCT FROM 'server_in_place' \
+            AND payload->>'origin' IS DISTINCT FROM 'dm_agent_admission'",
     )
     .bind(workspace_id)
     .bind(agent_member_id)
@@ -583,12 +585,12 @@ pub async fn mark_approval_decided_in_tx(
     decided_by: Uuid,
     decided_at: DateTime<Utc>,
     reason: Option<&str>,
-) -> Result<(), DbError> {
-    sqlx::query(
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
         "UPDATE approval \
             SET status = $2::approval_status, decided_by = $3, decided_at = $4, \
                 decision_reason = $5 \
-          WHERE id = $1",
+          WHERE id = $1 AND status = 'pending'",
     )
     .bind(approval_id)
     .bind(status)
@@ -597,7 +599,7 @@ pub async fn mark_approval_decided_in_tx(
     .bind(reason)
     .execute(&mut *conn)
     .await?;
-    Ok(())
+    Ok(result.rows_affected() == 1)
 }
 
 /// Record the claim grant on a just-decided approval (ADR-0186 증보 v3 V3-4). Called
@@ -684,26 +686,87 @@ pub const RUN_CANCELLED_DECISION_REASON: &str = "agent run cancelled by human";
 /// permits a decider only for `approved`/`rejected`, so naming one here would be
 /// refused by the database anyway.
 ///
-/// Returns how many approvals were retired, which the caller records rather than
-/// asserts on: zero is the ordinary case, because most runs raise no approval.
+/// Returns the approvals actually retired, still locked, so the caller settles
+/// their cards and broadcasts in this same transaction. An empty list is ordinary.
 pub async fn cancel_pending_approvals_for_run_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     run_id: Uuid,
     decided_at: DateTime<Utc>,
-) -> Result<u64, DbError> {
-    let result = sqlx::query(
-        "UPDATE approval \
-            SET status = 'cancelled', decided_at = $3, decision_reason = $4 \
-          WHERE workspace_id = $1 AND run_id = $2 AND status = 'pending'",
+) -> Result<Vec<LockedApproval>, DbError> {
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM approval WHERE workspace_id = $1 AND run_id = $2 \
+         AND status = 'pending' ORDER BY id FOR UPDATE",
     )
     .bind(workspace_id)
     .bind(run_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut cancelled = Vec::with_capacity(ids.len());
+    for id in ids {
+        let Some(approval) = lock_approval_in_tx(conn, workspace_id, id).await? else {
+            continue;
+        };
+        let result = sqlx::query(
+            "UPDATE approval SET status = 'cancelled', decided_at = $3, decision_reason = $4 \
+             WHERE workspace_id = $1 AND id = $2 AND status = 'pending'",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(decided_at)
+        .bind(RUN_CANCELLED_DECISION_REASON)
+        .execute(&mut *conn)
+        .await?;
+        if result.rows_affected() == 1 {
+            // An `expression.create` card's candidate pictures go with the run (ADR-0186 v8
+            // X8-2: reject, expire, cancel and the TTL sweep all reclaim the bytes).
+            if approval
+                .payload
+                .pointer("/action/id")
+                .and_then(Value::as_str)
+                == Some(crate::actions::ACTION_EXPRESSION_CREATE)
+            {
+                momo_expressions::action::reclaim_in_tx(conn, workspace_id, id)
+                    .await
+                    .map_err(|error| match error {
+                        momo_expressions::Error::Db(error) => error,
+                        other => DbError::Sqlx(sqlx::Error::Protocol(other.to_string())),
+                    })?;
+            }
+            cancelled.push(approval);
+        }
+    }
+    Ok(cancelled)
+}
+
+/// Close a card that never had anything to decide: the hosted expression door's **failure card**
+/// (ADR-0218 G3.8, #4820 C2b 2부). The approval row is born `pending` in the same transaction (the
+/// card is an approval-shaped message, so it needs a real `approval_id`) and is ended here as
+/// `cancelled` with no decider — `approval_decided_ck` allows a decider only for
+/// `approved`/`rejected`, exactly as for [`cancel_pending_approvals_for_run_in_tx`], whose shape
+/// this follows. `reason` is the card's closed code (or, for the door left shut by the operator,
+/// the word saying so); it is the value the card's `props.decision_reason` carries too.
+///
+/// Returns whether the row was still `pending` and is now closed. The row has no drafts, so there
+/// is nothing to reclaim.
+pub async fn close_failed_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    approval_id: Uuid,
+    decided_at: DateTime<Utc>,
+    reason: &str,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE approval SET status = 'cancelled', decided_at = $3, decision_reason = $4 \
+          WHERE workspace_id = $1 AND id = $2 AND status = 'pending'",
+    )
+    .bind(workspace_id)
+    .bind(approval_id)
     .bind(decided_at)
-    .bind(RUN_CANCELLED_DECISION_REASON)
+    .bind(reason)
     .execute(&mut *conn)
     .await?;
-    Ok(result.rows_affected())
+    Ok(result.rows_affected() == 1)
 }
 
 /// The idempotency ledger row (Swift :277-288).
@@ -966,8 +1029,8 @@ pub fn approval_request_props(
         "action_type": action_type,
         "call_id": call.call_id,
         "tool_name": call.name,
-        "title": format!("Approve {}", call.name),
-        "summary": "Review the proposed tool call before oort executes it.",
+        "title": format!("도구 「{}」 실행", call.name),
+        "summary": "실행할 도구를 확인하고 결정해 주세요.",
         "arguments": raw_arguments,
         "status": "pending",
         "expires_at_ms": expires_at.timestamp_millis(),
@@ -1149,7 +1212,7 @@ fn apply_login_handoff_props(props: &mut Value, call: &ToolCall) {
 
 /// The one-line body of an `approval_request` message (Swift :1618).
 pub fn approval_request_body(tool_name: &str) -> String {
-    format!("Approval required: {tool_name}")
+    format!("도구 「{tool_name}」을 실행해도 될까요?")
 }
 
 /// The receipt a decision returns and stores (Swift `ApprovalDecisionReceiptDTO`).
@@ -1576,10 +1639,10 @@ mod tests {
             None,
         );
         assert!(props.get("kind").is_none());
-        assert_eq!(props["title"], json!("Approve work.session.end"));
+        assert_eq!(props["title"], json!("도구 「work.session.end」 실행"));
         assert_eq!(
             props["summary"],
-            json!("Review the proposed tool call before oort executes it.")
+            json!("실행할 도구를 확인하고 결정해 주세요.")
         );
         // The overlay reads `reason` and `session_id` out of the arguments, and
         // it must not do that for a tool that happens to use the same words.

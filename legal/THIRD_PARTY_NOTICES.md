@@ -70,6 +70,9 @@ this table only records why they are there.
 
 | Component | Version | License | Where | Introduced by |
 |---|---|---|---|---|
+| rlimit | 0.10.2 | MIT | `server-rust/crates/momo-expressions` (isolated codec subprocess resource limits) | ADR-0218 D3, #4676 |
+| image GIF feature; gif, color_quant, weezl | 0.25.10; 0.14.2, 1.1.0, 0.1.12 | MIT OR Apache-2.0 (color_quant: MIT) | `server-rust/crates/momo-expressions` (sequential GIF compositing and fresh PNG/GIF encoding) | ADR-0218 D3, #4676 |
+| multer (Axum multipart), encoding_rs, simdutf8 | 3.1.0; 0.8.42, 0.1.5 | MIT; Apache-2.0 OR MIT OR BSD-3-Clause, MIT | `server-rust/bins/momo-server` (bounded authenticated direct uploads) | ADR-0218 appendix A, #4676 |
 | p256 (RustCrypto; brings ecdsa, elliptic-curve, primeorder, sec1 and their RustCrypto deps) | 0.14.0 | Apache-2.0 OR MIT | `server-rust/crates/momo-wire` (human device-key P-256 verification) | ADR-0146 개정 2026-09-28 D-1, #3021 |
 | unicode-normalization | 0.1.25 | MIT OR Apache-2.0 | `server-rust/crates/momo-wire` (NFC of signed human text; was already transitive via sqlx) | ADR-0146 개정 2026-09-28 D-5, #3021 |
 | tauri-plugin-dialog | 2.7.3 | Apache-2.0 OR MIT | `clients/desktop/src-tauri` (native folder picker for the new-session menu, opened from Rust only; no `dialog:*` permission is granted to the webview) | ADR-0190 증보 2026-10-01, #2775 |
