@@ -1613,6 +1613,7 @@ export function ChatShell() {
           onOpenWorkSession={openWorkSession}
           isPlayEntrance={timeline.isPlayEntrance}
           onEntranceConsumed={timeline.consumeEntrance}
+          onThreadRead={timeline.applyThreadRead}
           onClose={() => {
             // 작업 패널의 onClose와 같은 이유 (#1431 · 아래 993-1004 주석): 이 서랍이
             // 덮어 `inert`로 만든 표면(chat-region) 안에 opener(답글 앵커)가 산다.

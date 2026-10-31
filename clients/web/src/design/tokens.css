@@ -493,6 +493,12 @@
   /* 공용 툴팁의 세로 여백 6px (#4324). 가로 12는 `px-3`이다. */
   --spacing-tooltip-y: 6px;
 
+  /* 스레드 요약 줄의 겹친 얼굴 (#4878, owner 10-31 규격). 한 변 20과 겹침 6은 격자(4의 배수) 밖이라 이름으로
+   * 들어온다: `size-5`·`-ml-1.5`는 컴파일되지 않는다. 폰은 22pt이고(코어 `THREAD_FACE_SIZE`), 두 수는
+   * `threadFaceTokens.test.ts`가 코어 상수와 대조한다. 바탕색 2px 링은 `ring-2`(스톡 유틸)다. */
+  --spacing-thread-face: 20px;
+  --spacing-thread-face-overlap: 6px;
+
   /* Control heights are a separate dimension from spacing. */
   --spacing-control-sm: 28px;
   --spacing-control: 32px;
