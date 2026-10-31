@@ -46,6 +46,9 @@ import AppsScreen from '../screens/AppsScreen';
 import InboxScreen from '../screens/InboxScreen';
 import SearchScreen from '../screens/SearchScreen';
 import SettingsScreen from '../screens/SettingsScreen';
+import {RELEASE_NOTES_SETTINGS_PAGE} from '@momo/core/features/releaseNotes/model';
+import type {SettingsPageName} from '../features/profile/SettingsPage';
+import {ReleaseNotesLaunchHost} from '../features/releaseNotes/ReleaseNotesSheet';
 import SidebarScreen from '../screens/SidebarScreen';
 import WorkJobsScreen from '../screens/WorkJobsScreen';
 import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
@@ -216,16 +219,26 @@ export function Shell({
     () => dispatch({type: 'openAgentList'}),
     [],
   );
+  // 설정을 처음 어느 장으로 여는가(#4937). 보통은 첫 장이고, 「업데이트 소식」 시트의 「자세히 보기」만 소식 장으로 연다.
+  // 설정은 닫히면 언마운트되고 `initialPage` 는 마운트 때 한 번만 읽히므로, 다른 입구는 열기 전에 첫 장으로 되돌린다.
+  // `undefined` 가 첫 장이다(`SettingsPage` 의 기본값): 직접 문구 장부가 낱말 하나짜리 문자열을 문구로 세므로 이름을 다시 적지 않는다.
+  const [settingsEntry, setSettingsEntry] = useState<SettingsPageName | undefined>(undefined);
   // 홈 머리의 내 얼굴 → 「설정」 페이지(층, #4457).
-  const onOpenSettings = useCallback(
-    () => dispatch({type: 'openSettings'}),
-    [],
-  );
+  const onOpenSettings = useCallback(() => {
+    setSettingsEntry(undefined);
+    dispatch({type: 'openSettings'});
+  }, []);
   // 대화 안의 내 프로필 시트의 「설정 열기」(#4319). 설정 층은 대화 층 **밑**에 그려지므로 대화와 그 밑의 층을 걷고 연다(`navReducer`).
-  const onOpenSettingsFromConversation = useCallback(
-    () => dispatch({type: 'openSettingsFromConversation'}),
-    [],
-  );
+  const onOpenSettingsFromConversation = useCallback(() => {
+    setSettingsEntry(undefined);
+    dispatch({type: 'openSettingsFromConversation'});
+  }, []);
+  // 「업데이트 소식」 시트의 「자세히 보기」(#4937): 소식 장으로 연다. 시트가 뜬 뒤 알림 탭으로 층이 생겼어도 설정이 그 밑에
+  // 가려지지 않게 층을 모두 걷는 쪽의 동작(위)을 쓰고, 그 직후 처음 열 장만 소식 장으로 바꾼다(같은 렌더에 묶여 뒤의 값이 이긴다).
+  const onOpenReleaseNotes = useCallback(() => {
+    onOpenSettingsFromConversation();
+    setSettingsEntry(RELEASE_NOTES_SETTINGS_PAGE);
+  }, [onOpenSettingsFromConversation]);
   const onOpenAgent = useCallback(
     (agent: OpenAgent) => dispatch({type: 'openAgent', agent}),
     [],
@@ -425,7 +438,7 @@ export function Shell({
           onBack={onBack}
           enter="rise"
           testID="settings-pane">
-          <SettingsScreen onBack={onBack} />
+          <SettingsScreen onBack={onBack} initialPage={settingsEntry} />
         </EdgeSwipeBack>
       ) : null}
 
@@ -649,6 +662,11 @@ export function Shell({
           onSubmitted={() => dispatch({type: 'openWorkList'})}
         />
       ) : null}
+      {/* 업데이트 뒤 처음 열 때 「업데이트 소식」을 한 번 올린다(#4937). 셸이 한가할 때만(층·다른 시트가 없을 때) 선다. */}
+      <ReleaseNotesLaunchHost
+        idle={!covered && create === null && !ai && !askMac && delegate === null}
+        onOpenDetails={onOpenReleaseNotes}
+      />
     </Canvas>
   );
 }

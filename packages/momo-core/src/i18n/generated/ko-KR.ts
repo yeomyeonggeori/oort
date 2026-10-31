@@ -1044,6 +1044,137 @@ export const catalog: MessageCatalog = {
       "value": "언어를 적용하는 중이에요."
     }
   ],
+  "releaseNotes.action.close": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "releaseNotes.action.details": [
+    {
+      "type": 0,
+      "value": "자세히 보기"
+    }
+  ],
+  "releaseNotes.detail.back": [
+    {
+      "type": 0,
+      "value": "업데이트 소식으로 돌아가기"
+    }
+  ],
+  "releaseNotes.detail.changed": [
+    {
+      "type": 0,
+      "value": "바뀐 점"
+    }
+  ],
+  "releaseNotes.detail.tryIt": [
+    {
+      "type": 0,
+      "value": "이렇게 써 보세요"
+    }
+  ],
+  "releaseNotes.page.back": [
+    {
+      "type": 0,
+      "value": "설정으로 돌아가기"
+    }
+  ],
+  "releaseNotes.page.description": [
+    {
+      "type": 0,
+      "value": "버전마다 바뀐 점과 써 보는 방법을 모았어요."
+    }
+  ],
+  "releaseNotes.page.empty": [
+    {
+      "type": 0,
+      "value": "아직 보여 줄 업데이트 소식이 없어요."
+    }
+  ],
+  "releaseNotes.page.openHint": [
+    {
+      "type": 0,
+      "value": "버전별로 바뀐 점을 봐요."
+    }
+  ],
+  "releaseNotes.page.title": [
+    {
+      "type": 0,
+      "value": "업데이트 소식"
+    }
+  ],
+  "releaseNotes.popup.close": [
+    {
+      "type": 0,
+      "value": "업데이트 소식 닫기"
+    }
+  ],
+  "releaseNotes.popup.more": [
+    {
+      "type": 0,
+      "value": "그 밖에 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "가지"
+    }
+  ],
+  "releaseNotes.popup.title": [
+    {
+      "type": 0,
+      "value": "업데이트 소식"
+    }
+  ],
+  "releaseNotes.surface.desktop": [
+    {
+      "type": 0,
+      "value": "데스크탑"
+    }
+  ],
+  "releaseNotes.surface.label": [
+    {
+      "type": 0,
+      "value": "보이는 화면"
+    }
+  ],
+  "releaseNotes.surface.phone": [
+    {
+      "type": 0,
+      "value": "폰"
+    }
+  ],
+  "releaseNotes.version.current": [
+    {
+      "type": 0,
+      "value": "지금 쓰는 버전"
+    }
+  ],
+  "releaseNotes.version.label": [
+    {
+      "type": 0,
+      "value": "버전 "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    }
+  ],
+  "releaseNotes.version.releasedOn": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " 공개"
+    }
+  ],
   "reply.card.cancel": [
     {
       "type": 0,

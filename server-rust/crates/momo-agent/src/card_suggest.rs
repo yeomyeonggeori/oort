@@ -1151,8 +1151,11 @@ mod tests {
         // link screen: `ai` until #4111 split it, then `ai` (AI 연결, not an
         // agent-openable section yet) and `aiHub` (the link row), and since
         // #4663 `devTools` (명령줄·AI 도구 — token issuance stays a human-only
-        // door, so agents get no card that opens it). A new nav row still turns
-        // this red until it is either openable or listed here.
+        // door, so agents get no card that opens it), and since #4937
+        // `releaseNotes` (업데이트 소식 — a read-only page the app opens by
+        // itself after an update; an agent has no reason to open it). A new
+        // nav row still turns this red until it is either openable or listed
+        // here.
         let left_out: Vec<&str> = nav_ids
             .iter()
             .copied()
@@ -1162,7 +1165,7 @@ mod tests {
         assert!(
             left_out
                 .iter()
-                .all(|id| ["ai", "aiHub", "devTools"].contains(id)),
+                .all(|id| ["ai", "aiHub", "devTools", "releaseNotes"].contains(id)),
             "unexpected nav ids outside settings.open: {left_out:?}"
         );
         // Everything else is a nav id, except the apps alias, which core owns.

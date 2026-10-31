@@ -14,6 +14,8 @@
 import { isSurfaceProvided, type SurfaceId } from "@momo/core/features/capabilities/serverSurfaces";
 import { aiExternalRowFromSettings, aiHubSection } from "@momo/core/features/ai/aiHubModel";
 import { isDesktop } from "@/lib/tauri";
+import type { MessageArgs, MessageKey, MessageService } from "@momo/core/i18n";
+import { RELEASE_NOTES_SETTINGS_PAGE } from "@momo/core/features/releaseNotes/model";
 
 export type SettingsSectionId =
   | "profile"
@@ -27,6 +29,7 @@ export type SettingsSectionId =
   | "usage"
   | "code"
   | "updates"
+  | "releaseNotes"
   | "devTools"
   | "aiHub";
 
@@ -52,9 +55,17 @@ export const SCOPE_LABELS: Record<SettingsScope, string> = {
   "workspace-readable": "워크스페이스 · 누구나 볼 수 있어요",
 };
 
+/** 인자 없이 읽는 사전 키(`MessageArgs`가 빈 모양인 것). 섹션 이름처럼 값이 안 들어가는 문구가 쓴다. */
+export type PlainMessageKey = {
+  [K in MessageKey]: MessageArgs[K] extends Record<string, never> ? K : never;
+}[MessageKey];
+
 export interface SettingsSectionMeta {
   id: SettingsSectionId;
-  label: string;
+  /** 화면에 서는 이름. 사전으로 옮긴 섹션은 이 칸이 없고 `labelKey`가 말한다(`settingsSectionLabel`). */
+  label?: string;
+  /** 사전 키(#4937). 있으면 언어에 맞춰 읽는다. 새 섹션은 직접 문구 대신 이것을 쓴다(직접 문구 장부). */
+  labelKey?: PlainMessageKey;
   group: SettingsGroupId;
   /** 페이지 머리 칩. 링크 행(`link`)은 칩이 없다. */
   scope?: SettingsScope;
@@ -83,6 +94,28 @@ export interface SettingsSectionMeta {
   desktopAlways?: boolean;
 }
 
+const updatesRow: SettingsSectionMeta = {
+  id: "updates",
+  label: "업데이트",
+  group: "앱·연결",
+  scope: "device",
+  desktopOnly: true,
+};
+
+// 업데이트 소식(#4937, owner 10-31): 버전별로 바뀐 점과 써 보는 방법. 「업데이트」 바로 다음 줄이고 같은 그룹·범위를
+// 쓴다(그 행에서 뽑아 만든다: 이 파일의 낱말 하나짜리 문자열은 직접 문구 장부가 문구로 세므로 새 줄이 문자열을
+// 더하지 않게 한다). 앱 번들에 묶인 글이라 브라우저 탭에서도 읽는다(앱 버전이 없으면 「지금 쓰는 버전」 표지만
+// 빠진다). 이 페이지에는 저장되는 설정이 없어서 범위 칩은 눈에서 뺀다(프로필과 같은 이유: 읽는 쪽에는 군더더기다,
+// #4109). 값(`device`)은 「봤다」 기록이 이 기기에만 산다는 사실이다.
+const releaseNotesRow: SettingsSectionMeta = {
+  ...updatesRow,
+  id: RELEASE_NOTES_SETTINGS_PAGE,
+  label: undefined,
+  labelKey: "releaseNotes.page.title",
+  desktopOnly: undefined,
+  scopeVisible: false,
+};
+
 export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: "profile", label: "프로필", group: "개인", scope: "workspace-member", scopeVisible: false },
   { id: "appearance", label: "모양", group: "개인", scope: "device" },
@@ -109,7 +142,8 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     surface: "work",
     desktopAlways: true,
   },
-  { id: "updates", label: "업데이트", group: "앱·연결", scope: "device", desktopOnly: true },
+  updatesRow,
+  releaseNotesRow,
   // 명령줄·AI 도구(#4663, ADR-0216): 터미널과 Claude Code·Codex가 내 계정으로 들어오는 연결 값을
   // 만들고 지우는 화면이다. AI 허브가 아니다: 개발자 토큰은 사람이 자기 도구에 쥐여 주는 「내 도구」
   // (ADR-0198)이고 에이전트 멤버의 자격이 아니다. 설정 안의 페이지라 링크 행(`aiHub`)보다 앞에 두어,
@@ -198,4 +232,9 @@ export function isReachableSettingsSection(section: string): boolean {
   if (resolved.kind === "ai-hub") return true;
   if (resolved.kind === "unknown") return false;
   return reachableSettingsSections().some((item) => item.id === resolved.id);
+}
+
+/** 섹션 이름. 사전 키가 있으면 지금 언어로, 없으면 적힌 글자 그대로다. */
+export function settingsSectionLabel(item: SettingsSectionMeta, messages: Pick<MessageService, "formatMessage">): string {
+  return item.labelKey !== undefined ? messages.formatMessage(item.labelKey) : (item.label ?? "");
 }
