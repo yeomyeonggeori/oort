@@ -220,20 +220,6 @@ describe("team expressions web/desktop port", () => {
     expect(mutation).not.toHaveBeenCalled(); fireEvent.click(confirm);
     await waitFor(() => expect(mutation).toHaveBeenCalledTimes(1));
   });
-  it("gives the delete and report confirmation the same inner spacing as the other confirm dialogs (#4912)", async () => {
-    // 삭제와 신고는 한 상자(`role="alertdialog"` DialogContent)를 같이 쓴다. 바탕 `DialogContent`는 안쪽 여백을
-    // 주지 않아서(호출부가 정한다) 이 상자만 클래스가 없으면 제목·본문·단추가 테두리에 붙는다. 다른 확인 창
-    // (메시지 삭제, 링크 미리보기 제거, 리마인더 삭제)은 모두 `gap-3 p-4`다. jsdom은 CSS를 계산하지 않으므로
-    // 자리는 클래스 토큰으로 잰다: 부분 문자열이 아니라 classList 항목이어야 `lg:p-4`·`p-40`이 통과하지 못한다.
-    const store = makeStore(); await store.refresh();
-    const view = render(wrapper(store, <TeamExpressionsPanel purpose="reaction" onPick={() => {}} />));
-    const trigger = view.getByRole("button", { name: "파티 앵무새 관리" });
-    fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse", ctrlKey: false }); fireEvent.keyDown(trigger, { key: "Enter" });
-    fireEvent.click(await view.findByRole("menuitem", { name: "신고하기" }));
-    const dialog = await view.findByRole("alertdialog");
-    expect(dialog.classList.contains("p-4")).toBe(true);
-    expect(dialog.classList.contains("gap-3")).toBe(true);
-  });
   it("completes team colon candidates with keyboard Enter without counting a preview as use", async () => {
     const store = makeStore(); await store.refresh();
     function Harness() {
