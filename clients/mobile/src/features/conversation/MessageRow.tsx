@@ -4680,6 +4680,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 내 반응 `.me{background:var(--accentSoft);color:var(--accentText);border-color:transparent}`.
    * 높이 바닥 32(`CHIP_SIZE`)는 그대로다 — 시안의 25 로 줄이면 슬롭이 한 변 10 이 되어
    * 이웃 칩과 누르는 상자가 겹친다(PR 「시안과의 차이」).
+   *
+   * **테두리 규칙은 시안과 반대로 뒤집었다**(owner 2026-10-31, #4879 — 웹과 같은 말, Buzz 기준):
+   * 내 칩은 1px 강조(`accent`) 테두리, 남의 칩은 테두리 없음. 「없음」은 폭 1 을 투명으로 두는 것이라
+   * 두 상태의 상자가 같다(눌러 바뀌어도 이웃이 밀리지 않는다). 시안 쪽으로 되돌리지 않는다.
    */
   chipRow: {flexDirection: 'row', flexWrap: 'wrap', gap: CONV.reactGap, paddingTop: space.xs},
   chip: {
@@ -4693,10 +4697,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     paddingVertical: 3,
     borderRadius: radius.pill,
     borderWidth: 1,
-    borderColor: color.border,
+    borderColor: 'transparent',
     backgroundColor: color.surfaceMuted,
   },
-  chipMine: {borderColor: 'transparent', backgroundColor: color.accentSurface},
+  chipMine: {borderColor: color.accent, backgroundColor: color.accentSurface},
   chipPressed: {backgroundColor: color.surfacePressed},
   chipEmoji: {fontSize: font.label},
   chipCount: {fontSize: font.meta, color: color.textMuted, fontWeight: '600'},

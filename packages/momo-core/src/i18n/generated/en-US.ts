@@ -158,6 +158,673 @@ export const catalog: MessageCatalog = {
       "value": "Window"
     }
   ],
+  "expressions.add.adminsOnly": [
+    {
+      "type": 0,
+      "value": "Only admins can add new pictures on this team."
+    }
+  ],
+  "expressions.add.back": [
+    {
+      "type": 0,
+      "value": "Back to list"
+    }
+  ],
+  "expressions.add.backLabel": [
+    {
+      "type": 0,
+      "value": "Back to the team emoji list"
+    }
+  ],
+  "expressions.add.import": [
+    {
+      "type": 0,
+      "value": "Import"
+    }
+  ],
+  "expressions.add.importDetail": [
+    {
+      "type": 0,
+      "value": "Register your own picture or link as a team emoji"
+    }
+  ],
+  "expressions.add.make": [
+    {
+      "type": 0,
+      "value": "Make with AI"
+    }
+  ],
+  "expressions.add.makeDetail": [
+    {
+      "type": 0,
+      "value": "Pick a photo and an agent makes a moving team emoji"
+    }
+  ],
+  "expressions.add.offlineHint": [
+    {
+      "type": 0,
+      "value": "Available when you are back online"
+    }
+  ],
+  "expressions.add.trigger": [
+    {
+      "type": 0,
+      "value": "Add"
+    }
+  ],
+  "expressions.add.triggerHint": [
+    {
+      "type": 0,
+      "value": "Import a picture or make one with AI"
+    }
+  ],
+  "expressions.draft.another": [
+    {
+      "type": 0,
+      "value": "Choose another picture"
+    }
+  ],
+  "expressions.draft.approve": [
+    {
+      "type": 0,
+      "value": "Register in team library"
+    }
+  ],
+  "expressions.draft.approveFailed": [
+    {
+      "type": 0,
+      "value": "Could not register it. Check the name, your permission and the preview, then try again."
+    }
+  ],
+  "expressions.draft.approving": [
+    {
+      "type": 0,
+      "value": "Registering"
+    }
+  ],
+  "expressions.draft.previewLabel": [
+    {
+      "type": 0,
+      "value": "Preview before registering "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.draft.replaceFailed": [
+    {
+      "type": 0,
+      "value": "Could not upload the picture. Check the file and upload it again."
+    }
+  ],
+  "expressions.draft.replacing": [
+    {
+      "type": 0,
+      "value": "Uploading"
+    }
+  ],
+  "expressions.draft.rights": [
+    {
+      "type": 0,
+      "value": "I have the right to save this picture to the team. If it shows a person, only the named person approves."
+    }
+  ],
+  "expressions.draft.source": [
+    {
+      "type": 0,
+      "value": "Source: "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "expressions.draft.waiting": [
+    {
+      "type": 0,
+      "value": "Loading the picture. Register after you have seen the new preview."
+    }
+  ],
+  "expressions.import.displayName": [
+    {
+      "type": 0,
+      "value": "Display name"
+    }
+  ],
+  "expressions.import.displayNamePlaceholder": [
+    {
+      "type": 0,
+      "value": "Happy dance"
+    }
+  ],
+  "expressions.import.face": [
+    {
+      "type": 0,
+      "value": "Human faces"
+    }
+  ],
+  "expressions.import.faceNone": [
+    {
+      "type": 0,
+      "value": "No human faces"
+    }
+  ],
+  "expressions.import.faceOther": [
+    {
+      "type": 0,
+      "value": "Someone else or several people"
+    }
+  ],
+  "expressions.import.faceOtherIssue": [
+    {
+      "type": 0,
+      "value": "Only a picture of your own single face can be approved. Please do not upload pictures of other people or groups."
+    }
+  ],
+  "expressions.import.faceSelf": [
+    {
+      "type": 0,
+      "value": "Only my own face"
+    }
+  ],
+  "expressions.import.fileIssue": [
+    {
+      "type": 0,
+      "value": "Choose a PNG, JPEG, WebP or GIF of 5 MiB or less."
+    }
+  ],
+  "expressions.import.fixedNote": [
+    {
+      "type": 0,
+      "value": "The name and picture cannot be changed after registering. Ask other people to upload their own face themselves."
+    }
+  ],
+  "expressions.import.metadataIssue": [
+    {
+      "type": 0,
+      "value": "Use 2 to 30 lowercase letters, digits, underscores or hyphens for the name, up to 40 characters for the display name and up to 8 tags."
+    }
+  ],
+  "expressions.import.name": [
+    {
+      "type": 0,
+      "value": "Fixed name"
+    }
+  ],
+  "expressions.import.namePlaceholder": [
+    {
+      "type": 0,
+      "value": "happy_dance"
+    }
+  ],
+  "expressions.import.nameTaken": [
+    {
+      "type": 0,
+      "value": "That name overlaps a standard emoji. Please use another name."
+    }
+  ],
+  "expressions.import.offline": [
+    {
+      "type": 0,
+      "value": "Try again when you are back online."
+    }
+  ],
+  "expressions.import.photo": [
+    {
+      "type": 0,
+      "value": "Picture to upload"
+    }
+  ],
+  "expressions.import.photoChange": [
+    {
+      "type": 0,
+      "value": "Choose another picture"
+    }
+  ],
+  "expressions.import.photoDenied": [
+    {
+      "type": 0,
+      "value": "Photo access is turned off. Allow photo access in device settings and try again."
+    }
+  ],
+  "expressions.import.photoPick": [
+    {
+      "type": 0,
+      "value": "Choose from album"
+    }
+  ],
+  "expressions.import.photoPicked": [
+    {
+      "type": 0,
+      "value": "Chosen picture "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.import.photoUnavailable": [
+    {
+      "type": 0,
+      "value": "Could not open the album. Please try again."
+    }
+  ],
+  "expressions.import.prepare": [
+    {
+      "type": 0,
+      "value": "Create preview"
+    }
+  ],
+  "expressions.import.prepareFailed": [
+    {
+      "type": 0,
+      "value": "Could not create the preview. Check the name, the file and your connection, then try again."
+    }
+  ],
+  "expressions.import.preparing": [
+    {
+      "type": 0,
+      "value": "Creating preview"
+    }
+  ],
+  "expressions.import.tags": [
+    {
+      "type": 0,
+      "value": "Tags (comma separated)"
+    }
+  ],
+  "expressions.import.tagsPlaceholder": [
+    {
+      "type": 0,
+      "value": "party, dance"
+    }
+  ],
+  "expressions.import.url": [
+    {
+      "type": 0,
+      "value": "Source link (optional)"
+    }
+  ],
+  "expressions.import.urlIssue": [
+    {
+      "type": 0,
+      "value": "Enter a public HTTPS source link."
+    }
+  ],
+  "expressions.import.urlPlaceholder": [
+    {
+      "type": 0,
+      "value": "https://giphy.com/gifs/…"
+    }
+  ],
+  "expressions.make.agent": [
+    {
+      "type": 0,
+      "value": "Agent to make it"
+    }
+  ],
+  "expressions.make.agentHint": [
+    {
+      "type": 0,
+      "value": "An agent without a picture tool will say it cannot make one."
+    }
+  ],
+  "expressions.make.agentLoading": [
+    {
+      "type": 0,
+      "value": "Loading the agent list."
+    }
+  ],
+  "expressions.make.agentMissing": [
+    {
+      "type": 0,
+      "value": "Choose an agent to make it."
+    }
+  ],
+  "expressions.make.agentPaused": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " (asleep)"
+    }
+  ],
+  "expressions.make.chipLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "description"
+    }
+  ],
+  "expressions.make.done": [
+    {
+      "type": 0,
+      "value": "OK"
+    }
+  ],
+  "expressions.make.failDm": [
+    {
+      "type": 0,
+      "value": "Could not open the conversation with the agent. Check your connection and try again."
+    }
+  ],
+  "expressions.make.failDmForbidden": [
+    {
+      "type": 0,
+      "value": "You do not have permission to open a conversation with an agent in this workspace. Please ask an admin."
+    }
+  ],
+  "expressions.make.failDmMissing": [
+    {
+      "type": 0,
+      "value": "That agent could not be found. Reload the list and choose again."
+    }
+  ],
+  "expressions.make.failSend": [
+    {
+      "type": 0,
+      "value": "Could not send the request. Check your connection and try again."
+    }
+  ],
+  "expressions.make.failUpload": [
+    {
+      "type": 0,
+      "value": "Could not upload the photo. Check your connection and try again."
+    }
+  ],
+  "expressions.make.failUploadForbidden": [
+    {
+      "type": 0,
+      "value": "Files cannot be uploaded to this conversation. Please ask an admin."
+    }
+  ],
+  "expressions.make.failUploadNoArchive": [
+    {
+      "type": 0,
+      "value": "File storage is not connected, so the photo cannot be uploaded. Please tell the server admin."
+    }
+  ],
+  "expressions.make.failUploadTooLarge": [
+    {
+      "type": 0,
+      "value": "The photo is too large to upload. Choose a smaller photo."
+    }
+  ],
+  "expressions.make.intro": [
+    {
+      "type": 0,
+      "value": "An agent makes a team emoji from the photo you pick, and the result arrives in the conversation as an approval card."
+    }
+  ],
+  "expressions.make.motion": [
+    {
+      "type": 0,
+      "value": "Motion"
+    }
+  ],
+  "expressions.make.motionDuplicate": [
+    {
+      "type": 0,
+      "value": "You cannot choose the same motion twice."
+    }
+  ],
+  "expressions.make.motionHint": [
+    {
+      "type": 0,
+      "value": "You can choose up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": ". The preview is only similar to the real motion, and you check the actual result on the approval card."
+    }
+  ],
+  "expressions.make.motionMissing": [
+    {
+      "type": 0,
+      "value": "Choose at least one motion or choose No motion."
+    }
+  ],
+  "expressions.make.motionStillMixed": [
+    {
+      "type": 0,
+      "value": "No motion cannot be combined with other motions. Clear the first choice first."
+    }
+  ],
+  "expressions.make.motionTooMany": [
+    {
+      "type": 0,
+      "value": "You can choose up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " motions."
+    }
+  ],
+  "expressions.make.motionUnknown": [
+    {
+      "type": 0,
+      "value": "That motion is not known. Choose again."
+    }
+  ],
+  "expressions.make.noAgents": [
+    {
+      "type": 0,
+      "value": "No agents yet"
+    }
+  ],
+  "expressions.make.noAgentsDetail": [
+    {
+      "type": 0,
+      "value": "You need an agent to make with AI. For now you can import from a photo or a link."
+    }
+  ],
+  "expressions.make.note": [
+    {
+      "type": 0,
+      "value": "Request note (optional)"
+    }
+  ],
+  "expressions.make.noteCount": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    }
+  ],
+  "expressions.make.notePlaceholder": [
+    {
+      "type": 0,
+      "value": "e.g. Make it a smiling face"
+    }
+  ],
+  "expressions.make.noteTooLong": [
+    {
+      "type": 0,
+      "value": "The request note can be up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters."
+    }
+  ],
+  "expressions.make.offline": [
+    {
+      "type": 0,
+      "value": "You are offline. You can send the request when you are back online."
+    }
+  ],
+  "expressions.make.openConversation": [
+    {
+      "type": 0,
+      "value": "Open conversation"
+    }
+  ],
+  "expressions.make.photo": [
+    {
+      "type": 0,
+      "value": "Original photo"
+    }
+  ],
+  "expressions.make.photoChange": [
+    {
+      "type": 0,
+      "value": "Choose another photo"
+    }
+  ],
+  "expressions.make.photoDenied": [
+    {
+      "type": 0,
+      "value": "Photo access is turned off. Allow photo access in device settings and try again."
+    }
+  ],
+  "expressions.make.photoDimensions": [
+    {
+      "type": 0,
+      "value": "The photo is too wide or tall. Reduce it to 4096 pixels or less and 16 million pixels or less."
+    }
+  ],
+  "expressions.make.photoEmpty": [
+    {
+      "type": 0,
+      "value": "This file is empty. Choose another photo."
+    }
+  ],
+  "expressions.make.photoMissing": [
+    {
+      "type": 0,
+      "value": "Choose an original photo."
+    }
+  ],
+  "expressions.make.photoPick": [
+    {
+      "type": 0,
+      "value": "Choose from album"
+    }
+  ],
+  "expressions.make.photoPreview": [
+    {
+      "type": 0,
+      "value": "Preview of the chosen original photo"
+    }
+  ],
+  "expressions.make.photoRule": [
+    {
+      "type": 0,
+      "value": "You can use a still PNG, JPEG, WebP or GIF of 5 MiB or less."
+    }
+  ],
+  "expressions.make.photoSize": [
+    {
+      "type": 0,
+      "value": "The photo is too large. Choose one of 5 MiB or less."
+    }
+  ],
+  "expressions.make.photoType": [
+    {
+      "type": 0,
+      "value": "Choose a PNG, JPEG, WebP or GIF photo."
+    }
+  ],
+  "expressions.make.photoUnavailable": [
+    {
+      "type": 0,
+      "value": "Could not open the album. Please try again."
+    }
+  ],
+  "expressions.make.photoUnreadable": [
+    {
+      "type": 0,
+      "value": "This photo cannot be opened. Choose another photo."
+    }
+  ],
+  "expressions.make.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "expressions.make.rosterFailed": [
+    {
+      "type": 0,
+      "value": "Could not load the agent list. Please try again."
+    }
+  ],
+  "expressions.make.sending": [
+    {
+      "type": 0,
+      "value": "Sending the request"
+    }
+  ],
+  "expressions.make.sent": [
+    {
+      "type": 0,
+      "value": "Request sent. The agent reply and approval card appear in the conversation."
+    }
+  ],
+  "expressions.make.sizeInvalid": [
+    {
+      "type": 0,
+      "value": "Check the size."
+    }
+  ],
+  "expressions.make.stepDm": [
+    {
+      "type": 0,
+      "value": "Opening the conversation with the agent"
+    }
+  ],
+  "expressions.make.stepSend": [
+    {
+      "type": 0,
+      "value": "Sending the request"
+    }
+  ],
+  "expressions.make.stepUpload": [
+    {
+      "type": 0,
+      "value": "Uploading the photo"
+    }
+  ],
+  "expressions.make.submit": [
+    {
+      "type": 0,
+      "value": "Send request"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,

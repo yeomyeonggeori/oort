@@ -5,10 +5,13 @@ import {
 import {matchesExpressionContract} from '@momo/core/features/expressions/contracts';
 import type {
   Expression,
+  ExpressionAddPolicy,
+  ExpressionDraft,
   ExpressionList,
+  ExpressionMutation,
   ExpressionVariant,
 } from '@momo/core/features/expressions/types';
-import type {ExpressionTransport} from './transport';
+import type {ExpressionRequest, ExpressionTransport} from './transport';
 import {
   emptyExpressionUsage,
   recordExpressionUse,
@@ -26,6 +29,8 @@ export interface ExpressionSnapshot {
   state: 'loading' | 'ready' | 'error' | 'offline';
   revision: number;
   usage?: ExpressionUsage;
+  /** 누가 새 그림을 올릴 수 있는가. 서버가 준 값이고, 목록을 받기 전에는 모른다. */
+  addPolicy?: ExpressionAddPolicy;
 }
 
 /** Owns metadata, pending downloads and temporary files for one signed-in scope. */
@@ -54,7 +59,11 @@ export function createPhoneExpressionStore(
   const listeners = new Set<() => void>();
   const images = new Map<string, string>();
   const pending = new Map<string, Promise<string | null>>();
-  const base = `/v1/workspaces/${encodeURIComponent(workspaceId)}/expressions`;
+  const root = `/v1/workspaces/${encodeURIComponent(workspaceId)}`;
+  const base = `${root}/expressions`;
+  // 등록 전 미리보기 파일. 목록 그림(`images`)과 따로 둔다: 변경 알림이 목록 그림을 걷어도 사람이 보고 있는
+  // 미리보기를 지우면 안 된다. 화면이 놓을 때(`discardDraftImage`)나 세션이 끝날 때만 지운다.
+  const draftFiles = new Set<string>();
   const publish = (state = snapshot.state) => {
     snapshot = {
       items:
@@ -62,6 +71,7 @@ export function createPhoneExpressionStore(
       state,
       revision: epoch,
       usage,
+      addPolicy: cache.addPolicy,
     };
     listeners.forEach(listener => listener());
   };
@@ -204,8 +214,91 @@ export function createPhoneExpressionStore(
       pending.set(key, task);
       return task;
     },
+    /** `/v1/workspaces/{id}` — 가져오기가 `…/expressions/import`·`…/expression-drafts/{id}/file` 같은 길을 이어 붙인다. */
+    root,
+    workspaceId,
+    memberId,
+    /** 올리기·가져오기·바꿔 올리기: 서버가 준 초안이 계약과 이 워크스페이스에 맞을 때만 돌려준다. */
+    async draft(request: ExpressionRequest): Promise<ExpressionDraft> {
+      const response = await transport.request(request);
+      const value = response.json as ExpressionDraft | undefined;
+      if (
+        (response.status !== 200 && response.status !== 201) ||
+        !matchesExpressionContract('Draft', value) ||
+        value?.workspaceId !== workspaceId
+      )
+        throw new Error('Expression draft unavailable');
+      return value;
+    },
+    /** 보고 고른 초안을 등록한다. 돌려받은 그림을 목록에 바로 넣고, 못 맞으면 목록을 다시 받는다. */
+    async mutate(request: ExpressionRequest): Promise<ExpressionMutation> {
+      const response = await transport.request(request);
+      const result = response.json as ExpressionMutation | undefined;
+      if (
+        (response.status !== 200 && response.status !== 201) ||
+        !matchesExpressionContract('Mutation', result) ||
+        result?.workspaceId !== workspaceId
+      )
+        throw new Error('Expression mutation unavailable');
+      const update = applyExpressionList(cache, {
+        workspaceId,
+        version: result.version,
+        baseVersion: cache.version,
+        reset: false,
+        addPolicy: cache.addPolicy,
+        items: [result.expression],
+      });
+      if (disposed) return result;
+      if (!update.applied) {
+        await refresh();
+        return result;
+      }
+      if (update.evictImageIds.length > 0) evict();
+      cache = update.cache;
+      publish('ready');
+      return result;
+    },
+    /** 등록 전 미리보기(`large`)를 임시 파일로 받는다. 못 받으면 `null` — 그때는 등록할 수 없다. */
+    async draftImage(
+      draft: ExpressionDraft,
+      variant: ExpressionVariant = 'large',
+    ): Promise<string | null> {
+      if (disposed || !online || draft.state !== 'ready') return null;
+      const media = draft.media[variant];
+      try {
+        const response = await transport.request({
+          method: 'GET',
+          path: `${root}/expression-drafts/${encodeURIComponent(
+            draft.draftId,
+          )}/image?size=${variant}&v=${media.sha256}`,
+        });
+        if (disposed || response.status !== 200) return null;
+        const bytes =
+          response.bytes ??
+          (response.bodyBase64 === undefined
+            ? null
+            : Uint8Array.from(atob(response.bodyBase64), char =>
+                char.charCodeAt(0),
+              ));
+        if (!bytes || bytes.length > media.bytes || bytes.length === 0)
+          return null;
+        const uri = files.write(
+          `draft-${++serial}.${media.mime === 'image/gif' ? 'gif' : 'png'}`,
+          bytes,
+        );
+        draftFiles.add(uri);
+        return uri;
+      } catch {
+        return null;
+      }
+    },
+    discardDraftImage(uri: string) {
+      if (draftFiles.delete(uri)) files.remove(uri);
+    },
     dispose() {
       disposed = true;
+      for (const uri of draftFiles) files.remove(uri);
+      draftFiles.clear();
       evict();
       cache = emptyExpressionCache(workspaceId, memberId);
       publish('offline');
