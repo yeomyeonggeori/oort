@@ -6079,6 +6079,44 @@ const AGENT_RUN_LEDGER_KINDS = new Set<AgentRunLedgerKnownKind>([
   "doorbell_rung",
 ]);
 
+/**
+ * 에이전트가 보고한 활동 하나의 최신 상태(ADR-0200 증보 7 7-7, openapi `AgentRunActivity`).
+ * 서버는 `?include=activity`일 때만 싣는다. **에이전트 자기 보고**이고 신뢰하지 않는 일반
+ * 텍스트다: 그릴 때는 항상 「에이전트 보고」 꼬리표와 함께, 이스케이프해서, 서버가 잰 줄
+ * (`tool_call`·`claimed`)과 한 칸에 섞지 않는다. `kind`·`status`는 서버의 닫힌 낱말이지만
+ * 클라이언트보다 서버가 먼저 낱말을 늘릴 수 있어 `string`으로 둔다(닫힌 목록과 모르는 낱말
+ * 처리는 UXUI 슬라이스 7-S4의 몫이다).
+ */
+export interface AgentRunActivity {
+  /** 에이전트가 붙인 뜻 없는 번호 이름(`a1`). 글자는 `A-Za-z0-9_-`뿐, 1~32자. */
+  id: string;
+  /** `run`·`edit`·`read`·`search`·`web`·`other`·`delegate`. */
+  kind: string;
+  /** 일의 이름(1~40자). 없으면 화면이 종류 낱말을 쓴다. */
+  label?: string;
+  /** `in_progress`·`completed`·`failed`. 끝난 run의 `in_progress`는 진행 중으로 그리지 않는다. */
+  status: string;
+  /** 그 항목이 묶은 일의 수(1~100000). */
+  n: number;
+  /** 그 id의 첫 보고 시각. 행의 `createdAtMs`는 마지막 갱신 시각이다. */
+  startedAtMs: number;
+}
+
+/** 에이전트가 보고한 계획의 한 단계(openapi `AgentRunPlanStep`). 에이전트 자기 보고다. */
+export interface AgentRunPlanStep {
+  /** 단계 이름(1~60자). */
+  text: string;
+  /** `pending`·`in_progress`·`completed`. */
+  status: string;
+}
+
+/** 종류별로 끝난 활동의 단위 합(openapi `AgentRunActivityTally`). 에이전트의 자기 보고 합이다. */
+export interface AgentRunActivityTally {
+  kind: string;
+  completed: number;
+  failed: number;
+}
+
 export interface AgentRunLedgerEvent {
   /** 읽는 순간의 1-기반 순번. 키로 쓰지 않는다(200행 상한이 오래된 stage를 지운다). */
   ordinal: number;
@@ -6091,12 +6129,24 @@ export interface AgentRunLedgerEvent {
   code?: string;
   approvalId?: string;
   actorMemberId?: string;
+  /**
+   * `activity` 행에만, 서버가 `?include=activity`일 때만 싣는다(ADR-0200 증보 7). **타입만 먼저
+   * 둔다**: 지금 파서(`agentRunLedgerFromWire`)는 이 칸을 읽지 않고(모르는 행 키는 버린다) 이
+   * 클라이언트는 `include=activity`를 보내지 않는다. 파서·행 모델은 UXUI 슬라이스(7-S4)가 채운다.
+   */
+  activity?: AgentRunActivity;
+  /** `plan` 행에만(같은 조건): 최신 계획 전체. 빈 배열은 에이전트가 비웠다는 뜻이다. */
+  plan?: AgentRunPlanStep[];
   createdAtMs: number;
 }
 
 export interface AgentRunLedger {
   runId: string;
   events: AgentRunLedgerEvent[];
+  /** `?include=activity`일 때만(ADR-0200 증보 7). 타입만 먼저 둔다 — 파서는 7-S4가 채운다. */
+  activityTally?: AgentRunActivityTally[];
+  /** `?include=activity`일 때만: 합계가 보이는 끝난 활동보다 커서 일부는 합계로만 남았다. */
+  activityRowsTrimmed?: boolean;
 }
 
 export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
