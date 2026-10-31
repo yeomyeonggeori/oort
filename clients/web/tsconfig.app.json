@@ -19,7 +19,9 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@momo/core/*": ["../../packages/momo-core/src/*"]
+      "@momo/core/*": ["../../packages/momo-core/src/*"],
+      "@formatjs/icu-messageformat-parser": ["./node_modules/@formatjs/icu-messageformat-parser"],
+      "@formatjs/intl": ["./node_modules/@formatjs/intl"]
     }
   },
   "include": ["src"]
