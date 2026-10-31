@@ -115,6 +115,21 @@ def main():
     if "token=gate" in json.dumps(value):
         raise SystemExit("expression sampler: the link's query reached the response")
     record("POST", "/expressions/import", 200, value)
+    # Photo route (#4941, ADR-0218 section 8 H9). The gate has no image model to call, so it samples
+    # the two answers a deployment without one gives on the real routes: the availability read says
+    # no model is connected, and a well-formed photo request is told so with the closed 409 code
+    # (nothing is sent anywhere, nothing is stored).
+    value, _ = request("GET", prefix + "/expressions/photo-model")
+    if value.get("available") is not False or value.get("provider") is not None:
+        raise SystemExit("expression sampler: the gate deployment must have no image model connected")
+    record("GET", "/expressions/photo-model", 200, value)
+    photo_metadata = {"branch": "cutout", "acknowledgedProvider": "openai", "name": "photo_" + uuid.uuid4().hex[:20],
+                      "displayName": "contract photo", "tags": [], "subjectMemberId": None}
+    value, _ = request("POST", prefix + "/expressions/photo-drafts", multipart(photo_metadata),
+                       f"multipart/form-data; boundary={boundary}", expected=409)
+    if value.get("error", {}).get("code") != "image_model_unavailable":
+        raise SystemExit("expression sampler: a photo request without an image model must be image_model_unavailable")
+    record("POST", "/expressions/photo-drafts", 409, value)
     value, _ = request("POST", prefix + expression_path + "/report", {"reason": "other"})
     record("POST", "/expressions/{id}/report", 200, value)
     value, _ = request("DELETE", prefix + expression_path)

@@ -369,6 +369,187 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/workspaces/{ws}/expressions/photo-model:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    get:
+      operationId: getExpressionPhotoModel
+      summary: Which image model a photo would be sent to (ADR-0218 section 8 H9)
+      description: >
+        Says whether the team has connected an image model that can draw from a
+        photo, and if so which company would receive the photo. The form asks
+        before it shows the photo field. `available` and `provider` stand and fall
+        together. The key is never read out: only the company's name is. A team key
+        is an image model only when it is a plain API key for `api.openai.com`
+        (OpenAI) or `generativelanguage.googleapis.com` (Gemini); an OAuth
+        subscription, an Anthropic key, a mock mode or any other host is not one.
+        `canManage` is true for an instance operator, who can connect a model in the
+        AI settings; anyone else is told to ask the operator. Registering a picture
+        by link or upload never needs a model.
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: The image model state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionPhotoModel'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: '`expression_role_required` - not a human member.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Another workspace's bearer; the same body as every expression route.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/workspaces/{ws}/expressions/photo-drafts:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    post:
+      operationId: createExpressionPhotoDraft
+      summary: Draw a picture from the caller's own photo with the team image model (ADR-0218 section 8 H9)
+      description: >
+        Sends one photo of the caller's to the team-connected image model (OpenAI or
+        Gemini) and stages what comes back as the same direct draft every other way
+        of adding a picture ends in (`GET /expression-drafts/{draftId}`, activate
+        with `POST /expressions`). `branch` is `cutout` (the subject as it is, the
+        background removed) or `caricature` (a new caricature drawn from the photo).
+        The instructions sent to the model are fixed text written by the server;
+        there is no free-text field. The cost is the team's.
+
+
+        The photo is the caller's own: the file of this request, or an attachment the
+        caller uploaded to a channel they are in (JSON body, the `from-attachment`
+        rule); anyone else's photo is the same `404`. It is opened in the isolated
+        decoder, turned upright, shrunk to 1024 pixels and encoded again from its
+        pixels, so its EXIF, GPS, profile, comment and trailing bytes never leave.
+        `acknowledgedProvider` is the company the caller was told the photo goes to;
+        if the team key now reaches another one nothing is sent (`409
+        image_model_changed`). Authority, the add policy and the live-draft limit
+        are proved before the body is read; one photo per member and four per
+        instance may be in flight (`503` with `Retry-After` otherwise). The model has
+        at most 120 seconds. `cutout` in the answer says what the server did with the
+        background: `model` (the model drew a transparent one), `erased` (removed
+        here from a single flat colour), `unchanged` (it could not be removed and the
+        picture is as drawn), or null for a caricature. The picture in `draft` is
+        exactly what registering would save.
+
+
+        No answer carries a word a provider wrote. `subjectMemberId` must be null or
+        the caller.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - metadata
+              - file
+              properties:
+                metadata:
+                  $ref: '#/components/schemas/ExpressionPhotoMetadata'
+                file:
+                  type: string
+                  format: binary
+            encoding:
+              metadata:
+                contentType: application/json
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpressionPhotoAttachmentRequest'
+      responses:
+        '201':
+          description: Ready draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionPhotoDraftResult'
+        '400':
+          description: '`expression_invalid` - malformed body, branch or provider.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            `expression_role_required` - not a human with the add role (guest, agent,
+            admins-only policy), or `subjectMemberId` is another member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: >
+            Another workspace's bearer, or a photo that is not the caller's (someone
+            else's, another channel's, deleted); one body for all of them.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: >
+            `image_model_unavailable` (no image model is connected, or the connected
+            key cannot use one), `image_model_changed` (the company the caller agreed
+            to is not the one the key reaches now), `expression_name_reserved`, or
+            `expression_quota` (4 live drafts already).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: '`expression_media_invalid` - the photo is over 5 MiB.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '415':
+          description: '`expression_media_invalid` - not a still PNG, JPEG, WebP or GIF.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`image_model_refused` - the provider declined this photo.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '502':
+          description: >
+            `image_model_failed` - a provider error, an answer that is not the
+            documented shape, one over the size bounds, or an address the egress
+            policy refused.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: >
+            One photo per member and four per instance are already in flight, or the
+            decoder is busy; retry after the `Retry-After` seconds. Nothing was sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: >
+            `image_model_timeout` - no answer within 120 seconds. The provider may
+            have finished (and billed) the work.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expressions/from-attachment:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -15639,6 +15820,163 @@ components:
           minLength: 36
           maxLength: 36
           pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+    ExpressionPhotoModel:
+      type: object
+      additionalProperties: false
+      required:
+      - available
+      - provider
+      - branches
+      - canManage
+      properties:
+        available:
+          type: boolean
+        provider:
+          nullable: true
+          type: string
+          enum:
+          - openai
+          - gemini
+          - null
+        branches:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum:
+            - cutout
+            - caricature
+        canManage:
+          type: boolean
+    ExpressionPhotoMetadata:
+      type: object
+      additionalProperties: false
+      required:
+      - branch
+      - acknowledgedProvider
+      - name
+      - displayName
+      - tags
+      - subjectMemberId
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 30
+          pattern: ^[a-z0-9_-]{2,30}$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 8
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          uniqueItems: true
+        subjectMemberId:
+          oneOf:
+          - type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          - nullable: true
+            enum:
+            - null
+        branch:
+          type: string
+          enum:
+          - cutout
+          - caricature
+        acknowledgedProvider:
+          type: string
+          enum:
+          - openai
+          - gemini
+    ExpressionPhotoAttachmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - branch
+      - acknowledgedProvider
+      - name
+      - displayName
+      - tags
+      - subjectMemberId
+      - attachmentId
+      - channelId
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 30
+          pattern: ^[a-z0-9_-]{2,30}$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 8
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          uniqueItems: true
+        subjectMemberId:
+          oneOf:
+          - type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          - nullable: true
+            enum:
+            - null
+        branch:
+          type: string
+          enum:
+          - cutout
+          - caricature
+        acknowledgedProvider:
+          type: string
+          enum:
+          - openai
+          - gemini
+        attachmentId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        channelId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+    ExpressionPhotoDraftResult:
+      type: object
+      additionalProperties: false
+      required:
+      - draft
+      - cutout
+      properties:
+        draft:
+          $ref: '#/components/schemas/ExpressionDraft'
+        cutout:
+          nullable: true
+          type: string
+          enum:
+          - model
+          - erased
+          - unchanged
+          - null
     ExpressionImportRequest:
       type: object
       additionalProperties: false
