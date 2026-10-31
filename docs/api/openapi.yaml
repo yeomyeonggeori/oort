@@ -11305,7 +11305,10 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
-          description: Not the author/channel member, or workspace scope mismatch.
+          description: >
+            Not the author/channel member, or workspace scope mismatch. Also an
+            approval card (`approval_request`): its sentence is the server's, so
+            its author may neither rewrite it nor stream into it (#4980).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
