@@ -273,7 +273,7 @@ export interface UnfurlCardOptions {
 
 // The server strips these from titles it extracts now; rows stored before that
 // still carry them, and a right-to-left override can reorder what follows it.
-const BIDI_CONTROLS = /[‪-‮⁦-⁩]/g;
+const BIDI_CONTROLS = /[\u202A-\u202E\u2066-\u2069]/g;
 
 function plainText(value: string | undefined): string | undefined {
   if (!value) return undefined;

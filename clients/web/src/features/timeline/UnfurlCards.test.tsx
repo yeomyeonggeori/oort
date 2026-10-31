@@ -313,6 +313,20 @@ describe("UnfurlCardView", () => {
     expect(componentSource).not.toContain("dangerouslySetInnerHTML");
   });
 
+  it("keeps raw direction-control characters out of the sources that handle page text", () => {
+    // Writing the character itself (not its backslash-u escape) in a regex hides it from a reader and
+    // reorders the code around it; the model strips these from page text, so its own source
+    // must not carry them.
+    const sources = [
+      "../../../../../packages/momo-core/src/features/timeline/unfurl.ts",
+      "./UnfurlCards.tsx",
+      "./useUnfurlImage.ts",
+    ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"));
+    for (const source of sources) {
+      expect(source).not.toMatch(/[\u202A-\u202E\u2066-\u2069\u200B-\u200F\u2028\u2029\uFEFF]/);
+    }
+  });
+
   it("strips direction controls from page text before it is drawn", () => {
     const output = view({ ...base, title: "\u202Egnp.exe" });
     expect(output).toContain(">gnp.exe<");
