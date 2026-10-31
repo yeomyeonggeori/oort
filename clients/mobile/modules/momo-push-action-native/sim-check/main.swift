@@ -179,8 +179,8 @@ do {
     "an approval id that is not a UUID is refused")
   check(
     MomoPushActionContract.reasons
-      == ["dm", "mention", "approval_request", "resume_offer", "work_session_idle", "work_run_done"],
-    "the reason vocabulary is exactly the relay's six (the JS contract test holds the same list)")
+      == ["dm", "mention", "approval_request", "resume_offer", "work_session_idle", "work_run_done", "thread_reply"],
+    "the reason vocabulary is exactly the relay's seven (the JS contract test holds the same list)")
   for reason in MomoPushActionContract.reasons {
     check(MomoPushActionEnvelope.parse(userInfo: payload(reason: reason)) != nil, "reason \(reason) is accepted")
   }

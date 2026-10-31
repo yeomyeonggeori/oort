@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
-use momo_push::{DispatchOutcome, PushDispatch, PushDispatcher};
+use momo_push::{DispatchOutcome, PushDispatch, PushDispatcher, RELAY_RATE_LIMITED};
 
 /// The two headers the relay authenticates with (`App.swift:31-32`).
 const SERVER_ID_HEADER: &str = "X-Momo-Server-Id";
@@ -134,7 +134,12 @@ pub fn classify_relay_status(status: u16) -> Option<DispatchOutcome> {
     if status == 200 {
         return None;
     }
-    if status == 429 || status >= 500 {
+    if status == 429 {
+        return Some(DispatchOutcome::TransientFailure(
+            RELAY_RATE_LIMITED.to_string(),
+        ));
+    }
+    if status >= 500 {
         return Some(DispatchOutcome::TransientFailure(format!("HTTP {status}")));
     }
     Some(DispatchOutcome::PermanentFailure {

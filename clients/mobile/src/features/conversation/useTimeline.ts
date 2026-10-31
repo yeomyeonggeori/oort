@@ -62,7 +62,9 @@ import {
   type ReactionMap,
 } from '@momo/core/features/timeline/reactions';
 import {endedStreamRunIds} from '@momo/core/features/timeline/streamStop';
+import type {UnfurlMap} from '@momo/core/features/timeline/unfurl';
 import {seedEndedRuns} from '../agents/endedRuns';
+import {useMessageUnfurls} from './useMessageUnfurls';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {ChannelRail} from '../../realtime/channelRail';
 import {hapticScope} from '../../lib/haptics';
@@ -236,6 +238,13 @@ export interface UseTimelineResult {
    * back where it was — the caller turns the error into the sentence.
    */
   togglePin: (message: Message) => Promise<void>;
+  /**
+   * 링크 카드(ADR-0170 D5, #4883) — `message id(소문자) -> 서버 투영`. 빈 목록은 묘비다. 메시지 줄이 아니라
+   * 곁가지라 `state` 에 들어 있지 않다.
+   */
+  unfurls: UnfurlMap;
+  /** 작성자가 이 메시지의 링크 미리보기를 모두에게서 지운다. **던진다** — 문장은 부른 쪽이 고른다. */
+  removeUnfurls: (message: Message) => Promise<void>;
 }
 
 export {RECOVERY_MARKER_TTL_MS};
@@ -375,6 +384,16 @@ export function useTimeline(
   // person moved on. Without it a POST for channel A merges into channel B.
   const channelRef = useRef<string | null>(null);
   const sendEpochRef = useRef(0);
+  // 링크 카드(#4883). 읽기 답이 방을 옮긴 뒤에 오면 버리도록 지금 방을 묻는 함수를 넘긴다.
+  const currentChannel = useCallback(() => channelRef.current, []);
+  const {
+    unfurls,
+    hydrate: hydrateUnfurls,
+    reset: resetUnfurls,
+    applyFrame: applyUnfurlFrame,
+    clear: clearUnfurls,
+    remove: removeUnfurls,
+  } = useMessageUnfurls(workspaceId, currentChannel);
 
   // Which echoes are thread replies: `clientMsgId -> rootId`. A side map rather
   // than a field on `PendingMessage`, so the core's pending model stays as it
@@ -616,8 +635,9 @@ export function useTimeline(
       );
       setReactions(reactionsRef.current);
       applyPins(removePin(pinsRef.current, message.id));
+      clearUnfurls(message.id);
     },
-    [workspaceId, applyBatch, applyPins],
+    [workspaceId, applyBatch, applyPins, clearUnfurls],
   );
 
   const loadReplies = useCallback(
@@ -636,11 +656,12 @@ export function useTimeline(
           cursor,
         );
         applyBatch(page.messages);
+        hydrateUnfurls(page.messages, channel);
         if (page.nextCursor === undefined) break;
         cursor = page.nextCursor;
       }
     },
-    [workspaceId, applyBatch],
+    [workspaceId, applyBatch, hydrateUnfurls],
   );
 
   const sendReply = useCallback(
@@ -717,6 +738,7 @@ export function useTimeline(
           verdict,
         );
         applyBatch(page.messages);
+        hydrateUnfurls(page.messages, channel);
         const maxSeq = page.messages.reduce((m, x) => Math.max(m, x.seq), after);
         if (maxSeq <= after) break;
         after = maxSeq;
@@ -724,7 +746,7 @@ export function useTimeline(
       }
       return {fetched: total, verdict};
     },
-    [workspaceId, applyBatch],
+    [workspaceId, applyBatch, hydrateUnfurls],
   );
 
   useEffect(() => {
@@ -770,6 +792,7 @@ export function useTimeline(
     reactionsRef.current = emptyReactions();
     setReactions(reactionsRef.current);
     applyPins(emptyPins());
+    resetUnfurls();
 
     // 복구되지 않은 (재)구독은 REST 로 꼬리를 메운다. 머리 페이지가 이미 왔으면
     // 곧바로, 아직이면 **머리가 온 뒤** 그 끝에서(#2633).
@@ -803,6 +826,7 @@ export function useTimeline(
       .then(page => {
         if (cancelled) return;
         applyBatch(page.messages);
+        hydrateUnfurls(page.messages, channelId);
         setReachedStart(page.nextBefore === undefined);
         setStatus('ready');
         setLoadedChannelId(channelId);
@@ -914,6 +938,7 @@ export function useTimeline(
         // `message.unpinned` is published for a delete, so this is the only
         // place the pin list learns about it.
         applyPins(removePin(pinsRef.current, messageId));
+        clearUnfurls(messageId);
       },
       onReaction: event => {
         if (cancelled) return;
@@ -938,6 +963,11 @@ export function useTimeline(
           applyPins(removePin(pinsRef.current, event.payload.message_id));
         }
       },
+      // ADR-0170 D5 — 서버가 만든 카드(또는 작성자의 지우기)가 같은 레일로 온다. 전체 투영이라 통째로 바꾼다.
+      onUnfurl: event => {
+        if (cancelled) return;
+        applyUnfurlFrame(event);
+      },
     });
 
     return () => {
@@ -955,6 +985,10 @@ export function useTimeline(
     loadPins,
     addMarker,
     updatePending,
+    hydrateUnfurls,
+    resetUnfurls,
+    applyUnfurlFrame,
+    clearUnfurls,
     reloadNonce,
   ]);
 
@@ -984,6 +1018,7 @@ export function useTimeline(
       // 위로 읽은 쪽은 `applyBatch` 를 지나지 않는다 — 그 줄의 id 도 「이미 든 줄」이다(끊긴 사이 그 오래된 줄이 수정돼 되쏘기로 오면 새 줄이 아니다).
       for (const message of page.messages) knownIdsRef.current.add(messageIdKey(message.id));
       setState(s => reconcileMessages(s, page.messages));
+      hydrateUnfurls(page.messages, channelId);
       if (page.nextBefore === undefined) setReachedStart(true);
     } catch {
       // Silent: the rows already on screen are still true, and the person can
@@ -992,7 +1027,14 @@ export function useTimeline(
     } finally {
       setLoadingOlder(false);
     }
-  }, [workspaceId, channelId, state.oldestSeq, loadingOlder, reachedStart]);
+  }, [
+    workspaceId,
+    channelId,
+    state.oldestSeq,
+    loadingOlder,
+    reachedStart,
+    hydrateUnfurls,
+  ]);
 
   const reload = useCallback(() => setReloadNonce(n => n + 1), []);
 
@@ -1022,5 +1064,7 @@ export function useTimeline(
     pinsStatus,
     reloadPins,
     togglePin,
+    unfurls,
+    removeUnfurls,
   };
 }
