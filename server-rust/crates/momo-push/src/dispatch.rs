@@ -48,6 +48,17 @@ pub enum PushReason {
     /// `work_complete_push` switch and ADR-0120 부록 A-8 rules as
     /// `work_session_idle`.
     WorkRunDone,
+    /// A new reply in a thread this member follows (ADR-0206 증보 1 F4, #4889): the seventh
+    /// reason. Sent to a member whose `thread_follow` row is `auto` or `followed` — never to the
+    /// replier, never to someone who stopped following, and never when a stronger reason (a mention,
+    /// a DM, an agent's answer to them) already speaks for the same message. Same category as a plain
+    /// message (`momo.message`), so the lock screen keeps its reply button; the envelope's
+    /// `thread_id` is the thread's root, which is where a tap goes.
+    ///
+    /// **Deploy order (ADR-0120 A-6):** the relay first, then migrate, the notifier, the server, the
+    /// app. An old relay answers an unknown reason with a closed-vocabulary refusal, so the
+    /// notifier's first such dispatch would be settled as a permanent failure and the push lost.
+    ThreadReply,
 }
 
 impl PushReason {
@@ -59,6 +70,7 @@ impl PushReason {
             PushReason::ResumeOffer => "resume_offer",
             PushReason::WorkSessionIdle => "work_session_idle",
             PushReason::WorkRunDone => "work_run_done",
+            PushReason::ThreadReply => "thread_reply",
         }
     }
 
@@ -71,6 +83,7 @@ impl PushReason {
             "resume_offer" => Some(PushReason::ResumeOffer),
             "work_session_idle" => Some(PushReason::WorkSessionIdle),
             "work_run_done" => Some(PushReason::WorkRunDone),
+            "thread_reply" => Some(PushReason::ThreadReply),
             _ => None,
         }
     }
