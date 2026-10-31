@@ -11625,8 +11625,11 @@ paths:
       summary: List derived unfurl cards for a message.
       description: >
         Channel members. Failed/blocked cards are present so a client can choose
-        silence (ADR-0170 D5). Image bytes are not inlined — `imageUrl` is the
-        authenticated proxy path.
+        silence (ADR-0170 D5); a page that gave nothing to show (no title and no
+        picture) is recorded the same quiet way, as `failed` with no fields
+        (ADR-0170 amendment 2026-10-31 D11). Image bytes are not inlined —
+        `imageUrl` and `iconUrl` are the authenticated proxy paths. A message
+        gets cards for its first three distinct links only (D10), in link order.
       security:
         - bearerAuth: []
       parameters:
@@ -11720,6 +11723,50 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "404":
           description: Card or image not available (including SSRF-blocked).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/unfurls/{unfurlId}/icon:
+    get:
+      tags: [unfurls]
+      operationId: getUnfurlIcon
+      summary: Stream the unfurl site icon through this origin.
+      description: >
+        ADR-0170 amendment 2026-10-31 D9. Channel members, same authorization as
+        the preview image. The client must not fetch the remote host (CSP) and is
+        never given the icon's own address. The icon is fetched like the picture
+        (public addresses only, every redirect hop re-checked) but on port 443
+        only, with a 512 KiB cap. Only image/png, jpeg, gif, webp, avif and ICO
+        (`image/x-icon`, `image/vnd.microsoft.icon`) are proxied; SVG never is.
+        A 404 for an address that failed (not found, refused, too slow, wrong type)
+        is remembered by the server for a few minutes, so asking again does not
+        reach the remote site. A request that must fetch spends the member's fetch
+        budget and a place among the fetches in flight, and is answered 429 when
+        either is exhausted (see `RateLimited`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: unfurlId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Icon bytes.
+          content:
+            "image/*":
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Card or icon not available (including a refused destination).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -11973,6 +12020,9 @@ paths:
         scope may call this route on the same membership predicate as history
         (ADR-0173). Hosted connection credentials are refused here.
 
+        Every page carries `following`: whether the caller follows this thread
+        (ADR-0206 증보 1 F8, `PUT …/follow`). An agent caller always reads `false`.
+
 
         A developer token with `dev:messages:read` may call this route as its
         person (ADR-0216 D4 L5, `oort read --thread`), under the same channel rule
@@ -12032,6 +12082,121 @@ paths:
             `dev:messages:read`), `dev_access_denied` (the workspace switch no
             longer admits its member's role) or `dev_route_not_allowed` (the
             `{workspaceId}` is not the token's own).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Root absent from this channel (including cross-channel roots).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/messages/{rootId}/follow:
+    put:
+      tags: [messages]
+      operationId: followThread
+      summary: Follow a thread (직접 따라가기).
+      description: >
+        ADR-0206 증보 1 F8 (#4889). Marks the caller as following the thread whose
+        root is `rootId`, whatever the state was before: an automatic follow
+        becomes a direct one, and a thread the caller stopped following is followed
+        again — this is the only way back from `DELETE`, because nothing automatic
+        (a new reply, a new mention, being the root's author) re-follows it. Idempotent;
+        no body. A personal setting: nothing is broadcast, and other devices see it on
+        their next read of the thread (`getThreadReplies` → `following`).
+
+        Guard order is the thread read's: active channel membership (403, the same
+        bytes for a channel that does not exist), then the root (404 when it is absent
+        or in another channel, 400 when it is itself a reply; a deleted root is
+        accepted), then DM channels (400 `thread_follow_not_applicable`: every
+        message already notifies there).
+
+        Human bearer only. An agent bearer is refused whatever its scopes, and a
+        developer token is refused (the route is not on its closed table).
+
+        Following does not send a push by itself; the new-reply push for followed
+        threads is the `thread_reply` reason (ADR-0206 증보 1 F4–F6), served after
+        its notifier slice.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: rootId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The caller now follows the thread.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadFollow"
+        "400":
+          description: >
+            Invalid id, the selected root is itself a reply, or the channel is a DM
+            (`error.code` `thread_follow_not_applicable`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a channel member, workspace scope mismatch, or a non-human bearer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Root absent from this channel (including cross-channel roots).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    delete:
+      tags: [messages]
+      operationId: unfollowThread
+      summary: Stop following a thread (그만 따라가기).
+      description: >
+        ADR-0206 증보 1 F8 (#4889). Marks the caller as not following the thread, and
+        that choice sticks: no later reply, mention or authorship follows it again
+        until `PUT` does. The record is kept, not removed — removing it would let the
+        automatic follow make it again on the next reply. Stopping only silences the
+        thread-reply push; a mention of the caller, a keyword hit, or a channel-level
+        `all` setting still reaches them by their own rules. Idempotent; no body.
+        Same guards, same refusals and same bearer rule as `PUT`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: rootId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The caller no longer follows the thread.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadFollow"
+        "400":
+          description: >
+            Invalid id, the selected root is itself a reply, or the channel is a DM
+            (`error.code` `thread_follow_not_applicable`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a channel member, workspace scope mismatch, or a non-human bearer.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -14765,8 +14930,17 @@ components:
         person and 600 for an agent credential; scheduled-message creates and edits,
         default 60; attachment upload starts, default 60. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
-        use) and every read are not budgeted. Retrying with the same `clientMsgId`
-        after a 429 is safe. `POST /v1/join` also has a per-account password-guess
+        use) and every read except the two below are not budgeted. Retrying with the
+        same `clientMsgId` after a 429 is safe. The link-card proxies
+        (`GET …/unfurls/{id}/image` and `GET …/unfurls/{id}/icon`, ADR-0170 증보 D13,
+        #4881) have a per-member budget of fetches **from the card's remote site**,
+        default 240 per window (`RATE_LIMIT_UNFURL_PROXY_PER_MEMBER`, 0 removes it),
+        shared by both routes and spent only by a request that really would fetch: a
+        picture already held by the server, and an address that failed in the last few
+        minutes, cost the remote site nothing and spend nothing. Those two routes also
+        answer 429 with `Retry-After: 1` when the server is already fetching as many
+        remote images as it allows at once (16), whoever asks; ask again shortly. A
+        client shows its fallback meanwhile. `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
         already has an active account, is spent before the password is compared
         (a right password counts too), and answers 429 without comparing once
@@ -24368,12 +24542,44 @@ components:
         status:
           type: string
           enum: [pending, ok, failed, blocked]
-        title: {type: string}
-        description: {type: string}
+        title: {type: string, description: "At most 180 characters, whitespace collapsed."}
+        description:
+          type: string
+          description: At most 280 characters. Absent when it would repeat the title.
         domain: {type: string}
         imageUrl:
           type: string
           description: Authenticated proxy path on this origin. Never a remote host.
+        siteName:
+          type: string
+          description: >
+            og:site_name, at most 100 characters (ADR-0170 amendment 2026-10-31).
+            Absent when the page has none. Every key from here to `isVideo` is
+            optional; an older client that ignores them keeps working.
+        iconUrl:
+          type: string
+          description: >
+            Authenticated proxy path on this origin for the site icon
+            (`/v1/workspaces/{id}/unfurls/{id}/icon`). Never a remote host and
+            never the icon's own address. Absent when the card has no icon.
+        imageWidth:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: >
+            Pixels. og:image:width of the first og:image, or the width the image
+            proxy measured when it first received the picture. Present together
+            with `imageHeight` or not at all.
+        imageHeight:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: Pixels. See `imageWidth`.
+        isVideo:
+          type: boolean
+          description: >
+            `true` when og:type is `video.*` or twitter:card is `player`. The key
+            is absent otherwise (absent means not known to be a video).
 
     MessageUnfurlList:
       type: object
@@ -24847,7 +25053,7 @@ components:
 
     ThreadRepliesPage:
       type: object
-      required: [messages]
+      required: [messages, following]
       properties:
         messages:
           type: array
@@ -24858,6 +25064,24 @@ components:
           type: integer
           format: int64
           description: Last seq in this page when more replies remain; pass as `cursor`.
+        following:
+          type: boolean
+          description: >
+            Whether the caller follows this thread (ADR-0206 증보 1 F8): an automatic
+            or a direct follow. A thread the caller stopped following, and a thread
+            they never joined, both read `false`. Present on every page; a server that
+            predates it omits the key, which a client reads as `false`.
+
+    ThreadFollow:
+      type: object
+      required: [following]
+      properties:
+        following:
+          type: boolean
+          description: >
+            The caller's follow state after the write: `true` after `PUT …/follow`,
+            `false` after `DELETE …/follow`. An automatic and a direct follow are not
+            told apart.
 
     WorkspaceMessageSearchHit:
       type: object

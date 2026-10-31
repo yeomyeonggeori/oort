@@ -851,6 +851,15 @@ async fn finish_send_in_tx(
         _ => None,
     };
 
+    // ADR-0206 증보 1 F2 — a reply the thread counts follows the thread (same tx, one call).
+    crate::thread_follow::auto_follow_in_tx(
+        &mut *conn,
+        workspace_id,
+        &message,
+        threads == ThreadPolicy::Maintain,
+    )
+    .await?;
+
     // Read AFTER the binding the caller performed and BEFORE the payload is
     // built, which is the only ordering that makes the broadcast describe the
     // row: an earlier read would publish a message with no files, and a later

@@ -5,7 +5,8 @@
 //! the check and the socket. Redirects are followed by this module, never by
 //! reqwest, because each Location has to go through the same guard.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -13,12 +14,22 @@ use momo_webhook::{
     validated_resolved_addresses, validated_url, HostResolver, OutboundUrl, OutboundUrlError,
     SystemHostResolver,
 };
+use tokio::sync::Semaphore;
 
 pub const HTML_MAX_BYTES: usize = 512 * 1024;
 pub const IMAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
+/// A site icon is shown at a few dozen pixels; ADR-0170 amendment D9 gives it a tenth of a picture.
+pub const ICON_MAX_BYTES: usize = 512 * 1024;
 pub const MAX_REDIRECTS: u32 = 3;
 pub const UNFURL_USER_AGENT: &str = "oort-unfurl/1";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+/// A name server that has not answered in this long is as good as down. `getaddrinfo` normally
+/// answers in milliseconds; without a deadline a slow one held a request for as long as it liked
+/// (#4881 security review M-2).
+const DNS_DEADLINE: Duration = Duration::from_secs(3);
+/// Name lookups running at once, **including ones that were given up on at the deadline** but
+/// whose thread is still waiting inside `getaddrinfo`. See [`BoundedResolver`].
+const MAX_DNS_LOOKUPS: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FetchKind {
@@ -30,6 +41,11 @@ pub enum FetchKind {
     /// only, on every hop**, and a refusal at the very first hop is told apart
     /// ([`FetchError::OriginBlocked`]) from a refusal after a redirect.
     Source,
+    /// A link card's site icon (ADR-0170 amendment 2026-10-31 D9). The guard is the picture's
+    /// (public addresses only, https in production, every hop re-checked, address pinned) and the
+    /// rules are narrower in two ways: **port 443 only, on every hop** (the rule `Source` has),
+    /// and a body of at most [`ICON_MAX_BYTES`]. The picture kind keeps its own rules.
+    Icon,
 }
 
 impl FetchKind {
@@ -37,6 +53,7 @@ impl FetchKind {
         match self {
             FetchKind::Html => HTML_MAX_BYTES,
             FetchKind::Image | FetchKind::Source => IMAGE_MAX_BYTES,
+            FetchKind::Icon => ICON_MAX_BYTES,
         }
     }
 }
@@ -82,17 +99,38 @@ pub trait UnfurlHttp: Send + Sync {
     async fn fetch(&self, url: &str, kind: FetchKind) -> Result<Fetched, FetchError>;
 }
 
-/// Production transport: OutboundHTTPPolicy + address pin + hop-by-hop redirect.
+/// Production transport: OutboundHTTPPolicy + address pin + hop-by-hop redirect, with a deadline
+/// and a ceiling on name lookups ([`BoundedResolver`]).
 pub struct SafeUnfurlTransport {
     allow_development_http: bool,
     timeout: Duration,
+    resolver: BoundedResolver,
 }
 
 impl SafeUnfurlTransport {
     pub fn new(allow_development_http: bool, timeout: Duration) -> SafeUnfurlTransport {
+        SafeUnfurlTransport::with_lookup(
+            allow_development_http,
+            timeout,
+            Arc::new(SystemLookup),
+            DNS_DEADLINE,
+            MAX_DNS_LOOKUPS,
+        )
+    }
+
+    /// The same transport over any name lookup, so a test can hold one open (or never answer)
+    /// without a network.
+    fn with_lookup(
+        allow_development_http: bool,
+        timeout: Duration,
+        lookup: Arc<dyn NameLookup>,
+        dns_deadline: Duration,
+        max_dns_lookups: usize,
+    ) -> SafeUnfurlTransport {
         SafeUnfurlTransport {
             allow_development_http,
             timeout,
+            resolver: BoundedResolver::new(lookup, dns_deadline, max_dns_lookups),
         }
     }
 
@@ -108,12 +146,78 @@ impl UnfurlHttp for SafeUnfurlTransport {
             url,
             kind,
             self.allow_development_http,
-            &SystemHostResolver,
+            &self.resolver,
             &ReqwestGet {
                 timeout: self.timeout,
             },
         )
         .await
+    }
+}
+
+/// How a name becomes addresses, one level below the guard's [`HostResolver`]. The production
+/// lookup is `getaddrinfo` ([`SystemLookup`]); the trait exists so a lookup can be handed to a
+/// task of its own and so a test can stand one in.
+#[async_trait::async_trait]
+trait NameLookup: Send + Sync + 'static {
+    async fn lookup(&self, authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError>;
+}
+
+struct SystemLookup;
+
+#[async_trait::async_trait]
+impl NameLookup for SystemLookup {
+    async fn lookup(&self, authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError> {
+        SystemHostResolver.resolve(authority).await
+    }
+}
+
+/// The resolver the transport hands the guard: a deadline on every lookup, and a ceiling on how
+/// many run at once (#4881 security review M-2).
+///
+/// `tokio::net::lookup_host` runs `getaddrinfo` on the blocking pool. Dropping its future at the
+/// deadline frees the *request* but not that thread: a name server that never answers would pin
+/// one pool thread for every request that asked, however quickly each request gave up. So the
+/// lookup runs on a task of its own that **owns a permit until `getaddrinfo` really returns**. At
+/// most `max_running` threads can be held that way, abandoned lookups included, and a lookup that
+/// finds no free place fails at once instead of queueing behind them. Both outcomes read to the
+/// guard as an unresolvable name (`Failed("dns")`), which the worker retries and the proxy
+/// remembers for a few minutes.
+///
+/// It wraps the transport's resolver only. `SystemHostResolver` itself is shared with webhook
+/// delivery and the doorbell and is left as it was.
+struct BoundedResolver {
+    lookup: Arc<dyn NameLookup>,
+    deadline: Duration,
+    running: Arc<Semaphore>,
+}
+
+impl BoundedResolver {
+    fn new(lookup: Arc<dyn NameLookup>, deadline: Duration, max_running: usize) -> BoundedResolver {
+        BoundedResolver {
+            lookup,
+            deadline,
+            running: Arc::new(Semaphore::new(max_running)),
+        }
+    }
+}
+
+impl HostResolver for BoundedResolver {
+    async fn resolve(&self, authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError> {
+        let Ok(place) = Arc::clone(&self.running).try_acquire_owned() else {
+            return Err(OutboundUrlError::ResolutionFailed);
+        };
+        let lookup = Arc::clone(&self.lookup);
+        let authority = authority.to_string();
+        let task = tokio::spawn(async move {
+            let _place = place;
+            lookup.lookup(&authority).await
+        });
+        match tokio::time::timeout(self.deadline, task).await {
+            Ok(Ok(answer)) => answer,
+            // The deadline passed (the task carries on, holding its place) or the lookup panicked.
+            Ok(Err(_)) | Err(_) => Err(OutboundUrlError::ResolutionFailed),
+        }
     }
 }
 
@@ -208,7 +312,7 @@ impl PinnedGet for ReqwestGet {
 fn accept_for(kind: FetchKind) -> &'static str {
     match kind {
         FetchKind::Html => "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
-        FetchKind::Image | FetchKind::Source => "image/*,*/*;q=0.1",
+        FetchKind::Image | FetchKind::Source | FetchKind::Icon => "image/*,*/*;q=0.1",
     }
 }
 
@@ -266,8 +370,11 @@ async fn fetch_guarded<R: HostResolver, G: PinnedGet>(
         };
         // ADR-0218 D5 (planner, 10-30): an imported picture is fetched on 443 only, on
         // every hop. An explicit other port would let the status codes of this endpoint
-        // map a public host's open ports. Judged before any DNS query.
-        if kind == FetchKind::Source && parsed.port.is_some_and(|port| port != 443) {
+        // map a public host's open ports. Judged before any DNS query. A link card's site
+        // icon (ADR-0170 amendment D9) takes the same rule; the other preview kinds do not.
+        if matches!(kind, FetchKind::Source | FetchKind::Icon)
+            && parsed.port.is_some_and(|port| port != 443)
+        {
             return Err(blocked(redirects));
         }
         let addresses = validated_resolved_addresses(&parsed, resolver)
@@ -295,7 +402,9 @@ async fn fetch_guarded<R: HostResolver, G: PinnedGet>(
         }
         let content_type = response.content_type.unwrap_or_else(|| match kind {
             FetchKind::Html => "text/html".into(),
-            FetchKind::Image | FetchKind::Source => "application/octet-stream".into(),
+            FetchKind::Image | FetchKind::Source | FetchKind::Icon => {
+                "application/octet-stream".into()
+            }
         });
         return Ok(Fetched {
             final_url: parsed.absolute,
@@ -319,12 +428,115 @@ fn resolve_location(base: &str, location: &str) -> Result<String, FetchError> {
     Ok(joined.to_string())
 }
 
+/// Test support for other modules: the REAL hop loop ([`fetch_guarded`], the same guard the
+/// production transport runs) over scripted answers, so a test can ask "did the guard let this
+/// reach a socket?" and count the answer. Nothing here dials the network: private literals are
+/// refused before DNS, and a name resolves to one fixed public address.
+#[cfg(test)]
+pub(crate) mod guard_fixtures {
+    use super::*;
+    use std::net::IpAddr;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    pub(crate) enum ScriptedReply {
+        Redirect(String),
+        Body {
+            content_type: &'static str,
+            body: Vec<u8>,
+        },
+    }
+
+    struct Fixed(Vec<IpAddr>);
+
+    impl HostResolver for Fixed {
+        async fn resolve(&self, _authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// Answers the n-th request that gets past the guard with the n-th scripted reply (a plain
+    /// PNG-typed 200 once the script runs out) and counts those requests.
+    pub(crate) struct GuardedScript {
+        hops: AtomicU32,
+        replies: Vec<ScriptedReply>,
+        resolves_to: Vec<IpAddr>,
+    }
+
+    impl GuardedScript {
+        /// Every hostname resolves to one public address.
+        pub(crate) fn new(replies: Vec<ScriptedReply>) -> GuardedScript {
+            GuardedScript {
+                hops: AtomicU32::new(0),
+                replies,
+                resolves_to: vec!["93.184.216.34".parse().unwrap()],
+            }
+        }
+
+        /// Every hostname resolves to `answer`, whatever it is: a name that points inward.
+        pub(crate) fn resolving_to(answer: &str, replies: Vec<ScriptedReply>) -> GuardedScript {
+            GuardedScript {
+                hops: AtomicU32::new(0),
+                replies,
+                resolves_to: vec![answer.parse().expect("an IP literal")],
+            }
+        }
+
+        /// Requests that passed the guard and reached the (scripted) socket.
+        pub(crate) fn hops(&self) -> u32 {
+            self.hops.load(Ordering::SeqCst)
+        }
+    }
+
+    struct Getter<'a>(&'a GuardedScript);
+
+    impl PinnedGet for Getter<'_> {
+        async fn get(
+            &self,
+            _url: &OutboundUrl,
+            _addr: SocketAddr,
+            _kind: FetchKind,
+        ) -> Result<RawResponse, FetchError> {
+            let n = self.0.hops.fetch_add(1, Ordering::SeqCst) as usize;
+            Ok(match self.0.replies.get(n) {
+                Some(ScriptedReply::Redirect(to)) => RawResponse {
+                    status: 302,
+                    location: Some(to.clone()),
+                    content_type: None,
+                    body: Vec::new(),
+                },
+                Some(ScriptedReply::Body { content_type, body }) => RawResponse {
+                    status: 200,
+                    location: None,
+                    content_type: Some((*content_type).to_string()),
+                    body: body.clone(),
+                },
+                None => RawResponse {
+                    status: 200,
+                    location: None,
+                    content_type: Some("image/png".into()),
+                    body: b"scripted".to_vec(),
+                },
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl UnfurlHttp for GuardedScript {
+        async fn fetch(&self, url: &str, kind: FetchKind) -> Result<Fetched, FetchError> {
+            let resolver = Fixed(self.resolves_to.clone());
+            let getter = Getter(self);
+            fetch_guarded(url, kind, false, &resolver, &getter).await
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::net::IpAddr;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
+    use tokio::sync::Semaphore;
 
     struct FixedResolver(Vec<IpAddr>);
 
@@ -1434,5 +1646,436 @@ mod tests {
             ["/x.png"],
             "the origin was reached directly"
         );
+    }
+
+    // ── ADR-0170 amendment D9 (#4881): the site-icon kind ───────────────────────────────
+
+    use super::guard_fixtures::{GuardedScript, ScriptedReply};
+
+    /// An icon goes through the same guard as every other preview fetch: a private,
+    /// loopback or link-local destination is refused BEFORE a connect, on the first hop.
+    #[tokio::test]
+    async fn an_icon_fetch_is_refused_for_private_loopback_and_link_local_before_any_connect() {
+        for raw in [
+            "https://127.0.0.1/favicon.ico",
+            "https://10.1.2.3/favicon.ico",
+            "https://172.16.0.9/favicon.ico",
+            "https://192.168.0.1/favicon.ico",
+            "https://169.254.169.254/latest/meta-data",
+            "https://localhost/favicon.ico",
+            "https://[::1]/favicon.ico",
+            "https://[fe80::1]/favicon.ico",
+            "https://[fd00::1]/favicon.ico",
+            "https://[::ffff:7f00:1]/favicon.ico",
+            "http://example.com/favicon.ico",
+            "https://user:pw@example.com/favicon.ico",
+        ] {
+            let script = GuardedScript::new(vec![]);
+            let err = script.fetch(raw, FetchKind::Icon).await.unwrap_err();
+            assert!(err.is_blocked(), "{raw}: {err:?}");
+            assert_eq!(script.hops(), 0, "{raw} must not reach the socket");
+        }
+        // Control: the same guard lets a public https icon through, once.
+        let script = GuardedScript::new(vec![]);
+        let fetched = script
+            .fetch("https://example.com/favicon.ico", FetchKind::Icon)
+            .await
+            .expect("a public icon");
+        assert_eq!(fetched.final_url, "https://example.com/favicon.ico");
+        assert_eq!(script.hops(), 1);
+    }
+
+    /// An icon is fetched on 443 only, on every hop; a picture still is not held to that.
+    #[tokio::test]
+    async fn an_icon_dials_443_only_on_every_hop_and_a_picture_does_not() {
+        for raw in [
+            "https://example.com:8443/i.png",
+            "https://example.com:444/i.png",
+            "https://example.com:80/i.png",
+        ] {
+            let script = GuardedScript::new(vec![]);
+            assert_eq!(
+                script.fetch(raw, FetchKind::Icon).await.unwrap_err(),
+                FetchError::Blocked,
+                "{raw}"
+            );
+            assert_eq!(script.hops(), 0, "{raw}: refused before the socket");
+        }
+        // An explicit 443 is the default port.
+        let script = GuardedScript::new(vec![]);
+        script
+            .fetch("https://example.com:443/i.png", FetchKind::Icon)
+            .await
+            .expect("explicit 443");
+        // Control: the picture kind keeps its rule (no port restriction).
+        let script = GuardedScript::new(vec![]);
+        script
+            .fetch("https://example.com:8443/i.png", FetchKind::Image)
+            .await
+            .expect("the picture kind dials other ports");
+        // A redirect to another port is refused after exactly one request.
+        for location in [
+            "https://example.com:8443/b.ico",
+            "https://example.com:444/b.ico",
+        ] {
+            let script = GuardedScript::new(vec![ScriptedReply::Redirect(location.into())]);
+            assert_eq!(
+                script
+                    .fetch("https://example.com/a.ico", FetchKind::Icon)
+                    .await
+                    .unwrap_err(),
+                FetchError::Blocked,
+                "{location}"
+            );
+            assert_eq!(script.hops(), 1, "{location}");
+        }
+    }
+
+    /// A redirect that leads an icon fetch to a private destination stops there: the public
+    /// first hop was requested, the private one never is.
+    #[tokio::test]
+    async fn an_icon_redirect_into_a_private_destination_stops_after_the_public_hop() {
+        for location in [
+            "https://127.0.0.1/x.ico",
+            "https://10.0.0.5/x.ico",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://[::1]/x.ico",
+            "https://[fe80::1]/x.ico",
+            "https://localhost/x.ico",
+            "http://example.com/downgrade.ico",
+            "file:///etc/passwd",
+            "https://user:pw@example.com/x.ico",
+        ] {
+            let script = GuardedScript::new(vec![ScriptedReply::Redirect(location.into())]);
+            let err = script
+                .fetch("https://example.com/a.ico", FetchKind::Icon)
+                .await
+                .unwrap_err();
+            assert_eq!(err, FetchError::Blocked, "{location}");
+            assert_eq!(
+                script.hops(),
+                1,
+                "{location}: only the public hop connected"
+            );
+        }
+        // Control: a public redirect target is followed.
+        let script = GuardedScript::new(vec![ScriptedReply::Redirect(
+            "https://cdn.example/i.ico".into(),
+        )]);
+        let fetched = script
+            .fetch("https://example.com/a.ico", FetchKind::Icon)
+            .await
+            .expect("a public redirect");
+        assert_eq!(fetched.final_url, "https://cdn.example/i.ico");
+        assert_eq!(script.hops(), 2);
+    }
+
+    /// The icon's body cap is [`ICON_MAX_BYTES`], not the picture's 5 MiB.
+    #[tokio::test]
+    async fn an_icon_body_is_cut_off_at_the_icon_cap() {
+        let url = |fake: &Fake| OutboundUrl {
+            scheme: "http".into(),
+            host: "pin.invalid".into(),
+            port: Some(fake.addr.port()),
+            path_and_query: "/i.ico".into(),
+            absolute: format!("http://pin.invalid:{}/i.ico", fake.addr.port()),
+        };
+        let exact = Fake::start(|_, _| Reply::Chunked {
+            chunks: big(ICON_MAX_BYTES),
+        })
+        .await;
+        let got = ReqwestGet {
+            timeout: SECOND * 5,
+        }
+        .get(&url(&exact), exact.addr, FetchKind::Icon)
+        .await
+        .expect("exactly the cap is fine");
+        assert_eq!(got.body.len(), ICON_MAX_BYTES);
+
+        let over = Fake::start(|_, _| Reply::Chunked {
+            chunks: big(ICON_MAX_BYTES + 1),
+        })
+        .await;
+        let err = ReqwestGet {
+            timeout: SECOND * 5,
+        }
+        .get(&url(&over), over.addr, FetchKind::Icon)
+        .await
+        .unwrap_err();
+        assert_eq!(err, FetchError::TooLarge, "one byte past the cap");
+        // The same body is fine for a picture: the cap is per kind.
+        let got = ReqwestGet {
+            timeout: SECOND * 5,
+        }
+        .get(&url(&over), over.addr, FetchKind::Image)
+        .await
+        .expect("a picture may be larger than an icon");
+        assert_eq!(got.body.len(), ICON_MAX_BYTES + 1);
+        // A declared length past the cap is refused before the body is read.
+        let declared = Fake::start(|_, _| Reply::Ok {
+            status: 200,
+            headers: vec![("Content-Type".into(), "image/x-icon".into())],
+            body: vec![0u8; ICON_MAX_BYTES + 1],
+        })
+        .await;
+        let err = ReqwestGet {
+            timeout: SECOND * 5,
+        }
+        .get(&url(&declared), declared.addr, FetchKind::Icon)
+        .await
+        .unwrap_err();
+        assert_eq!(err, FetchError::TooLarge);
+    }
+
+    // ── #4881 security review r1, M-1: the DNS stage, for the icon kind ──────────────────────
+    //
+    // An icon address that is a NAME passes the literal check by construction (a name is not a
+    // private address), so what stops `evil.example` -> 169.254.169.254 is the check of the
+    // ANSWERS after resolution (`validated_resolved_addresses`). Before these tests nothing
+    // asserted that for icons: resolving without the check, for the icon kind only, left every
+    // test green. These are the tests the claim "an icon is refused for private, loopback and
+    // link-local destinations" rests on for the name case.
+
+    /// What a hostile name can answer with. Each is somewhere the server could dial if the guard
+    /// let it: loopback, the private blocks, link-local, the cloud metadata services (169.254.169.254
+    /// on AWS, GCP and Azure, `fd00:ec2::254` on AWS over IPv6, 100.100.100.200 on Alibaba), the
+    /// unspecified address, and the IPv6 forms that carry an IPv4 address (v4-mapped, NAT64, 6to4,
+    /// IPv4-compatible), so that a private IPv4 cannot be dressed as IPv6.
+    const INWARD_ANSWERS: &[&str] = &[
+        "127.0.0.1",
+        "10.0.0.1",
+        "172.16.0.9",
+        "192.168.1.1",
+        "169.254.169.254",
+        "169.254.1.1",
+        "100.100.100.200",
+        "0.0.0.0",
+        "::1",
+        "::",
+        "fe80::1",
+        "fc00::1",
+        "fd00:ec2::254",
+        "::ffff:127.0.0.1",
+        "::ffff:a9fe:a9fe",
+        "64:ff9b::7f00:1",
+        "64:ff9b::a9fe:a9fe",
+        "2002:7f00:1::",
+        "2002:a9fe:a9fe::",
+        "::127.0.0.1",
+    ];
+
+    fn never_answers_with_a_page() -> ScriptedGet {
+        ScriptedGet {
+            hops: AtomicU32::new(0),
+            locations: Mutex::new(vec![]),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_icon_name_that_resolves_to_an_inward_address_is_blocked_before_any_connect() {
+        for &answer in INWARD_ANSWERS {
+            let dns = Dns::new(&[("evil.example", &[answer])]);
+            let getter = never_answers_with_a_page();
+            let err = fetch_guarded(
+                "https://evil.example/favicon.ico",
+                FetchKind::Icon,
+                false,
+                &dns,
+                &getter,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err, FetchError::Blocked, "{answer}");
+            assert_eq!(
+                getter.hops.load(Ordering::SeqCst),
+                0,
+                "{answer} must not reach the socket"
+            );
+            // The refusal came from the answer check: the name really was asked for. A guard that
+            // refused earlier would pass this test for the wrong reason.
+            assert_eq!(
+                *dns.asked.lock().unwrap(),
+                ["evil.example:443"],
+                "{answer}: refused after resolution, not before"
+            );
+        }
+        // Control: the same harness lets a public answer through, once.
+        let dns = Dns::new(&[("good.example", &["93.184.216.34"])]);
+        let getter = never_answers_with_a_page();
+        fetch_guarded(
+            "https://good.example/favicon.ico",
+            FetchKind::Icon,
+            false,
+            &dns,
+            &getter,
+        )
+        .await
+        .expect("a public answer");
+        assert_eq!(getter.hops.load(Ordering::SeqCst), 1);
+    }
+
+    /// A name with one public and one inward record is the rebinding attack with the work done
+    /// for it: refused whichever answer comes first.
+    #[tokio::test]
+    async fn an_icon_name_with_one_inward_answer_among_public_ones_is_blocked() {
+        for &answer in INWARD_ANSWERS {
+            for answers in [["93.184.216.34", answer], [answer, "93.184.216.34"]] {
+                let dns = Dns::new(&[("rebind.example", &answers)]);
+                let getter = never_answers_with_a_page();
+                let err = fetch_guarded(
+                    "https://rebind.example/favicon.ico",
+                    FetchKind::Icon,
+                    false,
+                    &dns,
+                    &getter,
+                )
+                .await
+                .unwrap_err();
+                assert_eq!(err, FetchError::Blocked, "{answers:?}");
+                assert_eq!(getter.hops.load(Ordering::SeqCst), 0, "{answers:?}");
+            }
+        }
+    }
+
+    /// The same check on a redirect hop: the first hop is public and is requested, the Location
+    /// is a name that resolves inward, and that hop is never dialled.
+    #[tokio::test]
+    async fn an_icon_redirect_to_a_name_that_resolves_inward_stops_after_the_public_hop() {
+        for &answer in INWARD_ANSWERS {
+            let dns = Dns::new(&[
+                ("news.example", &["93.184.216.34"]),
+                ("inner.example", &[answer]),
+            ]);
+            let getter = ScriptedGet {
+                hops: AtomicU32::new(0),
+                locations: Mutex::new(vec!["https://inner.example/x.ico".into()]),
+            };
+            let err = fetch_guarded(
+                "https://news.example/a.ico",
+                FetchKind::Icon,
+                false,
+                &dns,
+                &getter,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err, FetchError::Blocked, "{answer}");
+            assert_eq!(
+                getter.hops.load(Ordering::SeqCst),
+                1,
+                "{answer}: only the public first hop connected"
+            );
+            assert_eq!(
+                *dns.asked.lock().unwrap(),
+                ["news.example:443", "inner.example:443"],
+                "{answer}: the redirect target was resolved, then refused"
+            );
+        }
+    }
+
+    // ── #4881 security review r1, M-2: a deadline and a ceiling on name lookups ──────────────
+
+    /// A name lookup that answers one public address once the test opens the gate, and counts
+    /// how many it was asked to start.
+    struct Gate {
+        asked: AtomicU32,
+        gate: Arc<Semaphore>,
+    }
+
+    impl Gate {
+        fn closed() -> Arc<Gate> {
+            Arc::new(Gate {
+                asked: AtomicU32::new(0),
+                gate: Arc::new(Semaphore::new(0)),
+            })
+        }
+        fn open(&self, lookups: usize) {
+            self.gate.add_permits(lookups);
+        }
+        fn asked(&self) -> u32 {
+            self.asked.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl NameLookup for Gate {
+        async fn lookup(&self, _authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError> {
+            self.asked.fetch_add(1, Ordering::SeqCst);
+            self.gate.acquire().await.expect("gate").forget();
+            Ok(vec!["93.184.216.34".parse().unwrap()])
+        }
+    }
+
+    /// The whole production path (`SafeUnfurlTransport::fetch`, the real hop loop and guard) over
+    /// a name server that never answers: the fetch ends at the lookup deadline with the same
+    /// error an unresolvable name gets, and nothing is dialled (the lookup is before the socket).
+    #[tokio::test]
+    async fn a_name_server_that_never_answers_ends_the_fetch_at_the_deadline() {
+        let lookup = Gate::closed();
+        let transport = SafeUnfurlTransport::with_lookup(
+            false,
+            Duration::from_secs(5),
+            lookup.clone(),
+            Duration::from_millis(50),
+            4,
+        );
+        let started = std::time::Instant::now();
+        // The outer timeout makes a lookup with no deadline fail here, not hang the suite.
+        let result = tokio::time::timeout(
+            Duration::from_secs(8),
+            transport.fetch("https://slow.example/favicon.ico", FetchKind::Icon),
+        )
+        .await
+        .expect("the fetch must end by itself at the lookup deadline");
+        assert_eq!(result.unwrap_err(), FetchError::Failed("dns".into()));
+        assert!(
+            started.elapsed() >= Duration::from_millis(50),
+            "it waited for the deadline, not less"
+        );
+        assert_eq!(lookup.asked(), 1);
+    }
+
+    /// A lookup given up on at the deadline is still running (its thread is inside
+    /// `getaddrinfo`), so it keeps its place: the ceiling counts it until it really ends.
+    #[tokio::test]
+    async fn lookups_that_outlive_their_deadline_still_count_against_the_ceiling() {
+        // Every wait is bounded, so a resolver with no deadline fails this test instead of
+        // holding the suite.
+        async fn within<T>(what: &str, work: impl std::future::Future<Output = T>) -> T {
+            tokio::time::timeout(Duration::from_secs(5), work)
+                .await
+                .unwrap_or_else(|_| panic!("{what}: no answer by itself"))
+        }
+        let lookup = Gate::closed();
+        let resolver = BoundedResolver::new(lookup.clone(), Duration::from_millis(30), 2);
+        for host in ["a.example:443", "b.example:443"] {
+            assert_eq!(
+                within(host, resolver.resolve(host)).await,
+                Err(OutboundUrlError::ResolutionFailed),
+                "{host}: not answered by the deadline"
+            );
+        }
+        assert_eq!(lookup.asked(), 2);
+        // Both are abandoned but not finished: a third finds no place and fails at once, without
+        // starting a lookup.
+        assert_eq!(
+            within("c.example", resolver.resolve("c.example:443")).await,
+            Err(OutboundUrlError::ResolutionFailed)
+        );
+        assert_eq!(lookup.asked(), 2, "no third lookup was started");
+        // Let the abandoned ones finish: their places come back and a lookup runs again.
+        lookup.open(2);
+        within("the abandoned lookups ending", async {
+            while resolver.running.available_permits() < 2 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        lookup.open(1);
+        assert_eq!(
+            within("d.example", resolver.resolve("d.example:443")).await,
+            Ok(vec!["93.184.216.34".parse().unwrap()])
+        );
+        assert_eq!(lookup.asked(), 3);
     }
 }

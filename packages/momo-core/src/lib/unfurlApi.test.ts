@@ -119,4 +119,35 @@ describe("unfurl API", () => {
       "Bearer access-token"
     );
   });
+
+  it("fetches a site icon through the same proxy gate and nothing else", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
+      new Response(new Uint8Array([0, 0, 1, 0]), {
+        status: 200,
+        headers: { "content-type": "image/x-icon" },
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (const bad of [
+      "https://remote.example/favicon.ico",
+      "/v1/workspaces/w-1/unfurls/u-1/icon.svg",
+      "/v1/workspaces/w-1/unfurls/u-1/icon?x=1",
+      "/v1/workspaces/w-1/unfurls/u-1/other",
+    ]) {
+      await expect(fetchUnfurlImage(bad)).rejects.toMatchObject({ status: 400 });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await expect(
+      fetchUnfurlImage("/v1/workspaces/w-1/unfurls/u-1/icon")
+    ).resolves.toBeInstanceOf(Blob);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://oort.test/v1/workspaces/w-1/unfurls/u-1/icon"
+    );
+    expect((fetchMock.mock.calls[0]?.[1]?.headers as Headers).get("Authorization")).toBe(
+      "Bearer access-token"
+    );
+  });
 });

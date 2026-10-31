@@ -2269,6 +2269,7 @@ dependencies = [
  "axum",
  "bytes",
  "chrono",
+ "encoding_rs",
  "futures",
  "momo-db",
  "momo-outbox",

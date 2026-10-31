@@ -19,7 +19,21 @@ export interface MessageUnfurl {
   domain?: string;
   /** Authenticated same-origin proxy path. Never a remote image URL. */
   imageUrl?: string;
+  // ADR-0170 amendment 2026-10-31. Every field below is optional: an older server omits
+  // them all, and a missing one means "not known", never "empty".
+  /** og:site_name, at most 100 characters. */
+  siteName?: string;
+  /** Authenticated same-origin proxy path of the site icon. Never a remote icon URL. */
+  iconUrl?: string;
+  /** Pixels, 1..16384. Present together with `imageHeight`, or not at all. */
+  imageWidth?: number;
+  imageHeight?: number;
+  /** The server only ever sends `true`; absent means "not known to be a video". */
+  isVideo?: boolean;
 }
+
+/** The server's bound for a picture side (the migration's CHECK says the same). */
+export const UNFURL_IMAGE_SIDE_MAX = 16_384;
 
 export interface WorkspaceUnfurlSettings {
   enabled: boolean;
@@ -44,6 +58,30 @@ function stringField(
 
 export function isUnfurlImagePath(value: string): boolean {
   return /^\/v1\/workspaces\/[^/?#]+\/unfurls\/[^/?#]+\/image$/.test(value);
+}
+
+/** The site-icon proxy path (`…/unfurls/{id}/icon`), the only form an icon is ever given in. */
+export function isUnfurlIconPath(value: string): boolean {
+  return /^\/v1\/workspaces\/[^/?#]+\/unfurls\/[^/?#]+\/icon$/.test(value);
+}
+
+/** Either of a card's two proxy paths: the preview picture or the site icon. */
+export function isUnfurlProxyPath(value: string): boolean {
+  return isUnfurlImagePath(value) || isUnfurlIconPath(value);
+}
+
+function sizeField(
+  source: Record<string, unknown>,
+  camel: string,
+  snake: string
+): number | undefined {
+  const value = source[camel] ?? source[snake];
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= UNFURL_IMAGE_SIDE_MAX
+    ? value
+    : undefined;
 }
 
 /** Strict enough to prevent a client from turning an unfurl into a script URL. */
@@ -79,6 +117,12 @@ export function messageUnfurlFromWire(value: unknown): MessageUnfurl | null {
   const description = stringField(source, "description");
   const domain = stringField(source, "domain");
   const imageUrl = stringField(source, "imageUrl", "image_url");
+  const siteName = stringField(source, "siteName", "site_name");
+  const iconUrl = stringField(source, "iconUrl", "icon_url");
+  // A size is a pair: half of one, or a value outside the server's bound, is no size.
+  const imageWidth = sizeField(source, "imageWidth", "image_width");
+  const imageHeight = sizeField(source, "imageHeight", "image_height");
+  const isVideo = (source.isVideo ?? source.is_video) === true;
   return {
     id,
     messageId,
@@ -88,6 +132,12 @@ export function messageUnfurlFromWire(value: unknown): MessageUnfurl | null {
     ...(description ? { description } : {}),
     ...(domain ? { domain } : {}),
     ...(imageUrl && isUnfurlImagePath(imageUrl) ? { imageUrl } : {}),
+    ...(siteName ? { siteName } : {}),
+    ...(iconUrl && isUnfurlIconPath(iconUrl) ? { iconUrl } : {}),
+    ...(imageWidth !== undefined && imageHeight !== undefined
+      ? { imageWidth, imageHeight }
+      : {}),
+    ...(isVideo ? { isVideo: true } : {}),
   };
 }
 

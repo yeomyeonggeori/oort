@@ -89,6 +89,8 @@ pub mod search;
 pub mod self_media;
 /// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
 pub mod sidebar_prefs;
+/// ADR-0206 증보 1 / #4889 — who follows which thread (`thread_follow`, migration 164).
+pub mod thread_follow;
 pub mod workspace_avatar;
 
 pub use approval_card::settle_approval_card_in_tx;
@@ -291,6 +293,10 @@ pub use sidebar_prefs::{
     get_sidebar_prefs_in_tx, set_sidebar_prefs_in_tx, validate_sidebar_prefs, SidebarPrefs,
     SidebarPrefsInvalid, SidebarSection, StoredSidebarPrefs, CHANNEL_REF_MAX, SECTION_ID_MAX_CHARS,
     SECTION_MAX, SECTION_NAME_MAX_CHARS, SECTION_SORT_MAX_CHARS, SIDEBAR_PREFS_VERSION,
+};
+pub use thread_follow::{
+    is_following_thread_in_tx, set_thread_follow_in_tx, FollowRefused, STATE_AUTO, STATE_FOLLOWED,
+    STATE_UNFOLLOWED,
 };
 pub use workspace_avatar::{
     create_pending_avatar_upload_in_tx, load_avatar_media_in_tx, read_current_avatar_media_in_tx,
