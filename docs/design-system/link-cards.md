@@ -17,6 +17,7 @@
 
 - **기본이 「크게」에서 「작게」로 바뀌었어요.** 한 번도 이 설정을 열지 않은 사람(저장된 값이 없는 기기)은 큰 카드에서 작은 카드로 바뀌어요. 「크게」를 직접 고른 기기는 저장된 값이 있어 그대로예요. 저장 값의 이름(`rich`·`compact`·`off`)은 안 바꿨어요.
 - 그림 칸은 셋 중 하나예요: **보통 그림 104×64**(칸에 맞춰 자름) · **작거나 정사각형인 그림 64×64**(자르지 않고 통째로) · **아이콘 타일 64×64**. 높이는 늘 64라서 카드 높이가 그림에 따라 뛰지 않아요.
+- 설정 › 대화 표시의 **대화 미리보기 샘플**은 늘 전형적인 카드 하나(보통 그림 104×64, 크게는 1.91:1 틀)를 그려요. 아이콘 타일·작은 그림·동영상 같은 대체 모양은 샘플이 보여 주지 않고, 눌리지 않는 그림이라 같은 클래스를 다시 적었어요(어긋나면 `ConversationPreview.test.ts`가 붉어요).
 - 카드 전체가 링크 하나예요(`<a>` 하나, 안에 눌리는 것 없음). 보낸 사람의 「링크 미리보기 제거」 칩과 확인 창은 예전 그대로 카드 바깥 형제 단추예요.
 
 ## 2. 대체 규칙 표 (전 행이 코어 `unfurlCardModel`·`visibleUnfurls`의 갈래예요)
@@ -61,6 +62,7 @@
 | 작게·크게·끄기 · 그림 칸 셋 · 테두리 없음 · 실제 도메인 · 동영상 · 라벨 · 4개 → 3카드 · 텍스트로만 | 웹 `UnfurlCards.test.tsx`(서버 렌더 마크업) · `UnfurlCards.live.test.tsx`(설정 즉시 반영, 그림 오류 → 타일) |
 | 아이콘은 화면에 보일 때만 · 404/429 기억 | 웹 `UnfurlCards.live.test.tsx`의 「site icon requests」 · `useUnfurlImage.requests.test.tsx` · 코어 `unfurlApi.test.ts`(`Retry-After`가 오류에 실림) |
 | 설정 낱말·기본값·저장 값 | 웹 `AppearanceSection.test.tsx` · `linkPreviewPreference.test.ts` |
+| 설정 샘플이 카드와 같은 클래스인가 · 방향 제어 문자를 실제 문자로 적지 않았는가 | 웹 `ConversationPreview.test.ts`(두 소스를 맞대 봐요) · `UnfurlCards.test.tsx`의 「raw direction-control characters」(소스에 보이지 않는 문자가 없는지) |
 | 직접 문구 | 새 문구(설정의 작게·크게·끄기와 설명, 카드 라벨)는 사전 키 `settings.appearance.linkPreview*`·`timeline.unfurl.*`로 넣었고, 장부는 줄어든 만큼 내렸어요 |
 
 **아무것도 재지 않는 것**: 라이트·다크에서 실제로 어떻게 보이는지, 390/900/1440 폭, 큰 글자, 긴 한국어·영어 섞인 제목, 실제 사이트의 아이콘·그림. 캡처와 독립 design-review는 스택 검증에서 해요(`runtime-unverified`).
