@@ -179,6 +179,114 @@ export const catalog: MessageCatalog = {
       "value": "대화에 첨부할 최근 사진을 보여 주고 고르게 하려고 사진 보관함을 읽어요. 고른 사진만 올라가요."
     }
   ],
+  "mobile.linkCard.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "mobile.linkCard.copied": [
+    {
+      "type": 0,
+      "value": "링크 복사됨"
+    }
+  ],
+  "mobile.linkCard.copy": [
+    {
+      "type": 0,
+      "value": "링크 복사"
+    }
+  ],
+  "mobile.linkCard.copyFailed": [
+    {
+      "type": 0,
+      "value": "링크를 복사하지 못했어요."
+    }
+  ],
+  "mobile.linkCard.loading": [
+    {
+      "type": 0,
+      "value": "링크 미리보기를 불러오는 중"
+    }
+  ],
+  "mobile.linkCard.remove": [
+    {
+      "type": 0,
+      "value": "미리보기 지우기"
+    }
+  ],
+  "mobile.linkCard.removeConfirm": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "mobile.linkCard.removeDetail": [
+    {
+      "type": 0,
+      "value": "모두에게서 지워지고 다시 만들어지지 않아요. 메시지와 링크는 그대로 남아요."
+    }
+  ],
+  "mobile.linkCard.removeFailed": [
+    {
+      "type": 0,
+      "value": "링크 미리보기를 지우지 못했어요. 연결을 확인하고 다시 해 보세요."
+    }
+  ],
+  "mobile.linkCard.removePending": [
+    {
+      "type": 0,
+      "value": "지우는 중…"
+    }
+  ],
+  "mobile.linkCard.removeTitle": [
+    {
+      "type": 0,
+      "value": "링크 미리보기를 지울까요?"
+    }
+  ],
+  "mobile.linkCard.share": [
+    {
+      "type": 0,
+      "value": "공유"
+    }
+  ],
+  "mobile.linkCard.sheetClose": [
+    {
+      "type": 0,
+      "value": "링크 동작 닫기"
+    }
+  ],
+  "mobile.linkCard.sheetTitle": [
+    {
+      "type": 0,
+      "value": "링크 동작"
+    }
+  ],
+  "mobile.linkPreview.compactHint": [
+    {
+      "type": 0,
+      "value": "왼쪽에 작은 그림, 오른쪽에 주소와 제목을 보여줘요."
+    }
+  ],
+  "mobile.linkPreview.richHint": [
+    {
+      "type": 0,
+      "value": "큰 그림을 위에, 제목과 설명을 아래에 보여줘요. 큰 그림이 없는 링크는 작게와 같아요."
+    }
+  ],
+  "mobile.linkPreview.scopeNote": [
+    {
+      "type": 0,
+      "value": "이 기기에서만 적용돼요. 웹과 데스크탑은 따로 골라요."
+    }
+  ],
+  "mobile.linkPreview.title": [
+    {
+      "type": 0,
+      "value": "링크 미리보기"
+    }
+  ],
   "mobile.locale.backToSettings": [
     {
       "type": 0,

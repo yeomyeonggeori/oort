@@ -200,6 +200,114 @@ export const catalog: MessageCatalog = {
       "value": "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded."
     }
   ],
+  "mobile.linkCard.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "mobile.linkCard.copied": [
+    {
+      "type": 0,
+      "value": "Link copied"
+    }
+  ],
+  "mobile.linkCard.copy": [
+    {
+      "type": 0,
+      "value": "Copy link"
+    }
+  ],
+  "mobile.linkCard.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t copy the link."
+    }
+  ],
+  "mobile.linkCard.loading": [
+    {
+      "type": 0,
+      "value": "Loading link preview"
+    }
+  ],
+  "mobile.linkCard.remove": [
+    {
+      "type": 0,
+      "value": "Remove preview"
+    }
+  ],
+  "mobile.linkCard.removeConfirm": [
+    {
+      "type": 0,
+      "value": "Remove"
+    }
+  ],
+  "mobile.linkCard.removeDetail": [
+    {
+      "type": 0,
+      "value": "It disappears for everyone and won’t be made again. The message and link stay."
+    }
+  ],
+  "mobile.linkCard.removeFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t remove the link preview. Check your connection and try again."
+    }
+  ],
+  "mobile.linkCard.removePending": [
+    {
+      "type": 0,
+      "value": "Removing…"
+    }
+  ],
+  "mobile.linkCard.removeTitle": [
+    {
+      "type": 0,
+      "value": "Remove this link preview?"
+    }
+  ],
+  "mobile.linkCard.share": [
+    {
+      "type": 0,
+      "value": "Share"
+    }
+  ],
+  "mobile.linkCard.sheetClose": [
+    {
+      "type": 0,
+      "value": "Close link actions"
+    }
+  ],
+  "mobile.linkCard.sheetTitle": [
+    {
+      "type": 0,
+      "value": "Link actions"
+    }
+  ],
+  "mobile.linkPreview.compactHint": [
+    {
+      "type": 0,
+      "value": "Shows a small picture on the left, with the address and title on the right."
+    }
+  ],
+  "mobile.linkPreview.richHint": [
+    {
+      "type": 0,
+      "value": "Shows a large picture on top, with the title and description below. Links without a large picture look like Small."
+    }
+  ],
+  "mobile.linkPreview.scopeNote": [
+    {
+      "type": 0,
+      "value": "Applies to this device only. Web and desktop are set separately."
+    }
+  ],
+  "mobile.linkPreview.title": [
+    {
+      "type": 0,
+      "value": "Link previews"
+    }
+  ],
   "mobile.locale.backToSettings": [
     {
       "type": 0,

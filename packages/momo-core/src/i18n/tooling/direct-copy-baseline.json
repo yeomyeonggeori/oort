@@ -183,7 +183,7 @@
     "clients/mobile/src/features/profile/PauseBanner.tsx": 11,
     "clients/mobile/src/features/profile/PauseUntilCustom.tsx": 28,
     "clients/mobile/src/features/profile/PauseUntilPage.tsx": 20,
-    "clients/mobile/src/features/profile/SettingsPage.tsx": 129,
+    "clients/mobile/src/features/profile/SettingsPage.tsx": 131,
     "clients/mobile/src/features/profile/StatusSheet.tsx": 27,
     "clients/mobile/src/features/profile/appVersion.ts": 3,
     "clients/mobile/src/features/profile/avatarPhoto.ts": 16,

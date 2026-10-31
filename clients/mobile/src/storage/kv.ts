@@ -159,6 +159,13 @@ export const NON_SECRET_KEYS = {
   workFilter: 'momo.mobile.work.filter.v1',
   /** Device preference: rich (default), basic or off. No account data. */
   hapticMode: 'momo.mobile.haptics.v1',
+  /**
+   * 「링크 미리보기」 — 이 폰이 대화의 링크 카드를 어떻게 그리는가 (#4883). 값은 `rich`(크게) ·
+   * `compact`(작게) · `off`(끄기) 세 낱말 중 하나이고, 웹의 `momo.web.link-preview.v1` 과 **같은 값 이름**이다.
+   * 키가 없거나 모르는 값이면 코어의 `DEFAULT_UNFURL_SIZE`(작게)다. 기기 취향이라 로그아웃에도 남고
+   * 서버·다른 멤버 화면과 무관하다. 비밀이 아니다.
+   */
+  linkPreview: 'momo.mobile.link-preview.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];
