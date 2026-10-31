@@ -322,7 +322,7 @@ describe('길게 누르기가 시트를 연다', () => {
     longPress('sidebar-row-channel:ch-quiet');
     expect(sheetKeys()).toContain('mark-unread');
     expect(sheetKeys()).not.toContain('mark-read');
-    expect(screen.getByTestId('channel-sheet-mute-toggle')).toHaveTextContent('알림 켜기');
+    expect(screen.getByTestId('channel-sheet-mute-toggle')).toHaveTextContent(/알림 꺼짐/);
   });
 
   it('DM 이 아직 없는 에이전트 줄은 시트를 열지 않는다 — 누르면 DM 을 여는 줄이다', async () => {

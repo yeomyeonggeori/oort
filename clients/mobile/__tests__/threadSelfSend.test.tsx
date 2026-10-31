@@ -3,7 +3,7 @@ import type {PendingMessage} from '@momo/core/features/timeline/model';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
-import {FlatList} from 'react-native';
+import {FlatList, StyleSheet} from 'react-native';
 
 import {ThreadPanel} from '../src/features/conversation/ThreadPanel';
 import type {UseTimelineResult} from '../src/features/conversation/useTimeline';
@@ -252,14 +252,18 @@ describe('스레드도 채널과 같은 자가전송 규칙을 쓴다 (이미 �
 });
 
 describe('그래서 원인은 짧은 대화의 정렬이었다', () => {
-  it('답글 하나짜리 스레드도 바닥 정렬을 쓴다 — 리프트가 닿지 못하는 자리', () => {
+  it('S1 #4789 짧은 스레드도 공통 유리 머리 아래 바닥 정렬이다', async () => {
     // 이 한 줄이 결함 4다. 위로 정렬돼 있으면 이 스레드(루트+답글 하나)는 통째로
     // 헤더 위로 밀려 나간다. 픽셀은 `measure/` 가 시뮬레이터에서 재고, 여기서는
     // 그 숫자가 성립하기 위한 전제를 지킨다.
     render(<Harness replies={[REPLIES[0]]} />);
+    await act(async () => {});
     expect(
-      screen.getByTestId('timeline-list').props.contentContainerStyle,
-    ).toEqual({flexGrow: 1, justifyContent: 'flex-end'});
+      StyleSheet.flatten(screen.getByTestId('timeline-list').props.contentContainerStyle),
+    ).toMatchObject({flexGrow: 1, justifyContent: 'flex-end', paddingTop: 62});
+    expect(StyleSheet.flatten(screen.getByTestId('thread-header-overlay').props.style).position).toBe('absolute');
+    expect(screen.getByTestId('header-back-glass-fallback')).toBeTruthy();
+    expect(screen.getByLabelText('스레드 닫기')).toBeTruthy();
   });
 
   it('스레드에서도 끌면 키보드가 내려간다', () => {

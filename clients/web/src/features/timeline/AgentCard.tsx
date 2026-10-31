@@ -120,6 +120,9 @@ import {
   isSurfaceProvided,
   serverSurface,
 } from "@momo/core/features/capabilities/serverSurfaces";
+import { approvalBundleCard, approvalBundleContext, openApprovalDecisionStage } from "@/features/decisionStage/stageEntry";
+import { requestBundleModel, requestBundleState, type RequestBundleModel } from "@momo/core/features/timeline/requestBundle";
+import { RequestBundleCard } from "./RequestBundleCard";
 
 // =============================================================================
 // Agent card (R-1 §4). Structured, calm, dense: a title row (icon, name, status
@@ -409,10 +412,13 @@ function ExpiredApprovalFooter({
 function ApprovalBody({
   card,
   directory,
+  onOpenStage,
 }: {
   card: AgentApprovalCard;
   directory: Directory;
+  onOpenStage?: () => void;
 }) {
+  const { session, workspaceId } = useSession();
   const [local, setLocal] = useState<{
     status: ApprovalStatus;
     decidedAtMs?: number;
@@ -452,10 +458,26 @@ function ApprovalBody({
   // 기한 (#3738). 카드 메시지는 스냅샷이라 서버가 승인을 만료시켜도 이 카드의
   // status 는 저절로 바뀌지 않는다. 기한이 지난 대기 카드를 「만료」로 읽는 것은
   // 이 시계의 일이다. 이미 끝난 카드·재개 제안은 시계를 돌리지 않는다.
-  const watchesExpiry = resolvedStatus === "pending" && !card.isResumeOffer;
+  const watchesExpiry = resolvedStatus === "pending" && !card.isResumeOffer && requestBundleState({
+    ...card.bundle, status: receipt?.status ?? card.bundle?.status ?? resolvedStatus,
+  }) === "approval";
   const nowMs = useExpiryNow(card.expiresAtMs, watchesExpiry);
   const phase = watchesExpiry ? expiryPhase(card.expiresAtMs, nowMs) : "none";
-  const status: ApprovalStatus = phase === "expired" ? "expired" : resolvedStatus;
+  const context = approvalBundleContext(card, session.member, directory);
+  const isAdmin = context.isWorkspaceAdmin;
+  const bundle = card.isResumeOffer ? undefined : requestBundleModel(
+    approvalBundleCard(card, receipt), { ...context, nowMs }
+  );
+  // open을 명시하지 않은 서버 카드는 인라인 [승인][거부]를 그대로 유지해요.
+  const openStage = card.bundle?.decisionMode === "open" ? (event?: React.MouseEvent<HTMLButtonElement>) => {
+    if (onOpenStage) { onOpenStage(); return; }
+    openApprovalDecisionStage({ card, member: session.member, directory, workspaceId,
+      opener: event?.currentTarget ?? null, source: () => cardRef.current });
+  } : undefined;
+  const terminalStatus: Partial<Record<NonNullable<typeof bundle>["state"], ApprovalStatus>> = {
+    done: "approved", executing: "approved", declined: "rejected", expired: "expired", failed: "cancelled", cancelled: "cancelled",
+  };
+  const status: ApprovalStatus = bundle ? terminalStatus[bundle.state] ?? resolvedStatus : phase === "expired" ? "expired" : resolvedStatus;
   const settled = status !== "pending";
   // 컨트롤 대신 「다시 제안」이 설 자리: 만료됐고, 결정할 대상이 있는 도구·행동 승인.
   const expired =
@@ -503,12 +525,14 @@ function ApprovalBody({
       icon={<ShieldQuestion className="size-4" aria-hidden="true" />}
       // 먼저 제안 카드는 제목 끝의 짧은 꼬리표 하나로만 말한다(#4705). 제안자는 카드 작성자라 줄이 이미 말한다.
       title={approvalHeadTitle(card)}
+      bundle={bundle}
+      onOpenStage={openStage}
       chip={<ApprovalChip status={status} />}
       status={status}
       kind="approval"
       // 오프라인에서는 y/n 단축키도 꺼진다. 켜 두면 키가 무장까지 하고 확정이
       // 나가지 않는, 화면이 설명하지 못하는 상태가 만들어진다.
-      keyboard={note === null && !expired && !settled}
+      keyboard={note === null && !expired && !settled && (bundle?.canDecide ?? true)}
       // y/n 은 한 번에 결정하지 않고 **버튼에 초점을 놓는다**(#3819): 키 하나로
       // 되돌릴 수 없는 결정이 나가지 않게, Enter/Space 가 결정을 만든다.
       // 이슈 1114: `y`도 버튼과 같은 문을 지난다. 자격 있는 호스트가 없으면 승인
@@ -560,7 +584,7 @@ function ApprovalBody({
           // 이 분기가 없던 때는 영수증(이번 세션의 결정)이 없는 옛 카드가 `note === null`로
           // 떨어져 거부/승인 버튼을 다시 그렸다.
           null
-        ) : card.approvalId !== null ? (
+        ) : card.approvalId !== null && (bundle?.canDecide ?? true) ? (
           <>
             {phase === "soon" && card.expiresAtMs !== undefined && (
               <ApprovalNoteLine
@@ -573,6 +597,8 @@ function ApprovalBody({
             )}
           <ApprovalActions
             approvalId={card.approvalId}
+            decisionLabel={bundle?.headline}
+            lead={bundle ? "" : undefined}
             className="border-t border-line"
             execution={card.execution}
             forbiddenCopy={
@@ -721,7 +747,7 @@ function ApprovalBody({
             {[
               decidedBy?.displayName,
               decidedAtMs !== undefined ? timeLabel(decidedAtMs) : null,
-              card.approvalId
+              isAdmin && card.approvalId
                 ? `원장 #${ledgerHandle(card.approvalId)}`
                 : null,
             ]
@@ -1325,6 +1351,8 @@ export function CardFrame({
   onApprove,
   onReject,
   sectionRef,
+  bundle,
+  onOpenStage,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -1347,6 +1375,8 @@ export function CardFrame({
    * 그 노드를 스스로 만들지 않으므로 참조가 밖에서 들어와야 한다.
    */
   sectionRef?: React.Ref<HTMLElement>;
+  bundle?: RequestBundleModel;
+  onOpenStage?: () => void;
 }) {
   return (
     <section
@@ -1355,7 +1385,9 @@ export function CardFrame({
       data-card-kind={kind}
       data-status={status}
       tabIndex={0}
-      aria-label={title}
+      role={bundle ? "group" : undefined}
+      aria-label={bundle?.headline ?? title}
+      data-bundle-state={bundle?.state}
       {...(keyboard ? { "aria-keyshortcuts": "y n" } : {})}
       onKeyDown={(event) => {
         if (!keyboard) return;
@@ -1376,6 +1408,7 @@ export function CardFrame({
       // which stops reading as a card and starts reading as a banner.
       className="mt-2 max-w-pane-lg rounded-md border border-line bg-surface-raised focus-visible:focus-ring"
     >
+      {bundle ? <RequestBundleCard bundle={bundle} footer={footer} note={note} raw={<PayloadDisclosure detail={detail} />} onOpenStage={onOpenStage}>{children}</RequestBundleCard> : <>
       <div className="flex items-center gap-2 border-b border-line px-3 py-2">
         <span className="shrink-0 text-ink-muted">{icon}</span>
         <span className="min-w-0 flex-1 truncate text-body font-medium text-ink">
@@ -1387,6 +1420,7 @@ export function CardFrame({
       {note}
       <PayloadDisclosure detail={detail} />
       {footer}
+      </>}
     </section>
   );
 }
@@ -1395,6 +1429,7 @@ export function AgentCard({
   card,
   directory,
   onOpenWorkSession,
+  onOpenStage,
 }: {
   card: AgentCardModel;
   directory: Directory;
@@ -1403,9 +1438,10 @@ export function AgentCard({
    * 그려지지 않는다 — 없는 방으로 가는 문을 그리지 않는다는 이 레포의 규율.
    */
   onOpenWorkSession?: OpenWorkSession;
+  onOpenStage?: () => void;
 }) {
   if (card.kind === "approval") {
-    return <ApprovalBody card={card} directory={directory} />;
+    return <ApprovalBody card={card} directory={directory} onOpenStage={onOpenStage} />;
   }
   if (card.kind === "login_handoff") {
     return (

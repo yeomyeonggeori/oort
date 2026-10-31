@@ -1,6 +1,6 @@
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import type {Directory} from '@momo/core/features/workspace/directory';
-import React, {useCallback, useEffect} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   Image,
   type LayoutChangeEvent,
@@ -23,6 +23,7 @@ import {
 import {usePalette, useStyles} from '../../design/theme';
 import {ds2Radius, font, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import type {StatusDotTone} from '@momo/core/features/presence/statusDot';
+import {useMobileLocale} from '../../i18n/LocaleProvider';
 import {StatusDot} from '../presence/StatusDot';
 import {useOnline} from '../inbox/useOnline';
 import {Avatar} from './Avatar';
@@ -30,42 +31,9 @@ import {CONV} from './convDesign';
 import {headerSlotWidth, pillShowsSecondary, pillStatusWord} from './headerPill';
 
 // =============================================================================
-// 대화 머리 — 시안 A `.a-hd` + owner 표의 Buzz 대조 (DS2-4 #2716).
-//
-//   [ ‹ ]      ( # agent-lab · 6명 )      [🎧] [ ⋮ ]
-//   [ ‹ ]      ( ◉ 김인턴 · 응답함 )          [ ⋮ ]
-//
-// 가운데 알약은 **단추 하나**다(#4319, owner 10-27 Buzz 대조): 이름과 상태가 한 덩어리로 눌려 대화·채널 정보 페이지를 연다. 알약은 원(뒤로·⋮)과
-// 같은 토큰 가족(`surface` + 가는 테두리 + 고도)이라 유리 띠 위에서 같은 층으로 읽힌다.
-//
-// * 뒤로는 42 원(`.a-cbtn`, surface + sh1). 옛 머리의 파란 「‹」 글자는 누르는
-//   자리가 보이지 않았다.
-// * 제목은 **가운데**다(#4319 — 이전 판은 왼쪽 정렬이었다). 오른쪽 아이콘 수가 달라 가운데가 아니게 되던 문제는 **양쪽 칸을 같은 폭**으로
-//   두어 푼다(`headerSlotWidth`): 뒤로의 칸이 오른쪽(⋮·허들 자리) 칸과 같은 폭을 비워 두고, 오른쪽이 비어도 원 하나 폭을 지킨다.
-// * **머리는 여전히 한 줄이다**(#4016, owner 「두 줄로 표시하니까 좀 구리네」): 이름 옆에 보조 글(DM 의 상태 낱말·채널의 멤버 수)이 나란히 선다.
-//   줄이 모자라면 **이름이 이기고 보조 글이 통째로 숨는다**(`headerPill.ts` 의 순수 규칙 — 큰 글씨·이름 바닥 미달). 긴 부제(「6명 · 김인턴 참여 중」)와
-//   긴 상태 판정은 정보 페이지가 말한다. 머리 높이(`row.minHeight` 62)는 알약 유무·보조 글 유무와 무관하다(#4292·#4613 의 측정이 이 높이에 기댄다).
-// * 오른쪽은 아이콘 원. 옛 머리의 빨간 글자 링크 「고정한 메시지」는 ⋮ 메뉴 안으로
-//   갔다 — 그 문은 매일 쓰는 것이 아니고, 머리 오른쪽을 글자 하나가 차지했다.
-//   ⋮ 가 여는 것은 시스템 액션 시트(제목 + 「취소」)가 아니라 앱의 **공용 행동 시트**다(#4319,
-//   `ConversationMenuSheet`) — 이 머리는 누름을 알릴 뿐이고 무엇이 서는지는 화면이 정한다. 알약이 여는 정보 페이지도 마찬가지다(`onOpenInfo`).
-// * 허들 헤드폰은 **자리만** 있다(`huddle` prop). 폰에는 허들이 없고
-//   (`realtime/channelRail.ts` 가 허들 레일을 받지 않는다), 없는 기능의 아이콘은
-//   누르면 아무 일도 안 하는 버튼이 된다. 생기는 날 호출자가 prop 을 준다.
-// * 머리 띠는 유리다(`GlassSurface`, 투명도 줄이기에서는 불투명). 안전 영역까지
-//   덮는다 — 상태 막대 밑만 다른 색이면 띠가 떠 보이지 않는다.
-// * 연결 상태는 부제가 아니라 머리 **밑의 가벼운 띠**다(owner 표). 부제는 방이
-//   무엇인지를 말하는 자리이고, 연결은 방의 정체가 아니다.
-// * 띠는 **목록 위에 뜬다 — 흐름에 끼지 않는다**(#4292). 흐름 안에 끼면 4초 넘는 끊김마다 머리가 36.7pt
-//   자라 목록의 보이는 높이가 매번 그만큼 줄었다 돌아오고, 목록은 그 변화를 한 프레임 늦게 알아채 끝으로
-//   따라가므로 그 한 프레임 동안 맨 아래 줄이 밀렸다 돌아오기도 했다(간헐적 — 시뮬레이터 실측
-//   `measure/steady.tsx` 에서 높이 변화는 매번 36.7, 줄의 이동은 한 번 36.7·다른 실행에서는 0). 높이가 안
-//   바뀌면 그 전제가 사라진다. 표지(#4016)와 달리 이 줄은 「실제로 바뀐 것이 있을 때만 선다」로 줄일 수
-//   없다 — 연결이 정말 끊긴 것이 바뀐 것이다. 줄일 수 없으니 자리를 차지하지 않게 한다. 머리 뿌리에
-//   `zIndex` 를 주는 이유도 같다: 뒤 형제인 목록이 위에 그려지면 띠가 목록 밑으로 숨는다.
-// * 목록 위 가운데는 목록의 떠 있는 필(날짜 · 「안 읽은 곳으로」, `JumpPillDock`)이 이미 쓰는 자리다. 띠가 뜨면
-//   그 필들은 띠 밑에 쌓여야 하므로(안 그러면 필이 띠 뒤에 숨은 채 눌리는 컨트롤이 된다) 띠의 **실제** 높이를
-//   `onBannerInset` 으로 알린다 — 글자 크기에 따라 띠 높이가 달라서 상수로 둘 수 없다.
+// 대화 머리 — 목록 위에 각각 뜨는 유리 원·이름 알약 (#4789).
+// 안전 영역과 줄 높이는 목록의 위 여백으로 전달한다. 유리 뒤로 목록이 흐르며,
+// 연결 띠만 머리 밑에 매달린다. 전체 폭의 재료·테두리는 두지 않는다.
 // =============================================================================
 
 /** 머리 오른쪽 허들 자리. 기능이 생기면 호출자가 준다. */
@@ -86,6 +54,13 @@ export function connectionBannerText(status: RealtimeStatus): string | null {
   return status === 'connecting' ? '연결 중…' : '연결이 끊겼습니다';
 }
 
+/**
+ * 끊김 띠를 눌렀을 때의 이름(#4895). 사전(`mobile.connection.reconnectNow`, ko·en)이 정본이고, 이 낱말은
+ * 사전 없이 올라오는 격리 하네스를 위한 폴백이다 — 같은 낱말을 두 곳에 적는 것은 알지만, 머리의 나머지 문장이
+ * 아직 리터럴이라 이관(ADR-0213 P1)이 끝나기 전까지는 이 파일이 폴백을 들고 있는다.
+ */
+export const RECONNECT_NOW_LABEL = '지금 다시 연결';
+
 export function ConversationHeader({
   title,
   memberCount,
@@ -99,7 +74,10 @@ export function ConversationHeader({
   onOpenInfo,
   huddle,
   railStatus,
+  onReconnect,
   onBannerInset,
+  children,
+  backLabel = '뒤로',
   titleTestID = 'conversation-title',
 }: {
   title: string;
@@ -130,20 +108,46 @@ export function ConversationHeader({
   huddle?: HuddleSlot;
   railStatus: RealtimeStatus;
   /**
+   * 끊김 띠를 누르면 부른다(「지금 다시 연결」, #4895) — 화면은 이것을 전송의 `resume` 과 같은 길(`useRealtime().reconnect`)로
+   * 잇는다. **「연결이 끊겼습니다」일 때만** 단추가 선다: 「연결 중…」은 이미 시도하는 중이라 누를 것이 없다. 없으면 띠는
+   * 단추가 아니라 문장만 선다(열 것이 없는 단추는 만들지 않는다 — ⋮·허들 자리와 같은 규칙).
+   */
+  onReconnect?: () => void;
+  /**
    * 뜬 띠가 목록 위 가장자리를 가린 높이(pt, 띠 위 여백 포함). 띠가 서면 그 높이, 걷히면 0. 목록의 떠 있는 필이 그
    * 밑에 쌓이도록 화면이 `Timeline.topPillInset` 에 건넨다(#4292).
    */
   onBannerInset?: (inset: number) => void;
+  /** 머리 바로 아래의 기존 요약 줄. 연결 띠는 이 줄 아래에 뜬다. */
+  children?: React.ReactNode;
+  backLabel?: string;
   titleTestID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const banner = connectionBannerText(railStatus);
+  const reconnectable = railStatus === 'disconnected' && onReconnect !== undefined;
+  const reconnectLabel =
+    useMobileLocale()?.locale.formatMessage('mobile.connection.reconnectNow') ?? RECONNECT_NOW_LABEL;
   // 기기가 오프라인이면(NetInfo) 레일 재시도가 닿을 수 없다. 웹 배너의 browser-offline 과 같은 규칙으로
   // 같은 마크가 멈춘다(#3961 design-review M-2). 문장은 그대로다.
   const online = useOnline();
+  // 띠의 안쪽(로더 + 문장)은 문장이든 단추든 같다. 두 문장(「연결 중…」·「연결이 끊겼습니다」) 모두 레일이 다시 연결을
+  // 시도하는 동안이라 같은 로더가 돈다(#3961). 문장은 그대로고 로더는 곁들일 뿐이다. 기기가 오프라인이면 멈춘다.
+  const bannerBody = banner ? (
+    <>
+      <OortLoader size={BANNER_LOADER_SIZE} still={!online} testID="connection-loader" />
+      <Text style={styles.bannerText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+        {banner}
+      </Text>
+    </>
+  ) : null;
   const {width: windowWidth, fontScale} = useWindowDimensions();
+  const [headerHeight, setHeaderHeight] = useState<number | null>(null);
+  const onHeaderLayout = useCallback((event: LayoutChangeEvent) => {
+    setHeaderHeight(event.nativeEvent.layout.height);
+  }, []);
 
   const onBannerLayout = useCallback(
     (event: LayoutChangeEvent) => onBannerInset?.(event.nativeEvent.layout.height),
@@ -220,92 +224,107 @@ export function ConversationHeader({
   );
 
   return (
-    <View testID="conversation-header" style={styles.root}>
-      <GlassSurface radius={0} style={[styles.band, {paddingTop: insets.top}]}>
-        <View style={styles.row} testID="conversation-header-row">
-          <View style={[styles.slot, {width: slotWidth}]} testID="conversation-header-start">
+    <View testID="conversation-header" pointerEvents="box-none" onLayout={onHeaderLayout} style={[styles.root, {paddingTop: insets.top}]}>
+      {/* 정적인 공간 페이드다. 불투명도 애니메이션은 유리 조상에 걸지 않는다. */}
+      <View pointerEvents="none" style={[styles.statusFade, {height: insets.top + CONV.headHeight}]} testID="conversation-status-fade" />
+      <View pointerEvents="box-none" style={styles.row} testID="conversation-header-row">
+        <View pointerEvents="box-none" style={[styles.slot, {width: slotWidth}]} testID="conversation-header-start">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={backLabel}
+            onPress={onBack}
+            hitSlop={CIRCLE_SLOP}
+            style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
+            testID="header-back">
+            <GlassSurface radius={CONV.circle / 2} style={StyleSheet.absoluteFill} testID="header-back-glass" />
+            <Image
+              source={CONV_ICONS.left}
+              style={[styles.icon22, {tintColor: palette.text}]}
+            />
+          </Pressable>
+        </View>
+        <View pointerEvents="box-none" style={styles.center} testID="conversation-header-center">
+          {onOpenInfo ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="뒤로"
-              onPress={onBack}
+              accessibilityLabel={pillLabel}
+              onPress={onOpenInfo}
+              hitSlop={PILL_SLOP}
+              style={({pressed}) => [styles.pill, pressed && styles.pillPressed]}
+              testID="conversation-info-button">
+              <GlassSurface radius={ds2Radius.pill} style={StyleSheet.absoluteFill} testID="conversation-info-glass" />
+              {body}
+            </Pressable>
+          ) : (
+            <GlassSurface radius={ds2Radius.pill} style={[styles.pill, styles.titleLine]} testID="conversation-title-line">
+              {body}
+            </GlassSurface>
+          )}
+        </View>
+        <View pointerEvents="box-none" style={[styles.slot, styles.slotEnd, {width: slotWidth}]} testID="conversation-header-end">
+          {huddle ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={huddle.label}
+              onPress={huddle.onPress}
               hitSlop={CIRCLE_SLOP}
               style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
-              testID="header-back">
+              testID="conversation-huddle">
+              <GlassSurface radius={CONV.circle / 2} style={StyleSheet.absoluteFill} testID="conversation-huddle-glass" />
               <Image
-                source={CONV_ICONS.left}
-                style={[styles.icon22, {tintColor: palette.text}]}
+                source={CONV_ICONS[huddle.icon]}
+                style={[styles.icon20, {tintColor: palette.text}]}
               />
             </Pressable>
-          </View>
-          <View style={styles.center} testID="conversation-header-center">
-            {onOpenInfo ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={pillLabel}
-                onPress={onOpenInfo}
-                hitSlop={PILL_SLOP}
-                style={({pressed}) => [styles.pill, pressed && styles.pillPressed]}
-                testID="conversation-info-button">
-                {body}
-              </Pressable>
-            ) : (
-              <View style={styles.titleLine} testID="conversation-title-line">
-                {body}
-              </View>
-            )}
-          </View>
-          <View style={[styles.slot, styles.slotEnd, {width: slotWidth}]} testID="conversation-header-end">
-            {huddle ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={huddle.label}
-                onPress={huddle.onPress}
-                hitSlop={CIRCLE_SLOP}
-                style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
-                testID="conversation-huddle">
-                <Image
-                  source={CONV_ICONS[huddle.icon]}
-                  style={[styles.icon20, {tintColor: palette.text}]}
-                />
-              </Pressable>
-            ) : null}
-            {onOpenMenu ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="대화 메뉴"
-                onPress={onOpenMenu}
-                hitSlop={CIRCLE_SLOP}
-                style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
-                testID="conversation-menu">
-                <Image
-                  source={CONV_ICONS.kebab}
-                  style={[styles.icon20, {tintColor: palette.text}]}
-                />
-              </Pressable>
-            ) : null}
-          </View>
+          ) : null}
+          {onOpenMenu ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="대화 메뉴"
+              onPress={onOpenMenu}
+              hitSlop={CIRCLE_SLOP}
+              style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
+              testID="conversation-menu">
+              <GlassSurface radius={CONV.circle / 2} style={StyleSheet.absoluteFill} testID="conversation-menu-glass" />
+              <Image
+                source={CONV_ICONS.kebab}
+                style={[styles.icon20, {tintColor: palette.text}]}
+              />
+            </Pressable>
+          ) : null}
         </View>
-      </GlassSurface>
+      </View>
+      {children}
       {banner ? (
         // 머리 밑 가장자리에 매달려 목록 위에 뜬다. 문장이 아닌 띠 바깥은 손을 받지 않는다 — 알약 밑의 메시지가
-        // 눌려야 하고, 이 줄은 누르는 것이 아니다.
+        // 눌려야 한다. 끊김일 때만 알약 **자신**이 단추다(#4895): 층은 `box-none` 이라 손을 받는 것은 알약뿐이다.
         <View
-          pointerEvents="none"
+          pointerEvents={reconnectable ? 'box-none' : 'none'}
           onLayout={onBannerLayout}
-          style={styles.bannerLayer}
+          style={[styles.bannerLayer, {top: headerHeight ?? insets.top + CONV.headHeight}, headerHeight === null && styles.bannerUnmeasured]}
           testID="connection-banner-layer">
-          <View
-            accessibilityRole="text"
-            accessibilityLiveRegion="polite"
-            style={styles.banner}
-            testID="connection-banner">
-            {/* 두 문장(「연결 중…」·「연결이 끊겼습니다」) 모두 레일이 다시 연결을 시도하는 동안이라
-                같은 로더가 돈다(#3961). 문장은 그대로고 로더는 곁들일 뿐이다. 기기가 오프라인이면 멈춘다. */}
-            <OortLoader size={BANNER_LOADER_SIZE} still={!online} testID="connection-loader" />
-            <Text style={styles.bannerText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-              {banner}
-            </Text>
-          </View>
+          {reconnectable ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={reconnectLabel}
+              // 이름은 행동(「지금 다시 연결」)이고, 지금 상태(「연결이 끊겼습니다」)는 값으로 따라 읽힌다.
+              accessibilityValue={{text: banner}}
+              accessibilityLiveRegion="polite"
+              onPress={onReconnect}
+              hitSlop={BANNER_SLOP}
+              style={({pressed}) => [styles.banner, pressed && styles.bannerPressed]}
+              testID="connection-banner">
+              {bannerBody}
+            </Pressable>
+          ) : (
+            <View
+              accessibilityRole="text"
+              accessibilityLiveRegion="polite"
+              style={styles.banner}
+              testID="connection-banner">
+              {bannerBody}
+            </View>
+          )}
         </View>
       ) : null}
     </View>
@@ -318,6 +337,13 @@ const CIRCLE_SLOP = (TOUCH_TARGET - CONV.circle) / 2;
 const PILL_SLOP = {top: CIRCLE_SLOP, bottom: CIRCLE_SLOP} as const;
 
 /**
+ * 끊김 띠(눌리는 알약, 높이 약 29)를 엄지에 가깝게 만드는 여유. RN 의 `hitSlop` 은 **부모 경계를 넘지 못해서**(RN 문서), 층 안에
+ * 머무는 만큼만 번다: 위는 알약 위 여백(`space.sm`) 안이라 머리의 줄과 겹치지 않고, 옆은 층이 화면 폭이라 넉넉하다. 아래로는 층이
+ * 알약에서 끝나 벌 수 없다 — 층을 키우면 `onBannerInset`(목록 위 필의 자리)이 움직이므로 키우지 않았다. 눌리는 높이는 약 36.
+ */
+const BANNER_SLOP = {top: space.sm - 1, bottom: 0, left: space.md, right: space.md} as const;
+
+/**
  * 연결 띠의 로더 한 변(pt). 12pt 문장 한 줄 옆에 서는 자리라 small 마크가 읽히는 20: 글자 대비 1.67배로
  * 웹 배너의 24px 대 15px(1.6배)와 같은 크기감이다(웹에는 같은 숫자의 짝이 없다).
  */
@@ -325,9 +351,9 @@ const BANNER_LOADER_SIZE = 20;
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    band: {
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: color.glassLine,
+    statusFade: {
+      ...StyleSheet.absoluteFill,
+      experimental_backgroundImage: `linear-gradient(180deg, ${color.canvasTop}, transparent)`,
     },
     row: {
       minHeight: CONV.headHeight,
@@ -342,20 +368,18 @@ const buildStyles = (color: Palette) =>
       borderRadius: CONV.circle / 2,
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: color.surface,
-      // 다크에서 surface 원이 유리 띠에 녹아 「원형 버튼」이라는 모양이 약했다(검수 L-7).
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: color.border,
       boxShadow: color.elevationRest,
     },
-    circlePressed: {backgroundColor: color.surfacePressed},
+    circlePressed: {borderColor: color.textFaint},
     icon22: {width: CONV_ICON_SIZE.left, height: CONV_ICON_SIZE.left},
     icon20: {width: CONV_ICON_SIZE.kebab, height: CONV_ICON_SIZE.kebab},
     // 양쪽 칸은 폭이 같다(`headerSlotWidth`, 인라인) — 가운데 알약이 정말 가운데에 선다. 뒤로의 칸은 왼쪽 정렬, 오른쪽 칸은 원들이 오른쪽 끝에 붙는다.
     slot: {flexDirection: 'row', alignItems: 'center', gap: CONV.headGap},
     slotEnd: {justifyContent: 'flex-end'},
     center: {flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center'},
-    // 눌리지 않는 이름(`onOpenInfo` 없음): 캡슐 모양 없이 이름만 선다 — 단추처럼 보이는 것이 단추가 아닌 일은 없다.
+    // 동작이 없는 이름은 같은 유리 재료지만 단추 역할·누름을 갖지 않는다.
     titleLine: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -363,7 +387,7 @@ const buildStyles = (color: Palette) =>
       maxWidth: '100%',
       minHeight: CONV.circle,
     },
-    // 가운데 알약 — 원(뒤로·⋮)과 같은 토큰 가족이라 유리 띠 위에서 같은 층이다. 최소 높이가 원과 같아 머리 줄(62)이 움직이지 않는다.
+    // 가운데 알약 — 원(뒤로·⋮)과 같은 유리 재료다. 최소 높이가 원과 같아 머리 줄(62)이 움직이지 않는다.
     pill: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -371,13 +395,12 @@ const buildStyles = (color: Palette) =>
       maxWidth: '100%',
       minHeight: CONV.circle,
       paddingHorizontal: CONV.headPillPadX,
-      borderRadius: CONV.circle / 2,
-      backgroundColor: color.surface,
+      borderRadius: ds2Radius.pill,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: color.border,
       boxShadow: color.elevationRest,
     },
-    pillPressed: {backgroundColor: color.surfacePressed},
+    pillPressed: {borderColor: color.textFaint},
     face: {width: CONV.titleFace, height: CONV.titleFace},
     statusAnchor: {position: 'absolute', right: -2, bottom: -2},
     titleGlyph: {width: CONV.titleGlyph, height: CONV.titleGlyph},
@@ -396,16 +419,18 @@ const buildStyles = (color: Palette) =>
     // 머리가 `Screen` 직속이면 뒤에 서는 전면 덮개(스레드 · 고정 목록 · 작업 목록) **위로** 올라온다. `ConversationScreen` 은 머리 · 목록을
     // `collapsable={false}` 틀 하나에 담아 이 `zIndex` 가 틀 안에서만 겨루게 한다(시험이 잠근다).
     root: {zIndex: 1},
-    // 흐름 밖. `top: '100%'` 는 머리 뿌리의 높이 — 곧 머리 유리 띠의 밑 가장자리다.
+    // RN Yoga 호환 모드의 절대 % 위치는 부모의 안쪽 높이를 기준으로 삼아 안전 영역 패딩을 빠뜨린다.
+    // onLayout 이 알린 전체 높이(안전 영역·머리·요약 줄)를 pt 로 써서 부모의 아래 끝에 건다.
     bannerLayer: {
       position: 'absolute',
-      top: '100%',
       left: 0,
       right: 0,
       alignItems: 'center',
       // 긴 문장(다른 언어 · 큰 글자)이 화면 가장자리에 닿지 않게 알약의 폭을 한계 안에 둔다.
       paddingHorizontal: space.md,
     },
+    // 첫 배치가 알려 오기 전에는 이름 위에 한 프레임도 그리지 않는다. 흐름 밖이라 측정 높이는 같다.
+    bannerUnmeasured: {opacity: 0},
     banner: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -422,5 +447,7 @@ const buildStyles = (color: Palette) =>
       // `shadowOpacity` 레시피의 검정 18% 는 어두운 바닥 위에서 3단계밖에 못 누른다).
       boxShadow: color.elevationRest,
     },
+    // 눌리는 띠(끊김)의 눌림 — 머리 알약·원과 같은 자리의 같은 토큰이다(`pillPressed`).
+    bannerPressed: {borderColor: color.textFaint},
     bannerText: {fontSize: font.meta, color: color.text, fontWeight: '600', flexShrink: 1},
   });

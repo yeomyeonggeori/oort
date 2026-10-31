@@ -53,6 +53,7 @@ export interface RealtimeContextValue {
   /** Null until the session yields a websocket address. */
   rail: ChannelRail | null;
   status: RealtimeStatus;
+  reconnect?: () => Promise<void>;
   /**
    * Does the background policy want a socket at all right now (goal RN-T2)?
    *
@@ -94,29 +95,24 @@ export function RealtimeProvider({
   const url = getPersistedSession()?.realtimeWebSocketUrl ?? '';
   const [status, setStatus] = useState<RealtimeStatus>('connecting');
   const [rail, setRail] = useState<ChannelRail | null>(null);
+  const [reconnect, setReconnect] = useState<(() => Promise<void>) | undefined>();
   const [subscriptionsWanted, setSubscriptionsWanted] = useState(false);
 
   useEffect(() => {
     if (url === '') return;
-    // `connecting` means two things to centrifuge-js and only one thing to a
-    // reader. Before the first `connected` it is the opening handshake, and
-    // "연결 중" is honest. After it, it is the reconnect loop — and a real 40s
-    // drop reported as "연결 중" showed no offline state at all on web
-    // (measured there), so after the first connection a gap is a
-    // disconnection. But not INSTANTLY: a phone reconnects all the time, mostly
-    // in under two seconds, and reporting each one flashed 「연결이 끊겼습니다」
-    // at the owner mid-reconnect (#2751). The transport now hands over the
-    // status to SHOW, with gaps shorter than `DISPLAY_GRACE_MS` absorbed — see
-    // `./connectionDisplay.ts`.
+    // The display keeps every recovery `connecting` for ten seconds. A retry
+    // loop cannot restart that deadline; a foreground return can (#4783).
     const transport = createRealtimeTransport({
       url,
       onStatus: setStatus,
       onPolicy: state => setSubscriptionsWanted(socketWanted(state)),
     });
     setRail(createChannelRail(transport.client));
+    setReconnect(() => transport.reconnect);
     transport.start();
     return () => {
       setRail(null);
+      setReconnect(undefined);
       // The socket is going away with the transport, so nothing may keep
       // subscribing against it. Said here rather than left to `onPolicy`: a
       // disposed transport has stopped dispatching, so it will never say this
@@ -127,8 +123,8 @@ export function RealtimeProvider({
   }, [url]);
 
   const value = useMemo<RealtimeContextValue>(
-    () => ({rail, status, subscriptionsWanted}),
-    [rail, status, subscriptionsWanted],
+    () => ({rail, status, subscriptionsWanted, reconnect}),
+    [rail, status, subscriptionsWanted, reconnect],
   );
 
   return (

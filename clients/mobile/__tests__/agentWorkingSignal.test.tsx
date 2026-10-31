@@ -47,7 +47,7 @@ import {dropSocketPastDisplayGrace} from './fixtures/displayGrace';
 // 규칙(90초 TTL·상태 판정), core의 `turnCopy`(화면에 나가는 모든 낱말), 이
 // 클라이언트의 스토어와 레일과 화면.
 //
-// 특히 **문구를 mock하지 않는 것**이 중요하다. "승인 대기를 작업 중이라고 하지
+// 특히 **문구를 mock하지 않는 것**이 중요하다. "승인 필요를 작업 중이라고 하지
 // 않는다"는 단정이 mock된 문자열을 향하면 아무것도 지키지 못한다. 지켜야 하는
 // 것은 **화면에 그 글자가 없다**이다.
 //
@@ -463,7 +463,7 @@ describe('와이어 — 두 클라이언트가 같은 프레임을 읽는다', (
     await replay([statusFrame({phase: 'done', run_status: 'succeeded'})], 25);
     expect(screen.queryByTestId(`agent-turn-${KIM_AGENT}`)).toBeNull();
     expect(screen.getByTestId(`agent-row-${KIM_AGENT}`)).not.toHaveTextContent(
-      /작업 중|승인 대기/,
+      /작업 중|승인 필요/,
     );
   });
 });
@@ -477,7 +477,7 @@ describe('에이전트 탭 — 열린 턴을 말한다', () => {
     // 단정은 아무것도 증명하지 못한다 — `deliver`가 실제로 기다리는 이유.
     expect(screen.queryByTestId(`agent-turn-${KIM_AGENT}`)).toBeNull();
     expect(row()).not.toHaveTextContent(/작업 중/);
-    expect(row()).not.toHaveTextContent(/승인 대기/);
+    expect(row()).not.toHaveTextContent(/승인 필요/);
 
     // `queued`는 이미 열린 턴이다 — 그리고 시작 시각을 아는 유일한 프레임이다.
     // 그러나 아직 아무도 시작하지 않았으므로 「작업 중」이 아니라 「대기 중」이다
@@ -517,11 +517,11 @@ describe('에이전트 탭 — 열린 턴을 말한다', () => {
       35,
     );
 
-    await waitFor(() => expect(row()).toHaveTextContent(/승인 대기/));
+    await waitFor(() => expect(row()).toHaveTextContent(/승인 필요/));
     expect(row()).not.toHaveTextContent(/작업 중/);
   });
 
-  it('partial 은 승인 대기에 멈춘 런을 「작업 중」으로 되돌리지 못한다', async () => {
+  it('partial 은 승인 필요에 멈춘 런을 「작업 중」으로 되돌리지 못한다', async () => {
     await openAgentsTab();
     const row = () => screen.getByTestId(`agent-row-${KIM_AGENT}`);
 
@@ -530,13 +530,13 @@ describe('에이전트 탭 — 열린 턴을 말한다', () => {
       statusFrame({phase: 'thinking', run_status: 'awaiting_approval'}),
       40,
     );
-    await waitFor(() => expect(row()).toHaveTextContent(/승인 대기/));
+    await waitFor(() => expect(row()).toHaveTextContent(/승인 필요/));
 
     // 문서화된 payload 모양: 텍스트가 하나도 없는 tool_call 프레임. 상태는
     // `run_status`만 정하고 그것은 `agent.status`에만 실린다 — partial 하나가
-    // 승인 대기를 작업 중으로 끌어내면 두 표면이 다시 "기다리세요"라고 말한다.
+    // 승인 필요를 작업 중으로 끌어내면 두 표면이 다시 "기다리세요"라고 말한다.
     await deliver(partialFrame({tool_call_id: 't1', tool_call_name: 'read'}), 25);
-    expect(row()).toHaveTextContent(/승인 대기/);
+    expect(row()).toHaveTextContent(/승인 필요/);
     expect(row()).not.toHaveTextContent(/작업 중/);
   });
 

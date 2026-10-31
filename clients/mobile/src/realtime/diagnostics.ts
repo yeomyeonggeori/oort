@@ -19,6 +19,21 @@
 //                                         resume) — see the `policy` entry
 //                                         recorded just before it
 //   connecting code 109 / 3xxx            server-sent reasons
+//   disconnected code 1 / 101 / 3500     the socket ENDED for a token reason
+//                                        (#4895): a `policy terminal-retry`
+//                                        follows, with a new token each time
+//   disconnected code 3501-3509 / other  the server or protocol said not to
+//                                        reconnect: `policy terminal-hold`, and
+//                                        nothing is tried until the person, a
+//                                        foreground return or a network change
+//                                        asks
+//
+// The paths added by #4895 are all `policy` entries: `online-reconnect` (the
+// device came back online on the same kind of connection), `terminal-retry` /
+// `terminal-hold` (code attached) and `manual-reconnect` (「지금 다시 연결」 or a
+// pull to refresh). A `network` entry is written when the kind OR the
+// reachability changes, so a same-kind outage is visible as
+// `network cellular->cellular unreachable` followed by `network cellular->cellular`.
 //
 // Each `connected` → not-connected transition carries `lifetimeMs`, which is the
 // number the RCA could only reconstruct from edge logs.
@@ -28,7 +43,7 @@
 // No channel names (they embed workspace and channel ids), no token, no URL, no
 // user or member id, no error MESSAGE text from the token fetch (it is
 // `e.toString()` of whatever the HTTP layer threw and may carry a URL or a
-// body). Codes, library reason strings, policy action kinds, app-state names and
+// body). Codes, allowlisted policy action kinds, app-state names and
 // the network TYPE ("wifi" / "cellular" / "none") only. That is what makes it
 // safe to paste into an issue.
 //
@@ -55,20 +70,44 @@ export interface RealtimeDiagnostic {
   kind: RealtimeDiagnosticKind;
   /** centrifuge-js code (connecting/disconnected/error). */
   code?: number;
-  /** Library/server reason text, or the policy action / app state / network
-   *  type / error type. Never free-form user data. */
+  /** Allowlisted policy action / app state / network type / error type. */
   detail?: string;
   /** For a transition out of `connected`: how long that connection lived. */
   lifetimeMs?: number;
 }
 
-const MAX_DETAIL = 64;
+const SAFE_DETAILS: Partial<Record<RealtimeDiagnosticKind, readonly string[]>> = {
+  policy: [
+    'connect',
+    'disconnect',
+    'resume',
+    'force-reconnect',
+    'arm-grace',
+    'cancel-grace',
+    'token-cleared',
+    'online-reconnect',
+    'manual-reconnect',
+    'terminal-retry',
+    'terminal-hold',
+  ],
+  'app-state': ['active', 'inactive', 'background', 'unknown', 'extension'],
+  error: ['connectToken', 'refreshToken', 'transport', 'timeout', 'refresh', 'connect'],
+};
+const NETWORK = '(?:unknown|none|cellular|wifi|bluetooth|ethernet|wimax|vpn|other|\\?)';
+// ` offline` = no connection at all (`isConnected` false); ` unreachable` = a
+// connection that NetInfo's probe cannot get out of (`isInternetReachable` false).
+const NETWORK_DETAIL = new RegExp(`^${NETWORK}->${NETWORK}( offline| unreachable)?$`);
+function safeDetail(entry: RealtimeDiagnostic): string | undefined {
+  if (entry.detail === undefined) return undefined;
+  if (entry.kind === 'network') return NETWORK_DETAIL.test(entry.detail) ? entry.detail : undefined;
+  return SAFE_DETAILS[entry.kind]?.includes(entry.detail) ? entry.detail : undefined;
+}
 
 let entries: RealtimeDiagnostic[] = [];
 
 export function recordRealtimeDiagnostic(entry: RealtimeDiagnostic): void {
   const next: RealtimeDiagnostic = {...entry};
-  if (next.detail !== undefined) next.detail = next.detail.slice(0, MAX_DETAIL);
+  next.detail = safeDetail(entry);
   entries.push(next);
   if (entries.length > DIAGNOSTICS_CAPACITY) {
     entries = entries.slice(entries.length - DIAGNOSTICS_CAPACITY);
@@ -95,7 +134,8 @@ export function formatRealtimeDiagnostics(
     .map(entry => {
       const parts = [new Date(entry.at).toISOString(), entry.kind];
       if (entry.code !== undefined) parts.push(`code=${entry.code}`);
-      if (entry.detail !== undefined) parts.push(entry.detail);
+      const detail = safeDetail(entry);
+      if (detail !== undefined) parts.push(detail);
       if (entry.lifetimeMs !== undefined) {
         parts.push(`lifetime=${(entry.lifetimeMs / 1000).toFixed(1)}s`);
       }

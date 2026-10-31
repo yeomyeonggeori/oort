@@ -94,12 +94,12 @@ export function channelTopicIssueMessage(issue: ChannelTopicIssue): string {
 // 「주제 보기」이지 「편집」이 아니다. 빈 토픽에는 항목 자체를 그리지 않는다.
 // =============================================================================
 
-export const CHANNEL_MUTE_LABEL = "알림 끄기";
-export const CHANNEL_UNMUTE_LABEL = "알림 켜기";
+export const CHANNEL_MUTE_LABEL = "알림 켜짐";
+export const CHANNEL_UNMUTE_LABEL = "알림 꺼짐";
 export const CHANNEL_LEAVE_LABEL = "채널 나가기";
 export const CHANNEL_TOPIC_VIEW_LABEL = "주제 보기";
 
-/** 항목의 낱말은 상태다: 켜져 있으면 「끄기」, 꺼져 있으면 「켜기」. */
+/** 항목의 낱말은 상태다: 지금 켜짐·꺼짐을 말한다. */
 export function channelMuteToggleLabel(muted: boolean): string {
   return muted ? CHANNEL_UNMUTE_LABEL : CHANNEL_MUTE_LABEL;
 }
@@ -121,7 +121,7 @@ export function canLeaveChannel(role: MembershipRole | undefined): boolean {
 
 /** 알림 설정을 바꾸지 못했을 때, 그 항목 자리에서 하는 말(토스트가 아니다). */
 export const CHANNEL_MUTE_FAILURE =
-  "알림 설정을 바꾸지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+  "알림 설정을 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
 
 /** 나가기 확인 다이얼로그의 제목. */
 export const CHANNEL_LEAVE_CONFIRM_TITLE = "이 채널에서 나갈까요?";
@@ -238,18 +238,6 @@ export function dmCloseButtonLabel(name: string): string {
  * 하고, 그 이름이 이 문장이다.
  */
 export const CHANNEL_ACTION_ERROR_GROUP_LABEL = "이 메뉴의 알림";
-
-/**
- * 왕복이 도는 동안 그 항목이 하는 말 (design-review #1937 N-1).
- *
- * 낱말이 바뀌고 `aria-busy` 가 서는 것이 「지금 일어나는 중」의 표시다 —
- * `States.tsx` 가 같은 축에 대해 「never disabled and never dimmed」이라 적어
- * 두었고, 회색이 된 컨트롤은 「지금 일어나는 중」이 아니라 「너는 이걸 하면 안
- * 된다」로 읽힌다. 꼴은 「명사 + 중」이거나 고유어 어간 + 「는 중」이다.
- */
-export function channelMuteToggleBusyLabel(muted: boolean): string {
-  return muted ? "알림 켜는 중" : "알림 끄는 중";
-}
 
 /** 읽음 광고가 도는 동안. */
 export const CHANNEL_MARK_READ_BUSY_LABEL = "읽음 처리 중";

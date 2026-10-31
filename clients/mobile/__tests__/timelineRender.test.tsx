@@ -1,13 +1,17 @@
-import type {Message, RosterMember} from '@momo/core/lib/api';
+import type {AgentRunProgress, Message, RosterMember} from '@momo/core/lib/api';
+import {triggerChip} from '@momo/core/features/agents/triggerChip';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {PendingMessage} from '@momo/core/features/timeline/model';
-import {cleanup, render, screen} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
 import {StyleSheet} from 'react-native';
 
 import {WorkingRow} from '../src/features/conversation/MessageRow';
 import {NEUTRAL_ANCHOR_TEST_ID} from '../src/features/conversation/neutralAnchor';
 import {Timeline} from '../src/features/conversation/Timeline';
+import * as progressStore from '../src/features/agents/agentRunProgressStore';
+import {RequestStatusChip} from '../src/features/agents/RequestStatusChip';
+import {hasAgentRequest} from '../src/features/conversation/requestLoop';
 
 // =============================================================================
 // What the list renders, and how it is configured.
@@ -84,6 +88,66 @@ function renderTimeline(props: Partial<React.ComponentProps<typeof Timeline>> = 
 }
 
 afterEach(cleanup);
+
+describe('요청 묶음의 채널 칩과 스레드 자리', () => {
+  const run: AgentRunProgress = {id: 'run', channelId: 'ch', agentMemberId: OTHER,
+    triggerMessageId: 'msg-1', approvalId: 'ap-1', status: 'awaiting_approval', phase: 'awaiting_approval',
+    leaseState: 'live', stepCount: 1, ahead: [], createdAtMs: BASE_MS, updatedAtMs: BASE_MS};
+  const request = message(1, {authorMemberId: SELF_ID});
+  const card = message(2, {rootId: request.id, type: 'approval_request', body: '소개를 바꿔도 될까요?', props: {
+    approval_id: 'ap-1', run_id: 'run', approval_status: 'pending', action_type: 'workspace_action',
+    intent: '소개를 바꾸려고 해요', can_decide: false,
+  }});
+  afterEach(() => jest.restoreAllMocks());
+  it('에이전트를 부르지 않은 일반 스레드에는 빈 생각 칸을 더하지 않아요', () => {
+    expect(hasAgentRequest(request, DIRECTORY)).toBe(false);
+    expect(hasAgentRequest({...request, body: '@hermes 소개를 바꿔 줘'}, DIRECTORY)).toBe(true);
+    renderTimeline({messages: [request], showRollup: false, requestThoughts: true});
+    expect(screen.queryByTestId('request-thinking-slot')).toBeNull();
+  });
+  it('채널에는 칩만 서고, 칩·요약 줄이 같은 스레드 카드로 가요', () => {
+    jest.spyOn(progressStore, 'useChannelRuns').mockReturnValue([run]);
+    const openMessage = jest.fn();
+    const openThread = jest.fn();
+    renderTimeline({messages: [request, card], actions: {myMemberId: SELF_ID, onOpenMessage: openMessage,
+      onOpenThread: openThread, onToggleReaction: async () => {}, onEdit: async () => {}, onDelete: async () => {}}});
+    expect(screen.queryByTestId('request-bundle-card')).toBeNull();
+    expect(screen.getByTestId('request-status-chip')).toHaveTextContent(/승인 필요/);
+    fireEvent.press(screen.getByTestId('request-status-chip'));
+    fireEvent.press(screen.getByTestId('thread-rollup'));
+    expect(openMessage.mock.calls).toEqual([['ch', card.id], ['ch', card.id]]);
+    expect(openThread).not.toHaveBeenCalled();
+  });
+  it('스레드와 에이전트 DM에서는 같은 카드가 서요', () => {
+    const view = renderTimeline({messages: [request, card], showRollup: false});
+    expect(screen.getByTestId('request-bundle-card')).toBeTruthy();
+    view.rerender(<Timeline messages={[request, card]} directory={DIRECTORY} status="ready" myMemberId={SELF_ID} nowMs={BASE_MS} channelKind="dm" />);
+    expect(screen.getByTestId('request-bundle-card')).toBeTruthy();
+  });
+  it('요청 메시지가 창 밖이면 묶음 카드를 감추지 않아요', () => {
+    renderTimeline({messages: [card]});
+    expect(screen.getByTestId('request-bundle-card')).toBeTruthy();
+  });
+  it('같은 목록의 종결 카드가 설명하는 옛 결과 줄만 접고, 창 밖이면 남겨요', () => {
+    const done = {...card, props: {...card.props, approval_status: 'approved', result: {status: 'succeeded', line: '소개를 바꿨어요'}}};
+    const result = message(3, {body: '소개를 바꿨어요', props: {bundle_of: 'ap-1'}});
+    const view = renderTimeline({messages: [done, result], showRollup: false});
+    expect(screen.getAllByTestId('message-row')).toHaveLength(1);
+    view.rerender(<Timeline messages={[result]} directory={DIRECTORY} status="ready" myMemberId={SELF_ID} nowMs={BASE_MS} showRollup={false} />);
+    expect(screen.getAllByTestId('message-row')).toHaveLength(1);
+    expect(screen.getByText('소개를 바꿨어요')).toBeTruthy();
+  });
+  it('승인·거부·만료·끝으로 바뀌어도 칩의 상자 크기는 같아요', () => {
+    const view = render(<RequestStatusChip chip={triggerChip([run], () => ({name: '에이전트'}), BASE_MS)!} />);
+    const box = StyleSheet.flatten(screen.getByTestId('request-status-chip').props.style);
+    for (const [phase, endReason] of [['cancelled', 'approval_rejected'], ['timed_out', 'approval_expired'], ['succeeded', undefined]] as const) {
+      const chip = triggerChip([{...run, phase, endReason}], () => ({name: '에이전트'}), BASE_MS)!;
+      view.rerender(<RequestStatusChip chip={chip} />);
+      const next = StyleSheet.flatten(screen.getByTestId('request-status-chip').props.style);
+      expect([next.width, next.height]).toEqual([box.width, box.height]);
+    }
+  });
+});
 
 type ReactTestInstance = ReturnType<typeof screen.getByTestId>;
 
@@ -395,4 +459,14 @@ describe('행이 말하는 것', () => {
     });
     expect(screen.getByTestId('message-resend')).toBeTruthy();
   });
+});
+
+
+it('S1 #4789 머리 여백은 스크롤 안에 있고 날짜·안 읽음 자리는 머리 아래다', () => {
+  renderTimeline({contentTopInset: 121, topPillInset: 121, jumpPills: true, loadingOlder: true});
+  const list = screen.getByTestId('timeline-list');
+  expect(StyleSheet.flatten(list.props.contentContainerStyle)).toMatchObject({paddingTop: 121, flexGrow: 1, justifyContent: 'flex-end'});
+  expect(StyleSheet.flatten(list.props.style)?.paddingTop).toBeUndefined();
+  expect(StyleSheet.flatten(screen.getByTestId('timeline-top-pills').props.style).top).toBe(121);
+  expect(screen.UNSAFE_getAllByType(require('react-native').ActivityIndicator)).toHaveLength(1);
 });

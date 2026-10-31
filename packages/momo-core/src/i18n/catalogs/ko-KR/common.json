@@ -1,0 +1,5 @@
+{
+  "common.feedback.unavailable": "내용을 표시하지 못했어요. 다시 시도해 주세요.",
+  "common.members.count": "{count, number}명",
+  "common.invitation.received": "{actorName} 님이 초대했어요."
+}

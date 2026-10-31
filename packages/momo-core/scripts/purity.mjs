@@ -20,7 +20,7 @@
 // =============================================================================
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, resolve, dirname } from "node:path";
+import { join, relative, resolve, dirname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
@@ -88,6 +88,18 @@ const BANNED_IMPORT_PATTERNS = [
   /^expo/,
 ];
 
+/**
+ * The one runtime dependency the core declares: Accepted ADR-0213 adopts FormatJS
+ * (`@formatjs/intl`) as the message foundation every client shares. Pinned exactly so
+ * a bump is a reviewed change, and importable only under src/i18n — the rest of the
+ * core stays dependency-free. `@formatjs/icu-messageformat-parser` is the catalog
+ * generator's development dependency: src/i18n may name its AST types, never load it.
+ */
+const ALLOWED_RUNTIME_DEPENDENCIES = new Map([["@formatjs/intl", "6.1.4"]]);
+const I18N = join(SRC, "i18n") + sep;
+const I18N_RUNTIME_IMPORTS = new Set(["@formatjs/intl"]);
+const I18N_TYPE_ONLY_IMPORTS = new Set(["@formatjs/icu-messageformat-parser"]);
+
 const failures = [];
 function fail(file, line, message) {
   failures.push(`${relative(PKG, file)}:${line}  ${message}`);
@@ -113,13 +125,13 @@ for (const f of files) {
   }
 }
 
-// ---- 2. the package declares no runtime dependencies ------------------------
+// ---- 2. the package declares no runtime dependencies but FormatJS -----------
 const pkg = JSON.parse(readFileSync(join(PKG, "package.json"), "utf8"));
 for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
-  const names = Object.keys(pkg[field] ?? {});
-  if (names.length > 0) {
+  for (const [name, version] of Object.entries(pkg[field] ?? {})) {
+    if (field === "dependencies" && ALLOWED_RUNTIME_DEPENDENCIES.get(name) === version) continue;
     failures.push(
-      `package.json  ${field} must stay empty; found ${names.join(", ")}. ` +
+      `package.json  ${field} must stay empty apart from ADR-0213's exact FormatJS pin; found ${name}@${version}. ` +
         "A platform arrives as an injected port (src/runtime/host.ts), not as a dependency."
     );
   }
@@ -131,7 +143,7 @@ for (const file of files.filter((f) => f.endsWith(".ts"))) {
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.ES2022, true);
   const lineOf = (node) => sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
 
-  const checkSpecifier = (node, spec) => {
+  const checkSpecifier = (node, spec, typeOnly = false) => {
     const line = lineOf(node);
     if (spec.startsWith("@/")) {
       fail(file, line, `"${spec}" — "@/" is the web client's alias. The core cannot import from clients/web.`);
@@ -149,6 +161,12 @@ for (const file of files.filter((f) => f.endsWith(".ts"))) {
         fail(file, line, `"${spec}" is a UI/platform/transport package. The core stays free of it.`);
         return;
       }
+    }
+    if (
+      file.startsWith(I18N) &&
+      (I18N_RUNTIME_IMPORTS.has(spec) || (typeOnly && I18N_TYPE_ONLY_IMPORTS.has(spec)))
+    ) {
+      return;
     }
     if (!spec.startsWith("vitest") && !spec.startsWith("node:")) {
       fail(file, line, `"${spec}" — the core has no runtime dependencies; only relative imports (and vitest in tests) are allowed.`);
@@ -190,7 +208,10 @@ for (const file of files.filter((f) => f.endsWith(".ts"))) {
       node.moduleSpecifier &&
       ts.isStringLiteral(node.moduleSpecifier)
     ) {
-      checkSpecifier(node, node.moduleSpecifier.text);
+      const typeOnly = ts.isImportDeclaration(node)
+        ? Boolean(node.importClause?.isTypeOnly)
+        : node.isTypeOnly;
+      checkSpecifier(node, node.moduleSpecifier.text, typeOnly);
     }
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
       const arg = node.arguments[0];

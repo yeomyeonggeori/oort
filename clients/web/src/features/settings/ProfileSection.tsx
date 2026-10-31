@@ -24,6 +24,7 @@ import { Field, SaveButton } from "./SettingsFields";
 import { ProfileHero } from "./shell/ProfileHero";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
+import { LanguageRow } from "./LanguageRow";
 
 // Design Read: settings / Profile for internal team users on web+Tauri,
 // density 7/10, motion 2/10.
@@ -196,6 +197,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
         description="이 워크스페이스에서 다른 멤버에게 보이는 이름, 핸들, 프로필 사진이에요."
         testId="profile-card"
       >
+        <LanguageRow />
         <form className="flex min-w-0 flex-col divide-y divide-line" onSubmit={handleSubmit}>
           <div className="px-4 py-3">
             <Field

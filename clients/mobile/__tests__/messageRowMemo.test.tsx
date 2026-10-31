@@ -107,6 +107,10 @@ const BASE: MessageRowProps = {
  * 동일성만 바꾸어도 충분하다 — 그것이 그 prop 들의 계약이다.
  */
 const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
+  requestChip: {requestChip: {kind: 'approval', word: '승인 필요', mark: 'none', tone: 'warn', label: '승인 필요', runIds: ['run']}},
+  requestCardTarget: {requestCardTarget: message(3)},
+  requestRun: {requestRun: {id: 'run'} as never},
+  requestThinking: {requestThinking: true},
   message: {message: message(2)},
   startsGroup: {startsGroup: false},
   directory: {directory: OTHER_DIRECTORY},

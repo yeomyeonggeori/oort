@@ -32,6 +32,7 @@ import {
   Composer,
   composerColumnBudget,
   composerMaxHeight,
+  COMPOSER_MAX_ROWS,
   INPUT_CHROME,
   INPUT_CHROME_X,
   mentionAnnotationLines,
@@ -192,6 +193,7 @@ import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
 import {BubbleSurface} from './bubbleConv';
+import {BubbleClipSurface} from './bubbleClip';
 import {DockGapSurface} from './dockGap';
 import {TapDismissSurface} from './tapDismiss';
 import {JumpLatestSurface} from './jumpLatest';
@@ -1295,7 +1297,7 @@ function GrowthProbe({
         {`대화 열 ${budget.column.toFixed(1)}pt = 목록 ${budget.list.toFixed(1)} + 입력창 ${budget.composer.toFixed(1)} — 목록 ≥ 입력창 ${budget.list >= budget.composer ? '참' : '거짓'}`}
       </Text>
       <Text allowFontScaling={false} style={styles.probeRead}>
-        {`상한 ${cap.toFixed(1)}pt = ${((cap - space.sm * 2 - 2) / row).toFixed(1)}줄 · 5줄이면 ${(5 * row + space.sm * 2 + 2).toFixed(1)}pt · 실제 상자 ${boxHeight.toFixed(1)}pt`}
+        {`상한 ${cap.toFixed(1)}pt = ${((cap - space.sm * 2 - 2) / row).toFixed(1)}줄 · ${COMPOSER_MAX_ROWS}줄이면 ${(COMPOSER_MAX_ROWS * row + INPUT_CHROME).toFixed(1)}pt · 실제 상자 ${boxHeight.toFixed(1)}pt`}
       </Text>
       <Text allowFontScaling={false} style={styles.probeRead}>
         {`글폭 ${Math.round(content)}pt 에서 끊기는 자리 — ${broken}`}
@@ -2239,6 +2241,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     return <AppsTailSurface which={name.slice('apps-tail'.length).replace(/^-/, '')} />;
   }
   // #4300: 말풍선 대화 + 눌림·착지 강조 면(실제 MessageRow).
+  // #4894: 말풍선 글 잘림 — 여러 폭의 칸에 실제 MessageRow 를 세우고 네이티브가 낸 틀을 숫자로 적는다(`bubbleClip.tsx`).
+  if (name.startsWith('bubble-clip')) {
+    return <BubbleClipSurface which={name.slice('bubble-clip'.length).replace(/^-/, '')} />;
+  }
   if (name.startsWith('bubble-')) return <BubbleSurface which={name.slice('bubble-'.length)} />;
   // #4016: DM 대화 화면(실제 머리·레이아웃·타임라인·컴포저).
   if (name.startsWith('dm-conversation')) {
@@ -5635,7 +5641,7 @@ export default function SurfacesHarness({
   return (
     <FixedScheme
       scheme={scheme}
-      bubble={name.startsWith('bubble-row') || name.startsWith('bubble-arrive-row') ? {layout: 'row'} : undefined}>
+      bubble={name.startsWith('bubble-row') || name.startsWith('bubble-arrive-row') || name.startsWith('bubble-clip-row') ? {layout: 'row'} : undefined}>
       <SafeAreaProvider>
         <QueryClientProvider client={harnessClient}>
           <SessionProvider member={HARNESS_MEMBER}>

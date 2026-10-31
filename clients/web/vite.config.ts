@@ -143,6 +143,18 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
       "@momo/core": path.resolve(__dirname, "../../packages/momo-core/src"),
     },
+    // What the web ships, the web declares (#4913; the phone's twin is
+    // `clients/mobile/metro.config.js`). The core's runtime imports are FormatJS
+    // (ADR-0213), and Vite resolves a bare import from the importing file's own
+    // directory — for a core file that is `packages/momo-core/…`, which finds
+    // only what a repo-root `npm ci` hoisted. The server image
+    // (`server-rust/Dockerfile`) and `release-desktop.yml` run `npm ci` in this
+    // folder alone, so `dedupe` resolves these two from this project's
+    // `node_modules` (the Vite root) instead. `tsconfig.app.json` and
+    // `tsconfig.measure.json` carry the same two `paths`; package.json pins them
+    // to the core's exact versions and the lock pins their closure.
+    // `src/testing/shippedCoreDependencies.test.ts` measures each of the three.
+    dedupe: ["@formatjs/icu-messageformat-parser", "@formatjs/intl"],
   },
   clearScreen: false,
   server: {

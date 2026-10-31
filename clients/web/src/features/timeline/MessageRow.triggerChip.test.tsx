@@ -252,12 +252,12 @@ describe("머리 줄의 칩 (B)", () => {
     expect(q(none, "trigger-chip")).toBeNull();
   });
 
-  it("평소의 진행에는 칩만 있고 문장 행은 없다: 받음·가져감·작업 중·승인 대기·답함", () => {
+  it("평소의 진행에는 칩만 있고 문장 행은 없다: 받음·가져감·작업 중·승인 필요·답함", () => {
     const states: [Partial<AgentRunProgress>, string][] = [
       [{ status: "queued", phase: "queued", leaseState: "none", startedAtMs: undefined, createdAtMs: T0 - 10_000 }, "받음"],
       [{ status: "queued", phase: "claimed", claimedAtMs: T0 - 5_000, startedAtMs: undefined }, "가져감"],
       [{}, "작업 중"],
-      [{ status: "awaiting_approval", phase: "awaiting_approval" }, "승인 대기"],
+      [{ status: "awaiting_approval", phase: "awaiting_approval" }, "승인 필요"],
       [DONE, "답함"],
     ];
     for (const [extra, word] of states) {

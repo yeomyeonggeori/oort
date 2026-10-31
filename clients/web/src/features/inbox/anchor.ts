@@ -306,6 +306,8 @@ export interface WatchOptions {
    * 취소된 감시자는 부르지 않는다: 채널을 옮겨서 그만둔 것은 실패가 아니다.
    */
   onExpire?: () => void;
+  /** 실제 행을 스크롤하고 강조했을 때 한 번 부른다. 같은 착지를 재실행하지 않게 해요. */
+  onLand?: () => void;
   /**
    * 매 틱마다, 행을 찾기 전에 부른다. 가상 목록은 DOM 오버스캔에 행이 있어도
    * `scrollIntoView`만으로는 창을 옮기지 못하므로, 목록의 `scrollToIndex`를
@@ -379,6 +381,7 @@ function watchForRow(
     if (row && rowInViewport(row)) {
       row.scrollIntoView({ block: "center" });
       row.classList.add(HIGHLIGHT_CLASS);
+      options.onLand?.();
       schedule(() => row.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_MS);
       return;
     }

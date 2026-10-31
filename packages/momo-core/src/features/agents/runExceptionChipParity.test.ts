@@ -1,3 +1,7 @@
+import type { Approval, Message } from "../../lib/api";
+import { agentRequestBundle } from "../timeline/agentCardModel";
+import { approvalItem } from "../inbox/model";
+import { runPhaseLabel } from "./runPhase";
 import { describe, expect, it } from "vitest";
 import type { AgentRunPhase, AgentRunProgress } from "../../lib/api";
 import { activityRail } from "./activityRail";
@@ -275,12 +279,12 @@ describe("카드·줄·칩·레일이 같은 run을 같은 판정·같은 낱말
     expect(seen).toBeGreaterThan(20);
   });
 
-  it("줄도 칩도 없는 상태: 취소는 둘 다 없다. 줄 없이 칩만 있는 상태는 진행 중·답함·승인 대기뿐이다", () => {
+  it("줄도 칩도 없는 상태: 취소는 둘 다 없다. 줄 없이 칩만 있는 상태는 진행 중·답함·승인 필요뿐이다", () => {
     for (const { where, exception, chip } of rows) {
       if (exception !== null) continue;
       if (chip === null) continue;
       expect(
-        ["received", "claimed", "working", "approval", "answered"],
+        ["received", "claimed", "working", "approval", "answered", "declined", "expired"],
         where
       ).toContain(chip.kind);
     }
@@ -288,4 +292,94 @@ describe("카드·줄·칩·레일이 같은 run을 같은 판정·같은 낱말
     expect(runException(cancelled, T + HOUR)).toBeNull();
     expect(triggerChip([cancelled], nameFor, T + HOUR)).toBeNull();
   });
+});
+
+it("승인 종결은 카드·칩·인박스·문장이 같은 낱말이고 예외 줄은 없다", () => {
+  for (const [status, phase, endReason, word, sentence] of [
+    ["rejected", "cancelled", "approval_rejected", "거부", "거부됐어요"],
+    [
+      "expired",
+      "timed_out",
+      "approval_expired",
+      "만료",
+      "승인을 기다리다 만료됐어요",
+    ],
+  ] as const) {
+    const r = run({ phase, status: phase, endReason });
+    const message: Message = {
+      id: "card",
+      channelId: r.channelId,
+      authorMemberId: AGENT,
+      type: "approval_request",
+      seq: 1,
+      hlcTs: T,
+      hlcCount: 0,
+      createdAtMs: T,
+      props: { approval_id: "approval", status, action_type: "tool_call" },
+    };
+    const card = agentRequestBundle(message, { nowMs: T })!;
+    const chip = triggerChip([r], nameFor, T)!;
+    const approval: Approval = {
+      id: "approval",
+      workspaceId: "workspace",
+      runId: r.id,
+      channelId: r.channelId,
+      requestedBy: AGENT,
+      actionType: "tool_call",
+      status,
+    };
+    const row = approvalItem(
+      approval,
+      { name: "달무리봇", isAgent: true },
+      "실험실",
+      T
+    );
+    expect([
+      card.word,
+      chip.word,
+      row.outcome,
+      runPhaseLabel(serverFactsOf(r)),
+    ]).toEqual([word, word, word, word]);
+    expect(card.sentence).toBe(sentence);
+    expect(runException(r, T)).toBeNull();
+    // 끝 코드가 아직 run에 없더라도 같은 bundle을 받으면 예외 줄은 서지 않아요.
+    const stale = {
+      ...run({ phase: "failed", status: "failed" }),
+      bundle: { status },
+    };
+    expect(runException(stale, T)).toBeNull();
+    expect(triggerChip([stale], nameFor, T)?.word).toBe(word);
+  }
+});
+
+it.each([
+  { name: "승인 직후(run 미수신)", status: "approved", state: "executing", word: "실행 중", chipKind: "working", chipWord: "작업 중" },
+  { name: "승인 직후(대기 run)", status: "approved", phase: "awaiting_approval", state: "executing", word: "실행 중", chipKind: "working", chipWord: "작업 중" },
+  { name: "실행 중", status: "approved", phase: "running", state: "executing", word: "실행 중", chipKind: "working", chipWord: "작업 중" },
+  { name: "성공", status: "approved", phase: "succeeded", state: "done", word: "끝", chipKind: "answered", chipWord: "끝" },
+  { name: "실패", status: "approved", phase: "failed", endReason: "agent_error", state: "failed", word: "실패", chipKind: "failed", chipWord: "실패" },
+  { name: "결과 성공(run 미수신)", status: "approved", resultStatus: "executed", state: "done", word: "끝", chipKind: "answered", chipWord: "끝" },
+  { name: "결과 실패(run 미수신)", status: "approved", resultStatus: "failed", state: "failed", word: "실패", chipKind: "failed", chipWord: "실패" },
+  { name: "만료", status: "expired", phase: "timed_out", endReason: "approval_expired", state: "expired", word: "만료", chipKind: "expired", chipWord: "만료" },
+] as const)("도구 승인 $name: 카드·인박스·칩이 같은 상태를 말한다", (row) => {
+  const phase = "phase" in row ? row.phase : undefined;
+  const endReason = "endReason" in row ? row.endReason : undefined;
+  const r = phase === undefined ? undefined : run({ phase, status: phase, endReason });
+  const result = "resultStatus" in row ? { status: row.resultStatus, rows: [], omittedRows: 0 } : undefined;
+  const bundle = { status: row.status, actionType: "tool_call", result };
+  const card = agentRequestBundle({
+    id: "card", channelId: "channel", authorMemberId: AGENT, type: "approval_request",
+    seq: 1, hlcTs: T, hlcCount: 0, createdAtMs: T,
+    props: { approval_id: "approval", status: row.status, action_type: "tool_call", result },
+  }, { nowMs: T, run: r })!;
+  const inbox = approvalItem({
+    id: "approval", workspaceId: "workspace", runId: "run", channelId: "channel",
+    requestedBy: AGENT, actionType: "tool_call", status: row.status,
+  }, { name: "달무리봇", isAgent: true }, "실험실", T, { run: r, result });
+  // run을 아직 받지 못했으면 전달 상태에 머물러도 같은 승인 bundle을 읽어요.
+  const chip = triggerChip([r ?? run({})], nameFor, T, { bundleFor: () => bundle });
+  expect(card.state).toBe(row.state);
+  expect(card.word).toBe(row.word);
+  expect(inbox.outcome).toBe(row.word);
+  expect(chip).toMatchObject({ kind: row.chipKind, word: row.chipWord });
 });

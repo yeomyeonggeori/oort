@@ -113,7 +113,7 @@ describe("서버 phase가 클라이언트 시계를 이긴다 (ADR-0200 D1)", ()
   });
 });
 
-describe("상태 어휘: 대기 n번째 / 가져감 / 진행 / 승인 대기 / 끝(사유)", () => {
+describe("상태 어휘: 대기 n번째 / 가져감 / 진행 / 승인 필요 / 끝(사유)", () => {
   it("phase마다 한 낱말", () => {
     const label = (extra: Partial<AgentRunProgress>) =>
       runPhaseLabel(serverFactsOf(progress(extra)));
@@ -121,12 +121,12 @@ describe("상태 어휘: 대기 n번째 / 가져감 / 진행 / 승인 대기 / �
     expect(label({ phase: "queued" })).toBe("대기 중");
     expect(label({ phase: "claimed", leaseState: "live" })).toBe("가져감");
     expect(label({ phase: "running", leaseState: "live" })).toBe("작업 중");
-    expect(label({ phase: "awaiting_approval" })).toBe("승인 대기");
+    expect(label({ phase: "awaiting_approval" })).toBe("승인 필요");
     expect(label({ phase: "paused" })).toBe("일시 정지");
     expect(label({ phase: "succeeded" })).toBe("완료");
     expect(label({ phase: "failed" })).toBe("실패");
     expect(label({ phase: "cancelled" })).toBe("취소됨");
-    expect(label({ phase: "timed_out", endReason: "approval_expired" })).toBe("시간 초과");
+    expect(label({ phase: "timed_out", endReason: "approval_expired" })).toBe("만료");
   });
 
   it("「신호 소실」은 서버가 lease_abandoned로 끝냈다고 알릴 때만 나온다", () => {
@@ -165,7 +165,7 @@ describe("상태 어휘: 대기 n번째 / 가져감 / 진행 / 승인 대기 / �
   });
 
   it("종료 사유: 닫힌 코드만 문장이 되고 모르는 코드는 만들어 내지 않는다", () => {
-    expect(endReasonText("approval_expired")).toBe("승인이 만료됐어요");
+    expect(endReasonText("approval_expired")).toBe("승인을 기다리다 만료됐어요");
     expect(endReasonText("unclaimed_expired")).toBe("아무도 가져가지 않아 끝냈어요");
     // ADR-0200 증보 3 E4(#4284): 새 닫힌 코드의 문장. 「아무도」(24시간 규칙)와 다른 사실이라 문장도 다르다.
     expect(endReasonText("woken_not_collected")).toBe("깨웠지만 가져가지 않아 끝냈어요");
@@ -187,7 +187,7 @@ describe("상태 어휘: 대기 n번째 / 가져감 / 진행 / 승인 대기 / �
 });
 
 describe("표면 낱말", () => {
-  it("대기·가져감·진행·승인 대기가 알약에서 서로 다른 낱말이다", () => {
+  it("대기·가져감·진행·승인 필요가 알약에서 서로 다른 낱말이다", () => {
     const sig = (extra: Partial<AgentRunProgress>) => {
       const s = signalFromProgress(progress(extra));
       if (s === null) throw new Error("signal");
@@ -198,7 +198,7 @@ describe("표면 낱말", () => {
     expect(word({ phase: "queued", queuePosition: 2 })).toBe("대기 2번째");
     expect(word({ phase: "claimed", leaseState: "live" })).toBe("가져감");
     expect(word({ phase: "running", status: "running", leaseState: "live" })).toBe("작업 중");
-    expect(word({ phase: "awaiting_approval", status: "awaiting_approval" })).toBe("승인 대기");
+    expect(word({ phase: "awaiting_approval", status: "awaiting_approval" })).toBe("승인 필요");
   });
 
   it("컴포저 줄: 대기·가져감은 「작업 중」이 아니고, 진행 단계는 에이전트가 보고한 만큼이다", () => {
@@ -222,7 +222,7 @@ describe("표면 낱말", () => {
     expect(r.startedAtMs).toBe(NOW - 2 * MIN);
   });
 
-  it("한 에이전트의 여러 run은 working > 승인 대기 > 대기 순으로 접힌다", () => {
+  it("한 에이전트의 여러 run은 working > 승인 필요 > 대기 순으로 접힌다", () => {
     const mk = (extra: Partial<AgentRunProgress>) => {
       const s = signalFromProgress(progress(extra));
       if (s === null) throw new Error("signal");

@@ -222,14 +222,14 @@ describe("승인 카드 기한 (#3738)", () => {
     expect(document.activeElement).not.toBe(q(el, "agent-card"));
   });
 
-  it("기한이 지난 카드는 컨트롤이 없고 「다시 제안해 달라고 하기」가 선다", () => {
+  it("기한이 지난 카드는 컨트롤이 없고 「다시 요청」가 선다", () => {
     const el = mount(actionProps("channel.create", CHANNEL_CREATE_ROWS, "admin", T0 - 1_000));
     expect(q(el, "approval-approve")).toBeNull();
     expect(q(el, "approval-reject")).toBeNull();
     expect(q(el, "approval-expired")?.textContent).toContain(
       "승인 시간이 지나서 더 이상 결정할 수 없어요."
     );
-    expect(q(el, "approval-repropose")?.textContent).toBe("다시 제안해 달라고 하기");
+    expect(q(el, "approval-repropose")?.textContent).toBe("다시 요청");
   });
 
   it("버튼은 그 에이전트를 멘션한 초안을 그 채널의 입력창에 넣는다 (보내지 않는다)", () => {
@@ -270,10 +270,16 @@ describe("승인 카드 기한 (#3738)", () => {
 });
 
 describe("새 행동 카드 다섯 (#3729)", () => {
+  function mountDetails(props: Record<string, unknown>) {
+    const el = mount(props);
+    const details = el.querySelector<HTMLDetailsElement>('[data-testid="request-bundle-details"]')!;
+    act(() => { details.open = true; details.dispatchEvent(new Event("toggle")); });
+    return el;
+  }
   const FUTURE = T0 + 3_600_000;
 
   it("channel.create: 「이 에이전트도 참여」 행이 강조되고 접근 범위 한 줄이 붙는다", () => {
-    const el = mount(actionProps("channel.create", CHANNEL_CREATE_ROWS, "admin", FUTURE));
+    const el = mountDetails(actionProps("channel.create", CHANNEL_CREATE_ROWS, "admin", FUTURE));
     const rows = [...el.querySelectorAll('[data-testid="approval-action-row"]')];
     expect(rows).toHaveLength(3);
     expect(q(el, "approval-access-widening")?.textContent).toBe(
@@ -300,14 +306,14 @@ describe("새 행동 카드 다섯 (#3729)", () => {
     ["hosted.channels.grant", "admin", "관리자만 승인할 수 있어요."],
     ["workspace.settings.update", "workspace_operator", "워크스페이스 운영자(관리자)만 승인할 수 있어요."],
   ])("%s: 결정 권한 줄이 %s 의 문장으로 선다", (id, role, copy) => {
-    const el = mount(
+    const el = mountDetails(
       actionProps(id, [{ label: "행", value: "값" }], role, FUTURE)
     );
     expect(q(el, "approval-action-role")?.textContent).toContain(copy);
   });
 
   it("행 값은 평문이다 — 링크도 멘션도 요소가 되지 않는다 (부록 A)", () => {
-    const el = mount(
+    const el = mountDetails(
       actionProps(
         "workspace.settings.update",
         [
@@ -327,7 +333,7 @@ describe("새 행동 카드 다섯 (#3729)", () => {
   });
 
   it("agent.rename: 「현재 → 새」 행이 서버 문장 그대로 그려진다", () => {
-    const el = mount(
+    const el = mountDetails(
       actionProps(
         "agent.rename",
         [{ label: "이름 변경", value: "그록봇 → 그록 2" }],

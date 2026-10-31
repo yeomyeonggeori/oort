@@ -9,6 +9,9 @@ import {AccessibilityInfo, Dimensions, Platform, StyleSheet} from 'react-native'
 import {
   Composer,
   composerColumnBudget,
+  composerMaxHeight,
+  composerCollapsedHeight,
+  composerAgentNoticeMaxHeight,
   mentionAnnotationLines,
   noticeEssentialFirst,
   mentionRowHeight,
@@ -16,6 +19,7 @@ import {
 } from '../src/features/conversation/Composer';
 import {line} from '../src/design/tokens';
 import {__setNonSecretStore} from '../src/storage/kv';
+import {measureComposerText} from './fixtures/composerMeasurement';
 
 // =============================================================================
 // AIH-9b (#3440) — 폰 멘션 시트의 AI 보조 줄·칩·잠금과 입력창 위 한 줄.
@@ -355,9 +359,26 @@ describe('입력창 위 한 줄 — 답하지 않을 에이전트를 부르는 �
   it('두 줄 한 줄이 가장 큰 글자에서도 입력창 상한 뒤 열에 든다 — 도크 예산', () => {
     for (const fs of [1, 2.143, 3.143, 3.571]) {
       for (const h of [812, 874, 956]) {
-        const b = composerColumnBudget(fs, h);
+        // 고지가 실제로 보이는 예산을 읽는다. 두 줄·도구 줄·고지 패딩까지
+        // 같은 열에 들어야 하며, 렌더된 입력창도 그 상한을 써야 한다.
+        const b = composerColumnBudget(fs, h, false, true);
         const noticeMax = 2 * line.meta * fs; // 두 줄 × line.meta × 글자 배수
         expect(b.composer + b.dockChrome + noticeMax).toBeLessThanOrEqual(b.column);
+        setWindow({fontScale: fs, height: h});
+        const view = composer([otherSub]);
+        const input = screen.getByTestId('composer-input');
+        fireEvent.changeText(input, '@sj 안녕 ');
+        measureComposerText(10 * line.body * fs);
+        const inputStyle = StyleSheet.flatten(screen.getByTestId('composer-input').props.style);
+        expect(inputStyle.maxHeight).toBe(b.composer);
+        expect(inputStyle.height).toBe(b.composer);
+        expect(screen.getByTestId('composer-input').props.scrollEnabled).toBe(true);
+        expect(inputStyle.height + b.dockChrome + noticeMax).toBeLessThanOrEqual(b.column);
+        // 고지를 지우면 평소 입력창 예산으로 돌아온다.
+        fireEvent.changeText(input, '안녕 ');
+        expect(StyleSheet.flatten(screen.getByTestId('composer-input').props.style).maxHeight)
+          .toBe(composerMaxHeight(fs, h));
+        view.unmount();
       }
     }
   });
@@ -367,6 +388,31 @@ describe('입력창 위 한 줄 — 답하지 않을 에이전트를 부르는 �
     fireEvent.changeText(screen.getByTestId('composer-input'), '@sj 안녕 @');
     expect(screen.getByTestId('mention-list')).toBeTruthy();
     expect(screen.queryByTestId('composer-agent-notice')).toBeNull();
+  });
+
+  it('SE의 가장 큰 글자에서도 입력 첫 줄과 고지를 함께 남긴다 — 고지는 한 줄씩 스크롤한다', () => {
+    for (const fs of [3.143, 3.571]) {
+      setWindow({fontScale: fs, height: 667});
+      const view = composer([otherSub]);
+      fireEvent.changeText(screen.getByTestId('composer-input'), '@sj 안녕 ');
+      measureComposerText(10 * line.body * fs);
+      const b = composerColumnBudget(fs, 667, false, true);
+      const notice = screen.getByTestId('composer-agent-notice');
+      const viewport = screen.getByTestId('composer-agent-notice-scroll');
+      const noticePadding = StyleSheet.flatten(notice.props.style).paddingTop as number;
+      const noticeHeight = StyleSheet.flatten(viewport.props.style).maxHeight as number;
+      const inputHeight = StyleSheet.flatten(screen.getByTestId('composer-input').props.style).height as number;
+      expect(inputHeight).toBeGreaterThanOrEqual(composerCollapsedHeight(fs));
+      expect(inputHeight).toBe(b.composer);
+      expect(noticeHeight).toBe(composerAgentNoticeMaxHeight(fs, 667));
+      expect(noticeHeight).toBe(line.meta * fs + noticePadding);
+      expect(inputHeight + b.dockChrome + noticeHeight - noticePadding).toBeLessThanOrEqual(b.column);
+      expect(viewport.props.scrollEnabled).toBe(true);
+      expect(viewport.props.keyboardShouldPersistTaps).toBe('handled');
+      expect(notice.props.numberOfLines).toBe(2);
+      expect(notice.props.accessibilityLabel).toBe(notice.props.children);
+      view.unmount();
+    }
   });
 });
 

@@ -1,0 +1,44 @@
+/* Named stage geometry. The card scrolls independently of the glass controls,
+   so large text and short windows keep every action reachable. */
+.decision-stage-layout {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  block-size: 100%;
+  min-block-size: 0;
+  gap: var(--spacing-3);
+  padding: var(--spacing-4);
+}
+.decision-stage-drag {
+  touch-action: none;
+}
+/* Same native-window inset as the photo stage; fullscreen folds this token. */
+.decision-stage-layout > header[data-desktop-shell] {
+  padding-inline-start: max(0px, calc(var(--titlebar-inset) - var(--spacing-4)));
+}
+.decision-stage-thumbnails {
+  display: flex;
+  gap: var(--spacing-2);
+  max-inline-size: 100%;
+  overflow-x: auto;
+  padding: var(--spacing-1);
+}
+.decision-stage-thumbnail {
+  inline-size: var(--spacing-pane);
+  max-inline-size: 40vw;
+}
+/* Motion reduction removes blur as well as the spring. The solid stage token
+   is already shared with photo stages; no new palette or overlay colour. */
+@media (prefers-reduced-motion: reduce) {
+  [data-decision-stage] {
+    background: var(--lightbox-stage-solid);
+  }
+  .decision-stage-scrim {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  [data-decision-stage] .glass {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--surface);
+  }
+}

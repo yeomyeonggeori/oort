@@ -401,6 +401,32 @@ func intent(
 
 do {
   typealias P = MomoPushActionPlanner
+  // 요청 고리: 영수증의 공개 한 줄만 결과 알림으로 읽어요. 실패·알 수 없는 상태는
+  // 서버가 line을 보내도 기존 실패 안내를 지켜요. 네이티브 실행은 스택 검증에서 해요.
+  for (status, httpStatus, direction, text) in [
+    ("approved", 200, MomoPushActionDirection.approve, "✓ 소개를 바꿨어요"),
+    ("rejected", 200, MomoPushActionDirection.reject, "소개 바꾸기를 거부했어요"),
+    ("approved", 409, MomoPushActionDirection.reject, "이미 승인된 요청이에요 · 소개 바꾸기"),
+    ("expired", 200, MomoPushActionDirection.approve, "승인을 기다리다 만료됐어요"),
+  ] {
+    let body = try! JSONSerialization.data(withJSONObject: ["status": status, "line": text])
+    let outcome = MomoPushActionClassifier.classify(httpStatus: httpStatus, body: body, direction: direction)
+    let line = P.line(for: outcome, intent: intent(direction))
+    check(line.text == text && !line.alerts && line.removesSiblings,
+      "receipt.line replaces the same notification quietly, including a contradictory 409")
+    check(!outcome.logName.contains(text), "the public line is never put in the native outcome log")
+  }
+  let invalidLines: [Any] = ["", "  \n", 42, NSNull()]
+  for invalidLine in invalidLines {
+    let body = try! JSONSerialization.data(withJSONObject: ["status": "approved", "line": invalidLine])
+    let outcome = MomoPushActionClassifier.classify(httpStatus: 200, body: body, direction: .approve)
+    check(P.line(for: outcome, intent: intent()).text == "승인했어요 · 그록봇",
+      "missing, blank and unreadable receipt lines keep the old server wording")
+  }
+  let refusedBody = try! JSONSerialization.data(withJSONObject: ["status": "approved", "line": "✓ 소개를 바꿨어요"])
+  let refusedOutcome = MomoPushActionClassifier.classify(httpStatus: 403, body: refusedBody, direction: .approve)
+  check(P.line(for: refusedOutcome, intent: intent()).text == "승인하지 못했어요",
+    "a receipt line never promotes an HTTP failure to a successful result")
   let decided = P.line(for: .decided(.approve), intent: intent())
   check(decided == MomoPushActionLine(text: "승인했어요 · 그록봇", detail: nil, alerts: false, removesSiblings: true),
     "a decision is a quiet line and clears the approval's other notifications")

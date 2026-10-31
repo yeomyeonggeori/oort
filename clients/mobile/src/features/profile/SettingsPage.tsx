@@ -53,6 +53,7 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
+import {HAPTIC_MODES, setHapticMode, useHapticMode} from '../../lib/haptics';
 import {useNow} from '../../lib/useNow';
 import {EdgeSwipeBack, useLayerClose} from '../../nav/EdgeSwipeBack';
 import {
@@ -103,6 +104,7 @@ import {
   devToolsCountLabel,
 } from './DevToolsPage';
 import {useDevToolsEntry} from './devTools';
+import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSettings';
 
 // =============================================================================
 // 「설정」 페이지 — 홈 머리의 내 얼굴이 여는 전체 화면 (#4457, owner 2026-10-25; 옛 `ProfileSheet` 의 자리).
@@ -168,6 +170,7 @@ import {useDevToolsEntry} from './devTools';
 
 /** 설정 페이지 위에 한 겹 더 쌓이는 장. `main` 은 설정 페이지 자신이다. */
 export type SettingsSubPage =
+  | 'language'
   | 'theme'
   | 'deviceKey'
   | 'devTools'
@@ -179,7 +182,7 @@ export type SettingsPageName = 'main' | SettingsSubPage;
 /** 안쪽 장의 첫 요소 위 여백 — 설정 첫 장·시트와 같은 `space.md`. 스타일(`subContent`)과 기한 장의 펼침 셈(`revealAt`)이 함께 읽는다. */
 const SUB_PAGE_TOP = space.md;
 
-const SUB_PAGE_TITLE: Record<SettingsSubPage, string> = {
+const SUB_PAGE_TITLE: Record<Exclude<SettingsSubPage, 'language'>, string> = {
   theme: '테마',
   deviceKey: DEVICE_KEY_TITLE,
   devTools: DEV_TOOLS_TITLE,
@@ -257,6 +260,7 @@ export function SettingsPage({
             directory={directory}
             connected={connected}
             onOpenTheme={() => setPage('theme')}
+            onOpenLanguage={() => setPage('language')}
             onOpenStatus={() => setStatusOpen(true)}
             onOpenDeviceKey={() => setPage('deviceKey')}
             onOpenDevTools={() => setPage('devTools')}
@@ -278,13 +282,17 @@ export function SettingsPage({
           // 스택의 push 처럼 오른쪽에서 밀려 들어오고, ‹ 는 오른쪽으로 물러난다(동작 줄이기면 즉시).
           enter="push"
           testID="settings-sub-pane">
-          <SubPage
-            page={page}
-            workspaceId={workspaceId}
-            member={member}
-            directory={directory}
-            onBack={backToMain}
-          />
+          {page === 'language' ? (
+            <LanguageSettingsPage onBack={backToMain} />
+          ) : (
+            <SubPage
+              page={page}
+              workspaceId={workspaceId}
+              member={member}
+              directory={directory}
+              onBack={backToMain}
+            />
+          )}
         </EdgeSwipeBack>
       ) : null}
 
@@ -308,7 +316,7 @@ function SubPage({
   directory,
   onBack,
 }: {
-  page: SettingsSubPage;
+  page: Exclude<SettingsSubPage, 'language'>;
   workspaceId: string;
   member: Member;
   directory: Directory;
@@ -415,6 +423,7 @@ export function SettingsContent({
   directory,
   connected,
   onOpenTheme,
+  onOpenLanguage,
   onOpenStatus,
   onOpenDeviceKey,
   onOpenDevTools,
@@ -430,6 +439,7 @@ export function SettingsContent({
   directory: Directory;
   connected: boolean;
   onOpenTheme: () => void;
+  onOpenLanguage?: () => void;
   /** 「상태 설정」 바텀시트를 연다. */
   onOpenStatus: () => void;
   onOpenDeviceKey: () => void;
@@ -460,6 +470,7 @@ export function SettingsContent({
   const push = usePushSwitch(workspaceId, member.id);
   // 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5): 이 폰의 선택 둘. 서버 값이 아니라 기기에 있어서
   // 읽는 중·못 읽음이 없고, 켜 두는 것이 처음 상태다.
+  const hapticMode = useHapticMode();
   const previewOn = usePushPreview();
   const showSenderOn = usePushShowSender();
   const setPresence = useSetPresence(workspaceId, member.id);
@@ -479,9 +490,7 @@ export function SettingsContent({
   const updateOffer = useAppUpdateOffer();
   const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
 
-  // 버전 줄을 길게 누르면 실시간 연결 기록을 복사한다(#2751). 폰 소켓이 왜 끊겼는지는 서버 로그로
-  // 판정되지 않았고, 이유 코드는 클라이언트에만 있다. 기록에는 코드·수명·네트워크 종류만 있고 식별
-  // 정보는 없다(`diagnostics.ts`). 숨은 동작이라 화면에는 영수증 한 줄만 잠깐 보인다.
+  // 설정 › 정보의 명시적인 복사 경로 (#4783). 기존 버전 줄의 길게 누르기도 유지한다.
   const copyDiagnostics = useCallback(() => {
     const text = `${currentAppVersionLabel()}\n${formatRealtimeDiagnostics()}`;
     void copyText(text).then(ok => {
@@ -692,15 +701,18 @@ export function SettingsContent({
       ) : null}
 
       {/* ③ 프로필 — Buzz 「Edit photo ›」. */}
-      {onOpenAvatar ? (
+      {onOpenAvatar || onOpenLanguage ? (
         <GroupCard label="프로필" testID="settings-profile-card">
-          <ListRow
-            title="사진 바꾸기"
-            accessory="chevron"
-            onPress={onOpenAvatar}
-            accessibilityLabel="프로필 사진 바꾸기"
-            testID="self-profile-avatar-change"
-          />
+          {onOpenAvatar ? (
+            <ListRow
+              title="사진 바꾸기"
+              accessory="chevron"
+              onPress={onOpenAvatar}
+              accessibilityLabel="프로필 사진 바꾸기"
+              testID="self-profile-avatar-change"
+            />
+          ) : null}
+          {onOpenLanguage ? <LanguageSettingRow onPress={onOpenLanguage} /> : null}
         </GroupCard>
       ) : null}
 
@@ -732,6 +744,17 @@ export function SettingsContent({
             }
             testID="profile-push-row"
           />
+          <View accessibilityRole="radiogroup" accessibilityLabel="햅틱" testID="settings-haptics">
+            {HAPTIC_MODES.map(option => (
+              <ChoiceRow
+                key={option.value}
+                title={`햅틱: ${option.label}`}
+                selected={hapticMode === option.value}
+                onPress={() => setHapticMode(option.value)}
+                testID={`haptics-${option.value}`}
+              />
+            ))}
+          </View>
           {/* 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5). 이 폰의 선택이라 서버를 부르지 않고, 확장은
               MMKV 를 읽지 못해서 바꿀 때 App Group 으로도 쓴다(`push/presentation.ts`). 「보낸 사람 표시」를
               끄면 건넨 사진·채널 이름과 시스템에 기부한 기록이 함께 지워진다. */}
@@ -865,6 +888,7 @@ export function SettingsContent({
             />
           )}
         </GroupCard>
+        <SettingsNote testID="settings-haptics-note">끔은 앱이 더하는 햅틱을 꺼요. 시스템 컨트롤의 햅틱은 기기 설정을 따라요.</SettingsNote>
         {push.failed ? (
           <SettingsNote tone="danger" testID="push-failure">
             {PUSH_SWITCH_OFF_FAILED}
@@ -973,6 +997,14 @@ export function SettingsContent({
             testID="sign-out"
           />
         )}
+      </GroupCard>
+
+      <GroupCard label="정보" testID="settings-about-card">
+        <ListRow
+          title={diagCopied ? '연결 기록 복사됨' : '연결 기록 복사'}
+          onPress={copyDiagnostics}
+          testID="settings-copy-connection-log"
+        />
       </GroupCard>
 
       <Text

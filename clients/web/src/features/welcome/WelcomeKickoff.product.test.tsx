@@ -50,6 +50,7 @@ import {
 } from "./welcomeKickoff";
 import { AGENTS_NAV } from "@/features/sidebar/workspaceNav";
 import { EMPTY_WRITE_ACTION_LABEL } from "@momo/core/features/timeline/model";
+import { browserLaunchBlocked } from "@/testing/agentSandbox";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const OTHER_WS = "00000000-0000-7000-8000-000000000002";
@@ -153,6 +154,8 @@ let host: HTMLElement | null = null;
 let reducedMotion = false;
 
 function detectChromium(): { ok: true } | { ok: false; path: string } {
+  const blocked = browserLaunchBlocked();
+  if (blocked !== null) return { ok: false, path: blocked };
   try {
     const { chromium } = require_("playwright") as typeof import("playwright");
     const exe = chromium.executablePath();

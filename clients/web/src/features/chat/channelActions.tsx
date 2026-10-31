@@ -2,7 +2,7 @@ import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfac
 import { Fragment, useId, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Loader2 } from "lucide-react";
+import { Bell, BellOff, Check, Loader2 } from "lucide-react";
 import {
   removeChannelMember,
   setChannelNotificationPref,
@@ -12,6 +12,7 @@ import {
   type ReadState,
 } from "@momo/core/lib/api";
 import { composedUnreadCount } from "@momo/core/features/readState/model";
+import { useChannelNotificationMutation } from "./useChannelNotificationMutation";
 import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import {
   channelLeaveConfirmBody,
@@ -187,15 +188,15 @@ export function useChannelActions({
   const nameCopy = useClipboardCopy(title);
   const idCopy = useClipboardCopy(channel.id);
 
-  const muteMutation = useMutation({
-    mutationFn: (muted: boolean) =>
-      setChannelNotificationPref(workspaceId, channel.id, muted),
+  // 알림의 낙관 갱신은 행을 지우지 않는다. 나가기와 달리 전용 훅이 상태·복구를 맡고,
+  // API 호출은 여기 한 벌을 유지해 헤더와 사이드바가 같은 실행 경로를 쓴다.
+  const {mutation: muteMutation, optimisticMute} = useChannelNotificationMutation({
+    mutationFn: (target) =>
+      setChannelNotificationPref(target.workspaceId, target.channelId, target.muted),
+    onStart: () => setError(null),
     onSuccess: () => {
       setError(null);
       onActionSucceeded();
-      // 서버가 진실이다: 무효화하면 새 muted 가 흘러 내려와 다음에 열 때 낱말이
-      // 뒤집힌다.
-      void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
     },
     onError: () => setError(CHANNEL_MUTE_FAILURE),
   });
@@ -337,7 +338,8 @@ export function useChannelActions({
   );
 
   const state: ChannelActionState = {
-    muted: channel.muted,
+    muted: optimisticMute?.workspaceId === workspaceId && optimisticMute.channelId === channel.id
+      ? optimisticMute.muted : channel.muted,
     copiedLink: linkCopy.copied,
     copiedName: nameCopy.copied,
     copiedId: idCopy.copied,
@@ -377,9 +379,12 @@ export function useChannelActions({
     if (key === "mark-read" && markReadMutation.isPending) return;
     if (key === "mark-unread" && markUnreadMutation.isPending) return;
     switch (key) {
-      case "mute":
-        muteMutation.mutate(!channel.muted);
+      case "mute": {
+        const previousMuted = client.getQueryData<Channel[]>(["channels", workspaceId])
+          ?.find((row) => uuidEq(row.id, channel.id))?.muted ?? channel.muted;
+        muteMutation.mutate({ workspaceId, channelId: channel.id, previousMuted, muted: !previousMuted });
         return;
+      }
       case "mark-read":
         markReadMutation.mutate();
         return;
@@ -597,7 +602,14 @@ function ChannelActionMenuRow({
       if (!channelActionKeepsMenuOpen(item.key)) onHandOff(item.key);
       actions.run(item.key);
     },
-    children: busy ? item.busyLabel ?? item.label : item.label,
+    children: item.key === "mute" ? (
+      <>
+        {actions.state.muted
+          ? <BellOff className="size-4 shrink-0" aria-hidden="true" />
+          : <Bell className="size-4 shrink-0" aria-hidden="true" />}
+        {item.label}
+      </>
+    ) : busy ? item.busyLabel ?? item.label : item.label,
   };
   return surface === "header" ? (
     <DropdownMenuItem {...props} />
