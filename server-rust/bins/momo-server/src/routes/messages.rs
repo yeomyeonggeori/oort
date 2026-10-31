@@ -40,16 +40,16 @@ use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
-    channel_pins, channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit,
-    delete_message_in_tx, edit_message_in_tx, is_channel_member, is_following_thread_in_tx,
-    list_channel_page, list_thread_replies, open_stream_run_id, parse_replies_cursor,
-    set_pin_in_tx, set_reaction_in_tx, stream_message_body_in_tx, validate_harness_refine,
-    validate_reaction_emoji, validate_replies_root_in_tx, AttachmentLinkRejected,
-    ChannelRestriction, HarnessRefine, HarnessRefineInvalid, HistoryCursor, InteractionMessage,
-    InteractionRefused, MessageAttachment, MessageType, NewMessage, PagedMessage, PinAction,
-    PinnedMessage, ProvenanceRejected, QuoteTargetInvalid, QuotedMessage, ReactionAction,
-    ReactionSnapshot, SendRejected, SentVia, StoredMessage, StreamCloseOutcome, StreamEdit,
-    ThreadRollup, ThreadRootInvalid, HARNESS_REFINE_PROPS_KEY, OPENING_STREAM_REV,
+    attach_unread_reply_counts, channel_pins, channel_reaction_snapshot, clamp_history_limit,
+    clamp_replies_limit, delete_message_in_tx, edit_message_in_tx, is_channel_member,
+    is_following_thread_in_tx, list_channel_page, list_thread_replies, open_stream_run_id,
+    parse_replies_cursor, set_pin_in_tx, set_reaction_in_tx, stream_message_body_in_tx,
+    validate_harness_refine, validate_reaction_emoji, validate_replies_root_in_tx,
+    AttachmentLinkRejected, ChannelRestriction, HarnessRefine, HarnessRefineInvalid, HistoryCursor,
+    InteractionMessage, InteractionRefused, MessageAttachment, MessageType, NewMessage,
+    PagedMessage, PinAction, PinnedMessage, ProvenanceRejected, QuoteTargetInvalid, QuotedMessage,
+    ReactionAction, ReactionSnapshot, SendRejected, SentVia, StoredMessage, StreamCloseOutcome,
+    StreamEdit, ThreadRollup, ThreadRootInvalid, HARNESS_REFINE_PROPS_KEY, OPENING_STREAM_REV,
     STREAM_PROPS_KEY,
 };
 use serde::de::{self, Deserialize, Deserializer, IgnoredAny, MapAccess, Visitor};
@@ -183,6 +183,8 @@ fn thread_dto(rollup: &ThreadRollup) -> ThreadRollupDto {
         // `thread_rollup()`; this only spells the ids.
         participant_ids: rollup.participant_ids.iter().map(Uuid::to_string).collect(),
         participant_count: rollup.participant_count,
+        // #4889 stage 2 — `Some` only where a per-reader read filled it (the history page).
+        unread_reply_count: rollup.unread_reply_count,
     }
 }
 
@@ -1102,7 +1104,12 @@ pub async fn history(
             {
                 return Ok(None);
             }
-            let messages = list_channel_page(conn, channel_id, cursor, limit).await?;
+            let mut messages = list_channel_page(conn, channel_id, cursor, limit).await?;
+            // #4889 stage 2 — how many replies the reader has not read, under each thread root on
+            // the page they follow. Same transaction as the page it annotates; a page with no
+            // thread (and every agent reader, who has no follow rows) costs no extra query.
+            attach_unread_reply_counts(conn, workspace_id, principal.member_id, &mut messages)
+                .await?;
             // #1166 — the reload closure. `endedRuns` in a client only knows
             // the runs whose terminal frame it *watched arrive*, which is the
             // right rule for a live session and no rule at all for a tab that
@@ -2576,6 +2583,7 @@ mod tests {
             last_reply_at_ms: 1_700_000_000_500,
             participant_ids: vec![newest, older],
             participant_count: 4,
+            unread_reply_count: None,
         };
         let json = serde_json::to_value(message_dto(
             &message,
@@ -2601,6 +2609,10 @@ mod tests {
             serde_json::json!([newest.to_string(), older.to_string()])
         );
         assert_eq!(json["thread"]["participant_count"], serde_json::json!(4));
+        assert!(
+            json["thread"].get("unread_reply_count").is_none(),
+            "a reader-less rollup says nothing about unread replies (absent, never 0): {json}"
+        );
         assert!(json.get("rootId").is_none(), "a root has no rootId: {json}");
 
         // A message with no replies carries no rollup at all — the badge's
