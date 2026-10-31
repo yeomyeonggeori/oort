@@ -245,7 +245,7 @@ export const catalog: MessageCatalog = {
   "mobile.linkCard.removeDetail": [
     {
       "type": 0,
-      "value": "It disappears for everyone and won’t be made again. The message and link stay."
+      "value": "Every link preview on this message disappears for everyone and won’t be made again. The message and its links stay."
     }
   ],
   "mobile.linkCard.removeFailed": [

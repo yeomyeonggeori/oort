@@ -22,7 +22,7 @@
   "mobile.linkCard.share": "Share",
   "mobile.linkCard.remove": "Remove preview",
   "mobile.linkCard.removeTitle": "Remove this link preview?",
-  "mobile.linkCard.removeDetail": "It disappears for everyone and won’t be made again. The message and link stay.",
+  "mobile.linkCard.removeDetail": "Every link preview on this message disappears for everyone and won’t be made again. The message and its links stay.",
   "mobile.linkCard.removeConfirm": "Remove",
   "mobile.linkCard.removePending": "Removing…",
   "mobile.linkCard.removeFailed": "Couldn’t remove the link preview. Check your connection and try again.",

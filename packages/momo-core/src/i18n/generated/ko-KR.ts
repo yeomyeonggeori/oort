@@ -224,7 +224,7 @@ export const catalog: MessageCatalog = {
   "mobile.linkCard.removeDetail": [
     {
       "type": 0,
-      "value": "모두에게서 지워지고 다시 만들어지지 않아요. 메시지와 링크는 그대로 남아요."
+      "value": "이 메시지에 달린 링크 미리보기가 모두에게서 지워지고 다시 만들어지지 않아요. 메시지와 링크는 그대로 남아요."
     }
   ],
   "mobile.linkCard.removeFailed": [
