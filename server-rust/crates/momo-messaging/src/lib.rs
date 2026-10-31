@@ -295,8 +295,9 @@ pub use sidebar_prefs::{
     SECTION_MAX, SECTION_NAME_MAX_CHARS, SECTION_SORT_MAX_CHARS, SIDEBAR_PREFS_VERSION,
 };
 pub use thread_follow::{
-    is_following_thread_in_tx, set_thread_follow_in_tx, FollowRefused, STATE_AUTO, STATE_FOLLOWED,
-    STATE_UNFOLLOWED,
+    attach_unread_reply_counts, is_following_thread_in_tx, mark_thread_read_in_tx,
+    set_thread_follow_in_tx, thread_follow_views_in_tx, FollowRefused, FollowView, ThreadReadState,
+    STATE_AUTO, STATE_FOLLOWED, STATE_UNFOLLOWED,
 };
 pub use workspace_avatar::{
     create_pending_avatar_upload_in_tx, load_avatar_media_in_tx, read_current_avatar_media_in_tx,

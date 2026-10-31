@@ -40,6 +40,20 @@ true/yes/on, but one spelling leaves no judgement about what an operator meant) 
 (loaded into the Hermes process after this gate ran, it could replace the checked value, whatever its own value is). `report`
 re-checks both on the live volume. The worker half is `OORT_HOSTED_MEDIA_STRICT` (the door opens only with both).
 
+The volume's `.env` (#4886). Hermes loads `<HERMES_HOME>/.env` after this gate ran and its values replace what was judged, so the file
+is read the way Hermes reads it (hermes_cli/env_loader.py, v0.22.2): `env_cleanup` (its decoding and the NUL / whitespace clean-up it
+applies before loading, one load at a time), python-dotenv's own statement parser with interpolation off (the image's module; outside
+the image, e.g. the offline tests, a fallback with the same grammar), then the `${VAR}` / `${VAR:-default}` references resolved the way
+Hermes resolves them right after parsing (against the environment and the file's earlier values), the last assignment of a name
+winning. Hermes loads the file more than once and each load rewrites it, so the gate follows the file through those loads
+(`env_states`, at most `ENV_LOAD_CAP`; one that is still changing then is refused) and judges every text a load may parse
+(`env_texts`: each state of the file, cleaned up and as it stands), the problems of all of them together. A name this gate
+judges may not be given a value that holds a reference at all (`${...}` or `$NAME`): Hermes resolves `${...}` in ITS process environment,
+which has variables this gate's shell does not (its service slot adds some), so what the gate computed and what Hermes ends with can
+differ, and nothing can be proven about such a value from here. The data folder this gate reads must be Hermes' own `$HERMES_HOME`,
+written out (`~` and `$HOME` mean another folder under Hermes' HOME than under this gate's), or the file judged is not the file loaded.
+The LOCKGATE line names the parser used.
+
 Connector mode (#3948, ADR-0203 증보 K2·K4). The tool-lock rule above is unchanged. The one thing that
 changes is `mcp_servers`:
 
@@ -55,7 +69,9 @@ inspects what Hermes would load (`mcp_servers`), and the post-start `report` kee
 see. This gate checks the operator's CONFIG; whether the vendor server really exposes only the listed tools is
 the operator's attestation (OORT_COHOSTED_AGENT_CONNECTORS_LOCKED), not something this script proves.
 """
+import codecs
 import hashlib
+import io
 import json
 import os
 import re
@@ -102,8 +118,8 @@ IMAGE_PROVIDER_ONLY_KEYS = frozenset({"provider"})
 SELF_ORIGIN_ENV = "OORT_SELF_MEDIA_ORIGIN"
 SELF_MEDIA_PATH_PREFIX = "/v1/self-media/"
 # Hermes' media delivery policy (#4820 C2b 3부): required in the process environment, exactly this value, whenever the picture
-# tool is exposed; refused in the volume's `.env` whatever its value. Only this exact name is judged (spelling variants and the
-# widening siblings HERMES_MEDIA_ALLOW_DIRS / HERMES_MEDIA_TRUST_RECENT_* are #4886's).
+# tool is exposed; refused in the volume's `.env` whatever its value, in every spelling python-dotenv accepts (#4886). Only this exact
+# name is judged: the widening siblings HERMES_MEDIA_ALLOW_DIRS / HERMES_MEDIA_TRUST_RECENT_* are not (a follow-up, not #4886).
 MEDIA_STRICT_ENV = "HERMES_MEDIA_DELIVERY_STRICT"
 MEDIA_STRICT_VALUE = "1"
 SELF_ORIGIN_RE = re.compile(
@@ -240,50 +256,356 @@ def tool_problems(cfg, tools):
 
 DATA_DIR = "/opt/data"  # the Hermes volume; the gate judges a scratch HERMES_HOME, so the volume's .env is read here
 VOLUME_ENV_TRUTHY_KEYS = ("HERMES_YOLO_MODE", "HERMES_DASHBOARD")
+# Every name `volume_env_problems` judges by its value. A value that holds a reference is refused for these (`_referenced_names`).
+VOLUME_ENV_JUDGED = frozenset(VOLUME_ENV_TRUTHY_KEYS + ("API_SERVER_CORS_ORIGINS", "API_SERVER_KEY") + IMAGE_KEY_ENV_NAMES)
 
-
-def _read_env_pairs(env_path):
-    """(pairs, problems) of the volume's `.env`: `(name, value)` per assignment line, read the way Hermes reads the file.
-
-    `utf-8-sig` drops a leading byte order mark (PowerShell 5.1 and Notepad write one); plain utf-8 keeps U+FEFF on the
-    first key name, so a rule about that line's name would never match. A missing file is fine (nothing there); an
-    unreadable one is a problem."""
+# --- the volume's `.env`, read the way Hermes reads it (#4886) ---------------------------------------------------------------
+try:  # the image's own parser; the fallback below is for runs without it (the offline tests)
+    from dotenv.main import DotEnv as _DotEnv
     try:
-        with open(env_path, "r", encoding="utf-8-sig", errors="replace") as handle:
+        from importlib.metadata import version as _distribution_version
+        _DOTENV_VERSION = _distribution_version("python-dotenv")
+    except Exception:  # a version we cannot name is still the module Hermes uses
+        _DOTENV_VERSION = "unknown"
+except Exception:  # missing, or broken enough to raise anything: never a reason to skip the gate; the fallback judges instead
+    _DotEnv, _DOTENV_VERSION = None, None
+
+# The same statements as python-dotenv's parser (parser.py, BSD-3-Clause, https://github.com/theskumar/python-dotenv), written out
+# again for runs where the module is absent. infra/hermes/test_lockgate_env.py holds both to one table of inputs.
+_RX = {name: re.compile(pattern) for name, pattern in {
+    "blank_lines": r"\s*",
+    "blanks": r"[^\S\r\n]*",
+    "export": r"(?:export[^\S\r\n]+)?",
+    "quoted_key": r"'([^']+)'",
+    "key": r"([^=\#\s]+)",
+    "equals": r"=[^\S\r\n]*",
+    "single_value": r"'((?:\\'|[^'])*)'",
+    "double_value": r'"((?:\\"|[^"])*)"',
+    "bare_value": r"[^\r\n]*",
+    "comment": r"(?:[^\S\r\n]*#[^\r\n]*)?",
+    "line_end": r"[^\S\r\n]*(?:\r\n|\n|\r|$)",
+    "rest_of_line": r"[^\r\n]*(?:\r|\n|\r\n)?",
+    "double_escape": r"\\[\\'\"abfnrtv]",
+    "single_escape": r"\\[\\']",
+}.items()}
+_TRAILING_COMMENT_RE = re.compile(r"\s+#.*")
+_REFERENCE_RE = re.compile(r"\$\{([^}:]*)(?::-([^}]*))?\}")  # python-dotenv's `${NAME}` / `${NAME:-default}`
+# What counts as "a reference" in a judged value: `${` (Hermes resolves `${NAME}` / `${NAME:-default}`; an unclosed one is refused
+# too) or a bare `$NAME` (Hermes leaves it as it is, but it is the other spelling of the same thing and nothing here reads a
+# judged value through it, so it is refused as well).
+_REFERENCE_SHAPE_RE = re.compile(r"\$(?:\{|[A-Za-z_])")
+
+
+class _Unreadable(Exception):
+    pass
+
+
+def _fallback_assignments(text):
+    """`(name, value)` per statement of `text`, like python-dotenv's `DotEnv(..., interpolate=False).parse()`: `value` is None for a
+    bare `NAME`, and a statement the grammar cannot read is dropped up to the end of the line it failed on."""
+    out, pos, end = [], 0, len(text)
+
+    def take(piece):  # the next piece of the statement; it has to be there
+        nonlocal pos
+        match = _RX[piece].match(text, pos)
+        if match is None:
+            raise _Unreadable()
+        pos = match.end()
+        return match
+
+    def unescape(piece, value):
+        return _RX[piece].sub(lambda m: codecs.decode(m.group(0), "unicode-escape"), value)
+
+    while pos < end:
+        try:
+            take("blank_lines")
+            if pos >= end:
+                break
+            take("export")
+            ahead = text[pos:pos + 1]
+            name = None if ahead == "#" else take("quoted_key" if ahead == "'" else "key").group(1)
+            take("blanks")
+            value = None
+            if text[pos:pos + 1] == "=":
+                take("equals")
+                ahead = text[pos:pos + 1]
+                if ahead == "'":
+                    value = unescape("single_escape", take("single_value").group(1))
+                elif ahead == '"':
+                    value = unescape("double_escape", take("double_value").group(1))
+                elif ahead in ("", "\n", "\r"):
+                    value = ""
+                else:
+                    value = _TRAILING_COMMENT_RE.sub("", take("bare_value").group(0)).rstrip()
+            take("comment")
+            take("line_end")
+        except _Unreadable:
+            take("rest_of_line")
+            continue
+        if name is not None:
+            out.append((name, value))
+    return out
+
+
+def _real_assignments(text):
+    """Exactly the call Hermes makes (env_loader `_load_dotenv_with_fallback`): its interpolation happens afterwards."""
+    return list(_DotEnv(dotenv_path=None, stream=io.StringIO(text), interpolate=False).parse())
+
+
+def dotenv_assignments(text):
+    return _real_assignments(text) if _DotEnv is not None else _fallback_assignments(text)
+
+
+def env_parser():
+    """Which parser read the volume's `.env`: named in the LOCKGATE line, so a proof can tell the image's from the fallback."""
+    return {"impl": "python-dotenv", "version": _DOTENV_VERSION} if _DotEnv is not None else {"impl": "fallback"}
+
+
+ENV_LOAD_CAP = 64  # how many loads of Hermes' clean-up the gate follows; a file still being changed after that many is refused
+ENV_NOT_UTF8 = ("the volume's .env is not valid UTF-8 (Hermes may repair it in place or read it as Latin-1, and the gate cannot "
+                "tell which)")
+ENV_NOT_SETTLED = (f"cannot parse the volume's .env: Hermes' clean-up is still changing it after {ENV_LOAD_CAP} loads, so what it "
+                   "ends up holding is not known")
+_UTF16_BOMS = (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)
+_UTF32_BOMS = (codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)
+
+
+def _universal_lines(text):
+    """`readlines()` of a text file read with universal newlines: a line ends at CRLF, CR or LF and nowhere else (`str.splitlines`
+    knows more separators; Hermes' clean-up does not)."""
+    parts = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return [part + "\n" for part in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+
+
+def env_cleanup(raw):
+    """The bytes the volume's `.env` holds once ONE load of Hermes' loader has run its clean-up on `raw` (hermes_cli/env_loader.py
+    v0.22.2, `_sanitize_env_file_if_needed`), or None when the gate cannot say which file that is: bytes that are not UTF-8 (the
+    clean-up may repair them in place or leave them for the loader to read as Latin-1, and the two texts differ), UTF-32, UTF-16 that
+    does not decode.
+
+    UTF-16 is decoded by its byte order mark and always rewritten as UTF-8, anything else is read as `utf-8-sig`. A file whose first
+    character is U+FFFD is left alone. Otherwise NUL bytes are dropped and every line that is neither blank nor a comment is stripped
+    (lines end at CRLF, CR or LF only), and the file is rewritten only when that changed something. The result goes back through the
+    same function on the next load, so this is one step of a chain (`env_states`)."""
+    if raw.startswith(_UTF32_BOMS):
+        return None
+    utf16 = raw.startswith(_UTF16_BOMS)
+    try:
+        text = raw.decode("utf-16" if utf16 else "utf-8-sig")
+    except UnicodeDecodeError:
+        return None
+    original = _universal_lines(text)
+    if not utf16 and original and original[0].startswith("\ufffd"):
+        return raw
+    sanitized = []
+    for line in original:
+        body = line.replace("\x00", "").rstrip("\r\n")
+        stripped = body.strip()
+        sanitized.append((body if not stripped or stripped.startswith("#") else stripped) + "\n")
+    return "".join(sanitized).encode("utf-8") if utf16 or sanitized != original else raw
+
+
+def _env_chain(raw):
+    """`(states, None)`, or `(None, the problem to report)`: see `env_states`."""
+    states = [raw]
+    while True:
+        step = env_cleanup(states[-1])
+        if step is None:
+            return None, ENV_NOT_UTF8
+        if step == states[-1]:
+            return states, None
+        if len(states) > ENV_LOAD_CAP:
+            return None, ENV_NOT_SETTLED
+        states.append(step)
+
+
+def env_states(raw):
+    """The files the volume's `.env` goes through: `[raw, the file after one load, after two, ...]` up to the first one that a
+    further load leaves as it is. Hermes loads the file several times in its life and every load cleans it up in place, so the next
+    load reads the cleaned file. None when `env_cleanup` cannot say (not UTF-8 ...) or when the file is still being changed after
+    `ENV_LOAD_CAP` loads."""
+    return _env_chain(raw)[0]
+
+
+def env_loaded_text(raw):
+    """The text Hermes' loader parses for a file holding `raw` (`_load_dotenv_with_fallback`): `utf-8-sig`, else Latin-1."""
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.removeprefix(codecs.BOM_UTF8).decode("latin-1")
+
+
+def env_text(raw):
+    """The text Hermes' FIRST load parses for these bytes (the clean-up has run and the loader reads what it left), or None when the
+    gate cannot say (`env_cleanup`)."""
+    step = env_cleanup(raw)
+    return None if step is None else env_loaded_text(step)
+
+
+def _env_texts(raw):
+    """`(texts, None)` or `(None, the problem to report)`: see `env_texts`."""
+    states, problem = _env_chain(raw)
+    if states is None:
+        return None, problem
+    texts = []
+    for state in [states[1] if len(states) > 1 else states[0]] + states:
+        text = env_loaded_text(state)
+        if text not in texts:
+            texts.append(text)
+    return texts, None
+
+
+def env_texts(raw):
+    """Every text Hermes' loader may parse for these bytes over its life, the one its first load parses first; None as `env_states`.
+    There is one for each file of the chain (`env_states`), read as the file stands: a later load reads what the earlier loads left,
+    and the clean-up leaves some files alone or cannot write its result, so the loader then reads a file nobody cleaned. The volume's
+    `.env` is judged by all of them, never by the first alone."""
+    return _env_texts(raw)[0]
+
+
+def _resolve_references(assignments, lookup_env):
+    """Hermes interpolates every value right after parsing (`${NAME}`, `${NAME:-default}`): the value NAME has among the file's
+    earlier assignments, else in the environment, else the default, else empty. A name given no value (bare `NAME`) is empty."""
+    resolved, out = {}, []
+    for name, value in assignments:
+        if value is not None:
+            lookup = {**lookup_env, **resolved}
+            value = _REFERENCE_RE.sub(lambda m: _none_is_empty(lookup.get(m.group(1), m.group(2) or "")), value)
+        resolved[name] = value
+        out.append((name, value))
+    return out
+
+
+def _none_is_empty(value):
+    return "" if value is None else value
+
+
+def _read_env_readings(env_path, lookup_env=None):
+    """`([(assignments, pairs)], problems)` of the volume's `.env`: one reading for each text Hermes' loader may parse over its life
+    (`env_texts`, the one its first load parses first). `assignments` are `(name, value)` per statement in file order as the parser gave
+    them, BEFORE any `${...}` is resolved; `pairs` are the same statements after Hermes' own resolution (see the module docstring).
+    `value` is None for a bare `NAME`: Hermes sets nothing for it. A name may repeat; the last one is in force (callers use
+    `dict(pairs)`). `lookup_env` is the environment `${NAME}` references resolve against (default: this process). A missing file is
+    fine (nothing there); an unreadable one, one that is not valid UTF-8 or never stops being changed (`env_texts`), or one the parser
+    cannot read, is a problem and has no readings."""
+    try:
+        with open(env_path, "rb") as handle:
             raw = handle.read()
     except FileNotFoundError:
         return [], []
     except OSError as exc:
         return [], [f"cannot read {env_path}: {type(exc).__name__}"]
-    pairs = []
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        if key.startswith("export "):
-            key = key[len("export "):].strip()
-        pairs.append((key, value.strip().strip("\"'").strip()))
-    return pairs, []
+    texts, problem = _env_texts(raw)
+    if texts is None:
+        return [], [problem]
+    lookup = os.environ if lookup_env is None else lookup_env
+    readings = []
+    for text in texts:
+        try:
+            assignments = dotenv_assignments(text)
+        except Exception as exc:  # a file the parser could not read is never taken for an empty one
+            return [], [f"cannot parse the volume's .env: {type(exc).__name__}"]
+        readings.append((assignments, _resolve_references(assignments, lookup)))
+    return readings, []
 
 
-def volume_env_problems(env_path):
+def _read_env_file(env_path, lookup_env=None):
+    """(assignments, pairs, problems) of the volume's `.env` as Hermes' FIRST load reads it: the first reading of `_read_env_readings`."""
+    readings, problems = _read_env_readings(env_path, lookup_env)
+    assignments, pairs = readings[0] if readings else ([], [])
+    return assignments, pairs, problems
+
+
+def _add_new(problems, more):
+    """`more` appended to `problems`, each problem once (several readings of one file name the same thing in the same words)."""
+    for problem in more:
+        if problem not in problems:
+            problems.append(problem)
+
+
+def _read_env_pairs(env_path, lookup_env=None):
+    """(pairs, problems): `_read_env_file` without the statements as parsed."""
+    _, pairs, problems = _read_env_file(env_path, lookup_env)
+    return pairs, problems
+
+
+def _referenced_names(assignments, judged):
+    """The names, in file order, for which `judged(name)` holds and whose value in force (the last assignment, as parsed, before any
+    `${...}` is resolved) holds a reference: `${NAME}`, `${NAME:-default}` or `$NAME`. Hermes resolves `${...}` against its own process
+    environment, not this gate's, so no verdict on such a value from here is worth anything: the name is refused for the reference
+    itself. A bare `NAME` (no value) sets nothing in Hermes and holds no reference."""
+    final = dict(assignments)
+    return [name for name in final
+            if judged(name) and final[name] is not None and _REFERENCE_SHAPE_RE.search(final[name]) is not None]
+
+
+def _reference_problem(where, name):
+    return (f"{where} sets {name} through a reference (${{...}} or $NAME): Hermes resolves it in its own environment, "
+            "so what this gate reads is not what Hermes applies")
+
+
+_HOME_REFERENCE_RE = re.compile(r"\$(?:\{HOME\}|HOME(?!\w))", re.ASCII)  # `$HOME` / `${HOME}` the way `os.path.expandvars` reads them
+
+
+def hermes_home_problems(env, data_dir):
+    """The folder this gate reads the volume's `.env` from must be Hermes' own `$HERMES_HOME` (hermes_constants `get_hermes_home`:
+    the variable with `$VAR` and `~` expanded). Anything else, or no variable at all, and the file judged is not the file loaded.
+
+    `~` and `$HOME` are the exception: they name a folder under the HOME of whoever expands them, and Hermes runs in a service slot
+    with a HOME of its own, not this gate's. A value that needs a HOME is refused (the image sets the folder out in full); any other
+    `$VAR` is expanded against the container's environment, which Hermes inherits."""
+    home = str(env.get("HERMES_HOME") or "").strip()
+    if not home:
+        return ["HERMES_HOME is not set: the folder Hermes loads its .env from is not known to be the one this gate reads"]
+    expanded = os.path.expandvars(home)
+    if _HOME_REFERENCE_RE.search(home) is not None or expanded.startswith("~"):
+        return ["HERMES_HOME is written with `~` or $HOME: Hermes expands it under its own HOME, which is not this gate's (write the folder out)"]
+    if os.path.realpath(expanded) != os.path.realpath(data_dir):
+        return ["HERMES_HOME is not the folder this gate reads the volume's .env from"]
+    return []
+
+
+def _credential_length(value):
+    """Characters of a key that are left once Hermes has loaded it: its loader drops every non-ASCII character from variables
+    named `*_KEY`, `*_TOKEN`, `*_SECRET` (`_sanitize_loaded_credentials`). Outer blanks are not counted."""
+    return len(str(value).strip().encode("ascii", "ignore"))
+
+
+def _volume_reading_problems(assignments, pairs):
+    """The invariants of `volume_env_problems` for ONE reading of the file."""
+    where = "the volume's .env"
+    problems = []
+    final = dict(pairs)
+    referenced = _referenced_names(assignments, lambda name: name in VOLUME_ENV_JUDGED)
+    problems.extend(_reference_problem(where, name) for name in referenced)
+    for key in VOLUME_ENV_TRUTHY_KEYS:
+        if key not in referenced and _truthy(final.get(key)):
+            problems.append(f"{where} enables {key}")
+    if "API_SERVER_CORS_ORIGINS" not in referenced and str(final.get("API_SERVER_CORS_ORIGINS") or "").strip():
+        problems.append(f"{where} sets API_SERVER_CORS_ORIGINS")
+    if "API_SERVER_KEY" not in referenced and final.get("API_SERVER_KEY") is not None \
+            and _credential_length(final["API_SERVER_KEY"]) < 32:
+        problems.append(f"{where} sets an API_SERVER_KEY shorter than 32 characters")
+    for key in IMAGE_KEY_ENV_NAMES:
+        if key not in referenced and str(final.get(key) or "").strip():
+            problems.append(f"{where} sets {key} (another image provider's credential)")
+    return problems
+
+
+def volume_env_problems(env_path, lookup_env=None):
     """Invariants a reused volume's own `.env` could undo after the gate passed (#4072 review M2).
 
     Hermes loads `<volume>/.env` after this gate has judged a scratch home, so a volume that was used by a
     less strict Hermes can carry YOLO / dashboard / CORS / a short API key. A fresh volume has no such lines.
-    Only names are returned, never values. A missing file is fine (nothing there); an unreadable one is not."""
-    pairs, problems = _read_env_pairs(env_path)
-    for key, value in pairs:
-        if key in VOLUME_ENV_TRUTHY_KEYS and value.lower() in TRUTHY:
-            problems.append(f"the volume's .env enables {key}")
-        elif key == "API_SERVER_CORS_ORIGINS" and value:
-            problems.append("the volume's .env sets API_SERVER_CORS_ORIGINS")
-        elif key == "API_SERVER_KEY" and len(value) < 32:
-            problems.append("the volume's .env sets an API_SERVER_KEY shorter than 32 characters")
-        elif key in IMAGE_KEY_ENV_NAMES and value:
-            problems.append(f"the volume's .env sets {key} (another image provider's credential)")
+    Judged on what Hermes ends up with (#4886): the file read as it reads it, the last assignment of a name in force, a bare
+    `NAME` setting nothing. Hermes loads the file more than once and every load cleans it up in place, so the file is judged as EVERY
+    load may read it (`_read_env_readings`): the problems of all of its readings, each once. A judged name whose value holds a
+    reference (`${...}`, `$NAME`) is refused for that, once, instead of being judged by a value resolved in an environment that is not
+    Hermes' (`_referenced_names`). Only names are returned, never values. A missing file is fine (nothing there); an unreadable one is
+    not."""
+    readings, problems = _read_env_readings(env_path, lookup_env)
+    for assignments, pairs in readings:
+        _add_new(problems, _volume_reading_problems(assignments, pairs))
     return problems
 
 
@@ -318,35 +640,44 @@ def canonical_origin(raw):
     return raw
 
 
-def image_environment_problems(pairs, where, volume=False):
+def image_environment_problems(pairs, where, volume=False, referenced=()):
     """Names (never values) in one environment source that turn Hermes' SSRF filter or the image guard off, or leave its media
     delivery open.
 
     `volume=True` for the volume's `.env`: there the self-media origin and the strict media flag may not be set at all, since
     the file is loaded into the Hermes process after this gate ran and could replace the value the gate judged. For the
     process environment the strict media flag must be set, to exactly `1` (#4820 C2b 3부): without it Hermes hands the answer
-    any readable file that a `MEDIA:` line names."""
+    any readable file that a `MEDIA:` line names.
+
+    `referenced` (the volume's `.env` only, from `_referenced_names`): the judged names whose value holds a reference. Each is
+    refused once for that and is not judged by a value that was resolved here, in an environment that is not Hermes'."""
     pairs = list(pairs)
+    final = dict(pairs)  # the last assignment of a name is the one in force (a file may repeat a name, an environment cannot)
     problems, seen = [], set()
     for name, value in pairs:
         if name in seen:
             continue
         if name == MEDIA_STRICT_ENV:
-            if volume:
+            if volume and value is not None:  # a bare NAME in the file sets nothing in Hermes
                 problems.append(f"{where} sets {name} (set it on the service: the file would replace the checked value)")
                 seen.add(name)
             continue
         if name == SELF_ORIGIN_ENV:
             raw = str(value)
             if volume:
-                problems.append(f"{where} sets {name} (set it on the service: the file would replace the checked value)")
-                seen.add(name)
+                if value is not None:
+                    problems.append(f"{where} sets {name} (set it on the service: the file would replace the checked value)")
+                    seen.add(name)
             elif raw != "" and canonical_origin(raw) is None:
                 problems.append(f"{where} sets {name} to a value that is not a canonical origin "
                                 "(https://<lowercase host>[:port], no path, no trailing slash, not :443)")
                 seen.add(name)
             continue
-        value = str(value).strip()
+        if name in referenced:
+            problems.append(_reference_problem(where, name))
+            seen.add(name)
+            continue
+        value = "" if final[name] is None else str(final[name]).strip()
         if name in IMAGE_ENV_FLAG_REASONS and _truthy(value):
             problems.append(f"{where} enables {name} ({IMAGE_ENV_FLAG_REASONS[name]})")
             seen.add(name)
@@ -359,9 +690,13 @@ def image_environment_problems(pairs, where, volume=False):
     return problems
 
 
-def image_volume_env_problems(env_path):
-    pairs, problems = _read_env_pairs(env_path)
-    return problems + image_environment_problems(pairs, "the volume's .env", volume=True)
+def image_volume_env_problems(env_path, lookup_env=None):
+    """`image_environment_problems` for the volume's `.env`, judged as every load of Hermes may read it, like `volume_env_problems`."""
+    readings, problems = _read_env_readings(env_path, lookup_env)
+    for assignments, pairs in readings:
+        referenced = _referenced_names(assignments, lambda name: name in IMAGE_ENV_FLAG_REASONS or _is_proxy_name(name))
+        _add_new(problems, image_environment_problems(pairs, "the volume's .env", volume=True, referenced=referenced))
+    return problems
 
 
 def image_ssrf_config_problems(cfg):
@@ -654,7 +989,8 @@ def gate(cfg_path):
             problems.append(f"{name} is set (another image provider's credential)")
 
     data_dir = os.environ.get("HERMES_DATA_DIR", DATA_DIR)
-    problems.extend(volume_env_problems(os.path.join(data_dir, ".env")))
+    problems.extend(hermes_home_problems(original_env, data_dir))
+    problems.extend(volume_env_problems(os.path.join(data_dir, ".env"), original_env))
     # The guard's bytes are read and hashed ONCE here; the scratch home gets exactly these bytes. Whether a missing or
     # edited guard matters depends on the tool being exposed, which is only known after the config is resolved.
     guard_files, guard_file_problems = read_image_guard_files(data_dir)
@@ -694,7 +1030,7 @@ def gate(cfg_path):
             problems.extend(image_guard_config_problems(cfg))
             problems.extend(image_ssrf_config_problems(cfg))
             problems.extend(image_environment_problems(original_env.items(), "the process environment"))
-            problems.extend(image_volume_env_problems(os.path.join(data_dir, ".env")))
+            problems.extend(image_volume_env_problems(os.path.join(data_dir, ".env"), original_env))
             guard_evidence = {"files": sorted(IMAGE_GUARD_FILES), "files_verified": guard_files is not None,
                               "media_strict": original_env.get(MEDIA_STRICT_ENV) == MEDIA_STRICT_VALUE}
             if guard_files is not None:  # never run bytes that did not match the pinned hashes
@@ -717,7 +1053,7 @@ def gate(cfg_path):
         ok = not problems
         emit("LOCKGATE", ok=ok, config_sha256=sha, migrate_rc=migrate_rc, disabled_count=len(disabled),
              enabled_toolsets=enabled, selected_tools=selected, resolved_tools=resolved,
-             approvals_mode=mode, image_guard=guard_evidence, problems=problems)
+             approvals_mode=mode, image_guard=guard_evidence, env_parser=env_parser(), problems=problems)
         return 0 if ok else 3
     except SystemExit:
         raise
@@ -779,9 +1115,12 @@ def report():
         disabled = (live_cfg.get("agent") or {}).get("disabled_toolsets") or []
         selected = sorted(_select_tool_names(sorted(_get_platform_tools(live_cfg, "api_server")), disabled, True))
         violations = tool_problems(live_cfg, set(tools) | set(selected))
+        data_dir = os.environ.get("HERMES_DATA_DIR", DATA_DIR)
+        # The volume's `.env` the way the boot gate judged it, whatever tool is exposed: the YOLO / dashboard / CORS / API key / FAL
+        # rules hold for the life of the process, not only until the first /health (#4886 review).
+        violations += volume_env_problems(os.path.join(data_dir, ".env"))
         if (set(tools) | set(selected)) & IMAGE_TOOLS:
             # Files, config and environment again on the live volume; the canary needs the scratch home, so it is boot-only.
-            data_dir = os.environ.get("HERMES_DATA_DIR", DATA_DIR)
             violations += read_image_guard_files(data_dir)[1]
             violations += image_guard_config_problems(live_cfg) + image_ssrf_config_problems(live_cfg)
             violations += image_environment_problems(os.environ.items(), "the process environment")

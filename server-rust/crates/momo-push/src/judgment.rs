@@ -163,6 +163,20 @@
 //!   **boolean** `true` and nothing else — a client's props are strings, so `"true"` is an
 //!   ordinary message — and it is a server-owned key that a REST send strips
 //!   (`is_server_owned_props_key`). The check is first in the reason `CASE`, above every arm.
+//! * **A new reply in a thread you follow (ADR-0206 증보 1 F4, #4889 2단계)** — the seventh
+//!   reason, `thread_reply`. The recipient is a human whose `thread_follow` row for the message's
+//!   root is `auto` or `followed` (migration 164; a stopped follow and no row at all are the same
+//!   silence). Only a finished `text` line of a non-DM thread counts: a still-streaming or
+//!   provisional line is **held** like the answer arm holds it and judged again by the second
+//!   candidate the close enqueues, and the reading window is the answer arm's (a `read_state` cursor
+//!   or a `channel_viewing` beat inside 30 s — the thread panel has no presence signal of its own, so
+//!   looking at the channel quiets its threads too). The replier is not a recipient (the same join
+//!   that drops every author). It is the **last** arm: a mention, a DM or an agent's answer to the
+//!   same person already claimed the message, so one message is one reason and one push, and a
+//!   person who is both mentioned and a follower hears it once, as the `mention`. It has no way
+//!   through a channel mute and none through DND — the `WHERE` below lets only `reason = 'mention'`
+//!   past a mute — and the envelope's `thread_id` is the root, which is where a tap goes.
+//!   `momo_notifier` reads `thread_follow` with SELECT only (migration 165).
 //! * **Mute (ADR-0124)** — the per-channel `notification_pref` row suppresses
 //!   every reason, mentions and approvals included. Read at judgment time; no
 //!   cache.
@@ -182,8 +196,9 @@
 //! Reason precedence per member is the `CASE` arm order below: the three work
 //! reasons (`resume_offer`, `work_session_idle`, `work_run_done` — each claims its
 //! message for the one person it names) > `approval_request` > `mention` > `dm` > an
-//! agent's answer to you. That last arm never outranks a mention or a DM, and only a
-//! person nothing else selected reaches it, so one message carries one reason.
+//! agent's answer to you > a reply in a thread you follow. The last two never outrank a
+//! mention or a DM, and only a person nothing else selected reaches them, so one message
+//! carries one reason.
 //! Suppression precedence across the two ledgers
 //! is `dnd > channel-mute(with mention exception) > deliver`, expressed by the
 //! `WHERE` clause: absence of a `notification_rule` row is `dnd=false,
@@ -493,6 +508,41 @@ async fn judge_targets_for_source(
                                     - make_interval(secs => $4::double precision) \
                             ) \
                         THEN 'mention' END \
+                    WHEN (SELECT root_id FROM msg) IS NOT NULL \
+                         AND (SELECT message_type FROM msg) = 'text' \
+                         AND (SELECT channel_kind FROM msg) <> 'dm' \
+                         AND EXISTS ( \
+                           SELECT 1 FROM thread_follow tf \
+                            WHERE tf.workspace_id = $1 \
+                              AND tf.root_id = (SELECT root_id FROM msg) \
+                              AND tf.member_id = ms.member_id \
+                              AND tf.state IN ('auto', 'followed') \
+                         ) THEN \
+                      CASE WHEN NOT (SELECT streaming FROM msg) \
+                            AND NOT EXISTS ( \
+                            SELECT 1 FROM read_state seen \
+                             WHERE seen.workspace_id = $1 \
+                               AND seen.channel_id = (SELECT channel_id FROM msg) \
+                               AND seen.member_id = mem.id \
+                               AND seen.last_read_seq > 0 \
+                               AND CASE WHEN (SELECT streamed FROM msg) \
+                                    THEN seen.last_read_at >= now() \
+                                           - make_interval(secs => $4::double precision) \
+                                    ELSE ( seen.last_read_seq >= (SELECT seq FROM msg) \
+                                           OR seen.last_read_at >= (SELECT created_at FROM msg) \
+                                                - make_interval(secs => $4::double precision) ) \
+                                    END \
+                            ) \
+                            AND NOT EXISTS ( \
+                            SELECT 1 FROM channel_viewing viewing \
+                             WHERE viewing.workspace_id = $1 \
+                               AND viewing.channel_id = (SELECT channel_id FROM msg) \
+                               AND viewing.member_id = mem.id \
+                               AND viewing.seen_at >= CASE WHEN (SELECT streamed FROM msg) \
+                                    THEN now() ELSE (SELECT created_at FROM msg) END \
+                                    - make_interval(secs => $4::double precision) \
+                            ) \
+                        THEN 'thread_reply' END \
                     ELSE NULL \
                   END AS reason \
              FROM membership ms \

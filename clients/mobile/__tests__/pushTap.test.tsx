@@ -503,6 +503,18 @@ const TARGETS = {
     landsOn: REPLY,
     inThread: true,
   },
+  // ADR-0206 증보 1 F7 (#4889): 따라가는 스레드의 새 답글. 봉투의 `thread-id` 가 루트라서
+  // 탭은 그 스레드를 열고 그 답글에 착지한다 — 새 분기 없이 기존 `thread-id !== channel_id` 규칙이다.
+  '스레드 새 답글 알림': {
+    aim: {
+      messageId: REPLY,
+      threadId: ROOT,
+      category: 'momo.message',
+      reason: 'thread_reply',
+    } as Aim,
+    landsOn: REPLY,
+    inThread: true,
+  },
   '승인 카드': {
     aim: {
       messageId: APPROVAL_MSG,
@@ -720,6 +732,24 @@ describe('탭이 가리키는 곳 — 식별자만으로 짓는다 (순수)', ()
       WS,
     );
     expect(arrival?.kind === 'target' && arrival.target.threadRootId).toBe(ROOT);
+  });
+
+  it('thread_reply 알림은 받아들여지고 thread-id 가 스레드 루트다 (ADR-0206 증보 1 F7)', () => {
+    const arrival = tapArrival(
+      tapResponse(apnsPayload(TARGETS['스레드 새 답글 알림'].aim)),
+      WS,
+    );
+    expect(arrival).toEqual({
+      kind: 'target',
+      target: {
+        channelId: GENERAL,
+        messageId: REPLY,
+        threadRootId: ROOT,
+        approvalId: null,
+        category: 'momo.message',
+        reason: 'thread_reply',
+      },
+    });
   });
 
   it('승인 알림은 승인 id 를 들고, 착지는 그 카드 메시지다', () => {

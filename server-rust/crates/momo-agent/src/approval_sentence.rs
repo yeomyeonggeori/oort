@@ -30,12 +30,24 @@
 //! approver to approve a text nobody showed them. A message, a rationale, an image and anything
 //! long are never quoted: the card is where those are read in full (D6-3: 「값이 길거나 사람의
 //! 글이면 본문에 넣지 않는다」).
+//!
+//! ## What the sentence says when it cannot show
+//!
+//! A card the lock screen may decide ([`crate::actions::decision_mode`] answers `inline`) is
+//! decided from this sentence alone, and that answer never reads a value. So a value that was
+//! meant to be quoted and was not — too long, more than one line, anything that hides or
+//! reorders text — is **said to be left out**: 「· 앱에서 확인」 ([`IN_APP_NOTE`]) follows the
+//! question, instead of a question that reads as if there were nothing more to see. And a
+//! profile or rename card that names an agent other than the proposer (`targetHandle`) names
+//! it too, after the value: 「· 대상 에이전트 「luna」」 ([`TARGET_LABEL`]) — the push's title is
+//! the agent that proposed it, and without the target the question reads as being about that
+//! agent itself.
 
 use serde_json::Value;
 
 use crate::actions::{
     action_by_id, plugin_install_label, WorkspaceAction, ACTION_AGENT_PROFILE_UPDATE,
-    ACTION_CHANNEL_CREATE, ACTION_CHANNEL_MEMBER_ADD, ACTION_PLUGIN_INSTALL,
+    ACTION_AGENT_RENAME, ACTION_CHANNEL_CREATE, ACTION_CHANNEL_MEMBER_ADD, ACTION_PLUGIN_INSTALL,
     ACTION_TYPE_WORKSPACE_ACTION,
 };
 use crate::hosted_notice::inert_display_name;
@@ -49,6 +61,12 @@ pub const UNASKED_PREFIX: &str = "먼저 제안";
 /// The longest value a sentence quotes, in characters. Longer is left out, not cut: a cut
 /// value is a different value.
 pub const VALUE_MAX_CHARS: usize = 30;
+/// Said after the question when a value it was meant to quote could not be shown (see the
+/// module docs): the text is in the app, not in this sentence.
+pub const IN_APP_NOTE: &str = "앱에서 확인";
+/// In front of the agent a profile or rename card is about, when it is not the proposer. Spelled
+/// as the card's own row label (`agent_rename_rows`).
+pub const TARGET_LABEL: &str = "대상 에이전트";
 
 /// The question a tool approval asks. The tool's name is quoted after it.
 pub const TOOL_QUESTION: &str = "도구를 실행해도 될까요?";
@@ -74,27 +92,42 @@ pub struct Phrases {
 }
 
 /// A value this server may quote in a sentence: one short line, trimmed, with nothing in it that
-/// could draw something else — no control or direction-changing character, no bracket of the
-/// quote itself. `None` when it has to be left out.
+/// could draw something else — no control or direction-changing character, no hidden or
+/// blank-drawing character ([`is_hidden_char`]), no bracket of the quote itself, no long stack of
+/// combining marks. `None` when it has to be left out.
+///
+/// The whole value is left out, not tidied: a value that had such a character in it is not the
+/// value a person would read. (The link preview drops direction controls from the title of a page
+/// because what it stores is what it shows, ADR-0170 증보 D13; this sentence quotes a value that
+/// is kept elsewhere exactly as written.)
 ///
 /// What is quoted is also made **inert** ([`inert_display_name`], the way the hosted notice
 /// lines and the in-place card's body already name an agent): a `body` is parsed as markdown by
 /// the clients, so a name that spells `[label](https://…)` must not be able to become a link in
 /// a sentence this server wrote. An ordinary name is unchanged.
 pub fn quotable_value(raw: &str) -> Option<String> {
-    let unsafe_char = |c: char| {
-        c.is_control()
-            || matches!(c, '「' | '」' | '『' | '』')
-            || matches!(c as u32,
-                0x200B..=0x200F // zero-width and direction marks
-                | 0x2028..=0x202E // separators and embeddings/overrides
-                | 0x2060..=0x2069 // word joiner, isolates
-                | 0xFEFF)
-    };
     // Judged on the raw text: a line break or a tab is not tidied into a space — a value that
     // had one is not the value a person would read, so it is left out.
-    if raw.chars().any(unsafe_char) {
-        return None;
+    let mut marks_in_a_row = 0usize;
+    let mut previous: Option<char> = None;
+    for c in raw.chars() {
+        if is_hidden_char(c) || matches!(c, '「' | '」' | '『' | '』') {
+            return None;
+        }
+        // The presentation selector of an emoji (❤️ is ❤ and U+FE0F) is part of what is drawn
+        // — right behind a pictograph, once. Anywhere else it draws nothing.
+        if matches!(c, '\u{FE0E}' | '\u{FE0F}') && !previous.is_some_and(is_pictograph) {
+            return None;
+        }
+        if is_combining_mark(c) {
+            marks_in_a_row += 1;
+            if marks_in_a_row > MAX_COMBINING_RUN {
+                return None;
+            }
+        } else {
+            marks_in_a_row = 0;
+        }
+        previous = Some(c);
     }
     let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.is_empty() || collapsed.chars().count() > VALUE_MAX_CHARS {
@@ -103,19 +136,123 @@ pub fn quotable_value(raw: &str) -> Option<String> {
     Some(inert_display_name(&collapsed))
 }
 
-/// `question`, or `question · 「value」`, behind 「먼저 제안 · 」 when nobody asked.
+/// The most combining marks a quoted value may stack in a row — the limit a proposed name
+/// carries (`momo_messaging::name_guard`). More is not text but noise drawn over its neighbours.
+const MAX_COMBINING_RUN: usize = 2;
+
+/// The pictographs an emoji presentation selector may follow — the narrow set a proposed status
+/// emoji is made of (`momo_messaging::name_guard`'s `is_emoji`).
+fn is_pictograph(c: char) -> bool {
+    matches!(c as u32, 0x1F300..=0x1FAFF | 0x2600..=0x27BF | 0x2B50 | 0x2B55)
+}
+
+/// The combining-mark blocks a stack of marks is made of.
+fn is_combining_mark(c: char) -> bool {
+    matches!(c as u32,
+        0x0300..=0x036F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F)
+}
+
+/// A character that draws nothing, or draws something other than itself, and so cannot stand in
+/// a value a person is asked to approve from a banner:
+///
+/// * a control character, and the line and paragraph separators;
+/// * the zero-width and direction marks (U+200B–U+200F) and the embedding, override and isolate
+///   controls (U+202A–U+202E, U+2066–U+2069 — the nine the link preview drops, ADR-0170 증보
+///   D13), the word joiner and the other invisible operators (U+2060–U+206F), and the format
+///   characters of other scripts (soft hyphen, Arabic and Syriac marks, the Mongolian
+///   separator, shorthand and musical controls, the byte order mark);
+/// * the characters that fill a space with nothing: the Hangul fillers, the Khmer inherent
+///   vowels, the combining grapheme joiner and the braille blank;
+/// * variation selectors (but for the emoji presentation selector right behind a pictograph,
+///   which [`quotable_value`] lets through), tag characters, the specials block (annotation
+///   marks, the object replacement and replacement characters), private use, and
+///   noncharacters.
+///
+/// Spelled out as ranges: `char` has no general category. `momo-agent` has no normal dependency
+/// on `momo-messaging`, whose `name_guard::has_invisible_or_control_characters` is the nearest
+/// list; the unit test `every_character_name_guard_calls_hidden_is_left_out_here_too` walks all
+/// of Unicode against it, so the two cannot drift apart without a red test.
+fn is_hidden_char(c: char) -> bool {
+    let code = c as u32;
+    c.is_control()
+        // The last two code points of every plane are noncharacters.
+        || code & 0xFFFE == 0xFFFE
+        || matches!(code,
+            0x00AD // soft hyphen
+            | 0x034F // combining grapheme joiner
+            | 0x0600..=0x0605 | 0x061C | 0x06DD | 0x070F | 0x0890..=0x0891 | 0x08E2 // Arabic, Syriac
+            | 0x115F..=0x1160 // Hangul choseong and jungseong fillers
+            | 0x17B4..=0x17B5 // Khmer inherent vowels
+            | 0x180B..=0x180F // Mongolian selectors and vowel separator
+            | 0x200B..=0x200F // zero-width and direction marks
+            | 0x2028..=0x202E // separators, embeddings and overrides
+            | 0x2060..=0x206F // word joiner, invisible operators, isolates
+            | 0x2800 // braille blank
+            | 0x3164 // Hangul filler
+            | 0xFDD0..=0xFDEF // noncharacters
+            | 0xFE00..=0xFE0D // variation selectors (the emoji ones, FE0E and FE0F, see `quotable_value`)
+            | 0xFEFF // byte order mark
+            | 0xFFA0 // halfwidth Hangul filler
+            | 0xFFF0..=0xFFFF // specials
+            | 0x110BD | 0x110CD // Kaithi format characters
+            | 0x13430..=0x1343F // Egyptian hieroglyph format controls
+            | 0x1BCA0..=0x1BCA3 // shorthand format controls
+            | 0x1D173..=0x1D17A // musical format controls
+            | 0xE000..=0xF8FF // private use
+            | 0xE0000..=0xE0FFF // tags, variation selectors supplement
+            | 0xF0000..=0x10FFFF // private use planes
+        )
+}
+
+/// `question`, or `question · 「value」`, behind 「먼저 제안 · 」 when nobody asked. A value that
+/// was given and cannot be shown ([`quotable_value`]) is said to be left out
+/// ([`IN_APP_NOTE`]); `None` — nothing to quote — adds nothing.
 pub fn question_body(question: &str, value: Option<&str>, unasked: bool) -> String {
+    question_body_about(question, value, None, unasked)
+}
+
+/// [`question_body`], with the agent the card is about named after the value when it is not
+/// the proposer: `question · 「value」 · 대상 에이전트 「handle」`. Whatever was given and could
+/// not be shown — the value or the handle — is said to be left out, once, at the end.
+fn question_body_about(
+    question: &str,
+    value: Option<&str>,
+    target: Option<&str>,
+    unasked: bool,
+) -> String {
     let mut body = String::new();
     if unasked {
         body.push_str(UNASKED_PREFIX);
         body.push_str(SEPARATOR);
     }
     body.push_str(question);
-    if let Some(value) = value.and_then(quotable_value) {
+    let mut left_out = false;
+    if let Some(raw) = value {
+        match quotable_value(raw) {
+            Some(value) => {
+                body.push_str(SEPARATOR);
+                body.push('「');
+                body.push_str(&value);
+                body.push('」');
+            }
+            None => left_out = true,
+        }
+    }
+    if let Some(raw) = target {
+        match quotable_value(raw) {
+            Some(handle) => {
+                body.push_str(SEPARATOR);
+                body.push_str(TARGET_LABEL);
+                body.push_str(" 「");
+                body.push_str(&handle);
+                body.push('」');
+            }
+            None => left_out = true,
+        }
+    }
+    if left_out {
         body.push_str(SEPARATOR);
-        body.push('「');
-        body.push_str(&value);
-        body.push('」');
+        body.push_str(IN_APP_NOTE);
     }
     body
 }
@@ -162,7 +299,24 @@ pub fn action_request_body(
     } else {
         phrases_of(action, args).question
     };
-    question_body(question, quoted_value(action, args), unasked)
+    question_body_about(
+        question,
+        quoted_value(action, args),
+        target_handle(action, args),
+        unasked,
+    )
+}
+
+/// The agent a profile or rename card is about, when the proposer named one (`targetHandle`;
+/// absent or `null` means the proposer itself). The handle the server validated, never a name.
+fn target_handle<'a>(action: &WorkspaceAction, args: Option<&'a Value>) -> Option<&'a str> {
+    match action.id {
+        ACTION_AGENT_PROFILE_UPDATE | ACTION_AGENT_RENAME => args?
+            .get("targetHandle")
+            .and_then(Value::as_str)
+            .filter(|handle| !handle.trim().is_empty()),
+        _ => None,
+    }
 }
 
 /// The raw text a request card may quote for this action ([`question_body`] makes it safe).
@@ -171,8 +325,9 @@ fn quoted_value<'a>(action: &WorkspaceAction, args: Option<&'a Value>) -> Option
     match action.id {
         ACTION_CHANNEL_CREATE => text("name"),
         ACTION_CHANNEL_MEMBER_ADD => text("channel"),
-        // The official name of the app, never the id the model wrote.
-        ACTION_PLUGIN_INSTALL => text("pluginId").and_then(plugin_install_label),
+        // The official name of the app, never the id the model wrote. An id this build does not
+        // list gives no name — `""` is given, so the sentence says it left the app out.
+        ACTION_PLUGIN_INSTALL => text("pluginId").map(|id| plugin_install_label(id).unwrap_or("")),
         ACTION_AGENT_PROFILE_UPDATE => ProfileChange::of(args)?.quoted_key().and_then(text),
         _ => None,
     }
@@ -482,9 +637,11 @@ mod tests {
             body(json!({"tagline": "알림 시험"})),
             "소개를 바꿔도 될까요? · 「알림 시험」"
         );
+        // Another agent's profile names that agent after the text (the sentence's own test:
+        // `a_card_about_another_agent_names_it_after_the_value`).
         assert_eq!(
             body(json!({"tagline": "x", "targetHandle": "luna"})),
-            "소개를 바꿔도 될까요? · 「x」"
+            "소개를 바꿔도 될까요? · 「x」 · 대상 에이전트 「luna」"
         );
         assert_eq!(
             body(json!({"statusText": "회의 중", "statusEmoji": "📅"})),
@@ -517,12 +674,13 @@ mod tests {
             assert_eq!(line, format!("소개를 바꿔도 될까요? · 「{text}」"));
             assert_clean(text, &line);
         }
-        // Not short, not one line, or no text: left out, the question stands alone.
+        // Not short, not one line, or no text: left out — and the sentence says it was
+        // (`a_value_that_cannot_be_shown_says_so_in_the_sentence` has the rest of the rows).
         let long = "가".repeat(VALUE_MAX_CHARS + 1);
         for text in [long.as_str(), "두 줄\n입니다", "닫는」괄호", ""] {
             assert_eq!(
                 body(json!({"tagline": text})),
-                "소개를 바꿔도 될까요?",
+                "소개를 바꿔도 될까요? · 앱에서 확인",
                 "{text:?}"
             );
         }
@@ -553,10 +711,11 @@ mod tests {
             ),
             "앱을 설치해도 될까요? · 「GitHub」"
         );
-        // An id this build does not list names no app, and the id itself is not quoted.
+        // An id this build does not list names no app, and the id itself is not quoted: the
+        // sentence says the app was left out.
         assert_eq!(
             action_request_body(install, Some(&json!({"pluginId": "evil.example"})), false),
-            "앱을 설치해도 될까요?"
+            "앱을 설치해도 될까요? · 앱에서 확인"
         );
     }
 
@@ -592,13 +751,16 @@ mod tests {
             assert!(line.ends_with('」'), "{line}");
             assert_clean(name, &line);
         }
-        // A name that cannot be quoted is left out; the question stands alone.
+        // A name that cannot be quoted is left out, and the sentence says so.
         assert_eq!(
             body("가".repeat(VALUE_MAX_CHARS + 1).as_str(), "public"),
-            "채널을 만들어도 될까요?"
+            "채널을 만들어도 될까요? · 앱에서 확인"
         );
-        assert_eq!(body("a」b", "public"), "채널을 만들어도 될까요?");
-        // No arguments at all: the plain question.
+        assert_eq!(
+            body("a」b", "public"),
+            "채널을 만들어도 될까요? · 앱에서 확인"
+        );
+        // No arguments at all: nothing was given, so the plain question.
         assert_eq!(
             action_request_body(create, None, false),
             "채널을 만들어도 될까요?"
@@ -638,11 +800,14 @@ mod tests {
             tool_request_body("work.session.login_handoff"),
             "도구를 실행해도 될까요? · 「work.session.login_handoff」"
         );
-        // A tool name that is not plain is not quoted: the question stands alone.
-        assert_eq!(tool_request_body("a\nb"), "도구를 실행해도 될까요?");
+        // A tool name that is not plain is not quoted, and the sentence says so.
+        assert_eq!(
+            tool_request_body("a\nb"),
+            "도구를 실행해도 될까요? · 앱에서 확인"
+        );
         assert_eq!(
             tool_request_body(&"x".repeat(80)),
-            "도구를 실행해도 될까요?"
+            "도구를 실행해도 될까요? · 앱에서 확인"
         );
         assert_eq!(
             spawn_request_body("codex"),
@@ -675,6 +840,286 @@ mod tests {
         ] {
             assert_clean("card kind", &body);
         }
+    }
+
+    /// A character that draws nothing, or draws something other than itself, is never inside a
+    /// quoted value — whichever of the kinds it is. Each row is one character from one kind
+    /// ([`is_hidden_char`]): inside a value, in front of one, and repeated alone to the length
+    /// limit.
+    #[test]
+    fn a_value_with_a_hidden_character_is_left_out() {
+        let hidden: [(&str, char); 45] = [
+            ("soft hyphen", '\u{00AD}'),
+            ("combining grapheme joiner", '\u{034F}'),
+            ("arabic letter mark", '\u{061C}'),
+            ("hangul choseong filler", '\u{115F}'),
+            ("hangul jungseong filler", '\u{1160}'),
+            ("khmer inherent vowel", '\u{17B4}'),
+            ("mongolian selector", '\u{180B}'),
+            ("mongolian vowel separator", '\u{180E}'),
+            ("zero width space", '\u{200B}'),
+            ("zero width non-joiner", '\u{200C}'),
+            ("zero width joiner", '\u{200D}'),
+            ("left-to-right mark", '\u{200E}'),
+            ("right-to-left mark", '\u{200F}'),
+            ("line separator", '\u{2028}'),
+            ("paragraph separator", '\u{2029}'),
+            // The nine the link preview drops (ADR-0170 증보 D13).
+            ("left-to-right embedding", '\u{202A}'),
+            ("right-to-left embedding", '\u{202B}'),
+            ("pop directional formatting", '\u{202C}'),
+            ("left-to-right override", '\u{202D}'),
+            ("right-to-left override", '\u{202E}'),
+            ("left-to-right isolate", '\u{2066}'),
+            ("right-to-left isolate", '\u{2067}'),
+            ("first strong isolate", '\u{2068}'),
+            ("pop directional isolate", '\u{2069}'),
+            ("word joiner", '\u{2060}'),
+            ("invisible separator", '\u{2063}'),
+            ("braille blank", '\u{2800}'),
+            ("hangul filler", '\u{3164}'),
+            ("halfwidth hangul filler", '\u{FFA0}'),
+            ("variation selector", '\u{FE0F}'),
+            ("ideographic variation selector", '\u{FE00}'),
+            ("variation selector supplement", '\u{E0100}'),
+            ("byte order mark", '\u{FEFF}'),
+            ("annotation anchor", '\u{FFF9}'),
+            ("object replacement", '\u{FFFC}'),
+            ("replacement character", '\u{FFFD}'),
+            ("language tag", '\u{E0001}'),
+            ("tag space", '\u{E0020}'),
+            ("cancel tag", '\u{E007F}'),
+            ("private use", '\u{E000}'),
+            ("plane 15 private use", '\u{F0000}'),
+            ("noncharacter", '\u{FDD0}'),
+            ("plane 1 noncharacter", '\u{1FFFE}'),
+            ("musical format", '\u{1D173}'),
+            ("control", '\u{0007}'),
+        ];
+        for (label, c) in hidden {
+            assert_eq!(quotable_value(&format!("a{c}b")), None, "{label}: inside");
+            assert_eq!(quotable_value(&format!("{c}ab")), None, "{label}: in front");
+            assert_eq!(
+                quotable_value(&c.to_string().repeat(VALUE_MAX_CHARS)),
+                None,
+                "{label}: alone, thirty times"
+            );
+        }
+        // The emoji presentation selector is drawn with its pictograph — once, right behind it,
+        // and nowhere else.
+        for text in [
+            "❤\u{FE0F}",
+            "팀 ☀\u{FE0F} 화이팅",
+            "🌙\u{FE0E}",
+            "✈\u{FE0F} 출장",
+        ] {
+            assert!(quotable_value(text).is_some(), "{text:?}");
+        }
+        for text in [
+            "❤\u{FE0F}\u{FE0F}",
+            "\u{FE0F}❤",
+            "a\u{FE0F}",
+            "❤ \u{FE0F}",
+            "❤\u{FE00}",
+            "\u{FE0F}",
+        ] {
+            assert_eq!(quotable_value(text), None, "{text:?}");
+        }
+        // A stack of combining marks is noise, two are an accent.
+        assert_eq!(quotable_value("a\u{0300}\u{0301}\u{0302}"), None);
+        assert_eq!(quotable_value(&format!("a{}", "\u{0301}".repeat(12))), None);
+        assert!(quotable_value("a\u{0300}\u{0301}").is_some());
+        assert!(quotable_value("e\u{0301} e\u{0301}\u{0323}").is_some());
+        // Plain text of any script is still quoted — including the letters of a right-to-left
+        // script, which are not direction controls.
+        for text in [
+            "달무리",
+            "Hermes",
+            "v1.2",
+            "qa-lab_",
+            "🌙",
+            "مرحبا",
+            "日本語",
+            "회의 중 · 점검",
+            "a — b…",
+        ] {
+            assert!(quotable_value(text).is_some(), "{text:?}");
+        }
+    }
+
+    /// `momo-agent` has no normal dependency on `momo-messaging`, whose `name_guard` already
+    /// judges what a person-facing name may not carry (`has_invisible_or_control_characters`).
+    /// Every character that list calls hidden is left out of a quoted value here too, over all
+    /// of Unicode — so the two lists cannot drift apart without this going red.
+    #[test]
+    fn every_character_name_guard_calls_hidden_is_left_out_here_too() {
+        use momo_messaging::name_guard::has_invisible_or_control_characters;
+        let mut checked = 0usize;
+        for code in 0..=0x10FFFFu32 {
+            let Some(c) = char::from_u32(code) else {
+                continue;
+            };
+            if has_invisible_or_control_characters(&c.to_string()) {
+                checked += 1;
+                assert_eq!(quotable_value(&format!("a{c}b")), None, "U+{code:04X}");
+            }
+        }
+        // The walk found the list (controls, tags, selectors, the format characters).
+        assert!(checked > 400, "only {checked} characters were judged");
+    }
+
+    /// **D6-3, a value left out.** A card the lock screen may decide is decided from its sentence,
+    /// and the decision word never reads a value; so when the text it was meant to quote cannot
+    /// be shown — too long, more than one line, a bracket of the quote, hidden characters — the
+    /// sentence says 「앱에서 확인」 instead of reading as if there were nothing more to see.
+    #[test]
+    fn a_value_that_cannot_be_shown_says_so_in_the_sentence() {
+        let profile = action(ACTION_AGENT_PROFILE_UPDATE);
+        let with = |key: &str, text: &str| {
+            let mut args = serde_json::Map::new();
+            args.insert(key.to_string(), json!(text));
+            action_request_body(profile, Some(&Value::Object(args)), false)
+        };
+        let long = "가".repeat(VALUE_MAX_CHARS + 1);
+        let only_hidden = "\u{3164}".repeat(VALUE_MAX_CHARS);
+        let hidden_inside = "회의\u{2800}중";
+        for (key, question) in [
+            ("tagline", "소개를 바꿔도 될까요?"),
+            ("statusText", "상태를 바꿔도 될까요?"),
+            ("roleLabel", "역할 이름을 바꿔도 될까요?"),
+        ] {
+            for text in [
+                long.as_str(),
+                "두 줄\n입니다",
+                "닫는」괄호",
+                only_hidden.as_str(),
+                hidden_inside,
+            ] {
+                let line = with(key, text);
+                assert_eq!(line, format!("{question} · 앱에서 확인"), "{key}: {text:?}");
+                assert_clean(key, &line);
+            }
+            // Something that can be shown is shown, and no note follows it.
+            assert_eq!(
+                with(key, "알림 시험"),
+                format!("{question} · 「알림 시험」"),
+                "{key}"
+            );
+        }
+        // Nothing given — a cleared field, no arguments — leaves nothing out.
+        assert_eq!(
+            action_request_body(profile, Some(&json!({"tagline": null})), false),
+            "소개를 바꿔도 될까요?"
+        );
+        assert_eq!(action_request_body(profile, None, false), profile.question);
+        // The note stays at the back, behind 「먼저 제안 · 」 at the front.
+        assert_eq!(
+            action_request_body(profile, Some(&json!({"tagline": long})), true),
+            "먼저 제안 · 소개를 바꿔도 될까요? · 앱에서 확인"
+        );
+        // The other quoting cards say it the same way.
+        assert_eq!(
+            dm_admission_request_body(&"가".repeat(VALUE_MAX_CHARS + 2)),
+            "에이전트를 이 대화에 들여도 될까요? · 앱에서 확인"
+        );
+        assert_eq!(
+            spawn_request_body("a\u{2800}b"),
+            "작업을 시작해도 될까요? · 앱에서 확인"
+        );
+        // A card with no value to quote (the in-place grant) has nothing to leave out.
+        assert_eq!(
+            in_place_grant_request_body(),
+            "이 채널에서 읽고 쓰게 해도 될까요?"
+        );
+    }
+
+    /// **D6-3, the target.** A profile or rename card about another agent says which one, after
+    /// the value — the push's title is the agent that proposed it, so without the target the
+    /// question reads as being about that agent itself. The handle is the validated one; a value
+    /// is never put inside the sentence, so no particle follows it.
+    #[test]
+    fn a_card_about_another_agent_names_it_after_the_value() {
+        let profile = action(ACTION_AGENT_PROFILE_UPDATE);
+        let rename = action(ACTION_AGENT_RENAME);
+        let about = |action: &WorkspaceAction, args: Value| {
+            let line = action_request_body(action, Some(&args), false);
+            assert_clean(action.id, &line);
+            line
+        };
+        assert_eq!(
+            about(profile, json!({"tagline": "x", "targetHandle": "luna"})),
+            "소개를 바꿔도 될까요? · 「x」 · 대상 에이전트 「luna」"
+        );
+        assert_eq!(
+            about(
+                profile,
+                json!({"statusText": "회의 중", "targetHandle": "luna"})
+            ),
+            "상태를 바꿔도 될까요? · 「회의 중」 · 대상 에이전트 「luna」"
+        );
+        assert_eq!(
+            about(profile, json!({"avatar": null, "targetHandle": "luna"})),
+            "에이전트 사진을 바꿔도 될까요? · 대상 에이전트 「luna」"
+        );
+        assert_eq!(
+            about(
+                profile,
+                json!({"displayName": "새 이름", "targetHandle": "luna"})
+            ),
+            "에이전트 이름을 바꿔도 될까요? · 대상 에이전트 「luna」"
+        );
+        assert_eq!(
+            about(
+                profile,
+                json!({"tagline": "x", "roleLabel": "y", "targetHandle": "luna"})
+            ),
+            "에이전트 프로필을 바꿔도 될까요? · 대상 에이전트 「luna」"
+        );
+        assert_eq!(
+            about(
+                rename,
+                json!({"displayName": "새 이름", "targetHandle": "luna"})
+            ),
+            "에이전트 이름을 바꿔도 될까요? · 대상 에이전트 「luna」"
+        );
+        // The proposer itself: no handle, or `null` (a rename is stored with `null`).
+        for args in [
+            json!({"displayName": "새 이름"}),
+            json!({"displayName": "새 이름", "targetHandle": null}),
+        ] {
+            assert_eq!(about(rename, args), "에이전트 이름을 바꿔도 될까요?");
+        }
+        assert_eq!(
+            about(profile, json!({"tagline": "x", "targetHandle": null})),
+            "소개를 바꿔도 될까요? · 「x」"
+        );
+        // Behind 「먼저 제안 · 」, and a value left out and a target make one note, at the back.
+        assert_eq!(
+            action_request_body(
+                profile,
+                Some(&json!({"tagline": "x", "targetHandle": "luna"})),
+                true
+            ),
+            "먼저 제안 · 소개를 바꿔도 될까요? · 「x」 · 대상 에이전트 「luna」"
+        );
+        let long = "가".repeat(VALUE_MAX_CHARS + 1);
+        assert_eq!(
+            about(profile, json!({"tagline": long, "targetHandle": "luna"})),
+            "소개를 바꿔도 될까요? · 대상 에이전트 「luna」 · 앱에서 확인"
+        );
+        // A handle that cannot be shown is left out the same way.
+        assert_eq!(
+            about(profile, json!({"tagline": "x", "targetHandle": long})),
+            "소개를 바꿔도 될까요? · 「x」 · 앱에서 확인"
+        );
+        // Only these two actions have a target: a stray key on another is nothing.
+        assert_eq!(
+            about(
+                action(ACTION_CHANNEL_CREATE),
+                json!({"name": "qa", "kind": "public", "targetHandle": "luna"})
+            ),
+            "채널을 만들어도 될까요? · 「qa」"
+        );
     }
 
     fn card(id: &str, args: Value) -> Value {

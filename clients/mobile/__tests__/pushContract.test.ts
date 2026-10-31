@@ -156,6 +156,9 @@ describe('the JS push contract matches the Swift the extension runs', () => {
     expect(swiftReasons).toEqual([...PUSH_REASONS]);
     expect(PUSH_REASONS).toContain('work_session_idle');
     expect(PUSH_REASONS).toContain('work_run_done');
+    // ADR-0206 증보 1 (#4889): a reply in a followed thread. The Swift gate above is held equal
+    // to this list, so the extension and the lock-screen action accept it exactly when JS does.
+    expect(PUSH_REASONS).toContain('thread_reply');
   });
 
   it('renders work_run_done with fixed copy, never the agent reply (ADR-0162 D14)', () => {
