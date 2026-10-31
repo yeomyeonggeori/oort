@@ -248,7 +248,7 @@ public enum MomoPushParser {
               !payload.serverID.isEmpty,
               !payload.collapseID.isEmpty,
               root.aps.badge >= 0,
-              ["dm", "mention", "approval_request", "resume_offer", "work_session_idle", "work_run_done"].contains(payload.reason),
+              ["dm", "mention", "approval_request", "resume_offer", "work_session_idle", "work_run_done", "thread_reply"].contains(payload.reason),
               root.aps.category.carriesApprovalID == (approvalID.flatMap(UUID.init(uuidString:)) != nil),
               (root.aps.category.carriesApprovalID || approvalID == nil)
         else {

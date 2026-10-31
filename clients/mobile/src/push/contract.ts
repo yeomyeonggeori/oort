@@ -97,7 +97,12 @@ export const PUSH_ENVELOPE_SCHEMA = 'momo.push.notification.v2';
  *  Six since ADR-0162 증보 3 D14 (#3517): `work_run_done` is the same push for a
  *  hosted agent's work run, sent to the person who asked for it. Same category,
  *  same label-only validation; a build without it fails open to the static
- *  placeholder (relay ships first, the app follows). */
+ *  placeholder (relay ships first, the app follows).
+ *
+ *  Seven since ADR-0206 증보 1 F5 (#4889): `thread_reply` is a new reply in a thread
+ *  the member follows. Category `momo.message` (the reply button stays), and the
+ *  envelope's `thread-id` is the thread's root — the tap opens that thread through
+ *  the existing `thread-id !== channel_id` rule, so nothing here branches on it. */
 export const PUSH_REASONS = [
   'dm',
   'mention',
@@ -105,6 +110,7 @@ export const PUSH_REASONS = [
   'resume_offer',
   'work_session_idle',
   'work_run_done',
+  'thread_reply',
 ] as const;
 
 export type PushReason = (typeof PUSH_REASONS)[number];
