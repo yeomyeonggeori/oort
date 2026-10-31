@@ -6081,8 +6081,22 @@ pub struct MessageUnfurlDto {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub domain: Option<String>,
+    /// Proxy path on this origin (`…/unfurls/{id}/image`), never a remote address.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_url: Option<String>,
+    // ADR-0170 amendment 2026-10-31 D6: every key below is optional and absent when unknown.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
+    /// Proxy path on this origin (`…/unfurls/{id}/icon`), never a remote address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_width: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_height: Option<i32>,
+    /// Only ever `true`; absent otherwise.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_video: bool,
 }
 
 #[derive(Debug, Serialize)]

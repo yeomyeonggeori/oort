@@ -20,7 +20,9 @@
 //! * the Swift **global** per-member axis (`RATE_LIMIT_PER_MEMBER`, every
 //!   authenticated route). What replaced it is narrower on purpose: the per-member
 //!   **write** budget at the bottom of this file (#4234, ADR-0208 D10 증보), mounted
-//!   on the five write endpoints (three surfaces) a member can flood. Reads and the
+//!   on the five write endpoints (three surfaces) a member can flood, and spent in the
+//!   handler, only when a request makes this server fetch from a remote site, by the
+//!   two unfurl proxy reads (#4881, [`MemberWrite::UnfurlProxy`]). Other reads and the
 //!   streaming `PATCH` have no per-member budget;
 //! * the per-IP `audit_log` row. Swift never writes it for the per-IP axis either
 //!   (:186-195), because that axis runs before any principal exists and
@@ -816,6 +818,13 @@ pub enum MemberWrite {
     ScheduledWrite,
     /// `POST …/channels/{ch}/attachments/uploads`.
     UploadStart,
+    /// `GET …/unfurls/{id}/image` and `GET …/unfurls/{id}/icon`: reads, but reads that can make
+    /// this server GET a site the caller's card names. Spent in the handler, **not** by a route
+    /// layer, and only by a request that really would fetch (no cached picture, no recent failure
+    /// remembered: `momo_unfurl::proxy_goes_outbound`), so rendering a timeline of cached cards
+    /// costs nothing and the budget is what stops a member from using the proxy to knock on third
+    /// parties' doors (#4881 security review M-2, ADR-0170 증보 D13).
+    UnfurlProxy,
 }
 
 impl MemberWrite {
@@ -826,6 +835,7 @@ impl MemberWrite {
             MemberWrite::MessageSend => "message_send",
             MemberWrite::ScheduledWrite => "scheduled_write",
             MemberWrite::UploadStart => "upload_start",
+            MemberWrite::UnfurlProxy => "unfurl_proxy",
         }
     }
 
@@ -836,6 +846,7 @@ impl MemberWrite {
             MemberWrite::MessageSend => "write:send",
             MemberWrite::ScheduledWrite => "write:schedule",
             MemberWrite::UploadStart => "write:upload",
+            MemberWrite::UnfurlProxy => "write:unfurl",
         }
     }
 }
@@ -862,6 +873,7 @@ pub fn member_write_limit(
         }
         (MemberWrite::ScheduledWrite, _) => config.scheduled_write_per_member_limit,
         (MemberWrite::UploadStart, _) => config.upload_start_per_member_limit,
+        (MemberWrite::UnfurlProxy, _) => config.unfurl_proxy_per_member_limit,
     }
 }
 
@@ -1469,6 +1481,7 @@ mod tests {
             message_send_per_agent_limit: 22,
             scheduled_write_per_member_limit: 33,
             upload_start_per_member_limit: 44,
+            unfurl_proxy_per_member_limit: 55,
             ..RateLimitConfig::default()
         }
     }
@@ -1495,6 +1508,11 @@ mod tests {
                 44,
                 "an agent bearer cannot reach this route today; if one ever does it is held to a budget, not exempt"
             );
+            assert_eq!(
+                limit(MemberWrite::UnfurlProxy, kind),
+                55,
+                "the proxy budget is one number for every credential"
+            );
         }
     }
 
@@ -1507,13 +1525,14 @@ mod tests {
             (MemberWrite::MessageSend, "message_send"),
             (MemberWrite::ScheduledWrite, "scheduled_write"),
             (MemberWrite::UploadStart, "upload_start"),
+            (MemberWrite::UnfurlProxy, "unfurl_proxy"),
         ];
         let mut keys = std::collections::HashSet::new();
         for (surface, label) in surfaces {
             assert_eq!(surface.label(), label);
             assert!(keys.insert(member_write_key(surface, member)));
         }
-        assert_eq!(keys.len(), 3);
+        assert_eq!(keys.len(), 4);
         assert_ne!(
             member_write_key(MemberWrite::MessageSend, member),
             member_write_key(MemberWrite::MessageSend, Uuid::from_u128(8)),
