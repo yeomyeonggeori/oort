@@ -216,7 +216,11 @@ enum RawMotion {
         #[serde(rename = "frameMs")]
         frame_ms: u32,
     },
-    Still,
+    /// A **struct** variant on purpose: serde reads the leftover keys of an internally tagged *unit*
+    /// variant as `IgnoredAny`, so `deny_unknown_fields` never fires for it and
+    /// `{"kind":"still","evil":"x"}` (or a `sourceAttachmentId` hidden inside the still) would be
+    /// accepted. With an empty field list the leftover keys are unknown fields like any other.
+    Still {},
 }
 
 #[derive(Deserialize)]
@@ -253,7 +257,7 @@ fn parse_request(body: &str) -> Result<DoorRequest, Refused> {
         return Err(Refused::Value);
     }
     let motion = match raw.motion {
-        RawMotion::Still => DoorMotion::Still,
+        RawMotion::Still {} => DoorMotion::Still,
         RawMotion::Preset { presets } => DoorMotion::Assemble(AssembleRequest {
             motion: Motion::Preset { presets },
             size: raw.size,
@@ -1390,6 +1394,21 @@ mod tests {
                 with(
                     r#""v":1"#,
                     r#""v":1,"sourceAttachmentId":"00000000-0000-4000-8000-000000000009""#,
+                ),
+                Refused::Shape,
+            ),
+            // The still has no fields at all: whatever else the motion object carries is refused, the
+            // photo pointer included (serde would let an internally tagged unit variant swallow it).
+            (
+                "still with an unknown key",
+                with(r#"{"kind":"still"}"#, r#"{"kind":"still","evil":"x"}"#),
+                Refused::Shape,
+            ),
+            (
+                "still carrying the photo pointer",
+                with(
+                    r#"{"kind":"still"}"#,
+                    r#"{"kind":"still","sourceAttachmentId":"00000000-0000-4000-8000-000000000009"}"#,
                 ),
                 Refused::Shape,
             ),

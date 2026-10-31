@@ -1220,6 +1220,24 @@ impl AgentWorker {
                     reason,
                     "provider call failed"
                 );
+                // #4820 C2b review (High-1, Medium-2): a door turn's over-long answer and its
+                // deadline are the door's to settle (a closed card, a capped number of attempts);
+                // every other failure — of a door turn or of any other — is settled below as ever.
+                if door_turn.is_some() {
+                    if let Some(settlement) = self
+                        .hosted_door_provider_failed(
+                            &job,
+                            &payload,
+                            run_id,
+                            &error,
+                            &reason,
+                            &transport.endpoint,
+                        )
+                        .await
+                    {
+                        return settlement;
+                    }
+                }
                 if error.is_retryable() {
                     return self
                         .settle_retryable(&job, &reason, &transport.endpoint)

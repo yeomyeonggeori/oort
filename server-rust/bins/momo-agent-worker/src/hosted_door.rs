@@ -381,8 +381,16 @@ impl AgentWorker {
                 Err(_) => {
                     tracing::error!(run_id = %run_id, "hosted expression door: the assembler is not found");
                     return Landed::Settled(
-                        self.settle_retryable(job, "hosted door assembler not found", endpoint)
-                            .await,
+                        self.hosted_door_retry_or_close(
+                            job,
+                            payload,
+                            run_id,
+                            &run,
+                            usage,
+                            "hosted door assembler not found",
+                            endpoint,
+                        )
+                        .await,
                     );
                 }
             },
@@ -413,8 +421,16 @@ impl AgentWorker {
             Prepared::Unavailable => {
                 tracing::error!(run_id = %run_id, "hosted expression door: the assembler could not run");
                 return Landed::Settled(
-                    self.settle_retryable(job, "hosted door assembler unavailable", endpoint)
-                        .await,
+                    self.hosted_door_retry_or_close(
+                        job,
+                        payload,
+                        run_id,
+                        &run,
+                        usage,
+                        "hosted door assembler unavailable",
+                        endpoint,
+                    )
+                    .await,
                 );
             }
         };
@@ -477,8 +493,12 @@ impl AgentWorker {
                 })
             }
             Err(error) => Landed::Settled(
-                self.settle_retryable(
+                self.hosted_door_retry_or_close(
                     job,
+                    payload,
+                    run_id,
+                    &run,
+                    usage,
                     &format!("hosted door proposal failed: {error}"),
                     endpoint,
                 )
@@ -486,4 +506,167 @@ impl AgentWorker {
             ),
         }
     }
+
+    /// A door turn's provider call failed with `error`: the part of that the door settles itself.
+    /// `None` is every other failure — the ordinary path (`settle_retryable` /
+    /// `settle_terminal_failure`) decides it exactly as it does for any turn.
+    ///
+    /// * [`ProviderError::BodyTooLarge`] — the answer was over the size limit and was not read past it
+    ///   (#4820 C2b review, High-1). No picture can be taken from what was not read and asking again
+    ///   would ask Hermes for the same amplification: one closed `generation_failed` card.
+    /// * [`ProviderError::TimedOut`] — the provider may well have made the picture and simply not
+    ///   returned it in time, and every attempt asks for a new one: the attempts are capped at
+    ///   [`DOOR_MAX_ATTEMPTS`] (Medium-2), the last of them ending as the same closed card.
+    pub(crate) async fn hosted_door_provider_failed(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        error: &crate::provider::ProviderError,
+        reason: &str,
+        endpoint: &ProviderEndpoint,
+    ) -> Option<Settlement> {
+        use crate::provider::ProviderError;
+        let run = self.door_run(job, payload, run_id);
+        match error {
+            ProviderError::BodyTooLarge { .. } => {
+                tracing::warn!(
+                    run_id = %run_id,
+                    reason,
+                    "hosted expression door: the provider's answer was over the size limit; closing with a failure card"
+                );
+                Some(
+                    self.hosted_door_fail(
+                        job,
+                        payload,
+                        run_id,
+                        &run,
+                        generation_failed(),
+                        None,
+                        endpoint,
+                    )
+                    .await,
+                )
+            }
+            ProviderError::TimedOut(_) => Some(
+                self.hosted_door_retry_or_close(job, payload, run_id, &run, None, reason, endpoint)
+                    .await,
+            ),
+            _ => None,
+        }
+    }
+
+    /// A door turn failed in a way a retry may fix but must not be left to fix seven times over: the
+    /// assembler could not run, the proposal's transaction failed, the provider ran out of time. Every
+    /// attempt asks Hermes for a new picture (a subscription's image allowance), so the turn gets
+    /// [`DOOR_MAX_ATTEMPTS`] attempts; the first failure is requeued, the last one ends as the closed
+    /// `generation_failed` card (and the run delivered, like every failure card).
+    ///
+    /// `usage` is what the model reported on the attempt that failed, if it answered at all. When the
+    /// attempt is requeued it is written first ([`Self::hosted_door_record_usage`]): the retry's own
+    /// commit knows nothing of it.
+    #[allow(clippy::too_many_arguments)]
+    async fn hosted_door_retry_or_close(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        run: &DoorRun,
+        usage: Option<ChatUsage>,
+        reason: &str,
+        endpoint: &ProviderEndpoint,
+    ) -> Settlement {
+        if job.attempts < DOOR_MAX_ATTEMPTS {
+            self.hosted_door_record_usage(job, payload, run_id, usage)
+                .await;
+            return self.settle_retryable(job, reason, endpoint).await;
+        }
+        tracing::warn!(
+            run_id = %run_id,
+            attempts = job.attempts,
+            reason,
+            "hosted expression door: its attempts are spent; closing with a failure card"
+        );
+        self.hosted_door_fail(
+            job,
+            payload,
+            run_id,
+            run,
+            generation_failed(),
+            usage,
+            endpoint,
+        )
+        .await
+    }
+
+    /// Write the ledger row of an attempt that is about to be retried, when the model reported usage.
+    /// `usage_ledger` has one row per run (`record_run_usage_in_tx` is `WHERE NOT EXISTS`): this writes
+    /// it if the run has none yet and is a no-op if one exists, so a retry can never double-charge —
+    /// and the tokens of the attempt that paid for the picture are not lost with the requeue. A failed
+    /// write is logged and never stops the retry.
+    async fn hosted_door_record_usage(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        usage: Option<ChatUsage>,
+    ) {
+        if usage.is_none() {
+            return;
+        }
+        let workspace_id = job.workspace_id;
+        let model = payload.model_or(&self.config.default_model).to_string();
+        let ledger = usage_report(usage, &model, payload);
+        let written = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            let ledger = ledger.clone();
+            let model = model.clone();
+            Box::pin(async move {
+                // The run's lock first: the ledger insert is only idempotent under it.
+                let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
+                else {
+                    return Ok(false);
+                };
+                let mut resolved = RunUsageReport::resolve(
+                    Some(&ledger),
+                    &model,
+                    snapshot.requested_effort.as_deref(),
+                    snapshot.profile_effort_pref.as_deref(),
+                );
+                resolved.source = momo_agent::UsageSource::Measured;
+                record_run_usage_in_tx(
+                    conn,
+                    workspace_id,
+                    run_id,
+                    snapshot.agent_member_id,
+                    snapshot.channel_id,
+                    &resolved,
+                )
+                .await
+            })
+        })
+        .await;
+        match written {
+            Ok(wrote) => {
+                tracing::debug!(run_id = %run_id, wrote, "hosted door: usage of a retried attempt recorded")
+            }
+            Err(error) => {
+                tracing::warn!(run_id = %run_id, error = %error, "hosted door: usage of a retried attempt not recorded")
+            }
+        }
+    }
+}
+
+/// How many attempts a door turn gets when what failed is something every retry pays for again (see
+/// [`AgentWorker::hosted_door_retry_or_close`]). `job.attempts` counts the attempt that is running:
+/// the first failure (`1`) is requeued, the second (`2`) is the last. The ordinary budget
+/// (`WorkerConfig::max_attempts`) still governs every failure that is not one of these.
+pub(crate) const DOOR_MAX_ATTEMPTS: i32 = 2;
+
+/// The card of a door turn that ended without a picture for a reason that is the provider's or the
+/// operator's rather than the picture's: `generation_failed`, in its golden line.
+fn generation_failed() -> FailureCard {
+    FailureCard::of(&door::Failure {
+        code: "generation_failed",
+        bytes: None,
+    })
 }
