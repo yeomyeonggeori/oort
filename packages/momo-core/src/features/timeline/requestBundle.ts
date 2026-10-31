@@ -6,6 +6,7 @@ import type {
 } from "./agentCardModel";
 import { roleDisplayName } from "../approvals/actionRole";
 import { expressionFailureLine } from "../approvals/approvalOutcome";
+import { EXPIRY_WARN_MS } from "../approvals/expiry";
 import {
   approvalEndState,
   APPROVAL_EXPIRED_SENTENCE,
@@ -347,6 +348,12 @@ export interface RequestBundleModel {
   valueChips: RequestValueChip[];
   moreValues: number;
   quietLine: string;
+  /**
+   * 남은 시간만의 한 줄(결정을 기다릴 때만 키가 있어요). `quietLine` 은 끝의 「자세히」가 누르는 자리(타임라인
+   * 카드의 펼침)를 가리켜요. 누를 수 없는 표면(결정 무대)이 그 글자를 그대로 그리면 눌리는 것처럼 읽혀서,
+   * 그런 표면은 이 줄만 그려요 (#4986).
+   */
+  remainingLine?: string;
   decisionMode: DecisionMode;
   canDecide: boolean;
   waitingFor?: string;
@@ -360,17 +367,31 @@ export interface RequestBundleModel {
   ref?: RequestBundleResult["ref"];
 }
 
-function remainingTime(
+const MINUTE_MS = 60_000;
+const HOUR_MS = 3_600_000;
+const DAY_MS = 86_400_000;
+
+/**
+ * 조용한 줄의 남은 시간 (#4986). 두 가지를 지켜요.
+ *
+ * - 단위는 남은 크기로 골라요: 한 시간이 안 되면 분, 하루가 안 되면 시간, 그 위는 일.
+ *   예전에는 10분을 넘으면 곧장 시간으로 올려서 15분 남은 허락이 「1시간 남음」이라고 말했어요.
+ *   결정할 사람이 한 시간을 믿고 미루면 돌아왔을 때 이미 만료예요.
+ * - 단위 안에서는 내려요(61분은 「1시간」, 25시간은 「1일」). 만료는 마감이라 실제보다 길게 말하는 쪽이
+ *   틀린 쪽이에요. 올림 판정은 「N분 안에 만료돼요」(`minutesLeft`)의 몫이에요: 그 말은 「안에」라서 올려야 맞아요.
+ *
+ * 초는 말하지 않고, 10분 이하는 숫자 없이 「10분 안에 만료돼요」예요(`expiryPhase` 의 soon 과 같은 경계).
+ */
+export function remainingTime(
   expiresAtMs: number | undefined,
   nowMs: number
 ): string | undefined {
   if (expiresAtMs === undefined || expiresAtMs <= nowMs) return undefined;
   const remaining = expiresAtMs - nowMs;
-  if (remaining <= 600_000) return "10분 안에 만료돼요";
-  const hours = Math.ceil(remaining / 3_600_000);
-  return hours >= 24
-    ? `${Math.ceil(remaining / 86_400_000)}일 남음`
-    : `${hours}시간 남음`;
+  if (remaining <= EXPIRY_WARN_MS) return "10분 안에 만료돼요";
+  if (remaining < HOUR_MS) return `${Math.floor(remaining / MINUTE_MS)}분 남음`;
+  if (remaining < DAY_MS) return `${Math.floor(remaining / HOUR_MS)}시간 남음`;
+  return `${Math.floor(remaining / DAY_MS)}일 남음`;
 }
 
 export function requestBundleModel(
@@ -492,6 +513,7 @@ export function requestBundleModel(
     valueChips,
     moreValues: Math.max(0, rows.length - 2) + omittedRows,
     quietLine: quiet ? `${quiet} · 자세히` : "자세히",
+    ...(quiet ? { remainingLine: quiet } : {}),
     decisionMode: requestBundleDecisionMode(card),
     canDecide,
     ...(waitingFor !== undefined ? { waitingFor } : {}),

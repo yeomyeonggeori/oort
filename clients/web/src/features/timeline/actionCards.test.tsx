@@ -1059,7 +1059,9 @@ describe("요청 묶음 카드", () => {
     expect(host.querySelector('a[href="#/settings?section=invites"]')).toBeNull();
   });
   it("머리·값 둘·단추 쌍·조용한 줄만 서고 자세히를 닫으면 라벨 행이 DOM에도 없다", () => {
-    const host = mountCard({ ...approvalProps(), intent: "팀원 초대 링크를 만들려고 해요", expires_at_ms: Date.now() + 3_600_000 });
+    // 기한은 단위 경계(정각 1시간)에서 떨어뜨려 둔다: 남은 시간은 단위 안에서 내리므로(#4986) 정각에 두면 시계가 한 틱만
+    // 가도 「59분 남음」이 되어 시험이 시각에 기대게 된다.
+    const host = mountCard({ ...approvalProps(), intent: "팀원 초대 링크를 만들려고 해요", expires_at_ms: Date.now() + 3.5 * 3_600_000 });
     expect(byTestId(host, "request-bundle-headline")[0]?.textContent).toBe("팀원 초대 링크를 만들려고 해요");
     expect(byTestId(host, "request-bundle-values")[0]?.querySelectorAll('[role="group"]')).toHaveLength(2);
     expect(byTestId(host, "approval-approve")).toHaveLength(1);

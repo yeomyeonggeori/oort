@@ -731,6 +731,29 @@ describe("이모지 고르개 안에서", () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
+  it("삭제 확인 단계의 Escape는 단계만 취소하고 고르개를 닫지 않아요, 다음 Escape가 고르개를 닫아요 (#4986)", async () => {
+    // 실제 모달 팝오버 안에서: Radix 는 Escape 를 문서 캡처 단계에서 먼저 가져가므로, 확인 단계가 서 있는 동안
+    // 고르개가 단계의 취소를 부르지 않으면 한 번의 Escape 가 고르개를 통째로 닫는다(확인에서 길을 잃는다).
+    stubBrowserOnlyApis();
+    const onOpenChange = vi.fn();
+    const store = makeStore();
+    await store.refresh();
+    const { view } = mount(<Host onOpenChange={onOpenChange} />, store);
+    fireEvent.click(await view.findByRole("button", { name: "우리 팀" }));
+    const manage = await view.findByRole("button", { name: "파티 앵무새 관리" });
+    fireEvent.pointerDown(manage, { button: 0, pointerType: "mouse", ctrlKey: false });
+    fireEvent.keyDown(manage, { key: "Enter" });
+    fireEvent.click(await view.findByRole("menuitem", { name: "삭제하기" }));
+    expect(view.getByTestId("expression-confirm")).toBeTruthy();
+    // 이 순간 열린 대화상자는 고르개 하나뿐이다: 두 번째 표면이 없다.
+    expect(document.querySelectorAll('[role="dialog"][data-state="open"], [role="alertdialog"]')).toHaveLength(1);
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(view.queryByTestId("expression-confirm")).toBeNull());
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(view.getByRole("button", { name: "파티 앵무새 관리" }));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
   it("요청을 보내면 onClose 를 거쳐 고르개가 닫히고 그 DM으로 가요", async () => {
     const onOpenChange = vi.fn();
     const { view } = await openMakeForm(onOpenChange);

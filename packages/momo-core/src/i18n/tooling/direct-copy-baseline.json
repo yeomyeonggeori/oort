@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "624fe679953e527d73ba32f05b70650196fd1b9e",
+  "baselineHead": "4908d8eceabefd63c0f99a86a705bb179738d5bc",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -492,7 +492,7 @@
     "clients/web/src/features/common/avatarTone.ts": 13,
     "clients/web/src/features/common/chip.ts": 1,
     "clients/web/src/features/common/useOffline.ts": 6,
-    "clients/web/src/features/decisionStage/DecisionStage.tsx": 67,
+    "clients/web/src/features/decisionStage/DecisionStage.tsx": 65,
     "clients/web/src/features/decisionStage/stageEntry.ts": 7,
     "clients/web/src/features/decisionStage/useDecisionStageDrag.ts": 5,
     "clients/web/src/features/directory/DirectoryRoute.tsx": 23,
