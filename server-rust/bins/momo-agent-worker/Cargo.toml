@@ -48,9 +48,13 @@ momo-embed = { path = "../../crates/momo-embed" }
 momo-t3 = { path = "../../crates/momo-t3" }
 
 # The provider call is outbound HTTP by nature (the Swift AgentWorker does the
-# same). It targets the LLM gateway only: this binary never calls momo-server,
-# and never publishes to Centrifugo — the reply reaches clients through the
-# message write path → outbox → relay, like every other message.
+# same). It targets the LLM gateway, plus — since #4934 — exactly one call to
+# momo-server: `GET /v1/self-media/{ws}/{token}` on the api's private address
+# (OORT_API_INTERNAL_ORIGIN), with a single-use token this worker minted itself,
+# to read the picture a person asked to have as their profile image when the
+# archive is a volume only the api mounts (ADR-0151 증보 3). It never publishes
+# to Centrifugo — the reply reaches clients through the message write path →
+# outbox → relay, like every other message.
 reqwest.workspace = true
 
 async-trait.workspace = true

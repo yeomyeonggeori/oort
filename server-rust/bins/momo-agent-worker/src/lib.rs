@@ -43,9 +43,13 @@
 //!   message is `momo-messaging`'s, the run and the ledger are `momo-agent`'s,
 //!   the `provider_link` read is `momo-settings`'. Invariant #3 and invariant #6
 //!   both stay single-chokepoint.
-//! * **Outbound HTTP to the LLM provider only.** That call is this binary's
-//!   whole purpose (the Swift AgentWorker does the same). It never calls
-//!   momo-server, and it never publishes to Centrifugo.
+//! * **Outbound HTTP to the LLM provider, plus one read from the api.** The provider
+//!   call is this binary's whole purpose (the Swift AgentWorker does the same). Since
+//!   #4934 the one other call is `GET /v1/self-media/{ws}/{token}` on the api's private
+//!   address (`OORT_API_INTERNAL_ORIGIN`), with a single-use token this worker minted
+//!   itself, to read the picture a person asked to have as their profile image when the
+//!   archive is a volume only the api mounts (ADR-0151 증보 3, [`self_media`]). It never
+//!   publishes to Centrifugo.
 //! * **No credential in a log, a row, or a message.** See [`redact_secrets`].
 //!
 //! ## B7.2 — the turn can now delegate
@@ -90,7 +94,8 @@ mod personal;
 pub mod provider;
 pub mod responses;
 /// #4820 C2a — the photo address the co-hosted Hermes' picture tool reads: the worker's half (mint + the one line).
-mod self_media;
+/// #4934 — and the worker's own read of a requester's attachment through the api's private address.
+pub mod self_media;
 pub mod serving;
 pub mod sse;
 pub mod stream;
@@ -409,6 +414,9 @@ impl ResolvedTransport {
 pub struct AgentWorker {
     pool: PgPool,
     drive: Arc<dyn momo_drive::DriveArchive>,
+    /// #4934 — the client the worker reads a requester's attachment through the api with. Built only when
+    /// `OORT_API_INTERNAL_ORIGIN` is set; follows no redirect and ignores proxies (`self_media::attachment_client`).
+    attachment_client: Option<reqwest::Client>,
     provider: Arc<dyn ChatProvider>,
     /// The OAuth token endpoint client (ADR-0147 결정 2). A seam, so the
     /// conformance suite can point it at its own server rather than the internet.
@@ -485,9 +493,21 @@ impl AgentWorker {
     ) -> AgentWorker {
         let ttl = Duration::from_millis(2_000);
         let config_memory = config.memory.clone();
+        let attachment_client = config
+            .api_internal_origin
+            .as_ref()
+            .and_then(|_| self_media::attachment_client());
+        if config.api_internal_origin.is_some() && attachment_client.is_none() {
+            // Every read would answer "unavailable" without a trace otherwise (the TLS backend did not start).
+            tracing::error!(
+                "OORT_API_INTERNAL_ORIGIN is set but the HTTP client for attachment reads could not be built; \
+                 a requester's picture cannot be read"
+            );
+        }
         AgentWorker {
             pool,
             drive: Arc::new(momo_drive::UnavailableDriveArchive),
+            attachment_client,
             provider,
             refresher,
             config,

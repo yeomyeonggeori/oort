@@ -2382,6 +2382,7 @@ dependencies = [
 name = "momo-workspace-actions"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "chrono",
  "momo-agent",
