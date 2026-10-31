@@ -20,7 +20,7 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {BAR_CONTROL_MAX_SCALE} from '../src/design/atoms';
-import {HOME_ICON_SIZE} from '../src/design/icons';
+import {HOME_ICON_SIZE, HOME_ICONS} from '../src/design/icons';
 import {FixedScheme} from '../src/design/theme';
 import {darkPalette, lightPalette} from '../src/design/tokens';
 import {GroupCard} from '../src/design/sheetParts';
@@ -1666,17 +1666,22 @@ describe.each([
     expect(fill).toBe(p.surfaceMuted);
     expect([p.accent, p.primary]).not.toContain(fill);
     expect(flat(within(chip).getByText('4').props.style).color).toBe(p.textMuted);
+    // 흐려도 읽혀야 한다: 이 짝(중성 채움 위 흐린 글자)은 새 토큰이 아니라 기존 둘의 조합이라, 대비는 여기서 잰다.
+    expect(contrast(p.textMuted, p.surfaceMuted)).toBeGreaterThanOrEqual(4.5);
   });
 });
 
 describe('홈 — 채널 줄의 아이콘과 큰 글씨 (#4953)', () => {
   it('아이콘 종류 — 공개는 #, 비공개는 자물쇠, DM 은 글리프 없이 상대 얼굴', async () => {
     await mountHomeIn('light', {channels: STATE_CHANNELS, readStates: STATE_READS});
+    // testID 는 이미지와 따로 계산된다 — 그래서 **실제로 그려지는 자산**을 잰다. 두 자산이 구별되지 않으면 아래 단정은
+    // 아이콘이 뒤바뀌어도 초록이다(사보타주가 한 번 그렇게 통과했다).
+    expect(HOME_ICONS.hash).not.toEqual(HOME_ICONS.lock);
     const general = channelRowEl('ch-general');
-    expect(within(general).getByTestId('home-row-hash')).toBeTruthy();
+    expect(within(general).getByTestId('home-row-hash').props.source).toBe(HOME_ICONS.hash);
     expect(within(general).queryByTestId('home-row-lock')).toBeNull();
     const design = channelRowEl('ch-design');
-    expect(within(design).getByTestId('home-row-lock')).toBeTruthy();
+    expect(within(design).getByTestId('home-row-lock').props.source).toBe(HOME_ICONS.lock);
     expect(within(design).queryByTestId('home-row-hash')).toBeNull();
     const dm = screen.getByTestId('sidebar-row-dm:ch-dm-human');
     expect(within(dm).queryByTestId('home-row-hash')).toBeNull();
