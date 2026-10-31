@@ -3,6 +3,7 @@ import {
   frequentExpressions,
 } from '@momo/core/features/expressions/usage';
 import type {Expression} from '@momo/core/features/expressions/types';
+import type {Channel} from '@momo/core/lib/api';
 import {searchExpressions} from '@momo/core/features/expressions/search';
 import {
   buildExpressionMessage,
@@ -31,7 +32,10 @@ import {
   type Palette,
 } from '../../design/tokens';
 import {useKeyboardHeight} from '../../lib/useKeyboardHeight';
+import {ExpressionAddMenu, useCanAddExpression} from './ExpressionAddMenu';
 import {ExpressionImage} from './ExpressionImage';
+import {ExpressionImportForm} from './ExpressionImportForm';
+import {ExpressionMakeForm} from './ExpressionMakeForm';
 import {useExpressions} from './ExpressionProvider';
 
 type Filter = 'emoji' | 'sticker' | 'gif' | 'recent' | 'frequent';
@@ -43,16 +47,24 @@ const FILTERS = [
   {id: 'frequent', label: '자주'},
 ] as const;
 
+/** 「＋」가 여는 안쪽 장 둘. 목록이 아닌 동안은 고르개의 본문이 그 장으로 바뀐다(`ExpressionChapter` 머리말). */
+type Chapter = 'list' | 'import' | 'make';
+
 export function TeamExpressionPicker({
   query,
   onSelect,
   mode = 'reaction',
+  onOpenConversation,
 }: {
   query: string;
   onSelect: (token: string) => void;
   mode?: 'reaction' | 'message';
+  /** 「AI와 만들기」 요청을 보낸 뒤 그 에이전트 DM 으로 간다. 호스트가 대화로 가는 길을 줄 때만 서고, 시트를 먼저 내린다. */
+  onOpenConversation?: (channel: Channel) => void;
 }) {
   const {items, state, store, usage} = useExpressions();
+  const canAdd = useCanAddExpression();
+  const [chapter, setChapter] = useState<Chapter>('list');
   const styles = useStyles(buildStyles);
   const {width, fontScale} = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -146,14 +158,32 @@ export function TeamExpressionPicker({
       : query
       ? '찾는 표현이 없어요. 다른 이름이나 태그로 검색해 보세요.'
       : '아직 우리 팀 이모지가 없습니다.';
+  const rootStyle = [
+    styles.root,
+    {marginBottom: Math.max(0, keyboardHeight - insets.bottom)},
+  ];
+  // 안쪽 장(가져오기·AI와 만들기)은 같은 시트 안에서 목록을 대신한다. 고르개 본문(`rootStyle`)은 같아서 키보드가 올라와도 장이 그 위에 선다.
+  if (chapter !== 'list') {
+    return (
+      <View style={rootStyle} testID="team-expression-picker">
+        {chapter === 'import' ? (
+          <ExpressionImportForm
+            onBack={() => setChapter('list')}
+            onDone={() => setChapter('list')}
+          />
+        ) : (
+          <ExpressionMakeForm
+            onBack={() => setChapter('list')}
+            onDone={() => setChapter('list')}
+            onImport={() => setChapter('import')}
+            onOpenConversation={onOpenConversation}
+          />
+        )}
+      </View>
+    );
+  }
   return (
-    <View
-      style={[
-        styles.root,
-        {marginBottom: Math.max(0, keyboardHeight - insets.bottom)},
-      ]}
-      testID="team-expression-picker"
-    >
+    <View style={rootStyle} testID="team-expression-picker">
       <View style={styles.filters}>
         {FILTERS.map(item => (
           <Pressable
@@ -168,6 +198,14 @@ export function TeamExpressionPicker({
           </Pressable>
         ))}
       </View>
+      {store && !(current && mode === 'message') ? (
+        <ExpressionAddMenu
+          canAdd={canAdd}
+          offline={state === 'offline'}
+          onImport={() => setChapter('import')}
+          onMake={() => setChapter('make')}
+        />
+      ) : null}
       {current && mode === 'message' ? (
         <View style={styles.preview} testID="expression-send-preview">
           <ExpressionImage expression={current} size="large" />
