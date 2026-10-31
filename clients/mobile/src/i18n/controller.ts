@@ -1,15 +1,18 @@
+// Both catalogs are static imports of the generated modules, and core i18n is taken from its leaf modules rather
+// than the `@momo/core/i18n` barrel. The barrel re-exports the core's `loadMessageCatalog`, whose dynamic
+// `import()` becomes a lazy bundle URL on Metro's dev server (`lazy=true`), and that URL cannot name a file
+// outside this project root, so a dev build stalled on the safe screen (#4910). Web keeps the dynamic loader.
+import {catalog as enCatalog} from '@momo/core/i18n/generated/en-US';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createLocaleService, type LocaleService} from '@momo/core/i18n/context';
+import {resolveLocaleContext, type LocalePreference} from '@momo/core/i18n/locale';
 import {
   createLocalePreferences,
-  createLocaleService,
-  loadMessageCatalog,
-  resolveLocaleContext,
-  type CatalogLocale,
-  type LocalePreference,
   type LocalePreferenceDiagnostic,
   type LocalePreferencePort,
   type LocalePreferenceSnapshot,
-  type LocaleService,
-} from '@momo/core/i18n';
+} from '@momo/core/i18n/preferences';
+import type {CatalogLocale} from '@momo/core/i18n/types';
 import {initializeMobileIntl} from './intl';
 
 export type MobileLocaleDiagnosticCode = LocalePreferenceDiagnostic['code']
@@ -27,7 +30,7 @@ export interface MobileLocaleController {
   dispose(): void;
 }
 
-/** Intl → both offline catalogs → stored preference → service → render, in that order. */
+/** Intl → stored preference → service → render, in that order. Both offline catalogs are static imports, already in hand. */
 export async function createMobileLocaleController(options: {
   port: LocalePreferencePort;
   initializeIntl?: () => void | Promise<void>;
@@ -43,7 +46,6 @@ export async function createMobileLocaleController(options: {
     throw new Error('mobile-intl-initialization-failed');
   }
   try {
-    const [ko, en] = await Promise.all([loadMessageCatalog('ko-KR'), loadMessageCatalog('en-US')]);
     let bootFailed = false;
     const preferences = await createLocalePreferences(options.port, {onDiagnostic: entry => {
       diagnostic(entry.code);
@@ -63,7 +65,7 @@ export async function createMobileLocaleController(options: {
         });
       return Object.freeze({
         preference: value.preference, effectiveLocale,
-        locale: createLocaleService({...context, catalog: effectiveLocale === 'ko-KR' ? ko : en}),
+        locale: createLocaleService({...context, catalog: effectiveLocale === 'ko-KR' ? koCatalog : enCatalog}),
       });
     };
     let snapshot = resolve(preferences.getSnapshot());

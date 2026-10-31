@@ -44,12 +44,14 @@ ko/en 네이티브 기능을 확인한 뒤 Locale → PluralRules → RelativeTi
   선택은 다른 계정 트리를 다시 마운트하지 않는다. 큰 글자를 제한하는 행 높이·줄 수를
   추가하지 않았고 자칭 행은 자기 언어로 VoiceOver를 지정한다. 언어 행의 낭독 라벨은 화면에 보이는 베타 표시를
 포함한다(`한국어, 베타`·`English, 베타`, 영어 UI에서는 `…, Beta`).
-- 빈 저장값은 system 선택, 사전 로딩은 앱 진입 전 로더, 쓰는 중은 행 잠금/진행 표시,
+- 빈 저장값은 system 선택, 시작 준비(Intl 검사·저장값 복원)는 앱 진입 전 로더, 쓰는 중은 행 잠금/진행 표시,
   저장 오류는 기존 언어를 유지한 인라인 재시도다. 저장값을 읽지 못해도(`preference-read-failed`)
   코어처럼 기기 언어(system)로 계속하고 코드만 보고한다(앱 전체를 안전 화면에 막지 않는다).
   기기 언어를 읽지 못하면(`device-read-failed`) 시작할 언어가 없어 시작하지 않는다
-  (영어 `SAFE_MESSAGE`와 `mobile-locale-initialization-failed`). 두 사전은 Metro에 포함하므로
-  오프라인 전환에 네트워크가 필요하지 않다. 키보드 입력은 없다. 뒤로/가장자리 밀기와
+  (영어 `SAFE_MESSAGE`와 `mobile-locale-initialization-failed`). 두 사전은 컨트롤러가 정적 import로
+  메인 번들에 담으므로 오프라인 전환에 네트워크가 필요하지 않다. 코어의 동적 `loadMessageCatalog`는 폰이 쓰지 않는다:
+  Metro 개발 서버(`lazy=true`)의 지연 번들이 루트 밖 파일을 못 풀어 개발 빌드가 언어 초기화에서 멈췄다(#4910,
+  `__tests__/mobileCatalogStatic.test.ts`가 막는다). 키보드 입력은 없다. 뒤로/가장자리 밀기와
   VoiceOver escape·동작 줄이기는 기존 페이지 부품을 따른다.
 
 ## 출하 설정과 플랫폼 문구
