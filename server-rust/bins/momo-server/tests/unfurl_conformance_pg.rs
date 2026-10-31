@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
 async fn test_lock() -> tokio::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -1109,4 +1110,250 @@ async fn an_icon_that_404ed_is_remembered_so_asking_again_costs_neither_the_site
         1,
         "the remote site was asked once"
     );
+}
+
+// ---------------------------------------------------------------------------
+// #4881 security review r2, Low: the places are shared, so each member has a share, and being
+// turned away for want of a place costs the member nothing
+// ---------------------------------------------------------------------------
+
+/// `SiteHttp`, except that once armed every icon request says it has arrived and then waits at a
+/// gate the test opens: a way to hold fetches in flight while the test asks for more.
+struct HeldIcons {
+    inner: SiteHttp,
+    armed: std::sync::atomic::AtomicBool,
+    arrived: tokio::sync::mpsc::UnboundedSender<()>,
+    gate: Arc<tokio::sync::Semaphore>,
+}
+
+#[async_trait::async_trait]
+impl UnfurlHttp for HeldIcons {
+    async fn fetch(&self, url: &str, kind: FetchKind) -> Result<Fetched, FetchError> {
+        if kind == FetchKind::Icon && self.armed.load(Ordering::SeqCst) {
+            let _ = self.arrived.send(());
+            self.gate.acquire().await.expect("gate open").forget();
+        }
+        self.inner.fetch(url, kind).await
+    }
+}
+
+/// Two members of one channel, two cards with a picture and an icon each, and a site whose icons
+/// can be held at a gate.
+struct HeldWorld {
+    su: PgPool,
+    base: String,
+    http: reqwest::Client,
+    workspace: Uuid,
+    alice: Uuid,
+    alice_token: String,
+    bob_token: String,
+    story: String,
+    sized: String,
+    gate: Arc<tokio::sync::Semaphore>,
+    arrived: tokio::sync::mpsc::UnboundedReceiver<()>,
+}
+
+async fn held_world(rate: RateLimitConfig, limits: ProxyLimits) -> HeldWorld {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let bob = add_member(&su, fixture.workspace, fixture.channel).await;
+    let (workspace, channel, bob_id) = (fixture.workspace, fixture.channel, bob.member);
+    momo_db::with_tenant_tx(&app_pool, workspace, move |conn| {
+        Box::pin(async move {
+            add_channel_member_in_tx(conn, workspace, channel, bob_id, "member").await
+        })
+    })
+    .await
+    .expect("add to channel")
+    .expect("the second member joins the channel");
+    sqlx::query(
+        "UPDATE unfurl_job SET status = 'skipped' WHERE status IN ('pending', 'processing')",
+    )
+    .execute(&su)
+    .await
+    .ok();
+    let (arrived_tx, arrived) = tokio::sync::mpsc::unbounded_channel();
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    let site = Arc::new(HeldIcons {
+        inner: SiteHttp {
+            asked: std::sync::Mutex::new(Vec::new()),
+        },
+        armed: std::sync::atomic::AtomicBool::new(false),
+        arrived: arrived_tx,
+        gate: gate.clone(),
+    });
+    let base = start_tuned_server(app_pool.clone(), site.clone(), rate, limits).await;
+    let http = reqwest::Client::new();
+    let alice_token = login(&http, &base, &fixture).await;
+    let bob_token = login(&http, &base, &bob).await;
+    let (story, sized) =
+        two_cards_with_pictures_and_icons(&su, &http, &base, &alice_token, &fixture, site.clone())
+            .await;
+    // From here on, an icon is held at the gate.
+    site.armed.store(true, Ordering::SeqCst);
+    HeldWorld {
+        su,
+        base,
+        http,
+        workspace,
+        alice: fixture.member,
+        alice_token,
+        bob_token,
+        story,
+        sized,
+        gate,
+        arrived,
+    }
+}
+
+impl HeldWorld {
+    fn request(&self, kind: &str, id: &str, token: &str) -> reqwest::RequestBuilder {
+        self.http
+            .get(format!(
+                "{}/v1/workspaces/{}/unfurls/{id}/{kind}",
+                self.base, self.workspace
+            ))
+            .bearer_auth(token)
+    }
+
+    /// A request that must be answered at once. The bound makes a request that waits for a place
+    /// it should not have been given fail here, instead of hanging the suite at the gate.
+    async fn ask(&self, kind: &str, id: &str, token: &str) -> reqwest::Response {
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.request(kind, id, token).send(),
+        )
+        .await
+        .expect("the request must be answered at once, not wait for a place")
+        .expect("request")
+    }
+
+    /// An icon request on a task of its own, so the test goes on while it waits at the gate.
+    fn start_icon(&self, id: &str, token: &str) -> tokio::task::JoinHandle<reqwest::Response> {
+        let request = self.request("icon", id, token);
+        tokio::spawn(async move { request.send().await.expect("icon request") })
+    }
+
+    /// Wait until an icon request has reached the site, so it holds its places.
+    async fn arrived(&mut self, what: &str) {
+        tokio::time::timeout(Duration::from_secs(10), self.arrived.recv())
+            .await
+            .unwrap_or_else(|_| panic!("{what}: never reached the site"))
+            .expect("the site is alive");
+    }
+}
+
+async fn refusal_rows(su: &PgPool, workspace: Uuid, member: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'rate_limit.exceeded' AND actor_member_id = $2",
+    )
+    .bind(workspace)
+    .bind(member)
+    .fetch_one(su)
+    .await
+    .expect("audit rows")
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_request_turned_away_for_want_of_a_place_keeps_the_members_budget() {
+    let _guard = test_lock().await;
+    // One fetch per member per window, and one place in all.
+    let mut world = held_world(
+        RateLimitConfig {
+            unfurl_proxy_per_member_limit: 1,
+            ..RateLimitConfig::default()
+        },
+        ProxyLimits {
+            max_in_flight: 1,
+            ..ProxyLimits::default()
+        },
+    )
+    .await;
+    // Bob's request for the story's icon is in flight and holds the one place.
+    let bobs = world.start_icon(&world.story, &world.bob_token);
+    world.arrived("bob's icon").await;
+
+    // Alice asks three times for the other card's icon. There is no place, so each is turned away
+    // with "ask again in a second" and none costs her anything: a spent budget would answer with
+    // the rest of the window instead.
+    for attempt in 1..=3 {
+        let turned_away = world.ask("icon", &world.sized, &world.alice_token).await;
+        assert_eq!(turned_away.status(), 429, "attempt {attempt}");
+        assert_eq!(
+            turned_away.headers()["retry-after"],
+            "1",
+            "attempt {attempt}: refused for the place, not for the budget"
+        );
+    }
+    assert_eq!(
+        refusal_rows(&world.su, world.workspace, world.alice).await,
+        0,
+        "her budget never ran out"
+    );
+
+    // Bob's fetch ends and the place is free. Alice's one unit is still hers: her request is
+    // served (the second permit is hers at the gate).
+    world.gate.add_permits(2);
+    assert_eq!(bobs.await.unwrap().status(), 200);
+    let served = world.ask("icon", &world.sized, &world.alice_token).await;
+    assert_eq!(
+        served.status(),
+        200,
+        "the turned-away requests spent none of her budget"
+    );
+
+    // The request that did fetch did spend it, as it should: the same card's picture needs a
+    // fetch of its own, her one unit is gone, and the refusal names the rest of the window.
+    let spent = world.ask("image", &world.sized, &world.alice_token).await;
+    assert_eq!(spent.status(), 429);
+    let retry_after: u64 = spent.headers()["retry-after"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .expect("whole seconds");
+    assert!((2..=60).contains(&retry_after), "Retry-After {retry_after}");
+    assert_eq!(
+        refusal_rows(&world.su, world.workspace, world.alice).await,
+        1,
+        "the one refusal that was about the budget"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn one_members_share_of_the_places_does_not_shut_another_member_out() {
+    let _guard = test_lock().await;
+    // Eight places in all, one for each member.
+    let mut world = held_world(
+        RateLimitConfig::default(),
+        ProxyLimits {
+            max_in_flight: 8,
+            max_in_flight_per_member: 1,
+            ..ProxyLimits::default()
+        },
+    )
+    .await;
+    // Alice's request for the story's icon is in flight and holds her one place.
+    let alices = world.start_icon(&world.story, &world.alice_token);
+    world.arrived("alice's icon").await;
+
+    // Her next request is turned away at once, although seven of the eight places are free.
+    let refused = world.ask("icon", &world.sized, &world.alice_token).await;
+    assert_eq!(refused.status(), 429);
+    assert_eq!(refused.headers()["retry-after"], "1");
+    assert!(
+        world.arrived.try_recv().is_err(),
+        "the refused request never reached the site"
+    );
+
+    // Bob is not shut out by her: his request is given a place and reaches the site.
+    let bobs = world.start_icon(&world.sized, &world.bob_token);
+    world.arrived("bob's icon").await;
+    world.gate.add_permits(2);
+    assert_eq!(alices.await.unwrap().status(), 200);
+    assert_eq!(bobs.await.unwrap().status(), 200);
 }

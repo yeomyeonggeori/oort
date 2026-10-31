@@ -36,7 +36,9 @@ use crate::dto::{
     UnfurlSettingsResponse,
 };
 use crate::error::ApiError;
-use crate::rate_limit::{spend_member_write, too_many_requests, MemberWrite};
+use crate::rate_limit::{
+    refund_member_write, spend_member_write_unit, too_many_requests, MemberWrite,
+};
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, path_uuid, require_human, require_workspace_operator,
     settle_db, workspace_scope, DbRejectable,
@@ -238,19 +240,21 @@ async fn proxy_remote_image(
     // budget: a picture already in memory and an address that failed lately are free, so a
     // timeline of cached cards never meets the limit. A route layer cannot tell the two apart,
     // which is why this is asked here, after authorization and before the fetch.
-    if proxy_goes_outbound(&record, state.unfurl_cache.as_ref(), slot) {
-        if let Err(retry_after_seconds) =
-            spend_member_write(&state, MemberWrite::UnfurlProxy, &principal).await
-        {
-            return Ok(too_many_requests(retry_after_seconds));
+    let spent = if proxy_goes_outbound(&record, state.unfurl_cache.as_ref(), slot) {
+        match spend_member_write_unit(&state, MemberWrite::UnfurlProxy, &principal).await {
+            Ok(unit) => unit,
+            Err(retry_after_seconds) => return Ok(too_many_requests(retry_after_seconds)),
         }
-    }
+    } else {
+        None
+    };
     let fetched = match slot {
         ProxySlot::Image => {
             fetch_record_image(
                 &record,
                 state.unfurl_http.as_ref(),
                 state.unfurl_cache.as_ref(),
+                member_id,
             )
             .await
         }
@@ -259,6 +263,7 @@ async fn proxy_remote_image(
                 &record,
                 state.unfurl_http.as_ref(),
                 state.unfurl_cache.as_ref(),
+                member_id,
             )
             .await
         }
@@ -268,9 +273,15 @@ async fn proxy_remote_image(
         Err(ProxyError::NotFound | ProxyError::Unavailable) => {
             return Err(ApiError::not_found("unfurl image not found"));
         }
-        // The process is already fetching as many remote images as it allows at once. Nothing
-        // is wrong with this card; ask again in a second.
-        Err(ProxyError::Busy) => return Ok(too_many_requests(1)),
+        // This server had no place for the fetch (the process's, the member's own, or a name
+        // lookup's). Nothing is wrong with this card, and nothing left the building, so the unit
+        // of budget this request spent is given back; ask again in a second.
+        Err(ProxyError::Busy) => {
+            if let Some(unit) = spent {
+                refund_member_write(&state, unit);
+            }
+            return Ok(too_many_requests(1));
+        }
     };
 
     // ADR-0170 amendment D12: a picture whose size the page did not declare gets the size read
