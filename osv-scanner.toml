@@ -182,11 +182,6 @@ ignoreUntil = 2027-01-22
 reason = "image-size 1.2.1 (ICNS parser infinite loop = DoS) via metro 0.84.4 (the bundler reads the app's own image assets at build time). Fix is image-size 2.0.3 (major) so it needs a Metro release; not in the Metro release bundle."
 
 [[IgnoredVulns]]
-id = "GHSA-86w9-cpqp-85rv"
-ignoreUntil = 2027-01-22
-reason = "node-forge 1.4.0 (RSA PKCS#1 v1.5 signature verification accepts extra DigestAlgorithm elements) via @expo/cli 57.0.11 and @expo/code-signing-certificates (Expo CLI code-signing tooling, build machine only). No patched release known; not in the Metro release bundle. Follow-up: Expo CLI bump when a fix ships."
-
-[[IgnoredVulns]]
 id = "GHSA-w5hq-g745-h8pq"
 ignoreUntil = 2027-01-22
 reason = "uuid 7.0.3 via xcode 3.0.1 <- @expo/config-plugins (Expo prebuild/config plugins, build machine only; the bug needs a caller-supplied buf). Fix is uuid >=11.1.1 (major), xcode pins ^7; not in the Metro release bundle."
@@ -195,3 +190,15 @@ reason = "uuid 7.0.3 via xcode 3.0.1 <- @expo/config-plugins (Expo prebuild/conf
 id = "GHSA-mrhx-c7xc-m3w5"
 ignoreUntil = 2027-01-22
 reason = "zod 3.25.76 via @expo/cli 57.0.11 (Expo CLI, build machine only; validates local config). No 3.x fix exists (fixed in 4.6.6); not in the Metro release bundle. Follow-up: Expo CLI bump."
+
+# ---- npm build/lint tooling, fixed only in a new major (10-31, #4855·#4902 gate) ----
+
+[[IgnoredVulns]]
+id = "GHSA-g3hv-75wg-m249"
+ignoreUntil = 2026-12-31
+reason = """minimatch 3.1.5 / 10.2.5-10.2.6 (DoS via globparts amplification; needs an attacker-supplied glob pattern and optimizationLevel >= 2). Fixed only in 11.0.1 (major; require('minimatch') is a callable function in 3.x but an object in 11.x, so 3.x callers such as eslint and eslint-plugin-react would break). Dev tooling only: root and clients/web through eslint 9 and typescript-eslint (npm ls --omit=dev is empty); clients/mobile through eslint 8, eslint-plugin-react, jest test-exclude, and glob 13 under @expo/cli, @expo/config, @expo/config-plugins and @expo/fingerprint (which also depends on minimatch directly) (build machine; none of minimatch/glob is among the 61 node_modules packages of the 2026-10-31 Metro release bundle). Every dependent's latest release still requires ^3 or ^10 (typescript-estree 8.72.1, eslint 10.14.0, @expo/fingerprint 0.21.7). Follow-up: re-check upstream at renewal."""
+
+[[IgnoredVulns]]
+id = "GHSA-3g3m-2fjr-6pw4"
+ignoreUntil = 2026-12-31
+reason = """glob 13.0.6 (an aborted async walk keeps reading directories; only matters to callers that pass a signal). Fixed only in 14.0.2 (major). clients/mobile only, through @expo/cli, @expo/config, @expo/config-plugins and @expo/fingerprint (Expo build tooling, not in the Metro release bundle); the only caller that passes a signal is the TypeScript doctor check of @expo/cli (`expo start`: fixed pattern `**/*.@(ts|tsx)` in the developer's own project root with AbortSignal.timeout(5000)), where the leftover walk costs I/O and CPU on the developer machine only (no attacker-controlled pattern or path). The latest @expo/* 58.x still requires glob ^13. Follow-up: re-check Expo at renewal."""
