@@ -471,7 +471,7 @@ describe('앱 아이콘 배지는 서버의 안읽음 합계를 따른다 (#2670
     await waitFor(() =>
       expect(
         screen.getByTestId(`sidebar-row-channel:${GENERAL}`).props.accessibilityLabel,
-      ).toBe('채널 general, 안 읽은 메시지 8개'),
+      ).toBe('#general, 새 메시지 8개'),
     );
     await waitFor(() => expect(badgeWrites().length).toBeGreaterThan(0));
     expect(badgeSequence()).toEqual([0]);
