@@ -143,3 +143,132 @@ REST는 camelCase, 실시간 `message.unfurl`은 snake_case다(기존 `imageUrl`
 - 사보타주(아이콘 가드 우회, 풀이 뒤 검사 제거, 3개 상한 제거, charset 무시, 설명=제목 비우기 제거, 응답에 아이콘 원본 주소 노출, 그리고 1회차 수리의 제목 플래그·방향 문자·아이콘 DNS 단계 생략·실패 기억·LRU·바이트 상한·동시 상한·멤버 예산·해석 마감과 상한·`NOT VALID`)는 각각 RED를 확인하고 되돌렸다. 결과표는 PR 본문에 있다.
 - 실제 외부 사이트를 대상으로 한 확인은 하지 않았다(`runtime-unverified`). 가짜 서버는 127.0.0.1이고 안전 규칙은 주입한 해석기와 가짜 소켓으로 시험한다. 화면은 이 증보의 범위가 아니다.
 - `docs/security/claims.yaml`의 새 주장(아이콘 443 전용 등)은 정책 파일이라 이 증보가 고치지 않는다. 기존 NET-2의 증명 시험 이름·위치는 바꾸지 않았다. 후속 이슈의 몫이다.
+
+## 증보 2026-11-01 — 보내기 전 입력칸 링크 미리보기와 「미리보기 없이 보내기」 (#4884)
+
+- Status: **Proposed** (2026-11-01, #4884 엔진 워커 기안. owner 2026-10-31 요청(이슈 #4884에 요약)의 범위). 이 증보는 공개 API(새 경로 3개, 보내기 필드 1개)와 서버가 가져오는 주소가 정해지는 길(보안 경계)을 바꾸므로 Accepted가 구현 머지 조건이다(ADR-0100). 독립 보안 검수(등급 2)를 거친 뒤 planner가 올린다.
+- 근거: 이슈 #4884. 화면(웹·폰 입력칸 카드와 ✕)은 #4882 뒤의 별도 칸이고, 이 증보는 **서버가 저장 전에 카드 정보를 내보내는 길과, 이 메시지는 카드를 만들지 말라는 표시**만 정한다.
+- 관계: D1~D13은 바뀌지 않는다. D2(P9)는 그대로다 — 미리보기 요청은 **초안 본문이 아니라 주소 하나**만 받는다. D3(egress 가드)는 그대로 쓰고, 그 위에 이 길만의 **더 좁은 규칙 하나**(443 전용)를 더한다(D9의 아이콘과 같은 방식). 같이 읽는 것: ADR-0218 D5(회원이 직접 적은 주소를 서버가 받는 선례, 443 전용), #4956(멤버별 동시 상한·예산·바쁨 환불의 틀).
+- 표기: [V] 이 세션에서 직접 확인(track/engine `2ed568572`) · `runtime-unverified` 실행하지 않음.
+
+### 확인한 사실 [V]
+
+- 카드 행(`message_unfurl.message_id`)은 메시지를 가리키는 `NOT NULL` 외래키이므로 **보내기 전에는 카드 행이 있을 수 없다**. 그림·아이콘 프록시(`…/unfurls/{id}/image|icon`)는 그 행의 id가 열쇠라서 미리보기에는 그대로 쓸 수 없다.
+- 카드는 메시지 INSERT 트리거가 `unfurl_job`을 남기면 워커가 만든다. 워커는 **맨 먼저** `message_unfurl_tombstone`을 본다(`prepare`의 `tombstone_exists`, 커밋 직전에 한 번 더). 묘비는 D4의 「메시지 단위 제거」가 이미 쓰는 표이고 RLS·권한이 있다.
+- `unfurl_url_cache`를 지우는 코드는 어디에도 없다(만료는 같은 주소를 다시 받을 때 덮어쓰기뿐). 이 표에 미리보기를 쓰면 회원의 입력이 만드는 행이 예산만큼 영원히 쌓인다.
+- 미리보기 종류에 해당하는 `FetchKind::Html`에는 포트 제한이 없다(D9 확인 사실). 회원이 주소를 직접 적고 **응답이 바로 돌아오는** 길에 이것을 그대로 쓰면 공개 호스트의 열린 포트를 상태 코드로 훑는 길이 된다(ADR-0218 D5가 막은 것과 같은 문제).
+- 보내기 요청은 closed-world(`deny_unknown_fields`)이고 새 선택 필드는 「켠 때만 키가 간다」로 더해 왔다(`alsoInChannel`, `apps`). 개발자 토큰의 보내기 본문은 허용 목록 5개 키뿐이라 새 키는 자동으로 막히고, 개발자 토큰이 닿는 경로는 닫힌 표(`dev_route_scope`)라 새 경로도 자동으로 막힌다.
+
+### D14. 미리보기 요청 — 채널에 매인 POST 하나
+
+`POST /v1/workspaces/{ws}/channels/{ch}/unfurl-previews`, 본문 `{ "url": "<http(s) 주소>" }`(closed-world, 2048바이트 이하). 응답은 항상 200이고 본문은 D15다. 400은 주소가 http(s) 모양이 아닐 때(자격증명 포함·너무 김)뿐이고 **네트워크는 아직 건드리지 않은 상태**다. 본문이 이 모양을 벗어나면(모르는 키·`url` 없음) 서버 공통 JSON 추출기의 4xx다. 401·403(D16)·429(D20)가 그 밖이다.
+
+- **POST + 본문**인 이유: 링크의 쿼리는 흔히 토큰이라 주소를 경로·쿼리에 싣지 않는다(액세스 로그·프록시·브라우저 기록).
+- **채널에 매인** 이유: 미리보기의 권한을 「그 채널에서 보낼 수 있는가」와 같게 하려는 것이다. 게스트·DM·비공개 채널 규칙을 새로 만들지 않고 보내기의 규칙이 그대로 따라온다.
+- 서버는 입력칸 본문을 받지 않는다. 어느 주소를 물을지는 클라이언트가 정하고(D22), 서버는 그 주소 하나만 읽는다(D2).
+
+### D15. 응답 — 기존 카드 필드와 같은 모양, 상태는 둘뿐
+
+| 키 | 값 |
+|---|---|
+| `url` | 정규화한 주소(`normalize_url`, 저장된 카드의 `url`과 같은 모양) |
+| `status` | `ok` 또는 `failed` |
+| `id` | `ok`일 때만. 미리보기 열쇠(D19) |
+| `title`·`description`·`domain`·`siteName`·`imageWidth`·`imageHeight`·`isVideo` | `ok`일 때, 카드와 같은 규칙으로 정리·상한(D7). 값이 없으면 키가 없다 |
+| `imageUrl`·`iconUrl` | `ok`이고 있을 때만, **미리보기 프록시 경로**(D19). 원격 그림·아이콘 주소는 어디에도 실리지 않는다 |
+
+`messageId`는 없다(메시지가 아직 없다). `failed`는 `url`·`status`만 싣는다. **`blocked`·`pending`은 내보내지 않는다.** 가드가 거절한 것·받지 못한 것·정보가 없는 페이지(D11)는 모두 같은 `failed`다 — 「이 이름은 서버 안쪽으로 풀린다」를 알려 주는 길이 되지 않게 한다. 저장된 카드의 `blocked`/`failed` 구별(D5)은 그대로다.
+
+### D16. 권한
+
+- **사람 자격만**(`require_human`). 에이전트·작업 호스트 자격은 403이다. 개발자 토큰은 닫힌 표에 없어 `dev_route_not_allowed`다.
+- **활성 워크스페이스 멤버이면서 그 채널의 현재 멤버**. 둘 중 하나라도 아니면, 채널이 없는 경우까지 포함해 같은 403이다(채널이 있는지 알려 주지 않는다).
+- **게스트**: 보내기와 같은 규칙 — 자기가 속한 채널에서만 된다. 따로 막거나 따로 열지 않는다. 게스트가 속한 채널에 링크를 보내면 지금도 서버가 그 주소를 받으므로(D1), 새 능력을 열어 주는 것이 아니다.
+- **스위치 둘이 받기 자체를 막는다**: 인스턴스 `MOMO_UNFURL_ENABLED`가 켜져 있고 워크스페이스 설정(D4)이 켜져 있어야 한다. 하나라도 꺼져 있으면 **받지 않고** `failed`로 답한다(예산도 안 쓴다). 렌더만 끄는 것이 아니다.
+
+### D17. 바깥으로 나가는 받기 — 새 전송기도 새 가드도 없다
+
+미리보기의 페이지 받기는 `state.unfurl_http` 하나(`UnfurlHttp`, 운영에서는 `SafeUnfurlTransport`)를 지난다. 새 HTTP 클라이언트·새 이름 해석기를 만들지 않는다. D3의 상한은 그대로다: HTML 512 KiB, 리디렉션 ≤3(매 hop 재검사), 공개 IP만·핀 연결, https(운영), 시간 마감, 이름 조회 마감·상한.
+
+더해진 것은 **새 받기 종류 `FetchKind::Preview`와 그 규칙 하나**다. 본문 상한·`Accept`·내용 형식 기본값은 `Html`과 같고, 같은 가드 위에서 **443 포트만, 매 hop**(ADR-0218 D5, D9의 아이콘과 같은 규칙. 첫 검사는 DNS보다 앞이다). 이슈가 적은 「지금 SSRF 규칙 그대로」를 새 경로에 처음부터 더 좁게 적용한 것이고, 가드 코드(`fetch_guarded`)는 한 벌이다. **워커의 `Html`(포트 제한 없음)은 이 증보가 바꾸지 않는다.**
+
+받기 결과는 워커와 같은 함수(`build_card`, 막힌 풀에서 실행: D13 H-1)로 카드 필드가 된다. 그림·아이콘의 원격 주소는 D9의 문자 수준 검사를 거친 뒤에만 쥔다. 어떤 실패도 로그에 주소·쿼리·본문을 싣지 않는다.
+
+### D18. 캐시 — 프로세스 안에, 멤버별로, DB에는 아무것도 쓰지 않는다
+
+- 키는 **(워크스페이스, 멤버, 정규화한 주소)**. 같은 주소를 같은 멤버가 다시 물으면 바깥에 가지 않고 예산도 쓰지 않는다. `ok`는 30분, `failed`는 2분 기억한다. 항목은 512개, 한 멤버는 그중 64개까지다. 가득 차면 가장 오래 안 쓴 것부터, 한 멤버가 자기 몫을 넘으면 **그 멤버 자신의** 가장 오래 안 쓴 것부터 나가므로 한 멤버가 캐시를 채워 남의 미리보기를 밀어낼 수 없다(그림 캐시와 따로, 자리의 멤버 몫(D20)과 같은 이유).
+- **테넌트가 다르면 절대 공유하지 않는다**(키의 워크스페이스 성분이 막고, 시험이 잰다). 멤버 성분은 이슈의 「테넌트별」보다 **한 겹 더 좁다**: 같은 워크스페이스의 다른 멤버가 방금 쓰다 만 초안의 링크가 캐시 적중의 속도·예산으로 새지 않게 한다.
+- **DB 표(`unfurl_url_cache`)를 쓰지 않는 이유**: ① 보내지 않을 수도 있는 초안의 주소가 24시간 이상 남지 않게, ② 위 [V]처럼 지우는 코드가 없어 회원 입력이 만드는 행이 끝없이 쌓이지 않게, ③ 마이그레이션이 필요 없게. 대가는 아래 「남는 위험」의 1·2다.
+- `failed`는 정확히 한 가지를 빼고 기억한다: 자리가 없어서 시작하지 못한 것(D20)은 주소의 잘못이 아니므로 기억하지 않는다.
+
+### D19. 그림·아이콘 — 미리보기 열쇠와 같은 프록시
+
+`ok` 미리보기마다 서버가 무작위 `id`(UUID v4)를 만들어 캐시 항목에 붙인다. 클라이언트는 두 경로로만 그림·아이콘을 받는다.
+
+- `GET /v1/workspaces/{ws}/unfurl-previews/{id}/image`
+- `GET /v1/workspaces/{ws}/unfurl-previews/{id}/icon`
+
+**프록시 기능은 기존 것이다.** 항목을 카드 행과 같은 모양으로 풀어 `fetch_record_image`/`fetch_record_icon`(같은 가드, `FetchKind::Image`/`Icon`, 같은 형식 허용 목록·SVG 금지, 같은 `ImageCache`·실패 기억·자리)에 넘긴다. 응답 헤더도 `…/unfurls/{id}/image`와 같다(`nosniff`, 사설 캐시). 그림 크기를 재서 기록하는 일(D12)만 하지 않는다(쓸 행이 없다).
+
+권한은 **자기 미리보기뿐**이다: 활성 워크스페이스 멤버이고 `id`가 **그 멤버가 만든** 살아 있는 항목일 때만 된다. 남의 `id`·만료된 `id`·다른 워크스페이스의 `id`·받을 것이 없는 항목은 모두 404이고(`{ws}`가 자격의 워크스페이스와 다르면 기존 규칙대로 403), `id`는 추측할 수 없는 무작위 값이다. 서버가 그림을 받을 때 쓰는 예산은 기존 `UnfurlProxy`다(D20).
+
+### D20. 예산과 자리 — #4956과 같은 틀
+
+- **예산**: `MemberWrite::UnfurlPreview`, 창(60초)당 기본 60, `RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`(0이면 끔). **캐시에 없어서 서버가 실제로 바깥에서 받아야 하는 요청만** 센다. 넘으면 429 + `Retry-After`이고 감사 행은 멤버 쓰기 예산의 기존 계약이다(`rate_limit.exceeded`, `surface = unfurl_preview`, 멤버·표면당 창마다 최대 1행). 입력을 멈추고 350ms 뒤에 묻는 보통의 사용은 이 한도의 한참 아래이고, 주소를 천천히 치다 멈춘 중간 상태가 몇 번 더해져도 여유가 있도록 60으로 잡았다.
+- **자리**: 바깥으로 나가는 받기의 **같은 자리**(프로세스 16, 한 멤버 4: `ImageCache`)를 쓴다. 그래서 한 멤버가 동시에 바깥으로 내보내는 받기는 미리보기·그림·아이콘을 다 합쳐 4개다. 자리가 없거나 이름 조회 자리가 없으면(`FetchError::Capacity`) 429 + `Retry-After: 1`이고, 그 요청이 쓴 예산은 돌려주며, 실패로 기억하지 않는다.
+- 두 번째 예산(`UnfurlProxy`)은 미리보기 그림·아이콘 프록시가 그대로 쓴다(D13).
+
+### D21. 「미리보기 없이 보내기」 — 보내기 필드 하나, 묘비 하나
+
+`POST …/messages` 요청에 선택 필드 `suppressUnfurl`(boolean)을 더한다. **`true`일 때만 키가 간다**(옛 서버의 closed-world 요청이 모르는 키를 400으로 거절하므로 클라이언트는 미리보기 표면이 있는 서버에만 보낸다). 없거나 `false`는 같은 요청이다.
+
+- **같은 보내기 트랜잭션 안에서**, 메시지가 **새로 들어갈 때만**, 보낸 사람 이름으로 `message_unfurl_tombstone` 행 하나를 심는다(D4의 묘비, `ON CONFLICT DO NOTHING`). 그러면 워커가 `prepare`에서 `Skip("tombstone")`으로 끝내므로 **카드가 하나도 만들어지지 않는다**. 보내기의 채널 순번·메시지 행·outbox는 한 줄도 바뀌지 않고, 새 표·새 열·새 상태가 없다(마이그레이션 0).
+- 멱등 재시도(`deduped`)는 저장된 메시지를 돌려줄 뿐 이 필드를 다시 판단하지 않는다(`alsoInChannel`과 같다). 첫 보내기에 켜졌으면 묘비가 남아 있고, 안 켰으면 재시도가 뒤늦게 켜지 못한다.
+- props 키가 아니다: props는 클라이언트가 쓰는 평평한 문자열 표라 서버가 보증할 값을 담을 수 없다(`apps`·`stream`과 같은 이유). 서버 소유 키 목록은 바뀌지 않는다.
+- 효과 범위는 **자기 메시지뿐**이다(다른 사람의 카드·캐시에 영향이 없다). 개발자 토큰의 보내기는 허용 목록이 닫혀 있어 이 키를 보내면 기존대로 `dev_field_not_allowed`다. 예약 전송은 이 선택을 아직 싣지 않는다.
+- 보낸 뒤의 제거(`DELETE …/unfurls`, D4)는 그대로다. 이 필드는 「보내기 전의 ✕」일 뿐이다.
+
+### D22. 클라이언트 권고 (서버가 강제하지 않는다)
+
+- 입력을 멈추고 **350ms 뒤**에 묻는다. 주소가 끝났다고 볼 수 있을 때(뒤에 공백·줄바꿈, 붙여넣기 직후) 묻고, 한 입력칸에서 같은 주소는 한 번만 묻는다. 한 메시지에서 카드가 되는 링크는 앞의 서로 다른 3개다(D10).
+- 어느 주소가 카드가 되는지는 서버의 추출 규칙(코드 블록·이메일 제외, 정규화 뒤 중복 제거)을 따른다. 규칙이 다르면 미리보기에는 보이는데 보낸 뒤에는 카드가 안 생기는 어긋남이 난다.
+- 429는 `Retry-After`(초) 뒤에 한 번 다시 묻고, 그동안 카드 자리를 비운다. 404(그림·아이콘)는 대체 아이콘으로 조용히 그린다.
+- ✕는 **이번 메시지의 미리보기 전체**를 끄는 한 번의 선택이고, 보낼 때 `suppressUnfurl: true`로 간다.
+
+## 대안 기각 (이 증보)
+
+- **미리보기를 `unfurl_url_cache`에 쓰고 보낼 때 워커가 그대로 쓰게 하기**: 보낸 직후 카드가 바로 뜨고 바깥 받기도 한 번 줄지만, 위 [V]처럼 지우는 코드가 없어 입력이 곧 영구 행이 되고, 보내지 않은 초안의 주소가 남으며, 그림 프록시가 행을 찾으려면 주소를 경로·쿼리에 싣거나 색인 없는 열을 훑어야 한다. 기각. 보낼 때 **실제로 보낸 주소만** 미리보기에서 캐시로 옮기는 안은 보내기 트랜잭션을 건드려야 해서 이번에 하지 않는다(후속 후보).
+- **새 표(`unfurl_preview`)와 마이그레이션**: 같은 쌓임 문제에 지우는 작업까지 새로 만들어야 한다. 기각.
+- **입력칸 본문 전체를 보내고 서버가 주소를 뽑기**: 추출 규칙은 서버 한 벌이 되지만 초안 본문이 서버로 나간다(D2). 기각 — 주소 하나만 받는다.
+- **클라이언트가 직접 받기**: 기존 기각 사유(CSP·수신자 IP 노출·CORS)와 같다.
+- **억제를 props 키로**: D21에 적은 이유로 기각. **억제를 DB 열·트리거 변경으로**: 묘비가 이미 같은 일을 하므로 마이그레이션이 필요 없다. 기각.
+- **워크스페이스 단위 미리보기 경로**: 게스트·비공개 채널 규칙을 새로 정해야 한다. 기각.
+- **미리보기 `Html`을 포트 제한 없이 그대로 쓰기**: 공개 호스트 포트 훑기가 된다(위 [V]). 기각.
+
+## 남는 위험 (이 증보)
+
+1. **프로세스 안 상태**: 재시작하거나 복제본이 여러 개이면 미리보기 `id`가 사라져 그림·아이콘이 404가 되고(입력칸이 그림 없이 그린다), 예산도 복제본마다다(기존 한도와 같은 계약).
+2. **보낼 때 한 번 더 받는다**: 워커는 미리보기 항목을 모르므로 같은 주소를 다시 받는다. 그 사이 페이지가 바뀌면 카드가 미리보기와 다를 수 있다.
+3. **443이 아닌 포트의 링크**: 미리보기는 `failed`(카드 없음)인데 보낸 뒤 워커의 `Html`은 카드를 만든다. 어긋남이지 보안 문제가 아니다.
+4. **남은 신호**: 「공개 호스트 하나가 443에서 HTML을 주는가」(`ok`/`failed`)는 여전히 보인다. 브라우저가 알 수 있는 것과 같은 정보이고 예산·자리가 속도를 묶는다. 사설 이름이 있는지는 알려 주지 않는다(D15).
+5. **같은 주소 동시 요청은 합치지 않는다**(D13에 적은 후속 후보와 같다). 멤버 자리 4개가 상한이다.
+6. **서버는 초안 링크를 본다**: 이 기능의 본질이다. 저장도 로그도 하지 않지만 요청을 받는 순간 서버는 안다.
+7. **멤버끼리 캐시를 나누지 않아** 같은 링크를 두 멤버가 물으면 두 번 받는다(D18의 선택).
+
+## 무엇을 열지 않나 (이 증보)
+
+- 화면(입력칸 카드·✕·모바일), 미리보기 → 워커 이어받기, 예약 전송의 억제, `unfurl_url_cache` 청소 작업, 워커 `Html`의 포트 제한, 같은 주소 동시 요청 합치기, 웹훅 공용 이름 해석기의 마감.
+- 새 송신 경로: 가져오기는 여전히 `UnfurlHttp` 한 곳이고, 클라이언트는 원격 호스트에 붙지 않는다. 새 표·새 열·마이그레이션 없음.
+
+## 확인 [V]와 한계 (이 증보)
+
+시험 이름이 정본이다(PR 본문이 실행 결과를 적는다). 아래 이름을 바꾸면 이 목록도 같이 바꾼다.
+
+- 가드를 지난다(D17, 크레이트 시험, 실제 `fetch_guarded` 위의 가짜 소켓·이름 풀이): `preview.rs`의 `the_preview_fetch_is_refused_for_private_loopback_link_local_and_metadata_before_any_connect` · `a_name_that_resolves_inward_is_a_failed_preview_and_never_dialled` · `a_preview_is_https_on_443_only_on_every_hop` · `a_preview_redirect_into_a_private_destination_stops_after_the_public_hop` · `every_way_to_fail_is_the_same_failed_preview` · `a_page_with_nothing_to_show_is_a_failed_preview`.
+- 캐시·열쇠·자리(D18~D20): `preview.rs`의 `the_cache_key_names_workspace_member_and_address` · `an_ok_preview_is_kept_for_its_ttl_and_a_failed_one_for_a_shorter_while` · `the_least_recently_used_preview_goes_first_and_its_id_goes_with_it` · `one_member_cannot_fill_the_cache_and_push_out_another_members_previews` · `a_preview_belongs_to_the_member_who_asked` · `a_place_shortage_is_busy_and_is_never_remembered` · `one_member_cannot_hold_more_places_than_its_share_while_another_is_served`.
+- REST·실 PG(비우회 역할 `momo_app`을 시험이 단정한다, 두 테넌트): `momo-server/tests/unfurl_conformance_pg.rs`의 `a_preview_shows_the_card_to_the_member_who_asked_and_never_a_remote_address` · `only_an_active_member_of_the_channel_may_preview_and_a_guest_only_where_it_may_send` · `two_tenants_and_two_members_never_share_a_preview` · `a_preview_is_cached_and_spends_budget_only_when_it_fetches` · `a_preview_with_no_place_is_a_429_and_gives_the_unit_back` · `a_destination_the_guard_refuses_is_a_plain_failed_preview_through_the_production_transport` · `a_preview_makes_no_request_while_the_workspace_or_the_instance_has_unfurls_off` · `a_malformed_preview_request_is_a_400_before_any_fetch`.
+- 억제(D21): 같은 파일의 `a_message_sent_with_suppress_unfurl_gets_no_cards_and_one_without_still_does`. 개발자 토큰(D16·D21): `messages.rs`의 `every_key_outside_the_allow_list_is_refused_as_dev_field_not_allowed`(새 키 `suppressUnfurl`)와 `dev_access.rs`의 `templates_off_the_table_are_refused`(새 경로 셋).
+- 예산 설정(D20): `config.rs`의 `the_member_write_defaults_admit_ordinary_use_with_headroom`(기본값 60) · `the_member_write_env_names_move_exactly_their_own_field`(`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`), `rate_limit.rs`의 `the_limit_follows_the_surface_and_only_the_send_surface_tells_humans_from_agents` · `every_surface_has_its_own_label_and_its_own_key_space`(`unfurl_preview`).
+- 코어 타입·디코더: `packages/momo-core`의 `unfurlPreview.test.ts`.
+- 사보타주(가드 우회, 캐시 키의 테넌트·멤버 성분, 멤버 상한, 억제 분기, 환불, 스위치 확인, 443 규칙)는 각각 RED를 확인하고 되돌린다. 결과표는 PR 본문에 있다.
+- 실제 외부 사이트를 대상으로 한 확인은 하지 않았다(`runtime-unverified`). 가짜 서버는 127.0.0.1이고 안전 규칙은 주입한 해석기와 가짜 소켓으로 시험한다. 화면은 이 증보의 범위가 아니다.
