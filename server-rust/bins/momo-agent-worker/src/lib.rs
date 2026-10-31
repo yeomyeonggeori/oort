@@ -275,6 +275,16 @@ pub fn degraded_provider_message() -> &'static str {
     "지금은 답변을 만들지 못했어요. 잠시 뒤에 다시 멘션해 주세요."
 }
 
+/// What stands in an **ordinary** turn's answer where a `data:image/…` address was cut out (#4908).
+///
+/// The co-hosted Hermes turns a `MEDIA:` line into that address — MiB of base64 — in any non-streamed
+/// answer, not only a hosted-door turn's, and a message cannot show it. The worker cuts it (the door's own
+/// rule, [`momo_workspace_actions::hosted_expression::replace_pictures`]) and says so in one short
+/// sentence in the place: one sentence for each address, nothing else about the answer changes. (Turning
+/// the picture into an attachment instead is a follow-up: it needs a path of its own for the worker to
+/// write to the api's storage.) Korean, in the voice of the sentences above and of the door's.
+pub const PICTURE_REMOVED_SENTENCE: &str = "그림은 이 메시지에 실을 수 없어서 뺐어요.";
+
 /// Strip anything credential-shaped out of a string that is about to be
 /// persisted (`outbox.last_error`), shown to a user (the degraded message), or
 /// logged.
@@ -1289,7 +1299,11 @@ impl AgentWorker {
         // #4820 C2b 2부 — a door turn's answer is taken apart here: a valid request block becomes a card
         // (or a failure card) and the turn ends; anything else continues below as an ordinary answer, but
         // with the **cleaned** text — no picture, no `MEDIA:` line, no request block — which is the only
-        // text that may ever be committed. A turn that is not a door turn keeps `completion.text` as it was.
+        // text that may ever be committed. A turn that is not a door turn keeps `completion.text` as it
+        // was, except that a `data:image/…` address in it is cut the door's way and a sentence stands in
+        // its place (#4908): the only size limit on this path is the provider layer's read limit
+        // (`RESPONSE_BODY_MAX_BYTES`), which the text has already passed to be here, and the message
+        // write has none — so this cut is before the only write that could carry the picture.
         let answer_text = if door_turn.is_some() {
             match self
                 .hosted_door_land(
@@ -1322,7 +1336,26 @@ impl AgentWorker {
                 hosted_door::Landed::Answer(text) => text,
             }
         } else {
-            completion.text
+            // #4908 — before the completion report is read (a picture address inside the fence would
+            // otherwise ride `props`) and before `commit_turn`. No address in the text: it is
+            // `completion.text` itself, moved, not a byte different.
+            match momo_workspace_actions::hosted_expression::replace_pictures(
+                &completion.text,
+                PICTURE_REMOVED_SENTENCE,
+            ) {
+                Some(replaced) => {
+                    // Counts only, never the text (redaction, L4 §7).
+                    tracing::info!(
+                        run_id = %run_id,
+                        pictures = replaced.cuts,
+                        bytes_before = completion.text.len(),
+                        bytes_after = replaced.text.len(),
+                        "picture addresses replaced in an ordinary answer"
+                    );
+                    replaced.text
+                }
+                None => completion.text,
+            }
         };
 
         // #1454 — the completion report, if the model wrote one. The fence is
