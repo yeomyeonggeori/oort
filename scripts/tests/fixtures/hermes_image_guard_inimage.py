@@ -8,6 +8,9 @@ It sets up /opt/data the way the start commands do (config.yaml + the two guard 
 change, runs the REAL `lockgate.py gate` and prints one JSON line: {"scenario", "rc", "lockgate", "tail"}.
 `lockgate` is the parsed LOCKGATE record (ok, problems, image_guard evidence incl. the canary counts and the plugin
 listing Hermes itself reports), `tail` the last stderr/stdout lines when the gate printed no record.
+
+Every gate run carries `HERMES_MEDIA_DELIVERY_STRICT=1` unless a scenario removes or changes it (#4820 C2b 3부: the gate
+requires it whenever the picture tool is exposed, exactly as the shipped templates provide it).
 """
 import hashlib
 import json
@@ -47,9 +50,14 @@ def write(path, raw):
         handle.write(raw)
 
 
+STRICT_ENV = "HERMES_MEDIA_DELIVERY_STRICT"
+
+
 def run_gate(gate=os.path.join(OORT, "lockgate.py"), env=None):
     environment = dict(os.environ)
+    environment.setdefault(STRICT_ENV, "1")
     environment.update(env or {})
+    environment = {name: value for name, value in environment.items() if value is not None}  # None removes a name
     done = subprocess.run([PY, gate, "gate", os.path.join(DATA, "config.yaml")], capture_output=True, text=True,
                           timeout=600, env=environment)
     record = None
@@ -184,6 +192,70 @@ def scenario_clean_env_file():
     install()
     write(os.path.join(DATA, ".env"), b"\xef\xbb\xbfOPENROUTER_API_KEY=keep\n")
     return run_gate()
+
+
+def scenario_strict_missing():
+    """#4820 C2b 3부: no strict media flag in the process environment while the picture tool is exposed: refused."""
+    install()
+    return run_gate(env={STRICT_ENV: None})
+
+
+def scenario_strict_wrong():
+    """`true` is strict to Hermes itself, but the gate takes one spelling: refused."""
+    install()
+    return run_gate(env={STRICT_ENV: "true"})
+
+
+def scenario_strict_env_file():
+    """The volume's .env is loaded into Hermes after the gate: it may not carry the name even with the same value."""
+    install()
+    write(os.path.join(DATA, ".env"), ("HERMES_MEDIA_DELIVERY_STRICT=1\nOPENROUTER_API_KEY=keep\n").encode("utf-8"))
+    return run_gate()
+
+
+MEDIA_PROBE = r'''
+import json, os, sys, tempfile
+home = tempfile.mkdtemp(prefix="oort-media-home-")
+os.environ["HERMES_HOME"] = home
+os.environ["HOME"] = home
+sys.path.insert(0, "/opt/hermes")
+from gateway.platforms.base import MEDIA_DELIVERY_SAFE_ROOTS, validate_media_delivery_path
+outside_dir = tempfile.mkdtemp(prefix="oort-media-outside-")      # under /tmp: in no cache dir, not on the denylist
+outside = os.path.join(outside_dir, "old.png")
+with open(outside, "wb") as handle:
+    handle.write(b"not a secret, only a file that exists")
+os.utime(outside, (1, 1))                                          # decades old: no recency trust either
+root = str(MEDIA_DELIVERY_SAFE_ROOTS[0])
+assert root.startswith(home), (root, home)                         # the cache root under the SCRATCH home, never the volume
+os.makedirs(root, exist_ok=True)
+cached = os.path.join(root, "made-by-hermes.png")
+with open(cached, "wb") as handle:
+    handle.write(b"cache")
+os.utime(cached, (1, 1))
+print("PROBE " + json.dumps({"outside": validate_media_delivery_path(outside) is not None,
+                             "cache": validate_media_delivery_path(cached) is not None}))
+'''
+
+
+def media_probe(strict):
+    environment = dict(os.environ)
+    environment.pop(STRICT_ENV, None)
+    if strict is not None:
+        environment[STRICT_ENV] = strict
+    done = subprocess.run([PY, "-c", MEDIA_PROBE], capture_output=True, text=True, timeout=300, env=environment)
+    for line in done.stdout.splitlines():
+        if line.startswith("PROBE "):
+            return json.loads(line[len("PROBE "):])
+    return {"error": (done.stderr.strip().splitlines() + done.stdout.strip().splitlines())[-6:]}
+
+
+def scenario_media_policy():
+    """The premise the gate relies on, measured in the pinned image with Hermes' own `validate_media_delivery_path`: with
+    HERMES_MEDIA_DELIVERY_STRICT=1 an old file outside Hermes' cache dirs is NOT delivered (a file in a cache dir still is);
+    without it the same file IS. So requiring the flag is what closes the local-file door of a `MEDIA:` line. Not a gate run:
+    the record carries the 2x2 table."""
+    table = {"strict": media_probe("1"), "true": media_probe("true"), "unset": media_probe(None)}
+    return 0, {"ok": True, "problems": [], "media_policy": table}, None
 
 
 SCENARIOS = {name[len("scenario_"):].replace("_", "-"): fn for name, fn in sorted(globals().items())

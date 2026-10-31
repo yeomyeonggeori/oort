@@ -129,8 +129,10 @@ pub struct WorkerConfig {
     /// that the co-hosted Hermes behind this worker runs with `HERMES_MEDIA_DELIVERY_STRICT=1`, which is
     /// what keeps a `MEDIA:` mark in a final answer from being turned into the bytes of any file the
     /// model names. This worker cannot see that from here, so the door that harvests a picture from an
-    /// answer opens **only** on an exact `1`; unset (or anything else) a photo turn is answered by one
-    /// failure card and calls no model. Hermes' own enforcement of the flag is the next piece.
+    /// answer opens **only** on an exact `1`; unset (or anything else) the door is **shut and a photo turn
+    /// is an ordinary turn** (no failure card, no photo lookup, the streaming model call it always was).
+    /// Hermes' own enforcement of the flag is `infra/hermes/lockgate.py`, which refuses to start Hermes
+    /// with its picture tool unless `HERMES_MEDIA_DELIVERY_STRICT=1`; both must be on for the door to open.
     pub hosted_media_strict: bool,
     /// The assembler child the hosted door runs for a motion (`None` = `momo-expression-assembler` next
     /// to this executable, the way every picture path finds it). A hook for tests, like `momo-server`'s.

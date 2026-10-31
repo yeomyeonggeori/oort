@@ -950,9 +950,10 @@ impl AgentWorker {
         }
 
         // #4820 C2b 2부 — the hosted expression door. A photo turn of the co-hosted Hermes (not a welcome,
-        // not a resume) is decided here, **before** anything costs: the operator's strict-media
-        // attestation, the run's state, the requester and the agent's ceiling of waiting cards are
-        // judged now (#4829's cheap refusals first), and a refusal ends the turn without a model call.
+        // not a resume) is decided here, **before** anything costs: first the operator's strict-media
+        // attestation (3부: absent, the door is shut and this is an ordinary turn — the `NotAPhotoTurn` arm,
+        // not even a photo lookup), then the run's state, the requester and the agent's ceiling of waiting
+        // cards (#4829's cheap refusals), and a refusal ends the turn without a model call.
         // Every other turn takes the `NotAPhotoTurn` arm and is untouched.
         let door_turn = if cohosted_pin && !payload.is_welcome() && !payload.is_resume() {
             match self

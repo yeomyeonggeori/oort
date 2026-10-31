@@ -88,6 +88,8 @@ HAND_LITERALS = {
     "HERMES_BASE_URL", "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK", "AGENT_PROVIDER_LOCAL_HOSTS",
     "OORT_COHOSTED_AGENT_TOOLS_LOCKED", "API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_PORT",
     "HERMES_LOGIN_RELAY_URL",  # #4079: the login relay sidecar, hermes.railway.internal:8643
+    # #4820 C2b 3부: the two halves of the hosted expression door are typed by hand, so the README lists both.
+    "OORT_HOSTED_MEDIA_STRICT", "HERMES_MEDIA_DELIVERY_STRICT",
 }
 # Shared variables the operator creates by hand (the generator does not print them).
 # HERMES_API_KEY: `openssl rand -hex 32`, one value for hermes' API_SERVER_KEY and the
@@ -828,6 +830,40 @@ def self_media_errors(services: dict) -> list[str]:
     return errors
 
 
+HOSTED_STRICT_VAR = "OORT_HOSTED_MEDIA_STRICT"
+MEDIA_STRICT_VAR = "HERMES_MEDIA_DELIVERY_STRICT"
+
+
+def hosted_media_strict_errors(services: dict) -> list[str]:
+    """#4820 C2b 3부 (ADR-0218 G3.7 (b)): the two halves of the hosted expression door, one on each service.
+
+    hermes carries the literal `1`: lockgate.py refuses to start the picture tool without exactly that (and refuses the name
+    in the volume's .env), so a template without it would be a Hermes that cannot boot. agent-worker carries the operator's
+    attestation EMPTY: the template never attests for the operator, the door opens only when someone sets `1` there (a worker
+    cannot see Hermes, so an attestation shipped in the template would be a claim nobody made). No other service has either
+    name."""
+    errors: list[str] = []
+    got = (services["hermes"].get("variables") or {}).get(MEDIA_STRICT_VAR)
+    if got != "1":
+        errors.append(
+            "hermes %s %r must be '1' (lockgate.py refuses to start the picture tool without exactly that)"
+            % (MEDIA_STRICT_VAR, got)
+        )
+    got = (services["agent-worker"].get("variables") or {}).get(HOSTED_STRICT_VAR)
+    if got != "":
+        errors.append(
+            "agent-worker %s %r must be present and empty (the template does not attest strict media delivery for the "
+            "operator; the hosted door opens only on an operator's exact 1)" % (HOSTED_STRICT_VAR, got)
+        )
+    for name, svc in services.items():
+        variables = svc.get("variables") or {}
+        if name != "hermes" and MEDIA_STRICT_VAR in variables:
+            errors.append("%s must not carry %s (hermes only, #4820 C2b)" % (name, MEDIA_STRICT_VAR))
+        if name != "agent-worker" and HOSTED_STRICT_VAR in variables:
+            errors.append("%s must not carry %s (agent-worker only, #4820 C2b)" % (name, HOSTED_STRICT_VAR))
+    return errors
+
+
 def github_errors(services: dict) -> list[str]:
     """ADR-0205 / #4221: the GitHub App key and public address reach api only, in the one shape the api accepts.
 
@@ -1005,6 +1041,7 @@ def collect_errors(
     # -- GitHub App key + public address: api only (ADR-0205, #4221) ----------
     errors.extend(github_errors(services))
     errors.extend(self_media_errors(services))
+    errors.extend(hosted_media_strict_errors(services))
 
     # -- Postgres image service ----------------------------------------------
     pg = services["postgres"]
@@ -1388,6 +1425,16 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["hermes"]["variables"][SELF_MEDIA_VAR] = "https://${{shared.MOMO_CENTRIFUGO_WS_URL}}"
     elif kind == "relay-self-media-origin":
         services["relay"]["variables"][SELF_MEDIA_VAR] = PUBLIC_BASE_VALUE
+    elif kind == "worker-hosted-strict-dropped":
+        del services["agent-worker"]["variables"][HOSTED_STRICT_VAR]
+    elif kind == "worker-hosted-strict-attested":  # the template would attest strict media delivery for the operator
+        services["agent-worker"]["variables"][HOSTED_STRICT_VAR] = "1"
+    elif kind == "hermes-media-strict-dropped":  # a Hermes the lock gate would refuse to start
+        del services["hermes"]["variables"][MEDIA_STRICT_VAR]
+    elif kind == "hermes-media-strict-wrong":  # Hermes reads `true` as strict, the gate takes only an exact 1
+        services["hermes"]["variables"][MEDIA_STRICT_VAR] = "true"
+    elif kind == "relay-hosted-strict":
+        services["relay"]["variables"][HOSTED_STRICT_VAR] = "1"
     else:
         raise SystemExit("unknown catalog mutation %s" % kind)
 
@@ -1474,6 +1521,11 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("worker-self-media-dropped", "agent-worker OORT_SELF_MEDIA_ORIGIN"),
     ("hermes-self-media-wrong-host", "hermes OORT_SELF_MEDIA_ORIGIN"),
     ("relay-self-media-origin", "relay must not carry OORT_SELF_MEDIA_ORIGIN"),
+    ("worker-hosted-strict-dropped", "agent-worker OORT_HOSTED_MEDIA_STRICT"),
+    ("worker-hosted-strict-attested", "agent-worker OORT_HOSTED_MEDIA_STRICT"),
+    ("hermes-media-strict-dropped", "hermes HERMES_MEDIA_DELIVERY_STRICT"),
+    ("hermes-media-strict-wrong", "hermes HERMES_MEDIA_DELIVERY_STRICT"),
+    ("relay-hosted-strict", "relay must not carry OORT_HOSTED_MEDIA_STRICT"),
 )
 
 
@@ -1502,22 +1554,27 @@ def prove_mutations(
             if needle not in joined:
                 raise SystemExit("mutation %s failed without naming its rule (%s): %s" % (kind, needle, joined))
             print("mutation %s RED (%s)" % (kind, needle))
-        # README: drop the WORKER_DATABASE_URL row → the table no longer covers
-        # a value the operator must type.
+        # README: drop one row → the table no longer covers a value the operator must type. The first row is the
+        # long-standing one; the other two are the hosted door's halves (#4820 C2b 3부).
         readme = readme_path.read_text()
-        kept = [
-            line
-            for line in readme.splitlines(True)
-            if not re.match(r"^\|\s*agent-worker\s*\|\s*`WORKER_DATABASE_URL`", line)
-        ]
-        if len(kept) == len(readme.splitlines(True)):
-            raise SystemExit("README has no agent-worker WORKER_DATABASE_URL row to drop")
-        dest_readme = scratch / "README.md"
-        dest_readme.write_text("".join(kept))
-        errors = collect_errors(catalog_path, compose_path, centrifugo_path, keys_path, dest_readme)
-        if not any("agent-worker WORKER_DATABASE_URL" in error for error in errors):
-            raise SystemExit("mutation readme-row-missing did not fail on the README table: %s" % errors)
-        print("mutation readme-row-missing RED (README hand-mapped table missing rows)")
+        for service, var, label in (
+            ("agent-worker", "WORKER_DATABASE_URL", "readme-row-missing"),
+            ("agent-worker", HOSTED_STRICT_VAR, "readme-row-missing-hosted-strict"),
+            ("hermes", MEDIA_STRICT_VAR, "readme-row-missing-media-strict"),
+        ):
+            kept = [
+                line
+                for line in readme.splitlines(True)
+                if not re.match(r"^\|\s*%s\s*\|\s*`%s`" % (re.escape(service), re.escape(var)), line)
+            ]
+            if len(kept) == len(readme.splitlines(True)):
+                raise SystemExit("README has no %s %s row to drop" % (service, var))
+            dest_readme = scratch / ("README-%s.md" % label)
+            dest_readme.write_text("".join(kept))
+            errors = collect_errors(catalog_path, compose_path, centrifugo_path, keys_path, dest_readme)
+            if not any("%s %s" % (service, var) in error for error in errors):
+                raise SystemExit("mutation %s did not fail on the README table: %s" % (label, errors))
+            print("mutation %s RED (README hand-mapped table missing rows)" % label)
         # infra/centrifugo.json gains a setting the Railway literals do not carry.
         cent = json.loads(centrifugo_path.read_text())
         cent.setdefault("client", {})["connection_limit"] = 10

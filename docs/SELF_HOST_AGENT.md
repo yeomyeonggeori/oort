@@ -2503,7 +2503,18 @@ generator now do for you; you still read the lock, and the model key stays yours
   passes it to agent-worker and hermes; lowercase host, optional `:port`, no trailing
   slash). Hermes downloads that address itself, so it must resolve to a public
   address from Hermes (its private-address filter stays on); unset, nothing changes.
-- `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` stays **your own declaration**. In both
+- **Letting the agent turn a photo into a team expression (the hosted door; #4820).**
+  The server reads the picture the co-hosted Hermes made out of Hermes' own answer, so
+  it opens that door only when **both** halves are on. Hermes side:
+  `HERMES_MEDIA_DELIVERY_STRICT=1`, Hermes' strict media delivery (without it a `MEDIA:`
+  line in an answer would hand over any readable file); the template and compose set it
+  for you, and `lockgate.py` refuses to start Hermes with its picture tool unless it is
+  exactly `1` (and refuses the name in the volume's `.env`). Worker side:
+  `OORT_HOSTED_MEDIA_STRICT=1` on agent-worker, your statement that the Hermes it dials
+  is that strict one. The template and compose ship it **empty**, so by default the door
+  is shut and a photo message is an ordinary conversation turn (no error card). Set it
+  only after the Hermes service runs the new gate (redeploy `HERMES_LOCKGATE_B64` and the
+  start command's checksum first); only an exact `1` opens the door. In both
   shipped shapes it is backed by the gate; if you edit the config, the gate or
   the start command, you take that backing back on yourself.
 - **Model authentication is not part of this** (#4073): Hermes starts and the

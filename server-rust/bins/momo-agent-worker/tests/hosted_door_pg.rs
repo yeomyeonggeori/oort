@@ -22,7 +22,7 @@
 //! | `no_valid_request_block_is_an_ordinary_answer_without_picture_marker_or_block` | commit the raw answer / open the door on a malformed or doubled block |
 //! | `a_turn_without_a_photo_is_unchanged_and_the_requesters_own_photo_rule_holds` | apply the door to a turn without a photo, or to a photo the rule refuses |
 //! | `the_cheap_refusals_come_before_the_model` | judge the ceiling after the model call |
-//! | `the_door_stays_shut_without_the_operators_strict_attestation` | open the door without the attestation |
+//! | `without_the_operators_strict_attestation_the_door_is_shut_and_the_turn_is_an_ordinary_one` | open the door without the attestation (or raise a card / look for the photo while shut) |
 //! | `the_source_pointer_is_recorded_only_when_the_model_was_given_the_photo` | record the pointer for a turn that handed no address |
 //! | `the_directive_is_exactly_one_more_message_on_a_photo_turn` | a second block / a block on a turn without a photo |
 
@@ -1603,12 +1603,17 @@ async fn the_cheap_refusals_come_before_the_model() {
     );
 }
 
-/// Without the operator's attestation the door is shut: the model is not called, the person sees one
-/// failure card (`generation_failed`, the reason that says why, the sentence that tells them), the run
-/// is failed so the operator sees it too — and a turn without a photo is untouched.
+/// Without the operator's attestation the door is **shut and the turn is an ordinary one** (planner
+/// 10-31): the model is called the way it always was — streaming, once, without the door's instruction —
+/// nothing in the answer is read as a picture or a request (no card, no approval, no draft), the answer
+/// is committed as it is, and the run succeeds. A shut door does not even look for the photo: with the
+/// attachment table out of the way (and no origin, so no address is minted either) the shut door answers
+/// while the attested one cannot — the attested door is the positive control that the missing table
+/// really would have stopped a probe.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn the_door_stays_shut_without_the_operators_strict_attestation() {
+async fn without_the_operators_strict_attestation_the_door_is_shut_and_the_turn_is_an_ordinary_one()
+{
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     reset_instance(&su).await;
@@ -1626,11 +1631,9 @@ async fn the_door_stays_shut_without_the_operators_strict_attestation() {
         },
     )
     .await;
-    provider.say(answer(
-        "만들었어요",
-        Some(&picture(32, 32)),
-        Some(&still_request()),
-    ));
+    // Exactly what an open door would take apart into a card: a picture and one request block.
+    let door_style = answer("만들었어요", Some(&picture(32, 32)), Some(&still_request()));
+    provider.say(door_style.clone());
     let (run, _, _) = enqueue_mention(
         &su,
         &worker_pool,
@@ -1640,32 +1643,50 @@ async fn the_door_stays_shut_without_the_operators_strict_attestation() {
     )
     .await;
     let stats = drain(&w).await;
-    assert_eq!((stats.claimed, stats.failed), (1, 1), "{stats:?}");
-    assert_eq!(provider.calls(), (0, 0), "the model was never called");
+    assert_eq!(
+        (stats.claimed, stats.answered, stats.failed),
+        (1, 1, 0),
+        "{stats:?}"
+    );
+    assert_eq!(
+        provider.calls(),
+        (0, 1),
+        "the model is called the ordinary way: streaming, once"
+    );
     let messages = agent_messages(&app, &t).await;
     assert_eq!(messages.len(), 1, "{messages:?}");
-    let card = &messages[0];
-    assert!(is_card(card));
-    assert_eq!(card.props["code"], "generation_failed");
-    assert_eq!(card.body.as_deref(), Some(golden_line("generation_failed")));
-    assert_eq!(card.props["status"], "cancelled");
-    assert_eq!(card.props["decision_reason"], "hosted_media_strict_unset");
+    assert!(!is_card(&messages[0]), "no failure card: {:?}", messages[0]);
     assert_eq!(
-        card.props["summary"],
-        "이 에이전트는 지금 그림을 받을 수 없어요"
+        messages[0].body.as_deref(),
+        Some(door_style.as_str()),
+        "committed as it is: a shut door reads nothing in the answer"
     );
-    let approvals = approvals_of(&app, &t, run).await;
-    assert_eq!(approvals.len(), 1);
-    assert_eq!(approvals[0].status, "cancelled");
+    assert!(approvals_of(&app, &t, run).await.is_empty(), "no approval");
+    assert!(drafts_of(&app, &t).await.is_empty(), "no draft");
+    assert_eq!(run_status(&su, run).await, "succeeded");
     assert_eq!(
-        approvals[0].reason.as_deref(),
-        Some("hosted_media_strict_unset")
+        ledger_rows(&su, run).await,
+        1,
+        "one ledger row, the ordinary commit's"
     );
-    assert!(drafts_of(&app, &t).await.is_empty());
-    assert_eq!(run_status(&su, run).await, "failed");
-    assert_eq!(ledger_rows(&su, run).await, 0, "no model call, no tokens");
+    let requests = provider.requests();
+    let request = request_for(&requests, "shut-4820");
+    assert!(
+        !request
+            .iter()
+            .any(|m| m.content.contains("oort-expression")),
+        "the door's instruction is not in a shut door's request"
+    );
+    // C2a's photo address is the self-media variable's, not the door's: with the origin set it still
+    // rides the turn (the door is the only thing that is off).
+    assert!(
+        request
+            .iter()
+            .any(|m| m.content.contains("/v1/self-media/")),
+        "the address line is C2a's and unchanged"
+    );
 
-    // A turn without a photo is untouched by the missing attestation.
+    // A turn without a photo is the same ordinary turn as before.
     provider.say("그냥 답이에요");
     enqueue_mention(
         &su,
@@ -1676,10 +1697,78 @@ async fn the_door_stays_shut_without_the_operators_strict_attestation() {
     )
     .await;
     drain(&w).await;
-    assert_eq!(provider.calls(), (0, 1), "an ordinary turn streams");
+    assert_eq!(provider.calls(), (0, 2), "an ordinary turn streams");
     let messages = agent_messages(&app, &t).await;
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[1].body.as_deref(), Some("그냥 답이에요"));
+
+    // The shut door does not look for the photo. A second tenant, no origin (nothing else reads the
+    // attachment table for this turn), the table renamed away while the worker runs.
+    let t2 = seed(&su).await;
+    pin_env(&su, &t2).await;
+    let (run2, _, _) = enqueue_mention(
+        &su,
+        &worker_pool,
+        &t2,
+        "@hermes 사진을 안 찾아요 (shut-probe-4820)",
+        Some(PHOTO),
+    )
+    .await;
+    async fn without_attachments<T>(su: &PgPool, work: impl std::future::Future<Output = T>) -> T {
+        sqlx::query("ALTER TABLE attachment RENAME TO attachment_away")
+            .execute(su)
+            .await
+            .unwrap();
+        let out = work.await;
+        sqlx::query("ALTER TABLE attachment_away RENAME TO attachment")
+            .execute(su)
+            .await
+            .unwrap();
+        out
+    }
+    let shut_provider = Scripted::new();
+    shut_provider.say("사진을 찾지 않고 평소처럼 답했어요");
+    let shut_worker = worker(&shut_provider, &Opts::default()).await;
+    let shut = without_attachments(&su, shut_worker.drain_once())
+        .await
+        .expect("drain");
+    assert_eq!(
+        (shut.claimed, shut.answered, shut.requeued),
+        (1, 1, 0),
+        "a shut door answers without the attachment table: {shut:?}"
+    );
+    assert_eq!(shut_provider.calls(), (0, 1));
+    assert_eq!(run_status(&su, run2).await, "succeeded");
+
+    // Positive control: the same missing table does stop the attested door's probe (the turn is retried
+    // and the model is not called), so the shut door above really did not read it.
+    let (run3, _, _) = enqueue_mention(
+        &su,
+        &worker_pool,
+        &t2,
+        "@hermes 사진을 찾아요 (open-probe-4820)",
+        Some(PHOTO),
+    )
+    .await;
+    let open_provider = Scripted::new();
+    let open_worker = worker(
+        &open_provider,
+        &Opts {
+            strict: true,
+            ..Opts::default()
+        },
+    )
+    .await;
+    let open = without_attachments(&su, open_worker.drain_once())
+        .await
+        .expect("drain");
+    assert_eq!(
+        (open.claimed, open.requeued, open.answered),
+        (1, 1, 0),
+        "the attested door probes the photo and cannot: {open:?}"
+    );
+    assert_eq!(open_provider.calls(), (0, 0), "no model call");
+    assert_ne!(run_status(&su, run3).await, "succeeded");
 }
 
 /// The photo is recorded as the picture's source **only** when the model was handed the address of

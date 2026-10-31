@@ -52,16 +52,10 @@ pub const REQUEST_VERSION: u8 = 1;
 pub const PICTURE_B64_MAX_CHARS: usize = 6_990_508;
 
 /// The environment name of the operator's attestation that the Hermes behind this worker enforces
-/// strict media delivery (`HERMES_MEDIA_DELIVERY_STRICT=1`). Without it the door stays shut.
+/// strict media delivery (`HERMES_MEDIA_DELIVERY_STRICT=1`, which Hermes' `lockgate.py` enforces on the
+/// Hermes side). The door opens only when this is exactly `1`; without it the door is **shut and the turn
+/// is an ordinary one** — no failure card, no model-call change (planner 10-31).
 pub const STRICT_ENV: &str = "OORT_HOSTED_MEDIA_STRICT";
-
-/// `approval.decision_reason` (and the card's) of a failure card raised because the door is shut.
-pub const STRICT_UNSET_REASON: &str = "hosted_media_strict_unset";
-
-/// The sentence the person is told when the door is shut. It is not one of the six golden lines
-/// (the code set is closed), so it rides the card's `summary`; the card's `code` and `body` are
-/// `generation_failed`'s.
-pub const STRICT_UNSET_SUMMARY: &str = "이 에이전트는 지금 그림을 받을 수 없어요";
 
 /// The instruction a photo turn carries (G6), as one `system` block. It is in the context of the
 /// turns that open the door and of no other turn.
@@ -990,10 +984,9 @@ pub struct FailureCard {
     pub code: &'static str,
     /// The measured size of a too-large animation, when there is one.
     pub bytes: Option<u64>,
-    /// The word stored as the approval's `decision_reason` and the card's: the code itself, or
-    /// [`STRICT_UNSET_REASON`] for the door the operator left shut.
+    /// The word stored as the approval's `decision_reason` and the card's: the code itself.
     pub reason: &'static str,
-    /// The card's `summary`: the code's golden line unless the card has something more to say.
+    /// The card's `summary`: the code's golden line.
     pub summary: &'static str,
 }
 
@@ -1005,17 +998,6 @@ impl FailureCard {
             bytes: failure.bytes,
             reason: failure.code,
             summary: failure_line(failure.code).expect("a failure code has a golden line"),
-        }
-    }
-
-    /// The card of the door left shut: `generation_failed`'s code and line, the reason that says
-    /// why, and the sentence that tells the person.
-    pub fn door_shut() -> FailureCard {
-        FailureCard {
-            code: "generation_failed",
-            bytes: None,
-            reason: STRICT_UNSET_REASON,
-            summary: STRICT_UNSET_SUMMARY,
         }
     }
 }

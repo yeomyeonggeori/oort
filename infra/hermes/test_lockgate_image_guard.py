@@ -60,6 +60,14 @@ def install(data_dir, files=None):
     return root
 
 
+def baseline_env(data_dir, env=None):
+    """The environment of a healthy boot: the API key, the volume, and the strict media flag (#4820 C2b 3부). A test's `env`
+    adds to it; a name given as `None` is removed from it (how a test boots WITHOUT the flag)."""
+    merged = {"API_SERVER_KEY": KEY, "HERMES_DATA_DIR": data_dir,
+              lockgate.MEDIA_STRICT_ENV: lockgate.MEDIA_STRICT_VALUE, **(env or {})}
+    return {name: value for name, value in merged.items() if value is not None}
+
+
 def healthy_cfg(**over):
     cfg = {"web": {"search_backend": "openai-native", "keyless_fallback": False},
            "image_gen": {"provider": "openai-codex"},
@@ -149,7 +157,7 @@ class GateHarness(unittest.TestCase):
             path = os.path.join(data, "config.yaml")
             with open(path, "w") as handle:
                 handle.write("# isolated boot fixture; load_config is doubled\n")
-            environment = {"API_SERVER_KEY": KEY, "HERMES_DATA_DIR": data, **(env or {})}
+            environment = baseline_env(data, env)
             with mock.patch.dict(os.environ, environment, clear=True), \
                     mock.patch.dict(sys.modules, fake.modules()), \
                     mock.patch.object(sys, "path", list(sys.path)), \
@@ -167,7 +175,7 @@ class GateHarness(unittest.TestCase):
             if env_file is not None:
                 with open(os.path.join(data_dir, ".env"), "wb") as handle:
                     handle.write(env_file)
-            environment = {"API_SERVER_KEY": KEY, "HERMES_DATA_DIR": data_dir, **(env or {})}
+            environment = baseline_env(data_dir, env)
             with mock.patch.dict(os.environ, environment, clear=True), \
                     mock.patch.dict(sys.modules, fake.modules()), \
                     mock.patch.object(sys, "path", list(sys.path)), \
@@ -575,6 +583,93 @@ class SelfMediaOrigin(GateHarness):
                 return "canary_spy"
             return result
         return lockgate.run_image_guard_canary(hook, wrapped_call, install, ORIGIN)
+
+
+class MediaStrict(GateHarness):
+    """`HERMES_MEDIA_DELIVERY_STRICT` (#4820 C2b 3부, ADR-0218 G3.7 (b)): when the picture tool is exposed the process
+    environment must carry exactly `1`, the volume's `.env` may not carry the name at all, and `report` re-checks both.
+    Outside strict mode Hermes hands the answer any readable file a `MEDIA:` line names, which is what the hosted door's
+    picture harvest must never be able to reach."""
+
+    NAME = lockgate.MEDIA_STRICT_ENV
+
+    def test_the_flag_in_the_process_environment_boots_and_is_reported(self):
+        rc, record, _ = self.boot()
+        self.assertEqual((rc, record["problems"]), (0, []))
+        self.assertIs(record["image_guard"]["media_strict"], True)
+
+    def test_without_the_flag_the_start_is_refused_by_name(self):
+        rc, record, _ = self.boot(env={self.NAME: None})
+        self.assertRefused(rc, record, self.NAME)
+        self.assertTrue(any("must set " + self.NAME + "=1" in p for p in record["problems"]), record["problems"])
+        self.assertEqual(len([p for p in record["problems"] if self.NAME in p]), 1)
+        self.assertIs(record["image_guard"]["media_strict"], False)
+
+    def test_anything_but_an_exact_one_is_refused_and_the_value_is_never_printed(self):
+        # Hermes itself reads true/yes/on as strict too; the gate takes ONE spelling.
+        for value in ("", "0", "false", "true", "TRUE", "yes", "on", " 1", "1 ", "01", "11", "1\n", "secret-media-4820"):
+            with self.subTest(value=value):
+                rc, record, _ = self.boot(env={self.NAME: value})
+                self.assertRefused(rc, record, self.NAME)
+                self.assertNotIn("secret-media-4820", json.dumps(record))
+                self.assertIs(record["image_guard"]["media_strict"], False)
+
+    def test_the_volumes_env_file_may_not_carry_the_name_at_all(self):
+        # Hermes loads the file into its process after the gate ran: a line there can replace the value that was checked,
+        # so even `=1` is refused. The process environment is healthy in every case.
+        for line in (self.NAME + "=1", self.NAME + "=0", self.NAME + "=", "export " + self.NAME + "=1",
+                     self.NAME + '="1"', self.NAME + "='true'", "  " + self.NAME + " = 1 "):
+            with self.subTest(line=line):
+                rc, record, _ = self.boot(env_file=("OPENROUTER_API_KEY=keep\n" + line + "\n").encode())
+                self.assertRefused(rc, record, "the volume's .env sets " + self.NAME)
+                self.assertEqual(len([p for p in record["problems"] if "the volume's .env" in p]), 1)
+        for harmless in ("# " + self.NAME + "=0", self.NAME.lower() + "=0", "OPENROUTER_API_KEY=keep"):
+            with self.subTest(harmless=harmless):
+                rc, record, _ = self.boot(env_file=(harmless + "\n").encode())
+                self.assertEqual((rc, record["problems"]), (0, []))
+
+    def test_a_byte_order_mark_does_not_hide_the_name_in_the_env_file(self):
+        rc, record, _ = self.boot(env_file=BOM + (self.NAME + "=1\n").encode())
+        self.assertRefused(rc, record, "the volume's .env sets " + self.NAME)
+
+    def test_the_process_flag_and_the_volume_file_are_judged_separately(self):
+        rc, record, _ = self.boot(env={self.NAME: None}, env_file=(self.NAME + "=1\n").encode())
+        self.assertEqual(rc, 3)
+        text = " | ".join(record["problems"])
+        self.assertIn("the process environment must set " + self.NAME, text)
+        self.assertIn("the volume's .env sets " + self.NAME, text)
+
+    def test_the_rule_applies_only_when_image_generation_is_exposed(self):
+        chat_only = TOOLS - {"image_generate"}
+        cfg = {"web": healthy_cfg()["web"]}
+        rc, record, _ = self.boot(cfg, chat_only, env={self.NAME: None}, install_guard=False)
+        self.assertEqual((rc, record["problems"]), (0, []))
+        self.assertIsNone(record["image_guard"])
+        rc, record, _ = self.boot(cfg, chat_only, env_file=(self.NAME + "=0\n").encode(), install_guard=False)
+        self.assertEqual((rc, record["problems"]), (0, []))
+
+    def test_the_same_rules_hold_on_the_live_volume_after_start(self):
+        rc, kills, record = self.monitor(healthy_cfg())
+        self.assertEqual((rc, kills), (0, []), record)
+        for kwargs, fragment in (
+            ({"env": {self.NAME: None}}, "the process environment must set " + self.NAME),
+            ({"env": {self.NAME: "true"}}, "the process environment must set " + self.NAME),
+            ({"env_file": (self.NAME + "=1\n").encode()}, "the volume's .env sets " + self.NAME),
+        ):
+            with self.subTest(fragment=fragment):
+                rc, kills, record = self.monitor(healthy_cfg(), **kwargs)
+                self.assertEqual(rc, 3, record)
+                self.assertEqual(kills, [mock.call(1, lockgate.signal.SIGTERM)], "a definitive violation asks PID 1 to stop")
+                self.assertTrue(any(fragment in p for p in record["problems"]), record["problems"])
+
+    def test_the_function_judges_the_two_sources_by_their_own_rule(self):
+        judge = lockgate.image_environment_problems
+        self.assertEqual(judge([(self.NAME, "1")], "the process environment"), [])
+        self.assertEqual(judge([], "the process environment")[0].split(" must set ")[0], "the process environment")
+        self.assertEqual(judge([], "the volume's .env", volume=True), [], "the file need not carry it")
+        self.assertEqual(len(judge([(self.NAME, "1"), (self.NAME, "1")], "the volume's .env", volume=True)), 1)
+        # a generator is read once for the loop and once for the presence check: both must see every pair
+        self.assertEqual(judge(iter([(self.NAME, "1")]), "the process environment"), [])
 
 
 class CanaryBehavior(GateHarness):

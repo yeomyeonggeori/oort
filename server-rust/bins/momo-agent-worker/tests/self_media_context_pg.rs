@@ -398,10 +398,6 @@ async fn worker(provider: &Arc<Probe>, origin: Option<&str>) -> AgentWorker {
     config.claim_batch_size = 10;
     config.provider_link_master_key = Some("conformance-4820-master".to_string());
     config.provider = env_link();
-    // #4820 C2b 2부: these tests are about the photo address, and a photo turn of the co-hosted Hermes is a
-    // hosted-door turn. The operator's strict-media attestation is what lets such a turn run at all (without
-    // it the door answers with one failure card and calls no model — `hosted_door_pg` measures that).
-    config = config.with_hosted_media_strict(true);
     if let Some(origin) = origin {
         config = config.with_self_media_origin(origin);
     }
@@ -506,16 +502,10 @@ async fn a_turn_with_a_photo_gets_one_address_line_and_a_turn_without_does_not()
         address_lines(without).is_empty(),
         "a text-only turn carries no address"
     );
-    // C2b 2부: a photo turn of the co-hosted Hermes also carries the hosted door's directive (one more
-    // `system` block, measured in `hosted_door_pg`). Set it aside and the C2a rule is what it was.
-    let without_directive = with
-        .iter()
-        .filter(|m| !m.content.contains("oort-expression"))
-        .count();
     assert_eq!(
-        without_directive,
+        with.len(),
         without.len() + 1,
-        "the photo turn has exactly one more message than the text-only turn (the address line)"
+        "the photo turn has exactly one more message than the text-only turn"
     );
     assert_eq!(token_rows(&su, run_with).await, 1);
     assert_eq!(token_rows(&su, run_without).await, 0);

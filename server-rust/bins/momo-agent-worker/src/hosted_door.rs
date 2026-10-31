@@ -9,10 +9,12 @@
 //!
 //! The order, and why:
 //!
-//! 1. **[`AgentWorker::hosted_door_open`], before the model.** Is there a photo (the one definition the
-//!    address mint also asks)? Did the operator attest strict media delivery (`OORT_HOSTED_MEDIA_STRICT=1`)?
-//!    Is the run still running, did a live person ask, is the agent under its ceiling of waiting cards?
-//!    These are the cheap refusals (#4829): none of them costs a model call, a picture or a decoder slot.
+//! 1. **[`AgentWorker::hosted_door_open`], before the model.** Did the operator attest strict media
+//!    delivery (`OORT_HOSTED_MEDIA_STRICT` exactly `1`)? **Without it the door is shut and the turn is an
+//!    ordinary one** — not even the photo is looked for (no read, no card, the model is called the way it
+//!    always was). With it: is there a photo (the one definition the address mint also asks)? Is the run
+//!    still running, did a live person ask, is the agent under its ceiling of waiting cards? These are the
+//!    cheap refusals (#4829): none of them costs a model call, a picture or a decoder slot.
 //! 2. **The model, non-streaming**, in `process()`.
 //! 3. **[`AgentWorker::hosted_door_land`], after it.** The answer is opened; no valid request block means
 //!    an ordinary answer (the cleaned text); a valid one becomes candidates and a card, or — when the
@@ -50,7 +52,8 @@ pub(crate) struct DoorTurn;
 
 /// What [`AgentWorker::hosted_door_open`] decided before the model.
 pub(crate) enum DoorOpen {
-    /// Not a photo turn: nothing about this turn changes.
+    /// Not a door turn — no photo on the trigger, or the operator has not attested strict media
+    /// delivery (the door is shut): nothing about this turn changes.
     NotAPhotoTurn,
     /// A photo turn with the door open: call the model without streaming and land the answer.
     Turn(DoorTurn),
@@ -109,6 +112,12 @@ impl AgentWorker {
     /// Decide, before the model is called, whether this is a door turn — and refuse what is cheap to
     /// refuse. Called only for a turn of an agent pinned to the co-hosted Hermes that is neither a
     /// welcome nor a resume.
+    ///
+    /// The operator's attestation is the **first** thing asked and costs nothing: when
+    /// `OORT_HOSTED_MEDIA_STRICT` is not exactly `1` the door is shut and the turn goes on as an ordinary
+    /// one (planner 10-31). The photo is not even looked for — a shut door reads nothing from the
+    /// database — and no failure card is raised, so an operator who has not set the value loses nothing
+    /// of the ordinary conversation about a photo.
     pub(crate) async fn hosted_door_open(
         &self,
         job: &ClaimedAgentJob,
@@ -116,11 +125,13 @@ impl AgentWorker {
         run_id: Uuid,
         endpoint: &ProviderEndpoint,
     ) -> DoorOpen {
+        if !self.config.hosted_media_strict {
+            return DoorOpen::NotAPhotoTurn;
+        }
         let run = self.door_run(job, payload, run_id);
         let workspace_id = job.workspace_id;
-        let strict = self.config.hosted_media_strict;
-        // One read: is there a photo on the trigger, and (only when the operator attested) do the
-        // cheap refusals pass. A database error is transient: the turn is retried.
+        // One read: is there a photo on the trigger, and do the cheap refusals pass. A database error
+        // is transient: the turn is retried.
         let probed = with_tenant_tx(&self.pool, workspace_id, {
             let run = run.clone();
             move |conn| {
@@ -136,12 +147,7 @@ impl AgentWorker {
                     if photo.is_none() {
                         return Ok(None);
                     }
-                    let gate = if strict {
-                        door::gate_in_tx(conn, &run).await?
-                    } else {
-                        Gate::Open
-                    };
-                    Ok(Some(gate))
+                    Ok(Some(door::gate_in_tx(conn, &run).await?))
                 })
             }
         })
@@ -160,27 +166,6 @@ impl AgentWorker {
                 )
             }
         };
-        if !strict {
-            // The operator has not attested strict media delivery: the door stays shut, the model is
-            // not called, and the person sees one failure card. (The operator sees the reason.)
-            tracing::warn!(
-                run_id = %run_id,
-                "hosted expression door shut: OORT_HOSTED_MEDIA_STRICT is not `1`; a photo turn was answered by a failure card"
-            );
-            return DoorOpen::Settled(
-                self.hosted_door_fail(
-                    job,
-                    payload,
-                    run_id,
-                    &run,
-                    FailureCard::door_shut(),
-                    None,
-                    false,
-                    endpoint,
-                )
-                .await,
-            );
-        }
         match gate {
             Gate::Open => DoorOpen::Turn(DoorTurn),
             Gate::Capped => DoorOpen::Settled(
@@ -239,8 +224,9 @@ impl AgentWorker {
         }
     }
 
-    /// Raise the failure card and end the run in the same transaction. `usage` is the model's, when it
-    /// was called (the door left shut called none); `model_called` says whether to write a ledger row.
+    /// Raise the failure card and end the run in the same transaction. `usage` is the model's — the
+    /// model has been called by the time a card is earned (a shut door never gets here) — and the ledger
+    /// row is written in the same transaction.
     #[allow(clippy::too_many_arguments)]
     async fn hosted_door_fail(
         &self,
@@ -250,12 +236,8 @@ impl AgentWorker {
         run: &DoorRun,
         card: FailureCard,
         usage: Option<ChatUsage>,
-        model_called: bool,
         endpoint: &ProviderEndpoint,
     ) -> Settlement {
-        // A shut door is the operator's to see as a failed run; a card the answer itself earned is a
-        // delivered one.
-        let run_succeeded = card.reason != door::STRICT_UNSET_REASON;
         let workspace_id = job.workspace_id;
         let model = payload.model_or(&self.config.default_model).to_string();
         let ledger = usage_report(usage, &model, payload);
@@ -279,7 +261,8 @@ impl AgentWorker {
                     // `None`: nobody (no live person) is left to show a card to — the requester went
                     // while the model worked. The run still ends, as a failed one, with no card.
                     let raised = door::failure_card_in_tx(conn, &run, &card).await?;
-                    let run_succeeded = run_succeeded && raised.is_some();
+                    // A card that was raised is a delivered one: the run succeeded.
+                    let run_succeeded = raised.is_some();
                     let output = json!({
                         "schema": "momo.agent_run.output.v0",
                         "source": "agent_worker.hosted_expression.v0",
@@ -287,12 +270,7 @@ impl AgentWorker {
                         "code": card.code,
                     });
                     let error = (!run_succeeded).then(|| {
-                        let reason = if raised.is_some() {
-                            card.reason
-                        } else {
-                            "hosted_door_no_requester"
-                        };
-                        json!({"code": reason, "reason": reason})
+                        json!({"code": "hosted_door_no_requester", "reason": "hosted_door_no_requester"})
                     });
                     finish_run_in_tx(conn, run.run_id, run_succeeded, &output, error.as_ref())
                         .await?;
@@ -309,24 +287,22 @@ impl AgentWorker {
                         },
                     )
                     .await?;
-                    if model_called {
-                        let mut resolved = RunUsageReport::resolve(
-                            Some(&ledger),
-                            &model,
-                            snapshot.requested_effort.as_deref(),
-                            snapshot.profile_effort_pref.as_deref(),
-                        );
-                        resolved.source = momo_agent::UsageSource::Measured;
-                        record_run_usage_in_tx(
-                            conn,
-                            run.workspace_id,
-                            run.run_id,
-                            snapshot.agent_member_id,
-                            snapshot.channel_id,
-                            &resolved,
-                        )
-                        .await?;
-                    }
+                    let mut resolved = RunUsageReport::resolve(
+                        Some(&ledger),
+                        &model,
+                        snapshot.requested_effort.as_deref(),
+                        snapshot.profile_effort_pref.as_deref(),
+                    );
+                    resolved.source = momo_agent::UsageSource::Measured;
+                    record_run_usage_in_tx(
+                        conn,
+                        run.workspace_id,
+                        run.run_id,
+                        snapshot.agent_member_id,
+                        snapshot.channel_id,
+                        &resolved,
+                    )
+                    .await?;
                     Ok(match raised {
                         Some(raised) => Finished::Card(raised),
                         None => Finished::NoRequester,
@@ -344,15 +320,10 @@ impl AgentWorker {
                     reason = card.reason,
                     "hosted expression failure card raised"
                 );
-                if run_succeeded {
-                    self.settle_done(job.id, Some(card.code)).await;
-                    Settlement::Answered {
-                        delegated: 0,
-                        blocked: 0,
-                    }
-                } else {
-                    self.settle_failed(job.id, card.reason).await;
-                    Settlement::Failed
+                self.settle_done(job.id, Some(card.code)).await;
+                Settlement::Answered {
+                    delegated: 0,
+                    blocked: 0,
                 }
             }
             Ok(Finished::Suppressed) => {
@@ -434,7 +405,6 @@ impl AgentWorker {
                         &run,
                         FailureCard::of(&failure),
                         usage,
-                        true,
                         endpoint,
                     )
                     .await,
