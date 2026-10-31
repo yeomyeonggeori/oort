@@ -20,7 +20,9 @@
 //! * the Swift **global** per-member axis (`RATE_LIMIT_PER_MEMBER`, every
 //!   authenticated route). What replaced it is narrower on purpose: the per-member
 //!   **write** budget at the bottom of this file (#4234, ADR-0208 D10 증보), mounted
-//!   on the five write endpoints (three surfaces) a member can flood. Reads and the
+//!   on the five write endpoints (three surfaces) a member can flood, and spent in the
+//!   handler, only when a request makes this server fetch from a remote site, by the
+//!   two unfurl proxy reads (#4881, [`MemberWrite::UnfurlProxy`]). Other reads and the
 //!   streaming `PATCH` have no per-member budget;
 //! * the per-IP `audit_log` row. Swift never writes it for the per-IP axis either
 //!   (:186-195), because that axis runs before any principal exists and
@@ -816,6 +818,15 @@ pub enum MemberWrite {
     ScheduledWrite,
     /// `POST …/channels/{ch}/attachments/uploads`.
     UploadStart,
+    /// `GET …/unfurls/{id}/image` and `GET …/unfurls/{id}/icon`: reads, but reads that can make
+    /// this server GET a site the caller's card names. Spent in the handler, **not** by a route
+    /// layer, and only by a request that really would fetch (no cached picture, no recent failure
+    /// remembered: `momo_unfurl::proxy_goes_outbound`), so rendering a timeline of cached cards
+    /// costs nothing and the budget is what stops a member from using the proxy to knock on third
+    /// parties' doors (#4881 security review M-2, ADR-0170 증보 D13). A request turned away for want
+    /// of a place to fetch (`ProxyError::Busy`) is given its unit back ([`refund_member_write`]):
+    /// nothing left the building.
+    UnfurlProxy,
     /// `POST …/expressions/photo-drafts` (ADR-0218 §8 H9, #4941): a start may end in one call
     /// to the team's image model. A short-window guard on starts, not an allowance: how many
     /// pictures a team may draw is the team's own decision (#4944).
@@ -830,6 +841,7 @@ impl MemberWrite {
             MemberWrite::MessageSend => "message_send",
             MemberWrite::ScheduledWrite => "scheduled_write",
             MemberWrite::UploadStart => "upload_start",
+            MemberWrite::UnfurlProxy => "unfurl_proxy",
             MemberWrite::PhotoDraft => "photo_draft",
         }
     }
@@ -841,6 +853,7 @@ impl MemberWrite {
             MemberWrite::MessageSend => "write:send",
             MemberWrite::ScheduledWrite => "write:schedule",
             MemberWrite::UploadStart => "write:upload",
+            MemberWrite::UnfurlProxy => "write:unfurl",
             MemberWrite::PhotoDraft => "write:photo",
         }
     }
@@ -868,6 +881,7 @@ pub fn member_write_limit(
         }
         (MemberWrite::ScheduledWrite, _) => config.scheduled_write_per_member_limit,
         (MemberWrite::UploadStart, _) => config.upload_start_per_member_limit,
+        (MemberWrite::UnfurlProxy, _) => config.unfurl_proxy_per_member_limit,
         (MemberWrite::PhotoDraft, _) => config.photo_draft_per_member_limit,
     }
 }
@@ -921,16 +935,43 @@ pub(crate) async fn spend_member_write(
     surface: MemberWrite,
     principal: &Principal,
 ) -> Result<(), u64> {
+    spend_member_write_unit(state, surface, principal)
+        .await
+        .map(|_| ())
+}
+
+/// One unit of a member's budget that a request spent, kept so the request can give it back
+/// ([`refund_member_write`]) when the work it paid for did not happen.
+#[derive(Debug)]
+pub(crate) struct SpentUnit {
+    key: String,
+    at: Instant,
+}
+
+/// [`spend_member_write`] that also says which unit it spent: `Ok(Some(unit))` for a counted
+/// request, `Ok(None)` when the surface has no budget (limit 0) and nothing was counted.
+///
+/// For a caller that spends **before** the work and must hand the unit back when the work is
+/// turned away for a reason that is not the member's doing (the link-card proxy's `Busy`).
+pub(crate) async fn spend_member_write_unit(
+    state: &AppState,
+    surface: MemberWrite,
+    principal: &Principal,
+) -> Result<Option<SpentUnit>, u64> {
     let config = &state.rate_limit.config;
     let limit = member_write_limit(config, surface, principal.kind);
     if limit == 0 {
-        return Ok(());
+        return Ok(None);
     }
     let key = member_write_key(surface, principal.member_id);
     let window = Duration::from_secs(config.window_seconds);
-    let verdict = state.rate_limit.member_writes.check(&key, limit, window);
+    let at = Instant::now();
+    let verdict = state
+        .rate_limit
+        .member_writes
+        .check_at(&key, limit, window, at);
     if verdict.allowed {
-        return Ok(());
+        return Ok(Some(SpentUnit { key, at }));
     }
     // Only the first denial of a burst owns a reservation, so a flood of parallel refusals has
     // exactly one request that goes on to the database.
@@ -938,6 +979,13 @@ pub(crate) async fn spend_member_write(
         record_member_write_denial(state, principal, surface, limit, &key, reservation).await;
     }
     Err(verdict.retry_after_seconds)
+}
+
+/// Take back the unit [`spend_member_write_unit`] counted, as if the request had not been
+/// counted: the member's budget is what it was before. A unit that has already left the window
+/// is gone and this does nothing.
+pub(crate) fn refund_member_write(state: &AppState, unit: SpentUnit) {
+    state.rate_limit.member_writes.forget_at(&unit.key, unit.at);
 }
 
 /// The audit half of a first denial. Never fails the request: an audit that cannot
@@ -1469,14 +1517,15 @@ mod tests {
 
     use std::sync::atomic::AtomicUsize;
 
-    /// Five different numbers, so a swapped field cannot pass by coincidence.
+    /// Six different numbers, so a swapped field cannot pass by coincidence.
     fn budget_config() -> RateLimitConfig {
         RateLimitConfig {
             message_send_per_member_limit: 11,
             message_send_per_agent_limit: 22,
             scheduled_write_per_member_limit: 33,
             upload_start_per_member_limit: 44,
-            photo_draft_per_member_limit: 55,
+            unfurl_proxy_per_member_limit: 55,
+            photo_draft_per_member_limit: 66,
             ..RateLimitConfig::default()
         }
     }
@@ -1504,8 +1553,13 @@ mod tests {
                 "an agent bearer cannot reach this route today; if one ever does it is held to a budget, not exempt"
             );
             assert_eq!(
-                limit(MemberWrite::PhotoDraft, kind),
+                limit(MemberWrite::UnfurlProxy, kind),
                 55,
+                "the proxy budget is one number for every credential"
+            );
+            assert_eq!(
+                limit(MemberWrite::PhotoDraft, kind),
+                66,
                 "a photo start has one limit whoever asks"
             );
         }
@@ -1520,6 +1574,7 @@ mod tests {
             (MemberWrite::MessageSend, "message_send"),
             (MemberWrite::ScheduledWrite, "scheduled_write"),
             (MemberWrite::UploadStart, "upload_start"),
+            (MemberWrite::UnfurlProxy, "unfurl_proxy"),
             (MemberWrite::PhotoDraft, "photo_draft"),
         ];
         let mut keys = std::collections::HashSet::new();
@@ -1527,7 +1582,7 @@ mod tests {
             assert_eq!(surface.label(), label);
             assert!(keys.insert(member_write_key(surface, member)));
         }
-        assert_eq!(keys.len(), 4);
+        assert_eq!(keys.len(), 5);
         assert_ne!(
             member_write_key(MemberWrite::MessageSend, member),
             member_write_key(MemberWrite::MessageSend, Uuid::from_u128(8)),

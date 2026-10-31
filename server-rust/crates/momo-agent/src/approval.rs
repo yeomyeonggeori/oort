@@ -1210,9 +1210,12 @@ fn apply_login_handoff_props(props: &mut Value, call: &ToolCall) {
     }
 }
 
-/// The one-line body of an `approval_request` message (Swift :1618).
+/// The one-line body of an `approval_request` message (Swift :1618): one question, the tool
+/// quoted after it — 「도구를 실행해도 될까요? · 「name」」 (ADR-0204 증보 6 D6-3). The old frame put
+/// a particle behind the name (「도구 「name」을」), and which particle a name takes is decided by its
+/// last syllable, which an English tool id does not give.
 pub fn approval_request_body(tool_name: &str) -> String {
-    format!("도구 「{tool_name}」을 실행해도 될까요?")
+    crate::approval_sentence::tool_request_body(tool_name)
 }
 
 /// The receipt a decision returns and stores (Swift `ApprovalDecisionReceiptDTO`).
@@ -1230,6 +1233,17 @@ pub fn decision_receipt(
         "decidedAtMs": decided_at.timestamp_millis(),
         "decisionReason": reason,
     })
+}
+
+/// A decision's receipt with the one line it says (ADR-0204 증보 6 D6-4) — see
+/// [`crate::approval_sentence::receipt_line`]. The receipt is stored verbatim and replayed on a
+/// retry, so call this **before** the receipt is recorded: a second tap then answers the line
+/// the first one did.
+pub fn with_receipt_line(mut receipt: Value, line: String) -> Value {
+    if let Some(object) = receipt.as_object_mut() {
+        object.insert("line".into(), Value::String(line));
+    }
+    receipt
 }
 
 /// The audit/broadcast body shared by every decision outcome (Swift
