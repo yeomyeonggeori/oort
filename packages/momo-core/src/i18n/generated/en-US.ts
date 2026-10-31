@@ -218,6 +218,42 @@ export const catalog: MessageCatalog = {
       "value": "Applying language…"
     }
   ],
+  "settings.appearance.linkPreviewCompact": [
+    {
+      "type": 0,
+      "value": "Small"
+    }
+  ],
+  "settings.appearance.linkPreviewCompactHint": [
+    {
+      "type": 0,
+      "value": "Shows a small picture on the left, with the address, a one-line title and a one-line description on the right."
+    }
+  ],
+  "settings.appearance.linkPreviewOff": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
+  "settings.appearance.linkPreviewOffHint": [
+    {
+      "type": 0,
+      "value": "Keeps only the link in the message and draws no card."
+    }
+  ],
+  "settings.appearance.linkPreviewRich": [
+    {
+      "type": 0,
+      "value": "Large"
+    }
+  ],
+  "settings.appearance.linkPreviewRichHint": [
+    {
+      "type": 0,
+      "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
+    }
+  ],
   "settings.profile.languageBeta": [
     {
       "type": 0,
@@ -288,26 +324,10 @@ export const catalog: MessageCatalog = {
       "value": "domain"
     }
   ],
-  "timeline.unfurl.labelVideo": [
+  "timeline.unfurl.video": [
     {
       "type": 0,
-      "value": "Link preview: "
-    },
-    {
-      "type": 1,
-      "value": "title"
-    },
-    {
-      "type": 0,
-      "value": ", "
-    },
-    {
-      "type": 1,
-      "value": "domain"
-    },
-    {
-      "type": 0,
-      "value": ", video"
+      "value": "Video"
     }
   ]
 };

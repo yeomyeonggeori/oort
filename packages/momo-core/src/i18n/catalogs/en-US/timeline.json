@@ -1,4 +1,4 @@
 {
   "timeline.unfurl.label": "Link preview: {title}, {domain}",
-  "timeline.unfurl.labelVideo": "Link preview: {title}, {domain}, video"
+  "timeline.unfurl.video": "Video"
 }

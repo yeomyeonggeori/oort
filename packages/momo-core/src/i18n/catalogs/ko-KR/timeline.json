@@ -1,4 +1,4 @@
 {
   "timeline.unfurl.label": "링크 미리보기: {title}, {domain}",
-  "timeline.unfurl.labelVideo": "링크 미리보기: {title}, {domain}, 동영상"
+  "timeline.unfurl.video": "동영상"
 }

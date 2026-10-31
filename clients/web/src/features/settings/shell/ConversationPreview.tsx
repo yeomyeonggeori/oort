@@ -1,8 +1,13 @@
 import type { ReactNode } from "react";
-import { Eye, ImageIcon } from "lucide-react";
+import { Eye, Globe, ImageIcon } from "lucide-react";
 import type { LinkPreviewPreference } from "@/features/timeline/linkPreviewPreference";
 import { cn } from "@/design/lib/cn";
 import { MESSAGE_BODY_CLASS, MessageBody } from "@/features/timeline/MessageBody";
+import {
+  UNFURL_CARD_SURFACE_CLASS,
+  UNFURL_HERO_FRAME_CLASS,
+  UNFURL_THUMB_SLOT_CLASS,
+} from "@/features/timeline/UnfurlCards";
 import {
   MESSAGE_AVATAR_GUTTER_CLASS,
   MESSAGE_AVATAR_SIZE_CLASS,
@@ -43,34 +48,46 @@ const AGENT_REPLY = [
 
 function LinkCard({ layout }: { layout: Exclude<LinkPreviewPreference, "off"> }) {
   const rich = layout === "rich";
+  const address = (
+    <span className="flex min-w-0 items-center gap-1 text-timestamp text-ink-muted">
+      <Globe className="size-4 shrink-0" aria-hidden="true" />
+      <span className="truncate">example.com</span>
+    </span>
+  );
   return (
     <div
-      className={cn(
-        // `mt-2`는 타임라인의 링크 카드 묶음(`UnfurlCards`)이 본문 아래에서 여는 간격과 같다.
-        "mt-2 flex max-w-pane min-w-0 overflow-hidden rounded-md border border-line bg-surface",
-        rich ? "flex-col" : "items-stretch"
-      )}
+      // `mt-2`는 타임라인의 링크 카드 묶음(`UnfurlCards`)이 본문 아래에서 여는 간격과 같고, 면은 같은 상수다.
+      className={cn("mt-2 max-w-pane min-w-0", UNFURL_CARD_SURFACE_CLASS)}
       data-testid="preview-link-card"
       data-layout={layout}
     >
       {rich ? (
-        <span className="flex aspect-og max-h-unfurl-hero w-full items-center justify-center bg-muted-soft text-icon">
-          <ImageIcon className="size-4" aria-hidden="true" />
+        <span className="flex min-w-0 flex-1 flex-col gap-2 p-3">
+          <span className="flex min-w-0 flex-col gap-px">
+            {address}
+            <span className="line-clamp-2 break-keep text-body font-medium text-ink">
+              v0.1.19 릴리스 노트
+            </span>
+            <span className="line-clamp-2 break-keep text-meta text-ink-muted">
+              이번 배포에서 바뀐 점을 정리했어요.
+            </span>
+          </span>
+          <span className={cn(UNFURL_HERO_FRAME_CLASS, "flex items-center justify-center text-icon")}>
+            <ImageIcon className="size-4" aria-hidden="true" />
+          </span>
         </span>
       ) : (
-        <span className="m-3 flex size-rail-tile shrink-0 items-center justify-center self-center rounded-sm bg-muted-soft text-icon">
-          <ImageIcon className="size-4" aria-hidden="true" />
+        <span className="flex min-w-0 flex-1 items-center gap-3 p-2">
+          <span className={UNFURL_THUMB_SLOT_CLASS}>
+            <ImageIcon className="size-4" aria-hidden="true" />
+          </span>
+          <span className="flex min-w-0 flex-1 flex-col gap-px">
+            {address}
+            <span className="truncate text-body font-medium text-ink">v0.1.19 릴리스 노트</span>
+            <span className="truncate text-meta text-ink-muted">이번 배포에서 바뀐 점을 정리했어요.</span>
+          </span>
         </span>
       )}
-      <span className={cn("flex min-w-0 flex-1 flex-col gap-px p-3", !rich && "pl-0")}>
-        <span className="truncate text-timestamp text-ink-muted">example.com</span>
-        <span className="line-clamp-2 break-keep text-body font-medium text-ink">
-          v0.1.19 릴리스 노트
-        </span>
-        <span className="line-clamp-2 break-keep text-meta text-ink-muted">
-          이번 배포에서 바뀐 점을 정리했어요.
-        </span>
-      </span>
     </div>
   );
 }
