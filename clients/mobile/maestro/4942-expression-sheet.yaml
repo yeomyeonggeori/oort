@@ -1,0 +1,118 @@
+appId: app.momo.ios
+name: 4942-expression-sheet
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID
+---
+# 4942-expression-sheet — 입력창 보내기 왼쪽 표현 단추 → 바텀시트의 네 탭(이모티콘·이모지·팀 이모지·GIF)과 검색 하나 (owner 10-31).
+#
+# 스택 검증용이다(워커는 돌리지 않았다 — `runtime-unverified`). 서버에 아무것도 쓰지 않는다: 이모지 하나를 입력칸에 넣을 뿐
+# 메시지는 보내지 않는다. 보내기·넣기 규칙(이모티콘·GIF = 큰 그림 미리보기 뒤 대화로, 이모지·팀 이모지 = 입력칸)과 탭 안 검색·최근
+# 먼저·동작 줄이기는 폰 jest(`__tests__/expressionSheet.test.tsx`)가 코어 fixture 서버로 재고, 이 흐름은 jest 가 못 재는 것을 본다:
+#   · 단추가 쉬는 알약에도, 글을 치는 동안에도 보내기 바로 왼쪽에 서 있는가(글 칸이 단추 밑으로 흐르지 않는가)
+#   · 시트가 열리고 네 탭이 오가며 **검색이 하나**이고 탭을 옮겨도 남는가
+#   · 이모지를 고르면 시트가 내려가고 입력칸에 글자가 들어가며 키보드가 되돌아오는가
+#
+# 팀 보관함에 표현이 하나도 없는 격리 스택이면 세 팀 탭은 「아직 … 없어요」 안내와 「＋ 추가하기」(이모티콘·팀 이모지)까지만
+# 지난다. 칸을 눌러 큰 그림 미리보기 → 「보내기」(이모티콘·GIF)와 입력칸에 `:이름:` 넣기(팀 이모지)는 GIF 하나를 등록한 스택에서
+# 손으로 한 번 더 본다(인계 「스택 검증 메모」).
+#
+# 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼 ≥1.5(네 탭이 가로로 밀림)): 쉬는 알약 · 글 치는 알약 · 시트 네 탭 ·
+# 「＋」의 안쪽 장(검색·탭 줄이 접힘). 캡처와 design-review 는 planner 몫이다.
+#
+# 손으로 돌리는 법(레인 밖): 70-composer-newline.yaml 의 머리말과 같다 — 로그인할 수 있는 멤버가 든 격리 스택 + 이 체크아웃의 Metro.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-pill"
+    timeout: 30000
+
+# ① 쉬는 알약: 보내기 왼쪽에 단추가 서 있다(알약을 펼치기 전).
+- assertVisible:
+    id: "composer-expression"
+- assertVisible:
+    id: "composer-send"
+
+# ② 글을 치는 동안에도 보이고, 도구 줄(@만 남는다)에는 같은 단추가 더는 없다.
+- tapOn:
+    id: "composer-input"
+- inputText: "안녕"
+- assertVisible:
+    id: "composer-expression"
+- assertVisible:
+    id: "composer-tool-mention"
+# 아래 한 줄은 옛 도구 줄 단추(`composer-tool-emoji`)가 걷혔다는 기록이다 — 런타임 상태를 재는 단정이 아니다(그 id 는 이제 어디에도 없다).
+- assertNotVisible:
+    id: "composer-tool-emoji"
+
+# ③ 시트가 열리고 네 탭이 서며 검색은 하나다.
+- tapOn:
+    id: "composer-expression"
+- assertVisible:
+    id: "expression-sheet-search"
+- assertVisible:
+    id: "expression-sheet-tab-emoticon"
+- assertVisible:
+    id: "expression-sheet-tab-emoji"
+- assertVisible:
+    id: "expression-sheet-tab-team"
+- assertVisible:
+    id: "expression-sheet-tab-gif"
+# 이모지 본문은 제 검색 칸·「우리 팀」 탭을 세우지 않는다(검색 하나).
+- assertNotVisible:
+    id: "emoji-search"
+- assertNotVisible:
+    id: "emoji-tab-team"
+
+# ④ 검색어는 탭을 옮겨도 남고 지금 탭 안에서만 거른다.
+- tapOn:
+    id: "expression-sheet-search"
+- inputText: "zzzzqq"
+- pressKey: Enter
+- tapOn:
+    id: "expression-sheet-tab-gif"
+- assertVisible:
+    id: "emoji-team-empty"
+- assertNotVisible:
+    id: "expression-add-menu"
+- tapOn:
+    id: "expression-sheet-tab-emoticon"
+- assertVisible:
+    id: "expression-add-menu"
+- tapOn:
+    id: "expression-sheet-tab-team"
+- assertVisible:
+    id: "expression-add-menu"
+
+# ⑤ 이모지 탭으로 돌아와 검색을 지우고 하나 고르면 시트가 내려가고 입력칸에 들어간다(보내지 않는다).
+#    ④의 Enter 가 검색칸을 내려놓았으므로(`onSubmitEditing` = 자판 내림) 지우기 전에 칸을 다시 누른다 — 안 그러면 지울 칸이 없다.
+- tapOn:
+    id: "expression-sheet-tab-emoji"
+- tapOn:
+    id: "expression-sheet-search"
+- eraseText: 6
+- tapOn:
+    id: "emoji-pick-👍️"
+- assertNotVisible:
+    id: "expression-sheet-search"
+- assertVisible:
+    id: "composer-input"
+    text: "안녕.*"
+- assertVisible:
+    id: "composer-expression"
+
+# ⑥ 다시 열고 X 로 닫으면 단추로 돌아온다.
+- tapOn:
+    id: "composer-expression"
+- assertVisible:
+    id: "expression-sheet-search"
+- tapOn:
+    id: "expression-sheet-close"
+- assertNotVisible:
+    id: "expression-sheet-search"
+- assertVisible:
+    id: "composer-expression"
