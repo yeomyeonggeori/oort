@@ -2013,8 +2013,9 @@ agent:
   아예 listen하지 않아요. `infra/railway/README.md`(Hermes)를 보세요. 템플릿은
   agent-worker와 hermes에 `OORT_SELF_MEDIA_ORIGIN`(이 엣지의 공개 출처)도 같은 값으로
   둬요. 이 값이 있으면 사진이 붙은 요청에서 에이전트의 그림 도구가 그 사진을 편집할 수
-  있도록 5분짜리 1회용 주소를 받아요. 두 서비스 중 하나라도 비어 있으면 사진 주소는
-  건네지 않아요(#4820).
+  있도록 5분짜리 1회용 주소를 받아요. agent-worker 쪽 값이 비면 사진 주소는 건네지 않아요.
+  hermes 쪽 값만 비면 워커는 주소를 건네지만 그림 가드가 거절하므로 그림 도구는 그 주소를
+  내려받지 않고, 편집할 원본이 없어요(#4820).
 - **docker compose:** `scripts/self_host_env.sh --local-build --with-agents`(또는
   `--published-image …`)가 `COMPOSE_PROFILES=agents`, 생성된 `HERMES_API_KEY`,
   `HERMES_BASE_URL=http://hermes:8642/v1`, 정확한 호스트 `hermes`의 로컬 허용,

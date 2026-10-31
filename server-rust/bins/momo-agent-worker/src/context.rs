@@ -121,7 +121,7 @@ struct Turn {
 /// Both blocks ride **outside the budget trim** (see [`assemble`]). Two or three
 /// lines cannot be what pushes a window over, and a turn that silently dropped
 /// either of them would lose a capability with nothing on screen to say why.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Default, Clone, Copy)]
 pub struct SystemBlocks<'a> {
     /// The current-date block (goal B8 L7). Passed in rather than read from the
     /// clock so [`assemble`] stays deterministic and its tests stay
@@ -159,6 +159,35 @@ pub struct SystemBlocks<'a> {
     /// from channel content. Like the others it rides outside the conversation budget trim (it
     /// has its own budget, enforced where it is built: [`crate::serving`]).
     pub memory: Option<&'a str>,
+}
+
+/// `Debug` by hand because one block is a credential: the `self_media` line holds the one-time
+/// token of the requester's photo address (#4820 C2a, ADR-0218 G4), and a `{:?}` of the blocks
+/// must not be where it leaks. That block prints as `Some("<redacted>")`; every other field prints
+/// as the derive did. The struct is destructured without `..`, so a block added later has to be
+/// decided on here, not skipped in silence.
+impl std::fmt::Debug for SystemBlocks<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let SystemBlocks {
+            now,
+            report_protocol,
+            card_suggest,
+            memory_suggest,
+            self_media,
+            cite_seq,
+            memory,
+        } = self;
+        formatter
+            .debug_struct("SystemBlocks")
+            .field("now", now)
+            .field("report_protocol", report_protocol)
+            .field("card_suggest", card_suggest)
+            .field("memory_suggest", memory_suggest)
+            .field("self_media", &self_media.map(|_| "<redacted>"))
+            .field("cite_seq", cite_seq)
+            .field("memory", memory)
+            .finish()
+    }
 }
 
 /// Build the chat array for one turn.
@@ -552,6 +581,79 @@ mod tests {
                 .count(),
             0
         );
+    }
+
+    /// #4820 C2a security review (L5): the photo address carries a live token, so none of the types
+    /// that hold the line prints it in `{:?}` — the blocks, a message, the assembled window. What
+    /// they do print is untouched (the other blocks, the role, the surrounding text, the workspace
+    /// part of the address), so the redaction cannot be an `Debug` that prints nothing.
+    #[test]
+    fn no_debug_output_of_a_turn_prints_the_photo_address_token() {
+        let token = "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWo";
+        let workspace = "01234567-89ab-cdef-0123-456789abcdef";
+        let line = format!(
+            "첨부 사진 주소 — 그림 도구의 원본(image_url)으로만 쓰고, 5분 뒤 만료: https://oort.example.com/v1/self-media/{workspace}/{token}"
+        );
+        let blocks = SystemBlocks {
+            now: Some("현재 시각: 2026-10-31"),
+            self_media: Some(&line),
+            cite_seq: true,
+            ..SystemBlocks::default()
+        };
+        let window = vec![message(
+            1,
+            Some(5),
+            Some("성재"),
+            "@hermes 이 사진으로 이모티콘 만들어줘",
+        )];
+        let assembled = assemble(
+            &window,
+            Uuid::from_u128(AGENT),
+            Some(Uuid::from_u128(1)),
+            "unused",
+            Some("you are hermes"),
+            blocks,
+            10_000,
+        );
+        let carrier = assembled
+            .messages
+            .iter()
+            .find(|m| m.content.contains("self-media"))
+            .expect("the address line is in the window")
+            .clone();
+        // the credential is still in the request the provider is sent: only `Debug` scrubs it
+        assert!(carrier.content.contains(token));
+
+        let blocks_debug = [format!("{blocks:?}"), format!("{blocks:#?}")];
+        for text in &blocks_debug {
+            assert!(!text.contains(token), "the blocks leaked the token: {text}");
+            assert!(text.contains("<redacted>"), "{text}");
+            assert!(text.contains("현재 시각: 2026-10-31"), "{text}");
+            assert!(text.contains("cite_seq: true"), "{text}");
+        }
+        assert!(
+            blocks_debug[0].contains("self_media: Some(\"<redacted>\")"),
+            "{}",
+            blocks_debug[0]
+        );
+        assert!(format!("{:?}", SystemBlocks::default()).contains("self_media: None"));
+
+        let message_debug = [format!("{carrier:?}"), format!("{carrier:#?}")];
+        let window_debug = [format!("{assembled:?}"), format!("{assembled:#?}")];
+        for text in message_debug.iter().chain(&window_debug) {
+            assert!(!text.contains(token), "a message leaked the token: {text}");
+            assert!(
+                text.contains(&format!("/v1/self-media/{workspace}/<redacted>")),
+                "{text}"
+            );
+        }
+        for text in &window_debug {
+            assert!(
+                text.contains("@hermes 이 사진으로 이모티콘 만들어줘"),
+                "{text}"
+            );
+            assert!(text.contains("you are hermes"), "{text}");
+        }
     }
 
     /// #1466 — the operator's opt-out lands on that same pre-#1454 context,

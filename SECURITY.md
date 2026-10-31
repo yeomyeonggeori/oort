@@ -232,10 +232,16 @@ the photo its requester attached): `image_url` alone may also be one short-lived
 address of that requester's own photo on this oort instance. The address is
 single-use, valid for five minutes, bound to the run, the conversation and that one
 attachment, and oort serves the bytes itself (no redirect, no Drive address); every
-refusal is the same 404, and oort stores only a hash of the token. The plugin
+refusal is the same 404, and oort's token table stores only a hash of the token
+(that is the table, not every place the token passes: a token the model repeats in
+its reply can still end up in a message). The plugin
 compares the address as exact bytes against the one origin the operator configured
-plus a fixed path and token shape, never parsing or normalizing it; with no origin
-configured the exception is off. The photo's bytes then go to OpenAI's image
+plus a fixed path and token shape, never parsing or normalizing it. It sees only
+the shape, not whether a token was ever issued, so the workspace and token slots the
+model fills in can travel as the request path to that one origin, which answers
+anything it did not issue with the same constant 404; with no origin
+configured the exception is off. The remaining risks of this path are listed in
+ADR-0218 G4. The photo's bytes then go to OpenAI's image
 processing like the prompt does, faces included. The lock gate requires that plugin (pinned
 bytes, enabled, and exercised with refused and accepted examples, including the
 one allowed address and its bypass variants, at every start),

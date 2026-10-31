@@ -46,10 +46,29 @@ pub const SELF_MEDIA_TOKEN_CHARS: usize = 43;
 const CLEANUP_AFTER_SECS: f64 = 86_400.0;
 
 /// A freshly minted address: the token (shown once, never stored) and when it dies.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` is written by hand: the token is the whole credential until it is spent, so a stray
+/// `{:?}` (a `tracing::debug!(?grant)`, an `unwrap()` message) must not be where it leaks. It prints
+/// `<redacted>` and the expiry, nothing else.
+#[derive(Clone, PartialEq, Eq)]
 pub struct SelfMediaGrant {
     pub token: String,
     pub expires_at: DateTime<Utc>,
+}
+
+impl std::fmt::Debug for SelfMediaGrant {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Destructured so that a field added later has to be decided on here, not skipped silently.
+        let SelfMediaGrant {
+            token: _,
+            expires_at,
+        } = self;
+        formatter
+            .debug_struct("SelfMediaGrant")
+            .field("token", &"<redacted>")
+            .field("expires_at", expires_at)
+            .finish()
+    }
 }
 
 /// What a redeemed token lets the route read: one Drive file, its declared size and mime.
@@ -474,6 +493,43 @@ mod tests {
         assert_eq!(
             redact_self_media_urls("self-media is a word"),
             "self-media is a word"
+        );
+    }
+
+    /// The grant carries the live token, so no `{:?}` — plain or pretty, the value or a container of
+    /// it — may print it. The expiry and the marker must still be there: an empty `Debug` would pass
+    /// the first half of this test and tell a reader nothing.
+    #[test]
+    fn a_grant_never_prints_its_token_in_debug() {
+        let token = new_token().expect("entropy");
+        let expires_at = DateTime::<Utc>::from_timestamp(1_900_000_000, 0).expect("a timestamp");
+        let grant = SelfMediaGrant {
+            token: token.clone(),
+            expires_at,
+        };
+        let rendered = [
+            format!("{grant:?}"),
+            format!("{grant:#?}"),
+            format!("{:?}", Some(&grant)),
+            format!("{:?}", vec![grant.clone()]),
+        ];
+        for text in &rendered {
+            assert!(!text.contains(&token), "the token leaked: {text}");
+            assert!(text.contains("SelfMediaGrant"), "{text}");
+            assert!(text.contains("<redacted>"), "{text}");
+            assert!(
+                text.contains("2030-03-17"),
+                "the expiry is still shown: {text}"
+            );
+        }
+        // the credential itself is untouched: the field is public and `PartialEq` still sees it
+        assert_eq!(grant.token, token);
+        assert_ne!(
+            grant,
+            SelfMediaGrant {
+                token: new_token().expect("entropy"),
+                expires_at
+            }
         );
     }
 
