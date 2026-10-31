@@ -1,4 +1,5 @@
-import {localeAutonyms, type LocalePreference} from '@momo/core/i18n';
+import {localeAutonyms} from '@momo/core/i18n/autonyms';
+import type {LocalePreference} from '@momo/core/i18n/locale';
 import React, {useRef, useState} from 'react';
 import {ActivityIndicator, ScrollView, StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
