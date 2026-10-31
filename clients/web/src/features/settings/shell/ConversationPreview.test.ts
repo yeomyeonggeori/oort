@@ -18,6 +18,7 @@ const read = (rel: string) =>
 const preview = read("./ConversationPreview.tsx");
 const messageRow = read("../../timeline/MessageRow.tsx");
 const messageBody = read("../../timeline/MessageBody.tsx");
+const unfurlCards = read("../../timeline/UnfurlCards.tsx");
 
 /** `import { A, B } from "<module>"`에서 이름들을 꺼낸다. */
 function importedFrom(source: string, module: string): string[] {
@@ -82,5 +83,31 @@ describe("대화 미리보기가 타임라인과 같은 값을 읽는다", () =>
     expect(preview).toContain("rounded-full");
     expect(preview).toContain("rounded-sm");
     expect(messageRow).toContain('identity.kind === "agent" ? "rounded-sm" : "rounded-full"');
+  });
+});
+
+// 링크 카드 샘플은 눌리지 않는 그림이라 진짜 `UnfurlCardView`를 쓰지 못하고 같은 클래스를 다시 적는다(#4882).
+// 한쪽만 바뀌면 미리보기가 거짓말이 되므로, 두 소스에 같은 클래스 문자열이 있는지 맞대 본다.
+describe("링크 카드 샘플이 타임라인 카드와 같은 클래스를 쓴다", () => {
+  const SHARED = [
+    "relative isolate flex rounded-md bg-surface-muted", // 테두리 없는 면
+    "relative flex h-unfurl-tile w-unfurl-thumb shrink-0 items-center justify-center overflow-hidden rounded-sm bg-muted-soft text-icon", // 104x64 그림 칸
+  ] as const;
+
+  it.each(SHARED)("두 소스에 모두 있다: %s", (classes) => {
+    const words = (source: string) => [...source.matchAll(/className="([^"]*)"/g)].map((m) => m[1]!);
+    const asSet = (text: string) => new Set(text.split(/\s+/));
+    const covers = (source: string) =>
+      words(source).some((value) => {
+        const have = asSet(value);
+        return classes.split(" ").every((c) => have.has(c));
+      });
+    expect(covers(unfurlCards), "UnfurlCards.tsx").toBe(true);
+    expect(covers(preview), "ConversationPreview.tsx").toBe(true);
+  });
+
+  it("미리보기는 크게 카드의 그림 틀을 타임라인과 같은 상수에서 받는다", () => {
+    expect(preview).toContain("UNFURL_HERO_FRAME_CLASS");
+    expect(preview).toContain('from "@/features/timeline/UnfurlCards"');
   });
 });

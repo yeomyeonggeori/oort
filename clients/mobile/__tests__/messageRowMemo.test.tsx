@@ -134,6 +134,20 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
     },
   },
   quoteAttachmentCount: {quoteAttachmentCount: 2},
+  // #4883. 서버가 카드를 만들거나 작성자가 지우면 한 메시지의 투영 배열이 새것이 된다(`replaceMessageUnfurls`). 목록이 줄마다
+  // 그 배열을 그대로(없으면 같은 빈 배열을) 건네므로 동일성이 곧 값이다. 비교자가 이것을 안 보면, 카드가 도착한 뒤에도 붙어 있는
+  // 행은 카드 없이 서 있다.
+  unfurls: {
+    unfurls: [
+      {
+        id: 'u-1',
+        messageId: 'msg-1',
+        url: 'https://example.com/a',
+        status: 'ok',
+        title: '제목',
+      },
+    ],
+  },
   rollup: {rollup: {replyCount: 2, lastReplySeq: 10, lastReplyAtMs: BASE_MS}},
   replyParent: {replyParent: message(1)},
   // 원본이 **수정되면** 인용도 따라 바뀐다(ADR-0148 규칙 3: 참조이지 사본이

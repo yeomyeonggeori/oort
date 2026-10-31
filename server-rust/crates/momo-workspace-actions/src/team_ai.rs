@@ -1220,6 +1220,9 @@ pub async fn propose_with_avatar_in_tx(
     if let Some(object) = payload.as_object_mut() {
         object.insert("via_ai".into(), via_json(context, requester.member_id));
     }
+    // ADR-0204 증보 6 D6-2: the card carries the same answer the push and the `push_action`
+    // refusal give, judged on the payload that is about to be stored.
+    let decision = actions::decision_mode(actions::ACTION_TYPE_WORKSPACE_ACTION, &payload);
     let approval_id = momo_agent::approval::create_pending_approval_in_tx(
         conn,
         workspace_id,
@@ -1278,6 +1281,7 @@ pub async fn propose_with_avatar_in_tx(
             }),
         );
     }
+    actions::stamp_decision_mode(&mut props, decision);
     // The card is authored by the team AI; the body says so in words.
     let card = send_message_in_tx(
         conn,
@@ -1286,7 +1290,11 @@ pub async fn propose_with_avatar_in_tx(
             channel_id: context.channel_id,
             author_member_id: context.agent_member_id,
             message_type: MessageType::ApprovalRequest,
-            body: Some(actions::workspace_action_request_body(action)),
+            body: Some(actions::workspace_action_request_body_with(
+                action,
+                Some(&resolved.validated.normalized),
+                false,
+            )),
             props,
             root_id: None,
             reply_to_id: None,

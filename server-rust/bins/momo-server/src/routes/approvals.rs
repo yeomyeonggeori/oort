@@ -61,6 +61,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine as _;
 use chrono::Utc;
 use momo_agent::actions::{
     action_by_id, action_ref, action_result_props, agent_invite_result_body,
@@ -88,13 +90,15 @@ use momo_agent::actions::{
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
     decision_stamp_in_tx, default_execution_host, existing_decision_in_tx,
-    is_active_channel_member_in_tx, is_active_human_member_in_tx, is_overdue, list_approvals_in_tx,
-    lock_approval_in_tx, mark_approval_decided_in_tx, mark_approval_expired_in_tx,
-    normalized_reason, offers_host_choice, record_decision_in_tx, reference_execution_host,
-    resume_job_payload, selectable_host_ids, validated_limit, validated_status, ApprovalListRow,
+    is_active_channel_member_in_tx, is_active_human_member_in_tx, is_overdue,
+    list_approval_page_in_tx, lock_approval_in_tx, mark_approval_decided_in_tx,
+    mark_approval_expired_in_tx, normalized_reason, offers_host_choice, record_decision_in_tx,
+    reference_execution_host, resume_job_payload, selectable_host_ids, validated_limit,
+    validated_scope, validated_status_filter, with_receipt_line, ApprovalCursor, ApprovalListRow,
     LockedApproval,
 };
 use momo_agent::approval_outcome::approval_card_outcome;
+use momo_agent::approval_sentence::{receipt_line, LineKind};
 use momo_agent::decider::{action_required_role, decider_gate, GatePlan};
 use momo_agent::tools::TOOL_AUDIT_SCHEMA;
 use momo_agent::{
@@ -132,7 +136,7 @@ use crate::config::T3Settings;
 use crate::dev_credential::DevCredential;
 use crate::dto::{
     ApprovalDecisionReceipt, ApprovalDecisionRequest, ApprovalDto, ApprovalListQuery,
-    ApprovalListResponse, SecretOnceDto,
+    ApprovalListResponse, ApprovalResultDto, SecretOnceDto,
 };
 use crate::error::ApiError;
 use crate::plugin_writes::{self, Actor, Provenance};
@@ -343,7 +347,18 @@ fn is_run_not_parked(error: &momo_db::DbError) -> bool {
 // list
 // ---------------------------------------------------------------------------
 
-/// `GET /v1/workspaces/{ws}/approvals` (Swift `list`, :22-54).
+/// `GET /v1/workspaces/{ws}/approvals?status=&scope=&limit=&cursor=` (Swift `list`,
+/// :22-54; ADR-0186 v6 R-f).
+///
+/// | `status` | rows | order |
+/// |---|---|---|
+/// | `pending` (default) | the to-decide queue | soonest deadline first, no cursor |
+/// | `approved` `rejected` `expired` `cancelled` | that status | newest first, `nextCursor` |
+/// | `all` | the five | newest first, `nextCursor` |
+///
+/// `scope=team` (default) is every approval in the rooms the caller is in; `scope=mine`
+/// narrows to what they decided, requested, or own the agent of. Neither reaches a room
+/// the caller has left, nor another workspace.
 pub async fn list(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -351,13 +366,33 @@ pub async fn list(
     Query(query): Query<ApprovalListQuery>,
 ) -> Result<Json<ApprovalListResponse>, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
-    let status = validated_status(query.status.as_deref()).ok_or_else(|| {
-        ApiError::bad_request("status must be pending, approved, rejected, expired, or cancelled")
+    let status = validated_status_filter(query.status.as_deref()).ok_or_else(|| {
+        ApiError::bad_request(
+            "status must be pending, approved, rejected, expired, cancelled, or all",
+        )
     })?;
+    let scope = validated_scope(query.scope.as_deref())
+        .ok_or_else(|| ApiError::bad_request("scope must be team or mine"))?;
+    let after = match query
+        .cursor
+        .as_deref()
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
+        None => None,
+        Some(_) if !status.is_time_ordered() => {
+            return Err(ApiError::bad_request(
+                "cursor is not supported with status=pending",
+            ))
+        }
+        Some(token) => Some(
+            decode_cursor(token).ok_or_else(|| ApiError::bad_request("invalid approval cursor"))?,
+        ),
+    };
     let limit = validated_limit(query.limit.as_deref());
     let member_id = principal.member_id;
 
-    let outcome: DbRejectable<Vec<ApprovalListRow>> =
+    let outcome: DbRejectable<momo_agent::approval::ApprovalPage> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 if !is_active_human_member_in_tx(conn, member_id).await? {
@@ -365,11 +400,13 @@ pub async fn list(
                         "not an active human workspace member",
                     )));
                 }
-                Ok(Ok(list_approvals_in_tx(
+                Ok(Ok(list_approval_page_in_tx(
                     conn,
                     workspace_id,
                     member_id,
                     &status,
+                    scope,
+                    after,
                     limit,
                 )
                 .await?))
@@ -377,10 +414,46 @@ pub async fn list(
         })
         .await;
 
-    let approvals = settle_db("approvals.list", outcome)?;
+    let page = settle_db("approvals.list", outcome)?;
     Ok(Json(ApprovalListResponse {
-        approvals: approvals.iter().map(approval_dto).collect(),
+        approvals: page.rows.iter().map(approval_dto).collect(),
+        next_cursor: page.next.as_ref().map(encode_cursor),
     }))
+}
+
+/// `inline` or `open`: may this approval be decided where it is shown, or must it be
+/// opened in the app (ADR-0186 v6 R-f `decision_mode`)?
+///
+/// It **calls** the one judgment, [`momo_agent::actions::decision_mode`] (#4764) — the
+/// function the push categories, the `push_action` refusal and the decision route read —
+/// and decides nothing of its own. The places this fills are the approval list (and the
+/// inbox's pending cards, which share [`approval_dto`]) and the run bundle
+/// (`routes::run_bundle`).
+pub(crate) fn decision_mode(action_type: &str, payload: &Value) -> &'static str {
+    momo_agent::actions::decision_mode(action_type, payload).as_str()
+}
+
+/// `nextCursor`: the position of the last row of a page, as `{microseconds}:{id}` in
+/// URL-safe base64 — the shape of the inbox cursor (ADR-0199 D6). Opaque to clients.
+fn encode_cursor(cursor: &ApprovalCursor) -> String {
+    URL_SAFE_NO_PAD.encode(format!("{}:{}", cursor.at.timestamp_micros(), cursor.id))
+}
+
+/// The inverse of [`encode_cursor`]. `None` for anything that is not exactly that, or
+/// whose time is outside what Postgres stores and a client could have been given:
+/// the answer is a 400, never a bind error.
+fn decode_cursor(token: &str) -> Option<ApprovalCursor> {
+    let bytes = URL_SAFE_NO_PAD.decode(token.as_bytes()).ok()?;
+    let text = String::from_utf8(bytes).ok()?;
+    let (micros, id) = text.split_once(':')?;
+    let at = chrono::DateTime::from_timestamp_micros(micros.parse().ok()?)?;
+    if !(0..=4_102_444_800).contains(&at.timestamp()) {
+        return None;
+    }
+    Some(ApprovalCursor {
+        at,
+        id: Uuid::parse_str(id).ok()?,
+    })
 }
 
 pub(crate) fn approval_dto(row: &ApprovalListRow) -> ApprovalDto {
@@ -399,6 +472,13 @@ pub(crate) fn approval_dto(row: &ApprovalListRow) -> ApprovalDto {
         decision_reason: row.decision_reason.clone(),
         expires_at_ms: row.expires_at.map(epoch_ms),
         created_at_ms: epoch_ms(row.created_at),
+        decision_mode: decision_mode(&row.action_type, &row.payload),
+        is_direct: row.is_direct,
+        root_id: row.root_id.map(|id| id.to_string()),
+        result: row
+            .result_line
+            .as_ref()
+            .map(|line| ApprovalResultDto { line: line.clone() }),
     }
 }
 
@@ -942,7 +1022,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     // and before anything is read or written for the decision. The credential only
     // ever NARROWS the route here; it never grants (the token adds no authority).
     if input.credential_via.is_some()
-        && momo_agent::actions::opens_in_app(&approval.action_type, &approval.payload)
+        && momo_agent::actions::decision_mode(&approval.action_type, &approval.payload).is_open()
     {
         return Ok(Ok(refusal(
             approval.id,
@@ -1011,14 +1091,36 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             .await?
             .map(|(by, at)| (by, at.unwrap_or(now)))
             .unwrap_or((Some(input.member_id), now));
-        return Ok(Ok(Decision {
-            receipt: decision_receipt(
-                approval.id,
-                &status,
-                decided_by,
-                decided_at,
-                Some(&format!("approval is already {status}")),
+        let receipt = decision_receipt(
+            approval.id,
+            &status,
+            decided_by,
+            decided_at,
+            Some(&format!("approval is already {status}")),
+        );
+        // ADR-0204 증보 6 D6-4: 「이미 승인된(거부된) 요청이에요 · 소개 바꾸기」. An expired or a
+        // cancelled card has no sentence of this kind — the device keeps its own.
+        let receipt = match status.as_str() {
+            "approved" => with_receipt_line(
+                receipt,
+                receipt_line(
+                    &approval.action_type,
+                    &approval.payload,
+                    LineKind::AlreadyApproved,
+                ),
             ),
+            "rejected" => with_receipt_line(
+                receipt,
+                receipt_line(
+                    &approval.action_type,
+                    &approval.payload,
+                    LineKind::AlreadyRejected,
+                ),
+            ),
+            _ => receipt,
+        };
+        return Ok(Ok(Decision {
+            receipt,
             // The server has already stopped this action. Acknowledge the
             // terminal card without resurrecting work or recording a new vote.
             status: if status == "cancelled" {
@@ -1345,12 +1447,25 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         now,
         input.reason,
     );
-    let receipt = decision_receipt(
-        approval.id,
-        desired_status,
-        Some(input.member_id),
-        now,
-        input.reason,
+    // ADR-0204 증보 6 D6-4: the line is part of the receipt, so it is stored with it and a
+    // second tap replays the sentence the first one got.
+    let receipt = with_receipt_line(
+        decision_receipt(
+            approval.id,
+            desired_status,
+            Some(input.member_id),
+            now,
+            input.reason,
+        ),
+        receipt_line(
+            &approval.action_type,
+            &approval.payload,
+            if input.approve {
+                LineKind::Approved
+            } else {
+                LineKind::Rejected
+            },
+        ),
     );
 
     if !mark_approval_decided_in_tx(
@@ -2553,12 +2668,15 @@ async fn execute_workspace_action(
         now,
         input.reason,
     );
-    let mut receipt = decision_receipt(
-        approval.id,
-        "approved",
-        Some(input.member_id),
-        now,
-        input.reason,
+    let mut receipt = with_receipt_line(
+        decision_receipt(
+            approval.id,
+            "approved",
+            Some(input.member_id),
+            now,
+            input.reason,
+        ),
+        receipt_line(&approval.action_type, &approval.payload, LineKind::Approved),
     );
     // The **ref only** (ADR-0186 D2). This object is stored verbatim in
     // `approval_decision.receipt` and replayed to a retry, so anything put here
@@ -4992,6 +5110,42 @@ fn refusal(
 mod tests {
     use super::*;
 
+    /// `nextCursor` is a position and nothing else: it round-trips to the microsecond
+    /// (two approvals that moved in the same millisecond must still be told apart), and
+    /// everything that is not exactly `{microseconds}:{uuid}` is refused, as is a time
+    /// Postgres cannot hold — so a bad token is a 400 and never a bind error.
+    #[test]
+    fn a_cursor_round_trips_to_the_microsecond_and_nothing_else_decodes() {
+        let cursor = ApprovalCursor {
+            at: chrono::DateTime::from_timestamp_micros(1_761_900_000_123_457).expect("time"),
+            id: Uuid::parse_str("0199aa11-0000-7000-8000-00000000000b").expect("id"),
+        };
+        assert_eq!(decode_cursor(&encode_cursor(&cursor)), Some(cursor));
+        let other = ApprovalCursor {
+            at: chrono::DateTime::from_timestamp_micros(1_761_900_000_123_458).expect("time"),
+            ..cursor
+        };
+        assert_ne!(
+            encode_cursor(&cursor),
+            encode_cursor(&other),
+            "one microsecond apart is two positions"
+        );
+
+        let id = cursor.id;
+        for bad in [
+            String::new(),
+            "not base64 !!".to_string(),
+            URL_SAFE_NO_PAD.encode("nope"),
+            URL_SAFE_NO_PAD.encode("1:nope"),
+            URL_SAFE_NO_PAD.encode(format!("nope:{id}")),
+            URL_SAFE_NO_PAD.encode(format!("-1:{id}")),
+            URL_SAFE_NO_PAD.encode(format!("99999999999999999:{id}")),
+            URL_SAFE_NO_PAD.encode(vec![0xff, 0xfe]),
+        ] {
+            assert_eq!(decode_cursor(&bad), None, "{bad:?}");
+        }
+    }
+
     /// `deliverSecretToAgent` truth table (ADR-0186 증보 v3, security review of
     /// #3795): honoured only when approving a workspace action that offers
     /// opt-in delivery — every other cell is a refusal. The `offers_opt_in` row
@@ -5417,6 +5571,26 @@ mod tests {
         ));
         assert!(!shows_a_value_to_the_lock_screen(None, true));
         assert!(!shows_a_value_to_the_lock_screen(None, false));
+    }
+
+    /// `momo_agent` writes the spawn approval's `action_type` into its sentences
+    /// (`approval_sentence`) and cannot depend on `momo_t3`, which owns the constant: the two
+    /// spellings are pinned equal here, so a renamed spawn type cannot silently become a
+    /// 「요청」 with no name in the receipt's line.
+    #[test]
+    fn the_sentence_module_spells_the_spawn_action_type_as_the_work_control_does() {
+        assert_eq!(
+            momo_agent::approval_sentence::WORK_SPAWN_ACTION_TYPE,
+            momo_t3::work_control::ACTION_TYPE_WORK_SPAWN
+        );
+        assert_eq!(
+            momo_agent::approval_sentence::receipt_line(
+                momo_t3::work_control::ACTION_TYPE_WORK_SPAWN,
+                &json!({}),
+                momo_agent::approval_sentence::LineKind::Rejected,
+            ),
+            "작업 시작을 거부했어요"
+        );
     }
 
     /// The `opens_in_app` refusal is a receipt like every other expected failure,

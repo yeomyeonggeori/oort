@@ -22928,6 +22928,17 @@ async fn an_unasked_card_stands_in_the_owners_dm_with_one_run_one_approval_and_n
     assert_eq!(payload["origin"], "agent_initiated");
     let props = message_props(&su, card).await;
     assert_eq!(props["origin"], "agent_initiated");
+    // ADR-0204 증보 6 D6-2 · D6-3: nobody asked, so the card says so first and is opened in the app.
+    assert_eq!(props["decision_mode"], "open");
+    let initiated_body: String = sqlx::query_scalar("SELECT body FROM message WHERE id=$1")
+        .bind(card)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(
+        initiated_body,
+        format!("먼저 제안 · 비공개 채널을 만들어도 될까요? · 「{name}」")
+    );
     assert_eq!(props["channel_id"], json!(dm.to_string()));
     assert!(
         card_row(&props, "이 에이전트도 참여")

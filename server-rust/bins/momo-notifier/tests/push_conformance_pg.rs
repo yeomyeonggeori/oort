@@ -2454,6 +2454,10 @@ struct Card {
     audience: Vec<Who>,
     /// `momo.approval` (the lock screen decides) or `momo.approval.open` (the app does).
     category: &'static str,
+    /// Why (ADR-0204 증보 6 D6-2: 1회 값 · 권한 · 되돌릴 수 없음 · 앱에서 봐야 함 · 먼저 제안 ·
+    /// 모르는 모양 · 없음) — [`momo_agent::actions::DecisionReason::as_str`]. A recorded column,
+    /// not a comment: the test below asks the one function and compares.
+    reason: &'static str,
 }
 
 fn workspace_action(id: &str, pins: Value) -> Value {
@@ -2500,11 +2504,23 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
     let admins = vec![Who::Owner, Who::Admin];
     vec![
         Card {
-            label: "a tool call: any member of the room",
+            label: "a tool call of the catalog: any member of the room",
             action_type: "tool_call",
-            payload: json!({"tool_call": {"call_id": "c1", "name": "send_message"}}),
+            payload: json!({"tool_call": {"call_id": "c1", "name": "work.session.end"}}),
             audience: EVERYONE.to_vec(),
             category: inline,
+            reason: "none",
+        },
+        // ADR-0204 증보 6 D6-2 (the changed row): a tool outside the catalog is an operator's
+        // own, whose effect the server cannot say it can undo — it used to be decided from the
+        // banner and is now opened in the app.
+        Card {
+            label: "an operator's own tool (outside the catalog): any member of the room; the app opens it",
+            action_type: "tool_call",
+            payload: json!({"tool_call": {"call_id": "c1b", "name": "send_message"}}),
+            audience: EVERYONE.to_vec(),
+            category: open,
+            reason: "irreversible",
         },
         // Planner decision 2026-10-17: the lock screen cannot show what is being
         // approved, so these two are opened in the app.
@@ -2521,6 +2537,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             }}),
             audience: EVERYONE.to_vec(),
             category: open,
+            reason: "needs_the_app",
         },
         Card {
             label: "a tool call that names no tool: nothing says a banner is enough",
@@ -2528,6 +2545,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: json!({"tool_call": {"call_id": "c3"}}),
             audience: EVERYONE.to_vec(),
             category: open,
+            reason: "unknown_shape",
         },
         Card {
             label: "agent.profile.update, words only: admins and the agent's owner; the lock screen decides",
@@ -2535,6 +2553,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: profile_update(room, json!({"tagline": "새 소개"})),
             audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
             category: inline,
+            reason: "none",
         },
         Card {
             label: "agent.profile.update with a staged picture: admins and the agent's owner; the app shows the picture",
@@ -2550,6 +2569,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             ),
             audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
             category: open,
+            reason: "needs_the_app",
         },
         Card {
             label: "agent.profile.update removing the picture: opened too — the change is to the picture",
@@ -2557,6 +2577,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: profile_update(room, json!({"avatar": null})),
             audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
             category: open,
+            reason: "needs_the_app",
         },
         Card {
             label: "agent.profile.update changing the name: the app shows the new name",
@@ -2564,6 +2585,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: profile_update(room, json!({"displayName": "새 이름"})),
             audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
             category: open,
+            reason: "needs_the_app",
         },
         Card {
             label: "member.display_name.set: the requester sees the new name in the app",
@@ -2575,6 +2597,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             }}),
             audience: vec![Who::Owner],
             category: open,
+            reason: "needs_the_app",
         },
         // Not reachable (the resolver stores an object), but it is the one input on which
         // Postgres' `jsonb_exists` alone would disagree with `opens_in_app`: it says yes
@@ -2585,6 +2608,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: profile_update(room, json!(["avatar", "displayName"])),
             audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
             category: inline,
+            reason: "none",
         },
         Card {
             label: "channel.create: workspace admins",
@@ -2592,6 +2616,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: workspace_action("channel.create", json!({})),
             audience: admins.clone(),
             category: inline,
+            reason: "none",
         },
         Card {
             label: "workspace.settings.update: operator, which a row can only see as an admin",
@@ -2599,6 +2624,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: workspace_action("workspace.settings.update", json!({})),
             audience: admins.clone(),
             category: inline,
+            reason: "none",
         },
         Card {
             label: "agent.rename: admins and the target agent's owner",
@@ -2606,6 +2632,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: workspace_action("agent.rename", json!({"target": room.pet.to_string()})),
             audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
             category: open,
+            reason: "needs_the_app",
         },
         Card {
             label: "invite.create: admins; the link is shown once, so the app opens it",
@@ -2613,6 +2640,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: workspace_action("invite.create", json!({})),
             audience: admins.clone(),
             category: open,
+            reason: "one_time_value",
         },
         Card {
             label: "agent.invite: admins; the pairing code is shown once, so the app opens it",
@@ -2620,6 +2648,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: workspace_action("agent.invite", json!({})),
             audience: admins.clone(),
             category: open,
+            reason: "one_time_value",
         },
         // ADR-0186 증보 v5 U-e (#4703): the card quotes the first 120 characters of a message
         // that can be thousands, and a pin endorses all of it — read in the app, not decided
@@ -2630,6 +2659,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: workspace_action("message.pin", json!({})),
             audience: admins.clone(),
             category: open,
+            reason: "needs_the_app",
         },
         Card {
             label: "message.unpin: admins; the same card, the same app",
@@ -2637,6 +2667,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: workspace_action("message.unpin", json!({})),
             audience: admins.clone(),
             category: open,
+            reason: "needs_the_app",
         },
         // ADR-0186 증보 v5 U-c (#4704): nobody asked for this card, so a 승인 button on the lock
         // screen would consent to something its reader never looked at. `channel.create` is
@@ -2649,8 +2680,9 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
                 payload["origin"] = json!("agent_initiated");
                 payload
             },
-            audience: admins,
+            audience: admins.clone(),
             category: open,
+            reason: "unasked",
         },
         Card {
             label: "spawn onto the owner's own laptop (card default): that owner only",
@@ -2658,6 +2690,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: spawn_payload(room, Some(room.laptop), Some(room.laptop)),
             audience: vec![Who::HostOwner],
             category: open,
+            reason: "needs_the_app",
         },
         Card {
             label: "spawn the request named a laptop and the card chose nothing: that owner only",
@@ -2665,6 +2698,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: spawn_payload(room, None, Some(room.laptop)),
             audience: vec![Who::HostOwner],
             category: open,
+            reason: "needs_the_app",
         },
         Card {
             label: "spawn onto a team box: any member of the room",
@@ -2672,6 +2706,31 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             payload: spawn_payload(room, Some(room.team_box), Some(room.team_box)),
             audience: EVERYONE.to_vec(),
             category: open,
+            reason: "needs_the_app",
+        },
+        // ADR-0204 증보 6 D6-2 (the changed row): an agent asking for more channels is a
+        // permission — the app opens it. The card the server raised in place, because a person
+        // called the agent in that very channel, is the one that is still decided from the
+        // banner: the origin alone moves it back.
+        Card {
+            label: "hosted.channels.grant an agent asked for: admins; a permission, so the app opens it",
+            action_type: "workspace_action",
+            payload: workspace_action("hosted.channels.grant", json!({})),
+            audience: admins.clone(),
+            category: open,
+            reason: "permission",
+        },
+        Card {
+            label: "hosted.channels.grant raised in place (origin server_in_place): admins; the person just asked, so the lock screen decides",
+            action_type: "workspace_action",
+            payload: {
+                let mut payload = workspace_action("hosted.channels.grant", json!({}));
+                payload["origin"] = json!("server_in_place");
+                payload
+            },
+            audience: admins,
+            category: inline,
+            reason: "none",
         },
     ]
 }
@@ -2770,16 +2829,37 @@ async fn an_approval_that_must_be_opened_is_the_open_category_and_the_rest_are_i
 
     let cards = cards(&room);
     // The function the decision route calls (#3977: `via=push_action` on an approval that
-    // `opens_in_app` is refused) reads the WHOLE payload; the push reads the routing
+    // is `Open` is refused) reads the WHOLE payload; the push reads the routing
     // projection of it. A card they disagree on is a banner button the route then
     // refuses, or an app-only card the route would have decided — so the table ties the
-    // three together: what is written down, what the whole-payload function says, and
-    // (below) the category the projection-fed judgment actually sent.
+    // three together: what is written down (the category and the reason), what the
+    // whole-payload function says, and (below) the category the projection-fed judgment
+    // actually sent. ADR-0204 증보 6 D6-2: it is ONE function, `decision_mode`.
     for card in &cards {
+        let mode = momo_agent::actions::decision_mode(card.action_type, &card.payload);
         assert_eq!(
-            momo_agent::actions::opens_in_app(card.action_type, &card.payload),
+            mode.is_open(),
             card.category == "momo.approval.open",
-            "{}: `opens_in_app` on the whole payload must agree with the table and with the push",
+            "{}: `decision_mode` on the whole payload must agree with the table and with the push",
+            card.label
+        );
+        assert_eq!(
+            momo_agent::actions::decision_reason(card.action_type, &card.payload).as_str(),
+            card.reason,
+            "{}: the recorded reason",
+            card.label
+        );
+        // The card's own `props.decision_mode` word is this same answer.
+        let mut props = json!({});
+        momo_agent::actions::stamp_decision_mode(&mut props, mode);
+        assert_eq!(
+            props["decision_mode"],
+            if card.category == "momo.approval.open" {
+                "open"
+            } else {
+                "inline"
+            },
+            "{}",
             card.label
         );
     }
@@ -3012,7 +3092,9 @@ async fn an_approval_card_a_person_may_not_decide_does_not_leak_through_a_dm_or_
     .bind(dm)
     .bind(ungated_message)
     .bind(room.requester)
-    .bind(json!({"tool_call": {"call_id": "c2", "name": "send_message"}}))
+    // A tool of the catalog: the positive control is about the audience, so it must be one the
+    // lock screen may decide (an operator's own tool is opened in the app, ADR-0204 증보 6).
+    .bind(json!({"tool_call": {"call_id": "c2", "name": "work.session.end"}}))
     .execute(&su)
     .await
     .expect("insert ungated approval");
@@ -3577,6 +3659,80 @@ async fn an_agents_answer_pushes_the_person_who_asked_and_nobody_else() {
         assert_eq!(hit.reason, "mention");
         assert_eq!(hit.category, "momo.mention");
         assert_eq!(hit.approval_id, None);
+    }
+}
+
+/// **ADR-0186 증보 v6 R-e · ADR-0204 증보 6 D6-5: 「채널에도 한 줄」 is a quiet line.** The line an
+/// approval's result may get in the channel's main stream — an agent's line of the run, quoting
+/// the request, with `props.announce: true` — pushes **nobody**: the person who asked already
+/// heard the result from the settlement candidate. Not the asker (whom the answer arm would
+/// wake), and not somebody the line mentions.
+///
+/// The marker is a JSON **boolean** `true`. A client's props are strings, so `"true"` — what a
+/// member could write — is an ordinary line and pushes as any answer does; `false` and no marker
+/// are the controls that make the silence the marker's and not the shape's.
+///
+/// Revert: drop the `announce` guard at the head of the reason `CASE` in `judge_targets`, or
+/// compare the key as text instead of as `'true'::jsonb`.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_channel_announce_line_is_quiet_and_only_a_server_written_true_makes_it_so() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let room = seed_approval_room(&su).await;
+    let pool = momo_notifier_pool().await;
+
+    let question = human_says(&su, &room, room.channel_id, room.id(ASKER)).await;
+    let run = chat_run_for(&su, &room, room.channel_id, Some(question), "succeeded").await;
+    let mut lines = Vec::new();
+    for (label, quiet, props) in [
+        ("announce: true", true, json!({"announce": true})),
+        (
+            "announce: true, and it mentions somebody else",
+            true,
+            json!({
+                "announce": true,
+                "mention_member_ids": [room.id(Who::Admin).to_string()],
+            }),
+        ),
+        (
+            "announce: \"true\" (a string, what a client could write)",
+            false,
+            json!({"announce": "true"}),
+        ),
+        ("announce: false", false, json!({"announce": false})),
+        ("no marker at all", false, json!({})),
+    ] {
+        let line = agent_says(
+            &su,
+            &room,
+            AgentLine {
+                run: Some(run),
+                reply_to: Some(question),
+                props,
+                ..AgentLine::new(room.channel_id)
+            },
+        )
+        .await;
+        lines.push((label, quiet, line));
+    }
+
+    let sent = drain_room(&su, &pool, &room).await;
+    for (label, quiet, line) in lines {
+        let woken = people_woken(&room, &sent, line);
+        if quiet {
+            assert!(
+                woken.is_empty(),
+                "{label}: a quiet line wakes nobody: {sent:?}"
+            );
+        } else {
+            assert_eq!(
+                woken,
+                BTreeSet::from([ASKER]),
+                "{label}: an ordinary answer wakes the person who asked: {sent:?}"
+            );
+        }
     }
 }
 

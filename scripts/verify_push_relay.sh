@@ -69,7 +69,7 @@ MOMO_APNS_ALLOW_STUB=1 \
 MOMO_APNS_STUB_STATUS=410 \
 MOMO_APNS_STUB_REASON=Unregistered \
 MOMO_APNS_STUB_CAPTURE_PATH="$CAPTURE" \
-MOMO_PUSH_RELAY_RATE_LIMIT_PER_MINUTE=8 \
+MOMO_PUSH_RELAY_RATE_LIMIT_PER_MINUTE=9 \
 MOMO_PUSH_RELAY_HOST=127.0.0.1 \
 MOMO_PUSH_RELAY_PORT="$PORT" \
 "$BIN" >"$TMP_ROOT/relay.log" 2>&1 &
@@ -158,13 +158,16 @@ test "$STATUS" = 400
 # outside the set is a 400 (the closed validator, not a pass-through). ADR-0204 D7
 # (#3928) adds the category `momo.approval.open`: an approval that is decided in
 # the app. It names its approval exactly like `momo.approval`, so the same reason
-# rides on both. The six accepted bodies use six of the window's eight slots (the
-# first body above used one more), so the rate-limit step below still sees exactly
-# one slot left for its accepted body and the one after it is the 429.
+# rides on both. ADR-0206 증보 1 F5 (#4889) adds `thread_reply` (a new reply in a
+# followed thread) under the plain `momo.message` category. The seven accepted bodies
+# use seven of the window's nine slots (the first body above used one more), so the
+# rate-limit step below still sees exactly one slot left for its accepted body and
+# the one after it is the 429.
 reason_n=0
 for pair in "dm momo.message" "mention momo.mention" "approval_request momo.approval" \
             "approval_request momo.approval.open" \
-            "resume_offer momo.work" "work_session_idle momo.work"; do
+            "resume_offer momo.work" "work_session_idle momo.work" \
+            "thread_reply momo.message"; do
   reason="${pair% *}"; category="${pair#* }"
   reason_n=$((reason_n + 1))
   msg_id="55555555-5555-5555-5555-55555555555${reason_n}"
