@@ -378,8 +378,11 @@ paths:
       description: >
         Says whether the team has connected an image model that can draw from a
         photo, and if so which company would receive the photo. The form asks
-        before it shows the photo field. `available` and `provider` stand and fall
-        together. The key is never read out: only the company's name is. A team key
+        before it shows the photo field. Only someone who may add a picture is
+        told (a human who is not a guest and whom the add policy lets in); anyone
+        else is refused before the team key is read. `available` and `provider`
+        stand and fall together. The key is never read out: only the company's
+        name is. A team key
         is an image model only when it is a plain API key for `api.openai.com`
         (OpenAI) or `generativelanguage.googleapis.com` (Gemini); an OAuth
         subscription, an Anthropic key, a mock mode or any other host is not one.
@@ -397,7 +400,10 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          description: '`expression_role_required` - not a human member.'
+          description: >
+            `expression_role_required` - not a human with the add role (guest,
+            agent, or a member the admins-only policy leaves out). The body names
+            no company.
           content:
             application/json:
               schema:
@@ -433,8 +439,11 @@ paths:
         if the team key now reaches another one nothing is sent (`409
         image_model_changed`). Authority, the add policy and the live-draft limit
         are proved before the body is read; one photo per member and four per
-        instance may be in flight (`503` with `Retry-After` otherwise). The model has
-        at most 120 seconds. `cutout` in the answer says what the server did with the
+        instance may be in flight, and they stay in flight until the model's call
+        has ended (`503` with `Retry-After` otherwise). A start also spends a
+        per-member budget, `RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER` starts per window,
+        default 10 per 60 seconds (`429` with `Retry-After`, before the body is
+        read). The model has at most 120 seconds. `cutout` in the answer says what the server did with the
         background: `model` (the model drew a transparent one), `erased` (removed
         here from a single flat colour), `unchanged` (it could not be removed and the
         picture is as drawn), or null for a caricature. The picture in `draft` is
@@ -525,6 +534,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
         '502':
           description: >
             `image_model_failed` - a provider error, an answer that is not the
@@ -536,8 +547,9 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '503':
           description: >
-            One photo per member and four per instance are already in flight, or the
-            decoder is busy; retry after the `Retry-After` seconds. Nothing was sent.
+            One photo per member and four per instance are already in flight (until
+            the model's call has ended), or the decoder is busy; retry after the
+            `Retry-After` seconds. Nothing was sent.
           content:
             application/json:
               schema:
@@ -14944,8 +14956,9 @@ components:
         (default 60 seconds) and per member: message sends — `POST …/messages` and
         `POST …/scheduled-messages/{id}/send-now` share one budget, default 120 for a
         person and 600 for an agent credential; scheduled-message creates and edits,
-        default 60; attachment upload starts, default 60. Cancelling a scheduled
-        message, editing a message (`PATCH …/messages/{id}`, which streaming answers
+        default 60; attachment upload starts, default 60; starts of a picture from a
+        photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H11), default 10.
+        Cancelling a scheduled message, editing a message (`PATCH …/messages/{id}`, which streaming answers
         use) and every read are not budgeted. Retrying with the same `clientMsgId`
         after a 429 is safe. `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
