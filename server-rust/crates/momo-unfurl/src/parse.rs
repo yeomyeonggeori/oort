@@ -990,6 +990,20 @@ mod tests {
                 .as_deref(),
             Some("title")
         );
+        // So do the Twitter card and `name=description` fallbacks. Each is read only when the
+        // sources above it are absent (og first, then Twitter, then the plain name), so each is
+        // parsed on a page of its own: with an og value on the page, the og value would win and
+        // these would never be looked at.
+        let twitter = parse_card(
+            "<meta name=\"twitter:title\" content=\"tw\u{202E}it\u{2066}ter\">\
+             <meta name=\"twitter:description\" content=\"tw&#x202E;in\u{2069} text\">",
+        );
+        assert_eq!(twitter.title.as_deref(), Some("twitter"));
+        assert_eq!(twitter.description.as_deref(), Some("twin text"));
+        let named = parse_card(
+            "<meta name=\"description\" content=\"na\u{202A}me\u{202C}d\u{2067} text\">",
+        );
+        assert_eq!(named.description.as_deref(), Some("named text"));
         // Letters of right-to-left scripts, and the marks that are not in the list, stay.
         let kept =
             parse_card("<meta property=\"og:title\" content=\"שלום עולם مرحبا\u{200F}\u{200E}\">");

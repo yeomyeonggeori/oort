@@ -14945,8 +14945,11 @@ components:
         shared by both routes and spent only by a request that really would fetch: a
         picture already held by the server, and an address that failed in the last few
         minutes, cost the remote site nothing and spend nothing. Those two routes also
-        answer 429 with `Retry-After: 1` when the server is already fetching as many
-        remote images as it allows at once (16), whoever asks; ask again shortly. A
+        answer 429 with `Retry-After: 1` when the server has no place for the fetch: it
+        is already fetching as many remote images as it allows at once (16), this member
+        is already fetching as many as one member may (4), or it has no room for another
+        name lookup. Such a refusal says nothing about the card, is not remembered, and
+        gives back the unit of fetch budget the request spent; ask again shortly. A
         client shows its fallback meanwhile. `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
         already has an active account, is spent before the password is compared

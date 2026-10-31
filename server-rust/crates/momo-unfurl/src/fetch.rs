@@ -6,6 +6,7 @@
 //! reqwest, because each Location has to go through the same guard.
 
 use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -80,6 +81,12 @@ pub enum FetchError {
     TooLarge,
     #[error("request timed out")]
     Timeout,
+    /// This server had no room for the request: every place for a name lookup was taken, so none
+    /// was started ([`BoundedResolver`]). That is a fact about this server's load and not about the
+    /// address, so unlike [`FetchError::Failed`] it is not a verdict to remember: the same request
+    /// may succeed a moment later.
+    #[error("no room for another name lookup")]
+    Capacity,
     #[error("fetch failed: {0}")]
     Failed(String),
 }
@@ -142,16 +149,23 @@ impl SafeUnfurlTransport {
 #[async_trait::async_trait]
 impl UnfurlHttp for SafeUnfurlTransport {
     async fn fetch(&self, url: &str, kind: FetchKind) -> Result<Fetched, FetchError> {
-        fetch_guarded(
+        let resolver = FetchResolver::new(&self.resolver);
+        let result = fetch_guarded(
             url,
             kind,
             self.allow_development_http,
-            &self.resolver,
+            &resolver,
             &ReqwestGet {
                 timeout: self.timeout,
             },
         )
-        .await
+        .await;
+        match result {
+            // The guard can only read "no place for the lookup" as an unresolvable name. This
+            // fetch knows it was turned away, and says so.
+            Err(FetchError::Failed(_)) if resolver.turned_away() => Err(FetchError::Capacity),
+            other => other,
+        }
     }
 }
 
@@ -180,9 +194,12 @@ impl NameLookup for SystemLookup {
 /// one pool thread for every request that asked, however quickly each request gave up. So the
 /// lookup runs on a task of its own that **owns a permit until `getaddrinfo` really returns**. At
 /// most `max_running` threads can be held that way, abandoned lookups included, and a lookup that
-/// finds no free place fails at once instead of queueing behind them. Both outcomes read to the
-/// guard as an unresolvable name (`Failed("dns")`), which the worker retries and the proxy
-/// remembers for a few minutes.
+/// finds no free place fails at once instead of queueing behind them.
+///
+/// The two outcomes mean different things. A lookup that ran out of time is an unresolvable
+/// name (`Failed("dns")`): the worker retries it and the proxy remembers it for a few minutes. A
+/// lookup that found no place was never asked of anyone and says nothing about the name: it is
+/// [`FetchError::Capacity`], which the proxy does not remember.
 ///
 /// It wraps the transport's resolver only. `SystemHostResolver` itself is shared with webhook
 /// delivery and the doorbell and is left as it was.
@@ -190,6 +207,16 @@ struct BoundedResolver {
     lookup: Arc<dyn NameLookup>,
     deadline: Duration,
     running: Arc<Semaphore>,
+}
+
+/// Why a bounded lookup gave no addresses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LookupMiss {
+    /// Every place was taken, so no lookup was started. A fact about this server's load.
+    NoPlace,
+    /// The lookup ran and gave no usable answer: the name server said no, did not answer by the
+    /// deadline, or the lookup task died.
+    Unresolved(OutboundUrlError),
 }
 
 impl BoundedResolver {
@@ -200,12 +227,10 @@ impl BoundedResolver {
             running: Arc::new(Semaphore::new(max_running)),
         }
     }
-}
 
-impl HostResolver for BoundedResolver {
-    async fn resolve(&self, authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError> {
+    async fn try_resolve(&self, authority: &str) -> Result<Vec<IpAddr>, LookupMiss> {
         let Ok(place) = Arc::clone(&self.running).try_acquire_owned() else {
-            return Err(OutboundUrlError::ResolutionFailed);
+            return Err(LookupMiss::NoPlace);
         };
         let lookup = Arc::clone(&self.lookup);
         let authority = authority.to_string();
@@ -214,9 +239,56 @@ impl HostResolver for BoundedResolver {
             lookup.lookup(&authority).await
         });
         match tokio::time::timeout(self.deadline, task).await {
-            Ok(Ok(answer)) => answer,
+            Ok(Ok(answer)) => answer.map_err(LookupMiss::Unresolved),
             // The deadline passed (the task carries on, holding its place) or the lookup panicked.
-            Ok(Err(_)) | Err(_) => Err(OutboundUrlError::ResolutionFailed),
+            Ok(Err(_)) | Err(_) => Err(LookupMiss::Unresolved(OutboundUrlError::ResolutionFailed)),
+        }
+    }
+}
+
+impl HostResolver for BoundedResolver {
+    async fn resolve(&self, authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError> {
+        self.try_resolve(authority)
+            .await
+            .map_err(|miss| match miss {
+                LookupMiss::NoPlace => OutboundUrlError::ResolutionFailed,
+                LookupMiss::Unresolved(error) => error,
+            })
+    }
+}
+
+/// What the guard of **one** fetch sees of the shared [`BoundedResolver`]: the same lookups, and a
+/// note of whether this fetch was turned away for want of a place. `OutboundUrlError` has no word
+/// for that (it belongs to the webhook crate), so the note travels beside it, on an object made
+/// per fetch so concurrent fetches never read each other's.
+struct FetchResolver<'a> {
+    shared: &'a BoundedResolver,
+    no_place: AtomicBool,
+}
+
+impl<'a> FetchResolver<'a> {
+    fn new(shared: &'a BoundedResolver) -> FetchResolver<'a> {
+        FetchResolver {
+            shared,
+            no_place: AtomicBool::new(false),
+        }
+    }
+
+    /// Did a lookup of this fetch find every place taken?
+    fn turned_away(&self) -> bool {
+        self.no_place.load(Ordering::SeqCst)
+    }
+}
+
+impl HostResolver for FetchResolver<'_> {
+    async fn resolve(&self, authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError> {
+        match self.shared.try_resolve(authority).await {
+            Ok(addresses) => Ok(addresses),
+            Err(LookupMiss::NoPlace) => {
+                self.no_place.store(true, Ordering::SeqCst);
+                Err(OutboundUrlError::ResolutionFailed)
+            }
+            Err(LookupMiss::Unresolved(error)) => Err(error),
         }
     }
 }
@@ -2077,5 +2149,44 @@ mod tests {
             Ok(vec!["93.184.216.34".parse().unwrap()])
         );
         assert_eq!(lookup.asked(), 3);
+    }
+
+    // ── #4881 security review r2, Low: no place for a lookup is not an unresolvable name ─────
+
+    /// The whole production path again (`SafeUnfurlTransport::fetch`, the real hop loop and
+    /// guard) over a name server that never answers, with one place for lookups in all. A fetch
+    /// whose lookup ran out of time is an unresolvable name; a fetch that found the place taken
+    /// is [`FetchError::Capacity`], which says something about this server and not about the
+    /// name, and starts no lookup at all.
+    #[tokio::test]
+    async fn a_fetch_that_finds_no_place_for_its_lookup_is_not_told_as_an_unresolvable_name() {
+        let lookup = Gate::closed();
+        let transport = SafeUnfurlTransport::with_lookup(
+            false,
+            Duration::from_secs(5),
+            lookup.clone(),
+            Duration::from_millis(30),
+            1,
+        );
+        // The outer timeouts make a transport that waits instead of answering fail here, not
+        // hang the suite.
+        let first = tokio::time::timeout(
+            Duration::from_secs(8),
+            transport.fetch("https://slow.example/favicon.ico", FetchKind::Icon),
+        )
+        .await
+        .expect("the fetch must end by itself at the lookup deadline");
+        assert_eq!(first.unwrap_err(), FetchError::Failed("dns".into()));
+        assert_eq!(lookup.asked(), 1);
+        // The lookup of the first is given up on but still running, holding the only place. The
+        // second finds none.
+        let second = tokio::time::timeout(
+            Duration::from_secs(8),
+            transport.fetch("https://other.example/favicon.ico", FetchKind::Icon),
+        )
+        .await
+        .expect("a fetch with no place for its lookup must end at once");
+        assert_eq!(second.unwrap_err(), FetchError::Capacity);
+        assert_eq!(lookup.asked(), 1, "no second lookup was started");
     }
 }
