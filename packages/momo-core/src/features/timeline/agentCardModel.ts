@@ -221,6 +221,10 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   "action_type",
   "tool_name",
   "tool",
+  // 서버가 `tool_call` 행에 도구 이름을 싣는 키다(`tools.rs` `ToolCall::message_props`: `{name, arguments,
+  // call_id}`, #4995). 도구 카드가 제목으로 **그리는** 값이라 여기 없으면 정직 카운트가 자기가 그린 것을
+  // 숨김으로 센다(위 `execution` 과 같은 이유). `DETAIL_FIELDS` 에는 넣지 않는다: 이름은 이미 카드의 얼굴이다.
+  "name",
   "label",
   "tier",
   "is_reversible",
@@ -841,7 +845,13 @@ function toolCard(message: Message, props: Props): AgentToolCard {
       approvalDeclined: true, detail: { rows: [], withheld: 0 },
     };
   }
-  const toolName = readString(props, "tool_name") ?? readString(props, "tool");
+  // 도구 이름: 승인 결과 줄은 `tool_name`/`tool` 로, 서버의 `tool_call` 행은 `name` 으로 싣는다(`ToolCall::
+  // message_props` 는 `{name, arguments, call_id}` 가 전부다). `name` 을 읽지 않으면 제목이 이름 없는 「도구
+  // 실행」이 된다(#4995, 디자인 검수 M9). 앞의 둘이 있으면 그것이 먼저다.
+  const toolName =
+    readString(props, "tool_name") ??
+    readString(props, "tool") ??
+    readString(props, "name");
   const isError = readBoolean(props, "is_error") === true;
   const status =
     turnStatusFor(props?.["status"]) ??
