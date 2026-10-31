@@ -287,8 +287,21 @@ impl AgentWorker {
             wire: wire.as_str(),
             ..TurnTrace::default()
         };
+        // ADR-0201 증보 v3 B3: the workspace's role bundles, as this request read them. What the
+        // model is offered (the tool's `actionId` enum, the tool list, the prompt) is built from
+        // them; the proposal transaction and the decision read them again.
+        //
+        // The system prompt is built ONCE, before anything is read, and is the same on every call
+        // of the request (`a10_text_inside_a_read_is_never_an_instruction` pins that: what was read
+        // never touches it). What changes after a read is the tool's enum, below — and the prompt
+        // already says the sensitive card leaves it.
+        let roles = gathered.state.roles;
         let mut messages = vec![
-            ChatMessage::system(team_ai::system_prompt(&gathered.roster, web)),
+            ChatMessage::system(team_ai::system_prompt(
+                &gathered.roster,
+                web,
+                &roles.advertised_action_ids(false),
+            )),
             ChatMessage::user(team_ai::user_turn(&gathered.trigger_text)),
         ];
         let mut spend: Option<Spend> = None;
@@ -316,12 +329,22 @@ impl AgentWorker {
             }
             // The tools this call may use. Reads stop being offered once the read
             // budget is spent; web search is never offered after a read (H5).
-            let mut momo_tools = momo_agent::tools::enabled_tool_definitions(&[
-                momo_agent::tools::WORKSPACE_ACTION_PROPOSE.to_string(),
-            ]);
+            //
+            // B3 / B4-3: the proposal tool's `actionId` enum is the allow-list minus every
+            // bundle that is off, and — once this request has read anything (a workspace read, or
+            // a search the provider ran) — minus the sensitive ids too. A tool with nothing left
+            // to offer is not offered at all.
+            let tainted = read_used || trace.web_searches > 0;
+            let offered = roles.advertised_action_ids(tainted);
+            let mut momo_tools: Vec<momo_agent::tools::ToolDefinition> =
+                momo_agent::tools::workspace_action_propose_definition(&offered)
+                    .into_iter()
+                    .collect();
             if trace.tools.len() < team_ai::MAX_TOOL_CALLS {
                 momo_tools.extend(team_ai_tools::read_tool_definitions());
             }
+            // The seam later slices fill: a tool a bundle owns leaves with it.
+            momo_tools.retain(|tool| roles.tool_allowed(tool.name));
             let mut tools: Vec<Value> = Vec::new();
             if web == WebSearch::Available && !read_used {
                 tools.push(crate::anthropic::web_search_tool(
@@ -670,6 +693,19 @@ impl AgentWorker {
                 ProposalRefusal::TargetBusy => {
                     self.team_ai_finish(job, payload, run_id,
                         Some("같은 대상에 승인을 기다리는 카드가 있어요. 그 카드를 먼저 처리해 주세요.".to_string()),
+                        json!({}), None, &model, Ending::Answered, Some(trace.clone())).await
+                }
+                // B13-I5: the bundle that owns this card was switched off while the model was
+                // thinking (or the model named an id it was not offered). Say so, once.
+                ProposalRefusal::RoleOff => {
+                    self.team_ai_finish(job, payload, run_id,
+                        Some(team_ai::ROLE_OFF_SENTENCE.to_string()),
+                        json!({}), None, &model, Ending::Answered, Some(trace.clone())).await
+                }
+                // B4-3: this request read something, so this card is not one it may raise.
+                ProposalRefusal::AfterRead => {
+                    self.team_ai_finish(job, payload, run_id,
+                        Some(team_ai::AFTER_READ_ROLES_SENTENCE.to_string()),
                         json!({}), None, &model, Ending::Answered, Some(trace.clone())).await
                 }
                 ProposalRefusal::NoHumanRequester | ProposalRefusal::RunNotParkable => {

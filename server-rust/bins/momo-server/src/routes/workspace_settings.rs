@@ -12,11 +12,15 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use momo_agent::is_active_agent_in_tx;
+use momo_agent::team_ai_roles::TeamAiRoles;
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_settings::{
     merge_workspace_settings, read_workspace_settings, read_workspace_settings_for_update,
-    write_workspace_settings, WorkspaceSettingsInvalid,
+    write_workspace_settings, WorkspaceSettingsInvalid, TEAM_AI_ROLES_SETTING,
+};
+use momo_workspace_actions::team_ai_roles::{
+    changed_keys, memory_prerequisite_in_tx, roles_changed_audit,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -90,6 +94,21 @@ pub async fn patch(
                 Ok(merged) => merged,
                 Err(error) => return Ok(Err(rejection(error))),
             };
+            // ADR-0201 증보 v3 B3: the helper's role switches. Turning `memory` on while team
+            // memory is switched off is a 409 — judged on the *effective* change, so a screen
+            // that sends all six fields on every save is not stopped by one it did not change.
+            let roles_before = TeamAiRoles::from_settings(&existing);
+            let roles_after = TeamAiRoles::from_settings(&merged);
+            let roles_touched = request.get(TEAM_AI_ROLES_SETTING).is_some();
+            if roles_touched
+                && !memory_prerequisite_in_tx(conn, member_id, &roles_before, &roles_after).await?
+            {
+                return Ok(Err(ApiError::coded(
+                    StatusCode::CONFLICT,
+                    "team_memory_off",
+                    "team memory is switched off; turn it on before turning the memory role on",
+                )));
+            }
             if let Some(Value::String(raw_id)) = request.get("welcome_agent_member_id") {
                 let parsed = match Uuid::parse_str(raw_id) {
                     Ok(id) => id,
@@ -147,6 +166,17 @@ pub async fn patch(
                 stored = read_workspace_settings(conn, workspace_id)
                     .await?
                     .unwrap_or(stored);
+            }
+            // The switches that actually moved, by name (never a value): one row per write.
+            if roles_touched {
+                let moved = changed_keys(&roles_before, &roles_after);
+                if !moved.is_empty() {
+                    write_audit(
+                        conn,
+                        &roles_changed_audit(workspace_id, member_id, via, &moved, None),
+                    )
+                    .await?;
+                }
             }
             write_audit(
                 conn,

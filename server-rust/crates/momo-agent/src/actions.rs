@@ -115,6 +115,13 @@ pub const ACTION_WORKSPACE_WORK_TIER_UPDATE: &str = "workspace.work_tier.update"
 /// card — that is the member's own consent (ADR-0113 D2).
 pub const ACTION_PLUGIN_INSTALL: &str = "plugin.install";
 
+/// `team_ai.roles.set` — switch **one** role bundle of the team AI ("oort 도우미") on or off,
+/// as `PATCH …/settings` does for `team_ai_roles` (ADR-0201 증보 v3 B3-T, #4964). The one
+/// way the helper's reach changes from a chat; helper only, an admin approves, and it is on
+/// the sensitive list (`team_ai_roles::SENSITIVE_ACTION_IDS`): a request that has read anything
+/// never gets to propose it.
+pub const ACTION_TEAM_AI_ROLES_SET: &str = "team_ai.roles.set";
+
 /// The requesting human's own avatar (ADR-0186 v4 + amendment v7, #4791).
 /// Sources are their image attachment in this conversation or generated/retrieved
 /// image bytes. The run supplies the subject and only that person may approve.
@@ -284,10 +291,15 @@ pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 /// never told an id the server refuses. A new id here is an ADR amendment, not a
 /// code change.
 ///
+/// ADR-0201 증보 v3 B3-T adds `team_ai.roles.set` (#4964): the card that switches the
+/// helper's own role bundles. Which of these ids one request is actually offered is
+/// `team_ai_roles::TeamAiRoles::advertised_action_ids`; this list is the allow-list, not the
+/// advertisement.
+///
 /// Still outside (H6-2): `invite.create` and `agent.invite` (one-time secrets),
 /// `hosted.channels.grant` (widens access), and everything declared but not
 /// executable (`webhook.create`, `member.role.set`).
-pub const TEAM_AI_ACTION_IDS: [&str; 11] = [
+pub const TEAM_AI_ACTION_IDS: [&str; 12] = [
     ACTION_AGENT_PROFILE_UPDATE,
     ACTION_AGENT_RENAME,
     ACTION_CHANNEL_CREATE,
@@ -299,6 +311,7 @@ pub const TEAM_AI_ACTION_IDS: [&str; 11] = [
     ACTION_PLUGIN_INSTALL,
     ACTION_MEMBER_AVATAR_SET,
     ACTION_MEMBER_DISPLAY_NAME_SET,
+    ACTION_TEAM_AI_ROLES_SET,
 ];
 
 /// Whether an action's one-time secret may go to the **proposing agent** instead
@@ -484,6 +497,10 @@ pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
                     // none: the push says 「앱에서 확인」 and offers no 승인 button
                     // (ADR-0186 증보 v8 X8-3).
                     || id == ACTION_EXPRESSION_CREATE
+                    // The card carries the 「공급자로 가는 내용」 line for `files` and `memory`;
+                    // approving is the consent to it, so it is read in the app (ADR-0201 증보
+                    // v3 B3-T). The id decides — an argument's value is never read here.
+                    || id == ACTION_TEAM_AI_ROLES_SET
             }),
         _ => true,
     }
@@ -1013,6 +1030,21 @@ fn hosted_channels_grant_args_schema() -> Value {
 
 /// A channel reference: `#` + the 80-character name.
 pub const CHANNEL_REF_MAX_BYTES: u64 = 81;
+
+/// `team_ai.roles.set` arguments (ADR-0201 증보 v3 B3-T, #4964): one bundle and the switch.
+/// The enum is the six **switchable** bundles — `chat_read` is not on it, and the
+/// normaliser refuses it by name as well (a schema is a hint to the model, not the gate).
+fn team_ai_roles_set_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["bundle", "enabled"],
+        "properties": {
+            "bundle": {"type": "string", "enum": crate::team_ai_roles::SWITCHABLE_BUNDLES},
+            "enabled": {"type": "boolean"}
+        }
+    })
+}
 
 /// `workspace.unfurl.update` arguments (ADR-0201 증보 v2 H6-1): the one switch
 /// `PUT …/unfurl-settings` takes.
@@ -1639,6 +1671,21 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         initiative: false,
         effect: PLUGIN_INSTALL_EFFECT,
         args_schema: plugin_install_args_schema,
+    },
+    // ADR-0201 증보 v3 B3-T: 「파일 역할 꺼 줘」 in a chat becomes this card, and an admin approves.
+    // Admin and not `WorkspaceOperator`: the people who may switch the helper's reach are the
+    // workspace's own owners and admins, not a platform-operator credential.
+    WorkspaceAction {
+        id: ACTION_TEAM_AI_ROLES_SET,
+        title: "도우미 역할 켜고 끄기",
+        summary: "도우미가 할 수 있는 일의 묶음 하나를 켜거나 꺼요. 한 카드에 묶음 하나만 바꿔요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::TeamAiOnly,
+        initiative: false,
+        effect: "도우미의 역할 묶음 하나를 표시된 대로 켜거나 꺼요",
+        args_schema: team_ai_roles_set_args_schema,
     },
     WorkspaceAction {
         id: ACTION_DM_AGENT_ADMIT,
@@ -2648,6 +2695,7 @@ mod tests {
                 "workspace.memory.update",
                 "workspace.work_tier.update",
                 "plugin.install",
+                "team_ai.roles.set",
                 "dm.agent.admit"
             ]
         );
@@ -2680,6 +2728,7 @@ mod tests {
                 "plugin.install",
                 "member.avatar.set",
                 "member.display_name.set",
+                "team_ai.roles.set",
             ]
         );
         for id in TEAM_AI_ACTION_IDS {
@@ -2707,7 +2756,8 @@ mod tests {
                 ACTION_WORKSPACE_UNFURL_UPDATE,
                 ACTION_WORKSPACE_MEMORY_UPDATE,
                 ACTION_WORKSPACE_WORK_TIER_UPDATE,
-                ACTION_PLUGIN_INSTALL
+                ACTION_PLUGIN_INSTALL,
+                ACTION_TEAM_AI_ROLES_SET
             ]
         );
         assert_eq!(
@@ -3584,6 +3634,9 @@ mod tests {
                 && action.id != ACTION_MESSAGE_PIN
                 && action.id != ACTION_MESSAGE_UNPIN
                 && action.id != ACTION_EXPRESSION_CREATE
+                // Opened so the 「공급자로 가는 내용」 line is read (pinned by
+                // `the_roles_card_is_always_opened_in_the_app`).
+                && action.id != ACTION_TEAM_AI_ROLES_SET
             {
                 assert!(
                     !opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(action.id)),
@@ -3679,6 +3732,11 @@ mod tests {
             // Installs one official app; "the token is not stored in oort", so there is
             // no value to show the approver once (ADR-0113 P3, ADR-0201 증보 v2 H7).
             (ACTION_PLUGIN_INSTALL, false),
+            // Switching the helper's reach: turning `files` or `memory` on is a consent to the
+            // 「공급자로 가는 내용」 line on the card, and a lock-screen 승인 would skip reading
+            // it. Decided by the id alone — the push projection never reads an argument's value
+            // (ADR-0201 증보 v3 B3-T, #4964).
+            (ACTION_TEAM_AI_ROLES_SET, true),
             // The picture is the card, and a banner shows none: always opened in the app
             // (ADR-0186 증보 v8 X8-3; no 승인 button on the lock screen).
             (ACTION_EXPRESSION_CREATE, true),
@@ -3852,6 +3910,44 @@ mod tests {
     /// approve, any hosted agent may propose, nothing is minted — and the arguments name
     /// **no target**. The one key is the attachment; a `memberId`, a `targetHandle`, a URL
     /// or a data field cannot be spelled at all (`additionalProperties: false`), which is
+    /// ADR-0201 증보 v3 B3-T (#4964): the roles card is a helper-only, admin-decided, secret-free
+    /// card whose arguments are exactly one bundle and one switch, and it is always opened in the
+    /// app whatever the arguments say (the push projection never reads a value).
+    #[test]
+    fn the_roles_card_is_always_opened_in_the_app() {
+        let action = action_by_id(ACTION_TEAM_AI_ROLES_SET).expect("registered");
+        assert_eq!(action.required_role, RequiredRole::Admin);
+        assert_eq!(action.proposers, Proposers::TeamAiOnly);
+        assert_eq!(action.secret_delivery, SecretDelivery::None);
+        assert_eq!(action.risk, Risk::Approval);
+        assert!(!action.initiative, "never raised unasked");
+        assert!(proposable_action_by_id(ACTION_TEAM_AI_ROLES_SET, ProposalDoor::TeamAi).is_some());
+        assert!(
+            proposable_action_by_id(ACTION_TEAM_AI_ROLES_SET, ProposalDoor::AgentPort).is_none(),
+            "an external agent cannot raise it"
+        );
+        assert!(TEAM_AI_ACTION_IDS.contains(&ACTION_TEAM_AI_ROLES_SET));
+        assert!(initiative_action_by_id(ACTION_TEAM_AI_ROLES_SET).is_none());
+        let schema = action.args_schema();
+        assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+        assert_eq!(schema["required"], serde_json::json!(["bundle", "enabled"]));
+        assert_eq!(
+            schema["properties"]["bundle"]["enum"],
+            serde_json::json!(crate::team_ai_roles::SWITCHABLE_BUNDLES),
+            "the six switchable bundles, and no `chat_read`"
+        );
+        assert!(proposal_summary(action).contains("관리자"));
+        for args in [
+            serde_json::json!({"bundle": "files", "enabled": true}),
+            serde_json::json!({"bundle": "files", "enabled": false}),
+            serde_json::json!({}),
+        ] {
+            let card =
+                serde_json::json!({"action": {"id": ACTION_TEAM_AI_ROLES_SET, "args": args}});
+            assert!(opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card), "{card}");
+        }
+    }
+
     /// what keeps "only my own face" a property of the schema and not of a validator.
     #[test]
     fn member_avatar_set_names_a_picture_and_never_a_person() {

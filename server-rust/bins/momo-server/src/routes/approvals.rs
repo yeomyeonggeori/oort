@@ -2123,6 +2123,14 @@ async fn execute_workspace_action(
         }
     }
 
+    // ---- 2b. the team AI's role bundles, judged again (ADR-0201 증보 v3 B13-I5, B4-3) --------
+    //
+    // After the subject gates above on purpose: a decider who is not eligible has been turned
+    // away before this, so the answer below is never an oracle for a switch they may not read.
+    if let Some(refused) = team_ai_card_gate_in_tx(conn, approval, input, action.id, now).await? {
+        return Ok(Ok(refused));
+    }
+
     // The ids this card was drawn from must be the ids the names resolve to now.
     // (After the subject gate above, so a decider who is not eligible learns
     // nothing about whether the target moved.)
@@ -2408,6 +2416,23 @@ async fn execute_workspace_action(
         // the safe answer.
         ActionArgs::PluginInstall { plugin: None, .. } => {
             return Err(protocol_error("plugin.install resolved without a plugin"));
+        }
+        ActionArgs::TeamAiRolesSet {
+            bundle,
+            enabled,
+            before: Some(before),
+        } => match execute_team_ai_roles_set(conn, approval, input, now, bundle, *enabled, *before)
+            .await?
+        {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
+        // The resolver always fills `before`; a switch card that reached the executor without
+        // the state the approver was shown has nothing to compare, and rolling back is the safe answer.
+        ActionArgs::TeamAiRolesSet { before: None, .. } => {
+            return Err(protocol_error(
+                "team_ai.roles.set resolved without the switch it showed",
+            ));
         }
     };
 
@@ -2937,6 +2962,178 @@ async fn execute_channel_create(
         ref_id: channel_id,
         result_body: channel_create_result_body(name, kind, channel_id),
         result_rows: channel_create_result_rows(name, kind, add_proposer, added),
+        secret_once: None,
+        next: None,
+        expression: None,
+    }))
+}
+
+/// The team AI's role bundles, judged **again** at the decision, for a card the helper raised
+/// (`payload.via_ai.source = "team_ai"` — written by the server, never by the agent).
+///
+/// Two things can have changed since the card was drawn, and both end the card the same way
+/// (`action_args_invalid`, the approval stays pending and can still be rejected):
+///
+/// * the bundle that owns the action was switched **off** (B13-I5) — whether the card was drawn
+///   while it was on, or came in sideways with the bundle already off;
+/// * for a sensitive action (`team_ai.roles.set`, B4-3): the request that raised it had read
+///   something, so text it read may have been the one asking. A card that does not say it
+///   read nothing (no `tools`, no `web_searches`) is judged as one that did.
+///
+/// A card from any other door (the Agent Port) is not the helper's and is not touched here. The
+/// refused attempt is an `action.refused` audit row naming the reason; the receipt reuses the
+/// existing word, so the client vocabulary does not grow.
+async fn team_ai_card_gate_in_tx(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    action_id: &str,
+    now: chrono::DateTime<Utc>,
+) -> Result<Option<Decision>, momo_db::DbError> {
+    let Some(via) = approval.payload.get("via_ai") else {
+        return Ok(None);
+    };
+    if via.get("source").and_then(Value::as_str) != Some("team_ai") {
+        return Ok(None);
+    }
+    let reason = if !momo_workspace_actions::team_ai::read_roles_in_tx(conn, input.workspace_id)
+        .await?
+        .action_allowed(action_id)
+    {
+        Some((
+            "team_ai_role_off",
+            "the helper role that raised this card is switched off",
+        ))
+    } else if momo_agent::team_ai_roles::is_sensitive_action(action_id) && !card_read_nothing(via) {
+        Some((
+            "team_ai_read_context",
+            "the helper raised this card after reading workspace text",
+        ))
+    } else {
+        None
+    };
+    let Some((code, message)) = reason else {
+        return Ok(None);
+    };
+    write_audit(
+        conn,
+        &AuditEntry::new(input.workspace_id, "action.refused")
+            .by(input.member_id)
+            .about(approval.requested_by)
+            .target("approval", approval.id)
+            .via_token(input.via_token_id)
+            .run(approval.run_id)
+            .with_schema(
+                "momo.action.refused.v1",
+                stamp_via(
+                    input.credential_via,
+                    json!({
+                        "action_id": action_id,
+                        "approval_id": approval.id.to_string(),
+                        "reason": code,
+                    }),
+                ),
+            ),
+    )
+    .await?;
+    Ok(Some(refusal(
+        approval.id,
+        input.member_id,
+        "action_args_invalid",
+        message,
+        StatusCode::CONFLICT,
+        now,
+    )))
+}
+
+/// Does the card's `via_ai` say its request read nothing? Only an explicit empty `tools` list and
+/// a zero `web_searches` do — a missing or malformed field is not "nothing".
+fn card_read_nothing(via: &Value) -> bool {
+    via.get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| tools.is_empty())
+        && via.get("web_searches").and_then(Value::as_i64) == Some(0)
+}
+
+/// `team_ai.roles.set` (ADR-0201 증보 v3 B3-T, #4964): the write `PATCH …/settings` makes for
+/// `{team_ai_roles: {<bundle>: <enabled>}}` — `merge_workspace_settings` and
+/// `write_workspace_settings`, as the **approver** and under the row lock — and its audit rows:
+/// `team_ai.roles.changed` (key names only) and, when the bundle that goes on carries a notice,
+/// the consent record the approval is (`team_ai.roles.notice_shown`).
+///
+/// Refuses before its first write when the switch is no longer what the card showed (stale), or
+/// when `memory` would go on while team memory is off (409, the approval stays pending so the
+/// admin can switch team memory on and approve the same card).
+async fn execute_team_ai_roles_set(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    bundle: &'static str,
+    enabled: bool,
+    before: bool,
+) -> Result<Execution, momo_db::DbError> {
+    use momo_workspace_actions::team_ai_roles::{
+        notice_audit, roles_changed_audit, set_role_in_tx, CardProvenance, NoticeVia, RoleWrite,
+    };
+    let Some(row) = momo_agent::team_ai_roles::bundle(bundle) else {
+        return Err(protocol_error("team_ai.roles.set names no bundle"));
+    };
+    match set_role_in_tx(
+        conn,
+        input.workspace_id,
+        input.member_id,
+        bundle,
+        enabled,
+        before,
+    )
+    .await?
+    {
+        RoleWrite::Changed { .. } => {}
+        RoleWrite::Stale => {
+            return Ok(Execution::Refused(args_invalid_refusal(
+                approval, input, now,
+            )))
+        }
+        RoleWrite::TeamMemoryOff => {
+            return Ok(Execution::Refused(refusal(
+                approval.id,
+                input.member_id,
+                "action_args_invalid",
+                "team memory is switched off; turn it on before turning the memory role on",
+                StatusCode::CONFLICT,
+                now,
+            )))
+        }
+    }
+    let mut audits = vec![roles_changed_audit(
+        input.workspace_id,
+        input.member_id,
+        input.via_token_id,
+        &[bundle],
+        Some(CardProvenance {
+            agent_member_id: approval.requested_by,
+            approval_id: approval.id,
+            run_id: approval.run_id,
+        }),
+    )];
+    // Approving the card that turns `files` or `memory` on is the consent to the line on the card.
+    if enabled {
+        audits.extend(notice_audit(
+            input.workspace_id,
+            input.member_id,
+            input.via_token_id,
+            &[bundle],
+            NoticeVia::Card,
+            Some(approval.id),
+        ));
+    }
+    Ok(Execution::Ran(Executed {
+        audits,
+        ref_type: REF_TYPE_WORKSPACE_SETTINGS,
+        ref_id: input.workspace_id,
+        result_body: momo_agent::team_ai_roles::roles_set_result_body(row, enabled),
+        result_rows: momo_agent::team_ai_roles::roles_set_result_rows(row, before, enabled),
         secret_once: None,
         next: None,
         expression: None,
