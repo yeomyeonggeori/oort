@@ -51,6 +51,13 @@ export interface MessageNewEvent {
      */
     reply_to_id?: string | null;
     /**
+     * ADR-0148 증보 2026-10-31(#4887) — 보낸 사람이 「대화에도 보내기」를 골랐다(본류에도 보이는
+     * 스레드 답글). **`true`일 때만 키가 있다** — 켜지 않은 메시지의 프레임은 예전 바이트 그대로다.
+     * `message.edited`도 싣는다(편집은 메시지 전체를 다시 싣는 프레임이라, 침묵을 「꺼짐」으로
+     * 읽으면 본류의 행이 사라진다).
+     */
+    also_in_channel?: boolean;
+    /**
      * Server-decided message properties, forwarded verbatim by the relay
      * (server `MessageRoutes.broadcastPayload`, omitted when empty). This is
      * where `mention_member_ids` and the approval fields live, so a live frame
@@ -346,6 +353,8 @@ export function payloadToMessage(p: MessageNewEvent["payload"]): Message {
   // ADR-0148. `replyTo` is deliberately NOT set here — the frame has no quoted
   // body to set it from, and inventing one would be the snapshot the ADR bans.
   if (typeof p.reply_to_id === "string") message.replyToId = p.reply_to_id;
+  // #4887 — `=== true` 로만 읽는다: 키가 없거나 다른 값이면 「꺼짐」이고 필드는 만들지 않는다.
+  if (p.also_in_channel === true) message.alsoInChannel = true;
   if (p.props && typeof p.props === "object") message.props = p.props;
   if (typeof p.edited_at_ms === "number") message.editedAtMs = p.edited_at_ms;
   if (typeof p.deleted_at_ms === "number") message.deletedAtMs = p.deleted_at_ms;

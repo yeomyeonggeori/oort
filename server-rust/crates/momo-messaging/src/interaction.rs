@@ -230,9 +230,12 @@ pub struct InteractionMessage {
 ///
 /// `sent_via` (ADR-0216 D8) is read back but never written here: every `UPDATE` in this
 /// module names the columns it changes, so an edit keeps a developer token's marker.
+/// `also_in_channel` (ADR-0148 증보, #4887) is the same: read back so the edit frame and the
+/// `PATCH` answer say what the row says, never written, so an edit keeps the sender's choice.
 const INTERACTION_COLS: &str = "id, workspace_id, channel_id, seq, hlc_ts, hlc_count, \
      author_member_id, type::text AS message_type, state::text AS state, body, props, \
-     root_id, reply_to_id, created_at, edited_at, deleted_at, sent_via, run_id, client_msg_id";
+     root_id, reply_to_id, created_at, edited_at, deleted_at, sent_via, also_in_channel, \
+     run_id, client_msg_id";
 
 fn decode_interaction(row: &sqlx::postgres::PgRow) -> Result<InteractionMessage, sqlx::Error> {
     Ok(InteractionMessage {
@@ -324,6 +327,10 @@ pub fn build_message_edited_payload(workspace_id: Uuid, projection: &Interaction
     // ADR-0216 D8 — an edit re-publishes the whole message, so it carries the marker the
     // edit kept; absent (not null) for every message that has none, as on `message.new`.
     crate::message::insert_sent_via(&mut payload, message.sent_via);
+    // ADR-0148 증보 — the same re-publish rule for the 「대화에도 보내기」 flag: on only when on, and
+    // present on the edit frame so that "said nothing" is never read as "off" (a main-flow row
+    // would vanish on the first edit).
+    crate::message::insert_also_in_channel(&mut payload, message.also_in_channel);
 
     interaction_envelope(
         workspace_id,
@@ -1875,6 +1882,7 @@ mod tests {
             edited_at: DateTime::from_timestamp_millis(1_700_000_777_000),
             deleted_at: None,
             sent_via: None,
+            also_in_channel: false,
         }
     }
 

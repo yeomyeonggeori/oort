@@ -405,6 +405,21 @@ export interface ThreadRollup {
   replyCount: number;
   lastReplySeq: number;
   lastReplyAtMs: number;
+  /**
+   * #4877 — 답글 단 사람, **가장 최근에 단 사람 먼저**, 최대 3명(`participant_ids`). 나간 멤버·지운
+   * 멤버의 id도 그대로 온다 — 명부에서 못 푸는 id는 화면이 기존 「알 수 없는 사람」 규칙으로 그린다.
+   * 에이전트도 멤버라서 같은 규칙으로 들어 있다.
+   *
+   * `threadRollup()`은 서버 롤업에서 이 값을 **항상** 채운다(옛 서버는 두 키를 안 보내서 `[]`·0).
+   * 선택 필드인 이유는 폰이 로컬로 세어 만드는 롤업(`threadContext.rollupFor`)이 얼굴을 모르기
+   * 때문이다 — 없다는 것은 「얼굴 없음」이지 오류가 아니다.
+   */
+  participantIds?: string[];
+  /**
+   * #4877 — 답글 단 **서로 다른** 멤버 수(상한 없음). `participantIds`는 이 중 최근 `min(수, 3)`명이라
+   * 화면이 얼굴 뒤에 「+2」를 쓸 수 있다.
+   */
+  participantCount?: number;
 }
 
 /**
@@ -460,6 +475,17 @@ export interface Message {
    * 아래 `replyTo`와 달리 이쪽이 **영속하는 사실**이다.
    */
   replyToId?: string;
+  /**
+   * ADR-0148 증보 2026-10-31(#4887) — 보낸 사람이 「대화에도 보내기」를 골랐다: 이 스레드 답글은
+   * 채널 본류에도 보인다. 본류에 보이는 규칙은 **`rootId`가 없는 메시지 + 이 값이 `true`인 답글**이고,
+   * 스레드 화면에는 그 root의 모든 답글이 이 값과 무관하게 보인다.
+   *
+   * **`true`일 때만 온다 — 켜지 않았으면 키 자체가 없다**(`runEnded`와 같은 모양, `=== true`로 읽는다).
+   * 답글(`rootId` 있음)에서만 켤 수 있다. 전송 응답·히스토리·답글 페이지·편집 응답, 그리고
+   * 실시간 `message.new`·`message.edited`(`also_in_channel`)에 실린다. 편집 프레임도 싣는다 —
+   * 말하지 않음을 「꺼짐」으로 읽어 본류의 행을 지우지 않게 하려는 것이다.
+   */
+  alsoInChannel?: boolean;
   /**
    * 풀린 인용. 히스토리·답글 페이지에만 있고 전송 응답과 `message.new`에는 없다
    * (서버가 그 둘에서 일부러 뺀다 — 쓰기 경로 안에서 읽기를 한 번 더 하지 않기
@@ -521,6 +547,10 @@ export interface Message {
     reply_count: number;
     last_reply_seq: number;
     last_reply_at: number;
+    /** #4877 — 최근에 답글 단 사람 먼저, 최대 3개. 옛 서버는 보내지 않는다. */
+    participant_ids?: string[];
+    /** #4877 — 답글 단 서로 다른 멤버 수. 옛 서버는 보내지 않는다. */
+    participant_count?: number;
   };
   /**
    * #1166 — 이 반쪽 답을 쓴 run 이 **끝났다**고 서버가 말한 것.
@@ -557,10 +587,20 @@ function isMessage(value: unknown): value is Message {
 export function threadRollup(message: Message): ThreadRollup | null {
   const raw = message.thread;
   if (!raw || !raw.reply_count) return null;
+  // #4877 — 옛 서버는 두 키를 안 보낸다. 그때는 얼굴 없음(`[]`·0)으로 읽고, 새 서버는 항상 보낸다.
+  // 문자열이 아닌 항목은 버린다(형상이 어긋난 한 건이 나머지 얼굴을 지우지 않게).
+  const participantIds = Array.isArray(raw.participant_ids)
+    ? raw.participant_ids.filter((id): id is string => typeof id === "string")
+    : [];
   return {
     replyCount: raw.reply_count,
     lastReplySeq: raw.last_reply_seq,
     lastReplyAtMs: raw.last_reply_at,
+    participantIds,
+    participantCount:
+      typeof raw.participant_count === "number"
+        ? raw.participant_count
+        : participantIds.length,
   };
 }
 
@@ -3089,6 +3129,24 @@ export function sendMessage(
 }
 
 /**
+ * 스레드 답글 전송(`sendThreadReply`)의 선택들.
+ *
+ * `alsoInChannel`이 `SendMessageOptions`가 아니라 여기에 있는 이유: 「대화에도 보내기」는 **답글에서만**
+ * 켤 수 있고, `sendMessage`는 `rootId`를 싣지 않는 전송이라 거기서 켜면 서버가 늘 400으로 거절한다.
+ * 켤 수 있는 자리에만 옵션이 있게 해서 그 실수가 타입에서 막히게 한다.
+ */
+export interface ThreadReplyOptions {
+  attachmentIds?: SendMessageOptions["attachmentIds"];
+  /**
+   * ADR-0148 증보 2026-10-31(#4887) — 「대화에도 보내기」: 이 답글을 채널 본류에도 보인다. 켠 때만
+   * 키가 간다(`true`). 끄거나 없으면 키 자체가 빠진다 — 전송 요청은 closed-world라 옛 서버는 모르는
+   * 키를 400으로 거절하므로, 켜지 않은 답글은 이 필드 이전과 바이트 단위로 같은 요청이어야 한다.
+   * 보낼 때 한 번 정해지고 이후에 바꾸는 길은 없다.
+   */
+  alsoInChannel?: boolean;
+}
+
+/**
  * Reply inside a thread. The SAME write path as `sendMessage` with `rootId`
  * set (server `SendMessageRequest.rootId`), which is exactly how the mac client
  * shares a work excerpt into a session thread (ChatViewModel.shareWorkExcerpt
@@ -3102,7 +3160,7 @@ export function sendThreadReply(
   rootId: string,
   clientMsgId: string,
   bodyText: string,
-  options?: Pick<SendMessageOptions, "attachmentIds">
+  options?: ThreadReplyOptions
 ): Promise<Message> {
   const body: Record<string, unknown> = {
     clientMsgId,
@@ -3110,6 +3168,8 @@ export function sendThreadReply(
     type: "text",
     body: bodyText,
   };
+  // 이 함수가 `rootId`를 늘 싣는 유일한 전송이라 「대화에도 보내기」가 합법인 자리다(#4887).
+  if (options?.alsoInChannel === true) body.alsoInChannel = true;
   if (options?.attachmentIds !== undefined && options.attachmentIds.length > 0) {
     body.attachmentIds = options.attachmentIds;
   }

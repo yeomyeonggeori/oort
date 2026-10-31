@@ -1037,6 +1037,9 @@ async fn message_post(
                     opens_stream: false,
                     subscription_agents_disabled: !subscription_agents_enabled,
                     claude_subscription_agents_disabled: !claude_subscription_agents_enabled,
+                    // ADR-0148 증보 (#4887): an agent's `oort_message_post` chooses its own place
+                    // (`rootId`) and does not carry 「대화에도 보내기」 — a person's choice.
+                    also_in_channel: false,
                 },
             )
             .await?;
