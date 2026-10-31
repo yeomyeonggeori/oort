@@ -722,11 +722,14 @@ mod tests {
     /// `expression` and `expression_draft` (generated origin only) and the six G3.8 card codes in the
     /// draft's `code` CHECK. No new table.
     ///
+    /// 162 is #4887's 「대화에도 보내기」 (ADR-0148 증보 2026-10-31): `message.also_in_channel boolean
+    /// NOT NULL DEFAULT false` and the CHECK `message_also_in_channel_reply_ck` that lets only a thread
+    /// reply (`root_id` set) turn it on. No new table, so no new RLS policy.
+    ///
     /// 163 is #4881's link-card site metadata (ADR-0170 amendment 2026-10-31): six columns (site name,
     /// icon proxy key and remote icon address, image width/height, video flag) on `unfurl_url_cache` and
     /// `message_unfurl`, with the column CHECKs that keep the size pair and the icon pair whole. No new
-    /// table. (162 belongs to another issue; on a branch that lacks it this test is the one expected
-    /// failure until the stack lands in order.)
+    /// table.
     #[test]
     fn discovers_contiguous_migrations_001_to_163() {
         let dir = default_migrations_dir();

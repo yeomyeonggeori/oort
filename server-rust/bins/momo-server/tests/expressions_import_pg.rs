@@ -7,6 +7,11 @@
 //!
 //! DATABASE_URL=<dedicated DB> cargo test -p momo-server --test expressions_import_pg \
 //!   -- --ignored --test-threads=1
+//!
+//! Needs the isolated decoder child beside the test binary: `cargo build -p momo-expressions
+//! --bins` first (`cargo test -p momo-server` builds no other package's bins). Without it every
+//! import ends as a `source_invalid_media` card and six of these tests go red without saying why
+//! (#4947); `require_decoder_4947` fails first and names the command.
 use async_trait::async_trait;
 use momo_db::sqlx::{
     self,
@@ -306,11 +311,35 @@ async fn agent_bearer(su: &PgPool, ws: Uuid) -> String {
     token
 }
 
+/// The decoder child (`momo-expression-decoder`) must sit beside this test's target directory,
+/// found the way `momo_expressions::media` finds it: the `OORT_EXPRESSION_DECODER` override, else
+/// next to the test executable (one level above a `deps` directory). It belongs to
+/// `momo-expressions`, so building this test does not build it (#4947, header above). Fail here,
+/// first, and name the command: left to the server, a missing decoder is "every picture is
+/// invalid media". An explicit override is trusted.
+fn require_decoder_4947() {
+    if std::env::var_os("OORT_EXPRESSION_DECODER").is_some() {
+        return;
+    }
+    let exe = std::env::current_exe().expect("test executable");
+    let mut dir = exe.parent().expect("target dir").to_path_buf();
+    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
+        dir.pop();
+    }
+    let path = dir.join("momo-expression-decoder");
+    assert!(
+        path.is_file(),
+        "build the decoder first: cargo build -p momo-expressions --bins ({path:?}); without it \
+         every picture is invalid media and an import ends as a source_invalid_media card"
+    );
+}
+
 async fn boot() -> World {
     boot_with(true).await
 }
 
 async fn boot_with(unfurl_enabled: bool) -> World {
+    require_decoder_4947();
     let url = std::env::var("DATABASE_URL").expect("dedicated DATABASE_URL");
     momo_db::migrate::run_migrations(
         &url,

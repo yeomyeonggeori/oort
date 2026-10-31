@@ -307,6 +307,18 @@ pub struct SendMessageRequest {
     /// exclusive.
     #[serde(default)]
     pub reply_to_id: Option<Uuid>,
+    /// ADR-0148 증보 2026-10-31 (#4887) — 「대화에도 보내기」: this thread reply is also part of the
+    /// channel's main flow.
+    ///
+    /// Optional and additive: absent and `false` are the same request, and a request shaped like
+    /// yesterday's still means what it meant. **Only a reply may turn it on**: `true` without
+    /// `rootId` is a 400, answered before any connection is taken (a shape error, so a retry of the
+    /// same request is the same 400), and the table's CHECK holds the rule for any path that skips
+    /// the route. The value is written once, at send; an idempotent retry answers the stored
+    /// message whatever this field says now. A developer token may not send it (R12's allow-list
+    /// names five keys and this is not one).
+    #[serde(default)]
+    pub also_in_channel: Option<bool>,
     #[serde(default, rename = "type")]
     pub message_type: Option<String>,
     #[serde(default)]
@@ -447,6 +459,16 @@ pub struct ThreadRollupDto {
     /// Epoch milliseconds. Swift names this key `last_reply_at` (not `…AtMs`)
     /// even though the value is milliseconds; the client reads that spelling.
     pub last_reply_at: i64,
+    /// #4877 — who replied, **most recent replier first**, at most three, as lowercase UUID
+    /// strings. snake_case beside the keys above for the same reason they are: the core's
+    /// `threadRollup()` is the one place that turns this object into `participantIds`. A member who
+    /// left keeps an id here; the client draws its existing 「알 수 없는 사람」. Always present
+    /// (an empty list reads as "no faces"), so a client that checks the key is not racing the
+    /// server's version.
+    pub participant_ids: Vec<String>,
+    /// #4877 — every distinct member who has replied; the faces above are the newest
+    /// `min(count, 3)` of them.
+    pub participant_count: i32,
 }
 
 /// The quoted message carried beside a reply (ADR-0148 §3-2).
@@ -591,6 +613,16 @@ pub struct MessageDto {
     /// through the app answers exactly the bytes it did before the column existed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sent_via: Option<&'static str>,
+    /// ADR-0148 증보 2026-10-31 (#4887) — the sender chose 「대화에도 보내기」: this thread reply
+    /// is also part of the channel's main flow.
+    ///
+    /// **Only ever `true`, and only when it is** — omitted otherwise, the shape `runEnded` has,
+    /// so a message sent without the choice answers exactly the bytes it did before the column
+    /// existed and a client reads the key as `=== true`. It rides every projection built from the
+    /// stored row (send echo, history, thread replies, edits): the choice is made once at send, and
+    /// an edit frame or `PATCH` answer that said nothing would read as "off".
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub also_in_channel: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -6487,6 +6519,7 @@ mod tests {
             thread: None,
             run_ended: false,
             sent_via: None,
+            also_in_channel: false,
         };
         let json = serde_json::to_value(&dto).expect("serialize");
         assert_eq!(json["seq"], 3);
@@ -6510,6 +6543,9 @@ mod tests {
         assert!(json.get("runEnded").is_none(), "{json}");
         // ADR-0216 D8 — a message sent through the app carries no marker key at all.
         assert!(json.get("sentVia").is_none(), "{json}");
+        // ADR-0148 증보 — a message that was not also sent to the channel carries no
+        // `alsoInChannel` key: `false` never crosses the wire, and a client reads `=== true`.
+        assert!(json.get("alsoInChannel").is_none(), "{json}");
     }
 
     /// The two B11 keys, once they exist, are camelCase millisecond integers —
@@ -6539,6 +6575,7 @@ mod tests {
             thread: None,
             run_ended: false,
             sent_via: Some("dev"),
+            also_in_channel: true,
         })
         .expect("serialize");
         assert_eq!(json["state"], "edited");
@@ -6546,6 +6583,8 @@ mod tests {
         assert!(json.get("deletedAtMs").is_none());
         // ADR-0216 D8 — an edit keeps the marker, under its camelCase key.
         assert_eq!(json["sentVia"], "dev");
+        // ADR-0148 증보 — and keeps 「대화에도 보내기」, which is only ever `true` when present.
+        assert_eq!(json["alsoInChannel"], true);
     }
 
     #[test]

@@ -11816,6 +11816,14 @@ paths:
         conversation into a thread. The two are independent and may be sent
         together. A quote target must be undeleted and in the same channel, but
         — unlike a thread root — it may itself be a reply.
+        Supplying `alsoInChannel: true` on a thread reply also sends it to the
+        channel's main flow (ADR-0148 증보 2026-10-31, 「대화에도 보내기」). Only a
+        reply may turn it on: `true` without `rootId` is a 400, answered before
+        anything is read or written (so a retry of the same request is the same
+        400). The choice is stored once, with the message, and an idempotent retry
+        (same `clientMsgId`) answers the stored message whatever `alsoInChannel`
+        says now. The message is still one message — one `seq`, one reply in the
+        thread's `reply_count` — shown in two places.
 
 
         A developer token with `dev:messages:write` may call this route as its
@@ -11861,7 +11869,8 @@ paths:
         "400":
           description: >
             Invalid workspace/channel id, deleted root, nested reply root, a
-            deleted quote target, an opening `stream` block that declares
+            deleted quote target, `alsoInChannel: true` without a `rootId`, an
+            opening `stream` block that declares
             anything other than `rev: 0` / `streaming: true`, or a signed send
             that also opens a stream (the provenance digest binds the props as
             inserted, and the opening marker is written by the server after the
@@ -23794,6 +23803,20 @@ components:
             reply from inside its own thread. The target must be an undeleted
             message in the same channel (it may itself be a reply); a target in
             another channel or another workspace is reported as not found.
+        alsoInChannel:
+          type: boolean
+          default: false
+          description: >
+            ADR-0148 증보 2026-10-31 (#4887) — 「대화에도 보내기」: this thread
+            reply is also part of the channel's main flow. **Only a reply may turn
+            it on**: `true` without `rootId` is a 400 (checked before anything is
+            read, retries included), and the database refuses the same row even
+            if a path skipped the check. Absent and `false` are the same request.
+            Chosen once, at send: an idempotent retry answers the stored message
+            whatever this says now, and no later call changes it. Not allowed on a
+            developer token (`dev_field_not_allowed`). An older server's
+            closed-world request refuses the unknown key, so a client sends it
+            only when the sender turned it on.
         type:
           type: string
           enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
@@ -24700,6 +24723,23 @@ components:
             tombstone lists no files). Upload capability URLs and archive provider
             identifiers are never included; download bytes through the authenticated
             content proxy.
+        alsoInChannel:
+          type: boolean
+          enum: [true]
+          description: >
+            ADR-0148 증보 2026-10-31 (#4887) — the sender chose 「대화에도 보내기」:
+            this thread reply is also part of the channel's main flow. A channel's
+            main flow is the messages with no `rootId` **plus** the replies that
+            carry this flag; the thread shows every reply of its root either way.
+            **Present, and only ever `true`, when the choice was made — omitted
+            otherwise, never `false`** (the shape `runEnded` has), so a message sent
+            without it answers exactly the bytes it did before the field existed
+            and a client reads the key as `=== true`. Only a reply (`rootId` set)
+            can carry it. Present on every projection built from the stored row
+            (send echo, history, thread replies, edits). The realtime `message.new`
+            and `message.edited` payload carries the same flag under the snake_case
+            key `also_in_channel`, again only when on — an edit frame says it too,
+            so a client never reads silence as "off".
         thread:
           $ref: "#/components/schemas/ThreadRollup"
         sentVia:
@@ -24825,7 +24865,22 @@ components:
 
     ThreadRollup:
       type: object
-      required: [reply_count, last_reply_seq, last_reply_at]
+      required: [reply_count, last_reply_seq, last_reply_at, participant_ids, participant_count]
+      description: >
+        The reply summary a client draws under a root message (「답글 3개」, the last
+        reply's time, the faces of whoever replied). snake_case on the wire inside
+        an otherwise camelCase body — the core's `threadRollup()` is the one place
+        that turns it into `replyCount`, `lastReplySeq`, `lastReplyAtMs`,
+        `participantIds` and `participantCount`.
+
+
+        Only on a **root** message with at least one reply: a reply carries none,
+        and a root with no replies carries none. **The realtime `thread.updated`
+        payload carries the same five keys** (beside `channel_id` and `root_id`),
+        built by the same function as this object, so a client that keeps a root's
+        summary live applies it over the `thread` it holds. The send response for a
+        root that already has replies carries it too. `GET …/replies` returns the
+        replies themselves and no summary of their root.
       properties:
         reply_count:
           type: integer
@@ -24837,6 +24892,28 @@ components:
           type: integer
           format: int64
           description: Epoch milliseconds for the latest reply timestamp.
+        participant_ids:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            format: uuid
+          description: >
+            #4877 — who replied, **most recent replier first**, at most three
+            (lowercase UUID strings). A member who has left the channel or was
+            deleted keeps its id here; the client draws its existing 「알 수 없는
+            사람」 for an id it cannot resolve. Agent members are listed by the
+            same rule. A thread row written before this field kept its
+            first-reply order until its next reply, so an old thread's faces are
+            right after the next reply, not before. An empty list means no faces to
+            draw, never an error.
+        participant_count:
+          type: integer
+          minimum: 0
+          description: >
+            #4877 — how many distinct members have replied (no upper bound). The
+            faces in `participant_ids` are the newest `min(count, 3)` of them, so a
+            client can write 「+2」 after the faces.
 
     MessagePage:
       type: object
