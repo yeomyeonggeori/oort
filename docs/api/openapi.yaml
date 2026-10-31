@@ -12020,6 +12020,9 @@ paths:
         scope may call this route on the same membership predicate as history
         (ADR-0173). Hosted connection credentials are refused here.
 
+        Every page carries `following`: whether the caller follows this thread
+        (ADR-0206 증보 1 F8, `PUT …/follow`). An agent caller always reads `false`.
+
 
         A developer token with `dev:messages:read` may call this route as its
         person (ADR-0216 D4 L5, `oort read --thread`), under the same channel rule
@@ -12079,6 +12082,121 @@ paths:
             `dev:messages:read`), `dev_access_denied` (the workspace switch no
             longer admits its member's role) or `dev_route_not_allowed` (the
             `{workspaceId}` is not the token's own).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Root absent from this channel (including cross-channel roots).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/messages/{rootId}/follow:
+    put:
+      tags: [messages]
+      operationId: followThread
+      summary: Follow a thread (직접 따라가기).
+      description: >
+        ADR-0206 증보 1 F8 (#4889). Marks the caller as following the thread whose
+        root is `rootId`, whatever the state was before: an automatic follow
+        becomes a direct one, and a thread the caller stopped following is followed
+        again — this is the only way back from `DELETE`, because nothing automatic
+        (a new reply, a new mention, being the root's author) re-follows it. Idempotent;
+        no body. A personal setting: nothing is broadcast, and other devices see it on
+        their next read of the thread (`getThreadReplies` → `following`).
+
+        Guard order is the thread read's: active channel membership (403, the same
+        bytes for a channel that does not exist), then the root (404 when it is absent
+        or in another channel, 400 when it is itself a reply; a deleted root is
+        accepted), then DM channels (400 `thread_follow_not_applicable`: every
+        message already notifies there).
+
+        Human bearer only. An agent bearer is refused whatever its scopes, and a
+        developer token is refused (the route is not on its closed table).
+
+        Following does not send a push by itself; the new-reply push for followed
+        threads is the `thread_reply` reason (ADR-0206 증보 1 F4–F6), served after
+        its notifier slice.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: rootId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The caller now follows the thread.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadFollow"
+        "400":
+          description: >
+            Invalid id, the selected root is itself a reply, or the channel is a DM
+            (`error.code` `thread_follow_not_applicable`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a channel member, workspace scope mismatch, or a non-human bearer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Root absent from this channel (including cross-channel roots).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    delete:
+      tags: [messages]
+      operationId: unfollowThread
+      summary: Stop following a thread (그만 따라가기).
+      description: >
+        ADR-0206 증보 1 F8 (#4889). Marks the caller as not following the thread, and
+        that choice sticks: no later reply, mention or authorship follows it again
+        until `PUT` does. The record is kept, not removed — removing it would let the
+        automatic follow make it again on the next reply. Stopping only silences the
+        thread-reply push; a mention of the caller, a keyword hit, or a channel-level
+        `all` setting still reaches them by their own rules. Idempotent; no body.
+        Same guards, same refusals and same bearer rule as `PUT`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: rootId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The caller no longer follows the thread.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadFollow"
+        "400":
+          description: >
+            Invalid id, the selected root is itself a reply, or the channel is a DM
+            (`error.code` `thread_follow_not_applicable`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a channel member, workspace scope mismatch, or a non-human bearer.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -14820,8 +14938,11 @@ components:
         shared by both routes and spent only by a request that really would fetch: a
         picture already held by the server, and an address that failed in the last few
         minutes, cost the remote site nothing and spend nothing. Those two routes also
-        answer 429 with `Retry-After: 1` when the server is already fetching as many
-        remote images as it allows at once (16), whoever asks; ask again shortly. A
+        answer 429 with `Retry-After: 1` when the server has no place for the fetch: it
+        is already fetching as many remote images as it allows at once (16), this member
+        is already fetching as many as one member may (4), or it has no room for another
+        name lookup. Such a refusal says nothing about the card, is not remembered, and
+        gives back the unit of fetch budget the request spent; ask again shortly. A
         client shows its fallback meanwhile. `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
         already has an active account, is spent before the password is compared
@@ -24935,7 +25056,7 @@ components:
 
     ThreadRepliesPage:
       type: object
-      required: [messages]
+      required: [messages, following]
       properties:
         messages:
           type: array
@@ -24946,6 +25067,24 @@ components:
           type: integer
           format: int64
           description: Last seq in this page when more replies remain; pass as `cursor`.
+        following:
+          type: boolean
+          description: >
+            Whether the caller follows this thread (ADR-0206 증보 1 F8): an automatic
+            or a direct follow. A thread the caller stopped following, and a thread
+            they never joined, both read `false`. Present on every page; a server that
+            predates it omits the key, which a client reads as `false`.
+
+    ThreadFollow:
+      type: object
+      required: [following]
+      properties:
+        following:
+          type: boolean
+          description: >
+            The caller's follow state after the write: `true` after `PUT …/follow`,
+            `false` after `DELETE …/follow`. An automatic and a direct follow are not
+            told apart.
 
     WorkspaceMessageSearchHit:
       type: object
