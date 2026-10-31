@@ -91,10 +91,11 @@ use momo_agent::approval::{
     is_active_channel_member_in_tx, is_active_human_member_in_tx, is_overdue, list_approvals_in_tx,
     lock_approval_in_tx, mark_approval_decided_in_tx, mark_approval_expired_in_tx,
     normalized_reason, offers_host_choice, record_decision_in_tx, reference_execution_host,
-    resume_job_payload, selectable_host_ids, validated_limit, validated_status, ApprovalListRow,
-    LockedApproval,
+    resume_job_payload, selectable_host_ids, validated_limit, validated_status, with_receipt_line,
+    ApprovalListRow, LockedApproval,
 };
 use momo_agent::approval_outcome::approval_card_outcome;
+use momo_agent::approval_sentence::{receipt_line, LineKind};
 use momo_agent::decider::{action_required_role, decider_gate, GatePlan};
 use momo_agent::tools::TOOL_AUDIT_SCHEMA;
 use momo_agent::{
@@ -942,7 +943,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     // and before anything is read or written for the decision. The credential only
     // ever NARROWS the route here; it never grants (the token adds no authority).
     if input.credential_via.is_some()
-        && momo_agent::actions::opens_in_app(&approval.action_type, &approval.payload)
+        && momo_agent::actions::decision_mode(&approval.action_type, &approval.payload).is_open()
     {
         return Ok(Ok(refusal(
             approval.id,
@@ -1011,14 +1012,36 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             .await?
             .map(|(by, at)| (by, at.unwrap_or(now)))
             .unwrap_or((Some(input.member_id), now));
-        return Ok(Ok(Decision {
-            receipt: decision_receipt(
-                approval.id,
-                &status,
-                decided_by,
-                decided_at,
-                Some(&format!("approval is already {status}")),
+        let receipt = decision_receipt(
+            approval.id,
+            &status,
+            decided_by,
+            decided_at,
+            Some(&format!("approval is already {status}")),
+        );
+        // ADR-0204 증보 6 D6-4: 「이미 승인된(거부된) 요청이에요 · 소개 바꾸기」. An expired or a
+        // cancelled card has no sentence of this kind — the device keeps its own.
+        let receipt = match status.as_str() {
+            "approved" => with_receipt_line(
+                receipt,
+                receipt_line(
+                    &approval.action_type,
+                    &approval.payload,
+                    LineKind::AlreadyApproved,
+                ),
             ),
+            "rejected" => with_receipt_line(
+                receipt,
+                receipt_line(
+                    &approval.action_type,
+                    &approval.payload,
+                    LineKind::AlreadyRejected,
+                ),
+            ),
+            _ => receipt,
+        };
+        return Ok(Ok(Decision {
+            receipt,
             // The server has already stopped this action. Acknowledge the
             // terminal card without resurrecting work or recording a new vote.
             status: if status == "cancelled" {
@@ -1345,12 +1368,25 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         now,
         input.reason,
     );
-    let receipt = decision_receipt(
-        approval.id,
-        desired_status,
-        Some(input.member_id),
-        now,
-        input.reason,
+    // ADR-0204 증보 6 D6-4: the line is part of the receipt, so it is stored with it and a
+    // second tap replays the sentence the first one got.
+    let receipt = with_receipt_line(
+        decision_receipt(
+            approval.id,
+            desired_status,
+            Some(input.member_id),
+            now,
+            input.reason,
+        ),
+        receipt_line(
+            &approval.action_type,
+            &approval.payload,
+            if input.approve {
+                LineKind::Approved
+            } else {
+                LineKind::Rejected
+            },
+        ),
     );
 
     if !mark_approval_decided_in_tx(
@@ -2528,12 +2564,15 @@ async fn execute_workspace_action(
         now,
         input.reason,
     );
-    let mut receipt = decision_receipt(
-        approval.id,
-        "approved",
-        Some(input.member_id),
-        now,
-        input.reason,
+    let mut receipt = with_receipt_line(
+        decision_receipt(
+            approval.id,
+            "approved",
+            Some(input.member_id),
+            now,
+            input.reason,
+        ),
+        receipt_line(&approval.action_type, &approval.payload, LineKind::Approved),
     );
     // The **ref only** (ADR-0186 D2). This object is stored verbatim in
     // `approval_decision.receipt` and replayed to a retry, so anything put here

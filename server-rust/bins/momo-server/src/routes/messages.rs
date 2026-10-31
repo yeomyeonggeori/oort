@@ -121,6 +121,11 @@ pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
             key,
             "origin" | "target_member_id" | "requested_for" | "dm_admission_id"
         )
+        // ADR-0186 증보 v6 R-e: the channel's one-line result of an approval. `announce: true`
+        // is what keeps its push silent (`momo_push` judgment) and `bundle_of` names the approval
+        // it is the notice of — a member who could write either could silence their own
+        // message's push, or dress a message as the notice of somebody's approval.
+        || matches!(key, "announce" | "bundle_of")
         // ADR-0218 appendix B / ADR-0186 v8: `action.expression` (the candidates a person is
         // asked to choose from) and `result.expression` (what was saved) are written only by
         // the server, inside an approval card's own transaction. A plain message can carry
@@ -2000,7 +2005,20 @@ mod tests {
         for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
             props.insert(key.to_string(), r#"{"kind":"login_lost"}"#.to_string());
         }
+        // ADR-0204 증보 6 D6-5 — a member cannot silence their own message's push with the
+        // channel's quiet-line marker, nor dress a message as the notice of an approval.
+        props.insert("announce".to_string(), "true".to_string());
+        props.insert(
+            "bundle_of".to_string(),
+            "22222222-2222-4222-8222-222222222222".to_string(),
+        );
         let value = props_value(Some(&props));
+        for key in ["announce", "bundle_of"] {
+            assert!(
+                value.get(key).is_none(),
+                "{key} is server-owned and must be stripped"
+            );
+        }
         for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
             assert!(
                 value.get(key).is_none(),
