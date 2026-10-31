@@ -29,6 +29,9 @@ momo-agent = { path = "../../crates/momo-agent" }
 momo-workspace-actions = { path = "../../crates/momo-workspace-actions" }
 momo-db = { path = "../../crates/momo-db" }
 momo-drive = { path = "../../crates/momo-drive" }
+# #4820 C2b 2부: the hosted expression door turns a picture into candidates through the same decoder
+# and assembler every picture path shares (`momo_workspace_actions::hosted_expression`). No new crate.
+momo-expressions = { path = "../../crates/momo-expressions" }
 momo-messaging = { path = "../../crates/momo-messaging" }
 momo-outbox = { path = "../../crates/momo-outbox" }
 momo-settings = { path = "../../crates/momo-settings" }
@@ -61,6 +64,11 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# #4820 C2b 2부 (tests/hosted_door_pg.rs): the suite draws its own pictures and writes them the way
+# Hermes' API server does (`data:image/png;base64,…`). Both crates are already in the workspace graph.
+image = { workspace = true }
+base64.workspace = true
+
 # Conformance harness (tests/agent_worker_conformance_pg.rs, all #[ignore]): the
 # real migrations + bootstrap roles, with the deterministic in-process provider
 # so a turn and a provider outage are both staged without a network. `sqlx` is a

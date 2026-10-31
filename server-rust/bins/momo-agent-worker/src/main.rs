@@ -114,6 +114,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              no trailing slash); no picture address will be handed to the co-hosted Hermes"
         );
     }
+    // #4820 C2b 3부: the hosted expression door opens only on an exact `OORT_HOSTED_MEDIA_STRICT=1`.
+    // Without it the door is shut and a photo turn of the co-hosted Hermes is an ordinary turn — say so
+    // once at boot (info, the name only, never the value), so an operator who expected the door can see why.
+    if !config.hosted_media_strict {
+        tracing::info!(
+            "호스팅 문 꺼짐 (hosted expression door off): OORT_HOSTED_MEDIA_STRICT is not exactly `1`; \
+             photo turns of the co-hosted Hermes are ordinary turns"
+        );
+    }
     let worker = AgentWorker::connect(config).await?;
     worker.run(shutdown_signal()).await;
     Ok(())

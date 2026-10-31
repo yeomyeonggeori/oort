@@ -31579,3 +31579,434 @@ async fn expression_create_gives_the_fetch_slot_back_before_it_waits_for_the_dec
         "250 ms after the fetch, while the picture is still being decoded, the fetch slot is back"
     );
 }
+
+// ===========================================================================
+// #4820 C2b — `expression.create` takes `{source:"assembled", assemblyId, index}`
+// (ADR-0218 G3.6, G1). Real PG18 (the NOBYPASSRLS `momo_app` role), real HTTP, the real child.
+// Build the child first: `cargo build -p momo-expressions --bins`; run `--test-threads=1`.
+//
+// Sabotage map (each line → the test that goes red when it is broken):
+//   * `held.requester != requester` in `prepare_expression`  → `…refusals_are_one_answer…` (person)
+//   * the agent predicate of `assembly::get_in_tx` / its RLS   → `…refusals_are_one_answer…` (agent, tenant)
+//   * `expires_at > clock_timestamp()` in `get_in_tx`          → `…refusals_are_one_answer…` (expired)
+//   * the cheap refusals before the read transaction           → `…refusals_are_one_answer…` (shape)
+//   * `reclaim_in_tx` after `insert_candidates_in_tx`          → `…become_the_card_as_kept…` (taken once)
+//   * `origin_json` (the pointer key of a generated origin)    → `…become_the_card_as_kept…`, `…hole…`
+// ===========================================================================
+
+/// Assemble `presets` of `picture` for the claimed run, 240 px; the assembly id and the result.
+async fn keep_4820c(
+    w: &World4829,
+    handle: &str,
+    presets: Value,
+    picture: &[u8],
+    pointer: Option<Uuid>,
+    prompt: &str,
+) -> (Uuid, Value) {
+    let (status, answer) = assemble_4820(
+        w,
+        handle,
+        json!({
+            "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(picture)},
+            "motion": {"kind": "preset", "presets": presets},
+            "size": 240,
+            "prompt": prompt,
+            "sourceAttachmentId": pointer,
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["result"]["isError"], json!(false), "{answer}");
+    let result = structured(&answer).clone();
+    let id = Uuid::parse_str(result["assemblyId"].as_str().expect("assemblyId")).unwrap();
+    (id, result)
+}
+
+fn assembled_4820c(name: &str, assembly: Uuid, index: u8) -> Value {
+    candidate_4829(
+        name,
+        Value::Null,
+        json!({"source": "assembled", "assemblyId": assembly, "index": index}),
+    )
+}
+
+/// `(candidate_index, state, code, origin kind, origin prompt, origin pointer)` of one draft.
+type DraftRow4820c = (i32, String, Option<String>, String, String, Option<Uuid>);
+
+fn tag_4820c() -> String {
+    Uuid::new_v4().simple().to_string()[..8].to_string()
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assembled_candidates_become_the_card_as_kept_and_the_pointer_follows_to_the_expression() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("c2b-source-drive-id".into(), picture_4820(300, 200));
+    let msg = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    let attachment = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(msg),
+        "c2b-source-drive-id",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let handle = claim_run_4820(&w).await;
+    let (assembly, kept) = keep_4820c(
+        &w,
+        &handle,
+        json!(["bounce", "pulse"]),
+        &picture_4820(300, 200),
+        Some(attachment),
+        "PROMPT-C2B 빨강 파랑 초록 그림",
+    )
+    .await;
+    let kept_sha: Vec<String> = kept["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["sha256"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(kept_sha.len(), 2, "{kept}");
+    let tag = tag_4820c();
+
+    let (status, answer) = propose_with_4829(
+        &w,
+        &handle,
+        json!([
+            assembled_4820c(&format!("c2b_a_{tag}"), assembly, 0),
+            assembled_4820c(&format!("c2b_b_{tag}"), assembly, 1)
+        ]),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["result"]["isError"], json!(false), "{answer}");
+    let approval = Uuid::parse_str(
+        structured(&answer)["approvalId"]
+            .as_str()
+            .expect("approvalId"),
+    )
+    .unwrap();
+
+    // The drafts: two ready generated candidates, the prompt and the verified pointer the
+    // assembly kept — not anything the proposal said (it named only an id and an index).
+    let drafts: Vec<DraftRow4820c> = sqlx::query_as(
+        "SELECT candidate_index, state, code, origin->>'kind', origin->>'prompt', origin_source_attachment_id \
+           FROM expression_draft WHERE approval_id=$1 ORDER BY candidate_index",
+    )
+    .bind(approval)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(drafts.len(), 2);
+    for (position, draft) in drafts.iter().enumerate() {
+        assert_eq!(
+            (
+                draft.0,
+                draft.1.as_str(),
+                draft.2.as_deref(),
+                draft.3.as_str()
+            ),
+            (position as i32, "ready", None, "generated")
+        );
+        assert!(draft.4.contains("PROMPT-C2B"), "{}", draft.4);
+        assert_eq!(draft.5, Some(attachment), "the pointer is the assembly's");
+    }
+    // The card shows the bytes the assembler built, verbatim (G3.6, X8-2).
+    let stored: Vec<String> = sqlx::query_scalar(
+        "SELECT i.sha256 FROM expression_draft_image i JOIN expression_draft d \
+           ON d.workspace_id=i.workspace_id AND d.id=i.draft_id \
+          WHERE d.approval_id=$1 AND i.variant='large' ORDER BY d.candidate_index",
+    )
+    .bind(approval)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(stored, kept_sha);
+    // The kept copy was taken by this proposal: bytes reclaimed, the row stays as a record.
+    let (state, held_images): (String, i64) = sqlx::query_as(
+        "SELECT a.state, (SELECT count(*) FROM expression_assembly_image i WHERE i.assembly_id=a.id) \
+           FROM expression_assembly a WHERE a.id=$1",
+    )
+    .bind(assembly)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!((state.as_str(), held_images), ("expired", 0));
+    // The card's `Draft` carries the pointer under the contract's key, a uuid string.
+    let card = card_4829(&w, approval).await;
+    let origin = &card["action"]["expression"]["candidates"][0]["origin"];
+    assert_eq!(origin["kind"], json!("generated"), "{origin}");
+    assert_eq!(
+        origin["sourceAttachmentId"],
+        json!(attachment.to_string()),
+        "{origin}"
+    );
+    assert!(origin["prompt"].as_str().unwrap().contains("PROMPT-C2B"));
+
+    // A second proposal on the same assembly — from another run of the same agent — is refused:
+    // it was taken. (Same answer as an unknown id; see the refusals test.)
+    mention_4829(&w).await;
+    let second = claim_handles_4829(&w).await;
+    let (status, answer) = propose_with_4829(
+        &w,
+        &second[0],
+        json!([assembled_4820c(&format!("c2b_c_{tag}"), assembly, 0)]),
+    )
+    .await;
+    assert_eq!((status, error_code(&answer)), (400, -32602), "{answer}");
+
+    // Approve candidate 1: the registered expression records what it was made from.
+    let (status, decided) = decide_4829(
+        &w,
+        &w.requester_jwt,
+        approval,
+        true,
+        Some(choice_4829(&card, 1)),
+    )
+    .await;
+    assert_eq!(status, 200, "{decided}");
+    let (pointer, kind): (Option<Uuid>, String) = sqlx::query_as(
+        "SELECT origin_source_attachment_id, origin->>'kind' FROM expression WHERE approval_id=$1",
+    )
+    .bind(approval)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!((pointer, kind.as_str()), (Some(attachment), "generated"));
+    let list: Value = w
+        .client
+        .get(format!("{}/v1/workspaces/{ws}/expressions", w.base))
+        .bearer_auth(&w.requester_jwt)
+        .send()
+        .await
+        .expect("list responds")
+        .json()
+        .await
+        .expect("list body");
+    assert_eq!(
+        list["items"][0]["origin"]["sourceAttachmentId"],
+        json!(attachment.to_string()),
+        "{list}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assembled_refusals_are_one_answer_and_write_nothing() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let agent = w.fixture.hosted_agent;
+    let handle = claim_run_4820(&w).await;
+    let (kept, _) = keep_4820c(
+        &w,
+        &handle,
+        json!(["bounce"]),
+        &picture_4820(64, 64),
+        None,
+        "refusals",
+    )
+    .await;
+    let tag = tag_4820c();
+    let one = |assembly: Uuid, index: u8| {
+        json!([assembled_4820c(&format!("c2b_r_{tag}"), assembly, index)])
+    };
+
+    // The reference answer: an id nobody ever kept.
+    let (status, reference) = propose_with_4829(&w, &handle, one(Uuid::new_v4(), 0)).await;
+    assert_eq!(
+        (status, error_code(&reference)),
+        (400, -32602),
+        "{reference}"
+    );
+
+    // Expired: the hour is up (its row is still there, `ready`, the clock says no).
+    let (expired, _) = keep_4820c(
+        &w,
+        &handle,
+        json!(["pulse"]),
+        &picture_4820(64, 64),
+        None,
+        "expired",
+    )
+    .await;
+    // The header is immutable to everyone but the `ready → expired` move; the superuser of this
+    // test switches the trigger off for one transaction to age the row, like C1b's TTL test.
+    {
+        let mut tx = w.su.begin().await.unwrap();
+        sqlx::query("ALTER TABLE expression_assembly DISABLE TRIGGER expression_assembly_identity")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE expression_assembly SET expires_at = clock_timestamp() - interval '1 second' WHERE id=$1")
+            .bind(expired)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        sqlx::query("ALTER TABLE expression_assembly ENABLE TRIGGER expression_assembly_identity")
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+    }
+    // Another agent's, another person's, another workspace's.
+    let strangers_agent = hold_4820(&w.su, ws, w.fixture.managed_agent, w.requester, 1).await;
+    let strangers_person = hold_4820(&w.su, ws, agent, w.face, 1).await;
+    let other = seed(&w.su).await;
+    let other_tenant = hold_4820(&w.su, other.workspace, other.hosted_agent, other.human, 1).await;
+
+    let mut refused: Vec<(&str, (u16, Value))> = Vec::new();
+    for (why, assembly, index) in [
+        ("expired", expired, 0u8),
+        ("another agent's", strangers_agent, 0),
+        ("another person's", strangers_person, 0),
+        ("another workspace's", other_tenant, 0),
+        ("an index the assembly has no slot for", kept, 1),
+        ("the last index it could never have", kept, 3),
+    ] {
+        refused.push((
+            why,
+            propose_with_4829(&w, &handle, one(assembly, index)).await,
+        ));
+    }
+    // Shape: two assemblies in one proposal, and one candidate named twice.
+    refused.push((
+        "two assemblies",
+        propose_with_4829(
+            &w,
+            &handle,
+            json!([
+                assembled_4820c(&format!("c2b_s_{tag}"), kept, 0),
+                assembled_4820c(&format!("c2b_t_{tag}"), strangers_person, 0)
+            ]),
+        )
+        .await,
+    ));
+    refused.push((
+        "one candidate twice",
+        propose_with_4829(
+            &w,
+            &handle,
+            json!([
+                assembled_4820c(&format!("c2b_u_{tag}"), kept, 0),
+                assembled_4820c(&format!("c2b_v_{tag}"), kept, 0)
+            ]),
+        )
+        .await,
+    ));
+    for (why, (status, answer)) in &refused {
+        assert_eq!(
+            (*status, error_code(answer)),
+            (400, -32602),
+            "{why}: {answer}"
+        );
+        // Not one word tells these apart from an id nobody kept (the JSON-RPC `id` is the
+        // request's own and differs by call; the error is what the caller learns).
+        assert_eq!(answer["error"], reference["error"], "{why}");
+    }
+    // Nothing was written and nothing was taken.
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        0
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        0
+    );
+    let still: String = sqlx::query_scalar("SELECT state FROM expression_assembly WHERE id=$1")
+        .bind(kept)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(
+        still, "ready",
+        "a refused proposal does not spend the assembly"
+    );
+
+    // The harness is not what refused them: the same assembly, named properly, is taken.
+    let (status, answer) = propose_with_4829(&w, &handle, one(kept, 0)).await;
+    assert_eq!(status, 200, "{answer}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assembled_hole_stays_on_the_card_as_manual_upload_with_its_code() {
+    let w = world_4820(0, None).await;
+    let handle = claim_run_4820(&w).await;
+    // 16-level noise at 240 px: `pulse` fits, `sparkle` is built under 1 MiB but breaks the
+    // 256 KiB cap of the small rendition → a slot with no picture (G3.8, partial failure).
+    let (assembly, kept) = keep_4820c(
+        &w,
+        &handle,
+        json!(["pulse", "sparkle"]),
+        &noise_4820(),
+        None,
+        "a hole",
+    )
+    .await;
+    assert_eq!(kept["candidates"].as_array().unwrap().len(), 1, "{kept}");
+    let tag = tag_4820c();
+    let (status, answer) = propose_with_4829(
+        &w,
+        &handle,
+        json!([
+            assembled_4820c(&format!("c2b_p_{tag}"), assembly, 0),
+            assembled_4820c(&format!("c2b_q_{tag}"), assembly, 1)
+        ]),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let approval = Uuid::parse_str(
+        structured(&answer)["approvalId"]
+            .as_str()
+            .expect("approvalId"),
+    )
+    .unwrap();
+    let card = card_4829(&w, approval).await;
+    let slots = &card["action"]["expression"]["candidates"];
+    assert_eq!(slots[0]["state"], json!("ready"), "{slots}");
+    assert_eq!(
+        slots[1]["state"],
+        json!("manual_upload_required"),
+        "{slots}"
+    );
+    assert_eq!(
+        slots[1]["code"],
+        json!("assembly_output_too_large"),
+        "{slots}"
+    );
+    assert_eq!(slots[1]["media"], Value::Null, "{slots}");
+    // A generated origin always carries its pointer key, `null` for words alone (G7).
+    for slot in [&slots[0], &slots[1]] {
+        let origin = slot["origin"].as_object().unwrap();
+        assert_eq!(origin.get("kind"), Some(&json!("generated")));
+        assert_eq!(
+            origin.get("sourceAttachmentId"),
+            Some(&Value::Null),
+            "{origin:?}"
+        );
+    }
+    let stored: (String, Option<String>) = sqlx::query_as(
+        "SELECT state, code FROM expression_draft WHERE approval_id=$1 AND candidate_index=1",
+    )
+    .bind(approval)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        (stored.0.as_str(), stored.1.as_deref()),
+        ("manual_upload_required", Some("assembly_output_too_large"))
+    );
+}

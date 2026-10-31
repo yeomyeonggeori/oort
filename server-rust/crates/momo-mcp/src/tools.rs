@@ -925,7 +925,12 @@ fn expression_create_branch() -> Value {
                                  "properties": {"source": {"type": "string", "enum": ["generated"]},
                                                 "mime": {"type": "string", "enum": ["image/png", "image/jpeg", "image/gif", "image/webp"]},
                                                 "dataBase64": {"type": "string", "minLength": 4, "maxLength": 1_398_104},
-                                                "prompt": {"type": "string", "minLength": 1, "maxLength": 8000}}}
+                                                "prompt": {"type": "string", "minLength": 1, "maxLength": 8000}}},
+                                {"type": "object", "additionalProperties": false, "required": ["source", "assemblyId", "index"],
+                                 "description": "One candidate of what oort_expression_assemble kept for you (ADR-0218 G3.6). The picture, prompt and original photo are the ones stored there; yours or another person's assembly, an expired or an unknown one is refused alike.",
+                                 "properties": {"source": {"type": "string", "enum": ["assembled"]},
+                                                "assemblyId": {"type": "string", "minLength": 36, "maxLength": 36},
+                                                "index": {"type": "integer", "minimum": 0, "maximum": 3}}}
                             ]
                         }
                     }
@@ -939,7 +944,9 @@ fn expression_create_branch() -> Value {
          Offer at most 4 candidates. Name each candidate's source: image.source 'attachment' \
          (a picture the person who called you attached in THIS conversation), 'url' (one public \
          HTTPS link to a picture file, port 443) or 'generated' (bytes you made, PNG/JPEG/GIF/WebP, \
-         at most 1 MiB decoded, with the prompt you used; send the prompt so the card can show it). \
+         at most 1 MiB decoded, with the prompt you used; send the prompt so the card can show it) \
+         or 'assembled' (one candidate of what oort_expression_assemble kept for you: its assemblyId \
+         and the candidate's index; the picture, prompt and original photo are the stored ones). \
          If a picture shows a person's face, ask who it is and set subjectMemberId to that \
          workspace member's id: only that person can approve. Send subjectMemberId null only when \
          you know no person's face is in the pictures. Every candidate names the same \

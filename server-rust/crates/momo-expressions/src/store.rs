@@ -270,6 +270,20 @@ pub(crate) fn metadata(row: &PgRow) -> Result<Metadata, Error> {
         subject_member_id: row.try_get("subject_member_id")?,
     })
 }
+/// The wire `Origin` of a row (ADR-0218 G7): the stored `origin`, and for a `generated` one the
+/// original-photo pointer from its own column (a uuid, or `null` for "words alone"). Every other
+/// kind has no such key, so a client reads exactly the contract's closed shapes.
+pub(crate) fn origin_json(row: &PgRow) -> Result<Value, Error> {
+    let mut origin: Value = row.try_get("origin")?;
+    if origin.get("kind").and_then(Value::as_str) == Some("generated") {
+        let pointer: Option<Uuid> = row.try_get("origin_source_attachment_id")?;
+        origin
+            .as_object_mut()
+            .ok_or(Error::Invalid)?
+            .insert("sourceAttachmentId".into(), json!(pointer));
+    }
+    Ok(origin)
+}
 pub(crate) async fn draft_json(conn: &mut PgConnection, row: &PgRow) -> Result<Value, Error> {
     let ws: Uuid = row.try_get("workspace_id")?;
     let id: Uuid = row.try_get("id")?;
@@ -277,7 +291,7 @@ pub(crate) async fn draft_json(conn: &mut PgConnection, row: &PgRow) -> Result<V
     let mut v = serde_json::to_value(metadata(row)?).map_err(|_| Error::Invalid)?;
     let expires: chrono::DateTime<chrono::Utc> = row.try_get("expires_at")?;
     v.as_object_mut().ok_or(Error::Invalid)?.extend(json!({"draftId":id,"workspaceId":ws,"revision":row.try_get::<i64,_>("revision")?.to_string(),
-        "origin":row.try_get::<Value,_>("origin")?,"expiresAtMs":expires.timestamp_millis(),"state":state,"code":row.try_get::<Option<String>,_>("code")?,
+        "origin":origin_json(row)?,"expiresAtMs":expires.timestamp_millis(),"state":state,"code":row.try_get::<Option<String>,_>("code")?,
         "media":if state=="ready" {media_json(conn,ws,id,true).await?} else {Value::Null}}).as_object().ok_or(Error::Invalid)?.clone());
     Ok(v)
 }
@@ -288,7 +302,7 @@ pub(crate) async fn expression_json(conn: &mut PgConnection, row: &PgRow) -> Res
     let mut v = serde_json::to_value(metadata(row)?).map_err(|_| Error::Invalid)?;
     let created: chrono::DateTime<chrono::Utc> = row.try_get("created_at")?;
     v.as_object_mut().ok_or(Error::Invalid)?.extend(json!({"id":id,"workspaceId":ws,"version":row.try_get::<i64,_>("version")?.to_string(),
-        "origin":row.try_get::<Value,_>("origin")?,"createdBy":row.try_get::<Uuid,_>("created_by")?,"createdAtMs":created.timestamp_millis(),"status":status,
+        "origin":origin_json(row)?,"createdBy":row.try_get::<Uuid,_>("created_by")?,"createdAtMs":created.timestamp_millis(),"status":status,
         "media":if status=="active" {media_json(conn,ws,id,false).await?} else {Value::Null}}).as_object().ok_or(Error::Invalid)?.clone());
     Ok(v)
 }
@@ -459,8 +473,8 @@ pub async fn activate(pool: &PgPool, actor: Actor, choice: Choice) -> Result<Val
         if n>=QUOTA {return Err(Error::Quota);}
         let id=choice.draft_id;
         let v=changed(conn,actor,id,"expression.created",None).await?;
-        let e=sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *")
-            .bind(actor.workspace).bind(id).bind(meta.name).bind(meta.display_name).bind(json!(meta.tags)).bind(meta.subject_member_id).bind(row.try_get::<Value,_>("origin")?).bind(actor.member).bind(v).fetch_one(&mut *conn).await?;
+        let e=sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,version,origin_source_attachment_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *")
+            .bind(actor.workspace).bind(id).bind(meta.name).bind(meta.display_name).bind(json!(meta.tags)).bind(meta.subject_member_id).bind(row.try_get::<Value,_>("origin")?).bind(actor.member).bind(v).bind(row.try_get::<Option<Uuid>,_>("origin_source_attachment_id")?).fetch_one(&mut *conn).await?;
         sqlx::query("INSERT INTO expression_image(workspace_id,expression_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT workspace_id,draft_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms FROM expression_draft_image WHERE workspace_id=$1 AND draft_id=$2")
             .bind(actor.workspace).bind(id).execute(&mut *conn).await?;
         let receipt=json!({"workspaceId":actor.workspace,"version":v.to_string(),"expression":expression_json(conn,&e).await?});

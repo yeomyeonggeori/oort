@@ -829,7 +829,8 @@ fn member_avatar_set_args_schema() -> Value {
 
 /// One expression candidate's picture, as the proposal names it (ADR-0218 부록 B
 /// `AgentImage`): the requester's attachment in this conversation, one public HTTPS link,
-/// or bytes the agent made itself. Closed keys; the domain normaliser enforces the rest.
+/// bytes the agent made itself, or one candidate of a motion assembly the server kept for it
+/// (G3.6). Closed keys; the domain normaliser enforces the rest.
 pub const EXPRESSION_CANDIDATES_MAX: u64 = 4;
 /// base64 of one generated candidate's at most 1 MiB (ADR-0218 D3).
 pub const EXPRESSION_GENERATED_B64_MAX_CHARS: u64 = 1_398_104;
@@ -869,7 +870,12 @@ fn expression_create_args_schema() -> Value {
                                  "properties": {"source": {"type": "string", "enum": ["generated"]},
                                                 "mime": {"type": "string", "enum": ["image/png", "image/jpeg", "image/gif", "image/webp"]},
                                                 "dataBase64": {"type": "string", "minLength": 4, "maxLength": EXPRESSION_GENERATED_B64_MAX_CHARS},
-                                                "prompt": {"type": "string", "minLength": 1, "maxLength": EXPRESSION_PROMPT_MAX_BYTES}}}
+                                                "prompt": {"type": "string", "minLength": 1, "maxLength": EXPRESSION_PROMPT_MAX_BYTES}}},
+                                {"type": "object", "additionalProperties": false, "required": ["source", "assemblyId", "index"],
+                                 "description": "One candidate of what oort_expression_assemble kept for you (ADR-0218 G3.6). The picture, prompt and original photo are the ones stored there; yours or another person's assembly, an expired or an unknown one is refused alike.",
+                                 "properties": {"source": {"type": "string", "enum": ["assembled"]},
+                                                "assemblyId": {"type": "string", "minLength": 36, "maxLength": 36},
+                                                "index": {"type": "integer", "minimum": 0, "maximum": 3}}}
                             ]
                         }
                     }

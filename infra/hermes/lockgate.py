@@ -31,6 +31,15 @@ short-lived photo address under `OORT_SELF_MEDIA_ORIGIN`. This gate validates th
 and the volume's `.env`; unset means the exception is off), and the canary adds the one allowed address (accepted) and
 28 bypass variants (refused) when it is set, or one refused address of the allowed shape when it is not.
 
+Strict media delivery (#4820 C2b 3부, ADR-0218 G3.7 (b)). Hermes turns a `MEDIA:` line of a final answer into the bytes of
+the file it names; outside strict mode that is ANY readable regular file that is not on a short denylist (gateway/platforms/
+base.py `validate_media_delivery_path`), so a model that was talked into writing `MEDIA:/opt/data/...` hands that file to the
+person who asked. oort's hosted expression door reads its picture out of exactly such an answer, so when `image_generate` is
+exposed this gate requires `HERMES_MEDIA_DELIVERY_STRICT=1` in the process environment (exactly `1`: Hermes itself also takes
+true/yes/on, but one spelling leaves no judgement about what an operator meant) and refuses the name in the volume's `.env`
+(loaded into the Hermes process after this gate ran, it could replace the checked value, whatever its own value is). `report`
+re-checks both on the live volume. The worker half is `OORT_HOSTED_MEDIA_STRICT` (the door opens only with both).
+
 Connector mode (#3948, ADR-0203 증보 K2·K4). The tool-lock rule above is unchanged. The one thing that
 changes is `mcp_servers`:
 
@@ -92,6 +101,11 @@ IMAGE_PROVIDER_ONLY_KEYS = frozenset({"provider"})
 # in the volume's `.env` it is refused outright, because Hermes loads that file into the process after this gate ran.
 SELF_ORIGIN_ENV = "OORT_SELF_MEDIA_ORIGIN"
 SELF_MEDIA_PATH_PREFIX = "/v1/self-media/"
+# Hermes' media delivery policy (#4820 C2b 3부): required in the process environment, exactly this value, whenever the picture
+# tool is exposed; refused in the volume's `.env` whatever its value. Only this exact name is judged (spelling variants and the
+# widening siblings HERMES_MEDIA_ALLOW_DIRS / HERMES_MEDIA_TRUST_RECENT_* are #4886's).
+MEDIA_STRICT_ENV = "HERMES_MEDIA_DELIVERY_STRICT"
+MEDIA_STRICT_VALUE = "1"
 SELF_ORIGIN_RE = re.compile(
     r"https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?(?::[1-9][0-9]{0,4})?"
 )
@@ -305,13 +319,22 @@ def canonical_origin(raw):
 
 
 def image_environment_problems(pairs, where, volume=False):
-    """Names (never values) in one environment source that turn Hermes' SSRF filter or the image guard off.
+    """Names (never values) in one environment source that turn Hermes' SSRF filter or the image guard off, or leave its media
+    delivery open.
 
-    `volume=True` for the volume's `.env`: there the self-media origin may not be set at all, since the file is loaded
-    into the Hermes process after this gate ran and could replace the value the gate judged."""
+    `volume=True` for the volume's `.env`: there the self-media origin and the strict media flag may not be set at all, since
+    the file is loaded into the Hermes process after this gate ran and could replace the value the gate judged. For the
+    process environment the strict media flag must be set, to exactly `1` (#4820 C2b 3부): without it Hermes hands the answer
+    any readable file that a `MEDIA:` line names."""
+    pairs = list(pairs)
     problems, seen = [], set()
     for name, value in pairs:
         if name in seen:
+            continue
+        if name == MEDIA_STRICT_ENV:
+            if volume:
+                problems.append(f"{where} sets {name} (set it on the service: the file would replace the checked value)")
+                seen.add(name)
             continue
         if name == SELF_ORIGIN_ENV:
             raw = str(value)
@@ -330,6 +353,9 @@ def image_environment_problems(pairs, where, volume=False):
         elif _is_proxy_name(name) and value:
             problems.append(f"{where} sets {name} (a proxy: Hermes hands DNS and the final-target check to it)")
             seen.add(name)
+    if not volume and dict(pairs).get(MEDIA_STRICT_ENV) != MEDIA_STRICT_VALUE:
+        problems.append(f"{where} must set {MEDIA_STRICT_ENV}={MEDIA_STRICT_VALUE} when image_generate is exposed "
+                        "(without it Hermes delivers any readable file that a MEDIA: line in an answer names)")
     return problems
 
 
@@ -669,7 +695,8 @@ def gate(cfg_path):
             problems.extend(image_ssrf_config_problems(cfg))
             problems.extend(image_environment_problems(original_env.items(), "the process environment"))
             problems.extend(image_volume_env_problems(os.path.join(data_dir, ".env")))
-            guard_evidence = {"files": sorted(IMAGE_GUARD_FILES), "files_verified": guard_files is not None}
+            guard_evidence = {"files": sorted(IMAGE_GUARD_FILES), "files_verified": guard_files is not None,
+                              "media_strict": original_env.get(MEDIA_STRICT_ENV) == MEDIA_STRICT_VALUE}
             if guard_files is not None:  # never run bytes that did not match the pinned hashes
                 canary_problems, canary_evidence = hermes_image_guard_canary(
                     canonical_origin(original_env.get(SELF_ORIGIN_ENV, "")))

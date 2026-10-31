@@ -378,6 +378,18 @@ pub enum ProviderError {
     /// policy refuses. A verdict, not an outage — never retried.
     #[error("provider egress refused: {0}")]
     EgressDenied(String),
+    /// The call outlived its deadline (`PROVIDER_REQUEST_TIMEOUT_MS`, which covers the body too).
+    /// Still an availability failure — retried like [`Unreachable`](Self::Unreachable) — but kept
+    /// apart because it is the one failure that says the provider **may have done the work**: a turn
+    /// that is expensive to repeat (the hosted expression door, whose every attempt asks Hermes for
+    /// a new picture) spends its attempts differently on it.
+    #[error("provider did not answer in time: {0}")]
+    TimedOut(String),
+    /// #4820 C2b review (High-1): a non-streamed answer longer than `limit` bytes
+    /// ([`RESPONSE_BODY_MAX_BYTES`]). A verdict about this response, not an outage: never retried,
+    /// and the body is **not** read past the limit.
+    #[error("provider response is larger than {limit} bytes")]
+    BodyTooLarge { limit: usize },
 }
 
 impl ProviderError {
@@ -405,6 +417,20 @@ impl ProviderError {
             }
             ProviderError::ErrorEnvelope(message) => ProviderError::ErrorEnvelope(clean(message)),
             ProviderError::EgressDenied(message) => ProviderError::EgressDenied(clean(message)),
+            ProviderError::TimedOut(message) => ProviderError::TimedOut(clean(message)),
+            // Carries a number, never text from the provider: nothing to scrub.
+            ProviderError::BodyTooLarge { limit } => ProviderError::BodyTooLarge { limit },
+        }
+    }
+
+    /// A failure of the transport itself — connect, TLS, a read that broke or ran out of time —
+    /// as the one place that tells a deadline from the rest. reqwest's `Display` prints the URL and
+    /// never the request's headers or body, so the bearer cannot ride out through this string.
+    fn transport(error: &reqwest::Error) -> ProviderError {
+        if error.is_timeout() {
+            ProviderError::TimedOut(error.to_string())
+        } else {
+            ProviderError::Unreachable(error.to_string())
         }
     }
 
@@ -412,18 +438,19 @@ impl ProviderError {
     /// worth trying again, or is retrying it spending budget on a guaranteed
     /// repeat?
     ///
-    /// `Unreachable` and 5xx/429 are availability failures → retry. Every other
-    /// 4xx, an undecodable body, and an error envelope are the provider telling
+    /// `Unreachable`, `TimedOut` and 5xx/429 are availability failures → retry. Every other
+    /// 4xx, an undecodable body, an error envelope and an over-long body are the provider telling
     /// us something true about *this request* → do not retry.
     pub fn is_retryable(&self) -> bool {
         match self {
-            ProviderError::Unreachable(_) => true,
+            ProviderError::Unreachable(_) | ProviderError::TimedOut(_) => true,
             ProviderError::HttpStatus(status, _) => {
                 matches!(classify_status(Some(*status)), CascadeDecision::FallOver(_))
             }
             ProviderError::InvalidResponse(_)
             | ProviderError::ErrorEnvelope(_)
-            | ProviderError::EgressDenied(_) => false,
+            | ProviderError::EgressDenied(_)
+            | ProviderError::BodyTooLarge { .. } => false,
         }
     }
 }
@@ -555,8 +582,29 @@ impl ChatProvider for OpenAiCompatProvider {
     }
 }
 
+/// The most bytes of one **non-streamed** provider answer the worker will read (#4820 C2b review,
+/// High-1).
+///
+/// Sized for the one answer that is legitimately large: a hosted expression door turn, whose answer
+/// carries a picture of at most 5 MiB as base64 — 6,990,508 characters, 6.67 MiB — plus the words that
+/// say what was made and the one request block, inside a JSON envelope. 12 MiB leaves that more than
+/// 40 % of room, while an ordinary answer is a few KiB. What is larger is not an answer but an
+/// amplification — the co-hosted Hermes replaces *every* `MEDIA:` line the model writes with its own
+/// picture, so a line repeated N times is N × ~7 MB — and holding it would put the shared worker
+/// process, and with it every tenant's agents, at the mercy of one reply. The read stops at the limit:
+/// it never holds more than the limit and one chunk.
+///
+/// One value for every non-streamed turn (an ordinary answer is far below it); the streamed wires
+/// (Responses, Anthropic) read event by event and are not covered by this limit.
+pub const RESPONSE_BODY_MAX_BYTES: usize = 12 * 1024 * 1024;
+
+/// How deep into a **non-200** body the worker reads: the diagnostic snippet is 300 characters, so the
+/// rest of an error page is never worth holding.
+const ERROR_BODY_READ_MAX: usize = 64 * 1024;
+
 /// The one outbound call both wires make: `POST endpoint.url()` with the
-/// resolved Bearer, returning the whole 200 body.
+/// resolved Bearer, returning the whole 200 body — **at most**
+/// [`RESPONSE_BODY_MAX_BYTES`] of it.
 ///
 /// It is shared rather than duplicated because the two rules in it are the ones
 /// a second copy would quietly get wrong: the `chatgpt-account-id` header (sent
@@ -569,10 +617,63 @@ pub(crate) async fn post_json(
     body: &serde_json::Value,
 ) -> Result<String, ProviderError> {
     let response = post(client, endpoint, body, None).await?;
-    response
-        .text()
+    read_body_capped(response, RESPONSE_BODY_MAX_BYTES).await
+}
+
+/// The whole body of a 200 as text, **bounded**: a declared `Content-Length` over `limit` is refused
+/// before a byte of the body is read, and a body that does not declare one (chunked) is refused the
+/// moment the bytes taken would pass `limit` — the rest is never pulled off the wire. Either way the
+/// answer is [`ProviderError::BodyTooLarge`], and what was held is dropped with the response.
+///
+/// Memory: the buffer only grows while `len + chunk <= limit` and its capacity is clamped to `limit`,
+/// so the worker holds at most the limit plus the one chunk in hand. Text is decoded as UTF-8 with the
+/// same lossy fallback the old `.text()` had (reqwest is built here without its `charset` feature).
+async fn read_body_capped(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<String, ProviderError> {
+    let declared = response.content_length();
+    if declared.is_some_and(|declared| declared > limit as u64) {
+        return Err(ProviderError::BodyTooLarge { limit });
+    }
+    // Right-sized when the length is declared (<= limit, checked above), small otherwise.
+    let mut body: Vec<u8> =
+        Vec::with_capacity(declared.map_or(8 * 1024, |declared| declared as usize));
+    while let Some(chunk) = response
+        .chunk()
         .await
-        .map_err(|error| ProviderError::Unreachable(error.to_string()))
+        .map_err(|error| ProviderError::transport(&error))?
+    {
+        if chunk.len() > limit - body.len() {
+            return Err(ProviderError::BodyTooLarge { limit });
+        }
+        if chunk.len() > body.capacity() - body.len() {
+            let target = body
+                .capacity()
+                .saturating_mul(2)
+                .clamp(body.len() + chunk.len(), limit);
+            body.reserve_exact(target - body.len());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(String::from_utf8(body)
+        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned()))
+}
+
+/// What a non-200 answer says, read at most [`ERROR_BODY_READ_MAX`] bytes deep (the caller keeps 300
+/// characters of it). A body that breaks off leaves what was read — the old `.text()` kept nothing.
+async fn read_error_body(mut response: reqwest::Response) -> String {
+    let mut body: Vec<u8> = Vec::new();
+    while body.len() < ERROR_BODY_READ_MAX {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let room = ERROR_BODY_READ_MAX - body.len();
+                body.extend_from_slice(&chunk[..chunk.len().min(room)]);
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    String::from_utf8_lossy(&body).into_owned()
 }
 
 /// The same POST, handed back **before** the body is read (B5.4c).
@@ -633,7 +734,7 @@ async fn post(
         .await
         // The error is stringified through reqwest's Display, which never
         // includes the request headers — the bearer cannot ride out here.
-        .map_err(|error| ProviderError::Unreachable(error.to_string()))?;
+        .map_err(|error| ProviderError::transport(&error))?;
 
     let status = response.status().as_u16();
     if status != 200 {
@@ -642,7 +743,7 @@ async fn post(
         // Measured worth: NCP's live smoke reduced the ChatGPT backend's refusal
         // to this one sentence — "Stream must be set to true" — which is the
         // fact B5.4c is built on.
-        let body = response.text().await.unwrap_or_default();
+        let body = read_error_body(response).await;
         let snippet: String = body.chars().take(300).collect();
         return Err(ProviderError::HttpStatus(status, snippet));
     }
@@ -1360,6 +1461,11 @@ mod tests {
     fn only_no_response_and_5xx_429_are_worth_retrying() {
         let status = |code| ProviderError::HttpStatus(code, String::new());
         assert!(ProviderError::Unreachable("connect refused".into()).is_retryable());
+        // A deadline is an availability failure too (the door counts its attempts differently, the
+        // retry decision is the same).
+        assert!(ProviderError::TimedOut("operation timed out".into()).is_retryable());
+        // An over-long answer is a verdict on this response: a retry would read 12 MiB again.
+        assert!(!ProviderError::BodyTooLarge { limit: 1 }.is_retryable());
         assert!(status(429).is_retryable());
         assert!(status(500).is_retryable());
         assert!(status(503).is_retryable());
@@ -1591,5 +1697,26 @@ mod tests {
                 assert!(text.contains("<redacted>"), "{text}");
             }
         }
+    }
+
+    /// The two variants of the C2b review go through the same scrub: a deadline's message is the
+    /// transport's own sentence (it may name the URL a key rode in), and an over-long answer carries
+    /// only a number.
+    #[test]
+    fn a_deadline_message_is_scrubbed_and_a_size_verdict_carries_only_its_number() {
+        let secret = "sk-ant-api03-LEAKCANARY";
+        let timed_out = ProviderError::TimedOut(format!(
+            "error sending request for url (http://gateway/v1?key={secret}): operation timed out"
+        ));
+        let text = timed_out.scrub(secret).to_string();
+        assert!(!text.contains("LEAKCANARY"), "{text}");
+        assert!(text.contains("<redacted>"), "{text}");
+
+        let too_large = ProviderError::BodyTooLarge { limit: 7 };
+        assert_eq!(too_large.clone().scrub(secret), too_large);
+        assert_eq!(
+            too_large.to_string(),
+            "provider response is larger than 7 bytes"
+        );
     }
 }

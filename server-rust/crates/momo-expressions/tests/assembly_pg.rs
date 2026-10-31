@@ -6,6 +6,7 @@
 //! |---|---|---|
 //! | `a_kept_assembly_is_three_renditions_per_candidate_and_reads_back_for_its_own_agent` | what is stored is what the assembler built, with the one-hour TTL and the failed hole | a rendition is dropped, bytes change, the hour changes, the hole is lost |
 //! | `rls_hides_a_held_assembly_from_another_workspace_and_from_another_agent` | the `ws_isolation` and `expression_assembly_agent` policies, with no predicate in the query | either policy goes |
+//! | `get_in_tx_refuses_by_its_own_predicates_when_no_policy_helps` | the agent and the person are arguments the SQL itself checks, on a request that binds no `app.agent_member_id` (the hosted door's) | `AND agent_member_id` or `AND requester_member_id` is dropped from `get_in_tx` |
 //! | `an_agent_holds_twelve_candidates_and_the_twelve_are_proved_under_the_agents_lock` | the cap, refusing writes nothing, holes do not count, the lock | the cap, the count or the lock goes |
 //! | `an_hour_the_sweep_deletes_the_assembly_and_the_reclaim_retires_one_early` | TTL on read, the sweep (notifier-shaped) deleting bytes AND header, explicit reclaim retiring one early, the retired header deleted when its hour is up | any of the three stops deleting bytes, the sweep keeps a header, a retired header is never found |
 //! | `an_hour_the_sweep_leaves_no_prompt_behind` | no header row (so no prompt) outlives its hour, ready or reclaimed; a live one is untouched; the audit record never held the prompt | the sweep stops deleting headers or stops finding retired ones |
@@ -350,7 +351,9 @@ async fn a_kept_assembly_is_three_renditions_per_candidate_and_reads_back_for_it
     );
 
     let held = in_tx(&w.api, w.human, Some(w.agent), move |conn| {
-        Box::pin(async move { assembly::get_in_tx(conn, ws, w.agent, kept.assembly_id).await })
+        Box::pin(async move {
+            assembly::get_in_tx(conn, ws, w.agent, w.requester, kept.assembly_id).await
+        })
     })
     .await
     .unwrap()
@@ -449,7 +452,7 @@ async fn rls_hides_a_held_assembly_from_another_workspace_and_from_another_agent
     ] {
         let seen = in_tx(&w.api, who, Some(agent), move |conn| {
             Box::pin(async move {
-                assembly::get_in_tx(conn, who.workspace, agent, kept.assembly_id).await
+                assembly::get_in_tx(conn, who.workspace, agent, w.requester, kept.assembly_id).await
             })
         })
         .await
@@ -460,7 +463,9 @@ async fn rls_hides_a_held_assembly_from_another_workspace_and_from_another_agent
         );
     }
     let unknown = in_tx(&w.api, w.human, Some(w.agent), move |conn| {
-        Box::pin(async move { assembly::get_in_tx(conn, ws, w.agent, Uuid::new_v4()).await })
+        Box::pin(async move {
+            assembly::get_in_tx(conn, ws, w.agent, w.requester, Uuid::new_v4()).await
+        })
     })
     .await
     .unwrap();
@@ -495,6 +500,87 @@ async fn rls_hides_a_held_assembly_from_another_workspace_and_from_another_agent
     })
     .await;
     assert!(across.is_err(), "a tenant planted a row in another tenant");
+}
+
+/// **The read's own predicates, with no policy to hide behind** (C1b review, Low-4). The
+/// `expression_assembly_agent` policy only restricts a request that binds `app.agent_member_id`;
+/// the hosted door binds none, so there the SQL of `get_in_tx` is the whole defence. This test
+/// runs without the binding (and proves it did) and asks for one real assembly with each
+/// argument wrong in turn: another agent of the same workspace, another person, another
+/// workspace — every one is `None`, and the right triple reads it.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn get_in_tx_refuses_by_its_own_predicates_when_no_policy_helps() {
+    let w = world().await;
+    let ws = w.human.workspace;
+    let kept = keep(&w, w.agent, built())
+        .await
+        .unwrap()
+        .expect("room to keep");
+    let id = kept.assembly_id;
+    let (agent, other_agent, requester, other_person) =
+        (w.agent, w.other_agent, w.requester, w.human.member);
+    assert_ne!(
+        requester, other_person,
+        "the two people must differ for the test to mean anything"
+    );
+
+    // Same workspace, no agent binding: the policy is silent, so these are the predicates.
+    let (unbound, own, wrong_agent, wrong_person, unknown) =
+        in_tx(&w.api, w.human, None, move |conn| {
+            Box::pin(async move {
+                let bound: Option<String> = sqlx::query_scalar(
+                    "SELECT nullif(current_setting('app.agent_member_id', true), '')",
+                )
+                .fetch_one(&mut *conn)
+                .await?;
+                Ok((
+                    bound,
+                    assembly::get_in_tx(conn, ws, agent, requester, id).await?,
+                    assembly::get_in_tx(conn, ws, other_agent, requester, id).await?,
+                    assembly::get_in_tx(conn, ws, agent, other_person, id).await?,
+                    assembly::get_in_tx(conn, ws, agent, requester, Uuid::new_v4()).await?,
+                ))
+            })
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        unbound, None,
+        "no agent was bound: the policy had nothing to restrict"
+    );
+    assert!(
+        own.is_some(),
+        "the right workspace, agent and person read it"
+    );
+    assert!(
+        wrong_agent.is_none(),
+        "another agent of the workspace read an assembly that is not its own"
+    );
+    assert!(
+        wrong_person.is_none(),
+        "an assembly made for somebody else was read for another person"
+    );
+    assert!(unknown.is_none());
+
+    // Another workspace's request (its own tenant binding, still no agent binding).
+    let foreign_ws = w.foreign.workspace;
+    let (foreign_agent, foreign_requester) = (w.foreign_agent, w.foreign.member);
+    let from_foreign = in_tx(&w.api, w.foreign, None, move |conn| {
+        Box::pin(async move {
+            Ok((
+                assembly::get_in_tx(conn, foreign_ws, foreign_agent, foreign_requester, id).await?,
+                // Even naming the first workspace, the tenant policy answers for the second.
+                assembly::get_in_tx(conn, ws, agent, requester, id).await?,
+            ))
+        })
+    })
+    .await
+    .unwrap();
+    assert!(
+        from_foreign.0.is_none() && from_foreign.1.is_none(),
+        "another workspace read it"
+    );
 }
 
 #[tokio::test]
@@ -713,10 +799,10 @@ async fn an_hour_the_sweep_deletes_the_assembly_and_the_reclaim_retires_one_earl
     expire(&w.su, aged.assembly_id).await;
     // An expired assembly is gone for its agent on the very next read, swept or not.
     let read = |id: Uuid| {
-        let (api, who, agent) = (w.api.clone(), w.human, w.agent);
+        let (api, who, agent, requester) = (w.api.clone(), w.human, w.agent, w.requester);
         async move {
             in_tx(&api, who, Some(agent), move |conn| {
-                Box::pin(async move { assembly::get_in_tx(conn, ws, agent, id).await })
+                Box::pin(async move { assembly::get_in_tx(conn, ws, agent, requester, id).await })
             })
             .await
             .unwrap()
@@ -892,7 +978,7 @@ async fn an_hour_the_sweep_leaves_no_prompt_behind() {
     );
     let live_id = live.assembly_id;
     let held = in_tx(&w.api, w.human, Some(w.agent), move |conn| {
-        Box::pin(async move { assembly::get_in_tx(conn, ws, w.agent, live_id).await })
+        Box::pin(async move { assembly::get_in_tx(conn, ws, w.agent, w.requester, live_id).await })
     })
     .await
     .unwrap()

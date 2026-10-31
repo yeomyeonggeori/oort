@@ -341,6 +341,10 @@ pub enum ExpressionImageSpec {
         data_base64: String,
         prompt: String,
     },
+    /// One candidate of a motion assembly the server kept for this agent
+    /// (`oort_expression_assemble`, ADR-0218 G3.6). The picture, the prompt and the original-photo
+    /// pointer are what the server stored at assemble time; the agent names only which one.
+    Assembled { assembly_id: Uuid, index: u8 },
 }
 
 /// One proposed candidate: validated metadata plus its picture source.
@@ -1707,6 +1711,28 @@ pub fn expression_create_args(
                     prompt: prompt.to_string(),
                 }
             }
+            Some("assembled") => {
+                closed_keys(image, &["source", "assemblyId", "index"])?;
+                let raw = image
+                    .get("assemblyId")
+                    .and_then(Value::as_str)
+                    .filter(|raw| raw.len() == 36)
+                    .ok_or_else(|| bad("assemblyId"))?;
+                // The contract's pattern is lowercase hyphenated hex; a parser that also took
+                // upper case would accept a spelling the schema refuses.
+                if raw.chars().any(|c| c.is_ascii_uppercase()) {
+                    return Err(bad("assemblyId"));
+                }
+                let index = image
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .filter(|index| *index < actions::EXPRESSION_CANDIDATES_MAX)
+                    .ok_or_else(|| bad("index"))?;
+                ExpressionImageSpec::Assembled {
+                    assembly_id: Uuid::parse_str(raw).map_err(|_| bad("assemblyId"))?,
+                    index: index as u8,
+                }
+            }
             _ => return Err(bad("image source")),
         };
         candidates.push(ExpressionCandidateSpec { meta, image });
@@ -1719,6 +1745,7 @@ pub fn expression_create_args(
             ExpressionImageSpec::Attachment(_) => "attachment",
             ExpressionImageSpec::Url(_) => "url",
             ExpressionImageSpec::Generated { .. } => "generated",
+            ExpressionImageSpec::Assembled { .. } => "assembled",
         })
         .collect();
     Ok(ValidatedActionArgs {
@@ -3663,6 +3690,77 @@ pub fn bounded_integer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0218 G3.6 (#4820 C2b): `{source:"assembled", assemblyId, index}` is one closed shape. The id is
+    /// the contract's lowercase hyphenated uuid, the index 0..=3, and the proposal says nothing
+    /// else about the picture (its prompt and its original photo are what the assembly kept).
+    #[test]
+    fn an_assembled_source_is_one_closed_shape() {
+        let action = actions::action_by_id(actions::ACTION_EXPRESSION_CREATE).expect("registered");
+        let id = "0000000a-0000-4000-8000-00000000004b";
+        let one = |image: Value| {
+            json!({"candidates": [{"name": "dance_a", "displayName": "춤", "tags": ["t"],
+                "subjectMemberId": null, "image": image}]})
+        };
+        let parsed = validated_action_args(
+            action,
+            &one(json!({"source": "assembled", "assemblyId": id, "index": 3})),
+            0,
+        )
+        .expect("a well-formed assembled source");
+        let ActionArgs::ExpressionCreate { candidates, .. } = parsed.args else {
+            panic!("an expression.create");
+        };
+        assert_eq!(
+            candidates[0].image,
+            ExpressionImageSpec::Assembled {
+                assembly_id: Uuid::parse_str(id).unwrap(),
+                index: 3
+            }
+        );
+        assert_eq!(parsed.normalized, json!({"candidates": ["assembled"]}));
+        for (why, image) in [
+            (
+                "upper case",
+                json!({"source": "assembled", "assemblyId": id.to_uppercase(), "index": 0}),
+            ),
+            (
+                "index 4",
+                json!({"source": "assembled", "assemblyId": id, "index": 4}),
+            ),
+            (
+                "negative",
+                json!({"source": "assembled", "assemblyId": id, "index": -1}),
+            ),
+            (
+                "fractional",
+                json!({"source": "assembled", "assemblyId": id, "index": 1.5}),
+            ),
+            (
+                "a string index",
+                json!({"source": "assembled", "assemblyId": id, "index": "0"}),
+            ),
+            ("no index", json!({"source": "assembled", "assemblyId": id})),
+            ("no id", json!({"source": "assembled", "index": 0})),
+            (
+                "short id",
+                json!({"source": "assembled", "assemblyId": "abc", "index": 0}),
+            ),
+            (
+                "an extra key",
+                json!({"source": "assembled", "assemblyId": id, "index": 0, "prompt": "mine"}),
+            ),
+            (
+                "the pointer",
+                json!({"source": "assembled", "assemblyId": id, "index": 0, "sourceAttachmentId": id}),
+            ),
+        ] {
+            assert!(
+                validated_action_args(action, &one(image), 0).is_err(),
+                "{why} must be refused"
+            );
+        }
+    }
 
     /// ADR-0186 증보 v5 U-b-3 (#4704): the switch that bounds an agent's unasked cards is **not**
     /// something a proposal can write. `workspace.settings.update` takes exactly two keys, and

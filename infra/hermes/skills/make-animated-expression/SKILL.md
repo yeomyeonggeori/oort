@@ -28,7 +28,7 @@ If you do not have an image-generation tool (`image_generate`), answer exactly: 
 ## Step 2 - draw one still or one sprite sheet
 
 - Call the image tool with a plain prompt: one character, sticker style, centered, flat colors, plain solid background, no text, no logo, no watermark, `aspect_ratio: "square"`. Describe what you saw in the original in words. You make a new picture; you do not copy a person's photo.
-- Never use `image_url` or `reference_image_urls`. A guard in front of the image tool refuses every web address, file path and anything that is not a small inline picture (`data:image/png|jpeg|webp|gif;base64,` up to 4 MiB) before the tool runs, and the refusal names the argument. If you see it, call the tool again with the text prompt only.
+- Use `image_url` only for the attachment photo address your instructions for this conversation give you (`첨부 사진 주소`), and never put it in `reference_image_urls`. Put no other web address or file path in either. A guard in front of the image tool refuses every other address, every file path and anything that is not a small inline picture (`data:image/png|jpeg|webp|gif;base64,` up to 4 MiB) before the tool runs, and the refusal names the argument. If you see it, call the tool again with the text prompt only.
 - The tool only returns a file path. If your runtime delivers files with `MEDIA:<path>`, put that line, with the exact path from the tool result, alone on its own line in your final answer so oort can receive the picture. Never try to write the picture out as base64.
 - Sprite sheet (optional): draw 2, 3 or 4 poses of the SAME character on ONE square picture in equal cells, same size, same ground line, no grid lines or labels. 2 poses = 2 columns x 1 row, 3 poses = 3 x 1, 4 poses = 2 x 2. Cells are numbered 0, 1, 2, 3 from left to right, then top to bottom.
 
@@ -43,6 +43,8 @@ If you do not have an image-generation tool (`image_generate`), answer exactly: 
 | sprite | 자세 바꾸기 | shows the poses of your sheet in the order you list (`sequence` of 2-24 cell numbers, `frameMs` 40-500) |
 
 One request gives at most 4 candidates in total: up to 4 different presets, or one sprite sequence. The whole proposal has at most 4 candidates.
+
+- **No motion (정지)**: when the request says 「움직임: 없음(정지)」, you do not add motion. The picture you drew becomes the one candidate as it is (the server re-encodes it like any picture); in the hosted request notation the motion is `{"kind":"still"}`.
 
 ## Step 4 - assemble, then propose
 

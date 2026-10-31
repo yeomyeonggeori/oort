@@ -586,6 +586,10 @@ services:
       # of the requester's attachment under it. Unset = no address is minted. Not MOMO_PUBLIC_BASE_URL: that reaches
       # api only (ADR-0205 D1). The same value goes to `hermes` below.
       OORT_SELF_MEDIA_ORIGIN: ${OORT_SELF_MEDIA_ORIGIN:-}
+      # #4820 C2b 3부 (ADR-0218 G3.7 (b)): the operator's attestation that the Hermes behind this worker runs strict media
+      # delivery (the `hermes` service below does, and its lock gate refuses to start without it). The hosted expression door
+      # opens ONLY on an exact `1`; empty or unset = the door is shut and a photo turn is an ordinary turn.
+      OORT_HOSTED_MEDIA_STRICT: ${OORT_HOSTED_MEDIA_STRICT:-}
       # #3431 (ADR-0193 D18): same key and rule as api — the spawn tool keeps Claude
       # Code off shared hosts unless an exact `true`.
       MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED:-}
@@ -652,6 +656,11 @@ services:
       # minted). lockgate.py refuses a value that is not https://<lowercase host>[:port] and refuses the name in the
       # volume's .env; empty or unset = the exception is off and every address stays refused.
       OORT_SELF_MEDIA_ORIGIN: ${OORT_SELF_MEDIA_ORIGIN:-}
+      # #4820 C2b 3부: strict media delivery. Without it Hermes turns a `MEDIA:` line of an answer into the bytes of ANY
+      # readable file it names; with it only Hermes' own cache dirs and files made moments ago. lockgate.py requires exactly
+      # `1` here whenever the picture tool is exposed and refuses the name in the volume's .env, so this is a literal and not
+      # an operator choice. The hosted door itself opens only when the worker's OORT_HOSTED_MEDIA_STRICT is `1` as well.
+      HERMES_MEDIA_DELIVERY_STRICT: "1"
       # Deliberately NOT passed: DATABASE_URL, WORKER_DATABASE_URL, PROVIDER_LINK_MASTER_KEY,
       # JWT_HMAC, any other oort secret (ADR-0203 D6-2), HERMES_YOLO_MODE, API_SERVER_CORS_ORIGINS.
     volumes:

@@ -115,7 +115,8 @@
           "required": [
             "kind",
             "sourceUrl",
-            "prompt"
+            "prompt",
+            "sourceAttachmentId"
           ],
           "properties": {
             "kind": {
@@ -138,6 +139,19 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 2000
+            },
+            "sourceAttachmentId": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "minLength": 36,
+                  "maxLength": 36,
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           }
         }
@@ -887,7 +901,13 @@
                 "source_timeout",
                 "source_invalid_media",
                 "video_processing_unavailable",
-                "video_conversion_failed"
+                "video_conversion_failed",
+                "generation_failed",
+                "assembly_source_invalid",
+                "assembly_source_too_large",
+                "assembly_output_too_large",
+                "assembly_timeout",
+                "assembly_busy"
               ]
             },
             "media": {
@@ -1189,6 +1209,31 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 2000
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "assemblyId",
+            "index"
+          ],
+          "properties": {
+            "source": {
+              "const": "assembled"
+            },
+            "assemblyId": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36,
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+            },
+            "index": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 3
             }
           }
         }

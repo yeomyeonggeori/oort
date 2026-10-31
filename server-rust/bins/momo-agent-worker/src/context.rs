@@ -149,6 +149,13 @@ pub struct SystemBlocks<'a> {
     /// a turn of an agent pinned to that Hermes whose trigger message carries a picture. A fact plus
     /// the one use it is for, so it sits with the rules and before the memory *data* block.
     pub self_media: Option<&'a str>,
+    /// #4820 C2b 2부 (ADR-0218 증보 G6) — the instruction a **photo turn of the co-hosted Hermes** carries:
+    /// how to make the picture (the photo address into `image_url` only), how to show it (a `MEDIA:` line),
+    /// the one `oort-expression` request block, the face rule and the failure rule
+    /// ([`momo_workspace_actions::hosted_expression::DIRECTIVE`]). Present only on a turn that opens the
+    /// hosted door, so every other turn's window is byte-for-byte what it was. A rule about behaviour, so
+    /// it sits with the rules and before the memory *data* block.
+    pub hosted_expression: Option<&'a str>,
     /// Print `#<seq> ` before each **person's** message (#3169): the handle the model cites as
     /// evidence when it calls `memory_suggest`. Off unless that tool is offered — an ordinary
     /// turn's window is byte-for-byte what it was before. The agent's own turns carry no number
@@ -164,8 +171,9 @@ pub struct SystemBlocks<'a> {
 /// `Debug` by hand because one block is a credential: the `self_media` line holds the one-time
 /// token of the requester's photo address (#4820 C2a, ADR-0218 G4), and a `{:?}` of the blocks
 /// must not be where it leaks. That block prints as `Some("<redacted>")`; every other field prints
-/// as the derive did. The struct is destructured without `..`, so a block added later has to be
-/// decided on here, not skipped in silence.
+/// as the derive did — including the hosted door's `hosted_expression` directive (#4820 C2b, G6),
+/// which is a fixed instruction text with no secret in it. The struct is destructured without `..`,
+/// so a block added later has to be decided on here, not skipped in silence.
 impl std::fmt::Debug for SystemBlocks<'_> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let SystemBlocks {
@@ -174,6 +182,7 @@ impl std::fmt::Debug for SystemBlocks<'_> {
             card_suggest,
             memory_suggest,
             self_media,
+            hosted_expression,
             cite_seq,
             memory,
         } = self;
@@ -184,6 +193,7 @@ impl std::fmt::Debug for SystemBlocks<'_> {
             .field("card_suggest", card_suggest)
             .field("memory_suggest", memory_suggest)
             .field("self_media", &self_media.map(|_| "<redacted>"))
+            .field("hosted_expression", hosted_expression)
             .field("cite_seq", cite_seq)
             .field("memory", memory)
             .finish()
@@ -236,6 +246,13 @@ pub fn assemble(
     }
     if let Some(line) = blocks.self_media.map(str::trim).filter(|l| !l.is_empty()) {
         head.push(ChatMessage::system(line));
+    }
+    if let Some(directive) = blocks
+        .hosted_expression
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+    {
+        head.push(ChatMessage::system(directive));
     }
     if let Some(memory) = blocks.memory.map(str::trim).filter(|m| !m.is_empty()) {
         head.push(ChatMessage::system(memory));
@@ -583,6 +600,56 @@ mod tests {
         );
     }
 
+    /// #4820 C2b 2부: the hosted door's instruction is exactly one more `system` turn, after the photo
+    /// address and before the memory data block, and `None` adds nothing at all.
+    #[test]
+    fn the_hosted_expression_directive_is_exactly_one_more_system_turn() {
+        let window = vec![message(
+            1,
+            Some(5),
+            Some("성재"),
+            "@hermes 이 사진으로 이모티콘 만들어줘",
+        )];
+        let assembled = |hosted_expression: Option<&str>| {
+            assemble(
+                &window,
+                Uuid::from_u128(AGENT),
+                Some(Uuid::from_u128(1)),
+                "unused",
+                Some("you are hermes"),
+                SystemBlocks {
+                    now: Some("현재 시각: 2026-10-31"),
+                    self_media: Some("첨부 사진 주소 — 줄"),
+                    hosted_expression,
+                    memory: Some("memory data"),
+                    ..SystemBlocks::default()
+                },
+                10_000,
+            )
+        };
+        let with = assembled(Some("표현 만들기 안내"));
+        let without = assembled(None);
+        assert_eq!(with.messages.len(), without.messages.len() + 1);
+        let roles: Vec<&str> = with.messages.iter().map(|m| m.content.as_str()).collect();
+        assert_eq!(
+            roles,
+            vec![
+                "you are hermes",
+                "현재 시각: 2026-10-31",
+                "첨부 사진 주소 — 줄",
+                "표현 만들기 안내",
+                "memory data",
+                "[성재] @hermes 이 사진으로 이모티콘 만들어줘",
+            ]
+        );
+        let mut stripped = with.messages.clone();
+        stripped.retain(|m| m.content != "표현 만들기 안내");
+        assert_eq!(
+            stripped, without.messages,
+            "the directive is the only difference"
+        );
+    }
+
     /// #4820 C2a security review (L5): the photo address carries a live token, so none of the types
     /// that hold the line prints it in `{:?}` — the blocks, a message, the assembled window. What
     /// they do print is untouched (the other blocks, the role, the surrounding text, the workspace
@@ -597,6 +664,7 @@ mod tests {
         let blocks = SystemBlocks {
             now: Some("현재 시각: 2026-10-31"),
             self_media: Some(&line),
+            hosted_expression: Some("표현 만들기 안내"),
             cite_seq: true,
             ..SystemBlocks::default()
         };
@@ -636,7 +704,20 @@ mod tests {
             "{}",
             blocks_debug[0]
         );
-        assert!(format!("{:?}", SystemBlocks::default()).contains("self_media: None"));
+        // the hosted door's directive (C2b, G6) is a fixed instruction with no secret in it: it prints
+        // as it is, so the manual `Debug` cannot be one that drops the field it does not know
+        for text in &blocks_debug {
+            assert!(text.contains("hosted_expression"), "{text}");
+            assert!(text.contains("표현 만들기 안내"), "{text}");
+        }
+        assert!(
+            blocks_debug[0].contains("hosted_expression: Some(\"표현 만들기 안내\")"),
+            "{}",
+            blocks_debug[0]
+        );
+        let none = format!("{:?}", SystemBlocks::default());
+        assert!(none.contains("self_media: None"), "{none}");
+        assert!(none.contains("hosted_expression: None"), "{none}");
 
         let message_debug = [format!("{carrier:?}"), format!("{carrier:#?}")];
         let window_debug = [format!("{assembled:?}"), format!("{assembled:#?}")];

@@ -739,6 +739,36 @@ pub async fn cancel_pending_approvals_for_run_in_tx(
     Ok(cancelled)
 }
 
+/// Close a card that never had anything to decide: the hosted expression door's **failure card**
+/// (ADR-0218 G3.8, #4820 C2b 2부). The approval row is born `pending` in the same transaction (the
+/// card is an approval-shaped message, so it needs a real `approval_id`) and is ended here as
+/// `cancelled` with no decider — `approval_decided_ck` allows a decider only for
+/// `approved`/`rejected`, exactly as for [`cancel_pending_approvals_for_run_in_tx`], whose shape
+/// this follows. `reason` is the card's closed code (or, for the door left shut by the operator,
+/// the word saying so); it is the value the card's `props.decision_reason` carries too.
+///
+/// Returns whether the row was still `pending` and is now closed. The row has no drafts, so there
+/// is nothing to reclaim.
+pub async fn close_failed_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    approval_id: Uuid,
+    decided_at: DateTime<Utc>,
+    reason: &str,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE approval SET status = 'cancelled', decided_at = $3, decision_reason = $4 \
+          WHERE workspace_id = $1 AND id = $2 AND status = 'pending'",
+    )
+    .bind(workspace_id)
+    .bind(approval_id)
+    .bind(decided_at)
+    .bind(reason)
+    .execute(&mut *conn)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
 /// The idempotency ledger row (Swift :277-288).
 ///
 /// `UNIQUE (workspace_id, client_decision_id)` (`004_approval_decision.sql:23`)

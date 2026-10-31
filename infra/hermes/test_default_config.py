@@ -293,7 +293,8 @@ class EnforcedWebToolPolicy(unittest.TestCase):
             path = os.path.join(tmp, "config.yaml")
             with open(path, "w") as handle:
                 handle.write("# isolated boot fixture; load_config is doubled\n")
-            env = {"API_SERVER_KEY": "test-only-" * 4, "HERMES_DATA_DIR": tmp, **(extra_env or {})}
+            env = {"API_SERVER_KEY": "test-only-" * 4, "HERMES_DATA_DIR": tmp,
+                   lockgate.MEDIA_STRICT_ENV: lockgate.MEDIA_STRICT_VALUE, **(extra_env or {})}
             with mock.patch.dict(os.environ, env, clear=True), \
                     mock.patch.dict(sys.modules, self.hermes_modules(cfg, tools)), \
                     mock.patch.object(sys, "path", list(sys.path)), \
@@ -317,7 +318,8 @@ class EnforcedWebToolPolicy(unittest.TestCase):
         volume = tempfile.TemporaryDirectory()
         self.addCleanup(volume.cleanup)
         install_guard_files(volume.name)
-        with mock.patch.dict(os.environ, {"API_SERVER_KEY": "test-only-" * 4, "HERMES_DATA_DIR": volume.name}, clear=True), \
+        with mock.patch.dict(os.environ, {"API_SERVER_KEY": "test-only-" * 4, "HERMES_DATA_DIR": volume.name,
+                                          lockgate.MEDIA_STRICT_ENV: lockgate.MEDIA_STRICT_VALUE}, clear=True), \
                 mock.patch.dict(sys.modules, modules), \
                 mock.patch.object(sys, "path", list(sys.path)), \
                 mock.patch.object(lockgate, "_status", side_effect=lambda url, *args: (200 if url.endswith("/health") else 401, {})), \
