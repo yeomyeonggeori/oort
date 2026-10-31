@@ -424,18 +424,13 @@ pub async fn list(
 /// `inline` or `open`: may this approval be decided where it is shown, or must it be
 /// opened in the app (ADR-0186 v6 R-f `decision_mode`)?
 ///
-/// It **calls** the one existing judgment, [`momo_agent::actions::opens_in_app`] — the
-/// list the push categories, the `push_action` refusal and the decision route already
-/// read — and decides nothing of its own. Gathering every reader onto one function and
-/// changing a row of its table are #4764's; the places this fills are the approval list
-/// (and the inbox's pending cards, which share [`approval_dto`]) and the run bundle
+/// It **calls** the one judgment, [`momo_agent::actions::decision_mode`] (#4764) — the
+/// function the push categories, the `push_action` refusal and the decision route read —
+/// and decides nothing of its own. The places this fills are the approval list (and the
+/// inbox's pending cards, which share [`approval_dto`]) and the run bundle
 /// (`routes::run_bundle`).
 pub(crate) fn decision_mode(action_type: &str, payload: &Value) -> &'static str {
-    if momo_agent::actions::opens_in_app(action_type, payload) {
-        "open"
-    } else {
-        "inline"
-    }
+    momo_agent::actions::decision_mode(action_type, payload).as_str()
 }
 
 /// `nextCursor`: the position of the last row of a page, as `{microseconds}:{id}` in

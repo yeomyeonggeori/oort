@@ -1697,7 +1697,8 @@ async fn a_settled_status_is_read_newest_first_so_a_limit_keeps_the_new_rows() {
 ///
 /// Revert that makes it red: read `isDirect` from anything but the channel's kind, take
 /// `rootId` from anywhere but the card, or answer `decisionMode` by anything but the
-/// server's one `opens_in_app` judgment (a pin must be opened, a named tool need not).
+/// server's one `decision_mode` judgment (a pin must be opened, a channel create need not; since
+/// #4764 a tool outside the catalog is opened too).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn each_approval_says_where_it_lives_and_whether_it_opens_in_the_app() {
@@ -1709,10 +1710,9 @@ async fn each_approval_says_where_it_lives_and_whether_it_opens_in_the_app() {
     let root = seed_request(&env.su, t.workspace, t.channel, t.owner).await;
 
     let mut top = Record::new(t.workspace, t.channel, t.agent, "pending", "now");
-    top.card = Some((
-        json!({}),
-        "도구 「github.search_issues」을 실행해도 될까요?",
-    ));
+    top.action_type = "workspace_action";
+    top.payload = json!({"action": {"id": "channel.create", "args": {"name": "plan"}}});
+    top.card = Some((json!({}), "승인 요청: 채널 만들기"));
     let top = seed_record(&env.su, top).await;
 
     let mut threaded = Record::new(t.workspace, t.channel, t.agent, "pending", "now");
