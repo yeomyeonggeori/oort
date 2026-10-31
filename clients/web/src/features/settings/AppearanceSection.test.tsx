@@ -18,6 +18,9 @@ import {
   LINK_PREVIEW_STORAGE_KEY,
   reloadLinkPreviewPreferenceForTest,
 } from "@/features/timeline/linkPreviewPreference";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
+import type { AppLocale } from "@/i18n/localeStore";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -25,8 +28,11 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 
-beforeAll(() => {
+let korean: AppLocale;
+
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  korean = await koreanLocaleForTest();
 });
 
 beforeEach(() => {
@@ -214,39 +220,55 @@ describe("AppearanceSection: 링크 미리보기와 대화 미리보기", () => 
   function sample(host: HTMLElement) {
     return host.querySelector<HTMLElement>('[data-testid="preview-link-card"]');
   }
+  const inKorean = () =>
+    mount(
+      <LocaleProvider locale={korean}>
+        <AppearanceSection />
+      </LocaleProvider>
+    );
+  const labels = (host: HTMLElement) =>
+    [...host.querySelectorAll('[data-testid="link-preview-choice"] label')].map((label) => label.textContent);
 
-  it("defaults to 사진 카드 and the sample card follows each choice at once", () => {
-    const host = mount(createElement(AppearanceSection));
+  it("defaults to 작게 and the sample card follows each choice at once", () => {
+    const host = inKorean();
     const group = host.querySelector('[data-testid="link-preview-choice"]');
     expect(group?.tagName).toBe("FIELDSET");
+    expect(labels(host)).toEqual(["작게", "크게", "끄기"]);
     expect(
-      host.querySelector<HTMLInputElement>('[data-testid="link-preview-choice-rich"]')?.checked
+      host.querySelector<HTMLInputElement>('[data-testid="link-preview-choice-compact"]')?.checked
     ).toBe(true);
-    expect(sample(host)?.getAttribute("data-layout")).toBe("rich");
-
-    pick(host, "link-preview-choice-compact");
     expect(sample(host)?.getAttribute("data-layout")).toBe("compact");
-    expect(localStorage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBe("compact");
+
+    pick(host, "link-preview-choice-rich");
+    expect(sample(host)?.getAttribute("data-layout")).toBe("rich");
+    expect(localStorage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBe("rich");
 
     pick(host, "link-preview-choice-off");
     expect(sample(host)).toBeNull();
     expect(localStorage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBe("off");
 
-    pick(host, "link-preview-choice-rich");
-    expect(sample(host)?.getAttribute("data-layout")).toBe("rich");
-    expect(localStorage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBe("rich");
+    pick(host, "link-preview-choice-compact");
+    expect(sample(host)?.getAttribute("data-layout")).toBe("compact");
+    expect(localStorage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBe("compact");
   });
 
-  it("shows the explanation of the chosen layout", () => {
-    const host = mount(createElement(AppearanceSection));
+  it("shows the explanation of the chosen size", () => {
+    const host = inKorean();
     const row = () => host.querySelector('[data-testid="link-preview-choice"]')!.closest(".settings-row");
-    expect(row()?.textContent).toContain("사진을 위에 두고");
+    expect(row()?.textContent).toContain("왼쪽에 작은 그림을 두고");
+    pick(host, "link-preview-choice-rich");
+    expect(row()?.textContent).toContain("글을 위에, 큰 그림을 아래에 둬요");
     pick(host, "link-preview-choice-off");
     expect(row()?.textContent).toContain("카드는 그리지 않아요");
   });
 
-  it("keeps the sample out of the timeline's own test ids", () => {
+  it("reads the words from the dictionary: English without a Korean locale", () => {
     const host = mount(createElement(AppearanceSection));
+    expect(labels(host)).toEqual(["Small", "Large", "Off"]);
+  });
+
+  it("keeps the sample out of the timeline's own test ids", () => {
+    const host = inKorean();
     expect(host.querySelector('[data-testid="unfurl-card"]')).toBeNull();
     expect(host.querySelector('[data-testid="conversation-preview"]')?.getAttribute("aria-hidden")).toBe(
       "true"
