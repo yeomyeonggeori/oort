@@ -132,11 +132,13 @@ describe('동심 — 토큰 수준의 관계', () => {
   });
 
   it('알약 안에서 글 칸이 아닌 가로가 실제 구조와 같다', () => {
-    // 왼쪽: 여백 + 원 + 글 여백. 오른쪽도 같다. 두 원이 있으니 대칭이다.
+    // 왼쪽: 여백 + 원 + 글 여백. 오른쪽도 같다. 두 원이 있으니 대칭이고, 보내기 왼쪽의 표현 단추(#4942) 칸이 한 번 더 든다
+    // (옛 108 은 그 단추가 도구 줄에 있던 때의 값이다).
     expect(COMPOSER_CHROME_X).toBe(
-      2 * (CONV.composerGap + CONV.composerCircle + CONV.composerTextInset),
+      2 * (CONV.composerGap + CONV.composerCircle + CONV.composerTextInset) +
+        CONV.composerExpression,
     );
-    expect(COMPOSER_CHROME_X).toBe(108);
+    expect(COMPOSER_CHROME_X).toBe(144);
   });
 
   it('원은 엄지 44 안에 든다 — 눌림 영역이 알약 밖으로 안 나간다', () => {

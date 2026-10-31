@@ -37,6 +37,11 @@ import {ExpressionImage} from './ExpressionImage';
 import {ExpressionImportForm} from './ExpressionImportForm';
 import {ExpressionMakeForm} from './ExpressionMakeForm';
 import {useExpressions} from './ExpressionProvider';
+import {browseExpressions, type ExpressionView} from './expressionViews';
+import {
+  useExpressionMessages,
+  type PlainMessageKey,
+} from './useExpressionMessages';
 
 type Filter = 'emoji' | 'sticker' | 'gif' | 'recent' | 'frequent';
 const FILTERS = [
@@ -50,21 +55,49 @@ const FILTERS = [
 /** 「＋」가 여는 안쪽 장 둘. 목록이 아닌 동안은 고르개의 본문이 그 장으로 바뀐다(`ExpressionChapter` 머리말). */
 type Chapter = 'list' | 'import' | 'make';
 
+/** 표현 시트의 큰 칸(이모티콘·GIF 탭, #4942): 정지 그림 64 + 칸 여백. 열 수는 글자 배수만큼 줄어든다. */
+const TILE_CELL = 72;
+/** 탭마다의 빈 보관함 안내 — 어디서 채우는지까지 한 줄로 말한다. */
+const EMPTY_COPY: Readonly<Record<ExpressionView, PlainMessageKey>> = {
+  emoticon: 'expressions.sheet.emptyEmoticon',
+  team: 'expressions.sheet.emptyTeam',
+  gif: 'expressions.sheet.emptyGif',
+};
+
 export function TeamExpressionPicker({
   query,
   onSelect,
   mode = 'reaction',
+  view,
   onOpenConversation,
+  onChapterChange,
 }: {
   query: string;
   onSelect: (token: string) => void;
-  mode?: 'reaction' | 'message';
+  /**
+   * `reaction`: 고르면 바로 넘긴다. `message`: 큰 그림을 먼저 미리 보고 「보내기」를 한 번 더 눌러야 넘긴다(ADR-0218 D1).
+   * `insert`: 고르면 바로 넘긴다 — 호스트가 그 이름을 입력칸에 넣는다(미리보기 없음, #4942).
+   */
+  mode?: 'reaction' | 'message' | 'insert';
+  /**
+   * 입력창 표현 시트의 탭(#4942): 안쪽 필터 줄 없이 이 보기 하나만 그린다(`expressionViews.ts` 머리말). 주지 않으면
+   * 옛 모양(이모지·스티커·GIF·최근·자주 필터 줄)이고 반응 고르개가 그렇게 쓴다.
+   */
+  view?: ExpressionView;
   /** 「AI와 만들기」 요청을 보낸 뒤 그 에이전트 DM 으로 간다. 호스트가 대화로 가는 길을 줄 때만 서고, 시트를 먼저 내린다. */
   onOpenConversation?: (channel: Channel) => void;
+  /** 「＋」의 안쪽 장이 열리고 닫힐 때 알린다 — 호스트가 장 동안 검색·탭 줄을 접어 좁은 화면에 자리를 준다. */
+  onChapterChange?: (open: boolean) => void;
 }) {
   const {items, state, store, usage} = useExpressions();
   const canAdd = useCanAddExpression();
+  const formatMessage = useExpressionMessages();
   const [chapter, setChapter] = useState<Chapter>('list');
+  const onChapterChangeRef = useRef(onChapterChange);
+  onChapterChangeRef.current = onChapterChange;
+  useEffect(() => {
+    onChapterChangeRef.current?.(chapter !== 'list');
+  }, [chapter]);
   const styles = useStyles(buildStyles);
   const {width, fontScale} = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -76,13 +109,18 @@ export function TeamExpressionPicker({
   const [selectionError, setSelectionError] = useState(false);
   const selection = useRef(0);
   const locked = useRef(false);
+  const tiles = view === 'emoticon' || view === 'gif';
+  // 이름 줄은 옛 모양에서는 이모지 필터만 빼고, 시트에서는 작은 칸(팀 이모지)만 뺀다.
+  const captioned = view ? view !== 'team' : filter !== 'emoji';
   const columns = Math.max(
     1,
     Math.floor(
-      (width - SAFE_GUTTER * 2) / (TOUCH_TARGET * Math.max(1, fontScale)),
+      (width - SAFE_GUTTER * 2) /
+        ((tiles ? TILE_CELL : TOUCH_TARGET) * Math.max(1, fontScale)),
     ),
   );
   const results = useMemo(() => {
+    if (view) return browseExpressions(items, view, query, usage);
     const found = searchExpressions(
       items,
       query.replace(/^:|:$/g, ''),
@@ -96,7 +134,7 @@ export function TeamExpressionPicker({
         ? recentExpressions(usage)
         : frequentExpressions(usage);
     return ranked.flatMap(entry => found.filter(item => item.id === entry.id));
-  }, [items, query, filter, usage]);
+  }, [items, query, filter, usage, view]);
   const rows = useMemo(() => {
     const next: Expression[][] = [];
     for (let i = 0; i < results.length; i += columns)
@@ -111,7 +149,7 @@ export function TeamExpressionPicker({
     return () => {
       selection.current += 1;
     };
-  }, [query, filter]);
+  }, [query, filter, view]);
   const current =
     preview &&
     items.find(
@@ -150,14 +188,16 @@ export function TeamExpressionPicker({
   };
   const notice =
     state === 'offline'
-      ? '오프라인이에요. 연결되면 팀 보관함을 볼 수 있어요.'
+      ? formatMessage('expressions.sheet.offline')
       : state === 'error'
-      ? '팀 보관함을 불러오지 못했어요. 다시 시도해 주세요.'
+      ? formatMessage('expressions.sheet.error')
       : state === 'loading'
-      ? '팀 보관함을 불러오는 중이에요.'
+      ? formatMessage('expressions.sheet.loading')
       : query
-      ? '찾는 표현이 없어요. 다른 이름이나 태그로 검색해 보세요.'
-      : '아직 우리 팀 이모지가 없습니다.';
+      ? formatMessage('expressions.sheet.noMatch')
+      : formatMessage(
+          view ? EMPTY_COPY[view] : 'expressions.sheet.emptyLegacy',
+        );
   const rootStyle = [
     styles.root,
     {marginBottom: Math.max(0, keyboardHeight - insets.bottom)},
@@ -184,21 +224,23 @@ export function TeamExpressionPicker({
   }
   return (
     <View style={rootStyle} testID="team-expression-picker">
-      <View style={styles.filters}>
-        {FILTERS.map(item => (
-          <Pressable
-            key={item.id}
-            accessibilityRole="tab"
-            accessibilityLabel={item.label}
-            accessibilityState={{selected: filter === item.id}}
-            onPress={() => setFilter(item.id)}
-            style={[styles.filter, filter === item.id && styles.selected]}
-          >
-            <Text style={styles.label}>{item.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-      {store && !(current && mode === 'message') ? (
+      {view ? null : (
+        <View style={styles.filters}>
+          {FILTERS.map(item => (
+            <Pressable
+              key={item.id}
+              accessibilityRole="tab"
+              accessibilityLabel={item.label}
+              accessibilityState={{selected: filter === item.id}}
+              onPress={() => setFilter(item.id)}
+              style={[styles.filter, filter === item.id && styles.selected]}
+            >
+              <Text style={styles.label}>{item.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+      {store && view !== 'gif' && !(current && mode === 'message') ? (
         <ExpressionAddMenu
           canAdd={canAdd}
           offline={state === 'offline'}
@@ -208,7 +250,8 @@ export function TeamExpressionPicker({
       ) : null}
       {current && mode === 'message' ? (
         <View style={styles.preview} testID="expression-send-preview">
-          <ExpressionImage expression={current} size="large" />
+          {/* 미리보기는 서 있는 동안 늘 보인다 — `visible` 이라 동작 줄이기만 정지 그림(thumb)으로 가르고, 움직이면 4회 뒤 멈춘다. */}
+          <ExpressionImage expression={current} size="large" visible />
           <Text style={styles.label}>{expressionAltText(current)}</Text>
           <Pressable
             accessibilityRole="button"
@@ -220,7 +263,9 @@ export function TeamExpressionPicker({
             testID="expression-confirm-send"
           >
             <Text style={styles.label}>
-              {selecting ? '확인 중…' : '보내기'}
+              {selecting
+                ? formatMessage('expressions.sheet.sending')
+                : formatMessage('expressions.sheet.send')}
             </Text>
           </Pressable>
           <Pressable
@@ -233,13 +278,15 @@ export function TeamExpressionPicker({
             }}
             style={styles.filter}
           >
-            <Text style={styles.label}>다시 고르기</Text>
+            <Text style={styles.label}>
+              {formatMessage('expressions.sheet.pickAgain')}
+            </Text>
           </Pressable>
         </View>
       ) : (
         <FlatList
           {...scrollProps}
-          key={`${columns}-${filter}-${query}`}
+          key={`${columns}-${view ?? filter}-${query}`}
           data={rows}
           keyExtractor={row => row[0].id}
           initialNumToRender={6}
@@ -265,7 +312,9 @@ export function TeamExpressionPicker({
                   }}
                   style={styles.filter}
                 >
-                  <Text style={styles.label}>다시 시도</Text>
+                  <Text style={styles.label}>
+                    {formatMessage('expressions.sheet.retry')}
+                  </Text>
                 </Pressable>
               ) : null}
             </View>
@@ -277,9 +326,13 @@ export function TeamExpressionPicker({
                   key={item.id}
                   accessibilityRole="button"
                   accessibilityLabel={expressionAltText(item)}
-                  accessibilityHint={
-                    mode === 'message' ? '큰 그림으로 미리 보기' : '반응하기'
-                  }
+                  accessibilityHint={formatMessage(
+                    mode === 'message'
+                      ? 'expressions.sheet.hintPreview'
+                      : mode === 'insert'
+                      ? 'expressions.sheet.hintInsert'
+                      : 'expressions.sheet.hintReact',
+                  )}
                   disabled={selecting}
                   onPress={() => {
                     if (mode === 'message') setPreview(item);
@@ -291,9 +344,17 @@ export function TeamExpressionPicker({
                   ]}
                   testID={`expression-pick-${item.name}`}
                 >
-                  <ExpressionImage expression={item} size="grid" />
-                  {filter !== 'emoji' ? (
-                    <Text style={styles.caption}>{item.displayName}</Text>
+                  <ExpressionImage
+                    expression={item}
+                    size={tiles ? 'tile' : 'grid'}
+                  />
+                  {captioned ? (
+                    <Text
+                      style={styles.caption}
+                      numberOfLines={view ? 2 : undefined}
+                    >
+                      {item.displayName}
+                    </Text>
                   ) : null}
                 </Pressable>
               ))}
@@ -303,7 +364,7 @@ export function TeamExpressionPicker({
       )}
       {selectionError ? (
         <Text accessibilityRole="alert" style={styles.label}>
-          이 표현을 지금 쓸 수 없어요. 다시 골라 주세요.
+          {formatMessage('expressions.sheet.unavailable')}
         </Text>
       ) : null}
     </View>

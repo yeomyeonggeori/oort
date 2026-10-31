@@ -1195,8 +1195,9 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     ] as const) {
       setWindow({width, fontScale, height: H});
       const view = composer();
+      // 입력창은 알약에서 양쪽 (여백 9 + 원 36)을 뺀 칸이고, 오른쪽은 보내기 왼쪽의 표현 단추 칸 36 이 한 번 더 든다(#4942).
       const inputWidth =
-        width - 2 * composerFloat(width, fontScale) - 2 * (9 + 36);
+        width - 2 * composerFloat(width, fontScale) - 2 * (9 + 36) - 36;
       layoutInput(inputWidth);
       const probeStyle = StyleSheet.flatten(probes()[0].props.style) as {
         width?: number;

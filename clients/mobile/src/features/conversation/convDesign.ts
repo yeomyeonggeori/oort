@@ -124,6 +124,11 @@ export const CONV = {
   // `__tests__/composerPill.test.tsx` 가 잰다.
   /** + · ↑ 원의 지름. 두 원이 같다. */
   composerCircle: 36,
+  /**
+   * 보내기 **왼쪽** 표현 단추의 칸(#4942, owner 10-31) — 두 원과 같은 지름이고 글리프만 선다(채운 원은 보내기 하나다).
+   * 접힌 알약에서는 글 칸이 이만큼 더 비운다(`COMPOSER_CHROME_X`).
+   */
+  composerExpression: 36,
   /** 원 ↔ 알약 가장자리, 사방 같다(좌·우·위·아래). */
   composerGap: 9,
   /** 알약 반경 = 원 반경 18 + 사방 여백 9. 한 줄 높이는 2 × 27 = 54(Buzz 53.3). */
@@ -184,12 +189,13 @@ export const CONV = {
 } as const;
 
 /**
- * 알약 안에서 글 칸이 **아닌** 가로 — 양쪽의 (원 + 원 ↔ 알약 가장자리 + 원 ↔ 글).
- * 108 = 2 × (9 + 36 + 9). 두 원이 있는 대화 컴포저의 값이다(작업 대화 알약은 이 거리를 안
- * 쓴다 — 바깥 여백이 위 안내 줄과 맞아야 해서 독의 12 그대로다).
+ * 알약 안에서 글 칸이 **아닌** 가로 — 양쪽의 (원 + 원 ↔ 알약 가장자리 + 원 ↔ 글) + 보내기 왼쪽 표현 단추의 칸.
+ * 144 = 2 × (9 + 36 + 9) + 36. 두 원과 표현 단추가 있는 대화 컴포저의 값이다(옛 108 은 표현 단추가 도구 줄에 있던 때의
+ * 값이다, #4942). 작업 대화 알약은 이 거리를 안 쓴다 — 바깥 여백이 위 안내 줄과 맞아야 해서 독의 12 그대로다.
  */
 export const COMPOSER_CHROME_X =
-  2 * (CONV.composerGap + CONV.composerCircle + CONV.composerTextInset);
+  2 * (CONV.composerGap + CONV.composerCircle + CONV.composerTextInset) +
+  CONV.composerExpression;
 
 /** #4790: 창 폭·글자 크기와 무관하게 도크 전체가 같은 8pt 선에 선다. */
 export function composerFloat(_windowWidth: number, _fontScale: number): number {
