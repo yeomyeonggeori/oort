@@ -293,6 +293,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 momo_server::routes::provider_link::PROBE_TIMEOUT,
             ),
         ))
+        // ADR-0218 §8 (#4941): the team image model is dialled under the same egress policy as a
+        // real turn; the hosts and models come from the environment (model ids only).
+        .with_image_model(
+            std::sync::Arc::new(momo_image_model::GuardedImageModel::new(
+                momo_server::config::provider_probe_policy_from_env(&config.settings),
+                momo_image_model::DEFAULT_DEADLINE,
+            )),
+            momo_image_model::ImageModelConfig::from_env(),
+        )
         // ADR-0203: the co-hosted agent probe dials only the host the operator wrote
         // in HERMES_BASE_URL, under the same egress policy as a real turn.
         .with_cohosted(
