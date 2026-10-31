@@ -2038,8 +2038,12 @@ agent:
   `OORT_HOSTED_MEDIA_STRICT=1`이에요. 워커가 연결하는 Hermes가 그 엄격한 Hermes라는
   운영자의 확인이에요. 템플릿과 compose는 이 값을 **비워서** 보내요. 그래서 기본은 문이
   닫혀 있고, 사진 메시지는 오류 카드 없이 평소 대화로 처리돼요. Hermes 서비스가 새
-  게이트로 돌고 있을 때만(먼저 `HERMES_LOCKGATE_B64`와 시작 명령의 체크섬을 다시 배포해요)
-  켜세요. 정확히 `1`일 때만 문이 열려요.
+  게이트로 돌고 있을 때만 켜세요. 기존 Railway 프로젝트는 이 순서로 고쳐요. ① hermes에
+  `HERMES_MEDIA_DELIVERY_STRICT=1`을 먼저 더해요. ② 그다음 `HERMES_LOCKGATE_B64`와 시작
+  명령의 체크섬을 함께 다시 배포해요(새 게이트는 ①이 없으면 Hermes를 띄우지 않으니 ②만
+  하면 에이전트가 멈춰요). ③ 배포 로그의 `LOCKGATE` 줄에서 `image_guard` 안의
+  `"media_strict": true`가 보이면 마지막으로 `OORT_HOSTED_MEDIA_STRICT=1`을 켜요.
+  정확히 `1`일 때만 문이 열려요.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 여전히 **운영자 본인의 선언**이에요. 두
   배포 모양 모두 게이트가 뒷받침하지만, 설정·게이트·시작 명령을 고치면 그 뒷받침은
   운영자가 직접 책임져요.

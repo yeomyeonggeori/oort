@@ -900,6 +900,107 @@ mod tests {
             assert!(!hosted_media_strict_attested(wrong), "{wrong:?}");
         }
     }
+
+    /// The name the operator types. Pinned as a literal on purpose: the Railway template, the compose
+    /// file and the docs all write it, so renaming the worker's constant must break a test here and
+    /// not every deployment.
+    const STRICT_VAR: &str = "OORT_HOSTED_MEDIA_STRICT";
+    /// Set only by the parent below; without it [`strict_wiring_probe_child`] returns at once.
+    const PROBE_MARKER: &str = "OORT_TEST_STRICT_WIRING_PROBE";
+    /// The one line the probe prints, followed by `true` or `false`.
+    const PROBE_LINE: &str = "OORT_STRICT_WIRING_PROBE hosted_media_strict=";
+
+    /// The child half of [`the_strict_media_value_opens_the_door_switch_only_as_an_exact_one`]: it
+    /// prints what the REAL `WorkerConfig::from_env()` made of the environment it was started with.
+    /// A plain `cargo test` finds no marker and passes without doing anything — the parent is the
+    /// assertion, and it fails unless this printed its line.
+    #[test]
+    fn strict_wiring_probe_child() {
+        if std::env::var_os(PROBE_MARKER).is_none() {
+            return; // the parent test drives this one
+        }
+        let config =
+            WorkerConfig::from_env().expect("the probe's minimal environment is a valid config");
+        // `--nocapture` appends a test's output to the harness's `test … ... ` line: start a new one.
+        println!("\n{PROBE_LINE}{}", config.hosted_media_strict);
+    }
+
+    /// What the real `from_env()` makes of `OORT_HOSTED_MEDIA_STRICT=<value>` (`None`: not in the
+    /// environment at all), asked of a child process — this test binary re-executed — so that the
+    /// environment is the child's alone and no test here ever calls `set_var`, which would race every
+    /// other test of the binary.
+    fn the_door_switch_from_env_in_a_child(value: Option<&str>) -> bool {
+        // libtest names a test by its module path below the crate: `config::tests::<fn>`.
+        let below_the_crate = module_path!().split_once("::").map_or("", |(_, rest)| rest);
+        let test = format!("{below_the_crate}::strict_wiring_probe_child");
+        let mut child =
+            std::process::Command::new(std::env::current_exe().expect("this test binary"));
+        child
+            .args([test.as_str(), "--exact", "--nocapture", "--test-threads=1"])
+            // Nothing the operator's shell or the CI job exported may decide this test (a stray
+            // `OORT_HOSTED_MEDIA_STRICT`, a `DATABASE_URL`, a malformed number): the child starts
+            // empty and gets the one variable `from_env()` insists on — a dummy that is never dialled.
+            .env_clear()
+            .env(PROBE_MARKER, "1")
+            .env("WORKER_DATABASE_URL", "postgres://probe.invalid/probe");
+        if let Some(value) = value {
+            child.env(STRICT_VAR, value);
+        }
+        let out = child.output().expect("spawn the probe");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            out.status.success() && stdout.contains("test result: ok. 1 passed;"),
+            "the probe did not run its one test (a probe that ran 0 tests must not count):\n{stdout}\n{stderr}"
+        );
+        let answers: Vec<&str> = stdout
+            .lines()
+            .filter_map(|line| line.split_once(PROBE_LINE).map(|(_, answer)| answer.trim()))
+            .collect();
+        match answers.as_slice() {
+            ["true"] => true,
+            ["false"] => false,
+            other => panic!(
+                "the probe must print exactly one `true`/`false` answer, got {other:?}:\n{stdout}\n{stderr}"
+            ),
+        }
+    }
+
+    /// #4820 C2b second security review, Medium-1: the seam between the environment and the door
+    /// switch. [`the_strict_media_attestation_is_an_exact_one`] pins the pure rule; this one runs the
+    /// real `from_env()` — the `env()` read, the wiring line, the value exactly as a process gets it —
+    /// so pinning `hosted_media_strict` to a constant, reading another name, or letting `env()` trim
+    /// the value (`" 1"` would become `1`) turns it red. Only an exact `1` opens the switch.
+    #[test]
+    fn the_strict_media_value_opens_the_door_switch_only_as_an_exact_one() {
+        assert!(
+            the_door_switch_from_env_in_a_child(Some("1")),
+            "an exact `1` is the operator's attestation"
+        );
+        for (label, value) in [
+            ("not in the environment", None),
+            ("empty", Some("")),
+            ("blanks only", Some("   ")),
+            ("a leading space", Some(" 1")),
+            ("a trailing space", Some("1 ")),
+            ("a trailing newline", Some("1\n")),
+            ("a leading tab", Some("\t1")),
+            ("a leading newline", Some("\n1")),
+            ("zero-padded", Some("01")),
+            ("doubled", Some("11")),
+            ("zero", Some("0")),
+            ("the word true", Some("true")),
+            ("TRUE", Some("TRUE")),
+            ("yes", Some("yes")),
+            ("on", Some("on")),
+        ] {
+            assert!(
+                !the_door_switch_from_env_in_a_child(value),
+                "{label} ({value:?}) must leave the door switch shut"
+            );
+        }
+    }
+
     /// #3431: the worker reads the Claude opt-in by the server's rule — only an
     /// exact `true` opens it, and the shipped default (`for_target`) is off.
     #[test]

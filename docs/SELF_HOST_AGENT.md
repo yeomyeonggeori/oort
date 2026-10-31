@@ -2513,8 +2513,12 @@ generator now do for you; you still read the lock, and the model key stays yours
   `OORT_HOSTED_MEDIA_STRICT=1` on agent-worker, your statement that the Hermes it dials
   is that strict one. The template and compose ship it **empty**, so by default the door
   is shut and a photo message is an ordinary conversation turn (no error card). Set it
-  only after the Hermes service runs the new gate (redeploy `HERMES_LOCKGATE_B64` and the
-  start command's checksum first); only an exact `1` opens the door. In both
+  only after the Hermes service runs the new gate, and update an existing Railway project
+  in this order: (1) add `HERMES_MEDIA_DELIVERY_STRICT=1` to hermes; (2) redeploy
+  `HERMES_LOCKGATE_B64` and the start command's checksum together (the new gate refuses
+  to start Hermes without (1), so (2) alone stops the agent); (3) when the `LOCKGATE` line
+  of the deploy log shows `"media_strict": true` (inside `image_guard`), set
+  `OORT_HOSTED_MEDIA_STRICT=1` last. Only an exact `1` opens the door. In both
   shipped shapes it is backed by the gate; if you edit the config, the gate or
   the start command, you take that backing back on yourself.
 - **Model authentication is not part of this** (#4073): Hermes starts and the
