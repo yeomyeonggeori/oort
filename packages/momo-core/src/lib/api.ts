@@ -2976,6 +2976,18 @@ export async function searchMessages(
 }
 
 /**
+ * One page of thread replies, oldest first. `following` is the **caller's own** follow state of this
+ * thread (ADR-0206 증보 1 F8, #4889): an automatic or a direct follow reads `true`; a thread they
+ * stopped following and one they never joined both read `false`. A server that predates the field
+ * omits the key — read a missing `following` as `false`, never as "unknown".
+ */
+export interface ThreadRepliesPage {
+  messages: Message[];
+  nextCursor?: number;
+  following?: boolean;
+}
+
+/**
  * One oldest-first page of thread replies (ascending channel seq). `limit` is
  * clamped to 1...200 by the server; the work session panel asks for the ceiling
  * because a session thread is an event log, not a conversation.
@@ -2986,18 +2998,60 @@ export function fetchThreadReplies(
   rootId: string,
   cursor?: number,
   limit?: number
-): Promise<{ messages: Message[]; nextCursor?: number }> {
+): Promise<ThreadRepliesPage> {
   const params = new URLSearchParams();
   if (cursor !== undefined) params.set("cursor", String(cursor));
   if (limit !== undefined) params.set("limit", String(limit));
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
-  return request<{ messages: Message[]; nextCursor?: number }>(
+  return request<ThreadRepliesPage>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(
       rootId
     )}/replies${suffix}`
   );
+}
+
+function threadFollowPath(workspaceId: string, channelId: string, rootId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(
+    channelId
+  )}/messages/${encodeURIComponent(rootId)}/follow`;
+}
+
+/**
+ * 스레드를 직접 따라간다 (ADR-0206 증보 1 F8, #4889) — `PUT …/messages/{rootId}/follow`. 본문이 없고
+ * 멱등이다. 응답의 `following` 은 쓴 뒤의 **효과값**이다. 그만 따라간 스레드로 돌아오는 길은 이 호출
+ * 하나뿐이다(새 답글·멘션은 되돌리지 못한다). 채널 멤버가 아니면 403, 루트가 없으면 404, 루트가 답글이거나
+ * DM 채널이면 400(`thread_follow_not_applicable`). 옛 서버는 404·405 — 호출부가 「기능 없음」으로 보고
+ * 칸을 숨긴다.
+ */
+export async function followThread(
+  workspaceId: string,
+  channelId: string,
+  rootId: string
+): Promise<{ following: boolean }> {
+  const res = await request<{ following?: unknown }>(
+    threadFollowPath(workspaceId, channelId, rootId),
+    { method: "PUT" }
+  );
+  return { following: res.following === true };
+}
+
+/**
+ * 스레드를 그만 따라간다 — `DELETE …/messages/{rootId}/follow`. 같은 가드·같은 오류·멱등이다. 이 선택은
+ * 유지된다: 뒤의 답글·멘션·루트 작성자라는 사실이 다시 따라가게 만들지 않는다. 막히는 것은 새 답글 알림
+ * (`thread_reply`)뿐이고, 나를 부른 멘션·키워드·채널 단계 `all` 은 각자의 규칙대로 온다.
+ */
+export async function unfollowThread(
+  workspaceId: string,
+  channelId: string,
+  rootId: string
+): Promise<{ following: boolean }> {
+  const res = await request<{ following?: unknown }>(
+    threadFollowPath(workspaceId, channelId, rootId),
+    { method: "DELETE" }
+  );
+  return { following: res.following === true };
 }
 
 /**
