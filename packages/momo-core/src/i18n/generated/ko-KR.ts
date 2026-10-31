@@ -197,6 +197,42 @@ export const catalog: MessageCatalog = {
       "value": "언어를 적용하는 중이에요."
     }
   ],
+  "settings.appearance.linkPreviewCompact": [
+    {
+      "type": 0,
+      "value": "작게"
+    }
+  ],
+  "settings.appearance.linkPreviewCompactHint": [
+    {
+      "type": 0,
+      "value": "왼쪽에 작은 그림을 두고, 오른쪽에 주소와 제목 한 줄, 설명 한 줄을 보여줘요."
+    }
+  ],
+  "settings.appearance.linkPreviewOff": [
+    {
+      "type": 0,
+      "value": "끄기"
+    }
+  ],
+  "settings.appearance.linkPreviewOffHint": [
+    {
+      "type": 0,
+      "value": "메시지 속 링크만 남기고 카드는 그리지 않아요."
+    }
+  ],
+  "settings.appearance.linkPreviewRich": [
+    {
+      "type": 0,
+      "value": "크게"
+    }
+  ],
+  "settings.appearance.linkPreviewRichHint": [
+    {
+      "type": 0,
+      "value": "글을 위에, 큰 그림을 아래에 둬요. 제목과 설명은 두 줄까지 보여줘요. 큰 그림이 없는 링크는 작게와 같아요."
+    }
+  ],
   "settings.profile.languageBeta": [
     {
       "type": 0,
@@ -247,6 +283,30 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "기기 언어 따르기"
+    }
+  ],
+  "timeline.unfurl.label": [
+    {
+      "type": 0,
+      "value": "링크 미리보기: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "domain"
+    }
+  ],
+  "timeline.unfurl.video": [
+    {
+      "type": 0,
+      "value": "동영상"
     }
   ]
 };
