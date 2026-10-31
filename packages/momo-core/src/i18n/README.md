@@ -241,8 +241,9 @@ under core `npm test`: missing/blank keys, ICU parsing, argument name/type misma
 and stale generated files fail there. No second validator or workflow change is
 needed. `pseudo.test.ts` proves AST preservation and real service formatting.
 
-`tooling/direct-copy-baseline.json` records the fixed starting HEAD
-`078f76b1056191fdfc1664f9c837ffa6fbf0482c` and **file → occurrence count** for
+`tooling/direct-copy-baseline.json` records the baseline HEAD
+`ec72216333e1a26be9387da5a3863ffd065ca4b2` (track/uxui after the S3 screen PRs;
+see "Ledger refresh" below) and **file → occurrence count** for
 web/mobile production JS/TS sources (including mobile `App.tsx`/`index.js`).
 `tooling/direct-copy.mjs` uses the existing
 TypeScript parser, not a Korean-only regex: JSX text, accessible names, known copy
@@ -251,8 +252,13 @@ counted, including template segments. This deliberately conservative English
 rule also budgets standalone technical enum words. Comments, imports/types,
 property names, non-copy JSX attributes, diagnostic calls (`console`, `logger`,
 `log`, Error constructors/assertions), test/fixture/testkit files, generated files
-are excluded. Product design controls remain included. Dynamic user content has
-no literal to count;
+are excluded. Product design controls remain included. Scan roots are
+`clients/{web,mobile}/src` plus mobile `App.tsx`/`index.js`; trees outside them
+(`clients/*/measure/` measurement harnesses, `clients/mobile/maestro/`,
+`clients/web/e2e/`, `scripts/`) are not scanned. Mobile `index.js` imports only
+`measure/root` (a launch-argument reader) and requires the harness modules in a
+measure mode; whether they ship in a release bundle is not verified here. Dynamic
+user content has no literal to count;
 message keys/arguments are validated by the dictionary and typed service instead.
 Literal `formatMessage` references are checked against every English feature JSON.
 
@@ -268,11 +274,48 @@ strings. Extracted copy text and user data are not written to the ledger.
 ```sh
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs web
 node packages/momo-core/src/i18n/tooling/direct-copy.mjs mobile
-# Audit/reproduce the original baseline; emit only, never auto-update allowances:
-node packages/momo-core/src/i18n/tooling/direct-copy.mjs --baseline 078f76b1056191fdfc1664f9c837ffa6fbf0482c
+# Audit/reproduce the baseline (commit or tree id); emit only, never auto-update allowances.
+# The output must equal the committed ledger's `version`, `baselineHead` and `files`.
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs --baseline ec72216333e1a26be9387da5a3863ffd065ca4b2
 ```
 
-For P1, lower only the migrated files' counts after reviewing the scanner output;
-do not regenerate against a later HEAD to bless additions. Stack QA should check
-buttons, settings rows, errors, accessible names and multiline text in en-XA,
-including narrow widths and large type. This change itself renders no screens.
+### Ledger refresh at the S3 landing (2026-10-31)
+
+The ledger was first emitted at `078f76b1056191fdfc1664f9c837ffa6fbf0482c`
+(P0-1). Before this PR could land, the S3 UXUI screen PRs (#4847 #4848 #4853
+#4859 #4860 #4863 #4867 #4899 #4901 and fixes) had added direct copy, so the
+ledger was re-emitted with `--baseline` at track/uxui `ec7221633` (two emissions
+are byte-identical; the PR's own client files are test-only, so the merge commit
+emits the same counts). Result: 880 → 902 entries, **22 new files, 16 raised
+files, 0 lowered, 0 removed**, +450 occurrences (web 18 files, mobile 20):
+
+| Added | Count | Disposition |
+|---|---|---|
+| Hangul/JSX/accessible-name literals | 123 in 16 files | 119 in 14 files are screen copy for P1 migration; 3 are the Intl capability probe's expected strings (`intl.ts`), 1 is the reconnect fallback literal (`ConversationHeader.tsx`, dictionary key `mobile.connection.reconnectNow` is the source of truth; the fallback serves isolated harnesses without a dictionary and a test pins its value) |
+| Standalone English words, class and selector strings | 320 | not user copy (state/kind/event/style names the conservative rule budgets) |
+| Dictionary keys passed through an aliased call (`const t = service.formatMessage; t("key")`) | 9 | scanner blind spot, see below |
+| Replaced literals | −2 | `ApprovalDecision.tsx` accessible names became templates |
+
+Every new or raised entry has a line in the ledger's `reasons` map (PR, the
+copy/technical split and the disposition). `reasons` is informational: the
+checker reads `files` only, so it adds no gate and no format contract. Do not
+copy copy text into it.
+
+Policy: refresh only to re-base at a landing. Emit with `--baseline <HEAD>`, diff
+against the committed ledger, and explain every new or raised file in `reasons`.
+Never refresh to hide new user copy that should use a dictionary key. P1 migration
+lowers a file's count and deletes its `reason`; the checker already fails on a stale
+(higher) allowance. A refresh at a later HEAD changes `baselineHead` too, and the
+emission does not carry `reasons`, so copy the existing lines over for files that
+keep a raised allowance.
+
+Known limitation (decision pending with the planner): the scanner recognises
+`formatMessage(...)` only by that callee name. An alias such as
+`const t = locale.service.formatMessage; {t("settings.profile.languageLabel")}`
+counts the key as one direct literal (so a screen that follows the dictionary rule
+through the alias is flagged) and skips the unknown-key check. Web
+`LanguageRow.tsx` carries 9 such references in its allowance.
+
+Stack QA should check buttons, settings rows, errors, accessible names and
+multiline text in en-XA, including narrow widths and large type. This change
+itself renders no screens.
