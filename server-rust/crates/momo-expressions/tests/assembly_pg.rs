@@ -8,7 +8,8 @@
 //! | `rls_hides_a_held_assembly_from_another_workspace_and_from_another_agent` | the `ws_isolation` and `expression_assembly_agent` policies, with no predicate in the query | either policy goes |
 //! | `get_in_tx_refuses_by_its_own_predicates_when_no_policy_helps` | the agent and the person are arguments the SQL itself checks, on a request that binds no `app.agent_member_id` (the hosted door's) | `AND agent_member_id` or `AND requester_member_id` is dropped from `get_in_tx` |
 //! | `an_agent_holds_twelve_candidates_and_the_twelve_are_proved_under_the_agents_lock` | the cap, refusing writes nothing, holes do not count, the lock | the cap, the count or the lock goes |
-//! | `an_hour_the_sweep_and_the_reclaim_delete_the_bytes_and_keep_the_record` | TTL on read, the sweep (notifier-shaped), explicit reclaim | any of the three stops deleting bytes |
+//! | `an_hour_the_sweep_deletes_the_assembly_and_the_reclaim_retires_one_early` | TTL on read, the sweep (notifier-shaped) deleting bytes AND header, explicit reclaim retiring one early, the retired header deleted when its hour is up | any of the three stops deleting bytes, the sweep keeps a header, a retired header is never found |
+//! | `an_hour_the_sweep_leaves_no_prompt_behind` | no header row (so no prompt) outlives its hour, ready or reclaimed; a live one is untouched; the audit record never held the prompt | the sweep stops deleting headers or stops finding retired ones |
 //! | `pixels_and_the_header_are_immutable_to_the_runtime_role` | the backstop triggers | a trigger goes |
 //! | `the_audit_row_carries_facts_and_never_the_prompt_the_picture_or_the_attachment` | D6's closed list | the row starts to carry them |
 use futures::future::BoxFuture;
@@ -216,9 +217,20 @@ async fn keep(
     agent: Uuid,
     outcomes: Vec<Outcome>,
 ) -> Result<Result<assembly::Kept, assembly::Full>, Error> {
+    keep_saying(w, agent, "빨간 네모 스티커", outcomes).await
+}
+
+/// [`keep`] with the agent's own words (the prompt the header holds) chosen by the test.
+async fn keep_saying(
+    w: &World,
+    agent: Uuid,
+    prompt: &str,
+    outcomes: Vec<Outcome>,
+) -> Result<Result<assembly::Kept, assembly::Full>, Error> {
     let ws = w.human.workspace;
     let requester = w.requester;
     let motions = slot_motions();
+    let prompt = prompt.to_string();
     in_tx(&w.api, w.human, Some(agent), move |conn| {
         Box::pin(async move {
             assembly::keep_in_tx(
@@ -227,7 +239,7 @@ async fn keep(
                     workspace: ws,
                     agent,
                     requester,
-                    prompt: "빨간 네모 스티커",
+                    prompt: &prompt,
                     source_attachment_id: None,
                     motions: &motions[..outcomes.len()],
                     outcomes: &outcomes,
@@ -237,6 +249,34 @@ async fn keep(
         })
     })
     .await
+}
+
+/// Header rows of the tenant that still carry exactly `prompt`: what is left of the agent's words.
+async fn holding(su: &PgPool, prompt: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM expression_assembly WHERE prompt=$1")
+        .bind(prompt)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+/// The notifier's sweep, tick after tick, until the header `id` is gone (at most eight ticks): a
+/// tick discovers 100 tenants, and a database that other tests share may be carrying more than
+/// that of due rows. It reports whether the header went; a sweep that never deletes it fails the
+/// caller's assertion after the eighth tick.
+async fn sweep_away(w: &World, id: Uuid) -> bool {
+    for _ in 0..8 {
+        e::sweep_expired(&w.su, &w.api).await.unwrap();
+        let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM expression_assembly WHERE id=$1")
+            .bind(id)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+        if rows == 0 {
+            return true;
+        }
+    }
+    false
 }
 
 /// `SELECT count(*)` with no predicate: what the runtime role may see, and nothing else.
@@ -737,7 +777,7 @@ async fn the_twelve_cannot_be_outrun_by_simultaneous_calls() {
 
 #[tokio::test]
 #[ignore = "real PG; security-nightly workspace ignored pass"]
-async fn an_hour_the_sweep_and_the_reclaim_delete_the_bytes_and_keep_the_record() {
+async fn an_hour_the_sweep_deletes_the_assembly_and_the_reclaim_retires_one_early() {
     let w = world().await;
     let ws = w.human.workspace;
     // One assembly the hour ends on, one an explicit reclaim ends, one still within its hour.
@@ -800,12 +840,16 @@ async fn an_hour_the_sweep_and_the_reclaim_delete_the_bytes_and_keep_the_record(
         0,
         "TTL sweep deletes the bytes"
     );
-    let state: String = sqlx::query_scalar("SELECT state FROM expression_assembly WHERE id=$1")
-        .bind(aged.assembly_id)
-        .fetch_one(&w.su)
-        .await
-        .unwrap();
-    assert_eq!(state, "expired", "the row stays as a record");
+    let header_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression_assembly WHERE id=$1")
+            .bind(aged.assembly_id)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(
+        header_rows, 0,
+        "the header goes with its bytes: it holds the agent's prompt, which nothing needs once the hour is up"
+    );
     assert_eq!(
         images_of(&w.su, live.assembly_id).await,
         6,
@@ -832,6 +876,134 @@ async fn an_hour_the_sweep_and_the_reclaim_delete_the_bytes_and_keep_the_record(
     .await
     .unwrap();
     assert_eq!(again, 0);
+
+    // A reclaim retires the assembly early (`expired`, no bytes) but its header stays for the rest
+    // of its own hour; the sweep does not touch what is not yet due. When the hour is up the
+    // retired header is due too, though it is no longer `ready`: the sweep finds it and deletes it.
+    let state: String = sqlx::query_scalar("SELECT state FROM expression_assembly WHERE id=$1")
+        .bind(closed.assembly_id)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(
+        state, "expired",
+        "a reclaimed assembly is retired, not deleted"
+    );
+    e::sweep_expired(&w.su, &w.api).await.unwrap();
+    let still: i64 = sqlx::query_scalar("SELECT count(*) FROM expression_assembly WHERE id=$1")
+        .bind(closed.assembly_id)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(still, 1, "the sweep leaves what is not yet due");
+    expire(&w.su, closed.assembly_id).await;
+    assert!(
+        sweep_away(&w, closed.assembly_id).await,
+        "a header retired by a reclaim outlived its hour"
+    );
+    assert!(
+        sweep_away(&w, aged.assembly_id).await,
+        "an aged header is gone and stays gone"
+    );
+    let live_rows = images_of(&w.su, live.assembly_id).await;
+    assert_eq!(live_rows, 6, "the live assembly is still whole");
+}
+
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn an_hour_the_sweep_leaves_no_prompt_behind() {
+    let w = world().await;
+    let canary = format!("PROMPT-CANARY-{}", Uuid::new_v4());
+    // One the hour ends on while it is still `ready`, one a reclaim retired early whose hour then
+    // ends, one still within its hour. All three carry the agent's words.
+    let mut kept = Vec::new();
+    for _ in 0..3 {
+        kept.push(
+            keep_saying(&w, w.agent, &canary, built()[..1].to_vec())
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    let (aged, retired, live) = (&kept[0], &kept[1], &kept[2]);
+    assert_eq!(
+        holding(&w.su, &canary).await,
+        3,
+        "the agent's words are kept"
+    );
+
+    // The hour ends on the first: the sweep leaves no row, so no prompt.
+    expire(&w.su, aged.assembly_id).await;
+    assert!(
+        sweep_away(&w, aged.assembly_id).await,
+        "an assembly whose hour is up still has its row"
+    );
+    assert_eq!(
+        holding(&w.su, &canary).await,
+        2,
+        "the sweep takes the aged assembly's header and only that one (an expired prompt outlived \
+         it, or a live one went with it)"
+    );
+
+    // A reclaim retires the second early; its words stay only until its own hour is up.
+    let ws = w.human.workspace;
+    let id = retired.assembly_id;
+    in_tx(&w.api, w.human, Some(w.agent), move |conn| {
+        Box::pin(async move { assembly::reclaim_in_tx(conn, ws, id).await })
+    })
+    .await
+    .unwrap();
+    e::sweep_expired(&w.su, &w.api).await.unwrap();
+    assert_eq!(
+        holding(&w.su, &canary).await,
+        2,
+        "the sweep touched an assembly whose hour is not up"
+    );
+    expire(&w.su, retired.assembly_id).await;
+    assert!(
+        sweep_away(&w, retired.assembly_id).await,
+        "a reclaimed assembly kept its prompt past its hour"
+    );
+    assert_eq!(
+        holding(&w.su, &canary).await,
+        1,
+        "only the live assembly still holds the prompt"
+    );
+
+    // The one within its hour is whole: bytes and words, for the agent that made it.
+    assert_eq!(
+        images_of(&w.su, live.assembly_id).await,
+        3,
+        "a live assembly lost its bytes to the sweep"
+    );
+    let live_id = live.assembly_id;
+    let held = in_tx(&w.api, w.human, Some(w.agent), move |conn| {
+        Box::pin(async move { assembly::get_in_tx(conn, ws, w.agent, w.requester, live_id).await })
+    })
+    .await
+    .unwrap()
+    .expect("a live assembly is read back");
+    assert_eq!(held.prompt, canary);
+
+    // And when its hour is up it goes the same way.
+    expire(&w.su, live.assembly_id).await;
+    assert!(sweep_away(&w, live.assembly_id).await);
+    assert_eq!(
+        holding(&w.su, &canary).await,
+        0,
+        "no header of the tenant holds the prompt any more"
+    );
+    // The record that survives is the audit row: ids, motions, hash prefixes, never the words.
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='expression.assembled' \
+            AND detail::text NOT LIKE '%'||$2||'%'",
+    )
+    .bind(ws)
+    .bind(&canary)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(audited, 3, "the three audit rows stay, without the prompt");
 }
 
 #[tokio::test]

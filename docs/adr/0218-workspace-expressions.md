@@ -352,7 +352,7 @@ paths:
 
 **G3.6 보관과 후보 연결.** 조립 결과는 서버가 `assemblyId`(UUID)로 임시 보관한다. 워크스페이스·요청 에이전트에 묶이고 TTL은 1시간이며 `expression_draft`와 같은 회수 규칙·할당·디코더 동시성을 공유한다(에이전트당 동시에 보관하는 후보 ≤12 = 기존 pending 제안 ≤3 × 후보 ≤4). 후보는 `expression.create`의 `image`에 `{source:"assembled", assemblyId, index}`로 들어간다. **에이전트가 GIF 바이트를 다시 나르지 않는다.** 승인 카드가 보이는 그림은 서버가 조립한 바이트 그대로이고(X8-2), prompt와 `sourceAttachmentId`는 조립 요청 때 서버가 받은 값이 후보의 `origin`이 된다. 다른 에이전트·다른 요청자·다른 워크스페이스의 `assemblyId`는 구분 없는 같은 invalid arguments다. 후보는 한 조립 결과의 일부만 제안해도 되고, 5개 이상이나 서로 다른 조립 결과의 섞임은 `AgentAction`의 상한(후보 ≤4)과 같은 규칙으로 거절한다.
 
-**G3.7 입구.** 입구는 둘이고 같은 조립 함수를 부른다. (a) Agent Port의 MCP 도구 `oort_expression_assemble`(인자 `AssembleRequest`, 결과 `AssembleResult`, 필요한 범위는 `oort_action_propose`와 같고 새 범위는 없다)와 (b) 호스팅 실행(공동 Hermes)의 서버 쪽 문이다. 둘의 입력 한도·실패 사유·보관은 같다. (b)의 입력 경로는 G4가 확인한 사실로 좁혀진다. Hermes API 서버는 클라이언트가 선언한 함수 도구(`tools`·`tool_choice`)를 읽지 않으므로(Hermes `api_server_openai_routes.py:653-656,723,793`, `/v1/responses`는 `:1054-1060`) 워커의 카탈로그 도구 문은 Hermes에서 열리지 않는다. 남는 후보는 모델의 최종 답에서 `AssembleRequest`와 같은 닫힌 스키마로 검증되는 구조만 읽는 문이다(자유 문장·마크다운을 행동으로 해석하지 않는다). Hermes의 `mcp_servers`에 oort MCP를 다는 길은 커넥터 모드라 ADR-0203 I3과 충돌하므로 새 결정 없이는 쓰지 않는다. 구체 표기와 워커 적합성은 아래대로 #4820 C2b 2부(2026-10-31)가 닫았다.
+**G3.7 입구.** 입구는 둘이고 같은 조립 함수를 부른다. (a) Agent Port의 MCP 도구 `oort_expression_assemble`(인자 `AssembleRequest`, 결과 `AssembleResult`, 필요한 범위는 `oort_action_propose`와 같고 새 범위는 없다)와 (b) 호스팅 실행(공동 Hermes)의 서버 쪽 문이다. 둘의 입력 한도·실패 사유·보관은 같다. (a)의 답은 둘로 나뉜다. 조립에 성공했거나 G3.8의 카드 코드로 거절한 것은 에이전트가 읽고 카드로 이어 가는 결과라 `isError:false`인 도구 결과(`AssembleResult`, 또는 `{code}`·`{code, bytes}`)로 나가고, 호출 오류(`assembly_params_invalid`와 인가·범위 오류)만 오류 응답이다(`isError:true` 쪽이며, Agent Port에서는 닫힌 `ToolFailure`의 JSON-RPC 오류로 나간다). (b)의 입력 경로는 G4가 확인한 사실로 좁혀진다. Hermes API 서버는 클라이언트가 선언한 함수 도구(`tools`·`tool_choice`)를 읽지 않으므로(Hermes `api_server_openai_routes.py:653-656,723,793`, `/v1/responses`는 `:1054-1060`) 워커의 카탈로그 도구 문은 Hermes에서 열리지 않는다. 남는 후보는 모델의 최종 답에서 `AssembleRequest`와 같은 닫힌 스키마로 검증되는 구조만 읽는 문이다(자유 문장·마크다운을 행동으로 해석하지 않는다). Hermes의 `mcp_servers`에 oort MCP를 다는 길은 커넥터 모드라 ADR-0203 I3과 충돌하므로 새 결정 없이는 쓰지 않는다. 구체 표기와 워커 적합성은 아래대로 #4820 C2b 2부(2026-10-31)가 닫았다.
 
 - **(b)의 닫힌 표기와 처리 [#4820 C2b 2부, 2026-10-31].** 호스팅 문은 **공동 Hermes(`operator_env` 핀) 턴이고 환영·재개가 아니며 트리거 메시지에 요청자의 완료 이미지 첨부가 있을 때만** 켠다(첨부 판정은 C2a 주소 발급과 같은 함수다). 켜진 턴만 모델을 **비스트리밍**으로 부르고 스트리밍 펌프를 건너뛴다. 최종 답에서 읽는 것은 둘뿐이다.
   - **그림**: 요청 블록 밖의 `data:image/(png|jpeg|webp|gif);base64,` 주소 **정확히 하나**. 0개는 그림 없음(`generation_failed`), 2개 이상·다른 형식·base64 아님은 쓸 수 없음(`assembly_source_invalid`), 5 MiB 환산 6,990,508자 초과는 너무 큼(`assembly_source_too_large`, 디코드 전에 길이로 자른다). `MEDIA:` 줄·`file://`·경로·http 이미지는 **그림이 아니며 열지 않는다**(로컬 경로 읽기를 열지 않는다).
@@ -363,7 +363,7 @@ paths:
   - **성공 카드**는 에이전트 포트의 `expression.create` 제안과 같은 부품을 같은 순서로 쓴다(이니셔티브 잠금 → 런 → 요청자 → 해석 → 에이전트당 대기 3 상한 → 런 정지 → 승인·초안·카드). **값싼 거절은 모델을 부르기 전에** 한다(#4829): 운영자 확인은 읽기 없이 맨 먼저(없으면 문이 닫히고 평소 턴), 런 상태·요청자·대기 3 상한이 모델 호출 앞의 읽기 한 번에서 판정되고(상한이면 모델 호출 0), 제안 트랜잭션이 다시 증명한다.
   - **STRICT [#4820 C2b 3부, 2026-10-31]. 둘 다 켜야 문이 열린다.** 로컬 경로 읽기를 열지 않으려면 Hermes가 `HERMES_MEDIA_DELIVERY_STRICT=1`로 돌아야 한다(strict가 아니면 Hermes는 `MEDIA:` 줄이 가리키는, 거부 목록 밖의 읽을 수 있는 아무 파일이나 답에 싣는다. 고정 이미지의 `validate_media_delivery_path`로 측정했다). (1) **Hermes 쪽**: `infra/hermes/lockgate.py`가 그림 도구가 노출될 때 프로세스 환경의 이 값이 정확히 `1`이 아니면 기동을 거절하고, 볼륨 `.env`에 이 이름이 있으면 값과 상관없이 거절하며(`report`가 기동 뒤에도 같은 규칙을 다시 본다), 템플릿·compose는 리터럴 `1`을 싣는다(시작 명령의 체크섬 사슬이 갱신됐다). (2) **워커 쪽**: 워커는 Hermes를 밖에서 알 수 없으므로 운영자가 환경값 `OORT_HOSTED_MEDIA_STRICT`를 **정확히 `1`**로 확인해야 문이 열린다. **없으면 문은 닫히고 사진 턴은 평소 턴이다**: 사진을 찾지도 않고(읽기 0), 실패 카드도 없고, 모델은 스트리밍으로 평소처럼 불린다(기동 때 info 한 줄 「호스팅 문 꺼짐」). 템플릿·compose는 이 값을 비워서 보낸다. 닫힌 코드는 늘리지 않았다. 게이트는 프로세스 환경만 보므로 다중 프로필 턴(Hermes는 이때 설정의 `gateway.strict`를 읽는다)과 형제 변수(`HERMES_MEDIA_ALLOW_DIRS`·`HERMES_MEDIA_TRUST_RECENT_*`)는 미검증이다(`runtime-unverified`, #4886).
 
-**G3.8 실패 사유와 카드.** 닫힌 코드다. 한도 초과와 생성 실패를 **조용히 자르거나 프레임을 버려 통과시키지 않는다**(D3).
+**G3.8 실패 사유와 카드.** 닫힌 코드다. 한도 초과와 생성 실패를 **조용히 자르거나 프레임을 버려 통과시키지 않는다**(D3). (a)에서 카드 코드 다섯(`assembly_source_invalid`·`assembly_source_too_large`·`assembly_output_too_large`·`assembly_timeout`·`assembly_busy`)은 `isError:false` 도구 결과로, `assembly_params_invalid`는 호출 오류로 나간다(G3.7). `generation_failed`는 조립 전 단계의 코드라 (a)가 내지 않는다. 호출 오류는 만들어진 것이 없어 카드가 없고, JSON-RPC -32602의 고정 문장에 `error.data {code, params}`로 틀린 인자의 이름만(`presets`·`frames`·`sequence`·`frameMs`·`size` 중에서만, 값은 싣지 않는다) 싣는다.
 
 | 코드 | 언제 | 남는 곳 | 한국어 한 줄(코어 사전) |
 |---|---|---|---|
@@ -373,7 +373,7 @@ paths:
 | `assembly_source_too_large` | 원본 바이트 상한 초과 | 실패 카드 | 그림이 너무 커서 움직임을 입힐 수 없어요 |
 | `assembly_output_too_large` | 결과 GIF가 1 MiB 초과, 또는 1 MiB 안이어도 D3 재통과의 small 렌디션 상한(256 KiB)을 넘는 경우. 코드는 하나이고 `props`의 `bytes`는 **실제로 조립한 GIF의 크기**(숫자)라 1 MiB보다 작을 수 있다 | 실패 카드. 서버는 크기를 **줄여 다시 만들지 않는다**. 안내는 「프레임 수를 줄이거나 더 작은 size로 다시」이고 에이전트가 그렇게 새 요청을 할 수 있다 | 움직이는 그림이 너무 커요 |
 | `assembly_timeout` | 벽시계 10초·할당 상한 초과 | 실패 카드 | 움직임을 입히다가 시간이 다 됐어요 |
-| `assembly_busy` | 디코더 동시성 한도 때문에 시작하지 못함 | 실패 카드 | 지금 다른 그림을 처리하고 있어요. 잠시 뒤에 다시 해 주세요 |
+| `assembly_busy` | 디코더 동시성 한도 때문에 시작하지 못함, 또는 에이전트당 보관 상한(12) | 실패 카드 | 지금 다른 그림을 처리하고 있어요. 잠시 뒤에 다시 해 주세요 |
 
 위 일곱 코드가 닫힌 목록의 전부다. 조립기를 돌릴 수 없는 운영 장애(실행 파일 없음, 한도가 아닌 이유의 비정상 종료)는 이 목록의 코드가 **아니다**: 서버는 내부 오류(5xx)로만 답하고 `props.code`에 넣지 않으며, 요청이 틀린 것처럼 `assembly_source_invalid`·`assembly_timeout`이나 재시도를 권하는 `assembly_busy`로 둔갑시키지 않는다. 한도(시그널로 끝난 자식)는 그대로 `assembly_timeout`이다. **[#4820 C2b 2차 검수 반영, 2026-10-31]** 다만 호스팅 문(G3.7 (b))은 시도 상한(2번)이나 응답 상한(12 MiB)에 닿으면 닫힌 `generation_failed` 카드로 끝난다: 이 카드의 `props.code`는 목록의 `generation_failed`일 뿐 운영 사유를 싣지 않고 새 코드도 만들지 않는다(G3.7 (b) 「응답 크기와 시도 수」).
 
@@ -431,6 +431,8 @@ X8-1의 목록에 이 증보가 더한다. 후보 ≤4와 같은 `subjectMemberI
 }
 ```
 <!-- expression-augment-4820:end -->
+
+`oort_expression_assemble`(G3.7 (a))의 호출 인자는 `AssembleRequest`에 문자열 `handle`을 더한 것이다(위 블록에는 넣지 않는다). `handle`은 다른 Agent Port 도구와 같은 봉인된 lease 핸들(`oort_jobs_claim`이 준 값)로 호출한 연결과 그 런에 묶인다. 첨부 출처가 「요청자가 같은 대화에 올린 첨부」(G6)라서, 그 요청자와 대화를 서버가 이 핸들의 런으로 증명해야 하기 때문에 필요하다.
 
 ### G8. 열지 않는 것과 구현·검수 인계
 

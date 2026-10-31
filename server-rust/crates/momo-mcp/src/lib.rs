@@ -27,14 +27,15 @@ pub use oauth::{
     MAX_STATE_BYTES, PROTECTED_RESOURCE_WELL_KNOWN_PREFIX, RESPONSE_TYPE_CODE, TOKEN_TYPE_BEARER,
 };
 pub use tools::{
-    validate_arguments, ArtifactRule, ArtifactViolation, ToolAnnotations, ToolCapability,
-    ToolDescriptor, ToolFailure, ToolSurface, ToolView, APPS_USED_ENTRY_KEYS, APP_NOTICE_KEYS,
-    APP_NOTICE_REPORTABLE_KINDS, ARTIFACT_KEYS, MAX_APPS_USED_ENTRIES, MAX_APPS_USED_TOOL_BYTES,
-    MAX_ARTIFACT_COUNT, MAX_REPORTED_COUNT, MAX_STAGE_BYTES, NEXT_ACTIONS, RESULT_KINDS,
-    TEST_COUNT_KEYS, TOOL_ACTION_CLAIM_SECRET, TOOL_ACTION_INITIATE, TOOL_ACTION_PROPOSE,
-    TOOL_CARD_SUGGEST, TOOL_CATALOG, TOOL_CONVERSATION_READ, TOOL_COUNT_KEYS,
-    TOOL_EXPRESSION_ASSEMBLE, TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_RELEASE, TOOL_JOB_RENEW,
-    TOOL_JOB_START, TOOL_MESSAGE_POST, TOOL_PING, TOOL_RUN_COMPLETE, TOOL_RUN_EVENT,
+    validate_arguments, ArtifactRule, ArtifactViolation, AssembleParams, ToolAnnotations,
+    ToolCapability, ToolDescriptor, ToolFailure, ToolSurface, ToolView, APPS_USED_ENTRY_KEYS,
+    APP_NOTICE_KEYS, APP_NOTICE_REPORTABLE_KINDS, ARTIFACT_KEYS, ASSEMBLE_PARAMS,
+    ASSEMBLY_PARAMS_INVALID, MAX_APPS_USED_ENTRIES, MAX_APPS_USED_TOOL_BYTES, MAX_ARTIFACT_COUNT,
+    MAX_REPORTED_COUNT, MAX_STAGE_BYTES, NEXT_ACTIONS, RESULT_KINDS, TEST_COUNT_KEYS,
+    TOOL_ACTION_CLAIM_SECRET, TOOL_ACTION_INITIATE, TOOL_ACTION_PROPOSE, TOOL_CARD_SUGGEST,
+    TOOL_CATALOG, TOOL_CONVERSATION_READ, TOOL_COUNT_KEYS, TOOL_EXPRESSION_ASSEMBLE,
+    TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_RELEASE, TOOL_JOB_RENEW, TOOL_JOB_START,
+    TOOL_MESSAGE_POST, TOOL_PING, TOOL_RUN_COMPLETE, TOOL_RUN_EVENT,
 };
 
 pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
@@ -1007,7 +1008,9 @@ fn tool_result(call: &ToolCall, structured: Value, is_error: bool) -> HttpRespon
 /// fail-closed reads refuse to confirm. The one exception is
 /// [`ToolFailure::InvalidArtifacts`] (ADR-0162 증보 5 C3), whose message and
 /// `error.data` name an `artifacts` field and a closed rule from a static list —
-/// still never a value the caller sent.
+/// still never a value the caller sent. [`ToolFailure::InvalidAssembleParams`]
+/// (ADR-0218 G3.8) keeps the fixed message and adds `error.data {code, params}` with the
+/// wrong parameters' names from [`ASSEMBLE_PARAMS`], again never a value.
 pub fn tool_failure(call: &ToolCall, failure: ToolFailure) -> HttpResponse {
     let (status, code, _) = failure.wire();
     error(

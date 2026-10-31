@@ -28723,6 +28723,8 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
 //   * `expires_at > clock_timestamp()` / the +1 hour default / `HELD_MAX` → `…twelve_and_the_hour…`
 //   * the closed audit detail of `keep_in_tx`            → `…keeps_what_the_assembler_built…`
 //   * the rate limit spent once: `pre_admission` reuse    → `…the_rate_limit_is_spent_once…`
+//   * the names of `assembly_params_invalid`: `params_failure` (the assembler's own check) or
+//     `assemble_fault_params` (the schema's) returning nothing → `…failure_codes_are_results…`
 // ===========================================================================
 
 fn assembler_4820() -> std::path::PathBuf {
@@ -28740,6 +28742,27 @@ fn assembler_4820() -> std::path::PathBuf {
         "build the assembler first: cargo build -p momo-expressions --bins ({path:?})"
     );
     path
+}
+
+/// How many content reads have **begun** in a [`SlowDrive4820`] (the wait comes after the count, so
+/// a call is known to be inside its Drive fetch while the Drive is still sleeping). A test that
+/// needs to act between a call's lookup transaction and its keep transaction waits on this
+/// instead of on a clock. One process-wide counter: these tests run `--test-threads=1`.
+static SLOW_DRIVE_ENTERED_4820: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Wait until a call is inside a Drive fetch (more reads have begun than `before`). The lookup
+/// transaction is behind that call and its keep transaction is ahead, as far as the Drive's delay
+/// is long.
+async fn wait_for_fetch_4820(before: usize) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while SLOW_DRIVE_ENTERED_4820.load(std::sync::atomic::Ordering::SeqCst) <= before {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the call never reached its Drive fetch"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }
 
 /// A Drive that makes every content read wait first: the slow part of a call whose clock the
@@ -28776,6 +28799,7 @@ impl momo_drive::DriveArchive for SlowDrive4820 {
         file_id: &str,
         max_bytes: i64,
     ) -> Result<momo_drive::DriveContent, momo_drive::DriveError> {
+        SLOW_DRIVE_ENTERED_4820.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         tokio::time::sleep(self.delay).await;
         self.inner.file_content(file_id, max_bytes).await
     }
@@ -29590,28 +29614,127 @@ async fn assemble_failure_codes_are_results_parameters_are_call_errors_and_busy_
     let bounce = json!({"kind": "preset", "presets": ["bounce"]});
 
     // ---- parameters: a call error (-32602), nothing built, nothing kept ------------------------
-    for (what, motion) in [
+    // ADR-0218 G3.8: the answer names the wrong parameters (the closed list's names, in its
+    // order, never a value) in `error.data`, under the same fixed sentence as any malformed
+    // argument. Two layers find them and answer the same envelope: the published schema (a
+    // range, an enum, a count: it runs first) and the assembler's own check (what a schema
+    // cannot say).
+    let sprite = |frames: u64, sequence: Value, frame_ms: u64| json!({"kind": "sprite", "frames": frames, "sequence": sequence, "frameMs": frame_ms});
+    for (what, motion, size, names, values) in [
+        // The assembler's own check:
         (
             "a duplicate preset",
             json!({"kind": "preset", "presets": ["bounce", "bounce"]}),
+            240,
+            vec!["presets"],
+            vec![],
         ),
         (
             "a cell outside the grid",
-            json!({"kind": "sprite", "frames": 2, "sequence": [0, 2], "frameMs": 100}),
+            sprite(2, json!([0, 2]), 100),
+            240,
+            vec!["sequence"],
+            vec![],
         ),
         (
             "a play longer than 10 s",
-            json!({"kind": "sprite", "frames": 2, "sequence": vec![0; 24], "frameMs": 500}),
+            sprite(2, json!(vec![0; 24]), 500),
+            240,
+            vec!["sequence", "frameMs"],
+            vec![],
+        ),
+        (
+            "a size inside the range that is not one of the three",
+            bounce.clone(),
+            301,
+            vec!["size"],
+            vec!["301"],
+        ),
+        // The published schema:
+        (
+            "a size outside the range",
+            bounce.clone(),
+            4711,
+            vec!["size"],
+            vec!["4711"],
+        ),
+        (
+            "five presets",
+            json!({"kind": "preset", "presets": ["bounce", "wobble", "pulse", "sparkle", "bounce"]}),
+            240,
+            vec!["presets"],
+            vec![],
+        ),
+        (
+            "an unknown preset",
+            json!({"kind": "preset", "presets": ["zzspin"]}),
+            240,
+            vec!["presets"],
+            vec!["zzspin"],
+        ),
+        (
+            "frames 5",
+            sprite(5, json!([0, 1]), 100),
+            240,
+            vec!["frames"],
+            vec![],
+        ),
+        (
+            "a sequence of 25",
+            sprite(2, json!(vec![0; 25]), 100),
+            240,
+            vec!["sequence"],
+            vec![],
+        ),
+        (
+            "a frame time far outside the range",
+            sprite(2, json!([0, 1]), 98765),
+            240,
+            vec!["frameMs"],
+            vec!["98765"],
+        ),
+        // The schema runs first: a call both layers would refuse is named by the schema alone
+        // (`sequence` is the assembler's, and comes the next time).
+        (
+            "both layers at fault",
+            sprite(2, json!([0, 2]), 98765),
+            240,
+            vec!["frameMs"],
+            vec!["98765"],
         ),
     ] {
-        let (status, answer) = one(motion, drawn.clone()).await;
+        let (status, answer) = assemble_4820(
+            &w,
+            &handle,
+            json!({"source": drawn, "motion": motion, "size": size,
+            "prompt": "p", "sourceAttachmentId": null}),
+        )
+        .await;
         assert_eq!(
             (status, error_code(&answer)),
             (400, -32602),
             "{what}: {answer}"
         );
         assert!(answer["result"].is_null(), "{what} is not a result");
+        assert_eq!(
+            answer["error"]["message"],
+            json!("invalid tool arguments"),
+            "{what}: the sentence is the fixed one"
+        );
+        assert_eq!(
+            answer["error"]["data"],
+            json!({"code": "assembly_params_invalid", "params": names}),
+            "{what}: the names, and nothing else"
+        );
+        // The error object, not the envelope: the JSON-RPC id of this call is a random uuid.
+        for value in values {
+            assert!(
+                !answer["error"].to_string().contains(value),
+                "{what}: the value {value} is never on the wire: {answer}"
+            );
+        }
     }
+    // A fault that is none of the five names nothing: the same answer as any malformed argument.
     for (what, prompt) in [
         ("an empty prompt", String::new()),
         ("a control character", "a\u{7}b".into()),
@@ -29629,7 +29752,28 @@ async fn assemble_failure_codes_are_results_parameters_are_call_errors_and_busy_
             (400, -32602),
             "{what}: {answer}"
         );
+        assert!(
+            answer["error"].get("data").is_none(),
+            "{what} names no parameter: {answer}"
+        );
     }
+    let (status, answer) = assemble_4820(
+        &w,
+        &handle,
+        json!({"source": drawn, "motion": bounce, "size": 240,
+        "prompt": "p", "sourceAttachmentId": null, "extra": 1}),
+    )
+    .await;
+    assert_eq!((status, error_code(&answer)), (400, -32602), "{answer}");
+    assert!(
+        answer["error"].get("data").is_none(),
+        "an unknown key names no parameter: {answer}"
+    );
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        0,
+        "a refused call keeps nothing"
+    );
     // A prompt of 2,000 characters is the limit and is fine, in bytes up to 6,000.
     let (status, answer) = assemble_4820(
         &w,
@@ -30206,6 +30350,400 @@ async fn assemble_needs_the_propose_scope_and_a_handle_that_is_this_agents() {
         "a released lease: {answer}"
     );
     assert_eq!(assembly_rows_4820(&w.su, w.fixture.workspace).await, 0);
+}
+
+// ---------------------------------------------------------------------------
+// #4820 C1b-fix — what the independent security review (r1) found this suite could not see.
+//
+//   * `assemble_a_busy_decoder_is_refused_before_the_attachment_is_fetched_…`: Medium-1. A busy
+//     decoder is `assembly_busy` BEFORE the picture is read from Drive (the cheap refusal must not
+//     come after the expensive work), and no slot is held while the picture is on its way.
+//   * `assemble_a_parked_or_settled_run_…` and `assemble_the_scope_is_proved_again_…`: Low-2. Two
+//     guards that could be deleted with every other test green.
+//   * the two raw-TCP tests: the order the transport authenticates in. A declared large body is
+//     read only after the caller is known and holds the propose scope, measured with a body that
+//     never finishes (a client library cannot send one).
+//
+// Sabotage map:
+//   * the `decoder_slots().available_permits() == 0` look in `expression_assemble` removed
+//                                                  → `…busy_decoder_is_refused_before…` (Drive read)
+//   * that look taking the permit (`try_acquire_owned`) and keeping it through the fetch
+//                                                  → `…busy_decoder_is_refused_before…` (slot held)
+//   * `run.status.is_approval_held() || run.status.is_terminal()` removed from the lookup
+//                                                  → `…parked_or_settled_run…`
+//   * `authorize_in_tx` removed from the keep transaction
+//                                                  → `…scope_is_proved_again…`
+//   * `routes/agent_port.rs`: the large body read before the credential is proved, or the large
+//     budget given to every admitted principal     → the two raw-TCP tests
+// ---------------------------------------------------------------------------
+
+/// The requester's own picture, in the conversation and in the test Drive under `drive_id`: the
+/// id an `attachment` source names.
+async fn attach_picture_4820(w: &World4829, drive_id: &str) -> Uuid {
+    let ws = w.fixture.workspace;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert(drive_id.into(), picture_4820(300, 200));
+    let message = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(message),
+        drive_id,
+        "image/png",
+        "complete",
+    )
+    .await
+}
+
+/// One `bounce` of the attachment: the smallest call whose source the server has to fetch.
+fn from_attachment_4820(attachment: Uuid) -> Value {
+    json!({
+        "source": {"from": "attachment", "attachmentId": attachment},
+        "motion": {"kind": "preset", "presets": ["bounce"]}, "size": 240, "prompt": "p",
+        "sourceAttachmentId": null})
+}
+
+/// [`assemble_4820`] on its own task, so the test can act while the call is in flight.
+fn spawn_assemble_4820(
+    w: &World4829,
+    handle: &str,
+    args: Value,
+) -> tokio::task::JoinHandle<(u16, Value)> {
+    let (client, base, bearer) = (
+        w.client.clone(),
+        w.base.clone(),
+        w.fixture.hosted_bearer.clone(),
+    );
+    let mut args = args;
+    args["handle"] = json!(handle);
+    tokio::spawn(
+        async move { call(&client, &base, &bearer, "oort_expression_assemble", args).await },
+    )
+}
+
+/// The run the claim holds (the world raises exactly one).
+async fn run_of_4820(su: &PgPool, ws: Uuid) -> Uuid {
+    sqlx::query_scalar(
+        "SELECT id FROM agent_run WHERE workspace_id=$1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(ws)
+    .fetch_one(su)
+    .await
+    .expect("the run the claim holds")
+}
+
+/// Raw TCP: the head of a `tools/call` declared as `declared` (the mirrored transport headers a
+/// modern client sends) with `content_length`, then `body_bytes` bytes of body, then silence with
+/// the connection left open. Returns the first line of the answer and how long it took, or `None`
+/// when nothing came back within `wait`.
+///
+/// The answer is read on its own task while the body is still being written: a server that
+/// answers and closes with request bytes unread resets the connection, and a reader that only
+/// starts after the last write could lose the answer it is there to measure.
+async fn raw_tcp_4820(
+    w: &World4829,
+    bearer: &str,
+    declared: &str,
+    content_length: usize,
+    body_bytes: usize,
+    wait: std::time::Duration,
+) -> Option<(String, std::time::Duration)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let addr = w
+        .base
+        .strip_prefix("http://")
+        .expect("http base")
+        .to_string();
+    let stream = tokio::net::TcpStream::connect(&addr)
+        .await
+        .expect("connect");
+    let (mut read, mut write) = stream.into_split();
+    let started = std::time::Instant::now();
+    let reader = tokio::spawn(async move {
+        let mut buffer = vec![0u8; 512];
+        match read.read(&mut buffer).await {
+            Ok(n) if n > 0 => Some((
+                String::from_utf8_lossy(&buffer[..n])
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
+                started.elapsed(),
+            )),
+            _ => None,
+        }
+    });
+    let head = format!(
+        "POST {PATH} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\n\
+         Accept: application/json, text/event-stream\r\nMCP-Protocol-Version: {MODERN_VERSION}\r\n\
+         Mcp-Method: tools/call\r\nMcp-Name: {declared}\r\nAuthorization: Bearer {bearer}\r\n\
+         Content-Length: {content_length}\r\n\r\n"
+    );
+    write.write_all(head.as_bytes()).await.expect("head");
+    let chunk = vec![b'a'; 16 * 1024];
+    let mut sent = 0usize;
+    while sent < body_bytes {
+        let n = chunk.len().min(body_bytes - sent);
+        if write.write_all(&chunk[..n]).await.is_err() {
+            break;
+        }
+        sent += n;
+    }
+    // `write` stays open until the wait is over: closing it would hand the server the end of an
+    // unfinished body, which is not the stall this measures.
+    let answer = tokio::time::timeout(wait, reader).await;
+    drop(write);
+    match answer {
+        Ok(Ok(answer)) => answer,
+        _ => None,
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_a_busy_decoder_is_refused_before_the_attachment_is_fetched_and_no_slot_is_held_while_it_is(
+) {
+    // The Drive takes 2 s per read, so "refused before the fetch" is a count of zero AND two
+    // seconds the caller does not wait.
+    let w = build_world_4820(0, None, Some(std::time::Duration::from_secs(2))).await;
+    let ws = w.fixture.workspace;
+    let attachment = attach_picture_4820(&w, "busy-first").await;
+    let handle = claim_run_4820(&w).await;
+    let reads = || {
+        w.drive
+            .content_reads
+            .load(std::sync::atomic::Ordering::SeqCst)
+    };
+    let slots = momo_expressions::media::decoder_slots();
+
+    // Both decoder slots are taken by two other pictures. `assembly_busy` is the cheap answer, so
+    // it is given before the expensive work: the picture is not read from Drive for it.
+    let held = (
+        slots.clone().acquire_owned().await.unwrap(),
+        slots.clone().acquire_owned().await.unwrap(),
+    );
+    let (before, started) = (reads(), std::time::Instant::now());
+    let (status, answer) = assemble_4820(&w, &handle, from_attachment_4820(attachment)).await;
+    let took = started.elapsed();
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_busy"}),
+        "{answer}"
+    );
+    assert_eq!(
+        reads(),
+        before,
+        "a busy decoder was refused only after the picture had been read from Drive"
+    );
+    assert!(
+        took < std::time::Duration::from_secs(1),
+        "a busy refusal waited for a 2 s Drive read: {took:?}"
+    );
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 0);
+    drop(held);
+
+    // With the slots free the same call goes through. The slot is NOT held while the picture is on
+    // its way (network time is not decoder time, #4676): the pool is whole during the fetch and
+    // the work takes its slot only afterwards.
+    let entered = SLOW_DRIVE_ENTERED_4820.load(std::sync::atomic::Ordering::SeqCst);
+    let call = spawn_assemble_4820(&w, &handle, from_attachment_4820(attachment));
+    wait_for_fetch_4820(entered).await;
+    assert_eq!(
+        slots.available_permits(),
+        2,
+        "a decoder slot was held across the Drive fetch"
+    );
+    let (status, answer) = call.await.unwrap();
+    assert_eq!(status, 200, "{answer}");
+    assert!(structured(&answer)["assemblyId"].is_string(), "{answer}");
+    assert_eq!(
+        reads(),
+        before + 1,
+        "the control call read the picture once, so the counter is live"
+    );
+    assert_eq!(slots.available_permits(), 2, "the slot came back");
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_a_parked_or_settled_run_is_refused_before_anything_is_fetched_or_kept() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let attachment = attach_picture_4820(&w, "parked-run").await;
+    let handle = claim_run_4820(&w).await;
+    let run = run_of_4820(&w.su, ws).await;
+    let reads = || {
+        w.drive
+            .content_reads
+            .load(std::sync::atomic::Ordering::SeqCst)
+    };
+    // The lease stays live and ours throughout; only the run's own state moves. (A lease failure
+    // answers the same 409, which is why each refusal is also shown to leave the picture unread.)
+    let (original, deadline): (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, deadline_at::text FROM agent_run WHERE id=$1")
+            .bind(run)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    for settled in ["awaiting_approval", "cancelled"] {
+        sqlx::query(&format!(
+            "UPDATE agent_run SET status='{settled}', deadline_at=now() + interval '1 hour' \
+              WHERE id=$1"
+        ))
+        .bind(run)
+        .execute(&w.su)
+        .await
+        .unwrap();
+        let before = reads();
+        let (status, refused) = assemble_4820(&w, &handle, from_attachment_4820(attachment)).await;
+        assert_eq!(
+            status, 409,
+            "{settled}: the call was not refused, the run state is not a guard any more: {refused}"
+        );
+        assert_eq!(error_code(&refused), -32005, "{settled}: {refused}");
+        assert_eq!(reads(), before, "{settled}: the picture was read anyway");
+        assert_eq!(assembly_rows_4820(&w.su, ws).await, 0, "{settled}");
+    }
+    // Control: the run as it was, the same call. It is the state that was refused, not the call.
+    sqlx::query(
+        "UPDATE agent_run SET status=$2::run_status, deadline_at=$3::timestamptz WHERE id=$1",
+    )
+    .bind(run)
+    .bind(&original)
+    .bind(&deadline)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let before = reads();
+    let (status, answer) = assemble_4820(&w, &handle, from_attachment_4820(attachment)).await;
+    assert_eq!(status, 200, "{original}: {answer}");
+    assert!(structured(&answer)["assemblyId"].is_string(), "{answer}");
+    assert_eq!(reads(), before + 1);
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_the_scope_is_proved_again_when_the_result_is_kept() {
+    // The picture takes 3 s to come from Drive: the window between the lookup transaction (which
+    // proved the scope) and the keep transaction (which must prove it again).
+    let w = build_world_4820(0, None, Some(std::time::Duration::from_secs(3))).await;
+    let ws = w.fixture.workspace;
+    let attachment = attach_picture_4820(&w, "scope-moves").await;
+    let handle = claim_run_4820(&w).await;
+    let approved: Vec<String> = sqlx::query_scalar(
+        "SELECT approved_scopes FROM hosted_agent_connection WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(w.fixture.hosted_connection)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert!(
+        approved
+            .iter()
+            .any(|s| s == momo_auth::SCOPE_WORKSPACE_PROPOSE),
+        "the fixture connection holds the propose scope: {approved:?}"
+    );
+    let audited = |su: PgPool| async move {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='expression.assembled'",
+        )
+        .bind(ws)
+        .fetch_one(&su)
+        .await
+        .unwrap()
+    };
+
+    // The scope is withdrawn once the call is inside its Drive fetch: after the lookup, before the
+    // keep. The token and the connection stay valid, so only the scope check can say no.
+    let entered = SLOW_DRIVE_ENTERED_4820.load(std::sync::atomic::Ordering::SeqCst);
+    let call = spawn_assemble_4820(&w, &handle, from_attachment_4820(attachment));
+    wait_for_fetch_4820(entered).await;
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_scopes = array_remove(approved_scopes, $3) \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(w.fixture.hosted_connection)
+    .bind(momo_auth::SCOPE_WORKSPACE_PROPOSE)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let (status, refused) = call.await.unwrap();
+    assert_eq!(
+        status, 403,
+        "a call whose scope was withdrawn while it worked kept its result: {refused}"
+    );
+    assert_eq!(error_code(&refused), -32003, "{refused}");
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 0, "nothing is kept");
+    assert_eq!(audited(w.su.clone()).await, 0, "and nothing is audited");
+
+    // Control: the scope back, the same call keeps its result. It is the scope that was refused.
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_scopes = $3 WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(w.fixture.hosted_connection)
+    .bind(&approved)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let (status, answer) = assemble_4820(&w, &handle, from_attachment_4820(attachment)).await;
+    assert_eq!(status, 200, "{answer}");
+    assert!(structured(&answer)["assemblyId"].is_string(), "{answer}");
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 1);
+    assert_eq!(audited(w.su.clone()).await, 1);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_a_fake_token_is_answered_401_before_the_declared_large_body_is_read() {
+    let w = world_4820(0, None).await;
+    // A declared assemble call that promises 6 MiB, sends 1 KiB of it and then says nothing: the
+    // credential is proved before the body is read, so the answer does not wait for the rest.
+    let got = raw_tcp_4820(
+        &w,
+        "not-a-token",
+        "oort_expression_assemble",
+        6 * 1024 * 1024,
+        1024,
+        std::time::Duration::from_secs(3),
+    )
+    .await;
+    let (line, took) = got.expect(
+        "no answer without the rest of the body: the 6 MiB was read before the caller was known",
+    );
+    assert!(line.contains(" 401 "), "{line}");
+    assert!(took < std::time::Duration::from_secs(2), "{took:?}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_a_connect_only_token_is_cut_at_64_kib_and_never_gets_the_large_budget() {
+    let w = world_4820(0, None).await;
+    // A credential that is real but has no propose scope declares the same 6 MiB and sends 70 KiB:
+    // it keeps the 64 KiB ceiling every other request has, so it is told 413 the moment that is
+    // passed, without waiting for the rest.
+    let got = raw_tcp_4820(
+        &w,
+        &w.fixture.connect_only_bearer,
+        "oort_expression_assemble",
+        6 * 1024 * 1024,
+        70 * 1024,
+        std::time::Duration::from_secs(3),
+    )
+    .await;
+    let (line, took) = got.expect("no answer without the rest of the body: the 6 MiB budget was handed to a caller without the scope");
+    assert!(line.contains(" 413 "), "{line}");
+    assert!(took < std::time::Duration::from_secs(2), "{took:?}");
 }
 
 // ---------------------------------------------------------------------------

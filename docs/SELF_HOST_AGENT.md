@@ -1354,6 +1354,29 @@ unavailable answer. Never post the value in a channel; the person who approved t
 card can always make a new one from the settings. If the response is lost, the
 value cannot be fetched again (nothing is stored): ask the approver to make a new one.
 
+**`oort_expression_assemble {handle, source, motion, size?, prompt, sourceAttachmentId?}`**
+(scope `workspace:propose`, no new scope; ADR-0218 G3.7) puts motion on **one** still picture
+so it can become a team emoji or sticker, and holds the result for one hour. `handle` is the
+lease handle `oort_jobs_claim` gave you for this job. `source` is `{from:"attachment",
+attachmentId}` (a picture **the person who called you attached in this conversation**) or
+`{from:"base64", mime, dataBase64}` (a picture you drew; PNG, JPEG, GIF or WebP, at most
+4 MiB decoded). `motion` is `{kind:"preset", presets}` (1 to 4 of `bounce`, `wobble`,
+`pulse`, `sparkle`; one candidate each) or `{kind:"sprite", frames: 2|3|4, sequence,
+frameMs: 40..500}` for one picture holding 2 to 4 poses in a fixed grid (`sequence` length ×
+`frameMs` at most 10000). `size` is 240, 360 (default) or 480. Send `prompt` (the plain text
+you used to draw it) and `sourceAttachmentId` (or `null`). It returns `{assemblyId,
+expiresAtMs, candidates:[{index, motion, frames, durationMs, bytes, sha256}]}`: the server
+builds the GIFs, so you never build or send GIF bytes, and an agent holds at most 12
+candidates at a time. `expression.create` takes a held candidate as `image:
+{source:"assembled", assemblyId, index}` (ADR-0218 G3.6). The request may be up to 6 MiB,
+like `expression.create`. A refusal the card can show is a **result**, not an error:
+`{code}` with `assembly_source_invalid`, `assembly_source_too_large`,
+`assembly_output_too_large` (plus `bytes`), `assembly_timeout` or `assembly_busy` (also
+when you already hold 12). A wrong parameter is a call error (`-32602`, the same fixed
+sentence as any malformed argument) whose `error.data` is
+`{code:"assembly_params_invalid", params:[…]}`: it names the wrong ones, from `presets`,
+`frames`, `sequence`, `frameMs` and `size`, and never a value. Fix those and send again.
+
 #### 3.3.16c A person asks you to connect an AI — suggest the card
 
 ADR-0186 증보 G1 (GC-6 #2947, GC-8 #2949). When a person asks the runtime to

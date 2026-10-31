@@ -422,6 +422,28 @@ SCAN_SCOPE = [
         ),
     },
     {
+        # The expression TTL sweep's one cross-tenant read: #4676 (ADR-0218 D2, drafts) and
+        # #4820 C1b (G3.6, held assemblies). A UNION of two single-table SELECTs; which columns
+        # they read is what a literal scan cannot say, so they are named here — hence column
+        # grants, never a table grant.
+        "path": "server-rust/crates/momo-expressions/src/store.rs",
+        "mode": "symbols",
+        "symbols": ["sweep_expired"],
+        "column_reads": {
+            "expression_draft": ["workspace_id", "state", "expires_at"],
+            "expression_assembly": ["workspace_id", "state", "expires_at"],
+        },
+        "why": (
+            "notifier lib.rs:805 momo_expressions::sweep_expired: the cross-tenant candidate "
+            "READ on the notifier pool (restart-safe byte TTL, ADR-0218 D2 / G3.6). "
+            "`SELECT workspace_id` over expression_draft ∪ expression_assembly filtered by "
+            "state and expires_at: workspace ids only, never the prompt, the picture bytes, "
+            "the requester or the agent. sweep_in_tx (SELECT … FOR UPDATE, the DELETE of the "
+            "image bytes, the UPDATE of the headers) is the momo_app write pool's and must "
+            "stay out of scope."
+        ),
+    },
+    {
         "path": "server/Migrations/058_t3_interval_micro_precision.sql",
         "mode": "sql_function",
         "symbols": ["t3_terminate"],
@@ -466,6 +488,7 @@ NOT_SCANNED = [
     "billing.rs topup/admission/start_usage — REST / agent-worker",
     "approval.rs create_pending / approval_decision — REST human decision",
     "message.rs thread/attachment/list — REST send extras; notifier uses ThreadPolicy::Skip",
+    "momo-expressions store.rs sweep_in_tx / assembly.rs sweep_in_tx — the momo_app tenant transaction's byte DELETE and header UPDATE; only sweep_expired's candidate read runs on the notifier pool",
 ]
 
 SKIP_IDENT = {
@@ -1279,6 +1302,41 @@ print(
     "hosted_agent_doorbell to momo_notifier; sabotage table- and column-scoped grants → RED"
 )
 
+# (i2) #4820 C1b polish: the notifier is never granted DELETE, in ANY statement shape. The shell
+# grep at the top reads only `GRANT … DELETE … ON TABLE …`: a bare `GRANT DELETE ON t TO
+# momo_notifier` (no TABLE keyword) stayed GREEN, and a DELETE inside a column-scoped statement
+# only turned the run RED by accident (the column grant no longer parsed). This reads every
+# `GRANT … ON … TO … momo_notifier` statement, comments stripped, whatever its shape.
+DELETE_GRANT_RE = re.compile(
+    r'\bGRANT\b([^;]*?)\bON\b([^;]*?)\bTO\b([^;]*?)\bmomo_notifier\b', re.I | re.S
+)
+
+
+def delete_grants_to_notifier(text):
+    sql = re.sub(r'--[^\n]*', '', text)
+    return [
+        " ".join(m.group(0).split())
+        for m in DELETE_GRANT_RE.finditer(sql)
+        if re.search(r'\bDELETE\b', m.group(1), re.I)
+    ]
+
+
+bad_i2 = delete_grants_to_notifier(bootstrap_text)
+if bad_i2:
+    fail(f"momo_notifier is granted DELETE: {bad_i2}")
+for fixture in (
+    "GRANT DELETE ON expression_assembly TO momo_notifier;",
+    "GRANT SELECT (workspace_id,state,expires_at), DELETE ON expression_assembly TO momo_notifier;",
+    "GRANT SELECT, DELETE ON TABLE outbox TO momo_app, momo_notifier;",
+    "GRANT\n  DELETE\n  ON expression_draft\n  TO momo_notifier;",
+):
+    if not delete_grants_to_notifier(bootstrap_text + "\n" + fixture):
+        fail(f"sabotage `{fixture}` stayed GREEN (the DELETE reader does not see this shape)")
+print(
+    "[test-notifier-role-grants] ok: no DELETE granted to momo_notifier in any statement shape; "
+    "sabotage bare / column-scoped / multi-role / multi-line grants → RED"
+)
+
 # (j) ADR-0200 증보 3 E7: the new tables are column-scoped only. A table-level SELECT on
 # any of them is an over-grant (compare() → "table-level SELECT …"); dropping a column
 # the verdict reads is a missing grant.
@@ -1342,6 +1400,58 @@ if not any("over-grant column attachment.drive_file_id" in p for p in probs_k3):
 print(
     "[test-notifier-role-grants] ok: attachment is a column-scoped read; table-level SELECT / "
     "dropped column / drive_file_id added → RED"
+)
+
+# (l) ADR-0218 D2 / G3.6 (#4676, #4820 C1b): the expression TTL sweep's one cross-tenant read
+# (workspace ids only) is column-scoped on BOTH tables. A table-level SELECT would hand a BYPASSRLS
+# role the prompt, the picture, the requester and the agent (→ RED); a dropped column is a missing
+# grant production only notices at the first sweep tick, because the dev bootstrap holds
+# table-level grants (→ RED); a column no statement reads is an over-grant (→ RED); a DELETE verb
+# on either table is never granted (→ RED). The scan entry itself is proven live: a DELETE or an
+# UPDATE injected into the scanned sweep text is seen (→ RED), so dropping the entry cannot pass.
+EXPRESSION_SWEEP_COLUMNS = {"workspace_id", "state", "expires_at"}
+EXPRESSION_SWEEP_SCAN = "server-rust/crates/momo-expressions/src/store.rs"
+for table in ("expression_draft", "expression_assembly"):
+    if table not in COLUMN_READS or table not in COLUMN_GRANTS:
+        fail(f"{table} must be a column-scoped read (scan scope + bootstrap)")
+    if COLUMN_GRANTS[table] != EXPRESSION_SWEEP_COLUMNS:
+        fail(
+            f"{table} must be granted exactly {sorted(EXPRESSION_SWEEP_COLUMNS)} to momo_notifier "
+            f"(the workspace ids of the expired rows), not {sorted(COLUMN_GRANTS[table])}"
+        )
+    grants_l = {t: set(vs) for t, vs in grants.items()}
+    grants_l[table] = {"SELECT"}
+    probs_l = compare(used_real, grants_l, real)
+    if not any(f"table-level SELECT {table}" in p for p in probs_l):
+        fail(f"sabotage table-level SELECT {table} stayed GREEN (problems={probs_l})")
+    col_l = {t: set(c) for t, c in COLUMN_GRANTS.items()}
+    col_l.pop(table, None)
+    probs_l2 = compare(used_real, grants, real, col_grants=col_l)
+    if not any(f"column read {table}." in p for p in probs_l2):
+        fail(f"sabotage drop {table} column GRANT stayed GREEN (problems={probs_l2})")
+    col_l3 = {t: set(c) for t, c in COLUMN_GRANTS.items()}
+    col_l3[table].add("prompt")
+    probs_l3 = compare(used_real, grants, real, col_grants=col_l3)
+    if not any(f"over-grant column {table}.prompt" in p for p in probs_l3):
+        fail(f"sabotage over-granted {table}.prompt stayed GREEN (problems={probs_l3})")
+    grants_l4 = {t: set(vs) for t, vs in grants.items()}
+    grants_l4.setdefault(table, set()).add("DELETE")
+    probs_l4 = compare(used_real, grants_l4, real)
+    if not any(f"GRANT DELETE ON TABLE {table}" in p for p in probs_l4):
+        fail(f"sabotage GRANT DELETE ON {table} stayed GREEN (problems={probs_l4})")
+_, dels_l5 = collect_used(extra_by_path={EXPRESSION_SWEEP_SCAN: "DELETE FROM expression_assembly"})
+if "expression_assembly" not in dels_l5:
+    fail("sabotage DELETE FROM expression_assembly in the scanned sweep text stayed GREEN")
+used_l6, _ = collect_used(
+    extra_by_path={EXPRESSION_SWEEP_SCAN: "UPDATE expression_draft SET state = 'expired'"}
+)
+probs_l6 = compare({t: v for t, v in used_l6.items() if t in real}, grants, real)
+if not any("statement UPDATE expression_draft not in GRANT" in p for p in probs_l6):
+    fail(f"sabotage UPDATE expression_draft in the scanned sweep text stayed GREEN (problems={probs_l6})")
+print(
+    "[test-notifier-role-grants] ok: expression_draft / expression_assembly are column-scoped reads "
+    "of exactly (workspace_id, state, expires_at); table-level SELECT / dropped column / prompt "
+    "added / DELETE granted / DELETE or UPDATE in the scanned sweep text → RED"
 )
 
 # (f) #3377: a share-retention DELETE in the scanned notifier source → RED.
