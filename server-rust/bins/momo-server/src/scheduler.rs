@@ -190,6 +190,9 @@ pub(crate) async fn deliver_schedule_in_tx(
         requested_routing: None,
         // A schedule is closed to `apps` like it is to `props` and `routing` (ADR-0113 증보 3 F5).
         requested_apps: Vec::new(),
+        // ADR-0148 증보 (#4887): a timed thread reply does not carry 「대화에도 보내기」 yet (the
+        // schedule row has no such column) — it lands in the thread only, as before.
+        also_in_channel: false,
         gates: gates.clone(),
     };
     let outcome = deliver_message_in_tx(conn, request).await?;
