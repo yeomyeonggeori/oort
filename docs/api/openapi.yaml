@@ -11625,8 +11625,11 @@ paths:
       summary: List derived unfurl cards for a message.
       description: >
         Channel members. Failed/blocked cards are present so a client can choose
-        silence (ADR-0170 D5). Image bytes are not inlined — `imageUrl` is the
-        authenticated proxy path.
+        silence (ADR-0170 D5); a page that gave nothing to show (no title and no
+        picture) is recorded the same quiet way, as `failed` with no fields
+        (ADR-0170 amendment 2026-10-31 D11). Image bytes are not inlined —
+        `imageUrl` and `iconUrl` are the authenticated proxy paths. A message
+        gets cards for its first three distinct links only (D10), in link order.
       security:
         - bearerAuth: []
       parameters:
@@ -11725,6 +11728,50 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/workspaces/{workspaceId}/unfurls/{unfurlId}/icon:
+    get:
+      tags: [unfurls]
+      operationId: getUnfurlIcon
+      summary: Stream the unfurl site icon through this origin.
+      description: >
+        ADR-0170 amendment 2026-10-31 D9. Channel members, same authorization as
+        the preview image. The client must not fetch the remote host (CSP) and is
+        never given the icon's own address. The icon is fetched like the picture
+        (public addresses only, every redirect hop re-checked) but on port 443
+        only, with a 512 KiB cap. Only image/png, jpeg, gif, webp, avif and ICO
+        (`image/x-icon`, `image/vnd.microsoft.icon`) are proxied; SVG never is.
+        A 404 for an address that failed (not found, refused, too slow, wrong type)
+        is remembered by the server for a few minutes, so asking again does not
+        reach the remote site. A request that must fetch spends the member's fetch
+        budget and a place among the fetches in flight, and is answered 429 when
+        either is exhausted (see `RateLimited`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: unfurlId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Icon bytes.
+          content:
+            "image/*":
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Card or icon not available (including a refused destination).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/reactions:
     get:
       tags: [messages]
@@ -11769,6 +11816,14 @@ paths:
         conversation into a thread. The two are independent and may be sent
         together. A quote target must be undeleted and in the same channel, but
         — unlike a thread root — it may itself be a reply.
+        Supplying `alsoInChannel: true` on a thread reply also sends it to the
+        channel's main flow (ADR-0148 증보 2026-10-31, 「대화에도 보내기」). Only a
+        reply may turn it on: `true` without `rootId` is a 400, answered before
+        anything is read or written (so a retry of the same request is the same
+        400). The choice is stored once, with the message, and an idempotent retry
+        (same `clientMsgId`) answers the stored message whatever `alsoInChannel`
+        says now. The message is still one message — one `seq`, one reply in the
+        thread's `reply_count` — shown in two places.
 
 
         A developer token with `dev:messages:write` may call this route as its
@@ -11814,7 +11869,8 @@ paths:
         "400":
           description: >
             Invalid workspace/channel id, deleted root, nested reply root, a
-            deleted quote target, an opening `stream` block that declares
+            deleted quote target, `alsoInChannel: true` without a `rootId`, an
+            opening `stream` block that declares
             anything other than `rev: 0` / `streaming: true`, or a signed send
             that also opens a stream (the provenance digest binds the props as
             inserted, and the opening marker is written by the server after the
@@ -14874,8 +14930,17 @@ components:
         person and 600 for an agent credential; scheduled-message creates and edits,
         default 60; attachment upload starts, default 60. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
-        use) and every read are not budgeted. Retrying with the same `clientMsgId`
-        after a 429 is safe. `POST /v1/join` also has a per-account password-guess
+        use) and every read except the two below are not budgeted. Retrying with the
+        same `clientMsgId` after a 429 is safe. The link-card proxies
+        (`GET …/unfurls/{id}/image` and `GET …/unfurls/{id}/icon`, ADR-0170 증보 D13,
+        #4881) have a per-member budget of fetches **from the card's remote site**,
+        default 240 per window (`RATE_LIMIT_UNFURL_PROXY_PER_MEMBER`, 0 removes it),
+        shared by both routes and spent only by a request that really would fetch: a
+        picture already held by the server, and an address that failed in the last few
+        minutes, cost the remote site nothing and spend nothing. Those two routes also
+        answer 429 with `Retry-After: 1` when the server is already fetching as many
+        remote images as it allows at once (16), whoever asks; ask again shortly. A
+        client shows its fallback meanwhile. `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
         already has an active account, is spent before the password is compared
         (a right password counts too), and answers 429 without comparing once
@@ -23856,6 +23921,20 @@ components:
             reply from inside its own thread. The target must be an undeleted
             message in the same channel (it may itself be a reply); a target in
             another channel or another workspace is reported as not found.
+        alsoInChannel:
+          type: boolean
+          default: false
+          description: >
+            ADR-0148 증보 2026-10-31 (#4887) — 「대화에도 보내기」: this thread
+            reply is also part of the channel's main flow. **Only a reply may turn
+            it on**: `true` without `rootId` is a 400 (checked before anything is
+            read, retries included), and the database refuses the same row even
+            if a path skipped the check. Absent and `false` are the same request.
+            Chosen once, at send: an idempotent retry answers the stored message
+            whatever this says now, and no later call changes it. Not allowed on a
+            developer token (`dev_field_not_allowed`). An older server's
+            closed-world request refuses the unknown key, so a client sends it
+            only when the sender turned it on.
         type:
           type: string
           enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
@@ -24463,12 +24542,44 @@ components:
         status:
           type: string
           enum: [pending, ok, failed, blocked]
-        title: {type: string}
-        description: {type: string}
+        title: {type: string, description: "At most 180 characters, whitespace collapsed."}
+        description:
+          type: string
+          description: At most 280 characters. Absent when it would repeat the title.
         domain: {type: string}
         imageUrl:
           type: string
           description: Authenticated proxy path on this origin. Never a remote host.
+        siteName:
+          type: string
+          description: >
+            og:site_name, at most 100 characters (ADR-0170 amendment 2026-10-31).
+            Absent when the page has none. Every key from here to `isVideo` is
+            optional; an older client that ignores them keeps working.
+        iconUrl:
+          type: string
+          description: >
+            Authenticated proxy path on this origin for the site icon
+            (`/v1/workspaces/{id}/unfurls/{id}/icon`). Never a remote host and
+            never the icon's own address. Absent when the card has no icon.
+        imageWidth:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: >
+            Pixels. og:image:width of the first og:image, or the width the image
+            proxy measured when it first received the picture. Present together
+            with `imageHeight` or not at all.
+        imageHeight:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: Pixels. See `imageWidth`.
+        isVideo:
+          type: boolean
+          description: >
+            `true` when og:type is `video.*` or twitter:card is `player`. The key
+            is absent otherwise (absent means not known to be a video).
 
     MessageUnfurlList:
       type: object
@@ -24730,6 +24841,23 @@ components:
             tombstone lists no files). Upload capability URLs and archive provider
             identifiers are never included; download bytes through the authenticated
             content proxy.
+        alsoInChannel:
+          type: boolean
+          enum: [true]
+          description: >
+            ADR-0148 증보 2026-10-31 (#4887) — the sender chose 「대화에도 보내기」:
+            this thread reply is also part of the channel's main flow. A channel's
+            main flow is the messages with no `rootId` **plus** the replies that
+            carry this flag; the thread shows every reply of its root either way.
+            **Present, and only ever `true`, when the choice was made — omitted
+            otherwise, never `false`** (the shape `runEnded` has), so a message sent
+            without it answers exactly the bytes it did before the field existed
+            and a client reads the key as `=== true`. Only a reply (`rootId` set)
+            can carry it. Present on every projection built from the stored row
+            (send echo, history, thread replies, edits). The realtime `message.new`
+            and `message.edited` payload carries the same flag under the snake_case
+            key `also_in_channel`, again only when on — an edit frame says it too,
+            so a client never reads silence as "off".
         thread:
           $ref: "#/components/schemas/ThreadRollup"
         sentVia:
@@ -24855,7 +24983,22 @@ components:
 
     ThreadRollup:
       type: object
-      required: [reply_count, last_reply_seq, last_reply_at]
+      required: [reply_count, last_reply_seq, last_reply_at, participant_ids, participant_count]
+      description: >
+        The reply summary a client draws under a root message (「답글 3개」, the last
+        reply's time, the faces of whoever replied). snake_case on the wire inside
+        an otherwise camelCase body — the core's `threadRollup()` is the one place
+        that turns it into `replyCount`, `lastReplySeq`, `lastReplyAtMs`,
+        `participantIds` and `participantCount`.
+
+
+        Only on a **root** message with at least one reply: a reply carries none,
+        and a root with no replies carries none. **The realtime `thread.updated`
+        payload carries the same five keys** (beside `channel_id` and `root_id`),
+        built by the same function as this object, so a client that keeps a root's
+        summary live applies it over the `thread` it holds. The send response for a
+        root that already has replies carries it too. `GET …/replies` returns the
+        replies themselves and no summary of their root.
       properties:
         reply_count:
           type: integer
@@ -24867,6 +25010,28 @@ components:
           type: integer
           format: int64
           description: Epoch milliseconds for the latest reply timestamp.
+        participant_ids:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            format: uuid
+          description: >
+            #4877 — who replied, **most recent replier first**, at most three
+            (lowercase UUID strings). A member who has left the channel or was
+            deleted keeps its id here; the client draws its existing 「알 수 없는
+            사람」 for an id it cannot resolve. Agent members are listed by the
+            same rule. A thread row written before this field kept its
+            first-reply order until its next reply, so an old thread's faces are
+            right after the next reply, not before. An empty list means no faces to
+            draw, never an error.
+        participant_count:
+          type: integer
+          minimum: 0
+          description: >
+            #4877 — how many distinct members have replied (no upper bound). The
+            faces in `participant_ids` are the newest `min(count, 3)` of them, so a
+            client can write 「+2」 after the faces.
 
     MessagePage:
       type: object

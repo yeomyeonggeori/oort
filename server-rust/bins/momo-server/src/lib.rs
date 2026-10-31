@@ -869,6 +869,11 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/unfurls/{id}/image",
             get(routes::unfurl::image),
         )
+        // ADR-0170 amendment 2026-10-31 D9 — the site icon, through the same proxy kind.
+        .route(
+            "/v1/workspaces/{ws}/unfurls/{id}/icon",
+            get(routes::unfurl::icon),
+        )
         // ADR-0151 — 첨부. Three routes, and the split between them is the
         // decision: the upload session hands out a Drive capability so the bytes
         // never cross this process, while the content proxy reads them here so

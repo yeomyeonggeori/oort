@@ -425,6 +425,9 @@ async fn run_tool(state: &AppState, caller: &Caller, call: &ToolCall) -> Result<
                 client_msg_id,
                 root_id: argument_uuid(arguments, "rootId")?,
                 reply_to_id: argument_uuid(arguments, "replyToId")?,
+                // ADR-0148 증보 (#4887): 「대화에도 보내기」 is not one of the five arguments — the
+                // developer-token door stays closed to it (R12) until ADR-0216 opens it.
+                also_in_channel: None,
                 message_type: None,
                 body: Some(body),
                 props: None,

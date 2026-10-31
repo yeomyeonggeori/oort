@@ -12,15 +12,16 @@ use sqlx::PgConnection;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::card::{build_card, CardFields};
 use crate::config::UnfurlConfig;
 use crate::extract::extract_urls;
-use crate::fetch::{FetchError, FetchKind, UnfurlHttp};
-use crate::parse::parse_card;
+use crate::fetch::{FetchError, FetchKind, Fetched, UnfurlHttp};
+use crate::proxy::{icon_path, image_path};
 use crate::settings::workspace_fetch_allowed;
 use crate::store::{
-    cache_lookup, cent_channel, claim_job_batch, domain_of, finish_job, image_proxy_key,
-    list_unfurls_in_tx, load_message, requeue_job, tombstone_exists, upsert_unfurl_and_cache,
-    ClaimedJob, UnfurlRecord, UpsertSpec,
+    cache_lookup, cent_channel, claim_job_batch, finish_job, image_proxy_key, list_unfurls_in_tx,
+    load_message, requeue_job, tombstone_exists, upsert_unfurl_and_cache, ClaimedJob, UnfurlRecord,
+    UpsertSpec,
 };
 
 pub const NOTIFY_CHANNEL: &str = "unfurl";
@@ -162,30 +163,24 @@ impl<T: UnfurlHttp + 'static> UnfurlWorker<T> {
                         None => match self.http.fetch(&url, FetchKind::Html).await {
                             Ok(fetched) => {
                                 fetched_any = true;
-                                let html = String::from_utf8_lossy(&fetched.body);
-                                let card = parse_card(&html);
-                                let image_url = card
-                                    .image_url
-                                    .as_ref()
-                                    .and_then(|raw| resolve_image(&fetched.final_url, raw));
-                                cards.push(CardResult::Fetched {
-                                    url,
-                                    status: "ok",
-                                    title: card.title,
-                                    description: card.description,
-                                    domain: domain_of(&fetched.final_url),
-                                    image_url,
-                                });
+                                // D11: a page with no title and no picture gives a card nothing
+                                // to show. It is recorded the way every other quiet end is.
+                                let settled = match build_card_off_thread(
+                                    fetched,
+                                    self.config.allow_development_http,
+                                )
+                                .await
+                                {
+                                    Some(card) => Settled::ok(card),
+                                    None => Settled::quiet("failed"),
+                                };
+                                cards.push(CardResult::Fetched { url, card: settled });
                             }
                             Err(error) if error.is_blocked() => {
                                 fetched_any = true;
                                 cards.push(CardResult::Fetched {
                                     url,
-                                    status: "blocked",
-                                    title: None,
-                                    description: None,
-                                    domain: None,
-                                    image_url: None,
+                                    card: Settled::quiet("blocked"),
                                 });
                             }
                             Err(FetchError::Timeout) | Err(FetchError::Failed(_))
@@ -198,11 +193,7 @@ impl<T: UnfurlHttp + 'static> UnfurlWorker<T> {
                                 fetched_any = true;
                                 cards.push(CardResult::Fetched {
                                     url,
-                                    status: "failed",
-                                    title: None,
-                                    description: None,
-                                    domain: None,
-                                    image_url: None,
+                                    card: Settled::quiet("failed"),
                                 });
                             }
                         },
@@ -292,19 +283,19 @@ impl<T: UnfurlHttp + 'static> UnfurlWorker<T> {
                                     domain: hit.domain.as_deref(),
                                     image_proxy_key: hit.image_proxy_key.as_deref(),
                                     image_url: hit.image_url.as_deref(),
+                                    site_name: hit.site_name.as_deref(),
+                                    icon_proxy_key: hit.icon_proxy_key.as_deref(),
+                                    icon_source_url: hit.icon_source_url.as_deref(),
+                                    image_width: hit.image_width,
+                                    image_height: hit.image_height,
+                                    is_video: hit.is_video,
                                 },
                             )
                             .await?;
                         }
-                        CardResult::Fetched {
-                            url,
-                            status,
-                            title,
-                            description,
-                            domain,
-                            image_url,
-                        } => {
-                            let proxy_key = image_url.as_ref().map(|u| image_proxy_key(u));
+                        CardResult::Fetched { url, card } => {
+                            let image_key = card.image_url.as_ref().map(|u| image_proxy_key(u));
+                            let icon_key = card.icon_url.as_ref().map(|u| image_proxy_key(u));
                             upsert_unfurl_and_cache(
                                 conn,
                                 UpsertSpec {
@@ -313,12 +304,18 @@ impl<T: UnfurlHttp + 'static> UnfurlWorker<T> {
                                     message_id,
                                     url_key: url,
                                     source_url: url,
-                                    status,
-                                    title: title.as_deref(),
-                                    description: description.as_deref(),
-                                    domain: domain.as_deref(),
-                                    image_proxy_key: proxy_key.as_deref(),
-                                    image_url: image_url.as_deref(),
+                                    status: card.status,
+                                    title: card.title.as_deref(),
+                                    description: card.description.as_deref(),
+                                    domain: card.domain.as_deref(),
+                                    image_proxy_key: image_key.as_deref(),
+                                    image_url: card.image_url.as_deref(),
+                                    site_name: card.site_name.as_deref(),
+                                    icon_proxy_key: icon_key.as_deref(),
+                                    icon_source_url: card.icon_url.as_deref(),
+                                    image_width: card.image_width,
+                                    image_height: card.image_height,
+                                    is_video: card.is_video,
                                 },
                             )
                             .await?;
@@ -372,17 +369,92 @@ enum CardResult {
     },
     Fetched {
         url: String,
-        status: &'static str,
-        title: Option<String>,
-        description: Option<String>,
-        domain: Option<String>,
-        image_url: Option<String>,
+        card: Settled,
     },
 }
 
-fn resolve_image(page_url: &str, raw: &str) -> Option<String> {
-    let joined = url::Url::parse(page_url).ok()?.join(raw).ok()?;
-    crate::normalize::normalize_url(joined.as_str()).ok()
+/// What one fetched link ends up as: a card with fields, or one of the quiet ends (no fields).
+struct Settled {
+    status: &'static str,
+    title: Option<String>,
+    description: Option<String>,
+    domain: Option<String>,
+    site_name: Option<String>,
+    image_url: Option<String>,
+    image_width: Option<i32>,
+    image_height: Option<i32>,
+    icon_url: Option<String>,
+    is_video: bool,
+}
+
+impl Settled {
+    fn ok(card: CardFields) -> Settled {
+        Settled {
+            status: "ok",
+            title: card.title,
+            description: card.description,
+            domain: card.domain,
+            site_name: card.site_name,
+            image_url: card.image_url,
+            image_width: card.image_width,
+            image_height: card.image_height,
+            icon_url: card.icon_url,
+            is_video: card.is_video,
+        }
+    }
+
+    /// `failed` / `blocked`: a row clients already render as nothing (ADR-0170 D5).
+    fn quiet(status: &'static str) -> Settled {
+        Settled {
+            status,
+            title: None,
+            description: None,
+            domain: None,
+            site_name: None,
+            image_url: None,
+            image_width: None,
+            image_height: None,
+            icon_url: None,
+            is_video: false,
+        }
+    }
+}
+
+/// Read one fetched page into a card on the blocking pool (#4881 security review H-1, the second
+/// layer behind the linear-time parser).
+///
+/// Reading a page is CPU work over up to 512 KiB of somebody else's text, and this worker is one
+/// branch of the `select!` that `momo-webhook-sender` runs next to webhook delivery and the
+/// doorbell. Inline, a page that is slow to read stops all three; on the blocking pool it can
+/// only slow its own job. The page's bytes move into the closure, nothing is cloned. A panic in
+/// the reading code ends the job as the quiet `failed` a page with nothing to show gets, and is
+/// logged without the page's address or text.
+async fn build_card_off_thread(
+    fetched: Fetched,
+    allow_development_http: bool,
+) -> Option<CardFields> {
+    let built = tokio::task::spawn_blocking(move || {
+        build_card(
+            &fetched.final_url,
+            &fetched.content_type,
+            &fetched.body,
+            allow_development_http,
+        )
+    })
+    .await;
+    match built {
+        Ok(card) => card,
+        Err(error) => {
+            // Not `error`'s text: a `JoinError` carries the panic's message, and the message of a
+            // slicing panic can quote the text that was being sliced.
+            tracing::error!(
+                panicked = error.is_panic(),
+                cancelled = error.is_cancelled(),
+                "unfurl card builder did not finish"
+            );
+            None
+        }
+    }
 }
 
 async fn emit_unfurl_broadcast(
@@ -414,11 +486,22 @@ async fn emit_unfurl_broadcast(
             if record.image_proxy_key.is_some() {
                 card.insert(
                     "image_url".into(),
-                    json!(format!(
-                        "/v1/workspaces/{workspace_id}/unfurls/{}/image",
-                        record.id
-                    )),
+                    json!(image_path(workspace_id, record.id)),
                 );
+            }
+            // ADR-0170 amendment D6: new optional keys. The icon is only ever its proxy path.
+            if let Some(site_name) = &record.site_name {
+                card.insert("site_name".into(), json!(site_name));
+            }
+            if record.icon_proxy_key.is_some() {
+                card.insert("icon_url".into(), json!(icon_path(workspace_id, record.id)));
+            }
+            if let (Some(width), Some(height)) = (record.image_width, record.image_height) {
+                card.insert("image_width".into(), json!(width));
+                card.insert("image_height".into(), json!(height));
+            }
+            if record.is_video {
+                card.insert("is_video".into(), json!(true));
             }
             Value::Object(card)
         })

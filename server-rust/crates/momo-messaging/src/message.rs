@@ -218,7 +218,19 @@ pub struct StoredMessage {
     /// never by an edit (`edit_message_in_tx` sets `body`/`state`/`edited_at` only), so the
     /// marker outlives its author's later edits.
     pub sent_via: Option<SentVia>,
+    /// ADR-0148 증보 2026-10-31 (#4887) — a thread reply its sender also sent to the channel's
+    /// main flow (`message.also_in_channel`, migration 162).
+    ///
+    /// `true` only on a reply (`root_id` is set — the table's CHECK holds that even if a caller
+    /// forgets), chosen **once, at send**: no `UPDATE` in this crate names the column, so an edit
+    /// or a delete keeps it. The same message shows in two places — the thread and the main flow —
+    /// so it is one row, one `seq`, and one count in the thread's rollup.
+    pub also_in_channel: bool,
 }
+
+/// How many faces a thread summary carries (#4877). The rest of the thread's repliers are only
+/// counted ([`ThreadRollup::participant_count`]).
+pub const THREAD_SUMMARY_PARTICIPANTS: usize = 3;
 
 /// The reply rollup a client draws as "3 replies" under a root message
 /// (`thread`, `001_init.sql:202`; Swift `ThreadRollupDTO`, `DTOs.swift:186-197`).
@@ -227,27 +239,52 @@ pub struct StoredMessage {
 /// carries no rollup of its own (momo threads are one level, like Slack's), and
 /// a root with `reply_count = 0` carries none either, because the badge's
 /// absence is what "no thread here" looks like.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Not `Copy` since #4877: the faces are a list. Every producer of the wire shape — the history
+/// page, the send echo and `thread.updated` — builds it through [`thread_rollup`], so the shape
+/// cannot differ between them.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThreadRollup {
     pub reply_count: i32,
     pub last_reply_seq: i64,
     pub last_reply_at_ms: i64,
+    /// Who replied, **most recent replier first**, at most [`THREAD_SUMMARY_PARTICIPANTS`]. A
+    /// member who left or was deleted keeps its id here — the client draws the existing 「알 수 없는
+    /// 사람」 for it. Agents are members and are listed by the same rule.
+    pub participant_ids: Vec<Uuid>,
+    /// How many **distinct** members have replied (no upper bound), so a client can write "+2"
+    /// after the faces. `participant_ids.len()` is `min(participant_count, 3)`.
+    pub participant_count: i32,
 }
 
 /// Swift `MessageRoutes.threadRollup` (:990-1006): all three parts or nothing.
 /// A `reply_count` without a `last_reply_seq` is a half-written rollup, and
 /// emitting it would put a badge on a thread a client cannot then open.
+///
+/// `participants` is `thread.participant_ids` **as stored**: every distinct replier, the one who
+/// replied last at the **end** ([`bump_thread_rollup_in_tx`] moves a repeat replier there). The
+/// wire order and the cap are decided here and nowhere else — newest first, three of them — so
+/// the page, the send echo and `thread.updated` agree by construction. A missing array reads as
+/// no faces rather than as a missing rollup: the badge is the reply count's, not the faces'.
 fn thread_rollup(
     reply_count: Option<i32>,
     last_reply_seq: Option<i64>,
     last_reply_at_ms: Option<i64>,
+    participants: Option<Vec<Uuid>>,
 ) -> Option<ThreadRollup> {
     match (reply_count, last_reply_seq, last_reply_at_ms) {
         (Some(reply_count), Some(last_reply_seq), Some(last_reply_at_ms)) if reply_count > 0 => {
+            let participants = participants.unwrap_or_default();
             Some(ThreadRollup {
                 reply_count,
                 last_reply_seq,
                 last_reply_at_ms,
+                participant_count: i32::try_from(participants.len()).unwrap_or(i32::MAX),
+                participant_ids: participants
+                    .into_iter()
+                    .rev()
+                    .take(THREAD_SUMMARY_PARTICIPANTS)
+                    .collect(),
             })
         }
         _ => None,
@@ -282,11 +319,13 @@ pub struct SentMessage {
 /// The `message.*` column list shared by insert-RETURNING and read queries, so a
 /// single [`decode_stored`] reads every row shape.
 ///
-/// `sent_via` (ADR-0216 D8) is in this list and in its two siblings — [`PAGED_COLS`] and
-/// `interaction::INTERACTION_COLS` — because [`decode_stored`] reads it from every row shape.
+/// `sent_via` (ADR-0216 D8) and `also_in_channel` (ADR-0148 증보, #4887) are in this list and in
+/// its two siblings — [`PAGED_COLS`] and `interaction::INTERACTION_COLS` — because
+/// [`decode_stored`] reads them from every row shape. A statement that forgets one fails loudly in
+/// its first test (`try_get` finds no such column) rather than quietly answering `false`.
 const STORED_COLS: &str = "id, workspace_id, channel_id, seq, hlc_ts, hlc_count, \
      author_member_id, type::text AS message_type, state::text AS state, body, props, \
-     root_id, reply_to_id, created_at, edited_at, deleted_at, sent_via";
+     root_id, reply_to_id, created_at, edited_at, deleted_at, sent_via, also_in_channel";
 
 /// [`decode_stored`] for the sibling modules that project the same columns with
 /// extras beside them (`interaction::INTERACTION_COLS`). Crate-private: the
@@ -329,7 +368,26 @@ fn decode_stored(row: &sqlx::postgres::PgRow) -> Result<StoredMessage, sqlx::Err
         edited_at: row.try_get("edited_at")?,
         deleted_at: row.try_get("deleted_at")?,
         sent_via,
+        also_in_channel: row.try_get("also_in_channel")?,
     })
+}
+
+/// The `message.new` / `message.edited` key that carries [`StoredMessage::also_in_channel`]
+/// (ADR-0148 증보 2026-10-31, #4887). snake_case like every other key of the payload.
+pub(crate) const ALSO_IN_CHANNEL_PAYLOAD_KEY: &str = "also_in_channel";
+
+/// Put the 「대화에도 보내기」 flag on a realtime message payload — **only when it is on**.
+///
+/// Omitted rather than `false`, for the reason [`insert_sent_via`] gives: an outbox row is
+/// written for every message and replayed forever, and every message sent before the column
+/// existed (or without the flag) must keep exactly the bytes it had. A client therefore reads
+/// the key as `=== true`; absence is "off". `message.edited` carries it too — an edit re-publishes
+/// the whole message, and a frame that said nothing would read as "off" and could drop an
+/// also-in-channel reply out of the main flow.
+pub(crate) fn insert_also_in_channel(payload: &mut Map<String, Value>, also_in_channel: bool) {
+    if also_in_channel {
+        payload.insert(ALSO_IN_CHANNEL_PAYLOAD_KEY.into(), Value::Bool(true));
+    }
 }
 
 /// The `message.new` / `message.edited` key that carries [`SentVia`] (ADR-0216 D8).
@@ -380,6 +438,8 @@ fn stored_broadcast_payload(
         .and_then(Value::as_object_mut)
     {
         insert_sent_via(inner, message.sent_via);
+        // ADR-0148 증보 — same rule, same place: on only when on.
+        insert_also_in_channel(inner, message.also_in_channel);
     }
     payload
 }
@@ -571,6 +631,19 @@ pub struct SendExtras<'a> {
     /// above, but `SendExtras::default()` therefore means the opt-in is *on*;
     /// every real send path sets it from `AgentPortConfig`.
     pub claude_subscription_agents_disabled: bool,
+    /// ADR-0148 증보 2026-10-31 (#4887) — the sender chose 「대화에도 보내기」: this thread reply
+    /// is also part of the channel's main flow.
+    ///
+    /// A field of the extras rather than of [`NewMessage`] for `sent_via`'s reason: `NewMessage` is
+    /// built as a literal by dozens of producers and a field there is one more thing each of
+    /// them could set, whereas only the REST send — a person choosing — has an opinion about
+    /// this. `false` (the `Default`) is the unchanged path for every other caller.
+    ///
+    /// **Not judged here.** "Only a reply may turn it on" is decided before the transaction (the
+    /// route answers 400) and held by the table's CHECK (`message_also_in_channel_reply_ck`) for
+    /// any path that skipped that check; a send that reaches the INSERT with `true` and no
+    /// `root_id` is therefore refused by the database, not silently stored as `false`.
+    pub also_in_channel: bool,
 }
 
 /// Why a REST send was refused before it could commit.
@@ -599,11 +672,17 @@ pub enum SendRejected {
 /// purpose. `NewMessage` is built as a literal by dozens of producers, and a field there
 /// would be one more thing a producer *could* set; the marker is the server's statement
 /// about the credential, so only the send composition that knows the credential passes it.
+///
+/// `also_in_channel` (ADR-0148 증보, #4887) is the second such parameter, for the same reason: it
+/// is the sender's choice and only the REST send carries one, so every other caller passes
+/// `false` and writes exactly the row it always did. A `true` with no `root_id` fails the
+/// table's `message_also_in_channel_reply_ck` — the statement does not paper over it.
 async fn insert_message_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     input: NewMessage,
     sent_via: Option<SentVia>,
+    also_in_channel: bool,
 ) -> Result<(StoredMessage, bool), DbError> {
     let hlc_ts = input
         .hlc_ts
@@ -620,8 +699,9 @@ async fn insert_message_in_tx(
          ) \
          INSERT INTO message \
            (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, \
-            type, body, props, root_id, reply_to_id, client_msg_id, run_id, sent_via) \
-         SELECT $2, $1, b.seq, $3, $4, $5, $6::message_type, $7, $8, $9, $10, $11, $12, $13 \
+            type, body, props, root_id, reply_to_id, client_msg_id, run_id, sent_via, \
+            also_in_channel) \
+         SELECT $2, $1, b.seq, $3, $4, $5, $6::message_type, $7, $8, $9, $10, $11, $12, $13, $14 \
            FROM bumped b \
          ON CONFLICT (channel_id, author_member_id, client_msg_id) DO NOTHING \
          RETURNING {STORED_COLS}"
@@ -640,6 +720,7 @@ async fn insert_message_in_tx(
         .bind(input.client_msg_id)
         .bind(input.run_id)
         .bind(sent_via.map(SentVia::as_db_label))
+        .bind(also_in_channel)
         .fetch_optional(&mut *conn)
         .await?;
 
@@ -849,7 +930,7 @@ pub async fn send_message_in_tx(
     workspace_id: Uuid,
     input: NewMessage,
 ) -> Result<SentMessage, DbError> {
-    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None).await?;
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None, false).await?;
     finish_send_in_tx(
         conn,
         workspace_id,
@@ -891,7 +972,7 @@ pub async fn send_thread_notice_in_tx(
     workspace_id: Uuid,
     input: NewMessage,
 ) -> Result<SentMessage, DbError> {
-    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None).await?;
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None, false).await?;
     finish_send_in_tx(
         conn,
         workspace_id,
@@ -972,6 +1053,7 @@ pub async fn send_message_with_mentions_via_in_tx(
         opens_stream,
         subscription_agents_disabled,
         claude_subscription_agents_disabled,
+        also_in_channel,
     } = extras;
     if let Some(signature) = signature {
         if input.client_msg_id.is_none() {
@@ -1000,7 +1082,8 @@ pub async fn send_message_with_mentions_via_in_tx(
 
     let channel_id = input.channel_id;
     let author_member_id = input.author_member_id;
-    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, sent_via).await?;
+    let (message, deduped) =
+        insert_message_in_tx(conn, workspace_id, input, sent_via, also_in_channel).await?;
 
     if let Some(signature) = signature {
         // `client_msg_id` was checked above; the stored row is the digest's
@@ -1513,10 +1596,12 @@ pub struct QuotedMessage {
 const PAGED_COLS: &str = "m.id, m.workspace_id, m.channel_id, m.seq, m.hlc_ts, m.hlc_count, \
      m.author_member_id, m.type::text AS message_type, m.state::text AS state, m.body, m.props, \
      m.root_id, m.reply_to_id, m.created_at, m.edited_at, m.deleted_at, m.sent_via, \
+     m.also_in_channel, \
      t.reply_count, t.last_reply_seq, \
      CASE WHEN t.last_reply_at IS NULL THEN NULL \
           ELSE floor(extract(epoch from t.last_reply_at) * 1000)::bigint \
      END AS last_reply_at_ms, \
+     t.participant_ids AS thread_participant_ids, \
      q.id AS quote_id, q.seq AS quote_seq, q.author_member_id AS quote_author_member_id, \
      q.type::text AS quote_message_type, q.state::text AS quote_state, q.body AS quote_body, \
      q.edited_at AS quote_edited_at, q.deleted_at AS quote_deleted_at, \
@@ -1594,6 +1679,7 @@ fn decode_paged(row: &sqlx::postgres::PgRow) -> Result<PagedMessage, sqlx::Error
             row.try_get("reply_count")?,
             row.try_get("last_reply_seq")?,
             row.try_get("last_reply_at_ms")?,
+            row.try_get("thread_participant_ids")?,
         ),
         reply_to: decode_quoted(row)?,
         attachments: decode_paged_attachments(row)?,
@@ -1837,8 +1923,14 @@ pub async fn validate_replies_root_in_tx(
 ///
 /// `ON CONFLICT DO UPDATE` takes the root row's lock, which is what makes
 /// concurrent replies serialize: two simultaneous replies cannot both read
-/// `reply_count = 4` and both write 5. `participant_ids` is appended only when
-/// the author is new to the thread, so it stays a set without a second read.
+/// `reply_count = 4` and both write 5.
+///
+/// **`participant_ids` is a set ordered by recency (#4877).** The author is taken out of the
+/// array (`array_remove`) and put back at the end (`array_append`) in the same statement, so a
+/// first reply appends, a repeat reply moves the author to the end, and the array stays a set
+/// without a second read. The member who replied **last is therefore last**; the wire shows the
+/// newest three, newest first ([`thread_rollup`]). A row written before this change keeps the
+/// first-reply order it has until its next reply — no backfill.
 async fn bump_thread_rollup_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -1857,13 +1949,12 @@ async fn bump_thread_rollup_in_tx(
            SET reply_count = thread.reply_count + 1, \
                last_reply_seq = EXCLUDED.last_reply_seq, \
                last_reply_at = EXCLUDED.last_reply_at, \
-               participant_ids = CASE \
-                 WHEN EXCLUDED.participant_ids[1] = ANY(thread.participant_ids) \
-                   THEN thread.participant_ids \
-                 ELSE array_append(thread.participant_ids, EXCLUDED.participant_ids[1]) \
-               END \
+               participant_ids = array_append( \
+                 array_remove(thread.participant_ids, EXCLUDED.participant_ids[1]), \
+                 EXCLUDED.participant_ids[1]) \
          RETURNING reply_count, last_reply_seq, \
-                   floor(extract(epoch from last_reply_at) * 1000)::bigint AS last_reply_at_ms",
+                   floor(extract(epoch from last_reply_at) * 1000)::bigint AS last_reply_at_ms, \
+                   participant_ids",
     )
     .bind(root_id)
     .bind(workspace_id)
@@ -1878,6 +1969,7 @@ async fn bump_thread_rollup_in_tx(
         row.try_get("reply_count")?,
         row.try_get("last_reply_seq")?,
         row.try_get("last_reply_at_ms")?,
+        row.try_get("participant_ids")?,
     )
     .ok_or_else(|| {
         DbError::from(sqlx::Error::Decode(
@@ -1893,7 +1985,8 @@ pub async fn fetch_thread_rollup_in_tx(
 ) -> Result<Option<ThreadRollup>, DbError> {
     let row = sqlx::query(
         "SELECT reply_count, last_reply_seq, \
-                floor(extract(epoch from last_reply_at) * 1000)::bigint AS last_reply_at_ms \
+                floor(extract(epoch from last_reply_at) * 1000)::bigint AS last_reply_at_ms, \
+                participant_ids \
            FROM thread \
           WHERE root_id = $1 AND reply_count > 0 \
           LIMIT 1",
@@ -1906,6 +1999,7 @@ pub async fn fetch_thread_rollup_in_tx(
         row.try_get("reply_count")?,
         row.try_get("last_reply_seq")?,
         row.try_get("last_reply_at_ms")?,
+        row.try_get("participant_ids")?,
     ))
 }
 
@@ -1916,6 +2010,13 @@ pub async fn fetch_thread_rollup_in_tx(
 /// and Centrifugo silently drops a publish whose version is not strictly greater
 /// than the channel's stored version — which the reply's `message.new` has
 /// already claimed. Idempotency therefore rides on the key alone.
+///
+/// **The rollup keys are the history page's, key for key** (#4877): `reply_count`,
+/// `last_reply_seq`, `last_reply_at`, and now `participant_ids` (newest replier first, at most
+/// three) and `participant_count`. A client that keeps a root's summary live applies this
+/// payload over the `Message.thread` it holds, so the two must not differ in shape. The member
+/// ids are lowercase strings, like every member id on the wire; only `channel_id` and `root_id`
+/// keep Swift's uppercase `uuidString` spelling (clients compare ids case-insensitively).
 pub fn build_thread_updated_payload(
     workspace_id: Uuid,
     channel_id: Uuid,
@@ -1923,6 +2024,7 @@ pub fn build_thread_updated_payload(
     rollup: &ThreadRollup,
 ) -> Value {
     let channel = cent_channel(workspace_id, channel_id);
+    let participant_ids: Vec<String> = rollup.participant_ids.iter().map(Uuid::to_string).collect();
     let data = json!({
         "type": "thread.updated",
         "v": 1,
@@ -1934,6 +2036,8 @@ pub fn build_thread_updated_payload(
             "reply_count": rollup.reply_count,
             "last_reply_seq": rollup.last_reply_seq,
             "last_reply_at": rollup.last_reply_at_ms,
+            "participant_ids": participant_ids,
+            "participant_count": rollup.participant_count,
         },
     });
     let envelope = BroadcastPayload {
@@ -2486,6 +2590,7 @@ mod tests {
             edited_at: None,
             deleted_at: None,
             sent_via,
+            also_in_channel: false,
         }
     }
 
@@ -2626,18 +2731,81 @@ mod tests {
     /// A half-written rollup must not produce a badge a client cannot open.
     #[test]
     fn a_rollup_needs_all_three_parts_and_a_reply() {
+        let who = Uuid::from_u128(0xA1);
         assert_eq!(
-            thread_rollup(Some(2), Some(9), Some(1_700_000_000_000)),
+            thread_rollup(Some(2), Some(9), Some(1_700_000_000_000), Some(vec![who])),
             Some(ThreadRollup {
                 reply_count: 2,
                 last_reply_seq: 9,
                 last_reply_at_ms: 1_700_000_000_000,
+                participant_ids: vec![who],
+                participant_count: 1,
             })
         );
-        assert_eq!(thread_rollup(Some(0), Some(9), Some(1)), None);
-        assert_eq!(thread_rollup(None, Some(9), Some(1)), None);
-        assert_eq!(thread_rollup(Some(2), None, Some(1)), None);
-        assert_eq!(thread_rollup(Some(2), Some(9), None), None);
+        assert_eq!(thread_rollup(Some(0), Some(9), Some(1), None), None);
+        assert_eq!(thread_rollup(None, Some(9), Some(1), None), None);
+        assert_eq!(thread_rollup(Some(2), None, Some(1), None), None);
+        assert_eq!(thread_rollup(Some(2), Some(9), None, None), None);
+    }
+
+    /// #4877 — the wire order and the cap are decided in one function. The stored array runs
+    /// oldest replier → newest replier; the summary shows the newest three, **newest first**, and
+    /// counts every distinct replier. Goes red if the cap leaves `thread_rollup` (a fourth face
+    /// appears), if the reversal does (the oldest repliers are shown), or if the count is taken from
+    /// the capped list instead of the stored one.
+    #[test]
+    fn the_summary_shows_the_newest_three_repliers_newest_first_and_counts_all() {
+        let ids: Vec<Uuid> = (1..=5).map(Uuid::from_u128).collect();
+        let rollup = thread_rollup(Some(9), Some(40), Some(1), Some(ids.clone()))
+            .expect("a thread with replies has a rollup");
+        assert_eq!(
+            rollup.participant_ids,
+            vec![ids[4], ids[3], ids[2]],
+            "newest first, and only three"
+        );
+        assert_eq!(
+            rollup.participant_count, 5,
+            "the count is every distinct replier, not the faces shown"
+        );
+
+        // Fewer than the cap: every face, still newest first.
+        let two =
+            thread_rollup(Some(2), Some(7), Some(1), Some(vec![ids[0], ids[1]])).expect("rollup");
+        assert_eq!(two.participant_ids, vec![ids[1], ids[0]]);
+        assert_eq!(two.participant_count, 2);
+
+        // An array the join did not find reads as no faces, not as a missing badge.
+        let none = thread_rollup(Some(1), Some(7), Some(1), None).expect("rollup");
+        assert!(none.participant_ids.is_empty());
+        assert_eq!(none.participant_count, 0);
+    }
+
+    /// ADR-0148 증보 — the 「대화에도 보내기」 flag rides the realtime payload **only when it is on**,
+    /// so every message sent without it keeps the bytes it always had (an outbox row is replayed
+    /// forever), and the sender's `message.new` says `true` for a reply that chose it.
+    #[test]
+    fn the_message_new_payload_carries_also_in_channel_only_when_it_is_on() {
+        let mut reply = stored_text(None);
+        reply.root_id = Some(Uuid::from_u128(0xB0));
+        let off = stored_broadcast_payload(reply.workspace_id, &reply, &[]);
+        assert!(
+            off["data"]["payload"]
+                .get(ALSO_IN_CHANNEL_PAYLOAD_KEY)
+                .is_none(),
+            "an ordinary reply publishes exactly what it always did: {off}"
+        );
+
+        reply.also_in_channel = true;
+        let on = stored_broadcast_payload(reply.workspace_id, &reply, &[]);
+        assert_eq!(
+            on["data"]["payload"][ALSO_IN_CHANNEL_PAYLOAD_KEY],
+            json!(true)
+        );
+        assert_eq!(
+            on["data"]["payload"]["root_id"],
+            json!(Uuid::from_u128(0xB0)),
+            "the flag rides beside root_id, which is what makes it legal"
+        );
     }
 
     #[test]
@@ -2784,10 +2952,13 @@ mod tests {
         let ws = Uuid::from_u128(1);
         let ch = Uuid::from_u128(2);
         let root = Uuid::from_u128(3);
+        let (older, newest) = (Uuid::from_u128(0xA0), Uuid::from_u128(0xA1));
         let rollup = ThreadRollup {
             reply_count: 4,
             last_reply_seq: 11,
             last_reply_at_ms: 1_700_000_000_123,
+            participant_ids: vec![newest, older],
+            participant_count: 5,
         };
         let payload = build_thread_updated_payload(ws, ch, root, &rollup);
 
@@ -2802,6 +2973,13 @@ mod tests {
             payload["data"]["payload"]["last_reply_at"],
             json!(1_700_000_000_123_i64)
         );
+        // #4877 — the two summary keys, spelled and ordered as the history page's rollup.
+        assert_eq!(
+            payload["data"]["payload"]["participant_ids"],
+            json!([newest.to_string(), older.to_string()]),
+            "newest replier first, lowercase like every member id on the wire"
+        );
+        assert_eq!(payload["data"]["payload"]["participant_count"], json!(5));
         assert_eq!(
             payload["data"]["payload"]["root_id"],
             json!(root.to_string().to_uppercase()),

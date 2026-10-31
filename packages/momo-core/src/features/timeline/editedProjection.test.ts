@@ -200,10 +200,13 @@ describe("편집 투영이 말하지 않는 장식은 이미 든 것을 지킨�
     expect(state.messages).toHaveLength(1);
     const row = state.messages[0];
     // 롤업: 이 시험이 잡는 버그. `threadRollup` 은 화면이 쓰는 그 읽기다.
+    // 두 얼굴 키는 옛 서버 모양(세 키뿐인 롤업)을 읽은 값이다 — 얼굴 없음(#4877).
     expect(threadRollup(row)).toEqual({
       replyCount: 3,
       lastReplySeq: 12,
       lastReplyAtMs: 1_700_000_500_000,
+      participantIds: [],
+      participantCount: 0,
     });
     // 글·표시: 「들어온 행을 통째로 무시」하는 가짜 수리를 막는다. 편집이 실제로
     // 적용됐다는 증거가 같은 단정 안에 있어야 롤업이 남은 것이 「편집이 안 먹어서」가
@@ -387,6 +390,8 @@ describe("편집 투영이 말하지 않는 장식은 이미 든 것을 지킨�
       replyCount: 5,
       lastReplySeq: 15,
       lastReplyAtMs: 1_700_000_900_000,
+      participantIds: [],
+      participantCount: 0,
     });
 
     const quotes = fold(

@@ -722,11 +722,18 @@ mod tests {
     /// `expression` and `expression_draft` (generated origin only) and the six G3.8 card codes in the
     /// draft's `code` CHECK. No new table.
     ///
+    /// 162 is #4887's 「대화에도 보내기」 (ADR-0148 증보 2026-10-31): `message.also_in_channel boolean
+    /// NOT NULL DEFAULT false` and the CHECK `message_also_in_channel_reply_ck` that lets only a thread
+    /// reply (`root_id` set) turn it on. No new table, so no new RLS policy.
+    ///
+    /// 163 is #4881's link-card site metadata (ADR-0170 amendment 2026-10-31): six columns (site name,
+    /// icon proxy key and remote icon address, image width/height, video flag) on `unfurl_url_cache` and
+    /// `message_unfurl`, with the column CHECKs that keep the size pair and the icon pair whole. No new
+    /// table.
+    ///
     /// 164 is #4889's `thread_follow` (ADR-0206 증보 1 F1): who follows which thread, one row per
     /// (root, member) with the state `auto` / `followed` / `unfollowed`, tenant ENABLE + FORCE +
-    /// `ws_isolation`. No grant for `momo_notifier` until the stage-2 judgment arm reads it. 162 and 163
-    /// belong to other stack slots (#4887, #4881), so on a branch without them this test is the one
-    /// that is expected to fail until they land (162 → 163 → 164).
+    /// `ws_isolation`. No grant for `momo_notifier` until the stage-2 judgment arm reads it.
     #[test]
     fn discovers_contiguous_migrations_001_to_164() {
         let dir = default_migrations_dir();
