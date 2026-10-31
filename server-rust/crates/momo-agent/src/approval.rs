@@ -150,6 +150,14 @@ pub struct ApprovalListRow {
     pub decision_reason: Option<String>,
     pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+    /// ADR-0186 v6 R-f, where the approval lives: its channel is a DM.
+    pub is_direct: bool,
+    /// ADR-0186 v6 R-f, where the approval lives: the thread its card sits in
+    /// (the card message's `root_id`), when it sits in one.
+    pub root_id: Option<Uuid>,
+    /// ADR-0186 v6 R-f, the card's one-line outcome. Only a settled approval has
+    /// one (see [`CARD_OUTCOME_LINE_SQL`]); a pending one is still asking.
+    pub result_line: Option<String>,
 }
 
 /// A replayed decision, found by `client_decision_id` (Swift `ExistingDecision`
@@ -479,16 +487,92 @@ pub async fn decision_stamp_in_tx(
     )))
 }
 
-/// The approval inbox (Swift `fetchApprovals` :503-589).
+/// Which approvals a read returns, by status (`GET …/approvals?status=`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApprovalStatusFilter {
+    /// One status: `pending`, `approved`, `rejected`, `expired` or `cancelled`.
+    Only(String),
+    /// Every status. ADR-0186 v6 R-f: the inbox 「승인」 칸 reads the five in one stream.
+    All,
+}
+
+impl ApprovalStatusFilter {
+    /// Does the read order by **when the approval last moved** (and so resume from a
+    /// [`ApprovalCursor`])? Everything but `pending`, which keeps its deadline order:
+    /// the to-decide queue is read soonest-expiry first, and it is bounded by the
+    /// `limit` rather than paged.
+    pub fn is_time_ordered(&self) -> bool {
+        !matches!(self, ApprovalStatusFilter::Only(status) if status == "pending")
+    }
+}
+
+/// Whose approvals a read returns (`GET …/approvals?scope=`). Both are inside the
+/// channels the caller is an active member of: the scope narrows, it never widens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalScope {
+    /// Every approval in those channels (the long-standing read; an in-place channel
+    /// grant only for a workspace owner/admin).
+    Team,
+    /// Only what the caller **decided**, **requested** (the author of the run's trigger
+    /// message, or the actor of a work run's `agent.work.queued` row: the same two
+    /// sources the "running now" read's `scope=mine` uses) or whose **agent they own**
+    /// (`agent.owner_human_id`). ADR-0186 v6 R-f, ADR-0199 D5's recipient isolation.
+    Mine,
+}
+
+/// A keyset position `(when the approval last moved, id)` — the id breaks ties
+/// between approvals that moved in the same microsecond. Carried to clients as an
+/// opaque token (`routes::approvals`). A position, not a capability: every read that
+/// takes one is scoped to the authenticated member, so a forged cursor can only move
+/// that member's own page window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ApprovalCursor {
+    pub at: DateTime<Utc>,
+    pub id: Uuid,
+}
+
+impl ApprovalCursor {
+    /// The position of `row` in the time order: its decision (or expiry or cancellation)
+    /// time, and for a pending approval the time it was asked.
+    pub fn of(row: &ApprovalListRow) -> ApprovalCursor {
+        ApprovalCursor {
+            at: row.decided_at.unwrap_or(row.created_at),
+            id: row.id,
+        }
+    }
+}
+
+/// One page of the approval inbox.
+#[derive(Debug, Clone)]
+pub struct ApprovalPage {
+    pub rows: Vec<ApprovalListRow>,
+    /// `Some` only when a further page exists **and** the read is time-ordered.
+    pub next: Option<ApprovalCursor>,
+}
+
+/// The card's one-line outcome for a **settled** approval (ADR-0186 v6 R-b/R-f): the
+/// explicit `props.result.line`, else the card `body` when the settlement patched the
+/// card (a patched card carries a terminal `code`, and its body is then the decision
+/// sentence: R-f 「`body`는 `result.line`(없으면 결정 문장)」).
 ///
-/// The `JOIN membership` is the authorization, not a filter applied afterwards:
-/// a person sees exactly the approvals raised in rooms they are still in. A
-/// `WHERE` on the workspace alone would have shown every approval in the tenant.
-///
-/// An in-place channel-grant card (ADR-0162 증보 5 G2) is listed only to a
-/// workspace owner/admin — the people who can decide it. Everyone else in the
-/// room still sees the card in the timeline, without buttons; it is not put in
-/// their 「나에게 필요한 일」.
+/// A card settled before that patch existed has neither, and its body is still the
+/// question it asked. A question is not an outcome, so such a card yields nothing
+/// instead of a stale 「…해도 될까요?」 beside an 「승인」 chip. Expects the card as `m`.
+const CARD_OUTCOME_LINE_SQL: &str = "COALESCE(NULLIF(btrim(m.props #>> '{result,line}'), ''), \
+     CASE WHEN jsonb_exists(m.props, 'code') THEN NULLIF(btrim(m.body), '') END)";
+
+/// The longest card sentence a read passes on. The sentences are server-written and
+/// short; one that is not is no sentence, so it is dropped rather than cut in half.
+pub const CARD_LINE_MAX_CHARS: usize = 300;
+
+/// Trim a card sentence and keep it only if it is a sentence a read may pass on.
+pub fn public_card_line(line: Option<String>) -> Option<String> {
+    line.map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty() && line.chars().count() <= CARD_LINE_MAX_CHARS)
+}
+
+/// The approval inbox (Swift `fetchApprovals` :503-589), legacy shape: one status,
+/// the team scope, no cursor. See [`list_approval_page_in_tx`] for the full read.
 pub async fn list_approvals_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -496,33 +580,123 @@ pub async fn list_approvals_in_tx(
     status: &str,
     limit: i64,
 ) -> Result<Vec<ApprovalListRow>, DbError> {
-    let rows = sqlx::query(
+    Ok(list_approval_page_in_tx(
+        conn,
+        workspace_id,
+        member_id,
+        &ApprovalStatusFilter::Only(status.to_string()),
+        ApprovalScope::Team,
+        None,
+        limit,
+    )
+    .await?
+    .rows)
+}
+
+/// The approval inbox, read for ADR-0186 v6 R-f.
+///
+/// The `JOIN membership` is the authorization, not a filter applied afterwards:
+/// a person sees exactly the approvals raised in rooms they are still in. A
+/// `WHERE` on the workspace alone would have shown every approval in the tenant.
+/// Leaving a room hides its approvals at the next read, including the ones the
+/// person decided (ADR-0199 D4: visibility is judged again at read time).
+///
+/// An in-place channel-grant card (ADR-0162 증보 5 G2) is listed under
+/// [`ApprovalScope::Team`] only to a workspace owner/admin — the people who can decide
+/// it. Everyone else in the room still sees the card in the timeline, without buttons;
+/// it is not put in their 「나에게 필요한 일」. Under [`ApprovalScope::Mine`] it is
+/// listed like any other approval the person decided, requested or owns the agent of.
+///
+/// ## Order
+///
+/// * `pending` — soonest deadline first, then newest asked (the to-decide queue).
+/// * anything else — newest first by when the approval last moved
+///   (`COALESCE(decided_at, created_at)`), then by id; resumable with `after`. This is
+///   a change for a single settled status (`approved`, `rejected`, …), which used to
+///   come back in deadline order and so, under a `limit`, returned the *oldest* rows.
+///
+/// `after` is ignored for a `pending` read (the caller refuses it before asking).
+pub async fn list_approval_page_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    status: &ApprovalStatusFilter,
+    scope: ApprovalScope,
+    after: Option<ApprovalCursor>,
+    limit: i64,
+) -> Result<ApprovalPage, DbError> {
+    let time_ordered = status.is_time_ordered();
+    let order = if time_ordered {
+        "ORDER BY COALESCE(a.decided_at, a.created_at) DESC, a.id DESC"
+    } else {
+        "ORDER BY a.expires_at NULLS LAST, a.created_at DESC, a.id DESC"
+    };
+    let after = if time_ordered { after } else { None };
+    let sql = format!(
         "SELECT a.id, a.workspace_id, a.run_id, a.channel_id, a.request_message_id, \
                 a.requested_by, a.action_type, a.payload, a.status::text AS status_label, \
-                a.decided_by, a.decided_at, a.decision_reason, a.expires_at, a.created_at \
+                a.decided_by, a.decided_at, a.decision_reason, a.expires_at, a.created_at, \
+                (c.kind = 'dm') AS is_direct, m.root_id AS card_root_id, \
+                CASE WHEN a.status <> 'pending' THEN {CARD_OUTCOME_LINE_SQL} END AS result_line \
            FROM approval a \
            JOIN membership ms \
-             ON ms.channel_id = a.channel_id \
+             ON ms.workspace_id = a.workspace_id \
+            AND ms.channel_id = a.channel_id \
             AND ms.member_id = $2 \
             AND ms.left_at IS NULL \
+           JOIN channel c ON c.workspace_id = a.workspace_id AND c.id = a.channel_id \
+           LEFT JOIN message m \
+             ON m.workspace_id = a.workspace_id AND m.id = a.request_message_id \
+            AND m.type = 'approval_request' AND m.deleted_at IS NULL \
           WHERE a.workspace_id = $1 \
-            AND a.status = $3::approval_status \
-            AND (a.payload->>'origin' IS DISTINCT FROM 'server_in_place' \
-                 OR EXISTS (SELECT 1 FROM workspace_membership wm \
-                             WHERE wm.workspace_id = a.workspace_id \
-                               AND wm.member_id = $2 \
-                               AND wm.role IN ('owner', 'admin'))) \
-          ORDER BY a.expires_at NULLS LAST, a.created_at DESC \
-          LIMIT $4",
-    )
-    .bind(workspace_id)
-    .bind(member_id)
-    .bind(status)
-    .bind(limit)
-    .fetch_all(&mut *conn)
-    .await?;
+            AND ($3::text IS NULL OR a.status = $3::approval_status) \
+            AND (($4::boolean = false \
+                  AND (a.payload->>'origin' IS DISTINCT FROM 'server_in_place' \
+                       OR EXISTS (SELECT 1 FROM workspace_membership wm \
+                                   WHERE wm.workspace_id = a.workspace_id \
+                                     AND wm.member_id = $2 \
+                                     AND wm.role IN ('owner', 'admin')))) \
+                 OR ($4::boolean = true \
+                     AND (a.decided_by = $2 \
+                          OR EXISTS (SELECT 1 FROM agent_run r \
+                                      WHERE r.workspace_id = a.workspace_id AND r.id = a.run_id \
+                                        AND (EXISTS (SELECT 1 FROM message tm \
+                                                      WHERE tm.workspace_id = r.workspace_id \
+                                                        AND tm.id = r.trigger_message_id \
+                                                        AND tm.author_member_id = $2) \
+                                             OR EXISTS (SELECT 1 FROM audit_log al \
+                                                         WHERE al.workspace_id = r.workspace_id \
+                                                           AND al.run_id = r.id \
+                                                           AND al.action = 'agent.work.queued' \
+                                                           AND al.actor_member_id = $2))) \
+                          OR EXISTS (SELECT 1 FROM agent ag \
+                                      WHERE ag.workspace_id = a.workspace_id \
+                                        AND ag.member_id = a.requested_by \
+                                        AND ag.owner_human_id = $2)))) \
+            AND ($5::timestamptz IS NULL \
+                 OR (COALESCE(a.decided_at, a.created_at), a.id) < ($5, $6)) \
+          {order} \
+          LIMIT $7"
+    );
+    // A time-ordered page reads one row more than it returns: that row is the only
+    // way to know a further page exists without a second query that could disagree.
+    let fetch = if time_ordered { limit + 1 } else { limit };
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(match status {
+            ApprovalStatusFilter::Only(status) => Some(status.as_str()),
+            ApprovalStatusFilter::All => None,
+        })
+        .bind(matches!(scope, ApprovalScope::Mine))
+        .bind(after.map(|cursor| cursor.at))
+        .bind(after.map(|cursor| cursor.id).unwrap_or_else(Uuid::nil))
+        .bind(fetch)
+        .fetch_all(&mut *conn)
+        .await?;
 
-    rows.iter()
+    let mut approvals = rows
+        .iter()
         .map(|row| {
             Ok(ApprovalListRow {
                 id: row.try_get("id")?,
@@ -539,6 +713,86 @@ pub async fn list_approvals_in_tx(
                 decision_reason: row.try_get("decision_reason")?,
                 expires_at: row.try_get("expires_at")?,
                 created_at: row.try_get("created_at")?,
+                is_direct: row.try_get("is_direct")?,
+                root_id: row.try_get("card_root_id")?,
+                result_line: public_card_line(row.try_get("result_line")?),
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(DbError::from)?;
+
+    let next = if time_ordered && approvals.len() as i64 > limit {
+        approvals.truncate(limit as usize);
+        approvals.last().map(ApprovalCursor::of)
+    } else {
+        None
+    };
+    Ok(ApprovalPage {
+        rows: approvals,
+        next,
+    })
+}
+
+/// What the run progress read says about the approval a run is waiting on, or last
+/// asked (ADR-0186 v6 R-f `AgentRunProgress.bundle`). The stored facts only: the
+/// route layer judges them for the viewer (`canDecide`, the status as of now).
+#[derive(Debug, Clone)]
+pub struct RunApprovalFacts {
+    pub run_id: Uuid,
+    pub approval_id: Uuid,
+    pub channel_id: Uuid,
+    /// The stored status, not the one the approval reads as at `now`
+    /// ([`effective_status`]).
+    pub status: String,
+    pub action_type: String,
+    pub payload: Value,
+    pub expires_at: Option<DateTime<Utc>>,
+    /// The card's one sentence: the question while pending, the outcome once settled.
+    pub line: Option<String>,
+}
+
+/// One approval per run, for every run in `run_ids`: the one the run is parked on
+/// (the newest `pending`), else the newest of any status. A run with no approval has
+/// no entry. Rows are not filtered by who is asking: **the caller must drop the ones
+/// in channels the viewer cannot see** (`visible_channels_in_tx`) before it says
+/// anything about them.
+pub async fn run_approval_facts_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_ids: &[Uuid],
+) -> Result<Vec<RunApprovalFacts>, DbError> {
+    if run_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let sql = format!(
+        "SELECT DISTINCT ON (a.run_id) \
+                a.run_id, a.id, a.channel_id, a.status::text AS status_label, a.action_type, \
+                a.payload, a.expires_at, \
+                CASE WHEN a.status = 'pending' THEN NULLIF(btrim(m.body), '') \
+                     ELSE {CARD_OUTCOME_LINE_SQL} END AS line \
+           FROM approval a \
+           LEFT JOIN message m \
+             ON m.workspace_id = a.workspace_id AND m.id = a.request_message_id \
+            AND m.type = 'approval_request' AND m.deleted_at IS NULL \
+          WHERE a.workspace_id = $1 AND a.run_id = ANY($2) \
+          ORDER BY a.run_id, (a.status = 'pending') DESC, a.created_at DESC, a.id DESC"
+    );
+    let rows = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(run_ids)
+        .fetch_all(&mut *conn)
+        .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(RunApprovalFacts {
+                run_id: row.try_get("run_id")?,
+                approval_id: row.try_get("id")?,
+                channel_id: row.try_get("channel_id")?,
+                status: row.try_get("status_label")?,
+                action_type: row.try_get("action_type")?,
+                payload: row.try_get("payload")?,
+                expires_at: row.try_get("expires_at")?,
+                line: public_card_line(row.try_get("line")?),
             })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()
@@ -1437,6 +1691,25 @@ pub fn validated_status(raw: Option<&str>) -> Option<String> {
     }
 }
 
+/// `?status=` of the approval list, which also takes `all` (ADR-0186 v6 R-f). `None`
+/// when it is neither `all` nor one of [`LISTABLE_STATUSES`]; absent or blank is
+/// `pending`, as it always was.
+pub fn validated_status_filter(raw: Option<&str>) -> Option<ApprovalStatusFilter> {
+    if raw.is_some_and(|raw| raw.trim().eq_ignore_ascii_case("all")) {
+        return Some(ApprovalStatusFilter::All);
+    }
+    validated_status(raw).map(ApprovalStatusFilter::Only)
+}
+
+/// `?scope=` of the approval list: `team` (default) or `mine`. `None` for anything else.
+pub fn validated_scope(raw: Option<&str>) -> Option<ApprovalScope> {
+    match raw.map(|raw| raw.trim().to_lowercase()).as_deref() {
+        None | Some("") | Some("team") => Some(ApprovalScope::Team),
+        Some("mine") => Some(ApprovalScope::Mine),
+        Some(_) => None,
+    }
+}
+
 /// Swift `validatedLimit` (:499-501): default 100, clamped to `1..=500`.
 pub fn validated_limit(raw: Option<&str>) -> i64 {
     raw.and_then(|raw| raw.trim().parse::<i64>().ok())
@@ -1671,11 +1944,67 @@ mod tests {
             Some("approved")
         );
         assert_eq!(validated_status(Some("bogus")), None);
+        // `all` is a read filter, not a status: the old validator still refuses it.
+        assert_eq!(validated_status(Some("all")), None);
 
         assert_eq!(validated_limit(None), 100);
         assert_eq!(validated_limit(Some("0")), 1);
         assert_eq!(validated_limit(Some("9999")), 500);
         assert_eq!(validated_limit(Some("not a number")), 100);
+    }
+
+    #[test]
+    fn the_read_filters_take_all_and_mine_and_nothing_else() {
+        let only = |status: &str| Some(ApprovalStatusFilter::Only(status.to_string()));
+        assert_eq!(validated_status_filter(None), only("pending"));
+        assert_eq!(validated_status_filter(Some("  ")), only("pending"));
+        assert_eq!(
+            validated_status_filter(Some("cancelled")),
+            only("cancelled")
+        );
+        assert_eq!(
+            validated_status_filter(Some(" ALL ")),
+            Some(ApprovalStatusFilter::All)
+        );
+        for refused in ["settled", "history", "pending,approved", "all-of-them"] {
+            assert_eq!(validated_status_filter(Some(refused)), None, "{refused}");
+        }
+
+        assert_eq!(validated_scope(None), Some(ApprovalScope::Team));
+        assert_eq!(validated_scope(Some("")), Some(ApprovalScope::Team));
+        assert_eq!(validated_scope(Some("TEAM")), Some(ApprovalScope::Team));
+        assert_eq!(validated_scope(Some(" mine ")), Some(ApprovalScope::Mine));
+        for refused in ["everyone", "me", "mine,team"] {
+            assert_eq!(validated_scope(Some(refused)), None, "{refused}");
+        }
+
+        // Only the to-decide queue keeps its deadline order; everything else is paged by
+        // time, and so is the only thing a cursor may be given to.
+        assert!(!ApprovalStatusFilter::Only("pending".into()).is_time_ordered());
+        for status in ["approved", "rejected", "expired", "cancelled"] {
+            assert!(
+                ApprovalStatusFilter::Only(status.into()).is_time_ordered(),
+                "{status}"
+            );
+        }
+        assert!(ApprovalStatusFilter::All.is_time_ordered());
+    }
+
+    #[test]
+    fn a_card_sentence_is_passed_on_only_if_it_is_one() {
+        assert_eq!(public_card_line(None), None);
+        assert_eq!(public_card_line(Some("   ".into())), None);
+        assert_eq!(
+            public_card_line(Some("  승인됐어요 ".into())).as_deref(),
+            Some("승인됐어요")
+        );
+        let longest = "가".repeat(CARD_LINE_MAX_CHARS);
+        assert_eq!(public_card_line(Some(longest.clone())), Some(longest));
+        assert_eq!(
+            public_card_line(Some("가".repeat(CARD_LINE_MAX_CHARS + 1))),
+            None,
+            "one over is dropped, not cut"
+        );
     }
 
     #[test]

@@ -28,6 +28,8 @@
 //! | `active_4_claimed_is_a_leased_queued_run` | count raw status only (`claimed` stays 0) |
 //! | `active_5_refusals_and_tenants` | accept an unknown `state`/`scope`, answer an unseen cursor with a page, or leak another tenant's runs |
 //! | `active_6_a_dm_run_is_its_two_peoples` | widen visibility beyond channel membership |
+//! | `active_7_a_runs_bundle_is_its_latest_approval_read_for_the_viewer` | make `canDecide` a constant, drop the room check on the approval's channel, skip the deadline (an overdue approval still reads `pending`), or read a settled card's sentence from its original question |
+//! | `active_8_the_channel_progress_read_carries_the_same_bundle` | leave the bundle out of the channel's own progress read, or hand it a viewer other than the caller |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -942,4 +944,590 @@ async fn active_6_a_dm_run_is_its_two_peoples() {
         "a third person does not"
     );
     let _ = peer;
+}
+
+// ---------------------------------------------------------------------------
+// 7 — `AgentRunProgress.bundle` (ADR-0186 v6 R-f, #4763): the run's approval, read for me
+// ---------------------------------------------------------------------------
+
+/// One approval of a seeded run, and the card that renders it.
+struct Ask<'a> {
+    status: &'a str,
+    /// Only `approved` / `rejected` have a decider (`approval_decided_ck`).
+    decided_by: Option<Uuid>,
+    action_type: &'a str,
+    payload: Value,
+    /// A Postgres interval from now, for the deadline (`"-1 minute"` = already late).
+    expires: &'a str,
+    /// How long ago it was asked, in minutes: the newest is the latest.
+    asked_minutes_ago: i64,
+    /// The card's props over the minimal real ones, and its body.
+    card: Option<(Value, &'a str)>,
+}
+
+impl<'a> Ask<'a> {
+    fn tool(status: &'a str) -> Self {
+        Ask {
+            status,
+            decided_by: None,
+            action_type: "tool_call",
+            payload: json!({"tool_call": {
+                "call_id": "i4763", "name": "github.search_issues", "arguments": {},
+            }}),
+            expires: "1 hour",
+            asked_minutes_ago: 5,
+            card: None,
+        }
+    }
+
+    fn action(status: &'a str, id: &str) -> Self {
+        Ask {
+            action_type: "workspace_action",
+            payload: json!({"action": {"id": id, "args": {}}}),
+            ..Ask::tool(status)
+        }
+    }
+}
+
+/// The approval row (in `channel`, which need not be the run's) and its card.
+async fn seed_ask(
+    su: &PgPool,
+    workspace: Uuid,
+    run: Uuid,
+    channel: Uuid,
+    agent: Uuid,
+    ask: Ask<'_>,
+) -> Uuid {
+    let approval = Uuid::new_v4();
+    let card = match ask.card {
+        Some((extra, body)) => {
+            let mut props = json!({
+                "approval_id": approval.to_string(),
+                "run_id": run.to_string(),
+                "channel_id": channel.to_string(),
+                "action_type": ask.action_type,
+                "status": "pending",
+            });
+            for (key, value) in extra.as_object().expect("card props are an object") {
+                props[key] = value.clone();
+            }
+            let seq: i64 = sqlx::query_scalar(
+                "SELECT COALESCE(max(seq), 0) + 1 FROM message WHERE channel_id = $1",
+            )
+            .bind(channel)
+            .fetch_one(su)
+            .await
+            .expect("next seq");
+            Some(
+                sqlx::query_scalar::<_, Uuid>(
+                    "INSERT INTO message (workspace_id, channel_id, seq, hlc_ts, hlc_count, \
+                                          author_member_id, type, body, props) \
+                     VALUES ($1, $2, $3, $3, 0, $4, 'approval_request', $5, $6) RETURNING id",
+                )
+                .bind(workspace)
+                .bind(channel)
+                .bind(seq)
+                .bind(agent)
+                .bind(body)
+                .bind(props)
+                .fetch_one(su)
+                .await
+                .expect("seed approval card"),
+            )
+        }
+        None => None,
+    };
+    let pending = ask.status == "pending";
+    sqlx::query(
+        "INSERT INTO approval \
+           (id, workspace_id, run_id, channel_id, request_message_id, requested_by, \
+            action_type, payload, status, decided_by, decided_at, created_at, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::approval_status, $10, \
+                 CASE WHEN $11 THEN NULL \
+                      ELSE now() - make_interval(mins => $12::int - 1) END, \
+                 now() - make_interval(mins => $12::int), \
+                 now() + $13::interval)",
+    )
+    .bind(approval)
+    .bind(workspace)
+    .bind(run)
+    .bind(channel)
+    .bind(card)
+    .bind(agent)
+    .bind(ask.action_type)
+    .bind(ask.payload)
+    .bind(ask.status)
+    .bind(ask.decided_by)
+    .bind(pending)
+    .bind(ask.asked_minutes_ago as i32)
+    .bind(ask.expires)
+    .execute(su)
+    .await
+    .expect("seed approval");
+    approval
+}
+
+fn bundle_of(page: &Value, run: Uuid) -> Option<&Value> {
+    page["runs"]
+        .as_array()
+        .unwrap_or_else(|| panic!("runs is an array in {page}"))
+        .iter()
+        .find(|row| row["id"].as_str().map(str::to_lowercase) == Some(run.to_string()))
+        .unwrap_or_else(|| panic!("run {run} is listed in {page}"))
+        .get("bundle")
+}
+
+/// A run's `bundle` is **one approval of it**, read for whoever asks: the one the run is
+/// parked on, else the latest; its status as of now; whether *this* person may decide it;
+/// where it opens; and the card's own sentence. A viewer who is not in the approval's room
+/// is told nothing of it.
+///
+/// Revert that makes it red: make `canDecide` a constant (the admin-only approval says
+/// `true` to a plain member, or `false` to the admin), drop the room check on the
+/// approval's channel (the one raised elsewhere appears), skip the deadline (the overdue
+/// approval still reads `pending` and still says `true`), prefer the newest of any status
+/// over the one the run is parked on, or read a card settled before it carried an outcome
+/// as its original question.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn active_7_a_runs_bundle_is_its_latest_approval_read_for_the_viewer() {
+    let s = setup().await;
+    let ws = seed_workspace(&s.su).await;
+    let (admin, admin_email) = seed_human(&s.su, ws, "owner", "이도현").await;
+    let (member, member_email) = seed_human(&s.su, ws, "member", "박서연").await;
+    let room = seed_channel(&s.su, &s.app, ws, admin).await;
+    join_channel(&s.su, ws, room, member).await;
+    let elsewhere = seed_channel(&s.su, &s.app, ws, admin).await; // 박서연 is not in it
+    let agent = seed_agent(&s.su, ws, admin, "달무리봇").await;
+
+    let question = "도구 「github.search_issues」을 실행해도 될까요?";
+    let mut seeded: Vec<(&str, Uuid)> = Vec::new();
+    macro_rules! run_with {
+        ($name:expr, $status:expr, $($ask:expr),+ $(,)?) => {{
+            let run = seed_run(&s.su, ws, agent, room, $status, 60).await;
+            $( seed_ask(&s.su, ws, run, room, agent, $ask).await; )+
+            seeded.push(($name, run));
+            run
+        }};
+    }
+
+    // Parked: a named tool (anyone in the room may decide), an admin-only action that is
+    // decided in place, an admin-only action that must be opened.
+    let mut tool = Ask::tool("pending");
+    tool.card = Some((json!({}), question));
+    let parked_tool = run_with!("tool", "awaiting_approval", tool);
+    let mut create = Ask::action("pending", "channel.create");
+    create.card = Some((json!({}), "승인 요청: 채널 만들기"));
+    let parked_create = run_with!("create", "awaiting_approval", create);
+    let mut pin = Ask::action("pending", "message.pin");
+    pin.card = Some((json!({}), "승인 요청: 메시지 고정"));
+    let parked_pin = run_with!("pin", "awaiting_approval", pin);
+
+    // Past its deadline and not yet swept: it reads as what it is.
+    let mut overdue = Ask::tool("pending");
+    overdue.expires = "-1 minute";
+    overdue.card = Some((json!({}), question));
+    let overdue_run = run_with!("overdue", "awaiting_approval", overdue);
+
+    // Settled: the card says how, with the sentence the server wrote on it.
+    let mut approved = Ask::tool("approved");
+    approved.decided_by = Some(admin);
+    approved.card = Some((
+        json!({"status": "approved", "code": "approval_approved"}),
+        "승인됐어요",
+    ));
+    let approved_run = run_with!("approved", "running", approved);
+    let mut rejected = Ask::action("rejected", "channel.create");
+    rejected.decided_by = Some(admin);
+    rejected.card = Some((
+        json!({
+            "status": "rejected",
+            "code": "approval_rejected",
+            "result": {"status": "rejected", "line": "채널 만들기를 거부했어요", "rows": []},
+        }),
+        "채널 만들기를 거부했어요",
+    ));
+    let rejected_run = run_with!("rejected", "running", rejected);
+    let mut cancelled = Ask::tool("cancelled");
+    cancelled.card = Some((
+        json!({"status": "cancelled", "code": "human_cancelled"}),
+        "요청을 멈췄어요",
+    ));
+    let cancelled_run = run_with!("cancelled", "running", cancelled);
+    let mut expired = Ask::tool("expired");
+    expired.card = Some((
+        json!({"status": "expired", "code": "approval_expired"}),
+        "승인을 기다리다 만료됐어요",
+    ));
+    let expired_run = run_with!("expired", "running", expired);
+    // Settled before the card carried an outcome: its body is still the question, which is
+    // no outcome, so the bundle gives none.
+    let mut legacy = Ask::tool("approved");
+    legacy.decided_by = Some(admin);
+    legacy.card = Some((json!({"status": "approved"}), question));
+    let legacy_run = run_with!("legacy", "running", legacy);
+
+    // Which approval: the one it is parked on beats a newer settled one; with nothing
+    // pending, the newest wins.
+    let mut older_pending = Ask::tool("pending");
+    older_pending.asked_minutes_ago = 30;
+    older_pending.card = Some((json!({}), question));
+    let mut newer_cancelled = Ask::tool("cancelled");
+    newer_cancelled.asked_minutes_ago = 3;
+    let parked_over_newer = run_with!("two", "awaiting_approval", older_pending, newer_cancelled);
+    let mut older_approved = Ask::tool("approved");
+    older_approved.decided_by = Some(admin);
+    older_approved.asked_minutes_ago = 30;
+    let mut newer_rejected = Ask::tool("rejected");
+    newer_rejected.decided_by = Some(admin);
+    newer_rejected.asked_minutes_ago = 3;
+    let newest_wins = run_with!("latest", "running", older_approved, newer_rejected);
+
+    // No approval at all; and an approval raised in a room 박서연 is not in.
+    let none = seed_run(&s.su, ws, agent, room, "running", 60).await;
+    let raised_elsewhere = seed_run(&s.su, ws, agent, room, "running", 60).await;
+    let mut raised = Ask::tool("approved");
+    raised.decided_by = Some(admin);
+    seed_ask(&s.su, ws, raised_elsewhere, elsewhere, agent, raised).await;
+    let _ = &seeded;
+
+    let admin_token = login(&s.http, &s.base, ws, &admin_email).await;
+    let member_token = login(&s.http, &s.base, ws, &member_email).await;
+    let as_admin = active(&s.http, &s.base, &admin_token, ws, "?limit=100").await;
+    let as_member = active(&s.http, &s.base, &member_token, ws, "?limit=100").await;
+
+    let expect = |page: &Value,
+                  run: Uuid,
+                  status: &str,
+                  mode: &str,
+                  can_decide: bool,
+                  line: Option<&str>,
+                  label: &str| {
+        let bundle = bundle_of(page, run)
+            .unwrap_or_else(|| panic!("{label}: the run has a bundle in {page}"));
+        assert_eq!(bundle["status"], json!(status), "{label}: {bundle}");
+        assert_eq!(bundle["decisionMode"], json!(mode), "{label}: {bundle}");
+        assert_eq!(bundle["canDecide"], json!(can_decide), "{label}: {bundle}");
+        assert_eq!(
+            bundle.get("line").and_then(Value::as_str),
+            line,
+            "{label}: {bundle}"
+        );
+        // The question rides under `intent` too while it is still being asked, and only then.
+        assert_eq!(
+            bundle.get("intent").and_then(Value::as_str),
+            if status == "pending" { line } else { None },
+            "{label}: {bundle}"
+        );
+        assert!(bundle["approvalId"].as_str().is_some(), "{label}: {bundle}");
+        assert!(bundle["actionType"].as_str().is_some(), "{label}: {bundle}");
+    };
+
+    // ---- the admin ---------------------------------------------------------------
+    expect(
+        &as_admin,
+        parked_tool,
+        "pending",
+        "open",
+        true,
+        Some(question),
+        "tool/admin",
+    );
+    expect(
+        &as_admin,
+        parked_create,
+        "pending",
+        "inline",
+        true,
+        Some("승인 요청: 채널 만들기"),
+        "create/admin",
+    );
+    expect(
+        &as_admin,
+        parked_pin,
+        "pending",
+        "open",
+        true,
+        Some("승인 요청: 메시지 고정"),
+        "pin/admin",
+    );
+    expect(
+        &as_admin,
+        overdue_run,
+        "expired",
+        "open",
+        false,
+        None,
+        "overdue/admin",
+    );
+    expect(
+        &as_admin,
+        approved_run,
+        "approved",
+        "open",
+        false,
+        Some("승인됐어요"),
+        "approved/admin",
+    );
+    expect(
+        &as_admin,
+        rejected_run,
+        "rejected",
+        "inline",
+        false,
+        Some("채널 만들기를 거부했어요"),
+        "rejected/admin",
+    );
+    expect(
+        &as_admin,
+        cancelled_run,
+        "cancelled",
+        "open",
+        false,
+        Some("요청을 멈췄어요"),
+        "cancelled/admin",
+    );
+    expect(
+        &as_admin,
+        expired_run,
+        "expired",
+        "open",
+        false,
+        Some("승인을 기다리다 만료됐어요"),
+        "expired/admin",
+    );
+    expect(
+        &as_admin,
+        legacy_run,
+        "approved",
+        "open",
+        false,
+        None,
+        "legacy/admin",
+    );
+    expect(
+        &as_admin,
+        parked_over_newer,
+        "pending",
+        "open",
+        true,
+        Some(question),
+        "two/admin",
+    );
+    expect(
+        &as_admin,
+        newest_wins,
+        "rejected",
+        "open",
+        false,
+        None,
+        "latest/admin",
+    );
+
+    // ---- a plain member: the same approvals, decided by someone else ---------------
+    expect(
+        &as_member,
+        parked_tool,
+        "pending",
+        "open",
+        true,
+        Some(question),
+        "tool/member",
+    );
+    expect(
+        &as_member,
+        parked_create,
+        "pending",
+        "inline",
+        false,
+        Some("승인 요청: 채널 만들기"),
+        "create/member",
+    );
+    expect(
+        &as_member,
+        parked_pin,
+        "pending",
+        "open",
+        false,
+        Some("승인 요청: 메시지 고정"),
+        "pin/member",
+    );
+    expect(
+        &as_member,
+        overdue_run,
+        "expired",
+        "open",
+        false,
+        None,
+        "overdue/member",
+    );
+    expect(
+        &as_member,
+        approved_run,
+        "approved",
+        "open",
+        false,
+        Some("승인됐어요"),
+        "approved/member",
+    );
+    expect(
+        &as_member,
+        parked_over_newer,
+        "pending",
+        "open",
+        true,
+        Some(question),
+        "two/member",
+    );
+
+    // ---- what has no bundle for them -------------------------------------------------
+    assert!(
+        bundle_of(&as_admin, none).is_none(),
+        "never asked: {as_admin}"
+    );
+    assert!(
+        bundle_of(&as_member, none).is_none(),
+        "never asked: {as_member}"
+    );
+    // The admin is in the room the approval was raised in; the member is not: the run is
+    // listed (they are in its room) but the approval is not theirs to be told of.
+    expect(
+        &as_admin,
+        raised_elsewhere,
+        "approved",
+        "open",
+        false,
+        None,
+        "elsewhere/admin",
+    );
+    assert!(
+        bundle_of(&as_member, raised_elsewhere).is_none(),
+        "an approval raised in a room the viewer is not in is left out: {as_member}"
+    );
+
+    // A person who is no longer an active member (suspended after their token was issued,
+    // which the app token does not notice) is not someone the decision route would let
+    // through, and `canDecide` says so: the same approval that said `true` a moment ago.
+    sqlx::query("UPDATE member SET status = 'suspended' WHERE id = $1")
+        .bind(member)
+        .execute(&s.su)
+        .await
+        .expect("suspend 박서연");
+    let as_suspended = active(&s.http, &s.base, &member_token, ws, "?limit=100").await;
+    expect(
+        &as_suspended,
+        parked_tool,
+        "pending",
+        "open",
+        false,
+        Some(question),
+        "tool/suspended",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 8 — the channel's own progress read carries the same bundle
+// ---------------------------------------------------------------------------
+
+/// `GET …/channels/{ch}/agent-runs/progress` is the read the channel's status chip polls
+/// (a hosted agent's runs, finished ones included). It assembles its rows with the same
+/// function as the "running now" read, and this holds it to that: a parked run, a finished
+/// run whose approval was rejected, and a run that never asked — read by the admin who may
+/// decide the parked one and by the member who may not.
+///
+/// Revert that makes it red: leave the bundle out of the channel read (or key it by anything
+/// but the run), or hand it a viewer other than the caller.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn active_8_the_channel_progress_read_carries_the_same_bundle() {
+    let s = setup().await;
+    let ws = seed_workspace(&s.su).await;
+    let (admin, admin_email) = seed_human(&s.su, ws, "owner", "이도현").await;
+    let (member, member_email) = seed_human(&s.su, ws, "member", "박서연").await;
+    let room = seed_channel(&s.su, &s.app, ws, admin).await;
+    join_channel(&s.su, ws, room, member).await;
+    let agent = seed_agent(&s.su, ws, admin, "달무리봇").await;
+    // The channel read lists a hosted agent's runs: the ledger exists for no other kind. A
+    // hosted connection needs the dedicated sentinel shape of agent (ADR-0162, migration 069).
+    sqlx::query(
+        "UPDATE agent SET model = 'hosted-agent', base_url = 'https://hosted-agent.invalid/disabled', \
+                config = jsonb_build_object('execution_mode', 'hosted_dial_in') \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(ws)
+    .bind(agent)
+    .execute(&s.su)
+    .await
+    .expect("make the agent the hosted sentinel");
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection (workspace_id, agent_member_id, status, created_by) \
+         VALUES ($1, $2, 'expired', $3)",
+    )
+    .bind(ws)
+    .bind(agent)
+    .bind(admin)
+    .execute(&s.su)
+    .await
+    .expect("seed hosted connection");
+
+    let mut create = Ask::action("pending", "channel.create");
+    create.card = Some((json!({}), "승인 요청: 채널 만들기"));
+    let parked = seed_run(&s.su, ws, agent, room, "awaiting_approval", 60).await;
+    seed_ask(&s.su, ws, parked, room, agent, create).await;
+
+    let mut rejected = Ask::action("rejected", "channel.create");
+    rejected.decided_by = Some(admin);
+    rejected.card = Some((
+        json!({
+            "status": "rejected",
+            "code": "approval_rejected",
+            "result": {"status": "rejected", "line": "채널 만들기를 거부했어요", "rows": []},
+        }),
+        "채널 만들기를 거부했어요",
+    ));
+    let ended = seed_run(&s.su, ws, agent, room, "cancelled", 120).await;
+    seed_ask(&s.su, ws, ended, room, agent, rejected).await;
+    let none = seed_run(&s.su, ws, agent, room, "running", 30).await;
+
+    for (who, email, can_decide) in [
+        ("admin", admin_email, true),
+        ("member", member_email, false),
+    ] {
+        let token = login(&s.http, &s.base, ws, &email).await;
+        let response = get(
+            &s.http,
+            &s.base,
+            &token,
+            &format!("/v1/workspaces/{ws}/channels/{room}/agent-runs/progress?state=all"),
+        )
+        .await;
+        assert_eq!(response.status(), 200, "{who}");
+        let page = json_body(response).await;
+
+        let waiting = bundle_of(&page, parked)
+            .unwrap_or_else(|| panic!("{who}: the parked run has a bundle in {page}"));
+        assert_eq!(waiting["status"], json!("pending"), "{who}: {waiting}");
+        assert_eq!(waiting["decisionMode"], json!("inline"), "{who}: {waiting}");
+        assert_eq!(waiting["canDecide"], json!(can_decide), "{who}: {waiting}");
+        assert_eq!(
+            waiting["line"],
+            json!("승인 요청: 채널 만들기"),
+            "{who}: {waiting}"
+        );
+
+        let over = bundle_of(&page, ended)
+            .unwrap_or_else(|| panic!("{who}: the finished run has a bundle in {page}"));
+        assert_eq!(over["status"], json!("rejected"), "{who}: {over}");
+        assert_eq!(over["canDecide"], json!(false), "{who}: {over}");
+        assert_eq!(
+            over["line"],
+            json!("채널 만들기를 거부했어요"),
+            "{who}: {over}"
+        );
+
+        assert!(
+            bundle_of(&page, none).is_none(),
+            "{who}: a run that never asked has no bundle: {page}"
+        );
+    }
 }
