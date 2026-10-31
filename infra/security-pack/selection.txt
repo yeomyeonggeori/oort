@@ -31,6 +31,7 @@ auth momo-server dev_login_oauth_conformance_pg
 auth momo-server human_mcp_conformance_pg
 approval momo-server approval_push_audience_conformance_pg
 approval momo-server tool_grants_conformance_pg
+approval momo-server hosted_inplace_grant_conformance_pg
 push momo-push device_conformance_pg
 push momo-notifier push_conformance_pg
 push momo-server push_action_token_conformance_pg

@@ -273,6 +273,102 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+  /v1/workspaces/{ws}/expressions/import:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    post:
+      operationId: importExpression
+      summary: Stage a picture from a public HTTPS link (ADR-0218 D5)
+      description: >
+        The server fetches the link through the SSRF-guarded transport (HTTPS only,
+        every DNS answer checked and the connection pinned to a checked one,
+        redirects at most 3 and re-checked at every hop, 5 MiB streaming cap, one
+        5 second deadline for the whole fetch; no cookie, bearer or referer is sent),
+        checks and re-encodes the bytes like an upload, and stages a draft owned by
+        the caller. The format is decided by the bytes, never by the Content-Type.
+        The query of `url` is used for the fetch only; `origin.sourceUrl` is the
+        host/path without userinfo, query or fragment, and is what a card shows.
+
+
+        A link that is malformed, carries credentials or a fragment, or is private
+        from the start (loopback, link-local, metadata, RFC 1918 or `localhost`, in
+        any spelling) is a `400 expression_invalid` and nothing is fetched or stored.
+        Everything the fetch itself cannot do is NOT an error: it answers `200` with
+        a `manual_upload_required` draft that keeps the safe source link and the
+        upload control (`PUT /expression-drafts/{draftId}/file`), cannot be approved,
+        and carries exactly one closed `code`. `source_blocked`: the guard refused
+        (a private DNS answer or redirect, a non-https hop, more than 3 redirects).
+        `source_unavailable`: DNS, connect, a non-2xx answer or a truncated body.
+        `source_too_large`: more than 5 MiB declared or streamed.
+        `source_unsupported`: an HTML page or any other format (SVG, HEIC, AVIF).
+        `source_timeout`: the deadline, or the decoder was busy.
+        `source_invalid_media`: undecodable, over the pixel/frame/duration limits,
+        APNG or an animated WebP. `video_processing_unavailable`: a video (D4 is on
+        hold). The caller needs the add role (guests cannot) and fewer than 4 live
+        drafts; both are proved before anything is fetched. `subjectMemberId` must be
+        null or the caller. `503` (with `Retry-After`) means too many imports are in
+        flight; nothing was fetched or written.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpressionImportRequest'
+      responses:
+        '201':
+          description: Ready draft (a picture was fetched and re-encoded)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionDraft'
+        '200':
+          description: >
+            Manual upload required. `state` is `manual_upload_required`, `media` is
+            null and `code` is one of the closed reasons above; `origin` keeps the
+            safe source link.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionDraft'
+        '400':
+          description: >
+            `expression_invalid` - malformed body, a link the contract cannot describe,
+            or a destination that is private from the start.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            `expression_role_required` - not a human with the add role (guest, agent,
+            admins-only policy), or `subjectMemberId` is another member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Another workspace's bearer; the same body as every expression route.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: >
+            `expression_name_reserved` (a standard short name), or `expression_quota`
+            (4 live drafts already).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Too many imports in flight; retry after the `Retry-After` seconds.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expressions/from-attachment:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -13386,6 +13482,19 @@ paths:
           $ref: "#/components/responses/AgentPortUnauthorized"
         "403":
           $ref: "#/components/responses/AgentPortForbidden"
+        "408":
+          description: >
+            The body of an `expression.create` proposal did not arrive within 15
+            seconds (ADR-0218 appendix A). Only that call is read past 64 KiB
+            (up to 6 MiB), and only for a credential that holds
+            `workspace:propose`; every other body keeps the 64 KiB bound and is
+            answered `413` when it is over. The body is deliberately empty.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
         "413":
           description: Request body exceeds the Agent Port byte bound.
           headers:
@@ -15505,6 +15614,50 @@ components:
           minLength: 36
           maxLength: 36
           pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+    ExpressionImportRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - displayName
+      - tags
+      - subjectMemberId
+      - url
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 30
+          pattern: ^[a-z0-9_-]{2,30}$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 8
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          uniqueItems: true
+        subjectMemberId:
+          oneOf:
+          - type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          - nullable: true
+            enum:
+            - null
+        url:
+          type: string
+          minLength: 8
+          maxLength: 2048
+          pattern: ^https://[^\s/@#]+(?:/[^\s#]*)?$
     ExpressionChoice:
       type: object
       additionalProperties: false
@@ -18689,6 +18842,18 @@ components:
         amendment v7, #4791) changes only the human who started the run, with
         that human's approval. It reuses PATCH /members/me normalization,
         rename, broadcast and audit. Handle and past mention text stay unchanged.
+        `expression.create` (`{candidates:[1-4 x {name,displayName,tags,subjectMemberId,
+        image:{source:attachment|url|generated}}]}`, `expression_adder`; ADR-0186
+        amendment v8, ADR-0218 appendix B, #4829) lets an external agent offer up to four
+        candidate pictures for ONE team expression. The server fetches/decodes every candidate
+        itself (an attachment of the person who called the agent in this conversation, one
+        public HTTPS link on port 443, or bytes the agent made, at most 1 MiB), stores each
+        as a draft, and the approval card (`props.action.expression`, ADR-0218 `Approval`)
+        shows the stored pictures; approving takes the person's
+        `expressionChoice:{draftId,revision,sha256}` and registers exactly that one. A
+        link that cannot be received stays on the card as `manual_upload_required` with a
+        closed reason code and the approval stays pending. Only this action's proposal may
+        be larger than 64 KiB (up to 6 MiB, base64 candidates).
         `member.avatar.set` (`{attachmentId}` or
         `{avatar:{source:generated,dataBase64}}`, `requesting_member`; ADR-0186
         증보 2026-10-25 v4, #4385) lets an agent propose that **the person who
@@ -18722,7 +18887,7 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "dm.agent.admit"]
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "dm.agent.admit"]
 
     InitiativeActionId:
       type: string
@@ -18802,9 +18967,14 @@ components:
         the human who called the agent, derived by the server from the run).
         `dm_participant` is the exact other human named on a DM admission card,
         without an admin or agent-owner override (ADR-0217).
+        `expression_adder` (ADR-0186 amendment v8 X8-3) is a **dynamic judgement**, not a
+        stored role: a live human member of the card's channel who is not a guest and
+        satisfies the workspace's current expression add policy (members, or admins only),
+        and, when the card names a face, that very person. No admin or agent-owner proxy;
+        the decision route, the push audience and the preview ask one predicate.
         The canonical list is `momo_agent::actions::RequiredRole`; held equal by
         `routes::actions::the_required_roles_are_one_list_in_two_places`.
-      enum: ["admin", "agent_editor", "requesting_member", "dm_participant", "workspace_operator"]
+      enum: ["admin", "agent_editor", "requesting_member", "dm_participant", "workspace_operator", "expression_adder"]
 
     ListWorkspaceActionsResponse:
       type: object
@@ -25881,6 +26051,29 @@ components:
             rejection it is ignored (ADR-0188 R0.1): nothing runs, and the
             decision is judged on the host the card points at. Not part of the
             idempotency key: a replayed decision answers the original receipt.
+        expressionChoice:
+          type: object
+          additionalProperties: false
+          required: [draftId, revision, sha256]
+          properties:
+            draftId: {type: string, format: uuid}
+            revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+            sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+          description: >
+            ADR-0186 addendum v8 X8-2 / ADR-0218 `Decision`. The one picture chosen on
+            an `expression.create` card, exactly as shown (draft id, revision, large
+            sha256). **Required when approving that action and a 400 receipt
+            (`expression_choice_required`) without it; a 400 receipt
+            (`expression_choice_not_allowed`) on anything else** (another action, a
+            rejection, a non-workspace approval), judged before the status and expiry
+            arms. The decision transaction re-proves the approval is pending and
+            unexpired, the person's current membership, add policy and (for a face) that
+            they are the person shown, the candidate's membership of this card, its
+            revision, the stored bytes hashed again, the name and the quota; a failure is
+            a 409 receipt (`expression_preview_stale`, `expression_name_reserved`,
+            `expression_quota`) that spends nothing. Success registers that one picture,
+            reclaims every other candidate's bytes and writes `props.result.expression`
+            (`{id,name,token}`) on the card.
         deliverSecretToAgent:
           type: boolean
           default: false

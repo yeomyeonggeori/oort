@@ -1348,7 +1348,7 @@ else:
     if set(content) != {"application/json"}:
         errors.append("Agent Port request media type must be exactly application/json")
     responses = post.get("responses") or {}
-    expected_statuses = {"200", "202", "400", "401", "403", "413", "415", "429", "500"}
+    expected_statuses = {"200", "202", "400", "401", "403", "408", "413", "415", "429", "500"}
     if set(responses) != expected_statuses:
         errors.append(
             "Agent Port response status set drifted: "
@@ -1356,6 +1356,8 @@ else:
         )
     if (responses.get("202") or {}).get("content"):
         errors.append("Agent Port 202 notification response must be body-less")
+    if (responses.get("408") or {}).get("content"):
+        errors.append("Agent Port 408 large-body read deadline must be body-less")
     if (responses.get("401") or {}).get("$ref") != "#/components/responses/AgentPortUnauthorized":
         errors.append("Agent Port 401 must use the dedicated empty bearer challenge")
     if (responses.get("403") or {}).get("$ref") != "#/components/responses/AgentPortForbidden":

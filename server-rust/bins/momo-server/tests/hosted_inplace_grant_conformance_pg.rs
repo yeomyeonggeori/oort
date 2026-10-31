@@ -3,7 +3,7 @@
 //!
 //! | test | G6 | proves |
 //! |---|---|---|
-//! | `an_unapproved_mention_holds_a_run_and_raises_one_card_with_no_job` | ① ⑥ | run `awaiting_approval` (hold marker, deadline), 1 pending approval (`server_in_place`, pins), 1 card in the caller's thread, **0 job / 0 inbox / 0 notice**, no `queued` ledger row; a second call is coalesced (0 run, 0 card, 1 audit); the held run does not use the concurrency slot; only admins list it |
+//! | `an_unapproved_mention_holds_a_run_and_raises_one_card_with_no_job` | ① ⑥ | run `awaiting_approval` (hold marker, deadline), 1 pending approval (`server_in_place`, pins = this room on the connection that raised it, #4821), 1 card in the caller's thread, **0 job / 0 inbox / 0 notice**, no `queued` ledger row; a second call is coalesced (0 run, 0 card, 1 audit); the held run does not use the concurrency slot; only admins list it |
 //! | `approving_widens_the_grant_and_releases_exactly_one_job` | ② ⑨ | 200; channel granted + agent seated; run `queued`; exactly 1 job + 1 inbox reference; replay = same receipt, still 1 job; another decision = 409, still 1 job; two concurrent claims hand it out once |
 //! | `a_run_that_left_the_hold_rolls_the_whole_decision_back` | ③ | person's cancel before approval → 200 `cancelled`, channel not granted, 0 job; a run that left the hold under a still-pending approval → 409 `run_not_parked`, grant rolled back, approval still pending |
 //! | `expiry_settles_the_held_run_and_there_is_no_job_to_reclaim` | ④ | the production sweep → `timed_out{approval_expired}`, 0 job, channel not granted, Korean line; a late click settles the same way; a new call after expiry raises a new card |
@@ -11,6 +11,8 @@
 //! | `dm_agent_authored_and_switched_off_calls_keep_the_old_line` | ⑦ | DM, an agent's send, and the switch off → notice line (or A2A skip), 0 card |
 //! | `rejection_ends_the_held_run_with_a_reason_the_caller_reads` | G4 | run `cancelled{channel_grant_rejected}`, Korean outcome line, 0 job, channel not granted; next call raises a new card |
 //! | `the_per_connection_ceiling_falls_back_to_the_notice_line` | G2 | 5 pending cards per connection, the 6th room gets the notice line |
+//! | `a_card_decided_after_the_agent_reconnected_is_refused_and_moves_nothing` | #4821 | the agent pairs a fresh connection after the card was raised → 409 `action_args_invalid`, approval pending, every row as it was, no grant on the old or the new connection, run still held, 0 job, exactly 1 `action.refused{hosted_connection_changed}`; a rejection still ends the held run; in a second tenant whose agent kept its connection the same approval is 200 with exactly one job, and the first tenant's refusal wrote nothing there |
+//! | `a_card_without_the_connection_that_raised_it_waits_for_rejection_or_expiry` | #4821 | a card with no `hostedConnection` pin, and one whose pin names another connection → the same refusal (same rows, same one audit) and the same rejection |
 //!
 //! Run through `scripts/verify_agent_port_tools.sh` so the database is isolated.
 
@@ -336,6 +338,20 @@ async fn seed_hosted_agent(
     .await
     .expect("seed agent profile");
 
+    let (connection, bearer) = seed_connection(pool, workspace, owner, agent, approved).await;
+    (agent, connection, bearer)
+}
+
+/// One live connection for `agent`, approved for `approved`: `detected`, a hosted
+/// bearer bound to it, then `active` and proved — what confirm and the first
+/// proof leave behind. Returns `(connection id, bearer)`.
+async fn seed_connection(
+    pool: &PgPool,
+    workspace: Uuid,
+    owner: Uuid,
+    agent: Uuid,
+    approved: &[Uuid],
+) -> (Uuid, String) {
     let connection = Uuid::new_v4();
     let scopes: Vec<String> = FULL_SCOPES.iter().map(|s| s.to_string()).collect();
     sqlx::query(
@@ -381,7 +397,34 @@ async fn seed_hosted_agent(
     .execute(pool)
     .await
     .expect("activate hosted connection");
-    (agent, connection, bearer)
+    (connection, bearer)
+}
+
+/// The agent drops its connection and pairs a fresh one: same agent, same
+/// owner, same approvals at confirm — only the connection id differs. The old
+/// bearer is revoked first and the old row ends with its token released in one
+/// statement (an `active` row must keep its token, and `…_live_uniq` lets a
+/// second live row in only once the first is `expired`). Returns the new id.
+async fn reconnect(pool: &PgPool, f: &Fixture) -> Uuid {
+    sqlx::query(
+        "UPDATE token SET revoked_at=now() WHERE workspace_id=$1 AND hosted_connection_id=$2",
+    )
+    .bind(f.workspace)
+    .bind(f.connection)
+    .execute(pool)
+    .await
+    .expect("revoke the old hosted bearer");
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='expired', active_token_id=NULL \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(f.workspace)
+    .bind(f.connection)
+    .execute(pool)
+    .await
+    .expect("end the old connection");
+    let (connection, _) = seed_connection(pool, f.workspace, f.owner.id, f.agent, &[f.home]).await;
+    connection
 }
 
 async fn join(pool: &PgPool, workspace: Uuid, channel: Uuid, member: Uuid) {
@@ -573,12 +616,18 @@ async fn inbox_events(pool: &PgPool, f: &Fixture) -> i64 {
 }
 
 async fn room_granted(pool: &PgPool, f: &Fixture, channel: Uuid) -> bool {
+    connection_covers(pool, f, f.connection, channel).await
+}
+
+/// Whether `connection` (any of the workspace's, not only the fixture's first)
+/// lists `channel` as approved.
+async fn connection_covers(pool: &PgPool, f: &Fixture, connection: Uuid, channel: Uuid) -> bool {
     sqlx::query_scalar(
         "SELECT $3 = ANY(approved_channel_ids) FROM hosted_agent_connection \
           WHERE workspace_id=$1 AND id=$2",
     )
     .bind(f.workspace)
-    .bind(f.connection)
+    .bind(connection)
     .bind(channel)
     .fetch_one(pool)
     .await
@@ -727,10 +776,17 @@ async fn an_unapproved_mention_holds_a_run_and_raises_one_card_with_no_job() {
         .unwrap();
     assert_eq!(payload["action"]["id"], json!("hosted.channels.grant"));
     assert_eq!(payload["origin"], json!("server_in_place"));
+    // #4821: the card also names the connection it was raised on, in the one key
+    // the decision compares for every hosted proposer's card. A card without it
+    // can never be approved, so the producer must write it.
     assert_eq!(
         payload["action"]["pins"],
-        json!({"connection": f.connection.to_string(), "channels": [f.room.to_string()]}),
-        "exactly this room, on this agent's own connection"
+        json!({
+            "connection": f.connection.to_string(),
+            "channels": [f.room.to_string()],
+            "hostedConnection": f.connection.to_string(),
+        }),
+        "exactly this room, on the connection that raised the card"
     );
     assert_eq!(payload["requested_for"], json!(f.owner.id.to_string()));
 
@@ -1486,6 +1542,250 @@ async fn rejection_ends_the_held_run_with_a_reason_the_caller_reads() {
     )
     .await;
     assert_eq!(in_place_cards(&su, &f, f.room).await.len(), 2);
+}
+
+// ---------------------------------------------------------------------------
+// #4821 — the card is bound to the connection that raised it
+// ---------------------------------------------------------------------------
+//
+// The approvals above prove the other half: a decision on the very connection
+// that raised the card goes through (200, grant, exactly one job). Here the
+// card is not on the connection that stands now — the agent paired a fresh one,
+// or the card carries no pin / a pin naming some other connection — and the
+// same admin's approval must be refused with nothing written but its audit row.
+
+/// Every row a refused decision must leave exactly as it found it. `audit_log`
+/// is left out on purpose: the refusal writes its one audit row, counted apart.
+async fn decision_effects(pool: &PgPool, workspace: Uuid) -> Value {
+    let mut snapshot = json!({});
+    for table in [
+        "approval",
+        "approval_decision",
+        "agent_run",
+        "agent_run_event",
+        "message",
+        "outbox",
+        "membership",
+        "channel_seq",
+        "hosted_agent_connection",
+    ] {
+        let rows: Value = sqlx::query_scalar(&format!(
+            "SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text), '[]'::jsonb) \
+               FROM {table} t WHERE workspace_id=$1"
+        ))
+        .bind(workspace)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        snapshot[table] = rows;
+    }
+    snapshot
+}
+
+async fn approval_status(pool: &PgPool, approval: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// The owner's approval of a card that is not bound to the connection standing
+/// now is refused and nothing happens: 409 `action_args_invalid`, the approval
+/// still pending, every row as it was, no channel granted on any of
+/// `connections`, the run still held, no job, and exactly one `action.refused`
+/// audit row saying why. A rejection then still works and ends the held run the
+/// way any rejection does — a person can always say no.
+async fn assert_stale_connection_refusal(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    f: &Fixture,
+    approval: Uuid,
+    run: Uuid,
+    connections: &[Uuid],
+) {
+    let audit_rows = "SELECT count(*) FROM audit_log WHERE workspace_id=$1";
+    let effects_before = decision_effects(su, f.workspace).await;
+    let audits_before = count(su, audit_rows, f.workspace).await;
+
+    let (status, receipt) = decide(
+        client,
+        base,
+        f,
+        &f.owner.jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{receipt}");
+    assert_eq!(receipt["status"], json!("action_args_invalid"), "{receipt}");
+    assert_eq!(approval_status(su, approval).await, "pending");
+    assert_eq!(
+        decision_effects(su, f.workspace).await,
+        effects_before,
+        "a refused decision writes no row but its audit"
+    );
+    for connection in connections {
+        assert!(
+            !connection_covers(su, f, *connection, f.room).await,
+            "no channel is granted on {connection}"
+        );
+    }
+    assert_eq!(run_state(su, run).await.0, "awaiting_approval");
+    assert_eq!(jobs_for_agent(su, f).await, 0);
+    assert_eq!(inbox_events(su, f).await, 0);
+    assert_eq!(
+        count(su, audit_rows, f.workspace).await,
+        audits_before + 1,
+        "exactly one refusal audit"
+    );
+    let refusals: Vec<Value> = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='action.refused' \
+          ORDER BY created_at",
+    )
+    .bind(f.workspace)
+    .fetch_all(su)
+    .await
+    .unwrap();
+    assert_eq!(refusals.len(), 1, "{refusals:?}");
+    assert_eq!(refusals[0]["schema"], json!("momo.action.refused.v1"));
+    assert_eq!(refusals[0]["reason"], json!("hosted_connection_changed"));
+    assert_eq!(refusals[0]["approval_id"], json!(approval.to_string()));
+    assert_eq!(
+        count(
+            su,
+            "SELECT count(*) FROM audit_log WHERE workspace_id=$1 \
+                AND action='hosted_connection.channels_granted'",
+            f.workspace,
+        )
+        .await,
+        0,
+        "no grant was written"
+    );
+
+    let (status, receipt) = decide(
+        client,
+        base,
+        f,
+        &f.owner.jwt,
+        approval,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{receipt}");
+    assert_eq!(receipt["status"], json!("rejected"));
+    assert_eq!(
+        run_state(su, run).await,
+        (
+            "cancelled".to_string(),
+            Some("channel_grant_rejected".to_string())
+        )
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#3857)"]
+async fn a_card_decided_after_the_agent_reconnected_is_refused_and_moves_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    // Two tenants on one server and one non-bypass role: the first tenant's agent
+    // pairs a fresh connection after its card was raised, the second never does.
+    let (f, other) = (seed(&su).await, seed(&su).await);
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+
+    let (approval, run, _) = raise_card(&client, &base, &su, &f, f.room).await;
+    let (other_approval, other_run, _) = raise_card(&client, &base, &su, &other, other.room).await;
+    // The agent drops its connection and pairs a fresh, equally valid one for the
+    // same owner. The card was raised on the first; the second is not who asked.
+    let fresh = reconnect(&su, &f).await;
+    assert_ne!(fresh, f.connection);
+    let stands: bool = sqlx::query_scalar(
+        "SELECT status = 'active' AND proved_at IS NOT NULL FROM hosted_agent_connection \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(f.workspace)
+    .bind(fresh)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(
+        stands,
+        "the replacement is itself a live, proved connection"
+    );
+
+    let other_before = decision_effects(&su, other.workspace).await;
+    assert_stale_connection_refusal(
+        &client,
+        &base,
+        &su,
+        &f,
+        approval,
+        run,
+        &[f.connection, fresh],
+    )
+    .await;
+    assert_eq!(
+        decision_effects(&su, other.workspace).await,
+        other_before,
+        "a refusal in one tenant writes nothing in the other"
+    );
+
+    // The second tenant's agent kept its connection: the very same decision there
+    // is a plain approval — the grant, the released run, exactly one job.
+    let (status, receipt) = decide(
+        &client,
+        &base,
+        &other,
+        &other.owner.jwt,
+        other_approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{receipt}");
+    assert_eq!(receipt["status"], json!("approved"));
+    assert!(room_granted(&su, &other, other.room).await);
+    assert_eq!(run_state(&su, other_run).await.0, "queued");
+    assert_eq!(jobs_for_agent(&su, &other).await, 1, "exactly one job");
+}
+
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#3857)"]
+async fn a_card_without_the_connection_that_raised_it_waits_for_rejection_or_expiry() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+
+    // `None`: a card written before the pin existed. `Some(other)`: a pin that names
+    // a connection that is not the one standing. Both are closed, not guessed at.
+    for pin in [None, Some(Uuid::new_v4())] {
+        let f = seed(&su).await;
+        let (approval, run, _) = raise_card(&client, &base, &su, &f, f.room).await;
+        match pin {
+            None => sqlx::query(
+                "UPDATE approval SET payload = payload #- '{action,pins,hostedConnection}' \
+                  WHERE id=$1",
+            )
+            .bind(approval),
+            Some(other) => sqlx::query(
+                "UPDATE approval SET payload = jsonb_set(payload, \
+                   '{action,pins,hostedConnection}', to_jsonb($2::text)) WHERE id=$1",
+            )
+            .bind(approval)
+            .bind(other.to_string()),
+        }
+        .execute(&su)
+        .await
+        .unwrap();
+
+        assert_stale_connection_refusal(&client, &base, &su, &f, approval, run, &[f.connection])
+            .await;
+    }
 }
 
 // ---------------------------------------------------------------------------

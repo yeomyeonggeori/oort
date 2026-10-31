@@ -149,7 +149,7 @@ export function EmojiPickerDialog({
       <Button type="button" variant={team ? "ghost" : "secondary"} size="sm" aria-pressed={!team} onClick={() => { setSkinOpen(false); setTeam(false); }}>기본 이모지</Button>
       <Button type="button" variant={team ? "secondary" : "ghost"} size="sm" aria-pressed={team} onClick={() => { setSkinOpen(false); setTeam(true); }}>우리 팀</Button>
     </div>}
-    {team && purpose !== "status" ? <TeamExpressionsPanel purpose={purpose} onPick={(token) => { onPick(token); onOpenChange(false); }} /> : <EmojiPickerPanel
+    {team && purpose !== "status" ? <TeamExpressionsPanel purpose={purpose} onPick={(token) => { onPick(token); onOpenChange(false); }} onClose={() => onOpenChange(false)} /> : <EmojiPickerPanel
       itemPrefix={copy.itemPrefix}
       entries={entries}
       loading={open && !error && entries === null}

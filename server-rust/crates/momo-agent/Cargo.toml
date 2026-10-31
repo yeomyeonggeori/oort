@@ -9,6 +9,10 @@ rust-version.workspace = true
 # The sole RLS GUC seam, and the owner of `audit_log` (the gateway event
 # de-duplication read lives there, not here).
 momo-db = { path = "../momo-db" }
+# ADR-0186 v8: cancelling a run reclaims the candidate pictures of its `expression.create`
+# card in the same transaction (`reclaim_in_tx`). momo-expressions depends on
+# momo-db/-outbox/-wire only: no cycle.
+momo-expressions = { path = "../momo-expressions" }
 
 sqlx.workspace = true
 uuid.workspace = true

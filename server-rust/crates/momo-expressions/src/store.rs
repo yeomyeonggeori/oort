@@ -8,7 +8,7 @@ use sqlx::{postgres::PgRow, Row};
 use uuid::Uuid;
 
 use crate::media::{Processed, Rendition};
-use crate::{hash, version, Choice, Error, Metadata, Origin, Patch, Report, QUOTA};
+use crate::{hash, version, Choice, Error, Metadata, Origin, Patch, Report, LIVE_DRAFTS, QUOTA};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Actor {
@@ -22,9 +22,51 @@ pub struct Member {
     pub role: String,
 }
 impl Member {
-    fn admin(&self) -> bool {
+    pub fn admin(&self) -> bool {
         matches!(self.role.as_str(), "owner" | "admin")
     }
+}
+
+/// **The one predicate behind `expression_adder`** (ADR-0186 v8 X8-3): a live human, not a
+/// guest, satisfying the add policy *as it is now*; and when the picture shows a face
+/// (`subject`), also exactly that person. The decision route, the push audience, the
+/// preview/replace authorization and the direct API all ask this function and nothing
+/// else; a display name, a tag or a prompt is never an input.
+pub fn adder_allows(policy: &str, member: &Member, subject: Option<Uuid>, decider: Uuid) -> bool {
+    member.human
+        && member.role != "guest"
+        && (policy != "admins" || member.admin())
+        && subject.is_none_or(|face| face == decider)
+}
+
+/// [`adder_allows`] for one person, read **without taking the catalog lock** (the push
+/// judgment and the preview read; the decision itself re-asks under the lock in
+/// [`crate::action::choose_in_tx`]). A person who is not an active member of the
+/// workspace is simply not allowed.
+pub async fn adder_allows_in_tx(
+    conn: &mut PgConnection,
+    workspace: Uuid,
+    member: Uuid,
+    subject: Option<Uuid>,
+) -> Result<bool, Error> {
+    let row = sqlx::query("SELECT m.kind::text AS kind, wm.role::text AS role FROM member m JOIN workspace_membership wm ON (wm.workspace_id,wm.member_id) = (m.workspace_id,m.id) WHERE m.workspace_id=$1 AND m.id=$2 AND m.status='active' AND m.deleted_at IS NULL")
+        .bind(workspace).bind(member).fetch_optional(&mut *conn).await?;
+    let Some(row) = row else { return Ok(false) };
+    let policy: Option<String> =
+        sqlx::query_scalar("SELECT add_policy FROM expression_catalog WHERE workspace_id=$1")
+            .bind(workspace)
+            .fetch_optional(&mut *conn)
+            .await?;
+    let who = Member {
+        human: row.try_get::<String, _>("kind")? == "human",
+        role: row.try_get("role")?,
+    };
+    Ok(adder_allows(
+        policy.as_deref().unwrap_or("members"),
+        &who,
+        subject,
+        member,
+    ))
 }
 
 pub async fn transaction<T: Send, F>(pool: &PgPool, actor: Actor, body: F) -> Result<T, Error>
@@ -50,7 +92,7 @@ pub async fn authorize(conn: &mut PgConnection, actor: Actor) -> Result<Member, 
     })
 }
 
-async fn catalog(conn: &mut PgConnection, ws: Uuid) -> Result<(i64, String), Error> {
+pub(crate) async fn catalog(conn: &mut PgConnection, ws: Uuid) -> Result<(i64, String), Error> {
     sqlx::query("INSERT INTO expression_catalog(workspace_id) VALUES ($1) ON CONFLICT DO NOTHING")
         .bind(ws)
         .execute(&mut *conn)
@@ -70,17 +112,39 @@ async fn can_add(
     policy: &str,
     subject: Option<Uuid>,
 ) -> Result<(), Error> {
+    // authorize already locked the person's active human membership (the subject's too:
+    // a face is only ever the deciding person).
     let m = authorize(conn, actor).await?;
-    if !m.human || m.role == "guest" || (policy == "admins" && !m.admin()) {
+    if !adder_allows(policy, &m, subject, actor.member) {
         return Err(Error::Role);
     }
-    if let Some(subject) = subject {
-        if subject != actor.member {
-            return Err(Error::Role);
-        }
-        // authorize already locked the subject's active human membership.
-    }
     Ok(())
+}
+
+/// How many direct drafts this person holds that are still live (not activated,
+/// expired or approval-owned).
+async fn live_drafts(conn: &mut PgConnection, actor: Actor) -> Result<i64, Error> {
+    Ok(sqlx::query_scalar("SELECT count(*) FROM expression_draft WHERE workspace_id=$1 AND creator=$2 AND approval_id IS NULL AND state IN ('ready','manual_upload_required') AND expires_at>clock_timestamp()")
+        .bind(actor.workspace).bind(actor.member).fetch_one(&mut *conn).await?)
+}
+
+/// Link-import preflight (#4829): the add role/policy and the person's live-draft
+/// quota, proved BEFORE the server makes an outbound request on their behalf. Every
+/// import that fetches ends in a draft row (ready, or a manual card), so this is
+/// also what bounds how often one person can make the server fetch. `create_draft`
+/// re-proves both after the fetch; this only refuses early.
+pub async fn preflight_import(pool: &PgPool, actor: Actor) -> Result<(), Error> {
+    transaction(pool, actor, move |conn| {
+        Box::pin(async move {
+            let (_, policy) = catalog(conn, actor.workspace).await?;
+            can_add(conn, actor, &policy, None).await?;
+            if live_drafts(conn, actor).await? >= LIVE_DRAFTS {
+                return Err(Error::Quota);
+            }
+            Ok(())
+        })
+    })
+    .await
 }
 
 pub async fn preflight_add(pool: &PgPool, actor: Actor) -> Result<(), Error> {
@@ -104,7 +168,10 @@ pub async fn sweep_expired(read_pool: &PgPool, write_pool: &PgPool) -> Result<u6
     if !safe {
         return Err(Error::Role);
     }
-    let workspaces:Vec<Uuid>=sqlx::query_scalar("SELECT DISTINCT workspace_id FROM expression_draft WHERE state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp() LIMIT 100")
+    // Expired drafts and expired held assemblies (ADR-0218 G3.6) are found together: one sweep. A held
+    // assembly is due when its hour is up whether it is still `ready` or a reclaim already retired it
+    // (`expired`): either way its header holds the agent's prompt, and the sweep deletes it.
+    let workspaces:Vec<Uuid>=sqlx::query_scalar("SELECT workspace_id FROM (SELECT workspace_id FROM expression_draft WHERE state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp() UNION SELECT workspace_id FROM expression_assembly WHERE state IN ('ready','expired') AND expires_at<=clock_timestamp()) due LIMIT 100")
         .fetch_all(read_pool).await?;
     let mut bytes = 0;
     for ws in workspaces {
@@ -129,10 +196,12 @@ pub async fn sweep_in_tx(conn: &mut PgConnection, ws: Uuid) -> Result<u64, Error
         .bind(ws).execute(&mut *conn).await?.rows_affected();
     sqlx::query("UPDATE expression_draft SET state='expired',code=NULL WHERE workspace_id=$1 AND state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp()")
         .bind(ws).execute(&mut *conn).await?;
-    Ok(n)
+    // Held assemblies (G3.6) follow the same hour, but their header goes with the bytes (it holds the
+    // agent's prompt; a draft's header is a record). See `assembly::sweep_in_tx`.
+    Ok(n + crate::assembly::sweep_in_tx(conn, ws).await?)
 }
 
-async fn put_images(
+pub(crate) async fn put_images(
     conn: &mut PgConnection,
     ws: Uuid,
     id: Uuid,
@@ -165,7 +234,7 @@ async fn put_images(
     Ok(())
 }
 
-async fn media_json(
+pub(crate) async fn media_json(
     conn: &mut PgConnection,
     ws: Uuid,
     id: Uuid,
@@ -193,7 +262,7 @@ async fn media_json(
     Ok(Value::Object(media))
 }
 
-fn metadata(row: &PgRow) -> Result<Metadata, Error> {
+pub(crate) fn metadata(row: &PgRow) -> Result<Metadata, Error> {
     Ok(Metadata {
         name: row.try_get("name")?,
         display_name: row.try_get("display_name")?,
@@ -201,7 +270,7 @@ fn metadata(row: &PgRow) -> Result<Metadata, Error> {
         subject_member_id: row.try_get("subject_member_id")?,
     })
 }
-async fn draft_json(conn: &mut PgConnection, row: &PgRow) -> Result<Value, Error> {
+pub(crate) async fn draft_json(conn: &mut PgConnection, row: &PgRow) -> Result<Value, Error> {
     let ws: Uuid = row.try_get("workspace_id")?;
     let id: Uuid = row.try_get("id")?;
     let state: String = row.try_get("state")?;
@@ -212,7 +281,7 @@ async fn draft_json(conn: &mut PgConnection, row: &PgRow) -> Result<Value, Error
         "media":if state=="ready" {media_json(conn,ws,id,true).await?} else {Value::Null}}).as_object().ok_or(Error::Invalid)?.clone());
     Ok(v)
 }
-async fn expression_json(conn: &mut PgConnection, row: &PgRow) -> Result<Value, Error> {
+pub(crate) async fn expression_json(conn: &mut PgConnection, row: &PgRow) -> Result<Value, Error> {
     let ws: Uuid = row.try_get("workspace_id")?;
     let id: Uuid = row.try_get("id")?;
     let status: String = row.try_get("status")?;
@@ -228,7 +297,7 @@ async fn draft_row(conn: &mut PgConnection, actor: Actor, id: Uuid) -> Result<Pg
         .bind(actor.workspace).bind(id).bind(actor.member).fetch_optional(&mut *conn).await?.ok_or(Error::NotFound)?;
     Ok(row)
 }
-fn unexpired(row: &PgRow) -> Result<(), Error> {
+pub(crate) fn unexpired(row: &PgRow) -> Result<(), Error> {
     let expired: chrono::DateTime<chrono::Utc> = row.try_get("expires_at")?;
     if expired <= chrono::Utc::now() {
         Err(Error::Expired)
@@ -246,13 +315,9 @@ pub async fn create_draft(
     code: Option<&str>,
 ) -> Result<Value, Error> {
     meta.validate()?;
-    // This direct API never accepts caller-supplied origin/prompts/cards.
-    if !["upload", "attachment"].contains(&origin.kind.as_str())
-        || origin.source_url.is_some()
-        || origin.prompt.is_some()
-        || (media.is_none() && code != Some("video_processing_unavailable"))
-        || (media.is_some() && code.is_some())
-    {
+    // This direct API never accepts caller-supplied prompts or cards; a link's origin
+    // is accepted only in its storable form (no query, credentials or fragment).
+    if !crate::draft_origin_ok(&origin, media.is_some(), code) {
         return Err(Error::Invalid);
     }
     let code = code.map(str::to_owned);
@@ -260,14 +325,16 @@ pub async fn create_draft(
         let (_,policy)=catalog(conn,actor.workspace).await?;
         can_add(conn,actor,&policy,meta.subject_member_id).await?;
         sweep_in_tx(conn,actor.workspace).await?;
-        let n:i64=sqlx::query_scalar("SELECT count(*) FROM expression_draft WHERE workspace_id=$1 AND creator=$2 AND approval_id IS NULL AND state IN ('ready','manual_upload_required') AND expires_at>clock_timestamp()")
-            .bind(actor.workspace).bind(actor.member).fetch_one(&mut *conn).await?;
-        if n>=4 {return Err(Error::Quota);}
+        if live_drafts(conn,actor).await?>=LIVE_DRAFTS {return Err(Error::Quota);}
         let row=sqlx::query("INSERT INTO expression_draft(workspace_id,name,display_name,tags,subject_member_id,origin,creator,state,code) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *")
             .bind(actor.workspace).bind(&meta.name).bind(&meta.display_name).bind(json!(meta.tags)).bind(meta.subject_member_id).bind(json!(origin)).bind(actor.member)
-            .bind(if media.is_some(){"ready"}else{"manual_upload_required"}).bind(code).fetch_one(&mut *conn).await?;
+            .bind(if media.is_some(){"ready"}else{"manual_upload_required"}).bind(code.clone()).fetch_one(&mut *conn).await?;
         let id:Uuid=row.try_get("id")?;
+        let sha=media.as_ref().map(|m|m.large.info.sha256.clone());
         if let Some(media)=media {put_images(conn,actor.workspace,id,Some(1),&media).await?;}
+        // The reason code of a failed receive is recorded here as well: the TTL sweep
+        // clears the draft's own `code` (ADR-0218 D6, `staged` carries the reason).
+        crate::action::audit_staged(conn,actor.workspace,actor.member,id,&origin,code.as_deref(),sha.as_deref(),None,json!({})).await?;
         draft_json(conn,&row).await
     })).await
 }
@@ -275,7 +342,15 @@ pub async fn create_draft(
 pub async fn get_draft(pool: &PgPool, actor: Actor, id: Uuid) -> Result<Value, Error> {
     transaction(pool, actor, move |conn| {
         Box::pin(async move {
-            let row = draft_row(conn, actor, id).await?;
+            // A candidate of an open approval (ADR-0186 v8) is read through its own
+            // authorization: the proposing agent, or whoever may decide the card now.
+            let row = match draft_row(conn, actor, id).await {
+                Ok(row) => row,
+                Err(Error::NotFound) => {
+                    return crate::action::candidate_get_in_tx(conn, actor, id).await
+                }
+                Err(error) => return Err(error),
+            };
             if row.try_get::<String, _>("state")? == "activated" {
                 return Err(Error::NotFound);
             }
@@ -306,11 +381,12 @@ pub async fn replace_draft(
     })).await
 }
 
-async fn changed(
+pub(crate) async fn changed(
     conn: &mut PgConnection,
     actor: Actor,
     id: Uuid,
     action: &str,
+    extra: Option<Value>,
 ) -> Result<i64, Error> {
     let v: i64 = sqlx::query_scalar(
         "UPDATE expression_catalog SET version=version+1 WHERE workspace_id=$1 RETURNING version",
@@ -323,10 +399,15 @@ async fn changed(
         &AuditEntry::new(actor.workspace, action)
             .by(actor.member)
             .target("expression", id)
-            .with_schema(
-                "momo.expression.changed.v1",
-                json!({"version":v.to_string()}),
-            ),
+            .with_schema("momo.expression.changed.v1", {
+                // Ids, a closed origin summary, a hash prefix, the approval: never bytes,
+                // a prompt or an original link (ADR-0218 D6).
+                let mut detail = json!({"version":v.to_string()});
+                if let (Some(Value::Object(more)), Some(object)) = (extra, detail.as_object_mut()) {
+                    object.extend(more);
+                }
+                detail
+            }),
     )
     .await?;
     let payload = BroadcastPayload {
@@ -377,7 +458,7 @@ pub async fn activate(pool: &PgPool, actor: Actor, choice: Choice) -> Result<Val
         let n:i64=sqlx::query_scalar("SELECT count(*) FROM expression WHERE workspace_id=$1 AND status <> 'deleted'").bind(actor.workspace).fetch_one(&mut *conn).await?;
         if n>=QUOTA {return Err(Error::Quota);}
         let id=choice.draft_id;
-        let v=changed(conn,actor,id,"expression.created").await?;
+        let v=changed(conn,actor,id,"expression.created",None).await?;
         let e=sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *")
             .bind(actor.workspace).bind(id).bind(meta.name).bind(meta.display_name).bind(json!(meta.tags)).bind(meta.subject_member_id).bind(row.try_get::<Value,_>("origin")?).bind(actor.member).bind(v).fetch_one(&mut *conn).await?;
         sqlx::query("INSERT INTO expression_image(workspace_id,expression_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT workspace_id,draft_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms FROM expression_draft_image WHERE workspace_id=$1 AND draft_id=$2")
@@ -444,7 +525,7 @@ pub async fn mutate(
         }
         let changes=patch.is_some() || (report.is_some() && status=="active") || (report.is_none() && patch.is_none() && status!="deleted");
         let (row,v)=if changes {
-            let v=changed(conn,actor,id,if report.is_some(){"expression.hidden"}else if patch.is_some(){"expression.edited"}else{"expression.deleted"}).await?;
+            let v=changed(conn,actor,id,if report.is_some(){"expression.hidden"}else if patch.is_some(){"expression.edited"}else{"expression.deleted"},None).await?;
             let next=if patch.is_some(){"active"}else if report.is_some(){"hidden"}else{"deleted"};
             let meta=metadata(&row)?;
             let display=patch.as_ref().and_then(|p|p.display_name.clone()).unwrap_or(meta.display_name);
@@ -471,7 +552,12 @@ pub async fn image(
     }
     transaction(pool,actor,move|conn|Box::pin(async move {
         if draft {
-            let row=draft_row(conn,actor,id).await?;
+            let row=match draft_row(conn,actor,id).await {
+                Ok(row)=>row,
+                // A candidate of an open approval: its own authorization, same pinned bytes.
+                Err(Error::NotFound)=>return crate::action::candidate_image_in_tx(conn,actor,id,&variant,&sha).await,
+                Err(error)=>return Err(error),
+            };
             if row.try_get::<String,_>("state")?!="ready" || unexpired(&row).is_err() {return Err(Error::NotFound);}
         }else{
             sqlx::query("SELECT id FROM expression WHERE workspace_id=$1 AND id=$2 AND status='active' FOR SHARE").bind(actor.workspace).bind(id).fetch_optional(&mut *conn).await?.ok_or(Error::NotFound)?;
@@ -502,7 +588,14 @@ pub async fn set_policy(pool: &PgPool, actor: Actor, policy: String) -> Result<(
                     .bind(policy)
                     .execute(&mut *conn)
                     .await?;
-                changed(conn, actor, actor.workspace, "expression.policy_changed").await?;
+                changed(
+                    conn,
+                    actor,
+                    actor.workspace,
+                    "expression.policy_changed",
+                    None,
+                )
+                .await?;
             }
             Ok(())
         })

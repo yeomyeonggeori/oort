@@ -8,17 +8,17 @@
 //! | test | proves | goes red if |
 //! |---|---|---|
 //! | `every_reachable_refusal_gets_its_own_token` | ~40 real malformed requests, driven through the real dispatcher, each answer with the documented status, code and token | a sentence loses its row, two causes are merged, or a token is renamed |
-//! | `every_tool_failure_has_a_token` | all nine `ToolFailure` variants, through `tool_failure`, map to a token that is not `other` | a new failure variant ships without a row |
+//! | `every_tool_failure_has_a_token` | all ten `ToolFailure` variants, through `tool_failure`, map to a token that is not `other` | a new failure variant ships without a row |
 //! | `every_sentence_in_the_dispatcher_has_a_row` | the string literals in `src/lib.rs` passed to `error(` / `version_mismatch(` / `Err(\"JSON …\")` are all keys of the table (≥ 35 found, so the scan cannot pass by finding nothing) | a sentence is added to the dispatcher without deciding its token |
 //! | `a_sentence_the_server_does_not_own_is_other` | any `error.message` that is not an exact table key is `other`, whatever it says; a success has no reason | the lookup becomes a prefix/contains match, or copies text |
 //! | `the_token_vocabulary_is_closed_and_small` | tokens are short lowercase snake_case and few | a token starts carrying a value |
 
 use momo_mcp::{
     dispatch, dispatch_with_tools, reason_of_sentence, refusal_reason, tool_failure, ArtifactRule,
-    ArtifactViolation, HttpRequest, HttpResponse, Outcome, ToolCall, ToolCapability, ToolEra,
-    ToolFailure, ToolView, JSON_CONTENT_TYPE, LEGACY_PROTOCOL_VERSION, MAX_BODY_BYTES,
-    MODERN_PROTOCOL_VERSION, REASON_OTHER, REASON_TOOL_ARTIFACTS, REFUSAL_REASONS, TOOL_CATALOG,
-    TOOL_INBOX_READ,
+    ArtifactViolation, AssembleParams, HttpRequest, HttpResponse, Outcome, ToolCall,
+    ToolCapability, ToolEra, ToolFailure, ToolView, JSON_CONTENT_TYPE, LEGACY_PROTOCOL_VERSION,
+    MAX_BODY_BYTES, MODERN_PROTOCOL_VERSION, REASON_OTHER, REASON_TOOL_ARTIFACTS, REFUSAL_REASONS,
+    TOOL_CATALOG, TOOL_INBOX_READ,
 };
 use serde_json::{json, Value};
 
@@ -469,7 +469,11 @@ fn every_tool_failure_has_a_token() {
     // A match with no wildcard: a new variant stops this file compiling until it is listed.
     fn expected(failure: ToolFailure) -> &'static str {
         match failure {
-            ToolFailure::InvalidArguments => "tool_arguments",
+            // The fixed sentence stays, so the token is the plain arguments one: the names it
+            // carries travel in `error.data`, not in the sentence.
+            ToolFailure::InvalidArguments | ToolFailure::InvalidAssembleParams(_) => {
+                "tool_arguments"
+            }
             ToolFailure::InvalidArtifacts(_) => REASON_TOOL_ARTIFACTS,
             ToolFailure::NotAuthorized | ToolFailure::HandleRefused => "tool_not_authorized",
             ToolFailure::Unavailable => "tool_unavailable",
@@ -488,6 +492,9 @@ fn every_tool_failure_has_a_token() {
             requires: None,
             hint: "must be one of the closed values",
         }),
+        ToolFailure::InvalidAssembleParams(
+            AssembleParams::from_names(["presets"]).expect("a closed name"),
+        ),
         ToolFailure::NotAuthorized,
         ToolFailure::HandleRefused,
         ToolFailure::Unavailable,

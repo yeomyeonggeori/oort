@@ -718,6 +718,21 @@ pub async fn cancel_pending_approvals_for_run_in_tx(
         .execute(&mut *conn)
         .await?;
         if result.rows_affected() == 1 {
+            // An `expression.create` card's candidate pictures go with the run (ADR-0186 v8
+            // X8-2: reject, expire, cancel and the TTL sweep all reclaim the bytes).
+            if approval
+                .payload
+                .pointer("/action/id")
+                .and_then(Value::as_str)
+                == Some(crate::actions::ACTION_EXPRESSION_CREATE)
+            {
+                momo_expressions::action::reclaim_in_tx(conn, workspace_id, id)
+                    .await
+                    .map_err(|error| match error {
+                        momo_expressions::Error::Db(error) => error,
+                        other => DbError::Sqlx(sqlx::Error::Protocol(other.to_string())),
+                    })?;
+            }
             cancelled.push(approval);
         }
     }

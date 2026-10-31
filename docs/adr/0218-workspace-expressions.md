@@ -106,7 +106,7 @@ HTTPS만 받는다. `momo-unfurl`의 URL/공인 IP 검증·모든 DNS 응답 검
 
 아래 표·스키마·JSON은 엔진/웹/폰 동시 구현의 정본이다. 경로의 `{ws}`는 UUID다. 그림·목록은 현재 워크스페이스 멤버 bearer, 쓰기는 사람 bearer(게스트 추가 불가), 정책/할당/당사자 판정은 매 결정 tx에서 다시 한다. 에이전트는 이 REST로 직접 등록하지 않고 ADR-0186 행동으로만 제안한다. 기존 엔드포인트/메시지 DTO의 다른 필드는 그대로다.
 
-**운반 예산**: 생성 후보당 디코드 ≤1 MiB/base64 ≤1,398,104자, 후보 합계 디코드 ≤4 MiB, `expression.create` 제안의 **전체 UTF-8 JSON/RPC 요청 ≤6 MiB**다(단순 args만이 아닌 envelope 포함). 직접 multipart도 file 5 MiB + metadata를 포함해 요청 ≤6 MiB다. 현행 `momo-mcp`는 전체 64 KiB·dataBase64 58,700자(아바타 예외)를 검사하므로 레지스트리 추가만으로 새 후보를 운반할 수 없다. S3 엔진은 MCP/CLI bridge/Agent Port/propose HTTP body limit·문자열 검사·중계·원장 저장을 **expression.create에만** 이 예산으로 연결한다. 대상에는 `momo-mcp/src/lib.rs`의 parse 전 검사, `oort-cli/src/mcp.rs`의 64 KiB 줄 상한, `oort-cli/tests/wire_constants.rs`의 동등성 계약, `routes/agent_port.rs`의 `to_bytes` cap도 포함된다. 기존 행동의 64 KiB/기존 문자열 예산은 유지하고 다른 행동이나 알 수 없는 필드에 base64를 숨겨 한도를 넓힐 수 없게 한다. 인증·scope 검사를 대형 바이트 수집 전에 수행하고 스트리밍/파서 단계 전체 6 MiB cap은 항상 적용한다. 1 MiB 후보 4개의 실제 왕복, 5번째·base64/전체 cap 초과·다른 행동으로 위장한 요청을 거절하는 회귀/사보타주가 S3 수용기준이다.
+**운반 예산**: 생성 후보당 디코드 ≤1 MiB/base64 ≤1,398,104자, 후보 합계 디코드 ≤4 MiB, `expression.create` 제안의 **전체 UTF-8 JSON/RPC 요청 ≤6 MiB**다(단순 args만이 아닌 envelope 포함). 직접 multipart도 file 5 MiB + metadata를 포함해 요청 ≤6 MiB다. 현행 `momo-mcp`는 전체 64 KiB·dataBase64 58,700자(아바타 예외)를 검사하므로 레지스트리 추가만으로 새 후보를 운반할 수 없다. S3 엔진은 MCP/CLI bridge/Agent Port/propose HTTP body limit·문자열 검사·중계·원장 저장을 **expression.create에만** 이 예산으로 연결한다. 대상에는 `momo-mcp/src/lib.rs`의 parse 전 검사, `oort-cli/src/mcp.rs`의 64 KiB 줄 상한, `oort-cli/tests/wire_constants.rs`의 동등성 계약, `routes/agent_port.rs`의 `to_bytes` cap도 포함된다. 기존 행동의 64 KiB/기존 문자열 예산은 유지하고 다른 행동이나 알 수 없는 필드에 base64를 숨겨 한도를 넓힐 수 없게 한다. 인증·scope 검사를 대형 바이트 수집 전에 수행하고 스트리밍/파서 단계 전체 6 MiB cap은 항상 적용한다. 6 MiB까지 읽는 길은 인증을 통과하고 `workspace:propose` scope를 가진 에이전트에게만 열리고(그 밖의 인증은 64 KiB 그대로), 그 본문은 **15초 안에** 도착해야 한다(넘으면 본문 없는 `408`; 닫힌 거절 어휘와 호출 추적 규칙은 늘리지 않는다). 1 MiB 후보 4개의 실제 왕복, 5번째·base64/전체 cap 초과·다른 행동으로 위장한 요청을 거절하는 회귀/사보타주가 S3 수용기준이다.
 
 
 | method / `/v1/workspaces/{ws}` 뒤 경로 | 요청 → 응답 | 상태·권한 |
@@ -328,7 +328,7 @@ paths:
 
 **G3.2 입력.** 한 요청은 원본 그림 한 장과 움직임 지정 하나다.
 
-- 원본 그림: D3 「정지 입력」 규격(PNG·JPEG·정지 WebP·단일 프레임 GIF, 한 변 ≤4096, ≤16,000,000 px). 바이트 상한은 요청에 실려 오면 디코드 후 ≤4 MiB(base64 ≤5,592,408자, 전체 요청 ≤6 MiB 예산 안), 서버 안에서 옮겨 온 것이면 ≤5 MiB(D3 입력)다.
+- 원본 그림: D3 「정지 입력」 규격(PNG·JPEG·정지 WebP·단일 프레임 GIF, 한 변 ≤4096, ≤16,000,000 px). 바이트 상한은 요청에 실려 오면 디코드 후 ≤4 MiB(base64 ≤5,592,408자, 전체 요청 ≤6 MiB 예산 안), 서버 안에서 옮겨 온 것이면 ≤5 MiB(D3 입력)다. 폰 사진이 눕지 않도록 **EXIF 방향은 조립 입력에서 적용한다**(여백 색·80% 맞춤·sprite 격자는 돌린 그림 기준이다). 방향 값이 없거나 읽을 수 없으면 저장된 그대로 쓴다. D3 정지 렌디션(직접 올리기·링크)에는 적용하지 않는다(이 증보의 범위 밖).
 - `motion`은 둘 중 하나다.
   - `preset`: `presets` 1~4개(중복 없음). 값은 `bounce`(통통)·`wobble`(흔들기)·`pulse`(두근)·`sparkle`(반짝). 프리셋마다 후보 하나.
   - `sprite`: 한 장에 자세 2~4개를 격자로 그린 시트. `frames` ∈ {2,3,4}이고 격자는 고정이다. 2 → 가로 2×세로 1, 3 → 3×1, 4 → 2×2이며 칸 번호는 왼쪽→오른쪽, 위→아래로 0부터 센다. 이미지를 열×행으로 균등 분할하고 나누어떨어지지 않으면 남는 오른쪽·아래 픽셀은 버린다. `sequence`는 칸 번호 배열(길이 2~24, 같은 칸 반복 가능, `frames` 밖 번호 거절), `frameMs`는 40~500의 정수 하나다. `sequence` 길이 × `frameMs` ≤ 10,000이다. 후보는 하나다.
@@ -346,15 +346,15 @@ paths:
 
 모든 프리셋이 D3의 GIF 한도(캔버스 ≤512, ≤100프레임, 지연 ≥20 ms, ≤10초)를 만족하고, 가장 큰 움직임(통통 8%·흔들기 8°·두근 ×1.12)도 80% 정사각 안의 그림이 10% 여백 안에서 움직이도록 정했다.
 
-**G3.4 출력.** 후보 1~4개(프리셋 수, 또는 sprite 하나). 각 후보는 GIF89a이고 `size`×`size`이며 프레임·지연은 G3.3 표 또는 요청 값이다. **≤1 MiB**(D3 후보 상한). 반복은 총 4회 재생이다(의미는 D3처럼 디코더 시험으로 확인). 주석·응용 확장은 반복 하나뿐이다. 같은 입력과 같은 값이면 같은 바이트가 나온다(sha 핀이 안정적이다). 출력은 D3의 일반 경로를 다시 지난다. 곧 GIF 입력 검사 → 픽셀 재인코딩 → small/large/thumb이다. 조립 결과를 검사 없이 저장하지 않는다.
+**G3.4 출력.** 후보 1~4개(프리셋 수, 또는 sprite 하나). 각 후보는 GIF89a이고 `size`×`size`이며 프레임·지연은 G3.3 표 또는 요청 값이다. **≤1 MiB**(D3 후보 상한). 반복은 총 4회 재생이다(의미는 D3처럼 디코더 시험으로 확인). 주석·응용 확장은 반복 하나뿐이다. 같은 입력과 같은 값이면 같은 바이트가 나온다(sha 핀이 안정적이다). 출력은 D3의 일반 경로를 다시 지난다. 곧 GIF 입력 검사 → 픽셀 재인코딩 → small/large/thumb이다. 조립 결과를 검사 없이 저장하지 않는다. GIF 지연은 10 ms 단위라서 sprite의 `frameMs`는 **10 ms 단위로 내리고**(45 → 40 ms; 스키마에 `multipleOf`는 두지 않는다), 실제 한 번 재생 길이는 결과의 `durationMs`다. 내림이므로 `길이 × frameMs ≤ 10,000` 검사를 요청 값으로 해도 D3의 10초 상한을 넘지 않는다.
 
 **G3.5 실행 환경.** #4676의 격리 디코더·재인코딩 경로 **안에서만** 돈다(전 출처 공통 semaphore 2, 작업당 할당 192 MiB, 벽시계 10초, 프레임 순차 합성, 무제한 `collect_frames` 금지). 네트워크·셸·외부 프로세스는 없다. **ffmpeg를 쓰지 않고** permissive 라이선스 라이브러리만 쓴다(GPL 계열 양자화 라이브러리 등은 제외하며 선택·검증·NOTICE 귀속은 C가 `deny.toml`로 한다). 서버는 이미지를 생성하지 않고 외부를 호출하지 않는다.
 
 **G3.6 보관과 후보 연결.** 조립 결과는 서버가 `assemblyId`(UUID)로 임시 보관한다. 워크스페이스·요청 에이전트에 묶이고 TTL은 1시간이며 `expression_draft`와 같은 회수 규칙·할당·디코더 동시성을 공유한다(에이전트당 동시에 보관하는 후보 ≤12 = 기존 pending 제안 ≤3 × 후보 ≤4). 후보는 `expression.create`의 `image`에 `{source:"assembled", assemblyId, index}`로 들어간다. **에이전트가 GIF 바이트를 다시 나르지 않는다.** 승인 카드가 보이는 그림은 서버가 조립한 바이트 그대로이고(X8-2), prompt와 `sourceAttachmentId`는 조립 요청 때 서버가 받은 값이 후보의 `origin`이 된다. 다른 에이전트·다른 요청자·다른 워크스페이스의 `assemblyId`는 구분 없는 같은 invalid arguments다. 후보는 한 조립 결과의 일부만 제안해도 되고, 5개 이상이나 서로 다른 조립 결과의 섞임은 `AgentAction`의 상한(후보 ≤4)과 같은 규칙으로 거절한다.
 
-**G3.7 입구.** 입구는 둘이고 같은 조립 함수를 부른다. (a) Agent Port의 MCP 도구 `oort_expression_assemble`(인자 `AssembleRequest`, 결과 `AssembleResult`, 필요한 범위는 `oort_action_propose`와 같고 새 범위는 없다)와 (b) 호스팅 실행(공동 Hermes)의 서버 쪽 문이다. 둘의 입력 한도·실패 사유·보관은 같다. (b)의 입력 경로는 G4가 확인한 사실로 좁혀진다. Hermes API 서버는 클라이언트가 선언한 함수 도구(`tools`·`tool_choice`)를 읽지 않으므로(Hermes `api_server_openai_routes.py:653-656,723,793`, `/v1/responses`는 `:1054-1060`) 워커의 카탈로그 도구 문은 Hermes에서 열리지 않는다. 남는 후보는 모델의 최종 답에서 `AssembleRequest`와 같은 닫힌 스키마로 검증되는 구조만 읽는 문이다(자유 문장·마크다운을 행동으로 해석하지 않는다). Hermes의 `mcp_servers`에 oort MCP를 다는 길은 커넥터 모드라 ADR-0203 I3과 충돌하므로 새 결정 없이는 쓰지 않는다. 구체 표기와 워커 적합성은 C가 닫는다.
+**G3.7 입구.** 입구는 둘이고 같은 조립 함수를 부른다. (a) Agent Port의 MCP 도구 `oort_expression_assemble`(인자 `AssembleRequest`, 결과 `AssembleResult`, 필요한 범위는 `oort_action_propose`와 같고 새 범위는 없다)와 (b) 호스팅 실행(공동 Hermes)의 서버 쪽 문이다. 둘의 입력 한도·실패 사유·보관은 같다. (a)의 답은 둘로 나뉜다. 조립에 성공했거나 G3.8의 카드 코드로 거절한 것은 에이전트가 읽고 카드로 이어 가는 결과라 `isError:false`인 도구 결과(`AssembleResult`, 또는 `{code}`·`{code, bytes}`)로 나가고, 호출 오류(`assembly_params_invalid`와 인가·범위 오류)만 오류 응답이다(`isError:true` 쪽이며, Agent Port에서는 닫힌 `ToolFailure`의 JSON-RPC 오류로 나간다). (b)의 입력 경로는 G4가 확인한 사실로 좁혀진다. Hermes API 서버는 클라이언트가 선언한 함수 도구(`tools`·`tool_choice`)를 읽지 않으므로(Hermes `api_server_openai_routes.py:653-656,723,793`, `/v1/responses`는 `:1054-1060`) 워커의 카탈로그 도구 문은 Hermes에서 열리지 않는다. 남는 후보는 모델의 최종 답에서 `AssembleRequest`와 같은 닫힌 스키마로 검증되는 구조만 읽는 문이다(자유 문장·마크다운을 행동으로 해석하지 않는다). Hermes의 `mcp_servers`에 oort MCP를 다는 길은 커넥터 모드라 ADR-0203 I3과 충돌하므로 새 결정 없이는 쓰지 않는다. 구체 표기와 워커 적합성은 C가 닫는다.
 
-**G3.8 실패 사유와 카드.** 닫힌 코드다. 한도 초과와 생성 실패를 **조용히 자르거나 프레임을 버려 통과시키지 않는다**(D3).
+**G3.8 실패 사유와 카드.** 닫힌 코드다. 한도 초과와 생성 실패를 **조용히 자르거나 프레임을 버려 통과시키지 않는다**(D3). (a)에서 카드 코드 다섯(`assembly_source_invalid`·`assembly_source_too_large`·`assembly_output_too_large`·`assembly_timeout`·`assembly_busy`)은 `isError:false` 도구 결과로, `assembly_params_invalid`는 호출 오류로 나간다(G3.7). `generation_failed`는 조립 전 단계의 코드라 (a)가 내지 않는다. 호출 오류는 만들어진 것이 없어 카드가 없고, JSON-RPC -32602의 고정 문장에 `error.data {code, params}`로 틀린 인자의 이름만(`presets`·`frames`·`sequence`·`frameMs`·`size` 중에서만, 값은 싣지 않는다) 싣는다.
 
 | 코드 | 언제 | 남는 곳 | 한국어 한 줄(코어 사전) |
 |---|---|---|---|
@@ -362,9 +362,11 @@ paths:
 | `generation_failed` | 그림 도구가 오류·빈 응답·구독 한도로 그림을 주지 못함, 또는 호스팅 실행에서 받을 그림이 없음 | 실패 카드 | 그림을 만들지 못했어요 |
 | `assembly_source_invalid` | 형식 불허(APNG·움직이는 WebP·SVG·HEIC/AVIF)·디코드 실패·치수/픽셀 한도 초과 | 실패 카드 | 이 그림에는 움직임을 입힐 수 없어요 |
 | `assembly_source_too_large` | 원본 바이트 상한 초과 | 실패 카드 | 그림이 너무 커서 움직임을 입힐 수 없어요 |
-| `assembly_output_too_large` | 결과 GIF가 1 MiB 초과(측정한 바이트 수는 `props`에 숫자로) | 실패 카드. 서버는 크기를 **줄여 다시 만들지 않는다**. 에이전트가 더 작은 `size`로 새 요청을 할 수 있다 | 움직이는 그림이 너무 커요 |
+| `assembly_output_too_large` | 결과 GIF가 1 MiB 초과, 또는 1 MiB 안이어도 D3 재통과의 small 렌디션 상한(256 KiB)을 넘는 경우. 코드는 하나이고 `props`의 `bytes`는 **실제로 조립한 GIF의 크기**(숫자)라 1 MiB보다 작을 수 있다 | 실패 카드. 서버는 크기를 **줄여 다시 만들지 않는다**. 안내는 「프레임 수를 줄이거나 더 작은 size로 다시」이고 에이전트가 그렇게 새 요청을 할 수 있다 | 움직이는 그림이 너무 커요 |
 | `assembly_timeout` | 벽시계 10초·할당 상한 초과 | 실패 카드 | 움직임을 입히다가 시간이 다 됐어요 |
-| `assembly_busy` | 디코더 동시성 한도 때문에 시작하지 못함 | 실패 카드 | 지금 다른 그림을 처리하고 있어요. 잠시 뒤에 다시 해 주세요 |
+| `assembly_busy` | 디코더 동시성 한도 때문에 시작하지 못함, 또는 에이전트당 보관 상한(12) | 실패 카드 | 지금 다른 그림을 처리하고 있어요. 잠시 뒤에 다시 해 주세요 |
+
+위 일곱 코드가 닫힌 목록의 전부다. 조립기를 돌릴 수 없는 운영 장애(실행 파일 없음, 한도가 아닌 이유의 비정상 종료)는 이 목록의 코드가 **아니다**: 서버는 내부 오류(5xx)로만 답하고 `props.code`에 넣지 않으며, 요청이 틀린 것처럼 `assembly_source_invalid`·`assembly_timeout`이나 재시도를 권하는 `assembly_busy`로 둔갑시키지 않는다. 한도(시그널로 끝난 자식)는 그대로 `assembly_timeout`이다.
 
 「실패 카드」는 요청 고리의 카드가 닫힌 코드(`props.code`)와 한국어 한 줄로 끝나는 것이다. 한국어 문장은 클라이언트가 코어 사전에서 읽고 서버는 같은 골든 데이터의 중립문을 `body`에 쓴다. 영어 원문은 쓰지 않으며 에이전트의 문장이 카드 제목이 되지 않는다([ADR-0186 v6 R-d](0186-agent-workspace-actions.md#r-d-영어-원문을-쓰지-않는다--상태-코드--한국어-accepted-전부-권장으로)). 후보 일부만 실패하면 승인 카드의 그 자리가 부록 C의 `manual_upload_required` + 위 코드(그림 없음, 직접 올리기 안내)로 남고 준비된 후보는 계속 고를 수 있다. 에이전트에 그림 도구가 없는 경우는 후보가 만들어진 적이 없으므로 카드가 아니라 에이전트의 답 「이 에이전트는 그림을 만들 수 없어요」(ADR-0203 I4)다. 새 코드는 C가 부록 C의 표와 부록 B의 `Draft.code`에 함께 더한다(`assembly_params_invalid`는 호출 오류라 카드 코드가 아니다).
 
@@ -418,6 +420,8 @@ X8-1의 목록에 이 증보가 더한다. 후보 ≤4와 같은 `subjectMemberI
 }
 ```
 <!-- expression-augment-4820:end -->
+
+`oort_expression_assemble`(G3.7 (a))의 호출 인자는 `AssembleRequest`에 문자열 `handle`을 더한 것이다(위 블록에는 넣지 않는다). `handle`은 다른 Agent Port 도구와 같은 봉인된 lease 핸들(`oort_jobs_claim`이 준 값)로 호출한 연결과 그 런에 묶인다. 첨부 출처가 「요청자가 같은 대화에 올린 첨부」(G6)라서, 그 요청자와 대화를 서버가 이 핸들의 런으로 증명해야 하기 때문에 필요하다.
 
 ### G8. 열지 않는 것과 구현·검수 인계
 
