@@ -509,6 +509,15 @@ async fn a_request_becomes_a_pending_card_the_approver_can_judge() {
 
     let (status, _) = run_status(&su, run_id).await;
     assert_eq!(status, "awaiting_approval", "the run is parked on a person");
+    let source: String = sqlx::query_scalar("SELECT source FROM usage_ledger WHERE run_id=$1")
+        .bind(run_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(
+        source, "measured",
+        "team AI reads provider token counts in the worker"
+    );
     let cards = approvals(&su, &t).await;
     assert_eq!(cards.len(), 1);
     assert_eq!(cards[0].1, "pending");

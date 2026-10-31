@@ -106,6 +106,8 @@ async function until(testId: string) {
 // 좁은 폭에서만 보이는 칸 이름(aria-hidden)은 칸의 값이 아니다.
 const cell = (kind: string, handle: string) => {
   const td = q(`ai-agent-${kind}-${handle}`)?.cloneNode(true) as HTMLElement | undefined;
+  // 기존 비용 부담 주체 라벨만 잰다. 새 월 사용량은 AgentUsage.test.tsx가 응답과 함께 잰다.
+  td?.querySelectorAll("[data-testid=agent-month-usage]").forEach((el) => el.remove());
   td?.querySelectorAll("[data-cell-label]").forEach((el) => el.remove());
   return td?.textContent?.replace(/\s+/g, " ").trim();
 };

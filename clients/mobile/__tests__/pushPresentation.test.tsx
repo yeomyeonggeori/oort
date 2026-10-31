@@ -430,3 +430,9 @@ describe('셸 안의 동기화 (PushPresentationSync)', () => {
     expect(native.exportChannels).toHaveBeenCalledTimes(1);
   });
 });
+
+
+it('a consented group DM exports the real member count to native push presentation', () => {
+  const [group] = presentationChannels([channel('group-dm', 'dm', undefined, {memberIds: ['self-member', SEOYEON, 'agent-member']})], []);
+  expect(group.memberCount).toBe(3);
+});

@@ -118,6 +118,7 @@ export type ChannelRail = Pick<
    * 구독에서 **받는 것은 없다**(핸들러가 없다). 다른 구독과 같은 refcount·같은 소켓이고, 소켓이 백그라운드
    * 정책으로 내려가면 함께 내려가서 그동안 이 폰은 「접속 없음」으로 보인다(그것이 폰에서 「온라인」의 뜻이다).
    */
+  subscribeExpressions?: (workspaceId: string, handlers: {onChanged: () => void; onResync: () => void}) => () => void;
   joinOnlineRollCall: (workspaceId: string) => () => void;
   /**
    * 팀 작업 보드의 **신호**(#2864, ADR-0194 D8). 한 채널의 공유 변화·세션 수명주기·도구
@@ -199,6 +200,17 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
   }
 
   return {
+    subscribeExpressions(workspaceId, handlers) {
+      return attach(`expressions:ws${workspaceId.toUpperCase()}`, {recoverable: false, positioned: false}, sub => {
+        const publication = (ctx: {data?: unknown}) => {
+          const frame = ctx.data as {type?: string; workspaceId?: string} | undefined;
+          if (frame?.type === 'expression.changed' && frame.workspaceId?.toLowerCase() === workspaceId.toLowerCase()) handlers.onChanged();
+        };
+        sub.on('publication', publication);
+        sub.on('subscribed', handlers.onResync);
+        return () => { sub.off('publication', publication); sub.off('subscribed', handlers.onResync); };
+      });
+    },
     // 복구도 위치 추적도 요구하지 않는다: 되살릴 과거가 없는 레일이다(`history_size: 0`). 거절(구서버·구설정의
     // `unknown channel`, 자격 만료의 403)은 이 구독 하나만 끝내고 연결은 그대로다(실측).
     joinOnlineRollCall(workspaceId) {

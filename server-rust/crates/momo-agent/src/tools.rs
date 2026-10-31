@@ -381,7 +381,9 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
         ToolDefinition {
             name: WORKSPACE_ACTION_PROPOSE,
             description: "Propose ONE simple workspace change that the person who asked wants \
-             (change an agent's name or profile, create a channel, add people to a channel, \
+             (change the requesting person's own name with member.display_name.set, their photo \
+             with member.avatar.set, your agent name with agent.rename or photo with \
+             agent.profile.update avatar; create a channel, add people to a channel, \
              change the workspace welcome text or role labels, turn link previews on or off, \
              turn team memory off or pause it, change how work resumes when a host is lost, \
              install one of the official apps GitHub, Notion, Linear or Google Drive). \
@@ -427,6 +429,10 @@ fn workspace_action_args_description() -> String {
             .unwrap_or_default();
         lines.push(format!("{id} {{{}}}", keys.join(", ")));
     }
+    lines.push(
+        "member.display_name.set {displayName} changes only the requesting human, with their approval. member.avatar.set accepts exactly one of {attachmentId} (their image in this conversation) or {avatar:{source:'generated',dataBase64}} (retrieved/generated PNG/JPEG/WebP, strict base64, <=44000 decoded bytes). agent.profile.update accepts avatar:{source:'attachment',attachmentId} or {source:'generated',dataBase64}, or a preset. No member target argument, no URL."
+            .to_string(),
+    );
     lines.push(
         "workspace.memory.update can only turn memory off (enabled:false) or pause/resume it."
             .to_string(),

@@ -141,6 +141,10 @@ compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
 | api | `MOMO_PUBLIC_BASE_URL` | `https://${{shared.OORT_SITE_ADDRESS}}` — the address GitHub is told to call (ADR-0205 D2) and the origin of the invite links an approval decision answers with (ADR-0186); api only. The generator does not write this key: the scheme is typed here, the host is the one already declared for this edge (see "GitHub App on this instance") |
 | relay | `CENT_API_URL` | `http://centrifugo.railway.internal:8000/api` |
 | agent-worker | `WORKER_DATABASE_URL` | `postgres://momo_worker:${{shared.WORKER_POSTGRES_PASSWORD}}@postgres.railway.internal:5432/${{shared.POSTGRES_DB}}` |
+| agent-worker | `OORT_SELF_MEDIA_ORIGIN` | `https://${{shared.OORT_SITE_ADDRESS}}` — this edge's own public origin under the worker's own name (`MOMO_PUBLIC_BASE_URL` stays api only, ADR-0205 D1). With it the worker hands a co-hosted-Hermes turn whose request message carries a photo ONE short-lived (5 min), single-use address of that photo (`/v1/self-media/{workspace}/{token}`); without it no address is minted (#4820 C2a). The same value goes to `hermes` |
+| hermes | `OORT_SELF_MEDIA_ORIGIN` | `https://${{shared.OORT_SITE_ADDRESS}}` — the ONE origin the oort image guard lets `image_url` carry. `lockgate.py` refuses a value that is not `https://<lowercase host>[:port]` (no trailing slash, no `:443`) and refuses the name in the volume's `.env`; unset or empty means the exception is off and every address stays refused (#4820 C2a). The same value as agent-worker |
+| agent-worker | `OORT_HOSTED_MEDIA_STRICT` | _(empty)_ — the operator's attestation that the hosted expression door may open (#4820 C2b, ADR-0218 G3.7 (b)): only an exact `1` opens it, and the template ships it EMPTY so the door is shut and a photo turn of the co-hosted Hermes is an ordinary turn (no failure card). Set `1` on this service only together with the `hermes` row below — and on an existing project last, in the order that row gives. Never a guess: the worker cannot see Hermes, so `1` is your statement that the Hermes it dials is this template's strict one |
+| hermes | `HERMES_MEDIA_DELIVERY_STRICT` | `1` — Hermes' own strict media delivery flag: without it Hermes turns a `MEDIA:` line of an answer into the bytes of any readable file it names. `lockgate.py` requires exactly `1` in the process environment while `image_generate` is exposed (it refuses to start otherwise) and refuses the name in the volume's `.env` whatever its value; `report` re-checks both after start. A literal in the template, not an operator choice (#4820 C2b 3부). The hosted door opens only when this AND the `agent-worker` row above are on. **Updating an existing project, in this order:** (1) add `HERMES_MEDIA_DELIVERY_STRICT=1` to hermes first; (2) then replace `HERMES_LOCKGATE_B64` and the lockgate sha256 in the start command (one change) — the new gate refuses to start Hermes without (1), so doing (2) alone stops the agent; (3) when the `LOCKGATE` line of the deploy log shows `"media_strict": true` (inside `image_guard`), last of all set `OORT_HOSTED_MEDIA_STRICT=1` on agent-worker |
 | api | `HERMES_BASE_URL` | `http://hermes.railway.internal:8642/v1` |
 | api | `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` | `1` — a plain `http://` internal host is refused without this opt-in |
 | api | `AGENT_PROVIDER_LOCAL_HOSTS` | `hermes.railway.internal` — the exact host, never a wildcard |
@@ -157,6 +161,8 @@ compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
 | hermes | `API_SERVER_KEY` | `${{shared.HERMES_API_KEY}}` — the shared variable you create by hand, see Hermes |
 | hermes | `HERMES_CONFIG_B64` | `base64 < infra/hermes/config.yaml \| tr -d '\n'` (one line) |
 | hermes | `HERMES_LOCKGATE_B64` | `base64 < infra/hermes/lockgate.py \| tr -d '\n'` (one line) |
+| hermes | `HERMES_IMAGE_GUARD_B64` | `base64 < infra/hermes/plugins/oort-image-guard/__init__.py \| tr -d '\n'` (one line) — the oort guard that refuses every `image_generate` address, path and non-inline value before the tool runs (#4820, ADR-0203 I2) |
+| hermes | `HERMES_IMAGE_GUARD_MANIFEST_B64` | `base64 < infra/hermes/plugins/oort-image-guard/plugin.yaml \| tr -d '\n'` (one line) |
 | hermes | `HERMES_LOGIN_RELAY_KEY` | `${{shared.HERMES_LOGIN_RELAY_KEY}}` — the login relay sidecar's own shared secret (`openssl rand -hex 32`, never the chat key); leave the shared variable out and the sidecar does not start (oort answers `login_relay_off`) |
 | hermes | `HERMES_LOGIN_RELAY_B64` | `base64 < infra/hermes/login_relay.py \| tr -d '\n'` (one line; needed only with the relay key) |
 | hermes | `HERMES_LOGIN_PROBE_B64` | `base64 < infra/hermes/mcp_login_probe.py \| tr -d '\n'` (one line; needed only with the relay key) |
@@ -197,16 +203,22 @@ variable**: not `DATABASE_URL`, not `PROVIDER_LINK_MASTER_KEY`, not a JWT key.
    `HERMES_API_KEY=$(openssl rand -hex 32)` as a project shared variable. hermes
    reads it as `API_SERVER_KEY`; api and agent-worker as `HERMES_API_KEY`
    (the gate refuses a key under 32 characters).
-2. **Two base64 variables on hermes** (hand-mapped table): `HERMES_CONFIG_B64`
-   from `infra/hermes/config.yaml` (24 toolsets off, approvals manual/deny, no
-   model, no connector) and `HERMES_LOCKGATE_B64` from
-   `infra/hermes/lockgate.py`.
-3. **Start order.** The start command writes the config and the gate, checks
-   both against the sha256 of the repo files (an empty, stale or swapped
-   variable stops the service; `check_railway_catalog.py` recomputes the hashes,
-   so changing `config.yaml` or `lockgate.py` means updating the command in the
+2. **Four base64 variables on hermes** (hand-mapped table): `HERMES_CONFIG_B64`
+   from `infra/hermes/config.yaml` (22 toolsets off, Codex subscription search and
+   image generation on, the image guard enabled, approvals manual/deny, no model, no connector),
+   `HERMES_LOCKGATE_B64` from `infra/hermes/lockgate.py`, and the two files of the oort image guard
+   plugin, `HERMES_IMAGE_GUARD_B64` (`plugins/oort-image-guard/__init__.py`) and
+   `HERMES_IMAGE_GUARD_MANIFEST_B64` (`plugins/oort-image-guard/plugin.yaml`).
+3. **Start order.** The start command writes the config, the gate and the guard plugin
+   (into `/opt/data/plugins/oort-image-guard`), checks all four against the sha256 of the repo files (an empty,
+   stale or swapped variable stops the service; `check_railway_catalog.py` recomputes the hashes,
+   so changing `config.yaml`, `lockgate.py` or a plugin file means updating the command in the
    same change), runs `lockgate.py gate` and only then `exec`s the Hermes
-   dispatcher. A non-zero gate (`set -e`) means the service never listens.
+   dispatcher. A non-zero gate (`set -e`) means the service never listens. When image generation is
+   exposed the gate also hashes the installed plugin again, requires it as the only entry of
+   `plugins.enabled`, refuses the switches that turn Hermes' private-address filter or the plugin off
+   (private-URL settings, proxies, safe mode, project plugins) and runs a canary through the real
+   dispatch path: refused examples must be blocked before the tool runs, an allowed one must reach it.
    **Login relay (#4078, ADR-0203 증보 2026-10-19):** with `HERMES_LOGIN_RELAY_KEY` set, the start
    command also decodes `login_relay.py` and `mcp_login_probe.py` (pinned by sha256 the same way) and,
    after the gate, starts the sidecar in the background on `:8643` (private, no domain). The sidecar

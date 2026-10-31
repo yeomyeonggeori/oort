@@ -24,6 +24,7 @@ momo-auth = { path = "../../crates/momo-auth" }
 # owns no SQL or HTTP client; the Axum adapter remains in this binary.
 momo-mcp = { path = "../../crates/momo-mcp" }
 momo-messaging = { path = "../../crates/momo-messaging" }
+momo-expressions = { path = "../../crates/momo-expressions" }
 # ADR-0151: the workspace Drive archive. It owns the HTTP client so this manifest
 # does not, and its whole API is the five-method `DriveArchive` trait — so an
 # attachment handler cannot build a request of its own. Same shape as
@@ -87,10 +88,11 @@ momo-provider-probe = { path = "../../crates/momo-provider-probe" }
 # has no `client_secret` field and redacts the two secrets under Debug.
 momo-github = { path = "../../crates/momo-github" }
 
-axum.workspace = true
+axum = { workspace = true, features = ["multipart"] }
 tokio = { workspace = true, features = ["net", "signal", "sync", "time"] }
 serde.workspace = true
 serde_json.workspace = true
+futures.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 thiserror.workspace = true

@@ -1945,13 +1945,24 @@ else:
     if "@sha256:" not in h.get("image", ""):
         bad.append("hermes image is not digest-pinned")
     mounts = {v["target"]: v for v in h.get("volumes", []) if v.get("type") == "bind"}
-    for target in ("/oort/config.yaml", "/oort/lockgate.py", "/oort/login_relay.py", "/oort/mcp_login_probe.py"):
+    for target in ("/oort/config.yaml", "/oort/lockgate.py", "/oort/login_relay.py", "/oort/mcp_login_probe.py",
+                   "/oort/plugins/oort-image-guard"):
         if not mounts.get(target, {}).get("read_only"):
             bad.append("%s is not a read-only mount" % target)
+    # #4820 review: the image guard plugin is copied into place BEFORE the gate judges (and canary-tests) it.
+    guard_copy = command.find("cp /oort/plugins/oort-image-guard/__init__.py /oort/plugins/oort-image-guard/plugin.yaml /opt/data/plugins/oort-image-guard/")
+    if guard_copy < 0 or not (guard_copy < gate):
+        bad.append("the image guard plugin is not installed before the lock gate")
     env = h.get("environment", {})
-    leaked = sorted(k for k in env if k not in ("API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_KEY", "API_SERVER_PORT", "HERMES_LOGIN_RELAY_KEY"))
+    # #4820 C2a: OORT_SELF_MEDIA_ORIGIN is this edge's own public origin (not a secret): the one origin the image guard lets
+    # `image_url` carry. It is Hermes' own variable (lockgate validates it), so it is allowed here, and only it.
+    # #4820 C2b 3부: HERMES_MEDIA_DELIVERY_STRICT is Hermes' own strict media delivery flag, a literal `1` (lockgate.py refuses to
+    # start the picture tool without exactly that), so it is allowed here too, and it must be there.
+    leaked = sorted(k for k in env if k not in ("API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_KEY", "API_SERVER_PORT", "HERMES_LOGIN_RELAY_KEY", "OORT_SELF_MEDIA_ORIGIN", "HERMES_MEDIA_DELIVERY_STRICT"))
     if leaked:
         bad.append("hermes carries variables beyond its own: %s" % ",".join(leaked))
+    if env.get("HERMES_MEDIA_DELIVERY_STRICT") != "1":
+        bad.append("hermes does not carry HERMES_MEDIA_DELIVERY_STRICT=1 (the lock gate refuses to start the picture tool without it)")
     if env.get("API_SERVER_HOST") != "0.0.0.0":
         bad.append("API_SERVER_HOST is not 0.0.0.0")
     if len(env.get("API_SERVER_KEY", "")) < 32:
@@ -1972,6 +1983,12 @@ else:
         bad.append("api/agent-worker HERMES_BASE_URL is not the same-server Hermes")
     if "HERMES_LOGIN_RELAY_KEY" in worker or "HERMES_LOGIN_RELAY_URL" in worker:
         bad.append("agent-worker holds the login relay key or address")
+    # #4820 C2b 3부: the hosted door's worker half is the operator's attestation. Shipped empty the door is shut; only an
+    # operator's exact `1` opens it. Neither half belongs to api.
+    if worker.get("OORT_HOSTED_MEDIA_STRICT", ""):
+        bad.append("agent-worker ships OORT_HOSTED_MEDIA_STRICT attested (the hosted door must be shut until an operator sets 1)")
+    if "OORT_HOSTED_MEDIA_STRICT" in api or "HERMES_MEDIA_DELIVERY_STRICT" in api:
+        bad.append("api carries a hosted-door variable (agent-worker and hermes only)")
     if api.get("HERMES_LOGIN_RELAY_KEY") != env.get("HERMES_LOGIN_RELAY_KEY"):
         bad.append("api HERMES_LOGIN_RELAY_KEY differs from the hermes service's")
     if api.get("HERMES_LOGIN_RELAY_URL") != "http://hermes:8643":
@@ -2078,6 +2095,26 @@ elif edit == "relay-key-differs-on-api":
     api["HERMES_LOGIN_RELAY_KEY"] = "x" * 40
 elif edit == "relay-on-worker":
     cfg["services"]["agent-worker"]["environment"]["HERMES_LOGIN_RELAY_KEY"] = h["environment"]["HERMES_LOGIN_RELAY_KEY"]
+elif edit == "guard-not-installed":
+    c = h["command"][0]
+    h["command"] = [c.replace("cp /oort/plugins/oort-image-guard/__init__.py /oort/plugins/oort-image-guard/plugin.yaml /opt/data/plugins/oort-image-guard/; ", "")]
+elif edit == "guard-after-gate":
+    c = h["command"][0]
+    copy = "cp /oort/plugins/oort-image-guard/__init__.py /oort/plugins/oort-image-guard/plugin.yaml /opt/data/plugins/oort-image-guard/; "
+    gate_cmd = "/opt/hermes/.venv/bin/python /oort/lockgate.py gate /opt/data/config.yaml; "
+    h["command"] = [c.replace(copy, "").replace(gate_cmd, gate_cmd + copy, 1)]
+elif edit == "writable-guard":
+    for v in h["volumes"]:
+        if v.get("target") == "/oort/plugins/oort-image-guard":
+            v["read_only"] = False
+elif edit == "no-media-strict":
+    h["environment"].pop("HERMES_MEDIA_DELIVERY_STRICT", None)
+elif edit == "media-strict-wrong":
+    h["environment"]["HERMES_MEDIA_DELIVERY_STRICT"] = "true"
+elif edit == "door-attested-by-default":
+    cfg["services"]["agent-worker"]["environment"]["OORT_HOSTED_MEDIA_STRICT"] = "1"
+elif edit == "door-var-on-api":
+    api["OORT_HOSTED_MEDIA_STRICT"] = "1"
 else:
     raise SystemExit("unknown sabotage " + edit)
 json.dump(cfg, open(sys.argv[2], "w"))
@@ -2088,10 +2125,11 @@ PY
   fi
 }
 for sab in no-gate gate-swallowed published-port oort-secret writable-config floating-image wildcard-host no-attest \
-  relay-key-kept relay-before-gate relay-on-worker relay-url-elsewhere relay-key-differs-on-api; do
+  relay-key-kept relay-before-gate relay-on-worker relay-url-elsewhere relay-key-differs-on-api \
+  guard-not-installed guard-after-gate writable-guard no-media-strict media-strict-wrong door-attested-by-default door-var-on-api; do
   agents_sabotage "$sab" "$sab"
 done
-echo "with-agents: rendered Hermes private + gate-first + wired + relay key separate and unset before exec; 13 sabotages RED"
+echo "with-agents: rendered Hermes private + gate-first + wired + relay key separate and unset before exec + image guard plugin installed before the gate from a read-only mount + strict media delivery on (hermes) and the hosted door shut by default (agent-worker); 20 sabotages RED"
 
 # Add-only on the existing env: the generated key is never replaced, a re-run of
 # --allow-local-provider alone keeps the Hermes host, and a second --with-agents

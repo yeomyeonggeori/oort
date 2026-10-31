@@ -5,11 +5,17 @@ import type {
   PayloadRow,
 } from "./agentCardModel";
 import { roleDisplayName } from "../approvals/actionRole";
+import { expressionFailureLine } from "../approvals/approvalOutcome";
 import {
   approvalEndState,
   APPROVAL_EXPIRED_SENTENCE,
   REQUEST_WORD,
 } from "../agents/runPhase";
+import {
+  isParticipantConsent,
+  participantWaitingLine,
+  waitsForParticipant,
+} from "./approvalNote";
 
 /** 한 요청의 상태. 전달 지연·시간 초과·신호 소실은 이 상태가 아니에요. */
 export type RequestBundleState = keyof typeof REQUEST_WORD;
@@ -407,6 +413,12 @@ export function requestBundleModel(
     failed: "실행을 끝내지 못했어요 · 다시 요청해 보세요",
     cancelled: "요청이 취소됐어요",
   };
+  // ADR-0217: 참여자 동의 카드는 카드에 고정된 사람 하나만 결정해요. 그 밖의 사람은 요청자든 다른
+  // 참여자든 관리자든 기다리는 쪽이에요. 다른 승인 카드는 이 판정에 걸리지 않아요.
+  const waitsForPerson = waitsForParticipant(
+    card.action,
+    context.viewerMemberId
+  );
   const canDecide =
     state === "approval" &&
     card.approvalId !== null &&
@@ -416,13 +428,23 @@ export function requestBundleModel(
     context.viewerKind === "human" &&
     context.viewerMemberId !== undefined &&
     context.viewerMemberId.toLowerCase() !==
-      card.requestedByMemberId?.toLowerCase();
+      card.requestedByMemberId?.toLowerCase() &&
+    !waitsForPerson;
   const approvers = context.approverMemberIds ?? [];
   const approver =
     approvers.length === 1 ? context.nameFor?.(approvers[0]!) : undefined;
+  const target = card.action?.targetMemberId;
+  // 참여자 동의 카드의 대기 줄은 결정자의 이름이에요. 결정자 본인에게는 기다릴 사람이 없어서 줄이
+  // 없고, 「관리자」는 이 카드의 결정자가 아니라서 어느 경우에도 세우지 않아요.
   const waitingFor =
     state === "approval" && !canDecide
-      ? approver
+      ? isParticipantConsent(card.action)
+        ? waitsForPerson
+          ? participantWaitingLine(
+              target === undefined ? undefined : context.nameFor?.(target)
+            )
+          : undefined
+        : approver
         ? `${approver} 님의 승인을 기다려요`
         : "관리자의 승인을 기다려요"
       : undefined;
@@ -448,15 +470,25 @@ export function requestBundleModel(
     state === "approval"
       ? remainingTime(card.expiresAtMs, context.nowMs)
       : undefined;
+  // ADR-0218 G3.8: 코드가 정본이에요. 거부·만료·실패·취소로 닫힌 카드가 생성·조립 실패 코드를
+  // 싣고 있으면 그 코드의 골든 줄이 일반 상태 문장보다 앞서요(서버가 같은 줄을 body에 써요).
+  // 결정을 묻는 중인 같은 카드는 이 줄을 말하지 않아요. 표현 실패 코드가 아니면 null이라
+  // 다른 승인 카드의 문장은 그대로예요.
+  const resultLine =
+    state === "done" || state === "failed" ? result?.line : undefined;
+  const codeLine =
+    state === "declined" ||
+    state === "expired" ||
+    state === "failed" ||
+    state === "cancelled"
+      ? expressionFailureLine(bundle?.code)
+      : null;
   return {
     approvalId: card.approvalId,
     state,
     ...face,
     headline,
-    sentence:
-      state === "done" || state === "failed"
-        ? result?.line ?? sentences[state]
-        : sentences[state],
+    sentence: resultLine ?? codeLine ?? sentences[state],
     valueChips,
     moreValues: Math.max(0, rows.length - 2) + omittedRows,
     quietLine: quiet ? `${quiet} · 자세히` : "자세히",

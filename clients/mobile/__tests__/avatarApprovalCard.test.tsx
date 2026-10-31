@@ -1,7 +1,7 @@
 import type {Member, Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {cleanup, render, screen, waitFor, within} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
 
 import '../src/boot/polyfills';
@@ -16,7 +16,7 @@ import {
 } from '../src/features/conversation/memberAvatarImage';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {SessionProvider} from '../src/session/useSession';
-import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
+import {__resetSessionStore, sessionPort, replacePersistedMember} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import type {ApprovalGate} from '../src/features/conversation/approvalGate';
 
@@ -176,6 +176,12 @@ function renderRow(message: Message) {
           startsGroup
           directory={DIRECTORY}
           chips={[]}
+          actions={{
+            myMemberId: SELF_ID,
+            onToggleReaction: async () => {},
+            onEdit: async () => {},
+            onDelete: async () => {},
+          }}
           nowMs={BASE_MS}
           approvalGates={new Map([[APPROVAL_ID, GATE]])}
           approvalsProvided
@@ -192,8 +198,13 @@ describe('#4394 — member.avatar.set 승인 카드 (폰)', () => {
     expect(screen.getByTestId('approval-avatar-headline').props.children).toBe(
       '달무리봇이 내 프로필 사진을 이 사진으로 바꾸려고 해요',
     );
+    expect(screen.getByTestId(`card-approval-${APPROVAL_ID}-approve`)).toBeDisabled();
     const image = await screen.findByTestId('approval-avatar-image');
     expect(String(image.props.source.uri).startsWith('file://')).toBe(true);
+    expect(screen.getByTestId(`card-approval-${APPROVAL_ID}-approve`)).toBeDisabled();
+    expect(screen.getByTestId('approval-avatar-caption')).toHaveTextContent('사진을 확인한 뒤 승인할 수 있어요.');
+    fireEvent(image, 'load');
+    expect(screen.getByTestId(`card-approval-${APPROVAL_ID}-approve`)).toBeEnabled();
     expect(screen.getByTestId('approval-avatar-caption').props.children).toContain('승인하면');
 
     // 정확히 이 승인·이 해시의 주소를 베어러와 함께 한 번.
@@ -210,29 +221,88 @@ describe('#4394 — member.avatar.set 승인 카드 (폰)', () => {
   it('결정 권한 줄은 관리자가 아니라 사진 주인 본인을 말한다', async () => {
     renderRow(approvalMessage(avatarProps()));
     await screen.findByTestId('approval-avatar-image');
-    expect(screen.getByTestId('approval-action-role')).toHaveTextContent(/사진 주인 본인만 승인할 수 있어요\./);
+    expect(screen.getByTestId('approval-action-role')).toHaveTextContent(/요청한 본인만 승인할 수 있어요\./);
     expect(JSON.stringify(screen.toJSON())).not.toContain('requesting_member');
   });
 
-  it('본인이 아니라 서버가 404 를 주면 사진 자리가 본인만 볼 수 있다고 말한다', async () => {
-    fsMock.__state.failures = [new Error('HTTP 404')];
-    renderRow(approvalMessage(avatarProps()));
-    await waitFor(() =>
-      expect(screen.getByTestId('approval-avatar-caption').props.children).toBe(
-        '이 사진은 요청한 본인만 볼 수 있어요.',
-      ),
-    );
-    expect(screen.queryByTestId('approval-avatar-image')).toBeNull();
-    // 폰은 주인을 추측하지 않는다 — 버튼은 서 있고 403 이 서버의 답이다.
-    expect(screen.getByTestId(`card-approval-${APPROVAL_ID}-approve`)).toBeTruthy();
-  });
+  it.each(['member.avatar.set', 'agent.profile.update'])(
+    '%s: 다운로드·표시 실패에서 승인과 로터를 잠그고, 다시 받은 사진의 onLoad 뒤에만 푼다 (#4846)',
+    async actionId => {
+      const fetchMock = jest.fn(async (_url: string, _init?: RequestInit) => ({
+        ok: true, status: 200, text: async () => JSON.stringify({status: 'rejected'}),
+      }));
+      const oldFetch = globalThis.fetch;
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      try {
+        fsMock.__state.failures = [new Error('HTTP 404')];
+        const props = avatarProps();
+        (props.action as Record<string, unknown>).id = actionId;
+        renderRow(approvalMessage(props));
+        const approve = () => screen.getByTestId(`card-approval-${APPROVAL_ID}-approve`);
+        const reject = () => screen.getByTestId(`card-approval-${APPROVAL_ID}-reject`);
+        const caption = () => screen.getByTestId('approval-avatar-caption');
+        const rotor = async (actionName: string) => {
+          await act(async () => fireEvent(screen.getByTestId('message-row'), 'accessibilityAction', {
+            nativeEvent: {actionName},
+          }));
+        };
+        const blocked = async () => {
+          expect(approve()).toBeDisabled();
+          expect(approve().props.accessibilityState.disabled).toBe(true);
+          expect(reject()).toBeEnabled();
+          // 화면 단추와 접근성 손잡이 모두 실제 전송을 막는다.
+          await act(async () => fireEvent.press(approve()));
+          await rotor('momoApprove');
+          expect(fetchMock).not.toHaveBeenCalled();
+        };
+        await waitFor(() => expect(caption()).toHaveTextContent(
+          '사진을 불러오지 못했어요. 사진을 확인한 뒤 승인할 수 있어요.',
+        ));
+        expect(caption().props.accessibilityLiveRegion).toBe('polite');
+        expect(screen.queryByTestId('approval-avatar-image')).toBeNull();
+        await blocked();
+
+        fireEvent.press(screen.getByTestId('approval-avatar-retry'));
+        const first = await screen.findByTestId('approval-avatar-image');
+        expect(downloads()).toHaveLength(2); // 실패 유예 중이어도 사람이 요청하면 다시 받는다.
+        await blocked(); // file:// 를 받았어도 화면에 그리기 전이다.
+        fireEvent(first, 'load');
+        expect(approve()).toBeEnabled();
+        fireEvent(first, 'error');
+        expect(screen.queryByTestId('approval-avatar-image')).toBeNull();
+        await blocked();
+        expect(caption()).toHaveTextContent(/사진을 불러오지 못했어요\./);
+
+        fireEvent.press(screen.getByTestId('approval-avatar-retry'));
+        const second = await screen.findByTestId('approval-avatar-image');
+        expect(downloads()).toHaveLength(3); // 표시하지 못한 캐시 파일도 새로 받는다.
+        await blocked();
+        fireEvent(second, 'load');
+        expect(approve()).toBeEnabled();
+        expect(screen.queryByTestId('approval-avatar-retry')).toBeNull();
+        fireEvent(second, 'error');
+        await blocked();
+        // 실패 중에도 화면 단추·접근성 손잡이 양쪽의 거부가 실제 전송된다.
+        if (actionId === 'member.avatar.set') {
+          await act(async () => fireEvent.press(reject()));
+        } else {
+          await rotor('momoReject');
+        }
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body)).approve).toBe(false);
+      } finally {
+        globalThis.fetch = oldFetch;
+      }
+    },
+  );
 
   it('미리보기 블록이 어긋난 카드는 사진을 요청하지 않는다', async () => {
     const props = avatarProps();
     (props.action as Record<string, unknown>).preview = {kind: 'avatar_image', sha256: 'nope'};
     renderRow(approvalMessage(props));
     expect(downloads()).toHaveLength(0);
-    expect(screen.getByTestId('approval-avatar-caption').props.children).toContain('본인만');
+    expect(screen.getByTestId('approval-avatar-caption')).toHaveTextContent(/사진을 불러오지 못했어요\./);
+    expect(screen.getByTestId(`card-approval-${APPROVAL_ID}-approve`)).toBeDisabled();
   });
 
   it('결정이 난 카드에는 사진 블록이 서지 않는다', () => {
@@ -301,5 +371,74 @@ describe('#4394 — member.avatar.set 결과 카드 (폰)', () => {
   it('실행됨은 기본 문장이다', () => {
     renderRow(resultMessage('executed'));
     expect(screen.getByText('실행을 마쳤어요.')).toBeTruthy();
+  });
+});
+
+describe('#4791 — 이름과 에이전트 사진 승인', () => {
+  it('내 이름 카드가 전후 글자와 본인 권한을 보여 준다', () => {
+    const props = avatarProps({
+      title: '내 이름 바꾸기',
+      action: {
+        id: 'member.display_name.set',
+        required_role: 'requesting_member',
+        rows: [
+          { label: '바꾸기 전', value: '하늘' },
+          { label: '바꾼 뒤', value: '별하늘' },
+        ],
+      },
+    });
+    renderRow(approvalMessage(props));
+    expect(screen.getByText('바꾸기 전')).toBeTruthy();
+    expect(screen.getByText('하늘')).toBeTruthy();
+    expect(screen.getByText('바꾼 뒤')).toBeTruthy();
+    expect(screen.getByText('별하늘')).toBeTruthy();
+    expect(screen.getByTestId('approval-action-role')).toHaveTextContent(
+      /요청한 본인만 승인할 수 있어요\./,
+    );
+    expect(screen.queryByTestId('approval-avatar-preview')).toBeNull();
+  });
+
+  it('에이전트 사진도 이전 사진과 제안 사진을 베어러로 읽어 그린다', async () => {
+    const props = avatarProps();
+    const action = props.action as Record<string, unknown>;
+    action.id = 'agent.profile.update';
+    action.required_role = 'agent_editor';
+    const before = `/v1/workspaces/${WS}/members/${AGENT}/avatar/content?v=previous-image`;
+    (action.preview as Record<string, unknown>).previousAvatarUrl = before;
+    renderRow(approvalMessage(props));
+    expect(await screen.findByLabelText('바꾸기 전 프로필 사진')).toBeTruthy();
+    expect(
+      await screen.findByLabelText('에이전트의 프로필 사진으로 제안된 사진'),
+    ).toBeTruthy();
+    expect(screen.getByText('바꾸기 전')).toBeTruthy();
+    expect(screen.getByText('바꾼 뒤')).toBeTruthy();
+    expect(downloads().some(row => row.url === `${BASE}${before}`)).toBe(true);
+    expect(downloads()).toHaveLength(2);
+    for (const row of downloads()) {
+      expect(row.options.headers).toEqual({
+        Authorization: 'Bearer access-token-1',
+      });
+    }
+  });
+});
+
+describe('#4791 — 확정된 내 이름의 세션 반영', () => {
+  it('서버에서 읽은 자기 프로필만 바꾸고 두 자격 증명은 그대로 둔다', () => {
+    const before = sessionPort.getPersistedSession()!;
+    const access = sessionPort.getAccessToken();
+    replacePersistedMember({ ...before.member, displayName: '새 이름' });
+    expect(sessionPort.getPersistedSession()?.member.displayName).toBe(
+      '새 이름',
+    );
+    expect(sessionPort.getAccessToken()).toBe(access);
+    expect(sessionPort.getRefreshToken()).toBe(before.refreshToken);
+    replacePersistedMember({
+      ...before.member,
+      id: 'another-person',
+      displayName: '다른 이름',
+    });
+    expect(sessionPort.getPersistedSession()?.member.displayName).toBe(
+      '새 이름',
+    );
   });
 });

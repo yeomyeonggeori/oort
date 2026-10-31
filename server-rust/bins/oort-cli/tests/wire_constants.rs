@@ -44,6 +44,16 @@ fn the_login_wire_constants_are_the_servers() {
     assert_eq!(ACCESS_PREFIX, format!("{DEV_TOKEN_PREFIX}."));
     assert_eq!(REFRESH_PREFIX, format!("{DEV_REFRESH_PREFIX}."));
     assert_eq!(oort_cli::mcp::MAX_LINE_BYTES, momo_mcp::MAX_BODY_BYTES);
+    // ADR-0218 appendix A: the one larger budget is the same number and the same action on
+    // both sides of the bridge.
+    assert_eq!(
+        oort_cli::mcp::MAX_EXPRESSION_LINE_BYTES,
+        momo_mcp::MAX_EXPRESSION_REQUEST_BYTES
+    );
+    assert_eq!(
+        oort_cli::mcp::EXPRESSION_CREATE_ACTION_ID,
+        momo_mcp::EXPRESSION_CREATE_ACTION_ID
+    );
 }
 
 #[test]

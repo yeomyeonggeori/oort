@@ -27,6 +27,9 @@ const virtuoso = vi.hoisted(() => ({
   data: [] as { kind: string; key: string }[],
 }));
 
+// 기본은 공개 채널 「엔진」이다. 셋 이상 DM 시험(#4912)만 이 칸에 DM 하나를 넣는다.
+const dmState = vi.hoisted(() => ({ channel: null as Channel | null }));
+
 // #3653: 개인 에이전트 부르기는 QueryClient가 필요하다. 이 시험이 보는 것이 아니다.
 // #4142: 닫은 DM 의 되살림 판정은 메시지 쪽을 읽는 쿼리라 QueryClient 가 필요하다. 이 시험이 보는 것이 아니다
 // (판정은 dmRevival.test.ts · Sidebar.dm.test.tsx).
@@ -97,7 +100,9 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
   return {
     ...actual,
     useChannels: () => ({
-      groups: { channels: [engineChannel], dms: [] },
+      groups: dmState.channel
+        ? { channels: [], dms: [dmState.channel] }
+        : { channels: [engineChannel], dms: [] },
       isLoading: false,
       error: null,
       refetch: () => undefined,
@@ -297,6 +302,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   virtuoso.data = [];
+  dmState.channel = null;
   directoryState.isPending = true;
   directoryState.isFetching = true;
   directoryState.error = null;
@@ -422,5 +428,46 @@ describe("빈 채널의 「에이전트 연결」 (#3697)", () => {
       member({ id: "agent-1", kind: "agent", handle: "kim-intern", displayName: "김인턴" }),
     ]);
     expect(connect(mountShell())).toBeNull();
+  });
+});
+
+// #4912 (S3 묶음 검증 R3). 머리가 「… · 3명」인 DM의 소개가 「둘만 봅니다」라고 말하던 자리를, 화면 전체(ChatShell이 `dmGroupFacts`로
+// 판정해 Timeline에 넘기는 길)로 잰다. 단위 시험은 `dmGroup`을 손으로 건네므로 이 연결이 끊겨도 빨개지지 않는다.
+describe("그룹 DM의 소개 문구 (#4912)", () => {
+  const OTHER = "00000000-0000-7000-8000-000000000102";
+  const AGENT = "00000000-0000-7000-8000-000000000103";
+  const roster = [
+    member(),
+    member({ id: OTHER, displayName: "정하윤", handle: "hayun" }),
+    member({ id: AGENT, kind: "agent", displayName: "코메토", handle: "cometo" }),
+  ];
+  const dm = (memberIds: string[]): Channel => ({
+    id: CHANNEL,
+    workspaceId: WS,
+    kind: "dm",
+    muted: false,
+    memberIds,
+  });
+  const settle = (channel: Channel) => {
+    dmState.channel = channel;
+    directoryState.isPending = false;
+    directoryState.isFetching = false;
+    directoryState.directory = makeDirectory(roster);
+  };
+
+  it("셋 이상이면 둘만 본다고 말하지 않고, 머리와 같은 인원을 말한다", () => {
+    settle(dm([ME, OTHER, AGENT]));
+    const intro = mountShell().querySelector("[data-testid='timeline-empty']");
+    expect(intro?.querySelector("h2")?.textContent).toContain("3명");
+    expect(intro?.textContent).toContain("여기 쓴 메시지는 이 대화에 있는 3명이 함께 봅니다.");
+    expect(intro?.textContent).toContain("에이전트는 이 대화에 들어온 뒤에 쓴 글만 봅니다.");
+    expect(intro?.textContent).not.toContain("둘만 봅니다");
+    expect(intro?.textContent).not.toContain("이 둘로 고정");
+  });
+
+  it("두 사람 DM은 지금까지의 문장 그대로다", () => {
+    settle(dm([ME, OTHER]));
+    const intro = mountShell().querySelector("[data-testid='timeline-empty']");
+    expect(intro?.textContent).toContain("여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다.");
   });
 });

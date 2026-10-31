@@ -37,7 +37,7 @@ uuid.workspace = true
 url = "2"
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util"] }
 axum.workspace = true
 
 [lints]

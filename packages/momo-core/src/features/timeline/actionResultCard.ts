@@ -106,6 +106,11 @@ export const ACTION_RESULT_STATUS_NOTE: Readonly<
 const ACTION_RESULT_NOTE_OVERRIDES: Readonly<
   Record<string, Partial<Record<ActionResultStatus, string>>>
 > = {
+  "member.display_name.set": {
+    rejected: "승인하지 않아 이름은 그대로예요.",
+    expired: "기한이 지나 이름은 그대로예요.",
+    role_required: "요청한 본인이 승인해야 해요.",
+  },
   "member.avatar.set": {
     rejected: "승인하지 않아 프로필 사진은 그대로예요.",
     expired: "기한이 지나 프로필 사진은 그대로예요.",

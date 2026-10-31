@@ -18,17 +18,43 @@ import {
 } from '@momo/core/features/presence/customStatus';
 import type {PresenceStatus, RosterMember} from '@momo/core/lib/api';
 import React, {useState} from 'react';
-import {StyleSheet, TextInput, View} from 'react-native';
+import {
+  Keyboard,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 
 import {ROW_GLYPH_MAX_SCALE} from '../../design/atoms';
 import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {ChoiceRow, GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
-import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
-import {font, radius, SHEET, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {
+  ChoiceRow,
+  GroupCard,
+  ListRow,
+  SheetScroll,
+} from '../../design/sheetParts';
+import {
+  useKeyboardAppearance,
+  usePalette,
+  useStyles,
+} from '../../design/theme';
+import {
+  font,
+  radius,
+  SHEET,
+  space,
+  TOUCH_TARGET,
+  type Palette,
+} from '../../design/tokens';
 import {useSetPresence} from './selfStatus';
 import {SettingsNote} from './settingsRows';
 import {initialExpiry, statusDraftVerdict, statusSeed} from './statusDraft';
+import { EmojiPicker } from '../emoji/EmojiPicker';
+import { emojiHaptic } from '../emoji/haptics';
+import {useEmojiTriggerFocus} from '../emoji/useEmojiTriggerFocus';
 
 // =============================================================================
 // 「상태 설정」 바텀시트 — 이모지 + 한 문장 + 지우는 때 (#4457, ADR-0176; 옛 `StatusPage` 의 자리).
@@ -51,10 +77,9 @@ import {initialExpiry, statusDraftVerdict, statusSeed} from './statusDraft';
 // 쓰는 길은 옛 장과 **그대로**다 — 웹 `SetStatusDialog` 와 같은 `PUT /presence`, 같은 코어 낱말·
 // 프리셋·상한·저장 규칙(`customStatusDraftWrite`). 서버 계약을 더하지 않는다.
 //
-// ## 이모지는 키보드로 받는다
-//
-// 폰에는 이모지 고르개가 없고 새로 들이지 않는다. iOS 키보드의 이모지 판이 그 일을 한다 — 입력 알약
-// 앞의 작은 칸 하나가 그 입력을 받는다. 빠른 상태 다섯 줄은 이모지와 글을 한 번에 채운다.
+// ## 전체 이모지 피커 (#4322)
+// 앞 이모지를 누르면 같은 PageSheet 가 큰 단 피커로 전환된다. Modal 을 겹치지 않고,
+// 고르거나 닫으면 쓰던 글·만료·실패 상태를 보존한 편집기로 돌아온다.
 //
 // ## 「시각 고르기」가 없다
 //
@@ -92,30 +117,41 @@ export function StatusSheet({
   self: RosterMember | undefined;
   onClose: () => void;
 }): React.JSX.Element {
+  const [pickerOpen, setPickerOpen] = useState(false);
   return (
     <PageSheet
-      height="fit"
+      height={pickerOpen ? 'large' : 'fit'}
       onClose={onClose}
-      accessibilityLabel={CUSTOM_STATUS_DIALOG_TITLE}
+      onNavigateBack={pickerOpen ? () => setPickerOpen(false) : undefined}
+      accessibilityLabel={
+        pickerOpen ? '이모지 고르기' : CUSTOM_STATUS_DIALOG_TITLE
+      }
       testID="status-sheet"
       scrimTestID="status-sheet-scrim"
-      scrimLabel={`${CUSTOM_STATUS_DIALOG_TITLE} 닫기`}>
+      scrimLabel={`${CUSTOM_STATUS_DIALOG_TITLE} 닫기`}
+    >
       <StatusSheetBody
         workspaceId={workspaceId}
         selfId={selfId}
         self={self}
         onClose={onClose}
+        pickerOpen={pickerOpen}
+        setPickerOpen={setPickerOpen}
       />
     </PageSheet>
   );
 }
 
 function StatusSheetBody({
+  pickerOpen,
+  setPickerOpen,
   workspaceId,
   selfId,
   self,
   onClose,
 }: {
+  pickerOpen: boolean;
+  setPickerOpen: (open: boolean) => void;
   workspaceId: string;
   selfId: string;
   self: RosterMember | undefined;
@@ -123,6 +159,7 @@ function StatusSheetBody({
 }): React.JSX.Element {
   // 저장이 끝나면 스크림·끌기와 같이 미끄러져 나간다.
   const slideClose = usePageSheetClose() ?? onClose;
+  const emojiTrigger = useEmojiTriggerFocus(pickerOpen);
   const write = useSetPresence(workspaceId, selfId);
   const declared: PresenceStatus = self?.presenceStatus ?? 'auto';
   // 씨앗은 여는 순간 한 번 — 명부가 다시 읽혀도 쓰던 글을 덮지 않는다.
@@ -156,12 +193,26 @@ function StatusSheetBody({
     commit(clearCustomStatusWrite(declared), customStatusClearFailureMessage());
 
   const choices: PhoneStatusExpiryChoice[] =
-    seed.storedExpiry !== undefined ? ['keep', ...PHONE_EXPIRY] : [...PHONE_EXPIRY];
+    seed.storedExpiry !== undefined
+      ? ['keep', ...PHONE_EXPIRY]
+      : [...PHONE_EXPIRY];
   const choiceLabel = (id: PhoneStatusExpiryChoice): string =>
     id === 'keep' && seed.storedExpiry !== undefined
       ? `지금대로 · ${statusExpiryShortLabel(seed.storedExpiry, openedAtMs)}`
       : expiryLabel(id as Exclude<PhoneStatusExpiryChoice, 'keep'>);
   const expiryValue = choiceLabel(expiry);
+
+  if (pickerOpen)
+    return (
+      <EmojiPicker
+        onClose={() => setPickerOpen(false)}
+        onSelect={glyph => {
+          emojiHaptic('reactionCandidateChanged');
+          setEmoji(glyph);
+          setPickerOpen(false);
+        }}
+      />
+    );
 
   return (
     <>
@@ -182,10 +233,22 @@ function StatusSheetBody({
       <SheetScroll testID="status-sheet-scroll">
         <StatusInputPill
           emoji={emoji}
+          emojiTrigger={emojiTrigger}
           text={text}
-          onEmojiChange={setEmoji}
+          onOpenEmoji={() => {
+            Keyboard.dismiss();
+            setPickerOpen(true);
+          }}
           onTextChange={setText}
         />
+
+        {emoji ? (
+          <ListRow
+            title="이모지 빼기"
+            onPress={() => setEmoji('')}
+            testID="status-emoji-clear"
+          />
+        ) : null}
 
         <GroupCard label="기간" testID="status-expiry-card">
           <ListRow
@@ -260,14 +323,16 @@ function StatusSheetBody({
  * (`leading`)가 생기면(후속 — `phone-sheets.md` §4 얇은 부품 표) 이 함수는 지워진다.
  */
 function StatusInputPill({
+  emojiTrigger,
   emoji,
   text,
-  onEmojiChange,
+  onOpenEmoji,
   onTextChange,
 }: {
+  emojiTrigger: React.RefObject<View | null>;
   emoji: string;
   text: string;
-  onEmojiChange: (next: string) => void;
+  onOpenEmoji: () => void;
   onTextChange: (next: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -276,21 +341,23 @@ function StatusInputPill({
   const keyboardAppearance = useKeyboardAppearance();
   return (
     <View style={styles.pill} testID="status-input-pill">
-      <TextInput
-        value={emoji}
-        onChangeText={onEmojiChange}
-        // 이모지를 자리표시자로 두면 제 색으로 그려져 「골라 둔 값」처럼 보인다(옛 리뷰 M-2). 「＋」 는 컨트롤 표지라
-        // 안내문(`textMuted`)이 아니라 셰브론과 같은 `icon` 색이다 — 같은 색이면 입력 칸이 아니라 목록 기호로 읽힌다(r1 M1).
-        placeholder="＋"
-        placeholderTextColor={palette.icon}
-        accessibilityLabel="상태 이모지"
-        accessibilityHint="키보드의 이모지 판에서 고릅니다."
-        keyboardAppearance={keyboardAppearance}
-        // 22pt 칸에 서는 글리프라 큰 글씨에서도 배율을 따라가지 않는다(행 이모지와 같은 상한). 따라가면 AX5 에서 칸을 넘는다.
-        maxFontSizeMultiplier={ROW_GLYPH_MAX_SCALE}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="상태 이모지 고르기"
+        ref={emojiTrigger}
+        accessibilityValue={{ text: emoji || '선택 안 함' }}
+        onPress={onOpenEmoji}
         style={styles.emojiInput}
         testID="status-emoji-input"
-      />
+      >
+        <Text
+          testID="status-emoji-glyph"
+          style={[styles.emojiGlyph, !emoji && { color: palette.icon }]}
+          maxFontSizeMultiplier={ROW_GLYPH_MAX_SCALE}
+        >
+          {emoji || '＋'}
+        </Text>
+      </Pressable>
       <TextInput
         value={text}
         onChangeText={onTextChange}
@@ -327,11 +394,10 @@ const buildStyles = (color: Palette) =>
       alignSelf: 'stretch',
       minWidth: TOUCH_TARGET,
       minHeight: TOUCH_TARGET,
-      textAlign: 'center',
-      fontSize: font.heading,
-      color: color.text,
-      padding: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
+    emojiGlyph: { fontSize: font.heading, color: color.text },
     textInput: {
       flex: 1,
       paddingVertical: space.sm,

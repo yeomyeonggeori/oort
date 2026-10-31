@@ -56,7 +56,8 @@ const COMPOSITE_ROLE_NAMES: Readonly<Record<string, string>> = {
   // 관리자도 에이전트 소유자도 아니다 — 지금은 `member.avatar.set`만 쓴다. 권고 문구는
   // 서버 ADR이 정했다. 이 낱말이 표에 없으면 카드가 「requesting_member만 승인할 수
   // 있어요」라는 원문 토큰을 읽는다.
-  requesting_member: "사진 주인 본인",
+  requesting_member: "요청한 본인",
+  dm_participant: "카드에 표시된 대화 참여자",
 };
 
 function isCompositeRole(role: string): boolean {

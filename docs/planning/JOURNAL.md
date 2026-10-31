@@ -3,6 +3,20 @@
 > 세션 종료 시 공용 계약에 따라 짧은 항목을 맨 위에 추가한다.
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 갱신할 때 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-10-31 · Opus 5.5 planner(+Sonnet 5.5 워커·독립 보안 검수·검증) · ★S3 마무리 착륙 — #4820 조립·원본 사진 주소·호스팅 문, S1~S3 묶음 검증
+
+- C1 #4902(움직이는 표현 조립·보관, migration 159)·C2a #4907(원본 사진의 짧게 사는 자기 주소, 160)·C2b #4909(호스팅 문·`assembled` 제안, 161, STRICT 짝)·다국어 직접 문구 장부 #4855 착륙. 등급 2 보안 검수: C2b 1회차 High 1(공급자 응답 본문 상한)·Medium 2 → 수리, 2회차 Blocker 0·High 0.
+- 착륙을 막은 것과 수리: ① CI 디버그 빌드에서 그림 인코더가 조립 자식의 CPU 10초 한도를 넘음 → dev 프로필에서 코덱 crate만 opt-level 3(같은 시험 5.4초 → 0.5초) ② 시험 코드의 가짜 토큰이 gitleaks에 걸림 → 커밋별 지문 등록 ③ Rust 시험이 읽는 새 입력 파일이 pr-ci 필터 밖 → 필터 넓힘(정책 감사) ④ npm 공지 19건 → node-forge·joi 올림, minimatch·glob 기한 예외.
+- 묶음 검증이 잡은 것: **서버 이미지 빌드 Blocker 2건** — C2b의 비시험 `include_str!`가 Dockerfile 밖 파일을 읽음(#4911), 웹 빌드 단계가 코어의 `@formatjs`를 못 찾음(#4913). 두 트랙을 합칠 때만 생기는 결함 — 묶음 카드가 표현 실패 사유 문장을 그리지 않음(#4914, 승격 첫 합치기의 `POST_MERGE_FIX` 패치). 화면 High 4건(#4912). 사전 청크 재시도(#4915)는 Medium 후속.
+- 묶음 검증 중 발견: 폰 개발 빌드(Debug + Metro)가 언어 초기화에서 멈춤(#4910) — 사전 동적 `import()`의 지연 번들이 프로젝트 루트 밖 코어를 못 찾음. 릴리스 번들은 사전이 번들 안에서 바로 풀려 영향 없음을 `--dev false` 번들로 확인, 폰만 정적 import로 수리.
+- 교훈: ① 착륙 전 시험 병합이 글자 충돌 없는 의미 충돌(`get_in_tx` 요청자 인자)을 잡음 — 묶음 승격 전 리허설을 유지 ② 클러스터 역할을 바꾸는 PG 시험을 다른 시험과 같은 클러스터에서 병렬로 돌리면 서로 깨뜨림 → 한 줄씩·전용 컨테이너 ③ Agent Port conformance 시험은 `PG*` 환경값이 있어야 함 ④ 끝난 워커 target 회수로 디스크 51GB → 106GB ⑤ PR CI는 서버 Docker 이미지를 빌드하지 않음 — 묶음 승격 전 `test_image_day2_tools.sh`로 실제 빌드.
+- 다음: 묶음 검증(화면·게이트·실 PG) → S1~S3 한 번에 승격 → v0.1.41 배포·증거 빌드. 묶음 카드·결정 무대는 서버 #4763·#4764 전까지 보이지 않음.
+
+## 2026-10-30 · Codex 워커 · #4792 / PR #4809 후속 수리
+
+- 기존 이슈 워크트리에서 요청된 후속 수리와 로컬 검증을 진행했다. 상세 인계와 실행 증거는 공용 로컬 기록 및 워크트리의 비공개 워커 증거에 보관한다.
+- 다음: planner가 로컬 diff·인계를 확인하고 커밋·원격 CI·통합을 이어간다. 워커는 커밋·push·공개 코멘트를 하지 않는다.
+
 ## 2026-10-05~06 · Opus 5.5 planner(+Sonnet 5.5 워커·독립 보안·사실·design-review 검수) · ★개인 작업 공간 보류 → 외부 VM 에이전트 작업 추적 main
 
 - 성재 방향 전환(10-05): 개인 클라우드 작업 공간(ADR-0197)은 VM 비용·운영 부담으로 보류(M1~M3은 기본 꺼짐으로 main, M4는 WIP 브랜치), 그록봇·dots의 무료 VM에서 에이전트가 일하고 oort는 진행만 추적. AT 6티켓 「이대로 진행」, v0.1.18은 「추적 기능까지 넣고」.
@@ -225,16 +239,3 @@
 - go → G1'-1 발사. **SH-5a #2205**: 워커 완주(커밋 7: `infra/railway/`(서비스 6·Caddy 엣지·Centrifugo env·PG 플러그인), 생성기 `--railway`(키 41 정본 파생), `Caddyfile.railway`+공개 엣지 계약 픽스처 확장, §3.4 실절차, doctor Railway fail-closed) → planner 검토(gitleaks 지문 2 = 사설 URL 오탐 확인, 시험 7/7) → 감사 랜딩·승격 ao → main `03e90c4c`. 실배포 E2E는 `railway login` 대기(#2205 open). 체인 결함 1: BODY의 `'`(G1'-1) → 문법 오류 → 승격부터 재개(교훈: 체인 BODY에 아포스트로피 금지).
 - **SH-6a-w #2204**: 워커 완주(PR #2214, 커밋 10) → planner 범위 수용 → design-review R1 **FAIL B0·H4·M5·N5**(선택 행=hover 토큰 · 오프라인 잠금 aria 미설명 · 안내 문장이 없는 스위치·티켓 id — **planner 브리프 결함** · 390 절단) → R2 수리(행 선택 `--accent-soft`·이름 붙은 액션·`dl` 사실·`lockReason` 패턴·제품 어휘 카피·서버 원문 보존·캡처 4장면·렌더 시험) → design-review R2 진행 중.
 - G1'-2 패킷: **SH-6a-e #2215**(로컬 provider opt-in — 실측: `validated_base_url`이 staging에서 플래그 무효 → ADR-0004 증보 필수) · **UX-R2c #2216**(첫 에이전트 연결 퍼널) · **#1265**(웹훅 인바운드) 브리프. 교훈: 브리프의 좌표(플래그명·티켓 id)는 화면 글자가 아님을 명시. 발사는 SH-6a-w 랜딩 뒤 go.
-
-## 2026-09-08 · Fable · ★결재: 실기기 APNs 보류(2) · 출시 정의 개정 확정(1) · G1'-1 브리프(3) + 남은 작업 지도
-
-- 성재: 「2번은 다음 진행으로, 1번·3번 중심으로 진행. 남은 작업도 파악」 → `2026-09-02-launch-program-plan.md` 상단 **개정 상자**(G1' = 두 케이스 E2E, G2 += iOS 앱스토어 v0, 파도 확정, 연기 목록) · `first-goal-two-cases.md` §7 확인·§8 · **`2026-09-08-remaining-work-map.md`**(G1'까지 파도 표 · G2 축 · 선재/위생 · 연기 · 이슈 위생 후속).
-- 발급: **SH-6a-w #2204**(uxui, 설정 › 연결 › 에이전트 자격 — 기존 hosted 연결 라우트·위저드 재사용, 새 API 없음) · **SH-5a #2205**(engine, Railway 템플릿 — 같은 이미지 서비스 4 + PG 플러그인 + Centrifugo env + Caddy 서비스, 생성기 `--railway`, 계정 의존). 패킷 2본. 워크트리 `wsh6a`(uxui)·`wsh5a`(engine). 발사는 go.
-- 미발급(지도 §1): UX-R2c · #1265 · SH-6a-e · SH-8 · SH-9 · E2E-A/B · ITO. iOS v0는 G1' 뒤(§2).
-
-## 2026-09-07 (밤·종결) · Fable · ★LS 시리즈 완결(LS-0~6) + SH-10 push relay Rust main 정본화 — 스냅샷 93
-
-- **LS-γ 랜딩**: **SH-10 #1255**(PR #2192 커밋 6 + planner 위생 1: GHCR 고지 번들 재생성 — 새 crate 의존 fnv·h2) → 승격 al → main `5c670e98`. momo-push-relay Rust(같은 이미지 `push-relay`, 정적 레지스트리, raw-body Ed25519, id-only 봉투, live/stub, 401/400/429가 notifier 분류기와 정합, stub E2E `push_dispatch_log` 200, 런북 3 모드). **LS-3 #2182**(PR #2191 R1 10 + R2 링크 19 정정) → 승격 ak → main `47f4d6f0`: 은퇴 문서 24 삭제(RUN·DEPLOY·BACKLOG·…·G3 문서·Codex 잔재·ncp 런북), 회전 절 SELF_HOST 이식+계약 게이트 재지정, INDEX/README D1 재작성, 살아 있는 md 링크 0 깨짐.
-- **경량화 최종**(main `47f4d6f0` vs 진단 시점 `f399e417`): 추적 파일 **3,416 → 2,491(−27%)** · 코드 LOC ≈768k → 624k(−19%) · md 107k → 67k(−38%) · `.swift` 224→7 · scripts 265→151 · docs 663→364(루트 34→18) · handoffs 302→80 · research 112→36 · CI 레인 5→4. LS-5 17 close · LS-6 원장 #2187.
-- 선재 이슈: #2157(pgbackrest 시험) · #2181(gate:csp-deploy 템플릿) · #2193(momo_notifier 롤). 교훈: 정책 파일 변경은 track·승격·sync 셋 다 감사(자동화) · GHCR 매니페스트가 NOTICE 해시 고정 · Rust 의존 추가 시 고지 번들 재생성 · 체인 update-branch 뒤 로컬은 pull --no-rebase.
-- 다음: §7(G2에 iOS 앱스토어 v0) 성재 확인 → 출시 계획 개정 → G1' 파도(SH-6a ∥ SH-5a 브리프) · 실기기 APNs 실수신(`checklist-apns-real-device.md`, 성재 iPhone).

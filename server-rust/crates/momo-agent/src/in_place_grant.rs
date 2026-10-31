@@ -149,7 +149,13 @@ pub fn in_place_grant_rows(
 /// The stored approval payload: the same `workspace_action` shape an agent's
 /// `oort_action_propose` stores for `hosted.channels.grant`, so the decision
 /// route re-proves it with the same resolver — plus the origin and the pins the
-/// resolver will compare (`{connection, channels:[id]}`).
+/// resolver will compare (`{connection, channels:[id], hostedConnection}`).
+///
+/// `hostedConnection` is the proposal-time binding every card of a hosted
+/// proposer carries (ADR-0186 U-d, #4821): the decision resolver puts the
+/// connection it proves into the pins it compares, so a card written without
+/// this key could never be approved (`action_args_invalid`, even on the very
+/// connection that raised it). Here it is the connection the card was raised on.
 pub fn in_place_grant_payload(
     agent_member_id: Uuid,
     requested_for: Uuid,
@@ -170,6 +176,7 @@ pub fn in_place_grant_payload(
             json!({
                 "connection": connection_id.to_string(),
                 "channels": [channel_id.to_string()],
+                "hostedConnection": connection_id.to_string(),
             }),
         );
     }
@@ -336,7 +343,13 @@ mod tests {
         assert_eq!(payload["action"]["args"], json!({"channels": ["general"]}));
         assert_eq!(
             payload["action"]["pins"],
-            json!({"connection": connection.to_string(), "channels": [channel.to_string()]})
+            json!({
+                "connection": connection.to_string(),
+                "channels": [channel.to_string()],
+                // #4821: the connection the card was raised on, in the one key the
+                // decision compares for every hosted proposer's card.
+                "hostedConnection": connection.to_string(),
+            })
         );
         assert_eq!(payload["proposed_by"], json!(agent.to_string()));
         assert_eq!(payload["requested_for"], json!(human.to_string()));

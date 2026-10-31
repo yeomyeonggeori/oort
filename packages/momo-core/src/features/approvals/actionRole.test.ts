@@ -78,11 +78,11 @@ describe("행동의 결정 권한 낱말 (ADR-0186 부록 A · §5)", () => {
     expect(ROLE_KEYS as readonly string[]).not.toContain("workspace_operator");
   });
 
-  it("#4394: requesting_member 는 「사진 주인 본인」이라고 말하고 원문 토큰을 내지 않는다", () => {
-    expect(roleDisplayName("requesting_member")).toBe("사진 주인 본인");
-    expect(approvalRoleCopy("requesting_member")).toBe("사진 주인 본인만 승인할 수 있어요.");
+  it("#4394: requesting_member 는 「요청한 본인」이라고 말하고 원문 토큰을 내지 않는다", () => {
+    expect(roleDisplayName("requesting_member")).toBe("요청한 본인");
+    expect(approvalRoleCopy("requesting_member")).toBe("요청한 본인만 승인할 수 있어요.");
     const copy = roleRequiredCopy("requesting_member");
-    expect(copy.startsWith("사진 주인 본인이 승인해야 해요.")).toBe(true);
+    expect(copy.startsWith("요청한 본인이 승인해야 해요.")).toBe(true);
     expect(copy).toContain("아직 대기 중");
     expect(copy).not.toContain("requesting_member");
   });

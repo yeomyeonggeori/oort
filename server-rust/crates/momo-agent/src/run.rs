@@ -1448,6 +1448,31 @@ pub async fn mark_run_started_in_tx(
     Ok(updated.rows_affected() > 0)
 }
 
+/// `failed → running` for the attempt that is running **now**, when its job was re-claimed after a
+/// transient failure (#4820 C2b 2부).
+///
+/// Between attempts a run reads `failed` ([`finish_run_in_tx`] with `succeeded = false`, written by the
+/// worker's retry path) while its job waits to be claimed again — a mark, not a verdict. An ordinary
+/// turn never needs it back: its commit ends the run whatever it read. A turn that **parks** the run
+/// (the hosted expression door's card) does, because [`park_run_for_approval_in_tx`] only parks a
+/// `running` run. A run a person cancelled, or one that has already succeeded, is not touched, and the
+/// error left by the failed attempt is cleared with the status.
+pub async fn resume_run_between_attempts_in_tx(
+    conn: &mut PgConnection,
+    run_id: Uuid,
+) -> Result<bool, DbError> {
+    let updated = sqlx::query(
+        "UPDATE agent_run \
+            SET status = 'running'::run_status, error = NULL, finished_at = NULL, \
+                updated_at = now() \
+          WHERE id = $1 AND status = 'failed'",
+    )
+    .bind(run_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
 /// Spend one of the run's steps, atomically, or report that it has none left
 /// (B7.2 — the G3 half that has to be a write).
 ///

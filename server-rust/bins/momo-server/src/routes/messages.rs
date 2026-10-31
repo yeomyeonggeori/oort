@@ -115,7 +115,18 @@ const SERVER_OWNED_PROPS_KEYS: [&str; 5] = [
 /// somewhere those can be sourced from. Only the completion transaction and the
 /// sweeps write them ([`momo_agent::SERVER_OWNED_APP_PROPS_KEYS`]).
 pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
-    SERVER_OWNED_PROPS_KEYS.contains(&key) || momo_agent::SERVER_OWNED_APP_PROPS_KEYS.contains(&key)
+    SERVER_OWNED_PROPS_KEYS.contains(&key)
+        || momo_agent::SERVER_OWNED_APP_PROPS_KEYS.contains(&key)
+        || matches!(
+            key,
+            "origin" | "target_member_id" | "requested_for" | "dm_admission_id"
+        )
+        // ADR-0218 appendix B / ADR-0186 v8: `action.expression` (the candidates a person is
+        // asked to choose from) and `result.expression` (what was saved) are written only by
+        // the server, inside an approval card's own transaction. A plain message can carry
+        // none of the three top-level names those blocks live under, so a member cannot dress
+        // a message as a trusted expression card.
+        || matches!(key, "action" | "result" | "expression")
 }
 
 /// `momo.instruction` — see [`crate::routes::work_instructions`].
@@ -143,7 +154,10 @@ fn props_value(props: Option<&std::collections::BTreeMap<String, String>>) -> Va
     let mut object = Map::new();
     if let Some(props) = props {
         for (key, value) in props {
-            if is_server_owned_props_key(key) || momo_webhook::is_github_owned_prop(key, value) {
+            if is_server_owned_props_key(key)
+                || momo_webhook::is_github_owned_prop(key, value)
+                || (key == "kind" && value == "dm_agent_membership")
+            {
                 continue;
             }
             object.insert(key.clone(), Value::String(value.clone()));
@@ -1927,6 +1941,17 @@ mod tests {
         props.clear();
         props.insert("source".to_string(), "prime".to_string());
         assert_eq!(props_value(Some(&props))["source"], "prime");
+    }
+
+    #[test]
+    fn client_props_cannot_forge_an_expression_card() {
+        let mut props = BTreeMap::new();
+        for key in ["action", "result", "expression"] {
+            props.insert(key.to_string(), "{\"expression\":{}}".to_string());
+        }
+        props.insert("note".to_string(), "kept".to_string());
+        let value = props_value(Some(&props));
+        assert_eq!(value, serde_json::json!({"note": "kept"}));
     }
 
     #[test]

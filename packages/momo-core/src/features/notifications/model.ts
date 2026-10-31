@@ -37,7 +37,7 @@ import { agentCardModel } from "../timeline/agentCardModel";
 // =============================================================================
 
 /**
- * `dm` (#3339): a message in a one-to-one conversation that does not mention
+ * `dm` (#3339): a message in a direct conversation (including a consented group DM) that does not mention
  * you. Off by default on this device (`preference.ts`): a DM is the noisiest
  * thing a person can do to a teammate, so the person opts in.
  */

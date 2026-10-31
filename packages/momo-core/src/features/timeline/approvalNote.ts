@@ -170,6 +170,7 @@ export const APPROVAL_NOTE_BLOCKED_TWIN = "composer-offline";
  * 서로 다르고 테스트·게이트는 이유로 지목해야 한다.
  */
 export type ApprovalNoteKind =
+  | "participant"
   | "receipt"
   | "offline"
   | "elsewhere"
@@ -185,7 +186,77 @@ export interface ApprovalCardNote {
   text: string;
 }
 
+// -----------------------------------------------------------------------------
+// 참여자 동의 카드 (ADR-0217, #4920): 기다리는 사람은 카드에 고정된 그 사람 하나다
+// -----------------------------------------------------------------------------
+//
+// DM에 에이전트를 들이는 허락은 초대한 사람을 뺀 사람마다 카드가 한 장씩이다. 서버가 카드마다
+// `target_member_id`로 결정자 한 명을 고정하고(`dm_agents.rs` `vote_in_tx`), 관리자·에이전트
+// 소유자·초대한 사람은 대신 결정할 수 없다. 그래서 1:1이든 여럿이든 **한 장의 카드가 기다리는
+// 사람은 언제나 그 한 사람**이고, 세 사람 이상의 대화에서는 카드마다 다른 이름이 선다.
+//
+// 이 카드를 보는 결정자 아닌 사람(초대한 사람·다른 참여자)에게 「관리자의 승인을 기다려요」는
+// 사실이 아니고(결정자가 관리자가 아니다), 「카드에 표시된 참여자」도 가리킬 것이 없다(카드는
+// 참여자를 그리지 않는다). 카드는 결정할 사람을 이름으로 말한다. 묶음 카드의 대기 줄
+// (`requestBundleModel`)과 현행 카드의 참여자 줄(`approvalCardNote`)이 같은 문장 한 곳을 읽는다.
+
+/** 참여자 동의 카드의 행동 id. 서버 전용 제안이다. */
+const PARTICIPANT_CONSENT_ACTION = "dm.agent.admit";
+/** 카드에 고정된 사람 본인만 결정하는 역할. */
+const PARTICIPANT_CONSENT_ROLE = "dm_participant";
+
+/** 참여자 동의 카드를 알아보는 데 필요한 행동 블록의 부분. `AgentApprovalAction`이 그대로 들어와요. */
+export interface ParticipantConsentAction {
+  id: string;
+  requiredRole?: string | null;
+  targetMemberId?: string;
+}
+
+/**
+ * 이 행동 블록이 참여자 동의 카드의 것인가. 행동 id(서버 전용 제안)와 역할(카드에 고정된 사람 본인) 중
+ * 어느 쪽이 가리켜도 그 카드로 읽는다. 역할만 같고 결정자를 말하지 않는 카드는 `waitsForParticipant`가
+ * 아무에게도 열지 않고, 대기 줄은 이름 없이 말한다. 그 카드에 「관리자」를 세우는 것이 가장 나쁜 답이다.
+ */
+export function isParticipantConsent(
+  action: ParticipantConsentAction | null | undefined
+): boolean {
+  return (
+    action !== null &&
+    action !== undefined &&
+    (action.id === PARTICIPANT_CONSENT_ACTION ||
+      action.requiredRole === PARTICIPANT_CONSENT_ROLE)
+  );
+}
+
+/**
+ * 보는 사람이 결정자가 아니라 **기다리는 쪽**인가. 참여자 동의 카드가 아니면 거짓이라 다른 카드의
+ * 판정은 그대로다. 카드가 결정자를 말하지 않거나 보는 사람을 모르면 기다리는 쪽이다(모르면 안 연다).
+ */
+export function waitsForParticipant(
+  action: ParticipantConsentAction | null | undefined,
+  viewerMemberId: string | undefined
+): boolean {
+  if (!isParticipantConsent(action)) return false;
+  const target = action?.targetMemberId?.toLowerCase();
+  return target === undefined || target !== viewerMemberId?.toLowerCase();
+}
+
+/**
+ * 참여자 동의 카드가 결정을 기다리는 한 줄. 이름을 풀 수 있으면 그 사람의 이름으로 말하고, 명부에서
+ * 못 풀면 이름 없이 말한다. 어느 쪽도 「관리자」를 대신 세우지 않는다.
+ */
+export function participantWaitingLine(name?: string | null): string {
+  const person = name?.trim();
+  return person
+    ? `${person} 님의 허락을 기다려요`
+    : "다른 참여자의 허락을 기다려요";
+}
+
 export interface ApprovalCardNoteInput {
+  /** ADR-0217: this card belongs to another named participant. */
+  waitingForParticipant?: boolean;
+  /** 그 참여자의 이름. 명부에서 못 풀면 비워 둬요. */
+  participantName?: string | null;
   /**
    * 원장이 방금 답해 준 영수증 문장. 있으면 이 사람은 **이미 결정했다**.
    *
@@ -255,6 +326,9 @@ export const APPROVAL_ELSEWHERE_COPY =
  *   5. **원장 없는 서버.** 버튼을 세우면 결코 성공할 수 없는 요청이 나가고 화면은
  *      그 404를 원장의 답인 양 읽는다. 카드는 남기고 컨트롤만 지운다.
  *   6. **이 표면에서는 결정할 수 없다** → 길 안내. **자리**의 문제다.
+ *      참여자 동의 카드에서 결정자가 아닌 사람은 **사람**의 문제라 오프라인보다 먼저 결정자의
+ *      이름을 말한다(`participantWaitingLine`). 그 사람은 연결이 돌아와도 결정할 수 없으므로
+ *      「다시 연결되면 여기서 승인하거나 거부할 수 있어요」가 거짓이 된다.
  *   7. **결정할 수 있는데 지금 못 보낸다** → 오프라인. **때**의 문제다. 두 문장이
  *      달라야 하는 이유가 이 둘의 차이다.
  *   8. → `null`, 컨트롤이 선다.
@@ -288,6 +362,13 @@ export function approvalCardNote(
       kind: "elsewhere",
       tone: "guidance",
       text: APPROVAL_ELSEWHERE_COPY,
+    };
+  }
+  if (input.waitingForParticipant) {
+    return {
+      kind: "participant",
+      tone: "guidance",
+      text: participantWaitingLine(input.participantName),
     };
   }
   if (input.offline) {

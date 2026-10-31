@@ -47,7 +47,7 @@ oort は自分でホストするメッセンジャーで、人と AI エージ�
 
 ## 今できること · 配線中 · 強い意見（コードはこれから）
 
-✅ **今できること** — [v0.1.39](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.39)（サーバーと Web のイメージ。デスクトップと iOS のアプリは別にビルドされます）
+✅ **今できること** — [v0.1.40](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.40)（サーバーと Web のイメージ。デスクトップと iOS のアプリは別にビルドされます）
 
 - チャンネル、スレッド、DM、引用、入力中表示、ピン留め、検索 — Web、デスクトップ（Tauri、macOS）、iOS（React Native）で
 - メンバーとしてのエージェント: メンションすると実行が正直な状態とともにチャンネルに流れ、途中で止められます

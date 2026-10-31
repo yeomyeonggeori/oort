@@ -1,6 +1,11 @@
 import {haptics} from '../lib/haptics';
 import {useChannelRuns} from '../features/agents/agentRunProgressStore';
 import {
+  dmMembershipRevision,
+  removableDmAgents,
+} from '@momo/core/features/agents/dmAdmission';
+import {removeDmAgent} from '@momo/core/lib/api';
+import {
   openDirectMessage,
   uuidEq,
   type Message,
@@ -31,6 +36,7 @@ import {readProjectionPhase} from '@momo/core/features/sidebar/goneDm';
 import {composedUnreadCount} from '@momo/core/features/readState/model';
 import {
   dmAutoReplyAgent,
+  dmGroupFacts,
   dmPeer,
   unreadFor,
 } from '@momo/core/features/workspace/directory';
@@ -392,8 +398,8 @@ export default function ConversationScreen({
   }, [insets.top]);
   const nowMs = useNow();
 
-  const {directory, data: rosterMembers} = useDirectory(workspaceId);
-  const {groups} = useChannels(workspaceId);
+  const {directory, data: rosterMembers, refetch: refetchDirectory} = useDirectory(workspaceId);
+  const {groups, refetch: refetchChannels} = useChannels(workspaceId);
   const readStates = useReadStates(workspaceId);
   const roleLabels = useRoleLabels(workspaceId);
   const markRead = useMarkRead();
@@ -466,6 +472,11 @@ export default function ConversationScreen({
   const peer = useMemo(
     () => (channel ? dmPeer(channel, directory, member.id) : null),
     [channel, directory, member.id],
+  );
+  // 셋 이상 DM 의 참여자 사실(ADR-0217). `peer` 가 null 인 까닭이 「그룹」이라는 것을 빈 방 문구에 알린다 — 웹 ChatShell 과 같은 판정.
+  const dmGroup = useMemo(
+    () => (channel ? dmGroupFacts(channel, directory) : null),
+    [channel, directory],
   );
 
   // DM 머리의 상대 상태 점 (#4016). 홈 DM 줄과 같은 core 판정(`dmPeerStatusDot`)이고 같은 쿼리 키
@@ -1125,6 +1136,12 @@ export default function ConversationScreen({
   const composerInputRef = useRef<TextInput | null>(null);
 
   const messages = timeline.state.messages;
+  const membershipRevision = dmMembershipRevision(messages);
+  useEffect(() => {
+    if (membershipRevision === '') return;
+    void refetchChannels(); void refetchDirectory();
+  }, [membershipRevision, refetchChannels, refetchDirectory]);
+
   // 걸어 둔 원본이 지워졌다. 서버는 받아 주지만(같은 채널이면 묘비도 유효한
   // 대상이다) 그렇게 보낸 글은 태어날 때부터 「삭제된 메시지」를 가리킨다. 조용히
   // 떼는 것이 맞다 — 걸어 둔 사람은 그 삭제를 이미 화면에서 봤다.
@@ -2078,6 +2095,7 @@ export default function ConversationScreen({
               channelKind={channel?.kind}
               requestThoughts={dmAgent !== null}
               peer={peer}
+              dmGroup={dmGroup}
               lastReadSeq={boundary?.lastReadSeq ?? null}
               unreadCount={boundary?.unreadCount ?? 0}
               recoveryMarkers={timeline.recoveryMarkers}
@@ -2181,6 +2199,7 @@ export default function ConversationScreen({
             ) : null}
             <LongPressHint visible={hint.visible} onDismiss={hint.dismiss} />
             <Composer
+              channel={channel}
               channelLabel={title}
               // 조사를 정하는 사실 (#1384): DM 의 title 은 방 이름이 아니라 상대
               // 이름이라 「hermes에」가 아니라 「hermes에게」여야 한다. 상대가 명부에 없어
@@ -2276,6 +2295,8 @@ export default function ConversationScreen({
       {/* 정보 페이지. 고정 목록 뒤 — 층은 JSX 순서다. 사진 뷰어는 아래 맨 끝이라 페이지 **위에** 선다(닫으면 이 페이지로 돌아온다). */}
       {infoOpen && channel !== null ? (
         <ConversationInfoPage
+          dmAgents={removableDmAgents(channel, directory)}
+          onRemoveDmAgent={async id => { await removeDmAgent(workspaceId, channelId, id); await Promise.all([refetchChannels(), refetchDirectory()]); }}
           kind={channel.kind}
           title={title}
           directory={directory}

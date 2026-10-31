@@ -1267,6 +1267,22 @@ pub async fn set_reaction_in_tx(
     if action == ReactionAction::Added && locked.is_deleted() {
         return Ok(Err(InteractionRefused::ReactDeleted));
     }
+    // ADR-0218 D1, model (a): only a WHOLE, exact active name may be newly
+    // added. The SHARE lock linearizes addition with immediate report/hide.
+    // Withdrawal never requires the expression to remain active.
+    if action == ReactionAction::Added
+        && emoji.len() > 2
+        && emoji.starts_with(':')
+        && emoji.ends_with(':')
+    {
+        let name = &emoji[1..emoji.len() - 1];
+        let active: Option<Uuid> = sqlx::query_scalar(
+            "SELECT id FROM expression WHERE workspace_id=$1 AND name=$2 AND status='active' FOR SHARE",
+        ).bind(workspace_id).bind(name).fetch_optional(&mut *conn).await?;
+        if active.is_none() {
+            return Ok(Err(InteractionRefused::NotFound));
+        }
+    }
 
     let changed = match action {
         ReactionAction::Added => {

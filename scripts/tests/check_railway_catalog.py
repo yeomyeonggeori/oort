@@ -88,6 +88,8 @@ HAND_LITERALS = {
     "HERMES_BASE_URL", "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK", "AGENT_PROVIDER_LOCAL_HOSTS",
     "OORT_COHOSTED_AGENT_TOOLS_LOCKED", "API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_PORT",
     "HERMES_LOGIN_RELAY_URL",  # #4079: the login relay sidecar, hermes.railway.internal:8643
+    # #4820 C2b 3부: the two halves of the hosted expression door are typed by hand, so the README lists both.
+    "OORT_HOSTED_MEDIA_STRICT", "HERMES_MEDIA_DELIVERY_STRICT",
 }
 # Shared variables the operator creates by hand (the generator does not print them).
 # HERMES_API_KEY: `openssl rand -hex 32`, one value for hermes' API_SERVER_KEY and the
@@ -106,6 +108,7 @@ HERMES_SHARED_KEY = "${{shared.HERMES_API_KEY}}"
 HERMES_RELAY_SHARED_KEY = "${{shared.HERMES_LOGIN_RELAY_KEY}}"
 HERMES_PORT = 8642
 HERMES_DATA = "/opt/data"
+HERMES_GUARD_DIR = HERMES_DATA + "/plugins/oort-image-guard"  # #4820 review: the oort image_generate guard plugin
 HERMES_KEYS = {"public", "image", "startCommand", "port", "privateHostname", "volume", "variables"}
 HERMES_PY = "/opt/hermes/.venv/bin/python"
 REF_RE = re.compile(r"\$\{\{([^}]*)\}\}")
@@ -231,7 +234,7 @@ COMPOSE_TWINS: dict[str, tuple[list[tuple[str, str]], set[str]]] = {
     "agent-worker": ([("docker-compose.rust.yml", "agent-worker")], set()),
     # compose mounts config.yaml and lockgate.py read-only; Railway has no bind mount, so
     # both arrive as base64 variables the start command decodes.
-    "hermes": ([("docker-compose.rust.yml", "hermes")], {"HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"}),
+    "hermes": ([("docker-compose.rust.yml", "hermes")], {"HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_IMAGE_GUARD_B64", "HERMES_IMAGE_GUARD_MANIFEST_B64", "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"}),
     "postgres": ([("docker-compose.rust.yml", "postgres")], set()),
     # compose mounts infra/centrifugo.json; these four env literals replace it.
     "centrifugo": ([("docker-compose.rust.yml", "centrifugo")], set(CENTRIFUGO_DERIVED)),
@@ -286,7 +289,7 @@ KNOWN_CENTRIFUGO_SETTINGS = {
 
 
 def hermes_canonical(
-    config_sha: str, gate_sha: str, relay_sha: str, probe_sha: str
+    config_sha: str, gate_sha: str, guard_sha: str, manifest_sha: str, relay_sha: str, probe_sha: str
 ) -> list[tuple[object, list[object]]]:
     """#4072: config and gate arrive as base64 variables and are PINNED to the repo bytes.
 
@@ -299,19 +302,32 @@ def hermes_canonical(
     process, the Q3 off switch). With a key, the sidecar and probe are decoded, PINNED to the repo bytes (a stale
     sidecar would be a stale security boundary) and launched in the background (`launch` moves the key into a 0400
     file of a dedicated uid and starts `serve` as that uid). The key variables are UNSET before `exec`, so the
-    gateway and every `hermes` child inherit no copy."""
+    gateway and every `hermes` child inherit no copy.
+
+    #4820 review: the oort-owned image guard plugin (a Hermes user plugin, `pre_tool_call`) is decoded into
+    /opt/data/plugins/oort-image-guard BEFORE the gate, both files pinned to the repo bytes, because the gate
+    verifies those bytes again, loads them into its scratch home and calls the real dispatch path with a canary."""
     return [
         ("", ["set", "-eu"]),
         (";", ["umask", "022"]),
-        (";", [":", "${HERMES_CONFIG_B64:?}", "${HERMES_LOCKGATE_B64:?}", "${API_SERVER_KEY:?}"]),
-        (";", ["mkdir", "-p", HERMES_DATA]),
+        (";", [":", "${HERMES_CONFIG_B64:?}", "${HERMES_LOCKGATE_B64:?}", "${HERMES_IMAGE_GUARD_B64:?}",
+               "${HERMES_IMAGE_GUARD_MANIFEST_B64:?}", "${API_SERVER_KEY:?}"]),
+        (";", ["mkdir", "-p", HERMES_GUARD_DIR]),
         (";", ["printf", "%s", "$HERMES_CONFIG_B64"]),
         ("|", ["base64", "-d", ">", HERMES_DATA + "/config.yaml"]),
         (";", ["printf", "%s", "$HERMES_LOCKGATE_B64"]),
         ("|", ["base64", "-d", ">", "/tmp/lockgate.py"]),
+        (";", ["printf", "%s", "$HERMES_IMAGE_GUARD_B64"]),
+        ("|", ["base64", "-d", ">", HERMES_GUARD_DIR + "/__init__.py"]),
+        (";", ["printf", "%s", "$HERMES_IMAGE_GUARD_MANIFEST_B64"]),
+        ("|", ["base64", "-d", ">", HERMES_GUARD_DIR + "/plugin.yaml"]),
         (";", ["echo", "%s  %s" % (config_sha, HERMES_DATA + "/config.yaml")]),
         ("|", ["sha256sum", "-c", "-"]),
         (";", ["echo", "%s  %s" % (gate_sha, "/tmp/lockgate.py")]),
+        ("|", ["sha256sum", "-c", "-"]),
+        (";", ["echo", "%s  %s" % (guard_sha, HERMES_GUARD_DIR + "/__init__.py")]),
+        ("|", ["sha256sum", "-c", "-"]),
+        (";", ["echo", "%s  %s" % (manifest_sha, HERMES_GUARD_DIR + "/plugin.yaml")]),
         ("|", ["sha256sum", "-c", "-"]),
         (";", [HERMES_PY, "/tmp/lockgate.py", "gate", HERMES_DATA + "/config.yaml"]),
         (";", ["[", "-z", "${HERMES_LOGIN_RELAY_KEY:-}", "]"]),
@@ -719,17 +735,19 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
     if extra_keys:
         errors.append("hermes has keys the catalog does not review (domain? replicas? restart?): %s" % ",".join(extra_keys))
     shas = []
-    for name in ("config.yaml", "lockgate.py", "login_relay.py", "mcp_login_probe.py"):
+    for name in ("config.yaml", "lockgate.py", "plugins/oort-image-guard/__init__.py",
+                 "plugins/oort-image-guard/plugin.yaml", "login_relay.py", "mcp_login_probe.py"):
         try:
             shas.append(hashlib.sha256((repo_root / "infra" / "hermes" / name).read_bytes()).hexdigest())
         except OSError as exc:
             errors.append("infra/hermes/%s unreadable: %s" % (name, exc.__class__.__name__))
-    if len(shas) == 4:
+    if len(shas) == 6:
         diff = canonical_diff(shell_commands(shell_script(hermes.get("startCommand"))), hermes_canonical(*shas))
         if diff:
             errors.append(
-                "hermes start command is not the canonical command list (gate-first, fail-closed, config and gate "
-                "pinned to the sha256 of infra/hermes/config.yaml and lockgate.py; the login relay block only with a key, "
+                "hermes start command is not the canonical command list (gate-first, fail-closed, config, gate and "
+                "the two image-guard plugin files pinned to the sha256 of infra/hermes/config.yaml, lockgate.py and "
+                "plugins/oort-image-guard/*, the plugin installed before the gate; the login relay block only with a key, "
                 "its two files pinned the same way, key variables unset before exec): %s" % diff
             )
     if (hermes.get("volume") or {}).get("mountPath") != HERMES_DATA:
@@ -753,7 +771,8 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
             "hermes HERMES_LOGIN_RELAY_KEY %r must be %s (its own shared secret, not the chat key)"
             % (variables.get("HERMES_LOGIN_RELAY_KEY"), HERMES_RELAY_SHARED_KEY)
         )
-    for name in ("HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"):
+    for name in ("HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_IMAGE_GUARD_B64", "HERMES_IMAGE_GUARD_MANIFEST_B64",
+                 "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"):
         if not str(variables.get(name, "")).startswith("<operator:"):
             errors.append("hermes %s must be an <operator: …> placeholder (base64 of the repo file)" % name)
     if hermes.get("healthcheckPath") is not None:
@@ -783,6 +802,65 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
             errors.append("agent-worker must not carry %s (the login relay is api only, #4079)" % var)
     if "OORT_COHOSTED_AGENT_TOOLS_LOCKED" in (services["agent-worker"].get("variables") or {}):
         errors.append("agent-worker must not carry OORT_COHOSTED_AGENT_* (api only, ADR-0203 증보 K-S2)")
+    return errors
+
+
+SELF_MEDIA_VAR = "OORT_SELF_MEDIA_ORIGIN"
+SELF_MEDIA_SERVICES = ("agent-worker", "hermes")
+
+
+def self_media_errors(services: dict) -> list[str]:
+    """#4820 C2a (owner 10-30 decision): the origin of the requester's short-lived photo address reaches exactly two services.
+
+    agent-worker builds the address under it and hermes' image guard lets `image_url` carry exactly that origin, so both
+    hold the one value `https://${{shared.OORT_SITE_ADDRESS}}` (the edge's own host; lockgate.py refuses anything that is not
+    that shape) and no other service has the variable by name or by reference. It is a separate name on purpose:
+    MOMO_PUBLIC_BASE_URL stays api only (ADR-0205 D1, see github_errors)."""
+    errors: list[str] = []
+    for name in SELF_MEDIA_SERVICES:
+        got = (services[name].get("variables") or {}).get(SELF_MEDIA_VAR)
+        if got != PUBLIC_BASE_VALUE:
+            errors.append(
+                "%s %s %r must be %s (the one origin the image guard accepts; without it no photo address is minted)"
+                % (name, SELF_MEDIA_VAR, got, PUBLIC_BASE_VALUE)
+            )
+    for name, svc in services.items():
+        if name not in SELF_MEDIA_SERVICES and SELF_MEDIA_VAR in (svc.get("variables") or {}):
+            errors.append("%s must not carry %s (agent-worker and hermes only, #4820 C2a)" % (name, SELF_MEDIA_VAR))
+    return errors
+
+
+HOSTED_STRICT_VAR = "OORT_HOSTED_MEDIA_STRICT"
+MEDIA_STRICT_VAR = "HERMES_MEDIA_DELIVERY_STRICT"
+
+
+def hosted_media_strict_errors(services: dict) -> list[str]:
+    """#4820 C2b 3부 (ADR-0218 G3.7 (b)): the two halves of the hosted expression door, one on each service.
+
+    hermes carries the literal `1`: lockgate.py refuses to start the picture tool without exactly that (and refuses the name
+    in the volume's .env), so a template without it would be a Hermes that cannot boot. agent-worker carries the operator's
+    attestation EMPTY: the template never attests for the operator, the door opens only when someone sets `1` there (a worker
+    cannot see Hermes, so an attestation shipped in the template would be a claim nobody made). No other service has either
+    name."""
+    errors: list[str] = []
+    got = (services["hermes"].get("variables") or {}).get(MEDIA_STRICT_VAR)
+    if got != "1":
+        errors.append(
+            "hermes %s %r must be '1' (lockgate.py refuses to start the picture tool without exactly that)"
+            % (MEDIA_STRICT_VAR, got)
+        )
+    got = (services["agent-worker"].get("variables") or {}).get(HOSTED_STRICT_VAR)
+    if got != "":
+        errors.append(
+            "agent-worker %s %r must be present and empty (the template does not attest strict media delivery for the "
+            "operator; the hosted door opens only on an operator's exact 1)" % (HOSTED_STRICT_VAR, got)
+        )
+    for name, svc in services.items():
+        variables = svc.get("variables") or {}
+        if name != "hermes" and MEDIA_STRICT_VAR in variables:
+            errors.append("%s must not carry %s (hermes only, #4820 C2b)" % (name, MEDIA_STRICT_VAR))
+        if name != "agent-worker" and HOSTED_STRICT_VAR in variables:
+            errors.append("%s must not carry %s (agent-worker only, #4820 C2b)" % (name, HOSTED_STRICT_VAR))
     return errors
 
 
@@ -962,6 +1040,8 @@ def collect_errors(
 
     # -- GitHub App key + public address: api only (ADR-0205, #4221) ----------
     errors.extend(github_errors(services))
+    errors.extend(self_media_errors(services))
+    errors.extend(hosted_media_strict_errors(services))
 
     # -- Postgres image service ----------------------------------------------
     pg = services["postgres"]
@@ -1209,6 +1289,19 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["relay"]["variables"]["MIGRATE_DATABASE_URL"] = "${{shared.MIGRATE_DATABASE_URL}}"
     elif kind == "sender-cent-api-key":  # G10
         services["webhook-sender"]["variables"]["CENT_API_KEY"] = "${{shared.CENT_API_KEY}}"
+    elif kind == "hermes-guard-sha-stale":  # #4820 review: the pinned guard bytes no longer match the plugin file
+        command = services["hermes"]["startCommand"]
+        stale = re.search(r"echo \"([0-9a-f]{64})  /opt/data/plugins/oort-image-guard/__init__\.py", command)
+        if stale is None:
+            raise SystemExit("mutation %s: no guard sha in the hermes start command" % kind)
+        services["hermes"]["startCommand"] = command.replace(stale.group(1), "0" * 64, 1)
+    elif kind == "hermes-no-guard-install":  # the guard is not decoded: the gate would refuse, but nothing may assume that
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"],
+            'printf %s "$HERMES_IMAGE_GUARD_B64" | base64 -d > /opt/data/plugins/oort-image-guard/__init__.py; ',
+            "",
+            kind,
+        )
     elif kind == "hermes-no-gate":  # #4072: the lock gate line removed
         services["hermes"]["startCommand"] = replace_once(
             services["hermes"]["startCommand"],
@@ -1326,6 +1419,22 @@ def mutate_catalog(kind: str, data: dict) -> None:
         api["variables"][PUBLIC_BASE_VAR] = "https://${{shared.MOMO_CENTRIFUGO_WS_URL}}"
     elif kind == "worker-public-base":
         services["agent-worker"]["variables"][PUBLIC_BASE_VAR] = PUBLIC_BASE_VALUE
+    elif kind == "worker-self-media-dropped":
+        del services["agent-worker"]["variables"][SELF_MEDIA_VAR]
+    elif kind == "hermes-self-media-wrong-host":
+        services["hermes"]["variables"][SELF_MEDIA_VAR] = "https://${{shared.MOMO_CENTRIFUGO_WS_URL}}"
+    elif kind == "relay-self-media-origin":
+        services["relay"]["variables"][SELF_MEDIA_VAR] = PUBLIC_BASE_VALUE
+    elif kind == "worker-hosted-strict-dropped":
+        del services["agent-worker"]["variables"][HOSTED_STRICT_VAR]
+    elif kind == "worker-hosted-strict-attested":  # the template would attest strict media delivery for the operator
+        services["agent-worker"]["variables"][HOSTED_STRICT_VAR] = "1"
+    elif kind == "hermes-media-strict-dropped":  # a Hermes the lock gate would refuse to start
+        del services["hermes"]["variables"][MEDIA_STRICT_VAR]
+    elif kind == "hermes-media-strict-wrong":  # Hermes reads `true` as strict, the gate takes only an exact 1
+        services["hermes"]["variables"][MEDIA_STRICT_VAR] = "true"
+    elif kind == "relay-hosted-strict":
+        services["relay"]["variables"][HOSTED_STRICT_VAR] = "1"
     else:
         raise SystemExit("unknown catalog mutation %s" % kind)
 
@@ -1384,6 +1493,8 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("hermes-extra-key", "hermes has keys the catalog does not review"),
     ("hermes-gate-sha-stale", "hermes start command is not the canonical command list"),
     ("hermes-no-sha-check", "hermes start command is not the canonical command list"),
+    ("hermes-guard-sha-stale", "hermes start command is not the canonical command list"),
+    ("hermes-no-guard-install", "hermes start command is not the canonical command list"),
     ("hermes-image-floating", "hermes image"),
     ("hermes-oort-secret", "hermes variables outside its compose twin"),
     ("hermes-cors-open", "hermes variables outside its compose twin"),
@@ -1407,6 +1518,14 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("api-public-base-http", "api MOMO_PUBLIC_BASE_URL"),
     ("api-public-base-wrong-host", "api MOMO_PUBLIC_BASE_URL"),
     ("worker-public-base", "MOMO_PUBLIC_BASE_URL belongs to api only"),
+    ("worker-self-media-dropped", "agent-worker OORT_SELF_MEDIA_ORIGIN"),
+    ("hermes-self-media-wrong-host", "hermes OORT_SELF_MEDIA_ORIGIN"),
+    ("relay-self-media-origin", "relay must not carry OORT_SELF_MEDIA_ORIGIN"),
+    ("worker-hosted-strict-dropped", "agent-worker OORT_HOSTED_MEDIA_STRICT"),
+    ("worker-hosted-strict-attested", "agent-worker OORT_HOSTED_MEDIA_STRICT"),
+    ("hermes-media-strict-dropped", "hermes HERMES_MEDIA_DELIVERY_STRICT"),
+    ("hermes-media-strict-wrong", "hermes HERMES_MEDIA_DELIVERY_STRICT"),
+    ("relay-hosted-strict", "relay must not carry OORT_HOSTED_MEDIA_STRICT"),
 )
 
 
@@ -1435,22 +1554,27 @@ def prove_mutations(
             if needle not in joined:
                 raise SystemExit("mutation %s failed without naming its rule (%s): %s" % (kind, needle, joined))
             print("mutation %s RED (%s)" % (kind, needle))
-        # README: drop the WORKER_DATABASE_URL row → the table no longer covers
-        # a value the operator must type.
+        # README: drop one row → the table no longer covers a value the operator must type. The first row is the
+        # long-standing one; the other two are the hosted door's halves (#4820 C2b 3부).
         readme = readme_path.read_text()
-        kept = [
-            line
-            for line in readme.splitlines(True)
-            if not re.match(r"^\|\s*agent-worker\s*\|\s*`WORKER_DATABASE_URL`", line)
-        ]
-        if len(kept) == len(readme.splitlines(True)):
-            raise SystemExit("README has no agent-worker WORKER_DATABASE_URL row to drop")
-        dest_readme = scratch / "README.md"
-        dest_readme.write_text("".join(kept))
-        errors = collect_errors(catalog_path, compose_path, centrifugo_path, keys_path, dest_readme)
-        if not any("agent-worker WORKER_DATABASE_URL" in error for error in errors):
-            raise SystemExit("mutation readme-row-missing did not fail on the README table: %s" % errors)
-        print("mutation readme-row-missing RED (README hand-mapped table missing rows)")
+        for service, var, label in (
+            ("agent-worker", "WORKER_DATABASE_URL", "readme-row-missing"),
+            ("agent-worker", HOSTED_STRICT_VAR, "readme-row-missing-hosted-strict"),
+            ("hermes", MEDIA_STRICT_VAR, "readme-row-missing-media-strict"),
+        ):
+            kept = [
+                line
+                for line in readme.splitlines(True)
+                if not re.match(r"^\|\s*%s\s*\|\s*`%s`" % (re.escape(service), re.escape(var)), line)
+            ]
+            if len(kept) == len(readme.splitlines(True)):
+                raise SystemExit("README has no %s %s row to drop" % (service, var))
+            dest_readme = scratch / ("README-%s.md" % label)
+            dest_readme.write_text("".join(kept))
+            errors = collect_errors(catalog_path, compose_path, centrifugo_path, keys_path, dest_readme)
+            if not any("%s %s" % (service, var) in error for error in errors):
+                raise SystemExit("mutation %s did not fail on the README table: %s" % (label, errors))
+            print("mutation %s RED (README hand-mapped table missing rows)" % label)
         # infra/centrifugo.json gains a setting the Railway literals do not carry.
         cent = json.loads(centrifugo_path.read_text())
         cent.setdefault("client", {})["connection_limit"] = 10

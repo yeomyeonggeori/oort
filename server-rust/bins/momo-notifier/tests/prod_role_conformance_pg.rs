@@ -27,7 +27,7 @@
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3740) | drop `GRANT SELECT, INSERT ON agent_run_event TO momo_notifier` — the migration-128 ledger trigger appends as the invoking role (verified red: `permission denied for table agent_run_event`) |
 //! | `an_approval_audience_is_judged_as_the_production_notifier_role` (ADR-0204 D7, #3928) | drop `GRANT SELECT (workspace_id, member_id, role) ON workspace_membership` — `may_approve_in_tx` reads it for every role-gated card (verified red: `permission denied for table workspace_membership`); or drop the `agent` / `work_host` SELECT the agent-owner and host-owner arms read |
 //! | `the_personal_agent_member_trigger_runs_as_every_role_that_writes_member` (#3591) | drop `GRANT UPDATE ON agent` from a role that can UPDATE `member` (the migration-123 trigger updates `agent` as the invoking role), or add the trigger's table to a lockdown |
-//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown or a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none) that drifts |
+//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown, a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none) or the `self_media_token` lockdown (#4820 C2a L6: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/DELETE, relay/notifier none) that drifts — e.g. dropping the block from `bootstrap_runtime_roles.sql` hands relay and notifier-class write back to the BYPASSRLS roles |
 //! | `a_dead_push_token_is_invalidated_by_the_production_notifier_role` (#3930) | drop `GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier` — the settle's `UPDATE push_token` dies with `permission denied for table push_token`, and rolls back to its savepoint, so ONLY this suite sees it; widen the grant past those two columns and the denied-write half goes red |
 //! | `closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_stream` (ADR-0204 증보 1 D8-a, #3987) | revoke `INSERT` on `outbox` from `momo_app` or `momo_worker` (the stream's closing write enqueues the `push_candidate` as the invoking role — the same privilege the 011 trigger already needs for the opening INSERT), or give the outbox a kind-specific lockdown |
 //! | `a_woken_uncollected_run_is_ended_by_the_production_notifier_role_with_column_scoped_reads` (ADR-0200 증보 3 E7, #4284) | drop a column from the `hosted_agent_connection` / `hosted_agent_liveness` / `hosted_agent_doorbell_ring` / `agent_provider_pin` GRANT the woken verdict reads (the sweep dies with `permission denied for table …` and rolls back to its savepoint, so ONLY this suite sees it); or grant the notifier `token` / `hosted_agent_doorbell` / a table-level SELECT on the new tables (the denied-read half goes red) |
@@ -1332,6 +1332,106 @@ async fn the_run_stall_and_ledger_retention_sweeps_do_real_work_as_their_product
 
 #[tokio::test]
 #[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn dm_expiry_and_stall_lines_run_as_the_production_notifier_without_membership_writes() {
+    let db = ProdDb::create().await;
+    let seeded = seed_hosted_work_run(&db.su).await;
+    sqlx::query("UPDATE channel SET kind='dm', dm_key='admitted:' || id::text WHERE id=$1")
+        .bind(seeded.channel)
+        .execute(&db.su)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO dm_agent_admission(workspace_id,channel_id,agent_member_id,requested_by,trigger_message_id,required_human_ids,expires_at,admitted_at,admitted_after_seq) \
+        VALUES($1,$2,$3,$4,$5,ARRAY[$4::uuid],now()+interval '15 minutes',clock_timestamp(),1)")
+        .bind(seeded.workspace).bind(seeded.channel).bind(seeded.agent).bind(seeded.requester).bind(seeded.answer)
+        .execute(&db.su).await.unwrap();
+    sqlx::query("UPDATE channel_seq SET last_seq=1 WHERE channel_id=$1")
+        .bind(seeded.channel)
+        .execute(&db.su)
+        .await
+        .unwrap();
+    // #3982: expiry settles the request card in place (ADR-0186 v6 R-b) instead of writing a
+    // result line, so an approval without a card would prove no write at all. Seed the DM card
+    // through the production app role, as the admitted agent.
+    let (approval, card) = add_dm_expiry_card(&db, &seeded, seeded.parked_run).await;
+    let stalled = Uuid::new_v4();
+    sqlx::query("INSERT INTO agent_run(id,workspace_id,agent_member_id,channel_id,status,input,idempotency_key,started_at,updated_at) \
+        VALUES($1,$2,$3,$4,'running','{}',$5,now()-interval '5 hours',now()-interval '4 hours')")
+        .bind(stalled).bind(seeded.workspace).bind(seeded.agent).bind(seeded.channel).bind(format!("t:{stalled}"))
+        .execute(&db.su).await.unwrap();
+    sqlx::query("INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key,lease_owner,lease_acquired_at,lease_expires_at) \
+        VALUES($1,'agent_job','pending','gateway',$2,$3,uuidv7(),now()-interval '5 hours',now()-interval '4 hours')")
+        .bind(seeded.workspace).bind(serde_json::json!({"agent_member_id":seeded.agent,"run_id":stalled,"channel_id":seeded.channel}))
+        .bind(seeded.agent).execute(&db.su).await.unwrap();
+
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let actual_role: String = sqlx::query_scalar("SELECT current_user::text")
+        .fetch_one(&notifier)
+        .await
+        .unwrap();
+    assert_eq!(actual_role, "momo_notifier");
+    let may_update: bool =
+        sqlx::query_scalar("SELECT has_any_column_privilege(current_user,'membership','UPDATE')")
+            .fetch_one(&notifier)
+            .await
+            .unwrap();
+    assert!(
+        !may_update,
+        "membership remains SELECT-only for the notifier"
+    );
+    let expired = approval_sweep::sweep_expired_approvals(&notifier, 32)
+        .await
+        .unwrap();
+    assert_eq!(
+        expired.expired, 1,
+        "the whole expiry transaction must commit in a DM: {expired:?}"
+    );
+    let stalled_stats = momo_notifier::run_stall_sweep::sweep_stalled_runs(
+        &notifier,
+        momo_outbox::StallPolicy::default(),
+        32,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        stalled_stats.lease_abandoned, 1,
+        "the stall line must commit in a DM: {stalled_stats:?}"
+    );
+    let status: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&db.su)
+        .await
+        .unwrap();
+    assert_eq!(status, "expired");
+    let card_status: Option<String> =
+        sqlx::query_scalar("SELECT props->>'status' FROM message WHERE id=$1")
+            .bind(card)
+            .fetch_one(&db.su)
+            .await
+            .unwrap();
+    assert_eq!(
+        card_status.as_deref(),
+        Some("expired"),
+        "the notifier settles the DM card in place"
+    );
+    // One durable agent-authored message per run: the settled card for the expiry, the
+    // timeout line for the stall.
+    for run in [seeded.parked_run, stalled] {
+        let status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+            .bind(run)
+            .fetch_one(&db.su)
+            .await
+            .unwrap();
+        assert_eq!(status, "timed_out");
+        let lines: i64 = sqlx::query_scalar("SELECT count(*) FROM message WHERE channel_id=$1 AND author_member_id=$2 AND run_id=$3")
+            .bind(seeded.channel).bind(seeded.agent).bind(run).fetch_one(&db.su).await.unwrap();
+        assert_eq!(lines, 1, "one durable agent-authored line for each sweep");
+    }
+    notifier.close().await;
+    db.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
 async fn the_notifier_role_has_no_delete_and_no_table_it_does_not_name() {
     let db = ProdDb::create().await;
     let offenders: Vec<String> = sqlx::query_scalar(
@@ -1359,7 +1459,8 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     // `mem_*` tables (#3161), the migration-owned read-only catalogs (`plugin_registry`,
     // `schema_migrations`, `work_cloud_host_transition`: #4372, see
     // `migration_owned_catalogs_are_read_only_for_every_runtime_role`), the `cloud_box*` tables (ADR-0197 D10 lockdown, see
-    // below) and the `scheduled_message*` tables (ADR-0208 D3 lockdown, see below) are
+    // below), the `scheduled_message*` tables (ADR-0208 D3 lockdown, see below) and
+    // `self_media_token` (#4820 C2a L6 lockdown, see below) are
     // the only tables outside the rule; everything else must be readable and writable
     // by the three ALL-TABLES roles.
     let missing: Vec<String> = sqlx::query_scalar(
@@ -1371,6 +1472,7 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
             AND c.relname NOT LIKE 'mem\\_%' AND c.relname NOT IN ('plugin_registry', 'schema_migrations', 'work_cloud_host_transition') \
             AND c.relname NOT LIKE 'cloud\\_box%' \
             AND c.relname NOT LIKE 'scheduled\\_message%' \
+            AND c.relname <> 'self_media_token' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
           ORDER BY 1",
     )
@@ -1422,6 +1524,34 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     .fetch_one(&db.su)
     .await
     .expect("scheduled message table count");
+    // `self-media-token-lockdown` (bootstrap_runtime_roles.sql, #4820 C2a security review L6): a row
+    // opens one requester's attachment to whoever presents its token, and the BYPASSRLS roles skip
+    // RLS, so their table privileges are what keeps a forged row out of a role with no business
+    // writing one. `momo_worker` mints and sweeps (SELECT/INSERT/DELETE), `momo_app` spends
+    // (SELECT/UPDATE), relay and notifier touch nothing; no role holds TRUNCATE/REFERENCES/TRIGGER.
+    let self_media_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
+                       has_table_privilege(r.rolname, c.oid, p.priv)) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier')) AS r(rolname) \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname = 'self_media_token' \
+            AND has_table_privilege(r.rolname, c.oid, p.priv) \
+                IS DISTINCT FROM ((r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'UPDATE')) \
+                                  OR (r.rolname = 'momo_worker' AND p.priv IN ('SELECT', 'INSERT', 'DELETE'))) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("self media privilege scan");
+    let self_media_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = 'self_media_token'",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("self media table count");
     db.finish().await;
     assert!(
         missing.is_empty(),
@@ -1438,6 +1568,14 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     assert!(
         schedule_drift.is_empty(),
         "scheduled_message* privileges drifted from the lockdown: {schedule_drift:?}"
+    );
+    assert_eq!(
+        self_media_tables, 1,
+        "the scan must actually see the self_media_token table, or it proves nothing"
+    );
+    assert!(
+        self_media_drift.is_empty(),
+        "self_media_token privileges drifted from the lockdown: {self_media_drift:?}"
     );
 }
 
@@ -2813,6 +2951,30 @@ async fn an_expired_hosted_proposal_is_swept_by_the_production_notifier_role_wit
     .await
     .expect("channel_seq catch-up");
 
+    // #3982: exercise the actual props/body UPDATE and its triggers, rather
+    // than settling an approval with no request_message_id (which proves no grants).
+    let (ws, channel, agent, run) = (
+        seeded.workspace,
+        seeded.channel,
+        seeded.agent,
+        seeded.parked_run,
+    );
+    let card = momo_db::with_tenant_tx(&app, ws, move |conn| Box::pin(async move {
+        send_message_in_tx(conn, ws, NewMessage {
+            channel_id: channel, author_member_id: agent, message_type: MessageType::ApprovalRequest,
+            body: Some("채널을 만들어도 될까요?".into()),
+            props: serde_json::json!({"approval_id": approval, "status":"pending", "last_attempt":"role_required"}),
+            root_id: None, reply_to_id: None, client_msg_id: Some(Uuid::new_v4()),
+            run_id: Some(run), hlc_ts: None, hlc_count: None,
+        }).await
+    })).await.expect("request card through the production app role");
+    sqlx::query("UPDATE approval SET request_message_id=$2 WHERE id=$1")
+        .bind(approval)
+        .bind(card.message.id)
+        .execute(&db.su)
+        .await
+        .unwrap();
+
     let stats = approval_sweep::sweep_expired_approvals(&notifier, 32)
         .await
         .expect("the sweep runs as the production notifier role");
@@ -2833,6 +2995,36 @@ async fn an_expired_hosted_proposal_is_swept_by_the_production_notifier_role_wit
         (approval_status.as_str(), run_status.as_str()),
         ("expired", "timed_out")
     );
+    let (props, body, state, edited): (
+        serde_json::Value,
+        String,
+        String,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ) = sqlx::query_as("SELECT props,body,state::text,edited_at FROM message WHERE id=$1")
+        .bind(card.message.id)
+        .fetch_one(&db.su)
+        .await
+        .unwrap();
+    assert_eq!(
+        props["status"], "expired",
+        "notifier updated the actual card under production grants"
+    );
+    assert_eq!(props["result"]["line"], body);
+    assert_eq!(body, "승인을 기다리다 만료됐어요");
+    assert!(props.get("last_attempt").is_none());
+    assert_eq!(state, "sent");
+    assert!(edited.is_none());
+    let frames: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 \
+        AND payload->'data'->>'type'='message.edited' AND payload->'data'->'payload'->>'id'=$2",
+    )
+    .bind(ws)
+    .bind(card.message.id.to_string())
+    .fetch_one(&db.su)
+    .await
+    .unwrap();
+    assert_eq!(frames, 1, "the notifier can publish the full row too");
+
     let inbox_rows = |su: PgPool| async move {
         let events: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM hosted_agent_inbox_event WHERE connection_id = $1",
@@ -2932,5 +3124,151 @@ async fn an_expired_hosted_proposal_is_swept_by_the_production_notifier_role_wit
         "one run reference, one counter step"
     );
 
+    db.finish().await;
+}
+
+// ADR-0217: seed the real card while the agent is seated. Later mutations model
+// rows an older deployment left behind, independently of new stop cleanup.
+async fn seed_dm_expiry_card(db: &ProdDb) -> (HostedRun, Uuid, Uuid) {
+    let seeded = seed_hosted_work_run(&db.su).await;
+    sqlx::query("UPDATE channel SET kind='dm',dm_key='admitted:' || id::text WHERE id=$1")
+        .bind(seeded.channel)
+        .execute(&db.su)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO dm_agent_admission(workspace_id,channel_id,agent_member_id,requested_by,trigger_message_id,required_human_ids,expires_at,admitted_at,admitted_after_seq) VALUES($1,$2,$3,$4,$5,ARRAY[$4::uuid],now()+interval '15 minutes',clock_timestamp(),1)")
+        .bind(seeded.workspace).bind(seeded.channel).bind(seeded.agent).bind(seeded.requester).bind(seeded.answer).execute(&db.su).await.unwrap();
+    sqlx::query("UPDATE channel_seq SET last_seq=(SELECT max(seq) FROM message WHERE channel_id=$1) WHERE channel_id=$1")
+        .bind(seeded.channel).execute(&db.su).await.unwrap();
+    let (approval, card) = add_dm_expiry_card(db, &seeded, seeded.parked_run).await;
+    (seeded, approval, card)
+}
+async fn add_dm_expiry_card(db: &ProdDb, seeded: &HostedRun, run: Uuid) -> (Uuid, Uuid) {
+    let (ws, channel, agent) = (seeded.workspace, seeded.channel, seeded.agent);
+    let app = db.role("momo_app", "momo_app_dev_pw").await;
+    let result=momo_db::with_tenant_tx(&app,ws,move |conn| Box::pin(async move {
+        let approval=Uuid::new_v4();
+        sqlx::query("INSERT INTO approval(id,workspace_id,run_id,channel_id,requested_by,action_type,payload,status,expires_at) VALUES($1,$2,$3,$4,$5,'tool_call','{}','pending',now()-interval '1 minute')")
+            .bind(approval).bind(ws).bind(run).bind(channel).bind(agent).execute(&mut *conn).await?;
+        let mut message=NewMessage::text(channel,agent,"pending card");
+        message.message_type=MessageType::ApprovalRequest; message.run_id=Some(run);
+        message.props=serde_json::json!({"status":"pending","approval_id":approval});
+        let card=send_message_in_tx(conn,ws,message).await?.message.id;
+        momo_agent::approval::attach_request_message_in_tx(conn,ws,approval,card).await?;
+        Ok((approval,card))
+    })).await.unwrap();
+    app.close().await;
+    result
+}
+
+#[tokio::test]
+#[ignore = "dedicated real PG; production notifier grants"]
+async fn dm_expiry_closes_legacy_cards_after_removal_suspension_and_retirement() {
+    let db = ProdDb::create().await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let role: String = sqlx::query_scalar("SELECT current_user::text")
+        .fetch_one(&notifier)
+        .await
+        .unwrap();
+    assert_eq!(role, "momo_notifier");
+    for state in ["removed", "suspended", "deleted"] {
+        let (seeded, approval, card) = seed_dm_expiry_card(&db).await;
+        if state == "removed" {
+            sqlx::query("UPDATE membership SET left_at=now() WHERE channel_id=$1 AND member_id=$2")
+                .bind(seeded.channel)
+                .bind(seeded.agent)
+                .execute(&db.su)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE dm_agent_admission SET revoked_at=now() WHERE channel_id=$1")
+                .bind(seeded.channel)
+                .execute(&db.su)
+                .await
+                .unwrap();
+        } else {
+            sqlx::query("UPDATE member SET status=$2::member_status WHERE id=$1")
+                .bind(seeded.agent)
+                .bind(state)
+                .execute(&db.su)
+                .await
+                .unwrap();
+        }
+        let pass = approval_sweep::sweep_expired_approvals(&notifier, 32)
+            .await
+            .unwrap();
+        assert_eq!(
+            (pass.expired, pass.failed),
+            (1, 0),
+            "old {state} card must settle as notifier: {pass:?}"
+        );
+        let closed: bool=sqlx::query_scalar("SELECT a.status='expired' AND m.props->>'status'='expired' AND r.status='timed_out' FROM approval a JOIN message m ON m.id=a.request_message_id JOIN agent_run r ON r.id=a.run_id WHERE a.id=$1 AND m.id=$2")
+            .bind(approval).bind(card).fetch_one(&db.su).await.unwrap();
+        assert!(closed, "both the card and run close after {state}");
+        let lines: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM message WHERE channel_id=$1 AND run_id=$2 AND type='tool_result'",
+        )
+        .bind(seeded.channel)
+        .bind(seeded.parked_run)
+        .fetch_one(&db.su)
+        .await
+        .unwrap();
+        assert_eq!(lines, 0, "no fresh agent utterance after {state}");
+        let audited: i64=sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='approval.expired' AND target_id=$2")
+            .bind(seeded.workspace).bind(approval).fetch_one(&db.su).await.unwrap();
+        assert_eq!(audited, 1, "a skipped line still records the expiry");
+    }
+    notifier.close().await;
+    db.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "dedicated real PG; production notifier grants"]
+async fn dm_expiry_savepoint_isolates_one_bad_card_and_retries_it_next_tick() {
+    let db = ProdDb::create().await;
+    let (seeded, bad, bad_card) = seed_dm_expiry_card(&db).await;
+    let other_run = Uuid::new_v4();
+    sqlx::query("INSERT INTO agent_run(id,workspace_id,agent_member_id,channel_id,status,input,idempotency_key) VALUES($1,$2,$3,$4,'awaiting_approval','{}',$5)")
+        .bind(other_run).bind(seeded.workspace).bind(seeded.agent).bind(seeded.channel).bind(other_run.to_string()).execute(&db.su).await.unwrap();
+    let (good, good_card) = add_dm_expiry_card(&db, &seeded, other_run).await;
+    // Fail during card UPDATE, after the approval status and its side effects
+    // were written. This proves rollback as well as continuation.
+    let fault=format!("CREATE FUNCTION r2_fail_card() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.id='{bad_card}'::uuid THEN RAISE EXCEPTION 'injected card update failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER r2_fail_card BEFORE UPDATE ON message FOR EACH ROW EXECUTE FUNCTION r2_fail_card();");
+    sqlx::raw_sql(&fault).execute(&db.su).await.unwrap();
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let first = approval_sweep::sweep_expired_approvals(&notifier, 32)
+        .await
+        .unwrap();
+    assert_eq!(
+        (first.expired, first.failed),
+        (1, 1),
+        "one failure cannot abort its neighbor: {first:?}"
+    );
+    for (id, card, want) in [(bad, bad_card, "pending"), (good, good_card, "expired")] {
+        let (ledger,face):(String,String)=sqlx::query_as("SELECT a.status::text,m.props->>'status' FROM approval a JOIN message m ON m.id=a.request_message_id WHERE a.id=$1 AND m.id=$2")
+            .bind(id).bind(card).fetch_one(&db.su).await.unwrap();
+        assert_eq!(
+            (ledger.as_str(), face.as_str()),
+            (want, want),
+            "atomic settlement for {id}"
+        );
+    }
+    sqlx::raw_sql("DROP TRIGGER r2_fail_card ON message; DROP FUNCTION r2_fail_card();")
+        .execute(&db.su)
+        .await
+        .unwrap();
+    let second = approval_sweep::sweep_expired_approvals(&notifier, 32)
+        .await
+        .unwrap();
+    assert_eq!(
+        (second.expired, second.failed),
+        (1, 0),
+        "the failed approval is retried next tick"
+    );
+    let done: bool=sqlx::query_scalar("SELECT a.status='expired' AND r.status='timed_out' FROM approval a JOIN agent_run r ON r.id=a.run_id WHERE a.id=$1").bind(bad).fetch_one(&db.su).await.unwrap();
+    assert!(
+        done,
+        "the retry commits rather than merely skipping the failed card"
+    );
+    notifier.close().await;
     db.finish().await;
 }

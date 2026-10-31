@@ -6634,3 +6634,9 @@ export async function markInboxReadAll(
 export function isInboxAbsent(error: unknown): boolean {
   return error instanceof ApiError && isInboxAbsentStatus(error.status);
 }
+
+
+/** ADR-0217: any human DM participant may remove a consented agent. */
+export async function removeDmAgent(workspaceId: string, channelId: string, agentId: string): Promise<void> {
+  await request<unknown>(`/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/dm-agents/${encodeURIComponent(agentId)}`, { method: "DELETE" });
+}

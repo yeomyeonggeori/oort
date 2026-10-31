@@ -12,7 +12,7 @@ import {roleLabel, type RoleLabels} from '@momo/core/features/directory/model';
 import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusDot';
 import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
 import type {Channel, RosterMember} from '@momo/core/lib/api';
-import React from 'react';
+import React, {useState} from 'react';
 import {Image, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {AVATAR_INITIAL_MAX_SCALE, Screen, Sentence} from '../../design/atoms';
@@ -67,6 +67,8 @@ import {CONVERSATION_INFO_LABEL} from './conversationMenu';
 const PRIVATE_FACE_LABEL = '비공개 채널';
 
 export interface ConversationInfoPageProps {
+  dmAgents?: RosterMember[];
+  onRemoveDmAgent?: (id: string) => Promise<void>;
   kind: Channel['kind'];
   /** 대화의 이름 — DM 은 상대 이름, 채널은 `#` 없는 이름. */
   title: string;
@@ -120,6 +122,8 @@ export function ConversationInfoPage({
 }
 
 function InfoBody({
+  dmAgents = [],
+  onRemoveDmAgent,
   kind,
   title,
   directory,
@@ -146,6 +150,15 @@ function InfoBody({
   // ‹ · VoiceOver escape 는 같은 길로 한 겹만 벗긴다: 들어온 길의 반대로 물러난 뒤 `onClose`(층 밖에서는 곧바로 `onClose`).
   const closeLayer = useLayerClose();
   const goBack = closeLayer ?? onClose;
+  const [dmPending, setDmPending] = useState<string | null>(null);
+  const [dmError, setDmError] = useState<string | null>(null);
+  const removeAgent = async (id: string) => {
+    if (!onRemoveDmAgent) return;
+    setDmPending(id); setDmError(null);
+    try { await onRemoveDmAgent(id); }
+    catch { setDmError('에이전트를 내보내지 못했어요. 연결을 확인하고 다시 시도해 주세요.'); }
+    finally { setDmPending(null); }
+  };
   const isDm = kind === 'dm';
   const pageTitle = isDm ? CONVERSATION_INFO_LABEL.dm : CONVERSATION_INFO_LABEL.channel;
 
@@ -303,6 +316,10 @@ function InfoBody({
                   ) : null}
                 </GroupCard>
               ) : null}
+              {dmAgents.length > 0 && onRemoveDmAgent ? <GroupCard label="에이전트 · 이후 대화를 봐요" testID="conversation-info-dm-agents">
+                {dmAgents.map(agent => <ListRow key={agent.id} title={dmPending === agent.id ? '내보내는 중이에요' : `${agent.displayName} (@${agent.handle}) 내보내기`} tone="danger" busy={dmPending === agent.id} disabled={dmPending !== null} onPress={() => { void removeAgent(agent.id); }} testID="dm-agent-remove" />)}
+                {dmError !== null ? <Sentence style={styles.error} testID="dm-agent-remove-error">{dmError}</Sentence> : null}
+              </GroupCard> : null}
               {mute !== undefined ? <GroupCard>{row(mute)}</GroupCard> : null}
               {copies.length > 0 ? (
                 <GroupCard label={channelActionClusterTitle('copy')} testID="conversation-info-copy">
