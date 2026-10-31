@@ -123,6 +123,35 @@ export function dmPeer(
 }
 
 /**
+ * 셋 이상이 든 DM의 참여자 사실(ADR-0217: 모든 사람의 허락으로 에이전트가 들어와 그룹이 된 대화).
+ *
+ * `dmPeer`가 null이라는 사실만으로는 「그룹」과 「명부를 아직 못 받음」을 가를 수 없어서(둘 다 상대를 못 고른다) 인원은
+ * 따로 센다. 판정은 머리 이름(`channelLabelParts`의 「… · N명」)이 쓰는 것과 **같은 것**(`memberIds.length > 2`)이고 수도
+ * 같은 `memberIds.length`다: 머리가 3명이라 말하는데 소개 문구가 둘이라 말하는 일이 구조적으로 없다.
+ */
+export interface DmGroupFacts {
+  /** 활성 참여자 전체(나 포함, 에이전트 포함). 채널 DTO의 `memberIds`는 활성 전체다. */
+  count: number;
+  /** 그중 명부로 에이전트임을 아는 수. 명부에 없는 멤버는 세지 않는다: 모르는 것을 에이전트라 부르지 않는다. */
+  agentCount: number;
+}
+
+/** 셋 이상 DM이면 그 사실, 실제 1:1(둘 이하)이거나 DM이 아니면 null이다(그쪽은 `dmPeer`가 말한다). */
+export function dmGroupFacts(
+  channel: Channel,
+  directory: Directory
+): DmGroupFacts | null {
+  if (channel.kind !== "dm") return null;
+  const ids = channel.memberIds ?? [];
+  if (ids.length <= 2) return null;
+  return {
+    count: ids.length,
+    agentCount: ids.filter((id) => memberFor(directory, id)?.kind === "agent")
+      .length,
+  };
+}
+
+/**
  * The agent this channel answers **without an @mention**, or null.
  *
  * The server rule (goal B13 / QA H7, `momo_agent::dm::resolve_dm_addressing`) is

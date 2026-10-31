@@ -108,6 +108,77 @@ describe("team expressions web/desktop port", () => {
     fireEvent.click(button); await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
     expect(approve.mock.calls[0][0]).toMatchObject({ draftId: failed.draftId, revision: "2" });
   });
+  // #4912 (S3 묶음 검증 R4). 동작 줄이기에서는 큰 그림 대신 정지 썸네일을 그리므로 「보임」이 바뀌어도 그림 주소가
+  // 같다: <img>가 다시 만들어지지 않아 load가 다시 오지 않는다. 옛 코드는 load 시점에 보이는 경우에만 준비
+  // 신호를 냈고, 그림이 IntersectionObserver의 첫 보고보다 먼저 로드되면 등록·승인 단추가 영영 잠겼다.
+  // 움직임을 허용하면 보임이 주소를 큰 그림으로 바꿔 항상 보인 뒤에 로드되므로 그 경주가 없다.
+  // 제어되는 관찰자: 보고는 시험이 낸다.
+  function controlledVisibility() {
+    const callbacks: Array<(entries: Array<{ isIntersecting: boolean }>) => void> = [];
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: (entries: Array<{ isIntersecting: boolean }>) => void) { callbacks.push(callback); }
+      observe() {} disconnect() {}
+    });
+    return { report: (isIntersecting: boolean) => act(() => { for (const callback of callbacks) callback([{ isIntersecting }]); }) };
+  }
+  const reduceMotion = (matches: boolean) => vi.mocked(window.matchMedia).mockImplementation(() => ({ matches, addEventListener() {}, removeEventListener() {} }) as unknown as MediaQueryList);
+  it("unlocks registration when the preview finished loading before it was reported visible, under reduced motion", async () => {
+    reduceMotion(true); const sight = controlledVisibility();
+    const store = makeStore(); const draft = await prepare(store); const approve = vi.fn().mockResolvedValue(undefined);
+    const view = render(wrapper(store, <ExpressionDraftCard draft={draft} onReplace={() => {}} onApprove={approve} />));
+    fireEvent.click(view.getByRole("checkbox"));
+    const button = view.getByRole("button", { name: "팀 보관함에 등록" }) as HTMLButtonElement;
+    await waitFor(() => expect(view.container.querySelector("img")).not.toBeNull());
+    fireEvent.load(view.container.querySelector("img")!);
+    // 그려졌지만 아직 화면에 있다는 보고가 없다: #4846의 잠금은 그대로다.
+    expect(button.disabled).toBe(true);
+    expect(view.getByText(/그림을 불러오는 중이에요/)).toBeTruthy();
+    sight.report(true);
+    await waitFor(() => expect(button.disabled).toBe(false));
+    expect(view.queryByText(/그림을 불러오는 중이에요/)).toBeNull();
+    fireEvent.click(button); await waitFor(() => expect(approve).toHaveBeenCalledTimes(1));
+  });
+  it("keeps registration locked for a preview that loaded but was never on screen", async () => {
+    reduceMotion(true); controlledVisibility();
+    const store = makeStore(); const draft = await prepare(store); const approve = vi.fn().mockResolvedValue(undefined);
+    const view = render(wrapper(store, <ExpressionDraftCard draft={draft} onReplace={() => {}} onApprove={approve} />));
+    fireEvent.click(view.getByRole("checkbox"));
+    const button = view.getByRole("button", { name: "팀 보관함에 등록" }) as HTMLButtonElement;
+    await waitFor(() => expect(view.container.querySelector("img")).not.toBeNull());
+    fireEvent.load(view.container.querySelector("img")!);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(button.disabled).toBe(true); expect(view.getByText(/그림을 불러오는 중이에요/)).toBeTruthy();
+    fireEvent.click(button); expect(approve).not.toHaveBeenCalled();
+  });
+  const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  it("tells a reduced-motion preview is ready exactly once, whichever of load and visibility comes first", async () => {
+    const store = makeStore(); const draft = await prepare(store);
+    for (const loadFirst of [true, false]) {
+      cleanup(); store.clearImages(); reduceMotion(true); const sight = controlledVisibility(); const ready = vi.fn();
+      const view = render(wrapper(store, <ExpressionImage item={draft} size="large" onReady={ready} />));
+      const load = async () => { await waitFor(() => expect(view.container.querySelector("img")).not.toBeNull()); fireEvent.load(view.container.querySelector("img")!); };
+      if (loadFirst) { await load(); await settle(); expect(ready).not.toHaveBeenCalled(); sight.report(true); }
+      else { sight.report(true); await load(); }
+      await waitFor(() => expect(ready).toHaveBeenCalledTimes(1));
+      // 보임이 흔들리고 같은 그림이 다시 load돼도 신호는 더 오지 않는다.
+      sight.report(false); sight.report(true); fireEvent.load(view.container.querySelector("img")!); await settle();
+      expect(ready, `loadFirst=${loadFirst}`).toHaveBeenCalledTimes(1);
+    }
+  });
+  it("tells a motion-allowed preview is ready once, only for the large picture after it is visible", async () => {
+    reduceMotion(false); const sight = controlledVisibility(); const ready = vi.fn();
+    const store = makeStore(); const draft = await prepare(store);
+    const view = render(wrapper(store, <ExpressionImage item={draft} size="large" onReady={ready} />));
+    // 보이기 전에는 정지 썸네일이다. 이 그림이 로드돼도 신호는 없다.
+    await waitFor(() => expect(view.container.querySelector("img")?.src).toContain("data:image/png"));
+    fireEvent.load(view.container.querySelector("img")!); await settle();
+    expect(ready).not.toHaveBeenCalled();
+    sight.report(true);
+    await waitFor(() => expect(view.container.querySelector("img")?.src).toContain("data:image/gif"));
+    fireEvent.load(view.container.querySelector("img")!);
+    await waitFor(() => expect(ready).toHaveBeenCalledTimes(1));
+    await settle(); expect(ready).toHaveBeenCalledTimes(1);
+  });
   it("stops after four plays and restarts by keyboard activation", async () => {
     const store = makeStore(); await store.refresh();
     const item = store.getSnapshot().cache.items[0];
@@ -148,6 +219,20 @@ describe("team expressions web/desktop port", () => {
     const confirm = await view.findByRole("button", { name: "신고하고 숨기기" });
     expect(mutation).not.toHaveBeenCalled(); fireEvent.click(confirm);
     await waitFor(() => expect(mutation).toHaveBeenCalledTimes(1));
+  });
+  it("gives the delete and report confirmation the same inner spacing as the other confirm dialogs (#4912)", async () => {
+    // 삭제와 신고는 한 상자(`role="alertdialog"` DialogContent)를 같이 쓴다. 바탕 `DialogContent`는 안쪽 여백을
+    // 주지 않아서(호출부가 정한다) 이 상자만 클래스가 없으면 제목·본문·단추가 테두리에 붙는다. 다른 확인 창
+    // (메시지 삭제, 링크 미리보기 제거, 리마인더 삭제)은 모두 `gap-3 p-4`다. jsdom은 CSS를 계산하지 않으므로
+    // 자리는 클래스 토큰으로 잰다: 부분 문자열이 아니라 classList 항목이어야 `lg:p-4`·`p-40`이 통과하지 못한다.
+    const store = makeStore(); await store.refresh();
+    const view = render(wrapper(store, <TeamExpressionsPanel purpose="reaction" onPick={() => {}} />));
+    const trigger = view.getByRole("button", { name: "파티 앵무새 관리" });
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse", ctrlKey: false }); fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.click(await view.findByRole("menuitem", { name: "신고하기" }));
+    const dialog = await view.findByRole("alertdialog");
+    expect(dialog.classList.contains("p-4")).toBe(true);
+    expect(dialog.classList.contains("gap-3")).toBe(true);
   });
   it("completes team colon candidates with keyboard Enter without counting a preview as use", async () => {
     const store = makeStore(); await store.refresh();

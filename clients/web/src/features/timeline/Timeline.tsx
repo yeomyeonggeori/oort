@@ -38,6 +38,7 @@ import {
 } from "@momo/core/lib/api";
 import { prefersReducedMotion } from "@/app/sidebarPane";
 import type { Directory } from "@/features/workspace/useWorkspace";
+import type { DmGroupFacts } from "@momo/core/features/workspace/directory";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import {
@@ -232,6 +233,7 @@ export function Timeline({
   status,
   channelKind,
   peer,
+  dmGroup,
   lastReadSeq,
   unreadCount,
   recoveryMarkers,
@@ -282,6 +284,8 @@ export function Timeline({
   canAddMember?: boolean;
   /** The other participant, for a DM. */
   peer?: RosterMember | null;
+  /** 셋 이상 DM의 참여자 사실(ADR-0217). 소개 문구가 「둘만 봅니다」라 말하지 않게 한다. 1:1이면 비운다. */
+  dmGroup?: DmGroupFacts | null;
   lastReadSeq?: number | null;
   unreadCount?: number;
   recoveryMarkers?: RecoveryMarker[];
@@ -409,6 +413,9 @@ export function Timeline({
     welcomePhase === "stage" ||
     welcomePhase === "exiting" ||
     welcomePhase === "backstop";
+  // 값(수)으로 의존한다: 부모가 렌더마다 새 객체를 줘도 소개 행이 다시 만들어지지 않는다.
+  const groupCount = dmGroup?.count;
+  const groupAgents = dmGroup?.agentCount;
   const intro = useMemo(
     () =>
       buildChannelIntro({
@@ -416,11 +423,25 @@ export function Timeline({
         name: channelName ?? "",
         topic: channelTopic,
         peer: peer ?? null,
+        dmGroup:
+          groupCount === undefined
+            ? null
+            : { count: groupCount, agentCount: groupAgents ?? 0 },
         canAddMember: Boolean(canAddMember) && channelKind !== "dm",
         canConnectAgent: Boolean(canConnectAgent) && channelKind !== "dm",
         empty,
       }),
-    [channelKind, channelName, channelTopic, peer, canAddMember, canConnectAgent, empty]
+    [
+      channelKind,
+      channelName,
+      channelTopic,
+      peer,
+      groupCount,
+      groupAgents,
+      canAddMember,
+      canConnectAgent,
+      empty,
+    ]
   );
 
   const items = useMemo(() => {

@@ -1,11 +1,13 @@
 import React from 'react';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {StyleSheet} from 'react-native';
+import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import {
   AGENT_USAGE_COPY as COPY, fetchAgentUsage, saveSubscriptionFee,
   type AgentUsageResponse,
 } from '@momo/core/features/settings/agentUsage';
 import {AgentMonthlyReport, AgentUsageStatus} from '../src/features/agents/AgentUsage';
+import {SAFE_GUTTER} from '../src/design/tokens';
 
 jest.mock('@momo/core/features/settings/agentUsage', () => ({
   ...jest.requireActual('@momo/core/features/settings/agentUsage'),
@@ -60,4 +62,50 @@ it('lets admins set a shared fee, keeps a refused draft, and clears with null', 
   fireEvent.press(screen.getByRole('button', {name: '구독 정액 저장'}));
   await waitFor(() => expect(saveSubscriptionFee).toHaveBeenLastCalledWith('w', 'a', null));
   await screen.findByText(COPY.saved);
+});
+
+// #4912: 설정 안쪽 장(`SubPage`)의 스크롤은 가로 여백을 주지 않는다. 장마다 제 가터(`SAFE_GUTTER`)를 지는데
+// (`ThemePage` 의 `themePage`), 월 보고만 지지 않아 안내·기간·「다시 불러오기」·정액 입력·「저장」이 화면
+// 가장자리(x=0)에 붙었다. 레이아웃은 JS 렌더러에 없으므로 「그 다섯이 가터를 문 한 그릇 안에 있다」로 잰다.
+const flat = (node: {props: {style?: unknown}}) =>
+  (StyleSheet.flatten(node.props.style as never) ?? {}) as Record<string, unknown>;
+
+it('puts the loaded report, its note, range, refresh, fee input and save inside one SAFE_GUTTER container', async () => {
+  jest.mocked(fetchAgentUsage).mockResolvedValue(data(true)); mount();
+  const report = await screen.findByTestId('agent-monthly-report');
+  expect(flat(report).paddingHorizontal).toBe(SAFE_GUTTER);
+  const inside = within(report);
+  expect(inside.getByText(COPY.note)).toBeTruthy();
+  expect(inside.getByText('2026-10-01 ~ 2026-10-30 (UTC)')).toBeTruthy();
+  expect(inside.getByRole('button', {name: '다시 불러오기'})).toBeTruthy();
+  expect(inside.getByLabelText(COPY.subscription)).toBeTruthy();
+  expect(inside.getByRole('button', {name: '구독 정액 저장'})).toBeTruthy();
+});
+it('keeps the same gutter while the report is still loading', () => {
+  jest.mocked(fetchAgentUsage).mockReturnValue(new Promise(() => {}));
+  mount();
+  const state = screen.getByTestId('agent-monthly-report-state');
+  expect(flat(state).paddingHorizontal).toBe(SAFE_GUTTER);
+  expect(within(state).getByText(COPY.loading)).toBeTruthy();
+});
+it('keeps the same gutter when the report failed, retry button included', async () => {
+  jest.mocked(fetchAgentUsage).mockRejectedValue(new Error('unavailable')); mount();
+  await screen.findByText(COPY.error);
+  const state = screen.getByTestId('agent-monthly-report-state');
+  expect(flat(state).paddingHorizontal).toBe(SAFE_GUTTER);
+  expect(within(state).getByRole('button', {name: '다시 불러오기'})).toBeTruthy();
+});
+it('leaves the shared status line to its host: the gutter is the report page, not AgentUsageStatus', async () => {
+  // `AgentUsageStatus` 는 에이전트 목록·상세 화면 안에 서고 그 화면이 제 가터를 준다. 이 장의 가터를 같이 쓰는
+  // `group` 에 얹으면 목록에서 이중 인셋이 된다. 그 그릇이 가터를 지면 이 줄이 빨개진다.
+  jest.mocked(fetchAgentUsage).mockResolvedValue(data()); mount(true);
+  const status = await screen.findByTestId('agent-usage-status');
+  // 바로 윗 그릇 하나가 아니라 **모든 조상**을 본다: 합성 요소 한 겹이 사이에 끼어 있어도 이 단정이 비지 않는다.
+  interface Walkable {parent: Walkable | null; props: {style?: unknown}}
+  const gutters: unknown[] = [];
+  for (let node: Walkable | null = status as unknown as Walkable; node; node = node.parent) {
+    const value = flat(node).paddingHorizontal;
+    if (value !== undefined) {gutters.push(value);}
+  }
+  expect(gutters).toEqual([]);
 });

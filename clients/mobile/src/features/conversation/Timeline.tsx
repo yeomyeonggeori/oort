@@ -9,7 +9,7 @@ import {
 } from '@momo/core/features/timeline/model';
 import {chipsFor, type ReactionMap} from '@momo/core/features/timeline/reactions';
 import {isPinned, type PinMap} from '@momo/core/features/timeline/pins';
-import type {Directory} from '@momo/core/features/workspace/directory';
+import type {Directory, DmGroupFacts} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {
   AccessibilityInfo,
@@ -838,6 +838,7 @@ function TimelineInner({
   channelId,
   channelKind,
   peer,
+  dmGroup,
   lastReadSeq,
   unreadCount,
   recoveryMarkers,
@@ -901,6 +902,8 @@ function TimelineInner({
   channelId?: string;
   channelKind?: Channel['kind'];
   peer?: RosterMember | null;
+  /** 셋 이상 DM 의 참여자 사실(ADR-0217). 빈 그룹이 「둘만 봅니다」라 말하지 않게 한다 — 웹 `Timeline` 과 같은 코어 문구. 1:1 이면 비운다. */
+  dmGroup?: DmGroupFacts | null;
   lastReadSeq?: number | null;
   unreadCount?: number;
   recoveryMarkers?: RecoveryMarker[];
@@ -3272,7 +3275,7 @@ function TimelineInner({
   }
 
   if (status === 'ready' && empty) {
-    const copy = emptyOverride ?? emptyChannelCopy(channelKind, peer ?? null);
+    const copy = emptyOverride ?? emptyChannelCopy(channelKind, peer ?? null, dmGroup);
     return (
       <EmptyState
         headline={copy.headline}

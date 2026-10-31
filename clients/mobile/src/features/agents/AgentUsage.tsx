@@ -9,7 +9,7 @@ import {
 import {memberFor} from '@momo/core/features/workspace/directory';
 import {OutlineButton, Sentence} from '../../design/atoms';
 import {InputPill} from '../../design/sheetParts';
-import {font, line, space, type Palette} from '../../design/tokens';
+import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {useSession} from '../../session/useSession';
 import {useDirectory} from '../workspace/queries';
@@ -68,7 +68,7 @@ export function AgentMonthlyReport({workspaceId}: {workspaceId: string}) {
   const {directory} = useDirectory(workspaceId);
   const data = query.data;
   if (query.isPending || query.isError || query.fetchStatus === 'paused') {
-    return <View style={styles.group}>
+    return <View style={styles.state} testID="agent-monthly-report-state">
       <Sentence style={styles.detail} accessibilityLiveRegion="polite">{query.fetchStatus === 'paused' ? COPY.offline : query.isError ? COPY.error : COPY.loading}</Sentence>
       {query.isError && <OutlineButton label="다시 불러오기" onPress={() => {void query.refetch();}} />}
     </View>;
@@ -96,7 +96,12 @@ export function AgentMonthlyReport({workspaceId}: {workspaceId: string}) {
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
-  report: {gap: space.md},
+  // 설정 안쪽 장의 스크롤은 가로 여백을 주지 않는다(`SettingsPage` 의 `subContent`): 장마다 제 가터를 진다
+  // (`themePage`). 월 보고 장은 이 둘이 진다 - 다 불러온 보고서(`report`)와 불러오는 중·오류·오프라인 줄(`state`).
+  // 같은 이유로 `group` 에는 얹지 않는다: `AgentUsageStatus` 가 에이전트 목록·상세 안에서 쓰고(그 화면이 가터를
+  // 준다) `SubscriptionEditor` 는 `report` 안에 들어 있어서, 얹으면 이중 인셋이 된다.
+  report: {gap: space.md, paddingHorizontal: SAFE_GUTTER},
+  state: {gap: space.sm, paddingHorizontal: SAFE_GUTTER},
   group: {gap: space.sm},
   row: {gap: space.sm, paddingVertical: space.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: color.border},
   name: {fontSize: font.body, lineHeight: line.body, color: color.text, fontWeight: '600'},

@@ -230,6 +230,42 @@ describe('네 가지 상태', () => {
     expect(screen.getByText('김인턴님과의 대화를 시작하세요.')).toBeTruthy();
   });
 
+  it('빈 그룹 DM 은 「둘만 봅니다」라고 말하지 않는다 — 웹과 같은 코어 문구 (#4912)', () => {
+    // 에이전트가 모두의 허락으로 들어온 3명 대화(ADR-0217). `peer` 는 그룹에서 null 이라서 명부 대기와 같은 모양이다 —
+    // 그룹임은 `dmGroup` 이 말한다. 두 사람 DM 의 문장(위 테스트의 `peer` 경로)은 그대로다.
+    renderTimeline({
+      messages: [],
+      status: 'ready',
+      channelKind: 'dm',
+      peer: null,
+      dmGroup: {count: 3, agentCount: 1},
+    });
+    expect(
+      screen.getByText(
+        '여기 쓴 메시지는 이 대화에 있는 3명이 함께 봅니다. 에이전트는 이 대화에 들어온 뒤에 쓴 글만 봅니다.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/둘만 봅니다/)).toBeNull();
+    expect(screen.queryByText(/이 둘로 고정/)).toBeNull();
+  });
+
+  it.each([
+    ['그룹 사실이 없을 때', undefined],
+    ['그룹 사실이 null 일 때', null],
+    ['그룹 사실이 두 명일 때', {count: 2, agentCount: 0}],
+  ])('빈 두 사람 DM 의 안내 문장은 그대로다 — %s (#4912)', (_name, dmGroup) => {
+    renderTimeline({
+      messages: [],
+      status: 'ready',
+      channelKind: 'dm',
+      peer: member({id: OTHER, displayName: '김인턴', handle: 'intern-kim'}),
+      dmGroup,
+    });
+    expect(
+      screen.getByText('여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다.'),
+    ).toBeTruthy();
+  });
+
   it('오류는 다시 시도를 준다', () => {
     renderTimeline({status: 'error', onRetry: () => {}});
     expect(screen.getByTestId('timeline-error')).toBeTruthy();

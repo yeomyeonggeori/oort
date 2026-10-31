@@ -1,4 +1,5 @@
 import type { Channel, RosterMember } from "@momo/core/lib/api";
+import type { DmGroupFacts } from "@momo/core/features/workspace/directory";
 import { normalizeChannelTopic } from "@momo/core/features/channels/model";
 import {
   emptyChannelCopy,
@@ -81,6 +82,11 @@ export function buildChannelIntro(input: {
   name: string;
   topic?: string;
   peer: Pick<RosterMember, "displayName" | "kind"> | null;
+  /**
+   * 셋 이상 DM의 참여자 사실(`dmGroupFacts`). `peer`는 그룹에서 null이라 명부 대기와 같은 모양이므로 그룹임은 이것이 말한다.
+   * 생략하거나 null이면 두 사람 DM(또는 명부 대기)의 문장이다.
+   */
+  dmGroup?: DmGroupFacts | null;
   canAddMember: boolean;
   /**
    * 에이전트가 한 명도 없는 워크스페이스의 관리자(#3697). 빈 채널에 「에이전트 연결」을
@@ -90,7 +96,7 @@ export function buildChannelIntro(input: {
   /** Message count is 0. Actions and "첫…" copy only then. */
   empty: boolean;
 }): ChannelIntroView {
-  const copy = emptyChannelCopy(input.kind, input.peer);
+  const copy = emptyChannelCopy(input.kind, input.peer, input.dmGroup);
   const write: ChannelIntroActionView = {
     kind: "write",
     label: EMPTY_WRITE_ACTION_LABEL,
