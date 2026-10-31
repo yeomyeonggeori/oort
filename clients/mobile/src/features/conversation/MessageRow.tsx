@@ -118,7 +118,7 @@ import {
 } from 'react-native';
 import {GlassSurface} from '../../design/glass';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
-import {pressFace, ROW_FACE} from './rowFace';
+import {landedFace, pressFace, ROW_FACE} from './rowFace';
 import {usePalette, useStyles} from '../../design/theme';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
@@ -3129,11 +3129,6 @@ function MessageRowInner({
       {/* 틴트가 **물러나는 순간**의 덮개 (#3921). 서 있는 동안은 아무것도 그리지 않는다 —
           위 그릇이 배경으로 입는다. 첫 자식이라 내용 뒤에 깔린다. */}
       <LandedTintFade landed={landed === true} />
-      {/* 서 있는 착지의 테두리(`warnBorder` 1px). 면만으로는 라이트에서 경계가 안 선다 —
-          덮개(`LandedTintFade`)도 같은 테두리를 들고 녹는다. 절대 배치라 레이아웃 불변. */}
-      {landed ? (
-        <View pointerEvents="none" style={styles.rowLandedEdge} testID="message-row-landed-edge" />
-      ) : null}
       <Pressable
         // The tap rule is above. The row stays pressable even when it has no
         // door and no actions (a tombstone), because with the keyboard up every
@@ -4358,51 +4353,25 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 폰에서 「여기를 보라」를 맡고 있는 색은 앰버다: 미읽 구분선이 `warn` 으로
    * 그려진다(`dividerLineBoundary`) — 웹에서 그 경계가 accent 로 그려지는 것과 같은
    * 자리다. 그래서 대응은 **accent→accent 가 아니라 「미읽 경계를 그리는 색」→
-   * 「미읽 경계를 그리는 색」** 이고, 그 색의 가장 부드러운 단이 `warnSurface` 다.
+   * 「미읽 경계를 그리는 색」**(`warn`)이고, 면으로는 그 색의 옅은 알파다(아래 「값」).
    *
-   * ## 값이 옳은지 (실측)
+   * ## 값 — 경고색 10% 이하의 알파 면, 테두리 없음 (owner 2026-10-31, #4949)
    *
-   * `warnSurface`(#292415) 는 앱 배경(#17161a) 위에서 **1.16:1**. 같은 팔레트의
-   * 다른 부드러운 단들과 한 계단이고(`dangerSurface` 1.19 · `okSurface` 1.21),
-   * 웹의 착지 틴트가 자기 표면(`--surface`) 위에서 갖는 값(1.23:1)과 같은
-   * 자릿수다. 즉 이것은
-   * **띠가 아니라 물듦**이다 — 고도(`surface`, 1.10:1)로 오해되지 않을 만큼
-   * 색을 갖되, 행을 카드로 만들지 않는다.
+   * 옛 값은 `warnSurface`(`warn-soft`) 면 + `warnBorder` 1px 였다. 팀 사용자가 알림으로 들어올 때
+   * 「테두리가 진해서 어색하고 너무 오래 남는다」고 짚었다(v0.1.41). 색의 **가족**은 그대로다 —
+   * 위 판정(「누구의 뜻인가」: 「여기를 보라」는 `warn`, `accent` 는 「내가 한 것」)은 지금도 서고,
+   * 바뀐 것은 세기와 모양이다.
    *
-   * 그 「같은 자릿수」가 우연이 아닌 것도 #1164 부터다. 배경이 웹 `--surface` 로
-   * 옮겨가면서 여섯 상태 채움·테두리도 **배경 대비 같은 걸음**을 들고 따라갔고,
-   * 그래서 이 세 값의 배경 위 세기는 정렬 전과 같다. 안 따라갔다면 배경만 밝아져
-   * 물듦이 고도보다 조용해졌을 것이다(1.08 대 1.10 — 뜻이 뒤집힌다).
+   *   - 면: `landedFace` = `warn` 위 알파 25/255(≈9.8%, 「10% 이하」). `warnSurface` 는 칩들의 채움이라
+   *     여기서 물러났다 — 다크에서 바닥 대비 1.30~1.46:1 로 진했고 라이트에서는 1.02~1.04:1 로 안 보여서 테두리가
+   *     필요했던 것이 그 값이다. 알파 면은 87개 테마 조합(내장 3 테마 × 2 모드 × (기본+프리셋) + 카탈로그)에서
+   *     바닥 대비 1.10~1.29:1 이라 **면만으로 선다**.
+   *   - 테두리: 없다. 서 있는 면과 물러나는 덮개(`LandedTintFade`) 모두 같은 색이고 테두리를 들지 않는다.
+   *   - 강조색 말풍선과의 분리: 내 글의 말풍선(accent 채움)이 이 면 위에 앉아도 최악 조합(`noeul/light/default`)에서
+   *     2.91:1 이다(옛 면 3.05:1). 면이 옅어질수록 분리는 늘고(8% 2.99 · 6% 3.08), 가시성은 줄어(8% 1.08 · 6% 1.06)
+   *     둘이 맞바뀐다 — 가시성 1.10 을 지키는 쪽을 골랐다.
    *
-   * ## 현행 값과 색 판정 (#3921, 새벽하늘 실측)
-   *
-   * 위 두 절의 hex·거리·대비는 #1155·#1164 시점의 값이다. 팔레트는 그 뒤 core 표
-   * 새벽하늘(ADR-0189 D5)로 옮겨 갔고 웹의 `accent` 는 호박이 아니라 `signal`(주황)이
-   * 됐다. 같은 질문을 현행 값으로 다시 쟀다 — 배경은 각 클라의 목록 바닥(웹 `--pane`,
-   * 폰 `ConversationScreen` 의 `screen`: 다크 `bg`, 라이트 `surface`)이다.
-   *
-   *             웹 착지 틴트 `signal-soft`           폰 `warnSurface` (`warn-soft`)
-   *   다크      #392418 · 색상각 50° · 1.19:1       #372E1B · 색상각 85° · 1.30:1
-   *   라이트    #FBE9DE · 색상각 54° · 1.17:1       #FFF0DB · 색상각 76° · 1.11:1
-   *
-   * **판정: 색은 바꾸지 않는다.**
-   *
-   *   - 뜻이 그대로다. 웹 값과 같아지려면 `accentSurface`(= `signal-soft`)로 가야 하는데,
-   *     그 색은 폰에서 아직 「내가 한 것」(보내기 버튼 · 내 반응 칩)이다 — `conversationVisual`
-   *     H-2 가 못박은 뜻이고, 착지 틴트가 그 색을 입으면 `conversationHygiene` 의 착지 단정
-   *     (「도착한 행이 물든다」: 틴트는 `warnSurface`)이 빨갛다. 두 클라가 「여기를 보라」를
-   *     서로 다른 토큰이 맡는 것은 설계다(`approvalNote.ts` 색 계약: 웹 `--accent` ↔ 폰
-   *     `warn`). 세기는 같은 자릿수다(다크 +0.11 · 라이트 −0.06) — 모양이 아니라 물듦이라는
-   *     주장은 그대로 선다.
-   *   - 「경고처럼 읽혔다」의 원인은 색상이 아니라 **지속**이었다. 이 값은 대기 상태 칩
-   *     (「승인 대기」)의 채움과 **같은 값**이다. 칩은 「승인됨」으로 바뀌고 행은 앰버로
-   *     남으면 한 카드가 한 화면에서 「끝났다」와 「남았다」를 함께 말한다(성재 실측,
-   *     2026-10-16). 아래 세 규칙이 그 모순을 없앤다 — 2초 서 있다 녹는 색은 상태가
-   *     아니라 도착 신호로 읽힌다.
-   *   - 세기를 바꾸는 일은 이 변경의 몫이 아니다. 토큰 값(`warn-soft`)이 정하고, 바꾸려면
-   *     `docs/design-system/README.md` §6 의 절차다.
-   *
-   * ## 언제 사라지는가 — 결정이 먼저, 보인 뒤 2초, 손가락은 언제나 (#3921)
+   * ## 언제 사라지는가 — 결정이 먼저, 보인 뒤 1.5초, 손가락은 언제나 (#3921 · #4949)
    *
    * 이 절의 옛 제목은 「시간이 아니라 손가락」이었다. 시한을 버린 이유는 정당했다 — 웹의
    * 1,600ms 를 베끼면 타이머가 **이동 애니메이션과 경주한다**: 점프는
@@ -4414,30 +4383,25 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 영영 남았고, 승인 카드에서는 그것이 「아직 처리할 것」으로 읽혔다. 그래서 경주를 없애는
    * 쪽으로 규칙을 고쳤다 — 시한을 버리는 것이 아니라 **시한이 시작되는 순간을 고른다**.
    *
+   * 승인 카드도 이 규칙을 그대로 따른다(#4949 판단): 「결정할 때까지 남는」 강조로 되돌리지 않는다.
+   * 아직 결정되지 않았다는 사실은 카드의 칩(「승인 대기」)과 버튼이 말하고, 틴트는 **도착 신호**
+   * 하나만 맡는다 — 한 카드가 「끝났다」와 「남았다」를 함께 말하던 결함(#3921)이 바로 그 겸직에서
+   * 났다. 결정은 여전히 시한보다 먼저 거둔다(①).
+   *
    *   1. 승인이 결정되면 곧바로. 착지한 행이 승인 요청이고 그 승인이 결정됐다(영수증 ·
    *      카드 상태 · 대기 원장에서 사라짐)는 것은 이 행의 틴트가 약속한 「아직 할 일이
    *      있다」가 거짓이 됐다는 뜻이다. 판정은 `landedHighlight.ts`.
-   *   2. 이동이 **끝난 뒤** 2초. 시계는 점프의 이동이 멎은 순간(`Timeline` 의
+   *   2. 이동이 **끝난 뒤** 1.5초(`LANDED_HOLD_MS`). 시계는 점프의 이동이 멎은 순간(`Timeline` 의
    *      `endJumpTravel` → `onLanded`)에 켜진다 — 애니메이션과 `onScrollToIndexFailed`
    *      회복이 모두 지난 뒤다. 시계가 켜지기 전에는 경주할 시계가 없다.
    *   3. 손가락(`onScrollBeginDrag`). 사람이 화면을 다시 가져가면 「방금 여기로 왔다」는
    *      더는 사실이 아니다. #1076 부터의 규칙이고 시계의 앞이든 뒤든 먼저 온다.
    *
    * 물러나는 모양은 `LandedTintFade` 가 든다: 그릇이 배경을 벗는 그 커밋에 같은 색의
-   * 덮개가 불투명도 1 에서 0 으로 녹는다. 「동작 줄이기」면 덮개 없이 즉시다.
+   * 덮개가 불투명도 1 에서 0 으로 녹는다(0.24초). 「동작 줄이기」면 덮개 없이 즉시다.
    */
-  // 모서리는 그릇(`row`)이 이미 든다 — 서 있는 착지는 그 상자에 색만 입힌다.
-  rowLanded: {backgroundColor: color.warnSurface},
-  rowLandedEdge: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    borderRadius: ROW_FACE.radius,
-    borderWidth: ROW_FACE.edge,
-    borderColor: color.warnBorder,
-  },
+  // 모서리는 그릇(`row`)이 이미 든다 — 서 있는 착지는 그 상자에 색만 입힌다. 테두리는 없다(#4949).
+  rowLanded: {backgroundColor: landedFace(color)},
   // 그룹 사이는 `CONV.groupGap`. 안쪽이 이미 절반씩 물고 있으므로 차이만 더한다.
   /**
    * 작성자가 바뀌는 자리의 틈. 시안 `.a-m{margin-bottom:16px}` — 두 행의 안쪽 패딩

@@ -88,6 +88,33 @@ import {RequestThinkingLine} from '../agents/RequestThinkingLine';
 import type {AgentRunProgress} from '@momo/core/lib/api';
 
 const noRefresh = async (): Promise<void> => {};
+
+/**
+ * 당김이 **꺼진 동안** 목록의 `refreshControl` 자리를 채우는 빈 요소 (#4949).
+ *
+ * 목록의 `refreshControl` prop 을 `undefined` 와 요소 사이로 오가게 하면 안 된다. RN 0.86 iOS 의
+ * `ScrollView` 는 컨트롤이 있을 때 `{refreshControl}{contentContainer}` 두 자식을, 없을 때
+ * `{contentContainer}` 하나를 그린다(`ScrollView.js` 1838~1858). 자식의 모양이 바뀌면 React 는 같은
+ * 자리의 첫 자식이 달라졌다고 보고 **내용 컨테이너를 통째로 내렸다 다시 세운다** — 모든 행이 다시
+ * 마운트되고 새 컨테이너는 높이 0 에서 다시 자란다. 목록은 바닥을 따라가는 중이었으므로 그 첫
+ * `onContentSizeChange` 에서 끝으로 활강한다: 앱에 돌아올 때마다 위에서 아래로 빠르게 훑는 현상이다
+ * (owner 10-31, v0.1.41).
+ *
+ * 방아쇠는 `pullEnabled` 가 연결 상태를 따라 뒤집히는 것이다 — 연결 복구 중에는 이력이 남은 방도
+ * 당겨서 다시 맞추게 열어 두기 때문이다(#4783). 앱 복귀는 소켓을 일부러 다시 여니(`resume`) 이력이 긴
+ * 방은 복귀 한 번에 두 번(복구 시작·끝) 뒤집혔다. 이력을 다 읽은 짧은 방은 늘 켜져 있어 겪지 않았고,
+ * 시험의 `ScrollView` 모형은 `[refreshControl, <View>]` 두 자리를 늘 고정해 그려서 이 차이를 보여 주지
+ * 못했다(`timelinePullStable.test.tsx` 가 실제 구조로 잰다).
+ *
+ * 그래서 꺼진 동안에는 **아무것도 그리지 않는 요소**를 같은 자리에 둔다. 자식은 늘 두 자리이고 바뀌는
+ * 것은 첫 자리의 내용뿐이라 내용 컨테이너는 그대로다. 네이티브에는 아무 뷰도 서지 않으므로 꺼진
+ * 목록은 예전처럼 당김 없이 그냥 튕긴다. iOS 전용이다(안드로이드는 컨트롤이 스크롤뷰를 감싸는
+ * 구조라 이 방법이 맞지 않는다 — 이 앱에는 안드로이드 대상이 없다).
+ */
+function NoPullSlot(): null {
+  return null;
+}
+const NO_PULL_SLOT = <NoPullSlot />;
 const NO_RUNS: readonly AgentRunProgress[] = [];
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
@@ -3449,7 +3476,10 @@ function TimelineInner({
       // 먼 「최신으로」가 가는 동안만 한 판·창을 넓힌다(#4689 원인 B, `FAR_LATEST_BATCH`). `undefined` 는 목록의 기본값(10·21)이다.
       maxToRenderPerBatch={widenTail ? FAR_LATEST_BATCH : undefined}
       windowSize={widenTail ? FAR_LATEST_WINDOW : undefined}
-      refreshControl={pullEnabled ? refreshControl : undefined}
+      // 당김이 꺼져도 자리는 비우지 않는다 — `NoPullSlot` 머리말. `onRefresh` 가 없는 표면(스레드 패널)은 처음부터 없다.
+      refreshControl={
+        onRefresh === undefined ? undefined : pullEnabled ? refreshControl : NO_PULL_SLOT
+      }
       onScroll={pullScroll.onScroll}
       // 탭 판정(#4614): 읽기만 하는 터치 처리기 넷. 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
       onTouchStart={tapTouch.onTouchStart}

@@ -33,7 +33,10 @@ import {
   resetTimelineRenderItemCount,
   timelineRenderItemCount,
 } from '../src/features/conversation/Timeline';
-import {DISPLAY_GRACE_MS} from '../src/realtime/connectionDisplay';
+import {
+  CONNECTING_BAND_DELAY_MS,
+  DISPLAY_GRACE_MS,
+} from '../src/realtime/connectionDisplay';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -611,8 +614,10 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
       client.state = 'connecting';
       client.__emit('connecting', {code: 1, reason: 'transport closed'});
     });
-    // #4783은 복구를 숨기는 대신 10초 동안 「연결 중」을 보인다(PR의 의도된 표시 변경).
-    // 띠가 없다는 옛 기대만 문장 전환으로 바꾼다. 두 상태 모두 같은 흐름 밖 층이어야 한다.
+    // #4783은 복구를 숨기는 대신 「연결 중」을 보였고, #4949(owner 10-31)는 끊긴 첫 1초는 말이 없게 했다.
+    // 그래서 띠는 1초부터 「연결 중…」, 10초에 「끊겼습니다」다. 두 상태 모두 같은 흐름 밖 층이어야 한다.
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
+    await settle(CONNECTING_BAND_DELAY_MS);
     const header = screen.getByTestId('conversation-header');
     const connectingLayer = within(header).getByTestId('connection-banner-layer');
     expect(within(connectingLayer).getByTestId('connection-banner')).toHaveTextContent('연결 중…');
@@ -621,7 +626,7 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     expect(within(connectingLayer).getByTestId('connection-banner').props.accessibilityRole).toBe('text');
     fireEvent(header, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 393, height: 124}}});
     expect(flat(connectingLayer.props.style)).toMatchObject({position: 'absolute', top: 124});
-    await settle(DISPLAY_GRACE_MS - 1_000);
+    await settle(DISPLAY_GRACE_MS - CONNECTING_BAND_DELAY_MS - 1_000);
     expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결 중…');
     await settle(2_000);
 
@@ -655,6 +660,46 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     await settle(25);
     expect(screen.queryByTestId('connection-banner')).toBeNull();
     expect(screen.queryByTestId('connection-banner-layer')).toBeNull();
+  });
+
+  it('1초 안에 이어지는 재연결은 띠를 세우지 않고, 1초를 넘기면 그때부터 선다 (#4949)', async () => {
+    await openDm();
+    const client = socket();
+    const drop = async () => {
+      await act(async () => {
+        client.state = 'connecting';
+        client.__emit('connecting', {code: 1, reason: 'transport closed'});
+      });
+    };
+    const heal = async () => {
+      await act(async () => {
+        client.state = 'connected';
+        client.__emit('connected', {});
+      });
+    };
+
+    // 0.6초: 끊긴 순간에도, 이어질 때까지도, 이어진 뒤 한참 지나서도 띠는 한 번도 서지 않는다.
+    await drop();
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
+    await settle(CONNECTING_BAND_DELAY_MS - 400);
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
+    await heal();
+    await settle(CONNECTING_BAND_DELAY_MS + 500);
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
+
+    // 1.5초: 999ms 까지는 조용하고 1초가 되는 순간 「연결 중…」이 선다. 이어지면 곧 걷힌다.
+    await drop();
+    await settle(CONNECTING_BAND_DELAY_MS - 1);
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
+    await settle(1);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결 중…');
+    await settle(500);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결 중…');
+    await heal();
+    await settle(25);
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
+    // 깨뜨리면(각각): `CONNECTING_BAND_DELAY_MS` 를 0 으로 하거나 `onBand` 를 `onStatus` 로 이으면 첫 단정이 빨갛다 ·
+    //                 1초 문턱을 2초로 늘리면 `settle(1)` 뒤 단정이 빨갛다.
   });
 
   it('끊김 띠를 누르면 전송의 resume 과 같은 길로 같은 클라이언트가 새 토큰으로 다시 붙는다 (#4895)', async () => {

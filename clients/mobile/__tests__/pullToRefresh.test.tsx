@@ -9,6 +9,7 @@ import '../src/boot/coreHost';
 import AppShell from '../src/shell/AppShell';
 import HostedConnectionsScreen from '../src/screens/HostedConnectionsScreen';
 import {SessionProvider} from '../src/session/useSession';
+import {CONNECTING_BAND_DELAY_MS} from '../src/realtime/connectionDisplay';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {
@@ -187,6 +188,15 @@ function pull(surfaceTestID: string) {
   });
 }
 
+/**
+ * 목록의 당김이 **받는 중**인가. 실제 컨트롤만 `onRefresh` 를 든다. 당김이 꺼져도 `refreshControl` 자리는 비지
+ * 않는다(빈 요소) — 자리를 비웠다 채우면 RN iOS 가 내용 컨테이너를 통째로 다시 세운다(#4949, `Timeline` 의 `NoPullSlot`).
+ */
+function timelinePullIsLive(): boolean {
+  const control = screen.getByTestId('timeline-list').props.refreshControl;
+  return typeof control?.props?.onRefresh === 'function';
+}
+
 const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
@@ -324,28 +334,33 @@ describe('대화 당겨서 다시 맞추기 — owner 10-30 (#4783)', () => {
     expect(client.connectCount).toBe(connects + 1);
   });
 
-  it.each([0, 10_000])('연결 복구 %dms 뒤에도 이전 이력이 남은 방을 당기면 다시 맞춘다', async elapsedMs => {
+  it.each([CONNECTING_BAND_DELAY_MS, 10_000])('연결 복구 %dms 뒤에도 이전 이력이 남은 방을 당기면 다시 맞춘다', async elapsedMs => {
     const fetchMock = installFetch({timelineHasOlder: true});
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
     fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
     await waitFor(() => expect(screen.getByTestId('timeline-list')).toBeTruthy());
-    expect(screen.getByTestId('timeline-list').props.refreshControl).toBeUndefined();
+    expect(timelinePullIsLive()).toBe(false);
     const clients = (jest.requireMock('centrifuge') as {
       __clients: {connectCount: number; disconnect: () => void}[];
     }).__clients;
     const client = clients[clients.length - 1];
     act(() => {
       client.disconnect();
-      jest.advanceTimersByTime(elapsedMs);
+      jest.advanceTimersByTime(CONNECTING_BAND_DELAY_MS - 1);
     });
-    await waitFor(() => expect(screen.getByTestId('timeline-list').props.refreshControl).toBeTruthy());
+    // 끊긴 첫 1초는 띠가 조용하고(#4949) 당김의 문도 그대로다 — 「연결 복구 중」은 사람이 보는 띠가 선 동안이다.
+    expect(timelinePullIsLive()).toBe(false);
+    act(() => {
+      jest.advanceTimersByTime(elapsedMs - (CONNECTING_BAND_DELAY_MS - 1));
+    });
+    await waitFor(() => expect(timelinePullIsLive()).toBe(true));
     const connects = client.connectCount;
     const reads = callsTo(fetchMock, '/messages');
     pull('timeline-list');
     await waitFor(() => expect(callsTo(fetchMock, '/messages')).toBeGreaterThan(reads));
     expect(client.connectCount).toBe(connects + 1);
-    await waitFor(() => expect(screen.getByTestId('timeline-list').props.refreshControl).toBeUndefined());
+    await waitFor(() => expect(timelinePullIsLive()).toBe(false));
   });
 
   it('연결됐고 더 읽을 이전 이력이 있으면 당김 대신 이전 대화를 불러온다', async () => {
@@ -354,7 +369,7 @@ describe('대화 당겨서 다시 맞추기 — owner 10-30 (#4783)', () => {
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
     fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
     await waitFor(() => expect(screen.getByTestId('timeline-list')).toBeTruthy());
-    expect(screen.getByTestId('timeline-list').props.refreshControl).toBeUndefined();
+    expect(timelinePullIsLive()).toBe(false);
     fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
     const reads = callsTo(fetchMock, '/messages');
     fireEvent(screen.getByTestId('timeline-list'), 'startReached', {distanceFromStart: 0});
