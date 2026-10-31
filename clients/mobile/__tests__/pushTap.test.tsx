@@ -36,8 +36,8 @@ import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
 // 이 파일은 알림이 **어디에 착지하는가**를 잰다. 착지 틴트가 스스로 물러나는 시한(이동이
-// 끝난 뒤 2초, #3921)은 `landedHighlight.test.tsx` 가 가짜 시계로 잰다. 여기서는 실시계
-// 위에서 「제목을 기다린 뒤 `landedIds()`」를 읽는데, 차가운 워커에서 그 사이가 2초를
+// 끝난 뒤 1.5초, #3921·#4949)은 `landedHighlight.test.tsx` 가 가짜 시계로 잰다. 여기서는 실시계
+// 위에서 「제목을 기다린 뒤 `landedIds()`」를 읽는데, 차가운 워커에서 그 사이가 1.5초를
 // 넘으면 착지가 정상이어도 틴트가 이미 물러나 있다 — 관측이 시한에 기대지 않게 시한만
 // 늘려 둔다. 나머지(결정·손가락)는 진짜 그대로다.
 jest.mock('../src/features/conversation/landedHighlight', () => ({

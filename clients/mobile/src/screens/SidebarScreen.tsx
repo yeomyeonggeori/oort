@@ -76,6 +76,7 @@ import {
   type SidebarRow,
   type SidebarSection,
 } from '../features/sidebar/rows';
+import {CHIP_TONE, type ChipTone, type RowChip} from '../features/sidebar/rowEmphasis';
 import {useGoneUnreadVerdicts} from '../features/sidebar/useGoneUnreadVerdicts';
 import {dmClosedEntries, dmClosureMode, dmVerdicts} from '../features/sidebar/dmVerdicts';
 import {DmClosedSheet} from '../features/sidebar/DmClosedSheet';
@@ -1203,13 +1204,14 @@ function Row({
       if (actionTarget !== null) onOpenActions(actionTarget);
     },
   });
-  const unread = row.unreadCount > 0 || row.mentionCount > 0;
+  // 이름·아이콘의 회색과 굵기, 오른쪽 칩은 `rows.ts` 가 줄마다 계산해 둔 한 값이다(`rowEmphasis.ts`).
+  const {emphasis} = row;
   let lead: React.ReactNode;
   if (row.kind === 'channel') {
     lead = (
       <Image
         source={row.isPrivate ? HOME_ICONS.lock : HOME_ICONS.hash}
-        style={[styles.icon22, {tintColor: unread ? palette.text : palette.icon}]}
+        style={[styles.icon22, {tintColor: emphasis.dim ? palette.textMuted : palette.text}]}
         testID={row.isPrivate ? 'home-row-lock' : 'home-row-hash'}
       />
     );
@@ -1272,8 +1274,8 @@ function Row({
         <Text
           style={[
             styles.rowTitle,
-            unread && styles.rowTitleUnread,
-            row.muted && !unread && styles.rowTitleMuted,
+            emphasis.bold && styles.rowTitleUnread,
+            emphasis.dim && styles.rowTitleMuted,
           ]}
           numberOfLines={1}
           ellipsizeMode="tail">
@@ -1287,22 +1289,49 @@ function Row({
       </View>
       {busy ? (
         <ActivityIndicator color={palette.textMuted} testID="home-row-busy" />
-      ) : row.mentionCount > 0 ? (
-        // 멘션이 있으면 잉크 `@N` 하나가 선다(시안 `.a-badge.at`). 안 읽은 수는
-        // 굵은 이름과 낭독 라벨이 함께 진다 — 배지 둘을 나란히 세우지 않는다.
-        <View style={[styles.badge, styles.badgeAt]} testID="home-badge-mention">
-          <Text style={[styles.badgeText, styles.badgeAtText]} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-            @{row.mentionCount > 99 ? '99+' : row.mentionCount}
-          </Text>
-        </View>
-      ) : row.unreadCount > 0 ? (
-        <View style={styles.badge} testID="home-badge-unread">
-          <Text style={styles.badgeText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-            {row.unreadCount > 99 ? '99+' : row.unreadCount}
-          </Text>
-        </View>
+      ) : emphasis.chip !== null ? (
+        <RowChipView chip={emphasis.chip} />
       ) : null}
     </Pressable>
+  );
+}
+
+/** 칩마다의 testID. 키가 이름 붙은 숫자(`CHIP_TONE`)라 이 표에는 문자열 비교가 없다. */
+const CHIP_TEST_ID: Readonly<Record<ChipTone, string>> = {
+  [CHIP_TONE.mention]: 'home-badge-mention',
+  [CHIP_TONE.count]: 'home-badge-unread',
+  [CHIP_TONE.muted]: 'home-badge-muted',
+};
+
+/**
+ * 줄 오른쪽의 개수 칩(시안 `.a-badge`). 셋 중 하나다: 멘션은 잉크 `@N`(시안 `.a-badge.at`), 안 읽음은 신호색 `N`, 음소거는
+ * 중성으로 흐린 칩(`surfaceMuted` 위 `textMuted`) — 신호색·잉크를 입지 않는다. 칩 둘을 나란히 세우지 않는다: 멘션이 있으면
+ * 하나(`@N`)이고 안 읽은 수는 굵은 이름과 낭독 라벨이 함께 진다.
+ *
+ * 큰 글씨에서 잘리지 않는 이유(구조): 높이·너비는 `minHeight`·`minWidth` 뿐이라 글자가 크면 칩이 **자란다**, 줄어들지 않는
+ * flex 자식이라 모자란 폭은 이름(`flexShrink: 1`, 한 줄 말줄임)이 먼저 내준다, 글자는 이름 아닌 컨트롤 글자의 상한
+ * (`BAR_CONTROL_MAX_SCALE`)을 따른다.
+ */
+function RowChipView({chip}: {chip: RowChip}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const box =
+    chip.tone === CHIP_TONE.mention
+      ? styles.badgeAt
+      : chip.tone === CHIP_TONE.muted
+        ? styles.badgeMuted
+        : null;
+  const ink =
+    chip.tone === CHIP_TONE.mention
+      ? styles.badgeAtText
+      : chip.tone === CHIP_TONE.muted
+        ? styles.badgeMutedText
+        : null;
+  return (
+    <View style={[styles.badge, box]} testID={CHIP_TEST_ID[chip.tone]}>
+      <Text style={[styles.badgeText, ink]} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+        {chip.glyphs}
+      </Text>
+    </View>
   );
 }
 
@@ -1806,8 +1835,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     backgroundColor: color.accent,
   },
   badgeAt: {backgroundColor: color.primary},
+  // 음소거한 줄의 칩: 신호색도 잉크도 아닌 중성 채움 위의 흐린 글자. 새 토큰 없이 기존 둘의 조합이라 대비(AA 4.5)는 `home.test.tsx` 의 음소거 시험이 두 스킴에서 잰다.
+  badgeMuted: {backgroundColor: color.surfaceMuted},
   badgeText: {fontSize: font.meta, fontWeight: '700', color: color.onAccent},
   badgeAtText: {color: color.onPrimary},
+  badgeMutedText: {color: color.textMuted},
 
   // ---- 카드 ------------------------------------------------------------------
   cardPress: {marginBottom: HOME.cardBelow, borderRadius: HOME.cardRadius},

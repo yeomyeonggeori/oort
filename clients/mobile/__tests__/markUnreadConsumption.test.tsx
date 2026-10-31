@@ -403,7 +403,7 @@ describe('사이드바 행은 D3 합성 수를 그린다 — 서버 unread_count
     expect(read.unreadCount).toBe(0);
     const row = rowFor(read);
     expect(row?.unreadCount).toBe(MARK_AT_3_CURSOR_10.count);
-    expect(row?.accessibilityLabel).toBe('채널 general, 안 읽은 메시지 8개');
+    expect(row?.accessibilityLabel).toBe('#general, 새 메시지 8개');
   });
 
   it('마크가 커서보다 위면 수를 넓히지 않는다 (D3 의 min)', () => {
@@ -492,7 +492,7 @@ describe('데스크탑에서 마크한 채널이 폰에서도 안 읽음으로 �
     await mountShell();
     await settle();
     const row = screen.getByTestId(`sidebar-row-channel:${CH}`);
-    expect(row.props.accessibilityLabel).toBe('채널 general, 안 읽은 메시지 8개');
+    expect(row.props.accessibilityLabel).toBe('#general, 새 메시지 8개');
     // 배지는 스스로 라벨을 들지 않는다(행이 한 접근성 원소다, DS2-3). 보이는 수가 8이다.
     expect(within(row).getByTestId('home-badge-unread')).toHaveTextContent('8');
   });

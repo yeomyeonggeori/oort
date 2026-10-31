@@ -122,6 +122,37 @@ export const messageKeys = [
   "expressions.make.stepSend",
   "expressions.make.stepUpload",
   "expressions.make.submit",
+  "expressions.sheet.a11y",
+  "expressions.sheet.close",
+  "expressions.sheet.emptyEmoticon",
+  "expressions.sheet.emptyGif",
+  "expressions.sheet.emptyLegacy",
+  "expressions.sheet.emptyTeam",
+  "expressions.sheet.error",
+  "expressions.sheet.hintInsert",
+  "expressions.sheet.hintPreview",
+  "expressions.sheet.hintReact",
+  "expressions.sheet.loading",
+  "expressions.sheet.noMatch",
+  "expressions.sheet.offline",
+  "expressions.sheet.open",
+  "expressions.sheet.pickAgain",
+  "expressions.sheet.placeholderEmoji",
+  "expressions.sheet.placeholderTeam",
+  "expressions.sheet.retry",
+  "expressions.sheet.searchEmoji",
+  "expressions.sheet.searchEmoticon",
+  "expressions.sheet.searchGif",
+  "expressions.sheet.searchTeam",
+  "expressions.sheet.send",
+  "expressions.sheet.sending",
+  "expressions.sheet.tabEmoji",
+  "expressions.sheet.tabEmoticon",
+  "expressions.sheet.tabGif",
+  "expressions.sheet.tabs",
+  "expressions.sheet.tabTeam",
+  "expressions.sheet.title",
+  "expressions.sheet.unavailable",
   "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
@@ -317,6 +348,37 @@ export const argumentSpecs = {
   "expressions.make.stepSend": {},
   "expressions.make.stepUpload": {},
   "expressions.make.submit": {},
+  "expressions.sheet.a11y": {},
+  "expressions.sheet.close": {},
+  "expressions.sheet.emptyEmoticon": {},
+  "expressions.sheet.emptyGif": {},
+  "expressions.sheet.emptyLegacy": {},
+  "expressions.sheet.emptyTeam": {},
+  "expressions.sheet.error": {},
+  "expressions.sheet.hintInsert": {},
+  "expressions.sheet.hintPreview": {},
+  "expressions.sheet.hintReact": {},
+  "expressions.sheet.loading": {},
+  "expressions.sheet.noMatch": {},
+  "expressions.sheet.offline": {},
+  "expressions.sheet.open": {},
+  "expressions.sheet.pickAgain": {},
+  "expressions.sheet.placeholderEmoji": {},
+  "expressions.sheet.placeholderTeam": {},
+  "expressions.sheet.retry": {},
+  "expressions.sheet.searchEmoji": {},
+  "expressions.sheet.searchEmoticon": {},
+  "expressions.sheet.searchGif": {},
+  "expressions.sheet.searchTeam": {},
+  "expressions.sheet.send": {},
+  "expressions.sheet.sending": {},
+  "expressions.sheet.tabEmoji": {},
+  "expressions.sheet.tabEmoticon": {},
+  "expressions.sheet.tabGif": {},
+  "expressions.sheet.tabs": {},
+  "expressions.sheet.tabTeam": {},
+  "expressions.sheet.title": {},
+  "expressions.sheet.unavailable": {},
   "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
@@ -496,6 +558,37 @@ export interface MessageArgs {
   "expressions.make.stepSend": Record<string, never>;
   "expressions.make.stepUpload": Record<string, never>;
   "expressions.make.submit": Record<string, never>;
+  "expressions.sheet.a11y": Record<string, never>;
+  "expressions.sheet.close": Record<string, never>;
+  "expressions.sheet.emptyEmoticon": Record<string, never>;
+  "expressions.sheet.emptyGif": Record<string, never>;
+  "expressions.sheet.emptyLegacy": Record<string, never>;
+  "expressions.sheet.emptyTeam": Record<string, never>;
+  "expressions.sheet.error": Record<string, never>;
+  "expressions.sheet.hintInsert": Record<string, never>;
+  "expressions.sheet.hintPreview": Record<string, never>;
+  "expressions.sheet.hintReact": Record<string, never>;
+  "expressions.sheet.loading": Record<string, never>;
+  "expressions.sheet.noMatch": Record<string, never>;
+  "expressions.sheet.offline": Record<string, never>;
+  "expressions.sheet.open": Record<string, never>;
+  "expressions.sheet.pickAgain": Record<string, never>;
+  "expressions.sheet.placeholderEmoji": Record<string, never>;
+  "expressions.sheet.placeholderTeam": Record<string, never>;
+  "expressions.sheet.retry": Record<string, never>;
+  "expressions.sheet.searchEmoji": Record<string, never>;
+  "expressions.sheet.searchEmoticon": Record<string, never>;
+  "expressions.sheet.searchGif": Record<string, never>;
+  "expressions.sheet.searchTeam": Record<string, never>;
+  "expressions.sheet.send": Record<string, never>;
+  "expressions.sheet.sending": Record<string, never>;
+  "expressions.sheet.tabEmoji": Record<string, never>;
+  "expressions.sheet.tabEmoticon": Record<string, never>;
+  "expressions.sheet.tabGif": Record<string, never>;
+  "expressions.sheet.tabs": Record<string, never>;
+  "expressions.sheet.tabTeam": Record<string, never>;
+  "expressions.sheet.title": Record<string, never>;
+  "expressions.sheet.unavailable": Record<string, never>;
   "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;

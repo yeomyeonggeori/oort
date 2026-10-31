@@ -188,6 +188,7 @@ const afterClose = usePageSheetAction();
 | 새 채널 | `NewChannelSheet` | `PageSheet` **medium** | 입력 1 + 라디오 1묶음(2행). ✓ = 채널 만들기 | 시트 | #4458 |
 | AI | `AiSheet` | `PageSheet` **fit** | 행 ≤ 5, 모두 「다른 곳으로 가는 문」 — 누르면 시트가 먼저 내려간 뒤 이동(`usePageSheetAction`). 「개인」 표식·「내 맥 켜짐/꺼짐」 칩은 행의 오른쪽 노드(`ListRow trailing`)이고 글자는 행의 이름에도 든다. **큰 글씨(`STACK_PILL_SCALE` 1.5 부터)에서는 오른쪽 노드를 그리지 않고** 그 글자를 보조 줄 아래 제 줄로 내린다 — 칩이 폭을 먹어 이름 칸이 한 글자 폭으로 접히던 것(AX5·SE) | 시트(문 모음) | #4458 |
 | 메시지 고치기 | `MessageEditorSheet` | `PageSheet` **medium** | 입력 1(여러 줄). ✓ = 저장, X = 고치기 취소 | 시트 | #4458 (자체 `Modal` → 공용) |
+| 표현 고르기 | `ExpressionComposerPicker`(입력창 보내기 왼쪽 단추 `composer-expression`) | `PageSheet` large | 검색 하나(`InputPill`) · 네 탭(이모티콘·이모지·팀 이모지·GIF — 「상세」·「대화」 스위치와 같은 트랙이고 큰 글씨에서는 가로로 민다) · 격자. 이모티콘·GIF 는 큰 그림 미리보기 뒤 대화로 보내고 이모지·팀 이모지는 입력칸에 넣는다. 「＋ 추가하기」(#4891)의 안쪽 장은 이모티콘·팀 이모지 탭 안에서 목록을 대신하고 그동안 검색·탭 줄은 접힌다 | 시트(고르고 곧 닫히는 선택기, §1 규칙 4) | #4942 |
 | 닫은 대화 | `DmClosedSheet` | `PageSheet` **fit** | 목록(스크롤) · 대화 하나 = 행 하나(행 전체가 「다시 열기」·「열기」) | 시트(선택기) | #4458 (자체 `Modal` → 공용) |
 | 새 버전 안내 | `AppUpdateSheet`(`AppUpdateBanner.tsx`) | `PageSheet` **fit** | 행 1(스토어로 가기) + 안내 한 문단 | 시트 | #4458 (자체 `Modal` → 공용). 배너 자체에는 닫기가 없다 |
 | 업데이트 소식 | `ReleaseNotesSheet`(`features/releaseNotes/ReleaseNotesSheet.tsx`) | `PageSheet` **fit** | 업데이트 뒤 처음 열 때 **한 번** 올라온다(셸이 한가할 때만). 제목 · 버전과 공개일 · 한 문장 요약 · 이 폰에서 보이는 변화 제목 4줄까지 · 행 1(「자세히 보기」, `closesSheet`: 시트가 먼저 내린 뒤 설정의 소식 장이 열린다). 닫는 길은 공용 그대로고 글자 「닫기」 단추는 없다 | 시트 | #4937 |
