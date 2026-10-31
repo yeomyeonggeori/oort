@@ -873,12 +873,6 @@ export const catalog: MessageCatalog = {
       "value": "Back to settings"
     }
   ],
-  "mobile.locale.permissionNotice": [
-    {
-      "type": 0,
-      "value": "Permission prompts follow the iOS language setting. Changing the app language may not change these prompts immediately."
-    }
-  ],
   "mobile.locale.saving": [
     {
       "type": 0,
@@ -943,12 +937,6 @@ export const catalog: MessageCatalog = {
       "value": "Send reply"
     }
   ],
-  "settings.profile.languageBeta": [
-    {
-      "type": 0,
-      "value": "Beta"
-    }
-  ],
   "settings.profile.languageCurrent": [
     {
       "type": 0,
@@ -980,7 +968,7 @@ export const catalog: MessageCatalog = {
   "settings.profile.languagePartialNotice": [
     {
       "type": 0,
-      "value": "Screens that are not yet translated appear in Korean."
+      "value": "Some screens are still in Korean."
     }
   ],
   "settings.profile.languageRetry": [

@@ -692,7 +692,7 @@
     "clients/web/src/features/settings/FontFamilyRows.tsx": 52,
     "clients/web/src/features/settings/InviteSection.tsx": 21,
     "clients/web/src/features/settings/IssuedInviteCard.tsx": 13,
-    "clients/web/src/features/settings/LanguageRow.tsx": 20,
+    "clients/web/src/features/settings/LanguageRow.tsx": 19,
     "clients/web/src/features/settings/LeaveWorkspaceRow.tsx": 4,
     "clients/web/src/features/settings/LinkedDevicesList.tsx": 25,
     "clients/web/src/features/settings/LoginRelaySession.tsx": 11,
