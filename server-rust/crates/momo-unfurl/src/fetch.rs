@@ -16,6 +16,8 @@ use momo_webhook::{
 
 pub const HTML_MAX_BYTES: usize = 512 * 1024;
 pub const IMAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
+/// A site icon is shown at a few dozen pixels; ADR-0170 amendment D9 gives it a tenth of a picture.
+pub const ICON_MAX_BYTES: usize = 512 * 1024;
 pub const MAX_REDIRECTS: u32 = 3;
 pub const UNFURL_USER_AGENT: &str = "oort-unfurl/1";
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -30,6 +32,11 @@ pub enum FetchKind {
     /// only, on every hop**, and a refusal at the very first hop is told apart
     /// ([`FetchError::OriginBlocked`]) from a refusal after a redirect.
     Source,
+    /// A link card's site icon (ADR-0170 amendment 2026-10-31 D9). The guard is the picture's
+    /// (public addresses only, https in production, every hop re-checked, address pinned) and the
+    /// rules are narrower in two ways: **port 443 only, on every hop** (the rule `Source` has),
+    /// and a body of at most [`ICON_MAX_BYTES`]. The picture kind keeps its own rules.
+    Icon,
 }
 
 impl FetchKind {
@@ -37,6 +44,7 @@ impl FetchKind {
         match self {
             FetchKind::Html => HTML_MAX_BYTES,
             FetchKind::Image | FetchKind::Source => IMAGE_MAX_BYTES,
+            FetchKind::Icon => ICON_MAX_BYTES,
         }
     }
 }
@@ -208,7 +216,7 @@ impl PinnedGet for ReqwestGet {
 fn accept_for(kind: FetchKind) -> &'static str {
     match kind {
         FetchKind::Html => "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
-        FetchKind::Image | FetchKind::Source => "image/*,*/*;q=0.1",
+        FetchKind::Image | FetchKind::Source | FetchKind::Icon => "image/*,*/*;q=0.1",
     }
 }
 
@@ -266,8 +274,11 @@ async fn fetch_guarded<R: HostResolver, G: PinnedGet>(
         };
         // ADR-0218 D5 (planner, 10-30): an imported picture is fetched on 443 only, on
         // every hop. An explicit other port would let the status codes of this endpoint
-        // map a public host's open ports. Judged before any DNS query.
-        if kind == FetchKind::Source && parsed.port.is_some_and(|port| port != 443) {
+        // map a public host's open ports. Judged before any DNS query. A link card's site
+        // icon (ADR-0170 amendment D9) takes the same rule; the other preview kinds do not.
+        if matches!(kind, FetchKind::Source | FetchKind::Icon)
+            && parsed.port.is_some_and(|port| port != 443)
+        {
             return Err(blocked(redirects));
         }
         let addresses = validated_resolved_addresses(&parsed, resolver)
@@ -295,7 +306,9 @@ async fn fetch_guarded<R: HostResolver, G: PinnedGet>(
         }
         let content_type = response.content_type.unwrap_or_else(|| match kind {
             FetchKind::Html => "text/html".into(),
-            FetchKind::Image | FetchKind::Source => "application/octet-stream".into(),
+            FetchKind::Image | FetchKind::Source | FetchKind::Icon => {
+                "application/octet-stream".into()
+            }
         });
         return Ok(Fetched {
             final_url: parsed.absolute,
@@ -317,6 +330,99 @@ fn resolve_location(base: &str, location: &str) -> Result<String, FetchError> {
         return Err(FetchError::Blocked);
     }
     Ok(joined.to_string())
+}
+
+/// Test support for other modules: the REAL hop loop ([`fetch_guarded`], the same guard the
+/// production transport runs) over scripted answers, so a test can ask "did the guard let this
+/// reach a socket?" and count the answer. Nothing here dials the network: private literals are
+/// refused before DNS, and a name resolves to one fixed public address.
+#[cfg(test)]
+pub(crate) mod guard_fixtures {
+    use super::*;
+    use std::net::IpAddr;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    pub(crate) enum ScriptedReply {
+        Redirect(String),
+        Body {
+            content_type: &'static str,
+            body: Vec<u8>,
+        },
+    }
+
+    struct Fixed(Vec<IpAddr>);
+
+    impl HostResolver for Fixed {
+        async fn resolve(&self, _authority: &str) -> Result<Vec<IpAddr>, OutboundUrlError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// Answers the n-th request that gets past the guard with the n-th scripted reply (a plain
+    /// PNG-typed 200 once the script runs out) and counts those requests.
+    pub(crate) struct GuardedScript {
+        hops: AtomicU32,
+        replies: Vec<ScriptedReply>,
+        resolves_to: Vec<IpAddr>,
+    }
+
+    impl GuardedScript {
+        /// Every hostname resolves to one public address.
+        pub(crate) fn new(replies: Vec<ScriptedReply>) -> GuardedScript {
+            GuardedScript {
+                hops: AtomicU32::new(0),
+                replies,
+                resolves_to: vec!["93.184.216.34".parse().unwrap()],
+            }
+        }
+
+        /// Requests that passed the guard and reached the (scripted) socket.
+        pub(crate) fn hops(&self) -> u32 {
+            self.hops.load(Ordering::SeqCst)
+        }
+    }
+
+    struct Getter<'a>(&'a GuardedScript);
+
+    impl PinnedGet for Getter<'_> {
+        async fn get(
+            &self,
+            _url: &OutboundUrl,
+            _addr: SocketAddr,
+            _kind: FetchKind,
+        ) -> Result<RawResponse, FetchError> {
+            let n = self.0.hops.fetch_add(1, Ordering::SeqCst) as usize;
+            Ok(match self.0.replies.get(n) {
+                Some(ScriptedReply::Redirect(to)) => RawResponse {
+                    status: 302,
+                    location: Some(to.clone()),
+                    content_type: None,
+                    body: Vec::new(),
+                },
+                Some(ScriptedReply::Body { content_type, body }) => RawResponse {
+                    status: 200,
+                    location: None,
+                    content_type: Some((*content_type).to_string()),
+                    body: body.clone(),
+                },
+                None => RawResponse {
+                    status: 200,
+                    location: None,
+                    content_type: Some("image/png".into()),
+                    body: b"scripted".to_vec(),
+                },
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl UnfurlHttp for GuardedScript {
+        async fn fetch(&self, url: &str, kind: FetchKind) -> Result<Fetched, FetchError> {
+            let resolver = Fixed(self.resolves_to.clone());
+            let getter = Getter(self);
+            fetch_guarded(url, kind, false, &resolver, &getter).await
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1434,5 +1540,184 @@ mod tests {
             ["/x.png"],
             "the origin was reached directly"
         );
+    }
+
+    // ── ADR-0170 amendment D9 (#4881): the site-icon kind ───────────────────────────────
+
+    use super::guard_fixtures::{GuardedScript, ScriptedReply};
+
+    /// An icon goes through the same guard as every other preview fetch: a private,
+    /// loopback or link-local destination is refused BEFORE a connect, on the first hop.
+    #[tokio::test]
+    async fn an_icon_fetch_is_refused_for_private_loopback_and_link_local_before_any_connect() {
+        for raw in [
+            "https://127.0.0.1/favicon.ico",
+            "https://10.1.2.3/favicon.ico",
+            "https://172.16.0.9/favicon.ico",
+            "https://192.168.0.1/favicon.ico",
+            "https://169.254.169.254/latest/meta-data",
+            "https://localhost/favicon.ico",
+            "https://[::1]/favicon.ico",
+            "https://[fe80::1]/favicon.ico",
+            "https://[fd00::1]/favicon.ico",
+            "https://[::ffff:7f00:1]/favicon.ico",
+            "http://example.com/favicon.ico",
+            "https://user:pw@example.com/favicon.ico",
+        ] {
+            let script = GuardedScript::new(vec![]);
+            let err = script.fetch(raw, FetchKind::Icon).await.unwrap_err();
+            assert!(err.is_blocked(), "{raw}: {err:?}");
+            assert_eq!(script.hops(), 0, "{raw} must not reach the socket");
+        }
+        // Control: the same guard lets a public https icon through, once.
+        let script = GuardedScript::new(vec![]);
+        let fetched = script
+            .fetch("https://example.com/favicon.ico", FetchKind::Icon)
+            .await
+            .expect("a public icon");
+        assert_eq!(fetched.final_url, "https://example.com/favicon.ico");
+        assert_eq!(script.hops(), 1);
+    }
+
+    /// An icon is fetched on 443 only, on every hop; a picture still is not held to that.
+    #[tokio::test]
+    async fn an_icon_dials_443_only_on_every_hop_and_a_picture_does_not() {
+        for raw in [
+            "https://example.com:8443/i.png",
+            "https://example.com:444/i.png",
+            "https://example.com:80/i.png",
+        ] {
+            let script = GuardedScript::new(vec![]);
+            assert_eq!(
+                script.fetch(raw, FetchKind::Icon).await.unwrap_err(),
+                FetchError::Blocked,
+                "{raw}"
+            );
+            assert_eq!(script.hops(), 0, "{raw}: refused before the socket");
+        }
+        // An explicit 443 is the default port.
+        let script = GuardedScript::new(vec![]);
+        script
+            .fetch("https://example.com:443/i.png", FetchKind::Icon)
+            .await
+            .expect("explicit 443");
+        // Control: the picture kind keeps its rule (no port restriction).
+        let script = GuardedScript::new(vec![]);
+        script
+            .fetch("https://example.com:8443/i.png", FetchKind::Image)
+            .await
+            .expect("the picture kind dials other ports");
+        // A redirect to another port is refused after exactly one request.
+        for location in [
+            "https://example.com:8443/b.ico",
+            "https://example.com:444/b.ico",
+        ] {
+            let script = GuardedScript::new(vec![ScriptedReply::Redirect(location.into())]);
+            assert_eq!(
+                script
+                    .fetch("https://example.com/a.ico", FetchKind::Icon)
+                    .await
+                    .unwrap_err(),
+                FetchError::Blocked,
+                "{location}"
+            );
+            assert_eq!(script.hops(), 1, "{location}");
+        }
+    }
+
+    /// A redirect that leads an icon fetch to a private destination stops there: the public
+    /// first hop was requested, the private one never is.
+    #[tokio::test]
+    async fn an_icon_redirect_into_a_private_destination_stops_after_the_public_hop() {
+        for location in [
+            "https://127.0.0.1/x.ico",
+            "https://10.0.0.5/x.ico",
+            "https://169.254.169.254/latest/meta-data/",
+            "https://[::1]/x.ico",
+            "https://[fe80::1]/x.ico",
+            "https://localhost/x.ico",
+            "http://example.com/downgrade.ico",
+            "file:///etc/passwd",
+            "https://user:pw@example.com/x.ico",
+        ] {
+            let script = GuardedScript::new(vec![ScriptedReply::Redirect(location.into())]);
+            let err = script
+                .fetch("https://example.com/a.ico", FetchKind::Icon)
+                .await
+                .unwrap_err();
+            assert_eq!(err, FetchError::Blocked, "{location}");
+            assert_eq!(
+                script.hops(),
+                1,
+                "{location}: only the public hop connected"
+            );
+        }
+        // Control: a public redirect target is followed.
+        let script = GuardedScript::new(vec![ScriptedReply::Redirect(
+            "https://cdn.example/i.ico".into(),
+        )]);
+        let fetched = script
+            .fetch("https://example.com/a.ico", FetchKind::Icon)
+            .await
+            .expect("a public redirect");
+        assert_eq!(fetched.final_url, "https://cdn.example/i.ico");
+        assert_eq!(script.hops(), 2);
+    }
+
+    /// The icon's body cap is [`ICON_MAX_BYTES`], not the picture's 5 MiB.
+    #[tokio::test]
+    async fn an_icon_body_is_cut_off_at_the_icon_cap() {
+        let url = |fake: &Fake| OutboundUrl {
+            scheme: "http".into(),
+            host: "pin.invalid".into(),
+            port: Some(fake.addr.port()),
+            path_and_query: "/i.ico".into(),
+            absolute: format!("http://pin.invalid:{}/i.ico", fake.addr.port()),
+        };
+        let exact = Fake::start(|_, _| Reply::Chunked {
+            chunks: big(ICON_MAX_BYTES),
+        })
+        .await;
+        let got = ReqwestGet {
+            timeout: SECOND * 5,
+        }
+        .get(&url(&exact), exact.addr, FetchKind::Icon)
+        .await
+        .expect("exactly the cap is fine");
+        assert_eq!(got.body.len(), ICON_MAX_BYTES);
+
+        let over = Fake::start(|_, _| Reply::Chunked {
+            chunks: big(ICON_MAX_BYTES + 1),
+        })
+        .await;
+        let err = ReqwestGet {
+            timeout: SECOND * 5,
+        }
+        .get(&url(&over), over.addr, FetchKind::Icon)
+        .await
+        .unwrap_err();
+        assert_eq!(err, FetchError::TooLarge, "one byte past the cap");
+        // The same body is fine for a picture: the cap is per kind.
+        let got = ReqwestGet {
+            timeout: SECOND * 5,
+        }
+        .get(&url(&over), over.addr, FetchKind::Image)
+        .await
+        .expect("a picture may be larger than an icon");
+        assert_eq!(got.body.len(), ICON_MAX_BYTES + 1);
+        // A declared length past the cap is refused before the body is read.
+        let declared = Fake::start(|_, _| Reply::Ok {
+            status: 200,
+            headers: vec![("Content-Type".into(), "image/x-icon".into())],
+            body: vec![0u8; ICON_MAX_BYTES + 1],
+        })
+        .await;
+        let err = ReqwestGet {
+            timeout: SECOND * 5,
+        }
+        .get(&url(&declared), declared.addr, FetchKind::Icon)
+        .await
+        .unwrap_err();
+        assert_eq!(err, FetchError::TooLarge);
     }
 }

@@ -20,7 +20,10 @@
 //!
 //! It owns no Axum types. The route layer translates HTTP.
 
+pub mod card;
+pub mod charset;
 pub mod config;
+pub mod dimensions;
 pub mod extract;
 pub mod fetch;
 pub mod normalize;
@@ -36,12 +39,13 @@ pub use config::UnfurlConfig;
 pub use extract::{extract_urls, MAX_URLS_PER_MESSAGE};
 pub use fetch::{
     FetchError, FetchKind, Fetched, SafeUnfurlTransport, UnfurlHttp, HTML_MAX_BYTES,
-    IMAGE_MAX_BYTES, MAX_REDIRECTS, UNFURL_USER_AGENT,
+    ICON_MAX_BYTES, IMAGE_MAX_BYTES, MAX_REDIRECTS, UNFURL_USER_AGENT,
 };
 pub use normalize::normalize_url;
 pub use parse::parse_card;
 pub use proxy::{
-    fetch_record_image, proxy_image_in_tx, CachedImage, ImageCache, ProxyError, ProxyImage,
+    fetch_record_icon, fetch_record_image, icon_path, image_path, proxy_image_in_tx, CachedImage,
+    ImageCache, ProxyError, ProxyImage, ProxySlot,
 };
 pub use remove::{remove_unfurls_in_tx, RemoveOutcome};
 pub use settings::{load_setting_in_tx, upsert_setting_in_tx, UnfurlSetting};
@@ -49,7 +53,7 @@ pub use source::{
     fetch_source, parse_source_url, SourceFailure, SourceUrl, SourceUrlError, SOURCE_DEADLINE,
     SOURCE_MAX_BYTES,
 };
-pub use store::{list_unfurls_in_tx, load_unfurl_in_tx, UnfurlRecord};
+pub use store::{list_unfurls_in_tx, load_unfurl_in_tx, record_measured_size, UnfurlRecord};
 pub use worker::{DrainStats, UnfurlWorker, NOTIFY_CHANNEL};
 
 /// `MOMO_UNFURL_ENABLED` is exactly the character `1`. Anything else — unset,

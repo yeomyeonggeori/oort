@@ -50,7 +50,7 @@ OutboundHTTPPolicy 재사용: 사설망·링크로컬·루프백 차단, redirec
 - 워커는 페이지 본문을 늘 UTF-8로 읽었다(`String::from_utf8_lossy`). EUC-KR 같은 다른 인코딩의 페이지는 글자가 깨졌다.
 - 메시지당 링크 3개는 `extract_urls`가 이미 지킨다(`MAX_URLS_PER_MESSAGE = 3`, 코드 블록·이메일 제외, 정규화 뒤 중복 제거).
 - 가드(`fetch_guarded`)의 443 전용 규칙은 ADR-0218 D5의 `FetchKind::Source`에만 있다. 미리보기 종류(`Html`·`Image`)는 https(운영)·공개 IP·hop마다 재검사이고 포트 제한은 없다.
-- 그림 상대 주소는 풀어 쓰되(`resolve_image`) 풀어 낸 주소에 문자 수준 검사는 없었고, 거절은 프록시가 가져올 때의 가드에서만 일어났다.
+- 그림 상대 주소는 풀어 쓰되(`resolve_image`) 풀어 낸 주소에는 모양 검사(`normalize_url`)뿐이었다. 사설·루프백 리터럴 검사는 없었고, 거절은 프록시가 가져올 때의 가드에서만 일어났다.
 - 정보가 하나도 없는 페이지(제목도 그림도 없음)도 `ok` 행(도메인만 채운)으로 남았고 웹 화면은 도메인을 제목으로 쓴 카드를 그렸다.
 
 ### D6. 새 응답 필드 — 모두 선택값
@@ -77,7 +77,7 @@ REST는 camelCase, 실시간 `message.unfurl`은 snake_case다(기존 `imageUrl`
 
 - 읽는 순서: BOM → Content-Type의 `charset` → `<meta charset>` → `<meta http-equiv="Content-Type" content="…; charset=…">` → 모르면 UTF-8. 메타는 본문 앞 4096바이트에서만 찾는다(HTML 표준의 1024바이트 prescan을 넓힌 값이다. 시험이 경계를 잰다).
 - 라벨은 `encoding_rs`(WHATWG 라벨표)로 읽고, 모르는 라벨은 건너뛰어 다음 순위로 간다. 메타가 UTF-16을 말하면 UTF-8로 읽는다(ASCII로 읽히는 문서이므로, WHATWG와 같다). 잘못된 바이트는 U+FFFD로 바뀌고 읽기는 실패하지 않는다.
-- 라이브러리는 `encoding_rs` 0.8(Apache-2.0 OR MIT OR BSD-3-Clause)이다. 이미 `Cargo.lock`에 있고(`multer` 경유) `NOTICE`에도 이름이 있어 새 패키지는 없다. 이 크레이트의 직접 의존으로 더해지므로 `generate_ghcr_notice_bundle.py check`를 통과시킨다.
+- 라이브러리는 `encoding_rs` 0.8(`(Apache-2.0 OR MIT) AND BSD-3-Clause`, 모두 permissive)이다. 이미 `Cargo.lock`에 있어서(`multer` 경유) 새 패키지는 없다. 링크 미리보기 워커(`momo-unfurl`, webhook-sender 바이너리에도 링크된다)의 직접 의존으로 더해지므로 `legal/THIRD_PARTY_NOTICES.md`의 「Server direct additions」에 행을 더하고 `NOTICE`의 같은 문단을 고치고, 번들을 다시 만들어 `generate_ghcr_notice_bundle.py check`를 통과시킨다.
 
 ### D9. 상대 주소와 안전 규칙 — 새 우회 길을 만들지 않는다
 
@@ -115,6 +115,14 @@ REST는 camelCase, 실시간 `message.unfurl`은 snake_case다(기존 `imageUrl`
 
 ### 확인 [V]와 한계
 
-- 추출·인코딩·주소 풀이·아이콘 가드(443·사설·루프백·링크 로컬·리디렉션)·카드 3개·정보 없음·새 열의 저장과 읽기(두 테넌트)·응답에 아이콘 원본 주소가 없음은 시험으로 확인한다(PR 본문이 정본). 사보타주(가드 제거 등)는 각각 RED를 확인하고 되돌린다.
-- 실제 외부 사이트를 대상으로 한 확인은 하지 않았다(`runtime-unverified`). 가짜 서버는 127.0.0.1이고 안전 규칙은 주입한 해석기로 시험한다.
-- `docs/security/claims.yaml`의 새 주장(아이콘 443 전용 등)은 정책 파일이라 이 증보가 고치지 않는다. 후속 이슈의 몫이다.
+시험 이름이 정본이다(PR 본문이 실행 결과를 적는다). 아래 이름을 바꾸면 이 목록도 같이 바꾼다.
+
+- 추출·정리(D7·D12): `parse.rs`의 `every_missing_item_combination_yields_exactly_what_is_there`(빠진 항목 조합) · `the_caps_are_180_280_and_100_characters_and_whitespace_collapses` · `a_description_that_repeats_the_title_is_dropped` · `entities_are_decoded_once` · `a_greater_than_inside_a_quoted_value_does_not_cut_the_tag` · `comments_scripts_and_styles_do_not_feed_the_card` · `video_is_og_type_video_dot_something_or_a_twitter_player` · `icons_come_apple_touch_first_then_icon_and_never_svg` · `the_size_is_the_first_og_images_valid_pair`, `dimensions.rs`의 `each_supported_format_reports_its_size` · `what_cannot_be_measured_is_none_and_never_a_panic`.
+- 인코딩(D8): `charset.rs`의 `the_content_type_charset_decodes_euc_kr` · `meta_charset_and_http_equiv_fill_in_when_the_header_is_silent` · `the_order_is_header_then_meta_charset_then_http_equiv_then_utf8` · `a_label_we_do_not_know_is_skipped_not_fatal` · `a_byte_order_mark_beats_the_header` · `the_meta_is_only_looked_for_in_the_first_4096_bytes`, `card.rs`의 `an_euc_kr_page_reads_in_korean`.
+- 주소·안전(D9): `card.rs`의 `relative_pictures_and_icons_resolve_against_the_final_page_address` · `a_resolved_address_that_lands_on_a_private_host_is_dropped` · `plain_http_is_only_a_development_allowance` · `an_icon_is_on_port_443_a_picture_may_not_be`, `fetch.rs`의 `an_icon_fetch_is_refused_for_private_loopback_and_link_local_before_any_connect` · `an_icon_dials_443_only_on_every_hop_and_a_picture_does_not` · `an_icon_redirect_into_a_private_destination_stops_after_the_public_hop` · `an_icon_body_is_cut_off_at_the_icon_cap`, `proxy.rs`의 `the_icon_proxy_refuses_private_loopback_and_link_local_addresses` · `an_icon_redirect_into_a_private_address_is_refused_after_the_public_hop` · `an_icon_may_be_an_ico_a_picture_may_not_and_nothing_may_be_svg_or_html` · `a_picture_and_an_icon_at_one_address_never_share_a_cache_entry` · `each_slot_fetches_its_own_address_as_its_own_kind`.
+- 카드 3개·정보 없음·새 열(D10·D11·DB, 실 PG, `momo_app`은 superuser·BYPASSRLS 아님을 시험이 단정한다, 두 테넌트): `momo-unfurl/tests/unfurl_conformance_pg.rs`의 `four_links_make_three_cards_in_order_and_every_new_column_is_stored` · `a_page_with_no_title_and_no_picture_ends_quietly` · `the_cache_carries_the_new_fields_to_the_next_message` · `two_tenants_each_read_only_their_own_site_meta_as_the_runtime_role` · `a_measured_size_is_recorded_once_and_a_declared_size_is_never_overwritten` · `the_database_holds_the_size_pair_the_icon_pair_and_the_name_length`, 기존 `extract.rs`의 `keeps_three_and_drops_the_fourth`.
+- 응답에 아이콘·그림의 원격 주소가 없음(REST와 실시간 모두, 본문 문자열에서 부재를 단정한다)·아이콘 경로의 인가(비로그인 401, 채널 밖 멤버·다른 테넌트 403, 없는 카드·아이콘 없는 카드 404)·잰 크기의 기록: `momo-server/tests/unfurl_conformance_pg.rs`의 `site_meta_over_rest_the_icon_proxy_and_the_measured_size`와 위 첫 PG 시험의 방송 단정.
+- 코어 타입·디코더: `packages/momo-core`의 `unfurl.test.ts`(`unfurl site metadata`) · `unfurlFrames.test.ts` · `unfurlApi.test.ts`.
+- 사보타주(아이콘 가드 우회, 풀이 뒤 검사 제거, 3개 상한 제거, charset 무시, 설명=제목 비우기 제거, 응답에 아이콘 원본 주소 노출)는 각각 RED를 확인하고 되돌렸다. 결과표는 PR 본문에 있다.
+- 실제 외부 사이트를 대상으로 한 확인은 하지 않았다(`runtime-unverified`). 가짜 서버는 127.0.0.1이고 안전 규칙은 주입한 해석기와 가짜 소켓으로 시험한다. 화면은 이 증보의 범위가 아니다.
+- `docs/security/claims.yaml`의 새 주장(아이콘 443 전용 등)은 정책 파일이라 이 증보가 고치지 않는다. 기존 NET-2의 증명 시험 이름·위치는 바꾸지 않았다. 후속 이슈의 몫이다.

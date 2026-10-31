@@ -721,12 +721,18 @@ mod tests {
     /// 161 is #4820 C2b's original-photo pointer (ADR-0218 G1/G7): `origin_source_attachment_id` on
     /// `expression` and `expression_draft` (generated origin only) and the six G3.8 card codes in the
     /// draft's `code` CHECK. No new table.
+    ///
+    /// 163 is #4881's link-card site metadata (ADR-0170 amendment 2026-10-31): six columns (site name,
+    /// icon proxy key and remote icon address, image width/height, video flag) on `unfurl_url_cache` and
+    /// `message_unfurl`, with the column CHECKs that keep the size pair and the icon pair whole. No new
+    /// table. (162 belongs to another issue; on a branch that lacks it this test is the one expected
+    /// failure until the stack lands in order.)
     #[test]
-    fn discovers_contiguous_migrations_001_to_161() {
+    fn discovers_contiguous_migrations_001_to_163() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=161).collect();
+        let expected: Vec<i64> = (1..=163).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -734,7 +740,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=161 under {}",
+            "expected contiguous 001..=163 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -742,7 +748,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("161_expression_origin_source"));
+            .starts_with("163_unfurl_site_meta"));
     }
 
     #[test]
