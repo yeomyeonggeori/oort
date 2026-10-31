@@ -1886,7 +1886,9 @@ paths:
             `team_memory_off` — the patch turns the `memory` role from off to on
             while team memory is switched off (ADR-0201 증보 v3 B3, #4964).
             Nothing was written. (The `team_ai_fast_path` provisioning conflict
-            `team_ai_unavailable` is also a 409.)
+            `team_ai_unavailable` is also a 409, but it is answered after the
+            write: the helper's own switch is put back off and the rest of that
+            request stays committed — and audited, like any other write.)
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}

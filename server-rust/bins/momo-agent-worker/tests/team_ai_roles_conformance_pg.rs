@@ -25,6 +25,8 @@
 //! | `w7_a_search_and_a_proposal_in_one_call_is_refused` | read `web_searches` out of `ViaAi::read_something` |
 //! | `w8_the_roles_card_refuses_chat_read_and_unknown_bundles` | accept `chat_read` in `team_ai_roles_set_args` |
 //! | `w9_another_workspaces_switches_do_not_reach_this_one` | read the settings without the workspace id |
+//! | `w10_a_card_of_an_off_bundle_is_refused_before_any_picture_work` | drop the early `roles.action_allowed` check before `profile_avatar::prepare`, or hand the refusal `None` instead of the tokens spent |
+//! | `w11_a_bundle_switched_off_while_the_model_thinks_is_refused_at_the_proposal` | drop the `read_roles_in_tx` check from `propose_with_avatar_in_tx` |
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -399,6 +401,32 @@ async fn agent_texts(su: &PgPool, t: &Tenant) -> Vec<String> {
     .into_iter()
     .flatten()
     .collect()
+}
+
+/// The `team_ai.turn` audit row of one run.
+async fn turn_audit(su: &PgPool, t: &Tenant, run: Uuid) -> Value {
+    sqlx::query_scalar(
+        "SELECT detail FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'team_ai.turn' AND run_id = $2",
+    )
+    .bind(t.workspace_id)
+    .bind(run)
+    .fetch_one(su)
+    .await
+    .expect("a team_ai.turn audit row")
+}
+
+/// The ledger rows of one run: how many, and the tokens they carry.
+async fn ledger_of(su: &PgPool, t: &Tenant, run: Uuid) -> (i64, i64) {
+    sqlx::query_as::<_, (i64, i64)>(
+        "SELECT count(*), COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint \
+           FROM usage_ledger WHERE workspace_id = $1 AND run_id = $2",
+    )
+    .bind(t.workspace_id)
+    .bind(run)
+    .fetch_one(su)
+    .await
+    .expect("ledger rows")
 }
 
 // --- the scripted, recording model -------------------------------------------------------------
@@ -781,7 +809,7 @@ async fn w6_an_injected_roles_request_after_a_read_makes_no_card() {
         propose(ROLES_CARD, json!({"bundle": "files", "enabled": true})),
     ]);
     let w = worker_with(model.clone()).await;
-    enqueue(
+    let run = enqueue(
         &pool,
         &t,
         t.owner_id,
@@ -823,6 +851,14 @@ async fn w6_an_injected_roles_request_after_a_read_makes_no_card() {
         json!({"files": false, "memory": false}),
         "untouched"
     );
+    // The refusal is counted: the turn's audit row says why, by reason code and card id.
+    let turn = turn_audit(&su, &t, run).await;
+    assert_eq!(turn["outcome"], "refused_after_read");
+    assert_eq!(turn["refused_action"], ROLES_CARD);
+    assert!(
+        !turn.to_string().contains(HOSTILE),
+        "no text in the row: {turn}"
+    );
 }
 
 /// B4-3, the same-call case the enum cannot catch: ONE completion in which the provider searched the
@@ -842,13 +878,17 @@ async fn w7_a_search_and_a_proposal_in_one_call_is_refused() {
     searched_and_proposed.web_search_requests = 1;
     let model = ScriptedModel::new([searched_and_proposed]);
     let w = worker_with(model.clone()).await;
-    enqueue(&pool, &t, t.owner_id, "@oort-helper 코드 역할 꺼 줘", None).await;
+    let run = enqueue(&pool, &t, t.owner_id, "@oort-helper 코드 역할 꺼 줘", None).await;
     drain(&w).await;
 
     assert!(
         approvals(&su, &t).await.is_empty(),
         "a request that searched the web does not get to change the helper's reach"
     );
+    let turn = turn_audit(&su, &t, run).await;
+    assert_eq!(turn["outcome"], "refused_after_read");
+    assert_eq!(turn["refused_action"], ROLES_CARD);
+    assert_eq!(turn["web_searches"], 1);
     // A control: the same proposal without the search is a card.
     let model = ScriptedModel::new([propose(
         ROLES_CARD,
@@ -947,4 +987,152 @@ async fn w9_another_workspaces_switches_do_not_reach_this_one() {
     );
     assert_eq!(approvals(&su, &b).await.len(), 1, "B's card");
     assert!(approvals(&su, &a).await.is_empty(), "A's is refused");
+}
+
+/// B13-I5, before any picture work: a model that names `member.avatar.set` while `workspace_admin`
+/// is off is refused at once. Nothing is looked up or fetched for it — the refusal row that
+/// preparing the picture would have written (`member.avatar.refused`) is not there — the person
+/// hears that the role is off, the tokens are charged once, and the turn's audit row names the
+/// reason code and the card (no text).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn w10_a_card_of_an_off_bundle_is_refused_before_any_picture_work() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_link(&su, t.owner_id).await;
+    set_roles(&su, &t, json!({"workspace_admin": false})).await;
+    let attachment = Uuid::new_v4().to_string();
+    let model = ScriptedModel::new([propose(
+        "member.avatar.set",
+        json!({"attachmentId": attachment}),
+    )]);
+    let w = worker_with(model.clone()).await;
+    let run = enqueue(
+        &pool,
+        &t,
+        t.owner_id,
+        "@oort-helper 내 사진을 바꿔 줘",
+        None,
+    )
+    .await;
+    drain(&w).await;
+
+    assert!(approvals(&su, &t).await.is_empty(), "no card");
+    let texts = agent_texts(&su, &t).await;
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == momo_workspace_actions::team_ai::ROLE_OFF_SENTENCE),
+        "the person is told the role is off: {texts:?}"
+    );
+    let picture_work: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'member.avatar.refused'",
+    )
+    .bind(t.workspace_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        picture_work, 0,
+        "no picture work was done for a card that was refused first"
+    );
+    assert_eq!(
+        ledger_of(&su, &t, run).await,
+        (1, 15),
+        "the tokens the request spent are charged, once"
+    );
+    let turn = turn_audit(&su, &t, run).await;
+    assert_eq!(turn["outcome"], "refused_role_off");
+    assert_eq!(turn["refused_action"], "member.avatar.set");
+    assert!(
+        !turn.to_string().contains(&attachment) && !turn.to_string().contains("사진"),
+        "no text in the row: {turn}"
+    );
+}
+
+/// A scripted model that switches a bundle off in the database before it answers — an admin turned
+/// it off while the model was thinking.
+struct SwitchesOffWhileThinking {
+    inner: Arc<ScriptedModel>,
+    su: PgPool,
+    workspace: Uuid,
+}
+
+#[async_trait]
+impl ChatProvider for SwitchesOffWhileThinking {
+    async fn complete(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+    ) -> Result<ChatCompletion, ProviderError> {
+        sqlx::query(
+            "UPDATE workspace SET settings = settings || \
+               jsonb_build_object('team_ai_roles', '{\"workspace_admin\": false}'::jsonb) \
+             WHERE id = $1",
+        )
+        .bind(self.workspace)
+        .execute(&self.su)
+        .await
+        .expect("switch the bundle off");
+        self.inner.complete(endpoint, request).await
+    }
+}
+
+/// The proposal transaction stays the fence for a switch that moves WHILE the model thinks: the card
+/// was offered (the bundle was on when the request began), the bundle goes off, and the transaction —
+/// which reads the switches again — refuses. The tokens are on the ledger once (the transaction wrote
+/// the row) and the turn's audit row carries the same reason code.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn w11_a_bundle_switched_off_while_the_model_thinks_is_refused_at_the_proposal() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_link(&su, t.owner_id).await;
+    let inner = ScriptedModel::new([propose(
+        "channel.create",
+        json!({"name": "ideas", "kind": "public"}),
+    )]);
+    let model = Arc::new(SwitchesOffWhileThinking {
+        inner: inner.clone(),
+        su: su.clone(),
+        workspace: t.workspace_id,
+    });
+    let w = worker_with(model).await;
+    let run = enqueue(
+        &pool,
+        &t,
+        t.owner_id,
+        "@oort-helper ideas 채널 만들어줘",
+        None,
+    )
+    .await;
+    drain(&w).await;
+
+    let requests = inner.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        offered_ids(&requests[0])
+            .expect("offered")
+            .iter()
+            .any(|id| id == "channel.create"),
+        "the bundle was on when the request began"
+    );
+    assert!(approvals(&su, &t).await.is_empty(), "no card");
+    let texts = agent_texts(&su, &t).await;
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == momo_workspace_actions::team_ai::ROLE_OFF_SENTENCE),
+        "{texts:?}"
+    );
+    assert_eq!(ledger_of(&su, &t, run).await, (1, 15), "charged once");
+    let turn = turn_audit(&su, &t, run).await;
+    assert_eq!(turn["outcome"], "refused_role_off");
+    assert_eq!(turn["refused_action"], "channel.create");
 }
