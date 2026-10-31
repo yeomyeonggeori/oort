@@ -47,6 +47,10 @@ export const HOME_ICONS = {
   // 상대를 알아볼 수 없는 DM(「나간 멤버」)의 기본 아바타 글리프 (#4252). 웹 `DmAvatar` 의 Lucide `user`
   // (16)와 같은 모양이고 같은 레시피(선 1.8, viewBox 24, 18pt 의 1·2·3배)다.
   user: require('./user18.png') as ImageSourcePropType,
+  // 섹션 머리 「채널」 전용 (#4979, owner 11-01). 머리가 줄과 같은 `#`(hash)라 줄 하나처럼 읽혔다 — 여러 채널이 겹친 묶음으로
+  // 읽히는 Lucide `layers`(ISC, 웹 `lucide-react` 0.454.0 의 경로 그대로: path 셋)로 바꾼다. 같은 레시피(선 1.8, viewBox 24,
+  // 22pt 의 1·2·3배: `rsvg-convert -w <22|44|66> -h <22|44|66>`). 줄의 `hash`·`lock`은 그대로다(#4953).
+  layers: require('./layers22.png') as ImageSourcePropType,
 } as const;
 
 export type HomeIconName = keyof typeof HOME_ICONS;
@@ -64,6 +68,7 @@ export const HOME_ICON_SIZE: Readonly<Record<HomeIconName, number>> = {
   down: 20,
   bot: 18,
   user: 18,
+  layers: 22,
 };
 
 // ---- 대화 아이콘 아홉 (DS2-4 #2716 · 시계 #4455 · 답글 #4869) -----------------

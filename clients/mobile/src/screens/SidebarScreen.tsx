@@ -1039,7 +1039,8 @@ function SectionHead({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  const icon: HomeIconName = section.key === 'channels' ? 'hash' : 'dms';
+  // 머리의 아이콘은 줄의 아이콘(`#`·자물쇠, #4953)과 달라야 「채널 묶음」으로 읽힌다 (#4979). 한 줄이라 바꾸기 쉽다.
+  const icon: HomeIconName = section.key === 'channels' ? 'layers' : 'dms';
   return (
     <View style={styles.secHead} testID={`home-section-${section.key}`}>
       <Image
