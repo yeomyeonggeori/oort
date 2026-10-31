@@ -135,6 +135,7 @@ import {
 } from '../features/conversation/LongPressHint';
 import type {MessageRowActions} from '../features/conversation/MessageRow';
 import {ThreadPanel} from '../features/conversation/ThreadPanel';
+import {useReplyDraft} from '../features/conversation/useReplyDraft';
 import {PinListPanel} from '../features/conversation/PinListPanel';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import {Timeline} from '../features/conversation/Timeline';
@@ -1142,6 +1143,25 @@ export default function ConversationScreen({
     void refetchChannels(); void refetchDirectory();
   }, [membershipRevision, refetchChannels, refetchDirectory]);
 
+  // ---- 걸어 둔 답글 대상 (#4869) ---------------------------------------------
+  //
+  // 오른쪽→왼쪽 밀기와 행동 시트의 「답글 달기」가 **같은 길**(`startReply`)로 대상을 건다. 보내면 스레드(`rootId`)에 달리고
+  // 이 화면에 머문다 — 스레드 화면(`openThread`)은 열리지 않는다. 인용과는 함께 걸 수 없어(스레드 쓰기 길에 `replyToId` 가
+  // 없다) 대상이 걸리면 인용을 떼고(아래 `onReplyStarted`), 인용이 걸리면 대상을 뗀다(`onQuoteMessage`).
+  const onReplyStarted = useCallback(() => {
+    setQuote(null);
+    // 답글을 건 사람의 다음 동작도 100% 글쓰기다 — 인용과 같다.
+    composerInputRef.current?.focus();
+  }, []);
+  const {replyTarget, startReply, cancelReply, sendReply: sendReplyDraft} =
+    useReplyDraft({
+      channelId,
+      messages,
+      myMemberId: member.id,
+      sendThreadReply: timeline.sendReply,
+      onStarted: onReplyStarted,
+    });
+
   // 걸어 둔 원본이 지워졌다. 서버는 받아 주지만(같은 채널이면 묘비도 유효한
   // 대상이다) 그렇게 보낸 글은 태어날 때부터 「삭제된 메시지」를 가리킨다. 조용히
   // 떼는 것이 맞다 — 걸어 둔 사람은 그 삭제를 이미 화면에서 봤다.
@@ -1154,10 +1174,12 @@ export default function ConversationScreen({
 
   const onQuoteMessage = useCallback((message: Message) => {
     setQuote(quoteDraftFor(message));
+    // 한 입력칸에는 한 가지 머리말이다: 인용을 걸면 걸려 있던 답글 대상은 떨어진다(#4869).
+    cancelReply();
     // 인용을 건 사람의 다음 동작은 100% 글쓰기다. 캐럿을 옮겨 주지 않으면 줄은
     // 떴는데 손은 아직 타임라인에 있다.
     composerInputRef.current?.focus();
-  }, []);
+  }, [cancelReply]);
   const onCancelQuote = useCallback(() => setQuote(null), []);
 
   // ---- 인용이 가리키는 줄로 이동 --------------------------------------------
@@ -1535,8 +1557,12 @@ export default function ConversationScreen({
   const quoteRef = useRef<QuoteDraft | null>(null);
   quoteRef.current = quote;
   const onSend = useCallback(
-    (body: string, options?: ComposerSendOptions) => {
+    (body: string, options?: ComposerSendOptions, resend = false) => {
       setSelfSendToken(token => token + 1);
+      // 답글 머리말이 걸려 있으면 그 스레드(`rootId`)에 달고 **이 화면에 머문다**(#4869). 전화 호출 길과 인용은 스레드 쓰기에
+      // 실리지 않으므로 이 길이 먼저고, 호출 길을 지나지 않는다(`@별칭`도 스레드의 평범한 답글이다). **다시 보내기는 이 길을
+      // 지나지 않는다**: 실패한 채널 글을 다시 보내는 손가락이 지금 걸려 있는 답글 대상을 가로채 남의 스레드로 보내면 안 된다.
+      if (!resend && sendReplyDraft(body, options)) return;
       // 인용은 **보낸 순간** 떨어진다. 남겨 두면 다음 줄까지 같은 원본을 가리키게
       // 되는데, 그것을 원한 사람은 거의 없고 알아채는 사람은 더 적다. 컴포저가
       // 자기 글을 먼저 비우는 것과 같은 규율이다.
@@ -1553,7 +1579,7 @@ export default function ConversationScreen({
       }
       void send(body, replyToId, options?.attachments);
     },
-    [send, tryPersonalCall],
+    [send, tryPersonalCall, sendReplyDraft],
   );
 
   // ---- 리스트에 내려가는 핸들러는 전부 고정된 동일성이어야 한다 (goal RN-P2a) --
@@ -1588,6 +1614,7 @@ export default function ConversationScreen({
         message.attachments === undefined
           ? undefined
           : {attachments: message.attachments},
+        true,
       ),
     [onSend],
   );
@@ -1640,6 +1667,7 @@ export default function ConversationScreen({
       onEdit: editBody,
       onDelete: removeMessage,
       onOpenThread: openThread,
+      onReplyInline: startReply,
       onQuote: onQuoteMessage,
       onJumpToQuoted,
       onLongPressUsed: hint.markUsed,
@@ -1660,6 +1688,7 @@ export default function ConversationScreen({
       editBody,
       removeMessage,
       openThread,
+      startReply,
       onQuoteMessage,
       onJumpToQuoted,
       hint.markUsed,
@@ -2220,6 +2249,8 @@ export default function ConversationScreen({
               attachmentTarget={{workspaceId, channelId}}
               quote={quote}
               onCancelQuote={onCancelQuote}
+              replyTarget={replyTarget}
+              onCancelReply={cancelReply}
               inputRef={composerInputRef}
               onTyping={onTyping}
               onSend={onSend}

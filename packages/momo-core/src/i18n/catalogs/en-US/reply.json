@@ -1,0 +1,11 @@
+{
+  "reply.card.headerOther": "Reply to {name}",
+  "reply.card.headerSelf": "Reply to my message",
+  "reply.card.cancel": "Cancel reply",
+  "reply.card.excerptPhoto": "Photo",
+  "reply.card.excerptFile": "File",
+  "reply.card.excerptExpression": "Emoticon",
+  "reply.card.excerptEmpty": "No message content",
+  "reply.composer.placeholder": "Write a reply",
+  "reply.composer.send": "Send reply"
+}

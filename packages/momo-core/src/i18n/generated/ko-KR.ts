@@ -197,6 +197,64 @@ export const catalog: MessageCatalog = {
       "value": "언어를 적용하는 중이에요."
     }
   ],
+  "reply.card.cancel": [
+    {
+      "type": 0,
+      "value": "답글 취소"
+    }
+  ],
+  "reply.card.excerptEmpty": [
+    {
+      "type": 0,
+      "value": "내용 없는 메시지"
+    }
+  ],
+  "reply.card.excerptExpression": [
+    {
+      "type": 0,
+      "value": "이모티콘"
+    }
+  ],
+  "reply.card.excerptFile": [
+    {
+      "type": 0,
+      "value": "파일"
+    }
+  ],
+  "reply.card.excerptPhoto": [
+    {
+      "type": 0,
+      "value": "사진"
+    }
+  ],
+  "reply.card.headerOther": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님에게 답글"
+    }
+  ],
+  "reply.card.headerSelf": [
+    {
+      "type": 0,
+      "value": "내 글에 답글"
+    }
+  ],
+  "reply.composer.placeholder": [
+    {
+      "type": 0,
+      "value": "답글 입력"
+    }
+  ],
+  "reply.composer.send": [
+    {
+      "type": 0,
+      "value": "답글 보내기"
+    }
+  ],
   "settings.profile.languageBeta": [
     {
       "type": 0,

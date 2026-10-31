@@ -218,6 +218,64 @@ export const catalog: MessageCatalog = {
       "value": "Applying language…"
     }
   ],
+  "reply.card.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel reply"
+    }
+  ],
+  "reply.card.excerptEmpty": [
+    {
+      "type": 0,
+      "value": "No message content"
+    }
+  ],
+  "reply.card.excerptExpression": [
+    {
+      "type": 0,
+      "value": "Emoticon"
+    }
+  ],
+  "reply.card.excerptFile": [
+    {
+      "type": 0,
+      "value": "File"
+    }
+  ],
+  "reply.card.excerptPhoto": [
+    {
+      "type": 0,
+      "value": "Photo"
+    }
+  ],
+  "reply.card.headerOther": [
+    {
+      "type": 0,
+      "value": "Reply to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "reply.card.headerSelf": [
+    {
+      "type": 0,
+      "value": "Reply to my message"
+    }
+  ],
+  "reply.composer.placeholder": [
+    {
+      "type": 0,
+      "value": "Write a reply"
+    }
+  ],
+  "reply.composer.send": [
+    {
+      "type": 0,
+      "value": "Send reply"
+    }
+  ],
   "settings.profile.languageBeta": [
     {
       "type": 0,

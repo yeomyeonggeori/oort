@@ -31,6 +31,15 @@ export const messageKeys = [
   "mobile.locale.backToSettings",
   "mobile.locale.permissionNotice",
   "mobile.locale.saving",
+  "reply.card.cancel",
+  "reply.card.excerptEmpty",
+  "reply.card.excerptExpression",
+  "reply.card.excerptFile",
+  "reply.card.excerptPhoto",
+  "reply.card.headerOther",
+  "reply.card.headerSelf",
+  "reply.composer.placeholder",
+  "reply.composer.send",
   "settings.profile.languageBeta",
   "settings.profile.languageCurrent",
   "settings.profile.languageHint",
@@ -79,6 +88,17 @@ export const argumentSpecs = {
   "mobile.locale.backToSettings": {},
   "mobile.locale.permissionNotice": {},
   "mobile.locale.saving": {},
+  "reply.card.cancel": {},
+  "reply.card.excerptEmpty": {},
+  "reply.card.excerptExpression": {},
+  "reply.card.excerptFile": {},
+  "reply.card.excerptPhoto": {},
+  "reply.card.headerOther": {
+    "name": "string"
+  },
+  "reply.card.headerSelf": {},
+  "reply.composer.placeholder": {},
+  "reply.composer.send": {},
   "settings.profile.languageBeta": {},
   "settings.profile.languageCurrent": {
     "languageName": "string"
@@ -123,6 +143,15 @@ export interface MessageArgs {
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.permissionNotice": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "reply.card.cancel": Record<string, never>;
+  "reply.card.excerptEmpty": Record<string, never>;
+  "reply.card.excerptExpression": Record<string, never>;
+  "reply.card.excerptFile": Record<string, never>;
+  "reply.card.excerptPhoto": Record<string, never>;
+  "reply.card.headerOther": { name: string };
+  "reply.card.headerSelf": Record<string, never>;
+  "reply.composer.placeholder": Record<string, never>;
+  "reply.composer.send": Record<string, never>;
   "settings.profile.languageBeta": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
   "settings.profile.languageHint": Record<string, never>;

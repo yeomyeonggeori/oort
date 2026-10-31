@@ -1,0 +1,11 @@
+{
+  "reply.card.headerOther": "{name}님에게 답글",
+  "reply.card.headerSelf": "내 글에 답글",
+  "reply.card.cancel": "답글 취소",
+  "reply.card.excerptPhoto": "사진",
+  "reply.card.excerptFile": "파일",
+  "reply.card.excerptExpression": "이모티콘",
+  "reply.card.excerptEmpty": "내용 없는 메시지",
+  "reply.composer.placeholder": "답글 입력",
+  "reply.composer.send": "답글 보내기"
+}
