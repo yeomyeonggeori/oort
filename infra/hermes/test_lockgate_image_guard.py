@@ -157,7 +157,8 @@ class GateHarness(unittest.TestCase):
             path = os.path.join(data, "config.yaml")
             with open(path, "w") as handle:
                 handle.write("# isolated boot fixture; load_config is doubled\n")
-            environment = baseline_env(data, env)
+            # the image's own `ENV HERMES_HOME=/opt/data` (#4886): a test passes `{"HERMES_HOME": None}` or another folder to break it
+            environment = baseline_env(data, {"HERMES_HOME": data, **(env or {})})
             with mock.patch.dict(os.environ, environment, clear=True), \
                     mock.patch.dict(sys.modules, fake.modules()), \
                     mock.patch.object(sys, "path", list(sys.path)), \
@@ -779,6 +780,113 @@ class CanaryBehavior(GateHarness):
         refused, accepted = lockgate.canary_self_media_examples(None)
         self.assertEqual(len(seen), 2 * (len(lockgate.IMAGE_GUARD_CANARY_REFUSED) + len(refused)
                                          + len(lockgate.IMAGE_GUARD_CANARY_ACCEPTED) + len(accepted)))
+
+
+class EnvFileThroughTheGate(GateHarness):
+    """#4886: the volume's `.env` as Hermes loads it, judged through the real `gate()` / `report()` (the rule tables, for both
+    parsers, are in test_lockgate_env.py). Every spelling the loader applies stops the start, `${...}` is resolved against the
+    container's own environment, and what the loader ignores does not stop it."""
+
+    APPLIED = (
+        ("HERMES_SAFE_MODE=1 # note", "HERMES_SAFE_MODE"),
+        ("export\tHERMES_ALLOW_PRIVATE_URLS=true", "HERMES_ALLOW_PRIVATE_URLS"),
+        ("'HERMES_ENABLE_PROJECT_PLUGINS'=1", "HERMES_ENABLE_PROJECT_PLUGINS"),
+        ('export  HTTPS_PROXY="http://proxy.example:3128" # c', "HTTPS_PROXY"),
+        ("HERMES_SAFE_MODE=${OORT_PROOF_UNSET:-1}", "HERMES_SAFE_MODE"),
+        ("export\t'OORT_SELF_MEDIA_ORIGIN'=\"https://oort.example.com\" # c", "OORT_SELF_MEDIA_ORIGIN"),
+        ("'HERMES_MEDIA_DELIVERY_STRICT'=1", "HERMES_MEDIA_DELIVERY_STRICT"),
+        ('HERMES_YOLO_MODE="1" # c', "HERMES_YOLO_MODE"),
+        ("export\tHERMES_DASHBOARD=true", "HERMES_DASHBOARD"),
+        ("API_SERVER_CORS_ORIGINS=https://evil.example # c", "API_SERVER_CORS_ORIGINS"),
+    )
+
+    def test_every_spelling_the_loader_applies_stops_the_start(self):
+        for line, name in self.APPLIED:
+            with self.subTest(line=line):
+                rc, record, _ = self.boot(env_file=("OPENROUTER_API_KEY=keep\n" + line + "\n").encode())
+                self.assertRefused(rc, record, "the volume's .env")
+                self.assertEqual(len([p for p in record["problems"] if name in p]), 1, record["problems"])
+                for secret in ("evil.example", "proxy.example"):
+                    self.assertNotIn(secret, json.dumps(record))
+
+    def test_what_the_loader_ignores_does_not_stop_the_start(self):
+        for text in ("# HERMES_SAFE_MODE=1", 'HERMES_SAFE_MODE="1', "HERMES_SAFE_MODE", "HERMES_SAFE_MODE=0 # =1",
+                     "hermes_safe_mode=1", 'HERMES_SAFE_MODE="1" junk', "OORT_SELF_MEDIA_ORIGIN",
+                     "HERMES_SAFE_MODE=1\nHERMES_SAFE_MODE=0", 'NOTE="one\nHERMES_SAFE_MODE=1"', "A=1\x0cHERMES_SAFE_MODE=1"):
+            with self.subTest(text=text):
+                rc, record, _ = self.boot(env_file=(text + "\n").encode())
+                self.assertEqual((rc, record["problems"]), (0, []))
+
+    def test_references_resolve_against_the_containers_own_environment(self):
+        text = b"HERMES_SAFE_MODE=${OORT_PROOF_FLAG}\n"
+        rc, record, _ = self.boot(env={"OORT_PROOF_FLAG": "1"}, env_file=text)
+        self.assertRefused(rc, record, "the volume's .env enables HERMES_SAFE_MODE")
+        for env in ({"OORT_PROOF_FLAG": "0"}, {"OORT_PROOF_FLAG": ""}, {}):
+            with self.subTest(env=env):
+                rc, record, _ = self.boot(env=env, env_file=text)
+                self.assertEqual((rc, record["problems"]), (0, []))
+        # and again after start, against the live process environment
+        rc, kills, record = self.monitor(healthy_cfg(), env={"OORT_PROOF_FLAG": "1"}, env_file=text)
+        self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
+
+    def test_references_do_not_see_the_scratch_home_the_gate_sets_up(self):
+        # The gate points HOME and HERMES_HOME at a scratch folder while it works; Hermes' loader sees the container's environment,
+        # where this test has no HOME: the proxy value below is empty there, so it is no proxy.
+        rc, record, _ = self.boot(env_file=b"HTTPS_PROXY=${HOME}\n")
+        self.assertEqual((rc, record["problems"]), (0, []))
+        rc, record, _ = self.boot(env={"HOME": "/home/someone"}, env_file=b"HTTPS_PROXY=${HOME}\n")
+        self.assertRefused(rc, record, "the volume's .env sets HTTPS_PROXY")
+
+    def test_the_gate_names_the_parser_it_used(self):
+        rc, record, _ = self.boot()
+        self.assertEqual((rc, record["env_parser"]), (0, lockgate.env_parser()))
+        with mock.patch.object(lockgate, "_DotEnv", None):
+            rc, record, _ = self.boot()
+        self.assertEqual((rc, record["env_parser"]), (0, {"impl": "fallback"}))
+
+    def test_the_live_volume_is_read_the_same_way_after_start(self):
+        for line in ("HERMES_SAFE_MODE=1 # note", "export\t'OORT_SELF_MEDIA_ORIGIN'=x", "'HERMES_MEDIA_DELIVERY_STRICT'=1"):
+            with self.subTest(line=line):
+                rc, kills, record = self.monitor(healthy_cfg(), env_file=(line + "\n").encode())
+                self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
+        rc, kills, record = self.monitor(healthy_cfg(), env_file=b"# HERMES_SAFE_MODE=1\nHERMES_SAFE_MODE=0 # =1\n")
+        self.assertEqual((rc, kills), (0, []), record)
+
+
+class HermesHomeIsTheFolderTheGateReads(GateHarness):
+    """#4886: the gate reads `<data folder>/.env`; Hermes loads `$HERMES_HOME/.env`. They have to be the same folder."""
+
+    def test_a_home_that_is_another_folder_stops_the_start(self):
+        with tempfile.TemporaryDirectory() as other:
+            rc, record, _ = self.boot(env={"HERMES_HOME": other})
+        self.assertRefused(rc, record, "HERMES_HOME is not the folder this gate reads")
+        self.assertNotIn(other, json.dumps(record))
+
+    def test_no_home_at_all_stops_the_start(self):
+        for home in (None, "", "   "):
+            with self.subTest(home=home):
+                rc, record, _ = self.boot(env={"HERMES_HOME": home})
+                self.assertRefused(rc, record, "HERMES_HOME is not set")
+
+    def test_the_check_does_not_depend_on_the_picture_tool(self):
+        rc, record, _ = self.boot({"web": healthy_cfg()["web"]}, TOOLS - {"image_generate"}, install_guard=False,
+                                  env={"HERMES_HOME": "/nonexistent-4886"})
+        self.assertRefused(rc, record, "HERMES_HOME is not the folder this gate reads")
+        self.assertNotIn("nonexistent-4886", json.dumps(record))
+
+    def test_the_same_folder_written_another_way_is_the_same_folder(self):
+        # Hermes expands `$VAR` and `~` in the variable (hermes_constants `_expand_hermes_home`); the folders are compared by real path.
+        with tempfile.TemporaryDirectory() as data, tempfile.TemporaryDirectory() as parent:
+            link = os.path.join(parent, "link")
+            os.symlink(data, link)
+            with mock.patch.dict(os.environ, {"OORT_PROOF_VOLUME": data}):
+                for home in (data, data + "/", data + "//", os.path.join(data, "."), link, "$OORT_PROOF_VOLUME",
+                             "${OORT_PROOF_VOLUME}", "  " + data + "  "):
+                    with self.subTest(home=home):
+                        self.assertEqual(lockgate.hermes_home_problems({"HERMES_HOME": home}, data), [])
+                for home in (parent, os.path.join(data, "sub"), "/", "~", "$OORT_PROOF_UNSET_VARIABLE"):
+                    with self.subTest(other=home):
+                        self.assertEqual(len(lockgate.hermes_home_problems({"HERMES_HOME": home}, data)), 1)
 
 
 if __name__ == "__main__":

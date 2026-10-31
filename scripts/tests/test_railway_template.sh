@@ -287,12 +287,12 @@ pass "catalog: start commands = canonical command lists (operators, order, value
 # ①b #4072 — the Hermes default config and the tool-lock gate's own rules. The
 # catalog above pins the start command to these files' sha256, so a gate that
 # is wrong here is wrong in both shapes. Stdlib only (no PyYAML skip).
-(cd "$ROOT" && python3 -m unittest infra/hermes/test_default_config.py infra/hermes/test_lockgate_connectors.py infra/hermes/test_image_guard.py infra/hermes/test_lockgate_image_guard.py infra/hermes/test_login_relay.py) \
+(cd "$ROOT" && python3 -m unittest infra/hermes/test_default_config.py infra/hermes/test_lockgate_connectors.py infra/hermes/test_image_guard.py infra/hermes/test_lockgate_image_guard.py infra/hermes/test_lockgate_env.py infra/hermes/test_login_relay.py) \
   >"$TMP_ROOT/hermes-unit.out" 2>&1 || {
   cat "$TMP_ROOT/hermes-unit.out" >&2
   fail "infra/hermes offline tests failed"
 }
-pass "hermes: default config (22 toolsets off, no model, no connector), gate rules + volume .env, image guard plugin (accept/refuse table, zero network or file access) + its pinned files, config, SSRF switches and canary, login relay sidecar (fixed argv, URL allow-list, paste rebuild, key/env separation, process-group kill; fake CLI), offline"
+pass "hermes: default config (22 toolsets off, no model, no connector), gate rules + volume .env, image guard plugin (accept/refuse table, zero network or file access) + its pinned files, config, SSRF switches and canary, the volume's .env read like Hermes' loader (one input table for the fallback parser and python-dotenv, every spelling the loader applies refused, ${} resolved, $HERMES_HOME = the folder read; #4886), login relay sidecar (fixed argv, URL allow-list, paste rebuild, key/env separation, process-group kill; fake CLI), offline"
 
 # ①c #4820 review — the REAL pinned Hermes image (the digest compose and railway.json share): the real lockgate.py, the oort
 # image guard plugin and Hermes' own dispatch path with NO network, the start-command text of compose and railway.json up to
