@@ -5,7 +5,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -21,7 +20,7 @@ import {
   type ThemeRef,
 } from '@momo/core/design/themeResolve';
 import type {Mode} from '@momo/core/design/themes';
-import {Screen} from './atoms';
+import {Screen, Sentence} from './atoms';
 import {resolveThemeTokens} from './themeCatalog';
 import {SHEET_ICONS, SHEET_ICON_SIZE} from './icons';
 import {themeChoiceLabel, useStyles, useTheme, type ThemeChoice} from './theme';
@@ -129,13 +128,13 @@ export function ThemePickerPage({
             testID="theme-picker-undo"
             style={({pressed}) => [styles.action, pressed && styles.pressed]}
           >
-            <Text style={[styles.actionText, !changed && styles.muted]}>
+            <Sentence style={[styles.actionText, !changed && styles.muted]}>
               되돌리기
-            </Text>
+            </Sentence>
           </Pressable>
-          <Text accessibilityRole="header" style={styles.title}>
+          <Sentence accessibilityRole="header" style={styles.title}>
             테마 고르기
-          </Text>
+          </Sentence>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="테마 선택 완료"
@@ -143,7 +142,7 @@ export function ThemePickerPage({
             testID="theme-picker-done"
             style={({pressed}) => [styles.action, pressed && styles.pressed]}
           >
-            <Text style={styles.actionText}>완료</Text>
+            <Sentence style={styles.actionText}>완료</Sentence>
           </Pressable>
         </View>
         <View
@@ -165,14 +164,14 @@ export function ThemePickerPage({
                 pressed && styles.pressed,
               ]}
             >
-              <Text
+              <Sentence
                 style={[
                   styles.filterText,
                   choice === filter && styles.filterTextSelected,
                 ]}
               >
                 {themeChoiceLabel(filter)}
-              </Text>
+              </Sentence>
             </Pressable>
           ))}
         </View>
@@ -183,14 +182,14 @@ export function ThemePickerPage({
           ]}
           testID="theme-picker-scroll"
         >
-          <Text
+          <Sentence
             style={styles.hint}
             accessibilityLiveRegion="polite"
             testID="theme-picker-notice"
           >
             {notice ??
               '고르면 앱 전체에 바로 보여요. 되돌리기로 처음 선택을 복원할 수 있어요.'}
-          </Text>
+          </Sentence>
           <View
             accessibilityRole="radiogroup"
             accessibilityLabel="테마 스타일"
@@ -218,11 +217,11 @@ export function ThemePickerPage({
                 >
                   <ThemePreview theme={tile.ref} large />
                   <View style={styles.tileFooter}>
-                    <Text
+                    <Sentence
                       style={[styles.label, selected && styles.labelSelected]}
                     >
                       {tile.label}
-                    </Text>
+                    </Sentence>
                     {selected ? (
                       <Image
                         source={SHEET_ICONS.check}
@@ -233,9 +232,9 @@ export function ThemePickerPage({
                     ) : null}
                   </View>
                   {tile.ref === 'noeul' ? (
-                    <Text style={styles.detail}>
+                    <Sentence style={styles.detail}>
                       폰에서는 남색 띠 없이 평평한 바닥으로 보여요.
-                    </Text>
+                    </Sentence>
                   ) : null}
                 </Pressable>
               );

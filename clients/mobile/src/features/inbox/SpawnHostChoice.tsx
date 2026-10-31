@@ -6,7 +6,8 @@ import {
   tierLabel,
 } from '@momo/core/features/timeline/spawnHostChoice';
 import React from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Pressable, StyleSheet, View} from 'react-native';
+import {Sentence} from '../../design/atoms';
 import {font, line, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 
@@ -71,7 +72,7 @@ export function SpawnHostChoice({
     <View style={styles.group} testID={`${testIDPrefix}-host-group`}>
       {/* 보이는 라벨이다. 라디오 목록이 무엇을 묻는지 모른 채 기계 이름 서너 개만
           보는 화면은 선택기가 아니라 수수께끼다. */}
-      <Text style={styles.legend}>{HOST_CHOICE_LABEL}</Text>
+      <Sentence style={styles.legend}>{HOST_CHOICE_LABEL}</Sentence>
       {/* 후보가 0이면 상자 자체를 세우지 않는다. 빈 테두리는 「로딩 중」으로
           읽히는데, 실제로 일어난 일은 등록된 호스트가 없다는 것이고 그것은 아래
           문장이 말한다. */}
@@ -125,10 +126,10 @@ export function SpawnHostChoice({
                 ) : null}
               </View>
               <View style={styles.rowText}>
-                <Text style={[styles.name, !live && styles.nameQuiet]}>
+                <Sentence style={[styles.name, !live && styles.nameQuiet]}>
                   {candidateLabel(candidate)}
-                </Text>
-                {tier !== null ? <Text style={styles.tier}>{tier}</Text> : null}
+                </Sentence>
+                {tier !== null ? <Sentence style={styles.tier}>{tier}</Sentence> : null}
               </View>
             </Pressable>
           );
@@ -136,9 +137,9 @@ export function SpawnHostChoice({
       </View>
       ) : null}
       {gate.blockedCopy !== undefined ? (
-        <Text style={styles.blocked} testID={`${testIDPrefix}-host-blocked`}>
+        <Sentence style={styles.blocked} testID={`${testIDPrefix}-host-blocked`}>
           {gate.blockedCopy}
-        </Text>
+        </Sentence>
       ) : null}
     </View>
   );

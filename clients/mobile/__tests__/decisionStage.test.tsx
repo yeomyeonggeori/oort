@@ -22,7 +22,8 @@ import {useOpenDecisionStage} from '../src/features/decisionStage/openDecisionSt
 import {StageHero} from '../src/features/attachments/StageHero';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {RequestBundleCard} from '../src/features/conversation/RequestBundleCard';
-import {STACK_PILL_SCALE} from '../src/design/atoms';
+import {BAR_CONTROL_MAX_SCALE, STACK_PILL_SCALE} from '../src/design/atoms';
+import {sweepHangulWord} from './fixtures/hangulWord';
 import {SessionProvider} from '../src/session/useSession';
 import {
   resetBlurSupportForTests,
@@ -892,4 +893,186 @@ test('큰 글씨: 넘기기·닫기는 이전/다음 단추와 VoiceOver 동작�
     }),
   );
   expect(defaults.onClose).toHaveBeenCalledTimes(1);
+});
+
+// ---- S3 화면 다듬기 (#4982) ----------------------------------------------------------------------
+// 아래 시험은 렌더 트리를 읽는다. JS 렌더러에는 레이아웃이 없으므로 「본문 창을 덜 차지한다」·「눌린다」는 선언된 구조·속성으로 잰다.
+
+const HOSTS = {
+  kind: 'work_session_spawn',
+  candidates: [
+    {hostId: 'mine', displayName: '내 맥', tier: 'local', online: true, selectable: true},
+    {
+      hostId: 'old',
+      displayName: '낡은 맥',
+      tier: 'remote',
+      online: false,
+      selectable: false,
+      unavailableReason: 'offline',
+    },
+  ],
+} as unknown as AgentApprovalCard['execution'];
+
+test.each([
+  ['기본 크기', 1],
+  ['큰 글씨(AX3)', AX3],
+])('%s: 결정 무대의 한글 글자는 모두 어절 우선 줄바꿈이에요 - 값·비용·호스트·자세히·오프라인까지', async (_name, scale) => {
+  setFontScale(scale);
+  const view = await mount({
+    entries: [entry('첫째', {...RISKY, execution: HOSTS}), entry('둘째', RISKY)],
+  });
+  const sweep = () => sweepHangulWord(view.getByTestId('decision-stage'));
+  // 헛도는 훑기가 아니어야 한다: 머리말·값·위험·비용·「자세히」·결정 패널·호스트 선택·이전/다음·썸네일이 다 센 글자다.
+  const first = sweep();
+  expect(first.checked).toBeGreaterThan(14);
+  expect(first.missing).toEqual([]);
+  fireEvent.press(view.getByTestId('decision-stage-details-toggle'));
+  expect(within(view.getByTestId('decision-stage-card')).getByText('표시 이름 · 별하늘')).toBeTruthy();
+  const opened = sweep();
+  expect(opened.checked).toBeGreaterThan(first.checked);
+  expect(opened.missing).toEqual([]);
+  await act(async () =>
+    view.rerender(wrap(<DecisionStage {...view.props} offline />)),
+  );
+  const offline = sweep();
+  expect(offline.checked).toBeGreaterThan(10);
+  expect(offline.missing).toEqual([]);
+  expect(view.getByText(/연결이 없어요/)).toBeTruthy();
+});
+
+test('한글 글자 훑기: 영수증·한 번만 보이는 값·완료·불러오는 중·오류·빈 상태도 어절 우선이에요', async () => {
+  mockDecide
+    .mockResolvedValueOnce({
+      kind: 'committed',
+      status: 'approved',
+      result: {secretOnce: {kind: 'invite', value: 'stage-only-value'}},
+    })
+    .mockResolvedValueOnce({kind: 'committed', status: 'approved'});
+  const view = await mount({entries: [entry('첫째'), entry('둘째')]});
+  const sweep = () => sweepHangulWord(view.getByTestId('decision-stage'));
+  await act(async () => fireEvent.press(view.getByTestId('decision-stage-approve')));
+  // 영수증 + 한 번만 보이는 값(LinkOnce) + 「다음 결정 보기」
+  expect(view.getByText('복사하기')).toBeTruthy();
+  const receipt = sweep();
+  expect(receipt.checked).toBeGreaterThan(8);
+  expect(receipt.missing).toEqual([]);
+  await act(async () => fireEvent.press(view.getByText('다음 결정 보기')));
+  await act(async () => fireEvent.press(view.getByTestId('decision-stage-approve')));
+  await act(async () => jest.advanceTimersByTime(260));
+  expect(view.getByText('모두 처리했어요')).toBeTruthy();
+  const done = sweep();
+  expect(done.checked).toBeGreaterThan(3);
+  expect(done.missing).toEqual([]);
+  view.unmount();
+
+  const loading = await mount({entries: [], loading: true});
+  expect(sweepHangulWord(loading.getByTestId('decision-stage')).missing).toEqual([]);
+  expect(sweepHangulWord(loading.getByTestId('decision-stage')).checked).toBeGreaterThan(1);
+  loading.unmount();
+  const failed = await mount({entries: [], error: '결정을 불러오지 못했어요', onRetry: jest.fn()});
+  expect(failed.getByText('다시 불러오기')).toBeTruthy();
+  expect(sweepHangulWord(failed.getByTestId('decision-stage')).missing).toEqual([]);
+  expect(sweepHangulWord(failed.getByTestId('decision-stage')).checked).toBeGreaterThan(2);
+  failed.unmount();
+  const empty = await mount({entries: []});
+  expect(empty.getByText('지금 살펴볼 결정이 없어요.')).toBeTruthy();
+  expect(sweepHangulWord(empty.getByTestId('decision-stage')).missing).toEqual([]);
+  expect(sweepHangulWord(empty.getByTestId('decision-stage')).checked).toBeGreaterThan(1);
+});
+
+test.each([
+  ['기본 크기', 1],
+  ['큰 글씨(AX3)', AX3],
+])('%s: 「자세히」는 한 번만 서고, 서 있는 것은 눌려요', async (_name, scale) => {
+  setFontScale(scale);
+  const view = await mount({entries: [entry('첫째', RISKY)]});
+  // 코어의 조용한 줄이 「… · 자세히」로 끝난다: 그 줄이 곧 단추이고, 같은 낱말의 두 번째 글자는 없다.
+  const mentions = view.getAllByText(/자세히/);
+  expect(mentions).toHaveLength(1);
+  const toggle = view.getByTestId('decision-stage-details-toggle');
+  expect(within(toggle).getAllByText(/자세히/)).toHaveLength(1);
+  expect(toggle.props.accessibilityRole).toBe('button');
+  expect(toggle.props.accessibilityState).toMatchObject({expanded: false});
+  expect(view.queryByText('표시 이름 · 별하늘')).toBeNull();
+  fireEvent.press(mentions[0]); // 글자를 눌러도 단추가 받는다
+  expect(view.getByTestId('decision-stage-details-toggle').props.accessibilityState).toMatchObject({expanded: true});
+  expect(view.getByTestId('decision-stage-details-toggle').props.accessibilityLabel).toBe('자세히 접기');
+  expect(view.getByText('표시 이름 · 별하늘')).toBeTruthy();
+  fireEvent.press(view.getByTestId('decision-stage-details-toggle'));
+  expect(view.queryByText('표시 이름 · 별하늘')).toBeNull();
+  // 낭독 이름은 보이는 글(남은 시간)을 잃지 않는다.
+  view.rerender(wrap(<DecisionStage {...view.props} entries={[entry('첫째', {...RISKY, expiresAtMs: NOW + 23 * 3_600_000})]} />));
+  expect(view.getByTestId('decision-stage-details-toggle').props.accessibilityLabel).toBe('23시간 남음 · 자세히');
+});
+
+test('첫 장의 「이전」과 마지막 장의 「다음」은 눌리는 단추와 다르게 보이고, 넘길 수 없는 순간에는 썸네일도 같아요', async () => {
+  const look = (view: ReturnType<typeof render>, id: string) =>
+    StyleSheet.flatten(view.getByTestId(id).props.style) as {opacity?: number};
+  const dim = (view: ReturnType<typeof render>, id: string) => (look(view, id).opacity ?? 1) < 1;
+  const view = await mount();
+  // 첫 장: 이전만 흐리고(+ 비활성), 다음은 그대로다.
+  expect(dim(view, 'decision-stage-previous')).toBe(true);
+  expect(view.getByTestId('decision-stage-previous').props.accessibilityState).toMatchObject({disabled: true});
+  expect(dim(view, 'decision-stage-next')).toBe(false);
+  expect(view.getByTestId('decision-stage-next').props.accessibilityState).toMatchObject({disabled: false});
+  // 가운데 장: 둘 다 눌린다.
+  await act(async () => fireEvent.press(view.getByTestId('decision-stage-next')));
+  expect(dim(view, 'decision-stage-previous')).toBe(false);
+  expect(dim(view, 'decision-stage-next')).toBe(false);
+  // 마지막 장: 다음만 흐리다.
+  await act(async () => fireEvent.press(view.getByTestId('decision-stage-next')));
+  expect(dim(view, 'decision-stage-next')).toBe(true);
+  expect(dim(view, 'decision-stage-previous')).toBe(false);
+  // 보내는 중에는 넘길 수 없다: 이전/다음/썸네일이 함께 흐려진다(눌러도 일이 없는데 같은 모양이면 거짓말이다).
+  await act(async () => fireEvent.press(view.getByTestId('decision-stage-previous')));
+  expect(dim(view, 'decision-stage-thumbnail-첫째')).toBe(false);
+  mockDecide.mockReturnValue(new Promise(() => {}));
+  await act(async () => fireEvent.press(view.getByTestId('decision-stage-approve')));
+  for (const id of ['decision-stage-previous', 'decision-stage-next', 'decision-stage-thumbnail-첫째']) {
+    expect(dim(view, id)).toBe(true);
+  }
+});
+
+test.each([
+  ['기본 크기', 1, 2, true],
+  ['큰 글씨(AX3)', AX3, 1, false],
+])('%s: 이전/다음 줄과 썸네일이 본문 창에서 갖는 몫 - 썸네일은 큰 글씨에서 한 줄, 글자 상한은 바 컨트롤과 같아요', async (_name, scale, headlineLines, hasWord) => {
+  setFontScale(scale);
+  const view = await mount();
+  const texts = (id: string) =>
+    view.getByTestId(id).findAll((node: {type: unknown}) => node.type === 'Text');
+  const thumb = texts('decision-stage-thumbnail-첫째');
+  expect(thumb[0].props.numberOfLines).toBe(headlineLines);
+  expect(thumb).toHaveLength(hasWord ? 2 : 1);
+  // 넘기기 줄은 크롬이다: 본문이 아니라 단추라서 글자 배율 상한(바 컨트롤)을 진다. 이 상한이 큰 글씨에서 이 줄의 높이를 막는다.
+  const chrome = [
+    ...texts('decision-stage-previous'),
+    ...texts('decision-stage-position'),
+    ...texts('decision-stage-next'),
+    ...thumb,
+  ];
+  expect(chrome.length).toBeGreaterThanOrEqual(4);
+  for (const node of chrome) {
+    expect(node.props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
+  }
+});
+
+test.each([
+  ['기본 크기', 1, 2],
+  ['큰 글씨(AX3)', AX3, undefined],
+])('%s: 묶음 카드 머리 문장은 큰 글씨에서 두 줄에서 자르지 않아요', (_name, scale, lines) => {
+  setFontScale(scale);
+  const item = entry('첫째');
+  const view = render(
+    wrap(
+      <RequestBundleCard
+        card={item.card}
+        directory={directory}
+        viewerMemberId="self"
+        gate={item.gate}
+        nowMs={NOW}
+      />,
+    ),
+  );
+  expect(view.getByTestId('request-bundle-headline').props.numberOfLines).toBe(lines);
 });

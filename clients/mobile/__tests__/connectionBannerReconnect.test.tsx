@@ -1,9 +1,11 @@
 import React from 'react';
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {StyleSheet} from 'react-native';
+import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import type {LocalePreferencePort} from '@momo/core/i18n';
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {FixedScheme} from '../src/design/theme';
+import {TOUCH_TARGET} from '../src/design/tokens';
 import {
   ConversationHeader,
   RECONNECT_NOW_LABEL,
@@ -44,12 +46,48 @@ describe('끊김 띠', () => {
     expect(banner.props.accessibilityRole).toBe('button');
     expect(banner.props.accessibilityLabel).toBe('지금 다시 연결');
     expect(banner.props.accessibilityValue).toEqual({text: '연결이 끊겼습니다'});
-    expect(banner).toHaveTextContent('연결이 끊겼습니다');
+    // 문장 뒤에 행동의 이름이 눈에 보이게 선다(#4982) - 낭독 라벨에만 있던 이름이다.
+    expect(banner).toHaveTextContent('연결이 끊겼습니다지금 다시 연결');
     // 눌리는 것은 알약이다. 층은 손을 통과시킨다 — 알약 밖의 메시지는 그대로 눌린다.
     expect(screen.getByTestId('connection-banner-layer').props.pointerEvents).toBe('box-none');
 
     fireEvent.press(banner);
     expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  // #4982: 끊김 띠의 「지금 다시 연결」은 낭독 라벨에만 있었고(눈에는 문장 하나뿐), 눌리는 높이는 약 36(알약 29 + 위 여유 7)이었다.
+  // JS 렌더러에는 레이아웃이 없으니 눌리는 상자를 **선언된 값**으로 잰다: 알약의 `minHeight` + 세로 `hitSlop` 이 엄지 바닥(44)이다.
+  const flat = (style: unknown) => (StyleSheet.flatten(style as never) ?? {}) as Record<string, number | undefined>;
+  const slop = (value: unknown) => {
+    const found = (value ?? {}) as {top?: number; bottom?: number};
+    return (found.top ?? 0) + (found.bottom ?? 0);
+  };
+
+  it('끊김 띠는 행동의 이름이 눈에 보이고 눌림 높이가 44 이상이다: 캡슐은 그림이고 눌리는 것은 띠 전체다', () => {
+    const onReconnect = jest.fn();
+    render(header('disconnected', onReconnect));
+    const banner = screen.getByTestId('connection-banner');
+    // 눌림 높이: 알약의 상자가 지고(`minHeight`), 슬롭으로 채우지 않는다.
+    const box = flat(banner.props.style).minHeight ?? 0;
+    expect(box).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    expect(box + slop(banner.props.hitSlop)).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    // 보이는 이름: 문장 옆 캡슐 안의 글자다.
+    const action = within(banner).getByTestId('connection-banner-action');
+    // 낭독 라벨과 같은 낱말이 **글자로도** 선다(보이는 글자가 이름에 들어 있다).
+    expect(within(action).getByText('지금 다시 연결')).toBeTruthy();
+    expect(banner.props.accessibilityLabel).toBe('지금 다시 연결');
+    // 캡슐은 그림이다: 손을 따로 받지 않고(Pressable 이 아니다) 눌러도 띠가 한 번 부른다.
+    expect(action.props.onPress).toBeUndefined();
+    fireEvent.press(within(action).getByText('지금 다시 연결'));
+    expect(onReconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('연결 중 띠는 그대로다: 행동의 이름도 44 상자도 없다', () => {
+    render(header('connecting', jest.fn()));
+    const banner = screen.getByTestId('connection-banner');
+    expect(within(banner).queryByTestId('connection-banner-action')).toBeNull();
+    expect(screen.queryByText('지금 다시 연결')).toBeNull();
+    expect(flat(banner.props.style).minHeight).toBeUndefined();
   });
 
   it('연결 중에는 누를 것이 없다: 문장만 서고 손은 받지 않는다', () => {
@@ -97,8 +135,9 @@ describe('이름은 사전(ko·en)에서 온다', () => {
     return screen.getByTestId('connection-banner').props.accessibilityLabel as string;
   }
 
-  it('영어 기기는 「Reconnect now」', async () => {
+  it('영어 기기는 「Reconnect now」 - 눈에 보이는 글자도 같은 낱말이다', async () => {
     expect(await labelIn('en-US')).toBe('Reconnect now');
+    expect(within(screen.getByTestId('connection-banner-action')).getByText('Reconnect now')).toBeTruthy();
   });
 
   it('한국어 기기는 「지금 다시 연결」', async () => {

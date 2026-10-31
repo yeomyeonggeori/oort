@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
+import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
 import {OortLoader} from '../../design/brand/OortLoader';
 import {GlassSurface} from '../../design/glass';
 import {
@@ -315,9 +315,20 @@ export function ConversationHeader({
               accessibilityLiveRegion="polite"
               onPress={onReconnect}
               hitSlop={BANNER_SLOP}
-              style={({pressed}) => [styles.banner, pressed && styles.bannerPressed]}
+              style={({pressed}) => [
+                styles.banner,
+                styles.bannerActionable,
+                pressed && styles.bannerPressed,
+              ]}
               testID="connection-banner">
               {bannerBody}
+              {/* 행동의 이름이 눈에도 보인다(#4982). 예전에는 이름이 낭독 라벨에만 있어서 띠가 단추인 줄 알 수 없었다. 이 캡슐은 그림일 뿐
+                  누르는 것은 띠 전체다(눌림 높이도 띠가 진다). */}
+              <View style={styles.bannerAction} testID="connection-banner-action">
+                <Sentence style={styles.bannerActionText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+                  {reconnectLabel}
+                </Sentence>
+              </View>
             </Pressable>
           ) : (
             <View
@@ -340,11 +351,12 @@ const CIRCLE_SLOP = (TOUCH_TARGET - CONV.circle) / 2;
 const PILL_SLOP = {top: CIRCLE_SLOP, bottom: CIRCLE_SLOP} as const;
 
 /**
- * 끊김 띠(눌리는 알약, 높이 약 29)를 엄지에 가깝게 만드는 여유. RN 의 `hitSlop` 은 **부모 경계를 넘지 못해서**(RN 문서), 층 안에
- * 머무는 만큼만 번다: 위는 알약 위 여백(`space.sm`) 안이라 머리의 줄과 겹치지 않고, 옆은 층이 화면 폭이라 넉넉하다. 아래로는 층이
- * 알약에서 끝나 벌 수 없다 — 층을 키우면 `onBannerInset`(목록 위 필의 자리)이 움직이므로 키우지 않았다. 눌리는 높이는 약 36.
+ * 끊김 띠(눌리는 알약)의 가로 여유. RN 의 `hitSlop` 은 **부모 경계를 넘지 못해서**(RN 문서) 아래로는 벌 수 없다 — 층이 알약에서 끝난다.
+ * 그래서 예전의 눌림 높이는 약 36(알약 29 + 위 여유 7)에서 멈췄고, 44 에 못 미쳤다(#4982). 이제 세로는 슬롭이 아니라 알약의 상자가 지는
+ * `minHeight: TOUCH_TARGET`(`bannerActionable`)이다: 층의 높이가 늘면 `onBannerInset`(`onLayout` 이 잰 값)이 그대로 따라간다.
+ * 여기 남은 것은 옆 여유뿐이다(층이 화면 폭이라 넉넉하다).
  */
-const BANNER_SLOP = {top: space.sm - 1, bottom: 0, left: space.md, right: space.md} as const;
+const BANNER_SLOP = {left: space.md, right: space.md} as const;
 
 /**
  * 연결 띠의 로더 한 변(pt). 12pt 문장 한 줄 옆에 서는 자리라 small 마크가 읽히는 20: 글자 대비 1.67배로
@@ -452,5 +464,16 @@ const buildStyles = (color: Palette) =>
     },
     // 눌리는 띠(끊김)의 눌림 — 머리 알약·원과 같은 자리의 같은 토큰이다(`pillPressed`).
     bannerPressed: {borderColor: color.textFaint},
+    // 눌리는 띠는 엄지 높이(44)를 상자 자신이 진다. 문장만 서는 띠(연결 중)는 예전 높이 그대로다.
+    bannerActionable: {minHeight: TOUCH_TARGET},
+    // 행동의 이름 캡슐 — 문장 옆에 서는 은은한 단추 모양(신호색 연한 면 + 신호 글자).
+    bannerAction: {
+      flexShrink: 1,
+      paddingHorizontal: space.md,
+      paddingVertical: space.xs,
+      borderRadius: ds2Radius.pill,
+      backgroundColor: color.accentSurface,
+    },
+    bannerActionText: {fontSize: font.meta, color: color.accentText, fontWeight: '600'},
     bannerText: {fontSize: font.meta, color: color.text, fontWeight: '600', flexShrink: 1},
   });

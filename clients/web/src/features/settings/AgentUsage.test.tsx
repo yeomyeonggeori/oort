@@ -96,7 +96,7 @@ describe("agent month usage", () => {
     vi.mocked(fetchAgentUsage).mockResolvedValue(response); mount(true);
     const line = await screen.findByTestId("agent-month-usage");
     await waitFor(() => expect(line.textContent).toContain("자기 보고 · 추정"));
-    expect(line.textContent).toContain("구독 US$20.00/월");
+    expect(line.textContent).toContain("구독 $20.00/월");
     expect(line.textContent).not.toContain("정확");
   });
 });

@@ -72,9 +72,9 @@ export function GroupLabel({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
-    <Text accessibilityRole="header" style={styles.label} testID={testID}>
+    <Sentence accessibilityRole="header" style={styles.label} testID={testID}>
       {children}
-    </Text>
+    </Sentence>
   );
 }
 
