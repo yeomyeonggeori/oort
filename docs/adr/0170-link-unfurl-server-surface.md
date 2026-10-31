@@ -69,7 +69,7 @@ REST는 camelCase, 실시간 `message.unfurl`은 snake_case다(기존 `imageUrl`
 ### D7. 추출 순서·상한·정리
 
 - 제목: og:title → twitter:title → `<title>`, 180자. 설명: og:description → twitter:description → `name=description`, 280자. 사이트 이름: og:site_name, 100자(대체 규칙 없음, 화면이 도메인으로 메운다).
-- 정리: 엔티티를 한 번만 해석한다(`&amp; &lt; &gt; &quot; &apos; &nbsp;`와 숫자 `&#N;`·`&#xH;`. 옛 코드는 `&amp;lt;`를 `<`로 두 번 풀었다). 제어 문자와 공백 연속은 공백 하나로 줄이고 양끝 공백을 걷은 **뒤에** 글자 수(문자 단위, 줄임표 없음)로 자른다. 정리 뒤 비어 있으면 없는 값이다. 그래서 `og:title=""`는 다음 순위로 넘어간다.
+- 정리: 엔티티를 한 번만 해석한다(`&amp; &lt; &gt; &quot; &apos; &nbsp;`와 숫자 `&#N;`·`&#xH;`. 옛 코드는 `&amp;lt;`를 `<`로 두 번 풀었다). 제어 문자와 공백 연속은 공백 하나로 줄이고(글자 방향 제어 문자 U+202A–U+202E·U+2066–U+2069는 지운다, D13) 양끝 공백을 걷은 **뒤에** 글자 수(문자 단위, 줄임표 없음)로 자른다. 정리 뒤 비어 있으면 없는 값이다. 그래서 `og:title=""`는 다음 순위로 넘어간다.
 - 설명이 제목과 같으면 설명을 비운다(정리 뒤, 자르기 전에 비교).
 - 같은 키가 여럿이면 글자 값은 마지막 것, 주소 값은 처음 것(현행 유지).
 
@@ -103,6 +103,22 @@ REST는 camelCase, 실시간 `message.unfurl`은 snake_case다(기존 `imageUrl`
 - 선언이 없으면 프록시가 그림을 받을 때 **헤더에서 잰다**(PNG·GIF·JPEG·WebP. AVIF 등은 재지 않는다). 잰 값은 그 카드 행과 캐시 행에 한 번 기록한다(`WHERE image_width IS NULL`). 기록이 실패해도 그림 응답은 그대로다. 외부 이미지 디코더는 쓰지 않고 헤더의 정수만 읽는다(범위를 벗어난 입력은 못 잰 것으로 본다).
 - 선언한 값은 페이지가 정직하다는 보장이 없다. 화면은 값을 비율로만 쓰고 자기 상한을 둔다(#4882).
 
+### D13. 독립 보안 검수 1회차 수리 (2026-10-31)
+
+검수가 이 증보의 구현에서 High 1건·Medium 2건·Low 3건을 냈다. 아래는 고친 것과 그 결정이다(검수 기록은 비공개이고 재현 절차는 여기에 쓰지 않는다). 새 송신 경로나 새 열은 없다. Status는 Proposed 그대로다(2회차 검수 PASS 뒤 planner가 올린다).
+
+- **해석은 페이지 크기에 선형이다 (H-1).** 해석기는 `</title`이 없는 `<title>`을 만나면 「뒤에도 없다」를 한 번만 알아내고(`Scan::title_unclosed`) 이후 `<title>`에서 다시 찾지 않는다. 닫혔지만 정리하면 비는 제목은 이 표시를 켜지 않는다(뒤의 `<title>`이 제목이 될 수 있다). 모듈 머리 주석의 선형 시간 설명을 사실에 맞게 고쳤다. 안전망으로 워커는 카드 만들기를 `spawn_blocking`으로 돌려 같은 태스크에서 도는 웹훅 송신·도어벨과 떼어 놓는다(구조적 방어라 단독 시험·사보타주는 없다). 시험 문턱은 512 KiB 상한 페이지 1초이고 근거는 시험 주석에 있다(고치기 전 디버그 빌드에서 128 KiB 11.8초로 이차였고 고친 뒤 512 KiB가 27 ms).
+- **아이콘의 DNS 단계를 시험이 잰다 (M-1).** 아이콘 주소가 이름이고 그 이름이 사설·루프백·링크 로컬·클라우드 메타데이터·IPv6에 담긴 IPv4(매핑·NAT64·6to4·호환)로 풀리면 `Blocked`이고 소켓은 0이다(첫 hop, 공개+사설 혼합 답, 리디렉션 hop의 이름). 해석기가 실제로 불렸는지까지 단정해 더 앞의 거절 때문에 통과하는 일이 없게 했다. 이 시험이 후속 주장(「아이콘은 443 전용이고 사설·루프백·링크 로컬은 거절」)의 증명 시험이다(`claims.yaml`은 정책 파일이라 이 증보가 고치지 않는다).
+- **프록시는 바깥 사이트를 아낀다 (M-2).** 아이콘은 거의 모든 카드에 생기고(`/favicon.ico` 대체) 각 요청은 최대 4번의 바깥 GET이므로, #4882·#4883 화면이 `…/icon`을 부르기 전에 넣는다.
+  - **실패 기억**: 404·가드 거절·시간 초과·형식 불일치를 10분 기억하고 그동안 바깥에 묻지 않는다. 그림 캐시와 따로 한도(1024개)를 둬서 나쁜 주소가 좋은 그림을 밀어내지 못한다.
+  - **멤버 예산**: `MemberWrite::UnfurlProxy`, 창(60초)당 기본 240, `RATE_LIMIT_UNFURL_PROXY_PER_MEMBER`(0이면 끔). 두 라우트가 한 예산을 쓰고 **서버가 실제로 바깥에서 받아 와야 하는 요청만** 센다(`proxy_goes_outbound`): 메모리에 있는 그림과 기억 중인 실패는 세지 않는다. 라우트 층이 아니라 핸들러에서 인가 뒤·받기 앞에 쓴다(층은 둘을 가르지 못한다). 넘으면 openapi가 이미 선언한 429 + `Retry-After`이고, 감사 행은 멤버 쓰기 예산의 기존 계약이다(`rate_limit.exceeded`, `surface = unfurl_proxy`, 멤버·표면당 창마다 최대 1행). 240은 한 화면 20장(그림·아이콘 40번)을 처음 열 때보다 넉넉하고 초당 4번이다.
+  - **동시 상한**: 바깥으로 나가는 받기는 프로세스 전체로 16개. 넘으면 429 + `Retry-After: 1`이고 카드 탓이 아니므로 실패로 기억하지 않는다. 화면(#4882·#4883)은 429를 404처럼 조용히 대체 아이콘으로 그리고 `Retry-After` 뒤에 다시 부른다.
+  - **해석 마감**: `SafeUnfurlTransport`의 이름 조회에 3초 마감과 32개 상한을 둔다. `tokio::net::lookup_host`는 blocking 풀에서 `getaddrinfo`를 부르고, 마감에 future를 버려도 그 스레드는 `getaddrinfo`가 끝날 때까지 잡혀 있다. 그래서 조회를 자기 태스크에서 돌려 **끝날 때까지 자리를 쥐게** 했다(포기한 조회도 상한에 센다). 자리가 없으면 줄 세우지 않고 바로 이름 해석 실패(`Failed("dns")`)다. 한계: 이 상한은 이 전송기 하나의 것이고 `momo-webhook`의 공용 `SystemHostResolver`(웹훅 전달·도어벨)는 그대로다. 같은 마감을 거기에 주는 것은 후속 후보다.
+  - **LRU**: 가득 차면 전부 비우던 것을 가장 오래 안 쓴 것부터 내보내고 항목 256개·합 32 MiB로 묶는다(전에는 64개에 항목당 최대 5 MiB라 이론상 320 MiB).
+- **마이그레이션 163의 CHECK 여섯 개는 `NOT VALID`다 (Low-1).** 열이 방금 생겨 기존 행이 어길 수 없고 새로 쓰는 행(INSERT·UPDATE)은 검사된다. 그래서 큰 표에서도 잠금이 메타데이터 변경 길이로 끝난다(162와 같은 이유). 이미 163을 적용한 DB는 옛 모양을 그대로 가진다(적용된 마이그레이션은 다시 돌지 않는다).
+- **글자 방향 제어 문자를 지운다 (Low-3).** 제목·설명·사이트 이름에서 U+202A–U+202E·U+2066–U+2069를 서버가 지운다(공백으로 바꾸지 않는다). 오른쪽에서 왼쪽으로 쓰는 글자와 U+200E·U+200F는 그대로다.
+- 하지 않은 것(후속 후보): 첫 hop 호스트를 정규화한 뒤 IP를 고정하기(검수 Low-2, 이번 변경 밖의 기존 코드이고 운영 glibc에서는 닿지 않는다), 같은 주소를 동시에 부르는 요청 합치기.
+
 ### DB (migration 163)
 
 `unfurl_url_cache`와 `message_unfurl`에 같은 열 여섯: `site_name`·`icon_proxy_key`·`icon_source_url`·`image_width`·`image_height`·`is_video`(NOT NULL DEFAULT false). 크기 쌍·범위·주소 길이는 CHECK로 DB도 쥔다. `icon_source_url`은 `image_url`처럼 클라이언트에 나가지 않는다고 열 COMMENT에 적는다. 새 표가 없으므로 RLS 정책·FORCE·권한은 그대로다. 163 이전의 `unfurl_url_cache` 행은 새 필드 없이 24시간 안에 만료된다(다시 가져오지 않는다).
@@ -123,6 +139,7 @@ REST는 camelCase, 실시간 `message.unfurl`은 snake_case다(기존 `imageUrl`
 - 카드 3개·정보 없음·새 열(D10·D11·DB, 실 PG, `momo_app`은 superuser·BYPASSRLS 아님을 시험이 단정한다, 두 테넌트): `momo-unfurl/tests/unfurl_conformance_pg.rs`의 `four_links_make_three_cards_in_order_and_every_new_column_is_stored` · `a_page_with_no_title_and_no_picture_ends_quietly` · `the_cache_carries_the_new_fields_to_the_next_message` · `two_tenants_each_read_only_their_own_site_meta_as_the_runtime_role` · `a_measured_size_is_recorded_once_and_a_declared_size_is_never_overwritten` · `the_database_holds_the_size_pair_the_icon_pair_and_the_name_length`, 기존 `extract.rs`의 `keeps_three_and_drops_the_fourth`.
 - 응답에 아이콘·그림의 원격 주소가 없음(REST와 실시간 모두, 본문 문자열에서 부재를 단정한다)·아이콘 경로의 인가(비로그인 401, 채널 밖 멤버·다른 테넌트 403, 없는 카드·아이콘 없는 카드 404)·잰 크기의 기록: `momo-server/tests/unfurl_conformance_pg.rs`의 `site_meta_over_rest_the_icon_proxy_and_the_measured_size`와 위 첫 PG 시험의 방송 단정.
 - 코어 타입·디코더: `packages/momo-core`의 `unfurl.test.ts`(`unfurl site metadata`) · `unfurlFrames.test.ts` · `unfurlApi.test.ts`.
-- 사보타주(아이콘 가드 우회, 풀이 뒤 검사 제거, 3개 상한 제거, charset 무시, 설명=제목 비우기 제거, 응답에 아이콘 원본 주소 노출)는 각각 RED를 확인하고 되돌렸다. 결과표는 PR 본문에 있다.
+- 검수 1회차 수리(D13): `parse.rs`의 `a_page_of_unclosed_titles_is_read_in_linear_time` · `no_page_shape_at_the_fetch_cap_makes_the_reader_slow` · `an_empty_closed_title_does_not_stop_a_later_title_but_an_unclosed_one_does` · `direction_controls_are_dropped_from_every_text_field`. 아이콘 DNS 단계(M-1): `fetch.rs`의 `an_icon_name_that_resolves_to_an_inward_address_is_blocked_before_any_connect` · `an_icon_name_with_one_inward_answer_among_public_ones_is_blocked` · `an_icon_redirect_to_a_name_that_resolves_inward_stops_after_the_public_hop`, `proxy.rs`의 `an_icon_name_that_resolves_inward_is_refused_by_the_proxy_and_never_dialled`. 프록시 절약(M-2): `proxy.rs`의 `a_failed_fetch_is_remembered_and_the_address_is_not_asked_again` · `a_remembered_failure_runs_out_and_the_address_is_asked_again` · `the_least_recently_used_picture_goes_first_and_the_cache_is_never_emptied_at_once` · `the_byte_budget_bounds_the_cache_and_a_body_over_it_is_served_but_not_kept` · `failures_have_a_bound_of_their_own_and_never_push_pictures_out` · `at_most_the_limit_of_fetches_run_at_once_and_the_next_is_busy_until_one_ends` · `a_failed_fetch_gives_its_place_back` · `only_a_request_that_would_leave_the_building_goes_outbound`, `fetch.rs`의 `a_name_server_that_never_answers_ends_the_fetch_at_the_deadline` · `lookups_that_outlive_their_deadline_still_count_against_the_ceiling`, 서버 PG(`momo-server/tests/unfurl_conformance_pg.rs`)의 `the_proxy_budget_is_spent_only_by_a_request_that_fetches_and_is_the_members_own` · `a_full_house_of_fetches_in_flight_is_a_429_and_only_for_a_request_that_must_fetch` · `an_icon_that_404ed_is_remembered_so_asking_again_costs_neither_the_site_nor_the_budget`, 설정 `config.rs`의 `the_member_write_defaults_admit_ordinary_use_with_headroom` · `the_member_write_env_names_move_exactly_their_own_field`. migration 163의 `NOT VALID`(두 표의 새 행·UPDATE 거절과 `convalidated` 거짓): crate PG `the_database_holds_the_size_pair_the_icon_pair_and_the_name_length`.
+- 사보타주(아이콘 가드 우회, 풀이 뒤 검사 제거, 3개 상한 제거, charset 무시, 설명=제목 비우기 제거, 응답에 아이콘 원본 주소 노출, 그리고 1회차 수리의 제목 플래그·방향 문자·아이콘 DNS 단계 생략·실패 기억·LRU·바이트 상한·동시 상한·멤버 예산·해석 마감과 상한·`NOT VALID`)는 각각 RED를 확인하고 되돌렸다. 결과표는 PR 본문에 있다.
 - 실제 외부 사이트를 대상으로 한 확인은 하지 않았다(`runtime-unverified`). 가짜 서버는 127.0.0.1이고 안전 규칙은 주입한 해석기와 가짜 소켓으로 시험한다. 화면은 이 증보의 범위가 아니다.
 - `docs/security/claims.yaml`의 새 주장(아이콘 443 전용 등)은 정책 파일이라 이 증보가 고치지 않는다. 기존 NET-2의 증명 시험 이름·위치는 바꾸지 않았다. 후속 이슈의 몫이다.

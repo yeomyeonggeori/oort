@@ -1174,4 +1174,106 @@ async fn the_database_holds_the_size_pair_the_icon_pair_and_the_name_length() {
             "{label} must violate {constraint}: {error}"
         );
     }
+
+    // #4881 review Low-1: the migration adds all six rules `NOT VALID` (no scan of the existing
+    // rows, so a short lock on a big table). That must not weaken them for a NEW row, and the
+    // cache table, which the loop above does not touch, holds them just the same.
+    let cache_attempt = |label: &str, row: Row| {
+        let su = su.clone();
+        let label = label.to_string();
+        async move {
+            sqlx::query(
+                "INSERT INTO unfurl_url_cache \
+                   (workspace_id, url_key, status, expires_at, \
+                    image_width, image_height, icon_source_url, icon_proxy_key, site_name) \
+                 VALUES ($1,$2,'ok', now() + interval '1 day',$3,$4,$5,$6,$7)",
+            )
+            .bind(tenant.workspace)
+            .bind(format!("https://db.example/cache/{label}"))
+            .bind(row.width)
+            .bind(row.height)
+            .bind(row.icon_url)
+            .bind(row.icon_key)
+            .bind(row.site_name)
+            .execute(&su)
+            .await
+        }
+    };
+    cache_attempt("good", good.clone())
+        .await
+        .expect("the boundary values are valid in the cache table too");
+    for (label, row, constraint) in [
+        (
+            "w-only",
+            Row {
+                height: None,
+                ..good.clone()
+            },
+            "unfurl_url_cache_image_size_ck",
+        ),
+        (
+            "h-big",
+            Row {
+                height: Some(16385),
+                ..good.clone()
+            },
+            "unfurl_url_cache_image_size_ck",
+        ),
+        (
+            "icon-no-key",
+            Row {
+                icon_key: None,
+                ..good.clone()
+            },
+            "unfurl_url_cache_icon_ck",
+        ),
+        (
+            "name-101",
+            Row {
+                site_name: Some("가".repeat(101)),
+                ..good.clone()
+            },
+            "unfurl_url_cache_site_name_ck",
+        ),
+    ] {
+        let error = cache_attempt(label, row)
+            .await
+            .expect_err(label)
+            .to_string();
+        assert!(
+            error.contains(constraint),
+            "{label} must violate {constraint}: {error}"
+        );
+    }
+    // An UPDATE of a stored row is checked as well, not only an INSERT.
+    let update = sqlx::query(
+        "UPDATE message_unfurl SET image_width = 0 WHERE url_key = 'https://db.example/good'",
+    )
+    .execute(&su)
+    .await
+    .expect_err("an update that breaks a rule is refused")
+    .to_string();
+    assert!(update.contains("message_unfurl_image_size_ck"), "{update}");
+    // And the six are `NOT VALID`: that is the migration's whole point, and a later edit that
+    // puts the validating scan back would otherwise change nothing a test can see.
+    let constraints: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT conname::text, convalidated FROM pg_constraint \
+          WHERE conname IN ( \
+            'unfurl_url_cache_site_name_ck', 'unfurl_url_cache_icon_ck', \
+            'unfurl_url_cache_image_size_ck', 'message_unfurl_site_name_ck', \
+            'message_unfurl_icon_ck', 'message_unfurl_image_size_ck') \
+          ORDER BY conname",
+    )
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(constraints.len(), 6, "{constraints:?}");
+    for (name, validated) in constraints {
+        assert!(
+            !validated,
+            "{name} must be NOT VALID (migration 163, review Low-1). A database that applied \
+             migration 163 before that change keeps the validated constraint, because applied \
+             migrations are never re-run: use a freshly created database"
+        );
+    }
 }
