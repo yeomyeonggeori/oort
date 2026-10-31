@@ -75,6 +75,7 @@ import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {isPhoneSlashRow} from '../aiConnect/AiConnectCard';
 import {CONV, composerFloat, PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from './convDesign';
 import {DockFollowContext} from './dockFollow';
+import {useMakeLanding} from './makeLanding';
 import {COMPOSER_INPUT_TYPOGRAPHY, useComposerInputLayout} from './useComposerInputLayout';
 import {clearDraft, readDraft, saveDraft} from './drafts';
 import {Avatar} from './Avatar';
@@ -1245,6 +1246,8 @@ export function Composer({
   const replyCopy = useReplyCopy(directory);
   // 보내기 왼쪽 표현 단추의 낭독 이름(#4942) — 사전(ko·en)에서만 온다.
   const expressionCopy = useExpressionMessages();
+  // 「AI와 만들기」 요청을 보낸 뒤 그 DM 으로 가는 길(#4962) — 대화 화면이 컨텍스트로 준다. 없으면 시트는 「확인」으로 끝난다.
+  const openMadeConversation = useMakeLanding();
   const replying = !!replyTarget && onCancelReply !== undefined;
   const placeholder = replying ? replyCopy.placeholder() : placeholderProp;
   const sendLabel = replying ? replyCopy.send() : sendLabelProp;
@@ -2763,6 +2766,7 @@ export function Composer({
               haptics.light();
               onSend(body);
             }}
+            onOpenConversation={openMadeConversation}
           />
       ) : null}
       <AttachMenu

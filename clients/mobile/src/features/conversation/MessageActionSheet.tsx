@@ -34,6 +34,7 @@ import { CONV_ICONS, CONV_ICON_SIZE } from '../../design/icons';
 import { EmojiPicker } from '../emoji/EmojiPicker';
 import { emojiFrequency } from '../emoji/preferences';
 import {useEmojiTriggerFocus} from '../emoji/useEmojiTriggerFocus';
+import {useMakeLanding} from './makeLanding';
 
 /** hh:mm, 24-hour, local. The row's own clock is never used for ordering. */
 export function timeLabel(atMs: number): string {
@@ -175,6 +176,8 @@ function SheetBody({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const afterClose = usePageSheetAction();
+  // 「AI와 만들기」 요청을 보낸 뒤 그 DM 으로 가는 길(#4962) — 대화 화면이 컨텍스트로 준다. 없으면 시트는 「확인」으로 끝난다.
+  const openMadeConversation = useMakeLanding();
   const emojiTrigger = useEmojiTriggerFocus(pickerOpen);
   const [confirmingDelete, setConfirmingDelete] =
     useState(startInDeleteConfirm);
@@ -248,7 +251,7 @@ function SheetBody({
     return (
       <EmojiPicker
         onClose={() => setPickerOpen(false)}
-        team={{render: ({query}) => <TeamExpressionPicker query={query} onSelect={token => afterClose(() => onToggleReaction(token))} />}}
+        team={{render: ({query}) => <TeamExpressionPicker query={query} onSelect={token => afterClose(() => onToggleReaction(token))} onOpenConversation={openMadeConversation} />}}
         onSelect={glyph => afterClose(() => onToggleReaction(glyph))}
       />
     );
