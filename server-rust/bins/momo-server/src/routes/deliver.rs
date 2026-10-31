@@ -158,6 +158,11 @@ pub(crate) struct DeliverRequest {
     /// `message.props.requestedApps`. Judged here, after the insert and only when it
     /// was new; empty for every sender that picked none (and for the scheduler).
     pub requested_apps: Vec<String>,
+    /// ADR-0148 증보 (#4887) — the sender chose 「대화에도 보내기」. Already shape-checked by the
+    /// REST route (a 400 without `rootId`); passed on as [`SendExtras::also_in_channel`], where the
+    /// table's CHECK is the second layer. `false` for the scheduler, whose timed send carries no
+    /// such choice yet.
+    pub also_in_channel: bool,
     pub gates: DeliverGates,
 }
 
@@ -224,6 +229,7 @@ pub(crate) async fn deliver_message_via_in_tx(
         author_is_human,
         requested_routing,
         requested_apps,
+        also_in_channel,
         gates,
     } = request;
     let channel_id = message.channel_id;
@@ -296,6 +302,7 @@ pub(crate) async fn deliver_message_via_in_tx(
             opens_stream,
             subscription_agents_disabled: !gates.subscription_agents_enabled,
             claude_subscription_agents_disabled: !gates.claude_subscription_agents_enabled,
+            also_in_channel,
         },
         sent_via,
     )
