@@ -98,10 +98,28 @@ use crate::responses::OpenAiResponsesProvider;
 use momo_settings::EgressPolicy;
 
 /// One OpenAI-compatible chat message.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+}
+
+/// `Debug` by hand so a self-media address inside `content` loses its token (#4820 C2a, ADR-0218
+/// G4): a hosted turn carries the requester's one-time photo address as one `system` line, and a
+/// `{:?}` of a message, a window (`AssembledContext`) or a request (`ChatRequest`) is the likeliest
+/// place for it to reach a log. The scrub is `momo_messaging::redact_self_media_urls`, the same one
+/// every stored error string passes; text that holds no such address prints as the derive did.
+impl std::fmt::Debug for ChatMessage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ChatMessage")
+            .field("role", &self.role)
+            .field(
+                "content",
+                &momo_messaging::redact_self_media_urls(&self.content),
+            )
+            .finish()
+    }
 }
 
 impl ChatMessage {

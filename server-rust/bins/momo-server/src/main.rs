@@ -143,6 +143,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              upload PUT (/__momo_stub/drive/uploads/…); that route answers anyone"
         );
     }
+    if config.rate_limit.self_media_per_workspace_limit == 0 {
+        tracing::warn!(
+            "RATE_LIMIT_SELF_MEDIA_PER_WORKSPACE=0 disables the budget on the public photo \
+             address (GET /v1/self-media/…); that route answers anyone who knows the path shape"
+        );
+    }
     // #4234: each member-write axis that is off is said once, by its own name — an operator who
     // turned one off for a load test should not find out from an incident.
     for (name, limit, what) in [

@@ -1954,7 +1954,9 @@ else:
     if guard_copy < 0 or not (guard_copy < gate):
         bad.append("the image guard plugin is not installed before the lock gate")
     env = h.get("environment", {})
-    leaked = sorted(k for k in env if k not in ("API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_KEY", "API_SERVER_PORT", "HERMES_LOGIN_RELAY_KEY"))
+    # #4820 C2a: OORT_SELF_MEDIA_ORIGIN is this edge's own public origin (not a secret): the one origin the image guard lets
+    # `image_url` carry. It is Hermes' own variable (lockgate validates it), so it is allowed here, and only it.
+    leaked = sorted(k for k in env if k not in ("API_SERVER_ENABLED", "API_SERVER_HOST", "API_SERVER_KEY", "API_SERVER_PORT", "HERMES_LOGIN_RELAY_KEY", "OORT_SELF_MEDIA_ORIGIN"))
     if leaked:
         bad.append("hermes carries variables beyond its own: %s" % ",".join(leaked))
     if env.get("API_SERVER_HOST") != "0.0.0.0":

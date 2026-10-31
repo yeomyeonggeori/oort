@@ -26,6 +26,11 @@ loaded into the scratch home and the real dispatch path (`_dispatch_pre_tool_cal
 called with refused and accepted examples against a stand-in handler, so a guard that is present but not consulted
 is still refused. The stand-in is why a failing guard cannot reach the network from here.
 
+The guard has one narrow exception (owner 10-30 decision, #4820 C2a): `image_url` may also be exactly this instance's own
+short-lived photo address under `OORT_SELF_MEDIA_ORIGIN`. This gate validates that variable's format (process environment
+and the volume's `.env`; unset means the exception is off), and the canary adds the one allowed address (accepted) and
+28 bypass variants (refused) when it is set, or one refused address of the allowed shape when it is not.
+
 Connector mode (#3948, ADR-0203 증보 K2·K4). The tool-lock rule above is unchanged. The one thing that
 changes is `mcp_servers`:
 
@@ -70,8 +75,8 @@ IMAGE_KEY_ENV_NAMES = ("FAL_KEY",)
 IMAGE_GUARD_PLUGIN = "oort-image-guard"
 IMAGE_GUARD_MARKER = "[oort-image-guard]"  # the plugin's MARKER: every refusal it returns carries it
 IMAGE_GUARD_FILES = {
-    "__init__.py": "216d5bb13f01e2b887b88c821f42a327a5dd4119eb18c5f6743d94e72c3a9c92",
-    "plugin.yaml": "791fefcef68dfe8b71f3eac7c685c6d9a0cc0de8f4214830d3be0ec3ab9de675",
+    "__init__.py": "c84147c4bfdd15914b11447c39311225b21017e3f1e317c4329bb422f5be639f",
+    "plugin.yaml": "10d3fd436927cf819380016614edbe12d029d372a2bd995da128726d905bc936",
 }
 # Environment names that undo the guard or Hermes' SSRF filter (tools/url_safety.py, hermes_cli/plugins.py v0.22.2).
 IMAGE_ENV_FLAG_REASONS = {
@@ -80,6 +85,16 @@ IMAGE_ENV_FLAG_REASONS = {
     "HERMES_ENABLE_PROJECT_PLUGINS": "a project plugin could replace the image guard",
 }
 IMAGE_PROVIDER_ONLY_KEYS = frozenset({"provider"})
+# The one narrow exception of the guard (owner 10-30 decision, #4820 C2a): `image_url` may also be this instance's own
+# short-lived photo address. The origin is this variable; the path prefix is fixed in the plugin. The grammar below is the
+# plugin's and the Rust worker's (infra/hermes/self_media_vectors.json is the shared accept/reject list all three are
+# tested against). Unset (or empty) the exception is off; set to anything that is not canonical the start is refused;
+# in the volume's `.env` it is refused outright, because Hermes loads that file into the process after this gate ran.
+SELF_ORIGIN_ENV = "OORT_SELF_MEDIA_ORIGIN"
+SELF_MEDIA_PATH_PREFIX = "/v1/self-media/"
+SELF_ORIGIN_RE = re.compile(
+    r"https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?(?::[1-9][0-9]{0,4})?"
+)
 REQUIRED_TOOL = "memory"  # positive control: the allow-list must resolve something real
 INSTALL = "/opt/hermes"
 TRUTHY = ("1", "true", "yes", "on")
@@ -275,11 +290,38 @@ def _is_proxy_name(name):
     return upper.endswith("_PROXY") and upper != "NO_PROXY"
 
 
-def image_environment_problems(pairs, where):
-    """Names (never values) in one environment source that turn Hermes' SSRF filter or the image guard off."""
+def canonical_origin(raw):
+    """`raw` itself when it is exactly `https://<lowercase ASCII host of 2+ labels, last label starting with a letter>`
+    plus an optional explicit port in 1..65535 that is not 443; otherwise None. No userinfo, path, slash, query,
+    fragment, whitespace, uppercase or non-ASCII. Same grammar as the plugin and the Rust worker."""
+    if not isinstance(raw, str) or len(raw) > 300 or SELF_ORIGIN_RE.fullmatch(raw) is None:
+        return None
+    host, _, port = raw[len("https://"):].partition(":")
+    if len(host) > 253:
+        return None
+    if port and (int(port) > 65535 or int(port) == 443):
+        return None
+    return raw
+
+
+def image_environment_problems(pairs, where, volume=False):
+    """Names (never values) in one environment source that turn Hermes' SSRF filter or the image guard off.
+
+    `volume=True` for the volume's `.env`: there the self-media origin may not be set at all, since the file is loaded
+    into the Hermes process after this gate ran and could replace the value the gate judged."""
     problems, seen = [], set()
     for name, value in pairs:
         if name in seen:
+            continue
+        if name == SELF_ORIGIN_ENV:
+            raw = str(value)
+            if volume:
+                problems.append(f"{where} sets {name} (set it on the service: the file would replace the checked value)")
+                seen.add(name)
+            elif raw != "" and canonical_origin(raw) is None:
+                problems.append(f"{where} sets {name} to a value that is not a canonical origin "
+                                "(https://<lowercase host>[:port], no path, no trailing slash, not :443)")
+                seen.add(name)
             continue
         value = str(value).strip()
         if name in IMAGE_ENV_FLAG_REASONS and _truthy(value):
@@ -293,7 +335,7 @@ def image_environment_problems(pairs, where):
 
 def image_volume_env_problems(env_path):
     pairs, problems = _read_env_pairs(env_path)
-    return problems + image_environment_problems(pairs, "the volume's .env")
+    return problems + image_environment_problems(pairs, "the volume's .env", volume=True)
 
 
 def image_ssrf_config_problems(cfg):
@@ -400,6 +442,64 @@ IMAGE_GUARD_CANARY_ACCEPTED = (
 )
 
 
+# The one allowed address and its bypass variants (#4820 C2a). All derived from the configured origin, so the canary
+# proves the plugin that is about to run accepts exactly this shape and nothing near it. The workspace and token are
+# canary-only values: nothing is fetched, the stand-in handler below records the call and does nothing else.
+CANARY_SELF_WORKSPACE = "0000000a-0000-4000-8000-00000000000b"  # hex letters, so its upper-case form is a different string
+CANARY_SELF_TOKEN = "C" * 43
+CANARY_OTHER_ORIGIN = "https://canary.invalid"  # never the configured origin: see canary_self_media_examples
+
+
+def canary_self_media_examples(origin):
+    """(refused, accepted) canary lists about the one allowed address.
+
+    With a configured `origin`: the address itself must be accepted as `image_url` (the positive control: the exception is
+    live) and every variant must be refused: the same address in the reference list, another scheme case, host case, a
+    written-out default port, another port, userinfo (both directions), surrounding whitespace, `..`, `%2e`, doubled
+    slashes, a query, a fragment, a trailing slash, another path under the origin, a longer host, another host, plain
+    http, a wrong-length token, an upper-case workspace, a lookalike first letter. Without an origin the exception is
+    off: an address of the allowed shape under a made-up origin must be refused."""
+    tail = CANARY_SELF_WORKSPACE + "/" + CANARY_SELF_TOKEN
+    prefix = SELF_MEDIA_PATH_PREFIX
+    if origin is None:
+        return [("image_url", CANARY_OTHER_ORIGIN + prefix + tail)], []
+    hostport = origin[len("https://"):]
+    host, _, port = hostport.partition(":")
+    good = origin + prefix + tail
+    other = CANARY_OTHER_ORIGIN if origin != CANARY_OTHER_ORIGIN else "https://canary2.invalid"
+    variants = [
+        ("reference_image_urls", [good]),
+        ("reference_image_urls", good),
+        ("image_url", "HTTPS://" + hostport + prefix + tail),
+        ("image_url", "https://" + hostport.upper() + prefix + tail),
+        ("image_url", "https://" + host + ":443" + prefix + tail),
+        ("image_url", "https://" + host + ("" if port else ":8443") + prefix + tail),
+        ("image_url", "https://user@" + hostport + prefix + tail),
+        ("image_url", "https://" + hostport + "@" + other[len("https://"):] + prefix + tail),
+        ("image_url", " " + good),
+        ("image_url", good + " "),
+        ("image_url", good + "\n"),
+        ("image_url", origin + prefix + "../self-media/" + tail),
+        ("image_url", origin + prefix + "%2e%2e/self-media/" + tail),
+        ("image_url", origin + "/" + prefix + tail),
+        ("image_url", origin + "/v1/" + prefix[len("/v1/"):] + "/" + tail),
+        ("image_url", origin + prefix + CANARY_SELF_WORKSPACE + "//" + CANARY_SELF_TOKEN),
+        ("image_url", good + "?x=1"),
+        ("image_url", good + "#f"),
+        ("image_url", good + "/"),
+        ("image_url", origin + "/v1/attachments/" + tail),
+        ("image_url", origin + "/v1/auth/login"),
+        ("image_url", "https://" + host + ".canary.invalid" + (":" + port if port else "") + prefix + tail),
+        ("image_url", other + prefix + tail),
+        ("image_url", "http://" + hostport + prefix + tail),
+        ("image_url", origin + prefix + CANARY_SELF_WORKSPACE + "/" + CANARY_SELF_TOKEN[:-1]),
+        ("image_url", origin + prefix + CANARY_SELF_WORKSPACE + "/" + CANARY_SELF_TOKEN + "C"),
+        ("image_url", origin + prefix + CANARY_SELF_WORKSPACE.upper() + "/" + CANARY_SELF_TOKEN),
+        ("image_url", "https://\u0430" + hostport[1:] + prefix + tail),
+    ]
+    return variants, [{"prompt": "canary", "image_url": good}]
+
+
 class _CanarySpy:
     """Stands in for image_generate's real handler while the canary runs: records the call and does nothing else."""
 
@@ -411,16 +511,21 @@ class _CanarySpy:
         return json.dumps({"success": True, "canary_spy": True})
 
 
-def run_image_guard_canary(hook_block, call_tool, install_spy):
+def run_image_guard_canary(hook_block, call_tool, install_spy, origin=None):
     """Exercise the dispatch path with refused and accepted image_generate calls. Returns (problems, evidence).
 
     hook_block(args, call_id) -> block message or None (what the agent loop asks the hooks);
     call_tool(args, call_id)  -> the result text of the full tool call (what the registry dispatch returns);
     install_spy(spy)          -> restore callable (the registered handler is replaced by `spy` until restored).
     Refused examples must be blocked by this guard's marker and never reach the handler; accepted ones must reach the
-    handler exactly once, which is also the positive control that the path is live. Labels only, never a value."""
+    handler exactly once, which is also the positive control that the path is live. `origin` is the configured
+    self-media origin (None: the exception is off); its address and bypass variants join the lists. Labels only,
+    never a value."""
     import copy
     spy = _CanarySpy()
+    self_refused, self_accepted = canary_self_media_examples(origin)
+    refused_examples = IMAGE_GUARD_CANARY_REFUSED + tuple(self_refused)
+    accepted_examples = IMAGE_GUARD_CANARY_ACCEPTED + tuple(self_accepted)
     restore = install_spy(spy)
     problems = []
     evidence = {"refused": 0, "accepted": 0}
@@ -431,7 +536,7 @@ def run_image_guard_canary(hook_block, call_tool, install_spy):
         return f"lockgate-canary-{serial[0]}"
 
     try:
-        for index, (field, value) in enumerate(IMAGE_GUARD_CANARY_REFUSED):
+        for index, (field, value) in enumerate(refused_examples):
             label = f"{field}#{index}"
             blocked = hook_block({"prompt": "canary", field: copy.deepcopy(value)}, call_id())
             if not (isinstance(blocked, str) and IMAGE_GUARD_MARKER in blocked):
@@ -441,7 +546,7 @@ def run_image_guard_canary(hook_block, call_tool, install_spy):
             if spy.calls or not (isinstance(result, str) and IMAGE_GUARD_MARKER in result):
                 problems.append(f"canary: image_generate was not refused before running for the example {label}")
             evidence["refused"] += 1
-        for index, args in enumerate(IMAGE_GUARD_CANARY_ACCEPTED):
+        for index, args in enumerate(accepted_examples):
             label = f"accepted#{index}"
             if hook_block(copy.deepcopy(args), call_id()) is not None:
                 problems.append(f"canary: the pre_tool_call hooks refused the allowed example {label}")
@@ -455,9 +560,10 @@ def run_image_guard_canary(hook_block, call_tool, install_spy):
     return problems, evidence
 
 
-def hermes_image_guard_canary():
+def hermes_image_guard_canary(origin=None):
     """The canary against the real Hermes dispatch path. HERMES_HOME must be the scratch home holding the verified
-    plugin, and model_tools must have been imported after that (its import runs plugin discovery)."""
+    plugin, and model_tools must have been imported after that (its import runs plugin discovery). `origin` is the
+    configured self-media origin the plugin will read from this process' environment (None when unset or invalid)."""
     from hermes_cli.plugins import _dispatch_pre_tool_call_hooks, get_plugin_manager
     from model_tools import handle_function_call
     from tools.registry import registry
@@ -483,7 +589,7 @@ def hermes_image_guard_canary():
             entry.handler, entry.is_async = handler, is_async
         return restore
 
-    problems, evidence = run_image_guard_canary(hook_block, call_tool, install_spy)
+    problems, evidence = run_image_guard_canary(hook_block, call_tool, install_spy, origin)
     try:  # evidence and diagnosis only; the verdict above comes from behavior, not from this listing
         evidence["plugin"] = [{k: p.get(k) for k in ("name", "source", "enabled", "hooks", "error")}
                               for p in get_plugin_manager().list_plugins() if p.get("name") == IMAGE_GUARD_PLUGIN]
@@ -565,7 +671,8 @@ def gate(cfg_path):
             problems.extend(image_volume_env_problems(os.path.join(data_dir, ".env")))
             guard_evidence = {"files": sorted(IMAGE_GUARD_FILES), "files_verified": guard_files is not None}
             if guard_files is not None:  # never run bytes that did not match the pinned hashes
-                canary_problems, canary_evidence = hermes_image_guard_canary()
+                canary_problems, canary_evidence = hermes_image_guard_canary(
+                    canonical_origin(original_env.get(SELF_ORIGIN_ENV, "")))
                 problems.extend(canary_problems)
                 guard_evidence["canary"] = canary_evidence
         if REQUIRED_TOOL not in resolved:

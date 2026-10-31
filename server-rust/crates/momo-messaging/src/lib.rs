@@ -84,6 +84,9 @@ pub mod reminder;
 /// ADR-0208 / #4214 — scheduled messages: every `scheduled_message` statement (owner-scoped FORCE RLS).
 pub mod scheduled;
 pub mod search;
+/// #4820 C2a — the short-lived, single-use address of the requester's own picture for the co-hosted
+/// Hermes picture tool (ADR-0218 증보 G4·G8): token mint/redeem, the origin grammar, the log scrub.
+pub mod self_media;
 /// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
 pub mod sidebar_prefs;
 pub mod workspace_avatar;
@@ -275,6 +278,12 @@ pub use search::{
     clamp_search_limit, decode_search_cursor, encode_search_cursor, literal_like_pattern,
     normalize_query, search_messages, SearchCursor, SearchHit, SearchPage, SearchRequestInvalid,
     SearchScope, SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, SEARCH_QUERY_MIN_CHARS,
+};
+pub use self_media::{
+    bytes_match_mime, canonical_origin, mint_for_run_in_tx, mint_with_ttl_in_tx,
+    redact_self_media_urls, redeem_in_tx, self_media_url, token_hash, token_is_well_formed,
+    SelfMediaGrant, SelfMediaSource, SELF_MEDIA_MAX_BYTES, SELF_MEDIA_PATH_PREFIX,
+    SELF_MEDIA_TOKEN_CHARS, SELF_MEDIA_TTL_SECS,
 };
 pub use sidebar_prefs::{
     get_sidebar_prefs_in_tx, set_sidebar_prefs_in_tx, validate_sidebar_prefs, SidebarPrefs,

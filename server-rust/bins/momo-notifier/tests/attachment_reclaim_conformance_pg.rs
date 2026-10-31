@@ -1627,8 +1627,8 @@ async fn the_operators_check_sql_agrees_with_the_sweep_and_would_notice_a_refere
         .collect();
     assert_eq!(
         fks.len(),
-        4,
-        "the four foreign keys into attachment: {fks:?}"
+        5,
+        "the five foreign keys into attachment (A1-A4 and the self-media token, ADR-0151 증보 2): {fks:?}"
     );
     assert!(
         fks.iter().all(|key| key.ends_with("(known)")),

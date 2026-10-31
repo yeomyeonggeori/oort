@@ -140,6 +140,46 @@ def scenario_bom_env_file():
     return run_gate()
 
 
+SELF_ORIGIN = "https://oort.example.com"
+
+
+def scenario_self_origin():
+    """The owner's 10-30 exception, on: the origin is set to a canonical value. The canary must accept the one allowed
+    address and refuse its variants through the real Hermes dispatch path."""
+    install()
+    return run_gate(env={"OORT_SELF_MEDIA_ORIGIN": SELF_ORIGIN})
+
+
+def scenario_self_origin_bad():
+    install()
+    return run_gate(env={"OORT_SELF_MEDIA_ORIGIN": "https://Oort.Example.com/"})
+
+
+def scenario_self_origin_env_file():
+    """The volume's .env is loaded into Hermes after the gate: it may not carry the variable even with the same value."""
+    install()
+    write(os.path.join(DATA, ".env"), ("OORT_SELF_MEDIA_ORIGIN=" + SELF_ORIGIN + "\nOPENROUTER_API_KEY=keep\n").encode("utf-8"))
+    return run_gate(env={"OORT_SELF_MEDIA_ORIGIN": SELF_ORIGIN})
+
+
+def scenario_prefix_only_plugin():
+    """The exception weakened to a bare prefix comparison (no tail check, no length check), its hash patched into the gate:
+    the hash check passes, so only the canary's bypass variants can object."""
+    install()
+    path = os.path.join(GUARD_DIR, "__init__.py")
+    original = read(path)
+    old_check = b"    if not value.startswith(prefix) or len(value) != len(prefix) + _SELF_TAIL_CHARS:\n        return False\n"
+    old_tail = b"    return _SELF_TAIL.fullmatch(value, len(prefix)) is not None\n"
+    assert old_check in original and old_tail in original, "the plugin source changed; update this scenario"
+    weakened = original.replace(old_check, b"    if not value.startswith(prefix):\n        return False\n").replace(old_tail, b"    return True\n")
+    write(path, weakened)
+    gate_text = read(os.path.join(OORT, "lockgate.py")).decode("utf-8")
+    assert sha(original) in gate_text
+    patched = "/tmp/lockgate_patched.py"
+    write(patched, gate_text.replace(sha(original), sha(weakened)).encode("utf-8"))
+    return run_gate(gate=patched, env={"OORT_SELF_MEDIA_ORIGIN": SELF_ORIGIN})
+
+
 def scenario_clean_env_file():
     install()
     write(os.path.join(DATA, ".env"), b"\xef\xbb\xbfOPENROUTER_API_KEY=keep\n")

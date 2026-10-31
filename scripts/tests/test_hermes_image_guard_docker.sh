@@ -15,6 +15,12 @@
 #   not-enabled ............ plugins.enabled missing: the plugin is not loaded and the canary says so
 #   safe-mode .............. HERMES_SAFE_MODE=1 makes real Hermes skip every plugin: refused
 #   proxy / private / BOM .. the SSRF switches, in the environment, in config and in a BOM-prefixed volume .env
+#   self-origin ............ the owner's 10-30 exception (#4820 C2a): OORT_SELF_MEDIA_ORIGIN set to a canonical origin boots,
+#                            and the canary accepts the one allowed address and refuses its 28 bypass variants through the
+#                            real Hermes dispatch path; unset keeps the exception off and adds one refused example
+#   self-origin-bad / -env-file  a non-canonical origin, and the variable in the volume's .env, are refused before listening
+#   prefix-only-plugin ..... the exception weakened to a bare prefix comparison, its hash patched into the gate: refused by
+#                            the canary alone (the same shape of proof as widened-plugin)
 #   compose-start / railway-start  the real start command text (compose and railway.json) runs to the point where it would
 #                            exec Hermes, with an edited guard variable stopping it before any gate output
 set -euo pipefail
@@ -49,7 +55,8 @@ scenario() {  # scenario <name> -> $OUT/<name>.json (the RESULT line)
 }
 
 for name in healthy no-plugin edited-plugin widened-plugin not-enabled extra-image-gen-key security-private-urls \
-  safe-mode proxy-env private-env bom-env-file clean-env-file; do
+  safe-mode proxy-env private-env bom-env-file clean-env-file self-origin self-origin-bad self-origin-env-file \
+  prefix-only-plugin; do
   scenario "$name"
 done
 
@@ -101,6 +108,7 @@ say "scenario gateway-boot (real gateway + real lockgate report, no network)"
 NAME="oort-guardproof-$$"
 trap 'docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
 docker run -d --name "$NAME" --network none --memory 2g -e "API_SERVER_KEY=$KEY" -e API_SERVER_ENABLED=true \
+  -e OORT_SELF_MEDIA_ORIGIN=https://oort.example.com \
   -e API_SERVER_HOST=0.0.0.0 -e API_SERVER_PORT=8642 -v "$ROOT/infra/hermes:/oort:ro" -v "$ROOT/scripts/tests/fixtures:/fx:ro" \
   --entrypoint /bin/sh "$IMG" -c "$(cat "$OUT/compose-full.sh")" >"$OUT/gateway-boot.id"
 healthy=0
@@ -151,7 +159,8 @@ guard = (h["lockgate"] or {}).get("image_guard") or {}
 canary = guard.get("canary") or {}
 if not guard.get("files_verified"):
     failures.append("healthy: files were not verified")
-if (canary.get("refused"), canary.get("accepted")) != (10, 4):
+# no origin configured: the exception is off, so the canary has ONE more refused example (an address of the allowed shape)
+if (canary.get("refused"), canary.get("accepted")) != (11, 4):
     failures.append("healthy: canary counts %r" % (canary,))
 plugin = canary.get("plugin")
 if not (isinstance(plugin, list) and len(plugin) == 1 and plugin[0].get("enabled") is True
@@ -172,6 +181,17 @@ expect("proxy-env", 3, ["HTTPS_PROXY"], absent=["proxy.invalid"])
 expect("private-env", 3, ["HERMES_ALLOW_PRIVATE_URLS"])
 expect("bom-env-file", 3, ["the volume's .env sets HTTPS_PROXY"], absent=["proxy.invalid"])
 expect("clean-env-file", 0)
+so = expect("self-origin", 0)
+so_canary = (((so["lockgate"] or {}).get("image_guard") or {}).get("canary")) or {}
+if (so_canary.get("refused"), so_canary.get("accepted")) != (38, 5):
+    failures.append("self-origin: canary counts %r (want 10+28 refused, 4+1 accepted)" % (so_canary,))
+expect("self-origin-bad", 3, ["OORT_SELF_MEDIA_ORIGIN", "not a canonical origin"], absent=["Oort.Example"])
+expect("self-origin-env-file", 3, ["the volume's .env sets OORT_SELF_MEDIA_ORIGIN"])
+p_only = expect("prefix-only-plugin", 3, ["canary:"], absent=["pinned sha256"])
+if not ((p_only["lockgate"] or {}).get("image_guard") or {}).get("files_verified"):
+    failures.append("prefix-only-plugin: the hash check must have passed so that the canary is what refused")
+if not any("did not refuse the example" in problem for problem in (p_only["lockgate"] or {}).get("problems", [])):
+    failures.append("prefix-only-plugin: the canary did not name a bypass variant it let through")
 
 
 def text(name, ext):
@@ -221,11 +241,15 @@ else:
         failures.append("gateway-boot: the plugin is not loaded from the live volume: %r" % (p,))
     if not (p.get("refused_is_block") and p.get("accepted_is_none")) or p.get("uid") == 0:
         failures.append("gateway-boot: live hook verdicts or uid wrong: %r" % (p,))
+    if not (p.get("origin_set") and p.get("self_address_is_none") and p.get("self_variant_is_block")
+            and p.get("self_as_reference_is_block")):
+        failures.append("gateway-boot: the live plugin does not judge the self-media address as designed: %r" % (p,))
 if failures:
     print("\n".join("FAIL " + f for f in failures))
     sys.exit(1)
 print("OK: %d in-image scenarios (gate) + 4 start-command runs + the live gateway boot" % len(
     ["healthy", "no-plugin", "edited-plugin", "widened-plugin", "not-enabled", "extra-image-gen-key", "security-private-urls",
-     "safe-mode", "proxy-env", "private-env", "bom-env-file", "clean-env-file"]))
+     "safe-mode", "proxy-env", "private-env", "bom-env-file", "clean-env-file", "self-origin", "self-origin-bad",
+     "self-origin-env-file", "prefix-only-plugin"]))
 PY
 say "PASS (evidence in $OUT)"
