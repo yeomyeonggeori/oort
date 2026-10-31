@@ -1,20 +1,20 @@
 {
   "counts": {
     "cargo": 407,
-    "npm": 469,
-    "unique_blobs": 441
+    "npm": 474,
+    "unique_blobs": 443
   },
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "2d96d648984ce1c7b665b07ccb3e800cb0bd6434b54e00213a14047ae09485ff",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "a07d2d3d29ae6214f515a27e0c34a35a64fe0f7fc2ee9e09e40bda4be34f18df",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "NOTICE": "f7010ff8d911a1dbe1c5bad71baa483c96063c596abf1fc0db8abf041e7444cb",
     "THIRD_PARTY_NOTICES.md": "04dfe1fec60cf4ce73eb03401c3a73acc13bf76d3fc964a8ef18d6e4d2ae0405"
   },
   "inputs": {
     "clarify_sha256": "366b7c68569c49f9fab915342fc2c620d1ee6318ab3567d337fd4f7d1a0f79c3",
-    "clients_web_package_lock_sha256": "f1bc70d19c96ea279755dc0abb0c4315e65b9f4cfd1243b9b06d9f9306d02b68",
+    "clients_web_package_lock_sha256": "0e4507662218a825c370dcef97ee7d5ff5bad8f5238da3f50bbb5f5e85ba2c2d",
     "server_rust_cargo_lock_sha256": "4af5b67e4ecb10ffc014d84639745dbd28bda035a726544e22829efa15e645ad",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "2d96d648984ce1c7b665b07ccb3e800cb0bd6434b54e00213a14047ae09485ff",
-    "sha256_manifest_sha256": "1420e9b5b95520ecccbad5f32050339ab7896d853a98a6d1cf0f76bf9483a61a"
+    "bundle_sha256": "a07d2d3d29ae6214f515a27e0c34a35a64fe0f7fc2ee9e09e40bda4be34f18df",
+    "sha256_manifest_sha256": "0e07f08fba12bccb9f3e063fb571a17a709a1454b6c88c5f6fdc84e95c4f0121"
   },
   "packages": [
     {
@@ -9873,6 +9873,70 @@
       "version": "0.2.12"
     },
     {
+      "copyright": "Copyright (c) 2023 FormatJS",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "b1cc980e28e9e48f377db191578a9361494ca7117185b69dd66cabaf5b460fb7",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@formatjs/fast-memoize",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "3.1.7"
+    },
+    {
+      "copyright": "Copyright (c) 2023 FormatJS",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "b1cc980e28e9e48f377db191578a9361494ca7117185b69dd66cabaf5b460fb7",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@formatjs/icu-messageformat-parser",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "3.5.22"
+    },
+    {
+      "copyright": "Copyright (c) 2023 FormatJS",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "b1cc980e28e9e48f377db191578a9361494ca7117185b69dd66cabaf5b460fb7",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@formatjs/icu-skeleton-parser",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "2.1.12"
+    },
+    {
+      "copyright": "Copyright (c) 2023 FormatJS",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "b1cc980e28e9e48f377db191578a9361494ca7117185b69dd66cabaf5b460fb7",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@formatjs/intl",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "6.1.4"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
       "ecosystem": "npm",
       "files": [
@@ -13668,6 +13732,22 @@
       "source": "clarify",
       "spdx": "MIT",
       "version": "0.1.4"
+    },
+    {
+      "copyright": "Copyright (c) 2023, Oath Inc.; copyright notice, this list of conditions and the",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "cc4143615b27c66eafbe913f132a9e41ac14c1e2ec6b2df24dafeaa97f028850",
+          "source": "package-tree"
+        }
+      ],
+      "name": "intl-messageformat",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "BSD-3-Clause",
+      "version": "12.1.4"
     },
     {
       "copyright": "Copyright (c) 2014-2016, Jon Schlinkert",
