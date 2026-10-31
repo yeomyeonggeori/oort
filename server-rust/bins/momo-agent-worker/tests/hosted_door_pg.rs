@@ -25,7 +25,7 @@
 //! | `every_failure_is_one_closed_card_with_the_golden_line` | any code mapped to another / a body that is not the golden line / a card that stays pending |
 //! | `an_assembler_that_cannot_run_is_a_retry_and_never_a_card` | map an outage to a card code |
 //! | `no_valid_request_block_is_an_ordinary_answer_without_picture_marker_or_block` | commit the raw answer / open the door on a malformed or doubled block |
-//! | `a_turn_without_a_photo_is_unchanged_and_the_requesters_own_photo_rule_holds` | apply the door to a turn without a photo, or to a photo the rule refuses |
+//! | `a_turn_without_a_photo_never_opens_the_door_and_the_requesters_own_photo_rule_holds` | apply the door to a turn without a photo, or to a photo the rule refuses |
 //! | `the_cheap_refusals_come_before_the_model` | judge the ceiling after the model call |
 //! | `without_the_operators_strict_attestation_the_door_is_shut_and_the_turn_is_an_ordinary_one` | open the door without the attestation (or raise a card / look for the photo while shut) |
 //! | `the_source_pointer_is_recorded_only_when_the_model_was_given_the_photo` | record the pointer for a turn that handed no address |
@@ -36,6 +36,9 @@
 //! | `an_assembler_that_cannot_run_gets_two_attempts_and_ends_as_one_closed_card` | let the door retry past two attempts / lose the first attempt's tokens / raise a card twice |
 //! | `a_provider_deadline_gets_two_attempts_but_an_outage_keeps_its_budget` | cap every retryable failure instead of the deadline / never cap the deadline |
 //! | `an_answer_over_the_size_limit_is_one_closed_card_on_a_door_turn_and_the_ordinary_failure_elsewhere` | retry an over-long answer / answer a door turn with the generic failure / change an ordinary turn |
+//! | `an_ordinary_answer_with_a_picture_address_commits_a_sentence_in_its_place_and_no_base64` | #4908: commit the raw answer / drop the cut / one sentence for all instead of one for each / break one rule of the cut the door shares |
+//! | `an_ordinary_answer_without_a_picture_address_is_committed_byte_for_byte` | #4908: tidy, trim or re-line an answer that has no address / cut a `MEDIA:` line, a request block or a `data:` address that is not an image |
+//! | `a_picture_address_inside_a_completion_report_does_not_ride_the_card` | #4908: cut after the report is read (the address rides `props`) |
 
 use std::collections::VecDeque;
 use std::os::unix::fs::PermissionsExt;
@@ -94,6 +97,11 @@ fn golden_line(code: &str) -> &'static str {
         .expect("a golden code")
         .1
 }
+
+/// #4908 — the sentence that stands where an ordinary turn's picture address was cut out. Written out
+/// here on purpose, like the golden lines above: an independent copy to hold the worker's constant
+/// against (a change of the sentence has to change this line too).
+const PICTURE_REMOVED: &str = "그림은 이 메시지에 실을 수 없어서 뺐어요.";
 
 // --- harness -----------------------------------------------------------------
 
@@ -836,6 +844,40 @@ async fn assert_no_picture_anywhere(su: &PgPool, t: &Tenant) {
     }
 }
 
+/// #4908 — no picture address, no `base64,` and none of the payload's own characters (`payload_heads`:
+/// the first characters of the base64 itself, the needle that cannot be a coincidence) anywhere a
+/// person's channel (`message.body`, `message.props`) or the broadcast rail carries them. The rail is the
+/// outbox row: the relay hands its `data` to Centrifugo verbatim (`momo-relay`
+/// `CentrifugoClient::publish`), so a row without the picture is a Centrifugo payload without it — and
+/// the closing slice of a streamed turn is an outbox row too.
+async fn assert_no_data_picture_anywhere(su: &PgPool, t: &Tenant, payload_heads: &[&str]) {
+    let ws = t.workspace_id;
+    let mut needles = vec!["data:image", "base64,"];
+    needles.extend_from_slice(payload_heads);
+    for needle in needles {
+        let like = format!("%{needle}%");
+        let in_messages: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM message WHERE workspace_id = $1 \
+               AND (body LIKE $2 OR props::text LIKE $2)",
+        )
+        .bind(ws)
+        .bind(&like)
+        .fetch_one(su)
+        .await
+        .unwrap();
+        let in_outbox: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM outbox WHERE workspace_id = $1 AND payload::text LIKE $2",
+        )
+        .bind(ws)
+        .bind(&like)
+        .fetch_one(su)
+        .await
+        .unwrap();
+        assert_eq!(in_messages, 0, "{needle:.40} in a message");
+        assert_eq!(in_outbox, 0, "{needle:.40} in an outbox payload");
+    }
+}
+
 /// The last request the provider saw for a turn whose trigger text contains `body`.
 fn request_for<'a>(requests: &'a [Vec<ChatMessage>], body: &str) -> &'a Vec<ChatMessage> {
     requests
@@ -1014,7 +1056,9 @@ async fn a_still_photo_turn_becomes_one_generated_candidate_card_and_commits_no_
     assert_eq!(messages.len(), 1, "{messages:?}");
     let card = &messages[0];
     assert!(is_card(card));
-    assert_eq!(card.body.as_deref(), Some("승인 요청: 팀 표현 추가"));
+    assert_eq!(card.body.as_deref(), Some("팀 표현을 추가해도 될까요?"));
+    // ADR-0204 증보 6 D6-2: the picture is the card, so the app decides it.
+    assert_eq!(card.props["decision_mode"], "open");
     assert_eq!(card.props["status"], "pending");
     let candidates = card.props["action"]["expression"]["candidates"]
         .as_array()
@@ -1549,12 +1593,13 @@ async fn no_valid_request_block_is_an_ordinary_answer_without_picture_marker_or_
     }
 }
 
-/// A turn without a photo is byte-for-byte what it was — even when its answer happens to carry a picture
-/// and a request block, which are then plain text — and so is a photo turn of an agent that is not the
-/// co-hosted one, and a photo the requester's rule refuses (here: over the 5 MiB ceiling).
+/// A turn without a photo is what it was — even when its answer happens to carry a request block, which
+/// is then plain text (a picture address in it is cut and a sentence stands in its place, #4908) — and
+/// so is a photo turn of an agent that is not the co-hosted one, and a photo the requester's rule
+/// refuses (here: over the 5 MiB ceiling).
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn a_turn_without_a_photo_is_unchanged_and_the_requesters_own_photo_rule_holds() {
+async fn a_turn_without_a_photo_never_opens_the_door_and_the_requesters_own_photo_rule_holds() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     reset_instance(&su).await;
@@ -1593,11 +1638,14 @@ async fn a_turn_without_a_photo_is_unchanged_and_the_requesters_own_photo_rule_h
     let messages = agent_messages(&app, &plain).await;
     assert_eq!(messages.len(), 1);
     assert_eq!(messages[0].kind, "text");
-    assert_eq!(
-        messages[0].body.as_deref(),
-        Some(verbatim.as_str()),
-        "verbatim"
+    // Verbatim but for the picture (#4908): its address is cut and the sentence stands there; the request
+    // block is plain text on a turn that is not a door turn, and stays exactly as written.
+    let cut = verbatim.replace(&markdown_of(&picture(16, 16)), PICTURE_REMOVED);
+    assert!(
+        cut.contains(PICTURE_REMOVED) && cut.contains("```oort-expression"),
+        "the expectation is built from the answer: {cut:.200}"
     );
+    assert_eq!(messages[0].body.as_deref(), Some(cut.as_str()));
     let request = request_for(&provider.requests(), "nophoto-4820").clone();
     assert!(
         request
@@ -1750,7 +1798,9 @@ async fn the_cheap_refusals_come_before_the_model() {
 /// Without the operator's attestation the door is **shut and the turn is an ordinary one** (planner
 /// 10-31): the model is called the way it always was — streaming, once, without the door's instruction —
 /// nothing in the answer is read as a picture or a request (no card, no approval, no draft), the answer
-/// is committed as it is, and the run succeeds. A shut door does not even look for the photo: with the
+/// is committed as the model wrote it — but for the picture address, which no turn commits (#4908: cut,
+/// a sentence in its place; the request block stays plain text) — and the run succeeds. A shut door does
+/// not even look for the photo: with the
 /// attachment table out of the way (and no origin, so no address is minted either) the shut door answers
 /// while the attested one cannot — the attested door is the positive control that the missing table
 /// really would have stopped a probe.
@@ -1800,10 +1850,15 @@ async fn without_the_operators_strict_attestation_the_door_is_shut_and_the_turn_
     let messages = agent_messages(&app, &t).await;
     assert_eq!(messages.len(), 1, "{messages:?}");
     assert!(!is_card(&messages[0]), "no failure card: {:?}", messages[0]);
+    let cut = door_style.replace(&markdown_of(&picture(32, 32)), PICTURE_REMOVED);
+    assert!(
+        cut.contains(PICTURE_REMOVED) && cut.contains("```oort-expression"),
+        "the expectation is built from the answer: {cut:.200}"
+    );
     assert_eq!(
         messages[0].body.as_deref(),
-        Some(door_style.as_str()),
-        "committed as it is: a shut door reads nothing in the answer"
+        Some(cut.as_str()),
+        "committed as written but for the picture: a shut door reads nothing in the answer"
     );
     assert!(approvals_of(&app, &t, run).await.is_empty(), "no approval");
     assert!(drafts_of(&app, &t).await.is_empty(), "no draft");
@@ -2601,4 +2656,256 @@ async fn an_answer_over_the_size_limit_is_one_closed_card_on_a_door_turn_and_the
     assert_eq!(run_status(&su, run).await, "failed");
     let (_, job_status, _) = job_of(&su, run).await;
     assert_eq!(job_status, "failed");
+}
+
+// --- #4908: an ordinary turn's picture addresses ---------------------------------------------
+
+/// #4908 — an ordinary turn (the co-hosted Hermes with no photo: the door never opens) whose answer
+/// carries `data:image/…` addresses, the way Hermes' API server writes a `MEDIA:` line it could turn into a
+/// picture. Message, outbox (the relay hands its `data` to Centrifugo verbatim) and `props` hold none of
+/// the base64, and a sentence stands in each place an address was: the model's words around it, its blank
+/// lines and the rest of its markup are exactly as written. Every shape the door cuts is cut (a markdown
+/// image with a title, a capital scheme, a bare token), a picture just under the provider layer's 12 MiB
+/// read limit included — the limit is on the wire, before this cut, and the message write has none. An
+/// agent that is not pinned to the co-hosted Hermes gets the same cut. The turn is still one streamed
+/// call, one commit, one ledger row, and the run succeeds.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn an_ordinary_answer_with_a_picture_address_commits_a_sentence_in_its_place_and_no_base64() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let app = pool_as("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw").await;
+    let worker_pool = pool_as("momo_worker", "MOMO_WORKER_PASSWORD", "momo_worker_dev_pw").await;
+    let provider = Scripted::new();
+    let w = worker(
+        &provider,
+        &Opts {
+            origin: Some(ORIGIN),
+            strict: true,
+            ..Opts::default()
+        },
+    )
+    .await;
+    let png = picture(48, 48);
+    let md = markdown_of(&png);
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+    let head: String = b64.chars().take(48).collect();
+    let huge = "A".repeat(11 * 1024 * 1024);
+    let huge_head = "A".repeat(48);
+    // (what, pinned to the co-hosted Hermes, the answer, what is committed, sentences, payload head)
+    let cases: Vec<(&str, bool, String, String, usize, &str)> = vec![
+        (
+            "a picture between words",
+            true,
+            format!("앞 이야기\n\n{md}\n\n뒤 이야기"),
+            format!("앞 이야기\n\n{PICTURE_REMOVED}\n\n뒤 이야기"),
+            1,
+            &head,
+        ),
+        (
+            "nothing but a picture",
+            true,
+            md.clone(),
+            PICTURE_REMOVED.to_string(),
+            1,
+            &head,
+        ),
+        (
+            "several, in the shapes the door cuts",
+            true,
+            format!(
+                "{md}\n\n그리고 ![b](Data:Image/GIF;Base64,{b64} \"제목\") 또 data:image/webp;base64,{b64} 끝"
+            ),
+            format!(
+                "{PICTURE_REMOVED}\n\n그리고 {PICTURE_REMOVED} 또 {PICTURE_REMOVED} 끝"
+            ),
+            3,
+            &head,
+        ),
+        (
+            "one just under the read limit",
+            true,
+            format!("앞\n\n![큰 그림](data:image/png;base64,{huge})\n\n뒤"),
+            format!("앞\n\n{PICTURE_REMOVED}\n\n뒤"),
+            1,
+            &huge_head,
+        ),
+        (
+            "an agent that is not the co-hosted one",
+            false,
+            format!("앞 이야기\n\n{md}\n\n뒤 이야기"),
+            format!("앞 이야기\n\n{PICTURE_REMOVED}\n\n뒤 이야기"),
+            1,
+            &head,
+        ),
+    ];
+    for (what, cohosted, said, want, sentences, payload_head) in cases {
+        let t = seed(&su).await;
+        if cohosted {
+            pin_env(&su, &t).await;
+        }
+        provider.say(said);
+        let before = provider.calls();
+        let (run, _, _) = enqueue_mention(
+            &su,
+            &worker_pool,
+            &t,
+            &format!("@hermes 그려 줘 ({what}, 4908)"),
+            None,
+        )
+        .await;
+        let stats = drain(&w).await;
+        assert_eq!(
+            (stats.claimed, stats.answered, stats.failed),
+            (1, 1, 0),
+            "{what}: {stats:?}"
+        );
+        let after = provider.calls();
+        assert_eq!(
+            (after.0 - before.0, after.1 - before.1),
+            (0, 1),
+            "{what}: an ordinary turn streams, once"
+        );
+        let messages = agent_messages(&app, &t).await;
+        assert_eq!(messages.len(), 1, "{what}: {messages:?}");
+        assert_eq!(messages[0].kind, "text", "{what}");
+        let body = messages[0].body.clone().unwrap_or_default();
+        assert_eq!(body, want, "{what}");
+        assert_eq!(body.matches(PICTURE_REMOVED).count(), sentences, "{what}");
+        assert!(body.len() < 400, "{what}: {} bytes", body.len());
+        assert_eq!(run_status(&su, run).await, "succeeded", "{what}");
+        assert_eq!(ledger_rows(&su, run).await, 1, "{what}");
+        assert!(approvals_of(&app, &t, run).await.is_empty(), "{what}");
+        assert_no_data_picture_anywhere(&su, &t, &[payload_head]).await;
+    }
+}
+
+/// #4908 — what the cut must not do: an answer with no `data:image/` address is committed **byte for
+/// byte** as the model wrote it. The texts are the ones a tidy-up, a trim or a re-line would have
+/// touched, and the ones that look like a picture or a door and are not one — a `MEDIA:` line, an
+/// `http(s)` image, a `file://` address, a `data:` address that is not an image, a request block —
+/// all of which are the model's own text on a turn that is not a door turn.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn an_ordinary_answer_without_a_picture_address_is_committed_byte_for_byte() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let app = pool_as("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw").await;
+    let worker_pool = pool_as("momo_worker", "MOMO_WORKER_PASSWORD", "momo_worker_dev_pw").await;
+    let provider = Scripted::new();
+    let w = worker(
+        &provider,
+        &Opts {
+            origin: Some(ORIGIN),
+            strict: true,
+            ..Opts::default()
+        },
+    )
+    .await;
+    let cases: Vec<(&str, String)> = vec![
+        ("plain", "그냥 답이에요".to_string()),
+        (
+            "blank runs and trailing spaces",
+            "앞에 공백이 있어요  \n\n\n\n세 번 비운 줄이에요   \n\n끝".to_string(),
+        ),
+        ("CRLF", "첫 줄\r\n둘째 줄\r\n끝".to_string()),
+        (
+            "a MEDIA line, an http image and a file address",
+            "만들었어요\nMEDIA:/opt/data/cache/images/x.png\n![x](https://example.com/a.png)\nfile:///etc/hosts\n끝"
+                .to_string(),
+        ),
+        (
+            "data addresses that are not images, and near misses",
+            "data:text/plain;base64,QUJD 와 data:application/pdf;base64,QUJD 와 image/png 와 data:image 와 base64,QUJD"
+                .to_string(),
+        ),
+        (
+            "fences that are not a report",
+            format!("```json\n{{\"a\":1}}\n```\n{}\n끝", fenced(&still_request())),
+        ),
+    ];
+    for (what, said) in cases {
+        let t = seed(&su).await;
+        pin_env(&su, &t).await;
+        provider.say(said.clone());
+        let (run, _, _) = enqueue_mention(
+            &su,
+            &worker_pool,
+            &t,
+            &format!("@hermes 그냥 답해 ({what}, 4908)"),
+            None,
+        )
+        .await;
+        drain(&w).await;
+        let messages = agent_messages(&app, &t).await;
+        assert_eq!(messages.len(), 1, "{what}: {messages:?}");
+        assert_eq!(messages[0].kind, "text", "{what}");
+        let body = messages[0].body.clone().unwrap_or_default();
+        // `String` equality is byte equality (both are valid UTF-8): the committed bytes are the model's.
+        assert_eq!(body, said, "{what}");
+        assert!(!body.contains(PICTURE_REMOVED), "{what}");
+        assert_eq!(run_status(&su, run).await, "succeeded", "{what}");
+        assert!(approvals_of(&app, &t, run).await.is_empty(), "{what}");
+    }
+}
+
+/// #4908 — the cut comes before the completion report is read: an address inside the fence (here the
+/// report's own `summary`) would otherwise ride the card's `props` into the outbox. The prose above the
+/// fence is cut the same way, the report is still a report.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_picture_address_inside_a_completion_report_does_not_ride_the_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let app = pool_as("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw").await;
+    let worker_pool = pool_as("momo_worker", "MOMO_WORKER_PASSWORD", "momo_worker_dev_pw").await;
+    let provider = Scripted::new();
+    let w = worker(
+        &provider,
+        &Opts {
+            origin: Some(ORIGIN),
+            strict: true,
+            ..Opts::default()
+        },
+    )
+    .await;
+    let png = picture(40, 40);
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&png);
+    let head: String = b64.chars().take(48).collect();
+    let report = json!({
+        "summary": format!("그림 data:image/png;base64,{b64} 도 만들었어요"),
+        "actions": [{"text": "그림을 만들었어요"}],
+    })
+    .to_string();
+    let t = seed(&su).await;
+    pin_env(&su, &t).await;
+    provider.say(format!(
+        "작업을 끝냈어요.\n\n{}\n\n```oort:report\n{report}\n```",
+        markdown_of(&png)
+    ));
+    let (run, _, _) = enqueue_mention(
+        &su,
+        &worker_pool,
+        &t,
+        "@hermes 리포트로 알려 줘 (report-4908)",
+        None,
+    )
+    .await;
+    drain(&w).await;
+    let messages = agent_messages(&app, &t).await;
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert_eq!(
+        messages[0].body.as_deref(),
+        Some(format!("작업을 끝냈어요.\n\n{PICTURE_REMOVED}").as_str())
+    );
+    assert_eq!(messages[0].props["kind"], "completion_report");
+    assert_eq!(
+        messages[0].props["summary"],
+        format!("그림 {PICTURE_REMOVED} 도 만들었어요")
+    );
+    assert_eq!(run_status(&su, run).await, "succeeded");
+    assert_no_data_picture_anywhere(&su, &t, &[&head]).await;
 }

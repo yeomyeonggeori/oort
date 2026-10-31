@@ -31,6 +31,12 @@ export const messageKeys = [
   "mobile.locale.backToSettings",
   "mobile.locale.permissionNotice",
   "mobile.locale.saving",
+  "settings.appearance.linkPreviewCompact",
+  "settings.appearance.linkPreviewCompactHint",
+  "settings.appearance.linkPreviewOff",
+  "settings.appearance.linkPreviewOffHint",
+  "settings.appearance.linkPreviewRich",
+  "settings.appearance.linkPreviewRichHint",
   "settings.profile.languageBeta",
   "settings.profile.languageCurrent",
   "settings.profile.languageHint",
@@ -38,7 +44,9 @@ export const messageKeys = [
   "settings.profile.languageLoadError",
   "settings.profile.languagePartialNotice",
   "settings.profile.languageRetry",
-  "settings.profile.languageSystem"
+  "settings.profile.languageSystem",
+  "timeline.unfurl.label",
+  "timeline.unfurl.video"
 ] as const;
 
 export type MessageKey = typeof messageKeys[number];
@@ -79,6 +87,12 @@ export const argumentSpecs = {
   "mobile.locale.backToSettings": {},
   "mobile.locale.permissionNotice": {},
   "mobile.locale.saving": {},
+  "settings.appearance.linkPreviewCompact": {},
+  "settings.appearance.linkPreviewCompactHint": {},
+  "settings.appearance.linkPreviewOff": {},
+  "settings.appearance.linkPreviewOffHint": {},
+  "settings.appearance.linkPreviewRich": {},
+  "settings.appearance.linkPreviewRichHint": {},
   "settings.profile.languageBeta": {},
   "settings.profile.languageCurrent": {
     "languageName": "string"
@@ -88,7 +102,12 @@ export const argumentSpecs = {
   "settings.profile.languageLoadError": {},
   "settings.profile.languagePartialNotice": {},
   "settings.profile.languageRetry": {},
-  "settings.profile.languageSystem": {}
+  "settings.profile.languageSystem": {},
+  "timeline.unfurl.label": {
+    "domain": "string",
+    "title": "string"
+  },
+  "timeline.unfurl.video": {}
 } as const;
 
 export interface MessageArgs {
@@ -123,6 +142,12 @@ export interface MessageArgs {
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.permissionNotice": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "settings.appearance.linkPreviewCompact": Record<string, never>;
+  "settings.appearance.linkPreviewCompactHint": Record<string, never>;
+  "settings.appearance.linkPreviewOff": Record<string, never>;
+  "settings.appearance.linkPreviewOffHint": Record<string, never>;
+  "settings.appearance.linkPreviewRich": Record<string, never>;
+  "settings.appearance.linkPreviewRichHint": Record<string, never>;
   "settings.profile.languageBeta": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
   "settings.profile.languageHint": Record<string, never>;
@@ -131,4 +156,6 @@ export interface MessageArgs {
   "settings.profile.languagePartialNotice": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "timeline.unfurl.label": { domain: string; title: string };
+  "timeline.unfurl.video": Record<string, never>;
 }

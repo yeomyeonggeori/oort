@@ -156,6 +156,13 @@
 //!   notifier with the new producers is harmless: it holds no stream at all, so it judges
 //!   the opening candidate when the stream opens, as before, and the closing candidate as
 //!   one more opening — `collapse_id` keeps it to one push.
+//! * **A quiet line (`props.announce: true`, ADR-0186 증보 v6 R-e · ADR-0204 증보 6 D6-5)** —
+//!   the one line a channel's main stream may get when an approval's result is visible there
+//!   (「채널에도 한 줄」). It pushes **nobody**, whoever it quotes or mentions: the person who asked
+//!   already heard the result from the settlement candidate. The key is read as a JSON
+//!   **boolean** `true` and nothing else — a client's props are strings, so `"true"` is an
+//!   ordinary message — and it is a server-owned key that a REST send strips
+//!   (`is_server_owned_props_key`). The check is first in the reason `CASE`, above every arm.
 //! * **Mute (ADR-0124)** — the per-channel `notification_pref` row suppresses
 //!   every reason, mentions and approvals included. Read at judgment time; no
 //!   cache.
@@ -192,18 +199,18 @@
 //! read — the audience's (`action.id`, `action.pins`, `execution`, `origin`; see
 //! `momo_agent::decider`) and the open-in-app list's (`tool_call.name`, and a bare
 //! marker for whether `action.args` is an object with an `avatar` or `displayName` key; see
-//! `momo_agent::actions::opens_in_app`) — never the card's argument values,
+//! `momo_agent::actions::decision_mode`) — never the card's argument values,
 //! `arguments` or rationale. That is a boundary (the card's text does not enter this
 //! process) and a bound (a model-sized tool input is not copied once per recipient
 //! and device). `tests/judgment_projection.rs` fails if the statement reads a path of
 //! the payload that nobody listed, or reaches the approval row any other way. The
-//! projection and `opens_in_app` must agree on every card (the decision route calls the
+//! projection and `decision_mode` must agree on every card (the decision route calls the
 //! same function on the whole payload): the category test in `push_conformance_pg`
 //! asserts it for each card of its table.
 
 use std::collections::HashMap;
 
-use momo_agent::actions::opens_in_app;
+use momo_agent::actions::{decision_mode, DecisionMode};
 use momo_agent::PROP_ANSWERS_MESSAGE_ID;
 use momo_db::DbError;
 use momo_messaging::STREAM_PROPS_KEY;
@@ -285,6 +292,7 @@ async fn judge_targets_for_source(
                   m.type::text AS message_type, \
                   COALESCE(m.props->'mention_member_ids', '[]'::jsonb) AS mention_ids, \
                   m.props->>'kind' AS props_kind, \
+                  COALESCE(m.props->'announce' = 'true'::jsonb, false) AS announce, \
                   m.props#>>'{result,status}' AS result_status, \
                   m.props->>'owner_member_id' AS owner_member_id, \
                   m.props->>'session_id' AS session_id, \
@@ -376,6 +384,7 @@ async fn judge_targets_for_source(
          recipients AS ( \
            SELECT ms.member_id, \
                   CASE \
+                    WHEN (SELECT announce FROM msg) THEN NULL \
                     WHEN $7::boolean THEN \
                       CASE WHEN mem.id = (SELECT requester_id FROM settled) \
                              AND mem.id IS DISTINCT FROM (SELECT decided_by FROM settled) \
@@ -627,13 +636,17 @@ async fn judge_targets_for_source(
             }
         }
 
-        let opens = card
-            .as_ref()
-            .is_some_and(|card| opens_in_app(&card.action_type, &card.payload));
+        // ADR-0204 증보 6 D6-2: the category reads the one `decision_mode` — the same answer the
+        // card's `props.decision_mode` and the `push_action` refusal read. A message that is
+        // the card of no approval reads as `Inline` here, and `category_for` ignores it for
+        // everything that is not an `approval_request`.
+        let decision = card.as_ref().map_or(DecisionMode::Inline, |card| {
+            decision_mode(&card.action_type, &card.payload)
+        });
         let category = if approval_settled {
             PushCategory::Mention
         } else {
-            category_for(&message_type, props_kind.as_deref(), reason, opens)
+            category_for(&message_type, props_kind.as_deref(), reason, decision)
         };
 
         targets.push(JudgedTarget {

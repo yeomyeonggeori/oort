@@ -1244,11 +1244,11 @@ planner 위임 기본값(결재 질문이 아님, 이탈 시 보고): 카드 자
 | `props.status` · `props.code` · `props.result{status,rows,ref,next,line}` | 승인 카드 | 종결 패치. `result`는 부록 B 객체 + `line`이고 부록 B와 D4의 규칙 그대로 1회 값 · 원본 코드 · 해시 · 프리뷰를 싣지 않는다 |
 | 카드 `body`(값만 바뀐다) · 종결 `message.edited` 전행 프레임 | 승인 카드 · 방송 | 종결 패치마다 한 번. `body`는 `result.line`(없으면 결정 문장). `seq` · `state` · `edited_at` 불변. 새 프레임 종류 없음 |
 | `props.intent` · `action.rows[].before` / `.after` | 승인 카드(제안 때) | 머리 문장의 「하려는 일」 한 구절(행동마다 서버가 만든다: 이름은 작성자에서 읽고 문장에 굽지 않는다, 증보 v5 U-c와 `proposal_summary`의 문서)과 값 칩의 이전 → 이후 구조. 구조가 없는 옛 카드는 한 줄 값(`value`)으로 그린다 |
-| `props.decision_mode` (`inline`/`open`) | 승인 카드 · 승인 목록 | `opens_in_app()` 한 함수의 결과(ADR-0204 증보 6) |
+| `props.decision_mode` (`inline`/`open`) | 승인 카드 · 승인 목록 | `momo_agent::actions::decision_mode()` 한 함수의 결과(ADR-0204 증보 6, #4764. 옛 `opens_in_app()`은 그 래퍼) |
 | `props.bundle_of` · `props.announce` | 「채널에도」 줄 | 묶음 역참조(접기 없음) · 푸시 조용 |
 | `receipt.line` | 결정 응답(영수증) | 잠금 화면 결과 알림 문장. 구버전 폴백 있음 |
-| `AgentRunProgress.bundle{approvalId,status,decisionMode,canDecide,line}` | run 진행 읽기 | 채널의 상태 칩과 스레드 요약 줄. `canDecide`는 보는 사람 기준 |
-| 승인 목록: 모든 상태 · 결정자 · 결정 시각 · 결과 요약 · 자리(채널 · root · DM 여부) · 쪽매김 | 승인 읽기 | 인박스 「승인」 칸. 채널 멤버십으로 서버가 거른다(ADR-0199 D4의 조회 시 가시성 재판정, D5의 수신자 격리와 같은 규칙) |
+| `AgentRunProgress.bundle{approvalId,status,decisionMode,canDecide,line}` (+ `actionType`·`intent`) | run 진행 읽기 | 채널의 상태 칩과 스레드 요약 줄. `canDecide`는 보는 사람 기준. `actionType`(이미 공개인 `ApprovalProjection.actionType`과 같은 닫힌 낱말 — 승인된 도구 호출이 아직 도는 run을 「끝」으로 읽지 않게)과 `intent`(대기 중에만, `line`과 같은 문장 — 착륙한 웹 요약 줄·칩이 읽음)는 planner가 2026-11-01 #4763 착륙 때 더한 가산 키다(독립 검수 L2) |
+| 승인 목록: 모든 상태 · 결정자 · 결정 시각 · 결과 요약 · 자리(채널 · root · DM 여부) · 쪽매김 | 승인 읽기 | 인박스 「승인」 칸. 채널 멤버십으로 서버가 거른다(ADR-0199 D4의 조회 시 가시성 재판정, D5의 수신자 격리와 같은 규칙). #4763: 기본 `scope=team`(`mine` = 내가 결정·요청·담당), `pending`은 옛 순서(마감 임박순·쪽매김 없음), 확정 상태와 `all`은 마지막으로 움직인 때 최신순 키셋(`nextCursor`는 위치일 뿐 권한이 아니다) |
 | `announce`(행동 속성) | 레지스트리 | R-e |
 | `push_candidate` 페이로드의 `source` 값 하나(승인 종결) | outbox | 세 번째 생산자(ADR-0204 증보 6 D6-5). 새 outbox 종류가 아니다. 판정이 이 값을 읽는다(R-0 13) |
 
