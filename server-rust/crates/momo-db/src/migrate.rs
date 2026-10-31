@@ -734,12 +734,18 @@ mod tests {
     /// 164 is #4889's `thread_follow` (ADR-0206 증보 1 F1): who follows which thread, one row per
     /// (root, member) with the state `auto` / `followed` / `unfollowed`, tenant ENABLE + FORCE +
     /// `ws_isolation`. No grant for `momo_notifier` until the stage-2 judgment arm reads it.
+    ///
+    /// 166 is #4966's 「별칭이 이름을 따라가요」 (ADR-0201 증보 v3 B10, slice S3): the helper's alias
+    /// set stops being fixed (`member_handle_alias_v2_set_ck` is dropped, the shape CHECK stays) and
+    /// the trigger `member_handle_alias_guard` takes over: an alias belongs to the workspace's team AI
+    /// member only, and a workspace holds at most four. No new table, no new grant. (165 is #4889's
+    /// stage 2, numbered by the planner.)
     #[test]
-    fn discovers_contiguous_migrations_001_to_164() {
+    fn discovers_contiguous_migrations_001_to_166() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=164).collect();
+        let expected: Vec<i64> = (1..=166).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -747,7 +753,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=164 under {}",
+            "expected contiguous 001..=166 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -755,7 +761,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("164_thread_follow"));
+            .starts_with("166_team_ai_alias_follow_name"));
     }
 
     #[test]
