@@ -21,6 +21,63 @@ export const messageKeys = [
   "desktop.menu.undo",
   "desktop.menu.view",
   "desktop.menu.window",
+  "expressions.photo.agentInstead",
+  "expressions.photo.anotherPhoto",
+  "expressions.photo.branchLabel",
+  "expressions.photo.busy",
+  "expressions.photo.caricatureHint",
+  "expressions.photo.caricatureLabel",
+  "expressions.photo.checkFailed",
+  "expressions.photo.checking",
+  "expressions.photo.consent",
+  "expressions.photo.consentMissing",
+  "expressions.photo.cutoutErased",
+  "expressions.photo.cutoutHint",
+  "expressions.photo.cutoutLabel",
+  "expressions.photo.cutoutModel",
+  "expressions.photo.cutoutUnchanged",
+  "expressions.photo.displayNameLabel",
+  "expressions.photo.displayNamePlaceholder",
+  "expressions.photo.errorBusy",
+  "expressions.photo.errorChanged",
+  "expressions.photo.errorFailed",
+  "expressions.photo.errorGeneric",
+  "expressions.photo.errorMedia",
+  "expressions.photo.errorName",
+  "expressions.photo.errorOffline",
+  "expressions.photo.errorQuota",
+  "expressions.photo.errorRefused",
+  "expressions.photo.errorRole",
+  "expressions.photo.errorTimeout",
+  "expressions.photo.errorUnavailable",
+  "expressions.photo.faceLabel",
+  "expressions.photo.faceNone",
+  "expressions.photo.faceOther",
+  "expressions.photo.faceOtherBlocked",
+  "expressions.photo.faceSelf",
+  "expressions.photo.fieldsInvalid",
+  "expressions.photo.fixedNote",
+  "expressions.photo.introText",
+  "expressions.photo.nameLabel",
+  "expressions.photo.namePlaceholder",
+  "expressions.photo.noModelAsk",
+  "expressions.photo.noModelDetail",
+  "expressions.photo.noModelHeadline",
+  "expressions.photo.noModelImport",
+  "expressions.photo.noModelManage",
+  "expressions.photo.originLabel",
+  "expressions.photo.photoHint",
+  "expressions.photo.photoLabel",
+  "expressions.photo.photoMissing",
+  "expressions.photo.photoPreviewAlt",
+  "expressions.photo.photoSize",
+  "expressions.photo.photoType",
+  "expressions.photo.providerGemini",
+  "expressions.photo.providerOpenai",
+  "expressions.photo.retry",
+  "expressions.photo.submit",
+  "expressions.photo.tagsLabel",
+  "expressions.photo.tagsPlaceholder",
   "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
@@ -69,6 +126,65 @@ export const argumentSpecs = {
   "desktop.menu.undo": {},
   "desktop.menu.view": {},
   "desktop.menu.window": {},
+  "expressions.photo.agentInstead": {},
+  "expressions.photo.anotherPhoto": {},
+  "expressions.photo.branchLabel": {},
+  "expressions.photo.busy": {},
+  "expressions.photo.caricatureHint": {},
+  "expressions.photo.caricatureLabel": {},
+  "expressions.photo.checkFailed": {},
+  "expressions.photo.checking": {},
+  "expressions.photo.consent": {
+    "provider": "string"
+  },
+  "expressions.photo.consentMissing": {},
+  "expressions.photo.cutoutErased": {},
+  "expressions.photo.cutoutHint": {},
+  "expressions.photo.cutoutLabel": {},
+  "expressions.photo.cutoutModel": {},
+  "expressions.photo.cutoutUnchanged": {},
+  "expressions.photo.displayNameLabel": {},
+  "expressions.photo.displayNamePlaceholder": {},
+  "expressions.photo.errorBusy": {},
+  "expressions.photo.errorChanged": {},
+  "expressions.photo.errorFailed": {},
+  "expressions.photo.errorGeneric": {},
+  "expressions.photo.errorMedia": {},
+  "expressions.photo.errorName": {},
+  "expressions.photo.errorOffline": {},
+  "expressions.photo.errorQuota": {},
+  "expressions.photo.errorRefused": {},
+  "expressions.photo.errorRole": {},
+  "expressions.photo.errorTimeout": {},
+  "expressions.photo.errorUnavailable": {},
+  "expressions.photo.faceLabel": {},
+  "expressions.photo.faceNone": {},
+  "expressions.photo.faceOther": {},
+  "expressions.photo.faceOtherBlocked": {},
+  "expressions.photo.faceSelf": {},
+  "expressions.photo.fieldsInvalid": {},
+  "expressions.photo.fixedNote": {},
+  "expressions.photo.introText": {},
+  "expressions.photo.nameLabel": {},
+  "expressions.photo.namePlaceholder": {},
+  "expressions.photo.noModelAsk": {},
+  "expressions.photo.noModelDetail": {},
+  "expressions.photo.noModelHeadline": {},
+  "expressions.photo.noModelImport": {},
+  "expressions.photo.noModelManage": {},
+  "expressions.photo.originLabel": {},
+  "expressions.photo.photoHint": {},
+  "expressions.photo.photoLabel": {},
+  "expressions.photo.photoMissing": {},
+  "expressions.photo.photoPreviewAlt": {},
+  "expressions.photo.photoSize": {},
+  "expressions.photo.photoType": {},
+  "expressions.photo.providerGemini": {},
+  "expressions.photo.providerOpenai": {},
+  "expressions.photo.retry": {},
+  "expressions.photo.submit": {},
+  "expressions.photo.tagsLabel": {},
+  "expressions.photo.tagsPlaceholder": {},
   "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
@@ -113,6 +229,63 @@ export interface MessageArgs {
   "desktop.menu.undo": Record<string, never>;
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
+  "expressions.photo.agentInstead": Record<string, never>;
+  "expressions.photo.anotherPhoto": Record<string, never>;
+  "expressions.photo.branchLabel": Record<string, never>;
+  "expressions.photo.busy": Record<string, never>;
+  "expressions.photo.caricatureHint": Record<string, never>;
+  "expressions.photo.caricatureLabel": Record<string, never>;
+  "expressions.photo.checkFailed": Record<string, never>;
+  "expressions.photo.checking": Record<string, never>;
+  "expressions.photo.consent": { provider: string };
+  "expressions.photo.consentMissing": Record<string, never>;
+  "expressions.photo.cutoutErased": Record<string, never>;
+  "expressions.photo.cutoutHint": Record<string, never>;
+  "expressions.photo.cutoutLabel": Record<string, never>;
+  "expressions.photo.cutoutModel": Record<string, never>;
+  "expressions.photo.cutoutUnchanged": Record<string, never>;
+  "expressions.photo.displayNameLabel": Record<string, never>;
+  "expressions.photo.displayNamePlaceholder": Record<string, never>;
+  "expressions.photo.errorBusy": Record<string, never>;
+  "expressions.photo.errorChanged": Record<string, never>;
+  "expressions.photo.errorFailed": Record<string, never>;
+  "expressions.photo.errorGeneric": Record<string, never>;
+  "expressions.photo.errorMedia": Record<string, never>;
+  "expressions.photo.errorName": Record<string, never>;
+  "expressions.photo.errorOffline": Record<string, never>;
+  "expressions.photo.errorQuota": Record<string, never>;
+  "expressions.photo.errorRefused": Record<string, never>;
+  "expressions.photo.errorRole": Record<string, never>;
+  "expressions.photo.errorTimeout": Record<string, never>;
+  "expressions.photo.errorUnavailable": Record<string, never>;
+  "expressions.photo.faceLabel": Record<string, never>;
+  "expressions.photo.faceNone": Record<string, never>;
+  "expressions.photo.faceOther": Record<string, never>;
+  "expressions.photo.faceOtherBlocked": Record<string, never>;
+  "expressions.photo.faceSelf": Record<string, never>;
+  "expressions.photo.fieldsInvalid": Record<string, never>;
+  "expressions.photo.fixedNote": Record<string, never>;
+  "expressions.photo.introText": Record<string, never>;
+  "expressions.photo.nameLabel": Record<string, never>;
+  "expressions.photo.namePlaceholder": Record<string, never>;
+  "expressions.photo.noModelAsk": Record<string, never>;
+  "expressions.photo.noModelDetail": Record<string, never>;
+  "expressions.photo.noModelHeadline": Record<string, never>;
+  "expressions.photo.noModelImport": Record<string, never>;
+  "expressions.photo.noModelManage": Record<string, never>;
+  "expressions.photo.originLabel": Record<string, never>;
+  "expressions.photo.photoHint": Record<string, never>;
+  "expressions.photo.photoLabel": Record<string, never>;
+  "expressions.photo.photoMissing": Record<string, never>;
+  "expressions.photo.photoPreviewAlt": Record<string, never>;
+  "expressions.photo.photoSize": Record<string, never>;
+  "expressions.photo.photoType": Record<string, never>;
+  "expressions.photo.providerGemini": Record<string, never>;
+  "expressions.photo.providerOpenai": Record<string, never>;
+  "expressions.photo.retry": Record<string, never>;
+  "expressions.photo.submit": Record<string, never>;
+  "expressions.photo.tagsLabel": Record<string, never>;
+  "expressions.photo.tagsPlaceholder": Record<string, never>;
   "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;

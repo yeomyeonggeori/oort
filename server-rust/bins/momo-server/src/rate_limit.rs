@@ -827,6 +827,10 @@ pub enum MemberWrite {
     /// of a place to fetch (`ProxyError::Busy`) is given its unit back ([`refund_member_write`]):
     /// nothing left the building.
     UnfurlProxy,
+    /// `POST …/expressions/photo-drafts` (ADR-0218 §8 H9, #4941): a start may end in one call
+    /// to the team's image model. A short-window guard on starts, not an allowance: how many
+    /// pictures a team may draw is the team's own decision (#4944).
+    PhotoDraft,
 }
 
 impl MemberWrite {
@@ -838,6 +842,7 @@ impl MemberWrite {
             MemberWrite::ScheduledWrite => "scheduled_write",
             MemberWrite::UploadStart => "upload_start",
             MemberWrite::UnfurlProxy => "unfurl_proxy",
+            MemberWrite::PhotoDraft => "photo_draft",
         }
     }
 
@@ -849,6 +854,7 @@ impl MemberWrite {
             MemberWrite::ScheduledWrite => "write:schedule",
             MemberWrite::UploadStart => "write:upload",
             MemberWrite::UnfurlProxy => "write:unfurl",
+            MemberWrite::PhotoDraft => "write:photo",
         }
     }
 }
@@ -876,6 +882,7 @@ pub fn member_write_limit(
         (MemberWrite::ScheduledWrite, _) => config.scheduled_write_per_member_limit,
         (MemberWrite::UploadStart, _) => config.upload_start_per_member_limit,
         (MemberWrite::UnfurlProxy, _) => config.unfurl_proxy_per_member_limit,
+        (MemberWrite::PhotoDraft, _) => config.photo_draft_per_member_limit,
     }
 }
 
@@ -1510,7 +1517,7 @@ mod tests {
 
     use std::sync::atomic::AtomicUsize;
 
-    /// Four different numbers, so a swapped field cannot pass by coincidence.
+    /// Six different numbers, so a swapped field cannot pass by coincidence.
     fn budget_config() -> RateLimitConfig {
         RateLimitConfig {
             message_send_per_member_limit: 11,
@@ -1518,6 +1525,7 @@ mod tests {
             scheduled_write_per_member_limit: 33,
             upload_start_per_member_limit: 44,
             unfurl_proxy_per_member_limit: 55,
+            photo_draft_per_member_limit: 66,
             ..RateLimitConfig::default()
         }
     }
@@ -1549,6 +1557,11 @@ mod tests {
                 55,
                 "the proxy budget is one number for every credential"
             );
+            assert_eq!(
+                limit(MemberWrite::PhotoDraft, kind),
+                66,
+                "a photo start has one limit whoever asks"
+            );
         }
     }
 
@@ -1562,13 +1575,14 @@ mod tests {
             (MemberWrite::ScheduledWrite, "scheduled_write"),
             (MemberWrite::UploadStart, "upload_start"),
             (MemberWrite::UnfurlProxy, "unfurl_proxy"),
+            (MemberWrite::PhotoDraft, "photo_draft"),
         ];
         let mut keys = std::collections::HashSet::new();
         for (surface, label) in surfaces {
             assert_eq!(surface.label(), label);
             assert!(keys.insert(member_write_key(surface, member)));
         }
-        assert_eq!(keys.len(), 4);
+        assert_eq!(keys.len(), 5);
         assert_ne!(
             member_write_key(MemberWrite::MessageSend, member),
             member_write_key(MemberWrite::MessageSend, Uuid::from_u128(8)),

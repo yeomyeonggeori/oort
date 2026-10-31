@@ -64,6 +64,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         rate_limit_scheduled_write_per_member = config.rate_limit.scheduled_write_per_member_limit,
         rate_limit_upload_start_per_member = config.rate_limit.upload_start_per_member_limit,
         rate_limit_unfurl_proxy_per_member = config.rate_limit.unfurl_proxy_per_member_limit,
+        rate_limit_photo_draft_per_member = config.rate_limit.photo_draft_per_member_limit,
         agent_port_rate_limit_per_token = config.agent_port.per_token_limit,
         agent_port_rate_limit_per_agent = config.agent_port.per_agent_limit,
         agent_port_rate_limit_per_ip = config.agent_port.per_ip_limit,
@@ -177,6 +178,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "RATE_LIMIT_UNFURL_PROXY_PER_MEMBER",
             config.rate_limit.unfurl_proxy_per_member_limit,
             "link-card pictures and icons fetched from remote sites",
+        ),
+        (
+            "RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER",
+            config.rate_limit.photo_draft_per_member_limit,
+            "picture-from-photo starts (each one can be a call to the team's image model)",
         ),
     ] {
         if limit == 0 {
@@ -299,6 +305,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 momo_server::routes::provider_link::PROBE_TIMEOUT,
             ),
         ))
+        // ADR-0218 §8 (#4941): the team image model is dialled under the same egress policy as a
+        // real turn; the hosts and models come from the environment (model ids only).
+        .with_image_model(
+            std::sync::Arc::new(momo_image_model::GuardedImageModel::new(
+                momo_server::config::provider_probe_policy_from_env(&config.settings),
+                momo_image_model::DEFAULT_DEADLINE,
+            )),
+            momo_image_model::ImageModelConfig::from_env(),
+        )
         // ADR-0203: the co-hosted agent probe dials only the host the operator wrote
         // in HERMES_BASE_URL, under the same egress policy as a real turn.
         .with_cohosted(

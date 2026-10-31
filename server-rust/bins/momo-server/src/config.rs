@@ -484,6 +484,18 @@ pub struct RateLimitConfig {
     /// gets per window. A request refused here is retried by the client after `Retry-After` and
     /// shows its fallback meanwhile. See ADR-0170 증보 D13.
     pub unfurl_proxy_per_member_limit: u32,
+    /// `RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER` (default 10 per window). 0 disables.
+    /// Starting a picture from a photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H9/H11,
+    /// #4941), which can end in one call to the team's image model and so in a charge on the
+    /// team's own key. A short-window guard on **starts**, not an allowance: the owner's default
+    /// for how many pictures a team may draw is no cap (#4944), and a team that wants one sets it
+    /// there. A person works on one photo at a time (the route admits one per member) and every
+    /// finished one leaves a draft to look at (four may wait, `momo_expressions::LIVE_DRAFTS`),
+    /// so ordinary use is a few starts a minute. 10 is two full draft allowances plus two: a
+    /// person who fills their drafts and asks once more reaches the draft limit, not this. A start
+    /// the route then refuses (busy, over the draft limit) counts too, and the gate runs before
+    /// the body is read.
+    pub photo_draft_per_member_limit: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -502,6 +514,7 @@ impl Default for RateLimitConfig {
             scheduled_write_per_member_limit: 60,
             upload_start_per_member_limit: 60,
             unfurl_proxy_per_member_limit: 240,
+            photo_draft_per_member_limit: 10,
         }
     }
 }
@@ -559,6 +572,9 @@ impl RateLimitConfig {
             unfurl_proxy_per_member_limit: lookup("RATE_LIMIT_UNFURL_PROXY_PER_MEMBER")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.unfurl_proxy_per_member_limit),
+            photo_draft_per_member_limit: lookup("RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.photo_draft_per_member_limit),
         }
     }
 }
@@ -3987,9 +4003,10 @@ mod tests {
                 defaults.scheduled_write_per_member_limit,
                 defaults.upload_start_per_member_limit,
                 defaults.unfurl_proxy_per_member_limit,
+                defaults.photo_draft_per_member_limit,
             ),
-            (120, 600, 60, 60, 240),
-            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 for the last one), docs/api/openapi.yaml and infra/.env.example with it"
+            (120, 600, 60, 60, 240, 10),
+            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 for the unfurl one, ADR-0218 §8 H11 for the photo one), docs/api/openapi.yaml and infra/.env.example with it"
         );
         for (name, limit) in [
             (
@@ -4000,6 +4017,7 @@ mod tests {
             ("scheduled write", defaults.scheduled_write_per_member_limit),
             ("upload start", defaults.upload_start_per_member_limit),
             ("unfurl proxy", defaults.unfurl_proxy_per_member_limit),
+            ("photo draft", defaults.photo_draft_per_member_limit),
         ] {
             assert!(
                 limit > 0,
@@ -4015,6 +4033,10 @@ mod tests {
             defaults.upload_start_per_member_limit as usize
                 >= 2 * momo_messaging::MAX_ATTACHMENTS_PER_MESSAGE,
             "two full messages' worth of attachment uploads must fit in one window"
+        );
+        assert!(
+            i64::from(defaults.photo_draft_per_member_limit) >= 2 * momo_expressions::LIVE_DRAFTS,
+            "a person who fills the live-draft allowance and asks once more must meet the draft limit, not the rate"
         );
         assert!(
             defaults.message_send_per_agent_limit >= AgentPortConfig::default().per_agent_limit,
@@ -4071,10 +4093,22 @@ mod tests {
                 ..defaults
             }
         );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER", "12")),
+            RateLimitConfig {
+                photo_draft_per_member_limit: 12,
+                ..defaults
+            }
+        );
         // 0 is the operator's off switch; a value that is not a number is not one.
         assert_eq!(
             RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MESSAGE_SEND_PER_AGENT", "0"))
                 .message_send_per_agent_limit,
+            0
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER", "0"))
+                .photo_draft_per_member_limit,
             0
         );
         assert_eq!(
