@@ -392,6 +392,18 @@ class SsrfSwitches(GateHarness):
                 rc, record, _ = self.boot(env_file=BOM + (line + "\nOPENROUTER_API_KEY=keep\n").encode())
                 self.assertRefused(rc, record, fragment)
                 self.assertNotIn("fixture-secret-value", json.dumps(record))
+            # Two marks in front, and a line after the first that the loader's clean-up changes (so it rewrites the file, and the loader
+            # decodes the rewritten one again and drops the second mark): Hermes applies the line, so the gate must see it. Also a blank
+            # in front of the mark, and a mark behind blanks inside UTF-16.
+            for label, raw in (("two marks", BOM + BOM + (line + "\n OPENROUTER_API_KEY=keep\n").encode()),
+                               ("blank, mark", b"\t" + BOM + (line + "\n").encode()),
+                               ("utf-16, two marks", b"\xff\xfe" + ("\ufeff" + line + "\n").encode("utf-16-le"))):
+                with self.subTest(line=line, shape=label):
+                    rc, record, _ = self.boot(env_file=raw)
+                    self.assertRefused(rc, record, fragment)
+                    self.assertNotIn("fixture-secret-value", json.dumps(record))
+                    rc, kills, record = self.monitor(healthy_cfg(), env_file=raw)
+                    self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
         with tempfile.TemporaryDirectory() as data:
             path = os.path.join(data, ".env")
             with open(path, "wb") as handle:
@@ -784,8 +796,9 @@ class CanaryBehavior(GateHarness):
 
 class EnvFileThroughTheGate(GateHarness):
     """#4886: the volume's `.env` as Hermes loads it, judged through the real `gate()` / `report()` (the rule tables, for both
-    parsers, are in test_lockgate_env.py). Every spelling the loader applies stops the start, `${...}` is resolved against the
-    container's own environment, and what the loader ignores does not stop it."""
+    parsers, are in test_lockgate_env.py). Every spelling the loader applies stops the start, a judged name given a reference
+    (`${...}`, `$NAME`) stops it whatever the container's environment would resolve it to, the live report reads the file the same
+    way, and what the loader ignores does not stop it."""
 
     APPLIED = (
         ("HERMES_SAFE_MODE=1 # note", "HERMES_SAFE_MODE"),
@@ -817,25 +830,54 @@ class EnvFileThroughTheGate(GateHarness):
                 rc, record, _ = self.boot(env_file=(text + "\n").encode())
                 self.assertEqual((rc, record["problems"]), (0, []))
 
-    def test_references_resolve_against_the_containers_own_environment(self):
-        text = b"HERMES_SAFE_MODE=${OORT_PROOF_FLAG}\n"
-        rc, record, _ = self.boot(env={"OORT_PROOF_FLAG": "1"}, env_file=text)
-        self.assertRefused(rc, record, "the volume's .env enables HERMES_SAFE_MODE")
-        for env in ({"OORT_PROOF_FLAG": "0"}, {"OORT_PROOF_FLAG": ""}, {}):
-            with self.subTest(env=env):
-                rc, record, _ = self.boot(env=env, env_file=text)
-                self.assertEqual((rc, record["problems"]), (0, []))
-        # and again after start, against the live process environment
-        rc, kills, record = self.monitor(healthy_cfg(), env={"OORT_PROOF_FLAG": "1"}, env_file=text)
-        self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
+    def test_a_reference_in_a_judged_name_stops_the_start_whatever_the_container_resolves_it_to(self):
+        # Hermes resolves `${...}` in ITS environment; nothing the gate computes from its own settles what Hermes ends with, so the
+        # reference itself is refused: once, by name, with the same answer whatever the container's variable holds.
+        for text, name in ((b"HERMES_SAFE_MODE=${OORT_PROOF_FLAG}\n", "HERMES_SAFE_MODE"), (b"HTTPS_PROXY=${HOME}\n", "HTTPS_PROXY"),
+                           (b"HERMES_DASHBOARD=${OORT_PROOF_FLAG}\n", "HERMES_DASHBOARD"), (b"FAL_KEY=${OORT_PROOF_FLAG:-}\n", "FAL_KEY"),
+                           (b"API_SERVER_KEY=${OORT_PROOF_FLAG:-" + b"k" * 40 + b"}\n", "API_SERVER_KEY")):
+            for env in ({"OORT_PROOF_FLAG": "1", "HOME": "/home/someone"}, {"OORT_PROOF_FLAG": "0"}, {"OORT_PROOF_FLAG": ""}, {}):
+                with self.subTest(name=name, environment=env):
+                    rc, record, _ = self.boot(env=env, env_file=text)
+                    self.assertRefused(rc, record, "the volume's .env sets %s through a reference" % name)
+                    self.assertEqual(len([p for p in record["problems"] if name in p]), 1, record["problems"])
+                    self.assertNotIn("k" * 40, json.dumps(record))
+                    # and again after start, against the live process environment
+                    rc, kills, record = self.monitor(healthy_cfg(), env=env, env_file=text)
+                    self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
 
-    def test_references_do_not_see_the_scratch_home_the_gate_sets_up(self):
-        # The gate points HOME and HERMES_HOME at a scratch folder while it works; Hermes' loader sees the container's environment,
-        # where this test has no HOME: the proxy value below is empty there, so it is no proxy.
-        rc, record, _ = self.boot(env_file=b"HTTPS_PROXY=${HOME}\n")
+    def test_a_variable_only_the_service_slot_defines_cannot_hide_a_value(self):
+        # Hermes' service slot exports HERMES_SUPERVISED_CHILD=1 before it execs Hermes; the gate's own environment has no such name,
+        # so a reference to it resolves to its default here and to `1` there.
+        for text in (b"HERMES_SAFE_MODE=${HERMES_SUPERVISED_CHILD:-0}\n", b"HERMES_ALLOW_PRIVATE_URLS=${HERMES_SUPERVISED_CHILD:-false}\n",
+                     b"API_SERVER_KEY=${HERMES_SUPERVISED_CHILD:-" + b"k" * 40 + b"}\n"):
+            with self.subTest(text=text[:40]):
+                rc, record, _ = self.boot(env_file=text)
+                self.assertRefused(rc, record, "through a reference")
+
+    def test_a_reference_in_a_name_the_gate_does_not_judge_does_not_stop_the_start(self):
+        rc, record, _ = self.boot(env_file=b"OPENROUTER_API_KEY=${OORT_PROOF_FLAG}\nOORT_PROOF_A=$HOME\nNO_PROXY=${OORT_PROOF_FLAG}\n")
         self.assertEqual((rc, record["problems"]), (0, []))
-        rc, record, _ = self.boot(env={"HOME": "/home/someone"}, env_file=b"HTTPS_PROXY=${HOME}\n")
-        self.assertRefused(rc, record, "the volume's .env sets HTTPS_PROXY")
+
+    def test_the_live_report_judges_the_volumes_env_whichever_tools_are_exposed(self):
+        # The boot gate reads the volume's `.env` for the YOLO / dashboard / CORS / API key / FAL rules whatever is exposed; the report
+        # does too, so a file edited after the start (or one the boot gate misread) is not left alone until the next restart.
+        for label, cfg, tools in (("no picture tool", {"web": healthy_cfg()["web"]}, TOOLS - {"image_generate"}),
+                                  ("picture tool exposed", healthy_cfg(), TOOLS)):
+            with self.subTest(case=label, file="none"):
+                self.assertEqual(self.monitor(cfg, tools=tools)[:2], (0, []))
+            for line, fragment in (("HERMES_YOLO_MODE=1", "HERMES_YOLO_MODE"), ("HERMES_DASHBOARD=true", "HERMES_DASHBOARD"),
+                                   ("API_SERVER_CORS_ORIGINS=https://evil.example", "API_SERVER_CORS_ORIGINS"),
+                                   ("API_SERVER_KEY=short", "API_SERVER_KEY"), ("FAL_KEY=" + "f" * 12, "FAL_KEY"),
+                                   ("HERMES_DASHBOARD=${OORT_PROOF_UNSET:-0}", "HERMES_DASHBOARD")):
+                with self.subTest(case=label, line=line):
+                    rc, kills, record = self.monitor(cfg, tools=tools, env_file=(line + "\n").encode())
+                    self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
+                    self.assertTrue(any(fragment in p and "the volume's .env" in p for p in record["problems"]), record["problems"])
+                    self.assertNotIn("f" * 12, json.dumps(record))
+            with self.subTest(case=label, file="harmless"):
+                rc, kills, record = self.monitor(cfg, tools=tools, env_file=b"OPENROUTER_API_KEY=keep\nHERMES_YOLO_MODE=0\n# HERMES_DASHBOARD=true\n")
+                self.assertEqual((rc, kills, record["problems"]), (0, [], []))
 
     def test_the_gate_names_the_parser_it_used(self):
         rc, record, _ = self.boot()
@@ -887,6 +929,22 @@ class HermesHomeIsTheFolderTheGateReads(GateHarness):
                 for home in (parent, os.path.join(data, "sub"), "/", "~", "$OORT_PROOF_UNSET_VARIABLE"):
                     with self.subTest(other=home):
                         self.assertEqual(len(lockgate.hermes_home_problems({"HERMES_HOME": home}, data)), 1)
+
+    def test_a_home_that_needs_a_HOME_is_refused_even_when_this_gates_HOME_would_make_it_right(self):
+        # `~` and `$HOME` mean a folder under the HOME of whoever expands them, and Hermes runs in a service slot with a HOME of its own.
+        with tempfile.TemporaryDirectory() as data:
+            with mock.patch.dict(os.environ, {"HOME": data, "OORT_PROOF_TILDE": "~", "OORT_PROOF_VOLUME": data}):
+                for home in ("~", "~/", "~/.", "$HOME", "${HOME}", "$HOME/", "${HOME}/.", "$OORT_PROOF_TILDE", " ~ "):
+                    with self.subTest(home=home):
+                        problems = lockgate.hermes_home_problems({"HERMES_HOME": home}, data)
+                        self.assertEqual(len(problems), 1)
+                        self.assertIn("`~` or $HOME", problems[0])
+                        self.assertNotIn(data, problems[0])
+                # a different variable is not HOME, and any other `$VAR` is still read from the container's environment
+                self.assertEqual(lockgate.hermes_home_problems({"HERMES_HOME": "$OORT_PROOF_VOLUME"}, data), [])
+                self.assertIn("is not the folder", lockgate.hermes_home_problems({"HERMES_HOME": "$HOMER"}, data)[0])
+        rc, record, _ = self.boot(env={"HERMES_HOME": "$HOME"})
+        self.assertRefused(rc, record, "`~` or $HOME")
 
 
 if __name__ == "__main__":

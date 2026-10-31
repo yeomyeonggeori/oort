@@ -10,13 +10,20 @@ parser every row wherever it is installed. `OORT_REQUIRE_DOTENV=1` turns "python
 failure; the in-image proof sets it (scripts/tests/test_hermes_image_guard_docker.sh), so there the comparison cannot be skipped.
 
 Then the rules, through `volume_env_problems` / `image_volume_env_problems`, for each parser: every spelling the loader APPLIES is
-refused once, by name, never with its value; every spelling it ignores is not; the last assignment of a name decides; references
-are resolved the way Hermes resolves them. Each rule has a case that fails when the rule is removed.
+refused once, by name, never with its value; every spelling it ignores is not; the last assignment of a name decides; a judged name
+whose value holds a reference (`${...}`, `$NAME`) is refused for that, because Hermes resolves it in an environment the gate does
+not have. The byte order marks at the front are read exactly as the loader strips them (its sanitizer's decode, and one more after
+it rewrote the file). Each rule has a case that fails when the rule is removed.
+
+The last part tests the comparison in infra/hermes/env_loader_oracle.py, which the in-image proof runs against Hermes' REAL loader
+(scenario `env-loader-oracle`): the policy, the reading of the gate's answer, the verdict and its plumbing, offline, with a
+stand-in loader that only exists to show the plumbing works.
 """
 import importlib.util
 import logging
 import os
 import random
+import re
 import sys
 import tempfile
 import unittest
@@ -38,6 +45,8 @@ def load(path, name):
 
 
 lockgate = load(os.path.join(HERE, "lockgate.py"), "lockgate_for_env_test")
+oracle = load(os.path.join(HERE, "env_loader_oracle.py"), "env_loader_oracle_for_env_test")
+FEFF = oracle.FEFF
 REAL = lockgate._DotEnv
 HAVE_DOTENV = REAL is not None
 PARSERS = [("fallback", None)] + ([("python-dotenv", REAL)] if HAVE_DOTENV else [])
@@ -278,6 +287,20 @@ READ_TABLE = [
     ("the last assignment wins", b"A=1\nA=2\n", {}, {"A": "2"}),
     ("a name without a value after an assignment sets nothing", b"A=1\nA\n", {}, {}),
     ("a name without a value before an assignment", b"A\nA=1\n", {}, {"A": "1"}),
+    # Byte order marks. These rows were measured with the REAL loader (hermes_cli/env_loader.py v0.22.2 run as it is, python-dotenv
+    # 1.2.2), not with a stand-in: the number of marks that reach the first name depends on whether its sanitizer rewrote the file.
+    ("two marks, and a second line the clean-up rewrites", BOM + BOM + b"A=1\n X=1\n", {}, {"A": "1", "X": "1"}),
+    ("two marks, and no final newline (rewritten)", BOM + BOM + b"A=1", {}, {"A": "1"}),
+    ("two marks, nothing to rewrite: one stays in the name", BOM + BOM + b"A=1\n", {}, {FEFF + "A": "1"}),
+    ("three marks, rewritten: one stays in the name", BOM + BOM + BOM + b"A=1\n X=1\n", {}, {FEFF + "A": "1", "X": "1"}),
+    ("a blank, then a mark, then the name", b" " + BOM + b"A=1\n", {}, {"A": "1"}),
+    ("a tab, then a mark", b"\t" + BOM + b"A=1\n", {}, {"A": "1"}),
+    ("a file separator, then a mark", b"\x1c" + BOM + b"A=1\n", {}, {"A": "1"}),
+    ("a mark, a blank, a mark", BOM + b" " + BOM + b"A=1\n", {}, {"A": "1"}),
+    ("utf-16 with a mark, then a second mark", b"\xff\xfe" + (FEFF + "A=1\n").encode("utf-16-le"), {}, {"A": "1"}),
+    ("utf-16 with a mark, then two marks", b"\xff\xfe" + (FEFF + FEFF + "A=1\n").encode("utf-16-le"), {}, {FEFF + "A": "1"}),
+    ("a mark on the second line stays in its name", b"B=2\n" + BOM + b"A=1\n", {}, {"B": "2", FEFF + "A": "1"}),
+    ("marks left in front move where the first statement ends", BOM + BOM + BOM + b' Q="x\nA=1\n"\n', {}, {"A": "1"}),
 ]
 
 # (name, a value the loader applies, a harmless value or None, the function that judges the name)
@@ -363,7 +386,9 @@ class ParserParity(unittest.TestCase):
     def test_the_two_parsers_agree_on_random_statements(self):
         pieces = ["A", "B", "HERMES_SAFE_MODE", "=", "=", " ", "\t", "\n", "\n", "\r\n", "\r", "#", "'", '"', "\\", "\\n", "\\'",
                   '\\"', "export ", "export\t", "${A}", "${B:-d}", "${}", "$", "{", "}", ":-", "1", "0", "x", "\x0c", "\xa0",
-                  " ", "\x85", "é"]
+                  " ", "\x85", "é",
+                  # what a review found no earlier input could make: a byte order mark inside a statement, and more shapes of reference
+                  FEFF, FEFF + FEFF, " " + FEFF, "$A", "${A:-${B}}", "${A:-", "$HERMES_SUPERVISED_CHILD", "x${A}y"]
         rnd = random.Random(4886)
         for _ in range(5000):
             text = "".join(rnd.choice(pieces) for _ in range(rnd.randint(1, 16)))
@@ -481,23 +506,120 @@ class RulesOnEverySpelling(unittest.TestCase):
                     for text in (f"{name}=x\n{name}=y\n", f"{name}=\n", f"{name}=x\n{name}\n", f"{name}=x\n{name}=\n"):
                         self.assertEqual(len(self.found(rule, text.encode(), impl)), 1, text)
 
-    def test_a_reference_is_resolved_the_way_hermes_resolves_it(self):
-        flag = next(r for r in RULES if r[0] == "HERMES_SAFE_MODE")
+    # Spellings of a reference. `{n}` name, `{v}` an applied value, `{g}` a harmless one.
+    REFERENCES = (
+        "{n}=${{OORT_PROOF_FLAG}}",
+        "{n}=${{OORT_PROOF_FLAG:-{g}}}",
+        "{n}=${{OORT_PROOF_FLAG:-{v}}}",
+        "{n}=$OORT_PROOF_FLAG",
+        '{n}="${{OORT_PROOF_FLAG}}"',
+        "{n}='${{OORT_PROOF_FLAG}}'",
+        "{n}=x${{OORT_PROOF_FLAG}}y",
+        "{n}=${{",
+        "{n}=${{}}",
+        "export {n}=${{OORT_PROOF_FLAG}} # c",
+        "OORT_PROOF_FLAG={g}\n{n}=${{OORT_PROOF_FLAG}}",
+    )
+
+    def test_a_judged_name_holding_a_reference_is_refused_whatever_it_resolves_to(self):
+        # Hermes resolves `${...}` in ITS environment (the service slot adds variables the gate's shell has not), so what the gate would
+        # compute is not what Hermes ends with: the reference itself is refused, once, by name, and the answer does not depend on
+        # what the gate's own environment holds.
+        for rule in RULES:
+            name, value, good, _ = rule
+            if good is None:  # the two name-only rules refuse the name whatever it holds
+                continue
+            for template in self.REFERENCES:
+                text = (template.format(n=name, v=value, g=good) + "\n").encode()
+                for lookup in ({}, {"OORT_PROOF_FLAG": good}, {"OORT_PROOF_FLAG": value}):
+                    for parser, impl in PARSERS:
+                        with self.subTest(rule=name, spelling=template, environment=lookup, parser=parser):
+                            found = self.found(rule, text, impl, lookup)
+                            self.assertEqual(len(found), 1, found)
+                            self.assertIn("reference", found[0])
+                            if len(value) > 4:
+                                self.assertNotIn(value, found[0])
+
+    def test_a_name_the_gate_does_not_judge_may_hold_references(self):
+        for text in ("OPENROUTER_API_KEY=${OORT_PROOF_FLAG}\n", "OORT_PROOF_A=$OORT_PROOF_B\n", 'NOTE="${OORT_PROOF_FLAG:-x}"\n',
+                     "NO_PROXY=${OORT_PROOF_FLAG}\n", "HERMES_SAFE_MODE_NOTE=${OORT_PROOF_FLAG}\n"):
+            for parser, impl in PARSERS:
+                with self.subTest(text=text, parser=parser):
+                    self.assertEqual(judge(text.encode(), impl, {"OORT_PROOF_FLAG": "1"}), ([], []))
+
+    def test_a_dollar_sign_that_starts_no_reference_is_not_one(self):
+        key = next(r for r in RULES if r[0] == "API_SERVER_KEY")
         for parser, impl in PARSERS:
-            def refused(text, env):
-                return len(self.found(flag, text.encode(), impl, env))
-            with self.subTest(parser=parser):
-                self.assertEqual(refused("HERMES_SAFE_MODE=${OORT_PROOF_FLAG}\n", {"OORT_PROOF_FLAG": "1"}), 1)
-                self.assertEqual(refused("HERMES_SAFE_MODE=${OORT_PROOF_FLAG}\n", {"OORT_PROOF_FLAG": "0"}), 0)
-                self.assertEqual(refused("HERMES_SAFE_MODE=${OORT_PROOF_FLAG}\n", {}), 0)
-                self.assertEqual(refused("HERMES_SAFE_MODE=${OORT_PROOF_FLAG:-1}\n", {}), 1)
-                self.assertEqual(refused("HERMES_SAFE_MODE=${OORT_PROOF_FLAG:-1}\n", {"OORT_PROOF_FLAG": "0"}), 0)
-                self.assertEqual(refused('HERMES_SAFE_MODE="${OORT_PROOF_FLAG}"\n', {"OORT_PROOF_FLAG": "yes"}), 1)
-                self.assertEqual(refused("HERMES_SAFE_MODE=$OORT_PROOF_FLAG\n", {"OORT_PROOF_FLAG": "1"}), 0, "no braces, no reference")
-                # the file's own earlier value wins over the environment, a later one is not visible yet
-                self.assertEqual(refused("OORT_PROOF_FLAG=0\nHERMES_SAFE_MODE=${OORT_PROOF_FLAG}\n", {"OORT_PROOF_FLAG": "1"}), 0)
-                self.assertEqual(refused("OORT_PROOF_FLAG=1\nHERMES_SAFE_MODE=${OORT_PROOF_FLAG}\n", {"OORT_PROOF_FLAG": "0"}), 1)
-                self.assertEqual(refused("HERMES_SAFE_MODE=${OORT_PROOF_FLAG}\nOORT_PROOF_FLAG=1\n", {}), 0)
+            for tail, refused in (("$1", 0), ("$", 0), ("$-", 0), ("$$", 0), ("$ {x}", 0), ("$x", 1), ("$_x", 1), ("${x}", 1), ("${", 1)):
+                with self.subTest(tail=tail, parser=parser):
+                    found = self.found(key, ("API_SERVER_KEY=" + "k" * 40 + tail + "\n").encode(), impl)
+                    self.assertEqual(len(found), refused, found)
+
+    def test_the_last_assignment_decides_whether_a_reference_counts(self):
+        for rule in RULES:
+            name, value, good, _ = rule
+            if good is None:
+                continue
+            for parser, impl in PARSERS:
+                with self.subTest(rule=name, parser=parser):
+                    self.assertEqual(self.found(rule, f"{name}=${{OORT_PROOF_FLAG}}\n{name}={good}\n".encode(), impl), [])
+                    self.assertEqual(len(self.found(rule, f"{name}={good}\n{name}=${{OORT_PROOF_FLAG}}\n".encode(), impl)), 1)
+                    # a bare name after it: the loader sets nothing, and the reference before it is gone too
+                    self.assertEqual(self.found(rule, f"{name}=${{OORT_PROOF_FLAG}}\n{name}\n".encode(), impl), [])
+
+    def test_every_byte_order_mark_shape_hermes_applies_is_refused_once_by_name(self):
+        for rule in RULES:
+            name, value, _good, _ = rule
+            applied, _kept, _control = oracle.byte_order_mark_shapes("%s=%s" % (name, value))
+            for label, raw in applied:
+                for parser, impl in PARSERS:
+                    with self.subTest(rule=name, shape=label, parser=parser):
+                        found = self.found(rule, raw, impl)
+                        self.assertEqual(len(found), 1, found)
+                        self.assertIn("the volume's .env", found[0])
+                        if len(value) > 4:
+                            self.assertNotIn(value, found[0])
+
+    def test_a_mark_that_stays_in_a_name_is_read_in_the_name(self):
+        # Hermes ends with the name `<mark>NAME`: it applies nothing under NAME, and neither may the gate. The one place a mark in a name
+        # still counts is a `*_PROXY`, which the gate judges by its ending whatever stands in front (no client reads such a variable).
+        for rule in RULES:
+            name, value, _good, _ = rule
+            _applied, kept, control = oracle.byte_order_mark_shapes("%s=%s" % (name, value))
+            for label, raw in kept + control:
+                for parser, impl in PARSERS:
+                    with self.subTest(rule=name, shape=label, parser=parser):
+                        self.assertEqual(len(self.found(rule, raw, impl)), 1 if is_proxy_rule(rule) else 0)
+
+    def test_the_same_marks_around_a_harmless_value_refuse_nothing(self):
+        for rule in RULES:
+            name, _value, good, _ = rule
+            if good is None:
+                continue
+            applied, kept, control = oracle.byte_order_mark_shapes("%s=%s" % (name, good))
+            for label, raw in applied + kept + control:
+                for parser, impl in PARSERS:
+                    with self.subTest(rule=name, shape=label, parser=parser):
+                        self.assertEqual(self.found(rule, raw, impl), [])
+
+    def test_env_text_drops_exactly_the_marks_the_loader_drops(self):
+        # No parser in it: the text the gate hands to python-dotenv. The expected texts are what the REAL loader parses (READ_TABLE rows).
+        for label, raw, want in (
+            ("one mark", BOM + b"A=1\n", "A=1\n"),
+            ("two marks, nothing to rewrite: one stays", BOM + BOM + b"A=1\n", FEFF + "A=1\n"),
+            ("two marks, a line the clean-up changes", BOM + BOM + b"A=1\n X=1\n", "A=1\nX=1\n"),
+            ("two marks, no final newline", BOM + BOM + b"A=1", "A=1\n"),
+            ("two marks and a NUL", BOM + BOM + b"A=1\x00\n", "A=1\n"),
+            ("three marks, no final newline: one stays", BOM + BOM + BOM + b"A=1", FEFF + "A=1\n"),
+            ("a blank, then a mark", b" " + BOM + b"A=1\n", "A=1\n"),
+            ("a blank line, then a mark: nothing is stripped", b"\n" + BOM + b"A=1\n", "\n" + FEFF + "A=1\n"),
+            ("a mark on the second line", b"B=2\n" + BOM + b"A=1\n", "B=2\n" + FEFF + "A=1\n"),
+            ("utf-16, a mark in the text", b"\xff\xfe" + (FEFF + "A=1\n").encode("utf-16-le"), "A=1\n"),
+            ("utf-16, two marks in the text: one stays", b"\xff\xfe" + (FEFF + FEFF + "A=1\n").encode("utf-16-le"), FEFF + "A=1\n"),
+            ("empty", b"", ""),
+        ):
+            with self.subTest(file=label):
+                self.assertEqual(lockgate.env_text(raw), want)
 
     def test_an_api_key_counts_only_what_survives_the_load(self):
         # Hermes drops every non-ASCII character from variables named *_KEY after loading them.
@@ -530,6 +652,205 @@ class RulesOnEverySpelling(unittest.TestCase):
             for parser, impl in PARSERS:
                 with self.subTest(file=label, parser=parser):
                     self.assertEqual(len(self.found(flag, raw, impl)), 1)
+
+
+class StandInLoader:
+    """Applies the `NAME=value` lines of `<home>/.env` and nothing else, and rewrites the file when told to. It only exists to show that
+    `run` isolates the loader from this process and compares what it should: it knows nothing of Hermes."""
+
+    def __init__(self, rewrite=None, fail=False):
+        self._DOTENV_PUBLISHED = {"stale": (None, "x", 0)}
+        self.calls, self.rewrite, self.fail = [], rewrite, fail
+
+    def load_hermes_dotenv(self, hermes_home=None, load_external_secrets=True):
+        managed = os.environ.get("HERMES_MANAGED_DIR", "")
+        self.calls.append({"home": hermes_home, "external": load_external_secrets, "env": dict(os.environ),
+                           "published": dict(self._DOTENV_PUBLISHED), "managed_is_an_empty_folder": os.path.isdir(managed) and not os.listdir(managed),
+                           "home_holds_only_the_file": sorted(os.listdir(hermes_home)) == [".env"]})
+        path = os.path.join(hermes_home, ".env")
+        with open(path, "rb") as handle:
+            data = handle.read()
+        for line in data.decode("utf-8", "replace").splitlines():
+            name, equals, value = line.partition("=")
+            if equals and not name.startswith("#"):
+                os.environ[name] = value
+        if self.rewrite is not None:
+            with open(path, "wb") as handle:
+                handle.write(self.rewrite)
+        if self.fail:
+            raise ValueError("stand-in failure")
+
+
+class StandInGate:
+    """Refuses a name that is assigned `1` in the bytes it is given, by the gate's own wording, and records what it was given."""
+
+    def __init__(self, names=("HERMES_SAFE_MODE",), extra=()):
+        self.names, self.extra, self.seen = names, extra, []
+
+    def volume_env_problems(self, path, lookup_env=None):
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        self.seen.append((raw, dict(lookup_env)))
+        return ["the volume's .env enables %s" % name for name in self.names if (name + "=1").encode() in raw] + list(self.extra)
+
+    def image_volume_env_problems(self, path, lookup_env=None):
+        return []
+
+
+class OracleComparison(unittest.TestCase):
+    """The comparison in infra/hermes/env_loader_oracle.py, offline. The in-image proof runs it against Hermes' REAL loader."""
+
+    def test_the_policy_names_what_hermes_must_not_end_with(self):
+        for env, want in (
+            ({}, set()),
+            ({"HERMES_SAFE_MODE": " Yes "}, {"HERMES_SAFE_MODE"}),
+            ({"HERMES_SAFE_MODE": "0", "HERMES_YOLO_MODE": ""}, set()),
+            ({"API_SERVER_CORS_ORIGINS": "  "}, set()),
+            ({"API_SERVER_CORS_ORIGINS": "https://evil.example"}, {"API_SERVER_CORS_ORIGINS"}),
+            ({"API_SERVER_KEY": "k" * 32}, set()),
+            ({"API_SERVER_KEY": "k" * 31}, {"API_SERVER_KEY"}),
+            ({"API_SERVER_KEY": " " + "k" * 31 + " "}, {"API_SERVER_KEY"}),
+            ({"FAL_KEY": "f"}, {"FAL_KEY"}),
+            ({"FAL_KEY": ""}, set()),
+            ({"http_proxy": "http://p.example"}, {"http_proxy"}),
+            ({"HTTP_PROXY": ""}, set()),
+            ({"NO_PROXY": "localhost"}, set()),
+            ({"PROXY_HOST": "p.example"}, set()),
+            ({FEFF + "HTTP_PROXY": "http://p.example"}, set()),
+            ({"OORT_SELF_MEDIA_ORIGIN": ""}, {"OORT_SELF_MEDIA_ORIGIN"}),
+            ({"HERMES_MEDIA_DELIVERY_STRICT": "1"}, {"HERMES_MEDIA_DELIVERY_STRICT"}),
+        ):
+            with self.subTest(env=env):
+                self.assertEqual(oracle.violations(env), want)
+
+    def test_the_gates_problems_are_read_back_by_name(self):
+        # The problems come from the real functions, so a change to their wording breaks here and not silently in the proof.
+        text = ("HERMES_YOLO_MODE=1\nAPI_SERVER_CORS_ORIGINS=x\nAPI_SERVER_KEY=short\nFAL_KEY=ffff\nHERMES_SAFE_MODE=${X}\n"
+                "HTTPS_PROXY=http://p.example\nall_proxy=socks5://p.example\nOORT_SELF_MEDIA_ORIGIN=https://o.example.com\n"
+                "HERMES_MEDIA_DELIVERY_STRICT=0\n").encode()
+        for parser, impl in PARSERS:
+            with self.subTest(parser=parser), mock.patch.object(lockgate, "_DotEnv", impl):
+                names, file_level = oracle.named(oracle.gate_view(lockgate, text, {}))
+                self.assertEqual(names, {"HERMES_YOLO_MODE", "API_SERVER_CORS_ORIGINS", "API_SERVER_KEY", "FAL_KEY", "HERMES_SAFE_MODE",
+                                         "HTTPS_PROXY", "all_proxy", "OORT_SELF_MEDIA_ORIGIN", "HERMES_MEDIA_DELIVERY_STRICT"})
+                self.assertFalse(file_level)
+                names, file_level = oracle.named(oracle.gate_view(lockgate, b"A=1\n\xe9\n", {}))
+                self.assertEqual((names, file_level), (set(), True))
+
+    def test_compare_finds_a_miss_a_needless_refusal_and_the_reason_for_it(self):
+        def enables(name):
+            return "the volume's .env enables %s (why)" % name
+
+        def sets(name):
+            return "the volume's .env sets %s (why)" % name
+
+        self.assertEqual(oracle.compare(b"", {"HERMES_SAFE_MODE"}, [])["missed"], ["HERMES_SAFE_MODE"], "a name nothing refuses is a miss")
+        self.assertEqual(oracle.compare(b"", {"HERMES_SAFE_MODE"}, [enables("HERMES_SAFE_MODE")]),
+                         {"file_refused": False, "missed": [], "needless": []})
+        for label, raw, name, problem, reason in (
+            ("a reference on the line", b"HERMES_SAFE_MODE=${X}\n", "HERMES_SAFE_MODE", enables("HERMES_SAFE_MODE"), "reference"),
+            ("a reference without braces", b"HERMES_SAFE_MODE=$X\n", "HERMES_SAFE_MODE", enables("HERMES_SAFE_MODE"), "reference"),
+            ("a mark inside a proxy name", BOM + b"x\n" + b"\n" + (FEFF + "HTTP_PROXY=p\n").encode(), FEFF + "HTTP_PROXY",
+             sets(FEFF + "HTTP_PROXY"), "mark in a proxy name"),
+            ("a name the volume may not set at all", b"OORT_SELF_MEDIA_ORIGIN=x\nOORT_SELF_MEDIA_ORIGIN\n", "OORT_SELF_MEDIA_ORIGIN",
+             sets("OORT_SELF_MEDIA_ORIGIN"), "name-only rule"),
+            ("a refusal with no reason in the file", b"HERMES_SAFE_MODE=0\n", "HERMES_SAFE_MODE", enables("HERMES_SAFE_MODE"), "unexplained"),
+            ("a mark elsewhere is no excuse", BOM + BOM + b"HERMES_SAFE_MODE=0\n", "HERMES_SAFE_MODE", enables("HERMES_SAFE_MODE"), "unexplained"),
+            ("a reference on ANOTHER name's line is no excuse", b"OPENROUTER_API_KEY=${X}\nHERMES_SAFE_MODE=0\n", "HERMES_SAFE_MODE",
+             enables("HERMES_SAFE_MODE"), "unexplained"),
+        ):
+            with self.subTest(case=label):
+                self.assertEqual(oracle.compare(raw, set(), [problem])["needless"], [(name, reason)])
+        verdict = oracle.compare(b"\xe9", {"HERMES_SAFE_MODE"}, ["the volume's .env is not valid UTF-8 (why)"])
+        self.assertEqual(verdict, {"file_refused": True, "missed": [], "needless": []}, "a refused file has nothing left to miss")
+
+    def test_the_generators_make_the_shapes_the_review_found_missing(self):
+        table = [label for label, _raw in oracle.table_cases()]
+        for name, _value, _good in oracle.JUDGED:
+            for kind in ("applied", "inert", "reference", "mark applied", "mark kept", "mark control"):
+                self.assertTrue(any(label.startswith("%s: %s: " % (kind, name)) for label in table), (kind, name))
+        cases = oracle.random_cases(4886, 2000)
+        self.assertEqual(cases[:40], oracle.random_cases(4886, 40), "the same seed gives the same inputs")
+        counts = {"two marks in front": 0, "a mark behind blanks": 0, "a reference": 0, "a line the clean-up rewrites": 0,
+                  "utf-16": 0, "bytes that are not utf-8": 0}
+        for _label, raw in cases:
+            counts["two marks in front"] += raw.startswith(BOM + BOM)
+            counts["a mark behind blanks"] += re.search(rb"[ \t\x0c\x1c]\xef\xbb\xbf", raw) is not None
+            counts["a reference"] += re.search(rb"\$(?:\{|[A-Za-z_])", raw) is not None
+            counts["a line the clean-up rewrites"] += b" OORT_ORACLE_X=1\n" in raw
+            counts["utf-16"] += raw[:2] in (b"\xff\xfe", b"\xfe\xff")
+            try:
+                raw.decode("utf-8")
+            except UnicodeDecodeError:
+                counts["bytes that are not utf-8"] += 1
+        for shape, count in counts.items():
+            with self.subTest(shape=shape):
+                self.assertGreaterEqual(count, 20, counts)
+
+    def run_oracle(self, loader, gate, cases):
+        with mock.patch.dict(os.environ, {"OORT_TEST_SENTINEL": "1"}):
+            before = dict(os.environ)
+            summary = oracle.run(loader, gate, cases)
+            self.assertEqual(dict(os.environ), before, "the loader's environment must not leak into this process")
+        return summary
+
+    def test_run_isolates_the_loader_and_gives_the_gate_the_original_bytes(self):
+        loader, gate = StandInLoader(rewrite=b"HERMES_YOLO_MODE=1\n"), StandInGate()
+        raw = b"HERMES_SAFE_MODE=1\n"
+        summary = self.run_oracle(loader, gate, [("applied: x", raw)])
+        call = loader.calls[0]
+        self.assertFalse(call["external"], "external secret sources are off")
+        self.assertEqual(call["published"], {}, "the loader's record of earlier passes is cleared before each load")
+        self.assertEqual(loader._DOTENV_PUBLISHED, {})
+        self.assertNotIn("OORT_TEST_SENTINEL", call["env"], "the loader runs in the slot's environment, not this process's")
+        self.assertEqual({name: call["env"].get(name) for name in ("HOME", "HERMES_SUPERVISED_CHILD")}, {"HOME": "/opt/data", "HERMES_SUPERVISED_CHILD": "1"})
+        self.assertNotIn("HERMES_SAFE_MODE", call["env"])
+        self.assertTrue(call["managed_is_an_empty_folder"], "the loader's managed-scope folder is an empty one: no second .env to read")
+        self.assertTrue(call["home_holds_only_the_file"])
+        self.assertNotEqual(call["home"], oracle.SLOT_ENV["HERMES_HOME"], "the file under test sits in a folder of its own")
+        self.assertEqual(gate.seen[0], (raw, oracle.GATE_ENV), "the gate reads the original bytes in its own environment")
+        self.assertNotIn("HERMES_SUPERVISED_CHILD", gate.seen[0][1])
+        # The loader rewrote ITS copy into a file whose second load applies something the gate does not refuse: the file Hermes leaves
+        # behind is judged too, against what Hermes applies when it loads THAT file (not against what the first load applied).
+        self.assertEqual(gate.seen[1][0], b"HERMES_YOLO_MODE=1\n")
+        self.assertEqual(len(loader.calls), 2)
+        self.assertEqual(loader.calls[1]["env"].get("HERMES_SAFE_MODE"), None, "the second load starts from the slot's environment again")
+        self.assertEqual((summary["cases"], summary["violating"], summary["missed"], summary["missed_after"], summary["detected"]),
+                         (1, 1, 0, 1, ["HERMES_SAFE_MODE"]))
+        self.assertFalse(summary["ok"], "a miss on the rewritten file fails the run")
+        # a file whose second load applies what the gate refuses is fine, however the first load went
+        loader, gate = StandInLoader(rewrite=b"HERMES_SAFE_MODE=1\n"), StandInGate()
+        summary = self.run_oracle(loader, gate, [("applied: y", raw)])
+        self.assertEqual((summary["missed"], summary["missed_after"], summary["ok"]), (0, 0, True))
+        # and so is one whose second load applies nothing, though the first load applied what the gate refused on the ORIGINAL bytes: the
+        # file left behind is judged against what Hermes applies when it loads that file, not against what the first load applied
+        loader, gate = StandInLoader(rewrite=b"OORT_PROOF_A=1\n"), StandInGate()
+        summary = self.run_oracle(loader, gate, [("applied: z", raw)])
+        self.assertEqual((summary["violating"], summary["missed"], summary["missed_after"], summary["ok"]), (1, 0, 0, True))
+
+    def test_run_counts_what_the_proof_has_to_be_able_to_tell(self):
+        good = StandInGate()
+        summary = self.run_oracle(StandInLoader(), good, [("applied: a", b"HERMES_SAFE_MODE=1\n"), ("inert: b", b"HERMES_SAFE_MODE=0\n"),
+                                                          ("random", b"OORT_PROOF_A=1\n")])
+        self.assertEqual((summary["cases"], summary["violating"], summary["clean"], summary["ok"]), (3, 1, 2, True))
+        self.assertEqual(summary["detected"], ["HERMES_SAFE_MODE"])
+        # a miss: the loader applies a name the gate does not refuse
+        summary = self.run_oracle(StandInLoader(), StandInGate(names=()), [("applied: a", b"HERMES_SAFE_MODE=1\n")])
+        self.assertEqual((summary["missed"], summary["ok"]), (1, False))
+        self.assertEqual(summary["examples"]["missed"][0][2], ["HERMES_SAFE_MODE"])
+        # a refusal nobody can explain
+        summary = self.run_oracle(StandInLoader(), StandInGate(extra=["the volume's .env enables HERMES_YOLO_MODE (why)"]),
+                                  [("random", b"OORT_PROOF_A=1\n")])
+        self.assertEqual((summary["unexplained"], summary["ok"]), (1, False))
+        # a table label the loader contradicts: an "inert" row it applies, an "applied" one it does not
+        for label, raw in (("inert: a", b"HERMES_SAFE_MODE=1\n"), ("applied: a", b"HERMES_SAFE_MODE=0\n"), ("mark kept: a", b"HERMES_SAFE_MODE=1\n")):
+            with self.subTest(label=label):
+                summary = self.run_oracle(StandInLoader(), StandInGate(), [(label, raw)])
+                self.assertEqual((summary["wrong_labels"], summary["ok"]), (1, False))
+        # a loader that cannot load the file: counted, nothing compared, and this process's environment is still back
+        loader = StandInLoader(fail=True)
+        summary = self.run_oracle(loader, StandInGate(), [("random", b"HERMES_SAFE_MODE=1\n")])
+        self.assertEqual((summary["hermes_errors"], summary["violating"], summary["ok"]), (1, 0, True))
 
 
 if __name__ == "__main__":
