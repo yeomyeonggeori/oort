@@ -713,12 +713,15 @@ mod tests {
     /// and `ws_isolation`, with composite workspace foreign keys.
     ///
     /// 159 is #4820 C1b's held assembly results (ADR-0218 G3.6): two tenant tables under RLS ENABLE + FORCE.
+    ///
+    /// 160 is #4820 C2a's `self_media_token` (ADR-0218 G4/G8): the hash of a short-lived, single-use
+    /// address of the requester's own photo, under RLS ENABLE + FORCE and `ws_isolation`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_159() {
+    fn discovers_contiguous_migrations_001_to_160() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=159).collect();
+        let expected: Vec<i64> = (1..=160).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -726,7 +729,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=159 under {}",
+            "expected contiguous 001..=160 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -734,7 +737,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("159_expression_assembly"));
+            .starts_with("160_self_media_token"));
     }
 
     #[test]
