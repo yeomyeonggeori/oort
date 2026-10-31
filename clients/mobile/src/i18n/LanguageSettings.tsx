@@ -54,7 +54,9 @@ export function LanguageSettingsPage({onBack}: {onBack: () => void}): React.JSX.
   };
   const goBack = closeLayer ?? onBack;
   const label = locale.formatMessage('settings.profile.languageLabel');
-  const beta = locale.formatMessage('settings.profile.languageBeta');
+  // The one note left (owner 10-31, #4936) belongs to the English UI, whatever got it there: an explicit choice, system on an
+  // English device, or system on a language the app has no catalog for (it falls back to English).
+  const englishUi = effectiveLocale === 'en-US';
   return (
     <View style={styles.root} onAccessibilityEscape={goBack} testID="settings-language-page">
       <Screen>
@@ -77,13 +79,11 @@ export function LanguageSettingsPage({onBack}: {onBack: () => void}): React.JSX.
                   testID="language-system"
                 />
                 {CATALOG_LOCALES.map(id => (
+                  // No beta tag, on screen or spoken (owner 10-31, #4936): the row is just the autonym.
                   <ChoiceRow
                     key={id}
                     title={localeAutonyms[id]}
-                    // The spoken label carries the on-screen beta tag too, not only the autonym.
-                    accessibilityLabel={`${localeAutonyms[id]}, ${beta}`}
                     accessibilityLanguage={id}
-                    detail={beta}
                     selected={preference === id}
                     disabled={pending}
                     onPress={() => { void choose(id); }}
@@ -106,10 +106,10 @@ export function LanguageSettingsPage({onBack}: {onBack: () => void}): React.JSX.
                 </GroupCard>
               </>
             ) : null}
-            <SettingsNote>{locale.formatMessage('settings.profile.languageCurrent', {languageName: localeAutonyms[effectiveLocale]})}</SettingsNote>
-            <SettingsNote>{locale.formatMessage('settings.profile.languageHint')}</SettingsNote>
-            <SettingsNote>{locale.formatMessage('settings.profile.languagePartialNotice')}</SettingsNote>
-            <SettingsNote>{locale.formatMessage('mobile.locale.permissionNotice')}</SettingsNote>
+            {/* The only note left: while the UI is English, some screens are still Korean. The Korean UI has none. */}
+            {englishUi ? (
+              <SettingsNote testID="language-partial-notice">{locale.formatMessage('settings.profile.languagePartialNotice')}</SettingsNote>
+            ) : null}
           </SettingsSection>
         </ScrollView>
       </Screen>

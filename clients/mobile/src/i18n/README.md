@@ -40,10 +40,12 @@ ko/en 네이티브 기능을 확인한 뒤 Locale → PluralRules → RelativeTi
   AppState `active`에도 기기 정보를 다시 읽는다. 명시 선택은 유지하면서 지역·시간대를
   갱신한다. 사전이 없는 OS 언어는 그 지역을 보존한 영어로 표시한다.
 - 설정 › 프로필 › 언어는 기존 ListRow/ChoiceRow/페이지 스택을 쓴다. 기기 언어가
-  첫 행이고, 출시한 ko/en만 자칭 표기와 베타로 보인다. 공용 부분 지원 안내를 유지한다.
-  선택은 다른 계정 트리를 다시 마운트하지 않는다. 큰 글자를 제한하는 행 높이·줄 수를
-  추가하지 않았고 자칭 행은 자기 언어로 VoiceOver를 지정한다. 언어 행의 낭독 라벨은 화면에 보이는 베타 표시를
-포함한다(`한국어, 베타`·`English, 베타`, 영어 UI에서는 `…, Beta`).
+  첫 행이고, 출시한 ko/en은 자칭 표기만 보인다. **베타 표시는 없고**(owner 10-31, #4936) 선택지 아래 설명
+  네 줄(현재 언어·적용 범위·부분 지원·권한 창)도 걷었다. 영어 UI일 때만 부분 지원 한 줄
+  (`settings.profile.languagePartialNotice`, 「Some screens are still in Korean.」)이 서고 한국어 UI에는 설명이 없다.
+  그 기준은 고른 값이 아니라 **지금 UI 언어**(`effectiveLocale === 'en-US'`)라서 기기 언어가 영어이거나 사전이 없는
+  언어로 영어 fallback 중일 때도 선다. 선택은 다른 계정 트리를 다시 마운트하지 않는다. 큰 글자를 제한하는 행 높이·줄 수를
+  추가하지 않았고 자칭 행은 자기 언어로 VoiceOver를 지정한다. 언어 행의 낭독 라벨은 자칭 표기뿐이다(`한국어`·`English`).
 - 빈 저장값은 system 선택, 시작 준비(Intl 검사·저장값 복원)는 앱 진입 전 로더, 쓰는 중은 행 잠금/진행 표시,
   저장 오류는 기존 언어를 유지한 인라인 재시도다. 저장값을 읽지 못해도(`preference-read-failed`)
   코어처럼 기기 언어(system)로 계속하고 코드만 보고한다(앱 전체를 안전 화면에 막지 않는다).
@@ -75,7 +77,7 @@ Locale polyfill의 내장 canonicalization/likely-subtag 표는 upstream 그대�
 기존 Info.plist 권한 이유 여섯 개를 `mobile.ios.*`에서 ko/en InfoPlist.strings로
 생성한다. 개발 언어 en, Xcode knownRegions en/ko/Base, PBXVariantGroup 및 앱 Resources를
 맞췄다. OS 권한창은 iOS가 고른 언어이며 앱 내 변경의 즉시 반영을 보장하지 않는다.
-이 한계도 `mobile.locale.permissionNotice`로 설정에 보인다.
+이 한계를 설정에 문장으로 보이던 `mobile.locale.permissionNotice`는 owner 10-31(#4936)에 걷었다(사전 키도 지웠다).
 
 ```sh
 npm --prefix packages/momo-core run i18n:generate
@@ -206,7 +208,7 @@ null 의존 0, tooling/TypeScript 포함 0이다. core README 명령도 추가 �
 - `npm --prefix clients/mobile test -- --watchman=false` 전체 1회: **260 suite 통과(skip 1) · 6,786 PASS ·
   skip 5 · 실패 0**. retryRegistry는 track/uxui 판 그대로(중첩 Jest에 `--watchman=false` 없이)도 통과한다.
 - `__tests__/mobileLocale.test.tsx` **38 PASS**. MMKV 복원·로그아웃 보존, 앱 복귀, 실제 RN settingsUpdated 관찰,
-  지원 밖/오프라인, 원자적 전체 컨텍스트 전환과 마운트 보존(낭독 라벨에 베타 포함, 영어 UI는 `…, Beta`),
+  지원 밖/오프라인, 원자적 전체 컨텍스트 전환과 마운트 보존(낭독 라벨은 자칭 표기뿐, 베타 없음 — #4936),
   저장 실패 재시도, 초기화 실패의 영어 안전 문구/진단, 조건 로드와 공식 ko/en 데이터, Apple Hermes 모양
   엔진의 공식 polyfill 초기화, 등록됐으나 던지는 `formatToParts` 닫힘. Intl 측정은 값으로 고정한다:
   「등록됐지만 틀린」 Locale 2종(baseName·maximize)·PluralRules 2종(영어 1·한국어)·RelativeTimeFormat은
@@ -227,7 +229,7 @@ null 의존 0, tooling/TypeScript 포함 0이다. core README 명령도 추가 �
   「문구가 있기만 하면」으로 약화 ⑤ 재측정에서 RTF 제거 ⑥ 재측정에서 Locale 제거 ⑦ PluralRules 검사를
   `supportedLocalesOf`만으로 축소 ⑧ 네이티브 DateTimeFormat/NumberFormat/Collator 검사 제거 ⑨ `bootFailed` 제거
   ⑩ Locale 검사를 `typeof`만으로 축소 ⑪ `getCanonicalLocales` 검사 제거 ⑫ 재측정에서 PluralRules 제거
-  ⑬ 저장값 읽기 실패가 다시 시작을 막음 ⑭ 언어 행 라벨에서 베타 제거 ⑮ 폰이 `@formatjs/intl` 선언을 지움
+  ⑬ 저장값 읽기 실패가 다시 시작을 막음 ⑭ 부분 지원 한 줄이 한국어 UI에도 섬(#4936, 베타 라벨 변이를 대체) ⑮ 폰이 `@formatjs/intl` 선언을 지움
   ⑯ 정확 핀 대신 범위 ⑰ 루트 `node_modules`를 watch함 ⑱ 코어 bare import가 Metro 기본 탐색(루트가 이김)
   ⑲ 계층 탐색 허용(루트로 폴백) ⑳ jest가 코어 의존을 위로 탐색(루트가 이김). 소스 변이는 임시 사본을 jest가
   덮어쓰고, package.json·metro.config.js는 seam이 없어 제자리에서 고쳤다가 `finally`로 되돌린 뒤 해시를 비교한다.
