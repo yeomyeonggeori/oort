@@ -1,4 +1,5 @@
 import { authedRequest } from "../../lib/api";
+import { formatMicroUsd, MICRO_USD_FLOOR } from "../timeline/agentCardModel";
 
 /** Structural projection of usage.generated.ts. No identities are supplied by this endpoint. */
 export interface AgentUsageMetrics {
@@ -40,13 +41,6 @@ export const AGENT_USAGE_COPY = {
 } as const;
 
 const count = (value: number) => new Intl.NumberFormat("ko-KR").format(value);
-/** Keep sub-cent amounts visible, without suggesting a currency conversion. */
-export function usageUsd(microUsd: number): string {
-  return new Intl.NumberFormat("ko-KR", {
-    style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 6,
-  }).format(microUsd / 1_000_000);
-}
-
 export function usageTags(row: AgentUsageMetrics): string[] {
   const tags: string[] = [];
   if (row.source === "self_reported") tags.push("자기 보고");
@@ -57,8 +51,12 @@ export function usageTags(row: AgentUsageMetrics): string[] {
 
 export function usageLine(row: AgentUsageMetrics): string {
   const tags = usageTags(row);
+  // 「이상」 은 합계가 모자랄 수 있다는 말이다. 이미 「미만」 으로 상한을 말한 금액에는 붙이지 않는다(「$0.001 미만 이상」은 문장이 아니다).
+  const atLeast = (row.estimatedRuns > 0 || row.unpricedRuns > 0 || row.reportedRuns < row.runs) && row.costMicroUsd >= MICRO_USD_FLOOR;
+  // 같은 비용은 어디서나 같게 적힌다(#4982): 스레드 카드·결정 무대·웹 사용량이 쓰는 `formatMicroUsd` 하나뿐이다. 여기에 둘째 서식(Intl
+  // 통화, 「US$1.234567」)이 있던 것이 한 금액을 두 모양으로 적던 원인이다.
   const parts = [
-    row.reportedRuns > 0 ? `비용 ${usageUsd(row.costMicroUsd)}${row.estimatedRuns > 0 || row.unpricedRuns > 0 || row.reportedRuns < row.runs ? " 이상" : ""}` : "비용 미보고",
+    row.reportedRuns > 0 ? `비용 ${formatMicroUsd(row.costMicroUsd)}${atLeast ? " 이상" : ""}` : "비용 미보고",
     row.reportedRuns > 0 ? `토큰 ${count(row.promptTokens + row.completionTokens)}` : "토큰 미보고",
     `작업 ${count(row.runs)}개`,
     ...tags,
@@ -72,7 +70,7 @@ export function usageLine(row: AgentUsageMetrics): string {
 export function agentUsageLine(row: AgentUsage, brain?: string): string {
   const base = row.runs === 0 ? AGENT_USAGE_COPY.empty : usageLine(row);
   return row.subscriptionFee
-    ? `${base} · 구독 ${usageUsd(row.subscriptionFee.monthlyMicroUsd)}/월`
+    ? `${base} · 구독 ${formatMicroUsd(row.subscriptionFee.monthlyMicroUsd)}/월`
     : brain === "subscription" ? `${base} · 구독 (정액 정보 없음)` : base;
 }
 export function hiddenUsageLabel(countHidden: number): string | null {

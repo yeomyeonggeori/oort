@@ -17,6 +17,7 @@ import {dividerIndent} from '../src/design/sheetModel';
 import {ds2Radius, paletteFrom, type Palette} from '../src/design/tokens';
 import {NON_SECRET_KEYS, __setNonSecretStore} from '../src/storage/kv';
 import {DARK_CHOSEN_RECORD} from './fixtures/darkWorld';
+import {sweepHangulWord} from './fixtures/hangulWord';
 
 // =============================================================================
 // #2719 — 테마와 강조색이 **끝까지** 바뀌고, 저장되고, 거절이 거절로 남는다.
@@ -446,5 +447,41 @@ describe('AP-6 테마 고르기 페이지', () => {
     fireEvent.press(screen.getByTestId('theme-picker-filter-system'));
     expect(saved()).toMatchObject({theme: 'dawnsky', scheme: 'system'});
     expect(screen.getByTestId('theme-picker-notice')).toHaveTextContent(/한쪽 모드만 있어서/);
+  });
+});
+
+// ---- 한국어 낱말 끊김 (#4982) ----------------------------------------------------------------------
+// iOS 기본 줄바꿈은 한글을 글자 단위로 끊는다. 테마 화면(화면 모드·테마·강조색·배경·미리보기)과 「테마 고르기」 페이지의
+// 한글 글자는 모두 `hangul-word` 여야 한다. 이름 허용 목록이 아니라 렌더 트리의 모든 글자 노드를 센다(`fixtures/hangulWord.ts`).
+describe('한국어 낱말 끊김 - 테마', () => {
+  it('테마 화면과 「테마 고르기」 페이지의 한글 글자는 모두 어절 우선이다 - 보정 알림·거절·배경 안내·되돌리기 단추까지', () => {
+    mount();
+    const area = () => sweepHangulWord(screen.getByTestId('appearance-control'));
+    const first = area();
+    expect(first.checked).toBeGreaterThan(20); // 머리글·모드·테마 행·강조색 이름·직접 입력·배경·미리보기가 다 세어졌다
+    expect(first.missing).toEqual([]);
+    // 알림·거절은 상태가 바뀌어야 서는 글자다.
+    fireEvent.changeText(screen.getByTestId('appearance-signal-input'), '#FFFFFF');
+    fireEvent.press(screen.getByTestId('appearance-signal-apply'));
+    expect(screen.getByTestId('appearance-signal-notice')).toBeTruthy();
+    fireEvent.changeText(screen.getByTestId('appearance-signal-input'), 'zzz');
+    fireEvent.press(screen.getByTestId('appearance-signal-apply'));
+    // 배경을 고르면 「기본으로」 단추와 반투명 면 안내가 선다.
+    fireEvent.press(screen.getByTestId('appearance-background-preset-noeul'));
+    expect(screen.getByTestId('appearance-background-reset')).toBeTruthy();
+    const after = area();
+    expect(after.checked).toBeGreaterThan(first.checked);
+    expect(after.missing).toEqual([]);
+
+    // 「테마 고르기」 페이지(머리·필터·안내·타일·되돌림 안내)도 같다.
+    fireEvent.press(screen.getByTestId('appearance-theme-picker'));
+    const page = () => sweepHangulWord(screen.getByTestId('theme-picker-page'));
+    const opened = page();
+    expect(opened.checked).toBeGreaterThan(8); // 되돌리기·제목·완료·필터 셋·안내·타일 이름·노을띠 설명
+    expect(opened.missing).toEqual([]);
+    fireEvent.press(screen.getByTestId('appearance-theme-graphite'));
+    fireEvent.press(screen.getByTestId('theme-picker-undo'));
+    expect(screen.getByTestId('theme-picker-notice')).toHaveTextContent('처음 고른 테마와 화면 모드로 되돌렸어요.');
+    expect(page().missing).toEqual([]);
   });
 });

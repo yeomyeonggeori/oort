@@ -339,7 +339,7 @@ function SignalGroup(): React.JSX.Element {
       <GroupCard style={styles.customWrap} testID="appearance-signal-custom-group">
         <View style={styles.customCard} testID="appearance-signal-custom">
           <View style={styles.customHead}>
-            <Text style={[styles.customLabel, custom && styles.customLabelSelected]}>직접 입력</Text>
+            <Sentence style={[styles.customLabel, custom && styles.customLabelSelected]}>직접 입력</Sentence>
             <CheckMark selected={!!custom} testID="appearance-signal-custom-check" />
           </View>
           <View style={styles.customRow}>
@@ -446,7 +446,7 @@ function BackgroundGroup({photoPorts}: {photoPorts?: PhotoPorts}): React.JSX.Ele
             checkTestID="appearance-background-none-check"
           />
           <View style={styles.bgBlock}>
-            <Text style={styles.customLabel}>단색</Text>
+            <Sentence style={styles.customLabel}>단색</Sentence>
             <View style={styles.bgSolids}>
               {SOLID_IDS.map(id => {
                 const selected = background.kind === 'solid' && background.id === id;
@@ -474,7 +474,7 @@ function BackgroundGroup({photoPorts}: {photoPorts?: PhotoPorts}): React.JSX.Ele
             </View>
           </View>
           <View style={styles.bgBlock}>
-            <Text style={styles.customLabel}>기본 제공</Text>
+            <Sentence style={styles.customLabel}>기본 제공</Sentence>
             <View style={styles.bgPresets}>
               {PRESET_IDS.map(id => {
                 const selected = background.kind === 'preset' && background.id === id;
@@ -502,9 +502,9 @@ function BackgroundGroup({photoPorts}: {photoPorts?: PhotoPorts}): React.JSX.Ele
                         </View>
                       ) : null}
                     </View>
-                    <Text style={[styles.presetLabel, selected && styles.presetLabelSelected]}>
+                    <Sentence style={[styles.presetLabel, selected && styles.presetLabelSelected]}>
                       {PRESETS[id].label}
-                    </Text>
+                    </Sentence>
                   </Pressable>
                 );
               })}
@@ -586,12 +586,12 @@ function Preview(): React.JSX.Element {
     <GroupCard style={styles.previewWrap} testID="appearance-preview-group">
       <View style={styles.preview} testID="appearance-preview">
         <View style={styles.previewFill}>
-          <Text style={styles.previewFillText}>안 읽음</Text>
+          <Sentence style={styles.previewFillText}>안 읽음</Sentence>
         </View>
         <View style={styles.previewSoft}>
-          <Text style={styles.previewSoftText}>내가 참여했어요</Text>
+          <Sentence style={styles.previewSoftText}>내가 참여했어요</Sentence>
         </View>
-        <Text style={styles.previewLink}>링크</Text>
+        <Sentence style={styles.previewLink}>링크</Sentence>
       </View>
     </GroupCard>
   );

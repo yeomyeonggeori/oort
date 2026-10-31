@@ -631,14 +631,15 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     await settle(2_000);
 
     const banner = within(header).getByTestId('connection-banner');
-    expect(banner).toHaveTextContent('연결이 끊겼습니다');
+    // 끊김 띠는 문장 뒤에 행동의 이름(「지금 다시 연결」)이 눈에 보이게 따라 선다(#4982).
+    expect(banner).toHaveTextContent('연결이 끊겼습니다지금 다시 연결');
 
     // (a) 띠를 진 층은 **흐름 밖**이다. 흐름 안에 있으면 띠가 설 때마다 머리가 자라 목록의 보이는 높이가 줄었다 돌아온다.
     const layer = within(header).getByTestId('connection-banner-layer');
     expect(layer).toBe(connectingLayer);
     expect(flat(layer.props.style)).toMatchObject({position: 'absolute', top: 124});
     // (b) 알약은 그 층 안에 있다 — 흐름에 끼는 형제로 따로 서 있지 않다.
-    expect(within(layer).getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');
+    expect(within(layer).getByTestId('connection-banner')).toHaveTextContent(/^연결이 끊겼습니다/);
     // (c) 머리 뿌리는 뒤 형제(목록) 위에 그려진다 — 아니면 매달린 띠가 목록 밑으로 숨는다.
     expect(Number(flat(header.props.style).zIndex ?? 0)).toBeGreaterThan(0);
     // (d) 띠 바깥은 여전히 손을 받지 않는다 — 알약 밑의 메시지가 눌려야 한다. 끊김일 때만 알약 **자신**이 단추라(#4895,
@@ -710,7 +711,7 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
       client.__emit('connecting', {code: 1, reason: 'transport closed'});
     });
     await settle(DISPLAY_GRACE_MS + 1_000);
-    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent(/^연결이 끊겼습니다/);
     const clientsBefore = centrifugeMock.__clients.length;
     const disconnects = client.disconnectCount;
     const connects = client.connectCount;

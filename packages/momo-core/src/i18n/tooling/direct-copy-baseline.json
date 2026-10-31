@@ -134,7 +134,7 @@
     "clients/mobile/src/features/conversation/usePersonalAgentCall.ts": 10,
     "clients/mobile/src/features/conversation/useTimeline.ts": 24,
     "clients/mobile/src/features/conversation/useTypingSender.ts": 3,
-    "clients/mobile/src/features/decisionStage/DecisionStage.tsx": 65,
+    "clients/mobile/src/features/decisionStage/DecisionStage.tsx": 64,
     "clients/mobile/src/features/decisionStage/DecisionStageScope.tsx": 4,
     "clients/mobile/src/features/decisionStage/useDecisionStageHero.ts": 9,
     "clients/mobile/src/features/deviceKey/DeviceKeyLinkSheet.tsx": 11,
