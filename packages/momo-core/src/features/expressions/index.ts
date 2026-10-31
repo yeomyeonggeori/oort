@@ -7,6 +7,7 @@ export * from "./cards";
 export * from "./cardCopy";
 export * from "./usage";
 export * from "./make";
+export * from "./photo";
 export * from "./fixtures";
 export * from "./fixtureServer";
 export * from "./fixtureMedia";
