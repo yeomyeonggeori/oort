@@ -286,7 +286,24 @@ pub enum DispatchOutcome {
         reason: String,
     },
     /// 429/5xx or a transport error — the candidate is requeued with backoff.
+    ///
+    /// A relay `429` carries exactly [`RELAY_RATE_LIMITED`]; see
+    /// [`DispatchOutcome::is_relay_rate_limited`] for the one layer that does not retry it.
     TransientFailure(String),
+}
+
+/// The text of the `TransientFailure` a relay `429` becomes (`classify_relay_status` builds it from
+/// this constant, so the notifier's one question — "was it the relay's rate limit?" — is not a string
+/// match against somebody else's formatting).
+pub const RELAY_RATE_LIMITED: &str = "HTTP 429";
+
+impl DispatchOutcome {
+    /// The relay refused because this server is over its per-minute limit. The bulk layer
+    /// (ADR-0206 증보 1 F6 / D7) drops such a push instead of retrying it: it is best-effort and must
+    /// not spend the retry budget approvals and DMs rely on.
+    pub fn is_relay_rate_limited(&self) -> bool {
+        matches!(self, DispatchOutcome::TransientFailure(reason) if reason == RELAY_RATE_LIMITED)
+    }
 }
 
 /// The transport seam.

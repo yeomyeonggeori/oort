@@ -29,10 +29,17 @@
 //! | `a_reply_also_sent_to_the_channel_still_reaches_a_follower_once` | give the reply a second reason / a second dispatch |
 //! | `a_thread_reply_push_never_crosses_a_tenant` | drop `tf.workspace_id = $1` from the arm's `thread_follow` lookup |
 //! | `a_tool_line_or_a_dm_in_a_followed_thread_pushes_no_thread_reply` | drop `message_type = 'text'` from the arm |
+//! | `twenty_replies_in_a_minute_are_seven_pushes_and_the_seventh_is_the_folded_one` | raise the cap 6 to 7, or stop folding, or fold under the message's own collapse id |
+//! | `another_thread_has_its_own_window` | key the window by (member, channel) instead of (member, thread root) |
+//! | `the_window_starts_over_with_the_next_minute` | never reset the window, or fold by a clock the test cannot move |
+//! | `the_server_wide_budget_caps_bulk_pushes_and_leaves_a_mention_alone` | ignore the budget, or spend it on mentions too |
+//! | `a_relay_429_drops_a_bulk_push_without_a_retry_but_a_mention_is_still_retried` | requeue a bulk push on 429, or drop a non-bulk push on 429 |
+//! | `a_redelivered_candidate_costs_neither_a_window_slot_nor_a_budget_unit` | drop the read-only "already settled" check before the window / budget |
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
@@ -42,8 +49,8 @@ use momo_messaging::{
     send_thread_notice_in_tx, set_thread_follow_in_tx, stream_message_body_in_tx, ChannelKind,
     MessageType, NewChannel, NewMessage, SendExtras, StreamEdit, STREAM_PROPS_KEY,
 };
-use momo_notifier::{PushConfig, PushDrain};
-use momo_push::{DispatchOutcome, PushDispatch, PushDispatcher};
+use momo_notifier::{DrainStats, PushConfig, PushDrain};
+use momo_push::{DispatchOutcome, PushDispatch, PushDispatcher, RELAY_RATE_LIMITED};
 use serde_json::json;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
@@ -940,4 +947,460 @@ async fn a_thread_reply_push_never_crosses_a_tenant() {
     for dispatch in sent.iter().filter(|d| d.reason == "thread_reply") {
         assert_eq!(dispatch.workspace_id, room_a.ws.to_string());
     }
+}
+
+// ---------------------------------------------------------------------------
+// T-10 — the bulk layer: a window per (member, thread), a server budget, no retry on 429
+// ---------------------------------------------------------------------------
+
+/// A fixed epoch second, so the window's minute cannot change under a test.
+const T0: i64 = 1_800_000_000;
+
+fn held_clock(now: &Arc<AtomicI64>) -> momo_notifier::bulk::Clock {
+    let now = now.clone();
+    Arc::new(move || now.load(Ordering::SeqCst))
+}
+
+async fn drain_pass(su: &PgPool, rooms: &[&Room], drain: &PushDrain) -> DrainStats {
+    let keep: Vec<Uuid> = rooms.iter().map(|room| room.ws).collect();
+    focus_candidates(su, &keep).await;
+    drain.drain_to_empty(64).await
+}
+
+fn mine<'a>(
+    room: &Room,
+    sent: &'a [PushDispatch],
+    who: &str,
+    reason: &str,
+) -> Vec<&'a PushDispatch> {
+    sent.iter()
+        .filter(|dispatch| dispatch.reason == reason && room.devices[&dispatch.device_id] == who)
+        .collect()
+}
+
+async fn candidate_statuses(su: &PgPool, ws: Uuid) -> Vec<(String, i64)> {
+    sqlx::query_as(
+        "SELECT status::text, count(*) FROM outbox \
+          WHERE kind = 'push_candidate' AND workspace_id = $1 GROUP BY 1 ORDER BY 1",
+    )
+    .bind(ws)
+    .fetch_all(su)
+    .await
+    .expect("candidate statuses")
+}
+
+/// Twenty replies in one minute to one follower are **seven** pushes: the first six go out as usual
+/// under their own collapse ids, the seventh goes out as the window's one representative
+/// (`o:<root>:<minute>`), and the other thirteen send nothing. Same for every follower. The first
+/// reply is not delayed (there is no time-based merging).
+///
+/// Sabotage: raise the cap 6 → 7 (eight pushes); fold under the message's own `m:` id (the
+/// representative assertion goes red, and the other thirteen would each send); never fold (twenty).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier / momo_app roles"]
+async fn twenty_replies_in_a_minute_are_seven_pushes_and_the_seventh_is_the_folded_one() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let (su, app) = (superuser_pool().await, momo_app_pool().await);
+    let room = seed_room(&su, &app, &["author", "replier", "follower"]).await;
+
+    let root = say(&app, &room, "author", "a busy thread").await;
+    set_follow(&app, &room, root, "follower", true).await;
+    let mut replies = Vec::new();
+    for n in 0..20 {
+        replies.push(reply(&app, &room, "replier", root, &format!("reply {n}")).await);
+    }
+
+    let now = Arc::new(AtomicI64::new(T0));
+    let relay = RecordingDispatcher::accepting();
+    let drain = PushDrain::new(
+        momo_notifier_pool().await,
+        PushConfig::for_target(),
+        relay.clone(),
+    )
+    .with_bulk_clock(held_clock(&now));
+    let stats = drain_pass(&su, &[&room], &drain).await;
+    let sent = relay.sent();
+
+    for who in ["author", "follower"] {
+        let pushes = mine(&room, &sent, who, "thread_reply");
+        assert_eq!(pushes.len(), 7, "{who}: twenty replies are seven pushes");
+        for (n, dispatch) in pushes[..6].iter().enumerate() {
+            assert_eq!(
+                dispatch.message_id,
+                replies[n].to_string(),
+                "{who}: reply {n}"
+            );
+            assert_eq!(
+                dispatch.collapse_id,
+                format!("m:{}", replies[n]),
+                "{who}: the first six keep the message's own collapse id"
+            );
+        }
+        assert_eq!(
+            pushes[6].message_id,
+            replies[6].to_string(),
+            "{who}: the seventh reply"
+        );
+        assert_eq!(
+            pushes[6].collapse_id,
+            format!("o:{root}:{}", T0 / 60),
+            "{who}: the seventh is the window's representative"
+        );
+        assert_eq!(
+            pushes[6].thread_id,
+            root.to_string(),
+            "its tap goes to the thread"
+        );
+        assert!(
+            replies[7..]
+                .iter()
+                .all(|reply| pushes.iter().all(|p| p.message_id != reply.to_string())),
+            "{who}: the other thirteen send nothing"
+        );
+    }
+    assert_eq!(
+        stats.held_back, 26,
+        "13 held back for each of the two followers"
+    );
+    assert!(
+        !drain
+            .bulk_counters()
+            .contains_key(&("thread_reply", "budget")),
+        "the thirteen folded messages did not even ask for the budget (the representative was \
+         already sent): {:?}",
+        drain.bulk_counters()
+    );
+    assert_eq!(
+        drain.bulk_counters().get(&("thread_reply", "window")).copied(),
+        Some(28),
+        "fourteen messages folded for each of the two followers (the representative carries the seventh)"
+    );
+    assert_eq!(
+        candidate_statuses(&su, room.ws)
+            .await
+            .iter()
+            .map(|(status, _)| status.as_str())
+            .collect::<Vec<_>>(),
+        vec!["done"],
+        "a folded push is a completed candidate, not a failure and not a retry"
+    );
+}
+
+/// The window belongs to the **thread**: six replies in each of two threads of one channel are twelve
+/// individual pushes, none folded. (Keyed by channel, the seventh would already fold.)
+///
+/// Sabotage: key the window by (member, channel) → the seventh push of the follower is an `o:` one.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier / momo_app roles"]
+async fn another_thread_has_its_own_window() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let (su, app) = (superuser_pool().await, momo_app_pool().await);
+    let room = seed_room(&su, &app, &["author", "replier", "follower"]).await;
+
+    let first = say(&app, &room, "author", "thread one").await;
+    let second = say(&app, &room, "author", "thread two").await;
+    set_follow(&app, &room, first, "follower", true).await;
+    set_follow(&app, &room, second, "follower", true).await;
+    for n in 0..6 {
+        reply(&app, &room, "replier", first, &format!("one {n}")).await;
+        reply(&app, &room, "replier", second, &format!("two {n}")).await;
+    }
+
+    let now = Arc::new(AtomicI64::new(T0));
+    let relay = RecordingDispatcher::accepting();
+    let drain = PushDrain::new(
+        momo_notifier_pool().await,
+        PushConfig::for_target(),
+        relay.clone(),
+    )
+    .with_bulk_clock(held_clock(&now));
+    let stats = drain_pass(&su, &[&room], &drain).await;
+
+    let sent = relay.sent();
+    let pushes = mine(&room, &sent, "follower", "thread_reply");
+    assert_eq!(pushes.len(), 12, "six in each thread");
+    assert!(
+        pushes.iter().all(|p| p.collapse_id.starts_with("m:")),
+        "none is folded"
+    );
+    assert_eq!(stats.held_back, 0);
+}
+
+/// A new minute is a new window: after eight replies (six, the representative, one folded) the clock
+/// moves a minute and the next two replies go out individually again.
+///
+/// Sabotage: never reset the window.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier / momo_app roles"]
+async fn the_window_starts_over_with_the_next_minute() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let (su, app) = (superuser_pool().await, momo_app_pool().await);
+    let room = seed_room(&su, &app, &["author", "replier", "follower"]).await;
+
+    let root = say(&app, &room, "author", "thread").await;
+    set_follow(&app, &room, root, "follower", true).await;
+    for n in 0..8 {
+        reply(&app, &room, "replier", root, &format!("burst {n}")).await;
+    }
+    let now = Arc::new(AtomicI64::new(T0));
+    let relay = RecordingDispatcher::accepting();
+    let drain = PushDrain::new(
+        momo_notifier_pool().await,
+        PushConfig::for_target(),
+        relay.clone(),
+    )
+    .with_bulk_clock(held_clock(&now));
+    drain_pass(&su, &[&room], &drain).await;
+    let first_minute = relay.sent();
+    assert_eq!(
+        mine(&room, &first_minute, "follower", "thread_reply").len(),
+        7
+    );
+
+    now.fetch_add(60, Ordering::SeqCst);
+    let after = [
+        reply(&app, &room, "replier", root, "a minute later").await,
+        reply(&app, &room, "replier", root, "and another").await,
+    ];
+    drain_pass(&su, &[&room], &drain).await;
+    let sent = relay.sent();
+    let later: Vec<_> = mine(&room, &sent, "follower", "thread_reply")
+        .into_iter()
+        .filter(|p| after.iter().any(|id| p.message_id == id.to_string()))
+        .collect();
+    assert_eq!(later.len(), 2, "both replies of the new minute go out");
+    assert!(
+        later.iter().all(|p| p.collapse_id.starts_with("m:")),
+        "as individual pushes"
+    );
+}
+
+/// The server-wide budget holds the whole layer to `bulk_push_per_minute` dispatches per minute: three
+/// pushes go out and the rest are not sent and leave **no** unsettled claim behind; their candidates
+/// complete. A mention in the same minute is not part of the layer and is still sent.
+///
+/// Sabotage: ignore the budget (eleven pushes); count mentions against it (the mention is lost).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier / momo_app roles"]
+async fn the_server_wide_budget_caps_bulk_pushes_and_leaves_a_mention_alone() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let (su, app) = (superuser_pool().await, momo_app_pool().await);
+    let room = seed_room(&su, &app, &["author", "replier", "follower"]).await;
+
+    // Five threads with one reply each — a window per thread, so nothing folds and only the budget
+    // can hold the pushes back — and a sixth whose reply names the follower.
+    for n in 0..5 {
+        let root = say(&app, &room, "author", &format!("thread {n}")).await;
+        set_follow(&app, &room, root, "follower", true).await;
+        reply(&app, &room, "replier", root, &format!("reply {n}")).await;
+    }
+    let last = say(&app, &room, "author", "thread 5").await;
+    set_follow(&app, &room, last, "follower", true).await;
+    let ping = reply(&app, &room, "replier", last, "over to you @follower").await;
+
+    let mut config = PushConfig::for_target();
+    config.bulk_push_per_minute = 3;
+    let now = Arc::new(AtomicI64::new(T0));
+    let relay = RecordingDispatcher::accepting();
+    let drain = PushDrain::new(momo_notifier_pool().await, config, relay.clone())
+        .with_bulk_clock(held_clock(&now));
+    let stats = drain_pass(&su, &[&room], &drain).await;
+    let sent = relay.sent();
+
+    let bulk_sent = sent.iter().filter(|d| d.reason == "thread_reply").count();
+    assert_eq!(
+        bulk_sent, 3,
+        "the budget is three dispatches a minute across everyone"
+    );
+    assert_eq!(
+        room.hits(&sent, ping, "mention"),
+        vec!["follower"],
+        "a mention is not in the layer: the spent budget does not touch it"
+    );
+    assert_eq!(
+        drain.bulk_counters().get(&("thread_reply", "budget")).copied(),
+        Some(8),
+        "eleven bulk pushes were due (two followers in each of five threads, and the author of the \
+         sixth); three went out"
+    );
+    assert_eq!(stats.held_back, 8);
+    assert!(
+        candidate_statuses(&su, room.ws)
+            .await
+            .iter()
+            .all(|(status, _)| status == "done"),
+        "an over-budget push completes its candidate"
+    );
+    let stranded: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM push_dispatch_log WHERE workspace_id = $1 AND apns_status IS NULL",
+    )
+    .bind(room.ws)
+    .fetch_one(&su)
+    .await
+    .expect("count unsettled claims");
+    assert_eq!(
+        stranded, 0,
+        "a held-back push is decided before any claim is taken"
+    );
+}
+
+/// A relay `429` for a bulk-layer push is **dropped, not retried**: the candidate completes and the
+/// claimed row is settled `429` / `relay_http: dropped` (so a redelivery cannot send it). In the same
+/// candidate a non-bulk push (the mention) is still requeued with backoff on a 429.
+///
+/// Sabotage: requeue a bulk push on 429 (the bulk-only candidate stays `pending`); drop a non-bulk push
+/// on 429 (the mention's candidate would complete and its claim be settled).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier / momo_app roles"]
+async fn a_relay_429_drops_a_bulk_push_without_a_retry_but_a_mention_is_still_retried() {
+    struct RateLimited;
+    #[async_trait::async_trait]
+    impl PushDispatcher for RateLimited {
+        async fn dispatch(&self, _dispatch: &PushDispatch) -> DispatchOutcome {
+            DispatchOutcome::TransientFailure(RELAY_RATE_LIMITED.to_string())
+        }
+    }
+
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let (su, app) = (superuser_pool().await, momo_app_pool().await);
+    let room = seed_room(&su, &app, &["author", "replier", "follower"]).await;
+
+    let root = say(&app, &room, "author", "thread").await;
+    set_follow(&app, &room, root, "follower", true).await;
+    let plain = reply(&app, &room, "replier", root, "just a reply").await;
+    let ping = reply(&app, &room, "replier", root, "and a call for @follower").await;
+
+    let relay: Arc<dyn PushDispatcher> = Arc::new(RateLimited);
+    let drain = PushDrain::new(momo_notifier_pool().await, PushConfig::for_target(), relay);
+    let stats = drain_pass(&su, &[&room], &drain).await;
+
+    async fn status_of(su: &PgPool, message: Uuid) -> String {
+        sqlx::query_scalar(
+            "SELECT status::text FROM outbox \
+              WHERE kind = 'push_candidate' AND payload->>'message_id' = $1 ORDER BY id LIMIT 1",
+        )
+        .bind(message.to_string())
+        .fetch_one(su)
+        .await
+        .expect("candidate status")
+    }
+    assert_eq!(
+        status_of(&su, plain).await,
+        "done",
+        "a bulk-only candidate whose pushes the relay rate-limited is finished, not retried"
+    );
+    assert_eq!(
+        status_of(&su, ping).await,
+        "pending",
+        "the same 429 on a mention still requeues the candidate with backoff"
+    );
+    assert_eq!(stats.requeued, 1, "only the mention's candidate");
+
+    let dropped: Vec<(Option<i32>, Option<String>)> = sqlx::query_as(
+        "SELECT apns_status, apns_reason FROM push_dispatch_log \
+          WHERE workspace_id = $1 AND message_id = $2 ORDER BY member_id",
+    )
+    .bind(room.ws)
+    .bind(plain)
+    .fetch_all(&su)
+    .await
+    .expect("dispatch log of the plain reply");
+    assert_eq!(
+        dropped.len(),
+        2,
+        "one claimed row for each of the two followers"
+    );
+    assert!(
+        dropped.iter().all(|(status, reason)| *status == Some(429)
+            && reason.as_deref() == Some("relay_http: dropped")),
+        "a dropped push is settled 429 / relay_http: dropped: {dropped:?}"
+    );
+    assert_eq!(
+        drain
+            .bulk_counters()
+            .get(&("thread_reply", "relay_429"))
+            .copied(),
+        Some(3),
+        "the plain reply was due to both followers; the one that names the follower reaches only the \
+         author as a thread_reply (the follower hears it as the mention, which is not in the layer)"
+    );
+    let mention_row: (Option<i32>,) = sqlx::query_as(
+        "SELECT apns_status FROM push_dispatch_log \
+          WHERE workspace_id = $1 AND message_id = $2 AND member_id = $3",
+    )
+    .bind(room.ws)
+    .bind(ping)
+    .bind(room.id("follower"))
+    .fetch_one(&su)
+    .await
+    .expect("the mention's dispatch row");
+    assert_eq!(
+        mention_row.0, None,
+        "the mention's claim stays unsettled for its retry"
+    );
+}
+
+/// A candidate the outbox hands back (a crash between claim and settle) costs the layer nothing: every
+/// push it names is already settled, so no window slot is counted again and no budget unit is spent.
+/// The budget here is exactly what the first pass used, so a second look that spent any would fail.
+///
+/// Sabotage: drop the read-only "already settled" check that precedes the window and the budget → the
+/// redelivery asks for budget it no longer has (twelve held back, none recognised as settled).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier / momo_app roles"]
+async fn a_redelivered_candidate_costs_neither_a_window_slot_nor_a_budget_unit() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let (su, app) = (superuser_pool().await, momo_app_pool().await);
+    let room = seed_room(&su, &app, &["author", "replier", "follower"]).await;
+
+    let root = say(&app, &room, "author", "thread").await;
+    set_follow(&app, &room, root, "follower", true).await;
+    for n in 0..6 {
+        reply(&app, &room, "replier", root, &format!("reply {n}")).await;
+    }
+
+    let mut config = PushConfig::for_target();
+    config.bulk_push_per_minute = 12;
+    let now = Arc::new(AtomicI64::new(T0));
+    let relay = RecordingDispatcher::accepting();
+    let drain = PushDrain::new(momo_notifier_pool().await, config, relay.clone())
+        .with_bulk_clock(held_clock(&now));
+    let first = drain_pass(&su, &[&room], &drain).await;
+    assert_eq!(
+        first.dispatched, 12,
+        "six replies for each of the two followers"
+    );
+
+    sqlx::query(
+        "UPDATE outbox SET status = 'pending', available_at = now() - interval '1 second' \
+          WHERE kind = 'push_candidate' AND workspace_id = $1",
+    )
+    .bind(room.ws)
+    .execute(&su)
+    .await
+    .expect("hand every candidate back, as a crash would");
+    let second = drain_pass(&su, &[&room], &drain).await;
+
+    assert_eq!(relay.sent().len(), 12, "nothing is sent twice");
+    assert_eq!(
+        second.skipped_already_settled, 12,
+        "every push was recognised as already settled"
+    );
+    assert_eq!(
+        second.held_back, 0,
+        "…not mistaken for new demand on the budget"
+    );
+    assert!(
+        !drain
+            .bulk_counters()
+            .contains_key(&("thread_reply", "budget")),
+        "{:?}",
+        drain.bulk_counters()
+    );
 }
