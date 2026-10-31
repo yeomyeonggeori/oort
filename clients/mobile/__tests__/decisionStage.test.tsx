@@ -1,6 +1,15 @@
 import React from 'react';
-import {AccessibilityInfo, Animated, Pressable, Text, View} from 'react-native';
-import {act, fireEvent, render} from '@testing-library/react-native';
+import {
+  AccessibilityInfo,
+  Animated,
+  Dimensions,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import {act, fireEvent, render, within} from '@testing-library/react-native';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {Member, Message, RosterMember} from '@momo/core/lib/api';
 import type {AgentApprovalCard} from '@momo/core/features/timeline/agentCardModel';
@@ -13,6 +22,7 @@ import {useOpenDecisionStage} from '../src/features/decisionStage/openDecisionSt
 import {StageHero} from '../src/features/attachments/StageHero';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {RequestBundleCard} from '../src/features/conversation/RequestBundleCard';
+import {STACK_PILL_SCALE} from '../src/design/atoms';
 import {SessionProvider} from '../src/session/useSession';
 import {
   resetBlurSupportForTests,
@@ -164,7 +174,16 @@ function drag(view: ReturnType<typeof render>, x: number, y: number) {
   });
 }
 
+// 시험의 기본 창은 글자 배율 2(큰 글씨)다. 기본 크기 시험은 배율 1 로 열고, 큰 글씨 시험이 올린다(#4921).
+const BASE_WINDOW = Dimensions.get('window');
+const AX3 = 2.643; // iOS 접근성 크기 3 — RN 이 쓰는 글자 배율표의 값
+function setFontScale(fontScale: number) {
+  const window = {...BASE_WINDOW, fontScale};
+  Dimensions.set({window, screen: window});
+}
+
 beforeEach(() => {
+  setFontScale(1);
   jest.useFakeTimers({now: NOW});
   jest
     .spyOn(AccessibilityInfo, 'isReduceMotionEnabled')
@@ -182,6 +201,7 @@ beforeEach(() => {
 afterEach(() => {
   jest.useRealTimers();
   jest.restoreAllMocks();
+  Dimensions.set({window: BASE_WINDOW, screen: BASE_WINDOW});
 });
 
 test('실제 승인 경로: 두 탭은 한 요청이고 보내는 중 넘김을 막은 뒤 다음 미처리 장으로 가요', async () => {
@@ -690,4 +710,186 @@ test('요청 중 무대를 닫아도 같은 대화는 영수증을 받고, 대�
   view.unmount();
   await act(async () => resolve({kind: 'committed', status: 'approved'}));
   expect(defaults.onSettled).toHaveBeenCalledTimes(1);
+});
+
+// ---- 큰 글씨의 결정 패널 (#4921) ---------------------------------------------------------------
+// 렌더 트리의 DFS 순서만으로는 이 결함이 안 잡힌다: 고정 패널은 본문 스크롤의 **형제**라 예전에도 트리에서는 내용 뒤였다.
+// 결함은 배치였다 — 고정 패널·썸네일이 화면을 나눠 가지면 본문 창이 제목 한 덩이로 차서 내용이 접힌 아래에 숨었다.
+// 그래서 갈리는 것은 「패널이 본문 스크롤 **안**에서 내용 뒤에 흐르는가」이고, 순서 단정은 그 위에서 읽는 내용 앞섬이다.
+const RISKY: Partial<AgentApprovalCard> = {
+  isReversible: false,
+  estimatedMicroUsd: 1_500_000,
+  action: {
+    id: 'profile.rename',
+    rows: [
+      {label: '표시 이름', value: '별하늘', before: '하늘', after: '별하늘'},
+    ],
+    omittedRows: 0,
+    rationale: null,
+    requiredRole: null,
+  },
+};
+const CHIP_LABEL = '표시 이름: 이전 값 하늘, 이후 값 별하늘';
+const APPROVE = 'decision-stage-approve';
+const BODY = 'decision-stage-body';
+const CUE = 'decision-stage-more-cue';
+// 표지는 보조기술에서 숨겨져 있다. 숨은 요소를 포함해 묻지 않으면 「없다」 단정이 언제나 참이 된다.
+const cueOf = (view: ReturnType<typeof render>) =>
+  view.queryByTestId(CUE, {includeHiddenElements: true});
+function bodyLayout(height: number) {
+  return {nativeEvent: {layout: {x: 0, y: 100, width: 300, height}}};
+}
+function bodyScroll(offset: number, viewport: number, content: number) {
+  return {
+    nativeEvent: {
+      contentOffset: {x: 0, y: offset},
+      layoutMeasurement: {width: 300, height: viewport},
+      contentSize: {width: 300, height: content},
+    },
+  };
+}
+
+test('기본 크기: 결정 패널은 본문 스크롤 밖 고정 칸에 서고 표지는 없어요', async () => {
+  const view = await mount({entries: [entry('첫째', RISKY)]});
+  const body = view.getByTestId(BODY);
+  expect(view.getByTestId(APPROVE)).toBeTruthy();
+  expect(within(body).queryByTestId(APPROVE)).toBeNull();
+  // 기본 크기는 본문 창이 넘쳐도 표지·측정을 달지 않는다(지금 모양 그대로).
+  fireEvent(body, 'layout', bodyLayout(100));
+  fireEvent(body, 'contentSizeChange', 300, 900);
+  expect(cueOf(view)).toBeNull();
+});
+
+test('큰 글씨(AX3): 결정 패널이 본문 끝에서 값·되돌릴 수 없음·비용 뒤에 함께 흘러요', async () => {
+  setFontScale(AX3);
+  const view = await mount({entries: [entry('첫째', RISKY)]});
+  const body = view.getByTestId(BODY);
+  // 배치: 패널이 본문 스크롤 안, 카드 다음에 선다 — 접힌 아래의 내용을 지나야 단추에 닿는다.
+  const approve = within(body).getByTestId(APPROVE);
+  const nodes = view.UNSAFE_root.findAll(() => true);
+  const at = (node: (typeof nodes)[number]) => nodes.indexOf(node);
+  const card = within(body).getByTestId('decision-stage-card');
+  const panel = within(body).getByTestId('decision-stage-actions-glass');
+  const chip = within(body).getByLabelText(CHIP_LABEL);
+  const risk = within(body).getByText('실행하면 되돌릴 수 없어요');
+  const cost = within(body).getByText(/예상 비용/);
+  // 순서: 카드 → 패널, 그리고 카드 안에서 값 → 위험·비용 → 단추.
+  expect(at(card)).toBeGreaterThan(-1);
+  expect(at(card)).toBeLessThan(at(panel));
+  expect(at(chip)).toBeGreaterThan(at(card));
+  expect(at(chip)).toBeLessThan(at(risk));
+  expect(at(risk)).toBeLessThan(at(approve));
+  expect(at(cost)).toBeLessThan(at(approve));
+  expect(at(chip)).toBeLessThan(at(approve));
+  // 고정 칸에는 같은 패널이 두 번 서지 않는다.
+  expect(view.getAllByTestId(APPROVE)).toHaveLength(1);
+});
+
+test.each([
+  [STACK_PILL_SCALE - 0.01, false],
+  [STACK_PILL_SCALE, true],
+])('흐름의 문턱은 큰 글씨의 문턱이에요: 배율 %d 에서 패널이 본문 안=%s', async (fontScale, flows) => {
+  setFontScale(fontScale);
+  const view = await mount({entries: [entry('첫째', RISKY)]});
+  const inside =
+    within(view.getByTestId(BODY)).queryByTestId(APPROVE) !== null;
+  expect(inside).toBe(flows);
+  expect(view.getAllByTestId(APPROVE)).toHaveLength(1);
+});
+
+test('큰 글씨: 본문이 창보다 길고 끝이 아니면 「아래에 더 있다」 표지가 서고 끝에서 사라져요', async () => {
+  setFontScale(AX3);
+  const view = await mount({entries: [entry('첫째', RISKY)]});
+  const body = view.getByTestId(BODY);
+  expect(cueOf(view)).toBeNull(); // 아직 재지 않았다
+  fireEvent(body, 'layout', bodyLayout(400));
+  fireEvent(body, 'contentSizeChange', 300, 900);
+  const cue = cueOf(view)!;
+  expect(cue).toBeTruthy();
+  // 표지는 눌리지 않고 보조기술에도 서지 않으며(스크린리더는 순서대로 읽는다), 본문 창 바닥에 얹힌다.
+  expect(cue.props.pointerEvents).toBe('none');
+  expect(cue.props.accessibilityElementsHidden).toBe(true);
+  expect(cue.props.importantForAccessibility).toBe('no-hide-descendants');
+  expect(StyleSheet.flatten(cue.props.style).top).toBeGreaterThan(100);
+  fireEvent.scroll(body, bodyScroll(500, 400, 900)); // 끝
+  expect(cueOf(view)).toBeNull();
+  fireEvent.scroll(body, bodyScroll(120, 400, 900)); // 다시 위로
+  expect(cueOf(view)).toBeTruthy();
+  // 내용이 창에 다 들어가면 서지 않는다.
+  fireEvent(body, 'contentSizeChange', 300, 380);
+  fireEvent.scroll(body, bodyScroll(0, 400, 380));
+  expect(cueOf(view)).toBeNull();
+});
+
+test('큰 글씨: 다른 장으로 넘기면 본문은 그 장의 맨 위에서 시작해요', async () => {
+  setFontScale(AX3);
+  const scrollTo = ScrollView.prototype.scrollTo as unknown as jest.Mock;
+  const view = await mount({
+    entries: [entry('첫째', RISKY), entry('둘째', RISKY)],
+  });
+  scrollTo.mockClear();
+  await act(async () => fireEvent.press(view.getByLabelText('다음 결정')));
+  expect(view.getByTestId('decision-stage-position')).toHaveTextContent(
+    '2건 중 2번',
+  );
+  expect(scrollTo).toHaveBeenCalledWith({y: 0, animated: false});
+});
+
+// ---- 끌기 손잡이와 본문 스크롤 (#4921) ------------------------------------------------------------
+// 흐르는 본문에서는 제목·안내 줄(= 끌기 손잡이)이 첫 화면을 거의 다 덮는다. 터치 시작에서 가로채는 손잡이는 본문을 내리려는
+// 세로 끌기를 스크롤 대신 「무대 닫기」로 읽는다(시뮬레이터에서 확인: Maestro 의 세로 스크롤이 무대를 닫았다). 그래서 이
+// 크기에서는 끌기 응답자를 달지 않고, 넘기기·닫기는 단추와 VoiceOver 동작이 맡는다. (RNTL 의 fireEvent 는 응답자가 없으면
+// 끌기 이벤트를 흘려보내므로 끌기를 흉내 내지 않고 응답자의 유무를 묻는다.)
+const handleProps = (view: ReturnType<typeof render>) =>
+  view.getByTestId('decision-stage-drag').props;
+
+test('기본 크기: 손잡이는 터치 시작에서 가져가는 끌기 응답자를 달고 있어요', async () => {
+  const view = await mount();
+  const handle = handleProps(view);
+  expect(handle.onStartShouldSetResponder({})).toBe(true);
+  expect(typeof handle.onResponderGrant).toBe('function');
+  expect(typeof handle.onResponderRelease).toBe('function');
+  // 끌기를 말하는 안내 문장도 서 있다(낭독 힌트·「끌어 넘겨 보기」 줄).
+  expect(handle.accessibilityHint).toMatch(/끌어/);
+  expect(view.getByText(/끌어 넘겨 보기/)).toBeTruthy();
+});
+
+test('큰 글씨: 손잡이에 끌기 응답자가 없어 본문 스크롤을 가로채지 않아요', async () => {
+  setFontScale(AX3);
+  const view = await mount();
+  const handle = handleProps(view);
+  expect(handle.onStartShouldSetResponder).toBeUndefined();
+  expect(handle.onMoveShouldSetResponder).toBeUndefined();
+  expect(handle.onResponderGrant).toBeUndefined();
+  expect(handle.onResponderRelease).toBeUndefined();
+  // 없는 끌기를 말하는 안내 문장도 서지 않는다(낭독 힌트·「끌어 넘겨 보기」 줄).
+  expect(handle.accessibilityHint).toBeUndefined();
+  expect(view.queryByText(/끌어 넘겨 보기/)).toBeNull();
+  // 손잡이의 접근성 동작은 그대로다.
+  expect(handle.accessibilityRole).toBe('adjustable');
+  expect(handle.accessibilityActions).toEqual([
+    {name: 'increment', label: '다음 결정'},
+    {name: 'decrement', label: '이전 결정'},
+    {name: 'close', label: '결정 무대 닫기'},
+  ]);
+});
+
+test('큰 글씨: 넘기기·닫기는 이전/다음 단추와 VoiceOver 동작으로 해요', async () => {
+  setFontScale(AX3);
+  const view = await mount();
+  const position = () => view.getByTestId('decision-stage-position');
+  await act(async () => fireEvent.press(view.getByLabelText('다음 결정')));
+  expect(position()).toHaveTextContent('3건 중 2번');
+  await act(async () =>
+    fireEvent(view.getByTestId('decision-stage-drag'), 'accessibilityAction', {
+      nativeEvent: {actionName: 'increment'},
+    }),
+  );
+  expect(position()).toHaveTextContent('3건 중 3번');
+  await act(async () =>
+    fireEvent(view.getByTestId('decision-stage-drag'), 'accessibilityAction', {
+      nativeEvent: {actionName: 'close'},
+    }),
+  );
+  expect(defaults.onClose).toHaveBeenCalledTimes(1);
 });
