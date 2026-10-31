@@ -183,7 +183,11 @@ impl<T: UnfurlHttp + 'static> UnfurlWorker<T> {
                                     card: Settled::quiet("blocked"),
                                 });
                             }
-                            Err(FetchError::Timeout) | Err(FetchError::Failed(_))
+                            // A fetch this server had no room for (`Capacity`) is as transient as
+                            // one that timed out: it gets the same later attempt.
+                            Err(FetchError::Timeout)
+                            | Err(FetchError::Failed(_))
+                            | Err(FetchError::Capacity)
                                 if job.attempts < self.config.max_attempts =>
                             {
                                 self.settle_requeue_or_fail(&job, "transient fetch").await;

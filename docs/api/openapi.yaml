@@ -12662,9 +12662,16 @@ paths:
 
         The token is refused (403, receipt `status: opens_in_app`, approve or
         reject, whatever the body says) for the approvals that must be opened in
-        the app (ADR-0204 D7): an action that mints a value shown once (an invite
-        link, an agent pairing code) and an approval whose card asks the approver
-        to pick a host. It only ever narrows this route: an access token still
+        the app (ADR-0204 D7, 증보 6 D6-2): an action that mints a value shown once
+        (an invite link, an agent pairing code), an approval whose card asks the
+        approver to pick a host, a picture, a name, a message pin, a card an agent
+        raised unasked, an agent's request for more channels
+        (`hosted.channels.grant`, unless the server raised the card in place because
+        a person called the agent in that channel), a tool the catalog does not carry
+        (an operator's own, whose effect the server cannot say it can undo) and any
+        shape this build does not know. The answer is one function
+        (`decision_mode`), the same word the card carries as `props.decision_mode`
+        (`inline` | `open`). It only ever narrows this route: an access token still
         decides them.
       security:
         - bearerAuth: []
@@ -14938,8 +14945,11 @@ components:
         shared by both routes and spent only by a request that really would fetch: a
         picture already held by the server, and an address that failed in the last few
         minutes, cost the remote site nothing and spend nothing. Those two routes also
-        answer 429 with `Retry-After: 1` when the server is already fetching as many
-        remote images as it allows at once (16), whoever asks; ask again shortly. A
+        answer 429 with `Retry-After: 1` when the server has no place for the fetch: it
+        is already fetching as many remote images as it allows at once (16), this member
+        is already fetching as many as one member may (4), or it has no room for another
+        name lookup. Such a refusal says nothing about the card, is not remembered, and
+        gives back the unit of fetch budget the request spent; ask again shortly. A
         client shows its fallback meanwhile. `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
         already has an active account, is spent before the password is compared
@@ -26457,6 +26467,19 @@ components:
             ADR-0186 부록 C. Present only when this decision executed a
             workspace action; absent on tool-call approvals and on every
             refusal.
+        line:
+          type: string
+          description: >
+            ADR-0204 증보 6 D6-4 - the one Korean line this decision says, written by
+            the server so a device can show it as it is (the lock screen's notification
+            changes into it): `✓ 소개를 바꿨어요` on approval, `소개 바꾸기를 거부했어요` on
+            rejection, `이미 승인된 요청이에요 · 소개 바꾸기` / `이미 거부된 요청이에요 · 소개
+            바꾸기` on a second tap. Value-free: it names the action's title, and a tool
+            approval the tool's name when it is short and plain, never an argument.
+            Additive and optional: absent from every refusal (the words of a failure are
+            the device's), from an expired or cancelled card, from a DM admission's vote
+            and from receipts stored before it existed; a client that does not know it
+            keeps its own sentence. An idempotent replay answers the line the first call did.
 
     WorkspaceActionResult:
       type: object

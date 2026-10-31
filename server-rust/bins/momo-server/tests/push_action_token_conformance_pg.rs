@@ -459,9 +459,13 @@ impl World {
         .bind(run)
         .bind(self.channel)
         .bind(self.agent)
+        // An ordinary tool call: one of the **catalog** that the lock screen may decide. (A tool
+        // outside the catalog is an operator's own and is opened in the app — ADR-0204 증보 6
+        // D6-2 — so it could not stand for "the ordinary approval" here; it has its own row in
+        // `a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app`.)
         .bind(json!({"tool_call": {
             "call_id": format!("pat-{run}"),
-            "name": "github.search_issues",
+            "name": "work.session.end",
             "arguments": {},
         }}))
         .bind(expires)
@@ -691,6 +695,89 @@ async fn the_token_approves_and_rejects_through_the_one_route() {
         w.run_status(run2).await,
         "awaiting_approval",
         "a rejection ends the hold too"
+    );
+}
+
+/// ADR-0204 증보 6 D6-4: the decision answers with the one line a device shows — the lock
+/// screen's notification changes into it. Approve and reject carry their own sentence, a second
+/// tap carries 「이미 …된 요청이에요 · …」, a replay answers what the first call answered (the line is
+/// stored with the receipt), and a refusal carries none: the words of a failure are the device's.
+///
+/// Revert `with_receipt_line` at any of the three sites (the generic arm, the executed action,
+/// the already-decided arm) and the matching assertion goes red.
+#[tokio::test]
+#[ignore = "needs Postgres + runtime roles (DATABASE_URL)"]
+async fn a_decision_answers_with_the_line_a_device_shows() {
+    let _guard = test_lock().await;
+    let w = world().await;
+    let session = w.login().await;
+    let action = w.mint_action(&session).await;
+
+    // A tool approval: approve, the same key again, and a second tap.
+    let (_, approval) = w.seed_approval().await;
+    let key = Uuid::new_v4();
+    let (status, receipt) = w.decide(&action, approval, true, key).await;
+    assert_eq!(status, 200, "{receipt}");
+    assert_eq!(receipt["line"], "✓ 승인했어요 · 「work.session.end」");
+    let (status, replay) = w.decide(&action, approval, true, key).await;
+    assert_eq!(status, 200, "{replay}");
+    assert_eq!(
+        replay, receipt,
+        "a replay answers the line the first call did"
+    );
+    let (status, again) = w.decide(&action, approval, true, Uuid::new_v4()).await;
+    assert_eq!(status, 409, "{again}");
+    assert_eq!(again["status"], "approved");
+    assert_eq!(again["line"], "이미 승인된 요청이에요 · 도구 실행");
+
+    // A tool approval: reject, and a second tap on the rejected card.
+    let (_, rejected) = w.seed_approval().await;
+    let (status, receipt) = w.decide(&action, rejected, false, Uuid::new_v4()).await;
+    assert_eq!(status, 200, "{receipt}");
+    assert_eq!(
+        receipt["line"],
+        "도구 실행을 거부했어요 · 「work.session.end」"
+    );
+    let (status, again) = w.decide(&action, rejected, true, Uuid::new_v4()).await;
+    assert_eq!(status, 409, "{again}");
+    assert_eq!(again["status"], "rejected");
+    assert_eq!(again["line"], "이미 거부된 요청이에요 · 도구 실행");
+
+    // A workspace action that executes: the registry's own words, never an argument.
+    let (_, create) = w.seed_channel_create_approval("pat-line-secret-name").await;
+    let (status, receipt) = w.decide(&action, create, true, Uuid::new_v4()).await;
+    assert_eq!(status, 200, "{receipt}");
+    assert_eq!(receipt["line"], "✓ 채널을 만들었어요");
+    assert!(
+        !receipt["line"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("pat-line"),
+        "a line says nothing a person typed: {receipt}"
+    );
+    let (status, again) = w.decide(&action, create, true, Uuid::new_v4()).await;
+    assert_eq!(status, 409, "{again}");
+    assert_eq!(again["line"], "이미 승인된 요청이에요 · 채널 만들기");
+    let (_, reject_create) = w.seed_channel_create_approval("pat-line-rejected").await;
+    let (status, receipt) = w
+        .decide(&action, reject_create, false, Uuid::new_v4())
+        .await;
+    assert_eq!(status, 200, "{receipt}");
+    assert_eq!(receipt["line"], "채널 만들기를 거부했어요");
+
+    // A refusal carries no line: the lock screen's own tap on an app-only card.
+    let (_, opens) = w
+        .seed_parked_approval(
+            "tool_call",
+            json!({"tool_call": {"call_id": "pat-line-open", "name": "github.search_issues"}}),
+        )
+        .await;
+    let (status, refused) = w.decide(&action, opens, true, Uuid::new_v4()).await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "opens_in_app");
+    assert!(
+        refused.get("line").is_none(),
+        "a refusal says nothing of the kind: {refused}"
     );
 }
 
@@ -1528,6 +1615,20 @@ async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
         payload["origin"] = json!(momo_agent::initiative::APPROVAL_ORIGIN_AGENT_INITIATED);
         payload
     };
+    // ADR-0204 증보 6 D6-2, the two rows that changed. A tool the catalog does not carry is an
+    // operator's own: the server cannot say what it does can be undone, so it is opened in the
+    // app (it used to be decided from the banner).
+    let operators_tool = json!({
+        "tool_call": {"call_id": "pat-operator", "name": "github.search_issues", "arguments": {}},
+    });
+    // An agent asking for more channels is a permission: it is opened in the app. The card the
+    // server raised in place is the exception and is checked below.
+    let channels_asked = momo_agent::actions::workspace_action_payload(
+        momo_agent::actions::ACTION_HOSTED_CHANNELS_GRANT,
+        &json!({}),
+        None,
+        w.agent,
+    );
     let members_before = w.count("member").await;
     let agents_before = w.count("agent").await;
     let invites_before = w.count("invite_code").await;
@@ -1546,6 +1647,16 @@ async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
         ("message.pin", "workspace_action", pin),
         ("message.unpin", "workspace_action", unpin),
         ("channel.create raised unasked", "workspace_action", unasked),
+        (
+            "an operator's own tool (outside the catalog)",
+            "tool_call",
+            operators_tool,
+        ),
+        (
+            "hosted.channels.grant an agent asked for",
+            "workspace_action",
+            channels_asked,
+        ),
     ] {
         let (_, approval) = w.seed_parked_approval(action_type, payload).await;
         seeded.push((label, approval));
@@ -1597,6 +1708,28 @@ async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
         invites_before,
         "no invite was minted"
     );
+
+    // The exception, from the route's side: the `hosted.channels.grant` card the server raised in
+    // place (a person called the agent in that very channel) is **not** refused to the lock
+    // screen. Rejecting is used so the control executes nothing; what is pinned is that the
+    // refusal is not `opens_in_app`.
+    let mut in_place = momo_agent::actions::workspace_action_payload(
+        momo_agent::actions::ACTION_HOSTED_CHANNELS_GRANT,
+        &json!({}),
+        None,
+        w.agent,
+    );
+    in_place["origin"] = json!(momo_agent::in_place_grant::APPROVAL_ORIGIN_SERVER_IN_PLACE);
+    let (_, in_place_approval) = w.seed_parked_approval("workspace_action", in_place).await;
+    let (status, receipt) = w
+        .decide(&action, in_place_approval, false, Uuid::new_v4())
+        .await;
+    assert_ne!(
+        receipt["status"], "opens_in_app",
+        "the in-place channel grant is decided from the lock screen: {receipt}"
+    );
+    assert_eq!(status, 200, "{receipt}");
+    assert_eq!(receipt["status"], "rejected");
 
     // The refusal sits behind the membership gate: someone outside the approval's
     // channel is told `forbidden`, exactly as with an ordinary token, and learns
