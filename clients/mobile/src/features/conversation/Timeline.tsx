@@ -1327,7 +1327,7 @@ function TimelineInner({
         // `showRollup` 이 거짓인 표면(스레드 패널)은 롤업을 아예 안 그리므로,
         // 그 표면에서 롤업은 접기를 막을 이유가 되지 못한다 — 없는 문은 문이
         // 아니다.
-        hasRollup: showRollup && rollupFor(item.message, threads) !== null,
+        hasRollup: showRollup && rollupFor(item.message, threads, myMemberId) !== null,
         hasReactions:
           chipsFor(reactions ?? NO_REACTIONS, item.message.id, myMemberId)
             .length > 0,
@@ -2913,7 +2913,7 @@ function TimelineInner({
           actions={actions}
           // `null` 은 "이 표면에는 롤업이 없다"이고 `undefined` 였다면 행이 서버의
           // 롤업으로 되돌아간다 — 끄려는 자리에서 정확히 반대가 된다.
-          rollup={showRollup ? rollupFor(item.message, threads) : null}
+          rollup={showRollup ? rollupFor(item.message, threads, myMemberId) : null}
           // `undefined` turns the marker off for the whole surface. A thread
           // panel passes `markReplies={false}`: every row in there is a reply,
           // and a 답글 line on each would be noise wearing the shape of

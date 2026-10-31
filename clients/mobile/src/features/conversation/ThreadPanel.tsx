@@ -1,7 +1,9 @@
-import {uuidEq, type Message} from '@momo/core/lib/api';
+import {markThreadRead, uuidEq, type Message} from '@momo/core/lib/api';
+import {createThreadReadSender} from '@momo/core/features/timeline/threadRead';
+import {readSignalSeq} from '@momo/core/features/timeline/threadSummary';
 import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy';
 import type {Directory} from '@momo/core/features/workspace/directory';
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {StyleSheet, View, type LayoutChangeEvent} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {ErrorState, NoticeBlock, Screen} from '../../design/atoms';
@@ -23,6 +25,7 @@ import {MissedDigestCard} from '../memory/MissedDigestCard';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import {hasAgentRequest} from './requestLoop';
+import {appStateForeground} from '../readState/useViewingBeat';
 
 // =============================================================================
 // 스레드 — 한 메시지 아래에 달린 답글들.
@@ -53,6 +56,13 @@ import {hasAgentRequest} from './requestLoop';
 // 주지 않는다 — 코어가 이미 아는 규칙을 화면에서 다시 판정하지 않고, 진입점을
 // 뺌으로써 표현한다.
 // =============================================================================
+
+/** 앱이 앞에 있는가 — 「보고 있음」 신호가 쓰는 어댑터 그대로. 뒤에 있는 동안 온 답글을 읽은 것으로 치지 않는다. */
+function useAppActive(): boolean {
+  const [active, setActive] = useState(appStateForeground.isForeground());
+  useEffect(() => appStateForeground.subscribe(setActive), []);
+  return active;
+}
 
 /** 근거 착지 토큰의 시작. 알림 착지 토큰(1부터 오른다)과 겹치지 않는 대역이다. */
 const EVIDENCE_TOKEN_BASE = 1_000_000;
@@ -182,6 +192,37 @@ export function ThreadPanel({
 
   const messages = useMemo(() => [liveRoot, ...replies], [liveRoot, replies]);
 
+  // 답글을 다 받아 그린 뒤인가 — 착지 점프와 읽음 신호가 같은 때를 쓴다.
+  const ready = status === 'ready';
+
+  // 「여기까지 읽었어요」 신호 (#4878, #4889 2단계): 답글을 다 받아 화면에 그린 뒤(`ready`), 그리고 새 답글이 그려질 때마다
+  // 든 답글의 최대 seq가 오르면 한 번 보낸다. 앱이 앞에 있을 때만이다. 응답은 든 루트의 요약에 반영한다
+  // (`timeline.applyThreadRead` — 채널 목록의 「새 답글 M」 칩이 그 루트에서 그려진다). 운영은 `workspaceId`·`channelId`를
+  // 늘 준다; 격리 하니스는 안 주고, 그때는 보낼 곳이 없다 — 그 거절은 `send` 한 곳이 하고(가드가 하나다), 보내는 이는 그것을
+  // 「보내지 못함」으로 삼켜 다음 신호에 다시 시도한다.
+  const {applyThreadRead} = timeline;
+  const readTarget = useRef({workspaceId, channelId, applyThreadRead});
+  readTarget.current = {workspaceId, channelId, applyThreadRead};
+  const readSender = useMemo(
+    () =>
+      createThreadReadSender({
+        send: (rootId, seq) => {
+          const target = readTarget.current;
+          if (target.workspaceId === undefined || target.channelId === undefined) {
+            return Promise.reject(new Error('thread-read-without-channel'));
+          }
+          return markThreadRead(target.workspaceId, target.channelId, rootId, seq);
+        },
+        onState: (rootId, state) => readTarget.current.applyThreadRead(rootId, state),
+      }),
+    [],
+  );
+  const appActive = useAppActive();
+  useEffect(() => {
+    if (!ready || !appActive) return;
+    readSender.note(root.id, readSignalSeq(replies));
+  }, [ready, appActive, readSender, root.id, replies]);
+
   // 경계 뒤에 온 남의 답글 수. 내가 쓴 답글은 안 읽은 것이 아니다.
   const sinceSeq = memory?.sinceSeq;
   const unreadReplies = useMemo(
@@ -233,10 +274,10 @@ export function ThreadPanel({
     () =>
       landingMessageId !== undefined &&
       landingToken !== undefined &&
-      status === 'ready'
+      ready
         ? {messageId: landingMessageId, seq: null, token: landingToken}
         : undefined,
-    [landingMessageId, landingToken, status],
+    [landingMessageId, landingToken, ready],
   );
 
   const {toggleReaction, editBody, removeMessage, togglePin} = timeline;

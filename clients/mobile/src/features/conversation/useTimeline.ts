@@ -13,6 +13,7 @@ import {
   uuidEq,
   type Message,
   type MessageAttachment,
+  type ThreadReadState,
 } from '@momo/core/lib/api';
 import {
   payloadToMessage,
@@ -28,6 +29,7 @@ import {
   type PinListStatus,
   type PinMap,
 } from '@momo/core/features/timeline/pins';
+import {applyThreadReadState} from '@momo/core/features/timeline/threadSummary';
 import {
   pruneRecoveryMarkers,
   RECOVERY_MARKER_TTL_MS,
@@ -208,6 +210,11 @@ export interface UseTimelineResult {
   removeMessage: (message: Message) => Promise<void>;
   /** One page of a root's replies, merged into the same seq-ordered state. */
   loadReplies: (rootId: string) => Promise<void>;
+  /**
+   * The answer to a thread's 「read up to here」 signal (#4878, #4889 stage 2), folded into the HELD root's summary: a followed
+   * thread's unread count becomes the server's (0 clears the 「새 답글 M」 chip), an unfollowed one loses the value.
+   */
+  applyThreadRead: (rootId: string, read: ThreadReadState) => void;
   /** Reply into a thread. Same echo machinery as `send`, tagged with its root. */
   sendReply: (
     rootId: string,
@@ -996,6 +1003,10 @@ export function useTimeline(
 
   const reload = useCallback(() => setReloadNonce(n => n + 1), []);
 
+  const applyThreadRead = useCallback((rootId: string, read: ThreadReadState) => {
+    setState(s => applyThreadReadState(s, rootId, read));
+  }, []);
+
   return {
     state,
     status,
@@ -1011,6 +1022,7 @@ export function useTimeline(
     editBody,
     removeMessage,
     loadReplies,
+    applyThreadRead,
     sendReply,
     repliesPending,
     loadOlder,
