@@ -219,6 +219,9 @@ RUN set -eux; \
 COPY server-rust/crates crates
 COPY server-rust/bins bins
 COPY packages/momo-core/src/features/emoji/emojiCatalog.json ../packages/momo-core/src/features/emoji/emojiCatalog.json
+# The hosted door's failure-card sentences are the client's golden file, read by
+# `momo-workspace-actions` at compile time (ADR-0218 G3.8, #4911). Only that one file.
+COPY packages/momo-core/src/features/approvals/expression-failure-copy.json ../packages/momo-core/src/features/approvals/expression-failure-copy.json
 RUN set -eux; \
     # cargo rebuild detection is mtime-based and COPY'd files can carry stale
     # timestamps, so the stub-compiled (empty) workspace rlibs would be reused
