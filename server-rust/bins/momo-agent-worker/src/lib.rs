@@ -1757,6 +1757,22 @@ impl AgentWorker {
                 )
                 .await?;
 
+                // ADR-0204 증보 6 D6-2: the card carries the same answer the push and the
+                // `push_action` refusal give, judged on the payload that was just stored.
+                let mut card_props = approval_request_props(
+                    approval_id,
+                    run_id,
+                    channel_id,
+                    ACTION_TYPE_TOOL_CALL,
+                    &call,
+                    &raw_arguments,
+                    expires_at,
+                    execution.as_ref(),
+                );
+                momo_agent::actions::stamp_decision_mode(
+                    &mut card_props,
+                    momo_agent::actions::decision_mode(ACTION_TYPE_TOOL_CALL, &approval_payload),
+                );
                 let card = send_message_in_tx(
                     conn,
                     workspace_id,
@@ -1765,16 +1781,7 @@ impl AgentWorker {
                         author_member_id: agent_member_id,
                         message_type: MessageType::ApprovalRequest,
                         body: Some(approval_request_body(&call.name)),
-                        props: approval_request_props(
-                            approval_id,
-                            run_id,
-                            channel_id,
-                            ACTION_TYPE_TOOL_CALL,
-                            &call,
-                            &raw_arguments,
-                            expires_at,
-                            execution.as_ref(),
-                        ),
+                        props: card_props,
                         root_id: None,
                         // `None`, like the call card above. What this message
                         // points at is an `approval` row, not a message: the

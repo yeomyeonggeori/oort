@@ -5884,6 +5884,16 @@ pub struct ApprovalDecisionReceipt {
     /// struct's shape rather than by a caller remembering to strip a field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<ApprovalDecisionResult>,
+    /// ADR-0204 증보 6 D6-4 — the one line this decision says, written by the server so a
+    /// device can show it as it is (the lock screen's notification changes into it): 「✓ 소개를
+    /// 바꿨어요」, 「소개 바꾸기를 거부했어요」, 「이미 승인된 요청이에요 · 소개 바꾸기」.
+    ///
+    /// **Additive.** Absent from every refusal (the words of a failure are the device's), from
+    /// the receipts stored before it existed (a replay answers what the first call answered) and
+    /// from a decision no sentence is written for (a DM admission's vote). A client that does not
+    /// know the key keeps the sentence it always had.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
 }
 
 /// The `result` object of ADR-0186 부록 C.
@@ -6324,6 +6334,7 @@ mod tests {
             decided_at_ms: 9,
             decision_reason: None,
             result: None,
+            line: None,
         })
         .expect("serialize");
         let mut receipt_keys: Vec<&str> = receipt
@@ -6369,6 +6380,7 @@ mod tests {
                 },
                 secret_once: None,
             }),
+            line: None,
         };
         let stored = serde_json::to_value(&executed).expect("serialize");
         assert_eq!(stored["result"]["actionId"], "invite.create");

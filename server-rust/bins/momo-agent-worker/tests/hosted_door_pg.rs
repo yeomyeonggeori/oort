@@ -1014,7 +1014,9 @@ async fn a_still_photo_turn_becomes_one_generated_candidate_card_and_commits_no_
     assert_eq!(messages.len(), 1, "{messages:?}");
     let card = &messages[0];
     assert!(is_card(card));
-    assert_eq!(card.body.as_deref(), Some("승인 요청: 팀 표현 추가"));
+    assert_eq!(card.body.as_deref(), Some("팀 표현을 추가해도 될까요?"));
+    // ADR-0204 증보 6 D6-2: the picture is the card, so the app decides it.
+    assert_eq!(card.props["decision_mode"], "open");
     assert_eq!(card.props["status"], "pending");
     let candidates = card.props["action"]["expression"]["candidates"]
         .as_array()

@@ -26,6 +26,7 @@
 //!
 //! Parity source: `workers/NotifierWorker/.../PushRelayClient.swift:24-60`.
 
+use momo_agent::actions::DecisionMode;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -98,7 +99,7 @@ pub enum PushCategory {
     Approval,
     /// An approval that must be opened in the app to be decided (ADR-0204 D7,
     /// #3928): one 「열어서 결정」 button. Chosen by
-    /// [`momo_agent::actions::opens_in_app`] — the one list.
+    /// [`momo_agent::actions::decision_mode`] — the one function.
     ///
     /// **Deploy order:** the relay first (it refuses a category it does not
     /// know), then the server, then the app. An app build that predates the
@@ -134,14 +135,15 @@ impl PushCategory {
 /// a `resume_offer` is an `approval_request` message that must still group as
 /// work rather than as an approval.
 ///
-/// `opens_in_app` is [`momo_agent::actions::opens_in_app`] answered for the
-/// approval this message is the card of (ADR-0204 D7); it matters only for an
+/// `decision` is [`momo_agent::actions::decision_mode`] answered for the approval this
+/// message is the card of (ADR-0204 D7, 증보 6 D6-2 — the same answer the card's
+/// `props.decision_mode` and the `push_action` refusal carry); it matters only for an
 /// `approval_request` message and is ignored for every other shape.
 pub fn category_for(
     message_type: &str,
     props_kind: Option<&str>,
     reason: PushReason,
-    opens_in_app: bool,
+    decision: DecisionMode,
 ) -> PushCategory {
     if matches!(props_kind, Some("resume_offer") | Some("work_session_idle"))
         || reason == PushReason::WorkRunDone
@@ -149,10 +151,9 @@ pub fn category_for(
         return PushCategory::Work;
     }
     if message_type == "approval_request" {
-        return if opens_in_app {
-            PushCategory::ApprovalOpen
-        } else {
-            PushCategory::Approval
+        return match decision {
+            DecisionMode::Open => PushCategory::ApprovalOpen,
+            DecisionMode::Inline => PushCategory::Approval,
         };
     }
     if props_kind == Some("work_session") {
@@ -480,11 +481,11 @@ mod tests {
     #[test]
     fn category_precedence_matches_swift() {
         assert_eq!(
-            category_for("text", None, PushReason::Dm, false),
+            category_for("text", None, PushReason::Dm, DecisionMode::Inline),
             PushCategory::Message
         );
         assert_eq!(
-            category_for("text", None, PushReason::Mention, false),
+            category_for("text", None, PushReason::Mention, DecisionMode::Inline),
             PushCategory::Mention
         );
         assert_eq!(
@@ -492,12 +493,17 @@ mod tests {
                 "approval_request",
                 Some("work_control_approval"),
                 PushReason::ApprovalRequest,
-                false
+                DecisionMode::Inline
             ),
             PushCategory::Approval
         );
         assert_eq!(
-            category_for("system", Some("work_session"), PushReason::Dm, false),
+            category_for(
+                "system",
+                Some("work_session"),
+                PushReason::Dm,
+                DecisionMode::Inline
+            ),
             PushCategory::Work
         );
         assert_eq!(
@@ -505,7 +511,7 @@ mod tests {
                 "approval_request",
                 Some("resume_offer"),
                 PushReason::ResumeOffer,
-                false
+                DecisionMode::Inline
             ),
             PushCategory::Work,
             "a resume offer is an approval_request message that must still group as work"
@@ -515,7 +521,7 @@ mod tests {
                 "system",
                 Some("work_session_idle"),
                 PushReason::WorkSessionIdle,
-                false
+                DecisionMode::Inline
             ),
             PushCategory::Work
         );
@@ -523,7 +529,12 @@ mod tests {
         // reason says it is a work-run completion (#3517).
         for message_type in ["text", "system"] {
             assert_eq!(
-                category_for(message_type, None, PushReason::WorkRunDone, false),
+                category_for(
+                    message_type,
+                    None,
+                    PushReason::WorkRunDone,
+                    DecisionMode::Inline
+                ),
                 PushCategory::Work
             );
         }
@@ -534,20 +545,30 @@ mod tests {
     #[test]
     fn an_approval_that_opens_in_the_app_is_its_own_category() {
         assert_eq!(
-            category_for("approval_request", None, PushReason::ApprovalRequest, true),
+            category_for(
+                "approval_request",
+                None,
+                PushReason::ApprovalRequest,
+                DecisionMode::Open
+            ),
             PushCategory::ApprovalOpen
         );
         assert_eq!(
-            category_for("approval_request", None, PushReason::ApprovalRequest, false),
+            category_for(
+                "approval_request",
+                None,
+                PushReason::ApprovalRequest,
+                DecisionMode::Inline
+            ),
             PushCategory::Approval
         );
         // The flag is about an approval card; it does not turn anything else into one.
         assert_eq!(
-            category_for("text", None, PushReason::Dm, true),
+            category_for("text", None, PushReason::Dm, DecisionMode::Open),
             PushCategory::Message
         );
         assert_eq!(
-            category_for("text", None, PushReason::Mention, true),
+            category_for("text", None, PushReason::Mention, DecisionMode::Open),
             PushCategory::Mention
         );
         // And the work shapes keep their grouping even on an approval_request row:
@@ -557,7 +578,7 @@ mod tests {
                 "approval_request",
                 Some("resume_offer"),
                 PushReason::ResumeOffer,
-                true
+                DecisionMode::Open
             ),
             PushCategory::Work
         );

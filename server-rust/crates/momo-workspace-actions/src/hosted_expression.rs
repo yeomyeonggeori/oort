@@ -902,6 +902,9 @@ pub async fn propose_in_tx(
     if let Some(block) = payload.get_mut("action").and_then(Value::as_object_mut) {
         block.insert("pins".into(), resolved.pins.clone());
     }
+    // ADR-0204 증보 6 D6-2: the card carries the same answer the push and the `push_action`
+    // refusal give (always `Open`: the picture is the card).
+    let decision = actions::decision_mode(actions::ACTION_TYPE_WORKSPACE_ACTION, &payload);
     let approval_id = momo_agent::create_pending_approval_in_tx(
         conn,
         workspace_id,
@@ -946,6 +949,7 @@ pub async fn propose_in_tx(
     if let (Some(summary), Some(object)) = (&resolved.validated.summary, props.as_object_mut()) {
         object.insert("summary".into(), Value::String(summary.clone()));
     }
+    actions::stamp_decision_mode(&mut props, decision);
     let sent = send_message_in_tx(
         conn,
         workspace_id,

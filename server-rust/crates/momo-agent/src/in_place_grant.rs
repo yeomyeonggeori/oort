@@ -32,7 +32,6 @@ use crate::actions::{
     action_row, grant_channel_row, member_card_label, workspace_action_payload,
     ACTION_HOSTED_CHANNELS_GRANT, ACTION_TYPE_WORKSPACE_ACTION,
 };
-use crate::hosted_notice::inert_display_name;
 
 /// `approval.payload.origin` of a card the **server** raised in place (G2).
 /// Every other `workspace_action` was proposed by an agent and has no origin.
@@ -101,13 +100,12 @@ pub fn mark_held_for_channel_grant(input: &mut Value) {
     }
 }
 
-/// The card body (D5 fallback for a client that does not know the card kind).
-/// The name is made inert exactly as the hosted notice line makes it.
-pub fn in_place_grant_body(agent_display_name: &str) -> String {
-    format!(
-        "승인 요청: 이 채널에서 {} 쓰기",
-        inert_display_name(agent_display_name)
-    )
+/// The card body (D5 fallback for a client that does not know the card kind): one question,
+/// quoting nothing (ADR-0204 증보 6 D6-3). The agent is the push's title and the channel is on
+/// the notification, so a name written into the sentence would only be a second place for a
+/// person-chosen text to reach a lock screen.
+pub fn in_place_grant_body() -> String {
+    crate::approval_sentence::in_place_grant_request_body()
 }
 
 /// What the server found about the channel and the connection — the only
@@ -389,12 +387,7 @@ mod tests {
     }
 
     #[test]
-    fn the_body_names_the_agent_inertly() {
-        assert_eq!(
-            in_place_grant_body("그록"),
-            "승인 요청: 이 채널에서 그록 쓰기"
-        );
-        let body = in_place_grant_body("[x](https://evil.example)");
-        assert!(!body.contains("](") && !body.contains("https://"), "{body}");
+    fn the_body_is_one_question_and_quotes_nothing() {
+        assert_eq!(in_place_grant_body(), "이 채널에서 읽고 쓰게 해도 될까요?");
     }
 }
