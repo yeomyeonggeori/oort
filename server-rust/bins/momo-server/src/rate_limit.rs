@@ -545,6 +545,7 @@ pub(crate) async fn per_ip_refused(
         request,
         next,
         key_prefix,
+        None,
         limit_of,
         StatusCode::UNAUTHORIZED,
     )
@@ -554,11 +555,19 @@ pub(crate) async fn per_ip_refused(
 /// [`per_ip_refused`] for a surface whose one refusal is a different status. `refused` is the
 /// status that spends the address's budget; every other answer — a served response above all —
 /// spends nothing. #4820 C2a: the self-media route answers every refusal with one 404.
+///
+/// `scope` splits one surface's budget further than the address: `Some(scope)` is a second part of
+/// the key (`{key_prefix}:{scope}:{ip}`), so two scopes on one address never share a budget. The
+/// caller validates the scope from the request line (a canonical id or a fixed word, never a raw
+/// client string) and pairs a scoped budget with an address-wide one, because a caller who can pick
+/// the scope can also rotate it: see [`per_ip_self_media_ceiling`]. Both the pre-check and the spend
+/// below take their key from [`refused_key`], so they can never disagree about whose budget it is.
 pub(crate) async fn per_ip_refused_by(
     state: AppState,
     request: Request,
     next: Next,
     key_prefix: &'static str,
+    scope: Option<&str>,
     limit_of: fn(&RateLimitConfig) -> u32,
     refused: StatusCode,
 ) -> Response {
@@ -573,7 +582,7 @@ pub(crate) async fn per_ip_refused_by(
     // before the handler (and its database transaction) runs.
     if let Some(ip) = ip.as_deref() {
         if let Some(retry_after) = state.rate_limit.limiter.exhausted(
-            &format!("{key_prefix}:{ip}"),
+            &refused_key(key_prefix, scope, ip),
             limit,
             Duration::from_secs(config.window_seconds),
         ) {
@@ -589,7 +598,7 @@ pub(crate) async fn per_ip_refused_by(
         return response;
     };
     let verdict = state.rate_limit.limiter.check(
-        &format!("{key_prefix}:{ip}"),
+        &refused_key(key_prefix, scope, &ip),
         limit,
         Duration::from_secs(config.window_seconds),
     );
@@ -602,19 +611,72 @@ pub(crate) async fn per_ip_refused_by(
             limit,
             window_seconds = config.window_seconds,
             surface = key_prefix,
+            scope = scope.unwrap_or("-"),
             "rate limit exceeded (per-ip, refused credentials)"
         );
     }
     too_many_requests(verdict.retry_after_seconds)
 }
 
-/// Per-IP budget for **refused** self-media addresses (#4820 C2a): the public
+/// The limiter key of one refused-credential budget: `{key_prefix}:{ip}`, or
+/// `{key_prefix}:{scope}:{ip}` when the surface splits its budget by scope. A scope never contains
+/// `:`, so an IPv6 address after it cannot be read as part of it.
+fn refused_key(key_prefix: &str, scope: Option<&str>, ip: &str) -> String {
+    match scope {
+        Some(scope) => format!("{key_prefix}:{scope}:{ip}"),
+        None => format!("{key_prefix}:{ip}"),
+    }
+}
+
+/// Budget for **refused** self-media addresses (#4820 C2a): the public
 /// `GET /v1/self-media/{ws}/{token}` answers one 404 for everything it refuses (unknown, other
 /// workspace, expired, spent, run over, not the requester's file). Only that 404 spends the
-/// address's budget, and an address whose budget is spent is turned away before the handler and
-/// its database transaction run. A served picture spends nothing. Reuses the claim budget on an
-/// independent key, like device-link redeem.
+/// budget, and a key whose budget is spent is turned away (429 + `Retry-After`) before the handler
+/// and its database transaction run. A served picture spends nothing.
+///
+/// **Its own limit, split by the workspace in the path** (security review L7). The co-hosted
+/// Hermes reaches the api from one address for every workspace, and its picture tool lets any
+/// well-shaped address through, so a budget keyed by address alone let one model's invented
+/// addresses spend what every workspace's real ones needed. The key is now the address *and* the
+/// path's workspace, and the number is [`RateLimitConfig::self_media_per_workspace_limit`], not the
+/// claim budget. The address-wide ceiling that keeps this split from being a way around the limit
+/// is [`per_ip_self_media_ceiling`], mounted on the same route.
 pub async fn per_ip_self_media(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let scope = self_media_scope(request.uri().path());
+    per_ip_refused_by(
+        state,
+        request,
+        next,
+        "ip:self-media",
+        Some(&scope),
+        |config| config.self_media_per_workspace_limit,
+        StatusCode::NOT_FOUND,
+    )
+    .await
+}
+
+/// How many workspaces' worth of the per-workspace limit one address may be refused across **all**
+/// workspaces in a window. Real traffic is refused almost never (a served picture spends nothing; a
+/// refusal is a token that expired or was used twice), so this sits far above anything it produces.
+const SELF_MEDIA_ADDRESS_CEILING_FACTOR: u32 = 10;
+
+/// The address-wide ceiling on **refused** self-media addresses — the other half of the split in
+/// [`per_ip_self_media`]. A budget per workspace id alone is one the caller can walk around: the
+/// path names the workspace, so a caller who rotates it never spends the same budget twice and every
+/// guess would cost a database transaction again. This one counts the address's refusals whichever
+/// workspace the path names (`limit × SELF_MEDIA_ADDRESS_CEILING_FACTOR`, 300 by default), so a flood
+/// that rotates ids is cut off at that number and the number of workspace buckets one address can
+/// make is bounded by it.
+///
+/// What it costs: an address that really sends more refusals than that in a window — only Hermes,
+/// only in a flood — is turned away for every workspace until the window passes. That is the
+/// availability trade the split moves from "30 refusals" to "300", and no further: below it, one
+/// workspace's refusals touch only that workspace's budget.
+pub async fn per_ip_self_media_ceiling(
     State(state): State<AppState>,
     request: Request,
     next: Next,
@@ -623,11 +685,33 @@ pub async fn per_ip_self_media(
         state,
         request,
         next,
-        "ip:self-media",
-        |config| config.claim_per_ip_limit,
+        "ip:self-media-all",
+        None,
+        |config| {
+            config
+                .self_media_per_workspace_limit
+                .saturating_mul(SELF_MEDIA_ADDRESS_CEILING_FACTOR)
+        },
         StatusCode::NOT_FOUND,
     )
     .await
+}
+
+/// The bucket one self-media request is charged to when the path's workspace is not written as a
+/// canonical id (anything else: not a uuid, upper case, percent-encoded, no path at all).
+const SELF_MEDIA_OTHER_SCOPE: &str = "other";
+
+/// Which workspace's budget a self-media request spends: the id in `/v1/self-media/{ws}/…`,
+/// when it is spelled exactly as the handler accepts it (lowercase, hyphenated), else
+/// [`SELF_MEDIA_OTHER_SCOPE`]. Taken from the request line without decoding it, so it can neither
+/// fail nor disagree about what was asked: a spelling the handler would decode into a real
+/// workspace (a percent-encoded digit) lands in the shared `other` bucket — still counted, never
+/// free.
+fn self_media_scope(path: &str) -> String {
+    path.strip_prefix(momo_messaging::SELF_MEDIA_PATH_PREFIX)
+        .and_then(|rest| rest.split('/').next())
+        .filter(|segment| Uuid::parse_str(segment).is_ok_and(|id| id.to_string() == *segment))
+        .map_or_else(|| SELF_MEDIA_OTHER_SCOPE.to_string(), str::to_string)
 }
 
 /// The upload budget's own key prefix — never the join/claim prefixes, so
@@ -1141,6 +1225,51 @@ mod tests {
             headers.insert("x-forwarded-for", value.parse().expect("header value"));
         }
         headers
+    }
+
+    /// #4820 C2a security review (L7): the workspace a self-media request is charged to is the id the
+    /// path spells exactly as the handler accepts it, and every other spelling shares one bucket —
+    /// so a caller can neither make a key out of arbitrary text nor get a spelling the handler would
+    /// decode into a real workspace for free.
+    #[test]
+    fn a_self_media_request_is_charged_to_the_canonical_workspace_in_its_path() {
+        let ws = "01234567-89ab-cdef-0123-456789abcdef";
+        let token = "T".repeat(43);
+        for (path, scope) in [
+            (format!("/v1/self-media/{ws}/{token}"), ws),
+            // only the segment right after the prefix is the workspace; what follows it does not matter here
+            (format!("/v1/self-media/{ws}/{token}/extra"), ws),
+            (format!("/v1/self-media/{ws}/"), ws),
+            (format!("/v1/self-media/{ws}"), ws),
+            // not written as the handler accepts it: one shared bucket
+            (
+                format!("/v1/self-media/{}/{token}", ws.to_uppercase()),
+                "other",
+            ),
+            (format!("/v1/self-media/%30{}/{token}", &ws[1..]), "other"),
+            (
+                format!("/v1/self-media/{}/{token}", ws.replace('-', "")),
+                "other",
+            ),
+            (format!("/v1/self-media/{ws}x/{token}"), "other"),
+            (format!("/v1/self-media/ {ws}/{token}"), "other"),
+            (format!("/v1/self-media//{token}"), "other"),
+            ("/v1/self-media/".to_string(), "other"),
+            ("/v1/self-media/not-a-uuid/x".to_string(), "other"),
+            (format!("/elsewhere/{ws}/{token}"), "other"),
+        ] {
+            assert_eq!(self_media_scope(&path), scope, "{path}");
+        }
+        // a scope never holds the separator the key is joined with
+        assert!(!SELF_MEDIA_OTHER_SCOPE.contains(':'));
+        assert_eq!(
+            refused_key("ip:self-media", Some(ws), "2001:db8::1"),
+            format!("ip:self-media:{ws}:2001:db8::1")
+        );
+        assert_eq!(
+            refused_key("ip:runner", None, "198.51.100.1"),
+            "ip:runner:198.51.100.1"
+        );
     }
 
     #[test]

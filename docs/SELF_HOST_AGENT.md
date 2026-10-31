@@ -2485,8 +2485,10 @@ generator now do for you; you still read the lock, and the model key stays yours
   never listens. See `infra/railway/README.md` (Hermes). The template also sets
   `OORT_SELF_MEDIA_ORIGIN` (this edge's own public origin) on agent-worker and
   hermes: with it, a request that carries a photo hands the agent's picture tool a
-  five-minute, single-use address of that photo so it can edit the photo; unset on
-  either service, no photo address is handed over (#4820).
+  five-minute, single-use address of that photo so it can edit the photo. Unset on
+  agent-worker, no photo address is handed over. Unset on hermes, the worker still
+  hands one over and the image guard refuses it, so the picture tool never
+  downloads it and the edit has no source (#4820).
 - **docker compose:** `scripts/self_host_env.sh --local-build --with-agents` (or
   `--published-image …`) writes `COMPOSE_PROFILES=agents`, a generated
   `HERMES_API_KEY`, `HERMES_BASE_URL=http://hermes:8642/v1`, the loopback opt-in

@@ -2289,13 +2289,20 @@ pub fn build_app(state: AppState) -> Router {
         // hash-only, five-minute token in the path is the only authority, and the path's workspace
         // is the tenant the token is looked up in. axum serves HEAD with the GET handler, which would
         // spend the token with the body dropped, so the handler itself answers 405 to anything but GET.
-        // Own per-IP budget, spent only by the route's one 404.
+        // Its own budget per (address, path workspace) and an address-wide ceiling above it (so a
+        // caller cannot walk around the first by rotating the workspace), both spent only by the
+        // route's one 404.
         .route(
             "/v1/self-media/{ws}/{token}",
-            get(routes::self_media::serve).route_layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                rate_limit::per_ip_self_media,
-            )),
+            get(routes::self_media::serve)
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    rate_limit::per_ip_self_media,
+                ))
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    rate_limit::per_ip_self_media_ceiling,
+                )),
         )
         .merge(protected)
         .merge(human_mcp);

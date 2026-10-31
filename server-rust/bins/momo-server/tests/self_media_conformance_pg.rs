@@ -6,15 +6,18 @@
 //! ```
 //!
 //! The server runs as `momo_app` (`rolsuper=false`, `rolbypassrls=false`); the fixture is seeded as
-//! the superuser; tokens are minted by the real `momo_messaging::mint_with_ttl_in_tx`. The Drive
-//! archive is an in-process map that (a) answers a deliberately leaky mime string so a response that
-//! passed it through would show, and (b) counts content reads so a refusal that reached Drive would show.
+//! the superuser; tokens are minted by the real `momo_messaging::mint_with_ttl_in_tx` **as
+//! `momo_worker`**, the role the agent-worker mints with (`momo_app` holds no INSERT on the token
+//! table: `self-media-token-lockdown`). The Drive archive is an in-process map that (a) answers a
+//! deliberately leaky mime string so a response that passed it through would show, (b) counts content
+//! reads so a refusal that reached Drive would show, and (c) can be told to stop holding itself to the
+//! ceiling the route hands it, so the route's own length check is what a test measures.
 
 use std::collections::{BTreeSet, HashMap};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -26,6 +29,7 @@ use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::{with_tenant_tx, PgPool};
 use momo_drive::{DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession};
 use momo_messaging::{mint_with_ttl_in_tx, token_hash};
+use momo_server::config::RateLimitConfig;
 use momo_server::{build_app, AppState};
 use uuid::Uuid;
 
@@ -101,11 +105,28 @@ async fn momo_app_pool() -> PgPool {
         .expect("momo_app pool")
 }
 
+/// The agent-worker's own role (BYPASSRLS): the only runtime role that may INSERT a token.
+async fn momo_worker_pool() -> PgPool {
+    let options: PgConnectOptions = database_url().parse().expect("DATABASE_URL parses");
+    let password =
+        std::env::var("MOMO_WORKER_PASSWORD").unwrap_or_else(|_| "momo_worker_dev_pw".to_string());
+    PgPoolOptions::new()
+        .max_connections(4)
+        .connect_with(options.username("momo_worker").password(&password))
+        .await
+        .expect("momo_worker pool")
+}
+
 /// Holds the bytes of the files a test registers and counts every content read.
 #[derive(Debug, Default)]
 struct MapArchive {
     files: Mutex<HashMap<String, Vec<u8>>>,
     reads: AtomicUsize,
+    /// When set, `file_content` hands back whatever bytes the file holds even if they are longer than
+    /// the `max_bytes` the caller asked for. A real archive enforces that ceiling (so a longer stream
+    /// fails before the route sees it); an archive that does not is what the route's own length check
+    /// exists for, and a test of that check needs one.
+    uncapped: AtomicBool,
 }
 
 #[async_trait]
@@ -137,7 +158,7 @@ impl DriveArchive for MapArchive {
             .get(file_id)
             .cloned()
             .ok_or(DriveError::FileNotFound)?;
-        if bytes.len() as i64 > max_bytes {
+        if bytes.len() as i64 > max_bytes && !self.uncapped.load(Ordering::SeqCst) {
             return Err(DriveError::ContentTooLarge);
         }
         Ok(DriveContent {
@@ -158,24 +179,31 @@ struct Server {
     base: String,
     archive: Arc<MapArchive>,
     su: PgPool,
-    app: PgPool,
+    /// What the agent-worker runs as. It mints; the api (`momo_app`, behind the router) only redeems.
+    worker: PgPool,
 }
 
 async fn start() -> Server {
+    start_with(RateLimitConfig::default()).await
+}
+
+async fn start_with(rate_limit: RateLimitConfig) -> Server {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
+    let worker = momo_worker_pool().await;
     let archive = Arc::new(MapArchive::default());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind");
     let address: SocketAddr = listener.local_addr().unwrap();
     let state = AppState::new(
-        app.clone(),
+        app,
         "self-media-conformance-signing-secret".to_string(),
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
     )
-    .with_drive(archive.clone());
+    .with_drive(archive.clone())
+    .with_rate_limit(rate_limit);
     let router = build_app(state);
     tokio::spawn(async move {
         let _ = axum::serve(listener, router).await;
@@ -184,7 +212,7 @@ async fn start() -> Server {
         base: format!("http://{address}"),
         archive,
         su,
-        app,
+        worker,
     }
 }
 
@@ -347,7 +375,7 @@ async fn seed_tenant(server: &Server) -> Tenant {
 
 async fn mint(server: &Server, tenant: &Tenant, ttl_secs: i64) -> String {
     let (ws, run, agent) = (tenant.ws, tenant.run, tenant.agent);
-    with_tenant_tx(&server.app, ws, move |conn| {
+    with_tenant_tx(&server.worker, ws, move |conn| {
         Box::pin(async move { mint_with_ttl_in_tx(conn, ws, run, agent, ttl_secs).await })
     })
     .await
@@ -710,8 +738,8 @@ async fn only_get_reaches_the_handler_and_other_methods_spend_nothing() {
     assert_eq!(get(&server, &address(&tenant, &token)).await.status, 200);
 }
 
-/// Refusals spend the caller's address budget and only they do: after the budget (30, the claim
-/// budget) is gone the address is turned away with 429 + Retry-After before the handler runs, and
+/// Refusals spend the caller's address budget and only they do: after the budget (30, this route's
+/// own default) is gone the address is turned away with 429 + Retry-After before the handler runs, and
 /// a different address is unaffected.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a disposable PG18"]
@@ -759,4 +787,236 @@ async fn refusals_spend_the_per_address_budget_and_serving_does_not() {
     // another address is not affected
     let token = mint(&server, &tenant, 300).await;
     assert_eq!(guess("198.51.100.22", token).await.status().as_u16(), 200);
+}
+
+/// The declared length is a promise the route holds the archive to (security review L2): bytes one
+/// short of what the row declares, one over it, or far over it — all of which still start like the
+/// declared image — are refused with the one 404. They are never served short and never cut down to
+/// fit. The archive here does not hold itself to the ceiling the route passes it, so what refuses
+/// the long ones is the route's own check, not the archive's.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn a_stream_one_byte_short_or_long_is_refused_and_never_truncated() {
+    let server = start().await;
+    server.archive.uncapped.store(true, Ordering::SeqCst);
+    let tenant = seed_tenant(&server).await; // the row declares 4096 bytes
+    let declared = 4096usize;
+
+    // the control: the declared length, served whole — so a 404 below is about the length
+    let token = mint(&server, &tenant, 300).await;
+    let whole = get(&server, &address(&tenant, &token)).await;
+    assert_eq!(whole.status, 200, "the declared length is served");
+    assert_eq!(whole.body, png_bytes(declared));
+
+    // the one refusal everything below must equal
+    let baseline = get(&server, &address(&tenant, &"N".repeat(43))).await;
+    assert_eq!(baseline.status, 404);
+    let fingerprint = |seen: &Seen| {
+        seen.headers
+            .iter()
+            .filter(|(name, _)| name != "date")
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    };
+
+    for (label, length) in [
+        ("one byte short", declared - 1),
+        ("one byte long", declared + 1),
+        ("far longer", declared * 2),
+    ] {
+        server
+            .archive
+            .files
+            .lock()
+            .unwrap()
+            .insert(tenant.drive_file.clone(), png_bytes(length));
+        let token = mint(&server, &tenant, 300).await;
+        let reads_before = server.archive.reads.load(Ordering::SeqCst);
+        let refused = get(&server, &address(&tenant, &token)).await;
+        assert_eq!(
+            refused.status,
+            404,
+            "{label}: a stream that is not the declared length is not served (got {} body bytes)",
+            refused.body.len()
+        );
+        assert_eq!(refused.body, baseline.body, "{label}: the same body");
+        assert_eq!(
+            fingerprint(&refused),
+            fingerprint(&baseline),
+            "{label}: the same headers"
+        );
+        assert_eq!(
+            server.archive.reads.load(Ordering::SeqCst),
+            reads_before + 1,
+            "{label}: the archive was read — it is the length that is wrong"
+        );
+        let spent: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM self_media_token WHERE token_hash = $1 AND used_at IS NOT NULL",
+        )
+        .bind(token_hash(&token).to_vec())
+        .fetch_one(&server.su)
+        .await
+        .unwrap();
+        assert_eq!(spent, 1, "{label}: the token was spent either way");
+    }
+}
+
+/// One workspace's refusals never block another workspace's picture (security review L7). The
+/// co-hosted Hermes reaches the api from one address for every workspace and its tool lets any
+/// well-shaped address through, so a model that invents addresses under its own workspace used to
+/// spend the budget every workspace's real addresses needed. The budget is now this route's own
+/// number and is split by the workspace in the path. `claim_per_ip_limit` is set far above the
+/// number so a budget that still read the claim one would show.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn one_workspaces_refusals_never_block_another_workspaces_picture() {
+    let server = start_with(RateLimitConfig {
+        self_media_per_workspace_limit: 4,
+        claim_per_ip_limit: 100_000,
+        ..RateLimitConfig::default()
+    })
+    .await;
+    let one = seed_tenant(&server).await;
+    let two = seed_tenant(&server).await;
+    let one_token = mint(&server, &one, 300).await;
+    let two_token = mint(&server, &two, 300).await;
+    let hermes = "198.51.100.40"; // every workspace's picture request arrives from here
+    let from = |ip: &'static str, path: String| {
+        let url = format!("{}{path}", server.base);
+        async move {
+            client()
+                .get(url)
+                .header("x-forwarded-for", ip)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+
+    // workspace one's model invents addresses: four 404s spend its budget, then 429
+    let mut statuses = Vec::new();
+    for round in 0..7u8 {
+        let fake = format!("{}{}", "N".repeat(42), char::from(b'a' + round));
+        statuses.push(from(hermes, address(&one, &fake)).await.status().as_u16());
+    }
+    assert_eq!(
+        statuses[..4],
+        [404, 404, 404, 404],
+        "its own budget, not the claim one: {statuses:?}"
+    );
+    assert!(
+        statuses[4..].iter().all(|status| *status == 429),
+        "then turned away: {statuses:?}"
+    );
+
+    // the budget is real for workspace one: its own live address is turned away too, before the
+    // handler, so the token is not spent either
+    let blocked = from(hermes, address(&one, &one_token)).await;
+    assert_eq!(blocked.status().as_u16(), 429);
+    assert!(blocked.headers().contains_key("retry-after"));
+    let unspent: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM self_media_token WHERE token_hash = $1 AND used_at IS NULL",
+    )
+    .bind(token_hash(&one_token).to_vec())
+    .fetch_one(&server.su)
+    .await
+    .unwrap();
+    assert_eq!(unspent, 1, "turned away before the handler: not spent");
+
+    // …and workspace two, from the very same address, is untouched: its real picture is served
+    let served = from(hermes, address(&two, &two_token)).await;
+    assert_eq!(
+        served.status().as_u16(),
+        200,
+        "another workspace's refusals must not block this workspace's picture"
+    );
+    assert_eq!(served.bytes().await.unwrap().to_vec(), png_bytes(4096));
+
+    // workspace two still has its whole budget of its own
+    let mut two_statuses = Vec::new();
+    for round in 0..5u8 {
+        let fake = format!("{}{}", "M".repeat(42), char::from(b'a' + round));
+        two_statuses.push(from(hermes, address(&two, &fake)).await.status().as_u16());
+    }
+    assert_eq!(
+        two_statuses,
+        [404, 404, 404, 404, 429],
+        "workspace one's refusals spent none of workspace two's budget"
+    );
+
+    // and workspace one's budget belongs to this address: its live address is served from another
+    let elsewhere = from("198.51.100.41", address(&one, &one_token)).await;
+    assert_eq!(elsewhere.status().as_u16(), 200);
+}
+
+/// The split by workspace must not be a way around the limit: the path names the workspace, so a
+/// caller who rotates it would never spend the same budget twice and every guess would cost a
+/// database transaction again. The address-wide ceiling (ten times the per-workspace number) cuts the
+/// rotation off, and a workspace spelled any way but the canonical one shares a single bucket.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn rotating_the_workspace_in_the_path_does_not_walk_around_the_limit() {
+    let server = start_with(RateLimitConfig {
+        self_media_per_workspace_limit: 2,
+        ..RateLimitConfig::default()
+    })
+    .await;
+    let ceiling = 20usize; // ten times the per-workspace number
+    let rotate = |ip: &'static str, workspace: String| {
+        let url = format!(
+            "{}/v1/self-media/{workspace}/{}",
+            server.base,
+            "N".repeat(43)
+        );
+        async move {
+            client()
+                .get(url)
+                .header("x-forwarded-for", ip)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let mut statuses = Vec::new();
+    for _ in 0..ceiling + 6 {
+        statuses.push(
+            rotate("198.51.100.50", Uuid::new_v4().to_string())
+                .await
+                .status()
+                .as_u16(),
+        );
+    }
+    let not_found = statuses.iter().filter(|status| **status == 404).count();
+    assert!(
+        (ceiling..=ceiling + 1).contains(&not_found),
+        "a different workspace every time still runs out at the ceiling, not never: {statuses:?}"
+    );
+    assert!(
+        statuses.last() == Some(&429),
+        "turned away at the ceiling: {statuses:?}"
+    );
+    // another address has its own ceiling
+    assert_eq!(
+        rotate("198.51.100.51", Uuid::new_v4().to_string())
+            .await
+            .status()
+            .as_u16(),
+        404
+    );
+
+    // spellings the handler would not take as a workspace share one bucket (limit 2), not one each
+    let mut other = Vec::new();
+    for round in 0..4 {
+        other.push(
+            rotate("198.51.100.52", format!("not-a-workspace-{round}"))
+                .await
+                .status()
+                .as_u16(),
+        );
+    }
+    assert_eq!(
+        other,
+        [404, 404, 429, 429],
+        "every non-canonical spelling is charged to one bucket"
+    );
 }

@@ -434,6 +434,48 @@ BEGIN
 END $$;
 -- END catalog-readonly-lockdown
 
+-- BEGIN self-media-token-lockdown (#4820 C2a security review L6; ADR-0218 G4). Identical in
+-- 160_self_media_token.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
+-- between the markers. A row of this table opens one requester's attachment to whoever presents the
+-- token, and the BYPASSRLS roles skip RLS, so their table privileges are what keeps a forged row (any
+-- run, requester and attachment) away from a role with no business writing one. Each runtime role gets
+-- exactly what the flow uses: momo_worker mints (INSERT) and sweeps day-old rows (DELETE) and reads what
+-- it writes (SELECT); momo_app spends a token (UPDATE ... RETURNING, so SELECT too) and never creates or
+-- deletes one; relay, notifier and platform_admin do not touch it at all. A foreign-key cascade (attachment,
+-- run, workspace) runs as the table's owner, so deleting a parent still clears its rows. Idempotent and
+-- order-proof (a pass before the table or the roles exist finishes what it can, the pass after lands the
+-- rest), and it fails loudly if the result is not what is written here.
+DO $$
+DECLARE
+  r text;
+  p text;
+  allowed text[];
+BEGIN
+  IF to_regclass('public.self_media_token') IS NULL THEN
+    RETURN;
+  END IF;
+  REVOKE ALL ON TABLE public.self_media_token FROM PUBLIC;
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+    allowed := CASE r
+      WHEN 'momo_app' THEN ARRAY['SELECT', 'UPDATE']
+      WHEN 'momo_worker' THEN ARRAY['SELECT', 'INSERT', 'DELETE']
+      ELSE ARRAY[]::text[]
+    END;
+    EXECUTE format('REVOKE ALL ON TABLE public.self_media_token FROM %I', r);
+    IF cardinality(allowed) > 0 THEN
+      EXECUTE format('GRANT %s ON TABLE public.self_media_token TO %I', array_to_string(allowed, ', '), r);
+    END IF;
+    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+      IF has_table_privilege(r, 'public.self_media_token', p) IS DISTINCT FROM (p = ANY (allowed)) THEN
+        RAISE EXCEPTION 'role % must % % on self_media_token',
+          r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END self-media-token-lockdown
+
 -- momo_notifier: table-scoped GRANTs only (no ALL TABLES, no DELETE).
 -- Relations are absent on the pre-migrate pass; the post-migrate re-apply
 -- of this file is what actually lands these grants (#2193).

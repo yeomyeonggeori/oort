@@ -878,3 +878,195 @@ async fn a_mint_clears_only_its_own_workspaces_rows_older_than_a_day() {
         "another workspace's rows are not touched"
     );
 }
+
+/// A pool as one of the runtime roles the production processes use (the development passwords the
+/// bootstrap file sets), for the privilege tests below.
+async fn pool_as(role: &str, password_env: &str, fallback: &str) -> PgPool {
+    let options: PgConnectOptions = database_url().parse().expect("postgres URL");
+    let password = std::env::var(password_env).unwrap_or_else(|_| fallback.to_string());
+    PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(options.username(role).password(&password))
+        .await
+        .unwrap_or_else(|error| panic!("{role} pool: {error}"))
+}
+
+/// Run one statement as a role and say whether the **privilege** let it through. `permission denied
+/// for table` is the privilege missing; anything else that stops the statement later (a NOT NULL
+/// constraint on an INSERT of `DEFAULT VALUES`, a row-level-security check for the non-bypass role,
+/// whose SQLSTATE is also 42501) means the privilege check had already passed.
+async fn privilege_probe(pool: &PgPool, sql: &str) -> &'static str {
+    match sqlx::query(sql).execute(pool).await {
+        Ok(_) => "allowed",
+        Err(sqlx::Error::Database(error))
+            if error.code().as_deref() == Some("42501")
+                && error.message().starts_with("permission denied for table") =>
+        {
+            "denied"
+        }
+        Err(sqlx::Error::Database(error))
+            if error.code().as_deref() == Some("23502")
+                || error.message().contains("row-level security") =>
+        {
+            "allowed"
+        }
+        Err(other) => panic!("`{sql}` failed for a reason other than privilege: {other}"),
+    }
+}
+
+/// The table holds exactly what the flow uses, role by role (security review L6,
+/// `self-media-token-lockdown`): the worker mints and sweeps, the api spends, and the other two
+/// BYPASSRLS roles — which skip RLS, so their table privileges are the only door — touch nothing, so
+/// a role that has no business writing a row cannot forge one. Both the catalog and a real statement
+/// as each role are checked: the catalog says what is granted, the statement says it is not a
+/// privilege some other grant path still supplies.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_runtime_roles_hold_exactly_the_privileges_the_flow_uses() {
+    let pools = pools().await;
+    const VERBS: [&str; 7] = [
+        "SELECT",
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "TRUNCATE",
+        "REFERENCES",
+        "TRIGGER",
+    ];
+    let expected = |role: &str| -> &'static [&'static str] {
+        match role {
+            "momo_app" => &["SELECT", "UPDATE"],
+            "momo_worker" => &["SELECT", "INSERT", "DELETE"],
+            _ => &[],
+        }
+    };
+    let mut drift: Vec<String> = Vec::new();
+    for role in [
+        "momo_app",
+        "momo_relay",
+        "momo_worker",
+        "momo_notifier",
+        "public",
+    ] {
+        for verb in VERBS {
+            let held: bool =
+                sqlx::query_scalar("SELECT has_table_privilege($1, 'public.self_media_token', $2)")
+                    .bind(role)
+                    .bind(verb)
+                    .fetch_one(&pools.su)
+                    .await
+                    .unwrap();
+            let want = expected(role).contains(&verb);
+            if held != want {
+                drift.push(format!("{role}:{verb} held={held} want={want}"));
+            }
+        }
+    }
+    assert!(
+        drift.is_empty(),
+        "the table's privileges drifted from the lockdown: {drift:?}"
+    );
+
+    // the same, as real statements run by the real roles
+    let statements = [
+        ("SELECT", "SELECT count(*) FROM self_media_token"),
+        ("INSERT", "INSERT INTO self_media_token DEFAULT VALUES"),
+        (
+            "UPDATE",
+            "UPDATE self_media_token SET used_at = used_at WHERE false",
+        ),
+        ("DELETE", "DELETE FROM self_media_token WHERE false"),
+    ];
+    let relay = pool_as("momo_relay", "MOMO_RELAY_PASSWORD", "momo_relay_dev_pw").await;
+    let notifier = pool_as(
+        "momo_notifier",
+        "MOMO_NOTIFIER_PASSWORD",
+        "momo_notifier_dev_pw",
+    )
+    .await;
+    let mut wrong: Vec<String> = Vec::new();
+    for (role, pool) in [
+        ("momo_app", &pools.app),
+        ("momo_relay", &relay),
+        ("momo_worker", &pools.worker),
+        ("momo_notifier", &notifier),
+    ] {
+        for (verb, sql) in statements {
+            let got = privilege_probe(pool, sql).await;
+            let want = if expected(role).contains(&verb) {
+                "allowed"
+            } else {
+                "denied"
+            };
+            if got != want {
+                wrong.push(format!("{role} {verb}: {got}, want {want}"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "a statement ran (or was refused) against the lockdown: {wrong:?}"
+    );
+}
+
+/// Taking the deleting roles' DELETE away from the table must not leave rows behind when a parent
+/// goes: a foreign-key cascade runs as the table's owner, so the api (which deletes attachments) and
+/// the notifier (whose reclaim does) still clear a picture's tokens with them.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn a_parent_delete_still_clears_the_tokens_though_the_deleting_role_holds_no_delete_on_them()
+{
+    let pools = pools().await;
+    let notifier = pool_as(
+        "momo_notifier",
+        "MOMO_NOTIFIER_PASSWORD",
+        "momo_notifier_dev_pw",
+    )
+    .await;
+    let rows = |ws: Uuid| {
+        let su = pools.su.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM self_media_token WHERE workspace_id = $1",
+            )
+            .bind(ws)
+            .fetch_one(&su)
+            .await
+            .unwrap()
+        }
+    };
+
+    // as the api's role (RLS-bound, no DELETE on the token table)
+    let by_api = seed_tenant(&pools.su).await;
+    mint(&pools, &by_api, 300).await.expect("a token");
+    assert_eq!(rows(by_api.ws).await, 1);
+    let (ws, attachment) = (by_api.ws, by_api.attachment);
+    with_tenant_tx(&pools.app, ws, move |conn| {
+        Box::pin(async move {
+            sqlx::query("DELETE FROM attachment WHERE workspace_id = $1 AND id = $2")
+                .bind(ws)
+                .bind(attachment)
+                .execute(&mut *conn)
+                .await?;
+            Ok::<(), momo_db::DbError>(())
+        })
+    })
+    .await
+    .expect("momo_app deletes the attachment");
+    assert_eq!(rows(by_api.ws).await, 0, "the cascade cleared the token");
+
+    // as the notifier (BYPASSRLS, no privilege of any kind on the token table)
+    let by_notifier = seed_tenant(&pools.su).await;
+    mint(&pools, &by_notifier, 300).await.expect("a token");
+    assert_eq!(rows(by_notifier.ws).await, 1);
+    sqlx::query("DELETE FROM attachment WHERE id = $1")
+        .bind(by_notifier.attachment)
+        .execute(&notifier)
+        .await
+        .expect("momo_notifier deletes the attachment");
+    assert_eq!(
+        rows(by_notifier.ws).await,
+        0,
+        "the cascade cleared the token"
+    );
+}
