@@ -842,10 +842,9 @@ mod tests {
     /// * The linear scan: a debug build reads 512 KiB of it in 27 ms, and every other page shape in
     ///   the table below in 35 ms or less. A release build needs a few milliseconds.
     ///
-    /// One second is therefore about 35 times the slowest debug time of the fixed parser (a loaded
-    /// CI machine does not reach it) and well below even the release time of the broken one, so
-    /// the broken parser fails in either profile, and fails here in one second because the read
-    /// runs on a thread this test stops waiting for. Do not raise the number to make a slow machine
+    /// One second is therefore about 35 times the slowest debug time of the linear parser (a loaded
+    /// CI machine does not reach it), so a non-linear scan fails in either profile, and fails here
+    /// in one second because the read runs on a thread this test stops waiting for. Do not raise the number to make a slow machine
     /// pass: a page that needs a second here is the bug this test exists for.
     const READ_DEADLINE: Duration = Duration::from_secs(1);
 
@@ -863,10 +862,9 @@ mod tests {
         receiver.recv_timeout(limit).ok()
     }
 
-    /// H-1: a `<title>` with no `</title` after it used to be searched for again by every later
-    /// `<title>`, to the end of the page each time. 512 KiB of them took seconds on the one task
-    /// that also sends webhooks. The answer to "is there a `</title` ahead?" cannot change as the
-    /// scan moves forward, so it is asked once.
+    /// A `<title>` with no `</title` after it must not be searched for again by every later
+    /// `<title>`. The answer to "is there a `</title` ahead?" cannot change as the scan moves
+    /// forward, so it is asked once.
     #[test]
     fn a_page_of_unclosed_titles_is_read_in_linear_time() {
         let html = "<title>x".repeat(PAGE_BYTES / "<title>x".len());
