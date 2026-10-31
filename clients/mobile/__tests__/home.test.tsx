@@ -19,6 +19,9 @@ import {AccessibilityInfo, ActionSheetIOS, StyleSheet} from 'react-native';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {BAR_CONTROL_MAX_SCALE} from '../src/design/atoms';
+import {HOME_ICON_SIZE} from '../src/design/icons';
+import {FixedScheme} from '../src/design/theme';
 import {darkPalette, lightPalette} from '../src/design/tokens';
 import {GroupCard} from '../src/design/sheetParts';
 import {describeCloseContract} from './fixtures/sheetContract';
@@ -138,6 +141,8 @@ interface Routes {
   channels?: unknown[];
   /** 서버 읽음 투영의 행(와이어 형상). 생략하면 기본 `READ_STATES`. */
   readStates?: unknown[];
+  /** 참이면 읽음 투영 요청이 500 으로 실패한다(안 읽음 수를 모르는 화면, #4953). */
+  readStatesFail?: boolean;
   workspace?: () => Response | Promise<Response>;
   /**
    * 에이전트 생존 판정(#3964): id → 상태. 적지 않은 에이전트는 404 다(= 「라벨 없음」, 호스티드가 아님).
@@ -168,6 +173,7 @@ function installFetch(routes: Routes = {}): jest.Mock {
       return jsonResponse(200, {members: routes.roster ?? ROSTER});
     }
     if (url.includes('/read-state')) {
+      if (routes.readStatesFail) return jsonResponse(500, {error: {message: 'boom'}});
       return jsonResponse(200, {read_states: routes.readStates ?? READ_STATES});
     }
     if (url.includes('/messages')) {
@@ -389,6 +395,7 @@ function row(over: Partial<SidebarRow>): SidebarRow {
     muted: false,
     unreadCount: 0,
     mentionCount: 0,
+    emphasis: {dim: false, bold: false, chip: null},
     accessibilityLabel: 'x',
     searchText: 'x',
     ...over,
@@ -1548,5 +1555,173 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     closeLabel: '닫은 대화 닫기',
     scrimTestID: 'dm-closed-backdrop',
     scrimLabel: '닫은 대화 닫기',
+  });
+});
+
+// =============================================================================
+// #4953 — 폰 홈 채널 줄의 네 상태를 **실제 화면**에서 잰다 (라이트·다크 둘 다).
+//
+// 판정(`rowEmphasis`)과 줄에 싣는 길은 `sidebarRowEmphasis.test.ts` 가 잰다. 여기서 재는 것은 그 판정이 **색 토큰으로
+// 옮겨져 화면에 나온다는 것**이다: 이름·아이콘의 색, 칩의 채움·글자 색, 칩 숫자. 기대값은 스킴마다 그 스킴의 팔레트
+// 낱값 그대로이고(「둘 중 하나」가 아니다), 두 스킴에서 같은 뜻 — 회색 ↔ 진한 글자 — 이어야 한다.
+//
+// 큰 글씨는 jest 가 레이아웃을 재지 못해 **구조**로 잰다(아래 마지막 둘). 눈으로 보는 캡처는 스택 검증의 몫이다.
+// =============================================================================
+
+const HUSH_CHANNEL = {id: 'ch-hush', workspaceId: WS, kind: 'public', name: 'hush', muted: true};
+const STATE_CHANNELS = [...CHANNELS, HUSH_CHANNEL];
+const STATE_READS = [
+  ...READ_STATES,
+  {channel_id: 'ch-hush', last_read_seq: 0, latest_seq: 4, unread_count: 4, mention_count: 0},
+];
+
+async function mountHomeIn(scheme: 'light' | 'dark', routes: Routes = {}) {
+  const fetchMock = installFetch(routes);
+  queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {retry: false, gcTime: 0},
+      mutations: {retry: false, gcTime: 0},
+    },
+  });
+  render(
+    <QueryClientProvider client={queryClient}>
+      <FixedScheme scheme={scheme}>
+        <AppShell member={SELF} />
+      </FixedScheme>
+    </QueryClientProvider>,
+  );
+  await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+  return fetchMock;
+}
+
+function channelRowEl(id: string) {
+  return screen.getByTestId(`sidebar-row-channel:${id}`);
+}
+
+function titleStyle(id: string, name: string): Record<string, unknown> {
+  return flat(within(channelRowEl(id)).getByText(name).props.style);
+}
+
+function chipIds(id: string): string[] {
+  return within(channelRowEl(id))
+    .queryAllByTestId(/^home-badge-/)
+    .map(node => node.props.testID as string);
+}
+
+describe.each([
+  ['라이트', 'light', lightPalette],
+  ['다크', 'dark', darkPalette],
+] as const)('홈 — 채널 줄의 네 상태, %s 스킴 (#4953)', (_name, scheme, p) => {
+  async function mountStates() {
+    await mountHomeIn(scheme, {channels: STATE_CHANNELS, readStates: STATE_READS});
+    await waitFor(() =>
+      expect(within(channelRowEl('ch-general')).getByTestId('home-badge-unread')).toBeTruthy(),
+    );
+  }
+
+  it('읽음 — 이름·아이콘이 회색(textMuted)이고 굵지 않고, 칩이 없다', async () => {
+    await mountStates();
+    const title = titleStyle('ch-design', 'design-2.0');
+    expect(title.color).toBe(p.textMuted);
+    expect(title.fontWeight).not.toBe('700');
+    const icon = within(channelRowEl('ch-design')).getByTestId('home-row-lock');
+    expect(flat(icon.props.style).tintColor).toBe(p.textMuted);
+    expect(chipIds('ch-design')).toEqual([]);
+  });
+
+  it('안 읽음 — 이름·아이콘이 본문색(text)이고 굵고, 신호색 칩이 5 를 말한다', async () => {
+    await mountStates();
+    const title = titleStyle('ch-general', 'general');
+    expect(title.color).toBe(p.text);
+    expect(title.fontWeight).toBe('700');
+    const icon = within(channelRowEl('ch-general')).getByTestId('home-row-hash');
+    expect(flat(icon.props.style).tintColor).toBe(p.text);
+    expect(chipIds('ch-general')).toEqual(['home-badge-unread']);
+    const chip = within(channelRowEl('ch-general')).getByTestId('home-badge-unread');
+    expect(flat(chip.props.style).backgroundColor).toBe(p.accent);
+    expect(flat(within(chip).getByText('5').props.style).color).toBe(p.onAccent);
+  });
+
+  it('멘션 — 칩 하나가 잉크 @2 이고(안 읽음 2 는 칩에 오르지 않는다), 이름은 본문색·굵게', async () => {
+    await mountStates();
+    const title = titleStyle('ch-agent-lab', 'agent-lab');
+    expect(title.color).toBe(p.text);
+    expect(title.fontWeight).toBe('700');
+    expect(chipIds('ch-agent-lab')).toEqual(['home-badge-mention']);
+    const chip = within(channelRowEl('ch-agent-lab')).getByTestId('home-badge-mention');
+    expect(flat(chip.props.style).backgroundColor).toBe(p.primary);
+    expect(flat(within(chip).getByText('@2').props.style).color).toBe(p.onPrimary);
+  });
+
+  it('음소거 — 새 글이 4 개 있어도 이름·아이콘이 회색·굵지 않음이고, 칩은 신호색도 잉크도 아닌 흐린 칩이다', async () => {
+    await mountStates();
+    const title = titleStyle('ch-hush', 'hush');
+    expect(title.color).toBe(p.textMuted);
+    expect(title.fontWeight).not.toBe('700');
+    const icon = within(channelRowEl('ch-hush')).getByTestId('home-row-hash');
+    expect(flat(icon.props.style).tintColor).toBe(p.textMuted);
+    expect(chipIds('ch-hush')).toEqual(['home-badge-muted']);
+    const chip = within(channelRowEl('ch-hush')).getByTestId('home-badge-muted');
+    const fill = flat(chip.props.style).backgroundColor;
+    expect(fill).toBe(p.surfaceMuted);
+    expect([p.accent, p.primary]).not.toContain(fill);
+    expect(flat(within(chip).getByText('4').props.style).color).toBe(p.textMuted);
+  });
+});
+
+describe('홈 — 채널 줄의 아이콘과 큰 글씨 (#4953)', () => {
+  it('아이콘 종류 — 공개는 #, 비공개는 자물쇠, DM 은 글리프 없이 상대 얼굴', async () => {
+    await mountHomeIn('light', {channels: STATE_CHANNELS, readStates: STATE_READS});
+    const general = channelRowEl('ch-general');
+    expect(within(general).getByTestId('home-row-hash')).toBeTruthy();
+    expect(within(general).queryByTestId('home-row-lock')).toBeNull();
+    const design = channelRowEl('ch-design');
+    expect(within(design).getByTestId('home-row-lock')).toBeTruthy();
+    expect(within(design).queryByTestId('home-row-hash')).toBeNull();
+    const dm = screen.getByTestId('sidebar-row-dm:ch-dm-human');
+    expect(within(dm).queryByTestId('home-row-hash')).toBeNull();
+    expect(within(dm).queryByTestId('home-row-lock')).toBeNull();
+    expect(within(dm).getByTestId('avatar-initial', {includeHiddenElements: true})).toBeTruthy();
+  });
+
+  it('큰 글씨에서 칩이 잘리지 않는 구조 — 칩은 자라고, 모자란 폭은 이름이 먼저 내준다, 아이콘은 줄 높이를 흔들지 않는다', async () => {
+    await mountHomeIn('light', {channels: STATE_CHANNELS, readStates: STATE_READS});
+    await waitFor(() =>
+      expect(within(channelRowEl('ch-general')).getByTestId('home-badge-unread')).toBeTruthy(),
+    );
+    const rowEl = channelRowEl('ch-general');
+    const chip = within(rowEl).getByTestId('home-badge-unread');
+    const box = flat(chip.props.style);
+    // 높이·너비는 하한뿐이다: 고정 높이였다면 글자가 커질 때 칩이 글자를 자른다.
+    expect(box.minWidth).toBe(HOME.badge);
+    expect(box.minHeight).toBe(HOME.badge);
+    for (const fixed of ['width', 'height', 'maxWidth', 'maxHeight', 'overflow']) {
+      expect(box[fixed]).toBeUndefined();
+    }
+    // 줄어들지 않는 flex 자식이다: 폭이 모자라면 칩이 아니라 이름이 줄어든다.
+    expect(box.flexShrink ?? 0).toBe(0);
+    const title = within(rowEl).getByText('general');
+    expect(flat(title.props.style).flexShrink).toBe(1);
+    expect(title.props.numberOfLines).toBe(1);
+    // 칩 글자는 컨트롤 글자의 상한을 따른다(이름만 끝까지 커진다).
+    expect(within(chip).getByText('5').props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
+    // 줄은 최소 높이뿐이고, 아이콘은 글자 배율과 무관한 고정 22 다.
+    const rowStyle = flat(rowEl.props.style);
+    expect(rowStyle.minHeight).toBe(HOME.row);
+    expect(rowStyle.height).toBeUndefined();
+    const icon = flat(within(rowEl).getByTestId('home-row-hash').props.style);
+    expect(icon.width).toBe(HOME_ICON_SIZE.hash);
+    expect(icon.height).toBe(HOME_ICON_SIZE.hash);
+  });
+
+  it('읽음 투영이 실패하면 새 글 없는 줄을 회색으로 칠하지 않는다 — 실패 안내가 선 채, 음소거만 회색이다', async () => {
+    await mountHomeIn('dark', {channels: STATE_CHANNELS, readStatesFail: true});
+    await screen.findByTestId('read-state-error');
+    // 안 읽음 수를 모르는 줄은 「다 읽었다」가 아니라 모름이다: 본문색.
+    expect(titleStyle('ch-design', 'design-2.0').color).toBe(darkPalette.text);
+    expect(titleStyle('ch-general', 'general').color).toBe(darkPalette.text);
+    expect(chipIds('ch-general')).toEqual([]);
+    // 음소거는 읽음 투영이 아니라 채널이 말하는 사실이다.
+    expect(titleStyle('ch-hush', 'hush').color).toBe(darkPalette.textMuted);
   });
 });

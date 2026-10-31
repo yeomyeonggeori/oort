@@ -213,7 +213,7 @@
     "clients/mobile/src/features/sidebar/channelRowActions.ts": 3,
     "clients/mobile/src/features/sidebar/dmClosedCache.ts": 3,
     "clients/mobile/src/features/sidebar/dmVerdicts.ts": 17,
-    "clients/mobile/src/features/sidebar/rows.ts": 25,
+    "clients/mobile/src/features/sidebar/rows.ts": 24,
     "clients/mobile/src/features/sidebar/useChannelRowActions.ts": 15,
     "clients/mobile/src/features/sidebar/useDmReopen.ts": 2,
     "clients/mobile/src/features/work/SignedWorkControls.tsx": 90,
