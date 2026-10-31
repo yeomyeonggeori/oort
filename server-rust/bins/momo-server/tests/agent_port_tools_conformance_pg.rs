@@ -22923,6 +22923,17 @@ async fn an_unasked_card_stands_in_the_owners_dm_with_one_run_one_approval_and_n
     assert_eq!(payload["origin"], "agent_initiated");
     let props = message_props(&su, card).await;
     assert_eq!(props["origin"], "agent_initiated");
+    // ADR-0204 증보 6 D6-2 · D6-3: nobody asked, so the card says so first and is opened in the app.
+    assert_eq!(props["decision_mode"], "open");
+    let initiated_body: String = sqlx::query_scalar("SELECT body FROM message WHERE id=$1")
+        .bind(card)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(
+        initiated_body,
+        format!("먼저 제안 · 비공개 채널을 만들어도 될까요? · 「{name}」")
+    );
     assert_eq!(props["channel_id"], json!(dm.to_string()));
     assert!(
         card_row(&props, "이 에이전트도 참여")
@@ -27304,6 +27315,17 @@ async fn agent_port_four_profile_conversations_in_dm_4791() {
 //   * `expression_choice_refused`: always None                                   → choice
 //     accepted on a reject / another action / absent on approve;
 //   * `is_expression_create_call` / the 64 KiB bound                              → budget tests.
+//
+// Prerequisite (#4947): the server decodes every picture in an isolated child,
+// `momo-expression-decoder`, a bin of `momo-expressions`. `cargo test -p momo-server --test
+// agent_port_tools_conformance_pg` builds no other package's bins (a `--workspace` or a
+// `-p momo-expressions` test build does), so build it first: `cargo build -p momo-expressions
+// --bins` (it also builds the assembler the C1b tests below need). Without the decoder every
+// picture is invalid media: a `generated` candidate answers `-32602 invalid tool arguments`
+// (`routes/agent_port_tools.rs` turns every decoder rejection but Busy into InvalidArguments) and a
+// fetched one becomes a `source_invalid_media` card, which reads like a schema drift and is
+// not. In a fresh target 24 tests went red: 16 at the assembler's own assertion (below), 8 here
+// with those answers. `require_decoder_4947` fails first and names the command.
 // ---------------------------------------------------------------------------
 
 struct Mock4829 {
@@ -27358,7 +27380,31 @@ struct World4829 {
     outsider_jwt: String,
 }
 
+/// The decoder child (`momo-expression-decoder`) must sit beside this test's target directory,
+/// found the way `momo_expressions::media` finds it: the `OORT_EXPRESSION_DECODER` override, else
+/// next to the test executable (one level above a `deps` directory). It belongs to
+/// `momo-expressions`, so building this test does not build it (#4947, header above). Fail here,
+/// first, and name the command: left to the server, a missing decoder is "every picture is
+/// invalid media". An explicit override is trusted, as the assembler's is.
+fn require_decoder_4947() {
+    if std::env::var_os("OORT_EXPRESSION_DECODER").is_some() {
+        return;
+    }
+    let exe = std::env::current_exe().expect("test executable");
+    let mut dir = exe.parent().expect("target dir").to_path_buf();
+    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
+        dir.pop();
+    }
+    let path = dir.join("momo-expression-decoder");
+    assert!(
+        path.is_file(),
+        "build the decoder first: cargo build -p momo-expressions --bins ({path:?}); without it \
+         every picture is invalid media and a proposal answers -32602"
+    );
+}
+
 async fn world_4829() -> World4829 {
+    require_decoder_4947();
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app = momo_app_pool().await;

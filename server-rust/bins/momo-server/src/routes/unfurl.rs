@@ -5,7 +5,13 @@
 //! GET      /v1/workspaces/{ws}/messages/{id}/unfurls    channel member
 //! DELETE   /v1/workspaces/{ws}/messages/{id}/unfurls    author
 //! GET      /v1/workspaces/{ws}/unfurls/{id}/image       channel member (proxy)
+//! GET      /v1/workspaces/{ws}/unfurls/{id}/icon        channel member (proxy, 443 only)
 //! ```
+//!
+//! The two proxy routes can make this server GET a site the card names. A request the cache can
+//! answer, or whose address failed lately, costs the site nothing and is free. One that would
+//! fetch spends the member's fetch budget (`MemberWrite::UnfurlProxy`) and a place among the
+//! fetches in flight; either is refused with 429 + `Retry-After` (#4881 security review M-2).
 //!
 //! No SQL here. No reqwest here. Personal render-fold is the client half.
 
@@ -18,8 +24,10 @@ use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::is_channel_member;
 use momo_unfurl::{
-    fetch_record_image, list_unfurls_in_tx, load_setting_in_tx, load_unfurl_in_tx,
-    remove_unfurls_in_tx, upsert_setting_in_tx, RemoveOutcome, UnfurlRecord, UnfurlSetting,
+    fetch_record_icon, fetch_record_image, icon_path, image_path, list_unfurls_in_tx,
+    load_setting_in_tx, load_unfurl_in_tx, proxy_goes_outbound, record_measured_size,
+    remove_unfurls_in_tx, upsert_setting_in_tx, ProxyError, ProxySlot, RemoveOutcome, UnfurlRecord,
+    UnfurlSetting,
 };
 use uuid::Uuid;
 
@@ -28,6 +36,9 @@ use crate::dto::{
     UnfurlSettingsResponse,
 };
 use crate::error::ApiError;
+use crate::rate_limit::{
+    refund_member_write, spend_member_write_unit, too_many_requests, MemberWrite,
+};
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, path_uuid, require_human, require_workspace_operator,
     settle_db, workspace_scope, DbRejectable,
@@ -52,7 +63,16 @@ fn card_dto(workspace_id: Uuid, record: UnfurlRecord) -> MessageUnfurlDto {
         domain: record.domain,
         image_url: record
             .image_proxy_key
-            .map(|_| format!("/v1/workspaces/{workspace_id}/unfurls/{}/image", record.id)),
+            .map(|_| image_path(workspace_id, record.id)),
+        site_name: record.site_name,
+        // The remote icon address (`icon_source_url`) stays in the database. A client is only
+        // ever given the proxy path.
+        icon_url: record
+            .icon_proxy_key
+            .map(|_| icon_path(workspace_id, record.id)),
+        image_width: record.image_width,
+        image_height: record.image_height,
+        is_video: record.is_video,
     }
 }
 
@@ -175,9 +195,29 @@ pub async fn remove(
 
 /// `GET /v1/workspaces/{ws}/unfurls/{id}/image`
 pub async fn image(
+    state: State<AppState>,
+    principal: Extension<Principal>,
+    path: Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    proxy_remote_image(state, principal, path, ProxySlot::Image).await
+}
+
+/// `GET /v1/workspaces/{ws}/unfurls/{id}/icon` (ADR-0170 amendment D9)
+pub async fn icon(
+    state: State<AppState>,
+    principal: Extension<Principal>,
+    path: Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    proxy_remote_image(state, principal, path, ProxySlot::Icon).await
+}
+
+/// One authorization and one proxy for both of a card's remote images. The remote address is
+/// read from the row inside [`fetch_record_image`] / [`fetch_record_icon`] and goes no further.
+async fn proxy_remote_image(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path((workspace, unfurl)): Path<(String, String)>,
+    slot: ProxySlot,
 ) -> Result<Response, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let unfurl_id = path_uuid(&unfurl, "invalid unfurl id")?;
@@ -196,18 +236,61 @@ pub async fn image(
         })
         .await;
     let record = settle_db("unfurl.image.authorize", outcome)?;
-    let image = match fetch_record_image(
-        &record,
-        state.unfurl_http.as_ref(),
-        state.unfurl_cache.as_ref(),
-    )
-    .await
-    {
-        Ok(image) => image,
-        Err(momo_unfurl::ProxyError::NotFound | momo_unfurl::ProxyError::Unavailable) => {
-            return Err(ApiError::not_found("unfurl image not found"));
+    // Only a request that would make this server fetch from the remote site spends the member's
+    // budget: a picture already in memory and an address that failed lately are free, so a
+    // timeline of cached cards never meets the limit. A route layer cannot tell the two apart,
+    // which is why this is asked here, after authorization and before the fetch.
+    let spent = if proxy_goes_outbound(&record, state.unfurl_cache.as_ref(), slot) {
+        match spend_member_write_unit(&state, MemberWrite::UnfurlProxy, &principal).await {
+            Ok(unit) => unit,
+            Err(retry_after_seconds) => return Ok(too_many_requests(retry_after_seconds)),
+        }
+    } else {
+        None
+    };
+    let fetched = match slot {
+        ProxySlot::Image => {
+            fetch_record_image(
+                &record,
+                state.unfurl_http.as_ref(),
+                state.unfurl_cache.as_ref(),
+                member_id,
+            )
+            .await
+        }
+        ProxySlot::Icon => {
+            fetch_record_icon(
+                &record,
+                state.unfurl_http.as_ref(),
+                state.unfurl_cache.as_ref(),
+                member_id,
+            )
+            .await
         }
     };
+    let image = match fetched {
+        Ok(image) => image,
+        Err(ProxyError::NotFound | ProxyError::Unavailable) => {
+            return Err(ApiError::not_found("unfurl image not found"));
+        }
+        // This server had no place for the fetch (the process's, the member's own, or a name
+        // lookup's). Nothing is wrong with this card, and nothing left the building, so the unit
+        // of budget this request spent is given back; ask again in a second.
+        Err(ProxyError::Busy) => {
+            if let Some(unit) = spent {
+                refund_member_write(&state, unit);
+            }
+            return Ok(too_many_requests(1));
+        }
+    };
+
+    // ADR-0170 amendment D12: a picture whose size the page did not declare gets the size read
+    // from the bytes just received, once. Best effort: the picture is served either way.
+    if slot == ProxySlot::Image && record.image_width.is_none() {
+        if let Some((width, height)) = image.size {
+            remember_measured_size(&state, workspace_id, &record, width, height).await;
+        }
+    }
 
     Response::builder()
         .status(StatusCode::OK)
@@ -217,4 +300,27 @@ pub async fn image(
         .header(header::CACHE_CONTROL, "private, max-age=86400")
         .body(Body::from(image.bytes))
         .map_err(|error| ApiError::internal("unfurl.image.response", error))
+}
+
+/// Write the measured size back through a short tenant transaction. A failure is logged and
+/// ignored; it never changes what the client receives.
+async fn remember_measured_size(
+    state: &AppState,
+    workspace_id: Uuid,
+    record: &UnfurlRecord,
+    width: u32,
+    height: u32,
+) {
+    let (Ok(width), Ok(height)) = (i32::try_from(width), i32::try_from(height)) else {
+        return;
+    };
+    let record = record.clone();
+    let outcome: Result<bool, momo_db::DbError> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move { record_measured_size(conn, &record, width, height).await })
+        })
+        .await;
+    if let Err(error) = outcome {
+        tracing::warn!(error = %error, "unfurl measured size was not recorded");
+    }
 }

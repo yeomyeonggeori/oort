@@ -721,12 +721,25 @@ mod tests {
     /// 161 is #4820 C2b's original-photo pointer (ADR-0218 G1/G7): `origin_source_attachment_id` on
     /// `expression` and `expression_draft` (generated origin only) and the six G3.8 card codes in the
     /// draft's `code` CHECK. No new table.
+    ///
+    /// 162 is #4887's 「대화에도 보내기」 (ADR-0148 증보 2026-10-31): `message.also_in_channel boolean
+    /// NOT NULL DEFAULT false` and the CHECK `message_also_in_channel_reply_ck` that lets only a thread
+    /// reply (`root_id` set) turn it on. No new table, so no new RLS policy.
+    ///
+    /// 163 is #4881's link-card site metadata (ADR-0170 amendment 2026-10-31): six columns (site name,
+    /// icon proxy key and remote icon address, image width/height, video flag) on `unfurl_url_cache` and
+    /// `message_unfurl`, with the column CHECKs that keep the size pair and the icon pair whole. No new
+    /// table.
+    ///
+    /// 164 is #4889's `thread_follow` (ADR-0206 증보 1 F1): who follows which thread, one row per
+    /// (root, member) with the state `auto` / `followed` / `unfollowed`, tenant ENABLE + FORCE +
+    /// `ws_isolation`. No grant for `momo_notifier` until the stage-2 judgment arm reads it.
     #[test]
-    fn discovers_contiguous_migrations_001_to_161() {
+    fn discovers_contiguous_migrations_001_to_164() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=161).collect();
+        let expected: Vec<i64> = (1..=164).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -734,7 +747,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=161 under {}",
+            "expected contiguous 001..=164 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -742,7 +755,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("161_expression_origin_source"));
+            .starts_with("164_thread_follow"));
     }
 
     #[test]

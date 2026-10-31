@@ -11625,8 +11625,11 @@ paths:
       summary: List derived unfurl cards for a message.
       description: >
         Channel members. Failed/blocked cards are present so a client can choose
-        silence (ADR-0170 D5). Image bytes are not inlined — `imageUrl` is the
-        authenticated proxy path.
+        silence (ADR-0170 D5); a page that gave nothing to show (no title and no
+        picture) is recorded the same quiet way, as `failed` with no fields
+        (ADR-0170 amendment 2026-10-31 D11). Image bytes are not inlined —
+        `imageUrl` and `iconUrl` are the authenticated proxy paths. A message
+        gets cards for its first three distinct links only (D10), in link order.
       security:
         - bearerAuth: []
       parameters:
@@ -11725,6 +11728,50 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/workspaces/{workspaceId}/unfurls/{unfurlId}/icon:
+    get:
+      tags: [unfurls]
+      operationId: getUnfurlIcon
+      summary: Stream the unfurl site icon through this origin.
+      description: >
+        ADR-0170 amendment 2026-10-31 D9. Channel members, same authorization as
+        the preview image. The client must not fetch the remote host (CSP) and is
+        never given the icon's own address. The icon is fetched like the picture
+        (public addresses only, every redirect hop re-checked) but on port 443
+        only, with a 512 KiB cap. Only image/png, jpeg, gif, webp, avif and ICO
+        (`image/x-icon`, `image/vnd.microsoft.icon`) are proxied; SVG never is.
+        A 404 for an address that failed (not found, refused, too slow, wrong type)
+        is remembered by the server for a few minutes, so asking again does not
+        reach the remote site. A request that must fetch spends the member's fetch
+        budget and a place among the fetches in flight, and is answered 429 when
+        either is exhausted (see `RateLimited`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: unfurlId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Icon bytes.
+          content:
+            "image/*":
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Card or icon not available (including a refused destination).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/reactions:
     get:
       tags: [messages]
@@ -11769,6 +11816,14 @@ paths:
         conversation into a thread. The two are independent and may be sent
         together. A quote target must be undeleted and in the same channel, but
         — unlike a thread root — it may itself be a reply.
+        Supplying `alsoInChannel: true` on a thread reply also sends it to the
+        channel's main flow (ADR-0148 증보 2026-10-31, 「대화에도 보내기」). Only a
+        reply may turn it on: `true` without `rootId` is a 400, answered before
+        anything is read or written (so a retry of the same request is the same
+        400). The choice is stored once, with the message, and an idempotent retry
+        (same `clientMsgId`) answers the stored message whatever `alsoInChannel`
+        says now. The message is still one message — one `seq`, one reply in the
+        thread's `reply_count` — shown in two places.
 
 
         A developer token with `dev:messages:write` may call this route as its
@@ -11814,7 +11869,8 @@ paths:
         "400":
           description: >
             Invalid workspace/channel id, deleted root, nested reply root, a
-            deleted quote target, an opening `stream` block that declares
+            deleted quote target, `alsoInChannel: true` without a `rootId`, an
+            opening `stream` block that declares
             anything other than `rev: 0` / `streaming: true`, or a signed send
             that also opens a stream (the provenance digest binds the props as
             inserted, and the opening marker is written by the server after the
@@ -11964,6 +12020,9 @@ paths:
         scope may call this route on the same membership predicate as history
         (ADR-0173). Hosted connection credentials are refused here.
 
+        Every page carries `following`: whether the caller follows this thread
+        (ADR-0206 증보 1 F8, `PUT …/follow`). An agent caller always reads `false`.
+
 
         A developer token with `dev:messages:read` may call this route as its
         person (ADR-0216 D4 L5, `oort read --thread`), under the same channel rule
@@ -12023,6 +12082,121 @@ paths:
             `dev:messages:read`), `dev_access_denied` (the workspace switch no
             longer admits its member's role) or `dev_route_not_allowed` (the
             `{workspaceId}` is not the token's own).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Root absent from this channel (including cross-channel roots).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/messages/{rootId}/follow:
+    put:
+      tags: [messages]
+      operationId: followThread
+      summary: Follow a thread (직접 따라가기).
+      description: >
+        ADR-0206 증보 1 F8 (#4889). Marks the caller as following the thread whose
+        root is `rootId`, whatever the state was before: an automatic follow
+        becomes a direct one, and a thread the caller stopped following is followed
+        again — this is the only way back from `DELETE`, because nothing automatic
+        (a new reply, a new mention, being the root's author) re-follows it. Idempotent;
+        no body. A personal setting: nothing is broadcast, and other devices see it on
+        their next read of the thread (`getThreadReplies` → `following`).
+
+        Guard order is the thread read's: active channel membership (403, the same
+        bytes for a channel that does not exist), then the root (404 when it is absent
+        or in another channel, 400 when it is itself a reply; a deleted root is
+        accepted), then DM channels (400 `thread_follow_not_applicable`: every
+        message already notifies there).
+
+        Human bearer only. An agent bearer is refused whatever its scopes, and a
+        developer token is refused (the route is not on its closed table).
+
+        Following does not send a push by itself; the new-reply push for followed
+        threads is the `thread_reply` reason (ADR-0206 증보 1 F4–F6), served after
+        its notifier slice.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: rootId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The caller now follows the thread.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadFollow"
+        "400":
+          description: >
+            Invalid id, the selected root is itself a reply, or the channel is a DM
+            (`error.code` `thread_follow_not_applicable`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a channel member, workspace scope mismatch, or a non-human bearer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Root absent from this channel (including cross-channel roots).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    delete:
+      tags: [messages]
+      operationId: unfollowThread
+      summary: Stop following a thread (그만 따라가기).
+      description: >
+        ADR-0206 증보 1 F8 (#4889). Marks the caller as not following the thread, and
+        that choice sticks: no later reply, mention or authorship follows it again
+        until `PUT` does. The record is kept, not removed — removing it would let the
+        automatic follow make it again on the next reply. Stopping only silences the
+        thread-reply push; a mention of the caller, a keyword hit, or a channel-level
+        `all` setting still reaches them by their own rules. Idempotent; no body.
+        Same guards, same refusals and same bearer rule as `PUT`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: rootId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The caller no longer follows the thread.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadFollow"
+        "400":
+          description: >
+            Invalid id, the selected root is itself a reply, or the channel is a DM
+            (`error.code` `thread_follow_not_applicable`).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a channel member, workspace scope mismatch, or a non-human bearer.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -12358,8 +12532,27 @@ paths:
       summary: List approval projections visible to the caller.
       description: >
         Requires an active human member; only approvals on channels where the
-        caller has an active membership are returned. Ordered by expiry
-        (soonest first, NULLs last), then newest first.
+        caller has an active membership are returned (leaving a channel hides its
+        approvals at the next read, the ones the caller decided included).
+
+
+        **Order.** `status=pending` (the default, the to-decide queue) is ordered by
+        expiry (soonest first, NULLs last), then newest first, and is not paged: it
+        takes no `cursor` and never returns `nextCursor`. Every other `status`
+        (`approved`, `rejected`, `expired`, `cancelled`, `all`) is ordered newest
+        first by when the approval last moved (its decision, expiry or cancellation
+        time; for a pending one the time it was asked), then by id, and is paged by
+        keyset: pass the previous page's `nextCursor` as `cursor`. (A single settled
+        status used to come back in expiry order, so under a `limit` it returned the
+        oldest rows.)
+
+
+        **Scope.** `scope=team` (the default) is every approval on those channels
+        (an in-place channel grant only for a workspace owner or admin).
+        `scope=mine` narrows to the approvals the caller decided, requested (the
+        author of the run's trigger message, or the actor of a work run's
+        `agent.work.queued` row) or whose agent they own (`agent.owner_human_id`).
+        It narrows within the caller's channels and never widens them.
       security:
         - bearerAuth: []
       parameters:
@@ -12367,11 +12560,23 @@ paths:
         - name: status
           in: query
           required: false
-          description: Approval status filter; defaults to `pending`.
+          description: >
+            Approval status filter; defaults to `pending`. `all` returns the five
+            statuses in one stream.
           schema:
             type: string
-            enum: [pending, approved, rejected, expired, cancelled]
+            enum: [pending, approved, rejected, expired, cancelled, all]
             default: pending
+        - name: scope
+          in: query
+          required: false
+          description: >
+            `team` (default) or `mine`: the approvals the caller decided, requested,
+            or owns the agent of.
+          schema:
+            type: string
+            enum: [team, mine]
+            default: team
         - name: limit
           in: query
           required: false
@@ -12381,6 +12586,14 @@ paths:
             default: 100
             minimum: 1
             maximum: 500
+        - name: cursor
+          in: query
+          required: false
+          description: >
+            The previous page's `nextCursor`, opaque. Refused (400) with
+            `status=pending`, and when it is not a cursor this server issued.
+          schema:
+            type: string
       responses:
         "200":
           description: Approval projections.
@@ -12389,7 +12602,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApprovalProjectionPage"
         "400":
-          description: Invalid status filter.
+          description: Invalid status or scope filter, or a cursor that is not usable.
           content:
             application/json:
               schema:
@@ -12488,9 +12701,16 @@ paths:
 
         The token is refused (403, receipt `status: opens_in_app`, approve or
         reject, whatever the body says) for the approvals that must be opened in
-        the app (ADR-0204 D7): an action that mints a value shown once (an invite
-        link, an agent pairing code) and an approval whose card asks the approver
-        to pick a host. It only ever narrows this route: an access token still
+        the app (ADR-0204 D7, 증보 6 D6-2): an action that mints a value shown once
+        (an invite link, an agent pairing code), an approval whose card asks the
+        approver to pick a host, a picture, a name, a message pin, a card an agent
+        raised unasked, an agent's request for more channels
+        (`hosted.channels.grant`, unless the server raised the card in place because
+        a person called the agent in that channel), a tool the catalog does not carry
+        (an operator's own, whose effect the server cannot say it can undo) and any
+        shape this build does not know. The answer is one function
+        (`decision_mode`), the same word the card carries as `props.decision_mode`
+        (`inline` | `open`). It only ever narrows this route: an access token still
         decides them.
       security:
         - bearerAuth: []
@@ -14756,8 +14976,20 @@ components:
         person and 600 for an agent credential; scheduled-message creates and edits,
         default 60; attachment upload starts, default 60. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
-        use) and every read are not budgeted. Retrying with the same `clientMsgId`
-        after a 429 is safe. `POST /v1/join` also has a per-account password-guess
+        use) and every read except the two below are not budgeted. Retrying with the
+        same `clientMsgId` after a 429 is safe. The link-card proxies
+        (`GET …/unfurls/{id}/image` and `GET …/unfurls/{id}/icon`, ADR-0170 증보 D13,
+        #4881) have a per-member budget of fetches **from the card's remote site**,
+        default 240 per window (`RATE_LIMIT_UNFURL_PROXY_PER_MEMBER`, 0 removes it),
+        shared by both routes and spent only by a request that really would fetch: a
+        picture already held by the server, and an address that failed in the last few
+        minutes, cost the remote site nothing and spend nothing. Those two routes also
+        answer 429 with `Retry-After: 1` when the server has no place for the fetch: it
+        is already fetching as many remote images as it allows at once (16), this member
+        is already fetching as many as one member may (4), or it has no room for another
+        name lookup. Such a refusal says nothing about the card, is not remembered, and
+        gives back the unit of fetch budget the request spent; ask again shortly. A
+        client shows its fallback meanwhile. `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
         already has an active account, is spent before the password is compared
         (a right password counts too), and answers 429 without comparing once
@@ -18547,6 +18779,56 @@ components:
         lastEventAtMs: {type: integer, format: int64}
         approvalId: {type: string, format: uuid}
         approvalExpiresAtMs: {type: integer, format: int64}
+        bundle:
+          type: object
+          additionalProperties: false
+          required: [approvalId, status, decisionMode, canDecide, actionType]
+          description: >
+            ADR-0186 v6 R-f. One approval of this run, read for **the caller**: the one
+            the run is parked on, else the latest it asked, whatever its status. What
+            the channel's status chip and the thread's summary line read in place of the
+            approval card. Absent when the run never asked for an approval, or asked in
+            a channel the caller is not an active member of.
+          properties:
+            approvalId: {type: string, format: uuid}
+            status:
+              type: string
+              enum: [pending, approved, rejected, expired, cancelled]
+              description: >
+                As of now: a `pending` approval past its deadline reads `expired`
+                before the sweep writes it down.
+            decisionMode:
+              type: string
+              enum: [inline, open]
+              description: See `ApprovalProjection.decisionMode`.
+            canDecide:
+              type: boolean
+              description: >
+                Whether **the caller** may decide it right now: `pending`, in time,
+                and a person the decision route would let through (an active human
+                member of its channel who meets the role, owner or pinned-person
+                condition the approval puts on its decider). `false` for everyone
+                else, for a settled approval, and for a platform operator who is not
+                a workspace admin. A viewer-relative value, never cacheable across
+                members.
+            line:
+              type: string
+              maxLength: 300
+              description: >
+                The card's one server-written sentence: the question while `pending`,
+                the outcome once settled. Absent when the card has none to give.
+            intent:
+              type: string
+              maxLength: 300
+              description: >
+                Present only while `pending`: the same sentence as `line`, under the
+                key the shipped clients read (`parseRequestBundleSnapshot`, #4760).
+            actionType:
+              type: string
+              description: >
+                `tool_call`, `workspace_action`, ... as `ApprovalProjection.actionType`.
+                Tells an approved tool call that is still running from an approved
+                action that is already done.
         endReason:
           type: string
           description: >
@@ -23738,6 +24020,20 @@ components:
             reply from inside its own thread. The target must be an undeleted
             message in the same channel (it may itself be a reply); a target in
             another channel or another workspace is reported as not found.
+        alsoInChannel:
+          type: boolean
+          default: false
+          description: >
+            ADR-0148 증보 2026-10-31 (#4887) — 「대화에도 보내기」: this thread
+            reply is also part of the channel's main flow. **Only a reply may turn
+            it on**: `true` without `rootId` is a 400 (checked before anything is
+            read, retries included), and the database refuses the same row even
+            if a path skipped the check. Absent and `false` are the same request.
+            Chosen once, at send: an idempotent retry answers the stored message
+            whatever this says now, and no later call changes it. Not allowed on a
+            developer token (`dev_field_not_allowed`). An older server's
+            closed-world request refuses the unknown key, so a client sends it
+            only when the sender turned it on.
         type:
           type: string
           enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
@@ -24345,12 +24641,44 @@ components:
         status:
           type: string
           enum: [pending, ok, failed, blocked]
-        title: {type: string}
-        description: {type: string}
+        title: {type: string, description: "At most 180 characters, whitespace collapsed."}
+        description:
+          type: string
+          description: At most 280 characters. Absent when it would repeat the title.
         domain: {type: string}
         imageUrl:
           type: string
           description: Authenticated proxy path on this origin. Never a remote host.
+        siteName:
+          type: string
+          description: >
+            og:site_name, at most 100 characters (ADR-0170 amendment 2026-10-31).
+            Absent when the page has none. Every key from here to `isVideo` is
+            optional; an older client that ignores them keeps working.
+        iconUrl:
+          type: string
+          description: >
+            Authenticated proxy path on this origin for the site icon
+            (`/v1/workspaces/{id}/unfurls/{id}/icon`). Never a remote host and
+            never the icon's own address. Absent when the card has no icon.
+        imageWidth:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: >
+            Pixels. og:image:width of the first og:image, or the width the image
+            proxy measured when it first received the picture. Present together
+            with `imageHeight` or not at all.
+        imageHeight:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: Pixels. See `imageWidth`.
+        isVideo:
+          type: boolean
+          description: >
+            `true` when og:type is `video.*` or twitter:card is `player`. The key
+            is absent otherwise (absent means not known to be a video).
 
     MessageUnfurlList:
       type: object
@@ -24612,6 +24940,23 @@ components:
             tombstone lists no files). Upload capability URLs and archive provider
             identifiers are never included; download bytes through the authenticated
             content proxy.
+        alsoInChannel:
+          type: boolean
+          enum: [true]
+          description: >
+            ADR-0148 증보 2026-10-31 (#4887) — the sender chose 「대화에도 보내기」:
+            this thread reply is also part of the channel's main flow. A channel's
+            main flow is the messages with no `rootId` **plus** the replies that
+            carry this flag; the thread shows every reply of its root either way.
+            **Present, and only ever `true`, when the choice was made — omitted
+            otherwise, never `false`** (the shape `runEnded` has), so a message sent
+            without it answers exactly the bytes it did before the field existed
+            and a client reads the key as `=== true`. Only a reply (`rootId` set)
+            can carry it. Present on every projection built from the stored row
+            (send echo, history, thread replies, edits). The realtime `message.new`
+            and `message.edited` payload carries the same flag under the snake_case
+            key `also_in_channel`, again only when on — an edit frame says it too,
+            so a client never reads silence as "off".
         thread:
           $ref: "#/components/schemas/ThreadRollup"
         sentVia:
@@ -24737,7 +25082,22 @@ components:
 
     ThreadRollup:
       type: object
-      required: [reply_count, last_reply_seq, last_reply_at]
+      required: [reply_count, last_reply_seq, last_reply_at, participant_ids, participant_count]
+      description: >
+        The reply summary a client draws under a root message (「답글 3개」, the last
+        reply's time, the faces of whoever replied). snake_case on the wire inside
+        an otherwise camelCase body — the core's `threadRollup()` is the one place
+        that turns it into `replyCount`, `lastReplySeq`, `lastReplyAtMs`,
+        `participantIds` and `participantCount`.
+
+
+        Only on a **root** message with at least one reply: a reply carries none,
+        and a root with no replies carries none. **The realtime `thread.updated`
+        payload carries the same five keys** (beside `channel_id` and `root_id`),
+        built by the same function as this object, so a client that keeps a root's
+        summary live applies it over the `thread` it holds. The send response for a
+        root that already has replies carries it too. `GET …/replies` returns the
+        replies themselves and no summary of their root.
       properties:
         reply_count:
           type: integer
@@ -24749,6 +25109,28 @@ components:
           type: integer
           format: int64
           description: Epoch milliseconds for the latest reply timestamp.
+        participant_ids:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            format: uuid
+          description: >
+            #4877 — who replied, **most recent replier first**, at most three
+            (lowercase UUID strings). A member who has left the channel or was
+            deleted keeps its id here; the client draws its existing 「알 수 없는
+            사람」 for an id it cannot resolve. Agent members are listed by the
+            same rule. A thread row written before this field kept its
+            first-reply order until its next reply, so an old thread's faces are
+            right after the next reply, not before. An empty list means no faces to
+            draw, never an error.
+        participant_count:
+          type: integer
+          minimum: 0
+          description: >
+            #4877 — how many distinct members have replied (no upper bound). The
+            faces in `participant_ids` are the newest `min(count, 3)` of them, so a
+            client can write 「+2」 after the faces.
 
     MessagePage:
       type: object
@@ -24770,7 +25152,7 @@ components:
 
     ThreadRepliesPage:
       type: object
-      required: [messages]
+      required: [messages, following]
       properties:
         messages:
           type: array
@@ -24781,6 +25163,24 @@ components:
           type: integer
           format: int64
           description: Last seq in this page when more replies remain; pass as `cursor`.
+        following:
+          type: boolean
+          description: >
+            Whether the caller follows this thread (ADR-0206 증보 1 F8): an automatic
+            or a direct follow. A thread the caller stopped following, and a thread
+            they never joined, both read `false`. Present on every page; a server that
+            predates it omits the key, which a client reads as `false`.
+
+    ThreadFollow:
+      type: object
+      required: [following]
+      properties:
+        following:
+          type: boolean
+          description: >
+            The caller's follow state after the write: `true` after `PUT …/follow`,
+            `false` after `DELETE …/follow`. An automatic and a direct follow are not
+            told apart.
 
     WorkspaceMessageSearchHit:
       type: object
@@ -25034,6 +25434,8 @@ components:
         - payload
         - status
         - createdAtMs
+        - decisionMode
+        - isDirect
       properties:
         id:
           type: string
@@ -25107,9 +25509,15 @@ components:
         decidedBy:
           type: string
           format: uuid
+          description: >
+            The person who approved or rejected it. Absent for `pending`,
+            `expired` and `cancelled`: nobody decided those.
         decidedAtMs:
           type: integer
           format: int64
+          description: >
+            When it was settled: the decision, the expiry or the cancellation.
+            Absent while `pending`.
         decisionReason:
           type: string
         expiresAtMs:
@@ -25122,6 +25530,43 @@ components:
             Always present on the Rust server. Neither the Swift DTO nor this
             schema carried it before SRV-B5c, which under the gate's
             closed-object rule made every Rust approval row undeclared drift.
+        decisionMode:
+          type: string
+          enum: [inline, open]
+          description: >
+            ADR-0186 v6 R-f. `inline`: may be decided where it is shown. `open`: must
+            be opened in the app (a one-time value, a picture to look at, a host to
+            choose, a name change, an agent-initiated or unknown card, ...). The
+            answer of the server's one `opens_in_app` judgment, the one the lock-screen
+            category and the `push_action` refusal read; a client never recomputes it.
+        isDirect:
+          type: boolean
+          description: >
+            ADR-0186 v6 R-f, where it lives. The approval's channel is a direct
+            message. With `channelId` and `rootId`, the whole address.
+        rootId:
+          type: string
+          format: uuid
+          description: >
+            ADR-0186 v6 R-f, where it lives. The thread the approval card sits in (the
+            card message's `rootId`). Absent when the card is in the channel's main
+            stream, or the approval has no card.
+        result:
+          type: object
+          additionalProperties: false
+          required: [line]
+          description: >
+            ADR-0186 v6 R-f. The card's outcome, for a settled approval whose card was
+            patched with one. Absent while `pending`, and for a card that was settled
+            before the card carried its outcome (its body is still the question it
+            asked, which is no outcome).
+          properties:
+            line:
+              type: string
+              maxLength: 300
+              description: >
+                One server-written Korean sentence, e.g. 「승인됐어요」 or a
+                result line. The card's `result.line`, else its `body`.
 
     # ---- Plugin registry and delegated tool policy --------------------------
     InstallPluginRequest:
@@ -26036,6 +26481,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ApprovalProjection"
+        nextCursor:
+          type: string
+          description: >
+            ADR-0186 v6 R-f. Present only when a further page exists, and only for a
+            read that is not `status=pending`. Pass it back as `cursor`; opaque.
 
     ApprovalDecisionRequest:
       type: object
@@ -26156,6 +26606,19 @@ components:
             ADR-0186 부록 C. Present only when this decision executed a
             workspace action; absent on tool-call approvals and on every
             refusal.
+        line:
+          type: string
+          description: >
+            ADR-0204 증보 6 D6-4 - the one Korean line this decision says, written by
+            the server so a device can show it as it is (the lock screen's notification
+            changes into it): `✓ 소개를 바꿨어요` on approval, `소개 바꾸기를 거부했어요` on
+            rejection, `이미 승인된 요청이에요 · 소개 바꾸기` / `이미 거부된 요청이에요 · 소개
+            바꾸기` on a second tap. Value-free: it names the action's title, and a tool
+            approval the tool's name when it is short and plain, never an argument.
+            Additive and optional: absent from every refusal (the words of a failure are
+            the device's), from an expired or cancelled card, from a DM admission's vote
+            and from receipts stored before it existed; a client that does not know it
+            keeps its own sentence. An idempotent replay answers the line the first call did.
 
     WorkspaceActionResult:
       type: object

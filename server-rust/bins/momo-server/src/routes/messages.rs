@@ -41,9 +41,9 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
     channel_pins, channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit,
-    delete_message_in_tx, edit_message_in_tx, is_channel_member, list_channel_page,
-    list_thread_replies, open_stream_run_id, parse_replies_cursor, set_pin_in_tx,
-    set_reaction_in_tx, stream_message_body_in_tx, validate_harness_refine,
+    delete_message_in_tx, edit_message_in_tx, is_channel_member, is_following_thread_in_tx,
+    list_channel_page, list_thread_replies, open_stream_run_id, parse_replies_cursor,
+    set_pin_in_tx, set_reaction_in_tx, stream_message_body_in_tx, validate_harness_refine,
     validate_reaction_emoji, validate_replies_root_in_tx, AttachmentLinkRejected,
     ChannelRestriction, HarnessRefine, HarnessRefineInvalid, HistoryCursor, InteractionMessage,
     InteractionRefused, MessageAttachment, MessageType, NewMessage, PagedMessage, PinAction,
@@ -121,6 +121,14 @@ pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
             key,
             "origin" | "target_member_id" | "requested_for" | "dm_admission_id"
         )
+        // ADR-0186 증보 v6 R-e: the channel's one-line result of an approval. `announce: true`
+        // is what keeps its push silent (`momo_push` judgment) and `bundle_of` names the approval
+        // it is the notice of — a member who could write either could silence their own
+        // message's push, or dress a message as the notice of somebody's approval.
+        // ADR-0204 증보 6 D6-2: `decision_mode` is the word an approval card's buttons read
+        // (`inline` | `open`), written by the server beside the approval it describes. A message
+        // that carried a forged one would tell a client which way to draw somebody's decision.
+        || matches!(key, "announce" | "bundle_of" | "decision_mode")
         // ADR-0218 appendix B / ADR-0186 v8: `action.expression` (the candidates a person is
         // asked to choose from) and `result.expression` (what was saved) are written only by
         // the server, inside an approval card's own transaction. A plain message can carry
@@ -179,6 +187,10 @@ fn thread_dto(rollup: &ThreadRollup) -> ThreadRollupDto {
         reply_count: rollup.reply_count,
         last_reply_seq: rollup.last_reply_seq,
         last_reply_at: rollup.last_reply_at_ms,
+        // #4877 — the order and the cap were decided once, in `momo_messaging`'s
+        // `thread_rollup()`; this only spells the ids.
+        participant_ids: rollup.participant_ids.iter().map(Uuid::to_string).collect(),
+        participant_count: rollup.participant_count,
     }
 }
 
@@ -246,6 +258,9 @@ fn message_dto(
         // echo, history, thread replies, edits). The column is the only source; nothing
         // here looks at the request that is being answered.
         sent_via: message.sent_via.map(SentVia::as_db_label),
+        // ADR-0148 증보 (#4887) — straight from the row, on every projection that has the row.
+        // Written once at send and never by an edit, so no projection can disagree with another.
+        also_in_channel: message.also_in_channel,
     }
 }
 
@@ -645,6 +660,19 @@ pub async fn send(
     let client_msg_id = request.client_msg_id;
     let root_id = request.root_id;
     let reply_to_id = request.reply_to_id;
+    // ADR-0148 증보 2026-10-31 (#4887) — 「대화에도 보내기」 belongs to a thread reply. Shape only,
+    // so it is judged here, before any connection is taken and before anything is read: the same
+    // answer on a retry as on the first try, whatever the stored message looks like. The
+    // `message_also_in_channel_reply_ck` CHECK is the second layer for a path that skips this
+    // route; this is the only place that turns the rule into a 400 (without it the INSERT would
+    // fail the CHECK and surface as a 500). The sentence is English like every `ApiError` here and
+    // names no `routing` (see `thread_root_rejection`: the web probe reads refusals by shape).
+    let also_in_channel = request.also_in_channel.unwrap_or(false);
+    if also_in_channel && root_id.is_none() {
+        return Err(ApiError::bad_request(
+            "alsoInChannel needs rootId: only a thread reply can also be sent to the channel",
+        ));
+    }
     // B5.3a / ADR-0134 D1 — shape only, and deliberately here: a malformed
     // `routing` block becomes a 4xx before any connection is taken (MOMO-362),
     // which is also what makes the web capability probe read `ready` (see
@@ -725,6 +753,7 @@ pub async fn send(
         author_is_human,
         requested_routing,
         requested_apps,
+        also_in_channel,
         gates,
     };
 
@@ -1001,7 +1030,7 @@ pub async fn replies(
 
     // Guard and read share one transaction, so a caller removed from the
     // channel mid-flight cannot still receive the page their check passed for.
-    let (page, ended_runs) = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
+    let replied = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             // ADR-0216 D4 · R11 — the reach is the restriction ∩ today's membership, and
             // a channel outside it takes the non-member branch itself: same status, same
@@ -1028,7 +1057,11 @@ pub async fn replies(
             let ended =
                 terminal_run_ids_in_tx(conn, workspace_id, &open_stream_runs(&page.messages))
                     .await?;
-            Ok((page, ended))
+            // ADR-0206 증보 1 F8 — the caller's own follow state, read beside the page it
+            // annotates (same transaction, one primary-key lookup).
+            let following =
+                is_following_thread_in_tx(conn, workspace_id, root_id, principal.member_id).await?;
+            Ok((page, ended, following))
         })
     })
     .await
@@ -1036,6 +1069,7 @@ pub async fn replies(
         SendFailure::Rejected(rejection) => rejection,
         SendFailure::Db(error) => db_error("messages.replies", error),
     })?;
+    let (page, ended_runs, following) = replied;
 
     Ok(Json(ThreadRepliesPage {
         messages: page
@@ -1044,6 +1078,7 @@ pub async fn replies(
             .map(|paged| paged_dto(paged, true, &ended_runs))
             .collect(),
         next_cursor: page.next_cursor,
+        following,
     }))
 }
 
@@ -1979,7 +2014,21 @@ mod tests {
         for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
             props.insert(key.to_string(), r#"{"kind":"login_lost"}"#.to_string());
         }
+        // ADR-0204 증보 6 D6-5 — a member cannot silence their own message's push with the
+        // channel's quiet-line marker, nor dress a message as the notice of an approval.
+        props.insert("announce".to_string(), "true".to_string());
+        props.insert(
+            "bundle_of".to_string(),
+            "22222222-2222-4222-8222-222222222222".to_string(),
+        );
+        props.insert("decision_mode".to_string(), "inline".to_string());
         let value = props_value(Some(&props));
+        for key in ["announce", "bundle_of", "decision_mode"] {
+            assert!(
+                value.get(key).is_none(),
+                "{key} is server-owned and must be stripped"
+            );
+        }
         for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
             assert!(
                 value.get(key).is_none(),
@@ -2185,6 +2234,7 @@ mod tests {
             client_msg_id: Uuid::nil(),
             root_id: None,
             reply_to_id: None,
+            also_in_channel: None,
             message_type: None,
             body: None,
             props: None,
@@ -2541,10 +2591,13 @@ mod tests {
     #[test]
     fn the_thread_rollup_keeps_its_snake_case_keys() {
         let message = stored_message();
+        let (newest, older) = (Uuid::from_u128(0xA1), Uuid::from_u128(0xA0));
         let rollup = ThreadRollup {
             reply_count: 3,
             last_reply_seq: 9,
             last_reply_at_ms: 1_700_000_000_500,
+            participant_ids: vec![newest, older],
+            participant_count: 4,
         };
         let json = serde_json::to_value(message_dto(
             &message,
@@ -2563,6 +2616,13 @@ mod tests {
             serde_json::json!(1_700_000_000_500_i64),
             "Swift names the millisecond value `last_reply_at`, not `…AtMs`"
         );
+        // #4877 — the two summary keys keep the object's snake_case; the faces are the
+        // newest first, lowercase, and the count is the thread's, not the faces'.
+        assert_eq!(
+            json["thread"]["participant_ids"],
+            serde_json::json!([newest.to_string(), older.to_string()])
+        );
+        assert_eq!(json["thread"]["participant_count"], serde_json::json!(4));
         assert!(json.get("rootId").is_none(), "a root has no rootId: {json}");
 
         // A message with no replies carries no rollup at all — the badge's
@@ -2592,6 +2652,7 @@ mod tests {
             edited_at: None,
             deleted_at: None,
             sent_via: None,
+            also_in_channel: false,
         }
     }
 
@@ -3050,6 +3111,9 @@ mod tests {
             "stream",
             "harnessRefine",
             "apps",
+            // ADR-0148 증보 (#4887): 「대화에도 보내기」 is a person's choice in the app; the
+            // developer-token door stays closed to it until ADR-0216 opens it.
+            "alsoInChannel",
             "sentVia",
             "sent_via",
             "Body",

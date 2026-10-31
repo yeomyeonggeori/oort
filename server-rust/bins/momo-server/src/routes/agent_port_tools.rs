@@ -1037,6 +1037,9 @@ async fn message_post(
                     opens_stream: false,
                     subscription_agents_disabled: !subscription_agents_enabled,
                     claude_subscription_agents_disabled: !claude_subscription_agents_enabled,
+                    // ADR-0148 증보 (#4887): an agent's `oort_message_post` chooses its own place
+                    // (`rootId`) and does not carry 「대화에도 보내기」 — a person's choice.
+                    also_in_channel: false,
                 },
             )
             .await?;
@@ -2412,6 +2415,12 @@ async fn action_propose(
                 // The ids the names resolved to, for the decision to compare.
                 action_block.insert("pins".into(), resolved.pins.clone());
             }
+            // ADR-0204 증보 6 D6-2: the card carries the same answer the push and the
+            // `push_action` refusal give, judged on the payload that is about to be stored.
+            let decision = momo_agent::actions::decision_mode(
+                momo_agent::ACTION_TYPE_WORKSPACE_ACTION,
+                &payload,
+            );
             let approval_id = momo_agent::create_pending_approval_in_tx(
                 conn,
                 caller.workspace_id,
@@ -2464,7 +2473,11 @@ async fn action_propose(
                     channel_id: run.channel_id,
                     author_member_id: caller.agent_member_id,
                     message_type: MessageType::ApprovalRequest,
-                    body: Some(momo_agent::workspace_action_request_body(action)),
+                    body: Some(momo_agent::actions::workspace_action_request_body_with(
+                        action,
+                        Some(&resolved.validated.normalized),
+                        false,
+                    )),
                     props: {
                         let mut props = momo_agent::workspace_action_request_props(
                             approval_id,
@@ -2501,6 +2514,7 @@ async fn action_propose(
                         {
                             object.insert("summary".into(), Value::String(summary.clone()));
                         }
+                        momo_agent::actions::stamp_decision_mode(&mut props, decision);
                         props
                     },
                     root_id: None,

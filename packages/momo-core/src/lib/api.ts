@@ -25,6 +25,7 @@
 import {
   fetchWithDeadline,
   NetworkError,
+  parseRetryAfterSeconds,
   REQUEST_TIMEOUT_MS,
   type HttpResponse,
 } from "./http";
@@ -33,7 +34,7 @@ import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
 import { tokenExpiresAtMs } from "./tokenLifetime";
 import {
-  isUnfurlImagePath,
+  isUnfurlProxyPath,
   messageUnfurlFromWire,
   type MessageUnfurl,
   type WorkspaceUnfurlSettings,
@@ -405,6 +406,21 @@ export interface ThreadRollup {
   replyCount: number;
   lastReplySeq: number;
   lastReplyAtMs: number;
+  /**
+   * #4877 — 답글 단 사람, **가장 최근에 단 사람 먼저**, 최대 3명(`participant_ids`). 나간 멤버·지운
+   * 멤버의 id도 그대로 온다 — 명부에서 못 푸는 id는 화면이 기존 「알 수 없는 사람」 규칙으로 그린다.
+   * 에이전트도 멤버라서 같은 규칙으로 들어 있다.
+   *
+   * `threadRollup()`은 서버 롤업에서 이 값을 **항상** 채운다(옛 서버는 두 키를 안 보내서 `[]`·0).
+   * 선택 필드인 이유는 폰이 로컬로 세어 만드는 롤업(`threadContext.rollupFor`)이 얼굴을 모르기
+   * 때문이다 — 없다는 것은 「얼굴 없음」이지 오류가 아니다.
+   */
+  participantIds?: string[];
+  /**
+   * #4877 — 답글 단 **서로 다른** 멤버 수(상한 없음). `participantIds`는 이 중 최근 `min(수, 3)`명이라
+   * 화면이 얼굴 뒤에 「+2」를 쓸 수 있다.
+   */
+  participantCount?: number;
 }
 
 /**
@@ -460,6 +476,17 @@ export interface Message {
    * 아래 `replyTo`와 달리 이쪽이 **영속하는 사실**이다.
    */
   replyToId?: string;
+  /**
+   * ADR-0148 증보 2026-10-31(#4887) — 보낸 사람이 「대화에도 보내기」를 골랐다: 이 스레드 답글은
+   * 채널 본류에도 보인다. 본류에 보이는 규칙은 **`rootId`가 없는 메시지 + 이 값이 `true`인 답글**이고,
+   * 스레드 화면에는 그 root의 모든 답글이 이 값과 무관하게 보인다.
+   *
+   * **`true`일 때만 온다 — 켜지 않았으면 키 자체가 없다**(`runEnded`와 같은 모양, `=== true`로 읽는다).
+   * 답글(`rootId` 있음)에서만 켤 수 있다. 전송 응답·히스토리·답글 페이지·편집 응답, 그리고
+   * 실시간 `message.new`·`message.edited`(`also_in_channel`)에 실린다. 편집 프레임도 싣는다 —
+   * 말하지 않음을 「꺼짐」으로 읽어 본류의 행을 지우지 않게 하려는 것이다.
+   */
+  alsoInChannel?: boolean;
   /**
    * 풀린 인용. 히스토리·답글 페이지에만 있고 전송 응답과 `message.new`에는 없다
    * (서버가 그 둘에서 일부러 뺀다 — 쓰기 경로 안에서 읽기를 한 번 더 하지 않기
@@ -521,6 +548,10 @@ export interface Message {
     reply_count: number;
     last_reply_seq: number;
     last_reply_at: number;
+    /** #4877 — 최근에 답글 단 사람 먼저, 최대 3개. 옛 서버는 보내지 않는다. */
+    participant_ids?: string[];
+    /** #4877 — 답글 단 서로 다른 멤버 수. 옛 서버는 보내지 않는다. */
+    participant_count?: number;
   };
   /**
    * #1166 — 이 반쪽 답을 쓴 run 이 **끝났다**고 서버가 말한 것.
@@ -557,10 +588,20 @@ function isMessage(value: unknown): value is Message {
 export function threadRollup(message: Message): ThreadRollup | null {
   const raw = message.thread;
   if (!raw || !raw.reply_count) return null;
+  // #4877 — 옛 서버는 두 키를 안 보낸다. 그때는 얼굴 없음(`[]`·0)으로 읽고, 새 서버는 항상 보낸다.
+  // 문자열이 아닌 항목은 버린다(형상이 어긋난 한 건이 나머지 얼굴을 지우지 않게).
+  const participantIds = Array.isArray(raw.participant_ids)
+    ? raw.participant_ids.filter((id): id is string => typeof id === "string")
+    : [];
   return {
     replyCount: raw.reply_count,
     lastReplySeq: raw.last_reply_seq,
     lastReplyAtMs: raw.last_reply_at,
+    participantIds,
+    participantCount:
+      typeof raw.participant_count === "number"
+        ? raw.participant_count
+        : participantIds.length,
   };
 }
 
@@ -2832,14 +2873,15 @@ export async function updateWorkspaceUnfurlSettings(
 }
 
 /**
- * Fetch image bytes through the authenticated server proxy. The strict path
- * gate makes it impossible to attach a bearer to a remote image host.
+ * Fetch image bytes through the authenticated server proxy: a card's preview
+ * picture (`imageUrl`) or its site icon (`iconUrl`). The strict path gate makes
+ * it impossible to attach a bearer to a remote image host.
  */
 export async function fetchUnfurlImage(
   imageUrl: string,
   signal?: AbortSignal
 ): Promise<Blob> {
-  if (!isUnfurlImagePath(imageUrl)) {
+  if (!isUnfurlProxyPath(imageUrl)) {
     throw new ApiError(400, "not an unfurl image proxy path");
   }
   const send = (token: string | null): Promise<Response> => {
@@ -2855,7 +2897,16 @@ export async function fetchUnfurlImage(
     if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
-  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  // A 429 from the proxy says when to come back (#4956); keep it so a screen can wait that long
+  // instead of asking again on every remount.
+  if (!res.ok) {
+    throw new ApiError(
+      res.status,
+      `HTTP ${res.status}`,
+      undefined,
+      parseRetryAfterSeconds(res.headers.get("Retry-After"))
+    );
+  }
   return res.blob();
 }
 
@@ -2976,6 +3027,18 @@ export async function searchMessages(
 }
 
 /**
+ * One page of thread replies, oldest first. `following` is the **caller's own** follow state of this
+ * thread (ADR-0206 증보 1 F8, #4889): an automatic or a direct follow reads `true`; a thread they
+ * stopped following and one they never joined both read `false`. A server that predates the field
+ * omits the key — read a missing `following` as `false`, never as "unknown".
+ */
+export interface ThreadRepliesPage {
+  messages: Message[];
+  nextCursor?: number;
+  following?: boolean;
+}
+
+/**
  * One oldest-first page of thread replies (ascending channel seq). `limit` is
  * clamped to 1...200 by the server; the work session panel asks for the ceiling
  * because a session thread is an event log, not a conversation.
@@ -2986,18 +3049,60 @@ export function fetchThreadReplies(
   rootId: string,
   cursor?: number,
   limit?: number
-): Promise<{ messages: Message[]; nextCursor?: number }> {
+): Promise<ThreadRepliesPage> {
   const params = new URLSearchParams();
   if (cursor !== undefined) params.set("cursor", String(cursor));
   if (limit !== undefined) params.set("limit", String(limit));
   const suffix = params.size > 0 ? `?${params.toString()}` : "";
-  return request<{ messages: Message[]; nextCursor?: number }>(
+  return request<ThreadRepliesPage>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(
       rootId
     )}/replies${suffix}`
   );
+}
+
+function threadFollowPath(workspaceId: string, channelId: string, rootId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(
+    channelId
+  )}/messages/${encodeURIComponent(rootId)}/follow`;
+}
+
+/**
+ * 스레드를 직접 따라간다 (ADR-0206 증보 1 F8, #4889) — `PUT …/messages/{rootId}/follow`. 본문이 없고
+ * 멱등이다. 응답의 `following` 은 쓴 뒤의 **효과값**이다. 그만 따라간 스레드로 돌아오는 길은 이 호출
+ * 하나뿐이다(새 답글·멘션은 되돌리지 못한다). 채널 멤버가 아니면 403, 루트가 없으면 404, 루트가 답글이거나
+ * DM 채널이면 400(`thread_follow_not_applicable`). 옛 서버는 404·405 — 호출부가 「기능 없음」으로 보고
+ * 칸을 숨긴다.
+ */
+export async function followThread(
+  workspaceId: string,
+  channelId: string,
+  rootId: string
+): Promise<{ following: boolean }> {
+  const res = await request<{ following?: unknown }>(
+    threadFollowPath(workspaceId, channelId, rootId),
+    { method: "PUT" }
+  );
+  return { following: res.following === true };
+}
+
+/**
+ * 스레드를 그만 따라간다 — `DELETE …/messages/{rootId}/follow`. 같은 가드·같은 오류·멱등이다. 이 선택은
+ * 유지된다: 뒤의 답글·멘션·루트 작성자라는 사실이 다시 따라가게 만들지 않는다. 막히는 것은 새 답글 알림
+ * (`thread_reply`)뿐이고, 나를 부른 멘션·키워드·채널 단계 `all` 은 각자의 규칙대로 온다.
+ */
+export async function unfollowThread(
+  workspaceId: string,
+  channelId: string,
+  rootId: string
+): Promise<{ following: boolean }> {
+  const res = await request<{ following?: unknown }>(
+    threadFollowPath(workspaceId, channelId, rootId),
+    { method: "DELETE" }
+  );
+  return { following: res.following === true };
 }
 
 /**
@@ -3089,6 +3194,24 @@ export function sendMessage(
 }
 
 /**
+ * 스레드 답글 전송(`sendThreadReply`)의 선택들.
+ *
+ * `alsoInChannel`이 `SendMessageOptions`가 아니라 여기에 있는 이유: 「대화에도 보내기」는 **답글에서만**
+ * 켤 수 있고, `sendMessage`는 `rootId`를 싣지 않는 전송이라 거기서 켜면 서버가 늘 400으로 거절한다.
+ * 켤 수 있는 자리에만 옵션이 있게 해서 그 실수가 타입에서 막히게 한다.
+ */
+export interface ThreadReplyOptions {
+  attachmentIds?: SendMessageOptions["attachmentIds"];
+  /**
+   * ADR-0148 증보 2026-10-31(#4887) — 「대화에도 보내기」: 이 답글을 채널 본류에도 보인다. 켠 때만
+   * 키가 간다(`true`). 끄거나 없으면 키 자체가 빠진다 — 전송 요청은 closed-world라 옛 서버는 모르는
+   * 키를 400으로 거절하므로, 켜지 않은 답글은 이 필드 이전과 바이트 단위로 같은 요청이어야 한다.
+   * 보낼 때 한 번 정해지고 이후에 바꾸는 길은 없다.
+   */
+  alsoInChannel?: boolean;
+}
+
+/**
  * Reply inside a thread. The SAME write path as `sendMessage` with `rootId`
  * set (server `SendMessageRequest.rootId`), which is exactly how the mac client
  * shares a work excerpt into a session thread (ChatViewModel.shareWorkExcerpt
@@ -3102,7 +3225,7 @@ export function sendThreadReply(
   rootId: string,
   clientMsgId: string,
   bodyText: string,
-  options?: Pick<SendMessageOptions, "attachmentIds">
+  options?: ThreadReplyOptions
 ): Promise<Message> {
   const body: Record<string, unknown> = {
     clientMsgId,
@@ -3110,6 +3233,8 @@ export function sendThreadReply(
     type: "text",
     body: bodyText,
   };
+  // 이 함수가 `rootId`를 늘 싣는 유일한 전송이라 「대화에도 보내기」가 합법인 자리다(#4887).
+  if (options?.alsoInChannel === true) body.alsoInChannel = true;
   if (options?.attachmentIds !== undefined && options.attachmentIds.length > 0) {
     body.attachmentIds = options.attachmentIds;
   }
