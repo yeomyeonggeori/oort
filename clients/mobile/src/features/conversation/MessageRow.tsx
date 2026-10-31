@@ -194,6 +194,8 @@ import {
   type ApprovalReceipt,
 } from './approvalGate';
 import {LandedTintFade, ReduceMotionRefContext} from './LandedTintFade';
+import {canReplyBySwipe} from './replyTarget';
+import {ReplySwipeContainer, ReplySwipeGuardContext} from './ReplySwipeContainer';
 import {
   SEND_ARRIVE_EASE,
   SEND_ARRIVE_MS,
@@ -2206,6 +2208,15 @@ export interface MessageRowActions {
    */
   onOpenThread?: (message: Message) => void;
   /**
+   * 이 메시지에 **그 자리에서** 스레드 답글을 단다 (#4869) — 입력칸 머리에 답글 대상을 걸고 초점을 준다. 대화 화면에 머물고
+   * 스레드 화면(`onOpenThread`)으로 옮겨 가지 않는다. 오른쪽→왼쪽 밀기와 행동 시트의 「답글 달기」(VoiceOver 의 길)가 **같은
+   * 이 핸들러**를 부른다. 없으면(스레드 안·계측 하네스) 밀기는 서지 않고 시트의 「답글 달기」는 예전처럼 스레드를 연다.
+   *
+   * `onOpenThread` 와 다른 장치다 — 하나는 대화를 옆으로 치우고 하나는 여기 남는다. 한 핸들러에 플래그를 달아 접으면
+   * 표면이 둘을 하나로 다루기 시작한다(`onQuote` 가 같은 이유로 따로 있다).
+   */
+  onReplyInline?: (message: Message) => void;
+  /**
    * Quote this message: bind it to the composer as 인용, in the MAIN channel.
    *
    * Deliberately NOT `onOpenThread` with a flag. The two are different devices
@@ -2636,13 +2647,23 @@ function MessageRowInner({
     receiptRef.current = setTimeout(() => setRowReceipt(null), COPY_RECEIPT_MS);
   }, []);
 
+  // 「답글 달기」가 어디로 가는가는 둘이다(#4869). 그 자리에서 입력칸을 여는 길(`onReplyInline` — 밀기와 **같은** 길, 이미 스레드
+  // 답글인 행도 그 스레드의 루트로 단다)이 먼저고, 그 길이 닫힌 행(승인 카드 등)이나 표면(핸들러 없음)에서는 예전처럼 스레드
+  // 화면을 연다(코어 `canReplyToMessage`: 답글에는 답글을 못 단다).
+  const onReplyInline = actions?.onReplyInline;
+  const replyInline = useMemo(
+    () => onReplyInline !== undefined && canReplyBySwipe(message),
+    [onReplyInline, message],
+  );
+  const replyThread =
+    actions?.onOpenThread !== undefined && canReplyToMessage(message);
+
   // The five answers come from the core, which is also where the server's rules
   // are mirrored: only the author may edit or delete, nobody acts on a tombstone,
   // and a reply is never offered a reply of its own (momo threads are one level).
   const available = useMemo<MessageActionAvailability>(
     () => ({
-      reply:
-        actions?.onOpenThread !== undefined && canReplyToMessage(message),
+      reply: replyInline || replyThread,
       // 인용은 답글과 **다른 축**이다(core `model.ts`): 이미 답글인 행은 답글을
       // 더 달 수 없지만 인용은 할 수 있다. 두 답을 하나로 접으면 ADR-0148 이
       // 나눈 두 장치가 UI 에서 다시 합쳐진다.
@@ -2657,7 +2678,7 @@ function MessageRowInner({
       delete:
         actions !== undefined && canDeleteMessage(message, actions.myMemberId),
     }),
-    [actions, message],
+    [actions, message, replyInline, replyThread],
   );
   const actionable = actions !== undefined && hasAnyAction(available);
 
@@ -2678,12 +2699,15 @@ function MessageRowInner({
   // ===========================================================================
   const affordances = useMemo(() => bodyAffordances(body), [body]);
 
+  // 길게 눌러 시트를 연 손가락은 그 뒤에 움직여도 밀지 않는다 — 밀기 컨테이너가 새 터치 시작에서 이 표지를 거둔다(#4869).
+  const swipeGuard = useContext(ReplySwipeGuardContext);
   const openSheet = useCallback(() => {
     setRowError(null);
     if (!sheetOpen) haptics.event('messageMenu');
+    if (swipeGuard !== null) swipeGuard.current = true;
     setSheetOpen(true);
     actions?.onLongPressUsed?.();
-  }, [actions, sheetOpen]);
+  }, [actions, sheetOpen, swipeGuard]);
 
   const longPress = useLongPress({enabled: actionable, onFire: openSheet});
   const attachmentGesture = useMemo(
@@ -2728,8 +2752,8 @@ function MessageRowInner({
     if (isMarkedReply) return deleted ? null : replyParent ?? null;
     // 롤업만 있고 답글을 새로 달 수 없는 루트(묘비)도 문은 문이다 — 그 행은
     // 「답글 N개」를 이미 눌리는 것으로 그리고 있다.
-    return available.reply || rollup !== null ? message : null;
-  }, [actions, isMarkedReply, deleted, replyParent, available.reply, rollup, message]);
+    return replyThread || rollup !== null ? message : null;
+  }, [actions, isMarkedReply, deleted, replyParent, replyThread, rollup, message]);
 
   // ===========================================================================
   // 그리고 그 탭은 키보드와 다툰다 (결함 1 × 결함 2)
@@ -3542,7 +3566,9 @@ function MessageRowInner({
           }}
           onReply={() => {
             setSheetOpen(false);
-            actions.onOpenThread?.(message);
+            // 같은 입력칸을 연다(VoiceOver 의 길). 닫힌 행·표면에서는 예전처럼 스레드를 연다.
+            if (replyInline) actions.onReplyInline?.(message);
+            else actions.onOpenThread?.(message);
           }}
           onCopy={
             // 묘비에는 꺼낼 내용이 없다. `body` 가 비었을 때도 마찬가지 —
@@ -3811,7 +3837,36 @@ export function sameMessageRowProps(
   );
 }
 
-export const MessageRow = React.memo(MessageRowInner, sameMessageRowProps);
+/**
+ * 행을 오른쪽→왼쪽 밀기 컨테이너로 감싼다 (#4869).
+ *
+ * 컨테이너는 행 **바깥**이다: 행의 루트 `View`(접근성 원소 하나·`registerRowNode` 가 가리키는 노드·착지 틴트의 그릇)는
+ * 한 글자도 바뀌지 않고, 그 위에 항상 서 있는 층 하나가 더해질 뿐이다(조건부로 감싸면 그 순간 행이 다시 마운트된다).
+ * 컨테이너는 상태가 없으므로(위치는 `Animated.Value`) 드래그 중에 행이 다시 그려지지 않는다.
+ *
+ * 밀 수 있는 행: 이 표면이 `onReplyInline` 을 주었고(스레드 안·계측 하네스는 주지 않는다) 대기 중인 서버 사본이 아니며
+ * 시스템 줄·삭제된 메시지·승인 카드가 아니다(`canReplyBySwipe`). 아니면 컨테이너는 어떤 이동도 잡지 않는다.
+ */
+function MessageRowSwipeable(props: MessageRowProps): React.JSX.Element {
+  const {message, actions, standby} = props;
+  const onReplyInline = actions?.onReplyInline;
+  const swipeable = useMemo(
+    () =>
+      onReplyInline !== undefined && standby !== true && canReplyBySwipe(message),
+    [onReplyInline, standby, message],
+  );
+  const commit = useCallback(
+    () => onReplyInline?.(message),
+    [onReplyInline, message],
+  );
+  return (
+    <ReplySwipeContainer enabled={swipeable} onCommit={commit}>
+      <MessageRowInner {...props} />
+    </ReplySwipeContainer>
+  );
+}
+
+export const MessageRow = React.memo(MessageRowSwipeable, sameMessageRowProps);
 // `React.memo` 는 이름을 지우므로 다시 붙인다 — 리액트 개발자 도구와 테스트
 // 실패 메시지가 「Memo」 대신 이 이름을 말하게 하려고.
 MessageRow.displayName = 'MessageRow';

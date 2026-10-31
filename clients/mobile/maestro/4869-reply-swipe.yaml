@@ -1,0 +1,97 @@
+appId: app.momo.ios
+name: 4869-reply-swipe
+# S4 스택 검증에서만 돌린다(작성 워커는 돌리지 않았다 — `runtime-unverified`). 밀어서 스레드 답글 (#4869, owner 10-30·10-31).
+#
+# 준비: 로그인된 기기에서 `CHANNEL_ID` 채널에 **남이 쓴 글** `PEER_TEXT`(긴 글이 아니어도 된다)가 한 줄 이상 있고, 목록이 그 글을
+# 화면 가운데 근처에 둔다. 아래는 그 행 하나만 만진다.
+#
+#   maestro --udid <udid> test -e CHANNEL_ID=<채널 id> -e PEER_TEXT="<남의 글 한 줄>" \
+#     clients/mobile/maestro/4869-reply-swipe.yaml
+#
+# 이 흐름이 재는 것(눈이 아니라 단정이다):
+#   ① 문턱 전에 놓기 — 짧게 밀었다 놓으면 아무 일도 없다(머리말이 안 선다).
+#   ② 문턱을 넘겨 놓기 — 답글 머리말이 서고 입력칸이 「답글 입력」이 되며 **스레드 화면은 열리지 않는다**.
+#   ③ ✕ — 머리말만 사라지고 쓴 글은 남는다.
+#   ④ 보내기 — 머리말이 떨어지고 대화 화면에 머문다(스레드 화면 `thread-header-overlay` 가 서지 않는다).
+#   ⑤ 길게 눌러 시트의 「답글 달기」 — 같은 입력칸이 열린다(VoiceOver 의 길).
+#
+# 이 흐름이 **못 재는 것**(손으로 본다 — 인계 「스택 검증 메모」): 빠른 세로 스크롤 도중의 오→왼 살짝, 햅틱, 동작 줄이기에서
+# 미끄러짐 없음, 큰 글자. Maestro 의 `swipe` 는 한 번의 직선이라 「스크롤하던 손가락이 옆으로 휘는」 경합을 만들지 못한다.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+- tapOn:
+    id: "sidebar-row-channel:${CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- assertVisible: ".*${PEER_TEXT}.*"
+# ① 문턱(64pt)에 못 미치게: 화면 폭의 약 12%(≈47pt)만 밀고 놓는다.
+- swipe:
+    start: 90%, 50%
+    end: 78%, 50%
+    duration: 400
+- assertNotVisible:
+    id: "reply-draft-card"
+# ② 문턱을 넘겨 놓는다: 화면 폭의 약 45%(≈175pt).
+- swipe:
+    start: 90%, 50%
+    end: 45%, 50%
+    duration: 400
+- extendedWaitUntil:
+    visible:
+      id: "reply-draft-card"
+    timeout: 10000
+- assertVisible: ".*님에게 답글"
+- assertVisible:
+    id: "reply-draft-excerpt"
+    text: ".*${PEER_TEXT}.*"
+- assertVisible:
+    id: "composer-input"
+    text: "답글 입력"
+- assertNotVisible:
+    id: "thread-header-overlay"
+# ③ ✕: 대상만 지우고 쓴 글은 남는다.
+- inputText: "금요일에 합시다"
+- tapOn:
+    id: "reply-draft-cancel"
+- assertNotVisible:
+    id: "reply-draft-card"
+- assertVisible: ".*금요일에 합시다.*"
+# ④ 다시 밀어 보낸다: 머리말이 떨어지고 스레드 화면으로 옮겨 가지 않는다.
+- swipe:
+    start: 90%, 50%
+    end: 45%, 50%
+    duration: 400
+- extendedWaitUntil:
+    visible:
+      id: "reply-draft-card"
+    timeout: 10000
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    notVisible:
+      id: "reply-draft-card"
+    timeout: 10000
+- assertNotVisible:
+    id: "thread-header-overlay"
+- assertVisible:
+    id: "composer-input"
+# ⑤ 길게 눌러 시트의 「답글 달기」.
+- longPressOn:
+    id: "message-press"
+    text: ".*${PEER_TEXT}.*"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-reply"
+    timeout: 10000
+- tapOn:
+    id: "sheet-reply"
+- extendedWaitUntil:
+    visible:
+      id: "reply-draft-card"
+    timeout: 10000
+- assertNotVisible:
+    id: "thread-header-overlay"

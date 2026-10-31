@@ -84,6 +84,9 @@ import {
 } from './mentionQuery';
 import type {QuoteDraft} from '@momo/core/features/timeline/quote';
 import {QuoteDraftBar} from './Quote';
+import {ReplyDraftCard} from './ReplyDraftCard';
+import {useReplyCopy} from './replyCopy';
+import type {ReplyTarget} from './replyTarget';
 import {AttachMenu} from '../attachments/AttachMenu';
 import {AttachmentTray} from '../attachments/AttachmentTray';
 import {
@@ -1105,9 +1108,11 @@ export function Composer({
   onTyping,
   quote,
   onCancelQuote,
+  replyTarget,
+  onCancelReply,
   attachmentTarget,
-  placeholder,
-  sendLabel = '보내기',
+  placeholder: placeholderProp,
+  sendLabel: sendLabelProp = '보내기',
   inputRef: externalInputRef,
   onSlashCommand,
   onKeyBlockedChange,
@@ -1196,6 +1201,13 @@ export function Composer({
   /** 인용을 무른다. 인용이 있는데 이것이 없으면 나가는 길이 없다. */
   onCancelQuote?: () => void;
   /**
+   * 지금 스레드 답글을 쓰는 중이면 그 대상 (#4869). 있으면 입력 줄 위에 머리말이 붙어 알약이 **한 장의 카드**가 되고, 입력칸의
+   * 안내 글과 보내기의 이름이 「답글」이 된다. 인용과는 함께 걸리지 않는다(화면이 하나를 걸 때 다른 하나를 뗀다).
+   */
+  replyTarget?: ReplyTarget | null;
+  /** 답글 대상만 뗀다 — **쓴 글은 남는다**(글은 이 컴포저가 들고 있다). 대상이 있는데 이것이 없으면 나가는 길이 없다. */
+  onCancelReply?: () => void;
+  /**
    * The text field itself. Exposed so a caller can put the caret here — the
    * empty-state "첫 메시지 쓰기" affordance wants it, and `measure/` uses it to
    * raise the real software keyboard without a tap (a simulator cannot be
@@ -1219,6 +1231,12 @@ export function Composer({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  // 답글 대상이 걸려 있으면 입력칸의 안내 글이 「답글 입력」이 되고 보내기의 낭독 이름이 「답글 보내기」가 된다 — 위에 선
+  // 머리말이 말하는 곳으로 나간다(#4869). 안내 글은 넘겨받은 문장으로 취급되어 절 예산의 프로브도 서지 않는다.
+  const replyCopy = useReplyCopy(directory);
+  const replying = !!replyTarget && onCancelReply !== undefined;
+  const placeholder = replying ? replyCopy.placeholder() : placeholderProp;
+  const sendLabel = replying ? replyCopy.send() : sendLabelProp;
   const keyboardAppearance = useKeyboardAppearance();
   // 성장 상한은 **스타일시트에 못 박히지 않는다** (#1443). 글자 배수와 창 높이가
   // 정하고, 둘 다 사람이 설정에서 바꾸는 값이라 렌더마다 다시 읽는다 —
@@ -2458,6 +2476,14 @@ export function Composer({
           {marginHorizontal: floatInset},
         ]}
         testID="composer-pill">
+      {/* 답글 머리말 (#4869) — 알약 **안**, 입력 줄 바로 위. 알약의 반경이 카드의 모서리이고 입력과 한 장을 이룬다. */}
+      {replyTarget && onCancelReply ? (
+        <ReplyDraftCard
+          target={replyTarget}
+          directory={directory}
+          onCancel={onCancelReply}
+        />
+      ) : null}
       <View
         style={styles.bar}
         testID="composer-bar"
