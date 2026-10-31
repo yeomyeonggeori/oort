@@ -494,7 +494,7 @@ def table_cases():
 
 
 _PREFIXES = ("", "", "", "export ", "export\t", " ", "\t", "#", "# ", "\x0c", "\x85", "\x1c", FEFF, " " + FEFF, "\t" + FEFF, FEFF + FEFF,
-             (" " + FEFF) * 3, ("\t" + FEFF) * 3, ("\x1c" + FEFF) * 4)  # runs of (blank, mark): one pair comes off per load
+             (" " + FEFF) * 3, ("\t" + FEFF) * 3, ("\x1c" + FEFF) * 4)  # runs of (blank, mark)
 _SEPARATORS = ("=", "=", "=", " = ", "= ", " =", "==", "\t=\t", " ")
 _ENDS = ("\n", "\n", "\n", "\r\n", "\r", "", " ", "\n\n", " \n", "\\\n", "\n#\n", "\x0b", "\x0c", "\x85")
 _VALUES = ("1", "true", "yes", "on", "0", "false", "no", "off", "", " 1 ", "'1'", '"1"', "1 # c", "1#c", "'1' # c", '"1" x', "'1", '"1',
@@ -533,7 +533,7 @@ def random_cases(seed, count):
             if rnd.random() < 0.6:
                 statements.insert(rnd.randint(at + 1, len(statements)), rnd.choice(['"\n', "'\n", 'x"\n']))
         text = "".join(statements)
-        if rnd.random() < 0.08:  # a run of (blank, mark) pairs in front of everything: each load takes one pair off
+        if rnd.random() < 0.08:  # a run of (blank, mark) pairs in front of everything
             text = (rnd.choice(_BLANKS) + FEFF) * rnd.randint(3, 9) + text
         if rnd.random() < 0.10:  # U+FFFD as the first character: the clean-up leaves the file alone
             text = "\ufffd" + rnd.choice(["", "\n", " \n", " ", "=", "\x00\n"]) + text

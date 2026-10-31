@@ -13,7 +13,9 @@ Then the rules, through `volume_env_problems` / `image_volume_env_problems`, for
 refused once, by name, never with its value; every spelling it ignores is not; the last assignment of a name decides; a judged name
 whose value holds a reference (`${...}`, `$NAME`) is refused for that, because Hermes resolves it in an environment the gate does
 not have. The byte order marks at the front are read exactly as the loader strips them (its sanitizer's decode, and one more after
-it rewrote the file). Each rule has a case that fails when the rule is removed.
+it rewrote the file). The loader loads the file again and again and every load rewrites it: the gate follows the file through those
+loads (CHAIN_TABLE, measured with the real loader) and judges every text a load may parse, also the file as it stands when the
+clean-up leaves it alone. Each rule has a case that fails when the rule is removed.
 
 The last part tests the comparison in infra/hermes/env_loader_oracle.py, which the in-image proof runs against Hermes' REAL loader
 (scenario `env-loader-oracle`): the policy, the reading of the gate's answer, the verdict and its plumbing, offline, with a
@@ -467,7 +469,7 @@ class ReadingLikeHermes(unittest.TestCase):
                 self.assertIsNone(lockgate.env_text(raw))
 
     def test_a_file_that_keeps_changing_is_followed_up_to_the_cap_and_refused_beyond_it(self):
-        # one blank-and-mark pair comes off the front per load: n pairs take n loads. The cap is how many rewrites the gate follows.
+        # n blank-and-mark pairs take n loads (CHAIN_TABLE). The cap is how many rewrites the gate follows.
         cap = lockgate.ENV_LOAD_CAP
         within, beyond = oracle.pair_run(b" ", cap) + b"A=1\n", oracle.pair_run(b" ", cap + 1) + b"A=1\n"
         self.assertEqual(len(lockgate.env_states(within)), cap + 1)
@@ -823,7 +825,7 @@ class StandInLoader:
 
 
 def strip_one_pair(data):
-    """A clean-up step for `StandInLoader`: one (blank, mark) pair comes off the front of the file per load."""
+    """A clean-up step for `StandInLoader` that changes the file until it starts with the assignment."""
     return data[len(b" " + BOM):] if data.startswith(b" " + BOM) else data
 
 
