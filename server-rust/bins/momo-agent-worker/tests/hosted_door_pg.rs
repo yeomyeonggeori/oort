@@ -25,7 +25,14 @@
 //! | `the_door_stays_shut_without_the_operators_strict_attestation` | open the door without the attestation |
 //! | `the_source_pointer_is_recorded_only_when_the_model_was_given_the_photo` | record the pointer for a turn that handed no address |
 //! | `the_directive_is_exactly_one_more_message_on_a_photo_turn` | a second block / a block on a turn without a photo |
+//! | `a_third_card_that_lands_while_the_model_works_is_refused_by_the_proposal` | drop the proposal transaction's own re-proof of the ceiling of three waiting cards |
+//! | `a_run_that_is_not_live_is_refused_before_the_model_is_called` | judge the run's state after the model call (or not at all) |
+//! | `a_resume_turn_never_opens_the_door` | drop the `!payload.is_resume()` guard: an approved card's resume turn would open the door again on the same photo |
+//! | `an_assembler_that_cannot_run_gets_two_attempts_and_ends_as_one_closed_card` | let the door retry past two attempts / lose the first attempt's tokens / raise a card twice |
+//! | `a_provider_deadline_gets_two_attempts_but_an_outage_keeps_its_budget` | cap every retryable failure instead of the deadline / never cap the deadline |
+//! | `an_answer_over_the_size_limit_is_one_closed_card_on_a_door_turn_and_the_ordinary_failure_elsewhere` | retry an over-long answer / answer a door turn with the generic failure / change an ordinary turn |
 
+use std::collections::VecDeque;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::process::Command;
@@ -48,6 +55,7 @@ use momo_settings::{upsert_agent_pin, PinKind, ProviderConfig, ProviderMode};
 use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::Row;
+use tokio::sync::Notify;
 use uuid::Uuid;
 
 const ENV_URL: &str = "http://hermes.railway.internal:8642/v1";
@@ -399,6 +407,17 @@ struct Scripted {
     plain: AtomicUsize,
     streaming: AtomicUsize,
     seen: Mutex<Vec<Vec<ChatMessage>>>,
+    /// Errors the next calls return (one per call, in order) before the staged answer comes back.
+    failures: Mutex<VecDeque<ProviderError>>,
+    /// A one-shot stop inside the next non-streaming call: the model is "working" until released.
+    hold: Mutex<Option<Arc<Hold>>>,
+}
+
+/// The two ends of a stop inside a model call: the call says it is in, the test lets it go.
+#[derive(Default)]
+struct Hold {
+    entered: Notify,
+    release: Notify,
 }
 
 impl Scripted {
@@ -408,6 +427,8 @@ impl Scripted {
             plain: AtomicUsize::new(0),
             streaming: AtomicUsize::new(0),
             seen: Mutex::new(Vec::new()),
+            failures: Mutex::new(VecDeque::new()),
+            hold: Mutex::new(None),
         })
     }
 
@@ -415,8 +436,29 @@ impl Scripted {
         *self.answer.lock().unwrap() = answer.into();
     }
 
+    /// The next `errors.len()` calls fail with these, in order; the call after them answers as staged.
+    fn fail_next(&self, errors: Vec<ProviderError>) {
+        *self.failures.lock().unwrap() = errors.into();
+    }
+
+    /// The next non-streaming call stops inside the model until `hold.release` is notified.
+    fn hold_next_call(&self, hold: &Arc<Hold>) {
+        *self.hold.lock().unwrap() = Some(hold.clone());
+    }
+
+    async fn hold_if_asked(&self) {
+        let hold = self.hold.lock().unwrap().take();
+        if let Some(hold) = hold {
+            hold.entered.notify_one();
+            hold.release.notified().await;
+        }
+    }
+
     fn reply(&self, request: &ChatRequest) -> Result<ChatCompletion, ProviderError> {
         self.seen.lock().unwrap().push(request.messages.clone());
+        if let Some(error) = self.failures.lock().unwrap().pop_front() {
+            return Err(error);
+        }
         Ok(ChatCompletion {
             text: self.answer.lock().unwrap().clone(),
             usage: Some(ChatUsage {
@@ -450,6 +492,7 @@ impl ChatProvider for Scripted {
         request: &ChatRequest,
     ) -> Result<ChatCompletion, ProviderError> {
         self.plain.fetch_add(1, Ordering::SeqCst);
+        self.hold_if_asked().await;
         self.reply(request)
     }
 
@@ -766,6 +809,120 @@ fn request_for<'a>(requests: &'a [Vec<ChatMessage>], body: &str) -> &'a Vec<Chat
 
 fn is_card(msg: &Msg) -> bool {
     msg.kind == "approval_request"
+}
+
+/// One more `expression.create` card of the agent that waits for a decision: the requester's message,
+/// a finished earlier run of the agent and its pending approval (what the agent's ceiling of three
+/// counts).
+async fn add_waiting_card(worker_pool: &PgPool, t: &Tenant, words: &str) {
+    let (workspace_id, channel_id, human, agent) =
+        (t.workspace_id, t.channel_id, t.human_id, t.agent_id);
+    let words = words.to_string();
+    with_tenant_tx(worker_pool, workspace_id, move |conn| {
+        let words = words.clone();
+        Box::pin(async move {
+            let sent = send_message_in_tx(
+                conn,
+                workspace_id,
+                NewMessage::text(channel_id, human, words.clone()),
+            )
+            .await?;
+            let created = create_agent_run_in_tx(
+                conn,
+                workspace_id,
+                NewAgentRun {
+                    channel_id,
+                    trigger: RunTrigger::Mention {
+                        message_id: sent.message.id,
+                        agent_member_id: agent,
+                    },
+                    parent_run_id: None,
+                    max_steps: 50,
+                    depth: 0,
+                    input: json!({"schema": "momo.agent_run.input.v0", "surface": "mention",
+                                  "prompt": words, "depth": 0}),
+                },
+            )
+            .await?;
+            sqlx::query(
+                "UPDATE agent_run SET status = 'succeeded', finished_at = now() WHERE id = $1",
+            )
+            .bind(created.id)
+            .execute(&mut *conn)
+            .await?;
+            momo_agent::create_pending_approval_in_tx(
+                conn,
+                workspace_id,
+                momo_agent::NewApproval {
+                    run_id: created.id,
+                    channel_id,
+                    requested_by: agent,
+                    action_type: "workspace_action".to_string(),
+                    payload: json!({"action": {"id": "expression.create"}}),
+                    expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                },
+            )
+            .await?;
+            Ok(())
+        })
+    })
+    .await
+    .expect("a waiting card");
+}
+
+/// How many cards of the agent wait for a decision.
+async fn waiting_cards(su: &PgPool, t: &Tenant) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM approval \
+          WHERE workspace_id = $1 AND requested_by = $2 AND status = 'pending'",
+    )
+    .bind(t.workspace_id)
+    .bind(t.agent_id)
+    .fetch_one(su)
+    .await
+    .unwrap()
+}
+
+/// The outbox row of a run's agent job, with its settled state and the reason it was settled for.
+async fn job_of(su: &PgPool, run: Uuid) -> (i64, String, Option<String>) {
+    let row = sqlx::query(
+        "SELECT id, status::text AS status, last_error FROM outbox \
+          WHERE kind = 'agent_job' AND (payload->>'run_id')::uuid = $1 ORDER BY id DESC LIMIT 1",
+    )
+    .bind(run)
+    .fetch_one(su)
+    .await
+    .expect("the run's job");
+    (row.get("id"), row.get("status"), row.get("last_error"))
+}
+
+/// Let a requeued job's backoff end now, so the next `drain_once` claims it.
+async fn let_the_backoff_end(su: &PgPool, job_id: i64) {
+    sqlx::query("UPDATE outbox SET available_at = now() WHERE id = $1")
+        .bind(job_id)
+        .execute(su)
+        .await
+        .expect("let the backoff end");
+}
+
+/// `(prompt tokens, completion tokens, was_estimated)` of the run's ledger rows.
+async fn ledger_of(su: &PgPool, run: Uuid) -> Vec<(i32, i32, bool)> {
+    sqlx::query(
+        "SELECT prompt_tokens, completion_tokens, was_estimated FROM usage_ledger WHERE run_id = $1",
+    )
+    .bind(run)
+    .fetch_all(su)
+    .await
+    .unwrap()
+    .iter()
+    .map(|row| {
+        (
+            row.get("prompt_tokens"),
+            row.get("completion_tokens"),
+            row.get("was_estimated"),
+        )
+    })
+    .collect()
 }
 
 // --- behaviour ---------------------------------------------------------------
@@ -1516,57 +1673,7 @@ async fn the_cheap_refusals_come_before_the_model() {
     .await;
     // Three cards of this agent already wait.
     for n in 0..3 {
-        let (workspace_id, channel_id, human, agent) =
-            (t.workspace_id, t.channel_id, t.human_id, t.agent_id);
-        with_tenant_tx(&worker_pool, workspace_id, move |conn| {
-            Box::pin(async move {
-                let sent = send_message_in_tx(
-                    conn,
-                    workspace_id,
-                    NewMessage::text(channel_id, human, format!("앞선 요청 {n}")),
-                )
-                .await?;
-                let created = create_agent_run_in_tx(
-                    conn,
-                    workspace_id,
-                    NewAgentRun {
-                        channel_id,
-                        trigger: RunTrigger::Mention {
-                            message_id: sent.message.id,
-                            agent_member_id: agent,
-                        },
-                        parent_run_id: None,
-                        max_steps: 50,
-                        depth: 0,
-                        input: json!({"schema": "momo.agent_run.input.v0", "surface": "mention",
-                                      "prompt": "앞선", "depth": 0}),
-                    },
-                )
-                .await?;
-                sqlx::query(
-                    "UPDATE agent_run SET status = 'succeeded', finished_at = now() WHERE id = $1",
-                )
-                .bind(created.id)
-                .execute(&mut *conn)
-                .await?;
-                momo_agent::create_pending_approval_in_tx(
-                    conn,
-                    workspace_id,
-                    momo_agent::NewApproval {
-                        run_id: created.id,
-                        channel_id,
-                        requested_by: agent,
-                        action_type: "workspace_action".to_string(),
-                        payload: json!({"action": {"id": "expression.create"}}),
-                        expires_at: chrono::Utc::now() + chrono::Duration::hours(1),
-                    },
-                )
-                .await?;
-                Ok(())
-            })
-        })
-        .await
-        .expect("a waiting card");
+        add_waiting_card(&worker_pool, &t, &format!("앞선 요청 {n}")).await;
     }
     provider.say(answer(
         "만들었어요",
@@ -1822,4 +1929,550 @@ async fn the_directive_is_exactly_one_more_message_on_a_photo_turn() {
         text_bodies(&text_turn),
         "the directive is the only difference"
     );
+}
+
+// --- #4820 C2b review: guards that had no test, retries that cost, an answer too long to hold -------
+
+/// The ceiling of waiting cards is judged before the model **and again inside the proposal**. With two
+/// waiting the gate before the model sees room and the model is called; while it works, a third card of
+/// the agent lands (the model call is held open here, so the order is not a race). The proposal's own
+/// proof of the ceiling refuses: no card, no draft, never a fourth waiting — and the person is told in
+/// one sentence.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_third_card_that_lands_while_the_model_works_is_refused_by_the_proposal() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su).await;
+    pin_env(&su, &t).await;
+    let app = pool_as("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw").await;
+    let worker_pool = pool_as("momo_worker", "MOMO_WORKER_PASSWORD", "momo_worker_dev_pw").await;
+    let provider = Scripted::new();
+    let w = worker(
+        &provider,
+        &Opts {
+            origin: Some(ORIGIN),
+            strict: true,
+            ..Opts::default()
+        },
+    )
+    .await;
+    for n in 0..2 {
+        add_waiting_card(&worker_pool, &t, &format!("앞선 요청 {n}")).await;
+    }
+    provider.say(answer(
+        "만들었어요",
+        Some(&picture(32, 32)),
+        Some(&still_request()),
+    ));
+    let (run, _, _) = enqueue_mention(
+        &su,
+        &worker_pool,
+        &t,
+        "@hermes 하나 더 (landing-4820)",
+        Some(PHOTO),
+    )
+    .await;
+    assert_eq!(waiting_cards(&su, &t).await, 2, "room for exactly one more");
+
+    let hold = Arc::new(Hold::default());
+    provider.hold_next_call(&hold);
+    let landing = async {
+        // The worker is inside the model call now: the third card lands behind its back.
+        hold.entered.notified().await;
+        add_waiting_card(&worker_pool, &t, "끼어든 요청").await;
+        hold.release.notify_one();
+    };
+    let (stats, ()) = tokio::join!(drain(&w), landing);
+    assert_eq!(stats.claimed, 1, "{stats:?}");
+
+    assert_eq!(
+        provider.calls(),
+        (1, 0),
+        "the gate before the model saw room, so the model was called"
+    );
+    assert!(
+        approvals_of(&app, &t, run).await.is_empty(),
+        "the proposal's own proof refused: no card for this run"
+    );
+    assert!(drafts_of(&app, &t).await.is_empty());
+    assert_eq!(
+        waiting_cards(&su, &t).await,
+        3,
+        "the ceiling of three held: no fourth card"
+    );
+    let messages = agent_messages(&app, &t).await;
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(!is_card(&messages[0]));
+    assert_eq!(
+        messages[0].body.as_deref(),
+        Some("승인을 기다리는 카드가 이미 많아요. 먼저 처리해 주세요."),
+        "told in one sentence"
+    );
+    assert_eq!(run_status(&su, run).await, "succeeded");
+    assert_eq!(ledger_rows(&su, run).await, 1, "the tokens were spent");
+    assert_no_picture_anywhere(&su, &t).await;
+}
+
+/// A run that is not a live, running one is refused **before** the model is called. The table is every
+/// state a job can find its run in once the run is over or parked: the model call is the one thing that
+/// costs, and the proposal (or the commit) would refuse such a run afterwards in any case — so the
+/// *only* thing that tells the gate from its absence is whether the model was asked.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_run_that_is_not_live_is_refused_before_the_model_is_called() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let app = pool_as("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw").await;
+    let worker_pool = pool_as("momo_worker", "MOMO_WORKER_PASSWORD", "momo_worker_dev_pw").await;
+    let provider = Scripted::new();
+    let w = worker(
+        &provider,
+        &Opts {
+            origin: Some(ORIGIN),
+            strict: true,
+            ..Opts::default()
+        },
+    )
+    .await;
+    provider.say(answer(
+        "만들었어요",
+        Some(&picture(32, 32)),
+        Some(&still_request()),
+    ));
+    for status in ["cancelled", "succeeded", "awaiting_approval"] {
+        let t = seed(&su).await;
+        pin_env(&su, &t).await;
+        let (run, _, _) = enqueue_mention(
+            &su,
+            &worker_pool,
+            &t,
+            &format!("@hermes 이 사진으로 ({status}-gate-4820)"),
+            Some(PHOTO),
+        )
+        .await;
+        // Written directly, not through the cancel route: the job stays claimable, as the race of a
+        // person cancelling while the job is claimed leaves it.
+        sqlx::query(
+            "UPDATE agent_run \
+                SET status = $2::text::run_status, \
+                    finished_at = CASE WHEN $2::text IN ('succeeded', 'cancelled') THEN now() END, \
+                    deadline_at = CASE WHEN $2::text = 'awaiting_approval' \
+                                       THEN now() + interval '1 hour' END \
+              WHERE id = $1",
+        )
+        .bind(run)
+        .bind(status)
+        .execute(&su)
+        .await
+        .unwrap();
+        let before = provider.calls();
+        let stats = drain(&w).await;
+        assert_eq!(stats.claimed, 1, "{status}: {stats:?}");
+        assert_eq!(
+            provider.calls(),
+            before,
+            "{status}: the model was not called for a run that is not live"
+        );
+        let messages = agent_messages(&app, &t).await;
+        assert!(
+            messages.is_empty(),
+            "{status}: nothing was said, nothing raised: {messages:?}"
+        );
+        assert!(approvals_of(&app, &t, run).await.is_empty(), "{status}");
+        assert!(drafts_of(&app, &t).await.is_empty(), "{status}");
+        assert_eq!(
+            run_status(&su, run).await,
+            status,
+            "{status}: the run was left as it was"
+        );
+        let (_, job_status, reason) = job_of(&su, run).await;
+        assert_eq!(job_status, "done", "{status}");
+        assert_eq!(
+            reason.as_deref(),
+            Some("hosted_door_run_not_usable"),
+            "{status}: settled by the door's own refusal"
+        );
+        assert_eq!(ledger_rows(&su, run).await, 0, "{status}: no tokens spent");
+    }
+}
+
+/// The turn that continues a run after a person approved a card is a **resume** turn; its run's trigger
+/// is still the photo message. The door must not open for it: it would harvest and propose again — a
+/// card about a card — for every approval. A resume is an ordinary streamed turn (the directive is not
+/// even in its context), and nothing is raised.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_resume_turn_never_opens_the_door() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let app = pool_as("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw").await;
+    let worker_pool = pool_as("momo_worker", "MOMO_WORKER_PASSWORD", "momo_worker_dev_pw").await;
+    let provider = Scripted::new();
+    let w = worker(
+        &provider,
+        &Opts {
+            origin: Some(ORIGIN),
+            strict: true,
+            ..Opts::default()
+        },
+    )
+    .await;
+    let t = seed(&su).await;
+    pin_env(&su, &t).await;
+    // What the model would say if the door were open: a picture and a valid request.
+    provider.say(answer(
+        "만들었어요",
+        Some(&picture(32, 32)),
+        Some(&still_request()),
+    ));
+    let (run, _, _) = enqueue_mention(
+        &su,
+        &worker_pool,
+        &t,
+        "@hermes 이 사진으로 (resume-4820)",
+        Some(PHOTO),
+    )
+    .await;
+    // The job an approval's 승인 enqueues for this run: `resume_approval`, carrying the approval it
+    // resumes from. (The run itself is `queued` again, which is what the approval route leaves.)
+    let resumed = sqlx::query(
+        "UPDATE outbox SET method = 'resume_approval', \
+                payload = payload || jsonb_build_object('resume_from_approval_id', gen_random_uuid()::text) \
+          WHERE kind = 'agent_job' AND (payload->>'run_id')::uuid = $1",
+    )
+    .bind(run)
+    .execute(&su)
+    .await
+    .unwrap();
+    assert_eq!(resumed.rows_affected(), 1);
+
+    let stats = drain(&w).await;
+    assert_eq!(stats.claimed, 1, "{stats:?}");
+    assert_eq!(
+        provider.calls(),
+        (0, 1),
+        "a resume is an ordinary streamed turn: the door's non-streaming call was not made"
+    );
+    let requests = provider.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        requests[0]
+            .iter()
+            .all(|m| !m.content.contains("oort-expression")),
+        "no directive in a resume turn's context"
+    );
+    assert!(
+        approvals_of(&app, &t, run).await.is_empty(),
+        "no card, no failure card"
+    );
+    assert!(drafts_of(&app, &t).await.is_empty());
+    let messages = agent_messages(&app, &t).await;
+    assert!(messages.iter().all(|m| !is_card(m)), "{messages:?}");
+    assert_eq!(run_status(&su, run).await, "succeeded");
+}
+
+/// An assembler that cannot run is retried **once**, not seven times: every attempt asks Hermes for a
+/// new picture. The first attempt is requeued (its tokens already on the ledger, no card); the second is
+/// the last and ends as one closed `generation_failed` card with the run delivered; a third attempt
+/// never happens — and the run has one card, one approval and one ledger row throughout.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn an_assembler_that_cannot_run_gets_two_attempts_and_ends_as_one_closed_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su).await;
+    pin_env(&su, &t).await;
+    let app = pool_as("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw").await;
+    let worker_pool = pool_as("momo_worker", "MOMO_WORKER_PASSWORD", "momo_worker_dev_pw").await;
+    let provider = Scripted::new();
+    let w = worker(
+        &provider,
+        &Opts {
+            origin: Some(ORIGIN),
+            strict: true,
+            assembler: Some(script("broken-twice", "exit 3")),
+        },
+    )
+    .await;
+    provider.say(answer(
+        "움직이게 했어요",
+        Some(&picture(64, 64)),
+        Some(&preset_request(&["bounce"], 240, &[("jump-me", "통통")])),
+    ));
+    let (run, _, _) = enqueue_mention(
+        &su,
+        &worker_pool,
+        &t,
+        "@hermes 움직이게 (twice-4820)",
+        Some(PHOTO),
+    )
+    .await;
+    let (job_id, _, _) = job_of(&su, run).await;
+
+    // Attempt 1: no card for an operator fault; requeued; the tokens that paid for the picture are
+    // on the ledger already.
+    let stats = w.drain_once().await.expect("drain");
+    assert_eq!((stats.claimed, stats.requeued), (1, 1), "{stats:?}");
+    assert!(agent_messages(&app, &t).await.iter().all(|m| !is_card(m)));
+    assert!(approvals_of(&app, &t, run).await.is_empty());
+    assert_eq!(
+        ledger_of(&su, run).await,
+        vec![(120, 40, false)],
+        "the first attempt's measured tokens"
+    );
+    assert_eq!(
+        run_status(&su, run).await,
+        "failed",
+        "the between-attempts mark"
+    );
+
+    // Attempt 2: the last. One closed card, the run delivered, still one ledger row.
+    let_the_backoff_end(&su, job_id).await;
+    let stats = w.drain_once().await.expect("drain");
+    assert_eq!((stats.claimed, stats.answered), (1, 1), "{stats:?}");
+    assert_eq!(
+        provider.calls(),
+        (2, 0),
+        "exactly two attempts asked the model"
+    );
+    let messages = agent_messages(&app, &t).await;
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    let card = &messages[0];
+    assert!(is_card(card));
+    assert_eq!(card.props["code"], "generation_failed");
+    assert_eq!(card.body.as_deref(), Some(golden_line("generation_failed")));
+    assert_eq!(card.props["status"], "cancelled");
+    assert!(card.props["decided_by"].is_null());
+    let approvals = approvals_of(&app, &t, run).await;
+    assert_eq!(approvals.len(), 1, "one approval, one card");
+    assert_eq!(approvals[0].status, "cancelled");
+    assert_eq!(approvals[0].decided_by, None);
+    assert!(drafts_of(&app, &t).await.is_empty());
+    assert_eq!(run_status(&su, run).await, "succeeded");
+    assert_eq!(
+        ledger_of(&su, run).await,
+        vec![(120, 40, false)],
+        "still the one row: a retry never double-charges"
+    );
+    let (_, job_status, reason) = job_of(&su, run).await;
+    assert_eq!(job_status, "done");
+    assert_eq!(reason.as_deref(), Some("generation_failed"));
+
+    // Attempt 3 does not exist: even with every backoff ended there is nothing to claim.
+    let_the_backoff_end(&su, job_id).await;
+    let stats = w.drain_once().await.expect("drain");
+    assert_eq!(stats.claimed, 0, "{stats:?}");
+    assert_eq!(provider.calls(), (2, 0));
+    assert_eq!(agent_messages(&app, &t).await.len(), 1);
+    assert_no_picture_anywhere(&su, &t).await;
+}
+
+/// The provider's deadline is the other failure that costs a picture per attempt: two attempts, then
+/// one closed card. An **outage** (the provider refusing connections) is not that: it never produced a
+/// picture, so it keeps the ordinary budget — three failures in a row still end in a card of the answer.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_provider_deadline_gets_two_attempts_but_an_outage_keeps_its_budget() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let app = pool_as("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw").await;
+    let worker_pool = pool_as("momo_worker", "MOMO_WORKER_PASSWORD", "momo_worker_dev_pw").await;
+    let provider = Scripted::new();
+    let w = worker(
+        &provider,
+        &Opts {
+            origin: Some(ORIGIN),
+            strict: true,
+            ..Opts::default()
+        },
+    )
+    .await;
+
+    // 1. A deadline, twice.
+    let slow = seed(&su).await;
+    pin_env(&su, &slow).await;
+    provider.say(answer(
+        "만들었어요",
+        Some(&picture(32, 32)),
+        Some(&still_request()),
+    ));
+    provider.fail_next(vec![
+        ProviderError::TimedOut("operation timed out".into()),
+        ProviderError::TimedOut("operation timed out".into()),
+    ]);
+    let (run, _, _) = enqueue_mention(
+        &su,
+        &worker_pool,
+        &slow,
+        "@hermes 이 사진으로 (slow-4820)",
+        Some(PHOTO),
+    )
+    .await;
+    let (job_id, _, _) = job_of(&su, run).await;
+    let stats = w.drain_once().await.expect("drain");
+    assert_eq!((stats.claimed, stats.requeued), (1, 1), "{stats:?}");
+    assert!(agent_messages(&app, &slow).await.is_empty(), "no card yet");
+    assert!(
+        ledger_of(&su, run).await.is_empty(),
+        "nothing came back, so there is nothing to record"
+    );
+    let_the_backoff_end(&su, job_id).await;
+    let stats = w.drain_once().await.expect("drain");
+    assert_eq!((stats.claimed, stats.answered), (1, 1), "{stats:?}");
+    assert_eq!(provider.calls(), (2, 0), "two attempts, no third");
+    let messages = agent_messages(&app, &slow).await;
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(is_card(&messages[0]));
+    assert_eq!(messages[0].props["code"], "generation_failed");
+    assert_eq!(messages[0].props["status"], "cancelled");
+    assert_eq!(approvals_of(&app, &slow, run).await.len(), 1);
+    assert_eq!(run_status(&su, run).await, "succeeded");
+    assert_eq!(
+        ledger_of(&su, run).await,
+        vec![(0, 0, true)],
+        "one estimated row: the model was asked and reported nothing"
+    );
+    let_the_backoff_end(&su, job_id).await;
+    let stats = w.drain_once().await.expect("drain");
+    assert_eq!(stats.claimed, 0, "{stats:?}");
+    assert_eq!(provider.calls(), (2, 0));
+
+    // 2. An outage, twice, and then the provider is back: the third attempt raises the card.
+    let down = seed(&su).await;
+    pin_env(&su, &down).await;
+    provider.fail_next(vec![
+        ProviderError::Unreachable("connection refused".into()),
+        ProviderError::Unreachable("connection refused".into()),
+    ]);
+    let (run, _, _) = enqueue_mention(
+        &su,
+        &worker_pool,
+        &down,
+        "@hermes 이 사진으로 (down-4820)",
+        Some(PHOTO),
+    )
+    .await;
+    let (job_id, _, _) = job_of(&su, run).await;
+    let before = provider.calls().0;
+    for attempt in 1..=2 {
+        let stats = w.drain_once().await.expect("drain");
+        assert_eq!(
+            (stats.claimed, stats.requeued),
+            (1, 1),
+            "attempt {attempt} of an outage is requeued: {stats:?}"
+        );
+        assert!(agent_messages(&app, &down).await.is_empty());
+        let_the_backoff_end(&su, job_id).await;
+    }
+    w.drain_once().await.expect("drain");
+    assert_eq!(provider.calls().0 - before, 3, "the outage kept its budget");
+    let messages = agent_messages(&app, &down).await;
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(is_card(&messages[0]));
+    assert_eq!(
+        messages[0].props["status"], "pending",
+        "the third attempt raised the card of the answer"
+    );
+    assert_eq!(run_status(&su, run).await, "awaiting_approval");
+}
+
+/// An answer over the size limit is not read (the provider layer says so); for a door turn that is one
+/// closed `generation_failed` card — no retry, the run delivered, one estimated ledger row, nothing of
+/// the answer anywhere. Anywhere else it is the ordinary, non-retried provider failure, exactly as it
+/// is for any other non-retryable error.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn an_answer_over_the_size_limit_is_one_closed_card_on_a_door_turn_and_the_ordinary_failure_elsewhere(
+) {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    reset_instance(&su).await;
+    let app = pool_as("momo_app", "MOMO_APP_PASSWORD", "momo_app_dev_pw").await;
+    let worker_pool = pool_as("momo_worker", "MOMO_WORKER_PASSWORD", "momo_worker_dev_pw").await;
+    let provider = Scripted::new();
+    let w = worker(
+        &provider,
+        &Opts {
+            origin: Some(ORIGIN),
+            strict: true,
+            ..Opts::default()
+        },
+    )
+    .await;
+    let too_large = || ProviderError::BodyTooLarge {
+        limit: momo_agent_worker::provider::RESPONSE_BODY_MAX_BYTES,
+    };
+
+    // A door turn.
+    let door = seed(&su).await;
+    pin_env(&su, &door).await;
+    provider.fail_next(vec![too_large()]);
+    let (run, _, _) = enqueue_mention(
+        &su,
+        &worker_pool,
+        &door,
+        "@hermes 이 사진으로 (huge-door-4820)",
+        Some(PHOTO),
+    )
+    .await;
+    let stats = drain(&w).await;
+    assert_eq!((stats.claimed, stats.answered), (1, 1), "{stats:?}");
+    assert_eq!(
+        provider.calls(),
+        (1, 0),
+        "not retried: the same answer would come back"
+    );
+    let messages = agent_messages(&app, &door).await;
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    let card = &messages[0];
+    assert!(is_card(card));
+    assert_eq!(card.props["code"], "generation_failed");
+    assert_eq!(card.body.as_deref(), Some(golden_line("generation_failed")));
+    assert_eq!(card.props["status"], "cancelled");
+    assert_eq!(card.props["decision_reason"], "generation_failed");
+    let approvals = approvals_of(&app, &door, run).await;
+    assert_eq!(approvals.len(), 1);
+    assert_eq!(approvals[0].status, "cancelled");
+    assert!(drafts_of(&app, &door).await.is_empty());
+    assert_eq!(run_status(&su, run).await, "succeeded");
+    assert_eq!(ledger_of(&su, run).await, vec![(0, 0, true)]);
+    let (_, job_status, reason) = job_of(&su, run).await;
+    assert_eq!(
+        (job_status.as_str(), reason.as_deref()),
+        ("done", Some("generation_failed"))
+    );
+    assert_no_picture_anywhere(&su, &door).await;
+
+    // An ordinary turn (no photo): the same error is the generic provider failure, not a card.
+    let plain = seed(&su).await;
+    pin_env(&su, &plain).await;
+    provider.fail_next(vec![too_large()]);
+    let before = provider.calls();
+    let (run, _, _) = enqueue_mention(
+        &su,
+        &worker_pool,
+        &plain,
+        "@hermes 사진 없이 (huge-plain-4820)",
+        None,
+    )
+    .await;
+    let stats = drain(&w).await;
+    assert_eq!((stats.claimed, stats.failed), (1, 1), "{stats:?}");
+    let after = provider.calls();
+    assert_eq!(
+        (after.0 - before.0, after.1 - before.1),
+        (0, 1),
+        "one streamed attempt, no retry"
+    );
+    let messages = agent_messages(&app, &plain).await;
+    assert!(messages.iter().all(|m| !is_card(m)), "{messages:?}");
+    assert_eq!(run_status(&su, run).await, "failed");
+    let (_, job_status, _) = job_of(&su, run).await;
+    assert_eq!(job_status, "failed");
 }
