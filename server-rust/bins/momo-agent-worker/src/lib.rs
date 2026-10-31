@@ -1301,9 +1301,10 @@ impl AgentWorker {
         // with the **cleaned** text — no picture, no `MEDIA:` line, no request block — which is the only
         // text that may ever be committed. A turn that is not a door turn keeps `completion.text` as it
         // was, except that a `data:image/…` address in it is cut the door's way and a sentence stands in
-        // its place (#4908): the only size limit on this path is the provider layer's read limit
-        // (`RESPONSE_BODY_MAX_BYTES`), which the text has already passed to be here, and the message
-        // write has none — so this cut is before the only write that could carry the picture.
+        // its place (#4908). On the size limits: a non-streamed answer was already read under
+        // `RESPONSE_BODY_MAX_BYTES` (12 MiB) to get here, so that limit always comes first and this cut
+        // cannot be ordered before it; the message write (`insert_message_in_tx`, `message.body`) has no
+        // limit of its own — so the cut is before the only write that could carry the picture.
         let answer_text = if door_turn.is_some() {
             match self
                 .hosted_door_land(
@@ -4659,6 +4660,40 @@ mod tests {
             !message.chars().any(|c| c.is_ascii_alphabetic()),
             "no English internal vocabulary reaches the channel: {message}"
         );
+    }
+
+    /// #4908. The sentence that stands where a picture address was cut is one plain Korean line, and it
+    /// can stand anywhere an address stood — in a markdown image's place, in a JSON string of a
+    /// completion report — without breaking it or being read as a picture again: no quote, backslash,
+    /// newline or markup, and none of the words the cut exists to keep out of the channel.
+    #[test]
+    fn the_picture_removed_sentence_is_one_plain_korean_line_that_cannot_break_what_it_stands_in() {
+        let sentence = PICTURE_REMOVED_SENTENCE;
+        assert!(sentence.ends_with("어요."), "{sentence}");
+        for forbidden in [
+            "data:",
+            "base64",
+            "MEDIA:",
+            "oort-expression",
+            "oort:report",
+            "![",
+            "](",
+            "```",
+            "\"",
+            "\\",
+            "\n",
+            "<",
+            ">",
+        ] {
+            assert!(!sentence.contains(forbidden), "{forbidden:?} in {sentence}");
+        }
+        assert!(
+            !sentence.chars().any(|c| c.is_ascii_alphabetic()),
+            "no English vocabulary reaches the channel: {sentence}"
+        );
+        let wrapped = format!("{{\"summary\":\"{sentence}\"}}");
+        let parsed: Value = serde_json::from_str(&wrapped).expect("still a JSON string");
+        assert_eq!(parsed["summary"], json!(sentence));
     }
 
     /// The provider's words are moved, not deleted. `props` rides the relay to

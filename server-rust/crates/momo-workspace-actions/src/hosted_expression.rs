@@ -1403,7 +1403,7 @@ mod tests {
         for text in untouched {
             assert_eq!(replace_pictures(text, SAID), None, "{text:?}");
         }
-        // The control: one address makes the very same shapes a `Some`.
+        // The control: the same function does see an address when there is one.
         assert!(replace_pictures("data:image/png;base64,QUJD", SAID).is_some());
     }
 

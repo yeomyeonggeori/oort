@@ -25,7 +25,7 @@
 //! | `every_failure_is_one_closed_card_with_the_golden_line` | any code mapped to another / a body that is not the golden line / a card that stays pending |
 //! | `an_assembler_that_cannot_run_is_a_retry_and_never_a_card` | map an outage to a card code |
 //! | `no_valid_request_block_is_an_ordinary_answer_without_picture_marker_or_block` | commit the raw answer / open the door on a malformed or doubled block |
-//! | `a_turn_without_a_photo_is_unchanged_and_the_requesters_own_photo_rule_holds` | apply the door to a turn without a photo, or to a photo the rule refuses |
+//! | `a_turn_without_a_photo_never_opens_the_door_and_the_requesters_own_photo_rule_holds` | apply the door to a turn without a photo, or to a photo the rule refuses |
 //! | `the_cheap_refusals_come_before_the_model` | judge the ceiling after the model call |
 //! | `without_the_operators_strict_attestation_the_door_is_shut_and_the_turn_is_an_ordinary_one` | open the door without the attestation (or raise a card / look for the photo while shut) |
 //! | `the_source_pointer_is_recorded_only_when_the_model_was_given_the_photo` | record the pointer for a turn that handed no address |
@@ -1597,7 +1597,7 @@ async fn no_valid_request_block_is_an_ordinary_answer_without_picture_marker_or_
 /// refuses (here: over the 5 MiB ceiling).
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn a_turn_without_a_photo_is_unchanged_and_the_requesters_own_photo_rule_holds() {
+async fn a_turn_without_a_photo_never_opens_the_door_and_the_requesters_own_photo_rule_holds() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     reset_instance(&su).await;
@@ -2841,7 +2841,8 @@ async fn an_ordinary_answer_without_a_picture_address_is_committed_byte_for_byte
         assert_eq!(messages.len(), 1, "{what}: {messages:?}");
         assert_eq!(messages[0].kind, "text", "{what}");
         let body = messages[0].body.clone().unwrap_or_default();
-        assert_eq!(body.as_bytes(), said.as_bytes(), "{what}");
+        // `String` equality is byte equality (both are valid UTF-8): the committed bytes are the model's.
+        assert_eq!(body, said, "{what}");
         assert!(!body.contains(PICTURE_REMOVED), "{what}");
         assert_eq!(run_status(&su, run).await, "succeeded", "{what}");
         assert!(approvals_of(&app, &t, run).await.is_empty(), "{what}");
