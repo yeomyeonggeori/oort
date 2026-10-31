@@ -342,11 +342,13 @@ def scenario_env_reference_shapes():
 
 def scenario_env_loader_oracle():
     """#4886 review: the gate's reading of the volume's `.env` against Hermes' REAL loader, not against what its author expects. For
-    every input of the named table (each judged name on every spelling, reference and byte order mark shape) and a few thousand seeded
-    random ones, `hermes_cli.env_loader.load_hermes_dotenv` of this image runs on a copy in the service slot's environment, and the
-    names it ends with a forbidden value for must all be named by the gate's problems (also for the file as the loader leaves it); a
-    refusal beyond them must have a designed reason. Not a gate run: the record carries the counts, the judge in the shell script
-    holds them to thresholds so that an empty comparison cannot pass."""
+    every input of the named table (each judged name on every spelling, reference, byte order mark and load-chain shape) and a few
+    thousand seeded random ones, `hermes_cli.env_loader.load_hermes_dotenv` of this image runs on a copy in the service slot's
+    environment, again on the file it leaves behind until a load leaves the file as it was (at most `oracle.LOAD_CAP` loads), and once
+    more on each of those files as it stands (its clean-up switched off). The names it ends with a forbidden value for in ANY of those
+    loads must all be named by the gate's problems; a refusal beyond them must have a designed reason; and the gate's model of the files
+    the loader leaves is held to the loader's own. Not a gate run: the record carries the counts, the judge in the shell script holds
+    them to thresholds so that an empty comparison cannot pass."""
     install()  # the volume as the start commands leave it, like every other scenario: Hermes' modules are imported against it
     oracle, env_loader, lockgate = oracle_modules()
     summary = oracle.run(env_loader, lockgate, oracle.table_cases() + oracle.random_cases(ORACLE_SEED, ORACLE_RANDOM))

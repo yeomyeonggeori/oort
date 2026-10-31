@@ -40,9 +40,11 @@
 #   env-reference-shapes ... a judged name given `${...}` (a variable only Hermes' service slot has, HOME, an unset name with a default):
 #                            refused for the reference itself, whatever the real loader ends with (#4886 review)
 #   env-loader-oracle ...... the gate's reading against the REAL loader on the whole named table and 4000 seeded random inputs
-#                            (infra/hermes/env_loader_oracle.py): the loader runs on a copy in the service slot's environment; the names it
-#                            ends with a forbidden value for must all be named by the gate (also for the file as the loader leaves it),
-#                            a refusal beyond them needs a designed reason, and the judge demands thresholds so an empty comparison fails
+#                            (infra/hermes/env_loader_oracle.py): the loader runs on a copy in the service slot's environment, again on
+#                            the file it leaves until a load leaves it unchanged (at most 64 loads), and once more on each of those files
+#                            as it stands; the names it ends with a forbidden value for in any of those loads must all be named by the
+#                            gate, the gate's model of the files the loader leaves must equal the loader's own, a refusal beyond them
+#                            needs a designed reason, and the judge demands thresholds so an empty comparison fails
 #   hermes-home-other ...... a HERMES_HOME that names another folder than the one the gate reads is refused (the image sets /opt/data)
 #   env-parser-parity ...... the input table and rule tables of infra/hermes/test_lockgate_env.py (and the two test files that
 #                            changed with it), run by this image's python with python-dotenv: the fallback parser and the real one
@@ -293,7 +295,7 @@ if ((shapes["lockgate"] or {}).get("env_parser") or {}).get("impl") != "python-d
     failures.append("env-shapes: the gate did not use the image's python-dotenv: %r" % ((shapes["lockgate"] or {}).get("env_parser"),))
 against_loader("env-inert-shapes", 0, violated=[])
 # a judged name given a reference: refused for the reference itself (all five), whatever the real loader ends with. The loader
-# resolves them in the service slot's environment (HERMES_SUPERVISED_CHILD=1, HOME=the volume): three of the five end forbidden there.
+# resolves them in the service slot's environment; what it ends with comes from the record (`violated` below).
 against_loader("env-reference-shapes", 3,
                ["the volume's .env sets %s through a reference" % name for name in
                 ("HERMES_SAFE_MODE", "HERMES_DASHBOARD", "HTTPS_PROXY", "API_SERVER_KEY", "FAL_KEY")],
@@ -311,19 +313,26 @@ expect("env-loader-oracle", 0)
 orc = (result("env-loader-oracle")["lockgate"] or {}).get("oracle") or {}
 if not str(orc.get("loader_file", "")).startswith(LOADER_PREFIX):
     failures.append("env-loader-oracle: the loader is not this image's own hermes_cli.env_loader: %r" % (orc.get("loader_file"),))
-for kind in ("missed", "missed_after", "unexplained", "wrong_labels"):
+for kind in ("missed", "missed_after", "unexplained", "wrong_labels", "chain_mismatch", "unsettled"):
     if orc.get(kind) != 0:
         failures.append("env-loader-oracle: %s = %r (examples %r)" % (kind, orc.get(kind), (orc.get("examples") or {}).get(kind)))
+# the loads after the first, the files read as they stand and the gate's model of the loader's files were really compared: this image's
+# loader has the clean-up step that is switched off, some inputs needed several loads, enough of them applied something only later or only
+# as they stand, and the model was held to the loader's files on nearly every input
+if orc.get("cleanup_step_found") is not True:
+    failures.append("env-loader-oracle: this image's loader has no clean-up step to switch off: the files were not read as they stand")
+if not isinstance(orc.get("loads"), dict) or max([int(count) for count in orc["loads"]] or [0]) < 8:
+    failures.append("env-loader-oracle: no input needed 8 loads (the loads were not followed far enough): %r" % (orc.get("loads"),))
 if (orc.get("env_parser") or {}).get("version") != expected_dotenv:
     failures.append("env-loader-oracle: not this image's python-dotenv %s: %r" % (expected_dotenv, orc.get("env_parser")))
-for key, floor in (("cases", 4000), ("violating", 1500), ("clean", 1000)):
+for key, floor in (("cases", 4000), ("violating", 1500), ("clean", 1000), ("later_only", 150), ("as_stands_only", 15), ("states_compared", 3500)):
     if not isinstance(orc.get(key), int) or orc[key] < floor:
         failures.append("env-loader-oracle: only %r %s (at least %d wanted): the comparison was too thin" % (orc.get(key), key, floor))
 if orc.get("detected") != sorted(oracle.JUDGED_KEYS):
     failures.append("env-loader-oracle: judged names the loader violated and the gate named: %r (want %r)" % (orc.get("detected"), sorted(oracle.JUDGED_KEYS)))
 if (orc.get("needless") or {}).get("reference", 0) < 100:
     failures.append("env-loader-oracle: the reference shapes were barely exercised: %r" % (orc.get("needless"),))
-if set(orc.get("needless") or {}) - {"reference", "mark in a proxy name", "name-only rule"}:
+if set(orc.get("needless") or {}) - {"reference", "mark in a proxy name", "name-only rule", "NUL in the statement"}:
     failures.append("env-loader-oracle: refusals beyond the loader with no designed reason: %r" % (orc.get("needless"),))
 if not isinstance(orc.get("hermes_errors"), int) or orc["hermes_errors"] > 0.02 * (orc.get("cases") or 1):
     failures.append("env-loader-oracle: the loader raised on %r inputs: it was not run as Hermes runs it" % (orc.get("hermes_errors"),))
