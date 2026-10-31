@@ -54,7 +54,7 @@ function SubscriptionEditor({workspaceId, row}: {workspaceId: string; row: Agent
     finally {setSaving(false);}
   };
   return <View style={styles.group}>
-    <Text style={styles.detail}>{COPY.subscription}</Text>
+    <Sentence style={styles.detail}>{COPY.subscription}</Sentence>
     <InputPill accessibilityLabel={COPY.subscription} value={value} onChangeText={setValue} keyboardType="decimal-pad" editable={!saving} testID={`subscription-${row.agentMemberId}`} />
     <OutlineButton label={saving ? '저장하고 있어요' : '저장'} onPress={() => {void save();}} accessibilityLabel="구독 정액 저장" />
     <Sentence style={styles.detail}>비워서 저장하면 정액을 지워요.</Sentence>
@@ -86,7 +86,7 @@ export function AgentMonthlyReport({workspaceId}: {workspaceId: string}) {
     {data.agents.map(row => {
       const member = memberFor(directory, row.agentMemberId);
       return <View key={row.agentMemberId} style={styles.row}>
-        <Text style={styles.name}>{member?.displayName ?? '에이전트'}{member?.handle ? ` (@${member.handle})` : ''}</Text>
+        <Sentence style={styles.name}>{member?.displayName ?? '에이전트'}{member?.handle ? ` (@${member.handle})` : ''}</Sentence>
         <Sentence style={styles.number}>{agentUsageLine(row, member?.brain)}</Sentence>
         {data.totals.workspace && member?.callableBy === 'everyone' && <SubscriptionEditor workspaceId={workspaceId} row={row} />}
       </View>;
