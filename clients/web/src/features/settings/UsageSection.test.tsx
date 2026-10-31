@@ -119,6 +119,22 @@ describe("설정 › 사용량 (카드 문법, #3578 S5c)", () => {
     expect(innerBoxes(h).map((el) => el.getAttribute("data-testid") ?? el.tagName)).toEqual([]);
   });
 
+  it("한 화면의 다시 읽기 단추 셋은 같은 낱말이고 모두 카드 위 머리 줄에 선다 (#4986)", async () => {
+    // 월 보고는 「다시 불러오기」, 비용 집계는 「새로 고치기」, 구독 잔여량은 「다시 확인」이던 같은 동작이다. 낱말 하나, 자리 하나.
+    const h = await render();
+    await vi.waitFor(() => expect(byId(h, "usage-quota-provider")).not.toBeNull());
+    const ids = ["agent-usage-reload", "usage-refresh", "usage-quota-refresh"];
+    // 세 읽기가 각자 끝나야 단추가 쉬는 낱말로 돌아온다(읽는 동안은 「불러오는 중」). 끝날 때까지 기다린 뒤에 잰다.
+    await vi.waitFor(() => expect(ids.map((id) => byId(h, id)?.textContent)).toEqual(["다시 불러오기", "다시 불러오기", "다시 불러오기"]));
+    for (const id of ids) {
+      expect(byId(h, id)!.closest(".settings-card"), id).toBeNull();
+      expect(byId(h, id)!.hasAttribute("disabled"), id).toBe(false);
+    }
+    // 그 낱말의 단추는 이 화면에 이 셋뿐이다: 셋이 한 모양이라는 말은 넷째가 몰래 없다는 말이다.
+    const same = [...h.querySelectorAll("button")].filter((b) => /^(다시 불러오기|불러오는 중)$/.test(b.textContent ?? ""));
+    expect(same.map((b) => b.getAttribute("data-testid")).sort()).toEqual([...ids].sort());
+  });
+
   it("제공자 이름은 카드 제목(h2) 아래 h3 이다", async () => {
     const h = await render();
     await vi.waitFor(() => expect(byId(h, "usage-quota-provider")).not.toBeNull());

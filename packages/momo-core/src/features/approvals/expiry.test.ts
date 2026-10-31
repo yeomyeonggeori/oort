@@ -5,6 +5,7 @@ import {
   expirySoonCopy,
   minutesLeft,
   reproposeDraft,
+  closedCardReproposeReason,
   expiryLineSentence,
 } from "./expiry";
 
@@ -46,6 +47,34 @@ describe("승인 기한 국면 (#3738)", () => {
     const draft = reproposeDraft("grokbot");
     expect(draft.startsWith("@grokbot ")).toBe(true);
     expect(draft.endsWith(" ")).toBe(true);
+  });
+
+  it("이유를 생략하면 만료 초안이고, 거부·실패는 자기 사정을 말한다 (#4986)", () => {
+    expect(reproposeDraft("grokbot")).toBe(reproposeDraft("grokbot", "expired"));
+    expect(reproposeDraft("grokbot", "expired")).toContain("만료됐어요");
+    expect(reproposeDraft("grokbot", "declined")).toContain("거부됐어요");
+    expect(reproposeDraft("grokbot", "failed")).toContain("끝내지 못했어요");
+    // 이유마다 다른 글자이고, 모두 멘션으로 시작해 사람이 이어 쓸 수 있게 공백으로 끝난다.
+    const drafts = (["expired", "declined", "failed"] as const).map((reason) => reproposeDraft("grokbot", reason));
+    expect(new Set(drafts).size).toBe(3);
+    for (const draft of drafts) {
+      expect(draft.startsWith("@grokbot ")).toBe(true);
+      expect(draft.endsWith(" ")).toBe(true);
+      // 요청 고리 문구 규칙: 합쇼체·「거절」·영어 원문이 없다.
+      expect(draft).not.toMatch(/니다(?:[.!?\s]|$)|거절|[A-Za-z]{3,}\s[A-Za-z]{3,}/u);
+    }
+  });
+
+  it("닫힌 카드가 「다시 요청」을 건네는 것은 실패와 (남이 한) 거부뿐이다 (#4986)", () => {
+    expect(closedCardReproposeReason("failed", false)).toBe("failed");
+    expect(closedCardReproposeReason("failed", true)).toBe("failed");
+    expect(closedCardReproposeReason("declined", false)).toBe("declined");
+    // 내가 거부한 카드: 방금 스스로 닫은 사람에게 되돌릴 것이 없다.
+    expect(closedCardReproposeReason("declined", true)).toBeNull();
+    // 만료는 제 푸터가 맡고, 끝·취소·진행 중에는 다음 행동이 없다.
+    for (const state of ["expired", "thinking", "approval", "executing", "done", "cancelled", "", "unknown"]) {
+      expect(closedCardReproposeReason(state, false), state).toBeNull();
+    }
   });
 });
 

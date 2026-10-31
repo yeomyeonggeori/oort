@@ -16,7 +16,7 @@ import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 import { overlayOwnsEscape } from "@/design/ui/escapeLayer";
 import { PANEL_MOTION } from "@/design/motion";
 import { cn } from "@/design/lib/cn";
-import { shouldFoldBundleLine } from "@momo/core/features/timeline/requestBundle";
+import { presentableRows } from "@momo/core/features/timeline/toolCallSettle";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runStatusForMessage } from "./runStatus";
@@ -193,7 +193,7 @@ function ThreadPanelFrame({
   const allReplies = query.data?.messages ?? NO_REPLIES;
   const replyIds = useRef(new Set<string>());
   replyIds.current = new Set(allReplies.map((message) => message.id.toLowerCase()));
-  const replies = allReplies.filter((message) => !shouldFoldBundleLine(message, allReplies));
+  const replies = presentableRows(allReplies);
   const [landingMissed, setLandingMissed] = useState(false);
   const landedTarget = useRef<number | null>(null);
   useEffect(() => {

@@ -147,7 +147,7 @@ export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
           aria-busy={query.isFetching}
           data-testid="usage-quota-refresh"
         >
-          {query.isFetching ? "확인 중" : "다시 확인"}
+          {query.isFetching ? "불러오는 중" : "다시 불러오기"}
         </Button>
       }
     >
@@ -268,7 +268,7 @@ function QuotaBody({
   if (empty) {
     // A 200 with an empty list is the honest answer of a server that has not
     // probed its providers yet, and it is not a failure. One line, no centered
-    // poster (SKILL §5). The action is the 다시 확인 in the header one row above:
+    // poster (SKILL §5). The action is the 다시 불러오기 in the header one row above:
     // this state has exactly the same next step as the other three, and giving
     // it a differently named button of its own was the R1 M6 finding.
     return (

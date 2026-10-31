@@ -492,7 +492,7 @@
     "clients/web/src/features/common/avatarTone.ts": 13,
     "clients/web/src/features/common/chip.ts": 1,
     "clients/web/src/features/common/useOffline.ts": 6,
-    "clients/web/src/features/decisionStage/DecisionStage.tsx": 67,
+    "clients/web/src/features/decisionStage/DecisionStage.tsx": 65,
     "clients/web/src/features/decisionStage/stageEntry.ts": 7,
     "clients/web/src/features/decisionStage/useDecisionStageDrag.ts": 5,
     "clients/web/src/features/directory/DirectoryRoute.tsx": 23,
