@@ -101,6 +101,8 @@ pub mod reminders;
 /// `props.requestedApps` marker (a marker, never a grant).
 pub(crate) mod requested_apps;
 pub mod roster;
+/// ADR-0186 v6 R-f / #4763 — `AgentRunProgress.bundle`: one approval of a run, read for the viewer.
+pub(crate) mod run_bundle;
 /// ADR-0208 / #4214 — scheduled messages (human-only, owner-scoped, outbox event on every change).
 pub mod scheduled_messages;
 pub mod search;

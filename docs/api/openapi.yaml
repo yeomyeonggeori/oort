@@ -12367,8 +12367,27 @@ paths:
       summary: List approval projections visible to the caller.
       description: >
         Requires an active human member; only approvals on channels where the
-        caller has an active membership are returned. Ordered by expiry
-        (soonest first, NULLs last), then newest first.
+        caller has an active membership are returned (leaving a channel hides its
+        approvals at the next read, the ones the caller decided included).
+
+
+        **Order.** `status=pending` (the default, the to-decide queue) is ordered by
+        expiry (soonest first, NULLs last), then newest first, and is not paged: it
+        takes no `cursor` and never returns `nextCursor`. Every other `status`
+        (`approved`, `rejected`, `expired`, `cancelled`, `all`) is ordered newest
+        first by when the approval last moved (its decision, expiry or cancellation
+        time; for a pending one the time it was asked), then by id, and is paged by
+        keyset: pass the previous page's `nextCursor` as `cursor`. (A single settled
+        status used to come back in expiry order, so under a `limit` it returned the
+        oldest rows.)
+
+
+        **Scope.** `scope=team` (the default) is every approval on those channels
+        (an in-place channel grant only for a workspace owner or admin).
+        `scope=mine` narrows to the approvals the caller decided, requested (the
+        author of the run's trigger message, or the actor of a work run's
+        `agent.work.queued` row) or whose agent they own (`agent.owner_human_id`).
+        It narrows within the caller's channels and never widens them.
       security:
         - bearerAuth: []
       parameters:
@@ -12376,11 +12395,23 @@ paths:
         - name: status
           in: query
           required: false
-          description: Approval status filter; defaults to `pending`.
+          description: >
+            Approval status filter; defaults to `pending`. `all` returns the five
+            statuses in one stream.
           schema:
             type: string
-            enum: [pending, approved, rejected, expired, cancelled]
+            enum: [pending, approved, rejected, expired, cancelled, all]
             default: pending
+        - name: scope
+          in: query
+          required: false
+          description: >
+            `team` (default) or `mine`: the approvals the caller decided, requested,
+            or owns the agent of.
+          schema:
+            type: string
+            enum: [team, mine]
+            default: team
         - name: limit
           in: query
           required: false
@@ -12390,6 +12421,14 @@ paths:
             default: 100
             minimum: 1
             maximum: 500
+        - name: cursor
+          in: query
+          required: false
+          description: >
+            The previous page's `nextCursor`, opaque. Refused (400) with
+            `status=pending`, and when it is not a cursor this server issued.
+          schema:
+            type: string
       responses:
         "200":
           description: Approval projections.
@@ -12398,7 +12437,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApprovalProjectionPage"
         "400":
-          description: Invalid status filter.
+          description: Invalid status or scope filter, or a cursor that is not usable.
           content:
             application/json:
               schema:
@@ -18556,6 +18595,56 @@ components:
         lastEventAtMs: {type: integer, format: int64}
         approvalId: {type: string, format: uuid}
         approvalExpiresAtMs: {type: integer, format: int64}
+        bundle:
+          type: object
+          additionalProperties: false
+          required: [approvalId, status, decisionMode, canDecide, actionType]
+          description: >
+            ADR-0186 v6 R-f. One approval of this run, read for **the caller**: the one
+            the run is parked on, else the latest it asked, whatever its status. What
+            the channel's status chip and the thread's summary line read in place of the
+            approval card. Absent when the run never asked for an approval, or asked in
+            a channel the caller is not an active member of.
+          properties:
+            approvalId: {type: string, format: uuid}
+            status:
+              type: string
+              enum: [pending, approved, rejected, expired, cancelled]
+              description: >
+                As of now: a `pending` approval past its deadline reads `expired`
+                before the sweep writes it down.
+            decisionMode:
+              type: string
+              enum: [inline, open]
+              description: See `ApprovalProjection.decisionMode`.
+            canDecide:
+              type: boolean
+              description: >
+                Whether **the caller** may decide it right now: `pending`, in time,
+                and a person the decision route would let through (an active human
+                member of its channel who meets the role, owner or pinned-person
+                condition the approval puts on its decider). `false` for everyone
+                else, for a settled approval, and for a platform operator who is not
+                a workspace admin. A viewer-relative value, never cacheable across
+                members.
+            line:
+              type: string
+              maxLength: 300
+              description: >
+                The card's one server-written sentence: the question while `pending`,
+                the outcome once settled. Absent when the card has none to give.
+            intent:
+              type: string
+              maxLength: 300
+              description: >
+                Present only while `pending`: the same sentence as `line`, under the
+                key the shipped clients read (`parseRequestBundleSnapshot`, #4760).
+            actionType:
+              type: string
+              description: >
+                `tool_call`, `workspace_action`, ... as `ApprovalProjection.actionType`.
+                Tells an approved tool call that is still running from an approved
+                action that is already done.
         endReason:
           type: string
           description: >
@@ -25111,6 +25200,8 @@ components:
         - payload
         - status
         - createdAtMs
+        - decisionMode
+        - isDirect
       properties:
         id:
           type: string
@@ -25184,9 +25275,15 @@ components:
         decidedBy:
           type: string
           format: uuid
+          description: >
+            The person who approved or rejected it. Absent for `pending`,
+            `expired` and `cancelled`: nobody decided those.
         decidedAtMs:
           type: integer
           format: int64
+          description: >
+            When it was settled: the decision, the expiry or the cancellation.
+            Absent while `pending`.
         decisionReason:
           type: string
         expiresAtMs:
@@ -25199,6 +25296,43 @@ components:
             Always present on the Rust server. Neither the Swift DTO nor this
             schema carried it before SRV-B5c, which under the gate's
             closed-object rule made every Rust approval row undeclared drift.
+        decisionMode:
+          type: string
+          enum: [inline, open]
+          description: >
+            ADR-0186 v6 R-f. `inline`: may be decided where it is shown. `open`: must
+            be opened in the app (a one-time value, a picture to look at, a host to
+            choose, a name change, an agent-initiated or unknown card, ...). The
+            answer of the server's one `opens_in_app` judgment, the one the lock-screen
+            category and the `push_action` refusal read; a client never recomputes it.
+        isDirect:
+          type: boolean
+          description: >
+            ADR-0186 v6 R-f, where it lives. The approval's channel is a direct
+            message. With `channelId` and `rootId`, the whole address.
+        rootId:
+          type: string
+          format: uuid
+          description: >
+            ADR-0186 v6 R-f, where it lives. The thread the approval card sits in (the
+            card message's `rootId`). Absent when the card is in the channel's main
+            stream, or the approval has no card.
+        result:
+          type: object
+          additionalProperties: false
+          required: [line]
+          description: >
+            ADR-0186 v6 R-f. The card's outcome, for a settled approval whose card was
+            patched with one. Absent while `pending`, and for a card that was settled
+            before the card carried its outcome (its body is still the question it
+            asked, which is no outcome).
+          properties:
+            line:
+              type: string
+              maxLength: 300
+              description: >
+                One server-written Korean sentence, e.g. 「승인됐어요」 or a
+                result line. The card's `result.line`, else its `body`.
 
     # ---- Plugin registry and delegated tool policy --------------------------
     InstallPluginRequest:
@@ -26113,6 +26247,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ApprovalProjection"
+        nextCursor:
+          type: string
+          description: >
+            ADR-0186 v6 R-f. Present only when a further page exists, and only for a
+            read that is not `status=pending`. Pass it back as `cursor`; opaque.
 
     ApprovalDecisionRequest:
       type: object
