@@ -202,3 +202,178 @@ export function unfurlRenderState(
 export function messageMayHaveUnfurls(body: string | undefined): boolean {
   return typeof body === "string" && /https?:\/\/\S+/i.test(body);
 }
+
+// =============================================================================
+// Link card display model (#4882, owner 2026-10-31).
+//
+// The decoder above says what the server *knows*. This section says what a
+// person *sees* when a piece is missing, decided once so the web and the phone
+// (#4883) cannot drift. It still knows neither React nor a transport: the web
+// renders a model with classes, the phone with styles.
+//
+// `docs/design-system/link-cards.md` is the readable form of the table. Every
+// row of it is a branch below, and `unfurl.test.ts` has one case per row.
+//
+//   picture missing            -> an icon tile (site icon, else the globe)
+//   picture failed to load     -> the same tile, never a broken image
+//   description missing/same   -> no description line
+//   title missing              -> site name, then the domain, in the title slot
+//   site name                  -> never in the address line, which is the real
+//                                 domain every time (a page cannot change it)
+//   small or square picture    -> shown whole in a 64 box, never cropped
+//   video                      -> a play mark on the picture, link opens the page
+//   no title and no picture    -> no card, only the link (no error text)
+//   many links                 -> cards for the first 3 distinct links
+// =============================================================================
+
+/** This device's choice: small cards (the default), large cards, or none. */
+export type UnfurlSize = "compact" | "rich" | "off";
+
+export const DEFAULT_UNFURL_SIZE: UnfurlSize = "compact";
+
+/** Cards per message: the first distinct links in link order, never more. */
+export const UNFURL_MAX_CARDS = 3;
+
+/** A picture is "wide" only at this width or more AND at this ratio or more. */
+export const UNFURL_WIDE_PICTURE_MIN_WIDTH = 300;
+export const UNFURL_WIDE_PICTURE_MIN_RATIO = 1.3;
+
+/** `wide` may be cropped to its box; `small` is shown whole inside a square box. */
+export type UnfurlPictureShape = "wide" | "small";
+
+export type UnfurlPicture =
+  | { kind: "image"; imageUrl: string; shape: UnfurlPictureShape }
+  | { kind: "tile" };
+
+/** `rich` puts the text above a large picture; `compact` is the small row. */
+export type UnfurlLayout = "compact" | "rich";
+
+export interface UnfurlCardModel {
+  id: string;
+  /** The original page. A video card opens it as well; nothing plays inside the card. */
+  url: string;
+  layout: UnfurlLayout;
+  /** The real address host, never the site name: server `domain`, else read from `url`. */
+  domain: string;
+  /** Page title, else site name, else the domain. Plain text, never markup. */
+  title: string;
+  /** Absent when the page gave none or it only repeats the title. */
+  description?: string;
+  picture: UnfurlPicture;
+  /** Authenticated icon proxy path. Absent means the globe. */
+  iconUrl?: string;
+  isVideo: boolean;
+}
+
+export interface UnfurlCardOptions {
+  size: UnfurlSize;
+  /** The picture could not be fetched or decoded: draw the icon tile instead. */
+  imageFailed?: boolean;
+}
+
+// The server strips these from titles it extracts now; rows stored before that
+// still carry them, and a right-to-left override can reorder what follows it.
+const BIDI_CONTROLS = /[‪-‮⁦-⁩]/g;
+
+function plainText(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const text = value.replace(BIDI_CONTROLS, "").replace(/\s+/g, " ").trim();
+  return text === "" ? undefined : text;
+}
+
+function hostOfUrl(url: string): string | undefined {
+  const match = /^https?:\/\/(?:[^/?#@]*@)?(\[[^\]]*\]|[^/?#:]*)/i.exec(url);
+  const host = match?.[1]?.toLowerCase();
+  return host ? host : undefined;
+}
+
+/** Same page, same key: host case, a bare `/` path and the `#fragment` do not make a new link. */
+function distinctKey(url: string): string {
+  const noFragment = url.trim().replace(/#.*$/, "");
+  const match = /^(https?:\/\/[^/?#]*)(.*)$/i.exec(noFragment);
+  if (!match) return noFragment;
+  const rest = match[2] ?? "";
+  const path = rest === "" || rest.startsWith("?") ? `/${rest}` : rest;
+  return `${(match[1] ?? "").toLowerCase()}${path}`;
+}
+
+/**
+ * A declared size is a claim by the page, so it is used only to sort the picture
+ * into a box, never to size one. A missing size is "not known", which is the old
+ * behavior: the picture is cropped to its box.
+ */
+function pictureShape(width: number | undefined, height: number | undefined): UnfurlPictureShape {
+  if (width === undefined || height === undefined) return "wide";
+  return width < UNFURL_WIDE_PICTURE_MIN_WIDTH || width / height < UNFURL_WIDE_PICTURE_MIN_RATIO
+    ? "small"
+    : "wide";
+}
+
+/** An `ok` row with neither a title nor a picture has nothing to put in a card. */
+function hasCardContent(unfurl: MessageUnfurl): boolean {
+  return plainText(unfurl.title) !== undefined || Boolean(unfurl.imageUrl);
+}
+
+export function isUnfurlPending(unfurl: MessageUnfurl): boolean {
+  return unfurl.status === "pending";
+}
+
+/**
+ * The rows a message may draw, in link order: the first 3 distinct links, then
+ * only those that are loading or have something to show. A failed, blocked or
+ * empty one leaves just the link. The server stops at 3 too (ADR-0170 D10); this
+ * keeps an old or odd answer from drawing a fourth.
+ */
+export function visibleUnfurls(unfurls: readonly MessageUnfurl[]): MessageUnfurl[] {
+  const seen = new Set<string>();
+  const firstDistinct: MessageUnfurl[] = [];
+  for (const unfurl of unfurls) {
+    const key = distinctKey(unfurl.url);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    firstDistinct.push(unfurl);
+    if (firstDistinct.length === UNFURL_MAX_CARDS) break;
+  }
+  return firstDistinct.filter(
+    (unfurl) => isUnfurlPending(unfurl) || (unfurl.status === "ok" && hasCardContent(unfurl))
+  );
+}
+
+/** What one `ok` card shows, or `null` when it draws no card at all. */
+export function unfurlCardModel(
+  unfurl: MessageUnfurl,
+  { size, imageFailed = false }: UnfurlCardOptions
+): UnfurlCardModel | null {
+  if (size === "off" || unfurl.status !== "ok" || !hasCardContent(unfurl)) return null;
+  const domain =
+    plainText(unfurl.domain) ?? hostOfUrl(unfurl.url) ?? unfurl.url;
+  const title = plainText(unfurl.title) ?? plainText(unfurl.siteName) ?? domain;
+  const said = plainText(unfurl.description);
+  const description =
+    said !== undefined && said.toLowerCase() !== title.toLowerCase() ? said : undefined;
+  const picture: UnfurlPicture =
+    unfurl.imageUrl && !imageFailed
+      ? {
+          kind: "image",
+          imageUrl: unfurl.imageUrl,
+          shape: pictureShape(unfurl.imageWidth, unfurl.imageHeight),
+        }
+      : { kind: "tile" };
+  // Large needs a picture that can fill the 1.91:1 frame; anything else is the
+  // small row, so a large card never opens an empty or heavily cropped frame.
+  const layout: UnfurlLayout =
+    size === "rich" && picture.kind === "image" && picture.shape === "wide"
+      ? "rich"
+      : "compact";
+  return {
+    id: unfurl.id,
+    url: unfurl.url,
+    layout,
+    domain,
+    title,
+    ...(description !== undefined ? { description } : {}),
+    picture,
+    ...(unfurl.iconUrl ? { iconUrl: unfurl.iconUrl } : {}),
+    isVideo: unfurl.isVideo === true,
+  };
+}

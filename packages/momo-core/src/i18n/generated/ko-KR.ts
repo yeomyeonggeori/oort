@@ -248,5 +248,45 @@ export const catalog: MessageCatalog = {
       "type": 0,
       "value": "기기 언어 따르기"
     }
+  ],
+  "timeline.unfurl.label": [
+    {
+      "type": 0,
+      "value": "링크 미리보기: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "domain"
+    }
+  ],
+  "timeline.unfurl.labelVideo": [
+    {
+      "type": 0,
+      "value": "링크 미리보기: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "domain"
+    },
+    {
+      "type": 0,
+      "value": ", 동영상"
+    }
   ]
 };

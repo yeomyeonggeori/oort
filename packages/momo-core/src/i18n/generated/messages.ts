@@ -38,7 +38,9 @@ export const messageKeys = [
   "settings.profile.languageLoadError",
   "settings.profile.languagePartialNotice",
   "settings.profile.languageRetry",
-  "settings.profile.languageSystem"
+  "settings.profile.languageSystem",
+  "timeline.unfurl.label",
+  "timeline.unfurl.labelVideo"
 ] as const;
 
 export type MessageKey = typeof messageKeys[number];
@@ -88,7 +90,15 @@ export const argumentSpecs = {
   "settings.profile.languageLoadError": {},
   "settings.profile.languagePartialNotice": {},
   "settings.profile.languageRetry": {},
-  "settings.profile.languageSystem": {}
+  "settings.profile.languageSystem": {},
+  "timeline.unfurl.label": {
+    "domain": "string",
+    "title": "string"
+  },
+  "timeline.unfurl.labelVideo": {
+    "domain": "string",
+    "title": "string"
+  }
 } as const;
 
 export interface MessageArgs {
@@ -131,4 +141,6 @@ export interface MessageArgs {
   "settings.profile.languagePartialNotice": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "timeline.unfurl.label": { domain: string; title: string };
+  "timeline.unfurl.labelVideo": { domain: string; title: string };
 }

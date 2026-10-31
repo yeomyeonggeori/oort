@@ -269,5 +269,45 @@ export const catalog: MessageCatalog = {
       "type": 0,
       "value": "Use device language"
     }
+  ],
+  "timeline.unfurl.label": [
+    {
+      "type": 0,
+      "value": "Link preview: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "domain"
+    }
+  ],
+  "timeline.unfurl.labelVideo": [
+    {
+      "type": 0,
+      "value": "Link preview: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "domain"
+    },
+    {
+      "type": 0,
+      "value": ", video"
+    }
   ]
 };

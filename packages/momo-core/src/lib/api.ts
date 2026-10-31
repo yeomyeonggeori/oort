@@ -25,6 +25,7 @@
 import {
   fetchWithDeadline,
   NetworkError,
+  parseRetryAfterSeconds,
   REQUEST_TIMEOUT_MS,
   type HttpResponse,
 } from "./http";
@@ -2896,7 +2897,16 @@ export async function fetchUnfurlImage(
     if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
-  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  // A 429 from the proxy says when to come back (#4956); keep it so a screen can wait that long
+  // instead of asking again on every remount.
+  if (!res.ok) {
+    throw new ApiError(
+      res.status,
+      `HTTP ${res.status}`,
+      undefined,
+      parseRetryAfterSeconds(res.headers.get("Retry-After"))
+    );
+  }
   return res.blob();
 }
 
