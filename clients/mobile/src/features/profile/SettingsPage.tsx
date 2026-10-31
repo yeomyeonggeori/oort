@@ -55,7 +55,6 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
-import {HAPTIC_MODES, setHapticMode, useHapticMode} from '../../lib/haptics';
 import {useNow} from '../../lib/useNow';
 import {EdgeSwipeBack, useLayerClose} from '../../nav/EdgeSwipeBack';
 import {
@@ -133,21 +132,23 @@ import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSetti
 //
 //   얼굴        큰 원형 아바타(→ 프로필 사진 장) · 이름 · @핸들 · 상태 알약
 //   [새 버전]   배너(있을 때만)
-//   ① 상태 설정 ›              → 바텀시트 「상태 설정」 (짧은 편집 = 시트)
-//   ② 내 상태 라디오 3줄       온라인 · 자리 비움 · 방해 금지(→ 기한 장). 한 번에 고르는 3택이라 같은 자리에서
-//   ③ 프로필 › 사진 바꾸기      Buzz 「Edit photo ›」 자리
-//   ④ 알림 토글들               푸시 · 일시 중지(→ 기한 장) · 작업 끝남 · 항상 오는 알림
-//   ⑤ 기억                      내 일시정지
-//   ⑥ 보기 › 테마               → 테마 장
+//   ① 보기 › 테마               → 테마 장 — **얼굴 영역(프로필) 바로 아래**(owner 10-31, #4936)
+//   ② 상태 설정 ›              → 바텀시트 「상태 설정」 (짧은 편집 = 시트)
+//   ③ 내 상태 라디오 3줄       온라인 · 자리 비움 · 방해 금지(→ 기한 장). 한 번에 고르는 3택이라 같은 자리에서
+//   ④ 프로필 › 사진 바꾸기·언어  Buzz 「Edit photo ›」 자리
+//   ⑤ 알림 토글들               푸시 · 일시 중지(→ 기한 장) · 작업 끝남 · 항상 오는 알림
+//   ⑥ 기억                      내 일시정지
 //   ⑦ 연결                      서버(보조 줄) · 지시 기기 ›(→ 지시 기기 장) · 명령줄·AI 도구 ›(→ 목록·지우기 장, 쓸 수
 //                               있는 사람에게만 선다: `devTools.ts` `useDevToolsEntry`)
-//   ⑧ 계정                      로그아웃 — **마지막, 위험 행**
+//   ⑧ 정보 › 연결 기록 복사     **계정 위**(owner 10-31, #4936)
+//   ⑨ 계정                      로그아웃 — **마지막, 위험 행**
 //   바닥        버전 줄(길게 누르면 연결 기록 복사)
 //
-// 순서의 근거: Buzz 는 「상태 → 프로필 → 알림 → 연결」이고, 매일 만지는 것(상태·알림)이 위, 한 번 고르면
-// 끝나는 것(테마·연결)이 아래, 되돌릴 수 없는 것(로그아웃)이 맨 끝이다. 우리 항목이 더 많아 Buzz 의 넷
-// 사이에 「기억」과 「보기」를 끼웠을 뿐 순서의 문법은 그대로다. 「표시 이름 ›」·「프로필 설명 ›」은 폰에
-// 지금 없는 기능이라(코어 `changeMyDisplayName` 은 있다) 빈 약속 행으로 그리지 않는다.
+// 순서의 근거: Buzz 는 「상태 → 프로필 → 알림 → 연결」이고, 매일 만지는 것(상태·알림)이 위, 되돌릴 수 없는
+// 것(로그아웃)이 맨 끝이다. 우리 항목이 더 많아 Buzz 의 넷 사이에 「기억」을 끼웠을 뿐 순서의 문법은 그대로다.
+// 예외 둘은 owner 10-31 지시다: 테마는 긴 「알림」 목록 밑에 있어 찾아 내려가야 했으므로 얼굴 영역(프로필) 바로
+// 아래로 올렸고, 연결 기록 복사는 위험 행인 로그아웃 위로 옮겨 로그아웃이 마지막 카드가 된다. 「표시 이름 ›」·「프로필
+// 설명 ›」은 폰에 지금 없는 기능이라(코어 `changeMyDisplayName` 은 있다) 빈 약속 행으로 그리지 않는다.
 //
 // ## 상태는 모르는 것을 말하지 않는다
 //
@@ -479,7 +480,6 @@ export function SettingsContent({
   const push = usePushSwitch(workspaceId, member.id);
   // 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5): 이 폰의 선택 둘. 서버 값이 아니라 기기에 있어서
   // 읽는 중·못 읽음이 없고, 켜 두는 것이 처음 상태다.
-  const hapticMode = useHapticMode();
   const previewOn = usePushPreview();
   const showSenderOn = usePushShowSender();
   const setPresence = useSetPresence(workspaceId, member.id);
@@ -640,7 +640,21 @@ export function SettingsContent({
         <AppUpdateSheet offer={updateOffer} onClose={() => setUpdateSheetOpen(false)} />
       ) : null}
 
-      {/* ① 상태 설정 — 짧은 편집이라 시트가 연다. */}
+      {/* ① 보기 — 얼굴 영역(프로필: 얼굴·이름·상태 알약) 바로 아래(owner 10-31, #4936). 긴 「알림」 목록 밑에서 찾아 내려가던 것을
+          올렸다. 새 버전 배너는 알림이라 얼굴 바로 밑에 그대로 서고, 테마는 그 다음이다. */}
+      <GroupCard label="보기" testID="settings-view-card">
+        <ListRow
+          title="테마"
+          value={themeValue}
+          accessory="chevron"
+          onPress={onOpenTheme}
+          accessibilityLabel={`테마, ${themeValue}`}
+          accessibilityHint="화면 모드, 테마, 강조색을 고릅니다."
+          testID="profile-theme-row"
+        />
+      </GroupCard>
+
+      {/* ② 상태 설정 — 짧은 편집이라 시트가 연다. */}
       {self ? (
         <GroupCard testID="settings-status-card">
           <ListRow
@@ -655,7 +669,7 @@ export function SettingsContent({
         </GroupCard>
       ) : null}
 
-      {/* ② 내 상태 — 한 번에 고르는 3택이라 같은 자리에서 고른다. 앞 칸(상태 점)이 없다: 설정 페이지는 앞 칸 없는 쪽이고
+      {/* ③ 내 상태 — 한 번에 고르는 3택이라 같은 자리에서 고른다. 앞 칸(상태 점)이 없다: 설정 페이지는 앞 칸 없는 쪽이고
           (`phone-sheets.md` §4), 점이 있으면 이 카드만 글자 열이 38pt 안으로 들어가 이웃 카드와 어긋난다(design-review
           r1 H1). 상태의 색은 머리의 알약이 말하고, 고른 줄은 강조색·굵게·✓ 세 신호가 말한다. */}
       {declared ? (
@@ -709,7 +723,7 @@ export function SettingsContent({
         </SettingsSection>
       ) : null}
 
-      {/* ③ 프로필 — Buzz 「Edit photo ›」. */}
+      {/* ④ 프로필 — Buzz 「Edit photo ›」. */}
       {onOpenAvatar || onOpenLanguage ? (
         <GroupCard label="프로필" testID="settings-profile-card">
           {onOpenAvatar ? (
@@ -725,7 +739,7 @@ export function SettingsContent({
         </GroupCard>
       ) : null}
 
-      {/* ④ 알림. */}
+      {/* ⑤ 알림. */}
       <SettingsSection>
         <GroupCard label="알림" testID="settings-notify-card">
           {/* 이 폰의 스위치 (#3924, ADR-0204 D1). 켬 = OS 허용 + 사람이 끄지 않음. 끄면 이 기기의 서버
@@ -753,17 +767,6 @@ export function SettingsContent({
             }
             testID="profile-push-row"
           />
-          <View accessibilityRole="radiogroup" accessibilityLabel="햅틱" testID="settings-haptics">
-            {HAPTIC_MODES.map(option => (
-              <ChoiceRow
-                key={option.value}
-                title={`햅틱: ${option.label}`}
-                selected={hapticMode === option.value}
-                onPress={() => setHapticMode(option.value)}
-                testID={`haptics-${option.value}`}
-              />
-            ))}
-          </View>
           {/* 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5). 이 폰의 선택이라 서버를 부르지 않고, 확장은
               MMKV 를 읽지 못해서 바꿀 때 App Group 으로도 쓴다(`push/presentation.ts`). 「보낸 사람 표시」를
               끄면 건넨 사진·채널 이름과 시스템에 기부한 기록이 함께 지워진다. */}
@@ -897,7 +900,6 @@ export function SettingsContent({
             />
           )}
         </GroupCard>
-        <SettingsNote testID="settings-haptics-note">끔은 앱이 더하는 햅틱을 꺼요. 시스템 컨트롤의 햅틱은 기기 설정을 따라요.</SettingsNote>
         {push.failed ? (
           <SettingsNote tone="danger" testID="push-failure">
             {PUSH_SWITCH_OFF_FAILED}
@@ -915,21 +917,8 @@ export function SettingsContent({
         ) : null}
       </SettingsSection>
 
-      {/* ⑤ 기억 — 내 일시정지 하나. */}
+      {/* ⑥ 기억 — 내 일시정지 하나. */}
       <MemoryPauseSection workspaceId={workspaceId} />
-
-      {/* ⑥ 보기 — 한 번 고르면 끝나는 것. */}
-      <GroupCard label="보기" testID="settings-view-card">
-        <ListRow
-          title="테마"
-          value={themeValue}
-          accessory="chevron"
-          onPress={onOpenTheme}
-          accessibilityLabel={`테마, ${themeValue}`}
-          accessibilityHint="화면 모드, 테마, 강조색을 고릅니다."
-          testID="profile-theme-row"
-        />
-      </GroupCard>
 
       {/* ⑦ 연결. */}
       <GroupCard label="연결" testID="settings-connect-card">
@@ -965,7 +954,16 @@ export function SettingsContent({
         </GroupCard>
       ) : null}
 
-      {/* ⑧ 계정 — 마지막, 위험 행. 확인을 한 번 거친다. */}
+      {/* ⑧ 정보 — 연결 기록 복사. 계정(로그아웃) 위다(owner 10-31, #4936): 위험 행이 마지막 카드로 선다. */}
+      <GroupCard label="정보" testID="settings-about-card">
+        <ListRow
+          title={diagCopied ? '연결 기록 복사됨' : '연결 기록 복사'}
+          onPress={copyDiagnostics}
+          testID="settings-copy-connection-log"
+        />
+      </GroupCard>
+
+      {/* ⑨ 계정 — 마지막, 위험 행. 확인을 한 번 거친다. */}
       <GroupCard label="계정" testID="settings-account-card">
         {confirming ? (
           <View style={styles.confirm} testID="sign-out-confirm-block">
@@ -1012,14 +1010,6 @@ export function SettingsContent({
             testID="sign-out"
           />
         )}
-      </GroupCard>
-
-      <GroupCard label="정보" testID="settings-about-card">
-        <ListRow
-          title={diagCopied ? '연결 기록 복사됨' : '연결 기록 복사'}
-          onPress={copyDiagnostics}
-          testID="settings-copy-connection-log"
-        />
       </GroupCard>
 
       <Text

@@ -167,6 +167,7 @@ import {
   planNotificationLanding,
   type NotificationLanding,
 } from '../push/tapArrival';
+import {bandIsSilent} from '../realtime/connectionDisplay';
 import {useRealtime} from '../realtime/RealtimeProvider';
 import {
   useAgentLiveness,
@@ -387,7 +388,9 @@ export default function ConversationScreen({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
-  const {rail, status: railStatus, reconnect} = useRealtime();
+  // `bandStatus` 는 띠가 말해도 되는 상태다 — 끊긴 첫 1초는 말이 없다(#4949). 소켓이 살아 있는가를 묻는
+  // 자리(`railLive`·전송 잠금)는 그대로 `status` 를 읽는다.
+  const {rail, status: railStatus, bandStatus = railStatus, reconnect} = useRealtime();
   // 연결 띠는 머리 아래에 뜨고 목록의 viewport·첫 여백을 바꾸지 않는다.
   // 날짜·안 읽음 필만 띠의 실제 높이만큼 더 내려간다(#4292).
   const [bannerInset, setBannerInset] = useState(0);
@@ -2096,7 +2099,7 @@ export default function ConversationScreen({
         onOpenMenu={openMenu}
         // 정보 페이지는 종류를 알 때만 연다 — 채널 목록이 오기 전에는 무엇의 정보인지 모른다(알약은 단추가 아니라 이름만 선다).
         onOpenInfo={channel !== null ? openInfo : undefined}
-        railStatus={railStatus}
+        railStatus={bandStatus}
         onReconnect={reconnect ? reconnectNow : undefined}
         onBannerInset={setBannerInset}
       >
@@ -2135,7 +2138,8 @@ export default function ConversationScreen({
               myMemberId={member.id}
               loadingOlder={timeline.loadingOlder}
               reachedStart={timeline.reachedStart}
-              realtimeConnected={railLive}
+              // 「연결 복구 중」은 사람이 보는 띠가 선 동안이다 — 끊긴 첫 1초(띠가 조용한 동안)에는 당김 문이 바뀌지 않는다(#4949).
+              realtimeConnected={bandIsSilent(bandStatus)}
               nowMs={nowMs}
               actions={actions}
               selfSendToken={selfSendToken}

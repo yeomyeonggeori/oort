@@ -1,16 +1,16 @@
-import {useSyncExternalStore} from 'react';
 import {AppState, Platform} from 'react-native';
 
 import {NON_SECRET_KEYS, nonSecretStore} from '../storage/kv';
 
 // User events only. Never queue a suppressed pulse; visuals must stand on their own.
 // 동작 줄이기는 햅틱 설정과 별개이며(research-1029/haptics/report.md:55), 시스템 진동 끔은 iOS 피드백 생성기가 지킨다.
+//
+// 앱 햅틱은 늘 「풍부」다(owner 10-31, #4936). 설정에 고르는 곳이 없고 앱 코드는 단계를 바꾸지 않는다 — 예전 판이 저장한
+// 「기본」·「끔」(`momo.mobile.haptics.v1`)도 읽지 않는다(`NON_SECRET_KEYS.hapticMode` 를 v2로 올렸다).
+// 아래 `basic`·`off` 는 **내부 이음새**다: 사건마다의 단계(기본/풍부)와 풍부 모드의 100ms 창을 시험이 따로 재려고 남겼고
+// (예: 밀어서 답글은 창이 없는 기본 모드에서 컨테이너의 중복 방어를 잰다), `setHapticMode` 는 시험만 부른다.
+// `__tests__/hapticsAlwaysRich.test.ts` 가 앱 소스가 `setHapticMode` 를 부르는 것을 막는다.
 export type HapticMode = 'rich' | 'basic' | 'off';
-export const HAPTIC_MODES = [
-  { value: 'rich', label: '풍부' },
-  { value: 'basic', label: '기본' },
-  { value: 'off', label: '끔' },
-] as const;
 
 type Pattern =
   | 'selection'
@@ -40,25 +40,15 @@ const events = {
 } as const satisfies Record<string, readonly [Pattern, 'rich' | 'basic']>;
 export type HapticEvent = keyof typeof events;
 
-const listeners = new Set<() => void>();
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
+/** 저장된 값이 없으면 풍부다. 앱 코드는 이 키에 쓰지 않는다 — 시험 이음새(`setHapticMode`)가 쓸 뿐이다. */
 export function getHapticMode(): HapticMode {
   const stored = nonSecretStore().getString(NON_SECRET_KEYS.hapticMode);
-  // Start rich when unset; preserve every previously saved choice.
   return stored === 'basic' || stored === 'off' ? stored : 'rich';
 }
+/** 시험 이음새. 앱에는 단계를 고르는 화면이 없고, 앱 코드는 이것을 부르지 않는다. */
 export function setHapticMode(mode: HapticMode): void {
   if (getHapticMode() === mode) return;
   nonSecretStore().set(NON_SECRET_KEYS.hapticMode, mode);
-  listeners.forEach(listener => listener());
-}
-export function useHapticMode(): HapticMode {
-  return useSyncExternalStore(subscribe, getHapticMode, getHapticMode);
 }
 
 let appEpoch = 0;

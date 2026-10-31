@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import {getPersistedSession} from '../storage/secureSession';
 import {socketWanted} from './backgroundPolicy';
+import {bandOf, initialDisplayState} from './connectionDisplay';
 import {createChannelRail, type ChannelRail} from './channelRail';
 import {createRealtimeTransport} from './centrifugeTransport';
 
@@ -53,6 +54,14 @@ export interface RealtimeContextValue {
   /** Null until the session yields a websocket address. */
   rail: ChannelRail | null;
   status: RealtimeStatus;
+  /**
+   * What the connection BAND may say (#4949): `status` with a quiet first second. A reconnect
+   * that is over inside `CONNECTING_BAND_DELAY_MS` never reaches the band, so it never flashes
+   * 「연결 중…」; `connected` here means the band is silent, not that the socket is live — for
+   * that, read `status`. Absent in a hand-built context (tests, capture harness): the band then
+   * follows `status`, the behaviour before this field existed.
+   */
+  bandStatus?: RealtimeStatus;
   reconnect?: () => Promise<void>;
   /**
    * Does the background policy want a socket at all right now (goal RN-T2)?
@@ -94,17 +103,21 @@ export function RealtimeProvider({
 }): React.JSX.Element {
   const url = getPersistedSession()?.realtimeWebSocketUrl ?? '';
   const [status, setStatus] = useState<RealtimeStatus>('connecting');
+  // Silent until the first gap has lasted a second — a cold start is a gap too (#4949).
+  const [band, setBand] = useState<RealtimeStatus>(() => bandOf(initialDisplayState()));
   const [rail, setRail] = useState<ChannelRail | null>(null);
   const [reconnect, setReconnect] = useState<(() => Promise<void>) | undefined>();
   const [subscriptionsWanted, setSubscriptionsWanted] = useState(false);
 
   useEffect(() => {
     if (url === '') return;
-    // The display keeps every recovery `connecting` for ten seconds. A retry
-    // loop cannot restart that deadline; a foreground return can (#4783).
+    // `status` reads `connecting` from the moment a socket leaves `connected` until a ten-second
+    // outage deadline; a retry loop cannot restart that deadline, a foreground return can (#4783).
+    // The BAND is quieter (#4949): it says nothing for the first second of a gap.
     const transport = createRealtimeTransport({
       url,
       onStatus: setStatus,
+      onBand: setBand,
       onPolicy: state => setSubscriptionsWanted(socketWanted(state)),
     });
     setRail(createChannelRail(transport.client));
@@ -122,9 +135,12 @@ export function RealtimeProvider({
     };
   }, [url]);
 
+  // Without a websocket address there is no transport to quiet anything: `status` stays
+  // `connecting` and the band says so, as it always did.
+  const bandStatus = url === '' ? status : band;
   const value = useMemo<RealtimeContextValue>(
-    () => ({rail, status, subscriptionsWanted, reconnect}),
-    [rail, status, subscriptionsWanted, reconnect],
+    () => ({rail, status, bandStatus, subscriptionsWanted, reconnect}),
+    [rail, status, bandStatus, subscriptionsWanted, reconnect],
   );
 
   return (

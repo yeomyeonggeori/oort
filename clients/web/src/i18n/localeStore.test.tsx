@@ -136,17 +136,19 @@ describe("installation locale (#4832)", () => {
     expect(locale.service.context.messageLocale).toBe("ko-KR");
   });
 
-  it("offers only available autonyms with system first and shows English beta/partial support", async () => {
+  it("offers only available autonyms with system first, no beta tag, and one partial-support line only in English", async () => {
     const locale = await createAppLocale(memoryPort("en-US"));
     mount(locale);
     expect(listboxChoices(trigger()).map(choice => [choice.value, choice.label])).toEqual([
       ["system", "Use device language"], ["ko-KR", "한국어"], ["en-US", "English"],
     ]);
-    expect(host.querySelector('[data-testid="language-partial-notice"]')?.textContent).toContain("Beta");
-    expect(host.textContent).toContain("Screens that are not yet translated appear in Korean.");
+    // Owner 10-31 (#4936): the beta tag is gone on the web too; the one line that is left says some screens are still Korean.
+    expect(host.querySelector('[data-testid="language-partial-notice"]')?.textContent).toBe("Some screens are still in Korean.");
+    expect(host.textContent).not.toMatch(/Beta|베타/);
     chooseListbox(trigger(), "ko-KR");
     await act(async () => { await Promise.resolve(); });
     expect(host.querySelector('[data-testid="language-partial-notice"]')).toBeNull();
+    expect(host.textContent).not.toMatch(/Beta|베타/);
     expect(trigger().getAttribute("aria-labelledby")).toBe("profile-language-label");
   });
 

@@ -1,4 +1,3 @@
-import {getHapticMode} from '../src/lib/haptics';
 import {MobileLocaleProvider} from '../src/i18n/LocaleProvider';
 import {createMobileLocaleController} from '../src/i18n/controller';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
@@ -7,7 +6,6 @@ import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
   cleanup,
-  cleanupAsync,
   fireEvent,
   render,
   screen,
@@ -370,26 +368,33 @@ describe('설정 페이지', () => {
     expect(at('settings-status-card')).toBeGreaterThan(at('self-profile-presence'));
   });
 
-  it('묶음 순서: 상태 설정 → 내 상태 → 프로필 → 알림 → 기억 → 보기 → 연결 → 계정 (Buzz 문법, 우리 항목)', async () => {
+  it('묶음 순서: 보기(테마) → 상태 설정 → 내 상태 → 프로필 → 알림 → 기억 → 연결 → 정보 → 계정 (owner 10-31: 테마는 얼굴 영역 바로 아래, 연결 기록 복사는 계정 위)', async () => {
     const page = await openPage();
     await waitFor(() => expect(within(page).getByTestId('settings-presence-card')).toBeTruthy());
     const order = flatten(screen.toJSON());
     const cards = [
+      'settings-view-card',
       'settings-status-card',
       'settings-presence-card',
       'settings-profile-card',
       'settings-notify-card',
       'memory-section',
-      'settings-view-card',
       'settings-connect-card',
+      'settings-about-card',
       'settings-account-card',
     ];
     const positions = cards.map(id => order.indexOf(id));
     expect(positions.every(position => position > -1)).toBe(true);
     expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+    // 테마는 얼굴 영역(큰 아바타·이름·상태 알약) 바로 아래다 — 그 사이에 다른 카드가 없다. 긴 「알림」 목록 밑으로 내려가 찾지 않는다.
+    const faceEnd = order.indexOf('self-profile-presence');
+    expect(faceEnd).toBeGreaterThan(-1);
+    expect(order.indexOf('settings-view-card')).toBeGreaterThan(faceEnd);
+    expect(order.slice(faceEnd + 1, order.indexOf('settings-view-card')).filter(id => /^settings-.+-card$/.test(id))).toEqual([]);
+    expect(order.indexOf('profile-theme-row')).toBeLessThan(order.indexOf('settings-notify-card'));
   });
 
-  it('로그아웃은 마지막 카드의 빨강 위험 행이다 — 그 뒤에는 버전 줄뿐이다', async () => {
+  it('로그아웃은 마지막 카드의 빨강 위험 행이다 — 연결 기록 복사는 그 위, 그 뒤에는 버전 줄뿐이다', async () => {
     const page = await openPage();
     const order = flatten(screen.toJSON());
     const signOutAt = order.indexOf('sign-out');
@@ -403,11 +408,14 @@ describe('설정 페이지', () => {
       'profile-theme-row',
       'profile-server-row',
       'profile-device-key-row',
+      'settings-copy-connection-log',
     ]) {
       expect(order.indexOf(id)).toBeGreaterThan(-1);
       expect(order.indexOf(id)).toBeLessThan(signOutAt);
     }
     expect(order.indexOf('profile-version')).toBeGreaterThan(signOutAt);
+    // 로그아웃 뒤에는 카드가 하나도 없다 — 연결 기록 복사 카드가 다시 아래로 내려오면 여기서 걸린다.
+    expect(order.slice(signOutAt + 1).filter(id => /^settings-.+-card$/.test(id))).toEqual([]);
     const color = StyleSheet.flatten(within(page).getByText('로그아웃').props.style).color;
     expect([darkPalette.danger, lightPalette.danger]).toContain(color);
   });
@@ -1321,28 +1329,20 @@ describe('「연결」 카드의 「명령줄·AI 도구」 행 (#4663)', () => 
 });
 
 
-describe('햅틱 설정 (#4298)', () => {
-  it('햅틱 메모는 카드 밖에서 같은 묶음의 다른 메모와 같은 시작선을 쓴다 (#4839)', async () => {
-    await openPage();
-    const card = screen.getByTestId('settings-notify-card');
-    const note = screen.getByTestId('settings-haptics-note');
-    expect(within(card).queryByTestId('settings-haptics-note')).toBeNull();
-    // 공용 SettingsNote의 카드 밖 여백을 그대로 쓴다. 카드 안이면 GroupCard의 구분선·안 여백이 더해진다.
-    expect(StyleSheet.flatten(note.props.style).paddingHorizontal).toBe(4);
-  });
-  it('풍부로 시작하고, 기본·끔 선택은 저장되며 다시 열어도 남는다', async () => {
-    await openPage();
-    expect(getHapticMode()).toBe('rich');
-    expect(screen.getByTestId('haptics-rich').props.accessibilityState.selected).toBe(true);
-    for (const mode of ['basic', 'off'] as const) {
-      fireEvent.press(screen.getByTestId(`haptics-${mode}`));
-      expect(mmkvStore.get(NON_SECRET_KEYS.hapticMode)).toBe(mode);
-      expect(getHapticMode()).toBe(mode);
-      expect(screen.getByTestId(`haptics-${mode}`).props.accessibilityState.selected).toBe(true);
-      await cleanupAsync();
-      await openPage();
-      expect(getHapticMode()).toBe(mode);
-      expect(screen.getByTestId(`haptics-${mode}`).props.accessibilityState.selected).toBe(true);
+describe('햅틱 설정은 없다 (#4936, owner 10-31)', () => {
+  it('알림 칸에 햅틱 줄 셋도 아래 안내 문장도 없다 — 앱 햅틱은 늘 풍부라 고르는 곳이 없다', async () => {
+    const page = await openPage();
+    const card = within(page).getByTestId('settings-notify-card');
+    // 줄 셋(풍부·기본·끔)과 그 묶음, 카드 아래 안내 문장이 모두 없다.
+    for (const id of ['settings-haptics', 'haptics-rich', 'haptics-basic', 'haptics-off', 'settings-haptics-note']) {
+      expect(within(page).queryByTestId(id)).toBeNull();
     }
+    // 어느 줄에도 「햅틱」이라는 말이 남지 않는다(이름·낭독 라벨·안내 어느 쪽에도).
+    expect(within(card).queryByText(/햅틱/)).toBeNull();
+    expect(within(page).queryByText(/햅틱/)).toBeNull();
+    expect(within(page).queryByLabelText(/햅틱/)).toBeNull();
+    // 푸시 줄은 그대로 서 있다 — 줄만 걷었지 알림 카드를 비운 것이 아니다.
+    expect(within(card).getByTestId('profile-push-row')).toBeTruthy();
+    expect(within(card).getByTestId('profile-preview-row')).toBeTruthy();
   });
 });

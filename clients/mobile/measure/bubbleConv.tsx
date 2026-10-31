@@ -19,7 +19,7 @@ import {setServerBase} from '../src/storage/serverBase';
 //   press    둘째 행이 눌린 면을 입는다(시뮬레이터는 손가락을 댄 채 있을 수 없다). 눌린 면은
 //            **같은 심볼**(`rowPressedBackground`)과 `ROW_FACE` 로 깐다 — 색·상자를 베껴 적지 않는다.
 //   press-pair  이웃한 두 행이 동시에 눌린 면을 입는다(이웃 면이 맞붙는지 보는 최악 장면).
-//   landed   착지해 서 있는 행(`landed`) — 실제 `rowLanded` + 테두리.
+//   landed   착지해 서 있는 행(`landed`) — 실제 `rowLanded`(경고색 10% 이하의 면, 테두리 없음 — #4949).
 //   fade     착지가 풀리는 순간(`landed` true → false) 이후 덮개가 녹는 중. 풀리는 시각은 로그 없이
 //            실행 3초 뒤이고, 240ms 동안 녹는다 — 캡처는 연속으로 찍는다.
 //   row      줄 보기(`layout:'row'`, 예전 평면 행) — 같은 대화를 `FixedScheme bubble` 로 못 박아 찍는다(#4383).
