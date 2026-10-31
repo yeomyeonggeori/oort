@@ -34,6 +34,9 @@ const AUDIENCE: &str = "/v1/mcp/agent-port";
 
 #[path = "agent_port_tools/hosted_approval_connection.rs"]
 mod hosted_approval_connection;
+// #4656 / ADR-0200 증보 7: the agent's activity report (its own file: this one is 32,000 lines).
+#[path = "agent_port_tools/run_activity_4656.rs"]
+mod run_activity_4656;
 
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to an isolated PostgreSQL 18 URL")

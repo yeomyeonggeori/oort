@@ -734,12 +734,20 @@ mod tests {
     /// 164 is #4889's `thread_follow` (ADR-0206 증보 1 F1): who follows which thread, one row per
     /// (root, member) with the state `auto` / `followed` / `unfollowed`, tenant ENABLE + FORCE +
     /// `ws_isolation`. No grant for `momo_notifier` until the stage-2 judgment arm reads it.
+    ///
+    /// 167 is #4656's agent activity report (ADR-0200 증보 7): the two ledger kinds `activity` and
+    /// `plan` on `agent_run_event` (seven new columns, the SQL backstop CHECKs, the shared text
+    /// function), the per-run ended-unit total `agent_run_activity_tally` (tenant ENABLE + FORCE +
+    /// `ws_isolation`, `momo_notifier` SELECT for the retention sweep), the roll function
+    /// `agent_run_activity_trim`, the one writer `agent_run_activity_record`, and the stage trim /
+    /// append / frame-window functions made to look past the new kinds. 165 (#4889 stage 2) and 166
+    /// (#4966) are numbered by their own slots and land separately.
     #[test]
-    fn discovers_contiguous_migrations_001_to_164() {
+    fn discovers_contiguous_migrations_001_to_167() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=164).collect();
+        let expected: Vec<i64> = (1..=167).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -747,7 +755,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=164 under {}",
+            "expected contiguous 001..=167 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -755,7 +763,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("164_thread_follow"));
+            .starts_with("167_agent_run_activity"));
     }
 
     #[test]

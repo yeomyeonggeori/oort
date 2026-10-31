@@ -5138,7 +5138,9 @@ paths:
         requested/decided, and the terminal with its closed code. There is no
         cursor and no raw sequence — each row carries a 1-based `ordinal` in this
         run's ledger only. The only free text is the agent-reported `stage`
-        marker (at most 80 characters; render as plain text). A run outside this
+        marker (at most 80 characters; render as plain text) — and, behind
+        `include=activity`, the agent's own activity labels, plan steps and activity
+        ids (ADR-0200 증보 7; see `include`). A run outside this
         workspace and a run in a channel the caller is not an active member of
         are the same 404. Runs of managed or BYOA agents have an empty ledger.
       security: [{bearerAuth: []}]
@@ -5152,15 +5154,21 @@ paths:
           in: query
           required: false
           description: >
-            A comma-separated subset of `doorbell` and `tools` (`include=doorbell,tools`).
+            A comma-separated subset of `doorbell`, `tools` and `activity`
+            (`include=doorbell,tools,activity`).
             `doorbell` adds the `doorbell_rung` rows (ADR-0200 증보 2026-10-14). `tools` adds
             the `tool_call` rows — the oort tools the agent called on this run, at most 100,
             with `tool`, `durationMs` and a closed `code` — plus `toolTally` and
-            `toolCallRowsCapped` (ADR-0200 증보 2026-10-15 T4). Without them those rows and
+            `toolCallRowsCapped` (ADR-0200 증보 2026-10-15 T4). `activity` adds what the agent
+            says it is doing (ADR-0200 증보 7): one `activity` row per activity id — the newest
+            state of each, at most 100 — and the newest `plan` row, plus `activityTally` and
+            `activityRowsTrimmed`. That text is the AGENT'S OWN REPORT: render it as untrusted
+            plain text with an "agent-reported" label, never beside the server-measured rows
+            (`tool_call`, `claimed`) as if oort had observed it. Without them those rows and
             fields are left out, so a client that predates the kinds keeps parsing the
-            ledger. Any other value is a 400; a server that predates `tools` answers 400 to
-            it, and a client then re-reads without it.
-          schema: {type: string, pattern: "^\\s*(doorbell|tools)?\\s*(,\\s*(doorbell|tools)?\\s*)*$"}
+            ledger. Any other value is a 400; a server that predates `tools` or `activity`
+            answers 400 to it, and a client then re-reads without it.
+          schema: {type: string, pattern: "^\\s*(doorbell|tools|activity)?\\s*(,\\s*(doorbell|tools|activity)?\\s*)*$"}
       responses:
         "200":
           description: The ledger.
@@ -18839,8 +18847,10 @@ components:
           type: string
           description: >
             `doorbell_rung` only with `include=doorbell`; `tool_call` only with
-            `include=tools`. Clients reject a ledger holding a kind they do not know.
-          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled, doorbell_rung, tool_call]
+            `include=tools`; `activity` and `plan` only with `include=activity`, folded to the
+            newest row per activity id and the newest plan. Clients reject a ledger holding a
+            kind they do not know.
+          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled, doorbell_rung, tool_call, activity, plan]
         stage:
           type: string
           maxLength: 80
@@ -18866,7 +18876,85 @@ components:
           minimum: 0
           maximum: 600000
           description: "`tool_call` only: how long the server took, measured by the server."
-        createdAtMs: {type: integer, format: int64}
+        activity:
+          allOf: [{$ref: "#/components/schemas/AgentRunActivity"}]
+          description: >
+            `activity` only (with `include=activity`): the newest state of one activity id.
+            Agent-reported untrusted plain text.
+        plan:
+          type: array
+          maxItems: 12
+          items: {$ref: "#/components/schemas/AgentRunPlanStep"}
+          description: >
+            `plan` only (with `include=activity`): the newest whole plan — an empty array means
+            the agent cleared it. Agent-reported untrusted plain text.
+        createdAtMs:
+          type: integer
+          format: int64
+          description: On an `activity` row, the time of its last update.
+
+    AgentRunActivity:
+      type: object
+      additionalProperties: false
+      required: [id, kind, status, n, startedAtMs]
+      description: >
+        One activity as the agent's newest report left it (ADR-0200 증보 7). Everything but
+        `kind` and `status` is the agent's own text or number; oort checked only its length and
+        characters, never its meaning.
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 32
+          pattern: "^[A-Za-z0-9_-]+$"
+          description: >
+            The agent's meaningless number-name for this activity (`a1`). Plain text, shown as
+            reported: it can still carry a word the agent should not have used.
+        kind:
+          type: string
+          enum: [run, edit, read, search, web, other, delegate]
+        label:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: >
+            The agent's name for the work, no `/` or backslash and no control characters. Absent: show the
+            kind. Untrusted plain text.
+        status: {type: string, enum: [in_progress, completed, failed]}
+        n:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          description: How many things the item bundles (twelve files read is 12); 1 when not reported.
+        startedAtMs:
+          type: integer
+          format: int64
+          description: The id's FIRST report. A run that has ended does not make an `in_progress` activity running.
+
+    AgentRunPlanStep:
+      type: object
+      additionalProperties: false
+      required: [text, status]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 60
+          description: The agent's name for the step. Untrusted plain text.
+        status: {type: string, enum: [pending, in_progress, completed]}
+
+    AgentRunActivityTally:
+      type: object
+      additionalProperties: false
+      required: [kind, completed, failed]
+      description: >
+        The units of ENDED activities of one kind: for each activity id, its LAST report if it
+        ended counts `n`. The agent's own report, not a count oort made, and it survives the
+        100-row roll. A kind with nothing ended is left out.
+      properties:
+        kind: {type: string, enum: [run, edit, read, search, web, other, delegate]}
+        completed: {type: integer, format: int64, minimum: 0}
+        failed: {type: integer, format: int64, minimum: 0}
 
     AgentRunToolTally:
       type: object
@@ -18889,8 +18977,10 @@ components:
         runId: {type: string, format: uuid}
         events:
           type: array
-          maxItems: 300
-          description: At most 200 rows, plus at most 100 `tool_call` rows with `include=tools`.
+          maxItems: 401
+          description: >
+            At most 200 rows, plus at most 100 `tool_call` rows with `include=tools`, plus at most
+            100 `activity` rows and one `plan` row with `include=activity`.
           items: {$ref: "#/components/schemas/AgentRunEvent"}
         toolTally:
           type: array
@@ -18901,6 +18991,16 @@ components:
           description: >
             Present only with `include=tools`. True when calls were counted past the
             100-row cap (the tally holds more calls than there are `tool_call` rows).
+        activityTally:
+          type: array
+          description: Present only with `include=activity`; in the order run, edit, read, search, web, other, delegate.
+          items: {$ref: "#/components/schemas/AgentRunActivityTally"}
+        activityRowsTrimmed:
+          type: boolean
+          description: >
+            Present only with `include=activity`. True when `activityTally` counts more ended
+            units than the ended activities still shown — part of it survives only as a total
+            because the 100-row roll removed the rest.
 
     AgentRunCancelResponse:
       type: object

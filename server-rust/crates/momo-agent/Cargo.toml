@@ -13,6 +13,12 @@ momo-db = { path = "../momo-db" }
 # card in the same transaction (`reclaim_in_tx`). momo-expressions depends on
 # momo-db/-outbox/-wire only: no cycle.
 momo-expressions = { path = "../momo-expressions" }
+# ADR-0200 증보 7 (#4656): the agent activity report judges its text with the very rule a
+# stage marker passes through (`momo_wire::report_text::checked_report_text`, one function that
+# `momo-t3`'s share also uses), so the four agent-written text fields cannot drift apart.
+# This crate deliberately has no dependency on `momo-t3` (a boundary test in momo-server pins
+# it); momo-wire depends on momo-db only: no cycle.
+momo-wire = { path = "../momo-wire" }
 
 sqlx.workspace = true
 uuid.workspace = true

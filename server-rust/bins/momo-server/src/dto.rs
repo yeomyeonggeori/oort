@@ -2354,7 +2354,48 @@ pub struct AgentRunEventDto {
     /// `tool_call` only: the server-measured duration of the call.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<i32>,
+    /// `activity` only (served behind `include=activity`, ADR-0200 증보 7 7-7): the newest
+    /// state of one activity id. Agent-reported plain text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity: Option<AgentRunActivityDto>,
+    /// `plan` only (served behind `include=activity`): the newest whole plan; `[]` means the
+    /// agent cleared it. Agent-reported plain text.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<Vec<AgentRunPlanStepDto>>,
+    /// On an `activity` row, the time of its last update.
     pub created_at_ms: i64,
+}
+
+/// openapi `AgentRunActivity` — one activity as its newest report left it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunActivityDto {
+    pub id: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub status: String,
+    pub n: i32,
+    /// The id's first report.
+    pub started_at_ms: i64,
+}
+
+/// openapi `AgentRunPlanStep` — one step of the newest plan.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunPlanStepDto {
+    pub text: String,
+    pub status: String,
+}
+
+/// openapi `AgentRunActivityTally` — the units of ENDED activities of one kind: the agent's
+/// own report, not a count oort made.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunActivityTallyDto {
+    pub kind: String,
+    pub completed: i64,
+    pub failed: i64,
 }
 
 /// openapi `AgentRunToolTally` — one tool's totals on one run (ADR-0200 증보 T3).
@@ -2378,6 +2419,12 @@ pub struct AgentRunEventsResponse {
     /// Present only with `include=tools`: calls were counted past the 100-row cap.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_rows_capped: Option<bool>,
+    /// Present only with `include=activity` (ADR-0200 증보 7 7-7): the ended units per kind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity_tally: Option<Vec<AgentRunActivityTallyDto>>,
+    /// Present only with `include=activity`: part of the total survives only as a total.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity_rows_trimmed: Option<bool>,
 }
 
 /// openapi `AgentRunSummaryPage` (Swift `AgentRunSummaryPageDTO`).
