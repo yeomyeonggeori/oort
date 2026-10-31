@@ -34,6 +34,9 @@ const events = {
   refreshThreshold: ['light', 'basic'],
   refreshSucceeded: ['success', 'basic'],
   refreshFailed: ['warning', 'basic'],
+  // 밀어서 답글(#4869): 실행 문턱을 **처음** 지나는 순간 한 번(제스처당 1회는 부르는 쪽이 지킨다). 기본·풍부 모두 `light`
+  // (research-1029/haptics/report.md §5 「답글 스와이프」) — 스크롤·이동 중에는 울리지 않는다.
+  replySwipeThreshold: ['light', 'basic'],
 } as const satisfies Record<string, readonly [Pattern, 'rich' | 'basic']>;
 export type HapticEvent = keyof typeof events;
 
