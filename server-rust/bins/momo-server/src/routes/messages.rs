@@ -670,6 +670,8 @@ pub async fn send(
     // fail the CHECK and surface as a 500). The sentence is English like every `ApiError` here and
     // names no `routing` (see `thread_root_rejection`: the web probe reads refusals by shape).
     let also_in_channel = request.also_in_channel.unwrap_or(false);
+    // ADR-0170 증보 2026-11-01 D21 (#4884). Absent and `false` are the same request.
+    let suppress_unfurl = request.suppress_unfurl.unwrap_or(false);
     if also_in_channel && root_id.is_none() {
         return Err(ApiError::bad_request(
             "alsoInChannel needs rootId: only a thread reply can also be sent to the channel",
@@ -756,6 +758,7 @@ pub async fn send(
         requested_routing,
         requested_apps,
         also_in_channel,
+        suppress_unfurl,
         gates,
     };
 
@@ -1183,7 +1186,9 @@ fn interaction_refusal(refused: InteractionRefused) -> ApiError {
         InteractionRefused::NotFound => StatusCode::NOT_FOUND,
         InteractionRefused::NotAMember
         | InteractionRefused::NotAuthorForEdit
-        | InteractionRefused::NotAuthorForDelete => StatusCode::FORBIDDEN,
+        | InteractionRefused::NotAuthorForDelete
+        // The caller authored it and may not rewrite it: the card is the server's.
+        | InteractionRefused::ApprovalCardOwned => StatusCode::FORBIDDEN,
         InteractionRefused::EditDeleted
         | InteractionRefused::ReactDeleted
         | InteractionRefused::PinDeleted
@@ -2252,6 +2257,7 @@ mod tests {
             stream: None,
             harness_refine: None,
             apps: None,
+            suppress_unfurl: None,
         }
     }
 
@@ -3017,6 +3023,18 @@ mod tests {
         );
     }
 
+    /// An approval card's author is not refused as a stranger but as the one it is: 403, and a
+    /// sentence of its own (ADR-0204 증보 6 D6-3 — the body is the server's).
+    #[test]
+    fn an_approval_card_refusal_is_a_403_with_its_own_sentence() {
+        let error = interaction_refusal(InteractionRefused::ApprovalCardOwned);
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            InteractionRefused::ApprovalCardOwned.to_string(),
+            "approval cards are written by the server"
+        );
+    }
+
     /// The wire keys are the contract two clients decode. `type` in particular
     /// is a serde rename that a refactor of the struct field would silently
     /// drop, leaving the header list unable to tell a text message from a
@@ -3126,6 +3144,9 @@ mod tests {
             // ADR-0148 증보 (#4887): 「대화에도 보내기」 is a person's choice in the app; the
             // developer-token door stays closed to it until ADR-0216 opens it.
             "alsoInChannel",
+            // ADR-0170 증보 2026-11-01 (#4884): 「미리보기 없이 보내기」 is the author's choice in
+            // the composer, where a preview was shown; a terminal tool has none.
+            "suppressUnfurl",
             "sentVia",
             "sent_via",
             "Body",

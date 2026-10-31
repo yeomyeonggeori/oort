@@ -173,6 +173,9 @@ tags:
       ADR-0170 link unfurl server surface. Workspace on/off, message-level
       removal, and the authenticated image proxy. Cards arrive on
       `message.unfurl` broadcasts; personal render-fold is a client concern.
+      Before a message is sent, the composer can ask for the card of a link it
+      holds (`createUnfurlPreview`, ADR-0170 증보 2026-11-01) and send the message
+      with `suppressUnfurl` to give it no cards.
   - name: attachments
     description: Drive archive resumable uploads, completion, and authorized content proxy.
   - name: read-state
@@ -11320,7 +11323,10 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
-          description: Not the author/channel member, or workspace scope mismatch.
+          description: >
+            Not the author/channel member, or workspace scope mismatch. Also an
+            approval card (`approval_request`): its sentence is the server's, so
+            its author may neither rewrite it nor stream into it (#4980).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -11782,6 +11788,150 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "404":
           description: Card or icon not available (including a refused destination).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/unfurl-previews:
+    post:
+      tags: [unfurls]
+      operationId: createUnfurlPreview
+      summary: The card of a link that is still in the composer, asked before the message exists.
+      description: >
+        ADR-0170 증보 2026-11-01 D14–D20 (#4884). The body carries **one address and
+        nothing else** — never the draft's text — and it is a body and not a query
+        because a link's query is often a token. The answer is always 200 when the
+        request is allowed: `status` is `ok` (with the card) or `failed`, and `failed`
+        is the whole answer for every way of having no preview — the destination was
+        refused, the site is down or slow or too big or not HTML, the page has nothing a
+        card can show, a switch is off — so a preview never says *why*. `blocked` and
+        `pending` are not returned here.
+
+
+        **Who may ask**: a person (not an agent or a work host; a developer token is not
+        on the closed route table) who is an active member of the workspace **and** a
+        current member of the channel — the rule a send has, so a guest may preview in the
+        channels it is in and nowhere else. A channel that does not exist is the same 403
+        as one the caller is not in. The instance switch `MOMO_UNFURL_ENABLED` and the
+        workspace switch (`unfurl-settings`) both have to be on, or nothing is fetched and
+        the answer is `failed`.
+
+
+        **What the server does**: it fetches the page through the same guarded transport as
+        a stored card (public addresses only, https, every redirect hop re-checked,
+        512 KiB, time limit) with one rule added: **port 443 only, on every hop**. It
+        keeps the answer in memory, for the member who asked, 30 minutes (`failed`: 2
+        minutes); nothing is written to the database. The same address asked again by the
+        same member is answered from memory and costs nothing. A request that must fetch
+        spends the member's preview budget (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`,
+        default 60 per window) and a place among the fetches in flight (the same places
+        the picture proxy uses); either is exhausted with 429 + `Retry-After` (see
+        `RateLimited`), and a request turned away for want of a place gets its budget back.
+        A client should ask once the address looks finished (350 ms after typing stops, or
+        right after a paste), once per address.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UnfurlPreviewRequest"}
+      responses:
+        "200":
+          description: The card, or `failed`.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UnfurlPreview"}
+        "400":
+          description: >
+            The address is not an absolute http(s) address, carries credentials, or is
+            longer than 2048 bytes. Nothing was fetched.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a member of the workspace and the channel (or no such channel), not a
+            person, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/unfurl-previews/{previewId}/image:
+    get:
+      tags: [unfurls]
+      operationId: getUnfurlPreviewImage
+      summary: Stream a preview's picture through this origin.
+      description: >
+        ADR-0170 증보 2026-11-01 D19. `previewId` is the `id` of an `ok` preview and is
+        good only for the member it was made for, until the preview runs out. The bytes
+        come from the same proxy as `getUnfurlImage` (the same guard, type list, failure
+        memory, fetch budget and places): the client must not fetch the remote host and is
+        never given its address. An id that is unknown, run out, another member's or
+        another workspace's is the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: previewId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Image bytes.
+          content:
+            "image/*":
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Preview or picture not available (including a refused destination).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/unfurl-previews/{previewId}/icon:
+    get:
+      tags: [unfurls]
+      operationId: getUnfurlPreviewIcon
+      summary: Stream a preview's site icon through this origin.
+      description: >
+        ADR-0170 증보 2026-11-01 D19. Same authorization and same proxy as
+        `getUnfurlIcon` (port 443 only, 512 KiB, no SVG), for a preview's `iconUrl`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: previewId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Icon bytes.
+          content:
+            "image/*":
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Preview or icon not available (including a refused destination).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -15098,7 +15248,17 @@ components:
         is already fetching as many as one member may (4), or it has no room for another
         name lookup. Such a refusal says nothing about the card, is not remembered, and
         gives back the unit of fetch budget the request spent; ask again shortly. A
-        client shows its fallback meanwhile. `POST /v1/join` also has a per-account password-guess
+        client shows its fallback meanwhile. `POST …/channels/{ch}/unfurl-previews`
+        (ADR-0170 증보 2026-11-01 D20, #4884) has a per-member budget of its own, default 60
+        per window (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`, 0 removes it), spent only by a
+        request that must fetch the page: an answer the server already holds for that
+        member and address, a switch that is off, and a request turned away for want of a
+        place spend nothing. It draws its places from the same pool as the card proxies, so
+        one member's previews, pictures and icons together never hold more than that
+        member's share (4); with no place it answers 429 with `Retry-After: 1`, gives the
+        unit back and remembers nothing. The preview pictures and icons
+        (`GET …/unfurl-previews/{id}/image|icon`) spend the card proxies' budget above.
+        `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
         already has an active account, is spent before the password is compared
         (a right password counts too), and answers 429 without comparing once
@@ -24143,6 +24303,22 @@ components:
             developer token (`dev_field_not_allowed`). An older server's
             closed-world request refuses the unknown key, so a client sends it
             only when the sender turned it on.
+        suppressUnfurl:
+          type: boolean
+          default: false
+          description: >
+            ADR-0170 증보 2026-11-01 D21 (#4884) — 「미리보기 없이 보내기」: this message
+            gets **no link cards**, ever. In the send transaction, and only for a real
+            insert, the server plants the message's unfurl tombstone — the row an author's
+            own `removeMessageUnfurls` plants — so the unfurl worker ends the message's
+            job as skipped without fetching anything; nothing else about the send
+            changes. It is not a `props` key (props is client-writable). It reaches only
+            this message's own cards. Absent and `false` are the same request. Chosen
+            once, at send: an idempotent retry (same `clientMsgId`) answers the stored
+            message whatever this says now, and a retry plants nothing. Not allowed on a
+            developer token (`dev_field_not_allowed`). An older server's closed-world
+            request refuses the unknown key, so a client sends it only when the sender
+            turned it on.
         type:
           type: string
           enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
@@ -24809,6 +24985,75 @@ components:
         removed:
           type: boolean
           description: false when the cards were already gone (idempotent).
+
+    UnfurlPreviewRequest:
+      type: object
+      required: [url]
+      additionalProperties: false
+      description: >
+        One address. The draft's text is not part of this request and has no key here.
+      properties:
+        url:
+          type: string
+          maxLength: 2048
+          description: >
+            An absolute http(s) address, without credentials. A fragment is dropped.
+            The server normalizes it the way a stored card's address is normalized.
+
+    UnfurlPreview:
+      type: object
+      required: [url, status]
+      description: >
+        The keys of `MessageUnfurl` without `messageId` (there is no message yet), under
+        the same rules: every optional key is absent when unknown, and `imageUrl` and
+        `iconUrl` are paths on this origin, never a remote address. `status` is `ok` or
+        `failed` and nothing else; `failed` carries `url` and `status` only.
+      properties:
+        url:
+          type: string
+          format: uri
+          description: The normalized address that was asked about.
+        status:
+          type: string
+          enum: [ok, failed]
+        id:
+          type: string
+          format: uuid
+          description: >
+            Present only when `status` is `ok`: the handle of `imageUrl` and `iconUrl`.
+            Random, and good only for the member the preview was made for.
+        title: {type: string, description: "At most 180 characters, whitespace collapsed."}
+        description:
+          type: string
+          description: At most 280 characters. Absent when it would repeat the title.
+        domain: {type: string}
+        imageUrl:
+          type: string
+          description: >
+            `/v1/workspaces/{id}/unfurl-previews/{id}/image`, on this origin. Never a
+            remote host.
+        siteName:
+          type: string
+          description: og:site_name, at most 100 characters.
+        iconUrl:
+          type: string
+          description: >
+            `/v1/workspaces/{id}/unfurl-previews/{id}/icon`, on this origin. Never a
+            remote host and never the icon's own address.
+        imageWidth:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: >
+            Pixels, as the page declared them (og:image:width). A preview does not measure
+            the picture. Present together with `imageHeight` or not at all.
+        imageHeight:
+          type: integer
+          minimum: 1
+          maximum: 16384
+        isVideo:
+          type: boolean
+          description: "`true` when the page says it is a video. Absent otherwise."
 
     CreateAttachmentUploadRequest:
       type: object
