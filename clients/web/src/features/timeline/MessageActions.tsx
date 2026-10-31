@@ -340,7 +340,11 @@ export const TOOLBAR_CLASS =
 /** 오른쪽 12는 줄 안쪽 여백(`px-3`)과 같아 막대 오른끝이 본문 글자 끝과 맞는다. */
 export const toolbarItemClass =
   "flex size-control items-center justify-center rounded-full text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring";
-/** 빠른 반응 이모지: 글리프 20px. 내가 남긴 반응은 `accent-soft`. */
+/**
+ * 빠른 반응 이모지: 글리프 20px. 내가 남긴 반응도 바탕을 칠하지 않는다(owner 2026-10-31, #4879):
+ * 달린 반응은 아래 칩 줄(`ReactionChips`)이 말하고, 이 막대는 보조 기술에 `aria-pressed`와
+ * 「반응 취소」 라벨로 같은 상태를 말한다.
+ */
 export const toolbarReactionClass =
   "flex size-control items-center justify-center rounded-full reaction-glyph press focus-visible:focus-ring";
 /** 반응과 행동 사이 세로 구분선(1×16). */
@@ -446,11 +450,10 @@ export function MessageHoverToolbar({
                   recordEmojiUse(emoji);
                   callbacks.onReact(emoji);
                 }}
+                // 내가 단 이모지도 안 단 것과 같은 모양이다: 바탕색 없음(owner 2026-10-31, #4879).
                 className={cn(
                   toolbarReactionClass,
-                  mine
-                    ? "bg-accent-soft text-ink active:bg-surface-pressed"
-                    : "text-ink-muted hover:bg-surface-hover hover:text-ink"
+                  "text-ink-muted hover:bg-surface-hover hover:text-ink"
                 )}
               >
                 <span aria-hidden="true">{emoji}</span>

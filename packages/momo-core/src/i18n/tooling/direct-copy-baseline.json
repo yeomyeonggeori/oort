@@ -794,7 +794,7 @@
     "clients/web/src/features/timeline/ChannelIntroBlock.tsx": 18,
     "clients/web/src/features/timeline/FoldToggle.tsx": 6,
     "clients/web/src/features/timeline/LongPressHint.tsx": 5,
-    "clients/web/src/features/timeline/MessageActions.tsx": 61,
+    "clients/web/src/features/timeline/MessageActions.tsx": 60,
     "clients/web/src/features/timeline/MessageBody.tsx": 33,
     "clients/web/src/features/timeline/MessageEditor.tsx": 6,
     "clients/web/src/features/timeline/MessageRow.tsx": 62,
