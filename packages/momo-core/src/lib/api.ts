@@ -33,7 +33,7 @@ import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
 import { tokenExpiresAtMs } from "./tokenLifetime";
 import {
-  isUnfurlImagePath,
+  isUnfurlProxyPath,
   messageUnfurlFromWire,
   type MessageUnfurl,
   type WorkspaceUnfurlSettings,
@@ -2872,14 +2872,15 @@ export async function updateWorkspaceUnfurlSettings(
 }
 
 /**
- * Fetch image bytes through the authenticated server proxy. The strict path
- * gate makes it impossible to attach a bearer to a remote image host.
+ * Fetch image bytes through the authenticated server proxy: a card's preview
+ * picture (`imageUrl`) or its site icon (`iconUrl`). The strict path gate makes
+ * it impossible to attach a bearer to a remote image host.
  */
 export async function fetchUnfurlImage(
   imageUrl: string,
   signal?: AbortSignal
 ): Promise<Blob> {
-  if (!isUnfurlImagePath(imageUrl)) {
+  if (!isUnfurlProxyPath(imageUrl)) {
     throw new ApiError(400, "not an unfurl image proxy path");
   }
   const send = (token: string | null): Promise<Response> => {

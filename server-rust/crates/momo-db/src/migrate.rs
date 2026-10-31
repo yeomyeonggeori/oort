@@ -725,12 +725,17 @@ mod tests {
     /// 162 is #4887's 「대화에도 보내기」 (ADR-0148 증보 2026-10-31): `message.also_in_channel boolean
     /// NOT NULL DEFAULT false` and the CHECK `message_also_in_channel_reply_ck` that lets only a thread
     /// reply (`root_id` set) turn it on. No new table, so no new RLS policy.
+    ///
+    /// 163 is #4881's link-card site metadata (ADR-0170 amendment 2026-10-31): six columns (site name,
+    /// icon proxy key and remote icon address, image width/height, video flag) on `unfurl_url_cache` and
+    /// `message_unfurl`, with the column CHECKs that keep the size pair and the icon pair whole. No new
+    /// table.
     #[test]
-    fn discovers_contiguous_migrations_001_to_162() {
+    fn discovers_contiguous_migrations_001_to_163() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=162).collect();
+        let expected: Vec<i64> = (1..=163).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -738,7 +743,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=162 under {}",
+            "expected contiguous 001..=163 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -746,7 +751,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("162_message_also_in_channel"));
+            .starts_with("163_unfurl_site_meta"));
     }
 
     #[test]
