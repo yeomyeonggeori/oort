@@ -1899,6 +1899,19 @@ paths:
         `display name is already in use`. The handle is not changed. Writes
         `member.display_name`, audit `member.renamed` (`kind:"agent"`) and a
         `member.renamed` outbox broadcast per co-member channel.
+
+        ADR-0201 증보 v3 B10 (#4966), when the agent is the workspace's team AI
+        (the 「oort 도우미」): the new name is also **added** to its aliases in
+        the same transaction (the approved `agent.rename` and `agent.profile.update`
+        cards go through the same write). The alias is `lower(NFC(name))` when that
+        is `[a-z0-9_가-힣-]{2,16}` (a name with a space gives none); the fixed
+        `oort`·`오르트`·`claude` and the aliases of earlier names stay, up to four per
+        workspace — a fifth removes the oldest first, one at a time (audit
+        `team_ai.alias.released`, reason `evicted`). The audit row `member.renamed`
+        carries `alias: {state, alias?, evicted[]}`. What became of the alias is in
+        `team_ai_alias_status` of the workspace settings. The team AI's display name
+        may not be one of `here`, `channel`, `everyone`, `all`, `admin`, `system`,
+        `모두`, `전체`, `oort-helper` (400).
       security: [{bearerAuth: []}]
       parameters:
         - {$ref: "#/components/parameters/WorkspaceId"}
@@ -1917,7 +1930,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/SelfMemberResponse"
         "400":
-          description: displayName failed the join normalization.
+          description: >
+            displayName failed the join normalization, or is a reserved word
+            (`display name is reserved`) for the team AI.
           content:
             application/json:
               schema:
@@ -24754,13 +24769,18 @@ components:
         team_ai_alias_status:
           type: object
           description: >
-            Server-written (ADR-0201 증보 v2 H2-3); not PATCH-able. Per alias
-            (`oort`, `오르트`, `claude`): `registered`, `taken` (a member's
-            handle holds it — not registered, or released later) or
-            `display_name_match` (registered; a display name reads the same).
+            Server-written (ADR-0201 증보 v2 H2-3, v3 B10); not PATCH-able. Per alias
+            (`oort`, `오르트`, `claude`, and the alias of the name the helper was given):
+            `registered`, `taken` (a member's handle holds it — not registered, or
+            released later) or `display_name_match` (registered; a display name reads
+            the same). An alias that was given up to make room (four at most) has no
+            entry. The one key that is not an alias is `@name` (`@` cannot occur in an
+            alias): what the helper's *current display name* gave when it gave no alias —
+            `not_derivable` (a space, a character outside `[a-z0-9_가-힣-]`, or a length
+            outside 2..16; `@표시 이름` still calls the helper) or `reserved`.
           additionalProperties:
             type: string
-            enum: [registered, taken, display_name_match]
+            enum: [registered, taken, display_name_match, not_derivable, reserved]
 
     PatchWorkspaceSettingsRequest:
       type: object

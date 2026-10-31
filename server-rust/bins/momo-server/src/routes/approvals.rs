@@ -2320,7 +2320,7 @@ async fn execute_workspace_action(
             display_name,
             target: Some(target),
             ..
-        } => match execute_agent_rename(conn, approval, input, display_name, target).await? {
+        } => match execute_agent_rename(conn, approval, input, now, display_name, target).await? {
             Execution::Ran(executed) => executed,
             Execution::Refused(decision) => return Ok(Ok(decision)),
         },
@@ -3535,13 +3535,30 @@ async fn execute_agent_rename(
     conn: &mut PgConnection,
     approval: &LockedApproval,
     input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
     display_name: &str,
     target: &ResolvedAgentTarget,
 ) -> Result<Execution, momo_db::DbError> {
     let applied =
-        rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, display_name)
+        match rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, display_name)
             .await?
-            .ok_or_else(|| protocol_error("the rename target is no longer a live agent"))?;
+        {
+            Ok(Some(applied)) => applied,
+            Ok(None) => {
+                return Err(protocol_error(
+                    "the rename target is no longer a live agent",
+                ))
+            }
+            // The team AI may not wear a reserved word (ADR-0201 증보 v3 B10-5). The strict card
+            // alphabet refuses nearly all of them at proposal time; the write's whole-name check
+            // also catches a spaced-out spelling (`a l l`) it lets through, and answers like any
+            // card whose arguments went stale. Nothing has been written.
+            Err(_) => {
+                return Ok(Execution::Refused(args_invalid_refusal(
+                    approval, input, now,
+                )))
+            }
+        };
 
     let mut detail = json!({
         "old": applied.previous_display_name,
@@ -3551,6 +3568,10 @@ async fn execute_agent_rename(
         "approval_id": approval.id.to_string(),
         "managed": target.managed,
     });
+    // ADR-0201 증보 v3 B10-6: the helper's aliases moved with its name in this transaction.
+    if let Some(alias) = &applied.alias_sync {
+        detail["alias"] = alias.audit_detail();
+    }
     if target.managed {
         if let Some(object) = detail.as_object_mut() {
             object.insert("target_agent".into(), json!(target.id.to_string()));
@@ -3708,6 +3729,17 @@ async fn execute_agent_profile_update(
     if changes.is_empty() {
         return Err(protocol_error("agent.profile.update changes nothing"));
     }
+    // ADR-0201 증보 v3 B10 (#4966): a rename of the team AI moves its aliases, and every writer of
+    // those takes the alias lock before any row lock (the switch-on path does). This path locks the
+    // member row first, so for the helper it takes the alias lock ahead of that row.
+    if change.display_name.is_some() {
+        momo_messaging::team_ai_alias::lock_aliases_if_team_ai_in_tx(
+            conn,
+            input.workspace_id,
+            target.id,
+        )
+        .await?;
+    }
     // The row is locked **before the first write** and read again: the card was
     // resolved earlier in this transaction without the lock, so anything that
     // moved since (a concurrent rename or profile change) re-asks. A refusal here
@@ -3731,11 +3763,22 @@ async fn execute_agent_profile_update(
     if let Some(name) = change.display_name {
         if name != &target.current_display_name {
             let applied =
-                rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, name)
+                match rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, name)
                     .await?
-                    .ok_or_else(|| {
-                        protocol_error("the profile target is no longer a live agent")
-                    })?;
+                {
+                    Ok(Some(applied)) => applied,
+                    Ok(None) => {
+                        return Err(protocol_error(
+                            "the profile target is no longer a live agent",
+                        ))
+                    }
+                    // Reserved for the team AI (ADR-0201 증보 v3 B10-5): nothing has been written.
+                    Err(_) => {
+                        return Ok(Execution::Refused(args_invalid_refusal(
+                            approval, input, now,
+                        )))
+                    }
+                };
             new_name = applied.member.display_name.clone();
             let mut detail = json!({
                 "old": applied.previous_display_name,
@@ -3745,6 +3788,10 @@ async fn execute_agent_profile_update(
                 "approval_id": approval.id.to_string(),
                 "managed": target.managed,
             });
+            // ADR-0201 증보 v3 B10-6: the helper's aliases moved with its name in this transaction.
+            if let Some(alias) = &applied.alias_sync {
+                detail["alias"] = alias.audit_detail();
+            }
             if target.managed {
                 if let Some(object) = detail.as_object_mut() {
                     object.insert("target_agent".into(), json!(target.id.to_string()));

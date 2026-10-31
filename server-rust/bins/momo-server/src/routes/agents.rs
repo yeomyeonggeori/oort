@@ -446,16 +446,29 @@ pub async fn rename(
                         "display name is already in use",
                     )));
                 }
-                let Some(applied) = rename_agent_display_name_in_tx(
+                let applied = match rename_agent_display_name_in_tx(
                     conn,
                     workspace_id,
                     agent_member_id,
                     &display_name,
                 )
                 .await?
-                else {
-                    return Ok(Err(ApiError::not_found("active agent not found")));
+                {
+                    Ok(Some(applied)) => applied,
+                    Ok(None) => return Ok(Err(ApiError::not_found("active agent not found"))),
+                    // ADR-0201 증보 v3 B10-5: the team AI may not wear a reserved word
+                    // (`all`, `admin`, `모두`, …) — the write refused it before touching anything.
+                    Err(rejected) => return Ok(Err(ApiError::bad_request(rejected.to_string()))),
                 };
+                let mut detail = json!({
+                    "old": applied.previous_display_name,
+                    "new": applied.member.display_name,
+                    "kind": "agent",
+                });
+                // B10-6: the helper's aliases moved with its name in this transaction; say how.
+                if let Some(alias) = &applied.alias_sync {
+                    detail["alias"] = alias.audit_detail();
+                }
                 write_audit(
                     conn,
                     &AuditEntry::new(workspace_id, "member.renamed")
@@ -463,14 +476,7 @@ pub async fn rename(
                         .about(agent_member_id)
                         .target("member", agent_member_id)
                         .via_token(via_token)
-                        .with_schema(
-                            "momo.member.renamed.v1",
-                            json!({
-                                "old": applied.previous_display_name,
-                                "new": applied.member.display_name,
-                                "kind": "agent",
-                            }),
-                        ),
+                        .with_schema("momo.member.renamed.v1", detail),
                 )
                 .await?;
                 Ok(Ok(SelfMemberResponse {
