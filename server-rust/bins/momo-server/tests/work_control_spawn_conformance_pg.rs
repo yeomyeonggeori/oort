@@ -731,8 +731,8 @@ async fn ade1_1_a_spawn_waits_for_a_human_then_reaches_the_host_they_chose() {
 
     // The card the room sees carries the same rows, so a client can draw the
     // picker from the broadcast alone.
-    let card_props: Value = sqlx::query_scalar(
-        "SELECT props FROM message WHERE workspace_id = $1 AND type = 'approval_request'",
+    let (card_body, card_props): (String, Value) = sqlx::query_as(
+        "SELECT body, props FROM message WHERE workspace_id = $1 AND type = 'approval_request'",
     )
     .bind(tenant.workspace)
     .fetch_one(&su)
@@ -740,6 +740,18 @@ async fn ade1_1_a_spawn_waits_for_a_human_then_reaches_the_host_they_chose() {
     .expect("the approval card exists");
     assert_eq!(card_props["kind"], json!("work_control_approval"));
     assert_eq!(card_props["execution"], *execution);
+    // ADR-0204 증보 6 D6-2 · D6-3: a spawn asks which machine, so the app decides it, and its
+    // card says one question with the tool quoted after it (no particle behind the name).
+    assert_eq!(card_props["decision_mode"], json!("open"));
+    assert_eq!(
+        card_body,
+        format!(
+            "작업을 시작해도 될까요? · 「{}」",
+            card_props["tool"]
+                .as_str()
+                .expect("the card names its tool")
+        )
+    );
 
     // ---- the decision, which also chooses the host -------------------------
     let response = decide(

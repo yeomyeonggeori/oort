@@ -5182,6 +5182,26 @@ mod tests {
         assert!(!shows_a_value_to_the_lock_screen(None, false));
     }
 
+    /// `momo_agent` writes the spawn approval's `action_type` into its sentences
+    /// (`approval_sentence`) and cannot depend on `momo_t3`, which owns the constant: the two
+    /// spellings are pinned equal here, so a renamed spawn type cannot silently become a
+    /// 「요청」 with no name in the receipt's line.
+    #[test]
+    fn the_sentence_module_spells_the_spawn_action_type_as_the_work_control_does() {
+        assert_eq!(
+            momo_agent::approval_sentence::WORK_SPAWN_ACTION_TYPE,
+            momo_t3::work_control::ACTION_TYPE_WORK_SPAWN
+        );
+        assert_eq!(
+            momo_agent::approval_sentence::receipt_line(
+                momo_t3::work_control::ACTION_TYPE_WORK_SPAWN,
+                &json!({}),
+                momo_agent::approval_sentence::LineKind::Rejected,
+            ),
+            "작업 시작을 거부했어요"
+        );
+    }
+
     /// The `opens_in_app` refusal is a receipt like every other expected failure,
     /// and it executes nothing.
     #[test]

@@ -125,7 +125,10 @@ pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
         // is what keeps its push silent (`momo_push` judgment) and `bundle_of` names the approval
         // it is the notice of — a member who could write either could silence their own
         // message's push, or dress a message as the notice of somebody's approval.
-        || matches!(key, "announce" | "bundle_of")
+        // ADR-0204 증보 6 D6-2: `decision_mode` is the word an approval card's buttons read
+        // (`inline` | `open`), written by the server beside the approval it describes. A message
+        // that carried a forged one would tell a client which way to draw somebody's decision.
+        || matches!(key, "announce" | "bundle_of" | "decision_mode")
         // ADR-0218 appendix B / ADR-0186 v8: `action.expression` (the candidates a person is
         // asked to choose from) and `result.expression` (what was saved) are written only by
         // the server, inside an approval card's own transaction. A plain message can carry
@@ -2012,8 +2015,9 @@ mod tests {
             "bundle_of".to_string(),
             "22222222-2222-4222-8222-222222222222".to_string(),
         );
+        props.insert("decision_mode".to_string(), "inline".to_string());
         let value = props_value(Some(&props));
-        for key in ["announce", "bundle_of"] {
+        for key in ["announce", "bundle_of", "decision_mode"] {
             assert!(
                 value.get(key).is_none(),
                 "{key} is server-owned and must be stripped"

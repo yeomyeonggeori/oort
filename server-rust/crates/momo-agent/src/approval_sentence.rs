@@ -34,6 +34,7 @@ use crate::actions::{
     action_by_id, WorkspaceAction, ACTION_AGENT_PROFILE_UPDATE, ACTION_CHANNEL_CREATE,
     ACTION_TYPE_WORKSPACE_ACTION,
 };
+use crate::hosted_notice::inert_display_name;
 use crate::korean::{particle_for, ParticlePair};
 use crate::tools::ACTION_TYPE_TOOL_CALL;
 
@@ -71,6 +72,11 @@ pub struct Phrases {
 /// A value this server may quote in a sentence: one short line, trimmed, with nothing in it that
 /// could draw something else — no control or direction-changing character, no bracket of the
 /// quote itself. `None` when it has to be left out.
+///
+/// What is quoted is also made **inert** ([`inert_display_name`], the way the hosted notice
+/// lines and the in-place card's body already name an agent): a `body` is parsed as markdown by
+/// the clients, so a name that spells `[label](https://…)` must not be able to become a link in
+/// a sentence this server wrote. An ordinary name is unchanged.
 pub fn quotable_value(raw: &str) -> Option<String> {
     let unsafe_char = |c: char| {
         c.is_control()
@@ -90,7 +96,7 @@ pub fn quotable_value(raw: &str) -> Option<String> {
     if collapsed.is_empty() || collapsed.chars().count() > VALUE_MAX_CHARS {
         return None;
     }
-    Some(collapsed)
+    Some(inert_display_name(&collapsed))
 }
 
 /// `question`, or `question · 「value」`, behind 「먼저 제안 · 」 when nobody asked.
@@ -362,6 +368,17 @@ mod tests {
     #[test]
     fn a_value_is_quoted_only_when_it_is_short_and_plain() {
         assert_eq!(quotable_value(" qa  team "), Some("qa team".to_string()));
+        // Made inert, like every name this server writes into a body: no link can be formed.
+        assert_eq!(
+            quotable_value("김인턴 [봇]"),
+            Some("김인턴 ［봇］".to_string())
+        );
+        let link = quotable_value("[x](https://evil.example)").expect("short and plain");
+        assert!(!link.contains("](") && !link.contains("://"), "{link}");
+        assert_eq!(
+            quotable_value("a`b").map(|value| value.contains('`')),
+            Some(false)
+        );
         assert_eq!(
             quotable_value("work.session.end"),
             Some("work.session.end".to_string())
@@ -542,11 +559,14 @@ mod tests {
             dm_admission_request_body("코메토"),
             "에이전트를 이 대화에 들여도 될까요? · 「코메토」"
         );
+        // The agent's name is a person's choice of words: it is made inert before it is quoted, so
+        // a name that spells a markdown link cannot become one in a sentence the server wrote.
+        let evil = dm_admission_request_body("[x](https://evil.example)");
         assert_eq!(
-            dm_admission_request_body("[x](https://evil.example)"),
-            "에이전트를 이 대화에 들여도 될까요? · 「[x](https://evil.example)」",
-            "a plain line stays plain: the client draws a body as text, not markup"
+            evil,
+            "에이전트를 이 대화에 들여도 될까요? · 「［x］(https：//evil.example)」"
         );
+        assert!(!evil.contains("](") && !evil.contains("://"), "{evil}");
         for body in [
             tool_request_body("shell"),
             tool_request_body("Hermes"),
