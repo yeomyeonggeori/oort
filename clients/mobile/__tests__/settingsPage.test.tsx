@@ -485,6 +485,44 @@ describe('설정 페이지', () => {
     expect(screen.getByTestId('profile-theme-row')).toHaveTextContent(/다크/);
   });
 
+  it('링크 미리보기 행이 안쪽 장을 열고, 고른 것이 저장되며 행의 값이 바뀐다 — 기본은 작게다 (#4883)', async () => {
+    await openPage();
+    // 한 번도 열지 않은 폰: 키가 없고 값은 코어의 기본(작게)이다.
+    expect(mmkvStore.has(NON_SECRET_KEYS.linkPreview)).toBe(false);
+    expect(screen.getByTestId('settings-link-preview-row')).toHaveTextContent(/작게/);
+    expect(screen.queryByTestId('link-preview-rich')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('settings-link-preview-row'));
+    expect(screen.getByTestId('settings-sub-title')).toHaveTextContent('링크 미리보기');
+    // 세 낱말(웹과 같은 사전 키)이 이 순서로, 줄마다 설명이 붙어 서고 고른 것은 기본이다.
+    const choices = [
+      ['link-preview-compact', '작게'],
+      ['link-preview-rich', '크게'],
+      ['link-preview-off', '끄기'],
+    ] as const;
+    for (const [id, label] of choices) {
+      // 낱말이 줄 머리에 서고(그 뒤에 설명이 이어진다).
+      expect(screen.getByTestId(id)).toHaveTextContent(new RegExp(`^${label}`));
+      expect(screen.getByTestId(id).props.accessibilityRole).toBe('radio');
+    }
+    expect(screen.getByTestId('link-preview-compact').props.accessibilityState?.selected).toBe(true);
+    expect(screen.getByTestId('link-preview-rich').props.accessibilityState?.selected).toBe(false);
+    expect(screen.getByTestId('link-preview-rich')).toHaveTextContent(/큰 그림을 위에/);
+    expect(screen.getByTestId('link-preview-off')).toHaveTextContent(/카드는 그리지 않아요/);
+    expect(screen.getByText(/이 기기에서만 적용돼요/)).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('link-preview-rich'));
+    expect(mmkvStore.get(NON_SECRET_KEYS.linkPreview)).toBe('rich');
+    expect(screen.getByTestId('link-preview-rich').props.accessibilityState?.selected).toBe(true);
+    expect(screen.getByTestId('link-preview-compact').props.accessibilityState?.selected).toBe(false);
+
+    fireEvent.press(screen.getByTestId('link-preview-off'));
+    expect(mmkvStore.get(NON_SECRET_KEYS.linkPreview)).toBe('off');
+
+    fireEvent.press(screen.getByTestId('settings-back'));
+    expect(screen.getByTestId('settings-link-preview-row')).toHaveTextContent(/끄기/);
+  });
+
   it('열려 있던 로그아웃 확인은 안쪽 장·상태 시트를 다녀오면 접혀 있다 — 눌러 달라는 듯 서 있지 않는다', async () => {
     const page = await openPage();
     // 안쪽 장: 확인을 열고 → 테마 장 → ‹ 로 돌아오면 접혀 있다(옛 시트는 장을 갈아 끼워 저절로 닫혔다).
@@ -645,6 +683,7 @@ describe('머리의 자리 — 닫기 X 는 오른쪽 위, 안쪽 장의 ‹ 는
   // 안쪽 장이 하나 늘면 이 표가 타입 오류를 낸다 — 새 장의 머리도 같은 약속을 지켜야 한다.
   const SUB_PAGES: Record<SettingsSubPage, true> = {
     language: true,
+    linkPreview: true,
     usage: true,
     theme: true,
     deviceKey: true,

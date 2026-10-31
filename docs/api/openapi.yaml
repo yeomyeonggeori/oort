@@ -12116,8 +12116,16 @@ paths:
         developer token is refused (the route is not on its closed table).
 
         Following does not send a push by itself; the new-reply push for followed
-        threads is the `thread_reply` reason (ADR-0206 증보 1 F4–F6), served after
-        its notifier slice.
+        threads is the `thread_reply` reason (ADR-0206 증보 1 F4–F6, #4889 stage 2):
+        one push per new reply from someone else, held back while the follower is
+        reading the channel, silenced by a channel mute or Do Not Disturb, and a
+        single push per message when a mention or a DM already reaches them. Its
+        envelope's `thread-id` is the thread's root, which is where a tap goes.
+
+        A **new** follow starts its read position (`PUT …/read`) at the thread's
+        current last reply: following is "from now on", so replies already there are
+        not counted as unread. Following again or stopping never moves an existing
+        position.
       security:
         - bearerAuth: []
       parameters:
@@ -12202,6 +12210,92 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "404":
           description: Root absent from this channel (including cross-channel roots).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/messages/{rootId}/read:
+    put:
+      tags: [messages]
+      operationId: markThreadRead
+      summary: Say how far you have read a thread (읽은 위치).
+      description: >
+        #4889 stage 2 (owner 10-31 23:49). Moves the caller's read position in the thread
+        whose root is `rootId` **forward** to `last_read_reply_seq` (a reply's channel `seq`).
+        The stored position becomes `LEAST(requested, the thread's last reply seq)` and is
+        written only when that is greater than what is stored: it never moves backward, so
+        a late or stale signal from another device cannot rewind it, and it never passes the
+        last reply that exists, so a request cannot mark replies that have not been written
+        as read. The replies past the position that other people wrote are what
+        `ThreadRollup.unread_reply_count` counts.
+
+
+        This is the **only** thing that moves the position. A `GET …/replies` does not (the
+        inbox and the work panels read replies without anybody looking at them), and neither
+        does the channel's `PUT …/read-state` (reading the channel does not show the replies
+        inside its threads). A client that has the thread open sends it when it opens and
+        whenever a new reply is drawn.
+
+
+        It writes no row. For a thread the caller does not follow (no record, or stopped)
+        and for a DM thread it changes nothing and answers `{following: false}`, so a client
+        may send it without knowing whether it follows. A stopped follow's position does keep
+        up while the row exists, so re-following does not resurface what was read.
+
+
+        Guard order is the thread read's: workspace scope (403) → active channel membership
+        (403, the same bytes for a channel that does not exist) → the root (404 when absent or
+        in another channel, 400 when it is itself a reply; a deleted root is accepted). A
+        negative position is 400. Human bearer only: an agent bearer is refused whatever its
+        scopes, and a developer token is refused (the route is not on its closed table).
+        Personal state: nothing is broadcast, so other devices see the new position on their
+        next read of the channel history.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: rootId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ThreadReadRequest"
+      responses:
+        "200":
+          description: The caller's read position after the signal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadReadState"
+        "400":
+          description: >
+            Invalid id, a negative `last_read_reply_seq`, or the selected root is itself a
+            reply.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a channel member, workspace scope mismatch, or a non-human bearer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Root absent from this channel (including cross-channel roots).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422":
+          description: The body is not JSON, or `last_read_reply_seq` is missing or not an integer.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -25131,6 +25225,22 @@ components:
             #4877 — how many distinct members have replied (no upper bound). The
             faces in `participant_ids` are the newest `min(count, 3)` of them, so a
             client can write 「+2」 after the faces.
+        unread_reply_count:
+          type: integer
+          minimum: 0
+          description: >
+            #4889 stage 2 (owner 10-31 23:49) — **optional**, and per reader: how many
+            replies of this thread the reader has not read, never counting their own.
+            Present (`0` included) only on a history page read by a person who follows the
+            thread (`auto` or `followed`); absent for a thread they do not follow, for an
+            agent reader, and in every other place this summary appears. **The realtime
+            `thread.updated` payload never carries it**: that frame is one publication on
+            the channel for every member, so it cannot hold a number that differs per
+            person — a client that wants the live value re-reads the page, or keeps its
+            own count from the frame's `last_reply_seq` / `participant_ids[0]` and
+            resets it with `PUT …/messages/{rootId}/read`. An absent value is not zero:
+            the screen draws today's summary, with no emphasis and no 「새 답글」 chip.
+            The position behind it moves only on that explicit signal.
 
     MessagePage:
       type: object
@@ -25181,6 +25291,42 @@ components:
             The caller's follow state after the write: `true` after `PUT …/follow`,
             `false` after `DELETE …/follow`. An automatic and a direct follow are not
             told apart.
+
+    ThreadReadRequest:
+      type: object
+      required: [last_read_reply_seq]
+      properties:
+        last_read_reply_seq:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            The `seq` of the last reply the caller has read in this thread (typically the
+            newest reply they have drawn). snake_case like the channel's
+            `UpdateReadStateRequest`; the same spelling is used for this concept everywhere.
+
+    ThreadReadState:
+      type: object
+      required: [following]
+      properties:
+        following:
+          type: boolean
+          description: >
+            Whether the caller follows the thread (`auto` or `followed`). When `false` the
+            signal wrote nothing and the two numbers below are absent.
+        last_read_reply_seq:
+          type: integer
+          format: int64
+          description: >
+            The stored read position after the signal (never lower than before). Present only
+            when `following` is `true`.
+        unread_reply_count:
+          type: integer
+          minimum: 0
+          description: >
+            Replies other people wrote past the stored position (the caller's own are never
+            counted; deleted ones and non-text lines are not). Present only when `following`
+            is `true`; `0` means "follows, nothing new".
 
     WorkspaceMessageSearchHit:
       type: object

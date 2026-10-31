@@ -469,6 +469,14 @@ pub struct ThreadRollupDto {
     /// #4877 — every distinct member who has replied; the faces above are the newest
     /// `min(count, 3)` of them.
     pub participant_count: i32,
+    /// #4889 stage 2 (owner 10-31 23:49) — how many replies **the reader** has not read, never
+    /// counting their own. Present only on a page read for a reader who follows this thread
+    /// (`auto` or `followed`; `0` is "follows, nothing new"); absent for a thread they do not follow,
+    /// for an agent reader, and from every producer that is not a per-reader read — notably the
+    /// realtime `thread.updated` frame, which is one publication for the whole channel. snake_case
+    /// beside the keys above; the core's `threadRollup()` turns it into `unreadReplyCount`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread_reply_count: Option<i64>,
 }
 
 /// The quoted message carried beside a reply (ADR-0148 §3-2).
@@ -859,6 +867,27 @@ pub struct ThreadRepliesPage {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadFollowDto {
     pub following: bool,
+}
+
+/// `PUT …/messages/{root}/read` request (#4889 stage 2): how far the caller has read the thread.
+/// snake_case like the channel's `PUT read-state` body, and for the same reason one concept has one
+/// spelling on the wire (`last_read_reply_seq` / `unread_reply_count`, also the thread summary's).
+/// There is no member id: the cursor's owner is the bearer.
+#[derive(Debug, Deserialize)]
+pub struct ThreadReadRequestDto {
+    pub last_read_reply_seq: i64,
+}
+
+/// `PUT …/messages/{root}/read` response: the caller's read position **after** the write. For a thread
+/// the caller does not follow (no row, or stopped) it is `{following: false}` and nothing else — the
+/// signal wrote nothing and has no number to report.
+#[derive(Debug, Serialize)]
+pub struct ThreadReadStateDto {
+    pub following: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_read_reply_seq: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread_reply_count: Option<i64>,
 }
 
 /// Query string of the replies page. `limit` is lenient (a bad page size has a

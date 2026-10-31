@@ -421,6 +421,12 @@ export interface ThreadRollup {
    * 화면이 얼굴 뒤에 「+2」를 쓸 수 있다.
    */
   participantCount?: number;
+  /**
+   * #4889 2단계 — 보는 사람이 **따라가는** 스레드의 안 읽은 답글 수(본인 답글은 세지 않는다). 따라가지
+   * 않는 스레드·옛 서버·로컬로 세어 만든 롤업에는 없다 — 화면은 값이 없으면 지금 모양 그대로 그린다
+   * (강조도 「새 답글 M」 칩도 없이). 0은 「따라가고 있고 새 답글이 없다」다.
+   */
+  unreadReplyCount?: number;
 }
 
 /**
@@ -552,6 +558,12 @@ export interface Message {
     participant_ids?: string[];
     /** #4877 — 답글 단 서로 다른 멤버 수. 옛 서버는 보내지 않는다. */
     participant_count?: number;
+    /**
+     * #4889 2단계(owner 10-31 23:49) — **보는 사람 기준** 안 읽은 답글 수. 따라가는 스레드(자동·직접)의
+     * 요약에만 실리고(0이어도 실린다), 따라가지 않는 스레드·옛 서버·에이전트·실시간 `thread.updated`
+     * (채널 방송이라 사람마다 다른 값을 못 싣는다)에는 없다. 없다는 것은 「0」이 아니라 「말하지 않음」이다.
+     */
+    unread_reply_count?: number;
   };
   /**
    * #1166 — 이 반쪽 답을 쓴 run 이 **끝났다**고 서버가 말한 것.
@@ -593,6 +605,11 @@ export function threadRollup(message: Message): ThreadRollup | null {
   const participantIds = Array.isArray(raw.participant_ids)
     ? raw.participant_ids.filter((id): id is string => typeof id === "string")
     : [];
+  // #4889 2단계 — 값이 올바른 정수일 때만 옮긴다. 음수·소수·문자열은 「말하지 않음」으로 읽는다(깨진 한
+  // 값이 칩에 `NaN`·음수를 그리지 않게). 0은 올바른 값이다.
+  const unread = raw.unread_reply_count;
+  const unreadReplyCount =
+    typeof unread === "number" && Number.isInteger(unread) && unread >= 0 ? unread : undefined;
   return {
     replyCount: raw.reply_count,
     lastReplySeq: raw.last_reply_seq,
@@ -602,6 +619,7 @@ export function threadRollup(message: Message): ThreadRollup | null {
       typeof raw.participant_count === "number"
         ? raw.participant_count
         : participantIds.length,
+    ...(unreadReplyCount === undefined ? {} : { unreadReplyCount }),
   };
 }
 
@@ -3103,6 +3121,61 @@ export async function unfollowThread(
     { method: "DELETE" }
   );
   return { following: res.following === true };
+}
+
+/**
+ * 스레드 읽음 신호의 응답 — 쓴 뒤의 **효과값**이다(#4889 2단계). 따라가지 않는 스레드(행이 없음·그만 따라감)는
+ * `following: false` 이고 두 수가 없다.
+ */
+export interface ThreadReadState {
+  following: boolean;
+  /** 읽은 위치(마지막으로 읽은 답글의 seq). 앞으로만 간다. 따라가는 스레드에만 있다. */
+  lastReadReplySeq?: number;
+  /** 지금 안 읽은 답글 수(본인 답글 제외). 따라가는 스레드에만 있다. */
+  unreadReplyCount?: number;
+}
+
+interface WireThreadReadState {
+  following?: unknown;
+  last_read_reply_seq?: unknown;
+  unread_reply_count?: unknown;
+}
+
+function nonNegativeInt(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * 「여기까지 읽었어요」 — `PUT …/messages/{rootId}/read` (#4889 2단계, owner 10-31 23:49). 스레드를 열어 둔
+ * 화면이 보낸다: 열 때, 열려 있는 동안 새 답글이 그려질 때마다. 서버는 읽은 위치를
+ * `GREATEST(현재, LEAST(요청, 스레드의 마지막 답글 seq))` 로 **앞으로만** 올린다 — 뒤로 가는 요청은 무시되고
+ * 머리를 넘는 요청은 머리까지만 간다. 행을 만들지 않는다: 따라가지 않는 스레드에 보내면 아무것도 쓰지 않고
+ * `following: false` 가 돌아온다(보내도 해롭지 않아서 호출부가 따라가는지 먼저 알 필요가 없다).
+ *
+ * `GET …/replies` 는 읽음으로 치지 않는다 — 인박스·작업 세션 목록도 같은 읽기를 부르기 때문이다. 채널 읽음
+ * 커서(`updateReadState`)와도 별개다: 채널을 끝까지 읽어도 스레드 안의 답글은 읽은 것이 아니다.
+ * 채널 멤버가 아니면 403, 루트가 없으면 404, 루트가 답글이면 400. 옛 서버는 404·405 — 호출부가 「기능 없음」으로
+ * 보고 더 보내지 않는다.
+ */
+export async function markThreadRead(
+  workspaceId: string,
+  channelId: string,
+  rootId: string,
+  lastReadReplySeq: number
+): Promise<ThreadReadState> {
+  const res = await request<WireThreadReadState>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(
+      channelId
+    )}/messages/${encodeURIComponent(rootId)}/read`,
+    { method: "PUT", body: JSON.stringify({ last_read_reply_seq: lastReadReplySeq }) }
+  );
+  const position = nonNegativeInt(res.last_read_reply_seq);
+  const unread = nonNegativeInt(res.unread_reply_count);
+  return {
+    following: res.following === true,
+    ...(position === undefined ? {} : { lastReadReplySeq: position }),
+    ...(unread === undefined ? {} : { unreadReplyCount: unread }),
+  };
 }
 
 /**

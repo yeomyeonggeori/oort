@@ -490,10 +490,20 @@ async fn the_choice_and_the_summary_have_one_shape_on_the_wire() {
             "participant_count",
             "participant_ids",
             "reply_count",
+            // #4889 stage 2 — the one key that is the reader's own: the owner wrote the root, so the
+            // first reply made them a follower, and two of the three replies are somebody else's.
+            // The `thread.updated` frame (below) never carries it: it is one frame for the channel.
+            "unread_reply_count",
         ],
-        "the rollup keeps its snake_case keys and gains exactly the two summary keys: {thread}"
+        "the rollup keeps its snake_case keys, the two summary keys, and — for a follower — the \
+         reader's own unread count: {thread}"
     );
     assert_eq!(thread["reply_count"], json!(3));
+    assert_eq!(
+        thread["unread_reply_count"],
+        json!(2),
+        "the teammate's two replies are unread; the owner's own reply is never counted"
+    );
     assert_eq!(
         thread["participant_ids"],
         json!([teammate, owner]),

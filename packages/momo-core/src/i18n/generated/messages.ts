@@ -28,6 +28,24 @@ export const messageKeys = [
   "mobile.ios.microphoneUsage",
   "mobile.ios.photoLibraryAddUsage",
   "mobile.ios.photoLibraryUsage",
+  "mobile.linkCard.cancel",
+  "mobile.linkCard.copied",
+  "mobile.linkCard.copy",
+  "mobile.linkCard.copyFailed",
+  "mobile.linkCard.loading",
+  "mobile.linkCard.remove",
+  "mobile.linkCard.removeConfirm",
+  "mobile.linkCard.removeDetail",
+  "mobile.linkCard.removeFailed",
+  "mobile.linkCard.removePending",
+  "mobile.linkCard.removeTitle",
+  "mobile.linkCard.share",
+  "mobile.linkCard.sheetClose",
+  "mobile.linkCard.sheetTitle",
+  "mobile.linkPreview.compactHint",
+  "mobile.linkPreview.richHint",
+  "mobile.linkPreview.scopeNote",
+  "mobile.linkPreview.title",
   "mobile.locale.backToSettings",
   "mobile.locale.permissionNotice",
   "mobile.locale.saving",
@@ -84,6 +102,24 @@ export const argumentSpecs = {
   "mobile.ios.microphoneUsage": {},
   "mobile.ios.photoLibraryAddUsage": {},
   "mobile.ios.photoLibraryUsage": {},
+  "mobile.linkCard.cancel": {},
+  "mobile.linkCard.copied": {},
+  "mobile.linkCard.copy": {},
+  "mobile.linkCard.copyFailed": {},
+  "mobile.linkCard.loading": {},
+  "mobile.linkCard.remove": {},
+  "mobile.linkCard.removeConfirm": {},
+  "mobile.linkCard.removeDetail": {},
+  "mobile.linkCard.removeFailed": {},
+  "mobile.linkCard.removePending": {},
+  "mobile.linkCard.removeTitle": {},
+  "mobile.linkCard.share": {},
+  "mobile.linkCard.sheetClose": {},
+  "mobile.linkCard.sheetTitle": {},
+  "mobile.linkPreview.compactHint": {},
+  "mobile.linkPreview.richHint": {},
+  "mobile.linkPreview.scopeNote": {},
+  "mobile.linkPreview.title": {},
   "mobile.locale.backToSettings": {},
   "mobile.locale.permissionNotice": {},
   "mobile.locale.saving": {},
@@ -139,6 +175,24 @@ export interface MessageArgs {
   "mobile.ios.microphoneUsage": Record<string, never>;
   "mobile.ios.photoLibraryAddUsage": Record<string, never>;
   "mobile.ios.photoLibraryUsage": Record<string, never>;
+  "mobile.linkCard.cancel": Record<string, never>;
+  "mobile.linkCard.copied": Record<string, never>;
+  "mobile.linkCard.copy": Record<string, never>;
+  "mobile.linkCard.copyFailed": Record<string, never>;
+  "mobile.linkCard.loading": Record<string, never>;
+  "mobile.linkCard.remove": Record<string, never>;
+  "mobile.linkCard.removeConfirm": Record<string, never>;
+  "mobile.linkCard.removeDetail": Record<string, never>;
+  "mobile.linkCard.removeFailed": Record<string, never>;
+  "mobile.linkCard.removePending": Record<string, never>;
+  "mobile.linkCard.removeTitle": Record<string, never>;
+  "mobile.linkCard.share": Record<string, never>;
+  "mobile.linkCard.sheetClose": Record<string, never>;
+  "mobile.linkCard.sheetTitle": Record<string, never>;
+  "mobile.linkPreview.compactHint": Record<string, never>;
+  "mobile.linkPreview.richHint": Record<string, never>;
+  "mobile.linkPreview.scopeNote": Record<string, never>;
+  "mobile.linkPreview.title": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.permissionNotice": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
