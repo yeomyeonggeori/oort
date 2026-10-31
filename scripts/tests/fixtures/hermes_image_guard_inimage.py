@@ -11,6 +11,11 @@ listing Hermes itself reports), `tail` the last stderr/stdout lines when the gat
 
 Every gate run carries `HERMES_MEDIA_DELIVERY_STRICT=1` unless a scenario removes or changes it (#4820 C2b 3부: the gate
 requires it whenever the picture tool is exposed, exactly as the shipped templates provide it).
+
+The scenarios about the volume's `.env` (#4886) do not rest on what their author expects. Each one also feeds the same bytes to THIS
+image's own `hermes_cli.env_loader.load_hermes_dotenv` (infra/hermes/env_loader_oracle.py) and records what it applies in
+`lockgate["oracle"]`; `env-loader-oracle` does that for the whole named table and a few thousand seeded random inputs and compares
+the loader with the gate's functions. The judge in the shell script holds the gate to the loader's answer.
 """
 import hashlib
 import json
@@ -48,6 +53,49 @@ def read(path):
 def write(path, raw):
     with open(path, "wb") as handle:
         handle.write(raw)
+
+
+HERMES_INSTALL = "/opt/hermes"  # the image's own Hermes: its hermes_cli.env_loader is the REAL loader the oracle runs
+ORACLE_SEED, ORACLE_RANDOM = 4886, 4000  # the seeded random inputs of the `env-loader-oracle` scenario, on top of the named table
+
+
+def oracle_modules():
+    """(env_loader_oracle, this image's hermes_cli.env_loader, the gate's lockgate.py), imported into THIS process. The oracle and
+    lockgate.py come from /oort (read-only, no bytecode); the loader is the image's own, from /opt/hermes, not a copy and not a stand-in.
+    The loader imports some of its helpers lazily, on its first call: they are imported here, under the container's real environment,
+    because the oracle replaces `os.environ` around every load."""
+    sys.dont_write_bytecode = True
+    if HERMES_INSTALL not in sys.path:
+        sys.path.insert(0, HERMES_INSTALL)
+    if OORT not in sys.path:
+        sys.path.append(OORT)
+    import importlib
+    import importlib.util
+    oracle = importlib.import_module("env_loader_oracle")
+    env_loader = importlib.import_module("hermes_cli.env_loader")
+    for name in ("utils", "hermes_constants", "agent.secret_scope", "hermes_cli.config", "hermes_cli._early_recovery",
+                 "hermes_cli.managed_scope", "dotenv.main", "dotenv.variables"):
+        importlib.import_module(name)
+    spec = importlib.util.spec_from_file_location("lockgate_under_proof", os.path.join(OORT, "lockgate.py"))
+    lockgate = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lockgate)
+    return oracle, env_loader, lockgate
+
+
+def loader_evidence(raw):
+    """What this image's REAL loader applies for a volume `.env` holding `raw`: the judged names it ends with a forbidden value for.
+    The scenario's own expectation says what its author thinks; this says what Hermes does."""
+    oracle, env_loader, _lockgate = oracle_modules()
+    applied, _left, error = oracle.hermes_load(env_loader, raw)
+    return {"loader_file": os.path.realpath(env_loader.__file__), "error": error, "violated": sorted(oracle.violations(applied))}
+
+
+def with_loader(result, raw):
+    """A scenario's `(rc, record, tail)` with the real loader's verdict on the same bytes added to the record (`record["oracle"]`)."""
+    rc, record, tail = result
+    record = dict(record or {})
+    record["oracle"] = loader_evidence(raw)
+    return rc, record, tail
 
 
 STRICT_ENV = "HERMES_MEDIA_DELIVERY_STRICT"
@@ -144,8 +192,27 @@ def scenario_private_env():
 
 def scenario_bom_env_file():
     install()
-    write(os.path.join(DATA, ".env"), b"\xef\xbb\xbfHTTPS_PROXY=http://proxy.invalid:3128\nOPENROUTER_API_KEY=keep\n")
-    return run_gate()
+    raw = b"\xef\xbb\xbfHTTPS_PROXY=http://proxy.invalid:3128\nOPENROUTER_API_KEY=keep\n"
+    write(os.path.join(DATA, ".env"), raw)
+    return with_loader(run_gate(), raw)
+
+
+def scenario_bom_env_file_double():
+    """#4886 review: two byte order marks in front and a later line the loader's clean-up changes (a blank in front of it), so it
+    rewrites the file and the loader decodes the rewritten one again: it drops BOTH marks and applies the proxy."""
+    install()
+    raw = b"\xef\xbb\xbf\xef\xbb\xbfHTTPS_PROXY=http://proxy.invalid:3128\n OPENROUTER_API_KEY=keep\n"
+    write(os.path.join(DATA, ".env"), raw)
+    return with_loader(run_gate(), raw)
+
+
+def scenario_bom_env_file_kept():
+    """#4886 review, the other half: two marks and nothing for the clean-up to change. The loader keeps one in the first name, so it
+    applies nothing under the plain name, and the gate reads the name with the mark in it as well: it must not refuse."""
+    install()
+    raw = b"\xef\xbb\xbf\xef\xbb\xbfHERMES_SAFE_MODE=1\nOPENROUTER_API_KEY=keep\n"
+    write(os.path.join(DATA, ".env"), raw)
+    return with_loader(run_gate(), raw)
 
 
 SELF_ORIGIN = "https://oort.example.com"
@@ -218,7 +285,7 @@ ENV_SHAPES_APPLIED = (
     "export\tHERMES_ALLOW_PRIVATE_URLS=true",
     "'HERMES_ENABLE_PROJECT_PLUGINS'=1",
     'HERMES_YOLO_MODE="1" # c',
-    "HERMES_DASHBOARD=${OORT_PROOF_UNSET:-1}",
+    "export\tHERMES_DASHBOARD=true",
     "export\t'OORT_SELF_MEDIA_ORIGIN'=\"https://oort.example.com\" # c",
     "'HERMES_MEDIA_DELIVERY_STRICT'=1",
     'export  HTTPS_PROXY="http://proxy.invalid:3128" # c',
@@ -240,16 +307,52 @@ def scenario_env_shapes():
     reader did not see: inline comment, `export<TAB>`, a single-quoted name, a quoted value + comment, a `${NAME:-default}`. The REAL
     gate reads them with the REAL python-dotenv of this image; every name must be refused."""
     install()
-    write(os.path.join(DATA, ".env"), ("OPENROUTER_API_KEY=keep\n" + "\n".join(ENV_SHAPES_APPLIED) + "\n").encode("utf-8"))
-    return run_gate()
+    raw = ("OPENROUTER_API_KEY=keep\n" + "\n".join(ENV_SHAPES_APPLIED) + "\n").encode("utf-8")
+    write(os.path.join(DATA, ".env"), raw)
+    return with_loader(run_gate(), raw)
 
 
 def scenario_env_inert_shapes():
     """#4886: the other half: what the loader ignores (a comment, an unterminated quote, a name with no value, a lower-case name,
     junk after the closing quote, a name repeated with a harmless last value) must not stop the start."""
     install()
-    write(os.path.join(DATA, ".env"), ("OPENROUTER_API_KEY=keep\n" + "\n".join(ENV_SHAPES_IGNORED) + "\n").encode("utf-8"))
-    return run_gate()
+    raw = ("OPENROUTER_API_KEY=keep\n" + "\n".join(ENV_SHAPES_IGNORED) + "\n").encode("utf-8")
+    write(os.path.join(DATA, ".env"), raw)
+    return with_loader(run_gate(), raw)
+
+
+ENV_SHAPES_REFERENCES = (
+    "HERMES_SAFE_MODE=${HERMES_SUPERVISED_CHILD:-0}",
+    "HERMES_DASHBOARD=${OORT_PROOF_UNSET:-1}",
+    "HTTPS_PROXY=${HOME}",
+    "API_SERVER_KEY=${OORT_PROOF_UNSET:-" + "k" * 40 + "}",
+    "FAL_KEY=${OORT_PROOF_UNSET:-}",
+)
+
+
+def scenario_env_reference_shapes():
+    """#4886 review: a judged name given a `${...}` reference. Hermes resolves it in ITS environment, where the service slot has
+    variables the gate's shell has not (and HOME is the volume), so the gate cannot know the answer: it refuses the reference itself,
+    for every one of these, whatever the real loader happens to end with (the record carries that for the judge)."""
+    install()
+    raw = ("OPENROUTER_API_KEY=keep\n" + "\n".join(ENV_SHAPES_REFERENCES) + "\n").encode("utf-8")
+    write(os.path.join(DATA, ".env"), raw)
+    return with_loader(run_gate(), raw)
+
+
+def scenario_env_loader_oracle():
+    """#4886 review: the gate's reading of the volume's `.env` against Hermes' REAL loader, not against what its author expects. For
+    every input of the named table (each judged name on every spelling, reference and byte order mark shape) and a few thousand seeded
+    random ones, `hermes_cli.env_loader.load_hermes_dotenv` of this image runs on a copy in the service slot's environment, and the
+    names it ends with a forbidden value for must all be named by the gate's problems (also for the file as the loader leaves it); a
+    refusal beyond them must have a designed reason. Not a gate run: the record carries the counts, the judge in the shell script
+    holds them to thresholds so that an empty comparison cannot pass."""
+    install()  # the volume as the start commands leave it, like every other scenario: Hermes' modules are imported against it
+    oracle, env_loader, lockgate = oracle_modules()
+    summary = oracle.run(env_loader, lockgate, oracle.table_cases() + oracle.random_cases(ORACLE_SEED, ORACLE_RANDOM))
+    loader_file = os.path.realpath(env_loader.__file__)
+    summary.update({"loader_file": loader_file, "loader_sha256": sha(read(loader_file)), "env_parser": lockgate.env_parser()})
+    return (0 if summary["ok"] else 1), {"ok": summary["ok"], "problems": [], "oracle": summary}, None
 
 
 def scenario_hermes_home_other():

@@ -14,7 +14,10 @@
 #                            the canary alone (the verdict comes from behavior, not from the hash)
 #   not-enabled ............ plugins.enabled missing: the plugin is not loaded and the canary says so
 #   safe-mode .............. HERMES_SAFE_MODE=1 makes real Hermes skip every plugin: refused
-#   proxy / private / BOM .. the SSRF switches, in the environment, in config and in a BOM-prefixed volume .env
+#   proxy / private / BOM .. the SSRF switches, in the environment, in config and in a BOM-prefixed volume .env; two marks in front
+#                            with a line the loader's clean-up rewrites (bom-env-file-double: Hermes drops both marks, the gate must
+#                            refuse) and two marks with nothing to rewrite (bom-env-file-kept: Hermes keeps one in the name and applies
+#                            nothing, the gate must not refuse) (#4886 review)
 #   self-origin ............ the owner's 10-30 exception (#4820 C2a): OORT_SELF_MEDIA_ORIGIN set to a canonical origin boots,
 #                            and the canary accepts the one allowed address and refuses its 28 bypass variants through the
 #                            real Hermes dispatch path; unset keeps the exception off and adds one refused example
@@ -30,8 +33,16 @@
 #   media-policy ........... the premise, measured with Hermes' own validate_media_delivery_path: strict keeps an old file
 #                            outside Hermes' cache dirs from being delivered (`true` too), unset delivers it
 #   env-shapes / env-inert-shapes  (#4886) the volume's .env read like Hermes' loader, by the REAL gate with this image's own
-#                            python-dotenv: an inline comment, `export<TAB>`, a single-quoted name, a quoted value + comment and a
-#                            `${NAME:-default}` are refused; a comment, an unterminated quote, a name with no value and the like are not
+#                            python-dotenv: an inline comment, `export<TAB>`, a single-quoted name and a quoted value + comment are refused;
+#                            a comment, an unterminated quote, a name with no value and the like are not. The judge does not take the
+#                            author's word for which are which: the same bytes go through THIS image's real `hermes_cli.env_loader`, and the
+#                            names it applies must be exactly the ones the shapes are said to apply and all be named by the gate
+#   env-reference-shapes ... a judged name given `${...}` (a variable only Hermes' service slot has, HOME, an unset name with a default):
+#                            refused for the reference itself, whatever the real loader ends with (#4886 review)
+#   env-loader-oracle ...... the gate's reading against the REAL loader on the whole named table and 4000 seeded random inputs
+#                            (infra/hermes/env_loader_oracle.py): the loader runs on a copy in the service slot's environment; the names it
+#                            ends with a forbidden value for must all be named by the gate (also for the file as the loader leaves it),
+#                            a refusal beyond them needs a designed reason, and the judge demands thresholds so an empty comparison fails
 #   hermes-home-other ...... a HERMES_HOME that names another folder than the one the gate reads is refused (the image sets /opt/data)
 #   env-parser-parity ...... the input table and rule tables of infra/hermes/test_lockgate_env.py (and the two test files that
 #                            changed with it), run by this image's python with python-dotenv: the fallback parser and the real one
@@ -71,9 +82,9 @@ scenario() {  # scenario <name> -> $OUT/<name>.json (the RESULT line)
 }
 
 for name in healthy no-plugin edited-plugin widened-plugin not-enabled extra-image-gen-key security-private-urls \
-  safe-mode proxy-env private-env bom-env-file clean-env-file self-origin self-origin-bad self-origin-env-file \
-  prefix-only-plugin strict-missing strict-wrong strict-env-file media-policy env-shapes env-inert-shapes hermes-home-other \
-  env-parser-parity; do
+  safe-mode proxy-env private-env bom-env-file bom-env-file-double bom-env-file-kept clean-env-file self-origin self-origin-bad \
+  self-origin-env-file prefix-only-plugin strict-missing strict-wrong strict-env-file media-policy env-shapes env-inert-shapes \
+  env-reference-shapes hermes-home-other env-parser-parity env-loader-oracle; do
   scenario "$name"
 done
 
@@ -165,9 +176,12 @@ docker inspect -f '{{.State.Running}}' "$NAME" >"$OUT/gateway-boot.running" 2>&1
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 
 # --- judge ---------------------------------------------------------------------------------------------------------------
-python3 - "$OUT" "$EXPECTED_DOTENV" <<'PY'
+python3 - "$OUT" "$EXPECTED_DOTENV" "$ROOT" <<'PY'
 import json, sys
-out, expected_dotenv = sys.argv[1], sys.argv[2]
+out, expected_dotenv, root = sys.argv[1], sys.argv[2], sys.argv[3]
+sys.dont_write_bytecode = True
+sys.path.insert(0, root + "/infra/hermes")
+import env_loader_oracle as oracle  # pure functions: the reading of the gate's problems, the same as the oracle scenario uses
 failures = []
 
 
@@ -187,6 +201,28 @@ def expect(name, rc, fragments=(), absent=()):
     for fragment in absent:
         if fragment in text:
             failures.append("%s: problem text unexpectedly has %r" % (name, fragment))
+    return r
+
+
+LOADER_PREFIX = "/opt/hermes/hermes_cli/env_loader"
+
+
+def against_loader(name, rc, fragments=(), absent=(), violated=None):
+    """`expect` plus the verdict of this image's REAL loader on the very same file (the scenario recorded it, #4886 review): it has to
+    come from the image's own loader, every name the loader ends with a forbidden value for has to be named by a gate problem, and
+    where the scenario says which names those are (`violated`) the loader has to agree: a shape its author calls applied that the
+    loader ignores is a wrong table, not a pass."""
+    r = expect(name, rc, fragments, absent)
+    o = (r["lockgate"] or {}).get("oracle") or {}
+    if not str(o.get("loader_file", "")).startswith(LOADER_PREFIX):
+        failures.append("%s: the loader's verdict is not from this image's own hermes_cli.env_loader: %r" % (name, o.get("loader_file")))
+    if o.get("error"):
+        failures.append("%s: the real loader raised %s on this file" % (name, o["error"]))
+    named, _ = oracle.named((r["lockgate"] or {}).get("problems", []))
+    for missing in sorted(set(o.get("violated", [])) - named):
+        failures.append("%s: the real loader ends with a forbidden %s but no gate problem names it" % (name, missing))
+    if violated is not None and sorted(o.get("violated", [])) != sorted(violated):
+        failures.append("%s: the real loader applies %r, the scenario says %r" % (name, sorted(o.get("violated", [])), sorted(violated)))
     return r
 
 
@@ -221,7 +257,10 @@ expect("security-private-urls", 3, ["security.allow_private_urls"])
 expect("safe-mode", 3, ["HERMES_SAFE_MODE", "canary:"])
 expect("proxy-env", 3, ["HTTPS_PROXY"], absent=["proxy.invalid"])
 expect("private-env", 3, ["HERMES_ALLOW_PRIVATE_URLS"])
-expect("bom-env-file", 3, ["the volume's .env sets HTTPS_PROXY"], absent=["proxy.invalid"])
+against_loader("bom-env-file", 3, ["the volume's .env sets HTTPS_PROXY"], absent=["proxy.invalid"], violated=["HTTPS_PROXY"])
+# two marks and a rewrite: the loader drops both and applies the proxy; two marks and nothing to rewrite: it keeps one in the name
+against_loader("bom-env-file-double", 3, ["the volume's .env sets HTTPS_PROXY"], absent=["proxy.invalid"], violated=["HTTPS_PROXY"])
+against_loader("bom-env-file-kept", 0, violated=[])
 expect("clean-env-file", 0)
 so = expect("self-origin", 0)
 so_canary = (((so["lockgate"] or {}).get("image_guard") or {}).get("canary")) or {}
@@ -242,20 +281,52 @@ expect("strict-env-file", 3, ["the volume's .env sets HERMES_MEDIA_DELIVERY_STRI
 # #4886: the volume's .env as Hermes' loader reads it. The REAL gate, the image's python-dotenv: every spelling the loader applies
 # is refused by name (never with its value), what it ignores is not, a HERMES_HOME that is not the folder read is refused, and the
 # tables of the changed test files pass in this image with python-dotenv present (nothing skipped).
-shapes = expect("env-shapes", 3, [
+shapes = against_loader("env-shapes", 3, [
     "the volume's .env enables HERMES_SAFE_MODE", "the volume's .env enables HERMES_ALLOW_PRIVATE_URLS",
     "the volume's .env enables HERMES_ENABLE_PROJECT_PLUGINS", "the volume's .env enables HERMES_YOLO_MODE",
     "the volume's .env enables HERMES_DASHBOARD", "the volume's .env sets OORT_SELF_MEDIA_ORIGIN",
     "the volume's .env sets HERMES_MEDIA_DELIVERY_STRICT", "the volume's .env sets HTTPS_PROXY"],
-    absent=["proxy.invalid", "oort.example.com"])
+    absent=["proxy.invalid", "oort.example.com"],
+    violated=["HERMES_SAFE_MODE", "HERMES_ALLOW_PRIVATE_URLS", "HERMES_ENABLE_PROJECT_PLUGINS", "HERMES_YOLO_MODE", "HERMES_DASHBOARD",
+              "OORT_SELF_MEDIA_ORIGIN", "HERMES_MEDIA_DELIVERY_STRICT", "HTTPS_PROXY"])
 if ((shapes["lockgate"] or {}).get("env_parser") or {}).get("impl") != "python-dotenv":
     failures.append("env-shapes: the gate did not use the image's python-dotenv: %r" % ((shapes["lockgate"] or {}).get("env_parser"),))
-expect("env-inert-shapes", 0)
+against_loader("env-inert-shapes", 0, violated=[])
+# a judged name given a reference: refused for the reference itself (all five), whatever the real loader ends with. The loader
+# resolves them in the service slot's environment (HERMES_SUPERVISED_CHILD=1, HOME=the volume): three of the five end forbidden there.
+against_loader("env-reference-shapes", 3,
+               ["the volume's .env sets %s through a reference" % name for name in
+                ("HERMES_SAFE_MODE", "HERMES_DASHBOARD", "HTTPS_PROXY", "API_SERVER_KEY", "FAL_KEY")],
+               absent=["k" * 40],
+               violated=["HERMES_SAFE_MODE", "HERMES_DASHBOARD", "HTTPS_PROXY"])
 expect("hermes-home-other", 3, ["HERMES_HOME is not the folder this gate reads"], absent=["not-the-volume"])
 expect("env-parser-parity", 0)
 unit = ((result("env-parser-parity")["lockgate"] or {}).get("unittest")) or {}
 if unit.get("rc") != 0 or not isinstance(unit.get("ran"), int) or unit["ran"] < 100 or unit.get("skipped"):
     failures.append("env-parser-parity: the changed tests did not all run and pass here with python-dotenv: %r" % (unit,))
+# #4886 review: the gate against this image's REAL loader on the named table and seeded random inputs. A comparison of nothing against
+# nothing passes, so the judge also demands that it was not empty: enough inputs, enough the loader applied, enough both left alone,
+# every judged name violated and caught at least once, every designed reason for a refusal beyond the loader exercised.
+expect("env-loader-oracle", 0)
+orc = (result("env-loader-oracle")["lockgate"] or {}).get("oracle") or {}
+if not str(orc.get("loader_file", "")).startswith(LOADER_PREFIX):
+    failures.append("env-loader-oracle: the loader is not this image's own hermes_cli.env_loader: %r" % (orc.get("loader_file"),))
+for kind in ("missed", "missed_after", "unexplained", "wrong_labels"):
+    if orc.get(kind) != 0:
+        failures.append("env-loader-oracle: %s = %r (examples %r)" % (kind, orc.get(kind), (orc.get("examples") or {}).get(kind)))
+if (orc.get("env_parser") or {}).get("version") != expected_dotenv:
+    failures.append("env-loader-oracle: not this image's python-dotenv %s: %r" % (expected_dotenv, orc.get("env_parser")))
+for key, floor in (("cases", 4000), ("violating", 1500), ("clean", 1000)):
+    if not isinstance(orc.get(key), int) or orc[key] < floor:
+        failures.append("env-loader-oracle: only %r %s (at least %d wanted): the comparison was too thin" % (orc.get(key), key, floor))
+if orc.get("detected") != sorted(oracle.JUDGED_KEYS):
+    failures.append("env-loader-oracle: judged names the loader violated and the gate named: %r (want %r)" % (orc.get("detected"), sorted(oracle.JUDGED_KEYS)))
+if (orc.get("needless") or {}).get("reference", 0) < 100:
+    failures.append("env-loader-oracle: the reference shapes were barely exercised: %r" % (orc.get("needless"),))
+if set(orc.get("needless") or {}) - {"reference", "mark in a proxy name", "name-only rule"}:
+    failures.append("env-loader-oracle: refusals beyond the loader with no designed reason: %r" % (orc.get("needless"),))
+if not isinstance(orc.get("hermes_errors"), int) or orc["hermes_errors"] > 0.02 * (orc.get("cases") or 1):
+    failures.append("env-loader-oracle: the loader raised on %r inputs: it was not run as Hermes runs it" % (orc.get("hermes_errors"),))
 # the premise, from Hermes' own validate_media_delivery_path in the pinned image: strict (and `true`) keeps an old file outside
 # Hermes' cache dirs from being delivered, a file in a cache dir still goes out; unset delivers the outside file too.
 policy = ((result("media-policy")["lockgate"] or {}).get("media_policy")) or {}
@@ -328,8 +399,8 @@ if failures:
     sys.exit(1)
 print("OK: %d in-image scenarios (gate) + 6 start-command runs + the live gateway boot" % len(
     ["healthy", "no-plugin", "edited-plugin", "widened-plugin", "not-enabled", "extra-image-gen-key", "security-private-urls",
-     "safe-mode", "proxy-env", "private-env", "bom-env-file", "clean-env-file", "self-origin", "self-origin-bad",
-     "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy",
-     "env-shapes", "env-inert-shapes", "hermes-home-other", "env-parser-parity"]))
+     "safe-mode", "proxy-env", "private-env", "bom-env-file", "bom-env-file-double", "bom-env-file-kept", "clean-env-file", "self-origin",
+     "self-origin-bad", "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy",
+     "env-shapes", "env-inert-shapes", "env-reference-shapes", "hermes-home-other", "env-parser-parity", "env-loader-oracle"]))
 PY
 say "PASS (evidence in $OUT)"
