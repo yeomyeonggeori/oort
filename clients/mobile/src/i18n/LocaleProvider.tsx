@@ -1,4 +1,4 @@
-import {SAFE_MESSAGE} from '@momo/core/i18n';
+import {SAFE_MESSAGE} from '@momo/core/i18n/service';
 import React, {createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 import {OortLoader} from '../design/brand/OortLoader';
