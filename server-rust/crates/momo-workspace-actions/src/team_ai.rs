@@ -212,6 +212,42 @@ pub async fn read_roles_in_tx(
     Ok(read_state_in_tx(conn, workspace_id).await?.roles)
 }
 
+/// How a decision holds the settings row while it judges a helper's card (B13-I5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsRowLock {
+    /// `FOR SHARE`: the read waits for a settings write that is in flight, and a settings write
+    /// that comes later waits for this decision to end — so "the bundle was on when this card was
+    /// judged" is still true when the card runs. It does not block the inserts whose foreign key
+    /// reads the row (messages, audit), which only conflict with `FOR UPDATE`.
+    Share,
+    /// `FOR UPDATE`, for a card whose own executor takes the row this way right after. Holding it
+    /// `FOR SHARE` first would make that an upgrade, and two decisions that both hold the share
+    /// lock and then ask for the update would wait for each other forever.
+    Update,
+}
+
+/// [`read_roles_in_tx`] for a **decision**: the switches as they are now, with the settings row
+/// held (see [`SettingsRowLock`]) until the transaction ends. A row that cannot be read answers
+/// "every bundle off" — the refusing side.
+pub async fn read_roles_locked_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    lock: SettingsRowLock,
+) -> Result<TeamAiRoles, DbError> {
+    let sql = match lock {
+        SettingsRowLock::Share => "SELECT settings FROM workspace WHERE id = $1 FOR SHARE",
+        SettingsRowLock::Update => "SELECT settings FROM workspace WHERE id = $1 FOR UPDATE",
+    };
+    let settings: Option<Value> = sqlx::query_scalar(sql)
+        .bind(workspace_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    Ok(settings
+        .as_ref()
+        .map(TeamAiRoles::from_settings)
+        .unwrap_or_else(TeamAiRoles::none_on))
+}
+
 // ---------------------------------------------------------------------------
 // provisioning (D1, D8)
 // ---------------------------------------------------------------------------

@@ -9,16 +9,17 @@
 //!   writes [`roles_changed_audit`];
 //! * the card `team_ai.roles.set` (an admin approves in a chat) — [`set_role_in_tx`], which is
 //!   the same merge and the same write, plus the stale-card and prerequisite checks;
-//! * the onboarding role step (#4945) — [`record_notice_in_tx`] for the consent record.
+//! * the onboarding role step and the settings screen (#4945) — [`record_notice_in_tx`] for the
+//!   consent record (a card's own record is [`card_notice_audit`]'s, and needs its approval).
 //!
 //! ## The consent record (「어떤 내용이 팀 AI 공급자에게 가는지」)
 //!
 //! When an admin turns `files` or `memory` **on**, the card or the onboarding step has shown
-//! them the sentence that says what goes to the team's AI provider. [`notice_audit`] is the
-//! record: who (actor), when (the row's own time), which wording
-//! ([`momo_agent::team_ai_roles::NOTICE_VERSION`]). It is an `audit_log` row — no new table —
-//! and it never gates anything: the bundles are on from the start (owner answer 2026-11-01), so
-//! a missing record blocks nothing.
+//! them the sentence that says what goes to the team's AI provider. The record
+//! ([`card_notice_audit`] for a card, [`record_notice_in_tx`] for a screen) says who (actor),
+//! when (the row's own time) and which wording ([`momo_agent::team_ai_roles::NOTICE_VERSION`]).
+//! It is an `audit_log` row — no new table — and it never gates anything: the bundles are on
+//! from the start (owner answer 2026-11-01), so a missing record blocks nothing.
 
 use momo_agent::team_ai_roles::{self as roles, TeamAiRoles};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -80,37 +81,61 @@ pub fn roles_changed_audit(
     }
 }
 
-/// Where the admin was shown the notice.
+/// The screens that show the 「공급자로 가는 내용」 line outside a card. **This is the whole set a
+/// screen may name** — a card's consent is [`card_notice_audit`]'s, which needs the approval.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NoticeVia {
-    /// The `team_ai.roles.set` card that turns the bundle on.
-    Card,
+pub enum ScreenNotice {
     /// The onboarding role step (#4945).
     Onboarding,
     /// The settings screen's role row (#4945).
     Settings,
 }
 
-impl NoticeVia {
+impl ScreenNotice {
     pub fn as_str(self) -> &'static str {
         match self {
-            NoticeVia::Card => "card",
-            NoticeVia::Onboarding => "onboarding",
-            NoticeVia::Settings => "settings",
+            ScreenNotice::Onboarding => "onboarding",
+            ScreenNotice::Settings => "settings",
         }
     }
 }
 
-/// The consent record for the bundles in `bundle_ids` that carry a notice, or `None` when none
-/// does. **One shape for every writer**: the card's executor hands this entry to the decision's
-/// shared audit tail, and [`record_notice_in_tx`] writes it for the onboarding step.
-pub fn notice_audit(
+/// Where the admin was shown the notice, with what proves it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoticeSource {
+    /// The `team_ai.roles.set` card that turns the bundle on — and the approval that is the
+    /// consent. There is no card source without one.
+    Card {
+        approval_id: Uuid,
+    },
+    Screen(ScreenNotice),
+}
+
+impl NoticeSource {
+    fn via(self) -> &'static str {
+        match self {
+            NoticeSource::Card { .. } => "card",
+            NoticeSource::Screen(screen) => screen.as_str(),
+        }
+    }
+
+    fn approval_id(self) -> Option<String> {
+        match self {
+            NoticeSource::Card { approval_id } => Some(approval_id.to_string()),
+            NoticeSource::Screen(_) => None,
+        }
+    }
+}
+
+/// The one shape of the consent record, for every writer: the bundles in `bundle_ids` that carry
+/// a notice, or `None` when none does. Private, so a record that says it came from a card cannot
+/// be built without the approval ([`card_notice_audit`]).
+fn notice_entry(
     workspace_id: Uuid,
     actor: Uuid,
     via_token_id: Option<Uuid>,
     bundle_ids: &[&str],
-    via: NoticeVia,
-    approval_id: Option<Uuid>,
+    source: NoticeSource,
 ) -> Option<AuditEntry> {
     let bundles: Vec<&'static str> = roles::SWITCHABLE_BUNDLES
         .iter()
@@ -130,24 +155,55 @@ pub fn notice_audit(
                 json!({
                     "bundles": bundles,
                     "notice_version": roles::NOTICE_VERSION,
-                    "via": via.as_str(),
-                    "approval_id": approval_id.map(|id| id.to_string()),
+                    "via": source.via(),
+                    "approval_id": source.approval_id(),
                 }),
             ),
     )
 }
 
-/// Write the consent record in the caller's transaction (the onboarding step calls this). Returns
-/// whether a row was written — `false` when none of `bundle_ids` carries a notice.
+/// The consent record of the approval of a `team_ai.roles.set` card that turns a noticed bundle
+/// on, or `None` when none of `bundle_ids` carries a notice. The executor hands the entry to the
+/// decision's shared audit tail. **The approval's id is required by the type**: this is the only
+/// way to build a record that says `via: card`.
+pub fn card_notice_audit(
+    workspace_id: Uuid,
+    actor: Uuid,
+    via_token_id: Option<Uuid>,
+    bundle_ids: &[&str],
+    approval_id: Uuid,
+) -> Option<AuditEntry> {
+    notice_entry(
+        workspace_id,
+        actor,
+        via_token_id,
+        bundle_ids,
+        NoticeSource::Card { approval_id },
+    )
+}
+
+/// Write the consent record of a **screen** (onboarding or settings, #4945) in the caller's
+/// transaction. Returns whether a row was written — `false` when none of `bundle_ids` carries a
+/// notice. A card's consent is not writable from here: it is the approval's own record.
+///
+/// The caller owns the judgement that `actor` is the signed-in admin who was shown the line — this
+/// function records what it is told, like every audit writer; the screens' route gates on the
+/// workspace admin before it calls.
 pub async fn record_notice_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     actor: Uuid,
     via_token_id: Option<Uuid>,
     bundle_ids: &[&str],
-    via: NoticeVia,
+    screen: ScreenNotice,
 ) -> Result<bool, DbError> {
-    let Some(entry) = notice_audit(workspace_id, actor, via_token_id, bundle_ids, via, None) else {
+    let Some(entry) = notice_entry(
+        workspace_id,
+        actor,
+        via_token_id,
+        bundle_ids,
+        NoticeSource::Screen(screen),
+    ) else {
         return Ok(false);
     };
     write_audit(conn, &entry).await?;
@@ -328,34 +384,39 @@ mod tests {
         }
     }
 
-    /// Only a bundle with a notice is recorded, and the record names the wording it quotes.
+    /// Only a bundle with a notice is recorded, and the record names the wording it quotes. A card's
+    /// record carries its approval; a screen's carries none.
     #[test]
     fn the_notice_record_covers_only_bundles_with_a_notice() {
         let workspace = Uuid::from_u128(1);
         let admin = Uuid::from_u128(2);
-        assert!(notice_audit(
+        let approval = Uuid::from_u128(9);
+        assert!(card_notice_audit(
             workspace,
             admin,
             None,
             &[roles::WORKSPACE_ADMIN, roles::CODE, roles::INVITE_ACCESS],
-            NoticeVia::Card,
-            None
+            approval
         )
         .is_none());
-        let entry = notice_audit(
+        let screen = notice_entry(
             workspace,
             admin,
             None,
             &[roles::MEMORY, roles::FILES, roles::CODE],
-            NoticeVia::Onboarding,
-            None,
+            NoticeSource::Screen(ScreenNotice::Onboarding),
         )
         .expect("files and memory carry a notice");
-        assert_eq!(entry.action, "team_ai.roles.notice_shown");
-        assert_eq!(entry.actor_member_id, Some(admin));
-        assert_eq!(entry.detail["bundles"], json!(["files", "memory"]));
-        assert_eq!(entry.detail["notice_version"], roles::NOTICE_VERSION);
-        assert_eq!(entry.detail["via"], "onboarding");
+        assert_eq!(screen.action, "team_ai.roles.notice_shown");
+        assert_eq!(screen.actor_member_id, Some(admin));
+        assert_eq!(screen.detail["bundles"], json!(["files", "memory"]));
+        assert_eq!(screen.detail["notice_version"], roles::NOTICE_VERSION);
+        assert_eq!(screen.detail["via"], "onboarding");
+        assert_eq!(screen.detail["approval_id"], Value::Null);
+        let card = card_notice_audit(workspace, admin, None, &[roles::FILES], approval)
+            .expect("a card that turns files on");
+        assert_eq!(card.detail["via"], "card");
+        assert_eq!(card.detail["approval_id"], approval.to_string());
     }
 
     #[test]
@@ -378,6 +439,28 @@ mod tests {
         let mut foreign = right.clone();
         foreign["role_labels"] = json!({"owner": "마스터"});
         assert!(!only_that_switch_moved(&existing, &foreign, "memory"));
+    }
+
+    /// Every tool a bundle owns must be a tool the helper can be offered: the request's tool list
+    /// is filtered by these names, and a name that matches no tool filters nothing. (Today's table
+    /// owns none, so this is the guard the first slice that adds one runs into.)
+    #[test]
+    fn every_bundle_tool_name_is_a_tool_the_helper_can_be_offered() {
+        let mut known: Vec<&str> = crate::team_ai_tools::read_tool_definitions()
+            .iter()
+            .map(|tool| tool.name)
+            .collect();
+        known.push(momo_agent::tools::WORKSPACE_ACTION_PROPOSE);
+        known.extend(
+            momo_agent::tools::catalog_definitions()
+                .iter()
+                .map(|tool| tool.name),
+        );
+        assert_eq!(
+            roles::unknown_tool_names(&roles::BUNDLES, &known),
+            Vec::<&str>::new(),
+            "a bundle's tool_names names a tool the helper is never offered"
+        );
     }
 
     /// `momo-settings` cannot see `momo-agent`, so the six bundle names and the key are written in

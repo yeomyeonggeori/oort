@@ -2127,7 +2127,7 @@ async fn execute_workspace_action(
     //
     // After the subject gates above on purpose: a decider who is not eligible has been turned
     // away before this, so the answer below is never an oracle for a switch they may not read.
-    if let Some(refused) = team_ai_card_gate_in_tx(conn, approval, input, action.id, now).await? {
+    if let Some(refused) = team_ai_card_gate_in_tx(conn, approval, input, action, now).await? {
         return Ok(Ok(refused));
     }
 
@@ -2971,46 +2971,52 @@ async fn execute_channel_create(
 /// The team AI's role bundles, judged **again** at the decision, for a card the helper raised
 /// (`payload.via_ai.source = "team_ai"` — written by the server, never by the agent).
 ///
-/// Two things can have changed since the card was drawn, and both end the card the same way
-/// (`action_args_invalid`, the approval stays pending and can still be rejected):
+/// Three things can have changed since the card was drawn — or never been true of it — and all
+/// end the card the same way (`action_args_invalid`, the approval stays pending and can still be
+/// rejected):
 ///
 /// * the bundle that owns the action was switched **off** (B13-I5) — whether the card was drawn
-///   while it was on, or came in sideways with the bundle already off;
+///   while it was on, or came in sideways with the bundle already off. The settings row is held
+///   while this is judged ([`team_ai_bundle_allows_in_tx`]), so a switch that is being turned off
+///   is waited for, and one that comes after waits for this decision;
 /// * for a sensitive action (`team_ai.roles.set`, B4-3): the request that raised it had read
 ///   something, so text it read may have been the one asking. A card that does not say it
-///   read nothing (no `tools`, no `web_searches`) is judged as one that did.
+///   read nothing (no `tools`, no `web_searches`) is judged as one that did;
+/// * provenance: an action only the helper may raise (`Proposers::TeamAiOnly`) must carry the
+///   helper's mark — a card without it is not one the helper raised — and a card that does carry
+///   it must be for an action on the helper's own list.
 ///
-/// A card from any other door (the Agent Port) is not the helper's and is not touched here. The
-/// refused attempt is an `action.refused` audit row naming the reason; the receipt reuses the
-/// existing word, so the client vocabulary does not grow.
+/// A card of any other action from any other door (the Agent Port) is not the helper's and is
+/// not touched here. The refused attempt is an `action.refused` audit row naming the reason; the
+/// receipt reuses the existing word, so the client vocabulary does not grow.
 async fn team_ai_card_gate_in_tx(
     conn: &mut PgConnection,
     approval: &LockedApproval,
     input: &DecisionInput<'_>,
-    action_id: &str,
+    action: &momo_agent::actions::WorkspaceAction,
     now: chrono::DateTime<Utc>,
 ) -> Result<Option<Decision>, momo_db::DbError> {
-    let Some(via) = approval.payload.get("via_ai") else {
-        return Ok(None);
-    };
-    if via.get("source").and_then(Value::as_str) != Some("team_ai") {
-        return Ok(None);
-    }
-    let reason = if !momo_workspace_actions::team_ai::read_roles_in_tx(conn, input.workspace_id)
-        .await?
-        .action_allowed(action_id)
-    {
-        Some((
-            "team_ai_role_off",
-            "the helper role that raised this card is switched off",
-        ))
-    } else if momo_agent::team_ai_roles::is_sensitive_action(action_id) && !card_read_nothing(via) {
-        Some((
-            "team_ai_read_context",
-            "the helper raised this card after reading workspace text",
-        ))
-    } else {
-        None
+    let action_id = action.id;
+    let reason = match card_provenance(approval.payload.get("via_ai"), action) {
+        CardProvenance::NotThisGates => None,
+        CardProvenance::Refused(message) => Some(("team_ai_provenance", message)),
+        CardProvenance::Helper(via) => {
+            if !team_ai_bundle_allows_in_tx(conn, input.workspace_id, action_id).await? {
+                Some((
+                    "team_ai_role_off",
+                    "the helper role that raised this card is switched off",
+                ))
+            } else if momo_agent::team_ai_roles::is_sensitive_action(action_id)
+                && !card_read_nothing(via)
+            {
+                Some((
+                    "team_ai_read_context",
+                    "the helper raised this card after reading workspace text",
+                ))
+            } else {
+                None
+            }
+        }
     };
     let Some((code, message)) = reason else {
         return Ok(None);
@@ -3046,6 +3052,80 @@ async fn team_ai_card_gate_in_tx(
     )))
 }
 
+/// What a card's `via_ai` says about who raised it, against the action it names.
+enum CardProvenance<'a> {
+    /// Not the helper's card, and not an action only the helper may raise: not this gate's.
+    NotThisGates,
+    /// The helper's card, for an action on the helper's own list: judge the bundles and the
+    /// read rule (`via` is the card's `via_ai`).
+    Helper(&'a Value),
+    /// The mark and the action disagree.
+    Refused(&'static str),
+}
+
+/// Judge the mark. The helper's cards carry `via_ai.source = "team_ai"` (written by the server);
+/// the Agent Port refuses the ids that only the helper may raise
+/// (`Proposers::TeamAiOnly`) — so a card of one of those without the mark is not a card the helper
+/// raised, and a card with the mark must be for an action the helper is allowed to raise.
+fn card_provenance<'a>(
+    via: Option<&'a Value>,
+    action: &momo_agent::actions::WorkspaceAction,
+) -> CardProvenance<'a> {
+    let marked_as_helper = via
+        .and_then(|via| via.get("source"))
+        .and_then(Value::as_str)
+        == Some("team_ai");
+    match via {
+        Some(via) if marked_as_helper => {
+            if momo_workspace_actions::team_ai::is_team_ai_action(action.id) {
+                CardProvenance::Helper(via)
+            } else {
+                CardProvenance::Refused("the helper may not raise this action")
+            }
+        }
+        _ if action.proposers == momo_agent::actions::Proposers::TeamAiOnly => {
+            CardProvenance::Refused(
+                "this action is the helper's alone, and the card does not say the helper raised it",
+            )
+        }
+        _ => CardProvenance::NotThisGates,
+    }
+}
+
+/// Is the bundle that owns `action_id` on **now**, with the settings row held until this decision
+/// ends? An action no bundle owns (`team_ai.roles.set`) has nothing for a switch to say, so the row
+/// is neither read nor locked here — its executor takes the row itself, `FOR UPDATE`.
+async fn team_ai_bundle_allows_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    action_id: &str,
+) -> Result<bool, momo_db::DbError> {
+    if momo_agent::team_ai_roles::bundle_of_action(action_id).is_none() {
+        return Ok(true);
+    }
+    Ok(momo_workspace_actions::team_ai::read_roles_locked_in_tx(
+        conn,
+        workspace_id,
+        settings_row_lock_for(action_id),
+    )
+    .await?
+    .action_allowed(action_id))
+}
+
+/// How the gate holds the settings row for `action_id`'s card: `FOR UPDATE` when that card's own
+/// executor takes the row `FOR UPDATE` right after (`workspace.settings.update` merges the bag in
+/// process), so the gate is not a share lock the executor then has to upgrade; `FOR SHARE` for every
+/// other card. The one executor named here is the only one of the helper's bundle cards that locks
+/// or writes the `workspace` row — a card whose executor starts to must be named here too.
+fn settings_row_lock_for(action_id: &str) -> momo_workspace_actions::team_ai::SettingsRowLock {
+    use momo_workspace_actions::team_ai::SettingsRowLock;
+    if action_id == momo_agent::actions::ACTION_WORKSPACE_SETTINGS_UPDATE {
+        SettingsRowLock::Update
+    } else {
+        SettingsRowLock::Share
+    }
+}
+
 /// Does the card's `via_ai` say its request read nothing? Only an explicit empty `tools` list and
 /// a zero `web_searches` do — a missing or malformed field is not "nothing".
 fn card_read_nothing(via: &Value) -> bool {
@@ -3074,7 +3154,7 @@ async fn execute_team_ai_roles_set(
     before: bool,
 ) -> Result<Execution, momo_db::DbError> {
     use momo_workspace_actions::team_ai_roles::{
-        notice_audit, roles_changed_audit, set_role_in_tx, CardProvenance, NoticeVia, RoleWrite,
+        card_notice_audit, roles_changed_audit, set_role_in_tx, CardProvenance, RoleWrite,
     };
     let Some(row) = momo_agent::team_ai_roles::bundle(bundle) else {
         return Err(protocol_error("team_ai.roles.set names no bundle"));
@@ -3119,13 +3199,12 @@ async fn execute_team_ai_roles_set(
     )];
     // Approving the card that turns `files` or `memory` on is the consent to the line on the card.
     if enabled {
-        audits.extend(notice_audit(
+        audits.extend(card_notice_audit(
             input.workspace_id,
             input.member_id,
             input.via_token_id,
             &[bundle],
-            NoticeVia::Card,
-            Some(approval.id),
+            approval.id,
         ));
     }
     Ok(Execution::Ran(Executed {
@@ -5374,5 +5453,83 @@ mod tests {
             stamp_via(Some(AUDIT_VIA_PUSH_ACTION), json!("scalar")),
             json!("scalar")
         );
+    }
+
+    /// The helper's mark against the action a card names (ADR-0201 증보 v3 B13-I5): a card of an
+    /// action only the helper may raise must carry the mark — missing, another source and a
+    /// malformed `via_ai` all fail — a card that carries it must be for an action on the helper's
+    /// own list, and any other card is not this gate's.
+    #[test]
+    fn a_card_of_a_helper_only_action_must_say_the_helper_raised_it() {
+        let roles_card = action_by_id("team_ai.roles.set").expect("registered");
+        let unfurl = action_by_id("workspace.unfurl.update").expect("registered");
+        let channel_create = action_by_id("channel.create").expect("registered");
+        let admit = action_by_id("dm.agent.admit").expect("registered");
+        assert_eq!(
+            roles_card.proposers,
+            momo_agent::actions::Proposers::TeamAiOnly
+        );
+        assert_eq!(unfurl.proposers, momo_agent::actions::Proposers::TeamAiOnly);
+        let marked = json!({"source": "team_ai", "tools": [], "web_searches": 0});
+
+        for action in [roles_card, unfurl, channel_create] {
+            assert!(
+                matches!(
+                    card_provenance(Some(&marked), action),
+                    CardProvenance::Helper(_)
+                ),
+                "{}",
+                action.id
+            );
+        }
+        for via in [
+            None,
+            Some(json!({})),
+            Some(json!({"source": "agent"})),
+            Some(json!({"source": "team_ai "})),
+            Some(json!({"source": 1})),
+            Some(json!("team_ai")),
+        ] {
+            for action in [roles_card, unfurl] {
+                assert!(
+                    matches!(
+                        card_provenance(via.as_ref(), action),
+                        CardProvenance::Refused(_)
+                    ),
+                    "{} / {via:?}",
+                    action.id
+                );
+            }
+        }
+        // Marked, but for an action the helper may never raise.
+        assert!(matches!(
+            card_provenance(Some(&marked), admit),
+            CardProvenance::Refused(_)
+        ));
+        // An ordinary action's card from another door is not this gate's.
+        assert!(matches!(
+            card_provenance(None, channel_create),
+            CardProvenance::NotThisGates
+        ));
+        assert!(matches!(
+            card_provenance(Some(&json!({"source": "agent"})), channel_create),
+            CardProvenance::NotThisGates
+        ));
+    }
+
+    /// The gate holds the settings row the way the card's own executor will: `FOR UPDATE` for the
+    /// card whose executor merges the settings bag, `FOR SHARE` for every other helper card (a
+    /// share lock that the executor then upgrades is what two decisions deadlock on).
+    #[test]
+    fn the_gate_holds_the_settings_row_like_the_executor_that_follows() {
+        use momo_workspace_actions::team_ai::SettingsRowLock;
+        for id in momo_agent::actions::TEAM_AI_ACTION_IDS {
+            let expected = if id == "workspace.settings.update" {
+                SettingsRowLock::Update
+            } else {
+                SettingsRowLock::Share
+            };
+            assert_eq!(settings_row_lock_for(id), expected, "{id}");
+        }
     }
 }

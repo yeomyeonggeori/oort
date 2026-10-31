@@ -213,6 +213,14 @@ impl TeamAiRoles {
         roles
     }
 
+    /// Every switch off. What a reader answers with when it could not read the settings and the
+    /// answer decides a *refusal* (the decision route): unreadable never reads as "on".
+    pub const fn none_on() -> Self {
+        TeamAiRoles {
+            off: (1u8 << BUNDLES.len()) - 1,
+        }
+    }
+
     /// Is this bundle on? [`CHAT_READ`] is always on; an id that is not a bundle is **not**.
     pub fn is_on(&self, bundle_id: &str) -> bool {
         if bundle_id == CHAT_READ {
@@ -281,6 +289,18 @@ fn tool_allowed_in(table: &[RoleBundle], roles: &TeamAiRoles, tool_name: &str) -
         .iter()
         .filter(|bundle| bundle.tool_names.contains(&tool_name))
         .all(|bundle| roles.is_on(bundle.id))
+}
+
+/// The names in `table`'s `tool_names` that none of `known` carries. A name nobody carries is a
+/// bundle that filters nothing — the tool it meant would stay on offer while the bundle is off,
+/// and nothing would say so — so a misspelt name must fail a test rather than read as "no such
+/// tool is offered". The caller supplies every tool the helper can be offered.
+pub fn unknown_tool_names<'a>(table: &'a [RoleBundle], known: &[&str]) -> Vec<&'a str> {
+    table
+        .iter()
+        .flat_map(|bundle| bundle.tool_names.iter().copied())
+        .filter(|name| !known.contains(name))
+        .collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -501,6 +521,34 @@ mod tests {
         assert!(tool_allowed_in(&table, &off(&[FILES]), "search_messages"));
         // And through the public seam: today nothing is owned, so nothing is dropped.
         assert!(off(&[FILES, MEMORY]).tool_allowed("search_messages"));
+    }
+
+    /// What a reader that could not read the settings answers with when the answer decides a
+    /// refusal: every switch off — `chat_read` is not a switch and stays on, and an action no
+    /// bundle owns (the roles card) is not bundle-gated either way.
+    #[test]
+    fn none_on_turns_every_switch_off() {
+        let none = TeamAiRoles::none_on();
+        assert_eq!(none.off_bundles(), SWITCHABLE_BUNDLES);
+        assert!(none.is_on(CHAT_READ));
+        assert!(!none.action_allowed(ACTION_CHANNEL_CREATE));
+        assert!(none.action_allowed(ACTION_TEAM_AI_ROLES_SET));
+        assert_ne!(none, TeamAiRoles::default());
+    }
+
+    /// The checker that guards the names: a table whose `tool_names` carries a misspelling is
+    /// found, a table of names that all exist is not.
+    #[test]
+    fn a_misspelt_bundle_tool_name_is_found() {
+        let mut table = BUNDLES;
+        table[3].tool_names = &["read_attachment", "read_atachment"]; // files
+        table[4].tool_names = &["search_memory"]; // memory
+        let known = ["read_attachment", "search_memory", "search_messages"];
+        assert_eq!(unknown_tool_names(&table, &known), ["read_atachment"]);
+        table[3].tool_names = &["read_attachment"];
+        assert!(unknown_tool_names(&table, &known).is_empty());
+        // And an empty table of names (today's) has nothing to misspell.
+        assert!(unknown_tool_names(&BUNDLES, &known).is_empty());
     }
 
     #[test]

@@ -19009,9 +19009,9 @@ async fn the_helper_settings_cards_execute_as_the_approver_and_nobody_else() {
 }
 
 /// ADR-0201 증보 v2 H13-A13·A14 + H7 (#3889) — what never becomes a card:
-/// * the helper-only ids (the three settings actions and `plugin.install`) through
-///   the Agent Port (`oort_action_propose`) — refused like an unknown id, zero
-///   approvals;
+/// * the helper-only ids (the three settings actions, `plugin.install` and the roles
+///   card `team_ai.roles.set`) through the Agent Port (`oort_action_propose`) — refused
+///   like an unknown id, zero approvals;
 /// * an unknown or V9-closed settings key, and `memory {enabled:true}`, from the
 ///   helper — `InvalidArguments`, zero approvals;
 /// * `plugin.install` with an id outside the official four, or with any key but
@@ -19042,6 +19042,11 @@ async fn the_helper_only_and_declared_actions_make_no_card_where_they_must_not()
         (
             "plugin.install",
             json!({"pluginId": "com.momo.plugins.github"}),
+        ),
+        // ADR-0201 증보 v3 B3-T (#4964): the helper's own roles card is not the Agent Port's either.
+        (
+            "team_ai.roles.set",
+            json!({"bundle": "files", "enabled": false}),
         ),
     ] {
         let before = approval_count_3900(&su, workspace).await;

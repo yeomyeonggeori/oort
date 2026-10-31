@@ -17,13 +17,18 @@
 //! | test | acceptance | revert that makes it red |
 //! |---|---|---|
 //! | `s1_an_admin_approves_the_roles_card_and_nobody_else_can` | B3-T, B15-A18 | drop the Admin gate (`GatePlan::Admin` → no `require_admin`), or the executor's write |
-//! | `s2_a_card_that_turns_files_or_memory_on_leaves_one_notice_record` | B3 고지 | drop `notice_audit` from the executor, or the notice row from `roles_set_rows` |
+//! | `s2_a_card_that_turns_files_or_memory_on_leaves_one_notice_record` | B3 고지 | drop `card_notice_audit` from the executor, or the notice row from `roles_set_rows` |
 //! | `s3_a_card_does_not_outlive_its_bundle` | B13-I5 | return `Ok(None)` for the role-off branch of `team_ai_card_gate_in_tx` |
 //! | `s4_a_roles_card_that_read_something_is_refused_at_the_decision` | B4-3 | drop the `is_sensitive_action` branch of `team_ai_card_gate_in_tx`, or let a missing `tools` read as nothing |
 //! | `s5_the_settings_card_cannot_reach_a_team_ai_key` | B13-I9 | add a `team_ai_*` key to `workspace.settings.update`'s keys |
 //! | `s6_the_settings_patch_is_the_admins_door_and_moves_one_switch_at_a_time` | B3 저장 | merge `team_ai_roles` whole, drop the validator, or write the audit with values |
 //! | `s7_turning_memory_on_is_409_while_team_memory_is_off` | issue acceptance | drop `memory_prerequisite_in_tx` from the PATCH or from `set_role_in_tx` |
 //! | `s8_another_workspaces_switches_are_not_touched` | 두 테넌트 | write the settings without the workspace id |
+//! | `s9_what_a_settings_patch_commits_is_audited_when_it_answers_409` | B13-I5 감사 | write the two audit rows after the provisioning block instead of right after the write |
+//! | `s10_a_helper_only_card_runs_only_with_the_helpers_mark` | B13-I5 출처 | drop the unmarked-card arm of `card_provenance` |
+//! | `s11_a_decision_waits_for_a_settings_write_in_flight` | B13-I5 경쟁 | read the settings row in the gate without holding it |
+//! | `s12_the_decisions_read_holds_the_settings_row_in_the_mode_it_names` | B13-I5 경쟁 | swap the lock clauses of `read_roles_locked_in_tx`, or let an unreadable row read as all on |
+//! | `s13_a_platform_reader_who_is_not_an_admin_cannot_approve_the_roles_card` | B3-T | lower the roles card's `required_role` from `Admin` to `WorkspaceOperator` |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -139,6 +144,7 @@ struct Harness {
     workspace: Uuid,
     owner: Uuid,
     owner_token: String,
+    member: Uuid,
     member_token: String,
     channel: Uuid,
     helper: Uuid,
@@ -272,6 +278,7 @@ async fn harness_with(
         workspace,
         owner,
         owner_token,
+        member,
         member_token,
         channel,
         helper: Uuid::nil(),
@@ -656,7 +663,7 @@ async fn s2_a_card_that_turns_files_or_memory_on_leaves_one_notice_record() {
         h.owner,
         None,
         &[roles::FILES, roles::CODE],
-        momo_workspace_actions::team_ai_roles::NoticeVia::Onboarding,
+        momo_workspace_actions::team_ai_roles::ScreenNotice::Onboarding,
     )
     .await
     .unwrap();
@@ -1262,4 +1269,339 @@ async fn s9_what_a_settings_patch_commits_is_audited_when_it_answers_409() {
         h.audit_rows("workspace_setting.updated").await.len(),
         updated_rows + 2
     );
+}
+
+/// Provenance at the decision (B13-I5): a card of an action only the helper may raise runs only when
+/// its stored `via_ai` says the helper raised it. A card whose mark is missing, dropped or another
+/// source is refused — 409, nothing moves, the card stays pending (and can still be rejected), an
+/// `action.refused` row names the reason — for the roles card and for another helper-only action.
+/// The marked card of the same request runs.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn s10_a_helper_only_card_runs_only_with_the_helpers_mark() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let h = harness(None, &app, &su).await;
+
+    for (label, tamper) in [
+        (
+            "no via_ai",
+            "UPDATE approval SET payload = payload - 'via_ai' WHERE id = $1",
+        ),
+        (
+            "no source",
+            "UPDATE approval SET payload = payload #- '{via_ai,source}' WHERE id = $1",
+        ),
+        (
+            "another source",
+            "UPDATE approval SET payload = jsonb_set(payload, '{via_ai,source}', '\"agent\"') WHERE id = $1",
+        ),
+    ] {
+        let card = h
+            .raise(
+                h.owner,
+                ROLES_CARD,
+                json!({"bundle": "code", "enabled": false}),
+                &[],
+                0,
+            )
+            .await
+            .expect("a direct request is a card");
+        sqlx::query(tamper)
+            .bind(card.approval_id)
+            .execute(&h.su)
+            .await
+            .unwrap();
+        let (status, refused) = h.decide(&h.owner_token, card.approval_id, true).await;
+        assert_eq!(status, 409, "{label}: {refused}");
+        assert_eq!(refused["status"], "action_args_invalid", "{label}");
+        assert!(h.roles().await.is_on(roles::CODE), "{label}: nothing moved");
+        assert_eq!(h.approval_status(card.approval_id).await, "pending", "{label}");
+        assert_eq!(
+            h.decide(&h.owner_token, card.approval_id, false).await.0,
+            200,
+            "{label}: saying no still works"
+        );
+    }
+    // Another action only the helper may raise.
+    let unfurl = h
+        .raise(
+            h.owner,
+            "workspace.unfurl.update",
+            json!({"enabled": false}),
+            &[],
+            0,
+        )
+        .await
+        .expect("an unfurl card");
+    sqlx::query("UPDATE approval SET payload = payload - 'via_ai' WHERE id = $1")
+        .bind(unfurl.approval_id)
+        .execute(&h.su)
+        .await
+        .unwrap();
+    let (status, refused) = h.decide(&h.owner_token, unfurl.approval_id, true).await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(h.approval_status(unfurl.approval_id).await, "pending");
+
+    let refused_rows = h.audit_rows("action.refused").await;
+    assert_eq!(refused_rows.len(), 4, "{refused_rows:?}");
+    assert!(
+        refused_rows
+            .iter()
+            .all(|row| row["reason"] == "team_ai_provenance"),
+        "{refused_rows:?}"
+    );
+
+    // A control: the marked card of a direct request runs.
+    let card = h
+        .raise(
+            h.owner,
+            ROLES_CARD,
+            json!({"bundle": "code", "enabled": false}),
+            &[],
+            0,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        h.decide(&h.owner_token, card.approval_id, true).await.0,
+        200
+    );
+    assert!(!h.roles().await.is_on(roles::CODE));
+}
+
+/// How many backends are waiting on a lock that `holder_pid` holds.
+async fn waiting_on(su: &PgPool, holder_pid: i32) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM pg_stat_activity \
+          WHERE datname = current_database() AND wait_event_type = 'Lock' \
+            AND $1 = ANY(pg_blocking_pids(pid))",
+    )
+    .bind(holder_pid)
+    .fetch_one(su)
+    .await
+    .expect("pg_stat_activity")
+}
+
+/// B13-I5, the decision against a switch being turned off: while a settings write holds the row,
+/// the decision of a helper card WAITS for it, then judges the bundle as the write left it — the
+/// card does not run. (If the decision read the row without waiting, it would judge the old switch
+/// and run the card a moment after the bundle went off.) One card of each lock mode: a card whose
+/// executor only reads the row, and the settings card whose executor takes it `FOR UPDATE`.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn s11_a_decision_waits_for_a_settings_write_in_flight() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let h = harness(None, &app, &su).await;
+    let name = format!("wait-{}", &Uuid::new_v4().simple().to_string()[..6]);
+
+    for (label, action_id, args) in [
+        (
+            "channel card",
+            "channel.create",
+            json!({"name": name, "kind": "public"}),
+        ),
+        (
+            "settings card",
+            "workspace.settings.update",
+            json!({"welcomePrompt": "안녕하세요"}),
+        ),
+    ] {
+        let card = h
+            .raise(h.owner, action_id, args, &[], 0)
+            .await
+            .expect(label);
+        // A settings write in flight: it holds the row (`NO KEY UPDATE`, the weakest write lock,
+        // which blocks nothing but another settings reader/writer) and has not committed.
+        let mut writer = h.su.begin().await.unwrap();
+        sqlx::query("SELECT 1 FROM workspace WHERE id = $1 FOR NO KEY UPDATE")
+            .bind(h.workspace)
+            .execute(&mut *writer)
+            .await
+            .unwrap();
+        let writer_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *writer)
+            .await
+            .unwrap();
+        let workspace = h.workspace;
+        let (decided, waited) =
+            tokio::join!(h.decide(&h.owner_token, card.approval_id, true), async {
+                let mut waited = false;
+                for _ in 0..200 {
+                    if waiting_on(&h.su, writer_pid).await > 0 {
+                        waited = true;
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+                // The write turns the bundle off and commits, whether or not anything waited.
+                sqlx::query(
+                    "UPDATE workspace SET settings = jsonb_set(settings, '{team_ai_roles}', \
+                       '{\"workspace_admin\": false}'::jsonb) WHERE id = $1",
+                )
+                .bind(workspace)
+                .execute(&mut *writer)
+                .await
+                .unwrap();
+                writer.commit().await.unwrap();
+                waited
+            });
+        assert!(
+            waited,
+            "{label}: the decision did not wait for the settings write in flight"
+        );
+        assert_eq!(decided.0, 409, "{label}: {}", decided.1);
+        assert_eq!(decided.1["status"], "action_args_invalid", "{label}");
+        assert_eq!(
+            h.channel_named(&name).await,
+            0,
+            "{label}: the card did not run"
+        );
+        assert!(
+            h.settings().await.get("welcome_prompt").is_none(),
+            "{label}: the card did not run"
+        );
+        assert_eq!(
+            h.approval_status(card.approval_id).await,
+            "pending",
+            "{label}"
+        );
+        // Back on for the next card; the refused card can still be rejected.
+        sqlx::query("UPDATE workspace SET settings = settings - 'team_ai_roles' WHERE id = $1")
+            .bind(h.workspace)
+            .execute(&h.su)
+            .await
+            .unwrap();
+        assert_eq!(
+            h.decide(&h.owner_token, card.approval_id, false).await.0,
+            200,
+            "{label}"
+        );
+    }
+}
+
+/// Whether a second connection can take the row in `clause` mode without waiting.
+async fn row_lock_free(su: &PgPool, workspace: Uuid, clause: &str) -> bool {
+    let mut tx = su.begin().await.unwrap();
+    let outcome = sqlx::query(&format!(
+        "SELECT 1 FROM workspace WHERE id = $1 {clause} NOWAIT"
+    ))
+    .bind(workspace)
+    .fetch_optional(&mut *tx)
+    .await;
+    let free = match outcome {
+        Ok(_) => true,
+        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("55P03") => false,
+        Err(other) => panic!("unexpected error taking the row: {other}"),
+    };
+    let _ = tx.rollback().await;
+    free
+}
+
+/// The decision's read holds the settings row in the mode it names: `Share` lets another reader in
+/// and keeps every writer out; `Update` keeps both out. A row that cannot be read answers with every
+/// bundle off, the refusing side.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn s12_the_decisions_read_holds_the_settings_row_in_the_mode_it_names() {
+    use momo_workspace_actions::team_ai::{read_roles_locked_in_tx, SettingsRowLock};
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let h = harness(None, &app, &su).await;
+
+    for (lock, label, other_reader_free, writer_free) in [
+        (SettingsRowLock::Share, "share", true, false),
+        (SettingsRowLock::Update, "update", false, false),
+    ] {
+        let mut holder = h.su.begin().await.unwrap();
+        let read = read_roles_locked_in_tx(&mut holder, h.workspace, lock)
+            .await
+            .unwrap();
+        assert_eq!(
+            read,
+            TeamAiRoles::default(),
+            "{label}: the switches as stored"
+        );
+        assert_eq!(
+            row_lock_free(&h.su, h.workspace, "FOR SHARE").await,
+            other_reader_free,
+            "{label}: another share lock"
+        );
+        assert_eq!(
+            row_lock_free(&h.su, h.workspace, "FOR UPDATE").await,
+            writer_free,
+            "{label}: an update lock"
+        );
+        holder.rollback().await.unwrap();
+        assert!(
+            row_lock_free(&h.su, h.workspace, "FOR UPDATE").await,
+            "{label}: released with the transaction"
+        );
+    }
+
+    let mut conn = h.su.acquire().await.unwrap();
+    let nowhere = read_roles_locked_in_tx(&mut conn, Uuid::new_v4(), SettingsRowLock::Share)
+        .await
+        .unwrap();
+    assert_eq!(
+        nowhere,
+        TeamAiRoles::none_on(),
+        "an unreadable row refuses every bundle"
+    );
+    assert_eq!(nowhere.off_bundles().len(), roles::SWITCHABLE_BUNDLES.len());
+}
+
+/// The roles card is the workspace's own admins' to approve: a member who carries the
+/// `platform:read` scope but is not an owner or admin gets 403 `role_required` — nothing moves and
+/// the card stays pending — while the workspace's admin approves the same card.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn s13_a_platform_reader_who_is_not_an_admin_cannot_approve_the_roles_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let h = harness(None, &app, &su).await;
+    let reader_token = momo_auth::sign_access(
+        h.member,
+        h.workspace,
+        &["platform:read".to_string()],
+        TEST_JWT_SECRET,
+    )
+    .expect("sign a platform reader JWT")
+    .token;
+    sqlx::query(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label) \
+         VALUES($1,'session',$2,digest($3::text,'sha256'),ARRAY['platform:read']::text[],'roles-reader')",
+    )
+    .bind(h.workspace)
+    .bind(h.member)
+    .bind(&reader_token)
+    .execute(&h.su)
+    .await
+    .expect("record the platform reader's session token");
+
+    let card = h
+        .raise(
+            h.owner,
+            ROLES_CARD,
+            json!({"bundle": "files", "enabled": false}),
+            &[],
+            0,
+        )
+        .await
+        .expect("a direct request is a card");
+    let (status, refused) = h.decide(&reader_token, card.approval_id, true).await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert_eq!(h.roles().await, TeamAiRoles::default(), "nothing moved");
+    assert_eq!(h.approval_status(card.approval_id).await, "pending");
+    assert!(h.audit_rows("team_ai.roles.changed").await.is_empty());
+
+    let (status, decided) = h.decide(&h.owner_token, card.approval_id, true).await;
+    assert_eq!(status, 200, "{decided}");
+    assert!(!h.roles().await.is_on(roles::FILES));
 }
