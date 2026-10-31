@@ -47,12 +47,20 @@ pub enum FetchKind {
     /// rules are narrower in two ways: **port 443 only, on every hop** (the rule `Source` has),
     /// and a body of at most [`ICON_MAX_BYTES`]. The picture kind keeps its own rules.
     Icon,
+    /// The page behind a link a MEMBER typed into the composer, asked for **before** the message
+    /// exists (ADR-0170 amendment 2026-11-01 D17, #4884). Everything about the body is
+    /// [`FetchKind::Html`] (512 KiB cap, `Accept`, content-type default). The guard is the same
+    /// one and the rules are narrower in exactly one way: **port 443 only, on every hop**, the
+    /// rule `Source` and `Icon` have. A member names this address and the answer comes back at
+    /// once, so without the rule the status of a preview would map a public host's open ports.
+    /// The worker's `Html` (a link in a sent message) keeps no port rule.
+    Preview,
 }
 
 impl FetchKind {
     fn max_bytes(self) -> usize {
         match self {
-            FetchKind::Html => HTML_MAX_BYTES,
+            FetchKind::Html | FetchKind::Preview => HTML_MAX_BYTES,
             FetchKind::Image | FetchKind::Source => IMAGE_MAX_BYTES,
             FetchKind::Icon => ICON_MAX_BYTES,
         }
@@ -383,7 +391,7 @@ impl PinnedGet for ReqwestGet {
 
 fn accept_for(kind: FetchKind) -> &'static str {
     match kind {
-        FetchKind::Html => "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
+        FetchKind::Html | FetchKind::Preview => "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
         FetchKind::Image | FetchKind::Source | FetchKind::Icon => "image/*,*/*;q=0.1",
     }
 }
@@ -443,9 +451,12 @@ async fn fetch_guarded<R: HostResolver, G: PinnedGet>(
         // ADR-0218 D5 (planner, 10-30): an imported picture is fetched on 443 only, on
         // every hop. An explicit other port would let the status codes of this endpoint
         // map a public host's open ports. Judged before any DNS query. A link card's site
-        // icon (ADR-0170 amendment D9) takes the same rule; the other preview kinds do not.
-        if matches!(kind, FetchKind::Source | FetchKind::Icon)
-            && parsed.port.is_some_and(|port| port != 443)
+        // icon (ADR-0170 amendment D9) takes the same rule, and so does a link the composer
+        // asks about before sending (`Preview`, 2026-11-01 D17); the worker's `Html` does not.
+        if matches!(
+            kind,
+            FetchKind::Source | FetchKind::Icon | FetchKind::Preview
+        ) && parsed.port.is_some_and(|port| port != 443)
         {
             return Err(blocked(redirects));
         }
@@ -473,7 +484,7 @@ async fn fetch_guarded<R: HostResolver, G: PinnedGet>(
             continue;
         }
         let content_type = response.content_type.unwrap_or_else(|| match kind {
-            FetchKind::Html => "text/html".into(),
+            FetchKind::Html | FetchKind::Preview => "text/html".into(),
             FetchKind::Image | FetchKind::Source | FetchKind::Icon => {
                 "application/octet-stream".into()
             }
