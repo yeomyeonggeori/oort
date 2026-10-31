@@ -1,0 +1,7 @@
+/* Generated from @momo/core/i18n/catalogs/en-US/mobile.json. Do not edit. */
+"NSCameraUsageDescription" = "Use the camera to attach photos to conversations or scan a QR code to connect this device to a workspace.";
+"NSFaceIDUsageDescription" = "Use Face ID to confirm instructions sent to agents from this device.";
+"NSLocalNetworkUsageDescription" = "Use the local network to connect to an oort server on the same network.";
+"NSMicrophoneUsageDescription" = "oort does not record audio. All features work without microphone access.";
+"NSPhotoLibraryUsageDescription" = "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded.";
+"NSPhotoLibraryAddUsageDescription" = "oort does not save photos to your library. All features work without this permission.";

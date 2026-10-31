@@ -63,7 +63,7 @@ import {
 } from "@/features/chat/draftStore";
 import { BEFORE_RELAUNCH_EVENT } from "@/features/updates/relaunchFlush";
 import { rememberSendLearned, useSendHintNeeded } from "@/features/chat/sendHint";
-import { useAutoGrow } from "@/features/timeline/useAutoGrow";
+import { COMPOSER_MAX_ROWS, useAutoGrow } from "@/features/timeline/useAutoGrow";
 import { useDmDeliveryHint } from "@/features/chat/useDmDeliveryHint";
 import { useOffline } from "@/features/common/useOffline";
 import {
@@ -160,7 +160,7 @@ import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 // =============================================================================
 
 const MIN_ROWS = 1;
-const MAX_ROWS = 6;
+const MAX_ROWS = COMPOSER_MAX_ROWS;
 
 /**
  * 연결이 끊겨 있을 때 전송 자리에서 하는 말. **이름만 여기 있고 값은 코어에

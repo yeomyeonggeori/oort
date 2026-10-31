@@ -1,3 +1,4 @@
+import type {Mode} from '@momo/core/design/themes';
 import {contrast, hueGap} from '@momo/core/design/color';
 import {SIGNAL_PRESET_IDS} from '@momo/core/design/signal';
 import type {SignalChoice} from '@momo/core/design/appearance';
@@ -15,8 +16,7 @@ import {
   minimumScrimAlpha,
   scrimColor,
   worstCaseBackdrops,
-  type Mode,
-} from '../src/design/background/scrim';
+} from '@momo/core/design/scrim';
 import {DS2_COMBOS, THEME_IDS} from '../src/design/ds2Tokens';
 import {paletteFrom} from '../src/design/tokens';
 

@@ -2,7 +2,9 @@
 // gives @momo/core its platform answers (server base, session tokens). See
 // src/lib/coreHost.ts.
 import "@/lib/coreHost";
-import React from "react";
+import { appLocaleReady } from "@/i18n/boot";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
 import ReactDOM from "react-dom/client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClient } from "@/app/queryClient";
@@ -66,9 +68,9 @@ if (IS_TAURI) installDesktopEffects();
 // 창보다 큰 문서가 만들어지고, 사이드바가 화면 밖으로 밀려난다. 배너가 아무것도
 // 그리지 않는 평소(데스크탑, 이미 설치, 이미 본 사람)에는 앱이 예전과 똑같이
 // 창 전체를 받는다.
-function render() {
+function render(locale: AppLocale) {
   ReactDOM.createRoot(document.getElementById("root")!).render(
-    <React.Fragment>
+    <LocaleProvider locale={locale}>
       <QueryClientProvider client={queryClient}>
         <div className="flex h-full min-h-0 flex-col">
           <PwaBanner />
@@ -77,7 +79,7 @@ function render() {
           </div>
         </div>
       </QueryClientProvider>
-    </React.Fragment>
+    </LocaleProvider>
   );
 }
 
@@ -102,4 +104,7 @@ startPwa();
 // that answers after the first paint still resumes the session. The budget only
 // decides who owns the screen while nobody knows the answer yet, and the connect
 // screen is a better answer than a blank window.
-void releaseAfter(initSessionStore(), SESSION_HYDRATE_BUDGET_MS).finally(render);
+void Promise.all([
+  appLocaleReady,
+  releaseAfter(initSessionStore(), SESSION_HYDRATE_BUDGET_MS),
+]).then(([locale]) => render(locale));

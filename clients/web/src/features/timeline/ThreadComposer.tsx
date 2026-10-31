@@ -50,7 +50,7 @@ import {
   sendBlockCopy,
   sendBlockReason,
 } from "@momo/core/features/attachments/model";
-import { useAutoGrow } from "./useAutoGrow";
+import { COMPOSER_MAX_ROWS, useAutoGrow } from "./useAutoGrow";
 import { containsSecretKey } from "@momo/core/features/chat/secretKey";
 import { SecretKeyBlockNotice } from "@/features/chat/SecretKeyBlockNotice";
 import { hasLocalCardHost } from "@/features/chat/localCards";
@@ -213,7 +213,7 @@ export function ThreadComposer({
   // 답글도 한 줄로 끝나지 않는다. 메인 컴포저가 1행에서 6행까지 자라는 것과 같은
   // 규칙이다 (R2 M4) — 다른 것은 이 창이 320px 패널 안에 있어서 접히는 줄이 더
   // 빨리 생긴다는 점뿐이다.
-  useAutoGrow(ref, draft, { minRows: 1, maxRows: 6 });
+  useAutoGrow(ref, draft, { minRows: 1, maxRows: COMPOSER_MAX_ROWS });
 
   // 파일만 보내는 답글도 답글이다. 채널 컴포저와 같은 규칙을 같은 함수로 판정한다.
   const canSend =

@@ -9,11 +9,11 @@
 # inside each image; GPL/LGPL there are copyleft, not permissive.
 #
 # cargo.lock.sha256: 4a80b6010eb2b580ea5aedb6e541ba55dc4f1e66a90f1a27774ba5be27d63a21
-# web.package-lock.sha256: f1bc70d19c96ea279755dc0abb0c4315e65b9f4cfd1243b9b06d9f9306d02b68
+# web.package-lock.sha256: 0e4507662218a825c370dcef97ee7d5ff5bad8f5238da3f50bbb5f5e85ba2c2d
 # clarify.sha256: 366b7c68569c49f9fab915342fc2c620d1ee6318ab3567d337fd4f7d1a0f79c3
 # cargo.packages: 416
-# npm.packages: 469
-# unique.license.blobs: 450
+# npm.packages: 474
+# unique.license.blobs: 452
 #
 ## Package index
 # ecosystem <TAB> name <TAB> version <TAB> spdx <TAB> copyright <TAB> source <TAB> file_sha256[,file_sha256]
@@ -525,6 +525,10 @@ npm	@floating-ui/core	1.8.0	MIT	Copyright (c) 2021-present Floating UI contribut
 npm	@floating-ui/dom	1.8.0	MIT	Copyright (c) 2021-present Floating UI contributors; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER	package-tree	0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce
 npm	@floating-ui/react-dom	2.1.9	MIT	Copyright (c) 2021-present Floating UI contributors; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER	package-tree	0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce
 npm	@floating-ui/utils	0.2.12	MIT	Copyright (c) 2021-present Floating UI contributors; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER	package-tree	0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce
+npm	@formatjs/fast-memoize	3.1.7	MIT	Copyright (c) 2023 FormatJS	package-tree	b1cc980e28e9e48f377db191578a9361494ca7117185b69dd66cabaf5b460fb7
+npm	@formatjs/icu-messageformat-parser	3.5.22	MIT	Copyright (c) 2023 FormatJS	package-tree	b1cc980e28e9e48f377db191578a9361494ca7117185b69dd66cabaf5b460fb7
+npm	@formatjs/icu-skeleton-parser	2.1.12	MIT	Copyright (c) 2023 FormatJS	package-tree	b1cc980e28e9e48f377db191578a9361494ca7117185b69dd66cabaf5b460fb7
+npm	@formatjs/intl	6.1.4	MIT	Copyright (c) 2023 FormatJS	package-tree	b1cc980e28e9e48f377db191578a9361494ca7117185b69dd66cabaf5b460fb7
 npm	@humanfs/core	0.19.2	Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
 npm	@humanfs/node	0.16.8	Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
 npm	@humanfs/types	0.15.0	Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	clarify	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a
@@ -762,6 +766,7 @@ npm	ignore	5.3.2	MIT	Copyright (c) 2013 Kael Zhang <i@kael.me>, contributors	pac
 npm	ignore	7.0.6	MIT	Copyright (c) 2013 Kael Zhang <i@kael.me>, contributors	package-tree	542e7521fab287d3d2ea83e0145692c7d82ea81b28f141be6686364929d33079
 npm	import-fresh	3.3.1	MIT	Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)	package-tree	5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3
 npm	imurmurhash	0.1.4	MIT	copyright not stated in license file	clarify	f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d
+npm	intl-messageformat	12.1.4	BSD-3-Clause	Copyright (c) 2023, Oath Inc.; copyright notice, this list of conditions and the	package-tree	cc4143615b27c66eafbe913f132a9e41ac14c1e2ec6b2df24dafeaa97f028850
 npm	is-extglob	2.1.1	MIT	Copyright (c) 2014-2016, Jon Schlinkert	package-tree	73b5283588baa142c5baaef5f56d3e8fdea7a30b214e8c5737e87640f882453a
 npm	is-glob	4.0.3	MIT	Copyright (c) 2014-2017, Jon Schlinkert.	package-tree	4cd903859549d4b20b571041f96dfae1136ed079c476126268f9d7cc1b611150
 npm	is-potential-custom-element-name	1.0.1	MIT	Copyright Mathias Bynens <https://mathiasbynens.be/>	package-tree	483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a
@@ -24536,6 +24541,20 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -----
 
+### sha256:b1cc980e28e9e48f377db191578a9361494ca7117185b69dd66cabaf5b460fb7
+# as-filed: LICENSE.md
+-----
+MIT License
+
+Copyright (c) 2023 FormatJS
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-----
+
 ### sha256:b1cf9a3333ca78152b859012cd4a804156e5243e9ca20ad1df7327ba5ea7405c
 # as-filed: LICENSE-APACHE
 -----
@@ -26817,6 +26836,44 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
+-----
+
+### sha256:cc4143615b27c66eafbe913f132a9e41ac14c1e2ec6b2df24dafeaa97f028850
+# as-filed: LICENSE.md
+-----
+Copyright (c) 2023, Oath Inc.
+
+Licensed under the terms of the New BSD license. See below for terms.
+
+Redistribution and use of this software in source and binary forms,
+with or without modification, are permitted provided that the following
+conditions are met:
+
+- Redistributions of source code must retain the above
+  copyright notice, this list of conditions and the
+  following disclaimer.
+
+- Redistributions in binary form must reproduce the above
+  copyright notice, this list of conditions and the
+  following disclaimer in the documentation and/or other
+  materials provided with the distribution.
+
+- Neither the name of Oath Inc. nor the names of its
+  contributors may be used to endorse or promote products
+  derived from this software without specific prior
+  written permission of Oath Inc.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -----
 
 ### sha256:cca0bd3c4fcdba74145ef9d49c62337e2c9fbf9368288f11d0547f1b0273219f

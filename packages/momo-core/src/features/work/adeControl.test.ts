@@ -145,7 +145,7 @@ describe("상태 3분류", () => {
     expect(sessionAdeState("resuming")).toBeNull();
   });
 
-  it("승인 대기 턴은 blocked 다 — 사람을 기다리는 쪽이 강조축", () => {
+  it("승인 필요 턴은 blocked 다 — 사람을 기다리는 쪽이 강조축", () => {
     expect(turnAdeState(turn("agent-kim", "awaiting_approval"))).toBe("blocked");
     expect(turnAdeState(turn("agent-kim", "working"))).toBe("working");
   });
@@ -201,12 +201,12 @@ describe("카드 목록", () => {
     expect(item.runId).toBe("RUN1");
   });
 
-  it("승인 대기 턴은 헤드라인을 쓰지 않는다", () => {
+  it("승인 필요 턴은 헤드라인을 쓰지 않는다", () => {
     const [item] = adeItemsFromTurns(
       [turn("agent-kim", "awaiting_approval", { headlines: ["빌드 로그 확인"] })],
       nameFor
     );
-    expect(item.detail).toBe("승인 대기");
+    expect(item.detail).toBe("승인 필요");
   });
 
   it("두 레일의 키는 절대 충돌하지 않는다", () => {

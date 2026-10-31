@@ -65,6 +65,7 @@ import {endedStreamRunIds} from '@momo/core/features/timeline/streamStop';
 import {seedEndedRuns} from '../agents/endedRuns';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {ChannelRail} from '../../realtime/channelRail';
+import {hapticScope} from '../../lib/haptics';
 
 // =============================================================================
 // One channel's messages: load, receive, send.
@@ -373,6 +374,7 @@ export function useTimeline(
   // Which channel is on screen, read by in-flight sends that resolved after the
   // person moved on. Without it a POST for channel A merges into channel B.
   const channelRef = useRef<string | null>(null);
+  const sendEpochRef = useRef(0);
 
   // Which echoes are thread replies: `clientMsgId -> rootId`. A side map rather
   // than a field on `PendingMessage`, so the core's pending model stays as it
@@ -381,6 +383,10 @@ export function useTimeline(
 
   const post = useCallback(
     async (row: PendingMessage) => {
+      const epoch = sendEpochRef.current;
+      const feedback = hapticScope(() =>
+        sendEpochRef.current === epoch && channelRef.current === row.channelId,
+      );
       try {
         const rootId = pendingRootRef.current[row.clientMsgId];
         const attachmentIds = row.attachments?.map(attachment => attachment.id);
@@ -414,6 +420,7 @@ export function useTimeline(
         // No toast: a failure reported far from the message it belongs to makes
         // the person hunt for which message failed.
         updatePending(list => failPending(list, row.clientMsgId));
+        feedback('actionFailed');
       }
     },
     [workspaceId, applyBatch, updatePending, expressionStore],
@@ -722,7 +729,10 @@ export function useTimeline(
 
   useEffect(() => {
     channelRef.current = channelId;
-  }, [channelId]);
+    return () => {
+      sendEpochRef.current += 1;
+    };
+  }, [channelId, workspaceId]);
 
   const catchUp = useCallback(async () => {
     const channel = channelRef.current;

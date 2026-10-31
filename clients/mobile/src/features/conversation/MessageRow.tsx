@@ -6,6 +6,7 @@ import {
 import {useExpressionItems} from '../expressions/ExpressionProvider';
 import {ExpressionImage} from '../expressions/ExpressionImage';
 import {hasProfileAvatarPreview} from '@momo/core/features/approvals/avatarPreview';
+import {haptics, hapticScope} from '../../lib/haptics';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {
   threadRollup,
@@ -115,6 +116,7 @@ import {
   type StyleProp,
   type TextStyle,
 } from 'react-native';
+import {GlassSurface} from '../../design/glass';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {pressFace, ROW_FACE} from './rowFace';
 import {usePalette, useStyles} from '../../design/theme';
@@ -222,6 +224,7 @@ import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
 import {AttachmentList} from '../attachments/AttachmentList';
 import {
   approvalCardNote,
+  waitsForParticipant,
   type ApprovalNoteTone,
 } from '@momo/core/features/timeline/approvalNote';
 import {
@@ -252,6 +255,12 @@ import {turnRecordRunId} from '@momo/core/features/timeline/cascadeModel';
 import {MemoryProposalCards} from '../memory/MemoryProposalCard';
 import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
 import {MessageRunStatus} from '../agents/MessageRunStatus';
+import type {TriggerChip} from '@momo/core/features/agents/triggerChip';
+import {useOpenDecisionStage} from '../decisionStage/openDecisionStage';
+import {RequestStatusChip} from '../agents/RequestStatusChip';
+import {RequestThinkingLine} from '../agents/RequestThinkingLine';
+import {RequestBundleCard} from './RequestBundleCard';
+import {hasRequestBundle, phoneRequestBundle} from './requestLoop';
 
 // =============================================================================
 // One row of the conversation.
@@ -521,13 +530,11 @@ export function FloatingDayPill({
       importantForAccessibility="no-hide-descendants"
       style={styles.dayFloat}
       testID="floating-day">
-      <View style={styles.dayPillFloat}>
-        <DividerLabel
-          segments={dayDividerSegments(atMs, nowMs)}
-          tone={DIVIDER_TONE.day}
-          strong
-        />
-      </View>
+      <GlassSurface radius={radius.pill} style={styles.dayPillFloat} testID="floating-day-glass">
+        <Text style={styles.dayFloatLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+          {dayDividerSegments(atMs, nowMs).map(segment => segment.text).join('')}
+        </Text>
+      </GlassSurface>
     </View>
   );
 }
@@ -640,6 +647,7 @@ function Author({
   memberId,
   time,
   pendingMark,
+  requestChip,
 }: {
   directory: Directory;
   memberId: string;
@@ -661,6 +669,7 @@ function Author({
    * 절대 배치로 매달려 있어서 나타나고 사라질 때 줄이 넘어가거나 줄 높이가 바뀌지 않는다.
    */
   pendingMark?: React.ReactNode;
+  requestChip?: React.ReactNode;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const member = memberFor(directory, memberId);
@@ -699,6 +708,7 @@ function Author({
           {time}
         </Text>
       ) : null}
+      {requestChip}
       {pendingMark ? (
         <View pointerEvents="none" style={styles.authorMarkHost}>
           {pendingMark}
@@ -983,7 +993,7 @@ function StepRow({
 function StatusChip({label, tone}: {label: string; tone: 'ok' | 'warn' | 'danger' | 'muted'}) {
   const styles = useStyles(buildStyles);
   return (
-    <View style={[styles.statusChip, styles[`statusChip_${tone}`]]}>
+    <View testID="agent-status-chip" style={[styles.statusChip, styles[`statusChip_${tone}`]]}>
       <Text style={[styles.statusChipText, styles[`statusChipText_${tone}`]]}>
         {label}
       </Text>
@@ -1627,12 +1637,15 @@ export function readApprovalCard(
     approvalOffline,
     approvalsProvided,
     viewerMemberId,
+    nameFor,
   }: {
     approvalGates?: ReadonlyMap<string, ApprovalGate>;
     approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
     approvalOffline?: boolean;
     approvalsProvided?: boolean;
     viewerMemberId?: string;
+    /** 참여자 동의 카드의 결정자 이름을 푼다. 문장을 그리는 카드만 넘기면 돼요. */
+    nameFor?: (memberId: string) => string | undefined;
   },
 ) {
   // 카드가 이미 파싱돼 있으므로 여기서 맞춰 본다 — 목록 쪽에서 하려면 이
@@ -1645,7 +1658,13 @@ export function readApprovalCard(
   const settledStatus = receipt?.status ?? card.status;
   const note = approvalCardNote({
     receiptNote: receipt?.note ?? null,
-    waitingForParticipant: card.action?.id === 'dm.agent.admit' && card.action.targetMemberId?.toLowerCase() !== viewerMemberId?.toLowerCase(),
+    // 참여자 동의 카드(ADR-0217)의 결정자가 아닌 사람. 판정과 문장은 코어 한 곳이 지고, 묶음 카드의
+    // 대기 줄(`model.waitingFor`)도 같은 문장을 읽는다.
+    waitingForParticipant: waitsForParticipant(card.action, viewerMemberId),
+    participantName:
+      card.action?.targetMemberId === undefined
+        ? undefined
+        : nameFor?.(card.action.targetMemberId),
     isResumeOffer: card.isResumeOffer,
     // 폰에는 재개 제안에 할 말이 아직 없다. 웹의 문장은 **작업 세션 패널**로
     // 가라는 안내인데(`AgentCard.tsx` — 「내 세션에서 온라인 호스트를
@@ -1695,13 +1714,17 @@ function AgentCard({
   onApprovalSettled,
   onOpenMessage,
   decisionRef,
+  requestRun,
+  onOpenDecision,
 }: {
   card: AgentCardModel;
+  viewerMemberId?: string;
+  requestRun?: AgentRunProgress;
+  onOpenDecision?: (approvalId: string) => void;
   /** 행의 로터가 같은 결정을 부르는 손잡이 (#2595). */
   decisionRef?: React.Ref<ApprovalDecisionHandle>;
   /** 결과 카드의 「결정」 줄이 사람 이름을 푸는 데 쓴다. */
   directory: Directory;
-  viewerMemberId?: string;
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
   approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
   approvalOffline?: boolean;
@@ -1734,7 +1757,13 @@ function AgentCard({
       approvalOffline,
       approvalsProvided,
       viewerMemberId,
+      nameFor: id => memberFor(directory, id)?.displayName,
     });
+    if (hasRequestBundle(card)) {
+      return <RequestBundleCard card={card} directory={directory} viewerMemberId={viewerMemberId}
+        gate={approval} receipt={receipt} nowMs={nowMs} offline={approvalOffline} run={requestRun}
+        decisionRef={decisionRef} onSettled={onApprovalSettled} onOpenMessage={onOpenMessage} onOpenDecision={onOpenDecision} />;
+    }
     // 「전문 보기」를 세울 카드인가. 행의 로터(`MessageRowInner`)가 같은 함수로 같은 답을 읽는다.
     const messagePreview = openableMessagePreview(
       card,
@@ -2156,6 +2185,7 @@ export function resetMessageRowRenderCount(): void {
 /** What a row can do, supplied by the surface that owns the state. */
 export interface MessageRowActions {
   myMemberId: string;
+  onOpenDecision?: (approvalId: string) => void;
   /** Optimistic in the hook; rejects with the error the row turns into a line. */
   onToggleReaction: (message: Message, emoji: string) => Promise<void>;
   onEdit: (message: Message, body: string) => Promise<void>;
@@ -2330,6 +2360,10 @@ export interface MessageRowProps {
    * 메시지) 줄이 없다. 빈 배열은 「아직 없음」이다.
    */
   runStatus?: readonly AgentRunProgress[];
+  requestChip?: TriggerChip | null;
+  requestCardTarget?: Message;
+  requestRun?: AgentRunProgress;
+  requestThinking?: boolean;
   /**
    * 이 행의 접근성 요소(아래 `accessible` 뿌리)를 목록에 알린다 (#1892 R1 M-3).
    *
@@ -2422,6 +2456,10 @@ function MessageRowInner({
   onApprovalSettled,
   runEnded,
   runStatus,
+  requestChip,
+  requestCardTarget,
+  requestRun,
+  requestThinking,
   registerRowNode,
   standby,
 }: MessageRowProps): React.JSX.Element {
@@ -2431,6 +2469,7 @@ function MessageRowInner({
     .map(token => token.type === 'expression' ? expressionAltText(token.expression) : token.text)
     .join('');
   rowRenders += 1;
+  const openDecisionStage = useOpenDecisionStage();
   // 정리(cleanup) 형식의 ref — 떼는 쪽이 자기가 붙인 노드를 지목한다(R1 M-3).
   const messageId = message.id;
   const rowNodeRef = useCallback(
@@ -2441,6 +2480,13 @@ function MessageRowInner({
     [registerRowNode, messageId],
   );
   const presentation = useMemo(() => rowPresentation(message), [message]);
+  const requestSentence = useMemo(() => {
+    if (!requestCardTarget) return undefined;
+    const target = rowPresentation(requestCardTarget).card;
+    return target?.kind === 'approval'
+      ? phoneRequestBundle(target, directory, undefined, null, undefined, nowMs, false, requestRun).sentence
+      : undefined;
+  }, [requestCardTarget, directory, nowMs, requestRun]);
   const suggestion = useMemo(
     () => commandSuggestCard(message, directory),
     [message, directory],
@@ -2509,15 +2555,22 @@ function MessageRowInner({
       approvalsProvided,
     });
     if (read.note !== null || read.approval === null) return null;
+    if (hasRequestBundle(card)) {
+      const bundle = phoneRequestBundle(card, directory, actions?.myMemberId, read.approval, read.receipt, nowMs, approvalOffline, requestRun);
+      if (!bundle.canDecide || (bundle.decisionMode === 'open' && actions?.onOpenDecision)) return null;
+    }
     // 실행할 호스트가 하나도 없는 스폰 승인은 버튼도 꺼져 있다. 로터에도 세우지 않는다.
     return {canApprove: spawnHostGate(card.execution).canApprove};
   }, [
     presentation.card,
-    actions?.myMemberId,
     approvalGates,
     approvalReceipts,
     approvalOffline,
     approvalsProvided,
+    directory,
+    actions,
+    nowMs,
+    requestRun,
   ]);
   // 고정·고정 풀기 카드의 「전문 보기」 (#4705). 같은 이유로 — 행이 요소 하나라 카드 안의 링크에
   // VoiceOver 가 닿지 못한다 — 로터에 세운다. 서는 조건은 카드가 링크를 세우는 조건과 **같은
@@ -2627,9 +2680,10 @@ function MessageRowInner({
 
   const openSheet = useCallback(() => {
     setRowError(null);
+    if (!sheetOpen) haptics.event('messageMenu');
     setSheetOpen(true);
     actions?.onLongPressUsed?.();
-  }, [actions]);
+  }, [actions, sheetOpen]);
 
   const longPress = useLongPress({enabled: actionable, onFire: openSheet});
   const attachmentGesture = useMemo(
@@ -2710,12 +2764,21 @@ function MessageRowInner({
     if (threadTarget) actions?.onOpenThread?.(threadTarget);
   }, [longPress, threadTarget, actions]);
 
+  const reactionEpochRef = useRef(0);
+  useEffect(() => () => {
+    reactionEpochRef.current += 1;
+  }, [message.id, message.channelId, actions?.workspaceId]);
+
   const toggleReaction = useCallback(
     (emoji: string) => {
       if (!actions) return;
       setRowError(null);
+      haptics.event('reactionChanged');
+      const epoch = reactionEpochRef.current;
+      const feedback = hapticScope(() => reactionEpochRef.current === epoch);
       void actions.onToggleReaction(message, emoji).catch((error: unknown) => {
         setRowError(reactionFailureMessage(error));
+        feedback('actionFailed');
       });
     },
     [actions, message],
@@ -2983,7 +3046,7 @@ function MessageRowInner({
       // thread anchor and the resend button from each becoming their own stop —
       // the same count the web client cut from 6 to 1. Touch is unaffected:
       // grouping changes the accessibility tree, not the responder tree.
-      accessible
+      accessible={!(requestChip || requestThinking || (presentation.card?.kind === 'approval' && hasRequestBundle(presentation.card)))}
       accessibilityLabel={[
         rowAccessibilityLabel({
         message: {...message, body: spokenExpression(message.body ?? '')},
@@ -3100,11 +3163,14 @@ function MessageRowInner({
             )}
           </View>
         ) : null}
-        {startsGroup ? (
+        {startsGroup || requestChip ? (
           <Author
             directory={directory}
             memberId={message.authorMemberId}
             time={timeLabel(message.createdAtMs)}
+            requestChip={requestChip ? <RequestStatusChip chip={requestChip}
+              sentence={requestSentence}
+              onOpen={requestCardTarget && requestChip.kind === 'approval' && openDecisionStage ? source => { const card = rowPresentation(requestCardTarget).card; if (card?.kind === 'approval' && card.approvalId) openDecisionStage(card.approvalId, source); } : requestCardTarget && actions?.onOpenMessage ? () => actions.onOpenMessage?.(requestCardTarget.channelId, requestCardTarget.id) : actions?.onOpenThread ? () => actions.onOpenThread?.(message) : undefined} /> : null}
           />
         ) : null}
 
@@ -3226,6 +3292,8 @@ function MessageRowInner({
                 onApprovalSettled={onApprovalSettled}
                 onOpenMessage={actions?.onOpenMessage}
                 decisionRef={decisionRef}
+                requestRun={requestRun}
+                onOpenDecision={actions?.onOpenDecision}
               />
             ) : null}
 
@@ -3329,12 +3397,13 @@ function MessageRowInner({
                   hitSlop={META_HIT_SLOP}
                   onPress={() => {
                     if (longPress.consumeTap()) return;
-                    actions.onOpenThread?.(message);
+                    if (requestCardTarget && actions.onOpenMessage) actions.onOpenMessage(requestCardTarget.channelId, requestCardTarget.id);
+                    else actions.onOpenThread?.(message);
                   }}
                   style={({pressed}) => [pressed && styles.pressed]}
                   testID="thread-rollup">
                   <Text style={styles.rollupLink}>
-                    {`답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
+                    {requestCardTarget ? `답글 ${rollup.replyCount}개 · ${requestSentence ?? requestChip?.word ?? ''}` : `답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
                       rollup.lastReplyAtMs,
                       nowMs,
                     )}`}
@@ -3372,7 +3441,8 @@ function MessageRowInner({
 
         {/* 내가 보낸 메시지가 에이전트를 불렀으면 그 일의 상태 한 줄 (#3824). 칩보다
             안쪽이다: 칩은 남들의 반응이고, 이 줄은 이 메시지가 일으킨 일이다. */}
-        {runStatus !== undefined ? (
+        {requestThinking ? <RequestThinkingLine progress={requestRun ?? runStatus?.[0]} directory={directory} nowMs={nowMs} /> :
+        runStatus !== undefined && (!requestChip || ['failed', 'timed_out', 'uncollected'].includes(requestChip.kind)) ? (
           <MessageRunStatus
             messageId={message.id}
             channelId={message.channelId}
@@ -3511,6 +3581,7 @@ function MessageRowInner({
             setEditing(true);
           }}
           onDelete={() => {
+            haptics.event('deleteConfirmed');
             setDeletePending(true);
             setRowError(null);
             void actions
@@ -3644,6 +3715,10 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   onApprovalSettled: true,
   runEnded: true,
   runStatus: true,
+  requestChip: true,
+  requestCardTarget: true,
+  requestRun: true,
+  requestThinking: true,
   registerRowNode: true,
   standby: true,
 };
@@ -3723,6 +3798,10 @@ export function sameMessageRowProps(
     // #3824. 목록이 채널 run이 바뀔 때만 새 배열을 만들고, run이 없는 행에는 같은
     // 빈 배열을 넘기므로 동일성으로 충분하다.
     a.runStatus === b.runStatus &&
+    a.requestChip === b.requestChip &&
+    a.requestCardTarget === b.requestCardTarget &&
+    a.requestRun === b.requestRun &&
+    a.requestThinking === b.requestThinking &&
     // #1892 R1 M-3. 목록이 한 함수를 모든 행에 나눠 주므로 동일성으로 충분하다.
     // 빠지면 필이 켜진 표면으로 옮겨 온 행이 노드를 알리지 않아 초점이 그 행에
     // 가지 못한다.
@@ -4528,20 +4607,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     right: 0,
     alignItems: 'center',
   },
-  /**
-   * 떠 있는 알약 — **불투명** surface 위에 선과 sh1 (DS2-4 검수 B-1). 시안은 유리지만,
-   * 12pt 글자가 얇은 유리 위에 서면 밑의 16pt 본문 획과 섞여 둘 다 읽히지 않았다
-   * (실데이터 캡처). Buzz 의 알약도 불투명에 가까운 흰 바탕이다.
-   */
+  /** 떠 있는 유리 알약. 공용 재료가 투명도 줄이기에서는 불투명 surface로 물러난다. */
   dayPillFloat: {
-    backgroundColor: color.surface,
-    paddingVertical: CONV.dayPadY,
-    paddingHorizontal: CONV.dayPadX,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.lg,
     borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: color.glassLine,
     boxShadow: color.elevationRest,
   },
+  dayFloatLabel: {fontSize: font.heading, lineHeight: line.heading, fontWeight: '600', color: color.text},
   /** 숫자만 자릿폭 고정 — 조사·단위가 함께 받으면 음절 사이가 벌어진다. */
   dividerFigure: {fontVariant: ['tabular-nums']},
   dividerLabelBoundary: {color: color.warn, fontWeight: '600'},

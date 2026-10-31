@@ -307,9 +307,9 @@ describe('「작업 중」 카드 — 판정', () => {
     expect(workingStep(signal({state: 'awaiting_approval'}))).toBe(3);
   });
 
-  it('승인 대기는 결코 「작업 중」이라고 말하지 않는다', () => {
+  it('승인 필요는 결코 「작업 중」이라고 말하지 않는다', () => {
     const model = card(keyed(signal({state: 'awaiting_approval'})));
-    expect(model?.liveText).toBe('승인 대기');
+    expect(model?.liveText).toBe('승인 필요');
     expect(model?.accessibilityLabel).not.toMatch(/작업 중/);
   });
 
@@ -872,10 +872,10 @@ describe('홈 — 「작업 중」 카드', () => {
     );
   });
 
-  it('승인 대기로 멈춘 턴은 「승인 대기」, 세 칸, 맥박 없음', async () => {
+  it('승인 필요로 멈춘 턴은 「승인 필요」, 세 칸, 맥박 없음', async () => {
     await mountHome();
     act(() => markAgentWorking(signal({state: 'awaiting_approval'})));
-    await waitFor(() => expect(screen.getByTestId('home-working-state')).toHaveTextContent('승인 대기'));
+    await waitFor(() => expect(screen.getByTestId('home-working-state')).toHaveTextContent('승인 필요'));
     expect(screen.getByTestId('home-working-steps-3')).toBeTruthy();
     expect(screen.getByTestId('home-live-dot-still')).toBeTruthy();
   });
@@ -916,7 +916,7 @@ describe.each([
     p.surface,
   ];
 
-  it('카드 안의 글자(이름·한 줄·작업 중·승인 대기)가 모든 유리 바탕에서 4.5 이상', () => {
+  it('카드 안의 글자(이름·한 줄·작업 중·승인 필요)가 모든 유리 바탕에서 4.5 이상', () => {
     for (const ground of cardGrounds) {
       for (const ink of [p.text, p.textMuted, p.agent, p.accentText]) {
         expect(contrast(ink, ground)).toBeGreaterThanOrEqual(4.5);

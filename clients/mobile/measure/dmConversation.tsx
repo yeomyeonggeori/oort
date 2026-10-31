@@ -1,13 +1,14 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import React, {useEffect, useRef, useState} from 'react';
-import {TextInput} from 'react-native';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
+import {Settings, TextInput} from 'react-native';
 import {Screen} from '../src/design/atoms';
 import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy';
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {clearDraft, saveDraft} from '../src/features/conversation/drafts';
+import {BubbleProbeContext, type BubbleProbe} from '../src/features/conversation/MessageBody';
 import {Timeline} from '../src/features/conversation/Timeline';
 
 // =============================================================================
@@ -53,6 +54,12 @@ const DIRECTORY = makeDirectory([
   member({id: GROK, kind: 'agent', displayName: 'grok', handle: 'grok'}),
 ]);
 
+const PEER = '00000000-0000-7000-8000-0000000000c3';
+const LIVE_DIRECTORY = makeDirectory([
+  member({id: SELF, displayName: 'lee', handle: 'lee'}),
+  member({id: PEER, displayName: '이도현', handle: 'dohyun'}),
+]);
+
 const NOW = Date.now();
 
 const DRAFT_KEY = 'measure:dm-conversation';
@@ -86,6 +93,20 @@ const MESSAGES = [
   message(3, SELF, '반가워요'),
 ];
 
+// #4894: 말풍선 글 잘림 — 진짜 Timeline 안에서 긴 글(길이를 달리한 한국어 문장)이 어떻게 앉는가. `-momoMeasure DM-CONVERSATION-CLIP`.
+const CLIP_BASE =
+  '오늘 오후 세 시에 디자인 리뷰가 있어요. 자료는 공유 폴더에 올려 두었으니 미리 한번 훑어보시고, 막히는 부분이 있으면 스레드에 남겨 주세요. 리허설은 수요일 오후로 잡을게요.';
+const LIVE_SEED = [message(1, SELF, '자료 올렸어요'), message(2, PEER, '확인할게요')];
+const CLIP_MESSAGES = [
+  message(1, SELF, '자료 올렸어요'),
+  message(2, GROK, CLIP_BASE.slice(0, 41)),
+  message(3, GROK, CLIP_BASE.slice(0, 62)),
+  message(4, SELF, CLIP_BASE.slice(0, 62)),
+  message(5, GROK, CLIP_BASE.slice(0, 88)),
+  message(6, GROK, CLIP_BASE),
+  message(7, SELF, '네 확인했어요'),
+];
+
 export function DmConversationSurface({which}: {which: string}): React.JSX.Element {
   const inputRef = useRef<TextInput | null>(null);
   const keyboard = which.startsWith('up');
@@ -98,6 +119,37 @@ export function DmConversationSurface({which}: {which: string}): React.JSX.Eleme
     return null;
   });
   const thread = which === 'thread';
+  // #4894 `clip-live`: 받는 쪽 — 마운트된 목록 끝에 **사람** 동료의 긴 글이 실시간으로 덧붙는다(3·5초 뒤 남의 글, 7초 뒤 내 글).
+  // 목록은 새 행을 따라 내려가지 않아 새 행은 화면 아래(작성기 뒤)에 선다 — 보이지 않아도 `onLayout` 은 오므로
+  // 행 안 말풍선·글 상자·그린 줄을 Provider 로 받아 `-momoGapSink` 에 적는다(`bubble-clip-check.mjs serve` 가 받는다).
+  const live = which === 'clip-live';
+  const [liveStep, setLive] = useState(0);
+  useEffect(() => {
+    if (!live) return undefined;
+    const ts = [3000, 5000, 7000].map((ms, i) => setTimeout(() => setLive(i + 1), ms));
+    return () => ts.forEach(clearTimeout);
+  }, [live]);
+  const liveMessages = useMemo(
+    () => [
+      ...LIVE_SEED,
+      ...(liveStep >= 1 ? [message(3, PEER, CLIP_BASE.slice(0, 62))] : []),
+      ...(liveStep >= 2 ? [message(4, PEER, CLIP_BASE.slice(0, 88))] : []),
+      ...(liveStep >= 3 ? [message(5, SELF, CLIP_BASE.slice(0, 62))] : []),
+    ],
+    [liveStep],
+  );
+  const liveProbe = useMemo<BubbleProbe | null>(() => {
+    if (!live) return null;
+    const sink = Settings.get('momoGapSink');
+    return (event, body) => {
+      const line = {surface: 'dm-live', kind: 'live', body: body.slice(0, 40), event};
+      console.log(`CLIP4894 ${JSON.stringify(line)}`);
+      if (typeof sink === 'string' && sink !== '') {
+        void fetch(`http://${sink}/probe`, {method: 'POST', body: JSON.stringify(line)}).catch(() => {});
+      }
+    };
+  }, [live]);
+
   useEffect(() => {
     if (!keyboard) return undefined;
     const timer = setTimeout(() => inputRef.current?.focus(), 1500);
@@ -120,9 +172,10 @@ export function DmConversationSurface({which}: {which: string}): React.JSX.Eleme
       />
       <ConversationLayout
         list={
+          <BubbleProbeContext.Provider value={liveProbe}>
           <Timeline
-            messages={MESSAGES}
-            directory={DIRECTORY}
+            messages={which === 'clip' ? CLIP_MESSAGES : live ? liveMessages : MESSAGES}
+            directory={live ? LIVE_DIRECTORY : DIRECTORY}
             status="ready"
             channelKind="dm"
             myMemberId={SELF}
@@ -131,6 +184,7 @@ export function DmConversationSurface({which}: {which: string}): React.JSX.Eleme
               which === 'up-recovery' ? [{id: 'r1', seq: 3, source: 'replay'}] : undefined
             }
           />
+          </BubbleProbeContext.Provider>
         }
         composer={
           <Composer

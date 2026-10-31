@@ -191,12 +191,12 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(requesterToAgent(job)).toBe("그록봇");
   });
 
-  it("phase=awaiting_approval인 run만 「승인 대기」이고 「지금」 맨 위에 선다", () => {
+  it("phase=awaiting_approval인 run만 「승인 필요」이고 「지금」 맨 위에 선다", () => {
     const waiting = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c2", phase: "awaiting_approval" })), NOW);
     const working = workJobRow(row(wireRun()), NOW);
     const done = workJobRow(row(wireRun({ runId: "00000000-0000-7000-8000-0000000000c3", state: "done", endedAtMs: NOW })), NOW);
     expect(waiting.awaitingApproval).toBe(true);
-    expect(waiting.statusLabel).toBe("승인 대기");
+    expect(waiting.statusLabel).toBe("승인 필요");
     expect(working.awaitingApproval).toBe(false);
     const sections = workJobSections([working, done, waiting]);
     expect(sections.map((s) => s.key)).toEqual(["now", "done"]);
@@ -204,7 +204,7 @@ describe("줄 모델 (ADR-0202 D1)", () => {
     expect(inProgressCount([working, done, waiting])).toBe(2);
   });
 
-  it("옛 서버(phase 없음)는 승인 대기를 지어내지 않는다", () => {
+  it("옛 서버(phase 없음)는 승인 필요를 지어내지 않는다", () => {
     const job = workJobRow(row(wireRun()), NOW);
     expect(job.awaitingApproval).toBe(false);
     expect(job.statusLabel).toBe("실행 중");

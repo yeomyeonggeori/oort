@@ -1,4 +1,5 @@
 import type {Member} from '@momo/core/lib/api';
+import * as memoryApi from '@momo/core/features/memory/api';
 import {
   centrifugoChannelName,
   centrifugoTypingChannelName,
@@ -58,7 +59,7 @@ import {
 // 80~120pt 를 튕겼다. 시뮬레이터 실측(`measure/steady.tsx`, 맨 아래 행의 창 좌표를 프레임마다): 메시지 0개로 재연결 세 번에
 // 이동 합 772pt · 반전 10회(수리 뒤 73pt · 1회).
 //
-// 연결 띠(4초 넘는 끊김에서만 선다)도 목록을 움직였다. 머리 밑 **흐름 안**에 서서 머리가 36.7pt 자라 목록의 보이는 높이가 그만큼
+// 예전 연결 띠(4초 넘는 끊김에서만 섰다)도 목록을 움직였다. 머리 밑 **흐름 안**에 서서 머리가 36.7pt 자라 목록의 보이는 높이가 그만큼
 // 줄었다 돌아왔고, 목록은 그 변화를 한 프레임 늦게 알아채 끝으로 따라가므로 그 한 프레임 동안 맨 아래 줄이 36.7pt 밀렸다 돌아왔다
 // (시뮬레이터 실측). 지금은 띠가 목록 위에 **뜬다** — 아래 마지막 묶음이 그 구조(흐름 밖 층 + 머리 뿌리 `zIndex`)를 잠근다. 제스트에는
 // 레이아웃이 없어 높이 자체는 못 잰다: 「높이 변화 0」의 증거는 PR 본문의 시뮬레이터 표(`measure/steady.tsx`)이고, 이 시험은 그 0 을
@@ -171,6 +172,8 @@ function frame(seq: number, author: string = PEER_ID) {
 }
 
 /** 서버가 가진 메시지. 시험이 덧붙이면 REST 읽기가 그것을 답한다. */
+let peerKind: 'human' | 'agent' = 'human';
+let serverUnread: number | null = null;
 let serverMessages = Array.from({length: HISTORY_COUNT}, (_, i) => restMessage(i + 1));
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -196,8 +199,11 @@ function installFetch(): jest.Mock {
     if (url.includes('/channels') && !url.includes('/messages')) {
       return jsonResponse(200, {channels: CHANNELS});
     }
-    if (url.includes('/roster')) return jsonResponse(200, {members: ROSTER});
-    if (url.includes('/read-state')) return jsonResponse(200, {read_states: []});
+    if (url.includes('/roster')) return jsonResponse(200, {members: ROSTER.map((row, index) => index === 1 ? {...row, kind: peerKind} : row)});
+    if (url.includes('/read-state')) return jsonResponse(200, {read_states: serverUnread === null ? [] : [{
+      channel_id: DM, last_read_seq: HISTORY_COUNT - serverUnread, latest_seq: HISTORY_COUNT,
+      unread_count: serverUnread, mention_count: 0, marked_unread_before_seq: null,
+    }]});
     if (url.includes('/work-sessions')) return jsonResponse(200, {workSessions: []});
     if (url.includes('/work-hosts')) return jsonResponse(200, {workHosts: []});
     if (url.includes('/profile')) {
@@ -223,6 +229,9 @@ interface FakeSubscription {
 
 interface FakeClient {
   state: string;
+  connectCount: number;
+  disconnectCount: number;
+  setTokenCalls?: string[];
   subs: Map<string, FakeSubscription>;
   getSubscription: (name: string) => FakeSubscription | null;
   __emit: (event: string, ctx: unknown) => void;
@@ -354,6 +363,8 @@ jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
 
 beforeEach(() => {
   installAppClock();
+  peerKind = 'human';
+  serverUnread = null;
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -374,7 +385,7 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-/** 소켓이 죽었다가 이어지고 모든 구독이 다시 구독된다. `outageMs` 가 4초 유예를 넘으면 연결 띠가 선다. */
+/** 소켓이 죽었다가 이어지고 모든 구독이 다시 구독된다. 10초 유예를 넘으면 연결 중 띠가 끊김 문장으로 바뀐다. */
 async function reconnect(
   probe: Probe,
   options: {outageMs: number; recovered: boolean; publications?: unknown[]},
@@ -421,7 +432,7 @@ describe('메시지가 오지 않는 동안 목록은 제자리다', () => {
     resetMessageRowRenderCount();
     resetTimelineRenderItemCount();
 
-    // 네 번: 4초 안에 이어지는 끊김(되쏘기 성공, 받은 것 없음) · 띠가 서는 끊김(되쏘기 실패, REST 꼬리가 빈손) 을 번갈아.
+    // 네 번: 유예 안에 이어지는 끊김(되쏘기 성공, 받은 것 없음) · 유예 넘는 끊김(되쏘기 실패, REST 꼬리가 빈손)을 번갈아.
     for (let cycle = 0; cycle < 4; cycle += 1) {
       await reconnect(probe, {
         outageMs: cycle % 2 === 0 ? 1_000 : DISPLAY_GRACE_MS + 1_000,
@@ -590,7 +601,7 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
   const flat = (style: unknown): Record<string, unknown> =>
     (StyleSheet.flatten(style as never) ?? {}) as Record<string, unknown>;
 
-  it('4초 넘게 끊겨 띠가 서도 띠는 머리 밑에 매달려 목록 위에 뜬다 — 머리의 흐름 높이를 늘리지 않는다', async () => {
+  it('연결 중부터 10초 뒤 끊김까지 띠는 머리 밑에 매달려 목록 위에 뜬다 — 머리의 흐름 높이를 늘리지 않는다', async () => {
     await openDm();
     // 연결돼 있으면 띠가 없다.
     expect(screen.queryByTestId('connection-banner')).toBeNull();
@@ -600,26 +611,38 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
       client.state = 'connecting';
       client.__emit('connecting', {code: 1, reason: 'transport closed'});
     });
-    // 4초 유예 안에는 서지 않는다 — 아래에서 서는 띠가 「서는 끊김」의 결과이지 처음부터 있던 것이 아니다.
+    // #4783은 복구를 숨기는 대신 10초 동안 「연결 중」을 보인다(PR의 의도된 표시 변경).
+    // 띠가 없다는 옛 기대만 문장 전환으로 바꾼다. 두 상태 모두 같은 흐름 밖 층이어야 한다.
+    const header = screen.getByTestId('conversation-header');
+    const connectingLayer = within(header).getByTestId('connection-banner-layer');
+    expect(within(connectingLayer).getByTestId('connection-banner')).toHaveTextContent('연결 중…');
+    // 「연결 중…」은 이미 시도하는 중이라 누를 것이 없다 — 문장만 서고 손은 받지 않는다(#4895).
+    expect(connectingLayer.props.pointerEvents).toBe('none');
+    expect(within(connectingLayer).getByTestId('connection-banner').props.accessibilityRole).toBe('text');
+    fireEvent(header, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 393, height: 124}}});
+    expect(flat(connectingLayer.props.style)).toMatchObject({position: 'absolute', top: 124});
     await settle(DISPLAY_GRACE_MS - 1_000);
-    expect(screen.queryByTestId('connection-banner')).toBeNull();
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결 중…');
     await settle(2_000);
 
-    const header = screen.getByTestId('conversation-header');
     const banner = within(header).getByTestId('connection-banner');
     expect(banner).toHaveTextContent('연결이 끊겼습니다');
 
     // (a) 띠를 진 층은 **흐름 밖**이다. 흐름 안에 있으면 띠가 설 때마다 머리가 자라 목록의 보이는 높이가 줄었다 돌아온다.
     const layer = within(header).getByTestId('connection-banner-layer');
-    expect(flat(layer.props.style)).toMatchObject({position: 'absolute', top: '100%'});
+    expect(layer).toBe(connectingLayer);
+    expect(flat(layer.props.style)).toMatchObject({position: 'absolute', top: 124});
     // (b) 알약은 그 층 안에 있다 — 흐름에 끼는 형제로 따로 서 있지 않다.
     expect(within(layer).getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');
     // (c) 머리 뿌리는 뒤 형제(목록) 위에 그려진다 — 아니면 매달린 띠가 목록 밑으로 숨는다.
     expect(Number(flat(header.props.style).zIndex ?? 0)).toBeGreaterThan(0);
-    // (d) 띠 바깥은 손을 받지 않는다 — 알약 밑의 메시지가 눌려야 한다.
-    expect(layer.props.pointerEvents).toBe('none');
-    // (e) 낭독 속성(역할 · 라이브 리전)은 안쪽 알약에 있고 바깥 층에는 없다 — 층은 손만 막는 포장이다.
-    expect(banner.props.accessibilityRole).toBe('text');
+    // (d) 띠 바깥은 여전히 손을 받지 않는다 — 알약 밑의 메시지가 눌려야 한다. 끊김일 때만 알약 **자신**이 단추라(#4895,
+    // 옛 「재시도 단추 없음」을 뒤집었다) 층은 `box-none` 이고 손을 받는 것은 알약뿐이다.
+    expect(layer.props.pointerEvents).toBe('box-none');
+    // (e) 낭독 속성은 안쪽 알약에 있고 바깥 층에는 없다 — 이름은 행동(「지금 다시 연결」), 지금 상태는 값이다.
+    expect(banner.props.accessibilityRole).toBe('button');
+    expect(banner.props.accessibilityLabel).toBe('지금 다시 연결');
+    expect(banner.props.accessibilityValue).toEqual({text: '연결이 끊겼습니다'});
     expect(banner.props.accessibilityLiveRegion).toBe('polite');
     expect(layer.props.accessibilityRole).toBeUndefined();
     expect(layer.props.accessibilityLiveRegion).toBeUndefined();
@@ -634,11 +657,70 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     expect(screen.queryByTestId('connection-banner-layer')).toBeNull();
   });
 
-  it('띠의 높이는 목록의 위쪽 필 틀로 건너가 필이 띠 밑에 쌓이고, 그 일로 셀은 다시 그려지지 않는다', async () => {
+  it('끊김 띠를 누르면 전송의 resume 과 같은 길로 같은 클라이언트가 새 토큰으로 다시 붙는다 (#4895)', async () => {
+    await openDm();
+    const client = socket();
+    await act(async () => {
+      client.state = 'connecting';
+      client.__emit('connecting', {code: 1, reason: 'transport closed'});
+    });
+    await settle(DISPLAY_GRACE_MS + 1_000);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');
+    const clientsBefore = centrifugeMock.__clients.length;
+    const disconnects = client.disconnectCount;
+    const connects = client.connectCount;
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('connection-banner'));
+    });
+    // 새 클라이언트를 만들지 않는다(복구 위치를 지킨다). 닫고 · 토큰을 비우고 · 다시 연다 — 복귀와 같은 세 걸음.
+    expect(centrifugeMock.__clients.length).toBe(clientsBefore);
+    expect(client.disconnectCount).toBe(disconnects + 1);
+    expect(client.setTokenCalls?.slice(-1)).toEqual(['']);
+    expect(client.connectCount).toBe(connects + 1);
+    await settle(25);
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
+  });
+
+  it.each([0, 6])('S1 #4789 High 1: 읽음 상태가 로드된 에이전트 DM의 안읽음 %i·요약 닫힘은 목록 안 머리 여백 하나뿐이다', async unread => {
+    peerKind = 'agent';
+    serverUnread = unread;
+    jest.spyOn(memoryApi, 'getMemorySettings').mockResolvedValue({
+      workspace: {enabled: true, paused: false, resetEpoch: 0}, channels: [], me: {paused: false},
+    });
+    jest.spyOn(memoryApi, 'listMemoryDigests').mockResolvedValue({
+      digests: [], afterSeq: HISTORY_COUNT - unread, summarizedThroughSeq: HISTORY_COUNT,
+    });
+    await openDm();
+    if (unread > 0) {
+      await waitFor(() => expect(screen.getByTestId('missed-digest-dismiss')).toBeTruthy());
+      expect(within(screen.getByTestId('timeline-list')).getByTestId('missed-digest-dismiss')).toBeTruthy();
+      fireEvent.press(screen.getByTestId('missed-digest-dismiss'));
+    }
+    expect(screen.queryByTestId('missed-digest-card')).toBeNull();
+    fireEvent(screen.getByTestId('conversation-header-overlay'), 'layout', {
+      nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 121}},
+    });
+    const list = screen.getByTestId('timeline-list');
+    expect(flat(list.props.contentContainerStyle).paddingTop).toBe(121);
+    expect(flat(screen.getByTestId('timeline-top-pills').props.style).top).toBe(121);
+    let node = list.parent;
+    while (node) {
+      if (node.type === 'View') expect(flat(node.props.style).paddingTop ?? 0).toBe(0);
+      node = node.parent;
+    }
+  });
+
+  it('S1 #4789 머리·연결 띠 높이는 목록 안 여백과 위 필로 건너가며 셀은 다시 그려지지 않는다', async () => {
     await openDm();
     const topPills = () => flat(screen.getByTestId('timeline-top-pills').props.style);
-    // 띠가 없으면 필은 목록 위 가장자리에 선다.
-    expect(topPills().top).toBe(0);
+    const overlay = () => screen.getByTestId('conversation-header-overlay');
+    expect(flat(overlay().props.style)).toMatchObject({position: 'absolute', top: 0, zIndex: 1});
+    expect(topPills().top).toBe(62);
+    // 큰 글자 등으로 커진 실제 머리 높이를 네이티브가 보고한다.
+    fireEvent(overlay(), 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 121}}});
+    expect(topPills().top).toBe(121);
+    expect(flat(screen.getByTestId('timeline-list').props.contentContainerStyle).paddingTop).toBe(121);
     resetMessageRowRenderCount();
     resetTimelineRenderItemCount();
 
@@ -654,7 +736,8 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     await act(async () => {
       fireEvent(layer, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 36.7}}});
     });
-    expect(topPills().top).toBe(36.7);
+    expect(topPills().top).toBe(157.7);
+    expect(flat(screen.getByTestId('timeline-list').props.contentContainerStyle).paddingTop).toBe(121);
 
     // 이어져 띠가 걷히면 필 틀도 제자리로 돌아온다 — 사라진 띠 밑에 필이 떠 있지 않다.
     await act(async () => {
@@ -663,7 +746,7 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     });
     await settle(25);
     expect(screen.queryByTestId('connection-banner')).toBeNull();
-    expect(topPills().top).toBe(0);
+    expect(topPills().top).toBe(121);
 
     // 필 틀이 두 번 움직이는 동안 목록의 셀은 한 번도 다시 그려지지 않았다.
     expect(timelineRenderItemCount()).toBe(0);

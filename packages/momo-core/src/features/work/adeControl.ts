@@ -1,3 +1,4 @@
+import { REQUEST_WORD } from "../agents/runPhase";
 import { uuidEq, type WorkHost, type WorkSession } from "../../lib/api";
 import {
   agentLabel,
@@ -396,7 +397,7 @@ export function adeItemsFromTurns(
       detail:
         headline ??
         (state === "blocked"
-          ? "승인 대기"
+          ? REQUEST_WORD.approval
           : // 아직 시작하지 않은 run(ADR-0200)은 칩이 어떻든 「작업 중」이라고 쓰지 않는다.
             turn.state === "queued"
             ? turn.server === undefined

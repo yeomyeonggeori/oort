@@ -12,9 +12,10 @@ import {
 } from '@momo/core/features/workspace/directory';
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
-import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {appNote} from './appVoice';
+import {CONV} from './convDesign';
 
 // =============================================================================
 // 인용 — 본류에 남으면서 맥락만 끌어오는 장치 (ADR-0148).
@@ -352,7 +353,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.sm,
-    paddingLeft: SAFE_GUTTER,
+    paddingLeft: CONV.composerDockInset,
     paddingRight: space.sm,
     paddingVertical: space.xs,
     borderBottomWidth: StyleSheet.hairlineWidth,

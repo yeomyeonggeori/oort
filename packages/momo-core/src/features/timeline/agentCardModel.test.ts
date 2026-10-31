@@ -1,3 +1,8 @@
+import requestLoopFixture from "./__fixtures__/requestLoop.json";
+import { agentRequestBundle } from "./agentCardModel";
+import { requestBundleState, REQUEST_BUNDLE_FACE, requestLoopCopyViolations, shouldFoldBundleLine } from "./requestBundle";
+import { APPROVAL_OFFLINE_COPY } from "./approvalNote";
+import { particleFor, directionParticle } from "../../lib/koreanParticle";
 import { describe, expect, it } from "vitest";
 import type { Message } from "../../lib/api";
 import {
@@ -911,6 +916,228 @@ describe("만료 스윕이 남긴 줄 (검수 L4, #4705)", () => {
   });
 });
 
+// 요청 고리: 별도 줄을 기다리지 않고 카드 한 장의 공개 props만 읽어요.
+describe("요청 묶음", () => {
+  const nowMs = 1_800_000_000_000;
+  const names: Record<string, string> = { agent: "달무리봇", human: "김인턴", other: "박연구원" };
+  const context = { nowMs, nameFor: (id: string) => names[id], viewerMemberId: "human", viewerKind: "human" as const, canDecide: true };
+  const message = (props: Record<string, unknown> = {}) => msg({ type: "approval_request", authorMemberId: "agent", props: { approval_id: "approval", action_type: "tool_call", tool_name: "shell", status: "pending", ...props } });
+
+  it("승인 다섯 상태 × run 아홉 단계 × 종료 코드 여섯 × 승인 두 종류에서 정확히 한 상태와 얼굴을 낸다", () => {
+    const phases = ["queued", "claimed", "running", "awaiting_approval", "paused", "succeeded", "failed", "timed_out", "cancelled"] as const;
+    const endReasons = [undefined, "approval_rejected", "approval_expired", "agent_error", "human_cancelled", "lease_abandoned"];
+    const statusEnds = { rejected: "declined", expired: "expired", cancelled: "cancelled" } as const;
+    const faces = {
+      thinking: ["생각 중", "CircleDot", "working"], approval: ["승인 필요", "ShieldQuestion", "warn"],
+      executing: ["실행 중", "CircleDot", "working"], done: ["끝", "Check", "ok"],
+      declined: ["거부", "Ban", "muted"], expired: ["만료", "Clock", "warn"],
+      failed: ["실패", "CircleX", "danger"], cancelled: ["취소", "Octagon", "muted"],
+    };
+    const seen = new Set<string>();
+    for (const status of ["pending", "approved", "rejected", "expired", "cancelled"] as const) {
+      for (const phase of phases) for (const endReason of endReasons) for (const actionType of ["workspace_action", "tool_call"]) {
+        const terminal = ["succeeded", "failed", "timed_out", "cancelled"].includes(phase);
+        const ending = terminal ? ({ approval_rejected: "declined", approval_expired: "expired" } as Record<string, string>)[endReason ?? ""] : undefined;
+        const phaseEnd = ({ succeeded: "done", failed: "failed", cancelled: "cancelled" } as Record<string, string>)[phase];
+        const approved = actionType === "tool_call" ? "executing" : "done";
+        const expected = status === "approved" && actionType === "workspace_action"
+          ? "done"
+          : status === "pending" || status === "approved"
+            ? ending ?? phaseEnd ?? (status === "approved" ? approved : "approval") : statusEnds[status];
+        const state = requestBundleState({ status, actionType, run: { phase, endReason } });
+        expect(state, `${status}/${phase}/${endReason}/${actionType}`).toBe(expected);
+        const face = REQUEST_BUNDLE_FACE[state];
+        expect([face.word, face.icon, face.tone]).toEqual(faces[state]);
+        seen.add(state);
+      }
+    }
+    seen.add(requestBundleState({}));
+    expect([...seen].sort()).toEqual(Object.keys(faces).sort());
+  });
+
+  it.each([
+    ["failed", "agent_error"],
+    ["cancelled", "approval_rejected"],
+    ["cancelled", "human_cancelled"],
+  ] as const)("완료된 행동 승인은 후속 run %s/%s 뒤에도 완료로 남는다", (phase, endReason) => {
+    const card = message({
+      action_type: "workspace_action",
+      action: { id: "hosted.channels.grant", rows: [] },
+      status: "approved",
+    });
+    const model = agentRequestBundle(card, { ...context, run: { phase, endReason } });
+    expect(model).toMatchObject({ state: "done", word: "끝", sentence: "실행을 마쳤어요" });
+    expect(model?.sentence).not.toContain("다시 요청");
+  });
+
+  it("도구·행동 모두 코드와 result만으로 종결하고 옛 영어 본문을 한국어로 말한다", () => {
+    for (const action_type of ["tool_call", "workspace_action"]) {
+      const extra = action_type === "workspace_action" ? { action: { id: "channel.create", rows: [] } } : {};
+      for (const [status, expected, sentence] of [
+        ["rejected", "declined", "김인턴 님이 거부했어요"],
+        ["expired", "expired", "승인을 기다리다 만료됐어요"],
+        ["failed", "failed", "실행을 끝내지 못했어요 · 다시 요청해 보세요"],
+        ["cancelled", "cancelled", "요청이 취소됐어요"],
+        ["succeeded", "done", "실행을 마쳤어요"],
+      ]) {
+        const model = agentRequestBundle(message({ ...extra, action_type, status: "pending", decided_by: "human", result: { status, line: "Tool call rejected by human approval.", output: "PRIVATE" } }), context)!;
+        expect(model.state).toBe(expected);
+        expect(model.sentence).toBe(sentence);
+        expect(JSON.stringify(model)).not.toContain("PRIVATE");
+        expect(model.canDecide).toBe(false);
+      }
+      expect(agentRequestBundle(message({ ...extra, action_type, code: "approval_expired" }), context)?.state).toBe("expired");
+      expect(agentRequestBundle(message({ ...extra, action_type, code: "approval_rejected" }), context)?.word).toBe("거부");
+    }
+    for (const { code, word, sentence } of requestLoopFixture.terminalCopy) {
+      const model = agentRequestBundle(message({ code }), { ...context, nameFor: undefined })!;
+      expect({ word: model.word, sentence: model.sentence }).toEqual({ word, sentence });
+    }
+    for (const status of ["failed", "succeeded"]) {
+      expect(agentRequestBundle(message({ status }), context)?.state).toBe(status === "failed" ? "failed" : "done");
+    }
+    expect(agentRequestBundle(message({ status: "approved", result: { status: "running" } }), context)?.state).toBe("executing");
+    expect(agentRequestBundle(message({ status: "approved", result: { status: "approved" } }), context)?.state).toBe("executing");
+    expect(agentRequestBundle(message({ title: "Approve shell" }), context)?.headline).toBe("달무리봇 · 도구 「shell」 실행");
+    const line = agentCardModel(msg({ type: "tool_result", body: "Tool call rejected by human approval.", props: { approval_id: "approval", status: "rejected", is_error: true } }));
+    expect(line).toMatchObject({ kind: "tool", title: "거부", status: "cancelled", frame: { outcome: "거부됐어요" } });
+  });
+
+  // ADR-0218 G3.8, #4914. The six sentences are typed out by hand so this table is the witness,
+  // the same way the web card test and the golden's own test do.
+  it.each([
+    ["generation_failed", "그림을 만들지 못했어요"],
+    ["assembly_source_invalid", "이 그림에는 움직임을 입힐 수 없어요"],
+    ["assembly_source_too_large", "그림이 너무 커서 움직임을 입힐 수 없어요"],
+    ["assembly_output_too_large", "움직이는 그림이 너무 커요"],
+    ["assembly_timeout", "움직임을 입히다가 시간이 다 됐어요"],
+    ["assembly_busy", "지금 다른 그림을 처리하고 있어요. 잠시 뒤에 다시 해 주세요"],
+  ])("%s로 닫힌 카드는 골든 줄이 상태 문장보다 앞서고 상태와 얼굴은 그대로다", (code, line) => {
+    for (const action_type of ["tool_call", "workspace_action"]) {
+      const extra = action_type === "workspace_action" ? { action: { id: "channel.create", rows: [] } } : {};
+      for (const [status, state, word] of [
+        ["cancelled", "cancelled", "취소"], ["rejected", "declined", "거부"], ["expired", "expired", "만료"], ["failed", "failed", "실패"],
+      ] as const) {
+        const model = agentRequestBundle(message({ ...extra, action_type, status, code }), context)!;
+        expect(model, `${action_type}/${status}`).toMatchObject({ state, word, sentence: line, canDecide: false });
+        // The sentence replaces the generic one and does not add to it.
+        expect(model.sentence).not.toBe(agentRequestBundle(message({ ...extra, action_type, status }), context)!.sentence);
+      }
+    }
+    // Only a closed card says it. The same card while it asks for a decision, or after an approval
+    // that is still being carried out, keeps the sentence of that state.
+    const waiting = agentRequestBundle(message({ status: "pending", code }), context)!;
+    expect(waiting.state).toBe("approval");
+    expect(waiting.sentence).not.toBe(line);
+    expect(agentRequestBundle(message({ status: "approved", code }), context)).toMatchObject({ state: "executing", sentence: "승인됐어요 · 이어서 하는 중" });
+  });
+
+  it("표현 실패 코드가 아닌 닫힌 카드의 문장과 상태는 코드 없는 같은 카드와 같다", () => {
+    // `assembly_params_invalid` is a call error that never becomes a card; the rest are not codes at all.
+    for (const code of ["assembly_params_invalid", "a_future_code", "constructor", "__proto__", "toString", ""]) {
+      for (const status of ["cancelled", "rejected", "expired", "failed"]) {
+        const plain = agentRequestBundle(message({ status, decided_by: "human" }), context)!;
+        const coded = agentRequestBundle(message({ status, decided_by: "human", code }), context)!;
+        expect({ state: coded.state, sentence: coded.sentence }, `${code}/${status}`).toEqual({ state: plain.state, sentence: plain.sentence });
+      }
+    }
+    // A settlement code keeps the sentence it always had, with the decider's name.
+    expect(agentRequestBundle(message({ status: "rejected", code: "approval_rejected", decided_by: "human" }), context)).toMatchObject({ state: "declined", sentence: "김인턴 님이 거부했어요" });
+    expect(agentRequestBundle(message({ status: "expired", code: "approval_expired" }), context)).toMatchObject({ state: "expired", sentence: "승인을 기다리다 만료됐어요" });
+    // The server's own one line on a finished card still comes first.
+    expect(agentRequestBundle(message({ status: "failed", code: "assembly_busy", result: { status: "failed", line: "소개를 바꾸지 못했어요" } }), context)).toMatchObject({ state: "failed", sentence: "소개를 바꾸지 못했어요" });
+  });
+
+  it("문장이 머리이고 값 칩 둘·넘친 수·조용한 줄·관리자에게만 원장 번호를 낸다", () => {
+    const model = agentRequestBundle(message({ intent: "소개를 바꾸려고 해요", expires_at_ms: nowMs + 23 * 3_600_000,
+      action: { id: "agent.profile.update", rows: [
+        { label: "소개", before: "예전", after: "새 소개" }, { label: "이름", value: "달무리" }, { label: "별명", value: "구름" },
+      ] }, arguments: { private: "PRIVATE" },
+    }), context)!;
+    expect(model).toMatchObject({ headline: "달무리봇 · 소개를 바꾸려고 해요", quietLine: "23시간 남음 · 자세히", moreValues: 1, details: { label: "자세히" } });
+    expect(model.valueChips).toHaveLength(2);
+    expect(model.valueChips[0]).toMatchObject({ before: "예전", after: "새 소개", labelText: "소개: 이전 값 예전, 이후 값 새 소개" });
+    expect(model.details.approvalId).toBeUndefined();
+    expect(model.details.rows).toContainEqual({ label: "별명", value: "구름" });
+    expect(JSON.stringify(model)).not.toContain("PRIVATE");
+    expect(agentRequestBundle(message(), { ...context, isWorkspaceAdmin: true })?.details.approvalId).toBe("approval");
+    expect(agentRequestBundle(message({ expires_at_ms: nowMs + 600_000 }), context)?.quietLine).toBe("10분 안에 만료돼요 · 자세히");
+    expect(agentRequestBundle(message({ expires_at_ms: nowMs }), context)?.state).toBe("expired");
+    const result = agentRequestBundle(message({ status: "approved", result: {
+      status: "succeeded", rows: [{ label: "결과", after: "새 값" }, null],
+      ref: { type: "channel", id: "target", arguments: "PRIVATE" },
+      next: { label: "결과 보기", href: "javascript:PRIVATE" }, arguments: "PRIVATE",
+    } }), context)!;
+    expect(result.ref).toEqual({ type: "channel", id: "target" });
+    expect(result.next).toBeUndefined();
+    expect(result.moreValues).toBe(1);
+    expect(JSON.stringify(result)).not.toContain("PRIVATE");
+    for (const raw of [null, [], true, { rows: [null], status: "future" }]) {
+      expect(agentRequestBundle(message({ result: raw }), context)?.state).toBe("approval");
+    }
+  });
+
+  it("결정할 사람만 버튼을 받고 다른 사람·요청한 에이전트는 기다리는 문장을 받는다", () => {
+    for (const [viewerMemberId, viewerKind, canDecide, expected] of [
+      ["human", "human", true, true], ["other", "human", false, false], ["agent", "agent", true, false],
+    ] as const) {
+      const model = agentRequestBundle(message(), { ...context, viewerMemberId, viewerKind, canDecide, approverMemberIds: ["human"] })!;
+      expect(model.canDecide).toBe(expected);
+      expect(model.waitingFor).toBe(expected ? undefined : "김인턴 님의 승인을 기다려요");
+    }
+    expect(agentRequestBundle(message(), { ...context, viewerMemberId: "AGENT" })?.canDecide).toBe(false);
+    expect(agentRequestBundle(message({ can_decide: false }), context)?.canDecide).toBe(false);
+    expect(agentRequestBundle(message({ can_decide: true }), { ...context, canDecide: false })?.canDecide).toBe(false);
+    expect(agentRequestBundle(message(), { ...context, canDecide: false, approverMemberIds: ["human", "other"] })?.waitingFor).toBe("관리자의 승인을 기다려요");
+  });
+
+  it("decision_mode는 서버 값을 그대로 쓰고 부재 때만 현행 규칙으로 폴백한다", () => {
+    for (const decision_mode of ["inline", "open"] as const) {
+      expect(agentRequestBundle(message({ decision_mode, action: { id: "invite.create", rows: [] } }), context)?.decisionMode).toBe(decision_mode);
+    }
+    for (const [props, expected] of [
+      [{ tool_name: "shell" }, "inline"], [{ decision_mode: "future" }, "open"], [{ tool_name: "work.session.login_handoff" }, "open"],
+      [{ action: { id: "channel.create", rows: [] } }, "inline"], [{ action: { id: "invite.create", rows: [] } }, "open"],
+      [{ action: { id: "message.pin", rows: [] } }, "open"], [{ action: { id: "new.action", rows: [] } }, "open"],
+    ] as const) expect(agentRequestBundle(message(props), context)?.decisionMode).toBe(expected);
+    expect(agentRequestBundle(message({ status: "approved" }), context)?.state).toBe("executing");
+    expect(agentRequestBundle(message({ status: "approved" }), { ...context, run: { phase: "running" } })?.state).toBe("executing");
+    expect(agentRequestBundle(message({ action_type: "workspace_action", action: { id: "channel.create", rows: [] }, status: "approved" }), { ...context, run: { phase: "running" } })?.state).toBe("done");
+  });
+
+  it("bundle_of는 같은 목록의 같은 승인 종결 카드가 있을 때만 접고 도구 실행 결과를 잃지 않는다", () => {
+    const line = msg({ type: "tool_result", props: { bundle_of: "approval" } });
+    for (const status of ["rejected", "expired", "cancelled"]) expect(shouldFoldBundleLine(line, [message({ status }), line])).toBe(true);
+    expect(shouldFoldBundleLine(line, [message({ result: { status: "succeeded" } }), line])).toBe(true);
+    for (const cards of [[], [message()], [message({ approval_id: "other", status: "expired" })], [message({ status: "approved" })], [message({ status: "approved", result: {} })], [msg({ ...message({ status: "expired" }), state: "deleted" })]]) {
+      expect(shouldFoldBundleLine(line, cards)).toBe(false);
+    }
+    expect(shouldFoldBundleLine(msg({ ...line, props: {} }), [message({ status: "expired" })])).toBe(false);
+    expect(shouldFoldBundleLine(line, [msg({ ...message({ status: "expired" }), channelId: "other" })])).toBe(false);
+  });
+
+  it("문구 프리플라이트는 영어 원문·합쇼체·거절·옛 승인 낱말의 양성 fixture를 실제로 잡는다", () => {
+    for (const [copy, hit] of [
+      ["Tool call expired without a human approval.", "english-source"], ["Tool call rejected by human approval.", "english-source"],
+      ["Approval required: shell", "english-source"], ["Approve shell", "english-source"], ["결정할 수 없습니다.", "formal"], ["승인을 기록합니다.", "formal"], ["거절됨", "declined-copy"], ["승인 대기", "approval-wait-copy"],
+    ]) expect(requestLoopCopyViolations(copy)).toContain(hit);
+    expect(requestLoopCopyViolations(APPROVAL_OFFLINE_COPY)).toEqual([]);
+    expect(requestLoopCopyViolations("shell · 승인 필요 · 김인턴 님의 승인을 기다려요")).toEqual([]);
+  });
+
+  it("값 뒤 기본 틀은 한글·영문·숫자·기호·이모지 끝에서 조사 헤지 없이 읽힌다", () => {
+    for (const value of requestLoopFixture.valueOnly) {
+      const model = agentRequestBundle(message({ intent: "소개 바꾸기", action: { id: "agent.profile.update", rows: [{ label: "소개", before: "이전", after: value }] } }), context)!;
+      expect(model.valueChips[0]!.labelText).toBe(`소개: 이전 값 이전, 이후 값 ${value}`);
+      expect(JSON.stringify(model)).not.toMatch(/을\(를\)|\(으\)로/);
+    }
+    // 값 뒤 조사가 필요한 기존 틀은 같은 코어 표의 받침·ㄹ 예외를 읽어요.
+    for (const { value, object, direction } of requestLoopFixture.particles) {
+      expect(particleFor(value, "object")).toBe(object);
+      expect(directionParticle(value)).toBe(direction);
+    }
+  });
+});
 
 describe("terminal approval card (#3982)", () => {
   it.each([

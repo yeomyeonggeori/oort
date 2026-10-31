@@ -1,0 +1,40 @@
+appId: app.momo.ios
+name: 121-haptics-settings
+---
+# #4298. Same shell-update-home harness as 114-settings-shell-flow; no screenshots.
+# Owner checks tactile quality separately. Restore rich for later stack flows.
+- extendedWaitUntil:
+    visible:
+      id: "profile-avatar"
+    timeout: 60000
+- tapOn:
+    id: "profile-avatar"
+- scrollUntilVisible:
+    element:
+      id: "haptics-basic"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "haptics-basic"
+- scrollUntilVisible:
+    element:
+      id: "haptics-off"
+    direction: DOWN
+    timeout: 10000
+- tapOn:
+    id: "haptics-off"
+- tapOn:
+    id: "settings-close"
+- tapOn:
+    id: "profile-avatar"
+- scrollUntilVisible:
+    element:
+      id: "haptics-rich"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "haptics-rich"
+- tapOn:
+    id: "settings-close"
+- assertVisible:
+    id: "profile-avatar"

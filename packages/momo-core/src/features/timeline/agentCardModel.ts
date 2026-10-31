@@ -1,3 +1,5 @@
+import { REQUEST_WORD } from "../agents/runPhase";
+import { parseRequestBundleSnapshot, requestBundleModel, type RequestBundleSnapshot, type RequestBundleContext, type RequestBundleModel } from "./requestBundle";
 import type { Message } from "../../lib/api";
 import { approvalOutcomeLine } from "../approvals/approvalOutcome";
 import {
@@ -113,7 +115,7 @@ export const TURN_STATUS_LABEL: Readonly<Record<AgentTurnStatus, string>> = {
   queued: "대기열",
   thinking: "생각 중",
   streaming: "응답 중",
-  "awaiting-approval": "승인 대기",
+  "awaiting-approval": REQUEST_WORD.approval,
   done: "완료",
   error: "실패",
   stalled: "응답 없음",
@@ -121,11 +123,11 @@ export const TURN_STATUS_LABEL: Readonly<Record<AgentTurnStatus, string>> = {
 };
 
 export const APPROVAL_STATUS_LABEL: Readonly<Record<ApprovalStatus, string>> = {
-  pending: "승인 대기",
-  approved: "승인됨",
-  rejected: "거부됨",
-  expired: "만료됨",
-  cancelled: "취소됨",
+  pending: REQUEST_WORD.approval,
+  approved: REQUEST_WORD.done,
+  rejected: REQUEST_WORD.declined,
+  expired: REQUEST_WORD.expired,
+  cancelled: REQUEST_WORD.cancelled,
 };
 
 export function parseApprovalStatus(value: unknown): ApprovalStatus | null {
@@ -282,11 +284,18 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   // ADR-0201 D6-3. 도우미 카드의 「도우미 제안 · 요청: ○○」 줄이 **그리는** 블록이다
   // (`teamAi.ts`). 위 `action` 과 같은 이유로 숨김이 아니다.
   "proposed_via",
+  "intent",
+  "result",
+  "code",
+  "decision_mode",
+  "bundle_of",
 ]);
 
 export interface PayloadRow {
   label: string;
   value: string;
+  before?: string;
+  after?: string;
 }
 
 /**
@@ -514,8 +523,9 @@ function parseApprovalActionRow(value: unknown): PayloadRow | null {
   const row = value as Record<string, unknown>;
   const label = typeof row.label === "string" ? row.label : "";
   if (label === "") return null;
-  if (typeof row.value !== "string") return null;
-  return { label, value: row.value };
+  const displayValue = typeof row.value === "string" ? row.value : typeof row.after === "string" ? row.after : null;
+  if (displayValue === null) return null;
+  return { label, value: displayValue, ...(typeof row.before === "string" ? { before: row.before } : {}), ...(typeof row.after === "string" ? { after: row.after } : {}) };
 }
 
 /**
@@ -565,6 +575,8 @@ export function parseApprovalAction(value: unknown): AgentApprovalAction | null 
 }
 
 export interface AgentApprovalCard {
+  /** 가산 묶음 필드. 현재 props만 온 카드도 같은 모델로 읽어요. */
+  bundle?: RequestBundleSnapshot;
   kind: "approval";
   approvalId: string | null;
   title: string;
@@ -631,6 +643,7 @@ export interface AgentToolCard {
    * 칩은 「실패」가 아니라 중립의 「만료됨」이고 문장은 한국어 한 줄이다(`approvals/expiry.ts`).
    */
   approvalExpired?: true;
+  approvalDeclined?: true;
   detail: PayloadDetail;
 }
 
@@ -747,7 +760,9 @@ function approvalCard(
     parseApprovalStatus(props["status"]) ??
     "pending";
 
+  const bundle = parseRequestBundleSnapshot(props);
   const card: AgentApprovalCard = {
+    bundle,
     kind: "approval",
     approvalId,
     // ADR-0139 D3: a dead-host lineage resume must never borrow the same
@@ -812,6 +827,13 @@ function toolCard(message: Message, props: Props): AgentToolCard {
       // 영어 본문의 사본(`output`)과 비어 있는 `call_id`·id 들이라 읽을 값이 없고, 그 승인의 내용은
       // 바로 위 카드가 말한다.
       detail: { rows: [], withheld: 0 },
+    };
+  }
+  if ((props?.["status"] === "rejected" || props?.["code"] === "approval_rejected") && readString(props, "approval_id") !== undefined) {
+    return {
+      kind: "tool", title: REQUEST_WORD.declined, status: "cancelled",
+      frame: { verb: REQUEST_WORD.declined, object: null, outcome: "거부됐어요" },
+      approvalDeclined: true, detail: { rows: [], withheld: 0 },
     };
   }
   const toolName = readString(props, "tool_name") ?? readString(props, "tool");
@@ -929,4 +951,11 @@ export function cardKeepsBody(card: AgentCardModel): boolean {
   if (card.kind === "turn") return true;
   if (card.kind === "completion_report") return card.summary === undefined;
   return false;
+}
+
+/** 요청 고리 표면의 공용 진입점. 이력·별도 결과 줄 없이 카드 하나로 말해요. */
+export function agentRequestBundle(message: Message, context: RequestBundleContext): RequestBundleModel | null {
+  if (message.type !== "approval_request") return null;
+  const card = approvalCard(message, message.props);
+  return card === null || card.isResumeOffer ? null : requestBundleModel(card, context);
 }

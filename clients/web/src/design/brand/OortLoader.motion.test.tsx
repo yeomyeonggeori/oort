@@ -7,6 +7,7 @@ import { compile } from "tailwindcss";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { InlineBanner } from "@/features/common/States";
 import { OortLoader } from "./OortLoader";
+import { browserLaunchBlocked } from "@/testing/agentSandbox";
 
 /**
  * 오르트 로더 (#3961): 움직임 자체를 잰다.
@@ -212,6 +213,8 @@ describe("로더 CSS 소스 (브라우저 없이)", () => {
 // ---------------------------------------------------------------------------
 
 function detectChromium(): { ok: true } | { ok: false; path: string } {
+  const blocked = browserLaunchBlocked();
+  if (blocked !== null) return { ok: false, path: blocked };
   try {
     const { chromium } = require_("playwright") as typeof import("playwright");
     const exe = chromium.executablePath();

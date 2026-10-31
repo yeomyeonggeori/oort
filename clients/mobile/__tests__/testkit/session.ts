@@ -2,7 +2,9 @@ import type {LoginResponse, Member} from '@momo/core/lib/api';
 
 import {__resetSessionStore, sessionPort} from '../../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../../src/storage/serverBase';
-import {BASE_URL, SELF_ID, WS_ID} from './ids';
+import {BASE_URL} from './ids';
+import {loginBody} from '@momo/core/testkit/session';
+export {loginBody, selfMember} from '@momo/core/testkit/session';
 
 /**
  * 세션·저장소를 시험에서 만지는 길 하나.
@@ -32,32 +34,10 @@ export function resetSession(): void {
   __resetServerBaseCache();
 }
 
-/** 로그인 응답 본문. 토큰은 시험 전용 값이고, 멤버만 넘기면 된다. */
-export function loginBody(who: Member): LoginResponse {
-  return {
-    accessToken: 'access-token-1',
-    refreshToken: 'refresh-token-1',
-    realtimeWebSocketUrl: 'wss://api.example.com/connection/websocket',
-    member: who,
-  } as LoginResponse;
-}
-
 /** 서버 주소를 정하고 로그인한 상태로 만든다. `resetSession()` 뒤에 부른다. */
 export function signIn(who: Member, base: string = BASE_URL): LoginResponse {
   const body = loginBody(who);
   setServerBase(base);
   sessionPort.applyLogin(body);
   return body;
-}
-
-/** 시험용 「나」. 멤버 한 명이 필요한데 누구인지는 상관없을 때. */
-export function selfMember(over: Partial<Member> = {}): Member {
-  return {
-    id: SELF_ID,
-    workspaceId: WS_ID,
-    kind: 'human',
-    displayName: '이름',
-    handle: 'handle',
-    ...over,
-  } as Member;
 }

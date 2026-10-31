@@ -458,7 +458,7 @@ describe("applyAgentEvent", () => {
     // `agent.partial` carries no run_status; only `agent.status` knows whether
     // the run is running or stopped on a person. A tool_call partial is a
     // documented payload shape that carries no text at all, so treating any
-    // partial as proof of work is how 승인 대기 flips back to 작업 중 and the
+    // partial as proof of work is how 승인 필요 flips back to 작업 중 and the
     // reader is told to wait for an agent that is waiting for them.
     let tracks: RunTracks = applyAgentEvent(new Map(), status(), CONTEXT, NOW);
     tracks = applyAgentEvent(
@@ -559,7 +559,7 @@ describe("turn copy: the two surfaces say the same thing", () => {
     ]);
   });
 
-  it("says 승인 대기 for a turn that stopped for a human, with no headline", () => {
+  it("says 승인 필요 for a turn that stopped for a human, with no headline", () => {
     const waiting = resolveAgentWorkingSignals(
       [
         {
@@ -578,7 +578,7 @@ describe("turn copy: the two surfaces say the same thing", () => {
       "김인턴(@kim-intern)이 승인을 기다립니다",
     ]);
     const badge = agentTurnBadgeCopy(waiting, nameFor);
-    expect(badge?.text).toBe("승인 대기");
+    expect(badge?.text).toBe("승인 필요");
     expect(badge?.label).toBe("김인턴(@kim-intern)이 승인을 기다립니다.");
   });
 
@@ -631,7 +631,7 @@ describe("turn copy: the two surfaces say the same thing", () => {
       { ...turns[1], state: "awaiting_approval" as const },
     ];
     const badge = agentTurnBadgeCopy(mixed, nameFor);
-    expect(badge?.text).toBe("승인 대기");
+    expect(badge?.text).toBe("승인 필요");
     expect(badge?.state).toBe("awaiting_approval");
     expect(badge?.label).toBe(
       "김인턴(@kim-intern)이 승인을 기다립니다. 에이전트 1명이 작업 중입니다."

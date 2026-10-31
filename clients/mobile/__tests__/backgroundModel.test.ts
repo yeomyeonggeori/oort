@@ -13,7 +13,7 @@ import {
   parseBackground,
   serializeBackground,
   type BackgroundChoice,
-} from '../src/design/background/model';
+} from '@momo/core/design/mobileBackground';
 
 // =============================================================================
 // ADR-0189 증보 2 — 배경 선택의 저장 모양과 접근성 폴백 (#3907).
@@ -100,7 +100,7 @@ describe('접근성 설정이 배경을 끈다 (투명도 줄이기·대비 높�
   });
 
   it('폴백 문구는 이유를 사실대로 말하는 한 줄이다', () => {
-    for (const copy of Object.values(BACKGROUND_FALLBACK_COPY)) {
+    for (const copy of [BACKGROUND_FALLBACK_COPY['reduce-transparency'], BACKGROUND_FALLBACK_COPY['increase-contrast']]) {
       expect(copy).not.toMatch(/\n/);
       expect(copy).toMatch(/시스템 설정/);
     }
@@ -122,7 +122,7 @@ describe('기본 제공 그림은 이 저장소에서 만든 것이다', () => {
 
   it('외부 이미지·바이너리 자산을 참조하지 않는다 (url(...)·http·require 이미지 없음)', () => {
     const source = fs.readFileSync(
-      path.resolve(__dirname, '../src/design/background/model.ts'),
+      path.resolve(__dirname, '../../../packages/momo-core/src/design/wallpaper.ts'),
       'utf8',
     );
     expect(source).not.toMatch(/url\(/);

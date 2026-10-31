@@ -1,8 +1,9 @@
-import type {TypingSegment} from '@momo/core/features/chat/typing';
+import {typingLead, typingTail, type TypingSegment} from '@momo/core/features/chat/typing';
 import React from 'react';
-import {StyleSheet, Text} from 'react-native';
-import {font, line as lineScale, SAFE_GUTTER, type Palette} from '../../design/tokens';
+import {StyleSheet, Text, View} from 'react-native';
+import {font, line as lineScale, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {RespondingDots} from '../agents/RespondingDots';
 import {CONV} from './convDesign';
 
 // =============================================================================
@@ -89,8 +90,8 @@ export const TYPING_OVERHANG = lineScale.meta - TYPING_RESERVE;
 /**
  * 컴포저 위 「작성 중」 한 줄.
  *
- * `sentence`는 코어가 지은 완성 문장이다 — 「곽성재님이 작성 중…」,
- * 「곽성재님, 김민수님이 작성 중…」, 「3명이 작성 중…」. 자기 자신은 애초에
+ * 화면 조각은 코어의 `typingVisualSegments`, 낭독 문장은 기존 `typingLabel`을 받는다.
+ * 「A」·「A, B」·「A 외 N명」 뒤에 점과 「작성 중」이 선다. 자기 자신은 애초에
  * 여기 오지 않고(자기가 치는 것을 자기에게 알릴 이유가 없다), TTL이 지난 사람도
  * 오지 않는다(만료는 신호를 들고 있는 쪽의 일이다).
  */
@@ -108,8 +109,7 @@ export function TypingBar({
    * 대부분의 시각 — 사람 줄이 가진 단서는 「작성」과 「작업」을 가르는 한 음절과
    * 「님」뿐이 된다.
    *
-   * 「문장을 짓지 않는다」는 규율은 그대로다. 조각을 **잇지도 않고** 낱말을
-   * 더하지도 않는다 — 받은 것을 순서대로 그리고 `name` 조각만 다르게 칠한다.
+   * 코어의 앞부분·서술어 경계를 그대로 그리고, 이름만 굵은 사람 잉크로 칠한다.
    */
   segments: readonly TypingSegment[];
   /**
@@ -123,40 +123,28 @@ export function TypingBar({
   const styles = useStyles(buildStyles);
   const empty = segments.length === 0;
   return (
-    <Text
-      // `Text`는 그 자체로 접근성 원소다. `View`에 라벨을 붙였다가 아무도 읽지
-      // 않는 라벨을 만든 전례가 이 레포에 있다(`AgentActivityBar` 2R M1).
+    <View
+      accessible={!empty}
       accessibilityRole="text"
-      // 비어 있을 때는 접근성 트리에서도 비어 있어야 한다 — 자리는 예약하되
-      // 보조기술에 빈 원소를 하나 세워 두지는 않는다.
       accessibilityElementsHidden={empty}
       importantForAccessibility={empty ? 'no-hide-descendants' : 'auto'}
-      {...(empty ? {} : {accessibilityLabel: label ?? undefined})}
-      // ---------------------------------------------------------------
-      // `accessibilityLiveRegion` 을 **뺐다** (design-review N-4).
-      //
-      // 그 prop 은 **안드로이드 전용**이다 — iOS 에서는 아무 일도 하지 않는다.
-      // 즉 첫 판의 주석("읽던 문장을 끊지 않고 다음 틈에 말한다")은 이 플랫폼에서
-      // 참인 적이 없었다. 무동작인 채 주석만 남으면 다음 사람이 그 방어가 서
-      // 있다고 믿는다.
-      //
-      // 그리고 **뺀 것이 웹과도 정합한다**: 웹은 같은 줄을 *일부러* live 영역에서
-      // 뺐다(3초마다 재낭독). 「누가 치고 있다」는 남의 말을 자를 만큼 중요하지
-      // 않다 — 그 판단은 유지되고, 이제 코드가 그것을 정직하게 말한다.
-      // ---------------------------------------------------------------
-      numberOfLines={1}
+      accessibilityLabel={empty ? undefined : label ?? segments.map(part => part.text).join('')}
       style={styles.line}
       testID={testID}>
-      {segments.map((segment, index) =>
-        segment.kind === 'name' ? (
-          <Text key={index} style={styles.name}>
-            {segment.text}
+      {!empty ? (
+        <>
+          <Text numberOfLines={1} style={styles.lead}>
+            {typingLead(segments).map((segment, index) => (
+              <Text key={index} style={segment.kind === 'name' ? styles.name : undefined}>
+                {segment.text}
+              </Text>
+            ))}
           </Text>
-        ) : (
-          segment.text
-        ),
-      )}
-    </Text>
+          <RespondingDots />
+          <Text style={styles.tail}>{typingTail(segments)?.text}</Text>
+        </>
+      ) : null}
+    </View>
   );
 }
 
@@ -168,14 +156,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    */
   line: {
     paddingHorizontal: SAFE_GUTTER,
-    fontSize: font.meta,
-    // `textFaint` 는 배경 대비 **3.562:1** 로 본문 AA(4.5)에 못 미친다
-    // (design-review M-6, 실측 확정). `textMuted` 는 6.358:1 이다.
-    // 토큰 전면 재조정은 U2(라이트 모드)의 소관이고, 여기서는 **용례만** 옮긴다.
-    color: color.textMuted,
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: space.xs,
     // 자리 예약의 실체 (H-3): 줄이 비어도 이 높이가 남으므로 아래의 컴포저가
     // 남의 키보드 박자로 움직이지 않는다. 1줄 고정이다.
-    lineHeight: lineScale.meta,
     minHeight: lineScale.meta,
     // 흐름에서는 `TYPING_RESERVE` 만 먹는다 — 줄 상자의 아래 `TYPING_OVERHANG` 는 다음 형제의 위 여백 위에
     // 걸친다(머리말 「예약은 12, 줄 상자는 16」).
@@ -183,5 +168,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   // 이름만 한 급 밝다 (M-4). 「작성」과 「작업」을 가르는 한 음절 말고 **눈에
   // 보이는 축**을 하나 준다 — 에이전트 줄은 이름을 agent 색으로 칠한다.
-  name: {color: color.text, fontWeight: '600'},
+  lead: {flexShrink: 1, fontSize: font.meta, lineHeight: lineScale.meta, color: color.textMuted},
+  tail: {flexShrink: 0, fontSize: font.meta, lineHeight: lineScale.meta, color: color.textMuted},
+  name: {color: color.text, fontWeight: '700'},
 });

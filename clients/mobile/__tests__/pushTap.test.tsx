@@ -948,9 +948,9 @@ describe('승인 푸시로 도착한 카드의 도착 강조는 결정되면 곧
     });
 
     await waitFor(() => expect(landedIds()).toHaveLength(0), SETTLE);
-    // 카드는 그 결정을 말한다 — 컨트롤이 물러나고 칩이 「승인됨」이다.
+    // 카드는 그 결정을 말한다 — 컨트롤이 물러나고 칩이 「끝」이다.
     expect(screen.queryByTestId(`card-approval-${APPROVAL_ID}-approve`)).toBeNull();
-    expect(screen.getByText('승인됨')).toBeTruthy();
+    expect(screen.getByTestId('agent-status-chip')).toHaveTextContent(/^끝$/);
   });
 });
 
@@ -1624,20 +1624,9 @@ function latestPill() {
   return screen.queryByTestId('jump-latest');
 }
 
-/** 필 안의 보이는 문장(화살표 글리프 제외) — `unreadJumpPills.test.tsx` 와 같은 읽기. */
+/** 최신 원의 전체 낭독 문장. 보이는 것은 화살표와 수 뱃지다 (#4789). */
 function latestPillSentence(): string {
-  const pill = screen.getByTestId('jump-latest');
-  const texts = within(pill).queryAllByText(/보기|이동/);
-  const label = texts[texts.length - 1];
-  const flatten = (node: unknown): string => {
-    if (typeof node === 'string' || typeof node === 'number') {
-      return String(node);
-    }
-    if (Array.isArray(node)) return node.map(flatten).join('');
-    const children = (node as {props?: {children?: unknown}})?.props?.children;
-    return children === undefined ? '' : flatten(children);
-  };
-  return flatten(label.props.children);
+  return screen.getByTestId('jump-latest').props.accessibilityLabel;
 }
 
 /** 필이 말하는 문장, 필이 없으면 null — 실패할 때 무엇이 섰는지 원문으로 보인다. */

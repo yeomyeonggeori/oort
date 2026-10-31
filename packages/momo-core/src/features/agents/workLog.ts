@@ -1,3 +1,4 @@
+import { REQUEST_WORD } from "./runPhase";
 import type {
   AgentPartialEvent,
   AgentPhaseWire,
@@ -290,7 +291,7 @@ function appendStatus(
 
   return {
     ...log,
-    // 종료 프레임은 상태를 바꾸지 않는다. 끝난 run에 "작업 중"도 "승인 대기"도
+    // 종료 프레임은 상태를 바꾸지 않는다. 끝난 run에 "작업 중"도 "승인 필요"도
     // 붙일 수 없고, 그 사실은 `closed`가 말한다.
     state: terminal ? log.state : turnStateOf(runStatus),
     phase,
@@ -646,7 +647,7 @@ export function workLogStateLabel(
     }
   }
   if (liveness === "quiet") return "조용함";
-  return log.state === "awaiting_approval" ? "승인 대기" : "작업 중";
+  return log.state === "awaiting_approval" ? REQUEST_WORD.approval : "작업 중";
 }
 
 /** phase 전이 한 줄. 내부 어휘(`streaming`)를 그대로 내보내지 않는다. */
@@ -665,7 +666,7 @@ export function workPhaseLabel(entry: WorkPhaseEntry): string {
         return entry.phase === "error" ? "실패" : "종료";
     }
   }
-  if (entry.runStatus === "awaiting_approval") return "승인 대기";
+  if (entry.runStatus === "awaiting_approval") return REQUEST_WORD.approval;
   if (entry.runStatus === "paused") return "멈춤";
   switch (entry.phase) {
     case "queued":

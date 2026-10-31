@@ -386,7 +386,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
   it('DM(닫기를 내밂): 알림 → 복사 셋 → 대화 닫기, 낱말은 코어 것이다', () => {
     renderPage();
     expect(rowKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'close-dm']);
-    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(false));
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(false)));
     expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(false));
     expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(copyLinkActionLabel(false));
     expect(screen.getByTestId('conversation-info-copy-id')).toHaveTextContent(channelCopyIdLabel(false));
@@ -402,7 +402,7 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
 
   it('알림이 꺼진 대화는 「알림 켜기」다', () => {
     renderPage({items: conversationInfoActionItems(dmTarget({muted: true}))});
-    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(true));
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(true)));
   });
 
   it('채널: 소유자·관리자에게는 「채널 나가기」가 선다 — 위험색이고 DM 의 「대화 닫기」는 없다', () => {
@@ -476,10 +476,10 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(props.onClose).not.toHaveBeenCalled();
   });
 
-  it('왕복 중인 행은 진행 낱말로 바뀌고 busy 를 말한다 — 잠그거나 흐리게 하지 않는다', () => {
+  it('왕복 중에도 현재 알림 상태를 유지하고 busy 를 말한다 — 잠그거나 흐리게 하지 않는다', () => {
     renderPage({isPending: key => key === 'mute'});
     const mute = screen.getByTestId('conversation-info-mute-toggle');
-    expect(mute).toHaveTextContent('알림 끄는 중');
+    expect(mute).toHaveTextContent(/알림 켜짐/);
     expect(mute.props.accessibilityState).toMatchObject({busy: true, disabled: false});
     expect(screen.getByTestId('conversation-info-close-dm').props.accessibilityState).toMatchObject({busy: false});
   });

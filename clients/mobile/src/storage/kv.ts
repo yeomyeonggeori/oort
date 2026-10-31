@@ -157,6 +157,8 @@ export const NON_SECRET_KEYS = {
    * 편의일 뿐이고, 잃으면 기본값 「내 것」으로 열린다.
    */
   workFilter: 'momo.mobile.work.filter.v1',
+  /** Device preference: rich (default), basic or off. No account data. */
+  hapticMode: 'momo.mobile.haptics.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

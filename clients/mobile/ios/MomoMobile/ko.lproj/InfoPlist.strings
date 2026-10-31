@@ -1,0 +1,7 @@
+/* Generated from @momo/core/i18n/catalogs/ko-KR/mobile.json. Do not edit. */
+"NSCameraUsageDescription" = "사진을 찍어 대화에 첨부하거나 QR 코드로 이 기기를 워크스페이스에 연결할 때 카메라를 써요.";
+"NSFaceIDUsageDescription" = "에이전트에게 보내는 지시를 이 기기에서 확인할 때 Face ID를 써요.";
+"NSLocalNetworkUsageDescription" = "같은 네트워크에 있는 oort 서버에 연결할 때 로컬 네트워크를 써요.";
+"NSMicrophoneUsageDescription" = "oort는 소리를 녹음하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요.";
+"NSPhotoLibraryUsageDescription" = "대화에 첨부할 최근 사진을 보여 주고 고르게 하려고 사진 보관함을 읽어요. 고른 사진만 올라가요.";
+"NSPhotoLibraryAddUsageDescription" = "oort는 사진을 보관함에 저장하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요.";
