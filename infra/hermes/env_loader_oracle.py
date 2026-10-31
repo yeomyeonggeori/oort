@@ -4,25 +4,32 @@ The question is not "does the gate give the answer its author expected" but "doe
 For one `.env` (raw bytes), `run` does both and compares them on the judged names only:
 
     Hermes   `hermes_cli.env_loader.load_hermes_dotenv` on a copy of the file, in an environment shaped like the service slot Hermes
-             runs in (it has variables the gate's own shell does not, which is what a `${...}` reference can resolve to). The names
-             it ends with a forbidden value for are `violated`. It rewrites its copy in place; the result is kept for `after`.
+             runs in (it has variables the gate's own shell does not, which is what a `${...}` reference can resolve to). Hermes loads
+             the file again and again and every load rewrites it, so the copy is loaded until a load leaves it as it was (at most
+             `LOAD_CAP` loads, each in a fresh process): the names it ends with a forbidden value for in ANY of those loads are
+             `violated`. Each file the chain went through is also loaded once more as it stands, the clean-up switched off (it leaves
+             some files alone and cannot always write its result): what that applies counts too.
     gate     `volume_env_problems` + `image_volume_env_problems` on ANOTHER copy of the original bytes, in the gate's own environment.
-    missed   violated, but no gate problem names it. The unsafe direction: there must be none.
+    missed   violated, but no gate problem names it. The unsafe direction: there must be none. `missed` is what the first load or the
+             original file as it stands applies; `missed_after` is the rest: what only a later load applies, and the file Hermes
+             leaves behind after j loads (`report` and the next boot read that one), which the gate must name for the loads still to come.
     needless a gate problem names it, but it is not violated. Allowed only for the documented reasons that make the gate refuse MORE
              than Hermes applies (`explain`). Anything else is `unexplained`: that is what keeps "the gate reads the file the way
              Hermes does" true, and what stops a gate that refuses everything from passing.
-    after    the file as Hermes leaves it (it rewrites it, and each load drops a mark more, so it is not the same file) is loaded by Hermes
-             AGAIN, and the gate must name what that second load applies: the file `report` reads after the start, and the next boot.
+    states   the files the chain went through are what the gate's own model of the clean-up (`env_states`) says they are, byte for byte:
+             a model that differs from the loader is `chain_mismatch`, not a quiet pass.
 
 This module has no Hermes and no gate in it: `run` is given both. test_lockgate_env.py tests the plain functions offline, and the
 in-image proof (scripts/tests/fixtures/hermes_image_guard_inimage.py, scenario `env-loader-oracle`) passes the image's own
 `hermes_cli.env_loader`. The policy below spells the judged names out on purpose and does not read them from lockgate.py: a name
 the gate stops judging has to show up here as a miss.
 """
+import contextlib
 import os
 import random
 import re
 import tempfile
+from unittest import mock
 
 BOM = b"\xef\xbb\xbf"
 FEFF = "\ufeff"
@@ -60,7 +67,10 @@ def key_of(name):
 
 
 # --- reading the gate's answer -------------------------------------------------------------------------------------------------
-_PROBLEM_NAME_RE = re.compile(r"the volume's \.env (?:enables|sets(?: an)?) (\S+)")
+# A name in a problem runs up to the next " (" (the reason), " through a reference (" or the end: a proxy name may hold blanks and line ends
+# (a quoted name), so `\S+` would stop inside it and the gate would be said to have missed a name it did name.
+_PROBLEM_NAME_RE = re.compile(r"the volume's \.env (?:enables|sets(?: an)?) (.+?)(?: \(| through a reference \(| shorter than 32 characters|\Z)", re.S)
+_REFERENCE_PROBLEM_RE = re.compile(r"the volume's \.env sets (.+?) through a reference \(", re.S)
 _FILE_LEVEL = ("not valid UTF-8", "cannot parse", "cannot read")  # the gate refuses the whole file
 _REFERENCE_RE = re.compile(r"\$(?:\{|[A-Za-z_])")
 
@@ -77,39 +87,55 @@ def named(problems):
     return names, file_level
 
 
-def _text(raw):
+def _text_with_nuls(raw):
     if raw.startswith((b"\xff\xfe", b"\xfe\xff")) and not raw.startswith((b"\xff\xfe\x00\x00", b"\x00\x00\xfe\xff")):
         text = raw.decode("utf-16", "replace")
     else:
         text = raw.decode("utf-8", "replace")
         text = text[1:] if text.startswith(FEFF) else text  # one mark in front is the encoding's own: every reader strips it
-    return text.replace("\x00", "")
+    return text
 
 
-def explain(raw, name):
+def _text(raw):
+    return _text_with_nuls(raw).replace("\x00", "")
+
+
+def reference_names(problems):
+    """The names the gate's problems refuse for the reference in their value."""
+    return {match.group(1) for match in map(_REFERENCE_PROBLEM_RE.match, problems) if match}
+
+
+def explain(raw, name, refused_for_reference=False):
     """Why the gate may refuse `name` although Hermes ends without a forbidden value for it, or None. Three reasons, all designed:
-    a reference on a line that holds the name (the gate refuses the reference itself); a proxy name with a byte order mark inside
-    it (the gate judges a `*_PROXY` by its ending, no HTTP client reads a variable with a mark in its name); and the two names the
-    volume may not set at all, refused wherever an assignment stands, even one that a later bare `NAME` cancels. Nothing else:
-    in particular no byte order mark anywhere else is an excuse, the gate reads those exactly as many as the loader does."""
+    a reference on a line that holds the name, or, when the gate refused the name for its reference (`refused_for_reference`), anywhere
+    behind the name (a quoted value runs over several lines): the gate refuses the reference itself; a proxy name with a byte order mark inside
+    it (the gate judges a `*_PROXY` by its ending, no HTTP client reads a variable with a mark in its name); the two names the
+    volume may not set at all, refused wherever an assignment stands, even one that a later bare `NAME` cancels; and a NUL in the name
+    or on the line of the name (a file read as it stands holds it, and the loader cannot export such a variable). Nothing else: in
+    particular no byte order mark anywhere else is an excuse, the gate reads those exactly as many as the loader does."""
     text = _text(raw)
     if any(name in line and _REFERENCE_RE.search(line) for line in re.split(r"[\r\n]", text)):
+        return "reference"
+    if refused_for_reference and name in text and _REFERENCE_RE.search(text[text.index(name):]):
         return "reference"
     if FEFF in name and name.upper().endswith("_PROXY"):
         return "mark in a proxy name"
     if name in PRESENT_NAMES and re.search(re.escape(name) + r"'?\s*=", text):
         return "name-only rule"
+    if "\x00" in name or any(name in line and "\x00" in line for line in re.split(r"[\r\n]", _text_with_nuls(raw))):
+        return "NUL in the statement"
     return None
 
 
 def compare(raw, violated, problems):
     """{"file_refused", "missed", "needless": [(name, reason)]}: see the module docstring. A gate that refuses the file as a whole (not
-    UTF-8, unreadable, unparsable) has nothing left to miss."""
+    UTF-8, unreadable, unparsable, never settling) has nothing left to miss."""
     names, file_level = named(problems)
     if file_level:
         return {"file_refused": True, "missed": [], "needless": []}
+    by_reference = reference_names(problems)
     return {"file_refused": False, "missed": sorted(violated - names),
-            "needless": [(name, explain(raw, name) or "unexplained") for name in sorted(names - violated)]}
+            "needless": [(name, explain(raw, name, name in by_reference) or "unexplained") for name in sorted(names - violated)]}
 
 
 # --- the two environments ------------------------------------------------------------------------------------------------------
@@ -121,12 +147,26 @@ SLOT_ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": "/opt/data", "HERMES
 GATE_ENV = {name: value for name, value in SLOT_ENV.items() if name not in ("HERMES_SUPERVISED_CHILD", "HERMES_S6_SUPERVISED_CHILD")}
 GATE_ENV["HOME"] = "/root"
 
+LOAD_CAP = 64  # loads of one file the oracle follows beyond the first: the gate follows `lockgate.ENV_LOAD_CAP` rewrites, so this reaches what it accepts
+CLEANUP_STEP = "_sanitize_env_file_if_needed"  # the loader's clean-up of the file before it parses it: the one step switched off to load a file as it stands
 
-def hermes_load(env_loader, raw, slot_env=None):
+
+@contextlib.contextmanager
+def cleanup_switched(env_loader, on):
+    """With `on` False the loader's clean-up does nothing and the loader parses the file exactly as it stands: what it does with a
+    file the clean-up leaves alone, or cannot write back (read-only folder, no space). A loader without that step has nothing to switch off."""
+    if on or not hasattr(env_loader, CLEANUP_STEP):
+        yield
+        return
+    with mock.patch.object(env_loader, CLEANUP_STEP, new=lambda *args, **kwargs: None):
+        yield
+
+
+def hermes_load(env_loader, raw, slot_env=None, cleanup=True):
     """(the environment Hermes ends up with, the bytes it leaves in the file, the name of the error it raised or None), loading a COPY
     of `raw` with `env_loader.load_hermes_dotenv` as `<home>/.env`. `os.environ` is replaced for the call and put back after it, and the
     loader's own record of earlier passes is cleared, so one case never sees another's output. External secret sources are off and its
-    managed-scope folder is an empty one: the file under test is the only `.env` there is."""
+    managed-scope folder is an empty one: the file under test is the only `.env` there is. `cleanup=False`: see `cleanup_switched`."""
     slot_env = SLOT_ENV if slot_env is None else slot_env
     with tempfile.TemporaryDirectory(prefix="oort-env-oracle-home-") as home, tempfile.TemporaryDirectory(prefix="oort-env-oracle-managed-") as managed:
         path = os.path.join(home, ".env")
@@ -141,7 +181,8 @@ def hermes_load(env_loader, raw, slot_env=None):
             for record in ("_DOTENV_PUBLISHED", "_LOADED_DOTENV_KEYS", "_MANAGED_DOTENV_KEYS"):
                 getattr(env_loader, record, {}).clear()
             try:
-                env_loader.load_hermes_dotenv(hermes_home=home, load_external_secrets=False)
+                with cleanup_switched(env_loader, cleanup):
+                    env_loader.load_hermes_dotenv(hermes_home=home, load_external_secrets=False)
             except BaseException as exc:  # a file Hermes cannot load: whatever it applied before is still what it applied
                 error = type(exc).__name__
             applied = dict(os.environ)
@@ -151,6 +192,24 @@ def hermes_load(env_loader, raw, slot_env=None):
         with open(path, "rb") as handle:
             left = handle.read()
     return applied, left, error
+
+
+def hermes_chain(env_loader, raw, slot_env=None, cap=LOAD_CAP):
+    """The loads Hermes makes of one file, each in a fresh process (`hermes_load`), following the file until a load leaves it as it was:
+    {"states": [the file before load 1, before load 2, ...], "loads": [the environment each load ended with], "error": the name of the
+    error a load raised, or None, "settled": whether a load left the file as it was within `cap` + 1 loads}. `states[i]` is the file load
+    `i` + 1 was given."""
+    states, loads, current = [raw], [], raw
+    for _ in range(cap + 1):
+        applied, left, error = hermes_load(env_loader, current, slot_env)
+        if error:
+            return {"states": states, "loads": loads, "error": error, "settled": False}
+        loads.append(applied)
+        if left == current:
+            return {"states": states, "loads": loads, "error": None, "settled": True}
+        states.append(left)
+        current = left
+    return {"states": states, "loads": loads, "error": None, "settled": False}
 
 
 def gate_view(lockgate, raw, lookup_env=None):
@@ -165,27 +224,41 @@ def gate_view(lockgate, raw, lookup_env=None):
 
 
 # What a table label promises about the loader. `run` checks the promise against the loader's own result, so a row cannot rot: an
-# "applied" row the loader no longer applies, or an "inert" one it does, is `wrong_labels`, not a quiet pass.
-CLAIMS = (("applied:", True), ("mark applied:", True), ("inert:", False), ("mark kept:", False), ("mark control:", False))
+# "applied" row the loader no longer applies, or an "inert" one it does, is `wrong_labels`, not a quiet pass. "first": the first load
+# applies it. "later": the first load does not, a later one does. "as it stands": no load does, the file read as it stands does.
+# "never": neither does.
+CLAIMS = (("applied:", "first"), ("mark applied:", "first"), ("later applied:", "later"), ("as-is applied:", "as it stands"),
+          ("inert:", "never"), ("mark kept:", "never"), ("mark control:", "never"))
 
 
 def claim_of(label):
-    for prefix, applied in CLAIMS:
+    for prefix, claim in CLAIMS:
         if label.startswith(prefix):
-            return applied
+            return claim
     return None
 
 
+def claim_holds(claim, first, loaded, as_stands):
+    """Whether `claim` is true of what the first load (`first`), all loads (`loaded`) and the files read as they stand (`as_stands`) applied."""
+    return {"first": bool(first), "later": not first and bool(loaded), "as it stands": not loaded and bool(as_stands),
+            "never": not loaded and not as_stands}[claim]
+
+
 def run(env_loader, lockgate, cases, slot_env=None, gate_env=None, examples=6):
-    """Compare the gate with the loader on every `(label, raw)` of `cases`. The summary is JSON-able. `ok` is the verdict: no miss, no
-    miss on the file the loader left behind (`missed_after`), nothing unexplained, no table label the loader contradicts. The other counts are for the
-    caller's positive controls (a comparison of nothing against nothing passes): `violating` cases (the loader applied something
-    forbidden), `clean` ones (nothing forbidden and the gate said nothing), and `detected` (the judged keys that were violated and
-    named at least once). Examples are capped."""
-    kinds = ("missed", "missed_after", "unexplained", "wrong_labels")
-    summary = {"cases": 0, "hermes_errors": 0, "violating": 0, "clean": 0, "file_refused": 0, "needless": {}, "detected": set(),
-               "examples": {kind: [] for kind in kinds}}
+    """Compare the gate with the loader on every `(label, raw)` of `cases`. The summary is JSON-able. `ok` is the verdict: no miss (`missed`
+    on what the first load or the file as it stands applies, `missed_after` on the rest), nothing unexplained, no table label the loader
+    contradicts, no file whose chain the gate's model gets wrong (`chain_mismatch`), none that the gate accepts and the loader never
+    settles (`unsettled`). The other counts are for the caller's positive controls (a comparison of nothing against nothing passes):
+    `violating` cases (some load, or the file as it stands, applied something forbidden), `clean` ones (nothing forbidden and the gate said
+    nothing), `later_only` (what only a later load, or a later file as it stands, applied), `as_stands_only` (what only the files read as
+    they stand applied), `states_compared` (chains the gate's model was held to), `loads` (how many loads the chains took) and `detected`
+    (the judged keys that were violated and named at least once). Examples are capped."""
+    kinds = ("missed", "missed_after", "unexplained", "wrong_labels", "chain_mismatch", "unsettled")
+    summary = {"cases": 0, "hermes_errors": 0, "as_stands_errors": 0, "violating": 0, "clean": 0, "file_refused": 0, "later_only": 0,
+               "as_stands_only": 0, "states_compared": 0, "loads": {}, "needless": {}, "detected": set(), "load_cap": LOAD_CAP,
+               "cleanup_step_found": hasattr(env_loader, CLEANUP_STEP), "examples": {kind: [] for kind in kinds}}
     summary.update({kind: 0 for kind in kinds})
+    model = getattr(lockgate, "env_states", None)
 
     def keep(kind, label, raw, *extra):
         if len(summary["examples"][kind]) < examples:
@@ -193,38 +266,68 @@ def run(env_loader, lockgate, cases, slot_env=None, gate_env=None, examples=6):
 
     for label, raw in cases:
         summary["cases"] += 1
-        applied, left, error = hermes_load(env_loader, raw, slot_env)
-        if error:
+        chain = hermes_chain(env_loader, raw, slot_env)
+        if chain["error"]:
             summary["hermes_errors"] += 1
             continue
-        violated = violations(applied)
+        problems = gate_view(lockgate, raw, gate_env)
+        names, file_level = named(problems)
+        if not chain["settled"]:  # Hermes keeps changing the file: the gate has to refuse it as a whole, it cannot be proven otherwise
+            if file_level:
+                summary["file_refused"] += 1
+            else:
+                summary["unsettled"] += 1
+                keep("unsettled", label, raw, len(chain["loads"]))
+            continue
+        states = chain["states"]
+        loaded = [violations(applied) for applied in chain["loads"]]
+        as_stands = []
+        for state in states:
+            applied, _left, error = hermes_load(env_loader, state, slot_env, cleanup=False)
+            summary["as_stands_errors"] += bool(error)  # what it applied before it stopped still counts
+            as_stands.append(violations(applied))
+        summary["loads"][str(len(loaded))] = summary["loads"].get(str(len(loaded)), 0) + 1
+        ever_loaded, ever_as_stands = set().union(*loaded), set().union(*as_stands)
+        violated, first = ever_loaded | ever_as_stands, loaded[0] | as_stands[0]
         claim = claim_of(label)
-        if claim is not None and claim != bool(violated):
+        if claim is not None and not claim_holds(claim, loaded[0], ever_loaded, ever_as_stands):
             summary["wrong_labels"] += 1
             keep("wrong_labels", label, raw, sorted(violated))
-        problems = gate_view(lockgate, raw, gate_env)
         verdict = compare(raw, violated, problems)
         summary["file_refused"] += verdict["file_refused"]
         if violated:
             summary["violating"] += 1
         elif not problems:
             summary["clean"] += 1
-        if verdict["missed"]:
+        summary["later_only"] += bool(violated - first)
+        summary["as_stands_only"] += bool(ever_as_stands - ever_loaded)
+        if model is not None:  # the gate's own model of the clean-up has to produce the files the loader produced
+            modelled = model(raw)
+            if modelled is not None:
+                summary["states_compared"] += 1
+                if modelled != states:
+                    summary["chain_mismatch"] += 1
+                    keep("chain_mismatch", label, raw, len(modelled), len(states))
+        if verdict["file_refused"]:
+            continue
+        if first - names:
             summary["missed"] += 1
-            keep("missed", label, raw, verdict["missed"])
+            keep("missed", label, raw, sorted(first - names))
+        later_missed = sorted((violated - first) - names)
+        for index in range(1, len(states)):  # the file Hermes leaves behind after `index` loads: what `report` and the next boot read
+            names_here, file_level_here = named(gate_view(lockgate, states[index], gate_env))
+            ahead = set().union(*loaded[index:], *as_stands[index:])
+            if not file_level_here and ahead - names_here:
+                later_missed.append("%s (file after %d loads)" % (",".join(sorted(ahead - names_here)), index))
+        if later_missed:
+            summary["missed_after"] += 1
+            keep("missed_after", label, raw, later_missed)
         for name, why in verdict["needless"]:
             summary["needless"][why] = summary["needless"].get(why, 0) + 1
             if why == "unexplained":
                 summary["unexplained"] += 1
                 keep("unexplained", label, raw, name)
-        if not verdict["file_refused"]:
-            summary["detected"].update(key_of(name) for name in violated & named(problems)[0])
-        again, _left_again, again_error = hermes_load(env_loader, left, slot_env)
-        if not again_error:
-            after = compare(left, violations(again), gate_view(lockgate, left, gate_env))
-            if after["missed"] and not after["file_refused"]:
-                summary["missed_after"] += 1
-                keep("missed_after", label, raw, after["missed"], repr(left)[:160])
+        summary["detected"].update(key_of(name) for name in violated & names)
     summary["detected"] = sorted(summary["detected"])
     summary["ok"] = not any(summary[kind] for kind in kinds)
     return summary
@@ -317,9 +420,8 @@ def byte_order_mark_shapes(line):
         ("a mark, a blank, a mark", BOM + b" " + BOM + body),
         ("utf-16 with a mark, then a second mark", b"\xff\xfe" + (FEFF + line + "\n").encode("utf-16-le")),
         ("utf-16 big endian with a mark, then a second mark", b"\xfe\xff" + (FEFF + line + "\n").encode("utf-16-be")),
-        # Marks that stay in front of the first name end that statement early for Hermes (it is dropped up to its line end), so the
-        # next line is a statement of its own; a reader that dropped every mark would read an open quote there and swallow it.
-        ("marks left in front move where the first statement ends", BOM + BOM + BOM + b" " + b'OORT_ORACLE_Q="x\n' + body + b'"\n'),
+        # Marks left in front of the first name, then a statement the loader does not finish: measured on the real loader.
+        ("marks left in front of an unfinished statement", BOM + BOM + BOM + b" " + b'OORT_ORACLE_Q="x\n' + body + b'"\n'),
     ]
     for label, blank in (("blank", b" "), ("tab", b"\t"), ("file separator", b"\x1c"), ("form feed", b"\x0c"),
                          ("NEL", "\x85".encode("utf-8")), ("U+2028", "\u2028".encode("utf-8")), ("no-break space", "\xa0".encode("utf-8"))):
@@ -336,17 +438,63 @@ def byte_order_mark_shapes(line):
     return applied, kept, control
 
 
+FFFD = "\ufffd".encode("utf-8")  # a real U+FFFD as the first character: the loader's clean-up leaves such a file alone
+QUOTE_LINE = b'\x00 OORT_ORACLE_Q="x\n'  # a line with a NUL and a quote that is never closed on it
+
+
+def pair_run(blank, count):
+    """`count` times (a blank, a byte order mark), as bytes."""
+    return (blank + BOM) * count
+
+
+def chain_shapes(line):
+    """(later, skipped, as_stands) lists of `(label, raw)` for one assignment `line` (text, no newline), measured against Hermes
+    v0.22.2's real loader, which loads the file more than once in its life. `later`: the first load applies nothing under the name, a
+    later one does. `skipped`: the first character is U+FFFD, the clean-up leaves the file alone, and the first load applies the name.
+    `as_stands`: only a load of the file as it stands applies the name (a clean-up that could not write its result back)."""
+    body = (line + "\n").encode("utf-8")
+    later = [("%d blank-and-mark pairs" % count, pair_run(b" ", count) + body) for count in (2, 3, 4, 8, 16)]
+    later += [
+        ("3 tab-and-mark pairs", pair_run(b"\t", 3) + body),
+        ("3 file-separator-and-mark pairs", pair_run(b"\x1c", 3) + body),
+        ("a mark, then 3 blank-and-mark pairs", BOM + pair_run(b" ", 3) + body),
+        ("3 blank-and-mark pairs, a second line the clean-up rewrites", pair_run(b" ", 3) + body + b" OORT_ORACLE_X=1\n"),
+        ("utf-16 with 3 blank-and-mark pairs", b"\xff\xfe" + ((" " + FEFF) * 3 + line + "\n").encode("utf-16-le")),
+        ("utf-16 big endian with 4 blank-and-mark pairs", b"\xfe\xff" + ((" " + FEFF) * 4 + line + "\n").encode("utf-16-be")),
+    ]
+    skipped = [
+        ("first character U+FFFD, a NUL line, an open quote", FFFD + b"\n" + QUOTE_LINE + body + b'"\n'),
+        ("a mark, U+FFFD, a NUL line, an open quote", BOM + FFFD + b"\n" + QUOTE_LINE + body + b'"\n'),
+        ("first character U+FFFD, a blank, a NUL line, an open quote", FFFD + b" \n" + QUOTE_LINE + body + b'"\n'),
+        ("first character U+FFFD, the assignment on the next line", FFFD + b"\n" + body),
+    ]
+    as_stands = [
+        ("a NUL line and an open quote", b"OORT_ORACLE_X=1\n" + QUOTE_LINE + body + b'"\n'),
+        ("a NUL line and an open quote, a blank before the name", b"OORT_ORACLE_X=1\n" + QUOTE_LINE + b" " + body + b'"\n'),
+    ]
+    return later, skipped, as_stands
+
+
 def table_cases():
-    """The named inputs, for every judged name: the spellings Hermes applies and ignores, references, and byte order marks."""
+    """The named inputs, for every judged name: the spellings Hermes applies and ignores, references, byte order marks, the loads that
+    come after the first, and the files its clean-up leaves alone or cannot write."""
     cases = shape_cases(APPLIED, "applied") + shape_cases(INERT, "inert") + shape_cases(REFERENCES, "reference")
     for name, value, _good in JUDGED:
         applied, kept, control = byte_order_mark_shapes("%s=%s" % (name, value))
-        for kind, shapes in (("mark applied", applied), ("mark kept", kept), ("mark control", control)):
+        later, skipped, as_stands = chain_shapes("%s=%s" % (name, value))
+        for kind, shapes in (("mark applied", applied), ("mark kept", kept), ("mark control", control), ("later applied", later),
+                             ("applied", skipped), ("as-is applied", as_stands)):
             cases.extend(("%s: %s: %s" % (kind, name, label), raw) for label, raw in shapes)
+    # at the edge of what the oracle follows: a file that settles in the last load it makes (the gate must name what it applies), and files
+    # that are still changing after it (the gate must refuse the file as a whole, whatever it holds)
+    for count, kind, tail in ((LOAD_CAP, "later applied", b"HERMES_SAFE_MODE=on\n"), (LOAD_CAP + 1, "unbounded", b"HERMES_SAFE_MODE=on\n"),
+                              (LOAD_CAP + 6, "unbounded", b"OORT_ORACLE_X=1\n")):
+        cases.append(("%s: %d blank-and-mark pairs, at the load cap" % (kind, count), pair_run(b" ", count) + tail))
     return cases
 
 
-_PREFIXES = ("", "", "", "export ", "export\t", " ", "\t", "#", "# ", "\x0c", "\x85", "\x1c", FEFF, " " + FEFF, "\t" + FEFF, FEFF + FEFF)
+_PREFIXES = ("", "", "", "export ", "export\t", " ", "\t", "#", "# ", "\x0c", "\x85", "\x1c", FEFF, " " + FEFF, "\t" + FEFF, FEFF + FEFF,
+             (" " + FEFF) * 3, ("\t" + FEFF) * 3, ("\x1c" + FEFF) * 4)  # runs of (blank, mark): one pair comes off per load
 _SEPARATORS = ("=", "=", "=", " = ", "= ", " =", "==", "\t=\t", " ")
 _ENDS = ("\n", "\n", "\n", "\r\n", "\r", "", " ", "\n\n", " \n", "\\\n", "\n#\n", "\x0b", "\x0c", "\x85")
 _VALUES = ("1", "true", "yes", "on", "0", "false", "no", "off", "", " 1 ", "'1'", '"1"', "1 # c", "1#c", "'1' # c", '"1" x', "'1", '"1',
@@ -356,11 +504,15 @@ _VALUES = ("1", "true", "yes", "on", "0", "false", "no", "off", "", " 1 ", "'1'"
 _NOISE_NAMES = ("OORT_ORACLE_A", "OORT_ORACLE_B", "NO_PROXY", "OPENROUTER_API_KEY")
 
 
+_BLANKS = (" ", "\t", "\x1c", "\x0c", "\x85", "\xa0")
+
+
 def random_cases(seed, count):
-    """`count` seeded random `.env` inputs. The alphabet has what a review found missing from the earlier ones: U+FEFF in front of a
-    name (alone, behind blanks, doubled), `${...}` / `$NAME` in values, a line the loader's clean-up rewrites, and the encodings
-    (marks, UTF-16 with and without a mark, bytes that are not UTF-8). Names without a mark inside values, so Hermes' ASCII-only
-    clean-up of credentials never makes the oracle's own answer uncertain."""
+    """`count` seeded random `.env` inputs. The alphabet has what the reviews found missing from the earlier ones: U+FEFF in front of a
+    name (alone, behind blanks, doubled, in runs of (blank, mark) three to nine long), U+FFFD as the first character, a NUL line next to
+    a quote that is never closed, `${...}` / `$NAME` in values, a line the loader's clean-up rewrites, and the encodings (marks, UTF-16
+    with and without a mark, bytes that are not UTF-8). Names without a mark inside values, so Hermes' ASCII-only clean-up of
+    credentials never makes the oracle's own answer uncertain."""
     rnd = random.Random(seed)
     names = [name for name, _v, _g in JUDGED] + list(_NOISE_NAMES)
     out = []
@@ -375,7 +527,16 @@ def random_cases(seed, count):
             statements.insert(rnd.randint(0, len(statements)), " OORT_ORACLE_X=1\n")
         if rnd.random() < 0.08:
             statements.insert(rnd.randint(0, len(statements)), rnd.choice(["\x00", "'", '"', "\\", "\n", "#", " "]))
+        if rnd.random() < 0.10:  # a NUL line and a quote that is never closed on it, the statements after it, maybe a quote that closes
+            at = rnd.randint(0, len(statements))
+            statements.insert(at, rnd.choice(["\x00 OORT_ORACLE_Q=\"x\n", "\x00 OORT_ORACLE_Q='x\n", "\x00 \"\n", "X=1\x00 Q=\"x\n"]))
+            if rnd.random() < 0.6:
+                statements.insert(rnd.randint(at + 1, len(statements)), rnd.choice(['"\n', "'\n", 'x"\n']))
         text = "".join(statements)
+        if rnd.random() < 0.08:  # a run of (blank, mark) pairs in front of everything: each load takes one pair off
+            text = (rnd.choice(_BLANKS) + FEFF) * rnd.randint(3, 9) + text
+        if rnd.random() < 0.10:  # U+FFFD as the first character: the clean-up leaves the file alone
+            text = "\ufffd" + rnd.choice(["", "\n", " \n", " ", "=", "\x00\n"]) + text
         mode = rnd.random()
         if mode < 0.58:
             raw = text.encode("utf-8")

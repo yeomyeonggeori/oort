@@ -41,10 +41,13 @@ true/yes/on, but one spelling leaves no judgement about what an operator meant) 
 re-checks both on the live volume. The worker half is `OORT_HOSTED_MEDIA_STRICT` (the door opens only with both).
 
 The volume's `.env` (#4886). Hermes loads `<HERMES_HOME>/.env` after this gate ran and its values replace what was judged, so the file
-is read the way Hermes reads it (hermes_cli/env_loader.py, v0.22.2): `env_text` (its decoding and the NUL / whitespace clean-up it
-applies before loading), python-dotenv's own statement parser with interpolation off (the image's module; outside the image, e.g. the
-offline tests, a fallback with the same grammar), then the `${VAR}` / `${VAR:-default}` references resolved the way Hermes resolves them
-right after parsing (against the environment and the file's earlier values), the last assignment of a name winning. A name this gate
+is read the way Hermes reads it (hermes_cli/env_loader.py, v0.22.2): `env_cleanup` (its decoding and the NUL / whitespace clean-up it
+applies before loading, one load at a time), python-dotenv's own statement parser with interpolation off (the image's module; outside
+the image, e.g. the offline tests, a fallback with the same grammar), then the `${VAR}` / `${VAR:-default}` references resolved the way
+Hermes resolves them right after parsing (against the environment and the file's earlier values), the last assignment of a name
+winning. Hermes loads the file more than once and each load rewrites it, so the gate follows the file through those loads
+(`env_states`, at most `ENV_LOAD_CAP`; one that is still changing then is refused) and judges every text a load may parse
+(`env_texts`: each state of the file, cleaned up and as it stands), the problems of all of them together. A name this gate
 judges may not be given a value that holds a reference at all (`${...}` or `$NAME`): Hermes resolves `${...}` in ITS process environment,
 which has variables this gate's shell does not (its service slot adds some), so what the gate computed and what Hermes ends with can
 differ, and nothing can be proven about such a value from here. The data folder this gate reads must be Hermes' own `$HERMES_HOME`,
@@ -358,45 +361,106 @@ def env_parser():
     return {"impl": "python-dotenv", "version": _DOTENV_VERSION} if _DotEnv is not None else {"impl": "fallback"}
 
 
-def env_text(raw):
-    """The text Hermes' loader ends up parsing for these bytes (hermes_cli/env_loader.py v0.22.2), or None when that is not one
-    answer. UTF-16 is decoded by its byte order mark, anything else as `utf-8-sig`; bytes that are not UTF-8 give None: its
-    sanitizer may rewrite such a file in place (bad bytes become U+FFFD) or leave it for the loader to read as Latin-1, the two
-    texts differ, and no reading of either one would be safe. Then the two things its sanitizer does to a text: NUL bytes are
-    dropped and every line that is neither blank nor a comment is stripped (lines end at CRLF, CR or LF only, not at the other
-    separators `str.splitlines` knows). It never splits a line in v0.22.2.
+ENV_LOAD_CAP = 64  # how many loads of Hermes' clean-up the gate follows; a file still being changed after that many is refused
+ENV_NOT_UTF8 = ("the volume's .env is not valid UTF-8 (Hermes may repair it in place or read it as Latin-1, and the gate cannot "
+                "tell which)")
+ENV_NOT_SETTLED = (f"cannot parse the volume's .env: Hermes' clean-up is still changing it after {ENV_LOAD_CAP} loads, so what it "
+                   "ends up holding is not known")
+_UTF16_BOMS = (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)
+_UTF32_BOMS = (codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)
 
-    Then the byte order marks, exactly as many as the loader strips and no more. `str.strip` does not count U+FEFF as blank, so after
-    the clean-up a mark can sit at the front of the first line (a second mark, or one behind blanks the clean-up stripped). When the
-    sanitizer REWRITES the file (a NUL, a line it changed, a last line with no newline, any UTF-16 file), the loader decodes the new
-    file as `utf-8-sig` once more and strips one mark; when it does not rewrite, the loader reads the original bytes and the one
-    mark `utf-8-sig` took above is all that went. A mark that stays is part of the first name for Hermes and is read as such here:
-    dropping every leading mark instead would read that name differently and could move where the first statement ends, which moves
-    the statements after it. A mark anywhere else stays too, as it does for Hermes: there it makes another name."""
-    text, utf16 = None, False
-    if raw.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)) and not raw.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
-        try:
-            text, utf16 = raw.decode("utf-16"), True
-        except UnicodeDecodeError:
-            text = None
-    if text is None:
-        try:
-            text = raw.decode("utf-8-sig")
-        except UnicodeDecodeError:
-            return None
-    lines = text.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    complete = lines[-1] == ""  # the text is empty or ends with a newline
-    if complete:
-        lines.pop()
-    kept = []
-    for line in lines:
-        stripped = line.strip()
-        kept.append(line if not stripped or stripped.startswith("#") else stripped)
-    cleaned = "".join(line + "\n" for line in kept)
-    rewritten = utf16 or "\x00" in text or not complete or kept != lines
-    if rewritten and cleaned.startswith("\ufeff"):
-        cleaned = cleaned[1:]
-    return cleaned
+
+def _universal_lines(text):
+    """`readlines()` of a text file read with universal newlines: a line ends at CRLF, CR or LF and nowhere else (`str.splitlines`
+    knows more separators; Hermes' clean-up does not)."""
+    parts = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return [part + "\n" for part in parts[:-1]] + ([parts[-1]] if parts[-1] else [])
+
+
+def env_cleanup(raw):
+    """The bytes the volume's `.env` holds once ONE load of Hermes' loader has run its clean-up on `raw` (hermes_cli/env_loader.py
+    v0.22.2, `_sanitize_env_file_if_needed`), or None when the gate cannot say which file that is: bytes that are not UTF-8 (the
+    clean-up may repair them in place or leave them for the loader to read as Latin-1, and the two texts differ), UTF-32, UTF-16 that
+    does not decode.
+
+    UTF-16 is decoded by its byte order mark and always rewritten as UTF-8, anything else is read as `utf-8-sig`. A file whose first
+    character is U+FFFD is left alone. Otherwise NUL bytes are dropped and every line that is neither blank nor a comment is stripped
+    (lines end at CRLF, CR or LF only), and the file is rewritten only when that changed something. The result goes back through the
+    same function on the next load, so this is one step of a chain (`env_states`)."""
+    if raw.startswith(_UTF32_BOMS):
+        return None
+    utf16 = raw.startswith(_UTF16_BOMS)
+    try:
+        text = raw.decode("utf-16" if utf16 else "utf-8-sig")
+    except UnicodeDecodeError:
+        return None
+    original = _universal_lines(text)
+    if not utf16 and original and original[0].startswith("\ufffd"):
+        return raw
+    sanitized = []
+    for line in original:
+        body = line.replace("\x00", "").rstrip("\r\n")
+        stripped = body.strip()
+        sanitized.append((body if not stripped or stripped.startswith("#") else stripped) + "\n")
+    return "".join(sanitized).encode("utf-8") if utf16 or sanitized != original else raw
+
+
+def _env_chain(raw):
+    """`(states, None)`, or `(None, the problem to report)`: see `env_states`."""
+    states = [raw]
+    while True:
+        step = env_cleanup(states[-1])
+        if step is None:
+            return None, ENV_NOT_UTF8
+        if step == states[-1]:
+            return states, None
+        if len(states) > ENV_LOAD_CAP:
+            return None, ENV_NOT_SETTLED
+        states.append(step)
+
+
+def env_states(raw):
+    """The files the volume's `.env` goes through: `[raw, the file after one load, after two, ...]` up to the first one that a
+    further load leaves as it is. Hermes loads the file several times in its life and every load cleans it up in place, so the next
+    load reads the cleaned file. None when `env_cleanup` cannot say (not UTF-8 ...) or when the file is still being changed after
+    `ENV_LOAD_CAP` loads."""
+    return _env_chain(raw)[0]
+
+
+def env_loaded_text(raw):
+    """The text Hermes' loader parses for a file holding `raw` (`_load_dotenv_with_fallback`): `utf-8-sig`, else Latin-1."""
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.removeprefix(codecs.BOM_UTF8).decode("latin-1")
+
+
+def env_text(raw):
+    """The text Hermes' FIRST load parses for these bytes (the clean-up has run and the loader reads what it left), or None when the
+    gate cannot say (`env_cleanup`)."""
+    step = env_cleanup(raw)
+    return None if step is None else env_loaded_text(step)
+
+
+def _env_texts(raw):
+    """`(texts, None)` or `(None, the problem to report)`: see `env_texts`."""
+    states, problem = _env_chain(raw)
+    if states is None:
+        return None, problem
+    texts = []
+    for state in [states[1] if len(states) > 1 else states[0]] + states:
+        text = env_loaded_text(state)
+        if text not in texts:
+            texts.append(text)
+    return texts, None
+
+
+def env_texts(raw):
+    """Every text Hermes' loader may parse for these bytes over its life, the one its first load parses first; None as `env_states`.
+    There is one for each file of the chain (`env_states`), read as the file stands: a later load reads what the earlier loads left,
+    and the clean-up leaves some files alone or cannot write its result, so the loader then reads a file nobody cleaned. The volume's
+    `.env` is judged by all of them, never by the first alone."""
+    return _env_texts(raw)[0]
 
 
 def _resolve_references(assignments, lookup_env):
@@ -416,27 +480,47 @@ def _none_is_empty(value):
     return "" if value is None else value
 
 
-def _read_env_file(env_path, lookup_env=None):
-    """(assignments, pairs, problems) of the volume's `.env`. `assignments` are `(name, value)` per statement in file order as the parser
-    gave them, BEFORE any `${...}` is resolved; `pairs` are the same statements after Hermes' own resolution, read the way Hermes
-    reads the file (see the module docstring). `value` is None for a bare `NAME`: Hermes sets nothing for it. A name may repeat; the
-    last one is in force (callers use `dict(pairs)`). `lookup_env` is the environment `${NAME}` references resolve against (default:
-    this process). A missing file is fine (nothing there); an unreadable one, or one that is not valid UTF-8 (`env_text`), is a problem."""
+def _read_env_readings(env_path, lookup_env=None):
+    """`([(assignments, pairs)], problems)` of the volume's `.env`: one reading for each text Hermes' loader may parse over its life
+    (`env_texts`, the one its first load parses first). `assignments` are `(name, value)` per statement in file order as the parser gave
+    them, BEFORE any `${...}` is resolved; `pairs` are the same statements after Hermes' own resolution (see the module docstring).
+    `value` is None for a bare `NAME`: Hermes sets nothing for it. A name may repeat; the last one is in force (callers use
+    `dict(pairs)`). `lookup_env` is the environment `${NAME}` references resolve against (default: this process). A missing file is
+    fine (nothing there); an unreadable one, one that is not valid UTF-8 or never stops being changed (`env_texts`), or one the parser
+    cannot read, is a problem and has no readings."""
     try:
         with open(env_path, "rb") as handle:
             raw = handle.read()
     except FileNotFoundError:
-        return [], [], []
+        return [], []
     except OSError as exc:
-        return [], [], [f"cannot read {env_path}: {type(exc).__name__}"]
-    text = env_text(raw)
-    if text is None:
-        return [], [], ["the volume's .env is not valid UTF-8 (Hermes may repair it in place or read it as Latin-1, and the gate cannot tell which)"]
-    try:
-        assignments = dotenv_assignments(text)
-    except Exception as exc:  # a file the parser could not read is never taken for an empty one
-        return [], [], [f"cannot parse the volume's .env: {type(exc).__name__}"]
-    return assignments, _resolve_references(assignments, os.environ if lookup_env is None else lookup_env), []
+        return [], [f"cannot read {env_path}: {type(exc).__name__}"]
+    texts, problem = _env_texts(raw)
+    if texts is None:
+        return [], [problem]
+    lookup = os.environ if lookup_env is None else lookup_env
+    readings = []
+    for text in texts:
+        try:
+            assignments = dotenv_assignments(text)
+        except Exception as exc:  # a file the parser could not read is never taken for an empty one
+            return [], [f"cannot parse the volume's .env: {type(exc).__name__}"]
+        readings.append((assignments, _resolve_references(assignments, lookup)))
+    return readings, []
+
+
+def _read_env_file(env_path, lookup_env=None):
+    """(assignments, pairs, problems) of the volume's `.env` as Hermes' FIRST load reads it: the first reading of `_read_env_readings`."""
+    readings, problems = _read_env_readings(env_path, lookup_env)
+    assignments, pairs = readings[0] if readings else ([], [])
+    return assignments, pairs, problems
+
+
+def _add_new(problems, more):
+    """`more` appended to `problems`, each problem once (several readings of one file name the same thing in the same words)."""
+    for problem in more:
+        if problem not in problems:
+            problems.append(problem)
 
 
 def _read_env_pairs(env_path, lookup_env=None):
@@ -487,17 +571,10 @@ def _credential_length(value):
     return len(str(value).strip().encode("ascii", "ignore"))
 
 
-def volume_env_problems(env_path, lookup_env=None):
-    """Invariants a reused volume's own `.env` could undo after the gate passed (#4072 review M2).
-
-    Hermes loads `<volume>/.env` after this gate has judged a scratch home, so a volume that was used by a
-    less strict Hermes can carry YOLO / dashboard / CORS / a short API key. A fresh volume has no such lines.
-    Judged on what Hermes ends up with (#4886): the file read as it reads it, the last assignment of a name in force, a bare
-    `NAME` setting nothing. A judged name whose value holds a reference (`${...}`, `$NAME`) is refused for that, once, instead of
-    being judged by a value resolved in an environment that is not Hermes' (`_referenced_names`). Only names are returned, never
-    values. A missing file is fine (nothing there); an unreadable one is not."""
+def _volume_reading_problems(assignments, pairs):
+    """The invariants of `volume_env_problems` for ONE reading of the file."""
     where = "the volume's .env"
-    assignments, pairs, problems = _read_env_file(env_path, lookup_env)
+    problems = []
     final = dict(pairs)
     referenced = _referenced_names(assignments, lambda name: name in VOLUME_ENV_JUDGED)
     problems.extend(_reference_problem(where, name) for name in referenced)
@@ -512,6 +589,23 @@ def volume_env_problems(env_path, lookup_env=None):
     for key in IMAGE_KEY_ENV_NAMES:
         if key not in referenced and str(final.get(key) or "").strip():
             problems.append(f"{where} sets {key} (another image provider's credential)")
+    return problems
+
+
+def volume_env_problems(env_path, lookup_env=None):
+    """Invariants a reused volume's own `.env` could undo after the gate passed (#4072 review M2).
+
+    Hermes loads `<volume>/.env` after this gate has judged a scratch home, so a volume that was used by a
+    less strict Hermes can carry YOLO / dashboard / CORS / a short API key. A fresh volume has no such lines.
+    Judged on what Hermes ends up with (#4886): the file read as it reads it, the last assignment of a name in force, a bare
+    `NAME` setting nothing. Hermes loads the file more than once and every load cleans it up in place, so the file is judged as EVERY
+    load may read it (`_read_env_readings`): the problems of all of its readings, each once. A judged name whose value holds a
+    reference (`${...}`, `$NAME`) is refused for that, once, instead of being judged by a value resolved in an environment that is not
+    Hermes' (`_referenced_names`). Only names are returned, never values. A missing file is fine (nothing there); an unreadable one is
+    not."""
+    readings, problems = _read_env_readings(env_path, lookup_env)
+    for assignments, pairs in readings:
+        _add_new(problems, _volume_reading_problems(assignments, pairs))
     return problems
 
 
@@ -597,9 +691,12 @@ def image_environment_problems(pairs, where, volume=False, referenced=()):
 
 
 def image_volume_env_problems(env_path, lookup_env=None):
-    assignments, pairs, problems = _read_env_file(env_path, lookup_env)
-    referenced = _referenced_names(assignments, lambda name: name in IMAGE_ENV_FLAG_REASONS or _is_proxy_name(name))
-    return problems + image_environment_problems(pairs, "the volume's .env", volume=True, referenced=referenced)
+    """`image_environment_problems` for the volume's `.env`, judged as every load of Hermes may read it, like `volume_env_problems`."""
+    readings, problems = _read_env_readings(env_path, lookup_env)
+    for assignments, pairs in readings:
+        referenced = _referenced_names(assignments, lambda name: name in IMAGE_ENV_FLAG_REASONS or _is_proxy_name(name))
+        _add_new(problems, image_environment_problems(pairs, "the volume's .env", volume=True, referenced=referenced))
+    return problems
 
 
 def image_ssrf_config_problems(cfg):

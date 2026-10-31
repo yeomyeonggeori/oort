@@ -300,7 +300,39 @@ READ_TABLE = [
     ("utf-16 with a mark, then a second mark", b"\xff\xfe" + (FEFF + "A=1\n").encode("utf-16-le"), {}, {"A": "1"}),
     ("utf-16 with a mark, then two marks", b"\xff\xfe" + (FEFF + FEFF + "A=1\n").encode("utf-16-le"), {}, {FEFF + "A": "1"}),
     ("a mark on the second line stays in its name", b"B=2\n" + BOM + b"A=1\n", {}, {"B": "2", FEFF + "A": "1"}),
-    ("marks left in front move where the first statement ends", BOM + BOM + BOM + b' Q="x\nA=1\n"\n', {}, {"A": "1"}),
+    ("marks left in front of an unfinished statement", BOM + BOM + BOM + b' Q="x\nA=1\n"\n', {}, {"A": "1"}),
+]
+
+# The files a volume's `.env` goes through while the loader loads it again and again: the file before load 1, before load 2 ... up to the
+# one a load leaves as it is. Measured with the REAL loader (hermes_cli/env_loader.py v0.22.2 run as it is, python-dotenv 1.2.2), each
+# load in a fresh process on the file the load before left behind. (label, bytes, the files)
+CHAIN_TABLE = [
+    ('empty', b'', [b'']),
+    ('nothing to clean up', b'A=1\n', [b'A=1\n']),
+    ('a mark only: the file keeps it', b'\xef\xbb\xbfA=1\n', [b'\xef\xbb\xbfA=1\n']),
+    ('a blank before the name', b' A=1\n', [b' A=1\n', b'A=1\n']),
+    ('no final newline', b'A=1', [b'A=1', b'A=1\n']),
+    ('a NUL', b'A=1\x00\n', [b'A=1\x00\n', b'A=1\n']),
+    ('CRLF line ends are not a change', b'A=1\r\nB=2\r\n', [b'A=1\r\nB=2\r\n']),
+    ('outer blanks and form feeds', b'\x0c A=1 \x0b\n', [b'\x0c A=1 \x0b\n', b'A=1\n']),
+    ('a comment keeps its blanks', b'  # note \nA=1\n', [b'  # note \nA=1\n']),
+    ('utf-16 with a mark', b'\xff\xfeA\x00=\x001\x00\r\x00\n\x00', [b'\xff\xfeA\x00=\x001\x00\r\x00\n\x00', b'A=1\n']),
+    ('first character U+FFFD: left alone, NUL line and all', b'\xef\xbf\xbd\n\x00 Q="x\nA=1\n"\n',
+     [b'\xef\xbf\xbd\n\x00 Q="x\nA=1\n"\n']),
+    ('a mark, then U+FFFD: left alone', b'\xef\xbb\xbf\xef\xbf\xbd\n\x00 Q="x\nA=1\n"\n',
+     [b'\xef\xbb\xbf\xef\xbf\xbd\n\x00 Q="x\nA=1\n"\n']),
+    ('two blank-and-mark pairs', b' \xef\xbb\xbf \xef\xbb\xbfA=1\n',
+     [b' \xef\xbb\xbf \xef\xbb\xbfA=1\n', b'\xef\xbb\xbf \xef\xbb\xbfA=1\n', b'\xef\xbb\xbfA=1\n']),
+    ('three blank-and-mark pairs', b' \xef\xbb\xbf \xef\xbb\xbf \xef\xbb\xbfA=1\n',
+     [b' \xef\xbb\xbf \xef\xbb\xbf \xef\xbb\xbfA=1\n', b'\xef\xbb\xbf \xef\xbb\xbf \xef\xbb\xbfA=1\n', b'\xef\xbb\xbf \xef\xbb\xbfA=1\n',
+      b'\xef\xbb\xbfA=1\n']),
+    ('two tab-and-mark pairs, then a second line', b'\t\xef\xbb\xbf\t\xef\xbb\xbfA=1\n X=1\n',
+     [b'\t\xef\xbb\xbf\t\xef\xbb\xbfA=1\n X=1\n', b'\xef\xbb\xbf\t\xef\xbb\xbfA=1\nX=1\n', b'\xef\xbb\xbfA=1\nX=1\n']),
+    ('a mark, then two blank-and-mark pairs', b'\xef\xbb\xbf \xef\xbb\xbf \xef\xbb\xbfA=1\n',
+     [b'\xef\xbb\xbf \xef\xbb\xbf \xef\xbb\xbfA=1\n', b'\xef\xbb\xbf \xef\xbb\xbfA=1\n', b'\xef\xbb\xbfA=1\n']),
+    ('utf-16 with three blank-and-mark pairs', b'\xff\xfe \x00\xff\xfe \x00\xff\xfe \x00\xff\xfeA\x00=\x001\x00\n\x00',
+     [b'\xff\xfe \x00\xff\xfe \x00\xff\xfe \x00\xff\xfeA\x00=\x001\x00\n\x00', b'\xef\xbb\xbf \xef\xbb\xbf \xef\xbb\xbfA=1\n',
+      b'\xef\xbb\xbf \xef\xbb\xbfA=1\n', b'\xef\xbb\xbfA=1\n']),
 ]
 
 # (name, a value the loader applies, a harmless value or None, the function that judges the name)
@@ -388,7 +420,9 @@ class ParserParity(unittest.TestCase):
                   '\\"', "export ", "export\t", "${A}", "${B:-d}", "${}", "$", "{", "}", ":-", "1", "0", "x", "\x0c", "\xa0",
                   " ", "\x85", "é",
                   # what a review found no earlier input could make: a byte order mark inside a statement, and more shapes of reference
-                  FEFF, FEFF + FEFF, " " + FEFF, "$A", "${A:-${B}}", "${A:-", "$HERMES_SUPERVISED_CHILD", "x${A}y"]
+                  FEFF, FEFF + FEFF, " " + FEFF, "$A", "${A:-${B}}", "${A:-", "$HERMES_SUPERVISED_CHILD", "x${A}y",
+                  # the file as it stands reaches the parser with its NUL bytes and U+FFFD in it
+                  "\x00", "\x00 ", "\ufffd", "\x00\n", "\x00 Q=\"x\n"]
         rnd = random.Random(4886)
         for _ in range(5000):
             text = "".join(rnd.choice(pieces) for _ in range(rnd.randint(1, 16)))
@@ -409,6 +443,48 @@ class ReadingLikeHermes(unittest.TestCase):
             for parser, impl in PARSERS:
                 with self.subTest(row=label, parser=parser):
                     self.assertEqual(read_final(raw, impl, lookup), (want, []))
+
+    def test_the_gate_follows_the_file_through_the_loads_the_loader_makes(self):
+        # The model of the loader's clean-up, one load at a time, against the files the REAL loader left behind (CHAIN_TABLE).
+        for label, raw, files in CHAIN_TABLE:
+            with self.subTest(file=label):
+                self.assertEqual(lockgate.env_states(raw), files)
+                self.assertEqual(lockgate.env_cleanup(raw), files[1] if len(files) > 1 else raw, "one load of it")
+
+    def test_every_text_a_load_may_parse_is_judged_the_one_of_the_first_load_first(self):
+        for label, raw, files in CHAIN_TABLE:
+            with self.subTest(file=label):
+                texts = lockgate.env_texts(raw)
+                self.assertEqual(texts[0], lockgate.env_text(raw))
+                self.assertEqual(sorted(texts), sorted({lockgate.env_loaded_text(state) for state in files} | {lockgate.env_text(raw)}))
+                self.assertEqual(len(texts), len(set(texts)), "each text once")
+
+    def test_what_the_clean_up_cannot_be_modelled_for_has_no_files_to_follow(self):
+        for label, raw in (("a Latin-1 byte", b"# caf\xe9\nA=1\n"), ("utf-32", "A=1\n".encode("utf-32")), ("utf-16 cut in half", "A=1\n".encode("utf-16")[:-1])):
+            with self.subTest(file=label):
+                self.assertIsNone(lockgate.env_states(raw))
+                self.assertIsNone(lockgate.env_texts(raw))
+                self.assertIsNone(lockgate.env_text(raw))
+
+    def test_a_file_that_keeps_changing_is_followed_up_to_the_cap_and_refused_beyond_it(self):
+        # one blank-and-mark pair comes off the front per load: n pairs take n loads. The cap is how many rewrites the gate follows.
+        cap = lockgate.ENV_LOAD_CAP
+        within, beyond = oracle.pair_run(b" ", cap) + b"A=1\n", oracle.pair_run(b" ", cap + 1) + b"A=1\n"
+        self.assertEqual(len(lockgate.env_states(within)), cap + 1)
+        self.assertIsNone(lockgate.env_states(beyond))
+        for parser, impl in PARSERS:
+            for label, raw, harmless in (("beyond the cap, harmless value", beyond, True), ("beyond the cap, forbidden value", beyond.replace(b"A=1", b"HERMES_SAFE_MODE=on"), False)):
+                with self.subTest(parser=parser, file=label):
+                    volume, image = judge(raw, impl)
+                    self.assertEqual([len(volume), len(image)], [1, 1], "refused as a whole, for every function that reads the file")
+                    self.assertIn("cannot parse the volume's .env", volume[0])
+                    self.assertNotIn("HERMES_SAFE_MODE", volume[0] + image[0])
+            with self.subTest(parser=parser, file="within the cap, forbidden value"):
+                volume, image = judge(within.replace(b"A=1", b"HERMES_SAFE_MODE=on"), impl)
+                self.assertEqual((volume, len(image)), ([], 1))
+                self.assertIn("enables HERMES_SAFE_MODE", image[0])
+            with self.subTest(parser=parser, file="within the cap, harmless value"):
+                self.assertEqual(judge(within, impl), ([], []))
 
     def test_bytes_that_are_not_utf8_are_refused_not_guessed(self):
         # Hermes' sanitizer may rewrite such a file in place (bad bytes become U+FFFD) or leave it for the loader to read as
@@ -575,10 +651,17 @@ class RulesOnEverySpelling(unittest.TestCase):
                 for parser, impl in PARSERS:
                     with self.subTest(rule=name, shape=label, parser=parser):
                         found = self.found(rule, raw, impl)
-                        self.assertEqual(len(found), 1, found)
-                        self.assertIn("the volume's .env", found[0])
+                        # The name Hermes applies is refused once. A `*_PROXY` is refused by its ending whatever stands in front of it,
+                        # so a reading of the file with a mark left in the name (the file as it stood before a load cleaned it) adds
+                        # one more line for that other name; no other rule has a second line.
+                        plain = [problem for problem in found if FEFF not in problem]
+                        self.assertEqual(len(plain), 1, found)
+                        if not is_proxy_rule(rule):
+                            self.assertEqual(found, plain)
+                        self.assertIn("the volume's .env", plain[0])
                         if len(value) > 4:
-                            self.assertNotIn(value, found[0])
+                            for problem in found:
+                                self.assertNotIn(value, problem)
 
     def test_a_mark_that_stays_in_a_name_is_read_in_the_name(self):
         # Hermes ends with the name `<mark>NAME`: it applies nothing under NAME, and neither may the gate. The one place a mark in a name
@@ -589,7 +672,51 @@ class RulesOnEverySpelling(unittest.TestCase):
             for label, raw in kept + control:
                 for parser, impl in PARSERS:
                     with self.subTest(rule=name, shape=label, parser=parser):
-                        self.assertEqual(len(self.found(rule, raw, impl)), 1 if is_proxy_rule(rule) else 0)
+                        found = self.found(rule, raw, impl)
+                        if is_proxy_rule(rule):  # one line for each name with a mark in it that a reading of the file holds
+                            self.assertGreaterEqual(len(found), 1)
+                            self.assertTrue(all(FEFF in problem for problem in found), found)
+                        else:
+                            self.assertEqual(found, [])
+
+    def chain_shapes_for(self, rule, value):
+        later, skipped, as_stands = oracle.chain_shapes("%s=%s" % (rule[0], value))
+        return (("a later load", later), ("a file the clean-up leaves alone", skipped), ("a file the clean-up could not write", as_stands))
+
+    def test_a_name_hermes_applies_at_any_load_or_reads_from_the_file_as_it_stands_is_refused_once_by_name(self):
+        for rule in RULES:
+            name, value, _good, _ = rule
+            for kind, shapes in self.chain_shapes_for(rule, value):
+                for label, raw in shapes:
+                    for parser, impl in PARSERS:
+                        with self.subTest(rule=name, kind=kind, shape=label, parser=parser):
+                            found = self.found(rule, raw, impl)
+                            plain = [problem for problem in found if FEFF not in problem]  # a `*_PROXY` with a mark in its name is refused too
+                            self.assertEqual(len(plain), 1, found)
+                            self.assertIn("the volume's .env", plain[0])
+                            if len(value) > 4:
+                                for problem in found:
+                                    self.assertNotIn(value, problem)
+
+    def test_the_same_files_around_a_harmless_value_refuse_nothing(self):
+        for rule in RULES:
+            name, _value, good, _ = rule
+            if good is None:
+                continue
+            for kind, shapes in self.chain_shapes_for(rule, good):
+                for label, raw in shapes:
+                    for parser, impl in PARSERS:
+                        with self.subTest(rule=name, kind=kind, shape=label, parser=parser):
+                            self.assertEqual(self.found(rule, raw, impl), [])
+
+    def test_a_reading_that_names_a_problem_adds_to_the_others_and_never_repeats_one(self):
+        # two readings of one file give the same problem in the same words once, and different problems both
+        raw = oracle.pair_run(b" ", 2) + b"HERMES_YOLO_MODE=1\nAPI_SERVER_CORS_ORIGINS=https://evil.example\n"
+        for parser, impl in PARSERS:
+            with self.subTest(parser=parser):
+                volume, _image = judge(raw, impl)
+                self.assertEqual(sorted(p.split(" (")[0] for p in volume),
+                                 ["the volume's .env enables HERMES_YOLO_MODE", "the volume's .env sets API_SERVER_CORS_ORIGINS"])
 
     def test_the_same_marks_around_a_harmless_value_refuse_nothing(self):
         for rule in RULES:
@@ -656,18 +783,32 @@ class RulesOnEverySpelling(unittest.TestCase):
 
 class StandInLoader:
     """Applies the `NAME=value` lines of `<home>/.env` and nothing else, and rewrites the file when told to. It only exists to show that
-    `run` isolates the loader from this process and compares what it should: it knows nothing of Hermes."""
+    `run` isolates the loader from this process and compares what it should: it knows nothing of Hermes. Like the real loader it has its
+    clean-up as a step of its own (`_sanitize_env_file_if_needed`, called before it reads the file) that `clean` can make do something,
+    and it rewrites the file AFTER a load with `rewrite`."""
 
-    def __init__(self, rewrite=None, fail=False):
+    def __init__(self, rewrite=None, fail=False, clean=None):
         self._DOTENV_PUBLISHED = {"stale": (None, "x", 0)}
-        self.calls, self.rewrite, self.fail = [], rewrite, fail
+        self.calls, self.rewrite, self.fail, self.clean, self._cleaned = [], rewrite, fail, clean, False
+
+    def _sanitize_env_file_if_needed(self, path):
+        self._cleaned = True
+        if self.clean is not None:
+            with open(path, "rb") as handle:
+                data = handle.read()
+            cleaned = self.clean(data)
+            if cleaned != data:
+                with open(path, "wb") as handle:
+                    handle.write(cleaned)
 
     def load_hermes_dotenv(self, hermes_home=None, load_external_secrets=True):
         managed = os.environ.get("HERMES_MANAGED_DIR", "")
+        path = os.path.join(hermes_home, ".env")
+        self._cleaned = False
+        self._sanitize_env_file_if_needed(path)  # `run` may have switched it off
         self.calls.append({"home": hermes_home, "external": load_external_secrets, "env": dict(os.environ),
                            "published": dict(self._DOTENV_PUBLISHED), "managed_is_an_empty_folder": os.path.isdir(managed) and not os.listdir(managed),
-                           "home_holds_only_the_file": sorted(os.listdir(hermes_home)) == [".env"]})
-        path = os.path.join(hermes_home, ".env")
+                           "home_holds_only_the_file": sorted(os.listdir(hermes_home)) == [".env"], "cleanup_ran": self._cleaned})
         with open(path, "rb") as handle:
             data = handle.read()
         for line in data.decode("utf-8", "replace").splitlines():
@@ -679,6 +820,15 @@ class StandInLoader:
                 handle.write(self.rewrite)
         if self.fail:
             raise ValueError("stand-in failure")
+
+
+def strip_one_pair(data):
+    """A clean-up step for `StandInLoader`: one (blank, mark) pair comes off the front of the file per load."""
+    return data[len(b" " + BOM):] if data.startswith(b" " + BOM) else data
+
+
+def starts_with_the_assignment(raw, name):
+    return raw.startswith(name.encode() + b"=1")
 
 
 class StandInGate:
@@ -695,6 +845,63 @@ class StandInGate:
 
     def image_volume_env_problems(self, path, lookup_env=None):
         return []
+
+
+class FirstReadingGate(StandInGate):
+    """Judges the file as it stands and nothing else: a name is refused when the bytes START with its assignment."""
+
+    def volume_env_problems(self, path, lookup_env=None):
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        self.seen.append((raw, dict(lookup_env)))
+        return ["the volume's .env enables %s" % name for name in self.names if starts_with_the_assignment(raw, name)] + list(self.extra)
+
+
+def pair_stripping_chain(raw):
+    """The files `StandInLoader(clean=strip_one_pair)` goes through, as a model of them: `[raw, after one load, ...]`."""
+    files = [raw]
+    while strip_one_pair(files[-1]) != files[-1]:
+        files.append(strip_one_pair(files[-1]))
+    return files
+
+
+class EveryLoadGate(StandInGate):
+    """Follows the file through the loads of `StandInLoader(clean=strip_one_pair)` (the same model `run` holds to the loader's files) and
+    refuses a name when any file of that chain starts with its assignment."""
+
+    def volume_env_problems(self, path, lookup_env=None):
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        self.seen.append((raw, dict(lookup_env)))
+        return ["the volume's .env enables %s" % name for name in self.names
+                if any(starts_with_the_assignment(state, name) for state in pair_stripping_chain(raw))] + list(self.extra)
+
+    def env_states(self, raw):
+        return pair_stripping_chain(raw)
+
+
+class CleanedOnlyGate(StandInGate):
+    """Judges only what `clean` leaves of the file."""
+
+    def __init__(self, clean, **kwargs):
+        super().__init__(**kwargs)
+        self.clean = clean
+
+    def volume_env_problems(self, path, lookup_env=None):
+        with open(path, "rb") as handle:
+            raw = self.clean(handle.read())
+        self.seen.append((raw, dict(lookup_env)))
+        return ["the volume's .env enables %s" % name for name in self.names if (name + "=1").encode() in raw] + list(self.extra)
+
+
+class NoCleanupLoader:
+    """A loader with no clean-up step to switch off."""
+
+    def __init__(self):
+        self._DOTENV_PUBLISHED = {}
+
+    def load_hermes_dotenv(self, hermes_home=None, load_external_secrets=True):
+        pass
 
 
 class OracleComparison(unittest.TestCase):
@@ -744,6 +951,9 @@ class OracleComparison(unittest.TestCase):
         def sets(name):
             return "the volume's .env sets %s (why)" % name
 
+        def through_a_reference(name):
+            return "the volume's .env sets %s through a reference (${...} or $NAME): why" % name
+
         self.assertEqual(oracle.compare(b"", {"HERMES_SAFE_MODE"}, [])["missed"], ["HERMES_SAFE_MODE"], "a name nothing refuses is a miss")
         self.assertEqual(oracle.compare(b"", {"HERMES_SAFE_MODE"}, [enables("HERMES_SAFE_MODE")]),
                          {"file_refused": False, "missed": [], "needless": []})
@@ -754,6 +964,19 @@ class OracleComparison(unittest.TestCase):
              sets(FEFF + "HTTP_PROXY"), "mark in a proxy name"),
             ("a name the volume may not set at all", b"OORT_SELF_MEDIA_ORIGIN=x\nOORT_SELF_MEDIA_ORIGIN\n", "OORT_SELF_MEDIA_ORIGIN",
              sets("OORT_SELF_MEDIA_ORIGIN"), "name-only rule"),
+            ("a reference further down a quoted value, refused for the reference", b"HERMES_SAFE_MODE='one\n${X}'\n", "HERMES_SAFE_MODE",
+             through_a_reference("HERMES_SAFE_MODE"), "reference"),
+            ("a reference further down, but the gate refused for the value", b"HERMES_SAFE_MODE='one\n${X}'\n", "HERMES_SAFE_MODE",
+             enables("HERMES_SAFE_MODE"), "unexplained"),
+            ("a reference only in front of the name", b"${X}\nHERMES_SAFE_MODE=0\n", "HERMES_SAFE_MODE",
+             through_a_reference("HERMES_SAFE_MODE"), "unexplained"),
+            ("a NUL in the name", b"x\x00_PROXY=1\n", "x\x00_PROXY", sets("x\x00_PROXY"), "NUL in the statement"),
+            ("a NUL on the line of the name", b"FAL_KEY=\x00\n", "FAL_KEY", sets("FAL_KEY"), "NUL in the statement"),
+            ("a NUL on the line of the name, in a utf-16 file", b"\xff\xfe" + "FAL_KEY=\x00\n".encode("utf-16-le"), "FAL_KEY", sets("FAL_KEY"),
+             "NUL in the statement"),
+            ("a NUL on another line is no excuse", b"X=\x00\nFAL_KEY=\n", "FAL_KEY", sets("FAL_KEY"), "unexplained"),
+            ("a refusal for a reference with none in the file", b"HERMES_SAFE_MODE=0\n", "HERMES_SAFE_MODE",
+             through_a_reference("HERMES_SAFE_MODE"), "unexplained"),
             ("a refusal with no reason in the file", b"HERMES_SAFE_MODE=0\n", "HERMES_SAFE_MODE", enables("HERMES_SAFE_MODE"), "unexplained"),
             ("a mark elsewhere is no excuse", BOM + BOM + b"HERMES_SAFE_MODE=0\n", "HERMES_SAFE_MODE", enables("HERMES_SAFE_MODE"), "unexplained"),
             ("a reference on ANOTHER name's line is no excuse", b"OPENROUTER_API_KEY=${X}\nHERMES_SAFE_MODE=0\n", "HERMES_SAFE_MODE",
@@ -767,13 +990,21 @@ class OracleComparison(unittest.TestCase):
     def test_the_generators_make_the_shapes_the_review_found_missing(self):
         table = [label for label, _raw in oracle.table_cases()]
         for name, _value, _good in oracle.JUDGED:
-            for kind in ("applied", "inert", "reference", "mark applied", "mark kept", "mark control"):
+            for kind in ("applied", "inert", "reference", "mark applied", "mark kept", "mark control", "later applied", "as-is applied"):
                 self.assertTrue(any(label.startswith("%s: %s: " % (kind, name)) for label in table), (kind, name))
+            for shape in ("first character U+FFFD, a NUL line, an open quote", "16 blank-and-mark pairs", "3 tab-and-mark pairs"):
+                self.assertTrue(any(label.endswith(": %s: %s" % (name, shape)) for label in table), (shape, name))
+        for count, kind in ((oracle.LOAD_CAP, "later applied"), (oracle.LOAD_CAP + 1, "unbounded"), (oracle.LOAD_CAP + 6, "unbounded")):
+            self.assertIn("%s: %d blank-and-mark pairs, at the load cap" % (kind, count), table)
+        self.assertEqual(oracle.LOAD_CAP, lockgate.ENV_LOAD_CAP, "the oracle follows exactly as many rewrites as the gate does")
         cases = oracle.random_cases(4886, 2000)
         self.assertEqual(cases[:40], oracle.random_cases(4886, 40), "the same seed gives the same inputs")
-        counts = {"two marks in front": 0, "a mark behind blanks": 0, "a reference": 0, "a line the clean-up rewrites": 0,
-                  "utf-16": 0, "bytes that are not utf-8": 0}
+        counts = {"two marks in front": 0, "a mark behind blanks": 0, "three blank-and-mark pairs in a row": 0, "U+FFFD as the first character": 0,
+                  "a NUL line and an open quote": 0, "a reference": 0, "a line the clean-up rewrites": 0, "utf-16": 0, "bytes that are not utf-8": 0}
         for _label, raw in cases:
+            counts["three blank-and-mark pairs in a row"] += re.search(rb"(?:(?:[ \t\x0c\x1c]|\xc2[\x85\xa0])\xef\xbb\xbf){3}", raw) is not None
+            counts["U+FFFD as the first character"] += raw.startswith((b"\xef\xbf\xbd", BOM + b"\xef\xbf\xbd"))
+            counts["a NUL line and an open quote"] += re.search(rb"\x00 (?:OORT_ORACLE_Q=|\"\n)|X=1\x00 Q=", raw) is not None
             counts["two marks in front"] += raw.startswith(BOM + BOM)
             counts["a mark behind blanks"] += re.search(rb"[ \t\x0c\x1c]\xef\xbb\xbf", raw) is not None
             counts["a reference"] += re.search(rb"\$(?:\{|[A-Za-z_])", raw) is not None
@@ -813,7 +1044,8 @@ class OracleComparison(unittest.TestCase):
         # The loader rewrote ITS copy into a file whose second load applies something the gate does not refuse: the file Hermes leaves
         # behind is judged too, against what Hermes applies when it loads THAT file (not against what the first load applied).
         self.assertEqual(gate.seen[1][0], b"HERMES_YOLO_MODE=1\n")
-        self.assertEqual(len(loader.calls), 2)
+        # two loads follow the file (the second leaves it as the first did), then each file of the chain is loaded once more as it stands
+        self.assertEqual([call["cleanup_ran"] for call in loader.calls], [True, True, False, False])
         self.assertEqual(loader.calls[1]["env"].get("HERMES_SAFE_MODE"), None, "the second load starts from the slot's environment again")
         self.assertEqual((summary["cases"], summary["violating"], summary["missed"], summary["missed_after"], summary["detected"]),
                          (1, 1, 0, 1, ["HERMES_SAFE_MODE"]))
@@ -827,6 +1059,60 @@ class OracleComparison(unittest.TestCase):
         loader, gate = StandInLoader(rewrite=b"OORT_PROOF_A=1\n"), StandInGate()
         summary = self.run_oracle(loader, gate, [("applied: z", raw)])
         self.assertEqual((summary["violating"], summary["missed"], summary["missed_after"], summary["ok"]), (1, 0, 0, True))
+
+    def test_run_follows_the_loader_through_every_load_of_the_file(self):
+        raw = oracle.pair_run(b" ", 3) + b"HERMES_SAFE_MODE=1\n"
+        # a gate that judges the file as it stands does not name what the third load applies
+        loader, gate = StandInLoader(clean=strip_one_pair), FirstReadingGate()
+        summary = self.run_oracle(loader, gate, [("later applied: x", raw)])
+        self.assertEqual([call["cleanup_ran"] for call in loader.calls], [True] * 4 + [False] * 4, "four loads, then four files as they stand")
+        self.assertEqual((summary["loads"], summary["violating"], summary["later_only"], summary["missed"], summary["missed_after"], summary["wrong_labels"],
+                          summary["ok"]), ({"4": 1}, 1, 1, 0, 1, 0, False))
+        self.assertIn("HERMES_SAFE_MODE", summary["examples"]["missed_after"][0][2][0])
+        # the files the gate is asked about are the ones the loader leaves: it is told when a later file would be missed too
+        self.assertEqual([seen[0] for seen in gate.seen], [raw] + pair_stripping_chain(raw)[1:])
+        # a gate that follows the same loads names it, and its model of the files is held to the loader's
+        loader, gate = StandInLoader(clean=strip_one_pair), EveryLoadGate()
+        summary = self.run_oracle(loader, gate, [("later applied: x", raw)])
+        self.assertEqual((summary["missed"], summary["missed_after"], summary["chain_mismatch"], summary["states_compared"], summary["detected"], summary["ok"]),
+                         (0, 0, 0, 1, ["HERMES_SAFE_MODE"], True))
+
+    def test_run_holds_the_gates_model_of_the_files_to_the_loaders(self):
+        class WrongModel(EveryLoadGate):
+            def env_states(self, raw):
+                return [raw]  # says the loader never changes the file
+        raw = oracle.pair_run(b" ", 2) + b"HERMES_SAFE_MODE=1\n"
+        summary = self.run_oracle(StandInLoader(clean=strip_one_pair), WrongModel(), [("later applied: x", raw)])
+        self.assertEqual((summary["chain_mismatch"], summary["missed"], summary["missed_after"], summary["ok"]), (1, 0, 0, False))
+        # a gate with no model at all is not held to one; one that cannot say (None) is not either
+        summary = self.run_oracle(StandInLoader(clean=strip_one_pair), StandInGate(), [("later applied: x", raw)])
+        self.assertEqual((summary["states_compared"], summary["chain_mismatch"]), (0, 0))
+
+    def test_run_loads_each_file_once_more_with_the_clean_up_switched_off(self):
+        raw, clean = b"HERMES_SAFE_MODE=1\n", lambda data: data.replace(b"=1", b"=0")
+        # what only the file as it stands applies: a gate that judges only what the clean-up leaves misses it, and the table label says so
+        loader = StandInLoader(clean=clean)
+        summary = self.run_oracle(loader, CleanedOnlyGate(clean), [("as-is applied: x", raw)])
+        self.assertEqual([call["cleanup_ran"] for call in loader.calls], [True, True, False, False])
+        self.assertEqual((summary["cleanup_step_found"], summary["violating"], summary["as_stands_only"], summary["later_only"], summary["missed"],
+                          summary["wrong_labels"], summary["ok"]), (True, 1, 1, 0, 1, 0, False))
+        summary = self.run_oracle(StandInLoader(clean=clean), StandInGate(), [("as-is applied: x", raw)])
+        self.assertEqual((summary["missed"], summary["as_stands_only"], summary["ok"]), (0, 1, True))
+        # a label that promises the file only applies as it stands, on a loader whose clean-up changes nothing, is a wrong label
+        summary = self.run_oracle(StandInLoader(), StandInGate(), [("as-is applied: x", raw)])
+        self.assertEqual((summary["as_stands_only"], summary["wrong_labels"], summary["ok"]), (0, 1, False))
+        # a loader with no clean-up step has nothing to switch off, and the summary says so
+        self.assertFalse(self.run_oracle(NoCleanupLoader(), StandInGate(), [("random", raw)])["cleanup_step_found"])
+
+    def test_run_demands_a_refusal_of_the_whole_file_when_the_loader_never_stops_changing_it(self):
+        raw = b"HERMES_SAFE_MODE=0\n"
+        never_settles = lambda data: data + b"#\n"
+        summary = self.run_oracle(StandInLoader(clean=never_settles), StandInGate(), [("random", raw)])
+        self.assertEqual((summary["unsettled"], summary["file_refused"], summary["ok"]), (1, 0, False))
+        self.assertEqual(summary["examples"]["unsettled"][0][2], oracle.LOAD_CAP + 1)
+        refusing = StandInGate(extra=["cannot parse the volume's .env: still changing"])
+        summary = self.run_oracle(StandInLoader(clean=never_settles), refusing, [("random", raw)])
+        self.assertEqual((summary["unsettled"], summary["file_refused"], summary["ok"]), (0, 1, True))
 
     def test_run_counts_what_the_proof_has_to_be_able_to_tell(self):
         good = StandInGate()
