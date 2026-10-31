@@ -804,6 +804,192 @@ export const catalog: MessageCatalog = {
       "value": "요청 보내기"
     }
   ],
+  "expressions.sheet.a11y": [
+    {
+      "type": 0,
+      "value": "이모티콘, 이모지, GIF 고르기"
+    }
+  ],
+  "expressions.sheet.close": [
+    {
+      "type": 0,
+      "value": "이모티콘·이모지·GIF 닫기"
+    }
+  ],
+  "expressions.sheet.emptyEmoticon": [
+    {
+      "type": 0,
+      "value": "아직 팀 이모티콘이 없어요. 위의 「추가하기」로 만들거나 가져와 보세요."
+    }
+  ],
+  "expressions.sheet.emptyGif": [
+    {
+      "type": 0,
+      "value": "아직 움직이는 표현이 없어요. 이모티콘 탭의 「추가하기」로 가져오거나 만들 수 있어요."
+    }
+  ],
+  "expressions.sheet.emptyLegacy": [
+    {
+      "type": 0,
+      "value": "아직 우리 팀 이모지가 없습니다."
+    }
+  ],
+  "expressions.sheet.emptyTeam": [
+    {
+      "type": 0,
+      "value": "아직 팀 이모지가 없어요. 위의 「추가하기」로 가져와 보세요."
+    }
+  ],
+  "expressions.sheet.error": [
+    {
+      "type": 0,
+      "value": "팀 보관함을 불러오지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "expressions.sheet.hintInsert": [
+    {
+      "type": 0,
+      "value": "입력칸에 넣기"
+    }
+  ],
+  "expressions.sheet.hintPreview": [
+    {
+      "type": 0,
+      "value": "큰 그림으로 미리 보기"
+    }
+  ],
+  "expressions.sheet.hintReact": [
+    {
+      "type": 0,
+      "value": "반응하기"
+    }
+  ],
+  "expressions.sheet.loading": [
+    {
+      "type": 0,
+      "value": "팀 보관함을 불러오는 중이에요."
+    }
+  ],
+  "expressions.sheet.noMatch": [
+    {
+      "type": 0,
+      "value": "찾는 표현이 없어요. 다른 이름이나 태그로 검색해 보세요."
+    }
+  ],
+  "expressions.sheet.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 연결되면 팀 보관함을 볼 수 있어요."
+    }
+  ],
+  "expressions.sheet.open": [
+    {
+      "type": 0,
+      "value": "이모티콘, 이모지, GIF 고르기"
+    }
+  ],
+  "expressions.sheet.pickAgain": [
+    {
+      "type": 0,
+      "value": "다시 고르기"
+    }
+  ],
+  "expressions.sheet.placeholderEmoji": [
+    {
+      "type": 0,
+      "value": "이름이나 :code:로 검색"
+    }
+  ],
+  "expressions.sheet.placeholderTeam": [
+    {
+      "type": 0,
+      "value": "이름이나 태그로 검색"
+    }
+  ],
+  "expressions.sheet.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "expressions.sheet.searchEmoji": [
+    {
+      "type": 0,
+      "value": "이모지 검색"
+    }
+  ],
+  "expressions.sheet.searchEmoticon": [
+    {
+      "type": 0,
+      "value": "이모티콘 검색"
+    }
+  ],
+  "expressions.sheet.searchGif": [
+    {
+      "type": 0,
+      "value": "GIF 검색"
+    }
+  ],
+  "expressions.sheet.searchTeam": [
+    {
+      "type": 0,
+      "value": "팀 이모지 검색"
+    }
+  ],
+  "expressions.sheet.send": [
+    {
+      "type": 0,
+      "value": "보내기"
+    }
+  ],
+  "expressions.sheet.sending": [
+    {
+      "type": 0,
+      "value": "확인 중…"
+    }
+  ],
+  "expressions.sheet.tabEmoji": [
+    {
+      "type": 0,
+      "value": "이모지"
+    }
+  ],
+  "expressions.sheet.tabEmoticon": [
+    {
+      "type": 0,
+      "value": "이모티콘"
+    }
+  ],
+  "expressions.sheet.tabGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.sheet.tabs": [
+    {
+      "type": 0,
+      "value": "표현 종류"
+    }
+  ],
+  "expressions.sheet.tabTeam": [
+    {
+      "type": 0,
+      "value": "팀 이모지"
+    }
+  ],
+  "expressions.sheet.title": [
+    {
+      "type": 0,
+      "value": "이모티콘·이모지·GIF"
+    }
+  ],
+  "expressions.sheet.unavailable": [
+    {
+      "type": 0,
+      "value": "이 표현을 지금 쓸 수 없어요. 다시 골라 주세요."
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,

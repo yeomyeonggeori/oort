@@ -825,6 +825,192 @@ export const catalog: MessageCatalog = {
       "value": "Send request"
     }
   ],
+  "expressions.sheet.a11y": [
+    {
+      "type": 0,
+      "value": "Choose an emoticon, emoji or GIF"
+    }
+  ],
+  "expressions.sheet.close": [
+    {
+      "type": 0,
+      "value": "Close emoticons, emoji and GIFs"
+    }
+  ],
+  "expressions.sheet.emptyEmoticon": [
+    {
+      "type": 0,
+      "value": "No team emoticons yet. Use “Add” above to make or import one."
+    }
+  ],
+  "expressions.sheet.emptyGif": [
+    {
+      "type": 0,
+      "value": "No moving pictures yet. Use “Add” on the Emoticons tab to import or make one."
+    }
+  ],
+  "expressions.sheet.emptyLegacy": [
+    {
+      "type": 0,
+      "value": "No team emoji yet."
+    }
+  ],
+  "expressions.sheet.emptyTeam": [
+    {
+      "type": 0,
+      "value": "No team emoji yet. Use “Add” above to import one."
+    }
+  ],
+  "expressions.sheet.error": [
+    {
+      "type": 0,
+      "value": "Could not load the team library. Please try again."
+    }
+  ],
+  "expressions.sheet.hintInsert": [
+    {
+      "type": 0,
+      "value": "Add to the message box"
+    }
+  ],
+  "expressions.sheet.hintPreview": [
+    {
+      "type": 0,
+      "value": "Preview at full size"
+    }
+  ],
+  "expressions.sheet.hintReact": [
+    {
+      "type": 0,
+      "value": "React"
+    }
+  ],
+  "expressions.sheet.loading": [
+    {
+      "type": 0,
+      "value": "Loading the team library…"
+    }
+  ],
+  "expressions.sheet.noMatch": [
+    {
+      "type": 0,
+      "value": "Nothing matches. Try another name or tag."
+    }
+  ],
+  "expressions.sheet.offline": [
+    {
+      "type": 0,
+      "value": "You are offline. Connect to see the team library."
+    }
+  ],
+  "expressions.sheet.open": [
+    {
+      "type": 0,
+      "value": "Choose an emoticon, emoji or GIF"
+    }
+  ],
+  "expressions.sheet.pickAgain": [
+    {
+      "type": 0,
+      "value": "Choose another"
+    }
+  ],
+  "expressions.sheet.placeholderEmoji": [
+    {
+      "type": 0,
+      "value": "Search by name or :code:"
+    }
+  ],
+  "expressions.sheet.placeholderTeam": [
+    {
+      "type": 0,
+      "value": "Search by name or tag"
+    }
+  ],
+  "expressions.sheet.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "expressions.sheet.searchEmoji": [
+    {
+      "type": 0,
+      "value": "Search emoji"
+    }
+  ],
+  "expressions.sheet.searchEmoticon": [
+    {
+      "type": 0,
+      "value": "Search emoticons"
+    }
+  ],
+  "expressions.sheet.searchGif": [
+    {
+      "type": 0,
+      "value": "Search GIFs"
+    }
+  ],
+  "expressions.sheet.searchTeam": [
+    {
+      "type": 0,
+      "value": "Search team emoji"
+    }
+  ],
+  "expressions.sheet.send": [
+    {
+      "type": 0,
+      "value": "Send"
+    }
+  ],
+  "expressions.sheet.sending": [
+    {
+      "type": 0,
+      "value": "Checking…"
+    }
+  ],
+  "expressions.sheet.tabEmoji": [
+    {
+      "type": 0,
+      "value": "Emoji"
+    }
+  ],
+  "expressions.sheet.tabEmoticon": [
+    {
+      "type": 0,
+      "value": "Emoticons"
+    }
+  ],
+  "expressions.sheet.tabGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.sheet.tabs": [
+    {
+      "type": 0,
+      "value": "Kinds"
+    }
+  ],
+  "expressions.sheet.tabTeam": [
+    {
+      "type": 0,
+      "value": "Team emoji"
+    }
+  ],
+  "expressions.sheet.title": [
+    {
+      "type": 0,
+      "value": "Emoticons, emoji & GIFs"
+    }
+  ],
+  "expressions.sheet.unavailable": [
+    {
+      "type": 0,
+      "value": "This one is not available right now. Please choose another."
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,
