@@ -1720,4 +1720,150 @@ mod tests {
         .unwrap_err();
         assert_eq!(err, FetchError::TooLarge);
     }
+
+    // ── #4881 security review r1, M-1: the DNS stage, for the icon kind ──────────────────────
+    //
+    // An icon address that is a NAME passes the literal check by construction (a name is not a
+    // private address), so what stops `evil.example` -> 169.254.169.254 is the check of the
+    // ANSWERS after resolution (`validated_resolved_addresses`). Before these tests nothing
+    // asserted that for icons: resolving without the check, for the icon kind only, left every
+    // test green. These are the tests the claim "an icon is refused for private, loopback and
+    // link-local destinations" rests on for the name case.
+
+    /// What a hostile name can answer with. Each is somewhere the server could dial if the guard
+    /// let it: loopback, the private blocks, link-local, the cloud metadata services (169.254.169.254
+    /// on AWS, GCP and Azure, `fd00:ec2::254` on AWS over IPv6, 100.100.100.200 on Alibaba), the
+    /// unspecified address, and the IPv6 forms that carry an IPv4 address (v4-mapped, NAT64, 6to4,
+    /// IPv4-compatible), so that a private IPv4 cannot be dressed as IPv6.
+    const INWARD_ANSWERS: &[&str] = &[
+        "127.0.0.1",
+        "10.0.0.1",
+        "172.16.0.9",
+        "192.168.1.1",
+        "169.254.169.254",
+        "169.254.1.1",
+        "100.100.100.200",
+        "0.0.0.0",
+        "::1",
+        "::",
+        "fe80::1",
+        "fc00::1",
+        "fd00:ec2::254",
+        "::ffff:127.0.0.1",
+        "::ffff:a9fe:a9fe",
+        "64:ff9b::7f00:1",
+        "64:ff9b::a9fe:a9fe",
+        "2002:7f00:1::",
+        "2002:a9fe:a9fe::",
+        "::127.0.0.1",
+    ];
+
+    fn never_answers_with_a_page() -> ScriptedGet {
+        ScriptedGet {
+            hops: AtomicU32::new(0),
+            locations: Mutex::new(vec![]),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_icon_name_that_resolves_to_an_inward_address_is_blocked_before_any_connect() {
+        for &answer in INWARD_ANSWERS {
+            let dns = Dns::new(&[("evil.example", &[answer])]);
+            let getter = never_answers_with_a_page();
+            let err = fetch_guarded(
+                "https://evil.example/favicon.ico",
+                FetchKind::Icon,
+                false,
+                &dns,
+                &getter,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err, FetchError::Blocked, "{answer}");
+            assert_eq!(
+                getter.hops.load(Ordering::SeqCst),
+                0,
+                "{answer} must not reach the socket"
+            );
+            // The refusal came from the answer check: the name really was asked for. A guard that
+            // refused earlier would pass this test for the wrong reason.
+            assert_eq!(
+                *dns.asked.lock().unwrap(),
+                ["evil.example:443"],
+                "{answer}: refused after resolution, not before"
+            );
+        }
+        // Control: the same harness lets a public answer through, once.
+        let dns = Dns::new(&[("good.example", &["93.184.216.34"])]);
+        let getter = never_answers_with_a_page();
+        fetch_guarded(
+            "https://good.example/favicon.ico",
+            FetchKind::Icon,
+            false,
+            &dns,
+            &getter,
+        )
+        .await
+        .expect("a public answer");
+        assert_eq!(getter.hops.load(Ordering::SeqCst), 1);
+    }
+
+    /// A name with one public and one inward record is the rebinding attack with the work done
+    /// for it: refused whichever answer comes first.
+    #[tokio::test]
+    async fn an_icon_name_with_one_inward_answer_among_public_ones_is_blocked() {
+        for &answer in INWARD_ANSWERS {
+            for answers in [["93.184.216.34", answer], [answer, "93.184.216.34"]] {
+                let dns = Dns::new(&[("rebind.example", &answers)]);
+                let getter = never_answers_with_a_page();
+                let err = fetch_guarded(
+                    "https://rebind.example/favicon.ico",
+                    FetchKind::Icon,
+                    false,
+                    &dns,
+                    &getter,
+                )
+                .await
+                .unwrap_err();
+                assert_eq!(err, FetchError::Blocked, "{answers:?}");
+                assert_eq!(getter.hops.load(Ordering::SeqCst), 0, "{answers:?}");
+            }
+        }
+    }
+
+    /// The same check on a redirect hop: the first hop is public and is requested, the Location
+    /// is a name that resolves inward, and that hop is never dialled.
+    #[tokio::test]
+    async fn an_icon_redirect_to_a_name_that_resolves_inward_stops_after_the_public_hop() {
+        for &answer in INWARD_ANSWERS {
+            let dns = Dns::new(&[
+                ("news.example", &["93.184.216.34"]),
+                ("inner.example", &[answer]),
+            ]);
+            let getter = ScriptedGet {
+                hops: AtomicU32::new(0),
+                locations: Mutex::new(vec!["https://inner.example/x.ico".into()]),
+            };
+            let err = fetch_guarded(
+                "https://news.example/a.ico",
+                FetchKind::Icon,
+                false,
+                &dns,
+                &getter,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err, FetchError::Blocked, "{answer}");
+            assert_eq!(
+                getter.hops.load(Ordering::SeqCst),
+                1,
+                "{answer}: only the public first hop connected"
+            );
+            assert_eq!(
+                *dns.asked.lock().unwrap(),
+                ["news.example:443", "inner.example:443"],
+                "{answer}: the redirect target was resolved, then refused"
+            );
+        }
+    }
 }

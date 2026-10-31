@@ -3,8 +3,15 @@
 //!
 //! This is a small forgiving tag scanner, not an HTML parser. It finds `<meta>`, `<link>` and the
 //! first `<title>`, skips comments and `<script>`/`<style>` bodies, and reads attributes with
-//! quotes honoured, so a `>` inside `content="Q > A"` does not cut the tag. One forward pass: the
-//! cursor only ever moves ahead, so a hostile page cannot make it quadratic.
+//! quotes honoured, so a `>` inside `content="Q > A"` does not cut the tag.
+//!
+//! One forward pass, linear in the page. The cursor only ever moves ahead, and every search for a
+//! closing marker (`-->`, `</script`, `</style`, a tag's `>`) either moves it past what it found
+//! or ends the scan. The one search that does not move the cursor is the `</title` that closes a
+//! `<title>`. When there is none anywhere after a `<title>`, there is none after any later one
+//! either, so that is learned once (`Scan::title_unclosed`) and never searched for again. Without
+//! that, 512 KiB of `<title>` that never closes cost seconds on the one task that also sends
+//! webhooks (#4881 security review H-1, `a_page_of_unclosed_titles_is_read_in_linear_time`).
 //!
 //! Everything here is text in, text out. Resolving addresses, the safety checks and the charset
 //! live next to it ([`crate::card`], [`crate::charset`]).
@@ -39,7 +46,12 @@ pub fn parse_card(html: &str) -> ParsedCard {
     for_each_tag(html, &["meta", "link", "title"], |tag| match tag.name {
         "meta" => scan.meta(tag),
         "link" => scan.link(tag),
-        "title" if scan.html_title.is_none() => scan.html_title = title_text(tag.rest),
+        "title" if scan.html_title.is_none() && !scan.title_unclosed => {
+            match title_text(tag.rest) {
+                Title::Closed(text) => scan.html_title = text,
+                Title::Unclosed => scan.title_unclosed = true,
+            }
+        }
         _ => {}
     });
     scan.finish()
@@ -61,6 +73,9 @@ struct Scan {
     twitter_player: bool,
     named_description: Option<String>,
     html_title: Option<String>,
+    /// A `<title>` was met with no `</title` after it, so no later `<title>` can be closed
+    /// either. Set only by that, never by a title that closes but is empty once cleaned.
+    title_unclosed: bool,
     apple_icons: Vec<String>,
     icons: Vec<String>,
 }
@@ -210,12 +225,15 @@ fn looks_like_svg(type_attr: Option<&str>, href: &str) -> bool {
 }
 
 /// Entities decoded once, control characters and whitespace runs collapsed to one space, ends
-/// trimmed. Empty means "no value".
+/// trimmed, text-direction controls dropped. Empty means "no value".
 pub(crate) fn clean_text(raw: &str) -> String {
     let decoded = decode_entities(raw);
     let mut out = String::with_capacity(decoded.len());
     let mut pending_space = false;
     for c in decoded.chars() {
+        if is_direction_control(c) {
+            continue;
+        }
         if c.is_whitespace() || c.is_control() {
             pending_space = !out.is_empty();
         } else {
@@ -227,6 +245,16 @@ pub(crate) fn clean_text(raw: &str) -> String {
         }
     }
     out
+}
+
+/// The explicit text-direction formatting characters: embeddings and overrides (U+202A-U+202E)
+/// and isolates (U+2066-U+2069). They are invisible and reorder the text around them, so a page
+/// can use one to make a card title read as something it is not (#4881 review Low-3). They are
+/// category Cf, which `char::is_control` (Cc) does not cover. Dropped, not turned into a space:
+/// `a<U+202E>b` is `ab`. The marks U+200E/U+200F and the letters of right-to-left scripts are
+/// not touched.
+fn is_direction_control(c: char) -> bool {
+    matches!(c, '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
 /// Cut to `max` characters (not bytes), no ellipsis, then drop a space the cut may leave.
@@ -285,11 +313,22 @@ fn decode_one_entity(tail: &str) -> Option<(char, usize)> {
     Some((decoded, semi + 1))
 }
 
-/// The text of the first `<title>`, cleaned. `rest` is the document after the opening tag.
-fn title_text(rest: &str) -> Option<String> {
-    let end = find_ci(rest, "</title", 0)?;
+/// What one `<title>` tag led to.
+enum Title {
+    /// A `</title` follows. `Some` is the cleaned text. `None` is a title that is empty once
+    /// cleaned (`<title></title>`): it is no title, and a later `<title>` may still be the one.
+    Closed(Option<String>),
+    /// No `</title` anywhere after this tag, so none after any later `<title>` either.
+    Unclosed,
+}
+
+/// The text of a `<title>`, cleaned. `rest` is the document after the opening tag.
+fn title_text(rest: &str) -> Title {
+    let Some(end) = find_ci(rest, "</title", 0) else {
+        return Title::Unclosed;
+    };
     let cleaned = clean_text(&rest[..end]);
-    (!cleaned.is_empty()).then_some(cleaned)
+    Title::Closed((!cleaned.is_empty()).then_some(cleaned))
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +505,7 @@ fn find_ci(haystack: &str, needle: &str, from: usize) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn prefers_og_over_twitter_over_title() {
@@ -786,6 +826,179 @@ mod tests {
         assert_eq!(
             parse_card(r#"<meta property="og:site_name" content="   ">"#).site_name,
             None
+        );
+    }
+
+    // -- #4881 security review r1 -------------------------------------------------------------
+
+    /// The fetch cap: the largest page the parser is ever handed in production.
+    const PAGE_BYTES: usize = crate::fetch::HTML_MAX_BYTES;
+
+    /// How long a 512 KiB page may take: one second, from measurements of the same worst case (a
+    /// page of nothing but `<title>x` that never closes), this machine, 2026-10-31.
+    ///
+    /// * Before the fix the time was quadratic (about x4 for every doubling). A debug build, which
+    ///   is what `cargo test` runs: 0.70 s at 32 KiB, 3.1 s at 64 KiB, 11.8 s at 128 KiB, so about
+    ///   three minutes at 512 KiB. A release build: 7.0-8.5 s at 512 KiB (review r1).
+    /// * After the fix, a debug build reads 512 KiB of it in 27 ms, and every other page shape in
+    ///   the table below in 35 ms or less. A release build needs a few milliseconds.
+    ///
+    /// One second is therefore about 35 times the slowest debug time of the fixed parser (a loaded
+    /// CI machine does not reach it) and well below even the release time of the broken one, so
+    /// the broken parser fails in either profile, and fails here in one second because the read
+    /// runs on a thread this test stops waiting for. Do not raise the number to make a slow machine
+    /// pass: a page that needs a second here is the bug this test exists for.
+    const READ_DEADLINE: Duration = Duration::from_secs(1);
+
+    /// `parse_card` on a thread of its own, and give up waiting after `limit`. A parser that goes
+    /// quadratic again must fail the test in about `limit` instead of holding the whole suite
+    /// for minutes; the thread is left to run into the end of the process. Returns the card and
+    /// how long it took, or `None` when it did not finish in time.
+    fn parse_with_deadline(html: String, limit: Duration) -> Option<(ParsedCard, Duration)> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let card = parse_card(&html);
+            let _ = sender.send((card, started.elapsed()));
+        });
+        receiver.recv_timeout(limit).ok()
+    }
+
+    /// H-1: a `<title>` with no `</title` after it used to be searched for again by every later
+    /// `<title>`, to the end of the page each time. 512 KiB of them took seconds on the one task
+    /// that also sends webhooks. The answer to "is there a `</title` ahead?" cannot change as the
+    /// scan moves forward, so it is asked once.
+    #[test]
+    fn a_page_of_unclosed_titles_is_read_in_linear_time() {
+        let html = "<title>x".repeat(PAGE_BYTES / "<title>x".len());
+        let (card, took) = parse_with_deadline(html, READ_DEADLINE).unwrap_or_else(|| {
+            panic!("512 KiB of unclosed <title> took longer than {READ_DEADLINE:?}")
+        });
+        assert_eq!(card.title, None, "a title that never closes is no title");
+        eprintln!("512 KiB of unclosed <title>: {took:?}");
+    }
+
+    /// Not only titles: every shape that makes a hand-written scanner go quadratic, at the
+    /// largest size the fetch lets through. The unclosed `<title>` is the one that was; the rest
+    /// are the ones that were checked and must stay linear.
+    #[test]
+    fn no_page_shape_at_the_fetch_cap_makes_the_reader_slow() {
+        let big_attribute_list = format!("<meta {}>", "a=1 ".repeat(PAGE_BYTES / 4));
+        let big_quoted_value = format!(
+            r#"<meta property="og:title" content="{}">"#,
+            "&amp;".repeat(PAGE_BYTES / 5)
+        );
+        let broken_entities = format!(
+            r#"<meta property="og:title" content="{}">"#,
+            "&#x&#;&;&".repeat(PAGE_BYTES / 9)
+        );
+        let units: [(&str, String); 17] = [
+            ("unclosed title", "<title>x".into()),
+            (
+                "unclosed upper-case title with attributes",
+                "<TITLE lang=en>x".into(),
+            ),
+            (
+                "unclosed title, closing tag in a comment",
+                "<title>x<!-- </title> -->".into(),
+            ),
+            ("empty closed titles", "<title></title>".into()),
+            ("blank closed titles", "<title> \n</title>".into()),
+            ("unclosed meta quote", "<meta a='".into()),
+            ("unclosed link", "<link rel=icon href=".into()),
+            ("script that never ends", "<script>".into()),
+            ("style that never ends", "<style>".into()),
+            ("comment that never ends", "<!--".into()),
+            (
+                "one huge value of broken entity references",
+                broken_entities,
+            ),
+            ("angle brackets", "<<<<".into()),
+            ("tag-like noise", "<a<a<a<a ".into()),
+            (
+                "closed meta tags",
+                r#"<meta property="og:title" content="t">"#.into(),
+            ),
+            (
+                "icon links past the candidate cap",
+                r#"<link rel="icon" href="/i.png">"#.into(),
+            ),
+            ("one huge attribute list", big_attribute_list),
+            ("one huge quoted value", big_quoted_value),
+        ];
+        for (label, unit) in units {
+            let html = if unit.len() >= PAGE_BYTES {
+                unit
+            } else {
+                unit.repeat(PAGE_BYTES / unit.len())
+            };
+            assert!(
+                html.len() <= PAGE_BYTES + 64,
+                "{label}: the page is the fetch cap"
+            );
+            let (_, took) = parse_with_deadline(html, READ_DEADLINE)
+                .unwrap_or_else(|| panic!("{label}: took longer than {READ_DEADLINE:?}"));
+            eprintln!("{label}: {took:?}");
+        }
+    }
+
+    /// The flag behind the fix must mean "no `</title` anywhere ahead" and nothing else. A title
+    /// that is closed but empty once cleaned leaves the next `<title>` free to be the title.
+    #[test]
+    fn an_empty_closed_title_does_not_stop_a_later_title_but_an_unclosed_one_does() {
+        for html in [
+            "<title></title><title>Real</title>",
+            "<title>  \n\t </title><title>Real</title>",
+            "<title></title><title> </title><title>Real</title>",
+            "<title>\u{202E}</title><title>Real</title>",
+        ] {
+            assert_eq!(parse_card(html).title.as_deref(), Some("Real"), "{html:?}");
+        }
+        for (html, expected) in [
+            ("<title></title><title>never closed", None),
+            ("<title>never closed<title>second", None),
+            // One closing tag closes the first title, as it always did: the text between is the
+            // title, tags and all.
+            (
+                "<title>never closed<title>second</title>",
+                Some("never closed<title>second"),
+            ),
+        ] {
+            assert_eq!(parse_card(html).title.as_deref(), expected, "{html:?}");
+        }
+        // Nothing else on the page is lost to a title that never closes.
+        let card = parse_card(
+            r#"<title>never closed<meta property="og:title" content="From og"><title>x"#,
+        );
+        assert_eq!(card.title.as_deref(), Some("From og"));
+    }
+
+    /// Low-3: U+202A-U+202E and U+2066-U+2069 reorder the text around them, so a title can read
+    /// as something other than what it is. They are dropped (not turned into spaces) from every
+    /// text the card carries; real right-to-left text is left alone.
+    #[test]
+    fn direction_controls_are_dropped_from_every_text_field() {
+        let html = "<title>t\u{202E}it\u{2066}le</title>\
+            <meta property=\"og:title\" content=\"ab\u{202A}c\u{202B}d\u{202C}e\u{202D}f\u{202E}g\u{2067}h\u{2068}i\u{2069}j\">\
+            <meta property=\"og:description\" content=\"de&#x202E;sc\u{2066}ription\">\
+            <meta property=\"og:site_name\" content=\"\u{202E}Oort\u{2069} News\">";
+        let card = parse_card(html);
+        assert_eq!(card.title.as_deref(), Some("abcdefghij"));
+        assert_eq!(card.description.as_deref(), Some("description"));
+        assert_eq!(card.site_name.as_deref(), Some("Oort News"));
+        // The <title> fallback goes through the same cleaning.
+        assert_eq!(
+            parse_card("<title>t\u{202E}it\u{2066}le</title>")
+                .title
+                .as_deref(),
+            Some("title")
+        );
+        // Letters of right-to-left scripts, and the marks that are not in the list, stay.
+        let kept =
+            parse_card("<meta property=\"og:title\" content=\"שלום עולם مرحبا\u{200F}\u{200E}\">");
+        assert_eq!(
+            kept.title.as_deref(),
+            Some("שלום עולם مرحبا\u{200F}\u{200E}")
         );
     }
 }

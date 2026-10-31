@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::card::{build_card, CardFields};
 use crate::config::UnfurlConfig;
 use crate::extract::extract_urls;
-use crate::fetch::{FetchError, FetchKind, UnfurlHttp};
+use crate::fetch::{FetchError, FetchKind, Fetched, UnfurlHttp};
 use crate::proxy::{icon_path, image_path};
 use crate::settings::workspace_fetch_allowed;
 use crate::store::{
@@ -165,12 +165,12 @@ impl<T: UnfurlHttp + 'static> UnfurlWorker<T> {
                                 fetched_any = true;
                                 // D11: a page with no title and no picture gives a card nothing
                                 // to show. It is recorded the way every other quiet end is.
-                                let settled = match build_card(
-                                    &fetched.final_url,
-                                    &fetched.content_type,
-                                    &fetched.body,
+                                let settled = match build_card_off_thread(
+                                    fetched,
                                     self.config.allow_development_http,
-                                ) {
+                                )
+                                .await
+                                {
                                     Some(card) => Settled::ok(card),
                                     None => Settled::quiet("failed"),
                                 };
@@ -416,6 +416,37 @@ impl Settled {
             image_height: None,
             icon_url: None,
             is_video: false,
+        }
+    }
+}
+
+/// Read one fetched page into a card on the blocking pool (#4881 security review H-1, the second
+/// layer behind the linear-time parser).
+///
+/// Reading a page is CPU work over up to 512 KiB of somebody else's text, and this worker is one
+/// branch of the `select!` that `momo-webhook-sender` runs next to webhook delivery and the
+/// doorbell. Inline, a page that is slow to read stops all three; on the blocking pool it can
+/// only slow its own job. The page's bytes move into the closure, nothing is cloned. A panic in
+/// the reading code ends the job as the quiet `failed` a page with nothing to show gets, and is
+/// logged without the page's address or text.
+async fn build_card_off_thread(
+    fetched: Fetched,
+    allow_development_http: bool,
+) -> Option<CardFields> {
+    let built = tokio::task::spawn_blocking(move || {
+        build_card(
+            &fetched.final_url,
+            &fetched.content_type,
+            &fetched.body,
+            allow_development_http,
+        )
+    })
+    .await;
+    match built {
+        Ok(card) => card,
+        Err(error) => {
+            tracing::error!(error = %error, "unfurl card builder did not finish");
+            None
         }
     }
 }
