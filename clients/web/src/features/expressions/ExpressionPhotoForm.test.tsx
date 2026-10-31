@@ -124,6 +124,21 @@ describe("모델이 있는지 먼저 묻는다", () => {
     expect(calls.filter((call) => call.method === "GET")).toHaveLength(2);
   });
 
+  it("추가 권한이 없다는 답이면 확인 실패가 아니라 그렇다고 말하고, 다시 시도는 두지 않는다", async () => {
+    const { transport, calls } = fake({ model: () => { throw new ExpressionHttpError(403, "expression_role_required"); } });
+    const view = mount(transport);
+    const banner = await view.findByTestId("expression-photo-check-refused");
+    expect(banner.textContent).toContain(t("expressions.photo.errorRole"));
+    expect(banner.textContent).not.toContain(t("expressions.photo.checkFailed"));
+    expect(view.queryByTestId("expression-photo-check-error")).toBeNull();
+    expect(view.queryByText(t("expressions.photo.retry"))).toBeNull();
+    expect(view.queryByTestId("expression-photo-form")).toBeNull();
+    // 에이전트에게 부탁하는 길은 이 확인과 상관없이 열려 있다.
+    fireEvent.click(id(view, "expression-photo-agent"));
+    expect(handlers.onAgent).toHaveBeenCalledTimes(1);
+    expect(calls.filter((call) => call.method === "GET")).toHaveLength(1);
+  });
+
   it("어긋난 답(모델이 있다는데 회사가 없다)은 믿지 않는다", async () => {
     const { transport } = fake({ model: () => ({ ...MODEL, provider: null }) });
     const view = mount(transport);

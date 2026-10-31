@@ -47,7 +47,7 @@ const Step = { idle: 0, busy: 1, failed: 2, made: 3 } as const;
 const Check = { loading: 0, error: 1, ready: 2 } as const;
 const Face = { none: 0, self: 1, other: 2 } as const;
 
-type ModelState = { kind: typeof Check.loading } | { kind: typeof Check.error } | { kind: typeof Check.ready; model: PhotoModel };
+type ModelState = { kind: typeof Check.loading } | { kind: typeof Check.error; failure: PhotoFailure } | { kind: typeof Check.ready; model: PhotoModel };
 type Phase = { kind: typeof Step.idle } | { kind: typeof Step.busy } | { kind: typeof Step.failed; failure: PhotoFailure } | { kind: typeof Step.made; result: PhotoDraftResult };
 interface Invalid { photo?: string; consent?: string; fields?: string; face?: string }
 
@@ -119,7 +119,7 @@ export function ExpressionPhotoForm({ onImport, onAgent, onDone, onClose }: { on
     if (!store) return;
     let live = true;
     setModelState({ kind: Check.loading });
-    store.photoModel().then((model) => { if (live) setModelState({ kind: Check.ready, model }); }, () => { if (live) setModelState({ kind: Check.error }); });
+    store.photoModel().then((model) => { if (live) setModelState({ kind: Check.ready, model }); }, (error: unknown) => { if (live) setModelState({ kind: Check.error, failure: failureOf(error) }); });
     return () => { live = false; };
   }, [store, tries]);
 
@@ -145,8 +145,14 @@ export function ExpressionPhotoForm({ onImport, onAgent, onDone, onClose }: { on
   if (modelState.kind === Check.loading) return <div className="flex flex-col gap-2" data-testid="expression-photo-checking"><p className="text-meta text-ink-muted">{formatMessage("expressions.photo.checking")}</p><Skeleton ready={false} rows={2} /></div>;
   if (modelState.kind === Check.error) {
     // 확인이 안 될 때도 에이전트에게 부탁하는 길은 막지 않는다: 그 길은 이 확인과 상관없다.
+    // 서버가 이 사람에게는 사진으로 만들 권한이 없다고 답한 경우(게스트·관리자만 추가하는 팀)는 다시 해도 같다:
+    // 못 한다고 말하고 다시 시도는 두지 않는다. (실패 이름을 글자로 비교하지 않고 사전 키로 비교하는 것은
+    // 직접 문구 장부가 한 단어짜리 글자를 문구로 세기 때문이다.)
+    const refused = FAILURE_KEY[modelState.failure] === FAILURE_KEY.role;
     return <div className="flex flex-col gap-2">
-      <InlineBanner message={formatMessage("expressions.photo.checkFailed")} actionLabel={formatMessage("expressions.photo.retry")} onAction={() => setTries((value) => value + 1)} separator={false} className="px-0" testId="expression-photo-check-error" />
+      {refused
+        ? <InlineBanner message={formatMessage(FAILURE_KEY.role)} separator={false} className="px-0" testId="expression-photo-check-refused" />
+        : <InlineBanner message={formatMessage("expressions.photo.checkFailed")} actionLabel={formatMessage("expressions.photo.retry")} onAction={() => setTries((value) => value + 1)} separator={false} className="px-0" testId="expression-photo-check-error" />}
       <Button type="button" variant="ghost" size="sm" className="self-start" onClick={onAgent} data-testid="expression-photo-agent">{formatMessage("expressions.photo.agentInstead")}</Button>
     </div>;
   }
