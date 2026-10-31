@@ -445,7 +445,13 @@ async fn build_card_off_thread(
     match built {
         Ok(card) => card,
         Err(error) => {
-            tracing::error!(error = %error, "unfurl card builder did not finish");
+            // Not `error`'s text: a `JoinError` carries the panic's message, and the message of a
+            // slicing panic can quote the text that was being sliced.
+            tracing::error!(
+                panicked = error.is_panic(),
+                cancelled = error.is_cancelled(),
+                "unfurl card builder did not finish"
+            );
             None
         }
     }
