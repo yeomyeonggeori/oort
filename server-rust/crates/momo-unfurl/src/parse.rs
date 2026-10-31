@@ -9,9 +9,9 @@
 //! closing marker (`-->`, `</script`, `</style`, a tag's `>`) either moves it past what it found
 //! or ends the scan. The one search that does not move the cursor is the `</title` that closes a
 //! `<title>`. When there is none anywhere after a `<title>`, there is none after any later one
-//! either, so that is learned once (`Scan::title_unclosed`) and never searched for again. Without
-//! that, 512 KiB of `<title>` that never closes cost seconds on the one task that also sends
-//! webhooks (#4881 security review H-1, `a_page_of_unclosed_titles_is_read_in_linear_time`).
+//! either, so that is learned once (`Scan::title_unclosed`) and never searched for again, which
+//! keeps the whole scan linear in the page size (#4881,
+//! `a_page_of_unclosed_titles_is_read_in_linear_time`).
 //!
 //! Everything here is text in, text out. Resolving addresses, the safety checks and the charset
 //! live next to it ([`crate::card`], [`crate::charset`]).
@@ -837,10 +837,9 @@ mod tests {
     /// How long a 512 KiB page may take: one second, from measurements of the same worst case (a
     /// page of nothing but `<title>x` that never closes), this machine, 2026-10-31.
     ///
-    /// * Before the fix the time was quadratic (about x4 for every doubling). A debug build, which
-    ///   is what `cargo test` runs: 0.70 s at 32 KiB, 3.1 s at 64 KiB, 11.8 s at 128 KiB, so about
-    ///   three minutes at 512 KiB. A release build: 7.0-8.5 s at 512 KiB (review r1).
-    /// * After the fix, a debug build reads 512 KiB of it in 27 ms, and every other page shape in
+    /// * A non-linear scan blows far past this limit on the same input, so the test fails rather
+    ///   than slowing the suite down.
+    /// * The linear scan: a debug build reads 512 KiB of it in 27 ms, and every other page shape in
     ///   the table below in 35 ms or less. A release build needs a few milliseconds.
     ///
     /// One second is therefore about 35 times the slowest debug time of the fixed parser (a loaded
