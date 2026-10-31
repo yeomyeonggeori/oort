@@ -11,6 +11,16 @@ name: 4783-connection-resync
 # first and offer resync only once nextBefore is absent.
 # Device-only: lock/unlock without background; notification tap on 5G before/
 # after JWT expiry. Measure connected latency and attempts via copied log.
+#
+# SCENE=return (#4949, owner 10-31): app return must leave the conversation
+# where it was. Open a conversation that still has older history to load
+# (nextBefore present - a short room that is fully loaded never showed the
+# defect) and rest at the bottom. Go to the home screen and come back within a
+# second or two. EXPECTED: no 「연결 중…」 band at all for a reconnect shorter
+# than one second, the list does not sweep from the top to the bottom, the
+# last row stays where it was. Device-only: with airplane mode on, the band
+# must appear about one second after the return and become 「연결이 끊겼습니다」
+# at ten seconds; turning it off removes the band without moving the list.
 - runFlow:
     when:
       true: ${SCENE == 'info'}
@@ -34,3 +44,18 @@ name: 4783-connection-resync
       - extendedWaitUntil:
           visible: ${EXPECTED_REPLY}
           timeout: 15000
+- runFlow:
+    when:
+      true: ${SCENE == 'return'}
+    commands:
+      - pressKey: home
+      - launchApp:
+          stopApp: false
+      # A reconnect that heals inside a second leaves no band.
+      - assertNotVisible: 연결 중…
+      - assertVisible:
+          id: timeline-list
+      # The list was not rebuilt: the bottom marker is still there, and the
+      # newest row is still on screen without scrolling.
+      - assertVisible:
+          id: timeline-tail
