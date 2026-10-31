@@ -11,7 +11,11 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
+  type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 import type {AgentRunProgress} from '@momo/core/lib/api';
@@ -30,7 +34,7 @@ import {
   type Directory,
 } from '@momo/core/features/workspace/directory';
 import {roleRequiredCopy} from '@momo/core/features/approvals/actionRole';
-import {Sentence} from '../../design/atoms';
+import {Sentence, STACK_PILL_SCALE} from '../../design/atoms';
 import {GlassSurface, LiquidGlassAllowed} from '../../design/glass';
 import {CloseCircle} from '../../design/SheetChrome';
 import {useStyles} from '../../design/theme';
@@ -64,6 +68,9 @@ export interface DecisionStageEntry {
   receipt?: ApprovalReceipt;
   run?: AgentRunProgress;
 }
+
+/** 본문이 끝에 닿았다고 보는 여유(pt). 대화 입력창 후보 시트의 「아래에 더 있다」 표지와 같은 판정이다. */
+const BODY_END_SLOP = 2;
 
 export function DecisionStage({
   entries,
@@ -136,6 +143,43 @@ export function DecisionStage({
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(false);
   useEffect(() => setExpanded(false), [current?.id]);
+  // 큰 글씨(접근성 크기, 다른 폰 표면과 같은 문턱)에서는 결정 패널이 본문 아래 고정 칸을 떠나 본문 끝에서 함께 흐른다(#4921).
+  // 고정 패널·썸네일이 화면을 나눠 가지면 본문 창은 제목 한 덩이로 차서 값·되돌릴 수 없음·비용이 접힌 아래에 숨고
+  // 결정 단추만 남았다. 흐르는 칸에서는 단추가 언제나 그 내용 뒤에 선다.
+  const {fontScale} = useWindowDimensions();
+  const flowing = fontScale >= STACK_PILL_SCALE;
+  const body = useRef<ScrollView | null>(null);
+  const bodyMetrics = useRef({viewport: 0, content: 0, offset: 0});
+  const [bodyFrame, setBodyFrame] = useState({y: 0, height: 0});
+  const [moreBelow, setMoreBelow] = useState(false);
+  const syncMoreBelow = () => {
+    const {viewport, content, offset} = bodyMetrics.current;
+    setMoreBelow(viewport > 0 && content - (offset + viewport) > BODY_END_SLOP);
+  };
+  const onBodyLayout = (event: LayoutChangeEvent) => {
+    const {y, height} = event.nativeEvent.layout;
+    bodyMetrics.current.viewport = height;
+    setBodyFrame({y, height});
+    syncMoreBelow();
+  };
+  const onBodyContentSize = (_width: number, height: number) => {
+    bodyMetrics.current.content = height;
+    syncMoreBelow();
+  };
+  const onBodyScroll = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const {contentOffset, layoutMeasurement, contentSize} = event.nativeEvent;
+    bodyMetrics.current = {
+      viewport: layoutMeasurement.height,
+      content: contentSize.height,
+      offset: contentOffset.y,
+    };
+    syncMoreBelow();
+  };
+  // 다른 장으로 넘기면 본문은 그 장의 맨 위에서 시작한다. 흐르는 본문은 길어서, 앞 장에서 내린 자리가 남으면 새 장의
+  // 제목·값을 지나쳐 단추 앞에서 시작한다.
+  useEffect(() => {
+    body.current?.scrollTo({y: 0, animated: false});
+  }, [current?.id]);
   const busyRef = useRef(false);
   const multipleTouches = useRef(false);
   const heading = useRef<View | Text | null>(null);
@@ -294,6 +338,43 @@ export function DecisionStage({
       ))}
     </View>
   );
+  const stageOpen = hero.stage.phase === 'open';
+  // 결정 패널. 기본 크기에서는 본문 아래 고정 칸에, 큰 글씨(`flowing`)에서는 본문 끝에 선다(위 주석).
+  const actions =
+    stageOpen &&
+    !loading &&
+    !error &&
+    !complete &&
+    !feedback &&
+    current?.bundle.canDecide &&
+    current.bundle.state === 'approval' &&
+    entry ? (
+      <GlassSurface
+        radius={ds2Radius.card}
+        style={styles.actions}
+        testID="decision-stage-actions-glass"
+      >
+        <ApprovalDecision
+          key={current.id}
+          approvalId={current.bundle.approvalId!}
+          execution={entry.card.execution}
+          shape="request"
+          subject={current.bundle.headline}
+          lead="결정은 버튼을 눌러요"
+          forbiddenCopy={
+            entry.card.action?.requiredRole
+              ? roleRequiredCopy(entry.card.action.requiredRole)
+              : null
+          }
+          testIDPrefix="decision-stage"
+          onBusyChange={value => {
+            busyRef.current = value;
+            if (alive.current) setBusy(value);
+          }}
+          onSettled={outcome => settle(current.id, outcome)}
+        />
+      </GlassSurface>
+    ) : null;
 
   return (
     <Modal
@@ -337,9 +418,18 @@ export function DecisionStage({
               />
             </View>
             <ScrollView
+              ref={body}
               style={styles.bodyScroll}
-              contentContainerStyle={styles.bodyContent}
+              contentContainerStyle={[
+                styles.bodyContent,
+                flowing && styles.bodyContentFlow,
+              ]}
               keyboardShouldPersistTaps="handled"
+              testID="decision-stage-body"
+              scrollEventThrottle={16}
+              onLayout={flowing ? onBodyLayout : undefined}
+              onContentSizeChange={flowing ? onBodyContentSize : undefined}
+              onScroll={flowing ? onBodyScroll : undefined}
             >
               <Animated.View
                 ref={hero.content}
@@ -388,12 +478,21 @@ export function DecisionStage({
                   <>
                     <View
                       ref={heading}
-                      {...responder.panHandlers}
+                      // 큰 글씨(`flowing`)에서는 끌기 응답자를 달지 않는다(#4921). 제목·안내 줄(= 이 손잡이)이 첫 화면을 거의 다 덮어서,
+                      // 터치 시작에서 가로채는 손잡이가 본문을 내리려는 세로 끌기를 스크롤 대신 「무대 닫기」로 읽는다(시뮬레이터에서
+                      // 확인). 가로 끌기만 움직임에서 가져가는 길도 시험했지만 시뮬레이터의 가로 끌기가 넘어가지 않았다. 이 크기의 넘기기·닫기는
+                      // 이전/다음·썸네일·닫기 단추와 VoiceOver 동작(아래 `accessibilityActions`)이 맡는다. 없는 끌기를 말하는 안내 문장(낭독 힌트·
+                      // 「끌어 넘겨 보기」 줄)도 이 크기에서는 서지 않는다.
+                      {...(flowing ? undefined : responder.panHandlers)}
                       testID="decision-stage-drag"
                       accessible
                       accessibilityRole="adjustable"
                       accessibilityLabel={`${current.bundle.headline}. ${model.positionLabel}`}
-                      accessibilityHint="가로로 끌어 넘겨 보고 세로로 끌어 닫아요. 결정은 버튼을 눌러요."
+                      accessibilityHint={
+                        flowing
+                          ? undefined
+                          : '가로로 끌어 넘겨 보고 세로로 끌어 닫아요. 결정은 버튼을 눌러요.'
+                      }
                       accessibilityActions={[
                         {name: 'increment', label: '다음 결정'},
                         {name: 'decrement', label: '이전 결정'},
@@ -409,9 +508,11 @@ export function DecisionStage({
                       <Text style={styles.title} accessibilityRole="header">
                         {current.bundle.headline}
                       </Text>
-                      <Text style={styles.meta}>
-                        끌어 넘겨 보기 · 결정은 버튼을 눌러요
-                      </Text>
+                      {flowing ? null : (
+                        <Text style={styles.meta}>
+                          끌어 넘겨 보기 · 결정은 버튼을 눌러요
+                        </Text>
+                      )}
                     </View>
                     {offline ? (
                       <Sentence style={styles.body}>
@@ -519,41 +620,25 @@ export function DecisionStage({
                   </Text>
                 )}
               </Animated.View>
+              {flowing ? actions : null}
             </ScrollView>
-            {hero.stage.phase === 'open' &&
-            !loading &&
-            !error &&
-            !complete &&
-            !feedback &&
-            current?.bundle.canDecide &&
-            current.bundle.state === 'approval' &&
-            entry ? (
-              <GlassSurface
-                radius={ds2Radius.card}
-                style={styles.actions}
-                testID="decision-stage-actions-glass"
+            {flowing && moreBelow && stageOpen ? (
+              // 흐르는 본문이 창보다 길고 끝이 아닐 때 「아래에 더 있다」. 대화 입력창 후보 시트의 표지와 같은 도형이고
+              // 눌리지 않으며 보조기술에는 서지 않는다(스크린리더는 순서대로 읽어 내려간다). 높이를 먹지 않는 겹침이다.
+              <View
+                style={[
+                  styles.moreCue,
+                  {top: bodyFrame.y + bodyFrame.height - space.xl},
+                ]}
+                pointerEvents="none"
+                accessibilityElementsHidden
+                importantForAccessibility="no-hide-descendants"
+                testID="decision-stage-more-cue"
               >
-                <ApprovalDecision
-                  key={current.id}
-                  approvalId={current.bundle.approvalId!}
-                  execution={entry.card.execution}
-                  shape="request"
-                  subject={current.bundle.headline}
-                  lead="결정은 버튼을 눌러요"
-                  forbiddenCopy={
-                    entry.card.action?.requiredRole
-                      ? roleRequiredCopy(entry.card.action.requiredRole)
-                      : null
-                  }
-                  testIDPrefix="decision-stage"
-                  onBusyChange={value => {
-                    busyRef.current = value;
-                    if (alive.current) setBusy(value);
-                  }}
-                  onSettled={outcome => settle(current.id, outcome)}
-                />
-              </GlassSurface>
+                <View style={styles.moreChevron} />
+              </View>
             ) : null}
+            {flowing ? null : actions}
             <View style={styles.navigation}>
               <View style={styles.header}>
                 <Pressable
@@ -662,6 +747,25 @@ const buildStyles = (color: Palette) =>
       flexGrow: 1,
       justifyContent: 'center',
       paddingVertical: space.md,
+    },
+    // 큰 글씨: 위에서부터 읽고(가운데 정렬은 패널이 열릴 때 카드를 밀어 올린다), 카드와 패널 사이를 띄운다.
+    bodyContentFlow: {justifyContent: 'flex-start', gap: space.md},
+    moreCue: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      height: space.xl,
+      alignItems: 'center',
+      justifyContent: 'flex-end',
+      paddingBottom: space.xs,
+    },
+    moreChevron: {
+      width: 10,
+      height: 10,
+      borderRightWidth: 2,
+      borderBottomWidth: 2,
+      borderColor: color.textMuted,
+      transform: [{rotate: '45deg'}],
     },
     card: {
       backgroundColor: color.surface,
