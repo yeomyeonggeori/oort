@@ -22,6 +22,9 @@ import {
 import {MessageRow, PendingRow, rowPressedBackground} from '../src/features/conversation/MessageRow';
 import {
   blendOver,
+  landedFace,
+  LANDED_TINT_ALPHA,
+  LANDED_TINT_MAX_ALPHA,
   PRESS_FACE_MIN_CONTRAST,
   pressFace,
   ROW_FACE,
@@ -119,13 +122,10 @@ describe('행 강조 면 — 화면 끝에서 띄운 둥근 면', () => {
     // 서 있는 착지 = 그릇의 배경. 그릇이 화면 끝에서 outer 떨어진 둥근 상자다.
     expect(bowl.marginHorizontal).toBe(ROW_FACE.outer);
     expect(bowl.borderRadius).toBe(ROW_FACE.radius);
-    expect(bowl.backgroundColor).toBe(color.warnSurface);
-    // 서 있는 착지의 테두리 — 그릇을 꽉 채우는 절대 배치 + warnBorder 1px + 같은 모서리.
-    const edge = flat(screen.getByTestId('message-row-landed-edge').props.style);
-    expect(edge).toMatchObject({top: 0, right: 0, bottom: 0, left: 0});
-    expect(edge.borderRadius).toBe(bowl.borderRadius);
-    expect(edge.borderWidth).toBe(ROW_FACE.edge);
-    expect(edge.borderColor).toBe(color.warnBorder);
+    expect(bowl.backgroundColor).toBe(landedFace(color));
+    // 테두리는 없다(owner 2026-10-31, #4949) — 덧그림 뷰도, 그릇의 테두리도.
+    expect(screen.queryByTestId('message-row-landed-edge')).toBeNull();
+    expect(bowl.borderWidth).toBeUndefined();
 
     // 눌림 = 그릇 안쪽 Pressable 이 같은 상자를 꽉 채운다(마진 없음 = 그릇과 같은 경계).
     const pressed = pressedStyle();
@@ -140,11 +140,9 @@ describe('행 강조 면 — 화면 끝에서 띄운 둥근 면', () => {
     expect(fade).toMatchObject({top: 0, right: 0, bottom: 0, left: 0});
     expect(fade.borderRadius).toBe(bowl.borderRadius);
     expect(fade.backgroundColor).toBe(bowl.backgroundColor);
-    // 덮개도 같은 테두리를 든 채 녹는다 — 테두리만 먼저 사라지거나 늦게 남지 않는다.
-    expect(fade.borderWidth).toBe(edge.borderWidth);
-    expect(fade.borderColor).toBe(edge.borderColor);
-    // 서 있는 착지가 끝나면 테두리 덧그림도 함께 빠진다(덮개가 이어받는다).
-    expect(screen.queryByTestId('message-row-landed-edge')).toBeNull();
+    // 덮개도 테두리를 들지 않는다 — 서 있던 면과 같은 색·같은 상자로 이어받아 녹는다.
+    expect(fade.borderWidth).toBeUndefined();
+    expect(fade.borderColor).toBeUndefined();
     // 깨뜨리면(각각): 그릇 borderRadius 제거 · rowInner borderRadius 제거 · 덮개 borderRadius 제거
     //                 · 덮개를 다른 값으로 → 해당 줄만 빨개진다.
   });
@@ -224,6 +222,7 @@ describe('눌림 틴트 — 강조색 10%, 안 보이는 테마만 surface', () 
               surfacePressed: t.derived['surface-pressed'],
               text: t.color.ink,
               bg: t.canvas[1],
+              warn: t.color.warn,
               warnSurface: t.color['warn-soft'],
             },
           ] as const,
@@ -232,26 +231,20 @@ describe('눌림 틴트 — 강조색 10%, 안 보이는 테마만 surface', () 
     ),
   ];
 
+  /** 서 있는 착지 면이 바닥에서 이만큼은 갈려야 테두리 없이 면만으로 선다(`PRESS_FACE_MIN_CONTRAST` 와 같은 줄). */
   const LANDED_FACE_MIN_CONTRAST = 1.1;
-  /** 면(warnSurface)만으로는 바닥과 안 갈리는 테마 — 내장 3테마 라이트. 테두리가 경계를 세운다. */
-  const FACE_ALONE_WEAK = new Set([
-    'dawnsky/light/default',
-    'graphite/light/default',
-    'noeul/light/default',
-    ...Object.keys(SIGNAL_PRESETS).flatMap(id => [
-      `dawnsky/light/${id}`,
-      `graphite/light/${id}`,
-      `noeul/light/${id}`,
-    ]),
-  ]);
-  /** 테두리(warnBorder 1px)가 바닥에서 이만큼은 갈려야 면이 약한 테마에서도 경계가 선다. */
-  const LANDED_EDGE_MIN_CONTRAST = 1.2;
+  /**
+   * 내 말풍선(accent 채움)이 착지 면 위에서도 갈려야 하는 최소 대비. 이전 면(`warnSurface`)의 최저는 3.05 였다.
+   * 새 면(경고색 ≈9.8%)의 최저는 `noeul/light/default` 의 2.91 — 그 테마는 맨 바닥과도 3.0x 라 면이 깎은 것은
+   * 0.1 안쪽이다. 면을 더 옅게 하면 분리는 늘지만 가시성(1.10)이 깨진다(8% 에서 1.08) — 가시성을 지켰다.
+   */
+  const LANDED_OWN_BUBBLE_MIN_CONTRAST = 2.9;
 
   it('조합 수가 많다 — 내장 3 테마 × 2 모드 × (기본 + 프리셋) + 카탈로그 전체', () => {
     expect(COMBOS.length).toBeGreaterThan(60);
   });
 
-  it('모든 조합에서 눌림 면이 바닥에서 보이고, 내 말풍선 뒤에서도 착지 면이 갈린다', () => {
+  it('모든 조합에서 눌림 면이 바닥에서 보인다', () => {
     const fellBack: string[] = [];
     for (const [name, p] of COMBOS) {
       const face = pressFace(p);
@@ -263,27 +256,32 @@ describe('눌림 틴트 — 강조색 10%, 안 보이는 테마만 surface', () 
         const seen = blendOver(p.accent, p.bg, 0.1);
         expect(`${name} ${contrast(seen, p.bg) >= PRESS_FACE_MIN_CONTRAST}`).toBe(`${name} true`);
       }
-      // 착지 면: 바닥과 갈리고(경계가 보인다), 내 말풍선(강조색)과도 갈린다.
-      const warn = (p as {warnSurface?: string}).warnSurface;
-      if (warn !== undefined) {
-        // 착지 면은 내 말풍선(강조색)과 갈린다.
-        expect(`${name} ${contrast(p.accent, warn) >= 3}`).toBe(`${name} true`);
-        // 착지 면이 바닥에서 보이는가. 내장 3 테마의 라이트는 `warnSurface` 만으로는 바닥과
-        // 1.02~1.04:1 이라 경계가 안 선다 — planner 결정(2026-10-25): `warnBorder` 1px 헤어라인을
-        // 더한다. 면이 약한 조합의 목록은 고정하고(목록 밖에서 약해지면 빨강), 그 조합마다
-        // 테두리가 바닥에서 갈리는지를 잰다. 약점은 더 이상 「알려진 약점」이 아니다.
-        const weak = contrast(warn, p.bg) < LANDED_FACE_MIN_CONTRAST;
-        expect(`${name} weak=${weak}`).toBe(`${name} weak=${FACE_ALONE_WEAK.has(name)}`);
-        const edge = (p as {warnBorder?: string}).warnBorder;
-        if (weak) {
-          expect(edge).toBeDefined();
-          const c = contrast(edge as string, p.bg);
-          expect(`${name} edge=${c >= LANDED_EDGE_MIN_CONTRAST}`).toBe(`${name} edge=true`);
-        }
-      }
     }
     // 눈으로 볼 수 있게 이름을 남긴다 — 물러난 테마가 늘면 이 목록이 증거다.
     expect(fellBack.length).toBeLessThan(COMBOS.length / 4);
+  });
+
+  it('모든 조합에서 착지 면은 경고색 10% 이하이고, 테두리 없이 면만으로 바닥에서 보이며, 내 말풍선과 갈린다 (#4949)', () => {
+    expect(LANDED_TINT_ALPHA).toBeLessThanOrEqual(LANDED_TINT_MAX_ALPHA);
+    for (const [name, p] of COMBOS) {
+      const warn = (p as {warn?: string}).warn;
+      expect(`${name} warn=${warn !== undefined}`).toBe(`${name} warn=true`);
+      const face = landedFace({warn: warn as string});
+      // 실제로 칠해지는 색의 알파 바이트를 읽는다 — 상수가 아니라 결과를 잰다.
+      expect(face).toMatch(/^#[0-9a-f]{6}[0-9a-f]{2}$/i);
+      const alpha = parseInt(face.slice(7), 16) / 255;
+      expect(`${name} alpha<=${alpha <= LANDED_TINT_MAX_ALPHA}`).toBe(`${name} alpha<=true`);
+      // 알파 면이 바닥 위에 합성된 색.
+      const seen = blendOver(face.slice(0, 7), p.bg, alpha);
+      expect(`${name} visible=${contrast(seen, p.bg) >= LANDED_FACE_MIN_CONTRAST}`).toBe(
+        `${name} visible=true`,
+      );
+      expect(`${name} bubble=${contrast(p.accent, seen) >= LANDED_OWN_BUBBLE_MIN_CONTRAST}`).toBe(
+        `${name} bubble=true`,
+      );
+    }
+    // 깨뜨리면(각각): LANDED_TINT_ALPHA 를 0.2 로 → alpha 줄이 빨강 · 0.03 으로 → visible 줄이 빨강 ·
+    //                 warn 대신 accent 로 칠하면 → bubble 줄이 빨강.
   });
 });
 

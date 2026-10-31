@@ -95,7 +95,7 @@
     "clients/mobile/src/features/conversation/MessageActionSheet.tsx": 21,
     "clients/mobile/src/features/conversation/MessageBody.tsx": 45,
     "clients/mobile/src/features/conversation/MessageEditorSheet.tsx": 8,
-    "clients/mobile/src/features/conversation/MessageRow.tsx": 289,
+    "clients/mobile/src/features/conversation/MessageRow.tsx": 288,
     "clients/mobile/src/features/conversation/PinListPanel.tsx": 9,
     "clients/mobile/src/features/conversation/Quote.tsx": 34,
     "clients/mobile/src/features/conversation/ReplyDraftCard.tsx": 4,
