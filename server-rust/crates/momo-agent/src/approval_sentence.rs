@@ -23,15 +23,19 @@
 //!
 //! ## What may be quoted
 //!
-//! Only a short value the server has already validated or owns (a channel name, a tool name, an
-//! agent's display name) and only in one line: [`quotable_value`]. A person's free text — a
-//! tagline, a message, a rationale — is never quoted, and neither is anything long: the card is
-//! where it is read in full.
+//! What a person decides on a banner, when it is short and plain: a channel's name, the app being
+//! installed, a tool's name, an agent's display name, and the one short text a profile change
+//! carries (the tagline, the status, the role label) — in one line, never inside the sentence
+//! ([`quotable_value`]). Without it the banner would ask 「소개를 바꿔도 될까요?」 and leave the
+//! approver to approve a text nobody showed them. A message, a rationale, an image and anything
+//! long are never quoted: the card is where those are read in full (D6-3: 「값이 길거나 사람의
+//! 글이면 본문에 넣지 않는다」).
 
 use serde_json::Value;
 
 use crate::actions::{
-    action_by_id, WorkspaceAction, ACTION_AGENT_PROFILE_UPDATE, ACTION_CHANNEL_CREATE,
+    action_by_id, plugin_install_label, WorkspaceAction, ACTION_AGENT_PROFILE_UPDATE,
+    ACTION_CHANNEL_CREATE, ACTION_CHANNEL_MEMBER_ADD, ACTION_PLUGIN_INSTALL,
     ACTION_TYPE_WORKSPACE_ACTION,
 };
 use crate::hosted_notice::inert_display_name;
@@ -139,30 +143,39 @@ pub fn dm_admission_request_body(agent_display_name: &str) -> String {
 /// The `body` of a workspace action's approval card, from the action and the arguments the
 /// server validated. `unasked` is the card an agent raised on its own.
 ///
-/// The value is quoted for `channel.create` only (its name, a short validated slug); every other
-/// action asks without one — a card that names a person's text, a message or an image says so on
-/// the card, which is opened in the app (D6-3: 「값이 길거나 사람의 글이면 본문에 넣지 않는다」).
+/// A value is quoted after the question where it is what the approver decides and it is short
+/// and plain ([`quoted_value`]): the channel a `channel.create` makes (and 「비공개 채널을」 for a
+/// private one), the channel members are added to, the app being installed, the tagline, status
+/// or role label of a profile change. Every other action asks without one.
 pub fn action_request_body(
     action: &WorkspaceAction,
     args: Option<&Value>,
     unasked: bool,
 ) -> String {
-    if action.id == ACTION_CHANNEL_CREATE {
-        let name = args
-            .and_then(|args| args.get("name"))
-            .and_then(Value::as_str);
-        let private = args
+    let private = action.id == ACTION_CHANNEL_CREATE
+        && args
             .and_then(|args| args.get("kind"))
             .and_then(Value::as_str)
             .is_some_and(|kind| kind != "public");
-        let question = if private {
-            "비공개 채널을 만들어도 될까요?"
-        } else {
-            action.question
-        };
-        return question_body(question, name, unasked);
+    let question = if private {
+        "비공개 채널을 만들어도 될까요?"
+    } else {
+        phrases_of(action, args).question
+    };
+    question_body(question, quoted_value(action, args), unasked)
+}
+
+/// The raw text a request card may quote for this action ([`question_body`] makes it safe).
+fn quoted_value<'a>(action: &WorkspaceAction, args: Option<&'a Value>) -> Option<&'a str> {
+    let text = |key: &str| args.and_then(|args| args.get(key)).and_then(Value::as_str);
+    match action.id {
+        ACTION_CHANNEL_CREATE => text("name"),
+        ACTION_CHANNEL_MEMBER_ADD => text("channel"),
+        // The official name of the app, never the id the model wrote.
+        ACTION_PLUGIN_INSTALL => text("pluginId").and_then(plugin_install_label),
+        ACTION_AGENT_PROFILE_UPDATE => ProfileChange::of(args)?.quoted_key().and_then(text),
+        _ => None,
     }
-    question_body(phrases_of(action, args).question, None, unasked)
 }
 
 /// The phrases of this action, with the profile update read for what it changes — a person
@@ -170,8 +183,8 @@ pub fn action_request_body(
 /// Only the **presence** of the keys is read, never a value.
 pub fn phrases_of(action: &WorkspaceAction, args: Option<&Value>) -> Phrases {
     if action.id == ACTION_AGENT_PROFILE_UPDATE {
-        if let Some(phrases) = profile_update_phrases(args) {
-            return phrases;
+        if let Some(change) = ProfileChange::of(args) {
+            return change.phrases();
         }
     }
     Phrases {
@@ -182,47 +195,82 @@ pub fn phrases_of(action: &WorkspaceAction, args: Option<&Value>) -> Phrases {
 }
 
 /// What a profile update changes, when it changes one thing.
-fn profile_update_phrases(args: Option<&Value>) -> Option<Phrases> {
-    let keys: Vec<&str> = args?
-        .as_object()?
-        .keys()
-        .map(String::as_str)
-        // The target is who, not what.
-        .filter(|key| *key != "targetHandle")
-        .collect();
-    let only = |allowed: &[&str]| !keys.is_empty() && keys.iter().all(|key| allowed.contains(key));
-    if only(&["tagline"]) {
-        Some(Phrases {
-            question: "소개를 바꿔도 될까요?",
-            done: "소개를 바꿨어요",
-            noun: "소개 바꾸기",
-        })
-    } else if only(&["statusText", "statusEmoji", "statusExpiresInHours"]) {
-        Some(Phrases {
-            question: "상태를 바꿔도 될까요?",
-            done: "상태를 바꿨어요",
-            noun: "상태 바꾸기",
-        })
-    } else if only(&["roleLabel"]) {
-        Some(Phrases {
-            question: "역할 이름을 바꿔도 될까요?",
-            done: "역할 이름을 바꿨어요",
-            noun: "역할 이름 바꾸기",
-        })
-    } else if only(&["displayName"]) {
-        Some(Phrases {
-            question: "에이전트 이름을 바꿔도 될까요?",
-            done: "에이전트 이름을 바꿨어요",
-            noun: "에이전트 이름 바꾸기",
-        })
-    } else if only(&["avatar"]) {
-        Some(Phrases {
-            question: "에이전트 사진을 바꿔도 될까요?",
-            done: "에이전트 사진을 바꿨어요",
-            noun: "에이전트 사진 바꾸기",
-        })
-    } else {
-        None
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProfileChange {
+    Tagline,
+    Status,
+    RoleLabel,
+    DisplayName,
+    Avatar,
+}
+
+impl ProfileChange {
+    /// Read from the **presence** of the arguments' keys, never a value. `None` when the update
+    /// changes several things, or something this reader does not know.
+    fn of(args: Option<&Value>) -> Option<ProfileChange> {
+        let keys: Vec<&str> = args?
+            .as_object()?
+            .keys()
+            .map(String::as_str)
+            // The target is who, not what.
+            .filter(|key| *key != "targetHandle")
+            .collect();
+        let only =
+            |allowed: &[&str]| !keys.is_empty() && keys.iter().all(|key| allowed.contains(key));
+        if only(&["tagline"]) {
+            Some(ProfileChange::Tagline)
+        } else if only(&["statusText", "statusEmoji", "statusExpiresInHours"]) {
+            Some(ProfileChange::Status)
+        } else if only(&["roleLabel"]) {
+            Some(ProfileChange::RoleLabel)
+        } else if only(&["displayName"]) {
+            Some(ProfileChange::DisplayName)
+        } else if only(&["avatar"]) {
+            Some(ProfileChange::Avatar)
+        } else {
+            None
+        }
+    }
+
+    fn phrases(self) -> Phrases {
+        match self {
+            ProfileChange::Tagline => Phrases {
+                question: "소개를 바꿔도 될까요?",
+                done: "소개를 바꿨어요",
+                noun: "소개 바꾸기",
+            },
+            ProfileChange::Status => Phrases {
+                question: "상태를 바꿔도 될까요?",
+                done: "상태를 바꿨어요",
+                noun: "상태 바꾸기",
+            },
+            ProfileChange::RoleLabel => Phrases {
+                question: "역할 이름을 바꿔도 될까요?",
+                done: "역할 이름을 바꿨어요",
+                noun: "역할 이름 바꾸기",
+            },
+            ProfileChange::DisplayName => Phrases {
+                question: "에이전트 이름을 바꿔도 될까요?",
+                done: "에이전트 이름을 바꿨어요",
+                noun: "에이전트 이름 바꾸기",
+            },
+            ProfileChange::Avatar => Phrases {
+                question: "에이전트 사진을 바꿔도 될까요?",
+                done: "에이전트 사진을 바꿨어요",
+                noun: "에이전트 사진 바꾸기",
+            },
+        }
+    }
+
+    /// The argument whose short text the question may quote — what a banner decides. The name
+    /// and the picture are decided in the app, beside their old ones, so they quote nothing.
+    fn quoted_key(self) -> Option<&'static str> {
+        match self {
+            ProfileChange::Tagline => Some("tagline"),
+            ProfileChange::Status => Some("statusText"),
+            ProfileChange::RoleLabel => Some("roleLabel"),
+            ProfileChange::DisplayName | ProfileChange::Avatar => None,
+        }
     }
 }
 
@@ -423,28 +471,30 @@ mod tests {
         }
     }
 
-    /// 「소개를 바꿔도 될까요?」 is what the owner sees when the tagline is all that changes
-    /// (D6-3's own example); several fields, or an unknown one, stay 「에이전트 프로필」.
+    /// 「소개를 바꿔도 될까요? · 「알림 시험」」 is D6-3's own example: the tagline is all that
+    /// changes, and a banner that is decided there shows the text being approved. Several fields,
+    /// or an unknown one, stay 「에이전트 프로필」 with nothing quoted.
     #[test]
-    fn a_profile_update_asks_about_what_it_changes() {
+    fn a_profile_update_asks_about_what_it_changes_and_quotes_its_short_text() {
         let profile = action(ACTION_AGENT_PROFILE_UPDATE);
         let body = |args: Value| action_request_body(profile, Some(&args), false);
         assert_eq!(
             body(json!({"tagline": "알림 시험"})),
-            "소개를 바꿔도 될까요?"
+            "소개를 바꿔도 될까요? · 「알림 시험」"
         );
         assert_eq!(
             body(json!({"tagline": "x", "targetHandle": "luna"})),
-            "소개를 바꿔도 될까요?"
+            "소개를 바꿔도 될까요? · 「x」"
         );
         assert_eq!(
             body(json!({"statusText": "회의 중", "statusEmoji": "📅"})),
-            "상태를 바꿔도 될까요?"
+            "상태를 바꿔도 될까요? · 「회의 중」"
         );
         assert_eq!(
             body(json!({"roleLabel": "리뷰어"})),
-            "역할 이름을 바꿔도 될까요?"
+            "역할 이름을 바꿔도 될까요? · 「리뷰어」"
         );
+        // The name and the picture are decided in the app beside their old ones: nothing quoted.
         assert_eq!(
             body(json!({"displayName": "새 이름"})),
             "에이전트 이름을 바꿔도 될까요?"
@@ -453,14 +503,61 @@ mod tests {
             body(json!({"avatar": null})),
             "에이전트 사진을 바꿔도 될까요?"
         );
+        // Several things at once, none, or not an object: the general question, nothing quoted.
+        for args in [
+            json!({"tagline": "x", "statusText": "y"}),
+            json!({}),
+            json!("tagline"),
+        ] {
+            assert_eq!(body(args), "에이전트 프로필을 바꿔도 될까요?");
+        }
+        // An English or numeric ending asks for no particle: the text is quoted after the sentence.
+        for text in ["Hello", "v2", "ready!", "7"] {
+            let line = body(json!({"tagline": text}));
+            assert_eq!(line, format!("소개를 바꿔도 될까요? · 「{text}」"));
+            assert_clean(text, &line);
+        }
+        // Not short, not one line, or no text: left out, the question stands alone.
+        let long = "가".repeat(VALUE_MAX_CHARS + 1);
+        for text in [long.as_str(), "두 줄\n입니다", "닫는」괄호", ""] {
+            assert_eq!(
+                body(json!({"tagline": text})),
+                "소개를 바꿔도 될까요?",
+                "{text:?}"
+            );
+        }
+        // Made inert: a tagline that spells a link cannot become one.
+        let link = body(json!({"tagline": "[x](https://evil.example)"}));
+        assert!(!link.contains("](") && !link.contains("://"), "{link}");
+    }
+
+    /// The other two actions a banner decides that have one short thing to say: which channel
+    /// the members join, and which app is installed (by its official name, never the id).
+    #[test]
+    fn a_member_add_names_its_channel_and_an_install_its_app() {
+        let add = action(ACTION_CHANNEL_MEMBER_ADD);
         assert_eq!(
-            body(json!({"tagline": "x", "statusText": "y"})),
-            "에이전트 프로필을 바꿔도 될까요?"
+            action_request_body(
+                add,
+                Some(&json!({"channel": "design", "memberHandles": ["luna"]})),
+                false
+            ),
+            "채널에 멤버를 추가해도 될까요? · 「design」"
         );
-        assert_eq!(body(json!({})), "에이전트 프로필을 바꿔도 될까요?");
-        assert_eq!(body(json!("tagline")), "에이전트 프로필을 바꿔도 될까요?");
-        // The tagline's own words never reach the sentence: a person's text is not quoted.
-        assert!(!body(json!({"tagline": "알림 시험"})).contains("알림 시험"));
+        let install = action(ACTION_PLUGIN_INSTALL);
+        assert_eq!(
+            action_request_body(
+                install,
+                Some(&json!({"pluginId": "com.momo.plugins.github"})),
+                false
+            ),
+            "앱을 설치해도 될까요? · 「GitHub」"
+        );
+        // An id this build does not list names no app, and the id itself is not quoted.
+        assert_eq!(
+            action_request_body(install, Some(&json!({"pluginId": "evil.example"})), false),
+            "앱을 설치해도 될까요?"
+        );
     }
 
     /// The one value a card quotes is a channel's name, **after** the sentence, never inside
