@@ -163,6 +163,13 @@ export const NON_SECRET_KEYS = {
    * `momo.mobile.haptics.v1` 에 남아 있을 수 있으나 **읽지 않는다**(키를 v2로 올려서 되살아나지 않게 했다). 계정 정보 없음.
    */
   hapticMode: 'momo.mobile.haptics.v2',
+  /**
+   * 마지막으로 닫은 「업데이트 소식」의 **소식 버전** 하나(`0.1.41`, #4937). 앱 버전·빌드 번호가 아니다: 폰은 빌드 번호로 소식을
+   * 고르지만(`@momo/core/features/releaseNotes/model`) 기기에는 소식의 이름을 적는다. 지금 소식이 이 값보다 새로울 때만
+   * 업데이트 뒤 처음 열 때 한 번 보인다. 이 폰의 취향이라 로그아웃·계정 전환에도 남는다(테마와 같은 종류). 잃으면 같은
+   * 소식을 한 번 더 볼 뿐이다. 계정 정보 없음.
+   */
+  releaseNotesSeen: 'momo.mobile.release-notes.seen.v1',
 } as const;
 
 export type NonSecretKey = (typeof NON_SECRET_KEYS)[keyof typeof NON_SECRET_KEYS];

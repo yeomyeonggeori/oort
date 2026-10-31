@@ -438,14 +438,19 @@ export function formatCount(value: number): string {
   return sign + digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+/** Below this a nonzero cost prints as a floor ("$0.001 미만"), not as a rounded amount. */
+export const MICRO_USD_FLOOR = 1_000;
+
 /**
  * Micro USD to a printable amount. A nonzero cost never rounds down to $0.000:
  * saying a real charge was free is the exact kind of quiet lie the numbers
  * discipline exists to prevent (design-taste-web §3).
+ *
+ * This is the ONE money notation of every client (#4982): the agent usage lines (`usageLine`) print through it too.
  */
 export function formatMicroUsd(microUsd: number): string {
   if (microUsd === 0) return "$0";
-  if (microUsd > 0 && microUsd < 1_000) return "$0.001 미만";
+  if (microUsd > 0 && microUsd < MICRO_USD_FLOOR) return "$0.001 미만";
   const usd = microUsd / 1_000_000;
   const decimals = Math.abs(usd) < 1 ? 3 : 2;
   const fixed = Math.abs(usd).toFixed(decimals);

@@ -225,7 +225,7 @@ export function EmojiPicker({
           ))}
         </ScrollView>
         {tab !== 'team' && keyboardHeight === 0 ? (
-          <View style={styles.tones} accessibilityLabel="피부색">
+          <View style={styles.tones} accessibilityLabel="피부색" testID="emoji-tones">
             {TONES.map(item => (
               <Pressable
                 key={item.tone}
@@ -241,7 +241,8 @@ export function EmojiPicker({
                 }}
                 style={({pressed}) => [
                   styles.cell,
-                  tone === item.tone && styles.selected,
+                  styles.toneChip,
+                  tone === item.tone && styles.toneChipSelected,
                   pressed && styles.pressed,
                 ]}
               >
@@ -373,7 +374,21 @@ const buildStyles = (color: Palette) =>
       borderRadius: radius.pill,
     },
     label: {fontSize: font.body, color: color.text},
-    tones: {flexDirection: 'row', flexWrap: 'wrap'},
+    // 피부색 줄은 이모지 칸과 구분된다(#4982): 같은 44 정사각 칸·같은 고른 면을 쓰면 여섯 손이 격자의 첫 줄처럼 읽혀서 눌러
+    // 이모지를 고르는 줄인지 설정 줄인지 알 수 없었다. 그래서 줄이 자기 쟁반(조용한 면 + 가는 테두리 + 알약)에 서고, 칸은 둥근
+    // 정사각이 아니라 원이며, 고른 칸은 격자의 옅은 면이 아니라 신호색 고리다. 칸의 상자는 그대로 44(눌림 높이)다.
+    tones: {
+      flexDirection: 'row',
+      alignSelf: 'flex-start',
+      padding: space.xs,
+      borderRadius: radius.pill,
+      backgroundColor: color.surfaceMuted,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: color.border,
+    },
+    // 격자 칸(`cell`)과 같은 44 상자 위에 도형만 바꾼다: 원 + 고리 자리(고르지 않으면 투명).
+    toneChip: {borderRadius: radius.pill, borderWidth: 2, borderColor: 'transparent'},
+    toneChipSelected: {borderColor: color.accent},
     selected: {backgroundColor: color.accentSurface},
     pressed: {opacity: 0.6},
     glyph: {fontSize: font.title, color: color.text},
