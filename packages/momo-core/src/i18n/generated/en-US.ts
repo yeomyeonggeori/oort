@@ -1157,6 +1157,12 @@ export const catalog: MessageCatalog = {
       "value": "Some screens are still in Korean."
     }
   ],
+  "settings.profile.languageReload": [
+    {
+      "type": 0,
+      "value": "Reload"
+    }
+  ],
   "settings.profile.languageRetry": [
     {
       "type": 0,
