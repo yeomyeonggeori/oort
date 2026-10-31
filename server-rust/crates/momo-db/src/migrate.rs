@@ -730,12 +730,16 @@ mod tests {
     /// icon proxy key and remote icon address, image width/height, video flag) on `unfurl_url_cache` and
     /// `message_unfurl`, with the column CHECKs that keep the size pair and the icon pair whole. No new
     /// table.
+    ///
+    /// 164 is #4889's `thread_follow` (ADR-0206 증보 1 F1): who follows which thread, one row per
+    /// (root, member) with the state `auto` / `followed` / `unfollowed`, tenant ENABLE + FORCE +
+    /// `ws_isolation`. No grant for `momo_notifier` until the stage-2 judgment arm reads it.
     #[test]
-    fn discovers_contiguous_migrations_001_to_163() {
+    fn discovers_contiguous_migrations_001_to_164() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=163).collect();
+        let expected: Vec<i64> = (1..=164).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -743,7 +747,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=163 under {}",
+            "expected contiguous 001..=164 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -751,7 +755,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("163_unfurl_site_meta"));
+            .starts_with("164_thread_follow"));
     }
 
     #[test]
