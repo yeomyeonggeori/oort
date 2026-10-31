@@ -8,6 +8,7 @@ import {
 } from '@momo/core/features/settings/agentUsage';
 import {AgentMonthlyReport, AgentUsageStatus} from '../src/features/agents/AgentUsage';
 import {SAFE_GUTTER} from '../src/design/tokens';
+import {leftEdge} from './fixtures/leftInset';
 
 jest.mock('@momo/core/features/settings/agentUsage', () => ({
   ...jest.requireActual('@momo/core/features/settings/agentUsage'),
@@ -95,17 +96,44 @@ it('keeps the same gutter when the report failed, retry button included', async 
   expect(flat(state).paddingHorizontal).toBe(SAFE_GUTTER);
   expect(within(state).getByRole('button', {name: '다시 불러오기'})).toBeTruthy();
 });
-it('leaves the shared status line to its host: the gutter is the report page, not AgentUsageStatus', async () => {
-  // `AgentUsageStatus` 는 에이전트 목록·상세 화면 안에 서고 그 화면이 제 가터를 준다. 이 장의 가터를 같이 쓰는
-  // `group` 에 얹으면 목록에서 이중 인셋이 된다. 그 그릇이 가터를 지면 이 줄이 빨개진다.
+// #4912 2차(디자인 검수 H2): 에이전트 프로필·목록에는 가로 여백을 주는 그릇이 없다(`Screen` 은 0, 상세의 스크롤은 아래
+// 여백뿐 - 두 화면에서 직접 재는 시험은 `agentUsageHosts.test.tsx`). 그래서 가터는 `AgentUsageStatus` 가 스스로 진다.
+// 첫 판은 「그 화면이 가터를 준다」고 적고 이 자리를 비워 두었고, 프로필의 비용 줄이 화면 왼쪽 끝(x≈1)에 붙었다.
+// 재는 값은 조상 전체의 가로 여백 합이다(`leftEdge`): 가터가 비면 0, 부품과 호스트가 둘 다 지면 32 가 되어 둘 다 빨갛다.
+function mountList() {
+  client = new QueryClient({defaultOptions: {queries: {retry: false, gcTime: Infinity}}});
+  return render(<QueryClientProvider client={client}><AgentUsageStatus /></QueryClientProvider>);
+}
+
+it('starts the profile usage line one SAFE_GUTTER in from the screen edge, once', async () => {
   jest.mocked(fetchAgentUsage).mockResolvedValue(data()); mount(true);
-  const status = await screen.findByTestId('agent-usage-status');
-  // 바로 윗 그릇 하나가 아니라 **모든 조상**을 본다: 합성 요소 한 겹이 사이에 끼어 있어도 이 단정이 비지 않는다.
-  interface Walkable {parent: Walkable | null; props: {style?: unknown}}
-  const gutters: unknown[] = [];
-  for (let node: Walkable | null = status as unknown as Walkable; node; node = node.parent) {
-    const value = flat(node).paddingHorizontal;
-    if (value !== undefined) {gutters.push(value);}
-  }
-  expect(gutters).toEqual([]);
+  await waitFor(() => expect(screen.getByTestId('agent-usage-status')).toHaveTextContent(/자기 보고/));
+  expect(leftEdge(screen.getByTestId('agent-usage-status'))).toBe(SAFE_GUTTER);
+});
+it('starts the list status line one SAFE_GUTTER in while loading', async () => {
+  jest.mocked(fetchAgentUsage).mockReturnValue(new Promise(() => {}));
+  mountList();
+  expect(leftEdge(await screen.findByText(COPY.loading))).toBe(SAFE_GUTTER);
+});
+it('starts the list status line - and its retry button - one SAFE_GUTTER in when the read failed', async () => {
+  jest.mocked(fetchAgentUsage).mockRejectedValue(new Error('unavailable'));
+  mountList();
+  expect(leftEdge(await screen.findByText(COPY.error))).toBe(SAFE_GUTTER);
+  // 「다시 불러오기」도 같은 가터 안에서 시작한다(줄만 들이고 단추는 가장자리에 두면 한 덩어리가 두 x 에서 시작한다).
+  expect(leftEdge(screen.getByRole('button', {name: '다시 불러오기'}))).toBe(SAFE_GUTTER);
+});
+it('starts the hidden-personal-agents sentence one SAFE_GUTTER in', async () => {
+  jest.mocked(fetchAgentUsage).mockResolvedValue(data());
+  mountList();
+  expect(leftEdge(await screen.findByText('숨겨진 개인 에이전트 3개'))).toBe(SAFE_GUTTER);
+});
+it('keeps the fee editor inside the report on the report gutter alone - the editor must not add a second layer', async () => {
+  // `SubscriptionEditor` 는 `group` 을 쓰고 `report` 안에 있다. `group` 이 가터를 지면 정액 칸이 32 가 된다.
+  // (`status` 를 `group` 에서 떼어 낸 이유가 이것이고, 그 둘을 다시 합치면 여기서 빨개진다.)
+  // 입력 칸은 알약(`InputPill`)의 상자를 잰다: 알약은 제 안쪽 padding(16)으로 글자를 밀므로 그 안의 `TextInput` 은 32 에서 시작한다.
+  jest.mocked(fetchAgentUsage).mockResolvedValue(data(true)); mount();
+  await screen.findByLabelText(COPY.subscription);
+  expect(leftEdge(screen.getByTestId('subscription-a-pill'))).toBe(SAFE_GUTTER);
+  expect(leftEdge(screen.getByRole('button', {name: '구독 정액 저장'}))).toBe(SAFE_GUTTER);
+  expect(leftEdge(screen.getByText('비워서 저장하면 정액을 지워요.'))).toBe(SAFE_GUTTER);
 });

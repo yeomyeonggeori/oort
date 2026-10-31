@@ -127,6 +127,7 @@ function AppliedLine({
 function Frame({
   title,
   description,
+  agentMemberId,
   children,
   footer,
   onKeyDown,
@@ -134,6 +135,8 @@ function Frame({
 }: {
   title: string;
   description: string;
+  /** 비용 줄이 누구의 것인가. 틀이 머리와 본문 사이에 한 번 세운다. */
+  agentMemberId: string;
   children: ReactNode;
   footer: ReactNode;
   onKeyDown?: (event: React.KeyboardEvent) => void;
@@ -154,6 +157,10 @@ function Frame({
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
       </div>
+      {/* 이 틀의 자식은 제 가장자리를 스스로 진다(머리 `p-4`, 배너 `px-4 py-2`, 폼·스켈레톤 `p-4`). 비용 줄만 여백이
+          없어서 대화 상자 왼쪽 끝에 붙었다(#4912 2차, 디자인 검수 R12). 줄은 허브에서도 쓰는 부품이라 여백은 부품이
+          아니라 이 자리가 준다. 불러오는 중·오류·본문 세 분기가 같은 줄을 같은 자리에 두므로 한 곳에서만 준다. */}
+      <AgentUsageLine agentId={agentMemberId} className="px-4 py-2" />
       {children}
       {footer}
     </DialogContent>
@@ -323,10 +330,10 @@ function AgentProfilePanel({
       <Frame
         title={title}
         description={description}
+        agentMemberId={agentMemberId}
         footer={footer}
         blockClose={false}
       >
-        <AgentUsageLine agentId={agentMemberId} />
         <ProfileSkeleton />
       </Frame>
     );
@@ -337,10 +344,10 @@ function AgentProfilePanel({
       <Frame
         title={title}
         description={description}
+        agentMemberId={agentMemberId}
         footer={footer}
         blockClose={false}
       >
-        <AgentUsageLine agentId={agentMemberId} />
         <InlineBanner
           message="에이전트 프로필을 불러오지 못했습니다."
           actionLabel="다시 시도"
@@ -376,11 +383,11 @@ function AgentProfilePanel({
     <Frame
       title={title}
       description={description}
+      agentMemberId={agentMemberId}
       footer={footer}
       onKeyDown={onKeyDown}
       blockClose={handle.saving}
     >
-      <AgentUsageLine agentId={agentMemberId} />
       {handle.missing && (
         <InlineBanner
           tone="neutral"

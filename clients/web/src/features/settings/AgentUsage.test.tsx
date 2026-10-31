@@ -83,6 +83,13 @@ describe("agent month usage", () => {
     await waitFor(() => expect(saveSubscriptionFee).toHaveBeenLastCalledWith("w", "a", null));
     await screen.findByText(COPY.saved);
   });
+  it("carries no edge inset of its own: hub cells and rows give it theirs, so a second one would double it (#4912 R12)", async () => {
+    // 프로필 대화의 틀(`AgentProfileDialog.usage.test.tsx`)만 `className` 으로 여백을 준다. 부품 기본에 `px-4` 를 넣으면
+    // 허브 표 칸(`AiAgentsPane`)·허브 상세(`AgentHubRoute`)의 줄이 안으로 한 번 더 들어간다.
+    vi.mocked(fetchAgentUsage).mockResolvedValue(data()); mount(true);
+    const line = await screen.findByTestId("agent-month-usage");
+    expect([...line.classList].filter(token => /^-?(?:p|px|pl|ps|m|mx|ml|ms)-/.test(token))).toEqual([]);
+  });
   it("joins profiles case-insensitively and labels mixed/self-reported costs honestly", async () => {
     const response = data();
     response.agents[0] = {...response.agents[0]!, source: "self_reported", estimatedRuns: 1, subscriptionFee: {monthlyMicroUsd: 20000000, label: null}};

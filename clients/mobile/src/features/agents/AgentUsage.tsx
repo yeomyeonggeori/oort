@@ -26,7 +26,7 @@ export function AgentUsageStatus({agentId}: {agentId?: string}) {
   const row = query.data && agentId ? usageForAgent(query.data, agentId) : undefined;
   const failed = query.isError || query.fetchStatus === 'paused';
   const label = query.fetchStatus === 'paused' ? COPY.offline : query.isError ? COPY.error : query.isPending ? COPY.loading : agentId ? `${COPY.title}: ${row ? agentUsageLine(row, memberFor(directory, agentId)?.brain) : COPY.unavailable}` : query.data && hiddenUsageLabel(query.data.hiddenPersonalAgents);
-  return label ? <View style={styles.group}>
+  return label ? <View style={styles.status}>
     <Sentence style={styles.detail} testID="agent-usage-status">{label}</Sentence>
     {failed && <OutlineButton label="다시 불러오기" onPress={() => {void query.refetch();}} />}
   </View> : null;
@@ -96,12 +96,16 @@ export function AgentMonthlyReport({workspaceId}: {workspaceId: string}) {
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
-  // 설정 안쪽 장의 스크롤은 가로 여백을 주지 않는다(`SettingsPage` 의 `subContent`): 장마다 제 가터를 진다
-  // (`themePage`). 월 보고 장은 이 둘이 진다 - 다 불러온 보고서(`report`)와 불러오는 중·오류·오프라인 줄(`state`).
-  // 같은 이유로 `group` 에는 얹지 않는다: `AgentUsageStatus` 가 에이전트 목록·상세 안에서 쓰고(그 화면이 가터를
-  // 준다) `SubscriptionEditor` 는 `report` 안에 들어 있어서, 얹으면 이중 인셋이 된다.
+  // 가터는 이 부품들이 스스로 진다. 부품이 서는 자리 어디에도 가로 여백을 주는 그릇이 없기 때문이다.
+  //  - 설정 안쪽 장의 스크롤은 가로 여백을 주지 않는다(`SettingsPage` 의 `subContent`): 장마다 제 가터를 진다
+  //    (`themePage`). 월 보고 장은 이 둘이 진다 - 다 불러온 보고서(`report`)와 불러오는 중·오류·오프라인 줄(`state`).
+  //  - 에이전트 목록·상세도 같다(#4912 2차, 디자인 검수 H2). `Screen` 은 가로 여백이 없고 상세의 스크롤 `body` 는
+  //    아래 여백뿐이라, `AgentUsageStatus` 가 가터 없이 서면 줄이 화면 가장자리에 붙는다. 이 화면들의 다른 줄
+  //    (`SectionLabel`·`stateBlock`·`notice`)이 제 가터를 지는 것과 같은 문법으로 `status` 가 진다.
+  // `group` 에는 얹지 않는다: `SubscriptionEditor` 가 `report` 안에 들어 있어서, 얹으면 이중 인셋이 된다.
   report: {gap: space.md, paddingHorizontal: SAFE_GUTTER},
   state: {gap: space.sm, paddingHorizontal: SAFE_GUTTER},
+  status: {gap: space.sm, paddingHorizontal: SAFE_GUTTER},
   group: {gap: space.sm},
   row: {gap: space.sm, paddingVertical: space.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderColor: color.border},
   name: {fontSize: font.body, lineHeight: line.body, color: color.text, fontWeight: '600'},
