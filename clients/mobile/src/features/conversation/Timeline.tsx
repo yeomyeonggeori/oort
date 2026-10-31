@@ -80,7 +80,7 @@ import {useEndedRuns} from '../agents/endedRuns';
 import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
 import {triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
-import {shouldFoldBundleLine} from '@momo/core/features/timeline/requestBundle';
+import {presentableRows} from '@momo/core/features/timeline/toolCallSettle';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
 import {hasRequestBundle, requestLoopIndex} from './requestLoop';
 import {agentCardModel} from '@momo/core/features/timeline/agentCardModel';
@@ -1280,10 +1280,13 @@ function TimelineInner({
     [metricsRef],
   );
 
+  // 행으로 그릴 메시지는 코어 한 함수가 정한다(#4995): 끝난 도구 호출을 같은 `call_id` 의 결과로 닫고
+  // (서버는 호출 행을 다시 고치지 않아서 카드가 「생각 중」으로 계속 돈다) 종결 카드가 설명하는 옛 줄을
+  // 접는다. 두 판정은 **접기 전** 목록을 함께 봐야 하므로 여기서 짝짓기를 다시 구현하지 않는다.
+  // 웹의 본류·스레드와 같은 함수다. 요청 스레드도 이 목록을 그대로 쓴다(`ThreadPanel` → `Timeline`).
   const built = useMemo(
     () =>
-      buildTimelineItems(messages.filter(message => {
-        if (shouldFoldBundleLine(message, messages)) return false;
+      buildTimelineItems(presentableRows(messages).filter(message => {
         if (showRollup && channelKind !== 'dm' && message.rootId !== undefined &&
           messages.some(root => root.id.toLowerCase() === message.rootId?.toLowerCase())) {
           const card = agentCardModel(message);
