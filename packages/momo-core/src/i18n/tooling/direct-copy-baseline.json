@@ -276,7 +276,7 @@
     "clients/mobile/src/realtime/backgroundPolicy.ts": 10,
     "clients/mobile/src/realtime/centrifugeTransport.ts": 42,
     "clients/mobile/src/realtime/channelRail.ts": 27,
-    "clients/mobile/src/realtime/connectionDisplay.ts": 18,
+    "clients/mobile/src/realtime/connectionDisplay.ts": 14,
     "clients/mobile/src/realtime/diagnostics.ts": 17,
     "clients/mobile/src/screens/AgentDetailScreen.tsx": 28,
     "clients/mobile/src/screens/AgentsScreen.tsx": 11,
