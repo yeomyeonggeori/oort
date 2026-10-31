@@ -175,7 +175,7 @@ Slack 초기 파일 업로드는 서버 경유 단순 POST였고, 이후 외부 
 
 Railway는 api와 agent-worker를 다른 서비스로 띄우고, `local` 저장소는 api 볼륨에만 붙는다(볼륨은 서비스 하나에만 붙는다). 그래서 팀 서버의 워커는 요청자가 대화로 보낸 사진을 읽지 못했고(`UnavailableDriveArchive`, 오류 줄 없음) 「사진으로 프로필 사진 바꾸기」(#4791·#4808)가 열리지 않았다. 이 증보는 워커가 그 사진을 **api의 사설 주소로** 읽게 한다. 새 길을 만들지 않는다. [ADR-0218 증보 G4·G8(C2a)](0218-workspace-expressions.md)이 이미 열고 보안 검수를 마친 「1회용·짧은 만료·소유 재판정」 주소 `GET /v1/self-media/{ws}/{token}`을 워커가 **자기 요청에** 쓴다.
 
-- Status: **Proposed — planner의 독립 보안 검수와 확인 대기** (2026-10-31, #4934 worker 기안). 새 내부 호출이라 등급 2다(ADR-0100: 보안 경계 변경은 Accepted ADR 참조가 머지 조건). 이슈가 요구한 방식 비교는 아래 표다.
+- Status: **Accepted** (2026-11-01 planner — 독립 보안 검수 1회차 Blocker 0·High 0. Medium·Low는 후속 이슈로 남긴다. 2026-10-31 #4934 worker 기안). 새 내부 호출이라 등급 2다(ADR-0100: 보안 경계 변경은 Accepted ADR 참조가 머지 조건). 이슈가 요구한 방식 비교는 아래 표다.
 - **변경 전**: 워커의 사진 제안(`profile_avatar::prepare`)은 소유 조회 뒤 `MOMO_DRIVE_*`로 연 **자기 보관소**에서 바이트를 읽었다. api와 같은 볼륨이나 같은 SA 키가 워커에도 있어야 했다(셀프호스트 compose는 `local.override.yml`의 읽기 전용 마운트, Google 백엔드는 키 복제). Railway는 둘 다 안 돼서 읽기가 조용히 닫혔다.
 
 ### 결정
