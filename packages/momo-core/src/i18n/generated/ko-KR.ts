@@ -143,12 +143,6 @@ export const catalog: MessageCatalog = {
       "value": "이 팀은 관리자만 새 그림을 올릴 수 있어요."
     }
   ],
-  "expressions.add.back": [
-    {
-      "type": 0,
-      "value": "목록으로"
-    }
-  ],
   "expressions.add.backLabel": [
     {
       "type": 0,
@@ -666,12 +660,6 @@ export const catalog: MessageCatalog = {
       "value": "연결이 끊겼어요. 연결되면 요청을 보낼 수 있어요."
     }
   ],
-  "expressions.make.openConversation": [
-    {
-      "type": 0,
-      "value": "대화 열기"
-    }
-  ],
   "expressions.make.photo": [
     {
       "type": 0,
@@ -742,12 +730,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "앨범을 열지 못했어요. 다시 시도해 주세요."
-    }
-  ],
-  "expressions.make.photoUnreadable": [
-    {
-      "type": 0,
-      "value": "이 사진을 열 수 없어요. 다른 사진을 골라 주세요."
     }
   ],
   "expressions.make.retry": [

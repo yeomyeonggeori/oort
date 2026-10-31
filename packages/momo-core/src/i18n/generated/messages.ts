@@ -22,7 +22,6 @@ export const messageKeys = [
   "desktop.menu.view",
   "desktop.menu.window",
   "expressions.add.adminsOnly",
-  "expressions.add.back",
   "expressions.add.backLabel",
   "expressions.add.import",
   "expressions.add.importDetail",
@@ -99,7 +98,6 @@ export const messageKeys = [
   "expressions.make.notePlaceholder",
   "expressions.make.noteTooLong",
   "expressions.make.offline",
-  "expressions.make.openConversation",
   "expressions.make.photo",
   "expressions.make.photoChange",
   "expressions.make.photoDenied",
@@ -112,7 +110,6 @@ export const messageKeys = [
   "expressions.make.photoSize",
   "expressions.make.photoType",
   "expressions.make.photoUnavailable",
-  "expressions.make.photoUnreadable",
   "expressions.make.retry",
   "expressions.make.rosterFailed",
   "expressions.make.sending",
@@ -209,7 +206,6 @@ export const argumentSpecs = {
   "desktop.menu.view": {},
   "desktop.menu.window": {},
   "expressions.add.adminsOnly": {},
-  "expressions.add.back": {},
   "expressions.add.backLabel": {},
   "expressions.add.import": {},
   "expressions.add.importDetail": {},
@@ -306,7 +302,6 @@ export const argumentSpecs = {
     "max": "number"
   },
   "expressions.make.offline": {},
-  "expressions.make.openConversation": {},
   "expressions.make.photo": {},
   "expressions.make.photoChange": {},
   "expressions.make.photoDenied": {},
@@ -319,7 +314,6 @@ export const argumentSpecs = {
   "expressions.make.photoSize": {},
   "expressions.make.photoType": {},
   "expressions.make.photoUnavailable": {},
-  "expressions.make.photoUnreadable": {},
   "expressions.make.retry": {},
   "expressions.make.rosterFailed": {},
   "expressions.make.sending": {},
@@ -414,7 +408,6 @@ export interface MessageArgs {
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
   "expressions.add.adminsOnly": Record<string, never>;
-  "expressions.add.back": Record<string, never>;
   "expressions.add.backLabel": Record<string, never>;
   "expressions.add.import": Record<string, never>;
   "expressions.add.importDetail": Record<string, never>;
@@ -491,7 +484,6 @@ export interface MessageArgs {
   "expressions.make.notePlaceholder": Record<string, never>;
   "expressions.make.noteTooLong": { max: number };
   "expressions.make.offline": Record<string, never>;
-  "expressions.make.openConversation": Record<string, never>;
   "expressions.make.photo": Record<string, never>;
   "expressions.make.photoChange": Record<string, never>;
   "expressions.make.photoDenied": Record<string, never>;
@@ -504,7 +496,6 @@ export interface MessageArgs {
   "expressions.make.photoSize": Record<string, never>;
   "expressions.make.photoType": Record<string, never>;
   "expressions.make.photoUnavailable": Record<string, never>;
-  "expressions.make.photoUnreadable": Record<string, never>;
   "expressions.make.retry": Record<string, never>;
   "expressions.make.rosterFailed": Record<string, never>;
   "expressions.make.sending": Record<string, never>;
