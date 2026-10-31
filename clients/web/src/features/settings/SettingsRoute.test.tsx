@@ -212,7 +212,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
     ).toBe(false);
   });
 
-  it("개인 그룹 최상단이 프로필이고 13행이 세 그룹에 선다", () => {
+  it("개인 그룹 최상단이 프로필이고 브라우저에는 12행이 세 그룹에 선다", () => {
     const host = mountRoute();
     const nav = host.querySelector('[data-testid="settings-nav"]');
     expect(nav?.textContent).toContain("개인");
@@ -232,6 +232,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
       "settings-nav-members",
       "settings-nav-memory",
       "settings-nav-usage",
+      "settings-nav-releaseNotes",
       "settings-nav-devTools",
       "settings-nav-aiHub",
     ]);

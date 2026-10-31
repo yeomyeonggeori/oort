@@ -488,7 +488,9 @@ export function NoticeBlock({
  * 상자 밖에서 그리는 본문 문장도 같은 규칙을 든다 — 규칙이 한 자리에 있지 않으면
  * 같은 앱이 문장마다 다르게 끊긴다(리뷰 M2).
  *
- * 낱말·라벨·숫자 카운트에는 쓰지 않는다 — 어절 우선 줄바꿈은 문장에서만 뜻이 있다.
+ * 어절 우선 줄바꿈은 공백이 있는 글에서 뜻이 있다(한 낱말에는 효과가 없고 해도 없다). 그래서 문장뿐 아니라 두 낱말 이상의
+ * **라벨**(「다음 결정 보기」·「기본 제공」·단추 이름)에도 쓴다 — 결정 무대·테마·에이전트 비용(#4982)은 한글이 든 글자 전부가
+ * 이 부품이고, 하네스(`__tests__/fixtures/hangulWord.ts`)가 빠진 글자를 센다. 숫자·이모지·아이콘 글리프에는 쓰지 않는다.
  * `style`·`numberOfLines`·`testID` 등 `Text` 의 모든 props 를 그대로 받는다.
  */
 export function Sentence(
@@ -517,7 +519,7 @@ export function OutlineButton({
       onPress={onPress}
       style={({pressed}) => [styles.outline, pressed && styles.pressed]}
       testID={testID}>
-      <Text style={styles.retryLabel}>{label}</Text>
+      <Sentence style={styles.retryLabel}>{label}</Sentence>
     </Pressable>
   );
 }

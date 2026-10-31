@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { createMessageService, loadMessageCatalog } from "@momo/core/i18n";
 import {
   DEFAULT_SETTINGS_SECTION,
   LEGACY_SECTION_ALIAS,
@@ -11,22 +12,27 @@ import {
   isReachableSettingsSection,
   reachableSettingsSections,
   resolveSettingsSection,
+  settingsSectionLabel,
 } from "./settingsNav";
 
 const WEB_SRC = join(dirname(fileURLToPath(import.meta.url)), "../..");
+const koreanCatalog = await loadMessageCatalog("ko-KR");
 
 const idsIn = (group: (typeof SETTINGS_SECTIONS)[number]["group"]) =>
   SETTINGS_SECTIONS.filter((item) => item.group === group).map((item) => item.id);
 
-describe("settingsNav (#3578 S1 · #4141 · #4663: 13행, 세 그룹)", () => {
-  it("개인 / 워크스페이스 / 앱·연결 세 그룹에 13행이다", () => {
+describe("settingsNav (#3578 S1 · #4141 · #4663 · #4937: 14행, 세 그룹)", () => {
+  it("개인 / 워크스페이스 / 앱·연결 세 그룹에 14행이다", () => {
     expect(DEFAULT_SETTINGS_SECTION).toBe("profile");
     expect(SETTINGS_GROUPS).toEqual(["개인", "워크스페이스", "앱·연결"]);
-    expect(SETTINGS_SECTIONS).toHaveLength(13);
+    expect(SETTINGS_SECTIONS).toHaveLength(14);
     expect(idsIn("개인")).toEqual(["profile", "appearance", "notifications", "shortcuts", "devices"]);
     expect(idsIn("워크스페이스")).toEqual(["workspace", "members", "memory", "usage", "code"]);
-    expect(idsIn("앱·연결")).toEqual(["updates", "devTools", "aiHub"]);
-    expect(SETTINGS_SECTIONS.map((item) => item.label)).toEqual([
+    expect(idsIn("앱·연결")).toEqual(["updates", "releaseNotes", "devTools", "aiHub"]);
+    // 업데이트 소식은 사전 키로 읽는다(`labelKey`): 한국어·영어 문구 서비스가 자기 말로 답한다(#4937).
+    const korean = createMessageService({ messageLocale: "ko-KR", catalog: koreanCatalog });
+    const english = createMessageService({ messageLocale: "en-US" });
+    expect(SETTINGS_SECTIONS.map((item) => settingsSectionLabel(item, korean))).toEqual([
       "프로필",
       "모양",
       "알림",
@@ -38,9 +44,11 @@ describe("settingsNav (#3578 S1 · #4141 · #4663: 13행, 세 그룹)", () => {
       "사용량",
       "실행 호스트",
       "업데이트",
+      "업데이트 소식",
       "명령줄·AI 도구",
       "AI",
     ]);
+    expect(settingsSectionLabel(SETTINGS_SECTIONS.find((item) => item.id === "releaseNotes")!, english)).toBe("What's new");
   });
 
   it("명령줄·AI 도구 행은 설정 안의 페이지이고 어느 빌드에서나 도착한다 (#4663)", () => {
@@ -69,8 +77,12 @@ describe("settingsNav (#3578 S1 · #4141 · #4663: 13행, 세 그룹)", () => {
     expect(SETTINGS_SECTIONS.filter((item) => item.link).map((item) => item.id)).toEqual(["aiHub"]);
   });
 
-  it("눈에서 뺀 범위는 프로필 하나뿐이고, 그 값(범위)은 그대로 있다(#4109)", () => {
-    expect(SETTINGS_SECTIONS.filter((item) => item.scopeVisible === false).map((item) => item.id)).toEqual(["profile"]);
+  it("눈에서 뺀 범위는 프로필과 업데이트 소식뿐이고, 그 값(범위)은 그대로 있다(#4109 · #4937)", () => {
+    expect(SETTINGS_SECTIONS.filter((item) => item.scopeVisible === false).map((item) => item.id)).toEqual([
+      "profile",
+      "releaseNotes",
+    ]);
+    expect(SETTINGS_SECTIONS.find((item) => item.id === "releaseNotes")?.scope).toBe("device");
     expect(SETTINGS_SECTIONS.find((item) => item.id === "profile")?.scope).toBe("workspace-member");
   });
 

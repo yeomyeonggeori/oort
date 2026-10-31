@@ -106,6 +106,11 @@ import {
 } from './DevToolsPage';
 import {useDevToolsEntry} from './devTools';
 import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSettings';
+import {RELEASE_NOTES_SETTINGS_PAGE} from '@momo/core/features/releaseNotes/model';
+import {
+  ReleaseNotesSettingRow,
+  ReleaseNotesSettingsPage,
+} from '../releaseNotes/ReleaseNotesPage';
 
 // =============================================================================
 // 「설정」 페이지 — 홈 머리의 내 얼굴이 여는 전체 화면 (#4457, owner 2026-10-25; 옛 `ProfileSheet` 의 자리).
@@ -140,12 +145,18 @@ import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSetti
 //   ⑥ 기억                      내 일시정지
 //   ⑦ 연결                      서버(보조 줄) · 지시 기기 ›(→ 지시 기기 장) · 명령줄·AI 도구 ›(→ 목록·지우기 장, 쓸 수
 //                               있는 사람에게만 선다: `devTools.ts` `useDevToolsEntry`)
-//   ⑧ 정보 › 연결 기록 복사     **계정 위**(owner 10-31, #4936)
+//   ⑧ 정보 › 업데이트 소식 · 연결 기록 복사     **계정 위**(owner 10-31, #4936). 「업데이트 소식」(#4937)은 이 카드의 첫 줄이다
 //   ⑨ 계정                      로그아웃 — **마지막, 위험 행**
 //   바닥        버전 줄(길게 누르면 연결 기록 복사)
 //
 // 순서의 근거: Buzz 는 「상태 → 프로필 → 알림 → 연결」이고, 매일 만지는 것(상태·알림)이 위, 되돌릴 수 없는
 // 것(로그아웃)이 맨 끝이다. 우리 항목이 더 많아 Buzz 의 넷 사이에 「기억」을 끼웠을 뿐 순서의 문법은 그대로다.
+// 「업데이트 소식」(#4937)을 「정보」 카드의 첫 줄에 둔 근거: ① 「정보」는 이 설치본 자신에 대한 카드이고 소식은 지금 쓰는 앱
+// 버전의 정보다(연결 기록 복사도 같은 종류). ② #4936 이 방금 정한 순서(정보 → 계정(마지막 위험 카드) → 바닥 버전 줄)를 건드리지
+// 않고 한 줄 카드를 새로 만들지도 않는다. ③ 바닥 버전 줄 바로 위라서 「내가 쓰는 버전 → 그 버전에서 바뀐 것」이 이웃한다.
+// ④ 페이지로 들어가는 행이라 셰브론 행 문법 그대로다. 물리친 자리: 맨 위 새 버전 배너 곁(그 배너는 「더 새 빌드가 있다」는
+// 알림이고 소식은 이미 깔린 빌드의 이야기라 한 덩어리로 읽힌다), 「보기」(화면 취향 카드), 「연결」(서버·기기 진단 카드).
+//
 // 예외 둘은 owner 10-31 지시다: 테마는 긴 「알림」 목록 밑에 있어 찾아 내려가야 했으므로 얼굴 영역(프로필) 바로
 // 아래로 올렸고, 연결 기록 복사는 위험 행인 로그아웃 위로 옮겨 로그아웃이 마지막 카드가 된다. 「표시 이름 ›」·「프로필
 // 설명 ›」은 폰에 지금 없는 기능이라(코어 `changeMyDisplayName` 은 있다) 빈 약속 행으로 그리지 않는다.
@@ -174,6 +185,7 @@ import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSetti
 /** 설정 페이지 위에 한 겹 더 쌓이는 장. `main` 은 설정 페이지 자신이다. */
 export type SettingsSubPage =
   | 'language'
+  | 'releaseNotes'
   | 'usage'
   | 'theme'
   | 'deviceKey'
@@ -186,7 +198,7 @@ export type SettingsPageName = 'main' | SettingsSubPage;
 /** 안쪽 장의 첫 요소 위 여백 — 설정 첫 장·시트와 같은 `space.md`. 스타일(`subContent`)과 기한 장의 펼침 셈(`revealAt`)이 함께 읽는다. */
 const SUB_PAGE_TOP = space.md;
 
-const SUB_PAGE_TITLE: Record<Exclude<SettingsSubPage, 'language'>, string> = {
+const SUB_PAGE_TITLE: Record<Exclude<SettingsSubPage, 'language' | 'releaseNotes'>, string> = {
   usage: AGENT_USAGE_COPY.report,
   theme: '테마',
   deviceKey: DEVICE_KEY_TITLE,
@@ -267,6 +279,7 @@ export function SettingsPage({
             onOpenUsage={() => setPage('usage')}
             onOpenTheme={() => setPage('theme')}
             onOpenLanguage={() => setPage('language')}
+            onOpenReleaseNotes={() => setPage(RELEASE_NOTES_SETTINGS_PAGE)}
             onOpenStatus={() => setStatusOpen(true)}
             onOpenDeviceKey={() => setPage('deviceKey')}
             onOpenDevTools={() => setPage('devTools')}
@@ -290,6 +303,8 @@ export function SettingsPage({
           testID="settings-sub-pane">
           {page === 'language' ? (
             <LanguageSettingsPage onBack={backToMain} />
+          ) : page === RELEASE_NOTES_SETTINGS_PAGE ? (
+            <ReleaseNotesSettingsPage onBack={backToMain} />
           ) : (
             <SubPage
               page={page}
@@ -322,7 +337,7 @@ function SubPage({
   directory,
   onBack,
 }: {
-  page: Exclude<SettingsSubPage, 'language'>;
+  page: Exclude<SettingsSubPage, 'language' | 'releaseNotes'>;
   workspaceId: string;
   member: Member;
   directory: Directory;
@@ -432,6 +447,7 @@ export function SettingsContent({
   connected,
   onOpenTheme,
   onOpenLanguage,
+  onOpenReleaseNotes,
   onOpenStatus,
   onOpenDeviceKey,
   onOpenDevTools,
@@ -449,6 +465,8 @@ export function SettingsContent({
   connected: boolean;
   onOpenTheme: () => void;
   onOpenLanguage?: () => void;
+  /** 「업데이트 소식」 장을 연다(#4937). 없으면 행이 서지 않는다(캡처 하네스). */
+  onOpenReleaseNotes?: () => void;
   /** 「상태 설정」 바텀시트를 연다. */
   onOpenStatus: () => void;
   onOpenDeviceKey: () => void;
@@ -956,6 +974,7 @@ export function SettingsContent({
 
       {/* ⑧ 정보 — 연결 기록 복사. 계정(로그아웃) 위다(owner 10-31, #4936): 위험 행이 마지막 카드로 선다. */}
       <GroupCard label="정보" testID="settings-about-card">
+        {onOpenReleaseNotes ? <ReleaseNotesSettingRow onPress={onOpenReleaseNotes} /> : null}
         <ListRow
           title={diagCopied ? '연결 기록 복사됨' : '연결 기록 복사'}
           onPress={copyDiagnostics}

@@ -149,6 +149,10 @@ import {__setPermissionReader} from '../src/push/permissionStatus';
 import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
 import {pushDeviceId} from '../src/push/registration';
 import {AppUpdateSheet} from '../src/features/appUpdate/AppUpdateBanner';
+import {RELEASE_NOTES} from '@momo/core/features/releaseNotes/notes';
+import {ReleaseNotesSheet} from '../src/features/releaseNotes/ReleaseNotesSheet';
+import {createMobileLocaleController} from '../src/i18n/controller';
+import {MobileLocaleProvider} from '../src/i18n/LocaleProvider';
 import {seedIosFeedCacheForCapture} from '../src/features/appUpdate/feed';
 import {PageSheet} from '../src/design/PageSheet';
 import {LinkSheetBody} from '../src/features/deviceKey/DeviceKeyLinkSheet';
@@ -2138,6 +2142,25 @@ function JumpPillsRoomsStage({
     </Screen>
   );
 }
+
+// #4937: 하네스에는 언어 provider 가 없어서 사전을 읽는 새 화면은 영어 문장으로 선다. 소식 판은 언어를 정해 세워 앱 화면과
+// 같은 말로 그린다(`-en` 판은 영어 UI). 공장은 모듈 값이다: 렌더마다 새 공장이면 provider 가 사전을 다시 읽는다.
+const releaseNotesKo = () =>
+  createMobileLocaleController({
+    port: {
+      readPreference: () => 'ko-KR',
+      writePreference: () => {},
+      readDevice: () => ({languages: ['ko-KR'], timeZone: 'Asia/Seoul'}),
+    },
+  });
+const releaseNotesEn = () =>
+  createMobileLocaleController({
+    port: {
+      readPreference: () => 'en-US',
+      writePreference: () => {},
+      readDevice: () => ({languages: ['en-US'], timeZone: 'Asia/Seoul'}),
+    },
+  });
 
 export function Surface({name}: {name: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -4811,6 +4834,43 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </View>
       );
+    // #4937: 업데이트 뒤 처음 열 때 올라오는 「업데이트 소식」 시트(실제 v0.1.41 소식). 시뮬레이터 빌드 번호는 1 이라 앱이 스스로는
+    // 이 시트를 올리지 않는다(어느 소식도 붙지 않는다): 이 판이 시트를 직접 세운다. 「자세히 보기」는 `-page` 판이 보인다.
+    case 'shell-release-notes-sheet':
+    case 'shell-release-notes-sheet-en':
+      return (
+        <MobileLocaleProvider
+          createController={name === 'shell-release-notes-sheet' ? releaseNotesKo : releaseNotesEn}>
+          <View style={styles.fill}>
+            <Shell />
+            <ReleaseNotesSheet
+              note={RELEASE_NOTES[0]}
+              onClose={() => {}}
+              onOpenDetails={() => {}}
+            />
+          </View>
+        </MobileLocaleProvider>
+      );
+    // #4937: 설정의 「업데이트 소식」 장(버전 목록). 버전을 누르면 내용 장이 밀려 들어온다(`release-notes-row-0.1.41`).
+    case 'shell-release-notes-page':
+    case 'shell-release-notes-page-en':
+      return (
+        <MobileLocaleProvider
+          createController={name === 'shell-release-notes-page' ? releaseNotesKo : releaseNotesEn}>
+          <View style={styles.fill}>
+            <Shell />
+            <SettingsOverlay
+              initialPage="releaseNotes"
+              workspaceId={HARNESS_MEMBER.workspaceId}
+              member={SETTINGS_ME}
+              directory={settingsDirectory(SHELL_ROSTER)}
+              connected
+              onSignOut={() => {}}
+              onClose={() => {}}
+            />
+          </View>
+        </MobileLocaleProvider>
+      );
     // #4384: 프로필 사진 장. 진짜 셸 위의 진짜 프로필 시트가 사진 장으로 열린다(`initialPage="avatar"`).
     // `-photo` 는 내 사진이 있는 사람(지우기 줄이 선다), `-offline` 은 연결이 끊긴 때(세 줄 잠김),
     // `-denied` 는 사진 접근이 꺼진 때(고르기를 누르면 문장 + 「설정 열기」 — Maestro 가 누른다).
@@ -6603,6 +6663,7 @@ function SettingsBottomSurface({devTools = false}: {devTools?: boolean}): React.
           directory={settingsDirectory(SHELL_ROSTER)}
           connected
           onOpenTheme={() => {}}
+          onOpenReleaseNotes={() => {}}
           onOpenStatus={() => {}}
           onOpenDeviceKey={() => {}}
           onOpenDevTools={devTools ? () => {} : undefined}

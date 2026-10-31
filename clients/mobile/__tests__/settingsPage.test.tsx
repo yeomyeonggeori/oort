@@ -653,6 +653,7 @@ describe('머리의 자리 — 닫기 X 는 오른쪽 위, 안쪽 장의 ‹ 는
   // 안쪽 장이 하나 늘면 이 표가 타입 오류를 낸다 — 새 장의 머리도 같은 약속을 지켜야 한다.
   const SUB_PAGES: Record<SettingsSubPage, true> = {
     language: true,
+    releaseNotes: true,
     usage: true,
     theme: true,
     deviceKey: true,

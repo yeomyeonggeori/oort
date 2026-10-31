@@ -54,6 +54,7 @@ import { WorkHostNotices } from "@/features/notifications/WorkHostNotices";
 import { OnlineRollCall } from "@/features/presence/OnlineRollCall";
 import { LegacyAgentPortCleanup } from "@/features/welcome/harnessLogin/LegacyAgentPortCleanup";
 import { ReminderDueWatcher } from "@/features/reminders/ReminderDueWatcher";
+import { ReleaseNotesHost } from "@/features/releaseNotes/ReleaseNotesHost";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
 import { AgentWorkPanel } from "@/features/agents/AgentWorkPanel";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
@@ -510,6 +511,8 @@ export function AppShell({
           {!stress && <OnlineRollCall />}
           {!stress && <LegacyAgentPortCleanup />}
           {!stress && <ReminderDueWatcher />}
+          {/* 업데이트 뒤 처음 열 때 「업데이트 소식」을 한 번 보인다(#4937). 데스크탑 셸만 앱 버전을 안다. */}
+          {!stress && <ReleaseNotesHost />}
           {/* Renders nothing; watches every agent's progress channel so the
            * sidebar badge and the composer line describe the same turn
            * (MOMO-613). Exactly one writer to the turn store is ever mounted. */}

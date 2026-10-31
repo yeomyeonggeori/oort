@@ -1,4 +1,7 @@
 import { IS_TAURI } from "@/lib/env";
+// Static on purpose (#4915): a lazy chunk here would fail the same way the Korean one can,
+// inside `change()` where nothing could ask for it again, and it is 638 bytes.
+import { desktopMenuLabels } from "./desktopMenu";
 import { browserLocalePort, createAppLocale } from "./localeStore";
 import { observeLocaleEnvironment } from "./localeEnvironment";
 
@@ -10,10 +13,7 @@ async function bootLocale() {
     port.readPreference = native.readLocalePreference;
     port.writePreference = native.writeLocalePreference;
     return createAppLocale(port, {
-      syncMenu: async service => {
-        const { desktopMenuLabels } = await import("./desktopMenu");
-        await native.setLocaleMenu(desktopMenuLabels(service));
-      },
+      syncMenu: async service => { await native.setLocaleMenu(desktopMenuLabels(service)); },
     });
   }
   return createAppLocale(port);

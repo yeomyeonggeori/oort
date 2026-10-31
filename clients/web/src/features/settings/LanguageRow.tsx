@@ -62,7 +62,10 @@ function LanguageControl({ locale }: { locale: AppLocale }) {
                 });
               }}
             >
-              {t("settings.profile.languageRetry")}
+              {/* A rejected chunk import can only be asked again by a new page (#4915), so the button says what it does. */}
+              {snapshot.needsReload
+                ? locale.service.formatMessage("settings.profile.languageReload")
+                : t("settings.profile.languageRetry")}
             </Button>
           </div>
         ) : null}
