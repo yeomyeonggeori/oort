@@ -1452,6 +1452,59 @@ async fn the_notifier_role_has_no_delete_and_no_table_it_does_not_name() {
     );
 }
 
+/// ADR-0206 증보 1 F1 / #4889 2단계 (migration 165): the `thread_reply` arm of the push judgment
+/// reads `thread_follow`, so the production notifier holds **SELECT and nothing else** on it. The
+/// writes are the API's and the agent worker's (`momo_app`, `momo_worker`), never the notifier's
+/// (its own message lines are `ThreadPolicy::Skip` and never reach the automatic follow), and no
+/// role is BYPASSRLS because of this table. Also: the judgment as the production notifier does not
+/// die with `permission denied` (Postgres checks table privileges when the statement starts, so an
+/// unknown message id is enough to prove the read is granted).
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn the_production_notifier_role_reads_thread_follow_and_writes_nothing_there() {
+    let db = ProdDb::create().await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+
+    sqlx::query("SELECT count(*) FROM thread_follow")
+        .fetch_one(&notifier)
+        .await
+        .expect("the notifier reads thread_follow (migration 165 + bootstrap_runtime_roles.sql)");
+    sqlx::query("SELECT last_read_reply_seq FROM thread_follow WHERE false")
+        .fetch_all(&notifier)
+        .await
+        .expect("the notifier reads the new column too (a table-level SELECT covers it)");
+
+    for (verb, sql) in [
+        (
+            "INSERT",
+            "INSERT INTO thread_follow (workspace_id, channel_id, root_id, member_id, state) \
+             SELECT gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), gen_random_uuid(), 'auto' WHERE false",
+        ),
+        (
+            "UPDATE",
+            "UPDATE thread_follow SET last_read_reply_seq = last_read_reply_seq WHERE false",
+        ),
+        ("DELETE", "DELETE FROM thread_follow WHERE false"),
+    ] {
+        match sqlx::query(sql).execute(&notifier).await {
+            Ok(_) => panic!("the production notifier must not {verb} thread_follow"),
+            Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("42501") => {}
+            Err(error) => panic!("{verb} thread_follow failed for a reason other than permission: {error}"),
+        }
+    }
+
+    {
+        let mut conn = notifier.acquire().await.expect("acquire");
+        let judged = momo_push::judge_targets(&mut conn, Uuid::new_v4(), Uuid::new_v4())
+            .await
+            .expect("the judgment runs as the production notifier, thread_follow included");
+        assert!(judged.is_empty(), "an unknown message notifies nobody");
+    }
+
+    notifier.close().await;
+    db.finish().await;
+}
+
 #[tokio::test]
 #[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
 async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {

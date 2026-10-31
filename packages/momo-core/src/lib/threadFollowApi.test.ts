@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../runtime/host";
-import { ApiError, fetchThreadReplies, followThread, unfollowThread } from "./api";
+import { ApiError, fetchThreadReplies, followThread, markThreadRead, unfollowThread } from "./api";
 
 function installHost(): void {
   const session: SessionPort = {
@@ -99,5 +99,54 @@ describe("스레드 따라가기 경로 (ADR-0206 증보 1 F8, #4889)", () => {
     const old = await fetchThreadReplies("w-1", "c-1", "m-1");
     expect(old.following).toBeUndefined();
     expect(old.following ?? false).toBe(false);
+  });
+});
+
+const URL_OF_READ = "https://oort.test/v1/workspaces/w-1/channels/c-1/messages/m-1/read";
+
+describe("스레드 읽음 신호 (#4889 2단계)", () => {
+  it("PUT …/read 에 읽은 위치를 snake_case 본문으로 싣고, 효과값을 camelCase 로 돌려준다", async () => {
+    installHost();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        jsonResponse({ following: true, last_read_reply_seq: 41, unread_reply_count: 2 })
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await markThreadRead("w-1", "c-1", "m-1", 41);
+    const call = fetchMock.mock.calls[0];
+    expect(String(call?.[0])).toBe(URL_OF_READ);
+    expect(call?.[1]?.method).toBe("PUT");
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ last_read_reply_seq: 41 });
+    expect(result).toEqual({ following: true, lastReadReplySeq: 41, unreadReplyCount: 2 });
+  });
+
+  it("따라가지 않는 스레드는 following: false 이고 두 수가 없다 — 호출부가 먼저 알 필요가 없다", async () => {
+    installHost();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ following: false })));
+    const result = await markThreadRead("w-1", "c-1", "m-1", 7);
+    expect(result).toEqual({ following: false });
+    expect(result).not.toHaveProperty("unreadReplyCount");
+    expect(result).not.toHaveProperty("lastReadReplySeq");
+  });
+
+  it("깨진 수(음수·문자열)는 버리고 following 만 읽는다", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        jsonResponse({ following: true, last_read_reply_seq: -3, unread_reply_count: "x" })
+      )
+    );
+    expect(await markThreadRead("w-1", "c-1", "m-1", 7)).toEqual({ following: true });
+  });
+
+  it("옛 서버의 404 는 ApiError 로 올라온다 — 호출부가 「기능 없음」으로 읽는다", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(jsonResponse({ error: { message: "not found" } }, 404))
+    );
+    await expect(markThreadRead("w-1", "c-1", "m-1", 7)).rejects.toBeInstanceOf(ApiError);
   });
 });
