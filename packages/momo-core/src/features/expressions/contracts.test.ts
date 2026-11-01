@@ -22,7 +22,9 @@ describe("ADR-0218 closed wire-schema fixture assertions", () => {
     assertExpressionContract("Approval", FIXTURE_APPROVAL);
     assertExpressionContract("Result", FIXTURE_RESULT);
     assertExpressionContract("Choice", choice);
+    assertExpressionContract("Choice", { ...choice, kind: "emoji" });
     assertExpressionContract("Decision", { expressionChoice: choice });
+    assertExpressionContract("Decision", { expressionChoice: { ...choice, kind: "sticker" } });
     assertExpressionContract("MessageInput", { body: ":party_parrot:" });
     assertExpressionContract("Mutation", { workspaceId: FIXTURE_LIST.workspaceId, version: "3", expression: FIXTURE_EXPRESSIONS[0] });
     assertExpressionContract("ImportRequest", { ...metadata, url: "https://giphy.com/gifs/example" });
@@ -31,6 +33,31 @@ describe("ADR-0218 closed wire-schema fixture assertions", () => {
     assertExpressionContract("Changed", { type: "expression.changed", workspaceId: FIXTURE_LIST.workspaceId, version: "3" });
     assertExpressionContract("Patch", { displayName: "새 표시 이름" });
     assertExpressionContract("ReportRequest", { reason: "face", detail: "내 얼굴이에요" });
+  });
+  // ADR-0218 증보 4 §10 (#4961) J6: the kind is optional on what the server says and on what a person sends,
+  // closed to two words, and lives nowhere else — a draft, the draft requests, a patch and an agent's
+  // candidate take none (the kind is decided where every route registers).
+  it("keeps kind optional, closed to emoji|sticker, and off every other shape", () => {
+    for (const value of FIXTURE_EXPRESSIONS) expect(["emoji", "sticker"]).toContain(value.kind);
+    const older: Record<string, unknown> = { ...copy(FIXTURE_EXPRESSIONS[0]) };
+    delete older.kind;
+    assertExpressionContract("Expression", older);
+    assertExpressionContract("List", { ...FIXTURE_LIST, items: [older, FIXTURE_EXPRESSIONS[1]] });
+    for (const kind of ["emoji", "sticker"]) {
+      assertExpressionContract("Choice", { ...choice, kind });
+      assertExpressionContract("Expression", { ...FIXTURE_EXPRESSIONS[0], kind });
+      assertExpressionContract("Expression", { ...FIXTURE_EXPRESSIONS[0], status: "hidden", media: null, kind });
+    }
+    for (const bad of ["huge", "Emoji", "", null, 1, ["emoji"]]) {
+      expect(matchesExpressionContract("Choice", { ...choice, kind: bad }), `Choice ${JSON.stringify(bad)}`).toBe(false);
+      expect(matchesExpressionContract("Expression", { ...FIXTURE_EXPRESSIONS[0], kind: bad }), `Expression ${JSON.stringify(bad)}`).toBe(false);
+    }
+    expect(matchesExpressionContract("Draft", { ...FIXTURE_READY_DRAFT, kind: "emoji" })).toBe(false);
+    expect(matchesExpressionContract("Metadata", { ...metadata, kind: "emoji" })).toBe(false);
+    expect(matchesExpressionContract("ImportRequest", { ...metadata, url: "https://giphy.com/gifs/example", kind: "emoji" })).toBe(false);
+    expect(matchesExpressionContract("AttachmentRequest", { ...metadata, attachmentId: FIXTURE_EXPRESSIONS[0].id, channelId: FIXTURE_CHANNEL_ID, kind: "emoji" })).toBe(false);
+    expect(matchesExpressionContract("Patch", { kind: "emoji" })).toBe(false);
+    expect(matchesExpressionContract("AgentCandidate", { ...candidate, kind: "emoji" })).toBe(false);
   });
   it("accepts attachment, generated and GIF-site agent sources with 1–4 candidates", () => {
     const candidates = [candidate,
