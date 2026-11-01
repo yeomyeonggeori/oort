@@ -24,6 +24,7 @@ import {
   approvalsPanelState,
   decidableCount,
   decisionNote,
+  settledStatusLine,
   APPROVED_RECEIPT,
   REJECTED_RECEIPT,
 } from "./approvalsPanel";
@@ -202,6 +203,41 @@ describe("approvalRowControl", () => {
     expect(approvalRowControl(settled, { offline: true })).toEqual({
       kind: "none",
     });
+  });
+});
+
+// ---- ② red proof 1b: 이미 결정한 승인의 스냅샷 (#5092 D1) -------------------
+
+describe("approvalRowControl: 이 클라이언트가 이미 결정한 승인", () => {
+  // 인박스 패널은 고른 줄의 스냅샷을 들고 있어서 원장이 그 행을 뺀 뒤에도 같은 `approvalId`로 남는다.
+  // 영수증이 그 행의 컨트롤 자격을 거둔다 — 끊김보다 먼저: 결정이 끝난 것은 지금 연결과 무관한 사실이다.
+  it("이미 결정한 승인이면 대기로 보이는 같은 행에도 결정 컨트롤이 서지 않는다", () => {
+    for (const offline of [false, true]) {
+      expect(approvalRowControl(pendingRow(), { offline, settled: true })).toEqual({
+        kind: "none",
+      });
+    }
+  });
+
+  it("결정한 적이 없으면 자격은 그대로다", () => {
+    for (const settled of [undefined, false]) {
+      expect(approvalRowControl(pendingRow(), { offline: false, settled })).toEqual({
+        kind: "decide",
+        approvalId: "approval-pending",
+      });
+    }
+  });
+
+  it("결과 줄은 영수증 한 벌 그대로다: 승인·거부는 정본 영수증, 만료·취소는 이미 결정된 요청에 말하는 문장, 대기는 줄이 없다", () => {
+    expect(settledStatusLine("approved")).toBe(APPROVED_RECEIPT);
+    expect(settledStatusLine("rejected")).toBe(REJECTED_RECEIPT);
+    for (const status of ["expired", "cancelled"] as const) {
+      expect(settledStatusLine(status)).toBe(
+        decisionNote({ kind: "superseded", status }).text
+      );
+    }
+    // 끝난 상태가 아니면 말할 결과가 없다: 호출자가 이 값으로 「결정했다」를 판정한다.
+    expect(settledStatusLine("pending")).toBeNull();
   });
 });
 
