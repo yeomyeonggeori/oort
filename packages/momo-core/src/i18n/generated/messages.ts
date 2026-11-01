@@ -159,6 +159,7 @@ export const messageKeys = [
   "mobile.ios.photoLibraryUsage",
   "mobile.locale.backToSettings",
   "mobile.locale.saving",
+  "notifications.inviteLink.fallback",
   "releaseNotes.action.close",
   "releaseNotes.action.details",
   "releaseNotes.detail.back",
@@ -383,6 +384,7 @@ export const argumentSpecs = {
   "mobile.ios.photoLibraryUsage": {},
   "mobile.locale.backToSettings": {},
   "mobile.locale.saving": {},
+  "notifications.inviteLink.fallback": {},
   "releaseNotes.action.close": {},
   "releaseNotes.action.details": {},
   "releaseNotes.detail.back": {},
@@ -591,6 +593,7 @@ export interface MessageArgs {
   "mobile.ios.photoLibraryUsage": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "notifications.inviteLink.fallback": Record<string, never>;
   "releaseNotes.action.close": Record<string, never>;
   "releaseNotes.action.details": Record<string, never>;
   "releaseNotes.detail.back": Record<string, never>;

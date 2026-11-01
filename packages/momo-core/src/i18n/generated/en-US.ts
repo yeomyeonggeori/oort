@@ -1047,6 +1047,12 @@ export const catalog: MessageCatalog = {
       "value": "Applying language…"
     }
   ],
+  "notifications.inviteLink.fallback": [
+    {
+      "type": 0,
+      "value": "Posted an invite link"
+    }
+  ],
   "releaseNotes.action.close": [
     {
       "type": 0,

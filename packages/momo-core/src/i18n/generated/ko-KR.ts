@@ -1026,6 +1026,12 @@ export const catalog: MessageCatalog = {
       "value": "언어를 적용하는 중이에요."
     }
   ],
+  "notifications.inviteLink.fallback": [
+    {
+      "type": 0,
+      "value": "초대 링크를 올렸어요"
+    }
+  ],
   "releaseNotes.action.close": [
     {
       "type": 0,
