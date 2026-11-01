@@ -194,6 +194,13 @@ describe('「＋」 메뉴', () => {
     await press('expression-add-menu');
     jest.spyOn(api, 'fetchRoster').mockResolvedValue([]);
     await press('expression-add-make');
+    // 「AI와 만들기」는 사진 양식으로 먼저 열리고(#4984), 에이전트에게 부탁하는 길은 그 안의 단추 하나다.
+    // 이 가짜 서버에는 이미지 모델 길이 없어 확인이 실패해도 그 단추는 막히지 않는다.
+    await waitFor(() =>
+      expect(screen.getByTestId('expression-photo-agent')).toBeTruthy(),
+    );
+    expect(screen.queryByTestId('expression-make')).toBeNull();
+    await press('expression-photo-agent');
     expect(screen.getByTestId('expression-make')).toBeTruthy();
   });
 
@@ -511,6 +518,10 @@ describe('AI와 만들기', () => {
     );
     await press('expression-add-menu');
     await press('expression-add-make');
+    await waitFor(() =>
+      expect(screen.getByTestId('expression-photo-agent')).toBeTruthy(),
+    );
+    await press('expression-photo-agent');
     await waitFor(() =>
       expect(screen.getByTestId(`expression-make-agent-${agent.id}`)).toBeTruthy(),
     );
