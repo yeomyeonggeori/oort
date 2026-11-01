@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "d6a8ce1846dd11d0c0c4900207495fb0b538bb07",
+  "baselineHead": "6698a6e8f68af5dc7b12b5af16376daf2b828729",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -808,6 +808,7 @@
     "clients/web/src/features/timeline/RequestBundleCard.tsx": 5,
     "clients/web/src/features/timeline/SpawnHostChoice.tsx": 12,
     "clients/web/src/features/timeline/StatusChip.tsx": 24,
+    "clients/web/src/features/timeline/SystemLine.tsx": 1,
     "clients/web/src/features/timeline/TeamAiDelegateStrip.tsx": 15,
     "clients/web/src/features/timeline/TeamAiReplyMeta.tsx": 3,
     "clients/web/src/features/timeline/ThreadComposer.tsx": 36,
@@ -830,6 +831,7 @@
     "clients/web/src/features/timeline/runStatus.ts": 1,
     "clients/web/src/features/timeline/settledApprovals.ts": 1,
     "clients/web/src/features/timeline/spacing.ts": 3,
+    "clients/web/src/features/timeline/systemLineRows.ts": 3,
     "clients/web/src/features/timeline/timelineBurst.harness.tsx": 20,
     "clients/web/src/features/timeline/useApprovalAvatarPreview.ts": 7,
     "clients/web/src/features/timeline/useAutoGrow.ts": 4,

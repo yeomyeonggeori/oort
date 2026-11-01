@@ -1285,7 +1285,12 @@ fn summary_dto(row: &AgentRunSummaryRow) -> AgentRunSummaryDto {
 /// not say this — and it is written at all because a run that simply goes quiet
 /// is indistinguishable from a run that is thinking. The stop has to be visible
 /// to the room, not just to the person who tapped it.
-const CANCEL_SYSTEM_LINE: &str = "사람이 실행을 중지했어요.";
+///
+/// The verb is 「중단」, the same word the stop button, the receipt and the run's
+/// end reason use (`runCancel.ts` · `runPhase.ts`): one event, one word (#5079).
+/// This sentence used to say 「중지」, so the room read a different word than the
+/// person who had just pressed 「실행 중단」.
+const CANCEL_SYSTEM_LINE: &str = "사람이 실행을 중단했어요.";
 
 /// `message.props.kind` (Swift :532) — what a client switches on to render the
 /// line as a stop rather than as generic system chatter.

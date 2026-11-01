@@ -3450,7 +3450,7 @@ async fn a_test_push_runs_as_the_production_app_and_notifier_roles() {
 
     // (3) As momo_app again: the diagnostics read the result back.
     let diagnostics = momo_db::tenant::with_tenant_tx(&app, workspace, move |conn| {
-        Box::pin(async move { compute_diagnostics(conn, workspace, member, None).await })
+        Box::pin(async move { compute_diagnostics(conn, workspace, member, None, None).await })
     })
     .await
     .expect("momo_app reads the diagnostics");

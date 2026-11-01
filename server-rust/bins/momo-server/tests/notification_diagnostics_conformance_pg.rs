@@ -14,7 +14,7 @@
 //! | `the_last_delivery_failure_is_a_code_and_never_a_relays_words` | `last_delivery_failed` | return the recorded reason as is / count drop rows |
 //! | `the_last_test_reads_the_dispatch_log_by_its_collapse_id` | `lastTest`: sent / relay_outdated / failed / queued / stalled, by `t:<id>` exactly | read the outbox instead / classify every 400 as outdated / match another test's rows |
 //! | `the_last_test_read_is_served_by_the_partial_unique_index` | the `lastTest` SQL plans onto `push_dispatch_dedupe_uniq` (review M-1) | drop `AND push_token_id IS NOT NULL` from `LAST_TEST_ROWS_SQL` |
-//! | `kind_off_and_quiet_hours_are_not_emitted_before_their_slices` | the two codes stay out; `kind` is validated | emit either code |
+//! | `kind_off_needs_a_switched_off_kind_and_quiet_hours_waits_for_its_slice` | with no switch off `kind_off` stays out (it is emitted for a switched-off kind in `notification_prefs_conformance_pg`), `quiet_hours` stays out until N7; `kind` is validated | emit `kind_off` without a switch, or `quiet_hours` |
 //! | `a_test_push_passes_a_pause_and_writes_one_id_only_row_for_the_caller` | judgment bypass, id-only, own member only | route the test through `judge_targets` / add a name key |
 //! | `the_budget_is_three_per_minute_even_when_five_arrive_at_once` | exactly 3 of 5, 429 `rate_limited`, window reset | raise the limit to 4 / drop the row lock |
 //! | `a_second_test_waits_on_the_row_lock_and_counts_after_the_first` | the row lock, measured: B blocks behind A at `FOR UPDATE`, the count ends at 2 (review L-1) | drop `FOR UPDATE` from `reserve_test_push_in_tx` |
@@ -1232,7 +1232,7 @@ async fn the_last_test_read_is_served_by_the_partial_unique_index() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL to a real Postgres"]
-async fn kind_off_and_quiet_hours_are_not_emitted_before_their_slices() {
+async fn kind_off_needs_a_switched_off_kind_and_quiet_hours_waits_for_its_slice() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let tenant = seed_tenant(&su).await;
@@ -1240,8 +1240,9 @@ async fn kind_off_and_quiet_hours_are_not_emitted_before_their_slices() {
     let me = Caller::of(&base, tenant.workspace, &tenant.me).await;
 
     // Everything that can be wrong at once: paused, the channel muted, no device. The codes come
-    // in the response's fixed order, and the two codes of later slices are not among them for any
-    // kind the caller names.
+    // in the response's fixed order. With no kind switch off `kind_off` is not among them for any
+    // kind the caller names (the member in `notification_prefs_conformance_pg` who turned one off
+    // gets it), and `quiet_hours` is not among them until the work-hours slice (N7) judges a schedule.
     set_pause(&su, &tenant, true, None).await;
     sqlx::query(
         "INSERT INTO notification_pref (workspace_id, member_id, channel_id, muted_until) \

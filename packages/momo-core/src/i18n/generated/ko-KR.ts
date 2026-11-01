@@ -1834,6 +1834,117 @@ export const catalog: MessageCatalog = {
       "value": "동영상"
     }
   ],
+  "timeline.workPlan.button": [
+    {
+      "type": 0,
+      "value": "계획 "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 중 "
+    },
+    {
+      "type": 2,
+      "value": "done",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 완료"
+    }
+  ],
+  "timeline.workPlan.buttonDone": [
+    {
+      "type": 0,
+      "value": "계획 "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 모두 완료"
+    }
+  ],
+  "timeline.workPlan.maybeStale": [
+    {
+      "type": 0,
+      "value": "기록이 길어서 마지막 계획이 아닐 수 있어요."
+    }
+  ],
+  "timeline.workPlan.notLive": [
+    {
+      "type": 0,
+      "value": "지금은 돌고 있지 않아요. 마지막으로 알린 계획이에요."
+    }
+  ],
+  "timeline.workPlan.openAll": [
+    {
+      "type": 0,
+      "value": "모두 보기"
+    }
+  ],
+  "timeline.workPlan.sessionLabel": [
+    {
+      "type": 0,
+      "value": "작업 세션"
+    }
+  ],
+  "timeline.workPlan.stepCurrent": [
+    {
+      "type": 0,
+      "value": "지금 단계"
+    }
+  ],
+  "timeline.workPlan.stepDone": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "timeline.workPlan.stepPending": [
+    {
+      "type": 0,
+      "value": "대기"
+    }
+  ],
+  "timeline.workPlan.title": [
+    {
+      "type": 0,
+      "value": "계획 · "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 중 "
+    },
+    {
+      "type": 2,
+      "value": "done",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계"
+    }
+  ],
+  "timeline.workPlan.titleDone": [
+    {
+      "type": 0,
+      "value": "계획 · 모두 마쳤어요"
+    }
+  ],
   "timeline.workRecord.bundleRead": [
     {
       "type": 0,
