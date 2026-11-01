@@ -261,7 +261,7 @@ work-host 서명 미포팅으로 400 거부라(`server-rust/bins/momo-server/src
 폰 설정 토글·수신 UI는 #3342, 데스크탑 OS 알림 확장은 #3335 하위 이슈. 기기 앱 상태 보고(정확한 전경 신호)와
 팀 작업 끝남·DM의 푸시는 이 결정에 포함되지 않는다.
 
-## A-9. 어휘 증보 — `test_notification`·`momo.system`과 reason별 정적 본문 (ADR-0206 D11·D14·D15, #4341)
+## A-9. 어휘 증보 — `test_notification`·`momo.system`과 reason별 정적 본문 (ADR-0206 D11·D14·D15, #4341 — **Accepted** 2026-11-02, planner 위임 결정, ADR-0100; 독립 보안 검수 2회차 Blocker 0·High 0)
 
 ADR-0206 D14가 한 번에 묶은 어휘 증보 중, 시험 알림에 필요한 몫만 #4341이 먼저 냈다(`channel_message`·`keyword`·
 `scheduled_failed`는 그 슬라이스가 같은 방식으로 더한다). **와이어 계약은 그대로 id-only**(D2-A): 새 필드는 없고 새 라벨 둘과
