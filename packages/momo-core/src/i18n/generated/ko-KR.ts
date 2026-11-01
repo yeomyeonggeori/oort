@@ -29,6 +29,30 @@ export const catalog: MessageCatalog = {
       "value": "명"
     }
   ],
+  "connect.language.close": [
+    {
+      "type": 0,
+      "value": "언어 목록 닫기"
+    }
+  ],
+  "connect.language.hint": [
+    {
+      "type": 0,
+      "value": "언어 목록을 열어요."
+    }
+  ],
+  "connect.rememberEmail.hint": [
+    {
+      "type": 0,
+      "value": "이 기기에만 저장하고, 끄면 바로 지워요."
+    }
+  ],
+  "connect.rememberEmail.label": [
+    {
+      "type": 0,
+      "value": "이메일 기억하기"
+    }
+  ],
   "desktop.menu.close": [
     {
       "type": 0,

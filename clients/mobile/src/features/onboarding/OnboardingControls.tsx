@@ -163,20 +163,26 @@ export function OnboardingPhoneScreen({
   );
 }
 
-/** `.p-top`: 왼쪽 행동 · 가운데 진행 점 · 오른쪽 빈칸. */
+/**
+ * `.p-top`: 왼쪽 행동 · 가운데 진행 점 · 오른쪽 빈칸. 오른쪽에 `right`(첫 화면의 언어 칩, #4670)를 주면 양쪽이 같은 폭을
+ * 나눠 가져 칩의 폭이 진행 점을 밀지 않는다. 주지 않으면 예전 그대로다.
+ */
 export function OnboardingTopBar({
   left,
   dots,
+  right,
 }: {
   left?: React.ReactNode;
   dots: OnboardingDotsModel | null;
+  right?: React.ReactNode;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const even = right ? styles.topSideEven : null;
   return (
     <View style={styles.topBar}>
-      <View style={styles.topSide}>{left}</View>
+      <View style={[styles.topSide, even]}>{left}</View>
       <OnboardingDots dots={dots} />
-      <View style={[styles.topSide, styles.topSideRight]} />
+      <View style={[styles.topSide, styles.topSideRight, even]}>{right}</View>
     </View>
   );
 }
@@ -258,11 +264,14 @@ export function OnboardingButton({
 export function OnboardingGhostButton({
   label,
   onPress,
+  accessibilityLabel,
   accessibilityHint,
   testID,
 }: {
   label: string;
   onPress: () => void;
+  /** 글자와 다르게 읽을 때만(언어 칩의 「현재 언어: 한국어」). 없으면 글자 그대로다. */
+  accessibilityLabel?: string;
   accessibilityHint?: string;
   testID?: string;
 }): React.JSX.Element {
@@ -270,6 +279,7 @@ export function OnboardingGhostButton({
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       accessibilityHint={accessibilityHint}
       onPress={onPress}
       style={({pressed}) => [styles.ghost, pressed && styles.pressedText]}
@@ -482,6 +492,7 @@ const buildStyles = (color: Palette) =>
     },
     topSide: {minWidth: PHONE_OB.topSpacer, alignItems: 'flex-start'},
     topSideRight: {alignItems: 'flex-end'},
+    topSideEven: {flex: 1},
     button: {
       minHeight: PHONE_OB.buttonLg,
       borderRadius: PHONE_OB.buttonLgRadius,

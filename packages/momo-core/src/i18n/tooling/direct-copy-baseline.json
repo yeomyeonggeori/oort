@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "b4816e58a71db3d47378a4639c18b487f467d635",
+  "baselineHead": "0652d2794618ad078fbdc41450ec1730fe5af667",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -237,7 +237,7 @@
     "clients/mobile/src/features/work/useWorkSessionLive.ts": 1,
     "clients/mobile/src/features/work/workStreamTiming.ts": 2,
     "clients/mobile/src/features/workspace/queries.ts": 6,
-    "clients/mobile/src/i18n/LanguageSettings.tsx": 5,
+    "clients/mobile/src/i18n/LanguageSettings.tsx": 3,
     "clients/mobile/src/i18n/LocaleProvider.tsx": 6,
     "clients/mobile/src/i18n/device.ts": 11,
     "clients/mobile/src/i18n/intl.ts": 24,

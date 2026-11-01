@@ -64,6 +64,13 @@ name: ensure-signed-in
       - assertVisible: "요청 주소: ${SERVER_URL}/v1/…"
       - tapOn:
           id: "email-input"
+      # `eraseText` here too (#4669): 「이메일 기억하기」 is ON by default on the
+      # phone, so a signed-out screen reached with storage INTACT (an expired
+      # session, a lane flow run alone) already holds the email this device
+      # remembered for that server. Typing then APPENDS and the login body
+      # carries `me@example.comme@example.com`. 00-login.yaml starts from
+      # `clearState`, so its field is empty by construction and needs none.
+      - eraseText
       - inputText: ${EMAIL}
       # `eraseText` first — see the note in 00-login.yaml; without it the
       # secure field hands the server a mangled password.

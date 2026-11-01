@@ -1,0 +1,6 @@
+{
+  "connect.language.close": "언어 목록 닫기",
+  "connect.language.hint": "언어 목록을 열어요.",
+  "connect.rememberEmail.hint": "이 기기에만 저장하고, 끄면 바로 지워요.",
+  "connect.rememberEmail.label": "이메일 기억하기"
+}
