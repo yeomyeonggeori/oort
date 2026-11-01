@@ -159,7 +159,7 @@ function ExpressionUploadForm({ onDone }: { onDone: () => void }) {
     const metadata: ExpressionMetadata = { name, displayName, tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean), subjectMemberId: face === "self" ? store.memberId : null };
     if (face === "other") { setError("내 얼굴 한 명인 그림만 승인할 수 있어요. 다른 사람이나 여러 사람 얼굴은 올리지 말아 주세요."); return; }
     if (!matchesExpressionContract("Metadata", metadata)) { setError("이름은 영문 소문자·숫자·밑줄·하이픈 2~30자, 표시 이름은 40자, 태그는 8개 이하로 써 주세요."); return; }
-    if (!url && (!file || !validExpressionFile(file))) { setError("5 MiB 이하의 PNG, JPEG, WebP 또는 GIF를 골라 주세요."); return; }
+    if (!url && (!file || !validExpressionFile(file))) { setError("5MB 이하의 PNG, JPG, WebP 또는 GIF를 골라 주세요."); return; }
     if (url && !matchesExpressionContract("ImportRequest", { ...metadata, url })) { setError("공개 HTTPS 출처 링크를 넣어 주세요."); return; }
     lock.current = true; setBusy(true); setError(null);
     try {
