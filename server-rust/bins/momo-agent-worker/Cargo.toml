@@ -57,6 +57,17 @@ momo-t3 = { path = "../../crates/momo-t3" }
 # outbox → relay, like every other message.
 reqwest.workspace = true
 
+# #4970 (ADR-0201 증보 v3 B6-1, ADR-0151 증보 4): the helper reads an attachment. `lopdf` (MIT) pulls a
+# PDF's letters out — and is called **only** inside the supervised child process this binary re-executes
+# itself as (`attachment_text`), never in the worker's own address space. `image` (already in the
+# graph) re-encodes a picture before the model sees it, `base64` carries it on the wire, and
+# `encoding_rs` reads the Korean legacy encoding a text file may be in. No default features on lopdf:
+# no rayon, no date crates.
+lopdf = { version = "0.41", default-features = false }
+image.workspace = true
+base64.workspace = true
+encoding_rs = "0.8"
+
 async-trait.workspace = true
 chrono.workspace = true
 serde.workspace = true
@@ -69,9 +80,12 @@ uuid.workspace = true
 
 [dev-dependencies]
 # #4820 C2b 2부 (tests/hosted_door_pg.rs): the suite draws its own pictures and writes them the way
-# Hermes' API server does (`data:image/png;base64,…`). Both crates are already in the workspace graph.
-image = { workspace = true }
-base64.workspace = true
+# Hermes' API server does (`data:image/png;base64,…`). Both crates are normal dependencies now (#4970).
+#
+# #4970 (tests/team_ai_files_conformance_pg.rs): an in-memory archive for the worker's own read path
+# is a `DriveArchive` whose content is a one-chunk stream. Both crates are in the graph already.
+futures.workspace = true
+bytes.workspace = true
 
 # Conformance harness (tests/agent_worker_conformance_pg.rs, all #[ignore]): the
 # real migrations + bootstrap roles, with the deterministic in-process provider

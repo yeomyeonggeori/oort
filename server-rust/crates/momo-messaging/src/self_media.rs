@@ -50,7 +50,10 @@ use sha2::{Digest, Sha256};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-use crate::agent_avatar::{find_requester_attachment_in_tx, requester_of_run_in_tx};
+use crate::agent_avatar::{
+    find_requester_attachment_for_in_tx, find_requester_attachment_in_tx, requester_of_run_in_tx,
+    RequesterAttachmentUse,
+};
 use crate::identity::is_channel_member;
 
 /// The fixed path prefix of the address. The Hermes guard plugin pins the same literal.
@@ -64,6 +67,53 @@ pub const SELF_MEDIA_INTERNAL_TTL_SECS: i64 = 60;
 pub const SELF_MEDIA_MAX_BYTES: i64 = 5 * 1024 * 1024;
 /// 32 random bytes in unpadded URL-safe base64.
 pub const SELF_MEDIA_TOKEN_CHARS: usize = 43;
+
+/// The recorded media types of a picture the helper may look at (the avatar's three).
+pub const READ_IMAGE_MIMES: [&str; 3] = ["image/png", "image/jpeg", "image/webp"];
+/// The recorded media types of a text file the helper may read. A closed list: the stored value is
+/// what an uploader declared, and a type that is not here (`text/html`, `text/xml`, a word-processor
+/// file) is not read at all.
+pub const READ_TEXT_MIMES: [&str; 4] = [
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+];
+/// The one PDF media type.
+pub const READ_PDF_MIME: &str = "application/pdf";
+/// Everything [`RequesterAttachmentUse::Read`] accepts (ADR-0151 증보 4).
+pub const READ_MIMES: [&str; 8] = [
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "text/plain",
+    "text/markdown",
+    "text/csv",
+    "application/json",
+    "application/pdf",
+];
+
+/// What kind of thing a recorded media type is to the reader: a picture to look at, letters to read,
+/// or a PDF to pull letters out of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReadKind {
+    Image,
+    Text,
+    Pdf,
+}
+
+/// The [`ReadKind`] of a recorded media type, or `None` for one the helper does not read.
+pub fn read_kind(mime: &str) -> Option<ReadKind> {
+    if READ_IMAGE_MIMES.contains(&mime) {
+        Some(ReadKind::Image)
+    } else if READ_TEXT_MIMES.contains(&mime) {
+        Some(ReadKind::Text)
+    } else if mime == READ_PDF_MIME {
+        Some(ReadKind::Pdf)
+    } else {
+        None
+    }
+}
 /// Spent and expired rows stay a day (they are the record), then the next mint in that workspace drops them.
 const CLEANUP_AFTER_SECS: f64 = 86_400.0;
 
@@ -182,11 +232,18 @@ fn new_token() -> Option<String> {
 
 /// Does `bytes` start like the image its row says it is? The route serves what an uploader chose
 /// to store, from the api's own origin, so it refuses bytes that are not the declared picture.
+///
+/// ADR-0151 증보 4 widens this from the three pictures to what [`READ_MIMES`] names: a PDF starts with
+/// `%PDF-`, and a text file has no magic, so it is **not empty and holds no NUL byte** (a binary file
+/// that merely claims `text/plain` is refused). Whether the text is UTF-8 or a Korean legacy encoding
+/// is the reader's question, not the route's.
 pub fn bytes_match_mime(mime: &str, bytes: &[u8]) -> bool {
     match mime {
         "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
         "image/jpeg" => bytes.starts_with(&[0xFF, 0xD8, 0xFF]),
         "image/webp" => bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP",
+        READ_PDF_MIME => bytes.starts_with(b"%PDF-"),
+        text if READ_TEXT_MIMES.contains(&text) => !bytes.is_empty() && !bytes.contains(&0),
         _ => false,
     }
 }
@@ -371,18 +428,87 @@ pub async fn mint_for_attachment_with_ttl_in_tx(
     attachment_id: Uuid,
     ttl_secs: i64,
 ) -> Result<Option<SelfMediaGrant>, DbError> {
+    mint_for_use_with_ttl_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        attachment_id,
+        RequesterAttachmentUse::Avatar,
+        ttl_secs,
+    )
+    .await
+}
+
+/// The worker's own read address (#4970, ADR-0151 증보 4) for a **file the helper was asked to read**:
+/// the same single-use, 60-second, hash-only token as [`mint_for_attachment_in_tx`], judged by
+/// [`RequesterAttachmentUse::Read`] (the three pictures, text and PDF) instead of the avatar's three.
+/// `None` is every refusal alike — no live human requester, either of them gone from the conversation,
+/// or an attachment that is not the requester's complete, readable-type file on a live message in this
+/// conversation within [`SELF_MEDIA_MAX_BYTES`] — and writes nothing.
+pub async fn mint_for_read_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    attachment_id: Uuid,
+) -> Result<Option<SelfMediaGrant>, DbError> {
+    mint_for_read_with_ttl_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        attachment_id,
+        SELF_MEDIA_INTERNAL_TTL_SECS,
+    )
+    .await
+}
+
+/// [`mint_for_read_in_tx`] with an explicit TTL (seconds).
+pub async fn mint_for_read_with_ttl_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    attachment_id: Uuid,
+    ttl_secs: i64,
+) -> Result<Option<SelfMediaGrant>, DbError> {
+    mint_for_use_with_ttl_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        attachment_id,
+        RequesterAttachmentUse::Read,
+        ttl_secs,
+    )
+    .await
+}
+
+/// The one body of both worker mints: who asked, where, and — **before a row is written** — whether
+/// the id passes the requester-attachment rule for `usage`.
+async fn mint_for_use_with_ttl_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    attachment_id: Uuid,
+    usage: RequesterAttachmentUse,
+    ttl_secs: i64,
+) -> Result<Option<SelfMediaGrant>, DbError> {
     let Some((requester, channel_id)) =
         requester_in_conversation_in_tx(conn, workspace_id, run_id, agent_member_id).await?
     else {
         return Ok(None);
     };
-    if find_requester_attachment_in_tx(
+    if find_requester_attachment_for_in_tx(
         conn,
         workspace_id,
         requester,
         channel_id,
         attachment_id,
         SELF_MEDIA_MAX_BYTES,
+        usage,
     )
     .await?
     .is_none()
@@ -483,31 +609,26 @@ pub async fn redeem_in_tx(
     {
         return Ok(None);
     }
-    let Some(source) = find_requester_attachment_in_tx(
+    // ADR-0151 증보 4: judged as a **read** — the three pictures every token has always been for, and
+    // the text and PDF types only the helper's own mint (`mint_for_read_in_tx`) ever binds a token to.
+    // For a picture this is the question it has always been asked; no token's reach grows.
+    let Some(source) = find_requester_attachment_for_in_tx(
         conn,
         workspace_id,
         requester,
         channel_id,
         attachment_id,
         SELF_MEDIA_MAX_BYTES,
+        RequesterAttachmentUse::Read,
     )
     .await?
     else {
         return Ok(None);
     };
-    let mime: Option<String> =
-        sqlx::query_scalar("SELECT mime FROM attachment WHERE workspace_id = $1 AND id = $2")
-            .bind(workspace_id)
-            .bind(attachment_id)
-            .fetch_optional(&mut *conn)
-            .await?;
-    let Some(mime) = mime else {
-        return Ok(None);
-    };
     Ok(Some(SelfMediaSource {
         drive_file_id: source.drive_file_id,
         size_bytes: source.size_bytes,
-        mime,
+        mime: source.mime,
     }))
 }
 
@@ -736,5 +857,45 @@ mod tests {
         assert!(!bytes_match_mime("image/webp", b"RIFF\0\0\0\0WAVE"));
         assert!(!bytes_match_mime("image/gif", b"GIF89a"));
         assert!(!bytes_match_mime("text/html", b"<html>"));
+    }
+
+    /// ADR-0151 증보 4: a PDF starts with `%PDF-`; text has no magic, so it is non-empty and holds no
+    /// NUL; a type outside [`READ_MIMES`] is never served whatever its bytes look like.
+    #[test]
+    fn the_sniff_checks_pdf_and_text_too() {
+        assert!(bytes_match_mime("application/pdf", b"%PDF-1.7\n%\xe2\xe3"));
+        assert!(!bytes_match_mime("application/pdf", b"<html>%PDF-"));
+        assert!(!bytes_match_mime("application/pdf", b""));
+        for text in READ_TEXT_MIMES {
+            assert!(bytes_match_mime(text, "안녕 hello\n".as_bytes()), "{text}");
+            assert!(!bytes_match_mime(text, b""), "{text}");
+            assert!(!bytes_match_mime(text, b"binary\0inside"), "{text}");
+            assert!(!bytes_match_mime(text, b"\x89PNG\r\n\x1a\n\0"), "{text}");
+        }
+        for refused in [
+            "text/html",
+            "text/xml",
+            "application/zip",
+            "application/octet-stream",
+            "image/svg+xml",
+            "image/gif",
+            "",
+        ] {
+            assert!(!bytes_match_mime(refused, b"plain words"), "{refused}");
+        }
+        // every type the Read use accepts is one the sniff can judge, and is classified
+        for mime in READ_MIMES {
+            assert!(read_kind(mime).is_some(), "{mime}");
+        }
+        assert_eq!(read_kind("image/png"), Some(ReadKind::Image));
+        assert_eq!(read_kind("text/csv"), Some(ReadKind::Text));
+        assert_eq!(read_kind("application/pdf"), Some(ReadKind::Pdf));
+        assert_eq!(read_kind("image/gif"), None);
+        assert_eq!(
+            RequesterAttachmentUse::Read.mimes(),
+            &READ_MIMES,
+            "the use and the sniff name the same eight types"
+        );
+        assert_eq!(READ_MIMES.len(), 3 + READ_TEXT_MIMES.len() + 1);
     }
 }

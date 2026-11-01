@@ -41,8 +41,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{
-    bytes_match_mime, mint_for_attachment_in_tx, mint_for_run_in_tx, redact_self_media_urls,
-    self_media_url, SELF_MEDIA_TTL_SECS,
+    bytes_match_mime, mint_for_attachment_in_tx, mint_for_read_in_tx, mint_for_run_in_tx,
+    redact_self_media_urls, self_media_url, RequesterAttachmentUse, SELF_MEDIA_TTL_SECS,
 };
 use momo_workspace_actions::profile_avatar::{
     AttachmentBytes, DriveAttachmentBytes, RequesterAttachment,
@@ -192,9 +192,32 @@ fn transport(error: &reqwest::Error) -> Unread {
     Unread::Transport(redact_self_media_urls(&error.to_string()))
 }
 
-/// `GET url` and return **exactly** `declared` bytes of the declared image, or why not. `url` carries the
-/// token: it is never formatted here.
+/// `GET url` and return **exactly** `declared` bytes of the declared **picture**, or why not — the
+/// avatar flow's read (#4934): the answer's `Content-Type` must be one of the avatar's three picture types
+/// and the bytes must start like it. `url` carries the token: it is never formatted here.
+///
+/// Only the tests call this spelling now (the reader always passes its use's own types to [`fetch_as`]);
+/// it stays because the avatar's image-only rule is what the existing suite pins.
+#[cfg(test)]
 async fn fetch(client: &reqwest::Client, url: &str, declared: usize) -> Result<Vec<u8>, Unread> {
+    fetch_as(
+        client,
+        url,
+        declared,
+        RequesterAttachmentUse::Avatar.mimes(),
+    )
+    .await
+}
+
+/// [`fetch`] for any use: the answer's `Content-Type` must be one of `allowed` **and** the bytes must be
+/// what that type says ([`bytes_match_mime`]: a picture's magic, `%PDF-`, text without a NUL). The helper's
+/// `read_attachment` passes [`RequesterAttachmentUse::Read`]'s types (#4970, ADR-0151 증보 4).
+async fn fetch_as(
+    client: &reqwest::Client,
+    url: &str,
+    declared: usize,
+    allowed: &[&str],
+) -> Result<Vec<u8>, Unread> {
     let mut response = client.get(url).send().await.map_err(|e| transport(&e))?;
     let status = response.status();
     if status != reqwest::StatusCode::OK {
@@ -223,7 +246,7 @@ async fn fetch(client: &reqwest::Client, url: &str, declared: usize) -> Result<V
     }
     if !content_type
         .as_deref()
-        .is_some_and(|mime| bytes_match_mime(mime, &body))
+        .is_some_and(|mime| allowed.contains(&mime) && bytes_match_mime(mime, &body))
     {
         return Err(Unread::Shape("not_the_declared_image"));
     }
@@ -250,15 +273,34 @@ impl AttachmentBytes for ApiAttachmentBytes<'_> {
         else {
             return Err("attachment_not_available");
         };
-        let (workspace_id, run_id, agent_id, attachment_id) = (
+        let (workspace_id, run_id, agent_id, attachment_id, usage) = (
             attachment.workspace_id,
             attachment.run_id,
             attachment.agent_id,
             attachment.attachment_id,
+            attachment.usage,
         );
         let grant = with_tenant_tx(self.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                mint_for_attachment_in_tx(conn, workspace_id, run_id, agent_id, attachment_id).await
+                // The mint judges the id by the **use**: the avatar flow's three pictures, or the
+                // helper's `read_attachment` (also text and PDF). Both prove the requester's
+                // ownership before a row is written.
+                match usage {
+                    RequesterAttachmentUse::Read => {
+                        mint_for_read_in_tx(conn, workspace_id, run_id, agent_id, attachment_id)
+                            .await
+                    }
+                    _ => {
+                        mint_for_attachment_in_tx(
+                            conn,
+                            workspace_id,
+                            run_id,
+                            agent_id,
+                            attachment_id,
+                        )
+                        .await
+                    }
+                }
             })
         })
         .await
@@ -272,7 +314,7 @@ impl AttachmentBytes for ApiAttachmentBytes<'_> {
             return Err("attachment_not_available");
         };
         let url = self_media_url(self.origin, workspace_id, &grant.token);
-        match fetch(client, &url, declared).await {
+        match fetch_as(client, &url, declared, usage.mimes()).await {
             Ok(bytes) => Ok(bytes),
             Err(unread) => {
                 // The cause is the scrubbed text; the url and the token are not in scope of this line.
@@ -521,6 +563,66 @@ mod tests {
                 "{what}: {result:?}"
             );
         }
+    }
+
+    /// #4970: the same answer is a PDF for the helper's read and **not an answer at all** for the avatar's
+    /// — the type the worker accepts is the use's own, not whatever the route says.
+    #[tokio::test]
+    async fn the_avatar_read_takes_pictures_only_and_the_helpers_read_takes_its_own_types() {
+        let pdf = b"%PDF-1.7\n1 0 obj\n<<>>\nendobj\n".to_vec();
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/pdf\r\ncontent-length: {}\r\n\r\n",
+            pdf.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&pdf);
+        let (origin, _) = stub(response.clone()).await;
+        let unread = fetch(&client(), &url(&origin), pdf.len())
+            .await
+            .unwrap_err();
+        assert_eq!(unread.to_string(), "shape: not_the_declared_image");
+        let read = fetch_as(
+            &client(),
+            &url(&origin),
+            pdf.len(),
+            RequesterAttachmentUse::Read.mimes(),
+        )
+        .await;
+        assert_eq!(read.unwrap(), pdf);
+        // …and the read's types are still checked against the bytes: a `text/plain` answer that holds a NUL
+        let body = b"binary\0inside".to_vec();
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: {}\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&body);
+        let (origin, _) = stub(response).await;
+        assert!(fetch_as(
+            &client(),
+            &url(&origin),
+            body.len(),
+            RequesterAttachmentUse::Read.mimes()
+        )
+        .await
+        .is_err());
+        // a type outside the use's list is refused whatever the bytes say
+        let png_body = png(64);
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: image/gif\r\ncontent-length: {}\r\n\r\n",
+            png_body.len()
+        )
+        .into_bytes();
+        response.extend_from_slice(&png_body);
+        let (origin, _) = stub(response).await;
+        assert!(fetch_as(
+            &client(),
+            &url(&origin),
+            png_body.len(),
+            RequesterAttachmentUse::Read.mimes()
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]

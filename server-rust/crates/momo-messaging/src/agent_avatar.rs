@@ -712,6 +712,9 @@ pub struct AvatarAttachmentSource {
     pub channel_id: Uuid,
     pub drive_file_id: String,
     pub size_bytes: i64,
+    /// The recorded (lower-cased) media type — the first narrowing of what a caller does with the
+    /// bytes. Never the bytes' own say: those are sniffed again ([`crate::self_media::bytes_match_mime`]).
+    pub mime: String,
 }
 
 /// The attachment, **if and only if the proposing agent could read it**: it is
@@ -730,7 +733,7 @@ pub async fn find_visible_image_attachment_in_tx(
     max_bytes: i64,
 ) -> Result<Option<AvatarAttachmentSource>, DbError> {
     let row = sqlx::query(
-        "SELECT a.id, a.channel_id, a.drive_file_id, a.size_bytes \
+        "SELECT a.id, a.channel_id, a.drive_file_id, a.size_bytes, a.mime \
            FROM attachment a \
            JOIN channel c ON c.workspace_id = a.workspace_id AND c.id = a.channel_id \
            JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
@@ -758,6 +761,7 @@ pub async fn find_visible_image_attachment_in_tx(
         channel_id: row.try_get("channel_id")?,
         drive_file_id: row.try_get("drive_file_id")?,
         size_bytes: row.try_get("size_bytes")?,
+        mime: row.try_get("mime")?,
     }))
 }
 
@@ -803,12 +807,27 @@ pub enum RequesterAttachmentUse {
     /// which end as the `video_processing_unavailable` card (D4 is on hold). Nothing here
     /// widens what the decoder accepts: it decides on the bytes.
     ExpressionSource,
+    /// A person's own attachment **read for them** by the team's helper (ADR-0201 증보 v3 B6-1,
+    /// #4970; ADR-0151 증보 4): the avatar's three picture types plus the text and PDF types the
+    /// worker can pull letters out of ([`crate::self_media::READ_MIMES`]). The recorded type is
+    /// the first narrowing; the bytes are sniffed again at the route and in the worker, and the
+    /// extractor decides last.
+    Read,
+    /// The **lookup** half of [`Read`](Self::Read) (#4970): whose file is it, **whatever its type** — so a
+    /// person's own file of a type the helper does not read is told 「그 종류는 못 읽어요」 instead of
+    /// 「못 찾아요」 (it is their own file: nothing leaks), while somebody else's file of any type is `None`
+    /// as always. It is the only use with no type narrowing (an empty [`mimes`](Self::mimes) means "any"),
+    /// and it is **never** what a token is minted or redeemed under.
+    ReadAnyType,
 }
 
 impl RequesterAttachmentUse {
-    /// The recorded (lower-cased) media types this use accepts.
+    /// The recorded (lower-cased) media types this use accepts. **Empty means any type**, which only
+    /// [`ReadAnyType`](Self::ReadAnyType) says; a test pins that no other use is empty.
     pub const fn mimes(self) -> &'static [&'static str] {
         match self {
+            RequesterAttachmentUse::ReadAnyType => &[],
+            RequesterAttachmentUse::Read => &crate::self_media::READ_MIMES,
             RequesterAttachmentUse::Avatar => &["image/png", "image/jpeg", "image/webp"],
             RequesterAttachmentUse::ExpressionSource => &[
                 "image/png",
@@ -870,13 +889,13 @@ pub async fn find_requester_attachment_for_in_tx(
     usage: RequesterAttachmentUse,
 ) -> Result<Option<AvatarAttachmentSource>, DbError> {
     let row = sqlx::query(
-        "SELECT a.id, a.channel_id, a.drive_file_id, a.size_bytes \
+        "SELECT a.id, a.channel_id, a.drive_file_id, a.size_bytes, a.mime \
            FROM attachment a \
            JOIN channel c ON c.workspace_id = a.workspace_id AND c.id = a.channel_id \
            JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
           WHERE a.workspace_id = $1 AND a.id = $2 AND a.status = 'complete' \
             AND a.drive_file_id IS NOT NULL \
-            AND a.mime = ANY($6) \
+            AND (cardinality($6::text[]) = 0 OR a.mime = ANY($6)) \
             AND a.size_bytes BETWEEN 1 AND $5 \
             AND m.state <> 'deleted' AND m.deleted_at IS NULL \
             AND m.author_member_id = $4 \
@@ -896,6 +915,7 @@ pub async fn find_requester_attachment_for_in_tx(
         channel_id: row.try_get("channel_id")?,
         drive_file_id: row.try_get("drive_file_id")?,
         size_bytes: row.try_get("size_bytes")?,
+        mime: row.try_get("mime")?,
     }))
 }
 
@@ -1293,5 +1313,32 @@ mod tests {
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c == '_'));
         }
+    }
+}
+
+#[cfg(test)]
+mod read_use_tests {
+    use super::*;
+
+    /// "Any type" is spelled by an empty list, and only [`RequesterAttachmentUse::ReadAnyType`] is allowed
+    /// to say it: a use that became empty by accident would drop its type narrowing without a word.
+    #[test]
+    fn only_the_lookup_use_has_no_type_narrowing() {
+        for usage in [
+            RequesterAttachmentUse::Avatar,
+            RequesterAttachmentUse::ExpressionSource,
+            RequesterAttachmentUse::Read,
+        ] {
+            assert!(!usage.mimes().is_empty(), "{usage:?}");
+        }
+        assert!(RequesterAttachmentUse::ReadAnyType.mimes().is_empty());
+        // Read is exactly the three pictures plus the text and PDF types, nothing the avatar flow
+        // would be handed
+        for mime in RequesterAttachmentUse::Avatar.mimes() {
+            assert!(RequesterAttachmentUse::Read.mimes().contains(mime));
+        }
+        assert!(!RequesterAttachmentUse::Avatar
+            .mimes()
+            .contains(&"application/pdf"));
     }
 }

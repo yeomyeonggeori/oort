@@ -78,6 +78,8 @@
 
 pub mod a2a;
 pub mod anthropic;
+pub mod attachment_image;
+pub mod attachment_text;
 pub mod completion_report;
 pub mod config;
 pub mod consolidate;
@@ -101,6 +103,7 @@ pub mod sse;
 pub mod stream;
 pub mod summary;
 mod team_ai;
+mod team_ai_files;
 pub mod tool_exec;
 pub mod topics;
 

@@ -78,6 +78,14 @@ fn embed_check() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // #4970: the helper's PDF reader runs **this binary** as a supervised child with an empty
+    // environment. It must be the first thing `main` does — before logging, before any configuration
+    // is read — so the child never touches a secret it was not given.
+    if std::env::args().nth(1).as_deref() == Some(momo_agent_worker::attachment_text::CHILD_ARG) {
+        std::process::exit(momo_agent_worker::attachment_text::child_main(
+            momo_workspace_actions::team_ai_attachments::READ_MAX_BYTES as usize,
+        ));
+    }
     if std::env::args().any(|a| a == "--embed-check") {
         return embed_check();
     }
