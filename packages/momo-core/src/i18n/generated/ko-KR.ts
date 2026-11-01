@@ -152,6 +152,48 @@ export const catalog: MessageCatalog = {
       "value": "건"
     }
   ],
+  "expressions.kind.autoNote": [
+    {
+      "type": 0,
+      "value": "그림의 크기와 움직임에 맞춰 골라 뒀어요. 바꿀 수 있어요."
+    }
+  ],
+  "expressions.kind.emoji": [
+    {
+      "type": 0,
+      "value": "이모지"
+    }
+  ],
+  "expressions.kind.hintEmoji": [
+    {
+      "type": 0,
+      "value": "작은 그림이에요. 글 사이와 반응에 써요."
+    }
+  ],
+  "expressions.kind.hintSticker": [
+    {
+      "type": 0,
+      "value": "큰 그림이에요. 크게 보내고, 움직이면 팀 GIF에 보여요."
+    }
+  ],
+  "expressions.kind.legend": [
+    {
+      "type": 0,
+      "value": "종류"
+    }
+  ],
+  "expressions.kind.sticker": [
+    {
+      "type": 0,
+      "value": "스티커"
+    }
+  ],
+  "expressions.panel.viewEmpty": [
+    {
+      "type": 0,
+      "value": "이 보기에는 아직 그림이 없어요"
+    }
+  ],
   "expressions.photo.agentInstead": [
     {
       "type": 0,
@@ -1792,6 +1834,416 @@ export const catalog: MessageCatalog = {
       "value": "동영상"
     }
   ],
+  "timeline.workPlan.button": [
+    {
+      "type": 0,
+      "value": "계획 "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 중 "
+    },
+    {
+      "type": 2,
+      "value": "done",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 완료"
+    }
+  ],
+  "timeline.workPlan.buttonDone": [
+    {
+      "type": 0,
+      "value": "계획 "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 모두 완료"
+    }
+  ],
+  "timeline.workPlan.maybeStale": [
+    {
+      "type": 0,
+      "value": "기록이 길어서 마지막 계획이 아닐 수 있어요."
+    }
+  ],
+  "timeline.workPlan.notLive": [
+    {
+      "type": 0,
+      "value": "지금은 돌고 있지 않아요. 마지막으로 알린 계획이에요."
+    }
+  ],
+  "timeline.workPlan.openAll": [
+    {
+      "type": 0,
+      "value": "모두 보기"
+    }
+  ],
+  "timeline.workPlan.sessionLabel": [
+    {
+      "type": 0,
+      "value": "작업 세션"
+    }
+  ],
+  "timeline.workPlan.stepCurrent": [
+    {
+      "type": 0,
+      "value": "지금 단계"
+    }
+  ],
+  "timeline.workPlan.stepDone": [
+    {
+      "type": 0,
+      "value": "완료"
+    }
+  ],
+  "timeline.workPlan.stepPending": [
+    {
+      "type": 0,
+      "value": "대기"
+    }
+  ],
+  "timeline.workPlan.title": [
+    {
+      "type": 0,
+      "value": "계획 · "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계 중 "
+    },
+    {
+      "type": 2,
+      "value": "done",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "단계"
+    }
+  ],
+  "timeline.workPlan.titleDone": [
+    {
+      "type": 0,
+      "value": "계획 · 모두 마쳤어요"
+    }
+  ],
+  "timeline.workRecord.bundleRead": [
+    {
+      "type": 0,
+      "value": "읽기 "
+    },
+    {
+      "type": 2,
+      "value": "read",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.bundleReadSearch": [
+    {
+      "type": 0,
+      "value": "읽기 "
+    },
+    {
+      "type": 2,
+      "value": "read",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " · 검색 "
+    },
+    {
+      "type": 2,
+      "value": "search",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.bundleSearch": [
+    {
+      "type": 0,
+      "value": "검색 "
+    },
+    {
+      "type": 2,
+      "value": "search",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.capped": [
+    {
+      "type": 0,
+      "value": "처음 "
+    },
+    {
+      "type": 2,
+      "value": "shown",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번만 줄로 보여요. 위 합계는 모두 센 값이에요."
+    }
+  ],
+  "timeline.workRecord.durationMinutes": [
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분 "
+    },
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "초"
+    }
+  ],
+  "timeline.workRecord.durationMs": [
+    {
+      "type": 2,
+      "value": "ms",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "ms"
+    }
+  ],
+  "timeline.workRecord.durationSeconds": [
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "초"
+    }
+  ],
+  "timeline.workRecord.emptyEnded": [
+    {
+      "type": 0,
+      "value": "이 일에서 oort가 잰 도구 호출은 없었어요."
+    }
+  ],
+  "timeline.workRecord.emptyOpen": [
+    {
+      "type": 0,
+      "value": "아직 oort가 잰 도구 호출이 없어요."
+    }
+  ],
+  "timeline.workRecord.failureAlreadyClaimed": [
+    {
+      "type": 0,
+      "value": "이미 다른 곳에서 가져갔어요"
+    }
+  ],
+  "timeline.workRecord.failureClaimExpired": [
+    {
+      "type": 0,
+      "value": "맡은 시간이 지나 있었어요"
+    }
+  ],
+  "timeline.workRecord.failureConflict": [
+    {
+      "type": 0,
+      "value": "다른 변경과 겹쳤어요"
+    }
+  ],
+  "timeline.workRecord.failureInternal": [
+    {
+      "type": 0,
+      "value": "서버 안쪽 문제였어요"
+    }
+  ],
+  "timeline.workRecord.failureInvalidArguments": [
+    {
+      "type": 0,
+      "value": "요청 형식이 맞지 않았어요"
+    }
+  ],
+  "timeline.workRecord.failureNotAuthorized": [
+    {
+      "type": 0,
+      "value": "권한이 없었어요"
+    }
+  ],
+  "timeline.workRecord.failureUnavailable": [
+    {
+      "type": 0,
+      "value": "지금은 처리할 수 없었어요"
+    }
+  ],
+  "timeline.workRecord.kindDelegate": [
+    {
+      "type": 0,
+      "value": "다른 에이전트에게 맡기기"
+    }
+  ],
+  "timeline.workRecord.kindEdit": [
+    {
+      "type": 0,
+      "value": "편집"
+    }
+  ],
+  "timeline.workRecord.kindOther": [
+    {
+      "type": 0,
+      "value": "그 밖의 일"
+    }
+  ],
+  "timeline.workRecord.kindRead": [
+    {
+      "type": 0,
+      "value": "읽기"
+    }
+  ],
+  "timeline.workRecord.kindRun": [
+    {
+      "type": 0,
+      "value": "명령 실행"
+    }
+  ],
+  "timeline.workRecord.kindSearch": [
+    {
+      "type": 0,
+      "value": "검색"
+    }
+  ],
+  "timeline.workRecord.kindWeb": [
+    {
+      "type": 0,
+      "value": "웹 요청"
+    }
+  ],
+  "timeline.workRecord.noteAgent": [
+    {
+      "type": 0,
+      "value": "에이전트가 스스로 알린 내용이에요. oort가 확인한 것은 아니에요."
+    }
+  ],
+  "timeline.workRecord.noteComputer": [
+    {
+      "type": 0,
+      "value": "내 컴퓨터에서 도는 작업이 보낸 내용이에요."
+    }
+  ],
+  "timeline.workRecord.noteOort": [
+    {
+      "type": 0,
+      "value": "oort가 직접 잰 도구 호출이에요. 인자와 내용은 기록하지 않아요."
+    }
+  ],
+  "timeline.workRecord.repeat": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번"
+    }
+  ],
+  "timeline.workRecord.sourceAgent": [
+    {
+      "type": 0,
+      "value": "에이전트 보고"
+    }
+  ],
+  "timeline.workRecord.sourceComputer": [
+    {
+      "type": 0,
+      "value": "내 컴퓨터"
+    }
+  ],
+  "timeline.workRecord.sourceOort": [
+    {
+      "type": 0,
+      "value": "oort 기록"
+    }
+  ],
+  "timeline.workRecord.statusFailed": [
+    {
+      "type": 0,
+      "value": "실패"
+    }
+  ],
+  "timeline.workRecord.statusRunning": [
+    {
+      "type": 0,
+      "value": "진행 중"
+    }
+  ],
+  "timeline.workRecord.summary": [
+    {
+      "type": 0,
+      "value": "도구 호출 "
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번"
+    }
+  ],
+  "timeline.workRecord.summaryFailed": [
+    {
+      "type": 0,
+      "value": "도구 호출 "
+    },
+    {
+      "type": 2,
+      "value": "calls",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번 · 실패 "
+    },
+    {
+      "type": 2,
+      "value": "failed",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번"
+    }
+  ],
+  "timeline.workRecord.unsupported": [
+    {
+      "type": 0,
+      "value": "oort 호출 기록은 서버 업데이트 뒤에 보여요."
+    }
+  ],
   "timeline.workRequest.composerBusy": [
     {
       "type": 0,
@@ -1882,6 +2334,102 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "스레드를 열고 다시 눌러 주세요."
+    }
+  ],
+  "timeline.workTool.actionClaimSecret": [
+    {
+      "type": 0,
+      "value": "비밀 받아가기"
+    }
+  ],
+  "timeline.workTool.actionInitiate": [
+    {
+      "type": 0,
+      "value": "먼저 승인 요청 올리기"
+    }
+  ],
+  "timeline.workTool.actionPropose": [
+    {
+      "type": 0,
+      "value": "승인 요청하기"
+    }
+  ],
+  "timeline.workTool.cardSuggest": [
+    {
+      "type": 0,
+      "value": "카드 제안하기"
+    }
+  ],
+  "timeline.workTool.conversationRead": [
+    {
+      "type": 0,
+      "value": "대화 읽기"
+    }
+  ],
+  "timeline.workTool.expressionAssemble": [
+    {
+      "type": 0,
+      "value": "표현 만들기"
+    }
+  ],
+  "timeline.workTool.inboxRead": [
+    {
+      "type": 0,
+      "value": "받은 일 읽기"
+    }
+  ],
+  "timeline.workTool.jobRelease": [
+    {
+      "type": 0,
+      "value": "일 돌려놓기"
+    }
+  ],
+  "timeline.workTool.jobRenew": [
+    {
+      "type": 0,
+      "value": "맡은 시간 늘리기"
+    }
+  ],
+  "timeline.workTool.jobsClaim": [
+    {
+      "type": 0,
+      "value": "일 가져가기"
+    }
+  ],
+  "timeline.workTool.jobStart": [
+    {
+      "type": 0,
+      "value": "작업 시작 알리기"
+    }
+  ],
+  "timeline.workTool.messagePost": [
+    {
+      "type": 0,
+      "value": "메시지 보내기"
+    }
+  ],
+  "timeline.workTool.ping": [
+    {
+      "type": 0,
+      "value": "살아 있다고 알리기"
+    }
+  ],
+  "timeline.workTool.runComplete": [
+    {
+      "type": 0,
+      "value": "끝 알리기"
+    }
+  ],
+  "timeline.workTool.runEvent": [
+    {
+      "type": 0,
+      "value": "진행 알리기"
+    }
+  ],
+  "timeline.workTool.unknown": [
+    {
+      "type": 0,
+      "value": "oort 도구"
     }
   ]
 };

@@ -11,6 +11,11 @@
 //     `null`은 그 칸을 지운다(= 켬). 그래서 칸 하나만 보내도 다른 묶음이 움직이지 않는다.
 //     `chat_read`·모르는 묶음·불리언 아닌 값은 400, 팀 기억이 꺼져 있는데 기억을 켜면 409 `team_memory_off`.
 //   - 묶음이 꺼지면 서버가 그 묶음의 도구와 카드를 요청에 광고하지 않고 실행도 거절한다(구조).
+//   - 고지 기록(#5040): 파일·기억의 「공급자로 가는 내용」 줄을 보인 화면은 같은 설정 PATCH 본문에
+//     `team_ai_roles_notice {bundles, noticeVersion, via}`를 실어 그 사실을 남긴다. 설정이 아니라
+//     기록이라 가방에 저장되지도 응답에 실리지도 않는다. 없어도 아무것도 막지 않고(옛 클라이언트),
+//     서버가 모르는 판·묶음·via는 400이다. 판은 **화면이 말한다**: 이 모듈의 `TEAM_AI_NOTICE_VERSION`은
+//     사전(`teamAi.roles.*`)의 고지 문장이 가리키는 판이라 문장을 바꾸면 함께 올린다.
 //
 // 이 모듈에는 사용자 문구가 없다. 화면은 문구를 i18n 사전(`teamAi.roles.*`)으로 넣는다.
 // 읽기는 전부 총 함수다: 모양이 다르면 던지지 않고 서버와 같은 쪽으로 읽는다.
@@ -56,6 +61,84 @@ export type TeamAiRoles = Readonly<Record<TeamAiBundle, boolean>>;
 export const TEAM_AI_NOTICE_BUNDLES = ["files", "memory"] as const;
 
 export type TeamAiNoticeBundle = (typeof TEAM_AI_NOTICE_BUNDLES)[number];
+
+/** 고지 기록을 싣는 요청 본문의 키. 설정이 아니라 기록이라 가방에 저장되지 않는다(#5040). */
+export const TEAM_AI_ROLES_NOTICE_KEY = "team_ai_roles_notice";
+
+/**
+ * 사전의 고지 문장(`teamAi.roles.*`의 파일·기억 줄)이 가리키는 문구의 판. 서버 `NOTICE_VERSIONS`에
+ * 있어야 기록된다(모르는 판은 400). **사전의 고지 문장을 바꾸면 이 값을 올리고, 서버 목록에 판을
+ * 더한다**(옛 판은 지우지 않는다: 설치된 클라이언트가 아직 옛 문구를 보일 수 있다).
+ */
+export const TEAM_AI_NOTICE_VERSION = "2026-11-01.v1";
+
+/** 고지 줄을 보인 화면. 서버의 `ScreenNotice`와 같고, 카드는 승인 자신의 기록이라 여기 없다. */
+export type TeamAiNoticeVia = "onboarding" | "settings";
+
+/** 화면이 「이 고지 줄을 보였다」고 서버에 남기는 기록(`team_ai_roles_notice`의 값). */
+export interface TeamAiRolesNotice {
+  bundles: TeamAiNoticeBundle[];
+  noticeVersion: string;
+  via: TeamAiNoticeVia;
+}
+
+/**
+ * 고지 기록을 만든다. 고지가 있는 묶음(파일·기억)만 남기고 표 순서로 중복 없이 담는다. 남는 묶음이
+ * 없으면 null이다(보일 줄이 없었으니 남길 기록도 없다).
+ */
+export function teamAiRolesNotice(
+  via: TeamAiNoticeVia,
+  bundles: readonly string[]
+): TeamAiRolesNotice | null {
+  const shown = TEAM_AI_NOTICE_BUNDLES.filter((id) => bundles.includes(id));
+  return shown.length === 0
+    ? null
+    : { bundles: shown, noticeVersion: TEAM_AI_NOTICE_VERSION, via };
+}
+
+/**
+ * 고지 기록 필드를 모르는 **옛 서버**(#5040 전)의 거절인가. 그 서버는 모르는 설정 키를 400
+ * 「unknown settings key: team_ai_roles_notice」로 돌려준다(`momo-settings`의 `UnknownKey`). 이 거절만
+ * 필드 없이 한 번 더 보낼 이유다(#5109). 새 서버가 기록 자체를 거절한 400(모르는 판·묶음·화면)은
+ * 화면과 서버가 어긋났다는 신호라 그대로 오류다.
+ */
+export function isOldServerNoticeRefusal(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 400 &&
+    error.message.includes(`unknown settings key: ${TEAM_AI_ROLES_NOTICE_KEY}`)
+  );
+}
+
+/**
+ * 고지 기록을 실어 보내고, 옛 서버가 그 키를 몰라 거절하면 기록 없이 **한 번만** 다시 보낸다(#5109).
+ * 옛 서버는 키를 검사한 뒤 쓰기 전에 거절하므로 두 번째 요청이 같은 변경을 처음으로 쓴다. 기록은
+ * 남지 않지만 켜기는 된다 — 서버가 앱보다 늦게 올라가는 인스턴스에서도 파일·기억 켜기가 막히지 않는다
+ * (ADR-0201 증보 v3.2 한계 ②).
+ */
+export async function withNoticeFallback<T>(
+  notice: TeamAiRolesNotice | null | undefined,
+  send: (notice: TeamAiRolesNotice | null) => Promise<T>
+): Promise<T> {
+  if (!notice) return send(null);
+  try {
+    return await send(notice);
+  } catch (error) {
+    if (!isOldServerNoticeRefusal(error)) throw error;
+    return send(null);
+  }
+}
+
+/**
+ * 설정 화면의 스위치 하나가 싣는 고지 기록. **켤 때만**, 고지 줄이 있는 묶음일 때만이다: 끄는 것은
+ * 공급자로 가는 내용을 늘리지 않고, 다른 묶음은 보인 고지가 없다.
+ */
+export function teamAiSettingsToggleNotice(
+  bundle: TeamAiSwitchableBundle,
+  next: boolean
+): TeamAiRolesNotice | null {
+  return next ? teamAiRolesNotice("settings", [bundle]) : null;
+}
 
 /** 기본값: 일곱 묶음 모두 켬. 온보딩을 건너뛰었거나 설정이 없는 워크스페이스도 같다. */
 export function defaultTeamAiRoles(): TeamAiRoles {
@@ -113,18 +196,26 @@ export function isTeamAiRolesChangeEmpty(change: TeamAiRolesChange): boolean {
 /**
  * `PATCH …/settings {team_ai_roles: change}` — 한 단계 병합이라 댄 칸만 바뀐다. 응답은 병합된
  * 가방 전체다. 빈 변경은 부르지 않는 것이 호출자의 몫이다(보낼 것이 없다).
+ *
+ * `notice`가 있으면 같은 본문에 고지 기록(`team_ai_roles_notice`)이 함께 실려, 서버가 스위치와 같은
+ * 트랜잭션에서 기록을 남긴다(#5040). 없으면 본문은 예전과 똑같다.
  */
 export function patchTeamAiRoles(
   workspaceId: string,
-  change: TeamAiRolesChange
+  change: TeamAiRolesChange,
+  notice?: TeamAiRolesNotice | null
 ): Promise<unknown> {
-  return settingsRequest<unknown>(
-    `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({ [TEAM_AI_ROLES_KEY]: change }),
-    }
-  );
+  return withNoticeFallback(notice, (sent) => {
+    const body: Record<string, unknown> = { [TEAM_AI_ROLES_KEY]: change };
+    if (sent) body[TEAM_AI_ROLES_NOTICE_KEY] = sent;
+    return settingsRequest<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }
+    );
+  });
 }
 
 export type TeamAiNoticeKind = "files" | "memory" | "both";

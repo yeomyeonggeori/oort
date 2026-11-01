@@ -4,6 +4,7 @@ import { fetchRoster } from "@momo/core/lib/api";
 import { searchExpressions } from "@momo/core/features/expressions/search";
 import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
 import { expressionToken } from "@momo/core/features/expressions/message";
+import { expressionsForTab, firstFilledShelf, type ExpressionShelf } from "@momo/core/features/expressions/kind";
 import type { Expression, ExpressionDraft, ExpressionMetadata } from "@momo/core/features/expressions/types";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
@@ -12,6 +13,7 @@ import { SegmentedControl } from "@/design/ui/segmented-control";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/design/ui/dropdown-menu";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { loadCatalog } from "@/features/emoji/catalog";
 import { ExpressionDraftCard } from "./ExpressionDraftCard";
 import { ExpressionMakeEntry } from "./ExpressionMakeEntry";
@@ -24,8 +26,13 @@ type PanelMode = "list" | "import" | "make";
 
 export function TeamExpressionsPanel({ onPick, purpose, onClose }: { onPick: (token: string) => void; purpose: "reaction" | "insert"; /** 요청을 보낸 뒤 고르개를 닫는다. 없으면 열어 둔 채로 둔다. */ onClose?: () => void }) {
   const { store, cache, usage, status, offline } = useExpressions();
+  const formatMessage = useFormatMessage();
   const [query, setQuery] = useState("");
-  const [view, setView] = useState("emoji");
+  // ADR-0218 §10 J2: 세 보기가 보관함을 겹치지 않게 나눈다(코어 `expressionsForTab`). 이모지 = 작은 팀 이모지(움직여도),
+  // 스티커 = 움직이지 않는 큰 그림, 팀 GIF = 움직이는 큰 그림. 한 등록은 정확히 한 보기에 있다. 보기의 값이 곧 코어의 칸 이름이다.
+  // 사람이 고르기 전에는 등록이 있는 첫 칸을 연다: 옛 등록은 모두 스티커라 이모지 칸만 열면 있는 그림이 안 보인다(J5).
+  const [picked, setPicked] = useState<ExpressionShelf | null>(null);
+  const view = picked ?? firstFilledShelf(cache.items);
   const [mode, setMode] = useState<PanelMode>("list");
   const addTrigger = useRef<HTMLButtonElement>(null);
   const backButton = useRef<HTMLButtonElement>(null);
@@ -54,7 +61,7 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose }: { onPick: (to
   }, [mode]);
   if (!store) return null;
   function backToList() { focusTrigger.current = true; setMode("list"); }
-  const items = searchExpressions(cache.items, query.replace(/^:|:$/g, ""), usage).filter((item) => view !== "gif" || item.media?.large.mime === "image/gif");
+  const items = expressionsForTab(searchExpressions(cache.items, query.replace(/^:|:$/g, ""), usage), view);
   async function confirm() {
     if (!store || !target || lock.current || offline) return;
     lock.current = true; setBusy(true); setError(null);
@@ -74,15 +81,15 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose }: { onPick: (to
     {!canAdd && <p className="text-meta text-ink-muted">이 팀은 관리자만 새 그림을 올릴 수 있어요.</p>}
     {offline && <InlineBanner message="연결이 끊겼어요. 연결되면 그림을 다시 불러와요." separator={false} />}
     {mode === "import" ? <ExpressionUploadForm onDone={backToList} /> : mode === "make" ? <ExpressionMakeEntry onImport={() => setMode("import")} onDone={backToList} onClose={onClose} /> : <>
-      <SegmentedControl legend="팀 표현 보기" value={view} onValueChange={setView} options={[{ value: "emoji", label: "이모지" }, { value: "sticker", label: "스티커" }, { value: "gif", label: "팀 GIF" }]} />
+      <SegmentedControl legend="팀 표현 보기" value={view} onValueChange={setPicked} options={[{ value: "team", label: "이모지" }, { value: "emoticon", label: "스티커" }, { value: "gif", label: "팀 GIF" }]} />
       <Input type="search" aria-label="우리 팀 표현 검색" placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       <p className="text-meta text-ink-muted">한 보관함의 그림을 반응이나 메시지에 쓸 수 있어요.</p>
-      {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" ? <InlineBanner message="팀 그림을 불러오지 못했어요. 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => void store.refresh()} separator={false} /> : items.length === 0 ? <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} /> :
+      {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" ? <InlineBanner message="팀 그림을 불러오지 못했어요. 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => void store.refresh()} separator={false} /> : items.length === 0 ? <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : cache.items.length > 0 ? formatMessage("expressions.panel.viewEmpty") : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} /> :
         <ul className="min-h-0 max-h-pane overflow-y-auto" aria-label="팀 표현 목록">{items.map((item) => <li key={item.id} className="flex items-center gap-2 border-b border-line py-1">
           <button type="button" disabled={offline} className="tap-target flex min-w-0 flex-1 items-center gap-2 rounded-md p-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-50" aria-label={`${item.displayName} ${purpose === "reaction" ? "반응으로 고르기" : "메시지에 넣기"}`} onClick={() => {
             const active = store.getSnapshot().cache.items.find((entry) => entry.id === item.id && entry.name === item.name);
             if (active?.status === "active") onPick(expressionToken(active.name));
-          }}><ExpressionImage item={item} size={view === "sticker" ? "medium" : "reaction"} still /><span className="min-w-0 break-words text-body">{item.displayName}<span className="block break-all font-mono text-meta text-ink-muted">:{item.name}:</span></span></button>
+          }}><ExpressionImage item={item} size={view === "emoticon" ? "medium" : "reaction"} still /><span className="min-w-0 break-words text-body">{item.displayName}<span className="block break-all font-mono text-meta text-ink-muted">:{item.name}:</span></span></button>
           <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon" aria-label={`${item.displayName} 관리`} onFocus={(event) => { menuOpener.current = event.currentTarget; }} onPointerDown={(event) => { menuOpener.current = event.currentTarget; }}><MoreHorizontal aria-hidden="true" /></Button></DropdownMenuTrigger><DropdownMenuContent>
             <DropdownMenuItem onSelect={(event) => { setError(null); setTarget({ item, action: "report", opener: menuOpener.current ?? event.currentTarget as HTMLElement }); }}>신고하기</DropdownMenuItem>
             <DropdownMenuItem disabled={item.createdBy !== store.memberId && !admin} onSelect={(event) => { setError(null); setTarget({ item, action: "delete", opener: menuOpener.current ?? event.currentTarget as HTMLElement }); }}>삭제하기{item.createdBy !== store.memberId && !admin ? " (만든 사람·관리자만)" : ""}</DropdownMenuItem>

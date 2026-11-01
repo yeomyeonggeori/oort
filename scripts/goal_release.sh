@@ -64,6 +64,30 @@ pr_ref_from_url() {
   printf '%s' "$1" | sed -E 's#^https://github.com/[^/]+/[^/]+/pull/([0-9]+).*$#\1#'
 }
 
+# PR 본문에 요약 칸(`## 요약` 또는 `**요약**`)이 없거나 비어 있으면 경고만 한다(막지 않음, #5053).
+# 판정은 scripts/collect_changes.py 한 곳에만 둔다 — 승격 때 바뀐 점을 모으는 도구와 같은 규칙이다.
+warn_if_summary_missing() {
+  local pr_json="$1" pr_url="$2" checker body status=0
+  checker="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/collect_changes.py"
+  if ! command -v python3 >/dev/null 2>&1 || [ ! -f "$checker" ]; then
+    echo "warning: PR 요약 칸 검사를 건너뛰었어요(python3 또는 scripts/collect_changes.py 없음)." >&2
+    return 0
+  fi
+  body="$(printf '%s' "$pr_json" | jq -r '.body // ""')"
+  printf '%s' "$body" | python3 "$checker" --check-summary >/dev/null || status=$?
+  case "$status" in
+    0) ;;
+    3)
+      printf '%s\n' \
+        "warning: PR 본문에 요약 칸이 없거나 비어 있어요: $pr_url" \
+        "         「## 요약」 또는 「**요약**」 아래에 사용자·운영자가 알아야 할 변화를 1–3줄로 적어요(바뀐 것이 없으면 「N/A — 이유」)." \
+        "         승격 때 CHANGELOG와 업데이트 소식의 재료예요. 막지 않아요." >&2
+      ;;
+    *) echo "warning: PR 요약 칸 검사가 실패했어요(exit $status). 막지 않아요." >&2 ;;
+  esac
+  return 0
+}
+
 validate_review_pr() {
   local pr_ref pr_json pr_state pr_url pr_branch closes_issue branch_matches
 
@@ -73,7 +97,7 @@ validate_review_pr() {
   fi
 
   pr_ref="$(pr_ref_from_url "$PR_URL")"
-  pr_json="$(gh pr view "$pr_ref" --repo "$ORG_REPO" --json number,url,state,headRefName,closingIssuesReferences)"
+  pr_json="$(gh pr view "$pr_ref" --repo "$ORG_REPO" --json number,url,state,headRefName,closingIssuesReferences,body)"
   pr_state="$(printf '%s' "$pr_json" | jq -r '.state')"
   pr_url="$(printf '%s' "$pr_json" | jq -r '.url')"
   pr_branch="$(printf '%s' "$pr_json" | jq -r '.headRefName')"
@@ -100,6 +124,7 @@ validate_review_pr() {
   fi
 
   PR_URL="$pr_url"
+  warn_if_summary_missing "$pr_json" "$pr_url"
 }
 
 case "$MODE" in

@@ -770,13 +770,16 @@ mod tests {
     /// push's per-minute window and its last test, and the `push_dispatch_log (member_id,
     /// created_at DESC)` index the diagnostics read. No new table, so no new RLS policy or grant.
     ///
-    /// 171 is #4961's (reserved by the planner, lands in its own round). 172 is #4494's 「알림 설정
-    /// v2」 (ADR-0206 D5·D13, M-b2): six `notification_rule` columns (`kinds`, `presentation`,
-    /// `schedule`, `phone_delay_secs`, `keyword_overrides_mute`, `approval_time_sensitive`) and the
-    /// time-zone helper `notification_local_time` (a wrong zone name is NULL, not an error;
-    /// executable by `momo_app` only). No new table, so no new RLS policy; the helper's grant is
-    /// reasserted in both role bootstraps. **This test is red on a tree that has 170 and 172 but
-    /// not 171** — the planner closes the gap when 171 lands.
+    /// 171 is #4961's 「팀 표현의 종류 값」 (ADR-0218 증보 4 §10): `expression.kind` (`emoji` /
+    /// `sticker`), `NOT NULL DEFAULT 'sticker'` so every earlier row reads as a sticker, a closed
+    /// `CHECK`, and nothing else. No new table (so no new RLS policy), no new grant, and the identity
+    /// trigger of 158 keeps the new column immutable after INSERT without being touched.
+    ///
+    /// 172 is #4494's 「알림 설정 v2」 (ADR-0206 D5·D13, M-b2): six `notification_rule` columns
+    /// (`kinds`, `presentation`, `schedule`, `phone_delay_secs`, `keyword_overrides_mute`,
+    /// `approval_time_sensitive`) and the time-zone helper `notification_local_time` (a wrong zone
+    /// name is NULL, not an error; executable by `momo_app` only). No new table, so no new RLS
+    /// policy; the helper's grant is reasserted in both role bootstraps.
     #[test]
     fn discovers_contiguous_migrations_001_to_172() {
         let dir = default_migrations_dir();

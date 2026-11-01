@@ -79,3 +79,82 @@ describe("fetchAgentRunEvents ?include=doorbell", () => {
     expect(urls(fetchMock).at(-1)).toBe(`/v1/workspaces/${WS}/agent-runs/${RUN}/events?include=doorbell`);
   });
 });
+
+// =============================================================================
+// 원장 읽기의 `include=tools` (#4654, ADR-0200 증보 2026-10-15 T4). 물을 것을 한 칸씩 줄여 다시
+// 읽는다: `doorbell,tools` → `doorbell` → 쿼리 없음. 「doorbell은 알고 tools는 모르는」 서버가 핵심이다.
+// =============================================================================
+
+const rejectsTools = (input: RequestInfo | URL) => {
+  const url = String(input);
+  return url.includes("tools");
+};
+const rejectsAny = (input: RequestInfo | URL) => String(input).includes("include=");
+
+describe("fetchAgentRunEvents include=tools", () => {
+  it("깨움과 도구 호출을 한 번에 묻는다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ok());
+    vi.stubGlobal("fetch", fetchMock);
+    await fetchAgentRunEvents(WS, RUN, { includeDoorbell: true, includeTools: true });
+    expect(urls(fetchMock)).toEqual([
+      `/v1/workspaces/${WS}/agent-runs/${RUN}/events?include=doorbell,tools`,
+    ]);
+  });
+
+  it("tools만 모르는 서버: doorbell은 지키고 한 번만 물러서며, 다음부터는 곧장 doorbell만 묻는다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+      rejectsTools(input) ? bad() : ok()
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      fetchAgentRunEvents(WS, RUN, { includeDoorbell: true, includeTools: true })
+    ).resolves.toMatchObject({ runId: RUN });
+    await fetchAgentRunEvents(WS, RUN, { includeDoorbell: true, includeTools: true });
+    expect(urls(fetchMock)).toEqual([
+      `/v1/workspaces/${WS}/agent-runs/${RUN}/events?include=doorbell,tools`,
+      `/v1/workspaces/${WS}/agent-runs/${RUN}/events?include=doorbell`,
+      `/v1/workspaces/${WS}/agent-runs/${RUN}/events?include=doorbell`,
+    ]);
+  });
+
+  it("쿼리를 모두 거절하는 서버: 끝칸(쿼리 없음)까지 물러서고 둘 다 기억한다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+      rejectsAny(input) ? bad() : ok()
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await fetchAgentRunEvents(WS, RUN, { includeDoorbell: true, includeTools: true });
+    await fetchAgentRunEvents(WS, RUN, { includeDoorbell: true, includeTools: true });
+    expect(urls(fetchMock)).toEqual([
+      `/v1/workspaces/${WS}/agent-runs/${RUN}/events?include=doorbell,tools`,
+      `/v1/workspaces/${WS}/agent-runs/${RUN}/events?include=doorbell`,
+      `/v1/workspaces/${WS}/agent-runs/${RUN}/events`,
+      `/v1/workspaces/${WS}/agent-runs/${RUN}/events`,
+    ]);
+  });
+
+  it("쿼리 없이도 400이면(틀린 id) 거절을 기억하지 않는다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => bad());
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      fetchAgentRunEvents(WS, RUN, { includeDoorbell: true, includeTools: true })
+    ).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    fetchMock.mockImplementation(async () => ok());
+    await fetchAgentRunEvents(WS, RUN, { includeDoorbell: true, includeTools: true });
+    expect(urls(fetchMock).at(-1)).toBe(
+      `/v1/workspaces/${WS}/agent-runs/${RUN}/events?include=doorbell,tools`
+    );
+  });
+
+  it("폰의 호출(깨움만)은 그대로다: 쿼리 모양이 바뀌지 않는다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => ok());
+    vi.stubGlobal("fetch", fetchMock);
+    await fetchAgentRunEvents(WS, RUN, { includeDoorbell: true });
+    expect(urls(fetchMock)).toEqual([`/v1/workspaces/${WS}/agent-runs/${RUN}/events?include=doorbell`]);
+  });
+});

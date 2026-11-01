@@ -790,7 +790,7 @@ async function d1(browser, origin, scheme) {
   await page.screenshot({ path: shot("1-received") });
 
   // ② 깨우는 신호가 닿았다: 원장에 doorbell_rung 행, 프레임 하나. 화면은 조용하다(칩은 그대로 「받음」, 예외 줄 없음).
-  //    원장은 `?include=doorbell`로 읽는다.
+  //    원장은 `?include=doorbell,tools`로 읽는다(깨움 줄과 oort가 잰 도구 호출, #4654).
   scene.ledgers[RUN_A] = [
     { ordinal: 1, kind: "queued", createdAtMs: now - 3_000 },
     { ordinal: 2, kind: "doorbell_rung", code: "leading_ok", createdAtMs: now - 2_500 },
@@ -798,7 +798,7 @@ async function d1(browser, origin, scheme) {
   const ledgerBefore = scene.ledgerCalls;
   await serverMoves(page, scene, scene.runs, "doorbell_rung");
   await page.waitForTimeout(500);
-  check(`${tag} woken: 원장을 다시 읽었고 ?include=doorbell로 물었다`, scene.ledgerCalls > ledgerBefore && scene.ledgerIncludes.every((v) => v === "doorbell"), JSON.stringify(scene.ledgerIncludes));
+  check(`${tag} woken: 원장을 다시 읽었고 ?include=doorbell,tools로 물었다`, scene.ledgerCalls > ledgerBefore && scene.ledgerIncludes.every((v) => v === "doorbell,tools"), JSON.stringify(scene.ledgerIncludes));
   check(`${tag} woken: 신호가 닿았으면 줄이 서지 않는다(칩은 그대로)`, (await page.getByTestId("run-exception").count()) === 0 && (await chipWord()) === "받음");
   await page.screenshot({ path: shot("2-woken") });
 

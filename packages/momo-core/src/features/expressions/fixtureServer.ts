@@ -1,5 +1,6 @@
 import { matchesExpressionContract } from "./contracts";
 import { matchesExpressionChoice } from "./cards";
+import { recommendExpressionKind } from "./kind";
 import { FIXTURE_MEDIA } from "./fixtureMedia";
 import { PHOTO_BRANCHES, PHOTO_FAILURE_STATUS, PHOTO_PROVIDERS, type PhotoBranch, type PhotoFailureCode, type PhotoProvider } from "./photo";
 import { FIXTURE_LIST, FIXTURE_MEMBER_ID, FIXTURE_NOW_MS, FIXTURE_READY_DRAFT, FIXTURE_WORKSPACE_ID } from "./fixtures";
@@ -127,8 +128,11 @@ export function createExpressionFixtureServer(options: {
         if ([...catalogue.values()].some((item) => item.name === draft.name)) return error(409, "expression_name_reserved");
         if ([...catalogue.values()].filter((item) => item.status !== "deleted").length >= 1000) return error(409, "expression_quota");
         version += 1;
+        // ADR-0218 §10 J3, as the real server does it: the person's word, else the recommendation for the stored
+        // large picture (`draft.media` is non-null here: the state was checked above).
         const item: Expression = { id: draft.draftId, workspaceId: FIXTURE_WORKSPACE_ID,
           name: draft.name, displayName: draft.displayName, tags: draft.tags, subjectMemberId: draft.subjectMemberId,
+          kind: choice.kind ?? recommendExpressionKind(draft.media.large),
           version: String(version), status: "active", origin: draft.origin, media: draft.media,
           createdBy: FIXTURE_MEMBER_ID, createdAtMs: now };
         catalogue.set(item.id, clone(item)); drafts.delete(draft.draftId);

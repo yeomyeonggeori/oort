@@ -1,4 +1,5 @@
 import {ApiError, type RosterMember} from '@momo/core/lib/api';
+import {TEAM_AI_NOTICE_VERSION} from '@momo/core/features/settings/teamAiRoles';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -30,7 +31,7 @@ const HELPER = '33333333-3333-4333-8333-333333333333';
 
 const mockBag = jest.fn<Promise<unknown>, []>();
 const mockRename = jest.fn<Promise<unknown>, [string, string, string]>();
-const mockPatch = jest.fn<Promise<unknown>, [string, unknown]>();
+const mockPatch = jest.fn<Promise<unknown>, [string, unknown, unknown]>();
 
 jest.mock('@momo/core/features/settings/teamAiSwitch', () => {
   const actual = jest.requireActual('@momo/core/features/settings/teamAiSwitch');
@@ -40,7 +41,8 @@ jest.mock('@momo/core/features/settings/teamAiRoles', () => {
   const actual = jest.requireActual('@momo/core/features/settings/teamAiRoles');
   return {
     ...actual,
-    patchTeamAiRoles: (workspaceId: string, change: unknown) => mockPatch(workspaceId, change),
+    patchTeamAiRoles: (workspaceId: string, change: unknown, notice: unknown) =>
+      mockPatch(workspaceId, change, notice),
   };
 });
 jest.mock('@momo/core/lib/api', () => {
@@ -72,6 +74,13 @@ function bag(over: Record<string, unknown> = {}) {
     ...over,
   };
 }
+
+// 설정 화면이 파일·기억을 켤 때 같은 요청에 싣는 고지 기록(#5040).
+const settingsNotice = (bundle: string) => ({
+  bundles: [bundle],
+  noticeVersion: TEAM_AI_NOTICE_VERSION,
+  via: 'settings',
+});
 
 function withClient(node: React.ReactElement) {
   const client = new QueryClient({
@@ -183,7 +192,7 @@ describe('이름과 할 수 있는 일', () => {
       fireEvent.press(screen.getByTestId('team-ai-helper-role-files'));
     });
     expect(mockPatch).toHaveBeenCalledTimes(1);
-    expect(mockPatch.mock.calls[0]).toEqual([WS, {files: false}]);
+    expect(mockPatch.mock.calls[0]).toEqual([WS, {files: false}, null]);
     await waitFor(() =>
       expect(screen.getByTestId('team-ai-helper-role-files').props.accessibilityState.checked).toBe(
         false,
@@ -192,6 +201,41 @@ describe('이름과 할 수 있는 일', () => {
     expect(screen.getByTestId('team-ai-helper-role-memory').props.accessibilityState.checked).toBe(
       true,
     );
+  });
+
+  // #5040 (ADR-0201 증보 v3 B3): 켜는 순간이 동의다. 파일·기억을 켜면 같은 PATCH에 고지 기록이 실리고,
+  // 고지 줄이 없는 묶음을 켜거나 무엇이든 끌 때는 실리지 않는다.
+  it('파일·기억을 켤 때만 고지 기록을 같은 요청에 싣는다: 코드를 켜거나 기억을 끌 때는 싣지 않는다', async () => {
+    mockBag.mockResolvedValue(bag({team_ai_roles: {files: false, code: false}}));
+    mockPatch
+      .mockResolvedValueOnce(bag({team_ai_roles: {files: true, code: false}}))
+      .mockResolvedValueOnce(bag({team_ai_roles: {files: true, code: true}}))
+      .mockResolvedValueOnce(bag({team_ai_roles: {files: true, code: true, memory: false}}));
+    page();
+    await screen.findByTestId('team-ai-helper-name');
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('team-ai-helper-role-files'));
+    });
+    expect(mockPatch).toHaveBeenLastCalledWith(WS, {files: true}, settingsNotice('files'));
+    await waitFor(() =>
+      expect(screen.getByTestId('team-ai-helper-role-files').props.accessibilityState.checked).toBe(
+        true,
+      ),
+    );
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('team-ai-helper-role-code'));
+    });
+    expect(mockPatch).toHaveBeenLastCalledWith(WS, {code: true}, null);
+    await waitFor(() =>
+      expect(screen.getByTestId('team-ai-helper-role-code').props.accessibilityState.checked).toBe(
+        true,
+      ),
+    );
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('team-ai-helper-role-memory'));
+    });
+    expect(mockPatch).toHaveBeenLastCalledWith(WS, {memory: false}, null);
+    expect(mockPatch).toHaveBeenCalledTimes(3);
   });
 
   it('팀 기억이 꺼져 있어 기억을 못 켜면 이유를 말하고 스위치를 되돌린다', async () => {
@@ -205,7 +249,7 @@ describe('이름과 할 수 있는 일', () => {
     await act(async () => {
       fireEvent.press(screen.getByTestId('team-ai-helper-role-memory'));
     });
-    expect(mockPatch).toHaveBeenLastCalledWith(WS, {memory: true});
+    expect(mockPatch).toHaveBeenLastCalledWith(WS, {memory: true}, settingsNotice('memory'));
     expect((await screen.findByTestId('team-ai-helper-roles-error')).props.children).toBe(
       '팀 기억이 꺼져 있어요. 설정 › 기억에서 먼저 켜 주세요.',
     );

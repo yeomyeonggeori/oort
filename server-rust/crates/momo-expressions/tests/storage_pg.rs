@@ -118,6 +118,7 @@ fn choice(d: &Value) -> Choice {
         draft_id: Uuid::parse_str(d["draftId"].as_str().unwrap()).unwrap(),
         revision: d["revision"].as_str().unwrap().into(),
         sha256: d["media"]["large"]["sha256"].as_str().unwrap().into(),
+        kind: None,
     }
 }
 fn expression_id(v: &Value) -> Uuid {
@@ -853,4 +854,204 @@ async fn migration_167_blanks_the_words_of_drafts_that_expired_before_it() {
         assert_eq!(origin_of(&su, ws, id).await, expected);
         assert_eq!(state_of(&su, ws, id).await, "expired");
     }
+}
+
+// ---- ADR-0218 증보 4 §10 (#4961): the kind of a registration ----------------------------------
+
+fn still_of(width: u32, height: u32) -> e::media::Processed {
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::new_rgba8(width, height)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+    e::media::decode(
+        &png.into_inner(),
+        std::time::Instant::now() + std::time::Duration::from_secs(10),
+    )
+    .unwrap()
+}
+fn animated(frames: u8) -> e::media::Processed {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new_with_speed(&mut bytes, 30);
+        encoder
+            .set_repeat(image::codecs::gif::Repeat::Infinite)
+            .unwrap();
+        for n in 0..frames {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(8, 8, image::Rgba([20 + n * 40, 200, 50, 255])),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(80, 1),
+                ))
+                .unwrap();
+        }
+    }
+    let processed = e::media::decode(
+        &bytes,
+        std::time::Instant::now() + std::time::Duration::from_secs(10),
+    )
+    .unwrap();
+    assert!(
+        processed.large.info.frame_count > 1,
+        "control: the picture of this test moves"
+    );
+    processed
+}
+/// Make a draft of `media` and register it, saying `kind` or nothing (an older client). Returns the
+/// receipt.
+async fn register(
+    api: &PgPool,
+    who: Actor,
+    name: &str,
+    media: e::media::Processed,
+    kind: Option<e::Kind>,
+) -> Value {
+    let d = e::create_draft(api, who, meta(name), Origin::upload(), Some(media), None)
+        .await
+        .unwrap();
+    let mut picked = choice(&d);
+    picked.kind = kind;
+    e::activate(api, who, picked).await.unwrap()
+}
+fn kind_of(receipt: &Value) -> &str {
+    receipt["expression"]["kind"]
+        .as_str()
+        .expect("kind on the wire")
+}
+
+/// §10 J3: the person's word is what is stored, in both directions against the recommendation; with
+/// no word (an older client) the server applies J4 to the stored large picture at the edge of the
+/// rule; and the list says the same thing the receipt did.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_registration_records_the_chosen_kind_or_the_recommended_one() {
+    let (_su, api, owner, _member, foreign) = setup().await;
+    let cases: Vec<(&str, e::media::Processed, Option<e::Kind>, &str)> = vec![
+        // The person's word beats the recommendation, both ways.
+        (
+            "kind_word_sticker",
+            still_of(8, 4),
+            Some(e::Kind::Sticker),
+            "sticker",
+        ),
+        (
+            "kind_word_emoji",
+            animated(3),
+            Some(e::Kind::Emoji),
+            "emoji",
+        ),
+        // Nothing said: J4 on the large picture, on both sides of every flip.
+        ("kind_auto_small_still", still_of(8, 4), None, "emoji"),
+        ("kind_auto_edge_still", still_of(128, 128), None, "emoji"),
+        ("kind_auto_past_edge_w", still_of(129, 64), None, "sticker"),
+        ("kind_auto_past_edge_h", still_of(64, 129), None, "sticker"),
+        ("kind_auto_small_moving", animated(2), None, "sticker"),
+    ];
+    let mut expected = Vec::new();
+    for (name, media, said, want) in cases {
+        let receipt = register(&api, owner, name, media, said).await;
+        assert_eq!(kind_of(&receipt), want, "{name}");
+        expected.push((name, want));
+    }
+    let listed = e::list(&api, owner, None).await.unwrap();
+    let items = listed["items"].as_array().unwrap();
+    assert_eq!(items.len(), expected.len());
+    for (name, want) in &expected {
+        let item = items
+            .iter()
+            .find(|item| item["name"] == *name)
+            .unwrap_or_else(|| panic!("{name} is listed"));
+        assert_eq!(item["kind"], *want, "{name} in the list");
+    }
+    // The same retry of one Choice returns the first receipt, whatever kind it now says.
+    let d = e::create_draft(
+        &api,
+        owner,
+        meta("kind_retry"),
+        Origin::upload(),
+        Some(still_of(8, 4)),
+        None,
+    )
+    .await
+    .unwrap();
+    let mut first = choice(&d);
+    first.kind = Some(e::Kind::Emoji);
+    let receipt = e::activate(&api, owner, first.clone()).await.unwrap();
+    first.kind = Some(e::Kind::Sticker);
+    assert_eq!(e::activate(&api, owner, first).await.unwrap(), receipt);
+    assert_eq!(kind_of(&receipt), "emoji");
+    // Another tenant sees none of it.
+    let theirs = e::list(&api, foreign, None).await.unwrap();
+    assert!(theirs["items"].as_array().unwrap().is_empty());
+}
+
+/// §10 J5: the column has its own default (an INSERT that does not know the column — an older binary
+/// during a rolling deploy — reads as a sticker, not as the recommendation), a closed list the database
+/// enforces by itself, and no change after INSERT (the identity trigger of 158, untouched).
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn the_kind_column_defaults_to_sticker_is_closed_and_cannot_change_after_insert() {
+    let (su, api, owner, _member, _foreign) = setup().await;
+    // A small still registered as an emoji: the row an older binary would have written has no kind.
+    let receipt = register(&api, owner, "kind_source", pixels(), Some(e::Kind::Emoji)).await;
+    let source = expression_id(&receipt);
+    let legacy = Uuid::new_v4();
+    let ws = owner.workspace;
+    sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,version,origin_source_attachment_id) SELECT workspace_id,$3,'kind_legacy',display_name,tags,subject_member_id,origin,created_by,version+100,origin_source_attachment_id FROM expression WHERE workspace_id=$1 AND id=$2")
+        .bind(ws).bind(source).bind(legacy).execute(&su).await.unwrap();
+    sqlx::query("INSERT INTO expression_image(workspace_id,expression_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT workspace_id,$3,variant,mime,bytes,sha256,width,height,frame_count,duration_ms FROM expression_image WHERE workspace_id=$1 AND expression_id=$2")
+        .bind(ws).bind(source).bind(legacy).execute(&su).await.unwrap();
+    let stored: String = sqlx::query_scalar("SELECT kind FROM expression WHERE id=$1")
+        .bind(legacy)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(stored, "sticker", "the column default");
+    let listed = e::list(&api, owner, None).await.unwrap();
+    let kinds: Vec<(String, String)> = listed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| {
+            (
+                item["name"].as_str().unwrap().into(),
+                item["kind"].as_str().unwrap().into(),
+            )
+        })
+        .collect();
+    assert!(
+        kinds.contains(&("kind_legacy".into(), "sticker".into()))
+            && kinds.contains(&("kind_source".into(), "emoji".into())),
+        "an older row reads as a sticker although its picture is an emoji-sized still: {kinds:?}"
+    );
+    // The closed list is the database's own rule: not even a superuser writes another value.
+    let refused = sqlx::query("INSERT INTO expression(workspace_id,name,display_name,tags,origin,created_by,version,kind) VALUES($1,'kind_huge','x','[]','{}',$2,500,'huge')")
+        .bind(ws).bind(owner.member).execute(&su).await.unwrap_err();
+    let refused = refused.as_database_error().expect("a database refusal");
+    assert_eq!(refused.code().as_deref(), Some("23514"));
+    assert_eq!(refused.constraint(), Some("expression_kind_ck"));
+    // No change after INSERT, and the control: the columns that may change still can.
+    let edit = sqlx::query("UPDATE expression SET kind='emoji' WHERE workspace_id=$1 AND id=$2")
+        .bind(ws)
+        .bind(legacy)
+        .execute(&su)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        edit.as_database_error().unwrap().code().as_deref(),
+        Some("23514")
+    );
+    sqlx::query("UPDATE expression SET display_name='바뀐 이름' WHERE workspace_id=$1 AND id=$2")
+        .bind(ws)
+        .bind(legacy)
+        .execute(&su)
+        .await
+        .expect("control: a display name still changes");
+    let after: String = sqlx::query_scalar("SELECT kind FROM expression WHERE id=$1")
+        .bind(legacy)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(after, "sticker");
 }
