@@ -20,6 +20,13 @@ export interface ExpressionUploadFile {
 /** 코어 fixture 의 요청 모양에 그림 한 장을 더한 것. 그림이 있으면 multipart 이고, 본문은 `metadata` 부분이다. */
 export interface ExpressionRequest extends ExpressionFixtureRequest {
   file?: ExpressionUploadFile;
+  /**
+   * 이 요청이 기다릴 수 있는 시간. 없으면 올리기 기본(60초)이다. 사진을 이미지 모델에 보내는 요청만 더 길다
+   * (코어 `PHOTO_REQUEST_TIMEOUT_MS`: 서버가 모델에 최대 2분을 주므로 그보다 오래 기다린다). multipart 길에만 듣는다.
+   */
+  timeoutMs?: number;
+  /** 부르는 쪽이 기다리기를 그만둘 때(「취소」·화면 닫힘): 올리기를 멈추고 약속은 거절로 끝난다. multipart 길에만 듣는다. */
+  signal?: AbortSignal;
 }
 
 /** Both the core fixture and the live server enter through this port. */
@@ -55,7 +62,14 @@ async function uploadFile(
   }
   const method = request.method;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
+  const timer = setTimeout(
+    () => controller.abort(),
+    request.timeoutMs ?? UPLOAD_TIMEOUT_MS,
+  );
+  // 부르는 쪽의 신호를 이 요청의 컨트롤러에 잇는다 — 이미 멈춘 신호면 보내기 전에 멈춘다.
+  const giveUp = () => controller.abort();
+  if (request.signal?.aborted) giveUp();
+  else request.signal?.addEventListener('abort', giveUp);
   const send = async () => {
     const task = new File(picked.uri).createUploadTask(
       `${apiBase()}${request.path}`,
@@ -93,6 +107,7 @@ async function uploadFile(
     return {status: result.status, json: parsedJson(result.body)};
   } finally {
     clearTimeout(timer);
+    request.signal?.removeEventListener('abort', giveUp);
   }
 }
 

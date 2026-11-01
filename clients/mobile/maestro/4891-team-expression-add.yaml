@@ -13,8 +13,8 @@ name: 4891-team-expression-add
 #   · 키보드가 올라와도 입력 칸이 키보드 위에 서고 보내기 단추가 스크롤로 닿는가(SE 에서 확인)
 #   · 사진 앨범 시스템 창(PHPicker)이 권한 문구 없이 뜨는가 — 아래 `expression-import-photo`
 #
-# 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼): 「＋」 펼침 · 가져오기 장 · AI와 만들기 장(칩 다섯·미리보기
-# 재생·동작 줄이기 켬/끔). 캡처와 design-review 는 planner 몫이다.
+# 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼): 「＋」 펼침 · 가져오기 장 · AI와 만들기 장(사진 양식 또는 모델 없음
+# 안내, 에이전트 양식의 칩 다섯·미리보기 재생·동작 줄이기 켬/끔). 캡처와 design-review 는 planner 몫이다.
 #
 # 손으로 돌리는 법(레인 밖): 70-composer-newline.yaml 의 머리말과 같다 — 로그인할 수 있는 멤버가 든 격리 스택 + 이
 # 체크아웃의 Metro. 「AI와 만들기」 장의 에이전트 줄은 그 스택에 활성 에이전트가 있어야 서고, 없으면 「아직 에이전트가
@@ -62,19 +62,40 @@ name: 4891-team-expression-add
 - assertVisible:
     id: "expression-add-menu"
 
-# AI와 만들기 장: 열리고, 움직임 칩을 고르고, 「‹」로 돌아온다.
+# AI와 만들기 장(#4984): 사진 양식이 먼저 열린다. 이 레인의 서버에는 이미지 모델이 없어서(`provider_link` 없음) 확인이 끝나면
+# 「연결된 이미지 모델이 없어요」 안내가 서고, 모델이 연결된 서버에서는 양식(`expression-photo-form`)이 선다. 에이전트에게
+# 부탁하는 양식(움직임 칩)은 양식이나 확인 실패 쪽에서만 닿는다 — 그 단추가 보이는 서버에서만 그 길을 지난다.
+# 장면마다의 문장·요청·취소·실패는 폰 jest(`__tests__/expressionPhoto.test.tsx`)와 캡처 표면 `EXPRESSIONPHOTO-<장면>`이 맡는다.
 - tapOn:
     id: "expression-add-menu"
 - tapOn:
     id: "expression-add-make"
 - assertVisible:
-    id: "expression-make"
-- assertVisible:
-    id: "expression-make-chip-bounce"
-- tapOn:
-    id: "expression-make-chip-bounce"
-- assertVisible:
-    id: "expression-make-chip-still"
+    id: "expression-photo"
+- extendedWaitUntil:
+    notVisible:
+      id: "expression-photo-checking"
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: "expression-photo-agent"
+    commands:
+      - tapOn:
+          id: "expression-photo-agent"
+      - assertVisible:
+          id: "expression-make"
+      - assertVisible:
+          id: "expression-make-chip-bounce"
+      - tapOn:
+          id: "expression-make-chip-bounce"
+      - assertVisible:
+          id: "expression-make-chip-still"
+      # 에이전트 양식의 「‹」는 사진 양식으로 한 겹만 돌아온다.
+      - tapOn:
+          id: "expression-chapter-back"
+      - assertVisible:
+          id: "expression-photo"
 - tapOn:
     id: "expression-chapter-back"
 - assertVisible:

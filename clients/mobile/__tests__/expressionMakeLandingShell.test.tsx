@@ -255,6 +255,11 @@ describe('「AI와 만들기」 요청 뒤 (#4962)', () => {
     await screen.findByTestId('expression-add-menu');
     await press('expression-add-menu');
     await press('expression-add-make');
+    // 사진 양식이 먼저 열린다(#4984): 에이전트에게 부탁하는 길은 그 안의 단추 하나다.
+    await waitFor(() =>
+      expect(screen.getByTestId('expression-photo-agent')).toBeTruthy(),
+    );
+    await press('expression-photo-agent');
     await waitFor(() =>
       expect(screen.getByTestId(`expression-make-agent-${HELPER}`)).toBeTruthy(),
     );
