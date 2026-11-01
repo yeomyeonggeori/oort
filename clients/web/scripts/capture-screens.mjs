@@ -1733,14 +1733,20 @@ async function measureDeviceLinkQrPitch(page, label) {
   return measured;
 }
 
-async function installMocks(context) {
+/**
+ * @param {import("playwright").BrowserContext} context
+ * @param {{ resetHarness?: boolean }} [options] 장면 전용 컨텍스트(`newScenePage`)는 `false`: 장면이 컨텍스트를 열기 **전에**
+ *   정해 둔 모듈 수준 하네스 상태(`deviceLinkHarness.deepLink`·`getBody`·`issueStatus`, 연결된 기기 목록)를 새 컨텍스트가 지우면
+ *   안 된다 — 지우면 기기 연결 QR이 빈 링크의 같은 크기가 되고 확인 단계 흐름이 처음으로 돌아간다(#5048).
+ */
+async function installMocks(context, { resetHarness = true } = {}) {
   let declaredPresence = "auto";
   let customStatus = {
     statusEmoji: "📅",
     statusText: SELF_STATUS_TEXT,
     statusExpiresAtMs: undefined,
   };
-  resetDeviceLinkHarness();
+  if (resetHarness) resetDeviceLinkHarness();
   await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
   await context.route("**/v1/join", (route) =>
@@ -3641,7 +3647,7 @@ async function captureSidebarPrefsUnavailable(context, scheme, shots) {
   await isolated.grantPermissions(["clipboard-read", "clipboard-write"], {
     origin: ORIGIN,
   });
-  await installMocks(isolated);
+  await installMocks(isolated, { resetHarness: false });
   const page = await isolated.newPage();
   let puts = 0;
   await page.route("**/v1/workspaces/*/members/me/sidebar-prefs", (route) => {
@@ -7159,7 +7165,7 @@ async function captureScheme(browser, scheme) {
     await isolated.grantPermissions(["clipboard-read", "clipboard-write"], {
       origin: ORIGIN,
     });
-    await installMocks(isolated);
+    await installMocks(isolated, { resetHarness: false });
     sceneContexts.push(isolated);
     return isolated.newPage();
   };
@@ -8601,9 +8607,9 @@ async function captureScheme(browser, scheme) {
 
   // …and the probe table, which is the one surface carrying all four
   //     dispositions and therefore all four status tones in one frame.
-  // #2877: 확인은 팀 연결 줄의 곁판 안에 산다.
-  await sceneClick(aiLink, aiLink.getByTestId("ai-link-row-more"));
-  await sceneClick(aiLink, aiLink.getByRole("button", { name: "연결 확인" }));
+  // 허브 「팀 AI 키」의 키 줄은 곁판 없이 줄 안에 확인·바꾸기·해제가 선다(`ai-link-check`). 옛 설정 판의 「⋯ → 곁판 → 연결
+  // 확인」 두 걸음은 허브 이전(#4141)과 함께 사라졌다(#5048).
+  await sceneClick(aiLink, aiLink.getByTestId("ai-link-check"));
   await aiLink.getByTestId("chain-probe").waitFor({ state: "visible" });
   const aiProbeShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-probe-${scheme}.png`);
   await aiLink.screenshot({ path: aiProbeShot });
@@ -8916,12 +8922,8 @@ async function captureScheme(browser, scheme) {
   await sceneClick(devicesV7, devicesV7.getByTestId("device-link-create"));
   await devicesV7.getByTestId("device-link-qr").waitFor({ state: "visible" });
   const v7 = await measureDeviceLinkQrPitch(devicesV7, `v7 ${scheme}`);
-  // 이 두 장면이 지키는 것은 「QR의 모듈 피치가 정수 픽셀에 앉는다」이다. 정확한 모듈 수는 인코더의 오류 정정 수준과
-  // 딥링크 길이가 정하므로 옛 상수(53/57)는 인코더가 바뀌자 낡았다(지금은 둘 다 49) — 유효한 QR 크기(17 + 4·버전)인지만
-  // 단정한다(#5048).
-  const validQrSize = (modules) => modules >= 21 && (modules - 17) % 4 === 0;
-  if (!validQrSize(v7.modules)) {
-    throw new Error(`v7 QR modules ${v7.modules} is not a valid QR size (17 + 4·version)`);
+  if (v7.modules !== 53) {
+    throw new Error(`v7 QR expected 53 modules, got ${v7.modules}`);
   }
   await devicesV7.close();
 
@@ -8931,10 +8933,8 @@ async function captureScheme(browser, scheme) {
   await sceneClick(devicesV8, devicesV8.getByTestId("device-link-create"));
   await devicesV8.getByTestId("device-link-qr").waitFor({ state: "visible" });
   const v8 = await measureDeviceLinkQrPitch(devicesV8, `v8 ${scheme}`);
-  // 두 딥링크(Railway·셀프호스트 긴 주소)가 지금은 같은 크기(49)의 QR이 된다 — 인코딩이 주소 길이에 따라 버전이 갈리지
-  // 않는다. 「서로 다른 두 크기」 전제는 낡았으므로 둘 다 유효한 크기에서 피치가 정수에 앉는지만 잰다(#5048).
-  if (!validQrSize(v8.modules)) {
-    throw new Error(`v8 QR modules ${v8.modules} is not a valid QR size (17 + 4·version)`);
+  if (v8.modules !== 57) {
+    throw new Error(`v8 QR expected 57 modules, got ${v8.modules}`);
   }
   await devicesV8.close();
 
