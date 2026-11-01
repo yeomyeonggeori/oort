@@ -137,6 +137,21 @@ export const catalog: MessageCatalog = {
       "value": "윈도우"
     }
   ],
+  "desktop.notify.threadSummary": [
+    {
+      "type": 0,
+      "value": "스레드 답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,
@@ -341,6 +356,18 @@ export const catalog: MessageCatalog = {
       "value": "글을 위에, 큰 그림을 아래에 둬요. 제목과 설명은 두 줄까지 보여줘요. 큰 그림이 없는 링크는 작게와 같아요."
     }
   ],
+  "settings.notifications.threadReplyDescription": [
+    {
+      "type": 0,
+      "value": "따라가는 스레드에 남이 쓴 새 답글이에요."
+    }
+  ],
+  "settings.notifications.threadReplyName": [
+    {
+      "type": 0,
+      "value": "참여한 스레드의 새 답글"
+    }
+  ],
   "settings.profile.languageBeta": [
     {
       "type": 0,
@@ -391,6 +418,42 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "기기 언어 따르기"
+    }
+  ],
+  "timeline.thread.followDismiss": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "timeline.thread.followFailed": [
+    {
+      "type": 0,
+      "value": "따라가기를 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "timeline.thread.followOff": [
+    {
+      "type": 0,
+      "value": "이 스레드를 따라가지 않아요. 누르면 따라가요."
+    }
+  ],
+  "timeline.thread.followOn": [
+    {
+      "type": 0,
+      "value": "이 스레드를 따라가고 있어요. 누르면 그만 따라가요."
+    }
+  ],
+  "timeline.thread.followStart": [
+    {
+      "type": 0,
+      "value": "따라가기"
+    }
+  ],
+  "timeline.thread.followStop": [
+    {
+      "type": 0,
+      "value": "그만 따라가기"
     }
   ],
   "timeline.thread.open": [

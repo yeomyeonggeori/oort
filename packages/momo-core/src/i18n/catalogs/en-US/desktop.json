@@ -16,5 +16,6 @@
   "desktop.menu.fullscreen": "Enter full screen",
   "desktop.menu.hide": "Hide oort",
   "desktop.menu.hideOthers": "Hide others",
-  "desktop.menu.quit": "Quit oort"
+  "desktop.menu.quit": "Quit oort",
+  "desktop.notify.threadSummary": "{count, plural, one {# thread reply} other {# thread replies}}"
 }
