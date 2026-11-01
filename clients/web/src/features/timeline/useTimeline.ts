@@ -497,6 +497,10 @@ export function useTimeline(
             ...(row.attachments === undefined || row.attachments.length === 0
               ? {}
               : { attachmentIds: row.attachments.map((a) => a.id) }),
+            // #5005 — 입력칸 ✕로 끈 채 보낸 메시지의 재시도도 **같은 요청**이다. 서버는 이미 저장된
+            // 메시지의 재시도에서 이 필드를 다시 판단하지 않으므로, 첫 요청이 닿지 못했다면 여기서
+            // 떨군 순간 사람이 끈 카드가 되살아난다.
+            ...(row.suppressUnfurl === true ? { suppressUnfurl: true } : {}),
           }
         );
         const spec = callSpecsRef.current.get(row.clientMsgId);
@@ -557,6 +561,7 @@ export function useTimeline(
         ...(options?.replyToId === undefined
           ? {}
           : { replyToId: options.replyToId }),
+        ...(options?.suppressUnfurl === true ? { suppressUnfurl: true } : {}),
         // Local clock, used only for grouping and the time label on a row that
         // has not been ordered yet. Ordering still waits for seq.
         createdAtMs: Date.now(),
