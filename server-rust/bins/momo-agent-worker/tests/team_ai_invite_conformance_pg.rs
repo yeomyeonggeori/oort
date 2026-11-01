@@ -24,7 +24,7 @@
 //! | `v4_an_injected_invite_request_after_a_read_makes_no_card_for_either_id` | B4-3, B13-I4, B15-A3 | take the invite ids out of `SENSITIVE_ACTION_IDS`, or compute `tainted` as `false` |
 //! | `v5_a_later_read_shows_the_link_message_and_a_pasted_link_as_placeholders` | B13-I2 | drop `mask_links` from `data_text` |
 //! | `v6_the_team_memory_never_reads_the_link_message` | B13-I2 | drop the marker predicate from `memory::LIVE` |
-//! | `v7_an_admin_invite_is_refused_with_the_screen_sentence_and_a_default_one_is_a_card` | r1 Low-4, Low-7 | drop the role check from the proposal, or `team_ai_door_args` |
+//! | `v7_an_admin_invite_is_refused_with_the_screen_sentence_and_a_default_one_is_a_card` | r1 admin link, default numbers | drop the role check from the proposal, or `team_ai_door_args` |
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -1097,7 +1097,7 @@ async fn v6_the_team_memory_never_reads_the_link_message() {
     );
 }
 
-/// r1 Low-4 / Low-7 (planner defaults, the owner can flip them): the helper's door makes no admin
+/// r1 admin link and default numbers (planner defaults, the owner can flip them): the helper's door makes no admin
 /// invite link and writes one use for one day when no numbers are named. A model that proposes an
 /// admin link — for the admin who asked — gets no card; the helper says where a person makes one
 /// (the settings screen), and the audit row carries a reason code and no text. The model WAS told

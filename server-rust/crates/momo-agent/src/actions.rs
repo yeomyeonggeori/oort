@@ -462,7 +462,7 @@ pub fn team_ai_door_rows(action_id: &str, mut rows: Vec<Value>) -> Vec<Value> {
 /// 「구현 확정 (#4965)」): below admin. An admin link is the strongest thing an invite can carry (it
 /// makes an admin account), and a card the helper raises is one a model wrote after a chat, so an
 /// admin link is made by a person on the screen (설정 › 멤버와 초대). A planner default (the r1
-/// security review's Low-3/Low-4, 2026-11-01) that the owner can flip.
+/// security review's admin-link finding, 2026-11-01) that the owner can flip.
 ///
 /// This is the helper's *policy*. What a proposal can name at all is the shared schema's
 /// ([`INVITE_PROPOSABLE_ROLES`]: `member` and `admin` today), so together they leave `member` — the
@@ -478,7 +478,7 @@ pub fn team_ai_may_invite_as(role: &str) -> bool {
 
 /// The expiry the helper's door writes on an `invite.create` card when its proposal names none:
 /// **one day** (24 hours; the schema's own minimum). A planner default (owner 2026-10-31 「기본값을
-/// 짧게」, the r1 review's Low-7) the owner can flip. A person's link and the Agent Port's keep
+/// 짧게」, the r1 review's default-numbers finding) the owner can flip. A person's link and the Agent Port's keep
 /// [`DEFAULT_INVITE_EXPIRES_IN_DAYS`]; the single use is already everybody's default
 /// (`momo_settings::validated_max_uses`).
 pub const TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS: i64 = 1;
@@ -4518,7 +4518,7 @@ mod tests {
         assert_eq!(lost[1]["label"], "링크 받는 곳");
     }
 
-    /// B4-4 구현 확정 (#4965, r1 Low-4): the helper's door never raises an admin link, and the
+    /// B4-4 구현 확정 (#4965, r1 review: admin link): the helper's door never raises an admin link, and the
     /// Agent Port's schema did not move for it. Each role is named literally — a loop over
     /// [`INVITE_PROPOSABLE_ROLES`] would pass if a role left the policy.
     #[test]
@@ -4537,7 +4537,7 @@ mod tests {
         );
     }
 
-    /// B4-4 구현 확정 (#4965, r1 Low-7): the helper's door writes one day when no expiry is named
+    /// B4-4 구현 확정 (#4965, r1 review: default numbers): the helper's door writes one day when no expiry is named
     /// — and only then, and only for `invite.create`. The control cases are the ones the default
     /// must not touch: an explicit number, another action, and arguments that are not an object.
     #[test]

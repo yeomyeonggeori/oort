@@ -31,8 +31,8 @@
 //! | `i11_the_link_message_never_reaches_a_later_model_context` | B13-I2 | drop the marker arm of `context_message_body` |
 //! | `i12_the_link_message_in_a_dm_wakes_nobody_while_an_ordinary_line_wakes_the_admin` | r1 Medium-1 | drop `announce: true` from `invite_link::props()` |
 //! | `i13_a_members_forged_link_marker_is_stripped_by_the_route` | r1 Low-1 | drop `is_server_owned_props_entry` from `props_value` |
-//! | `i14_the_helper_raises_no_admin_link_and_a_card_that_says_admin_is_refused_at_the_decision` | r1 Low-4 | drop the role check from the proposal, or from `team_ai_card_gate_in_tx` |
-//! | `i15_a_link_the_helper_makes_without_numbers_is_one_use_for_one_day` | r1 Low-7 | drop `team_ai_door_args` from the proposal |
+//! | `i14_the_helper_raises_no_admin_link_and_a_card_that_says_admin_is_refused_at_the_decision` | r1 admin link | drop the role check from the proposal, or from `team_ai_card_gate_in_tx` |
+//! | `i15_a_link_the_helper_makes_without_numbers_is_one_use_for_one_day` | r1 default numbers | drop `team_ai_door_args` from the proposal |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -1693,7 +1693,7 @@ async fn i13_a_members_forged_link_marker_is_stripped_by_the_route() {
     );
 }
 
-/// r1 Low-4 (planner default, the owner can flip it): the helper's door raises no **admin** invite
+/// r1 admin link (planner default, the owner can flip it): the helper's door raises no **admin** invite
 /// link — an admin link is made by a person on the screen. Both fences: the proposal says no (no
 /// card, no pending approval), and a card that came in sideways with the role already `admin` is
 /// refused at the decision (409 `action_args_invalid`, an `action.refused` row naming the reason,
@@ -1785,7 +1785,7 @@ async fn i14_the_helper_raises_no_admin_link_and_a_card_that_says_admin_is_refus
     assert_eq!(roles, vec!["member".to_string()]);
 }
 
-/// r1 Low-7 (planner default; owner 「기본값을 짧게」, the owner can flip it): a link the helper
+/// r1 default numbers (planner default; owner 「기본값을 짧게」, the owner can flip it): a link the helper
 /// makes without numbers is **1 use for 1 day**. The default is written into the card — the rows the
 /// approver reads, the stored arguments and the invite row all say the same numbers — and a number
 /// the model did name is never changed (the controls: 5 uses and 7 days stay 5 and 7).
