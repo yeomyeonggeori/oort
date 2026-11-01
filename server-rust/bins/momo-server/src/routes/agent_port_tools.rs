@@ -2709,6 +2709,20 @@ async fn action_propose(
                     }
                 }
             }
+            // #5084 — the rail is told the run now waits on a person. Last, in the park's own
+            // transaction: the park above is guarded (a refusal returned before it), every `?`
+            // after it rolls the whole proposal back, and the frame queues behind the card.
+            crate::routes::shared::emit_awaiting_approval_agent_status(
+                conn,
+                momo_agent::AgentRunAddress {
+                    workspace_id: caller.workspace_id,
+                    channel_id: run.channel_id,
+                    agent_member_id: caller.agent_member_id,
+                    run_id: handle.run_id,
+                },
+                approval_id,
+            )
+            .await?;
             Ok(Ok(json!({
                 "approvalId": approval_id,
                 "status": "pending",

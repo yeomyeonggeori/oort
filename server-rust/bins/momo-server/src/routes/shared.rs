@@ -561,6 +561,27 @@ pub(crate) async fn emit_terminal_agent_status(
     emit_rail_frame(conn, workspace_id, channel_id, &frame).await
 }
 
+/// Publish the `(thinking, awaiting_approval)` rail frame for a run the caller's transaction just
+/// parked on a person (#5084) — the server-side twin of `momo-agent-worker`'s
+/// `emit_awaiting_approval_agent_status`, the same few lines around the same builder
+/// ([`momo_agent::awaiting_approval_agent_status_payload`]).
+///
+/// Called on the **park's own connection**, after the approval and its card, and only on the arm where
+/// the guarded park returned `true`: the frame then commits with the run's new status, or not at all.
+/// Like every rail frame it is partitioned on the channel, so it queues behind the card it points at.
+pub(crate) async fn emit_awaiting_approval_agent_status(
+    conn: &mut PgConnection,
+    address: momo_agent::AgentRunAddress,
+    approval_id: Uuid,
+) -> Result<(), DbError> {
+    let frame = momo_agent::awaiting_approval_agent_status_payload(
+        address,
+        epoch_ms(chrono::Utc::now()),
+        approval_id,
+    );
+    emit_rail_frame(conn, address.workspace_id, address.channel_id, &frame).await
+}
+
 /// Put one already-shaped progress-rail frame on the outbox (goal SRV-B3d).
 ///
 /// The partition key is the **channel**, the same one `send_message_in_tx` uses,

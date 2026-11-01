@@ -57,6 +57,10 @@
 //! goal, and one that must not be inferred from this one: a `queued` frame with
 //! no matching terminal frame is exactly the stranded badge the clients' 90s TTL
 //! exists to paper over.
+//!
+//! *(Since then the opening, progress and partial producers have landed — goals
+//! SRV-B3d/B3e — and #5084 added the one frame that is neither working nor over:
+//! [`awaiting_approval_agent_status_payload`], for a run parked on a person.)*
 
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -245,6 +249,40 @@ pub fn progress_agent_status_payload(
     key: &str,
 ) -> Value {
     agent_status_payload(address, phase, "running", hlc_ts, key)
+}
+
+/// A run stopped on a person — `(thinking, awaiting_approval)` (#5084, a follow-up of #5066).
+///
+/// The run row says `awaiting_approval` the moment [`crate::park_run_for_approval_in_tx`] commits, and
+/// so does the progress read; before this frame the **rail** did not. Its last word for a parked run
+/// was the `thinking` that opened the turn, so a surface that reads frames only (a run the server does
+/// not know, a progress read that is a moment late, a viewer who cannot read the approval ledger) said
+/// 「일하는 중」 until its own 90s cutoff. The clients already read this exact shape as 승인 대기
+/// (`agentRail.ts` `turnStateOf`: the decision is `run_status`, `phase` stays the strict-enum member
+/// `thinking`); nothing in them changes.
+///
+/// **It is not an ending.** Both axes stay open — `isRunOver` reads neither `thinking` nor
+/// `awaiting_approval` as over — and it is not an opening either, so it can neither clear a badge nor
+/// start a clock. What brings the rail back is the frame a resumed turn already publishes when the
+/// worker picks the run up again (`thinking`, `running`); what ends it is the ordinary terminal frame
+/// of whichever way the hold ends (rejected, expired, stopped, or the action executed). The terminal
+/// rule is untouched: [`terminal_phase`] still answers `None` for a parked run.
+///
+/// The key carries the **approval**: a run can be parked more than once (a tool, an approval, a
+/// resume, a second tool), and under a key of the run alone Centrifugo's 5-minute cache would swallow
+/// the second hold's frame. It also cannot collide with `queued`, `thinking`, `streaming` or `terminal`.
+pub fn awaiting_approval_agent_status_payload(
+    address: AgentRunAddress,
+    hlc_ts: i64,
+    approval_id: Uuid,
+) -> Value {
+    agent_status_payload(
+        address,
+        AgentPhase::Thinking,
+        RunStatus::AwaitingApproval.as_db_label(),
+        hlc_ts,
+        &format!("awaiting_approval:{approval_id}"),
+    )
 }
 
 /// One `agent.partial` — a slice of the answer as it is produced.
@@ -609,6 +647,122 @@ mod tests {
         // …and the opening frame cannot collide with a progress frame either.
         let opening = opening_agent_status_payload(address(), 6);
         assert_ne!(opening["idempotency_key"], a["idempotency_key"]);
+    }
+
+    /// A parked run's frame is the shape the clients already read as 승인 대기
+    /// (`agentRail.ts` `turnStateOf`: `run_status` decides, `phase` stays the
+    /// strict-enum `thinking`) — and it is neither an ending nor an opening, so
+    /// it can clear no badge and start no clock (#5084).
+    #[test]
+    fn a_parked_frame_is_thinking_and_awaiting_approval_and_neither_over_nor_opening() {
+        let approval = Uuid::from_u128(9);
+        let frame = awaiting_approval_agent_status_payload(address(), 1_784_983_000_000, approval);
+        let data = &frame["data"];
+        assert_eq!(data["type"], json!("agent.status"));
+        assert_eq!(data["v"], json!(1));
+        assert_eq!(data["ts"], json!(1_784_983_000_000i64));
+        let body = &data["payload"];
+        // The wire shape momowebqa measured for a stopped turn and `turnStateOf` decides on.
+        assert_eq!(body["phase"], json!("thinking"));
+        assert_eq!(body["run_status"], json!("awaiting_approval"));
+        // macOS decodes every id as a required UUID: a frame without one is dropped whole.
+        for key in [
+            "run_id",
+            "agent_member_id",
+            "channel_id",
+            "phase",
+            "run_status",
+        ] {
+            assert!(
+                body.get(key).is_some_and(|value| !value.is_null()),
+                "{key} is required by MomoCore's RealtimeEvent decoder: {frame}"
+            );
+        }
+        // `isRunOver` (agentRail.ts:164-171) reads either axis; neither says over.
+        assert!(
+            body["phase"] != json!("done") && body["phase"] != json!("error"),
+            "{frame}"
+        );
+        assert!(
+            !["succeeded", "failed", "cancelled", "timed_out"]
+                .contains(&body["run_status"].as_str().expect("label")),
+            "{frame}"
+        );
+        // `isRunOpening` (agentRail.ts:238-240) reads either axis; neither says queued.
+        assert!(
+            body["phase"] != json!("queued") && body["run_status"] != json!("queued"),
+            "{frame}"
+        );
+        // The hold is still not a terminal state: the builder of the ending refuses it.
+        assert_eq!(terminal_phase(RunStatus::AwaitingApproval), None);
+        // No place in the channel's sequence, like every other rail frame.
+        assert!(frame.get("version").is_none(), "{frame}");
+        // Addressed to this run on this rail.
+        assert_eq!(body["run_id"], json!(upper(Uuid::from_u128(4))));
+        assert_eq!(
+            frame["channel"],
+            json!(agent_status_channel(
+                Uuid::from_u128(1),
+                Uuid::from_u128(2),
+                Uuid::from_u128(3)
+            ))
+        );
+    }
+
+    /// Two holds of one run are two frames, and neither shares a key with any
+    /// other frame of the run — Centrifugo's 5-minute cache swallows the second
+    /// publish under a key it has already seen (#5084).
+    #[test]
+    fn a_parked_frame_shares_its_key_with_no_other_frame_of_the_run_and_none_with_another_hold() {
+        let first = Uuid::from_u128(9);
+        let second = Uuid::from_u128(10);
+        let key = |approval: Uuid, ts: i64| {
+            awaiting_approval_agent_status_payload(address(), ts, approval)["idempotency_key"]
+                .as_str()
+                .expect("key")
+                .to_string()
+        };
+        // The same hold, delivered twice, is one frame.
+        assert_eq!(key(first, 1), key(first, 2));
+        // A second hold of the same run is a second frame.
+        assert_ne!(key(first, 1), key(second, 1));
+        assert!(
+            key(first, 1).contains("awaiting_approval"),
+            "{}",
+            key(first, 1)
+        );
+        assert!(
+            key(first, 1).contains(&first.to_string()),
+            "the approval is part of the key: {}",
+            key(first, 1)
+        );
+        // …and none of the run's other frames can be mistaken for it.
+        let others = [
+            opening_agent_status_payload(address(), 1)["idempotency_key"].clone(),
+            progress_agent_status_payload(address(), AgentPhase::Thinking, 1, "thinking")
+                ["idempotency_key"]
+                .clone(),
+            progress_agent_status_payload(address(), AgentPhase::Streaming, 1, "streaming")
+                ["idempotency_key"]
+                .clone(),
+            terminal_agent_status_payload(
+                Uuid::from_u128(1),
+                Uuid::from_u128(2),
+                Uuid::from_u128(3),
+                Uuid::from_u128(4),
+                RunStatus::Cancelled,
+                1,
+            )
+            .expect("terminal")["idempotency_key"]
+                .clone(),
+        ];
+        for other in others {
+            assert_ne!(
+                json!(key(first, 1)),
+                other,
+                "a parked frame must not share a key with another frame of its run"
+            );
+        }
     }
 
     /// The partial carries the slice and NOT a cumulative `text` field: this
