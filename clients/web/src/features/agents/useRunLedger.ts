@@ -7,6 +7,10 @@ import {
   ledgerRows,
   type RunLedgerRow,
 } from "@momo/core/features/agents/runLedger";
+import {
+  workToolRecord,
+  type WorkToolRecord,
+} from "@momo/core/features/agents/workTimeline";
 import type { ServerRunFacts } from "@momo/core/features/agents/workingSignal";
 import {
   doorbellFactOf,
@@ -32,6 +36,11 @@ export interface RunLedgerView {
   counts?: { tools?: number; approvals: number };
   /** 원장의 깨우는 신호(행이 없거나 아직 못 읽었으면 null). */
   doorbell: DoorbellFact | null;
+  /**
+   * 「oort 기록」 칸의 재료(oort가 직접 잰 도구 호출, #4654). 아직 읽은 원장이 없으면 null.
+   * `supported`가 false면 이 서버는 `include=tools`를 모른다: 호출이 없다는 뜻이 아니다.
+   */
+  tools: WorkToolRecord | null;
   isLoading: boolean;
   /** 읽지 못했다(네트워크·5xx). 직전에 읽은 줄이 있으면 그대로 남는다. */
   isError: boolean;
@@ -54,14 +63,18 @@ function fingerprintOf(facts: ServerRunFacts | null): string {
  * 원장 읽기의 키와 함수. 작업 패널과 메시지 아래 상태 줄이 **같은 캐시**를 쓴다: 한 run의
  * 원장을 두 표면이 따로 읽으면 같은 순간에 서로 다른 단계를 말할 수 있다.
  *
- * 깨우는 신호 행을 함께 달라고 묻는다(`?include=doorbell`, #3824). 그 행을 모르는 옛
- * 서버는 쿼리를 읽지 않고 예전 원장을 준다.
+ * 깨우는 신호 행(`doorbell`, #3824)과 oort가 잰 도구 호출(`tools`, #4654)을 함께 달라고
+ * 묻는다. 그 값을 모르는 옛 서버는 쿼리를 읽지 않고 예전 원장을 주거나, 400이면 한 칸씩 물러서
+ * 다시 읽는다(`fetchAgentRunEvents`). 두 표면이 같은 캐시를 쓰므로 묻는 값도 같다.
  */
 export function runLedgerQueryOptions(workspaceId: string, runKey: string | null) {
   return {
     queryKey: ["agent-run-events", workspaceId, runKey] as const,
     queryFn: () =>
-      fetchAgentRunEvents(workspaceId, runKey as string, { includeDoorbell: true }),
+      fetchAgentRunEvents(workspaceId, runKey as string, {
+        includeDoorbell: true,
+        includeTools: true,
+      }),
     staleTime: 0,
     retry: (count: number, error: unknown) => !serverSaysAbsent(error) && count < 1,
   };
@@ -115,13 +128,20 @@ export function useRunLedger(
     [query.data]
   );
   const doorbell = useMemo(() => doorbellFactOf(query.data?.events), [query.data]);
+  const tools = useMemo(
+    () => (query.data === undefined ? null : workToolRecord(query.data)),
+    [query.data]
+  );
   const events = query.data?.events ?? [];
   return {
-    rows, doorbell,
+    rows, doorbell, tools,
     ...(includeCounts && query.data !== undefined ? { counts: {
-      // 현재 코어 읽기는 tools include/tally를 보존하지 않아요. 부재를 0회로 말하지 않아요.
-      ...(events.some((event) => event.rawKind === "tool_call" || event.rawKind === "agent_port.call") ? {
-        tools: events.filter((event) => event.rawKind === "tool_call" || event.rawKind === "agent_port.call").length,
+      // 여기의 「도구 N」은 에이전트가 한 일의 수다. oort가 직접 잰 호출(`tools`, 대개 job_start·
+      // run_event·run_complete 같은 보고 호출)은 출처가 달라 이 요약에 섞지 않는다(#4654 「출처를
+      // 한 칸에 섞지 않는다」). 에이전트 자기 보고 개수는 #4657이 「에이전트 보고」로 더한다.
+      // 모르는 값을 0회로 말하지 않는 것은 그대로다.
+      ...(events.some((event) => event.rawKind === "agent_port.call") ? {
+        tools: events.filter((event) => event.rawKind === "agent_port.call").length,
       } : {}),
       approvals: events.filter((event) => event.kind === "approval_requested").length,
     } } : {}),

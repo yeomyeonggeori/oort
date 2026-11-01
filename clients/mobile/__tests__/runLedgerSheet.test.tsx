@@ -173,7 +173,8 @@ describe('폰 기록 시트 (#3824)', () => {
           {ordinal: 1, kind: 'queued', createdAtMs: at},
           {ordinal: 2, kind: 'doorbell_rung', code: 'leading_ok', createdAtMs: at + 1 * SEC},
           {ordinal: 3, kind: 'doorbell_rung', code: 'trailing_ok', createdAtMs: at + 5 * SEC},
-          {ordinal: 4, kind: 'tool_call', code: 'ok', createdAtMs: at + 6 * SEC},
+          // `tool_call`은 코어가 아는 종류가 됐다(#4654). 서버가 앞서 늘릴 새 종류는 가상의 낱말로 잰다.
+          {ordinal: 4, kind: 'future_kind', code: 'ok', createdAtMs: at + 6 * SEC},
           {ordinal: 5, kind: 'claimed', createdAtMs: at + 12 * SEC},
           {ordinal: 6, kind: 'succeeded', createdAtMs: at + 3 * MIN + 12 * SEC},
         ],

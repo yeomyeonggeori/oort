@@ -344,7 +344,7 @@ describe("깨우는 신호가 닿지 않음 — 4번째 예외 (#4619 planner �
     expect(q("agent-work-panel-stop-arm")?.textContent).toBe("취소");
     expect(q("run-exception-settings")).not.toBeNull();
     // 원장은 작업 패널과 같은 캐시 키로 읽는다(`?include=doorbell`).
-    expect(api.fetchAgentRunEvents).toHaveBeenCalledWith(WS, RUN.toLowerCase(), { includeDoorbell: true });
+    expect(api.fetchAgentRunEvents).toHaveBeenCalledWith(WS, RUN.toLowerCase(), { includeDoorbell: true, includeTools: true });
   });
 
   it("생존 판정이 없어도(호스티드 아님) 줄은 서고, 이유와 다시 깨우기만 빠진다 — 지어내지 않는다", async () => {

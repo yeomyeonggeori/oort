@@ -410,7 +410,7 @@ describe('runPersonalAgentCall — 메시지 → 서명 → /work-spawns', () =>
 // ---- 훅: 보내기를 맡는가, N3로 가는가 ---------------------------------------------
 
 interface HookProbe {
-  tryCall: (body: string) => boolean;
+  tryCall: (body: string, flags?: {suppressUnfurl?: boolean}) => boolean;
   notice: {text: string; tone: string} | null;
 }
 
@@ -584,5 +584,52 @@ describe('usePersonalAgentCall — 컴포저에서', () => {
     await waitFor(() => expect(h.probe.current?.notice).not.toBeNull());
     act(() => h.moveTo({...CHANNEL, id: 'other-room', name: 'other'}));
     expect(h.probe.current?.notice).toBeNull();
+  });
+});
+
+// ---- 입력칸 ✕로 미리보기를 끈 채 부른다 (#5037) --------------------------------------
+//
+// 호출 길은 코어 `callPersonalAgent`가 메시지를 직접 보내고, 호출하지 못하면 평범한 전송으로 물러나고, 그 사이
+// 방을 옮기면 쓰던 방으로 직접 보낸다. 메시지가 나가는 이 세 길 모두에 같은 표시가 실려야 한다 — 하나라도 빠지면
+// 사람이 끈 카드가 그 길로 나간 `@별칭` 메시지에서만 되살아난다. 켜지 않은 호출은 키가 없어야 한다(요청은
+// closed-world라 옛 서버는 모르는 키를 400으로 거절한다). 여기서는 호출 길과 방 이동 폴백을 재고, 「물러나는
+// 평범한 전송」은 `sendPlain` 의 진짜 배선(`ConversationScreen` → `timeline.send`)이 있는 셸 시험
+// `conversationLinkPreview.test.tsx` 가 잰다.
+describe('usePersonalAgentCall — ✕로 미리보기를 끈 호출 (#5037)', () => {
+  beforeEach(() => {
+    mockSignerForHook.seen.length = 0;
+    wirePort();
+  });
+
+  it('호출 길: 켠 호출은 메시지 전송 본문에 억제 필드가 실리고 호출은 그대로 나가며, 켜지 않은 호출은 키가 없다', async () => {
+    const h = mountHook({});
+    act(() => {
+      h.probe.current?.tryCall('@my-claude 이 링크 봐줘 https://a.example/one', {suppressUnfurl: true});
+    });
+    await waitFor(() => expect(spawnPosts()).toHaveLength(1));
+    expect(messagePosts()).toHaveLength(1);
+    expect(messagePosts()[0]?.body).toMatchObject({suppressUnfurl: true});
+
+    act(() => {
+      h.probe.current?.tryCall('@my-claude 또 봐줘');
+    });
+    await waitFor(() => expect(spawnPosts()).toHaveLength(2));
+    expect(messagePosts()).toHaveLength(2);
+    expect(messagePosts()[1]?.body).not.toHaveProperty('suppressUnfurl');
+  });
+
+  it('호출이 끝나기 전에 다른 방으로 옮겨 가면, 쓰던 방으로 가는 직접 전송도 표시를 싣는다', async () => {
+    const h = mountHook({hosts: [mac({online: false})]});
+    act(() => {
+      h.probe.current?.tryCall('@my-claude 봐줘', {suppressUnfurl: true});
+      h.moveTo({...CHANNEL, id: 'other-room', name: 'other'});
+    });
+    await waitFor(() => expect(messagePosts()).toHaveLength(1));
+    expect(h.sendPlain).not.toHaveBeenCalled();
+    expect(messagePosts()[0]?.path).toContain(CH);
+    expect(messagePosts()[0]?.body).toMatchObject({
+      clientMsgId: 'client-msg-1',
+      suppressUnfurl: true,
+    });
   });
 });

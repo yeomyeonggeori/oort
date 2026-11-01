@@ -209,6 +209,18 @@ export interface CallPersonalAgentInput {
    * REST send below.
    */
   deliver?: () => Promise<Message>;
+  /**
+   * 「이번 메시지는 미리보기 없이 보내기」 (#5037, ADR-0170 증보 2026-11-01 D21): the composer's
+   * ✕ turned the link preview off for this message, so the message gets no link cards.
+   *
+   * It rides **the plain REST send only** — `SendMessageOptions.suppressUnfurl` /
+   * `ThreadReplyOptions.suppressUnfurl`, and only when `true` (that request is closed-world:
+   * an unflagged call stays byte-identical to what it was before this field). When `deliver`
+   * is given the caller owns the request and this field is not read: the web's `deliver`
+   * already carries the pending row's flag, so a second source would only be able to disagree.
+   * The call itself (the signed spawn) never touches unfurls — it names the message by id.
+   */
+  suppressUnfurl?: boolean;
 }
 
 /**
@@ -218,11 +230,13 @@ export interface CallPersonalAgentInput {
 export async function callPersonalAgent(
   input: CallPersonalAgentInput
 ): Promise<PersonalAgentCallResult> {
+  // The key is absent (not `false`) unless the person turned the preview off: see the field.
+  const unfurl = input.suppressUnfurl === true ? { suppressUnfurl: true } : undefined;
   const message = await (input.deliver !== undefined
     ? input.deliver()
     : input.threadRootId !== undefined
-    ? sendThreadReply(input.workspaceId, input.channelId, input.threadRootId, input.clientMsgId, input.text)
-    : sendMessage(input.workspaceId, input.channelId, input.clientMsgId, input.text));
+    ? sendThreadReply(input.workspaceId, input.channelId, input.threadRootId, input.clientMsgId, input.text, unfurl)
+    : sendMessage(input.workspaceId, input.channelId, input.clientMsgId, input.text, unfurl));
 
   if (input.signer === null) {
     return {

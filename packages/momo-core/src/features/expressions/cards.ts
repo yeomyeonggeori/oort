@@ -1,6 +1,6 @@
 import { expressionFailureLine } from "../approvals/approvalOutcome";
 import { expressionCopy } from "./cardCopy";
-import type { ExpressionChoice, ExpressionDraft, ManualUploadCode } from "./types";
+import type { ExpressionChoice, ExpressionDraft, ExpressionKind, ManualUploadCode } from "./types";
 
 const MANUAL_COPY: Record<ManualUploadCode, string> = {
   source_blocked: "이 출처에서 그림을 받지 못했어요. 직접 올려 주세요.",
@@ -95,9 +95,14 @@ function readSourcePointer(value: unknown): string | null | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
-export function expressionChoice(draft: ExpressionDraft, nowMs: number): ExpressionChoice | null {
+/**
+ * What registering this draft sends. `kind` (ADR-0218 §10 J3) is the one the person chose; leave it out and
+ * the server recommends one for the stored large picture. It is not part of the pin: a replacement upload
+ * invalidates the choice by revision and hash, never by kind.
+ */
+export function expressionChoice(draft: ExpressionDraft, nowMs: number, kind?: ExpressionKind): ExpressionChoice | null {
   if (!expressionDraftCard(draft, nowMs).canApprove || draft.state !== "ready") return null;
-  return { draftId: draft.draftId, revision: draft.revision, sha256: draft.media.large.sha256 };
+  return { draftId: draft.draftId, revision: draft.revision, sha256: draft.media.large.sha256, ...(kind ? { kind } : {}) };
 }
 
 /** A replacement upload invalidates every previously viewed choice. */

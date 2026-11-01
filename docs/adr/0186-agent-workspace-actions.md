@@ -1368,7 +1368,7 @@ V3-2a·V4의 매직/치수/할당 한도·재인코딩·서버 PG 보관·불변
 
 제안 시 각 후보는 `expression_draft`가 되고, 기존 `approval_request.props.action.expression`에 `Approval` 객체가 붙는다. ready 후보는 **저장될 large 그림 그 자체**를 보여 준다. 미리보기는 워크스페이스+approval+후보+현재 revision/sha를 함께 검사한다. 다른 방 사람에게 그림이 새지 않는다. 카드에는 사람별 `canDecide`를 서버가 판정해 주며 표시 이름·태그·prompt를 권한 판단에 쓰지 않는다.
 
-사람은 후보 하나를 고른 뒤 기존 결정 요청에 `expressionChoice:{draftId,revision,sha256}`(`Decision`)를 더한다. 이 행동 외 decision에는 이 입력을 받지 않는다. 결정 tx에서 approval pending·TTL·현재 멤버십/정책/당사자·후보 소속·revision·저장 바이트 재해시·이름/quota를 다시 증명한다. 실패는 기존 receipt/409 경로이고 승인 소모·부분 등록이 없다. 성공은 한 표현만 active로 만들고 나머지 draft 바이트를 회수한다. 거절·만료·취소·TTL sweep도 바이트를 회수한다.
+사람은 후보 하나를 고른 뒤 기존 결정 요청에 `expressionChoice:{draftId,revision,sha256}`(`Decision`; 사람이 고른 종류 `kind?`가 선택 키로 더해졌다: ADR-0218 증보 4 §10)를 더한다. 이 행동 외 decision에는 이 입력을 받지 않는다. 결정 tx에서 approval pending·TTL·현재 멤버십/정책/당사자·후보 소속·revision·저장 바이트 재해시·이름/quota를 다시 증명한다. 실패는 기존 receipt/409 경로이고 승인 소모·부분 등록이 없다. 성공은 한 표현만 active로 만들고 나머지 draft 바이트를 회수한다. 거절·만료·취소·TTL sweep도 바이트를 회수한다.
 
 ### X8-3. 새 승인 역할 `expression_adder`
 

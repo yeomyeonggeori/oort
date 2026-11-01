@@ -1,11 +1,20 @@
 import { EXPRESSION_FILE_ACCEPT, validExpressionFile } from "./media";
 import { useEffect, useRef, useState } from "react";
 import { expressionChoice, expressionDraftCard } from "@momo/core/features/expressions/cards";
-import type { ExpressionChoice, ExpressionDraft } from "@momo/core/features/expressions/types";
+import type { MessageKey } from "@momo/core/i18n";
+import { LEGACY_EXPRESSION_KIND, recommendedKindForDraft } from "@momo/core/features/expressions/kind";
+import { EXPRESSION_KINDS, type ExpressionChoice, type ExpressionDraft, type ExpressionKind } from "@momo/core/features/expressions/types";
 import { Button } from "@/design/ui/button";
+import { SegmentedControl } from "@/design/ui/segmented-control";
 import { GithubExternalLink } from "@/features/github/GithubExternalLink";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useExpressions } from "./context";
 import { ExpressionImage } from "./ExpressionImage";
+
+// 종류 고르기의 문장은 모두 사전에서 온다(`expressions.kind.*`). 종류 이름은 코어의 목록(`EXPRESSION_KINDS`)에서 오고
+// 이 파일에 낱말로 두지 않는다(직접 문구 장부).
+const KIND_LABEL = { emoji: "expressions.kind.emoji", sticker: "expressions.kind.sticker" } as const satisfies Record<ExpressionKind, MessageKey>;
+const KIND_HINT = { emoji: "expressions.kind.hintEmoji", sticker: "expressions.kind.hintSticker" } as const satisfies Record<ExpressionKind, MessageKey>;
 
 export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false, pending = true, promptLabel }: {
   draft: ExpressionDraft;
@@ -21,16 +30,24 @@ export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false,
   pending?: boolean;
 }) {
   const { store, offline } = useExpressions();
+  const formatMessage = useFormatMessage();
   const [now, setNow] = useState(Date.now());
   const [viewed, setViewed] = useState<string | null>(null);
+  // ADR-0218 §10 J3: 종류는 등록하는 순간 정한다. 사람이 고르기 전에는 서버가 같은 규칙으로 정할 추천을
+  // 미리 골라 보이고, 보낸 값이 곧 저장되는 값이다. 고른 값은 **그 그림의 핀**에 묶여서(그림이 바뀌면 핀이 바뀐다)
+  // 새 그림에는 옛 선택이 따라가지 않고 추천이 다시 정해진다.
+  const [chosen, setChosen] = useState<{ pin: string; kind: ExpressionKind } | null>(null);
   const [rights, setRights] = useState(false);
   const [working, setWorking] = useState(false);
   const lock = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const card = expressionDraftCard(draft, now, pending);
-  const choice = expressionChoice(draft, now);
-  const pin = choice ? `${choice.draftId}:${choice.revision}:${choice.sha256}` : null;
+  const base = expressionChoice(draft, now);
+  const pin = base ? `${base.draftId}:${base.revision}:${base.sha256}` : null;
+  const explicit = chosen !== null && chosen.pin === pin ? chosen.kind : null;
+  const kind = explicit ?? recommendedKindForDraft(draft) ?? LEGACY_EXPRESSION_KIND;
+  const choice = base ? { ...base, kind } : null;
   useEffect(() => {
     const timer = window.setTimeout(() => setNow(Date.now()), Math.max(0, Math.min(2147483647, draft.expiresAtMs - Date.now())));
     return () => window.clearTimeout(timer);
@@ -59,6 +76,13 @@ export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false,
     {draft.origin.prompt && <p className="break-words text-meta text-ink-muted" data-testid="expression-draft-prompt">{promptLabel ?? "에이전트가 쓴 설명:"} {draft.origin.prompt}</p>}
     {card.preview && <ExpressionImage key={`${draft.draftId}:${draft.revision}`} item={draft} size="large" onReady={() => setViewed(pin)} />}
     {card.canApprove && <>
+      <div className="flex items-center gap-2">
+        <span aria-hidden="true" className="text-meta">{formatMessage("expressions.kind.legend")}</span>
+        <SegmentedControl legend={formatMessage("expressions.kind.legend")} className="min-w-0 flex-1" testId="expression-draft-kind" disabled={blocked} value={kind} onValueChange={(next) => { if (pin) setChosen({ pin, kind: next }); }}
+          options={EXPRESSION_KINDS.map((value) => ({ value, label: formatMessage(KIND_LABEL[value]) }))} />
+      </div>
+      <p className="text-meta text-ink-muted" data-testid="expression-draft-kind-hint">{formatMessage(KIND_HINT[kind])}</p>
+      {explicit === null && <p className="text-meta text-ink-muted" data-testid="expression-draft-kind-auto">{formatMessage("expressions.kind.autoNote")}</p>}
       <label className="flex items-start gap-2 text-meta active:bg-surface-pressed"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} className="mt-1 focus-visible:focus-ring" />이 그림을 팀에 저장할 권한이 있어요. 사람 얼굴이 있다면 지정된 당사자만 승인해요.</label>
       <Button type="button" disabled={blocked || !rights || !pin || viewed !== pin} onClick={() => void approve()} className="self-end">{working ? "등록 중" : "팀 보관함에 등록"}</Button>
       {viewed !== pin && <p className="text-meta text-ink-muted">그림을 불러오는 중이에요. 새 미리보기를 본 뒤 등록해 주세요.</p>}
