@@ -127,7 +127,8 @@ import {
   serverSurface,
 } from "@momo/core/features/capabilities/serverSurfaces";
 import { approvalBundleCard, approvalBundleContext, openApprovalDecisionStage } from "@/features/decisionStage/stageEntry";
-import { requestBundleModel, requestBundleState, type RequestBundleModel } from "@momo/core/features/timeline/requestBundle";
+import { requestBundleModel, requestBundleState, runBundleCanDecide, type RequestBundleModel } from "@momo/core/features/timeline/requestBundle";
+import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { RequestBundleCard } from "./RequestBundleCard";
 
 // =============================================================================
@@ -518,7 +519,11 @@ function ApprovalBody({
   }) === "approval";
   const nowMs = useExpiryNow(card.expiresAtMs, watchesExpiry);
   const phase = watchesExpiry ? expiryPhase(card.expiresAtMs, nowMs) : "none";
-  const context = approvalBundleContext(card, session.member, directory);
+  // 서버가 보는 사람에게 「못 한다」고 한 승인(run 진행 bundle의 `canDecide:false`)은 카드 props가 아무 말이
+  // 없어도 인라인 결정 컨트롤을 거둔다. 카드 props는 모든 멤버에게 같게 방송돼서 사람마다 다른 값은 여기에만 있다.
+  const channelRuns = useChannelRuns(card.channelId ?? null);
+  const run = channelRuns.find((candidate) => runBundleCanDecide(candidate, card.approvalId) !== undefined);
+  const context = approvalBundleContext(card, session.member, directory, run);
   const isAdmin = context.isWorkspaceAdmin;
   const bundle = card.isResumeOffer ? undefined : requestBundleModel(
     approvalBundleCard(card, receipt), { ...context, nowMs }
