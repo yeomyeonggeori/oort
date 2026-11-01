@@ -1312,6 +1312,412 @@ export const catalog: MessageCatalog = {
       "value": "Use device language"
     }
   ],
+  "teamAi.helper.aliasesLine": [
+    {
+      "type": 0,
+      "value": "Call names: "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    }
+  ],
+  "teamAi.helper.aliasNotDerivable": [
+    {
+      "type": 0,
+      "value": "This name cannot become a short call name. In chat, type @ and the full name."
+    }
+  ],
+  "teamAi.helper.aliasReserved": [
+    {
+      "type": 0,
+      "value": "This name cannot be used as a call name."
+    }
+  ],
+  "teamAi.helper.description": [
+    {
+      "type": 0,
+      "value": "Set the helper name and what it can do."
+    }
+  ],
+  "teamAi.helper.nameErrorForbidden": [
+    {
+      "type": 0,
+      "value": "Only an owner or admin can change the name."
+    }
+  ],
+  "teamAi.helper.nameErrorInvalid": [
+    {
+      "type": 0,
+      "value": "The name cannot be empty or longer than 100 characters."
+    }
+  ],
+  "teamAi.helper.nameErrorOther": [
+    {
+      "type": 0,
+      "value": "Could not change the name. Check your connection and try again."
+    }
+  ],
+  "teamAi.helper.nameErrorReserved": [
+    {
+      "type": 0,
+      "value": "This name cannot be used in mentions. Try a different name."
+    }
+  ],
+  "teamAi.helper.nameErrorTaken": [
+    {
+      "type": 0,
+      "value": "Another member uses this name or one that looks too similar. Try a different name."
+    }
+  ],
+  "teamAi.helper.nameHint": [
+    {
+      "type": 0,
+      "value": "You can call it by the new name too. Earlier call names stay, and past 4 the oldest ones drop off."
+    }
+  ],
+  "teamAi.helper.nameLabel": [
+    {
+      "type": 0,
+      "value": "Helper name"
+    }
+  ],
+  "teamAi.helper.nameSave": [
+    {
+      "type": 0,
+      "value": "Save name"
+    }
+  ],
+  "teamAi.helper.nameSaved": [
+    {
+      "type": 0,
+      "value": "Name changed."
+    }
+  ],
+  "teamAi.helper.nameSaving": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "teamAi.helper.rolesForbidden": [
+    {
+      "type": 0,
+      "value": "Only an owner or admin can change what the helper does."
+    }
+  ],
+  "teamAi.helper.rolesHeading": [
+    {
+      "type": 0,
+      "value": "What it can do"
+    }
+  ],
+  "teamAi.helper.rolesHint": [
+    {
+      "type": 0,
+      "value": "When off, the helper does not do that. Only admins turn these on or off."
+    }
+  ],
+  "teamAi.helper.rolesMemoryOff": [
+    {
+      "type": 0,
+      "value": "Team memory is off. Turn it on first under Settings › Memory."
+    }
+  ],
+  "teamAi.helper.rolesOffline": [
+    {
+      "type": 0,
+      "value": "You are offline, so this cannot be changed now."
+    }
+  ],
+  "teamAi.helper.rolesSaveFailed": [
+    {
+      "type": 0,
+      "value": "Could not change what the helper does. Check your connection and try again."
+    }
+  ],
+  "teamAi.phone.loadFailed": [
+    {
+      "type": 0,
+      "value": "Could not load helper settings."
+    }
+  ],
+  "teamAi.phone.loading": [
+    {
+      "type": 0,
+      "value": "Loading helper settings."
+    }
+  ],
+  "teamAi.phone.rowTitle": [
+    {
+      "type": 0,
+      "value": "Helper"
+    }
+  ],
+  "teamAi.roles.alwaysOn": [
+    {
+      "type": 0,
+      "value": "Always on."
+    }
+  ],
+  "teamAi.roles.chatReadHint": [
+    {
+      "type": 0,
+      "value": "Answers questions, reads the chats and members the caller can see, and searches the web."
+    }
+  ],
+  "teamAi.roles.chatReadName": [
+    {
+      "type": 0,
+      "value": "Chat and reading"
+    }
+  ],
+  "teamAi.roles.codeHint": [
+    {
+      "type": 0,
+      "value": "Prefills a work request card for code tasks. The helper does not run code itself."
+    }
+  ],
+  "teamAi.roles.codeName": [
+    {
+      "type": 0,
+      "value": "Code"
+    }
+  ],
+  "teamAi.roles.filesHint": [
+    {
+      "type": 0,
+      "value": "Reads attached files."
+    }
+  ],
+  "teamAi.roles.filesName": [
+    {
+      "type": 0,
+      "value": "Files"
+    }
+  ],
+  "teamAi.roles.inviteAccessHint": [
+    {
+      "type": 0,
+      "value": "Raises approval cards to create invite links and invite agents."
+    }
+  ],
+  "teamAi.roles.inviteAccessName": [
+    {
+      "type": 0,
+      "value": "Invites and access"
+    }
+  ],
+  "teamAi.roles.longResearchHint": [
+    {
+      "type": 0,
+      "value": "Keeps working on research that takes a while."
+    }
+  ],
+  "teamAi.roles.longResearchName": [
+    {
+      "type": 0,
+      "value": "Long research"
+    }
+  ],
+  "teamAi.roles.memoryHint": [
+    {
+      "type": 0,
+      "value": "Searches team memory and suggests things worth remembering."
+    }
+  ],
+  "teamAi.roles.memoryName": [
+    {
+      "type": 0,
+      "value": "Memory"
+    }
+  ],
+  "teamAi.roles.noticeBoth": [
+    {
+      "type": 0,
+      "value": "Turning on Files and Memory sends the content of attachments the helper reads and team memory it finds to your team AI provider (the AI company that issued the team key)."
+    }
+  ],
+  "teamAi.roles.noticeFiles": [
+    {
+      "type": 0,
+      "value": "Turning on Files sends the content of attachments the helper reads to your team AI provider (the AI company that issued the team key)."
+    }
+  ],
+  "teamAi.roles.noticeMemory": [
+    {
+      "type": 0,
+      "value": "Turning on Memory sends the content of team memory the helper finds to your team AI provider (the AI company that issued the team key)."
+    }
+  ],
+  "teamAi.roles.workspaceAdminHint": [
+    {
+      "type": 0,
+      "value": "Raises approval cards to create channels, change profiles and names, and change settings or install apps."
+    }
+  ],
+  "teamAi.roles.workspaceAdminName": [
+    {
+      "type": 0,
+      "value": "Workspace management"
+    }
+  ],
+  "teamAi.stage.checkingLine": [
+    {
+      "type": 0,
+      "value": "Checking the team AI connection."
+    }
+  ],
+  "teamAi.stage.continue": [
+    {
+      "type": 0,
+      "value": "Continue"
+    }
+  ],
+  "teamAi.stage.doneDetail": [
+    {
+      "type": 0,
+      "value": "Mention it with @ in chat to try it."
+    }
+  ],
+  "teamAi.stage.doneLine": [
+    {
+      "type": 0,
+      "value": "The helper is on."
+    }
+  ],
+  "teamAi.stage.enable": [
+    {
+      "type": 0,
+      "value": "Turn helper on"
+    }
+  ],
+  "teamAi.stage.enableFailedDetail": [
+    {
+      "type": 0,
+      "value": "Your key is saved. Try again, or skip and turn it on later under Settings › AI."
+    }
+  ],
+  "teamAi.stage.enableFailedLine": [
+    {
+      "type": 0,
+      "value": "Could not turn the helper on."
+    }
+  ],
+  "teamAi.stage.enabling": [
+    {
+      "type": 0,
+      "value": "Turning on"
+    }
+  ],
+  "teamAi.stage.enablingLine": [
+    {
+      "type": 0,
+      "value": "Turning the helper on."
+    }
+  ],
+  "teamAi.stage.keyDetail": [
+    {
+      "type": 0,
+      "value": "With a key, a helper in chat answers questions and raises changes as approval cards. If you skip, the helper stays off."
+    }
+  ],
+  "teamAi.stage.keyFailedLine": [
+    {
+      "type": 0,
+      "value": "Could not verify the key."
+    }
+  ],
+  "teamAi.stage.keyLine": [
+    {
+      "type": 0,
+      "value": "Add a team AI key?"
+    }
+  ],
+  "teamAi.stage.later": [
+    {
+      "type": 0,
+      "value": "Later"
+    }
+  ],
+  "teamAi.stage.loadErrorDetail": [
+    {
+      "type": 0,
+      "value": "Check your connection and try again, or set this up later under Settings › AI."
+    }
+  ],
+  "teamAi.stage.loadErrorLine": [
+    {
+      "type": 0,
+      "value": "Could not check the team AI connection."
+    }
+  ],
+  "teamAi.stage.nameRequired": [
+    {
+      "type": 0,
+      "value": "Enter a name."
+    }
+  ],
+  "teamAi.stage.notOperatorDetail": [
+    {
+      "type": 0,
+      "value": "Once the operator adds a key under Settings › AI, you can turn the helper on. You can skip this for now."
+    }
+  ],
+  "teamAi.stage.notOperatorLine": [
+    {
+      "type": 0,
+      "value": "The server operator adds the team AI key."
+    }
+  ],
+  "teamAi.stage.offline": [
+    {
+      "type": 0,
+      "value": "You are offline, so the helper cannot be turned on now. You can continue once you reconnect."
+    }
+  ],
+  "teamAi.stage.reentry": [
+    {
+      "type": 0,
+      "value": "You can skip. Add a key and turn the helper on any time under Settings › AI."
+    }
+  ],
+  "teamAi.stage.renameFailedNote": [
+    {
+      "type": 0,
+      "value": "The name was not changed. Try again under Settings › AI."
+    }
+  ],
+  "teamAi.stage.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "teamAi.stage.setupDetail": [
+    {
+      "type": 0,
+      "value": "The key is connected. You can change these later under Settings › AI."
+    }
+  ],
+  "teamAi.stage.setupLine": [
+    {
+      "type": 0,
+      "value": "Name the helper and choose what it does."
+    }
+  ],
+  "teamAi.stage.setupUnverifiedDetail": [
+    {
+      "type": 0,
+      "value": "This server does not check the key directly. You will know it works when the helper first answers."
+    }
+  ],
+  "teamAi.stage.verifyingLine": [
+    {
+      "type": 0,
+      "value": "Checking the key."
+    }
+  ],
   "timeline.thread.followDismiss": [
     {
       "type": 0,

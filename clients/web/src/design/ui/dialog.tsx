@@ -2,6 +2,7 @@ import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/design/lib/cn";
 import { MODAL_CONTENT_MOTION, MODAL_OVERLAY_MOTION } from "@/design/motion";
+import { useDismissOnEntry } from "@/lib/useDismissOnEntry";
 
 // shadcn/ui new-york Dialog (vendored, Radix primitive). The ⌘K palette
 // consumes this same Root (`QuickSwitcher` PaletteLayer), not cmdk's
@@ -18,7 +19,38 @@ import { MODAL_CONTENT_MOTION, MODAL_OVERLAY_MOTION } from "@/design/motion";
 //     the Presence subtree first and the exit never plays. forceMount is not
 //     added.
 
-export const Dialog = DialogPrimitive.Root;
+/**
+ * Radix Root with one addition: a notification landing closes it (#4667).
+ *
+ * A notification click is a new entrance. Whatever dialog was open when the banner was clicked belongs to a
+ * place the person has already left, and a global dialog (channel create, profile, member picker) survives
+ * the route change, so the message the click was for sits behind it. Every dialog in the app is this Root,
+ * so closing them is one subscription here instead of one per dialog.
+ *
+ * It closes through the dialog own onOpenChange(false), exactly the way Esc does: a dialog that refuses to
+ * close while it is busy still refuses. Controlled (open) and uncontrolled (defaultOpen) dialogs both work;
+ * the uncontrolled case keeps its state here, because Radix keeps that state inside its own Root and the
+ * Root cannot be told from outside to close.
+ *
+ * Keep this comment free of quote characters: overlayMotion.test.ts reads this file for Tailwind class
+ * tokens by pairing quotes, and an odd quote count in prose shifts every pair after it.
+ */
+export function Dialog({ open: openProp, defaultOpen = false, onOpenChange, ...rest }: DialogPrimitive.DialogProps) {
+  const controlled = openProp !== undefined;
+  const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+  const open = controlled ? openProp : uncontrolledOpen;
+  const change = React.useCallback(
+    (next: boolean) => {
+      if (!controlled) setUncontrolledOpen(next);
+      onOpenChange?.(next);
+    },
+    [controlled, onOpenChange]
+  );
+  useDismissOnEntry(() => {
+    if (open) change(false);
+  });
+  return <DialogPrimitive.Root {...rest} open={open} onOpenChange={change} />;
+}
 export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogPortal = DialogPrimitive.Portal;
 export const DialogClose = DialogPrimitive.Close;

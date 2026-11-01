@@ -159,12 +159,12 @@ describe("OnboardingDots", () => {
     const states = [...host.querySelectorAll(".onboarding-dot")].map((d) =>
       d.getAttribute("data-state")
     );
-    expect(states).toEqual(["done", "current", "todo", "todo"]);
+    expect(states).toEqual(["done", "current", "todo", "todo", "todo"]);
     for (const dot of host.querySelectorAll(".onboarding-dot")) {
       expect(dot.getAttribute("aria-hidden")).toBe("true");
     }
     const label = q("onboarding-dots-label");
-    expect(label?.textContent).toBe("4단계 중 2단계");
+    expect(label?.textContent).toBe("5단계 중 2단계");
     expect(label?.className).toContain("sr-only");
   });
 });

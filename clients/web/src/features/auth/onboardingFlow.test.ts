@@ -35,20 +35,24 @@ describe("onboarding first step (ADR-0193 D7)", () => {
 });
 
 describe("owner onboarding stages (ADR-0185)", () => {
-  it("totalSteps_is_2", () => {
-    expect(ownerOnboardingTotalSteps()).toBe(2);
-    expect(OWNER_ONBOARDING_STAGES).toHaveLength(2);
-    expect(OWNER_ONBOARDING_STAGES).toEqual(["workspace-profile", "invite"]);
-    expect(ownerOnboardingProgressLabel("workspace-profile")).toBe("1/2");
-    expect(ownerOnboardingProgressLabel("invite")).toBe("2/2");
+  it("totalSteps_is_3: 프로필 → 초대 → 팀 AI(건너뛸 수 있는 마지막 칸, #4945)", () => {
+    expect(ownerOnboardingTotalSteps()).toBe(3);
+    expect(OWNER_ONBOARDING_STAGES).toHaveLength(3);
+    expect(OWNER_ONBOARDING_STAGES).toEqual(["workspace-profile", "invite", "team-ai"]);
+    expect(ownerOnboardingProgressLabel("workspace-profile")).toBe("1/3");
+    expect(ownerOnboardingProgressLabel("invite")).toBe("2/3");
+    expect(ownerOnboardingProgressLabel("team-ai")).toBe("3/3");
     expect(initialOwnerOnboardingStage()).toBe("workspace-profile");
     expect(OWNER_ONBOARDING_MOUNTED[0]).toBe("workspace-profile");
     expect(resolveOwnerOnboardingStage(null)).toBe("workspace-profile");
     expect(resolveOwnerOnboardingStage("invite")).toBe("invite");
+    expect(resolveOwnerOnboardingStage("team-ai")).toBe("team-ai");
     expect(nextOwnerOnboardingStage("workspace-profile")).toBe("invite");
-    expect(nextOwnerOnboardingStage("invite")).toBeNull();
+    expect(nextOwnerOnboardingStage("invite")).toBe("team-ai");
+    expect(nextOwnerOnboardingStage("team-ai")).toBeNull();
   });
 });
+
 
 describe("onboarding transitions (ADR-0193 D11)", () => {
   it("uses mask-reveal out of D0 and back into it", () => {

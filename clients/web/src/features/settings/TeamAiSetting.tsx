@@ -5,13 +5,16 @@ import {
   readTeamAiSwitch,
   setTeamAiSwitch,
   TEAM_AI_SECTION_DESCRIPTION,
-  TEAM_AI_SECTION_TITLE,
-  TEAM_AI_SWITCH_DESCRIPTION,
   TEAM_AI_SWITCH_LABEL,
+  teamAiHelperName,
   teamAiSaveErrorCopy,
+  teamAiSectionTitle,
   teamAiSwitchBusyLabel,
+  teamAiSwitchDescription,
 } from "@momo/core/features/settings/teamAiSwitch";
+import { memberFor } from "@momo/core/features/workspace/directory";
 import { Switch } from "@/design/ui/switch";
+import { useDirectory } from "@/features/workspace/useWorkspace";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
@@ -45,6 +48,11 @@ export function TeamAiSetting({
     staleTime: 30_000,
   });
   const state = bag.data === undefined ? null : readTeamAiSwitch(bag.data);
+  // 제목과 설명이 부르는 이름은 도우미 멤버의 표시 이름이다(ADR-0201 증보 v3 B10-7).
+  const directory = useDirectory(workspaceId);
+  const helperName = teamAiHelperName(
+    memberFor(directory.directory, state?.memberId ?? undefined)
+  );
   // 가방에 키가 있으면 묻지 않는다. 없을 때만 부작용 없는 물음을 한 번 던진다.
   const probe = useQuery({
     queryKey: [...bagKey, "probe"],
@@ -74,7 +82,7 @@ export function TeamAiSetting({
 
   return (
     <SettingsSection
-      title={TEAM_AI_SECTION_TITLE}
+      title={teamAiSectionTitle(helperName)}
       description={TEAM_AI_SECTION_DESCRIPTION}
       testId="workspace-team-ai-card"
     >
@@ -86,7 +94,7 @@ export function TeamAiSetting({
               : TEAM_AI_SWITCH_LABEL}
           </span>
         }
-        description={TEAM_AI_SWITCH_DESCRIPTION}
+        description={teamAiSwitchDescription(helperName)}
         labelId={nameId}
         descriptionId={descId}
         keep

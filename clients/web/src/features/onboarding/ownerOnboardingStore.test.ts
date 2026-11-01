@@ -23,15 +23,16 @@ afterEach(() => {
 });
 
 describe("owner onboarding pending flags", () => {
-  it("starts with both flags and advances S1 without clearing invite", () => {
+  it("starts with three flags and advances S1 without clearing invite or the team AI stage", () => {
     expect(ownerOnboardingIsPending()).toBe(false);
     markOwnerOnboardingPending();
     expect(ownerOnboardingIsPending()).toBe(true);
     expect(readOwnerOnboardingStage()).toBe("workspace-profile");
     expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
     expect(hasOwnerOnboardingFlag("invite")).toBe(true);
+    expect(hasOwnerOnboardingFlag("team-ai")).toBe(true);
     expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
-      JSON.stringify({ "workspace-profile": true, invite: true })
+      JSON.stringify({ "workspace-profile": true, invite: true, "team-ai": true })
     );
     markOwnerOnboardingStage("invite");
     expect(ownerOnboardingIsPending()).toBe(true);
@@ -85,13 +86,14 @@ describe("owner onboarding pending flags", () => {
     clearOwnerOnboardingFlag("workspace-profile");
     expect(hasOwnerOnboardingSettingsDoor("profile")).toBe(false);
     expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
-      JSON.stringify({ invite: true })
+      JSON.stringify({ invite: true, "team-ai": true })
     );
   });
 
   it("both settings doors succeeding remove the door flags from the marker", () => {
     markOwnerOnboardingPending();
     clearOwnerOnboardingFlag("invite");
+    clearOwnerOnboardingFlag("team-ai");
     recordOwnerOnboardingSettingsSave("workspace");
     recordOwnerOnboardingSettingsSave("profile");
     expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(false);
