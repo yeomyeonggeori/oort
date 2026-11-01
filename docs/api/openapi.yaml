@@ -561,7 +561,10 @@ paths:
           description: >
             One photo per member and four per instance are already in flight (until
             the model's call has ended), or the decoder is busy; retry after the
-            `Retry-After` seconds. Nothing was sent.
+            `Retry-After` seconds. Before the model is asked nothing was sent. If both
+            decoder slots stay taken for 15 seconds after the model has answered, the
+            picture is given up (it was billed) and the call is not repeated: the server
+            holds it and asks for a slot again meanwhile.
           content:
             application/json:
               schema:
@@ -570,6 +573,48 @@ paths:
           description: >
             `image_model_timeout` - no answer within 120 seconds. The provider may
             have finished (and billed) the work.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      operationId: listExpressionPhotoDrafts
+      summary: The caller's own live photo drafts (ADR-0218 section 9 I1)
+      description: >
+        The way back to a picture the photo route finished after the request that was
+        waiting for it was gone (the connection dropped, the app was closed): the draft is
+        stored whether or not anyone is still waiting (`POST` above), and
+        `GET /expression-drafts/{draftId}` needs an id nobody was left to receive.
+
+
+        Lists the caller's own drafts that this route made (origin `generated` with one of
+        the two sentences the server writes for it), that are still `ready` and not expired,
+        newest first, at most 4 (a person holds no more live drafts than that). Each item is
+        exactly what `GET /expression-drafts/{draftId}` answers for it, so it is opened,
+        replaced and registered through the routes that already do that. A registered or
+        expired draft, any other kind of draft and anyone else's draft are not listed. It is
+        a plain read: it opens no team key, calls no model and spends no photo-start budget.
+        The `cutout` outcome belongs to the answer of the request that made the draft and is
+        not stored with it, so it is not here.
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: The caller's live photo drafts, possibly none
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionPhotoDraftList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            Not a human: an agent credential is refused before the route is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Another workspace's bearer; the same body as every expression route.
           content:
             application/json:
               schema:
@@ -16600,6 +16645,17 @@ components:
           - erased
           - unchanged
           - null
+    ExpressionPhotoDraftList:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 4
+          items:
+            $ref: '#/components/schemas/ExpressionDraft'
     ExpressionImportRequest:
       type: object
       additionalProperties: false
