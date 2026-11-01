@@ -190,6 +190,12 @@ describe('「＋」 메뉴', () => {
     expect(
       screen.getByTestId('expression-add-make').props.accessibilityLabel,
     ).toContain(ko.formatMessage('expressions.add.make'));
+    // 메뉴의 설명은 이 행이 여는 사진 양식이 하는 일을 말한다: 팀 이미지 모델이 사진 한 장으로 정지 그림을 만든다.
+    // 에이전트에게 부탁하는 길(움직이는 그림)은 양식 안 단추의 몫이다(#5098, 검증 줄 2회차 화면 H1).
+    const makeDetail = ko.formatMessage('expressions.add.makeDetail');
+    expect(screen.getByText(makeDetail)).toBeTruthy();
+    expect(makeDetail).toContain('이미지 모델');
+    expect(makeDetail).not.toMatch(/에이전트|움직이/);
     // 두 행은 각각 자기 장으로 들어가고, 장에는 「목록으로」가 있다.
     await press('expression-add-import');
     expect(screen.getByTestId('expression-import')).toBeTruthy();
