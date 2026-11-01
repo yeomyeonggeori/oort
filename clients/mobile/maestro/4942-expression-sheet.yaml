@@ -30,6 +30,11 @@ name: 4942-expression-sheet
     visible:
       id: "composer-pill"
     timeout: 30000
+# Debug LogBox strip first (subflows/dismiss-dev-logbox.yaml): it sits on the
+# composer dock and swallows the first tap that lands there — the 11-01 verification
+# run lost both this flow and 4891 to it (rc=1 in ~40s, then green once this line
+# was in). The composer is empty here, which is what that subflow's tap needs.
+- runFlow: subflows/dismiss-dev-logbox.yaml
 
 # ① 쉬는 알약: 보내기 왼쪽에 단추가 서 있다(알약을 펼치기 전).
 - assertVisible:
@@ -114,5 +119,17 @@ name: 4942-expression-sheet
     id: "expression-sheet-close"
 - assertNotVisible:
     id: "expression-sheet-search"
+- assertVisible:
+    id: "composer-expression"
+
+# 떠나기 전에 초안을 지운다. 입력칸의 초안은 다음 `launchApp` 에도 남는다: 「안녕👍」 이 #general 에
+# 남은 채 뒤에 도는 20·30·40 이 `@kim` 을 쳐서 「안녕👍@kim」 이 되고 멘션 목록이 안 열렸다(11-01 검증,
+# 30-approval 이 `mention-list` 에서 떨어짐). 이 흐름은 서버에 아무것도 쓰지 않으므로 지울 것은 이것뿐이다.
+- tapOn:
+    id: "composer-input"
+- eraseText: 20
+- assertNotVisible:
+    id: "composer-input"
+    text: "안녕.*"
 - assertVisible:
     id: "composer-expression"
