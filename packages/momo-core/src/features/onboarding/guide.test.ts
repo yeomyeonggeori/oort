@@ -66,11 +66,11 @@ describe("말풍선 문장 (표정만 있고 문장이 빈 사용 거부)", () =
 });
 
 describe("진행 점 흐름 모델 (ADR-0193 D10)", () => {
-  it("counts dots per route: login 1~2, invite 2, claim 4", () => {
+  it("counts dots per route: login 1~2, invite 2, claim 5", () => {
     expect(onboardingDotScreens("login")).toHaveLength(1);
     expect(onboardingDotScreens("login", { aiConnect: true })).toHaveLength(2);
     expect(onboardingDotScreens("invite")).toHaveLength(2);
-    expect(onboardingDotScreens("claim")).toHaveLength(4);
+    expect(onboardingDotScreens("claim")).toHaveLength(5);
   });
 
   it("shares one line from before sign-in through AI 연결 on the claim route", () => {
@@ -78,6 +78,7 @@ describe("진행 점 흐름 모델 (ADR-0193 D10)", () => {
       "claim",
       "workspace-profile",
       "invite",
+      "team-ai",
       "ai-connect",
     ]);
     expect(onboardingDotScreens("invite").at(-1)).toBe("ai-connect");
@@ -97,11 +98,13 @@ describe("진행 점 흐름 모델 (ADR-0193 D10)", () => {
 
   it("marks done / current / todo and names the step for a screen reader", () => {
     expect(onboardingDots("claim", "workspace-profile")).toEqual({
-      total: 4,
+      total: 5,
       current: 2,
-      dots: ["done", "current", "todo", "todo"],
-      label: "4단계 중 2단계",
+      dots: ["done", "current", "todo", "todo", "todo"],
+      label: "5단계 중 2단계",
     });
+    expect(onboardingDots("claim", "team-ai")?.label).toBe("5단계 중 4단계");
+    expect(onboardingDots("invite", "team-ai")).toBeNull();
     expect(onboardingDots("invite", "join")).toEqual({
       total: 2,
       current: 1,
@@ -112,6 +115,7 @@ describe("진행 점 흐름 모델 (ADR-0193 D10)", () => {
       "2단계 중 1단계"
     );
     expect(onboardingDots("claim", "ai-connect")?.dots).toEqual([
+      "done",
       "done",
       "done",
       "done",
