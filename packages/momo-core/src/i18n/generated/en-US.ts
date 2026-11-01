@@ -50,6 +50,30 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "connect.language.close": [
+    {
+      "type": 0,
+      "value": "Close language list"
+    }
+  ],
+  "connect.language.hint": [
+    {
+      "type": 0,
+      "value": "Opens the language list."
+    }
+  ],
+  "connect.rememberEmail.hint": [
+    {
+      "type": 0,
+      "value": "Saved on this device only. Turning it off erases it right away."
+    }
+  ],
+  "connect.rememberEmail.label": [
+    {
+      "type": 0,
+      "value": "Remember my email"
+    }
+  ],
   "desktop.menu.close": [
     {
       "type": 0,

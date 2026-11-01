@@ -3,6 +3,10 @@ export const messageKeys = [
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
+  "connect.language.close",
+  "connect.language.hint",
+  "connect.rememberEmail.hint",
+  "connect.rememberEmail.label",
   "desktop.menu.close",
   "desktop.menu.copy",
   "desktop.menu.cut",
@@ -208,6 +212,10 @@ export const argumentSpecs = {
   "common.members.count": {
     "count": "number"
   },
+  "connect.language.close": {},
+  "connect.language.hint": {},
+  "connect.rememberEmail.hint": {},
+  "connect.rememberEmail.label": {},
   "desktop.menu.close": {},
   "desktop.menu.copy": {},
   "desktop.menu.cut": {},
@@ -437,6 +445,10 @@ export interface MessageArgs {
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
+  "connect.language.close": Record<string, never>;
+  "connect.language.hint": Record<string, never>;
+  "connect.rememberEmail.hint": Record<string, never>;
+  "connect.rememberEmail.label": Record<string, never>;
   "desktop.menu.close": Record<string, never>;
   "desktop.menu.copy": Record<string, never>;
   "desktop.menu.cut": Record<string, never>;
