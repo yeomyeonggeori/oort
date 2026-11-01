@@ -135,6 +135,10 @@ import {
 } from '../features/conversation/LongPressHint';
 import type {MessageRowActions} from '../features/conversation/MessageRow';
 import {ThreadPanel} from '../features/conversation/ThreadPanel';
+import {
+  MakeLandingContext,
+  useLandOnMadeDm,
+} from '../features/conversation/makeLanding';
 import {useReplyDraft} from '../features/conversation/useReplyDraft';
 import {PinListPanel} from '../features/conversation/PinListPanel';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
@@ -1630,6 +1634,15 @@ export default function ConversationScreen({
     setThreadLanding(null);
     setNotificationNotice(current => (current?.inThread ? null : current));
   }, []);
+  // 「AI와 만들기」 요청을 보낸 뒤 그 에이전트 DM 으로 (#4962). 입력창·스레드 입력창·행 시트의 고르개가 컨텍스트로 받는다 —
+  // 이 값은 `actions` 에 싣지 않는다(행 리렌더 없이 호스트 네 곳에 닿는 길은 컨텍스트다, `makeLanding.ts` 머리말).
+  const landOnMadeDm = useLandOnMadeDm({
+    workspaceId,
+    selfMemberId: member.id,
+    directory,
+    onOpenConversation,
+    closeThread,
+  });
   // 같은 이유로 고정된다. 이 화면은 턴이 열려 있는 동안 초당 한 번 다시 그려지고,
   // 인라인이면 그때마다 `StopTurnControl`(자체 상태 셋을 든 컴포넌트)이 새 엘리먼트가
   // 된다 — 사람이 「중단」을 겨누고 있는 바로 그 컨트롤을.
@@ -2069,6 +2082,7 @@ export default function ConversationScreen({
 
   return (
     <ChannelAudienceContext.Provider value={channelAudience}>
+    <MakeLandingContext.Provider value={landOnMadeDm}>
     <DecisionStageScope key={`${workspaceId}:${channelId}`} messages={messages} runs={requestRuns} directory={directory} viewerMemberId={member.id}
       gates={approvalGates} receipts={approvalReceipts} nowMs={nowMs} offline={!networkOnline} onSettled={onApprovalSettled}>
     <Screen style={styles.screen}>
@@ -2432,6 +2446,7 @@ export default function ConversationScreen({
       ) : null}
     </Screen>
     </DecisionStageScope>
+    </MakeLandingContext.Provider>
     </ChannelAudienceContext.Provider>
   );
 }

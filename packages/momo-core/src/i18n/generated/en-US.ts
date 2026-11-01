@@ -164,12 +164,6 @@ export const catalog: MessageCatalog = {
       "value": "Only admins can add new pictures on this team."
     }
   ],
-  "expressions.add.back": [
-    {
-      "type": 0,
-      "value": "Back to list"
-    }
-  ],
   "expressions.add.backLabel": [
     {
       "type": 0,
@@ -687,12 +681,6 @@ export const catalog: MessageCatalog = {
       "value": "You are offline. You can send the request when you are back online."
     }
   ],
-  "expressions.make.openConversation": [
-    {
-      "type": 0,
-      "value": "Open conversation"
-    }
-  ],
   "expressions.make.photo": [
     {
       "type": 0,
@@ -763,12 +751,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Could not open the album. Please try again."
-    }
-  ],
-  "expressions.make.photoUnreadable": [
-    {
-      "type": 0,
-      "value": "This photo cannot be opened. Choose another photo."
     }
   ],
   "expressions.make.retry": [
