@@ -764,12 +764,18 @@ mod tests {
     /// row is ended (`team_ai_task_ended_ck`). Tenant ENABLE + FORCE + `ws_isolation`; the grants are
     /// the minimum the code reads and writes (`team-ai-task-lockdown`, the same text in the migration
     /// and both role bootstraps).
+    ///
+    /// 171 is #4961's 「팀 표현의 종류 값」 (ADR-0218 증보 4 §10): `expression.kind` (`emoji` /
+    /// `sticker`), `NOT NULL DEFAULT 'sticker'` so every earlier row reads as a sticker, a closed
+    /// `CHECK`, and nothing else. No new table (so no new RLS policy), no new grant, and the identity
+    /// trigger of 158 keeps the new column immutable after INSERT without being touched.
+    /// (170 is #4341's; it may reach the track after this file.)
     #[test]
-    fn discovers_contiguous_migrations_001_to_169() {
+    fn discovers_contiguous_migrations_001_to_171() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=169).collect();
+        let expected: Vec<i64> = (1..=171).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -777,7 +783,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=169 under {}",
+            "expected contiguous 001..=171 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -785,7 +791,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("169_team_ai_task"));
+            .starts_with("171_expression_kind"));
     }
 
     #[test]

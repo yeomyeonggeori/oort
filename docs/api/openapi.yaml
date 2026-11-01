@@ -16161,6 +16161,18 @@ components:
             - active
           media:
             $ref: '#/components/schemas/ExpressionMedia'
+          kind:
+            type: string
+            enum:
+            - emoji
+            - sticker
+            description: >-
+              What this registration is for in the pickers (ADR-0218 supplement 4, section 10): `emoji`
+              is the small team emoji used between words and in reactions, `sticker` the large emoticon
+              sent on its own (a moving one is shown on the GIF tab). A classification only; message and
+              reaction sizes do not read it. The server always says it; the key is optional only so that
+              a payload from before the field (an older server or cache) still reads, and a missing
+              value means `sticker`, as every earlier registration is.
       - type: object
         additionalProperties: false
         required:
@@ -16240,6 +16252,18 @@ components:
             nullable: true
             enum:
             - null
+          kind:
+            type: string
+            enum:
+            - emoji
+            - sticker
+            description: >-
+              What this registration is for in the pickers (ADR-0218 supplement 4, section 10): `emoji`
+              is the small team emoji used between words and in reactions, `sticker` the large emoticon
+              sent on its own (a moving one is shown on the GIF tab). A classification only; message and
+              reaction sizes do not read it. The server always says it; the key is optional only so that
+              a payload from before the field (an older server or cache) still reads, and a missing
+              value means `sticker`, as every earlier registration is.
     ExpressionList:
       oneOf:
       - type: object
@@ -16768,6 +16792,18 @@ components:
           minLength: 64
           maxLength: 64
           pattern: ^[a-f0-9]{64}$
+        kind:
+          type: string
+          enum:
+          - emoji
+          - sticker
+          description: >-
+            The kind the person chose for this registration (ADR-0218 supplement 4, section 10). Left
+            out, the server applies its recommendation to the stored large picture when it registers
+            it: `sticker` when the picture moves or its longest edge is over 128 px, otherwise `emoji`.
+            An older client that never sends it gets that. A value outside the list is a 400
+            (`expression_invalid`; `expression_choice_invalid` on an approval decision), and a retry of
+            the same `(draftId, revision, sha256)` returns the first receipt whatever kind it names.
     ExpressionMutation:
       type: object
       additionalProperties: false

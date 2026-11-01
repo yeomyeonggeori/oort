@@ -1939,3 +1939,166 @@ async fn the_gates_expression_sampler_runs_to_its_end_on_the_drive_the_gate_stac
         "it ends where the gate used to end: {stderr}"
     );
 }
+
+// ── ADR-0218 증보 4 §10 (#4961): the kind is chosen on the one registration door ───────────────
+
+/// The draft routes (upload, import) take no kind — it is decided where every route registers
+/// (`POST /expressions`), once the person has seen the server's own large picture. There the kind is
+/// the person's word, else the server's recommendation, and nothing outside the closed list gets in.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn the_kind_is_chosen_on_the_registration_door_and_the_draft_routes_take_none() {
+    let w = boot().await;
+    let upload = |who: &Person, metadata: Value, file: Vec<u8>| {
+        let http = w.http.clone();
+        let url = format!("{}/expressions/uploads", w.prefix);
+        let token = who.token.clone();
+        async move {
+            http.post(url)
+                .bearer_auth(token)
+                .header(
+                    "content-type",
+                    "multipart/form-data; boundary=oort-import-test",
+                )
+                .body(multipart_with_metadata(&metadata, &file))
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let meta =
+        |name: &str| json!({"name":name,"displayName":"그림","tags":[],"subjectMemberId":null});
+    let door = |who: &Person, body: Value| {
+        let http = w.http.clone();
+        let url = format!("{}/expressions", w.prefix);
+        let token = who.token.clone();
+        async move {
+            http.post(url)
+                .bearer_auth(token)
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    let pin = |draft: &Value| json!({"draftId":draft["draftId"],"revision":draft["revision"],"sha256":draft["media"]["large"]["sha256"]});
+    let with_kind = |mut body: Value, kind: Value| {
+        body["kind"] = kind;
+        body
+    };
+
+    // A draft carries no kind, and the draft routes refuse one: it is not theirs to say.
+    let moving = unique("kind_moving");
+    let draft = w
+        .json(upload(&w.owner, meta(&moving), gif(3)).await, 201)
+        .await;
+    assert!(draft.get("kind").is_none(), "a draft has no kind: {draft}");
+    assert_eq!(
+        w.code_of(
+            upload(
+                &w.owner,
+                with_kind(meta(&unique("kind_in_upload")), json!("emoji")),
+                png()
+            )
+            .await,
+            400
+        )
+        .await,
+        "expression_invalid"
+    );
+    assert_eq!(
+        w.code_of(
+            w.import(
+                &w.owner,
+                &with_kind(
+                    request(&unique("kind_in_import"), "https://example.com/x.png"),
+                    json!("emoji")
+                )
+            )
+            .await,
+            400
+        )
+        .await,
+        "expression_invalid"
+    );
+
+    // The person's word beats the recommendation (a moving picture is recommended a sticker) …
+    let said_emoji = w
+        .json(
+            door(&w.owner, with_kind(pin(&draft), json!("emoji"))).await,
+            201,
+        )
+        .await;
+    assert_eq!(said_emoji["expression"]["kind"], "emoji");
+
+    // … and nothing outside the closed list is a kind: the refusal leaves the draft alone.
+    let big = unique("kind_big");
+    let draft = w
+        .json(upload(&w.owner, meta(&big), png_of(200, 100)).await, 201)
+        .await;
+    for bad in [
+        json!("huge"),
+        json!("Emoji"),
+        json!(""),
+        json!(null),
+        json!(1),
+        json!(["emoji"]),
+    ] {
+        assert_eq!(
+            w.code_of(
+                door(&w.owner, with_kind(pin(&draft), bad.clone())).await,
+                400
+            )
+            .await,
+            "expression_invalid",
+            "{bad}"
+        );
+    }
+    // Said nothing (an older client): the recommendation for the stored large picture — a still one
+    // over 128 px is a sticker — and the draft was still there to register.
+    let said_nothing = w.json(door(&w.owner, pin(&draft)).await, 201).await;
+    assert_eq!(said_nothing["expression"]["kind"], "sticker");
+    let small = unique("kind_small");
+    let draft = w
+        .json(upload(&w.owner, meta(&small), png_of(8, 6)).await, 201)
+        .await;
+    let small_receipt = w.json(door(&w.owner, pin(&draft)).await, 201).await;
+    assert_eq!(small_receipt["expression"]["kind"], "emoji");
+
+    // The list says what the receipts said, to every member; another workspace sees nothing.
+    let list = |who: &Person| {
+        let http = w.http.clone();
+        let url = format!("{}/expressions", w.prefix);
+        let token = who.token.clone();
+        async move { http.get(url).bearer_auth(token).send().await.unwrap() }
+    };
+    for viewer in [&w.owner, &w.member] {
+        let listed = w.json(list(viewer).await, 200).await;
+        let kind_of = |name: &str| {
+            listed["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["name"] == name)
+                .map(|item| item["kind"].clone())
+        };
+        assert_eq!(kind_of(&moving), Some(json!("emoji")));
+        assert_eq!(kind_of(&big), Some(json!("sticker")));
+        assert_eq!(kind_of(&small), Some(json!("emoji")));
+    }
+    let theirs = w
+        .json(
+            w.http
+                .get(format!(
+                    "{}/v1/workspaces/{}/expressions",
+                    w.base, w.foreign_ws
+                ))
+                .bearer_auth(&w.foreign.token)
+                .send()
+                .await
+                .unwrap(),
+            200,
+        )
+        .await;
+    assert!(theirs["items"].as_array().unwrap().is_empty());
+}

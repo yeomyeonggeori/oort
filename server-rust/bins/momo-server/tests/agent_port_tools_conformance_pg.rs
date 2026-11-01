@@ -32972,3 +32972,85 @@ async fn assembled_hole_stays_on_the_card_as_manual_upload_with_its_code() {
         ("manual_upload_required", Some("assembly_output_too_large"))
     );
 }
+
+/// ADR-0218 증보 4 §10 (#4961) J3: approving an agent's card registers the kind the approver chose on
+/// it, else the server's recommendation for the very picture they were shown (a still 8x8 is an
+/// emoji, a moving one a sticker); a value outside the closed list is a 400 that leaves the card
+/// pending. The agent's own request has no kind (`AgentCandidate` stays closed), so the card is
+/// where a person says it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn approving_an_expression_card_records_the_chosen_kind_or_the_recommended_one() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    let admin_jwt = w.fixture.human_jwt.clone();
+    let still = || generated_4829(&noise_png_4829(8, 1), "작은 그림");
+    let moving = || json!({"source": "generated", "mime": "image/gif", "dataBase64": b64_3787(&gif_4829()), "prompt": "움직이는 그림"});
+    for (name, image, said, want) in [
+        ("kind_card_still_auto", still(), None, "emoji"),
+        ("kind_card_moving_auto", moving(), None, "sticker"),
+        (
+            "kind_card_still_said_sticker",
+            still(),
+            Some("sticker"),
+            "sticker",
+        ),
+        (
+            "kind_card_moving_said_emoji",
+            moving(),
+            Some("emoji"),
+            "emoji",
+        ),
+    ] {
+        let (status, proposed) =
+            propose_4829(&w, json!([candidate_4829(name, Value::Null, image)])).await;
+        assert_eq!(status, 200, "{name}: {proposed}");
+        let approval = proposed_approval_3706(&proposed);
+        let card = card_4829(&w, approval).await;
+        let mut pick = choice_4829(&card, 0);
+        if let Some(kind) = said {
+            pick["kind"] = json!(kind);
+        }
+        let (status, receipt) = decide_4829(&w, &admin_jwt, approval, true, Some(pick)).await;
+        assert_eq!(status, 200, "{name}: {receipt}");
+        let stored: String =
+            sqlx::query_scalar("SELECT kind FROM expression WHERE workspace_id=$1 AND name=$2")
+                .bind(ws)
+                .bind(name)
+                .fetch_one(&w.su)
+                .await
+                .unwrap();
+        assert_eq!(stored, want, "{name}");
+    }
+
+    // Not a kind: refused before anything is read, and the card is still there to decide.
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829("kind_card_refused", Value::Null, still())]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card = card_4829(&w, approval).await;
+    for bad in [json!("huge"), json!(null), json!(7)] {
+        let mut pick = choice_4829(&card, 0);
+        pick["kind"] = bad.clone();
+        let (status, receipt) = decide_4829(&w, &admin_jwt, approval, true, Some(pick)).await;
+        assert_eq!(
+            (status, receipt["status"].as_str().unwrap_or("")),
+            (400, "expression_choice_invalid"),
+            "{bad}: {receipt}"
+        );
+        assert_eq!(approval_status_4385(&w.su, approval).await, "pending");
+    }
+    let none: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression WHERE workspace_id=$1 AND name=$2")
+            .bind(ws)
+            .bind("kind_card_refused")
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(none, 0, "a refused decision registers nothing");
+    let (status, _) = decide_4829(&w, &admin_jwt, approval, false, None).await;
+    assert_eq!(status, 200, "the card is rejected to free the pending slot");
+}

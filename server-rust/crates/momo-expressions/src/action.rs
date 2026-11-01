@@ -18,7 +18,7 @@ use uuid::Uuid;
 use crate::media::{Processed, Rendition};
 use crate::store::{
     adder_allows, adder_allows_in_tx, authorize, catalog, changed, draft_json, expression_json,
-    metadata, put_images, unexpired,
+    media_json, metadata, put_images, resolve_kind, unexpired,
 };
 use crate::{
     hash, valid_source_url, version, Actor, Choice, Error, ImageInfo, Metadata, Origin,
@@ -327,6 +327,14 @@ pub async fn choose_in_tx(
         return Err(Error::Quota);
     }
 
+    // The kind (ADR-0218 §10 J3): the person's choice on the card, else the server's recommendation for
+    // the large picture just proved above. Read before any write; a candidate with no readable
+    // picture never reaches here (`stored.len() == 3`).
+    let kind = resolve_kind(
+        choice.kind,
+        &media_json(conn, ws, choice.draft_id, true).await?["large"],
+    )?;
+
     // ---- proofs done: writes only from here -----------------------------------------
     let id = choice.draft_id;
     let version_after = changed(
@@ -346,10 +354,11 @@ pub async fn choose_in_tx(
     // The original-photo pointer travels with the chosen draft (ADR-0218 G1): the registered
     // expression records what it was made from exactly as the card showed it.
     let source_attachment_id: Option<Uuid> = row.try_get("origin_source_attachment_id")?;
-    let created = sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,proposed_by,approval_id,version,origin_source_attachment_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *")
+    let created = sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,proposed_by,approval_id,version,origin_source_attachment_id,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *")
         .bind(ws).bind(id).bind(&meta.name).bind(&meta.display_name).bind(json!(meta.tags))
         .bind(meta.subject_member_id).bind(json!(origin)).bind(decider.member).bind(proposer)
-        .bind(approval_id).bind(version_after).bind(source_attachment_id).fetch_one(&mut *conn).await?;
+        .bind(approval_id).bind(version_after).bind(source_attachment_id).bind(kind.as_str())
+        .fetch_one(&mut *conn).await?;
     sqlx::query("INSERT INTO expression_image(workspace_id,expression_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT workspace_id,draft_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms FROM expression_draft_image WHERE workspace_id=$1 AND draft_id=$2")
         .bind(ws).bind(id).execute(&mut *conn).await?;
     let receipt = json!({"workspaceId": ws, "version": version_after.to_string(),
