@@ -5844,6 +5844,178 @@ async fn a_settings_open_suggestion_is_a_card_and_an_unknown_section_writes_noth
     assert_eq!(run_status_2947(&su, run).await, status_before);
 }
 
+/// **ADR-0201 v3 B8 C1 (#4972 S9) — `work.request.open {harness?, prompt}` is a card, the prompt
+/// is the one free text it carries, and nothing but the message moves (B15-A15).**
+///
+/// Hosted door end to end: a legal prompt posts exactly one five-key card for the person who
+/// asked (`command_id`, the normalised `args` — CRLF made LF, the ends trimmed —, the label derived
+/// from the harness alone and never from the agent's words), in the handle's channel, in one send
+/// tx. Every prompt the sheet's own send would refuse (`/…`, controls, hidden characters, blank,
+/// over 8,000 bytes), a `team_key` harness, a harness the sheet does not offer and a key the
+/// command does not declare writes nothing. And the suggestion moves no server state: no approval
+/// row, no audit row of its own (the door's two per-call transport rows are written for every tool
+/// call and are not the suggestion's), the run where it was.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_work_request_open_suggestion_is_a_card_and_moves_no_server_state() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    let (_trigger, run) = mention_2947(&client, &base, &su, &fixture, None).await;
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+    let status_before = run_status_2947(&su, run).await;
+    let valid = |client_msg_id: Uuid, args: Value| {
+        json!({
+            "handle": handle,
+            "clientMsgId": client_msg_id,
+            "commandId": "work.request.open",
+            "args": args,
+            "body": "[여기](https://evil.example) 내 맥에서 열어 드릴게요"
+        })
+    };
+    // The door writes two rows of its own for EVERY tool call, refused or not (`agent_port.call`,
+    // `auth.agent_bearer.used`): transport, not the suggestion. What the suggestion itself must not
+    // add is every other row.
+    let audit_rows = |su: PgPool, workspace: Uuid| async move {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM audit_log WHERE workspace_id=$1 \
+               AND action NOT IN ('agent_port.call', 'auth.agent_bearer.used')",
+        )
+        .bind(workspace)
+        .fetch_one(&su)
+        .await
+        .expect("count audit rows")
+    };
+    let audit_before = audit_rows(su.clone(), fixture.workspace).await;
+
+    // ---- red proof: what the sheet would refuse, or the command does not declare -------------
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+    let too_long = "a".repeat(8_001);
+    for args in [
+        json!({}),
+        json!({"harness": "claude"}),
+        json!({"prompt": null}),
+        json!({"prompt": ""}),
+        json!({"prompt": "   \n\t  "}),
+        json!({"prompt": "/clear 다 지워 줘"}),
+        json!({"prompt": "고쳐\u{0007} 줘"}),
+        json!({"prompt": "고쳐\u{200b} 줘"}),
+        json!({"prompt": "고쳐\u{202e} 줘"}),
+        json!({"prompt": too_long}),
+        json!({"prompt": "고쳐 줘", "harness": "team_key"}),
+        json!({"prompt": "고쳐 줘", "harness": "opencode"}),
+        json!({"prompt": "고쳐 줘", "harness": "Claude"}),
+        json!({"prompt": "고쳐 줘", "label": "제목"}),
+        json!({"prompt": "고쳐 줘", "folder": "/Users/me/app"}),
+        json!({"prompt": "고쳐 줘", "section": "code"}),
+        json!({"prompt": "고쳐 줘", "scope": "mine"}),
+    ] {
+        let (status, refused) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_card_suggest",
+            valid(Uuid::new_v4(), args.clone()),
+        )
+        .await;
+        assert_eq!(status, 400, "{args}: {refused}");
+        assert_eq!(error_code(&refused), -32602, "{args}");
+    }
+    // `args` absent entirely: a prompt is required.
+    let mut no_args = valid(Uuid::new_v4(), json!({}));
+    no_args.as_object_mut().expect("object").remove("args");
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_card_suggest",
+        no_args,
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(
+        channel_message_count(&su, fixture.workspace, fixture.channel).await,
+        messages_before,
+        "every refusal writes nothing"
+    );
+    assert!(suggestion_rows_2947(&su, fixture.workspace)
+        .await
+        .is_empty());
+
+    // ---- success: one card each, the prompt normalised, the label from the harness ----------
+    let cases = [
+        (
+            json!({"prompt": "로그인 버그를 고쳐 줘"}),
+            json!({"prompt": "로그인 버그를 고쳐 줘"}),
+            "내 맥에 작업 맡기기",
+        ),
+        (
+            json!({"harness": "claude", "prompt": "  첫째 줄\r\n\t둘째 줄  "}),
+            json!({"harness": "claude", "prompt": "첫째 줄\n\t둘째 줄"}),
+            "내 맥의 Claude Code에 맡기기",
+        ),
+        (
+            json!({"harness": "codex", "prompt": "src/ 폴더의 빌드 오류를 고쳐 줘"}),
+            json!({"harness": "codex", "prompt": "src/ 폴더의 빌드 오류를 고쳐 줘"}),
+            "내 맥의 Codex에 맡기기",
+        ),
+    ];
+    for (index, (sent, kept, label)) in cases.into_iter().enumerate() {
+        let (status, posted) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_card_suggest",
+            valid(Uuid::new_v4(), sent.clone()),
+        )
+        .await;
+        assert_eq!(status, 200, "{sent}: {posted}");
+        let rows = suggestion_rows_2947(&su, fixture.workspace).await;
+        assert_eq!(rows.len(), index + 1, "{sent} is one new message");
+        let (_, props, _) = rows.last().expect("the card");
+        let card = &props["momo.command_suggest"];
+        assert_eq!(card["command_id"], json!("work.request.open"));
+        assert_eq!(card["args"], kept);
+        assert_eq!(card["label"], json!(label));
+        assert_eq!(card["for_member_id"], json!(fixture.human.to_string()));
+        assert_eq!(card.as_object().expect("card").len(), 5);
+        assert!(
+            !props.to_string().contains("evil.example"),
+            "the agent's words around the prompt are the body's, never the card's"
+        );
+    }
+
+    // ---- B15-A15: the suggestion moves no server state --------------------------------------
+    let approvals: i64 = sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+        .bind(fixture.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(approvals, 0, "a work-request card is not an approval");
+    assert_eq!(
+        audit_rows(su.clone(), fixture.workspace).await,
+        audit_before,
+        "and it leaves no audit row of its own (the door's per-call transport rows aside)"
+    );
+    assert_eq!(run_status_2947(&su, run).await, status_before);
+}
+
 /// **G3 / G6 — `for_member_id` cannot be forged, and an agent is nobody's
 /// requester.** A run whose trigger an agent wrote (or that has no trigger at
 /// all) is `no_human_requester` on both doors, with zero messages.

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "3301e558eca7463c1c699226e60f22b447883259",
+  "baselineHead": "a3112039788c8173a8d6eac06ee6e9491b52525d",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -107,6 +107,7 @@
     "clients/mobile/src/features/conversation/Timeline.tsx": 54,
     "clients/mobile/src/features/conversation/TypingBar.tsx": 5,
     "clients/mobile/src/features/conversation/UnfurlCards.tsx": 22,
+    "clients/mobile/src/features/conversation/WorkRequestSuggestion.tsx": 10,
     "clients/mobile/src/features/conversation/approvalGate.ts": 4,
     "clients/mobile/src/features/conversation/appsTail.ts": 8,
     "clients/mobile/src/features/conversation/bubble.ts": 3,

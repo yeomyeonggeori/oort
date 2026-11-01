@@ -912,5 +912,97 @@ export const catalog: MessageCatalog = {
       "type": 0,
       "value": "동영상"
     }
+  ],
+  "timeline.workRequest.composerBusy": [
+    {
+      "type": 0,
+      "value": "쓰던 글이 있어 채우지 않았어요. 입력창을 비우고 다시 눌러 주세요."
+    }
+  ],
+  "timeline.workRequest.fill": [
+    {
+      "type": 0,
+      "value": "입력창에 채우기"
+    }
+  ],
+  "timeline.workRequest.fillHint": [
+    {
+      "type": 0,
+      "value": "채운 글을 확인하고 직접 보내 주세요."
+    }
+  ],
+  "timeline.workRequest.fillLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": 입력창에 채우기"
+    }
+  ],
+  "timeline.workRequest.inDm": [
+    {
+      "type": 0,
+      "value": "이 대화는 DM이라 입력창에 채울 수 없어요. 채널에서 눌러 주세요."
+    }
+  ],
+  "timeline.workRequest.labelAny": [
+    {
+      "type": 0,
+      "value": "내 맥에 작업 맡기기"
+    }
+  ],
+  "timeline.workRequest.labelClaude": [
+    {
+      "type": 0,
+      "value": "내 맥의 Claude Code에 맡기기"
+    }
+  ],
+  "timeline.workRequest.labelCodex": [
+    {
+      "type": 0,
+      "value": "내 맥의 Codex에 맡기기"
+    }
+  ],
+  "timeline.workRequest.noPersonalAgent": [
+    {
+      "type": 0,
+      "value": "내 맥에 연결한 Claude Code·Codex가 아직 없어요. AI의 내 도구에서 먼저 연결해 주세요."
+    }
+  ],
+  "timeline.workRequest.openSheet": [
+    {
+      "type": 0,
+      "value": "작업 요청 열기"
+    }
+  ],
+  "timeline.workRequest.openSheetLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": 작업 요청 열기"
+    }
+  ],
+  "timeline.workRequest.openTools": [
+    {
+      "type": 0,
+      "value": "내 도구 열기"
+    }
+  ],
+  "timeline.workRequest.sheetHint": [
+    {
+      "type": 0,
+      "value": "열린 시트에서 글을 확인하고 직접 보내 주세요."
+    }
+  ],
+  "timeline.workRequest.threadClosed": [
+    {
+      "type": 0,
+      "value": "스레드를 열고 다시 눌러 주세요."
+    }
   ]
 };

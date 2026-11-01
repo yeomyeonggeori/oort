@@ -137,7 +137,21 @@ export const messageKeys = [
   "timeline.unfurl.previewDismiss",
   "timeline.unfurl.previewDismissed",
   "timeline.unfurl.previewGroup",
-  "timeline.unfurl.video"
+  "timeline.unfurl.video",
+  "timeline.workRequest.composerBusy",
+  "timeline.workRequest.fill",
+  "timeline.workRequest.fillHint",
+  "timeline.workRequest.fillLabel",
+  "timeline.workRequest.inDm",
+  "timeline.workRequest.labelAny",
+  "timeline.workRequest.labelClaude",
+  "timeline.workRequest.labelCodex",
+  "timeline.workRequest.noPersonalAgent",
+  "timeline.workRequest.openSheet",
+  "timeline.workRequest.openSheetLabel",
+  "timeline.workRequest.openTools",
+  "timeline.workRequest.sheetHint",
+  "timeline.workRequest.threadClosed"
 ] as const;
 
 export type MessageKey = typeof messageKeys[number];
@@ -302,7 +316,25 @@ export const argumentSpecs = {
   "timeline.unfurl.previewDismiss": {},
   "timeline.unfurl.previewDismissed": {},
   "timeline.unfurl.previewGroup": {},
-  "timeline.unfurl.video": {}
+  "timeline.unfurl.video": {},
+  "timeline.workRequest.composerBusy": {},
+  "timeline.workRequest.fill": {},
+  "timeline.workRequest.fillHint": {},
+  "timeline.workRequest.fillLabel": {
+    "label": "string"
+  },
+  "timeline.workRequest.inDm": {},
+  "timeline.workRequest.labelAny": {},
+  "timeline.workRequest.labelClaude": {},
+  "timeline.workRequest.labelCodex": {},
+  "timeline.workRequest.noPersonalAgent": {},
+  "timeline.workRequest.openSheet": {},
+  "timeline.workRequest.openSheetLabel": {
+    "label": "string"
+  },
+  "timeline.workRequest.openTools": {},
+  "timeline.workRequest.sheetHint": {},
+  "timeline.workRequest.threadClosed": {}
 } as const;
 
 export interface MessageArgs {
@@ -444,4 +476,18 @@ export interface MessageArgs {
   "timeline.unfurl.previewDismissed": Record<string, never>;
   "timeline.unfurl.previewGroup": Record<string, never>;
   "timeline.unfurl.video": Record<string, never>;
+  "timeline.workRequest.composerBusy": Record<string, never>;
+  "timeline.workRequest.fill": Record<string, never>;
+  "timeline.workRequest.fillHint": Record<string, never>;
+  "timeline.workRequest.fillLabel": { label: string };
+  "timeline.workRequest.inDm": Record<string, never>;
+  "timeline.workRequest.labelAny": Record<string, never>;
+  "timeline.workRequest.labelClaude": Record<string, never>;
+  "timeline.workRequest.labelCodex": Record<string, never>;
+  "timeline.workRequest.noPersonalAgent": Record<string, never>;
+  "timeline.workRequest.openSheet": Record<string, never>;
+  "timeline.workRequest.openSheetLabel": { label: string };
+  "timeline.workRequest.openTools": Record<string, never>;
+  "timeline.workRequest.sheetHint": Record<string, never>;
+  "timeline.workRequest.threadClosed": Record<string, never>;
 }

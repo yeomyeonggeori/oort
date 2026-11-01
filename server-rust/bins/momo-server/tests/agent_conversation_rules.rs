@@ -578,10 +578,12 @@ fn the_server_prompt_carries_the_conversation_policy() {
 
 #[test]
 fn the_team_ai_prompt_carries_the_conversation_rule() {
+    // Everything on, the way a workspace that stored nothing reads: the work-request card too.
     let prompt = system_prompt(
         &Roster::default(),
         WebSearch::Available,
         &momo_agent::actions::TEAM_AI_ACTION_IDS,
+        &momo_agent::card_suggest::TEAM_AI_SUGGESTABLE_COMMAND_IDS,
     );
     // The block ends at the data header, not at the first `[데이터` (the first rule quotes it).
     let scope = between(&prompt, "규칙:", "규칙:", "[데이터 —");
