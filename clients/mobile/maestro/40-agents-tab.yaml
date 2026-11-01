@@ -2,19 +2,27 @@ appId: app.momo.ios
 name: 40-agents-tab
 # No `env:` block — see the note at the top of 00-login.yaml.
 ---
-# 40-agents-tab — 에이전트 탭 상태 · 재우기 토글 · 자고 있음 시스템 라인.
+# 40-agents-tab — 에이전트 목록 → 에이전트 프로필.
 #
-# The flow ends by waking the agent again, and that is not politeness: 재우기 is
-# the one action here that OUTLIVES the run. A lane that left the agent asleep
-# would make 10/20/30 fail on the next pass with "the agent never answered",
-# which is a fixture bug wearing the costume of a product bug. The stack is torn
-# down per run, but this flow is also meant to be runnable alone against a live
-# one.
+# This flow used to be about 재우기: the agent screen's state card, the pause
+# toggle, and the 「자고 있음」 system line it causes in the channel. #3902
+# (a75a0eda9, 「깨우기 제거」) took that card OFF the phone on purpose — the pause
+# stays on the server and the desktop — so there is no toggle left to tap, and
+# `agent-state` / `agent-pause-*` are not in the app any more. The 11-01
+# verification run got as far as the agent screen and died there, once the
+# `plus-menu-agents` row it started from was also found gone (#5045).
 #
-# The lane's fixture member is a workspace ADMIN for this flow's sake: pause is
-# restricted to a workspace owner/admin or the agent's operator, and a plain
-# member gets `agent-state-forbidden` — a screen the flow would otherwise have
-# to treat as a pass.
+# What it checks now is what the phone still has: that the agent list opens from
+# where it lives today (+ 메뉴 → 「AI」 시트 → 「에이전트 부르기」), that the lane's agent
+# is on it, and that its profile screen is that agent's — the instructions text is
+# the one scripts/lane-phone.sh writes into `agent_profile` for the fixture, so a
+# profile of some other agent cannot pass. Nothing here changes server state, so
+# unlike the old flow there is nothing to put back for 10/20/30 to find.
+#
+# NOT covered any more, and not coverable from this lane: the phone rendering the
+# server's system line for a mention that reaches a PAUSED agent. With no pause
+# control on the phone the lane has no way to pause the agent; that needs either
+# the desktop or a REST call from the flow, and is left to a follow-up.
 - launchApp:
     appId: app.momo.ios
 - runFlow: subflows/ensure-signed-in.yaml
@@ -26,9 +34,8 @@ name: 40-agents-tab
 # reported COMPLETED here while the app never left 대화.
 #
 # It has to be dismissed from a CONVERSATION rather than from this screen,
-# because the dismissal is a coordinate and on the sidebar that coordinate lands
-# inside the 에이전트 tab. In a conversation it lands on a disabled send button.
-# The channel is opened again later anyway, for the system line.
+# because the dismissal is a coordinate and on the channel list that coordinate
+# is the 「＋」 button. In a conversation it lands on a disabled send button.
 - tapOn:
     id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
 - extendedWaitUntil:
@@ -46,18 +53,26 @@ name: 40-agents-tab
 - tapOn:
     id: "header-back"
 
-# The agents tab is mounted LAZILY on first visit (AppShell), so `agents-list`
-# does not exist in the hierarchy until this tap has happened — waiting for it
-# before tapping would time out on a healthy app.
+# The agent list layer is mounted LAZILY on first visit (AppShell), so `agents-list`
+# does not exist in the hierarchy until it has been opened — waiting for it
+# before opening it would time out on a healthy app.
 - extendedWaitUntil:
     visible:
       id: "shell-plus"
     timeout: 30000
-# 에이전트·작업은 탭이 아니라 + 메뉴의 행이다 (ADR-0189 D1, #2714 → #2750).
+# 에이전트 목록은 탭이 아니라 + 메뉴 「AI」 시트의 「에이전트 부르기」 행이다 (ADR-0189 D1 →
+# N10 #3598: 에이전트 부르기·작업 맡기기·내 도구가 「AI」 시트 하나로 모였다). `plus-menu-agents`
+# 행은 없어졌고 + 메뉴의 행은 dm·channel·ai·work 넷이다(`PlusMenuItem.key`).
 - tapOn:
     id: "shell-plus"
 - tapOn:
-    id: "plus-menu-agents"
+    id: "plus-menu-ai"
+- extendedWaitUntil:
+    visible:
+      id: "ai-row-agents"
+    timeout: 10000
+- tapOn:
+    id: "ai-row-agents"
 - extendedWaitUntil:
     visible:
       id: "agents-list"
@@ -71,92 +86,34 @@ name: 40-agents-tab
     id: "agent-row-${AGENT_MEMBER_ID}"
 - extendedWaitUntil:
     visible:
-      id: "agent-state"
+      id: "agent-detail-title"
     timeout: 60000
 
-# Awake first — otherwise "재우기 worked" cannot be told apart from "it was
-# already asleep", and the toggle's label would have been 깨우기 all along.
-- assertVisible: ".*깨어 있습니다.*"
+# The profile card carries the fixture's own instructions (see the header), the
+# two actions are the ones #3902 left (「대화 열기」 primary, 「작업 맡기기」 secondary),
+# and the channels the agent was seated in show as chips.
 - assertVisible:
-    id: "agent-pause-toggle"
-- assertVisible: ".*재우기.*"
-
-# The effect notice is asserted BEFORE the tap: this control has no confirm
-# step, so the sentence on screen is the only thing standing between a person
-# and an agent that stops answering. It also has to be honest about what
-# sleeping does NOT do — a run already in flight keeps going.
+    id: "agent-profile-card"
 - assertVisible:
-    id: "agent-pause-effect"
-- assertVisible: ".*재우면 새 실행이 시작되지 않습니다.*"
+    id: "agent-instructions"
+    text: ".*MAESTRO-1 phone lane fixture.*"
+- assertVisible:
+    id: "agent-open-dm"
+- assertVisible:
+    id: "agent-delegate-work"
+- assertVisible:
+    id: "agent-channels"
 
-- tapOn:
-    id: "agent-pause-toggle"
-- extendedWaitUntil:
-    visible:
-      id: "agent-pause-receipt"
-    timeout: 60000
-- assertVisible: ".*재웠습니다.*"
-- assertVisible: ".*자고 있습니다.*"
-
-# 자고 있음 시스템 라인 — the half of 재우기 that happens in the CHANNEL.
-#
-# This is the assertion that makes the flow worth running: a paused agent that
-# silently ignores a mention is indistinguishable from a broken one, so the
-# server posts a system line naming it (MessageRoutes insertPausedMentionSystemLine),
-# and the phone has to render that line.
-- tapOn:
-    id: "header-back"
 # 에이전트 상세 → 에이전트 목록 층 → 홈. 탭바는 층 뒤에 있어 누를 수 없다.
 - tapOn:
     id: "header-back"
-- tapOn:
-    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
 - extendedWaitUntil:
     visible:
-      id: "composer-input"
-    timeout: 60000
-- runFlow: subflows/dismiss-dev-logbox.yaml
-
-- tapOn:
-    id: "composer-input"
-- inputText: "@kim"
-- extendedWaitUntil:
-    visible:
-      id: "mention-list"
-    timeout: 20000
-- tapOn:
-    id: "mention-option"
-    index: 0
-- inputText: "MAESTRO TEXT phone lane paused check"
-- tapOn:
-    id: "composer-send"
-
-- extendedWaitUntil:
-    visible: ".*현재 일시정지되어 있습니다.*"
-    timeout: 60000
-
-# Wake it back up — see the header.
+      id: "agents-list"
+    timeout: 10000
 - tapOn:
     id: "header-back"
-# 에이전트·작업은 탭이 아니라 + 메뉴의 행이다 (ADR-0189 D1, #2714 → #2750).
-- tapOn:
-    id: "shell-plus"
-- tapOn:
-    id: "plus-menu-agents"
 - extendedWaitUntil:
     visible:
-      id: "agent-row-${AGENT_MEMBER_ID}"
-    timeout: 60000
-- tapOn:
-    id: "agent-row-${AGENT_MEMBER_ID}"
-- extendedWaitUntil:
-    visible:
-      id: "agent-pause-toggle"
-    timeout: 60000
-- assertVisible: ".*깨우기.*"
-- tapOn:
-    id: "agent-pause-toggle"
-- extendedWaitUntil:
-    visible: ".*깨어 있습니다.*"
-    timeout: 60000
-- assertVisible: ".*깨웠습니다.*"
+      id: "sidebar-list"
+    timeout: 10000
