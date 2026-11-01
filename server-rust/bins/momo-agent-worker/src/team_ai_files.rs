@@ -140,22 +140,23 @@ impl AgentWorker {
             .await
         {
             Ok(bytes) => bytes,
-            // The mint proved the id again and refused: the file went away since the lookup. It is the
-            // same answer a file that was never there gets.
-            Err("attachment_not_available") => return AttachmentRead::said(ToolOutcome::NotFound),
-            Err(_) => return AttachmentRead::said(files::UNREADABLE),
+            Err(reason) => return AttachmentRead::said(outcome_of_failed_read(reason)),
         };
         // Whichever reader gave them, the bytes are held to the row once more: exactly the declared
-        // length, and what the declared type says (the archive path has no route to have checked).
-        if i64::try_from(bytes.len()).ok() != Some(target.size_bytes)
-            || !bytes_match_mime(&target.mime, &bytes)
-        {
+        // length (a row that disagrees with its file is the server's to answer for), and what the declared
+        // type says — the archive path has no route to have checked. Bytes that are not what their type
+        // says are a permanent property of this file (#4970 review L1).
+        if i64::try_from(bytes.len()).ok() != Some(target.size_bytes) {
             return AttachmentRead::said(files::UNREADABLE);
         }
+        if !bytes_match_mime(&target.mime, &bytes) {
+            return AttachmentRead::said(files::NOT_READABLE_FORMAT);
+        }
         match target.kind {
+            // Not UTF-8 and not EUC-KR (UTF-16, Shift-JIS, a binary that has no NUL): the file's own, permanent.
             ReadKind::Text => match text_from_bytes(&bytes) {
                 Ok(text) => document(&text),
-                Err(_) => AttachmentRead::said(files::UNREADABLE),
+                Err(_) => AttachmentRead::said(files::NOT_READABLE_FORMAT),
             },
             ReadKind::Pdf => {
                 match extract_pdf_text(
@@ -169,8 +170,15 @@ impl AgentWorker {
                     Ok(text) => document(&text),
                     Err(ExtractError::Busy) => AttachmentRead::said(files::BUSY),
                     Err(ExtractError::NoText) => AttachmentRead::said(files::NO_TEXT),
+                    // This PDF: broken, not one, too complex for the child's time or memory. Said as a
+                    // property of the file — asking again in a moment would only spend the child again.
                     Err(ExtractError::Unreadable) => {
                         tracing::warn!(run_id = %run_id, "a PDF could not be read");
+                        AttachmentRead::said(files::NOT_READABLE_FORMAT)
+                    }
+                    // The server could not even try (no child could be started): the hiccup sentence.
+                    Err(ExtractError::Unavailable) => {
+                        tracing::warn!(run_id = %run_id, "the PDF reader could not be started");
                         AttachmentRead::said(files::UNREADABLE)
                     }
                 }
@@ -191,6 +199,23 @@ impl AgentWorker {
     }
 }
 
+/// What a failed read of the bytes is told to the requester as. The reasons are the reader's closed
+/// vocabulary ([`AttachmentBytes::read`]); the file is the requester's own by now (the lookup proved it), so
+/// what is said about it leaks nothing:
+///
+/// * `attachment_not_available` — the address could not be minted: the file went away since the lookup,
+///   which is the answer a file that was never there gets;
+/// * `attachment_not_readable` — the address was given and the api then refused the bytes (it sniffs them):
+///   the file is not what its type says. A permanent property of the file;
+/// * anything else is the archive or the api failing — a hiccup.
+fn outcome_of_failed_read(reason: &str) -> ToolOutcome {
+    match reason {
+        "attachment_not_available" => ToolOutcome::NotFound,
+        "attachment_not_readable" => files::NOT_READABLE_FORMAT,
+        _ => files::UNREADABLE,
+    }
+}
+
 /// A document's letters as the outcome: sanitized, capped, and honest about being cut. Nothing without a
 /// letter in it is a document.
 fn document(raw: &str) -> AttachmentRead {
@@ -204,6 +229,28 @@ fn document(raw: &str) -> AttachmentRead {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_read_is_told_as_what_it_is() {
+        // the file went away since the lookup: the one `not_found`
+        assert_eq!(
+            outcome_of_failed_read("attachment_not_available"),
+            ToolOutcome::NotFound
+        );
+        // the api refused the bytes of the requester's own file: permanent, said as such
+        assert_eq!(
+            outcome_of_failed_read("attachment_not_readable"),
+            files::NOT_READABLE_FORMAT
+        );
+        // the archive or the api failing, or a reason nobody has heard of: the hiccup
+        for hiccup in ["drive_unavailable", "something_new", ""] {
+            assert_eq!(
+                outcome_of_failed_read(hiccup),
+                files::UNREADABLE,
+                "{hiccup}"
+            );
+        }
+    }
 
     #[test]
     fn a_document_without_a_letter_is_no_document() {

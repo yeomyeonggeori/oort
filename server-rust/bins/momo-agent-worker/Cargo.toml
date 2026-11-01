@@ -67,6 +67,10 @@ lopdf = { version = "0.41", default-features = false }
 image.workspace = true
 base64.workspace = true
 encoding_rs = "0.8"
+# #4970 수리 (독립 보안 검수 High): the PDF child puts a ceiling on its own address space as its first
+# act. `rlimit` is the safe wrapper `momo-expressions` already uses for its decoder child, so this is a
+# new edge in the graph and no new crate (and the workspace's `unsafe_code = "forbid"` stands).
+rlimit = "0.10"
 
 async-trait.workspace = true
 chrono.workspace = true
@@ -102,6 +106,11 @@ sqlx.workspace = true
 # no new crate enters the dependency graph, so the Dockerfile crate list is
 # unchanged.
 tokio = { workspace = true, features = ["net", "io-util"] }
+
+# #4970 수리 (tests/attachment_text_child.rs): the memory guard is measured against a real child reading a
+# stream that inflates far past its own size; the test writes that stream with the very crate `lopdf`
+# reads it with. Already in the graph (lopdf's), so no new crate.
+flate2 = "1"
 
 [lints]
 workspace = true

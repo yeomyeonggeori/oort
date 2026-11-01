@@ -464,6 +464,9 @@ struct Script {
     replies: Mutex<VecDeque<ChatCompletion>>,
     seen: Mutex<Vec<(ProviderWire, ChatRequest)>>,
     pictures: Mutex<Vec<(usize, Vec<ModelImage>)>>,
+    /// When set, a call that carries a picture is refused with this HTTP status — what a text-only model
+    /// behind a compatible gateway does with an image block (#4970 review L4).
+    picture_refusal: Mutex<Option<u16>>,
 }
 
 impl Script {
@@ -472,7 +475,12 @@ impl Script {
             replies: Mutex::new(replies.into()),
             seen: Mutex::new(Vec::new()),
             pictures: Mutex::new(Vec::new()),
+            picture_refusal: Mutex::new(None),
         })
+    }
+    /// Make every call that carries a picture fail with `status`.
+    fn refuse_pictures(&self, status: u16) {
+        *self.picture_refusal.lock().unwrap() = Some(status);
     }
     fn seen(&self) -> Vec<(ProviderWire, ChatRequest)> {
         self.seen.lock().unwrap().clone()
@@ -517,6 +525,12 @@ impl ChatProvider for Script {
             .push((seen.len(), images.to_vec()));
         seen.push((endpoint.wire, request.clone()));
         drop(seen);
+        if let Some(status) = *self.picture_refusal.lock().unwrap() {
+            return Err(ProviderError::HttpStatus(
+                status,
+                "this model does not take image input".to_string(),
+            ));
+        }
         Ok(self.next())
     }
 }
@@ -921,15 +935,16 @@ async fn a_pdf_is_read_by_the_supervised_child_and_a_scan_or_a_broken_one_says_s
     let cases: Vec<(&str, Vec<u8>, &str)> = vec![
         ("letters", pdf_with(&[SENTINEL, "분기 계획"]), "ok"),
         ("a scan: no letters", pdf_with(&[]), "no_text"),
+        // #4970 review L1: what is wrong with **this file** is not told as 「잠시 뒤에 다시」
         (
             "broken",
             b"%PDF-1.7 this is not a document".to_vec(),
-            "unreadable",
+            "unreadable_format",
         ),
         (
             "not a PDF at all",
             b"<html>no</html>".to_vec(),
-            "unreadable",
+            "unreadable_format",
         ),
     ];
     for (label, bytes, expected_code) in cases {
@@ -1299,6 +1314,40 @@ async fn a_file_the_requester_owns_but_cannot_have_read_gets_an_honest_sentence(
         "complete",
     )
     .await;
+    // #4970 review L1: an empty file is the requester's own to be told about — and nobody else's
+    let empty = attach(
+        &su,
+        t.workspace_id,
+        t.channel_id,
+        t.member_id,
+        message,
+        "text/plain",
+        0,
+        "complete",
+    )
+    .await;
+    let empty_zip = attach(
+        &su,
+        t.workspace_id,
+        t.channel_id,
+        t.member_id,
+        message,
+        "application/zip",
+        0,
+        "complete",
+    )
+    .await;
+    let colleague_empty = attach(
+        &su,
+        t.workspace_id,
+        t.channel_id,
+        t.owner_id,
+        colleague_message,
+        "application/pdf",
+        0,
+        "complete",
+    )
+    .await;
     let colleague_huge = attach(
         &su,
         t.workspace_id,
@@ -1357,11 +1406,25 @@ async fn a_file_the_requester_owns_but_cannot_have_read_gets_an_honest_sentence(
     );
     assert_eq!(outcome_of(word).await.unwrap_err(), files::UNSUPPORTED_TYPE);
     assert_eq!(
+        outcome_of(empty).await.unwrap_err(),
+        files::EMPTY_FILE,
+        "no bytes: said as what it is, not 「못 찾아요」 and not 「잠시 뒤에」"
+    );
+    assert_eq!(
+        outcome_of(empty_zip).await.unwrap_err(),
+        files::UNSUPPORTED_TYPE,
+        "the type is said first, empty or not"
+    );
+    assert_eq!(
         outcome_of(zip).await.unwrap_err(),
         files::UNSUPPORTED_TYPE,
         "the type is said before the size: there is no point in a ceiling for a file that is not read"
     );
-    // somebody else's file says nothing about itself, whatever its size or type
+    // somebody else's file says nothing about itself, whatever its size or type — empty included
+    assert_eq!(
+        outcome_of(colleague_empty).await.unwrap_err(),
+        ToolOutcome::NotFound
+    );
     assert_eq!(
         outcome_of(colleague_huge).await.unwrap_err(),
         ToolOutcome::NotFound
@@ -1601,6 +1664,78 @@ async fn a_wire_that_cannot_see_pictures_says_so_and_reads_nothing() {
         heads.lock().unwrap().is_empty(),
         "the picture was not even read"
     );
+}
+
+/// #4970 review L4: a wire that can carry a picture says nothing about the model behind it. When the call
+/// that carries the picture is refused because of the request itself (400, 413, 415, 422) the person is told
+/// the model cannot read pictures — and the delegate buttons are still there; a refusal that has nothing to
+/// do with pictures (a rate limit, the provider's own fault) stays 「제때 답하지 못했어요」.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_model_that_refuses_the_picture_is_said_not_to_read_pictures() {
+    use momo_workspace_actions::team_ai::FallbackReason;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_anthropic_link(&su, t.owner_id).await;
+
+    let png = noise_png(64);
+    let (origin, _) = file_stub("image/png", png.clone()).await;
+    for (status, expected) in [
+        (400_u16, FallbackReason::ImageRefused),
+        (422, FallbackReason::ImageRefused),
+        (429, FallbackReason::Slow),
+        (500, FallbackReason::Slow),
+    ] {
+        let (_run, trigger) = enqueue(
+            &pool,
+            &t,
+            t.channel_id,
+            t.member_id,
+            "@oort-helper 이 사진 뭐야",
+        )
+        .await;
+        let id = attach(
+            &su,
+            t.workspace_id,
+            t.channel_id,
+            t.member_id,
+            trigger,
+            "image/png",
+            png.len() as i64,
+            "complete",
+        )
+        .await;
+        let provider = Script::new(vec![tools(&[read_call(id)]), text("쓰이지 않는 답이에요.")]);
+        provider.refuse_pictures(status);
+        let w = worker_with(provider.clone(), |config| {
+            config.api_internal_origin = Some(origin.clone());
+        })
+        .await;
+        drain(&w).await;
+        assert_eq!(
+            provider.pictures().len(),
+            1,
+            "{status}: the call that carried the picture is the one that was refused"
+        );
+        let (body, props_reason): (String, Option<String>) = sqlx::query_as(
+            "SELECT body, props->>'reason' FROM message \
+              WHERE workspace_id = $1 AND author_member_id = $2 \
+              ORDER BY created_at DESC, seq DESC LIMIT 1",
+        )
+        .bind(t.workspace_id)
+        .bind(t.agent_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        assert_eq!(body, expected.sentence(), "{status}");
+        assert_eq!(props_reason.as_deref(), Some(expected.as_str()), "{status}");
+    }
+    assert!(FallbackReason::ImageRefused
+        .sentence()
+        .contains("이미지를 못 읽어요"));
 }
 
 /// What the helper read taints the request (B4-3): the sensitive card leaves the `actionId` enum — the
@@ -2017,7 +2152,8 @@ impl DriveArchive for MapArchive {
 
 /// With no private address the worker reads its own archive, which nothing has sniffed: the worker holds
 /// the bytes to the row itself — the declared length and what the declared type says. A binary file that
-/// merely says `text/plain` is `unreadable`, never a document of control characters.
+/// merely says `text/plain` is `unreadable_format`, never a document of control characters; a file
+/// shorter than its row says is `unreadable` (the server's, a hiccup).
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn the_archive_path_is_sniffed_too() {
@@ -2034,6 +2170,9 @@ async fn the_archive_path_is_sniffed_too() {
         .as_bytes()
         .to_vec();
     let short = b"only part of what the row declares".to_vec();
+    // Latin-1 「été」: no NUL, so the sniff takes it, and neither UTF-8 nor EUC-KR — only the decoder stops
+    // it (#4970 review L1)
+    let other_encoding = vec![0xE9, 0x74, 0xE9];
     let archive = Arc::new(MapArchive::default());
     let (run, trigger) = enqueue(&pool, &t, t.channel_id, t.member_id, "@oort-helper 읽어줘").await;
     let mut ids = Vec::new();
@@ -2041,6 +2180,7 @@ async fn the_archive_path_is_sniffed_too() {
         (good.clone(), good.len() as i64),
         (binary.clone(), binary.len() as i64),
         (short.clone(), short.len() as i64 + 10),
+        (other_encoding.clone(), other_encoding.len() as i64),
     ] {
         let id = attach(
             &su,
@@ -2081,8 +2221,9 @@ async fn the_archive_path_is_sniffed_too() {
     .unwrap();
     assert_eq!(
         audit["tool_results"],
-        json!(["ok", "unreadable", "unreadable"]),
-        "the good file reads; the binary one and the short one do not"
+        json!(["ok", "unreadable_format", "unreadable", "unreadable_format"]),
+        "the good file reads; a binary that calls itself text and a text in another encoding are the \
+         file's own permanent problem; a file shorter than its row says is the server's (a hiccup)"
     );
     let result = last_user_turn(&provider.seen(), 1);
     assert!(result.contains(SENTINEL), "the good file reached the model");
@@ -2208,8 +2349,9 @@ async fn status_stub(status_line: &'static str) -> String {
 }
 
 /// The file is the requester's and the rules pass, but the server cannot read it: the api is down, the api
-/// has an error, or the file went away between the lookup and the read. The first two are the fixed
-/// 「서버가 이 파일을 읽지 못했어요」; a file that is gone is the one `not_found` — and none says why.
+/// has an error, or it refuses the bytes. The first two are the fixed 「서버가 이 파일을 읽지 못했어요」
+/// (a hiccup: try again); the api refusing the bytes of the requester's own file is the file's permanent
+/// problem, said as such — and none says why in more detail than that.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn a_server_that_cannot_read_the_file_says_so_honestly() {
@@ -2231,10 +2373,13 @@ async fn a_server_that_cannot_read_the_file_says_so_honestly() {
             status_stub("500 Internal Server Error").await,
             "unreadable",
         ),
+        // the api handed out the address and then refused the bytes — it sniffs them first: the requester's
+        // own file is not what its type says (UTF-16 text, a PDF that is not one). Permanent, and said so
+        // (#4970 review L1); a file that vanished before the address was minted is the lookup's `not_found`.
         (
-            "the file is gone",
+            "the api refuses the bytes of the requester's own file",
             status_stub("404 Not Found").await,
-            "not_found",
+            "unreadable_format",
         ),
     ];
     for (label, origin, expected) in cases {

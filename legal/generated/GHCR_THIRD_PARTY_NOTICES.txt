@@ -8,7 +8,7 @@
 # legal sufficiency. Debian OS-layer licenses are inventoried separately
 # inside each image; GPL/LGPL there are copyleft, not permissive.
 #
-# cargo.lock.sha256: 584a3253fc8ab92dad01b029753c5229fb174ff61fed35d5002de8267c35247b
+# cargo.lock.sha256: b5673b35c30ab9b0bd1e7b0bc4a67846c040d19eb3e57c1cf66b41445fa3654e
 # web.package-lock.sha256: 0e4507662218a825c370dcef97ee7d5ff5bad8f5238da3f50bbb5f5e85ba2c2d
 # clarify.sha256: 366b7c68569c49f9fab915342fc2c620d1ee6318ab3567d337fd4f7d1a0f79c3
 # cargo.packages: 423

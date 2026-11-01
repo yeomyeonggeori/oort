@@ -24,7 +24,8 @@
 //! workspace is the run's, the token is the one just minted.
 //!
 //! * **One refusal in, one reason out.** A refused mint, a 404 and every wrong shape of answer end as a
-//!   fixed reason code (`attachment_not_available`, `drive_unavailable`); no transport message is ever
+//!   fixed reason code (`attachment_not_available`, `attachment_not_readable` — the helper's read only —
+//!   `drive_unavailable`); no transport message is ever
 //!   returned. Those messages carry the request URL, and this URL carries a credential.
 //! * **Nothing about the address in a log line.** The two lines this module writes name the run and a cause:
 //!   a database error, or an `Unread` — the private failure type, which holds **a fixed word and nothing the
@@ -243,6 +244,23 @@ impl Unread {
     }
 }
 
+/// The reason a read through the api ends with, for the use it was made for. The helper's read
+/// ([`RequesterAttachmentUse::Read`]) tells one more thing than the avatar flow does: the mint has just proved
+/// the file is the requester's, so when the api then refuses the bytes (a 404 — it sniffs them before it sends
+/// them) or sends bytes that are not what the type says, **the file is not what its type says**. That is a
+/// permanent property of the file, not a vanished one (a vanished file is the mint's own refusal,
+/// `attachment_not_available`) and not the server failing — and the caller says so (#4970 review L1). A wrong
+/// header, a wrong length, any other status and the network failing stay `drive_unavailable`.
+fn failure_reason(usage: RequesterAttachmentUse, unread: &Unread) -> &'static str {
+    match (usage, unread) {
+        (RequesterAttachmentUse::Read, Unread::Status(404))
+        | (RequesterAttachmentUse::Read, Unread::Shape("not_the_declared_image")) => {
+            "attachment_not_readable"
+        }
+        _ => unread.reason(),
+    }
+}
+
 impl std::fmt::Display for Unread {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -324,10 +342,15 @@ async fn fetch_as(
     if body.len() != declared {
         return Err(Unread::Shape("too_short"));
     }
-    if !content_type
+    // The answer's type must be one of the use's own — a header problem is the api's, not the file's —
+    let Some(mime) = content_type
         .as_deref()
-        .is_some_and(|mime| allowed.contains(&mime) && bytes_match_mime(mime, &body))
-    {
+        .filter(|mime| allowed.contains(mime))
+    else {
+        return Err(Unread::Shape("content_type"));
+    };
+    // — and the bytes must be what that type says: the file is not, when they are not.
+    if !bytes_match_mime(mime, &body) {
         return Err(Unread::Shape("not_the_declared_image"));
     }
     Ok(body)
@@ -400,7 +423,7 @@ impl AttachmentBytes for ApiAttachmentBytes<'_> {
                 // The cause is a fixed word or a number (`Unread`); the url and the token are not in scope of
                 // this line, and nothing the transport said was kept to put on it.
                 tracing::warn!(run_id = %run_id, cause = %unread, "attachment read through the api failed");
-                Err(unread.reason())
+                Err(failure_reason(usage, &unread))
             }
         }
     }
@@ -629,12 +652,12 @@ mod tests {
             (
                 "a png under a type that is not an image",
                 answer("200 OK", "text/html", &png(4096)),
-                "not_the_declared_image",
+                "content_type",
             ),
             (
                 "no content type",
                 answer("200 OK", "", &png(4096)),
-                "not_the_declared_image",
+                "content_type",
             ),
         ] {
             let (origin, _) = stub(response).await;
@@ -642,6 +665,39 @@ mod tests {
             assert!(
                 matches!(&result, Err(Unread::Shape(got)) if *got == reason),
                 "{what}: {result:?}"
+            );
+        }
+    }
+
+    /// #4970 review L1: for the helper's read the api refusing the bytes of a file the mint just accepted is the
+    /// file's own permanent problem; for the avatar flow, and for everything that is the server or the network
+    /// failing, the reasons are what they always were.
+    #[test]
+    fn the_helpers_read_names_a_file_that_is_not_what_it_says_and_nothing_else_does() {
+        use RequesterAttachmentUse::{Avatar, Read};
+        for unread in [Unread::Status(404), Unread::Shape("not_the_declared_image")] {
+            assert_eq!(failure_reason(Read, &unread), "attachment_not_readable");
+        }
+        assert_eq!(
+            failure_reason(Avatar, &Unread::Status(404)),
+            "attachment_not_available"
+        );
+        assert_eq!(
+            failure_reason(Avatar, &Unread::Shape("not_the_declared_image")),
+            "drive_unavailable"
+        );
+        for unread in [
+            Unread::Status(500),
+            Unread::Status(429),
+            Unread::Shape("content_type"),
+            Unread::Shape("length"),
+            Unread::Shape("too_short"),
+            Unread::Transport("connect"),
+        ] {
+            assert_eq!(
+                failure_reason(Read, &unread),
+                "drive_unavailable",
+                "{unread}"
             );
         }
     }
@@ -661,7 +717,7 @@ mod tests {
         let unread = fetch(&client(), &url(&origin), pdf.len())
             .await
             .unwrap_err();
-        assert_eq!(unread.to_string(), "shape: not_the_declared_image");
+        assert_eq!(unread.to_string(), "shape: content_type");
         let read = fetch_as(
             &client(),
             &url(&origin),

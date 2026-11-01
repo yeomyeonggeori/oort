@@ -1364,8 +1364,11 @@ async fn a_text_file_a_pdf_and_a_picture_come_back_through_the_route_for_a_read(
 }
 
 /// What the read must still refuse — and, as importantly, what the **avatar** flow must still refuse: the
-/// widening is for the helper's read only. Each case is the one reason code, with the api asked only where
-/// the refusal is the route's own.
+/// widening is for the helper's read only. Each case is a closed reason code, with the api asked only where
+/// the refusal is the route's own: a refusal before the route (the mint, the worker's own size check) is
+/// `attachment_not_available`, the route's own refusal of the helper's read — it sniffs the bytes — is
+/// `attachment_not_readable` (#4970 review L1: the requester's own file is not what its type says, which is
+/// said to them as a permanent property of the file and not as a file that is not there).
 ///
 /// RED: widen the avatar mint to the read types (the PDF and the text file get an address), drop the
 /// author predicate from the mint or the redeem, drop the live-message predicate, drop the NUL rule from
@@ -1589,10 +1592,15 @@ async fn the_read_use_refuses_what_the_mint_the_route_and_the_worker_must_refuse
     for case in &cases {
         let before = server.requests().len();
         let answer = read_as(&worker, &case.tenant, case.id, case.size, case.usage).await;
+        let expected = if case.api_asked && case.usage == Read {
+            "attachment_not_readable"
+        } else {
+            "attachment_not_available"
+        };
         assert_eq!(
             answer,
-            Err("attachment_not_available"),
-            "{}: one reason, whoever refused",
+            Err(expected),
+            "{}: the reason is the refusing gate's own",
             case.label
         );
         let asked = server.requests().len() - before;

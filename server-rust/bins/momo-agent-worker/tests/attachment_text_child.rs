@@ -9,12 +9,24 @@
 //! | `a_child_that_answers_before_reading_everything_is_not_an_error_of_the_parent` | treating a closed stdin as a failure |
 //! | `a_child_that_answers_with_too_much_or_with_nonsense_is_unreadable` | the output cap / the closed answer shape |
 //! | `a_pdf_over_the_input_ceiling_never_starts_a_child` | the input ceiling |
+//! | `a_well_formed_answer_over_the_output_cap_is_refused` | `take(CHILD_OUTPUT_MAX + 1)` and the `data.len() > CHILD_OUTPUT_MAX` refusal (the nonsense test above is not JSON, so it passes without them) |
+//! | `both_slots_stay_taken_while_two_real_children_run` | giving the slot back before the child is reaped (`let _permit = permit;` → `drop(permit)`) |
+//! | `a_stream_that_inflates_far_past_its_size_is_ended_by_the_memory_watch` | the supervisor's memory watch (`over_memory` in the race, or its comparison with the ceiling), the kill by pid, the reap before the slot returns |
+//! | `the_shipped_ceiling_ends_a_child_that_inflates_past_it` | `CHILD_MEMORY_MAX` / `CHILD_MEMORY_POLL` as shipped (the guard the worker really uses, with only a sink added) |
+//! | `a_child_ends_itself_at_its_own_deadline_when_nothing_ends_it` | the watchdog thread `child_main_with` starts |
+//! | `a_child_confines_itself_before_it_reads_a_byte` (Linux) | `oom_score_adj` 1000 and the address-space ceiling `confine_self` sets |
 
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use momo_agent_worker::attachment_text::{extract_pdf_text, ExtractError, CHILD_ARG};
+use momo_agent_worker::attachment_text::{
+    child_main_with, extract_pdf_text, extract_pdf_text_guarded, ExtractError, MemoryGuard,
+    CHILD_ARG, CHILD_MEMORY_MAX, WATCHDOG_EXIT_CODE,
+};
 
 const CEILING: usize = 5 * 1024 * 1024;
 
@@ -222,8 +234,9 @@ async fn a_child_that_answers_with_too_much_or_with_nonsense_is_unreadable() {
     let missing = PathBuf::from("/nonexistent/oort-4970-child");
     assert_eq!(
         read_with(&missing, pdf_with(&["x"]), Duration::from_secs(10)).await,
-        Err(ExtractError::Unreadable),
-        "no child, no parse — the parent never falls back to reading the PDF itself"
+        Err(ExtractError::Unavailable),
+        "no child, no parse — the parent never falls back to reading the PDF itself, and it is the server's \
+         fault, not the file's (#4970 review L1: the caller must not blame the file)"
     );
     for path in [flood, nonsense, failing] {
         let _ = std::fs::remove_file(path);
@@ -253,4 +266,286 @@ async fn a_pdf_over_the_input_ceiling_never_starts_a_child() {
     assert_eq!(answer, Err(ExtractError::Unreadable));
     assert!(!marker.exists(), "an over-long input started the child");
     let _ = std::fs::remove_file(&tripwire);
+}
+
+// --- the two guards a review found nothing was measuring (#4970 수리) -----------------------------------
+
+/// 출력 상한: 넘치는 답이 **올바른 JSON 한 줄**이어도 거절해야 해요.
+#[tokio::test]
+async fn a_well_formed_answer_over_the_output_cap_is_refused() {
+    let _serial = serial().await;
+    let big = script(
+        "bigjson",
+        r#"printf '{"ok":true,"text":"'; head -c 2000000 /dev/zero | tr '\0' 'a'; printf '"}\n'"#,
+    );
+    assert_eq!(
+        read_with(&big, pdf_with(&["x"]), Duration::from_secs(10)).await,
+        Err(ExtractError::Unreadable),
+        "a 2 MB answer was accepted"
+    );
+    let _ = std::fs::remove_file(&big);
+}
+
+/// 슬롯: 진짜로 도는 자식 둘이 있는 동안 셋째는 즉시 Busy, 둘이 회수된 뒤에는 슬롯이 돌아와요.
+#[tokio::test]
+async fn both_slots_stay_taken_while_two_real_children_run() {
+    let _serial = serial().await;
+    let hang = script("hang2", "exec sleep 20");
+    let (p1, p2) = (hang.clone(), hang.clone());
+    let h1 =
+        tokio::spawn(
+            async move { read_with(&p1, pdf_with(&["x"]), Duration::from_millis(1500)).await },
+        );
+    let h2 =
+        tokio::spawn(
+            async move { read_with(&p2, pdf_with(&["x"]), Duration::from_millis(1500)).await },
+        );
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let started = Instant::now();
+    assert_eq!(
+        read_with(&hang, pdf_with(&["x"]), Duration::from_millis(1500)).await,
+        Err(ExtractError::Busy)
+    );
+    assert!(started.elapsed() < Duration::from_millis(500));
+    assert_eq!(h1.await.unwrap(), Err(ExtractError::Unreadable));
+    assert_eq!(h2.await.unwrap(), Err(ExtractError::Unreadable));
+    let fast = script("fast", r#"printf '{"ok":true,"text":"back"}\n'"#);
+    assert_eq!(
+        read_with(&fast, pdf_with(&["x"]), Duration::from_secs(5)).await,
+        Ok("back".to_string())
+    );
+}
+
+fn deflate(data: &[u8]) -> Vec<u8> {
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    encoder.write_all(data).unwrap();
+    encoder.finish().unwrap()
+}
+
+/// A page whose content stream is a few kilobytes on disk and `mebibytes` MiB once its three
+/// `FlateDecode` layers are opened. Written with the crates the child reads it with.
+fn inflating_pdf(mebibytes: usize) -> Vec<u8> {
+    use lopdf::{dictionary, Dictionary, Document, Object, Stream};
+    let zeros = vec![0u8; 1024 * 1024];
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+    for _ in 0..mebibytes {
+        encoder.write_all(&zeros).unwrap();
+    }
+    let innermost = encoder.finish().unwrap();
+    let packed = deflate(&deflate(&innermost));
+    let mut doc = Document::with_version("1.5");
+    let pages_id = doc.new_object_id();
+    let mut dict = Dictionary::new();
+    dict.set(
+        "Filter",
+        Object::Array(vec![Object::Name(b"FlateDecode".to_vec()); 3]),
+    );
+    let content_id = doc.add_object(Stream::new(dict, packed));
+    let page_id = doc.add_object(dictionary! {
+        "Type" => "Page", "Parent" => pages_id, "Contents" => content_id,
+    });
+    doc.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages", "Kids" => vec![page_id.into()], "Count" => 1,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        }),
+    );
+    let catalog_id = doc.add_object(dictionary! { "Type" => "Catalog", "Pages" => pages_id });
+    doc.trailer.set("Root", catalog_id);
+    let mut bytes = Vec::new();
+    doc.save_to(&mut bytes).unwrap();
+    bytes
+}
+
+/// One gigabyte once opened, built once per test run: the same bytes serve every test that needs them.
+fn shared_bomb() -> Vec<u8> {
+    static BOMB: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+    BOMB.get_or_init(|| inflating_pdf(1024)).clone()
+}
+
+/// ADR-0151 증보 4 D7: the memory of a child is bounded by the supervisor, not by luck. The ceiling here
+/// is small so a debug build reaches it fast; the **real** child reads the file. Three things are
+/// measured: it ends `Unreadable`, the watch **saw** it cross the ceiling and was not far behind it
+/// (`peak` is the highest size the watch sampled — a child that ended by itself, or was left to inflate
+/// the whole stream, would not leave that trace), and the slot is back for the next file.
+#[tokio::test]
+async fn a_stream_that_inflates_far_past_its_size_is_ended_by_the_memory_watch() {
+    let _serial = serial().await;
+    const CEILING_BYTES: u64 = 64 * 1024 * 1024;
+    const OVERSHOOT_BYTES: u64 = 512 * 1024 * 1024;
+    let bomb = shared_bomb();
+    assert!(
+        bomb.len() < 256 * 1024,
+        "the file stays small ({} bytes) while what it opens into is a gigabyte",
+        bomb.len()
+    );
+    let bomb_len = bomb.len();
+    let peak = Arc::new(AtomicU64::new(0));
+    let guard = MemoryGuard {
+        max_bytes: CEILING_BYTES,
+        poll: Duration::from_millis(25),
+        peak: Some(peak.clone()),
+    };
+    let child = worker_binary();
+    let started = Instant::now();
+    let answer =
+        extract_pdf_text_guarded(bomb, Some(&child), CEILING, Duration::from_secs(60), guard).await;
+    let took = started.elapsed();
+    assert_eq!(answer, Err(ExtractError::Unreadable));
+    let seen = peak.load(Ordering::SeqCst);
+    eprintln!(
+        "memory watch: file {} bytes, highest sample {} MiB, ended after {took:?}",
+        bomb_len,
+        seen / (1024 * 1024)
+    );
+    assert!(
+        seen > CEILING_BYTES,
+        "the watch never saw the child cross the ceiling (highest sample {seen} bytes)"
+    );
+    assert!(
+        seen < CEILING_BYTES + OVERSHOOT_BYTES,
+        "the child was ended after it had used {seen} bytes"
+    );
+    assert!(took < Duration::from_secs(40), "ended after {took:?}");
+    // the slot is back and the next file is read
+    let next = read_with(
+        &child,
+        pdf_with(&["after the stream"]),
+        Duration::from_secs(20),
+    )
+    .await
+    .expect("the next PDF reads");
+    assert!(next.contains("after the stream"), "{next:?}");
+}
+
+/// The guard **as shipped** — `CHILD_MEMORY_MAX` and `CHILD_MEMORY_POLL`, the numbers the worker really
+/// runs with — ends the same stream: the highest sample is above the shipped ceiling and well short of the
+/// stream's size. (The test above proves the mechanism with a small ceiling; this one proves the shipped
+/// numbers are not decorative. Needs the container, if any, to allow the child about a gigabyte.)
+#[tokio::test]
+async fn the_shipped_ceiling_ends_a_child_that_inflates_past_it() {
+    let _serial = serial().await;
+    let peak = Arc::new(AtomicU64::new(0));
+    let guard = MemoryGuard {
+        peak: Some(peak.clone()),
+        ..MemoryGuard::PRODUCTION
+    };
+    let child = worker_binary();
+    let answer = extract_pdf_text_guarded(
+        shared_bomb(),
+        Some(&child),
+        CEILING,
+        Duration::from_secs(60),
+        guard,
+    )
+    .await;
+    assert_eq!(answer, Err(ExtractError::Unreadable));
+    let seen = peak.load(Ordering::SeqCst);
+    eprintln!(
+        "shipped ceiling: {} MiB, highest sample {} MiB",
+        CHILD_MEMORY_MAX / (1024 * 1024),
+        seen / (1024 * 1024)
+    );
+    assert!(
+        seen > CHILD_MEMORY_MAX,
+        "the shipped watch never saw the child cross the shipped ceiling (highest sample {seen} bytes)"
+    );
+    assert!(
+        seen < CHILD_MEMORY_MAX + 512 * 1024 * 1024,
+        "the child was ended after it had used {seen} bytes"
+    );
+}
+
+// --- the child's own confinement, measured from outside ----------------------------------------------
+//
+// This test binary re-runs **itself** as the child: `OORT_4970_CHILD_PROBE=<ms>` makes the named test
+// call `child_main_with` and exit with its code, the way the worker binary does with
+// `--attachment-text-child`. The parent keeps the probe's stdin open and writes nothing, which is what a
+// child looks like whose supervisor has stopped answering.
+
+/// Call at the top of a probe test: becomes the child when asked to.
+fn become_the_child_if_asked() {
+    if let Some(ms) = std::env::var("OORT_4970_CHILD_PROBE")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+    {
+        std::process::exit(child_main_with(CEILING, Duration::from_millis(ms)));
+    }
+}
+
+fn spawn_probe(test: &str, self_deadline_ms: u64) -> std::process::Child {
+    std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test, "--nocapture", "--test-threads=1"])
+        .env("OORT_4970_CHILD_PROBE", self_deadline_ms.to_string())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap()
+}
+
+#[test]
+fn a_child_ends_itself_at_its_own_deadline_when_nothing_ends_it() {
+    become_the_child_if_asked();
+    let mut probe = spawn_probe(
+        "a_child_ends_itself_at_its_own_deadline_when_nothing_ends_it",
+        700,
+    );
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = probe.try_wait().unwrap() {
+            break status;
+        }
+        if started.elapsed() > Duration::from_secs(20) {
+            let _ = probe.kill();
+            let _ = probe.wait();
+            panic!("the child never ended itself");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(status.code(), Some(WATCHDOG_EXIT_CODE));
+    assert!(
+        started.elapsed() >= Duration::from_millis(600),
+        "it ended before its own deadline: {:?}",
+        started.elapsed()
+    );
+}
+
+/// `oom_score_adj` and the address-space ceiling are the kernel's to enforce, so they are read back from
+/// the kernel: `/proc/<pid>/oom_score_adj` and `/proc/<pid>/limits` of a child blocked on its stdin.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_child_confines_itself_before_it_reads_a_byte() {
+    become_the_child_if_asked();
+    let mut probe = spawn_probe("a_child_confines_itself_before_it_reads_a_byte", 60_000);
+    let pid = probe.id();
+    let ceiling = momo_agent_worker::attachment_text::CHILD_ADDRESS_SPACE_MAX.to_string();
+    let started = Instant::now();
+    let (adj, row) = loop {
+        let adj = std::fs::read_to_string(format!("/proc/{pid}/oom_score_adj")).unwrap_or_default();
+        let limits = std::fs::read_to_string(format!("/proc/{pid}/limits")).unwrap_or_default();
+        let row = limits
+            .lines()
+            .find(|line| line.starts_with("Max address space"))
+            .unwrap_or_default()
+            .to_string();
+        if (adj.trim() == "1000" && row.contains(&ceiling))
+            || started.elapsed() > Duration::from_secs(10)
+        {
+            break (adj, row);
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    let _ = probe.kill();
+    let _ = probe.wait();
+    assert_eq!(
+        adj.trim(),
+        "1000",
+        "the kernel's out-of-memory killer must pick the child first"
+    );
+    assert!(
+        row.contains(&ceiling),
+        "the address-space ceiling is not in place: {row:?}"
+    );
 }

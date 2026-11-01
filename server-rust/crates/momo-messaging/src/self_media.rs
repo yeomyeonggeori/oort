@@ -144,11 +144,31 @@ impl std::fmt::Debug for SelfMediaGrant {
 }
 
 /// What a redeemed token lets the route read: one Drive file, its declared size and mime.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Not `Debug`-derived, like [`SelfMediaGrant`]: `drive_file_id` is the archive's own name for the file
+/// (#4970 review, L5).
+#[derive(Clone, PartialEq, Eq)]
 pub struct SelfMediaSource {
     pub drive_file_id: String,
     pub size_bytes: i64,
     pub mime: String,
+}
+
+impl std::fmt::Debug for SelfMediaSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Destructured so that a field added later has to be decided on here, not skipped silently.
+        let SelfMediaSource {
+            drive_file_id: _,
+            size_bytes,
+            mime,
+        } = self;
+        formatter
+            .debug_struct("SelfMediaSource")
+            .field("drive_file_id", &"<redacted>")
+            .field("size_bytes", size_bytes)
+            .field("mime", mime)
+            .finish()
+    }
 }
 
 /// The configured public origin, accepted only in the one canonical form the guard plugin and the
@@ -897,5 +917,18 @@ mod tests {
             "the use and the sniff name the same eight types"
         );
         assert_eq!(READ_MIMES.len(), 3 + READ_TEXT_MIMES.len() + 1);
+    }
+
+    /// #4970 review L5: the archive's name for a file is in no `{:?}`, like the token in [`SelfMediaGrant`].
+    #[test]
+    fn a_redeemed_source_never_prints_the_archives_name_for_the_file() {
+        let source = SelfMediaSource {
+            drive_file_id: "DRIVE-NAME-4970".to_string(),
+            size_bytes: 7,
+            mime: "text/plain".to_string(),
+        };
+        let printed = format!("{source:?} {source:#?}");
+        assert!(!printed.contains("DRIVE-NAME-4970"), "{printed}");
+        assert!(printed.contains("text/plain") && printed.contains('7'));
     }
 }

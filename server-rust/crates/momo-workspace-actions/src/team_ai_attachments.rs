@@ -84,10 +84,24 @@ pub const UNSUPPORTED_TYPE: ToolOutcome = notice(
     "unsupported_type",
     "이 종류의 파일은 아직 못 읽어요. 글 파일(txt·md·csv·json)과 PDF, 이미지(png·jpeg·webp)만 읽을 수 있어요.",
 );
-/// The server could not read the file (the archive or the api's private door failed).
+/// The server could not read the file (the archive or the api's private door failed) — **a hiccup**: asking
+/// again is the right answer. What is wrong with the file itself is [`NOT_READABLE_FORMAT`] or
+/// [`EMPTY_FILE`], never this (#4970 review, L1: a permanent cause must not be told as 「잠시 뒤에」).
 pub const UNREADABLE: ToolOutcome = notice(
     "unreadable",
     "서버가 이 파일을 읽지 못했어요. 잠시 뒤에 다시 부탁해 주세요.",
+);
+/// The requester's own file has no bytes (a permanent property of the file).
+pub const EMPTY_FILE: ToolOutcome = notice(
+    "empty_file",
+    "이 파일은 비어 있어요. 내용이 있는 파일을 올려서 다시 부탁해 주세요.",
+);
+/// The bytes are not something the helper can read — a text file in another encoding (UTF-16…), a file that
+/// calls itself a PDF and is not one, a PDF that is broken or too complex to open. A permanent property of
+/// **this file**: said as such, with what would work, and never as a reason to try again in a moment.
+pub const NOT_READABLE_FORMAT: ToolOutcome = notice(
+    "unreadable_format",
+    "이 파일은 읽을 수 없는 형식이에요. 글 파일은 UTF-8이나 EUC-KR이어야 하고, PDF는 열리고 너무 복잡하지 않아야 해요. 다시 만들어 올려 주세요.",
 );
 /// The file was read but no letters came out of it.
 pub const NO_TEXT: ToolOutcome = notice(
@@ -227,6 +241,11 @@ pub async fn lookup_in_tx(
     if source.size_bytes > READ_MAX_BYTES {
         return Ok(Err(TOO_LARGE));
     }
+    // An empty file reaches here only because the lookup use admits one (`min_bytes() == 0`): it is the
+    // requester's own, so it is told what is wrong with it. Nothing is minted or fetched for it.
+    if source.size_bytes == 0 {
+        return Ok(Err(EMPTY_FILE));
+    }
     Ok(Ok(AttachmentTarget {
         attachment_id: source.id,
         channel_id: source.channel_id,
@@ -300,17 +319,16 @@ pub fn attachment_list_block(files: &[(Uuid, String, i64)]) -> String {
 // ---------------------------------------------------------------------------
 
 /// Is this one of the characters that carry no letter a reader sees but can carry an instruction a
-/// model reads — zero-width and bidirectional controls, the BOM, the Unicode tag block?
+/// model reads — zero-width and bidirectional controls, the BOM, the Unicode tag block, the invisible
+/// Hangul fillers, the soft hyphen and the other default-ignorable formatters?
+///
+/// The list is the repository's own ([`momo_messaging::name_guard::is_invisible_format_char`], which
+/// the names people type are held to), **plus the variation selectors** U+FE00–U+FE0F: a name may keep
+/// one for an emoji, but a document must not — a run of them after one emoji or letter is a known way
+/// to hide a message in text that looks empty (the supplement U+E0100–U+E01EF is in the shared list).
+/// Removing one from a real emoji costs its colour presentation and nothing a reader needs.
 fn is_invisible_format(c: char) -> bool {
-    matches!(
-        c,
-        '\u{200B}'..='\u{200F}'
-            | '\u{202A}'..='\u{202E}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{2069}'
-            | '\u{FEFF}'
-            | '\u{E0000}'..='\u{E007F}'
-    )
+    momo_messaging::name_guard::is_invisible_format_char(c) || matches!(c, '\u{FE00}'..='\u{FE0F}')
 }
 
 /// A document's text as it may be shown to a model: **line breaks kept** (a document is its lines,
@@ -396,6 +414,30 @@ mod tests {
         assert_eq!(text, "가나");
     }
 
+    /// #4970 review L2: the repository's list of invisible characters (the one names are held to), and the
+    /// variation selectors on top of it, are gone from a document — each one, between two visible letters —
+    /// while everything a reader sees stays.
+    #[test]
+    fn a_document_loses_the_invisible_characters_the_repository_knows_and_the_variation_selectors()
+    {
+        for code in [
+            0x00AD_u32, 0x034F, 0x061C, 0x115F, 0x1160, 0x17B4, 0x180B, 0x180E, 0x2060, 0x3164,
+            0xFE00, 0xFE0F, 0xFFA0, 0xFFF9, 0xFFFB, 0xE0100, 0xE01EF,
+        ] {
+            let c = char::from_u32(code).unwrap();
+            let (text, truncated) = document_text(&format!("가{c}나"));
+            assert_eq!((text.as_str(), truncated), ("가나", false), "U+{code:04X}");
+        }
+        // a message hidden behind one visible emoji is nothing but the emoji afterwards
+        let smuggled: String = ('\u{FE00}'..='\u{FE0F}')
+            .chain('\u{E0100}'..='\u{E01EF}')
+            .collect();
+        assert_eq!(document_text(&format!("😀{smuggled}")).0, "😀");
+        // what a reader sees stays: Hangul syllables and jamo, Latin, digits, an emoji, punctuation
+        let visible = "한글 가 abc 123 😀 — 끝.";
+        assert_eq!(document_text(visible).0, visible);
+    }
+
     /// A code fence cannot be rebuilt out of pieces: backticks that only touch once the characters
     /// between them are removed are one fence, and it is defused.
     #[test]
@@ -455,6 +497,8 @@ mod tests {
             ONE_IMAGE_ONLY,
             BUSY,
             IMAGE_UNREADABLE,
+            EMPTY_FILE,
+            NOT_READABLE_FORMAT,
         ];
         let codes: BTreeSet<&str> = all.iter().map(ToolOutcome::code).collect();
         assert_eq!(codes.len(), all.len(), "two sentences share a code");
@@ -469,6 +513,21 @@ mod tests {
         }
         // none of them is a refusal about existence: those are `NotFound`, in one voice
         assert_ne!(TOO_LARGE.code(), ToolOutcome::NotFound.code());
+        // #4970 review L1: only the server's own hiccup says 「잠시 뒤에 다시」; a permanent property of the
+        // file (too big, not a type we read, empty, not a readable format) never does
+        for permanent in [TOO_LARGE, UNSUPPORTED_TYPE, EMPTY_FILE, NOT_READABLE_FORMAT] {
+            let ToolOutcome::Notice { sentence, .. } = permanent else {
+                panic!("not a notice");
+            };
+            assert!(!sentence.contains("잠시 뒤"), "{sentence}");
+        }
+        let ToolOutcome::Notice { sentence, .. } = UNREADABLE else {
+            panic!("not a notice");
+        };
+        assert!(
+            sentence.contains("잠시 뒤"),
+            "the hiccup keeps its honest 「잠시 뒤에」"
+        );
     }
 
     #[test]

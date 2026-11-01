@@ -1532,6 +1532,12 @@ pub enum FallbackReason {
     RateLimited,
     /// The tool path ran out of calls or time (H10).
     TooLong,
+    /// The call that carried a picture was refused by the provider (a 4xx): the model behind this connection
+    /// cannot read pictures. A wire that can carry one ([`wire_sees_images`] in the worker) says nothing about
+    /// the model — a text-only model on a compatible gateway answers an image block with an error — so this
+    /// is what the person hears instead of 「제때 답하지 못했어요」 (#4970 review L4). The code is new to
+    /// clients, which read an unknown reason as none (`teamAi.ts`), like `too_long`.
+    ImageRefused,
 }
 
 impl FallbackReason {
@@ -1543,6 +1549,7 @@ impl FallbackReason {
             FallbackReason::CouldNotPropose => "could_not_propose",
             FallbackReason::RateLimited => "rate_limited",
             FallbackReason::TooLong => "too_long",
+            FallbackReason::ImageRefused => "image_refused",
         }
     }
 
@@ -1560,6 +1567,9 @@ impl FallbackReason {
             FallbackReason::OverBudget => crate::team_ai_limits::TEAM_LIMIT_SENTENCE,
             FallbackReason::TooLong => {
                 "시간이 오래 걸려서 멈췄어요. 다른 에이전트에게 맡길 수 있어요."
+            }
+            FallbackReason::ImageRefused => {
+                "이 모델은 이미지를 못 읽어요. 이미지 속 글자나 그림 내용은 말해 줄 수 없어요. 다른 에이전트에게 맡길 수 있어요."
             }
             FallbackReason::RateLimited => {
                 "요청이 너무 빨라요. 잠시 뒤에 다시 해 주세요."

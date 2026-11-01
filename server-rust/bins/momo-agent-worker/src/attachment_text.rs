@@ -13,16 +13,32 @@
 //!   started with an **empty environment** (it must not inherit the database URL, the master key or a
 //!   provider key), and at most [`CHILD_SLOTS`] run at once, process-wide, whoever asks.
 //!
-//! What a hostile PDF can still do is spend the child's CPU for [`CHILD_DEADLINE`] and its memory until
-//! the kernel or the container's limit ends it; a panic, a hang and an endless loop end with the
-//! child, not with the worker. Nothing here caps the child's memory (that needs a resource limit, which
-//! is `unsafe` territory this workspace forbids): the container's memory limit is the backstop, and
-//! ADR-0151 증보 4 lists it under the risks that remain.
+//! What a hostile PDF can do is spend the child's CPU for [`CHILD_DEADLINE`] and its memory; a panic,
+//! a hang and an endless loop end with the child, not with the worker. The memory is bounded three
+//! ways, none of which needs `unsafe` (the workspace forbids it) and all of which hold in the child's
+//! address space or beside it, never the worker's own:
+//!
+//! * **the child confines itself first** (`confine_self`, its first act, before it reads a byte): on
+//!   Linux a ceiling on its address space ([`CHILD_ADDRESS_SPACE_MAX`], `RLIMIT_AS` through the safe
+//!   `rlimit` wrapper `momo-expressions` already uses) and `oom_score_adj` 1000, so that when the
+//!   container's memory limit is reached the kernel's out-of-memory killer picks the child and not the
+//!   worker (which may hold a model — the killer takes the largest process, and the child is only the
+//!   largest by chance);
+//! * **the supervisor watches** ([`MemoryGuard`]): every [`CHILD_MEMORY_POLL`] it reads the child's
+//!   resident memory (`/proc/<pid>/status` on Linux, `ps` elsewhere) and, above [`CHILD_MEMORY_MAX`],
+//!   kills that very pid and reaps it before the slot is given back;
+//! * **the child has a deadline of its own** ([`CHILD_SELF_DEADLINE`]): a watchdog thread ends the
+//!   process when the supervisor is no longer there to (the worker itself was killed).
+//!
+//! macOS enforces no address-space ceiling, so there only the supervisor's watch bounds the memory
+//! (the image this ships in is Linux). The watch is a sample, not a fence: what a child allocates inside
+//! one [`CHILD_MEMORY_POLL`] is bounded by the address-space ceiling and nothing else.
 //!
 //! No text from a file is ever logged or put in an error: every failure is one of the closed codes
 //! of [`ExtractError`].
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -42,6 +58,57 @@ const CHILD_OUTPUT_MAX: usize = 512 * 1024;
 const CHILD_TEXT_STOP_CHARS: usize = 60_000;
 /// The child reads at most this many pages.
 const PDF_PAGES_MAX: usize = 60;
+/// The most resident memory (RSS) a PDF child may hold. Above it the supervisor kills that pid. A real
+/// document needs a small fraction of this (the bytes are at most 5 MiB and only the pages being read
+/// are opened); the room is for a page of dense vector art, not for a stream that inflates on purpose.
+pub const CHILD_MEMORY_MAX: u64 = 512 * 1024 * 1024;
+/// How often the supervisor looks at the child's resident memory. A child grows by about a hundred
+/// megabytes in this long at worst, which is what [`CHILD_MEMORY_MAX`] leaves room for before the
+/// address-space ceiling.
+pub const CHILD_MEMORY_POLL: Duration = Duration::from_millis(50);
+/// The address space the child limits itself to at its first act (Linux, `RLIMIT_AS`). It is a **virtual**
+/// ceiling — the loaded executable, thread stacks and allocator arenas count — so it is far above
+/// [`CHILD_MEMORY_MAX`] and stands behind it, for what the supervisor's sample cannot see.
+pub const CHILD_ADDRESS_SPACE_MAX: u64 = 4 * 1024 * 1024 * 1024;
+/// The child's own deadline: two seconds after the supervisor's, so the supervisor's kill is the normal end
+/// and this one is what is left when the supervisor is gone.
+pub const CHILD_SELF_DEADLINE: Duration = Duration::from_secs(CHILD_DEADLINE.as_secs() + 2);
+/// The exit status of a child that ended itself at its own deadline (`timeout(1)`'s).
+pub const WATCHDOG_EXIT_CODE: i32 = 124;
+/// The exit status of a child that could not confine itself and so read nothing.
+const CONFINE_FAILED_EXIT_CODE: i32 = 2;
+
+// The numbers stand in the order the module docs promise, or this does not compile: the child's own deadline is
+// after the supervisor's (the supervisor's kill is the normal end, this one is for a supervisor that is gone),
+// the sampled ceiling is below the address-space ceiling that stands behind it, and a look is more often than
+// half a second.
+const _: () = {
+    assert!(CHILD_SELF_DEADLINE.as_secs() > CHILD_DEADLINE.as_secs());
+    assert!(CHILD_MEMORY_MAX < CHILD_ADDRESS_SPACE_MAX);
+    assert!(CHILD_MEMORY_POLL.as_millis() < 500);
+};
+
+/// What the supervisor holds a child's memory to (see the module docs). The worker always uses
+/// [`MemoryGuard::PRODUCTION`]; a test passes a smaller ceiling and a sink for the highest size the watch
+/// saw, so that "the watch ended it" can be told from "it ended by itself".
+#[derive(Debug, Clone)]
+pub struct MemoryGuard {
+    /// Above this many resident bytes the child is killed.
+    pub max_bytes: u64,
+    /// How often the child is looked at.
+    pub poll: Duration,
+    /// Where the highest resident size seen is kept (tests only; `None` in production).
+    pub peak: Option<Arc<AtomicU64>>,
+}
+
+impl MemoryGuard {
+    /// The guard the worker uses.
+    pub const PRODUCTION: MemoryGuard = MemoryGuard {
+        max_bytes: CHILD_MEMORY_MAX,
+        poll: CHILD_MEMORY_POLL,
+        peak: None,
+    };
+}
 
 /// Why no letters came out. Closed, so a caller can keep it in an audit row: it names no file, no
 /// path and no text.
@@ -51,8 +118,13 @@ pub enum ExtractError {
     Busy,
     /// The file opened and no letters were in it (a scan, an encrypted file, a picture of a page).
     NoText,
-    /// The file could not be opened, the child failed or ran out of time.
+    /// **This file** cannot be read: not the encoding or the format it claims, broken, too complex for
+    /// the child's time or memory, or an answer from a child that failed. Asking again will not change it,
+    /// and the caller says so (#4970 review L1).
     Unreadable,
+    /// **The server** could not try: the child could not be started or its pipes opened. Nothing is known
+    /// about the file; asking again in a moment is the right answer.
+    Unavailable,
 }
 
 // ---------------------------------------------------------------------------
@@ -110,11 +182,54 @@ pub fn pdf_text(bytes: &[u8]) -> Result<String, ExtractError> {
     Ok(text.chars().take(CHILD_TEXT_STOP_CHARS * 2).collect())
 }
 
+/// What the child does to itself before it reads a byte: the memory half of the confinement (module
+/// docs). On Linux `oom_score_adj` goes to 1000 — raising it needs no privilege, and the write is best
+/// effort because the ceiling below does not depend on it — and the address space is limited to
+/// [`CHILD_ADDRESS_SPACE_MAX`], or to the hard limit the child was already given when that is lower
+/// (lowering a limit is always allowed; raising a hard one is not). Elsewhere there is nothing to set.
+fn confine_self() -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::fs::write("/proc/self/oom_score_adj", "1000");
+        let (_, hard) = rlimit::Resource::AS.get()?;
+        let ceiling = CHILD_ADDRESS_SPACE_MAX.min(hard);
+        rlimit::Resource::AS.set(ceiling, ceiling)?;
+    }
+    Ok(())
+}
+
+/// A thread that calls `expire` once `deadline` has passed, whatever the rest of the process is doing.
+/// The child's `expire` ends the process ([`WATCHDOG_EXIT_CODE`]); a test passes a flag.
+fn spawn_watchdog<F>(deadline: Duration, expire: F) -> std::io::Result<()>
+where
+    F: FnOnce() + Send + 'static,
+{
+    std::thread::Builder::new()
+        .name("attachment-text-watchdog".to_string())
+        .spawn(move || {
+            std::thread::sleep(deadline);
+            expire();
+        })
+        .map(drop)
+}
+
 /// The child's whole life: PDF bytes on stdin → one JSON line on stdout → exit status. Returns the
 /// process exit code. Reads at most `max_input + 1` bytes; an over-long input is the same
-/// "unreadable" as a broken one.
+/// "unreadable" as a broken one. Ends itself after [`CHILD_SELF_DEADLINE`].
 pub fn child_main(max_input: usize) -> i32 {
+    child_main_with(max_input, CHILD_SELF_DEADLINE)
+}
+
+/// [`child_main`] with the child's own deadline chosen by the caller (a test re-runs itself as the child
+/// with a short one). The first two acts are the confinement: nothing the file says has been read yet when
+/// the limits and the watchdog are in place, and a child that cannot have them reads nothing.
+pub fn child_main_with(max_input: usize, self_deadline: Duration) -> i32 {
     use std::io::{Read, Write};
+    if confine_self().is_err()
+        || spawn_watchdog(self_deadline, || std::process::exit(WATCHDOG_EXIT_CODE)).is_err()
+    {
+        return CONFINE_FAILED_EXIT_CODE;
+    }
     let mut bytes = Vec::new();
     let read = std::io::stdin()
         .lock()
@@ -171,18 +286,97 @@ pub async fn extract_pdf_text(
     max_input: usize,
     deadline: Duration,
 ) -> Result<String, ExtractError> {
+    extract_pdf_text_guarded(bytes, child, max_input, deadline, MemoryGuard::PRODUCTION).await
+}
+
+/// [`extract_pdf_text`] with the memory guard chosen by the caller: the worker always passes
+/// [`MemoryGuard::PRODUCTION`] (through `extract_pdf_text`); a test passes a smaller ceiling.
+pub async fn extract_pdf_text_guarded(
+    bytes: Vec<u8>,
+    child: Option<&Path>,
+    max_input: usize,
+    deadline: Duration,
+    guard: MemoryGuard,
+) -> Result<String, ExtractError> {
     let Some(path) = child_path(child) else {
-        return Err(ExtractError::Unreadable);
+        return Err(ExtractError::Unavailable);
     };
     let Ok(permit) = slots().try_acquire_owned() else {
         return Err(ExtractError::Busy);
     };
     tokio::spawn(async move {
         let _permit = permit;
-        run_child(bytes, path, max_input, deadline).await
+        run_child(bytes, path, max_input, deadline, guard).await
     })
     .await
-    .map_err(|_| ExtractError::Unreadable)?
+    .map_err(|_| ExtractError::Unavailable)?
+}
+
+/// The resident memory of process `pid` in bytes — `None` when it cannot be read (the process is gone) or
+/// when this platform has no cheap way to ask.
+async fn resident_bytes(pid: u32) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+        resident_from_status(&status)
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        let answer = tokio::process::Command::new("/bin/ps")
+            .args(["-o", "rss=", "-p", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .await
+            .ok()?;
+        resident_from_ps(&answer.stdout)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// `VmRSS` of a Linux `/proc/<pid>/status`, in bytes. The kernel prints it in kibibytes.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn resident_from_status(status: &str) -> Option<u64> {
+    let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
+    let kib: u64 = line
+        .trim_start_matches("VmRSS:")
+        .trim()
+        .strip_suffix("kB")?
+        .trim()
+        .parse()
+        .ok()?;
+    kib.checked_mul(1024)
+}
+
+/// `ps -o rss=` prints the resident size in kibibytes, alone on a line.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+fn resident_from_ps(output: &[u8]) -> Option<u64> {
+    let kib: u64 = std::str::from_utf8(output).ok()?.trim().parse().ok()?;
+    kib.checked_mul(1024)
+}
+
+/// Completes when `pid` holds more than the guard's ceiling; never completes for a child whose memory
+/// cannot be read. The highest size seen goes to the guard's sink, if it has one.
+async fn over_memory(pid: Option<u32>, guard: &MemoryGuard) {
+    let Some(pid) = pid else {
+        return std::future::pending().await;
+    };
+    loop {
+        tokio::time::sleep(guard.poll).await;
+        let Some(resident) = resident_bytes(pid).await else {
+            continue;
+        };
+        if let Some(peak) = &guard.peak {
+            peak.fetch_max(resident, Ordering::SeqCst);
+        }
+        if resident > guard.max_bytes {
+            return;
+        }
+    }
 }
 
 async fn run_child(
@@ -190,6 +384,7 @@ async fn run_child(
     path: PathBuf,
     max_input: usize,
     deadline: Duration,
+    guard: MemoryGuard,
 ) -> Result<String, ExtractError> {
     if bytes.len() > max_input {
         return Err(ExtractError::Unreadable);
@@ -204,12 +399,14 @@ async fn run_child(
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|_| ExtractError::Unreadable)?;
+        .map_err(|_| ExtractError::Unavailable)?;
     let (Some(mut input), Some(mut output)) = (child.stdin.take(), child.stdout.take()) else {
         let _ = child.kill().await;
         let _ = child.wait().await;
-        return Err(ExtractError::Unreadable);
+        return Err(ExtractError::Unavailable);
     };
+    // The pid the memory watch looks at (and, through `child`, the only process this supervisor ever kills).
+    let pid = child.id();
     let work = async {
         let write = async {
             // A child that answers before reading everything closes the pipe: that is its answer.
@@ -226,17 +423,25 @@ async fn run_child(
             result.map(|_| data)
         };
         let ((), data) = tokio::join!(write, read);
-        let data = data.map_err(|_| ExtractError::Unreadable)?;
+        let data = data.map_err(|_| ExtractError::Unavailable)?;
         if data.len() > CHILD_OUTPUT_MAX {
             return Err(ExtractError::Unreadable);
         }
-        let status = child.wait().await.map_err(|_| ExtractError::Unreadable)?;
+        let status = child.wait().await.map_err(|_| ExtractError::Unavailable)?;
         if !status.success() {
             return Err(ExtractError::Unreadable);
         }
         parse_answer(&data)
     };
-    let outcome = tokio::time::timeout(deadline, work).await;
+    // The work, the deadline and the memory watch race; whichever ends first wins, and the child is dealt
+    // with below the same way for all three.
+    let outcome = tokio::time::timeout(deadline, async {
+        tokio::select! {
+            result = work => result,
+            () = over_memory(pid, &guard) => Err(ExtractError::Unreadable),
+        }
+    })
+    .await;
     // Whatever happened, the child is gone and reaped before the slot is given back.
     if child.try_wait().ok().flatten().is_none() {
         let _ = child.kill().await;
@@ -388,6 +593,65 @@ mod tests {
             b"",
         ] {
             assert_eq!(parse_answer(bad), Err(ExtractError::Unreadable));
+        }
+    }
+
+    #[test]
+    fn the_resident_size_is_read_from_what_the_platform_prints() {
+        // Linux: `VmRSS` in kibibytes, among other lines.
+        let status =
+            "Name:\tmomo-agent-worker\nVmPeak:\t  900000 kB\nVmRSS:\t  123456 kB\nThreads:\t4\n";
+        assert_eq!(resident_from_status(status), Some(123_456 * 1024));
+        // no such line (a zombie prints none), a unit that is not kB, a number that is not one
+        assert_eq!(resident_from_status("Name:\tx\nState:\tZ (zombie)\n"), None);
+        assert_eq!(resident_from_status("VmRSS:\t 12 MB\n"), None);
+        assert_eq!(resident_from_status("VmRSS:\t lots kB\n"), None);
+        // `VmHWM` (the peak) is not the size now
+        assert_eq!(resident_from_status("VmHWM:\t 999 kB\n"), None);
+        // macOS and the BSDs: `ps -o rss=` is one number in kibibytes
+        assert_eq!(resident_from_ps(b"  2048\n"), Some(2048 * 1024));
+        assert_eq!(resident_from_ps(b""), None);
+        assert_eq!(resident_from_ps(b"RSS\n"), None);
+    }
+
+    /// The watch is only as good as its reading: a live process must read as a size, and one that is not
+    /// there as nothing (the supervisor keeps looking until the work ends). Where the platform has no way
+    /// to ask, `None` is the honest answer and the other guards stand alone.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_live_process_has_a_resident_size_and_a_gone_one_has_none() {
+        let own = resident_bytes(std::process::id()).await;
+        assert!(
+            own.is_some_and(|bytes| bytes > 1024 * 1024),
+            "this test process holds more than a megabyte: {own:?}"
+        );
+        let mut gone = std::process::Command::new("/bin/sh")
+            .args(["-c", "exit 0"])
+            .spawn()
+            .unwrap();
+        let pid = gone.id();
+        gone.wait().unwrap();
+        assert_eq!(resident_bytes(pid).await, None);
+    }
+
+    #[test]
+    fn the_watchdog_fires_at_its_deadline_and_not_before() {
+        use std::sync::atomic::AtomicBool;
+        let fired = Arc::new(AtomicBool::new(false));
+        let flag = fired.clone();
+        spawn_watchdog(Duration::from_millis(400), move || {
+            flag.store(true, Ordering::SeqCst)
+        })
+        .expect("a thread can start");
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            !fired.load(Ordering::SeqCst),
+            "it fired before its deadline"
+        );
+        let started = std::time::Instant::now();
+        while !fired.load(Ordering::SeqCst) {
+            assert!(started.elapsed() < Duration::from_secs(5), "it never fired");
+            std::thread::sleep(Duration::from_millis(20));
         }
     }
 

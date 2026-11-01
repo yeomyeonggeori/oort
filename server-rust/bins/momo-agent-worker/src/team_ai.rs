@@ -53,7 +53,7 @@ use uuid::Uuid;
 
 use crate::payload::AgentJobPayload;
 use crate::provider::{
-    ChatMessage, ChatRequest, ChatUsage, ModelImage, ProviderToolCall, ProviderWire,
+    ChatMessage, ChatRequest, ChatUsage, ModelImage, ProviderError, ProviderToolCall, ProviderWire,
 };
 use crate::{emit_terminal_agent_status, AgentWorker, ResolvedTransport, Settlement};
 
@@ -475,7 +475,9 @@ impl AgentWorker {
                     // ceiling still moves.
                     spend = Spend::add(spend, Spend::of(None, prompt_chars));
                     trace.latency_ms = millis(started);
-                    let reason = if started.elapsed() >= deadline && trace.model_calls > 1 {
+                    let reason = if !attached.is_empty() && image_was_refused(&other) {
+                        FallbackReason::ImageRefused
+                    } else if started.elapsed() >= deadline && trace.model_calls > 1 {
                         FallbackReason::TooLong
                     } else {
                         FallbackReason::Slow
@@ -1534,6 +1536,21 @@ fn trigger_turn_with_attachments(body: &str, ids: &[Uuid], files_block: &str) ->
     turn
 }
 
+/// Did the provider refuse a call **that carried a picture** because of the picture? The wire can carry one
+/// (`wire_sees_images`), but the model behind a compatible gateway may not read it, and then the provider
+/// answers the image block itself with a 4xx. Only the statuses that mean 「this request, as written, is
+/// not acceptable」 count — 400, 413, 415, 422: the same request without the picture had just been accepted
+/// (it is the call after the read that failed), so the picture is the difference. A 401/403 (the key),
+/// 404 (the model), 408 or 429 (time, rate) or any 5xx says nothing about pictures and stays what it was.
+fn image_was_refused<E>(
+    attempt: &Result<Result<crate::provider::ChatCompletion, ProviderError>, E>,
+) -> bool {
+    matches!(
+        attempt,
+        Ok(Err(ProviderError::HttpStatus(400 | 413 | 415 | 422, _)))
+    )
+}
+
 fn millis(since: Instant) -> i64 {
     i64::try_from(since.elapsed().as_millis()).unwrap_or(i64::MAX)
 }
@@ -1612,5 +1629,36 @@ mod profile_tests_4791 {
         // room for nothing is no block, not a header over nothing
         assert_eq!(whole_lines_within(&block, 10), "");
         assert_eq!(whole_lines_within(&block, 10_000), block);
+    }
+
+    /// #4970 review L4: only a 4xx that says 「this request, as written, is not acceptable」 is the
+    /// picture's doing; the key, the model, time, rate and the provider's own faults are not.
+    #[test]
+    fn only_a_refusal_of_the_request_itself_counts_as_the_model_not_reading_pictures() {
+        use crate::provider::ChatCompletion;
+        type Attempt = Result<Result<ChatCompletion, ProviderError>, ()>;
+        let refused = |status: u16| -> Attempt {
+            Ok(Err(ProviderError::HttpStatus(
+                status,
+                "no images".to_string(),
+            )))
+        };
+        for status in [400, 413, 415, 422] {
+            assert!(image_was_refused(&refused(status)), "{status}");
+        }
+        for status in [401, 403, 404, 408, 429, 500, 502, 503] {
+            assert!(!image_was_refused(&refused(status)), "{status}");
+        }
+        let unreachable: Attempt = Ok(Err(ProviderError::Unreachable("down".into())));
+        assert!(!image_was_refused(&unreachable));
+        let timed_out: Attempt = Err(());
+        assert!(!image_was_refused(&timed_out));
+        let answered: Attempt = Ok(Ok(ChatCompletion {
+            text: "ok".into(),
+            usage: None,
+            tool_calls: Vec::new(),
+            web_search_requests: 0,
+        }));
+        assert!(!image_was_refused(&answered));
     }
 }
