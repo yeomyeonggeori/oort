@@ -225,7 +225,9 @@ export function agentTurnsForMember(
  *    먼저 거르면 덮어쓰기가 승인을 근거로 새 턴을 세운다.
  *  - 기한이 지난 승인은 기다림이 아니다(코어가 `nowMs` 로 거른다). 이 표면들은 시계를 마운트하지 않으므로 호출자가 렌더의 `Date.now()` 를 준다.
  *
- * 대기 승인이 없는 채널은 건드리지 않는다. 입력은 바꾸지 않고 사본을 돌려준다(없으면 같은 객체).
+ * 대기 승인이 없는 채널은 건드리지 않는다. 대기 승인이 있는 채널에서도 **지우는 것은 없다**(코어 규칙은 턴을 빼지 않는다): 덮은 턴은 같은
+ * 키로 원래 항목을 바꾸고, 승인이 세운 턴은 더한다. 덮지 않은 만료 신호는 사본에도 남고 읽는 쪽의 만료 거름이 거른다(같은 키의 만료 신호는
+ * 승인이 세운 새 턴이 덮어쓴다). 입력은 바꾸지 않고 사본을 돌려준다(대기가 없으면 같은 객체).
  */
 export function withApprovalWaits(
   all: ReadonlyMap<Key, AgentWorkingSignal>,
@@ -233,16 +235,12 @@ export function withApprovalWaits(
   nowMs: number,
 ): ReadonlyMap<Key, AgentWorkingSignal> {
   if (waits.length === 0) return all;
-  // 대기 승인이 있는 채널들. 키는 접은 id 로 합치고(와이어가 대소문자를 섞어 보낸다), 코어에는 받은 그대로 넘긴다.
+  // 대기 승인이 있는 채널들. 접은 id 로 합치고(와이어가 대소문자를 섞어 보낸다), 코어에는 받은 그대로 넘긴다.
   const channels = new Map<string, string>();
   for (const wait of waits) channels.set(wait.channelId.toLowerCase(), wait.channelId);
 
   const next = new Map(all);
-  for (const [folded, channelId] of channels) {
-    const prefix = `${folded}|`;
-    for (const key of all.keys()) {
-      if (key.startsWith(prefix)) next.delete(key);
-    }
+  for (const channelId of channels.values()) {
     for (const turn of applyApprovalWaits(
       agentTurnsInChannel(all, channelId, nowMs),
       channelId,

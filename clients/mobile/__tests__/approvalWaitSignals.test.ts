@@ -80,21 +80,28 @@ describe('withApprovalWaits — 규칙은 코어의 것이고 여기서는 채�
     expect(all.get(key(CH_A, AGENT_1))?.state).toBe('working');
   });
 
-  it('만료된 신호는 덮기 전에 걸러져서 살아 있는 승인이 새 턴을 세운다 — 대기가 없으면 입력을 그대로 돌려준다', () => {
-    const all = mapOf(turn({lastActivityAtMs: NOW - IDLE_CUTOFF_MS - 1}));
+  it('만료된 신호는 덮기 전에 걸러져서 살아 있는 승인이 새 턴을 세운다 — 덮지 않은 항목은 지우지 않고, 대기가 없으면 입력을 그대로 돌려준다', () => {
+    const staleAt = NOW - IDLE_CUTOFF_MS - 1;
+    const all = mapOf(
+      turn({memberId: AGENT_1, lastActivityAtMs: staleAt}),
+      turn({memberId: AGENT_2, lastActivityAtMs: staleAt}),
+    );
     expect(withApprovalWaits(all, [], NOW)).toBe(all);
 
     const out = withApprovalWaits(all, [wait(CH_A, AGENT_1)], NOW);
 
     // 옛 신호를 그 자리에서 바꿔 두면 아래 표면의 만료 거름(`agentTurnsInChannel`·`agentTurnsForMember`)이 그 턴을 지우고 살아 있는
     // 승인은 어디에도 안 보인다. 먼저 거르면 승인을 근거로 선 새 턴이 남고, 시작 시각은 지어내지 않는다.
-    const [shown] = agentTurnsInChannel(out, CH_A, NOW);
+    const [shown, ...rest] = agentTurnsInChannel(out, CH_A, NOW);
+    expect(rest).toEqual([]);
     expect(shown).toMatchObject({
       memberId: AGENT_1,
       state: 'awaiting_approval',
       lastActivityAtMs: NOW,
     });
     expect(shown.startedAtMs).toBeUndefined();
+    // 덮지 않은 항목은 사본에도 남는다: 시계 없이 항목 유무만 보는 읽는 쪽(`hasChannelTurn`)이 원본 스토어와 다른 답을 하지 않는다.
+    expect(out.get(key(CH_A, AGENT_2))).toBe(all.get(key(CH_A, AGENT_2)));
   });
 });
 
