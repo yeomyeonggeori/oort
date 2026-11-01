@@ -88,6 +88,36 @@ describe("온보딩 도우미 켜기: 쓰는 순서가 안전이다", () => {
     expect(spies.enable).toHaveBeenCalledTimes(1);
   });
 
+  it("켜기가 실패한 뒤 끈 묶음을 도로 켜면 그 칸만 다시 쓴다. 달라진 것이 없으면 쓰지 않는다", async () => {
+    const { calls, spies } = deps();
+    spies.enable.mockRejectedValueOnce(new ApiError(503, "down"));
+    const progress = newTeamAiSetupProgress();
+    const off = { ...defaultTeamAiRoles(), memory: false };
+    const failure = await runTeamAiSetup(
+      { workspaceId: WS, linkPosition: 0, name: TEAM_AI_DEFAULT_NAME, roles: off },
+      progress,
+      spies
+    ).catch((error: unknown) => error);
+    expect((failure as TeamAiSetupError).step).toBe("enable");
+    // 다시 시도하되 값이 그대로면 역할은 다시 쓰지 않는다.
+    await runTeamAiSetup(
+      { workspaceId: WS, linkPosition: 0, name: TEAM_AI_DEFAULT_NAME, roles: off },
+      progress,
+      spies
+    );
+    expect(spies.patchRoles).toHaveBeenCalledTimes(1);
+    // 켜진 뒤의 재시도는 없지만, 같은 진행 기록으로 선택을 바꿔 다시 부르면 바뀐 칸만 간다.
+    await runTeamAiSetup(
+      { workspaceId: WS, linkPosition: 0, name: TEAM_AI_DEFAULT_NAME, roles: defaultTeamAiRoles() },
+      progress,
+      spies
+    );
+    expect(calls.filter((c) => c.startsWith("roles:"))).toEqual([
+      `roles:${JSON.stringify({ memory: false })}`,
+      `roles:${JSON.stringify({ memory: true })}`,
+    ]);
+  });
+
   it("이름이 거절돼도 켜기는 끝난 채 결과에 싣는다. 켜기가 실패하면 이름은 시도하지 않는다", async () => {
     const taken = new ApiError(409, "display name is already in use");
     const first = deps();

@@ -19,7 +19,9 @@
 // 바꿀 수 있다(충돌·예약어는 사람이 다른 이름을 골라야 하는 일이라 켜기를 되돌리지 않는다).
 //
 // **다시 시도는 끝난 단계를 다시 하지 않는다.** 호출자가 `progress`를 들고 있다가 다시 넘기면
-// 이미 끝난 단계는 건너뛴다. 건너뛰기(나중에)는 이 함수를 부르지 않는 것이다: 쓰기 0회.
+// 이미 끝난 단계는 건너뛴다. 역할만은 「끝났는가」가 아니라 **서버에 이미 쓴 값과의 차이**를 본다:
+// 켜기가 실패한 뒤 관리자가 스위치를 바꾸고 다시 시도하면(꺼 뒀던 묶음을 도로 켜는 것까지) 바뀐 칸만
+// 다시 쓰고, 달라진 것이 없으면 쓰지 않는다. 건너뛰기(나중에)는 이 함수를 부르지 않는 것이다: 쓰기 0회.
 //
 // 이 모듈에는 사용자 문구가 없다. 순수 오케스트레이션이라 쓰는 함수는 주입할 수 있다.
 // =============================================================================
@@ -67,13 +69,16 @@ export interface TeamAiSetupInput {
 
 /** 다시 시도가 건너뛸 수 있게 호출자가 들고 있는 진행 기록. */
 export interface TeamAiSetupProgress {
+  /** 끝난 단계. 역할은 여기 두지 않는다(아래 `rolesWritten`과 비교한다). */
   done: Set<TeamAiSetupStep>;
   /** 켜기가 끝나면 서버가 만든 도우미 멤버 id. */
   memberId: string | null;
+  /** 이 설정이 지금까지 서버에 쓴 역할 칸. 기본(모두 켬) 위에 얹힌 값이 서버의 현재 상태다. */
+  rolesWritten: TeamAiRolesChange;
 }
 
 export function newTeamAiSetupProgress(): TeamAiSetupProgress {
-  return { done: new Set(), memberId: null };
+  return { done: new Set(), memberId: null, rolesWritten: {} };
 }
 
 export interface TeamAiSetupResult {
@@ -120,16 +125,16 @@ export async function runTeamAiSetup(
     progress.done.add("default_ai");
   }
 
-  if (!progress.done.has("roles")) {
-    const change = teamAiRolesChange(defaultTeamAiRoles(), input.roles);
-    if (!isTeamAiRolesChangeEmpty(change)) {
-      try {
-        await deps.patchRoles(workspaceId, change);
-      } catch (error) {
-        throw new TeamAiSetupError("roles", error);
-      }
+  // 서버의 지금 역할 = 기본(모두 켬) + 이 설정이 이미 쓴 칸. 거기서 관리자가 고른 값까지의 차이만 쓴다.
+  const serverRoles = { ...defaultTeamAiRoles(), ...progress.rolesWritten };
+  const change = teamAiRolesChange(serverRoles, input.roles);
+  if (!isTeamAiRolesChangeEmpty(change)) {
+    try {
+      await deps.patchRoles(workspaceId, change);
+    } catch (error) {
+      throw new TeamAiSetupError("roles", error);
     }
-    progress.done.add("roles");
+    Object.assign(progress.rolesWritten, change);
   }
 
   if (!progress.done.has("enable")) {
