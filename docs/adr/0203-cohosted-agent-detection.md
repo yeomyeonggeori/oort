@@ -1065,7 +1065,7 @@ Hermes는 `<HERMES_HOME>/.env`를 게이트가 끝난 **뒤에** override로 적
 
 - **연결 모드 설정은 저장소 재료로 다시 만든다.** 연결 모드의 잠금 구간은 기본 설정의 것이 아니다(`web`·`image_gen`을 통째로 금지하고 그림 플러그인이 없다. K4-1·I3). 그래서 기본 설정 위에 조각을 얹지 않고 `google-connectors.config.yaml`(기존 연결 모드 기준 사본, I3 때문에 바뀌지 않는다)의 자기 `model:`·`fallback_model:`을 고른 조각으로 **같은 자리에서** 바꾼다. 나머지는 바이트 그대로다. 명령은 `python3 infra/hermes/render_model_config.py --auth <방식> [--fallback <방식>] --connector-base infra/hermes/google-connectors.config.yaml`이고 같은 입력이면 같은 바이트, 같은 sha256이다. `--sha256`은 해시만, `--catalog`는 위 다섯의 `이름  sha256` 목록을 낸다. 운영 값과 같은지는 해시로만 대조한다(값 미출력, RELEASING의 「Hermes 단계」).
 - **세 곳이 한 목록이다.** `lockgate.py`의 `ACCEPTED_CONFIG_SHA256`(게이트가 이름을 기록한다: LOCKGATE 줄의 `config_accepted_as`)·Railway 시작 명령의 `sha256sum <설정> | cut -c1-64 | grep -qxF -e <해시> … || { echo … >&2; exit 78; }`(정확한 한 줄 일치, 부분 일치 아님)·렌더러가 다시 만든 카탈로그. `scripts/tests/check_railway_catalog.py`가 렌더러에서 해시를 다시 계산해 시작 명령과 게이트 표가 그 목록과 같은지(이름·해시·순서) 매 PR에서 대조하고, 시작 명령의 해시를 하나 빼거나 낯선 해시를 더하거나 한 줄 일치를 부분 일치로 약화하거나 검사를 지우면 RED가 된다(변이 증명). compose는 읽기 전용으로 마운트한 저장소 파일(기본 설정)을 복사하고 확인은 게이트가 한다.
-- **`report`는 해시를 다시 재지 않는다.** 이미지의 자체 기동(stage2)이 시작 명령이 끝난 뒤 볼륨의 `config.yaml` 사본을 이주(migrate)하므로 기동 뒤의 바이트는 받은 바이트가 아니다. 게이트가 같은 이주를 scratch 사본에 되풀이해 그 결과를 판정하는 것은 그대로다.
+- **`report`는 해시를 다시 재지 않는다.** 이미지의 자체 기동이 시작 명령이 끝난 뒤 볼륨의 `config.yaml` 사본에 설정 이주를 돌리고(`docker/stage2-hook.sh`가 `docker_config_migrate.py`를 부른다) 그 일은 파일을 다시 쓸 수 있으므로, 기동 뒤의 바이트가 받은 바이트와 같다고 가정할 수 없다(이주가 이 다섯 설정의 바이트를 실제로 바꾸는지는 재지 않았다. 바뀐다면 건강한 Hermes를 `report`가 PID 1 종료로 몰아내게 되므로 다시 재지 않는 쪽이 안전하다). 게이트가 같은 이주를 scratch 사본에 되풀이해 그 결과를 판정하는 것은 그대로다.
 
 ### C3. 엄격 모드는 모든 기동에서, 연결 모드도 (#4935)
 

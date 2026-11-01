@@ -905,8 +905,9 @@ def hermes_image_guard_canary(origin=None):
 # the default config and of the connector-mode config of each model fragment, which `python3 infra/hermes/render_model_config.py --catalog`
 # rebuilds from the repo's own pieces (same input, same bytes, same hash; test_render_model_config.py holds this table to it). The Railway
 # start command carries the same list (scripts/tests/check_railway_catalog.py holds that to it), and compose mounts the repo file this table
-# names. Any other bytes are refused, whatever they say. `report` does not repeat the check: the image's own boot migrates the volume's copy
-# after the start command, so the live bytes are not these (the gate replays that migration on a scratch copy and judges what it resolves to).
+# names. Any other bytes are refused, whatever they say. `report` does not repeat the check: after the start command the image's own boot runs a
+# config migration on the volume's copy (docker/stage2-hook.sh -> docker_config_migrate.py), which may rewrite it, so the live bytes need not be
+# these (the gate replays that migration on a scratch copy and judges what it resolves to).
 # The table is keyed by the hash and the name is the value, never the other way round: a name with a word like `api-key` or `oauth` in front
 # of a 64-digit hex value on one line is what secret scanners report as a leaked credential, and these hashes are public pins.
 ACCEPTED_CONFIG_SHA256 = {  # sha256 of the bytes -> the name of the config
