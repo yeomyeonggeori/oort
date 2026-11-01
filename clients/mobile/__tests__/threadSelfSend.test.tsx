@@ -266,12 +266,14 @@ describe('그래서 원인은 짧은 대화의 정렬이었다', () => {
     expect(screen.getByLabelText('스레드 닫기')).toBeTruthy();
   });
 
-  it('스레드에서도 끌면 키보드가 내려간다', () => {
+  it('스레드에서도 끌어 아래로 48pt 면 키보드가 내려간다', () => {
     // 결함 1 은 채널만의 것이 아니었다. 스레드 컴포저도 똑같이 열리고, 똑같이 닫을
-    // 길이 없었다 — 같은 `Timeline` 이므로 같은 수정을 받는다.
+    // 길이 없었다 — 같은 `Timeline` 이므로 같은 수정을 받는다. #4665: 끌기 즉시(`on-drag`)가
+    // 아니라 손가락 아래 48pt 누적(`dragRest.ts`)이라 모드는 `none` 이다 — 판정은
+    // `timelineDragRest.test.tsx` 가 같은 `Timeline` 으로 잰다.
     render(<Harness />);
     expect(screen.getByTestId('timeline-list').props.keyboardDismissMode).toBe(
-      'on-drag',
+      'none',
     );
   });
 });

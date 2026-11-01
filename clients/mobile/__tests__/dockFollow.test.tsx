@@ -7,6 +7,7 @@ import type {TimelineStreamItem} from '@momo/core/features/timeline/model';
 
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {createDockFollow, DockFollowContext} from '../src/features/conversation/dockFollow';
+import {DRAG_REST_FOLLOW_HOLD_MS} from '../src/features/conversation/dragRest';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {installAppClock} from './fixtures/fakeClock';
 import {member} from './testkit';
@@ -202,6 +203,118 @@ describe('Timeline 이 도크 알림에 답한다', () => {
     const scrollToEnd = spyNativeScrollToEnd(listRef);
     act(() => bridge.notify());
     expect(scrollToEnd).not.toHaveBeenCalled();
+  });
+
+  // 아래로 끌다가 입력창이 쉬면(#4665, `dragRest.ts`) 목록은 바닥에서 아직 120pt 안이라 「따라가는 중」으로 남아 있다. 그때 입력창이 줄어드는 프레임마다(도크 알림) 또는 창이 늘어나는 순간(`onLayout`)
+  // 네이티브 `scrollToEnd` 를 부르면 손가락 밑에서 목록이 끝으로 튄다 — 손가락이 먼저다. 손을 떼면(`onScrollEndDrag`) 다시 따라간다.
+  const LIFT = {nativeEvent: {velocity: {x: 0, y: 0}}};
+
+  it('손가락이 목록을 끄는 동안은 도크 알림에도 바닥으로 끌어가지 않는다 — 손을 떼면 다시 따라간다 (#4665)', async () => {
+    const bridge = createDockFollow();
+    const {listRef} = mountTimeline(bridge);
+    await settleAtBottom();
+    const scrollToEnd = spyNativeScrollToEnd(listRef);
+    act(() => bridge.notify());
+    expect(scrollToEnd).toHaveBeenCalledTimes(1); // 대조: 손가락이 없으면 따라간다
+
+    fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
+    act(() => bridge.notify());
+    act(() => bridge.notify());
+    expect(scrollToEnd).toHaveBeenCalledTimes(1); // 끄는 동안은 늘지 않는다
+
+    fireEvent(screen.getByTestId('timeline-list'), 'scrollEndDrag', LIFT);
+    act(() => bridge.notify());
+    expect(scrollToEnd).toHaveBeenCalledTimes(2);
+  });
+
+  it('손가락이 목록을 끄는 동안 창이 늘어나도(입력창이 쉼) 바닥으로 끌어가지 않는다 — 손을 떼면 다시 따라간다 (#4665)', async () => {
+    const bridge = createDockFollow();
+    const {listRef} = mountTimeline(bridge);
+    await settleAtBottom();
+    const scrollToEnd = jest.spyOn(listRef.current!, 'scrollToEnd').mockImplementation(() => {});
+    const layout = (height: number) =>
+      fireEvent(screen.getByTestId('timeline-list'), 'layout', {
+        nativeEvent: {layout: {x: 0, y: 0, width: 390, height}},
+      });
+    layout(780);
+    expect(scrollToEnd).toHaveBeenCalledTimes(1); // 대조: 손가락이 없으면 창이 바뀔 때 바닥을 따라간다
+
+    fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
+    layout(800);
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
+
+    fireEvent(screen.getByTestId('timeline-list'), 'scrollEndDrag', LIFT);
+    layout(820);
+    expect(scrollToEnd).toHaveBeenCalledTimes(2);
+  });
+
+  // 끌어서 입력창이 쉬기 시작한 뒤에는 **손을 뗀 뒤에도** 접힘 스프링의 꼬리(몇 프레임) 동안 막는다 — 그 프레임이 방금 위로 읽으러 간 목록을 끝으로 되돌리지 않게(`DRAG_REST_FOLLOW_HOLD_MS`).
+  // 탭으로 쉴 때는 손가락이 없으니 막이 없다(꼬리가 입력창을 따라 내려간다).
+  const touch = (y: number, at: number, touches: number) => ({
+    nativeEvent: {
+      pageX: 100,
+      pageY: y,
+      locationX: 100,
+      locationY: y,
+      timestamp: at,
+      touches: Array.from({length: touches}, () => ({pageX: 100, pageY: y})),
+      changedTouches: [{pageX: 100, pageY: y}],
+    },
+  });
+
+  it('끌어서 입력창이 쉬기 시작하면 손을 뗀 뒤에도 접힘 꼬리 동안은 바닥으로 끌어가지 않는다 — 시한이 지나면 다시 따라간다 (#4665)', async () => {
+    const bridge = createDockFollow();
+    const {listRef} = mountTimeline(bridge);
+    await settleAtBottom();
+    const scrollToEnd = spyNativeScrollToEnd(listRef);
+    const list = screen.getByTestId('timeline-list');
+    fireEvent(list, 'scrollBeginDrag');
+    fireEvent(list, 'touchStart', touch(300, 1000, 1));
+    fireEvent(list, 'touchMove', touch(348, 1050, 1)); // 아래로 48pt — 입력창이 쉬기 시작한다
+    fireEvent(list, 'touchEnd', touch(348, 1100, 0)); // 손을 뗀다(관성 없음)
+    fireEvent(list, 'scrollEndDrag', LIFT);
+    act(() => bridge.notify());
+    expect(scrollToEnd).not.toHaveBeenCalled(); // 손은 떠났지만 접힘 스프링의 꼬리다
+
+    await wait(DRAG_REST_FOLLOW_HOLD_MS - 1);
+    act(() => bridge.notify());
+    expect(scrollToEnd).not.toHaveBeenCalled(); // 시한 바로 안
+
+    await wait(2);
+    act(() => bridge.notify());
+    expect(scrollToEnd).toHaveBeenCalledTimes(1); // 시한이 지났다 — 다시 따라간다
+  });
+
+  it('손을 뗀 직후 접힘 꼬리에 창이 늘어나도(onLayout) 바닥으로 끌어가지 않는다 — 시한이 지나면 다시 따라간다 (#4665)', async () => {
+    const bridge = createDockFollow();
+    const {listRef} = mountTimeline(bridge);
+    await settleAtBottom();
+    const scrollToEnd = jest.spyOn(listRef.current!, 'scrollToEnd').mockImplementation(() => {});
+    const list = screen.getByTestId('timeline-list');
+    const layout = (height: number) => fireEvent(list, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height}}});
+    fireEvent(list, 'scrollBeginDrag');
+    fireEvent(list, 'touchStart', touch(300, 1000, 1));
+    fireEvent(list, 'touchMove', touch(348, 1050, 1)); // 아래로 48pt — 입력창이 쉬기 시작한다
+    fireEvent(list, 'touchEnd', touch(348, 1100, 0));
+    fireEvent(list, 'scrollEndDrag', LIFT);
+    layout(800);
+    expect(scrollToEnd).not.toHaveBeenCalled(); // 손은 떠났지만 접힘 스프링의 꼬리다
+
+    await wait(DRAG_REST_FOLLOW_HOLD_MS + 1);
+    layout(820);
+    expect(scrollToEnd).toHaveBeenCalledTimes(1); // 시한이 지났다 — 다시 따라간다
+  });
+
+  it('탭으로 쉴 때는 막이 없다 — 손가락이 없으니 꼬리가 입력창을 따라 내려간다 (#4614·#4518)', async () => {
+    const bridge = createDockFollow();
+    const {listRef} = mountTimeline(bridge);
+    await settleAtBottom();
+    const scrollToEnd = spyNativeScrollToEnd(listRef);
+    const list = screen.getByTestId('timeline-list');
+    fireEvent(list, 'touchStart', touch(300, 1000, 1));
+    fireEvent(list, 'touchEnd', touch(300, 1080, 0)); // 탭
+    act(() => bridge.notify());
+    expect(scrollToEnd).toHaveBeenCalledTimes(1);
   });
 
   it('언마운트하면 걸었던 처리기를 푼다 — 사라진 목록에 처리기가 남지 않는다', async () => {
