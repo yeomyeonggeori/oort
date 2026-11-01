@@ -153,24 +153,38 @@ pub struct WorkerConfig {
     /// `AgentPortConfig`: only an exact `true` opens it. Off keeps the
     /// `work.session.spawn` tool from starting Claude Code on a shared host.
     pub claude_subscription_agents_enabled: bool,
-    /// `TEAM_AI_DAILY_TOKEN_CAP` (ADR-0201 D4): prompt + completion tokens the
-    /// team AI may spend per UTC day on the team key. `0` turns it off (every
-    /// request falls back at once).
-    pub team_ai_daily_token_cap: i64,
+    /// `TEAM_AI_DAILY_TOKEN_CAP` — the **operator's ceiling** on the prompt + completion tokens
+    /// the team AI may spend per UTC day on the team key (ADR-0201 증보 v3 B9-3, #4944). `None`
+    /// (unset or empty) = no ceiling: a team that set no limit of its own is never stopped. `Some(n)`
+    /// = no workspace value gets past `n`. `Some(0)` = the operator's emergency switch: every
+    /// request falls back at once.
+    pub team_ai_daily_token_cap: Option<i64>,
     /// ADR-0201 D7 hard cut for the team AI's model call (default 20 s). A field
     /// so a conformance test can prove the cut without waiting twenty seconds.
     pub team_ai_model_timeout: Duration,
     /// ADR-0201 증보 v2 H10: the whole tool path's wall clock (default 45 s).
     pub team_ai_request_deadline: Duration,
-    /// `TEAM_AI_DAILY_SEARCH_CAP` (ADR-0201 증보 v2 H5): provider-side web searches
-    /// the team AI may make per UTC day. `0` turns search off.
-    pub team_ai_daily_search_cap: i64,
+    /// `TEAM_AI_DAILY_SEARCH_CAP` — the operator's ceiling on the provider-side web searches the
+    /// team AI may make per UTC day (B9-3). Same reading as the token cap, except that `Some(0)`
+    /// turns web **search** off, not the helper.
+    pub team_ai_daily_search_cap: Option<i64>,
     /// ADR-0201 증보 v3 B5-5 (#4967): the team AI's **task** bounds — steps, wall clock, model and
     /// tool calls over the whole task, tasks running at once. Configuration values, not workspace
     /// settings; the defaults are **[추정]** until measured. `TEAM_AI_TASK_MAX_STEPS`,
     /// `TEAM_AI_TASK_MAX_WALL_SECS`, `TEAM_AI_TASK_MAX_MODEL_CALLS`, `TEAM_AI_TASK_MAX_TOOL_CALLS`,
     /// `TEAM_AI_TASK_MAX_PER_WORKSPACE`, `TEAM_AI_TASK_MAX_PER_REQUESTER` (each at least 1).
     pub team_ai_task: momo_agent::team_ai_task::TaskLimits,
+}
+
+impl WorkerConfig {
+    /// The two operator ceilings as one value (the shape `momo_workspace_actions::team_ai_limits`
+    /// judges with).
+    pub fn team_ai_caps(&self) -> momo_workspace_actions::team_ai_limits::OperatorCaps {
+        momo_workspace_actions::team_ai_limits::OperatorCaps {
+            daily_tokens: self.team_ai_daily_token_cap,
+            daily_searches: self.team_ai_daily_search_cap,
+        }
+    }
 }
 
 /// The team-memory summary loop's knobs (#3162, ADR-0196 D10, plan §6.1/§6.6). Every default
@@ -644,6 +658,13 @@ fn env(key: &str) -> Option<String> {
     }
 }
 
+/// One operator ceiling (`TEAM_AI_DAILY_*_CAP`): unset or empty = none, `0` = off, a positive
+/// number = the ceiling. The same rule the api reads it by (`parse_operator_cap`).
+fn operator_cap(key: &'static str) -> Result<Option<i64>, ConfigError> {
+    momo_workspace_actions::team_ai_limits::parse_operator_cap(key, env(key).as_deref())
+        .map_err(|invalid| ConfigError::NotANumber(invalid.0))
+}
+
 /// The task bounds from the environment (ADR-0201 증보 v3 B5-5): every key optional, each value at
 /// least 1 — a `0` would end every task before its first step, which is the switch's job
 /// (`long_research` off), not a limit's.
@@ -751,22 +772,14 @@ impl WorkerConfig {
             claude_subscription_agents_enabled: claude_subscription_agents_switch_on(
                 env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref(),
             ),
-            team_ai_daily_token_cap: env_number(
-                "TEAM_AI_DAILY_TOKEN_CAP",
-                momo_workspace_actions::team_ai::DEFAULT_DAILY_TOKEN_CAP,
-            )?
-            .max(0),
+            team_ai_daily_token_cap: operator_cap("TEAM_AI_DAILY_TOKEN_CAP")?,
             team_ai_model_timeout: Duration::from_secs(
                 momo_workspace_actions::team_ai::MODEL_TIMEOUT_SECS,
             ),
             team_ai_request_deadline: Duration::from_secs(
                 momo_workspace_actions::team_ai::TOOL_PATH_DEADLINE_SECS,
             ),
-            team_ai_daily_search_cap: env_number(
-                "TEAM_AI_DAILY_SEARCH_CAP",
-                momo_workspace_actions::team_ai::DEFAULT_DAILY_SEARCH_CAP,
-            )?
-            .max(0),
+            team_ai_daily_search_cap: operator_cap("TEAM_AI_DAILY_SEARCH_CAP")?,
             team_ai_task: team_ai_task_limits_from_env()?,
         })
     }
@@ -799,14 +812,14 @@ impl WorkerConfig {
             assembler_program: None,
             memory: MemoryConfig::default(),
             claude_subscription_agents_enabled: false,
-            team_ai_daily_token_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_TOKEN_CAP,
+            team_ai_daily_token_cap: None,
             team_ai_model_timeout: Duration::from_secs(
                 momo_workspace_actions::team_ai::MODEL_TIMEOUT_SECS,
             ),
             team_ai_request_deadline: Duration::from_secs(
                 momo_workspace_actions::team_ai::TOOL_PATH_DEADLINE_SECS,
             ),
-            team_ai_daily_search_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_SEARCH_CAP,
+            team_ai_daily_search_cap: None,
             team_ai_task: momo_agent::team_ai_task::TaskLimits::default(),
         }
     }

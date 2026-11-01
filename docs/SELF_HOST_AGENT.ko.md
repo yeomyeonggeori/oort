@@ -1105,6 +1105,15 @@ oort_card_suggest {handle, clientMsgId, commandId: "ai.connect", args, body}
   `section` ∈ `profile | appearance | notifications | shortcuts | devices |
   workspace | members | memory | usage | code | updates | plugins`(`plugins`는 앱
   화면)다. 경로가 아니라 섹션 id다. 다른 값은 거절되니 글로 답한다.
+- 그리고 `commandId: "work.request.open"`(ADR-0201 증보 v3 B8 C1)은 사람이 코드
+  일을 자기 맥에 맡겨 달라고 할 때 쓴다. 카드는 그 사람의 「작업 요청」 시트를
+  네가 쓴 글로 미리 채워 열고, 읽고 보내는 것은 **그 사람**이다. `args`는 필수
+  `prompt`(그 사람 말투의 평문, UTF-8 1~8,000바이트, 줄바꿈·탭 말고는 제어 문자
+  없음, 보이지 않는 글자 없음, `/`로 시작하지 않음 — 서명 spawn이 쓰는 규칙
+  그대로)와 선택 `harness` ∈ `claude | codex`(그 사람이 댄 이름. `team_key`는
+  `ai.connect`의 값이라 여기서는 거절된다)다. 다른 키(`folder`, `channel`,
+  `label` 등)는 거절된다. 카드는 아무것도 실행하지 않고 자기 승인 행·감사 행도
+  남기지 않는다. spawn은 그 사람이 보낼 때 소유자 기기 키로 서명한다.
 
 #### 3.3.17 도어벨 (실시간 wake)
 

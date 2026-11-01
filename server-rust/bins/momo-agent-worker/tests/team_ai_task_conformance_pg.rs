@@ -1102,8 +1102,10 @@ async fn t7_each_bound_ends_the_task_with_one_interim_report() {
 
     // (label, tune, script after the first step, expected note in the report, model calls)
     type Tune = fn(&mut WorkerConfig);
+    // #4944: the operator's ceiling (`TEAM_AI_DAILY_TOKEN_CAP`) is one of the B9 limits a step judges;
+    // t19 walks all four. The sentence names the operator, not the settings.
     let budget_sentence =
-        "오늘 팀 AI 사용량을 다 써서 여기서 멈췄어요. 지금까지 정리한 내용이에요.";
+        "서버 운영자가 정한 하루 사용량을 다 써서 여기서 멈췄어요. 지금까지 정리한 내용이에요.";
     let cases: Vec<(&str, Tune, Vec<ChatCompletion>, &str, usize)> = vec![
         (
             "steps",
@@ -1138,10 +1140,10 @@ async fn t7_each_bound_ends_the_task_with_one_interim_report() {
             "N1",
             5,
         ),
-        // The day's allowance (B9-2): step 1 spends 15 tokens, the cap is 15, so step 2 never calls.
+        // The day's allowance (B9-2): step 1 spends 15 tokens, the ceiling is 15, so step 2 never calls.
         (
             "the day's allowance",
-            (|c: &mut WorkerConfig| c.team_ai_daily_token_cap = 15) as Tune,
+            (|c: &mut WorkerConfig| c.team_ai_daily_token_cap = Some(15)) as Tune,
             vec![],
             "N1",
             1,

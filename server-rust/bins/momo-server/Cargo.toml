@@ -87,6 +87,12 @@ momo-provider-probe = { path = "../../crates/momo-provider-probe" }
 # — one egress-guarded POST to a host fixed at construction — and what it returns
 # has no `client_secret` field and redacts the two secrets under Debug.
 momo-github = { path = "../../crates/momo-github" }
+# ADR-0218 §8 (#4941): the crate owns the HTTP client for the one call the photo route makes to a
+# team-connected image model, so this manifest still does not. Its whole API is
+# `ImageModelClient::generate` — one egress-guarded POST of one of two fixed shapes (OpenAI
+# `images/edits`, Gemini `interactions`) — and what it returns is a picture's bytes or a closed
+# error kind: never a provider body, a header or an error string.
+momo-image-model = { path = "../../crates/momo-image-model" }
 
 axum = { workspace = true, features = ["multipart"] }
 tokio = { workspace = true, features = ["net", "signal", "sync", "time"] }

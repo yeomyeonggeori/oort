@@ -3,6 +3,7 @@ import {
   DEFAULT_UNFURL_SIZE,
   UNFURL_MAX_CARDS,
   clearMessageUnfurls,
+  drawablePreviews,
   emptyUnfurls,
   isUnfurlIconPath,
   isUnfurlImagePath,
@@ -11,10 +12,13 @@ import {
   messageUnfurlFromWire,
   replaceMessageUnfurls,
   unfurlCardModel,
+  unfurlDrawsCards,
   unfurlRenderState,
   unfurlsFor,
   visibleUnfurls,
   type MessageUnfurl,
+  type UnfurlPreview,
+  type UnfurlPreviewCard,
   type UnfurlSize,
 } from "./unfurl";
 
@@ -353,5 +357,73 @@ describe("unfurl card display model", () => {
     expect(text?.title).toBe("exe.txt report");
     expect(text?.description).toBe("a b c");
     expect(model(row({ siteName: "\u202Esite" }, ["title"]))?.title).toBe("site");
+  });
+});
+
+// #5005: the card of a link that is still in the composer is drawn by the same model.
+describe("composer preview cards", () => {
+  const previewImage = "/v1/workspaces/w-1/unfurl-previews/p-1/image";
+  const previewIcon = "/v1/workspaces/w-1/unfurl-previews/p-1/icon";
+  const preview: UnfurlPreviewCard = {
+    id: "p-1",
+    url: "https://example.com/guide",
+    status: "ok",
+    title: "운영 가이드",
+    description: "처음 일주일에 읽는 글",
+    domain: "example.com",
+    imageUrl: previewImage,
+    iconUrl: previewIcon,
+    imageWidth: 1200,
+    imageHeight: 630,
+  };
+
+  it("gives a preview and a stored card with the same fields the same card, at every size", () => {
+    const stored: MessageUnfurl = { ...preview, messageId: "M-1" };
+    for (const size of ["compact", "rich", "off"] as const) {
+      expect(unfurlCardModel(preview, { size }), size).toEqual(unfurlCardModel(stored, { size }));
+    }
+    // A preview has no message, and the model never needed one: the replacement rules still apply.
+    expect(unfurlCardModel(preview, { size: "rich" })).toMatchObject({
+      layout: "rich",
+      title: "운영 가이드",
+      domain: "example.com",
+      iconUrl: previewIcon,
+      picture: { kind: "image", imageUrl: previewImage, shape: "wide" },
+    });
+    const { imageUrl: _image, imageWidth: _w, imageHeight: _h, ...pictureless } = preview;
+    expect(unfurlCardModel(pictureless, { size: "rich" })).toMatchObject({
+      layout: "compact",
+      picture: { kind: "tile" },
+    });
+  });
+
+  it("draws cards in two layouts and none when off", () => {
+    expect(unfurlDrawsCards("compact")).toBe(true);
+    expect(unfurlDrawsCards("rich")).toBe(true);
+    expect(unfurlDrawsCards("off")).toBe(false);
+    // The model agrees: `off` is the one size that yields no card.
+    expect(unfurlCardModel(preview, { size: "off" })).toBeNull();
+    expect(unfurlCardModel(preview, { size: "compact" })).not.toBeNull();
+  });
+
+  it("draws only the previews that have something to show, in link order", () => {
+    const second: UnfurlPreviewCard = { ...preview, id: "p-2", url: "https://example.com/two" };
+    const titleless: UnfurlPreviewCard = {
+      id: "p-3",
+      url: "https://example.com/bare",
+      status: "ok",
+      domain: "example.com",
+      siteName: "Example",
+    };
+    const failed: UnfurlPreview = { status: "failed", url: "https://example.com/gone" };
+    expect(drawablePreviews([failed, preview, titleless, second]).map((card) => card.id)).toEqual([
+      "p-1",
+      "p-2",
+    ]);
+    // A picture alone is enough, exactly as for a stored card.
+    expect(
+      drawablePreviews([{ ...titleless, id: "p-4", imageUrl: previewImage }]).map((card) => card.id)
+    ).toEqual(["p-4"]);
+    expect(drawablePreviews([])).toEqual([]);
   });
 });

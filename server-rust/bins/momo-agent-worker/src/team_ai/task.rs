@@ -344,14 +344,22 @@ impl AgentWorker {
                 )
                 .await;
         }
-        // B9-2: the day's allowance ends a task with what it has found, like any other bound.
-        if gathered.used_today >= self.config.team_ai_daily_token_cap {
+        // B9-2 (#4944): the usage limits end a task with what it has found, like any other bound —
+        // and they are judged by the very function the quick path is judged by (nothing set and no
+        // operator ceiling = never; the operator's switch and ceiling first; then the team's own
+        // daily tokens and monthly dollars), before this step asks the model for anything.
+        let caps = self.config.team_ai_caps();
+        let usage = Usage {
+            tokens_today: gathered.used_today,
+            month_micro_usd: gathered.month_micro_usd,
+        };
+        if let Some(hit) = team_ai_limits::judge(&gathered.state.limits, &caps, &usage) {
             return self
                 .team_ai_task_interim(
                     job,
                     payload,
                     run_id,
-                    team_ai::TASK_BUDGET_SENTENCE,
+                    hit.task_sentence(),
                     &task.note,
                     store::END_LIMIT,
                     None,
@@ -431,7 +439,9 @@ impl AgentWorker {
             WebSearch::Off
         } else if !wire_searches(wire) {
             WebSearch::NotSupported
-        } else if gathered.searches_today >= self.config.team_ai_daily_search_cap {
+        } else if team_ai_limits::search_cap(&gathered.state.limits, &caps)
+            .is_some_and(|cap| gathered.searches_today >= cap)
+        {
             WebSearch::DailyCapReached
         } else if task.tool_calls > 0 {
             WebSearch::AfterRead
@@ -439,12 +449,14 @@ impl AgentWorker {
             WebSearch::Available
         };
         // No card is offered to a step of a task (B5-6: a task is reading work, and the sensitive
-        // set — whatever `SENSITIVE_ACTION_IDS` holds — is never offered inside one). The empty list
-        // is also what makes the prompt say so.
+        // set — whatever `SENSITIVE_ACTION_IDS` holds — is never offered inside one), and neither is
+        // the `card_suggest` work-request card (B8 C1: the tool list below carries no `card_suggest`,
+        // and a call of it is off-script). The two empty lists are also what makes the prompt say so.
         let mut messages = vec![
             ChatMessage::system(team_ai::system_prompt_with_task(
                 &gathered.roster,
                 web,
+                &[],
                 &[],
                 team_ai::TaskPrompt::InTask {
                     step,

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "de0790d67cafa5f128c0a7044009847479e98b5d",
+  "baselineHead": "a3112039788c8173a8d6eac06ee6e9491b52525d",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -107,6 +107,7 @@
     "clients/mobile/src/features/conversation/Timeline.tsx": 54,
     "clients/mobile/src/features/conversation/TypingBar.tsx": 5,
     "clients/mobile/src/features/conversation/UnfurlCards.tsx": 22,
+    "clients/mobile/src/features/conversation/WorkRequestSuggestion.tsx": 10,
     "clients/mobile/src/features/conversation/approvalGate.ts": 4,
     "clients/mobile/src/features/conversation/appsTail.ts": 8,
     "clients/mobile/src/features/conversation/bubble.ts": 3,
@@ -597,7 +598,7 @@
     "clients/web/src/features/memory/ProposalCard.tsx": 30,
     "clients/web/src/features/memory/memoryTestKit.tsx": 31,
     "clients/web/src/features/memory/useMemory.ts": 37,
-    "clients/web/src/features/notifications/DesktopNotifications.tsx": 18,
+    "clients/web/src/features/notifications/DesktopNotifications.tsx": 17,
     "clients/web/src/features/notifications/WorkHostNotices.tsx": 2,
     "clients/web/src/features/notifications/browserNotify.ts": 14,
     "clients/web/src/features/notifications/deviceNotify.ts": 1,

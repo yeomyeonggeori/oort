@@ -1,4 +1,5 @@
 import {fetchHumanControlSignatureRequired} from '@momo/core/features/auth/deviceKeys';
+import {WORK_REQUEST_SHEET_MODE} from '@momo/core/features/timeline/commandSuggest';
 import {uuidEq, type Channel} from '@momo/core/lib/api';
 import {useQuery, useQueryClient} from '@tanstack/react-query';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
@@ -105,6 +106,7 @@ export function AskMacSheet({
   port,
   preview,
   initialHarness,
+  initialPrompt,
   waitTimeoutMs = WAIT_TIMEOUT_MS,
 }: {
   onClose: () => void;
@@ -118,6 +120,12 @@ export function AskMacSheet({
   preview?: AskMacPreview;
   /** 「개인 에이전트」 줄이 넘기는 처음 하네스. 이 맥이 못 고르는 키면 평소 기본값이 이긴다. */
   initialHarness?: HarnessKey;
+  /**
+   * 도우미의 「작업 요청 열기」 카드(`work.request.open`, #4972)가 미리 채운 글. 있으면 시트는
+   * **「작업 요청」 모드**로 열리고 이 글이 입력 칸에 들어 있다 — 보내는 것은 사람이다(글을 읽고
+   * 고치고 ✓를 눌러야 서명·전송이 일어난다). 폴더·채널·맥은 미리 고르지 않는다.
+   */
+  initialPrompt?: string;
   waitTimeoutMs?: number;
 }): React.JSX.Element {
   return (
@@ -135,6 +143,7 @@ export function AskMacSheet({
         port={port}
         preview={preview}
         initialHarness={initialHarness}
+        initialPrompt={initialPrompt}
         waitTimeoutMs={waitTimeoutMs}
       />
     </PageSheet>
@@ -149,6 +158,7 @@ function SheetBody({
   port,
   preview,
   initialHarness,
+  initialPrompt,
   waitTimeoutMs,
 }: {
   onClose: () => void;
@@ -158,6 +168,7 @@ function SheetBody({
   port?: SpawnPort;
   preview?: AskMacPreview;
   initialHarness?: HarnessKey;
+  initialPrompt?: string;
   waitTimeoutMs: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -199,7 +210,10 @@ function SheetBody({
   const last = useMemo(() => readAskLast(workspaceId), [workspaceId]);
 
   const [macId, setMacId] = useState<string | null>(null);
-  const [mode, setMode] = useState<AskMode>(preview?.mode ?? 'ask');
+  // 카드가 글을 미리 채웠으면 일을 시키는 시트다(「작업 요청」): 글이 시킬 일이라서다.
+  const [mode, setMode] = useState<AskMode>(
+    preview?.mode ?? (initialPrompt !== undefined ? WORK_REQUEST_SHEET_MODE : 'ask'),
+  );
   const [harnessPick, setHarnessPick] = useState<HarnessKey | null>(
     preview?.harness ?? initialHarness ?? null,
   );
@@ -209,7 +223,7 @@ function SheetBody({
   const [channelPick, setChannelPick] = useState<string | null>(
     preview?.channelId ?? null,
   );
-  const [prompt, setPrompt] = useState(preview?.prompt ?? '');
+  const [prompt, setPrompt] = useState(preview?.prompt ?? initialPrompt ?? '');
   const [issue, setIssue] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [pending, setPending] = useState(false);

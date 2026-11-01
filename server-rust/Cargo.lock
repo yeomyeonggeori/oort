@@ -1786,6 +1786,7 @@ dependencies = [
  "momo-expressions",
  "momo-messaging",
  "momo-outbox",
+ "momo-wire",
  "serde_json",
  "sqlx",
  "thiserror 1.0.69",
@@ -1983,6 +1984,23 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "momo-image-model"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "futures",
+ "momo-egress",
+ "momo-settings",
+ "reqwest",
+ "serde_json",
+ "thiserror 1.0.69",
  "tokio",
  "tracing",
 ]
@@ -2195,6 +2213,7 @@ dependencies = [
  "momo-ephemeral",
  "momo-expressions",
  "momo-github",
+ "momo-image-model",
  "momo-mcp",
  "momo-messaging",
  "momo-notifier",

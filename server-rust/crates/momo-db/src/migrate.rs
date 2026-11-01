@@ -746,13 +746,18 @@ mod tests {
     /// the trigger `member_handle_alias_guard` takes over: an alias belongs to the workspace's team AI
     /// member only, and a workspace holds at most four. No new table, no new grant.
     ///
+    /// 167 is #4900's expiry rule for expression drafts (ADR-0218 D2): `expression_immutable()` lets
+    /// `origin` change in exactly one way — when a draft is `expired`, its `prompt` (the agent's words)
+    /// becomes JSON null — and the migration blanks the prompts of drafts that expired before it. No new
+    /// table, so no new RLS policy.
+    ///
     /// 169 is #4967's 「도우미 작업 모드」 (ADR-0201 증보 v3 B5·B14-S4): the `team_ai_task` marker
     /// table — one row per run, the row's existence is the task-mode judgement, `steps_done` and the
     /// step claim keep a step from running twice, and the plan/note between steps are gone once the
-    /// row is ended (`team_ai_task_ended_ck`). Tenant ENABLE + FORCE + `ws_isolation`; granted to
-    /// `momo_app` and `momo_worker` only (SELECT, INSERT, UPDATE — no DELETE). 167 (#4900) and 168
-    /// (#4656) are reserved by other slices and land before this one: until they do, this one test is
-    /// the single expected failure of a branch that carries 169 alone.
+    /// row is ended (`team_ai_task_ended_ck`). Tenant ENABLE + FORCE + `ws_isolation`; the grants are
+    /// the minimum the code reads and writes (`team-ai-task-lockdown`, the same text in the migration
+    /// and both role bootstraps). 168 (#4656) is reserved by another slice and lands before this one:
+    /// until it does, this one test is the single expected failure of a branch that carries 169 alone.
     #[test]
     fn discovers_contiguous_migrations_001_to_169() {
         let dir = default_migrations_dir();

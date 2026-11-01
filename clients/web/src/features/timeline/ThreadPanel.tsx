@@ -34,7 +34,10 @@ import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runStatusForMessage } from "./runStatus";
 import type { RequestThreadLanding } from "./useRequestThreadLanding";
 import { watchForMessageId } from "@/features/inbox/anchor";
+import { viewThread } from "@/features/notifications/viewedThread";
 import type { RealtimeHandle } from "@/lib/realtime";
+import { ThreadFollowButton } from "./ThreadFollowButton";
+import { useThreadFollow } from "./useThreadFollow";
 
 const NO_REPLIES: Message[] = [];
 
@@ -78,6 +81,12 @@ type ThreadPanelProps = {
    * 일이다. 없으면(작업 세션 패널) 신호도 보내지 않는다.
    */
   onThreadRead?: (rootId: string, state: ThreadReadState) => void;
+  /**
+   * 머리에 「따라가기」를 둘 수 있는 곳인가(#4890). DM 채널의 스레드는 따라가지 않는다(모든 메시지가 이미 알림이다 — 서버도
+   * 400 `thread_follow_not_applicable`). 호스트가 채널 종류를 안다. 생략하면 둘 수 있다. 대화 표면(`actions` 가 있는 곳)만
+   * 서고, 작업 세션 패널은 사건 기록이라 따라갈 대화가 아니다.
+   */
+  followable?: boolean;
 };
 
 const CLOSE_LABEL = "스레드 닫기";
@@ -145,6 +154,7 @@ function ThreadPanelFrame({
   requestLanding,
   realtime,
   onThreadRead,
+  followable = true,
 }: ThreadPanelProps & { root: Message }) {
   const [isPresent, safeToRemove] = usePresence();
   const reduceMotion = useReducedMotion();
@@ -198,6 +208,14 @@ function ThreadPanelFrame({
       return { ...page, messages };
     },
   });
+  // 따라가기(#4890): 스레드 열기 응답의 `following` 이 처음 값이고, 누르면 낙관적으로 바뀐다(코어 `threadFollow` 가 규칙).
+  const follow = useThreadFollow({
+    workspaceId,
+    channelId,
+    rootId: root.id,
+    queryKey,
+    serverFollowing: query.data === undefined ? undefined : query.data.following === true,
+  });
   const refetchReplies = query.refetch;
   const refreshQueue = useMemo(() => ({ key: queryKey, active: true, running: false, dirty: false }), [queryKey]);
   useEffect(() => { refreshQueue.active = true; return () => { refreshQueue.active = false; }; }, [refreshQueue]);
@@ -243,6 +261,13 @@ function ThreadPanelFrame({
     if (!readsThread || !foreground) return;
     readSender.note(root.id, readSignalSeq(allReplies));
   }, [readsThread, foreground, readSender, root.id, allReplies]);
+  // 이 패널이 열려 있는 동안 어느 스레드를 보여 주는지 데스크탑 알림 판정에 알린다(#4890: 「그 스레드를 보고 있으면 안 띄움」).
+  // 닫히는 중(`isPresent` 가 거짓)은 이미 닫은 것이다. 읽음 신호와 같은 이유로 대화 표면만이다.
+  useEffect(() => {
+    if (!readsThread || !isPresent) return;
+    return viewThread(channelId, root.id);
+  }, [readsThread, isPresent, channelId, root.id]);
+  const showFollow = readsThread && followable && query.data !== undefined && !follow.view.unavailable;
 
   const replyIds = useRef(new Set<string>());
   replyIds.current = new Set(allReplies.map((message) => message.id.toLowerCase()));
@@ -339,18 +364,31 @@ function ThreadPanelFrame({
           아주 연한 선으로, 툴팁은 아래 — 머리 단추는 전부 공유 `Tooltip`을 입는다). */}
       <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-2">
         <h2 className="text-body font-semibold">스레드</h2>
-        <Tooltip label={CLOSE_LABEL} side="bottom">
-          <button
-            type="button"
-            onClick={closePanel}
-            aria-label={CLOSE_LABEL}
-            data-testid="thread-close"
-            className={channelHeaderControlClass()}
-          >
-            <X className="size-4" />
-          </button>
-        </Tooltip>
+        <div className="flex items-center gap-2">
+          {showFollow && (
+            <ThreadFollowButton view={follow.view} copy={follow.copy} onToggle={follow.toggle} />
+          )}
+          <Tooltip label={CLOSE_LABEL} side="bottom">
+            <button
+              type="button"
+              onClick={closePanel}
+              aria-label={CLOSE_LABEL}
+              data-testid="thread-close"
+              className={channelHeaderControlClass()}
+            >
+              <X className="size-4" />
+            </button>
+          </Tooltip>
+        </div>
       </header>
+      {showFollow && follow.view.failed && (
+        <InlineBanner
+          message={follow.copy.failed}
+          actionLabel={follow.copy.dismiss}
+          onAction={follow.dismissError}
+          testId="thread-follow-failed"
+        />
+      )}
 
       <div
         className="min-h-0 flex-1 overflow-y-auto"
