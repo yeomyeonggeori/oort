@@ -42,6 +42,7 @@ export function ExpressionDraftStep({
   onApprove,
   onAnother,
   promptLabel,
+  pictureNote,
   anotherLabel,
 }: {
   draft: ExpressionDraft;
@@ -53,6 +54,12 @@ export function ExpressionDraftStep({
    * 보이지 않는다 — 가져온 그림에는 문장이 없고, 에이전트가 쓴 문장은 이 단계에서 보이지 않는다.
    */
   promptLabel?: string;
+  /**
+   * 사진으로 만든 그림만 준다: 서버가 이 그림에 한 일을 말하는 **그림 바로 위의 한 줄**(배경 지우기의 결과). 주면 서버의 고정
+   * 문장(`promptLabel`)은 서지 않는다 — 같은 사실을 두 번 말하지 않는다(배경을 지우지 못한 때는 고정 문장이 거꾸로 말한다).
+   * 주지 않으면(캐리커처) 고정 문장이 그 자리의 한 줄이다(#5099, 검증 줄 2회차 화면 L3).
+   */
+  pictureNote?: React.ReactNode;
   /** 「다른 …」 단추의 낱말. 주지 않으면 가져오기 쪽 낱말이다. */
   anotherLabel?: string;
 }): React.JSX.Element {
@@ -180,7 +187,10 @@ export function ExpressionDraftStep({
           {formatMessage('expressions.draft.source', {host: sourceHost})}
         </Text>
       ) : null}
-      {promptLabel && draft.origin.prompt ? (
+      {/* 그림 바로 위의 한 줄 — 배경에 한 일(`pictureNote`)이 있으면 그것 하나, 없으면 서버가 쓴 고정 문장이다. */}
+      {pictureNote ? (
+        pictureNote
+      ) : promptLabel && draft.origin.prompt ? (
         <Sentence style={styles.meta} testID="expression-draft-prompt">
           {`${promptLabel} ${draft.origin.prompt}`}
         </Sentence>

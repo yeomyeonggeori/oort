@@ -394,14 +394,18 @@ export function ExpressionPhotoForm({
     const {draft, cutout: done} = phase.result;
     return chapter(
       <View style={styles.section} testID="expression-photo-made">
-        {done !== null ? (
-          <LiveLine
-            text={formatMessage(PHOTO_CUTOUT_KEY[done])}
-            testID="expression-photo-cutout"
-          />
-        ) : null}
         <ExpressionDraftStep
           draft={draft}
+          // 배경에 한 일은 그림 바로 위의 한 줄이다. 서버의 고정 문장(「만든 방법」)은 이 줄이 있으면 서지 않는다 — 같은 사실을 두
+          // 번 말하고, 배경을 지우지 못한 때는 그 문장이 거꾸로 말한다. 캐리커처는 배경 줄이 없어서 고정 문장이 그 자리의 한 줄이다.
+          pictureNote={
+            done !== null ? (
+              <LiveLine
+                text={formatMessage(PHOTO_CUTOUT_KEY[done])}
+                testID="expression-photo-cutout"
+              />
+            ) : undefined
+          }
           promptLabel={formatMessage('expressions.photo.originLabel')}
           anotherLabel={formatMessage('expressions.photo.anotherPhoto')}
           onReplace={next =>

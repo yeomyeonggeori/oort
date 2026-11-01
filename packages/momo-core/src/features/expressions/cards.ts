@@ -38,7 +38,7 @@ export function expressionDraftCard(draft: ExpressionDraft, nowMs: number, pendi
     uploadLabel: "직접 올리기",
     code: draft.code,
     line: !pending ? "처리가 끝난 요청이에요" : expired ? "승인을 기다리다 만료됐어요" :
-      draft.state === "manual_upload_required" ? manualUploadLine(draft.code) : "이 그림을 팀 보관함에 저장할까요?",
+      draft.state === "manual_upload_required" ? manualUploadLine(draft.code) : "이 그림을 팀 보관함에 등록할까요?",
   };
 }
 

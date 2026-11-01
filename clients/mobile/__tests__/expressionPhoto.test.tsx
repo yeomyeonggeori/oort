@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import {AppState, Platform, StyleSheet} from 'react-native';
 import * as api from '@momo/core/lib/api';
@@ -142,6 +143,10 @@ function album(asset: Record<string, unknown> | null) {
 }
 const text = (testID: string) =>
   screen.getByTestId(testID).props.children as string;
+type TestInstance = ReturnType<typeof screen.getByTestId>;
+// 요소가 아니라 **글**을 모아 비교한다: 요소 배열로 단정이 실패하면 Jest 가 요소 트리를 통째로 찍다가 시험 프로세스가 죽는다.
+const textsMatching = (scope: ReturnType<typeof within>, pattern: RegExp) =>
+  scope.queryAllByText(pattern).map(node => [node.props.children].flat().join(''));
 const has = (testID: string) => screen.queryByTestId(testID) !== null;
 // 낭독에서 숨긴 장식(스피너)까지 센다: 「돌지 않는다」는 보이지 않는 것도 포함해서 잰다.
 const hasHidden = (testID: string) =>
@@ -477,6 +482,53 @@ describe('만드는 중', () => {
     await waitFor(() => expect(posts(request)).toHaveLength(2));
   });
 
+  // #5099 M2(검증 줄 2회차 화면): 만드는 동안(최대 2분) 사진 단추·갈래·얼굴·동의는 흐려지는데 잠긴 입력 칸 셋은 평소 그대로여서
+  // 눌러도 자판이 안 오르는 칸이 고칠 수 있는 칸처럼 보였다. 기준은 숫자가 아니라 **같은 화면의 잠긴 행**이다 — 한쪽 값만 바뀌면
+  // 한 화면이 잠김을 두 가지로 그린다.
+  it('만드는 동안 잠긴 입력 칸 셋(고정 이름·표시 이름·태그)은 잠긴 행과 같은 흐림이고 보조기술에도 잠겼다고 말하며, 끝나면 도로 살아난다 (#5099 M2)', async () => {
+    const {store} = setup({...OPENAI, hold: true});
+    await mount(store);
+    await ready();
+    const FIELDS = ['name', 'display-name', 'tags'].map(
+      key => `expression-photo-${key}`,
+    );
+    const opacityOf = (testID: string) =>
+      StyleSheet.flatten(screen.getByTestId(testID).props.style)?.opacity;
+    const locked = (testID: string) =>
+      screen.getByTestId(testID).props.accessibilityState?.disabled === true;
+    // 보내기 전의 살아 있는 칸은 흐리지 않고 잠겼다고 말하지도 않는다(`editable` 을 생략한 것을 잠김으로 읽지 않는다).
+    for (const id of FIELDS) {
+      expect({id, opacity: opacityOf(`${id}-pill`), locked: locked(id)}).toEqual({
+        id,
+        opacity: undefined,
+        locked: false,
+      });
+    }
+    await send({branch: 'caricature'});
+    await waitFor(() => expect(has('expression-photo-busy')).toBe(true));
+    // 기준: 같은 순간 잠긴 갈래 행의 흐림. 둘 다 1 이라서 맞는 빈 비교가 되지 않게 실제로 흐린지부터 본다.
+    const row = opacityOf('expression-photo-branch-cutout');
+    expect(row).toBeLessThan(1);
+    expect(disabled('expression-photo-branch-cutout')).toBe(true);
+    for (const id of FIELDS) {
+      expect({id, opacity: opacityOf(`${id}-pill`), locked: locked(id)}).toEqual({
+        id,
+        opacity: row,
+        locked: true,
+      });
+    }
+    // 기다리기를 그만두면(취소) 칸은 도로 살아난다.
+    await press('expression-photo-cancel');
+    await waitFor(() => expect(has('expression-photo-busy')).toBe(false));
+    for (const id of FIELDS) {
+      expect({id, opacity: opacityOf(`${id}-pill`), locked: locked(id)}).toEqual({
+        id,
+        opacity: undefined,
+        locked: false,
+      });
+    }
+  });
+
   it('화면을 닫아도 기다리기를 멈춘다(요청의 신호가 선다)', async () => {
     const {store, request} = setup({...OPENAI, hold: true});
     const {view} = await mount(store);
@@ -528,28 +580,49 @@ describe('만드는 중', () => {
 });
 
 describe('만든 그림', () => {
+  // 그림 카드(`expression-draft`)의 바로 아래 자식들의 testID 를 위에서 아래 순서로(testID 가 없는 자식은 null). 「그림 곁」은 순서로 잰다.
+  const draftOrder = () =>
+    screen
+      .getByTestId('expression-draft')
+      .children.map((child: TestInstance | string) =>
+        typeof child === 'string' ? null : (child.props.testID as string | undefined) ?? null,
+      );
+
+  // #5099 L3(검증 줄 2회차 화면): 맨 위 「배경을 지웠어요.」와 그림 위 「만든 방법: …배경을 지운 그림」이 같은 사실을 두 번 말했고, 첫 줄은
+  // 이름보다 위 — 그림에서 먼 곳에 섰다. 배경을 지우지 못한 때는 두 줄이 서로 거꾸로 말했다(결과: 못 지웠다 ↔ 고정 문장: 지운 그림). 이제
+  // 배경 이야기는 **그림 바로 위의 한 줄**이다: 서버가 배경에 한 일(결과)이 있으면 그 줄 하나, 캐리커처(배경 줄 없음)는 서버의 고정
+  // 문장이 그 자리의 한 줄이다.
   it.each([
     ['model', {...OPENAI, cutout: 'model'}, 'cutout', 'expressions.photo.cutoutModel'],
     ['erased', {...OPENAI, cutout: 'erased'}, 'cutout', 'expressions.photo.cutoutErased'],
     ['unchanged', {...OPENAI, cutout: 'unchanged'}, 'cutout', 'expressions.photo.cutoutUnchanged'],
-    ['캐리커처(줄 없음)', OPENAI, 'caricature', null],
+    ['캐리커처(배경 줄 없음)', OPENAI, 'caricature', null],
   ] as const)(
-    '서버가 배경에 한 일(%s)을 사전의 한 줄로 말하고, 서버가 쓴 고정 문장을 「만든 방법」 아래에 보인다',
+    '배경 이야기는 그림 바로 위의 한 줄이다 — 서버가 배경에 한 일(%s)이 있으면 그 줄 하나, 없으면 서버가 쓴 고정 문장 하나',
     async (_label, scene: PhotoScene, branch: PhotoBranch, line) => {
       const {store} = setup(scene);
       await mount(store);
       await ready();
       await send({branch});
       await waitFor(() => expect(has('expression-photo-made')).toBe(true));
+      await waitFor(() => expect(has('expression-draft-preview')).toBe(true));
       // 기대하는 사전 키는 폼의 표가 아니라 여기서 서버의 답(cutout)마다 적는다: 표가 어긋나면 빨개진다.
-      if (line === null) {
-        expect(has('expression-photo-cutout')).toBe(false);
-      } else {
-        expect(text('expression-photo-cutout')).toBe(ko.formatMessage(line));
-      }
-      expect(text('expression-draft-prompt')).toBe(
-        `${ko.formatMessage('expressions.photo.originLabel')} ${PHOTO_FIXTURE_PROMPTS[branch]}`,
-      );
+      const origin = `${ko.formatMessage('expressions.photo.originLabel')} ${PHOTO_FIXTURE_PROMPTS[branch]}`;
+      const [lineID, other, sentence] =
+        line === null
+          ? (['expression-draft-prompt', 'expression-photo-cutout', origin] as const)
+          : (['expression-photo-cutout', 'expression-draft-prompt', ko.formatMessage(line)] as const);
+      // 그 한 줄은 그림 카드 안에서 그림 바로 위에 서고(장 맨 위 이름보다 먼 곳이 아니다), 말이 사전·서버의 문장 그대로다.
+      const card = within(screen.getByTestId('expression-draft'));
+      expect(card.getByTestId(lineID).props.children).toBe(sentence);
+      const order = draftOrder();
+      expect(order[order.indexOf('expression-draft-preview') - 1]).toBe(lineID);
+      // 다른 한 줄은 서지 않는다 — 같은 사실을 두 번 말하지 않는다.
+      expect(has(other)).toBe(false);
+      // 「배경」 이야기는 이 장 전체에서 배경 갈래는 정확히 그 한 줄뿐이고, 캐리커처는 없다(서버의 고정 문장도 「배경」을 말한다).
+      expect(
+        textsMatching(within(screen.getByTestId('expression-photo-made')), /배경/),
+      ).toEqual(line === null ? [] : [sentence]);
       expect(
         screen.getByTestId('expression-draft-another').props.accessibilityLabel,
       ).toBe(ko.formatMessage('expressions.photo.anotherPhoto'));
@@ -557,6 +630,44 @@ describe('만든 그림', () => {
       expect(screen.getByText('신나는 춤')).toBeTruthy();
     },
   );
+
+  // #5099 L3(검증 줄 2회차 화면): 같은 장에서 질문·토글은 「저장」, 단추는 「팀 보관함에 등록」이라 한 행동이 두 낱말이었다. 이 흐름의
+  // 행동 낱말은 「등록」이 하나다(등록 중·등록하지 못했어요·등록 뒤·등록 전 미리보기가 모두 그렇다). 질문 한 줄은 코어가, 나머지는 사전이
+  // 말하고 웹이 같은 문장을 쓴다(`expressionAdd.test` 의 같은 문장 시험).
+  it('행동 낱말은 「등록」 하나다 — 질문·토글·단추·안내에 「저장」이 없다 (#5099 L3)', async () => {
+    const {store} = setup({...OPENAI, cutout: 'unchanged'});
+    await mount(store);
+    await ready();
+    await send();
+    await waitFor(() => expect(has('expression-photo-made')).toBe(true));
+    // 이 장에 보이는 모든 글에 「저장」이 없다(있으면 그 글이 단정 메시지에 찍힌다).
+    expect(
+      textsMatching(within(screen.getByTestId('expression-photo-made')), /저장/),
+    ).toEqual([]);
+    // 행동을 말하는 네 곳이 각자 실제로 「등록」을 말한다(빈 비교가 되지 않게): 질문(코어)·동의 토글·단추·배경을 못 지웠을 때의 안내.
+    for (const id of [
+      'expression-draft-line',
+      'expression-draft-rights',
+      'expression-draft-approve',
+      'expression-photo-cutout',
+    ]) {
+      expect(screen.getByTestId(id)).toHaveTextContent(/등록/);
+      expect(screen.getByTestId(id)).not.toHaveTextContent(/저장/);
+    }
+    // 영어도 같다: 「save」가 아니라 「register」 하나다.
+    for (const key of [
+      'expressions.draft.rights',
+      'expressions.draft.approve',
+      'expressions.photo.cutoutUnchanged',
+    ] as const) {
+      expect({key, save: /\bsav(e|ed|ing)\b/i.test(en.formatMessage(key))}).toEqual({
+        key,
+        save: false,
+      });
+    }
+    expect(en.formatMessage('expressions.draft.rights')).toMatch(/\bregister\b/i);
+    expect(en.formatMessage('expressions.photo.cutoutUnchanged')).toMatch(/\bregistered\b/i);
+  });
 
   it('보고 고른 바로 그 초안만 등록하고(코어의 등록 요청 그대로) 목록에 들어온다. 다른 사진으로 다시 만들면 동의는 다시 받는다', async () => {
     const {store, request} = setup(OPENAI);
