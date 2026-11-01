@@ -317,6 +317,14 @@ export type UnfurlSize = "compact" | "rich" | "off";
 
 export const DEFAULT_UNFURL_SIZE: UnfurlSize = "compact";
 
+/**
+ * Whether this device draws link cards at all. `off` draws none, so a surface that only draws
+ * (the composer preview) skips its work too, and it is narrowed to the two layouts a card has.
+ */
+export function unfurlDrawsCards(size: UnfurlSize): size is Exclude<UnfurlSize, "off"> {
+  return size !== "off";
+}
+
 /** Cards per message: the first distinct links in link order, never more. */
 export const UNFURL_MAX_CARDS = 3;
 
@@ -396,8 +404,20 @@ function pictureShape(width: number | undefined, height: number | undefined): Un
 }
 
 /** An `ok` row with neither a title nor a picture has nothing to put in a card. */
-function hasCardContent(unfurl: MessageUnfurl): boolean {
+function hasCardContent(unfurl: Pick<MessageUnfurl, "title" | "imageUrl">): boolean {
   return plainText(unfurl.title) !== undefined || Boolean(unfurl.imageUrl);
+}
+
+/**
+ * The previews of a draft that draw a card, in link order: `ok` with a title or a picture. A
+ * `failed` one, and an `ok` one with nothing to show (an odd or older server), leave only the
+ * link, exactly as a stored card does (`visibleUnfurls`). The composer asks this before it offers
+ * the ✕, so the ✕ is never there for a card that is not.
+ */
+export function drawablePreviews(previews: readonly UnfurlPreview[]): UnfurlPreviewCard[] {
+  return previews.filter(
+    (preview): preview is UnfurlPreviewCard => preview.status === "ok" && hasCardContent(preview)
+  );
 }
 
 export function isUnfurlPending(unfurl: MessageUnfurl): boolean {
@@ -425,9 +445,16 @@ export function visibleUnfurls(unfurls: readonly MessageUnfurl[]): MessageUnfurl
   );
 }
 
+/**
+ * What a card is drawn from: a stored card, or the preview of a link that is still in the
+ * composer (#5005). A preview has no message yet, so it has no `messageId`; nothing in the
+ * display model reads one, which is why the two draw the same card by the same rules.
+ */
+export type UnfurlCardSource = Omit<MessageUnfurl, "messageId">;
+
 /** What one `ok` card shows, or `null` when it draws no card at all. */
 export function unfurlCardModel(
-  unfurl: MessageUnfurl,
+  unfurl: UnfurlCardSource,
   { size, imageFailed = false }: UnfurlCardOptions
 ): UnfurlCardModel | null {
   if (size === "off" || unfurl.status !== "ok" || !hasCardContent(unfurl)) return null;

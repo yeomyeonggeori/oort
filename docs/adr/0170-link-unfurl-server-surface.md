@@ -257,6 +257,8 @@ REST는 camelCase, 실시간 `message.unfurl`은 snake_case다(기존 `imageUrl`
 8. **예산 1단위 = 바깥 GET 최대 4번**(검수 2026-11-01): 리디렉션 hop마다 하나라 예산이 바깥 요청 수를 그대로 세지는 않는다. 상한은 hop 수와 멤버 자리 4개가 묶는다.
 9. **og:image는 포트를 묶지 않는다**(검수 2026-11-01): 미리보기 HTML은 443만 받지만, 카드의 그림 주소(`Image` 종류)는 기존 그림 프록시처럼 포트 제한이 없다. 가드(사설·루프백·메타데이터·DNS 고정)는 그대로 걸린다.
 10. **자리 굶기기**: 프로세스 자리 16·이름 조회 32는 계정 몇 개로 바닥낼 수 있다(새 위험은 아니지만, 미리보기는 사람이 주소를 직접 적는 더 곧은 길이다). 멤버별 자리 4와 예산이 한 계정의 몫을 묶는다.
+11. **응답 시간**(검수 2026-11-01): 4의 「사설 이름이 있는지 알려 주지 않는다」는 응답 본문 기준이다. 가드가 바로 거절하는 이름, 없는 이름, 느린 공개 사이트는 응답 시간이 다를 수 있다. 저장된 카드의 `blocked`/`failed` 구별보다 새는 정보는 적다.
+12. **캐시 전체 상한**(검수 2026-11-01): 캐시는 프로세스 전체 512개, 멤버 몫 64개라 계정 여럿(8개 이상)이 채우면 다른 멤버의 항목이 밀린다. 밀린 쪽은 한 번 다시 받고 예산 1을 쓴다.
 
 ## 무엇을 열지 않나 (이 증보)
 
@@ -275,3 +277,47 @@ REST는 camelCase, 실시간 `message.unfurl`은 snake_case다(기존 `imageUrl`
 - 코어 타입·디코더: `packages/momo-core`의 `unfurlPreview.test.ts`.
 - 사보타주(가드 우회, 캐시 키의 테넌트·멤버 성분, 멤버 상한, 억제 분기, 환불, 스위치 확인, 443 규칙)는 각각 RED를 확인하고 되돌린다. 결과표는 PR 본문에 있다.
 - 실제 외부 사이트를 대상으로 한 확인은 하지 않았다(`runtime-unverified`). 가짜 서버는 127.0.0.1이고 안전 규칙은 주입한 해석기와 가짜 소켓으로 시험한다. 화면은 이 증보의 범위가 아니다.
+
+## 증보 2026-11-01 정오 — 미리보기 권한·응답 코드·예산 문장 바로잡기 (#5004)
+
+- Status: **Accepted** (2026-11-01 planner — #4884 독립 보안 검수 1회차의 Medium·Low 후속 #5004. D14~D22의 문장 정정이라 결정 변경은 없다). **동작·공개 API·DB는 바뀌지 않는다.** 앞 증보(D14~D22, Accepted)의 문장 가운데 코드와 어긋난 곳을 코드 기준으로 바로잡고, 시험이 재지 못하던 줄을 재는 시험의 이름을 아래 「확인 [V]」에 더한다. D14~D22의 결정은 그대로다.
+- 표기: [V] 이 세션에서 직접 확인(track/engine `de0790d67` 위) · `runtime-unverified` 실행하지 않음.
+
+### 정오 1 (D16) — 사람이 아닌 자격은 자격마다 다른 코드를 받는다
+
+D16의 「에이전트·작업 호스트 자격은 403이다」는 아래 표로 읽는다. 셋 다 **인증 미들웨어(문)에서** 끝나고 핸들러에 닿지 않는다.
+
+| 자격 | 응답 | 이유 [V] |
+|---|---|---|
+| 에이전트 베어러 | 403 `agent bearer is not allowed for this route` | 에이전트 허용 표(`required_agent_scope`)에 이 경로가 없다 |
+| 개발자 토큰 | 403 `dev_route_not_allowed` | 닫힌 표(`dev_route_scope`)에 없다(`dev_access.rs`의 `templates_off_the_table_are_refused`) |
+| 작업 호스트 서명(`MomoHost`) | **401** `invalid work host request signature` | 서명으로 인증되는 경로는 `is_allowed_signed_path`에 적힌 작업 호스트 경로뿐이고, 나머지는 서명이 틀린 요청과 같은 401이다 |
+
+핸들러의 `require_human`(403)은 이 셋을 지나온 비사람 주체를 위한 두 번째 겹이며 지금은 닿지 않는다. OpenAPI `createUnfurlPreview`의 「Who may ask」와 `403` 설명도 같이 고쳤다.
+
+### 정오 2 (D16·D19) — 「활성 워크스페이스 멤버」가 성립하는 조건과 자리
+
+- **조건**: `workspace_membership` 행이 있고, `member.status = 'active'`이며, `member.deleted_at`이 비어 있다(`momo_auth::active_workspace_role`). 역할은 따지지 않는다(게스트도 활성 멤버다). `status`가 `active`가 아닌 멤버(일시 중지·삭제·초대 중)와 삭제 표시가 있는 멤버는 `workspace_membership` 행이 남아 있어도 활성이 아니다.
+- **POST 미리보기**는 이 조건을 **요청마다 DB로** 확인한다(첫 트랜잭션에서 채널 현재 멤버 확인과 함께, 하나라도 아니면 같은 403).
+- **그림·아이콘 GET**(D19)은 DB로 확인하지 않는다. 정지·제거·탈퇴는 각각 그 멤버의 모든 토큰을 폐기하므로(`revoke_member_tokens_in_tx` — `momo_settings::membership_lifecycle`, 탈퇴는 `routes/workspaces.rs`) 그렇게 활성을 잃은 멤버는 문에서 401이고, 이 길 스스로 확인하는 것은 항목(워크스페이스·주인·수명)뿐이다. D19의 「활성 워크스페이스 멤버이고」는 이 뜻으로 읽는다. 토큰을 폐기하지 않고 `member` 행만 바꾼 상태(DB를 직접 고친 경우)에서는 그 멤버가 자기 미리보기의 그림·아이콘을 항목 수명(30분) 안에서 계속 받을 수 있다 — 남의 것은 받을 수 없고, 새 주소를 받아 오는 길도 아니다. 이 틈을 닫을지는 동작을 바꾸는 별도 결정이라 이 증보의 범위 밖이다. **planner 판단(2026-11-01)**: 닫지 않는다 — 정상 경로(정지·제거·탈퇴)는 토큰 폐기로 이미 닫히고, 남는 경우는 DB를 직접 고친 운영 실수뿐이며 자기 항목·30분으로 묶인다.
+
+### 정오 3 (D18·D20) — 「DB에는 아무것도 쓰지 않는다」와 실패한 받기
+
+- 미리보기의 **내용**(주소·카드·id)은 DB에 쓰지 않는다. 이 길이 만드는 행은 예산을 처음 넘긴 요청의 감사 행(`rate_limit.exceeded`, D20)뿐이다.
+- **실패한 받기도 예산을 쓴다**: 서버가 바깥에 물었으므로 `failed`가 돼도 단위를 돌려주지 않는다. 돌려주는 것은 자리가 없던 요청뿐이다(D20). 실패는 2분 기억하므로(D18) 같은 주소를 그 사이에 다시 물으면 세지 않는다.
+
+### 정오 4 (주석) — 「The one writer」
+
+`message_unfurl_tombstone`에 행을 넣는 곳은 둘이다: `momo_unfurl::plant_tombstone_in_tx`(카드 제거와 보내기 억제 D21)와 `momo_workspace_actions::team_ai::withhold_link_previews_in_tx`(팀 AI 답, #3899 — 그 크레이트는 이 크레이트에 의존하지 않아 INSERT가 따로 있다). `remove.rs`의 「The one writer」 주석을 이 사실로 고쳤다. 열이 바뀌면 두 곳을 같이 고쳐야 하고, 하나로 합치는 것은 후속 후보다.
+
+### 확인 [V] 더하기
+
+시험 이름이 정본이다(PR 본문이 실행 결과를 적는다).
+
+- 실패한 미리보기도 예산을 쓴다(D20, 환불을 넣으면 RED): `momo-server/tests/unfurl_conformance_pg.rs`의 `a_failed_preview_spends_the_budget_like_a_good_one`.
+- 리디렉션 hop에서 이름이 사설 주소로 풀리면 그 hop은 연결하지 않는다(D17, 아이콘의 짝): `momo-unfurl/src/fetch.rs`의 `a_preview_redirect_to_a_name_that_resolves_inward_stops_after_the_public_hop`.
+- 억제는 스레드 답글·인용에도 듣고, 답하거나 인용한 상대 메시지(남의 것일 수 있다)의 카드는 건드리지 않는다(D21): `unfurl_conformance_pg.rs`의 `suppress_unfurl_covers_a_thread_reply_and_a_quote_and_never_reaches_the_message_it_answers`.
+- 활성이 아닌 멤버(정지·삭제·워크스페이스 멤버십 행 없음)는 채널에 남아 있어도 403이다(D16): `unfurl_conformance_pg.rs`의 `a_member_the_workspace_does_not_count_as_active_may_not_preview_from_a_channel_it_is_still_in`.
+- 작업 호스트 서명은 미리보기 세 경로의 서명 허용 목록에 없어 401이다(D16): `momo-server/src/work_host_auth.rs`의 `the_link_preview_routes_are_not_signable_so_a_work_host_is_told_401_there`.
+- 사보타주(실패에 환불 넣기, 리디렉션 hop의 답 검사 생략, 묘비를 한 모양에만 심기, 활성 확인 빼기, 서명 허용 목록에 미리보기 넣기)는 각각 RED를 확인하고 되돌렸다. 결과표는 PR 본문에 있다.
+- 실제 외부 사이트를 대상으로 한 확인은 하지 않았다(`runtime-unverified`). 새 시험의 가짜 서버·가짜 이름 풀이는 시험이 주입한다.

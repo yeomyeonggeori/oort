@@ -276,6 +276,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expressions/import:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -372,6 +381,199 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/workspaces/{ws}/expressions/photo-model:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    get:
+      operationId: getExpressionPhotoModel
+      summary: Which image model a photo would be sent to (ADR-0218 section 8 H9)
+      description: >
+        Says whether the team has connected an image model that can draw from a
+        photo, and if so which company would receive the photo. The form asks
+        before it shows the photo field. Only someone who may add a picture is
+        told (a human who is not a guest and whom the add policy lets in); anyone
+        else is refused before the team key is read. `available` and `provider`
+        stand and fall together. The key is never read out: only the company's
+        name is. A team key
+        is an image model only when it is a plain API key for `api.openai.com`
+        (OpenAI) or `generativelanguage.googleapis.com` (Gemini); an OAuth
+        subscription, an Anthropic key, a mock mode or any other host is not one.
+        `canManage` is true for an instance operator, who can connect a model in the
+        AI settings; anyone else is told to ask the operator. Registering a picture
+        by link or upload never needs a model.
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: The image model state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionPhotoModel'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            `expression_role_required` - not a human with the add role (guest,
+            agent, or a member the admins-only policy leaves out). The body names
+            no company.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Another workspace's bearer; the same body as every expression route.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/workspaces/{ws}/expressions/photo-drafts:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    post:
+      operationId: createExpressionPhotoDraft
+      summary: Draw a picture from the caller's own photo with the team image model (ADR-0218 section 8 H9)
+      description: >
+        Sends one photo of the caller's to the team-connected image model (OpenAI or
+        Gemini) and stages what comes back as the same direct draft every other way
+        of adding a picture ends in (`GET /expression-drafts/{draftId}`, activate
+        with `POST /expressions`). `branch` is `cutout` (the subject as it is, the
+        background removed) or `caricature` (a new caricature drawn from the photo).
+        The instructions sent to the model are fixed text written by the server;
+        there is no free-text field. The cost is the team's.
+
+
+        The photo is the caller's own: the file of this request, or an attachment the
+        caller uploaded to a channel they are in (JSON body, the `from-attachment`
+        rule); anyone else's photo is the same `404`. It is opened in the isolated
+        decoder, turned upright, shrunk to 1024 pixels and encoded again from its
+        pixels, so its EXIF, GPS, profile, comment and trailing bytes never leave.
+        `acknowledgedProvider` is the company the caller was told the photo goes to;
+        if the team key now reaches another one nothing is sent (`409
+        image_model_changed`). Authority, the add policy and the live-draft limit
+        are proved before the body is read; one photo per member and four per
+        instance may be in flight, and they stay in flight until the model's call
+        has ended (`503` with `Retry-After` otherwise). A start also spends a
+        per-member budget, `RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER` starts per window,
+        default 10 per 60 seconds (`429` with `Retry-After`, before the body is
+        read). The model has at most 120 seconds. `cutout` in the answer says what the server did with the
+        background: `model` (the model drew a transparent one), `erased` (removed
+        here from a single flat colour), `unchanged` (it could not be removed and the
+        picture is as drawn), or null for a caricature. The picture in `draft` is
+        exactly what registering would save.
+
+
+        No answer carries a word a provider wrote. `subjectMemberId` must be null or
+        the caller.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - metadata
+              - file
+              properties:
+                metadata:
+                  $ref: '#/components/schemas/ExpressionPhotoMetadata'
+                file:
+                  type: string
+                  format: binary
+            encoding:
+              metadata:
+                contentType: application/json
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpressionPhotoAttachmentRequest'
+      responses:
+        '201':
+          description: Ready draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionPhotoDraftResult'
+        '400':
+          description: '`expression_invalid` - malformed body, branch or provider.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            `expression_role_required` - not a human with the add role (guest, agent,
+            admins-only policy), or `subjectMemberId` is another member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: >
+            Another workspace's bearer, or a photo that is not the caller's (someone
+            else's, another channel's, deleted); one body for all of them.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: >
+            `image_model_unavailable` (no image model is connected, or the connected
+            key cannot use one), `image_model_changed` (the company the caller agreed
+            to is not the one the key reaches now), `expression_name_reserved`, or
+            `expression_quota` (4 live drafts already).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: '`expression_media_invalid` - the photo is over 5 MiB.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '415':
+          description: '`expression_media_invalid` - not a still PNG, JPEG, WebP or GIF.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`image_model_refused` - the provider declined this photo.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          description: >
+            `image_model_failed` - a provider error, an answer that is not the
+            documented shape, one over the size bounds, or an address the egress
+            policy refused.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: >
+            One photo per member and four per instance are already in flight (until
+            the model's call has ended), or the decoder is busy; retry after the
+            `Retry-After` seconds. Nothing was sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: >
+            `image_model_timeout` - no answer within 120 seconds. The provider may
+            have finished (and billed) the work.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expressions/from-attachment:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -397,6 +599,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expression-drafts/{draftId}:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -438,6 +649,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expression-drafts/{draftId}/image:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -11867,25 +12087,31 @@ paths:
         `pending` are not returned here.
 
 
-        **Who may ask**: a person (not an agent or a work host; a developer token is not
-        on the closed route table) who is an active member of the workspace **and** a
-        current member of the channel — the rule a send has, so a guest may preview in the
-        channels it is in and nowhere else. A channel that does not exist is the same 403
-        as one the caller is not in. The instance switch `MOMO_UNFURL_ENABLED` and the
-        workspace switch (`unfurl-settings`) both have to be on, or nothing is fetched and
-        the answer is `failed`.
+        **Who may ask**: a person who is an active member of the workspace (a
+        `workspace_membership` row, `member.status` `active`, not deleted; any role,
+        guests included) **and** a current member of the channel — the rule a send has, so
+        a guest may preview in the channels it is in and nowhere else. A channel that does
+        not exist is the same 403 as one the caller is not in. Nothing but a person gets
+        further: an agent bearer and a developer token are a 403 and a work host's
+        signature is a 401 (the answer to a bad signature), all three at the door, because
+        none of them has this route on its table. The instance switch
+        `MOMO_UNFURL_ENABLED` and the workspace switch (`unfurl-settings`) both have to be
+        on, or nothing is fetched and the answer is `failed`.
 
 
         **What the server does**: it fetches the page through the same guarded transport as
         a stored card (public addresses only, https, every redirect hop re-checked,
         512 KiB, time limit) with one rule added: **port 443 only, on every hop**. It
         keeps the answer in memory, for the member who asked, 30 minutes (`failed`: 2
-        minutes); nothing is written to the database. The same address asked again by the
-        same member is answered from memory and costs nothing. A request that must fetch
-        spends the member's preview budget (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`,
-        default 60 per window) and a place among the fetches in flight (the same places
-        the picture proxy uses); either is exhausted with 429 + `Retry-After` (see
-        `RateLimited`), and a request turned away for want of a place gets its budget back.
+        minutes); no part of the preview is written to the database (the one row this
+        route can cause is the budget's audit row for a first refusal). The same address
+        asked again by the same member is answered from memory and costs nothing. A
+        request that must fetch spends the member's preview budget
+        (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`, default 60 per window) and a place among
+        the fetches in flight (the same places the picture proxy uses); either is
+        exhausted with 429 + `Retry-After` (see `RateLimited`), and a request turned away
+        for want of a place gets its budget back. A fetch that ends in `failed` does not:
+        the site was asked, so it spent its unit like any other.
         A client should ask once the address looks finished (350 ms after typing stops, or
         right after a paste), once per address.
       security:
@@ -11914,8 +12140,9 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
           description: >
-            Not a member of the workspace and the channel (or no such channel), not a
-            person, or workspace scope mismatch.
+            Not an active member of the workspace, or not a current member of the channel
+            (or no such channel), an agent bearer or a developer token, or workspace scope
+            mismatch. (A work host's signature is a 401, see above.)
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -11932,7 +12159,10 @@ paths:
         come from the same proxy as `getUnfurlImage` (the same guard, type list, failure
         memory, fetch budget and places): the client must not fetch the remote host and is
         never given its address. An id that is unknown, run out, another member's or
-        another workspace's is the same 404.
+        another workspace's is the same 404. Nothing here asks the database whether the
+        member is still active: suspension, removal and leaving the workspace each revoke
+        every token the member holds, so a member who stopped being active that way is a
+        401 before this route.
       security:
         - bearerAuth: []
       parameters:
@@ -15304,7 +15534,8 @@ components:
         (default 60 seconds) and per member: message sends — `POST …/messages` and
         `POST …/scheduled-messages/{id}/send-now` share one budget, default 120 for a
         person and 600 for an agent credential; scheduled-message creates and edits,
-        default 60; attachment upload starts, default 60. Cancelling a scheduled
+        default 60; attachment upload starts, default 60; starts of a picture from a
+        photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H11), default 10. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
         use) and every read except the two below are not budgeted. Retrying with the
         same `clientMsgId` after a 429 is safe. The link-card proxies
@@ -15324,10 +15555,12 @@ components:
         per window (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`, 0 removes it), spent only by a
         request that must fetch the page: an answer the server already holds for that
         member and address, a switch that is off, and a request turned away for want of a
-        place spend nothing. It draws its places from the same pool as the card proxies, so
-        one member's previews, pictures and icons together never hold more than that
-        member's share (4); with no place it answers 429 with `Retry-After: 1`, gives the
-        unit back and remembers nothing. The preview pictures and icons
+        place spend nothing. A fetch that ends in `failed` still spent its unit and does
+        not get it back; the failure is held for 2 minutes and asking for that address
+        again meanwhile is free. It draws its places from the same pool as the card
+        proxies, so one member's previews, pictures and icons together never hold more
+        than that member's share (4); with no place it answers 429 with `Retry-After: 1`,
+        gives the unit back and remembers nothing. The preview pictures and icons
         (`GET …/unfurl-previews/{id}/image|icon`) spend the card proxies' budget above.
         `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
@@ -16202,6 +16435,163 @@ components:
           minLength: 36
           maxLength: 36
           pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+    ExpressionPhotoModel:
+      type: object
+      additionalProperties: false
+      required:
+      - available
+      - provider
+      - branches
+      - canManage
+      properties:
+        available:
+          type: boolean
+        provider:
+          nullable: true
+          type: string
+          enum:
+          - openai
+          - gemini
+          - null
+        branches:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum:
+            - cutout
+            - caricature
+        canManage:
+          type: boolean
+    ExpressionPhotoMetadata:
+      type: object
+      additionalProperties: false
+      required:
+      - branch
+      - acknowledgedProvider
+      - name
+      - displayName
+      - tags
+      - subjectMemberId
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 30
+          pattern: ^[a-z0-9_-]{2,30}$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 8
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          uniqueItems: true
+        subjectMemberId:
+          oneOf:
+          - type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          - nullable: true
+            enum:
+            - null
+        branch:
+          type: string
+          enum:
+          - cutout
+          - caricature
+        acknowledgedProvider:
+          type: string
+          enum:
+          - openai
+          - gemini
+    ExpressionPhotoAttachmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - branch
+      - acknowledgedProvider
+      - name
+      - displayName
+      - tags
+      - subjectMemberId
+      - attachmentId
+      - channelId
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 30
+          pattern: ^[a-z0-9_-]{2,30}$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 8
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          uniqueItems: true
+        subjectMemberId:
+          oneOf:
+          - type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          - nullable: true
+            enum:
+            - null
+        branch:
+          type: string
+          enum:
+          - cutout
+          - caricature
+        acknowledgedProvider:
+          type: string
+          enum:
+          - openai
+          - gemini
+        attachmentId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        channelId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+    ExpressionPhotoDraftResult:
+      type: object
+      additionalProperties: false
+      required:
+      - draft
+      - cutout
+      properties:
+        draft:
+          $ref: '#/components/schemas/ExpressionDraft'
+        cutout:
+          nullable: true
+          type: string
+          enum:
+          - model
+          - erased
+          - unchanged
+          - null
     ExpressionImportRequest:
       type: object
       additionalProperties: false
@@ -19291,9 +19681,22 @@ components:
             `doorbell_rung` it is `<edge>_<result>` (`leading|trailing|urgent` + `ok|failed`),
             never an HTTP status or host. On `tool_call` it is `ok` or one closed failure
             code (`invalid_arguments`, `not_authorized`, `unavailable`, `conflict`,
-            `already_claimed`, `claim_expired`, `internal`) — never an error message.
-        approvalId: {type: string, format: uuid}
-        actorMemberId: {type: string, format: uuid}
+            `already_claimed`, `claim_expired`, `internal`) — never an error message. On a
+            row that names an approval it is absent wherever `approvalId` is withheld.
+        approvalId:
+          type: string
+          format: uuid
+          description: >
+            Under the rule of `AgentRunProgress.approvalId`: named only to a caller who is an
+            active member of the channel the approval was raised in, which need not be the
+            run's own. For anyone else the row stays but loses `approvalId`, `actorMemberId`
+            and `code` together; an approval whose channel is unknown is named to no one.
+        actorMemberId:
+          type: string
+          format: uuid
+          description: >
+            Who asked or decided the approval on an approval row; absent wherever
+            `approvalId` is withheld.
         tool:
           type: string
           pattern: "^oort_[a-z_]{1,40}$"

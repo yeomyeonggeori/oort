@@ -137,6 +137,371 @@ export const catalog: MessageCatalog = {
       "value": "윈도우"
     }
   ],
+  "desktop.notify.threadSummary": [
+    {
+      "type": 0,
+      "value": "스레드 답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건"
+    }
+  ],
+  "expressions.photo.agentInstead": [
+    {
+      "type": 0,
+      "value": "에이전트에게 부탁하기"
+    }
+  ],
+  "expressions.photo.anotherPhoto": [
+    {
+      "type": 0,
+      "value": "다른 사진으로 다시 만들기"
+    }
+  ],
+  "expressions.photo.branchLabel": [
+    {
+      "type": 0,
+      "value": "만드는 방법"
+    }
+  ],
+  "expressions.photo.busy": [
+    {
+      "type": 0,
+      "value": "그림을 만드는 중이에요 (최대 2분)"
+    }
+  ],
+  "expressions.photo.caricatureHint": [
+    {
+      "type": 0,
+      "value": "사진을 바탕으로 새로 그린 캐리커처로 만들어요."
+    }
+  ],
+  "expressions.photo.caricatureLabel": [
+    {
+      "type": 0,
+      "value": "캐리커처"
+    }
+  ],
+  "expressions.photo.checkFailed": [
+    {
+      "type": 0,
+      "value": "이미지 모델을 확인하지 못했어요. 다시 시도해 주세요."
+    }
+  ],
+  "expressions.photo.checking": [
+    {
+      "type": 0,
+      "value": "이미지 모델을 확인하는 중이에요"
+    }
+  ],
+  "expressions.photo.consent": [
+    {
+      "type": 0,
+      "value": "내 사진이 "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": "로 전송되는 것에 동의해요. 비용은 팀이 연결한 키로 청구돼요."
+    }
+  ],
+  "expressions.photo.consentMissing": [
+    {
+      "type": 0,
+      "value": "사진 전송에 동의해야 만들 수 있어요."
+    }
+  ],
+  "expressions.photo.cutoutErased": [
+    {
+      "type": 0,
+      "value": "배경을 지웠어요."
+    }
+  ],
+  "expressions.photo.cutoutHint": [
+    {
+      "type": 0,
+      "value": "사진 속 피사체는 그대로 두고 배경을 투명하게 해요."
+    }
+  ],
+  "expressions.photo.cutoutLabel": [
+    {
+      "type": 0,
+      "value": "배경 지우기"
+    }
+  ],
+  "expressions.photo.cutoutModel": [
+    {
+      "type": 0,
+      "value": "모델이 배경을 투명하게 그렸어요."
+    }
+  ],
+  "expressions.photo.cutoutUnchanged": [
+    {
+      "type": 0,
+      "value": "배경을 지우지 못했어요. 아래 미리보기가 그대로 저장돼요."
+    }
+  ],
+  "expressions.photo.displayNameLabel": [
+    {
+      "type": 0,
+      "value": "표시 이름"
+    }
+  ],
+  "expressions.photo.displayNamePlaceholder": [
+    {
+      "type": 0,
+      "value": "내 얼굴"
+    }
+  ],
+  "expressions.photo.errorBusy": [
+    {
+      "type": 0,
+      "value": "지금 다른 그림을 만들고 있어요. 잠시 뒤에 다시 해 주세요."
+    }
+  ],
+  "expressions.photo.errorChanged": [
+    {
+      "type": 0,
+      "value": "연결된 이미지 모델이 바뀌었어요. 다시 확인하고 동의해 주세요."
+    }
+  ],
+  "expressions.photo.errorFailed": [
+    {
+      "type": 0,
+      "value": "그림을 만들지 못했어요. 잠시 뒤 다시 시도해 주세요."
+    }
+  ],
+  "expressions.photo.errorGeneric": [
+    {
+      "type": 0,
+      "value": "만들지 못했어요. 연결과 입력을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "expressions.photo.errorMedia": [
+    {
+      "type": 0,
+      "value": "이 사진을 열 수 없어요. 다른 사진을 골라 주세요."
+    }
+  ],
+  "expressions.photo.errorName": [
+    {
+      "type": 0,
+      "value": "이름을 확인해 주세요. 표준 이모지와 겹치는 이름은 쓸 수 없어요."
+    }
+  ],
+  "expressions.photo.errorOffline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겼어요. 연결되면 다시 시도할 수 있어요."
+    }
+  ],
+  "expressions.photo.errorQuota": [
+    {
+      "type": 0,
+      "value": "만드는 중인 그림이 너무 많아요. 하나를 등록하거나 한 시간 뒤에 다시 해 주세요."
+    }
+  ],
+  "expressions.photo.errorRefused": [
+    {
+      "type": 0,
+      "value": "이미지 모델이 이 사진을 거절했어요. 다른 사진으로 해 보세요."
+    }
+  ],
+  "expressions.photo.errorRole": [
+    {
+      "type": 0,
+      "value": "이 팀에서는 지금 새 그림을 올릴 수 없어요."
+    }
+  ],
+  "expressions.photo.errorTimeout": [
+    {
+      "type": 0,
+      "value": "시간이 너무 오래 걸렸어요. 다시 시도해 주세요."
+    }
+  ],
+  "expressions.photo.errorUnavailable": [
+    {
+      "type": 0,
+      "value": "지금 연결된 키로는 이미지 모델을 쓸 수 없어요. OpenAI나 Gemini의 이미지 모델을 연결하거나 권한을 확인하면 돼요."
+    }
+  ],
+  "expressions.photo.faceLabel": [
+    {
+      "type": 0,
+      "value": "사람 얼굴"
+    }
+  ],
+  "expressions.photo.faceNone": [
+    {
+      "type": 0,
+      "value": "사람 얼굴이 없어요"
+    }
+  ],
+  "expressions.photo.faceOther": [
+    {
+      "type": 0,
+      "value": "다른 사람 또는 여러 명이에요"
+    }
+  ],
+  "expressions.photo.faceOtherBlocked": [
+    {
+      "type": 0,
+      "value": "내 얼굴 한 명인 그림만 승인할 수 있어요. 다른 사람이나 여러 사람 얼굴은 올리지 말아 주세요."
+    }
+  ],
+  "expressions.photo.faceSelf": [
+    {
+      "type": 0,
+      "value": "내 얼굴 한 명이에요"
+    }
+  ],
+  "expressions.photo.fieldsInvalid": [
+    {
+      "type": 0,
+      "value": "이름은 영문 소문자·숫자·밑줄·하이픈 2~30자, 표시 이름은 40자, 태그는 8개 이하로 써 주세요."
+    }
+  ],
+  "expressions.photo.fixedNote": [
+    {
+      "type": 0,
+      "value": "이름과 그림은 등록 뒤 바꿀 수 없어요."
+    }
+  ],
+  "expressions.photo.introText": [
+    {
+      "type": 0,
+      "value": "사진 한 장을 팀이 연결한 이미지 모델에 보내 이모티콘으로 만들어요."
+    }
+  ],
+  "expressions.photo.nameLabel": [
+    {
+      "type": 0,
+      "value": "고정 이름"
+    }
+  ],
+  "expressions.photo.namePlaceholder": [
+    {
+      "type": 0,
+      "value": "happy_face"
+    }
+  ],
+  "expressions.photo.noModelAsk": [
+    {
+      "type": 0,
+      "value": "연결은 서버 운영자가 해요. 운영자에게 알려 주세요."
+    }
+  ],
+  "expressions.photo.noModelDetail": [
+    {
+      "type": 0,
+      "value": "지금 연결된 모델로는 그림을 만들 수 없어요. OpenAI나 Gemini의 이미지 모델을 연결하면 돼요."
+    }
+  ],
+  "expressions.photo.noModelHeadline": [
+    {
+      "type": 0,
+      "value": "연결된 이미지 모델이 없어요"
+    }
+  ],
+  "expressions.photo.noModelImport": [
+    {
+      "type": 0,
+      "value": "가져오기로 등록하기"
+    }
+  ],
+  "expressions.photo.noModelManage": [
+    {
+      "type": 0,
+      "value": "AI 설정으로 가기"
+    }
+  ],
+  "expressions.photo.originLabel": [
+    {
+      "type": 0,
+      "value": "만든 방법:"
+    }
+  ],
+  "expressions.photo.photoHint": [
+    {
+      "type": 0,
+      "value": "5 MiB 이하의 움직이지 않는 PNG, JPEG, WebP, GIF를 쓸 수 있어요."
+    }
+  ],
+  "expressions.photo.photoLabel": [
+    {
+      "type": 0,
+      "value": "원본 사진"
+    }
+  ],
+  "expressions.photo.photoMissing": [
+    {
+      "type": 0,
+      "value": "원본 사진을 골라 주세요."
+    }
+  ],
+  "expressions.photo.photoPreviewAlt": [
+    {
+      "type": 0,
+      "value": "고른 원본 사진 미리보기"
+    }
+  ],
+  "expressions.photo.photoSize": [
+    {
+      "type": 0,
+      "value": "사진이 너무 커요. 5 MiB 이하로 골라 주세요."
+    }
+  ],
+  "expressions.photo.photoType": [
+    {
+      "type": 0,
+      "value": "PNG, JPEG, WebP 또는 GIF 사진을 골라 주세요."
+    }
+  ],
+  "expressions.photo.providerGemini": [
+    {
+      "type": 0,
+      "value": "Google Gemini"
+    }
+  ],
+  "expressions.photo.providerOpenai": [
+    {
+      "type": 0,
+      "value": "OpenAI"
+    }
+  ],
+  "expressions.photo.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "expressions.photo.submit": [
+    {
+      "type": 0,
+      "value": "만들기"
+    }
+  ],
+  "expressions.photo.tagsLabel": [
+    {
+      "type": 0,
+      "value": "태그 (쉼표로 구분)"
+    }
+  ],
+  "expressions.photo.tagsPlaceholder": [
+    {
+      "type": 0,
+      "value": "사진, 얼굴"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,
@@ -341,6 +706,18 @@ export const catalog: MessageCatalog = {
       "value": "글을 위에, 큰 그림을 아래에 둬요. 제목과 설명은 두 줄까지 보여줘요. 큰 그림이 없는 링크는 작게와 같아요."
     }
   ],
+  "settings.notifications.threadReplyDescription": [
+    {
+      "type": 0,
+      "value": "따라가는 스레드에 남이 쓴 새 답글이에요."
+    }
+  ],
+  "settings.notifications.threadReplyName": [
+    {
+      "type": 0,
+      "value": "참여한 스레드의 새 답글"
+    }
+  ],
   "settings.profile.languageBeta": [
     {
       "type": 0,
@@ -391,6 +768,42 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "기기 언어 따르기"
+    }
+  ],
+  "timeline.thread.followDismiss": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "timeline.thread.followFailed": [
+    {
+      "type": 0,
+      "value": "따라가기를 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+    }
+  ],
+  "timeline.thread.followOff": [
+    {
+      "type": 0,
+      "value": "이 스레드를 따라가지 않아요. 누르면 따라가요."
+    }
+  ],
+  "timeline.thread.followOn": [
+    {
+      "type": 0,
+      "value": "이 스레드를 따라가고 있어요. 누르면 그만 따라가요."
+    }
+  ],
+  "timeline.thread.followStart": [
+    {
+      "type": 0,
+      "value": "따라가기"
+    }
+  ],
+  "timeline.thread.followStop": [
+    {
+      "type": 0,
+      "value": "그만 따라가기"
     }
   ],
   "timeline.thread.open": [
@@ -474,6 +887,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "domain"
+    }
+  ],
+  "timeline.unfurl.previewDismiss": [
+    {
+      "type": 0,
+      "value": "이번 메시지는 미리보기 없이 보내기"
+    }
+  ],
+  "timeline.unfurl.previewDismissed": [
+    {
+      "type": 0,
+      "value": "이번 메시지는 링크 미리보기 없이 보내요."
+    }
+  ],
+  "timeline.unfurl.previewGroup": [
+    {
+      "type": 0,
+      "value": "보내기 전 링크 미리보기"
     }
   ],
   "timeline.unfurl.video": [

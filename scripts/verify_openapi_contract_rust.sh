@@ -13,6 +13,8 @@
 #   server-rust/Dockerfile 이 만드는 **배포와 동일한 이미지**로,
 #   infra/rust/docker-compose.rust.yml 의 **부분집합 스택**(postgres·centrifugo·api)
 #   위에서 실제로 왕복시켜, 응답 모양을 같은 스펙과 대조한다.
+#   (#4900: 그 api 는 ADR-0169 local Drive 를 얹고 뜬다 — 아래 env 블록. 첨부가 필요한 표본이
+#   끝까지 돌게 하는 설정이고, 서비스 계정 키는 여전히 이 스택에 들어가지 않는다.)
 #
 # 매니페스트와 샘플은 양방향으로 강제된다: 등재됐는데 미샘플이면 실패하고,
 # 샘플인데 미등재여도 실패한다. "목록에만 있는 경로"도 "목록에 없는 초록"도 없다.
@@ -933,6 +935,16 @@ MOMO_AGENT_SEED_MODE=e2e
 MIGRATE_IDEMPOTENCY_CHECK=1
 MOMO_INITIAL_OWNER_EMAIL=
 MOMO_INITIAL_OWNER_PASSWORD=
+
+# #4900: 첨부 보관소. Drive 설정이 비면 첨부 경로가 전부 503 이라 표현 표본(sample_expression_contract.py)이
+# 첫 첨부 업로드에서 끝났다 — 그 뒤 연산들은 이 게이트에서 한 번도 돌지 못했다. ADR-0169 의 local 백엔드는
+# 서비스 계정 키가 필요 없고(ADR-0004 와 부딪히지 않는다) 배포 환경에서도 허용되는 백엔드다. 디렉터리는
+# 컨테이너 안 임시 경로라 api 와 함께 사라진다: 볼륨도 초기화 컨테이너도 없어서 이 게이트가 회수할 자원이
+# 늘지 않는다. 업로드 주소는 요청의 Host 로 만든다(same-origin): 표본이 따라가는 주소가 BASE_URL 과 같은
+# 오리진이어야 하는데, 이 값이 없으면 컨테이너 안 포트(8080)가 박힌 주소가 나온다.
+MOMO_DRIVE_ARCHIVE_BACKEND=local
+MOMO_DRIVE_LOCAL_DIR=/tmp/oort-gate-drive
+MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin
 
 DB_VOLUME_NAME=$GATE_DB_VOLUME
 ENV

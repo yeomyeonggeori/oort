@@ -17,8 +17,11 @@ import { agentCardModel } from "../timeline/agentCardModel";
 //   - only on a surface that can raise OS notifications: the desktop shell, or
 //     a browser tab whose user opted in and was granted permission (#3340). The
 //     rules below are the same for both; only the gate differs;
-//   - only for the two events that are addressed to a person — a mention the
-//     SERVER recorded, and an approval request waiting on a human decision;
+//   - only for the events that are addressed to a person — a mention the
+//     SERVER recorded, an approval request waiting on a human decision, and (#4890)
+//     a new reply from someone else in a thread the SERVER says this member
+//     follows. The follow answer is handed in (`isFollowingThread`); this module
+//     never infers a thread from who wrote in it;
 //   - never when the window already has focus (zero-noise: the message is on
 //     screen, or one keystroke away);
 //   - never twice for the same message, never for one's own writing, never for
@@ -40,8 +43,11 @@ import { agentCardModel } from "../timeline/agentCardModel";
  * `dm` (#3339): a message in a direct conversation (including a consented group DM) that does not mention
  * you. Off by default on this device (`preference.ts`): a DM is the noisiest
  * thing a person can do to a teammate, so the person opts in.
+ *
+ * `thread-reply` (#4890, ADR-0206 증보 1): a new reply from someone else in a thread this member follows.
+ * On by default; 「그만 따라가기」 is the per-thread off switch and the server's answer for that thread decides.
  */
-export type NotifyKind = "mention" | "approval" | "dm";
+export type NotifyKind = "mention" | "approval" | "dm" | "thread-reply";
 
 /** Why nothing was shown. Every value is a rule someone can argue with. */
 export type NotifySkip =
@@ -64,7 +70,14 @@ export type NotifySkip =
   /** Replayed by a reconnect, not live. */
   | "stale"
   /** This device turned this kind off. */
-  | "kind-disabled";
+  | "kind-disabled"
+  /** A thread reply, and the server says this member does not follow that thread (#4890). */
+  | "not-followed"
+  /**
+   * A thread reply that would otherwise show, whose follow state the server has not told this device yet (#4890).
+   * The caller asks the server about that one thread and decides again with the answer; nothing is shown on a guess.
+   */
+  | "follow-unknown";
 
 export interface DesktopNotification {
   kind: NotifyKind;
@@ -160,6 +173,23 @@ export function notifiableKind(
   return null;
 }
 
+/**
+ * Could this be a 「참여한 스레드의 새 답글」 (#4890)? Only the **shape** is decided here: a person-readable text
+ * reply (`rootId` set) outside a DM. Whether this member follows that thread is the SERVER's answer and is read
+ * last in `notifyDecision`; a mention, a reply that quotes you, and the author's own writing are settled before it.
+ *
+ * A DM is out: every DM message already has its own kind, and the server refuses to follow a DM thread
+ * (`thread_follow_not_applicable`).
+ */
+export function isThreadReplyCandidate(message: Message, isDirect = false): boolean {
+  return (
+    !isDirect &&
+    message.type === "text" &&
+    message.state !== "deleted" &&
+    message.rootId !== undefined
+  );
+}
+
 // ---- decision --------------------------------------------------------------
 
 /**
@@ -219,6 +249,20 @@ export interface NotifyContext {
    * 배지·인박스는 이 입력과 무관하다(별개 원장, ADR-0124 D2).
    */
   paused?: boolean;
+  /**
+   * Does this member follow this thread (#4890)? **Only what the server told this device**: `ThreadRepliesPage.following`
+   * and the answer of `PUT`/`DELETE …/follow` (`threadFollowStore`), never a guess from who wrote in it. `undefined` =
+   * the server has not said (or the answer is too old): the decision then ends in `follow-unknown` and the caller asks
+   * the server about that one thread. Absent means this surface has no follow answer, so a thread reply is ordinary
+   * traffic and never a banner.
+   */
+  isFollowingThread?: (rootId: string) => boolean | undefined;
+  /**
+   * Is this thread what the window shows right now (its panel is open on this root)? A reply is **not** in the
+   * visible main timeline, so for a thread reply the channel being on screen proves nothing (`isTargetVisible` is
+   * the channel-level question and does not apply). Absent means "assume visible", like `isTargetVisible`.
+   */
+  isThreadVisible?: (rootId: string) => boolean;
   /** Server per-member mute for a channel (Channel.muted). */
   isMuted: (channelId: string) => boolean;
   /** Message ids already announced this run. */
@@ -246,11 +290,14 @@ export function notifyDecision(
   if (event.type !== "message.new") return { show: false, skip: "edited" };
 
   const message = payloadToMessage(event.payload);
-  const kind = notifiableKind(
-    message,
-    context.selfMemberId,
-    context.isDirect?.(message.channelId) ?? false
-  );
+  const isDirect = context.isDirect?.(message.channelId) ?? false;
+  let kind = notifiableKind(message, context.selfMemberId, isDirect);
+  // 스레드 답글 갈래(#4890): 멘션·승인·DM이 아닌 스레드 답글만 후보다. 따라가는지는 맨 끝에서 읽는다.
+  const threadRootId =
+    kind === null && context.isFollowingThread !== undefined && isThreadReplyCandidate(message, isDirect)
+      ? message.rootId
+      : undefined;
+  if (threadRootId !== undefined) kind = "thread-reply";
   if (kind === null) return { show: false, skip: "not-notifiable" };
   if (uuidEq(message.authorMemberId, context.selfMemberId)) {
     return { show: false, skip: "self" };
@@ -269,11 +316,15 @@ export function notifyDecision(
     return { show: false, skip: "stale" };
   }
   if (context.isAnnounced(message.id)) return { show: false, skip: "duplicate" };
-  if (
-    context.windowFocused &&
-    (context.isTargetVisible?.(message.channelId) ?? true)
-  ) {
+  if (context.windowFocused && onScreen(message, threadRootId, context)) {
     return { show: false, skip: "focused" };
+  }
+  // 스레드 답글은 여기까지 다른 이유로 걸러지지 않았을 때만 서버에 묻는다(`follow-unknown`): 묻는 값이 한 건의 요청이라
+  // 걸러질 글에 쓰지 않는다. 서버가 따라간다고 말한 스레드만 배너가 된다.
+  if (threadRootId !== undefined) {
+    const following = context.isFollowingThread?.(threadRootId);
+    if (following === undefined) return { show: false, skip: "follow-unknown" };
+    if (!following) return { show: false, skip: "not-followed" };
   }
 
   const notification: DesktopNotification = {
@@ -291,6 +342,22 @@ export function notifyDecision(
     (kind === "approval" ? undefined : (attachmentPreviewLine(message.attachments) ?? undefined));
   if (body !== undefined) notification.body = body;
   return { show: true, notification };
+}
+
+/**
+ * 이 메시지가 지금 화면에 있는가 — 배너가 소음이 되는 때. 일반 메시지는 **채널**이 화면에 있으면 있다(#3339). 스레드 답글은
+ * 본류 목록의 줄이 아니므로 **그 스레드 패널이 열려 있어야** 보인다(`isThreadVisible`). 「대화에도 보내기」(#4887)를 고른
+ * 답글은 본류에도 한 줄로 서므로 채널이 화면에 있어도 본 것이다.
+ */
+function onScreen(
+  message: Message,
+  threadRootId: string | undefined,
+  context: NotifyContext
+): boolean {
+  const channelVisible = context.isTargetVisible?.(message.channelId) ?? true;
+  if (threadRootId === undefined) return channelVisible;
+  if (context.isThreadVisible?.(threadRootId) ?? true) return true;
+  return message.alsoInChannel === true && channelVisible;
 }
 
 /**

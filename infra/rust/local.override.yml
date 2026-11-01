@@ -86,9 +86,22 @@ services:
 
   # #4791: image proposal preparation only reads attachments. The worker cannot
   # overwrite the archive; the API remains its sole file writer.
-  # #4934: by default the worker now reads those attachments THROUGH the api
-  # (OORT_API_INTERNAL_ORIGIN in docker-compose.rust.yml), so this read-only mount is
-  # the fallback for a stack that sets that origin empty — kept, not removed.
+  #
+  # #4934/#4974 — why this read-only mount stays although the default no longer
+  # reads through it. By default (OORT_API_INTERNAL_ORIGIN unset = http://api:8080,
+  # docker-compose.rust.yml) the worker reads a requester's attachment THROUGH the
+  # api, and nothing reads this mount. The other branch of the same switch
+  # (AgentWorker::attachment_reader) does: an EMPTY OORT_API_INTERNAL_ORIGIN — or a
+  # value that is not an origin, which the worker boots with as if it were unset —
+  # makes the worker read the archive itself from MOMO_DRIVE_LOCAL_DIR, and
+  # LocalDriveArchive::open_reader needs that directory, with objects/ inside it,
+  # to exist. Without the mount that branch does not fail loudly: the reader quietly
+  # becomes "unavailable" (no log line) and a person's picture is never read — the
+  # silence #4934 removed. The price of keeping it: the worker holds every
+  # workspace's attachments, read-only. So:
+  #   - a stack that blanks the origin needs the `volumes:` entry below;
+  #   - a stack that will never blank it may delete that entry (the worker still
+  #     boots; its own archive just stays closed and unused).
   agent-worker:
     volumes:
       - drive-archive:${MOMO_DRIVE_LOCAL_DIR:-/var/lib/oort/drive}:ro

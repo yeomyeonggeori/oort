@@ -60,6 +60,8 @@
 //! costs every later run of that agent and shows up as "the agent stopped
 //! answering", which is far more expensive to diagnose than to redo.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Duration, Utc};
 use momo_db::DbError;
 use serde_json::{json, Map, Value};
@@ -810,6 +812,33 @@ pub async fn run_approval_facts_in_tx(
             })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
+/// The room each of `approval_ids` was raised in, as `approval id -> channel id`. An id that
+/// names no approval of this workspace has no entry. It is what a reader needs to say whether
+/// a viewer may be told an approval's id (`approval_is_named_to_viewer`): rows are not
+/// filtered by who is asking, so **the caller must test each room against the viewer's rooms**
+/// (`visible_channels_in_tx`) before it names anything.
+pub async fn approval_channels_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    approval_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Uuid>, DbError> {
+    if approval_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query(
+        "SELECT a.id, a.channel_id FROM approval a \
+          WHERE a.workspace_id = $1 AND a.id = ANY($2)",
+    )
+    .bind(workspace_id)
+    .bind(approval_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| Ok((row.try_get("id")?, row.try_get("channel_id")?)))
+        .collect::<Result<HashMap<_, _>, sqlx::Error>>()
         .map_err(DbError::from)
 }
 

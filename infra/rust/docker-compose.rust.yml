@@ -576,7 +576,8 @@ services:
       WORKER_DATABASE_URL: postgres://momo_worker:${WORKER_POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
       # #4791: read requester-owned profile images through the same archive as api. Since #4934 this is the
       # FALLBACK: with OORT_API_INTERNAL_ORIGIN (below, set by default) the worker reads them through the api
-      # instead and these four go unused. They are kept for a stack that unsets that origin.
+      # instead and these four go unused. They are kept for a stack that unsets that origin (the read-only
+      # archive mount that goes with them is in local.override.yml, with the reason it stays).
       MOMO_DRIVE_ARCHIVE_BACKEND: ${MOMO_DRIVE_ARCHIVE_BACKEND:-}
       MOMO_DRIVE_SA_KEY_PATH: ${MOMO_DRIVE_SA_KEY_PATH:-}
       MOMO_DRIVE_SHARED_DRIVE_ID: ${MOMO_DRIVE_SHARED_DRIVE_ID:-}
