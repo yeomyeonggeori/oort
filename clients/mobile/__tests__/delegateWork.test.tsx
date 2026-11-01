@@ -1,3 +1,4 @@
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -30,7 +31,13 @@ import {DelegateWorkSheet, type DelegatePrefill} from '../src/shell/DelegateWork
 import {Field, TextArea} from '../src/shell/sheetForm';
 import {HOME_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {lightPalette} from '../src/design/tokens';
-import {describeCloseContract, imageSources, radioRows} from './fixtures/sheetContract';
+import {
+  describeCloseContract,
+  imageSources,
+  radioRows,
+  releaseReduceMotion,
+  setReduceMotion as setSheetReduceMotion,
+} from './fixtures/sheetContract';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
@@ -574,6 +581,27 @@ describe('입력은 이 앱 실행 안의 메모리에만 남는다', () => {
       .__store;
     expect(JSON.stringify([...store.values()])).not.toContain('비밀스러운 제목');
     expect(JSON.stringify([...store.values()])).not.toContain('고객사 이름이 든 설명');
+  });
+
+  it('알림이 새 입구로 들어와 시트를 걷어도 쓰던 글은 그대로다 — 이 시트는 키 입력마다 맡는 길이 이미 있고, 걷는 길이 그것을 지우지 않는다 (#4667)', async () => {
+    await setSheetReduceMotion(true); // 슬라이드 없이 바로 걷혀 「닫혔다」가 동기 단정이 된다
+    try {
+      installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+      const first = mount({agentMemberId: AGENT});
+      fireEvent.changeText(await screen.findByTestId('delegate-title'), '쓰던 제목');
+      fireEvent.changeText(screen.getByTestId('delegate-brief'), '쓰던 설명');
+      act(() => {
+        dismissTemporarySurfaces();
+      });
+      expect(first.onClose).toHaveBeenCalledTimes(1);
+      first.view.unmount();
+
+      mount({agentMemberId: AGENT});
+      expect((await screen.findByTestId('delegate-title')).props.value).toBe('쓰던 제목');
+      expect(screen.getByTestId('delegate-brief').props.value).toBe('쓰던 설명');
+    } finally {
+      releaseReduceMotion();
+    }
   });
 
   it('접수되면 지운다', async () => {
