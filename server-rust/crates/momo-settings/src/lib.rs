@@ -170,5 +170,5 @@ pub use workspace_settings::{
     read_workspace_settings_for_update, write_workspace_settings, WorkspaceSettingsInvalid,
     ALLOWED_SETTINGS_KEYS, MAX_ALLOWED_AGENT_MODELS, MAX_ALLOWED_AGENT_MODEL_BYTES,
     MAX_ROLE_LABEL_BYTES, MAX_WELCOME_PROMPT_CHARS, MAX_WORKSPACE_SETTINGS_JSON_BYTES,
-    ROLE_LABEL_KEYS,
+    ROLE_LABEL_KEYS, TEAM_AI_ROLES_KEYS, TEAM_AI_ROLES_SETTING,
 };

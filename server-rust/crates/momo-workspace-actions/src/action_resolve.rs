@@ -257,6 +257,15 @@ pub enum ActionArgs {
         plugin_id: &'static str,
         plugin: Option<ResolvedPlugin>,
     },
+    /// `team_ai.roles.set` (ADR-0201 증보 v3 B3-T, #4964): ONE role bundle and the switch.
+    /// `bundle` is one of the six switchable ids (the table's own `&'static str` — `chat_read`
+    /// and anything unknown never get this far); `before` is the switch as
+    /// [`resolve_action_in_tx`] found it (an absent field reads as on).
+    TeamAiRolesSet {
+        bundle: &'static str,
+        enabled: bool,
+        before: Option<bool>,
+    },
     /// `agent.profile.update` (증보 v3 V3-2). `target` and `before` are filled by
     /// [`resolve_action_in_tx`]; `None` target handle = the proposer itself.
     AgentProfileUpdate {
@@ -537,6 +546,7 @@ pub fn validated_action_args_from(
         actions::ACTION_WORKSPACE_MEMORY_UPDATE => workspace_memory_update_args(args),
         actions::ACTION_WORKSPACE_WORK_TIER_UPDATE => workspace_work_tier_update_args(args),
         actions::ACTION_PLUGIN_INSTALL => plugin_install_args(args),
+        actions::ACTION_TEAM_AI_ROLES_SET => team_ai_roles_set_args(args),
         // Fail closed. A registry entry with no normaliser must be an error and
         // not an unvalidated passthrough — `every_action_has_a_normaliser` is
         // what makes this arm unreachable rather than merely unlikely.
@@ -959,6 +969,41 @@ pub fn plugin_install_args(args: &Value) -> Result<ValidatedActionArgs, ActionRe
         args: ActionArgs::PluginInstall {
             plugin_id,
             plugin: None,
+        },
+    })
+}
+
+/// `team_ai.roles.set` (ADR-0201 증보 v3 B3-T): `{bundle, enabled}`, both required, nothing else.
+/// `bundle` is matched against the table's six switchable ids and the table's own
+/// `&'static str` is what is kept — `chat_read` (always on) and every unknown name are refused
+/// *here*, at the argument step, with the same answer (a refusal names no value, so it cannot be
+/// used to ask which bundles exist).
+pub fn team_ai_roles_set_args(args: &Value) -> Result<ValidatedActionArgs, ActionRejection> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    closed_keys(object, &["bundle", "enabled"])?;
+    let raw = match object.get("bundle") {
+        Some(Value::String(raw)) => raw.as_str(),
+        Some(_) => return Err(ActionRejection::new("bundle must be a string")),
+        None => return Err(ActionRejection::new("bundle is required")),
+    };
+    let Some(bundle) = momo_agent::team_ai_roles::SWITCHABLE_BUNDLES
+        .iter()
+        .find(|id| **id == raw)
+    else {
+        return Err(ActionRejection::new("bundle is not a switchable role"));
+    };
+    let enabled = boolean_arg(object, "enabled")?
+        .ok_or_else(|| ActionRejection::new("enabled is required"))?;
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized: json!({ "bundle": bundle, "enabled": enabled }),
+        rows: Vec::new(),
+        args: ActionArgs::TeamAiRolesSet {
+            bundle,
+            enabled,
+            before: None,
         },
     })
 }
@@ -2809,6 +2854,29 @@ pub async fn resolve_action_with_origin_in_tx(
             validated.rows = actions::unfurl_update_rows(current, *enabled);
             GateSubject::Workspace
         }
+        ActionArgs::TeamAiRolesSet {
+            bundle,
+            enabled,
+            before,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            let Some(bag) = read_workspace_settings(conn, workspace_id).await? else {
+                return Ok(Err(ActionRejection::new("workspace settings unavailable")));
+            };
+            let current = momo_agent::team_ai_roles::TeamAiRoles::from_settings(&bag).is_on(bundle);
+            // A proposal that changes nothing is not a proposal.
+            if current == *enabled {
+                return Ok(Err(ActionRejection::new("nothing to change")));
+            }
+            let Some(row) = momo_agent::team_ai_roles::bundle(bundle) else {
+                return Ok(Err(ActionRejection::new("bundle is not a switchable role")));
+            };
+            *before = Some(current);
+            validated.rows = momo_agent::team_ai_roles::roles_set_rows(row, current, *enabled);
+            GateSubject::Workspace
+        }
         ActionArgs::WorkspaceMemoryUpdate { .. } => {
             if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
                 return Ok(Err(ActionRejection::new("proposer is not an active agent")));
@@ -3637,6 +3705,10 @@ pub async fn resolve_action_with_origin_in_tx(
         ActionArgs::InviteCreate { .. } => Value::Null,
         // What the card said 「현재」 was: a switch flipped in between re-asks.
         ActionArgs::WorkspaceUnfurlUpdate { before, .. } => json!({"enabled": before}),
+        // Which switch, and what the card said it was: flipped in between, the card re-asks.
+        ActionArgs::TeamAiRolesSet { bundle, before, .. } => {
+            json!({"bundle": bundle, "before": before})
+        }
         ActionArgs::WorkspaceMemoryUpdate { .. } => Value::Null,
         ActionArgs::WorkspaceWorkTierUpdate { before, .. } => json!({
             "mode": before.as_ref().map(|(mode, _)| mode.clone()),

@@ -831,6 +831,14 @@ pub enum MemberWrite {
     /// to the team's image model. A short-window guard on starts, not an allowance: how many
     /// pictures a team may draw is the team's own decision (#4944).
     PhotoDraft,
+    /// `POST …/channels/{ch}/unfurl-previews`: a link a member typed into the composer, asked about
+    /// **before** the message exists (ADR-0170 증보 2026-11-01 D20, #4884). The one request where
+    /// the member names the address this server will GET and the answer comes straight back, so
+    /// the budget is smaller than the proxy's and counts only a request that really fetches (an
+    /// answer the server already holds, a switch that is off, and a request turned away for want
+    /// of a place spend nothing). Spent in the handler, like [`MemberWrite::UnfurlProxy`], and a
+    /// request turned away for want of a place gets its unit back ([`refund_member_write`]).
+    UnfurlPreview,
 }
 
 impl MemberWrite {
@@ -843,6 +851,7 @@ impl MemberWrite {
             MemberWrite::UploadStart => "upload_start",
             MemberWrite::UnfurlProxy => "unfurl_proxy",
             MemberWrite::PhotoDraft => "photo_draft",
+            MemberWrite::UnfurlPreview => "unfurl_preview",
         }
     }
 
@@ -855,6 +864,7 @@ impl MemberWrite {
             MemberWrite::UploadStart => "write:upload",
             MemberWrite::UnfurlProxy => "write:unfurl",
             MemberWrite::PhotoDraft => "write:photo",
+            MemberWrite::UnfurlPreview => "write:unfurl_preview",
         }
     }
 }
@@ -883,6 +893,7 @@ pub fn member_write_limit(
         (MemberWrite::UploadStart, _) => config.upload_start_per_member_limit,
         (MemberWrite::UnfurlProxy, _) => config.unfurl_proxy_per_member_limit,
         (MemberWrite::PhotoDraft, _) => config.photo_draft_per_member_limit,
+        (MemberWrite::UnfurlPreview, _) => config.unfurl_preview_per_member_limit,
     }
 }
 
@@ -1517,7 +1528,7 @@ mod tests {
 
     use std::sync::atomic::AtomicUsize;
 
-    /// Six different numbers, so a swapped field cannot pass by coincidence.
+    /// Different numbers for every surface, so a swapped field cannot pass by coincidence.
     fn budget_config() -> RateLimitConfig {
         RateLimitConfig {
             message_send_per_member_limit: 11,
@@ -1526,6 +1537,7 @@ mod tests {
             upload_start_per_member_limit: 44,
             unfurl_proxy_per_member_limit: 55,
             photo_draft_per_member_limit: 66,
+            unfurl_preview_per_member_limit: 77,
             ..RateLimitConfig::default()
         }
     }
@@ -1562,6 +1574,11 @@ mod tests {
                 66,
                 "a photo start has one limit whoever asks"
             );
+            assert_eq!(
+                limit(MemberWrite::UnfurlPreview, kind),
+                77,
+                "the preview budget is its own number, not the proxy's"
+            );
         }
     }
 
@@ -1576,13 +1593,14 @@ mod tests {
             (MemberWrite::UploadStart, "upload_start"),
             (MemberWrite::UnfurlProxy, "unfurl_proxy"),
             (MemberWrite::PhotoDraft, "photo_draft"),
+            (MemberWrite::UnfurlPreview, "unfurl_preview"),
         ];
         let mut keys = std::collections::HashSet::new();
         for (surface, label) in surfaces {
             assert_eq!(surface.label(), label);
             assert!(keys.insert(member_write_key(surface, member)));
         }
-        assert_eq!(keys.len(), 5);
+        assert_eq!(keys.len(), 6);
         assert_ne!(
             member_write_key(MemberWrite::MessageSend, member),
             member_write_key(MemberWrite::MessageSend, Uuid::from_u128(8)),

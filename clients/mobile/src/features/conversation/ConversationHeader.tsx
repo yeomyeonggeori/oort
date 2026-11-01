@@ -61,6 +61,17 @@ export function connectionBannerText(status: RealtimeStatus): string | null {
  */
 export const RECONNECT_NOW_LABEL = '지금 다시 연결';
 
+/** 머리 오른쪽의 「따라가기」 원(스레드 화면, #4890). 스레드 화면만 준다. */
+export interface FollowSlot {
+  /** 접근성 라벨 — **지금 상태를 말로** 하고 누르면 무엇이 되는지 잇는다(「…따라가고 있어요. 누르면 그만 따라가요.」). */
+  label: string;
+  /** 따라가는 중이면 `bell`, 아니면 빗금이 있는 `bellOff`. 색만으로 말하지 않는다. */
+  on: boolean;
+  /** 요청이 나가 있다. 흐리게 하지 않고 낭독으로만 알린다(`accessibilityState.busy`). */
+  busy?: boolean;
+  onPress: () => void;
+}
+
 export function ConversationHeader({
   title,
   memberCount,
@@ -73,6 +84,7 @@ export function ConversationHeader({
   onOpenMenu,
   onOpenInfo,
   huddle,
+  follow,
   railStatus,
   onReconnect,
   onBannerInset,
@@ -106,6 +118,8 @@ export function ConversationHeader({
    */
   onOpenInfo?: () => void;
   huddle?: HuddleSlot;
+  /** 스레드 화면의 「따라가기」 원(#4890). 없으면 서지 않는다 — 열 것이 없는 원은 누르면 아무 일도 안 하는 버튼이다. */
+  follow?: FollowSlot;
   railStatus: RealtimeStatus;
   /**
    * 끊김 띠를 누르면 부른다(「지금 다시 연결」, #4895) — 화면은 이것을 전송의 `resume` 과 같은 길(`useRealtime().reconnect`)로
@@ -162,7 +176,11 @@ export function ConversationHeader({
   const isDm = kind === 'dm' && Boolean(peerId);
   const isChannel = kind === 'public' || kind === 'private';
   const hasStatus = peerStatusTone !== null && Boolean(peerStatusLabel);
-  const slotWidth = headerSlotWidth({huddle: huddle !== undefined, menu: onOpenMenu !== undefined});
+  const slotWidth = headerSlotWidth({
+    huddle: huddle !== undefined,
+    menu: onOpenMenu !== undefined,
+    follow: follow !== undefined,
+  });
   // 보조 글: DM 은 상태 낱말, 채널은 멤버 수. 줄이 모자라면 이름이 이기고 보조 글이 통째로 숨는다(`headerPill.ts`).
   const secondaryText = isDm ? (hasStatus ? pillStatusWord(peerStatusLabel) : null) : isChannel ? (memberCount ?? null) : null;
   const showSecondary =
@@ -262,6 +280,23 @@ export function ConversationHeader({
           )}
         </View>
         <View pointerEvents="box-none" style={[styles.slot, styles.slotEnd, {width: slotWidth}]} testID="conversation-header-end">
+          {follow ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={follow.label}
+              accessibilityState={{busy: follow.busy === true}}
+              onPress={follow.onPress}
+              hitSlop={CIRCLE_SLOP}
+              style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
+              testID="thread-follow">
+              <GlassSurface radius={CONV.circle / 2} style={StyleSheet.absoluteFill} testID="thread-follow-glass" />
+              <Image
+                source={follow.on ? CONV_ICONS.bell : CONV_ICONS.bellOff}
+                style={[styles.icon20, {tintColor: follow.on ? palette.text : palette.textMuted}]}
+                testID="thread-follow-icon"
+              />
+            </Pressable>
+          ) : null}
           {huddle ? (
             <Pressable
               accessibilityRole="button"

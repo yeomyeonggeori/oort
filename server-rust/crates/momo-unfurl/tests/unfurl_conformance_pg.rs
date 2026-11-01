@@ -199,7 +199,7 @@ impl UnfurlHttp for CountingHttp {
     async fn fetch(&self, url: &str, kind: FetchKind) -> Result<Fetched, FetchError> {
         self.hits.fetch_add(1, Ordering::SeqCst);
         match kind {
-            FetchKind::Html => Ok(Fetched {
+            FetchKind::Html | FetchKind::Preview => Ok(Fetched {
                 final_url: url.to_string(),
                 content_type: "text/html".into(),
                 body: self.html.as_bytes().to_vec(),

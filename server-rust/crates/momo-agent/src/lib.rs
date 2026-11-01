@@ -173,6 +173,7 @@ pub mod run_progress;
 pub mod status;
 pub mod subscription;
 pub mod subscription_transition;
+pub mod team_ai_roles;
 pub mod thread_wake;
 pub mod tools;
 pub mod usage;
@@ -333,10 +334,10 @@ pub use run_event::{
     TOOL_CALL_DURATION_MS_MAX, TOOL_CALL_ROWS_PER_RUN,
 };
 pub use run_progress::{
-    assemble_run_progress, list_channel_run_progress_base_in_tx, list_run_events_in_tx,
-    list_run_ledger_in_tx, visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry,
-    RunEventInclude, RunEventRow, RunLedger, RunPhase, RunProgressBase, RunProgressRow,
-    ToolTallyRow,
+    approval_is_named_to_viewer, assemble_run_progress, list_channel_run_progress_base_in_tx,
+    list_run_events_in_tx, list_run_ledger_in_tx, redact_unseen_approvals_in_tx,
+    visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry, RunEventInclude,
+    RunEventRow, RunLedger, RunPhase, RunProgressBase, RunProgressRow, ToolTallyRow,
 };
 pub use woken::{
     active_hosted_connection_id_in_tx, load_woken_agent_facts_in_tx, woken_clock_start,

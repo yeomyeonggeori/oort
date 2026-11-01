@@ -135,6 +135,7 @@ import {
 } from '../features/conversation/LongPressHint';
 import type {MessageRowActions} from '../features/conversation/MessageRow';
 import {ThreadPanel} from '../features/conversation/ThreadPanel';
+import {threadsAreFollowable} from '@momo/core/features/timeline/threadFollow';
 import {PinListPanel} from '../features/conversation/PinListPanel';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import {Timeline} from '../features/conversation/Timeline';
@@ -1571,6 +1572,7 @@ export default function ConversationScreen({
     togglePin,
     editBody,
     removeMessage,
+    removeUnfurls,
     loadOlder,
     resend,
     reload,
@@ -1639,6 +1641,8 @@ export default function ConversationScreen({
       onTogglePin: togglePin,
       onEdit: editBody,
       onDelete: removeMessage,
+      // 작성자가 링크 미리보기를 모두에게서 지운다(#4883). 시트가 작성자에게만 행을 세운다.
+      onRemoveUnfurls: removeUnfurls,
       onOpenThread: openThread,
       onQuote: onQuoteMessage,
       onJumpToQuoted,
@@ -1659,6 +1663,7 @@ export default function ConversationScreen({
       togglePin,
       editBody,
       removeMessage,
+      removeUnfurls,
       openThread,
       onQuoteMessage,
       onJumpToQuoted,
@@ -2103,6 +2108,8 @@ export default function ConversationScreen({
               working={working}
               reactions={timeline.reactions}
               pins={timeline.pins}
+              // 링크 카드(#4883) — 목록이 줄마다 자기 메시지의 카드를 유도한다.
+              unfurls={timeline.unfurls}
               myMemberId={member.id}
               loadingOlder={timeline.loadingOlder}
               reachedStart={timeline.reachedStart}
@@ -2255,6 +2262,7 @@ export default function ConversationScreen({
           onOpenMessage={openApprovalMessage}
           nowMs={nowMs}
           onClose={closeThread}
+          followable={threadsAreFollowable(channel?.kind)}
           onReplySent={bumpSelfSend}
           onOpenProfile={showMemberProfile}
           onReaderTookList={onReaderTookList}

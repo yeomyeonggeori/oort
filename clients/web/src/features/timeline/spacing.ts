@@ -131,6 +131,32 @@ export const MESSAGE_AVATAR_SIZE_CLASS = "size-message-avatar";
 export const MESSAGE_AVATAR_GUTTER_CLASS = "w-message-avatar";
 
 /**
+ * 스레드 요약 줄의 겹친 얼굴 (#4878, owner 10-31): 한 변 20 · 겹침 6 · 바탕색 2px 링. 20과 6은 격자(4의 배수) 밖이라
+ * 이름 단계(`--spacing-thread-face*`)로 들어온다 — `size-5`·`-ml-1.5`는 컴파일되지 않는다(U4-4R W-1). 코어의
+ * `THREAD_FACE_SIZE.web`(20)·`THREAD_FACE_OVERLAP`(6)과 갈라지지 않는지는 `threadFaceTokens.test.ts`가 CSS를 읽어 묻는다.
+ * 링 색은 타임라인 바탕(`--pane`)이다: 겹친 얼굴이 옆 얼굴을 도려내는 것이 링의 일이다.
+ */
+export const THREAD_FACE_SIZE_CLASS = "size-thread-face";
+export const THREAD_FACE_OVERLAP_CLASS = "-ml-thread-face-overlap";
+export const THREAD_FACE_RING_CLASS = "ring-2 ring-pane";
+
+/**
+ * 스레드 패널의 답글 목록 머리: **뒤집힌 루트 호버 툴바가 걸치는 띠** (#1753, 이름 붙여 실측으로 지킨다 #4878).
+ *
+ * 루트는 스크롤러의 맨 위 행이라 호버 툴바가 아래로 뒤집힌다(`hover-toolbar-straddle-below`). 뒤집힌 툴바는 키가 42이고
+ * `--spacing-row` 한 칸을 뺀 36이 루트 행 **아래로** 내려와 첫 답글을 가린다. 캡처 레인의 가드(`assertThreadRootHoverToolbar`
+ * 「글자 교차 0」)는 패널 안 모든 `data-row-body`의 글자를 재는데, 그 안에 답글의 **머리 줄(이름·시각)**이 든다. 그래서
+ * 첫 답글의 머리 글자는 루트 행 아래 36 밖에서 시작해야 한다: `lead + pt-row-head(12) >= 36`.
+ *
+ * 격자의 값 중 이 식을 **밀도 세 단계에서** 지키는 가장 작은 것이 32다(`pt-6`=24는 기본 밀도에서 딱 닿고 촘촘히에서는
+ * 겹친다). 앞 판의 `pt-8`이 우연이 아니었다는 뜻이다. 루트 아래 빈 공간이 큰 다른 원인은 이 띠가 아니라 **run 없는 스레드의
+ * 24px 생각 줄 예약 자리**였고, 그것은 `ThreadPanel`이 조건을 달아 걷었다. 이 띠를 더 줄이려면 가드의 범위(패널 전체 →
+ * 루트 자기 글자)나 툴바의 자리(루트 위 머리 여백)를 바꾸는 결정이 먼저다 — 값만 고치면 `threadSurface.browser.test.ts`가
+ * 실제 엔진에서 붉어진다.
+ */
+export const THREAD_REPLIES_LEAD_CLASS = "pt-8";
+
+/**
  * 마크다운 블록(문단·목록·코드) 사이 간격과 목록 항목 사이 간격 (AP-2a #4189). 설정 미리보기가
  * 같은 상수를 읽는다 — 미리보기가 타임라인과 다른 간격을 그리면 눌러 보는 사람에게 거짓말이 된다.
  */

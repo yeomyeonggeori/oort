@@ -87,6 +87,11 @@ export const CONV_ICONS = {
   // 오래 걸리는 전송의 표지 (#4455). Lucide `clock`(ISC) — 같은 레시피(선 1.8, viewBox 24, 12pt 의
   // 1·2·3배). 시각 글자(`font.meta` 12)와 같은 크기라 이름 줄 옆에서 글자보다 튀지 않는다.
   clock: require('./clock.png') as ImageSourcePropType,
+  // 스레드 머리의 「따라가기」 단추(#4890). Lucide `bell`·`bell-off`(ISC, 웹이 `lucide-react` 0.454.0 으로 쓰는 같은 집합 — 경로 그대로)를
+  // 같은 레시피(선 1.8, viewBox 24, `rsvg-convert`, 20pt 의 1·2·3배)로 **옮겨 담았다**. 새로 그린 것이 아니다. 켜짐은 `bell`,
+  // 꺼짐은 빗금이 있는 `bell-off`.
+  bell: require('./bell.png') as ImageSourcePropType,
+  bellOff: require('./bell-off.png') as ImageSourcePropType,
 } as const;
 
 export type ConvIconName = keyof typeof CONV_ICONS;
@@ -104,6 +109,8 @@ export const CONV_ICON_SIZE: Readonly<Record<ConvIconName, number>> = {
   cross: 14,
   file: 18,
   clock: 12,
+  bell: 20,
+  bellOff: 20,
 };
 
 // ---- + 메뉴 아이콘 넷 (DS2-2b #2750) -----------------------------------------
@@ -182,3 +189,14 @@ export type ViewerIconName = keyof typeof VIEWER_ICONS;
 
 /** 둥근 유리 단추 안 글리프 22 — 뒤로(`CONV_ICON_SIZE.left`)와 같은 크기라 세 단추의 글리프가 한 무게로 읽힌다. */
 export const VIEWER_ICON_SIZE = 22;
+
+// ---- 링크 카드의 지구 (#4883) -------------------------------------------------
+// Lucide `globe`(ISC, 웹이 `lucide-react` 로 쓰는 같은 집합 — 경로 그대로), 같은 레시피(선 1.8, viewBox 24,
+// 24pt 의 1·2·3배). 서버가 사이트 아이콘을 주지 못한 카드의 **기본 아이콘**이다(코어 `unfurlCardModel`:
+// `iconUrl` 이 없으면 지구). 주소 줄에서는 16으로, 그림 칸의 타일에서는 24로 그린다(큰 래스터를 줄여 그린다).
+// 다시 만드는 법: `rsvg-convert -w <24|48|72> -h <24|48|72>`, 경로는
+// `<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>`.
+
+export const LINK_CARD_ICONS = {
+  globe: require('./globe24.png') as ImageSourcePropType,
+} as const;

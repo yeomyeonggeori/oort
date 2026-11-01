@@ -1,0 +1,14 @@
+{
+  "timeline.unfurl.label": "Link preview: {title}, {domain}",
+  "timeline.unfurl.video": "Video",
+  "timeline.thread.replyCount": "{count, plural, one {# reply} other {# replies}}",
+  "timeline.thread.unreadChip": "{count, plural, one {# new reply} other {# new replies}}",
+  "timeline.thread.open": "Open thread, {count, plural, one {# reply} other {# replies}}",
+  "timeline.thread.openUnread": "Open thread, {count, plural, one {# reply} other {# replies}}, {unread, plural, one {# new reply} other {# new replies}}",
+  "timeline.thread.followOn": "Following this thread. Press to stop following.",
+  "timeline.thread.followOff": "Not following this thread. Press to follow.",
+  "timeline.thread.followStop": "Stop following",
+  "timeline.thread.followStart": "Follow thread",
+  "timeline.thread.followFailed": "Couldn't change following. Try again in a moment.",
+  "timeline.thread.followDismiss": "Dismiss"
+}

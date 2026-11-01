@@ -1,7 +1,16 @@
 //! Team AI image preparation, outside the proposal transaction (ADR-0186 v7).
 //! No arbitrary URL is fetched. Attachments belong to the requesting human in this
 //! conversation; retrieved images arrive as bounded base64, like Agent Port images.
+//!
+//! ## Where an attachment's bytes come from (#4934, ADR-0151 증보 3)
+//!
+//! The database decides **whose** picture it is ([`momo_messaging::find_requester_attachment_in_tx`]);
+//! [`AttachmentBytes`] only fetches what it was just proved to be. Two readers: the archive itself
+//! ([`DriveAttachmentBytes`], what a deployment whose worker mounts or can authenticate to the archive
+//! has always used) and, when the archive lives on another service's volume, the api's own route (the
+//! agent-worker's `ApiAttachmentBytes`). Neither lets the model name anything but the attachment id.
 
+use async_trait::async_trait;
 use base64::Engine as _;
 use momo_db::{with_tenant_tx, PgPool};
 use momo_drive::DriveArchive;
@@ -20,6 +29,51 @@ pub struct PreparedAvatar {
 
 static DECODE_PERMITS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
+/// The attachment a proposal's picture comes from, **as the database has just proved it**: the run's
+/// requester's own complete image, written by them in the run's conversation.
+///
+/// Deliberately not `Debug`: `drive_file_id` is the archive's own name for the file, and no log line,
+/// error or audit row has any business holding it.
+pub struct RequesterAttachment<'a> {
+    pub workspace_id: Uuid,
+    pub run_id: Uuid,
+    pub agent_id: Uuid,
+    pub attachment_id: Uuid,
+    /// The archive's id for the file: the direct reader needs it, the api reader never looks at it.
+    pub drive_file_id: &'a str,
+    /// The size the attachment row declares (already within `max_bytes`).
+    pub size_bytes: i64,
+    /// The ceiling a reader must not read past. One byte more than the ceiling is allowed back, so the
+    /// decoder — not the reader — is what calls a too-large file too large.
+    pub max_bytes: usize,
+}
+
+/// Fetch the bytes of an attachment the caller has already proved to be the requester's. The error is a
+/// fixed reason code (the audit `reason` of a refused proposal), never a transport message: those carry
+/// addresses, and an address of this kind carries a credential.
+#[async_trait]
+pub trait AttachmentBytes: Send + Sync {
+    async fn read(&self, attachment: &RequesterAttachment<'_>) -> Result<Vec<u8>, &'static str>;
+}
+
+/// The archive read directly: the deployment's own Drive or local volume, by the row's file id.
+pub struct DriveAttachmentBytes<'a>(pub &'a dyn DriveArchive);
+
+#[async_trait]
+impl AttachmentBytes for DriveAttachmentBytes<'_> {
+    async fn read(&self, attachment: &RequesterAttachment<'_>) -> Result<Vec<u8>, &'static str> {
+        let content = self
+            .0
+            .file_content(attachment.drive_file_id, attachment.size_bytes)
+            .await
+            .map_err(|_| "drive_unavailable")?;
+        content
+            .read_prefix(attachment.max_bytes + 1)
+            .await
+            .map_err(|_| "drive_unavailable")
+    }
+}
+
 /// Same decoder, limits and blocking-task lifetime as the Agent Port image door.
 pub async fn process_image(bytes: Vec<u8>, max: usize) -> Result<ProcessedAvatar, &'static str> {
     let work = async move {
@@ -36,6 +90,7 @@ pub async fn process_image(bytes: Vec<u8>, max: usize) -> Result<ProcessedAvatar
         .map_err(|_| "timeout")?
 }
 
+/// [`prepare_with`] over the archive itself — the deployment whose worker can read it.
 pub async fn prepare(
     pool: &PgPool,
     drive: &dyn DriveArchive,
@@ -44,7 +99,26 @@ pub async fn prepare(
     agent_id: Uuid,
     args: &ActionArgs,
 ) -> Result<Option<PreparedAvatar>, &'static str> {
-    let result = prepare_inner(pool, drive, workspace_id, run_id, agent_id, args).await;
+    prepare_with(
+        pool,
+        &DriveAttachmentBytes(drive),
+        workspace_id,
+        run_id,
+        agent_id,
+        args,
+    )
+    .await
+}
+
+pub async fn prepare_with(
+    pool: &PgPool,
+    attachments: &dyn AttachmentBytes,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_id: Uuid,
+    args: &ActionArgs,
+) -> Result<Option<PreparedAvatar>, &'static str> {
+    let result = prepare_inner(pool, attachments, workspace_id, run_id, agent_id, args).await;
     if let Err(reason) = result.as_ref() {
         if matches!(args, ActionArgs::MemberAvatarSet { .. }) {
             let reason = *reason;
@@ -82,7 +156,7 @@ pub async fn prepare(
 
 async fn prepare_inner(
     pool: &PgPool,
-    drive: &dyn DriveArchive,
+    attachments: &dyn AttachmentBytes,
     workspace_id: Uuid,
     run_id: Uuid,
     agent_id: Uuid,
@@ -156,20 +230,20 @@ async fn prepare_inner(
             momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_GENERATED,
             "generated",
         ),
-        (AvatarIntent::Attachment(_), Some(source)) => {
+        (AvatarIntent::Attachment(attachment_id), Some(source)) => {
             let max = momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT;
-            let content = drive
-                .file_content(&source.drive_file_id, source.size_bytes)
-                .await
-                .map_err(|_| "drive_unavailable")?;
-            (
-                content
-                    .read_prefix(max + 1)
-                    .await
-                    .map_err(|_| "drive_unavailable")?,
-                max,
-                "attachment",
-            )
+            let bytes = attachments
+                .read(&RequesterAttachment {
+                    workspace_id,
+                    run_id,
+                    agent_id,
+                    attachment_id: *attachment_id,
+                    drive_file_id: &source.drive_file_id,
+                    size_bytes: source.size_bytes,
+                    max_bytes: max,
+                })
+                .await?;
+            (bytes, max, "attachment")
         }
         _ => return Err("image_not_available"),
     };
