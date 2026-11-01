@@ -27,6 +27,7 @@ import {
   TEST_PREFILL_ACTIVE,
 } from "@/lib/env";
 import {
+  absoluteApiBase,
   getServerBase,
   normalizeServerUrl,
   requiresServerUrl,
@@ -65,6 +66,8 @@ import {
   type OnboardingTransitionEffect,
 } from "./onboardingFlow";
 import { readRecentServers, rememberRecentServer } from "./recentServers";
+import { RememberEmailToggle } from "./RememberEmailToggle";
+import { createWebRememberedLogin } from "./rememberedLogin";
 import { useJoinPrefill } from "./useJoinPrefill";
 import {
   joinFailureCopy,
@@ -148,7 +151,17 @@ export function ConnectPage({
   const [entryError, setEntryError] = useState<string | null>(null);
   // 서버 없이 코드만 받은 데스크탑: D0에서 서버를 마저 묻는다.
   const [pendingCode, setPendingCode] = useState<string | null>(null);
-  const [email, setEmail] = useState(DEV_EMAIL);
+  // 「이메일 기억하기」(#4669): 테스트 프리필이 먼저이고, 없으면 이 서버에 기억한 이메일.
+  const [remembered] = useState(createWebRememberedLogin);
+  const [rememberOn, setRememberOn] = useState(() => remembered.isEnabled());
+  const initialEmail = useRef<string | null>(null);
+  if (initialEmail.current === null) {
+    initialEmail.current =
+      DEV_EMAIL !== "" ? DEV_EMAIL : (remembered.recall(absoluteApiBase()) ?? "");
+  }
+  // 사람이 이 칸에 글자를 친 적이 있는가. 있으면 서버를 바꿔도 그 글자가 이긴다.
+  const emailTyped = useRef(false);
+  const [email, setEmail] = useState(initialEmail.current);
   const [password, setPassword] = useState(DEV_PASSWORD);
   const [workspace, setWorkspace] = useState(CONFIGURED_WORKSPACE);
   const [workspaceOpen, setWorkspaceOpen] = useState(CONFIGURED_WORKSPACE !== "");
@@ -226,7 +239,7 @@ export function ConnectPage({
     const first = initialStep.current;
     if (first === "welcome") focusLater("entry");
     else if (first === "sign-in") {
-      focusLater(DEV_EMAIL.trim() === "" ? "email" : "password");
+      focusLater(initialEmail.current?.trim() === "" ? "email" : "password");
     } else focusLater("email");
   }, [focusLater]);
 
@@ -245,6 +258,15 @@ export function ConnectPage({
     setRecent(readRecentServers());
   }, []);
 
+  /** 서버가 정해진 뒤 로그인 칸에 보일 이메일. 사람이 친 글자와 테스트 프리필이 먼저다. */
+  const emailForServer = useCallback(
+    (current: string) => {
+      if (emailTyped.current || DEV_EMAIL !== "") return current;
+      return remembered.recall(absoluteApiBase()) ?? "";
+    },
+    [remembered]
+  );
+
   const enterSignIn = useCallback(
     (base: string) => {
       commitServer(base);
@@ -252,9 +274,11 @@ export function ConnectPage({
       setEntryError(null);
       setPendingCode(null);
       goTo("sign-in");
-      focusLater(email.trim() === "" ? "email" : "password");
+      const nextEmail = emailForServer(email);
+      if (nextEmail !== email) setEmail(nextEmail);
+      focusLater(nextEmail.trim() === "" ? "email" : "password");
     },
-    [commitServer, email, focusLater, goTo]
+    [commitServer, email, emailForServer, focusLater, goTo]
   );
 
   const enterJoin = useCallback(
@@ -372,6 +396,8 @@ export function ConnectPage({
       const session = await login(email, password, workspace);
       // 화면이 이미 내려갔다면(뒤로·다른 링크) 늦은 응답은 상태를 건드리지 않는다.
       if (!mountedRef.current) return;
+      // 로그인에 성공한 뒤에만 기억한다(오타는 남기지 않는다). 꺼져 있으면 아무것도 쓰지 않는다.
+      remembered.remember(absoluteApiBase(), email);
       onLoggedIn(session);
     } catch (err) {
       if (!mountedRef.current) return;
@@ -588,6 +614,7 @@ export function ConnectPage({
               type="email"
               value={email}
               onChange={(e) => {
+                emailTyped.current = true;
                 setEmail(e.target.value);
                 if (fieldError?.field === "email") setFieldError(null);
               }}
@@ -622,6 +649,14 @@ export function ConnectPage({
               data-testid="login-password"
             />
           </OnboardingFieldBlock>
+          <RememberEmailToggle
+            checked={rememberOn}
+            onCheckedChange={(next) => {
+              // 끄는 순간 저장된 이메일이 전부 지워진다(코어 규칙).
+              remembered.setEnabled(next);
+              setRememberOn(next);
+            }}
+          />
           <div className="flex flex-col gap-2">
             <button
               type="button"
@@ -700,7 +735,10 @@ export function ConnectPage({
               className={ONBOARDING_FIELD_CLASS}
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                emailTyped.current = true;
+                setEmail(e.target.value);
+              }}
               autoComplete="username"
               readOnly={joined !== null}
               required
@@ -809,7 +847,9 @@ export function ConnectPage({
                 onClick={() => {
                   setFailure(null);
                   goTo("sign-in");
-                  focusLater(email.trim() === "" ? "email" : "password");
+                  const nextEmail = emailForServer(email);
+                  if (nextEmail !== email) setEmail(nextEmail);
+                  focusLater(nextEmail.trim() === "" ? "email" : "password");
                 }}
                 data-testid="join-sign-in-link"
               >

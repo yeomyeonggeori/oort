@@ -49,6 +49,13 @@ export const NON_SECRET_KEYS = {
   /** The API base this device chose. Not a secret; it is printed on screen. */
   serverBase: 'momo.mobile.server.v1',
   /**
+   * 「이메일 기억하기」(#4669): 서버 주소별로 로그인 때 쓴 이메일과 사람이 고른 켬·끔(`@momo/core` `rememberedLogin`).
+   * 이메일은 화면에 찍히는 값이라 비밀이 아니고, **비밀번호와 토큰은 이 키에 닿지 않는다** — 코어가 이메일 모양만
+   * 받는다. 로그아웃이 지우지 않는다(같은 서버에 다시 들어오면 채워지는 것이 이 기능이다). 끄면 코어가 이 키의
+   * 이메일을 그 자리에서 비운다.
+   */
+  rememberedLogin: 'momo.mobile.login.remembered.v1',
+  /**
    * Member identity + the login-returned websocket address (ADR-0110). Not a
    * secret, but the refresh response does not repeat them, so a restored
    * session has to read them from somewhere that survives a restart.
