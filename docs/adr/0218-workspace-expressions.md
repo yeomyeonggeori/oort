@@ -6,7 +6,7 @@
 > 증보: §7 (2026-10-30, #4820, **Accepted**) — AI와 만드는 움직이는 표현: 생성 출처의 원본 첨부 참조·서버 조립 계약·실패 사유·비용. 부록 B의 고정 JSON 블록은 바꾸지 않고, 스키마 변경은 §7의 델타를 구현 단계가 한 번에 합친다.
 > 증보 2: §8 (2026-10-31, #4931 설계 → #4941 결정·구현, **Accepted — owner 2026-10-31**) — 사진 이모티콘: 방식 비교(H0~H8)는 근거로 남기고, **H9~H12가 새 계약**이다: 팀에 연결된 이미지 모델(OpenAI·Gemini)에 사진 한 장을 서버가 직접 보내 「배경 지우기」·「캐리커처」 그림을 받고, 지금의 직접 초안 길로 등록한다. ADR-0186 v8 X8-1의 「서버/팀 AI 생성 호출은 없다」에 이 길 하나의 예외를 둔다.
 > 증보 3: §9 (2026-11-01, #4992, **Accepted** 2026-11-02 planner) — 사진 초안 되찾기·돈이 든 그림 지키기: 내 사진 초안 목록 읽기 하나, 호출 뒤 디코더 바쁨 재시도, 격리 디코더 `--prepare` 출력 모양, 키 여는 문 시험. H9~H12의 결정은 바꾸지 않는다.
-> 증보 4: §10 (2026-11-02, #4961, **Proposed**) — 팀 표현의 종류 값: 등록마다 `emoji`(작은 팀 이모지)·`sticker`(큰 이모티콘) 하나. 등록(활성화) 순간에 사람이 고르거나 큰 그림으로 추천하고, 옛 등록은 `sticker`다. §1의 4(「별도 `kind=sticker`가 없다」)를 **고르개의 분류 값 하나**로 좁혀 더한다. 메시지·반응의 와이어와 D1의 크기 규칙은 바뀌지 않는다. migration 171.
+> 증보 4: §10 (2026-11-02, #4961, **Accepted** 2026-11-02 planner) — 팀 표현의 종류 값: 등록마다 `emoji`(작은 팀 이모지)·`sticker`(큰 이모티콘) 하나. 등록(활성화) 순간에 사람이 고르거나 큰 그림으로 추천하고, 옛 등록은 `sticker`다. §1의 4(「별도 `kind=sticker`가 없다」)를 **고르개의 분류 값 하나**로 좁혀 더한다. 메시지·반응의 와이어와 D1의 크기 규칙은 바뀌지 않는다. migration 171.
 > Consumes: [ADR-0100](0100-decision-governance.md), [ADR-0137](0137-mobile-react-native-migration.md), [ADR-0151](0151-attachments-v0-drive-contract-port.md), [ADR-0170](0170-link-unfurl-server-surface.md), [ADR-0186 증보 v8](0186-agent-workspace-actions.md#증보-2026-10-30--팀-표현-행동-expressioncreate-v8-4301).
 
 ## 1. 결정의 근거와 범위
@@ -684,7 +684,7 @@ H11 (a)의 「키는 한 문으로만 열리고 시험이 열린 횟수를 센�
 
 ## 10. 증보 2026-11-02 — 팀 표현의 종류 값: 작은 팀 이모지와 큰 이모티콘 (#4961)
 
-> Status: **Proposed (2026-11-02, #4961)**. ADR-0100: 공개 API의 선택 필드 둘과 DB 열 하나. planner가 검수한 뒤 Accepted로 올린다. 근거: [#4942](https://github.com/yeomyeonggeori/oort/issues/4942)(폰 입력창 표현 시트의 네 탭, owner 2026-10-31)의 후속 — 코어와 이 ADR에 종류 값이 없어서 「이모티콘」과 「팀 이모지」 탭이 같은 보관함을 두 번 보였다.
+> Status: **Accepted (2026-11-02, planner 위임 결정 — ADR-0100. 공개 API의 선택 필드 둘과 DB 열 하나, 등급 1)**. 옛 등록의 상수 `sticker`(J5)는 팀 인스턴스에 표현이 아직 배포되지 않아(v0.1.40, schema 155) 실제 데이터를 바꾸지 않는다. J6(엔진과 클라이언트를 같은 묶음으로)은 승격 배포 순서에 적는다. 근거: [#4942](https://github.com/yeomyeonggeori/oort/issues/4942)(폰 입력창 표현 시트의 네 탭, owner 2026-10-31)의 후속 — 코어와 이 ADR에 종류 값이 없어서 「이모티콘」과 「팀 이모지」 탭이 같은 보관함을 두 번 보였다.
 > 범위: 종류 값 하나, 정하는 법, 옛 등록의 값, 네 탭이 겹치지 않는 규칙, 와이어·호환. **바뀌지 않는 것**: D1의 메시지 모델(본문 `:name:`, 새 props·필드 0개)과 크기 규칙, D2의 표·RLS(새 표 없음), D3 이미지 규격, 초안을 만드는 네 경로(올리기·가져오기·첨부·사진)와 에이전트 후보(`AgentCandidate`)의 요청 모양, `Draft`, `Patch`, 부록 A의 경로 표. migration은 [171](../../server/Migrations/171_expression_kind.sql)이다(170 = #4341).
 > 같이 읽는 것: 추천 규칙의 공유 시험 값 [expression-kind.vectors.json](../api/expression-kind.vectors.json), 코어 [kind.ts](../../packages/momo-core/src/features/expressions/kind.ts).
 
