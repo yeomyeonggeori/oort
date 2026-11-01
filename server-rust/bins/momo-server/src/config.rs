@@ -1021,6 +1021,29 @@ fn subscription_agents_from_env() -> bool {
 }
 
 /// #3397 — read the Claude subscription-agent opt-in. Off unless an exact `true`.
+/// The operator's team-AI ceilings as this process reads them (ADR-0201 증보 v3 B9-3, #4944) — the
+/// same rule the agent-worker enforces by (`parse_operator_cap`): unset or empty = no ceiling, `0` =
+/// off, a positive number = the ceiling. The api only **explains** the ceiling, so a value it cannot
+/// read is a warning and "not shown", never a refusal to boot (the worker, which enforces, fails
+/// loudly on the same value).
+pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::OperatorCaps {
+    use momo_workspace_actions::team_ai_limits::{parse_operator_cap, OperatorCaps};
+    let read = |key: &'static str| match parse_operator_cap(key, env(key).as_deref()) {
+        Ok(cap) => cap,
+        Err(invalid) => {
+            tracing::warn!(
+                variable = invalid.0,
+                "unreadable team AI ceiling; the settings screen will not show it"
+            );
+            None
+        }
+    };
+    OperatorCaps {
+        daily_tokens: read("TEAM_AI_DAILY_TOKEN_CAP"),
+        daily_searches: read("TEAM_AI_DAILY_SEARCH_CAP"),
+    }
+}
+
 fn claude_subscription_agents_from_env() -> bool {
     claude_subscription_agents_switch_on(env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref())
 }

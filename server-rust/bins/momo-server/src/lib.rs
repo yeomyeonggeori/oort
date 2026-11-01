@@ -367,6 +367,12 @@ pub struct AppState {
     /// outbound hop (the manifest code → credentials conversion). Default: no key, so every
     /// `/v1/integrations/github/*` route answers 503 and the rest of the server is untouched.
     pub github: Arc<routes::github_app::GithubAppState>,
+    /// ADR-0201 증보 v3 B9 (#4944) — the operator's ceilings on the team AI (`TEAM_AI_DAILY_TOKEN_CAP`,
+    /// `TEAM_AI_DAILY_SEARCH_CAP`), **as the api reads them**: the agent-worker is what enforces the
+    /// ceiling, and the api only explains it to the administrator on the settings screen
+    /// (`team_ai_limits_status.operatorCeiling`). Default: no ceiling. Set the same values on both
+    /// processes — a ceiling the api does not know is still enforced, just not shown.
+    pub team_ai_caps: momo_workspace_actions::team_ai_limits::OperatorCaps,
 }
 
 impl AppState {
@@ -429,7 +435,19 @@ impl AppState {
                     routes::provider_link::PROBE_TIMEOUT,
                 )),
             )),
+            team_ai_caps: momo_workspace_actions::team_ai_limits::OperatorCaps::default(),
         }
+    }
+
+    /// ADR-0201 증보 v3 B9 (#4944) — attach the operator's team-AI ceilings (`main.rs` from the
+    /// env, a test with explicit values). Never read from the process environment here: a test
+    /// must not set one.
+    pub fn with_team_ai_caps(
+        mut self,
+        caps: momo_workspace_actions::team_ai_limits::OperatorCaps,
+    ) -> Self {
+        self.team_ai_caps = caps;
+        self
     }
 
     /// ADR-0205 — attach the GitHub App sealing key (`GITHUB_APP_MASTER_KEY`). The converter
