@@ -122,6 +122,16 @@ pub const ACTION_PLUGIN_INSTALL: &str = "plugin.install";
 /// never gets to propose it.
 pub const ACTION_TEAM_AI_ROLES_SET: &str = "team_ai.roles.set";
 
+/// `member.role.set` — declared, not executable yet ([`DECLARED_NOT_EXECUTABLE`]). Named here
+/// because ADR-0201 증보 v3 B4-3 puts it on the helper's sensitive list before it is ever opened:
+/// raising a person's workspace role must never come out of text the helper has read.
+pub const ACTION_MEMBER_ROLE_SET: &str = "member.role.set";
+
+/// `host.session.open` — Host Ops (ADR-0210), not in this registry yet. Named here for the same
+/// reason as [`ACTION_MEMBER_ROLE_SET`]: the sensitive list (B4-3) is a deny-list, so it can name
+/// an id before the action exists and the id is covered the day it is added.
+pub const ACTION_HOST_SESSION_OPEN: &str = "host.session.open";
+
 /// The requesting human's own avatar (ADR-0186 v4 + amendment v7, #4791).
 /// Sources are their image attachment in this conversation or generated/retrieved
 /// image bytes. The run supplies the subject and only that person may approve.
@@ -292,14 +302,17 @@ pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 /// code change.
 ///
 /// ADR-0201 증보 v3 B3-T adds `team_ai.roles.set` (#4964): the card that switches the
-/// helper's own role bundles. Which of these ids one request is actually offered is
-/// `team_ai_roles::TeamAiRoles::advertised_action_ids`; this list is the allow-list, not the
+/// helper's own role bundles. B4 adds `invite.create` and `agent.invite` (#4965, bundle
+/// `invite_access`): an invite link and an external agent's pairing code, **always** an admin's
+/// approval card, and the one-time value is delivered by the door that raised the card
+/// ([`SecretDelivery`], [`raised_by_team_ai`]). Which of these ids one request is actually offered
+/// is `team_ai_roles::TeamAiRoles::advertised_action_ids`; this list is the allow-list, not the
 /// advertisement.
 ///
-/// Still outside (H6-2): `invite.create` and `agent.invite` (one-time secrets),
-/// `hosted.channels.grant` (widens access), and everything declared but not
-/// executable (`webhook.create`, `member.role.set`).
-pub const TEAM_AI_ACTION_IDS: [&str; 12] = [
+/// Still outside: `hosted.channels.grant` (widens the proposing agent's own access, which the
+/// helper does not have, B4-6) and everything declared but not executable (`webhook.create`,
+/// `member.role.set`).
+pub const TEAM_AI_ACTION_IDS: [&str; 14] = [
     ACTION_AGENT_PROFILE_UPDATE,
     ACTION_AGENT_RENAME,
     ACTION_CHANNEL_CREATE,
@@ -311,6 +324,8 @@ pub const TEAM_AI_ACTION_IDS: [&str; 12] = [
     ACTION_PLUGIN_INSTALL,
     ACTION_MEMBER_AVATAR_SET,
     ACTION_MEMBER_DISPLAY_NAME_SET,
+    ACTION_INVITE_CREATE,
+    ACTION_AGENT_INVITE,
     ACTION_TEAM_AI_ROLES_SET,
 ];
 
@@ -340,6 +355,233 @@ impl SecretDelivery {
             SecretDelivery::Always => "always",
         }
     }
+}
+
+/// `payload.via_ai.source` of a card the **team AI door** raised (`workspace_action_propose`).
+pub const VIA_AI_SOURCE_TEAM_AI: &str = "team_ai";
+
+/// Did the team AI door raise this approval? **The one judgement of the door** (ADR-0201 증보 v3
+/// B4-2): it reads the stored approval payload's `via_ai.source`, which only the proposal
+/// transaction writes (`momo_workspace_actions::team_ai::propose_in_tx`). Neither the agent's tool
+/// call nor the decision request can set it — and a card the Agent Port raised carries no `via_ai`,
+/// so it reads as the other door. Every place that depends on the door calls this function: where
+/// the one-time value goes ([`secret_route`]), whether `deliverSecretToAgent` may be honoured, the
+/// card rows, and the audit provenance.
+pub fn raised_by_team_ai(payload: &Value) -> bool {
+    payload
+        .get("via_ai")
+        .and_then(|via| via.get("source"))
+        .and_then(Value::as_str)
+        == Some(VIA_AI_SOURCE_TEAM_AI)
+}
+
+/// Where a decision's one-time value goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretRoute {
+    /// The decision response's `secretOnce`, to the approver alone (ADR-0186 D4's original
+    /// shape). Also the route of an action that mints no value shown once.
+    Approver,
+    /// The proposing agent claims it once through the Agent Port (`payload.secretClaim`,
+    /// ADR-0186 증보 v3 V3-5). Never the team AI door's.
+    ProposerClaim,
+    /// The server writes it into the conversation as the team AI's one message (ADR-0201 증보 v3
+    /// B4-2). Only an `invite.create` the team AI door raised.
+    Conversation,
+}
+
+/// The route of this action's one-time value, by **door** (`team_ai_door`, from
+/// [`raised_by_team_ai`]) and — for the one action that lets the approver choose — the
+/// approver's `deliverSecretToAgent`. One function: the decision tail, the early
+/// `deliverSecretToAgent` guard and the executor all read it, so the three cannot disagree.
+///
+/// | action | Agent Port door | team AI door |
+/// |---|---|---|
+/// | `invite.create` (`Always`) | `ProposerClaim` | `Conversation` |
+/// | `agent.invite` (`OptIn`) | `ProposerClaim` if the approver ticked it, else `Approver` | `Approver` — the flag is not honoured (the route refuses it) |
+/// | anything else | `Approver` | `Approver` |
+pub fn secret_route(
+    action: &WorkspaceAction,
+    team_ai_door: bool,
+    deliver_to_agent_requested: bool,
+) -> SecretRoute {
+    match action.secret_delivery {
+        SecretDelivery::None => SecretRoute::Approver,
+        SecretDelivery::Always if team_ai_door => SecretRoute::Conversation,
+        SecretDelivery::Always => SecretRoute::ProposerClaim,
+        SecretDelivery::OptIn if team_ai_door => SecretRoute::Approver,
+        SecretDelivery::OptIn if deliver_to_agent_requested => SecretRoute::ProposerClaim,
+        SecretDelivery::OptIn => SecretRoute::Approver,
+    }
+}
+
+/// May the approver's `deliverSecretToAgent` be honoured on this card? Only where the action
+/// offers the choice **and** the card came through the Agent Port: a helper's `agent.invite` has no
+/// box to tick (B4-2), so a decision request that sends the flag is a malformed request.
+pub fn offers_opt_in_delivery(action: &WorkspaceAction, team_ai_door: bool) -> bool {
+    action.secret_delivery == SecretDelivery::OptIn && !team_ai_door
+}
+
+/// The label and the value of the row that says who receives the one-time value, when the **team
+/// AI door** raised the card (ADR-0201 증보 v3 B4-2). `None` for an action with no such row.
+fn team_ai_delivery_row(action_id: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    match action_id {
+        ACTION_INVITE_CREATE => Some((
+            "초대 링크",
+            "링크 받는 곳",
+            "승인하면 도우미가 이 대화에 링크를 올려요. 대화에 있는 사람은 모두 볼 수 있어요",
+        )),
+        ACTION_AGENT_INVITE => Some((
+            "연결 코드",
+            "연결 코드 받는 사람",
+            "승인한 분만 한 번 볼 수 있어요",
+        )),
+        _ => None,
+    }
+}
+
+/// The request card's rows for a card the team AI door raised: the Agent Port's delivery row
+/// (「에이전트가 이 링크를 받아 전달해요」, 「승인할 때 고르세요」) is replaced by the helper's
+/// (B4-2) — what the approver reads is what runs. Every other row, and every other action's rows,
+/// are returned as they were.
+pub fn team_ai_door_rows(action_id: &str, mut rows: Vec<Value>) -> Vec<Value> {
+    let Some((agent_port_label, label, text)) = team_ai_delivery_row(action_id) else {
+        return rows;
+    };
+    let replacement = action_row(label, text);
+    match rows
+        .iter_mut()
+        .find(|row| row.get("label").and_then(Value::as_str) == Some(agent_port_label))
+    {
+        Some(row) => *row = replacement,
+        None => rows.push(replacement),
+    }
+    rows
+}
+
+/// The roles the **helper's door** may put on an `invite.create` card (ADR-0201 증보 v3 B4-4,
+/// 「구현 확정 (#4965)」): below admin. An admin link is the strongest thing an invite can carry (it
+/// makes an admin account), and a card the helper raises is one a model wrote after a chat, so an
+/// admin link is made by a person on the screen (설정 › 멤버와 초대). A planner default (the r1
+/// security review's admin-link finding, 2026-11-01) that the owner can flip.
+///
+/// This is the helper's *policy*. What a proposal can name at all is the shared schema's
+/// ([`INVITE_PROPOSABLE_ROLES`]: `member` and `admin` today), so together they leave `member` — the
+/// Agent Port door is not narrowed by this list and keeps its schema as it was. `guest` is here
+/// because the policy is 「below admin」; it becomes reachable the day the schema offers it.
+pub const TEAM_AI_INVITE_ROLES: [&str; 2] = ["member", "guest"];
+
+/// May the helper's door raise an `invite.create` card for this (normalised) role? Asked at the
+/// proposal and again at the decision.
+pub fn team_ai_may_invite_as(role: &str) -> bool {
+    TEAM_AI_INVITE_ROLES.contains(&role)
+}
+
+/// The expiry the helper's door writes on an `invite.create` card when its proposal names none:
+/// **one day** (24 hours; the schema's own minimum). A planner default (owner 2026-10-31 「기본값을
+/// 짧게」, the r1 review's default-numbers finding) the owner can flip. A person's link and the Agent Port's keep
+/// [`DEFAULT_INVITE_EXPIRES_IN_DAYS`]; the single use is already everybody's default
+/// (`momo_settings::validated_max_uses`).
+pub const TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS: i64 = 1;
+
+/// The arguments a helper's proposal is validated as: `raw_args` with the **door's defaults**
+/// written in. Today that is one thing — an `invite.create` that names no expiry gets
+/// [`TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS`] — and it is filled in **before** the registry's
+/// validator runs, so the card's rows, the stored payload, the decision's re-validation, the
+/// invite row and the result line all read the same explicit number: what the approver is shown is
+/// what runs. A value the model did name (`expiresInDays: 7`) is never changed, and anything that
+/// is not an object is returned as it was for the validator to refuse.
+pub fn team_ai_door_args<'a>(action_id: &str, raw_args: &'a Value) -> std::borrow::Cow<'a, Value> {
+    if action_id != ACTION_INVITE_CREATE {
+        return std::borrow::Cow::Borrowed(raw_args);
+    }
+    let Some(object) = raw_args.as_object() else {
+        return std::borrow::Cow::Borrowed(raw_args);
+    };
+    if object
+        .get("expiresInDays")
+        .is_some_and(|value| !value.is_null())
+    {
+        return std::borrow::Cow::Borrowed(raw_args);
+    }
+    let mut object = object.clone();
+    object.insert(
+        "expiresInDays".to_string(),
+        json!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS),
+    );
+    std::borrow::Cow::Owned(Value::Object(object))
+}
+
+/// The result card's delivery row for an `invite.create` the team AI door raised: the link went
+/// to the conversation.
+pub const INVITE_CONVERSATION_RESULT_TEXT: &str = "도우미가 이 대화에 링크를 올렸어요";
+
+/// `client_msg_id` of the helper's invite-link message. A fourth key of its own
+/// (`invite_link:`), beside `card:` and `result:` — the spine's idempotency guard is
+/// `(channel, author, client_msg_id)` and the helper authors all of them in one channel. A
+/// retried decision posts the one message, not two.
+pub fn invite_link_client_msg_id(approval_id: Uuid) -> Uuid {
+    Uuid::new_v5(
+        &CARD_CLIENT_MSG_NAMESPACE,
+        format!("invite_link:{approval_id}").as_bytes(),
+    )
+}
+
+/// The provenance a helper card's audit rows carry (ADR-0201 증보 v3 B4-7): **tool names, call
+/// counts, token counts and milliseconds** — never text. Copied field by field from the stored
+/// `via_ai`, each only if it has the shape the proposal transaction wrote (a number, a short
+/// string, an array of short strings), so a payload that was tampered with cannot carry a
+/// sentence into the audit trail. `None` when the Agent Port raised the card.
+pub fn team_ai_audit_via(payload: &Value) -> Option<Value> {
+    if !raised_by_team_ai(payload) {
+        return None;
+    }
+    let via = payload.get("via_ai")?;
+    let number = |key: &str| {
+        via.get(key)
+            .filter(|value| value.is_i64() || value.is_u64())
+    };
+    let short = |value: &Value| {
+        value
+            .as_str()
+            .is_some_and(|text| text.chars().count() <= 64)
+    };
+    let mut out = serde_json::Map::new();
+    out.insert("source".into(), json!(VIA_AI_SOURCE_TEAM_AI));
+    if let Some(model) = via.get("model").filter(|model| short(model)) {
+        out.insert("model".into(), model.clone());
+    }
+    for key in [
+        "latency_ms",
+        "prompt_tokens",
+        "completion_tokens",
+        "model_calls",
+        "web_searches",
+    ] {
+        if let Some(value) = number(key) {
+            out.insert(key.into(), value.clone());
+        }
+    }
+    if let Some(tools) = via.get("tools").and_then(Value::as_array) {
+        if tools.iter().all(short) {
+            out.insert("tools".into(), json!(tools));
+        }
+    }
+    Some(Value::Object(out))
+}
+
+/// `detail` with the helper's provenance added under `via_ai` when the card is a helper card of an
+/// action the `invite_access` bundle owns (B4-7). Any other card, from any door, is returned
+/// unchanged: this slice adds provenance to the two secret-bearing actions, not to every card.
+pub fn with_team_ai_audit_via(action_id: &str, payload: &Value, mut detail: Value) -> Value {
+    let owned_by_invites = crate::team_ai_roles::bundle_of_action(action_id)
+        .is_some_and(|bundle| bundle.id == crate::team_ai_roles::INVITE_ACCESS);
+    if !owned_by_invites {
+        return detail;
+    }
+    if let (Some(via), Some(object)) = (team_ai_audit_via(payload), detail.as_object_mut()) {
+        object.insert("via_ai".into(), via);
+    }
+    detail
 }
 
 /// The actions whose approval **mints a value that is shown once** — the invite
@@ -1912,7 +2154,7 @@ pub const DECLARED_NOT_EXECUTABLE: &[DeclaredAction] = &[
         unavailable_reason: "웹훅 마스터키 분리(ADR-0004 증보 4)가 랜딩한 뒤에 열립니다.",
     },
     DeclaredAction {
-        id: "member.role.set",
+        id: ACTION_MEMBER_ROLE_SET,
         title: "멤버 역할 변경",
         summary: "한 멤버의 워크스페이스 역할을 바꿉니다.",
         unavailable_reason: "다음 배치에서 열립니다.",
@@ -2907,10 +3149,11 @@ mod tests {
         );
     }
 
-    /// ADR-0201 증보 v2 H6 / H13-A13·A14 + H7 (#3889): the helper's list is H6-1's
-    /// eight plus `plugin.install`, every one executable; the three settings
-    /// actions and `plugin.install` are the only team-AI-only rows, so the Agent
-    /// Port's list is still the eight v1 actions.
+    /// ADR-0201 증보 v2 H6 / H13-A13·A14 + H7 (#3889) + v3 B4 (#4965): the helper's list is H6-1's
+    /// eight plus `plugin.install`, the two invite actions (the `invite_access` bundle, B4) and the
+    /// roles card, every one executable; the three settings actions, `plugin.install` and the
+    /// roles card are the only team-AI-only rows, so the Agent Port's list is still the v1
+    /// actions — the two invites are on **both** lists, which is why the door has to be judged.
     #[test]
     fn the_team_ai_list_is_h6_plus_plugin_install_and_only_those_are_helper_only() {
         assert_eq!(
@@ -2927,6 +3170,8 @@ mod tests {
                 "plugin.install",
                 "member.avatar.set",
                 "member.display_name.set",
+                "invite.create",
+                "agent.invite",
                 "team_ai.roles.set",
             ]
         );
@@ -2936,11 +3181,25 @@ mod tests {
                 "{id} must be proposable by the team AI"
             );
         }
-        // Secrets and access stay out (H6-2).
+        // B15-A1: the invites are in; widening the helper's own access is not (B4-6), and
+        // neither is a declared-but-not-executable action or the box.
+        for id in [ACTION_INVITE_CREATE, ACTION_AGENT_INVITE] {
+            assert!(TEAM_AI_ACTION_IDS.contains(&id), "{id}");
+            assert!(
+                proposable_action_by_id(id, ProposalDoor::AgentPort).is_some(),
+                "{id}"
+            );
+            assert_eq!(
+                action_by_id(id).map(|a| a.proposers),
+                Some(Proposers::Any),
+                "{id}"
+            );
+        }
         for banned in [
-            ACTION_INVITE_CREATE,
-            ACTION_AGENT_INVITE,
             ACTION_HOSTED_CHANNELS_GRANT,
+            ACTION_MEMBER_ROLE_SET,
+            ACTION_HOST_SESSION_OPEN,
+            "webhook.create",
         ] {
             assert!(!TEAM_AI_ACTION_IDS.contains(&banned), "{banned}");
         }
@@ -4166,6 +4425,229 @@ mod tests {
             assert_eq!(keys, ["messageId"], "{id}");
             assert!(proposal_summary(action).contains("관리자"), "{id}");
         }
+    }
+
+    /// B4-2: the door is read from the stored approval payload, and only from `via_ai.source`.
+    #[test]
+    fn the_door_is_the_stored_via_ai_source_and_nothing_else() {
+        assert!(raised_by_team_ai(&json!({"via_ai": {"source": "team_ai"}})));
+        for payload in [
+            json!({}),
+            json!({"via_ai": {}}),
+            json!({"via_ai": {"source": "team_ai "}}),
+            json!({"via_ai": {"source": "agent_port"}}),
+            json!({"via_ai": "team_ai"}),
+            json!({"via_ai": {"source": ["team_ai"]}}),
+            // Things an agent can write into a proposal are not the door.
+            json!({"action": {"id": "invite.create", "args": {"source": "team_ai"}}, "source": "team_ai"}),
+            json!({"action": {"via_ai": {"source": "team_ai"}}}),
+        ] {
+            assert!(!raised_by_team_ai(&payload), "{payload}");
+        }
+    }
+
+    /// B4-2's table, cell by cell: where the one-time value goes, by action, door and the
+    /// approver's `deliverSecretToAgent`.
+    #[test]
+    fn the_secret_route_is_the_b4_2_table() {
+        let invite = action_by_id(ACTION_INVITE_CREATE).expect("registered");
+        let pairing = action_by_id(ACTION_AGENT_INVITE).expect("registered");
+        let channel = action_by_id(ACTION_CHANNEL_CREATE).expect("registered");
+        for flag in [false, true] {
+            // invite.create: the Agent Port's proposer claims it; the helper's goes to the chat.
+            assert_eq!(
+                secret_route(invite, false, flag),
+                SecretRoute::ProposerClaim
+            );
+            assert_eq!(secret_route(invite, true, flag), SecretRoute::Conversation);
+            // agent.invite: the helper's code is the approver's alone, whatever the flag says.
+            assert_eq!(secret_route(pairing, true, flag), SecretRoute::Approver);
+            // Nothing else has a route but the approver.
+            assert_eq!(secret_route(channel, false, flag), SecretRoute::Approver);
+            assert_eq!(secret_route(channel, true, flag), SecretRoute::Approver);
+        }
+        // The Agent Port's agent.invite honours the approver's choice, as before.
+        assert_eq!(
+            secret_route(pairing, false, true),
+            SecretRoute::ProposerClaim
+        );
+        assert_eq!(secret_route(pairing, false, false), SecretRoute::Approver);
+        // Only the Agent Port's agent.invite has a box to tick.
+        assert!(offers_opt_in_delivery(pairing, false));
+        assert!(!offers_opt_in_delivery(pairing, true));
+        assert!(!offers_opt_in_delivery(invite, false));
+        assert!(!offers_opt_in_delivery(invite, true));
+        assert!(!offers_opt_in_delivery(channel, false));
+    }
+
+    /// B4-2's card rows, from the helper's door only: the Agent Port's sentence is replaced, not
+    /// added to, and every other row keeps its place.
+    #[test]
+    fn the_helper_door_swaps_the_delivery_row_and_only_that_row() {
+        let invite_rows = invite_create_rows("member", 5, Some(7));
+        let swapped = team_ai_door_rows(ACTION_INVITE_CREATE, invite_rows.clone());
+        assert_eq!(swapped.len(), invite_rows.len());
+        assert_eq!(swapped[..3], invite_rows[..3]);
+        assert_eq!(
+            swapped[3],
+            json!({
+                "label": "링크 받는 곳",
+                "value": "승인하면 도우미가 이 대화에 링크를 올려요. 대화에 있는 사람은 모두 볼 수 있어요"
+            })
+        );
+        assert!(!swapped
+            .iter()
+            .any(|row| row["value"] == INVITE_DELIVERY_TEXT));
+
+        let pairing_rows = agent_invite_rows("Grok Bot", "그록봇", "grokbot");
+        let swapped = team_ai_door_rows(ACTION_AGENT_INVITE, pairing_rows.clone());
+        assert_eq!(swapped.len(), pairing_rows.len());
+        assert_eq!(swapped[1..], pairing_rows[1..]);
+        assert_eq!(
+            swapped[0],
+            json!({"label": "연결 코드 받는 사람", "value": "승인한 분만 한 번 볼 수 있어요"})
+        );
+        // An action with no delivery row is untouched, and a row set that lost the label still says it.
+        let other = vec![action_row("채널", "#a")];
+        assert_eq!(
+            team_ai_door_rows(ACTION_CHANNEL_CREATE, other.clone()),
+            other
+        );
+        let lost = team_ai_door_rows(ACTION_INVITE_CREATE, vec![action_row("역할", "member")]);
+        assert_eq!(lost.len(), 2);
+        assert_eq!(lost[1]["label"], "링크 받는 곳");
+    }
+
+    /// B4-4 구현 확정 (#4965, r1 review: admin link): the helper's door never raises an admin link, and the
+    /// Agent Port's schema did not move for it. Each role is named literally — a loop over
+    /// [`INVITE_PROPOSABLE_ROLES`] would pass if a role left the policy.
+    #[test]
+    fn the_helper_door_raises_no_admin_link_and_the_shared_schema_did_not_move() {
+        assert!(team_ai_may_invite_as("member"));
+        assert!(team_ai_may_invite_as("guest"));
+        assert!(!team_ai_may_invite_as("admin"));
+        assert!(!team_ai_may_invite_as("owner"));
+        assert!(!team_ai_may_invite_as(""));
+        assert!(!TEAM_AI_INVITE_ROLES.contains(&"admin"));
+        // The Agent Port door keeps the schema it had: member and admin, no guest.
+        assert_eq!(INVITE_PROPOSABLE_ROLES, ["member", "admin"]);
+        assert_eq!(
+            invite_create_args_schema()["properties"]["role"]["enum"],
+            json!(["member", "admin"])
+        );
+    }
+
+    /// B4-4 구현 확정 (#4965, r1 review: default numbers): the helper's door writes one day when no expiry is named
+    /// — and only then, and only for `invite.create`. The control cases are the ones the default
+    /// must not touch: an explicit number, another action, and arguments that are not an object.
+    #[test]
+    fn the_helper_door_fills_one_day_only_where_an_invite_names_no_expiry() {
+        let day = json!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS);
+        assert_eq!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS, 1);
+        // Checked when the crate compiles: the helper's default must stay shorter than the week the
+        // other doors keep.
+        const {
+            assert!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS < DEFAULT_INVITE_EXPIRES_IN_DAYS);
+        }
+        // Omitted, null, and the other keys left alone.
+        for omitted in [
+            json!({}),
+            json!({"expiresInDays": null}),
+            json!({"role": "member", "maxUses": 3}),
+        ] {
+            let filled = team_ai_door_args(ACTION_INVITE_CREATE, &omitted);
+            assert_eq!(filled["expiresInDays"], day, "{omitted}");
+            assert_eq!(filled["maxUses"], omitted["maxUses"], "{omitted}");
+            assert_eq!(filled["role"], omitted["role"], "{omitted}");
+        }
+        // A number the model named is never changed — in either direction.
+        for named in [1, 7, 30] {
+            let args = json!({"expiresInDays": named});
+            let kept = team_ai_door_args(ACTION_INVITE_CREATE, &args);
+            assert_eq!(kept["expiresInDays"], json!(named));
+            assert!(matches!(kept, std::borrow::Cow::Borrowed(_)));
+        }
+        // Another action is not an invite; non-objects are the validator's to refuse.
+        let other = json!({"name": "ideas"});
+        assert_eq!(
+            team_ai_door_args(ACTION_CHANNEL_CREATE, &other).as_ref(),
+            &other
+        );
+        for not_object in [json!(null), json!("7"), json!([1])] {
+            assert_eq!(
+                team_ai_door_args(ACTION_INVITE_CREATE, &not_object).as_ref(),
+                &not_object
+            );
+        }
+        // The Agent Port's own default is the SQL's seven days, unchanged.
+        assert_eq!(DEFAULT_INVITE_EXPIRES_IN_DAYS, 7);
+    }
+
+    /// B4-7: the helper card's audit provenance is names, counts and numbers — and an invented
+    /// field, a long string or a non-string in `tools` does not ride along.
+    #[test]
+    fn the_audit_provenance_is_text_free_and_only_for_the_helpers_invite_cards() {
+        let payload = json!({
+            "via_ai": {
+                "source": "team_ai", "requester_id": "u", "trigger_message_id": "m",
+                "model": "claude-x", "latency_ms": 812, "prompt_tokens": 120,
+                "completion_tokens": 40, "tools": ["read_channel"], "model_calls": 2,
+                "web_searches": 0, "note": "무엇이든 쓴 글", "rationale": "무엇이든 쓴 글"
+            }
+        });
+        let via = team_ai_audit_via(&payload).expect("a helper card");
+        assert_eq!(
+            via,
+            json!({"source": "team_ai", "model": "claude-x", "latency_ms": 812,
+                   "prompt_tokens": 120, "completion_tokens": 40, "model_calls": 2,
+                   "web_searches": 0, "tools": ["read_channel"]})
+        );
+        let tampered = json!({"via_ai": {"source": "team_ai", "model": "m".repeat(200),
+            "latency_ms": "빠름", "tools": ["x".repeat(300)], "model_calls": 1.5}});
+        assert_eq!(
+            team_ai_audit_via(&tampered),
+            Some(json!({"source": "team_ai"}))
+        );
+        assert_eq!(team_ai_audit_via(&json!({})), None);
+        assert_eq!(
+            team_ai_audit_via(&json!({"via_ai": {"source": "other"}})),
+            None
+        );
+
+        let detail = json!({"role": "member"});
+        for id in [ACTION_INVITE_CREATE, ACTION_AGENT_INVITE] {
+            assert_eq!(
+                with_team_ai_audit_via(id, &payload, detail.clone())["via_ai"]["tools"],
+                json!(["read_channel"]),
+                "{id}"
+            );
+            assert_eq!(
+                with_team_ai_audit_via(id, &json!({}), detail.clone()),
+                detail,
+                "{id}"
+            );
+        }
+        // Another action's rows are left alone: this slice does not widen the audit shape.
+        assert_eq!(
+            with_team_ai_audit_via(ACTION_CHANNEL_CREATE, &payload, detail.clone()),
+            detail
+        );
+    }
+
+    /// The link message's idempotency key is its own: not the card's, not the result line's.
+    #[test]
+    fn the_invite_link_message_has_its_own_client_msg_id() {
+        let approval = Uuid::new_v4();
+        let ids = [
+            invite_link_client_msg_id(approval),
+            card_client_msg_id(approval),
+            result_client_msg_id(approval),
+        ];
+        assert_ne!(ids[0], ids[1]);
+        assert_ne!(ids[0], ids[2]);
+        assert_ne!(ids[1], ids[2]);
+        assert_eq!(invite_link_client_msg_id(approval), ids[0]);
+        assert_ne!(invite_link_client_msg_id(Uuid::new_v4()), ids[0]);
     }
 
     fn pin_message(body: &str) -> PinCardMessage {

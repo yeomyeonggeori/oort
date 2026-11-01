@@ -2401,6 +2401,11 @@ pub fn context_message_body(message_type: &str, body: Option<&str>, props: &Valu
             None => "[artifact]".to_string(),
         },
         "approval_request" => "[approval_request]".to_string(),
+        // ADR-0201 증보 v3 B4-2 / B13-I2: the team AI's invite-link message is text in a channel,
+        // and this projection is what every agent's job payload (the helper's included) and every
+        // later window is built from. The model-bound copy says that a link was posted and never
+        // what it was.
+        _ if crate::invite_link::is_marked(props) => crate::invite_link::PLACEHOLDER.to_string(),
         _ => {
             let text = body.unwrap_or_default();
             if text.chars().count() > CONTEXT_BODY_MAX_CHARS {
@@ -2417,6 +2422,25 @@ pub fn context_message_body(message_type: &str, body: Option<&str>, props: &Valu
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0201 증보 v3 B13-I2: the team AI's invite-link message reaches a model as a
+    /// placeholder, by its marker — whatever the body says — and an unmarked message that merely
+    /// looks like a link is left to the readers that mask by shape.
+    #[test]
+    fn the_invite_link_message_projects_as_a_placeholder_for_every_agent() {
+        let body = crate::invite_link::body("https://oort.example/join?code=Ab3-_xQ7zK9");
+        let projected = context_message_body("text", Some(&body), &crate::invite_link::props());
+        assert_eq!(projected, crate::invite_link::PLACEHOLDER);
+        assert!(!projected.contains("Ab3"));
+        assert_eq!(
+            context_message_body("text", Some("안녕"), &json!({"kind": "something_else"})),
+            "안녕"
+        );
+        assert_eq!(
+            context_message_body("text", Some("안녕"), &json!({})),
+            "안녕"
+        );
+    }
 
     /// A structured message must never project as empty content: several
     /// OpenAI-compatible gateways answer 400 for an empty `content`, so one tool
