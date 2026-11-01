@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
+import { TEAM_AI_NOTICE_VERSION } from "@momo/core/features/settings/teamAiRoles";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
 import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 import type { AppLocale } from "@/i18n/localeStore";
@@ -178,6 +179,13 @@ function writesSoFar(): number {
   return [putLink, testLink, putDefaultAi, patchRoles, setSwitch, rename].reduce((sum, fn) => sum + fn.mock.calls.length, 0);
 }
 
+// #5040: 온보딩이 켜는 요청에 싣는 고지 기록(역할 단계를 마치는 순간, 최종 선택에서 켜진 파일·기억).
+const onboardingNotice = (bundles: string[]) => ({
+  bundles,
+  noticeVersion: TEAM_AI_NOTICE_VERSION,
+  via: "onboarding",
+});
+
 describe("키가 없으면 「나중에」로 넘어가고 도우미는 꺼진 채다", () => {
   it("운영자가 키를 아직 안 넣었다: 키 폼과 「나중에」, 누르면 쓰기 0회로 넘어간다", async () => {
     const { onSkip } = stage();
@@ -286,11 +294,30 @@ describe("이름과 역할 고르기", () => {
       `rename:${HELPER}:비서봇`,
     ]);
     expect(putDefaultAi).toHaveBeenCalledWith("teamAgent", { linkPosition: 0, modelId: null });
+    // #5040: 파일을 껐으니 보인 고지 줄은 기억 하나다. 기록은 켜는 요청에 실린다.
+    expect(setSwitch.mock.calls).toEqual([[WS, true, onboardingNotice(["memory"])]]);
     expect(view()).toBe("done");
     expect(q("onboarding-team-ai-aliases")?.textContent).toBe("부르는 이름: @oort · @오르트 · @claude · @비서봇");
     expect(q("onboarding-team-ai-rename-failed")).toBeNull();
     await click("onboarding-team-ai-continue");
     expect(onComplete).toHaveBeenCalledTimes(1);
+  });
+
+  it("역할을 건드리지 않아도(역할 PATCH 없음) 켜는 요청에 파일·기억의 고지 기록이 실린다. 둘 다 끄면 싣지 않는다", async () => {
+    await toSetup();
+    await click("onboarding-team-ai-enable");
+    expect(patchRoles).not.toHaveBeenCalled();
+    expect(setSwitch.mock.calls).toEqual([[WS, true, onboardingNotice(["files", "memory"])]]);
+
+    if (root) act(() => root?.unmount());
+    host?.remove();
+    setSwitch.mockClear();
+    await toSetup();
+    await click("onboarding-team-ai-role-files");
+    await click("onboarding-team-ai-role-memory");
+    await click("onboarding-team-ai-enable");
+    // 보인 줄이 없으니 켜는 요청은 예전 두 인자 호출 그대로다.
+    expect(setSwitch.mock.calls).toEqual([[WS, true]]);
   });
 
   it("이름이 겹쳐 거절돼도 켜기는 끝난 채이고, 이유와 다음 행동을 말한다", async () => {
