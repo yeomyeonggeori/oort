@@ -3,9 +3,10 @@
 //! Before this goal a run that stopped on an approval was `awaiting_approval` in the database and in the
 //! progress read, while the rail's last word for it stayed `thinking / running`: a surface that reads
 //! frames only said 「일하는 중」 until its own 90s cutoff. The producer now writes one
-//! `(thinking, awaiting_approval)` frame in the park's own transaction, and these two tests are the
-//! evidence that the frame is exactly one, that it is addressed to its own tenant's rail, and that every
-//! way the hold can go on leaves the rail telling the truth.
+//! `(thinking, awaiting_approval)` frame in the park's own transaction, and these tests are the
+//! evidence that the frame is exactly one, that it is addressed to its own tenant's rail, that a park
+//! which loses its guard says nothing, and that every way the hold can go on leaves the rail telling the
+//! truth.
 //!
 //! Real HTTP on `momo_app` (NOBYPASSRLS), the real worker in-process (`momo_worker`), the real expiry
 //! sweep (`momo_notifier`); the rail is read from the `outbox` rows the relay would publish, so what is
@@ -13,8 +14,9 @@
 //!
 //! | test | revert that makes it red |
 //! |---|---|
-//! | `t5084_1_a_parked_run_tells_the_rail_once_and_a_resumed_run_takes_it_back` | drop the worker's `emit_awaiting_approval_agent_status` (no frame), emit it before the card or outside the park's transaction, spell the frame `running`, drop the approval from its key (the second hold's frame would be eaten by Centrifugo's 5-minute cache), or give a resumed start the first start's key `thinking` (the frame that takes the rail off 승인 대기 would be eaten) |
+//! | `t5084_1_a_parked_run_tells_the_rail_once_and_a_resumed_run_takes_it_back` | drop the worker's `emit_awaiting_approval_agent_status` (no frame), emit it before the card, spell the frame `running`, drop the approval from its key (the second hold's frame would be eaten by Centrifugo's 5-minute cache), or give a resumed start the first start's key `thinking` (the frame that takes the rail off 승인 대기 would be eaten) |
 //! | `t5084_2_rejecting_stopping_or_expiring_a_hold_leaves_the_rail_on_its_ending` | let any of the three endings skip its terminal frame, or emit a `running` frame after the wait |
+//! | `t5084_3_a_park_that_loses_its_guard_tells_the_rail_nothing` | emit the frame on its own connection or before the guarded park instead of inside the park's transaction (a refused park would leave a wait on the rail for a run nobody parked) |
 
 use super::*;
 
@@ -471,4 +473,117 @@ async fn t5084_2_rejecting_stopping_or_expiring_a_hold_leaves_the_rail_on_its_en
             "still exactly one wait on the rail: {frames:?}"
         );
     }
+}
+
+/// A provider that, while the model "thinks", lets another turn park the run — the race the park's
+/// `status = 'running'` guard exists for — and then asks for a tool.
+struct ParkedUnderItsFeet {
+    su: PgPool,
+    workspace: Uuid,
+    inner: ToolEveryTime,
+    /// How many runs the "other turn" parked: the premise of the test, asserted by it.
+    parked: std::sync::atomic::AtomicU64,
+}
+
+#[async_trait::async_trait]
+impl ChatProvider for ParkedUnderItsFeet {
+    async fn complete(
+        &self,
+        endpoint: &momo_agent_worker::provider::ProviderEndpoint,
+        request: &momo_agent_worker::provider::ChatRequest,
+    ) -> Result<
+        momo_agent_worker::provider::ChatCompletion,
+        momo_agent_worker::provider::ProviderError,
+    > {
+        let parked = sqlx::query(
+            "UPDATE agent_run SET status = 'awaiting_approval', deadline_at = now() + interval '1 hour' \
+              WHERE workspace_id = $1 AND status = 'running'",
+        )
+        .bind(self.workspace)
+        .execute(&self.su)
+        .await
+        .expect("another turn parks the run")
+        .rows_affected();
+        self.parked
+            .fetch_add(parked, std::sync::atomic::Ordering::SeqCst);
+        self.inner.complete(endpoint, request).await
+    }
+}
+
+/// **A park that loses its guard tells the rail nothing** (#5084).
+///
+/// The frame is written in the park's own transaction, after the guarded park moved the run. When the
+/// guard says no (another turn parked the run first, which is what a re-claimed job finds), the whole
+/// proposal rolls back — no approval, no card — and the rail gets no wait for a run nobody parked here.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a pgvector/pg18 superuser DB"]
+async fn t5084_3_a_park_that_loses_its_guard_tells_the_rail_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let base = start_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let room = room(&su, &app_pool, &http, &base).await;
+    let provider = Arc::new(ParkedUnderItsFeet {
+        su: su.clone(),
+        workspace: room.tenant.workspace,
+        inner: ToolEveryTime(std::sync::atomic::AtomicUsize::new(0)),
+        parked: std::sync::atomic::AtomicU64::new(0),
+    });
+
+    send_message(
+        &http,
+        &base,
+        &room.token,
+        &room.tenant,
+        Uuid::new_v4(),
+        "@hermes 세션 정리해줘",
+    )
+    .await;
+    let run = runs_for(&su, room.tenant.workspace)
+        .await
+        .last()
+        .expect("the mention started a run")
+        .0;
+    worker(provider.clone())
+        .await
+        .drain_once()
+        .await
+        .expect("drain");
+
+    // The premise: the run was already parked by the time this turn's own park ran. (What the run reads
+    // afterwards is the retry's business — the worker marks a refused turn `failed` between attempts.)
+    assert_eq!(
+        provider.parked.load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "another turn parked the run while the model was thinking"
+    );
+    assert!(
+        approvals_of_run(&su, run).await.is_empty(),
+        "the refused park rolled its approval back"
+    );
+    let cards: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE run_id = $1 AND type = 'approval_request'",
+    )
+    .bind(run)
+    .fetch_one(&su)
+    .await
+    .expect("count cards");
+    assert_eq!(cards, 0, "…and its card");
+    let frames = status_frames_of(&su, room.tenant.workspace, run).await;
+    let story = rail_story(&frames);
+    assert_eq!(
+        story.get(..2),
+        Some(&["queued", "working"][..]),
+        "the turn did open and start: {frames:?}"
+    );
+    assert!(
+        !story.contains(&"awaiting_approval"),
+        "…and the rail was told nothing about a wait (what follows is the worker's own ending of a \
+         turn that could not record its tool call): {frames:?}"
+    );
+    // The refused turn left its job to be retried; the worker's claim is global, so do not leave it
+    // for the next suite's worker to pick up.
+    settle_residual_worker_jobs(&su).await;
 }
