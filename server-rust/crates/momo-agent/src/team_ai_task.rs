@@ -62,8 +62,9 @@ pub const ORPHAN_GRACE_SECS: i64 = 900;
 
 /// The task finished: the final report was posted.
 pub const END_DONE: &str = "done";
-/// A task bound was reached (steps, wall clock, model calls, tool calls, or the day's allowance):
-/// an interim report from the note was posted (B5-5).
+/// A task bound was reached (steps, wall clock, model calls, tool calls) or a B9 usage limit
+/// (the operator's switch or ceiling, the team's daily tokens or monthly dollars): an interim report
+/// from the note was posted (B5-5).
 pub const END_LIMIT: &str = "task_limit";
 /// A person stopped the run (the existing cancel route, B5-8).
 pub const END_CANCELLED: &str = "task_cancelled";

@@ -19,7 +19,7 @@
 //! | test | acceptance | revert that makes it red |
 //! |---|---|---|
 //! | `t1_a_first_step_that_continues_starts_a_task` | B15-A5 | drop `team_ai_task_begin`'s row/job/stage writes, or offer the tool unconditionally |
-//! | `t2_steps_go_on_and_end_in_one_report` | B5-4·9, A10 | write the final report once per step, or keep the note after the end |
+//! | `t2_steps_go_on_and_end_in_one_report` | B5-4·9, A10, r1 L4c | write the final report once per step, keep the note after the end, or count the usage `runs` by ledger rows (a three-step task is one run) |
 //! | `t3_the_bundle_off_offers_nothing_and_a_call_of_it_is_refused` | B13-I5, A16 | drop `task_continue` from the `long_research` row, or skip the `tool_allowed` check at a call |
 //! | `t4_a_reclaimed_first_turn_job_does_not_run_step_one_again` | A6 | judge by the payload instead of the row (`decide_step`) |
 //! | `t5_two_workers_for_one_step_call_the_model_once` | A6 | drop the claim (`claim_step_in_tx` always `Claimed`) |
@@ -36,6 +36,13 @@
 //! | `t16_the_sweep_closes_a_task_whose_run_ended_elsewhere` | B13-I7 | drop the sweep |
 //! | `t17_a_step_job_without_a_task_runs_nothing` | A6 | run the model for a step job whose row is missing |
 //! | `t18_switching_the_bundle_off_stops_a_running_task_and_a_task_about_to_start` | B13-I5 | drop the bundle check at a step's start or inside `team_ai_task_begin` |
+//! | `t19_the_marker_table_grants_exactly_what_the_code_uses` | r1 M1, A10 | add a verb or a role to the `team-ai-task-lockdown` block (or a grant after it), drop the block, or let the COMMENT drift from the grants |
+//! | `t20_a_row_cannot_point_at_another_workspaces_run_or_member` | r1 L2, A10 | turn either composite foreign key back into a single-column one |
+//! | `t21_a_steps_usage_limits_are_judged_by_the_quick_paths_function` | #4944, B9-2, B5-5 | judge a step by anything but `team_ai_limits::judge`/`search_cap` (a fixed default back, the workspace's limits or the month ignored, the operator's switch or ceiling ignored) |
+//! | `t22_a_late_commit_after_a_takeover_writes_nothing` | r1 M3, A6 | drop `steps_done = $3` or `claim_token = $4` from `commit_step_in_tx` |
+//! | `t23_a_tasks_report_gets_no_link_preview_even_when_its_last_step_read_nothing` | r1 M2 (#3899) | drop `trace.task_step.is_some()` from `team_ai_finish`'s `withhold_previews` |
+//! | `t24_a_stopped_steps_web_searches_count_toward_the_days_allowance` | r1 L4a, B9-2 | pass `0` instead of the trace's `web_searches` to `team_ai_task_drop` |
+//! | `t25_a_task_and_the_work_request_card_never_both_end_one_request` | #4972 × #4967, B13-I4 | check `card_suggest` before `task_continue`, or offer a step the card tool |
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -66,6 +73,7 @@ const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1";
 const ANTHROPIC_KEY: &str = "sk-ant-4967-z9y8x7";
 const PROPOSE_TOOL: &str = "workspace_action_propose";
 const TASK_TOOL: &str = "task_continue";
+const CARD_TOOL: &str = "card_suggest";
 const LIMIT_SENTENCE: &str =
     "작업이 정해진 한도에 닿아서 여기서 멈췄어요. 지금까지 정리한 내용이에요.";
 
@@ -2779,4 +2787,111 @@ async fn t24_a_stopped_steps_web_searches_count_toward_the_days_allowance() {
     .await
     .unwrap();
     assert_eq!(counted_today, 2, "and the day's allowance counts them");
+}
+
+/// The merge of #4972 (the `code` bundle's `card_suggest` work-request card) and #4967 (the task mode):
+/// the first turn is offered BOTH tools. A model that calls both in one answer starts the task and
+/// gives no card (the task wins — one ending per request, never a task and a card), and no step of a
+/// task is ever offered `card_suggest`: a call of it inside a step is the model going off script, so the
+/// task ends honestly and no card exists (B13-I4 for the card the helper may give outside a task).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t25_a_task_and_the_work_request_card_never_both_end_one_request() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let card = |prompt: &str| {
+        call(
+            CARD_TOOL,
+            json!({"commandId": "work.request.open", "args": {"prompt": prompt}, "body": "내 맥에서 열 수 있어요."}),
+        )
+    };
+    let cards = |su: PgPool, t: &Tenant| {
+        let workspace_id = t.workspace_id;
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM message WHERE workspace_id = $1 AND props ? 'momo.command_suggest'",
+            )
+            .bind(workspace_id)
+            .fetch_one(&su)
+            .await
+            .unwrap()
+        }
+    };
+
+    // 1. Both tools in the first answer: a task starts, no card.
+    let t = seed_fresh(&su, &pool).await;
+    let mut both = cont(&["다음"], "N1");
+    both.tool_calls.push(card("코드를 고쳐 주세요"));
+    let model = ScriptedModel::new([both]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    let run = start_task(
+        &su,
+        &pool,
+        &t,
+        &w,
+        t.owner_id,
+        "@oort-helper 조사하고 고쳐 줘",
+    )
+    .await;
+    let first_requests = model.requests();
+    let first = &first_requests[0];
+    assert!(
+        tool(first, CARD_TOOL).is_some() && tool(first, TASK_TOOL).is_some(),
+        "anti-vacuity: the first turn is offered both tools"
+    );
+    assert_eq!(
+        task_row(&su, run).await.unwrap().steps_done,
+        1,
+        "the task started"
+    );
+    assert_eq!(
+        cards(su.clone(), &t).await,
+        0,
+        "and no card was given beside it"
+    );
+    assert_eq!(live_jobs(&su, &t).await.len(), 1, "one step job");
+
+    // 2. A step that names the card is off script: it is offered no such tool, the task ends with the
+    //    provider-error report, and no card exists.
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([
+        cont(&["다음"], "N1"),
+        ChatCompletion {
+            usage: usage(),
+            tool_calls: vec![card("단계 안에서 낸 카드")],
+            ..ChatCompletion::default()
+        },
+    ]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    let run = enqueue(&pool, &t, t.owner_id, "@oort-helper 조사하고 고쳐 줘").await;
+    drain(&w).await;
+    let requests = model.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        tool(&requests[0], CARD_TOOL).is_some(),
+        "anti-vacuity: the first turn had the card tool"
+    );
+    assert!(
+        tool(&requests[1], CARD_TOOL).is_none() && tool(&requests[1], TASK_TOOL).is_some(),
+        "a step is offered the task tool and never the card"
+    );
+    assert!(
+        !system_prompt(&requests[1]).contains("work.request.open"),
+        "and its prompt has no sentence about the card"
+    );
+    assert_eq!(
+        cards(su.clone(), &t).await,
+        0,
+        "a card named inside a step makes none"
+    );
+    let (status, code, _) = run_state(&su, run).await;
+    assert_eq!(
+        (status.as_str(), code.as_deref()),
+        ("failed", Some("task_provider_error"))
+    );
+    assert_ended_clean(&task_row(&su, run).await.unwrap(), "task_provider_error");
+    let texts = agent_texts(&su, &t).await;
+    assert_eq!(texts.len(), 1, "{texts:?}");
+    assert!(texts[0].starts_with("AI 응답이 끊겨서 여기서 멈췄어요."));
 }
