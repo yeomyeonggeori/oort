@@ -145,9 +145,12 @@ class FakeHermes:
 
 
 class GateHarness(unittest.TestCase):
-    def boot(self, cfg=None, tools=TOOLS, env=None, files=None, env_file=None, install_guard=True, fake=None, config_bytes=None):
+    def boot(self, cfg=None, tools=TOOLS, env=None, files=None, env_file=None, install_guard=True, fake=None, config_bytes=None, setup=None,
+             swap_config_after_hash=None):
         """`config_bytes`: the bytes of config.yaml the gate hashes. Without them the file is a fixture (the config is doubled by `FakeHermes`)
-        and the gate accepts exactly that fixture; with them the gate's real `ACCEPTED_CONFIG_SHA256` judges them (`AcceptedConfigs`)."""
+        and the gate accepts exactly that fixture; with them the gate's real `ACCEPTED_CONFIG_SHA256` judges them (`AcceptedConfigs`).
+        `setup(data)`: more of the volume, made before the gate runs. `swap_config_after_hash`: bytes written over config.yaml the moment the
+        gate has hashed it; `fake.scratch_configs` holds the config.yaml the migration step found in the scratch home."""
         cfg = healthy_cfg() if cfg is None else cfg
         fake = fake or FakeHermes(cfg, tools)
         with tempfile.TemporaryDirectory() as data:
@@ -156,10 +159,26 @@ class GateHarness(unittest.TestCase):
             if env_file is not None:
                 with open(os.path.join(data, ".env"), "wb") as handle:
                     handle.write(env_file)
+            if setup is not None:
+                setup(data)
             path = os.path.join(data, "config.yaml")
             fixture = b"# isolated boot fixture; load_config is doubled\n" if config_bytes is None else config_bytes
             with open(path, "wb") as handle:
                 handle.write(fixture)
+            fake.scratch_configs = []
+            real_sha256 = hashlib.sha256
+
+            def sha256_then_swap(*args, **kwargs):
+                digest = real_sha256(*args, **kwargs)
+                if swap_config_after_hash is not None and args and args[0] == fixture:
+                    with open(path, "wb") as handle:
+                        handle.write(swap_config_after_hash)
+                return digest
+
+            def migrate(*args, **kwargs):
+                with open(os.path.join(os.environ["HERMES_HOME"], "config.yaml"), "rb") as handle:
+                    fake.scratch_configs.append(handle.read())
+                return types.SimpleNamespace(returncode=0)
             accepted = {hashlib.sha256(fixture).hexdigest(): "fixture"} if config_bytes is None else lockgate.ACCEPTED_CONFIG_SHA256
             # the image's own `ENV HERMES_HOME=/opt/data` (#4886): a test passes `{"HERMES_HOME": None}` or another folder to break it
             environment = baseline_env(data, {"HERMES_HOME": data, **(env or {})})
@@ -167,12 +186,13 @@ class GateHarness(unittest.TestCase):
                     mock.patch.dict(sys.modules, fake.modules()), \
                     mock.patch.object(sys, "path", list(sys.path)), \
                     mock.patch.object(lockgate, "ACCEPTED_CONFIG_SHA256", accepted), \
-                    mock.patch.object(lockgate.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)), \
+                    mock.patch.object(lockgate.hashlib, "sha256", side_effect=sha256_then_swap), \
+                    mock.patch.object(lockgate.subprocess, "run", side_effect=migrate), \
                     mock.patch.object(lockgate, "emit") as emit:
                 rc = lockgate.gate(path)
                 return rc, emit.call_args.kwargs, fake
 
-    def monitor(self, cfg, tools=TOOLS, env=None, data_files=None, env_file=None):
+    def monitor(self, cfg, tools=TOOLS, env=None, data_files=None, env_file=None, setup=None):
         fake = FakeHermes(cfg, tools)
         data = [{"name": "fixture", "enabled": True, "tools": sorted(tools)}]
         body = json.dumps({"data": data}).encode()
@@ -181,6 +201,8 @@ class GateHarness(unittest.TestCase):
             if env_file is not None:
                 with open(os.path.join(data_dir, ".env"), "wb") as handle:
                     handle.write(env_file)
+            if setup is not None:
+                setup(data_dir)
             environment = baseline_env(data_dir, env)
             with mock.patch.dict(os.environ, environment, clear=True), \
                     mock.patch.dict(sys.modules, fake.modules()), \
@@ -846,16 +868,56 @@ class EnvFileThroughTheGate(GateHarness):
             with self.subTest(line=line):
                 rc, record, _ = self.boot(env_file=("OPENAI_API_KEY=keep\n" + line + "\n").encode())
                 self.assertRefused(rc, record, "the volume's .env")
-                self.assertEqual(len([p for p in record["problems"] if name in p]), 1, record["problems"])
+                # the name as python-dotenv reads it is refused once; a spelling that Hermes' line-by-line reader reads as another key
+                # (`export<TAB>NAME`, a quoted name) adds a line for that key
+                self.assertEqual(len([p for p in record["problems"] if p.startswith("the volume's .env sets %s (" % name)]), 1, record["problems"])
                 for secret in ("evil.example", "proxy.example", "o" * 12):
                     self.assertNotIn(secret, json.dumps(record))
 
-    def test_what_the_loader_ignores_does_not_stop_the_start(self):
-        for text in ("# HERMES_SAFE_MODE=1", 'HERMES_SAFE_MODE="1', "HERMES_SAFE_MODE", 'HERMES_SAFE_MODE="1" junk', "OORT_SELF_MEDIA_ORIGIN",
-                     "HERMES_SAFE_MODE=1\nHERMES_SAFE_MODE", 'OPENAI_API_KEY="one\nHERMES_SAFE_MODE=1"', "OPENAI_API_KEY=1\x0cHERMES_SAFE_MODE=1"):
+    def test_what_no_reader_reads_does_not_stop_the_start(self):
+        for text in ("# HERMES_SAFE_MODE=1", "HERMES_SAFE_MODE", "OORT_SELF_MEDIA_ORIGIN", "   # HERMES_YOLO_MODE=1"):
             with self.subTest(text=text):
                 rc, record, _ = self.boot(env_file=(text + "\n").encode())
                 self.assertEqual((rc, record["problems"]), (0, []))
+
+    def test_what_only_the_line_by_line_reader_reads_stops_the_start_and_the_live_report(self):
+        # python-dotenv (the loader) sets nothing for these; Hermes' other reader of the file reads the name, so the file is judged as it
+        # reads it (one function, also after the start)
+        for text in ('HERMES_SAFE_MODE="1', 'HERMES_SAFE_MODE="1" junk', "HERMES_SAFE_MODE=1\nHERMES_SAFE_MODE",
+                     'OPENAI_API_KEY="one\nHERMES_SAFE_MODE=1"', "OPENAI_API_KEY=1\x0cHERMES_SAFE_MODE=1", "OPENAI_API_KEY=1 # c\u2029HERMES_SAFE_MODE=1"):
+            with self.subTest(text=text):
+                body = (text + "\n").encode("utf-8")
+                rc, record, _ = self.boot(env_file=body)
+                self.assertRefused(rc, record, "the volume's .env sets HERMES_SAFE_MODE (")
+                self.assertEqual(len([p for p in record["problems"] if "HERMES_SAFE_MODE" in p]), 1, record["problems"])
+                rc, kills, record = self.monitor(healthy_cfg(), env_file=body)
+                self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
+
+    def test_a_line_break_in_an_allowed_value_stops_the_start_and_the_live_report(self):
+        body = b"OPENAI_API_KEY='oort-proof-first\noort-proof-second'\n"
+        rc, record, _ = self.boot(env_file=body)
+        self.assertRefused(rc, record, "the volume's .env sets OPENAI_API_KEY (a line break inside its value")
+        self.assertNotIn("oort-proof", json.dumps(record), "the value is never printed")
+        rc, kills, record = self.monitor(healthy_cfg(), env_file=body)
+        self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
+
+    def test_a_profile_entry_stops_the_start_and_the_live_report_and_an_empty_folder_does_not(self):
+        def empty(data):
+            os.mkdir(os.path.join(data, "profiles"))
+
+        def with_entry(data):
+            empty(data)
+            os.mkdir(os.path.join(data, "profiles", "oort-proof-profile"))
+
+        rc, record, _ = self.boot(setup=empty)
+        self.assertEqual((rc, record["problems"]), (0, []))
+        rc, kills, record = self.monitor(healthy_cfg(), setup=empty)
+        self.assertEqual((rc, kills, record["problems"]), (0, [], []))
+        rc, record, _ = self.boot(setup=with_entry)
+        self.assertRefused(rc, record, "1 entry under profiles/")
+        self.assertNotIn("oort-proof-profile", json.dumps(record))
+        rc, kills, record = self.monitor(healthy_cfg(), setup=with_entry)
+        self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
 
     def test_a_name_that_is_not_allowed_stops_the_start_whatever_its_value_is_and_however_it_is_given(self):
         # Hermes resolves `${...}` in ITS environment, and nothing about a value can make a name acceptable: the name is refused, once, with
@@ -902,7 +964,7 @@ class EnvFileThroughTheGate(GateHarness):
             self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
 
     def test_a_reference_in_an_allowed_name_does_not_stop_the_start(self):
-        rc, record, _ = self.boot(env_file=b"OPENAI_API_KEY=${OORT_PROOF_FLAG}\nGOOGLE_OAUTH_CLIENT_ID=$HOME\nANTHROPIC_API_KEY=\n")
+        rc, record, _ = self.boot(env_file=b"OPENAI_API_KEY=${OORT_PROOF_FLAG}\nANTHROPIC_API_KEY=$HOME\n")
         self.assertEqual((rc, record["problems"]), (0, []))
 
     def test_the_file_hermes_seeds_into_a_fresh_volume_does_not_stop_the_start_or_the_live_report(self):
@@ -1002,6 +1064,19 @@ class AcceptedConfigs(GateHarness):
                     text = " ".join(record["problems"])
                     self.assertIn(hashlib.sha256(changed).hexdigest(), text)
                     self.assertNotIn("max_turn", text.replace("max_turns", ""), "no line of the file is printed")
+
+    def test_what_is_judged_is_the_file_that_was_hashed_and_not_a_second_read_of_it(self):
+        # the file changes between the hash and the copy the judgement is made on (a writer of the volume, a gap of milliseconds): the scratch
+        # home must hold the bytes that were hashed and accepted, never the bytes that replaced them
+        raw = self.catalog["default"]
+        swapped = raw + b"#\n"
+        rc, record, fake = self.boot(config_bytes=raw, swap_config_after_hash=swapped)
+        self.assertEqual((rc, record["problems"]), (0, []))
+        self.assertEqual(record["config_accepted_as"], "default")
+        self.assertEqual(fake.scratch_configs, [raw])
+        # the control: the swap really happens, so the file on disk is what a second read would have given
+        rc, record, fake = self.boot(config_bytes=raw)
+        self.assertEqual(fake.scratch_configs, [raw])
 
     def test_the_other_rules_still_apply_beside_an_accepted_config_and_beside_a_refused_one(self):
         default = self.catalog["default"]
