@@ -32,7 +32,7 @@ export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false,
   const blocked = busy || working || offline;
   async function upload(file: File) {
     if (!store || blocked || lock.current) return;
-    if (!validExpressionFile(file)) { setError("5 MiB 이하의 PNG, JPEG, WebP 또는 GIF를 골라 주세요."); return; }
+    if (!validExpressionFile(file)) { setError("5MB 이하의 PNG, JPG, WebP 또는 GIF를 골라 주세요."); return; }
     lock.current = true; setWorking(true); setError(null); setViewed(null); setRights(false);
     try { onReplace(await store.draft({ method: "PUT", path: `${store.base}/expression-drafts/${draft.draftId}/file`, file })); }
     catch { setError("그림을 올리지 못했어요. 파일을 확인하고 다시 올려 주세요."); }

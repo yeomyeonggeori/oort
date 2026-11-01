@@ -12,9 +12,10 @@ import {
   waitFor,
   within,
 } from '@testing-library/react-native';
-import {Animated, AppState} from 'react-native';
+import {Animated, AppState, StyleSheet} from 'react-native';
 import * as api from '@momo/core/lib/api';
 import * as host from '@momo/core/runtime/host';
+import {catalog as enCatalog} from '@momo/core/i18n/generated/en-US';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
 import {
@@ -36,12 +37,17 @@ import {
   MAKE_DEFAULT_SIZE,
   MAKE_PLAYS,
   MOTION_PRESETS,
+  STILL_MOTION,
   buildMakeRequest,
 } from '@momo/core/features/expressions/make';
-import type {
-  ExpressionDraft,
-  ManualUploadCode,
+import {
+  EXPRESSION_LIMITS,
+  type ExpressionDraft,
+  type ManualUploadCode,
 } from '@momo/core/features/expressions/types';
+import {circleLook} from '../src/design/sheetModel';
+import {FixedScheme, paletteFor} from '../src/design/theme';
+import {PhotoPickRow} from '../src/features/expressions/ExpressionChapter';
 import {PhoneExpressions} from '../src/features/expressions/ExpressionProvider';
 import {
   createPhoneExpressionStore,
@@ -448,6 +454,21 @@ describe('가져오기', () => {
       ).toBe(true),
     );
   });
+
+  // #5065 H1: 같은 부품(`PhotoPickRow`)을 쓰는 자리 — 가져오기의 앨범 알약도 시트 위 보조 알약이다(부품 시험은 아래 「앨범 알약」).
+  it('앨범 알약은 시트 위 보조 알약이다 — `surface` 채움 + `elevationRest` 그림자 (#5065)', async () => {
+    const {store} = setup();
+    await store.refresh(true);
+    mount(store);
+    await openImport();
+    const palette = paletteFor('light');
+    const pill = StyleSheet.flatten(
+      screen.getByTestId('expression-import-photo').props.style,
+    );
+    expect(pill.backgroundColor).toBe(palette.surface);
+    expect(pill.boxShadow).toBe(palette.elevationRest);
+    expect(pill.backgroundColor).not.toBe(palette.surfaceMuted);
+  });
 });
 
 describe('AI와 만들기', () => {
@@ -728,6 +749,99 @@ describe('AI와 만들기', () => {
       screen.getByTestId('expression-make-photo').props.accessibilityLabel,
     ).toBe(ko.formatMessage('expressions.make.photoPick'));
   });
+
+  // #5065 M1: 움직임 칸의 설명은 문장이다. 맨 `Text` 는 글자 단위로 끊어 「흔들려 / 요」·「두근 / 거려요」(캡처 4891-…-014)가 됐다.
+  it('움직임 칸의 설명은 어절 단위로 줄바꿈한다 — 프리셋 넷과 「움직임 없이」 모두 (#5065)', async () => {
+    wire();
+    await openMake();
+    const motions = [...MOTION_PRESETS, STILL_MOTION];
+    expect(motions).toHaveLength(5);
+    for (const motion of motions) {
+      const chip = screen.getByTestId(`expression-make-chip-${motion.id}`);
+      const description = within(chip).getByText(motion.description);
+      expect({id: motion.id, breaks: description.props.lineBreakStrategyIOS}).toEqual({
+        id: motion.id,
+        breaks: 'hangul-word',
+      });
+    }
+  });
+
+  // #5065 H1: 같은 부품을 쓰는 자리 — 「AI와 만들기」 첫 단계의 앨범 알약(캡처 4891-…-014 가 그릇 없는 글자로 찍힌 자리).
+  it('앨범 알약은 시트 위 보조 알약이다 — `surface` 채움 + `elevationRest` 그림자 (#5065)', async () => {
+    wire();
+    await openMake();
+    const palette = paletteFor('light');
+    const pill = StyleSheet.flatten(
+      screen.getByTestId('expression-make-photo').props.style,
+    );
+    expect(pill.backgroundColor).toBe(palette.surface);
+    expect(pill.boxShadow).toBe(palette.elevationRest);
+    expect(pill.backgroundColor).not.toBe(palette.surfaceMuted);
+  });
+});
+
+// #5065 H1: 「앨범에서 고르기」 알약(`PhotoPickRow`)은 사진을 고르지 않으면 이 장에서 아무것도 할 수 없는 유일한 입구인데, 보조 채움
+// (`surfaceMuted`)이 라이트에서 시트와 1.009 라 알약 안팎이 같은 색이었다. 시트 위 보조 알약은 `surface` 채움 + `elevationRest` 그림자다
+// (phone-sheets.md §4, README §3.3). 채움·가장자리는 시트 머리의 원과 같은 규칙(`circleLook`)이라 다크는 한 단 위 채움 + 윗면 한 줄이
+// 맡는다(그 규칙이 모든 테마에서 시트와 갈리는지는 `sheetKit.test.tsx` 가 잰다).
+describe('앨범 알약', () => {
+  const photoRow = (photo: React.ComponentProps<typeof PhotoPickRow>['photo']) => (
+    <PhotoPickRow
+      photo={photo}
+      pickLabel="앨범에서 고르기"
+      changeLabel="다른 사진 고르기"
+      previewLabel="고른 사진"
+      onPick={jest.fn()}
+      testID="pick"
+    />
+  );
+
+  it.each(['light', 'dark'] as const)(
+    '채움·그림자·가장자리가 설계 토큰이고 시트 바탕과 같은 색이 아니다 (%s)',
+    scheme => {
+      render(<FixedScheme scheme={scheme}>{photoRow(null)}</FixedScheme>);
+      const palette = paletteFor(scheme);
+      const pill = StyleSheet.flatten(screen.getByTestId('pick').props.style);
+      expect(pill.boxShadow).toBe(palette.elevationRest);
+      expect(pill.backgroundColor).toBe(circleLook(palette).fill);
+      expect(pill.borderColor).toBe(circleLook(palette).ring);
+      // 결함 그대로의 값이 아니다: 시트 바탕(`sheet`)과 같지 않다.
+      expect(pill.backgroundColor).not.toBe(palette.sheet);
+      if (scheme === 'light') {
+        // 계약 그대로: `surface` 채움이고, 시트와 1.009 로만 갈리던 옛 보조 채움(`surfaceMuted`)이 아니다.
+        expect(pill.backgroundColor).toBe(palette.surface);
+        expect(pill.backgroundColor).not.toBe(palette.surfaceMuted);
+      }
+    },
+  );
+
+  it('사진을 고른 뒤의 「다른 사진 고르기」도 같은 알약이다', () => {
+    render(
+      <FixedScheme scheme="light">
+        {photoRow({uri: 'file:///x.png', name: 'dance.png', bytes: 120_000})}
+      </FixedScheme>,
+    );
+    const palette = paletteFor('light');
+    const pill = StyleSheet.flatten(screen.getByTestId('pick').props.style);
+    expect(screen.getByText('다른 사진 고르기')).toBeTruthy();
+    expect(pill.backgroundColor).toBe(palette.surface);
+    expect(pill.boxShadow).toBe(palette.elevationRest);
+  });
+
+  // #5065 L2: 안내 줄이 「5MB」라고 말하는데 바로 위 고른 사진의 크기가 「4.2 MiB」면 한 화면이 두 낱말로 말한다. 코어 `formatBytes` 의
+  // 머리말이 이 경우를 적어 두었다(상한 문장과 그 상한에 걸린 파일의 표기는 같은 진법·같은 낱말) — 폰도 그 한 함수로 말한다.
+  it.each([
+    [120_000, '117.2 KB'],
+    [4_404_019, '4.2 MB'],
+  ])('고른 사진의 크기(%i 바이트)는 「%s」 — MiB·KiB 가 아니다 (#5065 L2)', (bytes, label) => {
+    render(
+      <FixedScheme scheme="light">
+        {photoRow({uri: 'file:///x.png', name: 'dance.png', bytes})}
+      </FixedScheme>,
+    );
+    expect(screen.getByText(label)).toBeTruthy();
+    expect(screen.queryByText(/MiB|KiB/)).toBeNull();
+  });
 });
 
 describe('웹과 같은 문장·같은 전송', () => {
@@ -766,6 +880,8 @@ describe('웹과 같은 문장·같은 전송', () => {
     same('form', [
       'expressions.make.intro',
       'expressions.make.photoMissing',
+      'expressions.make.photoType',
+      'expressions.make.photoRule',
       'expressions.make.photoDimensions',
       'expressions.make.photoSize',
       'expressions.make.motionMissing',
@@ -785,6 +901,56 @@ describe('웹과 같은 문장·같은 전송', () => {
       'expressions.make.failUpload',
       'expressions.make.failSend',
     ]);
+  });
+
+  // #5065 L2: 같은 업로드 한도를 프로필 사진은 「PNG, JPG, GIF, WebP. 5MB까지」, 이 장은 「5 MiB … PNG, JPEG, WebP, GIF」로 말했다.
+  // 사람에게는 「MB」·「JPG」 한 가지다. 실제 한도(바이트)는 그대로이고(위 「한도를 넘는 그림…」 시험이 5 MiB + 1 바이트를 막는다),
+  // 폰 사전이 말하는 문장은 웹 화면에도 같은 글로 있다(위 `same`) — 그래서 사전 값만 바꾸면 그 시험이 빨개지고 웹 문장도 함께 바뀐다.
+  it('업로드 한도는 사람에게 「MB」·「JPG」 한 가지로 말한다 — 폰 사전은 ko·en 모두, 바이트 한도는 그대로다 (#5065)', () => {
+    const en = createMessageService({messageLocale: 'en-US', catalog: enCatalog});
+    const SIZE_KEYS = [
+      'expressions.import.fileIssue',
+      'expressions.photo.photoHint',
+      'expressions.photo.photoSize',
+      'expressions.make.photoRule',
+      'expressions.make.photoSize',
+    ] as const;
+    const FORMAT_KEYS = [
+      'expressions.import.fileIssue',
+      'expressions.photo.photoHint',
+      'expressions.photo.photoType',
+      'expressions.make.photoRule',
+      'expressions.make.photoType',
+    ] as const;
+    for (const [locale, service, limit] of [
+      ['ko', ko, '5MB'],
+      ['en', en, '5 MB'],
+    ] as const) {
+      for (const key of new Set([...SIZE_KEYS, ...FORMAT_KEYS])) {
+        const sentence = service.formatMessage(key);
+        expect({locale, key, binaryUnit: /MiB|KiB|JPEG/.test(sentence)}).toEqual({
+          locale,
+          key,
+          binaryUnit: false,
+        });
+      }
+      for (const key of SIZE_KEYS) {
+        expect({locale, key, says: service.formatMessage(key).includes(limit)}).toEqual({
+          locale,
+          key,
+          says: true,
+        });
+      }
+      for (const key of FORMAT_KEYS) {
+        expect({locale, key, says: /\bJPG\b/.test(service.formatMessage(key))}).toEqual({
+          locale,
+          key,
+          says: true,
+        });
+      }
+    }
+    // 말만 바꿨다: 한도의 바이트는 5 MiB 그대로다.
+    expect(EXPRESSION_LIMITS.inputBytes).toBe(5 * 1024 * 1024);
   });
 
   it('실패 사유는 단계와 상태 코드마다 웹과 같은 문장을 고른다(고칠 수 없는 원인은 그대로 말한다)', () => {

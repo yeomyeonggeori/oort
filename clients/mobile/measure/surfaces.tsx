@@ -2144,8 +2144,9 @@ function JumpPillsRoomsStage({
   );
 }
 
-// #4937: 하네스에는 언어 provider 가 없어서 사전을 읽는 새 화면은 영어 문장으로 선다. 소식 판은 언어를 정해 세워 앱 화면과
-// 같은 말로 그린다(`-en` 판은 영어 UI). 공장은 모듈 값이다: 렌더마다 새 공장이면 provider 가 사전을 다시 읽는다.
+// #4937: 하네스에는 언어 provider 가 없고, provider 없이 사전을 읽는 화면은 한국어 서비스로 선다(`useMobileMessages` 와 같은 대체 —
+// 소식 훅도 같다, #5047). 소식 판은 그래도 언어를 정해 세워 앱 화면과 같은 말로 그린다: `-en` 판이 영어 UI 를 보이려면
+// provider 가 있어야 한다. 공장은 모듈 값이다: 렌더마다 새 공장이면 provider 가 사전을 다시 읽는다.
 const releaseNotesKo = () =>
   createMobileLocaleController({
     port: {

@@ -81,10 +81,7 @@ import {useEndedRuns} from '../agents/endedRuns';
 import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
 import {triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
-import {
-  shouldFoldBundleLine,
-  type RunWithBundleSnapshot,
-} from '@momo/core/features/timeline/requestBundle';
+import type {RunWithBundleSnapshot} from '@momo/core/features/timeline/requestBundle';
 import {presentableRows} from '@momo/core/features/timeline/toolCallSettle';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
 import {hasRequestBundle, requestLoopIndex} from './requestLoop';
