@@ -807,6 +807,356 @@ export const catalog: MessageCatalog = {
       "value": "Send request"
     }
   ],
+  "expressions.photo.agentInstead": [
+    {
+      "type": 0,
+      "value": "Ask an agent instead"
+    }
+  ],
+  "expressions.photo.anotherPhoto": [
+    {
+      "type": 0,
+      "value": "Start over with another photo"
+    }
+  ],
+  "expressions.photo.branchLabel": [
+    {
+      "type": 0,
+      "value": "How to make it"
+    }
+  ],
+  "expressions.photo.busy": [
+    {
+      "type": 0,
+      "value": "Drawing your picture (up to 2 minutes)"
+    }
+  ],
+  "expressions.photo.caricatureHint": [
+    {
+      "type": 0,
+      "value": "Draws a new caricature based on the photo."
+    }
+  ],
+  "expressions.photo.caricatureLabel": [
+    {
+      "type": 0,
+      "value": "Caricature"
+    }
+  ],
+  "expressions.photo.checkFailed": [
+    {
+      "type": 0,
+      "value": "Could not check the image model. Please try again."
+    }
+  ],
+  "expressions.photo.checking": [
+    {
+      "type": 0,
+      "value": "Checking the image model"
+    }
+  ],
+  "expressions.photo.consent": [
+    {
+      "type": 0,
+      "value": "I agree to send my photo to "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": ". The cost is billed to the key your team connected."
+    }
+  ],
+  "expressions.photo.consentMissing": [
+    {
+      "type": 0,
+      "value": "You need to agree to sending the photo first."
+    }
+  ],
+  "expressions.photo.cutoutErased": [
+    {
+      "type": 0,
+      "value": "The background was removed."
+    }
+  ],
+  "expressions.photo.cutoutHint": [
+    {
+      "type": 0,
+      "value": "Keeps the subject as it is and makes the background transparent."
+    }
+  ],
+  "expressions.photo.cutoutLabel": [
+    {
+      "type": 0,
+      "value": "Remove background"
+    }
+  ],
+  "expressions.photo.cutoutModel": [
+    {
+      "type": 0,
+      "value": "The model drew a transparent background."
+    }
+  ],
+  "expressions.photo.cutoutUnchanged": [
+    {
+      "type": 0,
+      "value": "The background could not be removed. The preview below is what will be saved."
+    }
+  ],
+  "expressions.photo.displayNameLabel": [
+    {
+      "type": 0,
+      "value": "Display name"
+    }
+  ],
+  "expressions.photo.displayNamePlaceholder": [
+    {
+      "type": 0,
+      "value": "My face"
+    }
+  ],
+  "expressions.photo.errorBusy": [
+    {
+      "type": 0,
+      "value": "Other pictures are being drawn. Please try again shortly."
+    }
+  ],
+  "expressions.photo.errorChanged": [
+    {
+      "type": 0,
+      "value": "The connected image model changed. Please check and agree again."
+    }
+  ],
+  "expressions.photo.errorFailed": [
+    {
+      "type": 0,
+      "value": "Could not draw the picture. Please try again shortly."
+    }
+  ],
+  "expressions.photo.errorGeneric": [
+    {
+      "type": 0,
+      "value": "Could not make it. Check your connection and input, then try again."
+    }
+  ],
+  "expressions.photo.errorMedia": [
+    {
+      "type": 0,
+      "value": "This photo cannot be opened. Choose another."
+    }
+  ],
+  "expressions.photo.errorName": [
+    {
+      "type": 0,
+      "value": "Check the name. Names that clash with standard emoji are not allowed."
+    }
+  ],
+  "expressions.photo.errorOffline": [
+    {
+      "type": 0,
+      "value": "You are offline. Try again when you are connected."
+    }
+  ],
+  "expressions.photo.errorQuota": [
+    {
+      "type": 0,
+      "value": "You have too many pending drafts. Register one or try again in an hour."
+    }
+  ],
+  "expressions.photo.errorRefused": [
+    {
+      "type": 0,
+      "value": "The image model declined this photo. Try another photo."
+    }
+  ],
+  "expressions.photo.errorRole": [
+    {
+      "type": 0,
+      "value": "You cannot add new pictures to this team right now."
+    }
+  ],
+  "expressions.photo.errorTimeout": [
+    {
+      "type": 0,
+      "value": "It took too long. Please try again."
+    }
+  ],
+  "expressions.photo.errorUnavailable": [
+    {
+      "type": 0,
+      "value": "The connected key cannot use an image model. Connect an OpenAI or Gemini image model or check its access."
+    }
+  ],
+  "expressions.photo.faceLabel": [
+    {
+      "type": 0,
+      "value": "People's faces"
+    }
+  ],
+  "expressions.photo.faceNone": [
+    {
+      "type": 0,
+      "value": "No person's face"
+    }
+  ],
+  "expressions.photo.faceOther": [
+    {
+      "type": 0,
+      "value": "Someone else or several people"
+    }
+  ],
+  "expressions.photo.faceOtherBlocked": [
+    {
+      "type": 0,
+      "value": "Only a single picture of your own face can be approved. Please do not upload other people's faces."
+    }
+  ],
+  "expressions.photo.faceSelf": [
+    {
+      "type": 0,
+      "value": "Only my own face"
+    }
+  ],
+  "expressions.photo.fieldsInvalid": [
+    {
+      "type": 0,
+      "value": "Use 2 to 30 lowercase letters, digits, underscores or hyphens for the name, up to 40 characters for the display name and up to 8 tags."
+    }
+  ],
+  "expressions.photo.fixedNote": [
+    {
+      "type": 0,
+      "value": "The name and picture cannot be changed after registering."
+    }
+  ],
+  "expressions.photo.introText": [
+    {
+      "type": 0,
+      "value": "Send one photo to the image model your team connected and turn it into an emoji."
+    }
+  ],
+  "expressions.photo.nameLabel": [
+    {
+      "type": 0,
+      "value": "Fixed name"
+    }
+  ],
+  "expressions.photo.namePlaceholder": [
+    {
+      "type": 0,
+      "value": "happy_face"
+    }
+  ],
+  "expressions.photo.noModelAsk": [
+    {
+      "type": 0,
+      "value": "The server operator connects models. Ask your operator."
+    }
+  ],
+  "expressions.photo.noModelDetail": [
+    {
+      "type": 0,
+      "value": "The connected models cannot draw pictures. Connect an OpenAI or Gemini image model to use this."
+    }
+  ],
+  "expressions.photo.noModelHeadline": [
+    {
+      "type": 0,
+      "value": "No image model is connected"
+    }
+  ],
+  "expressions.photo.noModelImport": [
+    {
+      "type": 0,
+      "value": "Add with Import instead"
+    }
+  ],
+  "expressions.photo.noModelManage": [
+    {
+      "type": 0,
+      "value": "Go to AI settings"
+    }
+  ],
+  "expressions.photo.originLabel": [
+    {
+      "type": 0,
+      "value": "How it was made:"
+    }
+  ],
+  "expressions.photo.photoHint": [
+    {
+      "type": 0,
+      "value": "Use a still PNG, JPEG, WebP or GIF up to 5 MiB."
+    }
+  ],
+  "expressions.photo.photoLabel": [
+    {
+      "type": 0,
+      "value": "Original photo"
+    }
+  ],
+  "expressions.photo.photoMissing": [
+    {
+      "type": 0,
+      "value": "Choose an original photo."
+    }
+  ],
+  "expressions.photo.photoPreviewAlt": [
+    {
+      "type": 0,
+      "value": "Preview of the chosen photo"
+    }
+  ],
+  "expressions.photo.photoSize": [
+    {
+      "type": 0,
+      "value": "The photo is too large. Choose one up to 5 MiB."
+    }
+  ],
+  "expressions.photo.photoType": [
+    {
+      "type": 0,
+      "value": "Choose a PNG, JPEG, WebP or GIF photo."
+    }
+  ],
+  "expressions.photo.providerGemini": [
+    {
+      "type": 0,
+      "value": "Google Gemini"
+    }
+  ],
+  "expressions.photo.providerOpenai": [
+    {
+      "type": 0,
+      "value": "OpenAI"
+    }
+  ],
+  "expressions.photo.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "expressions.photo.submit": [
+    {
+      "type": 0,
+      "value": "Make it"
+    }
+  ],
+  "expressions.photo.tagsLabel": [
+    {
+      "type": 0,
+      "value": "Tags (comma separated)"
+    }
+  ],
+  "expressions.photo.tagsPlaceholder": [
+    {
+      "type": 0,
+      "value": "photo, face"
+    }
+  ],
   "expressions.sheet.a11y": [
     {
       "type": 0,
