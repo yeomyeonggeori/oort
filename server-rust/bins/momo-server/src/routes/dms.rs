@@ -54,6 +54,7 @@ fn channel_dto(channel: &DirectMessage) -> ChannelDto {
         created_by: channel.created_by.map(|id| id.to_string()),
         archived_at_ms: None,
         muted: channel.muted,
+        muted_until_ms: channel.muted_until_ms,
     }
 }
 
@@ -155,6 +156,7 @@ mod tests {
             member_ids: vec![Uuid::from_u128(3), Uuid::from_u128(4)],
             created_by: Some(Uuid::from_u128(3)),
             muted: false,
+            muted_until_ms: None,
         }
     }
 

@@ -26,7 +26,9 @@
 //!     the point at which internal use stops being use.
 //!   * `PUT …/channels/{ch}/notification-pref` — the write half of the `muted`
 //!     flag every row above already reports. A read-only `muted` is a setting
-//!     that can be shown and never changed.
+//!     that can be shown and never changed. It also takes an optional end
+//!     (`mutedUntilMs`, ADR-0206 D12), which the same rows report back — only
+//!     while that timed mute is in progress.
 //!
 //! **B5.3a** adds the membership pair, and it is the hinge of agent onboarding
 //! rather than a CRUD convenience:
@@ -44,10 +46,11 @@ use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_messaging::{
     active_workspace_role, add_channel_member_in_tx, clamp_channel_list_limit,
-    create_channel_detailed_in_tx, list_workspace_channels_within, normalize_channel_kind,
-    normalize_channel_name, normalize_channel_topic, normalize_membership_role,
-    remove_channel_member_in_tx, set_notification_pref_in_tx, ChannelMembership,
-    ChannelRestriction, ChannelSummary, CreatedChannel, NewChannel,
+    create_channel_detailed_in_tx, db_now_in_tx, list_workspace_channels_within,
+    normalize_channel_kind, normalize_channel_name, normalize_channel_topic,
+    normalize_membership_role, remove_channel_member_in_tx, set_notification_pref_in_tx,
+    validate_channel_mute, ChannelMembership, ChannelMute, ChannelRestriction, ChannelSummary,
+    CreatedChannel, MutedUntilInvalid, NewChannel,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -112,6 +115,7 @@ fn channel_dto(channel: &ChannelSummary) -> ChannelDto {
         created_by: channel.created_by.map(|id| id.to_string()),
         archived_at_ms: channel.archived_at_ms,
         muted: channel.muted,
+        muted_until_ms: channel.muted_until_ms,
     }
 }
 
@@ -244,13 +248,26 @@ pub async fn create(
     ))
 }
 
+/// A refused mute window as the wire says it: 400, with the machine code a client branches on
+/// when the refusal has one (`muted_until_in_past`, `muted_until_too_far`; ADR-0206 D12).
+fn muted_until_error(invalid: MutedUntilInvalid) -> ApiError {
+    match invalid.code() {
+        Some(code) => ApiError::coded(StatusCode::BAD_REQUEST, code, invalid.to_string()),
+        None => ApiError::bad_request(invalid.to_string()),
+    }
+}
+
 /// `PUT /v1/workspaces/{ws}/channels/{ch}/notification-pref` — mute or unmute
 /// this channel **for the calling member** (Swift `updateNotificationPref`,
-/// :238-316; ADR-0124).
+/// :238-316; ADR-0124), optionally until a moment (`mutedUntilMs`, ADR-0206 D12).
 ///
 /// There is deliberately no actor field in the body: the preference's owner is
 /// the authenticated principal and nothing else. A `memberId` parameter here
 /// would let one member silence another.
+///
+/// The answer is the mute **as it now reads**, not an echo: `mutedUntilMs` is present only
+/// while a timed mute is in progress. The deadline is judged on the database clock, before the
+/// first write, so a refused window leaves no row and no audit behind.
 pub async fn notification_pref(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -260,44 +277,60 @@ pub async fn notification_pref(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let channel_id = path_uuid(&channel, "invalid channel id")?;
     let muted = request.muted;
+    let muted_until_ms = request.muted_until_ms;
     let via_token_id = audit_via_token_id(&principal);
 
-    let outcome: DbRejectable<()> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
-        Box::pin(async move {
-            if !set_notification_pref_in_tx(
-                conn,
-                workspace_id,
-                channel_id,
-                principal.member_id,
-                muted,
-            )
-            .await?
-            {
-                return Ok(Err(ApiError::forbidden(
-                    "active channel membership required",
-                )));
-            }
-            // The audit row shares the preference's transaction, so it can never
-            // record a mute that rolled back (`momo_db::audit` module docs).
-            momo_db::audit::write_audit(
-                conn,
-                &momo_db::audit::AuditEntry::new(workspace_id, "notification_pref.updated")
-                    .by(principal.member_id)
-                    .target("channel", channel_id)
-                    .via_token(via_token_id)
-                    .with_schema(
-                        "momo.notification_pref.updated.v1",
-                        serde_json::json!({ "muted": muted }),
-                    ),
-            )
-            .await?;
-            Ok(Ok(()))
+    let outcome: DbRejectable<ChannelMute> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                // The window is the database's call: `muted_until > now()` is what every reader
+                // evaluates, so a deadline this accepts is one they will all see as in progress.
+                let now = db_now_in_tx(conn).await?;
+                let write = match validate_channel_mute(muted, muted_until_ms, now) {
+                    Ok(write) => write,
+                    Err(invalid) => return Ok(Err(muted_until_error(invalid))),
+                };
+                let Some(mute) = set_notification_pref_in_tx(
+                    conn,
+                    workspace_id,
+                    channel_id,
+                    principal.member_id,
+                    write,
+                )
+                .await?
+                else {
+                    return Ok(Err(ApiError::forbidden(
+                        "active channel membership required",
+                    )));
+                };
+                // The audit row shares the preference's transaction, so it can never
+                // record a mute that rolled back (`momo_db::audit` module docs). It records the
+                // mute as stored: `mutedUntilMs` is `null` for an open-ended mute or an un-mute.
+                momo_db::audit::write_audit(
+                    conn,
+                    &momo_db::audit::AuditEntry::new(workspace_id, "notification_pref.updated")
+                        .by(principal.member_id)
+                        .target("channel", channel_id)
+                        .via_token(via_token_id)
+                        .with_schema(
+                            "momo.notification_pref.updated.v1",
+                            serde_json::json!({
+                                "muted": mute.muted,
+                                "mutedUntilMs": mute.muted_until_ms,
+                            }),
+                        ),
+                )
+                .await?;
+                Ok(Ok(mute))
+            })
         })
-    })
-    .await;
+        .await;
 
-    settle_db("channels.notification_pref", outcome)?;
-    Ok(Json(NotificationPrefResponse { muted }))
+    let mute = settle_db("channels.notification_pref", outcome)?;
+    Ok(Json(NotificationPrefResponse {
+        muted: mute.muted,
+        muted_until_ms: mute.muted_until_ms,
+    }))
 }
 
 /// `POST /v1/workspaces/{ws}/channels/{ch}/members` — put a member (human **or**
@@ -465,6 +498,7 @@ mod tests {
             created_by: Some(Uuid::from_u128(3)),
             archived_at_ms: None,
             muted: false,
+            muted_until_ms: None,
         };
         let json = serde_json::to_value(channel_dto(&summary)).expect("serialize");
         assert_eq!(json["kind"], "public");
@@ -496,6 +530,7 @@ mod tests {
             created_by: Some(Uuid::from_u128(7)),
             archived_at_ms: None,
             muted: false,
+            muted_until_ms: None,
         };
         let membership = ChannelMembership {
             id: Uuid::from_u128(12),
@@ -543,6 +578,7 @@ mod tests {
         let parsed: UpdateNotificationPrefRequest =
             serde_json::from_value(serde_json::json!({"muted": true})).expect("muted");
         assert!(parsed.muted);
+        assert_eq!(parsed.muted_until_ms, None, "the old body has no end");
         assert!(
             serde_json::from_value::<UpdateNotificationPrefRequest>(
                 serde_json::json!({"muted": true, "memberId": Uuid::from_u128(9)})
@@ -551,9 +587,89 @@ mod tests {
             "a caller must not be able to mute someone else"
         );
         assert_eq!(
-            serde_json::to_value(NotificationPrefResponse { muted: false }).expect("serialize"),
+            serde_json::to_value(NotificationPrefResponse {
+                muted: false,
+                muted_until_ms: None,
+            })
+            .expect("serialize"),
             serde_json::json!({"muted": false})
         );
+    }
+
+    /// ADR-0206 D12 (#4343): the end is one optional int64 beside `muted`. Absent and `null` are
+    /// both open-ended, so every body an older client sends parses as it always did; `level` is
+    /// the channel-level slice's and stays an unknown field here.
+    #[test]
+    fn the_mute_request_takes_an_optional_end_and_not_a_level_yet() {
+        let parse =
+            |body: serde_json::Value| serde_json::from_value::<UpdateNotificationPrefRequest>(body);
+        assert_eq!(
+            parse(serde_json::json!({"muted": true, "mutedUntilMs": 1_800_000_000_000_i64}))
+                .expect("timed")
+                .muted_until_ms,
+            Some(1_800_000_000_000)
+        );
+        assert_eq!(
+            parse(serde_json::json!({"muted": true, "mutedUntilMs": null}))
+                .expect("null end")
+                .muted_until_ms,
+            None
+        );
+        assert!(
+            parse(serde_json::json!({"muted": true, "level": "none"})).is_err(),
+            "`level` is not opened by this slice"
+        );
+        assert!(
+            parse(serde_json::json!({"muted": true, "muted_until_ms": 5})).is_err(),
+            "the wire spelling is camelCase only"
+        );
+        for not_an_int in [
+            serde_json::json!("soon"),
+            serde_json::json!(1.5),
+            serde_json::json!(true),
+        ] {
+            assert!(
+                parse(serde_json::json!({"muted": true, "mutedUntilMs": not_an_int})).is_err(),
+                "the end is an integer or nothing"
+            );
+        }
+    }
+
+    /// The answer names its end only while a timed mute runs: an open-ended mute and an un-mute
+    /// answer exactly what they always did, with no `mutedUntilMs` key (never `null`).
+    #[test]
+    fn the_mute_response_names_its_end_only_when_there_is_one() {
+        assert_eq!(
+            serde_json::to_value(NotificationPrefResponse {
+                muted: true,
+                muted_until_ms: None,
+            })
+            .expect("serialize"),
+            serde_json::json!({"muted": true})
+        );
+        assert_eq!(
+            serde_json::to_value(NotificationPrefResponse {
+                muted: true,
+                muted_until_ms: Some(1_800_000_000_000),
+            })
+            .expect("serialize"),
+            serde_json::json!({"muted": true, "mutedUntilMs": 1_800_000_000_000_i64})
+        );
+    }
+
+    /// A refused window is a 400; the two a client branches on carry their machine code, the
+    /// deadline-on-an-un-mute does not.
+    #[test]
+    fn a_refused_mute_window_is_a_400_with_the_code_a_client_branches_on() {
+        let past = muted_until_error(MutedUntilInvalid::InPast);
+        assert_eq!(past.status, StatusCode::BAD_REQUEST);
+        assert_eq!(past.code, Some("muted_until_in_past"));
+        let far = muted_until_error(MutedUntilInvalid::TooFar);
+        assert_eq!(far.status, StatusCode::BAD_REQUEST);
+        assert_eq!(far.code, Some("muted_until_too_far"));
+        let not_muted = muted_until_error(MutedUntilInvalid::NotMuted);
+        assert_eq!(not_muted.status, StatusCode::BAD_REQUEST);
+        assert_eq!(not_muted.code, None);
     }
 
     /// The create body is closed-world too: a dropped `kind` would create a
@@ -653,11 +769,17 @@ mod tests {
             created_by: None,
             archived_at_ms: None,
             muted: true,
+            muted_until_ms: Some(1_800_000_000_000),
         };
         let json = serde_json::to_value(channel_dto(&summary)).expect("serialize");
         assert_eq!(json["kind"], "dm");
         assert_eq!(json["dmKey"], "deadbeef");
         assert_eq!(json["memberIds"].as_array().expect("array").len(), 2);
         assert_eq!(json["muted"], true);
+        assert_eq!(
+            json["mutedUntilMs"],
+            serde_json::json!(1_800_000_000_000_i64),
+            "a timed mute in progress travels with its row"
+        );
     }
 }
