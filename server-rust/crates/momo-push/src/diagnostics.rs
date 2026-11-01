@@ -36,6 +36,7 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::dispatch_log::RELAY_DROPPED_REASON;
+use crate::system::SYSTEM_PUSH_MAX_TARGETS;
 
 /// Test pushes one member may send per window (ADR-0206 D11: 「멤버당 분당 3회」).
 pub const TEST_PUSH_PER_WINDOW: i16 = 3;
@@ -68,6 +69,26 @@ pub const RELAY_ENVIRONMENT_MISMATCH_TEXT: &str = "dispatch APNs environment doe
 
 /// The recorded-reason prefix [`crate::dispatch_log::settle_relay_refusal`] puts on a relay refusal.
 const RELAY_REASON_PREFIX: &str = "relay_http: ";
+
+/// The `lastTest` read: the dispatch-log rows of one test (one per device), newest first.
+///
+/// `push_token_id IS NOT NULL` is what makes this an **index-exact** lookup (#4341 security review
+/// M-1). The notifier always writes the token and the collapse id of a claim, and migration 011's
+/// partial unique index `push_dispatch_dedupe_uniq (member_id, push_token_id, collapse_id) WHERE
+/// push_token_id IS NOT NULL AND collapse_id IS NOT NULL` serves exactly this read — but the planner
+/// may use a partial index only when the query *proves* its predicate, and `collapse_id = $3` proves
+/// half of it. Without this line the index is not even considered and the read walks the member's
+/// whole log (a sequential scan on a table with one busy member), on every `GET`, forever: the log
+/// is never pruned and `GET` has no rate limit. Measured on 300k rows of one member: 10.2 ms and
+/// 4,617 buffers without it, 0.057 ms and 22 buffers with it.
+///
+/// `pub` (and hidden) only so a conformance test can `EXPLAIN` this exact text: a plan is not
+/// something a result-checking test can see.
+#[doc(hidden)]
+pub const LAST_TEST_ROWS_SQL: &str = "SELECT apns_status, apns_reason FROM push_dispatch_log \
+      WHERE workspace_id = $1 AND member_id = $2 AND collapse_id = $3 \
+        AND push_token_id IS NOT NULL \
+      ORDER BY created_at DESC, id DESC";
 
 /// An APNs reason code is a short identifier (`BadDeviceToken`, `Unregistered`, …). Anything with a
 /// space, punctuation or more than this many characters is not one and is never passed through.
@@ -389,20 +410,17 @@ pub async fn compute_diagnostics(
         blockers.push(blocker);
     }
 
-    // The last test: read by its collapse id, exactly — never by scanning the outbox.
+    // The last test: read by its collapse id through the partial unique index
+    // ([`LAST_TEST_ROWS_SQL`]) — never by scanning the outbox, nor the member's whole log.
     let mut last_test: Option<LastTest> = None;
     if let (Some(test_id), Some(test_at), Some(age)) = (last_test_id, last_test_at, last_test_age) {
         let collapse = crate::system::test_notification_collapse_id(test_id);
-        let rows = sqlx::query(
-            "SELECT apns_status, apns_reason FROM push_dispatch_log \
-              WHERE workspace_id = $1 AND member_id = $2 AND collapse_id = $3 \
-              ORDER BY created_at DESC, id DESC",
-        )
-        .bind(workspace_id)
-        .bind(member_id)
-        .bind(&collapse)
-        .fetch_all(&mut *conn)
-        .await?;
+        let rows = sqlx::query(LAST_TEST_ROWS_SQL)
+            .bind(workspace_id)
+            .bind(member_id)
+            .bind(&collapse)
+            .fetch_all(&mut *conn)
+            .await?;
         let mut dispatches = Vec::with_capacity(rows.len());
         for row in rows {
             dispatches.push(TestDispatchRow {
@@ -509,8 +527,24 @@ pub enum TestPushSlot {
     RateLimited { retry_after_secs: u64 },
     /// One test is reserved: `last_test_*` and the window were written under the row lock. The
     /// caller must write the `push_system` row in the **same transaction** (a rollback then undoes
-    /// the counter too) and answer with `test_id` and `device_count`.
+    /// the counter too) and answer with `test_id` and `device_count`. `device_count` is the number
+    /// of devices the test **goes to** — the member's live tokens capped at
+    /// [`SYSTEM_PUSH_MAX_TARGETS`], the same cap the delivery applies — not the member's real device
+    /// count (that is the diagnostics' `devices.active`).
     Reserved { test_id: Uuid, device_count: i64 },
+}
+
+/// The `Retry-After` of a refused test, for a window that was opened `open_for_ms` ago.
+///
+/// Whole seconds, rounded **up**, and always inside `1..=TEST_PUSH_WINDOW_SECS`: never 0 (a client
+/// that retries at once is refused again) and never longer than the window itself. The upper bound
+/// is not obvious (#4341 security review L-2): a request that waited on the row lock may have begun
+/// its transaction *before* the one that opened the window, so `now() < window_start`,
+/// `open_for_ms` is negative and the plain remainder is a full window **plus** that gap — 61 s.
+pub fn retry_after_secs(open_for_ms: i64) -> u64 {
+    let window_ms = TEST_PUSH_WINDOW_SECS * 1000;
+    let remaining_ms = (window_ms - open_for_ms).clamp(1000, window_ms);
+    (remaining_ms as u64).div_ceil(1000)
 }
 
 /// Take one test push's slot for `member_id` (ADR-0206 D11 「속도 제한」).
@@ -522,17 +556,22 @@ pub enum TestPushSlot {
 /// burst. Order: live tokens first (a member with no device spends nothing), then the window, then
 /// the write of the window, `last_test_id` and `last_test_at` under the same lock. Only the four
 /// test columns are written — never `dnd` or the other rule fields.
+///
+/// The device count is **capped** at [`SYSTEM_PUSH_MAX_TARGETS`], the cap
+/// [`crate::system_targets`] puts on the delivery, so `deviceCount` says how many devices the test
+/// goes to (#4341 security review H-1).
 pub async fn reserve_test_push_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
 ) -> Result<TestPushSlot, DbError> {
     let device_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM push_token \
+        "SELECT LEAST(count(*), $3) FROM push_token \
           WHERE workspace_id = $1 AND member_id = $2 AND invalidated_at IS NULL",
     )
     .bind(workspace_id)
     .bind(member_id)
+    .bind(SYSTEM_PUSH_MAX_TARGETS)
     .fetch_one(&mut *conn)
     .await?;
     if device_count == 0 {
@@ -569,9 +608,8 @@ pub async fn reserve_test_push_in_tx(
     let window_open = open_for.is_some_and(|elapsed| elapsed < TEST_PUSH_WINDOW_SECS * 1000);
     let spent_now = if window_open { spent.unwrap_or(0) } else { 0 };
     if spent_now >= TEST_PUSH_PER_WINDOW {
-        let remaining_ms = TEST_PUSH_WINDOW_SECS * 1000 - open_for.unwrap_or(0);
         return Ok(TestPushSlot::RateLimited {
-            retry_after_secs: (remaining_ms.max(1000) as u64).div_ceil(1000),
+            retry_after_secs: retry_after_secs(open_for.unwrap_or(0)),
         });
     }
     let window_start = if window_open {
@@ -802,5 +840,34 @@ mod tests {
             classify_last_test(&apns, 3.0),
             (LastTestStatus::Failed, Some(429))
         );
+    }
+
+    /// #4341 review L-2: `Retry-After` is whole seconds rounded up, never 0 and never past the
+    /// window. The negative `open_for_ms` is a lock waiter whose transaction began before the one
+    /// that opened the window (`now() < window_start`): the plain remainder is 62 s there.
+    #[test]
+    fn the_retry_after_stays_inside_one_to_sixty_seconds() {
+        // a window just opened, halfway, and 100 ms from its end
+        assert_eq!(retry_after_secs(0), 60);
+        assert_eq!(retry_after_secs(30_000), 30);
+        assert_eq!(
+            retry_after_secs(59_900),
+            1,
+            "never 0 — a client would retry at once"
+        );
+        // rounded up, not down
+        assert_eq!(retry_after_secs(29_999), 31);
+        // the lock waiter: `now()` is *before* the window's start
+        assert_eq!(retry_after_secs(-2_000), 60, "never longer than the window");
+        assert_eq!(retry_after_secs(-500), 60);
+        assert_eq!(retry_after_secs(i64::MIN / 2), 60);
+        // every value of the whole range stays in 1..=60
+        for open_for in (-5_000..=65_000).step_by(250) {
+            let seconds = retry_after_secs(open_for);
+            assert!(
+                (1..=60).contains(&seconds),
+                "open_for {open_for} ms -> {seconds}"
+            );
+        }
     }
 }

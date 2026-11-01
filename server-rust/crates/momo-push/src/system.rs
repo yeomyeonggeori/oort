@@ -5,7 +5,8 @@
 //! message cannot run through it. This module is what the notifier's second drain
 //! (`kind = 'push_system'`, [`momo_outbox::claim_push_system_batch`]) calls instead:
 //!
-//! * [`system_targets`] — the member's active tokens, and nobody else's;
+//! * [`system_targets`] — the member's active tokens (the most recent [`SYSTEM_PUSH_MAX_TARGETS`]
+//!   of them), and nobody else's;
 //! * [`system_dispatch_target`] — the id-only envelope with the **nil-UUID sentinel** for every id
 //!   the push does not have (the relay checks the fields are non-empty and does not look them up);
 //! * [`test_notification_collapse_id`] — `t:<test id>`, the key the dispatch log is claimed by and
@@ -15,6 +16,10 @@
 //! The test's question is "does the delivery path work", and the gates are what the diagnostics
 //! `GET` reports (ADR-0206 D11). What keeps that from being a way to push strangers is the shape of
 //! this module: [`system_targets`] takes one `member_id` and has no other way to choose a token.
+//!
+//! What keeps it from being a way to flood the relay is [`SYSTEM_PUSH_MAX_TARGETS`]: a push with no
+//! message has nothing else to bound it, and the number of devices is the requester's to choose
+//! (registering one costs nothing), so one `push_system` row is capped at that many relay calls.
 
 use momo_db::DbError;
 use sqlx::{PgConnection, Row};
@@ -41,7 +46,26 @@ pub struct SystemTarget {
     pub apns_topic: String,
 }
 
-/// The active tokens of **one** member, in the tenant the transaction is bound to.
+/// The most devices **one system push** reaches (#4341 security review H-1).
+///
+/// A test notification used to go to every active token of the member, so one `POST` made as many
+/// relay calls as the member had devices — and nothing limits how many a member registers. The relay
+/// answers 429 past its server-wide budget (60 a minute by default) and a regular push that meets a
+/// 429 retries for about three minutes and then gives up, so one member with enough devices could
+/// push other people's pushes out. With this cap the product is at most
+/// `SYSTEM_PUSH_MAX_TARGETS × TEST_PUSH_PER_WINDOW` = 15 relay calls per member per minute.
+///
+/// The devices kept are the **most recently registered or refreshed** (`push_token.updated_at`: a
+/// registration sets it and a re-registration of the same token refreshes it). It is one
+/// constant on purpose: [`system_targets`] applies it to the delivery and
+/// [`crate::reserve_test_push_in_tx`] applies it to the `deviceCount` it reports, so the number the
+/// person is told is the number of devices the push goes to. The diagnostics' `devices.active` stays
+/// the member's real count. Every `push_system` reason shares it (a later producer such as ADR-0208's
+/// failed-schedule push inherits the cap and may raise it by its own ADR).
+pub const SYSTEM_PUSH_MAX_TARGETS: i64 = 5;
+
+/// The active tokens of **one** member, in the tenant the transaction is bound to — the most recent
+/// [`SYSTEM_PUSH_MAX_TARGETS`] of them, newest first.
 ///
 /// "Active" is the judgment's definition of a token that can receive a push: `invalidated_at IS
 /// NULL`, on a `device` of this workspace, owned by a member who is an active, undeleted human.
@@ -72,10 +96,12 @@ pub async fn system_targets(
           WHERE t.workspace_id = $1 \
             AND t.member_id = $2 \
             AND t.invalidated_at IS NULL \
-          ORDER BY t.id",
+          ORDER BY t.updated_at DESC, t.id DESC \
+          LIMIT $3",
     )
     .bind(workspace_id)
     .bind(member_id)
+    .bind(SYSTEM_PUSH_MAX_TARGETS)
     .fetch_all(&mut *conn)
     .await?;
     let mut targets = Vec::with_capacity(rows.len());

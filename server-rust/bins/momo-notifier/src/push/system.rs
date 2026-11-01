@@ -25,6 +25,10 @@
 //!   hour). The diagnostics classify that recorded refusal as `relay_outdated`.
 //! * **Tokens stay healthy-or-dead on APNs' word** — a 410/`BadDeviceToken` receipt invalidates the
 //!   token exactly as for any push (ADR-0204 D9), so a test also finds a dead token.
+//! * **At most [`momo_push::SYSTEM_PUSH_MAX_TARGETS`] relay calls per row** — the member's most
+//!   recently registered or refreshed active tokens; the rest are not tried. A system push has no
+//!   message to bound it and a member chooses how many devices they register, so the cap is what
+//!   keeps one `POST` from spending the relay's server-wide budget (#4341 review H-1).
 
 use momo_db::sqlx;
 use momo_db::with_tenant_tx;
@@ -134,7 +138,8 @@ impl PushDrain {
         }
     }
 
-    /// Send one test notification to every active token of the payload's member. `Err` is a
+    /// Send one test notification to the payload's member's active tokens (the most recent
+    /// [`momo_push::SYSTEM_PUSH_MAX_TARGETS`] of them). `Err` is a
     /// database failure on our side and means "retry the row"; every relay outcome is `Ok`.
     async fn deliver_test_notification(
         &self,

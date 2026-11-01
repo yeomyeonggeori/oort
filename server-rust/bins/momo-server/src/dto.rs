@@ -3010,7 +3010,8 @@ pub struct NotificationDiagnosticsResponse {
 }
 
 /// `POST …/notification-diagnostics/test` response: the id of the test (its result is read from
-/// `lastTest`) and how many live tokens it goes to.
+/// `lastTest`) and how many live tokens it goes to — capped at `momo_push::SYSTEM_PUSH_MAX_TARGETS`
+/// (5), so it is not the caller's real device count (that is the diagnostics' `devices.active`).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendTestNotificationResponse {

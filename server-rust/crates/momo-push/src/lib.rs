@@ -52,9 +52,9 @@ pub use device::{
 };
 pub use diagnostics::{
     apns_reason_code, classify_last_test, compute_diagnostics, is_relay_vocabulary_refusal,
-    reserve_test_push_in_tx, Blocker, BlockerCode, DeviceCounts, Diagnostics, LastTest,
-    LastTestStatus, TestDispatchRow, TestPushSlot, NOTIFICATION_KINDS, TEST_PUSH_PER_WINDOW,
-    TEST_PUSH_WINDOW_SECS, TEST_STALLED_AFTER_SECS,
+    reserve_test_push_in_tx, retry_after_secs, Blocker, BlockerCode, DeviceCounts, Diagnostics,
+    LastTest, LastTestStatus, TestDispatchRow, TestPushSlot, LAST_TEST_ROWS_SQL,
+    NOTIFICATION_KINDS, TEST_PUSH_PER_WINDOW, TEST_PUSH_WINDOW_SECS, TEST_STALLED_AFTER_SECS,
 };
 pub use dispatch::{
     category_for, collapse_id, DispatchOutcome, DispatchTarget, PushCategory, PushDispatch,
@@ -73,5 +73,5 @@ pub use judgment::{
 };
 pub use system::{
     system_dispatch_target, system_targets, test_notification_collapse_id,
-    test_notification_dispatch_target, SystemPush, SystemTarget,
+    test_notification_dispatch_target, SystemPush, SystemTarget, SYSTEM_PUSH_MAX_TARGETS,
 };

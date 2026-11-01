@@ -134,8 +134,9 @@ pub async fn get(
 }
 
 /// `POST /v1/workspaces/{ws}/notification-diagnostics/test` — send a test push to the caller's own
-/// devices. 202 `{testId, deviceCount}`; 409 `no_device` when the caller has no live push token
-/// (no budget is spent); 429 `rate_limited` past 3 per minute.
+/// devices. 202 `{testId, deviceCount}` (`deviceCount` is the devices it goes to: at most the 5 most
+/// recently registered or refreshed); 409 `no_device` when the caller has no live push token (no
+/// budget is spent); 429 `rate_limited` past 3 per minute, with a `Retry-After` of 1 to 60 seconds.
 pub async fn test(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,

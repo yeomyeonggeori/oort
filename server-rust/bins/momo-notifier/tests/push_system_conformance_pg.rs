@@ -20,6 +20,7 @@
 //! | test | revert that makes it red |
 //! |---|---|
 //! | `a_test_push_goes_to_the_named_members_tokens_only_and_logs_no_message` | drop the `t.member_id = $2` predicate in `system_targets` / claim with a nil message id (FK) / put a name on the envelope |
+//! | `a_test_push_reaches_the_five_freshest_tokens_and_never_a_sixth` | six live tokens → five relay calls, the stalest token left out (review H-1) | drop the `LIMIT` of `system_targets` / order by something other than `updated_at DESC` |
 //! | `a_forged_payload_never_reaches_another_tenants_tokens` | drop the `workspace_id` predicates of `system_targets` |
 //! | `a_member_without_a_live_token_gets_a_finished_row_and_no_log` | send to a suspended member / to dead tokens |
 //! | `the_two_push_feeds_never_drain_each_other` | widen either claim's `kind` filter |
@@ -544,6 +545,82 @@ async fn a_test_push_goes_to_the_named_members_tokens_only_and_logs_no_message()
             !text.contains(&tenant.channel.to_string()),
             "a channel id leaked: {text}"
         );
+    }
+    assert_eq!(outbox_state(&su, tenant.workspace).await[0].0, "done");
+}
+
+/// #4341 security review H-1, at the consumer: a `push_system` row reaches at most
+/// `SYSTEM_PUSH_MAX_TARGETS` (5) of the named member's tokens, whatever the producer wrote — the
+/// number of devices a member registers is theirs to choose, and each one is a relay call.
+///
+/// Six live tokens, created in one order and *refreshed* in another (the first just registered
+/// again, the second not seen for an hour): the token left out is the stalest, so the order is
+/// `updated_at`, not the id.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier role"]
+async fn a_test_push_reaches_the_five_freshest_tokens_and_never_a_sixth() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let notifier = momo_notifier_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let mut tokens: Vec<(Uuid, String)> = Vec::new(); // (token id, apns token), in creation order
+    for age_minutes in [0, 60, 5, 4, 3, 2] {
+        let (token, apns) = seed_token(&su, tenant.workspace, tenant.me).await;
+        sqlx::query(
+            "UPDATE push_token SET updated_at = now() - make_interval(mins => $2) WHERE id = $1",
+        )
+        .bind(token)
+        .bind(age_minutes)
+        .execute(&su)
+        .await
+        .expect("set the token's last registration");
+        tokens.push((token, apns));
+    }
+    let stalest = tokens[1].clone();
+    let test_id = emit_test(&su, tenant.workspace, tenant.me).await;
+    focus(&su, &[tenant.workspace]).await;
+
+    let relay = RecordingRelay::accepting();
+    let stats = drain(&notifier, relay.clone())
+        .drain_system_once(32)
+        .await
+        .expect("drain");
+    assert_eq!(
+        (stats.claimed, stats.dispatched, stats.failed),
+        (1, 5, 0),
+        "{stats:?}"
+    );
+
+    let sent = relay.sent();
+    assert_eq!(
+        sent.len(),
+        5,
+        "one push_system row is five relay calls at most, however many tokens the member has"
+    );
+    let mut reached: Vec<&str> = sent
+        .iter()
+        .map(|dispatch| dispatch.apns_token.as_str())
+        .collect();
+    reached.sort_unstable();
+    let mut freshest: Vec<&str> = tokens
+        .iter()
+        .filter(|(token, _)| *token != stalest.0)
+        .map(|(_, apns)| apns.as_str())
+        .collect();
+    freshest.sort_unstable();
+    assert_eq!(
+        reached, freshest,
+        "the five most recently registered tokens — not the stalest one ({})",
+        stalest.1
+    );
+
+    let log = log_rows(&su, tenant.workspace, tenant.me).await;
+    assert_eq!(log.len(), 5, "one settled log row per device reached");
+    for row in &log {
+        assert_ne!(row.token, stalest.0, "the stalest token has no log row");
+        assert_eq!(row.status, Some(200));
+        assert_eq!(row.collapse, test_notification_collapse_id(test_id));
     }
     assert_eq!(outbox_state(&su, tenant.workspace).await[0].0, "done");
 }
