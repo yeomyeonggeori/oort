@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../../runtime/host";
-import { teamAiRolesNotice, TEAM_AI_NOTICE_VERSION } from "./teamAiRoles";
+import { patchTeamAiRoles, teamAiRolesNotice, TEAM_AI_NOTICE_VERSION } from "./teamAiRoles";
 import {
   classifyTeamAiProbe,
   probeTeamAiSwitch,
@@ -172,5 +172,71 @@ describe("스위치 설명은 사용량 한도가 기본으로 없다는 사실�
     expect(description).not.toContain("상한");
     expect(description).toContain("정하지 않으면 없");
     expect(description).toContain("「사용 한도」");
+  });
+});
+
+// #5109: 고지 기록 필드(#5040)를 모르는 옛 서버는 그 키를 400 「unknown settings key: …」로 거절한다.
+// 그 거절에만 기록 없이 한 번 더 보내, 서버가 앱보다 늦게 올라간 인스턴스에서도 켜기가 막히지 않게 한다.
+describe("옛 서버가 고지 기록 키를 모를 때 (#5109)", () => {
+  const notice = teamAiRolesNotice("onboarding", ["files", "memory"])!;
+  const oldServer = [
+    400,
+    { error: { code: "bad_request", message: "unknown settings key: team_ai_roles_notice" } },
+  ] as const;
+
+  function answers(...replies: ReadonlyArray<readonly [number, unknown]>) {
+    let next = 0;
+    return vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      const [status, body] = replies[Math.min(next++, replies.length - 1)]!;
+      return new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+    });
+  }
+  const sentBody = (fetchMock: ReturnType<typeof answers>, call: number) =>
+    JSON.parse(String(fetchMock.mock.calls[call]?.[1]?.body)) as Record<string, unknown>;
+
+  it("켜기는 기록 없이 한 번만 다시 보내 켠다", async () => {
+    installHost();
+    const fetchMock = answers(oldServer, [200, { team_ai_fast_path: true }]);
+    vi.stubGlobal("fetch", fetchMock);
+    const saved = await setTeamAiSwitch(WS, true, notice);
+    expect(readTeamAiSwitch(saved).enabled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sentBody(fetchMock, 0).team_ai_roles_notice).toEqual(notice);
+    expect(sentBody(fetchMock, 1)).toEqual({ team_ai_fast_path: true });
+  });
+
+  it("역할 바꾸기도 같은 변경을 기록 없이 한 번 더 보낸다", async () => {
+    installHost();
+    const fetchMock = answers(oldServer, [200, { team_ai_roles: { files: true } }]);
+    vi.stubGlobal("fetch", fetchMock);
+    await patchTeamAiRoles(WS, { files: true }, notice);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sentBody(fetchMock, 0).team_ai_roles_notice).toEqual(notice);
+    expect(sentBody(fetchMock, 1)).toEqual({ team_ai_roles: { files: true } });
+  });
+
+  it("새 서버가 기록을 거절한 400(모르는 판)은 다시 보내지 않고 오류다", async () => {
+    installHost();
+    const fetchMock = answers(
+      [400, { error: { code: "bad_request", message: "unknown team_ai_roles_notice noticeVersion" } }],
+      [200, { team_ai_fast_path: true }]
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(setTeamAiSwitch(WS, true, notice)).rejects.toBeInstanceOf(ApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("다른 키를 모르는 옛 서버의 거절은 물러설 이유가 아니다", async () => {
+    installHost();
+    const fetchMock = answers(
+      [400, { error: { code: "bad_request", message: "unknown settings key: team_ai_fast_path" } }],
+      [200, { team_ai_fast_path: true }]
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(setTeamAiSwitch(WS, true, notice)).rejects.toBeInstanceOf(ApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
