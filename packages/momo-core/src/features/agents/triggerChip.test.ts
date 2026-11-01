@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AgentRunProgress, Message } from "../../lib/api";
+import { agentRunProgressFromWire, type AgentRunBundle, type AgentRunProgress, type Message } from "../../lib/api";
 import { UNCOLLECTED_AFTER_MS, UNCOLLECTED_WORD } from "./runWaiting";
 import type { AgentNameLookup, AgentNameParts } from "./turnCopy";
 import {
@@ -24,6 +24,16 @@ const T = 1_800_000_000_000;
 const SEC = 1000;
 const MIN = 60 * SEC;
 const HOUR = 60 * MIN;
+
+/** 서버가 run 진행에 싣는 bundle 한 건(와이어 모양 그대로, 파서를 지난 값). */
+const bundleOf = (patch: Partial<AgentRunBundle> = {}): AgentRunBundle => ({
+  approvalId: "approval",
+  status: "pending",
+  decisionMode: "inline",
+  canDecide: true,
+  actionType: "tool_call",
+  ...patch,
+});
 
 const NAMES: Record<string, AgentNameParts> = {
   [A]: { name: "달무리봇" },
@@ -450,38 +460,23 @@ describe("요청 묶음 칩", () => {
     const done = run(DONE);
     expect(triggerChip([done], nameFor, T)?.word).toBe("답함");
     expect(
-      triggerChip(
-        [
-          {
-            ...done,
-            bundle: { status: "approved", result: { status: "succeeded" } },
-          },
-        ],
-        nameFor,
-        T
-      )?.word
+      triggerChip([{ ...done, bundle: bundleOf({ status: "approved" }) }], nameFor, T)?.word
     ).toBe("끝");
-    const bundled = { ...done, bundle: { status: "approved", result: { status: "succeeded" } } };
+    const bundled = { ...done, bundle: bundleOf({ status: "approved" }) };
     const destination = { id: "approval-card", seq: 12 };
     const textAnswer = { id: "text-answer", seq: 13 };
     const routed = triggerChip([bundled], nameFor, T, { answerFor: () => textAnswer, bundleTargetFor: () => destination });
     expect(routed?.answer).toEqual(destination);
     expect(routed?.bundleTarget).toEqual(destination);
     expect(triggerChip([bundled], nameFor, T, { answerFor: () => textAnswer })?.answer).toBeUndefined();
-    for (const status of [undefined, "approved"]) {
-      expect(
-        triggerChip(
-          [
-            {
-              ...run(RUNNING),
-              bundle: { status, action_type: "tool_call", code: "running" },
-            },
-          ],
-          nameFor,
-          T
-        )
-      ).toMatchObject({ kind: "working", word: "작업 중" });
-    }
+    // 승인된 도구 호출이 아직 도는 중이면 「끝」이 아니라 작업 중이다(actionType이 가른다).
+    expect(
+      triggerChip(
+        [{ ...run(RUNNING), bundle: bundleOf({ status: "approved", canDecide: false }) }],
+        nameFor,
+        T
+      )
+    ).toMatchObject({ kind: "working", word: "작업 중" });
     expect(
       triggerChip([run(RUNNING)], nameFor, T, {
         bundleFor: () => ({ status: "expired" }),
@@ -489,12 +484,13 @@ describe("요청 묶음 칩", () => {
     ).toMatchObject({ kind: "expired", word: "만료", tone: "warn" });
     expect(
       triggerChip(
-        [{ ...run(RUNNING), bundle: { status: "pending" } }],
+        [{ ...run(RUNNING), bundle: bundleOf() }],
         nameFor,
         T
       )
     ).toMatchObject({ kind: "approval", word: "승인 필요" });
-    for (const bundle of [{}, { status: "pending" }]) {
+    // bundle이 없는 run(옛 서버·승인 없는 run)과 대기 bundle 모두 신호 소실을 승인으로 덮지 않는다.
+    for (const bundle of [undefined, bundleOf()]) {
       expect(
         triggerChip(
           [
@@ -512,6 +508,25 @@ describe("요청 묶음 칩", () => {
         )
       ).toMatchObject({ kind: "timed_out", word: "신호 소실" });
     }
+  });
+
+  it("서버가 보낸 bundle은 파서를 지나 칩 낱말이 된다: phase만으로는 못 읽던 거부·승인 대기 (#4763)", () => {
+    // 와이어(camelCase)를 그대로 `agentRunProgressFromWire`에 통과시킨다 — 파서가 bundle을 버리면
+    // 이 칩들은 phase만 읽어 「답함」·「작업 중」으로 거짓을 말한다.
+    const wireRun = (phase: string, status: string, bundle?: Record<string, unknown>) =>
+      agentRunProgressFromWire({
+        id: "00000000-0000-7000-8000-0000000000b1", channelId: "00000000-0000-7000-8000-000000000201", agentMemberId: A,
+        triggerMessageId: TRIGGER, triggerSummary: "소개 바꿔줘", phase, status, leaseState: "live", stepCount: 1,
+        createdAtMs: T - MIN, updatedAtMs: T, ...(bundle ? { bundle } : {}),
+      });
+    const server = { approvalId: "approval", decisionMode: "inline", canDecide: true, actionType: "workspace_action" };
+    const wordOf = (run: AgentRunProgress) => triggerChip([run], nameFor, T)?.word;
+    expect(wordOf(wireRun("succeeded", "succeeded"))).toBe("답함");
+    expect(wordOf(wireRun("succeeded", "succeeded", { ...server, status: "rejected", canDecide: false }))).toBe("거부");
+    expect(wordOf(wireRun("succeeded", "succeeded", { ...server, status: "approved", canDecide: false }))).toBe("끝");
+    expect(wordOf(wireRun("running", "running", { ...server, status: "pending" }))).toBe("승인 필요");
+    // 모르는 상태는 bundle이 없는 것과 같다: 칩은 phase로 읽는다.
+    expect(wordOf(wireRun("succeeded", "succeeded", { ...server, status: "escalated" }))).toBe("답함");
   });
 
   it("고정 폭 측정 얼굴에 끝·답함·거부·만료가 모두 있고 거부는 실패와 다른 모양이다", () => {

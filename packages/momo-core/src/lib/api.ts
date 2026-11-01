@@ -5312,9 +5312,12 @@ export async function fetchWorkstreamRuns(
 }
 
 // ---- Approvals: read projection over the decision ledger --------------------
-// GET /v1/workspaces/{ws}/approvals?status=&limit= (ApprovalDecisionRoutes).
-// Rows are scoped by channel membership server-side and ordered
-// `expires_at NULLS LAST, created_at DESC`.
+// GET /v1/workspaces/{ws}/approvals?status=&scope=&cursor=&limit= (ApprovalDecisionRoutes).
+// Rows are scoped by channel membership server-side. `status=pending` is the
+// to-decide queue (soonest expiry first, not paged); every other status and
+// `all` is newest-first and paged by keyset (`nextCursor` → `cursor`, ADR-0186
+// v6 R-f, #4763). `scope=team` (default) is every approval on the caller's
+// channels, `scope=mine` the ones they decided, requested or own the agent of.
 //
 // ## 두 표기를 다 읽는다 (goal M-AP1 2R)
 //
@@ -5348,6 +5351,19 @@ export type ApprovalStatus =
   | "rejected"
   | "expired"
   | "cancelled";
+
+/**
+ * 어디서 결정하는가 (ADR-0186 v6 R-f). `inline`: 보인 자리에서 결정해도 된다.
+ * `open`: 앱에서 열어야 한다. **서버의 한 판정**(`decision_mode()`)이고 클라이언트가
+ * 다시 계산하지 않는다 — 모르는 낱말은 더 조심스러운 `open`으로 읽는다.
+ */
+export type ApprovalDecisionMode = "inline" | "open";
+
+/** 승인 목록이 거르는 상태. `all`은 다섯 상태를 한 줄기로 준다(목록 전용, 행의 상태가 아니다). */
+export type ApprovalListStatus = ApprovalStatus | "all";
+
+/** `team`(기본): 내 채널의 모든 승인. `mine`: 내가 결정·요청했거나 내 에이전트의 것. */
+export type ApprovalScope = "team" | "mine";
 
 export interface Approval {
   id: string;
@@ -5402,6 +5418,22 @@ export interface Approval {
    * 할 말은 「무엇을 허가하는가」 한마디다 (#3729).
    */
   workspaceActionId?: string;
+  /**
+   * 서버가 판정한 결정 자리 (ADR-0186 v6 R-f, #4763). 옛 서버는 보내지 않으므로
+   * **없을 수 있고, 없음은 `inline`이 아니다** — 화면은 지금처럼 읽는다.
+   */
+  decisionMode?: ApprovalDecisionMode;
+  /** 이 승인의 채널이 다이렉트 메시지인가. `channelId`·`rootId`와 함께 카드의 전체 주소다. */
+  isDirect?: boolean;
+  /** 카드가 선 스레드(카드 메시지의 `rootId`). 본류의 카드나 카드 없는 승인에는 없다. */
+  rootId?: string;
+  /** 승인이 요청된 때. 이 서버는 항상 싣는다(옛 서버는 없을 수 있다). */
+  createdAtMs?: number;
+  /**
+   * 끝난 승인의 결과 한 문장 (`result.line`, 서버가 쓴 한국어). 대기 중이거나
+   * 결과가 아직 카드에 패치되지 않은 승인에는 없다. 화면은 이 문장을 그대로 읽는다.
+   */
+  resultLine?: string;
 }
 
 /**
@@ -5472,6 +5504,18 @@ function toApproval(value: unknown): Approval {
   if (decisionReason !== undefined) approval.decisionReason = decisionReason;
   const expiresAtMs = wireNum(value, "expires_at_ms", "expiresAtMs");
   if (expiresAtMs !== undefined) approval.expiresAtMs = expiresAtMs;
+  const decisionMode = wireStr(value, "decision_mode", "decisionMode");
+  if (decisionMode !== undefined) {
+    approval.decisionMode = decisionMode === "inline" ? "inline" : "open";
+  }
+  const isDirect = wireBool(value, "is_direct", "isDirect");
+  if (isDirect !== undefined) approval.isDirect = isDirect;
+  const rootId = wireStr(value, "root_id", "rootId");
+  if (rootId !== undefined) approval.rootId = rootId;
+  const createdAtMs = wireNum(value, "created_at_ms", "createdAtMs");
+  if (createdAtMs !== undefined) approval.createdAtMs = createdAtMs;
+  const resultLine = str(record(value)?.["result"], "line")?.trim();
+  if (resultLine !== undefined && resultLine !== "") approval.resultLine = resultLine;
   return approval;
 }
 
@@ -5488,18 +5532,59 @@ export function isWireApproval(value: unknown): boolean {
   );
 }
 
-/** One approval status page. The server clamps `limit` to 1...500. */
+/** 승인 목록 한 쪽: 행들과, 다음 쪽이 있을 때만 `nextCursor`. */
+export interface ApprovalPage {
+  approvals: Approval[];
+  /**
+   * 다음 쪽의 위치. **불투명한 값**이라 고치지도 소문자로 바꾸지도 않고 그대로
+   * `cursor`로 돌려준다(위치일 뿐 권한이 아니다). `status=pending`은 쪽매김이 없어
+   * 이 값이 오지 않는다.
+   */
+  nextCursor?: string;
+}
+
+export interface ApprovalPageQuery {
+  /** 기본 `pending`. 쪽매김(`cursor`)은 `pending` 밖의 상태와 `all`에만 쓴다(서버가 400으로 막는다). */
+  status?: ApprovalListStatus;
+  /** 기본은 보내지 않는다 — 서버 기본(`team`)이다. */
+  scope?: ApprovalScope;
+  /** 이전 쪽의 `nextCursor` 그대로. */
+  cursor?: string;
+  /** The server clamps `limit` to 1...500. */
+  limit?: number;
+}
+
+/**
+ * 한 쪽을 읽는다. `status`가 첫 쿼리라 옛 호출과 URL의 앞부분이 같다. `scope`·`cursor`는
+ * 줄 때만 붙고, 커서는 불투명하므로 인코딩만 한다.
+ */
+export async function fetchApprovalPage(
+  workspaceId: string,
+  query: ApprovalPageQuery = {}
+): Promise<ApprovalPage> {
+  const { status = "pending", scope, cursor, limit = 50 } = query;
+  const params = [`status=${status}`, `limit=${limit}`];
+  if (scope !== undefined) params.push(`scope=${scope}`);
+  if (cursor !== undefined) params.push(`cursor=${encodeURIComponent(cursor)}`);
+  const res = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/approvals?${params.join("&")}`
+  );
+  return approvalPageFromWire(res);
+}
+
+/**
+ * One approval status page as rows. The server clamps `limit` to 1...500.
+ *
+ * 반환형을 행 목록으로 둔 것은 호출처 대부분이 한 쪽만 읽기 때문이다. 다음 쪽이 필요하면
+ * `fetchApprovalPage`를 쓴다.
+ */
 export async function fetchApprovals(
   workspaceId: string,
-  status: ApprovalStatus = "pending",
-  limit = 50
+  status: ApprovalListStatus = "pending",
+  limit = 50,
+  options: { scope?: ApprovalScope; cursor?: string } = {}
 ): Promise<Approval[]> {
-  const res = await request<{ approvals: unknown[] }>(
-    `/v1/workspaces/${encodeURIComponent(
-      workspaceId
-    )}/approvals?status=${status}&limit=${limit}`
-  );
-  return approvalsFromWire(res);
+  return (await fetchApprovalPage(workspaceId, { status, limit, ...options })).approvals;
 }
 
 /**
@@ -5513,6 +5598,15 @@ export async function fetchApprovals(
 export function approvalsFromWire(value: unknown): Approval[] {
   const approvals = arrayField(value, "approvals");
   return approvals === null ? [] : approvals.filter(isWireApproval).map(toApproval);
+}
+
+/** `{approvals, nextCursor?}` 한 쪽. 빈 커서는 「다음 쪽 없음」이다(서버는 없을 때 키를 빼고 보낸다). */
+export function approvalPageFromWire(value: unknown): ApprovalPage {
+  const nextCursor = str(value, "nextCursor");
+  return {
+    approvals: approvalsFromWire(value),
+    ...(nextCursor === undefined || nextCursor === "" ? {} : { nextCursor }),
+  };
 }
 
 // ---- Agent runs: work projection ------------------------------------------
@@ -5761,6 +5855,36 @@ export type AgentRunPhase =
  */
 export type AgentLeaseState = "live" | "stale" | "none";
 
+/**
+ * run 진행이 싣는 **승인 하나의 읽기, 보는 사람 기준** (ADR-0186 v6 R-f, #4763). 그 run이 멈춰
+ * 선 승인, 없으면 가장 최근에 물은 승인이고 상태는 가리지 않는다. 채널의 상태 칩과 스레드 요약
+ * 줄이 승인 카드를 손에 쥐지 않고 읽는 자리다.
+ *
+ * 키는 와이어 그대로 camelCase다(옛 snake 표기는 카드 props의 일이고 `parseRequestBundleSnapshot`이
+ * 읽는다). **와이어보다 좁게 읽는다**: 아래 값들은 이미 판정을 거친 것이고 화면은 다시 계산하지
+ * 않는다. 서버가 뜻을 바꾸는 칸을 못 채웠거나 모르는 상태 낱말을 보내면 `bundle` 자체가 없다 —
+ * 곧 「이 서버는 bundle을 안 보낸다」와 같아서 칩·요약 줄은 예전처럼 `phase`로 읽는다.
+ */
+export interface AgentRunBundle {
+  approvalId: string;
+  /** 닫힌 다섯. **지금 기준**이다: 기한이 지난 대기는 서버가 이미 `expired`로 말한다. */
+  status: ApprovalStatus;
+  /** 서버의 판정 그대로. 모르는 낱말은 `open`. */
+  decisionMode: ApprovalDecisionMode;
+  /**
+   * **보는 사람**이 지금 결정할 수 있는가. 대기(`pending`)가 아니면 늘 `false`다 — 서버도 그렇게
+   * 보내지만 모양이 어긋난 응답이 단추를 세우지 못하게 여기서도 한 번 더 닫는다. 사람마다 다른
+   * 값이라 멤버 사이에 캐시하지 않는다.
+   */
+  canDecide: boolean;
+  /** `tool_call`, `workspace_action` … 승인된 도구 호출이 아직 도는 것과 이미 끝난 행동을 가른다. */
+  actionType: string;
+  /** 카드의 한 문장: 대기 중에는 물음, 끝난 뒤에는 결과. 서버가 줄 말이 없으면 없다. */
+  line?: string;
+  /** 대기 중에만 오는, `line`과 같은 문장(출하된 요약 줄·칩이 읽는 키). */
+  intent?: string;
+}
+
 export interface AgentRunProgress {
   id: string;
   channelId: string;
@@ -5776,6 +5900,8 @@ export interface AgentRunProgress {
   lastEventAtMs?: number;
   approvalId?: string;
   approvalExpiresAtMs?: number;
+  /** 서버가 이 run의 승인 하나를 보는 사람 기준으로 읽어 준 것. 옛 서버·승인 없는 run은 없다. */
+  bundle?: AgentRunBundle;
   /** 서버가 쓴 닫힌 코드(`approval_expired` …). 모르는 코드도 그대로 온다. */
   endReason?: string;
   /** 1 = 다음에 가져갈 순서. 아직 아무도 가져가지 않은 run에만 있다. */
@@ -5823,6 +5949,51 @@ function optionalPositiveInt(
   if (value === undefined) return undefined;
   if (!Number.isInteger(value) || value < 0) throw new WireShapeError();
   return value;
+}
+
+const APPROVAL_STATUSES = new Set<ApprovalStatus>([
+  "pending",
+  "approved",
+  "rejected",
+  "expired",
+  "cancelled",
+]);
+
+/**
+ * run 진행 `bundle` 하나. **절대 던지지 않는다**: 쪽은 `runs.map(parse)`이고 더해진 칸 하나가
+ * 채널 전체의 진행을 비우면 안 된다.
+ *
+ * 두 갈래로 읽는다. **뜻을 바꾸는 칸**(`approvalId`·`status`·`actionType`)이 모자라거나 모르는
+ * 상태면 `undefined`(= bundle 없음)다: 모르는 상태를 닫힌 다섯 중 하나로 우기지 않고, `actionType`
+ * 없이는 승인된 도구 호출이 아직 도는지 이미 끝났는지 가를 수 없다. 칩·요약 줄은 그때 예전처럼
+ * `phase`로 읽는다. **권한만 줄이는 칸**(`decisionMode`·`canDecide`)이 없거나 모르는 값이면 제한
+ * 쪽(`open`·`false`)으로 읽는다 — 모르는 서버가 단추를 더 세우게 하지 않는다.
+ */
+function agentRunBundleFromWire(value: unknown): AgentRunBundle | undefined {
+  if (record(value) === null) return undefined;
+  const approvalId = str(value, "approvalId");
+  const status = str(value, "status");
+  const actionType = str(value, "actionType");
+  if (
+    approvalId === undefined ||
+    approvalId === "" ||
+    status === undefined ||
+    !APPROVAL_STATUSES.has(status as ApprovalStatus) ||
+    actionType === undefined
+  ) {
+    return undefined;
+  }
+  const line = str(value, "line")?.trim();
+  const intent = str(value, "intent")?.trim();
+  return {
+    approvalId: approvalId.toLowerCase(),
+    status: status as ApprovalStatus,
+    decisionMode: str(value, "decisionMode") === "inline" ? "inline" : "open",
+    canDecide: status === "pending" && bool(value, "canDecide") === true,
+    actionType,
+    ...(line === undefined || line === "" ? {} : { line }),
+    ...(intent === undefined || intent === "" ? {} : { intent }),
+  };
 }
 
 export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
@@ -5873,6 +6044,7 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
   const lastEventAtMs = optionalFiniteNumber(source, "lastEventAtMs");
   const approvalId = optionalString(source, "approvalId");
   const approvalExpiresAtMs = optionalFiniteNumber(source, "approvalExpiresAtMs");
+  const bundle = agentRunBundleFromWire(source.bundle);
   const endReason = optionalString(source, "endReason");
   const queuePosition = optionalPositiveInt(source, "queuePosition");
   const aheadTotal = optionalPositiveInt(source, "aheadTotal");
@@ -5907,6 +6079,7 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
     ...(lastEventAtMs === undefined ? {} : { lastEventAtMs }),
     ...(approvalId === undefined ? {} : { approvalId: approvalId.toLowerCase() }),
     ...(approvalExpiresAtMs === undefined ? {} : { approvalExpiresAtMs }),
+    ...(bundle === undefined ? {} : { bundle }),
     ...(endReason === undefined ? {} : { endReason }),
     ...(queuePosition === undefined ? {} : { queuePosition }),
     ...(aheadTotal === undefined ? {} : { aheadTotal }),

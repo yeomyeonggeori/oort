@@ -171,6 +171,36 @@ describe("approval rows", () => {
     expect(item.outcomeTone).toBe("warn");
   });
 
+  it("carries the server's decisionMode as it is, and leaves it absent when the server did not send one (#4763)", () => {
+    for (const decisionMode of ["inline", "open"] as const) {
+      expect(approvalItem(approval({ decisionMode }), agent, "엔진", NOW).decisionMode).toBe(decisionMode);
+    }
+    // 옛 서버: 없음은 inline이 아니다. 행은 예전 그대로이고 값이 지어지지 않는다.
+    expect("decisionMode" in approvalItem(approval(), agent, "엔진", NOW)).toBe(false);
+  });
+
+  it("reads all five server statuses and keeps the decide control to pending only (#4763)", () => {
+    const rows = (["pending", "approved", "rejected", "expired", "cancelled"] as const).map((status) =>
+      approvalItem(approval({ status }), agent, "엔진", NOW)
+    );
+    expect(rows.map((row) => row.outcome)).toEqual([null, "끝", "거부", "만료", "취소"]);
+    expect(rows.map((row) => row.approvalId !== undefined)).toEqual([true, false, false, false, false]);
+  });
+
+  it("does not claim an outcome, nor offer a decide control, for a status it does not know (#4763)", () => {
+    // 서버가 새 상태를 더해 모르는 낱말이 오면 닫힌 다섯 중 하나로 우기지 않는다: 「생각 중」도 「승인 대기」도 아니다.
+    const item = approvalItem(
+      approval({ status: "escalated" as unknown as Approval["status"] }),
+      agent,
+      "엔진",
+      NOW
+    );
+    expect(item.pending).toBe(false);
+    expect(item.approvalId).toBeUndefined();
+    expect(item.outcome).toBeNull();
+    expect(item.outcomeTone).toBe("muted");
+  });
+
   it("flags an irreversible action", () => {
     const item = approvalItem(
       approval({ isReversible: false }),

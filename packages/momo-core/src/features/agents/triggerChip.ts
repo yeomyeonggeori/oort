@@ -165,9 +165,7 @@ export interface TriggerChipContext {
   bundleTargetFor?: (run: AgentRunProgress) => AnswerRef | undefined;
 }
 
-/** #4763의 DTO가 보존할 가산 bundle. API 트리 변경 없이도 읽는 자리예요. */
-export type TriggerRunProgress = AgentRunProgress & { bundle?: unknown };
-function bundleOf(run: TriggerRunProgress, context: TriggerChipContext): RequestBundleSnapshot | undefined {
+function bundleOf(run: AgentRunProgress, context: TriggerChipContext): RequestBundleSnapshot | undefined {
   return context.bundleFor?.(run) ?? runBundleSnapshot(run);
 }
 
@@ -289,7 +287,7 @@ function labelOf(
  * `runs`는 먼저 생긴 것이 앞이다(`runsByTriggerMessage`).
  */
 export function triggerChip(
-  runs: readonly TriggerRunProgress[],
+  runs: readonly AgentRunProgress[],
   nameFor: AgentNameLookup,
   nowMs: number,
   context: TriggerChipContext = {}
