@@ -10,5 +10,8 @@
   "timeline.thread.followStop": "Stop following",
   "timeline.thread.followStart": "Follow thread",
   "timeline.thread.followFailed": "Couldn't change following. Try again in a moment.",
-  "timeline.thread.followDismiss": "Dismiss"
+  "timeline.thread.followDismiss": "Dismiss",
+  "timeline.unfurl.previewDismiss": "Send this message without a preview",
+  "timeline.unfurl.previewDismissed": "This message will be sent without a link preview.",
+  "timeline.unfurl.previewGroup": "Link preview before sending"
 }
