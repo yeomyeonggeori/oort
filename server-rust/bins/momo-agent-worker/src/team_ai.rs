@@ -612,9 +612,12 @@ impl AgentWorker {
                 chrono::Utc::now().timestamp_millis(),
             ) {
                 Ok(validated) => {
-                    momo_workspace_actions::profile_avatar::prepare(
+                    // #4934: the source picture is read from the api when its private address is
+                    // configured, from the worker's own archive otherwise.
+                    let attachments = self.attachment_reader();
+                    momo_workspace_actions::profile_avatar::prepare_with(
                         &self.pool,
-                        self.drive.as_ref(),
+                        &attachments,
                         workspace_id,
                         run_id,
                         agent,

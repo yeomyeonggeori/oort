@@ -86,6 +86,9 @@ services:
 
   # #4791: image proposal preparation only reads attachments. The worker cannot
   # overwrite the archive; the API remains its sole file writer.
+  # #4934: by default the worker now reads those attachments THROUGH the api
+  # (OORT_API_INTERNAL_ORIGIN in docker-compose.rust.yml), so this read-only mount is
+  # the fallback for a stack that sets that origin empty — kept, not removed.
   agent-worker:
     volumes:
       - drive-archive:${MOMO_DRIVE_LOCAL_DIR:-/var/lib/oort/drive}:ro
