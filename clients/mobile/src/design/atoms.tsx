@@ -225,6 +225,21 @@ export function TapRow({
   );
 }
 
+/**
+ * 셸의 주 단추. **주 행동은 잉크(`primary`)다** — 첫 화면·로그인·승인 알약과 같은 역할이고
+ * 커스텀 강조색(ADR-0174)이 칠하지 않는다(ADR-0189 D3 「주 버튼 검정」, #5100). 신호색
+ * (`accent`)은 안 읽음·경계·커서이지 주 행동이 아니다.
+ *
+ * 세 얼굴은 형제 `OnboardingButton`(`features/onboarding/OnboardingControls.tsx`)과 같은 규칙이다:
+ *
+ *   쉼      잉크 채움 + `onPrimary` 라벨
+ *   잠김    `disabled` 이고 일하는 중이 아닐 때 — 채움을 걷고 옅은 칸(`surfaceMuted`)으로 두되
+ *           **라벨은 `textMuted` 로 읽힌다**(옅은 칸 위 흰 글자는 1.26:1 로 사라졌다)
+ *   진행    `busy` — 잉크 채움을 그대로 두어 표시기와 낱말이 그 위에서 읽힌다(`disabled` 를 같이
+ *           주어도 진행이 이긴다). 누를 수 없는 것은 잠김과 같다.
+ *
+ * 눌림은 채움을 갈아 끼우지 않고 흐림만 낮춘다(옅은 눌림 색 위 라벨이 사라지는 것을 막는다).
+ */
 export function PrimaryButton({
   label,
   busyLabel,
@@ -265,7 +280,9 @@ export function PrimaryButton({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  // 누를 수 없는 것: 잠김과 진행 둘 다. 다만 **칠**은 잠김만 바꾼다(위 주석).
   const inert = disabled === true || busy === true;
+  const locked = disabled === true && busy !== true;
   return (
     <Pressable
       accessibilityRole="button"
@@ -275,17 +292,19 @@ export function PrimaryButton({
       onPress={onPress}
       style={({pressed}) => [
         styles.button,
-        inert && styles.buttonDisabled,
+        locked && styles.buttonDisabled,
         pressed && !inert && styles.buttonPressed,
       ]}
       testID={testID}>
       {busy ? (
         <View style={styles.buttonBusy}>
-          <ActivityIndicator color={palette.onAccent} />
+          <ActivityIndicator color={palette.onPrimary} />
           {busyLabel ? <Text style={styles.buttonLabel}>{busyLabel}</Text> : null}
         </View>
       ) : (
-        <Text style={styles.buttonLabel}>{label}</Text>
+        <Text style={[styles.buttonLabel, locked && styles.buttonLabelDisabled]}>
+          {label}
+        </Text>
       )}
     </Pressable>
   );
@@ -753,12 +772,19 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderRadius: radius.md,
     paddingVertical: space.md,
     alignItems: 'center',
-    backgroundColor: color.accent,
+    // 주 행동 = 잉크. `accent` 는 신호라 이 단추를 칠하지 않는다(#5100, `PrimaryButton` 주석).
+    backgroundColor: color.primary,
   },
-  buttonDisabled: {backgroundColor: color.border},
-  buttonPressed: {backgroundColor: color.accentPressed},
+  // 못 누르는 주 행동: 채움을 걷고 옅은 칸으로 둔다(잉크가 서 있으면 눌러도 되는 줄 안다).
+  // 온보딩 단추의 `buttonInert` 와 같은 값.
+  buttonDisabled: {backgroundColor: color.surfaceMuted},
+  // 잉크 채움은 눌려도 잉크다 — 흐림만 낮춘다(온보딩 `buttonPrimaryPressed`, 웹 `hover:opacity-90` 의 짝).
+  buttonPressed: {opacity: 0.86},
   buttonBusy: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
-  buttonLabel: {color: color.onAccent, fontSize: font.body, fontWeight: '600'},
+  buttonLabel: {color: color.onPrimary, fontSize: font.body, fontWeight: '600'},
+  // 옅은 칸 위에서는 채움 위 글자색(`onPrimary`)이 사라진다(옛 판의 흰 글자가 1.26:1 이었다).
+  // 못 누르는 버튼도 라벨은 읽혀야 한다 — 온보딩 `labelInert`.
+  buttonLabelDisabled: {color: color.textMuted},
   badge: {
     minWidth: 22,
     paddingHorizontal: 6,

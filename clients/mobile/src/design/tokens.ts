@@ -194,7 +194,14 @@ export interface Palette {
    * 웹이 컨트롤 테두리에 요구하는 **3:1** 을 지킨다(`--line-strong` 과 같은 자리).
    */
   textFaint: string;
-  /** The one accent. Selection, links, the primary button. */
+  /**
+   * 신호색(core `signal`) — 고른 것·안 읽음·경계·포커스 링. 커스텀 강조색(ADR-0174)이
+   * 칠하는 것은 이 역할 계열(`accentText`·`accentSurface`·`onAccent`)이다.
+   *
+   * **주 버튼은 이 색이 아니다** — 주 행동은 `primary`(잉크)다. 옛 주석은 「the primary
+   * button」이라 적었고 셸의 `PrimaryButton` 도 이 색이었다 — 같은 앱의 첫 화면·로그인·
+   * 승인 알약(잉크)과 주 행동이 갈렸다(#5100).
+   */
   accent: string;
   /** 눌린 accent 채움. */
   accentPressed: string;

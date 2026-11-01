@@ -656,7 +656,9 @@ describe('폰 에이전트 상세 (성재 2026-10-16)', () => {
     const flat = (n: {props: {style?: unknown}}) =>
       StyleSheet.flatten(n.props.style) as Record<string, unknown>;
     const primary = flat(screen.getByTestId('agent-open-dm'));
-    expect(primary.backgroundColor).toBeDefined();
+    // 주 행동은 잉크다(#5100) — 신호색(`accent`)이 아니라 첫 화면·로그인·승인 알약과 같은 역할이다.
+    expect(primary.backgroundColor).toBe(lightPalette.primary);
+    expect(primary.backgroundColor).not.toBe(lightPalette.accent);
     expect(primary.minHeight).toBeGreaterThanOrEqual(44);
     expect(screen.getByTestId('agent-open-dm')).toHaveTextContent('대화 열기');
     expect(screen.getByTestId('agent-open-dm').props.accessibilityLabel).toBe(
