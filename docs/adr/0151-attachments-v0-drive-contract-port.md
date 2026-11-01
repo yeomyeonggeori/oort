@@ -303,3 +303,271 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 | D8 | `team_ai_files_conformance_pg::a_picture_reaches_the_model_as_a_structural_part_once_and_never_as_text`, `…::a_wire_that_cannot_see_pictures_says_so_and_reads_nothing`, `attachment_image::tests::*`, 와이어 단위 시험 | 부품이 아니라 글로 실으면, 한 요청 한 그림 규칙을 지우면, 다시 인코딩을 지우면(메타데이터 시험), chat/completions를 열면 |
 
 사보타주를 실제로 돌린 결과는 PR 본문이 정본이다.
+
+## 증보 5 (2026-11-02, #4585): 큰 파일·영상 — 개당 300 MiB, 이어 올리기, 구간 읽기(206), 스트림 주소, 포스터
+
+개당 한도를 100 MiB에서 300 MiB로(메시지당 합계 600 MiB) 올리되 **순서를 지켜서** 올린다. 구간 읽기와 스트리밍(C3) → 청크 이어 올리기(C4) → 데스크탑 청크 전송(#4639) → 회수·사용량(C6) → 마지막에 기본값 스위치다. 업로드는 로컬 보관소가 Google 재개 업로드의 모양(8 MiB 청크, `Content-Range`, `308`)을 따라 하고, 읽기는 `Range`·`HEAD`(206·416)를 받으며, 웹·데스크탑의 영상 재생은 10분짜리 스트림 주소(요청마다 읽기 술어를 다시 판정)로 한다. 포스터와 길이는 보내는 기기가 만들어 PG에 두고, 회수는 증보 2의 청소기에 가지 하나(지운 메시지의 파일)를 더한다. **이 증보는 문서뿐이고 구현은 하지 않는다.** 뒤 칸 #4671·#4672·#4673·#4674·#4675가 이것을 계약으로 쓴다. 이슈·계획 본문이 말하는 「증보 3」은 이 증보다(번호는 착륙 순서라 #4934·#4970이 3·4를 먼저 썼다).
+
+- Status: **Proposed** (2026-11-02, #4585 worker 기안. 독립 설계 검토 뒤 planner가 Accepted로 올린다. [ADR-0100](0100-decision-governance.md): Accepted 전에는 C3~C7 어느 것도 머지하지 못한다). 근거: owner 10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐」와 10-27 「권장대로 해봐」가 **개당 300MB·메시지당 600MB, 만료 없는 보관 + 회수·사용량, 웹 서명 주소, 데스크탑 앱 안 재생**을 정했다. 아래에서 **(owner 결정)**은 그 넷이고 **[권장]**은 그 틀 안에서 이 문서가 고른 세부라 검토에서 뒤집을 수 있다. 등급 2: 공개 API 계약·보안 경계·DB 계약이 바뀐다.
+- **변경 전**: 2026-11-02, track/engine `195c304f3`의 코드를 읽어 확인한 사실이다.
+
+  | 항목 | 지금 | 자리 |
+  |---|---|---|
+  | 한도 | 개당 100 MiB, 메시지당 20개. **합계 한도는 없다**(20×100 MiB가 된다) | `attachment.rs:67,71` |
+  | 업로드 | 한 번의 PUT이 한 업로드다. 세션은 1회용·1시간이고 재시작이 `sessions/`·`incoming/`를 지운다 | `momo-drive/lib.rs:91`, `local.rs` 머리말(#2615·#2628), `routes/attachments.rs` `stub_upload` |
+  | 엣지 | Railway는 요청 본문이 5분 안에 끝나야 하고 한 요청은 데이터가 흐르면 최대 15분이다(공식 문서, 2026-11-02 확인). 300 MiB 단일 PUT은 지속 약 8.4 Mbit/s가 필요하고, 같은 크기의 응답은 2.8 Mbit/s 아래로 받으면 15분을 넘긴다 | `momo-drive/lib.rs:80-84`의 같은 기록 |
+  | 읽기 | content는 200 전체뿐이다. `Range`를 읽지 않고 `HEAD`는 axum 0.8이 GET 핸들러를 돌려 본문만 버린다 | `routes/attachments.rs` `content`, `lib.rs:989` |
+  | 로컬 보관소 | `file_content`가 **아카이브 락 안에서** `fs::read`로 파일 전체를 메모리에 올린다. 한도가 300 MiB면 동시 읽기마다 300 MiB다 | `local.rs:511` |
+  | Google 보관소 | 메타 호출과 `alt=media`, 상류 호출이 둘이고 `Range`를 넘기지 않는다 | `google.rs:472` |
+  | 재생·포스터 | 앱 안 영상 재생이 없고 폰 picker는 사진 전용이며 `expo-video`가 없다. `attachment` 행에는 길이·치수·포스터가 없다 | `clients/mobile/package.json`, `attachment.rs` |
+  | CSP | 웹 엣지 Caddyfile 넷은 `default-src 'self'`이고 `media-src`가 없다. 데스크탑은 번들 오리진이라 서버의 영상이 `default-src 'self'`에 막힌다 | `infra/rust/Caddyfile`·`.local`·`.host-network`, `infra/railway/Caddyfile.railway`, `tauri.conf.json:32` |
+  | CORS | 허용 요청 헤더는 고정 목록(`content-range` 없음)이고 노출 헤더는 `retry-after` 하나다. 이 층은 `build_app` 맨 바깥이라 업로드 PUT에도 닿는다 | `cors.rs:68,75`, `lib.rs:2471` |
+  | 회수 | 묶이지 않은 완료 첨부만 거둔다(30일, 기본 꺼짐). 지운 메시지에 묶인 바이트와 `pending`·`failed`는 안 거둔다 | 증보 2 |
+  | 데스크탑 | 다운로드는 IPC 한 덩이 100 MiB이고 64 MiB 한 건에 메모리가 +569 MiB 선다(실측) | [ADR-0133](0133-ui-stack-tauri-react-migration.md) 증보 D7, `downloads.rs:76` |
+
+### 결정
+
+- **D1 · 한도: 천장 300 MiB, 기본값은 마지막에 올린다, 메시지당 합계 600 MiB** (개당 300·합계 600은 owner 결정, 나머지는 [권장]).
+  - **천장은 코드·DB·계약의 한 값이다: 300 MiB(314,572,800 B).** DB CHECK `attachment_size_ck`, Rust 상수, openapi `maximum`, TS 상수가 같은 값이다. 화면 표기는 「300MB」다(`model.ts`의 관례: 100 MiB가 「100 MB」로 찍힌다).
+  - **기본값(`DEFAULT`)은 스위치 전까지 100 MiB다.** 능력(천장·청크·구간 읽기)과 노출(기본값)을 나눈다. 실효 개당 한도는 `MOMO_ATTACHMENT_MAX_BYTES`(운영자 값, 선택) 또는 `DEFAULT`다. 운영자 값은 [1 MiB, 천장] 안이어야 하고 해석할 수 없거나 범위 밖이면 무시하며 기동 때 변수 **이름**만 경고한다(값은 찍지 않는다. 증보 3 D5와 같은 규칙). 운영자는 스위치 전에도 값을 올려 먼저 켜 보고, 셀프호스터는 낮출 수 있다. **스위치**는 `DEFAULT`를 300 MiB로 바꾸는 한 줄 PR이고 D8의 순서가 끝난 뒤 planner가 올린다.
+  - **메시지당 합계 600 MiB(천장의 2배), 개수 20은 그대로다.** 합계는 `link_attachments_in_tx`와 `reserve_attachments_in_tx`가 **둘 다**, 행을 `FOR UPDATE`로 잠근 뒤 같은 함수 하나로 판정하고, 넘으면 어떤 `UPDATE`·`INSERT`도 하기 전에 413으로 거절한다(예약 발송·에이전트 deliver는 같은 척추다). 운영자 값 `MOMO_ATTACHMENT_MAX_MESSAGE_BYTES`(선택)는 [실효 개당 한도, 600 MiB] 안이다. **합계는 스위치 전에도 적용된다**(지금은 20×100 MiB가 된다).
+  - **클라이언트가 한도를 아는 길**: `GET /v1/workspaces/{ws}/attachment-limits`(인증된 멤버 누구나. 설정 가방 `getWorkspaceSettings`는 owner·admin 전용이라 못 쓴다)가 `maxFileBytes`·`maxMessageBytes`·`maxFiles`·`chunkBytes`(없으면 `null`)를 준다. 값은 실제 거절에 쓰는 **같은 함수**에서 나온다(광고와 집행이 어긋날 수 없다). 413의 문장도 그 함수가 숫자를 찍는다. 이 응답이 없는 서버에서는 클라이언트가 100 MiB·20개로 돌아간다.
+  - **DB CHECK는 천장과 같은 300 MiB로 넓힌다**(새 migration, 번호는 착수 때 planner가 준다). 넓히기만 하므로 기존 행이 모두 통과하고, 마이그레이션이 앱보다 먼저 도는 기존 배포 순서에서 안전하다. 300 MiB 행이 생긴 뒤에는 좁힐 수 없으니 되돌릴 때 CHECK는 그대로 둔다. 다음 상향도 새 ADR과 migration이다(CHECK를 더 크게 두는 안은 비교표).
+  - **「팀 설정」은 두지 않는다.** 한도는 인스턴스(운영자) 값이고 워크스페이스별 값은 저장할 자리도 화면도 없다. 필요해지면 `workspace.settings` 키로 **내리는** 값만 더할 수 있다(천장·운영자 값을 못 넘는다). 이월.
+  - **TS에는 값이 둘이다.** 천장(300 MiB)과 서버가 알려 주지 않을 때의 기본(100 MiB)이다. 데스크탑 IPC 상한을 TS 상수에 묶는 기존 시험(`downloadsContract.test.ts`)은 **천장** 쪽에 묶여야 한다. 기본 쪽에 묶이면 상향 뒤에도 초록이라 가드가 조용히 사라진다. 천장을 TS에 들이는 PR은 #4639가 IPC를 청크로 바꾸기 전에는 이 시험이 빨개지므로 **#4639 선행이 기계적으로 강제된다.**
+  - **한도가 박힌 곳 전수** (상향 때 한 묶음으로 바뀐다):
+
+  | # | 자리 | 값 | 상향 때 |
+  |---|---|---|---|
+  | 1 | `server/Migrations/017_attachment.sql:23` `attachment_size_ck` | 104857600 | 새 migration으로 300 MiB |
+  | 2 | `momo-messaging/src/attachment.rs:67` | 100 MiB | 천장 상수와 실효 한도 함수 |
+  | 3 | `momo-drive/src/lib.rs:63`과 사용처(`ReceivedLength`, `local.rs`, `google.rs`, `routes/attachments.rs`) | 100 MiB | 같은 값. 보관소가 상수 대신 실효 한도를 설정으로 받는다 |
+  | 4 | `routes/attachments.rs:132`의 문장 「at most 100 MB」와 시험 `attachment_conformance_pg.rs:1674,1679` | 문장 | 한도 함수가 숫자를 찍는다 |
+  | 5 | `momo-workspace-actions/src/team_ai_attachments.rs:57` `TABLE_MAX_BYTES` | 104_857_600 | 같은 값. 안 올리면 요청자 본인의 큰 파일이 「너무 커요」 대신 「못 찾아요」가 된다 |
+  | 6 | `docs/api/openapi.yaml`: `CreateAttachmentUploadRequest.size`(25947)·`Attachment.size`(26026)·`MessageAttachment.sizeBytes`(26318)의 `maximum`, 413 설명 둘(11442·11495), `size` 설명의 「100 MB」 | 104857600 | 같은 값 |
+  | 7 | `packages/momo-core/src/features/attachments/model.ts:52` `MAX_ATTACHMENT_BYTES`와 `:231`의 「100MB를 초과함」 | 100 MiB | 천장과 기본으로 나눈다. 문구는 숫자를 받는다 |
+  | 8 | `clients/desktop/src-tauri/src/downloads.rs:76` `MAX_DOWNLOAD_BYTES`(IPC 한 덩이) | 100 MiB | #4639가 청크 전송으로 바꾼 뒤 |
+  | 9 | `clients/desktop/src-tauri/src/pdf_viewer.rs:61` `MAX_PDF_BYTES` | 100 MiB | **올리지 않는다.** 뷰어 메모리 한도이지 첨부 계약이 아니다. 더 큰 PDF는 내려받기로 간다. 주석·시험의 「첨부 상한과 같다」를 고친다 |
+  | 10 | `clients/web/gates/gate-attachment.mjs:1021` | 시험 값 | 천장 + 1 |
+
+  - **한 시험이 이 자리들을 같이 잰다.** 지금의 `the_ceilings_agree_with_the_check_constraint`는 Rust 상수 둘과 리터럴 하나만 맞추고 SQL·openapi·TS를 읽지 않는다. 새 시험은 마이그레이션 SQL의 CHECK, openapi `maximum` 셋, TS 천장, Rust 상수 둘을 읽어 **같은 천장**임을 단정한다(한 곳만 바꾸면 빨강).
+- **D2 · 이어 올리기** (로컬 백엔드, C4) [권장]. Railway는 요청 본문이 5분 안에 끝나야 해서 300 MiB 단일 PUT은 지속 8.4 Mbit/s가 필요하다. 8 MiB 조각은 5분 안에 끝나는 데 0.22 Mbit/s면 된다. 규약은 Google 재개 업로드의 모양이다(상태 조회와 `308`·`Range`). 같은 클라이언트 코드가 두 백엔드를 다루게 하려는 것이다.
+
+  | 업로드 주소로 보내는 `PUT` | 응답 |
+  |---|---|
+  | `Content-Range` 없음 | 지금과 같다. 한 번의 전체 본문(옛 클라이언트, 아바타·이모지 조립 흐름). 성공은 `200`, 빈 본문 |
+  | 올바른 조각: `Content-Range: bytes a-b/N`에서 `a`가 받은 길이, `N`이 선언 크기, 본문이 `b-a+1` 바이트이고, 마지막 조각이 아니면 `b-a+1`이 `chunkBytes`다 | 마지막이 아니면 `308` + `Range: bytes=0-b`. 받은 길이가 `N`이 되면 공개(세션 소진 → 메타 → 객체, 현행 순서) 뒤 `200` |
+  | `a`가 받은 길이와 다르다(앞 조각의 응답이 유실된 경우) | 바이트를 쓰지 않고 `308` + 실제로 받은 만큼의 `Range`. 받은 것이 없으면 `Range` 헤더가 없다 |
+  | `Content-Range: bytes */N`, 빈 본문(상태 조회) | `308` + 받은 만큼의 `Range` |
+  | `Content-Range`의 문법 오류, `b`가 `N` 이상, 본문 길이가 `b-a+1`과 다름, 마지막이 아닌 조각의 크기가 `chunkBytes`가 아님, 선언 크기가 0(모르는 크기)인 세션에 `Content-Range` | `400`, 바이트를 쓰지 않는다(쓰던 조각은 되감는다). 청크는 선언 크기가 있어야 한다 |
+  | 모르는·만료된·소진된 세션 | `404`, 현행과 같은 한 모양 |
+  | 같은 세션의 동시 둘째 `PUT` | `409`. 앞 조각이 끝나야 한다 |
+
+  - **`chunkBytes`는 8 MiB**(256 KiB × 32. Google의 256 KiB 배수 규칙을 지킨다). 마지막 조각만 더 작을 수 있다. `createAttachmentUpload` 응답의 선택 필드 `chunkBytes`가 있을 때만 클라이언트가 조각으로 올리고, **로컬 백엔드만 이것을 광고한다.** Google·stub은 광고하지 않아 단일 PUT이다. 브라우저가 Google 세션 주소에 `Content-Range` PUT을 보낼 때의 CORS 프리플라이트를 확인하지 못했기 때문이다(Google 청크는 이월).
+  - **단일 PUT은 그대로 받는다.** 옛 클라이언트와, `putAttachmentBytes`로 단일 PUT을 보내는 아바타·이모지 조립 흐름(웹 `makeFlow.ts`·`uploadMyAvatar.ts`·`WorkspaceSection.tsx`)이 있다. `chunkBytes`는 첨부 `createAttachmentUpload`의 응답에만 더하고 아바타 업로드 응답은 그대로다. 응답 필드는 가산이라 옛 클라이언트는 모른다.
+  - **순서와 되감기.** 조각은 순서대로, 세션당 한 번에 하나다. 조각 하나가 끝까지 도착하지 못하면(연결 끊김·길이 불일치) 파트 파일을 이전 길이로 되돌리고 받은 길이는 늘지 않는다. 응답은 파트에 다 쓴 뒤에만 나간다. 아카이브 락은 세션 상태 전이와 공개에만 쓰고 본문을 쓰는 동안은 쥐지 않는다(현행 `stream_into`와 같다).
+  - **세션 수명은 두 마감이다.** 유휴 1시간(조각이 받아질 때마다 미끄러진다. 첫 조각 전에도 만든 뒤 1시간이라 단일 PUT 클라이언트에게는 지금과 같다)과 절대 6시간(만든 때부터. 300 MiB를 지속 0.12 Mbit/s로도 끝낼 수 있는 값이다). 만료·소진·모르는 세션은 모두 같은 404다. 세션 파일은 절대 마감 필드를 더하고, 그 필드가 없는 옛 세션 파일은 조각을 받지 않는다.
+  - **308에는 `Location`이 없다.** HTTP에서 308은 영구 리디렉션이라 `Location`이 붙으면 `fetch`·XHR·URLSession이 따라간다. Google의 「308 Resume Incomplete」도 `Location` 없이 `Range`만 싣는다. 308 응답의 헤더 목록을 고정하고 시험이 `Location` 없음을 단정한다.
+  - **CORS.** `cors.rs`의 허용 요청 헤더는 의도적으로 고정이라(요청 헤더를 반사하지 않는다) 데스크탑(번들 오리진이 API 오리진과 다르다)의 청크 PUT은 프리플라이트에서 막힌다. 허용 목록에 `content-range`·`range`를, 노출 목록에 `range`·`content-range`·`accept-ranges`를 더한다(지금 노출은 `retry-after`뿐이라 교차 오리진 클라이언트가 308의 `Range`를 읽지 못한다). 고정 목록의 변경이므로 C4의 독립 보안 검수 범위다. 같은 오리진인 웹은 해당 없다.
+  - **멤버당 열린 세션 4개.** 보관소가 **살아 있는 세션**을 센다(세션 파일에 만든 멤버를 적고, `create_resumable_upload`가 멤버를 받도록 시그니처가 바뀐다. 로컬만이고 아바타 업로드의 세션도 몫에 든다). 다섯째 세션은 429(`too many open uploads`)이고 행도 파일도 만들지 않는다. 만료·소진·재시작으로 사라진 세션은 세지 않으므로 끊긴 시도가 몫을 쥐지 않는다. `pending` 행으로 세지 않는 까닭: 재시작이 세션을 지워도 행은 남아 정상 사용자를 막고, 행이 오래돼도 조각으로 살려 둔 세션은 상한을 빠져나간다. 지금의 시작 예산(분당 60)과 별개다. 클라이언트는 파일을 하나씩 올리므로 정상 사용은 1~2개다.
+  - **디스크 예약(로컬만).** 새 세션은 `여유 − 열린 세션들의 남은 바이트(선언 − 받은) ≥ 선언 + 1 GiB`일 때만 만든다. 아니면 507(`storage is full`, 새 `DriveError`)이고 `attachment` 행도 세션 파일도 만들지 않는다. 조각을 쓰다 `ENOSPC`가 나도 507이고 파트는 되감는다. 여유는 볼륨의 `statvfs`다(D7). 시험이 결정적이도록 여유를 읽는 함수를 주입할 수 있어야 한다.
+  - **파트는 요청을 넘어 산다 → 청소가 필요해진다.** 지금의 `PartFile`은 요청이 끝나면 지워진다. 청크의 파트는 세션과 같이 살고 세션이 만료·소진되면 지운다. 접근 때 지우는 현행 방식에 더해 60초 주기 청소가 만료된 세션의 파트와 세션 파일을 지운다(보관소 안의 일이라 DB가 필요 없다).
+  - **재시작은 세션과 파트를 지운다(#2628 그대로).** 배포가 업로드를 끊으면 클라이언트는 상태 조회에서 404를 받고 0부터 다시 한다(남는 위험). **이월**: 재시작을 건너는 이어 올리기. 그 모양이라면 세션은 살리지 않고 파트만 살리며, 새 주소는 PG가 첨부를 `pending`으로 확인한 **인증 호출**로만 내준다. 주소가 파트를 새로 만들 수 없으므로 복원된 스냅샷이 이미 `complete`인 파일 id를 채우는 위험(`local.rs` 머리말, #2628)은 다시 열리지 않는다. 이 증보는 이것을 정하지 않는다.
+  - **`complete`는 그대로**다(측정 크기·mime 대조). 다만 실효 한도로 다시 잰다. **마지막 조각의 응답이 유실되면** 클라이언트는 상태 조회에서 404를 받는다(세션이 소진됐다). 그때는 `complete`를 부른다. 멱등이라 객체가 있으면 200, 없으면 404 또는 409이고 그러면 처음부터 한다.
+  - **바뀌는 불변식**: `momo-drive/lib.rs:80-91`의 「한 요청이 한 업로드」 전제와 「요청이 끝나면 파트를 지운다」는 규칙은 이 절이 **청크에 한해** 바꾼다(단일 PUT은 그대로). 바뀌지 않는 것은 재시작이 세션을 지우는 규칙, 공개된 객체를 어떤 세션으로도 덮어쓰지 않는 규칙, 공개 때 세션이 소진되는 규칙이다. `UPLOAD_SESSION_TTL`의 주석(「이 경로에는 재개 프로토콜이 없다」)은 C4가 고친다.
+- **D3 · 구간 읽기와 HEAD** (C3) [권장]. Bearer content 경로가 `Range`와 `HEAD`를 받는다.
+  - **판정 순서가 계약이다.** ① 인증 ② 활성 채널 멤버 ③ 읽기 술어(`load_readable_attachment_in_tx`) ④ `status = complete`를 지난 **다음에** `Range`를 해석한다. ①~④가 실패하면 `Range`가 있어도 지금의 응답(비멤버 403, 그 밖은 같은 404)과 상태·본문이 같다. 416은 **읽을 수 있는 파일에만** 나가므로 `Range`가 파일의 존재·크기를 묻는 오라클이 되지 못한다.
+
+  | 요청 | 응답 |
+  |---|---|
+  | `Range` 없음 | `200`, 전체, `Content-Length`와 `Accept-Ranges: bytes` |
+  | 단일 범위 `bytes=a-b`·`bytes=a-`·`bytes=-n`이고 만족할 수 있다 | `206`, `Content-Range: bytes s-e/크기`, `Content-Length: e-s+1`, 그 구간의 바이트만. `e`가 크기를 넘으면 `크기-1`로 줄이고 `-n`의 n이 크기 이상이면 전체 구간이다 |
+  | 만족할 수 없다(`a`가 크기 이상, `-0`) | `416`, `Content-Range: bytes */크기`, 본문은 오류 JSON |
+  | 다중 범위, 모르는 단위, 문법 오류, `If-Range`가 붙은 요청, 크기 0 | `Range`를 무시하고 `200` 전체. RFC 9110이 무시를 허용한다. 검증자(ETag·Last-Modified)를 내지 않으니 `If-Range`는 맞을 수 없다. 다중 범위를 멀티파트로 풀면 겹치는 범위로 응답이 부풀 수 있어 풀지 않는다 |
+  | `HEAD` | 같은 판정 뒤 같은 헤더에 본문 0바이트. 보관소를 읽지 않는다 |
+  | 그 밖의 메서드 | `405` |
+
+  - **헤더.** 200·206·416·HEAD 모두 `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store, no-transform`, `Accept-Ranges: bytes`다. **인라인 렌더 금지는 그대로다.** 206도 `attachment`다. 미디어 요소는 보통 disposition을 무시해 재생은 되고 주소창으로 열면 내려받기가 된다(미검증). `no-transform`은 엣지의 압축·변형을 막으려는 새 항목이다(아래 엣지).
+  - **헤더의 크기·mime은 DB 행에서 나온다**(`size_bytes`, `mime`). GET·HEAD·206이 한 곳에서 나온다. `complete`가 측정 크기를 기록하고 보관소가 같은 크기를 말해야 완료되므로 행이 곧 보관소의 사실이다. 보관소가 말하는 총 길이가 행과 다르면 502로 닫는다(Google은 상류 `Content-Range`의 총량과 대조한다).
+  - **보관소에 구간 읽기를 더한다**(`DriveArchive`, 세 백엔드). 로컬은 파일을 열어 시크한 뒤 구간만 청크 단위(64 KiB~1 MiB)로 흘리고 **스트림 동안 아카이브 락을 쥐지 않는다**(지금은 락 안에서 `fs::read`로 전체를 읽는다). Google은 `Range`를 그대로 넘기고 상류의 206·416을 옮기며, 크기를 DB가 알려 주므로 지금의 선행 메타 호출을 생략한다. stub은 메모리 슬라이스다. 모든 GET이 구간 읽기 하나를 쓴다(구간 없음 = 전체). HEAD는 보관소를 열지 않으므로 HEAD가 200이어도 GET이 보관소 오류일 수 있다(남는 위험). 시그니처는 C3의 몫이고 위의 동작이 계약이다.
+  - **메모리는 파일 크기와 무관하다.** 300 MiB 객체 넷을 동시에 읽는 동안 프로세스 RSS 증가가 64 MiB 이하여야 한다(수용기준. Linux `/proc/self/status`, 소비자는 받은 바이트를 버리며 읽는다).
+  - **엣지.** Caddyfile 넷이 모두 `encode zstd gzip`을 전역으로 두는데 206·`Content-Range`·영상 mime을 어떻게 다루는지는 확인하지 못했다. `no-transform`으로 막고, C3은 Caddy를 앞에 둔 실제 요청으로 206의 `Content-Range`·`Content-Length`가 그대로이고 `Content-Encoding`이 붙지 않음을 잰다.
+  - **요율.** content 읽기에는 멤버별 요율 제한이 없다(`MemberWrite`는 쓰기 예산이다). 영상이 분당 수십 번 보내는 `Range`가 재생을 막지 않는다. 반대로 한 멤버의 큰 반복 읽기를 막는 장치도 없다(남는 위험).
+  - **15분.** Railway는 한 응답을 15분 넘게 두지 않는다. 300 MiB를 2.8 Mbit/s 아래로 받는 클라이언트는 구간으로 받아야 한다(#4639·C7). 서버는 구간 응답을 지원한다.
+- **D4 · 스트림 주소** (웹·데스크탑 재생, C3b) (웹 서명 주소·데스크탑 앱 안 재생은 owner 결정, 모양은 [권장]). ADR-0151 D3의 「인가 프록시 단일 경로」에 이 증보가 더하는 **유일한 예외**다. D3는 이제 「단일 인가 함수」로 읽는다. Bearer 경로(`content`)와 능력 경로(`stream`)가 같은 두 함수(`is_attachment_channel_member`, `load_readable_attachment_in_tx`)를 부르므로 두 경로의 판정이 어긋날 길이 없다.
+  - **왜 필요한가.** `<video src>`는 `Authorization` 헤더를 못 싣는다. blob은 CSP가 `media-src`에 `blob:`을 열지 않고 300 MiB를 메모리에 올려야 해서 못 쓴다. self-media 주소(1회용)는 `<video>`가 `Range` 요청을 되풀이하므로 둘째 요청에서 죽는다.
+  - **발급**: `POST /v1/workspaces/{ws}/channels/{ch}/attachments/{id}/stream-url`, 본문 `{kind}`(`play` 또는 `save`). 사람 bearer만이고(좁은 토큰·에이전트는 403) 멤버당 분당 120회다. 읽기 술어를 **발급 때도** 판정하고(안 되면 content와 같은 403·404), `play`는 저장된 mime이 닫힌 목록일 때만 발급한다. 응답은 `{path, expiresAtMs}`이고 `path`는 `/v1/stream/{ws}/{token}`이다. 클라이언트가 자기 API 기준 주소에 붙인다(서버가 오리진을 만들지 않으므로 Host 파생을 믿을 일이 없다).
+  - **공개 경로** `GET`·`HEAD /v1/stream/{ws}/{token}`: 능력 주소가 유일한 권한이다(self-media와 Drive 스텁의 전례). 다른 메서드는 405다. 경로의 `{ws}`는 canonical 소문자 id여야 한다(self-media와 같다).
+  - **토큰**은 상태 없는 HMAC-SHA256이다. 키는 서버 비밀(JWT 서명 키)에서 도메인 라벨로 **파생한 전용 키**다(서명 키를 그대로 쓰지 않고 새 비밀 변수도 만들지 않는다). MAC은 {버전, 종류, 워크스페이스, 첨부, 멤버, 만료}를 덮는다. **TTL은 10분이고 그 안에서 여러 번** 쓸 수 있다.
+  - **요청마다 판정한다.** 서명·만료를 확인하고(DB 앞), 토큰의 멤버로 두 함수와 `status = complete`를 판정하고(채널은 첨부 행에서 읽고 그 채널로 멤버십을 판정하므로 토큰이 채널을 정하지 않는다), 구간 응답(D3과 같은 한 함수)을 낸다. 멤버가 떠나거나 정지·삭제되고, 메시지가 지워지고, 채널이 보관되면 **다음 요청부터** 404다. 이것이 회수 장치이고 TTL은 상한일 뿐이다. **로그아웃·세션 폐기는 이 주소를 끊지 않는다(최대 10분).** 좁은 토큰의 전례(push_fetch·push_action)는 세션 계보에 묶었지만 그 토큰들은 6시간이고, 이 주소는 10분에 파일 한 개 읽기라 행·계보 조회·상한의 비용이 이득보다 크다고 본다(비교표). TTL을 30분 넘게 늘리면 이 판단을 다시 한다.
+  - **거절은 한 모양이다.** 모양 틀림·서명 불일치·만료·종류 불일치·비멤버·지운 메시지·남의 초안·없는 파일·허용 목록 밖 mime이 모두 같은 404다(바이트까지 같다. 공개 경로가 멤버십을 말하지 않으므로 403은 없다). 위조 토큰은 DB를 건드리지 않고, 404만 호출 주소(per-IP) 예산을 쓴다. Drive 스텁 게이트(`per_ip_drive_upload`)의 전례를 따라 핸들러가 먼저 판정하고 **살아 있는 주소는 예산이 바닥나도 거절하지 않는다**(엣지 주소 하나가 인스턴스 전체일 수 있어, 가짜 토큰 홍수가 정상 재생을 막으면 안 된다. 핸들러 앞에서 막는 `per_ip_self_media`식은 택하지 않는다).
+  - **응답**은 구간 읽기와 같은 함수·같은 헤더에 `Referrer-Policy: no-referrer`가 더해지고 리디렉션은 없다. `play`는 저장된 mime이 `video/mp4`·`video/quicktime`·`video/webm`일 때만 나가고 `Content-Type`은 저장된 mime이다. 이 목록 덕에 주소를 주소창에 열어도 문서가 렌더되지 않는다(`attachment`·`nosniff`에 더한 둘째 겹이다). 목록을 늘리는 것은 이 ADR의 증보 사안이다. `save`(웹의 큰 파일 내려받기: blob 메모리 없이 브라우저 내장 다운로드)는 모든 mime을 받되 `Content-Type: application/octet-stream`으로 고정하고 `Content-Disposition: attachment; filename*=UTF-8''<퍼센트 인코딩한 이름>`을 낸다(이름이 헤더로 쓸 수 없는 값이면 `attachment`만). `save`는 C7이 쓸 때 구현한다.
+  - **로그·감사.** 토큰은 어떤 로그·감사·오류에도 없다. API에는 공통 요청 로그 층(`TraceLayer`)이 없고(경로를 찍는 줄은 옛 게이트웨이 비밀 경로의 `auth.rs:718` 하나다) Caddyfile 넷에는 접근 로그 지시어가 없다. Railway 엣지의 HTTP 로그가 경로를 남기는지는 확인하지 못했다(그래서 TTL이 짧다). 발급은 감사하지 않는다(읽기마다 감사하지 않는 현행과 같다).
+  - **폰**은 같은 주소를 쓰는 것이 [권장]이다. 헤더로 보내는 길(`expo-video`의 `headers`)은 access 토큰이 15분이라 긴 재생·탐색 중에 만료되고, 네이티브 플레이어는 헤더를 에셋을 만들 때 고정한다(미검증).
+  - **CSP.** 웹은 같은 오리진이라 `default-src 'self'`가 `media-src`를 덮으므로 **변경이 없다**(웹 Caddyfile 넷과 `gate-csp-deploy.mjs`는 `media-src` 없이 그대로). 데스크탑은 `tauri.conf.json`에 **`media-src 'self' http: https:`**를 더한다. `connect-src`와 같은 모양이다(서버 주소는 사용자가 정하고 셀프호스트는 http일 수 있다). `blob:`은 택하지 않는다(영상 전체를 메모리에 올려야 한다, 300 MiB). `img-src 'self' data:`는 그대로다. `media-src`가 넓어지는 대가로 **앱이 `<video>`·`<audio>` 요소를 만드는 곳은 재생기 컴포넌트 하나뿐**임을 정적 시험으로 못 박는다(메시지 본문이 원격 미디어를 부르는 길이 없다는 근거다). 이 CSP 변경의 기록은 ADR-0133 증보로 C7이 같은 PR에서 쓴다(값은 여기서 정한다).
+  - **공개 보안 문장.** `docs/security/claims.yaml:147`의 「익명 요청은 401」은 스트림 주소가 생기면 그대로는 거짓이다(능력 주소는 Bearer 없이 바이트를 준다). C3b가 문장과 증명을 같은 PR에서 고친다(정책 감사 대상인지 planner가 확인한다).
+- **D5 · 영상 메타와 포스터** (C5) [권장].
+  - **만드는 곳은 보내는 기기다.** 폰이 첫 구현이다. 웹·데스크탑은 로컬 파일을 `<video>`로 읽어야 해서 `media-src blob:`이 필요하므로 이월한다(그때까지 웹·데스크탑이 올린 영상은 포스터 없이 카드로 보인다). **서버는 영상을 파싱하지도 변환하지도 않는다.** ffmpeg는 이미지에 없고 라이선스·공격면·CPU가 문제이며, 증보 4 D7이 파서를 자식 프로세스에 가둔 전례처럼 적대 형식의 파싱은 가둬야 한다. HLS·서버 변환은 아이디어로만 둔다.
+  - **저장은 PG다.** 첨부 id에 1:1인 표 `attachment_media`(`ON DELETE CASCADE`, RLS FORCE)에 `duration_ms`(1..86,400,000), `width`·`height`(1..16,384), 포스터 `poster_mime`(`image/jpeg`·`image/webp`), `poster_width`·`poster_height`(1,280 이하), `poster_bytes`(`bytea`, 256 KiB 이하)를 둔다. 보관소에는 서버가 바이트를 쓰는 API가 없고(131 아바타 이미지가 같은 이유로 PG에 둔다), 포스터를 둘째 첨부 행으로 두면 「묶이지 않은 초안은 업로더만 읽고 30일 뒤 청소된다」는 규칙에 걸려 다른 멤버에게 안 보이거나 지워진다.
+  - **쓰기**: `PUT /v1/workspaces/{ws}/channels/{ch}/attachments/{id}/media`, JSON `{durationMs, width, height, poster: {mime, dataBase64}}`(본문 상한 512 KiB). **업로더 본인이 `complete`이고 아직 메시지에 묶이지 않은 첨부에만** 쓴다(멱등 교체). 서버 검증: 저장된 mime이 닫힌 영상 목록(`video/mp4`·`video/quicktime`·`video/webm`)이고 `read_prefix`로 읽은 첫 바이트에 `ftyp`(mp4·mov, 오프셋 4) 또는 EBML(`1A 45 DF A3`, webm) 매직이 있다. **새 파서 crate는 쓰지 않는다**(이슈 #4673의 「mp4 헤더 검사」는 이 매직 확인으로 줄인다). 포스터는 `sniff_image_mime`(JPEG·WebP 매직)·`image_dimensions`(헤더 치수)·크기로 바이트를 검증한다. 길이·치수는 **선언값의 범위만** 검증한다(클라이언트가 거짓이면 레이아웃만 틀어진다).
+  - **읽기**: `GET …/attachments/{id}/poster`가 content와 같은 인가·같은 헤더 셋·같은 404를 쓴다. 메시지 투영의 `attachments[]`에는 영상일 때만 `media: {kind, durationMs, width, height, hasPoster}`를 **더한다**(가산). 포스터 바이트는 투영·`message.new` 프레임·outbox 페이로드 어디에도 싣지 않고, 목록 질의는 `poster_bytes`를 고르지 않는다.
+  - **신뢰**: 포스터가 그 영상의 실제 프레임이라는 보장은 없다(남는 위험). 쓰기는 감사한다(`attachment.media_set`, 종류만이고 내용·이름은 없다). 회수는 행 CASCADE가 따라간다.
+- **D6 · 폰 영상 압축 기본값** (구현은 F1 #4586, 값은 여기서 정한다) [권장].
+  - 기본은 「일반 화질」이다. `expo-image-picker`의 내보내기 프리셋 `H264_1280x720`(H.264·AAC, 해상도가 정해져 있어 어디서나 재생되고 크기를 가늠할 수 있다. `MediumQuality`는 해상도가 기기에 달렸다). 「원본」은 `Passthrough`이고 **보낼 때마다 직접 고른다**(기억하지 않는다. 셀룰러에서 원본 300 MiB를 실수로 올리지 않게 한다).
+  - 줄인 결과도 한도를 넘으면 「너무 커요」로 거절하고, 자동으로 더 줄여 다시 시도하지 않는다. 웹·데스크탑은 영상을 변환하지 않는다. 안드로이드는 이 프리셋이 없어(iOS 옵션) 원본만 올린다.
+  - **미검증 셋.** ① 설치된 타입 정의(`expo-image-picker` 57)가 `videoExportPreset`을 deprecated로 표시한다(Apple `UIImagePickerController` 문서를 가리킨다). 라이브러리(PHPicker) 경로에서 프리셋이 실제로 적용되는지 실기로 확인한다. ② **위치 메타가 지워지는지** 모르므로 화면 문구는 위치 제거를 약속하지 않는다. ③ 안 되면 `AVAssetExportSession` 직접 사용이 대안이다(용량 상한·faststart·메타 필터가 정밀하지만 [ADR-0168](0168-mobile-photo-picker-native-dependency.md)급 네이티브 결정이다).
+  - **폰 청크 읽기**: `expo-file-system` 57의 `File.slice(start, end)`(Blob)와 `FileHandle.readBytes(length)`·`offset`이 타입에 있다. 8 MiB 단위로 읽을 수는 있다. 실기의 성능·메모리와 Blob을 `fetch`로 PUT할 때의 거동은 미검증이다. 폰 청크 업로드를 맡은 이슈가 아직 없다(남은 것).
+  - 폰의 올리기 순서는 고름 → 줄임 → 포스터·길이 뽑기 → create → 조각 → complete → `PUT …/media`(실패해도 보내기는 진행) → 전송이다.
+- **D7 · 보관·회수·사용량** (C6) (만료 없는 보관 + 회수·사용량은 owner 결정, 나머지는 [권장]).
+  - **살아 있는 메시지에 묶인 파일은 기간으로 지우지 않는다**(owner 결정).
+  - **회수**: 증보 2 D4 청소기에 **가지 하나**를 더한다. 지운 메시지에 묶인 완료 첨부 중 `COALESCE(m.deleted_at, a.created_at)`이 30일보다 오래된 것이다(`state`만 또는 `deleted_at`만 쓰인 반쪽 무덤도 포함하고, 시각이 비면 업로드 시각이 기준이라 더 늦게 거둔다). 같은 `NO_OTHER_HOLD_SQL`(huddle 세 열·아바타 두 표), 같은 저장점 순서(행 삭제와 감사를 먼저, 보관소는 나중), `attachment.expired` + `reason: deleted_message`다. 이 가지가 열리면 증보 2의 참조 전수 표 A1(「묶인 행은 후보가 아니다」)이 바뀌므로, A1과 점검 SQL(청소기의 술어와 **글자까지 같다**는 단위 시험)과 새 FK 탐지를 같은 PR에서 고치고 표에 **A6: `attachment_media`(CASCADE)**를 더한다. 기본 꺼짐·건조 실행 줄·점검 SQL 절차는 그대로이고 **켜기는 owner가 새 가지의 건조 실행 숫자를 본 뒤** 한다.
+  - **사용량**: 워크스페이스별 `SUM(size_bytes)`(`status = 'complete'`)를 RLS-bound 테넌트 tx로 센다. 이유별(살아 있음, 지운 메시지, 초안, 진행 중)로 나눠 owner·admin 화면에 보인다. **로컬 백엔드는 볼륨 사용률을 `statvfs`로 재어 80%에서 경고**한다(owner·admin 알림과 로그 한 줄, 반복은 억제). 안전한 래퍼로 읽는다. 새 `unsafe`는 금지이고(`unsafe-allowlist.tsv`), `rustix`가 이미 `Cargo.lock`에 있으며 그 라이선스를 `deny.toml`이 허용한다. Google 백엔드에는 볼륨 경고가 없고 사용량(DB 합계)만 있다. **하드 쿼터는 두지 않는다**(작은 팀이고 실제 한도는 디스크이며, 만들기 전 거절은 D2의 디스크 예약이 맡는다).
+  - **비용**: 요금표·플랜 한도·볼륨 크기는 운영 값이라 여기 적지 않는다. 읽기가 모두 api를 지나므로 전송 요금이 사용량과 같이 늘 수 있다는 사실과 계산식만 남긴다: 300 MiB × N개, 100개면 약 29 GiB다.
+  - 진행 중 업로드의 파트는 D2의 청소가 맡는다. 사용자가 초안 첨부를 지울 때 곧바로 거두는 API(`DELETE …/attachments/{id}`)는 이월한다(30일 청소가 거둔다).
+- **D8 · 순서와 스위치** (안전 장치).
+  1. C3(읽기)는 독립으로 먼저 선다.
+  2. #4639(데스크탑 큰 파일 청크 전송)는 천장을 TS에 들이는 C4의 한도 PR보다 앞이다. `downloadsContract.test.ts`가 기계적으로 강제한다(D1).
+  3. C4 1단계(청크 서버·CORS·열린 업로드 상한·디스크 예약·파트 청소) → 2단계(한도 함수·천장·CHECK·`attachment-limits`·메시지 합계).
+  4. C3b는 C3 뒤다. C5·C6은 서로도 C3와도 독립이다. C7은 C3·C3b·C4·C5 뒤이고 폰 F1은 C3·C3b·C5 뒤다.
+  5. **스위치**는 C3·C4·#4639·C6·C7(웹·코어)이 착륙하고 스택 검증(실기기 포함)이 끝난 뒤 planner가 `DEFAULT`를 300 MiB로 올리는 것이다. 그 전에 owner 인스턴스는 `MOMO_ATTACHMENT_MAX_BYTES`로 먼저 시험할 수 있다.
+
+### 비교한 방식
+
+| 결정 | 방식 | 판단 |
+|---|---|---|
+| 천장·CHECK | **[권장]** CHECK = 천장 300 MiB, 운영자 값은 [1 MiB, 천장], 기본값은 마지막에 스위치 | 능력과 노출을 나눠 순서를 지킨다. 같은 값이 여러 자리라 한 시험이 읽는다 |
+| | CHECK를 1 GiB처럼 더 크게 두고 env 기본만 300 | 기각. CHECK가 계약의 한 자리가 아니게 되어 「의도한 여유」와 어긋남을 시험이 구별하지 못한다. 다음 상향은 어차피 ADR이다(ADR-0100) |
+| | 100 MiB 유지, 500 MiB, 1 GiB | owner 결정이 300 MiB다 |
+| | 스위치 없이 한 번에 올림 | 기각. 데스크탑 IPC(64 MiB에 +569 MiB), 로컬의 전체 메모리 읽기, Railway 5분이 먼저 풀려야 한다 |
+| 업로드 규약 | **[권장]** Google 모양(`Content-Range`·`308`·상태 조회) | 같은 클라이언트 코드가 두 백엔드를 다룬다 |
+| | tus(HEAD로 오프셋, PATCH로 잇기) | 기각. 둘째 프로토콜이고 Google 백엔드와 모양이 달라 클라이언트가 둘이 된다 |
+| | S3 멀티파트 | 기각. Rust에 S3 백엔드가 없다(ADR-0151 옵션 2) |
+| 재시작 | **[권장]** 세션·파트를 지운다(#2628 그대로) | 0부터. 남는 위험으로 둔다 |
+| | 세션을 살린다 | 기각. 복원된 스냅샷이 이미 `complete`인 파일 id를 채우는 위험이 돌아온다 |
+| | 파트만 살리고 인증 호출로 새 주소를 낸다 | 안전하지만 상태 파일·인증 경로·청소가 는다. 쓰다가 판단한다(이월) |
+| 재생 인증 | **[권장]** 상태 없는 서명 주소(10분, 다회) + 요청마다 재판정 | 회수는 재판정이 맡고 TTL은 상한이다 |
+| | self-media식 1회용 DB 토큰 | 기각. `<video>`의 둘째 `Range` 요청에서 죽는다 |
+| | push_fetch식 세션 계보에 묶은 좁은 토큰 | 로그아웃이 즉시 끊지만 행·계보 조회·상한이 는다. 10분에 파일 하나라 이득이 작다. TTL이 30분을 넘으면 다시 본다 |
+| | 쿠키 | 기각. API가 쿠키 인증이 아니고 데스크탑은 교차 사이트라 WKWebView가 막는 것으로 보인다(미검증) |
+| | 서비스워커로 헤더 주입 | 기각. 데스크탑 CSP가 `worker-src 'none'`이고 토큰 갱신이 복잡하다 |
+| | blob 재생 | 기각. `media-src blob:` CSP 변경에 300 MiB 메모리 |
+| TTL | 5분 | 노출은 줄지만 탐색 때마다 갱신이 잦다 |
+| | **[권장]** 10분 | `<video>`가 탐색·재연결 때 새 요청을 내는 빈도와 오류 때 다시 받는 경로 사이의 값 |
+| | 30분 이상 | 갱신은 줄지만 경로·HTTP 로그에 남은 주소의 값이 커진다 |
+| 서명 키 | **[권장]** JWT 서명 키에서 도메인 라벨로 파생 | 새 비밀 변수의 회전·배포 부담이 없다 |
+| 포스터 저장 | **[권장]** PG `bytea` 표(131 전례) | 회수가 CASCADE로 따라가고 같은 읽기 술어를 쓴다 |
+| | 둘째 첨부 행 | 기각. 초안 규칙·30일 청소와 부딪힌다 |
+| | 서버 생성(ffmpeg) | 기각. 이미지에 없고 라이선스·공격면·CPU가 문제다 |
+| 영상 검증 | **[권장]** 선언값 범위 + 첫 바이트 매직 | 파서가 없으니 공격면이 늘지 않는다 |
+| | `mp4` crate로 헤더 파싱(길이·코덱·faststart) | 기각(v1). 적대 형식 파서와 새 의존의 NOTICE. 필요하면 자식 프로세스에 가두는 별도 결정 |
+| 폰 압축 | **[권장]** picker 프리셋 `H264_1280x720` | 새 네이티브 코드가 없다 |
+| | `AVAssetExportSession` 직접 | 정밀하지만 ADR-0168급 네이티브 결정이다. 프리셋이 안 통하면 대안이다 |
+| 데스크탑 CSP | **[권장]** `media-src 'self' http: https:` | `connect-src`와 같은 모양이고 한 줄이다 |
+| | 커스텀 프로토콜 + Rust 프록시(Authorization·Range) | 더 좁지만 새 네이티브 코드와 보안 면이다 |
+| 회수 기본값 | **[권장]** 기본 꺼짐 유지, 켜기는 owner | 영상이 쌓인 인스턴스가 업그레이드 직후 한꺼번에 거두는 일을 막는다 |
+
+### C3~C7 슬라이스
+
+등급은 이슈 계약의 등급이다(2 = 보안 경계·공개 API 계약을 바꾼다). migration 번호는 이 증보가 쓰지 않는다(착수 때 planner가 준다).
+
+| 슬라이스 | 이슈 | 일 | 의존 | 크기 | 등급 | migration | 검수 |
+|---|---|---|---|---|---|---|---|
+| C3 | #4671 | 로컬 스트리밍 읽기, `Range`·`HEAD`, Google 전달, `no-transform`, 모든 GET을 구간 읽기 하나로 | 이 증보 Accepted | M | 2 | 없음 | 독립 보안 검수(인가 경계 불변) |
+| C3b | 신규 이슈 필요 | 스트림 주소: 발급·공개 경로·토큰·per-IP 예산·`claims.yaml` 문장과 증명 | C3 | M | 2 | 없음 | 독립 보안 검수 |
+| C4 | #4672 | 1단계: 청크 서버·CORS 목록·열린 업로드 상한·디스크 예약·파트 청소. 2단계: 실효 한도 함수·천장·CHECK·`attachment-limits`·메시지 합계·한도 표의 모든 자리(**스위치 제외**) | #4639, C3와 같은 모듈이라 순서는 통합자 | L(2단계) | 2 | 1(CHECK 넓힘) | 독립 보안 검수 B0·H0 |
+| C5 | #4673 | `attachment_media` 표, `PUT …/media`, `GET …/poster`, 투영 | 이 증보(C3와 독립) | M | 2 | 1 | 보안 검수 |
+| C6 | #4674 | 지운 메시지 가지, 점검 SQL, 사용량, 80% 경고 | #4443 | M | 2 | 없음 | 독립 보안 검수 |
+| C7 | #4675(+#4588) | 웹·코어 청크 클라이언트, 스트림 주소 재생(웹·데스크탑), 데스크탑 `media-src`와 ADR-0133 증보, `save` 선택 | C3·C3b·C4·C5 | M | 1 | 없음 | design-review |
+| F1 | #4586 | 폰 영상 고르기·줄이기·포스터·재생과 **폰 청크 업로드(맡은 이슈 없음)** | C3·C3b·C5, [ADR-0168](0168-mobile-photo-picker-native-dependency.md) 증보(`expo-video`·저장 문구·마이크) | L | 1 | 없음 | design-review |
+| 스위치 | C4의 마지막 줄 또는 소 PR | `DEFAULT` 100 MiB → 300 MiB | D8의 5 | S | 2 | 없음 | planner |
+| #4639 | UXUI | 데스크탑 큰 파일 청크 전송(`downloads.rs:76`) | 없음(`Range` 없이도 된다) | M | 1 | 없음 | design-review |
+
+### 바뀌지 않는 것
+
+인가의 두 함수와 그 술어(활성 채널 멤버, 살아 있는 메시지에 묶였거나 묶이지 않은 업로더 본인의 초안, `complete`), Bearer content 경로의 거절 모양(비멤버 403, 그 밖은 404), 인라인 렌더 금지(`attachment`·`nosniff`·`no-store`), Drive 주소 비노출, 에이전트 업로드 제외, 바이러스 스캔 없음, 종류 제한 없음(영상은 표시를 키울 뿐 첨부의 정의를 바꾸지 않는다. 재생이 안 되면 내려받기 카드로 남는다), `complete`·묶기의 업로더 규칙, 증보 2의 회수 안전 규칙(같은 hold·저장점 순서·기본 꺼짐), 워커의 읽기 길(증보 3·4의 `self-media`와 1회용 주소), 단일 PUT 경로(옛 클라이언트·아바타·이모지), 재시작이 세션을 지우는 규칙(#2628).
+
+### 이슈·리서치 문구와 다른 곳
+
+① 이슈 #4585 코멘트와 #4671~#4675 본문의 「증보 3」은 이 증보(5)다. ② 이슈 코멘트의 「Accepted로 써요」는 칸 지시대로 Proposed다(독립 설계 검토 뒤 Accepted). ③ #4673의 「mp4 헤더 검사」는 첫 바이트 매직 확인으로 줄였다(D5). ④ #4672의 「한도 상향 마이그레이션(CHECK)·openapi·상수 한 곳」은 천장을 넓히는 일(C4)과 기본값을 올리는 일(스위치)로 나눴고, 한 시험이 여러 자리를 읽는다(D1). ⑤ #4584의 「앱 플레이어는 인증 헤더로 받아요」는 웹·데스크탑은 주소(헤더를 못 싣는다), 폰도 주소를 권장한다(access 토큰 15분). ⑥ 서버 쪽 스트림 주소(발급·공개 경로)를 맡은 이슈가 없다(C3b 신규 필요). ⑦ 폰 청크 업로드를 맡은 이슈가 없다(#4586에 넣거나 신규).
+
+### 남는 위험
+
+1. **스트림 주소는 Bearer 없이 바이트를 준다.** 10분·파일 하나·요청마다 재판정이지만 로그아웃·세션 폐기는 이 주소를 끊지 않는다.
+2. Railway 엣지의 HTTP 로그가 경로(토큰)를 남기는지 확인하지 못했다. 짧은 TTL이 완화책이다.
+3. `Content-Disposition: attachment` 아래의 `<video>` 재생과 `Range` 탐색, `no-store`가 재생 캐시에 미치는 영향이 WebKit(Safari·WKWebView)에서 미검증이다.
+4. `Location` 없는 308을 `fetch`·XHR·URLSession이 정상 응답으로 돌려주는지, Railway 엣지·Caddy를 그대로 지나는지 미검증이다.
+5. 배포가 업로드를 끊으면 0부터 다시 한다(재시작을 건너는 이어 올리기는 이월).
+6. Google 백엔드의 브라우저 청크는 CORS 프리플라이트를 확인하지 못해 광고하지 않는다. Google은 단일 PUT 300 MiB다.
+7. 클라이언트가 보낸 포스터·길이·치수는 믿지 않고 범위와 바이트만 잰다. 포스터가 그 영상의 프레임이라는 보장은 없다.
+8. 메시지당 합계 600 MiB는 스위치 전에도 적용된다(지금의 20×100 MiB가 줄어든다).
+9. 한 멤버의 반복 대용량 읽기(전송 요금)를 막는 장치가 없다. 이상 징후가 보이면 멤버별 바이트 예산을 더한다.
+10. 데스크탑 `media-src`가 http·https 전체로 넓다. 미디어 요소를 만드는 곳이 하나뿐이라는 정적 시험에 기댄다.
+11. HEAD는 보관소를 읽지 않아 200 뒤에 GET이 보관소 오류일 수 있다.
+12. 폰 영상 내보내기가 위치 메타를 지우는지 모른다. 문구가 약속하지 않는다.
+13. 채널·워크스페이스를 지우는 CASCADE는 보관소 객체를 고아로 남긴다(증보 2의 위험이 큰 파일에서 더 비싸진다).
+14. 열린 업로드 4개와 디스크 예약은 정상 사용자를 막을 수 있다. 예약은 보수적이라 60초 청소 주기 사이에 만료된 세션의 남은 바이트가 계산에 남는다.
+15. 데스크탑 IPC가 선형으로 늘면 300 MiB 한 건에 메모리가 약 +2.6 GiB다(64 MiB에서 +569 MiB를 잰 값에서 늘린 추정이며 측정이 아니다). #4639 전에는 올리지 않는다(D1의 시험이 강제한다).
+16. 웹·데스크탑이 올린 영상은 포스터가 없다(이월).
+
+### runtime-unverified
+
+이 증보는 문서뿐이라 코드를 실행하지 않았다. 읽은 코드 사실은 track/engine `195c304f3` 기준이고, Railway의 5분·15분과 Google 재개 업로드의 규칙(256 KiB 배수, 세션 1주, 상태 조회, 308)은 공식 문서를 2026-11-02에 읽은 값이다. 실행으로 확인하지 못한 것: 실제 Railway 엣지 위의 206·308·`Content-Range`·HTTP 로그, Caddy `encode`의 206 처리, 브라우저·WKWebView의 `attachment` 아래 `<video>` 재생과 `Range` 탐색, `fetch`·XHR·URLSession의 Location 없는 308 처리, 폰 `videoExportPreset`의 실제 적용과 위치 메타, `expo-file-system` 구간 읽기와 Blob PUT, Google 브라우저 청크의 CORS, 300 MiB 동시 읽기의 실제 RSS(수용기준은 C3의 몫).
+
+### red proof
+
+시험 이름은 제안이고 구현 칸이 정한다. 단정은 실제 바이트 수·헤더 값·행 수를 재야 하고(실 PG는 두 테넌트와 비우회 역할), 컴파일 실패는 RED로 세지 않는다.
+
+| 결정 | 시험(제안) | 분기를 지우면 빨강 | 칸 |
+|---|---|---|---|
+| D1 천장 | `attachment_ceilings_agree`(파일을 읽는 단위 시험) | 마이그레이션 SQL의 CHECK·openapi `maximum` 셋·TS 천장·Rust 상수 둘·`TABLE_MAX_BYTES`가 한 값이다. 한 곳만 300 MiB로 바꾸거나 한 곳만 100 MiB로 남기면 빨강 | C4 |
+| D1 실효 한도 | `the_effective_limit_is_one_function` | 운영자 값 120 MiB에서 120 MiB 선언은 통과하고 120 MiB + 1 B는 413이며, 413 문장이 120을 찍고 `GET attachment-limits`가 같은 값을 준다. 한 곳을 상수로 되돌리면 어긋나서 빨강 | C4 |
+| D1 범위 | `an_operator_value_outside_its_range_is_ignored` | 0·음수·문자열·천장 초과·1 MiB 미만은 `DEFAULT`로 돌아가고 기동 로그가 변수 이름만 담는다(값 없음). 클램프를 지우면 빨강 | C4 |
+| D1 스위치 | `the_default_is_100_until_the_switch` | 기본 설정에서 100 MiB + 1 B 선언은 413이고 운영자 값 300 MiB에서는 통과한다. 스위치가 바꾸는 것은 `DEFAULT` 한 줄이고 CHECK·천장·openapi는 그대로다(위 `attachment_ceilings_agree`가 초록으로 남는다). 스위치가 천장을 건드리면 빨강 | C4·스위치 |
+| D1 합계 | `a_message_over_the_total_is_refused_before_any_row_changes`(실 PG) | 300 + 300 MiB는 통과하고 + 1 B는 413이며 어떤 `attachment` 행의 `message_id`도 바뀌지 않고 메시지는 롤백된다. 예약(`reserve`)도 같다. `link`에서 판정을 지우면 보내기가, `reserve`에서 지우면 예약이 통과해 빨강 | C4 |
+| D2 왕복 | `a_chunked_upload_round_trips_to_the_same_bytes`(실 라우터·실 소켓) | 64 MiB(8조각)를 올린 객체의 SHA-256이 원본과 같고 마지막 조각 뒤 `200`이며 `complete`가 측정 크기를 기록한다. 오프셋 계산이나 이어붙이기를 틀리게 하면 해시가 달라 빨강 | C4 |
+| D2 오프셋·크기 | `a_chunk_at_the_wrong_offset_writes_nothing_and_reports_what_is_held` | 다른 오프셋의 조각은 파트 길이를 바꾸지 않고 `308` + 실제로 받은 만큼의 `Range`다(받은 것이 없으면 `Range` 헤더가 없다). 선언 크기 0인 세션에 `Content-Range`는 400이고 그 세션의 단일 PUT은 지금처럼 통과한다. 검사를 지우면 겹쳐 써서 해시가 달라 빨강 | C4 |
+| D2 되감기 | `an_interrupted_chunk_is_rewound` | 조각 본문을 반만 보내고 끊으면 상태 조회가 끊기기 전의 `Range`를 주고, 같은 조각을 다시 보내면 성공해 해시가 같다. 되감기를 지우면 파트가 길어져 다음 오프셋이 어긋나 빨강 | C4 |
+| D2 308 | `a_308_never_carries_a_location` | 조각 확인·상태 조회의 모든 308에 `Location`이 없다. 넣으면 빨강(`fetch`·URLSession의 실제 추종은 runtime-unverified) | C4 |
+| D2 수명 | `the_session_ends_at_its_idle_and_absolute_deadlines`(시계 주입) | 50분 간격 조각 일곱 개(5시간 50분)는 끝까지 산다. 마지막 조각 뒤 61분은 404, 생성 뒤 6시간 1분은 어느 때든 404다. 소진·만료·모르는 세션은 같은 상태·같은 본문이다. 유휴를 고정으로 바꾸면 앞이, 절대 마감을 지우면 뒤가 빨강 | C4 |
+| D2 동시 | `one_chunk_at_a_time_per_session` | 같은 세션의 동시 둘째 PUT은 409이고 파트가 섞이지 않는다(해시 같음). 세션 잠금을 지우면 빨강 | C4 |
+| D2 회귀 | 기존 `drive_upload_edge`·`local.rs` 단위 시험·아바타·이모지 업로드 시험 | `Content-Range` 없는 PUT이 그대로 통과한다. 청크 분기가 단일 PUT을 깨면 빨강 | C4 |
+| D2 상한·예약 | `the_open_upload_cap_and_the_disk_reservation_refuse_before_any_row` | 멤버당 살아 있는 세션 4개일 때 다섯째가 429이고 행이 없다. 세션 하나가 만료·소진되면 다시 만들 수 있고 재시작 뒤에는 0개다. 주입한 작은 볼륨에서 열린 세션들이 쥔 남은 바이트 때문에 다음 세션이 507이고 `attachment` 행도 세션 파일도 없다. 남은 바이트 항을 빼면 둘째 세션이 통과해, 1 GiB 바닥 항을 지우면 빨강 | C4 |
+| D2 청소 | `a_stale_part_is_swept_and_a_live_one_is_not` | 만료 세션의 파트와 세션 파일은 청소 뒤 없고 받는 중인 세션의 파트는 그대로다. 살아 있는 파트를 지우면 받는 중 업로드가 깨져, 만료 파트를 안 지우면 빨강 | C4 |
+| D2 재시작 | `a_restart_clears_sessions_and_parts_but_keeps_objects`(기존 `open_clears_pending_sessions_and_partial_writes_but_keeps_objects`의 청크판) | 청크 중간에 아카이브를 다시 열면 세션·파트가 없고 객체는 그대로이며 옛 주소는 404다. 지우는 규칙을 지우면 빨강(스냅샷 재생 위험이 돌아온다) | C4 |
+| D2 CORS | `cors_allows_content_range_and_exposes_range` | 허용 목록에 `content-range`·`range`, 노출 목록에 `range`·`content-range`·`accept-ranges`가 있고 요청 헤더를 반사하지 않는다. 반사로 바꾸면 빨강 | C4 |
+| D3 오라클 | `a_range_never_asks_whether_a_file_exists`(실 PG) | 남의 초안·지운 메시지(반쪽 무덤 둘)·없는 id·다른 채널·`pending`에 `Range`(만족 가능·불가능·다중)를 보내도 `Range` 없는 요청의 응답과 상태·본문이 같다. `Range` 해석을 인가 앞으로 옮기면 416이 존재를 말해 빨강 | C3 |
+| D3 응답표 | `the_range_table` | 표의 줄마다 상태와 `Content-Range`·`Content-Length`·`Accept-Ranges` 값을 단정한다(경계: `a-`, `-n`, n이 크기 이상, `b`가 크기 이상, 마지막 한 바이트, 크기 0, 다중 범위, `If-Range`). 줄 하나를 틀리게 하면 빨강 | C3 |
+| D3 HEAD | `head_reads_no_byte_of_the_archive` | 호출·읽은 바이트를 세는 보관소에서 HEAD의 보관소 읽기는 0이고 크기·mime은 DB 행의 값이다. HEAD가 본문 스트림을 열면 빨강 | C3 |
+| D3 메모리 | `a_local_read_is_flat_in_memory`(Linux) | 300 MiB 객체(희소 파일) 넷을 동시에 읽는 동안 RSS 증가가 64 MiB 이하다. `fs::read`로 되돌리면 1 GiB를 넘어 빨강 | C3 |
+| D3 락 | `a_slow_reader_does_not_hold_the_archive_lock` | 읽기 스트림을 멈춘 채 `file_metadata`와 새 세션 생성이 제때 끝난다. 스트림 동안 락을 쥐면 빨강 | C3 |
+| D3 백엔드 | `a_range_read_returns_only_those_bytes_on_every_backend` | 로컬·stub·Google(기록용 대역, 127.0.0.1)이 같은 구간 바이트를 준다. Google 대역이 행과 다른 총량의 `Content-Range`를 주면 502다. `Range` 전달을 지우면(전체를 보내고 206이라 우긴다) 빨강, 총량 대조를 지우면 빨강 | C3 |
+| D3 헤더 | `content_responses_keep_the_headers` | 200·206·416·HEAD가 모두 `attachment`·`nosniff`·`no-store, no-transform`·`Accept-Ranges`를 낸다. 206에서 `attachment`를 빼면 빨강(공개 보안 문장 `claims.yaml:147`의 증명) | C3 |
+| D3 엣지 | `the_edge_passes_a_206_untouched`(실행 증거) | Caddy(`encode zstd gzip`)를 앞에 둔 요청에서 206의 `Content-Range`·`Content-Length`가 그대로이고 `Content-Encoding`이 없다. `no-transform`을 지우고 영상이 압축되면 빨강 | C3 |
+| D4 같은 인가 | `a_stream_address_is_the_same_authorization_as_the_content_route`(실 PG) | 비멤버·나간 멤버·정지·다른 테넌트·지운 메시지(반쪽 무덤 둘)·남의 초안·`pending`·없는 id·보관된 채널의 매트릭스에서 stream이 모두 같은 404를 같은 바이트로 낸다. 술어 하나를 지우면 그 칸이 200이라 빨강 | C3b |
+| D4 회수 | `a_revoked_reader_loses_the_address_at_the_next_request` | 발급 뒤 206을 받고 멤버가 채널을 떠나거나 메시지가 지워지면 **같은 주소**의 다음 요청이 만료 전에 404다. 요청마다 판정을 지우고 발급 때만 판정하면 빨강 | C3b |
+| D4 다회·만료 | `the_address_serves_many_requests_within_its_ttl_and_none_after` | 같은 주소로 구간 요청 다섯 번이 성공하고 만료 1초 전은 200, 만료 뒤는 404다(시계 주입). 1회용으로 만들면 둘째가, TTL 비교를 지우면 만료 뒤가 빨강 | C3b |
+| D4 위조 | `a_forged_or_foreign_address_is_refused_before_the_database` | 서명 한 바이트·다른 첨부 id·다른 워크스페이스 경로·다른 멤버·다른 종류로 바꾼 주소는 같은 404이고 **DB 질의가 0회**이며 per-IP 예산을 쓴다. 예산을 다 쓴 주소에서도 살아 있는 주소는 206이다. MAC이 필드 하나를 안 덮으면 그 치환이 통과해, 서명 확인을 DB 뒤로 옮기면, 게이트를 핸들러 앞으로 옮기면(살아 있는 주소가 429) 빨강 | C3b |
+| D4 닫힌 목록 | `play_serves_only_the_closed_video_list` | mime이 `text/html`·`image/svg+xml`·`application/octet-stream`인 첨부(바이트는 HTML)는 `play` 발급이 거절이고 직접 서명한 토큰도 404다. `video/mp4`는 200·206이다. 목록을 와일드카드로 넓히거나 지우면 빨강 | C3b |
+| D4 헤더·메서드 | `the_stream_route_has_a_fixed_header_list_and_no_redirect` | `Referrer-Policy: no-referrer`·`attachment`·`nosniff`·`no-store`가 있고 `Location`이 없으며 POST·PUT·DELETE는 405다. 헤더 하나를 지우면 빨강 | C3b |
+| D4 로그 | `a_token_is_in_no_log_audit_or_error` | 성공·실패 요청 전후의 모든 로그 줄·감사 행·오류 본문에 토큰 문자열이 없다. 핸들러가 토큰이나 경로를 로그에 쓰면 빨강 | C3b |
+| D4 발급 자격 | `only_a_person_mints_an_address` | push-fetch·push-action 좁은 토큰과 에이전트 bearer는 403이고 사람 bearer는 200이다. 사람 확인을 지우면 빨강 | C3b |
+| D4 save | `save_forces_octet_stream_and_encodes_the_name`(구현할 때) | 이름에 CR·LF·따옴표·한글이 있어도 헤더가 깨지지 않고 `filename*`로 인코딩되며 `Content-Type`은 `application/octet-stream`이다. 인코딩을 지우면 빨강 | C7 |
+| D4 공개 문장 | `check_security_claims.py`(기존 린트) | `claims.yaml`의 첨부 읽기 문장이 스트림 주소를 말하고 증명이 둘(content 401, stream 404)을 가리킨다. 문장만 고치고 증명을 안 달면 빨강 | C3b |
+| D4 CSP | `desktopShellContract.test.ts` 확장, `gate-csp-deploy.mjs` | 데스크탑 `media-src`가 `'self' http: https:`이고 `blob:`이 없으며 `img-src 'self' data:`는 그대로다. 웹은 `media-src` 없이 `default-src 'self'`다. `blob:`을 더하면 빨강 | C7 |
+| D4 미디어 요소 | `only_the_player_creates_media_elements`(정적) | `<video`·`<audio`·`new Audio(`가 재생기 컴포넌트 하나 밖에 없다. 다른 컴포넌트가 만들면 빨강 | C7 |
+| D5 권한 | `the_media_write_is_the_uploaders_before_the_send_only` | 업로더 본인·`complete`·미묶임에서만 200이다. 남의 첨부·묶인 뒤·`pending`·영상 아닌 mime은 같은 404다. 술어 하나를 지우면 빨강 | C5 |
+| D5 포스터 검증 | `a_poster_is_validated_by_its_bytes_not_its_label` | `image/jpeg`로 선언한 HTML·PNG·GIF·SVG·잘린 JPEG·256 KiB + 1 B·치수 1,281은 각각 400이고 정상 JPEG·WebP는 200이다. 매직·치수·크기 검사 하나를 지우면 그 케이스가 통과해 빨강 | C5 |
+| D5 영상 확인 | `a_non_video_or_a_fake_video_cannot_hold_media` | 저장된 mime이 닫힌 목록 밖이거나 첫 바이트에 `ftyp`·EBML이 없으면 400이다. 길이 0·24시간 + 1 ms·치수 16,385도 400이다. 매직 검사나 범위 검사를 지우면 빨강 | C5 |
+| D5 읽기 | `the_poster_route_is_the_content_route_for_everyone_else` | 포스터 GET이 content와 같은 인가 매트릭스를 같은 404로 내고(지운 메시지 포함) 헤더 셋이 같다. 술어를 지우면 빨강 | C5 |
+| D5 페이로드 | `a_poster_is_never_in_a_payload` | 메시지 투영·`message.new` 프레임·outbox 페이로드에 `media`(길이·치수·`hasPoster`)만 있고 포스터 바이트·base64가 없으며 `PAGED_ATTACHMENT_JOIN`이 `poster_bytes`를 고르지 않는다. 포스터를 실으면 빨강 | C5 |
+| D5 회수 | `media_rows_follow_the_attachment` | 첨부 행이 지워지면 `attachment_media`도 CASCADE로 사라지고 FK 전수 시험이 새 FK를 `(known)`으로 센다. CASCADE를 지우면 빨강 | C5 |
+| D6 기본값 | 폰 Jest `the_default_video_choice_is_the_normal_quality` | 기본 선택이 `H264_1280x720`이고 「원본」은 `Passthrough`이며 기억되지 않아 다음 선택은 다시 기본이다. 기본을 `Passthrough`로 바꾸면 빨강 | F1 |
+| D6 실기 | 위치 메타가 있는 영상을 내보내 재는 실기 확인(F1이 잰다) | 내보낸 파일에 위치 atom이 없고 크기가 줄었는지 잰다. 안 되면 문구 장부에 위치 제거 문구가 없음을 단정한다 | F1 |
+| D7 회수 가지 | `a_deleted_messages_file_is_reclaimed_only_after_the_grace_and_only_when_nothing_holds_it`(실 PG) | 지운 지 29일은 후보가 아니고 31일은 후보다. 반쪽 무덤(상태만·시각만)도 같고(시각이 비면 업로드 시각 기준), huddle 세 열·아바타 두 표가 쥔 파일은 후보가 아니며, 살아 있는 메시지에 묶인 파일은 나이와 무관하게 후보가 아니다. 날짜 항·무덤 반쪽 하나·hold 하나를 지우면 각각 빨강(증보 2의 `a_file_something_else_holds_…`·`old_unbound_complete_…`의 짝) | C6 |
+| D7 점검 SQL | `the_operators_check_sql_embeds_the_sweeps_predicate_word_for_word`(갱신) | 점검 SQL의 후보 술어가 새 가지까지 청소기의 것과 글자까지 같다. 한쪽만 바꾸면 빨강 | C6 |
+| D7 사용량 | `usage_counts_what_the_sweep_would_count` | 이유별 합이 `SUM(size_bytes)`와 같고 두 테넌트가 섞이지 않는다. 분류 하나를 빼면 합이 어긋나 빨강 | C6 |
+| D7 경고 | `the_volume_warning_fires_at_80_and_only_for_the_local_backend` | 주입한 `statvfs` 값에서 79%는 경고 없음, 80%는 한 번(반복 억제), Google 백엔드는 없음이다. 임계값을 바꾸면 빨강 | C6 |
+| D7 감사 | `the_reclaim_audit_names_no_file` | `attachment.expired` + `reason: deleted_message`에 이름·Drive id가 없다. 이름을 실으면 빨강 | C6 |
+| D8 순서 | `downloadsContract.test.ts`(기존) | 천장을 TS에 들이는 PR이 데스크탑 IPC 상한을 같이 올리지(청크 전송으로 바꾸지) 않으면 빨강. #4639 선행이 이 시험으로 강제된다 | C4·#4639 |
+
+사보타주를 실제로 돌린 결과(어떤 되돌림이 어떤 시험을 빨갛게 했는지)는 각 구현 PR 본문이 정본이다. 이 증보는 문서뿐이라 시험을 돌리지 않았다(`runtime-unverified`).
