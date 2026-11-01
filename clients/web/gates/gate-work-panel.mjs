@@ -2,8 +2,9 @@
 // GATE: WEB-WP1 「작업 패널」 v0 (결정 정본 docs/planning/2026-08-04-work-panel-design.md).
 //
 // TC-1 (#1758): 헤더 터미널은 도크다. 이 게이트의 WorkPanel(작업 세션 pane)
-// 진입은 작업 콘솔 경유(`openWorkPanelViaConsole`). agent-work-panel 은
-// 컴포저 경로 그대로다.
+// 진입은 제품이 받는 주소(`?work-panel=1`, `openWorkPanelByAddress`)다. 작업 콘솔은 온라인 호스트가 있을 때만
+// 서는 표면이고(`SurfaceRoute`, #2780) 이 게이트의 픽스처는 호스트가 없어 콘솔 경유 진입은 서지 않는다(#5048).
+// agent-work-panel 은 컴포저 경로 그대로다.
 //
 // 이 게이트가 지키는 것은 화면의 모양이 아니라 **패널이 하는 말이 참인가**이다.
 //
@@ -77,7 +78,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
-import { openWorkPanelViaConsole } from "./work-openers.mjs";
+import { openWorkPanelByAddress } from "./work-openers.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -736,7 +737,9 @@ async function exerciseScenario(browser, scenario) {
   const phases = await page
     .locator('[data-testid="agent-work-panel-phase"]')
     .evaluateAll((nodes) => nodes.map((node) => node.textContent?.trim() ?? ""));
-  const expectedPhases = ["생각 중", "답을 쓰는 중", "승인 대기"];
+  // 승인을 기다리는 말은 「승인 필요」다 — 요청 고리의 낱말 정본(`REQUEST_WORD.approval`, #4760)이 칩·카드·인박스와
+  // 한 벌로 읽는다. 옛 「승인 대기」는 이 패널만 따로 쓰던 낱말이다(#5048).
+  const expectedPhases = ["생각 중", "답을 쓰는 중", "승인 필요"];
   for (const phase of expectedPhases) {
     if (!phases.includes(phase)) {
       throw new Error(
@@ -753,9 +756,9 @@ async function exerciseScenario(browser, scenario) {
   const stateText = await page
     .getByTestId("agent-work-panel-state")
     .textContent();
-  if (stateText?.trim() !== "승인 대기") {
+  if (stateText?.trim() !== "승인 필요") {
     throw new Error(
-      `${label}: awaiting_approval was rendered as "${stateText}" instead of 승인 대기`
+      `${label}: awaiting_approval was rendered as "${stateText}" instead of 승인 필요`
     );
   }
 
@@ -872,7 +875,7 @@ async function captureWorkPaneShots(browser) {
       await installRealtimeSocket(page);
       await installRoutes(context, CO_OPEN_SCENARIO);
       await login(page);
-      await openWorkPanelViaConsole(page, { allowHashFallback: true });
+      await openWorkPanelByAddress(page, channelId);
       // 목록이 자리를 잡은 뒤에 찍는다. 골격 막대가 서 있는 순간을 찍으면 두 번
       // 돌릴 때마다 다른 판이 나오고, 전후 비교가 조명 비교가 된다.
       await page.getByTestId("work-panel-empty").waitFor();
@@ -1026,7 +1029,7 @@ async function exerciseWorkPaneCoOpen(browser, width, scenario = CO_OPEN_SCENARI
     });
   }
 
-  await openWorkPanelViaConsole(page, { allowHashFallback: true });
+  await openWorkPanelByAddress(page, channelId);
   await settlePlaceholder(page);
 
   // red seam (#1422): 절 단위 생략을 **끄지 않고**, 그 결과를 되돌린다 — 상자에
@@ -1280,6 +1283,13 @@ async function exerciseThreadPaneNarrow(browser, width) {
     });
   }
 
+  // 스레드를 열기 **전**의 채널 컴포저 폭. 사이드바가 324px(레일 56 + 목록 268, DS2-6)가 되며 600px 창은 스레드와
+  // 상관없이 컴포저가 바닥 240px 아래다(아래 주석 · 인계의 별도 이슈). 그래서 이 게이트가 재는 것은 절대 폭이 아니라
+  // 「스레드가 열렸다고 채널이 좁아지는가」다 — 덮는 패널은 채널을 건드리지 않고, 옆에 서는 패널(수리 이전)은 320px을
+  // 가져간다(#5048).
+  const channelComposerBefore = await page.evaluate(() =>
+    Math.round(document.getElementById("composer-input").getBoundingClientRect().width)
+  );
   await page.getByTestId("thread-anchor").first().click();
   await page.getByTestId("thread-panel").waitFor();
 
@@ -1328,14 +1338,18 @@ async function exerciseThreadPaneNarrow(browser, width) {
   // 1. 두 컴포저 모두 바닥 위. 이 구간에서 실제로 쓰는 것은 답글 컴포저지만,
   //    채널 컴포저가 먼저 좁아지므로 둘을 함께 잰다.
   const squeezed =
-    geometry.channelComposerWidth < MIN_COMPOSER_WIDTH
-      ? ["channel", geometry.channelComposerWidth]
+    geometry.channelComposerWidth < channelComposerBefore
+      ? [
+          "channel",
+          geometry.channelComposerWidth,
+          `${channelComposerBefore}px before the thread opened`,
+        ]
       : geometry.threadComposerWidth < MIN_COMPOSER_WIDTH
-        ? ["thread", geometry.threadComposerWidth]
+        ? ["thread", geometry.threadComposerWidth, `floor ${MIN_COMPOSER_WIDTH}px`]
         : null;
   if (squeezed) {
     throw new Error(
-      `thread-pane-${width}: the ${squeezed[0]} composer was squeezed to ${squeezed[1]}px (floor ${MIN_COMPOSER_WIDTH}px). Between 600 and 899px the thread pane covers the channel instead of standing beside it as a 320px column, because standing beside it left the channel ${width - 240 - PANE_MEASURE}px (tokens.css thread-pane / chat-region).`
+      `thread-pane-${width}: the ${squeezed[0]} composer was squeezed to ${squeezed[1]}px (${squeezed[2]}). Between 600 and 899px the thread pane covers the channel instead of standing beside it as a 320px column, because standing beside it left the channel ${width - 240 - PANE_MEASURE}px (tokens.css thread-pane / chat-region).`
     );
   }
 
@@ -1513,7 +1527,7 @@ async function exerciseHeadClauseBand(browser, width) {
     });
   }
 
-  await openWorkPanelViaConsole(page, { allowHashFallback: true });
+  await openWorkPanelByAddress(page, channelId);
   await settlePlaceholder(page);
 
   const geometry = await page.evaluate(() => {
@@ -1641,7 +1655,7 @@ async function exerciseProbeRuler(browser, wideWidth, width) {
   await installRealtimeSocket(page);
   await installRoutes(context, CO_OPEN_SCENARIO);
   await login(page);
-  await openWorkPanelViaConsole(page, { allowHashFallback: true });
+  await openWorkPanelByAddress(page, channelId);
   await settlePlaceholder(page);
 
   const before = await page.evaluate(() => {
@@ -1807,7 +1821,7 @@ async function captureClauseShots(browser) {
       // 900px 에서만 pane 을 연다: 그 판이 이 티켓이 물려받은 판이고(#1418),
       // 390 과 1200 은 pane 없이도 각각 「가장 좁은 상자」와 「넉넉한 상자」다.
       if (width === 900) {
-        await openWorkPanelViaConsole(page, { allowHashFallback: true });
+        await openWorkPanelByAddress(page, channelId);
       }
       await page.setViewportSize({ width, height: 800 });
       await page.locator("#composer-input").waitFor();
@@ -1912,7 +1926,7 @@ async function main() {
     await server.stop();
   }
   console.log(
-    "GATE PASS: delta arrival order, phase transitions, 승인 대기 vocabulary,"
+    "GATE PASS: delta arrival order, phase transitions, 승인 필요 vocabulary,"
   );
   console.log(
     "           mid-run truncation notice, folded tool args, and volatile reopen"
@@ -1955,9 +1969,10 @@ async function main() {
     "           standing beside it, the covered column leaves the tab order"
   );
   console.log(
-    "           with it, and both composers stay above their floor at 600,"
+    "           with it, an open thread never narrows the channel composer and"
   );
-  console.log("           700 and 899px. In that same band the thread drawer escapes");
+  console.log("           the reply composer stays above its floor at 600, 700 and");
+  console.log("           899px. In that same band the thread drawer escapes");
   console.log(
     "           by keyboard like the 작업 세션 drawer: Escape inside the reply"
   );

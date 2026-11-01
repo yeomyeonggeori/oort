@@ -689,7 +689,10 @@ function GalleryBody() {
     <div
       data-testid="design-gallery"
       data-gallery-root=""
-      className="h-full min-h-0 overflow-y-auto bg-pane p-6 text-ink"
+      // `relative`: 이 상자가 스크롤을 소유하면 절대 배치 자손(`sr-only` 라디오 등)의 포함 블록도 이 상자여야 한다.
+      // 아니면 그것들이 문서의 스크롤 영역으로 새어 나와(offsetParent=body) 문서가 4649px로 스크롤된다
+      // (capture:design `assertGalleryScrollOwnership`, #5048). 디자인 모드 전용 하네스 페이지다.
+      className="relative h-full min-h-0 overflow-y-auto bg-pane p-6 text-ink"
     >
       <header className="flex flex-col gap-4 border-b border-line pb-6">
         <h1 className="text-display font-medium">디자인 갤러리</h1>
