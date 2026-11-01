@@ -153,6 +153,10 @@ compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
 | api | `HERMES_LOGIN_RELAY_URL` | `http://hermes.railway.internal:8643` — the login relay sidecar inside hermes (api only; empty/absent = `409 login_relay_off`) |
 | api | `HERMES_LOGIN_RELAY_KEY` | `${{shared.HERMES_LOGIN_RELAY_KEY}}` — the same shared secret hermes holds (api only) |
 | api | `HERMES_APP_LOGIN_GOOGLE_PUBLISHING` | optional. `testing` declares that the Google OAuth project is External and in Testing, so the app list shows an estimated 7-day re-login date for the three Google apps (#4081). oort cannot read the project's real status; absent = no such claim |
+| api | `TEAM_AI_DAILY_TOKEN_CAP` | optional (#4944, ADR-0201 증보 v3 B9), **not in the template**. The server operator's ceiling on the team AI's tokens per UTC day. Unset or empty = no ceiling (BYOK: an administrator sets any limit in Settings › AI); a positive number = a ceiling no workspace value gets past; `0` = the helper is off. Set the same value on api and agent-worker — agent-worker enforces it, api only reads it to say so on the settings screen |
+| api | `TEAM_AI_DAILY_SEARCH_CAP` | optional, **not in the template**. The same ceiling for provider web searches per UTC day (`0` turns off web search only, not the helper). Same value on api and agent-worker |
+| agent-worker | `TEAM_AI_DAILY_TOKEN_CAP` | optional, **not in the template** — the same value as on api; this is the process that enforces it |
+| agent-worker | `TEAM_AI_DAILY_SEARCH_CAP` | optional, **not in the template** — the same value as on api |
 | agent-worker | `HERMES_BASE_URL` | `http://hermes.railway.internal:8642/v1` |
 | agent-worker | `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` | `1` |
 | agent-worker | `AGENT_PROVIDER_LOCAL_HOSTS` | `hermes.railway.internal` |

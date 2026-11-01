@@ -2056,6 +2056,72 @@ mod tests {
         }
     }
 
+    /// The composer's link preview (`FetchKind::Preview`, ADR-0170 amendment 2026-11-01 D17,
+    /// #4884) on a redirect hop: the icon's test above, asked of the preview. The first hop is
+    /// public and is requested, the `Location` is a NAME that resolves inward, and that hop is
+    /// never dialled. A name passes the literal check by construction, so what stops
+    /// `inner.example` -> 169.254.169.254 on the second hop is the check of the answers after
+    /// resolution; the preview tests that redirect to a *literal* address never reach it.
+    #[tokio::test]
+    async fn a_preview_redirect_to_a_name_that_resolves_inward_stops_after_the_public_hop() {
+        for &answer in INWARD_ANSWERS {
+            let dns = Dns::new(&[
+                ("news.example", &["93.184.216.34"]),
+                ("inner.example", &[answer]),
+            ]);
+            let getter = ScriptedGet {
+                hops: AtomicU32::new(0),
+                locations: Mutex::new(vec!["https://inner.example/story".into()]),
+            };
+            let err = fetch_guarded(
+                "https://news.example/story",
+                FetchKind::Preview,
+                false,
+                &dns,
+                &getter,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err, FetchError::Blocked, "{answer}");
+            assert_eq!(
+                getter.hops.load(Ordering::SeqCst),
+                1,
+                "{answer}: only the public first hop connected"
+            );
+            assert_eq!(
+                *dns.asked.lock().unwrap(),
+                ["news.example:443", "inner.example:443"],
+                "{answer}: the redirect target was resolved, then refused"
+            );
+        }
+        // Control: the same harness follows a redirect to a name that resolves to a public
+        // address. Without it the refusal above could be any failure; as it is, it is the check
+        // of the answers (a name that did not resolve at all would be `Failed("dns")`).
+        let dns = Dns::new(&[
+            ("news.example", &["93.184.216.34"]),
+            ("www.news.example", &["93.184.216.35"]),
+        ]);
+        let getter = ScriptedGet {
+            hops: AtomicU32::new(0),
+            locations: Mutex::new(vec!["https://www.news.example/story".into()]),
+        };
+        let fetched = fetch_guarded(
+            "https://news.example/story",
+            FetchKind::Preview,
+            false,
+            &dns,
+            &getter,
+        )
+        .await
+        .expect("a redirect to a public name is followed");
+        assert_eq!(fetched.final_url, "https://www.news.example/story");
+        assert_eq!(getter.hops.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            *dns.asked.lock().unwrap(),
+            ["news.example:443", "www.news.example:443"]
+        );
+    }
+
     // ── #4881 security review r1, M-2: a deadline and a ceiling on name lookups ──────────────
 
     /// A name lookup that answers one public address once the test opens the gate, and counts

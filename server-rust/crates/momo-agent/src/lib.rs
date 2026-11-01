@@ -334,10 +334,10 @@ pub use run_event::{
     TOOL_CALL_DURATION_MS_MAX, TOOL_CALL_ROWS_PER_RUN,
 };
 pub use run_progress::{
-    assemble_run_progress, list_channel_run_progress_base_in_tx, list_run_events_in_tx,
-    list_run_ledger_in_tx, visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry,
-    RunEventInclude, RunEventRow, RunLedger, RunPhase, RunProgressBase, RunProgressRow,
-    ToolTallyRow,
+    approval_is_named_to_viewer, assemble_run_progress, list_channel_run_progress_base_in_tx,
+    list_run_events_in_tx, list_run_ledger_in_tx, redact_unseen_approvals_in_tx,
+    visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry, RunEventInclude,
+    RunEventRow, RunLedger, RunPhase, RunProgressBase, RunProgressRow, ToolTallyRow,
 };
 pub use woken::{
     active_hosted_connection_id_in_tx, load_woken_agent_facts_in_tx, woken_clock_start,
@@ -387,11 +387,13 @@ pub use thread_wake::{
     UnclaimedThreadTurn, THREAD_REPLY_WAKE_REASON,
 };
 pub use usage::{
-    agent_usage_in_tx, budget_state, chain_usage_in_tx, provider_spend_in_tx,
+    agent_month_spend_in_tx, agent_usage_in_tx, budget_state, chain_usage_in_tx,
+    latest_ledger_model_in_tx, pricing_available_for_model_in_tx, provider_spend_in_tx,
     record_run_usage_in_tx, usage_summary_in_tx, usage_summary_visible_in_tx, validated_window,
-    AgentUsageRow, ChainUsage, ProviderModelSpend, ResolvedUsage, RunUsageReport, UsageAgentRow,
-    UsageBucket, UsageBucketRow, UsageBudget, UsageModelRow, UsageSource, UsageSummary,
-    UsageTotals, UsageWindow, UsageWindowError, DEFAULT_LOOKBACK_DAYS, MAX_RANGE_DAYS,
+    AgentMonthSpend, AgentUsageRow, ChainUsage, ProviderModelSpend, ResolvedUsage, RunUsageReport,
+    UsageAgentRow, UsageBucket, UsageBucketRow, UsageBudget, UsageModelRow, UsageSource,
+    UsageSummary, UsageTotals, UsageWindow, UsageWindowError, DEFAULT_LOOKBACK_DAYS,
+    MAX_RANGE_DAYS,
 };
 pub use welcome::{
     configure_welcome_hosted_signal_hours, ensure_agent_in_general_in_tx,

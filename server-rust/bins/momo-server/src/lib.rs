@@ -336,6 +336,15 @@ pub struct AppState {
     /// link import honours it (ADR-0218 D5, planner decision 3), and so does the composer's link
     /// preview (ADR-0170 증보 2026-11-01 D16).
     pub unfurl_enabled: bool,
+    /// ADR-0218 §8 (#4941) — the only object in this process that can ask a team-connected image
+    /// model to draw. Default is the egress-guarded client under the default (public addresses
+    /// only) policy; `main` gives it the operator's policy and a test injects its own.
+    pub image_model: Arc<dyn momo_image_model::ImageModelClient>,
+    /// Which team-key hosts are image providers, and which model each one asks for.
+    pub image_models: Arc<momo_image_model::ImageModelConfig>,
+    /// Where the photo routes open the team's image key from (ADR-0218 §8 H11 (a)). Default is the
+    /// operator's sealed link; a test wraps it to count the openings.
+    pub team_keys: Arc<dyn routes::expression_photo::TeamKeySource>,
     /// ADR-0218 G3.5 (#4820 C1b): where `oort_expression_assemble` runs the motion assembler
     /// child from. `None` is the production answer: resolved per call from
     /// `OORT_EXPRESSION_ASSEMBLER`, else beside this executable (like the decoder). A test sets
@@ -367,6 +376,12 @@ pub struct AppState {
     /// outbound hop (the manifest code → credentials conversion). Default: no key, so every
     /// `/v1/integrations/github/*` route answers 503 and the rest of the server is untouched.
     pub github: Arc<routes::github_app::GithubAppState>,
+    /// ADR-0201 증보 v3 B9 (#4944) — the operator's ceilings on the team AI (`TEAM_AI_DAILY_TOKEN_CAP`,
+    /// `TEAM_AI_DAILY_SEARCH_CAP`), **as the api reads them**: the agent-worker is what enforces the
+    /// ceiling, and the api only explains it to the administrator on the settings screen
+    /// (`team_ai_limits_status.operatorCeiling`). Default: no ceiling. Set the same values on both
+    /// processes — a ceiling the api does not know is still enforced, just not shown.
+    pub team_ai_caps: momo_workspace_actions::team_ai_limits::OperatorCaps,
 }
 
 impl AppState {
@@ -404,6 +419,12 @@ impl AppState {
             turn: None,
             unfurl_http: Arc::new(momo_unfurl::SafeUnfurlTransport::production(false)),
             unfurl_enabled: momo_unfurl::enabled_from_env(),
+            image_model: Arc::new(momo_image_model::GuardedImageModel::new(
+                momo_settings::EgressPolicy::default(),
+                momo_image_model::DEFAULT_DEADLINE,
+            )),
+            image_models: Arc::new(momo_image_model::ImageModelConfig::default()),
+            team_keys: Arc::new(routes::expression_photo::SealedLink),
             assembler_program: None,
             large_body_deadline: routes::agent_port::LARGE_BODY_DEADLINE,
             unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
@@ -429,7 +450,19 @@ impl AppState {
                     routes::provider_link::PROBE_TIMEOUT,
                 )),
             )),
+            team_ai_caps: momo_workspace_actions::team_ai_limits::OperatorCaps::default(),
         }
+    }
+
+    /// ADR-0201 증보 v3 B9 (#4944) — attach the operator's team-AI ceilings (`main.rs` from the
+    /// env, a test with explicit values). Never read from the process environment here: a test
+    /// must not set one.
+    pub fn with_team_ai_caps(
+        mut self,
+        caps: momo_workspace_actions::team_ai_limits::OperatorCaps,
+    ) -> Self {
+        self.team_ai_caps = caps;
+        self
     }
 
     /// ADR-0205 — attach the GitHub App sealing key (`GITHUB_APP_MASTER_KEY`). The converter
@@ -511,6 +544,26 @@ impl AppState {
 
     pub fn with_unfurl_http(mut self, http: Arc<dyn momo_unfurl::UnfurlHttp>) -> Self {
         self.unfurl_http = http;
+        self
+    }
+
+    /// ADR-0218 §8 (#4941) — the image-model client and the hosts/models it may be pointed at.
+    pub fn with_image_model(
+        mut self,
+        client: Arc<dyn momo_image_model::ImageModelClient>,
+        config: momo_image_model::ImageModelConfig,
+    ) -> Self {
+        self.image_model = client;
+        self.image_models = Arc::new(config);
+        self
+    }
+
+    /// Where the photo routes open the team's image key from (see [`AppState::team_keys`]).
+    pub fn with_team_keys(
+        mut self,
+        source: Arc<dyn routes::expression_photo::TeamKeySource>,
+    ) -> Self {
+        self.team_keys = source;
         self
     }
 
@@ -773,6 +826,18 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/expressions/import",
             post(routes::expressions::import),
+        )
+        // ADR-0218 §8 (#4941): the team image model. Availability first (it reads the team key to
+        // say which company a photo would go to), then the one route that sends a photo.
+        .route(
+            "/v1/workspaces/{ws}/expressions/photo-model",
+            get(routes::expression_photo::availability),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/photo-drafts",
+            post(routes::expression_photo::create)
+                .route_layer(member_write(rate_limit::MemberWrite::PhotoDraft))
+                .layer(axum::extract::DefaultBodyLimit::max(momo_expressions::REQUEST_BYTES)),
         )
         .route(
             "/v1/workspaces/{ws}/expression-drafts/{draftId}",

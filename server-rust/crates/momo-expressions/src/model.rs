@@ -221,7 +221,25 @@ impl Origin {
             ..Self::upload()
         }
     }
+    /// A picture the team's image model drew from a member's photo (ADR-0218 §8 H9): `generated`,
+    /// with the one sentence this server wrote for the branch. `None` for a branch that is not one.
+    pub fn photo(branch: &str) -> Option<Self> {
+        let (_, sentence) = PHOTO_PROMPTS.iter().find(|(name, _)| *name == branch)?;
+        Some(Self {
+            kind: "generated".into(),
+            source_url: None,
+            prompt: Some((*sentence).into()),
+        })
+    }
 }
+
+/// The two sentences a picture drawn by the team's image model carries as its `prompt` (ADR-0218
+/// §8 H9). They are written here: no member, agent or provider writes a word of them, which is why
+/// the direct API may accept a `generated` origin that carries exactly one of them and no other.
+pub const PHOTO_PROMPTS: [(&str, &str); 2] = [
+    ("cutout", "사진에서 피사체만 남기고 배경을 지운 그림"),
+    ("caricature", "사진을 바탕으로 새로 그린 캐리커처"),
+];
 
 /// `Origin.sourceUrl` (contracts.schema.json) with the schema's slack removed:
 /// `https://host[:port][/path]`, ASCII only, host in lowercase `[a-z0-9.-]` or a
@@ -283,9 +301,21 @@ pub fn valid_source_url(link: &str) -> bool {
 
 /// Which `(origin, picture, reason)` combinations a direct draft may be created with.
 /// No caller-supplied prompts or cards: a `generated` origin belongs to the agent
+/// action, except the photo route's own (two fixed sentences, [`PHOTO_PROMPTS`]); the rest of this
+/// sentence is the old rule, unchanged: a `generated` origin belongs to the agent
 /// action, never to this API. A picture and a reason are mutually exclusive, and the
 /// `source_*` reasons exist only for a link import.
 pub fn draft_origin_ok(origin: &Origin, has_media: bool, code: Option<&str>) -> bool {
+    // The one `generated` origin this API takes: the photo route's (ADR-0218 §8 H9). A picture, no
+    // reason code, no link, and one of the server's own two sentences, verbatim.
+    if origin.kind == "generated" {
+        return has_media
+            && code.is_none()
+            && origin.source_url.is_none()
+            && PHOTO_PROMPTS
+                .iter()
+                .any(|(_, sentence)| origin.prompt.as_deref() == Some(*sentence));
+    }
     if origin.prompt.is_some() {
         return false;
     }
@@ -364,6 +394,24 @@ mod tests {
             kind: kind.into(),
             source_url: source_url.map(str::to_owned),
             prompt: prompt.map(str::to_owned),
+        }
+    }
+
+    /// The fixture server of the shared TypeScript core answers the photo route with these two
+    /// sentences (`PHOTO_FIXTURE_PROMPTS`); a screen built on it must say what the real server says.
+    /// Read from the file, not compiled in: the release image carries no client sources.
+    #[test]
+    fn the_clients_fixture_server_speaks_the_same_two_sentences() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../packages/momo-core/src/features/expressions/fixtureServer.ts"
+        );
+        let source = std::fs::read_to_string(path).expect("the core fixture server");
+        for (branch, sentence) in PHOTO_PROMPTS {
+            assert!(
+                source.contains(&format!("{branch}: \"{sentence}\"")),
+                "fixtureServer.ts PHOTO_FIXTURE_PROMPTS must carry {branch}: {sentence}"
+            );
         }
     }
 
@@ -575,7 +623,68 @@ mod tests {
                 false,
                 "unknown kind",
             ),
+            (
+                Origin::photo("cutout").unwrap(),
+                true,
+                None,
+                true,
+                "the photo route's cut-out sentence",
+            ),
+            (
+                Origin::photo("caricature").unwrap(),
+                true,
+                None,
+                true,
+                "the photo route's caricature sentence",
+            ),
+            (
+                Origin::photo("cutout").unwrap(),
+                false,
+                Some("generation_failed"),
+                false,
+                "a photo origin without a picture",
+            ),
+            (
+                Origin::photo("cutout").unwrap(),
+                true,
+                Some("generation_failed"),
+                false,
+                "a photo origin with a reason code",
+            ),
+            (
+                origin("generated", link, Some(PHOTO_PROMPTS[0].1)),
+                true,
+                None,
+                false,
+                "the server's sentence with a link",
+            ),
+            (
+                origin(
+                    "generated",
+                    None,
+                    Some("사진에서 피사체만 남기고 배경을 지운 그림!"),
+                ),
+                true,
+                None,
+                false,
+                "a sentence that is not exactly the server's",
+            ),
+            (
+                origin("upload", None, Some(PHOTO_PROMPTS[1].1)),
+                true,
+                None,
+                false,
+                "the server's sentence on a kind that takes no prompt",
+            ),
+            (
+                origin("generated", None, None),
+                true,
+                None,
+                false,
+                "generated with no prompt at all",
+            ),
         ];
+        assert!(Origin::photo("anything-else").is_none());
         for (origin, has_media, code, allowed, why) in rows {
             assert_eq!(
                 draft_origin_ok(&origin, has_media, code),

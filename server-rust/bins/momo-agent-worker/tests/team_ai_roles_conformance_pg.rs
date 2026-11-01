@@ -27,6 +27,17 @@
 //! | `w9_another_workspaces_switches_do_not_reach_this_one` | read the settings without the workspace id |
 //! | `w10_a_card_of_an_off_bundle_is_refused_before_any_picture_work` | drop the early `roles.action_allowed` check before `profile_avatar::prepare`, or hand the refusal `None` instead of the tokens spent |
 //! | `w11_a_bundle_switched_off_while_the_model_thinks_is_refused_at_the_proposal` | drop the `read_roles_in_tx` check from `propose_with_avatar_in_tx` |
+//!
+//! #4972 (S9 — the `code` bundle's `work.request.open` card, `card_suggest` in the helper turn):
+//!
+//! | test | revert that makes it red |
+//! |---|---|
+//! | `w12_with_code_on_the_helper_gives_a_prefilled_work_request_card_and_moves_nothing` | drop `card_suggest_definition` from the helper's tool list, or the `card_call` branch of the loop, or `command_suggest_props` from the card's message |
+//! | `w13_with_code_off_the_card_is_not_offered_or_said_and_a_named_card_is_refused` | drop `command_ids` from the `code` row (the card is then offered with the bundle off), or the `offered.contains` refusal in `team_ai_card` |
+//! | `w14_code_switched_off_while_the_model_thinks_turns_the_card_into_the_refusal` | drop the `read_roles_in_tx` re-read from `team_ai_finish`'s transaction |
+//! | `w15_a_card_the_normaliser_refuses_is_a_hand_off_not_a_card` | let `team_ai_card` post a card whose `validate_suggestion_among` failed, or drop the prompt rule from `normalize_work_request_prompt` |
+//! | `w16_a_request_that_read_something_may_still_give_the_work_request_card` | put `work.request.open` in `SENSITIVE_ACTION_IDS`-style taint (hide the tool after a read) — this test pins the owner-visible decision that it is not |
+//! | `w17_another_workspaces_code_switch_does_not_reach_this_one` | read the settings without the workspace id |
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -1163,4 +1174,467 @@ async fn w11_a_bundle_switched_off_while_the_model_thinks_is_refused_at_the_prop
     let turn = turn_audit(&su, &t, run).await;
     assert_eq!(turn["outcome"], "refused_role_off");
     assert_eq!(turn["refused_action"], "channel.create");
+}
+
+// --- #4972 (S9): the `code` bundle's `work.request.open` card ---------------------------------------
+
+const CARD_TOOL: &str = "card_suggest";
+const WORK_REQUEST: &str = "work.request.open";
+const CARD_BODY: &str = "내 맥에서 바로 열 수 있어요.";
+
+fn suggest_card(command: &str, args: Value) -> ChatCompletion {
+    ChatCompletion {
+        usage: usage(),
+        tool_calls: vec![call(
+            CARD_TOOL,
+            json!({"commandId": command, "args": args, "body": CARD_BODY}),
+        )],
+        ..ChatCompletion::default()
+    }
+}
+
+/// The helper's `card_suggest` as one request was offered it, or `None` when it was not offered.
+fn card_tool(request: &ChatRequest) -> Option<&momo_agent::tools::ToolDefinition> {
+    request
+        .momo_tools
+        .iter()
+        .find(|tool| tool.name == CARD_TOOL)
+}
+
+/// `(body, props)` of every suggestion card in the workspace, oldest first.
+async fn suggestion_cards(su: &PgPool, t: &Tenant) -> Vec<(String, Value)> {
+    sqlx::query_as::<_, (Option<String>, Value)>(
+        "SELECT body, props FROM message \
+          WHERE workspace_id = $1 AND props ? 'momo.command_suggest' ORDER BY seq",
+    )
+    .bind(t.workspace_id)
+    .fetch_all(su)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|(body, props)| (body.unwrap_or_default(), props))
+    .collect()
+}
+
+/// Every audit action of the workspace but the helper's own per-turn row, sorted — what a
+/// suggestion must leave exactly as it found it (B15-A15).
+async fn audit_actions_but_the_turn(su: &PgPool, t: &Tenant) -> Vec<String> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT action FROM audit_log \
+          WHERE workspace_id = $1 AND action <> 'team_ai.turn' ORDER BY action, id",
+    )
+    .bind(t.workspace_id)
+    .fetch_all(su)
+    .await
+    .unwrap()
+}
+
+async fn run_status(su: &PgPool, run: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id = $1")
+        .bind(run)
+        .fetch_one(su)
+        .await
+        .expect("run status")
+}
+
+/// A scripted model that switches **one** bundle off in the database before it answers.
+struct SwitchesBundleOffWhileThinking {
+    inner: Arc<ScriptedModel>,
+    su: PgPool,
+    workspace: Uuid,
+    bundle: &'static str,
+}
+
+#[async_trait]
+impl ChatProvider for SwitchesBundleOffWhileThinking {
+    async fn complete(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+    ) -> Result<ChatCompletion, ProviderError> {
+        sqlx::query(
+            "UPDATE workspace SET settings = settings || \
+               jsonb_build_object('team_ai_roles', jsonb_build_object($2::text, false)) \
+             WHERE id = $1",
+        )
+        .bind(self.workspace)
+        .bind(self.bundle)
+        .execute(&self.su)
+        .await
+        .expect("switch the bundle off");
+        self.inner.complete(endpoint, request).await
+    }
+}
+
+/// B8 C1 / B15-A15 / B15-A18: nothing stored means `code` is on, so the helper is offered
+/// `card_suggest` — one command on its enum, the work request's two arguments — and the prompt
+/// says what to do with coding work. A plain member (not an admin) asks; the model builds the card;
+/// ONE message lands for that member with the five-key envelope, the prompt exactly as the model
+/// wrote it, a label derived from the harness, and the model's own sentence as the body. Nothing
+/// else moves: no approval row, no audit row but the turn's own, and the turn's row carries the
+/// command's id and none of the words (H9-I10).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn w12_with_code_on_the_helper_gives_a_prefilled_work_request_card_and_moves_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_link(&su, t.owner_id).await;
+    let audit_before = audit_actions_but_the_turn(&su, &t).await;
+    let prompt = "로그인 화면의 비밀번호 보기 버튼이 눌리지 않아요. 원인을 찾아 고쳐 주세요.";
+    let model = ScriptedModel::new([suggest_card(
+        WORK_REQUEST,
+        json!({"harness": "claude", "prompt": prompt}),
+    )]);
+    let w = worker_with(model.clone()).await;
+    let run = enqueue(
+        &pool,
+        &t,
+        t.member_id,
+        "@oort-helper 로그인 화면 버그 좀 고쳐 줘",
+        None,
+    )
+    .await;
+    drain(&w).await;
+
+    let requests = model.requests();
+    assert_eq!(requests.len(), 1, "one call, and the card ends the request");
+    let tool = card_tool(&requests[0]).expect("offered while `code` is on");
+    assert_eq!(
+        tool.parameters["properties"]["commandId"]["enum"],
+        json!([WORK_REQUEST]),
+        "the helper's list, not the whole allow-list"
+    );
+    let args: Vec<&str> = tool.parameters["properties"]["args"]["properties"]
+        .as_object()
+        .expect("args properties")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(args.len(), 2, "{args:?}");
+    assert!(args.contains(&"harness") && args.contains(&"prompt"));
+    assert!(system_prompt(&requests[0]).contains(WORK_REQUEST));
+    assert!(system_prompt(&requests[0]).contains("「작업 요청」 시트"));
+
+    // ONE message, for the person who asked, in the helper's own place.
+    let cards = suggestion_cards(&su, &t).await;
+    assert_eq!(cards.len(), 1, "{cards:?}");
+    let (body, props) = &cards[0];
+    assert_eq!(body, CARD_BODY, "the model's sentence is the body");
+    let envelope = props["momo.command_suggest"].as_object().expect("envelope");
+    let mut keys: Vec<&str> = envelope.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, ["args", "command_id", "for_member_id", "label", "v"]);
+    assert_eq!(envelope["command_id"], WORK_REQUEST);
+    assert_eq!(
+        envelope["args"],
+        json!({"harness": "claude", "prompt": prompt})
+    );
+    assert_eq!(envelope["for_member_id"], t.member_id.to_string());
+    assert_eq!(envelope["label"], "내 맥의 Claude Code에 맡기기");
+    assert_eq!(props["source"], "team_ai");
+    assert_eq!(props["run_id"], run.to_string());
+
+    // B15-A15: nothing else moved.
+    assert!(
+        approvals(&su, &t).await.is_empty(),
+        "a suggestion is not an approval"
+    );
+    assert_eq!(
+        audit_actions_but_the_turn(&su, &t).await,
+        audit_before,
+        "no audit row of any kind from the card"
+    );
+    assert_eq!(run_status(&su, run).await, "succeeded");
+    assert_eq!(ledger_of(&su, &t, run).await, (1, 15), "charged once");
+    let turn = turn_audit(&su, &t, run).await;
+    assert_eq!(turn["outcome"], "suggested_card");
+    assert_eq!(turn["suggested_command"], WORK_REQUEST);
+    let row = turn.to_string();
+    for words in [prompt, CARD_BODY, "비밀번호", "로그인"] {
+        assert!(!row.contains(words), "no text in the turn's row: {row}");
+    }
+}
+
+/// B13-I5 / B15-A16: with `code` off the card is not offered, not described and not given — the tool
+/// list has no `card_suggest`, the prompt has no sentence about it and keeps the old hand-off line —
+/// and a model that names the command anyway (it saw nothing of it) is refused with the role-off
+/// sentence: no card, no approval, the reason code and the command's id on the turn's row.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn w13_with_code_off_the_card_is_not_offered_or_said_and_a_named_card_is_refused() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_link(&su, t.owner_id).await;
+    set_roles(&su, &t, json!({"code": false})).await;
+    let model = ScriptedModel::new([suggest_card(
+        WORK_REQUEST,
+        json!({"prompt": "로그인 버그를 고쳐 줘"}),
+    )]);
+    let w = worker_with(model.clone()).await;
+    let run = enqueue(
+        &pool,
+        &t,
+        t.member_id,
+        "@oort-helper 로그인 화면 버그 좀 고쳐 줘",
+        None,
+    )
+    .await;
+    drain(&w).await;
+
+    let requests = model.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        card_tool(&requests[0]).is_none(),
+        "the tool is not offered with `code` off"
+    );
+    let prompt = system_prompt(&requests[0]);
+    for gone in [
+        CARD_TOOL,
+        WORK_REQUEST,
+        "args.prompt",
+        "args.harness",
+        "작업 요청",
+    ] {
+        assert!(!prompt.contains(gone), "`{gone}` is still said: {prompt}");
+    }
+    assert!(
+        prompt.contains("코드·파일 작업"),
+        "the old hand-off line stands: {prompt}"
+    );
+    // The rest of the helper is untouched by this switch.
+    assert_eq!(
+        offered_ids(&requests[0])
+            .expect("the proposal tool is offered")
+            .len(),
+        12
+    );
+
+    assert!(suggestion_cards(&su, &t).await.is_empty(), "no card");
+    assert!(approvals(&su, &t).await.is_empty());
+    let texts = agent_texts(&su, &t).await;
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == momo_workspace_actions::team_ai::ROLE_OFF_SENTENCE),
+        "{texts:?}"
+    );
+    assert_eq!(ledger_of(&su, &t, run).await, (1, 15), "charged once");
+    let turn = turn_audit(&su, &t, run).await;
+    assert_eq!(turn["outcome"], "refused_role_off");
+    assert_eq!(turn["refused_action"], WORK_REQUEST);
+    assert!(turn.get("suggested_command").is_none(), "{turn}");
+}
+
+/// The finishing transaction is the fence for a switch that moves WHILE the model thinks: the card
+/// was offered (`code` was on when the request began), the bundle goes off, and the transaction that
+/// would post the card reads the switches again — the person gets the role-off sentence and no
+/// card, the tokens are on the ledger once, and the turn's row says so.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn w14_code_switched_off_while_the_model_thinks_turns_the_card_into_the_refusal() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_link(&su, t.owner_id).await;
+    let inner = ScriptedModel::new([suggest_card(
+        WORK_REQUEST,
+        json!({"prompt": "로그인 버그를 고쳐 줘"}),
+    )]);
+    let model = Arc::new(SwitchesBundleOffWhileThinking {
+        inner: inner.clone(),
+        su: su.clone(),
+        workspace: t.workspace_id,
+        bundle: "code",
+    });
+    let w = worker_with(model).await;
+    let run = enqueue(
+        &pool,
+        &t,
+        t.member_id,
+        "@oort-helper 로그인 화면 버그 좀 고쳐 줘",
+        None,
+    )
+    .await;
+    drain(&w).await;
+
+    let requests = inner.requests();
+    assert_eq!(requests.len(), 1);
+    assert!(
+        card_tool(&requests[0]).is_some(),
+        "`code` was on when the request began"
+    );
+    assert!(suggestion_cards(&su, &t).await.is_empty(), "no card");
+    let texts = agent_texts(&su, &t).await;
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == momo_workspace_actions::team_ai::ROLE_OFF_SENTENCE),
+        "{texts:?}"
+    );
+    assert_eq!(ledger_of(&su, &t, run).await, (1, 15), "charged once");
+    let turn = turn_audit(&su, &t, run).await;
+    assert_eq!(turn["outcome"], "refused_role_off");
+    assert_eq!(turn["refused_action"], WORK_REQUEST);
+    assert!(turn.get("suggested_command").is_none(), "{turn}");
+}
+
+/// A card the normaliser refuses is the model failing to build one: the hand-off line, no card, no
+/// approval, whatever it was. The prompt the sheet's own send would refuse (`/…`, a hidden
+/// character, a control, blank), a `team_key` harness, a stray key, a missing prompt — and a command
+/// the helper never gives (`ai.connect`), which is out of scope rather than a bad argument.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn w15_a_card_the_normaliser_refuses_is_a_hand_off_not_a_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_link(&su, t.owner_id).await;
+    let bad: Vec<(&str, Value)> = vec![
+        (WORK_REQUEST, json!({"prompt": "/clear 다 지워 줘"})),
+        (WORK_REQUEST, json!({"prompt": "고쳐\u{200b} 줘"})),
+        (WORK_REQUEST, json!({"prompt": "고쳐\u{0007} 줘"})),
+        (WORK_REQUEST, json!({"prompt": "   "})),
+        (
+            WORK_REQUEST,
+            json!({"harness": "team_key", "prompt": "고쳐 줘"}),
+        ),
+        (
+            WORK_REQUEST,
+            json!({"prompt": "고쳐 줘", "folder": "/Users/me"}),
+        ),
+        (WORK_REQUEST, json!({})),
+        ("ai.connect", json!({"harness": "claude"})),
+        ("settings.open", json!({"section": "profile"})),
+    ];
+    let model = ScriptedModel::new(
+        bad.iter()
+            .map(|(command, args)| suggest_card(command, args.clone())),
+    );
+    let w = worker_with(model.clone()).await;
+    let mut runs = Vec::new();
+    for _ in &bad {
+        runs.push(
+            enqueue(
+                &pool,
+                &t,
+                t.member_id,
+                "@oort-helper 로그인 화면 버그 좀 고쳐 줘",
+                None,
+            )
+            .await,
+        );
+        drain(&w).await;
+    }
+    assert_eq!(model.requests().len(), bad.len(), "one call per request");
+    assert!(
+        suggestion_cards(&su, &t).await.is_empty(),
+        "no card, whatever it was"
+    );
+    assert!(approvals(&su, &t).await.is_empty());
+    for (index, ((command, _), run)) in bad.iter().zip(&runs).enumerate() {
+        let turn = turn_audit(&su, &t, *run).await;
+        let expected = if *command == WORK_REQUEST {
+            "could_not_propose"
+        } else {
+            "out_of_scope"
+        };
+        assert_eq!(turn["outcome"], expected, "case {index}: {command}");
+    }
+    let texts = agent_texts(&su, &t).await;
+    let sentence = |reason: momo_workspace_actions::team_ai::FallbackReason| reason.sentence();
+    assert_eq!(
+        texts
+            .iter()
+            .filter(|text| text.as_str()
+                == sentence(momo_workspace_actions::team_ai::FallbackReason::CouldNotPropose))
+            .count(),
+        7,
+        "{texts:?}"
+    );
+}
+
+/// The decision this slice makes visible: the work-request card is **not** behind the read-taint rule
+/// (B4-3). It changes no server state and a person sends what it fills in, so a request that read the
+/// workspace first may still give it — the tool is still offered on the call after the read, and the
+/// card lands. (The self-widening cards are the tainted ones; this is not one.)
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn w16_a_request_that_read_something_may_still_give_the_work_request_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_link(&su, t.owner_id).await;
+    let model = ScriptedModel::new([
+        read_channel(&t.channel_name),
+        suggest_card(
+            WORK_REQUEST,
+            json!({"prompt": "이 채널에서 얘기한 버그를 고쳐 줘"}),
+        ),
+    ]);
+    let w = worker_with(model.clone()).await;
+    let run = enqueue(
+        &pool,
+        &t,
+        t.member_id,
+        "@oort-helper 이 채널에서 얘기한 버그를 고쳐 줘",
+        Some("로그인 화면의 보기 버튼이 안 눌려요"),
+    )
+    .await;
+    drain(&w).await;
+
+    let requests = model.requests();
+    assert_eq!(requests.len(), 2, "one read, then the card");
+    assert!(card_tool(&requests[0]).is_some());
+    assert!(
+        card_tool(&requests[1]).is_some(),
+        "still offered after a read (not behind the taint rule)"
+    );
+    assert_eq!(suggestion_cards(&su, &t).await.len(), 1);
+    let turn = turn_audit(&su, &t, run).await;
+    assert_eq!(turn["outcome"], "suggested_card");
+    assert_eq!(turn["suggested_command"], WORK_REQUEST);
+    assert_eq!(turn["tools"], json!(["read_channel"]));
+}
+
+/// "다른 테넌트 설정이 섞이지 않음": workspace A's `code` switch is A's. With `code` off in A, workspace
+/// B (nothing stored) is still offered the card and its helper gives one.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn w17_another_workspaces_code_switch_does_not_reach_this_one() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let a = seed(&su, &pool).await;
+    let b = seed(&su, &pool).await;
+    seed_link(&su, a.owner_id).await;
+    set_roles(&su, &a, json!({"code": false})).await;
+    let model = ScriptedModel::new([
+        suggest_card(WORK_REQUEST, json!({"prompt": "B의 버그를 고쳐 줘"})),
+        suggest_card(WORK_REQUEST, json!({"prompt": "A의 버그를 고쳐 줘"})),
+    ]);
+    let w = worker_with(model.clone()).await;
+    enqueue(&pool, &b, b.member_id, "@oort-helper 버그 고쳐 줘", None).await;
+    drain(&w).await;
+    enqueue(&pool, &a, a.member_id, "@oort-helper 버그 고쳐 줘", None).await;
+    drain(&w).await;
+
+    let requests = model.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(card_tool(&requests[0]).is_some(), "B stored nothing: on");
+    assert!(card_tool(&requests[1]).is_none(), "A switched `code` off");
+    assert_eq!(suggestion_cards(&su, &b).await.len(), 1, "B's card");
+    assert!(suggestion_cards(&su, &a).await.is_empty(), "A's is refused");
 }

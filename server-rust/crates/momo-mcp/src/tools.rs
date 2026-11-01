@@ -1254,14 +1254,26 @@ fn action_initiate_schema() -> Value {
 /// `the_suggestable_ids_are_one_list_in_four_places` measures this list, the
 /// registry, the worker's `card_suggest` definition and `docs/api/openapi.yaml`'s
 /// `SuggestableCommandId` together.
-const SUGGESTABLE_COMMAND_IDS: [&str; 2] = ["ai.connect", "settings.open"];
+const SUGGESTABLE_COMMAND_IDS: [&str; 3] = ["ai.connect", "settings.open", "work.request.open"];
 
 // `ai.connect`'s argument vocabulary, restated for the same reason. The domain
 // normaliser is the rule (it also enforces the pair `team_key ⇔ team`, which
 // this validator cannot express); these are the first fence, and
 // `the_card_suggest_tool_bounds_what_the_registry_normalises` compares them with
 // the registry's own schema.
+//
+// `harness` is shared with `work.request.open` (#4972), whose own values are `claude` and
+// `codex`: the one flat `args.harness` property carries the **union** of the two commands'
+// enums, which is this list (`claude` and `codex` are in it). Which value belongs to which
+// command is the domain normaliser's rule (`team_key` is refused for a work request).
 const AI_CONNECT_HARNESSES: [&str; 3] = ["claude", "codex", "team_key"];
+
+// `work.request.open`'s one free-text argument (ADR-0201 v3 B8 C1, #4972): what the person's
+// own 「작업 요청」 sheet is filled with. Length bounds count UTF-8 bytes here, like every text in
+// this schema; the domain normaliser is the rule (it also refuses what the signed spawn's
+// prompt rule refuses, a prompt that starts with `/`, and control or hidden characters), and
+// `the_card_suggest_tool_bounds_what_the_registry_normalises` compares the bounds.
+const WORK_REQUEST_PROMPT_MAX_BYTES: u64 = 8_000;
 const AI_CONNECT_SCOPES: [&str; 2] = ["mine", "team"];
 
 // `settings.open`'s section vocabulary (ADR-0201 v2 H6-4, #3939) — the web
@@ -1308,7 +1320,8 @@ fn card_suggest_schema() -> Value {
                 "properties": {
                     "harness": nullable(json!({"type": "string", "enum": AI_CONNECT_HARNESSES})),
                     "scope": nullable(json!({"type": "string", "enum": AI_CONNECT_SCOPES})),
-                    "section": nullable(json!({"type": "string", "enum": SETTINGS_OPEN_SECTIONS}))
+                    "section": nullable(json!({"type": "string", "enum": SETTINGS_OPEN_SECTIONS})),
+                    "prompt": nullable(required_text(WORK_REQUEST_PROMPT_MAX_BYTES))
                 }
             })),
             "body": required_text(8_000),
@@ -1558,7 +1571,9 @@ pub const TOOL_CATALOG: [ToolDescriptor; 15] = [
         title: "Suggest a card",
         description: "Answer the person who asked with a card they can act on in place \
                       (ai.connect: connect an AI subscription or a team API key; \
-                      settings.open: open one settings section, e.g. notifications). The \
+                      settings.open: open one settings section, e.g. notifications; \
+                      work.request.open: open their own work-request sheet with args.prompt \
+                      filled in, for coding work on their own Mac). The \
                       server picks the channel, the recipient and the title; the card \
                       runs nothing until that person taps it on their own device. If the \
                       request came inside a thread, set rootId to that thread's root so the \

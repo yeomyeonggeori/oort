@@ -25,6 +25,22 @@ describe("osNotifier 묶음 (#3339)", () => {
     expect(summarize(items)).toEqual({ title: "멘션 5건", body: "a, b, c 외 2건" });
   });
 
+  it("스레드 답글(#4890)은 묶음 제목을 호출부가 정한다 — 이 모듈의 고정 표에 한글을 더하지 않는다", () => {
+    const thread = (label: string): OsNotifyItem => ({
+      ...item("thread-reply", label),
+      summaryTitle: (count) => `스레드 답글 ${count}건`,
+    });
+    expect(summarize([thread("김인턴")])).toEqual({ title: "thread-reply:김인턴", body: "김인턴 본문" });
+    expect(summarize([thread("김인턴"), thread("민준"), thread("민준")])).toEqual({
+      title: "스레드 답글 3건",
+      body: "김인턴, 민준, 민준",
+    });
+    // 제목을 안 준 호출은 던지지 않고 보낸 사람 이름으로 말한다.
+    expect(summarize([item("thread-reply", "김인턴"), item("thread-reply", "민준")]).title).toBe(
+      "thread-reply:김인턴 2건"
+    );
+  });
+
   it("창 안의 같은 종류는 한 번만 보내고, 다른 종류는 따로 보낸다", () => {
     vi.useFakeTimers();
     try {

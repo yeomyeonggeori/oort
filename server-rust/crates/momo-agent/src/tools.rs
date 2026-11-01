@@ -362,7 +362,7 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
             // connect an AI), that the card does the connecting (so it must
             // not walk them through settings or ask for a key), and that the
             // title is not its to write.
-            description: "Show the person who asked you a card they can act on              in place — use `ai.connect` when they ask to connect an AI              subscription or a team API key, and `settings.open` (with `args.section`) when they ask where a setting is. Put your short answer in `body`;              the card itself is drawn by their app from their own settings, so              do not explain settings steps and never ask for a key, token or              password. The card's title and recipient are set by the server.",
+            description: "Show the person who asked you a card they can act on              in place — use `ai.connect` when they ask to connect an AI              subscription or a team API key, `settings.open` (with `args.section`) when they ask where a setting is, and `work.request.open` (with `args.prompt`, and `args.harness` if they named Claude Code or Codex) when they ask you to hand coding work to their own Mac. Put your short answer in `body`;              the card itself is drawn by their app from their own settings, so              do not explain settings steps and never ask for a key, token or              password. The card's title and recipient are set by the server.",
             parameters: card_suggest_parameters(),
         },
         ToolDefinition {
@@ -574,33 +574,46 @@ fn is_invite_id(id: &str) -> bool {
 /// drift test in `momo-server` still reads it back as a *third* list, because a
 /// hand edit here would otherwise pass silently.
 fn card_suggest_parameters() -> Value {
-    let commands = crate::card_suggest::SUGGESTABLE_COMMANDS;
-    // One closed `args` object whose properties are every command's, merged. The
-    // per-command rule (which keys, which pairs, which are required) is the
-    // normaliser's, not this schema's: JSON-Schema `oneOf` is not portable across
-    // the providers the worker speaks to, so the schema is the first fence and
-    // `validate_suggestion` is the gate. Property names do not collide across
-    // commands (`harness`/`scope` vs `section`); the drift test reads this back.
-    let mut properties = serde_json::Map::new();
-    for command in commands {
-        if let Some(own) = command.args_schema()["properties"].as_object() {
-            for (name, schema) in own {
-                let clash = properties.insert(name.clone(), schema.clone());
-                assert!(
-                    clash.is_none(),
-                    "two suggestable commands both declare args.{name}"
-                );
-            }
+    card_suggest_parameters_of(crate::card_suggest::SUGGESTABLE_COMMANDS)
+}
+
+/// One sentence per command for `commandId`'s description, written only for the commands the
+/// schema offers: a command that is not on the enum has no sentence anywhere in the tool (the
+/// helper's request must not describe a card its bundle is off for, B15-A16).
+fn card_command_hint(id: &str) -> &'static str {
+    match id {
+        crate::card_suggest::COMMAND_AI_CONNECT => {
+            "`ai.connect` is the AI connection card (args: harness, scope)."
         }
+        crate::card_suggest::COMMAND_SETTINGS_OPEN => {
+            "`settings.open` opens one settings section (args: section, required)."
+        }
+        crate::card_suggest::COMMAND_WORK_REQUEST_OPEN => {
+            "`work.request.open` opens the person's own work-request sheet with your prompt filled in, for coding work on their own Mac (args: prompt, required; harness: claude or codex, optional). They read it and send it themselves."
+        }
+        _ => "",
     }
+}
+
+/// [`card_suggest_parameters`] for any subset of the allow-list.
+///
+/// One closed `args` object whose properties are the commands' own, merged
+/// ([`crate::card_suggest::merged_args_properties`]: a name two commands share — `harness` — keeps
+/// the union of the enums). The per-command rule (which keys, which pairs, which are required) is
+/// the normaliser's, not this schema's: JSON-Schema `oneOf` is not portable across the providers
+/// the worker speaks to, so the schema is the first fence and `validate_suggestion` is the gate.
+fn card_suggest_parameters_of(commands: &[crate::card_suggest::SuggestableCommand]) -> Value {
+    let properties = crate::card_suggest::merged_args_properties(commands);
+    let ids: Vec<&str> = commands.iter().map(|command| command.id).collect();
+    let hints: Vec<&str> = ids.iter().map(|id| card_command_hint(id)).collect();
     let args = json!({"type": "object", "additionalProperties": false, "properties": properties});
     json!({
         "type": "object",
         "properties": {
             "commandId": {
                 "type": "string",
-                "enum": crate::card_suggest::suggestable_command_ids(),
-                "description": "Which card. `ai.connect` is the AI connection card (args: harness, scope). `settings.open` opens one settings section (args: section, required)."
+                "enum": ids,
+                "description": format!("Which card. {}", hints.join(" "))
             },
             "args": args,
             "body": {
@@ -610,6 +623,38 @@ fn card_suggest_parameters() -> Value {
         },
         "required": ["commandId", "body"],
         "additionalProperties": false
+    })
+}
+
+/// What the helper's `card_suggest` tells the model. Only the commands its request offers are
+/// named (see [`card_command_hint`]); the tool's own sentence is about **when** and **what the
+/// card is**, never about how to write the title or whom it goes to — those are the server's.
+const HELPER_CARD_SUGGEST_DESCRIPTION: &str = "Give the person who asked you a card that opens their own work-request sheet, already filled in. Use it when they ask you to do coding work (fix a bug, write or change code in a repository): put what they want done in `args.prompt` in their own voice, with the details they gave you, and `args.harness` only if they named Claude Code (`claude`) or Codex (`codex`). Put one short sentence in `body`. The card runs nothing by itself: they read the prompt in the sheet and send it from their own Mac. You never read or run code, and never put a key, token or password in the prompt. The card's title and recipient are set by the server.";
+
+/// The team AI helper's `card_suggest` (ADR-0201 증보 v3 B8 C1, #4972): the same tool, the same
+/// gate ([`crate::card_suggest::validate_suggestion_among`]), **narrowed to `command_ids`** — the
+/// commands this request's role bundles are on for
+/// ([`crate::team_ai_roles::TeamAiRoles::advertised_command_ids`]). `None` when nothing is on
+/// offer: a tool with no command to give is not offered at all, like the proposal tool with no
+/// `actionId` left. Ids that are not on the allow-list or not on
+/// [`crate::card_suggest::TEAM_AI_SUGGESTABLE_COMMAND_IDS`] are ignored.
+pub fn card_suggest_definition(command_ids: &[&str]) -> Option<ToolDefinition> {
+    let commands: Vec<crate::card_suggest::SuggestableCommand> =
+        crate::card_suggest::SUGGESTABLE_COMMANDS
+            .iter()
+            .filter(|command| {
+                command_ids.contains(&command.id)
+                    && crate::card_suggest::TEAM_AI_SUGGESTABLE_COMMAND_IDS.contains(&command.id)
+            })
+            .copied()
+            .collect();
+    if commands.is_empty() {
+        return None;
+    }
+    Some(ToolDefinition {
+        name: CARD_SUGGEST,
+        description: HELPER_CARD_SUGGEST_DESCRIPTION,
+        parameters: card_suggest_parameters_of(&commands),
     })
 }
 
@@ -1574,26 +1619,26 @@ mod tests {
             .collect();
         keys.sort_unstable();
         assert_eq!(keys, vec!["args", "body", "commandId"]);
-        // `args` is one closed object whose properties are every command's.
+        // `args` is one closed object whose properties are every command's; the one name two
+        // commands share (`harness`) keeps the union of their enums.
         let args = &parameters["properties"]["args"];
         assert_eq!(args["additionalProperties"], json!(false));
-        let mut expected = serde_json::Map::new();
-        for command in crate::card_suggest::SUGGESTABLE_COMMANDS {
-            for (name, schema) in command.args_schema()["properties"]
-                .as_object()
-                .expect("a command's args are an object")
-            {
-                assert!(
-                    expected.insert(name.clone(), schema.clone()).is_none(),
-                    "two suggestable commands both declare args.{name}"
-                );
-            }
-        }
+        let expected =
+            crate::card_suggest::merged_args_properties(crate::card_suggest::SUGGESTABLE_COMMANDS);
         assert_eq!(args["properties"], Value::Object(expected));
         assert_eq!(
             args["properties"]["section"]["enum"],
             json!(crate::card_suggest::SETTINGS_OPEN_SECTIONS)
         );
+        // `ai.connect` and `work.request.open` both take `harness`: the merged enum is the union,
+        // which is `ai.connect`'s own (claude and codex are in it), so the published schema is
+        // the one it was before the work request joined.
+        assert_eq!(
+            args["properties"]["harness"]["enum"],
+            json!(crate::card_suggest::AI_CONNECT_HARNESSES)
+        );
+        assert_eq!(args["properties"]["prompt"]["maxLength"], json!(8_000));
+        assert_eq!(args["properties"]["prompt"]["minLength"], json!(1));
         assert!(definition.description.contains("never ask for a key"));
         assert!(is_executable(CARD_SUGGEST));
         assert_eq!(wire_tool_name(CARD_SUGGEST), "card_suggest");
@@ -1611,5 +1656,56 @@ mod tests {
         // Gated tools keep their own backstop (the approval), untouched here.
         assert!(!exempt_tool_not_enabled(WORK_SESSION_END, &none));
         assert!(not_enabled_output(CARD_SUGGEST).contains("not enabled"));
+    }
+
+    /// #4972: the helper's `card_suggest` is the catalog tool **narrowed** to what the request
+    /// offers — one command, one property set — and it names nothing else.
+    #[test]
+    fn the_helpers_card_suggest_offers_only_the_commands_its_request_names() {
+        use crate::card_suggest::{
+            COMMAND_AI_CONNECT, COMMAND_SETTINGS_OPEN, COMMAND_WORK_REQUEST_OPEN,
+        };
+        // Nothing offered, nothing on offer; ids the helper may not suggest are ignored even when
+        // a caller passes them (the allow-list of the helper is not the caller's to widen).
+        assert!(card_suggest_definition(&[]).is_none());
+        assert!(card_suggest_definition(&[COMMAND_AI_CONNECT, COMMAND_SETTINGS_OPEN]).is_none());
+
+        let definition = card_suggest_definition(&[
+            COMMAND_AI_CONNECT,
+            COMMAND_SETTINGS_OPEN,
+            COMMAND_WORK_REQUEST_OPEN,
+        ])
+        .expect("the work request is on offer");
+        assert_eq!(definition.name, CARD_SUGGEST);
+        let parameters = &definition.parameters;
+        assert_eq!(
+            parameters["properties"]["commandId"]["enum"],
+            json!([COMMAND_WORK_REQUEST_OPEN])
+        );
+        // The args are the work request's own two properties — no `scope`, no `section`, and the
+        // shared `harness` is the work request's enum, not `ai.connect`'s (no `team_key`).
+        let args = parameters["properties"]["args"]["properties"]
+            .as_object()
+            .expect("args properties");
+        let mut names: Vec<&str> = args.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["harness", "prompt"]);
+        assert_eq!(
+            args["harness"]["enum"],
+            json!(crate::card_suggest::WORK_REQUEST_HARNESSES)
+        );
+        // Every sentence the model reads about the other two cards is absent (B15-A16).
+        let whole = format!("{} {}", definition.description, parameters);
+        for other in [
+            COMMAND_AI_CONNECT,
+            COMMAND_SETTINGS_OPEN,
+            "team_key",
+            "section",
+        ] {
+            assert!(!whole.contains(other), "{other}: {whole}");
+        }
+        assert!(whole.contains(COMMAND_WORK_REQUEST_OPEN));
+        // It is the same tool the executors and the exemption know by name.
+        assert!(is_executable(CARD_SUGGEST));
     }
 }

@@ -867,7 +867,10 @@ async fn the_daily_ceiling_calls_no_model() {
     .await
     .unwrap();
     let provider = Arc::new(MockChatProvider::echo());
-    let w = worker_with(provider.clone(), |c| c.team_ai_daily_token_cap = 1_000).await;
+    let w = worker_with(provider.clone(), |c| {
+        c.team_ai_daily_token_cap = Some(1_000)
+    })
+    .await;
     let (run_id, _) = enqueue(&pool, &t, t.owner_id, "human", "또 요청", None).await;
     drain(&w).await;
     assert!(
@@ -881,9 +884,18 @@ async fn the_daily_ceiling_calls_no_model() {
     );
     let last = agent_messages(&su, &t).await.pop().expect("hand-off line");
     assert_eq!(last.2["reason"], "over_budget");
+    // #4944 (B9-3): the env cap is the OPERATOR's ceiling — the line says so, and does not point
+    // the administrator at a setting that cannot lift it.
+    assert_eq!(
+        last.2["limit"],
+        json!({"source": "operator", "window": "day"})
+    );
     // And under the ceiling the same worker does call the model.
     let provider2 = Arc::new(MockChatProvider::echo());
-    let w2 = worker_with(provider2.clone(), |c| c.team_ai_daily_token_cap = 1_001).await;
+    let w2 = worker_with(provider2.clone(), |c| {
+        c.team_ai_daily_token_cap = Some(1_001)
+    })
+    .await;
     enqueue(&pool, &t, t.owner_id, "human", "다시", None).await;
     drain(&w2).await;
     assert_eq!(

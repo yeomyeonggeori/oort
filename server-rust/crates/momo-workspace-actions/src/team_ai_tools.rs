@@ -1063,7 +1063,10 @@ async fn get_agent_run(
     if let Some(code) = error_code {
         lines.push(format!("오류 코드: {code}"));
     }
-    // Stage names only — never a tool's input or output (H4-1).
+    // Stage names only — never a tool's input or output (H4-1). A row that names an approval
+    // says no `code`: there it is how the approval ended, which belongs to the room the approval
+    // was raised in, and this role cannot read `approval` to tell whether the requester is in
+    // that room (#5007, ADR-0200 F5). A row that names none is the run's own and keeps its code.
     if let Some(ledger) = ledger {
         for event in ledger.events.iter().take(RUN_EVENTS_MAX) {
             lines.push(format!(
@@ -1078,6 +1081,7 @@ async fn get_agent_run(
                 event
                     .code
                     .as_deref()
+                    .filter(|_| event.approval_id.is_none())
                     .map(|code| format!(" · {}", data_text(code, 40)))
                     .unwrap_or_default(),
             ));

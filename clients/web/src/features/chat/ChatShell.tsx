@@ -91,6 +91,7 @@ import {
 } from "@momo/core/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
+import { threadsAreFollowable } from "@momo/core/features/timeline/threadFollow";
 import { useSurfaceProvidedWhileOpen } from "@/features/capabilities/useSurfaceProvided";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { useOpenAddChannelMember } from "@/features/channels/useAddChannelMember";
@@ -1614,6 +1615,7 @@ export function ChatShell() {
           isPlayEntrance={timeline.isPlayEntrance}
           onEntranceConsumed={timeline.consumeEntrance}
           onThreadRead={timeline.applyThreadRead}
+          followable={threadsAreFollowable(channel?.kind)}
           onClose={() => {
             // 작업 패널의 onClose와 같은 이유 (#1431 · 아래 993-1004 주석): 이 서랍이
             // 덮어 `inert`로 만든 표면(chat-region) 안에 opener(답글 앵커)가 산다.

@@ -2448,6 +2448,32 @@ pub async fn proposer_is_live_agent_in_tx(
     .await?)
 }
 
+/// Is `face` a live **human** of the conversation `channel_id` (`expression.create`'s one face,
+/// ADR-0186 X8-1)? Active, not deleted, a member of the channel who has not left.
+///
+/// The proposal's resolver asks this inside the proposal's transaction, and the Agent Port's
+/// preparation asks it **before it fetches or decodes a single candidate** (#4900): one function,
+/// so the cheap answer and the authoritative one cannot become two judgements.
+pub async fn face_is_human_in_room_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    face: Uuid,
+    channel_id: Uuid,
+) -> Result<bool, momo_db::DbError> {
+    Ok(momo_db::sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM member m \
+           JOIN membership c ON (c.workspace_id, c.member_id) = (m.workspace_id, m.id) \
+          WHERE m.workspace_id = $1 AND m.id = $2 AND m.kind = 'human' \
+            AND m.status = 'active' AND m.deleted_at IS NULL \
+            AND c.channel_id = $3 AND c.left_at IS NULL)",
+    )
+    .bind(workspace_id)
+    .bind(face)
+    .bind(channel_id)
+    .fetch_one(&mut *conn)
+    .await?)
+}
+
 /// Is `member_id` a live member of `channel_id`? (`membership.left_at IS NULL`.)
 pub async fn member_is_live_in_channel_in_tx(
     conn: &mut PgConnection,
@@ -3365,19 +3391,7 @@ pub async fn resolve_action_with_origin_in_tx(
                 // The face, if any, is a live human of THIS conversation: a card must never be
                 // the first to say that somebody outside the room exists.
                 if let Some(face) = *subject {
-                    let human_in_room: bool = momo_db::sqlx::query_scalar(
-                        "SELECT EXISTS (SELECT 1 FROM member m \
-                           JOIN membership c ON (c.workspace_id, c.member_id) = (m.workspace_id, m.id) \
-                          WHERE m.workspace_id = $1 AND m.id = $2 AND m.kind = 'human' \
-                            AND m.status = 'active' AND m.deleted_at IS NULL \
-                            AND c.channel_id = $3 AND c.left_at IS NULL)",
-                    )
-                    .bind(workspace_id)
-                    .bind(face)
-                    .bind(run_channel)
-                    .fetch_one(&mut *conn)
-                    .await?;
-                    if !human_in_room {
+                    if !face_is_human_in_room_in_tx(conn, workspace_id, face, run_channel).await? {
                         return Ok(Err(unresolved()));
                     }
                 }
@@ -3867,6 +3881,69 @@ mod tests {
         advertised.sort();
         assert_eq!(advertised, ["roleLabels", "welcomePrompt"]);
         assert_eq!(schema["additionalProperties"], json!(false));
+    }
+
+    /// ADR-0201 증보 v3 B9 / B13-I9 (#4944): the limit that bounds the helper is not something the
+    /// helper can write. `team_ai_limits` — spelled as the bag spells it or as the wire would, alone
+    /// or beside a legal key, `null` included, and with a value the settings door **would** accept —
+    /// is refused, and the schema the tool advertises does not list it. (The settings door itself is
+    /// the administrator's: `PATCH …/settings`, `workspace_operator` only.)
+    #[test]
+    fn a_settings_proposal_cannot_name_the_team_ai_limits() {
+        let action =
+            actions::action_by_id(actions::ACTION_WORKSPACE_SETTINGS_UPDATE).expect("registered");
+        for args in [
+            json!({"team_ai_limits": {"dailyTokens": 100}}),
+            json!({"teamAiLimits": {"dailyTokens": 100}}),
+            json!({"team_ai_limits": {"monthlyUsd": 1.5, "dailySearches": 3}}),
+            json!({"team_ai_limits": null}),
+            json!({"welcomePrompt": "환영해요", "team_ai_limits": {"monthlyUsd": 1}}),
+            json!({"welcomePrompt": "환영해요", "teamAiLimits": {"dailySearches": 3}}),
+            json!({"roleLabels": {"owner": "대표"}, "team_ai_limits": {"dailyTokens": 5}}),
+        ] {
+            assert!(
+                validated_action_args(action, &args, 0).is_err(),
+                "{args} must be refused"
+            );
+        }
+        // Anti-vacuity: the same call with only the legal keys is accepted.
+        assert!(validated_action_args(action, &json!({"welcomePrompt": "환영해요"}), 0).is_ok());
+        let schema = action.args_schema();
+        let advertised: Vec<&str> = schema["properties"]
+            .as_object()
+            .expect("an object schema")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert!(
+            advertised
+                .iter()
+                .all(|key| !key.to_lowercase().contains("limit")),
+            "the tool the helper reads must not advertise a limits key: {advertised:?}"
+        );
+    }
+
+    /// B13-I9 (#4944): `team_ai.roles.set` — the other card the helper may raise about itself — names
+    /// one of the six bundles and a switch, nothing else. A limit is not a bundle, and a limits
+    /// object cannot ride beside one.
+    #[test]
+    fn the_roles_card_cannot_name_the_team_ai_limits() {
+        let action = actions::action_by_id(actions::ACTION_TEAM_AI_ROLES_SET).expect("registered");
+        for args in [
+            json!({"bundle": "team_ai_limits", "enabled": false}),
+            json!({"bundle": "dailyTokens", "enabled": true}),
+            json!({"bundle": "files", "enabled": false, "team_ai_limits": {"dailyTokens": 1}}),
+            json!({"bundle": "files", "enabled": false, "teamAiLimits": {"monthlyUsd": 1}}),
+        ] {
+            assert!(
+                validated_action_args(action, &args, 0).is_err(),
+                "{args} must be refused"
+            );
+        }
+        // Anti-vacuity: the legal card is accepted.
+        assert!(
+            validated_action_args(action, &json!({"bundle": "files", "enabled": false}), 0).is_ok()
+        );
     }
 
     /// `message.pin` / `message.unpin` (ADR-0186 증보 v5 U-e): the proposal is one message id

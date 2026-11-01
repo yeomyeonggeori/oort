@@ -12,7 +12,7 @@ import { showBrowserNotification, type BrowserNotifyTarget } from "./browserNoti
 // 앱 안 토스트가 아니다. OS 알림이다(ADR-0182의 대상 밖, taste §8).
 // =============================================================================
 
-export type OsNotifyKind = "approval" | "mention" | "dm" | "waiting" | "done";
+export type OsNotifyKind = "approval" | "mention" | "dm" | "waiting" | "done" | "thread-reply";
 
 export interface OsNotifyItem {
   kind: OsNotifyKind;
@@ -22,6 +22,11 @@ export interface OsNotifyItem {
   label: string;
   /** 브라우저 알림을 눌렀을 때 갈 곳(채널 경로). 데스크탑은 포커스 때 따로 간다. */
   route?: string;
+  /**
+   * 묶였을 때의 제목을 호출부가 정한다(#4890). 새 문구는 사전으로만 들어오므로 이 모듈의 고정 표(`SUMMARY_TITLE`)에
+   * 한글을 더하지 않는다. 건수는 묶인 뒤에야 알아서 함수다. 없으면 표의 것이다.
+   */
+  summaryTitle?: (count: number) => string;
 }
 
 /** 여러 건이 한 곳을 가리키면 그곳, 흩어지면 멘션 인박스(데스크탑 `openTarget`과 같은 말). */
@@ -34,7 +39,7 @@ export function routeFor(items: readonly OsNotifyItem[]): string | undefined {
 }
 
 /** 묶였을 때의 제목. 「무엇이 일어났나」가 먼저, 건수가 뒤다. */
-const SUMMARY_TITLE: Record<OsNotifyKind, string> = {
+const SUMMARY_TITLE: Record<Exclude<OsNotifyKind, "thread-reply">, string> = {
   approval: "승인 필요",
   mention: "멘션",
   dm: "새 메시지",
@@ -48,6 +53,13 @@ export const SUMMARY_NAMES = 3;
 /** 같은 종류를 한 묶음으로 보는 시간. */
 export const COALESCE_MS = 1200;
 
+/** 묶음 제목: 호출부가 준 것이 먼저, 없으면 표. 표에 없는 종류는 보낸 사람 이름으로 말한다(호출부가 늘 제목을 준다). */
+function summaryTitleFor(first: OsNotifyItem, count: number): string {
+  if (first.summaryTitle !== undefined) return first.summaryTitle(count);
+  const base = first.kind === "thread-reply" ? first.title : SUMMARY_TITLE[first.kind];
+  return `${base} ${count}건`;
+}
+
 /** 순수: 한 종류의 알림 여럿을 배너 하나로. 하나면 그대로다. */
 export function summarize(items: readonly OsNotifyItem[]): { title: string; body?: string } {
   const first = items[0]!;
@@ -57,7 +69,7 @@ export function summarize(items: readonly OsNotifyItem[]): { title: string; body
   const names = items.slice(0, SUMMARY_NAMES).map((i) => i.label);
   const rest = items.length - names.length;
   return {
-    title: `${SUMMARY_TITLE[first.kind]} ${items.length}건`,
+    title: summaryTitleFor(first, items.length),
     body: rest > 0 ? `${names.join(", ")} 외 ${rest}건` : names.join(", "),
   };
 }
