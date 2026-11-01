@@ -231,6 +231,46 @@ describe("useMailbox: 서버 투영이 정본", () => {
   });
 });
 
+// 처리할 일(승인)은 투영에 저장되지 않아 승인 원장은 투영과 **따로** 오고 따로 실패하고 따로 늦다(#5092
+// D2·D3). 투영만 비어 있고 원장이 실패했거나 늦다면 「비어 있어요」는 대기 중인 승인을 모르는 채 하는 말이다.
+describe("useMailbox: 승인 원장은 투영과 따로 실패하고 따로 늦는다 (#5092)", () => {
+  beforeEach(() => {
+    api.fetchInbox.mockResolvedValue({ items: [], nextCursor: null, unreadCount: 0 });
+  });
+  afterEach(() => {
+    needsFeed.error = false;
+    needsFeed.isLoading = false;
+    needsFeed.absent = false;
+  });
+
+  it("원장이 5xx이면 투영이 비어 있어도 서버 경로가 오류를 말한다", async () => {
+    needsFeed.error = true;
+    for (const filter of ["all", "unread", "task"] as const) {
+      await render(filter);
+      expect(latest?.source, filter).toBe("server");
+      expect(latest?.entries, filter).toEqual([]);
+      expect(latest?.error, filter).toBe(true);
+    }
+  });
+
+  it("원장 404(미제공)는 장애가 아니다: 오류가 아니라 tasksAbsent로 말한다", async () => {
+    needsFeed.error = true;
+    needsFeed.absent = true;
+    await render("task");
+    expect(latest?.error).toBe(false);
+    expect(latest?.tasksAbsent).toBe(true);
+  });
+
+  it("원장이 첫 응답을 기다리는 동안은 투영이 이미 답했어도 서버 경로가 로딩이다", async () => {
+    needsFeed.isLoading = true;
+    for (const filter of ["all", "unread", "task"] as const) {
+      await render(filter);
+      expect(latest?.source, filter).toBe("server");
+      expect(latest?.isLoading, filter).toBe(true);
+    }
+  });
+});
+
 describe("useMailbox: 구 서버(404) 후퇴", () => {
   beforeEach(() => {
     api.fetchInbox.mockRejectedValue(new ApiError(404, "not found"));

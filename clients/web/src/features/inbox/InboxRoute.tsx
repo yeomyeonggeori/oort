@@ -296,10 +296,13 @@ export function InboxRoute() {
   const showDetail = active !== null && filter !== "reminders";
   const listHidden = isMobile && showDetail;
 
+  // 로딩과 오류는 **이 탭에 보일 줄**이 없을 때만 말한다. 전체 항목 수(`entries`)로 가르면 투영에 줄이
+  // 있는 순간 「처리할 일」 탭이 원장의 실패·로딩을 가리고 「지금 처리할 일이 없어요」라고 말한다 —
+  // 그 탭의 내용은 승인 원장 하나다(#5092).
   const state =
-    mailbox.isLoading && mailbox.entries.length === 0
+    mailbox.isLoading && shown.length === 0
       ? "loading"
-      : mailbox.error && mailbox.entries.length === 0
+      : mailbox.error && shown.length === 0
         ? "error"
         : shown.length === 0
           ? "empty"
