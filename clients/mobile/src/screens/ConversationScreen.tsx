@@ -515,8 +515,8 @@ export default function ConversationScreen({
     channel,
     directory,
     members: rosterMembers ?? NO_MEMBERS,
-    sendPlain: (body, clientMsgId) =>
-      void timeline.send(body, undefined, undefined, clientMsgId),
+    sendPlain: (body, clientMsgId, flags) =>
+      void timeline.send(body, undefined, undefined, clientMsgId, flags),
     ingest: timeline.ingest,
     onOpenWorkSession,
     onOpenWorkList,
@@ -1558,22 +1558,18 @@ export default function ConversationScreen({
       // 인용·첨부가 없는 글만 호출로 간다 — 코어 호출 경로는 둘을 싣지 않는다. 그 밖의
       // `@별칭`은 평범한 메시지다(서버도 거기서 작업을 만들지 않는다).
       //
-      // 알려진 한계(#5016): 개인 에이전트 호출 경로는 메시지를 코어 `callPersonalAgent` 가 직접 보내고 그 요청이
-      // `suppressUnfurl` 을 싣지 못한다. 입력칸 ✕로 미리보기를 끈 `@별칭` 호출 메시지에는 카드가 생길 수 있다.
+      // 입력칸 ✕로 미리보기를 끈 글(#5016)은 호출 길에도 같은 표시를 싣는다(#5037): 코어 `callPersonalAgent` 가
+      // 메시지를 직접 보내므로 표시가 이 길로 넘어가지 않으면 사람이 끈 카드가 `@별칭` 메시지에만 되살아난다.
+      // 켠 때만 있다 — 켜지 않은 전송은 예전과 같은 호출이다.
+      const flags = options?.suppressUnfurl === true ? {suppressUnfurl: true} : undefined;
       if (
         replyToId === undefined &&
         (options?.attachments?.length ?? 0) === 0 &&
-        tryPersonalCall(body)
+        tryPersonalCall(body, flags)
       ) {
         return;
       }
-      void send(
-        body,
-        replyToId,
-        options?.attachments,
-        undefined,
-        options?.suppressUnfurl === true ? {suppressUnfurl: true} : undefined,
-      );
+      void send(body, replyToId, options?.attachments, undefined, flags);
     },
     [send, tryPersonalCall],
   );
