@@ -15,6 +15,9 @@
 //! Since #4763 the file also holds the approval **list** as the inbox 「승인」 칸 reads it
 //! (ADR-0186 v6 R-f), under its own banner at the end: all five states with who, when and the
 //! card's sentence, newest-first order, the keyset page, `scope=mine`, rooms and workspaces.
+//! #4985 adds what that read must not give — to a suspended member, a sentence or thread from
+//! a deleted card, or the card of another room — and what it must keep: the `limit` of the
+//! to-decide queue and the newest-first order across rooms.
 //!
 //! Contract notes the scripts got wrong for this server (found while porting):
 //! the approval JSON is camelCase (`approvalId`, `decidedBy`, `workspaceId`,
@@ -2219,4 +2222,304 @@ async fn a_status_scope_or_cursor_the_read_does_not_know_is_a_400() {
     let (status, page) = env.list(&owner, t.workspace, "status=all&cursor=").await;
     assert_eq!(status, 200, "{page}");
     assert_eq!(ordered_ids(&page).len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// #4985 — what the list must not give
+// ---------------------------------------------------------------------------
+
+/// A suspended member reads no approval list: the same 403 for every status and scope, with
+/// the very token that read it a moment earlier (the control).
+///
+/// Revert that makes it red: drop the active-human check from the list route (the suspended
+/// person reads their rooms' approvals), or let `is_active_human_member_in_tx` stop
+/// reading `status`.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_suspended_member_reads_no_approval_list() {
+    let env = approvals_env().await;
+    let t = seed_tenant(&env.su).await;
+    let (member, member_email) = seed_human(&env.su, t.workspace, "member", "박서연", true).await;
+    join_channel(&env.su, t.workspace, t.channel, member).await;
+    let asked = seed_asked(&env.su, &t, "1 hour").await.approval;
+    let token = access_token(&env.http, &env.base, t.workspace, &member_email).await;
+
+    for query in ["status=all", "status=all&scope=mine", "status=pending"] {
+        let (status, page) = env.list(&token, t.workspace, query).await;
+        assert_eq!(status, 200, "control {query}: {page}");
+    }
+    let (_, control) = env.list(&token, t.workspace, "status=pending").await;
+    assert_eq!(ordered_ids(&control), vec![asked.to_string()], "{control}");
+
+    sqlx::query("UPDATE member SET status = 'suspended' WHERE id = $1")
+        .bind(member)
+        .execute(&env.su)
+        .await
+        .expect("suspend the member");
+    for query in [
+        "status=all",
+        "status=all&scope=mine",
+        "status=pending",
+        "status=approved&scope=mine",
+    ] {
+        let (status, body) = env.list(&token, t.workspace, query).await;
+        assert_eq!(status, 403, "{query}: {body}");
+        assert!(
+            !body.to_string().contains(&asked.to_string()),
+            "{query}: the refusal names nothing of the room: {body}"
+        );
+    }
+}
+
+/// A card its author deleted gives the list no outcome sentence and no thread: the approval
+/// is still listed (its status stands), the card's words are not. The control reads the same
+/// row before the delete.
+///
+/// Revert that makes it red: drop `deleted_at IS NULL` from the card join of the list read.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_deleted_card_gives_the_approval_list_no_outcome_line_and_no_thread() {
+    let env = approvals_env().await;
+    let t = seed_tenant(&env.su).await;
+    let root = seed_request(&env.su, t.workspace, t.channel, t.owner).await;
+    let sentence = "채널 「가온」을 만들었어요";
+    let mut record = Record::new(
+        t.workspace,
+        t.channel,
+        t.agent,
+        "approved",
+        "2026-10-30 12:00:00+00",
+    );
+    record.decided_by = Some(t.owner);
+    record.card = Some((
+        json!({"status": "approved", "code": "approval_approved",
+               "result": {"status": "approved", "line": sentence, "rows": []}}),
+        sentence,
+    ));
+    record.thread_root = Some(root);
+    let seeded = seed_record(&env.su, record).await;
+    let owner = access_token(&env.http, &env.base, t.workspace, &t.owner_email).await;
+
+    let (_, before) = env.list(&owner, t.workspace, "status=approved").await;
+    let row = row_of(&before, seeded.approval);
+    assert_eq!(row["result"]["line"], json!(sentence), "control: {row}");
+    assert_eq!(row["rootId"], json!(root.to_string()), "control: {row}");
+
+    sqlx::query(
+        "UPDATE message SET state = 'deleted', body = NULL, deleted_at = clock_timestamp() \
+          WHERE id = (SELECT request_message_id FROM approval WHERE id = $1)",
+    )
+    .bind(seeded.approval)
+    .execute(&env.su)
+    .await
+    .expect("delete the card");
+
+    for query in ["status=approved", "status=all", "status=all&scope=mine"] {
+        let (_, after) = env.list(&owner, t.workspace, query).await;
+        let row = row_of(&after, seeded.approval);
+        assert_eq!(row["status"], json!("approved"), "{query}: {row}");
+        assert!(
+            row.get("result").is_none(),
+            "{query}: a deleted card gives no outcome line: {row}"
+        );
+        assert!(
+            row.get("rootId").is_none(),
+            "{query}: a deleted card gives no thread: {row}"
+        );
+        assert!(!after.to_string().contains(sentence), "{query}: {after}");
+    }
+}
+
+/// An approval quotes the card of **its own room** and no other. Here one approval of the
+/// public room is made to point at the card of an approval of a private room the reader is
+/// not in: the row is listed, and neither the card's sentence nor its thread comes with it —
+/// for the member outside the private room and for the owner inside it alike. The control is
+/// the private room's own approval, read by its owner with its card intact.
+///
+/// Revert that makes it red: drop the `channel_id` match from the card join of the list
+/// read.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_approval_does_not_quote_the_card_of_another_room() {
+    let env = approvals_env().await;
+    let t = seed_tenant(&env.su).await;
+    let (member, member_email) = seed_human(&env.su, t.workspace, "member", "박서연", true).await;
+    join_channel(&env.su, t.workspace, t.channel, member).await;
+    let private = seed_room(&env.su, t.workspace, "private", "비공개").await;
+    for who in [t.owner, t.agent] {
+        join_channel(&env.su, t.workspace, private, who).await;
+    }
+
+    // The private room's approval, its card and the thread the card sits in.
+    let secret_root = seed_request(&env.su, t.workspace, private, t.owner).await;
+    let sentence = "채널 「다온」을 만들었어요";
+    let mut theirs = Record::new(
+        t.workspace,
+        private,
+        t.agent,
+        "approved",
+        "2026-10-30 12:00:00+00",
+    );
+    theirs.decided_by = Some(t.owner);
+    theirs.card = Some((
+        json!({"status": "approved", "code": "approval_approved",
+               "result": {"status": "approved", "line": sentence, "rows": []}}),
+        sentence,
+    ));
+    theirs.thread_root = Some(secret_root);
+    let theirs = seed_record(&env.su, theirs).await;
+
+    // The public room's approval, with no card of its own, pointed at that card.
+    let mut mine = Record::new(
+        t.workspace,
+        t.channel,
+        t.agent,
+        "approved",
+        "2026-10-30 12:01:00+00",
+    );
+    mine.decided_by = Some(t.owner);
+    let mine = seed_record(&env.su, mine).await;
+    sqlx::query(
+        "UPDATE approval SET request_message_id = \
+           (SELECT request_message_id FROM approval WHERE id = $2) \
+          WHERE id = $1",
+    )
+    .bind(mine.approval)
+    .bind(theirs.approval)
+    .execute(&env.su)
+    .await
+    .expect("point the approval at the private room's card");
+
+    let owner = access_token(&env.http, &env.base, t.workspace, &t.owner_email).await;
+    let member_token = access_token(&env.http, &env.base, t.workspace, &member_email).await;
+
+    let (_, owner_page) = env.list(&owner, t.workspace, "status=all&limit=50").await;
+    let control = row_of(&owner_page, theirs.approval);
+    assert_eq!(
+        control["result"]["line"],
+        json!(sentence),
+        "control: {control}"
+    );
+    assert_eq!(
+        control["rootId"],
+        json!(secret_root.to_string()),
+        "control: {control}"
+    );
+
+    // `mine` is what the person decided: the owner decided both, the member neither.
+    let owner_reads = [
+        "status=approved",
+        "status=all&limit=50",
+        "status=all&scope=mine",
+    ];
+    let member_reads = ["status=approved", "status=all&limit=50"];
+    for (who, token, reads) in [
+        ("owner", &owner, &owner_reads[..]),
+        ("member", &member_token, &member_reads[..]),
+    ] {
+        for query in reads {
+            let (status, page) = env.list(token, t.workspace, query).await;
+            assert_eq!(status, 200, "{who} {query}: {page}");
+            let row = row_of(&page, mine.approval);
+            assert!(
+                row.get("result").is_none(),
+                "{who} {query}: another room's sentence rode on this approval: {row}"
+            );
+            assert!(
+                row.get("rootId").is_none(),
+                "{who} {query}: another room's thread rode on this approval: {row}"
+            );
+        }
+    }
+    // The member is not in the private room: nothing of it reaches them at all.
+    let (_, page) = env
+        .list(&member_token, t.workspace, "status=all&limit=50")
+        .await;
+    assert_eq!(
+        ordered_ids(&page),
+        vec![mine.approval.to_string()],
+        "{page}"
+    );
+    assert!(!page.to_string().contains(sentence), "{page}");
+    assert!(
+        !page.to_string().contains(&secret_root.to_string()),
+        "{page}"
+    );
+}
+
+/// The to-decide queue is bounded by `limit` and keeps the **soonest deadlines**: three
+/// approvals asked in an order that is not the deadline order, read with a `limit` of two,
+/// give the two that expire first, soonest first, and no `nextCursor` (the queue is not
+/// paged). With room to spare it gives all three in the same order.
+///
+/// Revert that makes it red: drop the `LIMIT` of the list read (the third row comes back),
+/// or choose the page without the deadline order (the wrong two come back).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_pending_queue_stops_at_the_limit_and_keeps_the_soonest_deadlines() {
+    let env = approvals_env().await;
+    let t = seed_tenant(&env.su).await;
+    // Asked in this order; they expire in the order second, third, first.
+    let mut asked = Vec::new();
+    for expires in ["3 hours", "1 hour", "2 hours"] {
+        asked.push(seed_asked(&env.su, &t, expires).await.approval);
+    }
+    let owner = access_token(&env.http, &env.base, t.workspace, &t.owner_email).await;
+    let soonest_first = vec![
+        asked[1].to_string(),
+        asked[2].to_string(),
+        asked[0].to_string(),
+    ];
+
+    let (status, queue) = env
+        .list(&owner, t.workspace, "status=pending&limit=2")
+        .await;
+    assert_eq!(status, 200, "{queue}");
+    assert_eq!(ordered_ids(&queue), soonest_first[..2].to_vec(), "{queue}");
+    assert!(queue.get("nextCursor").is_none(), "{queue}");
+
+    let (_, queue) = env
+        .list(&owner, t.workspace, "status=pending&limit=3")
+        .await;
+    assert_eq!(ordered_ids(&queue), soonest_first, "{queue}");
+}
+
+/// A settled read is newest first **across rooms**: five approvals settled a minute apart
+/// in two rooms, alternating, come back as one stream by when they were settled — not
+/// grouped by room — for `all`, for one status, and as the first page of a `limit`.
+///
+/// Revert that makes it red: lose the order after the room and card are joined on (the
+/// rows come back grouped by room), or choose the page without the order (the wrong rows
+/// make the first page).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_settled_read_is_newest_first_across_rooms() {
+    let env = approvals_env().await;
+    let t = seed_tenant(&env.su).await;
+    let other = seed_room(&env.su, t.workspace, "public", "두번째").await;
+    join_channel(&env.su, t.workspace, other, t.owner).await;
+    let mut settled = Vec::new();
+    for (minute, room) in [
+        (1, t.channel),
+        (2, other),
+        (3, t.channel),
+        (4, other),
+        (5, t.channel),
+    ] {
+        let moved = format!("2026-10-30 12:{minute:02}:00+00");
+        let mut record = Record::new(t.workspace, room, t.agent, "approved", &moved);
+        record.decided_by = Some(t.owner);
+        settled.push(seed_record(&env.su, record).await.approval.to_string());
+    }
+    settled.reverse(); // newest first
+    let owner = access_token(&env.http, &env.base, t.workspace, &t.owner_email).await;
+
+    for query in ["status=all&limit=50", "status=approved&limit=50"] {
+        let (status, page) = env.list(&owner, t.workspace, query).await;
+        assert_eq!(status, 200, "{query}: {page}");
+        assert_eq!(ordered_ids(&page), settled, "{query}: {page}");
+    }
+    let (_, first) = env.list(&owner, t.workspace, "status=all&limit=2").await;
+    assert_eq!(ordered_ids(&first), settled[..2].to_vec(), "{first}");
+    assert!(first.get("nextCursor").is_some(), "{first}");
 }
