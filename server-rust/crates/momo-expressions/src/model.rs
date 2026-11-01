@@ -118,6 +118,60 @@ pub struct Choice {
     pub draft_id: Uuid,
     pub revision: String,
     pub sha256: String,
+    /// ADR-0218 §10 J3: the kind the person chose. Absent — an older client, or an approval card
+    /// nobody chose on — means the server applies [`Kind::recommended`] to the stored large picture
+    /// at the moment it registers. A present `null` is not "absent": it is refused like any other
+    /// value outside the closed list, as the contract (`enum`) says.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub kind: Option<Kind>,
+}
+
+/// What a registration is for in the pickers (ADR-0218 §10 J1): `emoji` is the small team emoji that
+/// goes between words and into reactions, `sticker` the large emoticon that is sent on its own (a
+/// moving one is shown on the GIF tab). A **classification**, not a limit: message and reaction
+/// sizes (D1) do not read it, and no permission or add-policy decision does either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Kind {
+    Emoji,
+    Sticker,
+}
+
+/// The longest edge, in pixels, of a still picture that still counts as small (§10 J4). The large
+/// picture is never enlarged (D3), so a picture at or under this is already the size of `small`.
+pub const EMOJI_MAX_EDGE: u32 = 128;
+
+impl Kind {
+    /// The value every row without a kind of its own has: migration 171's column default. The wire
+    /// reads a missing `kind` the same way (core `expressionKindOf`).
+    pub const LEGACY: Kind = Kind::Sticker;
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Kind::Emoji => "emoji",
+            Kind::Sticker => "sticker",
+        }
+    }
+
+    /// §10 J4: a picture that moves, or whose longest edge is over [`EMOJI_MAX_EDGE`], is a sticker;
+    /// a still one at or under it is an emoji. Core `recommendExpressionKind` is the same rule, and
+    /// `docs/api/expression-kind.vectors.json` is what both are tested against.
+    pub fn recommended(width: u32, height: u32, frame_count: u32) -> Kind {
+        if frame_count > 1 || width.max(height) > EMOJI_MAX_EDGE {
+            Kind::Sticker
+        } else {
+            Kind::Emoji
+        }
+    }
+
+    /// [`Kind::recommended`] for the stored large picture.
+    pub fn recommended_for(large: &ImageInfo) -> Kind {
+        Kind::recommended(large.width, large.height, large.frame_count)
+    }
 }
 
 pub fn version(s: &str) -> Result<i64, Error> {
@@ -387,6 +441,103 @@ mod tests {
         ] {
             assert!(!valid_source_url(bad), "{why}: {bad:?}");
         }
+    }
+
+    /// ADR-0218 §10 J4: the rule and its threshold are what `docs/api/expression-kind.vectors.json`
+    /// says — the file the shared core (`recommendExpressionKind`) is tested against too, so the two
+    /// implementations cannot drift apart. Read at run time, not compiled in (like the sentence test
+    /// below): a build that carries no `docs/` still compiles.
+    #[test]
+    fn the_recommendation_rule_is_the_one_the_shared_vectors_pin() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/expression-kind.vectors.json"
+        );
+        let vectors: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("the shared kind vectors"))
+                .expect("vectors are JSON");
+        assert_eq!(
+            vectors["emojiMaxEdge"].as_u64(),
+            Some(u64::from(EMOJI_MAX_EDGE)),
+            "the threshold in the vectors and in the server"
+        );
+        let cases = vectors["cases"].as_array().expect("cases");
+        assert!(
+            cases.len() >= 8,
+            "a table that is nearly empty pins nothing"
+        );
+        for case in cases {
+            let number = |key: &str| u32::try_from(case[key].as_u64().expect(key)).expect(key);
+            let got = Kind::recommended(number("width"), number("height"), number("frameCount"));
+            assert_eq!(
+                got.as_str(),
+                case["kind"].as_str().expect("kind"),
+                "{}: {case}",
+                case["name"]
+            );
+        }
+        // Each way a case can flip must have both sides in the table, or a mutation of the rule
+        // could pass: a small still, a large still, a small animation, a large animation, and the
+        // edge itself with the pixel past it.
+        let has = |kind: &str, moving: bool, over: bool| {
+            cases.iter().any(|case| {
+                let edge = case["width"]
+                    .as_u64()
+                    .unwrap()
+                    .max(case["height"].as_u64().unwrap());
+                case["kind"] == kind
+                    && (case["frameCount"].as_u64().unwrap() > 1) == moving
+                    && (edge > u64::from(EMOJI_MAX_EDGE)) == over
+            })
+        };
+        assert!(has("emoji", false, false), "a small still");
+        assert!(has("sticker", false, true), "a large still");
+        assert!(has("sticker", true, false), "a small animation");
+        assert!(has("sticker", true, true), "a large animation");
+        assert!(
+            cases
+                .iter()
+                .any(|case| case["width"] == 128 && case["frameCount"] == 1)
+                && cases
+                    .iter()
+                    .any(|case| case["width"] == 129 || case["height"] == 129),
+            "the edge itself and one pixel past it"
+        );
+    }
+
+    #[test]
+    fn a_choice_takes_a_kind_only_from_the_closed_list() {
+        let draft = "00000000-0000-4000-8000-000000000021";
+        let sha = "0".repeat(64);
+        let parse = |extra: &str| {
+            serde_json::from_str::<Choice>(&format!(
+                r#"{{"draftId":"{draft}","revision":"1","sha256":"{sha}"{extra}}}"#
+            ))
+        };
+        assert_eq!(
+            parse("").unwrap().kind,
+            None,
+            "an older client sends no kind"
+        );
+        assert_eq!(parse(r#","kind":"emoji""#).unwrap().kind, Some(Kind::Emoji));
+        assert_eq!(
+            parse(r#","kind":"sticker""#).unwrap().kind,
+            Some(Kind::Sticker)
+        );
+        for bad in [
+            r#","kind":"huge""#,
+            r#","kind":"Emoji""#,
+            r#","kind":"" "#,
+            r#","kind":null"#,
+            r#","kind":1"#,
+            r#","kind":["emoji"]"#,
+            r#","kinds":"emoji""#,
+        ] {
+            assert!(parse(bad).is_err(), "{bad} must be refused");
+        }
+        // And what is serialized never grows a `kind: null`.
+        let choice = parse("").unwrap();
+        assert!(serde_json::to_value(&choice).unwrap().get("kind").is_none());
     }
 
     fn origin(kind: &str, source_url: Option<&str>, prompt: Option<&str>) -> Origin {

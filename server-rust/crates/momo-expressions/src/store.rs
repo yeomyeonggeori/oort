@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use crate::media::{Processed, Rendition};
 use crate::{
-    hash, version, Choice, Error, Metadata, Origin, Patch, Report, LIVE_DRAFTS, PHOTO_PROMPTS,
-    QUOTA,
+    hash, version, Choice, Error, Kind, Metadata, Origin, Patch, Report, LIVE_DRAFTS,
+    PHOTO_PROMPTS, QUOTA,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -312,10 +312,34 @@ pub(crate) async fn expression_json(conn: &mut PgConnection, row: &PgRow) -> Res
     let status: String = row.try_get("status")?;
     let mut v = serde_json::to_value(metadata(row)?).map_err(|_| Error::Invalid)?;
     let created: chrono::DateTime<chrono::Utc> = row.try_get("created_at")?;
+    // ADR-0218 §10 J6: the server always says the kind (the contract leaves the key optional only so
+    // that an older payload still reads).
     v.as_object_mut().ok_or(Error::Invalid)?.extend(json!({"id":id,"workspaceId":ws,"version":row.try_get::<i64,_>("version")?.to_string(),
         "origin":origin_json(row)?,"createdBy":row.try_get::<Uuid,_>("created_by")?,"createdAtMs":created.timestamp_millis(),"status":status,
+        "kind":row.try_get::<String,_>("kind")?,
         "media":if status=="active" {media_json(conn,ws,id,false).await?} else {Value::Null}}).as_object().ok_or(Error::Invalid)?.clone());
     Ok(v)
+}
+
+/// The kind a registration gets (ADR-0218 §10 J3): what the person chose, otherwise §10 J4 applied to
+/// the **stored** large picture — the one the server re-encoded and the person was shown, never the
+/// client's word about it. `large` is the `media_json` entry of the large rendition.
+pub(crate) fn resolve_kind(chosen: Option<Kind>, large: &Value) -> Result<Kind, Error> {
+    if let Some(kind) = chosen {
+        return Ok(kind);
+    }
+    let number = |key: &str| {
+        large
+            .get(key)
+            .and_then(Value::as_u64)
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or(Error::Invalid)
+    };
+    Ok(Kind::recommended(
+        number("width")?,
+        number("height")?,
+        number("frameCount")?,
+    ))
 }
 async fn draft_row(conn: &mut PgConnection, actor: Actor, id: Uuid) -> Result<PgRow, Error> {
     let row=sqlx::query("SELECT * FROM expression_draft WHERE workspace_id=$1 AND id=$2 AND creator=$3 AND approval_id IS NULL FOR UPDATE")
@@ -541,9 +565,11 @@ pub async fn activate(pool: &PgPool, actor: Actor, choice: Choice) -> Result<Val
         let n:i64=sqlx::query_scalar("SELECT count(*) FROM expression WHERE workspace_id=$1 AND status <> 'deleted'").bind(actor.workspace).fetch_one(&mut *conn).await?;
         if n>=QUOTA {return Err(Error::Quota);}
         let id=choice.draft_id;
+        // The kind is decided here, at the one door every route registers through (§10 J3).
+        let kind=resolve_kind(choice.kind,&media["large"])?;
         let v=changed(conn,actor,id,"expression.created",None).await?;
-        let e=sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,version,origin_source_attachment_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *")
-            .bind(actor.workspace).bind(id).bind(meta.name).bind(meta.display_name).bind(json!(meta.tags)).bind(meta.subject_member_id).bind(row.try_get::<Value,_>("origin")?).bind(actor.member).bind(v).bind(row.try_get::<Option<Uuid>,_>("origin_source_attachment_id")?).fetch_one(&mut *conn).await?;
+        let e=sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,version,origin_source_attachment_id,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *")
+            .bind(actor.workspace).bind(id).bind(meta.name).bind(meta.display_name).bind(json!(meta.tags)).bind(meta.subject_member_id).bind(row.try_get::<Value,_>("origin")?).bind(actor.member).bind(v).bind(row.try_get::<Option<Uuid>,_>("origin_source_attachment_id")?).bind(kind.as_str()).fetch_one(&mut *conn).await?;
         sqlx::query("INSERT INTO expression_image(workspace_id,expression_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT workspace_id,draft_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms FROM expression_draft_image WHERE workspace_id=$1 AND draft_id=$2")
             .bind(actor.workspace).bind(id).execute(&mut *conn).await?;
         let receipt=json!({"workspaceId":actor.workspace,"version":v.to_string(),"expression":expression_json(conn,&e).await?});

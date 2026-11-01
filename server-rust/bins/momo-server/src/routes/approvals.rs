@@ -676,7 +676,7 @@ async fn decide(
                 approval_id,
                 member_id,
                 "expression_choice_invalid",
-                "expressionChoice must be {draftId, revision, sha256}",
+                "expressionChoice must be {draftId, revision, sha256, kind?}",
                 StatusCode::BAD_REQUEST,
                 Utc::now(),
             ))

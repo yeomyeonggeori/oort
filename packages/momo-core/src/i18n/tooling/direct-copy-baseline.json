@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "310437a89c4c1adecda204480644b86f4ee5d4eb",
+  "baselineHead": "11bf5a045e48311ce5a1191ec4eb36ea07cfb391",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -516,7 +516,7 @@
     "clients/web/src/features/expressions/ExpressionStore.ts": 9,
     "clients/web/src/features/expressions/ExpressionText.tsx": 2,
     "clients/web/src/features/expressions/ExpressionsProvider.tsx": 6,
-    "clients/web/src/features/expressions/TeamExpressionsPanel.tsx": 108,
+    "clients/web/src/features/expressions/TeamExpressionsPanel.tsx": 106,
     "clients/web/src/features/expressions/cards.ts": 4,
     "clients/web/src/features/expressions/context.ts": 2,
     "clients/web/src/features/expressions/makeFixtures.ts": 6,
