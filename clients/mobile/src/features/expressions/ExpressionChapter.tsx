@@ -1,3 +1,4 @@
+import {formatBytes} from '@momo/core/features/attachments/model';
 import React, {
   useCallback,
   useEffect,
@@ -191,7 +192,7 @@ export function PhotoPickRow({
           </Text>
         ) : null}
         {photo && photo.bytes !== null ? (
-          <Text style={styles.photoMeta}>{sizeLabel(photo.bytes)}</Text>
+          <Text style={styles.photoMeta}>{formatBytes(photo.bytes)}</Text>
         ) : null}
         <Pressable
           accessibilityRole="button"
@@ -210,14 +211,6 @@ export function PhotoPickRow({
       </View>
     </View>
   );
-}
-
-/** 「123 KiB」·「4.2 MiB」. 숫자는 사실이고 낱말은 단위뿐이다. */
-function sizeLabel(bytes: number): string {
-  const kib = bytes / 1024;
-  return kib < 1024
-    ? `${kib.toFixed(kib < 10 ? 1 : 0)} KiB`
-    : `${(kib / 1024).toFixed(1)} MiB`;
 }
 
 const buildStyles = (color: Palette) =>
