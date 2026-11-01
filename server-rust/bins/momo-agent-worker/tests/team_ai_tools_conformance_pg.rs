@@ -20,7 +20,7 @@
 //! | `a6_a_requester_without_access_gets_nothing` | H13-A6 | drop `is_channel_member` from `resolve_channel`, or search as the helper |
 //! | `a7_the_read_role_is_rls_bound` | H13-A7 | drop `SET LOCAL ROLE momo_helper_read` |
 //! | `a8_the_reply_room_decides_what_may_be_said` | H13-A8 | drop the audience check / the guest narrowing |
-//! | `a10_text_inside_a_read_is_never_an_instruction` | H13-A10 | let a non-allow-listed proposal through, or render results unfenced |
+//! | `a10_text_inside_a_read_is_never_an_instruction` | H13-A10, B15-A3 | take the invite ids out of `SENSITIVE_ACTION_IDS` (the request read, so no card), or render results unfenced |
 //! | `a11_web_search_rides_only_a_wire_that_has_it` | H13-A11 | offer the tool on every wire, or offer `web_fetch` |
 //! | `a12_no_search_after_a_workspace_read` | H13-A12 | drop `!read_used` from the tool choice |
 //! | `a17_a18_no_secret_keys_and_no_bodies_in_audit` | H13-A17·A18 | widen `SETTINGS_READ_KEYS`, or put text in `team_ai.turn` |

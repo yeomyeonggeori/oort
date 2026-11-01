@@ -578,7 +578,8 @@ impl Harness {
         .expect("audit rows")
     }
 
-    /// Every base table of the database, with the number of rows whose text holds `needle`
+    /// Every base table of the database — all of them are in `public`, the only non-system schema
+    /// (153 at this head, the `mem_*` tables included) — with the number of rows whose text holds `needle`
     /// (case-insensitive: a full-text index lower-cases what it keeps). The needle is a random code,
     /// so rows of other tests cannot match it; the answer is "where does this string live".
     async fn where_it_lives(&self, needle: &str) -> Vec<(String, i64)> {
