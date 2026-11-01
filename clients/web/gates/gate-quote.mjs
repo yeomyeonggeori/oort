@@ -46,9 +46,13 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { focusReturnsTo } from "./focus.mjs";
+import { landingClass } from "./landing-class.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// 착지 행 클래스: 정본은 제품 소스(`inbox/anchor.ts`)다. 값을 베끼지 않는다(gates/landing-class.mjs, #5048).
+const LANDING_CLASS = landingClass(webRoot);
 
 /**
  * 인용 액션의 낱말. **코어 소스에서 읽는다** — 게이트가 문자열을 다시 적으면 정본이
@@ -618,7 +622,7 @@ async function exercise(browser) {
   // 안 읽었다)를 뜻한다. 인용은 그 둘과 관계없는 「참조」이므로 같은 색을 쓰면
   // 「가리킨다」가 「나를 불렀다」로 읽힌다. 정지 상태와 **hover 상태 둘 다** 잰다 —
   // 1차의 실제 위반은 hover(`border-accent`)였고 정지 상태만 보면 그것을 못 잡는다.
-  const railColors = await page.evaluate((paintAccent) => {
+  const railColors = await page.evaluate(([paintAccent, landingClass]) => {
     // 토큰의 실제 계산값을 얻는 방법: 그 유틸리티를 입은 프로브를 한 번 만든다.
     // 하드코딩한 hex와 비교하면 팔레트가 재조정될 때 이 단언만 조용히 낡는다.
     const probeWith = (className, read) => {
@@ -634,7 +638,9 @@ async function exercise(browser) {
     // 같은 색인가」를 사람이 눈이 아니라 숫자로 확인할 수 있게 한다.
     const mention = probeWith("text-signal-text", (s) => s.color);
     const unreadRule = probeWith("bg-signal", (s) => s.backgroundColor);
-    const anchorTint = probeWith("bg-accent-soft", (s) => s.backgroundColor);
+    // 착지 표면(#4324 2단계: `landed-surface`, `--warn-soft`). 옛 `bg-accent-soft`는 이제 칩·선택 행의 면이라
+    // 이 비교가 「인용이 방금 점프해 온 자리처럼 보이는가」를 더는 말해 주지 못했다(#5048).
+    const anchorTint = probeWith(landingClass, (s) => s.backgroundColor);
 
     const blocks = document.querySelectorAll('[data-testid="quote-block"]');
     if (paintAccent) {
@@ -656,7 +662,7 @@ async function exercise(browser) {
       railBackground:
         block === undefined ? null : getComputedStyle(block).backgroundColor,
     };
-  }, proveRedAccent);
+  }, [proveRedAccent, LANDING_CLASS]);
   console.log(
     `[color] 인용 레일 ${railColors.rail} / accent ${railColors.accent} ` +
       `(멘션 ${railColors.mention} · 미읽 규칙 ${railColors.unreadRule} · 앵커 틴트 ${railColors.anchorTint})`
@@ -682,7 +688,7 @@ async function exercise(browser) {
         "것으로는 부족하다 - 마우스를 얹은 순간 인용이 멘션의 색이 된다"
     );
   }
-  // 앵커 착지 틴트(`--accent-soft`)와도 겹치지 않는다. 그것은 「방금 여기로 왔다」는
+  // 앵커 착지 표면(`landed-surface`, `--warn-soft`)과도 겹치지 않는다. 그것은 「방금 여기로 왔다」는
   // 일시적 피드백이고, 인용이 상시로 그 색을 입으면 모든 인용이 방금 점프해 온 자리로
   // 보인다.
   if (
@@ -758,6 +764,26 @@ async function exercise(browser) {
       { ws: workspaceId, ch: channelId, target: 41 }
     );
   }
+  // 착지 표면(`landed-surface`)은 1.6초 뒤에 걷힌다(`inbox/anchor.ts` HIGHLIGHT_MS). 아래 점프 단정은 클릭 뒤
+  // 요청 단정(휠 두 번 + 600ms)을 다 거친 다음에 재므로, 부하가 걸린 회차에서는 걷힌 뒤를 보고 거짓 red가 된다.
+  // 그래서 클릭 전에 관찰자를 걸어 「원본 행이 한 번이라도 그 표면을 입었는가」를 기록한다. 행은 가상 목록이라 클릭 전에는
+  // 없을 수 있으므로 행이 아니라 문서를 본다.
+  await page.evaluate(([id, landingClass]) => {
+    window.__quoteLanded = false;
+    const wore = (node) =>
+      node instanceof HTMLElement &&
+      node.dataset.messageId === id &&
+      node.classList.contains(landingClass);
+    new MutationObserver((records) => {
+      for (const record of records) {
+        if (wore(record.target)) window.__quoteLanded = true;
+      }
+    }).observe(document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }, [ORIGIN_MSG, LANDING_CLASS]);
   // 인용을 읽고, 누르고, 스크롤한다. 어느 것도 서버에 물어볼 일이 아니다.
   await quoting.hover();
   await block.click();
@@ -784,10 +810,8 @@ async function exercise(browser) {
   }
 
   // ---- 6. 점프: 기존 앵커 기계 ----------------------------------------------
-  // 클릭은 위에서 이미 했다. 원본 행이 착지 표식을 받았는지 본다.
-  const landed = await rowLocator(page, ORIGIN_MSG).evaluate((node) =>
-    node.classList.contains("bg-accent-soft")
-  );
+  // 클릭은 위에서 이미 했다. 원본 행이 착지 표식(`landed-surface`)을 받은 적이 있는지 본다(위 관찰자의 기록).
+  const landed = await page.evaluate(() => window.__quoteLanded === true);
   if (!landed) {
     throw new Error(
       "clicking a quote did not land on the original (the anchor watcher never tinted the row)"
@@ -1063,9 +1087,14 @@ async function exercise(browser) {
   }
 
   // The avatar joins the row's roving group; it does not add another Tab stop.
-  const rowStops = await quoting
-    .locator('[data-row-action][tabindex="0"]')
-    .count();
+  // 행 하나 = 탭 스톱 하나(rowFocus.ts W-4): 포인터로 누를 수 있는 행의 쉬는 정거장은 **행 자신**이고 그 안의 컨트롤
+  // (아바타 포함)은 모두 tabindex=-1이다. 그래서 「로빙 그룹 구성원 중 tabindex=0」이 아니라 행 + 후손 전체에서
+  // tabindex=0인 것을 센다 — 아바타가 두 번째 정거장이 되는 회귀도 이 수가 2로 올라 잡힌다(#5048).
+  const rowStops = await quoting.evaluate(
+    (row) =>
+      (row.matches('[tabindex="0"]') ? 1 : 0) +
+      row.querySelectorAll('[tabindex="0"]').length
+  );
   if (rowStops !== 1) {
     throw new Error(`the profile avatar changed one message row into ${rowStops} tab stops`);
   }
@@ -1084,7 +1113,7 @@ async function exercise(browser) {
     throw new Error("an active peer profile has no direct-message action");
   }
   await page.keyboard.press("Escape");
-  if (!(await avatar.evaluate((node) => document.activeElement === node))) {
+  if (!(await focusReturnsTo(avatar))) {
     throw new Error("Esc from the member profile did not return focus to the message avatar");
   }
 
@@ -1097,7 +1126,7 @@ async function exercise(browser) {
   await directoryRow.click();
   await profile.waitFor();
   await page.keyboard.press("Escape");
-  if (!(await directoryRow.evaluate((node) => document.activeElement === node))) {
+  if (!(await focusReturnsTo(directoryRow))) {
     throw new Error("the directory profile did not return focus to its row");
   }
 
@@ -1107,7 +1136,7 @@ async function exercise(browser) {
   await dmProfileTrigger.click();
   await profile.waitFor();
   await page.keyboard.press("Escape");
-  if (!(await dmProfileTrigger.evaluate((node) => document.activeElement === node))) {
+  if (!(await focusReturnsTo(dmProfileTrigger))) {
     throw new Error("the DM-header profile did not return focus to its trigger");
   }
 

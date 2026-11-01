@@ -31,6 +31,27 @@ import { shouldFoldBundleLine } from "./requestBundle";
 //    실행」이었다. 같은 `call_id` 의 호출 행 이름을 결과 행 사본에 `name` 으로 얹는다(`toolCard` 가 이미 읽는 키
 //    이고 `PARSED_KEYS` 에 있어 「표시하지 않은 항목」 수는 그대로다). 결과 행이 자기 이름을 싣고 오면 그것이
 //    먼저이고, 짝이 되는 호출 행이 목록에 없으면 손대지 않는다.
+//
+// #5066 (검증 줄 1회차 H2). **승인이 걸린 호출은 호출 카드가 따로 말하지 않는다.**
+//
+// 도구 승인 하나를 호출 카드와 승인 카드 두 장이 말하면 두 장이 서로 다른 사실을 말하는 순간이 생긴다. 호출 카드는
+// 결과를 모르면 「생각 중」이 맞는 말이지만, 승인에 걸린 호출은 사람의 결정에 묶여 **돌지 않는다**(① 결정을
+// 기다리는 내내 「생각 중」). 승인 카드는 기한이 지나면 시계로 「만료」를 말하는데 호출 카드에는 시계가 없다(②
+// 서버가 정리하기 전까지 「생각 중」). 정리된 뒤에는 위의 1번이 사람이 멈췄다는 낱말 「중단됨」으로 닫아 바로 아래
+// 「만료」와 다른 말을 한다(③). 같은 일을 가리키는 두 말이 갈라지는 길은 두 가지였다: 호출 카드가 묶음 상태를
+// 계산하는 **같은 함수**(`requestBundleState`)를 시계·영수증·run 까지 같은 입력으로 한 번 더 부르거나, 묶음 카드가
+// 말하는 호출은 **접어서** 따로 말하지 않게 하거나.
+//
+// 접는다. 이유: (a) 승인 카드 props 가 호출 카드가 보이는 전부(도구 이름·`call_id`·인자)를 이미 싣는다
+// (`approval.rs` `approval_request_props`) — 접어도 사라지는 정보가 없다. (b) 호출 카드에서 같은 함수를 다시 부르려면
+// 승인 카드가 상태를 만드는 입력(영수증 저장소·run 진행·`useExpiryNow` 시계, 폰은 원장 문과 `nowMs`)을 두 번째 그리는
+// 자리마다 되풀이해야 하고, 그 입력이 하나라도 어긋나는 순간이 바로 이 결함이다 — 접으면 그 어긋남 자체가 없다. (c) 「한
+// 요청은 한 묶음」(`docs/design-system/agent-request-loop.md` §0·§2)이 이미 가리키는 방향이다.
+//
+// 접는 조건은 **같은 목록·같은 채널에 같은 `call_id` 를 든 승인 카드(승인 id 가 있는 `approval_request`)가 지워지지
+// 않고 있을 때**다. 짝 카드가 목록에 없으면(다른 목록에 있거나 아직 안 왔거나 지워졌으면) 지금처럼 결과 행이 말하는 대로
+// 그리고, 호출이 승인에 걸렸는지 모르는 채 「생각 중」이라고 하는 것은 그때의 맞는 말이다. 접기는 `settleToolCalls`
+// **뒤**에 한다: 접힌 호출 행의 이름을 결과 행이 빌려 가야 하기 때문이다.
 // =============================================================================
 
 type SettledStatus = "done" | "error" | "cancelled";
@@ -152,13 +173,45 @@ export function settleToolCalls(
 }
 
 /**
+ * 승인 카드가 대신 말하는 호출의 키들 (#5066). 승인 카드 = 승인 id 와 `call_id` 를 든, 지워지지 않은 `approval_request`.
+ * 로그인 핸드오프 카드도 승인 카드 가족이라 같은 승인 id 를 들고 같이 센다. 재개 제안은 승인 id 도 `call_id` 도 없어
+ * 저절로 빠진다. 키는 `settleToolCalls` 와 같은 `keyOf`(채널 + `call_id`)다.
+ */
+function approvalCallKeys(messages: readonly Message[]): ReadonlySet<string> {
+  const keys = new Set<string>();
+  for (const message of messages) {
+    if (message.type !== "approval_request" || message.state === "deleted") continue;
+    const approvalId = message.props?.["approval_id"];
+    if (typeof approvalId !== "string" || approvalId === "") continue;
+    const id = callId(message);
+    if (id !== undefined) keys.add(keyOf(message.channelId, id));
+  }
+  return keys;
+}
+
+/** 이 행은 승인 카드가 대신 말하는 호출 행인가: 지워지지 않은 `tool_call` 이고 짝 승인 카드가 같은 목록에 있다. */
+function speaksThroughApproval(
+  message: Message,
+  approvalCalls: ReadonlySet<string>
+): boolean {
+  if (message.type !== "tool_call" || message.state === "deleted") return false;
+  const id = callId(message);
+  return id !== undefined && approvalCalls.has(keyOf(message.channelId, id));
+}
+
+/**
  * 타임라인·스레드가 행으로 그릴 메시지 (#4986). 끝난 도구 호출을 닫고(`settleToolCalls`), 종결 카드가
- * 설명하는 옛 줄을 접는다(`shouldFoldBundleLine`). 두 판정이 같은 원본 목록을 보아야 서로의 근거를 잃지
- * 않는다: 접힐 줄 가운데 도구 결과가 있을 수 있어서, 접은 **뒤** 목록으로 짝짓기를 하면 그 호출이 영영
- * 「생각 중」으로 남는다. 웹의 본류(`Timeline`)와 스레드(`ThreadPanel`)가 이 한 함수를 부른다.
+ * 설명하는 옛 줄을 접고(`shouldFoldBundleLine`), 승인이 걸린 호출은 짝 승인 카드 한 장이 말하게 접는다(#5066).
+ * 세 판정이 같은 원본 목록을 보아야 서로의 근거를 잃지 않는다: 접힐 줄 가운데 도구 결과가 있을 수 있고 접힐 호출
+ * 행의 이름을 결과 행이 빌려 가야 해서, 접은 **뒤** 목록으로 짝짓기를 하면 그 호출이 영영 「생각 중」으로 남거나
+ * 결과 카드 제목이 이름을 잃는다. 웹의 본류(`Timeline`)와 스레드(`ThreadPanel`), 폰의 `Timeline` 이 이 한 함수를
+ * 부른다.
  */
 export function presentableRows(messages: readonly Message[]): Message[] {
+  const approvalCalls = approvalCallKeys(messages);
   return settleToolCalls(messages).filter(
-    (message) => !shouldFoldBundleLine(message, messages)
+    (message) =>
+      !shouldFoldBundleLine(message, messages) &&
+      !speaksThroughApproval(message, approvalCalls)
   );
 }

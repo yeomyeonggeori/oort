@@ -137,11 +137,18 @@ async function startMetro(port) {
   // `node cli.js` rather than `npx react-native`: npx is a wrapper process, and
   // signalling the wrapper leaves the real Metro listening — which is how a
   // stale server from a previous run ends up serving the next one. `detached`
-  // gives the whole tree one process group to kill.
+  // gives the whole tree one process group to kill. `CHROME_PATH` points
+  // chrome-launcher at /usr/bin/false so a debugger request never launches the
+  // real Chrome out of this shell — see scripts/lane-phone.sh (#5083).
   const child = spawn(
     process.execPath,
     [join(APP_ROOT, 'node_modules/react-native/cli.js'), 'start', '--port', String(port)],
-    {cwd: APP_ROOT, stdio: ['ignore', 'pipe', 'pipe'], detached: true},
+    {
+      cwd: APP_ROOT,
+      env: {...process.env, CHROME_PATH: '/usr/bin/false'},
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+    },
   );
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline) {

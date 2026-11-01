@@ -84,20 +84,28 @@ describe("끝난 도구 호출은 본류와 스레드에서 닫힌 상태로 그
   });
 });
 
-describe("거부·만료·취소로 끝난 승인은 호출 행을 중단으로 닫는다 (#5009)", () => {
-  it.each(["rejected", "expired", "cancelled"])("본류: %s 카드가 목록에 있으면 결과 행이 없어도 호출 행이 중단을 건네받는다", (status) => {
+// #5066. 승인이 걸린 호출은 호출 카드가 따로 말하지 않는다: 같은 목록에 짝 승인 카드가 있으면 코어(`presentableRows`)가 그 호출
+// 행을 접는다. 옛 #5009 는 거부·만료·취소로 끝난 승인이 호출 행을 「중단」으로 닫았는데, 그 닫힘이 승인 카드의 「만료」·「거부」와
+// 다른 낱말(「중단됨」)을 말하고 결정을 기다리는 동안과 기한이 지난 직후에는 닫지도 못했다. 이 시험은 두 자리(본류 `Timeline`,
+// 요청 스레드 `ThreadPanel`)가 접힌 목록을 **실제로 행에 건네는지**를 잰다(행 DOM 은 목 `MessageRow`).
+describe("승인이 걸린 호출은 본류와 스레드에서 승인 카드 한 장만 그린다 (#5066)", () => {
+  const rowOf = (id: string) => document.querySelector(`[data-message-id="${id}"]`);
+
+  it.each(["pending", "approved", "rejected", "expired", "cancelled"])("본류: %s 카드가 목록에 있으면 호출 행은 그려지지 않고 승인 카드 행만 선다", (status) => {
     mountTimeline([started(), approval(status)]);
-    expect(statusOf("call")).toBe("cancelled");
+    expect(rowOf("approval")).toBeTruthy();
+    expect(rowOf("call")).toBeNull();
   });
 
-  it("본류: 승인됨 카드만으로는 닫지 않는다(실행 중일 수 있다)", () => {
-    mountTimeline([started(), approval("approved")]);
-    expect(statusOf("call")).toBe("");
+  it("본류: 짝 승인 카드가 없는 호출 행은 접히지 않는다", () => {
+    mountTimeline([started()]);
+    expect(rowOf("call")).toBeTruthy();
   });
 
-  it("스레드: 같은 짝짓기가 요청 스레드 안에서도 선다", async () => {
+  it("스레드: 같은 접기가 요청 스레드 안에서도 선다", async () => {
     mountThread([started({ rootId: "request" }), approval("rejected", { rootId: "request" })]);
     await waitFor(() => expect(screen.queryByTestId("thread-loading")).toBeNull());
-    await waitFor(() => expect(statusOf("call")).toBe("cancelled"));
+    await waitFor(() => expect(rowOf("approval")).toBeTruthy());
+    expect(rowOf("call")).toBeNull();
   });
 });
