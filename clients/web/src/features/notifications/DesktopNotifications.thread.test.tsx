@@ -21,6 +21,10 @@ import { resetViewedThreadForTest, viewThread } from "./viewedThread";
 // `following`)만 가짜이고, 판정·장부·알림 묶음·셸 다리까지는 진짜다 — `showNotification` 이 불리는 횟수와 서버 읽기의
 // 호출 수가 증거다. 사보타주(「보는 중이면 안 띄움」·「내가 쓴 답글 제외」·「끈 종류 무시」)는 코어 `model.test.ts` 가 판정에서,
 // 여기서는 배선(열린 스레드 저장소·장부·설정 저장소)에서 잰다.
+//
+// #5017: 같은 스레드의 답글이 묶인 배너를 누르면 채널이 아니라 그 스레드로 가는지, 한 스레드의 배너가 분당 6건을 넘지 않는지
+// (넘은 답글은 배너도 착지 무장도 없다). 6 은 폰 푸시의 대량 층과 같은 값이라 **숫자를 그대로 적는다** — 상수를 가져다 쓰면
+// 상수를 바꿔도 시험이 따라 바뀌어 아무것도 지키지 못한다.
 // =============================================================================
 
 const IDS = vi.hoisted(() => ({
@@ -229,6 +233,25 @@ async function deliver(event: MessageNewEvent): Promise<void> {
   });
 }
 
+/** 프레임 여럿을 묶음 창 안에 연달아 배달하고, 한 번에 내보낸다. */
+async function deliverBurst(events: MessageNewEvent[]): Promise<void> {
+  for (const event of events) {
+    await act(async () => {
+      onMessage?.(event);
+    });
+  }
+  await act(async () => {
+    await new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+  });
+  await act(async () => {
+    osNotifier().flush();
+    await Promise.resolve();
+  });
+}
+
+const routeNow = (host: HTMLElement): string | null | undefined =>
+  host.querySelector('[data-testid="notification-route"]')?.textContent;
+
 describe("따라가는 스레드의 새 답글 배너 (#4890)", () => {
   it("서버가 따라간다고 말한 스레드에 남이 쓴 답글은 배너가 된다 — 그 스레드 하나를 limit=1 로 물어 확인한 뒤에", async () => {
     await mountSettled();
@@ -308,5 +331,57 @@ describe("따라가는 스레드의 새 답글 배너 (#4890)", () => {
     expect(host.querySelector('[data-testid="notification-route"]')?.textContent).toBe(
       `${messageAnchorPath(IDS.channel, event.payload.id)}&thread=${IDS.root}`
     );
+  });
+});
+
+describe("같은 스레드의 답글이 묶인 배너는 그 스레드로 간다 (#5017)", () => {
+  it("한 묶음 배너가 되면 눌러 앞에 온 창은 채널이 아니라 그 스레드의 가장 늦은 답글로 간다 — 스레드가 섞이면 예전처럼 채널이다", async () => {
+    const host = await mountSettled();
+    noteFollowing(IDS.ws, IDS.root, true);
+    noteFollowing(IDS.ws, IDS.otherRoot, true);
+    const burst = [replyEvent(), replyEvent(), replyEvent()];
+    // 브라우저 탭의 묶음 배너는 이 값으로 같은 스레드를 알아본다(`osNotifier.routeFor`): 레일이 스레드 루트를 실어 보낸다.
+    const offer = vi.spyOn(osNotifier(), "offer");
+    await deliverBurst(burst);
+    expect(offer.mock.calls.map(([item]) => item.rootId)).toEqual([IDS.root, IDS.root, IDS.root]);
+    expect(showNotification).toHaveBeenCalledTimes(1); // 셋이 한 묶음이다
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(routeNow(host)).toBe(`${messageAnchorPath(IDS.channel, burst[2]!.payload.id)}&thread=${IDS.root}`);
+
+    // 다른 스레드의 답글이 끼면 어느 스레드인지 추측하지 않고 채널이다.
+    await deliverBurst([replyEvent(), replyEvent({ root_id: IDS.otherRoot })]);
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(routeNow(host)).toBe(`/c/${IDS.channel}`);
+  });
+});
+
+describe("한 스레드의 배너는 분당 6건까지다 (#5017, 폭주 상한)", () => {
+  it("여덟 번째 답글까지 따로 와도 배너는 여섯이고, 넘은 답글은 착지 무장도 없다. 다른 스레드는 따로 세고, 60초가 지나면 다시 뜬다", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-01T10:00:00+09:00"));
+    const host = await mountSettled();
+    noteFollowing(IDS.ws, IDS.root, true);
+    noteFollowing(IDS.ws, IDS.otherRoot, true);
+    const sent: MessageNewEvent[] = [];
+    for (let n = 0; n < 8; n += 1) {
+      const event = replyEvent();
+      sent.push(event);
+      await deliver(event); // 매번 따로 내보낸다: 묶음 창이 합쳐 주지 않는 천천히 이어지는 스레드
+      vi.setSystemTime(Date.now() + 1_000);
+    }
+    expect(showNotification).toHaveBeenCalledTimes(6);
+    // 상한을 넘은 일곱째·여덟째 답글은 무장되지 않았다: 눌러 들어오면 여섯째 답글이다.
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(routeNow(host)).toBe(`${messageAnchorPath(IDS.channel, sent[5]!.payload.id)}&thread=${IDS.root}`);
+
+    // 다른 스레드는 자기 한도를 쓴다.
+    await deliver(replyEvent({ root_id: IDS.otherRoot }));
+    expect(showNotification).toHaveBeenCalledTimes(7);
+
+    // 첫 배너에서 60초가 지나면 자리가 비어 다시 뜬다(장부가 늙었으니 서버가 말한 값도 다시 적는다).
+    vi.setSystemTime(Date.now() + 60_000);
+    noteFollowing(IDS.ws, IDS.root, true);
+    await deliver(replyEvent());
+    expect(showNotification).toHaveBeenCalledTimes(8);
   });
 });
