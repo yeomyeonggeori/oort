@@ -76,6 +76,8 @@ import {
 } from "./MessageRow";
 import { TimelineLiveRegionProvider } from "./timelineLiveRegion";
 import { PendingRow } from "./PendingRow";
+import { SystemLine } from "./SystemLine";
+import { isSystemLineMessage, startGroupAfterSystemLine } from "./systemLineRows";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 import {
@@ -486,7 +488,10 @@ export function Timeline({
             .length > 0,
       })
     );
-    return showIntro ? [CHANNEL_INTRO_ITEM, ...folded] : folded;
+    // 중단 시스템 줄(`SystemLine`) 바로 다음 행은 작성자가 같아도 새 묶음이다(#5079) — 이유는 `startGroupAfterSystemLine`.
+    // 접기 뒤에 건다: 시스템 줄은 살아 있는 메시지라 묘비 접기가 줄을 건너 이어 접는 일이 없어서, 줄 바로 다음 행은 접기 앞뒤로 같은 행이다.
+    const grouped = startGroupAfterSystemLine(folded);
+    return showIntro ? [CHANNEL_INTRO_ITEM, ...grouped] : grouped;
   }, [
     mainMessages,
     lastReadSeq,
@@ -909,6 +914,11 @@ export function Timeline({
                 onResend={onResendPending}
               />
             );
+          }
+          // 서버가 방에 알리는 중단 줄(#5079)은 누가 한 말이 아니다 — 말풍선이 아니라 가운데의 시스템 줄이고, 반응·답글·행 동작이
+          // 하나도 붙지 않는다. 판정은 코어 `isRunCancelledNotice` 하나(폰과 같다).
+          if (isSystemLineMessage(item.message)) {
+            return <SystemLine message={item.message} />;
           }
           return (
             <MessageRow
