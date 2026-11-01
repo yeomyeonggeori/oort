@@ -16,27 +16,29 @@
 -- **끝난 행에는 노트·계획·임대가 있을 수 없다**(`team_ai_task_ended_ck`). 「종결 뒤 노트 삭제」를 앱 규율이
 -- 아니라 DB가 보장하므로, 끝내는 문장이 노트를 지우지 않으면 UPDATE 자체가 실패한다.
 --
--- 권한: RLS ENABLE + FORCE + ws_isolation(141·164와 같은 모양). 이 migration이 **직접 주는** 것은 서버 쪽 역할 둘뿐이다 —
---   momo_app    api. `live_run_count_in_tx`(작업 run은 동시 실행 칸에서 뺀다)가 행의 존재를 읽고,
---               취소 라우트(`cancel_run_in_tx`)가 같은 tx에서 작업을 끝낸다.
---   momo_worker agent-worker. 단계 임대·커밋·종결을 쓴다(BYPASSRLS라서 쓰는 문장이 workspace_id를 직접 명시한다).
--- 둘에게 주는 것은 SELECT, INSERT, UPDATE이고, 앱 코드에는 이 표의 DELETE 문장이 없다(행은 지우지 않고 끝낸다 —
--- 노트만 사라진다. run이 지워지면 CASCADE로 함께 사라진다). PUBLIC에서는 거둔다.
--- **시험이 재는 것**(worker t12): PUBLIC은 아무것도 없고, 도우미 읽기 역할 momo_helper_read(명시한 표만 SELECT)는
--- SELECT도 못 하며, 다른 워크스페이스의 행은 읽지도 쓰지도 못한다.
--- **이 migration이 정하지 못하는 것**: 실제로 역할이 가진 권한은 다른 테넌트 표와 똑같이 역할 부트스트랩의
--- `GRANT … ON ALL TABLES`·`ALTER DEFAULT PRIVILEGES`가 덧붙인다(thread_follow 등과 같은 방식). 그래서 momo_app·momo_worker·
--- momo_relay는 DELETE까지, 개발용 bootstrap_roles.sql에서는 momo_notifier도 이 표의 권한을 갖는다. 이 표를 읽고 쓰는
--- 코드는 api와 worker뿐이다. 더 좁히려면 mem-lockdown 같은 REVOKE 블록이 부트스트랩 파일에 필요하다(이 칸에서는 안 했다 —
--- migration에서 REVOKE해도 부트스트랩을 다시 돌리면 되돌아간다).
+-- 권한 (보안 검수 r1 M1): RLS ENABLE + FORCE + ws_isolation(141·164와 같은 모양). 노트는 읽은 글이 섞인 모델 글이고
+--   BYPASSRLS 역할(relay·worker·notifier)은 RLS를 건너뛰므로 표 권한이 마지막 문이다. 그래서 아래
+--   team-ai-task-lockdown 블록이 역할마다 **코드가 쓰는 권한만** 남긴다(self-media-token-lockdown과 같은 모양):
+--     momo_app     SELECT·UPDATE         api. `live_run_count_in_tx`가 행의 존재를 읽고(작업 run은 동시 실행 칸에서 뺀다),
+--                                        취소 라우트(`cancel_run_in_tx`)가 같은 tx에서 작업을 끝낸다. 행을 만들지 않는다
+--     momo_worker  SELECT·INSERT·UPDATE  agent-worker. 작업 시작(INSERT)·단계 임대·커밋·종결·청소(UPDATE)를 쓴다
+--                                        (BYPASSRLS라서 쓰는 문장이 workspace_id를 직접 명시한다)
+--     relay·notifier·platform_admin  없음
+--   DELETE는 어느 역할에도 없다(앱 코드에 이 표의 DELETE 문장이 없다: 행은 지우지 않고 끝낸다 — 노트만 사라진다).
+--   run·워크스페이스가 지워지면 외래 키 CASCADE가 표 소유자 권한으로 함께 지운다. PUBLIC에서도 거둔다.
+--   블록은 이 파일·bootstrap_roles.sql·bootstrap_runtime_roles.sql에 같은 글자로 있다(두 bootstrap 파일은 마이그레이션 뒤에
+--   ALL TABLES 권한을 다시 주므로, 이 파일에서만 거두면 다음 bootstrap이 되돌린다).
+-- **시험이 재는 것**(worker t12·t19·t20, momo-agent `team_ai_task_static_guards`): PUBLIC·도우미 읽기 역할 momo_helper_read는
+--   아무것도 못 하고, 다섯 역할이 가진 권한이 위 표와 정확히 같고, 세 파일의 블록이 같은 글자이고, 다른 워크스페이스의
+--   행은 읽지도 쓰지도 못하며, 다른 워크스페이스의 run·멤버를 가리키는 행은 만들 수 없다(아래 복합 외래 키, 보안 검수 r1 L2).
 --
 -- schema_v0.sql 은 건드리지 않는다. 다시 적용해도 무해하다.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS team_ai_task (
   workspace_id    uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  run_id          uuid NOT NULL REFERENCES agent_run(id) ON DELETE CASCADE,
-  agent_member_id uuid NOT NULL REFERENCES member(id) ON DELETE CASCADE,
+  run_id          uuid NOT NULL,
+  agent_member_id uuid NOT NULL,
   state           text NOT NULL DEFAULT 'active' CHECK (state IN ('active', 'ended')),
   -- 끝난 까닭(닫힌 어휘는 앱이 쥔다: done · task_limit · task_cancelled · task_requester_gone ·
   -- task_provider_error · task_role_off · …). 활성 행에는 없다.
@@ -53,6 +55,12 @@ CREATE TABLE IF NOT EXISTS team_ai_task (
   updated_at      timestamptz NOT NULL DEFAULT now(),
   ended_at        timestamptz,
   PRIMARY KEY (workspace_id, run_id),
+  -- 보안 검수 r1 L2: 복합 외래 키(030·133과 같은 모양). 단일 열 FK는 run·멤버 id 값만 보고 통과시켜서 다른
+  -- 워크스페이스의 run을 가리키는 행이 만들어졌다(RLS의 WITH CHECK는 workspace_id 열만 본다).
+  CONSTRAINT team_ai_task_run_fk FOREIGN KEY (workspace_id, run_id)
+    REFERENCES agent_run (workspace_id, id) ON DELETE CASCADE,
+  CONSTRAINT team_ai_task_agent_fk FOREIGN KEY (workspace_id, agent_member_id)
+    REFERENCES member (workspace_id, id) ON DELETE CASCADE,
   CONSTRAINT team_ai_task_claim_ck CHECK ((claim_token IS NULL) = (claim_until IS NULL)),
   CONSTRAINT team_ai_task_ended_ck CHECK (
     (state = 'active' AND end_reason IS NULL AND ended_at IS NULL)
@@ -68,7 +76,8 @@ COMMENT ON TABLE team_ai_task IS
   'ADR-0201 증보 v3 B5 (#4967): marker of the team AI task mode, one row per run. The ROW''S EXISTENCE is the '
   'judgement (re-claim and resume read the same fact). steps_done + claim_token/claim_until guarantee one execution '
   'per step. plan (<=8 items) and note (<=2000 chars) are server-internal state between steps and are gone once the '
-  'row is ended (team_ai_task_ended_ck). Granted to momo_app and momo_worker only; no API reads it.';
+  'row is ended (team_ai_task_ended_ck). Privileges are exactly what the code uses (team-ai-task-lockdown): momo_app '
+  'SELECT, UPDATE; momo_worker SELECT, INSERT, UPDATE; no other role, no DELETE for anyone; no API reads it.';
 
 ALTER TABLE team_ai_task ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team_ai_task FORCE ROW LEVEL SECURITY;
@@ -77,13 +86,45 @@ CREATE POLICY ws_isolation ON team_ai_task
   USING (workspace_id = current_setting('app.workspace_id', true)::uuid)
   WITH CHECK (workspace_id = current_setting('app.workspace_id', true)::uuid);
 
-REVOKE ALL ON TABLE team_ai_task FROM PUBLIC;
+-- BEGIN team-ai-task-lockdown (#4967 security review r1 M1; ADR-0201 증보 v3 B13-I7). Identical in
+-- 169_team_ai_task.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
+-- between the markers. A row's note is model-written text that may carry what the helper read for one
+-- requester, and the BYPASSRLS roles skip RLS, so their table privileges are what keeps every tenant's
+-- notes away from a role with no business reading them. Each runtime role gets exactly what the code
+-- does: momo_worker runs the task (INSERT starts one, UPDATE claims, commits, ends and sweeps, SELECT
+-- reads it); momo_app only counts the concurrency slot (SELECT) and ends the task a cancel stops
+-- (UPDATE); nobody deletes a row (an ended row is kept, its note gone — a foreign-key cascade from the
+-- run or the workspace runs as the table's owner, so deleting a parent still clears its rows); relay,
+-- notifier and platform_admin do not touch it at all. Idempotent and order-proof (a pass before the
+-- table or the roles exist finishes what it can, the pass after lands the rest), and it fails loudly
+-- if the result is not what is written here.
 DO $$
+DECLARE
+  r text;
+  p text;
+  allowed text[];
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_app') THEN
-    GRANT SELECT, INSERT, UPDATE ON TABLE team_ai_task TO momo_app;
+  IF to_regclass('public.team_ai_task') IS NULL THEN
+    RETURN;
   END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_worker') THEN
-    GRANT SELECT, INSERT, UPDATE ON TABLE team_ai_task TO momo_worker;
-  END IF;
+  REVOKE ALL ON TABLE public.team_ai_task FROM PUBLIC;
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+    allowed := CASE r
+      WHEN 'momo_app' THEN ARRAY['SELECT', 'UPDATE']
+      WHEN 'momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+      ELSE ARRAY[]::text[]
+    END;
+    EXECUTE format('REVOKE ALL ON TABLE public.team_ai_task FROM %I', r);
+    IF cardinality(allowed) > 0 THEN
+      EXECUTE format('GRANT %s ON TABLE public.team_ai_task TO %I', array_to_string(allowed, ', '), r);
+    END IF;
+    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+      IF has_table_privilege(r, 'public.team_ai_task', p) IS DISTINCT FROM (p = ANY (allowed)) THEN
+        RAISE EXCEPTION 'role % must % % on team_ai_task',
+          r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p;
+      END IF;
+    END LOOP;
+  END LOOP;
 END $$;
+-- END team-ai-task-lockdown

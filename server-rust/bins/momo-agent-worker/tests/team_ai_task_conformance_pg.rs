@@ -1103,7 +1103,7 @@ async fn t7_each_bound_ends_the_task_with_one_interim_report() {
     // (label, tune, script after the first step, expected note in the report, model calls)
     type Tune = fn(&mut WorkerConfig);
     // #4944: the operator's ceiling (`TEAM_AI_DAILY_TOKEN_CAP`) is one of the B9 limits a step judges;
-    // t19 walks all four. The sentence names the operator, not the settings.
+    // t21 walks them. The sentence names the operator, not the settings.
     let budget_sentence =
         "서버 운영자가 정한 하루 사용량을 다 써서 여기서 멈췄어요. 지금까지 정리한 내용이에요.";
     let cases: Vec<(&str, Tune, Vec<ChatCompletion>, &str, usize)> = vec![
@@ -1970,4 +1970,275 @@ async fn t17_a_step_job_without_a_task_runs_nothing() {
     );
     assert!(task_row(&su, run).await.is_none());
     assert!(agent_texts(&su, &t).await.is_empty());
+}
+
+// --- #4967 security review r1 (the repair round) ------------------------------------------------------
+
+/// Run one statement as `role` and say what the database answered: `Ok(rows)` or
+/// `Err("SQLSTATE:constraint")`. The statement runs in a transaction on the superuser's connection
+/// under `SET LOCAL ROLE` — so a role with BYPASSRLS keeps it, which is the whole point of probing the
+/// BYPASSRLS roles — with the workspace bound the way the api binds it, and is rolled back.
+async fn as_role(su: &PgPool, role: &str, workspace_id: Uuid, sql: &str) -> Result<u64, String> {
+    let mut tx = su.begin().await.expect("begin");
+    sqlx::query(&format!("SET LOCAL ROLE {role}"))
+        .execute(&mut *tx)
+        .await
+        .unwrap_or_else(|error| panic!("SET ROLE {role}: {error}"));
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(workspace_id.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("bind the workspace");
+    let result = sqlx::query(sql).execute(&mut *tx).await;
+    tx.rollback().await.expect("rollback");
+    match result {
+        Ok(done) => Ok(done.rows_affected()),
+        Err(sqlx::Error::Database(error)) => Err(format!(
+            "{}:{}",
+            error.code().unwrap_or_default(),
+            error.constraint().unwrap_or_default()
+        )),
+        Err(other) => panic!("not a database refusal: {other}"),
+    }
+}
+
+/// M1 (B15-A10): the marker table's privileges are exactly what the code uses, and not a verb more.
+/// A row's note is model-written text that may carry what the helper read for one person, and relay,
+/// worker and notifier skip row security — so the table privileges are the door that is left. The api
+/// reads and updates, the worker also creates, nobody deletes, and relay / notifier / platform_admin /
+/// the helper's read role / PUBLIC hold nothing (not even one column).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t19_the_marker_table_grants_exactly_what_the_code_uses() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([cont(&["다음"], "비공개 노트")]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
+    let ws = t.workspace_id;
+
+    // 1. The catalog: every role × verb, from outside the migration's own self-check. The four roles
+    //    the runtime is made of must exist here, or the loop below would prove nothing.
+    let mut measured = 0;
+    for role in [
+        "momo_app",
+        "momo_worker",
+        "momo_relay",
+        "momo_notifier",
+        "momo_platform_admin",
+        "momo_helper_read",
+        "public",
+    ] {
+        let exists: bool = role == "public"
+            || sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)")
+                .bind(role)
+                .fetch_one(&su)
+                .await
+                .unwrap();
+        if !exists {
+            assert!(
+                !matches!(
+                    role,
+                    "momo_app" | "momo_worker" | "momo_relay" | "momo_notifier"
+                ),
+                "{role} must exist after bootstrap_roles.sql"
+            );
+            continue;
+        }
+        for verb in [
+            "SELECT",
+            "INSERT",
+            "UPDATE",
+            "DELETE",
+            "TRUNCATE",
+            "REFERENCES",
+            "TRIGGER",
+        ] {
+            let expected = match role {
+                "momo_app" => ["SELECT", "UPDATE"].contains(&verb),
+                "momo_worker" => ["SELECT", "INSERT", "UPDATE"].contains(&verb),
+                _ => false,
+            };
+            let on_table: bool =
+                sqlx::query_scalar("SELECT has_table_privilege($1, 'public.team_ai_task', $2)")
+                    .bind(role)
+                    .bind(verb)
+                    .fetch_one(&su)
+                    .await
+                    .unwrap();
+            assert_eq!(on_table, expected, "{role} {verb} on the table");
+            measured += 1;
+        }
+        // a column-scoped grant is a privilege too (a `GRANT SELECT (note)` would read every note)
+        for verb in ["SELECT", "INSERT", "UPDATE", "REFERENCES"] {
+            let expected = match role {
+                "momo_app" => ["SELECT", "UPDATE"].contains(&verb),
+                "momo_worker" => ["SELECT", "INSERT", "UPDATE"].contains(&verb),
+                _ => false,
+            };
+            let on_a_column: bool = sqlx::query_scalar(
+                "SELECT has_any_column_privilege($1, 'public.team_ai_task', $2)",
+            )
+            .bind(role)
+            .bind(verb)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+            assert_eq!(on_a_column, expected, "{role} {verb} on some column");
+        }
+    }
+    assert!(measured >= 4 * 7, "the loop must have measured something");
+
+    // 2. Real statements, not only metadata. The BYPASSRLS roles are the ones row security does not
+    //    stop; the api's own role is stopped from creating and from deleting.
+    let refused = Err("42501:".to_string());
+    for role in ["momo_relay", "momo_notifier"] {
+        assert_eq!(
+            as_role(&su, role, ws, "SELECT note FROM team_ai_task").await,
+            refused,
+            "{role} cannot read a task note"
+        );
+        assert_eq!(
+            as_role(&su, role, ws, "UPDATE team_ai_task SET note = 'x'").await,
+            refused,
+            "{role} cannot rewrite one"
+        );
+    }
+    assert_eq!(
+        as_role(&su, "momo_app", ws, "DELETE FROM team_ai_task").await,
+        refused,
+        "the api deletes no row"
+    );
+    assert_eq!(
+        as_role(&su, "momo_worker", ws, "DELETE FROM team_ai_task").await,
+        refused,
+        "nor does the worker"
+    );
+    let insert = format!(
+        "INSERT INTO team_ai_task (workspace_id, run_id, agent_member_id) VALUES ('{ws}', '{}', '{}')",
+        Uuid::new_v4(),
+        t.agent_id
+    );
+    assert_eq!(
+        as_role(&su, "momo_app", ws, &insert).await,
+        refused,
+        "the api starts no task"
+    );
+    // ... and what the code does still works (anti-vacuity: the lockdown did not simply take everything).
+    assert_eq!(
+        as_role(&su, "momo_app", ws, "SELECT count(*) FROM team_ai_task").await,
+        Ok(1),
+        "the api reads the row of its own tenant"
+    );
+    assert_eq!(
+        as_role(
+            &su,
+            "momo_app",
+            ws,
+            &format!("UPDATE team_ai_task SET updated_at = now() WHERE run_id = '{run}'")
+        )
+        .await,
+        Ok(1),
+        "the api updates it (a cancel ends the task)"
+    );
+    assert_eq!(
+        as_role(&su, "momo_worker", ws, "SELECT count(*) FROM team_ai_task").await,
+        Ok(1)
+    );
+
+    // 3. The table's own comment says what the grants are (it said 「app and worker only」 while the
+    //    bootstrap handed the table to relay and notifier as well).
+    let comment: String =
+        sqlx::query_scalar("SELECT obj_description('public.team_ai_task'::regclass, 'pg_class')")
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    for phrase in [
+        "momo_app SELECT, UPDATE",
+        "momo_worker SELECT, INSERT, UPDATE",
+        "no DELETE",
+    ] {
+        assert!(
+            comment.contains(phrase),
+            "the comment lost `{phrase}`: {comment}"
+        );
+    }
+}
+
+/// L2 (B15-A10): a row of one tenant cannot point at another tenant's run or member. The single-column
+/// foreign keys took any id that existed anywhere (and told the two cases apart by the error); the
+/// composite ones take only the row's own workspace's.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t20_a_row_cannot_point_at_another_workspaces_run_or_member() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let a = seed(&su, &pool).await;
+    let b = seed(&su, &pool).await;
+    // A run in each tenant that has no task row yet (a mention nobody has drained).
+    let run_a = enqueue(&pool, &a, a.owner_id, "@oort-helper 조사해 줘").await;
+    let run_b = enqueue(&pool, &b, b.owner_id, "@oort-helper 조사해 줘").await;
+    let insert = |ws: Uuid, run: Uuid, agent: Uuid| {
+        format!(
+            "INSERT INTO team_ai_task (workspace_id, run_id, agent_member_id) \
+             VALUES ('{ws}', '{run}', '{agent}')"
+        )
+    };
+    // The worker writes this table (BYPASSRLS), so the foreign key is the only thing that can say no.
+    assert_eq!(
+        as_role(
+            &su,
+            "momo_worker",
+            a.workspace_id,
+            &insert(a.workspace_id, run_a, a.agent_id)
+        )
+        .await,
+        Ok(1),
+        "anti-vacuity: the row of tenant A about its own run and its own helper is fine"
+    );
+    assert_eq!(
+        as_role(
+            &su,
+            "momo_worker",
+            a.workspace_id,
+            &insert(a.workspace_id, run_b, a.agent_id)
+        )
+        .await,
+        Err("23503:team_ai_task_run_fk".to_string()),
+        "tenant A's row about tenant B's run"
+    );
+    assert_eq!(
+        as_role(
+            &su,
+            "momo_worker",
+            a.workspace_id,
+            &insert(a.workspace_id, run_a, b.agent_id)
+        )
+        .await,
+        Err("23503:team_ai_task_agent_fk".to_string()),
+        "tenant A's row about tenant B's helper"
+    );
+    // A run that does not exist anywhere answers the same as another tenant's run: the error does not
+    // say whether the id is real (the single-column key did).
+    assert_eq!(
+        as_role(
+            &su,
+            "momo_worker",
+            a.workspace_id,
+            &insert(a.workspace_id, Uuid::new_v4(), a.agent_id)
+        )
+        .await,
+        as_role(
+            &su,
+            "momo_worker",
+            a.workspace_id,
+            &insert(a.workspace_id, run_b, a.agent_id)
+        )
+        .await,
+        "a run that exists elsewhere and one that exists nowhere are refused the same way"
+    );
 }
