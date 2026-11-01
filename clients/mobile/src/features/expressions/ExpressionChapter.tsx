@@ -18,6 +18,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Sentence} from '../../design/atoms';
 import {usePageSheetScrollProps} from '../../design/PageSheet';
 import {BackCircle} from '../../design/SheetChrome';
+import {circleLook} from '../../design/sheetModel';
 import {useStyles} from '../../design/theme';
 import {
   ds2Radius,
@@ -253,13 +254,21 @@ const buildStyles = (color: Palette) =>
     photoText: {flex: 1, gap: space.xs},
     photoName: {fontSize: font.label, lineHeight: line.label, color: color.text},
     photoMeta: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
+    // 시트(`sheet`) 위에 서는 보조 알약은 시트 위 문법이다: `surface` 채움 + `elevationRest` 그림자(phone-sheets.md §4,
+    // README §3.3). 옛 판은 `surfaceMuted` 였는데 라이트에서 그 값이 시트와 1.009 라 알약 안팎이 같은 색이었다 — 사진을 고르지
+    // 않으면 이 장에서 할 수 있는 일이 없는데 그 유일한 입구가 글자로만 보였다(#5065, design-review H1).
+    // 채움·가장자리는 시트 머리의 원(X·‹)과 같은 규칙(`circleLook`)을 따른다 — 다크는 `surface` 가 시트와 덜 갈려서 한 단 위
+    // `surfaceMuted` + 윗면 가장자리 한 줄이 그 자리를 맡는다(라이트는 `surface` + 투명 고리라 위 문장 그대로다).
     pickButton: {
       minHeight: TOUCH_TARGET,
       alignSelf: 'flex-start',
       justifyContent: 'center',
       paddingHorizontal: space.lg,
       borderRadius: ds2Radius.pill,
-      backgroundColor: color.surfaceMuted,
+      backgroundColor: circleLook(color).fill,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: circleLook(color).ring,
+      boxShadow: color.elevationRest,
     },
     pickButtonOff: {opacity: 0.5},
     pickButtonPressed: {backgroundColor: color.surfacePressed},

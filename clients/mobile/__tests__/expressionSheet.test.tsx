@@ -325,6 +325,25 @@ describe('표현 시트', () => {
     expect(h.onSend).not.toHaveBeenCalled();
   });
 
+  // #5065 B1: 시트가 검색어를 쥐고 이모지 본문을 끼워 넣는데(`embedded`), 빈 결과의 「검색 지우기」가 본문 안의 상태만 비우면
+  // 화면의 검색어와 결과는 그대로라 눌러도 아무 일도 없는 죽은 단추가 된다(#4942 의 끼워 넣기에서 생긴 결함). 독립 고르개의 같은
+  // 단추는 `emojiPicker.test.tsx` 가 지킨다 — 여기서는 **시트의 검색 칸**과 **목록**이 눌림에 따라 돌아오는지를 렌더로 잰다.
+  it('이모지 탭: 빈 결과의 「검색 지우기」를 누르면 시트의 검색어가 비고 목록이 돌아온다 (#5065)', async () => {
+    const {store} = await loaded();
+    openSheet(store);
+    await screen.findByTestId('emoji-pick-🎉');
+    fireEvent.changeText(screen.getByTestId('expression-sheet-search'), 'zzzz');
+    // 아무것도 못 맞췄다: 격자가 비고, 빈 문장 아래에 지우기 단추가 서고, 검색 칸은 그대로 「zzzz」다.
+    expect(screen.queryByTestId('emoji-pick-🎉')).toBeNull();
+    expect(screen.getByTestId('emoji-empty')).toBeTruthy();
+    expect(screen.getByTestId('expression-sheet-search').props.value).toBe('zzzz');
+    fireEvent.press(screen.getByTestId('emoji-clear-search'));
+    // 눌림이 화면에 닿았다: 시트의 검색 칸이 비고, 본문이 처음 칸(자주 쓰는 것)으로 돌아온다.
+    expect(screen.getByTestId('expression-sheet-search').props.value).toBe('');
+    await screen.findByTestId('emoji-pick-🎉');
+    expect(screen.queryByTestId('emoji-empty')).toBeNull();
+  });
+
   it('팀 이모지 탭: 고르면 `:이름:` 을 입력칸에 넣는다 — 미리보기도 보내기도 없다', async () => {
     const {store} = await loaded();
     const h = openSheet(store);

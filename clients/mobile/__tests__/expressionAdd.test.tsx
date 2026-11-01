@@ -12,7 +12,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react-native';
-import {Animated, AppState} from 'react-native';
+import {Animated, AppState, StyleSheet} from 'react-native';
 import * as api from '@momo/core/lib/api';
 import * as host from '@momo/core/runtime/host';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
@@ -42,6 +42,9 @@ import type {
   ExpressionDraft,
   ManualUploadCode,
 } from '@momo/core/features/expressions/types';
+import {circleLook} from '../src/design/sheetModel';
+import {FixedScheme, paletteFor} from '../src/design/theme';
+import {PhotoPickRow} from '../src/features/expressions/ExpressionChapter';
 import {PhoneExpressions} from '../src/features/expressions/ExpressionProvider';
 import {
   createPhoneExpressionStore,
@@ -448,6 +451,21 @@ describe('가져오기', () => {
       ).toBe(true),
     );
   });
+
+  // #5065 H1: 같은 부품(`PhotoPickRow`)을 쓰는 자리 — 가져오기의 앨범 알약도 시트 위 보조 알약이다(부품 시험은 아래 「앨범 알약」).
+  it('앨범 알약은 시트 위 보조 알약이다 — `surface` 채움 + `elevationRest` 그림자 (#5065)', async () => {
+    const {store} = setup();
+    await store.refresh(true);
+    mount(store);
+    await openImport();
+    const palette = paletteFor('light');
+    const pill = StyleSheet.flatten(
+      screen.getByTestId('expression-import-photo').props.style,
+    );
+    expect(pill.backgroundColor).toBe(palette.surface);
+    expect(pill.boxShadow).toBe(palette.elevationRest);
+    expect(pill.backgroundColor).not.toBe(palette.surfaceMuted);
+  });
 });
 
 describe('AI와 만들기', () => {
@@ -727,6 +745,68 @@ describe('AI와 만들기', () => {
     expect(
       screen.getByTestId('expression-make-photo').props.accessibilityLabel,
     ).toBe(ko.formatMessage('expressions.make.photoPick'));
+  });
+
+  // #5065 H1: 같은 부품을 쓰는 자리 — 「AI와 만들기」 첫 단계의 앨범 알약(캡처 4891-…-014 가 그릇 없는 글자로 찍힌 자리).
+  it('앨범 알약은 시트 위 보조 알약이다 — `surface` 채움 + `elevationRest` 그림자 (#5065)', async () => {
+    wire();
+    await openMake();
+    const palette = paletteFor('light');
+    const pill = StyleSheet.flatten(
+      screen.getByTestId('expression-make-photo').props.style,
+    );
+    expect(pill.backgroundColor).toBe(palette.surface);
+    expect(pill.boxShadow).toBe(palette.elevationRest);
+    expect(pill.backgroundColor).not.toBe(palette.surfaceMuted);
+  });
+});
+
+// #5065 H1: 「앨범에서 고르기」 알약(`PhotoPickRow`)은 사진을 고르지 않으면 이 장에서 아무것도 할 수 없는 유일한 입구인데, 보조 채움
+// (`surfaceMuted`)이 라이트에서 시트와 1.009 라 알약 안팎이 같은 색이었다. 시트 위 보조 알약은 `surface` 채움 + `elevationRest` 그림자다
+// (phone-sheets.md §4, README §3.3). 채움·가장자리는 시트 머리의 원과 같은 규칙(`circleLook`)이라 다크는 한 단 위 채움 + 윗면 한 줄이
+// 맡는다(그 규칙이 모든 테마에서 시트와 갈리는지는 `sheetKit.test.tsx` 가 잰다).
+describe('앨범 알약', () => {
+  const photoRow = (photo: React.ComponentProps<typeof PhotoPickRow>['photo']) => (
+    <PhotoPickRow
+      photo={photo}
+      pickLabel="앨범에서 고르기"
+      changeLabel="다른 사진 고르기"
+      previewLabel="고른 사진"
+      onPick={jest.fn()}
+      testID="pick"
+    />
+  );
+
+  it.each(['light', 'dark'] as const)(
+    '채움·그림자·가장자리가 설계 토큰이고 시트 바탕과 같은 색이 아니다 (%s)',
+    scheme => {
+      render(<FixedScheme scheme={scheme}>{photoRow(null)}</FixedScheme>);
+      const palette = paletteFor(scheme);
+      const pill = StyleSheet.flatten(screen.getByTestId('pick').props.style);
+      expect(pill.boxShadow).toBe(palette.elevationRest);
+      expect(pill.backgroundColor).toBe(circleLook(palette).fill);
+      expect(pill.borderColor).toBe(circleLook(palette).ring);
+      // 결함 그대로의 값이 아니다: 시트 바탕(`sheet`)과 같지 않다.
+      expect(pill.backgroundColor).not.toBe(palette.sheet);
+      if (scheme === 'light') {
+        // 계약 그대로: `surface` 채움이고, 시트와 1.009 로만 갈리던 옛 보조 채움(`surfaceMuted`)이 아니다.
+        expect(pill.backgroundColor).toBe(palette.surface);
+        expect(pill.backgroundColor).not.toBe(palette.surfaceMuted);
+      }
+    },
+  );
+
+  it('사진을 고른 뒤의 「다른 사진 고르기」도 같은 알약이다', () => {
+    render(
+      <FixedScheme scheme="light">
+        {photoRow({uri: 'file:///x.png', name: 'dance.png', bytes: 120_000})}
+      </FixedScheme>,
+    );
+    const palette = paletteFor('light');
+    const pill = StyleSheet.flatten(screen.getByTestId('pick').props.style);
+    expect(screen.getByText('다른 사진 고르기')).toBeTruthy();
+    expect(pill.backgroundColor).toBe(palette.surface);
+    expect(pill.boxShadow).toBe(palette.elevationRest);
   });
 });
 

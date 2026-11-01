@@ -74,8 +74,12 @@ export interface EmojiPickerProps {
   /**
    * 입력창 표현 시트(#4942)가 머리와 검색을 직접 갖고 이 본문만 쓸 때. 머리·검색 칸·「우리 팀」 탭을 그리지 않고
    * 검색어를 위에서 받는다 — 분류 칩·피부색·격자·빈/오류 문장은 반응·상태 고르개와 같은 코드다.
+   *
+   * 검색어의 주인이 위(시트)라서 **지우는 손도 위에 있다**(#5065). 빈 결과의 「검색 지우기」가 이 본문 안의 상태만 비우면
+   * 화면의 검색어와 결과는 그대로여서 눌러도 아무 일도 없는 죽은 단추가 된다. 그래서 `onClearQuery` 는 필수다 —
+   * 끼워 넣는 쪽이 빠뜨리면 타입이 먼저 막는다.
    */
-  embedded?: {query: string};
+  embedded?: {query: string; onClearQuery: () => void};
 }
 
 type Tab = (typeof EMOJI_CATEGORIES)[number]['id'] | 'team';
@@ -100,6 +104,8 @@ export function EmojiPicker({
   );
   const [ownQuery, setQuery] = useState('');
   const query = embedded ? embedded.query : ownQuery;
+  // 검색어를 가진 쪽이 지운다: 독립 고르개는 제 상태, 시트에 끼워진 본문은 시트의 검색어(#5065).
+  const clearQuery = embedded ? embedded.onClearQuery : () => setQuery('');
   const [tab, setTab] = useState<Tab>('frequent');
   const [catalog, setCatalog] = useState<CatalogEmoji[] | null>(null);
   const [failed, setFailed] = useState(false);
@@ -295,7 +301,7 @@ export function EmojiPicker({
           })}
           testID="emoji-grid"
           ListEmptyComponent={
-            <View style={styles.notice}>
+            <View style={styles.notice} testID="emoji-empty">
               <Text
                 style={styles.label}
                 accessibilityRole={failed ? 'alert' : 'text'}
@@ -314,8 +320,9 @@ export function EmojiPicker({
               ) : catalog !== null && catalog.length > 0 ? (
                 <Pressable
                   accessibilityRole="button"
-                  onPress={() => setQuery('')}
+                  onPress={clearQuery}
                   style={styles.tab}
+                  testID="emoji-clear-search"
                 >
                   <Text style={styles.label}>검색 지우기</Text>
                 </Pressable>
