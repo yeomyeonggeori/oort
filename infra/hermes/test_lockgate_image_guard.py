@@ -68,16 +68,25 @@ def baseline_env(data_dir, env=None):
     return {name: value for name, value in merged.items() if value is not None}
 
 
+MEMORY_OFF = {"memory_enabled": False, "user_profile_enabled": False}  # #4898: the switches Hermes reads when it loads MEMORY.md / USER.md
+
+
 def healthy_cfg(**over):
     cfg = {"web": {"search_backend": "openai-native", "keyless_fallback": False},
            "image_gen": {"provider": "openai-codex"},
+           "memory": dict(MEMORY_OFF),
            "plugins": {"enabled": [NAME], "isolation": "in_process"},
            "security": {"allow_private_urls": False, "fake_ip_ranges": []}}
     cfg.update(over)
     return cfg
 
 
-TOOLS = {"memory", "todo_list", "session_search", "web_search", "image_generate"}
+def chat_cfg(**over):
+    """The config of a rollback without the picture tool: search and the memory switches, nothing else."""
+    return {"web": healthy_cfg()["web"], "memory": dict(MEMORY_OFF), **over}
+
+
+TOOLS = {"todo_list", "web_search", "image_generate"}
 
 
 class FakeHermes:
@@ -86,8 +95,9 @@ class FakeHermes:
     `<HERMES_HOME>/plugins/<name>/` as it is at that moment, loads it only when the config enables it, and every tool
     call asks the registered hooks first (a block becomes an error result) before the registry handler runs."""
 
-    def __init__(self, cfg, tools=TOOLS):
+    def __init__(self, cfg, tools=TOOLS, resolved=None):
         self.cfg, self.tools = cfg, set(tools)
+        self.resolved = {lockgate.REQUIRED_TOOL} if resolved is None else set(resolved)  # the names get_tool_definitions hands back
         self.hooks, self.listing, self.discovered = [], [], False
         self.real_calls = []
         self.entry = types.SimpleNamespace(handler=self._real_handler, is_async=False)
@@ -129,13 +139,13 @@ class FakeHermes:
                  "model_tools", "tools", "tools.registry")
         modules = {name: types.ModuleType(name) for name in names}
         modules["hermes_cli.config"].load_config = mock.Mock(return_value=self.cfg)
-        modules["hermes_cli.tools_config"]._get_platform_tools = mock.Mock(return_value={"memory", "search"})
+        modules["hermes_cli.tools_config"]._get_platform_tools = mock.Mock(return_value={"todo", "search"})
 
         def select(*args, **kwargs):
             self.discover()  # real Hermes: importing model_tools has already run discovery by the time this is callable
             return self.tools
         modules["model_tools"]._select_tool_names = select
-        modules["model_tools"].get_tool_definitions = mock.Mock(return_value=[{"function": {"name": "memory"}}])
+        modules["model_tools"].get_tool_definitions = mock.Mock(return_value=[{"function": {"name": name}} for name in sorted(self.resolved)])
         modules["model_tools"].handle_function_call = self.handle_function_call
         modules["hermes_cli.plugins"]._dispatch_pre_tool_call_hooks = self.dispatch_hooks
         modules["hermes_cli.plugins"].get_plugin_manager = lambda: types.SimpleNamespace(list_plugins=lambda: list(self.listing))
@@ -246,7 +256,7 @@ class HealthyBoot(GateHarness):
 
     def test_the_guard_rules_do_not_apply_when_image_generation_is_not_exposed(self):
         chat_only = TOOLS - {"image_generate"}
-        cfg = {"web": healthy_cfg()["web"]}
+        cfg = chat_cfg()
         rc, record, _ = self.boot(cfg, chat_only, env={"HTTPS_PROXY": "http://proxy.example:3128", "HERMES_SAFE_MODE": "1"},
                                   install_guard=False)
         self.assertEqual((rc, record["problems"]), (0, []))
@@ -358,7 +368,7 @@ class PluginFilesAndConfig(GateHarness):
                 self.assertTrue(any(sorted(extra)[0] in p for p in record["problems"]))
         self.assertEqual(lockgate.tool_problems(healthy_cfg(), TOOLS), [])
         # Rolling image generation back must not leave this rule behind.
-        self.assertEqual(lockgate.tool_problems({"image_gen": {"provider": "fal", "model": "x"}}, {"memory"}), [])
+        self.assertEqual(lockgate.tool_problems({"image_gen": {"provider": "fal", "model": "x"}}, {"todo_list"}), [])
 
 
 class SsrfSwitches(GateHarness):
@@ -543,7 +553,7 @@ class SelfMediaOrigin(GateHarness):
 
     def test_the_rules_apply_only_when_image_generation_is_exposed(self):
         chat_only = TOOLS - {"image_generate"}
-        cfg = {"web": healthy_cfg()["web"]}
+        cfg = chat_cfg()
         rc, record, _ = self.boot(cfg, chat_only, env={lockgate.SELF_ORIGIN_ENV: "https://Bad.Example/"}, install_guard=False)
         self.assertEqual((rc, record["problems"]), (0, []))
         # the volume's `.env` has an allow-list that does not depend on the tools (#4950): the variable is refused there either way
@@ -690,12 +700,12 @@ class MediaStrict(GateHarness):
     def test_the_rule_applies_whatever_tools_are_exposed(self):
         # #4935: not only with the picture tool. A chat-only config (a rollback) or a connector config is refused without the flag too.
         chat_only = TOOLS - {"image_generate"}
-        cfg = {"web": healthy_cfg()["web"]}
+        cfg = chat_cfg()
         rc, record, _ = self.boot(cfg, chat_only, install_guard=False)
         self.assertEqual((rc, record["problems"]), (0, []), "with the flag, no picture tool: fine")
         self.assertIsNone(record["image_guard"])
         self.assertIs(record["media_strict"], True)
-        for config, tools in ((cfg, chat_only), ({"mcp_servers": {"gmail": {}}}, {"memory", "todo_list", "session_search"})):
+        for config, tools in ((cfg, chat_only), ({"mcp_servers": {"gmail": {}}}, {"todo_list"})):
             with self.subTest(mcp_servers=bool(config.get("mcp_servers"))):
                 rc, record, _ = self.boot(config, tools, env={self.NAME: None}, install_guard=False)
                 self.assertRefused(rc, record, self.NAME)
@@ -981,7 +991,7 @@ class EnvFileThroughTheGate(GateHarness):
     def test_the_live_report_judges_the_volumes_env_whichever_tools_are_exposed(self):
         # The boot gate reads the volume's `.env` whatever is exposed; the report does too, so a file edited after the start (or one the
         # boot gate misread) is not left alone until the next restart.
-        for label, cfg, tools in (("no picture tool", {"web": healthy_cfg()["web"]}, TOOLS - {"image_generate"}),
+        for label, cfg, tools in (("no picture tool", chat_cfg(), TOOLS - {"image_generate"}),
                                   ("picture tool exposed", healthy_cfg(), TOOLS)):
             with self.subTest(case=label, file="none"):
                 self.assertEqual(self.monitor(cfg, tools=tools)[:2], (0, []))
@@ -1088,7 +1098,7 @@ class AcceptedConfigs(GateHarness):
         self.assertTrue(any("accepted configs" in p for p in record["problems"]), record["problems"])
 
     def test_a_connector_config_boots_only_with_the_strict_flag_and_the_attested_apps(self):
-        cfg, tools = connector_cfg(), {"memory", "todo_list", "session_search"}
+        cfg, tools = connector_cfg(), {"todo_list"}
         apps = {lockgate.APPS_ENV: "com.momo.plugins.gmail,com.momo.plugins.google-calendar"}
         raw = self.catalog["connector/claude-oauth.fallback-codex-oauth"]
         rc, record, _ = self.boot(cfg, tools, env=apps, install_guard=False, config_bytes=raw)
@@ -1114,7 +1124,131 @@ def connector_cfg():
     server = {"url": "https://mcp.example.com/mcp", "auth": "oauth", "trust": "untrusted", "sampling": {"enabled": False},
               "tools": {"include": ["search_threads", "get_thread"], "resources": False, "prompts": False}}
     return {"agent": {"disabled_toolsets": ["terminal", "code_execution", "browser", "cronjob", "delegation", "web", "image_gen"]},
+            "memory": dict(MEMORY_OFF),
             "mcp_servers": {"gmail": copy.deepcopy(server), "google_calendar": copy.deepcopy(server)}}
+
+
+class CrossRunRecall(GateHarness):
+    """#4898 (ADR-0203 augmentation of 2026-11-01, R1-R5): `session_search` and `memory` are off. One Hermes serves every workspace with one
+    state.db and one MEMORY.md / USER.md, so either tool lets a run read what a run of another workspace left. The gate refuses them by
+    name (toolsets before the availability filter AND the definitions the model would be handed), and refuses a config whose memory switches
+    are not explicitly false, because Hermes loads the memory files into the system prompt on those switches, toolset or not."""
+
+    TOOLS_OFF = TOOLS  # healthy: todo_list, web_search, image_generate
+    FRAGMENT = "cross-run recall tools would be exposed"
+
+    def test_a_healthy_boot_exposes_no_recall_tool_and_reports_the_memory_switches(self):
+        rc, record, _ = self.boot()
+        self.assertEqual((rc, record["problems"]), (0, []))
+        self.assertFalse(lockgate.CROSS_RUN_TOOLS & set(record["selected_tools"]))
+        self.assertFalse(lockgate.CROSS_RUN_TOOLS & set(record["resolved_tools"]))
+        self.assertEqual(record["resolved_tools"], [lockgate.REQUIRED_TOOL])
+        self.assertEqual(record["memory_config"], {"memory_enabled": False, "user_profile_enabled": False, "provider_set": False})
+
+    def test_each_recall_tool_selected_by_the_toolsets_refuses_the_start(self):
+        for tools in ({"session_search"}, {"memory"}, {"memory", "session_search"}):
+            with self.subTest(tools=sorted(tools)):
+                rc, record, _ = self.boot(tools=self.TOOLS_OFF | tools)
+                self.assertRefused(rc, record, self.FRAGMENT)
+                named = [p for p in record["problems"] if self.FRAGMENT in p]
+                self.assertEqual(len(named), 1, record["problems"])
+                self.assertTrue(named[0].endswith(",".join(sorted(tools))), named[0])
+                self.assertFalse(any("outside the allow-list" in p for p in record["problems"]), "one message, not two")
+
+    def test_a_recall_tool_that_only_the_availability_filtered_definitions_hold_is_refused_too(self):
+        # `selected` is what the toolsets name before check_fn; `resolved` is what the model would be handed. Either one is the surface.
+        for resolved in ({"session_search"}, {"memory"}):
+            with self.subTest(resolved=sorted(resolved)):
+                fake = FakeHermes(healthy_cfg(), self.TOOLS_OFF, resolved={lockgate.REQUIRED_TOOL} | resolved)
+                rc, record, _ = self.boot(fake=fake)
+                self.assertRefused(rc, record, self.FRAGMENT)
+                self.assertTrue(any(sorted(resolved)[0] in p for p in record["problems"] if self.FRAGMENT in p))
+
+    def test_the_recall_tools_are_refused_in_every_mode(self):
+        apps = {lockgate.APPS_ENV: "com.momo.plugins.gmail,com.momo.plugins.google-calendar"}
+        for label, cfg, tools, env in (("chat only", chat_cfg(), {"todo_list", "session_search"}, {}),
+                                       ("search", chat_cfg(), {"todo_list", "web_search", "memory"}, {}),
+                                       ("connector", connector_cfg(), {"todo_list", "memory"}, apps)):
+            with self.subTest(mode=label):
+                rc, record, _ = self.boot(cfg, tools, env=env, install_guard=False)
+                self.assertRefused(rc, record, self.FRAGMENT)
+
+    def test_the_memory_switches_must_be_explicitly_false_whatever_tools_are_exposed(self):
+        chat_only = TOOLS - {"image_generate"}
+        for key in lockgate.MEMORY_OFF_KEYS:
+            other = [k for k in lockgate.MEMORY_OFF_KEYS if k != key][0]
+            for value in ("missing", True, "false", 0, None, ""):
+                with self.subTest(key=key, value=value):
+                    section = dict(MEMORY_OFF)
+                    if value == "missing":
+                        del section[key]
+                    else:
+                        section[key] = value
+                    for cfg, tools, guard in ((healthy_cfg(memory=section), TOOLS, True), (chat_cfg(memory=section), chat_only, False)):
+                        rc, record, _ = self.boot(cfg, tools, install_guard=guard)
+                        self.assertRefused(rc, record, "memory.%s must be explicitly false" % key)
+                        self.assertFalse(any(("memory.%s " % other) in p for p in record["problems"]), record["problems"])
+        for label, section in (("no section", None), ("not a mapping", "off"), ("empty", {}), ("a list", [False, False])):
+            with self.subTest(section=label):
+                cfg = healthy_cfg()
+                if section is None:
+                    del cfg["memory"]
+                else:
+                    cfg["memory"] = section
+                rc, record, _ = self.boot(cfg)
+                self.assertRefused(rc, record, "memory.memory_enabled must be explicitly false")
+                self.assertTrue(any("memory.user_profile_enabled must be explicitly false" in p for p in record["problems"]))
+
+    def test_an_external_memory_provider_is_refused(self):
+        for provider in ("honcho", "mem0", "retaindb", " x ", ["honcho"]):
+            with self.subTest(provider=provider):
+                rc, record, _ = self.boot(healthy_cfg(memory={**MEMORY_OFF, "provider": provider}))
+                self.assertRefused(rc, record, "memory.provider must be empty")
+                self.assertTrue(record["memory_config"]["provider_set"])
+        for provider in ("", None):  # Hermes' own default is the empty string: nothing configured
+            with self.subTest(provider=provider):
+                rc, record, _ = self.boot(healthy_cfg(memory={**MEMORY_OFF, "provider": provider}))
+                self.assertEqual((rc, record["problems"]), (0, []))
+
+    def test_the_switch_check_does_not_echo_a_value(self):
+        rc, record, _ = self.boot(healthy_cfg(memory={"memory_enabled": "oort-proof-value", "user_profile_enabled": True,
+                                                      "provider": "oort-proof-provider"}))
+        self.assertEqual(rc, 3)
+        self.assertNotIn("oort-proof", json.dumps(record))
+        self.assertEqual(record["memory_config"], {"memory_enabled": None, "user_profile_enabled": True, "provider_set": True})
+
+    def test_the_positive_control_is_an_allowed_tool_and_a_gate_that_resolves_nothing_cannot_be_trusted(self):
+        rc, record, _ = self.boot(fake=FakeHermes(healthy_cfg(), TOOLS, resolved=set()))
+        self.assertRefused(rc, record, "positive control failed: %s did not resolve" % lockgate.REQUIRED_TOOL)
+        # the old control would now be a refusal of its own: a resolved recall tool does not make the gate trustworthy
+        rc, record, _ = self.boot(fake=FakeHermes(healthy_cfg(), TOOLS, resolved={"memory"}))
+        self.assertRefused(rc, record, "positive control failed")
+        self.assertRefused(rc, record, self.FRAGMENT)
+
+    def test_the_live_report_refuses_a_recall_tool_and_a_memory_switch_that_is_on(self):
+        rc, kills, record = self.monitor(healthy_cfg())
+        self.assertEqual((rc, kills), (0, []), record)
+        for label, cfg, tools, fragment in (
+            ("session_search live", healthy_cfg(), TOOLS | {"session_search"}, self.FRAGMENT),
+            ("memory live", healthy_cfg(), TOOLS | {"memory"}, self.FRAGMENT),
+            ("memory_enabled on", healthy_cfg(memory={**MEMORY_OFF, "memory_enabled": True}), TOOLS, "memory.memory_enabled must be explicitly false"),
+            ("user_profile_enabled missing", healthy_cfg(memory={"memory_enabled": False}), TOOLS, "memory.user_profile_enabled must be explicitly false"),
+            ("provider set", healthy_cfg(memory={**MEMORY_OFF, "provider": "honcho"}), TOOLS, "memory.provider must be empty"),
+        ):
+            with self.subTest(case=label):
+                rc, kills, record = self.monitor(cfg, tools=tools)
+                self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
+                self.assertTrue(any(fragment in p for p in record["problems"]), record["problems"])
+
+    def test_the_shipped_configs_pass_the_rule_through_the_gate_with_their_real_bytes(self):
+        # the five accepted configs, hashed as bytes and judged as what the doubled loader says they are: the switches in the files themselves
+        # are read by test_default_config.py; here the gate's own table has to accept exactly these bytes and nothing is left to a fixture
+        module = load(os.path.join(HERE, "render_model_config.py"), "render_model_config_for_cross_run")
+        for name, text in module.repo_catalog(HERE).items():
+            with self.subTest(config=name):
+                rc, record, _ = self.boot(config_bytes=text.encode("utf-8"))
+                self.assertEqual((rc, record["problems"]), (0, []))
+                self.assertEqual(record["config_accepted_as"], name)
 
 
 class HermesHomeIsTheFolderTheGateReads(GateHarness):
@@ -1133,7 +1267,7 @@ class HermesHomeIsTheFolderTheGateReads(GateHarness):
                 self.assertRefused(rc, record, "HERMES_HOME is not set")
 
     def test_the_check_does_not_depend_on_the_picture_tool(self):
-        rc, record, _ = self.boot({"web": healthy_cfg()["web"]}, TOOLS - {"image_generate"}, install_guard=False,
+        rc, record, _ = self.boot(chat_cfg(), TOOLS - {"image_generate"}, install_guard=False,
                                   env={"HERMES_HOME": "/nonexistent-4886"})
         self.assertRefused(rc, record, "HERMES_HOME is not the folder this gate reads")
         self.assertNotIn("nonexistent-4886", json.dumps(record))
