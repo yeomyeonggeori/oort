@@ -130,6 +130,12 @@ def main():
     if value.get("error", {}).get("code") != "image_model_unavailable":
         raise SystemExit("expression sampler: a photo request without an image model must be image_model_unavailable")
     record("POST", "/expressions/photo-drafts", 409, value)
+    # The list of the caller's own live photo drafts (#4992). The gate has no image model, so no photo
+    # draft was ever made: the answer is the empty list, and the route is the real one.
+    value, _ = request("GET", prefix + "/expressions/photo-drafts")
+    if value != {"items": []}:
+        raise SystemExit("expression sampler: the gate deployment has made no photo draft, the list must be empty")
+    record("GET", "/expressions/photo-drafts", 200, value)
     value, _ = request("POST", prefix + expression_path + "/report", {"reason": "other"})
     record("POST", "/expressions/{id}/report", 200, value)
     value, _ = request("DELETE", prefix + expression_path)

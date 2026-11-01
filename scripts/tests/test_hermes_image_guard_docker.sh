@@ -60,6 +60,15 @@
 #                            changed in a connector or the default config (stopped by the hash list before the gate prints anything), and
 #                            without the strict flag (every checksum passes, the gate refuses)
 #   hermes-home-other ...... a HERMES_HOME that names another folder than the one the gate reads is refused (the image sets /opt/data)
+#   cross-run-tools-off .... (#4898, ADR-0203 augmentation of 2026-11-01) the shipped default config exposes no recall tool and loads no memory file,
+#                            measured on this image's own Hermes: the REAL gate accepts it with neither `memory` nor `session_search` selected or
+#                            resolved and both memory switches explicitly false; this image's real Hermes modules on the shipped config, with a
+#                            MEMORY.md on the volume that holds a marker, name neither tool and build no memory store (so no marker can reach a system
+#                            prompt); and the control: the same probe on a copy with the two tools switched on sees both tools, the store and the marker,
+#                            so a probe that was blind fails here
+#   cross-run-tools-on ..... the REAL gate (a copy that accepts the variant's bytes by hash, so only a rule can refuse) on single-fault copies of the
+#                            config: one toolset on, the memory switches on, an external memory provider named, everything on: each refused before
+#                            Hermes listens, by its OWN rule
 #   env-parser-parity ...... the input table and rule tables of infra/hermes/test_lockgate_env.py (and the two test files that
 #                            changed with it), run by this image's python with python-dotenv: the fallback parser and the real one
 #                            reproduce every row, and nothing may be skipped (OORT_REQUIRE_DOTENV=1)
@@ -101,7 +110,7 @@ for name in healthy no-plugin edited-plugin widened-plugin not-enabled extra-ima
   safe-mode proxy-env private-env bom-env-file bom-env-file-double bom-env-file-kept clean-env-file self-origin self-origin-bad \
   self-origin-env-file prefix-only-plugin strict-missing strict-wrong strict-env-file media-policy env-shapes env-inert-shapes \
   env-line-reader-shapes profile-folder env-reference-shapes env-seed-template connector-configs connector-config-edited connector-config-nostrict connector-config-apps-missing \
-  hermes-home-other env-parser-parity env-loader-oracle; do
+  hermes-home-other cross-run-tools-off cross-run-tools-on env-parser-parity env-loader-oracle; do
   scenario "$name"
 done
 
@@ -297,6 +306,14 @@ if not (isinstance(plugin, list) and len(plugin) == 1 and plugin[0].get("enabled
     failures.append("healthy: Hermes does not report the plugin as loaded: %r" % (plugin,))
 if "image_generate" not in (h["lockgate"] or {}).get("selected_tools", []):
     failures.append("healthy: image_generate was not even selected, so nothing was proven")
+RECALL = {"memory", "session_search"}  # #4898: what an earlier run left behind (ADR-0203 augmentation of 2026-11-01)
+MEMORY_OFF = {"memory_enabled": False, "user_profile_enabled": False, "provider_set": False}
+for key in ("selected_tools", "resolved_tools"):
+    if RECALL & set((h["lockgate"] or {}).get(key) or []):
+        failures.append("healthy: %s holds a recall tool: %r" % (key, (h["lockgate"] or {}).get(key)))
+if "todo_list" not in ((h["lockgate"] or {}).get("resolved_tools") or []) or (h["lockgate"] or {}).get("memory_config") != MEMORY_OFF:
+    failures.append("healthy: the positive control (todo_list) did not resolve or the gate did not see both memory switches false: %r"
+                    % ({k: (h["lockgate"] or {}).get(k) for k in ("resolved_tools", "memory_config")},))
 expect("no-plugin", 3, ["is not installed"])
 expect("edited-plugin", 3, ["does not match the pinned sha256"])
 w = expect("widened-plugin", 3, ["canary:"], absent=["pinned sha256"])
@@ -373,6 +390,8 @@ for config_name, entry in entries.items():
     if entry.get("rc") != 0 or entry.get("accepted_as") != config_name or entry.get("problems") or entry.get("media_strict") is not True:
         failures.append("connector-configs: %s was not accepted by the real gate: %r" % (config_name, entry))
     tools = set(entry.get("selected_tools") or [])
+    if RECALL & (tools | set(entry.get("resolved_tools") or [])) or entry.get("memory_config") != MEMORY_OFF:
+        failures.append("connector-configs: %s exposes a recall tool or does not keep both memory switches false: %r" % (config_name, entry))
     if config_name.startswith("connector/"):
         if not tools or tools & {"web_search", "web_extract", "image_generate"} or entry.get("image_guard") is not None:
             failures.append("connector-configs: %s selects a search or picture tool, or carries picture evidence: %r" % (config_name, entry))
@@ -383,6 +402,51 @@ if (edited["lockgate"] or {}).get("config_accepted_as") is not None:
     failures.append("connector-config-edited: one changed byte was accepted as %r" % ((edited["lockgate"] or {}).get("config_accepted_as"),))
 expect("connector-config-nostrict", 3, ["must set HERMES_MEDIA_DELIVERY_STRICT=1"], absent=["accepted configs"])
 expect("connector-config-apps-missing", 3, ["OORT_COHOSTED_AGENT_CONNECTOR_APPS"], absent=["accepted configs"])
+# #4898: no recall tool and no memory file, measured on this image's own Hermes; and the control that proves the probe can see them
+off = expect("cross-run-tools-off", 0)
+off_record = off["lockgate"] or {}
+gate = off_record.get("gate") or {}
+if gate.get("rc") != 0 or gate.get("problems") or gate.get("config_accepted_as") != "default" or gate.get("memory_config") != MEMORY_OFF:
+    failures.append("cross-run-tools-off: the real gate did not accept the shipped config with both memory switches false: %r" % (gate,))
+for key in ("selected_tools", "resolved_tools"):
+    if RECALL & set(gate.get(key) or []) or "todo_list" not in set(gate.get("resolved_tools") or []):
+        failures.append("cross-run-tools-off: the gate's %s hold a recall tool, or the positive control did not resolve: %r" % (key, gate.get(key)))
+shipped, opened = off_record.get("real_shipped") or {}, off_record.get("real_opened") or {}
+if shipped.get("error") or opened.get("error"):
+    failures.append("cross-run-tools-off: the probe did not run in this image: %r" % ((shipped.get("error"), opened.get("error")),))
+else:
+    if (RECALL & (set(shipped.get("selected") or []) | set(shipped.get("resolved") or []) | set(shipped.get("enabled") or []))
+            or shipped.get("memory_flags") != [False, False] or shipped.get("memory_tool_available") is not False
+            or shipped.get("store_built") is not False or shipped.get("marker_in_prompt") is not None or shipped.get("provider_set") is not False
+            or "todo_list" not in set(shipped.get("resolved") or [])):
+        failures.append("cross-run-tools-off: this image's real Hermes still exposes a recall tool or would load the memory file on the shipped config: %r"
+                        % (shipped,))
+    if (not RECALL <= set(opened.get("selected") or []) or not RECALL <= set(opened.get("resolved") or [])
+            or opened.get("memory_flags") != [True, True] or opened.get("memory_tool_available") is not True
+            or opened.get("store_built") is not True or opened.get("marker_in_prompt") is not True):
+        failures.append("cross-run-tools-off: the control copy (both tools on) was not seen as open by the probe, so the probe proves nothing: %r"
+                        % (opened,))
+on = expect("cross-run-tools-on", 0)
+variants = (on["lockgate"] or {}).get("variants") or {}
+RECALL_MESSAGE = "cross-run recall tools would be exposed"
+SWITCH = "must be explicitly false"
+for name, wants, also_absent in (
+    ("session-search", [RECALL_MESSAGE, "): session_search"], [SWITCH, "memory.provider"]),
+    ("memory-tool", [RECALL_MESSAGE, "): memory"], [SWITCH, "session_search", "memory.provider"]),
+    ("memory-switches", ["memory.memory_enabled " + SWITCH, "memory.user_profile_enabled " + SWITCH], [RECALL_MESSAGE, "memory.provider"]),
+    ("provider", ["memory.provider must be empty"], [RECALL_MESSAGE, SWITCH]),
+    ("all-on", [RECALL_MESSAGE, "memory,session_search", "memory.memory_enabled " + SWITCH, "memory.user_profile_enabled " + SWITCH], []),
+):
+    variant = variants.get(name) or {}
+    text = " | ".join(variant.get("problems") or [])
+    if variant.get("rc") != 3 or variant.get("accepted_as") != "default" or "accepted configs" in text:
+        failures.append("cross-run-tools-on: %s: want rc 3 by a rule beside an accepted hash, got %r" % (name, {k: variant.get(k) for k in ("rc", "accepted_as", "tail")}))
+    for fragment in wants:
+        if fragment not in text:
+            failures.append("cross-run-tools-on: %s: no problem contains %r (%s)" % (name, fragment, text[:300]))
+    for fragment in also_absent:
+        if fragment in text:
+            failures.append("cross-run-tools-on: %s: problem text unexpectedly has %r (the rules must refuse separately)" % (name, fragment))
 expect("env-parser-parity", 0)
 unit = ((result("env-parser-parity")["lockgate"] or {}).get("unittest")) or {}
 if unit.get("rc") != 0 or not isinstance(unit.get("ran"), int) or unit["ran"] < 100 or unit.get("skipped"):
@@ -537,6 +601,7 @@ print("OK: %d in-image scenarios (gate) + 10 start-command runs + the live gatew
      "safe-mode", "proxy-env", "private-env", "bom-env-file", "bom-env-file-double", "bom-env-file-kept", "clean-env-file", "self-origin",
      "self-origin-bad", "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy",
      "env-shapes", "env-inert-shapes", "env-line-reader-shapes", "profile-folder", "env-reference-shapes", "env-seed-template", "connector-configs", "connector-config-edited",
-     "connector-config-nostrict", "connector-config-apps-missing", "hermes-home-other", "env-parser-parity", "env-loader-oracle"]))
+     "connector-config-nostrict", "connector-config-apps-missing", "hermes-home-other", "cross-run-tools-off", "cross-run-tools-on", "env-parser-parity",
+     "env-loader-oracle"]))
 PY
 say "PASS (evidence in $OUT)"

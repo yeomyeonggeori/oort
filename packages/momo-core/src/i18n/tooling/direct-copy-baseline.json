@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "522ebf9cb3a623948ec36e989d342f3d5af56ae3",
+  "baselineHead": "d85476383d71c22726f9ae43998860a8d56fc2de",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -124,7 +124,6 @@
     "clients/mobile/src/features/conversation/sendArrival.ts": 6,
     "clients/mobile/src/features/conversation/sendSlow.ts": 3,
     "clients/mobile/src/features/conversation/tapDismiss.ts": 8,
-    "clients/mobile/src/features/conversation/threadContext.ts": 1,
     "clients/mobile/src/features/conversation/unfurlImage.ts": 9,
     "clients/mobile/src/features/conversation/useComposerInputLayout.tsx": 1,
     "clients/mobile/src/features/conversation/useDmDeliveryHint.ts": 1,

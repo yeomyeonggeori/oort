@@ -369,7 +369,8 @@ owner에게 사전 고지한다(운영 변수는 워커가 건드리지 않는�
    `/opt/data/profiles/` 아래에 항목이 하나라도 있으면 Hermes를 띄우지 않는다. 서비스에 들어가
    `/opt/data/.env`의 **이름만** 읽고(`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env | sort -u`,
    값은 나오지 않는다), `/opt/data/.op.env`가 있는지, `/opt/data/profiles/`에 항목이 있는지(`ls -A /opt/data/profiles | wc -l`, 이름이 아니라 개수만 본다) 본다. 폴더가 없거나
-   비어 있는 것은 괜찮다. 허용 이름은 `lockgate.py`의 `VOLUME_ENV_SECRETS`·`VOLUME_ENV_SEEDED`다(씨앗 줄은 값이 Hermes가
+   비어 있는 것은 괜찮다. 프로필을 만들었다 지운 적이 있는 볼륨은 비어 있지 않다: Hermes가 지울 때 남기는 `profiles/.deleted/<이름>` 표식도 항목 하나라 시작이 거절된다
+   (`ls -A`가 숨김 항목도 센다). 공동 호스팅은 프로필을 쓰지 않으므로 그 `.deleted`를 지운다(지운 **개수**만 기록한다). 허용 이름은 `lockgate.py`의 `VOLUME_ENV_SECRETS`·`VOLUME_ENV_SEEDED`다(씨앗 줄은 값이 Hermes가
    쓴 그대로여야 한다). 연결 모드 서비스의 `GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`은 서비스 변수가 정본이라 허용 목록에 없다: 볼륨 `.env`에 같은 이름이 있으면
    그 줄을 지운다(서비스 변수는 그대로 둔다). 이름만 읽어서는 값에 줄바꿈이 든 줄을 알 수 없으므로, 그런 줄은 5단계의 `problems`가 이름만 대고 알려 준다. 이름만 읽어서는 씨앗 줄의 값이 낡았는지 모르므로, 목록에 씨앗 이름이 있으면 그 줄만 열어(`grep '^<이름>=' /opt/data/.env`) 값이 `VOLUME_ENV_SEEDED`의 값과 같은지 본다. 이 값들은 Hermes
    템플릿의 공개 상수라 비밀이 아니고, 다른 이름의 줄은 열지 않는다. 그 밖의 이름은 운영자가 지우고(지운 **이름**만 기록), 값이 다른 씨앗 줄도 지운다(Hermes는 이미 있는 파일에 다시 심지 않는다).
@@ -379,14 +380,24 @@ owner에게 사전 고지한다(운영 변수는 워커가 건드리지 않는�
    `HERMES_CONFIG_B64`도 같은 배포에서 바꾼다. 연결 모드 서비스가 이미 가진 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`·`GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`은
    건드리지 않는다. 배포는 한 번이다.
 5. **기동 로그를 확인한다.** 배포 로그의 `LOCKGATE` 줄이 `"ok": true`, `config_accepted_as`가 대상에 맞는 이름(`default` 또는 `connector/…`), `"media_strict": true`이고,
-   연결 모드에서는 `selected_tools`에 `web_search`·`image_generate`가 없다. 이어서 `LOCKREPORT` 줄이 `"ok": true`이고 서비스가 healthy이고 oort의 AI 연결 카드가
+   `selected_tools`·`resolved_tools`에 `memory`·`session_search`가 없고 `memory_config`가 `{"memory_enabled": false, "provider_set": false, "user_profile_enabled": false}`이고
+   (#4898), 연결 모드에서는 `selected_tools`에 `web_search`·`image_generate`도 없다. 이어서 `LOCKREPORT` 줄이 `"ok": true`이고 서비스가 healthy이고 oort의 AI 연결 카드가
    정상이다. `LOCKGATE`가 `"ok": false`이거나 서비스가 멈추면 `problems`(이름·해시만 나온다)를 이슈에 적고 6단계로 간다.
 6. **되돌린다.** 1단계에서 저장한 값으로 변수와 시작 명령을 되돌려 다시 배포한다(옛 게이트가 옛 설정을 받아들인다). 볼륨의 데이터·로그인(`auth.json`)은 그대로다.
    되돌린 뒤 5단계의 `problems`에 맞춰 원인(보통 3단계에서 놓친 `.env` 이름)을 고치고 다시 4단계부터 간다.
 
+**세션 검색·기억 도구를 끄는 변경(#4898)과 함께 볼 것.** 새 설정은 `memory`·`session_search`와 기억 스위치(`memory.memory_enabled`·`memory.user_profile_enabled`)를 끈다
+([ADR-0203 증보 2026-11-01](adr/0203-cohosted-agent-detection.md#증보-2026-11-01--공동-호스팅-hermes의-세션-검색기억-도구는-끈다-4898)). 이미 도는 볼륨의
+`/opt/data/memories/`에 `MEMORY.md`·`USER.md`가 있으면 새 설정은 읽지 않지만 파일은 남는다: 5단계 뒤에 **이름과 크기만** 보고(`ls -l /opt/data/memories`, 내용은 열지 않는다)
+운영자가 비운다(기록에는 지운 파일의 개수만 적는다). 세션 기록(`/opt/data/state.db`)은 Hermes가 계속 쓰며 이 변경이 지우지도 보관 기간을 정하지도 않는다. 이 변경은 게이트(`HERMES_LOCKGATE_B64`)·설정
+다섯의 해시·시작 명령 체크섬을 함께 바꾸므로 위 「함께 바뀌는 것」과 한 번에 간다. 되돌리기(6단계)는 저장해 둔 이전 값이면 되고 새 게이트는 옛 설정(두 도구가 켜진 설정)을 받지 않는다.
+
 **Hermes 핀(이미지 digest)을 올릴 때.** 새 이미지의 `.env.example`이 바뀌면 씨앗 표가 낡는다. 이 절의 단계와 별개로, 핀을 올리는 변경 안에서 한 번에 함께 고친다. 새 digest를
 `infra/rust/docker-compose.rust.yml`과 `infra/railway/railway.json`에 같이 적고, `bash scripts/tests/test_hermes_image_guard_docker.sh`를 돌린다: `env-seed-template`이 표를 새 이미지의 `.env.example`과 대조하고,
-`env-loader-oracle`이 새 이미지의 로더와 줄 판독기를 게이트와 대조한다(이미지의 판독기가 바뀌면 `line_reader_mismatch`·`chain_mismatch`가 알려 준다). `.env.example`이 바뀌었으면 ① `lockgate.py`의
+`env-loader-oracle`이 새 이미지의 로더와 줄 판독기를 게이트와 대조한다(이미지의 판독기가 바뀌면 `line_reader_mismatch`·`chain_mismatch`가 알려 준다). **줄 판독기 파일(`agent/secret_scope.py`)이
+바뀌었으면** `line_reader_mismatch`가 알려 준 뒤 새 태그 소스의 `_parse_env_text`·`load_env_file`을 읽어 `lockgate.py`의 `line_assignments` 복사본을 고치고, `test_lockgate_env.py`의 `LINE_TABLE`을
+**진짜 함수의 새 측정**으로 다시 만든다(표의 줄을 손으로 쓰지 않는다). 둘은 아래 ③의 새 sha256·`HERMES_LOCKGATE_B64`와 함께 바꾼다. `memory`·`session_search`의 이름이나 `memory.*` 스위치가 바뀌었으면
+`cross-run-tools-off`의 탐침(진짜 Hermes 모듈)이 알려 준다. `.env.example`이 바뀌었으면 ① `lockgate.py`의
 `VOLUME_ENV_SEEDED`, ② `env_loader_oracle.py`의 `SEEDED`(오라클의 독립 복사본), ③ `lockgate.py`의 새 sha256(`railway.json`의 hermes 시작 명령)과 `HERMES_LOCKGATE_B64`를 **함께** 고친다. 한쪽만 고치면
 두 표가 같다는 시험이나 카탈로그 검사(`check_railway_catalog.py`)가 깨진다. 표는 이름마다 값 하나만 받으므로 이미 도는 볼륨(옛 템플릿 줄)과 새 볼륨(새 줄)이 다를 수 있다: 값이 새 표와 다른 옛 줄은
 게이트가 거절한다(거절 방향이라 안전하고 가용성만 걸린다). 위 3단계처럼 그 줄만 열어 대조해서 지운다(Hermes는 이미 있는 파일에 다시 심지 않는다).

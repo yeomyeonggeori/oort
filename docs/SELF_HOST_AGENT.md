@@ -2454,7 +2454,10 @@ Do these in order — **Hermes is not started until step 2 is confirmed**.
 
 ```yaml
 agent:
-  disabled_toolsets: [terminal, code_execution, browser]
+  disabled_toolsets: [terminal, code_execution, browser, memory, session_search]
+memory:                        # ADR-0203 R2: one Hermes serves every workspace, so it
+  memory_enabled: false        # keeps no memory or session search across runs
+  user_profile_enabled: false
 ```
 
    The API server toolset keeps terminal, code execution and browser by
@@ -2513,7 +2516,8 @@ belong in this file. Hermes reads the file with two readers and the gate judges 
 a value is one line (a line break inside a value is refused), and every name either reader
 reads has to be on the list. Any other name, empty or not, stops the start by name (the gate
 never prints a value), and so does a `.op.env` beside it or any entry under `/opt/data/profiles/`
-(no folder, or an empty one, is fine). Before you update the gate of a Hermes that already runs, read the names in its `.env`
+(no folder, or an empty one, is fine; a profile that was created and deleted again leaves
+Hermes' own `.deleted` marker there, which counts as an entry). Before you update the gate of a Hermes that already runs, read the names in its `.env`
 (`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env`
 prints names only) and delete the lines that are not on that list.
 
@@ -2632,7 +2636,10 @@ volume.
 
 ```yaml
 agent:
-  disabled_toolsets: [terminal, code_execution, browser, cronjob, delegation, web]
+  disabled_toolsets: [terminal, code_execution, browser, cronjob, delegation, web, memory, session_search]
+memory:                        # ADR-0203 R2, as in the first config
+  memory_enabled: false
+  user_profile_enabled: false
 mcp_servers:
   gmail:                       # com.momo.plugins.gmail -> key "gmail"
     url: https://<vendor MCP URL>

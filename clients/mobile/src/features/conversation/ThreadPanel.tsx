@@ -30,7 +30,7 @@ import {MissedDigestCard} from '../memory/MissedDigestCard';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import {hasAgentRequest} from './requestLoop';
-import {appStateForeground} from '../readState/useViewingBeat';
+import {useAppForeground} from '../readState/useViewingBeat';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // =============================================================================
@@ -62,13 +62,6 @@ import {useFormatMessage} from '../../i18n/useFormatMessage';
 // 주지 않는다 — 코어가 이미 아는 규칙을 화면에서 다시 판정하지 않고, 진입점을
 // 뺌으로써 표현한다.
 // =============================================================================
-
-/** 앱이 앞에 있는가 — 「보고 있음」 신호가 쓰는 어댑터 그대로. 뒤에 있는 동안 온 답글을 읽은 것으로 치지 않는다. */
-function useAppActive(): boolean {
-  const [active, setActive] = useState(appStateForeground.isForeground());
-  useEffect(() => appStateForeground.subscribe(setActive), []);
-  return active;
-}
 
 /** 근거 착지 토큰의 시작. 알림 착지 토큰(1부터 오른다)과 겹치지 않는 대역이다. */
 const EVIDENCE_TOKEN_BASE = 1_000_000;
@@ -259,7 +252,8 @@ export function ThreadPanel({
       }),
     [],
   );
-  const appActive = useAppActive();
+  // 앱이 앞에 있는가 — 뒤에 있는 동안 온 답글을 읽은 것으로 치지 않는다. 채널 목록의 열린 스레드 요약(`viewingThreadId`)과 같은 값이다.
+  const appActive = useAppForeground();
   useEffect(() => {
     if (!ready || !appActive) return;
     readSender.note(root.id, readSignalSeq(replies));

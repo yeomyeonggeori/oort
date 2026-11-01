@@ -121,7 +121,7 @@ export function withLiveUnread(
   let beyond = 0;
   for (const reply of replies) {
     if (reply.seq <= rollup.lastReplySeq) continue;
-    if (!countsAsReply(reply)) continue;
+    if (!countsAsUnreadReply(reply)) continue;
     if (uuidEq(reply.authorMemberId, myMemberId)) continue;
     beyond += 1;
   }
@@ -131,11 +131,33 @@ export function withLiveUnread(
 // ---- 실시간 답글이 루트 요약에 닿는 길 (#5008) --------------------------------------------------
 
 /**
- * 요약에 한 줄로 치는 답글: 지우지 않은 `text` 줄. 서버 `unread_reply_count` 의 정의와 같고(`withLiveUnread`), 작업 세션
- * 이벤트·승인 카드 같은 `system` 등 text 아닌 줄은 대화의 답글이 아니라서 세지 않는다(서버도 그런 줄로는 요약을 올리지 않는다).
+ * 안 읽은 답글로 치는 줄: 지우지 않은 `text`. 서버 `thread_follow_views_in_tx` 의 SQL(`r.type = 'text' AND r.deleted_at IS NULL
+ * AND r.author_member_id <> viewer`)과 같은 정의다 — 승인 카드 답글은 「답글 N개」에는 들어도 안 읽은 수에는 안 든다.
+ */
+function countsAsUnreadReply(reply: Message): boolean {
+  return reply.type === "text" && reply.state !== "deleted";
+}
+
+/**
+ * 「답글 N개」·얼굴·마지막 답글에 한 줄로 치는 답글: 지우지 않은 `text` 줄과 `approval_request` 카드. 서버 `thread.reply_count` 를
+ * 따른 것이고(#5032가 서버 코드로 확인), 서버는 **종류가 아니라 쓰는 길**로 센다:
+ *
+ *   * `bump_thread_rollup_in_tx` 는 `ThreadPolicy::Maintain` 인 send(REST 보내기·`send_thread_notice_in_tx` — 에이전트의 답·카드 제안·
+ *     인플레이스 승인 카드)의 `root_id` 있는 줄을 종류와 상관없이 올린다. `send_message_in_tx`(Skip)로 쓰는 줄은 안 올린다.
+ *   * `text` 답글은 사람·에이전트 어느 쪽이든 전부 Maintain 길이다.
+ *   * `approval_request` 가 답글(`root_id` 있음)로 오는 생산자는 인플레이스 승인 카드(`agent_mentions.rs`, `send_thread_notice_in_tx`)
+ *     하나뿐이라 서버가 센다. 나머지 승인 카드 생산자는 전부 `root_id` 없는 채널 글이다. 그래서 요청 묶음의 승인 카드 답글은 센다.
+ *   * 그 밖(`system` 등)은 센 줄로 치지 않는다. 작업 세션 이벤트 줄이 `system` + `root_id` 를 Skip 길로 쓰는데(`work_sessions.rs`), 세면
+ *     세션 루트마다 「답글 1,283개」가 선다 — 서버가 Skip으로 막는 바로 그것이다. 서버는 실패 안내·호출 불가 안내 `system` 줄
+ *     (`agent_gateway.rs`·`agent_mentions.rs`, Maintain)은 세므로 그 줄은 새로 고침 때 수가 1 올라올 수 있다(알려진 틈 — 종류만 보는
+ *     클라이언트는 길을 못 본다).
+ *   * 앞으로 행동 제안 카드·결과·거부·만료 줄을 요청 스레드 안으로 옮길 때(`docs/design-system/agent-request-loop.md` §4.2, #4646)는
+ *     그 쓰기가 Maintain(`send_thread_notice_in_tx`)을 타야 이 규칙과 서버 수가 계속 같다 — Skip으로 `root_id` 만 붙이면 클라이언트는
+ *     세는데 서버는 안 센다.
+ *   * 지운 줄은 안 센다. 서버 수는 줄지 않지만(삭제가 `reply_count` 를 안 내린다) #5008이 정한 규칙이다.
  */
 function countsAsReply(reply: Message): boolean {
-  return reply.type === "text" && reply.state !== "deleted";
+  return reply.state !== "deleted" && (reply.type === "text" || reply.type === "approval_request");
 }
 
 /**
@@ -195,14 +217,13 @@ export function groupRepliesByRoot(messages: readonly Message[]): Map<string, Me
 }
 
 /**
- * 루트 아래 요약 줄이 그릴 값 — 웹·데스크탑 타임라인이 부른다. (폰 `rollupFor`는 아직 자기 식으로 센다: 서버 수와 로컬 수의 `max`이고
- * 요청 묶음의 승인 카드 같은 text 아닌 답글도 센다. 합치려면 그 카드를 세는지부터 정해야 한다 — #5008 후속.)
+ * 루트 아래 요약 줄이 그릴 값 — 웹·데스크탑·폰 타임라인이 **같은 이 함수**를 부른다(폰 `threadContext.rollupFor`는 껍데기다, #5032).
  *
  * 서버가 기록 페이지에서 준 요약(`message.thread`)은 **페이지를 읽은 때의 스냅샷**이다. 그 뒤 실시간으로 들어온 답글은 스냅샷의
  * 머리(`lastReplySeq`)보다 큰 seq를 갖고, 이 함수가 그것을 든 답글(`replies` — 이 루트의 것만)에서 세어 **스냅샷 위에** 얹는다:
  *
- *   * 답글 수: 서버 수 + 머리 뒤 답글 수. (로컬로 센 수와 `max` 를 취하지 않는다 — 열어 보지 않은 스레드는 든 답글이 일부라
- *     서버가 5개인데 새 답글 하나를 `max(5, 1)` 로 두면 수가 영영 안 오른다.)
+ *   * 답글 수: 서버 수 + 머리 뒤 답글 수(`countsAsReply` — text와 승인 카드). (로컬로 센 수와 `max` 를 취하지 않는다 — 열어 보지
+ *     않은 스레드는 든 답글이 일부라 서버가 5개인데 새 답글 하나를 `max(5, 1)` 로 두면 수가 영영 안 오른다. 폰이 예전에 이 식이었다.)
  *   * 얼굴: 새 답글의 저자가 가장 최근 먼저 앞에 서고 서버가 준 얼굴이 뒤를 잇는다(최대 3). 내 답글도 내 얼굴로 선다(서버
  *     `participant_ids` 도 저자를 넣는다). 서버가 얼굴을 안 주는 옛 서버(`participant_ids` 없음)는 얼굴을 지어내지 않는다.
  *   * 안 읽은 수: `withLiveUnread`(내 답글·지운 답글·text 아닌 줄은 안 센다). 값이 없으면(따라가지 않는 스레드) 없는 채다.
@@ -210,11 +231,33 @@ export function groupRepliesByRoot(messages: readonly Message[]): Map<string, Me
  * 프레임마다 +1 이 아니라 **든 배열에서 파생**하므로 되쏘기·재구독 복구가 같은 답글을 두 번 배달해도 같은 답이다. 서버 요약이
  * 없는 루트(방금 달린 첫 답글)는 빈 스냅샷 위에 얹는다 — 개수와 얼굴은 서고, 따라가는지 모르니 안 읽은 수는 말하지 않는다.
  * 답글은 요약을 갖지 않는다(스레드는 한 단계다).
+ *
+ * `viewing`(그 루트의 스레드 패널이 열려 있고 창·앱이 앞이다): 사람이 지금 그 답글들을 읽고 있으므로 안 읽은 수가 있으면 **0으로
+ * 읽는다**(#5032) — 읽음 신호(`PUT …/read`)가 왕복하는 동안에도 남의 새 답글에 칩이 깜빡 +1 되지 않는다. 상태에 쓰는 낙관값이
+ * 아니라 부를 때마다 파생하는 값이라: 안 읽은 수가 **없으면**(따라가지 않는 스레드) 없는 채이고(「말하지 않음」은 0이 아니다), 수·
+ * 얼굴은 그대로 오르며, 신호의 응답이 서버 값으로 접으면(`applyThreadReadState`) 그 값이 이어받는다. 패널이 닫히거나 창·앱이
+ * 뒤로 가면 파생이 풀려 서버가 아는 읽은 위치 뒤의 답글이 다시 센다.
  */
 export function liveThreadRollup(
   root: Message,
   replies: readonly Message[],
-  myMemberId?: string
+  myMemberId?: string,
+  viewing = false
+): ThreadRollup | null {
+  const rolled = deriveLiveRollup(root, replies, myMemberId);
+  return viewing ? settleViewed(rolled) : rolled;
+}
+
+/** 보고 있는 스레드의 요약: 안 읽은 수가 있으면 0으로 읽고, 없으면(말하지 않음) 없는 채다. */
+function settleViewed(rollup: ThreadRollup | null): ThreadRollup | null {
+  if (rollup === null || rollup.unreadReplyCount === undefined || rollup.unreadReplyCount === 0) return rollup;
+  return { ...rollup, unreadReplyCount: 0 };
+}
+
+function deriveLiveRollup(
+  root: Message,
+  replies: readonly Message[],
+  myMemberId: string | undefined
 ): ThreadRollup | null {
   if (root.rootId !== undefined) return null;
   const server = threadRollup(root);

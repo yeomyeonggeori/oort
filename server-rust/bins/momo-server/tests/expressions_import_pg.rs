@@ -1898,7 +1898,7 @@ async fn the_gates_expression_sampler_runs_to_its_end_on_the_drive_the_gate_stac
         "the sampler ran to its end: {stdout} {stderr}"
     );
     assert!(
-        stdout.contains("14 live storage operations passed"),
+        stdout.contains("15 live storage operations passed"),
         "every operation was measured: {stdout}"
     );
     // The gate checks the list both ways; this is that check for the expression operations.

@@ -4,6 +4,7 @@
 //! ```text
 //! GET  /v1/workspaces/{ws}/expressions/photo-model    which company a photo would go to, if any
 //! POST /v1/workspaces/{ws}/expressions/photo-drafts   photo + branch + name  ->  { draft, cutout }
+//! GET  /v1/workspaces/{ws}/expressions/photo-drafts   the caller's own live photo drafts -> { items }
 //! ```
 //!
 //! The order of `create` is the whole safety argument, and it is the order of the lines below:
@@ -24,6 +25,8 @@
 //! 5. **One call, bounded**: at most [`IN_FLIGHT`] on the instance and one per member, a 120 s
 //!    deadline, a 12 MiB answer, a 5 MiB picture. The places are held by the task that does the
 //!    work, until the call has ended ([`hold_until_done`]); the request only waits for its answer.
+//!    The call is made once: a decoder that is busy when the picture comes back is waited for
+//!    ([`DECODE_PATIENCE`]), never answered with a second call.
 //!    A start is also counted by the per-member write budget (`rate_limit::MemberWrite::PhotoDraft`).
 //!    The key, the photo and the answer are never logged and never come back in a response; the
 //!    failure the member sees is one closed code.
@@ -78,8 +81,11 @@ use crate::{error::ApiError, AppState};
 /// Photo requests in flight on this instance. Each one spends the team's money, holds a photo and
 /// waits for a decoder slot; at the cap the next is refused before anything is read or sent.
 pub const IN_FLIGHT: usize = 4;
-/// How long a paid-for picture waits for a decoder slot ([`media::WAIT_MAX`] is the longest it may).
-const DECODE_WAIT: Duration = Duration::from_secs(3);
+/// How long a picture the team has already paid for keeps asking for a decoder slot when both are
+/// taken, before it is given up (ADR-0218 §9 I2, #4992). The one place the number lives: it is the
+/// patience of [`media::process_cutout_patiently`] and [`media::process_waiting_patiently`], each ask
+/// of which stands in line for at most [`media::WAIT_MAX`]. The provider is never asked again.
+const DECODE_PATIENCE: Duration = Duration::from_secs(15);
 
 fn instance_slots() -> &'static Arc<Semaphore> {
     static SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
@@ -317,6 +323,27 @@ pub async fn availability(
         "branches": [Branch::Cutout.as_str(), Branch::Caricature.as_str()],
         "canManage": can_manage,
     })))
+}
+
+// ---- GET photo-drafts ------------------------------------------------------------------------
+
+/// The caller's own photo drafts that are still alive (ADR-0218 §9 I1): the way back to a picture
+/// the work finished after the screen that was waiting for it was gone. A plain read of the
+/// caller's own rows ([`expressions::list_photo_drafts`]): it opens no team key, calls no provider,
+/// takes no catalog lock, spends no photo-start budget and says nothing about the team's image
+/// model. Each item is exactly what `GET …/expression-drafts/{draftId}` answers for it, so a draft
+/// found here is opened, replaced and registered through the routes that already do that.
+pub async fn list(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(ws): Path<String>,
+) -> Result<Json<Value>, ApiError> {
+    human(&principal)?;
+    let actor = actor(&ws, &principal)?;
+    let items = expressions::list_photo_drafts(&state.pool, actor)
+        .await
+        .map_err(failure)?;
+    Ok(Json(json!({ "items": items })))
 }
 
 // ---- POST photo-drafts -----------------------------------------------------------------------
@@ -598,20 +625,31 @@ async fn finish(
         .await
         .map_err(model_failure)?;
     let model_ms = started.elapsed().as_millis() as u64;
-    // 6. What came back, decoded in the isolated child, and the draft it becomes.
+    // 6. What came back, decoded in the isolated child, and the draft it becomes. The picture is
+    //    paid for: if both decoder slots are taken it waits for one, asking again for
+    //    `DECODE_PATIENCE` and holding the bytes it has, and only then is it given up. The provider
+    //    is asked once, whatever happens here.
     let picture_failure = |rejected: media::Rejected| match rejected {
-        media::Rejected::Busy => ApiError::busy(2),
+        media::Rejected::Busy => {
+            // Numbers only: the one place an operator can see that a paid-for picture was dropped.
+            tracing::warn!(
+                patience_secs = DECODE_PATIENCE.as_secs(),
+                model_ms,
+                "expression photo: the decoder stayed busy and a picture the team paid for was dropped"
+            );
+            ApiError::busy(2)
+        }
         _ => model_failure(ImageModelError::Failed),
     };
     let (processed, outcome) = match asked.branch {
         Branch::Cutout => {
-            let cut = media::process_cutout(generated.bytes, DECODE_WAIT)
+            let cut = media::process_cutout_patiently(generated.bytes, DECODE_PATIENCE)
                 .await
                 .map_err(picture_failure)?;
             (cut.processed, Some(cut.outcome))
         }
         Branch::Caricature => (
-            media::process_waiting(generated.bytes, DECODE_WAIT)
+            media::process_waiting_patiently(generated.bytes, DECODE_PATIENCE)
                 .await
                 .map_err(picture_failure)?,
             None,
@@ -933,6 +971,59 @@ mod tests {
                 member: Uuid::new_v4(),
                 ..a
             })
+        );
+    }
+
+    #[test]
+    fn a_paid_for_picture_waits_fifteen_seconds_for_a_decoder_and_each_ask_stays_within_the_line() {
+        // ADR-0218 §9 I2 says fifteen seconds, and says them once: this constant. A longer patience
+        // would hold a member's place and one of the instance's four for longer, so it is a decision.
+        assert_eq!(DECODE_PATIENCE, Duration::from_secs(15));
+        // Each ask is still the line's own three seconds at most: the patience is many asks, not one
+        // long stand in line in front of a person's upload.
+        assert!(media::WAIT_MAX < DECODE_PATIENCE);
+        assert_eq!(media::WAIT_MAX, Duration::from_secs(3));
+    }
+
+    /// The team key has one door (ADR-0218 §8 H11 (a)): the route opens it through [`TeamKeySource`],
+    /// and the production source reads the sealed link in one function. The PG test counts the
+    /// openings that go through the trait (`CountingKeys`); it cannot see a second way in that does
+    /// not — a call to the sealed-link reader, or a new binding of the operator transaction, from
+    /// another function of this file (#4992, L5). So this reads the file's own code and counts.
+    #[test]
+    fn the_team_key_has_one_door_in_this_file() {
+        let source = include_str!("expression_photo.rs");
+        let (code, _tests) = source
+            .split_once("\n#[cfg(test)]\nmod tests")
+            .expect("the test module follows the code");
+        let code = code
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("//"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let count = |needle: &str| code.matches(needle).count();
+        let rule = "a new way to open the team key needs the review of ADR-0218 §8 H11 (a): \
+                    change the one door, `read_sealed_link`, and not beside it";
+        assert_eq!(
+            count("with_provider_link_admin_tx("),
+            1,
+            "the operator transaction is bound in one place; {rule}"
+        );
+        assert_eq!(
+            count("read_sealed_link("),
+            2,
+            "the sealed link is read by its definition and by `SealedLink::open` and nobody else; {rule}"
+        );
+        assert_eq!(
+            count("team_keys.open("),
+            1,
+            "the route opens the key through the trait in one function, `read_team_key`; {rule}"
+        );
+        assert_eq!(
+            count("read_team_key("),
+            3,
+            "`read_team_key` is its definition and the two requests that may open the key \
+             (`availability` and `finish`); {rule}"
         );
     }
 }
