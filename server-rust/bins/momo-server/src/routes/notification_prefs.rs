@@ -54,6 +54,12 @@ use crate::routes::shared::{
 };
 use crate::AppState;
 
+/// The largest `PATCH …/notification-prefs` body the route reads (ADR-0206 D13: 「8KB 이하」). The
+/// largest honest body — all ten kinds with both cells, ten sound slots, a schedule and the
+/// confirmation — is about 1.5 KiB, so this bounds abuse, not use; axum's default is 2 MiB (#4494
+/// review L-1).
+pub const MAX_PATCH_BODY_BYTES: usize = 8 * 1024;
+
 /// The audit action of the one write that is audited (D5): approval push turned off.
 pub const AUDIT_APPROVAL_PUSH_OFF: &str = "notification_prefs.approval_push_off";
 /// Its payload schema.
@@ -160,10 +166,12 @@ fn patch_from_request(request: PatchNotificationPrefsRequest) -> Result<PrefsPat
     if let Some(presentation) = request.presentation {
         for (key, sound) in presentation.sounds {
             let kind = NotificationKind::from_wire(&key).ok_or_else(|| {
+                // A fixed sentence on purpose: the key is the caller's own text, as long as the body
+                // limit allows, and an error answer does not echo what it refuses (#4494 review L-2).
                 ApiError::coded(
                     StatusCode::BAD_REQUEST,
                     "unknown_kind",
-                    format!("presentation.sounds names an unknown kind: {key}"),
+                    "presentation.sounds names a key that is not a notification kind",
                 )
             })?;
             patch.sounds.insert(kind, sound);
@@ -382,6 +390,18 @@ mod tests {
         ))
         .expect_err("not a kind");
         assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, Some("unknown_kind"));
+        // The answer is a fixed sentence: it never carries the caller's own key back (L-2).
+        let probe = "echo-probe-0123456789-presentation-key";
+        let error = patch_from_request(request(
+            json!({"presentation": {"sounds": {probe: "none"}}}),
+        ))
+        .expect_err("not a kind");
+        assert!(
+            !error.message.contains(probe) && !error.message.contains("echo-probe"),
+            "the refusal must not echo the key: {}",
+            error.message
+        );
         let patch =
             patch_from_request(request(json!({"presentation": {"sounds": {"dm": null}}}))).unwrap();
         assert_eq!(patch.sounds[&NotificationKind::Dm], None);

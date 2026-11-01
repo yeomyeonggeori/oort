@@ -29,11 +29,18 @@
 //! | `the_older_writes_leave_the_new_columns_alone` | make the old rule upsert write the new columns |
 //! | `effective_quiet_is_the_servers_own_evaluation` | evaluate the window on UTC instead of the schedule's zone |
 //! | `a_schedule_is_replaced_whole_and_null_removes_it` | merge a schedule field by field |
+//! | `two_people_of_one_workspace_never_touch_each_others_row` | drop `member_id = $2` from the PATCH's `UPDATE`, or from the `SELECT_PREFS` join the GET reads through (#4494 review M-1) |
+//! | `kind_off_never_reads_another_persons_switch` | drop `member_id = $2` from `kind_phone_switch_in_tx` (M-1) |
+//! | `a_patch_locks_only_the_callers_own_row` | drop `member_id = $2` from the row-lock read (M-1) |
+//! | `a_patch_body_over_the_limit_is_refused_and_the_largest_honest_one_fits` | drop the `DefaultBodyLimit` of the route (L-1) |
+//! | `an_unchanged_time_zone_skips_the_name_scan_and_a_stale_one_does_not` | scan `pg_timezone_names` for every name (the equal name is then refused), or trust an equal name without checking it still resolves (L-1) |
+//! | `a_refused_patch_is_a_400_and_writes_nothing_not_even_a_row` (the echo check) | put the caller's key back into the `unknown_kind` sentence (L-2) |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
@@ -257,6 +264,71 @@ async fn seed_tenant(su: &PgPool) -> Tenant {
         agent,
         channel,
     }
+}
+
+/// A second person in the **same workspace** (and the same channel) as `tenant.me`, reusing its agent.
+/// The tenant tests cannot see this boundary: row-level security fences workspaces, so what keeps one
+/// member's preferences from another's is the `member_id` predicate of every statement (#4494 review
+/// M-1) — and only a test with two people in one workspace can tell whether it is there.
+async fn add_human(su: &PgPool, tenant: &Tenant) -> Tenant {
+    let me = Uuid::new_v4();
+    let handle = format!("h-{}", &me.simple().to_string()[..10]);
+    let email = format!("{me}@prefs.test");
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'human', $3, $3)",
+    )
+    .bind(me)
+    .bind(tenant.workspace)
+    .bind(&handle)
+    .execute(su)
+    .await
+    .expect("seed second member");
+    sqlx::query(
+        "INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash) \
+         VALUES ($1, $2, $3, true, momo_password_hash($4))",
+    )
+    .bind(me)
+    .bind(tenant.workspace)
+    .bind(&email)
+    .bind(TEST_PASSWORD)
+    .execute(su)
+    .await
+    .expect("seed second human");
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) VALUES ($1, $2, 'member')",
+    )
+    .bind(tenant.workspace)
+    .bind(me)
+    .execute(su)
+    .await
+    .expect("seed second workspace membership");
+    sqlx::query("INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)")
+        .bind(tenant.workspace)
+        .bind(tenant.channel)
+        .bind(me)
+        .execute(su)
+        .await
+        .expect("seed second channel membership");
+    Tenant {
+        workspace: tenant.workspace,
+        me,
+        email,
+        agent: tenant.agent,
+        channel: tenant.channel,
+    }
+}
+
+/// The member's whole stored row as JSON (every column, `updated_at` included), or `None` without one.
+async fn row_snapshot(su: &PgPool, tenant: &Tenant) -> Option<Value> {
+    sqlx::query_scalar(
+        "SELECT to_jsonb(r) FROM notification_rule r WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(tenant.workspace)
+    .bind(tenant.me)
+    .fetch_optional(su)
+    .await
+    .expect("snapshot the rule row")
 }
 
 async fn agent_bearer(su: &PgPool, tenant: &Tenant) -> String {
@@ -666,6 +738,16 @@ async fn a_refused_patch_is_a_400_and_writes_nothing_not_even_a_row() {
         assert_eq!(got, status, "{label}: {response}");
         assert_eq!(error_code(&response), code, "{label}: {response}");
     }
+    // A refusal never echoes the caller's own text back (#4494 review L-2): the sentence is fixed.
+    let probe = format!("echo-probe-{}", "k".repeat(500));
+    let (status, response) = me
+        .patch(json!({"presentation": {"sounds": {probe.clone(): "none"}}}))
+        .await;
+    assert_eq!((status, error_code(&response)), (400, "unknown_kind"));
+    assert!(
+        !response.to_string().contains("echo-probe"),
+        "the refusal must not carry the caller's key back: {response}"
+    );
     assert_eq!(
         rule_rows(&su, &tenant).await,
         0,
@@ -1203,4 +1285,303 @@ async fn a_schedule_is_replaced_whole_and_null_removes_it() {
     let body = me.patch_ok(json!({"schedule": null})).await;
     assert_eq!(body["schedule"], Value::Null);
     assert_eq!(body["effective"]["quiet"]["active"], false);
+}
+
+/// #4494 review M-1. Two people in one workspace: row-level security fences the *workspace*, so the
+/// only thing between one member's preferences and another's is the `member_id` of every statement.
+/// Each PATCH changes something of every stored kind (the aliased work switch and a schedule
+/// included); the other person's row must stay byte for byte what it was — `updated_at` too — and each
+/// person's GET must show only their own values.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn two_people_of_one_workspace_never_touch_each_others_row() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let a = seed_tenant(&su).await;
+    let b = add_human(&su, &a).await;
+    let base = start_server(momo_app_pool().await).await;
+    let (alice, bob) = (Caller::of(&base, &a).await, Caller::of(&base, &b).await);
+
+    // Bob stores one of everything, the dangerous switch and the aliased work switch included.
+    bob.patch_ok(json!({
+        "kinds": {"dm": {"phone": false}, "mentionAgent": {"desktop": false},
+                  "approval": {"phone": false}, "workDone": {"phone": false}},
+        "phoneDelaySecs": 0, "keywordOverridesMute": false, "approvalTimeSensitive": true,
+        "presentation": {"sounds": {"dm": "oort.dm"}},
+        "schedule": {"enabled": false, "tz": "Asia/Seoul", "days": [1, 2], "start": "09:00",
+                     "end": "18:00", "passThrough": ["approval"]},
+        "confirm": ["approval_push_off"],
+    }))
+    .await;
+    let bobs_row = row_snapshot(&su, &b).await.expect("bob has a row");
+    let bobs_view = bob.prefs().await;
+
+    // Alice changes something of every kind, with values that differ from Bob's.
+    alice
+        .patch_ok(json!({
+            "kinds": {"dm": {"phone": true, "desktop": true}, "mentionHuman": {"phone": false},
+                      "workDone": {"phone": false}, "approval": {"desktop": false}},
+            "phoneDelaySecs": 300, "keywordOverridesMute": true, "approvalTimeSensitive": false,
+            "presentation": {"sounds": {"mentionHuman": "none"}},
+            "schedule": {"enabled": false, "tz": "America/Los_Angeles", "days": [5],
+                         "start": "22:00", "end": "06:00", "passThrough": []},
+        }))
+        .await;
+    assert_eq!(
+        row_snapshot(&su, &b).await.as_ref(),
+        Some(&bobs_row),
+        "alice's PATCH changed bob's stored row"
+    );
+    assert_eq!(
+        bob.prefs().await,
+        bobs_view,
+        "bob reads what he stored, not what alice wrote"
+    );
+
+    // Alice reads her own values and nothing of Bob's.
+    let alices_view = alice.prefs().await;
+    assert_eq!(
+        alices_view["kinds"]["dm"],
+        json!({"phone": true, "desktop": true})
+    );
+    assert_eq!(
+        alices_view["kinds"]["approval"]["phone"], true,
+        "bob's off switch is not alice's"
+    );
+    assert_eq!(alices_view["kinds"]["mentionHuman"]["phone"], false);
+    assert_eq!(alices_view["phoneDelaySecs"], 300);
+    assert_eq!(alices_view["approvalTimeSensitive"], false);
+    assert_eq!(
+        alices_view["presentation"]["sounds"],
+        json!({"mentionHuman": "none"})
+    );
+    assert_eq!(alices_view["schedule"]["tz"], "America/Los_Angeles");
+
+    // The other way round: Bob's PATCH leaves Alice's row alone.
+    let alices_row = row_snapshot(&su, &a).await.expect("alice has a row");
+    bob.patch_ok(
+        json!({"kinds": {"mentionHuman": {"phone": true}, "dm": {"phone": null}},
+                        "phoneDelaySecs": 60}),
+    )
+    .await;
+    assert_eq!(
+        row_snapshot(&su, &a).await.as_ref(),
+        Some(&alices_row),
+        "bob's PATCH changed alice's stored row"
+    );
+    assert_eq!(alice.prefs().await, alices_view);
+}
+
+/// #4494 review M-1, the diagnostics half: `kind_off` reads the **caller's** switch. Bob's `dm` and
+/// `workDone` are off, Alice's `mentionAgent` is off; each is asked about all three and only the
+/// person who turned a kind off is told so.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn kind_off_never_reads_another_persons_switch() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let a = seed_tenant(&su).await;
+    let b = add_human(&su, &a).await;
+    let base = start_server(momo_app_pool().await).await;
+    let (alice, bob) = (Caller::of(&base, &a).await, Caller::of(&base, &b).await);
+    bob.patch_ok(json!({"kinds": {"dm": {"phone": false}, "workDone": {"phone": false}}}))
+        .await;
+    alice
+        .patch_ok(json!({"kinds": {"mentionAgent": {"phone": false}}}))
+        .await;
+
+    let kind_off = |who: &Caller, kind: &str| {
+        let tail = format!("notification-diagnostics?kind={kind}");
+        let who_http = who.http.clone();
+        let (url, token) = (who.url(&tail), who.token.clone());
+        async move {
+            let response = who_http
+                .get(url)
+                .bearer_auth(token)
+                .send()
+                .await
+                .expect("GET diagnostics");
+            assert_eq!(response.status(), 200);
+            let body: Value = response.json().await.expect("diagnostics body");
+            body["blockers"]
+                .as_array()
+                .expect("blockers")
+                .iter()
+                .find(|blocker| blocker["code"] == "kind_off")
+                .map(|blocker| blocker["kind"].as_str().unwrap_or("").to_string())
+        }
+    };
+    for (kind, bob_turned_it_off, alice_turned_it_off) in [
+        ("dm", true, false),
+        ("workDone", true, false),
+        ("mentionAgent", false, true),
+    ] {
+        assert_eq!(
+            kind_off(&bob, kind).await.is_some(),
+            bob_turned_it_off,
+            "bob asks about {kind}"
+        );
+        assert_eq!(
+            kind_off(&alice, kind).await.is_some(),
+            alice_turned_it_off,
+            "alice asks about {kind}"
+        );
+    }
+}
+
+/// #4494 review M-1, the locking half: a PATCH takes **its own** row's lock and nobody else's. Bob's
+/// row is held by another transaction; Alice's PATCH must go through at once. A statement of hers that
+/// selected or updated her workspace's rows without her `member_id` would queue behind Bob's lock.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn a_patch_locks_only_the_callers_own_row() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let a = seed_tenant(&su).await;
+    let b = add_human(&su, &a).await;
+    let base = start_server(momo_app_pool().await).await;
+    let (alice, bob) = (Caller::of(&base, &a).await, Caller::of(&base, &b).await);
+    alice.patch_ok(json!({"phoneDelaySecs": 300})).await;
+    bob.patch_ok(json!({"phoneDelaySecs": 0})).await;
+
+    let mut held = su.begin().await.expect("begin the holding transaction");
+    sqlx::query(
+        "SELECT 1 FROM notification_rule WHERE workspace_id = $1 AND member_id = $2 FOR UPDATE",
+    )
+    .bind(b.workspace)
+    .bind(b.me)
+    .fetch_one(&mut *held)
+    .await
+    .expect("hold bob's row lock");
+
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(5),
+        alice.patch(json!({"phoneDelaySecs": 60, "kinds": {"dm": {"phone": false}}})),
+    )
+    .await;
+    held.rollback().await.expect("release bob's row lock");
+    let (status, body) = outcome
+        .expect("alice's PATCH queued behind bob's row lock: a statement of hers reaches his row");
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["phoneDelaySecs"], 60);
+    assert_eq!(
+        bob.prefs().await["phoneDelaySecs"],
+        0,
+        "bob's value is still bob's"
+    );
+}
+
+/// #4494 review L-1: the route reads at most 8 KiB (axum's default is 2 MiB, the honest maximum is about
+/// 1.5 KiB). The largest honest body — every kind with every cell it has, every sound slot, a schedule
+/// that lets all ten kinds through — fits with room; a body over the limit is 413 and writes nothing.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn a_patch_body_over_the_limit_is_refused_and_the_largest_honest_one_fits() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let base = start_server(momo_app_pool().await).await;
+    let me = Caller::of(&base, &tenant).await;
+
+    let mut kinds = serde_json::Map::new();
+    for kind in KINDS {
+        let has_desktop =
+            !["agentAnswer", "keyword", "threadReply", "scheduledFailed"].contains(&kind);
+        let cells = if has_desktop {
+            json!({"phone": true, "desktop": true})
+        } else {
+            json!({"phone": true})
+        };
+        kinds.insert(kind.to_string(), cells);
+    }
+    let sounds: serde_json::Map<String, Value> = KINDS
+        .iter()
+        .map(|kind| (kind.to_string(), json!("oort.message.b")))
+        .collect();
+    let honest = json!({
+        "kinds": kinds,
+        "presentation": {"sounds": sounds},
+        "schedule": {"enabled": true, "tz": "America/Argentina/ComodRivadavia",
+                     "days": [0, 1, 2, 3, 4, 5, 6], "start": "09:00", "end": "18:00",
+                     "passThrough": KINDS},
+        "phoneDelaySecs": 300, "keywordOverridesMute": false, "approvalTimeSensitive": true,
+        "confirm": ["approval_push_off"],
+    });
+    let size = serde_json::to_vec(&honest).unwrap().len();
+    assert!(
+        size < 4 * 1024,
+        "the honest maximum is {size} bytes: well inside the 8 KiB limit"
+    );
+    let (status, body) = me.patch(honest).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(rule_rows(&su, &tenant).await, 1);
+
+    // Over the limit: refused before the body is parsed; the stored row is untouched.
+    let before = row_snapshot(&su, &tenant).await;
+    let (status, _) = me
+        .patch(json!({"phoneDelaySecs": 0, "padding": "x".repeat(9 * 1024)}))
+        .await;
+    assert_eq!(status, 413, "a 9 KiB body is over the limit");
+    assert_eq!(
+        row_snapshot(&su, &tenant).await,
+        before,
+        "a refused body writes nothing"
+    );
+}
+
+/// #4494 review L-1: a schedule is replaced whole, so a client sends its zone back with every edit; an
+/// unchanged name needs no 15 ms scan of `pg_timezone_names`. Observed through two hand-made stored
+/// zones: one the scan does not list but the database still resolves (the equal name is accepted — that
+/// is the skip), one the database no longer resolves (the equal name is **not** vouched for and takes
+/// the scan, which refuses it, so a retired name cannot be saved again).
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a real Postgres"]
+async fn an_unchanged_time_zone_skips_the_name_scan_and_a_stale_one_does_not() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let base = start_server(momo_app_pool().await).await;
+    let me = Caller::of(&base, &tenant).await;
+    let schedule = |tz: &str| {
+        json!({"schedule": {"enabled": false, "tz": tz, "days": [1], "start": "09:00",
+                            "end": "18:00", "passThrough": ["approval"]}})
+    };
+    let store_tz = |tz: &'static str| {
+        let (su, tenant) = (su.clone(), (tenant.workspace, tenant.me));
+        async move {
+            sqlx::query(
+                "UPDATE notification_rule SET schedule = jsonb_set(schedule, '{tz}', to_jsonb($3::text)) \
+                  WHERE workspace_id = $1 AND member_id = $2",
+            )
+            .bind(tenant.0)
+            .bind(tenant.1)
+            .bind(tz)
+            .execute(&su)
+            .await
+            .expect("store a zone by hand");
+        }
+    };
+
+    // A real zone is looked up the first time and stored.
+    me.patch_ok(schedule("Asia/Seoul")).await;
+
+    // `UTC+9` resolves (a POSIX form) but is not in `pg_timezone_names`. Stored by hand, the **same**
+    // name is accepted again: it is not scanned for, it only has to still resolve.
+    store_tz("UTC+9").await;
+    let (status, body) = me.patch(schedule("UTC+9")).await;
+    assert_eq!(
+        status, 200,
+        "an unchanged name is not looked up again: {body}"
+    );
+    // A different name of the same kind is a new name and takes the scan, which refuses it.
+    let (status, body) = me.patch(schedule("UTC+8")).await;
+    assert_eq!((status, error_code(&body)), (400, "invalid_time_zone"));
+
+    // A stored name the database no longer resolves is not vouched for: the equal name is scanned
+    // for, found missing and refused — it cannot be saved again.
+    store_tz("Mars/Phobos").await;
+    let (status, body) = me.patch(schedule("Mars/Phobos")).await;
+    assert_eq!((status, error_code(&body)), (400, "invalid_time_zone"));
+    // And the way out is a real zone.
+    me.patch_ok(schedule("Europe/Berlin")).await;
 }

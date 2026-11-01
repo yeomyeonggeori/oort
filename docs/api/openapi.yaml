@@ -6199,7 +6199,7 @@ paths:
         `invalid_phone_delay`. `kinds` merges per cell and `presentation.sounds` per kind; a
         `null` value resets to the default. `workDone.phone` writes the same stored value as
         `push-kinds.workComplete`. `schedule` is replaced whole and `schedule: null` removes it.
-        Human bearer only (an agent bearer is 403).
+        The body is read up to 8 KiB (413 beyond). Human bearer only (an agent bearer is 403).
       security:
         - bearerAuth: []
       parameters:
@@ -6235,6 +6235,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: >
+            The body is over 8 KiB (ADR-0206 D13: 8 KB or less). The largest honest body is
+            about 1.5 KiB. Nothing was written.
 
   /v1/workspaces/{workspaceId}/notification-keywords:
     get:

@@ -1312,7 +1312,11 @@ pub fn build_app(state: AppState) -> Router {
         // agent-bearer allow-list does not list this path and each handler checks `require_human`.
         .route(
             "/v1/workspaces/{ws}/notification-prefs",
-            get(routes::notification_prefs::get).patch(routes::notification_prefs::patch),
+            get(routes::notification_prefs::get)
+                .patch(routes::notification_prefs::patch)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::notification_prefs::MAX_PATCH_BODY_BYTES,
+                )),
         )
         // ADR-0196 / #3164 — team memory v2: digest + receipt reads and the
         // settings switches. Human-only; visibility and write authority are the

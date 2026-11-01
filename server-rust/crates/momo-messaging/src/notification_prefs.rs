@@ -813,7 +813,8 @@ fn merge_kinds(
 }
 
 /// Does `name` exist in `pg_timezone_names`? A name that Postgres only tolerates (an abbreviation, a
-/// POSIX form) is not there, which is the point.
+/// POSIX form) is not there, which is the point. This scans the whole view (about 15 ms a call), so
+/// [`patch_prefs_in_tx`] asks it only for a name it cannot already vouch for.
 async fn time_zone_name_exists(conn: &mut PgConnection, name: &str) -> Result<bool, DbError> {
     Ok(
         sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = $1)")
@@ -823,12 +824,25 @@ async fn time_zone_name_exists(conn: &mut PgConnection, name: &str) -> Result<bo
     )
 }
 
+/// Does the database still resolve `name` (one conversion, microseconds)? It accepts everything `AT
+/// TIME ZONE` tolerates — an abbreviation, a POSIX form — so it is **never the validation of a new
+/// name**: it only proves that a name which was validated when it was stored still works (a tzdata
+/// change can retire one).
+async fn time_zone_resolves(conn: &mut PgConnection, name: &str) -> Result<bool, DbError> {
+    Ok(
+        sqlx::query_scalar("SELECT notification_local_time($1, now()) IS NOT NULL")
+            .bind(name)
+            .fetch_one(&mut *conn)
+            .await?,
+    )
+}
+
 /// Apply a patch to the caller's preferences (PATCH). Returns the stored preferences after it, or the
 /// rejection — **every rejection is decided before the first write** (see the module note).
 ///
-/// Order: pure checks → the zone name → the row (locked when it exists) → the confirmation rule →
-/// materialize the default row and lock it → merge onto what the lock shows → write only the named
-/// columns. The merge base is read under the lock, so two concurrent patches serialize and the second
+/// Order: pure checks → the row (locked when it exists) → the zone name (a name equal to the stored one
+/// is not looked up again) → the confirmation rule → materialize the default row and lock it → merge
+/// onto what the lock shows → write only the named columns. The merge base is read under the lock, so two concurrent patches serialize and the second
 /// merges onto the first one's committed row (a client that omits a field never reverts another
 /// client's value of it).
 pub async fn patch_prefs_in_tx(
@@ -840,8 +854,23 @@ pub async fn patch_prefs_in_tx(
     if let Err(rejection) = validate_patch(patch) {
         return Ok(Err(rejection));
     }
+
+    // The row first (locked when it exists): the zone check and the confirmation rule both decide on
+    // what it says now. Reading is not writing — every rejection below still precedes the first write.
+    let (early, _) = load_prefs(conn, workspace_id, member_id, true).await?;
+
+    // The zone name. A name equal to the one already stored was validated when it was stored, so it
+    // needs only the cheap proof that it still resolves; a schedule is replaced whole, so a client that
+    // sends it back with one field changed would otherwise pay the 15 ms scan of `pg_timezone_names` on
+    // every edit. Any other name — and a stored one that no longer resolves — takes the full lookup.
     if let Some(Some(schedule)) = &patch.schedule {
-        if !time_zone_name_exists(conn, &schedule.tz).await? {
+        let unchanged = early
+            .schedule
+            .as_ref()
+            .and_then(Schedule::from_json)
+            .is_some_and(|stored| stored.tz == schedule.tz);
+        let vouched_for = unchanged && time_zone_resolves(conn, &schedule.tz).await?;
+        if !vouched_for && !time_zone_name_exists(conn, &schedule.tz).await? {
             return Ok(Err(PrefsRejection::InvalidTimeZone));
         }
     }
@@ -859,7 +888,6 @@ pub async fn patch_prefs_in_tx(
                 stored.work_complete_push,
             )
     };
-    let (early, _) = load_prefs(conn, workspace_id, member_id, true).await?;
     if turning_off(&early) && !patch.confirm_approval_push_off {
         return Ok(Err(PrefsRejection::ConfirmationRequired));
     }
