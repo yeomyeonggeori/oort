@@ -125,6 +125,15 @@ pub struct WorkerConfig {
     /// no address is ever minted. A separate variable on purpose: `MOMO_PUBLIC_BASE_URL` reaches the api
     /// only (ADR-0205 D1), and the same value goes to the Hermes service as the guard's one allowed origin.
     pub self_media_origin: Option<String>,
+    /// `OORT_API_INTERNAL_ORIGIN` (#4934, ADR-0151 증보 3) — where **this worker** reaches the api on the
+    /// private network (`http://api.railway.internal:8080`, compose's `http://api:8080`): a lowercase
+    /// `http(s)://host[:port]` and nothing after it ([`crate::self_media::internal_origin`]). Set, the team
+    /// AI's picture proposal reads a requester's attachment **through the api** (a single-use address the
+    /// worker mints and spends itself), which is the only way when the archive is a volume the api alone
+    /// mounts. Unset **or not an origin** it is `None` and the worker reads attachments from its own archive
+    /// configuration (`MOMO_DRIVE_*`), as before. Never the public origin: that is `self_media_origin`'s,
+    /// and it is the one value a model's tool sees an address under.
+    pub api_internal_origin: Option<String>,
     /// `OORT_HOSTED_MEDIA_STRICT` (#4820 C2b 2부, ADR-0218 증보 G3.7 (b)·G4) — the operator's attestation
     /// that the co-hosted Hermes behind this worker runs with `HERMES_MEDIA_DELIVERY_STRICT=1`, which is
     /// what keeps a `MEDIA:` mark in a final answer from being turned into the bytes of any file the
@@ -702,6 +711,8 @@ impl WorkerConfig {
             ),
             self_media_origin: env("OORT_SELF_MEDIA_ORIGIN")
                 .and_then(|raw| momo_messaging::canonical_origin(&raw).map(str::to_string)),
+            api_internal_origin: env("OORT_API_INTERNAL_ORIGIN")
+                .and_then(|raw| crate::self_media::internal_origin(&raw).map(str::to_string)),
             hosted_media_strict: hosted_media_strict_attested(
                 env(momo_workspace_actions::hosted_expression::STRICT_ENV).as_deref(),
             ),
@@ -752,6 +763,7 @@ impl WorkerConfig {
             egress: momo_settings::EgressPolicy::default(),
             report_protocol_enabled: true,
             self_media_origin: None,
+            api_internal_origin: None,
             hosted_media_strict: false,
             assembler_program: None,
             memory: MemoryConfig::default(),
@@ -771,6 +783,13 @@ impl WorkerConfig {
     /// origin leaves it off, exactly as the environment does.
     pub fn with_self_media_origin(mut self, origin: &str) -> WorkerConfig {
         self.self_media_origin = momo_messaging::canonical_origin(origin).map(str::to_string);
+        self
+    }
+
+    /// The same config with the api's private address set (#4934) — a value that is not an origin
+    /// ([`crate::self_media::internal_origin`]) leaves it off, exactly as the environment does.
+    pub fn with_api_internal_origin(mut self, origin: &str) -> WorkerConfig {
+        self.api_internal_origin = crate::self_media::internal_origin(origin).map(str::to_string);
         self
     }
 

@@ -743,6 +743,71 @@ export const catalog: MessageCatalog = {
       "value": "기기 언어 따르기"
     }
   ],
+  "timeline.thread.open": [
+    {
+      "type": 0,
+      "value": "스레드 열기, 답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.thread.openUnread": [
+    {
+      "type": 0,
+      "value": "스레드 열기, 답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개, 새 답글 "
+    },
+    {
+      "type": 2,
+      "value": "unread",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.thread.replyCount": [
+    {
+      "type": 0,
+      "value": "답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "timeline.thread.unreadChip": [
+    {
+      "type": 0,
+      "value": "새 답글 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
   "timeline.unfurl.label": [
     {
       "type": 0,

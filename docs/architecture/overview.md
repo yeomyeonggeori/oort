@@ -44,6 +44,7 @@ flowchart LR
     CENT -->|"private agentwork: wake-up"| HG
     PG -->|"agent_job claim<br/>AGENT_GATEWAY_MODE=worker"| AW
     AW -->|"oort-owned state transitions<br/>progress·approval·usage/outbox"| PG
+    AW -->|"요청자 첨부 사진 읽기: 사설 주소 · 1회용 토큰<br/>(ADR-0151 증보 3)"| API
     WD -->|"서명 heartbeat · pending poll<br/>session/control REST"| API
 ```
 

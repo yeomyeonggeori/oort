@@ -243,8 +243,10 @@ pub struct ChatCompletion {
     /// failed turn.
     pub tool_calls: Vec<ProviderToolCall>,
     /// Provider-side web searches this call made (ADR-0201 증보 v2 H5) — Anthropic
-    /// reports `usage.server_tool_use.web_search_requests`. `0` on every wire
-    /// that has no server-side search, and whenever nothing was reported.
+    /// reports `usage.server_tool_use.web_search_requests`, and the response's own
+    /// content blocks show them too; the larger of the two is kept (a request that
+    /// searched is a request that read the web, whatever the billing figure says).
+    /// `0` on every wire that has no server-side search, and when neither shows one.
     pub web_search_requests: i32,
 }
 

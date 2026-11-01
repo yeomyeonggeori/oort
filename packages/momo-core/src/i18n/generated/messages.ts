@@ -120,6 +120,10 @@ export const messageKeys = [
   "settings.profile.languagePartialNotice",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
+  "timeline.thread.open",
+  "timeline.thread.openUnread",
+  "timeline.thread.replyCount",
+  "timeline.thread.unreadChip",
   "timeline.unfurl.label",
   "timeline.unfurl.video"
 ] as const;
@@ -255,6 +259,19 @@ export const argumentSpecs = {
   "settings.profile.languagePartialNotice": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {},
+  "timeline.thread.open": {
+    "count": "number"
+  },
+  "timeline.thread.openUnread": {
+    "count": "number",
+    "unread": "number"
+  },
+  "timeline.thread.replyCount": {
+    "count": "number"
+  },
+  "timeline.thread.unreadChip": {
+    "count": "number"
+  },
   "timeline.unfurl.label": {
     "domain": "string",
     "title": "string"
@@ -383,6 +400,10 @@ export interface MessageArgs {
   "settings.profile.languagePartialNotice": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "timeline.thread.open": { count: number };
+  "timeline.thread.openUnread": { count: number; unread: number };
+  "timeline.thread.replyCount": { count: number };
+  "timeline.thread.unreadChip": { count: number };
   "timeline.unfurl.label": { domain: string; title: string };
   "timeline.unfurl.video": Record<string, never>;
 }
