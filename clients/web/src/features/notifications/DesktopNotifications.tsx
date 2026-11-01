@@ -1,4 +1,5 @@
 import { missingMemberLabel } from "@momo/core/features/workspace/directory";
+import { dismissTemporarySurfaces } from "@momo/core/features/notifications/entryDismiss";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "@/app/session";
@@ -74,6 +75,16 @@ export function DesktopNotifications() {
   const { directory } = useDirectory(workspaceId);
   const navigate = useNavigate();
   const location = useLocation();
+  // 알림은 **새 입구**다(#4667). 사람은 열려 있던 대화상자·팔레트·서랍에서 그 메시지로 온 것이 아니라 배너에서 왔다 — 그 표면들이
+  // 그대로 떠 있으면 클릭한 메시지가 그 밑에 있다. 배너를 눌러 가는 두 길(브라우저 배너의 클릭, 데스크탑 창이 앞에 오는 순간)은
+  // 모두 이 한 함수를 지난다: 이동하기 직전에 방송 하나로 겹친 표면을 걷고(`dismissTemporarySurfaces`), 그다음 간다.
+  const landOnNotification = useCallback(
+    (route: string) => {
+      dismissTemporarySurfaces();
+      navigate(route);
+    },
+    [navigate]
+  );
   const selfId = session.member.id;
   const formatMessage = useFormatMessage();
   const formatRef = useRef(formatMessage);
@@ -255,9 +266,9 @@ export function DesktopNotifications() {
   // 브라우저 배너를 누르면 이 탭이 앞에 오고 대상으로 간다.
   useEffect(() => {
     if (desktop) return;
-    setBrowserOpenHandler((route) => navigate(route));
+    setBrowserOpenHandler(landOnNotification);
     return () => setBrowserOpenHandler(null);
-  }, [desktop, navigate]);
+  }, [desktop, landOnNotification]);
 
   // ---- window focus -------------------------------------------------------
 
@@ -272,7 +283,7 @@ export function DesktopNotifications() {
       }
       armedRef.current = null;
       armedThreadRef.current = null;
-      if (route !== null) navigate(route);
+      if (route !== null) landOnNotification(route);
     };
     const leave = () => {
       focusedRef.current = false;
@@ -288,7 +299,7 @@ export function DesktopNotifications() {
       window.removeEventListener("blur", leave);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [navigate]);
+  }, [landOnNotification]);
 
   // Someone who navigated on their own has answered the question the armed
   // target was there to answer; a later focus must not move them again.

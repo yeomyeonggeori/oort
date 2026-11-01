@@ -1,3 +1,4 @@
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import {act, fireEvent, screen, waitFor, within} from '@testing-library/react-native';
 import {AccessibilityInfo, Animated, Dimensions, Image} from 'react-native';
 
@@ -169,7 +170,7 @@ export interface CloseContract {
 }
 
 /**
- * 같은 계약 여덟 시험을 등록한다.
+ * 같은 계약 아홉 시험을 등록한다.
  *
  *   1. 머리 X: 이름이 「… 닫기」, 글리프가 공용 X(`SHEET_ICONS.close`), 글자 「닫기」가 시트 트리에 없고, 손잡이 띠가 선다.
  *   2. 동작 줄이기가 켜져 있으면 X 가 즉시 한 번 닫는다.
@@ -179,6 +180,7 @@ export interface CloseContract {
  *   6. 손잡이 띠를 끌어내리면(거리 문턱) 닫는다.
  *   7. 머리(제목 줄)를 끌어내려도 닫는다 (#4612).
  *   8. 본문을 스크롤 맨 위에서 끌어내리면 닫는다 — 본문 스크롤이 시트에 등록돼 있다 (#4612).
+ *   9. 알림이 새 입구로 들어오면(`dismissTemporarySurfaces`) 닫는다 — 시트마다 따로 구독하지 않아도 이 그릇의 약속이다 (#4667).
  */
 export function describeCloseContract(spec: CloseContract): void {
   describe(`${spec.name} — 닫는 길과 머리의 원형 X (#4458)`, () => {
@@ -261,6 +263,22 @@ export function describeCloseContract(spec: CloseContract): void {
       await spec.open();
       // 가져가지 못하면(`false`): 이 시트의 본문 스크롤이 시트에 등록되지 않았다 — `SheetScroll` 이나 `usePageSheetScroll()` 이어야 한다.
       expect(dragBody(FAR_SLOW_DRAG)).toBe(true);
+      expect(spec.closedCount()).toBe(1);
+    });
+
+    // #4667: 알림은 새 입구다 — 열려 있던 시트는 사람이 닫지 않아도 걷힌다. 시트마다 같은 코드로 잰다: 이 시트의 `onClose` 가
+    // 그릇의 닫는 길에 이어져 있는가. 한 번만 닫는다(방송은 닫는 중인 시트를 다시 닫지 않는다).
+    it('알림이 새 입구로 들어오면 시트가 닫힌다 — 누르지 않아도, 한 번만', async () => {
+      await setReduceMotion(true);
+      await spec.open();
+      expect(spec.closedCount()).toBe(0);
+      act(() => {
+        dismissTemporarySurfaces();
+      });
+      expect(spec.closedCount()).toBe(1);
+      act(() => {
+        dismissTemporarySurfaces();
+      });
       expect(spec.closedCount()).toBe(1);
     });
   });

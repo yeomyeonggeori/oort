@@ -1,9 +1,11 @@
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
 import {ActionSheetIOS, StyleSheet, TextInput} from 'react-native';
 
 import {ds2Radius, lightPalette} from '../src/design/tokens';
 import {MessageEditorSheet} from '../src/features/conversation/MessageEditorSheet';
+import {__resetEntryDrafts} from '../src/lib/entryDrafts';
 import {
   FAR_SLOW_DRAG,
   describeCloseContract,
@@ -235,6 +237,101 @@ describe('저장 안 한 입력 — 닫기 전에 「버릴까요?」', () => {
     expect(save).toHaveBeenCalledWith('안녕하세요, 이도현 님');
     expect(show).not.toHaveBeenCalled();
     show.mockRestore();
+  });
+});
+
+// 알림이 새 입구로 들어오면(#4667) 열려 있던 시트는 사람이 닫지 않아도 걷힌다. 고치던 글은 알림이 걷은 것이지 사람이 버린 것이
+// 아니므로 같은 메시지의 고치기가 다시 서면 돌아온다. 사람이 X 로 버린 글은 평소처럼 사라진다.
+describe('알림이 새 입구로 들어오면 — 고치던 글을 지킨다 (#4667)', () => {
+  const KEY = 'message-edit:m-1';
+
+  beforeEach(async () => {
+    __resetEntryDrafts();
+    await setReduceMotion(true);
+  });
+  afterEach(() => {
+    releaseReduceMotion();
+  });
+
+  const edit = (text: string) => {
+    fireEvent.changeText(screen.getByTestId('editor-input'), text);
+  };
+  const enter = () =>
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+
+  it('고치던 글이 있으면 「버릴까요?」를 묻지 않고 닫고, 같은 메시지의 고치기가 다시 서면 그 글로 시작한다', () => {
+    const show = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    const first = mount({draftKey: KEY});
+    edit('고치던 문장, 아직 저장 전');
+    enter();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(show).not.toHaveBeenCalled();
+    first.unmount();
+
+    mount({draftKey: KEY});
+    // 원문(`안녕하세요`)이 아니라 고치던 글이다. 원문과 다르니 ✓ 도 켜져 있다 — 이어서 저장할 수 있다.
+    expect(screen.getByTestId('editor-input').props.value).toBe('고치던 문장, 아직 저장 전');
+    expect(screen.getByTestId('editor-save').props.accessibilityState).toMatchObject({disabled: false});
+    show.mockRestore();
+  });
+
+  it('돌려주는 것은 한 번이다 — 그 시트를 사람이 닫고 다시 열면 원문으로 시작한다', () => {
+    const first = mount({draftKey: KEY});
+    edit('고치던 문장');
+    enter();
+    first.unmount();
+
+    const second = mount({draftKey: KEY});
+    expect(screen.getByTestId('editor-input').props.value).toBe('고치던 문장');
+    second.unmount();
+
+    mount({draftKey: KEY});
+    expect(screen.getByTestId('editor-input').props.value).toBe('안녕하세요');
+  });
+
+  it('사람이 「버리기」로 닫은 글은 돌아오지 않는다 — 평소의 폐기는 그대로다', () => {
+    const show = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    const first = mount({draftKey: KEY});
+    edit('버릴 문장');
+    fireEvent.press(screen.getByTestId('editor-cancel'));
+    act(() => {
+      show.mock.calls[0][1](0); // 버리기
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    mount({draftKey: KEY});
+    expect(screen.getByTestId('editor-input').props.value).toBe('안녕하세요');
+    show.mockRestore();
+  });
+
+  it('바뀐 것이 없으면 맡기지 않는다 — 다시 선 시트는 원문으로 시작한다', () => {
+    const clean = mount({draftKey: KEY});
+    enter();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    clean.unmount();
+    mount({draftKey: KEY});
+    expect(screen.getByTestId('editor-input').props.value).toBe('안녕하세요');
+  });
+
+  it('저장하는 중이면 맡기지 않는다 — 이미 나가는 글이다', () => {
+    const saving = mount({draftKey: KEY, pending: true});
+    edit('보내는 중인 글');
+    enter();
+    saving.unmount();
+    mount({draftKey: KEY});
+    expect(screen.getByTestId('editor-input').props.value).toBe('안녕하세요');
+  });
+
+  it('다른 메시지의 고치기에는 돌아가지 않는다 — 그 글은 이 메시지의 것이 아니다', () => {
+    const mine = mount({draftKey: KEY});
+    edit('m-1 의 글');
+    enter();
+    mine.unmount();
+    mount({draftKey: 'message-edit:m-2'});
+    expect(screen.getByTestId('editor-input').props.value).toBe('안녕하세요');
   });
 });
 
