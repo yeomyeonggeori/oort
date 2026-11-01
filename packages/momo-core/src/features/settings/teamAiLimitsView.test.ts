@@ -79,6 +79,8 @@ describe("행 모델: 기본은 제한 없음, 운영자 천장과 끔은 입력
     }
     expect(rowOf(status(), "dailyTokens").max).toBe(LIMIT_COUNT_MAX);
     expect(rowOf(status(), "monthlyUsd").max).toBe(LIMIT_USD_MAX);
+    // 키보드: 개수는 숫자판, 금액만 소수점이 있는 판.
+    expect(limitRows(status()).map((row) => row.inputMode)).toEqual(["numeric", "numeric", "decimal"]);
   });
 
   it("운영자 천장은 그 행의 입력 상한이다(금액 행은 천장이 없다)", () => {

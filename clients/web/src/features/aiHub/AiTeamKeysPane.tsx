@@ -50,6 +50,7 @@ import { LoopbackRefusalBanner, ProbeAnswer } from "@/features/settings/AiLinkSe
 import { AiOfflineBanner, AiPill } from "@/features/settings/aiAccountsParts";
 import { myAccountsBrowserTab } from "@/features/settings/aiMyAccountsModel";
 import { formatMoment } from "@/features/settings/oauthGrant";
+import { TeamAiLimitsSection } from "@/features/settings/TeamAiLimitsSection";
 import { TeamKeyForm } from "@/features/settings/TeamKeyForm";
 import { TeamUnlinkDialog } from "@/features/settings/TeamUnlinkDialog";
 import { PersonalKeysOperatorSection } from "./PersonalKeysOperatorSection";
@@ -513,6 +514,8 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
           team={teamDefaults}
         />
       </section>
+
+      <TeamAiLimitsSection workspaceId={workspaceId} offline={offline} />
 
       {link && !denied && !linkQuery.isError && !linkQuery.isPending && (
         <PersonalKeysOperatorSection workspaceId={workspaceId} offline={offline} link={link} />

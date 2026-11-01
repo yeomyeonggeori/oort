@@ -62,6 +62,8 @@ export interface LimitRow {
   ceiling: number | null;
   /** 입력 상한: 천장이 있으면 천장, 없으면 서버가 받는 최댓값. */
   max: number;
+  /** 입력칸이 띄울 키보드: 개수는 숫자판, 금액은 소수점이 있는 판. 화면이 낱말을 적지 않게 여기서 준다. */
+  inputMode: "numeric" | "decimal";
   /** 운영자가 막았으면 어느 쪽인지. 막혔으면 값을 쓰거나 켜거나 지울 수 없다. */
   lock: LimitLock | null;
   /** 금액 한도를 켤 수 없는 까닭(금액 행만, 켤 수 있으면 `null`). */
@@ -101,6 +103,7 @@ export function limitRows(status: TeamAiLimitsStatus): LimitRow[] {
       saved,
       ceiling,
       max: ceiling ?? (field === "monthlyUsd" ? LIMIT_USD_MAX : LIMIT_COUNT_MAX),
+      inputMode: field === "monthlyUsd" ? "decimal" : "numeric",
       lock,
       usdBlocker,
       editable: lock === null && usdBlocker === null,
