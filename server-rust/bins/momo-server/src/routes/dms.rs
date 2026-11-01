@@ -175,6 +175,10 @@ mod tests {
             json.get("archivedAtMs").is_none(),
             "the DM surface never returns an archived channel: {json}"
         );
+        assert!(
+            json.get("mutedUntilMs").is_none(),
+            "no timed mute in progress, no end — the key is omitted, never `null`: {json}"
+        );
     }
 
     #[test]

@@ -877,6 +877,22 @@ async fn dispatch_log_rows(su: &PgPool, workspace: Uuid, message: Uuid) -> i64 {
     .expect("count dispatch log")
 }
 
+/// `(status, attempts)` of each push candidate a workspace produced, oldest first.
+async fn candidate_states(su: &PgPool, workspace: Uuid) -> Vec<(String, i32)> {
+    use momo_db::sqlx::Row;
+    sqlx::query(
+        "SELECT status::text AS status, attempts FROM outbox \
+          WHERE kind = 'push_candidate' AND workspace_id = $1 ORDER BY id",
+    )
+    .bind(workspace)
+    .fetch_all(su)
+    .await
+    .expect("read candidate states")
+    .into_iter()
+    .map(|row| (row.get("status"), row.get("attempts")))
+    .collect()
+}
+
 /// The drain claims across every tenant, so park any candidate this test does not own. It only
 /// reschedules; a candidate left behind by an earlier, failed run cannot add a dispatch here.
 async fn focus_candidates(su: &PgPool, keep: &[Uuid]) {
@@ -951,6 +967,11 @@ async fn a_push_candidate_after_the_end_is_sent_one_before_it_is_not() {
         "a suppressed target leaves no push_dispatch_log row (ADR-0124 D2)"
     );
     assert_eq!(dispatch_log_rows(&su, b.workspace, first_b).await, 1);
+    assert_eq!(
+        candidate_states(&su, a.workspace).await,
+        vec![("done".to_string(), 1)],
+        "nobody to notify is a completed candidate, not a failure"
+    );
 
     // t0 + 3 s, with no sleep: the stored end moves three seconds earlier, which is the database
     // clock three seconds later. Only the timestamp moves — the row is still there, still a mute row.
@@ -995,5 +1016,10 @@ async fn a_push_candidate_after_the_end_is_sent_one_before_it_is_not() {
         dispatch_log_rows(&su, a.workspace, first_a).await,
         0,
         "the mention that came during the mute stays unsent: it is not judged a second time"
+    );
+    assert_eq!(
+        candidate_states(&su, a.workspace).await,
+        vec![("done".to_string(), 1), ("done".to_string(), 1)],
+        "each candidate was claimed once: the first was not claimed or judged again"
     );
 }

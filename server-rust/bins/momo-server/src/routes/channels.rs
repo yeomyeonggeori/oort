@@ -511,6 +511,10 @@ mod tests {
             json.get("archivedAtMs").is_none(),
             "the web sidebar filters on `archivedAtMs === undefined`: {json}"
         );
+        assert!(
+            json.get("mutedUntilMs").is_none(),
+            "no timed mute in progress, no end — the key is omitted, never `null`: {json}"
+        );
     }
 
     /// A freshly created channel is described exactly like a listed one, plus
