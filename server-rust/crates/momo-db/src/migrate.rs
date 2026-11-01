@@ -751,13 +751,19 @@ mod tests {
     /// becomes JSON null — and the migration blanks the prompts of drafts that expired before it. No new
     /// table, so no new RLS policy.
     ///
+    /// 168 is #4656's agent activity report (ADR-0200 증보 7): the two ledger kinds `activity` and
+    /// `plan` on `agent_run_event` (seven new columns, the SQL backstop CHECKs, the shared text
+    /// function), the per-run ended-unit total `agent_run_activity_tally` (tenant ENABLE + FORCE +
+    /// `ws_isolation`, `momo_notifier` SELECT for the retention sweep), the roll function
+    /// `agent_run_activity_trim`, the one writer `agent_run_activity_record`, and the stage trim /
+    /// append / frame-window functions made to look past the new kinds.
+    ///
     /// 169 is #4967's 「도우미 작업 모드」 (ADR-0201 증보 v3 B5·B14-S4): the `team_ai_task` marker
     /// table — one row per run, the row's existence is the task-mode judgement, `steps_done` and the
     /// step claim keep a step from running twice, and the plan/note between steps are gone once the
     /// row is ended (`team_ai_task_ended_ck`). Tenant ENABLE + FORCE + `ws_isolation`; the grants are
     /// the minimum the code reads and writes (`team-ai-task-lockdown`, the same text in the migration
-    /// and both role bootstraps). 168 (#4656) is reserved by another slice and lands before this one:
-    /// until it does, this one test is the single expected failure of a branch that carries 169 alone.
+    /// and both role bootstraps).
     #[test]
     fn discovers_contiguous_migrations_001_to_169() {
         let dir = default_migrations_dir();
