@@ -7,6 +7,7 @@ import {
   readTeamAiSwitch,
   setTeamAiSwitch,
   teamAiSaveErrorCopy,
+  teamAiSwitchDescription,
 } from "./teamAiSwitch";
 
 function installHost(): void {
@@ -134,5 +135,15 @@ describe("물음은 쓰기가 아니다", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       `https://oort.test/v1/workspaces/${WS}/settings`
     );
+  });
+});
+
+// 서버 PR(#4944)이 들어가면 기본은 「제한 없음」이다. 옛 문장 「하루 사용량에는 상한이 있어요」는 그 순간 거짓이다.
+describe("스위치 설명은 사용량 한도가 기본으로 없다는 사실과 맞다", () => {
+  it("하루 상한이 있다고 말하지 않고, 한도를 정하는 곳을 가리킨다", () => {
+    const description = teamAiSwitchDescription("비서봇");
+    expect(description).not.toContain("상한");
+    expect(description).toContain("정하지 않으면 없");
+    expect(description).toContain("「사용 한도」");
   });
 });

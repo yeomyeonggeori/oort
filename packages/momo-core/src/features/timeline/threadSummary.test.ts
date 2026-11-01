@@ -9,6 +9,8 @@ import {
   THREAD_FACE_RING,
   THREAD_FACE_SIZE,
   applyThreadReadState,
+  groupRepliesByRoot,
+  liveThreadRollup,
   readSignalSeq,
   threadSummary,
   threadSummaryCopy,
@@ -257,5 +259,110 @@ describe("applyThreadReadState — 읽음 신호의 응답이 든 루트에 닿�
   it("대소문자가 다른 루트 id도 같은 루트다", () => {
     const next = applyThreadReadState(held(), ROOT.toUpperCase(), { following: true, unreadReplyCount: 0 });
     expect(next.messages.find((m) => m.id === ROOT)?.thread?.unread_reply_count).toBe(0);
+  });
+});
+
+// =============================================================================
+// 실시간 답글이 루트 요약에 닿는 길 (#5008) — 웹 타임라인이 부르는 함수. 판정은 서버 스냅샷 위에 **든 답글**을 얹는 산수다.
+// =============================================================================
+describe("liveThreadRollup — 서버 스냅샷 위에 든 새 답글을 얹는다 (#5008)", () => {
+  const A = "00000000-0000-7000-8000-0000000000a1";
+  const B = "00000000-0000-7000-8000-0000000000a2";
+  const C = "00000000-0000-7000-8000-0000000000a3";
+  // 서버가 페이지를 읽을 때의 스냅샷: 답글 3(머리 seq 13), 얼굴 A·B, 내가 따라가고 안 읽은 것 1.
+  const snapshot = {
+    reply_count: 3,
+    last_reply_seq: 13,
+    last_reply_at: 1_000,
+    participant_ids: [A, B],
+    participant_count: 2,
+    unread_reply_count: 1,
+  };
+  const live = (thread: Message["thread"], replies: Message[]) => liveThreadRollup(root(thread), replies, ME);
+  const repliesOf = (messages: Message[]) => messages.filter((message) => message.rootId !== undefined);
+
+  it("열어 보지 않은 스레드에 남의 답글이 오면 수·안 읽은 수·얼굴이 오른다 — 든 답글이 하나여도 서버 수 위에 얹고, 되쏘기엔 같은 답이다", () => {
+    const fresh = reply(14, { authorMemberId: C });
+    // 로컬로 센 수(1)와 서버 수(3)의 max(3)가 아니라 서버 수 + 머리 뒤 답글(4)이다.
+    expect(live(snapshot, [fresh])).toMatchObject({
+      replyCount: 4,
+      unreadReplyCount: 2,
+      participantIds: [C, A, B],
+      lastReplySeq: 14,
+    });
+    const once = reconcileMessages(emptyTimeline(), [fresh]);
+    const twice = reconcileMessages(once, [fresh]);
+    expect(live(snapshot, twice.messages)).toEqual(live(snapshot, once.messages));
+    // 같은 답글이 배열에 두 번 들어와도 한 번만 센다(개수는 배달 횟수가 아니라 든 답글이다).
+    expect(live(snapshot, [fresh, { ...fresh }])?.replyCount).toBe(4);
+    // 머리 이전(서버 수에 이미 든) 답글·지운 줄·text 아닌 줄은 올리지 않는다.
+    expect(
+      live(snapshot, [
+        reply(13, { authorMemberId: C }),
+        reply(15, { authorMemberId: C, state: "deleted", body: undefined }),
+        reply(16, { authorMemberId: C, type: "system" }),
+      ])
+    ).toMatchObject({ replyCount: 3, unreadReplyCount: 1, participantIds: [A, B] });
+  });
+
+  it("내 답글은 수·얼굴만 올리고 안 읽은 수는 올리지 않는다", () => {
+    const theirs = reply(14, { authorMemberId: C });
+    const mine = reply(15, { authorMemberId: ME });
+    expect(live(snapshot, [theirs, mine])).toMatchObject({
+      replyCount: 5,
+      unreadReplyCount: 2,
+      participantIds: [ME, C, A],
+    });
+    expect(live(snapshot, [mine])).toMatchObject({ replyCount: 4, unreadReplyCount: 1, participantIds: [ME, A, B] });
+    // 대소문자가 다른 내 id도 내 답글이다.
+    expect(live(snapshot, [reply(15, { authorMemberId: ME.toUpperCase() })])?.unreadReplyCount).toBe(1);
+  });
+
+  it("읽음 응답으로 머리가 옮겨 가도 올랐던 수·얼굴은 되돌아가지 않고 안 읽은 수만 0이 된다", () => {
+    const state = reconcileMessages(emptyTimeline(), [
+      root(snapshot),
+      reply(14, { authorMemberId: C }),
+      reply(15, { authorMemberId: ME }),
+    ]);
+    const read = applyThreadReadState(state, ROOT, { following: true, unreadReplyCount: 0, lastReadReplySeq: 15 });
+    const held = read.messages.find((message) => message.id === ROOT)!;
+    // 머리가 15로 갔고, 그 사이 두 답글은 서버 요약에 접혔다(답글 수 3 → 5, 얼굴 앞에 ME·C).
+    expect(held.thread).toMatchObject({ last_reply_seq: 15, reply_count: 5, participant_ids: [ME, C, A], unread_reply_count: 0 });
+    expect(liveThreadRollup(held, repliesOf(read.messages), ME)).toMatchObject({
+      replyCount: 5,
+      unreadReplyCount: 0,
+      participantIds: [ME, C, A],
+    });
+    // 그 뒤에 온 답글은 다시 접힌 요약 위에 얹힌다.
+    const next = reconcileMessages(read, [reply(16, { authorMemberId: A })]);
+    expect(
+      liveThreadRollup(next.messages.find((message) => message.id === ROOT)!, repliesOf(next.messages), ME)
+    ).toMatchObject({ replyCount: 6, unreadReplyCount: 1, participantIds: [A, ME, C] });
+  });
+
+  it("따라가지 않는 스레드는 칩 없이 수·얼굴만 오르고, 옛 서버(얼굴 키 없음)는 얼굴을 지어내지 않는다", () => {
+    const { unread_reply_count: _following, ...unfollowed } = snapshot;
+    const quiet = live(unfollowed, [reply(14, { authorMemberId: C })]);
+    expect(quiet).toMatchObject({ replyCount: 4, participantIds: [C, A, B] });
+    expect(quiet).not.toHaveProperty("unreadReplyCount");
+    const { participant_ids: _ids, participant_count: _count, ...old } = snapshot;
+    const faceless = live(old, [reply(14, { authorMemberId: C })]);
+    expect(faceless).toMatchObject({ replyCount: 4, unreadReplyCount: 2, participantIds: [] });
+    // 읽음 응답이 머리를 옮길 때도 옛 서버는 얼굴 키를 만들지 않는다.
+    const state = reconcileMessages(emptyTimeline(), [root(old), reply(14, { authorMemberId: C })]);
+    const read = applyThreadReadState(state, ROOT, { following: true, unreadReplyCount: 0 });
+    expect(read.messages.find((message) => message.id === ROOT)?.thread).not.toHaveProperty("participant_ids");
+  });
+
+  it("서버 요약이 없는 루트에 첫 답글이 오면 「답글 1개」와 얼굴이 서고 칩은 없다 — 지운 줄·시스템 줄·답글 자신은 요약이 아니다", () => {
+    const first = live(undefined, [reply(14, { authorMemberId: C })]);
+    expect(first).toMatchObject({ replyCount: 1, participantIds: [C], lastReplySeq: 14 });
+    expect(first).not.toHaveProperty("unreadReplyCount");
+    expect(live(undefined, [reply(14, { state: "deleted", body: undefined }), reply(15, { type: "system" })])).toBeNull();
+    expect(live(undefined, [])).toBeNull();
+    expect(liveThreadRollup(reply(14), [reply(15)], ME)).toBeNull();
+    // 색인은 루트 id(대소문자 무관)별로 답글만 모은다.
+    const index = groupRepliesByRoot([root(undefined), reply(14), reply(15, { rootId: ROOT.toUpperCase() })]);
+    expect(index.get(ROOT)?.map((message) => message.seq)).toEqual([14, 15]);
   });
 });

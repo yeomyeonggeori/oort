@@ -114,6 +114,11 @@ import {
   TeamAiHelperSettingsPage,
   useTeamAiHelperEntry,
 } from './TeamAiHelperSettings';
+import {
+  AI_LIMITS_PAGE,
+  TeamAiLimitsSettingRow,
+  TeamAiLimitsSettingsPage,
+} from './TeamAiLimitsSettings';
 
 // =============================================================================
 // 「설정」 페이지 — 홈 머리의 내 얼굴이 여는 전체 화면 (#4457, owner 2026-10-25; 옛 `ProfileSheet` 의 자리).
@@ -182,6 +187,8 @@ export type SettingsSubPage =
   | 'language'
   | 'linkPreview'
   | typeof TEAM_AI_HELPER_PAGE
+  // 「사용 한도」 장(#5026). 이름은 `TeamAiLimitsSettings` 가 하이픈 낱말로 짓고 JSX 밖에서 선언한다(직접 문구 장부).
+  | typeof AI_LIMITS_PAGE
   | 'usage'
   | 'theme'
   | 'deviceKey'
@@ -195,7 +202,7 @@ export type SettingsPageName = 'main' | SettingsSubPage;
 const SUB_PAGE_TOP = space.md;
 
 const SUB_PAGE_TITLE: Record<
-  Exclude<SettingsSubPage, 'language' | 'linkPreview' | typeof TEAM_AI_HELPER_PAGE>,
+  Exclude<SettingsSubPage, 'language' | 'linkPreview' | typeof TEAM_AI_HELPER_PAGE | typeof AI_LIMITS_PAGE>,
   string
 > = {
   usage: AGENT_USAGE_COPY.report,
@@ -280,6 +287,7 @@ export function SettingsPage({
             onOpenLanguage={() => setPage('language')}
             onOpenLinkPreview={() => setPage('linkPreview')}
             onOpenTeamAiHelper={() => setPage(TEAM_AI_HELPER_PAGE)}
+            onOpenAiLimits={() => setPage(AI_LIMITS_PAGE)}
             onOpenStatus={() => setStatusOpen(true)}
             onOpenDeviceKey={() => setPage('deviceKey')}
             onOpenDevTools={() => setPage('devTools')}
@@ -311,6 +319,8 @@ export function SettingsPage({
               directory={directory}
               onBack={backToMain}
             />
+          ) : page === AI_LIMITS_PAGE ? (
+            <TeamAiLimitsSettingsPage workspaceId={workspaceId} onBack={backToMain} />
           ) : (
             <SubPage
               page={page}
@@ -343,7 +353,7 @@ function SubPage({
   directory,
   onBack,
 }: {
-  page: Exclude<SettingsSubPage, 'language' | 'linkPreview' | typeof TEAM_AI_HELPER_PAGE>;
+  page: Exclude<SettingsSubPage, 'language' | 'linkPreview' | typeof TEAM_AI_HELPER_PAGE | typeof AI_LIMITS_PAGE>;
   workspaceId: string;
   member: Member;
   directory: Directory;
@@ -455,6 +465,7 @@ export function SettingsContent({
   onOpenLanguage,
   onOpenLinkPreview,
   onOpenTeamAiHelper,
+  onOpenAiLimits,
   onOpenStatus,
   onOpenDeviceKey,
   onOpenDevTools,
@@ -476,6 +487,8 @@ export function SettingsContent({
   onOpenLinkPreview?: () => void;
   /** 관리자의 「도우미」 장(이름·할 수 있는 일, #4945)을 연다. 없으면 행이 서지 않고 아무것도 읽지 않는다(캡처 하네스). */
   onOpenTeamAiHelper?: () => void;
+  /** 「사용 한도」 장(#5026)을 연다. 없으면 행이 서지 않는다(캡처 하네스). 소유자·관리자에게만 선다. */
+  onOpenAiLimits?: () => void;
   /** 「상태 설정」 바텀시트를 연다. */
   onOpenStatus: () => void;
   onOpenDeviceKey: () => void;
@@ -995,12 +1008,13 @@ export function SettingsContent({
         ) : null}
       </GroupCard>
 
-      {isAdmin && (onOpenUsage || teamAiRow) ? (
+      {isAdmin && (onOpenUsage || teamAiRow || onOpenAiLimits) ? (
         <GroupCard label="관리자 설정">
           {onOpenUsage ? (
             <ListRow title={AGENT_USAGE_COPY.report} accessory="chevron" onPress={onOpenUsage} testID="settings-agent-usage" />
           ) : null}
           {teamAiRow}
+          {onOpenAiLimits ? <TeamAiLimitsSettingRow onPress={onOpenAiLimits} /> : null}
         </GroupCard>
       ) : null}
 

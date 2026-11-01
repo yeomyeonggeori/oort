@@ -670,6 +670,473 @@ export const catalog: MessageCatalog = {
       "value": "언어를 적용하는 중이에요."
     }
   ],
+  "settings.aiLimits.ceilingSearches": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 하루 "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회까지로 제한했어요."
+    }
+  ],
+  "settings.aiLimits.ceilingTokens": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 하루 "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "토큰까지로 제한했어요."
+    }
+  ],
+  "settings.aiLimits.cleared": [
+    {
+      "type": 0,
+      "value": "한도를 껐어요."
+    }
+  ],
+  "settings.aiLimits.description": [
+    {
+      "type": 0,
+      "value": "도우미가 쓰는 양에 거는 한도예요. 기본은 제한 없음이고, 팀 키로 쓰는 만큼 팀이 정해요. 원하면 하루나 한 달 한도를 켤 수 있어요."
+    }
+  ],
+  "settings.aiLimits.errorEmpty": [
+    {
+      "type": 0,
+      "value": "값을 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorInvalidCount": [
+    {
+      "type": 0,
+      "value": "1 이상의 정수로 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorInvalidUsd": [
+    {
+      "type": 0,
+      "value": "0보다 큰 금액을 소수 여섯 자리까지 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorOverCeiling": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 정한 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "까지만 적을 수 있어요."
+    }
+  ],
+  "settings.aiLimits.errorTooLarge": [
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 이하로 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorZero": [
+    {
+      "type": 0,
+      "value": "0은 한도로 쓸 수 없어요. 한도를 없애려면 스위치를 꺼 주세요."
+    }
+  ],
+  "settings.aiLimits.loadFailed": [
+    {
+      "type": 0,
+      "value": "사용 한도를 불러오지 못했어요."
+    }
+  ],
+  "settings.aiLimits.loading": [
+    {
+      "type": 0,
+      "value": "사용 한도를 불러오고 있어요."
+    }
+  ],
+  "settings.aiLimits.notAdmin": [
+    {
+      "type": 0,
+      "value": "소유자나 관리자만 볼 수 있어요."
+    }
+  ],
+  "settings.aiLimits.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 한도를 바꿀 수 없어요."
+    }
+  ],
+  "settings.aiLimits.operatorOff": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 팀 AI를 멈춰 뒀어요."
+    }
+  ],
+  "settings.aiLimits.operatorSearchOff": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 웹 검색을 꺼 뒀어요."
+    }
+  ],
+  "settings.aiLimits.pricingNote": [
+    {
+      "type": 0,
+      "value": "공개 단가로 계산한 금액이에요. 공급사 청구서와 다를 수 있어요."
+    }
+  ],
+  "settings.aiLimits.resetsDate": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 새로 시작해요"
+    }
+  ],
+  "settings.aiLimits.resetsDay": [
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 새로 시작해요"
+    }
+  ],
+  "settings.aiLimits.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "settings.aiLimits.rowHint": [
+    {
+      "type": 0,
+      "value": "도우미 사용량의 하루·한 달 한도를 정하고 사용량을 봐요."
+    }
+  ],
+  "settings.aiLimits.save": [
+    {
+      "type": 0,
+      "value": "저장"
+    }
+  ],
+  "settings.aiLimits.saved": [
+    {
+      "type": 0,
+      "value": "저장했어요."
+    }
+  ],
+  "settings.aiLimits.saveFailed": [
+    {
+      "type": 0,
+      "value": "한도를 저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "settings.aiLimits.saveForbidden": [
+    {
+      "type": 0,
+      "value": "소유자나 관리자만 한도를 바꿀 수 있어요."
+    }
+  ],
+  "settings.aiLimits.saving": [
+    {
+      "type": 0,
+      "value": "저장 중"
+    }
+  ],
+  "settings.aiLimits.searchesLabel": [
+    {
+      "type": 0,
+      "value": "하루 웹 검색 한도"
+    }
+  ],
+  "settings.aiLimits.searchesOfLimit": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "settings.aiLimits.searchesToday": [
+    {
+      "type": 0,
+      "value": "오늘 웹 검색 "
+    },
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "settings.aiLimits.searchesUnit": [
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "settings.aiLimits.searchesValueLabel": [
+    {
+      "type": 0,
+      "value": "하루 웹 검색 횟수"
+    }
+  ],
+  "settings.aiLimits.searchHint": [
+    {
+      "type": 0,
+      "value": "넘으면 새로 시작할 때까지 도우미가 웹 검색 없이 답해요."
+    }
+  ],
+  "settings.aiLimits.stopHint": [
+    {
+      "type": 0,
+      "value": "넘으면 도우미가 멈추고 다른 에이전트에게 맡기는 버튼이 나와요."
+    }
+  ],
+  "settings.aiLimits.title": [
+    {
+      "type": 0,
+      "value": "사용 한도"
+    }
+  ],
+  "settings.aiLimits.tokensLabel": [
+    {
+      "type": 0,
+      "value": "하루 토큰 한도"
+    }
+  ],
+  "settings.aiLimits.tokensOfLimit": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 토큰"
+    }
+  ],
+  "settings.aiLimits.tokensToday": [
+    {
+      "type": 0,
+      "value": "오늘 "
+    },
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 토큰 사용"
+    }
+  ],
+  "settings.aiLimits.tokensUnit": [
+    {
+      "type": 0,
+      "value": "토큰"
+    }
+  ],
+  "settings.aiLimits.tokensValueLabel": [
+    {
+      "type": 0,
+      "value": "하루 토큰 수"
+    }
+  ],
+  "settings.aiLimits.unsupported": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 사용 한도를 지원하지 않아요."
+    }
+  ],
+  "settings.aiLimits.usageMonth": [
+    {
+      "type": 0,
+      "value": "이번 달 "
+    },
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "% 사용"
+    }
+  ],
+  "settings.aiLimits.usageToday": [
+    {
+      "type": 0,
+      "value": "오늘 "
+    },
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "% 사용"
+    }
+  ],
+  "settings.aiLimits.usdApprox": [
+    {
+      "type": 0,
+      "value": "약 "
+    },
+    {
+      "type": 1,
+      "value": "amount"
+    },
+    {
+      "type": 0,
+      "value": " 이상"
+    }
+  ],
+  "settings.aiLimits.usdInactive": [
+    {
+      "type": 0,
+      "value": "지금 쓰는 모델의 단가를 몰라 이 금액 한도는 걸리지 않아요. 토큰 한도를 함께 써 보세요."
+    }
+  ],
+  "settings.aiLimits.usdLabel": [
+    {
+      "type": 0,
+      "value": "한 달 금액 한도"
+    }
+  ],
+  "settings.aiLimits.usdModelUnpriced": [
+    {
+      "type": 0,
+      "value": "지금 쓰는 모델의 단가를 몰라 금액 한도를 켤 수 없어요. 토큰 한도를 써 보세요."
+    }
+  ],
+  "settings.aiLimits.usdNoUsageYet": [
+    {
+      "type": 0,
+      "value": "도우미가 한 번 답한 뒤에 켤 수 있어요."
+    }
+  ],
+  "settings.aiLimits.usdOfLimit": [
+    {
+      "type": 1,
+      "value": "spent"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "limit"
+    }
+  ],
+  "settings.aiLimits.usdThisMonth": [
+    {
+      "type": 0,
+      "value": "이번 달 "
+    },
+    {
+      "type": 1,
+      "value": "spent"
+    }
+  ],
+  "settings.aiLimits.usdUnavailableNow": [
+    {
+      "type": 0,
+      "value": "지금은 금액 한도를 켤 수 없어요."
+    }
+  ],
+  "settings.aiLimits.usdUnit": [
+    {
+      "type": 0,
+      "value": "달러"
+    }
+  ],
+  "settings.aiLimits.usdUnpricedRuns": [
+    {
+      "type": 0,
+      "value": "단가를 모르는 모델로 한 요청 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건은 금액에 넣지 않았어요."
+    }
+  ],
+  "settings.aiLimits.usdValueLabel": [
+    {
+      "type": 0,
+      "value": "한 달 금액(달러)"
+    }
+  ],
   "settings.appearance.linkPreviewCompact": [
     {
       "type": 0,

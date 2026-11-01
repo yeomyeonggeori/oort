@@ -10,9 +10,12 @@
 //! `agent_run_event_append`, which takes no lock (a lock here closed deadlock cycles with the
 //! claim/approve/cancel paths — migration 128) and folds an immediate stage repeat; the
 //! 200-row cap is `agent_run_event_trim`, called after every server-side append here (stage or claimed). There is no other INSERT into the table
-//! but one: `tool_call` rows (ADR-0200 증보 2026-10-15) are written by `agent_run_tool_call_record`
+//! but two: `tool_call` rows (ADR-0200 증보 2026-10-15) are written by `agent_run_tool_call_record`
 //! (migration 133, [`record_tool_call_in_tx`]) under their own 100-row cap that deletes nothing;
-//! the 200-row trim neither counts nor deletes them.
+//! the 200-row trim neither counts nor deletes them. And the agent's own `activity` / `plan` rows
+//! (ADR-0200 증보 7, migration 168) are written by `agent_run_activity_record`
+//! ([`crate::run_activity::record_run_activity_in_tx`]) under their own roll; the 200-row trim
+//! neither counts nor deletes those either, and the stage fold looks past them.
 //!
 //! `seq` is an ordering key from a global sequence (gaps, cross-tenant): callers must
 //! not hand it to a client as a count (migration 128).
@@ -94,7 +97,9 @@ pub async fn workspaces_with_expired_run_events(
               AND (EXISTS (SELECT 1 FROM agent_run_event e \
                             WHERE e.workspace_id = r.workspace_id AND e.run_id = r.id) \
                    OR EXISTS (SELECT 1 FROM agent_run_tool_tally t \
-                               WHERE t.workspace_id = r.workspace_id AND t.run_id = r.id)) \
+                               WHERE t.workspace_id = r.workspace_id AND t.run_id = r.id) \
+                   OR EXISTS (SELECT 1 FROM agent_run_activity_tally a \
+                               WHERE a.workspace_id = r.workspace_id AND a.run_id = r.id)) \
             LIMIT $2) expired",
     )
     .bind(RUN_EVENT_RETENTION_DAYS)
@@ -151,7 +156,27 @@ pub async fn delete_expired_run_events_in_tx(
     .bind(batch)
     .execute(&mut *conn)
     .await?;
-    Ok(deleted.rows_affected() + tallies.rows_affected())
+    // The agent's ended-unit total (ADR-0200 증보 7 7-6) has the ledger's lifetime too.
+    let activity_totals = sqlx::query(
+        "WITH doomed AS MATERIALIZED ( \
+           SELECT t.workspace_id, t.run_id, t.kind \
+             FROM agent_run_activity_tally t \
+             JOIN agent_run r ON r.workspace_id = t.workspace_id AND r.id = t.run_id \
+            WHERE t.workspace_id = $1 \
+              AND r.finished_at IS NOT NULL \
+              AND r.finished_at < clock_timestamp() - make_interval(days => $2) \
+            ORDER BY r.finished_at \
+            LIMIT $3 \
+              FOR UPDATE OF t SKIP LOCKED) \
+         DELETE FROM agent_run_activity_tally x USING doomed d \
+          WHERE x.workspace_id = d.workspace_id AND x.run_id = d.run_id AND x.kind = d.kind",
+    )
+    .bind(workspace_id)
+    .bind(RUN_EVENT_RETENTION_DAYS)
+    .bind(batch)
+    .execute(&mut *conn)
+    .await?;
+    Ok(deleted.rows_affected() + tallies.rows_affected() + activity_totals.rows_affected())
 }
 
 // ---------------------------------------------------------------------------

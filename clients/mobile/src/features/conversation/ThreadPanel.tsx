@@ -392,7 +392,12 @@ export function ThreadPanel({
       // 한다면 그것은 "내가 친 채팅이 아래로 떠서 스크롤해야 나온다"와 같은
       // 결함이 한 화면 건너에서 반복되는 것이다.
       onReplySent?.();
-      void sendReply(root.id, body, options?.attachments);
+      void sendReply(
+        root.id,
+        body,
+        options?.attachments,
+        options?.suppressUnfurl === true ? {suppressUnfurl: true} : undefined,
+      );
     },
     [sendReply, root.id, onReplySent],
   );

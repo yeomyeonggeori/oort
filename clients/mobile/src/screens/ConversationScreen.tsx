@@ -1553,6 +1553,9 @@ export default function ConversationScreen({
       setQuote(null);
       // 인용·첨부가 없는 글만 호출로 간다 — 코어 호출 경로는 둘을 싣지 않는다. 그 밖의
       // `@별칭`은 평범한 메시지다(서버도 거기서 작업을 만들지 않는다).
+      //
+      // 알려진 한계(#5016): 개인 에이전트 호출 경로는 메시지를 코어 `callPersonalAgent` 가 직접 보내고 그 요청이
+      // `suppressUnfurl` 을 싣지 못한다. 입력칸 ✕로 미리보기를 끈 `@별칭` 호출 메시지에는 카드가 생길 수 있다.
       if (
         replyToId === undefined &&
         (options?.attachments?.length ?? 0) === 0 &&
@@ -1560,7 +1563,13 @@ export default function ConversationScreen({
       ) {
         return;
       }
-      void send(body, replyToId, options?.attachments);
+      void send(
+        body,
+        replyToId,
+        options?.attachments,
+        undefined,
+        options?.suppressUnfurl === true ? {suppressUnfurl: true} : undefined,
+      );
     },
     [send, tryPersonalCall],
   );

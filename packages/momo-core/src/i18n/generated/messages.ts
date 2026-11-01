@@ -107,6 +107,59 @@ export const messageKeys = [
   "mobile.locale.backToSettings",
   "mobile.locale.permissionNotice",
   "mobile.locale.saving",
+  "settings.aiLimits.ceilingSearches",
+  "settings.aiLimits.ceilingTokens",
+  "settings.aiLimits.cleared",
+  "settings.aiLimits.description",
+  "settings.aiLimits.errorEmpty",
+  "settings.aiLimits.errorInvalidCount",
+  "settings.aiLimits.errorInvalidUsd",
+  "settings.aiLimits.errorOverCeiling",
+  "settings.aiLimits.errorTooLarge",
+  "settings.aiLimits.errorZero",
+  "settings.aiLimits.loadFailed",
+  "settings.aiLimits.loading",
+  "settings.aiLimits.notAdmin",
+  "settings.aiLimits.offline",
+  "settings.aiLimits.operatorOff",
+  "settings.aiLimits.operatorSearchOff",
+  "settings.aiLimits.pricingNote",
+  "settings.aiLimits.resetsDate",
+  "settings.aiLimits.resetsDay",
+  "settings.aiLimits.retry",
+  "settings.aiLimits.rowHint",
+  "settings.aiLimits.save",
+  "settings.aiLimits.saved",
+  "settings.aiLimits.saveFailed",
+  "settings.aiLimits.saveForbidden",
+  "settings.aiLimits.saving",
+  "settings.aiLimits.searchesLabel",
+  "settings.aiLimits.searchesOfLimit",
+  "settings.aiLimits.searchesToday",
+  "settings.aiLimits.searchesUnit",
+  "settings.aiLimits.searchesValueLabel",
+  "settings.aiLimits.searchHint",
+  "settings.aiLimits.stopHint",
+  "settings.aiLimits.title",
+  "settings.aiLimits.tokensLabel",
+  "settings.aiLimits.tokensOfLimit",
+  "settings.aiLimits.tokensToday",
+  "settings.aiLimits.tokensUnit",
+  "settings.aiLimits.tokensValueLabel",
+  "settings.aiLimits.unsupported",
+  "settings.aiLimits.usageMonth",
+  "settings.aiLimits.usageToday",
+  "settings.aiLimits.usdApprox",
+  "settings.aiLimits.usdInactive",
+  "settings.aiLimits.usdLabel",
+  "settings.aiLimits.usdModelUnpriced",
+  "settings.aiLimits.usdNoUsageYet",
+  "settings.aiLimits.usdOfLimit",
+  "settings.aiLimits.usdThisMonth",
+  "settings.aiLimits.usdUnavailableNow",
+  "settings.aiLimits.usdUnit",
+  "settings.aiLimits.usdUnpricedRuns",
+  "settings.aiLimits.usdValueLabel",
   "settings.appearance.linkPreviewCompact",
   "settings.appearance.linkPreviewCompactHint",
   "settings.appearance.linkPreviewOff",
@@ -339,6 +392,96 @@ export const argumentSpecs = {
   "mobile.locale.backToSettings": {},
   "mobile.locale.permissionNotice": {},
   "mobile.locale.saving": {},
+  "settings.aiLimits.ceilingSearches": {
+    "limit": "number"
+  },
+  "settings.aiLimits.ceilingTokens": {
+    "limit": "number"
+  },
+  "settings.aiLimits.cleared": {},
+  "settings.aiLimits.description": {},
+  "settings.aiLimits.errorEmpty": {},
+  "settings.aiLimits.errorInvalidCount": {},
+  "settings.aiLimits.errorInvalidUsd": {},
+  "settings.aiLimits.errorOverCeiling": {
+    "max": "number"
+  },
+  "settings.aiLimits.errorTooLarge": {
+    "max": "number"
+  },
+  "settings.aiLimits.errorZero": {},
+  "settings.aiLimits.loadFailed": {},
+  "settings.aiLimits.loading": {},
+  "settings.aiLimits.notAdmin": {},
+  "settings.aiLimits.offline": {},
+  "settings.aiLimits.operatorOff": {},
+  "settings.aiLimits.operatorSearchOff": {},
+  "settings.aiLimits.pricingNote": {},
+  "settings.aiLimits.resetsDate": {
+    "date": "string",
+    "time": "string"
+  },
+  "settings.aiLimits.resetsDay": {
+    "day": "string",
+    "time": "string"
+  },
+  "settings.aiLimits.retry": {},
+  "settings.aiLimits.rowHint": {},
+  "settings.aiLimits.save": {},
+  "settings.aiLimits.saved": {},
+  "settings.aiLimits.saveFailed": {},
+  "settings.aiLimits.saveForbidden": {},
+  "settings.aiLimits.saving": {},
+  "settings.aiLimits.searchesLabel": {},
+  "settings.aiLimits.searchesOfLimit": {
+    "limit": "number",
+    "used": "number"
+  },
+  "settings.aiLimits.searchesToday": {
+    "used": "number"
+  },
+  "settings.aiLimits.searchesUnit": {},
+  "settings.aiLimits.searchesValueLabel": {},
+  "settings.aiLimits.searchHint": {},
+  "settings.aiLimits.stopHint": {},
+  "settings.aiLimits.title": {},
+  "settings.aiLimits.tokensLabel": {},
+  "settings.aiLimits.tokensOfLimit": {
+    "limit": "number",
+    "used": "number"
+  },
+  "settings.aiLimits.tokensToday": {
+    "used": "number"
+  },
+  "settings.aiLimits.tokensUnit": {},
+  "settings.aiLimits.tokensValueLabel": {},
+  "settings.aiLimits.unsupported": {},
+  "settings.aiLimits.usageMonth": {
+    "percent": "number"
+  },
+  "settings.aiLimits.usageToday": {
+    "percent": "number"
+  },
+  "settings.aiLimits.usdApprox": {
+    "amount": "string"
+  },
+  "settings.aiLimits.usdInactive": {},
+  "settings.aiLimits.usdLabel": {},
+  "settings.aiLimits.usdModelUnpriced": {},
+  "settings.aiLimits.usdNoUsageYet": {},
+  "settings.aiLimits.usdOfLimit": {
+    "limit": "string",
+    "spent": "string"
+  },
+  "settings.aiLimits.usdThisMonth": {
+    "spent": "string"
+  },
+  "settings.aiLimits.usdUnavailableNow": {},
+  "settings.aiLimits.usdUnit": {},
+  "settings.aiLimits.usdUnpricedRuns": {
+    "count": "number"
+  },
+  "settings.aiLimits.usdValueLabel": {},
   "settings.appearance.linkPreviewCompact": {},
   "settings.appearance.linkPreviewCompactHint": {},
   "settings.appearance.linkPreviewOff": {},
@@ -581,6 +724,59 @@ export interface MessageArgs {
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.permissionNotice": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "settings.aiLimits.ceilingSearches": { limit: number };
+  "settings.aiLimits.ceilingTokens": { limit: number };
+  "settings.aiLimits.cleared": Record<string, never>;
+  "settings.aiLimits.description": Record<string, never>;
+  "settings.aiLimits.errorEmpty": Record<string, never>;
+  "settings.aiLimits.errorInvalidCount": Record<string, never>;
+  "settings.aiLimits.errorInvalidUsd": Record<string, never>;
+  "settings.aiLimits.errorOverCeiling": { max: number };
+  "settings.aiLimits.errorTooLarge": { max: number };
+  "settings.aiLimits.errorZero": Record<string, never>;
+  "settings.aiLimits.loadFailed": Record<string, never>;
+  "settings.aiLimits.loading": Record<string, never>;
+  "settings.aiLimits.notAdmin": Record<string, never>;
+  "settings.aiLimits.offline": Record<string, never>;
+  "settings.aiLimits.operatorOff": Record<string, never>;
+  "settings.aiLimits.operatorSearchOff": Record<string, never>;
+  "settings.aiLimits.pricingNote": Record<string, never>;
+  "settings.aiLimits.resetsDate": { date: string; time: string };
+  "settings.aiLimits.resetsDay": { day: string; time: string };
+  "settings.aiLimits.retry": Record<string, never>;
+  "settings.aiLimits.rowHint": Record<string, never>;
+  "settings.aiLimits.save": Record<string, never>;
+  "settings.aiLimits.saved": Record<string, never>;
+  "settings.aiLimits.saveFailed": Record<string, never>;
+  "settings.aiLimits.saveForbidden": Record<string, never>;
+  "settings.aiLimits.saving": Record<string, never>;
+  "settings.aiLimits.searchesLabel": Record<string, never>;
+  "settings.aiLimits.searchesOfLimit": { limit: number; used: number };
+  "settings.aiLimits.searchesToday": { used: number };
+  "settings.aiLimits.searchesUnit": Record<string, never>;
+  "settings.aiLimits.searchesValueLabel": Record<string, never>;
+  "settings.aiLimits.searchHint": Record<string, never>;
+  "settings.aiLimits.stopHint": Record<string, never>;
+  "settings.aiLimits.title": Record<string, never>;
+  "settings.aiLimits.tokensLabel": Record<string, never>;
+  "settings.aiLimits.tokensOfLimit": { limit: number; used: number };
+  "settings.aiLimits.tokensToday": { used: number };
+  "settings.aiLimits.tokensUnit": Record<string, never>;
+  "settings.aiLimits.tokensValueLabel": Record<string, never>;
+  "settings.aiLimits.unsupported": Record<string, never>;
+  "settings.aiLimits.usageMonth": { percent: number };
+  "settings.aiLimits.usageToday": { percent: number };
+  "settings.aiLimits.usdApprox": { amount: string };
+  "settings.aiLimits.usdInactive": Record<string, never>;
+  "settings.aiLimits.usdLabel": Record<string, never>;
+  "settings.aiLimits.usdModelUnpriced": Record<string, never>;
+  "settings.aiLimits.usdNoUsageYet": Record<string, never>;
+  "settings.aiLimits.usdOfLimit": { limit: string; spent: string };
+  "settings.aiLimits.usdThisMonth": { spent: string };
+  "settings.aiLimits.usdUnavailableNow": Record<string, never>;
+  "settings.aiLimits.usdUnit": Record<string, never>;
+  "settings.aiLimits.usdUnpricedRuns": { count: number };
+  "settings.aiLimits.usdValueLabel": Record<string, never>;
   "settings.appearance.linkPreviewCompact": Record<string, never>;
   "settings.appearance.linkPreviewCompactHint": Record<string, never>;
   "settings.appearance.linkPreviewOff": Record<string, never>;

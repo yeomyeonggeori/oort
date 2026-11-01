@@ -166,3 +166,12 @@ describe("문구는 도우미의 표시 이름을 따라간다 (ADR-0201 증보 
     expect(TEAM_AI_NEXT_STEP_COPY.enabled("Hermes")).toBe("Hermes를 켰어요.");
   });
 });
+
+// 서버 PR(#4944) 뒤 기본은 「제한 없음」이다. 카드 한 줄이 하루 상한이 있다고 말하면 그 순간부터 거짓이다.
+describe("다음 단계 카드의 사용량 문구", () => {
+  it("하루 상한이 있다고 말하지 않고, 한도를 정하는 곳을 가리킨다", () => {
+    expect(TEAM_AI_NEXT_STEP_COPY.capLine).not.toContain("상한");
+    expect(TEAM_AI_NEXT_STEP_COPY.capLine).toContain("정하지 않으면 없");
+    expect(TEAM_AI_NEXT_STEP_COPY.capLine).toContain("「사용 한도」");
+  });
+});
