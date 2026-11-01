@@ -131,6 +131,21 @@ export function approvalWaits(
 }
 
 /**
+ * 워크스페이스 **전체**에서 사람을 기다리는 승인들 — 채널이 하나가 아닌 표면(홈 「작업 중」 카드·에이전트 탭)의 재료 (#5085).
+ *
+ * 대화 화면은 한 채널의 대기를 `approvalWaits(approvals, channelId)` 로 읽는다. 이 함수는 새 판정을 두지 않고 **그 함수를 승인이 있는
+ * 채널마다 한 번씩** 불러 이어 붙인다: 대화 화면의 줄과 홈 카드·에이전트 탭이 같은 승인을 두고 「기다린다」·「아니다」가 갈라질 길이
+ * 없다(대기가 아닌 것은 대기로 읽지 않는다는 `approvalGates` 의 규율이 그대로 따라온다).
+ */
+export function workspaceApprovalWaits(
+  approvals: readonly Approval[] | undefined,
+): readonly ApprovalWait[] {
+  const channelIds = new Set<string>();
+  for (const approval of approvals ?? []) channelIds.add(approval.channelId);
+  return [...channelIds].flatMap(channelId => approvalWaits(approvals, channelId));
+}
+
+/**
  * 이 카드에 컨트롤을 세울 수 있나. 세울 수 없으면 `null`.
  *
  * 네 문 중 ①②③ 을 여기서 지킨다(④ 오프라인은 화면이 안다).

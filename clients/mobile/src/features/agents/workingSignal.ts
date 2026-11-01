@@ -1,8 +1,10 @@
 import {useEffect, useState, useSyncExternalStore} from 'react';
 import {
+  applyApprovalWaits,
   byOldestTurn,
   isStaleSignal,
   type AgentWorkingSignal,
+  type ApprovalWait,
 } from '@momo/core/features/agents/workingSignal';
 
 // =============================================================================
@@ -205,6 +207,52 @@ export function agentTurnsForMember(
     out.push(signal);
   }
   return out.sort(byOldestTurn);
+}
+
+/**
+ * 열린 턴 **전체**(채널 너머)에 승인 원장을 덮은 사본 — 홈 「작업 중」 카드와 에이전트 탭이 읽는 판 (#5085).
+ *
+ * 승인 원장이 레일보다 이긴다(#3738, #5066): 사람을 기다리는 승인이 있는 에이전트의 턴은 레일이 뭐라 하든 승인 대기이고, 레일이 턴을
+ * 잃었어도 승인이 살아 있는 동안은 그 턴이 존재한다. 대화 화면은 한 채널의 턴에 이 덮어쓰기를 하고
+ * (`applyApprovalWaits(agentTurnsInChannel(…))`), 이 두 표면은 **채널 너머**를 읽어서 같은 일을 하지 못하고 있었다: 서버는 승인에 걸린
+ * run 을 레일 프레임으로 알리지 않아(중간 프레임은 늘 `running`) 홈 카드와 에이전트 탭이 같은 에이전트를 「작업 중」이라고 말했다.
+ *
+ * 규칙은 코어 `applyApprovalWaits` 하나이고 여기에 새 판정은 없다. 그 규칙이 **채널 하나**를 받으므로 대기 승인이 있는 채널마다
+ * 한 번씩 부를 뿐이다. 두 가지는 대화 화면과 같게 지킨다.
+ *
+ *  - 덮기 전에 **만료된 신호를 거른다**(`agentTurnsInChannel`). 90초를 넘긴 `working` 신호를 그대로 넘기면 덮어쓰기가 그 자리에서 승인
+ *    대기로 바꾸고 옛 `lastActivityAtMs` 를 그대로 둬서, 아래 표면의 만료 거름이 그 턴을 지우고 살아 있는 승인은 아무 데도 안 보인다.
+ *    먼저 거르면 덮어쓰기가 승인을 근거로 새 턴을 세운다.
+ *  - 기한이 지난 승인은 기다림이 아니다(코어가 `nowMs` 로 거른다). 이 표면들은 시계를 마운트하지 않으므로 호출자가 렌더의 `Date.now()` 를 준다.
+ *
+ * 대기 승인이 없는 채널은 건드리지 않는다. 입력은 바꾸지 않고 사본을 돌려준다(없으면 같은 객체).
+ */
+export function withApprovalWaits(
+  all: ReadonlyMap<Key, AgentWorkingSignal>,
+  waits: readonly ApprovalWait[],
+  nowMs: number,
+): ReadonlyMap<Key, AgentWorkingSignal> {
+  if (waits.length === 0) return all;
+  // 대기 승인이 있는 채널들. 키는 접은 id 로 합치고(와이어가 대소문자를 섞어 보낸다), 코어에는 받은 그대로 넘긴다.
+  const channels = new Map<string, string>();
+  for (const wait of waits) channels.set(wait.channelId.toLowerCase(), wait.channelId);
+
+  const next = new Map(all);
+  for (const [folded, channelId] of channels) {
+    const prefix = `${folded}|`;
+    for (const key of all.keys()) {
+      if (key.startsWith(prefix)) next.delete(key);
+    }
+    for (const turn of applyApprovalWaits(
+      agentTurnsInChannel(all, channelId, nowMs),
+      channelId,
+      waits,
+      nowMs,
+    )) {
+      next.set(keyOf(turn.channelId, turn.memberId), turn);
+    }
+  }
+  return next;
 }
 
 /**
