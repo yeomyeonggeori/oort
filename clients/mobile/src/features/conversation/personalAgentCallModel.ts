@@ -163,6 +163,11 @@ export async function runPersonalAgentCall(
     body: string;
     target: CallTarget;
     signer: HumanControlSigner;
+    /**
+     * 입력칸의 ✕로 이 메시지의 링크 미리보기를 끈 채 보낸다(#5037). 켠 때만 있다 — 코어 호출의 전송 요청은
+     * closed-world라, 켜지 않은 호출은 이 필드 이전과 같은 입력이어야 한다.
+     */
+    suppressUnfurl?: boolean;
   },
   deps: CallDeps,
 ): Promise<CallRun> {
@@ -200,6 +205,7 @@ export async function runPersonalAgentCall(
       agent: {memberId: input.target.memberId, handle: input.target.handle},
       destination: pick.destination,
       signer: input.signer,
+      ...(input.suppressUnfurl === true ? {suppressUnfurl: true} : {}),
     });
   } catch {
     return {kind: 'unsent', clientMsgId};
