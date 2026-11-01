@@ -2933,6 +2933,39 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
         "the hold is bounded — without a deadline one unanswered card silences the agent"
     );
 
+    // #5084 — the rail is told the run waits on a person: exactly one frame, named by this approval,
+    // on this agent's rail in this channel (and nothing else was added after the run's own frames).
+    let rail = rail_of_approval(&su, fixture.workspace, approval_id).await;
+    let waiting: Vec<_> = rail
+        .iter()
+        .filter(|(_, status, _)| status == "awaiting_approval")
+        .collect();
+    assert_eq!(
+        waiting.len(),
+        1,
+        "a park is exactly one rail frame: {rail:?}"
+    );
+    assert_eq!(waiting[0].0, "thinking", "{rail:?}");
+    assert!(
+        waiting[0]
+            .2
+            .ends_with(&format!("awaiting_approval:{approval_id}")),
+        "the hold is named by its approval: {rail:?}"
+    );
+    assert!(
+        waiting[0].2.starts_with(&momo_agent::agent_status_channel(
+            fixture.workspace,
+            fixture.channel,
+            fixture.hosted_agent
+        )),
+        "addressed to this agent's own rail in this channel: {rail:?}"
+    );
+    assert_eq!(
+        rail.last().map(|(_, status, _)| status.as_str()),
+        Some("awaiting_approval"),
+        "the wait is the rail's last word: {rail:?}"
+    );
+
     // **No new outbox producer.** The card's broadcast is `send_message_in_tx`'s
     // own; not one extra `agent_job` was enqueued for this agent.
     assert_eq!(
@@ -2986,6 +3019,15 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
     .await
     .unwrap();
     assert_eq!(cards, 1, "one proposal, one card");
+    assert_eq!(
+        rail_of_approval(&su, fixture.workspace, approval_id)
+            .await
+            .iter()
+            .filter(|(_, status, _)| status == "awaiting_approval")
+            .count(),
+        1,
+        "a refused second proposal parks nothing and tells the rail nothing"
+    );
 
     // ---- the proposal is still pending, and nothing has resumed ------------
     //
@@ -3048,6 +3090,20 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
     assert_eq!(
         run_after_reject, "cancelled",
         "a rejection releases the concurrency gate"
+    );
+    // #5084 — and the rail's last word is the ending, right after the wait: nothing runs in between.
+    let rail = rail_of_approval(&su, fixture.workspace, approval_id).await;
+    let tail: Vec<(&str, &str)> = rail
+        .iter()
+        .rev()
+        .take(2)
+        .rev()
+        .map(|(phase, status, _)| (phase.as_str(), status.as_str()))
+        .collect();
+    assert_eq!(
+        tail,
+        [("thinking", "awaiting_approval"), ("error", "cancelled")],
+        "a rejection ends the wait on the rail: {rail:?}"
     );
 
     // **The `tool_result` line actually reaches the channel.** This is what the
@@ -3149,6 +3205,26 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
         run_after_sweep, "timed_out",
         "an expired proposal MUST release the concurrency gate — otherwise one \
          unanswered card silences the agent permanently"
+    );
+    // #5084 — the second hold had its own frame (its own approval in the key), and the sweep's ending
+    // follows it directly.
+    let rail = rail_of_approval(&su, fixture.workspace, second).await;
+    let tail: Vec<(&str, &str)> = rail
+        .iter()
+        .rev()
+        .take(2)
+        .rev()
+        .map(|(phase, status, _)| (phase.as_str(), status.as_str()))
+        .collect();
+    assert_eq!(
+        tail,
+        [("thinking", "awaiting_approval"), ("error", "timed_out")],
+        "an expiry ends the wait on the rail: {rail:?}"
+    );
+    assert!(
+        rail.iter()
+            .any(|(_, _, key)| key.ends_with(&format!("awaiting_approval:{second}"))),
+        "the second hold is named by its own approval: {rail:?}"
     );
     assert_eq!(
         agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
@@ -3317,6 +3393,31 @@ async fn decide(
         .expect("decision responds")
         .status()
         .as_u16()
+}
+
+/// #5084 — the `agent.status` frames of the run behind an approval, oldest first, as
+/// `(phase, run_status, idempotency key)`. The run id rides the payload upper-cased (like Swift's
+/// `uuidString`), hence the `upper`.
+async fn rail_of_approval(
+    su: &PgPool,
+    workspace: Uuid,
+    approval: Uuid,
+) -> Vec<(String, String, String)> {
+    sqlx::query_as(
+        "SELECT o.payload->'data'->'payload'->>'phase', \
+                o.payload->'data'->'payload'->>'run_status', \
+                o.payload->>'idempotency_key' \
+           FROM outbox o \
+           JOIN approval a ON upper(o.payload->'data'->'payload'->>'run_id') = upper(a.run_id::text) \
+          WHERE o.workspace_id = $1 AND a.workspace_id = $1 AND a.id = $2 \
+            AND o.kind = 'broadcast' AND o.payload->'data'->>'type' = 'agent.status' \
+          ORDER BY o.id",
+    )
+    .bind(workspace)
+    .bind(approval)
+    .fetch_all(su)
+    .await
+    .expect("read the run's rail frames")
 }
 
 async fn channel_message_count(pool: &PgPool, workspace: Uuid, channel: Uuid) -> i64 {
