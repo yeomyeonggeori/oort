@@ -1,6 +1,8 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {readFileSync} from 'fs';
+import {join} from 'path';
 import React from 'react';
 
 import {Timeline} from '../src/features/conversation/Timeline';
@@ -95,9 +97,9 @@ describe('루트는 내가 방금 단 답글을 센다', () => {
     expect(rollup?.lastReplyAtMs).toBe(MY_REPLY.createdAtMs);
   });
 
-  it('서버가 앞서 있으면 서버가 이긴다 — 안 열어 본 스레드가 0개가 되지 않는다', () => {
-    // 로컬은 **불러온** 답글만 센다. 스레드를 열기 전에는 0이고, 그 0이 서버의
-    // 5를 이기면 있던 답글이 사라진 것처럼 보인다.
+  it('서버 수가 그대로 선다 — 안 열어 본 스레드가 0개가 되지 않는다', () => {
+    // 이 화면이 **불러온** 답글은 스레드를 열기 전에는 없다. 그래도 서버의 5는 그대로
+    // 서야 한다(코어가 서버 수 위에 든 답글을 얹는다 — 든 답글이 없으면 얹을 것도 없다).
     const busy = message({
       ...ROOT,
       thread: {reply_count: 5, last_reply_seq: 40, last_reply_at: BASE_MS + 1},
@@ -106,7 +108,7 @@ describe('루트는 내가 방금 단 답글을 센다', () => {
     expect(rollup?.replyCount).toBe(5);
   });
 
-  it('로컬이 앞서면 로컬이 이긴다 — 방금 단 답글이 세어진다', () => {
+  it('서버 요약 뒤에 든 답글은 서버 수 위에 얹힌다 — 방금 단 답글이 세어진다', () => {
     const busy = message({
       ...ROOT,
       thread: {reply_count: 1, last_reply_seq: 11, last_reply_at: BASE_MS},
@@ -224,6 +226,59 @@ describe('채널 타임라인에서', () => {
       />,
     );
     expect(screen.queryByTestId('reply-marker')).toBeNull();
+  });
+});
+
+describe('열린 스레드의 요약 줄은 남의 새 답글에도 칩이 깜빡이지 않는다 (#5032)', () => {
+  // 서버가 페이지를 읽을 때의 스냅샷: 답글 1(머리 seq 11), 내가 따라가고 안 읽은 것 0. 그 뒤에 김인턴이 답글을 단다.
+  const followed = message({
+    ...ROOT,
+    thread: {
+      reply_count: 1,
+      last_reply_seq: 11,
+      last_reply_at: BASE_MS,
+      participant_ids: [SELF],
+      participant_count: 1,
+      unread_reply_count: 0,
+    },
+  });
+  const theirs = message({id: 'reply-2', seq: 12, rootId: ROOT_ID, authorMemberId: OTHER, body: '저도요.'});
+
+  function timeline(messages: Message[], viewingThreadId: string | null) {
+    return (
+      <Timeline
+        messages={messages}
+        directory={DIRECTORY}
+        status="ready"
+        myMemberId={SELF}
+        nowMs={BASE_MS + 120_000}
+        actions={actions()}
+        viewingThreadId={viewingThreadId}
+      />
+    );
+  }
+
+  it('스레드 화면이 열려 있고 앱이 앞이면 새 답글이 와도 칩 없이 수만 오른다 — 읽음 신호의 응답을 기다리지 않고, 아니면 같은 프레임이 칩을 세운다', () => {
+    const view = render(timeline([followed, MY_REPLY], ROOT_ID));
+    expect(screen.queryByTestId('thread-unread-chip')).toBeNull();
+    // 실시간 프레임이 닿은 **바로 그 렌더**다: 읽음 신호는 보내지도 응답받지도 않았다.
+    view.rerender(timeline([followed, MY_REPLY, theirs], ROOT_ID));
+    expect(screen.queryByTestId('thread-unread-chip')).toBeNull();
+    expect(screen.getByText('답글 2개')).toBeTruthy();
+    // 대조: 열려 있지 않거나 다른 스레드가 열려 있으면 같은 프레임이 칩을 세운다.
+    view.rerender(timeline([followed, MY_REPLY, theirs], null));
+    expect(screen.getByText('새 답글 1')).toBeTruthy();
+    view.rerender(timeline([followed, MY_REPLY, theirs], 'someone-else'));
+    expect(screen.getByText('새 답글 1')).toBeTruthy();
+  });
+
+  it('호스트가 열린 스레드와 앱 앞 판정을 목록에 넘긴다 — 읽음 신호를 보내는 조건과 같은 훅이다', () => {
+    // `ConversationScreen`은 통합 렌더가 무거워(앱 전체·가짜 서버) 배선은 소스로 지킨다(웹 `threadSurface.test.ts`와 같은 방식).
+    const screenSource = readFileSync(join(__dirname, '../src/screens/ConversationScreen.tsx'), 'utf8');
+    const panelSource = readFileSync(join(__dirname, '../src/features/conversation/ThreadPanel.tsx'), 'utf8');
+    expect(screenSource).toContain('viewingThreadId={thread !== null && appForeground ? thread.id : null}');
+    expect(screenSource).toContain('const appForeground = useAppForeground(thread !== null);');
+    expect(panelSource).toContain('const appActive = useAppForeground();');
   });
 });
 

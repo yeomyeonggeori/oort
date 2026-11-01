@@ -147,7 +147,7 @@ import {dmClosureMode} from '../features/sidebar/dmVerdicts';
 import type {ChannelRowTarget} from '../features/sidebar/channelRowActions';
 import {useChannelRowActions} from '../features/sidebar/useChannelRowActions';
 import {visitFlushReason} from '../features/readState/advertise';
-import {useViewingBeat} from '../features/readState/useViewingBeat';
+import {useAppForeground, useViewingBeat} from '../features/readState/useViewingBeat';
 import {useReportViewedConversation} from '../push/viewedConversation';
 import {
   foldVisitBoundary,
@@ -912,6 +912,10 @@ export default function ConversationScreen({
 
   // ---- the action surface ---------------------------------------------------
   const [thread, setThread] = useState<Message | null>(null);
+  // 열린 스레드를 **보고 있는가**(스레드 화면이 떠 있고 앱이 앞이다): 채널 목록의 그 루트 요약 줄은 남의 새 답글에도 안 읽은
+  // 수를 0으로 읽는다. 스레드 화면이 읽음 신호를 보내는 조건(`ThreadPanel`)과 같은 앱 앞 판정이다(#5032). 스레드가 열려 있을
+  // 때만 구독한다 — 열려 있지 않으면 이 화면은 앱 앞뒤 전환에 다시 그려지지 않는다.
+  const appForeground = useAppForeground(thread !== null);
   // 앞에 떠 있는 동안 온 푸시가 「지금 보는 대화」를 읽는 자리 (#4310). 방과, 열려 있는 스레드가
   // 있으면 그 루트를 올린다 — 알림 처리기(`push/foregroundPresentation.ts`)가 같은 방·같은
   // 스레드의 알림만 숨기려면 둘 다 필요하다.
@@ -2118,6 +2122,7 @@ export default function ConversationScreen({
               directory={directory}
               status={timeline.status}
               channelKind={channel?.kind}
+              viewingThreadId={thread !== null && appForeground ? thread.id : null}
               requestThoughts={dmAgent !== null}
               peer={peer}
               dmGroup={dmGroup}
