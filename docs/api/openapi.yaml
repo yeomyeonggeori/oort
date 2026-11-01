@@ -19256,9 +19256,22 @@ components:
             `doorbell_rung` it is `<edge>_<result>` (`leading|trailing|urgent` + `ok|failed`),
             never an HTTP status or host. On `tool_call` it is `ok` or one closed failure
             code (`invalid_arguments`, `not_authorized`, `unavailable`, `conflict`,
-            `already_claimed`, `claim_expired`, `internal`) — never an error message.
-        approvalId: {type: string, format: uuid}
-        actorMemberId: {type: string, format: uuid}
+            `already_claimed`, `claim_expired`, `internal`) — never an error message. On a
+            row that names an approval it is absent wherever `approvalId` is withheld.
+        approvalId:
+          type: string
+          format: uuid
+          description: >
+            Under the rule of `AgentRunProgress.approvalId`: named only to a caller who is an
+            active member of the channel the approval was raised in, which need not be the
+            run's own. For anyone else the row stays but loses `approvalId`, `actorMemberId`
+            and `code` together; an approval whose channel is unknown is named to no one.
+        actorMemberId:
+          type: string
+          format: uuid
+          description: >
+            Who asked or decided the approval on an approval row; absent wherever
+            `approvalId` is withheld.
         tool:
           type: string
           pattern: "^oort_[a-z_]{1,40}$"

@@ -32,6 +32,7 @@
 //! | `active_8_the_channel_progress_read_carries_the_same_bundle` | leave the bundle out of the channel's own progress read, or hand it a viewer other than the caller; name a run's pending approval (`approvalId`, its deadline) to a viewer who is not in the approval's room |
 //! | `active_9_a_viewer_outside_the_approvals_room_is_told_nothing_of_it` | stop treating a room the viewer left (or never joined) as out of sight (the bundle, `approvalId` or its deadline still reach them), or judge the two fields by the run's room instead of the approval's |
 //! | `active_10_a_deleted_card_or_a_card_of_another_room_gives_no_sentence` | quote a card its author deleted, or a card that is not in the approval's own room |
+//! | `active_11_the_runs_ledger_names_an_approval_by_the_rule_the_progress_read_follows` | leave the ledger's `approvalId` unfiltered, judge it by the run's room or one approval for the whole ledger, treat a room the viewer left as theirs, name an approval of no known room, leave the asker, the decider or the outcome on a row whose approval is withheld (or take them off a row that is told, or that names no approval), drop rows instead of fields — or make the two reads follow different rules |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -1794,4 +1795,602 @@ async fn active_10_a_deleted_card_or_a_card_of_another_room_gives_no_sentence() 
     );
     assert!(bundle.get("intent").is_none(), "{bundle}");
     assert!(!run_row(&after, deleted_run).to_string().contains(own));
+}
+
+// ---------------------------------------------------------------------------
+// 11 — the run's event ledger names an approval by the rule the progress read follows (#5007)
+// ---------------------------------------------------------------------------
+
+/// Make `agent` the hosted sentinel with a hosted connection, as `active_8` does. The run
+/// ledger exists for no other kind of agent, and the triggers that write it only write for
+/// one that is hosted **when the row is written** — so this comes before any run or approval
+/// is seeded.
+async fn make_hosted(su: &PgPool, workspace: Uuid, agent: Uuid, creator: Uuid) {
+    sqlx::query(
+        "UPDATE agent SET model = 'hosted-agent', base_url = 'https://hosted-agent.invalid/disabled', \
+                config = jsonb_build_object('execution_mode', 'hosted_dial_in') \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .execute(su)
+    .await
+    .expect("make the agent the hosted sentinel");
+    sqlx::query(
+        "INSERT INTO hosted_agent_connection (workspace_id, agent_member_id, status, created_by) \
+         VALUES ($1, $2, 'expired', $3)",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .bind(creator)
+    .execute(su)
+    .await
+    .expect("seed hosted connection");
+}
+
+/// The ledger rows of `run` that name an approval, as the table holds them (oldest first).
+async fn stored_approval_rows(su: &PgPool, run: Uuid) -> Vec<(String, Option<Uuid>)> {
+    sqlx::query_as::<_, (String, Option<Uuid>)>(
+        "SELECT kind, approval_id FROM agent_run_event \
+          WHERE run_id = $1 AND approval_id IS NOT NULL ORDER BY seq",
+    )
+    .bind(run)
+    .fetch_all(su)
+    .await
+    .expect("stored ledger rows")
+}
+
+/// `GET …/agent-runs/{run}/events` as `token` reads it.
+async fn ledger(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    ws: Uuid,
+    run: Uuid,
+    query: &str,
+) -> Value {
+    let response = get(
+        http,
+        base,
+        token,
+        &format!("/v1/workspaces/{ws}/agent-runs/{run}/events{query}"),
+    )
+    .await;
+    assert_eq!(response.status(), 200, "the ledger of run {run}");
+    json_body(response).await
+}
+
+/// The `approvalId` of each ledger row, in order; `None` where the row names none.
+fn named_approvals(ledger: &Value) -> Vec<Option<String>> {
+    ledger["events"]
+        .as_array()
+        .unwrap_or_else(|| panic!("events is an array in {ledger}"))
+        .iter()
+        .map(|event| {
+            event
+                .get("approvalId")
+                .and_then(Value::as_str)
+                .map(str::to_lowercase)
+        })
+        .collect()
+}
+
+/// The approvals a ledger names, in order, without the rows that name none.
+fn approvals_named(ledger: &Value) -> Vec<String> {
+    named_approvals(ledger).into_iter().flatten().collect()
+}
+
+/// The rows of a ledger response.
+fn events_of(ledger: &Value) -> &Vec<Value> {
+    ledger["events"]
+        .as_array()
+        .unwrap_or_else(|| panic!("events is an array in {ledger}"))
+}
+
+/// The keys a ledger row carries, sorted.
+fn keys_of(row: &Value) -> Vec<&str> {
+    let mut keys: Vec<&str> = row
+        .as_object()
+        .expect("a row is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    keys
+}
+
+/// What is left of a row whose approval the reader is not told of: when it was, what kind it
+/// is, and where it stands in the ledger.
+const BARE_ROW: [&str; 3] = ["createdAtMs", "kind", "ordinal"];
+
+/// `ledger` as a reader told only of the approvals in `told` reads it: a row that names any
+/// other approval loses the three fields that belong to that approval — `approvalId`,
+/// `actorMemberId` and `code` — and nothing else.
+fn ruled_for(ledger: &Value, told: &[String]) -> Value {
+    let mut copy = ledger.clone();
+    for event in copy["events"].as_array_mut().expect("events") {
+        let named = event
+            .get("approvalId")
+            .and_then(Value::as_str)
+            .map(str::to_lowercase);
+        if named.is_some_and(|approval| !told.contains(&approval)) {
+            let row = event.as_object_mut().expect("a row is an object");
+            for key in ["approvalId", "actorMemberId", "code"] {
+                row.remove(key);
+            }
+        }
+    }
+    copy
+}
+
+/// For each `(run, the approval it is parked on)`: does the progress read name that approval
+/// to this reader, and does the run's own ledger? One question put to the two reads.
+async fn named_by_both_reads(
+    s: &Setup,
+    token: &str,
+    ws: Uuid,
+    parked: &[(Uuid, Uuid)],
+) -> Vec<(bool, bool)> {
+    let page = active(&s.http, &s.base, token, ws, "?limit=100").await;
+    let mut answers = Vec::new();
+    for &(run, approval) in parked {
+        let id = approval.to_string();
+        let progress = run_row(&page, run)
+            .get("approvalId")
+            .and_then(Value::as_str)
+            == Some(id.as_str());
+        let events = ledger(&s.http, &s.base, token, ws, run, "").await;
+        answers.push((progress, named_approvals(&events).contains(&Some(id))));
+    }
+    answers
+}
+
+/// The member's ledger is the admin's — who is in every room of the tenant — with exactly one
+/// change: on a row that names an approval not in `told`, the three fields of that approval are
+/// gone ([`ruled_for`]). The same rows in the same order with the same ordinals, kinds and
+/// times; every row that names no approval whole; and the member still reads each ledger.
+async fn assert_told_as_ruled(
+    s: &Setup,
+    ws: Uuid,
+    admin_token: &str,
+    token: &str,
+    runs: &[Uuid],
+    told: &[Uuid],
+    when: &str,
+) {
+    let told: Vec<String> = told.iter().map(Uuid::to_string).collect();
+    for &run in runs {
+        let seen_by_admin = ledger(&s.http, &s.base, admin_token, ws, run, "").await;
+        let seen = ledger(&s.http, &s.base, token, ws, run, "").await;
+        assert!(
+            !events_of(&seen).is_empty(),
+            "{when}: the member still reads the ledger of {run}"
+        );
+        assert_eq!(
+            seen,
+            ruled_for(&seen_by_admin, &told),
+            "{when}: the member's ledger of {run} differs from the admin's by more than the \
+             fields of approvals they are not told of"
+        );
+    }
+}
+
+/// A run's ledger carries the id of every approval the run asked (`approval_requested`,
+/// `approval_decided`), who asked or decided it (`actorMemberId`) and, on the decision, how it
+/// ended (`code`). All three are told by the rule `approvalId` of the progress read follows
+/// (#4985): to a person who is an active member of the room **the approval** was raised in,
+/// whichever room the run is in. A row whose approval is not theirs stays, bare — `ordinal`,
+/// `kind` and `createdAtMs` — and a row that names no approval is whole for everyone who may
+/// read the run at all.
+///
+/// Four runs of one room: three parked on an approval raised elsewhere (in a room the reader
+/// leaves, in a room the reader never joins and — on a run that asked twice — one decided
+/// approval of the run's own room and then one of the room never joined, so one ledger tells
+/// one and not the other), and one that was answered in the room never joined (the agent asked,
+/// the admin approved) and then failed with a code of its own. The reader is told while they
+/// are in the room, loses the id, the asker, the decider and the outcome the moment they leave
+/// it (the rows stay), and has them back when they return; the admin, who is in every room, is
+/// told all along. The progress read and the ledger are asked the same question about the same
+/// reader and have to give the same answer. A row whose approval belongs to no one in this
+/// workspace (a soft reference; here another tenant's) is bare for everybody, the admin
+/// included.
+///
+/// Revert that makes it red: leave the ledger's `approvalId` unfiltered (the left and
+/// never-joined rooms' ids reach the reader), judge it by the run's room, judge the whole
+/// ledger by the approval the run is parked on, read a room the viewer left (`left_at`) as
+/// still theirs, name an approval of no known room, leave the asker, the decider or the outcome
+/// on a row whose id is withheld (each one is its own revert), take them off a row the reader
+/// is told of or off a row that names no approval, drop the viewer's rows instead of fields,
+/// or let the progress read and the ledger follow different rules.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn active_11_the_runs_ledger_names_an_approval_by_the_rule_the_progress_read_follows() {
+    let s = setup().await;
+    let (superuser, bypass): (bool, bool) =
+        sqlx::query_as("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'momo_app'")
+            .fetch_one(&s.su)
+            .await
+            .expect("the server's role");
+    assert!(
+        !superuser && !bypass,
+        "the server runs as a role row-level security binds"
+    );
+
+    let ws = seed_workspace(&s.su).await;
+    let (admin, admin_email) = seed_human(&s.su, ws, "owner", "이도현").await;
+    let (member, member_email) = seed_human(&s.su, ws, "member", "박서연").await;
+    let room = seed_channel(&s.su, &s.app, ws, admin).await;
+    let elsewhere = seed_channel(&s.su, &s.app, ws, admin).await;
+    let never_joined = seed_channel(&s.su, &s.app, ws, admin).await;
+    join_channel(&s.su, ws, room, member).await;
+    join_channel(&s.su, ws, elsewhere, member).await;
+    let agent = seed_agent(&s.su, ws, admin, "달무리봇").await;
+    make_hosted(&s.su, ws, agent, admin).await;
+
+    let left_run = seed_run(&s.su, ws, agent, room, "awaiting_approval", 60).await;
+    let a_left = seed_ask(&s.su, ws, left_run, elsewhere, agent, Ask::tool("pending")).await;
+    let never_run = seed_run(&s.su, ws, agent, room, "awaiting_approval", 120).await;
+    let a_never = seed_ask(
+        &s.su,
+        ws,
+        never_run,
+        never_joined,
+        agent,
+        Ask::tool("pending"),
+    )
+    .await;
+    // A run that asked twice: the first approval was raised in the run's own room and has
+    // been decided; it is now parked on one raised in a room the member never joined.
+    let mixed_run = seed_run(&s.su, ws, agent, room, "awaiting_approval", 180).await;
+    let a_home = seed_ask(&s.su, ws, mixed_run, room, agent, Ask::tool("pending")).await;
+    sqlx::query(
+        "UPDATE approval SET status = 'approved', decided_by = $2, decided_at = now() \
+          WHERE id = $1",
+    )
+    .bind(a_home)
+    .bind(admin)
+    .execute(&s.su)
+    .await
+    .expect("decide the first approval");
+    let a_away = seed_ask(
+        &s.su,
+        ws,
+        mixed_run,
+        never_joined,
+        agent,
+        Ask::tool("pending"),
+    )
+    .await;
+    // A run that asked once, in the room never joined, was answered there (the agent asked,
+    // the admin approved) and then failed with a code of its own.
+    let decided_run = seed_run(&s.su, ws, agent, room, "running", 240).await;
+    let a_hidden = seed_ask(
+        &s.su,
+        ws,
+        decided_run,
+        never_joined,
+        agent,
+        Ask::tool("pending"),
+    )
+    .await;
+    sqlx::query(
+        "UPDATE approval SET status = 'approved', decided_by = $2, decided_at = now() \
+          WHERE id = $1",
+    )
+    .bind(a_hidden)
+    .bind(admin)
+    .execute(&s.su)
+    .await
+    .expect("decide the approval of the room never joined");
+    sqlx::query(
+        "UPDATE agent_run SET status = 'failed', finished_at = now(), \
+                error = jsonb_build_object('code', 'tool_error') \
+          WHERE id = $1",
+    )
+    .bind(decided_run)
+    .execute(&s.su)
+    .await
+    .expect("end the run with a code of its own");
+
+    // A second tenant, with a run parked on an approval of its own.
+    let ws_b = seed_workspace(&s.su).await;
+    let (admin_b, admin_b_email) = seed_human(&s.su, ws_b, "owner", "최하윤").await;
+    let room_b = seed_channel(&s.su, &s.app, ws_b, admin_b).await;
+    let agent_b = seed_agent(&s.su, ws_b, admin_b, "별무리봇").await;
+    make_hosted(&s.su, ws_b, agent_b, admin_b).await;
+    let run_b = seed_run(&s.su, ws_b, agent_b, room_b, "awaiting_approval", 60).await;
+    let a_b = seed_ask(&s.su, ws_b, run_b, room_b, agent_b, Ask::tool("pending")).await;
+    // A row of the first tenant's ledger naming an approval that is no approval of that
+    // tenant (the table keeps it as a soft reference, with no foreign key) — here the second
+    // tenant's: from this tenant no room can be found for it, so nobody is told it, the admin
+    // included. (That the room lookup also names its own workspace, for a connection row-level
+    // security cannot help, is held by `approval_pg` `t1_8`.)
+    sqlx::query(
+        "INSERT INTO agent_run_event (workspace_id, run_id, kind, code, approval_id) \
+         VALUES ($1, $2, 'approval_decided', 'cancelled', $3)",
+    )
+    .bind(ws)
+    .bind(mixed_run)
+    .bind(a_b)
+    .execute(&s.su)
+    .await
+    .expect("plant a row naming another tenant's approval");
+
+    // The fixture is the real thing: the triggers wrote the ids the ledger is about.
+    let (requested, decided) = ("approval_requested", "approval_decided");
+    let row = |kind: &str, approval: Uuid| (kind.to_string(), Some(approval));
+    assert_eq!(
+        stored_approval_rows(&s.su, left_run).await,
+        [row(requested, a_left)]
+    );
+    assert_eq!(
+        stored_approval_rows(&s.su, never_run).await,
+        [row(requested, a_never)]
+    );
+    assert_eq!(
+        stored_approval_rows(&s.su, mixed_run).await,
+        [
+            row(requested, a_home),
+            row(decided, a_home),
+            row(requested, a_away),
+            row(decided, a_b)
+        ]
+    );
+    assert_eq!(
+        stored_approval_rows(&s.su, decided_run).await,
+        [row(requested, a_hidden), row(decided, a_hidden)]
+    );
+
+    let admin_token = login(&s.http, &s.base, ws, &admin_email).await;
+    let token = login(&s.http, &s.base, ws, &member_email).await;
+    let admin_b_token = login(&s.http, &s.base, ws_b, &admin_b_email).await;
+    let parked = [
+        (left_run, a_left),
+        (never_run, a_never),
+        (mixed_run, a_away),
+    ];
+    let (id_left, id_never, id_home, id_away, id_hidden, id_b) = (
+        a_left.to_string(),
+        a_never.to_string(),
+        a_home.to_string(),
+        a_away.to_string(),
+        a_hidden.to_string(),
+        a_b.to_string(),
+    );
+    let (id_admin, id_agent) = (admin.to_string(), agent.to_string());
+
+    let runs = [left_run, never_run, mixed_run, decided_run];
+
+    // Control — the member is in the run's room and in `elsewhere`, not in the room never
+    // joined. Both reads name the approval raised in `elsewhere` and neither names the one
+    // raised in the room never joined; the ledger of the run that asked twice tells the
+    // approval of the run's own room on both of its rows and not the other.
+    assert_eq!(
+        named_by_both_reads(&s, &token, ws, &parked).await,
+        [(true, true), (false, false), (false, false)]
+    );
+    let seen = ledger(&s.http, &s.base, &token, ws, mixed_run, "").await;
+    assert_eq!(
+        approvals_named(&seen),
+        [id_home.clone(), id_home.clone()],
+        "one ledger, each row judged by its own approval: {seen}"
+    );
+    // …and what is told of a row is all of it: the approval of the run's own room reads as
+    // decided, by the admin, `approved` — the asker and the decider of the other rooms' are not.
+    let rows = events_of(&seen);
+    assert_eq!(rows[0]["actorMemberId"], json!(id_agent), "{seen}");
+    assert_eq!(rows[1]["kind"], json!("approval_decided"), "{seen}");
+    assert_eq!(rows[1]["code"], json!("approved"), "{seen}");
+    assert_eq!(rows[1]["actorMemberId"], json!(id_admin), "{seen}");
+    assert_eq!(
+        keys_of(&rows[2]),
+        BARE_ROW,
+        "asked in a room never joined: {seen}"
+    );
+    assert_eq!(
+        keys_of(&rows[3]),
+        BARE_ROW,
+        "another tenant's approval: {seen}"
+    );
+
+    // The approval decided in the room never joined: its two rows are there and bare for the
+    // member, whole for the admin (the agent asked, the admin approved, `approved`); the
+    // `started` and `failed` rows around them name no approval and are whole for both.
+    let seen = ledger(&s.http, &s.base, &token, ws, decided_run, "").await;
+    let rows = events_of(&seen);
+    let kinds: Vec<&str> = rows
+        .iter()
+        .map(|row| row["kind"].as_str().expect("kind"))
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "started",
+            "approval_requested",
+            "approval_decided",
+            "failed"
+        ],
+        "{seen}"
+    );
+    assert_eq!(keys_of(&rows[1]), BARE_ROW, "{seen}");
+    assert_eq!(
+        keys_of(&rows[2]),
+        BARE_ROW,
+        "no asker, no decider, no outcome: {seen}"
+    );
+    assert_eq!(
+        rows[3]["code"],
+        json!("tool_error"),
+        "a row naming no approval is whole: {seen}"
+    );
+    let seen = ledger(&s.http, &s.base, &admin_token, ws, decided_run, "").await;
+    let rows = events_of(&seen);
+    assert_eq!(rows[1]["approvalId"], json!(id_hidden), "{seen}");
+    assert_eq!(rows[1]["actorMemberId"], json!(id_agent), "{seen}");
+    assert_eq!(rows[2]["approvalId"], json!(id_hidden), "{seen}");
+    assert_eq!(rows[2]["code"], json!("approved"), "{seen}");
+    assert_eq!(rows[2]["actorMemberId"], json!(id_admin), "{seen}");
+    assert_eq!(rows[3]["code"], json!("tool_error"), "{seen}");
+    assert_told_as_ruled(
+        &s,
+        ws,
+        &admin_token,
+        &token,
+        &runs,
+        &[a_left, a_home],
+        "in `elsewhere`",
+    )
+    .await;
+
+    // The admin is in every room: told of every approval of this tenant — and of no other
+    // tenant's, planted row or not.
+    assert_eq!(
+        named_by_both_reads(&s, &admin_token, ws, &parked).await,
+        [(true, true), (true, true), (true, true)]
+    );
+    let seen = ledger(&s.http, &s.base, &admin_token, ws, mixed_run, "").await;
+    assert_eq!(
+        approvals_named(&seen),
+        [id_home.clone(), id_home.clone(), id_away.clone()],
+        "the row naming another tenant's approval names nothing, even to the admin: {seen}"
+    );
+    assert_eq!(
+        keys_of(&events_of(&seen)[3]),
+        BARE_ROW,
+        "…nor does it keep its code: {seen}"
+    );
+    assert!(
+        !seen.to_string().contains(&id_b),
+        "another tenant's approval id is nowhere in this ledger: {seen}"
+    );
+
+    // The member leaves the room the approval was raised in: the rows stay, bare — no id, no
+    // asker, no outcome — from the progress read and from the ledger alike, in every shape the
+    // ledger is read.
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(elsewhere)
+        .bind(member)
+        .execute(&s.su)
+        .await
+        .expect("leave the approval's room");
+    assert_eq!(
+        named_by_both_reads(&s, &token, ws, &parked).await,
+        [(false, false), (false, false), (false, false)]
+    );
+    for query in ["", "?include=doorbell,tools"] {
+        for (run, approval) in [(left_run, &id_left), (never_run, &id_never)] {
+            let seen = ledger(&s.http, &s.base, &token, ws, run, query).await;
+            let rows = events_of(&seen);
+            assert!(
+                rows.iter()
+                    .any(|row| row["kind"] == json!("approval_requested")),
+                "{query}: the row that asked is still there: {seen}"
+            );
+            for row in rows {
+                assert_eq!(
+                    keys_of(row),
+                    BARE_ROW,
+                    "{query}: no id, no asker on any row of {run}: {seen}"
+                );
+            }
+            assert!(
+                !seen.to_string().contains(approval.as_str()),
+                "{query}: the approval's id is nowhere in the ledger: {seen}"
+            );
+        }
+    }
+    let seen = ledger(&s.http, &s.base, &admin_token, ws, left_run, "").await;
+    assert_eq!(
+        events_of(&seen)[0]["actorMemberId"],
+        json!(id_agent),
+        "the admin still reads who asked: {seen}"
+    );
+    let seen = ledger(&s.http, &s.base, &token, ws, mixed_run, "").await;
+    assert_eq!(
+        approvals_named(&seen),
+        [id_home.clone(), id_home.clone()],
+        "the run's own room is still theirs: {seen}"
+    );
+    assert_eq!(events_of(&seen)[1]["code"], json!("approved"), "{seen}");
+    assert_told_as_ruled(
+        &s,
+        ws,
+        &admin_token,
+        &token,
+        &runs,
+        &[a_home],
+        "after leaving",
+    )
+    .await;
+    // …while the admin is told all along.
+    assert_eq!(
+        named_by_both_reads(&s, &admin_token, ws, &parked).await,
+        [(true, true), (true, true), (true, true)]
+    );
+
+    // Back in the room: told again, by both reads, asker included. The room never joined
+    // stays out of sight.
+    join_channel(&s.su, ws, elsewhere, member).await;
+    assert_eq!(
+        named_by_both_reads(&s, &token, ws, &parked).await,
+        [(true, true), (false, false), (false, false)]
+    );
+    let seen = ledger(&s.http, &s.base, &token, ws, left_run, "").await;
+    assert_eq!(
+        events_of(&seen)[0]["actorMemberId"],
+        json!(id_agent),
+        "{seen}"
+    );
+    assert_told_as_ruled(
+        &s,
+        ws,
+        &admin_token,
+        &token,
+        &runs,
+        &[a_left, a_home],
+        "back in `elsewhere`",
+    )
+    .await;
+
+    // The second tenant: its own admin is told its approval; nothing of one tenant reaches a
+    // reader of the other, by either path or by either run.
+    let seen = ledger(&s.http, &s.base, &admin_b_token, ws_b, run_b, "").await;
+    assert_eq!(approvals_named(&seen), vec![id_b.clone()], "{seen}");
+    for (who, bearer, workspace, run, others) in [
+        ("member of the first tenant", &token, ws, run_b, [&id_b]),
+        (
+            "admin of the second tenant",
+            &admin_b_token,
+            ws_b,
+            mixed_run,
+            [&id_away],
+        ),
+    ] {
+        let response = get(
+            &s.http,
+            &s.base,
+            bearer,
+            &format!("/v1/workspaces/{workspace}/agent-runs/{run}/events"),
+        )
+        .await;
+        assert_eq!(response.status(), 404, "{who}: a run of the other tenant");
+        let body = response.text().await.expect("body");
+        assert!(
+            others.iter().all(|id| !body.contains(id.as_str())),
+            "{who}: {body}"
+        );
+    }
+    let response = get(
+        &s.http,
+        &s.base,
+        &token,
+        &format!("/v1/workspaces/{ws_b}/agent-runs/{run_b}/events"),
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        403,
+        "the first tenant's token is no key to the second tenant's workspace"
+    );
+    assert!(!response.text().await.expect("body").contains(&id_b));
 }

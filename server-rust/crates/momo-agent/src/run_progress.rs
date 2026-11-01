@@ -15,7 +15,9 @@
 //! * It names no run, requester, channel or title the viewer cannot see: the
 //!   queue answer for a channel the viewer is not in is a **count** only.
 //! * It names no approval (its id or its deadline) raised in a channel the viewer is not
-//!   an active member of, whichever channel the run itself is in.
+//!   an active member of, whichever channel the run itself is in. The run's event ledger
+//!   holds the same ids — and who asked or decided them and how they ended — and follows the
+//!   same rule ([`approval_is_named_to_viewer`], [`redact_unseen_approvals_in_tx`]).
 //!
 //! ## Why the delivery job is an input, not a query
 //!
@@ -499,15 +501,32 @@ pub async fn visible_channels_in_tx(
     .collect())
 }
 
+/// The ONE rule that decides whether a viewer is told **which** approval a run asked, by id
+/// (and, for the one a run is parked on, its deadline): only when the viewer is an active
+/// member of the channel the approval was raised in, whichever channel the run itself is in.
+/// `visible` is the viewer's channels among the ones in question ([`visible_channels_in_tx`]);
+/// an approval whose channel is not known (`None`) is named to no one.
+///
+/// The run progress read ([`assemble_run_progress`]), the `bundle` (`run_bundle.rs`) and the run
+/// event ledger ([`redact_unseen_approvals_in_tx`]) all ask exactly this, so they cannot
+/// disagree about who is told.
+pub fn approval_is_named_to_viewer(
+    approval_channel_id: Option<Uuid>,
+    visible: &HashSet<Uuid>,
+) -> bool {
+    approval_channel_id.is_some_and(|channel| visible.contains(&channel))
+}
+
 /// Join the run-side facts with the delivery-job facts and the claimable queue.
 /// Pure: no SQL, so the honesty rules below are testable without a database.
 ///
 /// * `jobs` is keyed by run id; a run with no pending job simply has no entry.
 /// * `queue` is every agent's claimable queue in claim order.
 /// * `visible` is the set of channels the viewer may name runs **and approvals** from: a
-///   run's pending approval is named (`approval_id`, `approval_expires_at`) only when the
-///   channel it was raised in is in this set, the rule the `bundle` follows. The caller
-///   asks for the queue's channels and the approvals' channels in one go.
+///   run's pending approval is named (`approval_id`, `approval_expires_at`) only when
+///   [`approval_is_named_to_viewer`] says so for the channel it was raised in, the rule the
+///   `bundle` follows. The caller asks for the queue's channels and the approvals' channels
+///   in one go.
 pub fn assemble_run_progress(
     base: Vec<RunProgressBase>,
     jobs: &HashMap<Uuid, JobFacts>,
@@ -549,9 +568,7 @@ pub fn assemble_run_progress(
                 }
                 _ => (None, 0, Vec::new()),
             };
-            let approval_is_theirs = run
-                .approval_channel_id
-                .is_some_and(|channel| visible.contains(&channel));
+            let approval_is_theirs = approval_is_named_to_viewer(run.approval_channel_id, visible);
             RunProgressRow {
                 phase,
                 lease_state,
@@ -605,8 +622,16 @@ pub struct RunEventRow {
     pub ordinal: i64,
     pub kind: String,
     pub stage: Option<String>,
+    /// As the ledger stores it. On a row that names an approval (`approval_decided`: how it
+    /// ended) it goes with [`RunEventRow::approval_id`] — see [`redact_unseen_approvals_in_tx`].
     pub code: Option<String>,
+    /// As the ledger stores it. Whoever hands it to a person first passes the rows through
+    /// [`redact_unseen_approvals_in_tx`], which keeps it only where
+    /// [`approval_is_named_to_viewer`] says the viewer may be told (the events route does).
     pub approval_id: Option<Uuid>,
+    /// Who did it: the agent that asked, the person who decided. On a row that names an
+    /// approval it goes with [`RunEventRow::approval_id`] — see
+    /// [`redact_unseen_approvals_in_tx`].
     pub actor_member_id: Option<Uuid>,
     /// `tool_call` rows only: the oort tool name (ADR-0200 증보 2026-10-15 T1).
     pub tool: Option<String>,
@@ -678,6 +703,11 @@ pub async fn list_run_events_in_tx(
 /// [`list_run_events_in_tx`] with every opt-in kind selectable. With `tools`, the
 /// `tool_call` rows (≤ 100 per run, ADR-0200 증보 T3) ride along — so the row bound is
 /// 300 — and the run's per-tool tally is returned beside them.
+///
+/// The rows carry `approval_id`, `actor_member_id` and `code` as stored, and this read touches
+/// no `approval` row: the team AI's `get_agent_run` calls it as `momo_helper_read`, a role with
+/// no SELECT on `approval` whose answer shows stage names only. A reader that names an approval
+/// to a person redacts the rows with [`redact_unseen_approvals_in_tx`] first.
 pub async fn list_run_ledger_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -786,6 +816,70 @@ pub async fn list_run_ledger_in_tx(
     }))
 }
 
+/// Narrow the approval facts of each row of a run's ledger to what `viewer_member_id` may be
+/// told (#5007): an approval is named only from a channel the viewer is an active member
+/// of — [`approval_is_named_to_viewer`], the rule the run progress read and the `bundle`
+/// follow — whichever channel the run itself is in. Each row is judged by **its own**
+/// approval, so one ledger can name the approvals of one room and not the next.
+///
+/// A row whose approval the viewer may not be told loses its `approval_id`, and with it who
+/// asked or decided it (`actor_member_id`) and how it ended (`code`), by the same verdict:
+/// those are the approval's room's business too. The row itself stays — kind, time, order and
+/// ordinal, like every row that names no approval, are the same for everyone who may read the
+/// run.
+///
+/// A step after [`list_run_ledger_in_tx`], not a join inside it: that read also serves the
+/// team AI's `get_agent_run`, which runs as `momo_helper_read` and cannot read `approval`.
+/// The caller has already proven the viewer may read the run.
+pub async fn redact_unseen_approvals_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    viewer_member_id: Uuid,
+    events: &mut [RunEventRow],
+) -> Result<(), DbError> {
+    let named: Vec<Uuid> = events
+        .iter()
+        .filter_map(|event| event.approval_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    if named.is_empty() {
+        return Ok(());
+    }
+    let approval_channels =
+        crate::approval::approval_channels_in_tx(conn, workspace_id, &named).await?;
+    let channels: Vec<Uuid> = approval_channels
+        .values()
+        .copied()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let visible = visible_channels_in_tx(conn, workspace_id, viewer_member_id, &channels).await?;
+    redact_ledger_approvals(events, &approval_channels, &visible);
+    Ok(())
+}
+
+/// The pure half of [`redact_unseen_approvals_in_tx`]. `approval_channels` maps an approval to
+/// the channel it was raised in; an id with no entry (a soft reference, no foreign key) is
+/// named to no one. One verdict per row, applied to all three fields at once; a row that names
+/// no approval is not touched.
+fn redact_ledger_approvals(
+    events: &mut [RunEventRow],
+    approval_channels: &HashMap<Uuid, Uuid>,
+    visible: &HashSet<Uuid>,
+) {
+    for event in events {
+        let Some(approval) = event.approval_id else {
+            continue;
+        };
+        if !approval_is_named_to_viewer(approval_channels.get(&approval).copied(), visible) {
+            event.approval_id = None;
+            event.actor_member_id = None;
+            event.code = None;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -856,5 +950,192 @@ mod tests {
         let rows = assemble(vec![parked(own, None)], &[own, raised_in]);
         assert_eq!(rows[0].approval_id, None);
         assert_eq!(rows[0].approval_expires_at, None);
+    }
+
+    /// The actor of a ledger row: every row has one, so that a row that loses its actor is
+    /// seen to, and a row that keeps it is too.
+    fn actor_of(ordinal: i64) -> Uuid {
+        Uuid::from_u128(900 + ordinal as u128)
+    }
+
+    /// A ledger row as the table holds it.
+    fn ledger_row(
+        ordinal: i64,
+        kind: &str,
+        code: Option<&str>,
+        approval: Option<Uuid>,
+    ) -> RunEventRow {
+        RunEventRow {
+            ordinal,
+            kind: kind.to_string(),
+            stage: None,
+            code: code.map(str::to_string),
+            approval_id: approval,
+            actor_member_id: Some(actor_of(ordinal)),
+            tool: None,
+            duration_ms: None,
+            created_at: at(ordinal),
+        }
+    }
+
+    /// `rooms` = `(approval, the channel it was raised in)`; `visible` = the viewer's channels.
+    fn redact(events: &mut [RunEventRow], rooms: &[(Uuid, Uuid)], visible: &[Uuid]) {
+        let rooms: HashMap<Uuid, Uuid> = rooms.iter().copied().collect();
+        let visible: HashSet<Uuid> = visible.iter().copied().collect();
+        redact_ledger_approvals(events, &rooms, &visible);
+    }
+
+    /// What a viewer is shown of a row: `(ordinal, kind, code, actor, approval)`.
+    type Shown = (i64, String, Option<String>, Option<Uuid>, Option<Uuid>);
+
+    fn shown(events: &[RunEventRow]) -> Vec<Shown> {
+        events
+            .iter()
+            .map(|event| {
+                (
+                    event.ordinal,
+                    event.kind.clone(),
+                    event.code.clone(),
+                    event.actor_member_id,
+                    event.approval_id,
+                )
+            })
+            .collect()
+    }
+
+    /// A row as stored, and the same row with its approval withheld.
+    fn whole(ordinal: i64, kind: &str, code: Option<&str>, approval: Option<Uuid>) -> Shown {
+        (
+            ordinal,
+            kind.to_string(),
+            code.map(str::to_string),
+            Some(actor_of(ordinal)),
+            approval,
+        )
+    }
+
+    fn bare(ordinal: i64, kind: &str) -> Shown {
+        (ordinal, kind.to_string(), None, None, None)
+    }
+
+    #[test]
+    fn a_ledger_names_an_approval_only_from_a_room_the_viewer_is_in() {
+        let (here, away) = (Uuid::from_u128(1), Uuid::from_u128(2));
+        let (asked_here, asked_away, orphan) = (
+            Uuid::from_u128(11),
+            Uuid::from_u128(12),
+            Uuid::from_u128(13),
+        );
+        // `orphan` is a soft reference to an approval that is not there (no foreign key).
+        let rooms = [(asked_here, here), (asked_away, away)];
+        let ledger = || {
+            vec![
+                ledger_row(1, "queued", None, None),
+                ledger_row(2, "approval_requested", None, Some(asked_here)),
+                ledger_row(3, "approval_decided", Some("approved"), Some(asked_here)),
+                ledger_row(4, "approval_requested", None, Some(asked_away)),
+                ledger_row(5, "approval_decided", Some("rejected"), Some(orphan)),
+                // A row that names no approval keeps its code and actor, whoever reads it.
+                ledger_row(6, "timed_out", Some("approval_expired"), None),
+            ]
+        };
+        let shown_to = |viewer_in: &[Uuid]| {
+            let mut events = ledger();
+            redact(&mut events, &rooms, viewer_in);
+            shown(&events)
+        };
+        let queued = whole(1, "queued", None, None);
+        let ended = whole(6, "timed_out", Some("approval_expired"), None);
+        let asked = |ordinal: i64, approval: Uuid| {
+            whole(ordinal, "approval_requested", None, Some(approval))
+        };
+        let decided = |ordinal: i64, code: &str, approval: Uuid| {
+            whole(ordinal, "approval_decided", Some(code), Some(approval))
+        };
+
+        // One ledger, each row judged by its own approval, and one verdict for the whole row.
+        // The room the viewer is in is told on both of its rows — id, asker, decider and
+        // outcome. The other room's, and an approval with no known room (a room's member
+        // included), lose all of it together. A row that names no approval is not touched.
+        assert_eq!(
+            shown_to(&[here]),
+            [
+                queued.clone(),
+                asked(2, asked_here),
+                decided(3, "approved", asked_here),
+                bare(4, "approval_requested"),
+                bare(5, "approval_decided"),
+                ended.clone(),
+            ]
+        );
+        assert_eq!(
+            shown_to(&[here, away]),
+            [
+                queued.clone(),
+                asked(2, asked_here),
+                decided(3, "approved", asked_here),
+                asked(4, asked_away),
+                bare(5, "approval_decided"),
+                ended.clone(),
+            ]
+        );
+        assert_eq!(
+            shown_to(&[]),
+            [
+                queued,
+                bare(2, "approval_requested"),
+                bare(3, "approval_decided"),
+                bare(4, "approval_requested"),
+                bare(5, "approval_decided"),
+                ended,
+            ]
+        );
+        assert_eq!(
+            shown_to(&[Uuid::from_u128(3)]),
+            shown_to(&[]),
+            "a room that holds none of these approvals tells none of them"
+        );
+
+        // The rows themselves do not move: same rows, same order, same times.
+        let before = ledger();
+        let mut after = ledger();
+        redact(&mut after, &rooms, &[]);
+        assert_eq!(after.len(), before.len());
+        for (after, before) in after.iter().zip(&before) {
+            assert_eq!(
+                (after.ordinal, &after.kind, after.created_at),
+                (before.ordinal, &before.kind, before.created_at)
+            );
+        }
+    }
+
+    /// The progress read and the ledger put the same question to the same facts: whichever
+    /// rooms the viewer is in, they name an approval together or not at all, and it is the
+    /// approval's room that decides — not the run's.
+    #[test]
+    fn the_progress_read_and_the_ledger_name_an_approval_to_the_same_viewers() {
+        let (own, raised_in, other) = (Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3));
+        let approval = Uuid::from_u128(10);
+        let rooms = [own, raised_in, other];
+        for mask in 0u8..8 {
+            let viewer_in: Vec<Uuid> = rooms
+                .iter()
+                .enumerate()
+                .filter(|&(index, _)| mask & (1u8 << index) != 0)
+                .map(|(_, room)| *room)
+                .collect();
+            let progress = assemble(vec![parked(own, Some((approval, raised_in)))], &viewer_in);
+            let mut ledger = vec![ledger_row(1, "approval_requested", None, Some(approval))];
+            redact(&mut ledger, &[(approval, raised_in)], &viewer_in);
+            assert_eq!(
+                progress[0].approval_id, ledger[0].approval_id,
+                "the viewer is in {viewer_in:?}"
+            );
+            assert_eq!(
+                ledger[0].approval_id.is_some(),
+                viewer_in.contains(&raised_in),
+                "the viewer is in {viewer_in:?}"
+            );
+        }
     }
 }
