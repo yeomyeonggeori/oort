@@ -29,6 +29,12 @@ name: ensure-signed-in
       visible:
         id: "qr-connect-button"
     commands:
+      # Debug LogBox strip first, for the reason given at the same step in
+      # 00-login.yaml. It is called HERE, inside the signed-out branch, and not
+      # before the wait above: on the channel list the same coordinate is the
+      # 「＋」 button (see subflows/dismiss-dev-logbox.yaml), so a signed-in run must
+      # never reach it.
+      - runFlow: dismiss-dev-logbox.yaml
       - tapOn:
           id: "welcome-address"
       - extendedWaitUntil:
@@ -62,15 +68,29 @@ name: ensure-signed-in
       - assertVisible:
           id: "server-url-hint"
       - assertVisible: "요청 주소: ${SERVER_URL}/v1/…"
-      - tapOn:
-          id: "email-input"
       # `eraseText` here too (#4669): 「이메일 기억하기」 is ON by default on the
       # phone, so a signed-out screen reached with storage INTACT (an expired
       # session, a lane flow run alone) already holds the email this device
       # remembered for that server. Typing then APPENDS and the login body
       # carries `me@example.comme@example.com`. 00-login.yaml starts from
       # `clearState`, so its field is empty by construction and needs none.
-      - eraseText
+      #
+      # The tap lands at the RIGHT END of the field (`point` is a fraction of the
+      # element), and the erase is 100, for a reason measured on 11-02 (#5045):
+      # `eraseText` only deletes BEHIND the caret, and a plain tap puts the caret
+      # where the finger landed. The lane's emails are 32 characters
+      # (`lane-<epoch>-<pid>@momo.local`) and fill the field, so a tap at its
+      # middle left the caret inside the text — the erase took the front half, the
+      # new email went in at the caret, and the old tail stayed:
+      # `<new>@momo.local`, 43 characters, 「이메일 또는 비밀번호가 맞지 않습니다」. With
+      # the tap at the right end the caret is after the text and the same erase
+      # leaves the field empty (32 characters typed, 32 read back). It only showed
+      # for emails longer than about half the field — the `me@example.com` this
+      # step was written against never reached it.
+      - tapOn:
+          id: "email-input"
+          point: "97%,50%"
+      - eraseText: 100
       - inputText: ${EMAIL}
       # `eraseText` first — see the note in 00-login.yaml; without it the
       # secure field hands the server a mangled password.

@@ -1,19 +1,33 @@
 appId: app.momo.ios
 name: 4869-reply-swipe
-# S4 스택 검증에서만 돌린다(작성 워커는 돌리지 않았다 — `runtime-unverified`). 밀어서 스레드 답글 (#4869, owner 10-30·10-31).
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD CHANNEL_ID PEER_TEXT
+---
+# 밀어서 스레드 답글 (#4869, owner 10-30·10-31). 이 파일은 머리(위 `---`)가 없어 Maestro 가 파싱도 못 하고 3초 만에 떨어졌고
+# (11-01 검증), 고친 뒤에는 밀기가 **남이 쓴 글이 아니라 화면 가운데(90%,50%)의 아무 행**을 밀어 「내 글에 답글」이 떴다 — 레인의
+# #agent-lab 에서 그 자리는 레인 멤버 자신의 글이었다(#5045). 그래서 밀기 대상은 이제 좌표가 아니라 `PEER_TEXT` 가 든 행이다.
 #
-# 준비: 로그인된 기기에서 `CHANNEL_ID` 채널에 **남이 쓴 글** `PEER_TEXT`(긴 글이 아니어도 된다)가 한 줄 이상 있고, 목록이 그 글을
-# 화면 가운데 근처에 둔다. 아래는 그 행 하나만 만진다.
+# 준비: `CHANNEL_ID` 채널에 **남이 쓴 글** `PEER_TEXT`(긴 글이 아니어도 된다)가 있다. 내가 쓴 글이면 머리말이 「내 글에 답글」이라
+# ②의 「…님에게 답글」 단정이 빨개진다 — 그것이 이 단정이 있는 이유다.
 #
-#   maestro --udid <udid> test -e CHANNEL_ID=<채널 id> -e PEER_TEXT="<남의 글 한 줄>" \
-#     clients/mobile/maestro/4869-reply-swipe.yaml
+#   maestro --udid <udid> test -e SERVER_URL=… -e EMAIL=… -e PASSWORD=… \
+#     -e CHANNEL_ID=<채널 id> -e PEER_TEXT="<남의 글 한 줄>" clients/mobile/maestro/4869-reply-swipe.yaml
+#
+# 레인에서는 `npm run lane:phone -- --flow 4869-reply-swipe`: 레인이 `CHANNEL_ID`=#agent-lab, `PEER_TEXT`=「mock reply」 를 넘긴다.
+# 거기에는 레인 멤버의 글(warm-up)·김인턴의 목 답글·실시간 프로브 글이 순서대로 있어, 남의 글이 가운데에 끼어 있다.
 #
 # 이 흐름이 재는 것(눈이 아니라 단정이다):
 #   ① 문턱 전에 놓기 — 짧게 밀었다 놓으면 아무 일도 없다(머리말이 안 선다).
 #   ② 문턱을 넘겨 놓기 — 답글 머리말이 서고 입력칸이 「답글 입력」이 되며 **스레드 화면은 열리지 않는다**.
 #   ③ ✕ — 머리말만 사라지고 쓴 글은 남는다.
-#   ④ 보내기 — 머리말이 떨어지고 대화 화면에 머문다(스레드 화면 `thread-header-overlay` 가 서지 않는다).
-#   ⑤ 길게 눌러 시트의 「답글 달기」 — 같은 입력칸이 열린다(VoiceOver 의 길).
+#   ④ 길게 눌러 시트의 「답글 달기」 — 같은 입력칸이 다시 열린다(VoiceOver 의 길).
+#   ⑤ 보내기 — 머리말이 떨어지고 대화 화면에 머문다(스레드 화면 `thread-header-overlay` 가 서지 않는다).
+#
+# 보내기가 마지막인 데는 이유가 둘 있다. 스레드 답글을 보내면 김인턴(대상 글의 주인)이 **답한다** — 11-01 에 옛 순서대로 보냈더니
+# 대화에 일 카드(「github.search_issues 실행」·「승인 필요」)가 쌓여 대상 행이 화면 밖으로 밀려 다음 단계의 길게 누르기가 못 찾았다.
+# 그 답이 도구 호출이면 승인 대기가 남는데, 레인 오버레이가 적어 둔 대로 승인 대기는 에이전트의 동시 실행 자리를 쥔다(만료 600초).
+# 그래서 보내는 글에 목이 평문으로만 답하게 하는 `MAESTRO TEXT` 를 달고(10-mention-working 과 같다), 보낸 뒤에는 이 흐름이 아무것도
+# 짚지 않는다.
 #
 # 이 흐름이 **못 재는 것**(손으로 본다 — 인계 「스택 검증 메모」): 빠른 세로 스크롤 도중의 오→왼 살짝, 햅틱, 동작 줄이기에서
 # 미끄러짐 없음, 큰 글자. Maestro 의 `swipe` 는 한 번의 직선이라 「스크롤하던 손가락이 옆으로 휘는」 경합을 만들지 못한다.
@@ -29,60 +43,67 @@ name: 4869-reply-swipe
 - runFlow: subflows/dismiss-dev-logbox.yaml
 - assertVisible: ".*${PEER_TEXT}.*"
 # ① 문턱(64pt)에 못 미치게: 화면 폭의 약 12%(≈47pt)만 밀고 놓는다.
+#
+# Maestro 의 `swipe` 는 시작·끝을 좌표로만 받아 「이 행의 이만큼」을 못 말한다(행을 짚는 `from:` 은 방향만 받고 길이를 못 고른다 —
+# 아래 ②에서 쓰는 그 쓸기는 문턱을 한참 넘는다). 그래서 이 한 번은 좌표이고, 어느 행이 맞든 같은 약속이다 — 문턱 전에 놓으면
+# **어느 행에서도** 머리말이 서지 않는다. 세로 67% 는 레인의 #agent-lab 에서 남의 글 행(402×874 에서 59~76%)의 한가운데다: 목록이
+# 아래에서 위로 쌓이고 입력칸 높이가 같아서, 계산으로는 다른 화면 높이에서도 그 행 안에 든다(실측은 iPhone 17 Pro 한 대). 같은
+# 높이를 문턱을 넘겨 밀어 「…님에게 답글」이 뜨는 것을 실측해(11-01, #5045) 이 한 번이 빈 곳을 미는 헛단정이 아님을 확인했다.
+# 가운데(50%)는 레인 멤버의 글 행이라 옛 좌표가 틀렸다.
 - swipe:
-    start: 90%, 50%
-    end: 78%, 50%
+    start: 90%, 67%
+    end: 78%, 67%
     duration: 400
 - assertNotVisible:
     id: "reply-draft-card"
-# ② 문턱을 넘겨 놓는다: 화면 폭의 약 45%(≈175pt).
+# 그 높이가 카드(승인·일 카드) 행에 걸렸다면 짧은 쓸기도 스레드 화면을 열어 버리므로(11-01, 앞 실행이 대화에 일 카드를 쌓아 둔 스택에서
+# 실제로 그랬다) 그것을 여기서 잡는다 — 안 그러면 ②가 스레드 화면 위에서 엉뚱한 곳을 밀다가 먼 단계에서 떨어진다.
+- assertNotVisible:
+    id: "thread-header-overlay"
+# ② 문턱을 넘겨 놓는다. 이번에는 대상 행을 **요소로** 짚는다(`PEER_TEXT` 가 든 `message-press`): 행 가운데에서 왼쪽 가장자리까지
+# 가므로 문턱(64pt)을 한참 넘는다. 키보드가 올라와 목록이 밀려도 대상이 바뀌지 않는다.
 - swipe:
-    start: 90%, 50%
-    end: 45%, 50%
+    from:
+      id: "message-press"
+      text: ".*${PEER_TEXT}.*"
+    direction: LEFT
     duration: 400
 - extendedWaitUntil:
     visible:
       id: "reply-draft-card"
     timeout: 10000
+# 남의 글이면 「○○님에게 답글」, 내 글이면 「내 글에 답글」 — 앞의 것만 맞고 뒤의 것은 이 흐름이 밀기 대상을 잘못 잡았다는 뜻이다.
 - assertVisible: ".*님에게 답글"
+- assertNotVisible: "내 글에 답글"
 - assertVisible:
     id: "reply-draft-excerpt"
     text: ".*${PEER_TEXT}.*"
+# 입력칸의 낭독 문장은 「답글 입력 답글 입력」(라벨 + 자리표시자)이라 정규식은 앞뒤를 열어 둔다 — Maestro 의 `text` 는 전체 일치다.
 - assertVisible:
     id: "composer-input"
-    text: "답글 입력"
+    text: ".*답글 입력.*"
 - assertNotVisible:
     id: "thread-header-overlay"
-# ③ ✕: 대상만 지우고 쓴 글은 남는다.
-- inputText: "금요일에 합시다"
+# ③ ✕: 대상만 지우고 쓴 글은 남는다. 입력칸의 초안은 `launchApp` 을 건너 살아남으므로(30-approval 의 같은 줄 참고) 먼저 비운다 —
+# 안 그러면 앞 실행이 남긴 글 뒤에 이어 쳐져 보내는 글이 뒤섞인다(11-01, 실제로 그렇게 보내졌다).
+- eraseText: 200
+- inputText: "MAESTRO TEXT 금요일에 합시다"
 - tapOn:
     id: "reply-draft-cancel"
 - assertNotVisible:
     id: "reply-draft-card"
 - assertVisible: ".*금요일에 합시다.*"
-# ④ 다시 밀어 보낸다: 머리말이 떨어지고 스레드 화면으로 옮겨 가지 않는다.
-- swipe:
-    start: 90%, 50%
-    end: 45%, 50%
-    duration: 400
-- extendedWaitUntil:
-    visible:
-      id: "reply-draft-card"
-    timeout: 10000
-- tapOn:
-    id: "composer-send"
-- extendedWaitUntil:
-    notVisible:
-      id: "reply-draft-card"
-    timeout: 10000
-- assertNotVisible:
-    id: "thread-header-overlay"
-- assertVisible:
-    id: "composer-input"
-# ⑤ 길게 눌러 시트의 「답글 달기」.
+# ④ 길게 눌러 시트의 「답글 달기」: 같은 입력칸이 다시 열리고, 쓴 글은 그대로다. 자판이 올라와 있어도 대상 행은 화면 안이다(대화에
+# 아직 일 카드가 없다 — 위 머리말의 이유로 보내기가 맨 끝이다).
+#
+# 누르는 자리는 행 가운데가 아니라 **행 안의 70% 높이**다(`point` 는 요소 안의 비율이다). 레인의 남의 글 행은 레인 멤버의 warm-up
+# 글을 인용해 위쪽 절반에 인용 블록(「원본으로 이동」)이 서고, 행 가운데가 그 블록 가장자리에 걸린다 — 안쪽 누름 대상 위의 길게 누르기는
+# 행 시트를 열지 않는다(11-01 실측: 시트가 안 떠서 `sheet-reply` 에서 떨어졌다). 70% 는 그 밑의 본문 줄이고, 행 맨 아래에 서는
+# 「스레드 열기」 롤업(보내기 뒤에 생긴다)에도 닿지 않는다.
 - longPressOn:
     id: "message-press"
     text: ".*${PEER_TEXT}.*"
+    point: "50%,70%"
 - extendedWaitUntil:
     visible:
       id: "sheet-reply"
@@ -93,5 +114,18 @@ name: 4869-reply-swipe
     visible:
       id: "reply-draft-card"
     timeout: 10000
+- assertVisible: ".*님에게 답글"
+- assertVisible: ".*금요일에 합시다.*"
 - assertNotVisible:
     id: "thread-header-overlay"
+# ⑤ 보내기: 머리말이 떨어지고 스레드 화면으로 옮겨 가지 않는다.
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    notVisible:
+      id: "reply-draft-card"
+    timeout: 10000
+- assertNotVisible:
+    id: "thread-header-overlay"
+- assertVisible:
+    id: "composer-input"
