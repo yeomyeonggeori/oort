@@ -183,7 +183,7 @@ const actions = {
 };
 
 /** 채널 목록에 든 메시지(답글 프레임 포함)가 바뀔 때마다 같은 마운트를 다시 그린다 — 실시간 프레임이 오는 것과 같다. */
-function show(messages: Message[]): void {
+function show(messages: Message[], extra: { viewingThreadId?: string | null } = {}): void {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   if (host === null) {
     host = document.createElement("div");
@@ -208,6 +208,7 @@ function show(messages: Message[]): void {
             reachedStart: true,
             actions,
             onOpenThread: () => undefined,
+            ...extra,
           }),
         })
       )
@@ -273,5 +274,46 @@ describe("루트 요약 줄이 실시간 답글로 오른다 (#5008)", () => {
     state = reconcileMessages(state, [reply(16, B)]);
     show(state.messages);
     expect(line()).toEqual({ count: "답글 6개", chip: "새 답글 1", faces: 3 });
+  });
+
+  it("내 글에 남이 첫 답글을 달면 「답글 1개」와 얼굴이 바로 서고 칩은 아직 없다 — 칩은 서버가 따라가는 스레드라고 말해야 서므로 엔진 몫이다 (#5032)", () => {
+    // 서버 요약이 없는 루트: 따라가는지 클라이언트가 알 길이 없다(서버가 내 글의 작성자를 자동으로 따라가게 하지만 그 사실을 실시간으로
+    // 알려 주는 신호가 없다). 「말하지 않음」은 0도 칩도 아니다 — 지어내면 옛 서버·이전에 그만 따라간 스레드에 거짓 칩이 선다.
+    const bare: Message = { ...root, thread: undefined };
+    show([bare]);
+    expect(line()).toEqual({ count: null, chip: null, faces: 0 });
+    show([bare, reply(14, B)]);
+    expect(line()).toEqual({ count: "답글 1개", chip: null, faces: 1 });
+  });
+
+  it("스레드 패널이 열려 있고 창이 앞이면 남의 새 답글에도 칩이 +1 되지 않는다 — 읽음 신호의 응답을 기다리지 않고, 닫은 뒤에도 되살아나지 않는다 (#5032)", async () => {
+    let state: TimelineState = reconcileMessages(emptyTimeline(), [root]);
+    // 열린 루트: 서버가 준 안 읽은 1도 열자마자 읽는 중이라 칩이 없다.
+    show(state.messages, { viewingThreadId: ROOT });
+    expect(line().chip).toBeNull();
+    // 남의 답글 프레임이 닿은 **바로 그 렌더**: 읽음 신호는 아직 나가지도 않았다. 수·얼굴은 오르고 칩은 0이다.
+    state = reconcileMessages(state, [reply(14, C)]);
+    show(state.messages, { viewingThreadId: ROOT });
+    expect(line()).toEqual({ count: "답글 4개", chip: null, faces: 3 });
+    // 대조: 같은 프레임이 패널이 닫혀 있거나 다른 스레드가 열려 있을 때는 칩을 세운다.
+    show(state.messages, { viewingThreadId: null });
+    expect(line().chip).toBe("새 답글 2");
+    show(state.messages, { viewingThreadId: A });
+    expect(line().chip).toBe("새 답글 2");
+    // 읽음 신호의 응답(서버가 준 0)이 접으면 패널을 닫은 뒤에도 칩이 되살아나지 않는다.
+    show(state.messages, { viewingThreadId: ROOT });
+    const sender = createThreadReadSender({
+      send: async () => ({ following: true, lastReadReplySeq: 14, unreadReplyCount: 0 }),
+      onState: (rootId, read) => {
+        state = applyThreadReadState(state, rootId, read);
+        show(state.messages, { viewingThreadId: ROOT });
+      },
+    });
+    sender.note(ROOT, readSignalSeq(state.messages.filter((message) => message.rootId !== undefined)));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    show(state.messages, { viewingThreadId: null });
+    expect(line()).toEqual({ count: "답글 4개", chip: null, faces: 3 });
   });
 });

@@ -236,6 +236,7 @@ export function Timeline({
   directory,
   status,
   channelKind,
+  viewingThreadId,
   peer,
   dmGroup,
   lastReadSeq,
@@ -275,6 +276,13 @@ export function Timeline({
   status: "loading" | "ready" | "error";
   /** Decides what "empty" means here: a channel gains members, a DM cannot. */
   channelKind?: Channel["kind"];
+  /**
+   * 지금 이 화면이 **보고 있는** 스레드의 루트 id — 스레드 패널이 열려 있고 창이 앞일 때만 준다(아니면 `null`/생략). 그 루트의 요약
+   * 줄은 남의 새 답글에도 안 읽은 수를 0으로 읽는다: 사람이 그 답글들을 지금 읽고 있고, 읽음 신호(`PUT …/read`)가 왕복하는 동안
+   * 칩이 깜빡 +1 되지 않게 한다(코어 `liveThreadRollup`의 `viewing`, #5032). 패널이 읽음 신호를 보내는 조건과 같은 값이어야 한다
+   * (`useDocumentForeground`).
+   */
+  viewingThreadId?: string | null;
   /** Visible channel / DM name. The intro titles itself from this. */
   channelName?: string;
   /** Channel topic, quoted as the intro body when present. */
@@ -398,9 +406,12 @@ export function Timeline({
   // 이 목록이 이미 든 답글(`messages`에는 답글 프레임도 들어 있다 — 본류에서만 `mainMessages`가 뺀다)로 그 위에 얹는다.
   // 규칙은 코어 `liveThreadRollup` 한 곳이다. 든 배열에서 파생하므로 되쏘기에도 같은 답이다.
   const repliesByRoot = useMemo(() => groupRepliesByRoot(messages), [messages]);
+  // `viewing`은 그리는 쪽만 켠다(아래 행 렌더): 열린 스레드가 바뀌어도 이 함수의 동일성은 그대로여야 삭제 접기(`items`)의 스트림이
+  // 다시 지어지지 않는다 — 접기가 묻는 것은 「요약이 있는가」뿐이고 그것은 `viewing`과 상관없다.
+  const viewingKey = viewingThreadId == null ? null : viewingThreadId.toLowerCase();
   const rollupFor = useCallback(
-    (message: Message) =>
-      liveThreadRollup(message, repliesByRoot.get(message.id.toLowerCase()) ?? NO_REPLIES, myMemberIdForFold),
+    (message: Message, viewing = false) =>
+      liveThreadRollup(message, repliesByRoot.get(message.id.toLowerCase()) ?? NO_REPLIES, myMemberIdForFold, viewing),
     [repliesByRoot, myMemberIdForFold]
   );
 
@@ -925,7 +936,7 @@ export function Timeline({
               pausedRepeat={item.pausedRepeat}
               deletedRepeat={item.deletedRepeat}
               deletedFoldedIds={item.deletedFoldedIds}
-              rollup={rollupFor(item.message)}
+              rollup={rollupFor(item.message, viewingKey !== null && item.message.id.toLowerCase() === viewingKey)}
               onOpenThread={onOpenThread}
               onQuoteMessage={onQuoteMessage}
               onJumpToMessage={onJumpToMessage}

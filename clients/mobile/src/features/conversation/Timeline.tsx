@@ -859,6 +859,7 @@ function TimelineInner({
   status,
   channelId,
   channelKind,
+  viewingThreadId,
   peer,
   dmGroup,
   lastReadSeq,
@@ -930,6 +931,13 @@ function TimelineInner({
    */
   channelId?: string;
   channelKind?: Channel['kind'];
+  /**
+   * 지금 이 화면이 **보고 있는** 스레드의 루트 id — 스레드 화면이 열려 있고 앱이 앞일 때만 준다(둘 중 하나라도 아니면
+   * `null`/생략). 그 루트의 요약 줄은 남의 새 답글에도 안 읽은 수를 0으로 읽는다: 사람이 그 답글들을 지금 읽고 있고, 읽음
+   * 신호(`PUT …/read`)가 왕복하는 동안 칩이 깜빡 +1 되지 않게 한다(코어 `liveThreadRollup`의 `viewing`, #5032). 호스트가
+   * 읽음 신호를 보내는 조건과 같은 값이어야 한다(`ThreadPanel`의 `useAppForeground`).
+   */
+  viewingThreadId?: string | null;
   peer?: RosterMember | null;
   /** 셋 이상 DM 의 참여자 사실(ADR-0217). 빈 그룹이 「둘만 봅니다」라 말하지 않게 한다 — 웹 `Timeline` 과 같은 코어 문구. 1:1 이면 비운다. */
   dmGroup?: DmGroupFacts | null;
@@ -2942,7 +2950,16 @@ function TimelineInner({
           actions={actions}
           // `null` 은 "이 표면에는 롤업이 없다"이고 `undefined` 였다면 행이 서버의
           // 롤업으로 되돌아간다 — 끄려는 자리에서 정확히 반대가 된다.
-          rollup={showRollup ? rollupFor(item.message, threads, myMemberId) : null}
+          rollup={
+            showRollup
+              ? rollupFor(
+                  item.message,
+                  threads,
+                  myMemberId,
+                  viewingThreadId != null && uuidEq(item.message.id, viewingThreadId),
+                )
+              : null
+          }
           // `undefined` turns the marker off for the whole surface. A thread
           // panel passes `markReplies={false}`: every row in there is a reply,
           // and a 답글 line on each would be noise wearing the shape of
@@ -3040,6 +3057,7 @@ function TimelineInner({
       requestThoughts,
       requestRootId,
       channelKind,
+      viewingThreadId,
       // 둘 다 마운트 동안 바뀌지 않는다(`jumpPills` 는 규약, 등록 함수는 빈 의존성).
       jumpPills,
       registerRowNode,

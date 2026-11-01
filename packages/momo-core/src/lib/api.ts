@@ -413,9 +413,9 @@ export interface ThreadRollup {
    * 멤버의 id도 그대로 온다 — 명부에서 못 푸는 id는 화면이 기존 「알 수 없는 사람」 규칙으로 그린다.
    * 에이전트도 멤버라서 같은 규칙으로 들어 있다.
    *
-   * `threadRollup()`은 서버 롤업에서 이 값을 **항상** 채운다(옛 서버는 두 키를 안 보내서 `[]`·0).
-   * 선택 필드인 이유는 폰이 로컬로 세어 만드는 롤업(`threadContext.rollupFor`)이 얼굴을 모르기
-   * 때문이다 — 없다는 것은 「얼굴 없음」이지 오류가 아니다.
+   * 화면이 읽는 롤업은 두 길에서만 나오고 둘 다 이 값을 **항상** 채운다: `threadRollup()`(서버 요약 — 옛 서버는 두 키를 안
+   * 보내서 `[]`·0)과 코어 `liveThreadRollup()`(그 위에 든 새 답글을 얹은 값 — 웹·데스크탑·폰이 같은 함수다). 타입이 선택
+   * 필드인 것은 손으로 지은 값(시험·하니스)이 얼굴 없이 설 수 있게 해서일 뿐이다 — 없다는 것은 「얼굴 없음」이지 오류가 아니다.
    */
   participantIds?: string[];
   /**
@@ -425,7 +425,7 @@ export interface ThreadRollup {
   participantCount?: number;
   /**
    * #4889 2단계 — 보는 사람이 **따라가는** 스레드의 안 읽은 답글 수(본인 답글은 세지 않는다). 따라가지
-   * 않는 스레드·옛 서버·로컬로 세어 만든 롤업에는 없다 — 화면은 값이 없으면 지금 모양 그대로 그린다
+   * 않는 스레드·옛 서버·서버 요약이 없는 루트(방금 달린 첫 답글)에는 없다 — 화면은 값이 없으면 지금 모양 그대로 그린다
    * (강조도 「새 답글 M」 칩도 없이). 0은 「따라가고 있고 새 답글이 없다」다.
    */
   unreadReplyCount?: number;
@@ -549,7 +549,7 @@ export interface Message {
    * 편집 투영(`message.edited` 프레임·`PATCH` 응답)에는 없다. 거기서 없다는 것은 「답글 없음」이
    * 아니라 「말하지 않음」이므로, `reconcileMessages`가 이미 든 행의 롤업을 잇는다(#4450,
    * `keepHeldProjection`). 서버는 답글마다 `thread.updated` 를 발행하지만 TS 클라는 그것을 소비하지
-   * 않는다(폰은 `threadContext` 가 본 답글 수를 따로 세어 렌더에서 합친다). 그래서 `message.thread`
+   * 않는다(이 화면이 든 답글을 코어 `liveThreadRollup` 이 읽을 때 이 요약 위에 얹는다). 그래서 `message.thread`
    * 는 페이지 읽기에서만 바뀐다.
    */
   thread?: {

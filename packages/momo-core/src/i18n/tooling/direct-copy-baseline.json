@@ -124,7 +124,6 @@
     "clients/mobile/src/features/conversation/sendArrival.ts": 6,
     "clients/mobile/src/features/conversation/sendSlow.ts": 3,
     "clients/mobile/src/features/conversation/tapDismiss.ts": 8,
-    "clients/mobile/src/features/conversation/threadContext.ts": 1,
     "clients/mobile/src/features/conversation/unfurlImage.ts": 9,
     "clients/mobile/src/features/conversation/useComposerInputLayout.tsx": 1,
     "clients/mobile/src/features/conversation/useDmDeliveryHint.ts": 1,
