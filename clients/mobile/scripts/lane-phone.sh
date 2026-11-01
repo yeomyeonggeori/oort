@@ -936,7 +936,16 @@ if [ -z "$owner" ]; then
   else
     say "starting Metro on :$METRO_PORT"
   fi
-  ( cd "$APP_ROOT" && exec node node_modules/react-native/cli.js "${metro_args[@]}" ) \
+  # CHROME_PATH=/usr/bin/false: a Maestro tap that lands on the dev build's
+  # "Open debugger" toast makes Metro's dev-middleware launch the real Google
+  # Chrome through chrome-launcher. Started from a sandboxed agent shell, that
+  # Chrome cannot register with the window server and aborts within 0.2s, and
+  # macOS puts a "Google Chrome quit unexpectedly" dialog on the owner's screen —
+  # five of them in one lane run (#5083). chrome-launcher reads CHROME_PATH first,
+  # so the launch now fails quietly in metro.log ("Failed to launch debugger app
+  # window") instead. Nothing in this lane uses the debugger.
+  ( cd "$APP_ROOT" && export CHROME_PATH=/usr/bin/false \
+      && exec node node_modules/react-native/cli.js "${metro_args[@]}" ) \
     >"$OUT_DIR/metro.log" 2>&1 &
   METRO_PID=$!
   deadline=$(( $(date -u +%s) + 120 ))
