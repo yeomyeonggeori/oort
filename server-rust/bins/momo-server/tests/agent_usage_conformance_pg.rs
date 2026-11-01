@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Mutex;
 
-use momo_agent::{agent_usage_in_tx, validated_window};
+use chrono::{DateTime, SecondsFormat, Utc};
+use momo_agent::{agent_month_spend_in_tx, agent_usage_in_tx, validated_window};
 use momo_auth::{record_session_token, sign_access};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx::{self, postgres::PgConnectOptions, postgres::PgPoolOptions};
@@ -242,9 +243,30 @@ async fn fixture() -> Fixture {
     f
 }
 
+/// The upper bound every read in this file hands the route (#5087).
+///
+/// `usage_ledger.created_at` defaults to the **database's** `now()`, while the route's default
+/// window ends at the **host's** `Utc::now()`: two clocks. A database clock only tens of
+/// milliseconds ahead of the host (a Docker/Colima VM after sleep — +48 ms measured on
+/// 2026-11-02) puts every row seeded a moment ago after `to`, and the first reads see sums of 0
+/// or half. That is the trap #2950 fixed in `momo-agent/tests/conformance_pg.rs`; the production
+/// limit reader (`agent_month_spend_in_tx`) already reads both its bounds from the database
+/// clock. So the test asks the database what time it is — the clock that stamped the rows — and
+/// passes that as `to`.
+async fn db_now(su: &PgPool) -> DateTime<Utc> {
+    sqlx::query_scalar("SELECT clock_timestamp()")
+        .fetch_one(su)
+        .await
+        .expect("read the database clock")
+}
+
 async fn read(f: &Fixture, bearer: &str, path: &str) -> Value {
+    let to = db_now(&f.su)
+        .await
+        .to_rfc3339_opts(SecondsFormat::Micros, true);
     let response = reqwest::Client::new()
         .get(format!("{}/v1/workspaces/{}/usage/{path}", f.base, f.ws))
+        .query(&[("to", to.as_str())])
         .bearer_auth(bearer)
         .send()
         .await
@@ -445,7 +467,9 @@ async fn t4_workspace_rls_and_explicit_scope_are_independent() {
     .await
     .unwrap();
     assert_eq!(count, 0, "wrong GUC hides every ledger row");
-    let window = validated_window(None, None, None, chrono::Utc::now()).unwrap();
+    // The window must end on the database clock, or rows seeded a moment ago can sit after `to`
+    // and this read is empty with or without the workspace predicate (#5087).
+    let window = validated_window(None, None, None, db_now(&f.su).await).unwrap();
     let rows = with_tenant_tx(&f.app, other.ws, |conn| {
         Box::pin(async move {
             // Even an authorized id in the GUC tenant cannot be queried using a
@@ -678,4 +702,78 @@ async fn t9_admin_summary_retains_legacy_shape_and_amounts() {
     assert_eq!(budget["budget"]["state"], "soft_limit");
     assert_eq!(budget["budget"]["spentMicroUsd"], 400);
     assert_eq!(budget["budget"]["reservedMicroUsd"], 300);
+}
+
+/// One ledger row at the fixture's public price (1 in, 2 out, 0.1 cached per token; completion and
+/// cached are a tenth of the prompt, so `tokens` tokens list at `1.11 × tokens` micro-dollars).
+/// `run` is the run the row belongs to: a task of several steps writes one row per step.
+async fn run_row(f: &Fixture, agent: Uuid, run: Option<Uuid>, tokens: i32, stored_cost: i64) {
+    sqlx::query("INSERT INTO usage_ledger(workspace_id,agent_member_id,run_id,model,prompt_tokens,completion_tokens,cached_tokens,cost_micro_usd,source) \
+                 VALUES($1,$2,$3,'usage-public-4781',$4,$4/10,$4/10,$5,'measured')")
+        .bind(f.ws).bind(agent).bind(run).bind(tokens).bind(stored_cost).execute(&f.su).await.unwrap();
+}
+
+/// #5087: the three readers of one ledger — the agents screen, the monthly limit and the summary
+/// screen — add every row exactly once. A task of several steps is ONE run (#4967) and a row with
+/// no run is a run of its own, but neither moves a sum: no row is counted twice, none is dropped.
+#[tokio::test]
+#[ignore = "needs dedicated PostgreSQL 18"]
+async fn t10_the_screens_and_the_monthly_limit_add_every_ledger_row_once() {
+    let f = fixture().await;
+    let worker = agent(&f.su, f.ws, f.me, false).await;
+    let room = Uuid::new_v4();
+    sqlx::query("INSERT INTO channel(id,workspace_id,kind,name,created_by) VALUES($1,$2,'public','task-room',$3)")
+        .bind(room).bind(f.ws).bind(f.me).execute(&f.su).await.unwrap();
+    let run = Uuid::new_v4();
+    sqlx::query("INSERT INTO agent_run(id,workspace_id,agent_member_id,channel_id,idempotency_key) VALUES($1,$2,$3,$4,$5)")
+        .bind(run).bind(f.ws).bind(worker).bind(room).bind(format!("t10-{run}"))
+        .execute(&f.su).await.unwrap();
+    // Three steps of one run, then two answers that carry no run at all.
+    for (tokens, stored) in [(1000, 10), (2000, 20), (3000, 30)] {
+        run_row(&f, worker, Some(run), tokens, stored).await;
+    }
+    for (tokens, stored) in [(500, 5), (700, 7)] {
+        run_row(&f, worker, None, tokens, stored).await;
+    }
+
+    // The agents screen: list price of every row, once — 1110 + 2220 + 3330 + 555 + 777.
+    let body = read(&f, &f.member_token, "agents").await;
+    let seen = row(&body, worker);
+    assert_eq!(
+        seen["runs"], 3,
+        "three steps are one run; each runless row is its own"
+    );
+    assert_eq!(seen["reportedRuns"], 3);
+    assert_eq!(seen["promptTokens"], 7200);
+    assert_eq!(seen["completionTokens"], 720);
+    assert_eq!(seen["cachedTokens"], 720);
+    assert_eq!(seen["costMicroUsd"], 7992);
+    assert_eq!(seen["unpricedRuns"], 0);
+    assert_eq!(seen["estimatedRuns"], 0);
+
+    // The monthly limit reads the very same figure: a limit and the screen that explains it
+    // must not disagree (the limit's `to` is the database clock, so no `to` is passed here).
+    let spend = with_tenant_tx(&f.app, f.ws, |conn| {
+        Box::pin(async move { agent_month_spend_in_tx(conn, f.ws, worker).await })
+    })
+    .await
+    .unwrap();
+    assert_eq!(spend.cost_micro_usd, 7992);
+    assert_eq!(spend.runs, 3);
+    assert_eq!(spend.unpriced_runs, 0);
+    assert_eq!(spend.estimated_runs, 0);
+    assert_eq!(json!(spend.cost_micro_usd), seen["costMicroUsd"]);
+    assert_eq!(json!(spend.runs), seen["runs"]);
+
+    // The summary screen adds the stored (reported) cost of the same five rows: 10+20+30+5+7.
+    let summary = read(&f, &f.member_token, "summary").await;
+    let by_agent = summary["byAgent"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["agentMemberId"] == json!(worker))
+        .expect("the agent's summary row");
+    assert_eq!(by_agent["costMicroUsd"], 72);
+    assert_eq!(by_agent["promptTokens"], 7200);
+    assert_eq!(by_agent["completionTokens"], 720);
 }

@@ -245,6 +245,7 @@ export const messageKeys = [
   "teamAi.stage.verifyingLine",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
+  "timeline.thread.followHint",
   "timeline.thread.followOff",
   "timeline.thread.followOn",
   "timeline.thread.followStart",
@@ -571,6 +572,7 @@ export const argumentSpecs = {
   "teamAi.stage.verifyingLine": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
+  "timeline.thread.followHint": {},
   "timeline.thread.followOff": {},
   "timeline.thread.followOn": {},
   "timeline.thread.followStart": {},
@@ -862,6 +864,7 @@ export interface MessageArgs {
   "teamAi.stage.verifyingLine": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
+  "timeline.thread.followHint": Record<string, never>;
   "timeline.thread.followOff": Record<string, never>;
   "timeline.thread.followOn": Record<string, never>;
   "timeline.thread.followStart": Record<string, never>;

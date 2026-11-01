@@ -1,3 +1,4 @@
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import {channelLabel} from '@momo/core/features/workspace/directory';
 import {fetchWorkSessions} from '@momo/core/lib/api';
 import {useQueryClient} from '@tanstack/react-query';
@@ -116,15 +117,28 @@ export function useNotificationTapRouting(
   /** 답을 기다리는 탭. 하나뿐이다 — 새 탭이 오면 대체된다. */
   const pendingRef = useRef<PendingTap | null>(null);
 
+  // 알림은 **새 입구**다 (#4667). 항법 층(설정·대화·에이전트…)은 `navReducer` 가 걷지만 시트·뷰어·메뉴는 그것을 연
+  // 컴포넌트의 지역 상태라 리듀서가 모른다 — 입구는 이동하기 **직전에** 방송 하나로 그 표면을 모두 닫게 한다
+  // (`dismissTemporarySurfaces`). 이 훅의 항법은 전부 여기를 지난다: 착지(대화·세션)만이 아니라 못 가는 때도 그렇다 —
+  // 「없어졌거나 볼 권한이 없습니다」는 대화 목록에 서는데, 시트가 덮고 있으면 말하지 못한다. 시험이 이 파일에서
+  // `dispatch(` 가 이 한 곳뿐임을 센다.
+  const enter = useCallback(
+    (action: NavAction) => {
+      dismissTemporarySurfaces();
+      dispatch(action);
+    },
+    [dispatch],
+  );
+
   const fail = useCallback(
     (sentence: string) => {
       setNotice(sentence);
-      dispatch({type: 'selectTab', tab: 'home'});
+      enter({type: 'selectTab', tab: 'home'});
       // 이 문장은 사람이 누른 곳과 다른 화면에 선다. 화면을 보지 않는 사람에게는
       // 알림을 눌렀는데 아무 일도 없었던 것과 같으므로 소리로도 말한다.
       AccessibilityInfo.announceForAccessibility(sentence);
     },
-    [dispatch],
+    [enter],
   );
 
   const firstReadIn = !channels.isPending && !roster.isPending;
@@ -214,7 +228,7 @@ export function useNotificationTapRouting(
             if (session !== null) {
               pendingRef.current = null;
               setNotice(null);
-              dispatch({
+              enter({
                 type: 'openWorkSessionFromNotification',
                 workSession: {sessionId: session.id},
               });
@@ -234,7 +248,7 @@ export function useNotificationTapRouting(
       // 데려가는 셈이다.
       if (target.approvalId !== null) invalidateApprovals();
       setNotice(null);
-      dispatch({
+      enter({
         type: 'openFromNotification',
         conversation: {
           channelId: channel.id,
@@ -255,7 +269,7 @@ export function useNotificationTapRouting(
       // 탭은 들고 있는다.
       if (!pending.failureSaid) {
         pending.failureSaid = true;
-        dispatch({type: 'selectTab', tab: 'home'});
+        enter({type: 'selectTab', tab: 'home'});
         // 방금의 자리 옮김은 사람의 선택이 아니다. 그것을 기준점으로 삼는다.
         pending.nav = {tab: 'home', conversation: null};
         AccessibilityInfo.announceForAccessibility(CHANNEL_LIST_FAILED);
@@ -290,7 +304,7 @@ export function useNotificationTapRouting(
     fail,
     invalidateApprovals,
     queryClient,
-    dispatch,
+    enter,
     member.id,
     workspaceId,
     resolveTick,

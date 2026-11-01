@@ -27,15 +27,26 @@ export interface OsNotifyItem {
    * 한글을 더하지 않는다. 건수는 묶인 뒤에야 알아서 함수다. 없으면 표의 것이다.
    */
   summaryTitle?: (count: number) => string;
+  /**
+   * 이 알림이 어느 스레드의 답글인가(스레드 루트 id, #5017). 같은 스레드의 답글만 묶인 배너는 누르면 그 스레드로 간다:
+   * 답글마다 `route` 의 카드가 달라 「한 곳을 가리킴」으로 읽히지 않던 것을 이 값이 잇는다.
+   */
+  rootId?: string;
 }
 
-/** 여러 건이 한 곳을 가리키면 그곳, 흩어지면 멘션 인박스(데스크탑 `openTarget`과 같은 말). */
+/**
+ * 여러 건이 한 곳을 가리키면 그곳, 흩어지면 멘션 인박스(데스크탑 `openTarget`과 같은 말). 같은 스레드의 답글만 묶였으면
+ * 카드는 달라도 그 스레드다 — 가장 늦은 답글의 주소로 간다(#5017).
+ */
 export const MIXED_ROUTE = "/inbox?filter=mentions";
 
 export function routeFor(items: readonly OsNotifyItem[]): string | undefined {
   const routes = items.map((i) => i.route);
   if (routes.some((r) => r === undefined)) return undefined;
-  return routes.every((r) => r === routes[0]) ? routes[0] : MIXED_ROUTE;
+  if (routes.every((r) => r === routes[0])) return routes[0];
+  const root = items[0]?.rootId?.toLowerCase();
+  if (root !== undefined && items.every((i) => i.rootId?.toLowerCase() === root)) return routes[routes.length - 1];
+  return MIXED_ROUTE;
 }
 
 /** 묶였을 때의 제목. 「무엇이 일어났나」가 먼저, 건수가 뒤다. */

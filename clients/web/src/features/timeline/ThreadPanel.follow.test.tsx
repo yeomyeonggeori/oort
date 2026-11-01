@@ -18,6 +18,8 @@ import { useThreadFollow } from "./useThreadFollow";
 // 스레드 패널 머리의 「따라가기 / 그만 따라가기」 (#4890). 서버는 가짜 응답이다. 규칙(낙관적 갱신·되돌림·숨김)의 단위 시험은
 // 코어 `threadFollow.test.ts` 에 있고, 여기서는 **패널이 단추를 언제 세우고 무엇을 보이는가**를 잰다:
 // 상태 둘(말로 하는 라벨)·누르면 즉시 바뀜·실패하면 되돌리고 안내·쓸 수 없는 곳은 숨김·열린 스레드를 알림에 알림.
+// 그리고(#5017) 입력창 곁의 한 줄 「답하면 이 스레드를 따라가요」가 **처음 답할 때만** 서는지: 규칙 표는 코어
+// `threadFollow.test.ts` 가 재고, 여기서는 패널이 서버 값·누른 적·내 답글을 코어에 **제대로 물리는지**를 잰다.
 // =============================================================================
 
 const WS = "workspace";
@@ -41,7 +43,11 @@ vi.mock("@/features/agents/agentRunProgressStore", () => ({ useChannelRuns: () =
 vi.mock("./MessageRow", () => ({
   MessageRow: ({ message }: { message: Message }) => <div data-testid="timeline-message">{message.body}</div>,
 }));
-vi.mock("./ThreadComposer", () => ({ ThreadComposer: () => null }));
+// 입력창은 가짜다: 패널이 건넨 힌트 줄만 그대로 그린다(줄의 모양·`aria-describedby` 는 `ThreadComposer` 시험이 잰다).
+vi.mock("./ThreadComposer", () => ({
+  ThreadComposer: ({ followHint }: { followHint?: string }) =>
+    followHint === undefined ? null : <p data-testid="thread-composer-follow-hint">{followHint}</p>,
+}));
 
 const root = { id: "root", channelId: CH, seq: 1, authorMemberId: ME, type: "text", body: "소개를 바꿔 줘요", state: "sent", createdAtMs: 1, hlcTs: 1, hlcCount: 0 } as Message;
 const reply = (seq: number): Message => ({ ...root, id: `r${seq}`, rootId: "root", seq, authorMemberId: OTHER, body: `답글 ${seq}` });
@@ -67,7 +73,7 @@ beforeAll(async () => {
   ko = await koreanLocale();
 });
 
-function mount(options: { withActions?: boolean; followable?: boolean } = {}) {
+function mount(options: { withActions?: boolean; followable?: boolean; root?: Message } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   return render(
     <LocaleProvider locale={ko}>
@@ -75,7 +81,7 @@ function mount(options: { withActions?: boolean; followable?: boolean } = {}) {
         <ThreadPanel
           workspaceId={WS}
           channelId={CH}
-          root={root}
+          root={options.root ?? root}
           directory={makeDirectory([])}
           channels={[]}
           realtime={realtime}
@@ -285,3 +291,51 @@ describe("서버 값이 닿는 첫 그림부터 맞는 모양이다", () => {
   });
 });
 
+
+describe("처음 답할 때만 입력창 곁에 「답하면 이 스레드를 따라가요」가 선다 (#5017)", () => {
+  const HINT = "답하면 이 스레드를 따라가요.";
+  const hint = () => screen.queryByTestId("thread-composer-follow-hint");
+  /** 남이 연 스레드: 내가 아직 말한 적이 없다. (기본 `root` 는 내 글이라 답글이 달리면 이미 따라가던 쪽이다.) */
+  const othersRoot = { ...root, authorMemberId: OTHER } as Message;
+  const mine = (seq: number): Message => ({ ...reply(seq), authorMemberId: ME, body: `내 답글 ${seq}` });
+
+  it("서버가 따라가지 않는다고 말했고 아직 답한 적이 없으면 선다", async () => {
+    api.fetch.mockResolvedValue({ messages: [reply(2)], following: false });
+    mount({ root: othersRoot });
+    await waitFor(() => expect(hint()?.textContent).toBe(HINT));
+  });
+
+  it.each([
+    // 패널이 서버가 **말한** 값(`following` 의 키 없음 = 옛 서버)과 내 답글을 코어 규칙에 그대로 물리는지. 나머지 갈래(따라가는 스레드·
+    // 내 글의 스레드·다 못 불러옴·칸 없음)의 표는 코어 `threadFollow.test.ts` 가 잰다.
+    ["옛 서버(following 키 없음): 답해도 따라가지 않는다", { messages: [reply(2)] }],
+    ["내가 이미 답한 스레드", { messages: [reply(2), mine(3)], following: false }],
+  ])("%s → 서지 않는다", async (_name, page) => {
+    api.fetch.mockResolvedValue(page);
+    mount({ root: othersRoot });
+    await waitFor(() => expect(button()).toBeTruthy());
+    expect(hint()).toBeNull();
+  });
+
+  it("사람이 눌러 끈 스레드에서는 서지 않는다 — 끈 스레드는 답글로 돌아오지 않는다", async () => {
+    api.fetch.mockResolvedValue({ messages: [reply(2)], following: true });
+    api.unfollow.mockResolvedValue({ following: false });
+    mount({ root: othersRoot });
+    await waitFor(() => expect(button().getAttribute("data-following")).toBe("true"));
+    fireEvent.click(button());
+    await settle();
+    expect(button().getAttribute("data-following")).toBe("false");
+    expect(hint()).toBeNull();
+  });
+
+  it("첫 답글을 보낸 뒤 서버가 따라간다고 다시 말하면 거둬진다", async () => {
+    api.fetch.mockResolvedValue({ messages: [reply(2)], following: false });
+    mount({ root: othersRoot });
+    await waitFor(() => expect(hint()?.textContent).toBe(HINT));
+    api.fetch.mockResolvedValue({ messages: [reply(2), mine(3)], following: true });
+    act(() => handlers.onMessage({ type: "message.new", v: 1, ts: 1, seq: 3, payload: { id: "r3", root_id: "root", channel_id: CH } } as MessageNewEvent));
+    await waitFor(() => expect(screen.getAllByTestId("timeline-message").length).toBe(3));
+    expect(hint()).toBeNull();
+    expect(button().getAttribute("data-following")).toBe("true");
+  });
+});

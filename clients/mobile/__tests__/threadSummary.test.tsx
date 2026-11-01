@@ -5,6 +5,7 @@ import {
   THREAD_FACE_OVERLAP,
   THREAD_FACE_RING,
   THREAD_FACE_SIZE,
+  liveThreadRollup,
 } from '@momo/core/features/timeline/threadSummary';
 import {cleanup, fireEvent, render, screen, within} from './fixtures/darkWorld';
 import React from 'react';
@@ -273,7 +274,7 @@ describe('줄 전체가 하나의 버튼', () => {
   });
 });
 
-describe('rollupFor — 서버의 얼굴과 안 읽은 수가 폰까지 온다', () => {
+describe('rollupFor — 서버의 얼굴과 안 읽은 수가 폰까지 오고, 폰도 웹과 같은 코어 함수다', () => {
   const root = message({
     thread: {
       reply_count: 3,
@@ -325,11 +326,38 @@ describe('rollupFor — 서버의 얼굴과 안 읽은 수가 폰까지 온다',
     );
   });
 
-  it('서버 롤업이 없는 루트(방금 단 첫 답글)는 얼굴 없이 지금 모양이다', () => {
+  it('서버 롤업이 없는 루트(방금 단 첫 답글)는 「답글 1개」와 얼굴이 서고 칩은 없다 — 웹과 같다', () => {
     const bare = message();
     const merged = rollupFor(bare, buildThreadContext([bare, reply(14)]), SELF);
-    expect(merged?.replyCount).toBe(1);
-    expect(merged).not.toHaveProperty('participantIds');
+    expect(merged).toMatchObject({replyCount: 1, participantIds: [ids.a], lastReplySeq: 14});
     expect(merged).not.toHaveProperty('unreadReplyCount');
+  });
+
+  it('열어 보지 않은 스레드에서도 수·얼굴이 오르고, 승인 카드는 수에만 들고, 열린 스레드는 칩만 0이다 — 코어 함수 그대로 (#5032)', () => {
+    // 서버 3(머리 13) + 머리 뒤 새 답글 1. 예전 폰의 max(서버, 로컬)은 3이었고 얼굴은 그대로였다.
+    const fresh = reply(14, {authorMemberId: ids.c});
+    const phone = rollupFor(root, buildThreadContext([root, fresh]), SELF);
+    expect(phone).toMatchObject({
+      replyCount: 4,
+      unreadReplyCount: 2,
+      participantIds: [ids.c, ids.a, ids.b],
+    });
+    // 같은 입력을 코어가 직접 풀어도 같은 값이다: 폰에는 요약 산수가 하나도 남지 않았다.
+    expect(phone).toEqual(liveThreadRollup(root, [fresh], SELF));
+    // 요청 묶음의 승인 카드 답글은 서버 reply_count가 세므로 수·얼굴에 들고, 안 읽은 수(text만)에는 안 든다.
+    // 작업 세션의 system 줄은 서버가 안 세므로 어느 쪽에도 안 든다.
+    const card = reply(15, {type: 'approval_request', authorMemberId: ids.d});
+    const note = reply(16, {type: 'system', authorMemberId: ids.e});
+    expect(rollupFor(root, buildThreadContext([root, card, note]), SELF)).toMatchObject({
+      replyCount: 4,
+      unreadReplyCount: 1,
+      participantIds: [ids.d, ids.a, ids.b],
+    });
+    // 스레드 화면이 열려 앱이 앞이면(viewing) 안 읽은 수만 0이다. 수·얼굴은 그대로 오른다.
+    expect(rollupFor(root, buildThreadContext([root, fresh]), SELF, true)).toMatchObject({
+      replyCount: 4,
+      unreadReplyCount: 0,
+      participantIds: [ids.c, ids.a, ids.b],
+    });
   });
 });

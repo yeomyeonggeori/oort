@@ -1,6 +1,10 @@
 {
   "comment": "Reviewed fallbacks for packages whose tarball/install tree has an SPDX id but no LICENSE/COPYING file. Missing both on-disk files and a row here is fail-closed. This is not a license-policy allowlist (#1225 deny.toml / check_npm_licenses.mjs remain the policy).",
   "cargo": {
+    "alloc-stdlib@0.2.4": {
+      "reason": "crates.io tarball ships no LICENSE/COPYING. SPDX BSD-3-Clause (Daniel Reiter Horn / Dropbox; same repository as alloc-no-stdlib, whose tarball ships the BSD-3-Clause text). Pulled in via brotli-decompressor 5 <- lopdf 0.46 (#4970).",
+      "spdx_texts": ["BSD-3-Clause"]
+    },
     "r-efi@5.3.0": {
       "reason": "crates.io tarball ships AUTHORS and no LICENSE/COPYING. SPDX expression MIT OR Apache-2.0 OR LGPL-2.1-or-later. Pulled in via getrandom 0.3 by the #3173 embedding stack (fastembed/tokenizers); UEFI-target-only, not compiled on Linux/macOS.",
       "spdx_texts": ["MIT", "Apache-2.0", "LGPL-2.1-or-later"]

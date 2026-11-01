@@ -209,7 +209,7 @@ variable**: not `DATABASE_URL`, not `PROVIDER_LINK_MASTER_KEY`, not a JWT key.
    reads it as `API_SERVER_KEY`; api and agent-worker as `HERMES_API_KEY`
    (the gate refuses a key under 32 characters).
 2. **Four base64 variables on hermes** (hand-mapped table): `HERMES_CONFIG_B64`
-   from `infra/hermes/config.yaml` (22 toolsets off, Codex subscription search and
+   from `infra/hermes/config.yaml` (24 toolsets off, `memory` and `session_search` among them and Hermes' memory switches off, Codex subscription search and
    image generation on, the image guard enabled, approvals manual/deny, no model, no connector),
    `HERMES_LOCKGATE_B64` from `infra/hermes/lockgate.py`, and the two files of the oort image guard
    plugin, `HERMES_IMAGE_GUARD_B64` (`plugins/oort-image-guard/__init__.py`) and

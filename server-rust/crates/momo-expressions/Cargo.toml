@@ -32,8 +32,7 @@ rlimit = "0.10"
 # ADR-0218 D3: GIF decoding/compositing and fresh pixel-only encoding.
 # image, gif, color_quant and weezl are MIT/Apache-2.0; no video codecs.
 image = { workspace = true, features = ["gif"] }
-
-[dev-dependencies]
+# #4992: the prepared photo crosses the decoder child's stdout as base64 (media::Prepared).
 base64.workspace = true
 
 [lints]

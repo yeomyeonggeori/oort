@@ -2820,6 +2820,10 @@ pub struct ChannelDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub archived_at_ms: Option<i64>,
     pub muted: bool,
+    /// End of the caller's timed mute, epoch ms — present **only while a timed mute is in
+    /// progress** (ADR-0206 D12, #4343). An open-ended mute and an expired one omit the key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muted_until_ms: Option<i64>,
 }
 
 /// Swift `WorkspaceChannelsResponse` (:471-473) — the body of `GET …/dms` and
@@ -2878,17 +2882,30 @@ pub struct CreateChannelResponse {
 
 /// `PUT …/channels/{ch}/notification-pref` request (Swift
 /// `UpdateNotificationPrefRequest`, `DTOs.swift:476-478`).
+///
+/// `mutedUntilMs` (ADR-0206 D12, #4343) gives a mute an end: epoch ms, only with `muted: true`,
+/// validated against the database clock by the route. Absent and `null` both mean open-ended, which
+/// is what the old `{muted: true}` body always meant. `level` is not part of this body yet — it is
+/// the channel-level slice's — so it is still refused as an unknown field.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateNotificationPrefRequest {
     pub muted: bool,
+    #[serde(default)]
+    pub muted_until_ms: Option<i64>,
 }
 
 /// Swift `NotificationPrefResponse` (`DTOs.swift:480-482`) — the server's
 /// answer, not an echo: the caller re-reads its own state from this.
+///
+/// Both fields are **effective now** (ADR-0206 D12): `muted` is false once a timed mute has
+/// ended, and `mutedUntilMs` is present only while a timed mute is in progress.
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NotificationPrefResponse {
     pub muted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub muted_until_ms: Option<i64>,
 }
 
 /// `PUT …/notification-rules` request (ADR-0124 증보 1). The member-global rule

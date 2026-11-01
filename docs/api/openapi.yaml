@@ -561,7 +561,10 @@ paths:
           description: >
             One photo per member and four per instance are already in flight (until
             the model's call has ended), or the decoder is busy; retry after the
-            `Retry-After` seconds. Nothing was sent.
+            `Retry-After` seconds. Before the model is asked nothing was sent. If both
+            decoder slots stay taken for 15 seconds after the model has answered, the
+            picture is given up (it was billed) and the call is not repeated: the server
+            holds it and asks for a slot again meanwhile.
           content:
             application/json:
               schema:
@@ -570,6 +573,48 @@ paths:
           description: >
             `image_model_timeout` - no answer within 120 seconds. The provider may
             have finished (and billed) the work.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      operationId: listExpressionPhotoDrafts
+      summary: The caller's own live photo drafts (ADR-0218 section 9 I1)
+      description: >
+        The way back to a picture the photo route finished after the request that was
+        waiting for it was gone (the connection dropped, the app was closed): the draft is
+        stored whether or not anyone is still waiting (`POST` above), and
+        `GET /expression-drafts/{draftId}` needs an id nobody was left to receive.
+
+
+        Lists the caller's own drafts that this route made (origin `generated` with one of
+        the two sentences the server writes for it), that are still `ready` and not expired,
+        newest first, at most 4 (a person holds no more live drafts than that). Each item is
+        exactly what `GET /expression-drafts/{draftId}` answers for it, so it is opened,
+        replaced and registered through the routes that already do that. A registered or
+        expired draft, any other kind of draft and anyone else's draft are not listed. It is
+        a plain read: it opens no team key, calls no model and spends no photo-start budget.
+        The `cutout` outcome belongs to the answer of the request that made the draft and is
+        not stored with it, so it is not here.
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: The caller's live photo drafts, possibly none
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionPhotoDraftList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            Not a human: an agent credential is refused before the route is reached.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Another workspace's bearer; the same body as every expression route.
           content:
             application/json:
               schema:
@@ -5697,21 +5742,32 @@ paths:
       operationId: updateChannelNotificationPref
       summary: Mute or unmute push notifications for one channel.
       description: >
-        Active channel members only. `muted: true` stores an indefinite mute;
-        `muted: false` deletes the preference. Mute suppresses every push
-        reason, including mentions and approval requests, without changing
-        unread/read-state.
+        Active channel members only. `muted: true` stores a mute; `muted: false`
+        deletes the preference. Mute suppresses every push reason, including
+        mentions and approval requests, without changing unread/read-state.
 
-        ADR-0206 D7 and D12 contract draft: the body may instead carry `level`
-        (`all`, `mentions` or `none`) and, with a mute (`muted: true` or `level:
-        none`), `mutedUntilMs` (epoch ms, in the future and within 366 days: 400
-        `muted_until_in_past` or `muted_until_too_far`). Exactly one of `muted`
-        and `level` is required. `level: all` is refused for a DM channel (400
+        ADR-0206 D12 (#4343): a mute may end. With `muted: true`, `mutedUntilMs`
+        (epoch ms) is the moment it ends; omitted or null is open-ended, so the
+        original `{muted: true}` body is unchanged. The end must be after now and
+        at most 366 days away, judged on the database clock (400
+        `muted_until_in_past` or `muted_until_too_far`), and `mutedUntilMs` with
+        `muted: false` is a 400 (no code). A later write replaces the earlier
+        one whole, so a plain `{muted: true}` over a timed mute makes it
+        open-ended. Nothing sweeps an ended mute: every reader compares the end
+        with the clock when it reads. The answer, like the channel list's
+        `muted`, is the mute as it reads now: `mutedUntilMs` is present only
+        while a timed mute is in progress. The audit record
+        `notification_pref.updated` carries `muted` and `mutedUntilMs` (`null`
+        for an open-ended mute or an un-mute).
+
+        ADR-0206 D7 contract draft (the channel-level slice, not served yet):
+        the body may instead carry `level` (`all`, `mentions` or `none`), exactly
+        one of `muted` and `level`, and `level: none` takes `mutedUntilMs` like
+        `muted: true`. `level: all` is refused for a DM channel (400
         `level_not_applicable`). The mute is a layer over the level, so a timed
         mute returns to the earlier level when it ends, and the legacy `muted`
-        body touches only the mute layer. Until #4343 (`mutedUntilMs`) and the
-        channel-level slice land, the server accepts only `{muted}` and answers
-        422 to the new fields.
+        body touches only the mute layer. Until that slice lands the server
+        answers 422 to `level`.
       security:
         - bearerAuth: []
       parameters:
@@ -5731,7 +5787,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/NotificationPrefResponse"
         "400":
-          description: Invalid request body or identifiers.
+          description: >
+            Invalid identifiers, or a refused mute window: `muted_until_in_past`
+            (the end is not after now), `muted_until_too_far` (more than 366 days
+            away), or `mutedUntilMs` together with `muted: false` (no code).
           content:
             application/json:
               schema:
@@ -16641,6 +16700,17 @@ components:
           - erased
           - unchanged
           - null
+    ExpressionPhotoDraftList:
+      type: object
+      additionalProperties: false
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          maxItems: 4
+          items:
+            $ref: '#/components/schemas/ExpressionDraft'
     ExpressionImportRequest:
       type: object
       additionalProperties: false
@@ -17259,10 +17329,12 @@ components:
                 send-now (409),
                 the failure reason that the row now carries: `author_inactive`,
                 `not_member`, `root_unavailable`, `attachment_unavailable`,
-                `send_error`, `not_allowed`; ADR-0206 (contract draft, notification
-                settings v2): 400 `confirmation_required`, `invalid_time_zone`,
-                `invalid_schedule`, `unknown_sound`, `muted_until_in_past`,
-                `muted_until_too_far`, `level_not_applicable`, `keyword_too_short`,
+                `send_error`, `not_allowed`; ADR-0206 D12 (#4343, channel mute with an
+                end): 400 `muted_until_in_past` (the end is not after now),
+                `muted_until_too_far` (more than 366 days away); ADR-0206 (contract
+                draft, notification settings v2): 400 `confirmation_required`,
+                `invalid_time_zone`, `invalid_schedule`, `unknown_sound`,
+                `level_not_applicable`, `keyword_too_short`,
                 `keyword_too_long`, `too_many_keywords`; 409 `no_device`; 429
                 `rate_limited` (the test push only); ADR-0215 D2 (#4593, the
                 password a person is choosing: `POST /v1/join`, `POST /v1/claim`,
@@ -21024,8 +21096,10 @@ components:
           type: integer
           format: int64
           description: >
-            Epoch ms, present only while a timed mute is in progress (ADR-0206 D12
-            contract draft).
+            Epoch ms when the authenticated member's timed mute ends, present
+            only while that mute is in progress (ADR-0206 D12, #4343): omitted for
+            an open-ended mute, and once the end has passed (`muted` is false then
+            too). On the channel list, the DM list and the DM open answer alike.
         notificationLevel:
           type: string
           enum: [all, mentions, none]
@@ -21047,8 +21121,10 @@ components:
       type: object
       additionalProperties: false
       description: >
-        Exactly one of `muted` and `level` (ADR-0206 D7, D12 contract draft; only
-        `muted` is accepted until the slices land).
+        `muted`, with an optional `mutedUntilMs` (ADR-0206 D12, served since
+        #4343). `level` is the ADR-0206 D7 contract draft: exactly one of `muted`
+        and `level` once the channel-level slice lands; until then `level` is an
+        unknown field (422).
       oneOf:
         - required: [muted]
         - required: [level]
@@ -21066,8 +21142,11 @@ components:
           format: int64
           nullable: true
           description: >
-            Epoch ms when the mute ends. Only with `muted: true` or `level:
-            none`. Omitted or null is open-ended.
+            Epoch ms when the mute ends (ADR-0206 D12). Only with `muted: true`
+            (and `level: none` once that is served); with `muted: false` it is a
+            400. It must be after now and at most 366 days away, judged on the
+            database clock (400 `muted_until_in_past`, `muted_until_too_far`).
+            Omitted or null is open-ended. Not an integer: 422.
 
     NotificationPrefResponse:
       type: object
@@ -21083,7 +21162,9 @@ components:
         mutedUntilMs:
           type: integer
           format: int64
-          description: Epoch ms, present only while a timed mute is in progress (ADR-0206 D12 contract draft).
+          description: >
+            Epoch ms, present only while a timed mute is in progress (ADR-0206
+            D12, #4343); omitted for an open-ended mute and for an un-mute.
 
     PutAgentProviderPinRequest:
       type: object

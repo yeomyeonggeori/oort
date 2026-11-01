@@ -833,11 +833,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/expressions/photo-model",
             get(routes::expression_photo::availability),
         )
+        // The list is chained after the layers, so neither the start budget nor the body limit
+        // covers it: a read is never counted (ADR-0218 §9 I1, #4992).
         .route(
             "/v1/workspaces/{ws}/expressions/photo-drafts",
             post(routes::expression_photo::create)
                 .route_layer(member_write(rate_limit::MemberWrite::PhotoDraft))
-                .layer(axum::extract::DefaultBodyLimit::max(momo_expressions::REQUEST_BYTES)),
+                .layer(axum::extract::DefaultBodyLimit::max(momo_expressions::REQUEST_BYTES))
+                .get(routes::expression_photo::list),
         )
         .route(
             "/v1/workspaces/{ws}/expression-drafts/{draftId}",

@@ -29,6 +29,10 @@ MANDATED = {"terminal", "code_execution", "browser"}
 # turns it on in the default config with the Codex subscription provider only. The connector reference config still
 # denies it, and the lockgate rules below (provider, FAL_KEY, connector exclusivity) are what keep that door narrow.
 MEASURED_BYPASSES = {"file", "connections", "delegation", "cronjob", "skills", "vision"}
+# The two tools that read what an earlier run of this Hermes left behind (#4898, ADR-0203 augmentation of 2026-11-01): both configs deny them.
+CROSS_RUN = {"memory", "session_search"}
+# What a healthy config says about the built-in memory: both switches the system-prompt loading reads, explicitly false.
+MEMORY_OFF = {"memory": {"memory_enabled": False, "user_profile_enabled": False}}
 
 
 def disabled_toolsets(text):
@@ -60,11 +64,11 @@ def install_guard_files(data_dir):
 
 
 def cfg_from_text(text):
-    """The `web` and `image_gen` sections of a config written in this repo's flat style, as `tool_problems` reads them.
+    """The `web`, `image_gen` and `memory` sections of a config written in this repo's flat style, as `tool_problems` and `memory_problems` read them.
 
     Stdlib only, like the readers above: it reads exactly `  key: value` lines under a top-level section."""
     cfg = {}
-    for section in ("web", "image_gen"):
+    for section in ("web", "image_gen", "memory"):
         match = re.search(r"(?m)^%s:\n((?:  [a-z_]+: .*\n)+)" % section, text)
         if not match:
             continue
@@ -90,7 +94,7 @@ class DefaultConfig(unittest.TestCase):
         # and the Codex subscription image tool (#4820).
         self.assertEqual(disabled_toolsets(self.text),
                          [x for x in disabled_toolsets(self.google) if x not in ("web", "image_gen")])
-        self.assertEqual(len(disabled_toolsets(self.text)), 22)
+        self.assertEqual(len(disabled_toolsets(self.text)), 24)
         self.assertIn("image_gen", disabled_toolsets(self.google))
         self.assertNotIn("image_gen", disabled_toolsets(self.text))
 
@@ -99,7 +103,8 @@ class DefaultConfig(unittest.TestCase):
         match = re.search(r"(?m)^platform_toolsets:\n  api_server:\n((?:    - .*\n)+)", self.text)
         self.assertIsNotNone(match)
         selected = re.findall(r"(?m)^    - ([a-z_]+)\b", match.group(1))
-        self.assertEqual(selected, ["memory", "todo", "session_search", "search", "image_gen"])
+        self.assertEqual(selected, ["todo", "search", "image_gen"])
+        self.assertFalse(CROSS_RUN & set(selected), "memory and session_search are off (#4898)")
         self.assertNotIn("web", selected, "the combined `web` toolset would add web_extract")
         self.assertRegex(self.text, r"(?m)^web:\n  search_backend: openai-native\b.*\n  keyless_fallback: false\b")
 
@@ -111,6 +116,23 @@ class DefaultConfig(unittest.TestCase):
             self.assertNotRegex(body, r"(?m)^\s+provider:\s*%s\b" % other)
         self.assertNotIn("FAL_KEY", body)
         self.assertEqual(lockgate.tool_problems(cfg_from_text(self.text), lockgate.ALLOWED_TOOLS), [])
+
+    def test_memory_and_session_search_are_off_in_every_way_the_config_can_say_it(self):
+        # #4898: the toolsets are denied (the deny-list is subtracted last, so it also beats a composite), not selected, and Hermes' own memory
+        # switches are false: `_init_memory` reads those, not the toolset, so a file an earlier run wrote would stay in every prompt otherwise.
+        for name, text in (("default", self.text), ("connector reference", self.google)):
+            with self.subTest(config=name):
+                self.assertTrue(CROSS_RUN <= set(disabled_toolsets(text)), sorted(CROSS_RUN - set(disabled_toolsets(text))))
+                match = re.search(r"(?m)^platform_toolsets:\n  api_server:\n((?:    - .*\n)+)", text)
+                if match:  # the connector reference has none: its api_server is the platform composite minus the deny-list
+                    self.assertFalse(CROSS_RUN & set(re.findall(r"(?m)^    - ([a-z_]+)\b", match.group(1))))
+                section = cfg_from_text(text)["memory"]
+                self.assertEqual(section, {"memory_enabled": False, "user_profile_enabled": False}, "no other key, no provider")
+                self.assertEqual(lockgate.memory_problems(cfg_from_text(text)), [])
+        # The reader sees a missing or flipped switch (the sabotage the gate-side tests rely on).
+        for broken in (re.sub(r"(?m)^  memory_enabled: false", "  memory_enabled: true", self.text),
+                       re.sub(r"(?m)^memory:\n(?:  .*\n)+", "", self.text)):
+            self.assertTrue(lockgate.memory_problems(cfg_from_text(broken)))
 
     def test_no_connector_mode_and_no_model_here(self):
         keys = top_level_keys(self.text)
@@ -131,11 +153,14 @@ class DefaultConfig(unittest.TestCase):
 
     def test_the_gate_allows_search_and_image_generation_and_keeps_extraction_and_execution_out(self):
         self.assertEqual(set(lockgate.ALLOWED_TOOLS),
-                         {"memory", "todo_list", "session_search", "web_search", "image_generate"})
+                         {"todo_list", "web_search", "image_generate"})
         for tool in ("web_extract", "terminal", "process_manage", "execute_code", "browser_navigate", "read_file",
                      "write_file", "delegate_task", "skill_manage", "manage_connections", "cronjob_manage",
-                     "vision_analyze", "video_generate", "xai_video_edit", "text_to_speech", "x_search"):
+                     "vision_analyze", "video_generate", "xai_video_edit", "text_to_speech", "x_search",
+                     "memory", "session_search"):
             self.assertNotIn(tool, lockgate.ALLOWED_TOOLS, tool)
+        self.assertEqual(set(lockgate.CROSS_RUN_TOOLS), CROSS_RUN)
+        self.assertIn(lockgate.REQUIRED_TOOL, lockgate.ALLOWED_TOOLS, "the positive control is an allowed tool")
 
     def test_dropping_a_mandated_toolset_is_detected(self):
         # The sabotage the gate-side test relies on: removing `terminal` must change what this file's reader sees.
@@ -199,17 +224,17 @@ class WebToolPolicy(unittest.TestCase):
     def test_chat_with_subscription_search_is_allowed_and_chat_alone_can_roll_back(self):
         # Search alone, without the image tool: rolling image generation back must leave this passing (ADR-0203 I4).
         self.assertEqual(lockgate.tool_problems(self.cfg, lockgate.ALLOWED_TOOLS - lockgate.IMAGE_TOOLS), [])
-        self.assertEqual(lockgate.tool_problems({}, {"memory", "todo_list", "session_search"}), [])
+        self.assertEqual(lockgate.tool_problems({}, {"todo_list"}), [])
 
     def test_extraction_and_preexisting_bypasses_are_refused(self):
         for tool in ("web_extract", "terminal", "execute_code", "browser_navigate", "read_file", "delegate_task"):
             with self.subTest(tool=tool):
-                self.assertTrue(lockgate.tool_problems(self.cfg, {"memory", tool}))
+                self.assertTrue(lockgate.tool_problems(self.cfg, {"todo_list", tool}))
 
     def test_missing_or_different_search_backend_is_refused(self):
         for web in (None, "openai-native", {}, {"search_backend": "firecrawl"}, {"backend": "openai-native"}):
             with self.subTest(web=web):
-                found = lockgate.tool_problems({"web": web}, {"memory", "web_search"})
+                found = lockgate.tool_problems({"web": web}, {"todo_list", "web_search"})
                 self.assertTrue(any("web.search_backend" in p for p in found))
 
     def test_keyless_fallback_must_be_explicitly_false(self):
@@ -233,7 +258,7 @@ class ImageToolPolicy(unittest.TestCase):
         self.assertEqual(lockgate.tool_problems({"web": self.cfg["web"]}, lockgate.ALLOWED_TOOLS - lockgate.IMAGE_TOOLS), [])
         # Search rolled back, image kept.
         self.assertEqual(lockgate.tool_problems({"image_gen": self.cfg["image_gen"]},
-                                                {"memory", "todo_list", "session_search", "image_generate"}), [])
+                                                {"todo_list", "image_generate"}), [])
 
     def test_any_provider_but_the_codex_subscription_is_refused(self):
         for image in (None, "openai-codex", {}, {"provider": None}, {"provider": ""}, {"provider": "fal"},
@@ -246,28 +271,28 @@ class ImageToolPolicy(unittest.TestCase):
             else:
                 cfg["image_gen"] = image
             with self.subTest(image=image):
-                found = lockgate.tool_problems(cfg, {"memory", "image_generate"})
+                found = lockgate.tool_problems(cfg, {"todo_list", "image_generate"})
                 self.assertTrue(any("image_gen.provider" in p for p in found), found)
 
     def test_the_provider_rule_only_applies_when_the_tool_is_exposed(self):
         # A config that does not select image generation needs no provider; the rule must not reject chat-only configs.
-        self.assertEqual(lockgate.tool_problems({}, {"memory", "todo_list", "session_search"}), [])
-        self.assertEqual(lockgate.tool_problems({"image_gen": {"provider": "fal"}}, {"memory"}), [])
+        self.assertEqual(lockgate.tool_problems({}, {"todo_list"}), [])
+        self.assertEqual(lockgate.tool_problems({"image_gen": {"provider": "fal"}}, {"todo_list"}), [])
 
     def test_code_execution_files_urls_and_other_generators_stay_refused_beside_the_image_tool(self):
         for tool in ("execute_code", "terminal", "process_manage", "read_file", "write_file", "patch", "browser_navigate",
                      "web_extract", "delegate_task", "skill_manage", "manage_connections", "cronjob_manage",
                      "vision_analyze", "video_generate", "xai_video_edit", "text_to_speech", "x_search"):
             with self.subTest(tool=tool):
-                found = lockgate.tool_problems(self.cfg, {"memory", "image_generate", tool})
+                found = lockgate.tool_problems(self.cfg, {"todo_list", "image_generate", tool})
                 self.assertTrue(any(tool in p and "allow-list" in p for p in found), found)
 
     def test_connector_mode_refuses_the_image_tool_even_with_the_right_provider(self):
         cfg = {**self.cfg, "mcp_servers": {"gmail": {}}}
-        found = lockgate.tool_problems(cfg, {"memory", "image_generate"})
+        found = lockgate.tool_problems(cfg, {"todo_list", "image_generate"})
         self.assertTrue(any("connector mode forbids image generation" in p for p in found), found)
         # ...while the same connector config without the image tool is not touched by this rule.
-        self.assertFalse(any("image" in p for p in lockgate.tool_problems(cfg, {"memory"})))
+        self.assertFalse(any("image" in p for p in lockgate.tool_problems(cfg, {"todo_list"})))
 
     def test_the_connector_rules_require_image_gen_in_the_deny_list(self):
         off = [x for x in lockgate.CONNECTOR_REQUIRED_DISABLED]
@@ -282,16 +307,16 @@ class EnforcedWebToolPolicy(unittest.TestCase):
     returned definitions must not hide a policy violation. No service or vendor is contacted.
     """
     def setUp(self):
-        self.cfg = {"web": {"search_backend": "openai-native", "keyless_fallback": False}}
-        self.tools = {"memory", "todo_list", "session_search", "web_search"}
+        self.cfg = {**MEMORY_OFF, "web": {"search_backend": "openai-native", "keyless_fallback": False}}
+        self.tools = {"todo_list", "web_search"}
 
     def hermes_modules(self, cfg, tools):
         modules = {name: types.ModuleType(name) for name in (
             "hermes_cli", "hermes_cli.config", "hermes_cli.tools_config", "model_tools")}
         modules["hermes_cli.config"].load_config = mock.Mock(return_value=cfg)
-        modules["hermes_cli.tools_config"]._get_platform_tools = mock.Mock(return_value={"memory", "search"})
+        modules["hermes_cli.tools_config"]._get_platform_tools = mock.Mock(return_value={"todo", "search"})
         modules["model_tools"]._select_tool_names = mock.Mock(return_value=tools)
-        modules["model_tools"].get_tool_definitions = mock.Mock(return_value=[{"function": {"name": "memory"}}])
+        modules["model_tools"].get_tool_definitions = mock.Mock(return_value=[{"function": {"name": lockgate.REQUIRED_TOOL}}])
         return modules
 
     def boot(self, cfg, tools, extra_env=None):
@@ -342,7 +367,7 @@ class EnforcedWebToolPolicy(unittest.TestCase):
             return rc, kill.call_args_list, emit.call_args.kwargs
 
     def test_healthy_search_and_chat_only_rollback_pass_both_entry_points(self):
-        for cfg, tools in ((self.cfg, self.tools), ({}, self.tools - {"web_search"})):
+        for cfg, tools in ((self.cfg, self.tools), (MEMORY_OFF, self.tools - {"web_search"})):
             with self.subTest(cfg=cfg):
                 self.assertEqual(self.boot(cfg, tools)[0], 0)
                 rc, kills, _ = self.monitor(cfg, tools)
@@ -351,8 +376,8 @@ class EnforcedWebToolPolicy(unittest.TestCase):
     def test_prestart_refuses_unavailable_tools_and_wrong_backends_before_listening(self):
         for cfg, tools in (
             (self.cfg, self.tools | {"web_extract"}),
-            ({"web": {"search_backend": "firecrawl", "keyless_fallback": False}}, self.tools),
-            ({"web": {"search_backend": "openai-native", "keyless_fallback": True}}, self.tools),
+            ({**MEMORY_OFF, "web": {"search_backend": "firecrawl", "keyless_fallback": False}}, self.tools),
+            ({**MEMORY_OFF, "web": {"search_backend": "openai-native", "keyless_fallback": True}}, self.tools),
             ({**self.cfg, "mcp_servers": {"gmail": {}}}, self.tools),
         ):
             with self.subTest(cfg=cfg, tools=tools):
@@ -364,7 +389,7 @@ class EnforcedWebToolPolicy(unittest.TestCase):
     def test_live_extraction_wrong_backend_and_connector_search_request_shutdown(self):
         for cfg, tools in (
             (self.cfg, self.tools | {"web_extract"}),
-            ({"web": {"search_backend": "firecrawl", "keyless_fallback": False}}, self.tools),
+            ({**MEMORY_OFF, "web": {"search_backend": "firecrawl", "keyless_fallback": False}}, self.tools),
             ({**self.cfg, "mcp_servers": {"gmail": {}}}, self.tools),
         ):
             with self.subTest(cfg=cfg, tools=tools):
@@ -386,8 +411,8 @@ class EnforcedWebToolPolicy(unittest.TestCase):
         self.assertEqual(record["unreported_selected_tools"], ["web_search"])
         self.assertEqual(set(record["live_tools"]), reported)
         for cfg in (
-            {"web": {"search_backend": "firecrawl", "keyless_fallback": False}},
-            {"web": {"search_backend": "openai-native", "keyless_fallback": True}},
+            {**MEMORY_OFF, "web": {"search_backend": "firecrawl", "keyless_fallback": False}},
+            {**MEMORY_OFF, "web": {"search_backend": "openai-native", "keyless_fallback": True}},
             {**self.cfg, "mcp_servers": {"gmail": {}}},
         ):
             with self.subTest(cfg=cfg):

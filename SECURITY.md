@@ -209,6 +209,25 @@ amendments, by kind:
 The model provider or Hermes you choose is a separate trust boundary: oort sends
 it bounded work context directly.
 
+One shared-hosted Hermes serves every workspace of an instance and keeps one session
+history (`state.db`) and one memory (`MEMORY.md`, `USER.md`) for all of them. Hermes' own
+session search reads that whole history, tool-call arguments included, with no workspace,
+requester or channel as a filter, and its memory tool writes the file that every later
+session loads into its system prompt, so either one would let a run for one workspace read
+what a run for another left, or plant text for it. The repository's configs therefore turn
+both off: `memory` and `session_search` are denied toolsets, Hermes' memory switches
+(`memory.memory_enabled`, `memory.user_profile_enabled`) are false, and the lock gate
+refuses to start a Hermes whose config exposes either tool or leaves a switch on (it checks
+the tools Hermes would hand the model, and after the start the live tools and config).
+This closes the way a model can read that history. It does not stop Hermes from recording
+its sessions in its own volume: those records stay readable to whoever can read the volume
+or holds the Hermes API key, and a volume that already holds memory files keeps them until
+the operator removes them. This describes repository configuration, not a verified live
+deployment. See [ADR-0203 R1–R5](docs/adr/0203-cohosted-agent-detection.md#증보-2026-11-01--공동-호스팅-hermes의-세션-검색기억-도구는-끈다-4898),
+the [default config](infra/hermes/config.yaml), and the offline
+[gate](infra/hermes/test_lockgate_image_guard.py) and
+[config](infra/hermes/test_default_config.py) tests.
+
 The repository's shared-hosted Hermes default selects Codex subscription web
 search (`web_search`). Search queries can include conversation content and go
 to OpenAI's search processing; returned content is untrusted. We do not promise

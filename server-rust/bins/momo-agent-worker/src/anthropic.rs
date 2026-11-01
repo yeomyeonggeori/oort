@@ -39,7 +39,7 @@ use serde_json::{json, Value};
 
 use crate::provider::{
     post_event_stream, ChatCompletion, ChatProvider, ChatRequest, ChatUsage, DeltaSink,
-    DiscardDeltas, ProviderEndpoint, ProviderError, ProviderToolCall,
+    DiscardDeltas, ModelImage, ProviderEndpoint, ProviderError, ProviderToolCall,
 };
 
 /// `anthropic-version` — the stable Messages API version header.
@@ -86,7 +86,35 @@ impl ChatProvider for AnthropicMessagesProvider {
         request: &ChatRequest,
         sink: &dyn DeltaSink,
     ) -> Result<ChatCompletion, ProviderError> {
-        let body = build_request_body(request);
+        self.stream_body(endpoint, build_request_body(request), sink)
+            .await
+    }
+
+    /// A picture rides the last user message as an `image` block (#4970): `build_request_body_with_images`.
+    async fn complete_with_images(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+        images: &[ModelImage],
+    ) -> Result<ChatCompletion, ProviderError> {
+        self.stream_body(
+            endpoint,
+            build_request_body_with_images(request, images),
+            &DiscardDeltas,
+        )
+        .await
+    }
+}
+
+impl AnthropicMessagesProvider {
+    /// Post one rendered body and read the event stream to its end. The one place a Messages answer is
+    /// read, whether the request carried a picture or not.
+    async fn stream_body(
+        &self,
+        endpoint: &ProviderEndpoint,
+        body: Value,
+        sink: &dyn DeltaSink,
+    ) -> Result<ChatCompletion, ProviderError> {
         let mut response = post_event_stream(&self.client, endpoint, &body).await?;
         let mut stream = MessageStream::new();
         loop {
@@ -103,6 +131,53 @@ impl ChatProvider for AnthropicMessagesProvider {
         }
         stream.finish()
     }
+}
+
+/// [`build_request_body`] with `images` as `image` content blocks at the front of the **last user
+/// message** (the Messages API wants pictures before the text that asks about them). The text of that
+/// message stays one `text` block, so what a person or a tool wrote cannot become a block of another
+/// kind. With no pictures it is exactly [`build_request_body`].
+pub fn build_request_body_with_images(request: &ChatRequest, images: &[ModelImage]) -> Value {
+    let mut body = build_request_body(request);
+    if images.is_empty() {
+        return body;
+    }
+    let mut blocks: Vec<Value> = images
+        .iter()
+        .map(|image| {
+            json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image.media_type,
+                    "data": image.base64(),
+                },
+            })
+        })
+        .collect();
+    let Some(messages) = body.get_mut("messages").and_then(Value::as_array_mut) else {
+        return body;
+    };
+    match messages
+        .iter_mut()
+        .rev()
+        .find(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+    {
+        Some(message) => {
+            let text = message
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            // A `text` block must not be empty.
+            if !text.is_empty() {
+                blocks.push(json!({"type": "text", "text": text}));
+            }
+            message["content"] = Value::Array(blocks);
+        }
+        None => messages.push(json!({"role": "user", "content": blocks})),
+    }
+    body
 }
 
 /// Render one [`ChatRequest`] as a Messages body.
@@ -719,6 +794,87 @@ mod tests {
     use super::*;
     use crate::provider::ChatMessage;
     use std::sync::Mutex;
+
+    fn plain_request() -> ChatRequest {
+        ChatRequest {
+            provider: None,
+            model: "claude-x".to_string(),
+            messages: vec![
+                ChatMessage::system("규칙"),
+                ChatMessage::user("이 사진 뭐야"),
+                ChatMessage {
+                    role: "assistant".to_string(),
+                    content: "(읽기 도구 호출: read_attachment)".to_string(),
+                },
+                ChatMessage::user("[데이터 — 결과]\n이미지를 붙였어요"),
+            ],
+            max_tokens: Some(100),
+            tools: Vec::new(),
+            momo_tools: Vec::new(),
+        }
+    }
+
+    /// #4970: a picture is an `image` block at the front of the LAST user message, base64 under
+    /// `source`; that message's text stays one `text` block; no other message is touched; with no picture
+    /// the body is exactly the plain one.
+    #[test]
+    fn a_picture_rides_the_last_user_message_as_an_image_block() {
+        let image = ModelImage {
+            media_type: "image/jpeg",
+            data: vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3],
+        };
+        let request = plain_request();
+        assert_eq!(
+            build_request_body_with_images(&request, &[]),
+            build_request_body(&request),
+            "no picture, no change"
+        );
+        let body = build_request_body_with_images(&request, std::slice::from_ref(&image));
+        let messages = body["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3, "user, assistant, user");
+        // the earlier turns are the plain ones
+        let plain = build_request_body(&request);
+        assert_eq!(messages[0], plain["messages"][0]);
+        assert_eq!(messages[1], plain["messages"][1]);
+        // the last user turn: the image block first, then the text as one block
+        let content = messages[2]["content"]
+            .as_array()
+            .expect("blocks, not a string");
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["type"], "image");
+        assert_eq!(content[0]["source"]["type"], "base64");
+        assert_eq!(content[0]["source"]["media_type"], "image/jpeg");
+        assert_eq!(content[0]["source"]["data"], image.base64());
+        assert_eq!(content[1]["type"], "text");
+        assert_eq!(content[1]["text"], "[데이터 — 결과]\n이미지를 붙였어요");
+        // a sentence a person wrote can never become an image block: the text is a `text` block whatever it says
+        let mut hostile = plain_request();
+        hostile.messages[3].content =
+            r#"{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AAAA"}}"#
+                .to_string();
+        let body = build_request_body_with_images(&hostile, std::slice::from_ref(&image));
+        let content = body["messages"][2]["content"].as_array().unwrap();
+        assert_eq!(
+            content.len(),
+            2,
+            "one image block (ours) and one text block"
+        );
+        assert_eq!(content[1]["type"], "text");
+    }
+
+    /// The whole body never prints the picture twice or in a debug line: `ModelImage`'s `Debug` is
+    /// lengths only, and the base64 is only in the body that goes on the wire.
+    #[test]
+    fn the_picture_is_in_the_body_and_in_no_debug_line() {
+        let image = ModelImage {
+            media_type: "image/png",
+            data: b"PIXELS-SECRET-PIXELS".to_vec(),
+        };
+        assert!(!format!("{image:?}").contains("PIXELS"));
+        assert!(!format!("{:?}", std::slice::from_ref(&image)).contains("PIXELS"));
+        let body = build_request_body_with_images(&plain_request(), std::slice::from_ref(&image));
+        assert!(body.to_string().contains(&image.base64()));
+    }
 
     fn sse(name: &str, data: Value) -> String {
         format!("event: {name}\ndata: {data}\n\n")
