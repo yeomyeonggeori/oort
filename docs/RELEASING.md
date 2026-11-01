@@ -368,7 +368,9 @@ owner에게 사전 고지한다(운영 변수는 워커가 건드리지 않는�
 3. **볼륨 `.env`의 이름만 읽는다.** 새 게이트는 볼륨 `.env`에 허용 목록 밖의 이름이 있거나 `.op.env`가 있으면 Hermes를 띄우지 않는다. 서비스에 들어가
    `/opt/data/.env`의 **이름만** 읽고(`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env | sort -u`,
    값은 나오지 않는다), `/opt/data/.op.env`가 있는지 본다. 허용 이름은 `lockgate.py`의 `VOLUME_ENV_SECRETS`·`VOLUME_ENV_SEEDED`다(씨앗 줄은 값이 Hermes가
-   쓴 그대로여야 한다). 그 밖의 이름은 운영자가 지우고(지운 **이름**만 기록), 지우기 전에는 4단계로 가지 않는다.
+   쓴 그대로여야 한다). 이름만 읽어서는 씨앗 줄의 값이 낡았는지 모르므로, 목록에 씨앗 이름이 있으면 그 줄만 열어(`grep '^<이름>=' /opt/data/.env`) 값이 `VOLUME_ENV_SEEDED`의 값과 같은지 본다. 이 값들은 Hermes
+   템플릿의 공개 상수라 비밀이 아니고, 다른 이름의 줄은 열지 않는다. 그 밖의 이름은 운영자가 지우고(지운 **이름**만 기록), 값이 다른 씨앗 줄도 지운다(Hermes는 이미 있는 파일에 다시 심지 않는다).
+   지우기 전에는 4단계로 가지 않는다.
 4. **한 번에 바꾼다.** ① `HERMES_MEDIA_DELIVERY_STRICT=1`을 더한다(이미 있으면 정확히 `1`인지 본다). ② `HERMES_LOCKGATE_B64`를 `base64 < infra/hermes/lockgate.py | tr -d '\n'`로,
    시작 명령을 저장소 `infra/railway/railway.json`의 hermes `startCommand`와 같게 바꾸고(설정 해시 목록과 게이트 체크섬이 함께 들어 있다), 필요하면 2단계의
    `HERMES_CONFIG_B64`도 같은 배포에서 바꾼다. 연결 모드 서비스가 이미 가진 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`·`GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`은

@@ -1044,7 +1044,7 @@ Hermes는 `<HERMES_HOME>/.env`를 게이트가 끝난 **뒤에** override로 적
 
 - **이미 도는 볼륨의 `.env`에 목록 밖 이름이 있으면 다음 기동이 거절된다**(예: 이전 Hermes 설정 마법사가 쓴 줄, `LLM_MODEL=` 같은 빈 값, `API_SERVER_KEY`). 새 게이트를 올리기 전에 **이름만** 읽어 대조한다(RELEASING의 「Hermes 단계」). 거절은 성공 기동처럼 보이지 않고 서비스가 멈추므로, 되돌리기(이전 `HERMES_LOCKGATE_B64`·시작 명령)가 같은 절에 있다.
 - **허용된 비밀의 값은 읽지 않는다.** 키가 어느 서버를 가리키는지는 설정(`config.yaml`, 해시 고정)이 정하고 `.env`의 이름이 정하지 않는다.
-- **Hermes가 기동 뒤 스스로 `.env`에 쓰는 이름**은 지금 알려진 경로(첫 기동 씨앗, 위 stage2 훅의 조건부 쓰기)가 모두 목록 안이거나 템플릿에서 일어나지 않는다. 대화형 `hermes setup`·`hermes model` 같은 흐름이 쓰는 이름은 목록 밖이면 다음 기동을 거절시킨다. 그 흐름은 이 이미지에서 쓰지 않으며(터미널·파일 도구가 꺼져 있다), 로그인 중계가 부르는 `hermes auth add … --type oauth`는 `auth.json`에 쓰고 `.env`에 쓰지 않는다(소스 확인). 고정 이미지 안 증명의 `gateway-boot`가 실제 기동 뒤의 `.env` 이름 목록을 허용 목록과 다시 대조한다.
+- **Hermes가 기동 뒤 스스로 `.env`에 쓰는 이름**은 지금 알려진 경로(첫 기동 씨앗, 위 stage2 훅의 조건부 쓰기)가 모두 목록 안이거나 템플릿에서 일어나지 않는다. 대화형 `hermes setup`·`hermes model` 같은 흐름이 쓰는 이름은 목록 밖이면 다음 기동을 거절시킨다. 그 흐름은 이 이미지에서 쓰지 않으며(터미널·파일 도구가 꺼져 있다), 로그인 중계가 부르는 두 명령도 `.env`에 쓰지 않는다(소스 확인): `hermes auth add … --type oauth`는 자격 풀(`auth.json`)에 쓰고, 연결 앱 로그인(`hermes mcp login -- <서버>`와 Google 앱용 `mcp_login_probe.py`)은 OAuth 매니저를 거쳐 `mcp-tokens/`에 쓴다. `.env`에 쓰는 `MCP_<이름>_API_KEY`는 `hermes mcp add`의 베어러 토큰 분기이고(`mcp_config.py`의 `_save_bearer_auth_token`), 중계는 그 명령을 부르지 않으며 연결 모드 설정의 서버는 모두 `auth: oauth`다. 고정 이미지 안 증명의 `gateway-boot`가 실제 기동 뒤의 `.env` 이름 목록을 허용 목록과 다시 대조한다.
 - 허용 목록에 이름을 더하는 일은 결정이다: 표의 항목(쓰는 파일 포함)·오라클의 복사본·`HERMES_LOCKGATE_B64`와 시작 명령의 체크섬을 함께 바꾸고, 두 목록이 같다는 시험이 한쪽만 바꾸면 깨진다.
 - `runtime-unverified`: 고정 이미지 안 증명(`test_hermes_image_guard_docker.sh`의 `env-seed-template`·`env-loader-oracle`·`gateway-boot` 이름 목록)은 도커가 필요해 이 칸에서 돌리지 못했다. 진짜 로더 소스 대조는 얇은 스텁 위라서 `is_multiplex_active`·터미널 설정 다리 같은 이미지 쪽 차이는 못 본다.
 
