@@ -265,3 +265,23 @@ describe("a client with its own send path (#3653)", () => {
   });
 });
 
+
+describe("a message sent without a link preview (#5037)", () => {
+  it("rides the plain REST send of a message and of a thread reply, and only when it is on", async () => {
+    await callPersonalAgent(input({ suppressUnfurl: true }));
+    await callPersonalAgent(input({ suppressUnfurl: true, threadRootId: ROOT }));
+    // The options arg is the 5th of `sendMessage` and the 6th of `sendThreadReply`.
+    expect(api.sendMessage.mock.calls[0]![4]).toEqual({ suppressUnfurl: true });
+    expect(api.sendThreadReply.mock.calls[0]![5]).toEqual({ suppressUnfurl: true });
+
+    // Off — absent or an explicit `false` — hands the send NO options at all, so the request is the
+    // closed-world one it was before this field existed (`sendMessage` adds the key only for `true`).
+    api.sendMessage.mockClear();
+    api.sendThreadReply.mockClear();
+    await callPersonalAgent(input());
+    await callPersonalAgent(input({ suppressUnfurl: false }));
+    await callPersonalAgent(input({ threadRootId: ROOT }));
+    expect(api.sendMessage.mock.calls.map((call) => call[4])).toEqual([undefined, undefined]);
+    expect(api.sendThreadReply.mock.calls.map((call) => call[5])).toEqual([undefined]);
+  });
+});

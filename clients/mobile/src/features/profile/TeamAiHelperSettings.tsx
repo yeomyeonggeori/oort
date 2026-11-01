@@ -19,6 +19,7 @@ import {
   TEAM_AI_ALWAYS_ON_BUNDLE,
   TEAM_AI_BUNDLES,
   teamAiRolesErrorKind,
+  teamAiSettingsToggleNotice,
   type TeamAiBundle,
   type TeamAiSwitchableBundle,
 } from '@momo/core/features/settings/teamAiRoles';
@@ -57,7 +58,8 @@ import {ActionRow, SettingsNote, SettingsSection} from './settingsRows';
 //  - 이름: 사람용 `PATCH …/agents/{agent}`. 새 이름이 부르는 이름(별칭)에 더해지는 것은 서버가 같은
 //    트랜잭션에서 하고, 화면은 결과(부르는 이름 줄)를 보인다.
 //  - 역할: `PATCH …/settings {team_ai_roles: {묶음: 불리언}}`. 누르는 즉시 그 묶음 하나만 저장한다.
-//    파일·기억은 켜면 내용이 공급자로 가므로 그 행 아래에 고지를 늘 보인다.
+//    파일·기억은 켜면 내용이 공급자로 가므로 그 행 아래에 고지를 늘 보인다. 그 둘을 **켤 때** 같은
+//    본문에 고지 기록(`team_ai_roles_notice`)을 실어 서버가 스위치와 한 트랜잭션에 남긴다(#5040).
 //
 // 폰에는 온보딩 단계가 없다(ADR-0185 증보 §6 「폰은 새 단계를 만들지 않는다」): 키를 넣고 도우미를 켜는
 // 일은 데스크탑·웹 온보딩과 설정이 맡고, 폰은 **이미 켜진** 도우미를 관리한다. 설정 가방을 읽지 못하면
@@ -175,7 +177,11 @@ export function TeamAiHelperSettingsPage({
   );
   const toggle = useMutation({
     mutationFn: (change: {bundle: TeamAiSwitchableBundle; next: boolean}) =>
-      patchTeamAiRoles(workspaceId, {[change.bundle]: change.next}),
+      patchTeamAiRoles(
+        workspaceId,
+        {[change.bundle]: change.next},
+        teamAiSettingsToggleNotice(change.bundle, change.next),
+      ),
     onMutate: change => setPending(change),
     onSuccess: next => client.setQueryData(bagKey, next),
     onSettled: () => setPending(null),

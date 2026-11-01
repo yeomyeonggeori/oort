@@ -54,6 +54,7 @@ enum MomoPushActionContract {
   /// decided from the lock screen.
   static let reasons: Set<String> = [
     "dm", "mention", "approval_request", "resume_offer", "work_session_idle", "work_run_done", "thread_reply",
+    "test_notification",
   ]
 
   /// The alert the relay ships (ADR-0120 D2-A: id-only, so the payload names no

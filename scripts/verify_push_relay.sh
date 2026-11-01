@@ -69,7 +69,7 @@ MOMO_APNS_ALLOW_STUB=1 \
 MOMO_APNS_STUB_STATUS=410 \
 MOMO_APNS_STUB_REASON=Unregistered \
 MOMO_APNS_STUB_CAPTURE_PATH="$CAPTURE" \
-MOMO_PUSH_RELAY_RATE_LIMIT_PER_MINUTE=9 \
+MOMO_PUSH_RELAY_RATE_LIMIT_PER_MINUTE=10 \
 MOMO_PUSH_RELAY_HOST=127.0.0.1 \
 MOMO_PUSH_RELAY_PORT="$PORT" \
 "$BIN" >"$TMP_ROOT/relay.log" 2>&1 &
@@ -153,21 +153,24 @@ STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
 echo "[sabotage] extra envelope field body -> HTTP $STATUS (expect 400)"
 test "$STATUS" = 400
 
-# ADR-0120 부록 A (Accepted 2026-10-02, #3341): the reason vocabulary is five.
-# Every reason is accepted on the category the judgment pairs it with, and one
-# outside the set is a 400 (the closed validator, not a pass-through). ADR-0204 D7
+# ADR-0120 부록 A (Accepted 2026-10-02, #3341): the reason vocabulary was five and
+# is eight now. Every reason is accepted on the category the judgment (or the
+# push_system feed) pairs it with, and one outside the set is a 400 (the closed
+# validator, not a pass-through). ADR-0204 D7
 # (#3928) adds the category `momo.approval.open`: an approval that is decided in
 # the app. It names its approval exactly like `momo.approval`, so the same reason
 # rides on both. ADR-0206 증보 1 F5 (#4889) adds `thread_reply` (a new reply in a
-# followed thread) under the plain `momo.message` category. The seven accepted bodies
-# use seven of the window's nine slots (the first body above used one more), so the
+# followed thread) under the plain `momo.message` category. ADR-0206 D11·D14 (#4341)
+# adds `test_notification` (the test push a member sends to their own devices) under
+# the new `momo.system` category, with its own static body. The eight accepted bodies
+# use eight of the window's ten slots (the first body above used one more), so the
 # rate-limit step below still sees exactly one slot left for its accepted body and
 # the one after it is the 429.
 reason_n=0
 for pair in "dm momo.message" "mention momo.mention" "approval_request momo.approval" \
             "approval_request momo.approval.open" \
             "resume_offer momo.work" "work_session_idle momo.work" \
-            "thread_reply momo.message"; do
+            "thread_reply momo.message" "test_notification momo.system"; do
   reason="${pair% *}"; category="${pair#* }"
   reason_n=$((reason_n + 1))
   msg_id="55555555-5555-5555-5555-55555555555${reason_n}"
@@ -192,7 +195,7 @@ STATUS="$(curl -sS -o /dev/null -w '%{http_code}' \
   -H 'X-Momo-Server-Id: verify-server' \
   -H "X-Momo-Push-Signature: $(sign_body "$UNKNOWN")" \
   --data-binary "@$UNKNOWN" "http://127.0.0.1:$PORT/v1/push")"
-echo "[sabotage] reason outside the five -> HTTP $STATUS (expect 400)"
+echo "[sabotage] reason outside the eight -> HTTP $STATUS (expect 400)"
 test "$STATUS" = 400
 
 # ADR-0204 D7 (#3928): the category list is closed too. A near-miss of the new
@@ -263,6 +266,15 @@ fi
 test "$(jq -s -r 'map(select(.aps.category == "momo.approval.open"))
                   | map(.momo.approval_id + "|" + .aps.sound) | join(",")' "$CAPTURE")" \
   = "66666666-6666-6666-6666-666666666666|default"
+
+# ADR-0206 D14 (#4341): the system category reaches APNs with the static body of its
+# reason — 「시험 알림이에요」, not the default 「새 알림」 — the same sound as the rest, and
+# no approval id (only the two approval categories name one). Every other captured
+# dispatch keeps the default body.
+test "$(jq -s -r 'map(select(.aps.category == "momo.system"))
+                  | map(.aps.alert.body + "|" + .aps.sound + "|" + .momo.reason) | join(",")' "$CAPTURE")" \
+  = "시험 알림이에요|default|test_notification"
+test "$(jq -s -r 'map(select(.aps.category != "momo.system" and .aps.alert.body != "새 알림")) | length' "$CAPTURE")" = "0"
 
 # Capture assertions finished — stop the listener so boot-refusal processes
 # cannot collide on the same port if a config check ever reached bind.
