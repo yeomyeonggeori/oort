@@ -919,32 +919,60 @@ pub async fn find_requester_attachment_for_in_tx(
     }))
 }
 
-/// Image attachments of a page of messages, for the Agent Port's conversation read:
-/// `(message id, attachment id, name, mime, size)` for complete PNG/JPEG/WebP files
-/// only. The agent learns an attachment's **id** here because that id is the only
-/// way to name a file for [`find_visible_image_attachment_in_tx`]; the Drive file id
-/// is never projected.
+/// Image attachments of a page of messages: `(message id, attachment id, name, mime, size)` for
+/// complete PNG/JPEG/WebP files only — the avatar use of [`attachments_for_messages_in_tx`], what
+/// this function always was. The team AI's trigger turn reads it (a person asking for a profile
+/// picture can only name a picture an avatar may be made from).
+pub async fn image_attachments_for_messages_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_ids: &[Uuid],
+) -> Result<Vec<(Uuid, Uuid, String, String, i64)>, DbError> {
+    attachments_for_messages_in_tx(
+        conn,
+        workspace_id,
+        message_ids,
+        RequesterAttachmentUse::Avatar,
+    )
+    .await
+}
+
+/// Attachments of a page of messages that a **use** accepts, for the Agent Port's conversation
+/// read: `(message id, attachment id, name, mime, size)`, complete files only. The agent learns an
+/// attachment's **id** here because that id is the only way to name a file for
+/// [`find_visible_image_attachment_in_tx`] (an avatar) or [`find_requester_attachment_for_in_tx`]
+/// (an expression source); the Drive file id is never projected.
+///
+/// `usage` only widens or narrows the **recorded media types** ([`RequesterAttachmentUse::mimes`]):
+/// the conversation read lists the expression-source types (#4900 — PNG, JPEG, WebP, **GIF** and
+/// the **video** types) so an agent can name a GIF or a video it was sent, and nothing else about
+/// who may see a file changes: the page's own gate (an approved channel the agent belongs to) and
+/// every condition below apply to all of them alike. Listing a type is not accepting it: the
+/// avatar judgement still takes PNG/JPEG/WebP only, so a GIF's id named as an avatar is the same
+/// refusal as an unknown id.
 ///
 /// **A deleted message lists nothing** (ADR-0151 증보 2, #4443), in the statement
 /// itself: the join requires the message alive, the same tombstone test every other
 /// attachment projection uses. The conversation-read handler also drops a deleted
 /// row's `imageAttachments` (`agent_port_tools.rs`, `gated_channel_page`) — a second
 /// layer, kept, so this statement is the one that must be right on its own.
-pub async fn image_attachments_for_messages_in_tx(
+pub async fn attachments_for_messages_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     message_ids: &[Uuid],
+    usage: RequesterAttachmentUse,
 ) -> Result<Vec<(Uuid, Uuid, String, String, i64)>, DbError> {
     let rows = sqlx::query(
         "SELECT a.message_id, a.id, a.name, a.mime, a.size_bytes FROM attachment a \
            JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
           WHERE a.workspace_id = $1 AND a.message_id = ANY($2) AND a.status = 'complete' \
-            AND a.mime IN ('image/png', 'image/jpeg', 'image/webp') \
+            AND a.mime = ANY($3) \
             AND m.state <> 'deleted' AND m.deleted_at IS NULL \
           ORDER BY a.created_at ASC, a.id ASC",
     )
     .bind(workspace_id)
     .bind(message_ids)
+    .bind(usage.mimes())
     .fetch_all(&mut *conn)
     .await?;
     rows.iter()

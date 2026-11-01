@@ -15,10 +15,11 @@
 //!
 //! | test | revert that makes it red |
 //! |---|---|
-//! | `a_requesters_picture_goes_worker_to_api_to_worker_and_becomes_the_proposal_image` | the reader not using the api; a token or Drive id in a row or log line |
+//! | `a_requesters_picture_goes_worker_to_api_to_worker_and_becomes_the_proposal_image` | the reader not using the api; a token or Drive id in a row or log line; the address the worker mints living any other time than the 60 seconds the ADR names (read off the row it wrote) |
 //! | `a_refused_attachment_never_reaches_the_api_and_every_refusal_is_the_same` | dropping the ownership check from the mint (the api would then be asked, and 404 it) |
 //! | `the_address_the_worker_mints_is_single_use_and_short_lived_on_the_wire` | removing `used_at IS NULL` or `expires_at > …` from the redeem |
-//! | `a_failed_fetch_logs_a_cause_and_never_the_token` | removing the scrub in `self_media::transport` |
+//! | `the_client_the_worker_reads_with_follows_no_redirect` | `AgentWorker` building its attachment client with anything but `self_media::attachment_client()` (a default client follows the 302 to another server) |
+//! | `a_failed_fetch_logs_a_cause_and_never_the_token` | writing anything the transport said into the failure line (the api's origin, the workspace, the token), or dropping the kind of failure |
 //! | `a_worker_with_no_private_address_keeps_reading_its_own_archive` | `attachment_reader` ignoring the configuration |
 //! | `a_worker_whose_api_is_unreachable_fails_closed_and_does_not_fall_back_to_the_archive` | a silent fallback to the archive |
 //! | `the_api_refusing_after_the_mint_burns_the_address_and_the_worker_refuses` | a second attempt with the same address |
@@ -723,6 +724,22 @@ async fn a_requesters_picture_goes_worker_to_api_to_worker_and_becomes_the_propo
         "the address the worker minted names the ONE attachment the proposal carried"
     );
     assert!(spent, "and the worker spent it");
+    // #4974: how long the address the worker mints lives — **read off the row the worker itself wrote**, and
+    // compared with the number the ADR names (D4: 60 seconds), not with the constant it was written from (a
+    // constant compared with itself cannot fail). `created_at` and `expires_at` are two `clock_timestamp()`s of
+    // one INSERT, so the span is the lifetime and a few microseconds.
+    let lifetime_secs: f64 = sqlx::query_scalar(
+        "SELECT EXTRACT(EPOCH FROM (expires_at - created_at))::float8 \
+           FROM self_media_token WHERE workspace_id = $1",
+    )
+    .bind(tenant.ws)
+    .fetch_one(&server.su)
+    .await
+    .unwrap();
+    assert!(
+        (59.9..61.0).contains(&lifetime_secs),
+        "the worker's own read address lives 60 seconds, not {lifetime_secs}"
+    );
 
     assert_no_leak(
         &server,
@@ -981,16 +998,101 @@ async fn recording_stub(status: Option<&'static str>) -> (String, Arc<Mutex<Vec<
     (origin, heads)
 }
 
-/// RED proof (#4934, 로그 가림): a fetch that fails mid-flight logs **a cause** (an operator can see why
-/// the picture did not come) and never the token — the transport's own message carries the URL, so the
-/// scrub on it is what is under test. The request the worker sent carries no credential of its own.
+/// A stub that is not the api either: it records every request head and answers each one with `response`,
+/// byte for byte.
+async fn canned_stub(response: Vec<u8>) -> (String, Arc<Mutex<Vec<String>>>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let heads = Arc::new(Mutex::new(Vec::new()));
+    let kept = heads.clone();
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let (kept, response) = (kept.clone(), response.clone());
+            tokio::spawn(async move {
+                let mut buffer = vec![0u8; 16 * 1024];
+                let read = socket.read(&mut buffer).await.unwrap_or(0);
+                kept.lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&buffer[..read]).into_owned());
+                let _ = socket.write_all(&response).await;
+                let _ = socket.shutdown().await;
+            });
+        }
+    });
+    (origin, heads)
+}
+
+/// The token in the request line the worker sent a stub: `GET /v1/self-media/{workspace}/{token} HTTP/1.1`.
+fn token_in(head: &str, workspace: Uuid) -> String {
+    let request_line = head.lines().next().unwrap();
+    request_line
+        .strip_prefix(&format!("GET /v1/self-media/{workspace}/"))
+        .and_then(|rest| rest.strip_suffix(" HTTP/1.1"))
+        .unwrap_or_else(|| panic!("the request line is the fixed shape: {request_line}"))
+        .to_string()
+}
+
+/// RED proof (#4974, 검수 M1): the client the worker **actually reads with** follows no redirect. The unit
+/// test on `attachment_client()` proves the function, not that `AgentWorker` uses it: a worker built with
+/// `reqwest::Client::new()` (ten redirects followed, proxy variables honoured, no time limit) passed every
+/// other test. So this one reads through `attachment_reader()` — the door `team_ai` uses — against a stub that
+/// answers 302 to a second server, and that second server would hand over the very picture the proposal asked
+/// for. What is measured is the second server's request log (the first server's answer is "unavailable" either
+/// way): a followed redirect leaves a request there and the picture comes back; a worker that stops at the 302
+/// leaves it empty.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_client_the_worker_reads_with_follows_no_redirect() {
+    let server = start().await;
+    let tenant = seed_tenant(&server).await;
+    let picture = png(64, 1);
+    let mut landing = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        picture.len()
+    )
+    .into_bytes();
+    landing.extend_from_slice(&picture);
+    let (elsewhere, elsewhere_heads) = canned_stub(landing).await;
+    let redirect = format!(
+        "HTTP/1.1 302 Found\r\nlocation: {elsewhere}/stolen\r\ncontent-length: 0\r\nconnection: close\r\n\r\n"
+    );
+    let (origin, heads) = canned_stub(redirect.into_bytes()).await;
+
+    let result = read_direct(
+        &worker(&server, Some(&origin)),
+        &tenant,
+        tenant.photo,
+        picture.len() as i64,
+    )
+    .await;
+    assert_eq!(
+        result.err(),
+        Some("drive_unavailable"),
+        "a 302 is an answer that is not the picture"
+    );
+    // the worker did call the first server, with an address it minted for this attachment
+    let heads = heads.lock().unwrap().clone();
+    assert_eq!(heads.len(), 1, "one request reached the redirecting stub");
+    assert_eq!(token_in(&heads[0], tenant.ws).len(), 43);
+    assert_eq!(
+        elsewhere_heads.lock().unwrap().len(),
+        0,
+        "the worker followed a redirect to another server"
+    );
+}
+
+/// RED proof (#4934, 로그 가림 · #4974): a fetch that fails mid-flight logs **a cause** an operator can act on
+/// (the kind of failure) and nothing of the address. The transport's own message carries the request URL —
+/// the api's private origin, the workspace and the token — so what is measured is the line the worker really
+/// wrote, found in the captured output: it names the kind and holds none of that. The request the worker sent
+/// carries no credential of its own.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a disposable PG18"]
 async fn a_failed_fetch_logs_a_cause_and_never_the_token() {
     let logs = capture_logs();
     let server = start().await;
 
-    // 1. the server hangs up without answering: a transport error whose message holds the URL
+    // 1. the server hangs up without answering: a transport error whose own message holds the whole URL
     let tenant = seed_tenant(&server).await;
     let (origin, heads) = recording_stub(None).await;
     let size = png(64, 1).len() as i64;
@@ -999,12 +1101,7 @@ async fn a_failed_fetch_logs_a_cause_and_never_the_token() {
     let heads = heads.lock().unwrap().clone();
     assert_eq!(heads.len(), 1, "one request reached the stub");
     let head = &heads[0];
-    let request_line = head.lines().next().unwrap();
-    let token = request_line
-        .strip_prefix(&format!("GET /v1/self-media/{}/", tenant.ws))
-        .and_then(|rest| rest.strip_suffix(" HTTP/1.1"))
-        .unwrap_or_else(|| panic!("the request line is the fixed shape: {request_line}"))
-        .to_string();
+    let token = token_in(head, tenant.ws);
     assert_eq!(token.len(), 43);
     let lowered = head.to_ascii_lowercase();
     for header in ["authorization", "cookie", "x-api-key", "proxy-"] {
@@ -1013,15 +1110,45 @@ async fn a_failed_fetch_logs_a_cause_and_never_the_token() {
             "the worker sent `{header}`: {head}"
         );
     }
-    let text = logs.text();
-    assert!(
-        text.contains("attachment read through the api failed"),
-        "the failure leaves a line an operator can read"
+    // The line this read wrote, found by the run it names: it says what kind of failure it was and holds
+    // nothing of the address. (The capture also holds the HTTP client's own DEBUG and TRACE records, which name
+    // the peer they connect to — `connecting to 127.0.0.1:…`; those are the library's, appear only where an
+    // operator asks for DEBUG, and are not the worker's line — so the needles are looked for in the worker's
+    // line, not in the whole capture. The token is looked for in the whole capture, by `assert_no_leak`.)
+    let run = tenant.run.to_string();
+    let ours: Vec<String> = logs
+        .text()
+        .lines()
+        .filter(|line| {
+            line.contains("attachment read through the api failed") && line.contains(&run)
+        })
+        .map(str::to_string)
+        .collect();
+    assert_eq!(
+        ours.len(),
+        1,
+        "the failure leaves exactly one line an operator can read: {ours:?}"
     );
+    let line = &ours[0];
     assert!(
-        text.contains("<redacted>"),
-        "and it shows the URL with the token scrubbed"
+        line.contains("cause=transport: request"),
+        "the line names the kind of failure: {line}"
     );
+    let workspace = tenant.ws.to_string();
+    let peer = origin.strip_prefix("http://").unwrap();
+    for needle in [
+        origin.as_str(),
+        peer,
+        workspace.as_str(),
+        "/v1/",
+        "self-media",
+        token.as_str(),
+    ] {
+        assert!(
+            !line.contains(needle),
+            "the failure line holds `{needle}`: {line}"
+        );
+    }
     assert_no_leak(
         &server,
         tenant.ws,

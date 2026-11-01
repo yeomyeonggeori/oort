@@ -185,7 +185,7 @@ Railway는 api와 agent-worker를 다른 서비스로 띄우고, `local` 저장�
 - **D3 · 이 증보가 넓히는 것은 하나뿐이다: 발급이 첨부 id를 받는다.** C2a의 주소(`mint_for_run_in_tx`)는 id를 받지 않는다(서버가 트리거 메시지의 첫 이미지를 고른다). 워커의 읽기 주소는 제안 인자의 `attachmentId`를 받는다. 노출이 넓어지지 않는다: 같은 id가 지금도 직접 읽기 길에서 같은 술어를 통과해야 바이트가 된다. 그리고 이 주소는 **모델이 읽는 어떤 글에도 실리지 않는다**. 워커가 한 요청에 쓰고 버리며, 페이로드·메시지·감사·오류·로그 어디에도 쓰지 않는다. 그래서 모델이 말로 이 라우트에 닿을 방법은 늘지 않는다.
 - **D4 · 수명은 60초**(C2a의 5분과 따로: `SELF_MEDIA_INTERNAL_TTL_SECS`). 발급 직후 쓰므로 읽기 마감(10초)에 여유만 둔다. 표의 10분 천장 안이다.
 - **D5 · 설정과 선택.** `OORT_API_INTERNAL_ORIGIN`(워커 전용)이 있으면 **api 길 하나**, 없거나 모양이 틀리면 **자기 보관소 길(`MOMO_DRIVE_*`) 하나**로 읽는다. 폴백은 없다: api 길이 실패했을 때 몰래 보관소를 읽으면 끊어진 사설망이 가려진다. 값의 모양은 `http(s)://<소문자 호스트>[:포트]`뿐이다(경로·슬래시·사용자 정보·질의·대문자·비ASCII·IPv6 괄호 거절. `canonical_origin`의 공개 출처 문법과 다른 값이다). 이 값은 요청도 모델도 정하지 않는 배포 설정이다. 그래서 사람이 GUI에 적는 공급자 URL용 egress 가드(`momo-egress`)를 거치지 않는다(사설 주소가 정상이다). 대신 클라이언트가 **리디렉션을 따르지 않고 프록시를 무시한다**. 잘못 적은 값은 기동 때 변수 이름만 경고한다(값은 찍지 않는다).
-- **D6 · 읽는 법.** 선언된 크기와 정확히 같은 바이트만, 응답의 `Content-Type`이 png·jpeg·webp이고 바이트가 그 형식으로 시작할 때만 받는다. 200만 사진이고, 404는 api의 하나뿐인 거절(`attachment_not_available`), 그 밖의 상태·전송 오류·모양 불일치는 `drive_unavailable`이다. **전송 오류 문장은 돌려주지 않는다**(감사의 `reason`은 고정 코드다). 조용히 닫히던 것이 이 이슈의 불만이어서 원인 한 줄은 로그에 남기되, 그 원인은 만들 때 이미 `redact_self_media_urls`를 지난다(reqwest의 오류 문장은 요청 URL, 곧 토큰을 담는다).
+- **D6 · 읽는 법.** 선언된 크기와 정확히 같은 바이트만, 응답의 `Content-Type`이 png·jpeg·webp이고 바이트가 그 형식으로 시작할 때만 받는다. 200만 사진이고, 404는 api의 하나뿐인 거절(`attachment_not_available`), 그 밖의 상태·전송 오류·모양 불일치는 `drive_unavailable`이다. **전송 오류 문장은 돌려주지 않는다**(감사의 `reason`은 고정 코드다). 조용히 닫히던 것이 이 이슈의 불만이어서 원인 한 줄은 로그에 남기되, 그 원인은 **고정 낱말뿐이다**(#4974가 정정: `timeout`·`connect`·`body`·`request`. reqwest의 오류 문장은 요청 URL, 곧 api의 사설 출처·워크스페이스·토큰을 담으므로 아예 쓰지 않는다. 첫 판은 그 문장을 `redact_self_media_urls`로 가려 남겼는데, 가려도 출처와 워크스페이스가 남았다. 아래 후속 F3).
 - **D7 · 기본 배선.** Railway 템플릿의 agent-worker에 `OORT_API_INTERNAL_ORIGIN=http://api.railway.internal:8080`(api의 `privateHostname`+`port`), 셀프호스트 compose에 `${OORT_API_INTERNAL_ORIGIN-http://api:8080}`(빈 값으로 끄고 `MOMO_DRIVE_*` 길로 돌아갈 수 있다), host-network 오버레이는 `127.0.0.1:${MOMO_RUST_API_PORT:-8080}`. 카탈로그 검사가 값을 api의 선언에서 도출해 못 박고(공개 엣지나 다른 포트는 빨강) agent-worker 말고 다른 서비스가 가지면 빨강이다. 운영 값은 배포 때 planner가 넣는다.
 
 ### 비교한 방식
@@ -227,10 +227,29 @@ Railway는 api와 agent-worker를 다른 서비스로 띄우고, `local` 저장�
 | D5 | `attachment_via_api_conformance_pg::a_worker_whose_api_is_unreachable_fails_closed_and_does_not_fall_back_to_the_archive`, `…::a_worker_with_no_private_address_keeps_reading_its_own_archive`, `self_media::tests::the_internal_origin_is_a_bare_http_origin_and_nothing_else` | 폴백을 넣으면, 설정을 무시하면, 문법의 한 항을 느슨하게 하면 |
 | D6 리디렉션 | `self_media::tests::a_redirect_is_an_answer_not_a_place_to_go` | 클라이언트의 `redirect(Policy::none())`를 지우면 |
 | D6 길이 | `self_media::tests::a_body_that_never_ends_is_cut_at_the_declared_length` | 청크 길이 검사를 지우면 |
-| D6 로그 | `attachment_via_api_conformance_pg::a_failed_fetch_logs_a_cause_and_never_the_token`, `self_media::tests::a_transport_failure_holds_no_token`, `self_media::tests::no_log_line_names_the_address_the_token_or_the_drive_id` | `transport()`에서 `redact_self_media_urls`를 지우면, tracing 호출에 주소·토큰을 쓰면 |
+| D6 로그 | `attachment_via_api_conformance_pg::a_failed_fetch_logs_a_cause_and_never_the_token`, `self_media::tests::a_transport_failure_holds_a_kind_and_nothing_the_transport_said`, `self_media::tests::no_log_line_names_the_address_the_token_or_the_drive_id` | 실패 줄에 reqwest의 문장·출처·워크스페이스·토큰을 쓰면, tracing 호출에 주소·토큰을 쓰면(#4974: 가림에서 고정 낱말로 바뀜) |
 | D7 | `scripts/tests/check_railway_catalog.py --prove-mutations`의 5건(`worker-api-internal-dropped`·`-wrong-port`·`-public-edge`, `relay-api-internal-origin`, `readme-row-missing-api-internal`) | 값을 api 선언에서 도출하는 규칙, 다른 서비스 금지, README 행 |
 
 사보타주를 실제로 돌린 결과는 PR 본문이 정본이다.
+
+### 후속 (2026-11-01, #4974): 독립 보안 검수 1회차 Medium 1·Low 4의 처리
+
+결정(D1~D7)은 바뀌지 않는다. 검수가 남긴 것은 시험이 재지 못하던 줄과 운영 위생이고, 아래 다섯으로 닫는다. D6의 「원인은 `redact_self_media_urls`를 지난다」는 F3이 대신한다.
+
+- **F1 · 워커가 실제로 쓰는 읽기 클라이언트의 배선을 잰다(Medium).** 워커의 클라이언트를 `attachment_client()` 대신 기본 클라이언트(리디렉션 10회·프록시 환경변수·시간 한도 없음)로 바꿔도 모든 시험이 초록이었다. 단위 시험은 생성 함수만 재고, 워커가 쓰는 필드는 아무 시험도 건드리지 않았다. 이제 루프 시험이 `attachment_reader()`로 읽는다. 302를 주는 스텁이 진짜 사진을 내주는 둘째 서버를 가리키게 하고, 그 둘째 서버에 요청이 0건임을 잰다. 프록시 무시(`.no_proxy()`)는 이 시험이 재지 않는다. 시험에서 프로세스 환경을 바꾸지 않는 규칙 때문이고, `HTTP(S)_PROXY`를 준 자식 프로세스로 재는 CI 한 줄은 정책 파일이라 별도 결정이다.
+- **F2 · 읽기 주소의 수명 60초를 워커가 쓴 행에서 잰다(Low).** D4의 60초는 상수와 도메인 함수만 재고, 워커의 실제 호출이 다른 수명을 줘도 초록이었다. 첫 루프 시험이 이미 읽는 토큰 행에서 `expires_at - created_at`이 60초(이 문서의 숫자이지 상수가 아니다)임을 단정한다.
+- **F3 · 실패 로그에는 오류의 종류만 남는다(Low, D6 정정).** 가린 줄에도 api의 사설 출처와 워크스페이스 id가 남았고(`error sending request for url (http://…/v1/self-media/<워크스페이스>/<redacted>)`), reqwest 0.12의 문장은 원인(연결 거절인지 시간 초과인지)을 말하지도 않았다. 이제 전송 실패는 고정 낱말 하나(`timeout`·`connect`·`body`·`request`)만 남기고, reqwest의 문장은 어디에도 쓰지 않는다(가리지도 않는다. 남기지 않으니 샐 것이 없다). 시험은 실제 실패가 쓴 로그 줄을 붙잡아 그 줄에 종류가 있고 출처·워크스페이스·토큰이 없음을 잰다. 한 가지는 그대로다. DEBUG 이하로 켠 reqwest·hyper의 자체 기록(`starting new connection: http://…/`, `connecting to …`)은 접속하는 상대의 출처를 적는다. 경로와 토큰은 적지 않고(전체 캡처에서 토큰이 없음을 잰다, 남는 위험 5), 이 줄들은 라이브러리의 것이며 운영 기본(`info`)에는 나오지 않는다.
+- **F4 · 사설망 주소 모양이 아닌 값은 기동 때 한 줄 경고한다(Low, D5 보강).** 문법은 출처의 모양만 판정하고(`http://example.com`도 통과) 어디를 가리키는지는 판정하지 않는다. 이 값은 요청도 모델도 정하지 않는 운영 설정이지만, 1회용 토큰이 그 호스트로 간다. 값이 문법을 통과했는데 사설망 주소처럼 보이지 않으면 기동 로그에 변수 이름만 든 경고 한 줄을 남긴다(값은 찍지 않는다). 사설 모양은 루프백·사설 IPv4(`10/8`·`172.16/12`·`192.168/16`, 공유 주소 `100.64/10`), 한 낱말 이름(compose의 `api`), `.internal`(Railway의 `api.railway.internal`)·`.local`·`.localhost`·`.home.arpa` 접미사다. 공개 이름·공개 IP·링크 로컬 `169.254/16`(클라우드 메타데이터 주소)·해석기가 주소로 읽을 수 있는 숫자 모양(`2130706433`·`0x7f.1`)은 아니다. 스킴은 보지 않는다(`https://`로 공개 호스트를 가리켜도 공개 호스트다). 막지는 않는다. 모양 검사일 뿐이고 이름은 어디로든 풀릴 수 있다.
+- **F5 · 셀프호스트 워커의 읽기 전용 마운트는 남기고 이유를 적는다(Low).** 기본(`OORT_API_INTERNAL_ORIGIN` 미설정 = `http://api:8080`)은 이 마운트를 읽지 않는다. 그러나 같은 스위치의 다른 가지가 읽는다. 값을 비우면(또는 출처가 아닌 값이면) 워커는 `MOMO_DRIVE_LOCAL_DIR`의 자기 보관소를 읽고, 마운트가 없으면 조용히 닫힌다(`open_reader` 실패 → `UnavailableDriveArchive`, 로그 없음). #4934가 없앤 침묵이다. 그래서 지우지 않고, 이유와 지워도 되는 조건(그 값을 끄지 않을 스택)을 `local.override.yml` 주석에 적었다. 대가는 워커가 모든 워크스페이스의 첨부를 읽기 전용으로 쥔다는 것이다. 기본 오버레이에서 빼고 끄는 스택 전용 오버레이로 옮기는 길은 canonical compose 파일 집합(생성기·셀프호스트 시험)을 건드려 이 후속에서 하지 않는다. 필요하면 별도 결정이다.
+
+| 후속 | 시험 | 분기를 지우면 빨강 |
+|---|---|---|
+| F1 | `attachment_via_api_conformance_pg::the_client_the_worker_reads_with_follows_no_redirect` | `lib.rs`가 `attachment_client()` 대신 `reqwest::Client::new()`를 쓰면(둘째 서버에 요청이 간다. 이 사보타주에서 단위 시험 `a_redirect_is_an_answer_not_a_place_to_go`는 초록이어서 이 시험이 메운다) |
+| F2 | `attachment_via_api_conformance_pg::a_requesters_picture_goes_worker_to_api_to_worker_and_becomes_the_proposal_image` | `SELF_MEDIA_INTERNAL_TTL_SECS`를 바꾸면, 워커의 발급 호출이 다른 수명을 주면 |
+| F3 | `attachment_via_api_conformance_pg::a_failed_fetch_logs_a_cause_and_never_the_token`, `self_media::tests::a_transport_failure_holds_a_kind_and_nothing_the_transport_said` | 실패 줄에 출처·워크스페이스를 쓰면, `transport()`가 reqwest의 문장을 남기면, 종류 분기(`timeout`·`connect`·`body`)를 지우면 |
+| F4 | `self_media::tests::an_origin_is_private_shaped_only_when_it_names_a_place_on_a_private_network`, `self_media::tests::the_boot_line_for_an_origin_that_is_not_private_names_the_variable_and_never_the_value`, `boot_origin_warning::the_booting_worker_warns_once_by_name_for_an_origin_that_is_not_private_and_never_prints_it` | 판정의 한 항(접미사·사설 범위·숫자 모양)을 지우면, 경고에 값을 쓰면, 경고를 내지 않으면, `main.rs`가 호출하지 않으면 |
+
+F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 구성·기본+host-network 구성 모두 통과하고, 렌더된 워커의 마운트(`drive-archive` → `/var/lib/oort/drive`, 읽기 전용)가 그대로임을 확인했다. 사보타주를 실제로 돌린 결과는 PR 본문이 정본이다.
 
 ## 증보 4 (2026-11-01, #4970): 워커의 첨부 읽기를 글·PDF·그림까지 — 읽기용 발급, 같은 길, 같은 상한
 

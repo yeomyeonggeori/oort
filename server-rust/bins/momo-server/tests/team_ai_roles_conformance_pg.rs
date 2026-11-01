@@ -873,6 +873,25 @@ async fn s5_the_settings_card_cannot_reach_a_team_ai_key() {
             "{key}"
         );
     }
+    // #4944 (B9-1, B13-I9): the limit that bounds the helper — with a value the settings door
+    // WOULD accept, not just a stand-in — is no more reachable than the role switches.
+    for (key, limits) in [
+        ("team_ai_limits", json!({"dailyTokens": 100})),
+        ("teamAiLimits", json!({"monthlyUsd": 1})),
+    ] {
+        assert_eq!(
+            h.raise(
+                h.owner,
+                "workspace.settings.update",
+                json!({"welcomePrompt": "안녕하세요", key: limits}),
+                &[],
+                0,
+            )
+            .await,
+            Err(ProposalRefusal::InvalidArguments),
+            "{key}"
+        );
+    }
     let before = h.settings().await;
     let card = h
         .raise(
@@ -888,6 +907,8 @@ async fn s5_the_settings_card_cannot_reach_a_team_ai_key() {
         "UPDATE approval SET payload = jsonb_set(payload, '{action,args,team_ai_roles}', '{\"files\": false}') WHERE id = $1",
         "UPDATE approval SET payload = jsonb_set(payload, '{action,args,teamAiRoles}', '{\"files\": false}') WHERE id = $1",
         "UPDATE approval SET payload = jsonb_set(payload, '{action,args,team_ai_fast_path}', 'false') WHERE id = $1",
+        "UPDATE approval SET payload = jsonb_set(payload, '{action,args,team_ai_limits}', '{\"dailyTokens\": 1}') WHERE id = $1",
+        "UPDATE approval SET payload = jsonb_set(payload, '{action,args,teamAiLimits}', '{\"monthlyUsd\": 1}') WHERE id = $1",
     ] {
         sqlx::query(tampered).bind(card.approval_id).execute(&h.su).await.unwrap();
         let (status, refused) = h.decide(&h.owner_token, card.approval_id, true).await;
@@ -895,7 +916,7 @@ async fn s5_the_settings_card_cannot_reach_a_team_ai_key() {
         assert_eq!(refused["status"], "action_args_invalid");
         assert_eq!(h.settings().await, before, "no team_ai_* key moved");
         assert_eq!(h.approval_status(card.approval_id).await, "pending");
-        sqlx::query("UPDATE approval SET payload = payload #- '{action,args,team_ai_roles}' #- '{action,args,teamAiRoles}' #- '{action,args,team_ai_fast_path}' WHERE id = $1")
+        sqlx::query("UPDATE approval SET payload = payload #- '{action,args,team_ai_roles}' #- '{action,args,teamAiRoles}' #- '{action,args,team_ai_fast_path}' #- '{action,args,team_ai_limits}' #- '{action,args,teamAiLimits}' WHERE id = $1")
             .bind(card.approval_id)
             .execute(&h.su)
             .await
@@ -908,6 +929,7 @@ async fn s5_the_settings_card_cannot_reach_a_team_ai_key() {
     assert_eq!(after["welcome_prompt"], "안녕하세요");
     assert_eq!(after["team_ai_fast_path"], before["team_ai_fast_path"]);
     assert!(after.get("team_ai_roles").is_none());
+    assert!(after.get("team_ai_limits").is_none());
 }
 
 // --- the settings door ---------------------------------------------------------------------------

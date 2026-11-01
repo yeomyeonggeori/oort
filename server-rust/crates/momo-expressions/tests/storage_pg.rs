@@ -649,3 +649,208 @@ async fn quota_name_replacement_races_snapshot_delta_ttl_and_immutable_storage()
         .iter()
         .all(|item| item["status"] == "active"));
 }
+
+/// The draft row's `origin` exactly as stored.
+async fn origin_of(su: &PgPool, ws: Uuid, id: Uuid) -> Value {
+    sqlx::query_scalar("SELECT origin FROM expression_draft WHERE workspace_id=$1 AND id=$2")
+        .bind(ws)
+        .bind(id)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+async fn state_of(su: &PgPool, ws: Uuid, id: Uuid) -> String {
+    sqlx::query_scalar("SELECT state FROM expression_draft WHERE workspace_id=$1 AND id=$2")
+        .bind(ws)
+        .bind(id)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+fn id_of(d: &Value) -> Uuid {
+    choice(d).draft_id
+}
+
+/// #4900 (ADR-0218 D2, migration 167): an expired draft stays as a record but no longer holds the
+/// words an agent wrote into it. The TTL sweep blanks `origin.prompt` (JSON null) in the very
+/// statement that expires the row; everything else about the origin stays. And the immutability
+/// trigger lets `origin` move in that one way only: a draft that is still live cannot be blanked, and
+/// an expiry that changes anything else about the row or the origin is refused.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn an_expired_draft_keeps_its_record_but_not_the_agents_words() {
+    let (su, api, owner, member, _foreign) = setup().await;
+    let made = |who: Actor, name: &'static str, origin: Origin| {
+        let api = api.clone();
+        async move {
+            e::create_draft(&api, who, meta(name), origin, Some(pixels()), None)
+                .await
+                .unwrap()
+        }
+    };
+    // Words, no words, and a draft that is still live.
+    let old = made(owner, "words_old", Origin::photo("cutout").unwrap()).await;
+    let plain = made(member, "no_words", Origin::upload()).await;
+    let live = made(owner, "words_live", Origin::photo("caricature").unwrap()).await;
+    let (old, plain, live) = (id_of(&old), id_of(&plain), id_of(&live));
+    let ws = owner.workspace;
+    let before_old = origin_of(&su, ws, old).await;
+    let before_plain = origin_of(&su, ws, plain).await;
+    assert!(
+        before_old["prompt"].as_str().is_some_and(|p| !p.is_empty()),
+        "control: the draft carries words before it expires: {before_old}"
+    );
+    assert_eq!(before_old["kind"], "generated");
+
+    // The clock fixture (as above): backdate two drafts' own expiry, nothing else.
+    let mut clock = su.begin().await.unwrap();
+    sqlx::query("ALTER TABLE expression_draft DISABLE TRIGGER expression_draft_identity")
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE expression_draft SET expires_at=clock_timestamp()-interval '1 second' WHERE workspace_id=$1 AND id = ANY($2)")
+        .bind(ws)
+        .bind(vec![old, plain])
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    sqlx::query("ALTER TABLE expression_draft ENABLE TRIGGER expression_draft_identity")
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    clock.commit().await.unwrap();
+    e::sweep_expired(&su, &api).await.unwrap();
+
+    // The record stays, the words do not, and nothing else of the origin moved.
+    assert_eq!(state_of(&su, ws, old).await, "expired");
+    let mut expected = before_old.clone();
+    expected["prompt"] = Value::Null;
+    assert_eq!(
+        origin_of(&su, ws, old).await,
+        expected,
+        "only the prompt was blanked"
+    );
+    assert_eq!(state_of(&su, ws, plain).await, "expired");
+    assert_eq!(
+        origin_of(&su, ws, plain).await,
+        before_plain,
+        "a draft with no words is untouched"
+    );
+    assert_eq!(state_of(&su, ws, live).await, "ready");
+    assert!(
+        origin_of(&su, ws, live).await["prompt"].is_string(),
+        "a live draft keeps its words"
+    );
+
+    // The trigger: `origin` moves only into "prompt blanked, state expired", on the real API role.
+    let attempt = |sql: &'static str| {
+        let api = api.clone();
+        async move {
+            e::transaction(&api, owner, move |conn| {
+                Box::pin(async move {
+                    sqlx::query(sql)
+                        .bind(owner.workspace)
+                        .bind(live)
+                        .execute(conn)
+                        .await?;
+                    Ok(())
+                })
+            })
+            .await
+        }
+    };
+    for (label, sql) in [
+        (
+            "blanking a live draft",
+            "UPDATE expression_draft SET origin=jsonb_set(origin,'{prompt}','null'::jsonb) WHERE workspace_id=$1 AND id=$2",
+        ),
+        (
+            "expiring it while changing the kind too",
+            "UPDATE expression_draft SET state='expired',code=NULL,origin=jsonb_set(jsonb_set(origin,'{prompt}','null'::jsonb),'{kind}','\"upload\"'::jsonb) WHERE workspace_id=$1 AND id=$2",
+        ),
+        (
+            "expiring it with a rewritten prompt",
+            "UPDATE expression_draft SET state='expired',code=NULL,origin=jsonb_set(origin,'{prompt}','\"another\"'::jsonb) WHERE workspace_id=$1 AND id=$2",
+        ),
+        (
+            "expiring it while changing its name too",
+            "UPDATE expression_draft SET state='expired',code=NULL,display_name='x',origin=jsonb_set(origin,'{prompt}','null'::jsonb) WHERE workspace_id=$1 AND id=$2",
+        ),
+        (
+            "rewriting the prompt of a live draft",
+            "UPDATE expression_draft SET origin=jsonb_set(origin,'{prompt}','\"another\"'::jsonb) WHERE workspace_id=$1 AND id=$2",
+        ),
+    ] {
+        assert!(attempt(sql).await.is_err(), "{label} is refused");
+        assert_eq!(state_of(&su, ws, live).await, "ready", "{label}: unchanged");
+    }
+    assert!(
+        origin_of(&su, ws, live).await["prompt"].is_string(),
+        "none of the refused statements changed the words"
+    );
+    // And the one allowed shape is allowed (it is the sweep's own statement).
+    attempt("UPDATE expression_draft SET state='expired',code=NULL,origin=jsonb_set(origin,'{prompt}','null'::jsonb) WHERE workspace_id=$1 AND id=$2")
+        .await
+        .expect("expiring with the prompt blanked is the allowed change");
+    assert_eq!(state_of(&su, ws, live).await, "expired");
+    assert!(origin_of(&su, ws, live).await["prompt"].is_null());
+}
+
+/// #4900: drafts that expired before migration 167 still hold their words; the migration blanks them
+/// once, through the one change the trigger allows on an expired row, and applying it again is
+/// harmless. (The file is applied here the way the runner applies it: one transaction.)
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn migration_167_blanks_the_words_of_drafts_that_expired_before_it() {
+    let (su, api, owner, _member, _foreign) = setup().await;
+    let ws = owner.workspace;
+    let draft = e::create_draft(
+        &api,
+        owner,
+        meta("expired_before"),
+        Origin::photo("cutout").unwrap(),
+        Some(pixels()),
+        None,
+    )
+    .await
+    .unwrap();
+    let id = id_of(&draft);
+    let before = origin_of(&su, ws, id).await;
+    // Expired the way it was before 167: the state changed, the origin was left alone.
+    let mut old_way = su.begin().await.unwrap();
+    sqlx::query("ALTER TABLE expression_draft DISABLE TRIGGER expression_draft_identity")
+        .execute(&mut *old_way)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE expression_draft SET state='expired',code=NULL WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(id)
+    .execute(&mut *old_way)
+    .await
+    .unwrap();
+    sqlx::query("ALTER TABLE expression_draft ENABLE TRIGGER expression_draft_identity")
+        .execute(&mut *old_way)
+        .await
+        .unwrap();
+    old_way.commit().await.unwrap();
+    assert_eq!(state_of(&su, ws, id).await, "expired");
+    assert!(
+        origin_of(&su, ws, id).await["prompt"].is_string(),
+        "control: an old expired draft still holds its words"
+    );
+    let migration =
+        include_str!("../../../../server/Migrations/167_expression_draft_expiry_blanks_prompt.sql");
+    for _ in 0..2 {
+        let mut tx = su.begin().await.unwrap();
+        sqlx::raw_sql(migration).execute(&mut *tx).await.unwrap();
+        tx.commit().await.unwrap();
+        let mut expected = before.clone();
+        expected["prompt"] = Value::Null;
+        assert_eq!(origin_of(&su, ws, id).await, expected);
+        assert_eq!(state_of(&su, ws, id).await, "expired");
+    }
+}

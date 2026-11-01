@@ -111,6 +111,12 @@ async fn multipart(
     Ok((meta, file.ok_or_else(invalid)?))
 }
 pub(crate) fn media_error(e: media::Rejected) -> ApiError {
+    // Both decoder slots taken is the SERVER's retryable state, never a property of the file (#4900):
+    // the 503 with `Retry-After` the link import and the photo route already answer, not a
+    // "format not supported" 415 that tells a person their picture is the problem.
+    if e == media::Rejected::Busy {
+        return ApiError::busy(2);
+    }
     ApiError::coded(
         if e == media::Rejected::TooLarge {
             StatusCode::PAYLOAD_TOO_LARGE

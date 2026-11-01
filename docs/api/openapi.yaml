@@ -276,6 +276,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expressions/import:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -590,6 +599,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expression-drafts/{draftId}:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -631,6 +649,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expression-drafts/{draftId}/image:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -1985,10 +2012,19 @@ paths:
         Members read `role_labels` through `WorkspaceDto.roleLabels` on that
         identity GET, and `welcome_agent_member_id` / `welcome_prompt` through
         the matching WorkspaceDto fields (ADR-0181).
+
+        `?include=team_ai_limits_status` adds one computed key,
+        `team_ai_limits_status` (ADR-0201 증보 v3 B9-4, #4944): the team AI's
+        limits as set, the cap that applies after the operator's ceiling,
+        today's and this month's usage and whether a monthly dollar limit can
+        be switched on. It is never stored and is not a PATCH-able key. Without
+        the parameter the response is exactly the stored bag (a workspace that
+        never wrote a key still reads `{}`). Any other `include` value is 400.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SettingsInclude"
       responses:
         "200":
           description: Current bag. Empty object when unset.
@@ -2042,7 +2078,29 @@ paths:
         that names one switch never moves another. Turning `memory` from off to
         on while team memory is switched off is 409 `team_memory_off`. A change
         writes the audit row `team_ai.roles.changed` with the key names only. An
-        agent's `workspace.settings.update` proposal cannot name this key).
+        agent's `workspace.settings.update` proposal cannot name this key),
+        and `team_ai_limits` (object, ADR-0201 증보 v3 B9 / #4944: the team AI's
+        usage limits — **absent means no limit at all**; `dailyTokens` and
+        `dailySearches` are whole numbers >= 1 (at most 10^12), `monthlyUsd` is
+        a number from 0.000001 to 1000000. `0`, a negative, a fraction for a
+        count, a non-number and an unknown field are 400; "no limit" is the
+        absence of a field, never `0`. Merged one level down like
+        `team_ai_roles` — a named field replaces, an omitted field stays, a
+        `null` field is dropped, and an object left with no field removes the
+        key — so a patch that names one limit never lifts another. Only a
+        workspace owner/admin writes it; an agent's `workspace.settings.update`
+        proposal cannot name this key. `monthlyUsd` is the public list-price
+        equivalent computed at read time (ADR-0147 증보 2026-10-30), not the
+        provider's invoice, and it can be switched on only while the helper's
+        last request ran on a model that has a price on file: before the helper
+        has answered anything, or while its last request ran on an unpriced
+        model, naming `monthlyUsd` is 400 `team_ai_usd_limit_unavailable` and
+        nothing is written. Clearing it (`null`) is always allowed. The server
+        operator's env `TEAM_AI_DAILY_TOKEN_CAP` / `TEAM_AI_DAILY_SEARCH_CAP`
+        is a ceiling no workspace value gets past: empty = none, a positive
+        number = the ceiling, `0` = off).
+        `?include=team_ai_limits_status` returns the computed
+        `team_ai_limits_status` in the response, as on the GET.
         `role_labels` is replaced whole — omit a role key to
         drop that override; `null` deletes the key (client default labels).
         Serialized body over 8192 bytes is 413. There is no PUT whole-replace.
@@ -2050,6 +2108,7 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SettingsInclude"
       requestBody:
         required: true
         content:
@@ -2062,7 +2121,12 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/WorkspaceSettings"}
         "400":
-          description: Unknown key, malformed allowed_agent_models, role_labels, welcome_agent_member_id, welcome_prompt or team_ai_roles (an unknown bundle, `chat_read`, a non-boolean), inactive welcome agent, or non-object body.
+          description: >
+            Unknown key, malformed allowed_agent_models, role_labels, welcome_agent_member_id, welcome_prompt,
+            team_ai_roles (an unknown bundle, `chat_read`, a non-boolean) or team_ai_limits (`0`, a negative, a
+            fraction for a count, a non-number, an unknown field, a non-object), inactive welcome agent, an unknown
+            `include`, or non-object body. A `monthlyUsd` limit the server cannot price is 400
+            `team_ai_usd_limit_unavailable` (nothing written).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -15136,6 +15200,16 @@ components:
         No approval route accepts this scheme (ADR-0188 D3).
 
   parameters:
+    SettingsInclude:
+      in: query
+      name: include
+      required: false
+      description: >
+        A computed addition to the settings response (ADR-0201 증보 v3 B9-4, #4944). The only value is
+        `team_ai_limits_status`; any other is 400. Absent = the stored bag, unchanged.
+      schema:
+        type: string
+        enum: [team_ai_limits_status]
     Expressionws:
       in: path
       name: ws
@@ -19916,22 +19990,33 @@ components:
         and the TS registry's `agentSuggestable: true` commands are measured
         against this enum by `clients/web/src/app/commandRegistry.test.ts`.
         Every member is a client command (risk `none`): a command that changes
-        server state is a WorkspaceActionId instead. Two members: `ai.connect`,
+        server state is a WorkspaceActionId instead. Three members: `ai.connect`,
         whose `args` are `harness` (`claude | codex | team_key`, no `grok` in v1)
-        and `scope` (`mine | team`), paired `team_key` with `team`; and
+        and `scope` (`mine | team`), paired `team_key` with `team`;
         `settings.open` (ADR-0201 v2 H6-4, #3939), whose only `args` key is the
         required `section`, one of the web settings nav's section ids
         (`profile | appearance | notifications | shortcuts | devices | workspace |
         members | memory | usage | code | updates`) plus `plugins`, the legacy id
         the core AI hub model resolves to the AI hub's apps page; the AI hub link
         row `ai` and the other legacy aliases are not values, and a value is
-        never a path). A client
+        never a path); and `work.request.open` (ADR-0201 v3 B8 C1, #4972), which
+        opens the person's own 「작업 요청」 sheet already filled in — `args` are
+        the required `prompt` (plain text, 1–8,000 UTF-8 bytes, the signed spawn's
+        own prompt rule: no control character but line feed and tab, nothing
+        invisible, and it may not start with `/`) and an optional `harness`
+        (`claude | codex`; `team_key` belongs to `ai.connect` and is refused
+        here). `harness` is the one `args` property two commands share, so the
+        tools publish it once with the union of the enums. The person reads the
+        prompt in the sheet and sends it themselves — the spawn is a control
+        signed by the owner's device key — so the server writes the card's message
+        and no approval and no audit row for it. A client
         that cannot reach a section shows the message body as text. The message the
         tool posts carries `props["momo.command_suggest"]` with exactly `v`,
         `command_id`, `args` (normalised), `for_member_id` (the run's trigger
-        author, set by the server) and `label` (derived by the server) — never
-        connection state or any secret.
-      enum: ["ai.connect", "settings.open"]
+        author, set by the server) and `label` (derived by the server from the
+        command and, for `work.request.open`, the `harness` alone — never the
+        prompt) — never connection state or any secret.
+      enum: ["ai.connect", "settings.open", "work.request.open"]
 
     WorkspaceAction:
       type: object
@@ -25209,6 +25294,18 @@ components:
             files: {type: boolean}
             memory: {type: boolean}
             code: {type: boolean}
+        team_ai_limits:
+          type: object
+          description: >
+            ADR-0201 증보 v3 B9 (#4944): the limits the team's administrator set on the team AI.
+            **Absent means no limit.** Only the fields that are set are present.
+          additionalProperties: false
+          properties:
+            dailyTokens: {type: integer, format: int64, minimum: 1, description: "Tokens (prompt + completion) per UTC day."}
+            dailySearches: {type: integer, format: int64, minimum: 1, description: "Provider-side web searches per UTC day."}
+            monthlyUsd: {type: number, minimum: 0.000001, maximum: 1000000, description: "Public list-price equivalent per UTC calendar month (read-time, not the provider's invoice)."}
+        team_ai_limits_status:
+          $ref: "#/components/schemas/TeamAiLimitsStatus"
         team_ai_alias_status:
           type: object
           description: >
@@ -25308,6 +25405,87 @@ components:
             files: {type: boolean, nullable: true}
             memory: {type: boolean, nullable: true}
             code: {type: boolean, nullable: true}
+        team_ai_limits:
+          nullable: true
+          type: object
+          description: >
+            ADR-0201 증보 v3 B9 (#4944): the team AI's usage limits. Merged one level down — a named
+            field replaces, an omitted field stays, a `null` field is dropped; `null` for the key
+            removes every limit. `0`, a negative, a fraction for a count, a non-number and an unknown
+            field are 400 (no limit is the absence of a field, never `0`). `monthlyUsd` is 400
+            `team_ai_usd_limit_unavailable` while the helper's last request ran on a model with no
+            price on file, or before it has answered anything. Owner/admin only.
+          additionalProperties: false
+          properties:
+            dailyTokens: {type: integer, format: int64, minimum: 1, maximum: 1000000000000, nullable: true}
+            dailySearches: {type: integer, format: int64, minimum: 1, maximum: 1000000000000, nullable: true}
+            monthlyUsd: {type: number, minimum: 0.000001, maximum: 1000000, nullable: true}
+
+    TeamAiLimitsStatus:
+      type: object
+      readOnly: true
+      description: >
+        ADR-0201 증보 v3 B9-4 (#4944). What the settings screen reads about the team AI's limits,
+        computed per request (never stored), only with `?include=team_ai_limits_status`. Day = UTC
+        day, month = UTC calendar month. `usage` is the helper's own ledger; a `null` limit is "no
+        limit". The dollar figure is the public list-price equivalent computed at read time
+        (ADR-0147 증보 2026-10-30), not the provider's invoice, and a run on a model with no price
+        adds tokens but no dollars (`monthUnpricedRuns`). The model's name is never returned — only
+        whether it is priced.
+      required: [limits, effective, operatorCeiling, usage, monthlyUsdAvailable, dayResetsAtMs, monthResetsAtMs]
+      properties:
+        limits:
+          type: object
+          description: What the administrator set (`team_ai_limits`), `null` where nothing is set.
+          required: [dailyTokens, dailySearches, monthlyUsd]
+          properties:
+            dailyTokens: {type: integer, format: int64, nullable: true}
+            dailySearches: {type: integer, format: int64, nullable: true}
+            monthlyUsd: {type: number, nullable: true}
+        effective:
+          type: object
+          description: >
+            The cap that applies after the operator's ceiling: the lower of the workspace's limit and
+            the ceiling, `null` for none. `0` is the operator's off switch (the helper for tokens,
+            web search for searches).
+          required: [dailyTokens, dailySearches]
+          properties:
+            dailyTokens: {type: integer, format: int64, nullable: true}
+            dailySearches: {type: integer, format: int64, nullable: true}
+        operatorCeiling:
+          type: object
+          description: >
+            The server operator's env ceilings as the api process reads them
+            (`TEAM_AI_DAILY_TOKEN_CAP`, `TEAM_AI_DAILY_SEARCH_CAP`; set the same values on the api and
+            the agent-worker — the worker enforces, the api only explains). `null` = no ceiling.
+          required: [dailyTokens, dailySearches, helperOff, searchOff]
+          properties:
+            dailyTokens: {type: integer, format: int64, nullable: true}
+            dailySearches: {type: integer, format: int64, nullable: true}
+            helperOff: {type: boolean, description: "TEAM_AI_DAILY_TOKEN_CAP=0 — the operator switched the helper off."}
+            searchOff: {type: boolean, description: "TEAM_AI_DAILY_SEARCH_CAP=0 — web search is off for everyone."}
+        usage:
+          type: object
+          required: [todayTokens, todaySearches, monthCostMicroUsd, monthRuns, monthUnpricedRuns, monthEstimatedRuns]
+          properties:
+            todayTokens: {type: integer, format: int64, description: "Prompt + completion tokens since 00:00 UTC."}
+            todaySearches: {type: integer, format: int64, description: "Provider-side web searches since 00:00 UTC."}
+            monthCostMicroUsd: {type: integer, format: int64, description: "Read-time list-price cost of the priced runs this month, in micro-dollars."}
+            monthRuns: {type: integer, format: int64}
+            monthUnpricedRuns: {type: integer, format: int64, description: "Runs on a model with no price on file (counted in tokens, not in dollars)."}
+            monthEstimatedRuns: {type: integer, format: int64, description: "Runs whose tokens or price are estimates: the dollar figure is a lower bound."}
+        monthlyUsdAvailable:
+          type: boolean
+          description: Whether a monthly dollar limit can be switched on now.
+        monthlyUsdUnavailableReason:
+          type: string
+          nullable: true
+          enum: [model_unpriced, no_usage_yet, null]
+          description: >
+            Why not (`null` when it can): `model_unpriced` (the helper's last request ran on a model with no price on file)
+            or `no_usage_yet` (the helper has not answered anything, so there is no model to price).
+        dayResetsAtMs: {type: integer, format: int64, description: "Epoch milliseconds of the next 00:00 UTC."}
+        monthResetsAtMs: {type: integer, format: int64, description: "Epoch milliseconds of 00:00 UTC on the first of next month."}
 
     RoleLabels:
       type: object

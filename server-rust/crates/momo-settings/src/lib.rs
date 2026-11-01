@@ -167,8 +167,11 @@ pub use workspace::{
 };
 pub use workspace_settings::{
     merge_workspace_settings, project_role_labels, read_workspace_settings,
-    read_workspace_settings_for_update, write_workspace_settings, WorkspaceSettingsInvalid,
-    ALLOWED_SETTINGS_KEYS, MAX_ALLOWED_AGENT_MODELS, MAX_ALLOWED_AGENT_MODEL_BYTES,
-    MAX_ROLE_LABEL_BYTES, MAX_WELCOME_PROMPT_CHARS, MAX_WORKSPACE_SETTINGS_JSON_BYTES,
-    ROLE_LABEL_KEYS, TEAM_AI_ROLES_KEYS, TEAM_AI_ROLES_SETTING,
+    read_workspace_settings_for_update, valid_limit_usd, write_workspace_settings,
+    WorkspaceSettingsInvalid, ALLOWED_SETTINGS_KEYS, MAX_ALLOWED_AGENT_MODELS,
+    MAX_ALLOWED_AGENT_MODEL_BYTES, MAX_ROLE_LABEL_BYTES, MAX_TEAM_AI_LIMIT_COUNT,
+    MAX_TEAM_AI_LIMIT_USD, MAX_WELCOME_PROMPT_CHARS, MAX_WORKSPACE_SETTINGS_JSON_BYTES,
+    MIN_TEAM_AI_LIMIT_USD, ROLE_LABEL_KEYS, TEAM_AI_LIMITS_SETTING, TEAM_AI_LIMIT_DAILY_SEARCHES,
+    TEAM_AI_LIMIT_DAILY_TOKENS, TEAM_AI_LIMIT_FIELDS, TEAM_AI_LIMIT_MONTHLY_USD,
+    TEAM_AI_ROLES_KEYS, TEAM_AI_ROLES_SETTING,
 };

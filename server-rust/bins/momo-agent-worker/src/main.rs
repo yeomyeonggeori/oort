@@ -132,6 +132,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              it); attachments are read from this worker's own archive configuration instead"
         );
     }
+    // #4974: a well-formed value that is not shaped like a private-network address is accepted (the grammar says
+    // what an origin looks like, not where it may point), but the single-use token goes wherever it points — so one
+    // boot line says so. The variable's name only; the function never prints the value.
+    if let Some(origin) = config.api_internal_origin.as_deref() {
+        momo_agent_worker::self_media::warn_if_internal_origin_is_not_private(origin);
+    }
     tracing::info!(
         attachment_source = if config.api_internal_origin.is_some() {
             "api"

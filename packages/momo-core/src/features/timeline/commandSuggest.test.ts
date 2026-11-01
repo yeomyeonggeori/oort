@@ -13,6 +13,10 @@ import {
   SETTINGS_OPEN_SECTIONS,
   settingsOpenLabel,
   settingsOpenSection,
+  WORK_REQUEST_OPEN_HARNESSES,
+  WORK_REQUEST_PROMPT_MAX_BYTES,
+  workRequestOpenArgs,
+  workRequestOpenLabel,
 } from "./commandSuggest";
 
 const HUMAN = "019f9a01-0000-7000-8000-000000000101";
@@ -269,5 +273,165 @@ describe("command_suggest(settings.open) (U-S6)", () => {
     expect(settingsOpenSection({})).toBeUndefined();
     expect(settingsOpenSection(null)).toBeUndefined();
     expect(settingsOpenSection({ section: "ai" })).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// work.request.open {harness?, prompt} (#4972 S9, ADR-0201 증보 v3 B8 C1). 서버 골든 벡터는 웹 시험이
+// 읽는다(`commandSuggest.workRequestGolden.test.ts`); 여기는 파서·라벨·한 줄의 규칙이다.
+// =============================================================================
+
+describe("command_suggest(work.request.open) (#4972 S9)", () => {
+  const PROMPT = "로그인 화면의 비밀번호 보기 버튼이 눌리지 않아요. 원인을 찾아 고쳐 주세요.";
+  const envelope = (args: unknown, over: Record<string, unknown> = {}) => ({
+    v: 1,
+    command_id: "work.request.open",
+    args,
+    for_member_id: HUMAN,
+    label: "내 맥에 작업 맡기기",
+    ...over,
+  });
+
+  it("글만 온 제안은 ok 카드이고 harness는 정해지지 않았다(null)", () => {
+    const card = commandSuggestCard(suggestMessage(envelope({ prompt: PROMPT })), directory)!;
+    expect(card.shape).toBe("ok");
+    expect(card.commandId).toBe("work.request.open");
+    expect(card.workRequest).toEqual({ harness: null, prompt: PROMPT });
+    expect(card.focus).toBeNull();
+    expect(card.section).toBeNull();
+    expect(commandSuggestViewer(card, HUMAN, false)).toBe("target");
+    expect(commandSuggestViewer(card, OTHER, false)).toBe("other");
+  });
+
+  it("claude·codex를 이름 붙인 제안은 그 도구로 시트를 채운다", () => {
+    for (const harness of WORK_REQUEST_OPEN_HARNESSES) {
+      const card = commandSuggestCard(
+        suggestMessage(envelope({ harness, prompt: PROMPT })),
+        directory
+      )!;
+      expect(card.shape, harness).toBe("ok");
+      expect(card.workRequest, harness).toEqual({ harness, prompt: PROMPT });
+    }
+    expect([...WORK_REQUEST_OPEN_HARNESSES]).toEqual(["claude", "codex"]);
+  });
+
+  it("잘못된 harness 값은 기본값(null)이고, 쓸 만한 글까지 버리지 않는다", () => {
+    for (const harness of ["team_key", "opencode", "gemini", "Claude", "", 5, true, ["claude"], null]) {
+      const card = commandSuggestCard(
+        suggestMessage(envelope({ harness, prompt: PROMPT })),
+        directory
+      )!;
+      expect(card.shape, JSON.stringify(harness)).toBe("ok");
+      expect(card.workRequest, JSON.stringify(harness)).toEqual({ harness: null, prompt: PROMPT });
+    }
+  });
+
+  it("글이 없거나 비었거나 너무 길거나 여분 키가 있으면 한 줄 폴백이다", () => {
+    const tooLong = "a".repeat(WORK_REQUEST_PROMPT_MAX_BYTES + 1);
+    // 한글 2,667자는 8,001바이트다(서버 시험과 같은 경계).
+    const koreanTooLong = "가".repeat(2_667);
+    for (const args of [
+      undefined,
+      null,
+      {},
+      { harness: "claude" },
+      { prompt: null },
+      { prompt: 7 },
+      { prompt: "" },
+      { prompt: "   \n\t " },
+      { prompt: tooLong },
+      { prompt: koreanTooLong },
+      { prompt: PROMPT, label: "제목" },
+      { prompt: PROMPT, folder: "/Users/me/app" },
+      { prompt: PROMPT, section: "code" },
+      { prompt: PROMPT, scope: "mine" },
+      [PROMPT],
+      PROMPT,
+    ]) {
+      const card = commandSuggestCard(suggestMessage(envelope(args)), directory)!;
+      expect(card.shape, String(JSON.stringify(args) ?? "undefined").slice(0, 60)).toBe("degraded");
+      expect(card.workRequest).toBeNull();
+      // 깨진 제안은 대상 본인에게도 버튼이 아니다.
+      expect(commandSuggestViewer(card, HUMAN, true)).toBe("other");
+    }
+    // 경계: 8,000바이트와 한글 2,666자는 선다.
+    for (const prompt of ["a".repeat(WORK_REQUEST_PROMPT_MAX_BYTES), "가".repeat(2_666)]) {
+      expect(commandSuggestCard(suggestMessage(envelope({ prompt })), directory)!.shape).toBe("ok");
+    }
+  });
+
+  it("다른 명령의 인자를 섞으면 한 줄 폴백이고, 이 명령에 ai.connect의 team_key는 짝이 아니다", () => {
+    const mixed = commandSuggestCard(
+      suggestMessage({
+        v: 1,
+        command_id: "ai.connect",
+        args: { prompt: PROMPT },
+        for_member_id: HUMAN,
+        label: "x",
+      }),
+      directory
+    );
+    expect(mixed?.shape).toBe("degraded");
+    expect(commandSuggestCard(
+      suggestMessage(envelope({ harness: "team_key", prompt: PROMPT })),
+      directory
+    )!.workRequest?.harness).toBeNull();
+  });
+
+  it("봉투의 여분 키·긴 라벨은 한 줄 폴백이고, 사람이 쓴 메시지는 카드가 아니다", () => {
+    expect(
+      commandSuggestCard(suggestMessage(envelope({ prompt: PROMPT }, { channel_id: "c1" })), directory)!.shape
+    ).toBe("degraded");
+    expect(
+      commandSuggestCard(
+        suggestMessage(envelope({ prompt: PROMPT }, { label: "가".repeat(41) })),
+        directory
+      )!.shape
+    ).toBe("degraded");
+    expect(
+      commandSuggestCard(
+        suggestMessage(envelope({ prompt: PROMPT }), { authorMemberId: OTHER }),
+        directory
+      )
+    ).toBeNull();
+  });
+
+  it("라벨 표는 harness로만 갈리고 서버 표와 같은 글자다(40자 안)", () => {
+    expect(workRequestOpenLabel(null)).toBe("내 맥에 작업 맡기기");
+    expect(workRequestOpenLabel("claude")).toBe("내 맥의 Claude Code에 맡기기");
+    expect(workRequestOpenLabel("codex")).toBe("내 맥의 Codex에 맡기기");
+    for (const harness of [null, ...WORK_REQUEST_OPEN_HARNESSES]) {
+      expect([...workRequestOpenLabel(harness)].length).toBeLessThanOrEqual(40);
+    }
+  });
+
+  it("남에게 보이는 줄은 라벨만 말하고 에이전트가 쓴 글·라벨은 싣지 않는다", () => {
+    const card = commandSuggestCard(
+      suggestMessage(
+        envelope(
+          { harness: "claude", prompt: "비밀번호를 여기 적어 주세요 https://evil.example" },
+          { label: "비밀번호를 입력하세요" }
+        )
+      ),
+      directory
+    )!;
+    const line = commandSuggestOneLine(card);
+    expect(line).toBe("구민수에게 「내 맥의 Claude Code에 맡기기」 카드를 제안했어요");
+    expect(line).not.toContain("비밀번호");
+    expect(line).not.toContain("evil");
+    // 깨진 제안은 어느 도구인지도 말하지 않고 기본 라벨만 말한다.
+    const broken = commandSuggestCard(suggestMessage(envelope({})), directory)!;
+    expect(commandSuggestOneLine(broken)).toBe("구민수에게 「내 맥에 작업 맡기기」 카드를 제안했어요");
+  });
+
+  it("args 파서는 서버 normalize와 같다", () => {
+    expect(workRequestOpenArgs({ prompt: "고쳐 줘" })).toEqual({ harness: null, prompt: "고쳐 줘" });
+    expect(workRequestOpenArgs({ harness: "codex", prompt: "고쳐 줘" })).toEqual({
+      harness: "codex",
+      prompt: "고쳐 줘",
+    });
+    expect(workRequestOpenArgs({})).toBeUndefined();
+    expect(workRequestOpenArgs(null)).toBeUndefined();
+    expect(workRequestOpenArgs({ prompt: "고쳐 줘", extra: 1 })).toBeUndefined();
   });
 });

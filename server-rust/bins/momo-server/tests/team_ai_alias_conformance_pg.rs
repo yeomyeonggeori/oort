@@ -1454,17 +1454,24 @@ async fn b10_the_prompt_carries_the_current_display_name() {
         roster.helper_display_name, "oort 도우미",
         "the name it is created with"
     );
-    assert!(
-        team_ai::system_prompt(&roster, WebSearch::Available, &team_ai::TEAM_AI_ACTION_IDS)
-            .contains("네 이름: oort 도우미")
-    );
+    assert!(team_ai::system_prompt(
+        &roster,
+        WebSearch::Available,
+        &team_ai::TEAM_AI_ACTION_IDS,
+        &[]
+    )
+    .contains("네 이름: oort 도우미"));
 
     let (status, body) = h.rename_helper(helper, "별무리").await;
     assert_eq!(status, 200, "{body}");
     let roster = h.load_roster().await;
     assert_eq!(roster.helper_display_name, "별무리");
-    let prompt =
-        team_ai::system_prompt(&roster, WebSearch::Available, &team_ai::TEAM_AI_ACTION_IDS);
+    let prompt = team_ai::system_prompt(
+        &roster,
+        WebSearch::Available,
+        &team_ai::TEAM_AI_ACTION_IDS,
+        &[],
+    );
     assert!(prompt.contains("네 이름: 별무리"), "{prompt}");
     assert!(
         !prompt.contains("oort 도우미"),

@@ -13,11 +13,11 @@
 //!
 //! ## The table
 //!
-//! [`BUNDLES`] is the one place that says what each bundle owns. Today
-//! `workspace_admin` owns cards (the eleven of ADR-0201 증보 v2 F2) and `files` owns its one tool
-//! (`read_attachment`, #4970 S7); the others are empty slots, so a later slice (S2 invites, S4
-//! long work, S8 memory, S9 code) adds an id to its row and nothing else: the filters below read
-//! the table.
+//! [`BUNDLES`] is the one place that says what each bundle owns. `workspace_admin` owns the
+//! eleven cards of ADR-0201 증보 v2 F2, `files` owns its one tool (`read_attachment`, #4970 S7)
+//! and `code` owns the work-request card (`card_suggest`'s `work.request.open`, #4972 S9); the
+//! others are empty slots, so a later slice (S2 invites, S4 long work, S8 memory) adds an id to
+//! its row and nothing else: the filters below read the table.
 //! `team_ai.roles.set` itself belongs to **no** bundle — if it did, switching
 //! `workspace_admin` off would also remove the only chat path back on.
 //!
@@ -39,6 +39,7 @@ use crate::actions::{
     ACTION_WORKSPACE_MEMORY_UPDATE, ACTION_WORKSPACE_SETTINGS_UPDATE,
     ACTION_WORKSPACE_UNFURL_UPDATE, ACTION_WORKSPACE_WORK_TIER_UPDATE, TEAM_AI_ACTION_IDS,
 };
+use crate::card_suggest::{COMMAND_WORK_REQUEST_OPEN, TEAM_AI_SUGGESTABLE_COMMAND_IDS};
 
 /// The workspace settings key that holds the switches (an object of booleans).
 pub const SETTINGS_KEY: &str = "team_ai_roles";
@@ -92,6 +93,13 @@ pub struct RoleBundle {
     /// Other tools this bundle owns (a later slice's `task_continue`, `read_attachment`,
     /// `search_memory`, …). Dropped from the request's tool list while the bundle is off.
     pub tool_names: &'static [&'static str],
+    /// `card_suggest` command ids this bundle owns (ADR-0201 v3 B8 C1: `code` owns
+    /// `work.request.open`). The helper's `card_suggest` is one tool that carries several
+    /// commands, so the wall is per **command**, not per tool name: while the bundle is off its
+    /// ids are not on the tool's `commandId` enum, have no sentence in the prompt, and a suggestion
+    /// that names one is refused — and a bundle going off never takes a command it does not own
+    /// (`settings.open`, if the helper gets it, belongs to no bundle) down with it.
+    pub command_ids: &'static [&'static str],
     /// Turning the bundle **on** sends this kind of content to the team's AI provider (B3
     /// 고지). The card that turns it on shows this line, and approving it is the consent.
     pub notice: Option<&'static str>,
@@ -116,6 +124,7 @@ pub const BUNDLES: [RoleBundle; 6] = [
             ACTION_MEMBER_DISPLAY_NAME_SET,
         ],
         tool_names: &[],
+        command_ids: &[],
         notice: None,
     },
     // S2 puts these two on `TEAM_AI_ACTION_IDS`; mapping them now means that edit is the only one.
@@ -124,6 +133,7 @@ pub const BUNDLES: [RoleBundle; 6] = [
         label: "초대·권한",
         action_ids: &[ACTION_INVITE_CREATE, ACTION_AGENT_INVITE],
         tool_names: &[],
+        command_ids: &[],
         notice: None,
     },
     RoleBundle {
@@ -131,6 +141,7 @@ pub const BUNDLES: [RoleBundle; 6] = [
         label: "긴 조사",
         action_ids: &[],
         tool_names: &[],
+        command_ids: &[],
         notice: None,
     },
     RoleBundle {
@@ -138,6 +149,7 @@ pub const BUNDLES: [RoleBundle; 6] = [
         label: "파일",
         action_ids: &[],
         tool_names: &[TOOL_READ_ATTACHMENT],
+        command_ids: &[],
         notice: Some(NOTICE_FILES),
     },
     RoleBundle {
@@ -145,6 +157,7 @@ pub const BUNDLES: [RoleBundle; 6] = [
         label: "기억",
         action_ids: &[],
         tool_names: &[],
+        command_ids: &[],
         notice: Some(NOTICE_MEMORY),
     },
     RoleBundle {
@@ -152,6 +165,9 @@ pub const BUNDLES: [RoleBundle; 6] = [
         label: "코드",
         action_ids: &[],
         tool_names: &[],
+        // #4972 (S9): the one card the helper gives for coding work — it opens the person's own
+        // 「작업 요청」 sheet, filled in. The box (S10, ADR-0210 증보) is a later tool.
+        command_ids: &[COMMAND_WORK_REQUEST_OPEN],
         notice: None,
     },
 ];
@@ -173,6 +189,13 @@ pub fn bundle_of_action(action_id: &str) -> Option<&'static RoleBundle> {
     BUNDLES
         .iter()
         .find(|bundle| bundle.action_ids.contains(&action_id))
+}
+
+/// The bundle that owns this `card_suggest` command id, or `None` for a command no bundle owns.
+pub fn bundle_of_command(command_id: &str) -> Option<&'static RoleBundle> {
+    BUNDLES
+        .iter()
+        .find(|bundle| bundle.command_ids.contains(&command_id))
 }
 
 /// Is this id one the oort 도우미 may not propose once it has read something?
@@ -278,6 +301,28 @@ impl TeamAiRoles {
             .collect()
     }
 
+    /// May the helper's `card_suggest` name this command right now? A command no bundle owns is
+    /// not bundle-gated (the helper allow-list, [`TEAM_AI_SUGGESTABLE_COMMAND_IDS`], is a separate
+    /// check).
+    pub fn command_allowed(&self, command_id: &str) -> bool {
+        match bundle_of_command(command_id) {
+            Some(bundle) => self.is_on(bundle.id),
+            None => true,
+        }
+    }
+
+    /// The `commandId`s the helper's `card_suggest` may be offered: the helper allow-list minus the
+    /// ids of every bundle that is off. Empty means the tool is not offered at all. **The one
+    /// function the tool schema, the system prompt and the suggestion check all read**, like
+    /// [`Self::advertised_action_ids`] for the proposal tool, so they cannot disagree.
+    pub fn advertised_command_ids(&self) -> Vec<&'static str> {
+        TEAM_AI_SUGGESTABLE_COMMAND_IDS
+            .iter()
+            .copied()
+            .filter(|id| self.command_allowed(id))
+            .collect()
+    }
+
     /// The bundle ids that are off, in table order.
     pub fn off_bundles(&self) -> Vec<&'static str> {
         BUNDLES
@@ -306,6 +351,18 @@ pub fn unknown_tool_names<'a>(table: &'a [RoleBundle], known: &[&str]) -> Vec<&'
         .iter()
         .flat_map(|bundle| bundle.tool_names.iter().copied())
         .filter(|name| !known.contains(name))
+        .collect()
+}
+
+/// The command ids in `table` that are not on the helper allow-list
+/// ([`TEAM_AI_SUGGESTABLE_COMMAND_IDS`]). Same reason as [`unknown_tool_names`]: an id nobody
+/// offers is a bundle that filters nothing, so a misspelling must fail a test instead of reading
+/// as "no such command is offered".
+pub fn unknown_command_ids(table: &[RoleBundle]) -> Vec<&'static str> {
+    table
+        .iter()
+        .flat_map(|bundle| bundle.command_ids.iter().copied())
+        .filter(|id| !TEAM_AI_SUGGESTABLE_COMMAND_IDS.contains(id))
         .collect()
 }
 
@@ -500,6 +557,55 @@ mod tests {
             Some(WORKSPACE_ADMIN)
         );
         assert!(bundle_of_action(ACTION_TEAM_AI_ROLES_SET).is_none());
+    }
+
+    /// #4972 (S9): the `code` bundle owns the work-request card, and nothing but `code` gates it.
+    #[test]
+    fn the_work_request_card_follows_the_code_bundle_alone() {
+        assert_eq!(
+            TeamAiRoles::default().advertised_command_ids(),
+            [COMMAND_WORK_REQUEST_OPEN]
+        );
+        assert!(off(&[CODE]).advertised_command_ids().is_empty());
+        assert!(!off(&[CODE]).command_allowed(COMMAND_WORK_REQUEST_OPEN));
+        // Every other bundle off changes nothing for it.
+        let others = off(&[WORKSPACE_ADMIN, INVITE_ACCESS, LONG_RESEARCH, FILES, MEMORY]);
+        assert_eq!(others.advertised_command_ids(), [COMMAND_WORK_REQUEST_OPEN]);
+        assert_eq!(
+            bundle_of_command(COMMAND_WORK_REQUEST_OPEN).map(|bundle| bundle.id),
+            Some(CODE)
+        );
+        // Unreadable settings never read as "on".
+        assert!(TeamAiRoles::none_on().advertised_command_ids().is_empty());
+        // A command the helper does not give is not advertised, bundle on or off; a command no
+        // bundle owns is not bundle-gated (the allow-list is the separate check).
+        assert!(!TeamAiRoles::default()
+            .advertised_command_ids()
+            .contains(&"settings.open"));
+        assert!(bundle_of_command("settings.open").is_none());
+        assert!(TeamAiRoles::none_on().command_allowed("settings.open"));
+    }
+
+    /// A bundle that names a command nobody offers filters nothing: the table must not carry one,
+    /// and a misspelling must be found rather than read as "no such command is offered".
+    #[test]
+    fn every_bundle_command_id_is_one_the_helper_allow_list_carries() {
+        assert!(unknown_command_ids(&BUNDLES).is_empty());
+        let misspelt = [RoleBundle {
+            id: CODE,
+            label: "코드",
+            action_ids: &[],
+            tool_names: &[],
+            command_ids: &["work.request.opn"],
+            notice: None,
+        }];
+        assert_eq!(unknown_command_ids(&misspelt), ["work.request.opn"]);
+        for id in TEAM_AI_SUGGESTABLE_COMMAND_IDS {
+            assert!(
+                crate::card_suggest::suggestable_command(id).is_some(),
+                "{id} is on the helper list but not on the server allow-list"
+            );
+        }
     }
 
     /// The seam later slices fill: a tool a bundle owns is dropped while the bundle is off and a

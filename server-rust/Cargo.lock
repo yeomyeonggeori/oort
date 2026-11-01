@@ -1841,6 +1841,7 @@ dependencies = [
  "momo-expressions",
  "momo-messaging",
  "momo-outbox",
+ "momo-wire",
  "serde_json",
  "sqlx",
  "thiserror 1.0.69",

@@ -99,18 +99,19 @@ pub mod workspace_avatar;
 pub use approval_card::settle_approval_card_in_tx;
 
 pub use agent_avatar::{
-    apply_avatar_image_in_tx, apply_human_avatar_image_in_tx, bind_staged_image_to_approval_in_tx,
-    clear_avatar_image_in_tx, delete_staged_avatar_image_in_tx,
-    find_requester_attachment_for_in_tx, find_requester_attachment_in_tx,
-    find_visible_image_attachment_in_tx, image_attachments_for_messages_in_tx, is_avatar_preset,
-    process_avatar_image, purge_stale_staged_avatar_images_in_tx, read_avatar_image_bytes_in_tx,
-    read_avatar_image_in_tx, read_current_avatar_image_in_tx, requester_of_run_in_tx,
-    stage_avatar_image_in_tx, staged_image_matches_pin_in_tx, AgentAvatarBytes, AgentAvatarImage,
-    AvatarAttachmentSource, AvatarImageRejected, ProcessedAvatar, RequesterAttachmentUse,
-    AGENT_AVATAR_DECODE_ALLOC_LIMIT, AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT,
-    AGENT_AVATAR_IN_MAX_BYTES_GENERATED, AGENT_AVATAR_IN_MAX_DIM, AGENT_AVATAR_IN_MAX_PIXELS,
-    AGENT_AVATAR_OUT_MAX_BYTES, AGENT_AVATAR_OUT_MAX_DIM, AGENT_AVATAR_PRESETS,
-    AGENT_AVATAR_SOURCES, AGENT_AVATAR_STAGED_TTL_HOURS,
+    apply_avatar_image_in_tx, apply_human_avatar_image_in_tx, attachments_for_messages_in_tx,
+    bind_staged_image_to_approval_in_tx, clear_avatar_image_in_tx,
+    delete_staged_avatar_image_in_tx, find_requester_attachment_for_in_tx,
+    find_requester_attachment_in_tx, find_visible_image_attachment_in_tx,
+    image_attachments_for_messages_in_tx, is_avatar_preset, process_avatar_image,
+    purge_stale_staged_avatar_images_in_tx, read_avatar_image_bytes_in_tx, read_avatar_image_in_tx,
+    read_current_avatar_image_in_tx, requester_of_run_in_tx, stage_avatar_image_in_tx,
+    staged_image_matches_pin_in_tx, AgentAvatarBytes, AgentAvatarImage, AvatarAttachmentSource,
+    AvatarImageRejected, ProcessedAvatar, RequesterAttachmentUse, AGENT_AVATAR_DECODE_ALLOC_LIMIT,
+    AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT, AGENT_AVATAR_IN_MAX_BYTES_GENERATED,
+    AGENT_AVATAR_IN_MAX_DIM, AGENT_AVATAR_IN_MAX_PIXELS, AGENT_AVATAR_OUT_MAX_BYTES,
+    AGENT_AVATAR_OUT_MAX_DIM, AGENT_AVATAR_PRESETS, AGENT_AVATAR_SOURCES,
+    AGENT_AVATAR_STAGED_TTL_HOURS,
 };
 pub use agent_card::{
     apply_agent_card_in_tx, lock_agent_card_in_tx, read_agent_card_in_tx, AgentCard,

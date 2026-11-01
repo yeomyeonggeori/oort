@@ -46,12 +46,15 @@ use momo_workspace_actions::team_ai::{
     self, FallbackReason, ProposalContext, ProposalRefusal, TeamAiWorkspace, ViaAi, WebSearch,
 };
 use momo_workspace_actions::team_ai_attachments as team_ai_files;
+use momo_workspace_actions::team_ai_limits::{self, LimitHit, Usage};
 use momo_workspace_actions::team_ai_tools::{self, ToolOutcome};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::payload::AgentJobPayload;
-use crate::provider::{ChatMessage, ChatRequest, ChatUsage, ModelImage, ProviderWire};
+use crate::provider::{
+    ChatMessage, ChatRequest, ChatUsage, ModelImage, ProviderToolCall, ProviderWire,
+};
 use crate::{emit_terminal_agent_status, AgentWorker, ResolvedTransport, Settlement};
 
 /// What the first read of a team-AI turn found.
@@ -60,6 +63,9 @@ struct Gathered {
     requester: Option<momo_agent::card_suggest::SuggestionRequester>,
     trigger_text: String,
     used_today: i64,
+    /// This month's list-price spend in micro-dollars — read only when the workspace set a monthly
+    /// dollar limit (B9), otherwise `0` and never queried.
+    month_micro_usd: i64,
     roster: team_ai::Roster,
     candidates: Vec<(Uuid, String, String)>,
     recent_requests: i64,
@@ -80,6 +86,10 @@ struct TurnTrace {
     /// The registry id of a card the helper refused to raise (a bundle that is off, a card after
     /// a read). It comes from the registry's own `&'static str`, never from the model's text.
     refused_action: Option<&'static str>,
+    /// The `card_suggest` command id of the card this turn ended with (`work.request.open`): the
+    /// registry's `&'static str`, so a count of suggestions needs no text. **Never the prompt**
+    /// the card carries, and never the card's label or body (H9-I10).
+    suggested_command: Option<&'static str>,
 }
 
 impl TurnTrace {
@@ -100,6 +110,9 @@ impl TurnTrace {
         if let Some(action) = self.refused_action {
             detail["refused_action"] = json!(action);
         }
+        if let Some(command) = self.suggested_command {
+            detail["suggested_command"] = json!(command);
+        }
         detail
     }
 }
@@ -115,6 +128,8 @@ fn wire_searches(wire: ProviderWire) -> bool {
 /// code and nothing else, so refusals can be counted.
 const OUTCOME_REFUSED_ROLE_OFF: &str = "refused_role_off";
 const OUTCOME_REFUSED_AFTER_READ: &str = "refused_after_read";
+/// `team_ai.turn`'s `outcome` for a turn that ended with a `card_suggest` card (B8 C1, #4972).
+const OUTCOME_SUGGESTED_CARD: &str = "suggested_card";
 
 /// How a settled team-AI turn ends the run.
 enum Ending {
@@ -123,6 +138,12 @@ enum Ending {
     /// A reply was posted and the run succeeded, and the reply is a refusal of the card the model
     /// proposed: the audit row's `outcome` is this reason code.
     Refused(&'static str),
+    /// A reply was posted with a `card_suggest` card — the payload is the command's registry id
+    /// (`work.request.open`) — and the run succeeded. **The finishing transaction judges the card
+    /// once more** against the role switches as they are by then (B13-I5, the wall a suggestion has
+    /// in place of the proposal transaction's): a bundle switched off while the model thought
+    /// turns the card into the refusal sentence, and the audit row says so.
+    Suggested(&'static str),
     /// The run ends as a hand-off / refusal (`failed` with a code), nothing else to do.
     Closed(&'static str),
 }
@@ -163,6 +184,14 @@ impl AgentWorker {
                 };
                 let used_today =
                     team_ai::tokens_used_today_in_tx(conn, workspace_id, agent).await?;
+                let month_micro_usd = team_ai_limits::month_spend_if_limited_in_tx(
+                    conn,
+                    workspace_id,
+                    agent,
+                    &state.limits,
+                )
+                .await?
+                .cost_micro_usd;
                 let (roster, candidates) = match &requester {
                     Some(requester) => (
                         team_ai::load_roster_in_tx(
@@ -198,6 +227,7 @@ impl AgentWorker {
                     requester,
                     trigger_text,
                     used_today,
+                    month_micro_usd,
                     roster,
                     candidates,
                 }))
@@ -236,18 +266,23 @@ impl AgentWorker {
                     .await,
             );
         };
-        let cap = self.config.team_ai_daily_token_cap;
-        if gathered.used_today >= cap {
+        // ADR-0201 증보 v3 B9 (#4944): BYOK — the team decides. With no limit set and no operator
+        // ceiling nothing here ever stops a turn; the limits are judged BEFORE the model is asked,
+        // so a limit that is hit means zero model calls.
+        let caps = self.config.team_ai_caps();
+        let usage = Usage {
+            tokens_today: gathered.used_today,
+            month_micro_usd: gathered.month_micro_usd,
+        };
+        if let Some(hit) = team_ai_limits::judge(&gathered.state.limits, &caps, &usage) {
             return Some(
-                self.team_ai_fallback(
+                self.team_ai_limit_reached(
                     job,
                     payload,
                     run_id,
                     &requester,
                     &gathered.candidates,
-                    FallbackReason::OverBudget,
-                    None,
-                    "",
+                    hit,
                 )
                 .await,
             );
@@ -296,7 +331,9 @@ impl AgentWorker {
             WebSearch::Off
         } else if !wire_searches(wire) {
             WebSearch::NotSupported
-        } else if gathered.searches_today >= self.config.team_ai_daily_search_cap {
+        } else if team_ai_limits::search_cap(&gathered.state.limits, &caps)
+            .is_some_and(|cap| gathered.searches_today >= cap)
+        {
             WebSearch::DailyCapReached
         } else {
             WebSearch::Available
@@ -315,11 +352,15 @@ impl AgentWorker {
         // never touches it). What changes after a read is the tool's enum, below — and the prompt
         // already says the sensitive card leaves it.
         let roles = gathered.state.roles;
+        // B8 C1: the `card_suggest` commands this request is offered (`code` on = the work-request
+        // card). The tool, the prompt and the check on what the model names all read this one list.
+        let card_commands = roles.advertised_command_ids();
         let mut messages = vec![
             ChatMessage::system(team_ai::system_prompt_for(
                 &gathered.roster,
                 web,
                 &roles.advertised_action_ids(false),
+                &card_commands,
                 roles.is_on(momo_agent::team_ai_roles::FILES),
             )),
             ChatMessage::user(team_ai::user_turn(&gathered.trigger_text)),
@@ -332,6 +373,7 @@ impl AgentWorker {
         let started = Instant::now();
         let deadline = self.config.team_ai_request_deadline;
 
+        let mut card_call: Option<ProviderToolCall> = None;
         let (completion, call) = loop {
             let elapsed = started.elapsed();
             if trace.model_calls as usize >= team_ai::MAX_MODEL_CALLS || elapsed >= deadline {
@@ -366,6 +408,10 @@ impl AgentWorker {
             if trace.tools.len() < team_ai::MAX_TOOL_CALLS {
                 momo_tools.extend(team_ai_tools::read_tool_definitions());
             }
+            // B8 C1: the work-request card, offered only while a bundle that owns it is on. Not
+            // behind the taint rule (B4-3): it changes no server state and a person sends what it
+            // fills in, so a request that read something may still give it.
+            momo_tools.extend(momo_agent::tools::card_suggest_definition(&card_commands));
             // The seam later slices fill: a tool a bundle owns leaves with it.
             momo_tools.retain(|tool| roles.tool_allowed(tool.name));
             let mut tools: Vec<Value> = Vec::new();
@@ -462,6 +508,16 @@ impl AgentWorker {
             }) {
                 let propose = propose.clone();
                 break (completion, Some(propose));
+            }
+            // B8 C1: a `card_suggest` card ends the request the same way (a proposal in the same
+            // call wins, above). Whether it was offered, and whether it is legal, is judged after
+            // the loop, once, by `team_ai_card`.
+            if let Some(card) = completion.tool_calls.iter().find(|call| {
+                momo_agent::tools::normalize(&call.name)
+                    == momo_agent::tools::normalize(momo_agent::tools::CARD_SUGGEST)
+            }) {
+                card_call = Some(card.clone());
+                break (completion, None);
             }
             // Anything that is neither a read nor the proposal is the model going
             // off script.
@@ -568,6 +624,24 @@ impl AgentWorker {
         };
         trace.latency_ms = millis(started);
         let latency_ms = trace.latency_ms;
+
+        if let Some(card) = card_call {
+            return Some(
+                self.team_ai_card(
+                    job,
+                    payload,
+                    run_id,
+                    &requester,
+                    &gathered.candidates,
+                    &card,
+                    &card_commands,
+                    spend,
+                    &model,
+                    &trace,
+                )
+                .await,
+            );
+        }
 
         let Some(call) = call else {
             // A plain answer. Bounded, posted as one message.
@@ -876,6 +950,96 @@ impl AgentWorker {
         .await
     }
 
+    /// The helper's `card_suggest` (ADR-0201 증보 v3 B8 C1, #4972): judge what the model named
+    /// against what this request **offered**, then post the card as the turn's one message.
+    ///
+    /// * a command of a bundle that was off when the request began was not on the tool's enum, so
+    ///   the model named one it was not shown: the same refusal sentence as a card of an off
+    ///   bundle, before anything else;
+    /// * anything else illegal (a command the helper never gives, an argument the normaliser
+    ///   refuses — the prompt included) is the model failing to build a card: the hand-off line;
+    /// * a legal card goes through [`Self::team_ai_finish`], whose transaction reads the switches
+    ///   once more ([`Ending::Suggested`]) and posts `command_suggest_props` — five server-built
+    ///   keys, `for_member_id` the run's requester — with the model's one sentence as the body.
+    ///
+    /// No approval row and no `action.*` audit row are written: a suggestion is a message. The
+    /// turn's own `team_ai.turn` row carries the command id, never the prompt (H9-I10).
+    #[allow(clippy::too_many_arguments)]
+    async fn team_ai_card(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        requester: &momo_agent::card_suggest::SuggestionRequester,
+        candidates: &[(Uuid, String, String)],
+        call: &ProviderToolCall,
+        offered: &[&'static str],
+        usage: Option<Spend>,
+        model: &str,
+        trace: &TurnTrace,
+    ) -> Settlement {
+        use momo_agent::card_suggest::{
+            command_suggest_props, validate_suggestion_among, TEAM_AI_SUGGESTABLE_COMMAND_IDS,
+        };
+        let arguments = call.arguments_json();
+        // The helper-list command the model named, as the registry spells it (`None` for any
+        // other id or a missing one — never the model's own string).
+        let named: Option<&'static str> = arguments
+            .get("commandId")
+            .and_then(Value::as_str)
+            .and_then(|id| {
+                TEAM_AI_SUGGESTABLE_COMMAND_IDS
+                    .iter()
+                    .copied()
+                    .find(|command| *command == id)
+            });
+        if let Some(command) = named.filter(|command| !offered.contains(command)) {
+            return self
+                .team_ai_refused(
+                    job,
+                    payload,
+                    run_id,
+                    team_ai::ROLE_OFF_SENTENCE,
+                    usage,
+                    model,
+                    OUTCOME_REFUSED_ROLE_OFF,
+                    trace,
+                    Some(command),
+                )
+                .await;
+        }
+        let suggestion = match validate_suggestion_among(&arguments, &[], Some(offered)) {
+            Ok(suggestion) => suggestion,
+            Err(_) => {
+                let reason = if named.is_some() {
+                    FallbackReason::CouldNotPropose
+                } else {
+                    FallbackReason::OutOfScope
+                };
+                return self
+                    .team_ai_fallback_traced(
+                        job, payload, run_id, requester, candidates, reason, usage, trace,
+                    )
+                    .await;
+            }
+        };
+        let mut trace = trace.clone();
+        trace.suggested_command = Some(suggestion.command_id);
+        let props = command_suggest_props(&suggestion, requester.member_id);
+        self.team_ai_finish(
+            job,
+            payload,
+            run_id,
+            Some(suggestion.body.clone()),
+            props,
+            usage,
+            model,
+            Ending::Suggested(suggestion.command_id),
+            Some(trace),
+        )
+        .await
+    }
+
     /// End the run without posting anything (switch off, no human asked).
     async fn team_ai_close(
         &self,
@@ -927,6 +1091,39 @@ impl AgentWorker {
             usage,
             model,
             Ending::Closed(reason.as_str()),
+            None,
+        )
+        .await
+    }
+
+    /// A usage limit was hit before the model was asked (B9): one honest sentence that says whose
+    /// limit it was, the ordinary 「맡기기」 buttons (D5), and no model call. The reason stays
+    /// `over_budget` — a code every client knows — and `props.limit` adds the source and window.
+    async fn team_ai_limit_reached(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        requester: &momo_agent::card_suggest::SuggestionRequester,
+        candidates: &[(Uuid, String, String)],
+        hit: LimitHit,
+    ) -> Settlement {
+        let props = team_ai_limits::limit_fallback_props(
+            hit,
+            payload.agent_member_id,
+            requester.member_id,
+            payload.trigger_message_id,
+            candidates,
+        );
+        self.team_ai_finish(
+            job,
+            payload,
+            run_id,
+            Some(hit.sentence().to_string()),
+            props,
+            None,
+            "",
+            Ending::Closed(FallbackReason::OverBudget.as_str()),
             None,
         )
         .await
@@ -988,9 +1185,16 @@ impl AgentWorker {
         let channel_id = payload.channel_id;
         let model = model.to_string();
         let ledger = usage.map(|usage| ledger_report(Some(usage), &model, payload));
+        // B13-I5 for a suggestion: the command the card names, so the transaction below can judge
+        // it against the switches as they are when it commits.
+        let suggested_command: Option<&'static str> = match &ending {
+            Ending::Suggested(command) => Some(*command),
+            _ => None,
+        };
         let (succeeded, error_code, outcome) = match ending {
             Ending::Answered => (true, None, "answered"),
             Ending::Refused(reason) => (true, None, reason),
+            Ending::Suggested(_) => (true, None, OUTCOME_SUGGESTED_CARD),
             Ending::Closed(code) => (false, Some(code), code),
         };
         // H2-8 / H9-I9: whoever answers to `@claude`, the line says which model on
@@ -1002,6 +1206,15 @@ impl AgentWorker {
         let audit_detail = trace
             .as_ref()
             .map(|trace| trace.audit_detail(usage, outcome));
+        // What the audit row says instead when the card is refused in the transaction.
+        let refused_audit_detail = suggested_command.and_then(|command| {
+            trace.as_ref().map(|trace| {
+                let mut trace = trace.clone();
+                trace.suggested_command = None;
+                trace.refused_action = Some(command);
+                trace.audit_detail(usage, OUTCOME_REFUSED_ROLE_OFF)
+            })
+        });
         let searches = trace.as_ref().map(|trace| trace.web_searches).unwrap_or(0);
         // Workspace data or web text reached the model in this request: the answer
         // must not make the server fetch a URL the model was steered into writing.
@@ -1010,7 +1223,8 @@ impl AgentWorker {
             .is_some_and(|trace| !trace.tools.is_empty() || trace.web_searches > 0);
         let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             let label = label.clone();
-            let audit_detail = audit_detail.clone();
+            let mut audit_detail = audit_detail.clone();
+            let refused_audit_detail = refused_audit_detail.clone();
             let body = body.clone();
             let props = props.clone();
             let ledger = ledger.clone();
@@ -1023,6 +1237,22 @@ impl AgentWorker {
                 if snapshot.status == RunStatus::Cancelled {
                     return Ok(false);
                 }
+                // A suggestion is judged against the switches **as they are now**: the bundle that
+                // owns the command was on when the request began and may have been switched off
+                // while the model thought. Then the person gets the refusal sentence, not the
+                // card, and the audit row says `refused_role_off` with the command's id.
+                let (body, props) = match suggested_command {
+                    Some(command) => {
+                        let roles = team_ai::read_roles_in_tx(conn, workspace_id).await?;
+                        if roles.command_allowed(command) {
+                            (body, props)
+                        } else {
+                            audit_detail = refused_audit_detail;
+                            (Some(team_ai::ROLE_OFF_SENTENCE.to_string()), json!({}))
+                        }
+                    }
+                    None => (body, props),
+                };
                 let mut message_id: Option<Uuid> = None;
                 if let Some(text) = body {
                     let mut props = if props.is_object() { props } else { json!({}) };
