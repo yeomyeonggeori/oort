@@ -12,8 +12,12 @@
 //               아니므로 role="status"여야 한다(role="alert" + --danger면 실패).
 //   absent      목록이 본문 없는 404. 아직 배포되지 않은 서버의 답이고, 장애가 아니라
 //               미제공으로 접혀야 한다.
-//   error       목록이 500. 이건 진짜 장애라 오류 배너 + [다시 시도]가 서야 한다.
+//   error       승인 원장만 500(서버 투영은 정상·빈 배열, #5092 D2). 진짜 장애라 「비어 있어요」가 아니라
+//               오류 배너 + [다시 시도]가 서야 하고(전체·처리할 일 탭 모두), 원장이 다시 답하면 줄이 선다.
+//   projection-error  서버 투영이 500, 승인 원장은 정상. 인박스의 원천이 답하지 못한 장애다.
 //   empty       목록이 200 + 빈 배열. 조용한 인박스는 설계가 작동한 모습이다.
+//   loading     승인 원장만 늦게 답한다(서버 투영은 즉시, #5092 D3). 원장을 기다리는 동안은 「비어 있어요」가
+//               아니라 로딩 막대여야 한다.
 //   spawn       ADR-0125 D6-A 호스트 선택기 (이슈 1114). 스폰 승인 한 건이 후보 넷을
 //               싣고 온다: 자격 둘 + 오프라인 하나 + T3 예약 하나. 자격 없는 둘은
 //               **숨지 않고** 사유와 함께 서고, 라디오는 눌리지 않으며, 그 id는
@@ -23,6 +27,10 @@
 //               않았다**. 영수증이 아니라 오류로 그려져야 하고 픽커는 남아야 한다.
 //   spawn-blocked    자격 있는 후보가 0. 서버가 409로 답할 것을 결정 **전에**
 //               말한다: 승인 버튼이 실제로 불가용하고 그 옆에 이유가 선다.
+//
+// 결정한 승인(#5092 D1): 인박스 패널은 고른 줄의 스냅샷을 들고 있어서 원장이 그 행을 대기에서 뺀 뒤에도
+// 같은 승인이 패널에 남는다. 결정이 닿으면 승인·거부 컨트롤은 사라지고(두 번째 결정이 나갈 길이 없다)
+// 그 자리에 결정 결과가 서며, 초점은 사라진 버튼이 아니라 패널이 받는다. 원장이 다시 답한 뒤에도 같다.
 //
 // 결정 영수증은 **두 와이어를 함께 돌린다**(2R N2): 승인 갈래는 snake_case(Swift
 // 서버), 거부 갈래는 camelCase(Rust 서버). 한 표기만 검사하면 다른 표기 앞에서
@@ -81,6 +89,13 @@
 // 붉은 이음매는 전부 픽스처의 행동만 바꾼다. 제품 소스 줄을 지웠다 되돌리라고
 // 리뷰어에게 요구하지 않으므로 반복 실행할 수 있다. 반대로 **조건 분기를 부수는**
 // 쪽의 red proof는 src/features/inbox/approvalsPanel.test.ts가 갖는다.
+//
+// #5092가 더한 단정은 이음매가 없다: 결함이 서버가 아니라 화면에 있어서 픽스처로는 만들 수 없다.
+// 제품 소스를 되돌려야 하고, 각각 이름을 부르며 실패한다(증거는 PR 본문):
+//   InboxDetail이 결정한 승인임을 컨트롤 판정에 넘기는 줄(`settled: settledLine !== null`)을 지우면 "decided row control",
+//   결정이 닿을 때 패널로 초점을 옮기는 줄(`panelRef.current?.focus()`)을 지우면 "commit focus",
+//   useMailbox가 승인 원장의 오류를 접는 줄(`ledgerFailed`)을 지우면 "ledger error (전체)",
+//   승인 원장의 로딩을 접는 줄(`ledgerLoading`)을 지우면 "loading state".
 
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -408,7 +423,14 @@ async function installRealtimeSocket(page) {
  *                 헛초록으로 만든다.
  */
 async function installRoutes(context, scenario, delayMs) {
-  const state = { decisions: [], listCalls: 0, decidedIds: new Set() };
+  // `ledgerFails`: error 시나리오의 승인 원장이 지금 5xx로 답하는가. 테스트가 꺼서 「다시 시도」가 원장을
+  // 다시 읽는지 잰다.
+  const state = {
+    decisions: [],
+    listCalls: 0,
+    decidedIds: new Set(),
+    ledgerFails: scenario === "error",
+  };
 
   await context.route("**/v1/**", async (route) => {
     const request = route.request();
@@ -451,13 +473,11 @@ async function installRoutes(context, scenario, delayMs) {
     // 따로 합친다. 이 게이트가 재는 것은 승인이므로 투영은 비어 있다. 이 줄이 없으면 포괄 응답 `{}`가
     // 파싱에 실패해 인박스가 「불러오지 못했어요」로 서고 승인 행은 영영 그려지지 않는다(#5048).
     if (path.endsWith("/inbox")) {
-      // 로딩 시나리오는 **투영**을 붙든다: 서버 투영이 인박스의 원천이라 그 응답이 오기 전에만 로딩 막대가 선다
-      // (`useMailbox`의 `isLoading`은 투영만 센다). 승인 원장이 늦는 동안의 모습은 이 게이트가 잠그지 않는다 —
-      // 그 자리는 인박스가 「비어 있어요」라고 말하는 별도 결함이다(#5048 인계).
-      if (scenario === "loading") await wait(delayMs);
-      // 진짜 장애: 인박스의 원천(투영)이 5xx로 답하지 못한다. 승인 원장만 실패하는 경우는 인박스가 오류가 아니라
-      // 「비어 있어요」로 접는다 — 그 자리는 이 게이트가 잠그지 않는 별도 결함이다(#5048 인계).
-      if (scenario === "error") {
+      // 투영은 늘 즉시 답한다: 승인 원장만 늦거나 실패하는 갈래(`loading`·`error`)가 투영이 이미 답한 뒤에도
+      // 「비어 있어요」로 접히지 않는지를 잰다(#5092 D2·D3). 두 원천이 함께 붙들리면 이 단정은 승인 원장이 아니라
+      // 투영을 재게 된다.
+      // 진짜 장애: 인박스의 원천(투영)이 5xx로 답하지 못한다. 승인 원장은 정상이다.
+      if (scenario === "projection-error") {
         return json(route, { error: { message: "internal error" } }, 500);
       }
       return json(route, { items: [], nextCursor: null });
@@ -514,7 +534,7 @@ async function installRoutes(context, scenario, delayMs) {
       if (scenario === "absent") {
         return bodilessNotFound(route, proveRedAbsent ? 500 : 404);
       }
-      if (scenario === "error") {
+      if (scenario === "error" && state.ledgerFails) {
         return json(route, { error: { message: "internal error" } }, 500);
       }
       if (scenario === "empty") return json(route, { approvals: [] });
@@ -706,17 +726,27 @@ async function exerciseList(browser, delayMs) {
     throw new Error(`committed note: 계약을 넘어서는 약속을 했다 (${noteText})`);
   }
 
+  // #5092 D1: 컨트롤을 거두는 것은 서버의 영수증이지 목록의 재조회가 아니다 — 원장이 다시 답하기 **전에** 먼저 잰다.
+  await assertDecidedRowSettled(page, "right after the decision", "승인을 기록했어요");
+
   // 2R M6: 결정 뒤에 초점이 body로 떨어지면 키보드 사용자는 방금 일한 자리를 잃고 문서 맨 위에서 다시 Tab을
-  // 시작한다. 옛 판의 계약(착지는 목록 `ul`, ↓가 다음 `feed-row`로 이어진다)은 목록이 `ul` 로빙에서 메일함
-  // 목록으로 바뀌며 사라졌다(#5048). 남은 계약은 「초점이 문서 몸통으로 버려지지 않는다」이다.
+  // 시작한다. 눌린 버튼은 결과 줄로 바뀌며 사라지므로 초점은 패널이 받는다(#5092; 옛 판의 「목록 `ul`로 착지」는
+  // 목록이 메일함으로 바뀌며 사라졌다, #5048). 결과는 위의 상태 줄(role=status)이 한 번 읽어 주므로 초점은 결과
+  // 줄이 아니라 패널에 앉는다.
   const afterCommitFocus = await page.evaluate(() => {
     const active = document.activeElement;
-    return active === null || active === document.body
-      ? "body"
+    if (active === null || active === document.body) return "body";
+    return active.closest('[data-testid="inbox-detail"]') !== null
+      ? "panel"
       : (active.getAttribute("data-testid") ?? active.tagName);
   });
   if (afterCommitFocus === "body") {
     throw new Error("commit focus: 결정 뒤 초점이 문서 몸통으로 버려졌다");
+  }
+  if (afterCommitFocus !== "panel") {
+    throw new Error(
+      `commit focus: 결정 뒤 초점이 결정한 패널이 아니라 ${afterCommitFocus}에 있다`
+    );
   }
 
   // 결정 뒤에는 원장을 다시 읽는다. 행이 사라지는 것을 클라이언트가 흉내 내지
@@ -736,8 +766,37 @@ async function exerciseList(browser, delayMs) {
       `ledger refetch: 원장이 다시 답했는데 처리할 일 수가 1로 줄지 않았다 (${pendingAfter})`
     );
   }
+  // 원장이 결정된 행을 대기에서 뺀 뒤에도 패널은 그 승인의 스냅샷으로 남는다: 이때 컨트롤이 다시 서는 것이
+  // #5092가 고친 결함이다(탭 수는 2→1로 줄었는데 `inbox-approval-approve`가 그대로 섰다).
+  await assertDecidedRowSettled(page, "after the ledger answered again", "승인을 기록했어요");
 
   await context.close();
+}
+
+/**
+ * 결정한 승인의 패널 (#5092 D1).
+ *
+ * 인박스 패널은 고른 줄의 스냅샷을 들고 있어서 원장이 그 행을 대기에서 뺀 뒤에도 같은 승인이 남는다.
+ * 그 승인에 승인·거부가 다시 서면 이미 결정된 건에 두 번째 결정이 나간다(서버는 409). 그래서 컨트롤을
+ * **세는 것**이 이 단정이다: 결정 직후에도, 원장이 다시 답한 뒤에도 0이어야 하고 그 자리에 결과가 서야 한다.
+ */
+async function assertDecidedRowSettled(page, when, receipt) {
+  const buttons =
+    (await page.getByTestId("inbox-approval-approve").count()) +
+    (await page.getByTestId("inbox-approval-reject").count());
+  if (buttons !== 0) {
+    throw new Error(
+      `decided row control: 결정한 승인에 승인·거부 컨트롤이 ${buttons}개 남아 있다 (${when})`
+    );
+  }
+  const result = page.getByTestId("inbox-approval-settled");
+  const text =
+    (await result.count()) === 1 ? ((await result.textContent()) ?? "") : "";
+  if (!text.includes(receipt)) {
+    throw new Error(
+      `decided row result: 컨트롤 자리에 「${receipt}」가 서지 않았다 (${when}) ${JSON.stringify(text)}`
+    );
+  }
 }
 
 /**
@@ -796,6 +855,7 @@ async function exerciseReject(browser, delayMs) {
   ) {
     throw new Error(`reject receipt: 거부 영수증이 정본이 아니다 (${text})`);
   }
+  await assertDecidedRowSettled(page, "after the rejection", "거부를 기록했어요");
   // 계약 실측: 거부는 같은 트랜잭션에서 실행을 취소하지만 그 UPDATE는
   // `WHERE status='awaiting_approval'` 가드에 걸리면 조용히 빠진다. 무조건 참인
   // 것은 "재개되지 않는다"뿐이다.
@@ -1136,15 +1196,60 @@ async function exerciseAbsent(browser, delayMs) {
   await context.close();
 }
 
-/** 진짜 장애. 다시 시도할 일이므로 오류 배너와 [다시 시도]가 서야 한다. */
+/**
+ * 승인 원장만 5xx (#5092 D2). 서버 투영은 정상이고 비어 있다.
+ *
+ * 투영이 이미 답했다고 인박스가 비어 있는 것이 아니다: 처리할 일(승인)은 투영에 저장되지 않고 이 원장에서만
+ * 오므로, 원장이 답하지 못했는데 「조용한 게 정상이에요」라고 말하면 대기 중인 승인을 모르는 채 하는 말이다.
+ * 진짜 장애라 오류 배너와 [다시 시도]가 서야 하고, 다시 시도는 원장을 다시 읽어야 한다.
+ */
 async function exerciseError(browser, delayMs) {
-  const { context, page } = await newPage(browser, "error", delayMs, {
+  const { context, page, state } = await newPage(browser, "error", delayMs, {
     open: false,
   });
-  await waitForEither(page, "inbox-error", "inbox-unavailable", "error state");
+  // 전체 탭. 「비어 있어요」가 먼저 그려지면 그것이 곧 회귀다(원장 실패를 가린 것).
+  await waitForEither(page, "inbox-error", "inbox-empty", "ledger error (전체)");
   const role = await page.getByTestId("inbox-error").getAttribute("role");
   if (role !== "alert") {
-    throw new Error(`error state: 오류 배너가 alert이 아니다 (role=${role})`);
+    throw new Error(`ledger error: 오류 배너가 alert이 아니다 (role=${role})`);
+  }
+  // 「처리할 일」 탭: 그 탭의 내용은 이 원장 하나다. 「미제공」으로도 읽히면 안 된다(그건 404의 말이다).
+  await page.getByTestId("inbox-tab-task").click();
+  await waitForEither(page, "inbox-error", "inbox-empty", "ledger error (처리할 일)");
+  if ((await page.getByTestId("inbox-unavailable").count()) !== 0) {
+    throw new Error("ledger error: 5xx를 미제공(404의 말)으로 읽었다");
+  }
+
+  // 다시 시도는 원장을 다시 읽는다. 원장이 살아난 뒤 한 번 누르면 줄이 서야 한다.
+  const callsBefore = state.listCalls;
+  state.ledgerFails = false;
+  await page.getByTestId("inbox-error").getByRole("button").click();
+  await page.getByTestId("mailbox-row").first().waitFor({ timeout: 10_000 });
+  if ((await page.getByTestId("mailbox-row").count()) !== 2) {
+    throw new Error(
+      `ledger retry: 원장이 살아난 뒤 다시 시도했는데 대기 행 둘이 서지 않았다 (${await page.getByTestId("mailbox-row").count()})`
+    );
+  }
+  if ((await page.getByTestId("inbox-error").count()) !== 0) {
+    throw new Error("ledger retry: 줄이 섰는데 오류 배너가 남아 있다");
+  }
+  if (state.listCalls <= callsBefore) {
+    throw new Error(
+      `ledger retry: 다시 시도가 원장을 다시 읽지 않았다 (${callsBefore} -> ${state.listCalls})`
+    );
+  }
+  await context.close();
+}
+
+/** 서버 투영(인박스의 원천)이 5xx. 승인 원장이 멀쩡해도 인박스는 오류를 말한다. */
+async function exerciseProjectionError(browser, delayMs) {
+  const { context, page } = await newPage(browser, "projection-error", delayMs, {
+    open: false,
+  });
+  await waitForEither(page, "inbox-error", "inbox-unavailable", "projection error");
+  const role = await page.getByTestId("inbox-error").getAttribute("role");
+  if (role !== "alert") {
+    throw new Error(`projection error: 오류 배너가 alert이 아니다 (role=${role})`);
   }
   await context.close();
 }
@@ -1162,32 +1267,45 @@ async function exerciseEmpty(browser, delayMs) {
   await context.close();
 }
 
-/** 로딩은 첫 응답이 오기 전에만 서고, 높이를 지키는 중립 막대여야 한다. */
+/**
+ * 로딩은 첫 응답이 오기 전에만 서고, 높이를 지키는 중립 막대여야 한다.
+ *
+ * 늦는 것은 **승인 원장**이다(#5092 D3). 서버 투영은 즉시 비어 있다고 답하지만 처리할 일(승인)은 이 원장에서만
+ * 오므로, 원장을 기다리는 동안 「비어 있어요」를 말하면 대기 중인 승인을 모르는 채 하는 말이다.
+ */
 async function exerciseLoading(browser) {
-  // 로딩의 원천은 승인 원장이 아니라 서버 투영이다(`installRoutes`의 `loading`). 승인 원장은 앱이 뜰 때(사이드바
-  // 「나에게 필요한 일」 수) 이미 읽기 시작하므로 옛 900ms 창은 라우트가 열린 뒤 CDP 왕복만으로도 닫혔다 —
-  // 로딩 막대를 볼 수 있을 만큼 길게 잡는다(#5048).
-  const { context, page } = await newPage(browser, "loading", 3_000, {
+  // 승인 원장은 앱이 뜰 때(사이드바 「나에게 필요한 일」 수) 이미 읽기 시작하므로 옛 900ms 창은 라우트가 열린 뒤
+  // CDP 왕복만으로도 닫혔다 — 로딩 막대를 볼 수 있을 만큼 길게 잡는다(#5048).
+  const { context, page } = await newPage(browser, "loading", 4_000, {
     open: false,
   });
   // 인박스 안으로 한정한다. 사이드바 채널 섹션의 끝난 스켈레톤(숨은 막대)이 문서 앞에 남아 있어 페이지 전체의
-  // `.first()`는 영영 보이지 않을 그 요소를 기다린다(#5048).
-  const skeletonRows = page.locator(
-    '[data-testid="inbox-route"] [data-testid="skeleton-row"]'
+  // `.first()`는 영영 보이지 않을 그 요소를 기다린다(#5048). 끝난 스켈레톤의 막대는 DOM에 숨은 채 남는다
+  // (`is-settled`): 사람이 보는 것은 보이는 막대뿐이다.
+  const visibleBars = page.locator(
+    '[data-testid="inbox-route"] [data-testid="skeleton-row"]:visible'
   );
-  await skeletonRows.first().waitFor({ timeout: 10_000 });
+  // 막대를 기다리다 「비어 있어요」가 먼저 그려지면 그것이 곧 회귀다: 타임아웃이 아니라 이름으로 실패한다.
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    if ((await visibleBars.count()) > 0) break;
+    if ((await page.getByTestId("inbox-empty").count()) > 0) {
+      throw new Error(
+        "loading state: 승인 원장의 응답을 기다리는 동안 「비어 있어요」라고 말했다"
+      );
+    }
+    if (Date.now() > deadline) {
+      throw new Error("loading state: 로딩 막대가 10초 안에 보이지 않았다");
+    }
+    await wait(100);
+  }
   if ((await page.getByTestId("inbox-empty").count()) !== 0) {
     throw new Error(
       "loading state: 응답을 기다리는 동안 '결정할 일이 없습니다'라고 말했다"
     );
   }
   await page.getByTestId("inbox-list").waitFor({ timeout: 10_000 });
-  // 끝난 스켈레톤의 막대는 DOM에 숨은 채 남는다(`is-settled`). 사람이 보는 것은 보이는 막대뿐이다.
-  if (
-    (await page
-      .locator('[data-testid="inbox-route"] [data-testid="skeleton-row"]:visible')
-      .count()) !== 0
-  ) {
+  if ((await visibleBars.count()) !== 0) {
     throw new Error("loading state: 목록이 온 뒤에도 스켈레톤이 보인다");
   }
   await context.close();
@@ -1222,6 +1340,7 @@ async function main() {
       await exerciseSuperseded(browser, 120);
       await exerciseAbsent(browser, 60);
       await exerciseError(browser, 60);
+      await exerciseProjectionError(browser, 60);
       await exerciseEmpty(browser, 60);
     } finally {
       await browser.close();
@@ -1230,13 +1349,19 @@ async function main() {
     await server.stop();
   }
   console.log(
-    "GATE PASS: 처리할 일 탭 · 연 대기 행에만 결정 컨트롤 · 한 번에 결정(확정 단계 없음)과 초점 유지 ·"
+    "GATE PASS: 처리할 일 탭 · 연 대기 행에만 결정 컨트롤 · 한 번에 결정(확정 단계 없음) ·"
+  );
+  console.log(
+    "           결정한 승인은 컨트롤이 사라지고 결과가 서며 초점은 패널이 받는다(원장 재조회 뒤에도) ·"
   );
   console.log(
     "           900x600 뷰포트 안 · 결정 왕복과 원장 재조회 · 이미 결정됨은 상태 전이 ·"
   );
   console.log(
-    "           미제공/장애/빈/로딩 네 갈래가 세 가지 응답 지연에서 갈라진 채로 남았다."
+    "           미제공/장애/빈/로딩 갈래가 갈라진 채로 남았다: 원장만 실패하거나 늦어도 「비어 있어요」가"
+  );
+  console.log(
+    "           아니라 오류+다시 시도 / 로딩 막대 · 투영 장애도 오류."
   );
   console.log(
     "           호스트 선택기: 자격 없는 둘이 사유와 함께 서고 눌리지 않는다 ·"

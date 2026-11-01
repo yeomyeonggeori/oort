@@ -2,7 +2,7 @@ import { actorToken } from "@momo/core/features/inbox/model";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Check } from "lucide-react";
 import {
   fetchMessages,
   fetchThreadReplies,
@@ -31,8 +31,9 @@ import {
 } from "@/features/workspace/useWorkspace";
 import { actorNamesIn } from "./actorNames";
 import { inboxTargetPath, watchForMessage } from "./anchor";
+import { useSettledApproval } from "@/features/timeline/settledApprovals";
 import { InboxApprovalActions } from "./InboxApprovalActions";
-import { approvalRowControl } from "./approvalsPanel";
+import { approvalRowControl, settledStatusLine } from "./approvalsPanel";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
 
 // =============================================================================
@@ -336,17 +337,34 @@ export function InboxDetail({
     });
   }, [client, workspaceId, entry.key]);
 
+  // 이 클라이언트가 이미 결정한 승인(#5092): 패널은 고른 줄의 스냅샷을 들고 있어서 원장이
+  // 그 행을 대기에서 뺀 뒤에도 같은 `approvalId`로 남는다. 영수증이 있으면 컨트롤 대신
+  // 결정 결과가 서고, 이미 결정된 건에 두 번째 결정이 나가지 못한다.
+  const settledReceipt = useSettledApproval(entry.task?.approvalId);
+  const settledLine =
+    settledReceipt === null ? null : settledStatusLine(settledReceipt.status);
   const control =
     entry.task === undefined
       ? null
-      : approvalRowControl(entry.task, { offline });
+      : approvalRowControl(entry.task, {
+          offline,
+          settled: settledLine !== null,
+        });
+
+  // 결정이 닿으면 눌린 컨트롤은 이 렌더에서 결과 줄로 바뀌며 사라진다. 초점이 body로
+  // 떨어지지 않게 패널이 받는다(`AgentCard`가 같은 순간에 카드로 받는 것과 같다). 결과는
+  // 위의 `inbox-decision-note`(role=status)가 한 번 읽어 주므로 초점은 결과 줄이 아니라
+  // 패널 자신에게 놓는다: 같은 문장이 라이브 리전과 초점으로 두 번 들리지 않는다.
+  const panelRef = useRef<HTMLElement | null>(null);
 
   return (
     <section
+      ref={panelRef}
+      tabIndex={-1}
       aria-label="인박스 맥락"
       data-testid="inbox-detail"
       data-kind={entry.kind}
-      className="flex min-h-0 min-w-0 flex-1 flex-col"
+      className="flex min-h-0 min-w-0 flex-1 flex-col focus-visible:focus-ring"
     >
       <header className="flex items-center gap-2 border-b border-line px-4 py-2">
         {onBack && (
@@ -433,9 +451,21 @@ export function InboxDetail({
             {control?.kind === "decide" && entry.task && (
               <InboxApprovalActions
                 approvalId={control.approvalId}
-                onSettled={onDecided}
+                onSettled={(outcome) => {
+                  panelRef.current?.focus();
+                  onDecided(outcome);
+                }}
                 execution={entry.task.execution}
               />
+            )}
+            {settledLine !== null && (
+              <p className="text-body text-ink" data-testid="inbox-approval-settled">
+                <Check
+                  className="mr-2 inline size-4 align-text-bottom"
+                  aria-hidden="true"
+                />
+                {settledLine}
+              </p>
             )}
             {control?.kind === "offline" && (
               <p

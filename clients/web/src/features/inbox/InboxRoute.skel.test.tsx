@@ -161,7 +161,7 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-async function mount(): Promise<HTMLElement> {
+async function mount(path = "/inbox"): Promise<HTMLElement> {
   const host = document.createElement("div");
   document.body.append(host);
   mountedHost = host;
@@ -171,7 +171,7 @@ async function mount(): Promise<HTMLElement> {
     { value: sessionValue() },
     createElement(
       MemoryRouter,
-      { initialEntries: ["/inbox"] },
+      { initialEntries: [path] },
       createElement(InboxRoute)
     )
   );
@@ -430,5 +430,46 @@ describe("InboxRoute mailbox: 서버 투영 경로", () => {
       await Promise.resolve();
     });
     expect(markAllRead).toHaveBeenCalledWith("all");
+  });
+});
+
+// 「처리할 일」 탭의 내용은 승인 원장 하나다(#5092 D2·D3). 서버 투영에 다른 종류의 줄이 있는 순간 전체
+// 항목 수로 로딩·오류를 가르면 그 탭이 원장의 실패와 로딩을 가리고 「지금 처리할 일이 없어요」라고
+// 말한다. 게이트의 투영 스텁은 비어 있어서 이 경우를 못 잡는다 — 여기서 투영에 줄을 둔 채 잰다.
+describe("InboxRoute mailbox: 처리할 일 탭은 원장의 실패와 로딩을 가리지 않는다 (#5092)", () => {
+  beforeEach(() => {
+    state.source = "server";
+    state.serverUnreadCount = 1;
+    state.entries = [
+      entry({
+        key: "inbox:1",
+        itemId: "i-1",
+        kind: "mention",
+        typeLabel: "멘션 · #workbench",
+      }),
+    ];
+  });
+
+  it("원장이 실패하면 투영에 줄이 있어도 「없어요」 대신 오류와 다시 시도를 말한다", async () => {
+    state.error = true;
+    const host = await mount("/inbox?filter=task");
+    expect(host.querySelector('[data-testid="inbox-error"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="inbox-empty"]')).toBeNull();
+    expect(host.querySelector('[data-testid="inbox-error"] button')?.textContent).toBe("다시 시도");
+    if (mountedRoot) act(() => mountedRoot?.unmount());
+    mountedHost?.remove();
+
+    // 대조: 같은 실패라도 보여 줄 줄이 있는 탭은 있는 만큼 그린다(부분 실패는 오류가 아니다).
+    const all = await mount("/inbox?filter=all");
+    expect(all.querySelector('[data-testid="inbox-error"]')).toBeNull();
+    expect(all.querySelectorAll('[data-testid="mailbox-row"]')).toHaveLength(1);
+  });
+
+  it("원장이 첫 응답을 기다리는 동안은 투영에 줄이 있어도 「없어요」 대신 로딩 막대를 말한다", async () => {
+    state.isLoading = true;
+    const host = await mount("/inbox?filter=task");
+    const skel = host.querySelector('[data-testid="inbox-route"] [data-testid="skeleton"]');
+    expect(skel?.getAttribute("data-ready")).toBe("false");
+    expect(host.querySelector('[data-testid="inbox-empty"]')).toBeNull();
   });
 });

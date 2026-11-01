@@ -90,8 +90,16 @@ export interface Mailbox {
   /** 다음 쪽만 실패했다: 이미 받은 목록은 그대로다. */
   moreError: boolean;
   fetchMore: () => void;
+  /**
+   * 어떤 원천이 아직 첫 응답을 못 받았다. 서버 경로는 투영과 승인 원장을 함께 센다(#5092): 원장이
+   * 늦는 동안 투영만 비어 있다고 「비어 있어요」가 번쩍이지 않게 하는 값이다.
+   */
   isLoading: boolean;
-  /** 모든 원천이 실패했을 때만. 일부만 실패하면 있는 만큼 그린다. */
+  /**
+   * 보여 줄 줄이 없을 때 「비어 있다」고 말하면 거짓이 되는 실패가 있다. 구 서버 경로는 시도한
+   * 원천이 모두 실패했을 때, 서버 경로는 투영이 실패했거나 승인 원장이 실패했을 때(#5092).
+   * 일부만 실패하면 있는 만큼 그린다: 화면은 이 탭에 보일 줄이 없을 때만 이 값을 읽는다.
+   */
   error: boolean;
   /** 승인 원장이 없는 서버: 「처리할 일」 칸을 장애가 아닌 미제공으로 말한다. */
   tasksAbsent: boolean;
@@ -173,6 +181,14 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
 
   const composed = useComposedMailbox(absent, needsAction, tasksProvided);
 
+  // 승인(처리할 일)은 투영에 저장되지 않아서(위 머리말) 승인 원장은 투영과 **따로** 오고 따로 실패한다.
+  // 원장이 늦거나 실패했는데 투영만 빈 채로 답했다고 「비어 있어요」라고 말하면 대기 중인 승인을
+  // 모르는 채 조용한 게 정상이라고 말하는 일이다(#5092). 구 서버 경로(`useComposedMailbox`)는 이미
+  // 승인 원장의 로딩과 실패를 센다: 서버 경로도 같은 원천을 센다.
+  const ledgerLoading = tasksProvided && needsAction.isLoading;
+  // 404(`absent`)는 장애가 아니라 미제공이다: 화면이 「처리할 일」 탭에서 따로 말한다.
+  const ledgerFailed = tasksProvided && !needsAction.absent && needsAction.error;
+
   const serverFilter = toServerFilter(filter);
   const query = useInfiniteQuery({
     queryKey: ["inbox", workspaceId, serverFilter],
@@ -236,8 +252,8 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
     isFetchingMore: query.isFetchingNextPage,
     moreError: query.isFetchNextPageError,
     fetchMore: () => void query.fetchNextPage(),
-    isLoading: surface.isPending || (serverOn && query.isLoading),
-    error: surface.isError || (serverOn && query.isError),
+    isLoading: surface.isPending || (serverOn && (query.isLoading || ledgerLoading)),
+    error: surface.isError || (serverOn && (query.isError || ledgerFailed)),
     tasksAbsent: !tasksProvided || needsAction.absent,
     capped: false,
     updatedAtMs: Math.max(query.dataUpdatedAt, needsAction.updatedAtMs),
