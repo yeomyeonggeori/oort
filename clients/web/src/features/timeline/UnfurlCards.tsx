@@ -6,6 +6,7 @@ import {
   visibleUnfurls,
   type MessageUnfurl,
   type UnfurlCardModel,
+  type UnfurlCardSource,
 } from "@momo/core/features/timeline/unfurl";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
@@ -184,7 +185,8 @@ export function UnfurlCardView({
   icon = null,
   rootRef,
 }: {
-  unfurl: MessageUnfurl;
+  /** 저장된 카드이거나, 아직 입력칸에 있는 링크의 미리보기(#5005)다. 둘 다 같은 모델이 그린다. */
+  unfurl: UnfurlCardSource;
   image: string | null;
   preference: Exclude<LinkPreviewPreference, "off">;
   imageFailed?: boolean;
@@ -364,11 +366,12 @@ export function UnfurlCardView({
   );
 }
 
-function UnfurlCard({
+/** 그림·아이콘 받기까지 이어 붙인 카드 한 장. 입력칸 미리보기(#5005)도 이것을 그린다. */
+export function UnfurlCard({
   unfurl,
   preference,
 }: {
-  unfurl: MessageUnfurl;
+  unfurl: UnfurlCardSource;
   preference: Exclude<LinkPreviewPreference, "off">;
 }) {
   // 사이트 아이콘은 카드가 화면에 보일 때 처음 부른다. 프록시가 그때 사이트로 나가기

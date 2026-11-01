@@ -106,6 +106,8 @@ import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
 import { ScheduleDialog } from "@/features/scheduled/ScheduleDialog";
 import { ComposerContextBand, ComposerHostChip } from "@/features/chat/ComposerContextBand";
 import { ComposerFormatButton } from "@/features/chat/ComposerFormatButton";
+import { ComposerLinkPreview } from "@/features/chat/ComposerLinkPreview";
+import { useComposerLinkPreview } from "@/features/chat/useComposerLinkPreview";
 import { composerContextBandShows, composerContextHost } from "@/features/chat/composerContext";
 import { ScheduleSendMenu } from "@/features/scheduled/ScheduleSendMenu";
 import { ScheduledBanner } from "@/features/scheduled/ScheduledBanner";
@@ -298,6 +300,11 @@ export function Composer({
       attachments?: MessageAttachment[];
       /** 내 개인 에이전트를 불렀다(#3653): 메시지를 보낸 뒤 서명해 내 맥을 부른다. */
       personalCall?: PersonalCallSpec;
+      /**
+       * #5005 - 입력칸 위 링크 미리보기의 ✕(「이번 메시지는 미리보기 없이 보내기」). 켠 때(`true`)만 키가 간다.
+       * 이 메시지에는 링크 카드가 하나도 생기지 않는다(ADR-0170 증보 2026-11-01 D21).
+       */
+      suppressUnfurl?: boolean;
     }
   ) => Promise<void> | void;
   /**
@@ -381,6 +388,13 @@ export function Composer({
   // 자신(`navigator.onLine`)과 레일이 재연결을 포기한 종단 절단 둘의 합이다
   // (`useOffline`, 승인 경로가 같은 판단을 한다).
   const offline = useOffline();
+  // 링크를 넣고 멈추면 입력칸 위에 카드가 뜬다(#5005). 오프라인에서는 묻지 않고, 풀리면 이어서 묻는다.
+  const linkPreview = useComposerLinkPreview({
+    workspaceId,
+    channelId,
+    text,
+    paused: offline,
+  });
   // 키 배치 설명이 아직 필요한가 (감사 M-7). 이 기기에서 ↵로 한 번 보내면 꺼진다.
   const keysHintNeeded = useSendHintNeeded();
 
@@ -643,6 +657,8 @@ export function Composer({
       ...(callSpec ? { personalCall: callSpec } : {}),
       ...(payload ? { routing: payload } : {}),
       ...(replyToId === undefined ? {} : { replyToId }),
+      // ✕로 끈 채 보낸다. 값은 지금 렌더의 것이고(글을 비우기 전에 읽는다), 보낸 뒤에는 글이 비어 풀린다.
+      ...(linkPreview.suppressed ? { suppressUnfurl: true } : {}),
       ...(sent.attachments.length === 0
         ? {}
         : { attachments: sent.attachments }),
@@ -716,6 +732,12 @@ export function Composer({
     return "sent";
   }
 
+  /** ✕·Esc: 이번 메시지는 미리보기 없이 보낸다. 눌린 버튼이 사라지므로 포커스는 입력칸이 받는다. */
+  function dismissLinkPreview() {
+    linkPreview.dismiss();
+    inputRef.current?.focus();
+  }
+
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     // 예약 요청이 나는 동안은 보내기도 잠긴다: 같은 글이 일반 메시지와 예약으로 둘 다 나가면 안 된다.
@@ -751,6 +773,7 @@ export function Composer({
         justComposed: justComposedRef.current,
         enterSends: !isMobile,
         quoteOpen: quote !== null,
+        previewOpen: linkPreview.cards.length > 0,
       }
     );
 
@@ -771,6 +794,11 @@ export function Composer({
         }
         return;
       }
+      case "preview-dismiss":
+        // 멘션 목록 다음, 인용 앞이다(`composerKeys.ts`가 순서와 이유를 적는다). ✕와 같은 선택이다.
+        event.preventDefault();
+        dismissLinkPreview();
+        return;
       case "quote-cancel":
         // Esc는 「지금 열려 있는 것을 닫는다」이고, 멘션 목록이 닫혀 있을 때 이
         // 컴포저에 열려 있는 것은 인용이다. 취소 버튼과 같은 일을 하는 두 번째
@@ -924,6 +952,11 @@ export function Composer({
       )}
 
       <ExpressionSendPreview body={text} />
+      <ComposerLinkPreview
+        cards={linkPreview.cards}
+        suppressed={linkPreview.suppressed}
+        onDismiss={dismissLinkPreview}
+      />
       <form
         onSubmit={onSubmit}
         className="relative p-3 data-rail:pt-0"
