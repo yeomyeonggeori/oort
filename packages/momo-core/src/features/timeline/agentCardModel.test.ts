@@ -380,6 +380,26 @@ describe("tool card", () => {
     expect(rendered).not.toContain("call-secret-1");
   });
 
+  // #5009. 서버가 `tool_call` 행 본문에 쓰는 「Tool call: <이름>」 은 카드를 모르는 화면용 영어 폴백이지 호출이 낸
+  // 결과가 아니다. 결과 자리에 그대로 서면 한국어 제품 화면에 영어 한 줄이 「결과」로 남는다.
+  it("does not use the server's English fallback body of a tool_call as its result (#5009)", () => {
+    const card = agentCardModel(serverToolCall());
+    if (card?.kind !== "tool") throw new Error("not a tool card");
+    expect(card.frame.outcome).toBeNull();
+    // 결과 문장이 없으면 말하는 것은 제목 틀뿐이다(상태 낱말은 칩·`meta` 의 몫).
+    expect(frameSentence(card.frame)).toBe("work.session.end 실행");
+  });
+
+  it("keeps a body that is a real sentence, and a tool_result body that merely starts the same way (#5009)", () => {
+    const sentence = agentCardModel(msg({ type: "tool_call", body: "세션을 끝냈어요", props: { name: "work.session.end" } }));
+    if (sentence?.kind !== "tool") throw new Error("not a tool card");
+    expect(sentence.frame.outcome).toBe("세션을 끝냈어요");
+    // 폴백으로 거르는 것은 `tool_call` 행뿐이다: 결과 행의 본문은 도구가 낸 출력이라 그대로 결과다.
+    const output = agentCardModel(msg({ type: "tool_result", body: "Tool call: 로그 한 줄", props: { call_id: "c1", output: "x", is_error: false } }));
+    if (output?.kind !== "tool") throw new Error("not a tool card");
+    expect(output.frame.outcome).toBe("Tool call: 로그 한 줄");
+  });
+
   it("reads the tool name from tool_name, then tool, then name (#4995)", () => {
     const titleOf = (props: Record<string, unknown>) => {
       const card = agentCardModel(msg({ type: "tool_call", props }));
