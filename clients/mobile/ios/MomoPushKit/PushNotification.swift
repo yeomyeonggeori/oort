@@ -8,6 +8,11 @@
 //     (`PushAttachmentCopy`: 「사진 1장」, 「파일 2개」, same sentences as the core's
 //     `ATTACH_PREVIEW_COPY`), not left on the relay's 「새 알림」 placeholder. Only `dm` / `mention`
 //     pushes: an approval keeps ADR-0204 D7's rule (no body → no 승인·거절 buttons).
+//   - #5025: the message the team AI writes to hand over an invite link (`props.kind ==
+//     "team_ai_invite_link"`, #4965) is announced by its `props.preview` — the one link-free sentence the
+//     server wrote — or by a fixed sentence when there is none (`PushInviteLinkCopy`), never by its body: the
+//     body carries the link, and a lock screen is read by everyone near the phone (ADR-0201 증보 v3 B4-2).
+//     Same rule, same sentence as the core's `inviteLinkNotificationText`.
 //   - #4316: the REST read also says WHO wrote the message (`PushResolution.author`: id, name, human or
 //     agent, and the roster's avatar content path when it is exactly this member's — never any other
 //     URL), so `PushCommunication.swift` can dress the push as a communication notification. `fetch`
@@ -480,20 +485,47 @@ public enum PushAttachmentCopy {
     }
 }
 
+/// 도우미가 초대 링크를 대화에 올린 메시지의 알림 문장 (#5025, ADR-0201 증보 v3 B4-2).
+///
+/// 그 메시지의 본문은 「문장 + 링크」다. 확장은 본문을 알림 본문으로 쓰는데(`displayBody`), 잠금 화면은 폰 옆 누구나
+/// 보는 자리라서 링크가 거기 뜨면 안 된다. 서버가 링크 없이 써 준 `props.preview` 한 문장이 알림 문장이고, 없거나 비었거나
+/// 링크 모양이면 고정 문장이다. 코어 `inviteLinkNotificationText`(`packages/momo-core/src/features/notifications/model.ts`)와
+/// **같은 규칙·같은 문장**이다. 고정 문장의 정본은 문구 사전 `notifications.inviteLink.fallback` 인데 확장은 사전을 읽지
+/// 못하므로 여기에 두고, 폰 시험(`pushInviteLinkCopy.test.ts`)이 사전의 ko 값과 코어의 낱말·모양을 맞댄다.
+public enum PushInviteLinkCopy {
+    /// 서버가 그 메시지에 붙이는 `props.kind`.
+    public static let kind = "team_ai_invite_link"
+    public static let fallback = "초대 링크를 올렸어요"
+
+    /// 링크의 모양: `join?code=`(퍼센트 인코딩한 것도)이거나 `://`. 코어 `INVITE_LINK_SHAPE` 와 같은 세 조각이다.
+    public static func carriesLink(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        return lowered.contains("join?code=") || lowered.contains("join%3fcode%3d") || lowered.contains("://")
+    }
+
+    /// 알림 문장: 서버 preview(앞뒤 공백 제외). 없거나 비었거나 링크 모양이면 고정 문장.
+    public static func sentence(preview: String?) -> String {
+        let trimmed = preview?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty || carriesLink(trimmed) ? fallback : trimmed
+    }
+}
+
 public actor MomoPushRESTFetcher: PushMessageFetching, PushMessageResolving {
     private struct MessagePage: Decodable {
         let messages: [Message]
     }
 
-    /// 카드 `props` 에서 이 파일이 읽는 세 키. 하나라도 모양이 달라도(문자열이 아니거나 없거나)
+    /// 카드 `props` 에서 이 파일이 읽는 네 키. 하나라도 모양이 달라도(문자열이 아니거나 없거나)
     /// 메시지 전체를 버리지 않는다 — 각 키를 따로, 실패하면 nil 로 읽는다.
     private struct Props: Decodable {
         let kind: String?
         let ranMs: Int64?
         let label: String?
+        /// 도우미 초대 링크 메시지의 알림 문장(#5025). 그 표지(`kind`)가 있을 때만 읽힌다.
+        let preview: String?
 
         enum CodingKeys: String, CodingKey {
-            case kind, label
+            case kind, label, preview
             case ranMs = "ran_ms"
         }
 
@@ -502,6 +534,7 @@ public actor MomoPushRESTFetcher: PushMessageFetching, PushMessageResolving {
             kind = try? container.decode(String.self, forKey: .kind)
             ranMs = try? container.decode(Int64.self, forKey: .ranMs)
             label = try? container.decode(String.self, forKey: .label)
+            preview = try? container.decode(String.self, forKey: .preview)
         }
     }
 
@@ -641,11 +674,16 @@ public actor MomoPushRESTFetcher: PushMessageFetching, PushMessageResolving {
                     author.avatarUrl?.value, workspaceID: fetchSession.workspaceID, memberID: author.id)))
     }
 
-    /// 알림 본문: 글이 있으면 글. 글 없이 첨부만 있으면 개수 문구(#4294) — `PushAttachmentCopy.announces`
+    /// 알림 본문: 도우미가 올린 초대 링크 메시지는 본문이 아니라 그 문장(`PushInviteLinkCopy`, #5025) — 본문이 링크를
+    /// 품고 있어서 어떤 알림 이유로 와도 본문을 읽지 않는다. 지워진 메시지는 이 갈래를 타지 않는다(아래와 같은 까닭).
+    /// 그 밖에는 글이 있으면 글. 글 없이 첨부만 있으면 개수 문구(#4294) — `PushAttachmentCopy.announces`
     /// 가 허락한 알림(`dm`·`mention`)에서만, 그리고 지워지지 않은 메시지에서만. 지워진 메시지는 서버가 첨부
     /// 목록을 그대로 실어 보내도 개수를 말하지 않는다(보낸 사람이 거둔 것을 잠금 화면에 올리지 않는다; 코어의
     /// 인박스·배너도 삭제를 먼저 본다). 그 밖이거나 첨부도 없으면 nil(자리표시로 남는다).
     private static func displayBody(of message: Message, for envelope: MomoPushEnvelope) -> String? {
+        if message.state?.value != "deleted", message.props?.kind == PushInviteLinkCopy.kind {
+            return PushInviteLinkCopy.sentence(preview: message.props?.preview)
+        }
         let text = message.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !text.isEmpty { return text }
         guard PushAttachmentCopy.announces(envelope), message.state?.value != "deleted" else { return nil }
