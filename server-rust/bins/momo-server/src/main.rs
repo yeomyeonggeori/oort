@@ -184,6 +184,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER",
             config.rate_limit.photo_draft_per_member_limit,
             "picture-from-photo starts (each one can be a call to the team's image model)",
+        ),
+        (
             "RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER",
             config.rate_limit.unfurl_preview_per_member_limit,
             "link previews of a draft, fetched from remote sites",
