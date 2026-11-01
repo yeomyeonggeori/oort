@@ -428,6 +428,10 @@ async fn run_child(
             return Err(ExtractError::Unreadable);
         }
         let status = child.wait().await.map_err(|_| ExtractError::Unavailable)?;
+        // A child that could not confine itself read nothing: that is this machine, not the file.
+        if status.code() == Some(CONFINE_FAILED_EXIT_CODE) {
+            return Err(ExtractError::Unavailable);
+        }
         if !status.success() {
             return Err(ExtractError::Unreadable);
         }
@@ -639,7 +643,7 @@ mod tests {
         use std::sync::atomic::AtomicBool;
         let fired = Arc::new(AtomicBool::new(false));
         let flag = fired.clone();
-        spawn_watchdog(Duration::from_millis(400), move || {
+        spawn_watchdog(Duration::from_millis(1000), move || {
             flag.store(true, Ordering::SeqCst)
         })
         .expect("a thread can start");

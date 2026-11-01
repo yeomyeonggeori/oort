@@ -9,6 +9,7 @@
 //! | `a_child_that_answers_before_reading_everything_is_not_an_error_of_the_parent` | treating a closed stdin as a failure |
 //! | `a_child_that_answers_with_too_much_or_with_nonsense_is_unreadable` | the output cap / the closed answer shape |
 //! | `a_pdf_over_the_input_ceiling_never_starts_a_child` | the input ceiling |
+//! | `a_child_that_could_not_confine_itself_is_the_servers_fault_not_the_files` | mapping the child's "could not confine myself" status to `Unavailable` |
 //! | `a_well_formed_answer_over_the_output_cap_is_refused` | `take(CHILD_OUTPUT_MAX + 1)` and the `data.len() > CHILD_OUTPUT_MAX` refusal (the nonsense test above is not JSON, so it passes without them) |
 //! | `both_slots_stay_taken_while_two_real_children_run` | giving the slot back before the child is reaped (`let _permit = permit;` → `drop(permit)`) |
 //! | `a_stream_that_inflates_far_past_its_size_is_ended_by_the_memory_watch` | the supervisor's memory watch (`over_memory` in the race, or its comparison with the ceiling), the kill by pid, the reap before the slot returns |
@@ -239,6 +240,28 @@ async fn a_child_that_answers_with_too_much_or_with_nonsense_is_unreadable() {
          fault, not the file's (#4970 review L1: the caller must not blame the file)"
     );
     for path in [flood, nonsense, failing] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// #4970 review L1 (the same split as a child that cannot start): a child that ends with the status it
+/// uses for 「I could not confine myself, so I read nothing」 says something about this machine and nothing
+/// about the file, and the caller must not tell the person their file is broken.
+#[tokio::test]
+async fn a_child_that_could_not_confine_itself_is_the_servers_fault_not_the_files() {
+    let _serial = serial().await;
+    let unconfined = script("unconfined", "exit 2");
+    assert_eq!(
+        read_with(&unconfined, pdf_with(&["x"]), Duration::from_secs(10)).await,
+        Err(ExtractError::Unavailable)
+    );
+    // any other failing status is still the file's: the child ran and gave up on it
+    let gave_up = script("gave-up", "exit 3");
+    assert_eq!(
+        read_with(&gave_up, pdf_with(&["x"]), Duration::from_secs(10)).await,
+        Err(ExtractError::Unreadable)
+    );
+    for path in [unconfined, gave_up] {
         let _ = std::fs::remove_file(path);
     }
 }
