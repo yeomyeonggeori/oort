@@ -147,7 +147,8 @@ export function ExpressionComposerPicker({
       )}
       {tab === 'emoji' ? (
         <EmojiPicker
-          embedded={{query}}
+          // 검색어는 이 시트가 쥔다 — 본문의 「검색 지우기」도 이 검색어를 비워야 눌린 것이다(#5065).
+          embedded={{query, onClearQuery: () => setQuery('')}}
           onClose={onClose}
           onSelect={glyph => afterClose(() => onInsert(glyph))}
         />

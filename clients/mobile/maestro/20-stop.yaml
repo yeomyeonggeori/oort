@@ -94,8 +94,14 @@ name: 20-stop
 # CHANNEL is told. Both are asserted because a stop that only the actor can see
 # is a different (and wrong) product — everyone reading the channel has to be
 # able to tell the run did not simply die.
+#
+# The line is the server's own sentence (`CANCEL_SYSTEM_LINE`,
+# server-rust/bins/momo-server/src/routes/agent_runs.rs) — it is not client copy,
+# so the wording here follows that constant. It used to read 「실행이 사람에 의해
+# 중지되었습니다.」; the 11-01 verification run found the channel showing 「사람이
+# 실행을 중지했어요.」 while this wait timed out on the old sentence (#5045).
 - extendedWaitUntil:
-    visible: ".*실행이 사람에 의해 중지되었습니다.*"
+    visible: ".*사람이 실행을 중지했어요.*"
     timeout: 60000
 
 # …and the turn is actually over: the working bar clears without the reply ever

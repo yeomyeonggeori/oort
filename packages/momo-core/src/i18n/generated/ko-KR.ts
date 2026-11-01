@@ -328,7 +328,7 @@ export const catalog: MessageCatalog = {
   "expressions.import.fileIssue": [
     {
       "type": 0,
-      "value": "5 MiB 이하의 PNG, JPEG, WebP 또는 GIF를 골라 주세요."
+      "value": "5MB 이하의 PNG, JPG, WebP 또는 GIF를 골라 주세요."
     }
   ],
   "expressions.import.fixedNote": [
@@ -735,19 +735,19 @@ export const catalog: MessageCatalog = {
   "expressions.make.photoRule": [
     {
       "type": 0,
-      "value": "5 MiB 이하의 움직이지 않는 PNG, JPEG, WebP, GIF를 쓸 수 있어요."
+      "value": "5MB 이하의 움직이지 않는 PNG, JPG, WebP, GIF를 쓸 수 있어요."
     }
   ],
   "expressions.make.photoSize": [
     {
       "type": 0,
-      "value": "사진이 너무 커요. 5 MiB 이하로 골라 주세요."
+      "value": "사진이 너무 커요. 5MB 이하로 골라 주세요."
     }
   ],
   "expressions.make.photoType": [
     {
       "type": 0,
-      "value": "PNG, JPEG, WebP 또는 GIF 사진을 골라 주세요."
+      "value": "PNG, JPG, WebP 또는 GIF 사진을 골라 주세요."
     }
   ],
   "expressions.make.photoUnavailable": [
@@ -1115,7 +1115,7 @@ export const catalog: MessageCatalog = {
   "expressions.photo.photoHint": [
     {
       "type": 0,
-      "value": "5 MiB 이하의 움직이지 않는 PNG, JPEG, WebP, GIF를 쓸 수 있어요."
+      "value": "5MB 이하의 움직이지 않는 PNG, JPG, WebP, GIF를 쓸 수 있어요."
     }
   ],
   "expressions.photo.photoLabel": [
@@ -1139,13 +1139,13 @@ export const catalog: MessageCatalog = {
   "expressions.photo.photoSize": [
     {
       "type": 0,
-      "value": "사진이 너무 커요. 5 MiB 이하로 골라 주세요."
+      "value": "사진이 너무 커요. 5MB 이하로 골라 주세요."
     }
   ],
   "expressions.photo.photoType": [
     {
       "type": 0,
-      "value": "PNG, JPEG, WebP 또는 GIF 사진을 골라 주세요."
+      "value": "PNG, JPG, WebP 또는 GIF 사진을 골라 주세요."
     }
   ],
   "expressions.photo.providerGemini": [

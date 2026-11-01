@@ -1,7 +1,12 @@
 appId: app.momo.ios
 name: 45-work-console
 ---
-# #2864 — 「작업」 팀 보드 한 열 판과 읽기 전용 시트(옛 #1292 작업 콘솔의 자리).
+# 「작업」 — 결과 중심 한 화면(내 것 / 팀 전체)과 줄을 누르면 열리는 읽기 전용 시트 (옛 #1292 작업 콘솔의 자리).
+#
+# 이 화면은 ADR-0202 D6 의 `WorkJobsScreen` 이다(`work-jobs-*` · `work-job-row-*`). #2864 의 팀 보드 판
+# (`TeamBoardScreen` — `team-board-list` · `team-board-filter-*` · `team-board-row-*`)은 코드로만 남고 + 메뉴가 열지
+# 않는다: 11-01 검증에서 이 흐름이 `team-board-list` 를 60초 기다리다 떨어졌을 때 화면은 정상으로 줄을 그리고 있었다
+# (#5045). 줄을 누르면 열리는 시트(`TeamBoardDetailSheet`, `team-detail-*`)는 두 화면이 같이 써서 그대로다.
 - launchApp:
     appId: app.momo.ios
 - runFlow: subflows/ensure-signed-in.yaml
@@ -25,25 +30,28 @@ name: 45-work-console
     id: "plus-menu-work"
 - extendedWaitUntil:
     visible:
-      id: "team-board-list"
+      id: "work-jobs-list"
     timeout: 60000
 - assertVisible:
     id: "work-title"
 - assertVisible:
-    id: "team-board-filter-all"
+    id: "work-jobs-filter-mine"
 - assertVisible:
-    id: "team-board-filter-mine"
-# 「작업」은 팀 보드 한 열 판이다(#2864). 서버가 채널 멤버십으로 걸러 준 줄만 선다.
+    id: "work-jobs-filter-team"
+# 「작업」은 내 것 / 팀 전체 두 갈래다(ADR-0202 D6). 서버가 채널 멤버십으로 걸러 준 줄만 선다. 레인의 멤버가
+# 맡긴 세션이라 두 갈래 어느 쪽에서도 줄이 있다.
 - tapOn:
-    id: "team-board-filter-mine"
-- tapOn:
-    id: "team-board-filter-all"
+    id: "work-jobs-filter-mine"
 - assertVisible:
-    id: "team-board-row-${WORK_SESSION_ID}"
+    id: "work-job-row-${WORK_SESSION_ID}"
+- tapOn:
+    id: "work-jobs-filter-team"
+- assertVisible:
+    id: "work-job-row-${WORK_SESSION_ID}"
 
 # 줄을 누르면 읽기 전용 시트가 열린다. 터미널·입력·멈춤이 없고, 바닥에는 이동만 있다.
 - tapOn:
-    id: "team-board-row-${WORK_SESSION_ID}"
+    id: "work-job-row-${WORK_SESSION_ID}"
 - extendedWaitUntil:
     visible:
       id: "team-detail-terminal-note"
@@ -53,4 +61,4 @@ name: 45-work-console
 - tapOn:
     id: "team-detail-close"
 - assertVisible:
-    id: "team-board-list"
+    id: "work-jobs-list"

@@ -268,8 +268,8 @@ lane puts it on PATH itself, so nothing is added to your shell profile).
 | `00-login` | 서버 주소 입력 → 로그인 → 채널 목록 + 탭 바, from cleared state |
 | `10-mention-working` | a turn in flight is **visible as one** — 「작업 중」 is on screen WHILE it runs (#839), then the reply lands |
 | `20-stop` | 중단 is two-tap and the confirm step says what it costs; the receipt AND the channel's system line both appear |
-| `30-approval` | 결정 대기 → 무장 → "되돌릴 수 없습니다" → 승인 → 영수증, and the approved call actually resumes and finishes |
-| `40-agents-tab` | 재우기 warns before it acts, and a mention to a sleeping agent gets a system line instead of silence |
+| `30-approval` | 결정 대기 → 승인 한 번(확정 단계 없음, #3819) → 영수증, and the approved call actually resumes and finishes |
+| `40-agents-tab` | the agent list opens from + 메뉴 → 「AI」 → 「에이전트 부르기」 and its profile screen is the fixture agent's (the 재우기 card left the phone in #3902, so the flow no longer pauses anything) |
 
 Measured here, all five green: 90 + 46 + 37 + 49 + 42 seconds of flow time.
 

@@ -9,8 +9,10 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React, {useMemo} from 'react';
+import {StyleSheet} from 'react-native';
 
 import {Composer} from '../src/features/conversation/Composer';
+import {CONV} from '../src/features/conversation/convDesign';
 import {
   MessageRow,
   type MessageRowActions,
@@ -288,5 +290,119 @@ describe('보내기', () => {
     // 채널을 옮기면 이 대상은 다른 방의 것이다.
     view.rerender(<Harness messages={[ROOT, REPLY, approval]} channelId="other" fake={fake} />);
     expect(screen.queryByTestId('reply-draft-card')).toBeNull();
+  });
+});
+
+// =============================================================================
+// 머리말의 글자 열 (#5067, design-review M2) — 입력창의 **지금 배치**와 같은 선.
+//
+// 제스트에는 레이아웃 엔진이 없다. 그래서 두 글자의 x 를 **스타일에서 도출**한다: 알약 상자 안에서 글자까지 가는 길(호스트 조상)의 왼쪽 바깥 여백 + 테두리 + 안쪽 여백을
+// 더한다. 입력창은 `composer-bar`(줄 여백) → `composer-field`(글 칸 들여쓰기, 접힘 36 / 펼침 0) → `composer-input`(테두리 + 안쪽 여백) 이고, 머리말은 `reply-draft-card`(`textLeft`)
+// → 글 상자 → 글이다. 가로 줄(`flexDirection: 'row'`) 조상에서는 글로 가는 가지가 **첫 자식**이 아니면 던진다 — 앞선 형제가 x 를 미는데 이 도구는 그 폭을 못 잰다.
+// 그 사실을 조용히 지나가지 않는다.
+// =============================================================================
+
+type TestNode = ReturnType<typeof screen.getByTestId>;
+
+const flatStyle = (style: unknown) =>
+  (StyleSheet.flatten(style as never) ?? {}) as Record<string, number | string | undefined>;
+const px = (value: unknown) => (typeof value === 'number' ? value : 0);
+
+/** `target` 글자의 시작이 `rootTestID` 상자 **안쪽 왼쪽**에서 얼마나 떨어져 있는가(pt). */
+function textStartWithin(target: TestNode, rootTestID: string): number {
+  const root = screen.getByTestId(rootTestID);
+  const own = flatStyle(target.props.style);
+  // 자기 바깥 여백 + (입력창이면) 자기 테두리와 안쪽 여백까지가 글자의 시작이다.
+  let x =
+    px(own.marginLeft) +
+    px(own.borderLeftWidth ?? own.borderWidth) +
+    px(own.paddingLeft ?? own.paddingHorizontal);
+  let pathChild: TestNode = target;
+  for (let at = target.parent; at !== null; pathChild = at, at = at.parent) {
+    if (at === root) return x;
+    if (typeof at.type !== 'string') continue; // 합성 부품의 스타일은 아래 호스트가 한 번만 센다.
+    const style = flatStyle(at.props.style);
+    x +=
+      px(style.marginLeft) +
+      px(style.borderLeftWidth ?? style.borderWidth) +
+      px(style.paddingLeft ?? style.paddingHorizontal);
+    if (style.flexDirection === 'row' && at.children[0] !== pathChild) {
+      throw new Error(`가로 줄 ${String(at.props.testID)} 에서 글로 가는 가지가 첫 자식이 아니다 — 이 도구는 앞선 형제의 폭을 못 잰다`);
+    }
+  }
+  throw new Error(`${rootTestID} 아래에 있지 않다`);
+}
+
+describe('머리말의 글자 열 (#5067)', () => {
+  const headerX = () => textStartWithin(screen.getByTestId('reply-draft-header'), 'composer-pill');
+  const inputX = () => textStartWithin(screen.getByTestId('composer-input'), 'composer-pill');
+  const focus = () => fireEvent(screen.getByTestId('composer-input'), 'focus');
+  const blur = () => fireEvent(screen.getByTestId('composer-input'), 'blur');
+  const frames = (count: number) =>
+    act(() => {
+      jest.advanceTimersByTime(16 * count);
+    });
+  const settle = () =>
+    act(() => {
+      jest.advanceTimersByTime(500);
+    });
+  const mountReply = () => {
+    render(<Harness messages={[ROOT]} fake={senders()} />);
+    swipeRow(0);
+    expect(screen.getByTestId('reply-draft-card')).toBeTruthy();
+  };
+
+  it('접힌 한 줄 입력창 — 머리말 글자와 입력 글자가 같은 선이고, 그 선은 + 원 오른쪽이다', () => {
+    mountReply();
+    expect(screen.queryByTestId('composer-tools')).toBeNull(); // 접힘: 도구 줄이 없다
+    expect(inputX()).toBeGreaterThan(CONV.composerCircle);
+    expect(headerX()).toBeCloseTo(inputX(), 5);
+  });
+
+  it('초점이 들어 펼친 입력창 — 같은 선이고, 접힘보다 + 원 하나(36) 만큼 가장자리 쪽이다', () => {
+    mountReply();
+    const collapsedLine = inputX();
+    focus();
+    settle();
+    expect(screen.getByTestId('composer-tools')).toBeTruthy(); // 펼쳤다
+    expect(headerX()).toBeCloseTo(inputX(), 5);
+    expect(collapsedLine - inputX()).toBeCloseTo(CONV.composerCircle, 5);
+    expect(inputX()).toBeLessThan(CONV.composerCircle);
+  });
+
+  it('초점 없이 글이 있어 펼친 입력창도 같은 선이다', () => {
+    mountReply();
+    fireEvent.changeText(screen.getByTestId('composer-input'), '금요일에 배포합니다');
+    settle();
+    expect(screen.getByTestId('composer-tools')).toBeTruthy();
+    expect(headerX()).toBeCloseTo(inputX(), 5);
+    expect(inputX()).toBeLessThan(CONV.composerCircle);
+  });
+
+  it('펼치고 접는 스프링의 매 프레임에서 같은 선이다 — 선은 실제로 움직인다', () => {
+    mountReply();
+    const lines: number[] = [];
+    const check = () => {
+      expect(headerX()).toBeCloseTo(inputX(), 5);
+      lines.push(inputX());
+    };
+    check();
+    focus();
+    for (let frame = 0; frame < 24; frame += 1) {
+      frames(1);
+      check();
+    }
+    blur();
+    for (let frame = 0; frame < 24; frame += 1) {
+      frames(1);
+      check();
+    }
+    settle();
+    check();
+    // 대조: 단정이 움직이는 값을 쟀다 — 접힘 끝(36 만큼 안쪽)과 펼침 끝 사이의 중간 값이 여럿 있고, 처음과 끝은 같은 접힘이다.
+    const distinct = new Set(lines.map(line => Math.round(line * 10)));
+    expect(distinct.size).toBeGreaterThan(6);
+    expect(Math.max(...lines) - Math.min(...lines)).toBeCloseTo(CONV.composerCircle, 0);
+    expect(lines[0]).toBeCloseTo(lines[lines.length - 1], 5);
   });
 });

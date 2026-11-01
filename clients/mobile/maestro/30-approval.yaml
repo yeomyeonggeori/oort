@@ -49,6 +49,12 @@ name: 30-approval
 
 - tapOn:
     id: "composer-input"
+# Start from an empty draft. A composer draft survives `launchApp`: the 11-01
+# verification run ran 4942-expression-sheet first, which ends with 「안녕👍」 typed
+# and unsent, and found it still sitting in #general's composer — `@kim` typed
+# after it read 「안녕👍@kim」, `mention-list` never opened, and this flow died on
+# that wait. A failure about leftover state, not about approvals.
+- eraseText: 200
 - inputText: "@kim"
 - extendedWaitUntil:
     visible:
@@ -64,8 +70,16 @@ name: 30-approval
 # The pause is visible in the channel first — the agent posts an approval_request
 # message. Asserting it here is what ties the inbox card below to a turn this
 # flow actually caused.
+#
+# The card's headline is composed by the CLIENT now (`requestBundleModel` in
+# packages/momo-core/src/features/timeline/requestBundle.ts): 「김인턴 · 도구
+# 「work.session.end」 실행」. The server's English title 「Approve
+# work.session.end」 is dropped as an English-source string, so it is never on
+# screen any more. The match is on 「도구 「work.session.end」 실행」 and not on the
+# bare tool name because the thinking row above it (「work.session.end 실행 ·
+# 생각 중」) already carries the name before the approval exists.
 - extendedWaitUntil:
-    visible: ".*Approve work.session.end.*"
+    visible: ".*도구 「work.session.end」 실행.*"
     timeout: 120000
 
 # NO RELAUNCH. There used to be one here, and it was a workaround for #1020 —
@@ -85,8 +99,9 @@ name: 30-approval
 # APNs, and the relaunch used to stand in for it by accident. It never proved it
 # — the runner already prints that as an explicit 실기기 파이널 체크 item.
 
-# Back out of the conversation. Decisions live on the inbox tab, not in the
-# timeline (ApprovalDecision is only mounted by InboxScreen).
+# Back out of the conversation. The card in the timeline carries 승인/거부 too now
+# (ApprovalDecision, `shape="pill"`), but the ids this flow drives
+# (`inbox-approval-*`) belong to the inbox tab, so the decision is made there.
 - tapOn:
     id: "header-back"
 - extendedWaitUntil:
@@ -117,21 +132,20 @@ name: 30-approval
     visible:
       id: "inbox-approval-.*-approve"
     timeout: 60000
+
+# One tap decides (#3819, owner 10-14: 「승인을 누르면 그냥 승인이 되게 해줘」).
+# The two-step this flow used to walk — `-approve` arms, `-confirm` shows
+# 「승인하면 에이전트가 이어서 진행합니다. 되돌릴 수 없습니다.」, `-commit` decides — was
+# taken out of ApprovalDecision; the guard that protects a mistaken tap is now
+# what the card shows BEFORE the tap, and the idempotency key after it. The stop
+# control (20-stop) is the one place that still asks twice.
+#
+# There is deliberately no assertion that `-confirm` is absent: it could only be
+# checked at the instant of the tap, which proves nothing. The proof is the next
+# wait — `inbox-decision-note` exists only once the decision went out, so a
+# confirm step that came back would stall this flow right here.
 - tapOn:
     id: "inbox-approval-.*-approve"
-
-# Same two-tap contract as the stop control, and the same reason for asserting
-# the sentence rather than the button: `reversible` defaults false, so the copy
-# a person is asked to accept has to include that it cannot be undone.
-- assertVisible:
-    id: "inbox-approval-.*-confirm"
-- assertVisible: ".*승인하면 에이전트가 이어서 진행합니다. 되돌릴 수 없습니다.*"
-- waitForAnimationToEnd:
-    timeout: 3000
-- tapOn:
-    id: "inbox-approval-.*-commit"
-- assertNotVisible:
-    id: "inbox-approval-.*-too-fast"
 
 # The receipt is `inbox-decision-note`, NOT `decision-receipt-{key}`. The two are
 # easy to swap and mean opposite things: `decision-receipt-*` is what the screen
