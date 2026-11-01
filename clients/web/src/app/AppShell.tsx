@@ -56,7 +56,7 @@ import { LegacyAgentPortCleanup } from "@/features/welcome/harnessLogin/LegacyAg
 import { ReminderDueWatcher } from "@/features/reminders/ReminderDueWatcher";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
 import { AgentWorkPanel } from "@/features/agents/AgentWorkPanel";
-import { useWorkPanelTarget } from "@/features/agents/workLogStore";
+import { closeWorkPanel, useWorkPanelTarget } from "@/features/agents/workLogStore";
 import { AgentTurnFixture } from "@/features/agents/AgentTurnFixture";
 import { agentTurnFixtureMode } from "@/features/agents/turnFixture";
 import { AdeSummaryLine } from "@/features/ade/AdeSummaryLine";
@@ -67,6 +67,7 @@ import {
 } from "@/features/ade/adeDrawerStore";
 import { SurfaceGate } from "@/features/capabilities/SurfaceGate";
 import { IS_TAURI } from "@/lib/env";
+import { useDismissOnEntry } from "@/lib/useDismissOnEntry";
 import { isDesktop } from "@/lib/tauri";
 import { cn } from "@/design/lib/cn";
 import { WallpaperLayer } from "@/design/wallpaper/WallpaperLayer";
@@ -237,6 +238,17 @@ export function AppShell({
   // 달았고, 같은 타깃 같은 단계의 리스너는 서로를 막지 못해 한 번의 Esc가 두 층을
   // 닫았다(design-review ADE 2단계 H1 ①). 스택이 그 문장을 자료구조로 만든다.
   useEscapeLayer(drawerOpen, closeDrawer);
+
+  // 알림이 새 입구로 들어오면(#4667) 라우트를 덮는 표면과 팔레트를 걷는다. 위의 라우트 효과는 **경로가 바뀔 때만** 서랍을
+  // 닫는다 — 같은 채널의 다른 메시지로 오는 알림(`?msg=`)은 경로가 같아 서랍이 그 메시지를 덮은 채 남는다. 대화상자는
+  // `design/ui/dialog.tsx` 의 Root 가 스스로 받는다(여기는 그 Root 를 쓰지 않는 팔레트와 서랍 상태만 쥔다). 작업 패널은 넓은
+  // 창에서는 라우트 옆의 칸이라 걷지 않고, 라우트를 덮는 폭에서만(`paneDrawerWidth`) 걷는다.
+  useDismissOnEntry(() => {
+    setSwitcherOpen(false);
+    if (drawerOpen) closeDrawer();
+    closeAdeDrawer();
+    if (paneDrawerWidth && workPanelOpen) closeWorkPanel();
+  });
 
   const onDesktopToggleBlur = (event: FocusEvent<HTMLButtonElement>) => {
     const next = event.relatedTarget;
