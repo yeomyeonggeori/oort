@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { isDesktop } from "@/lib/tauri";
 import {
   holdChannelViewing,
@@ -37,6 +37,27 @@ export const documentForeground: ForegroundPort = {
     };
   },
 };
+
+// `useSyncExternalStore`는 구독 함수의 동일성이 바뀌면 다시 구독한다. 호스트(`ChatShell`)는 아주 자주 그려지므로 함수는 모듈에 하나씩 둔다.
+const subscribeForeground = (notify: () => void) => documentForeground.subscribe(() => notify());
+const readForeground = () => documentForeground.isForeground();
+const subscribeNothing = () => () => undefined;
+const assumeForeground = () => true;
+
+/**
+ * 사람이 이 창을 보고 있는가 — 위 어댑터(`documentForeground`)를 구독한다(탭이 보이고 창이 포커스를 가졌다). 뒤에 있는 동안 온
+ * 답글을 읽은 것으로 치지 않는 판정이 이 하나다: 스레드 패널의 읽음 신호(`ThreadPanel`)와 열린 스레드의 요약 줄(`ChatShell` →
+ * `Timeline.viewingThreadId`)이 같은 값을 읽어야 서로 어긋나지 않는다(#5032). 서버 렌더에서는 앞이라고 본다.
+ *
+ * `enabled`가 거짓이면 구독도 재그림도 없다(늘 앞이라고 답한다): 호스트는 열린 스레드가 없을 때 창 앞뒤 전환에 다시 그려질 이유가 없다.
+ */
+export function useDocumentForeground(enabled = true): boolean {
+  return useSyncExternalStore(
+    enabled ? subscribeForeground : subscribeNothing,
+    enabled ? readForeground : assumeForeground,
+    assumeForeground
+  );
+}
 
 /** 채널이 화면에 있는 동안만 신호를 보낸다. `channelId`가 null이면 보내지 않는다. */
 export function useChannelViewingBeat(

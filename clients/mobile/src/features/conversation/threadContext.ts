@@ -1,5 +1,8 @@
-import {threadRollup, type Message, type ThreadRollup} from '@momo/core/lib/api';
-import {withLiveUnread} from '@momo/core/features/timeline/threadSummary';
+import type {Message, ThreadRollup} from '@momo/core/lib/api';
+import {
+  groupRepliesByRoot,
+  liveThreadRollup,
+} from '@momo/core/features/timeline/threadSummary';
 
 // =============================================================================
 // 답글을 답글로 보이게 하는 데 필요한 두 가지 사실 — 둘 다 이미 손에 있는
@@ -48,12 +51,11 @@ function key(id: string): string {
 export interface ThreadContext {
   /** Every message by id, so a reply can name the message it answers. */
   byId: Map<string, Message>;
-  /** What THIS client can see under each root. Never the whole truth. */
-  localRollup: Map<string, ThreadRollup>;
   /**
-   * The replies this client holds under each root (every one, tombstones included — `withLiveUnread` decides
-   * what counts). The unread count is arithmetic over THESE, not a tally per frame: a resumed rail redelivers
-   * the same reply, and the array is deduped by seq (#4878).
+   * The replies this client holds under each root (every one, tombstones included — the core's
+   * `liveThreadRollup` decides what counts). The count, the faces and the unread number are arithmetic over
+   * THESE, not a tally per frame: a resumed rail redelivers the same reply, and the array is deduped by seq
+   * (#4878). Built by the core's `groupRepliesByRoot`, the function the web indexes its replies with.
    */
   repliesByRoot: Map<string, Message[]>;
 }
@@ -67,29 +69,10 @@ export interface ThreadContext {
  */
 export function buildThreadContext(messages: Message[]): ThreadContext {
   const byId = new Map<string, Message>();
-  const localRollup = new Map<string, ThreadRollup>();
-  const repliesByRoot = new Map<string, Message[]>();
   for (const message of messages) {
     byId.set(key(message.id), message);
   }
-  for (const message of messages) {
-    if (message.rootId === undefined) continue;
-    const held = repliesByRoot.get(key(message.rootId));
-    if (held) held.push(message);
-    else repliesByRoot.set(key(message.rootId), [message]);
-    // A tombstone is not a reply any more. Counting it would leave 「답글 1개」
-    // under a root whose only reply says 삭제된 메시지, which is a count of
-    // nothing.
-    if (message.state === 'deleted') continue;
-    const root = key(message.rootId);
-    const seen = localRollup.get(root);
-    localRollup.set(root, {
-      replyCount: (seen?.replyCount ?? 0) + 1,
-      lastReplySeq: Math.max(seen?.lastReplySeq ?? 0, message.seq),
-      lastReplyAtMs: Math.max(seen?.lastReplyAtMs ?? 0, message.createdAtMs),
-    });
-  }
-  return {byId, localRollup, repliesByRoot};
+  return {byId, repliesByRoot: groupRepliesByRoot(messages)};
 }
 
 /**
@@ -109,64 +92,35 @@ export function parentOf(
   return context.byId.get(key(message.rootId)) ?? null;
 }
 
+const NO_REPLIES: readonly Message[] = [];
+
 /**
- * What to draw under a root: the server's rollup and this client's own view of
- * the same thread, folded so that neither can hide the other.
+ * What to draw under a root — and **not a second implementation of it**: the core's `liveThreadRollup`, the
+ * one function the web timeline calls, over the replies this client holds under the root (#5032).
  *
- * **Why not just the server's.** Because the server's rides the page that
- * delivered the root, and nothing re-delivers a root when a reply lands under
- * it. Reply to a message with no replies and the server's rollup stays null for
- * as long as that page is on screen — so the one visible consequence of the
- * thing you just did is nothing at all. That is the defect.
+ * The server's rollup (`message.thread`) rides the page that delivered the root, and nothing re-delivers a
+ * root when a reply lands under it. So the core lays the replies this list already holds on top of that
+ * snapshot: the count is the server's count plus the replies past its head, the faces put each new replier
+ * first, and the unread number adds other people's new `text` replies. This used to be a phone-only rule,
+ * the larger of the server's count and a local tally. It was wrong for exactly the thread nobody opened:
+ * the local tally is 0 until the thread loads, so a root with 3 server replies and 1 new one still said 3,
+ * and a first reply had no face. Which replies count (the approval card of a request does, a work-session
+ * system line does not) is decided once, in the core, from what the server counts in `reply_count`.
  *
- * **Why not just the local one.** Because it only counts replies this client
- * has fetched, which is none until the thread is opened. A root with 5 replies
- * would announce 0.
- *
- * So: the larger of the two, field by field. The server wins while it is ahead
- * (history nobody opened), the local count wins the moment it goes past it (a
- * reply I just wrote), and neither ever pulls the number DOWN — a count that
- * drops as pages load would read as replies disappearing.
+ * `myMemberId` — without it the server's unread number passes through untouched. `viewing` — this root's
+ * thread is open on screen and the app is in front, so the unread number reads 0 (the core's `viewing`):
+ * a new reply does not flash the chip while the read signal is on its way.
  */
 export function rollupFor(
   message: Message,
   context: ThreadContext,
-  /**
-   * Whose unread this is. Without it the server's unread count passes through untouched; with it, replies other
-   * people wrote after the page was read are added on top (`withLiveUnread`).
-   */
   myMemberId?: string,
+  viewing = false,
 ): ThreadRollup | null {
-  // A reply can never carry a rollup: the server's projection joins the thread
-  // table only `AND m.root_id IS NULL`, which is what keeps momo threads one
-  // level deep in the read path as well as the write path.
-  if (message.rootId !== undefined) return null;
-  const server = threadRollup(message);
-  const local = context.localRollup.get(key(message.id));
-  if (!server && !local) return null;
-  // The faces and the unread count are things only the server knows (#4878): this client can count replies it
-  // fetched, but it cannot know who else replied or what the reader has read. They pass through — an absent
-  // value stays absent (a thread the reader does not follow draws today's line, no chip), and a root known only
-  // locally has no faces. The unread count gets the replies held beyond the page's head on top.
-  const live =
-    server && myMemberId !== undefined
-      ? withLiveUnread(server, context.repliesByRoot.get(key(message.id)) ?? [], myMemberId)
-      : server;
-  return {
-    replyCount: Math.max(server?.replyCount ?? 0, local?.replyCount ?? 0),
-    lastReplySeq: Math.max(server?.lastReplySeq ?? 0, local?.lastReplySeq ?? 0),
-    lastReplyAtMs: Math.max(
-      server?.lastReplyAtMs ?? 0,
-      local?.lastReplyAtMs ?? 0,
-    ),
-    ...(server?.participantIds === undefined
-      ? {}
-      : {participantIds: server.participantIds}),
-    ...(server?.participantCount === undefined
-      ? {}
-      : {participantCount: server.participantCount}),
-    ...(live?.unreadReplyCount === undefined
-      ? {}
-      : {unreadReplyCount: live.unreadReplyCount}),
-  };
+  return liveThreadRollup(
+    message,
+    context.repliesByRoot.get(key(message.id)) ?? NO_REPLIES,
+    myMemberId,
+    viewing,
+  );
 }
