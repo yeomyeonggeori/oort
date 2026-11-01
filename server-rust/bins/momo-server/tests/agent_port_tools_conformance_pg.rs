@@ -11823,7 +11823,8 @@ fn kinds_of_3840(body: &Value) -> Vec<String> {
 ///   * attribute calls with no handle to "the one lease"         -> inbox_read/ping rows appear
 ///   * drop `tool_call` from `agent_run_event_set_framed`        -> framed = true, a frame row
 ///   * drop `AND ($4 OR e.kind <> 'tool_call')` in the read      -> default read holds tool_call
-///   * add any column to `agent_run_event`/the tally             -> the fixed column lists differ
+///   * add any column to `agent_run_event`, `agent_run_tool_tally` or
+///     `agent_run_activity_tally` (168)                           -> the fixed column lists differ
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn an_oort_call_on_a_run_is_one_row_of_name_time_and_code_and_nothing_else() {
@@ -11834,10 +11835,21 @@ async fn an_oort_call_on_a_run_is_one_row_of_name_time_and_code_and_nothing_else
     let base = start_server(app, true).await;
     let client = reqwest::Client::new();
 
-    // ② the columns are fixed: there is nowhere for an argument or a body to go.
+    // ② the columns are fixed: a `tool_call` row has nowhere for an argument or a body to go.
+    // Migration 168 (#4656, ADR-0200 증보 7) added seven columns to this table ON PURPOSE: the
+    // first seven below, `activity_*`, `label`, `plan`. Three of them carry the AGENT's own
+    // words (`activity_id`, `label`, `plan`) and exist for the two report kinds only
+    // (`agent_run_event_activity_ck` keeps all seven NULL on every other kind, `tool_call`
+    // included). The list is pinned again so that the next column has to be chosen, not
+    // slipped in; the new total table is pinned beside the tool tally.
     assert_eq!(
         columns_3840(&su, "agent_run_event").await,
         [
+            "activity_id",
+            "activity_kind",
+            "activity_n",
+            "activity_started_at",
+            "activity_status",
             "actor_member_id",
             "approval_id",
             "code",
@@ -11845,6 +11857,8 @@ async fn an_oort_call_on_a_run_is_one_row_of_name_time_and_code_and_nothing_else
             "duration_ms",
             "framed",
             "kind",
+            "label",
+            "plan",
             "run_id",
             "seq",
             "stage",
@@ -11860,6 +11874,17 @@ async fn an_oort_call_on_a_run_is_one_row_of_name_time_and_code_and_nothing_else
             "ok_count",
             "run_id",
             "tool",
+            "updated_at",
+            "workspace_id"
+        ]
+    );
+    assert_eq!(
+        columns_3840(&su, "agent_run_activity_tally").await,
+        [
+            "completed_units",
+            "failed_units",
+            "kind",
+            "run_id",
             "updated_at",
             "workspace_id"
         ]

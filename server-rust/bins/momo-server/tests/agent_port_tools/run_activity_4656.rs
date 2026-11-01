@@ -1042,6 +1042,27 @@ fn event_kinds(body: &Value) -> Vec<String> {
     kinds_of_3840(body)
 }
 
+/// `GET …/agent-runs/{run}/events{query}` as the person this token belongs to.
+async fn events_as(
+    client: &reqwest::Client,
+    base: &str,
+    jwt: &str,
+    workspace: Uuid,
+    run: Uuid,
+    query: &str,
+) -> (u16, Value) {
+    let response = client
+        .get(format!(
+            "{base}/v1/workspaces/{workspace}/agent-runs/{run}/events{query}"
+        ))
+        .bearer_auth(jwt)
+        .send()
+        .await
+        .expect("events responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
 fn has_report_rows(body: &Value) -> bool {
     event_kinds(body)
         .iter()
@@ -1053,14 +1074,16 @@ fn has_report_rows(body: &Value) -> bool {
 /// `include=activity` returns them folded (and the total); a mistyped value is a 400; and the
 /// read the helper's `get_agent_run` tool makes (`RunEventInclude::default()`) never carries an
 /// agent's label into a model's context. Only the channel's ACTIVE members read: an admin who is
-/// not in the channel, a member who left, another tenant's member, a DM's third person — the same
-/// 404 as a run that does not exist.
+/// not in the channel, a member who left, another tenant's member, a DM's third person, and a
+/// member of ANOTHER channel of the same workspace (who reads the run of the room they are in and
+/// not this one) — the same 404 as a run that does not exist.
 ///
 /// Tamper table:
 ///   * drop `AND e.kind NOT IN ('activity','plan')` from the base read      -> the default read holds the rows
 ///   * make `RunEventInclude::default()` `activity: true`                     -> the helper-path assertion turns red
 ///   * drop `m.left_at IS NULL` from the visibility join                      -> the member who left reads the rows
 ///   * drop the membership JOIN (workspace membership only)                   -> the admin / the DM's third person reads them
+///   * drop `AND m.channel_id = r.channel_id` from the visibility join        -> the member of the other channel reads them
 ///   * drop `"activity" =>` from `parse_run_event_include`                    -> `include=activity` is a 400
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
@@ -1222,6 +1245,59 @@ async fn the_agents_rows_are_opt_in_and_read_only_by_the_channels_active_members
     assert_eq!(
         hidden, missing,
         "a hidden run and a missing one answer alike: no existence oracle"
+    );
+    // A person who is an active member of ANOTHER channel of this workspace. The admin and the
+    // DM's third person here are in no channel at all, so they cannot tell "a member of this
+    // run's room" from "a member of some room of the workspace"; this person can. The control
+    // first: the same person with the same token reads the run of the room they ARE in (with
+    // the report rows), so the 404 below is the room and not a broken credential.
+    let (elsewhere, elsewhere_jwt) = seed_human_2915(&su, &fixture, "member", "다른 방").await;
+    add_member_2915(&su, ws, fixture.private_channel, elsewhere).await;
+    let own_room_run = new_run(&su, &fixture, fixture.private_channel).await;
+    record_as_app(
+        &app,
+        ws,
+        own_room_run,
+        fixture.hosted_agent,
+        Some(json!([act("p1", "read", "completed", 2)])),
+        None,
+    )
+    .await;
+    let (status, body) = events_as(
+        &client,
+        &base,
+        &elsewhere_jwt,
+        ws,
+        own_room_run,
+        "?include=activity",
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "a member reads the run of their own room: {body}"
+    );
+    assert!(
+        has_report_rows(&body),
+        "…and its report rows with the opt-in: {body}"
+    );
+    let (status, other_room) =
+        events_as(&client, &base, &elsewhere_jwt, ws, run, "?include=activity").await;
+    assert_eq!(
+        status, 404,
+        "a member of another room of the workspace reads nothing of this one: {other_room}"
+    );
+    let (_, nothing_there) = events_as(
+        &client,
+        &base,
+        &elsewhere_jwt,
+        ws,
+        Uuid::new_v4(),
+        "?include=activity",
+    )
+    .await;
+    assert_eq!(
+        other_room, nothing_there,
+        "the other room's run answers like a run that does not exist"
     );
     let leaver = seed_outsider_3741(&su, &fixture).await; // joined the channel, then left it
     let (status, body) = events_3741(&client, &base, &leaver, &fixture, &run_text).await;
@@ -1412,6 +1488,7 @@ async fn nothing_the_agent_reports_is_copied_outside_its_ledger_rows() {
 ///   * remove `'activity','plan'` from the window in `agent_run_event_set_framed`  -> one frame per row (10)
 ///   * widen the window to include `tool_call`                                      -> tool calls frame
 ///   * put `NEW.label` into the frame payload in `agent_run_event_emit_frame`       -> the text scan finds the mark
+///   * put `NEW.stage` in place of `channel_id` in that payload                      -> the channel id equality turns red
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn one_call_is_one_frame_without_any_of_the_agents_text_and_the_next_window_frames_again() {
@@ -1482,7 +1559,15 @@ async fn one_call_is_one_frame_without_any_of_the_agents_text_and_the_next_windo
         "kind and two ids, nothing the agent wrote"
     );
     assert!(["stage", "activity", "plan"].contains(&frame["payload"]["kind"].as_str().unwrap()));
-    assert!(!frame.to_string().contains(MARK) && !frame.to_string().contains("a0"));
+    // Nothing is left that could carry the agent's words: the three keys hold the run's id (it
+    // is what found this frame), this channel's id and a kind, and the labels' mark is nowhere
+    // in the frame. (A substring scan for the activity id `a0` is not usable on this text: it
+    // holds two random UUIDs, and `a0` turns up inside one of them about one run in five.)
+    assert_eq!(
+        frame["payload"]["channel_id"],
+        json!(fixture.channel.to_string())
+    );
+    assert!(!frame.to_string().contains(MARK), "{frame}");
 
     // inside the same window another report writes its row and puts no second frame on the topic
     let started = std::time::Instant::now();
