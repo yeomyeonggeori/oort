@@ -1839,7 +1839,17 @@ paths:
         false closes the door for cards an agent raises nobody asked for —
         `oort_action_initiate` is refused, and a card already waiting is not
         executed when approved, while rejecting it still works; only an
-        administrator writes it here, never an agent proposal).
+        administrator writes it here, never an agent proposal), and
+        `team_ai_roles` (object of booleans, ADR-0201 증보 v3 B3 / #4964: which
+        role bundles of the helper are on — `workspace_admin`, `invite_access`,
+        `long_research`, `files`, `memory`, `code`; an absent key or field is
+        **on**, `chat_read` is always on and is not a field, so naming it is 400.
+        This is the one key merged one level down: a named field replaces, an
+        omitted field stays, `null` drops the field (back to on), so a patch
+        that names one switch never moves another. Turning `memory` from off to
+        on while team memory is switched off is 409 `team_memory_off`. A change
+        writes the audit row `team_ai.roles.changed` with the key names only. An
+        agent's `workspace.settings.update` proposal cannot name this key).
         `role_labels` is replaced whole — omit a role key to
         drop that override; `null` deletes the key (client default labels).
         Serialized body over 8192 bytes is 413. There is no PUT whole-replace.
@@ -1859,7 +1869,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/WorkspaceSettings"}
         "400":
-          description: Unknown key, malformed allowed_agent_models, role_labels, welcome_agent_member_id or welcome_prompt, inactive welcome agent, or non-object body.
+          description: Unknown key, malformed allowed_agent_models, role_labels, welcome_agent_member_id, welcome_prompt or team_ai_roles (an unknown bundle, `chat_read`, a non-boolean), inactive welcome agent, or non-object body.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -1871,6 +1881,17 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "404":
           description: Workspace not visible under the tenant GUC.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: >
+            `team_memory_off` — the patch turns the `memory` role from off to on
+            while team memory is switched off (ADR-0201 증보 v3 B3, #4964).
+            Nothing was written. (The `team_ai_fast_path` provisioning conflict
+            `team_ai_unavailable` is also a 409, but it is answered after the
+            write: the helper's own switch is put back off and the rest of that
+            request stays committed — and audited, like any other write.)
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -12811,7 +12832,10 @@ paths:
         `scope=mine` narrows to the approvals the caller decided, requested (the
         author of the run's trigger message, or the actor of a work run's
         `agent.work.queued` row) or whose agent they own (`agent.owner_human_id`).
-        It narrows within the caller's channels and never widens them.
+        It narrows within the caller's channels and never widens them. An in-place
+        channel grant the caller requested (or owns the agent of) is listed under
+        `mine` even when they are not an owner or admin, though `team` lists it only
+        to one: it is theirs to follow, not theirs to decide.
       security:
         - bearerAuth: []
       parameters:
@@ -19046,8 +19070,18 @@ components:
         claimedAtMs: {type: integer, format: int64}
         latestStage: {type: string, maxLength: 80}
         lastEventAtMs: {type: integer, format: int64}
-        approvalId: {type: string, format: uuid}
-        approvalExpiresAtMs: {type: integer, format: int64}
+        approvalId:
+          type: string
+          format: uuid
+          description: >
+            The pending approval the run is parked on. Named only to a caller who is
+            an active member of the channel the approval was raised in (the rule
+            `bundle` follows), which need not be the run's own channel; absent
+            otherwise.
+        approvalExpiresAtMs:
+          type: integer
+          format: int64
+          description: The deadline of `approvalId`, under the same rule.
         bundle:
           type: object
           additionalProperties: false
@@ -19437,6 +19471,23 @@ components:
         (`GET …/approvals/{approval}/avatar-preview?v=<sha256>`, readable by
         that person only) and its result `ref` is `{type: member, id: <the
         person>}`.
+        `team_ai.roles.set` (`{bundle, enabled}`, `admin`; ADR-0201 증보 v3
+        B3-T, #4964) is team-AI-only the same way: 「파일 역할 꺼 줘」 said to the
+        helper becomes one card that switches ONE role bundle (`bundle` is one
+        of `workspace_admin`, `invite_access`, `long_research`, `files`,
+        `memory`, `code`; `chat_read` and any other name are refused as an
+        argument). An admin approves; approving runs the same merge and write
+        as `PATCH …/settings` for `{team_ai_roles: {<bundle>: <enabled>}}` with
+        the approver's authority and writes the audit row `team_ai.roles.changed`
+        (key names only). A card that turns `files` or `memory` on shows the
+        line saying what content goes to the team's AI provider, and approving
+        it writes the consent record `team_ai.roles.notice_shown` (who, when,
+        wording version). A request in which the helper has read anything — a
+        workspace read, a web search — cannot raise it, and a card whose
+        bundle (for the helper's cards) was switched off since is refused at
+        the decision with `action_args_invalid`. It is always decided in the
+        app, never from a lock-screen action. Its result `ref` is
+        `{type: workspace_settings, id: <workspace id>}`.
         `message.pin` and `message.unpin` (`{messageId}`, `admin`; ADR-0186
         증보 2026-10-27 v5 U-e, #4703) let an agent propose pinning or unpinning
         **one text message of the conversation the run was raised in**. The
@@ -19457,7 +19508,7 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "dm.agent.admit"]
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "dm.agent.admit"]
 
     InitiativeActionId:
       type: string
@@ -24766,6 +24817,22 @@ components:
           description: >
             ADR-0186 증보 v5 U-b-3: the switch for cards an agent raises
             unasked. Absent = on; false = off.
+        team_ai_roles:
+          type: object
+          description: >
+            ADR-0201 증보 v3 B3 (#4964): which role bundles of the team AI
+            ("oort 도우미") are on. Absent key or absent field = on. A bundle
+            that is off is not advertised to the model and is refused again when
+            proposed and when approved. `chat_read` is always on and is not a
+            field.
+          additionalProperties: false
+          properties:
+            workspace_admin: {type: boolean}
+            invite_access: {type: boolean}
+            long_research: {type: boolean}
+            files: {type: boolean}
+            memory: {type: boolean}
+            code: {type: boolean}
         team_ai_alias_status:
           type: object
           description: >
@@ -24786,7 +24853,8 @@ components:
       type: object
       description: >
         RFC 7396-shaped top-level merge patch. Unknown keys 400. role_labels
-        is a whole-object replace (nested keys are not deep-merged). null
+        is a whole-object replace (nested keys are not deep-merged); the one
+        exception is team_ai_roles, merged one level down. null
         deletes the named key.
       additionalProperties: false
       properties:
@@ -24846,6 +24914,24 @@ components:
             boolean is stored: a string or a number is 400, because the door
             reads anything else as off. An agent's
             `workspace.settings.update` proposal cannot name this key.
+        team_ai_roles:
+          nullable: true
+          type: object
+          description: >
+            ADR-0201 증보 v3 B3 (#4964): the helper's role switches. Merged one
+            level down — a named field replaces, an omitted field stays, a
+            `null` field is dropped (back to on); `null` for the key drops the
+            whole object (all on). Unknown names (`chat_read` included) and
+            non-boolean values are 400. Turning `memory` from off to on while
+            team memory is switched off is 409 `team_memory_off`.
+          additionalProperties: false
+          properties:
+            workspace_admin: {type: boolean, nullable: true}
+            invite_access: {type: boolean, nullable: true}
+            long_research: {type: boolean, nullable: true}
+            files: {type: boolean, nullable: true}
+            memory: {type: boolean, nullable: true}
+            code: {type: boolean, nullable: true}
 
     RoleLabels:
       type: object
