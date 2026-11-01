@@ -978,7 +978,7 @@ oort_doctor_classify_outbox() {
     [ "$status" = "done" ] && continue
 
     row="${kind}|${status}|${count}"
-    if [ "$kind" = "agent_job" ]; then
+    if [ "$kind" = "agent_job" ] || [ "$kind" = "push_system" ]; then
       row="${row} max_age=${age}s"
     fi
 
@@ -1003,6 +1003,33 @@ oort_doctor_classify_outbox() {
       fi
       continue
     fi
+
+    # BEGIN oort-doctor-push-system
+    if [ "$kind" = "push_system" ]; then
+      # ADR-0206 D15 (#4341): a push that names no message (today the test push), drained by the
+      # notifier's second loop. A mix of the two rules around it: with no push relay configured
+      # nothing can drain it, so it is info (like push_candidate); with one configured, a row
+      # younger than the stale threshold is in flight (info) and an older one is FAIL (like
+      # agent_job), because the notifier should have taken it by then. It is not counted in
+      # push_pending: that count names push_candidate rows in the no-relay explanation.
+      if [ "$relay" = "0" ] || [ "$age" -lt "$stale_secs" ]; then
+        info_n=$((info_n + 1))
+        if [ -n "$info_bits" ]; then
+          info_bits="${info_bits}; ${row}"
+        else
+          info_bits="$row"
+        fi
+      else
+        fail_n=$((fail_n + 1))
+        if [ -n "$fail_bits" ]; then
+          fail_bits="${fail_bits}; ${row}"
+        else
+          fail_bits="$row"
+        fi
+      fi
+      continue
+    fi
+    # END oort-doctor-push-system
 
     if [ "$kind" = "agent_job" ]; then
       if [ "$age" -lt "$stale_secs" ]; then

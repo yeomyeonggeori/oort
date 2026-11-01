@@ -802,6 +802,29 @@ F5가 「별도 증보」로 미룬 데스크탑·웹 배너와 F8의 화면을 
 24. **에이전트가 많이 말하는 스레드에서 사람 후속의 푸시가 늘 수 있어요.** `type='text'`의 닫힌 줄만 대상이고(진행 줄은 다른 type) 대량 층 상한이 있어요. 작업 세션 스레드(F4)는 2단계가 잰 뒤 정해요.
 25. **상태 이름·열거 값은 엔진이 소유해요**(`docs/TRACKS.md:23`). 응답은 `following`(boolean)뿐이라 UXUI가 따라 넣을 열거 값이 없어요.
 
+## 증보 2 (2026-11-02, #4341 구현에서 확정한 것 — D11의 「[확인 필요] 추론의 오탐은 #4341이 격리 PG로 재현해서 조정해요」의 이행)
+
+D11·D15는 그대로이고, 구현이 격리 PG로 재현하며 정한 모양과 이슈 본문과의 차이만 적어요. 범위는 이 슬라이스가 낸 것(진단 `GET`·시험 `POST`·`push_system`·시험 알림 어휘 몫)뿐이에요.
+
+**이슈 #4341 본문과 달라진 곳** (이슈가 ADR보다 먼저 쓰였어요. ADR을 따랐어요)
+1. 시험 알림 행은 `outbox(kind='push_test')`가 아니라 **`push_system`**(D15)이에요. 소비는 notifier의 둘째 드레인이고 `push_candidate`의 판정을 지나지 않아요.
+2. 어휘 증보는 N0 전체가 아니라 이 슬라이스 몫만 먼저 냈어요: reason `test_notification`, category `momo.system`, reason별 정적 본문 표(기본 「새 알림」·`test_notification` 「시험 알림이에요」). `channel_message`·`keyword`·`scheduled_failed`는 N0·N1·N5·N13이 같은 방식으로 더해요(부록 ADR-0120 A-9). 폰 상수 최소 diff(`PUSH_REASONS`·`PUSH_CATEGORY`·Swift 둘·`categories.ts`)는 같은 PR이에요.
+3. migration은 **170 한 파일**에 M-a(outbox 라벨 `push_system`, 새 값을 쓰는 문장 없음)·M-b1(`notification_rule` 컬럼 넷)·M-h(`push_dispatch_log (member_id, created_at DESC)` 색인)를 묶었어요. 새 표·새 GRANT는 없어요(`prod_role_conformance_pg`가 운영 역할로 확인해요).
+4. `kind_off`·`quiet_hours`는 이 슬라이스가 내지 않아요(N3·N7). `kind`는 닫힌 열 가지 목록(종류 표 + `threadReply`)으로만 검증하고(400), 두 코드가 나오지 않는다는 것을 시험이 고정해요.
+
+**D11 조정** (각각 시험이 고정해요)
+- `relay_unreachable`의 「마지막 시험이 30초 넘게 처리되지 않음」 절도 **최근 15분**으로 한정해요. 그보다 오래 멈춘 시험은 지금의 relay에 대한 증거가 아닌데 화면에 영원히 남기 때문이에요. `sinceMs`는 두 증거(정산 전 2분 이상 된 기록, 멈춘 시험) 중 이른 쪽이에요. 두 읽기 모두 현재 활성 토큰의 기록만, 대량 층 드롭 행(`relay_http: dropped`, 상수 하나 `RELAY_DROPPED_REASON`)은 건너뛰어요.
+- `token_invalidated.sinceMs`는 마지막으로 죽은 토큰의 `invalidated_at`(곧 활성 토큰이 하나도 없게 된 순간)이에요. `devices.invalidated`는 무효 토큰 **행 수**라서 토큰 회전으로 쌓인 옛 행도 세요.
+- `lastTest`: 200이 하나라도 있으면 `sent`, 정산된 기록이 없으면 30초 미만 `queued`·이상 `stalled`, **모든 시도**가 어휘 거절 400이면 `relay_outdated`(환경 불일치 400은 `failed`), 그 밖의 정산 기록(정산 전 시도가 섞인 경우 포함)은 `failed`예요. `apnsStatus`는 `sent`면 200, 아니면 가장 새 정산 기록의 상태예요.
+- `apnsReason`은 **코드만** 내요: relay 거절은 `relay_vocabulary_refused`·`relay_environment_mismatch`·`relay_http_<status>`로 바꾸고, APNs reason은 글자·숫자·`_` 64자 이하일 때만 그대로 통과해요(relay가 영수증에 문장을 끼워도 응답에 닿지 않아요). 어휘·환경 문구가 relay에서 바뀌면 진짜 relay 라우터를 도는 시험(`push_system_conformance_pg`)이 빨개져요.
+- 속도 제한은 **고정 60초 창**(첫 시험이 창을 열어요)에서 멤버당 3회예요. 활성 토큰이 없으면 슬롯을 쓰지 않고(409 `no_device`) `notification_rule` 행도 만들지 않아요. 429는 `error.code=rate_limited`와 `Retry-After`를 줘요. 시험은 `dnd`·다른 규칙 컬럼을 건드리지 않고 자기 컬럼 넷만 써요(구 PUT/PATCH도 그 넷을 건드리지 않아요).
+
+**D15 조정**
+- 시험 알림의 전송 오류 규칙: relay가 429·5xx로 **답한** 것은 그 상태로 정산(`lastTest` = `failed`)하고, relay에 **닿지 못한** 전송(전송 오류)은 정산하지 않고 둬요 — 그래야 `queued` → `stalled`가 되고 진단이 `relay_unreachable`을 추론해요. 어느 쪽도 outbox 행은 `done`이에요(재시도 없음, `oort doctor`에 영구 FAIL로 남지 않아요). 우리 쪽 DB 오류만 후보와 같은 백오프·`max_attempts`로 되살려요.
+- 봉투의 `badge`는 0이 아니라 **멤버의 실제 안 읽은 수**예요(0이면 시험을 누른 부작용으로 앱 아이콘 배지가 지워져요).
+- 폰 탭: 시험 알림은 열 대화가 없어서 앱만 열려요(채널이 목록에 없다는 「대화가 없어졌어요」를 내지 않아요). 알림 설정 화면으로 보내는 것은 상태·시험 화면(#4342)의 몫이에요.
+- `oort doctor`의 `push_system` 분류: relay 미구성이면 info, 구성이면 나이(기본 300초) 기준 FAIL이에요. `available_at`이 미래인 행의 처리는 N11 몫이에요.
+
 ## owner 결정 (인용)
 
 - 2026-10-21 성재: 「버즈쪽에서 알림에서 에로사항을 엄청 느끼는 거 같아. 그 부분에 있어서 커스텀까지도 가능하게(직접 넣어서 말이야) 해줬으면 좋겠어.」
