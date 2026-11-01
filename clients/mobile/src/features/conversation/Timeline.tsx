@@ -31,6 +31,7 @@ import {
 } from 'react-native';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {DockFollowContext} from './dockFollow';
+import {DRAG_REST_FOLLOW_HOLD_MS, joinTouchHandlers, useDragRest} from './dragRest';
 import {useTapDismiss} from './tapDismiss';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
@@ -2746,10 +2747,18 @@ function TimelineInner({
   // 부른다: JS 가 아는 길이(`VirtualizedList.scrollToEnd` 는 어림이다)가 아니라 **네이티브 `scrollToEnd`** — 그 순간의 창과 콘텐츠 길이로 끝을 셈한다. 바닥을 따라가는 중이 아니면(과거를 읽는 중,
   // 점프가 가는 중 — `beginJumpTravel` 이 따라가기를 붙든다) 아무것도 안 한다.
   const dockFollow = useContext(DockFollowContext);
+  // 끌기로 입력창이 쉬기 시작한 시각 + `DRAG_REST_FOLLOW_HOLD_MS` (#4665). `restFromDrag` 가 건다. 시한이 있는 막이라 따로 풀 곳이 없다.
+  const dragRestHoldUntilRef = useRef(0);
+  // 읽는 사람이 목록을 쥐고 있다 — 손가락이 목록을 끌고 있거나, 끌기로 입력창이 쉬기 시작한 지 얼마 안 됐다. 이 동안은 입력창이 줄어드는 프레임에도 바닥으로 끌어가지 않는다(아래 두 자리).
+  const readerHoldsList = useCallback(() => fingerOnListRef.current || Date.now() < dragRestHoldUntilRef.current, []);
   useEffect(() => {
     if (dockFollow === null) return undefined;
     return dockFollow.register(() => {
       if (!followingRef.current) return;
+      // 읽는 사람이 목록을 쥔 동안은 바닥으로 끌어가지 않는다(#4665). 아래로 끌다가 입력창이 쉬면(`dragRest.ts`) 목록은 아직 바닥에서 120pt 안이라 「따라가는 중」으로 남아 있는데,
+      // 그때 네이티브 `scrollToEnd` 를 부르면 손가락 밑에서 목록이 끝으로 튀고 입력창이 줄어드는 프레임마다 다시 튄다. 손가락이 먼저다(`followGlide` 와 같은 원칙). 손을 뗀 직후의
+      // 접힘 꼬리(몇 프레임)도 같다 — 그 몇 프레임이 방금 위로 읽으러 간 목록을 끝으로 되돌린다(`DRAG_REST_FOLLOW_HOLD_MS`).
+      if (readerHoldsList()) return;
       // `getScrollResponder()` 는 ScrollView 인스턴스를 준다(타입은 `Element` 라 좁혀서 읽는다). 그 `scrollToEnd` 는 네이티브 명령이다.
       const scroller = listRef.current?.getScrollResponder() as unknown as
         | {scrollToEnd?: (options?: {animated?: boolean}) => void}
@@ -2757,15 +2766,34 @@ function TimelineInner({
         | undefined;
       scroller?.scrollToEnd?.({animated: false});
     });
-  }, [dockFollow, listRef]);
+  }, [dockFollow, listRef, readerHoldsList]);
 
-  // 목록의 탭 = 자판을 내리고 입력창을 쉬게 한다 (#4614, `tapDismiss.ts`). 터치를 **관찰만** 한다 — 응답자를 잡지 않으므로 링크·칩·길게 누르기·행 탭의 스레드 열기는 그대로이고, 어느 요소의
-  // 탭이든(자기 동작이 있어도) 손을 뗀 뒤에 이 처리기가 나머지를 거둔다. 자판은 여기서 직접 내리고(`Keyboard.dismiss` — 입력창이 안 쥔 자판은 없다), 글이 남은 입력창을 접는 것은 다리(`dockFollow.rest`)가 맡는다.
-  const onListTap = useCallback(() => {
+  // 목록이 입력창에게 쉬라고 한다. 자판은 여기서 직접 내리고(`Keyboard.dismiss` — 입력창이 안 쥔 자판은 없다), 글이 남은 입력창을 접는 것은 다리(`dockFollow.rest`)가 맡는다.
+  // 탭(#4614)과 끌기(#4665)가 **같은 함수**를 부른다 — 「쉬기」가 둘로 갈라지지 않는다.
+  const restDock = useCallback(() => {
     Keyboard.dismiss();
     dockFollow?.rest();
   }, [dockFollow]);
-  const tapTouch = useTapDismiss(onListTap);
+  // 목록의 탭 = 쉬기 (#4614, `tapDismiss.ts`). 터치를 **관찰만** 한다 — 응답자를 잡지 않으므로 링크·칩·길게 누르기·행 탭의 스레드 열기는 그대로이고, 어느 요소의
+  // 탭이든(자기 동작이 있어도) 손을 뗀 뒤에 이 처리기가 나머지를 거둔다.
+  const tapTouch = useTapDismiss(restDock);
+  // 끌기로 쉴 때만 목록이 잠시 바닥을 따라가지 않는다 — 손을 뗀 뒤 접힘 스프링의 꼬리가 방금 위로 읽으러 간 목록을 끝으로 되돌리지 않게(`DRAG_REST_FOLLOW_HOLD_MS`). 탭은 손가락이 없어서 이 막이 없다.
+  const restFromDrag = useCallback(() => {
+    dragRestHoldUntilRef.current = Date.now() + DRAG_REST_FOLLOW_HOLD_MS;
+    restDock();
+  }, [restDock]);
+  // 목록을 손가락으로 아래로 끌어 48pt 누적 = 같은 쉬기 (#4665, `dragRest.ts`). 같은 터치 이벤트를 읽는 탭 판정과 한 벌로 묶고, 목록이 손가락에 끌리는 동안(`onScrollBeginDrag` ~
+  // `onScrollEndDrag`)만 센다 — 손을 뗀 뒤의 관성·프로그램 이동은 손가락이 아니다. 그래서 아래 `keyboardDismissMode` 는 `none` 이다(`on-drag` 는 문턱보다 먼저 첫 1px 에 자판을 걷는다).
+  const dragRest = useDragRest(restFromDrag);
+  const listTouch = useMemo(() => joinTouchHandlers(tapTouch, dragRest), [tapTouch, dragRest]);
+  const onListDragBegin = useCallback(() => {
+    onScrollBeginDrag();
+    dragRest.onScrollBeginDrag();
+  }, [onScrollBeginDrag, dragRest]);
+  const onListDragEnd = useCallback(() => {
+    onScrollEndDrag();
+    dragRest.onScrollEndDrag();
+  }, [onScrollEndDrag, dragRest]);
 
   // The viewport changed size rather than the content growing. A reader who was
   // at the bottom stays at the bottom; one who was reading history is left
@@ -2781,9 +2809,10 @@ function TimelineInner({
     (event: LayoutChangeEvent) => {
       noteGeometry({viewportHeight: event.nativeEvent.layout.height});
       resolvePendingVerdict();
-      if (followingRef.current) listRef.current?.scrollToEnd({animated: false});
+      // 읽는 사람이 목록을 쥔 동안은 끌어가지 않는다(#4665) — 아래로 끌다가 입력창이 쉬어 창이 늘어나는 프레임에 `scrollToEnd` 가 손가락 밑 목록을 끝으로 되돌리면 안 된다(위 도크 처리기와 같은 이유).
+      if (followingRef.current && !readerHoldsList()) listRef.current?.scrollToEnd({animated: false});
     },
-    [listRef, noteGeometry, resolvePendingVerdict],
+    [listRef, noteGeometry, readerHoldsList, resolvePendingVerdict],
   );
 
   // ---- 두 필이 데려가는 곳 (#1892) ------------------------------------------
@@ -3489,13 +3518,13 @@ function TimelineInner({
         onRefresh === undefined ? undefined : pullEnabled ? refreshControl : NO_PULL_SLOT
       }
       onScroll={pullScroll.onScroll}
-      // 탭 판정(#4614): 읽기만 하는 터치 처리기 넷. 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
-      onTouchStart={tapTouch.onTouchStart}
-      onTouchMove={tapTouch.onTouchMove}
-      onTouchEnd={tapTouch.onTouchEnd}
-      onTouchCancel={tapTouch.onTouchCancel}
-      onScrollBeginDrag={onScrollBeginDrag}
-      onScrollEndDrag={onScrollEndDrag}
+      // 탭 판정(#4614)과 끌기 판정(#4665): 읽기만 하는 터치 처리기 넷(둘을 한 벌로 묶었다). 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
+      onTouchStart={listTouch.onTouchStart}
+      onTouchMove={listTouch.onTouchMove}
+      onTouchEnd={listTouch.onTouchEnd}
+      onTouchCancel={listTouch.onTouchCancel}
+      onScrollBeginDrag={onListDragBegin}
+      onScrollEndDrag={onListDragEnd}
       // 떠 있는 날짜 알약만 관성을 본다(DS2-4 B-1) — 따라가기 판정은 여기 없다.
       onMomentumScrollBegin={jumpPills ? onMomentumScrollBegin : undefined}
       onMomentumScrollEnd={jumpPills ? onMomentumScrollEnd : undefined}
@@ -3526,7 +3555,11 @@ function TimelineInner({
       // `on-drag` asks nothing of where the drag ends: moving the conversation at
       // all puts the keyboard away, which is the gesture people already make when
       // they want to read instead of type.
-      keyboardDismissMode="on-drag"
+      //
+      // **#4665 (owner 10-27): 첫 1px 에 걷지 않고 손가락이 아래로 48pt 누적될 때 걷는다.** `on-drag` 는 읽으려고 살짝 밀어도 자판을 걷었고, 그때 글이 남은 입력창은 펼친 채라(#4456)
+      // 「스크롤하면 입력창이 접힌다」가 안 됐다. 이제 끌기도 탭과 같은 쉬기(`restDock` — 자판 내림 + 글이 남은 입력창은 한 줄 알약)로 가고 **언제**는 `dragRest.ts` 가 정한다. 모드를
+      // `none` 으로 두는 이유: `on-drag` 로 두면 UIKit 이 그 문턱보다 먼저 첫 1px 에 자판을 걷는다. 위로 끌기는 더는 자판을 걷지 않는다(누적 0 — Buzz 와 같다).
+      keyboardDismissMode="none"
       // The other half of the rule is `handled`, and it is deliberately NOT
       // `never`. Both dismiss on a tap; they disagree about what else that tap
       // does, and `never` makes the scroll view swallow it — so while the
