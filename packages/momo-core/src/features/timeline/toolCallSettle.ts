@@ -1,4 +1,5 @@
 import type { Message } from "../../lib/api";
+import { parseApprovalStatus, toolNameOf } from "./agentCardModel";
 import { shouldFoldBundleLine } from "./requestBundle";
 
 // =============================================================================
@@ -16,6 +17,20 @@ import { shouldFoldBundleLine } from "./requestBundle";
 // 종결 패치하려면 `message.edited` 쓰기가 하나 더 생기는데, 클라이언트가 이미 가진 사실을 다시 쓰는 일이다.
 //
 // 결과가 아직 없으면(실행 중이거나 결과가 목록 밖) 손대지 않는다 — 그때의 「생각 중」은 맞는 말이다.
+//
+// #5009 가 같은 자리에 더한 둘:
+//
+// 1. **거부·만료·취소로 끝난 승인도 호출의 끝이다.** 그 승인은 결과 행을 쓰지 않고 승인 카드(`approval_request`)
+//    를 제자리에서 고쳐 끝낸다(`momo-messaging/src/approval_card.rs` `settle_approval_card_in_tx`, 「No new
+//    message or channel sequence is made」). 카드 props 에는 호출의 `call_id` 가 처음부터 실려 있으므로
+//    (`momo-agent/src/approval.rs` `approval_request_props`) 종결된 카드의 `call_id` 로 같은 호출 카드를 **중단**으로
+//    닫는다. 닫는 것은 거부·만료·취소 셋뿐이다: **승인됨** 카드는 닫지 않는다 — 승인 뒤 실행 중일 수 있고 그 끝은
+//    결과 행이 말한다. 같은 호출에 결과 행과 종결 카드가 함께 있으면 **결과 행이 이긴다**(실제로 일어난 일이
+//    카드의 상태보다 강한 근거다).
+// 2. **결과 카드가 호출 행의 이름을 빌린다.** 결과 행 props 에는 도구 이름이 없어 카드 제목이 이름 없는 「도구
+//    실행」이었다. 같은 `call_id` 의 호출 행 이름을 결과 행 사본에 `name` 으로 얹는다(`toolCard` 가 이미 읽는 키
+//    이고 `PARSED_KEYS` 에 있어 「표시하지 않은 항목」 수는 그대로다). 결과 행이 자기 이름을 싣고 오면 그것이
+//    먼저이고, 짝이 되는 호출 행이 목록에 없으면 손대지 않는다.
 // =============================================================================
 
 type SettledStatus = "done" | "error" | "cancelled";
@@ -38,26 +53,52 @@ function settledStatus(result: Message): SettledStatus {
   return result.props?.["is_error"] === true ? "error" : "done";
 }
 
-/** 같은 원본·같은 끝이면 같은 사본을 돌려준다 — 행이 사본 정체성으로 다시 그려지지 않게 한다. */
-const COPIES = new WeakMap<Message, Map<SettledStatus, Message>>();
+/**
+ * 호출이 **돌지 않고** 끝났다고 말하는 승인 카드인가: 거부·만료·취소만이다(허용 목록 — 모르는 상태와 `approved`·
+ * `pending` 은 호출을 닫지 않는다). 상태를 읽는 순서는 카드 모델(`approvalCard`)과 같다: `approval_status` →
+ * `status`(서버가 둘을 한 패치로 함께 쓴다, `decided_props_patch`).
+ */
+function endsCallUnrun(card: Message): boolean {
+  const status =
+    parseApprovalStatus(card.props?.["approval_status"]) ??
+    parseApprovalStatus(card.props?.["status"]);
+  return status === "rejected" || status === "expired" || status === "cancelled";
+}
 
-function settledCopy(message: Message, status: SettledStatus): Message {
-  let byStatus = COPIES.get(message);
-  if (byStatus === undefined) {
-    byStatus = new Map();
-    COPIES.set(message, byStatus);
+/**
+ * 같은 원본·같은 덧붙임이면 같은 사본을 돌려준다 — 행이 사본 정체성으로 다시 그려지지 않게 한다. 한 행에 얹는
+ * 것은 하나다(호출 행은 `status`, 결과 행은 `name`).
+ */
+const COPIES = new WeakMap<Message, Map<string, Message>>();
+
+function withProp(
+  message: Message,
+  key: "status" | "name",
+  value: string
+): Message {
+  const slot = `${key}=${value}`;
+  let bySlot = COPIES.get(message);
+  if (bySlot === undefined) {
+    bySlot = new Map();
+    COPIES.set(message, bySlot);
   }
-  let copy = byStatus.get(status);
+  let copy = bySlot.get(slot);
   if (copy === undefined) {
-    copy = { ...message, props: { ...message.props, status } };
-    byStatus.set(status, copy);
+    copy = { ...message, props: { ...message.props, [key]: value } };
+    bySlot.set(slot, copy);
   }
   return copy;
 }
 
 /**
- * 같은 목록에 결과가 있는 `tool_call` 행의 `props.status` 를 끝으로 채워 돌려준다. 이미 상태를 싣고 온
- * 행(서버가 말한 것)은 덮지 않는다. 바꿀 행이 없으면 **같은 배열**을 돌려줘서 호출자의 메모가 유지된다.
+ * 같은 목록의 짝을 보고 두 가지를 채워 돌려준다.
+ *
+ * - `tool_call` 행의 `props.status` 를 끝으로: 같은 `call_id` 의 결과 행(완료·실패·중단)이 있으면 그것으로,
+ *   결과 행이 없고 종결된 승인 카드(거부·만료·취소)가 있으면 중단으로. 이미 상태를 싣고 온 행(서버가 말한
+ *   것)은 덮지 않는다.
+ * - 이름이 없는 `tool_result` 행의 `props.name` 을 같은 `call_id` 의 호출 행 이름으로.
+ *
+ * 바꿀 행이 없으면 **같은 배열**을 돌려줘서 호출자의 메모가 유지된다.
  *
  * 결과 행이 접힌(`shouldFoldBundleLine`) 뒤에는 이 판정을 할 수 없으니, 호출자는 접기 **전** 목록을
  * 넘긴다.
@@ -66,26 +107,46 @@ export function settleToolCalls(
   messages: readonly Message[]
 ): readonly Message[] {
   const results = new Map<string, SettledStatus>();
+  const unrun = new Set<string>();
+  const names = new Map<string, string>();
   for (const message of messages) {
-    if (message.type !== "tool_result" || message.state === "deleted") continue;
+    if (message.state === "deleted") continue;
     const id = callId(message);
-    if (id !== undefined) {
-      results.set(keyOf(message.channelId, id), settledStatus(message));
+    if (id === undefined) continue;
+    const key = keyOf(message.channelId, id);
+    if (message.type === "tool_result") {
+      results.set(key, settledStatus(message));
+    } else if (message.type === "approval_request") {
+      if (endsCallUnrun(message)) unrun.add(key);
+    } else if (message.type === "tool_call") {
+      const name = toolNameOf(message.props);
+      if (name !== undefined) names.set(key, name);
     }
   }
-  if (results.size === 0) return messages;
+  if (results.size === 0 && unrun.size === 0 && names.size === 0) {
+    return messages;
+  }
   let changed = false;
   const next = messages.map((message) => {
-    if (message.type !== "tool_call" || message.state === "deleted") {
-      return message;
-    }
-    if (typeof message.props?.["status"] === "string") return message;
+    if (message.state === "deleted") return message;
     const id = callId(message);
-    const status =
-      id === undefined ? undefined : results.get(keyOf(message.channelId, id));
-    if (status === undefined) return message;
-    changed = true;
-    return settledCopy(message, status);
+    if (id === undefined) return message;
+    const key = keyOf(message.channelId, id);
+    if (message.type === "tool_call") {
+      if (typeof message.props?.["status"] === "string") return message;
+      const status = results.get(key) ?? (unrun.has(key) ? "cancelled" : undefined);
+      if (status === undefined) return message;
+      changed = true;
+      return withProp(message, "status", status);
+    }
+    if (message.type === "tool_result") {
+      if (toolNameOf(message.props) !== undefined) return message;
+      const name = names.get(key);
+      if (name === undefined) return message;
+      changed = true;
+      return withProp(message, "name", name);
+    }
+    return message;
   });
   return changed ? next : messages;
 }
