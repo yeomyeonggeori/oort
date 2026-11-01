@@ -80,7 +80,10 @@ import {useEndedRuns} from '../agents/endedRuns';
 import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
 import {triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
-import {shouldFoldBundleLine} from '@momo/core/features/timeline/requestBundle';
+import {
+  shouldFoldBundleLine,
+  type RunWithBundleSnapshot,
+} from '@momo/core/features/timeline/requestBundle';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
 import {hasRequestBundle, requestLoopIndex} from './requestLoop';
 import {agentCardModel} from '@momo/core/features/timeline/agentCardModel';
@@ -2878,7 +2881,8 @@ function TimelineInner({
       const run = runs[0];
       if (run) {
         const bundle = requests.bundleFor(run);
-        const progress = bundle === undefined ? run : {...run, bundle};
+        const progress: RunWithBundleSnapshot =
+          bundle === undefined ? run : {...run, bundleSnapshot: bundle};
         byMessage.set(messageId, progress);
       }
     }

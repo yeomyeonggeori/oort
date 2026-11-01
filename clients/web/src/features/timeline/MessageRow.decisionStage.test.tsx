@@ -62,8 +62,8 @@ function approval(mode?: "inline" | "open", props = {}): Message {
 function run(): AgentRunProgress {
   return { id: RUN, channelId: CH, triggerMessageId: ROOT, agentMemberId: AGENT, status: "running", phase: "awaiting_approval",
     leaseState: "live", approvalId: APPROVAL, stepCount: 1, ahead: [], createdAtMs: Date.now(), updatedAtMs: Date.now(),
-    bundle: { status: "pending", approval_id: APPROVAL, can_decide: true, intent: "안내를 고정해도 될까요?", decision_mode: "open" },
-  } as AgentRunProgress;
+    bundle: { approvalId: APPROVAL, status: "pending", decisionMode: "open", canDecide: true, actionType: "workspace_action", intent: "안내를 고정해도 될까요?" },
+  };
 }
 function mount({ shell = false, card = approval("open"), runs = [run()] }: { shell?: boolean; card?: Message; runs?: AgentRunProgress[] } = {}) {
   const fallback = vi.fn();
@@ -148,6 +148,27 @@ describe("요청에서 결정 무대로 연결", () => {
     await click(opener);
     expect(stage()).toBeNull();
     expect(fallback).toHaveBeenCalledTimes(1);
+  });
+
+  // #4960. 서버가 run 진행 bundle로 「이 사람은 지금 못 한다」고 말하면(보는 사람 기준 `canDecide:false`) 카드 props가 아무
+  // 말이 없어도(`can_decide` 없음) 무대에 올리지 않는다. 「한다」는 단추를 더 세우지 않는다.
+  it.each([
+    ["서버가 못 한다고 말하면 무대 대신 기존 스레드를 연다", false, "fallback"],
+    ["서버가 한다고 말하면 무대가 열린다", true, "stage"],
+  ] as const)("run bundle canDecide: %s", async (_name, serverCanDecide, expected) => {
+    const bundle = { ...run().bundle!, canDecide: serverCanDecide };
+    const card = approval("open", { can_decide: undefined });
+    const fallback = mount({ card, runs: [{ ...run(), bundle }] });
+    api.fetchMessages.mockResolvedValue({ messages: [card] });
+    await click(within(screen.getByTestId("thread-request-summary")).getByRole("button", { name: "열어서 결정" }));
+    if (expected === "stage") {
+      expect(stage()).toBeTruthy();
+      expect(fallback).not.toHaveBeenCalled();
+    } else {
+      expect(stage()).toBeNull();
+      expect(screen.queryByTestId("decision-stage-approve")).toBeNull();
+      expect(fallback).toHaveBeenCalledTimes(1);
+    }
   });
 
   it.each(["inline", "open"] as const)("%s: 무대 승인 한 번이 기존 결정 경로와 원래 카드의 같은 영수증으로 돌아와요", async (mode) => {
