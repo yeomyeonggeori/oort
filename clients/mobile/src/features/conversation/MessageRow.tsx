@@ -147,6 +147,7 @@ import {ApprovalAvatarPreview} from './ApprovalAvatarPreview';
 import {CONV} from './convDesign';
 import {AiConnectSuggestion} from './AiConnectSuggestion';
 import {SettingsOpenSuggestion} from './SettingsOpenSuggestion';
+import {WorkRequestSuggestion} from './WorkRequestSuggestion';
 import {
   TEAM_AI_DELEGATE_ACTION_PREFIX,
   TeamAiDelegateStrip,
@@ -202,7 +203,10 @@ import {
 
 /** 도우미 줄이 아닐 때 넘기는 빈 이름 목록. 렌더마다 새 배열을 만들지 않는다. */
 const NO_NAMES: readonly string[] = [];
-import {commandSuggestCard} from '@momo/core/features/timeline/commandSuggest';
+import {
+  commandSuggestCard,
+  type WorkRequestOpen,
+} from '@momo/core/features/timeline/commandSuggest';
 import {
   deadlinePassed,
   gateFor,
@@ -2192,6 +2196,12 @@ export function resetMessageRowRenderCount(): void {
 export interface MessageRowActions {
   myMemberId: string;
   onOpenDecision?: (approvalId: string) => void;
+  /**
+   * 도우미의 「작업 요청 열기」 카드(`work.request.open`, #4972)를 눌렀다: 「내 맥에 보내기」 시트를
+   * 작업 요청 모드로, 카드가 가진 글·도구로 미리 채워 연다. 보내는 것은 사람이다. 시트를 열 곳이 없는
+   * 표면은 이 줄을 주지 않고, 그때 카드는 누를 단추 없이 한 줄로 선다.
+   */
+  onOpenWorkRequest?: (prefill: WorkRequestOpen) => void;
   /** Optimistic in the hook; rejects with the error the row turns into a line. */
   onToggleReaction: (message: Message, emoji: string) => Promise<void>;
   onEdit: (message: Message, body: string) => Promise<void>;
@@ -2518,6 +2528,8 @@ function MessageRowInner({
     () => commandSuggestCard(message, directory),
     [message, directory],
   );
+  // 도우미의 「작업 요청 열기」 카드(#4972)는 시트를 미리 채워 여는 자기 컴포넌트를 쓴다.
+  const isWorkRequestCard = suggestion?.commandId === 'work.request.open';
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
   const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
   // 도우미 답의 꼬리(ADR-0201 v2): 찾아본 것 · 출처 · 모델 라벨. 칸이 없으면 null.
@@ -3415,6 +3427,12 @@ function MessageRowInner({
               <SettingsOpenSuggestion
                 card={suggestion}
                 viewerMemberId={actions?.myMemberId}
+              />
+            ) : isWorkRequestCard ? (
+              <WorkRequestSuggestion
+                card={suggestion}
+                viewerMemberId={actions?.myMemberId}
+                onOpen={actions?.onOpenWorkRequest}
               />
             ) : suggestion ? (
               <AiConnectSuggestion

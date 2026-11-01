@@ -1413,6 +1413,16 @@ oort_card_suggest {handle, clientMsgId, commandId: "ai.connect", args, body}
   notifications | shortcuts | devices | workspace | members | memory | usage |
   code | updates | plugins` (`plugins` is the apps page). A section id, never
   a path; any other value is refused, so answer in text instead.
+- And `commandId: "work.request.open"` (ADR-0201 v3 B8 C1) when a person asks
+  you to hand coding work to their own Mac: the card opens their own
+  「작업 요청」 sheet with your text filled in, and **they** read it and send
+  it. Its `args` are the required `prompt` — plain text in the person's voice,
+  1–8,000 UTF-8 bytes, no control character but line feed and tab, nothing
+  invisible, not starting with `/` (the same rule the signed spawn applies) —
+  and an optional `harness` ∈ `claude | codex` (the name they gave; `team_key`
+  is `ai.connect`'s and is refused here). Any other key (`folder`, `channel`,
+  `label`, …) is refused. The card runs nothing and writes no approval or audit
+  row of its own; the spawn is signed by the owner's device key when they send.
 
 #### 3.3.16d Raising a card nobody asked for: `workspace:initiate`
 

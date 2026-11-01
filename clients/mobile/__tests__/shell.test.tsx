@@ -7,6 +7,7 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {ActionSheetIOS} from 'react-native';
+import * as deviceKeyHook from '../src/features/deviceKey/useDeviceKey';
 import {FILTER_ACTION} from '../src/screens/SidebarScreen';
 import AppShell from '../src/shell/AppShell';
 import {
@@ -127,6 +128,10 @@ interface RouteOverrides {
   messages?: () => Response | Promise<Response>;
   dms?: () => Response | Promise<Response>;
   approvals?: () => Response | Promise<Response>;
+  /** 「내 맥에 보내기」 시트가 여는 순간 읽는 셋(#4972). 없으면 이 픽스처 서버는 옛 서버처럼 모른다. */
+  workHosts?: () => Response | Promise<Response>;
+  workSessions?: () => Response | Promise<Response>;
+  signingContext?: () => Response | Promise<Response>;
 }
 
 function installFetch(overrides: RouteOverrides = {}): jest.Mock {
@@ -169,6 +174,11 @@ function installFetch(overrides: RouteOverrides = {}): jest.Mock {
       return overrides.approvals
         ? overrides.approvals()
         : jsonResponse(200, {approvals: []});
+    }
+    if (overrides.workHosts && url.endsWith('/work-hosts')) return overrides.workHosts();
+    if (overrides.workSessions && url.endsWith('/work-sessions')) return overrides.workSessions();
+    if (overrides.signingContext && url.endsWith('/signing-context')) {
+      return overrides.signingContext();
     }
     if (url.includes('/dms')) {
       return overrides.dms
@@ -397,6 +407,89 @@ describe('opening a conversation', () => {
 
     fireEvent.press(screen.getByTestId('header-back'));
     expect(screen.queryByTestId('composer-input')).toBeNull();
+  });
+
+  // #4972 S9 — 도우미의 「작업 요청 열기」 카드는 대화 안에서 셸의 「내 맥에 보내기」 시트를 글·도구가
+  // 채워진 작업 요청으로 연다. 셸 → 대화 화면 → 타임라인 → 행 → 카드 → 셸 상태 → 시트가 한 줄로 이어진다.
+  it('opens the 「내 맥에 보내기」 sheet as a filled-in task request from the helper’s card (#4972)', async () => {
+    const PROMPT = '로그인 화면의 비밀번호 보기 버튼이 눌리지 않아요. 원인을 찾아 고쳐 주세요.';
+    const card = {
+      id: 'm-card',
+      channelId: 'ch-general',
+      seq: 1,
+      hlcTs: 1,
+      hlcCount: 0,
+      authorMemberId: 'dddddddd-1111-4111-8111-dddddddddddd',
+      type: 'text',
+      body: '내 맥에서 바로 열 수 있어요.',
+      state: 'sent',
+      createdAtMs: 1_700_000_000_000,
+      props: {
+        'momo.command_suggest': {
+          v: 1,
+          command_id: 'work.request.open',
+          args: {harness: 'codex', prompt: PROMPT},
+          for_member_id: SELF_ID,
+          label: '내 맥의 Codex에 맡기기',
+        },
+      },
+    };
+    const macWire = {
+      id: '55555555-5555-4555-8555-555555555551',
+      workspaceId: WS,
+      scope: 'member',
+      ownerMemberId: SELF_ID,
+      type: 'workd',
+      displayName: '성재의 MacBook',
+      capabilities: {},
+      createdAtMs: 1,
+      lastSeenAtMs: 1000,
+      online: true,
+      folders: [{id: 'fld_app', displayName: 'oort-app', kind: 'project'}],
+    };
+    installFetch({
+      messages: () => jsonResponse(200, {messages: [card]}),
+      workHosts: () => jsonResponse(200, {workHosts: [macWire]}),
+      workSessions: () => jsonResponse(200, {workSessions: []}),
+      signingContext: () =>
+        jsonResponse(200, {
+          instanceId: 'inst',
+          serverTimeMs: 1,
+          maxLifetimeMs: 600000,
+          maxClockSkewMs: 300000,
+          humanControlSignatureRequired: true,
+          hostRegisterSignatureRequired: false,
+        }),
+    });
+    // 시뮬레이터에는 Secure Enclave가 없다: 서명 키가 승인된 폰으로 읽는다(시트가 막히지 않게). 이 시험만이다.
+    const deviceKey = jest.spyOn(deviceKeyHook, 'useDeviceKey').mockReturnValue({
+      view: {kind: 'approved'},
+      enroll: jest.fn(),
+      replace: jest.fn(),
+      refresh: jest.fn(),
+      busy: false,
+      failure: null,
+    } as unknown as ReturnType<typeof deviceKeyHook.useDeviceKey>);
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
+
+    // 카드가 선다. 글은 카드에 그리지 않고, 누르기 전에는 시트가 없다.
+    const open = await screen.findByTestId('work-request-suggest-open');
+    expect(screen.getByTestId('work-request-suggest-label')).toHaveTextContent('내 맥의 Codex에 맡기기');
+    expect(screen.queryByText(PROMPT)).toBeNull();
+    expect(screen.queryByTestId('ask-mac-sheet')).toBeNull();
+
+    fireEvent.press(open);
+    // 시트가 작업 요청 모드로, 글이 채워진 채, 고른 도구로 열린다. 보내는 것은 사람이다(보내기 단추가 있다).
+    const prompt = await screen.findByTestId('ask-mac-prompt');
+    expect(prompt.props.value).toBe(PROMPT);
+    expect(screen.getByTestId('ask-mac-mode-work').props.accessibilityState?.selected).toBe(true);
+    expect(screen.getByTestId('ask-mac-destination-line')).toHaveTextContent(
+      '내 맥 · 성재의 MacBook · Codex',
+    );
+    expect(screen.getByTestId('ask-mac-send')).toBeTruthy();
+    deviceKey.mockRestore();
   });
 
   it('opens a group DM (an agent seated by everyone’s consent) and never says only two people see it (#4912)', async () => {
