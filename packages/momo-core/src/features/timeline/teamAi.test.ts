@@ -118,6 +118,56 @@ describe("넘기는 줄과 맡기기 버튼 (ADR-0201 D5)", () => {
     expect(parseTeamAiDelegate(delegateProps({ reason: "mystery" }))?.reasonLine).toBeNull();
   });
 
+  // 한도에 닿은 줄(#4944): 이유 코드는 `over_budget` 그대로이고 `props.limit = {source, window}` 만 더해진다.
+  // 「오늘」이라고만 하면 월 한도와 운영자 끔에는 틀린 말이다.
+  describe("한도에 닿은 줄은 props.limit 로 이유를 고른다", () => {
+    const reasonLine = (limit: unknown) =>
+      parseTeamAiDelegate(
+        delegateProps({ reason: "over_budget", ...(limit === undefined ? {} : { limit }) })
+      )?.reasonLine;
+
+    it("limit 가 없는 줄(옛 서버)은 옛 줄 그대로 「오늘」이다", () => {
+      expect(reasonLine(undefined)).toBe("넘긴 이유: 오늘 도우미 사용량을 다 씀");
+      expect(reasonLine(null)).toBe("넘긴 이유: 오늘 도우미 사용량을 다 씀");
+    });
+
+    it("서버가 내는 네 짝이 각자 자기 말을 한다", () => {
+      expect(reasonLine({ source: "team", window: "day" })).toBe("넘긴 이유: 오늘 도우미 사용량을 다 씀");
+      expect(reasonLine({ source: "team", window: "month" })).toBe(
+        "넘긴 이유: 이번 달 도우미 사용량을 다 씀"
+      );
+      expect(reasonLine({ source: "operator", window: "day" })).toBe(
+        "넘긴 이유: 서버 운영자가 정한 오늘 사용량을 다 씀"
+      );
+      expect(reasonLine({ source: "operator", window: "off" })).toBe(
+        "넘긴 이유: 서버 운영자가 도우미를 멈춰 둠"
+      );
+    });
+
+    it("모르는 짝이나 깨진 모양은 창을 지어내지 않고 어느 창에도 맞는 말만 한다", () => {
+      const neutral = "넘긴 이유: 도우미 사용량 한도에 닿음";
+      expect(reasonLine({ source: "team", window: "week" })).toBe(neutral);
+      expect(reasonLine({ source: "partner", window: "day" })).toBe(neutral);
+      expect(reasonLine({ source: "team" })).toBe(neutral);
+      expect(reasonLine("month")).toBe(neutral);
+      expect(reasonLine([])).toBe(neutral);
+    });
+
+    it("다른 이유의 줄은 limit 를 읽지 않는다", () => {
+      expect(
+        parseTeamAiDelegate(delegateProps({ reason: "slow", limit: { source: "operator", window: "off" } }))
+          ?.reasonLine
+      ).toBe("넘긴 이유: 도우미가 제때 답하지 못함");
+    });
+
+    it("이유 코드는 limit 가 있어도 over_budget 이다", () => {
+      expect(
+        parseTeamAiDelegate(delegateProps({ reason: "over_budget", limit: { source: "team", window: "month" } }))
+          ?.reason
+      ).toBe("over_budget");
+    });
+  });
+
   it("멱등 키가 없는 후보는 버튼이 아니다", () => {
     const parsed = parseTeamAiDelegate(
       delegateProps({
