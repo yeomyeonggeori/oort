@@ -264,7 +264,7 @@ export const catalog: MessageCatalog = {
   "expressions.draft.rights": [
     {
       "type": 0,
-      "value": "이 그림을 팀에 저장할 권한이 있어요. 사람 얼굴이 있다면 지정된 당사자만 승인해요."
+      "value": "이 그림을 팀에 등록할 권한이 있어요. 사람 얼굴이 있다면 지정된 당사자만 승인해요."
     }
   ],
   "expressions.draft.source": [
@@ -923,7 +923,7 @@ export const catalog: MessageCatalog = {
   "expressions.photo.cutoutUnchanged": [
     {
       "type": 0,
-      "value": "배경을 지우지 못했어요. 아래 미리보기가 그대로 저장돼요."
+      "value": "배경을 지우지 못했어요. 아래 미리보기가 그대로 등록돼요."
     }
   ],
   "expressions.photo.displayNameLabel": [
