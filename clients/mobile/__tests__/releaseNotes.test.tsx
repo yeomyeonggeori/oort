@@ -322,21 +322,30 @@ describe('설정 › 업데이트 소식 장', () => {
 
 describe('설정 › 정보 카드의 「업데이트 소식」 행', () => {
   pinMotionOff();
-  function mountSettings(initialPage?: React.ComponentProps<typeof SettingsPage>['initialPage']) {
+  // `language`: ko·en = 앱처럼 언어 provider 안, none = provider 없이(캡처 하네스의 `shell-profile-bottom` 같은 격리 표면).
+  function mountSettings(
+    initialPage?: React.ComponentProps<typeof SettingsPage>['initialPage'],
+    language: 'ko' | 'en' | 'none' = 'ko',
+  ) {
     const queryClient = new QueryClient({defaultOptions: {queries: {retry: false, gcTime: 0}}});
+    const page = (
+      <QueryClientProvider client={queryClient}>
+        <SettingsPage
+          workspaceId={WS}
+          member={SELF}
+          directory={makeDirectory(ROSTER as unknown as RosterMember[])}
+          connected
+          onSignOut={() => {}}
+          onClose={() => {}}
+          initialPage={initialPage}
+        />
+      </QueryClientProvider>
+    );
     return render(
-      withLocale(
-        <QueryClientProvider client={queryClient}>
-          <SettingsPage
-            workspaceId={WS}
-            member={SELF}
-            directory={makeDirectory(ROSTER as unknown as RosterMember[])}
-            connected
-            onSignOut={() => {}}
-            onClose={() => {}}
-            initialPage={initialPage}
-          />
-        </QueryClientProvider>,
+      language === 'none' ? (
+        <ThemeProvider>{page}</ThemeProvider>
+      ) : (
+        withLocale(page, language === 'en')
       ),
     );
   }
@@ -354,6 +363,25 @@ describe('설정 › 정보 카드의 「업데이트 소식」 행', () => {
     expect(row.props.accessibilityHint).toBe('버전별로 바뀐 점을 봐요.');
     fireEvent.press(row);
     expect(await screen.findByTestId('settings-release-notes-page')).toBeTruthy();
+  });
+
+  // #5047: 검증 줄 1회차에 `shell-profile-bottom` 의 이 행이 한국어 화면에서 「What's new」로 찍혔다. 사전 값은 처음부터 맞았고(위 시험),
+  // 틀린 것은 언어 provider 가 없는 하네스에서 소식 훅이 영어 사전으로 떨어지던 대체였다. 하네스 조건 그대로(provider 없이) 잰다.
+  it('언어 provider 가 없는 격리 표면(캡처 하네스)에서도 행은 한국어다 (#5047)', async () => {
+    mountSettings(undefined, 'none');
+    const row = await screen.findByTestId('settings-release-notes-row');
+    expect(within(row).getByText('업데이트 소식')).toBeTruthy();
+    expect(within(row).queryByText("What's new")).toBeNull();
+    expect(row.props.accessibilityHint).toBe('버전별로 바뀐 점을 봐요.');
+  });
+
+  it("영어 앱에서는 같은 행이 「What's new」다 (#5047)", async () => {
+    mountSettings(undefined, 'en');
+    const row = await screen.findByTestId('settings-release-notes-row');
+    expect(within(row).getByText("What's new")).toBeTruthy();
+    expect(within(row).queryByText('업데이트 소식')).toBeNull();
+    expect(within(row).getByText('0.1.41')).toBeTruthy();
+    expect(row.props.accessibilityHint).toBe('See what changed in each version.');
   });
 });
 
