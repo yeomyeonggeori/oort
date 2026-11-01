@@ -765,11 +765,15 @@ mod tests {
     /// the minimum the code reads and writes (`team-ai-task-lockdown`, the same text in the migration
     /// and both role bootstraps).
     ///
+    /// 170 is #4341's 「알림 진단과 시험 알림」 (ADR-0206 D11·D15): the `push_system` outbox label
+    /// (a value this file never uses, as 011 did), four `notification_rule` columns for the test
+    /// push's per-minute window and its last test, and the `push_dispatch_log (member_id,
+    /// created_at DESC)` index the diagnostics read. No new table, so no new RLS policy or grant.
+    ///
     /// 171 is #4961's 「팀 표현의 종류 값」 (ADR-0218 증보 4 §10): `expression.kind` (`emoji` /
     /// `sticker`), `NOT NULL DEFAULT 'sticker'` so every earlier row reads as a sticker, a closed
     /// `CHECK`, and nothing else. No new table (so no new RLS policy), no new grant, and the identity
     /// trigger of 158 keeps the new column immutable after INSERT without being touched.
-    /// (170 is #4341's; it may reach the track after this file.)
     #[test]
     fn discovers_contiguous_migrations_001_to_171() {
         let dir = default_migrations_dir();

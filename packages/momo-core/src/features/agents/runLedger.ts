@@ -93,11 +93,25 @@ function foldRepeats(rows: RunLedgerRow[]): RunLedgerRow[] {
   return out;
 }
 
+/**
+ * 기록 칸에 서는 줄. `tool_call`(oort가 잰 도구 호출)은 **여기에 서지 않는다**: 기록 칸은 수명주기·
+ * 에이전트 단계·승인·깨움을 시간순으로 말하는 곳이고, 서버가 잰 도구 호출은 「oort 기록」 칸이
+ * 따로 맡는다(`workTimeline`, #4654). 한 칸에 섞으면 출처가 다른 줄이 한 목록에 선다.
+ */
+type LedgerLineEvent = AgentRunLedgerEvent & {
+  kind: Exclude<AgentRunLedgerEvent["kind"], "tool_call">;
+};
+
+function isLedgerLine(event: AgentRunLedgerEvent): event is LedgerLineEvent {
+  return event.kind !== "tool_call";
+}
+
 function rawLedgerRows(
   events: readonly AgentRunLedgerEvent[]
 ): RunLedgerRow[] {
   const seen = new Map<string, number>();
   return events
+    .filter(isLedgerLine)
     .map((event, index) => ({ event, index }))
     .sort((a, b) => a.event.createdAtMs - b.event.createdAtMs || a.index - b.index)
     .map(({ event }): RunLedgerRow => {

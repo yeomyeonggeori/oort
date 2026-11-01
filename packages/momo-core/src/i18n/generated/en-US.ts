@@ -2014,6 +2014,364 @@ export const catalog: MessageCatalog = {
       "value": "Video"
     }
   ],
+  "timeline.workRecord.bundleRead": [
+    {
+      "type": 0,
+      "value": "Read "
+    },
+    {
+      "type": 2,
+      "value": "read",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.bundleReadSearch": [
+    {
+      "type": 0,
+      "value": "Read "
+    },
+    {
+      "type": 2,
+      "value": "read",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " · Search "
+    },
+    {
+      "type": 2,
+      "value": "search",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.bundleSearch": [
+    {
+      "type": 0,
+      "value": "Search "
+    },
+    {
+      "type": 2,
+      "value": "search",
+      "style": null
+    }
+  ],
+  "timeline.workRecord.capped": [
+    {
+      "type": 0,
+      "value": "Only the first "
+    },
+    {
+      "type": 2,
+      "value": "shown",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " calls are listed. The total above counts every call."
+    }
+  ],
+  "timeline.workRecord.durationMinutes": [
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "m "
+    },
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "s"
+    }
+  ],
+  "timeline.workRecord.durationMs": [
+    {
+      "type": 2,
+      "value": "ms",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "ms"
+    }
+  ],
+  "timeline.workRecord.durationSeconds": [
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "s"
+    }
+  ],
+  "timeline.workRecord.emptyEnded": [
+    {
+      "type": 0,
+      "value": "oort measured no tool call on this run."
+    }
+  ],
+  "timeline.workRecord.emptyOpen": [
+    {
+      "type": 0,
+      "value": "oort has not measured any tool call yet."
+    }
+  ],
+  "timeline.workRecord.failureAlreadyClaimed": [
+    {
+      "type": 0,
+      "value": "Already claimed elsewhere"
+    }
+  ],
+  "timeline.workRecord.failureClaimExpired": [
+    {
+      "type": 0,
+      "value": "The claim had already expired"
+    }
+  ],
+  "timeline.workRecord.failureConflict": [
+    {
+      "type": 0,
+      "value": "Conflicted with another change"
+    }
+  ],
+  "timeline.workRecord.failureInternal": [
+    {
+      "type": 0,
+      "value": "A server-side problem"
+    }
+  ],
+  "timeline.workRecord.failureInvalidArguments": [
+    {
+      "type": 0,
+      "value": "The request was malformed"
+    }
+  ],
+  "timeline.workRecord.failureNotAuthorized": [
+    {
+      "type": 0,
+      "value": "Not authorized"
+    }
+  ],
+  "timeline.workRecord.failureUnavailable": [
+    {
+      "type": 0,
+      "value": "Not available right now"
+    }
+  ],
+  "timeline.workRecord.kindDelegate": [
+    {
+      "type": 0,
+      "value": "Hand off to another agent"
+    }
+  ],
+  "timeline.workRecord.kindEdit": [
+    {
+      "type": 0,
+      "value": "Edit"
+    }
+  ],
+  "timeline.workRecord.kindOther": [
+    {
+      "type": 0,
+      "value": "Other work"
+    }
+  ],
+  "timeline.workRecord.kindRead": [
+    {
+      "type": 0,
+      "value": "Read"
+    }
+  ],
+  "timeline.workRecord.kindRun": [
+    {
+      "type": 0,
+      "value": "Run a command"
+    }
+  ],
+  "timeline.workRecord.kindSearch": [
+    {
+      "type": 0,
+      "value": "Search"
+    }
+  ],
+  "timeline.workRecord.kindWeb": [
+    {
+      "type": 0,
+      "value": "Web request"
+    }
+  ],
+  "timeline.workRecord.noteAgent": [
+    {
+      "type": 0,
+      "value": "What the agent reported about itself. oort has not verified it."
+    }
+  ],
+  "timeline.workRecord.noteComputer": [
+    {
+      "type": 0,
+      "value": "Sent by the work running on my computer."
+    }
+  ],
+  "timeline.workRecord.noteOort": [
+    {
+      "type": 0,
+      "value": "Tool calls that oort measured itself. Arguments and contents are not recorded."
+    }
+  ],
+  "timeline.workRecord.repeat": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " time"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " times"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.workRecord.sourceAgent": [
+    {
+      "type": 0,
+      "value": "Agent report"
+    }
+  ],
+  "timeline.workRecord.sourceComputer": [
+    {
+      "type": 0,
+      "value": "My computer"
+    }
+  ],
+  "timeline.workRecord.sourceOort": [
+    {
+      "type": 0,
+      "value": "oort record"
+    }
+  ],
+  "timeline.workRecord.statusFailed": [
+    {
+      "type": 0,
+      "value": "Failed"
+    }
+  ],
+  "timeline.workRecord.statusRunning": [
+    {
+      "type": 0,
+      "value": "In progress"
+    }
+  ],
+  "timeline.workRecord.summary": [
+    {
+      "type": 6,
+      "value": "calls",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tool call"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tool calls"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.workRecord.summaryFailed": [
+    {
+      "type": 6,
+      "value": "calls",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tool call"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " tool calls"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 2,
+      "value": "failed",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " failed"
+    }
+  ],
+  "timeline.workRecord.unsupported": [
+    {
+      "type": 0,
+      "value": "oort's call record will show once the server is updated."
+    }
+  ],
   "timeline.workRequest.composerBusy": [
     {
       "type": 0,
@@ -2104,6 +2462,102 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Open the thread and press again."
+    }
+  ],
+  "timeline.workTool.actionClaimSecret": [
+    {
+      "type": 0,
+      "value": "Take a secret"
+    }
+  ],
+  "timeline.workTool.actionInitiate": [
+    {
+      "type": 0,
+      "value": "Raise an unasked approval card"
+    }
+  ],
+  "timeline.workTool.actionPropose": [
+    {
+      "type": 0,
+      "value": "Request approval"
+    }
+  ],
+  "timeline.workTool.cardSuggest": [
+    {
+      "type": 0,
+      "value": "Suggest a card"
+    }
+  ],
+  "timeline.workTool.conversationRead": [
+    {
+      "type": 0,
+      "value": "Read conversation"
+    }
+  ],
+  "timeline.workTool.expressionAssemble": [
+    {
+      "type": 0,
+      "value": "Assemble an expression"
+    }
+  ],
+  "timeline.workTool.inboxRead": [
+    {
+      "type": 0,
+      "value": "Read inbox"
+    }
+  ],
+  "timeline.workTool.jobRelease": [
+    {
+      "type": 0,
+      "value": "Release work"
+    }
+  ],
+  "timeline.workTool.jobRenew": [
+    {
+      "type": 0,
+      "value": "Extend the claim"
+    }
+  ],
+  "timeline.workTool.jobsClaim": [
+    {
+      "type": 0,
+      "value": "Claim work"
+    }
+  ],
+  "timeline.workTool.jobStart": [
+    {
+      "type": 0,
+      "value": "Report work started"
+    }
+  ],
+  "timeline.workTool.messagePost": [
+    {
+      "type": 0,
+      "value": "Post a message"
+    }
+  ],
+  "timeline.workTool.ping": [
+    {
+      "type": 0,
+      "value": "Report being alive"
+    }
+  ],
+  "timeline.workTool.runComplete": [
+    {
+      "type": 0,
+      "value": "Report completion"
+    }
+  ],
+  "timeline.workTool.runEvent": [
+    {
+      "type": 0,
+      "value": "Report progress"
+    }
+  ],
+  "timeline.workTool.unknown": [
+    {
+      "type": 0,
+      "value": "oort tool"
     }
   ]
 };

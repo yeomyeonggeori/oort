@@ -21,6 +21,7 @@ import {
   runPersonalAgentCall,
   type CallDeps,
 } from './personalAgentCallModel';
+import type {TimelineSendFlags} from './useTimeline';
 
 // =============================================================================
 // 컴포저가 개인 에이전트를 부르는 한 길 (#3638, ADR-0198 증보 1 D7).
@@ -28,6 +29,10 @@ import {
 // `tryCall(body)`가 `true`이면 이 훅이 보내기를 맡았다(호출하는 쪽은 `timeline.send`를
 // 부르지 않는다 — 코어 `callPersonalAgent`가 메시지를 직접 보내므로 두 번 보내지 않게).
 // `false`이면 평범한 메시지다.
+//
+// 입력칸의 ✕로 미리보기를 끈 글(`flags.suppressUnfurl`, #5037)은 **메시지가 나가는 세 길 모두**에 같은 표시를
+// 싣는다: 호출 길(코어 `callPersonalAgent`의 전송), 호출하지 못해 평범하게 보내는 폴백(`sendPlain`), 그리고
+// 그 사이 방을 옮겨 간 뒤의 직접 전송. 한 길이라도 빠지면 사람이 끈 카드가 그 길로 나간 메시지에서만 되살아난다.
 //
 // 맡았을 때의 사람 말은 한 줄이고 컴포저 위에 선다(`notice`). 실패는 코어의
 // `callFailureLine` 문장 그대로다. 호출이 맥에 닿으면 만들어질 세션을 기다렸다가 N3 대화로
@@ -65,8 +70,11 @@ export function usePersonalAgentCall(input: {
   channel: Channel | null;
   directory: Directory;
   members: readonly RosterMember[];
-  /** 평범한 메시지로 보낸다(`timeline.send`). 같은 키로 — 호출 경로가 이미 한 번 시도했을 수 있다. */
-  sendPlain: (body: string, clientMsgId: string) => void;
+  /**
+   * 평범한 메시지로 보낸다(`timeline.send`). 같은 키로 — 호출 경로가 이미 한 번 시도했을 수 있다. 켠 때만 세 번째
+   * 인자가 간다(꺼진 전송은 이 인자 이전과 같은 호출이다).
+   */
+  sendPlain: (body: string, clientMsgId: string, flags?: TimelineSendFlags) => void;
   /** 서버가 확정한 호출 메시지를 타임라인에 합친다(`timeline.ingest`). */
   ingest: (message: Message) => void;
   onOpenWorkSession?: (sessionId: string) => void;
@@ -75,7 +83,7 @@ export function usePersonalAgentCall(input: {
   deps?: CallDeps;
   waitTimeoutMs?: number;
 }): {
-  tryCall: (body: string) => boolean;
+  tryCall: (body: string, flags?: TimelineSendFlags) => boolean;
   notice: CallNotice | null;
   dismissNotice: () => void;
 } {
@@ -124,7 +132,7 @@ export function usePersonalAgentCall(input: {
     return () => clearTimeout(id);
   }, [wait, timeout]);
 
-  const tryCall = useCallback((body: string): boolean => {
+  const tryCall = useCallback((body: string, flags?: TimelineSendFlags): boolean => {
     const current = latest.current;
     // 보내는 길이 이 빌드에 없으면 평범한 메시지다(AI 시트·시트 입구와 같은 게이트).
     if (!spawnPort().wired) return false;
@@ -138,6 +146,8 @@ export function usePersonalAgentCall(input: {
     if (target === null || current.channel === null) return false;
     const channelId = current.channel.id;
     const workspaceId = current.workspaceId;
+    // 켠 때만 키가 간다 — 켜지 않은 호출은 이 필드 이전과 같은 입력·같은 요청이다.
+    const suppress = flags?.suppressUnfurl === true;
     setNotice(null);
     void (async () => {
       const run = await runPersonalAgentCall(
@@ -148,6 +158,7 @@ export function usePersonalAgentCall(input: {
           body,
           target,
           signer: lazyPhoneSigner({workspaceId, memberId: current.selfId}),
+          ...(suppress ? {suppressUnfurl: true} : {}),
         },
         current.deps ?? DEFAULT_DEPS,
       ).catch(
@@ -158,11 +169,16 @@ export function usePersonalAgentCall(input: {
         // 그 사이 사람이 다른 방으로 옮겨 갔을 수 있다(화면은 방마다 새로 마운트되지 않는다).
         // 타임라인의 `send`는 지금 방으로 가므로 쓰지 않고, 쓰던 방으로 직접 보낸다(보안 검수 H1).
         if (live.channel !== null && uuidEq(live.channel.id, channelId)) {
-          live.sendPlain(body, run.clientMsgId);
+          if (suppress) live.sendPlain(body, run.clientMsgId, {suppressUnfurl: true});
+          else live.sendPlain(body, run.clientMsgId);
         } else {
-          void sendMessage(workspaceId, channelId, run.clientMsgId, body).catch(
-            () => undefined,
-          );
+          void sendMessage(
+            workspaceId,
+            channelId,
+            run.clientMsgId,
+            body,
+            suppress ? {suppressUnfurl: true} : undefined,
+          ).catch(() => undefined);
         }
         if (run.kind === 'plain') {
           setNotice({text: run.sentence, tone: 'info'});

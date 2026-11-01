@@ -116,6 +116,8 @@ async fn migration_runner_applies_all_66_and_matches_schema() {
         "agent_job",
         "push_candidate",
         "webhook_delivery",
+        // 170 (#4341, ADR-0206 D15): the feed of pushes with no message row (the test push).
+        "push_system",
     ] {
         assert!(
             labels.iter().any(|l| l == want),

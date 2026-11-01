@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../../runtime/host";
+import { teamAiRolesNotice, TEAM_AI_NOTICE_VERSION } from "./teamAiRoles";
 import {
   classifyTeamAiProbe,
   probeTeamAiSwitch,
@@ -135,6 +136,32 @@ describe("물음은 쓰기가 아니다", () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       `https://oort.test/v1/workspaces/${WS}/settings`
     );
+  });
+
+  it("고지 기록(#5040)은 넘겼을 때만 같은 본문에 실린다", async () => {
+    installHost();
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(JSON.stringify({ team_ai_fast_path: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const notice = teamAiRolesNotice("onboarding", ["files", "memory"]);
+    await setTeamAiSwitch(WS, true, notice);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      team_ai_fast_path: true,
+      team_ai_roles_notice: {
+        bundles: ["files", "memory"],
+        noticeVersion: TEAM_AI_NOTICE_VERSION,
+        via: "onboarding",
+      },
+    });
+    await setTeamAiSwitch(WS, true, null);
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      team_ai_fast_path: true,
+    });
   });
 });
 
