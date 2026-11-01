@@ -19990,22 +19990,33 @@ components:
         and the TS registry's `agentSuggestable: true` commands are measured
         against this enum by `clients/web/src/app/commandRegistry.test.ts`.
         Every member is a client command (risk `none`): a command that changes
-        server state is a WorkspaceActionId instead. Two members: `ai.connect`,
+        server state is a WorkspaceActionId instead. Three members: `ai.connect`,
         whose `args` are `harness` (`claude | codex | team_key`, no `grok` in v1)
-        and `scope` (`mine | team`), paired `team_key` with `team`; and
+        and `scope` (`mine | team`), paired `team_key` with `team`;
         `settings.open` (ADR-0201 v2 H6-4, #3939), whose only `args` key is the
         required `section`, one of the web settings nav's section ids
         (`profile | appearance | notifications | shortcuts | devices | workspace |
         members | memory | usage | code | updates`) plus `plugins`, the legacy id
         the core AI hub model resolves to the AI hub's apps page; the AI hub link
         row `ai` and the other legacy aliases are not values, and a value is
-        never a path). A client
+        never a path); and `work.request.open` (ADR-0201 v3 B8 C1, #4972), which
+        opens the person's own 「작업 요청」 sheet already filled in — `args` are
+        the required `prompt` (plain text, 1–8,000 UTF-8 bytes, the signed spawn's
+        own prompt rule: no control character but line feed and tab, nothing
+        invisible, and it may not start with `/`) and an optional `harness`
+        (`claude | codex`; `team_key` belongs to `ai.connect` and is refused
+        here). `harness` is the one `args` property two commands share, so the
+        tools publish it once with the union of the enums. The person reads the
+        prompt in the sheet and sends it themselves — the spawn is a control
+        signed by the owner's device key — so the server writes the card's message
+        and no approval and no audit row for it. A client
         that cannot reach a section shows the message body as text. The message the
         tool posts carries `props["momo.command_suggest"]` with exactly `v`,
         `command_id`, `args` (normalised), `for_member_id` (the run's trigger
-        author, set by the server) and `label` (derived by the server) — never
-        connection state or any secret.
-      enum: ["ai.connect", "settings.open"]
+        author, set by the server) and `label` (derived by the server from the
+        command and, for `work.request.open`, the `harness` alone — never the
+        prompt) — never connection state or any secret.
+      enum: ["ai.connect", "settings.open", "work.request.open"]
 
     WorkspaceAction:
       type: object

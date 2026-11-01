@@ -15,6 +15,7 @@ import { useSurfaceProvidedPredicate } from "@/features/capabilities/useSurfaceP
 import { reachableSettingsSections, resolveSettingsSection } from "@/features/settings/settingsNav";
 import type { CommandSuggestSlotProps } from "@/features/timeline/commandSuggestSlot";
 import { AiConnectSuggestion } from "./AiConnectCard";
+import { WorkRequestOpenSuggestion } from "./WorkRequestOpenCard";
 
 // =============================================================================
 // 「설정 열기」 제안 카드 (U-S6 #3940, ADR-0201 v2 H6-4, 서버 #3939).
@@ -42,6 +43,8 @@ import { AiConnectSuggestion } from "./AiConnectCard";
 
 export function CommandSuggestion(props: CommandSuggestSlotProps) {
   if (props.card.commandId === "settings.open") return <SettingsOpenSuggestion {...props} />;
+  // #4972: 「작업 요청 열기」 — 입력창을 미리 채우는 카드(`WorkRequestOpenCard.tsx`).
+  if (props.card.commandId === "work.request.open") return <WorkRequestOpenSuggestion {...props} />;
   return <AiConnectSuggestion {...props} />;
 }
 

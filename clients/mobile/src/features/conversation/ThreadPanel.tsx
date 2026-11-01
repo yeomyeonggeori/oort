@@ -22,6 +22,7 @@ import {threadDraftKey} from './drafts';
 import {useOnline} from '../inbox/useOnline';
 import {threadArrivalSurface} from './sendArrival';
 import {Timeline} from './Timeline';
+import type {WorkRequestOpen} from '@momo/core/features/timeline/commandSuggest';
 import type {MessageRowActions} from './MessageRow';
 import type {UseTimelineResult} from './useTimeline';
 import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
@@ -92,6 +93,7 @@ export function ThreadPanel({
   approvalsProvided,
   onApprovalSettled,
   onOpenMessage,
+  onOpenWorkRequest,
   followable = true,
 }: {
   root: Message;
@@ -105,6 +107,11 @@ export function ThreadPanel({
   approvalsProvided?: boolean;
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
   onOpenMessage?: (channelId: string, messageId: string) => void;
+  /**
+   * 스레드 안의 도우미 「작업 요청 열기」 카드를 누르면 「내 맥에 보내기」 시트를 미리 채워 연다(#4972).
+   * 채널 화면과 같은 콜백이다. 없으면 카드는 한 줄로만 선다.
+   */
+  onOpenWorkRequest?: (prefill: WorkRequestOpen) => void;
   /** Production supplies both; isolated legacy render fixtures may omit them. */
   workspaceId?: string;
   channelId?: string;
@@ -340,6 +347,7 @@ export function ThreadPanel({
       workspaceId,
       onOpenMemoryEvidence: openEvidence,
       onOpenMessage,
+      ...(onOpenWorkRequest !== undefined ? {onOpenWorkRequest} : {}),
       // No `onOpenThread`: see the header. Every row here is already in one.
       //
       // No `onQuote` either, and that absence is a decision rather than an
@@ -363,6 +371,7 @@ export function ThreadPanel({
       workspaceId,
       openEvidence,
       onOpenMessage,
+      onOpenWorkRequest,
     ],
   );
 

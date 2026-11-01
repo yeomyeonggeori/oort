@@ -107,6 +107,7 @@
     "clients/mobile/src/features/conversation/Timeline.tsx": 54,
     "clients/mobile/src/features/conversation/TypingBar.tsx": 5,
     "clients/mobile/src/features/conversation/UnfurlCards.tsx": 22,
+    "clients/mobile/src/features/conversation/WorkRequestSuggestion.tsx": 10,
     "clients/mobile/src/features/conversation/approvalGate.ts": 4,
     "clients/mobile/src/features/conversation/appsTail.ts": 8,
     "clients/mobile/src/features/conversation/bubble.ts": 3,

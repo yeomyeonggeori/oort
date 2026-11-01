@@ -1055,5 +1055,97 @@ export const catalog: MessageCatalog = {
       "type": 0,
       "value": "Video"
     }
+  ],
+  "timeline.workRequest.composerBusy": [
+    {
+      "type": 0,
+      "value": "You have a draft in progress, so nothing was filled in. Clear the message box and press again."
+    }
+  ],
+  "timeline.workRequest.fill": [
+    {
+      "type": 0,
+      "value": "Fill the message box"
+    }
+  ],
+  "timeline.workRequest.fillHint": [
+    {
+      "type": 0,
+      "value": "Check the text, then send it yourself."
+    }
+  ],
+  "timeline.workRequest.fillLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": fill the message box"
+    }
+  ],
+  "timeline.workRequest.inDm": [
+    {
+      "type": 0,
+      "value": "This is a direct message, so it can't be filled into the message box. Press it from a channel."
+    }
+  ],
+  "timeline.workRequest.labelAny": [
+    {
+      "type": 0,
+      "value": "Hand a task to my Mac"
+    }
+  ],
+  "timeline.workRequest.labelClaude": [
+    {
+      "type": 0,
+      "value": "Hand it to Claude Code on my Mac"
+    }
+  ],
+  "timeline.workRequest.labelCodex": [
+    {
+      "type": 0,
+      "value": "Hand it to Codex on my Mac"
+    }
+  ],
+  "timeline.workRequest.noPersonalAgent": [
+    {
+      "type": 0,
+      "value": "No Claude Code or Codex is connected on your Mac yet. Connect one under My tools in AI first."
+    }
+  ],
+  "timeline.workRequest.openSheet": [
+    {
+      "type": 0,
+      "value": "Open task request"
+    }
+  ],
+  "timeline.workRequest.openSheetLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": open task request"
+    }
+  ],
+  "timeline.workRequest.openTools": [
+    {
+      "type": 0,
+      "value": "Open my tools"
+    }
+  ],
+  "timeline.workRequest.sheetHint": [
+    {
+      "type": 0,
+      "value": "Check the text in the sheet, then send it yourself."
+    }
+  ],
+  "timeline.workRequest.threadClosed": [
+    {
+      "type": 0,
+      "value": "Open the thread and press again."
+    }
   ]
 };
