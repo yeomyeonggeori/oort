@@ -1,4 +1,6 @@
 {
+  "timeline.unfurl.label": "Link preview: {title}, {domain}",
+  "timeline.unfurl.video": "Video",
   "timeline.thread.replyCount": "{count, plural, one {# reply} other {# replies}}",
   "timeline.thread.unreadChip": "{count, plural, one {# new reply} other {# new replies}}",
   "timeline.thread.open": "Open thread, {count, plural, one {# reply} other {# replies}}",

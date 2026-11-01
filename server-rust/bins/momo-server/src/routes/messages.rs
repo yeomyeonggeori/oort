@@ -40,16 +40,16 @@ use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
-    channel_pins, channel_reaction_snapshot, clamp_history_limit, clamp_replies_limit,
-    delete_message_in_tx, edit_message_in_tx, is_channel_member, is_following_thread_in_tx,
-    list_channel_page, list_thread_replies, open_stream_run_id, parse_replies_cursor,
-    set_pin_in_tx, set_reaction_in_tx, stream_message_body_in_tx, validate_harness_refine,
-    validate_reaction_emoji, validate_replies_root_in_tx, AttachmentLinkRejected,
-    ChannelRestriction, HarnessRefine, HarnessRefineInvalid, HistoryCursor, InteractionMessage,
-    InteractionRefused, MessageAttachment, MessageType, NewMessage, PagedMessage, PinAction,
-    PinnedMessage, ProvenanceRejected, QuoteTargetInvalid, QuotedMessage, ReactionAction,
-    ReactionSnapshot, SendRejected, SentVia, StoredMessage, StreamCloseOutcome, StreamEdit,
-    ThreadRollup, ThreadRootInvalid, HARNESS_REFINE_PROPS_KEY, OPENING_STREAM_REV,
+    attach_unread_reply_counts, channel_pins, channel_reaction_snapshot, clamp_history_limit,
+    clamp_replies_limit, delete_message_in_tx, edit_message_in_tx, is_channel_member,
+    is_following_thread_in_tx, list_channel_page, list_thread_replies, open_stream_run_id,
+    parse_replies_cursor, set_pin_in_tx, set_reaction_in_tx, stream_message_body_in_tx,
+    validate_harness_refine, validate_reaction_emoji, validate_replies_root_in_tx,
+    AttachmentLinkRejected, ChannelRestriction, HarnessRefine, HarnessRefineInvalid, HistoryCursor,
+    InteractionMessage, InteractionRefused, MessageAttachment, MessageType, NewMessage,
+    PagedMessage, PinAction, PinnedMessage, ProvenanceRejected, QuoteTargetInvalid, QuotedMessage,
+    ReactionAction, ReactionSnapshot, SendRejected, SentVia, StoredMessage, StreamCloseOutcome,
+    StreamEdit, ThreadRollup, ThreadRootInvalid, HARNESS_REFINE_PROPS_KEY, OPENING_STREAM_REV,
     STREAM_PROPS_KEY,
 };
 use serde::de::{self, Deserialize, Deserializer, IgnoredAny, MapAccess, Visitor};
@@ -121,6 +121,14 @@ pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
             key,
             "origin" | "target_member_id" | "requested_for" | "dm_admission_id"
         )
+        // ADR-0186 증보 v6 R-e: the channel's one-line result of an approval. `announce: true`
+        // is what keeps its push silent (`momo_push` judgment) and `bundle_of` names the approval
+        // it is the notice of — a member who could write either could silence their own
+        // message's push, or dress a message as the notice of somebody's approval.
+        // ADR-0204 증보 6 D6-2: `decision_mode` is the word an approval card's buttons read
+        // (`inline` | `open`), written by the server beside the approval it describes. A message
+        // that carried a forged one would tell a client which way to draw somebody's decision.
+        || matches!(key, "announce" | "bundle_of" | "decision_mode")
         // ADR-0218 appendix B / ADR-0186 v8: `action.expression` (the candidates a person is
         // asked to choose from) and `result.expression` (what was saved) are written only by
         // the server, inside an approval card's own transaction. A plain message can carry
@@ -183,6 +191,8 @@ fn thread_dto(rollup: &ThreadRollup) -> ThreadRollupDto {
         // `thread_rollup()`; this only spells the ids.
         participant_ids: rollup.participant_ids.iter().map(Uuid::to_string).collect(),
         participant_count: rollup.participant_count,
+        // #4889 stage 2 — `Some` only where a per-reader read filled it (the history page).
+        unread_reply_count: rollup.unread_reply_count,
     }
 }
 
@@ -660,6 +670,8 @@ pub async fn send(
     // fail the CHECK and surface as a 500). The sentence is English like every `ApiError` here and
     // names no `routing` (see `thread_root_rejection`: the web probe reads refusals by shape).
     let also_in_channel = request.also_in_channel.unwrap_or(false);
+    // ADR-0170 증보 2026-11-01 D21 (#4884). Absent and `false` are the same request.
+    let suppress_unfurl = request.suppress_unfurl.unwrap_or(false);
     if also_in_channel && root_id.is_none() {
         return Err(ApiError::bad_request(
             "alsoInChannel needs rootId: only a thread reply can also be sent to the channel",
@@ -746,6 +758,7 @@ pub async fn send(
         requested_routing,
         requested_apps,
         also_in_channel,
+        suppress_unfurl,
         gates,
     };
 
@@ -1102,7 +1115,12 @@ pub async fn history(
             {
                 return Ok(None);
             }
-            let messages = list_channel_page(conn, channel_id, cursor, limit).await?;
+            let mut messages = list_channel_page(conn, channel_id, cursor, limit).await?;
+            // #4889 stage 2 — how many replies the reader has not read, under each thread root on
+            // the page they follow. Same transaction as the page it annotates; a page with no
+            // thread (and every agent reader, who has no follow rows) costs no extra query.
+            attach_unread_reply_counts(conn, workspace_id, principal.member_id, &mut messages)
+                .await?;
             // #1166 — the reload closure. `endedRuns` in a client only knows
             // the runs whose terminal frame it *watched arrive*, which is the
             // right rule for a live session and no rule at all for a tab that
@@ -1168,7 +1186,9 @@ fn interaction_refusal(refused: InteractionRefused) -> ApiError {
         InteractionRefused::NotFound => StatusCode::NOT_FOUND,
         InteractionRefused::NotAMember
         | InteractionRefused::NotAuthorForEdit
-        | InteractionRefused::NotAuthorForDelete => StatusCode::FORBIDDEN,
+        | InteractionRefused::NotAuthorForDelete
+        // The caller authored it and may not rewrite it: the card is the server's.
+        | InteractionRefused::ApprovalCardOwned => StatusCode::FORBIDDEN,
         InteractionRefused::EditDeleted
         | InteractionRefused::ReactDeleted
         | InteractionRefused::PinDeleted
@@ -2006,7 +2026,21 @@ mod tests {
         for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
             props.insert(key.to_string(), r#"{"kind":"login_lost"}"#.to_string());
         }
+        // ADR-0204 증보 6 D6-5 — a member cannot silence their own message's push with the
+        // channel's quiet-line marker, nor dress a message as the notice of an approval.
+        props.insert("announce".to_string(), "true".to_string());
+        props.insert(
+            "bundle_of".to_string(),
+            "22222222-2222-4222-8222-222222222222".to_string(),
+        );
+        props.insert("decision_mode".to_string(), "inline".to_string());
         let value = props_value(Some(&props));
+        for key in ["announce", "bundle_of", "decision_mode"] {
+            assert!(
+                value.get(key).is_none(),
+                "{key} is server-owned and must be stripped"
+            );
+        }
         for key in momo_agent::SERVER_OWNED_APP_PROPS_KEYS {
             assert!(
                 value.get(key).is_none(),
@@ -2223,6 +2257,7 @@ mod tests {
             stream: None,
             harness_refine: None,
             apps: None,
+            suppress_unfurl: None,
         }
     }
 
@@ -2576,6 +2611,7 @@ mod tests {
             last_reply_at_ms: 1_700_000_000_500,
             participant_ids: vec![newest, older],
             participant_count: 4,
+            unread_reply_count: None,
         };
         let json = serde_json::to_value(message_dto(
             &message,
@@ -2601,6 +2637,10 @@ mod tests {
             serde_json::json!([newest.to_string(), older.to_string()])
         );
         assert_eq!(json["thread"]["participant_count"], serde_json::json!(4));
+        assert!(
+            json["thread"].get("unread_reply_count").is_none(),
+            "a reader-less rollup says nothing about unread replies (absent, never 0): {json}"
+        );
         assert!(json.get("rootId").is_none(), "a root has no rootId: {json}");
 
         // A message with no replies carries no rollup at all — the badge's
@@ -2983,6 +3023,18 @@ mod tests {
         );
     }
 
+    /// An approval card's author is not refused as a stranger but as the one it is: 403, and a
+    /// sentence of its own (ADR-0204 증보 6 D6-3 — the body is the server's).
+    #[test]
+    fn an_approval_card_refusal_is_a_403_with_its_own_sentence() {
+        let error = interaction_refusal(InteractionRefused::ApprovalCardOwned);
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(
+            InteractionRefused::ApprovalCardOwned.to_string(),
+            "approval cards are written by the server"
+        );
+    }
+
     /// The wire keys are the contract two clients decode. `type` in particular
     /// is a serde rename that a refactor of the struct field would silently
     /// drop, leaving the header list unable to tell a text message from a
@@ -3092,6 +3144,9 @@ mod tests {
             // ADR-0148 증보 (#4887): 「대화에도 보내기」 is a person's choice in the app; the
             // developer-token door stays closed to it until ADR-0216 opens it.
             "alsoInChannel",
+            // ADR-0170 증보 2026-11-01 (#4884): 「미리보기 없이 보내기」 is the author's choice in
+            // the composer, where a preview was shown; a terminal tool has none.
+            "suppressUnfurl",
             "sentVia",
             "sent_via",
             "Body",

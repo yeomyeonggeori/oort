@@ -5,7 +5,8 @@
 //! `data:image/…` address only in a final, non-streamed answer), and the one answer is taken apart by
 //! [`momo_workspace_actions::hosted_expression`] — its picture and its one request block — into a card.
 //! Every other turn (no photo, a welcome, a resume, any other agent) never reaches this module and is
-//! byte-for-byte what it was.
+//! byte-for-byte what it was — its answer text alone excepted: a `data:image/…` address in it is cut by
+//! the same rule and a sentence stands in its place (`crate::PICTURE_REMOVED_SENTENCE`, #4908).
 //!
 //! The order, and why:
 //!

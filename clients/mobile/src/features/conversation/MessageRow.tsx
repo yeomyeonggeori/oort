@@ -6,15 +6,17 @@ import {
 import {useExpressionItems} from '../expressions/ExpressionProvider';
 import {ExpressionImage} from '../expressions/ExpressionImage';
 import {hasProfileAvatarPreview} from '@momo/core/features/approvals/avatarPreview';
-import {haptics, hapticScope} from '../../lib/haptics';
+import {haptics, hapticScope, type HapticEvent} from '../../lib/haptics';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {ThreadSummaryContent, useThreadSummaryView} from './ThreadSummary';
 import {
   threadRollup,
+  uuidEq,
   type AgentRunProgress,
   type Message,
   type ThreadRollup,
 } from '@momo/core/lib/api';
+import type {MessageUnfurl} from '@momo/core/features/timeline/unfurl';
 import {
   dayDividerLabel,
   dayDividerSegments,
@@ -109,6 +111,7 @@ import {
   Image,
   Keyboard,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -125,6 +128,18 @@ import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 import {MessageBody, bodyAffordances, openLink} from './MessageBody';
 import {MessageActionSheet, timeLabel} from './MessageActionSheet';
+import {LinkActionSheet} from './LinkActionSheet';
+import {
+  cardModelsFor,
+  linkCardTarget,
+  unfurlSpokenParts,
+  UnfurlCards,
+  type LinkCardTarget,
+} from './UnfurlCards';
+import {useLinkPreviewPreference} from './linkPreviewPreference';
+import {messageRowKey} from './rowViewability';
+import {NO_UNFURLS} from './useMessageUnfurls';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
@@ -2216,6 +2231,11 @@ export interface MessageRowActions {
   /** 작성자 신원을 연다. 사람은 프로필 시트, 에이전트는 기존 상세 표면으로 간다. */
   onOpenProfile?: (memberId: string) => void;
   /**
+   * 이 메시지의 링크 미리보기를 **모두에게서** 지운다(#4883, 작성자 전용 — 서버가 403 으로 같은 규칙을 지킨다). 없으면
+   * 링크 시트에 지우기 행이 서지 않는다(채널이 없는 표면). 실패하면 던지고, 시트가 확인 단계 안에서 문장으로 말한다.
+   */
+  onRemoveUnfurls?: (message: Message) => Promise<void>;
+  /**
    * 에이전트 답 밑의 「기억 n개 참고」 칩이 영수증을 읽을 워크스페이스 (#3166).
    * 없으면 칩을 세우지 않는다(측정 하네스처럼 서버가 없는 표면). 행 props가 아니라
    * `actions`에 실은 이유: `actions`는 이미 동일성으로 비교되므로 memo 비교자를 건드리지
@@ -2297,6 +2317,11 @@ export interface MessageRowProps {
   /** 로드된 인용 원본의 첨부 수. 인용 안에서는 바이트 대신 최소 표지만 그린다. */
   quoteAttachmentCount?: number;
   /**
+   * 이 메시지의 링크 카드 투영(ADR-0170 D5, #4883). 목록이 `unfurlRowsFor` 로 건넨다 — 카드가 없는 모든 줄이 **같은 빈
+   * 배열**을 받아야 아래 비교자의 동일성 비교가 맞는다. 없으면(측정 하네스·검색 미리보기) 카드는 그려지지 않는다.
+   */
+  unfurls?: readonly MessageUnfurl[];
+  /**
    * 이 행의 승인 카드를 **지금 결정할 수 있는가** (감사 H-1 / goal U4-g).
    *
    * `null`/`undefined` 면 컨트롤을 안 세운다. 왜 그 넷인지는 `approvalGate.ts`
@@ -2376,6 +2401,16 @@ export interface MessageRowProps {
 }
 
 /**
+ * 링크 카드의 로터 행동 이름(#4883). 행이 접근성 원소 하나라 카드 안의 `Pressable` 에 VoiceOver 가 닿지 않으므로,
+ * 카드마다 「열기」 하나(이름 = 카드의 낭독 문장)와 첫 카드의 시트(복사·공유·지우기) 하나를 올린다. 카드는 최대 셋이다.
+ */
+const UNFURL_OPEN_ACTION_PREFIX = 'momoUnfurlOpen:';
+/** 길게 눌러 시트를 여는 손맛 — 메시지 시트와 링크 시트가 같은 이벤트를 쓴다. */
+const MESSAGE_MENU_HAPTIC: HapticEvent = 'messageMenu';
+const UNFURL_MENU_ACTION_NAME = 'momoUnfurlMenu';
+const NO_CARD_MODELS: ReturnType<typeof cardModelsFor> = [];
+
+/**
  * 로터가 읽을 링크 라벨.
  *
  * 여럿이면 **첫 개만** 올린다 — 스무 개짜리 답에 액션 스무 개를 얹으면 로터가
@@ -2440,6 +2475,7 @@ function MessageRowInner({
   replyParent,
   quote,
   quoteAttachmentCount,
+  unfurls = NO_UNFURLS,
   approvalGates,
   approvalReceipts,
   approvalOffline,
@@ -2629,6 +2665,64 @@ function MessageRowInner({
     receiptRef.current = setTimeout(() => setRowReceipt(null), COPY_RECEIPT_MS);
   }, []);
 
+  // ===========================================================================
+  // 링크 카드 (ADR-0170 D5, #4883)
+  //
+  // 카드를 그리는 것은 `UnfurlCards` 이고 무엇을 그릴지는 코어 모델이 정한다. 이 행이 하는 일은 셋이다:
+  //   ① 카드가 서 있을 자리를 준다(본문 · 첨부 아래).
+  //   ② 카드의 낭독 문장(「링크 미리보기: 제목, 도메인」)을 **행의 문장**에 싣고 로터에 올린다 — 행이 접근성 원소 하나라
+  //      안쪽 `Pressable` 의 라벨은 VoiceOver 에 닿지 않는다(아래 `accessibilityLabel`·`accessibilityActions`).
+  //   ③ 카드를 길게 누르면 **링크 시트**를 연다(복사 · 공유 · 작성자만 「미리보기 지우기」). 행 전체의 길게 누르기(메시지
+  //      액션 시트)와 다른 문이고, 카드가 제 손가락을 먼저 받으므로 둘이 다투지 않는다.
+  // 묘비에는 카드가 없다: 지워진 본문에 달린 미리보기를 보이는 것은 지워진 것이 무엇인지 말을 어긋나게 한다.
+  // ===========================================================================
+  const formatMessage = useFormatMessage();
+  const linkPreview = useLinkPreviewPreference();
+  const cardModels = useMemo(
+    () => (deleted ? NO_CARD_MODELS : cardModelsFor(unfurls, linkPreview)),
+    [deleted, unfurls, linkPreview],
+  );
+  const unfurlSpoken = useMemo(
+    () => cardModels.map(model => unfurlSpokenParts(model, formatMessage)),
+    [cardModels, formatMessage],
+  );
+  const [linkSheet, setLinkSheet] = useState<{
+    target: LinkCardTarget;
+    confirmRemove: boolean;
+  } | null>(null);
+  // 지우기는 작성자만 한다 — 서버가 403 으로 같은 규칙을 지키고, 화면은 처음부터 행을 세우지 않는다.
+  const canRemoveUnfurls =
+    !deleted &&
+    actions?.onRemoveUnfurls !== undefined &&
+    uuidEq(actions.myMemberId, message.authorMemberId);
+  const openLinkSheet = useCallback(
+    (target: LinkCardTarget) => {
+      setRowError(null);
+      haptics.event(MESSAGE_MENU_HAPTIC);
+      setLinkSheet({target, confirmRemove: false});
+      actions?.onLongPressUsed?.();
+    },
+    [actions],
+  );
+  const copyLink = useCallback(
+    (url: string) => {
+      setRowError(null);
+      void copyText(url).then(ok => {
+        if (ok) showReceipt(formatMessage('mobile.linkCard.copied'));
+        else setRowError(formatMessage('mobile.linkCard.copyFailed'));
+      });
+    },
+    [showReceipt, formatMessage],
+  );
+  const shareLink = useCallback((url: string) => {
+    // iOS 공유 시트가 결과를 맡는다. 시트를 못 띄우는 기기는 이 행이 할 말이 없다(사람이 누른 것은 공유이고, 실패한 것은 기기의 사정이다).
+    void Share.share({url}).catch(() => undefined);
+  }, []);
+  const removeUnfurls = useCallback(
+    () => actions?.onRemoveUnfurls?.(message) ?? Promise.resolve(),
+    [actions, message],
+  );
+
   // The five answers come from the core, which is also where the server's rules
   // are mirrored: only the author may edit or delete, nobody acts on a tombstone,
   // and a reply is never offered a reply of its own (momo threads are one level).
@@ -2673,7 +2767,7 @@ function MessageRowInner({
 
   const openSheet = useCallback(() => {
     setRowError(null);
-    if (!sheetOpen) haptics.event('messageMenu');
+    if (!sheetOpen) haptics.event(MESSAGE_MENU_HAPTIC);
     setSheetOpen(true);
     actions?.onLongPressUsed?.();
   }, [actions, sheetOpen]);
@@ -2848,6 +2942,9 @@ function MessageRowInner({
             if (url) openLink(url);
           }
           return;
+        case UNFURL_MENU_ACTION_NAME:
+          if (cardModels[0] !== undefined) openLinkSheet(linkCardTarget(cardModels[0]));
+          return;
         case 'momoProfile':
           actions?.onOpenProfile?.(message.authorMemberId);
           return;
@@ -2858,6 +2955,14 @@ function MessageRowInner({
           if (githubNoticeUrl !== null) openLink(githubNoticeUrl);
           return;
         default:
+          if (event.nativeEvent.actionName.startsWith(UNFURL_OPEN_ACTION_PREFIX)) {
+            const model =
+              cardModels[
+                Number(event.nativeEvent.actionName.slice(UNFURL_OPEN_ACTION_PREFIX.length))
+              ];
+            if (model !== undefined) openLink(model.url);
+            return;
+          }
           if (event.nativeEvent.actionName.startsWith(TEAM_AI_CITATION_ACTION_PREFIX)) {
             const index = Number(
               event.nativeEvent.actionName.slice(TEAM_AI_CITATION_ACTION_PREFIX.length),
@@ -2891,6 +2996,8 @@ function MessageRowInner({
       teamAiReply,
       appNoticeWebUrl,
       githubNoticeUrl,
+      cardModels,
+      openLinkSheet,
     ],
   );
 
@@ -2963,6 +3070,19 @@ function MessageRowInner({
           && presentation.artifact.url) {
         list.push({name: 'momoArtifactLink', label: '아티팩트 주소 열기'});
       }
+      // 링크 카드(#4883): 카드마다 열기 하나(이름이 곧 카드의 낭독 문장), 첫 카드의 시트 하나. 묘비에는 카드가 없다.
+      cardModels.forEach((_, index) => {
+        list.push({
+          name: `${UNFURL_OPEN_ACTION_PREFIX}${index}`,
+          label: unfurlSpoken[index],
+        });
+      });
+      if (cardModels.length > 0) {
+        list.push({
+          name: UNFURL_MENU_ACTION_NAME,
+          label: formatMessage('mobile.linkCard.sheetTitle'),
+        });
+      }
     }
     return list.length > 0 ? list : undefined;
   }, [
@@ -2985,6 +3105,9 @@ function MessageRowInner({
     appNotice,
     appNoticeWebUrl,
     githubNoticeUrl,
+    cardModels,
+    unfurlSpoken,
+    formatMessage,
   ]);
 
   const authorLabel = memberNameParts(
@@ -3071,6 +3194,8 @@ function MessageRowInner({
         ...appNoticeSpoken(appNotice),
         ...(githubNotice !== null && !deleted ? [githubNoticeLabel(githubNotice)] : []),
         ...teamAiReplySpoken(teamAiReply),
+        // 링크 카드(#4883): 「링크 미리보기: 제목, 도메인」(동영상이면 「, 동영상」). 행이 원소 하나라 귀에는 여기로만 닿는다.
+        ...unfurlSpoken,
       ].join(', ')}
       accessibilityActions={accessibilityActions}
       onAccessibilityAction={onAccessibilityAction}
@@ -3335,6 +3460,16 @@ function MessageRowInner({
               />
             ) : null}
 
+            {/* 링크 카드(#4883)는 첨부 **아래**다 — 파일은 작성자가 이 메시지에 직접 붙인 것이고, 카드는 그 메시지에
+                **대해** 서버가 말하는 것이다(웹과 같은 순서, ADR-0151 D2). 끄면(`off`) 카드는 아무것도 그리지 않는다. */}
+            {unfurls.length > 0 ? (
+              <UnfurlCards
+                unfurls={unfurls}
+                rowKey={messageRowKey(message.seq)}
+                onLongPressCard={openLinkSheet}
+              />
+            ) : null}
+
             {/* 위 갈래와 **같은 판정의 반대쪽**이다 (#1478). 여기만 `body === ''`
                 로 남겨 두면 공백만 있는 본문이 어느 쪽에도 안 걸려 행이 통째로
                 말이 없어진다 — 빈 본문에는 「내용 없는 메시지」라고 말해 놓고
@@ -3510,6 +3645,18 @@ function MessageRowInner({
           // ===================================================================
         }
       </Pressable>
+
+      {linkSheet !== null ? (
+        <LinkActionSheet
+          target={linkSheet.target}
+          canRemove={canRemoveUnfurls}
+          startInRemoveConfirm={linkSheet.confirmRemove}
+          onClose={() => setLinkSheet(null)}
+          onCopy={() => copyLink(linkSheet.target.url)}
+          onShare={() => shareLink(linkSheet.target.url)}
+          onRemove={canRemoveUnfurls ? removeUnfurls : undefined}
+        />
+      ) : null}
 
       {sheetOpen && actions ? (
         <MessageActionSheet
@@ -3702,6 +3849,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   replyParent: true,
   quote: true,
   quoteAttachmentCount: true,
+  unfurls: true,
   approvalGates: true,
   approvalReceipts: true,
   approvalOffline: true,
@@ -3776,6 +3924,9 @@ export function sameMessageRowProps(
     sameRollup(a.rollup, b.rollup) &&
     sameQuote(a.quote, b.quote) &&
     a.quoteAttachmentCount === b.quoteAttachmentCount &&
+    // #4883. 목록이 줄마다 코어 투영 배열을 그대로(없으면 같은 빈 배열을) 건네므로 동일성으로 충분하다. 한 메시지의 카드가
+    // 바뀔 때(서버가 만들었다·작성자가 지웠다)만 그 줄이 다시 그려진다 — 채널의 다른 카드는 이 줄을 건드리지 않는다.
+    a.unfurls === b.unfurls &&
     // 두 표는 **동일성**으로 본다(`directory` 와 같은 취급). 화면이 `useMemo`
     // 로 붙잡고 있으므로 승인이 실제로 바뀔 때만 새 표가 되고, 그때는 붙어 있는
     // 행이 전부 다시 그려진다 — 승인은 드물어 감당할 수 있는 값이고, 대안은

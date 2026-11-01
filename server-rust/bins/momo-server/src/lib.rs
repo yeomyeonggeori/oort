@@ -333,7 +333,8 @@ pub struct AppState {
     pub unfurl_http: Arc<dyn momo_unfurl::UnfurlHttp>,
     /// `MOMO_UNFURL_ENABLED == 1` at start-up: the instance's switch for every request this
     /// server makes to an outside address on someone's behalf (ADR-0170 D3). The expression
-    /// link import honours it (ADR-0218 D5, planner decision 3).
+    /// link import honours it (ADR-0218 D5, planner decision 3), and so does the composer's link
+    /// preview (ADR-0170 증보 2026-11-01 D16).
     pub unfurl_enabled: bool,
     /// ADR-0218 G3.5 (#4820 C1b): where `oort_expression_assemble` runs the motion assembler
     /// child from. `None` is the production answer: resolved per call from
@@ -345,6 +346,10 @@ pub struct AppState {
     /// test shortens it. The ordinary 64 KiB body has no such deadline.
     pub large_body_deadline: std::time::Duration,
     pub unfurl_cache: Arc<momo_unfurl::ImageCache>,
+    /// ADR-0170 증보 2026-11-01 D18 (#4884) — the link previews this process holds for members who
+    /// are still composing: in memory only, per (workspace, member, address). Tests build one with
+    /// small limits.
+    pub unfurl_previews: Arc<momo_unfurl::PreviewCache>,
     /// #2960 — 「연결 확인」: the only object in this process that can call a
     /// provider, and all it can do is one guarded read-only GET per hop
     /// (`momo_provider_probe`). Default is the guarded probe under the
@@ -402,6 +407,7 @@ impl AppState {
             assembler_program: None,
             large_body_deadline: routes::agent_port::LARGE_BODY_DEADLINE,
             unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
+            unfurl_previews: Arc::new(momo_unfurl::PreviewCache::default()),
             provider_probe: Arc::new(routes::provider_link::ProviderProbeState::new(Arc::new(
                 momo_provider_probe::GuardedProviderProbe::new(
                     momo_settings::EgressPolicy::default(),
@@ -817,6 +823,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/follow",
             put(routes::thread_follow::follow).delete(routes::thread_follow::unfollow),
         )
+        // #4889 stage 2 — 「여기까지 읽었어요」: move the caller's read position in a followed
+        // thread forward. Personal like the follow verbs; the signal is explicit because a
+        // `GET …/replies` is also the inbox's and the work panels' read.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/read",
+            put(routes::thread_follow::mark_read),
+        )
         // B11 — the things you can do to a message that is already sent.
         // Message-scoped, not channel-scoped: Swift mounts these under
         // `/workspaces/{ws}/messages/{id}` (`MessageRoutes.swift:28-31`) because
@@ -873,6 +886,22 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/unfurls/{id}/icon",
             get(routes::unfurl::icon),
+        )
+        // ADR-0170 amendment 2026-11-01 D14/D19 (#4884) — the card of a link that is still in the
+        // composer. The request belongs to a channel (it is allowed where a send would be); the
+        // picture and icon come back through two paths keyed by the preview's own id, served by
+        // the same proxy code as a stored card's. Neither is on a developer token's closed table.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/unfurl-previews",
+            post(routes::unfurl::preview),
+        )
+        .route(
+            "/v1/workspaces/{ws}/unfurl-previews/{id}/image",
+            get(routes::unfurl::preview_image),
+        )
+        .route(
+            "/v1/workspaces/{ws}/unfurl-previews/{id}/icon",
+            get(routes::unfurl::preview_icon),
         )
         // ADR-0151 — 첨부. Three routes, and the split between them is the
         // decision: the upload session hands out a Drive capability so the bytes

@@ -21,11 +21,23 @@
 //!   [`ProxyLimits::failure_ttl`], so a site with no favicon is asked once and not on every render.
 //!   Failures live apart from pictures, with a bound of their own, so a stream of bad addresses
 //!   cannot push good pictures out;
-//! * how many fetches from remote sites run at once, process-wide ([`ProxyError::Busy`]).
+//! * how many fetches from remote sites run at once, process-wide **and per member**
+//!   ([`ProxyError::Busy`]).
 //!
 //! A request the cache can answer, or a failure it remembers, costs the remote site nothing, and
 //! the server spends no member budget on it: the per-member budget (`rate_limit.rs` in the server)
 //! is asked only when [`proxy_goes_outbound`] says the request would leave the building.
+//!
+//! ## Running out of places is not a verdict on an address (#4881 review r2, Low)
+//!
+//! The places among the fetches in flight, and the places for name lookups below them in the
+//! transport, are shared by everyone. So each member also has a share of its own
+//! ([`ProxyLimits::max_in_flight_per_member`]): a member already holding it is turned away while
+//! the process still has places for the others, and one member cannot take the places the rest
+//! need. Being turned away for want of a place, whether the process's, the member's or a name
+//! lookup's ([`FetchError::Capacity`]), says something about this server's load and nothing about
+//! the address. So none of them is remembered as a failure, all of them are [`ProxyError::Busy`],
+//! and the server gives the member's budget back for them.
 //!
 //! The cache is shared by every workspace. That is safe because a key is the hash of the remote
 //! address: a tenant can only read or fill an entry by already knowing the address.
@@ -33,7 +45,7 @@
 //! Drive archive reuse was considered and rejected as over-design for v0.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use momo_db::DbError;
@@ -42,7 +54,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
 
 use crate::dimensions::image_dimensions;
-use crate::fetch::{FetchKind, UnfurlHttp};
+use crate::fetch::{FetchError, FetchKind, UnfurlHttp};
 use crate::store::{load_unfurl_in_tx, UnfurlRecord};
 
 const PICTURE_TYPES: &[&str] = &[
@@ -78,8 +90,17 @@ pub struct ProxyLimits {
     /// Failed addresses remembered at once (default 1024, a few dozen bytes each).
     pub max_failures: usize,
     /// Fetches from remote sites in flight at once, across every member and workspace (default
-    /// 16). Past it a request that must fetch is refused with [`ProxyError::Busy`].
+    /// 16). Past it a request that must fetch is refused with [`ProxyError::Busy`]. 0 means no
+    /// place at all: every request that must fetch is refused.
     pub max_in_flight: usize,
+    /// How many of those one member may hold at once (default 4, a quarter of the process's: at
+    /// least four members must be fetching before they can fill it). A member already holding its
+    /// share is refused with [`ProxyError::Busy`] even while the process has places left, so one
+    /// member cannot take the places the others need. A screen opened on a channel of new links
+    /// asks for a picture and an icon per card at once; the share is what it is served from at a
+    /// time, and the rest are asked again after the `Retry-After` of the refusal. 0 means no
+    /// place at all, as for `max_in_flight`.
+    pub max_in_flight_per_member: usize,
 }
 
 impl Default for ProxyLimits {
@@ -90,6 +111,7 @@ impl Default for ProxyLimits {
             failure_ttl: Duration::from_secs(10 * 60),
             max_failures: 1024,
             max_in_flight: 16,
+            max_in_flight_per_member: 4,
         }
     }
 }
@@ -201,6 +223,10 @@ pub struct ImageCache {
     /// Address key -> when the failure stops counting.
     failures: Mutex<Lru<Instant>>,
     in_flight: Arc<Semaphore>,
+    /// Member -> fetches that member has in flight right now. An entry exists only while its
+    /// count is above zero, so the map is as large as the number of members fetching at this
+    /// moment and never grows with the members that have come and gone.
+    member_places: Mutex<HashMap<Uuid, usize>>,
 }
 
 impl Default for ImageCache {
@@ -219,6 +245,7 @@ impl ImageCache {
             }),
             failures: Mutex::new(Lru::new()),
             in_flight: Arc::new(Semaphore::new(limits.max_in_flight)),
+            member_places: Mutex::new(HashMap::new()),
         }
     }
 
@@ -289,9 +316,66 @@ impl ImageCache {
     }
 
     /// A place among the fetches in flight, held until the fetch ends (success, failure or the
-    /// caller going away). `None` when the process is already doing as many as it may.
-    fn try_start_fetch(&self) -> Option<OwnedSemaphorePermit> {
-        Arc::clone(&self.in_flight).try_acquire_owned().ok()
+    /// caller going away): one of the process's and one of `member`'s own. `None` when either is
+    /// already full.
+    pub(crate) fn try_start_fetch(&self, member: Uuid) -> Option<FetchPlace<'_>> {
+        // The member's own share first, so a member over it never touches the process's count.
+        let own = MemberPlace::take(
+            &self.member_places,
+            member,
+            self.limits.max_in_flight_per_member,
+        )?;
+        // Should the process be full, `own` goes back as this returns.
+        let process = Arc::clone(&self.in_flight).try_acquire_owned().ok()?;
+        Some(FetchPlace {
+            _process: process,
+            _own: own,
+        })
+    }
+}
+
+/// A place among the fetches in flight: one of the process's and one of the member's own. Both go
+/// back when this is dropped, whichever way the fetch ended.
+pub(crate) struct FetchPlace<'a> {
+    _process: OwnedSemaphorePermit,
+    _own: MemberPlace<'a>,
+}
+
+/// One of a member's own places; it goes back, and the member's entry goes with the last of them,
+/// when this is dropped.
+struct MemberPlace<'a> {
+    places: &'a Mutex<HashMap<Uuid, usize>>,
+    member: Uuid,
+}
+
+impl<'a> MemberPlace<'a> {
+    /// `None` when `member` already holds `limit` places.
+    fn take(
+        places: &'a Mutex<HashMap<Uuid, usize>>,
+        member: Uuid,
+        limit: usize,
+    ) -> Option<MemberPlace<'a>> {
+        // Nothing in here can panic, but a lock poisoned by someone else's panic is still a
+        // map of plain counts: take it rather than lose the proxy.
+        let mut held = places.lock().unwrap_or_else(PoisonError::into_inner);
+        let count = held.get(&member).copied().unwrap_or(0);
+        if count >= limit {
+            return None;
+        }
+        held.insert(member, count + 1);
+        Some(MemberPlace { places, member })
+    }
+}
+
+impl Drop for MemberPlace<'_> {
+    fn drop(&mut self) {
+        let mut held = self.places.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(count) = held.get_mut(&self.member) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                held.remove(&self.member);
+            }
+        }
     }
 }
 
@@ -309,40 +393,48 @@ pub enum ProxyError {
     NotFound,
     #[error("image not available")]
     Unavailable,
-    /// The process is already fetching as many remote images as it allows at once
-    /// ([`ProxyLimits::max_in_flight`]). Not a verdict on this card: the caller asks again soon.
+    /// This server has no place for the fetch: the process is already fetching as many remote
+    /// images as it allows at once ([`ProxyLimits::max_in_flight`]), the member is already
+    /// fetching as many as it may ([`ProxyLimits::max_in_flight_per_member`]), or the transport
+    /// has no room for another name lookup ([`FetchError::Capacity`]). Not a verdict on this card:
+    /// it is not remembered, and the caller asks again soon.
     #[error("too many remote fetches in flight")]
     Busy,
 }
 
+/// `member_id` is the member the request is served for: the fetches in flight are counted per
+/// member (see [`ProxyLimits::max_in_flight_per_member`]).
 pub async fn proxy_image_in_tx(
     conn: &mut PgConnection,
     unfurl_id: Uuid,
     http: &dyn UnfurlHttp,
     cache: &ImageCache,
+    member_id: Uuid,
 ) -> Result<Result<ProxyImage, ProxyError>, DbError> {
     let Some(record) = load_unfurl_in_tx(conn, unfurl_id).await? else {
         return Ok(Err(ProxyError::NotFound));
     };
-    Ok(fetch_record_image(&record, http, cache).await)
+    Ok(fetch_record_image(&record, http, cache, member_id).await)
 }
 
-/// The card's preview picture.
+/// The card's preview picture, for `member_id`.
 pub async fn fetch_record_image(
     record: &UnfurlRecord,
     http: &dyn UnfurlHttp,
     cache: &ImageCache,
+    member_id: Uuid,
 ) -> Result<ProxyImage, ProxyError> {
-    fetch_slot(record, http, cache, ProxySlot::Image).await
+    fetch_slot(record, http, cache, ProxySlot::Image, member_id).await
 }
 
-/// The card's site icon.
+/// The card's site icon, for `member_id`.
 pub async fn fetch_record_icon(
     record: &UnfurlRecord,
     http: &dyn UnfurlHttp,
     cache: &ImageCache,
+    member_id: Uuid,
 ) -> Result<ProxyImage, ProxyError> {
-    fetch_slot(record, http, cache, ProxySlot::Icon).await
+    fetch_slot(record, http, cache, ProxySlot::Icon, member_id).await
 }
 
 /// What the proxy needs to know about one of a card's two remote images.
@@ -405,6 +497,7 @@ async fn fetch_slot(
     http: &dyn UnfurlHttp,
     cache: &ImageCache,
     slot: ProxySlot,
+    member_id: Uuid,
 ) -> Result<ProxyImage, ProxyError> {
     let Some(target) = SlotTarget::of(record, slot) else {
         return Err(ProxyError::Unavailable);
@@ -419,13 +512,13 @@ async fn fetch_slot(
     if cache.failed_recently(&target.key) {
         return Err(ProxyError::Unavailable);
     }
-    // From here the server really goes to the remote site. The permit is held until this
+    // From here the server really goes to the remote site. The place is held until this
     // function returns, whichever way it does.
-    let Some(_permit) = cache.try_start_fetch() else {
+    let Some(_place) = cache.try_start_fetch(member_id) else {
         return Err(ProxyError::Busy);
     };
     match fetch_remote(&target, http, slot).await {
-        Some(image) => {
+        Ok(image) => {
             cache.put(
                 target.key,
                 CachedImage {
@@ -436,21 +529,36 @@ async fn fetch_slot(
             );
             Ok(image)
         }
-        None => {
+        Err(Miss::Failed) => {
             cache.remember_failure(&target.key);
             Err(ProxyError::Unavailable)
         }
+        // The address did nothing wrong: this server had no room. Remembering that would turn a
+        // busy moment into minutes of "not found" for a healthy site.
+        Err(Miss::NoRoom) => Err(ProxyError::Busy),
     }
 }
 
-/// One trip to the remote site. `None` is any failure: the guard refused it, the site answered
-/// with an error or too much or too slowly, or the body is not a type this slot serves.
+/// Why one trip to the remote site brought nothing back.
+enum Miss {
+    /// Any failure that belongs to this address: the guard refused it, the site answered with an
+    /// error or too much or too slowly, or the body is not a type this slot serves. Remembered.
+    Failed,
+    /// The transport had no room for the request ([`FetchError::Capacity`]). Not remembered.
+    NoRoom,
+}
+
+/// One trip to the remote site.
 async fn fetch_remote(
     target: &SlotTarget<'_>,
     http: &dyn UnfurlHttp,
     slot: ProxySlot,
-) -> Option<ProxyImage> {
-    let fetched = http.fetch(target.source, target.kind).await.ok()?;
+) -> Result<ProxyImage, Miss> {
+    let fetched = match http.fetch(target.source, target.kind).await {
+        Ok(fetched) => fetched,
+        Err(FetchError::Capacity) => return Err(Miss::NoRoom),
+        Err(_) => return Err(Miss::Failed),
+    };
     let content_type = fetched
         .content_type
         .split(';')
@@ -463,13 +571,13 @@ async fn fetch_remote(
         .iter()
         .any(|allowed| content_type == *allowed)
     {
-        return None;
+        return Err(Miss::Failed);
     }
     let size = match slot {
         ProxySlot::Image => image_dimensions(&fetched.body),
         ProxySlot::Icon => None,
     };
-    Some(ProxyImage {
+    Ok(ProxyImage {
         bytes: fetched.body,
         content_type,
         size,
@@ -486,6 +594,13 @@ mod tests {
 
     const IMAGE_ADDRESS: &str = "https://cdn.example/hero.png";
     const ICON_ADDRESS: &str = "https://news.example/favicon.ico";
+    /// The member a test asks as, when it is not about who is asking.
+    const MEMBER: Uuid = Uuid::from_u128(11);
+
+    /// Another member, for a test that is about who is asking.
+    fn member(n: u128) -> Uuid {
+        Uuid::from_u128(0x1000 + n)
+    }
 
     fn record() -> UnfurlRecord {
         UnfurlRecord {
@@ -569,8 +684,12 @@ mod tests {
     async fn each_slot_fetches_its_own_address_as_its_own_kind() {
         let http = Recorder::new("image/png", png_of(10, 10));
         let cache = ImageCache::default();
-        fetch_record_image(&record(), &http, &cache).await.unwrap();
-        fetch_record_icon(&record(), &http, &cache).await.unwrap();
+        fetch_record_image(&record(), &http, &cache, MEMBER)
+            .await
+            .unwrap();
+        fetch_record_icon(&record(), &http, &cache, MEMBER)
+            .await
+            .unwrap();
         assert_eq!(
             http.calls(),
             [
@@ -604,12 +723,16 @@ mod tests {
             // A fresh cache per case: this is about the allow-list, not the cache.
             let fresh = ImageCache::default();
             assert_eq!(
-                fetch_record_icon(&record(), &http, &fresh).await.is_ok(),
+                fetch_record_icon(&record(), &http, &fresh, MEMBER)
+                    .await
+                    .is_ok(),
                 icon_ok,
                 "icon as {content_type:?}"
             );
             assert_eq!(
-                fetch_record_image(&record(), &http, &fresh).await.is_ok(),
+                fetch_record_image(&record(), &http, &fresh, MEMBER)
+                    .await
+                    .is_ok(),
                 picture_ok,
                 "picture as {content_type:?}"
             );
@@ -625,10 +748,12 @@ mod tests {
         let http = Recorder::new("image/x-icon", png_of(10, 10));
         let cache = ImageCache::default();
         // Accepted as an icon, and cached.
-        fetch_record_icon(&shared, &http, &cache).await.unwrap();
+        fetch_record_icon(&shared, &http, &cache, MEMBER)
+            .await
+            .unwrap();
         // The picture slot must not be handed that cached ICO: it asks again and refuses it.
         assert_eq!(
-            fetch_record_image(&shared, &http, &cache)
+            fetch_record_image(&shared, &http, &cache, MEMBER)
                 .await
                 .unwrap_err(),
             ProxyError::Unavailable
@@ -639,7 +764,9 @@ mod tests {
             "the second request was not answered from the icon's cache entry"
         );
         // Each slot does hit its own entry.
-        fetch_record_icon(&shared, &http, &cache).await.unwrap();
+        fetch_record_icon(&shared, &http, &cache, MEMBER)
+            .await
+            .unwrap();
         assert_eq!(http.calls().len(), 2);
     }
 
@@ -651,7 +778,7 @@ mod tests {
         no_icon.icon_source_url = None;
         no_icon.icon_proxy_key = None;
         assert_eq!(
-            fetch_record_icon(&no_icon, &http, &cache)
+            fetch_record_icon(&no_icon, &http, &cache, MEMBER)
                 .await
                 .unwrap_err(),
             ProxyError::Unavailable
@@ -659,7 +786,7 @@ mod tests {
         let mut no_image = record();
         no_image.image_url = None;
         assert_eq!(
-            fetch_record_image(&no_image, &http, &cache)
+            fetch_record_image(&no_image, &http, &cache, MEMBER)
                 .await
                 .unwrap_err(),
             ProxyError::Unavailable
@@ -667,8 +794,12 @@ mod tests {
         for status in ["pending", "failed", "blocked"] {
             let mut not_ok = record();
             not_ok.status = status.into();
-            assert!(fetch_record_icon(&not_ok, &http, &cache).await.is_err());
-            assert!(fetch_record_image(&not_ok, &http, &cache).await.is_err());
+            assert!(fetch_record_icon(&not_ok, &http, &cache, MEMBER)
+                .await
+                .is_err());
+            assert!(fetch_record_image(&not_ok, &http, &cache, MEMBER)
+                .await
+                .is_err());
         }
         assert!(http.calls().is_empty());
     }
@@ -697,7 +828,7 @@ mod tests {
             let guard = GuardedScript::new(vec![]);
             let cache = ImageCache::default();
             assert_eq!(
-                fetch_record_icon(&stored, &guard, &cache)
+                fetch_record_icon(&stored, &guard, &cache, MEMBER)
                     .await
                     .unwrap_err(),
                 ProxyError::Unavailable,
@@ -714,16 +845,20 @@ mod tests {
         odd_port.image_url = Some("https://news.example:8443/p.png".into());
         let guard = GuardedScript::new(vec![]);
         let cache = ImageCache::default();
-        assert!(fetch_record_icon(&odd_port, &guard, &cache).await.is_err());
+        assert!(fetch_record_icon(&odd_port, &guard, &cache, MEMBER)
+            .await
+            .is_err());
         assert_eq!(guard.hops(), 0);
-        assert!(fetch_record_image(&odd_port, &guard, &cache).await.is_ok());
+        assert!(fetch_record_image(&odd_port, &guard, &cache, MEMBER)
+            .await
+            .is_ok());
         assert_eq!(guard.hops(), 1, "the picture kind keeps its rule");
         // Control: a public https icon is served.
         let guard = GuardedScript::new(vec![ScriptedReply::Body {
             content_type: "image/x-icon",
             body: vec![0, 0, 1, 0],
         }]);
-        let served = fetch_record_icon(&record(), &guard, &ImageCache::default())
+        let served = fetch_record_icon(&record(), &guard, &ImageCache::default(), MEMBER)
             .await
             .expect("a public icon");
         assert_eq!(served.content_type, "image/x-icon");
@@ -742,7 +877,7 @@ mod tests {
             let guard = GuardedScript::new(vec![ScriptedReply::Redirect(location.into())]);
             let cache = ImageCache::default();
             assert_eq!(
-                fetch_record_icon(&record(), &guard, &cache)
+                fetch_record_icon(&record(), &guard, &cache, MEMBER)
                     .await
                     .unwrap_err(),
                 ProxyError::Unavailable,
@@ -760,14 +895,20 @@ mod tests {
     async fn the_picture_slot_measures_what_it_proxies_and_the_icon_slot_does_not() {
         let http = Recorder::new("image/png", png_of(40, 30));
         let cache = ImageCache::default();
-        let first = fetch_record_image(&record(), &http, &cache).await.unwrap();
+        let first = fetch_record_image(&record(), &http, &cache, MEMBER)
+            .await
+            .unwrap();
         assert_eq!(first.size, Some((40, 30)));
         // The second answer comes from the cache and still carries the size.
-        let second = fetch_record_image(&record(), &http, &cache).await.unwrap();
+        let second = fetch_record_image(&record(), &http, &cache, MEMBER)
+            .await
+            .unwrap();
         assert_eq!(second.size, Some((40, 30)));
         assert_eq!(http.calls().len(), 1, "the second request was a cache hit");
         // Same bytes through the icon slot: no measuring.
-        let icon = fetch_record_icon(&record(), &http, &cache).await.unwrap();
+        let icon = fetch_record_icon(&record(), &http, &cache, MEMBER)
+            .await
+            .unwrap();
         assert_eq!(icon.size, None);
         // Bytes with no readable header are an unmeasured picture, still served.
         let mut other = record();
@@ -777,7 +918,7 @@ mod tests {
         ));
         let plain = Recorder::new("image/png", b"not really a png".to_vec());
         assert_eq!(
-            fetch_record_image(&other, &plain, &cache)
+            fetch_record_image(&other, &plain, &cache, MEMBER)
                 .await
                 .unwrap()
                 .size,
@@ -804,7 +945,7 @@ mod tests {
             let guard = GuardedScript::resolving_to(answer, vec![]);
             let cache = ImageCache::default();
             assert_eq!(
-                fetch_record_icon(&record(), &guard, &cache)
+                fetch_record_icon(&record(), &guard, &cache, MEMBER)
                     .await
                     .unwrap_err(),
                 ProxyError::Unavailable,
@@ -820,7 +961,7 @@ mod tests {
                 body: vec![0, 0, 1, 0],
             }],
         );
-        fetch_record_icon(&record(), &guard, &ImageCache::default())
+        fetch_record_icon(&record(), &guard, &ImageCache::default(), MEMBER)
             .await
             .expect("a public answer");
         assert_eq!(guard.hops(), 1);
@@ -910,7 +1051,7 @@ mod tests {
             let cache = ImageCache::default();
             for attempt in 1..=3 {
                 assert_eq!(
-                    fetch_record_icon(&record(), &http, &cache)
+                    fetch_record_icon(&record(), &http, &cache, MEMBER)
                         .await
                         .unwrap_err(),
                     ProxyError::Unavailable,
@@ -924,7 +1065,7 @@ mod tests {
             );
             // The card's picture is another address: it is tried on its own, once.
             for _ in 0..2 {
-                fetch_record_image(&record(), &http, &cache)
+                fetch_record_image(&record(), &http, &cache, MEMBER)
                     .await
                     .unwrap_err();
             }
@@ -934,7 +1075,7 @@ mod tests {
         let svg = Recorder::new("image/svg+xml", b"<svg/>".to_vec());
         let cache = ImageCache::default();
         for _ in 0..3 {
-            fetch_record_icon(&record(), &svg, &cache)
+            fetch_record_icon(&record(), &svg, &cache, MEMBER)
                 .await
                 .unwrap_err();
         }
@@ -949,7 +1090,7 @@ mod tests {
         });
         let http = Failing::new(FetchError::Failed("HTTP 404".into()));
         for _ in 0..3 {
-            fetch_record_icon(&record(), &http, &cache)
+            fetch_record_icon(&record(), &http, &cache, MEMBER)
                 .await
                 .unwrap_err();
         }
@@ -960,10 +1101,10 @@ mod tests {
         );
         // The site mends: the next request is served and kept.
         let healthy = Recorder::new("image/x-icon", vec![0, 0, 1, 0]);
-        fetch_record_icon(&record(), &healthy, &cache)
+        fetch_record_icon(&record(), &healthy, &cache, MEMBER)
             .await
             .expect("served once nothing is remembered against it");
-        fetch_record_icon(&record(), &healthy, &cache)
+        fetch_record_icon(&record(), &healthy, &cache, MEMBER)
             .await
             .expect("and kept");
         assert_eq!(healthy.calls().len(), 1);
@@ -1013,9 +1154,13 @@ mod tests {
         assert_eq!(held(&cache), (2, 50));
         // Through the proxy: it is still served, and asked for again next time.
         let http = Recorder::new("image/png", vec![7u8; 101]);
-        let served = fetch_record_icon(&record(), &http, &cache).await.unwrap();
+        let served = fetch_record_icon(&record(), &http, &cache, MEMBER)
+            .await
+            .unwrap();
         assert_eq!(served.bytes.len(), 101);
-        fetch_record_icon(&record(), &http, &cache).await.unwrap();
+        fetch_record_icon(&record(), &http, &cache, MEMBER)
+            .await
+            .unwrap();
         assert_eq!(http.calls().len(), 2);
     }
 
@@ -1052,7 +1197,7 @@ mod tests {
         let start = |n: u128| {
             let (http, cache) = (http.clone(), cache.clone());
             tokio::spawn(async move {
-                fetch_record_icon(&icon_record(n), http.as_ref(), cache.as_ref()).await
+                fetch_record_icon(&icon_record(n), http.as_ref(), cache.as_ref(), MEMBER).await
             })
         };
         let first = start(1);
@@ -1064,7 +1209,7 @@ mod tests {
         // regression that lets it through fail here instead of waiting on the gate for ever.
         let third = tokio::time::timeout(
             Duration::from_secs(5),
-            fetch_record_icon(&icon_record(3), http.as_ref(), cache.as_ref()),
+            fetch_record_icon(&icon_record(3), http.as_ref(), cache.as_ref(), MEMBER),
         )
         .await
         .expect("the third request must be refused at once, not wait for a place");
@@ -1083,7 +1228,7 @@ mod tests {
         first.await.unwrap().expect("first");
         second.await.unwrap().expect("second");
         gate.add_permits(1);
-        fetch_record_icon(&icon_record(3), http.as_ref(), cache.as_ref())
+        fetch_record_icon(&icon_record(3), http.as_ref(), cache.as_ref(), MEMBER)
             .await
             .expect("a place is free again");
     }
@@ -1097,7 +1242,7 @@ mod tests {
         let http = Failing::new(FetchError::Timeout);
         for n in 1..=4 {
             assert_eq!(
-                fetch_record_icon(&icon_record(n), &http, &cache)
+                fetch_record_icon(&icon_record(n), &http, &cache, MEMBER)
                     .await
                     .unwrap_err(),
                 ProxyError::Unavailable,
@@ -1111,7 +1256,7 @@ mod tests {
         no_icon.icon_proxy_key = None;
         for _ in 0..3 {
             assert_eq!(
-                fetch_record_icon(&no_icon, &http, &cache)
+                fetch_record_icon(&no_icon, &http, &cache, MEMBER)
                     .await
                     .unwrap_err(),
                 ProxyError::Unavailable
@@ -1127,7 +1272,9 @@ mod tests {
         assert!(proxy_goes_outbound(&card, &cache, ProxySlot::Image));
         // Served and kept: the next request for it is answered from memory.
         let healthy = Recorder::new("image/x-icon", vec![0, 0, 1, 0]);
-        fetch_record_icon(&card, &healthy, &cache).await.unwrap();
+        fetch_record_icon(&card, &healthy, &cache, MEMBER)
+            .await
+            .unwrap();
         assert!(!proxy_goes_outbound(&card, &cache, ProxySlot::Icon));
         assert!(
             proxy_goes_outbound(&card, &cache, ProxySlot::Image),
@@ -1135,7 +1282,7 @@ mod tests {
         );
         // Failed lately: left alone.
         let failing = Failing::new(FetchError::Failed("HTTP 404".into()));
-        fetch_record_image(&card, &failing, &cache)
+        fetch_record_image(&card, &failing, &cache, MEMBER)
             .await
             .unwrap_err();
         assert!(!proxy_goes_outbound(&card, &cache, ProxySlot::Image));
@@ -1157,5 +1304,156 @@ mod tests {
                 ProxySlot::Icon
             ));
         }
+    }
+
+    // ── #4881 security review r2, Low: the places are shared, so each member has a share ─────
+
+    /// The gate's entry signal, waited for with a bound: a request that should have reached the
+    /// transport and did not fails the test instead of holding the suite.
+    async fn reached_within(reached: &mut mpsc::UnboundedReceiver<()>, what: &str) {
+        tokio::time::timeout(Duration::from_secs(5), reached.recv())
+            .await
+            .unwrap_or_else(|_| panic!("{what}: never reached the transport"))
+            .expect("the transport is alive");
+    }
+
+    #[tokio::test]
+    async fn one_member_cannot_hold_more_than_its_share_and_the_others_are_not_shut_out() {
+        let cache = Arc::new(ImageCache::with_limits(ProxyLimits {
+            max_in_flight: 4,
+            max_in_flight_per_member: 1,
+            ..ProxyLimits::default()
+        }));
+        let (entered, mut reached) = mpsc::unbounded_channel();
+        let gate = Arc::new(Semaphore::new(0));
+        let http = Arc::new(Gated {
+            entered,
+            gate: gate.clone(),
+        });
+        let start = |n: u128, who: Uuid| {
+            let (http, cache) = (http.clone(), cache.clone());
+            tokio::spawn(async move {
+                fetch_record_icon(&icon_record(n), http.as_ref(), cache.as_ref(), who).await
+            })
+        };
+        let ask_again = |n: u128, who: Uuid| {
+            // The outer timeout makes a regression that lets the request through fail here
+            // instead of waiting on the gate for ever.
+            let (http, cache) = (http.clone(), cache.clone());
+            async move {
+                tokio::time::timeout(
+                    Duration::from_secs(5),
+                    fetch_record_icon(&icon_record(n), http.as_ref(), cache.as_ref(), who),
+                )
+                .await
+                .expect("a member over its share must be refused at once, not wait for a place")
+            }
+        };
+        let (alice, bob) = (member(1), member(2));
+
+        let first = start(1, alice);
+        reached_within(&mut reached, "alice's first").await;
+        // Alice holds her one place. Her second request is turned away at once although three
+        // of the process's four places are free.
+        assert_eq!(ask_again(2, alice).await.unwrap_err(), ProxyError::Busy);
+        assert!(
+            reached.try_recv().is_err(),
+            "the refused request never reached the transport"
+        );
+        // Busy says nothing about the card: it is not remembered as a failure.
+        let key = SlotTarget::of(&icon_record(2), ProxySlot::Icon)
+            .unwrap()
+            .key;
+        assert!(!cache.failed_recently(&key));
+
+        // The share is the member's own: Bob, who holds nothing, is served, and has the same
+        // share to hold.
+        let bobs = start(3, bob);
+        reached_within(&mut reached, "bob's first").await;
+        assert_eq!(ask_again(4, bob).await.unwrap_err(), ProxyError::Busy);
+
+        // Their fetches end and the places come back, member by member; nobody is left counted.
+        gate.add_permits(2);
+        first.await.unwrap().expect("alice's first");
+        bobs.await.unwrap().expect("bob's first");
+        assert!(
+            cache.member_places.lock().unwrap().is_empty(),
+            "no member is still counted"
+        );
+        gate.add_permits(1);
+        ask_again(2, alice).await.expect("alice's place is back");
+    }
+
+    #[tokio::test]
+    async fn a_members_place_comes_back_whichever_way_its_fetch_ends() {
+        let cache = ImageCache::with_limits(ProxyLimits {
+            max_in_flight_per_member: 1,
+            ..ProxyLimits::default()
+        });
+        let alice = member(1);
+        // A fetch that fails gives its place back: the next is never turned away.
+        let failing = Failing::new(FetchError::Timeout);
+        for n in 1..=3 {
+            assert_eq!(
+                fetch_record_icon(&icon_record(n), &failing, &cache, alice)
+                    .await
+                    .unwrap_err(),
+                ProxyError::Unavailable,
+                "request {n} was never turned away as busy"
+            );
+        }
+        // So does one whose caller walked away in the middle of it (its future is dropped).
+        let (entered, mut reached) = mpsc::unbounded_channel();
+        let held = Gated {
+            entered,
+            gate: Arc::new(Semaphore::new(0)),
+        };
+        let walked_away = tokio::time::timeout(
+            Duration::from_millis(100),
+            fetch_record_icon(&icon_record(4), &held, &cache, alice),
+        )
+        .await;
+        assert!(
+            walked_away.is_err(),
+            "the fetch was still waiting when its caller gave up"
+        );
+        reached_within(&mut reached, "the abandoned fetch").await;
+        let healthy = Recorder::new("image/png", png_of(10, 10));
+        fetch_record_icon(&icon_record(5), &healthy, &cache, alice)
+            .await
+            .expect("the place of the abandoned fetch is back");
+        assert!(cache.member_places.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn no_room_for_a_name_lookup_is_busy_and_is_never_remembered_against_the_address() {
+        let cache = ImageCache::default();
+        let card = icon_record(1);
+        let full = Failing::new(FetchError::Capacity);
+        for attempt in 1..=3 {
+            assert_eq!(
+                fetch_record_icon(&card, &full, &cache, MEMBER)
+                    .await
+                    .unwrap_err(),
+                ProxyError::Busy,
+                "attempt {attempt}: not a verdict on the card"
+            );
+            assert!(
+                proxy_goes_outbound(&card, &cache, ProxySlot::Icon),
+                "attempt {attempt}: the address is not held against it"
+            );
+        }
+        assert_eq!(
+            full.calls(),
+            3,
+            "every request really asked: nothing was remembered"
+        );
+        // Once the server has room the same address is served, and kept.
+        let healthy = Recorder::new("image/x-icon", vec![0, 0, 1, 0]);
+        fetch_record_icon(&card, &healthy, &cache, MEMBER)
+            .await
+            .expect("served once there is room");
+        assert!(!proxy_goes_outbound(&card, &cache, ProxySlot::Icon));
+        assert_eq!(healthy.calls().len(), 1);
     }
 }

@@ -1,26 +1,30 @@
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
-import {createLocaleService, type LocaleService} from '@momo/core/i18n/context';
-import {resolveLocaleContext} from '@momo/core/i18n/locale';
+import {createMessageService} from '@momo/core/i18n/service';
+import type {MessageService} from '@momo/core/i18n/types';
+
 import {useMobileLocale} from './LocaleProvider';
 
-// 화면이 사전 문구를 얻는 문 하나 (#4878 — 타임라인의 첫 사전 소비처라 이 모양이 다음 화면의 본이 된다).
+// =============================================================================
+// 화면이 사전에서 문구를 읽는 한 길 (#4883, ADR-0213).
 //
-// 제품 앱은 늘 언어 공급자를 세운다(`MobileLocaleProvider`). 공급자 밖의 격리 화면(시험·측정 하니스)은 **정적 한국어
-// 카탈로그**로 물러난다: 폰은 두 카탈로그를 정적으로 들고 있어(`mobileCatalogStatic.test.ts`, #4910 — 코어 배럴이
-// 아닌 잎 모듈만 부른다) 새 덩어리가 들지 않고, 폴백 문구를 화면 코드에 리터럴로 두지 않는다. 기존 격리 하니스들이
-// 한국어로 문구를 단정해 온 것과 같은 기본값이다.
+// 설치된 언어 서비스(`MobileLocaleProvider`)의 `formatMessage` 를 그대로 돌려준다. 앱은 늘 그 제공자 아래에서
+// 도는데, 따로 떨어진 화면 하네스와 시험은 제공자 없이 화면을 세운다(`useMobileLocale` 머리말). 그때도 화면이 문구를
+// 잃지 않도록 같은 사전의 한국어 판으로 읽는다 — 영어 판이 아니라 한국어인 이유는 이 앱의 기본 언어이기 때문이다.
+// 문구를 코드에 직접 적는 대체 경로가 아니다: 사전의 정적 import 이고(`controller.ts` 와 같다), 키가 없으면 코어의
+// `SAFE_MESSAGE` 가 나온다.
+//
+// 이름이 `formatMessage` 인 것은 일부러다. 직접 문구 장부(`direct-copy.mjs`)는 `formatMessage(...)` 호출 안의 키를
+// 문구가 아닌 것으로 읽고 모르는 키를 잡는다 — 다른 이름으로 부르면 키 문자열이 문구로 세어진다.
+// =============================================================================
 
-let koFallback: LocaleService | undefined;
+let fallback: MessageService | null = null;
 
-function fallbackLocale(): LocaleService {
-  koFallback ??= createLocaleService({
-    ...resolveLocaleContext('ko-KR', {languages: ['ko-KR'], timeZone: 'Asia/Seoul'}),
-    catalog: koCatalog,
-  });
-  return koFallback;
+function fallbackService(): MessageService {
+  fallback ??= createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
+  return fallback;
 }
 
-/** 선택한 언어의 `formatMessage`. 언어가 바뀌면 공급자가 값을 갈아 끼워 다시 그려진다. */
-export function useFormatMessage(): LocaleService['formatMessage'] {
-  return (useMobileLocale()?.locale ?? fallbackLocale()).formatMessage;
+export function useFormatMessage(): MessageService['formatMessage'] {
+  const current = useMobileLocale();
+  return current ? current.locale.formatMessage : fallbackService().formatMessage;
 }

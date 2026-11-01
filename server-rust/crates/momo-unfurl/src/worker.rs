@@ -183,7 +183,11 @@ impl<T: UnfurlHttp + 'static> UnfurlWorker<T> {
                                     card: Settled::quiet("blocked"),
                                 });
                             }
-                            Err(FetchError::Timeout) | Err(FetchError::Failed(_))
+                            // A fetch this server had no room for (`Capacity`) is as transient as
+                            // one that timed out: it gets the same later attempt.
+                            Err(FetchError::Timeout)
+                            | Err(FetchError::Failed(_))
+                            | Err(FetchError::Capacity)
                                 if job.attempts < self.config.max_attempts =>
                             {
                                 self.settle_requeue_or_fail(&job, "transient fetch").await;
@@ -429,7 +433,7 @@ impl Settled {
 /// only slow its own job. The page's bytes move into the closure, nothing is cloned. A panic in
 /// the reading code ends the job as the quiet `failed` a page with nothing to show gets, and is
 /// logged without the page's address or text.
-async fn build_card_off_thread(
+pub(crate) async fn build_card_off_thread(
     fetched: Fetched,
     allow_development_http: bool,
 ) -> Option<CardFields> {

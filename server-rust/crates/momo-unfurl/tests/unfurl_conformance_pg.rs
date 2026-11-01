@@ -199,7 +199,7 @@ impl UnfurlHttp for CountingHttp {
     async fn fetch(&self, url: &str, kind: FetchKind) -> Result<Fetched, FetchError> {
         self.hits.fetch_add(1, Ordering::SeqCst);
         match kind {
-            FetchKind::Html => Ok(Fetched {
+            FetchKind::Html | FetchKind::Preview => Ok(Fetched {
                 final_url: url.to_string(),
                 content_type: "text/html".into(),
                 body: self.html.as_bytes().to_vec(),
@@ -1276,4 +1276,82 @@ async fn the_database_holds_the_size_pair_the_icon_pair_and_the_name_length() {
              migrations are never re-run: use a freshly created database"
         );
     }
+}
+
+/// A transport with no room for any request at all (`FetchError::Capacity`), counting the asks.
+struct NoRoomHttp {
+    asks: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl UnfurlHttp for NoRoomHttp {
+    async fn fetch(&self, _url: &str, _kind: FetchKind) -> Result<Fetched, FetchError> {
+        self.asks.fetch_add(1, Ordering::SeqCst);
+        Err(FetchError::Capacity)
+    }
+}
+
+/// A fetch this server had no room for is as transient as one that timed out: the job goes back
+/// to the queue for a later attempt and no card is written, until the attempts run out. Taken as
+/// an unresolvable name, as it was before it had a kind of its own, it gave the same answer; a
+/// worker that did not know the new kind would end the card for good as `failed` on the first
+/// busy moment.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB"]
+async fn a_fetch_this_server_had_no_room_for_is_tried_again_like_a_timeout() {
+    let _guard = test_lock().await;
+    ensure_schema();
+    let su = superuser_pool().await;
+    skip_leftover_jobs(&su).await;
+    let tenant = seed(&su).await;
+    let message_id = insert_message(&su, &tenant, "https://busy.example/story").await;
+    let asks = Arc::new(AtomicUsize::new(0));
+    let worker = UnfurlWorker::new(
+        su.clone(),
+        Arc::new(NoRoomHttp { asks: asks.clone() }),
+        UnfurlConfig::for_tests(database_url(), true),
+    );
+    let job = || async {
+        sqlx::query_as::<_, (String, i32, Option<String>)>(
+            "SELECT status, attempts, last_error FROM unfurl_job WHERE message_id = $1",
+        )
+        .bind(message_id)
+        .fetch_one(&su)
+        .await
+        .unwrap()
+    };
+    let cards = || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM message_unfurl WHERE message_id = $1")
+            .bind(message_id)
+            .fetch_one(&su)
+            .await
+            .unwrap()
+    };
+
+    // The first attempt: put back, not ended, and nothing written for the link.
+    let stats = worker.drain_once().await.expect("first drain");
+    assert_eq!((stats.claimed, stats.failed), (1, 1), "{stats:?}");
+    assert_eq!(
+        job().await,
+        (
+            "pending".to_string(),
+            1,
+            Some("transient fetch".to_string())
+        )
+    );
+    assert_eq!(cards().await, 0, "a busy moment is not a card");
+    // The attempts run out as for any transient failure (`UnfurlConfig::for_tests`: three), and
+    // only then is the job over: the link was asked for three times, no more.
+    worker.drain_once().await.expect("second drain");
+    assert_eq!(
+        job().await,
+        (
+            "pending".to_string(),
+            2,
+            Some("transient fetch".to_string())
+        )
+    );
+    worker.drain_once().await.expect("third drain");
+    assert_eq!(job().await.0, "done");
+    assert_eq!(asks.load(Ordering::SeqCst), 3);
 }

@@ -25,6 +25,7 @@
 import {
   fetchWithDeadline,
   NetworkError,
+  parseRetryAfterSeconds,
   REQUEST_TIMEOUT_MS,
   type HttpResponse,
 } from "./http";
@@ -35,7 +36,9 @@ import { tokenExpiresAtMs } from "./tokenLifetime";
 import {
   isUnfurlProxyPath,
   messageUnfurlFromWire,
+  unfurlPreviewFromWire,
   type MessageUnfurl,
+  type UnfurlPreview,
   type WorkspaceUnfurlSettings,
 } from "../features/timeline/unfurl";
 import {
@@ -2890,9 +2893,42 @@ export async function updateWorkspaceUnfurlSettings(
 }
 
 /**
+ * 보내기 전 입력칸에 있는 링크 한 개의 카드 (ADR-0170 증보 2026-11-01 D14, #4884).
+ *
+ * 본문이 아니라 **주소 하나**만 보낸다(주소는 쿼리·경로가 아니라 본문에 싣는다 — 링크의 쿼리는 흔히
+ * 토큰이다). 허용된 요청의 답은 늘 200이고, `failed`는 모든 실패(거절된 목적지·느리거나 없는 사이트·
+ * 보여 줄 것이 없는 페이지·꺼진 스위치)의 한 가지 모양이라 이유를 말하지 않는다 — 조용히 카드를
+ * 그리지 않으면 된다. 429(예산·자리)는 `ApiError.status`로 나오고, `Retry-After` 뒤에 한 번 다시 묻는다.
+ *
+ * 권고(서버가 강제하지 않는다): 주소가 끝났다고 볼 수 있을 때(붙여넣기 직후, 뒤에 공백) 입력을 멈추고
+ * 350ms 뒤에 한 입력칸에서 같은 주소는 한 번만 묻는다. `ok`의 `imageUrl`·`iconUrl`은 `fetchUnfurlImage`로만 받는다.
+ */
+export async function fetchUnfurlPreview(
+  workspaceId: string,
+  channelId: string,
+  url: string,
+  signal?: AbortSignal
+): Promise<UnfurlPreview> {
+  const source = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/channels/${encodeURIComponent(channelId)}/unfurl-previews`,
+    {
+      method: "POST",
+      body: JSON.stringify({ url }),
+      ...(signal ? { signal } : {}),
+    }
+  );
+  const preview = unfurlPreviewFromWire(source);
+  if (preview === null) throw new WireShapeError();
+  return preview;
+}
+
+/**
  * Fetch image bytes through the authenticated server proxy: a card's preview
- * picture (`imageUrl`) or its site icon (`iconUrl`). The strict path gate makes
- * it impossible to attach a bearer to a remote image host.
+ * picture (`imageUrl`) or its site icon (`iconUrl`), stored card or composer
+ * preview alike. The strict path gate makes it impossible to attach a bearer
+ * to a remote image host.
  */
 export async function fetchUnfurlImage(
   imageUrl: string,
@@ -2914,7 +2950,16 @@ export async function fetchUnfurlImage(
     if (await rotateAfterUnauthorized()) res = await send(coreSession().getAccessToken());
   }
   if (res.status === 401) coreSession().markAuthExpired();
-  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  // A 429 from the proxy says when to come back (#4956); keep it so a screen can wait that long
+  // instead of asking again on every remount.
+  if (!res.ok) {
+    throw new ApiError(
+      res.status,
+      `HTTP ${res.status}`,
+      undefined,
+      parseRetryAfterSeconds(res.headers.get("Retry-After"))
+    );
+  }
   return res.blob();
 }
 
@@ -3223,6 +3268,17 @@ export interface SendMessageOptions {
    * 보내지 않는다.
    */
   apps?: string[];
+  /**
+   * ADR-0170 증보 2026-11-01(#4884) - 「미리보기 없이 보내기」: 이 메시지에는 링크 카드가 **하나도** 생기지
+   * 않는다(서버가 같은 전송 트랜잭션에서 그 메시지의 묘비를 심고, 워커는 아무것도 받지 않고 끝낸다). 입력칸의
+   * ✕가 이번 메시지의 미리보기를 끈 채 보낼 때 쓴다. 보낸 뒤에 바꾸는 길은 없고(멱등 재시도도 저장된 메시지를
+   * 돌려줄 뿐이다), 보낸 뒤 카드 제거는 `removeMessageUnfurls`다.
+   *
+   * **켠 때(`true`)만 키가 간다.** 전송 요청은 closed-world라 옛 서버는 모르는 키를 400으로 거절하므로,
+   * 켜지 않은 전송은 이 필드 이전과 바이트 단위로 같은 요청이어야 하고, 미리보기 요청(`fetchUnfurlPreview`)이
+   * 통하는 서버에만 켠다.
+   */
+  suppressUnfurl?: boolean;
 }
 
 export function sendMessage(
@@ -3248,6 +3304,7 @@ export function sendMessage(
   if (options?.apps !== undefined && options.apps.length > 0) {
     body.apps = options.apps;
   }
+  if (options?.suppressUnfurl === true) body.suppressUnfurl = true;
   return request<Message>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
@@ -3272,6 +3329,8 @@ export interface ThreadReplyOptions {
    * 보낼 때 한 번 정해지고 이후에 바꾸는 길은 없다.
    */
   alsoInChannel?: boolean;
+  /** `SendMessageOptions.suppressUnfurl`와 같다 — 켠 때(`true`)만 키가 간다. */
+  suppressUnfurl?: SendMessageOptions["suppressUnfurl"];
 }
 
 /**
@@ -3298,6 +3357,7 @@ export function sendThreadReply(
   };
   // 이 함수가 `rootId`를 늘 싣는 유일한 전송이라 「대화에도 보내기」가 합법인 자리다(#4887).
   if (options?.alsoInChannel === true) body.alsoInChannel = true;
+  if (options?.suppressUnfurl === true) body.suppressUnfurl = true;
   if (options?.attachmentIds !== undefined && options.attachmentIds.length > 0) {
     body.attachmentIds = options.attachmentIds;
   }

@@ -1,4 +1,6 @@
 {
+  "timeline.unfurl.label": "링크 미리보기: {title}, {domain}",
+  "timeline.unfurl.video": "동영상",
   "timeline.thread.replyCount": "답글 {count, number}개",
   "timeline.thread.unreadChip": "새 답글 {count, number}",
   "timeline.thread.open": "스레드 열기, 답글 {count, number}개",

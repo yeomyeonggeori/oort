@@ -823,8 +823,18 @@ pub enum MemberWrite {
     /// layer, and only by a request that really would fetch (no cached picture, no recent failure
     /// remembered: `momo_unfurl::proxy_goes_outbound`), so rendering a timeline of cached cards
     /// costs nothing and the budget is what stops a member from using the proxy to knock on third
-    /// parties' doors (#4881 security review M-2, ADR-0170 증보 D13).
+    /// parties' doors (#4881 security review M-2, ADR-0170 증보 D13). A request turned away for want
+    /// of a place to fetch (`ProxyError::Busy`) is given its unit back ([`refund_member_write`]):
+    /// nothing left the building.
     UnfurlProxy,
+    /// `POST …/channels/{ch}/unfurl-previews`: a link a member typed into the composer, asked about
+    /// **before** the message exists (ADR-0170 증보 2026-11-01 D20, #4884). The one request where
+    /// the member names the address this server will GET and the answer comes straight back, so
+    /// the budget is smaller than the proxy's and counts only a request that really fetches (an
+    /// answer the server already holds, a switch that is off, and a request turned away for want
+    /// of a place spend nothing). Spent in the handler, like [`MemberWrite::UnfurlProxy`], and a
+    /// request turned away for want of a place gets its unit back ([`refund_member_write`]).
+    UnfurlPreview,
 }
 
 impl MemberWrite {
@@ -836,6 +846,7 @@ impl MemberWrite {
             MemberWrite::ScheduledWrite => "scheduled_write",
             MemberWrite::UploadStart => "upload_start",
             MemberWrite::UnfurlProxy => "unfurl_proxy",
+            MemberWrite::UnfurlPreview => "unfurl_preview",
         }
     }
 
@@ -847,6 +858,7 @@ impl MemberWrite {
             MemberWrite::ScheduledWrite => "write:schedule",
             MemberWrite::UploadStart => "write:upload",
             MemberWrite::UnfurlProxy => "write:unfurl",
+            MemberWrite::UnfurlPreview => "write:unfurl_preview",
         }
     }
 }
@@ -874,6 +886,7 @@ pub fn member_write_limit(
         (MemberWrite::ScheduledWrite, _) => config.scheduled_write_per_member_limit,
         (MemberWrite::UploadStart, _) => config.upload_start_per_member_limit,
         (MemberWrite::UnfurlProxy, _) => config.unfurl_proxy_per_member_limit,
+        (MemberWrite::UnfurlPreview, _) => config.unfurl_preview_per_member_limit,
     }
 }
 
@@ -926,16 +939,43 @@ pub(crate) async fn spend_member_write(
     surface: MemberWrite,
     principal: &Principal,
 ) -> Result<(), u64> {
+    spend_member_write_unit(state, surface, principal)
+        .await
+        .map(|_| ())
+}
+
+/// One unit of a member's budget that a request spent, kept so the request can give it back
+/// ([`refund_member_write`]) when the work it paid for did not happen.
+#[derive(Debug)]
+pub(crate) struct SpentUnit {
+    key: String,
+    at: Instant,
+}
+
+/// [`spend_member_write`] that also says which unit it spent: `Ok(Some(unit))` for a counted
+/// request, `Ok(None)` when the surface has no budget (limit 0) and nothing was counted.
+///
+/// For a caller that spends **before** the work and must hand the unit back when the work is
+/// turned away for a reason that is not the member's doing (the link-card proxy's `Busy`).
+pub(crate) async fn spend_member_write_unit(
+    state: &AppState,
+    surface: MemberWrite,
+    principal: &Principal,
+) -> Result<Option<SpentUnit>, u64> {
     let config = &state.rate_limit.config;
     let limit = member_write_limit(config, surface, principal.kind);
     if limit == 0 {
-        return Ok(());
+        return Ok(None);
     }
     let key = member_write_key(surface, principal.member_id);
     let window = Duration::from_secs(config.window_seconds);
-    let verdict = state.rate_limit.member_writes.check(&key, limit, window);
+    let at = Instant::now();
+    let verdict = state
+        .rate_limit
+        .member_writes
+        .check_at(&key, limit, window, at);
     if verdict.allowed {
-        return Ok(());
+        return Ok(Some(SpentUnit { key, at }));
     }
     // Only the first denial of a burst owns a reservation, so a flood of parallel refusals has
     // exactly one request that goes on to the database.
@@ -943,6 +983,13 @@ pub(crate) async fn spend_member_write(
         record_member_write_denial(state, principal, surface, limit, &key, reservation).await;
     }
     Err(verdict.retry_after_seconds)
+}
+
+/// Take back the unit [`spend_member_write_unit`] counted, as if the request had not been
+/// counted: the member's budget is what it was before. A unit that has already left the window
+/// is gone and this does nothing.
+pub(crate) fn refund_member_write(state: &AppState, unit: SpentUnit) {
+    state.rate_limit.member_writes.forget_at(&unit.key, unit.at);
 }
 
 /// The audit half of a first denial. Never fails the request: an audit that cannot
@@ -1474,7 +1521,7 @@ mod tests {
 
     use std::sync::atomic::AtomicUsize;
 
-    /// Four different numbers, so a swapped field cannot pass by coincidence.
+    /// Different numbers for every surface, so a swapped field cannot pass by coincidence.
     fn budget_config() -> RateLimitConfig {
         RateLimitConfig {
             message_send_per_member_limit: 11,
@@ -1482,6 +1529,7 @@ mod tests {
             scheduled_write_per_member_limit: 33,
             upload_start_per_member_limit: 44,
             unfurl_proxy_per_member_limit: 55,
+            unfurl_preview_per_member_limit: 66,
             ..RateLimitConfig::default()
         }
     }
@@ -1513,6 +1561,11 @@ mod tests {
                 55,
                 "the proxy budget is one number for every credential"
             );
+            assert_eq!(
+                limit(MemberWrite::UnfurlPreview, kind),
+                66,
+                "the preview budget is its own number, not the proxy's"
+            );
         }
     }
 
@@ -1526,13 +1579,14 @@ mod tests {
             (MemberWrite::ScheduledWrite, "scheduled_write"),
             (MemberWrite::UploadStart, "upload_start"),
             (MemberWrite::UnfurlProxy, "unfurl_proxy"),
+            (MemberWrite::UnfurlPreview, "unfurl_preview"),
         ];
         let mut keys = std::collections::HashSet::new();
         for (surface, label) in surfaces {
             assert_eq!(surface.label(), label);
             assert!(keys.insert(member_write_key(surface, member)));
         }
-        assert_eq!(keys.len(), 4);
+        assert_eq!(keys.len(), 5);
         assert_ne!(
             member_write_key(MemberWrite::MessageSend, member),
             member_write_key(MemberWrite::MessageSend, Uuid::from_u128(8)),
