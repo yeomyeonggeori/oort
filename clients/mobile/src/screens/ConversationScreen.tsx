@@ -135,6 +135,7 @@ import {
 } from '../features/conversation/LongPressHint';
 import type {MessageRowActions} from '../features/conversation/MessageRow';
 import {ThreadPanel} from '../features/conversation/ThreadPanel';
+import {threadsAreFollowable} from '@momo/core/features/timeline/threadFollow';
 import {PinListPanel} from '../features/conversation/PinListPanel';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import {Timeline} from '../features/conversation/Timeline';
@@ -2261,6 +2262,7 @@ export default function ConversationScreen({
           onOpenMessage={openApprovalMessage}
           nowMs={nowMs}
           onClose={closeThread}
+          followable={threadsAreFollowable(channel?.kind)}
           onReplySent={bumpSelfSend}
           onOpenProfile={showMemberProfile}
           onReaderTookList={onReaderTookList}

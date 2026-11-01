@@ -145,6 +145,11 @@ export interface ResumeInfo {
   resubscribeCount: number;
 }
 
+/** `loadReplies` 가 돌려주는 값 — 서버가 알려 준 내 따라가기 상태(#4890). */
+export interface ThreadRepliesLoad {
+  following: boolean;
+}
+
 export interface UseTimelineResult {
   state: TimelineState;
   status: 'loading' | 'ready' | 'error';
@@ -211,7 +216,11 @@ export interface UseTimelineResult {
   /** Soft-delete my own message; the returned tombstone replaces the row. */
   removeMessage: (message: Message) => Promise<void>;
   /** One page of a root's replies, merged into the same seq-ordered state. */
-  loadReplies: (rootId: string) => Promise<void>;
+  /**
+   * 스레드의 답글을 끝까지 받아 같은 상태에 합친다. 돌려주는 값은 서버가 알려 준 **내 따라가기 상태**(#4890, ADR-0206 증보 1 F8:
+   * 스레드 열기 응답의 `following` — 마지막 쪽의 값, 키가 없는 옛 서버는 `false`).
+   */
+  loadReplies: (rootId: string) => Promise<ThreadRepliesLoad>;
   /**
    * The answer to a thread's 「read up to here」 signal (#4878, #4889 stage 2), folded into the HELD root's summary: a followed
    * thread's unread count becomes the server's (0 clears the 「새 답글 M」 chip), an unfollowed one loses the value.
@@ -648,10 +657,11 @@ export function useTimeline(
   );
 
   const loadReplies = useCallback(
-    async (rootId: string) => {
+    async (rootId: string): Promise<ThreadRepliesLoad> => {
       const channel = channelRef.current;
-      if (channel === null) return;
+      if (channel === null) return {following: false};
       let cursor: number | undefined;
+      let following = false;
       // Ascending pages until the server stops offering one. Replies are ordinary
       // channel messages, so every page lands in the same seq-ordered state the
       // channel is drawn from — loading a thread also heals the channel.
@@ -664,9 +674,12 @@ export function useTimeline(
         );
         applyBatch(page.messages);
         hydrateUnfurls(page.messages, channel);
+        // 모든 쪽이 내 따라가기 상태를 싣는다. 가장 나중에 읽은 쪽의 값이 가장 새 값이다.
+        following = page.following === true;
         if (page.nextCursor === undefined) break;
         cursor = page.nextCursor;
       }
+      return {following};
     },
     [workspaceId, applyBatch, hydrateUnfurls],
   );

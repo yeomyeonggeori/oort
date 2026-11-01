@@ -597,7 +597,7 @@
     "clients/web/src/features/memory/ProposalCard.tsx": 30,
     "clients/web/src/features/memory/memoryTestKit.tsx": 31,
     "clients/web/src/features/memory/useMemory.ts": 37,
-    "clients/web/src/features/notifications/DesktopNotifications.tsx": 18,
+    "clients/web/src/features/notifications/DesktopNotifications.tsx": 17,
     "clients/web/src/features/notifications/WorkHostNotices.tsx": 2,
     "clients/web/src/features/notifications/browserNotify.ts": 14,
     "clients/web/src/features/notifications/deviceNotify.ts": 1,

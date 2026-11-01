@@ -12,5 +12,7 @@
   "settings.appearance.linkPreviewOff": "끄기",
   "settings.appearance.linkPreviewCompactHint": "왼쪽에 작은 그림을 두고, 오른쪽에 주소와 제목 한 줄, 설명 한 줄을 보여줘요.",
   "settings.appearance.linkPreviewRichHint": "글을 위에, 큰 그림을 아래에 둬요. 제목과 설명은 두 줄까지 보여줘요. 큰 그림이 없는 링크는 작게와 같아요.",
-  "settings.appearance.linkPreviewOffHint": "메시지 속 링크만 남기고 카드는 그리지 않아요."
+  "settings.appearance.linkPreviewOffHint": "메시지 속 링크만 남기고 카드는 그리지 않아요.",
+  "settings.notifications.threadReplyName": "참여한 스레드의 새 답글",
+  "settings.notifications.threadReplyDescription": "따라가는 스레드에 남이 쓴 새 답글이에요."
 }

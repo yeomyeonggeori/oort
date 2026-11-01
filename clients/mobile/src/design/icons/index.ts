@@ -87,6 +87,11 @@ export const CONV_ICONS = {
   // 오래 걸리는 전송의 표지 (#4455). Lucide `clock`(ISC) — 같은 레시피(선 1.8, viewBox 24, 12pt 의
   // 1·2·3배). 시각 글자(`font.meta` 12)와 같은 크기라 이름 줄 옆에서 글자보다 튀지 않는다.
   clock: require('./clock.png') as ImageSourcePropType,
+  // 스레드 머리의 「따라가기」 단추(#4890). Lucide `bell`·`bell-off`(ISC, 웹이 `lucide-react` 0.454.0 으로 쓰는 같은 집합 — 경로 그대로)를
+  // 같은 레시피(선 1.8, viewBox 24, `rsvg-convert`, 20pt 의 1·2·3배)로 **옮겨 담았다**. 새로 그린 것이 아니다. 켜짐은 `bell`,
+  // 꺼짐은 빗금이 있는 `bell-off`.
+  bell: require('./bell.png') as ImageSourcePropType,
+  bellOff: require('./bell-off.png') as ImageSourcePropType,
 } as const;
 
 export type ConvIconName = keyof typeof CONV_ICONS;
@@ -104,6 +109,8 @@ export const CONV_ICON_SIZE: Readonly<Record<ConvIconName, number>> = {
   cross: 14,
   file: 18,
   clock: 12,
+  bell: 20,
+  bellOff: 20,
 };
 
 // ---- + 메뉴 아이콘 넷 (DS2-2b #2750) -----------------------------------------
