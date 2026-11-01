@@ -670,6 +670,8 @@ pub async fn send(
     // fail the CHECK and surface as a 500). The sentence is English like every `ApiError` here and
     // names no `routing` (see `thread_root_rejection`: the web probe reads refusals by shape).
     let also_in_channel = request.also_in_channel.unwrap_or(false);
+    // ADR-0170 증보 2026-11-01 D21 (#4884). Absent and `false` are the same request.
+    let suppress_unfurl = request.suppress_unfurl.unwrap_or(false);
     if also_in_channel && root_id.is_none() {
         return Err(ApiError::bad_request(
             "alsoInChannel needs rootId: only a thread reply can also be sent to the channel",
@@ -756,6 +758,7 @@ pub async fn send(
         requested_routing,
         requested_apps,
         also_in_channel,
+        suppress_unfurl,
         gates,
     };
 
@@ -2254,6 +2257,7 @@ mod tests {
             stream: None,
             harness_refine: None,
             apps: None,
+            suppress_unfurl: None,
         }
     }
 
@@ -3140,6 +3144,9 @@ mod tests {
             // ADR-0148 증보 (#4887): 「대화에도 보내기」 is a person's choice in the app; the
             // developer-token door stays closed to it until ADR-0216 opens it.
             "alsoInChannel",
+            // ADR-0170 증보 2026-11-01 (#4884): 「미리보기 없이 보내기」 is the author's choice in
+            // the composer, where a preview was shown; a terminal tool has none.
+            "suppressUnfurl",
             "sentVia",
             "sent_via",
             "Body",

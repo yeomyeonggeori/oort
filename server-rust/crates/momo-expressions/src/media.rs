@@ -5,6 +5,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use image::codecs::gif::{GifDecoder, GifEncoder, Repeat};
+use image::metadata::Orientation;
 use image::{
     AnimationDecoder, Delay, DynamicImage, Frame, ImageDecoder, ImageEncoder, ImageFormat,
     ImageReader, Limits,
@@ -153,23 +154,41 @@ async fn waiting(
     line: &Line<'_>,
     wait: Duration,
 ) -> Result<Processed, Rejected> {
-    // A free slot is taken without standing in line.
-    let permit = match semaphore.clone().try_acquire_owned() {
-        Ok(permit) => permit,
+    if let Some(rejected) = refused_before_a_slot(&bytes) {
+        return Err(rejected);
+    }
+    let permit = permit_waiting(semaphore, line, wait).await?;
+    run_with_permit(bytes, path, deadline, permit).await
+}
+
+/// What the **parent** can refuse from a body's first bytes alone, before it takes a decoder slot,
+/// stands in the line or starts a child (#4900). A video is never decoded here (ADR-0218 D4 is on
+/// hold), so it ends as [`Rejected::Video`], the card, whether or not a slot is free: without this
+/// a video was told "busy" whenever both slots were taken, for something no slot could ever make.
+fn refused_before_a_slot(bytes: &[u8]) -> Option<Rejected> {
+    (sniff(bytes) == Sniffed::Video).then_some(Rejected::Video)
+}
+
+/// A decoder slot: a free one is taken without standing in line; otherwise the line has room for
+/// `max` callers, each for `longest` at most. The place is held until the slot is ours (or the wait
+/// ends) and not a moment longer, so decoding never occupies it.
+async fn permit_waiting(
+    semaphore: Arc<Semaphore>,
+    line: &Line<'_>,
+    wait: Duration,
+) -> Result<tokio::sync::OwnedSemaphorePermit, Rejected> {
+    match semaphore.clone().try_acquire_owned() {
+        Ok(permit) => Ok(permit),
         Err(_) => {
-            // Both slots are busy. The line has room for `max` callers, each for `longest` at
-            // most; the place is held until the slot is ours (or the wait ends) and not a
-            // moment longer, so decoding never occupies it.
             let Some(_place) = Place::take(line) else {
                 return Err(Rejected::Busy);
             };
             tokio::time::timeout(wait.min(line.longest), semaphore.acquire_owned())
                 .await
                 .map_err(|_| Rejected::Busy)?
-                .map_err(|_| Rejected::Invalid)?
+                .map_err(|_| Rejected::Invalid)
         }
-    };
-    run_with_permit(bytes, path, deadline, permit).await
+    }
 }
 
 async fn supervised(
@@ -178,6 +197,9 @@ async fn supervised(
     deadline: Duration,
     semaphore: Arc<Semaphore>,
 ) -> Result<Processed, Rejected> {
+    if let Some(rejected) = refused_before_a_slot(&bytes) {
+        return Err(rejected);
+    }
     // Admission happens before detaching: canceled callers cannot accumulate
     // an unbounded queue of 5 MiB inputs waiting behind the two codec slots.
     let permit = semaphore.try_acquire_owned().map_err(|_| Rejected::Busy)?;
@@ -216,8 +238,24 @@ async fn child(
     path: std::path::PathBuf,
     deadline: Duration,
 ) -> Result<Processed, Rejected> {
-    let mut child = tokio::process::Command::new(path)
-        .env_clear()
+    child_typed::<Processed>(bytes, path, deadline, None).await
+}
+
+/// One job in the codec subprocess. `mode` is a fixed argument of the child (`--prepare`,
+/// `--cutout`), never anything a member wrote; the bytes go in on stdin, the answer comes back as
+/// JSON on stdout, and nothing else (no URL, path, environment or database) is passed.
+async fn child_typed<T: serde::de::DeserializeOwned>(
+    bytes: Vec<u8>,
+    path: std::path::PathBuf,
+    deadline: Duration,
+    mode: Option<&'static str>,
+) -> Result<T, Rejected> {
+    let mut command = tokio::process::Command::new(path);
+    command.env_clear();
+    if let Some(mode) = mode {
+        command.arg(mode);
+    }
+    let mut child = command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -246,8 +284,7 @@ async fn child(
         if !status.success() {
             return Err(Rejected::Invalid);
         }
-        serde_json::from_slice::<Result<Processed, Rejected>>(&data)
-            .map_err(|_| Rejected::Invalid)?
+        serde_json::from_slice::<Result<T, Rejected>>(&data).map_err(|_| Rejected::Invalid)?
     };
     match tokio::time::timeout(deadline, work).await {
         Ok(result) => {
@@ -264,6 +301,46 @@ async fn child(
         }
     }
 }
+
+/// A job that holds its slot until its child has exited and been reaped, even if the request that
+/// asked for it is cancelled.
+async fn job<T: serde::de::DeserializeOwned + Send + 'static>(
+    bytes: Vec<u8>,
+    mode: &'static str,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> Result<T, Rejected> {
+    let path = decoder_path()?;
+    let task = tokio::spawn(async move {
+        let _permit = permit;
+        child_typed::<T>(bytes, path, DEADLINE, Some(mode)).await
+    });
+    task.await.map_err(|_| Rejected::Invalid)?
+}
+
+/// A member's photo made ready to leave for an image model ([`prepare`], in the isolated child).
+/// A busy decoder is refused at once ([`Rejected::Busy`]): nothing has been spent yet, so the
+/// member simply tries again.
+pub async fn prepare_photo(bytes: Vec<u8>) -> Result<Prepared, Rejected> {
+    if bytes.len() > INPUT_BYTES {
+        return Err(Rejected::TooLarge);
+    }
+    let permit = decoder_slots()
+        .try_acquire_owned()
+        .map_err(|_| Rejected::Busy)?;
+    job(bytes, "--prepare", permit).await
+}
+
+/// What an image model drew, as a cut-out ([`decode_cutout`], in the isolated child). The model
+/// call has been paid for by now, so a busy decoder is **waited for** (as an agent's candidates
+/// are, [`WAIT_MAX`]) instead of refused at once.
+pub async fn process_cutout(bytes: Vec<u8>, wait: Duration) -> Result<Cutout, Rejected> {
+    if bytes.len() > INPUT_BYTES {
+        return Err(Rejected::TooLarge);
+    }
+    let permit = permit_waiting(decoder_slots(), &Line::process_wide(), wait).await?;
+    job(bytes, "--cutout", permit).await
+}
+
 struct TimedReader<'a> {
     input: Cursor<&'a [u8]>,
     end: Instant,
@@ -649,7 +726,18 @@ pub fn sniff(bytes: &[u8]) -> Sniffed {
     }
 }
 
-pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
+/// What [`open`] found behind the bytes.
+enum Opened {
+    /// A still picture, and the orientation its camera recorded (EXIF; `NoTransforms` for a
+    /// format that carries none or one that cannot be read).
+    Still(DynamicImage, Orientation),
+    /// A GIF with more than one frame.
+    Animated,
+}
+
+/// Every check that precedes a picture's pixels, then the pixels: the one place a still image is
+/// opened, whatever it is opened for. Bounds come first, animations are never collected.
+fn open(bytes: &[u8], end: Instant) -> Result<Opened, Rejected> {
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
     }
@@ -678,7 +766,7 @@ pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
     }
     let expected = preflight(format, bytes)?;
     if format == ImageFormat::Gif && gif_spec(bytes)?.2 > 1 {
-        return animated(bytes, end);
+        return Ok(Opened::Animated);
     }
     let input = || {
         std::io::BufReader::new(TimedReader {
@@ -690,7 +778,7 @@ pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
     CODEC_STARTS.with(|n| n.set(n.get() + 1));
     let mut reader = ImageReader::with_format(input(), format);
     reader.limits(limits(4096));
-    let decoder = reader.into_decoder().map_err(|_| Rejected::Invalid)?;
+    let mut decoder = reader.into_decoder().map_err(|_| Rejected::Invalid)?;
     let (w, h) = decoder.dimensions();
     // Native <=128MB + scratch16MiB + input5MiB + bounded renditions +
     // thumbnails (<8MiB) stays below the 192MiB per-job allocation budget.
@@ -702,13 +790,118 @@ pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
     {
         return Err(Rejected::Invalid);
     }
+    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
     let image = DynamicImage::from_decoder(decoder).map_err(|_| Rejected::Invalid)?;
+    Ok(Opened::Still(image, orientation))
+}
+
+pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
+    match open(bytes, end)? {
+        Opened::Animated => animated(bytes, end),
+        Opened::Still(image, _) => {
+            let small = png(&shrink(&image, 128), 256 * 1024, end)?;
+            let large = png(&shrink(&image, 512), 1024 * 1024, end)?;
+            Ok(Processed {
+                thumb: small.clone(),
+                small,
+                large,
+            })
+        }
+    }
+}
+
+/// The longest side of a photo that is sent to an image model (ADR-0218 §8 H9): enough for a
+/// face, small enough that the request is a fraction of the provider's limit.
+pub const PREPARED_EDGE: u32 = 1024;
+/// What a prepared photo may weigh.
+pub const PREPARED_MAX_BYTES: usize = 4 * 1024 * 1024;
+
+/// A member's photo made ready to leave for an image model: opened by the same checks as every
+/// picture, turned upright by its EXIF orientation, shrunk to [`PREPARED_EDGE`], and **encoded
+/// again from its pixels**, so no EXIF (where it was taken), GPS, ICC profile, comment or trailing
+/// byte of the original goes with it. A picture with an alpha channel stays a PNG; any other is a
+/// JPEG at quality 90.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Prepared {
+    /// `image/png` or `image/jpeg`.
+    pub mime: String,
+    pub data: Vec<u8>,
+}
+
+pub fn prepare(bytes: &[u8], end: Instant) -> Result<Prepared, Rejected> {
+    // A moving picture is not a photo: it is refused here, not sampled.
+    let Opened::Still(mut image, orientation) = open(bytes, end)? else {
+        return Err(Rejected::Invalid);
+    };
+    let has_alpha = image.color().has_alpha();
+    // Smaller first, turned second: a quarter turn builds a second buffer beside the first, and
+    // beside a 16-megapixel photograph that would not fit the child's 192 MiB.
+    if image.width().max(image.height()) > PREPARED_EDGE {
+        image = image.thumbnail(PREPARED_EDGE, PREPARED_EDGE);
+    }
+    image.apply_orientation(orientation);
+    let mut out = output(PREPARED_MAX_BYTES, end);
+    let (width, height) = (image.width(), image.height());
+    if has_alpha {
+        image::codecs::png::PngEncoder::new(&mut out)
+            .write_image(
+                image.to_rgba8().as_raw(),
+                width,
+                height,
+                image::ExtendedColorType::Rgba8,
+            )
+            .map_err(|_| Rejected::Invalid)?;
+        Ok(Prepared {
+            mime: "image/png".into(),
+            data: out.data,
+        })
+    } else {
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 90)
+            .write_image(
+                image.to_rgb8().as_raw(),
+                width,
+                height,
+                image::ExtendedColorType::Rgb8,
+            )
+            .map_err(|_| Rejected::Invalid)?;
+        Ok(Prepared {
+            mime: "image/jpeg".into(),
+            data: out.data,
+        })
+    }
+}
+
+/// A picture an image model drew, as a cut-out: [`crate::cutout::cut_out`] applied to its pixels,
+/// then the three renditions every picture gets. `outcome` says whether the background was the
+/// model's own transparency, was erased here, or was left alone.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Cutout {
+    pub processed: Processed,
+    pub outcome: crate::cutout::Outcome,
+}
+
+pub fn decode_cutout(bytes: &[u8], end: Instant) -> Result<Cutout, Rejected> {
+    let Opened::Still(image, _) = open(bytes, end)? else {
+        return Err(Rejected::Invalid);
+    };
+    // A picture a model drew is 1024 or 1536 px a side. A larger one is not worked on: it gets the
+    // renditions of any other picture, from the decoded pixels, without a second copy of them.
+    let (image, outcome) =
+        if u64::from(image.width()) * u64::from(image.height()) > crate::cutout::MAX_PIXELS {
+            (image, crate::cutout::Outcome::Untouched)
+        } else {
+            let cut = crate::cutout::cut_out(&image.to_rgba8());
+            (DynamicImage::ImageRgba8(cut.image), cut.outcome)
+        };
     let small = png(&shrink(&image, 128), 256 * 1024, end)?;
     let large = png(&shrink(&image, 512), 1024 * 1024, end)?;
-    Ok(Processed {
-        thumb: small.clone(),
-        small,
-        large,
+    Ok(Cutout {
+        processed: Processed {
+            thumb: small.clone(),
+            small,
+            large,
+        },
+        outcome,
     })
 }
 
@@ -973,13 +1166,26 @@ mod tests {
     /// documented caps — and not one a test built for itself: two places, three seconds. (One
     /// test, because the slots and the line are the process's own and other tests of this
     /// binary must not meet it half-way.)
+    ///
+    /// The two numbers are written out below as numbers (#4900). A test that takes its
+    /// expectation from the constant it is testing is green for any value of that constant: the
+    /// caps are what the process promises a person who is waiting behind an agent, so they are
+    /// pinned here by value and every measurement uses the value, not the name.
     #[tokio::test]
     async fn process_waiting_stands_in_the_process_wide_line_for_two_places_and_three_seconds() {
+        assert_eq!(WAIT_MAX, Duration::from_secs(3), "the documented wait cap");
+        assert_eq!(WAITERS_MAX, 2, "the documented line");
+        let wide = Line::process_wide();
+        assert_eq!(
+            (wide.max, wide.longest),
+            (2, Duration::from_secs(3)),
+            "the line `process_waiting` stands in is built from those two numbers"
+        );
         let held = decoder_slots().acquire_many_owned(2).await.unwrap();
-        // A caller that would wait 40 s waits `WAIT_MAX`, and is told Busy.
+        // A caller that would wait 40 s waits three seconds, and is told Busy.
         let started = Instant::now();
         let outcome = tokio::time::timeout(
-            WAIT_MAX + Duration::from_secs(4),
+            Duration::from_secs(7),
             process_waiting(vec![0; 8], Duration::from_secs(40)),
         )
         .await;
@@ -989,15 +1195,14 @@ mod tests {
             "a wait that ran out is Busy: {outcome:?}"
         );
         assert!(
-            waited >= WAIT_MAX - Duration::from_millis(200)
-                && waited < WAIT_MAX + Duration::from_secs(2),
-            "it stood in line for the cap and no longer: {waited:?}"
+            waited >= Duration::from_millis(2_800) && waited < Duration::from_secs(4),
+            "it stood in line for three seconds and no longer: {waited:?}"
         );
         // Two callers fill the line; the third is refused at once.
-        let queued: Vec<_> = (0..WAITERS_MAX)
+        let queued: Vec<_> = (0..2)
             .map(|_| tokio::spawn(process_waiting(vec![0; 8], Duration::from_secs(40))))
             .collect();
-        until_standing(Line::process_wide().standing, WAITERS_MAX).await;
+        until_standing(Line::process_wide().standing, 2).await;
         let started = Instant::now();
         let third = tokio::time::timeout(
             Duration::from_millis(500),
@@ -1023,6 +1228,117 @@ mod tests {
             );
         }
         until_standing(Line::process_wide().standing, 0).await;
+    }
+
+    fn mp4_video() -> Vec<u8> {
+        let mut b = vec![0, 0, 0, 0x18];
+        b.extend_from_slice(b"ftypisom\0\0\x02\0isomiso2mp41");
+        b.extend_from_slice(&[0; 64]);
+        b
+    }
+    fn quicktime_video() -> Vec<u8> {
+        let mut b = vec![0, 0, 0, 0x14];
+        b.extend_from_slice(b"ftypqt  \0\0\0\0qt  ");
+        b.extend_from_slice(&[0; 64]);
+        b
+    }
+    fn webm_video() -> Vec<u8> {
+        let mut b = vec![0x1a, 0x45, 0xdf, 0xa3, 0x9f];
+        b.extend_from_slice(&[0; 64]);
+        b
+    }
+
+    /// #4900: a video is refused by the parent from its first bytes. Both slots are taken and the
+    /// line has no room, and the answer is still the card (`Video`), at once: not `Busy` (nothing
+    /// a slot does could ever help it), not a place in the line, not a child process (the decoder
+    /// path is one that does not exist, so a spawn would have been `Invalid`). A picture in the
+    /// very same situation **is** `Busy`, which is what makes the first half mean something.
+    #[tokio::test]
+    async fn a_video_asks_for_no_slot_no_place_in_line_and_no_child() {
+        static STANDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let sem = Arc::new(Semaphore::new(2));
+        let held = sem.clone().acquire_many_owned(2).await.unwrap();
+        let no_room = || Line {
+            standing: &STANDING,
+            max: 0,
+            longest: Duration::from_secs(5),
+        };
+        let picture = png_still();
+        for (what, bytes) in [
+            ("mp4", mp4_video()),
+            ("quicktime", quicktime_video()),
+            ("webm", webm_video()),
+        ] {
+            let direct = tokio::time::timeout(
+                Duration::from_millis(150),
+                supervised(
+                    bytes.clone(),
+                    std::path::PathBuf::from(NO_DECODER),
+                    DEADLINE,
+                    sem.clone(),
+                ),
+            )
+            .await;
+            assert!(
+                matches!(direct, Ok(Err(Rejected::Video))),
+                "{what}: a video that is not allowed to wait is a card, not busy: {direct:?}"
+            );
+            let started = Instant::now();
+            let waited = tokio::time::timeout(
+                Duration::from_millis(150),
+                waiting(
+                    bytes,
+                    std::path::PathBuf::from(NO_DECODER),
+                    DEADLINE,
+                    sem.clone(),
+                    &no_room(),
+                    Duration::from_secs(40),
+                ),
+            )
+            .await;
+            assert!(
+                matches!(waited, Ok(Err(Rejected::Video))),
+                "{what}: a video that may wait is a card too, at once: {waited:?}"
+            );
+            assert!(started.elapsed() < Duration::from_millis(140), "{what}");
+            assert_eq!(STANDING.load(std::sync::atomic::Ordering::Acquire), 0);
+        }
+        // The control: the same slots and the same line, a picture. It is busy, in both doors.
+        let direct = tokio::time::timeout(
+            Duration::from_millis(150),
+            supervised(
+                picture.clone(),
+                std::path::PathBuf::from(NO_DECODER),
+                DEADLINE,
+                sem.clone(),
+            ),
+        )
+        .await;
+        assert!(matches!(direct, Ok(Err(Rejected::Busy))), "{direct:?}");
+        let waited = tokio::time::timeout(
+            Duration::from_millis(150),
+            waiting(
+                picture,
+                std::path::PathBuf::from(NO_DECODER),
+                DEADLINE,
+                sem.clone(),
+                &no_room(),
+                Duration::from_secs(40),
+            ),
+        )
+        .await;
+        assert!(matches!(waited, Ok(Err(Rejected::Busy))), "{waited:?}");
+        assert_eq!(sem.available_permits(), 0, "the slots were never touched");
+        drop(held);
+        assert_eq!(sem.available_permits(), 2);
+    }
+
+    fn png_still() -> Vec<u8> {
+        let mut out = Cursor::new(Vec::new());
+        DynamicImage::new_rgba8(8, 6)
+            .write_to(&mut out, ImageFormat::Png)
+            .unwrap();
+        out.into_inner()
     }
 
     #[test]

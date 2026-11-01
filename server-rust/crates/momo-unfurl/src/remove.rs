@@ -41,16 +41,7 @@ pub async fn remove_unfurls_in_tx(
         .execute(&mut *conn)
         .await?
         .rows_affected();
-    sqlx::query(
-        "INSERT INTO message_unfurl_tombstone (workspace_id, message_id, removed_by) \
-         VALUES ($1, $2, $3) \
-         ON CONFLICT (message_id) DO NOTHING",
-    )
-    .bind(workspace_id)
-    .bind(message_id)
-    .bind(actor_id)
-    .execute(&mut *conn)
-    .await?;
+    plant_tombstone_in_tx(conn, workspace_id, message_id, actor_id).await?;
     let changed = deleted > 0;
     if changed {
         emit_removed(conn, workspace_id, &message).await?;
@@ -60,6 +51,37 @@ pub async fn remove_unfurls_in_tx(
         seq: message.seq,
         channel_id: message.channel_id,
     }))
+}
+
+/// Plant the tombstone that keeps a message from ever getting cards: the worker looks for it
+/// before it fetches anything and again before it commits (ADR-0170 D4).
+///
+/// The statement this crate's callers share, **not** the only writer of `message_unfurl_tombstone`.
+/// [`remove_unfurls_in_tx`] calls it after deleting the cards a message already had, and the send
+/// path calls it at a message's birth for 「미리보기 없이 보내기」 (`suppressUnfurl`, 2026-11-01
+/// D21, #4884), when there is nothing to delete and nothing to announce. A third writer is out of
+/// this function's reach: `momo_workspace_actions::team_ai::withhold_link_previews_in_tx` plants
+/// the same row for a team-AI answer (#3899) with an INSERT of its own, because that crate does
+/// not depend on this one, so a change to the row's columns has to be made in both places.
+/// Idempotent. Runs under the caller's tenant transaction, so the row's `workspace_id` must be
+/// that tenant's (RLS WITH CHECK).
+pub async fn plant_tombstone_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Uuid,
+    removed_by: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query(
+        "INSERT INTO message_unfurl_tombstone (workspace_id, message_id, removed_by) \
+         VALUES ($1, $2, $3) \
+         ON CONFLICT (message_id) DO NOTHING",
+    )
+    .bind(workspace_id)
+    .bind(message_id)
+    .bind(removed_by)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
 }
 
 async fn emit_removed(

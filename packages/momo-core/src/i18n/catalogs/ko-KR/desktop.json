@@ -16,5 +16,6 @@
   "desktop.menu.fullscreen": "전체 화면",
   "desktop.menu.hide": "oort 가리기",
   "desktop.menu.hideOthers": "기타 가리기",
-  "desktop.menu.quit": "oort 종료"
+  "desktop.menu.quit": "oort 종료",
+  "desktop.notify.threadSummary": "스레드 답글 {count, number}건"
 }

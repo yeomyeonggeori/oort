@@ -811,6 +811,13 @@ export interface PendingMessage {
    * mac 이 낙관적 행에 첨부를 실어 보내는 것과 같은 근거다.
    */
   attachments?: MessageAttachment[];
+  /**
+   * ADR-0170 증보 2026-11-01(#5005) — 입력칸의 ✕로 이 메시지의 링크 미리보기를 끄고 보냈다(「미리보기 없이
+   * 보내기」). `routing`/`replyToId`와 같은 이유로 행을 타고 다닌다: 첫 요청이 서버에 닿지 못했다면 재시도가
+   * 같은 멱등키로 **같은 요청**을 다시 보내야 하고, 이 표시를 떨구면 사람이 끈 카드가 되살아난다(서버는
+   * 이미 저장된 메시지의 재시도에서 이 필드를 다시 판단하지 않는다). 켠 때만 있다.
+   */
+  suppressUnfurl?: boolean;
 }
 
 /** True when `message` is the server's echo of `pending`. */

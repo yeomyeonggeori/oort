@@ -25,6 +25,7 @@
 //! | `an_install_request_becomes_a_card_that_installs_nothing_until_decided` | take `plugin.install` out of `ACTIONS`/`TEAM_AI_ACTION_IDS`, read the registry as the wrong role (42501), drop the egress row, or skip the `nothing to change` / requester-role refusals |
 //! | `an_answer_to_a_request_made_in_a_thread_lands_in_that_thread` | write the team AI's answer with `root_id: None` (it leaves the thread the person is watching), or on the spine that skips the thread rollup (the root's 「답글 N개」 and `thread.updated` stop moving) |
 //! | `the_helper_raises_the_new_settings_cards_from_the_worker_role` | read `mem_settings` in the memory resolver (42501 as `momo_worker`) or drop an id from `TEAM_AI_ACTION_IDS` |
+//! | `a_picture_request_is_read_through_the_apis_private_address_and_the_model_never_sees_the_token` | (#4934) read the attachment from the worker's own archive again (`self.drive`) instead of `attachment_reader()`, or put the minted address into anything the model reads |
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -45,6 +46,7 @@ use momo_outbox::{emit_outbox, OutboxKind};
 use momo_settings::{seal_bearer, upsert_link};
 use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use uuid::Uuid;
 
 const MASTER_KEY: &str = "conformance-3835-master";
@@ -862,7 +864,10 @@ async fn the_daily_ceiling_calls_no_model() {
     .await
     .unwrap();
     let provider = Arc::new(MockChatProvider::echo());
-    let w = worker_with(provider.clone(), |c| c.team_ai_daily_token_cap = 1_000).await;
+    let w = worker_with(provider.clone(), |c| {
+        c.team_ai_daily_token_cap = Some(1_000)
+    })
+    .await;
     let (run_id, _) = enqueue(&pool, &t, t.owner_id, "human", "또 요청", None).await;
     drain(&w).await;
     assert!(
@@ -876,9 +881,18 @@ async fn the_daily_ceiling_calls_no_model() {
     );
     let last = agent_messages(&su, &t).await.pop().expect("hand-off line");
     assert_eq!(last.2["reason"], "over_budget");
+    // #4944 (B9-3): the env cap is the OPERATOR's ceiling — the line says so, and does not point
+    // the administrator at a setting that cannot lift it.
+    assert_eq!(
+        last.2["limit"],
+        json!({"source": "operator", "window": "day"})
+    );
     // And under the ceiling the same worker does call the model.
     let provider2 = Arc::new(MockChatProvider::echo());
-    let w2 = worker_with(provider2.clone(), |c| c.team_ai_daily_token_cap = 1_001).await;
+    let w2 = worker_with(provider2.clone(), |c| {
+        c.team_ai_daily_token_cap = Some(1_001)
+    })
+    .await;
     enqueue(&pool, &t, t.owner_id, "human", "다시", None).await;
     drain(&w2).await;
     assert_eq!(
@@ -1451,5 +1465,184 @@ async fn the_helper_raises_the_new_settings_cards_from_the_worker_role() {
         .await
         .unwrap();
         assert_eq!(count, 0, "{table} changed before anyone approved");
+    }
+}
+
+/// A stand-in for the api's private address: it records every request head and answers `200 image/png`
+/// with `bytes`. The api's own route is proved in `momo-server`'s `attachment_via_api_conformance_pg`;
+/// what is proved here is the **worker's turn** — which source it reads, and what it shows the model.
+async fn picture_stub(bytes: Vec<u8>) -> (String, Arc<Mutex<Vec<String>>>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let heads = Arc::new(Mutex::new(Vec::new()));
+    let kept = heads.clone();
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let (kept, bytes) = (kept.clone(), bytes.clone());
+            tokio::spawn(async move {
+                let mut buffer = vec![0u8; 16 * 1024];
+                let read = socket.read(&mut buffer).await.unwrap_or(0);
+                kept.lock()
+                    .unwrap()
+                    .push(String::from_utf8_lossy(&buffer[..read]).into_owned());
+                let mut answer = format!(
+                    "HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                    bytes.len()
+                )
+                .into_bytes();
+                answer.extend_from_slice(&bytes);
+                let _ = socket.write_all(&answer).await;
+                let _ = socket.shutdown().await;
+            });
+        }
+    });
+    (origin, heads)
+}
+
+fn noise_png(side: u32) -> Vec<u8> {
+    let mut state = 0x9E37_79B9u32;
+    let image = image::RgbaImage::from_fn(side, side, |_, _| {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let b = state.to_le_bytes();
+        image::Rgba([b[0], b[1], b[2], 255])
+    });
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
+/// #4934 — **the worker's turn, not just its reader.** A person asks the team AI to make a picture they
+/// sent their profile image. The worker has no archive of its own (Railway: the volume is the api's), so
+/// the source can only come from the private address it was configured with. The model proposes; the
+/// worker mints a single-use address for **that attachment**, reads it from the configured origin, and
+/// stages the decoded image behind the approval card. The address is the worker's own: it is in no
+/// request the model was sent, and in no row a run wrote.
+///
+/// RED: put `self.drive` back in `team_ai.rs` (no request reaches the stub and no image is staged), or
+/// hand the minted address to the model (the provider's recorded requests would hold it).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_picture_request_is_read_through_the_apis_private_address_and_the_model_never_sees_the_token(
+) {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool, true).await;
+    seed_link(&su, t.owner_id).await;
+
+    // the request, then the picture on it (so the model can name the attachment)
+    let (run_id, trigger) = enqueue(
+        &pool,
+        &t,
+        t.owner_id,
+        "human",
+        "@oort-helper 내 프로필 사진을 이걸로 바꿔줘",
+        None,
+    )
+    .await;
+    let bytes = noise_png(64);
+    let attachment = Uuid::new_v4();
+    let drive_file = format!("drive-file-{attachment}");
+    sqlx::query(
+        "INSERT INTO attachment (id, workspace_id, channel_id, uploader_member_id, message_id, \
+         drive_file_id, name, mime, size_bytes, status) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'photo', 'image/png', $7, 'complete')",
+    )
+    .bind(attachment)
+    .bind(t.workspace_id)
+    .bind(t.channel_id)
+    .bind(t.owner_id)
+    .bind(trigger)
+    .bind(&drive_file)
+    .bind(bytes.len() as i64)
+    .execute(&su)
+    .await
+    .expect("attachment");
+
+    let (origin, heads) = picture_stub(bytes).await;
+    let provider = Arc::new(MockChatProvider::echo().with_tool_calls([propose(
+        "member.avatar.set",
+        json!({"attachmentId": attachment.to_string()}),
+    )]));
+    let w = worker_with(provider.clone(), |config| {
+        config.api_internal_origin = Some(origin.clone());
+    })
+    .await;
+    drain(&w).await;
+
+    let (status, _) = run_status(&su, run_id).await;
+    assert_eq!(
+        status, "awaiting_approval",
+        "the run is parked on the person"
+    );
+    let cards = approvals(&su, &t).await;
+    assert_eq!(cards.len(), 1, "one card");
+    assert_eq!(cards[0].3["action"]["id"], "member.avatar.set");
+    let staged: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM agent_avatar_image WHERE workspace_id = $1")
+            .bind(t.workspace_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(
+        staged, 1,
+        "the picture was read, decoded and staged behind the card"
+    );
+
+    // exactly one request reached the configured address, in the fixed shape, with no credential
+    let heads = heads.lock().unwrap().clone();
+    assert_eq!(heads.len(), 1, "one read: {heads:?}");
+    let request_line = heads[0].lines().next().unwrap().to_string();
+    let token = request_line
+        .strip_prefix(&format!("GET /v1/self-media/{}/", t.workspace_id))
+        .and_then(|rest| rest.strip_suffix(" HTTP/1.1"))
+        .unwrap_or_else(|| panic!("the request line is the fixed shape: {request_line}"))
+        .to_string();
+    assert_eq!(token.len(), 43);
+    let lowered = heads[0].to_ascii_lowercase();
+    for header in ["authorization", "cookie", "x-api-key"] {
+        assert!(!lowered.contains(header), "the worker sent `{header}`");
+    }
+
+    // the address the worker minted is bound to the run's requester and the attachment it was asked for
+    let (bound, used): ((Uuid, Uuid, Uuid, Uuid), bool) = {
+        let row: (Uuid, Uuid, Uuid, Uuid, bool) = sqlx::query_as(
+            "SELECT run_id, requester_member_id, channel_id, attachment_id, used_at IS NOT NULL \
+               FROM self_media_token WHERE workspace_id = $1",
+        )
+        .bind(t.workspace_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        ((row.0, row.1, row.2, row.3), row.4)
+    };
+    assert_eq!(bound, (run_id, t.owner_id, t.channel_id, attachment));
+    assert!(!used, "the stand-in never redeems; the api would have");
+
+    // the model never saw the address, and no row or card the run wrote holds it (or the Drive id)
+    let calls = provider.calls();
+    assert!(!calls.is_empty(), "the model was asked");
+    for call in &calls {
+        let seen = format!("{call:?}");
+        assert!(!seen.contains(&token), "the model was shown the address");
+        assert!(!seen.contains("self-media"), "nor any address of that kind");
+        assert!(!seen.contains(&drive_file), "nor the Drive id");
+    }
+    for table in ["audit_log", "outbox", "agent_run", "message", "approval"] {
+        let rows: Vec<String> = sqlx::query_scalar(&format!(
+            "SELECT to_jsonb(t)::text FROM {table} t WHERE workspace_id = $1"
+        ))
+        .bind(t.workspace_id)
+        .fetch_all(&su)
+        .await
+        .unwrap();
+        assert!(!rows.is_empty(), "{table} has rows to look at");
+        for row in rows {
+            assert!(!row.contains(&token), "{table} holds the address");
+            assert!(!row.contains(&drive_file), "{table} holds the Drive id");
+        }
     }
 }

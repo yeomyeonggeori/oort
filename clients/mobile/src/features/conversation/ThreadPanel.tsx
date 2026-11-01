@@ -1,7 +1,13 @@
-import {uuidEq, type Message} from '@momo/core/lib/api';
+import {followThread, markThreadRead, unfollowThread, uuidEq, type Message} from '@momo/core/lib/api';
+import {createThreadReadSender} from '@momo/core/features/timeline/threadRead';
+import {
+  createThreadFollowController,
+  threadFollowCopy,
+} from '@momo/core/features/timeline/threadFollow';
+import {readSignalSeq} from '@momo/core/features/timeline/threadSummary';
 import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy';
 import type {Directory} from '@momo/core/features/workspace/directory';
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {StyleSheet, View, type LayoutChangeEvent} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {ErrorState, NoticeBlock, Screen} from '../../design/atoms';
@@ -16,6 +22,7 @@ import {threadDraftKey} from './drafts';
 import {useOnline} from '../inbox/useOnline';
 import {threadArrivalSurface} from './sendArrival';
 import {Timeline} from './Timeline';
+import type {WorkRequestOpen} from '@momo/core/features/timeline/commandSuggest';
 import type {MessageRowActions} from './MessageRow';
 import type {UseTimelineResult} from './useTimeline';
 import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
@@ -23,6 +30,8 @@ import {MissedDigestCard} from '../memory/MissedDigestCard';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import {hasAgentRequest} from './requestLoop';
+import {appStateForeground} from '../readState/useViewingBeat';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // =============================================================================
 // 스레드 — 한 메시지 아래에 달린 답글들.
@@ -54,6 +63,13 @@ import {hasAgentRequest} from './requestLoop';
 // 뺌으로써 표현한다.
 // =============================================================================
 
+/** 앱이 앞에 있는가 — 「보고 있음」 신호가 쓰는 어댑터 그대로. 뒤에 있는 동안 온 답글을 읽은 것으로 치지 않는다. */
+function useAppActive(): boolean {
+  const [active, setActive] = useState(appStateForeground.isForeground());
+  useEffect(() => appStateForeground.subscribe(setActive), []);
+  return active;
+}
+
 /** 근거 착지 토큰의 시작. 알림 착지 토큰(1부터 오른다)과 겹치지 않는 대역이다. */
 const EVIDENCE_TOKEN_BASE = 1_000_000;
 
@@ -77,13 +93,25 @@ export function ThreadPanel({
   approvalsProvided,
   onApprovalSettled,
   onOpenMessage,
+  onOpenWorkRequest,
+  followable = true,
 }: {
   root: Message;
+  /**
+   * 머리에 「따라가기」를 둘 수 있는 곳인가(#4890). DM 채널의 스레드는 따라가지 않는다(모든 메시지가 이미 알림이다 — 서버도
+   * 400 `thread_follow_not_applicable`). 대화 화면이 채널 종류를 안다. 생략하면 둘 수 있다.
+   */
+  followable?: boolean;
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
   approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
   approvalsProvided?: boolean;
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
   onOpenMessage?: (channelId: string, messageId: string) => void;
+  /**
+   * 스레드 안의 도우미 「작업 요청 열기」 카드를 누르면 「내 맥에 보내기」 시트를 미리 채워 연다(#4972).
+   * 채널 화면과 같은 콜백이다. 없으면 카드는 한 줄로만 선다.
+   */
+  onOpenWorkRequest?: (prefill: WorkRequestOpen) => void;
   /** Production supplies both; isolated legacy render fixtures may omit them. */
   workspaceId?: string;
   channelId?: string;
@@ -145,13 +173,37 @@ export function ThreadPanel({
     setStatus('loading');
   }
 
+  // 따라가기(#4890): 스레드 열기 응답의 `following` 이 처음 값이고, 누르면 낙관적으로 바뀐다(코어 `threadFollow` 가 규칙).
+  // 컨트롤러는 루트마다 하나다. 운영은 `workspaceId`·`channelId` 를 늘 준다; 격리 하니스는 안 주고, 그때는 보낼 곳이 없어 칸이 없다.
+  const formatMessage = useFormatMessage();
+  const follow = useMemo(
+    () =>
+      createThreadFollowController({
+        initial: false,
+        send: follow => {
+          if (workspaceId === undefined || channelId === undefined) {
+            return Promise.reject(new Error('thread-follow-without-channel'));
+          }
+          return follow
+            ? followThread(workspaceId, channelId, root.id)
+            : unfollowThread(workspaceId, channelId, root.id);
+        },
+      }),
+    [workspaceId, channelId, root.id],
+  );
+  const followView = useSyncExternalStore(follow.subscribe, follow.getSnapshot, follow.getSnapshot);
+  const followCopy = threadFollowCopy(followView.following, formatMessage);
+
   const {loadReplies} = timeline;
   useEffect(() => {
     let cancelled = false;
     setStatus('loading');
     loadReplies(root.id)
-      .then(() => {
-        if (!cancelled) setStatus('ready');
+      .then(load => {
+        if (cancelled) return;
+        // 서버가 말한 값은 사람이 누르기 전까지만 받는다(컨트롤러가 가른다). 다시 읽어도(재시도) 누른 값을 뒤집지 않는다.
+        follow.sync(load?.following === true);
+        setStatus('ready');
       })
       .catch(() => {
         if (!cancelled) setStatus('error');
@@ -159,7 +211,7 @@ export function ThreadPanel({
     return () => {
       cancelled = true;
     };
-  }, [loadReplies, root.id, reloadNonce]);
+  }, [loadReplies, root.id, reloadNonce, follow]);
 
   // The replies already in the shared state — including any that arrived on the
   // rail while this panel was open, because they land in the same array.
@@ -181,6 +233,37 @@ export function ThreadPanel({
   );
 
   const messages = useMemo(() => [liveRoot, ...replies], [liveRoot, replies]);
+
+  // 답글을 다 받아 그린 뒤인가 — 착지 점프와 읽음 신호가 같은 때를 쓴다.
+  const ready = status === 'ready';
+
+  // 「여기까지 읽었어요」 신호 (#4878, #4889 2단계): 답글을 다 받아 화면에 그린 뒤(`ready`), 그리고 새 답글이 그려질 때마다
+  // 든 답글의 최대 seq가 오르면 한 번 보낸다. 앱이 앞에 있을 때만이다. 응답은 든 루트의 요약에 반영한다
+  // (`timeline.applyThreadRead` — 채널 목록의 「새 답글 M」 칩이 그 루트에서 그려진다). 운영은 `workspaceId`·`channelId`를
+  // 늘 준다; 격리 하니스는 안 주고, 그때는 보낼 곳이 없다 — 그 거절은 `send` 한 곳이 하고(가드가 하나다), 보내는 이는 그것을
+  // 「보내지 못함」으로 삼켜 다음 신호에 다시 시도한다.
+  const {applyThreadRead} = timeline;
+  const readTarget = useRef({workspaceId, channelId, applyThreadRead});
+  readTarget.current = {workspaceId, channelId, applyThreadRead};
+  const readSender = useMemo(
+    () =>
+      createThreadReadSender({
+        send: (rootId, seq) => {
+          const target = readTarget.current;
+          if (target.workspaceId === undefined || target.channelId === undefined) {
+            return Promise.reject(new Error('thread-read-without-channel'));
+          }
+          return markThreadRead(target.workspaceId, target.channelId, rootId, seq);
+        },
+        onState: (rootId, state) => readTarget.current.applyThreadRead(rootId, state),
+      }),
+    [],
+  );
+  const appActive = useAppActive();
+  useEffect(() => {
+    if (!ready || !appActive) return;
+    readSender.note(root.id, readSignalSeq(replies));
+  }, [ready, appActive, readSender, root.id, replies]);
 
   // 경계 뒤에 온 남의 답글 수. 내가 쓴 답글은 안 읽은 것이 아니다.
   const sinceSeq = memory?.sinceSeq;
@@ -233,10 +316,10 @@ export function ThreadPanel({
     () =>
       landingMessageId !== undefined &&
       landingToken !== undefined &&
-      status === 'ready'
+      ready
         ? {messageId: landingMessageId, seq: null, token: landingToken}
         : undefined,
-    [landingMessageId, landingToken, status],
+    [landingMessageId, landingToken, ready],
   );
 
   const {toggleReaction, editBody, removeMessage, removeUnfurls, togglePin} = timeline;
@@ -264,6 +347,7 @@ export function ThreadPanel({
       workspaceId,
       onOpenMemoryEvidence: openEvidence,
       onOpenMessage,
+      ...(onOpenWorkRequest !== undefined ? {onOpenWorkRequest} : {}),
       // No `onOpenThread`: see the header. Every row here is already in one.
       //
       // No `onQuote` either, and that absence is a decision rather than an
@@ -287,6 +371,7 @@ export function ThreadPanel({
       workspaceId,
       openEvidence,
       onOpenMessage,
+      onOpenWorkRequest,
     ],
   );
 
@@ -319,8 +404,13 @@ export function ThreadPanel({
     setHeaderHeight(event.nativeEvent.layout.height - insets.top);
   }, [insets.top]);
 
+  const showFollow = followable && workspaceId !== undefined && channelId !== undefined && ready && !followView.unavailable;
+
   const topNotice = useMemo(() => (
     <>
+      {showFollow && followView.failed ? (
+        <NoticeBlock headline={followCopy.failed} onDismiss={follow.dismissError} testID="thread-follow-failed" />
+      ) : null}
       {notice ? (
         <NoticeBlock
           headline={notice.text}
@@ -344,7 +434,7 @@ export function ThreadPanel({
         />
       ) : null}
     </>
-  ), [notice, memory, workspaceId, channelId, status, root.id, unreadReplies, openEvidence]);
+  ), [notice, memory, workspaceId, channelId, status, root.id, unreadReplies, openEvidence, showFollow, followView.failed, followCopy.failed, follow]);
 
   if (status === 'error') {
     return (
@@ -387,6 +477,16 @@ export function ThreadPanel({
             onBack={onClose}
             backLabel="스레드 닫기"
             titleTestID="thread-title"
+            follow={
+              showFollow
+                ? {
+                    label: followCopy.label,
+                    on: followView.following,
+                    busy: followView.pending,
+                    onPress: () => void follow.toggle(),
+                  }
+                : undefined
+            }
           />
         </View>
         <ConversationLayout

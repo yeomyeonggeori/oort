@@ -438,6 +438,8 @@ async fn run_tool(state: &AppState, caller: &Caller, call: &ToolCall) -> Result<
                 stream: None,
                 harness_refine: None,
                 apps: None,
+                // ADR-0170 증보 2026-11-01 (#4884): not one of the five arguments either.
+                suppress_unfurl: None,
             };
             let (_created, Json(message)) = crate::routes::messages::send(
                 State(state.clone()),

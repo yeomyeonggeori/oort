@@ -8,6 +8,7 @@ import {ExpressionImage} from '../expressions/ExpressionImage';
 import {hasProfileAvatarPreview} from '@momo/core/features/approvals/avatarPreview';
 import {haptics, hapticScope, type HapticEvent} from '../../lib/haptics';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
+import {ThreadSummaryContent, useThreadSummaryView} from './ThreadSummary';
 import {
   threadRollup,
   uuidEq,
@@ -146,6 +147,7 @@ import {ApprovalAvatarPreview} from './ApprovalAvatarPreview';
 import {CONV} from './convDesign';
 import {AiConnectSuggestion} from './AiConnectSuggestion';
 import {SettingsOpenSuggestion} from './SettingsOpenSuggestion';
+import {WorkRequestSuggestion} from './WorkRequestSuggestion';
 import {
   TEAM_AI_DELEGATE_ACTION_PREFIX,
   TeamAiDelegateStrip,
@@ -201,7 +203,10 @@ import {
 
 /** 도우미 줄이 아닐 때 넘기는 빈 이름 목록. 렌더마다 새 배열을 만들지 않는다. */
 const NO_NAMES: readonly string[] = [];
-import {commandSuggestCard} from '@momo/core/features/timeline/commandSuggest';
+import {
+  commandSuggestCard,
+  type WorkRequestOpen,
+} from '@momo/core/features/timeline/commandSuggest';
 import {
   deadlinePassed,
   gateFor,
@@ -415,16 +420,6 @@ const AVATAR_HIT_SLOP = {
   right: AVATAR_SLOP,
 } as const;
 
-function relativeLabel(atMs: number, nowMs: number): string {
-  const diff = Math.max(0, nowMs - atMs);
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return '방금';
-  if (minutes < 60) return `${minutes}분 전`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
-  return `${Math.floor(hours / 24)}일 전`;
-}
-
 // ---- dividers ---------------------------------------------------------------
 
 /**
@@ -481,7 +476,7 @@ function DividerLabel({
  * 첫 판은 `${y}년 ${m}월 ${d}일` 절대 표기 **고정**이었다. 오늘 대화를 보면서
  * 「2026년 8월 5일」을 읽고 그게 오늘인지 계산해야 했고, 아픈 것은 상대 표기
  * 함수가 **같은 파일에 이미 있었다**는 점이다(`relativeLabel` — 스레드 롤업만
- * 그걸 썼다).
+ * 그걸 썼고, 요약 줄에서 시간 문구가 빠지며 #4878이 지웠다).
  *
  * 그리고 배치가 웹과 달랐다(폰=가운데 라벨+양쪽 rule, 웹=좌측 라벨+우측 rule).
  * 통일값은 **`leading`** 이고 그 판정은 `divider.ts` 가 든다 — 가운데 라벨은
@@ -2201,6 +2196,12 @@ export function resetMessageRowRenderCount(): void {
 export interface MessageRowActions {
   myMemberId: string;
   onOpenDecision?: (approvalId: string) => void;
+  /**
+   * 도우미의 「작업 요청 열기」 카드(`work.request.open`, #4972)를 눌렀다: 「내 맥에 보내기」 시트를
+   * 작업 요청 모드로, 카드가 가진 글·도구로 미리 채워 연다. 보내는 것은 사람이다. 시트를 열 곳이 없는
+   * 표면은 이 줄을 주지 않고, 그때 카드는 누를 단추 없이 한 줄로 선다.
+   */
+  onOpenWorkRequest?: (prefill: WorkRequestOpen) => void;
   /** Optimistic in the hook; rejects with the error the row turns into a line. */
   onToggleReaction: (message: Message, emoji: string) => Promise<void>;
   onEdit: (message: Message, body: string) => Promise<void>;
@@ -2527,6 +2528,8 @@ function MessageRowInner({
     () => commandSuggestCard(message, directory),
     [message, directory],
   );
+  // 도우미의 「작업 요청 열기」 카드(#4972)는 시트를 미리 채워 여는 자기 컴포넌트를 쓴다.
+  const isWorkRequestCard = suggestion?.commandId === 'work.request.open';
   // 도우미가 넘기는 줄(ADR-0201 D5). 이 키를 보내지 않는 서버에서는 늘 null 이다.
   const teamAiDelegate = useMemo(() => teamAiDelegateFor(message), [message]);
   // 도우미 답의 꼬리(ADR-0201 v2): 찾아본 것 · 출처 · 모델 라벨. 칸이 없으면 null.
@@ -2635,6 +2638,8 @@ function MessageRowInner({
   const deleted = message.state === 'deleted';
   const rollup =
     rollupOverride === undefined ? threadRollup(message) : rollupOverride;
+  // 요약 줄의 값과 문구(얼굴·「답글 N개」·「새 답글 M」)는 코어가 정한다 (#4878). 훅이라 롤업이 없어도 부른다.
+  const threadView = useThreadSummaryView(rollup);
   const body = message.body ?? '';
   // 살릴 본문이 실제로 있는가 (#1465 → #1478). 자격(`presentation.keepsBody`)과
   // 다른 물음이고, 웹의 같은 이름과 **같은 함수**다 — 이 행이 답을 세 곳에서 쓰기
@@ -3154,12 +3159,7 @@ function MessageRowInner({
     // 나가는 문 앞이다. 안쪽에서 바깥쪽으로. 이 배열은 낭독 라벨의 재료이기도
     // 하므로(`rowAccessibilityLabel`), 여기 끼우는 것만으로 귀에도 닿는다.
     showsPinMark ? PIN_ROW_MARK : null,
-    rollup
-      ? `답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
-          rollup.lastReplyAtMs,
-          nowMs,
-        )}`
-      : null,
+    threadView ? threadView.copy.spoken : null,
   ].filter((part): part is string => part !== null);
 
   return (
@@ -3428,6 +3428,12 @@ function MessageRowInner({
                 card={suggestion}
                 viewerMemberId={actions?.myMemberId}
               />
+            ) : isWorkRequestCard ? (
+              <WorkRequestSuggestion
+                card={suggestion}
+                viewerMemberId={actions?.myMemberId}
+                onOpen={actions?.onOpenWorkRequest}
+              />
             ) : suggestion ? (
               <AiConnectSuggestion
                 card={suggestion}
@@ -3524,11 +3530,11 @@ function MessageRowInner({
                 {PIN_ROW_MARK}
               </Text>
             ) : null}
-            {rollup ? (
+            {rollup && threadView ? (
               actions?.onOpenThread ? (
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel="스레드 열기"
+                  accessibilityLabel={threadView.copy.open}
                   hitSlop={META_HIT_SLOP}
                   onPress={() => {
                     if (longPress.consumeTap()) return;
@@ -3537,22 +3543,18 @@ function MessageRowInner({
                   }}
                   style={({pressed}) => [pressed && styles.pressed]}
                   testID="thread-rollup">
-                  <Text style={styles.rollupLink}>
-                    {requestCardTarget ? `답글 ${rollup.replyCount}개 · ${requestSentence ?? requestChip?.word ?? ''}` : `답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
-                      rollup.lastReplyAtMs,
-                      nowMs,
-                    )}`}
-                  </Text>
+                  <ThreadSummaryContent
+                    view={threadView}
+                    directory={directory}
+                    suffix={requestCardTarget ? ` · ${requestSentence ?? requestChip?.word ?? ''}` : undefined}
+                  />
                 </Pressable>
               ) : (
                 // A label, not a button: a door to a room that does not exist is
                 // worse than a sentence saying the room is there.
-                <Text style={styles.rollup} testID="thread-rollup">
-                  {`답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
-                    rollup.lastReplyAtMs,
-                    nowMs,
-                  )}`}
-                </Text>
+                <View testID="thread-rollup">
+                  <ThreadSummaryContent view={threadView} directory={directory} />
+                </View>
               )
             ) : null}
           </View>
@@ -3818,8 +3820,18 @@ function sameRollup(
   return (
     a.replyCount === b.replyCount &&
     a.lastReplySeq === b.lastReplySeq &&
-    a.lastReplyAtMs === b.lastReplyAtMs
+    a.lastReplyAtMs === b.lastReplyAtMs &&
+    // 요약 줄이 그리는 나머지 값(#4878): 얼굴·안 읽은 수가 바뀌면 행이 다시 그려져야 한다. 비교자가 이것을 못 보면
+    // 칩이 사라지지 않고 옛 얼굴이 남는다 — memo는 틀려도 조용하다. 그리지 않는 `participantCount`는 보지 않는다.
+    a.unreadReplyCount === b.unreadReplyCount &&
+    sameIds(a.participantIds, b.participantIds)
   );
+}
+
+function sameIds(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined || a.length !== b.length) return false;
+  return a.every((id, index) => id === b[index]);
 }
 
 /**
@@ -4596,16 +4608,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     flexWrap: 'wrap',
     paddingTop: 2,
   },
-  // 아래 넷은 전부 **누를 것의 라벨**이므로 줄 상자를 선언한다: 44pt 슬롭
+  // 아래 둘은 **누를 것의 라벨**이므로 줄 상자를 선언한다: 44pt 슬롭
   // (`META_SLOP`)이 그 줄 높이에서 도출되고, 선언하지 않으면 그 산수가 서체
-  // 자연값이라는 아무도 못 적는 숫자 위에 서게 된다 (감사 M-14).
-  rollup: {fontSize: font.meta, lineHeight: line.meta, color: color.textFaint},
-  rollupLink: {
-    fontSize: font.meta,
-    lineHeight: line.meta,
-    color: color.accentText,
-    fontWeight: '600',
-  },
+  // 자연값이라는 아무도 못 적는 숫자 위에 서게 된다 (감사 M-14). 스레드 롤업의 같은 선언은
+  // `ThreadSummary.tsx`의 `count`(`line.meta`)가 진다.
   // Meta size, like the tail: this is a statement ABOUT the message, and it must
   // not compete with the message for the eye.
   replyMark: {fontSize: font.meta, lineHeight: line.meta, color: color.textFaint},

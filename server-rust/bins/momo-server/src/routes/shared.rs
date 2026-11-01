@@ -33,11 +33,13 @@ pub(crate) fn path_uuid(raw: &str, message: &'static str) -> Result<Uuid, ApiErr
     Uuid::parse_str(raw).map_err(|_| ApiError::bad_request(message))
 }
 
-/// Swift's `requireHumanPrincipal` guards. The Rust middleware only ever
-/// resolves `PrincipalKind::Human` today (the agent-bearer and work-host bearer
-/// paths are not ported — see `auth.rs`), so this check is currently always
-/// true; it is written anyway so that porting those credentials cannot silently
-/// widen a human-only route.
+/// Swift's `requireHumanPrincipal` guards. The middleware resolves a person, an agent
+/// bearer and a signed work host (see `auth.rs`), so a human-only handler needs this
+/// check wherever its route is open to the other two. Where the route is closed to them
+/// at the door (the agent route table, the work-host signed-path list, the developer
+/// token's closed table: the composer's link preview is one) this is only the handler's
+/// own second layer, and it is the check that keeps a later widening of a table from
+/// widening the route with it.
 pub(crate) fn require_human(principal: &Principal, message: &'static str) -> Result<(), ApiError> {
     if principal.kind == PrincipalKind::Human {
         Ok(())

@@ -60,6 +60,8 @@
 //! costs every later run of that agent and shows up as "the agent stopped
 //! answering", which is far more expensive to diagnose than to redo.
 
+use std::collections::HashMap;
+
 use chrono::{DateTime, Duration, Utc};
 use momo_db::DbError;
 use serde_json::{json, Map, Value};
@@ -561,6 +563,15 @@ pub struct ApprovalPage {
 const CARD_OUTCOME_LINE_SQL: &str = "COALESCE(NULLIF(btrim(m.props #>> '{result,line}'), ''), \
      CASE WHEN jsonb_exists(m.props, 'code') THEN NULLIF(btrim(m.body), '') END)";
 
+/// The card an approval points at (`approval.request_message_id`), joined as `m`, for the
+/// two reads that quote it (the approval list and the run progress facts). One text, so the
+/// two cannot drift apart: the card must be an `approval_request`, not deleted, and in the
+/// **approval's own room**. Expects the approval as `a`.
+const APPROVAL_CARD_JOIN_SQL: &str = "LEFT JOIN message m \
+       ON m.workspace_id = a.workspace_id AND m.id = a.request_message_id \
+      AND m.channel_id = a.channel_id \
+      AND m.type = 'approval_request' AND m.deleted_at IS NULL";
+
 /// The longest card sentence a read passes on. The sentences are server-written and
 /// short; one that is not is no sentence, so it is dropped rather than cut in half.
 pub const CARD_LINE_MAX_CHARS: usize = 300;
@@ -632,51 +643,58 @@ pub async fn list_approval_page_in_tx(
         "ORDER BY a.expires_at NULLS LAST, a.created_at DESC, a.id DESC"
     };
     let after = if time_ordered { after } else { None };
+    // The page is chosen from `approval` alone (ids, in order, under the `LIMIT`); only
+    // the rows that made the page are then dressed with their room's kind and their card.
+    // Keep it that way: with the card join in the same level as the `LIMIT`, the planner
+    // is free to order the card join ahead of the page, and what that costs depends on how
+    // many messages the workspace holds per approval.
     let sql = format!(
         "SELECT a.id, a.workspace_id, a.run_id, a.channel_id, a.request_message_id, \
                 a.requested_by, a.action_type, a.payload, a.status::text AS status_label, \
                 a.decided_by, a.decided_at, a.decision_reason, a.expires_at, a.created_at, \
                 (c.kind = 'dm') AS is_direct, m.root_id AS card_root_id, \
                 CASE WHEN a.status <> 'pending' THEN {CARD_OUTCOME_LINE_SQL} END AS result_line \
-           FROM approval a \
-           JOIN membership ms \
-             ON ms.workspace_id = a.workspace_id \
-            AND ms.channel_id = a.channel_id \
-            AND ms.member_id = $2 \
-            AND ms.left_at IS NULL \
+           FROM (SELECT a.id \
+                   FROM approval a \
+                   JOIN membership ms \
+                     ON ms.workspace_id = a.workspace_id \
+                    AND ms.channel_id = a.channel_id \
+                    AND ms.member_id = $2 \
+                    AND ms.left_at IS NULL \
+                  WHERE a.workspace_id = $1 \
+                    AND ($3::text IS NULL OR a.status = $3::approval_status) \
+                    AND (($4::boolean = false \
+                          AND (a.payload->>'origin' IS DISTINCT FROM 'server_in_place' \
+                               OR EXISTS (SELECT 1 FROM workspace_membership wm \
+                                           WHERE wm.workspace_id = a.workspace_id \
+                                             AND wm.member_id = $2 \
+                                             AND wm.role IN ('owner', 'admin')))) \
+                         OR ($4::boolean = true \
+                             AND (a.decided_by = $2 \
+                                  OR EXISTS (SELECT 1 FROM agent_run r \
+                                              WHERE r.workspace_id = a.workspace_id \
+                                                AND r.id = a.run_id \
+                                                AND (EXISTS (SELECT 1 FROM message tm \
+                                                              WHERE tm.workspace_id = r.workspace_id \
+                                                                AND tm.id = r.trigger_message_id \
+                                                                AND tm.author_member_id = $2) \
+                                                     OR EXISTS (SELECT 1 FROM audit_log al \
+                                                                 WHERE al.workspace_id = r.workspace_id \
+                                                                   AND al.run_id = r.id \
+                                                                   AND al.action = 'agent.work.queued' \
+                                                                   AND al.actor_member_id = $2))) \
+                                  OR EXISTS (SELECT 1 FROM agent ag \
+                                              WHERE ag.workspace_id = a.workspace_id \
+                                                AND ag.member_id = a.requested_by \
+                                                AND ag.owner_human_id = $2)))) \
+                    AND ($5::timestamptz IS NULL \
+                         OR (COALESCE(a.decided_at, a.created_at), a.id) < ($5, $6)) \
+                  {order} \
+                  LIMIT $7) page \
+           JOIN approval a ON a.workspace_id = $1 AND a.id = page.id \
            JOIN channel c ON c.workspace_id = a.workspace_id AND c.id = a.channel_id \
-           LEFT JOIN message m \
-             ON m.workspace_id = a.workspace_id AND m.id = a.request_message_id \
-            AND m.type = 'approval_request' AND m.deleted_at IS NULL \
-          WHERE a.workspace_id = $1 \
-            AND ($3::text IS NULL OR a.status = $3::approval_status) \
-            AND (($4::boolean = false \
-                  AND (a.payload->>'origin' IS DISTINCT FROM 'server_in_place' \
-                       OR EXISTS (SELECT 1 FROM workspace_membership wm \
-                                   WHERE wm.workspace_id = a.workspace_id \
-                                     AND wm.member_id = $2 \
-                                     AND wm.role IN ('owner', 'admin')))) \
-                 OR ($4::boolean = true \
-                     AND (a.decided_by = $2 \
-                          OR EXISTS (SELECT 1 FROM agent_run r \
-                                      WHERE r.workspace_id = a.workspace_id AND r.id = a.run_id \
-                                        AND (EXISTS (SELECT 1 FROM message tm \
-                                                      WHERE tm.workspace_id = r.workspace_id \
-                                                        AND tm.id = r.trigger_message_id \
-                                                        AND tm.author_member_id = $2) \
-                                             OR EXISTS (SELECT 1 FROM audit_log al \
-                                                         WHERE al.workspace_id = r.workspace_id \
-                                                           AND al.run_id = r.id \
-                                                           AND al.action = 'agent.work.queued' \
-                                                           AND al.actor_member_id = $2))) \
-                          OR EXISTS (SELECT 1 FROM agent ag \
-                                      WHERE ag.workspace_id = a.workspace_id \
-                                        AND ag.member_id = a.requested_by \
-                                        AND ag.owner_human_id = $2)))) \
-            AND ($5::timestamptz IS NULL \
-                 OR (COALESCE(a.decided_at, a.created_at), a.id) < ($5, $6)) \
-          {order} \
-          LIMIT $7"
+           {APPROVAL_CARD_JOIN_SQL} \
+          {order}"
     );
     // A time-ordered page reads one row more than it returns: that row is the only
     // way to know a further page exists without a second query that could disagree.
@@ -771,9 +789,7 @@ pub async fn run_approval_facts_in_tx(
                 CASE WHEN a.status = 'pending' THEN NULLIF(btrim(m.body), '') \
                      ELSE {CARD_OUTCOME_LINE_SQL} END AS line \
            FROM approval a \
-           LEFT JOIN message m \
-             ON m.workspace_id = a.workspace_id AND m.id = a.request_message_id \
-            AND m.type = 'approval_request' AND m.deleted_at IS NULL \
+           {APPROVAL_CARD_JOIN_SQL} \
           WHERE a.workspace_id = $1 AND a.run_id = ANY($2) \
           ORDER BY a.run_id, (a.status = 'pending') DESC, a.created_at DESC, a.id DESC"
     );
@@ -796,6 +812,33 @@ pub async fn run_approval_facts_in_tx(
             })
         })
         .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
+/// The room each of `approval_ids` was raised in, as `approval id -> channel id`. An id that
+/// names no approval of this workspace has no entry. It is what a reader needs to say whether
+/// a viewer may be told an approval's id (`approval_is_named_to_viewer`): rows are not
+/// filtered by who is asking, so **the caller must test each room against the viewer's rooms**
+/// (`visible_channels_in_tx`) before it names anything.
+pub async fn approval_channels_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    approval_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Uuid>, DbError> {
+    if approval_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query(
+        "SELECT a.id, a.channel_id FROM approval a \
+          WHERE a.workspace_id = $1 AND a.id = ANY($2)",
+    )
+    .bind(workspace_id)
+    .bind(approval_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| Ok((row.try_get("id")?, row.try_get("channel_id")?)))
+        .collect::<Result<HashMap<_, _>, sqlx::Error>>()
         .map_err(DbError::from)
 }
 

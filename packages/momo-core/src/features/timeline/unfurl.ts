@@ -65,9 +65,30 @@ export function isUnfurlIconPath(value: string): boolean {
   return /^\/v1\/workspaces\/[^/?#]+\/unfurls\/[^/?#]+\/icon$/.test(value);
 }
 
-/** Either of a card's two proxy paths: the preview picture or the site icon. */
+/**
+ * A preview's picture path (`…/unfurl-previews/{id}/image`, ADR-0170 증보 2026-11-01): the card
+ * of a link that is still in the composer has no card row, so its picture has a path of its own.
+ */
+export function isUnfurlPreviewImagePath(value: string): boolean {
+  return /^\/v1\/workspaces\/[^/?#]+\/unfurl-previews\/[^/?#]+\/image$/.test(value);
+}
+
+/** A preview's site-icon path (`…/unfurl-previews/{id}/icon`). */
+export function isUnfurlPreviewIconPath(value: string): boolean {
+  return /^\/v1\/workspaces\/[^/?#]+\/unfurl-previews\/[^/?#]+\/icon$/.test(value);
+}
+
+/**
+ * Any of the four paths a client is ever given for a link card's remote image: a stored card's
+ * picture or icon, or a preview's picture or icon. Nothing else may carry a bearer token.
+ */
 export function isUnfurlProxyPath(value: string): boolean {
-  return isUnfurlImagePath(value) || isUnfurlIconPath(value);
+  return (
+    isUnfurlImagePath(value) ||
+    isUnfurlIconPath(value) ||
+    isUnfurlPreviewImagePath(value) ||
+    isUnfurlPreviewIconPath(value)
+  );
 }
 
 function sizeField(
@@ -87,6 +108,40 @@ function sizeField(
 /** Strict enough to prevent a client from turning an unfurl into a script URL. */
 export function isHttpUrl(value: string): boolean {
   return /^https?:\/\/[^\s]+$/i.test(value);
+}
+
+/**
+ * The optional keys a card and a preview share, decoded the same way: bad optional metadata is
+ * dropped, never fatal. `imagePath`/`iconPath` say which proxy path family is the only one a
+ * picture or icon may name (a stored card's, or a preview's).
+ */
+function optionalCardFields(
+  source: Record<string, unknown>,
+  imagePath: (value: string) => boolean,
+  iconPath: (value: string) => boolean
+): Omit<MessageUnfurl, "id" | "messageId" | "url" | "status"> {
+  const title = stringField(source, "title");
+  const description = stringField(source, "description");
+  const domain = stringField(source, "domain");
+  const imageUrl = stringField(source, "imageUrl", "image_url");
+  const siteName = stringField(source, "siteName", "site_name");
+  const iconUrl = stringField(source, "iconUrl", "icon_url");
+  // A size is a pair: half of one, or a value outside the server's bound, is no size.
+  const imageWidth = sizeField(source, "imageWidth", "image_width");
+  const imageHeight = sizeField(source, "imageHeight", "image_height");
+  const isVideo = (source.isVideo ?? source.is_video) === true;
+  return {
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(domain ? { domain } : {}),
+    ...(imageUrl && imagePath(imageUrl) ? { imageUrl } : {}),
+    ...(siteName ? { siteName } : {}),
+    ...(iconUrl && iconPath(iconUrl) ? { iconUrl } : {}),
+    ...(imageWidth !== undefined && imageHeight !== undefined
+      ? { imageWidth, imageHeight }
+      : {}),
+    ...(isVideo ? { isVideo: true } : {}),
+  };
 }
 
 /**
@@ -113,31 +168,62 @@ export function messageUnfurlFromWire(value: unknown): MessageUnfurl | null {
     return null;
   }
 
-  const title = stringField(source, "title");
-  const description = stringField(source, "description");
-  const domain = stringField(source, "domain");
-  const imageUrl = stringField(source, "imageUrl", "image_url");
-  const siteName = stringField(source, "siteName", "site_name");
-  const iconUrl = stringField(source, "iconUrl", "icon_url");
-  // A size is a pair: half of one, or a value outside the server's bound, is no size.
-  const imageWidth = sizeField(source, "imageWidth", "image_width");
-  const imageHeight = sizeField(source, "imageHeight", "image_height");
-  const isVideo = (source.isVideo ?? source.is_video) === true;
   return {
     id,
     messageId,
     url,
     status,
-    ...(title ? { title } : {}),
-    ...(description ? { description } : {}),
-    ...(domain ? { domain } : {}),
-    ...(imageUrl && isUnfurlImagePath(imageUrl) ? { imageUrl } : {}),
-    ...(siteName ? { siteName } : {}),
-    ...(iconUrl && isUnfurlIconPath(iconUrl) ? { iconUrl } : {}),
-    ...(imageWidth !== undefined && imageHeight !== undefined
-      ? { imageWidth, imageHeight }
-      : {}),
-    ...(isVideo ? { isVideo: true } : {}),
+    ...optionalCardFields(source, isUnfurlImagePath, isUnfurlIconPath),
+  };
+}
+
+// -----------------------------------------------------------------------------
+// The card of a link that is still in the composer (ADR-0170 증보 2026-11-01, #4884).
+//
+// The server answers `POST …/channels/{ch}/unfurl-previews` with `ok` and a card, or with `failed`
+// and nothing else: a preview never says why there is none, so neither state is an error to show.
+// The picture and icon of an `ok` preview come through the two preview paths and no others.
+// -----------------------------------------------------------------------------
+
+/** A preview that has a card: the keys of a stored card without `messageId`, plus its own `id`. */
+export interface UnfurlPreviewCard
+  extends Omit<MessageUnfurl, "messageId" | "status"> {
+  status: "ok";
+}
+
+/** No preview, whatever the reason. Render nothing. */
+export interface UnfurlPreviewFailed {
+  status: "failed";
+  url: string;
+}
+
+export type UnfurlPreview = UnfurlPreviewCard | UnfurlPreviewFailed;
+
+/**
+ * Decode the answer of the preview request. A bad status or address drops the whole answer
+ * (`null`); an `ok` without an `id` is dropped too, since nothing it names could be fetched.
+ * Optional metadata is decoded as for a stored card, except that a picture or icon may name a
+ * preview path only.
+ */
+export function unfurlPreviewFromWire(value: unknown): UnfurlPreview | null {
+  if (!value || typeof value !== "object") return null;
+  const source = value as Record<string, unknown>;
+  const url = stringField(source, "url");
+  const status = stringField(source, "status");
+  if (!url || !isHttpUrl(url)) return null;
+  if (status === "failed") return { status: "failed", url };
+  if (status !== "ok") return null;
+  const id = stringField(source, "id");
+  if (!id) return null;
+  return {
+    id,
+    url,
+    status: "ok",
+    ...optionalCardFields(
+      source,
+      isUnfurlPreviewImagePath,
+      isUnfurlPreviewIconPath
+    ),
   };
 }
 
@@ -231,6 +317,14 @@ export type UnfurlSize = "compact" | "rich" | "off";
 
 export const DEFAULT_UNFURL_SIZE: UnfurlSize = "compact";
 
+/**
+ * Whether this device draws link cards at all. `off` draws none, so a surface that only draws
+ * (the composer preview) skips its work too, and it is narrowed to the two layouts a card has.
+ */
+export function unfurlDrawsCards(size: UnfurlSize): size is Exclude<UnfurlSize, "off"> {
+  return size !== "off";
+}
+
 /** Cards per message: the first distinct links in link order, never more. */
 export const UNFURL_MAX_CARDS = 3;
 
@@ -310,8 +404,20 @@ function pictureShape(width: number | undefined, height: number | undefined): Un
 }
 
 /** An `ok` row with neither a title nor a picture has nothing to put in a card. */
-function hasCardContent(unfurl: MessageUnfurl): boolean {
+function hasCardContent(unfurl: Pick<MessageUnfurl, "title" | "imageUrl">): boolean {
   return plainText(unfurl.title) !== undefined || Boolean(unfurl.imageUrl);
+}
+
+/**
+ * The previews of a draft that draw a card, in link order: `ok` with a title or a picture. A
+ * `failed` one, and an `ok` one with nothing to show (an odd or older server), leave only the
+ * link, exactly as a stored card does (`visibleUnfurls`). The composer asks this before it offers
+ * the ✕, so the ✕ is never there for a card that is not.
+ */
+export function drawablePreviews(previews: readonly UnfurlPreview[]): UnfurlPreviewCard[] {
+  return previews.filter(
+    (preview): preview is UnfurlPreviewCard => preview.status === "ok" && hasCardContent(preview)
+  );
 }
 
 export function isUnfurlPending(unfurl: MessageUnfurl): boolean {
@@ -339,9 +445,16 @@ export function visibleUnfurls(unfurls: readonly MessageUnfurl[]): MessageUnfurl
   );
 }
 
+/**
+ * What a card is drawn from: a stored card, or the preview of a link that is still in the
+ * composer (#5005). A preview has no message yet, so it has no `messageId`; nothing in the
+ * display model reads one, which is why the two draw the same card by the same rules.
+ */
+export type UnfurlCardSource = Omit<MessageUnfurl, "messageId">;
+
 /** What one `ok` card shows, or `null` when it draws no card at all. */
 export function unfurlCardModel(
-  unfurl: MessageUnfurl,
+  unfurl: UnfurlCardSource,
   { size, imageFailed = false }: UnfurlCardOptions
 ): UnfurlCardModel | null {
   if (size === "off" || unfurl.status !== "ok" || !hasCardContent(unfurl)) return null;

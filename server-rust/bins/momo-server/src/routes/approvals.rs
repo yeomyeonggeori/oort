@@ -2238,6 +2238,14 @@ async fn execute_workspace_action(
         }
     }
 
+    // ---- 2b. the team AI's role bundles, judged again (ADR-0201 증보 v3 B13-I5, B4-3) --------
+    //
+    // After the subject gates above on purpose: a decider who is not eligible has been turned
+    // away before this, so the answer below is never an oracle for a switch they may not read.
+    if let Some(refused) = team_ai_card_gate_in_tx(conn, approval, input, action, now).await? {
+        return Ok(Ok(refused));
+    }
+
     // The ids this card was drawn from must be the ids the names resolve to now.
     // (After the subject gate above, so a decider who is not eligible learns
     // nothing about whether the target moved.)
@@ -2320,7 +2328,7 @@ async fn execute_workspace_action(
             display_name,
             target: Some(target),
             ..
-        } => match execute_agent_rename(conn, approval, input, display_name, target).await? {
+        } => match execute_agent_rename(conn, approval, input, now, display_name, target).await? {
             Execution::Ran(executed) => executed,
             Execution::Refused(decision) => return Ok(Ok(decision)),
         },
@@ -2523,6 +2531,23 @@ async fn execute_workspace_action(
         // the safe answer.
         ActionArgs::PluginInstall { plugin: None, .. } => {
             return Err(protocol_error("plugin.install resolved without a plugin"));
+        }
+        ActionArgs::TeamAiRolesSet {
+            bundle,
+            enabled,
+            before: Some(before),
+        } => match execute_team_ai_roles_set(conn, approval, input, now, bundle, *enabled, *before)
+            .await?
+        {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
+        // The resolver always fills `before`; a switch card that reached the executor without
+        // the state the approver was shown has nothing to compare, and rolling back is the safe answer.
+        ActionArgs::TeamAiRolesSet { before: None, .. } => {
+            return Err(protocol_error(
+                "team_ai.roles.set resolved without the switch it showed",
+            ));
         }
     };
 
@@ -3061,6 +3086,257 @@ async fn execute_channel_create(
     }))
 }
 
+/// The team AI's role bundles, judged **again** at the decision, for a card the helper raised
+/// (`payload.via_ai.source = "team_ai"` — written by the server, never by the agent).
+///
+/// Three things can have changed since the card was drawn — or never been true of it — and all
+/// end the card the same way (`action_args_invalid`, the approval stays pending and can still be
+/// rejected):
+///
+/// * the bundle that owns the action was switched **off** (B13-I5) — whether the card was drawn
+///   while it was on, or came in sideways with the bundle already off. The settings row is held
+///   while this is judged ([`team_ai_bundle_allows_in_tx`]), so a switch that is being turned off
+///   is waited for, and one that comes after waits for this decision;
+/// * for a sensitive action (`team_ai.roles.set`, B4-3): the request that raised it had read
+///   something, so text it read may have been the one asking. A card that does not say it
+///   read nothing (no `tools`, no `web_searches`) is judged as one that did;
+/// * provenance: an action only the helper may raise (`Proposers::TeamAiOnly`) must carry the
+///   helper's mark — a card without it is not one the helper raised — and a card that does carry
+///   it must be for an action on the helper's own list.
+///
+/// A card of any other action from any other door (the Agent Port) is not the helper's and is
+/// not touched here. The refused attempt is an `action.refused` audit row naming the reason; the
+/// receipt reuses the existing word, so the client vocabulary does not grow.
+async fn team_ai_card_gate_in_tx(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    action: &momo_agent::actions::WorkspaceAction,
+    now: chrono::DateTime<Utc>,
+) -> Result<Option<Decision>, momo_db::DbError> {
+    let action_id = action.id;
+    let reason = match card_provenance(approval.payload.get("via_ai"), action) {
+        CardProvenance::NotThisGates => None,
+        CardProvenance::Refused(message) => Some(("team_ai_provenance", message)),
+        CardProvenance::Helper(via) => {
+            if !team_ai_bundle_allows_in_tx(conn, input.workspace_id, action_id).await? {
+                Some((
+                    "team_ai_role_off",
+                    "the helper role that raised this card is switched off",
+                ))
+            } else if momo_agent::team_ai_roles::is_sensitive_action(action_id)
+                && !card_read_nothing(via)
+            {
+                Some((
+                    "team_ai_read_context",
+                    "the helper raised this card after reading workspace text",
+                ))
+            } else {
+                None
+            }
+        }
+    };
+    let Some((code, message)) = reason else {
+        return Ok(None);
+    };
+    write_audit(
+        conn,
+        &AuditEntry::new(input.workspace_id, "action.refused")
+            .by(input.member_id)
+            .about(approval.requested_by)
+            .target("approval", approval.id)
+            .via_token(input.via_token_id)
+            .run(approval.run_id)
+            .with_schema(
+                "momo.action.refused.v1",
+                stamp_via(
+                    input.credential_via,
+                    json!({
+                        "action_id": action_id,
+                        "approval_id": approval.id.to_string(),
+                        "reason": code,
+                    }),
+                ),
+            ),
+    )
+    .await?;
+    Ok(Some(refusal(
+        approval.id,
+        input.member_id,
+        "action_args_invalid",
+        message,
+        StatusCode::CONFLICT,
+        now,
+    )))
+}
+
+/// What a card's `via_ai` says about who raised it, against the action it names.
+enum CardProvenance<'a> {
+    /// Not the helper's card, and not an action only the helper may raise: not this gate's.
+    NotThisGates,
+    /// The helper's card, for an action on the helper's own list: judge the bundles and the
+    /// read rule (`via` is the card's `via_ai`).
+    Helper(&'a Value),
+    /// The mark and the action disagree.
+    Refused(&'static str),
+}
+
+/// Judge the mark. The helper's cards carry `via_ai.source = "team_ai"` (written by the server);
+/// the Agent Port refuses the ids that only the helper may raise
+/// (`Proposers::TeamAiOnly`) — so a card of one of those without the mark is not a card the helper
+/// raised, and a card with the mark must be for an action the helper is allowed to raise.
+fn card_provenance<'a>(
+    via: Option<&'a Value>,
+    action: &momo_agent::actions::WorkspaceAction,
+) -> CardProvenance<'a> {
+    let marked_as_helper = via
+        .and_then(|via| via.get("source"))
+        .and_then(Value::as_str)
+        == Some("team_ai");
+    match via {
+        Some(via) if marked_as_helper => {
+            if momo_workspace_actions::team_ai::is_team_ai_action(action.id) {
+                CardProvenance::Helper(via)
+            } else {
+                CardProvenance::Refused("the helper may not raise this action")
+            }
+        }
+        _ if action.proposers == momo_agent::actions::Proposers::TeamAiOnly => {
+            CardProvenance::Refused(
+                "this action is the helper's alone, and the card does not say the helper raised it",
+            )
+        }
+        _ => CardProvenance::NotThisGates,
+    }
+}
+
+/// Is the bundle that owns `action_id` on **now**, with the settings row held until this decision
+/// ends? An action no bundle owns (`team_ai.roles.set`) has nothing for a switch to say, so the row
+/// is neither read nor locked here — its executor takes the row itself, `FOR UPDATE`.
+async fn team_ai_bundle_allows_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    action_id: &str,
+) -> Result<bool, momo_db::DbError> {
+    if momo_agent::team_ai_roles::bundle_of_action(action_id).is_none() {
+        return Ok(true);
+    }
+    Ok(momo_workspace_actions::team_ai::read_roles_locked_in_tx(
+        conn,
+        workspace_id,
+        settings_row_lock_for(action_id),
+    )
+    .await?
+    .action_allowed(action_id))
+}
+
+/// How the gate holds the settings row for `action_id`'s card: `FOR UPDATE` when that card's own
+/// executor takes the row `FOR UPDATE` right after (`workspace.settings.update` merges the bag in
+/// process), so the gate is not a share lock the executor then has to upgrade; `FOR SHARE` for every
+/// other card. The one executor named here is the only one of the helper's bundle cards that locks
+/// or writes the `workspace` row — a card whose executor starts to must be named here too.
+fn settings_row_lock_for(action_id: &str) -> momo_workspace_actions::team_ai::SettingsRowLock {
+    use momo_workspace_actions::team_ai::SettingsRowLock;
+    if action_id == momo_agent::actions::ACTION_WORKSPACE_SETTINGS_UPDATE {
+        SettingsRowLock::Update
+    } else {
+        SettingsRowLock::Share
+    }
+}
+
+/// Does the card's `via_ai` say its request read nothing? Only an explicit empty `tools` list and
+/// a zero `web_searches` do — a missing or malformed field is not "nothing".
+fn card_read_nothing(via: &Value) -> bool {
+    via.get("tools")
+        .and_then(Value::as_array)
+        .is_some_and(|tools| tools.is_empty())
+        && via.get("web_searches").and_then(Value::as_i64) == Some(0)
+}
+
+/// `team_ai.roles.set` (ADR-0201 증보 v3 B3-T, #4964): the write `PATCH …/settings` makes for
+/// `{team_ai_roles: {<bundle>: <enabled>}}` — `merge_workspace_settings` and
+/// `write_workspace_settings`, as the **approver** and under the row lock — and its audit rows:
+/// `team_ai.roles.changed` (key names only) and, when the bundle that goes on carries a notice,
+/// the consent record the approval is (`team_ai.roles.notice_shown`).
+///
+/// Refuses before its first write when the switch is no longer what the card showed (stale), or
+/// when `memory` would go on while team memory is off (409, the approval stays pending so the
+/// admin can switch team memory on and approve the same card).
+async fn execute_team_ai_roles_set(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    bundle: &'static str,
+    enabled: bool,
+    before: bool,
+) -> Result<Execution, momo_db::DbError> {
+    use momo_workspace_actions::team_ai_roles::{
+        card_notice_audit, roles_changed_audit, set_role_in_tx, CardProvenance, RoleWrite,
+    };
+    let Some(row) = momo_agent::team_ai_roles::bundle(bundle) else {
+        return Err(protocol_error("team_ai.roles.set names no bundle"));
+    };
+    match set_role_in_tx(
+        conn,
+        input.workspace_id,
+        input.member_id,
+        bundle,
+        enabled,
+        before,
+    )
+    .await?
+    {
+        RoleWrite::Changed { .. } => {}
+        RoleWrite::Stale => {
+            return Ok(Execution::Refused(args_invalid_refusal(
+                approval, input, now,
+            )))
+        }
+        RoleWrite::TeamMemoryOff => {
+            return Ok(Execution::Refused(refusal(
+                approval.id,
+                input.member_id,
+                "action_args_invalid",
+                "team memory is switched off; turn it on before turning the memory role on",
+                StatusCode::CONFLICT,
+                now,
+            )))
+        }
+    }
+    let mut audits = vec![roles_changed_audit(
+        input.workspace_id,
+        input.member_id,
+        input.via_token_id,
+        &[bundle],
+        Some(CardProvenance {
+            agent_member_id: approval.requested_by,
+            approval_id: approval.id,
+            run_id: approval.run_id,
+        }),
+    )];
+    // Approving the card that turns `files` or `memory` on is the consent to the line on the card.
+    if enabled {
+        audits.extend(card_notice_audit(
+            input.workspace_id,
+            input.member_id,
+            input.via_token_id,
+            &[bundle],
+            approval.id,
+        ));
+    }
+    Ok(Execution::Ran(Executed {
+        audits,
+        ref_type: REF_TYPE_WORKSPACE_SETTINGS,
+        ref_id: input.workspace_id,
+        result_body: momo_agent::team_ai_roles::roles_set_result_body(row, enabled),
+        result_rows: momo_agent::team_ai_roles::roles_set_result_rows(row, before, enabled),
+        secret_once: None,
+        next: None,
+        expression: None,
+    }))
+}
+
 /// `workspace.settings.update` (증보 V7): merge the two keys into the settings bag
 /// as the approver, under the row lock.
 ///
@@ -3535,13 +3811,30 @@ async fn execute_agent_rename(
     conn: &mut PgConnection,
     approval: &LockedApproval,
     input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
     display_name: &str,
     target: &ResolvedAgentTarget,
 ) -> Result<Execution, momo_db::DbError> {
     let applied =
-        rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, display_name)
+        match rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, display_name)
             .await?
-            .ok_or_else(|| protocol_error("the rename target is no longer a live agent"))?;
+        {
+            Ok(Some(applied)) => applied,
+            Ok(None) => {
+                return Err(protocol_error(
+                    "the rename target is no longer a live agent",
+                ))
+            }
+            // The team AI may not wear a reserved word (ADR-0201 증보 v3 B10-5). The strict card
+            // alphabet refuses nearly all of them at proposal time; the write's whole-name check
+            // also catches a spaced-out spelling (`a l l`) it lets through, and answers like any
+            // card whose arguments went stale. Nothing has been written.
+            Err(_) => {
+                return Ok(Execution::Refused(args_invalid_refusal(
+                    approval, input, now,
+                )))
+            }
+        };
 
     let mut detail = json!({
         "old": applied.previous_display_name,
@@ -3551,6 +3844,10 @@ async fn execute_agent_rename(
         "approval_id": approval.id.to_string(),
         "managed": target.managed,
     });
+    // ADR-0201 증보 v3 B10-6: the helper's aliases moved with its name in this transaction.
+    if let Some(alias) = &applied.alias_sync {
+        detail["alias"] = alias.audit_detail();
+    }
     if target.managed {
         if let Some(object) = detail.as_object_mut() {
             object.insert("target_agent".into(), json!(target.id.to_string()));
@@ -3708,6 +4005,17 @@ async fn execute_agent_profile_update(
     if changes.is_empty() {
         return Err(protocol_error("agent.profile.update changes nothing"));
     }
+    // ADR-0201 증보 v3 B10 (#4966): a rename of the team AI moves its aliases, and every writer of
+    // those takes the alias lock before any row lock (the switch-on path does). This path locks the
+    // member row first, so for the helper it takes the alias lock ahead of that row.
+    if change.display_name.is_some() {
+        momo_messaging::team_ai_alias::lock_aliases_if_team_ai_in_tx(
+            conn,
+            input.workspace_id,
+            target.id,
+        )
+        .await?;
+    }
     // The row is locked **before the first write** and read again: the card was
     // resolved earlier in this transaction without the lock, so anything that
     // moved since (a concurrent rename or profile change) re-asks. A refusal here
@@ -3731,11 +4039,22 @@ async fn execute_agent_profile_update(
     if let Some(name) = change.display_name {
         if name != &target.current_display_name {
             let applied =
-                rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, name)
+                match rename_agent_display_name_in_tx(conn, input.workspace_id, target.id, name)
                     .await?
-                    .ok_or_else(|| {
-                        protocol_error("the profile target is no longer a live agent")
-                    })?;
+                {
+                    Ok(Some(applied)) => applied,
+                    Ok(None) => {
+                        return Err(protocol_error(
+                            "the profile target is no longer a live agent",
+                        ))
+                    }
+                    // Reserved for the team AI (ADR-0201 증보 v3 B10-5): nothing has been written.
+                    Err(_) => {
+                        return Ok(Execution::Refused(args_invalid_refusal(
+                            approval, input, now,
+                        )))
+                    }
+                };
             new_name = applied.member.display_name.clone();
             let mut detail = json!({
                 "old": applied.previous_display_name,
@@ -3745,6 +4064,10 @@ async fn execute_agent_profile_update(
                 "approval_id": approval.id.to_string(),
                 "managed": target.managed,
             });
+            // ADR-0201 증보 v3 B10-6: the helper's aliases moved with its name in this transaction.
+            if let Some(alias) = &applied.alias_sync {
+                detail["alias"] = alias.audit_detail();
+            }
             if target.managed {
                 if let Some(object) = detail.as_object_mut() {
                     object.insert("target_agent".into(), json!(target.id.to_string()));
@@ -5351,5 +5674,83 @@ mod tests {
             stamp_via(Some(AUDIT_VIA_PUSH_ACTION), json!("scalar")),
             json!("scalar")
         );
+    }
+
+    /// The helper's mark against the action a card names (ADR-0201 증보 v3 B13-I5): a card of an
+    /// action only the helper may raise must carry the mark — missing, another source and a
+    /// malformed `via_ai` all fail — a card that carries it must be for an action on the helper's
+    /// own list, and any other card is not this gate's.
+    #[test]
+    fn a_card_of_a_helper_only_action_must_say_the_helper_raised_it() {
+        let roles_card = action_by_id("team_ai.roles.set").expect("registered");
+        let unfurl = action_by_id("workspace.unfurl.update").expect("registered");
+        let channel_create = action_by_id("channel.create").expect("registered");
+        let admit = action_by_id("dm.agent.admit").expect("registered");
+        assert_eq!(
+            roles_card.proposers,
+            momo_agent::actions::Proposers::TeamAiOnly
+        );
+        assert_eq!(unfurl.proposers, momo_agent::actions::Proposers::TeamAiOnly);
+        let marked = json!({"source": "team_ai", "tools": [], "web_searches": 0});
+
+        for action in [roles_card, unfurl, channel_create] {
+            assert!(
+                matches!(
+                    card_provenance(Some(&marked), action),
+                    CardProvenance::Helper(_)
+                ),
+                "{}",
+                action.id
+            );
+        }
+        for via in [
+            None,
+            Some(json!({})),
+            Some(json!({"source": "agent"})),
+            Some(json!({"source": "team_ai "})),
+            Some(json!({"source": 1})),
+            Some(json!("team_ai")),
+        ] {
+            for action in [roles_card, unfurl] {
+                assert!(
+                    matches!(
+                        card_provenance(via.as_ref(), action),
+                        CardProvenance::Refused(_)
+                    ),
+                    "{} / {via:?}",
+                    action.id
+                );
+            }
+        }
+        // Marked, but for an action the helper may never raise.
+        assert!(matches!(
+            card_provenance(Some(&marked), admit),
+            CardProvenance::Refused(_)
+        ));
+        // An ordinary action's card from another door is not this gate's.
+        assert!(matches!(
+            card_provenance(None, channel_create),
+            CardProvenance::NotThisGates
+        ));
+        assert!(matches!(
+            card_provenance(Some(&json!({"source": "agent"})), channel_create),
+            CardProvenance::NotThisGates
+        ));
+    }
+
+    /// The gate holds the settings row the way the card's own executor will: `FOR UPDATE` for the
+    /// card whose executor merges the settings bag, `FOR SHARE` for every other helper card (a
+    /// share lock that the executor then upgrades is what two decisions deadlock on).
+    #[test]
+    fn the_gate_holds_the_settings_row_like_the_executor_that_follows() {
+        use momo_workspace_actions::team_ai::SettingsRowLock;
+        for id in momo_agent::actions::TEAM_AI_ACTION_IDS {
+            let expected = if id == "workspace.settings.update" {
+                SettingsRowLock::Update
+            } else {
+                SettingsRowLock::Share
+            };
+            assert_eq!(settings_row_lock_for(id), expected, "{id}");
+        }
     }
 }

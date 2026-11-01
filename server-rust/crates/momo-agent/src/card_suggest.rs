@@ -115,6 +115,38 @@ pub const AI_CONNECT_HARNESSES: [&str; 3] = ["claude", "codex", "team_key"];
 /// `ai.connect` `args.scope` (G2).
 pub const AI_CONNECT_SCOPES: [&str; 2] = ["mine", "team"];
 
+/// `work.request.open` — "open the 「작업 요청」 sheet, already filled in" (ADR-0201 증보 v3 B8 C1,
+/// #4972 S9; kind `client`, risk `none`, the same G2 four places as `settings.open`).
+///
+/// The person's own client opens the sheet of ADR-0198 D4 with `harness` and `prompt` filled and
+/// **a person sends it**. The spawn is a control signed by the owner's device key (ADR-0198 D4),
+/// so nothing a suggestion says runs by itself: the server writes the card's message and nothing
+/// else — no approval row, no audit row for the command (B15-A15). The helper reads no code and
+/// runs none (B8 C1, ADR-0198 D1·D5).
+pub const COMMAND_WORK_REQUEST_OPEN: &str = "work.request.open";
+
+/// `work.request.open` `args.harness` — the tools of the person's own Mac the sheet always
+/// offers (ADR-0198 D4: Claude Code, Codex; OpenCode shows up only when a Mac reports it, so a
+/// card never names it). **A subset of [`AI_CONNECT_HARNESSES`] on purpose**: `claude` and
+/// `codex` mean the same tool in both commands, which is why the two share one `args.harness`
+/// property on the wire (see [`merged_args_properties`]). `team_key` is a team API key — an
+/// agent, never a tool on somebody's Mac — and is refused here.
+pub const WORK_REQUEST_HARNESSES: [&str; 2] = ["claude", "codex"];
+
+/// `work.request.open` `args.prompt` ceiling, in UTF-8 bytes — the body's own number
+/// ([`SUGGESTION_BODY_MAX_BYTES`]). The sheet takes up to 32,768 characters, but this text rides
+/// in the card's props, which every member of the channel receives, and a coding request a
+/// person is asked to read before sending is not a document.
+pub const WORK_REQUEST_PROMPT_MAX_BYTES: usize = 8_000;
+
+/// What the team AI helper may suggest (ADR-0201 v3 B8 C1). Narrower than
+/// [`SUGGESTABLE_COMMANDS`] on purpose: `ai.connect` and `settings.open` have no sentence in the
+/// helper's prompt, and the helper's tool offers only what its request advertises
+/// ([`crate::team_ai_roles::TeamAiRoles::advertised_command_ids`]). H6-4's `settings.open` for the
+/// helper (ADR-0201 확인 필요 ④) is a later, separate decision: it joins this list **and** gets a
+/// prompt sentence together, never one without the other.
+pub const TEAM_AI_SUGGESTABLE_COMMAND_IDS: [&str; 1] = [COMMAND_WORK_REQUEST_OPEN];
+
 /// The worker's system-prompt rule for a connection request (GC-8, #2949).
 ///
 /// The tool description tells a model *what* `card_suggest` does; this block
@@ -213,8 +245,9 @@ impl SuggestableCommand {
     }
 }
 
-/// The server allow-list (G2): `ai.connect`, and `settings.open {section}`
-/// (ADR-0201 v2 H6-4, #3939).
+/// The server allow-list (G2): `ai.connect`, `settings.open {section}`
+/// (ADR-0201 v2 H6-4, #3939) and `work.request.open {harness?, prompt}`
+/// (ADR-0201 v3 B8 C1, #4972).
 ///
 /// Adding a command is four edits that one test measures together
 /// (`routes::actions::the_suggestable_ids_are_one_list_in_four_places` in
@@ -238,6 +271,12 @@ pub const SUGGESTABLE_COMMANDS: &[SuggestableCommand] = &[
         args_schema: settings_open_args_schema,
         normalize: normalize_settings_open_args,
         label: settings_open_label,
+    },
+    SuggestableCommand {
+        id: COMMAND_WORK_REQUEST_OPEN,
+        args_schema: work_request_open_args_schema,
+        normalize: normalize_work_request_open_args,
+        label: work_request_open_label,
     },
 ];
 
@@ -392,6 +431,128 @@ fn settings_open_label(args: &Value) -> &'static str {
     }
 }
 
+fn work_request_open_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+            "harness": {"type": "string", "enum": WORK_REQUEST_HARNESSES},
+            "prompt": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": WORK_REQUEST_PROMPT_MAX_BYTES,
+                "description": "What to ask the person's own Claude Code or Codex to do, in the person's voice and as plain text (1-8000 UTF-8 bytes; line feeds and tabs are the only control characters; it may not start with `/`). They read it in the sheet and send it themselves."
+            }
+        },
+        "required": ["prompt"]
+    })
+}
+
+/// `work.request.open` `args` → normalised `args`.
+///
+/// Closed, and **`prompt` is required** — the one free-text value a suggestion carries, so it
+/// is the one with a rule of its own ([`normalize_work_request_prompt`]). `harness` is optional
+/// and an enum member ([`WORK_REQUEST_HARNESSES`]); `null` is absent, `team_key`, `grok`,
+/// `opencode` and spellings are `InvalidArguments`. Nothing else rides along.
+fn normalize_work_request_open_args(args: &Map<String, Value>) -> Result<Value, SuggestionRefusal> {
+    if args.keys().any(|key| key != "harness" && key != "prompt") {
+        return Err(SuggestionRefusal::InvalidArguments);
+    }
+    let harness = enum_arg(args, "harness", &WORK_REQUEST_HARNESSES)?;
+    let prompt = match args.get("prompt") {
+        Some(Value::String(raw)) => normalize_work_request_prompt(raw)?,
+        _ => return Err(SuggestionRefusal::InvalidArguments),
+    };
+    let mut normalized = Map::new();
+    if let Some(harness) = harness {
+        normalized.insert("harness".into(), Value::String(harness.into()));
+    }
+    normalized.insert("prompt".into(), Value::String(prompt));
+    Ok(Value::Object(normalized))
+}
+
+/// The prompt a card may carry: the text the sheet's send path would accept, and shorter.
+///
+/// * line endings are made `\n` (a carriage return is refused by the send path, which asks
+///   clients to send `\n`) and the ends are trimmed, as the sheet trims before sending;
+/// * [`momo_wire::human_control::spawn_prompt_problem`] — **the function the signed spawn
+///   itself judges the prompt with**: not blank, 1...32,768 characters, only line feeds and tabs
+///   as control characters, nothing hidden (zero-width, direction marks, private use…);
+/// * not an adapter command: a prompt starting with `/` is what the phone sheet refuses to
+///   send, so a card never pre-fills one;
+/// * at most [`WORK_REQUEST_PROMPT_MAX_BYTES`] UTF-8 bytes.
+///
+/// The text is an agent's own words and stays so: it is shown only inside the sheet's input,
+/// where the person reads and may edit it before sending. It is never a card title, a label or
+/// a notification line, and it is never written to an audit row or a trace (H9-I10).
+fn normalize_work_request_prompt(raw: &str) -> Result<String, SuggestionRefusal> {
+    let unified = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let text = unified.trim();
+    if momo_wire::human_control::spawn_prompt_problem(text).is_some()
+        || text.starts_with('/')
+        || text.len() > WORK_REQUEST_PROMPT_MAX_BYTES
+    {
+        return Err(SuggestionRefusal::InvalidArguments);
+    }
+    Ok(text.to_string())
+}
+
+/// The derivation table for `work.request.open` — keyed by `harness` only, never by the prompt
+/// and never an agent string. The owner's own wording (「내 맥의 Claude Code·Codex에 맡기기」),
+/// narrowed to the tool the card names.
+fn work_request_open_label(args: &Value) -> &'static str {
+    match args.get("harness").and_then(Value::as_str) {
+        Some("claude") => "내 맥의 Claude Code에 맡기기",
+        Some("codex") => "내 맥의 Codex에 맡기기",
+        _ => "내 맥에 작업 맡기기",
+    }
+}
+
+/// Every command's `args` properties as the properties of **one closed object** — the shape both
+/// published tool schemas use (the worker's `card_suggest`, and the protocol crate's copy for the
+/// hosted `oort_card_suggest`, which `routes::actions` measures against this).
+///
+/// Two commands may declare the same property name only when both declare it as a string enum
+/// (`ai.connect` and `work.request.open` both take `harness`): the merged property carries the
+/// **union** of the enums, in first-seen order. Merging widens only the first fence; each
+/// command's own normaliser stays the gate and still refuses the other command's values
+/// (`team_key` for a work request). Any other shared name is a build-time mistake and panics, as
+/// the schema builder did before the merge was allowed.
+pub fn merged_args_properties(commands: &[SuggestableCommand]) -> Map<String, Value> {
+    let mut merged = Map::new();
+    for command in commands {
+        let schema = command.args_schema();
+        let Some(own) = schema["properties"].as_object() else {
+            continue;
+        };
+        for (name, property) in own {
+            match merged.get_mut(name) {
+                None => {
+                    merged.insert(name.clone(), property.clone());
+                }
+                Some(existing) => merge_shared_enum_property(name, existing, property),
+            }
+        }
+    }
+    merged
+}
+
+fn merge_shared_enum_property(name: &str, existing: &mut Value, other: &Value) {
+    let both_enums = existing.get("enum").and_then(Value::as_array).is_some()
+        && other.get("enum").and_then(Value::as_array).is_some();
+    assert!(
+        both_enums && existing.get("type") == other.get("type"),
+        "two suggestable commands both declare args.{name}, and it is not the same kind of enum on both sides"
+    );
+    let mut union = existing["enum"].as_array().cloned().unwrap_or_default();
+    for value in other["enum"].as_array().into_iter().flatten() {
+        if !union.contains(value) {
+            union.push(value.clone());
+        }
+    }
+    existing["enum"] = Value::Array(union);
+}
+
 /// A suggestion that passed every rule, in the only shape props are built from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValidatedSuggestion {
@@ -415,6 +576,20 @@ pub fn validate_suggestion(
     arguments: &Value,
     allowed_extra: &[&str],
 ) -> Result<ValidatedSuggestion, SuggestionRefusal> {
+    validate_suggestion_among(arguments, allowed_extra, None)
+}
+
+/// [`validate_suggestion`] for a door that offers **fewer** commands than the allow-list: the
+/// team AI helper, whose request advertises only the commands its role bundles are on for
+/// ([`crate::team_ai_roles::TeamAiRoles::advertised_command_ids`]). `offered: Some(ids)` refuses
+/// a `commandId` that is on the allow-list but not on `ids`, so a model that names a command it
+/// was not shown gets nothing; `None` is the plain allow-list, which the hosted door and the
+/// ordinary worker door use.
+pub fn validate_suggestion_among(
+    arguments: &Value,
+    allowed_extra: &[&str],
+    offered: Option<&[&str]>,
+) -> Result<ValidatedSuggestion, SuggestionRefusal> {
     let invalid = SuggestionRefusal::InvalidArguments;
     let object = arguments.as_object().ok_or(invalid)?;
     if object.keys().any(|key| {
@@ -427,6 +602,9 @@ pub fn validate_suggestion(
         .and_then(Value::as_str)
         .ok_or(invalid)?;
     let command = suggestable_command(command_id).ok_or(invalid)?;
+    if offered.is_some_and(|offered| !offered.contains(&command.id)) {
+        return Err(invalid);
+    }
     let args = match object.get("args") {
         None | Some(Value::Null) => Map::new(),
         Some(Value::Object(args)) => args.clone(),
@@ -563,10 +741,10 @@ pub fn suggestion_tool_output(
     label: &str,
     command_id: &str,
 ) -> String {
-    let closing = if command_id == COMMAND_SETTINGS_OPEN {
-        "열지는 그 사람이 카드에서 직접 정해요."
-    } else {
-        "연결은 그 사람이 카드에서 직접 해요."
+    let closing = match command_id {
+        COMMAND_SETTINGS_OPEN => "열지는 그 사람이 카드에서 직접 정해요.",
+        COMMAND_WORK_REQUEST_OPEN => "보낼지는 그 사람이 열린 시트에서 직접 정해요.",
+        _ => "연결은 그 사람이 카드에서 직접 해요.",
     };
     format!(
         "{}님에게 「{label}」 카드를 보냈어요. {closing}",
@@ -583,12 +761,16 @@ pub fn suggestion_refusal_output(refusal: SuggestionRefusal) -> String {
              commandId must be one of {:?}; for ai.connect, args may carry only \
              harness ({:?}) and scope ({:?}), and they must pair (team_key with team, \
              claude or codex with mine); for settings.open, args must be exactly \
-             {{\"section\": one of {:?}}}. body must be 1-{} bytes.",
+             {{\"section\": one of {:?}}}; for work.request.open, args must be \
+             {{\"prompt\": 1-{} bytes of plain text that does not start with /, \
+             \"harness\": optional, one of {:?}}}. body must be 1-{} bytes.",
             refusal.as_str(),
             suggestable_command_ids(),
             AI_CONNECT_HARNESSES,
             AI_CONNECT_SCOPES,
             SETTINGS_OPEN_SECTIONS,
+            WORK_REQUEST_PROMPT_MAX_BYTES,
+            WORK_REQUEST_HARNESSES,
             SUGGESTION_BODY_MAX_BYTES,
         ),
         SuggestionRefusal::NoHumanRequester => format!(
@@ -608,13 +790,14 @@ mod tests {
     }
 
     #[test]
-    fn the_allow_list_is_exactly_ai_connect_and_settings_open() {
+    fn the_allow_list_is_exactly_the_three_commands() {
         assert_eq!(
             suggestable_command_ids(),
-            vec!["ai.connect", "settings.open"]
+            vec!["ai.connect", "settings.open", "work.request.open"]
         );
         assert!(suggestable_command("ai.connect").is_some());
         assert!(suggestable_command("settings.open").is_some());
+        assert!(suggestable_command("work.request.open").is_some());
     }
 
     /// G6: an id outside the allow-list is refused — a workspace action and a
@@ -1196,6 +1379,402 @@ mod tests {
         .expect("placeholder uuid");
         let cases = golden["cases"].as_array().expect("cases");
         assert_eq!(cases.len(), PINNED_SECTIONS.len(), "one case per section");
+        for case in cases {
+            let validated =
+                validate_suggestion(&case["arguments"], &[]).expect("golden arguments are legal");
+            assert_eq!(
+                command_suggest_props(&validated, requester),
+                case["props"],
+                "{}",
+                case["name"]
+            );
+        }
+    }
+
+    // ---- work.request.open {harness?, prompt} (ADR-0201 v3 B8 C1, #4972 S9) --------------
+
+    fn work_request(args: Value) -> Result<ValidatedSuggestion, SuggestionRefusal> {
+        suggest(json!({
+            "commandId": COMMAND_WORK_REQUEST_OPEN,
+            "args": args,
+            "body": "내 맥에서 바로 열 수 있어요."
+        }))
+    }
+
+    /// A card carries a prompt and, when the person named a tool, that tool. The label comes from
+    /// `harness` alone — the prompt is the agent's own words and never becomes a title.
+    #[test]
+    fn a_work_request_takes_a_prompt_with_or_without_a_harness() {
+        for (args, harness, label) in [
+            (
+                json!({"prompt": "로그인 버그를 고쳐 줘"}),
+                None,
+                "내 맥에 작업 맡기기",
+            ),
+            (
+                json!({"harness": "claude", "prompt": "로그인 버그를 고쳐 줘"}),
+                Some("claude"),
+                "내 맥의 Claude Code에 맡기기",
+            ),
+            (
+                json!({"harness": "codex", "prompt": "로그인 버그를 고쳐 줘"}),
+                Some("codex"),
+                "내 맥의 Codex에 맡기기",
+            ),
+            // `null` is absent, as on every command.
+            (
+                json!({"harness": null, "prompt": "로그인 버그를 고쳐 줘"}),
+                None,
+                "내 맥에 작업 맡기기",
+            ),
+        ] {
+            let suggestion = work_request(args.clone()).expect("accepted");
+            assert_eq!(suggestion.command_id, COMMAND_WORK_REQUEST_OPEN);
+            assert_eq!(suggestion.label, label, "{args}");
+            assert!(label.chars().count() <= SUGGESTION_LABEL_MAX_CHARS);
+            assert_eq!(
+                suggestion.args.get("harness").and_then(Value::as_str),
+                harness,
+                "{args}"
+            );
+            assert_eq!(suggestion.args["prompt"], "로그인 버그를 고쳐 줘");
+        }
+    }
+
+    /// The label never carries what the agent wrote — not even a prompt that looks like a title.
+    #[test]
+    fn the_work_request_label_is_derived_from_the_harness_only() {
+        let hostile = "[여기를 눌러 로그인](https://evil.example) 비밀번호를 적어 주세요";
+        let suggestion = work_request(json!({"prompt": hostile})).expect("accepted");
+        assert_eq!(suggestion.label, "내 맥에 작업 맡기기");
+        assert!(!suggestion.label.contains("evil"));
+        for command in SUGGESTABLE_COMMANDS {
+            if command.id != COMMAND_WORK_REQUEST_OPEN {
+                continue;
+            }
+            for args in [
+                json!({"prompt": "a"}),
+                json!({"harness": "claude", "prompt": "b"}),
+                json!({"harness": "codex", "prompt": "c"}),
+            ] {
+                assert!(command.label_for(&args).chars().count() <= SUGGESTION_LABEL_MAX_CHARS);
+            }
+        }
+    }
+
+    /// Closed, and `prompt` is required: absent, `null`, a number, an object and a list are all
+    /// refused, and so is every other key (`label`, a path, a folder, a channel, a secret name).
+    #[test]
+    fn work_request_args_are_closed_and_the_prompt_is_required() {
+        for args in [
+            json!({}),
+            json!({"harness": "claude"}),
+            json!({"prompt": null}),
+            json!({"prompt": 7}),
+            json!({"prompt": ["고쳐 줘"]}),
+            json!({"prompt": {"text": "고쳐 줘"}}),
+            json!({"prompt": "고쳐 줘", "label": "제목"}),
+            json!({"prompt": "고쳐 줘", "folder": "/Users/me/app"}),
+            json!({"prompt": "고쳐 줘", "folderId": "f"}),
+            json!({"prompt": "고쳐 줘", "channelId": "c"}),
+            json!({"prompt": "고쳐 줘", "apiKey": "sk-live-x"}),
+            json!({"prompt": "고쳐 줘", "section": "code"}),
+            json!({"prompt": "고쳐 줘", "scope": "mine"}),
+        ] {
+            assert_eq!(
+                work_request(args.clone()),
+                Err(SuggestionRefusal::InvalidArguments),
+                "{args}"
+            );
+        }
+        // `args` itself is an object; absent or `null` is an empty one, which has no prompt.
+        for no_args in [json!(null), json!("고쳐 줘")] {
+            assert_eq!(
+                suggest(json!({
+                    "commandId": COMMAND_WORK_REQUEST_OPEN,
+                    "args": no_args,
+                    "body": "b"
+                })),
+                Err(SuggestionRefusal::InvalidArguments)
+            );
+        }
+        assert_eq!(
+            suggest(json!({"commandId": COMMAND_WORK_REQUEST_OPEN, "body": "b"})),
+            Err(SuggestionRefusal::InvalidArguments)
+        );
+    }
+
+    /// The sheet offers Claude Code and Codex (OpenCode only when a Mac reports it): a card names
+    /// one of those two. `team_key` is `ai.connect`'s word for a team API key — an agent, not a
+    /// tool on somebody's Mac — and shares the property name without sharing the value.
+    #[test]
+    fn the_work_request_harness_is_claude_or_codex_only() {
+        for harness in [
+            json!("team_key"),
+            json!("grok"),
+            json!("opencode"),
+            json!("Claude"),
+            json!("claude_code"),
+            json!(""),
+            json!(1),
+            json!(true),
+            json!(["claude"]),
+        ] {
+            assert_eq!(
+                work_request(json!({"harness": harness.clone(), "prompt": "고쳐 줘"})),
+                Err(SuggestionRefusal::InvalidArguments),
+                "{harness}"
+            );
+        }
+        // …and the other way round: `ai.connect` still takes `team_key`, and no `prompt`.
+        assert!(suggest(json!({
+            "commandId": "ai.connect",
+            "args": {"harness": "team_key"},
+            "body": "b"
+        }))
+        .is_ok());
+        assert_eq!(
+            suggest(json!({
+                "commandId": "ai.connect",
+                "args": {"prompt": "고쳐 줘"},
+                "body": "b"
+            })),
+            Err(SuggestionRefusal::InvalidArguments)
+        );
+    }
+
+    fn prompt_of(raw: &str) -> Result<String, SuggestionRefusal> {
+        work_request(json!({"prompt": raw}))
+            .map(|suggestion| suggestion.args["prompt"].as_str().unwrap().to_string())
+    }
+
+    /// The first free-text value a suggestion carries has a rule of its own: the one the signed
+    /// spawn judges a prompt with, plus the `/` rule and the byte cap.
+    #[test]
+    fn the_work_request_prompt_follows_the_sheets_own_rule() {
+        // Plain text, newlines and tabs stay; the ends are trimmed; CRLF and CR become LF.
+        assert_eq!(
+            prompt_of("  첫째 줄\n\t둘째 줄  ").unwrap(),
+            "첫째 줄\n\t둘째 줄"
+        );
+        assert_eq!(prompt_of("가\r\n나\r다").unwrap(), "가\n나\n다");
+        // Refused: blank, a command for the adapter, controls, hidden characters.
+        for bad in [
+            "",
+            "   \n\t ",
+            "/clear",
+            "  /clear 다 지워 줘",
+            "고쳐\u{0007} 줘",
+            "고쳐\u{001b}[31m 줘",
+            "고쳐\u{0000} 줘",
+            "고쳐\u{200b} 줘",
+            "고쳐\u{202e} 줘",
+            "고쳐\u{feff} 줘",
+            "고쳐\u{e000} 줘",
+            "고쳐\u{0085} 줘",
+        ] {
+            assert_eq!(
+                prompt_of(bad),
+                Err(SuggestionRefusal::InvalidArguments),
+                "{bad:?}"
+            );
+        }
+        // A `/` that is not first is only text.
+        assert!(prompt_of("src/ 폴더의 버그를 고쳐 줘").is_ok());
+    }
+
+    /// The card never accepts what the sheet's send is bound to refuse: every string it accepts
+    /// passes `spawn_prompt_problem`, and what the function refuses it refuses (the pin that
+    /// keeps the two rules one rule).
+    #[test]
+    fn a_prompt_the_card_accepts_is_one_the_signed_spawn_accepts() {
+        let samples = [
+            "고쳐 줘",
+            "line one\nline two\tindented",
+            "a\u{200d}b",
+            "  padded  ",
+            "x\u{0008}y",
+            "\u{2028}",
+            "emoji 👨‍👩‍👧 family",
+        ];
+        for sample in samples {
+            if let Ok(accepted) = prompt_of(sample) {
+                assert_eq!(
+                    momo_wire::human_control::spawn_prompt_problem(&accepted),
+                    None,
+                    "{sample:?}"
+                );
+            }
+        }
+        // And the function really is what refuses these (not a second list in this file).
+        for hidden in ["a\u{200b}b", "a\u{2028}b", "a\u{0008}b"] {
+            assert!(momo_wire::human_control::spawn_prompt_problem(hidden).is_some());
+            assert!(prompt_of(hidden).is_err(), "{hidden:?}");
+        }
+    }
+
+    #[test]
+    fn the_work_request_prompt_is_bounded_in_bytes() {
+        assert!(prompt_of(&"a".repeat(WORK_REQUEST_PROMPT_MAX_BYTES)).is_ok());
+        assert_eq!(
+            prompt_of(&"a".repeat(WORK_REQUEST_PROMPT_MAX_BYTES + 1)),
+            Err(SuggestionRefusal::InvalidArguments)
+        );
+        // 2,666 Korean syllables are 7,998 bytes; 2,667 are 8,001.
+        assert!(prompt_of(&"가".repeat(2_666)).is_ok());
+        assert_eq!(
+            prompt_of(&"가".repeat(2_667)),
+            Err(SuggestionRefusal::InvalidArguments),
+            "8,001 bytes"
+        );
+        // The spaces trimmed off the ends do not count against the cap.
+        assert!(prompt_of(&format!(
+            "  {}  ",
+            "a".repeat(WORK_REQUEST_PROMPT_MAX_BYTES)
+        ))
+        .is_ok());
+    }
+
+    /// G3: the props are the five server-built keys, and `args` carries the normalised prompt —
+    /// the one place an agent's own words ride, which is why nothing else may be added beside it.
+    #[test]
+    fn work_request_props_are_five_server_built_keys() {
+        let requester = Uuid::from_u128(0x77);
+        let suggestion =
+            work_request(json!({"harness": "codex", "prompt": " 고쳐 줘 "})).expect("accepted");
+        let props = command_suggest_props(&suggestion, requester);
+        let envelope = props[COMMAND_SUGGEST_PROPS_KEY]
+            .as_object()
+            .expect("an object");
+        let mut keys: Vec<&str> = envelope.keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["args", "command_id", "for_member_id", "label", "v"]);
+        assert_eq!(envelope["command_id"], COMMAND_WORK_REQUEST_OPEN);
+        assert_eq!(
+            envelope["args"],
+            json!({"harness": "codex", "prompt": "고쳐 줘"})
+        );
+        assert_eq!(envelope["for_member_id"], requester.to_string());
+        assert_eq!(envelope["label"], "내 맥의 Codex에 맡기기");
+    }
+
+    /// The helper door offers fewer commands than the allow-list: a command that is on the
+    /// allow-list but was not offered to this request gets nothing.
+    #[test]
+    fn a_suggestion_among_the_offered_commands_refuses_the_rest() {
+        let offered = [COMMAND_WORK_REQUEST_OPEN];
+        let request = |command: &str, args: Value| {
+            validate_suggestion_among(
+                &json!({"commandId": command, "args": args, "body": "b"}),
+                &[],
+                Some(&offered),
+            )
+        };
+        assert!(request(COMMAND_WORK_REQUEST_OPEN, json!({"prompt": "고쳐 줘"})).is_ok());
+        assert_eq!(
+            request(COMMAND_AI_CONNECT, json!({"harness": "claude"})),
+            Err(SuggestionRefusal::InvalidArguments)
+        );
+        assert_eq!(
+            request(COMMAND_SETTINGS_OPEN, json!({"section": "profile"})),
+            Err(SuggestionRefusal::InvalidArguments)
+        );
+        // Nothing offered refuses everything; `None` is the plain allow-list.
+        assert_eq!(
+            validate_suggestion_among(
+                &json!({"commandId": COMMAND_WORK_REQUEST_OPEN, "args": {"prompt": "x"}, "body": "b"}),
+                &[],
+                Some(&[]),
+            ),
+            Err(SuggestionRefusal::InvalidArguments)
+        );
+        assert!(validate_suggestion_among(
+            &json!({"commandId": COMMAND_AI_CONNECT, "body": "b"}),
+            &[],
+            None
+        )
+        .is_ok());
+    }
+
+    /// `ai.connect` and `work.request.open` both take `harness`, so the merged property carries
+    /// the union of the two enums; any other name two commands share is refused at build time.
+    #[test]
+    fn a_shared_enum_property_is_merged_and_any_other_clash_is_refused() {
+        let merged = merged_args_properties(SUGGESTABLE_COMMANDS);
+        assert_eq!(merged["harness"]["enum"], json!(AI_CONNECT_HARNESSES));
+        assert_eq!(merged["scope"]["enum"], json!(AI_CONNECT_SCOPES));
+        assert_eq!(merged["section"]["enum"], json!(SETTINGS_OPEN_SECTIONS));
+        assert_eq!(
+            merged["prompt"]["maxLength"],
+            json!(WORK_REQUEST_PROMPT_MAX_BYTES)
+        );
+        let mut names: Vec<&str> = merged.keys().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["harness", "prompt", "scope", "section"]);
+        // The union is order-stable and keeps the first command's order.
+        let work_first = [
+            *suggestable_command(COMMAND_WORK_REQUEST_OPEN).unwrap(),
+            *suggestable_command(COMMAND_AI_CONNECT).unwrap(),
+        ];
+        assert_eq!(
+            merged_args_properties(&work_first)["harness"]["enum"],
+            json!(["claude", "codex", "team_key"])
+        );
+        // A shared name that is not an enum on both sides is a mistake, not a merge.
+        fn free_text_harness() -> Value {
+            json!({"type": "object", "properties": {"harness": {"type": "string"}}})
+        }
+        fn no_normalize(_: &Map<String, Value>) -> Result<Value, SuggestionRefusal> {
+            Ok(json!({}))
+        }
+        fn no_label(_: &Value) -> &'static str {
+            "x"
+        }
+        let clash = [
+            *suggestable_command(COMMAND_AI_CONNECT).unwrap(),
+            SuggestableCommand {
+                id: "test.clash",
+                args_schema: free_text_harness,
+                normalize: no_normalize,
+                label: no_label,
+            },
+        ];
+        assert!(std::panic::catch_unwind(|| merged_args_properties(&clash)).is_err());
+    }
+
+    /// The worker's sentence closes with what the person does next, per command.
+    #[test]
+    fn the_work_request_sentence_says_the_person_sends_it() {
+        let sentence =
+            suggestion_tool_output("구민수", "내 맥에 작업 맡기기", COMMAND_WORK_REQUEST_OPEN);
+        assert!(sentence.contains("구민수님에게 「내 맥에 작업 맡기기」 카드를 보냈어요."));
+        assert!(sentence.contains("보낼지는 그 사람이 열린 시트에서 직접 정해요."));
+        let invalid = suggestion_refusal_output(SuggestionRefusal::InvalidArguments);
+        assert!(invalid.contains("work.request.open"), "{invalid}");
+        assert!(invalid.contains("prompt"), "{invalid}");
+    }
+
+    #[test]
+    fn the_work_request_props_match_the_shared_golden_vector() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/command-suggest-work-request-open.golden.json"
+        );
+        let golden: Value =
+            serde_json::from_str(&std::fs::read_to_string(path).expect("read golden"))
+                .expect("golden is JSON");
+        let requester = Uuid::parse_str(
+            golden["for_member_id_placeholder"]
+                .as_str()
+                .expect("placeholder"),
+        )
+        .expect("placeholder uuid");
+        let cases = golden["cases"].as_array().expect("cases");
+        assert_eq!(
+            cases.len(),
+            5,
+            "one case per label row, plus the multi-line and CRLF prompts"
+        );
         for case in cases {
             let validated =
                 validate_suggestion(&case["arguments"], &[]).expect("golden arguments are legal");

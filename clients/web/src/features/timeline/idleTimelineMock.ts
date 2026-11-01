@@ -36,6 +36,7 @@ export function idleTimelineMock(
     removeUnfurls: async () => undefined,
     isPlayEntrance: () => false,
     consumeEntrance: () => undefined,
+    applyThreadRead: () => undefined,
     capUnmountedArrivals: () => undefined,
   } satisfies UseTimelineResult;
 }

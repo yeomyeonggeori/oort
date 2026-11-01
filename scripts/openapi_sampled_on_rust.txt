@@ -5,6 +5,8 @@ POST /v1/workspaces/{ws}/expressions
 POST /v1/workspaces/{ws}/expressions/uploads
 POST /v1/workspaces/{ws}/expressions/from-attachment
 POST /v1/workspaces/{ws}/expressions/import
+GET /v1/workspaces/{ws}/expressions/photo-model
+POST /v1/workspaces/{ws}/expressions/photo-drafts
 GET /v1/workspaces/{ws}/expression-drafts/{draftId}
 PUT /v1/workspaces/{ws}/expression-drafts/{draftId}/file
 GET /v1/workspaces/{ws}/expression-drafts/{draftId}/image
@@ -102,6 +104,9 @@ POST /v1/workspaces/{ws}/expressions/{id}/report
 #
 #   따라서 이 세 연산의 모양 권위는 당분간 1차(Swift) 패스에 남는다 — 거기서는
 #   이미 stub 아카이브로 왕복 샘플이 돌고 있다(verify_openapi_contract.sh:1007-1034).
+#   [#4900 갱신] 게이트 스택에 ADR-0169 local Drive 가 합류했다(자격증명 없이 왕복이 성립한다).
+#   그래서 표현 표본이 업로드→완료→메시지 전송까지 이 스택에서 끝까지 돈다. 이 세 연산을 목록에
+#   올리는 일은 표본이 응답을 기록(record)하게 만드는 별도 변경이다 — 아래 조건 중 앞의 것은 충족됐다.
 #   등재 조건: 부분집합에 **Drive 목 서비스**가 합류하거나, S3 호환 백엔드(ADR-0151
 #   에서 v1 로 유보)가 들어와 자격증명 없이 왕복이 성립할 때. 그때 relay/agent-worker
 #   와 같은 규칙으로 세 줄을 함께 추가한다.

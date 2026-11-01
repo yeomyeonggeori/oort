@@ -2,6 +2,7 @@ import {ExpressionProvider} from '../features/expressions/ExpressionProvider';
 import type {Member} from '@momo/core/lib/api';
 import {canCreateChannelNow} from '@momo/core/features/channels/model';
 import {memberFor} from '@momo/core/features/workspace/directory';
+import type {WorkRequestOpen} from '@momo/core/features/timeline/commandSuggest';
 import React, {
   useCallback,
   useEffect,
@@ -162,10 +163,23 @@ export function Shell({
   const [askMac, setAskMac] = useState(false);
   // 「개인 에이전트」 줄이 고른 하네스. 일반 입구로 열면 없다.
   const [askHarness, setAskHarness] = useState<HarnessKey | undefined>(undefined);
+  // 도우미의 「작업 요청 열기」 카드가 미리 채운 글(#4972). 그 카드로 열 때만 있고, 다른 입구로 열면
+  // 늘 없다 — 지난 카드의 글이 다음 시트에 남지 않는다.
+  const [askPrompt, setAskPrompt] = useState<string | undefined>(undefined);
   // 「AI」 시트(N10 #3598). + 메뉴의 AI 줄이 연다. 줄을 고르면 닫히고 그 줄의 시트·목록이 선다.
   const [ai, setAi] = useState(false);
   const closeAi = useCallback(() => setAi(false), []);
-  const closeAskMac = useCallback(() => setAskMac(false), []);
+  const closeAskMac = useCallback(() => {
+    setAskMac(false);
+    setAskPrompt(undefined);
+  }, []);
+  // 대화 안의 도우미 카드가 「작업 요청」 시트를 미리 채워 연다(#4972). 하네스가 정해지지 않았거나 이
+  // 맥이 못 고르는 도구면 시트의 평소 기본값이 이긴다.
+  const onAskMacFromConversation = useCallback((prefill: WorkRequestOpen) => {
+    setAskHarness(prefill.harness ?? undefined);
+    setAskPrompt(prefill.prompt);
+    setAskMac(true);
+  }, []);
   const onDelegateWork = useCallback(
     (prefill: DelegatePrefill) => setDelegate(prefill),
     [],
@@ -584,6 +598,7 @@ export function Shell({
             onOpenConversation={onOpenConversation}
             onOpenAgent={onOpenAgent}
             onDelegateWork={onDelegateWork}
+            onAskMac={onAskMacFromConversation}
             onOpenWorkSession={workConsole ? onOpenWorkSession : undefined}
             onOpenWorkList={onOpenWorkList}
             onOpenSettings={onOpenSettingsFromConversation}
@@ -621,6 +636,7 @@ export function Shell({
           onAskMac={harness => {
             setAi(false);
             setAskHarness(harness);
+            setAskPrompt(undefined);
             setAskMac(true);
           }}
         />
@@ -628,9 +644,10 @@ export function Shell({
       {askMac ? (
         <AskMacSheet
           initialHarness={askHarness}
+          initialPrompt={askPrompt}
           onClose={closeAskMac}
           onUseAgent={() => {
-            setAskMac(false);
+            closeAskMac();
             setDelegate({});
           }}
           onOpenSession={sessionId => {

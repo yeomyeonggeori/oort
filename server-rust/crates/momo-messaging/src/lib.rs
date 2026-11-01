@@ -89,6 +89,9 @@ pub mod search;
 pub mod self_media;
 /// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
 pub mod sidebar_prefs;
+/// ADR-0201 증보 v3 B10 / #4966 — the team AI's aliases follow its display name
+/// (`sync_team_ai_aliases_in_tx`, migration 166).
+pub mod team_ai_alias;
 /// ADR-0206 증보 1 / #4889 — who follows which thread (`thread_follow`, migration 164).
 pub mod thread_follow;
 pub mod workspace_avatar;
@@ -96,18 +99,19 @@ pub mod workspace_avatar;
 pub use approval_card::settle_approval_card_in_tx;
 
 pub use agent_avatar::{
-    apply_avatar_image_in_tx, apply_human_avatar_image_in_tx, bind_staged_image_to_approval_in_tx,
-    clear_avatar_image_in_tx, delete_staged_avatar_image_in_tx,
-    find_requester_attachment_for_in_tx, find_requester_attachment_in_tx,
-    find_visible_image_attachment_in_tx, image_attachments_for_messages_in_tx, is_avatar_preset,
-    process_avatar_image, purge_stale_staged_avatar_images_in_tx, read_avatar_image_bytes_in_tx,
-    read_avatar_image_in_tx, read_current_avatar_image_in_tx, requester_of_run_in_tx,
-    stage_avatar_image_in_tx, staged_image_matches_pin_in_tx, AgentAvatarBytes, AgentAvatarImage,
-    AvatarAttachmentSource, AvatarImageRejected, ProcessedAvatar, RequesterAttachmentUse,
-    AGENT_AVATAR_DECODE_ALLOC_LIMIT, AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT,
-    AGENT_AVATAR_IN_MAX_BYTES_GENERATED, AGENT_AVATAR_IN_MAX_DIM, AGENT_AVATAR_IN_MAX_PIXELS,
-    AGENT_AVATAR_OUT_MAX_BYTES, AGENT_AVATAR_OUT_MAX_DIM, AGENT_AVATAR_PRESETS,
-    AGENT_AVATAR_SOURCES, AGENT_AVATAR_STAGED_TTL_HOURS,
+    apply_avatar_image_in_tx, apply_human_avatar_image_in_tx, attachments_for_messages_in_tx,
+    bind_staged_image_to_approval_in_tx, clear_avatar_image_in_tx,
+    delete_staged_avatar_image_in_tx, find_requester_attachment_for_in_tx,
+    find_requester_attachment_in_tx, find_visible_image_attachment_in_tx,
+    image_attachments_for_messages_in_tx, is_avatar_preset, process_avatar_image,
+    purge_stale_staged_avatar_images_in_tx, read_avatar_image_bytes_in_tx, read_avatar_image_in_tx,
+    read_current_avatar_image_in_tx, requester_of_run_in_tx, stage_avatar_image_in_tx,
+    staged_image_matches_pin_in_tx, AgentAvatarBytes, AgentAvatarImage, AvatarAttachmentSource,
+    AvatarImageRejected, ProcessedAvatar, RequesterAttachmentUse, AGENT_AVATAR_DECODE_ALLOC_LIMIT,
+    AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT, AGENT_AVATAR_IN_MAX_BYTES_GENERATED,
+    AGENT_AVATAR_IN_MAX_DIM, AGENT_AVATAR_IN_MAX_PIXELS, AGENT_AVATAR_OUT_MAX_BYTES,
+    AGENT_AVATAR_OUT_MAX_DIM, AGENT_AVATAR_PRESETS, AGENT_AVATAR_SOURCES,
+    AGENT_AVATAR_STAGED_TTL_HOURS,
 };
 pub use agent_card::{
     apply_agent_card_in_tx, lock_agent_card_in_tx, read_agent_card_in_tx, AgentCard,
@@ -282,10 +286,12 @@ pub use search::{
     SearchScope, SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, SEARCH_QUERY_MIN_CHARS,
 };
 pub use self_media::{
-    bytes_match_mime, canonical_origin, mint_for_run_in_tx, mint_with_ttl_in_tx,
+    bytes_match_mime, canonical_origin, mint_for_attachment_in_tx,
+    mint_for_attachment_with_ttl_in_tx, mint_for_run_in_tx, mint_with_ttl_in_tx,
     redact_self_media_urls, redeem_in_tx, self_media_url, token_hash, token_is_well_formed,
-    trigger_photo_in_tx, SelfMediaGrant, SelfMediaSource, TriggerPhoto, SELF_MEDIA_MAX_BYTES,
-    SELF_MEDIA_PATH_PREFIX, SELF_MEDIA_TOKEN_CHARS, SELF_MEDIA_TTL_SECS,
+    trigger_photo_in_tx, SelfMediaGrant, SelfMediaSource, TriggerPhoto,
+    SELF_MEDIA_INTERNAL_TTL_SECS, SELF_MEDIA_MAX_BYTES, SELF_MEDIA_PATH_PREFIX,
+    SELF_MEDIA_TOKEN_CHARS, SELF_MEDIA_TTL_SECS,
 };
 pub use sidebar_prefs::{
     get_sidebar_prefs_in_tx, set_sidebar_prefs_in_tx, validate_sidebar_prefs, SidebarPrefs,

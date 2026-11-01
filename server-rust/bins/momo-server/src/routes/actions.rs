@@ -504,21 +504,12 @@ mod tests {
         assert_eq!(tool_args["type"], json!(["object", "null"]));
         assert_eq!(tool_args["additionalProperties"], json!(false));
         // `args` is one closed object carrying every command's keys; each
-        // property's enum is measured against the registry's own schema.
-        let mut registry_properties = serde_json::Map::new();
-        for command in momo_agent::SUGGESTABLE_COMMANDS {
-            for (name, schema) in command.args_schema()["properties"]
-                .as_object()
-                .expect("registry args")
-            {
-                assert!(
-                    registry_properties
-                        .insert(name.clone(), schema.clone())
-                        .is_none(),
-                    "two suggestable commands both declare args.{name}"
-                );
-            }
-        }
+        // property's enum **and length bounds** are measured against the registry's own
+        // schema. A name two commands share (`harness`: `ai.connect` and `work.request.open`)
+        // is the union of their enums — `merged_args_properties`, the very merge the worker's
+        // tool is built from.
+        let registry_properties =
+            momo_agent::card_suggest::merged_args_properties(momo_agent::SUGGESTABLE_COMMANDS);
         let tool_properties = tool_args["properties"].as_object().expect("tool args");
         let mut tool_keys: Vec<&String> = tool_properties.keys().collect();
         let mut registry_keys: Vec<&String> = registry_properties.keys().collect();
@@ -526,10 +517,19 @@ mod tests {
         registry_keys.sort();
         assert_eq!(tool_keys, registry_keys);
         for (name, registry_property) in &registry_properties {
+            // A bound one side forgets is a lie the other side tells: `prompt` has no enum, so
+            // the lengths are the only thing that holds the free text to its cap.
+            for bound in ["enum", "minLength", "maxLength"] {
+                assert_eq!(
+                    tool_properties[name].get(bound),
+                    registry_property.get(bound),
+                    "args.{name}.{bound} disagrees between oort_card_suggest and SUGGESTABLE_COMMANDS"
+                );
+            }
             assert_eq!(
-                tool_properties[name].get("enum"),
-                registry_property.get("enum"),
-                "args.{name}.enum disagrees between oort_card_suggest and SUGGESTABLE_COMMANDS"
+                tool_properties[name]["type"],
+                json!([registry_property["type"].clone(), "null"]),
+                "args.{name} is the registry's type, nullable"
             );
         }
         assert!(!published.to_string().contains("grok"));
@@ -1658,7 +1658,23 @@ mod tests {
             assert_eq!(row["agentDelivery"], json!(expected), "{row}");
         }
         // No executor, no secret, no credential ever rides in the catalog.
-        let text = rendered.to_string();
+        //
+        // One word is the exception: `code` is the NAME of a role bundle (the helper's 코드
+        // 역할, ADR-0201 증보 v3 B3), and the `team_ai.roles.set` row lists the six bundle ids as
+        // the enum of its `bundle` argument. That enum — and only that, which is asserted to be
+        // exactly the bundle table — is taken out of the scan; everything else is still read.
+        let mut scanned = rendered.clone();
+        for row in scanned["actions"].as_array_mut().expect("rows") {
+            if row["id"] == json!(actions::ACTION_TEAM_AI_ROLES_SET) {
+                let listed = row["argsSchema"]["properties"]["bundle"]["enum"].take();
+                assert_eq!(
+                    listed,
+                    json!(momo_agent::team_ai_roles::SWITCHABLE_BUNDLES),
+                    "the one enum excused from the secret scan is the bundle table"
+                );
+            }
+        }
+        let text = scanned.to_string();
         for absent in ["code", "secret", "token", "credential"] {
             assert!(
                 !text.contains(absent),
