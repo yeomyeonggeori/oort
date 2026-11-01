@@ -19,6 +19,9 @@ use crate::{ImageInfo, INPUT_BYTES};
 pub const ALLOCATION_LIMIT: u64 = 192 * 1024 * 1024;
 const SCRATCH: u64 = 16 * 1024 * 1024;
 const DEADLINE: Duration = Duration::from_secs(10);
+/// The most a codec child's answer may weigh on its stdout, and so the most the parent reads back.
+/// An answer has to fit under it **as it is encoded on the wire** (see [`Prepared`]).
+const CHILD_OUTPUT_MAX: usize = 8 * 1024 * 1024;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, thiserror::Error, serde::Serialize, serde::Deserialize,
@@ -273,11 +276,11 @@ async fn child_typed<T: serde::de::DeserializeOwned>(
         drop(input);
         let mut data = Vec::new();
         (&mut output)
-            .take(8 * 1024 * 1024 + 1)
+            .take(CHILD_OUTPUT_MAX as u64 + 1)
             .read_to_end(&mut data)
             .await
             .map_err(|_| Rejected::Invalid)?;
-        if data.len() > 8 * 1024 * 1024 {
+        if data.len() > CHILD_OUTPUT_MAX {
             return Err(Rejected::Invalid);
         }
         let status = child.wait().await.map_err(|_| Rejected::Invalid)?;
@@ -339,6 +342,80 @@ pub async fn process_cutout(bytes: Vec<u8>, wait: Duration) -> Result<Cutout, Re
     }
     let permit = permit_waiting(decoder_slots(), &Line::process_wide(), wait).await?;
     job(bytes, "--cutout", permit).await
+}
+
+/// The pause between two asks for a decoder slot in [`permit_patiently`]. A full line is refused at
+/// once ([`Place::take`]), so without a pause a busy decoder would be asked about in a tight loop.
+const ASK_AGAIN_AFTER: Duration = Duration::from_millis(250);
+
+/// A decoder slot for a picture that has already been paid for (#4992, L2). Where [`permit_waiting`]
+/// gives up with [`Rejected::Busy`] when the line is full or its wait ran out, this **asks again**,
+/// `pause` after each refusal, until `patience` has passed: only then is it `Busy`. Each ask is a
+/// [`permit_waiting`] of what is left of the patience, so it never stands in line past the line's own
+/// cap ([`WAIT_MAX`]) nor past the end; and between two asks the place in line is given back, so a
+/// person's upload or import (which never stands in line) is not kept waiting behind it.
+async fn permit_patiently(
+    semaphore: Arc<Semaphore>,
+    line: &Line<'_>,
+    patience: Duration,
+    pause: Duration,
+) -> Result<tokio::sync::OwnedSemaphorePermit, Rejected> {
+    let end = Instant::now() + patience;
+    loop {
+        let left = end.saturating_duration_since(Instant::now());
+        match permit_waiting(semaphore.clone(), line, left).await {
+            Err(Rejected::Busy) => {
+                let left = end.saturating_duration_since(Instant::now());
+                if left.is_zero() {
+                    return Err(Rejected::Busy);
+                }
+                tokio::time::sleep(pause.min(left)).await;
+            }
+            outcome => return outcome,
+        }
+    }
+}
+
+/// [`process_cutout`] for a picture the team has already paid for: a decoder that stays busy is asked
+/// again for `patience` ([`permit_patiently`]) before the picture is given up. The caller never asks
+/// the provider again: the picture is held here, in memory, and decoded when a slot is free.
+pub async fn process_cutout_patiently(
+    bytes: Vec<u8>,
+    patience: Duration,
+) -> Result<Cutout, Rejected> {
+    if bytes.len() > INPUT_BYTES {
+        return Err(Rejected::TooLarge);
+    }
+    let permit = permit_patiently(
+        decoder_slots(),
+        &Line::process_wide(),
+        patience,
+        ASK_AGAIN_AFTER,
+    )
+    .await?;
+    job(bytes, "--cutout", permit).await
+}
+
+/// [`process_waiting`] with [`process_cutout_patiently`]'s patience: the ordinary picture path for a
+/// picture that has already been paid for.
+pub async fn process_waiting_patiently(
+    bytes: Vec<u8>,
+    patience: Duration,
+) -> Result<Processed, Rejected> {
+    if bytes.len() > INPUT_BYTES {
+        return Err(Rejected::TooLarge);
+    }
+    if let Some(rejected) = refused_before_a_slot(&bytes) {
+        return Err(rejected);
+    }
+    let permit = permit_patiently(
+        decoder_slots(),
+        &Line::process_wide(),
+        patience,
+        ASK_AGAIN_AFTER,
+    )
+    .await?;
+    run_with_permit(bytes, decoder_path()?, DEADLINE, permit).await
 }
 
 struct TimedReader<'a> {
@@ -821,11 +898,45 @@ pub const PREPARED_MAX_BYTES: usize = 4 * 1024 * 1024;
 /// again from its pixels**, so no EXIF (where it was taken), GPS, ICC profile, comment or trailing
 /// byte of the original goes with it. A picture with an alpha channel stays a PNG; any other is a
 /// JPEG at quality 90.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Prepared {
     /// `image/png` or `image/jpeg`.
     pub mime: String,
+    /// The encoded picture. On the child's wire it is **base64**, not the JSON array of numbers a
+    /// `Vec<u8>` is by default: a number takes up to four characters a byte, so a PNG over about
+    /// 2.3 MB no longer fitted the parent's [`CHILD_OUTPUT_MAX`] read and a photo with an alpha
+    /// channel was refused as invalid media (#4992, L4). Base64 is four characters for three
+    /// bytes, so all of [`PREPARED_MAX_BYTES`] fits with room to spare.
+    #[serde(with = "wire_bytes")]
     pub data: Vec<u8>,
+}
+
+/// The photo is a member's own: it is printed as its size and never as its bytes.
+impl std::fmt::Debug for Prepared {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Prepared")
+            .field("mime", &self.mime)
+            .field("bytes", &self.data.len())
+            .finish()
+    }
+}
+
+/// `Prepared.data` as one base64 string on the child's stdout.
+mod wire_bytes {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&STANDARD.encode(bytes))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        STANDARD
+            .decode(text.as_bytes())
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 pub fn prepare(bytes: &[u8], end: Instant) -> Result<Prepared, Rejected> {
@@ -1449,5 +1560,177 @@ mod tests {
             Err(Rejected::Invalid)
         ));
         std::fs::remove_file(path).unwrap();
+    }
+
+    /// What the child writes for a prepared photo, the way it writes it (`main.rs`).
+    fn child_answer(data: Vec<u8>) -> Vec<u8> {
+        serde_json::to_vec(&Ok::<Prepared, Rejected>(Prepared {
+            mime: "image/png".into(),
+            data,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_prepared_photo_of_the_largest_size_fits_what_the_parent_reads_back() {
+        // The worst bytes for a list of numbers (`255,` is four characters); base64 does not care.
+        let largest = vec![0xFF; PREPARED_MAX_BYTES];
+        let wire = child_answer(largest.clone());
+        assert!(
+            wire.len() <= CHILD_OUTPUT_MAX,
+            "{} bytes of answer for {} bytes of picture, the parent reads {CHILD_OUTPUT_MAX}",
+            wire.len(),
+            largest.len()
+        );
+        let back: Result<Prepared, Rejected> = serde_json::from_slice(&wire).unwrap();
+        assert!(
+            back.unwrap().data == largest,
+            "the picture came back unchanged"
+        );
+        // Every byte value survives, and so does nothing at all.
+        let every: Vec<u8> = (0..=255u8).cycle().take(1000).collect();
+        let back: Result<Prepared, Rejected> =
+            serde_json::from_slice(&child_answer(every.clone())).unwrap();
+        assert!(back.unwrap().data == every);
+        let back: Result<Prepared, Rejected> =
+            serde_json::from_slice(&child_answer(Vec::new())).unwrap();
+        assert!(back.unwrap().data.is_empty());
+        // A string that is not base64 is not a picture: the parent answers `Invalid` for it.
+        assert!(serde_json::from_str::<Result<Prepared, Rejected>>(
+            r#"{"Ok":{"mime":"image/png","data":"not base64 ***"}}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_prepared_photo_prints_its_size_and_never_its_bytes() {
+        let photo = Prepared {
+            mime: "image/png".into(),
+            data: b"MEMBERS-OWN-PHOTO-BYTES".to_vec(),
+        };
+        let shown = format!("{photo:?} {photo:#?}");
+        // Neither the bytes as numbers (`77, 69, 77` is "MEM") nor as text.
+        assert!(
+            !shown.contains("77, 69, 77") && !shown.contains("MEMBERS"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains("image/png") && shown.contains("23"),
+            "{shown}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_slot_that_frees_up_within_the_patience_is_taken_after_the_line_gave_up_once() {
+        static STANDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let sem = Arc::new(Semaphore::new(2));
+        let held = sem.clone().acquire_many_owned(2).await.unwrap();
+        // One stint in line is 40 ms and the slots come free after 250 ms: a single ask is long over.
+        let line = Line {
+            standing: &STANDING,
+            max: 2,
+            longest: Duration::from_millis(40),
+        };
+        let freeing = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            drop(held);
+        });
+        let started = Instant::now();
+        let permit = tokio::time::timeout(
+            Duration::from_secs(3),
+            permit_patiently(
+                sem.clone(),
+                &line,
+                Duration::from_secs(2),
+                Duration::from_millis(10),
+            ),
+        )
+        .await
+        .expect("it did not hang")
+        .expect("the slot is taken once it is free");
+        let waited = started.elapsed();
+        assert!(
+            waited >= Duration::from_millis(200) && waited < Duration::from_secs(1),
+            "it took the slot when it came free: {waited:?}"
+        );
+        drop(permit);
+        freeing.await.unwrap();
+        assert_eq!(
+            STANDING.load(std::sync::atomic::Ordering::Acquire),
+            0,
+            "no place is left standing in line"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_asking_stops_when_the_patience_is_gone_and_not_when_the_line_cap_is() {
+        static STANDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let sem = Arc::new(Semaphore::new(2));
+        let _held = sem.clone().acquire_many_owned(2).await.unwrap();
+        // The line would let it stand for 5 s; the patience is 300 ms.
+        let line = Line {
+            standing: &STANDING,
+            max: 2,
+            longest: Duration::from_secs(5),
+        };
+        let started = Instant::now();
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(3),
+            permit_patiently(
+                sem.clone(),
+                &line,
+                Duration::from_millis(300),
+                Duration::from_millis(20),
+            ),
+        )
+        .await;
+        let waited = started.elapsed();
+        assert!(
+            matches!(outcome, Ok(Err(Rejected::Busy))),
+            "a patience that ran out is Busy: {outcome:?}"
+        );
+        assert!(
+            waited >= Duration::from_millis(280),
+            "it asked for the whole patience: {waited:?}"
+        );
+        assert!(
+            waited < Duration::from_millis(1500),
+            "and not for the line's 5 s: {waited:?}"
+        );
+        assert_eq!(STANDING.load(std::sync::atomic::Ordering::Acquire), 0);
+    }
+
+    #[tokio::test]
+    async fn a_full_line_does_not_end_the_asking() {
+        static STANDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let sem = Arc::new(Semaphore::new(2));
+        let held = sem.clone().acquire_many_owned(2).await.unwrap();
+        // A line with no room at all: every ask is refused at once.
+        let line = Line {
+            standing: &STANDING,
+            max: 0,
+            longest: Duration::from_millis(50),
+        };
+        assert!(matches!(
+            permit_waiting(sem.clone(), &line, Duration::from_secs(1)).await,
+            Err(Rejected::Busy)
+        ));
+        let freeing = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            drop(held);
+        });
+        let permit = tokio::time::timeout(
+            Duration::from_secs(3),
+            permit_patiently(
+                sem.clone(),
+                &line,
+                Duration::from_secs(2),
+                Duration::from_millis(10),
+            ),
+        )
+        .await
+        .expect("it did not hang");
+        assert!(permit.is_ok(), "{permit:?}");
+        freeing.await.unwrap();
     }
 }

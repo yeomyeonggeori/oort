@@ -28,7 +28,7 @@ use serde_json::{json, Value};
 use std::io::Cursor;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
@@ -751,6 +751,105 @@ impl World {
     }
 }
 
+impl World {
+    /// A photo request that runs on a task of its own, so a test can do other things while it waits
+    /// (and can stop waiting for it).
+    fn photo_in_flight(
+        &self,
+        who: &Person,
+        branch: &str,
+        name: &str,
+        timeout: Duration,
+    ) -> tokio::task::JoinHandle<reqwest::Response> {
+        let (http, url, token) = (
+            self.http.clone(),
+            format!("{}/expressions/photo-drafts", self.prefix),
+            who.token.clone(),
+        );
+        let (meta, photo) = (self.meta(branch, &unique(name)), photo_from_home());
+        tokio::spawn(
+            async move { post_photo(&http, &url, &token, &meta, &photo, Some(timeout)).await },
+        )
+    }
+    /// `GET …/expressions/photo-drafts`: the caller's own live photo drafts (#4992).
+    async fn photo_drafts(&self, who: &Person) -> reqwest::Response {
+        self.http
+            .get(format!("{}/expressions/photo-drafts", self.prefix))
+            .bearer_auth(&who.token)
+            .send()
+            .await
+            .unwrap()
+    }
+    /// The draft route's own answer for one draft: what a list item must equal.
+    async fn draft(&self, who: &Person, id: &str) -> Value {
+        let response = self
+            .http
+            .get(format!("{}/expression-drafts/{id}", self.prefix))
+            .bearer_auth(&who.token)
+            .send()
+            .await
+            .unwrap();
+        self.json(response, 200).await
+    }
+    /// An ordinary upload draft (`origin.kind = upload`): a draft of the caller's that is not a photo
+    /// draft.
+    async fn upload_draft(&self, who: &Person, name: &str) -> Value {
+        let picture = png_of(&image::RgbaImage::from_pixel(
+            8,
+            8,
+            image::Rgba([9, 99, 199, 255]),
+        ));
+        let metadata = json!({"name":name,"displayName":"upload","tags":[],"subjectMemberId":null});
+        let mut body = Vec::new();
+        body.extend_from_slice(b"--oort-photo-test\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n");
+        body.extend_from_slice(metadata.to_string().as_bytes());
+        body.extend_from_slice(b"\r\n--oort-photo-test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\nContent-Type: image/png\r\n\r\n");
+        body.extend_from_slice(&picture);
+        body.extend_from_slice(b"\r\n--oort-photo-test--\r\n");
+        let response = self
+            .http
+            .post(format!("{}/expressions/uploads", self.prefix))
+            .bearer_auth(&who.token)
+            .header(
+                "content-type",
+                "multipart/form-data; boundary=oort-photo-test",
+            )
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        self.json(response, 201).await
+    }
+    /// A fixture the API cannot make: another row like `draft` — the same owner and origin and the
+    /// same three pictures — that expires `expires_in` from now (negative: already). A draft's
+    /// expiry cannot be changed once it exists (migration 158) and one person can hold four live
+    /// drafts, so the clock and the bound are tested with rows the database is told about directly.
+    async fn copy_draft(&self, draft: &str, expires_in: &str, with_pictures: bool) -> String {
+        let draft: Uuid = draft.parse().unwrap();
+        let copy: Uuid = sqlx::query_scalar(
+            "INSERT INTO expression_draft(workspace_id,name,display_name,tags,subject_member_id,origin,creator,state,code,expires_at) SELECT workspace_id,name,display_name,tags,subject_member_id,origin,creator,state,code,clock_timestamp() + $3::interval FROM expression_draft WHERE workspace_id=$1 AND id=$2 RETURNING id",
+        )
+        .bind(self.ws)
+        .bind(draft)
+        .bind(expires_in)
+        .fetch_one(&self.su)
+        .await
+        .unwrap();
+        if with_pictures {
+            sqlx::query(
+                "INSERT INTO expression_draft_image(workspace_id,draft_id,revision,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT i.workspace_id,$3::uuid,i.revision,i.variant,i.mime,i.bytes,i.sha256,i.width,i.height,i.frame_count,i.duration_ms FROM expression_draft_image i WHERE i.workspace_id=$1 AND i.draft_id=$2",
+            )
+            .bind(self.ws)
+            .bind(draft)
+            .bind(copy)
+            .execute(&self.su)
+            .await
+            .unwrap();
+        }
+        copy.to_string()
+    }
+}
+
 fn unique(prefix: &str) -> String {
     format!("{prefix}_{}", &Uuid::new_v4().simple().to_string()[..12])
 }
@@ -1355,6 +1454,373 @@ async fn a_busy_decoder_is_a_503_before_anything_is_sent() {
         201,
     )
     .await;
+}
+
+/// #4992 (L2): the provider has answered — and been paid — and then both decoder slots are taken.
+/// The picture is not thrown away: it waits for a slot, longer than the three seconds one stint in
+/// the line lasts (where it used to be lost), and becomes the draft. The provider hears from the
+/// server once. Both branches, which decode through different calls.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_picture_that_is_paid_for_waits_for_a_busy_decoder_and_the_provider_is_asked_once() {
+    let w = boot().await;
+    w.connect_fake().await;
+    let slots = momo_expressions::media::decoder_slots();
+    for (branch, picture) in [
+        ("cutout", drawn_transparent()),
+        ("caricature", drawn_caricature()),
+    ] {
+        w.fake.forget();
+        let before = w.drafts_of(&w.member).await;
+        let gate = Arc::new(Semaphore::new(0));
+        w.fake
+            .say(Reply::Hold(gate.clone(), Box::new(Reply::Picture(picture))));
+        let request = w.photo_in_flight(&w.member, branch, "paid", Duration::from_secs(40));
+        wait_for(&w.fake, 1).await;
+        // The photo has been prepared and is with the provider. From here on both slots are taken.
+        let first = slots.clone().acquire_owned().await.unwrap();
+        let second = slots.clone().acquire_owned().await.unwrap();
+        gate.add_permits(1);
+        // Longer than one stint in the line (three seconds): the picture used to be dropped there.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert!(
+            !request.is_finished(),
+            "{branch}: still waiting for a decoder, not answered 503"
+        );
+        assert_eq!(
+            w.drafts_of(&w.member).await,
+            before,
+            "{branch}: no draft yet"
+        );
+        drop((first, second));
+        let made = w.json(request.await.unwrap(), 201).await;
+        assert_eq!(made["draft"]["state"], "ready", "{branch}");
+        assert_eq!(w.fake.count(), 1, "{branch}: the provider was asked once");
+        assert_eq!(
+            w.drafts_of(&w.member).await,
+            before + 1,
+            "{branch}: the picture became the draft"
+        );
+    }
+}
+
+/// #4992 (L2): the decoder stays taken. The picture is given up only after the patience (fifteen
+/// seconds), the answer is the 503 it always was, the provider was not asked again, and the places
+/// come back with the work. What an operator can read is one line of numbers.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_picture_that_is_paid_for_is_given_up_only_after_the_patience_and_costs_no_second_call() {
+    let w = boot().await;
+    w.connect_fake().await;
+    let logs = Logs::default();
+    let _guard = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_ansi(false)
+            .with_writer({
+                let logs = logs.clone();
+                move || logs.clone()
+            })
+            .finish(),
+    );
+    let gate = Arc::new(Semaphore::new(0));
+    w.fake.say(Reply::Hold(
+        gate.clone(),
+        Box::new(Reply::Picture(drawn_transparent())),
+    ));
+    let request = w.photo_in_flight(&w.member, "cutout", "given_up", Duration::from_secs(60));
+    wait_for(&w.fake, 1).await;
+    let slots = momo_expressions::media::decoder_slots();
+    let first = slots.clone().acquire_owned().await.unwrap();
+    let second = slots.clone().acquire_owned().await.unwrap();
+    let answered = Instant::now();
+    gate.add_permits(1);
+    let response = request.await.unwrap();
+    let waited = answered.elapsed();
+    assert_eq!(response.status().as_u16(), 503);
+    assert!(response.headers().contains_key("retry-after"));
+    assert!(
+        waited >= Duration::from_secs(14),
+        "it asked for the whole patience: {waited:?}"
+    );
+    assert!(
+        waited < Duration::from_secs(25),
+        "and not for much longer: {waited:?}"
+    );
+    assert_eq!(w.fake.count(), 1, "the provider was not asked again");
+    assert_eq!(w.drafts_of(&w.member).await, 0, "nothing was stored");
+    let logged = logs.text();
+    assert!(
+        logged.contains("a picture the team paid for was dropped"),
+        "the operator can see it: {logged}"
+    );
+    for never in [KEY, ECHO, "GPS-37", "TRAILING-BYTES"] {
+        assert!(!logged.contains(never), "the logs hold {never:?}");
+    }
+    drop((first, second));
+    // The places came back with the work: the same member may ask again — a new call, by their own
+    // choice.
+    w.json(
+        photo_when_a_place_is_free(&w, &w.member, "again", &photo_from_home()).await,
+        201,
+    )
+    .await;
+    assert_eq!(w.fake.count(), 2);
+}
+
+/// #4992: the headline. The screen that was waiting is gone — the connection dropped, the app was
+/// closed — and the work finishes without it: the draft is stored, and now the member can find it.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_member_finds_the_picture_the_work_finished_after_the_screen_that_waited_was_gone() {
+    let w = boot().await;
+    w.connect_fake().await;
+    assert_eq!(
+        w.json(w.photo_drafts(&w.member).await, 200).await,
+        json!({"items": []}),
+        "nothing yet"
+    );
+    let gate = Arc::new(Semaphore::new(0));
+    w.fake.say(Reply::Hold(
+        gate.clone(),
+        Box::new(Reply::Picture(drawn_caricature())),
+    ));
+    let asking = w.photo_in_flight(&w.member, "caricature", "left", Duration::from_secs(30));
+    wait_for(&w.fake, 1).await;
+    // The screen is gone. The provider has not answered, so there is nothing to find yet.
+    asking.abort();
+    let _ = asking.await;
+    assert_eq!(
+        w.json(w.photo_drafts(&w.member).await, 200).await["items"],
+        json!([])
+    );
+    gate.add_permits(100);
+    // The work ends on its own, and the list shows what it made.
+    let mut listed = Value::Null;
+    for _ in 0..400 {
+        listed = w.json(w.photo_drafts(&w.member).await, 200).await;
+        if listed["items"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let items = listed["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "{listed}");
+    // An id the member never saw, and exactly what the one-draft route answers for it.
+    let id = items[0]["draftId"].as_str().unwrap().to_string();
+    assert_eq!(items[0], w.draft(&w.member, &id).await);
+    assert_eq!(items[0]["state"], "ready");
+    assert_eq!(items[0]["origin"]["kind"], "generated");
+    assert_eq!(items[0]["origin"]["prompt"], PHOTO_PROMPTS[1].1);
+    // It is registered like any other draft, and once it is, it is a draft no more.
+    w.json(w.activate(&w.member, &items[0]).await, 201).await;
+    assert_eq!(
+        w.json(w.photo_drafts(&w.member).await, 200).await["items"],
+        json!([]),
+        "a registered draft is not listed"
+    );
+}
+
+fn draft_ids(list: &Value) -> Vec<String> {
+    list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["draftId"].as_str().unwrap().to_string())
+        .collect()
+}
+
+/// #4992: what the list holds and what it does not. Own rows only, alive ones only, photo drafts
+/// only, the newest first, never more than a person may hold, and a read is never a photo start.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn the_list_is_the_callers_own_live_photo_drafts_newest_first_bounded_and_never_counted() {
+    // Three photo starts a window: the reads below would be refused if a read counted as one.
+    let w = boot_all(Duration::from_secs(20), |config| config, 3).await;
+    w.connect_fake().await;
+    let photo = photo_from_home();
+    w.fake.say(Reply::Picture(drawn_transparent()));
+    let older = w
+        .json(
+            w.photo(&w.member, &w.meta("cutout", &unique("older")), &photo)
+                .await,
+            201,
+        )
+        .await["draft"]["draftId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    w.fake.say(Reply::Picture(drawn_caricature()));
+    let newer = w
+        .json(
+            w.photo(&w.member, &w.meta("caricature", &unique("newer")), &photo)
+                .await,
+            201,
+        )
+        .await["draft"]["draftId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let theirs = w
+        .json(
+            w.photo(
+                &w.other_member,
+                &w.meta("caricature", &unique("theirs")),
+                &photo,
+            )
+            .await,
+            201,
+        )
+        .await["draft"]["draftId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    // A draft of the member's own that is not a photo draft.
+    let upload = w.upload_draft(&w.member, &unique("upload")).await;
+    let upload = upload["draftId"].as_str().unwrap().to_string();
+
+    // Own rows only, photo drafts only, newest first, each exactly the one-draft route's answer.
+    let listed = w.json(w.photo_drafts(&w.member).await, 200).await;
+    assert_eq!(
+        listed.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["items"],
+        "a closed answer"
+    );
+    assert_eq!(draft_ids(&listed), [newer.clone(), older.clone()]);
+    for id in [&newer, &older] {
+        let item = listed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["draftId"] == id.as_str())
+            .unwrap();
+        assert_eq!(item, &w.draft(&w.member, id).await);
+    }
+    assert!(
+        !draft_ids(&listed).contains(&upload),
+        "an upload is not a photo draft"
+    );
+    assert_eq!(
+        draft_ids(&w.json(w.photo_drafts(&w.other_member).await, 200).await),
+        std::slice::from_ref(&theirs),
+        "the other member's own, and nothing of the first member's"
+    );
+
+    // A read is not a photo start: eight of them, then the member's budget is as it was (one start
+    // left of three), so two more starts go through and the fourth is the one that is refused.
+    for _ in 0..8 {
+        w.json(w.photo_drafts(&w.other_member).await, 200).await;
+    }
+    for name in ["third", "fourth"] {
+        w.json(
+            w.photo(
+                &w.other_member,
+                &w.meta("caricature", &unique(name)),
+                &photo,
+            )
+            .await,
+            201,
+        )
+        .await;
+    }
+    let refused = w
+        .photo(
+            &w.other_member,
+            &w.meta("caricature", &unique("fifth")),
+            &photo,
+        )
+        .await;
+    assert_eq!(refused.status().as_u16(), 429, "three starts, no more");
+
+    // Nobody else's: no drafts for the owner or a guest; another workspace's bearer is a 404 and
+    // sees none of ours in its own list; an agent is not a person to have a list; no bearer, no list.
+    for (who, what) in [(&w.owner, "the owner"), (&w.guest, "a guest")] {
+        assert_eq!(
+            w.json(w.photo_drafts(who).await, 200).await["items"],
+            json!([]),
+            "{what} made no photo draft"
+        );
+    }
+    assert_eq!(w.photo_drafts(&w.foreign).await.status().as_u16(), 404);
+    let own = w
+        .http
+        .get(format!(
+            "{}/v1/workspaces/{}/expressions/photo-drafts",
+            w.base, w.foreign.actor.workspace
+        ))
+        .bearer_auth(&w.foreign.token)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(w.json(own, 200).await["items"], json!([]));
+    let agent = w
+        .http
+        .get(format!("{}/expressions/photo-drafts", w.prefix))
+        .bearer_auth(&w.agent_token)
+        .send()
+        .await
+        .unwrap();
+    // The auth layer's allow-list closes the route to an agent bearer before the handler is reached
+    // (the handler's own `human` check is the second lock on the same door).
+    assert_eq!(agent.status().as_u16(), 403, "an agent has no list");
+    let anonymous = w
+        .http
+        .get(format!("{}/expressions/photo-drafts", w.prefix))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(anonymous.status().as_u16(), 401);
+
+    // Alive ones only: a copy of the newest draft that has expired is newer than both and is not
+    // listed.
+    let expired = w.copy_draft(&newer, "-1 minute", true).await;
+    let listed = draft_ids(&w.json(w.photo_drafts(&w.member).await, 200).await);
+    assert_eq!(listed, [newer.clone(), older.clone()], "expired: {expired}");
+
+    // A live row whose pictures are gone (an expiry under a concurrent sweep leaves such a moment) is
+    // left out and does not turn the list into a 404.
+    let broken = w.copy_draft(&newer, "30 minutes", false).await;
+    let listed = draft_ids(&w.json(w.photo_drafts(&w.member).await, 200).await);
+    assert_eq!(
+        listed,
+        [newer.clone(), older.clone()],
+        "a row without pictures: {broken}"
+    );
+    sqlx::query("DELETE FROM expression_draft WHERE workspace_id=$1 AND id=$2::uuid")
+        .bind(w.ws)
+        .bind(&broken)
+        .execute(&w.su)
+        .await
+        .unwrap();
+
+    // Never more than a person may hold: three more live rows make five for the member, and the
+    // oldest is the one that is left out.
+    let mut copies = Vec::new();
+    for _ in 0..3 {
+        copies.push(w.copy_draft(&newer, "30 minutes", true).await);
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    let capped = draft_ids(&w.json(w.photo_drafts(&w.member).await, 200).await);
+    assert_eq!(
+        capped.len() as i64,
+        momo_expressions::LIVE_DRAFTS,
+        "{capped:?}"
+    );
+    assert!(
+        capped.windows(2).all(|pair| pair[0] > pair[1]),
+        "newest first: {capped:?}"
+    );
+    assert!(
+        !capped.contains(&older),
+        "the oldest is left out: {capped:?}"
+    );
+    for copy in &copies {
+        assert!(capped.contains(copy), "{copy} is among the four newest");
+    }
+    assert!(capped.contains(&newer));
 }
 
 #[tokio::test]
@@ -1966,22 +2432,40 @@ async fn wait_for(fake: &Fake, n: usize) {
 }
 
 async fn send(http: &reqwest::Client, url: &str, token: &str, meta: &Value, file: &[u8]) -> u16 {
+    post_photo(http, url, token, meta, file, None)
+        .await
+        .status()
+        .as_u16()
+}
+
+/// The multipart photo request, with its own time limit when a test needs more than the client's.
+async fn post_photo(
+    http: &reqwest::Client,
+    url: &str,
+    token: &str,
+    meta: &Value,
+    file: &[u8],
+    timeout: Option<Duration>,
+) -> reqwest::Response {
     let mut body = Vec::new();
     body.extend_from_slice(b"--oort-photo-test\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n");
     body.extend_from_slice(meta.to_string().as_bytes());
     body.extend_from_slice(b"\r\n--oort-photo-test\r\nContent-Disposition: form-data; name=\"file\"; filename=\"photo.jpg\"\r\nContent-Type: application/octet-stream\r\n\r\n");
     body.extend_from_slice(file);
     body.extend_from_slice(b"\r\n--oort-photo-test--\r\n");
-    http.post(url)
+    let request = http
+        .post(url)
         .bearer_auth(token)
         .header(
             "content-type",
             "multipart/form-data; boundary=oort-photo-test",
         )
-        .body(body)
-        .send()
-        .await
-        .unwrap()
-        .status()
-        .as_u16()
+        .body(body);
+    match timeout {
+        Some(timeout) => request.timeout(timeout),
+        None => request,
+    }
+    .send()
+    .await
+    .unwrap()
 }

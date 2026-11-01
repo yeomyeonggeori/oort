@@ -157,6 +157,72 @@ async fn a_photo_with_an_alpha_channel_stays_a_png_and_is_never_enlarged() {
     assert_eq!(sent.get_pixel(5, 5).0, [10, 120, 60, 255]);
 }
 
+/// Deterministic RGBA noise with a transparent hole: a picture a PNG encoder cannot make smaller, so
+/// its file weighs about as much as its pixels (width x height x 4 bytes).
+fn noise_with_a_hole(width: u32, height: u32) -> RgbaImage {
+    let mut state = 0x9E37_79B9_7F4A_7C15_u64;
+    let mut image = RgbaImage::new(width, height);
+    for byte in image.iter_mut() {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        *byte = (state >> 24) as u8;
+    }
+    for y in 100..200 {
+        for x in 100..200 {
+            image.put_pixel(x, y, Rgba([0, 0, 0, 0]));
+        }
+    }
+    image
+}
+
+/// #4992 (L4): the prepared photo came back from the child as a JSON list of numbers, up to four
+/// characters a byte, so a PNG over about 2.3 MB overran the 8 MiB the parent reads and a photo with
+/// an alpha channel was refused as invalid media. Both sides of the boundary, through the real child.
+#[tokio::test]
+async fn a_large_photo_with_an_alpha_channel_comes_back_from_the_child_whole() {
+    let _turn = TURN.lock().await;
+    let old_break = 2_500_000; // above what the old encoding carried (about 2.3 MB), below the bound
+    let sizes = [(900u32, 900u32), (1024, 1000)];
+    for (width, height) in sizes {
+        let photo = noise_with_a_hole(width, height);
+        let original = png_of(&photo);
+        assert!(
+            (old_break..=media::PREPARED_MAX_BYTES).contains(&original.len()),
+            "{width}x{height}: the test picture is {} bytes: past the old break, within the bound",
+            original.len()
+        );
+        let prepared = media::prepare_photo(original)
+            .await
+            .unwrap_or_else(|rejected| panic!("{width}x{height} was refused: {rejected:?}"));
+        assert_eq!(prepared.mime, "image/png");
+        assert!(prepared.data.len() >= old_break, "{}", prepared.data.len());
+        let sent = image::load_from_memory(&prepared.data).unwrap().to_rgba8();
+        assert_eq!(sent.dimensions(), (width, height));
+        assert_eq!(sent.get_pixel(150, 150).0[3], 0, "the hole is still a hole");
+        assert!(
+            sent.as_raw() == photo.as_raw(),
+            "{width}x{height}: every pixel came back as it went in"
+        );
+    }
+    // One row more and the picture no longer fits the 4 MiB a prepared photo may weigh: refused as
+    // invalid, by the bound, and not for the size of the child's answer.
+    let over = noise_with_a_hole(1024, 1024);
+    let original = png_of(&over);
+    assert!(
+        original.len() > media::PREPARED_MAX_BYTES
+            && original.len() <= momo_expressions::INPUT_BYTES,
+        "the test picture is {} bytes: it goes in, and cannot come out",
+        original.len()
+    );
+    assert_eq!(
+        media::prepare_photo(original)
+            .await
+            .map(|prepared| prepared.data.len()),
+        Err(Rejected::Invalid)
+    );
+}
+
 #[tokio::test]
 async fn what_is_not_a_still_picture_is_refused_before_anything_can_leave() {
     let _turn = TURN.lock().await;
