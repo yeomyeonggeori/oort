@@ -239,7 +239,7 @@ describe("claim → first-run 사다리 (#2301)", () => {
       memberId: session.member.id,
     });
     expect(sessionStorage.getItem("oort.onboarding.v1")).toBe(
-      JSON.stringify({ "workspace-profile": true, invite: true })
+      JSON.stringify({ "workspace-profile": true, invite: true, "team-ai": true })
     );
     expect(claimOwnerPassword).toHaveBeenCalledWith(TOKEN, PASSWORD);
 
@@ -260,10 +260,16 @@ describe("claim → first-run 사다리 (#2301)", () => {
       memberId: session.member.id,
     });
     expect(sessionStorage.getItem("oort.onboarding.v1")).toBe(
-      JSON.stringify({ invite: true })
+      JSON.stringify({ invite: true, "team-ai": true })
     );
 
     click("onboarding-s2-skip");
+    // S2 다음은 건너뛸 수 있는 팀 AI 단계다(#4945). 건너뛰면 서버에 쓰지 않고 세션을 넘긴다.
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-team-ai-skip"]')).not.toBeNull();
+    });
+    expect(onLoggedIn).not.toHaveBeenCalled();
+    click("onboarding-team-ai-skip");
     await vi.waitFor(() => {
       expect(onLoggedIn).toHaveBeenCalledTimes(1);
     });

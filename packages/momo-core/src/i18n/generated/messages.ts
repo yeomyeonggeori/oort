@@ -176,6 +176,73 @@ export const messageKeys = [
   "settings.profile.languagePartialNotice",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
+  "teamAi.helper.aliasesLine",
+  "teamAi.helper.aliasNotDerivable",
+  "teamAi.helper.aliasReserved",
+  "teamAi.helper.description",
+  "teamAi.helper.nameErrorForbidden",
+  "teamAi.helper.nameErrorInvalid",
+  "teamAi.helper.nameErrorOther",
+  "teamAi.helper.nameErrorReserved",
+  "teamAi.helper.nameErrorTaken",
+  "teamAi.helper.nameHint",
+  "teamAi.helper.nameLabel",
+  "teamAi.helper.nameSave",
+  "teamAi.helper.nameSaved",
+  "teamAi.helper.nameSaving",
+  "teamAi.helper.rolesForbidden",
+  "teamAi.helper.rolesHeading",
+  "teamAi.helper.rolesHint",
+  "teamAi.helper.rolesMemoryOff",
+  "teamAi.helper.rolesOffline",
+  "teamAi.helper.rolesSaveFailed",
+  "teamAi.phone.loadFailed",
+  "teamAi.phone.loading",
+  "teamAi.phone.rowTitle",
+  "teamAi.roles.alwaysOn",
+  "teamAi.roles.chatReadHint",
+  "teamAi.roles.chatReadName",
+  "teamAi.roles.codeHint",
+  "teamAi.roles.codeName",
+  "teamAi.roles.filesHint",
+  "teamAi.roles.filesName",
+  "teamAi.roles.inviteAccessHint",
+  "teamAi.roles.inviteAccessName",
+  "teamAi.roles.longResearchHint",
+  "teamAi.roles.longResearchName",
+  "teamAi.roles.memoryHint",
+  "teamAi.roles.memoryName",
+  "teamAi.roles.noticeBoth",
+  "teamAi.roles.noticeFiles",
+  "teamAi.roles.noticeMemory",
+  "teamAi.roles.workspaceAdminHint",
+  "teamAi.roles.workspaceAdminName",
+  "teamAi.stage.checkingLine",
+  "teamAi.stage.continue",
+  "teamAi.stage.doneDetail",
+  "teamAi.stage.doneLine",
+  "teamAi.stage.enable",
+  "teamAi.stage.enableFailedDetail",
+  "teamAi.stage.enableFailedLine",
+  "teamAi.stage.enabling",
+  "teamAi.stage.enablingLine",
+  "teamAi.stage.keyDetail",
+  "teamAi.stage.keyFailedLine",
+  "teamAi.stage.keyLine",
+  "teamAi.stage.later",
+  "teamAi.stage.loadErrorDetail",
+  "teamAi.stage.loadErrorLine",
+  "teamAi.stage.nameRequired",
+  "teamAi.stage.notOperatorDetail",
+  "teamAi.stage.notOperatorLine",
+  "teamAi.stage.offline",
+  "teamAi.stage.reentry",
+  "teamAi.stage.renameFailedNote",
+  "teamAi.stage.retry",
+  "teamAi.stage.setupDetail",
+  "teamAi.stage.setupLine",
+  "teamAi.stage.setupUnverifiedDetail",
+  "teamAi.stage.verifyingLine",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
   "timeline.thread.followOff",
@@ -433,6 +500,75 @@ export const argumentSpecs = {
   "settings.profile.languagePartialNotice": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {},
+  "teamAi.helper.aliasesLine": {
+    "names": "string"
+  },
+  "teamAi.helper.aliasNotDerivable": {},
+  "teamAi.helper.aliasReserved": {},
+  "teamAi.helper.description": {},
+  "teamAi.helper.nameErrorForbidden": {},
+  "teamAi.helper.nameErrorInvalid": {},
+  "teamAi.helper.nameErrorOther": {},
+  "teamAi.helper.nameErrorReserved": {},
+  "teamAi.helper.nameErrorTaken": {},
+  "teamAi.helper.nameHint": {},
+  "teamAi.helper.nameLabel": {},
+  "teamAi.helper.nameSave": {},
+  "teamAi.helper.nameSaved": {},
+  "teamAi.helper.nameSaving": {},
+  "teamAi.helper.rolesForbidden": {},
+  "teamAi.helper.rolesHeading": {},
+  "teamAi.helper.rolesHint": {},
+  "teamAi.helper.rolesMemoryOff": {},
+  "teamAi.helper.rolesOffline": {},
+  "teamAi.helper.rolesSaveFailed": {},
+  "teamAi.phone.loadFailed": {},
+  "teamAi.phone.loading": {},
+  "teamAi.phone.rowTitle": {},
+  "teamAi.roles.alwaysOn": {},
+  "teamAi.roles.chatReadHint": {},
+  "teamAi.roles.chatReadName": {},
+  "teamAi.roles.codeHint": {},
+  "teamAi.roles.codeName": {},
+  "teamAi.roles.filesHint": {},
+  "teamAi.roles.filesName": {},
+  "teamAi.roles.inviteAccessHint": {},
+  "teamAi.roles.inviteAccessName": {},
+  "teamAi.roles.longResearchHint": {},
+  "teamAi.roles.longResearchName": {},
+  "teamAi.roles.memoryHint": {},
+  "teamAi.roles.memoryName": {},
+  "teamAi.roles.noticeBoth": {},
+  "teamAi.roles.noticeFiles": {},
+  "teamAi.roles.noticeMemory": {},
+  "teamAi.roles.workspaceAdminHint": {},
+  "teamAi.roles.workspaceAdminName": {},
+  "teamAi.stage.checkingLine": {},
+  "teamAi.stage.continue": {},
+  "teamAi.stage.doneDetail": {},
+  "teamAi.stage.doneLine": {},
+  "teamAi.stage.enable": {},
+  "teamAi.stage.enableFailedDetail": {},
+  "teamAi.stage.enableFailedLine": {},
+  "teamAi.stage.enabling": {},
+  "teamAi.stage.enablingLine": {},
+  "teamAi.stage.keyDetail": {},
+  "teamAi.stage.keyFailedLine": {},
+  "teamAi.stage.keyLine": {},
+  "teamAi.stage.later": {},
+  "teamAi.stage.loadErrorDetail": {},
+  "teamAi.stage.loadErrorLine": {},
+  "teamAi.stage.nameRequired": {},
+  "teamAi.stage.notOperatorDetail": {},
+  "teamAi.stage.notOperatorLine": {},
+  "teamAi.stage.offline": {},
+  "teamAi.stage.reentry": {},
+  "teamAi.stage.renameFailedNote": {},
+  "teamAi.stage.retry": {},
+  "teamAi.stage.setupDetail": {},
+  "teamAi.stage.setupLine": {},
+  "teamAi.stage.setupUnverifiedDetail": {},
+  "teamAi.stage.verifyingLine": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
   "timeline.thread.followOff": {},
@@ -657,6 +793,73 @@ export interface MessageArgs {
   "settings.profile.languagePartialNotice": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "teamAi.helper.aliasesLine": { names: string };
+  "teamAi.helper.aliasNotDerivable": Record<string, never>;
+  "teamAi.helper.aliasReserved": Record<string, never>;
+  "teamAi.helper.description": Record<string, never>;
+  "teamAi.helper.nameErrorForbidden": Record<string, never>;
+  "teamAi.helper.nameErrorInvalid": Record<string, never>;
+  "teamAi.helper.nameErrorOther": Record<string, never>;
+  "teamAi.helper.nameErrorReserved": Record<string, never>;
+  "teamAi.helper.nameErrorTaken": Record<string, never>;
+  "teamAi.helper.nameHint": Record<string, never>;
+  "teamAi.helper.nameLabel": Record<string, never>;
+  "teamAi.helper.nameSave": Record<string, never>;
+  "teamAi.helper.nameSaved": Record<string, never>;
+  "teamAi.helper.nameSaving": Record<string, never>;
+  "teamAi.helper.rolesForbidden": Record<string, never>;
+  "teamAi.helper.rolesHeading": Record<string, never>;
+  "teamAi.helper.rolesHint": Record<string, never>;
+  "teamAi.helper.rolesMemoryOff": Record<string, never>;
+  "teamAi.helper.rolesOffline": Record<string, never>;
+  "teamAi.helper.rolesSaveFailed": Record<string, never>;
+  "teamAi.phone.loadFailed": Record<string, never>;
+  "teamAi.phone.loading": Record<string, never>;
+  "teamAi.phone.rowTitle": Record<string, never>;
+  "teamAi.roles.alwaysOn": Record<string, never>;
+  "teamAi.roles.chatReadHint": Record<string, never>;
+  "teamAi.roles.chatReadName": Record<string, never>;
+  "teamAi.roles.codeHint": Record<string, never>;
+  "teamAi.roles.codeName": Record<string, never>;
+  "teamAi.roles.filesHint": Record<string, never>;
+  "teamAi.roles.filesName": Record<string, never>;
+  "teamAi.roles.inviteAccessHint": Record<string, never>;
+  "teamAi.roles.inviteAccessName": Record<string, never>;
+  "teamAi.roles.longResearchHint": Record<string, never>;
+  "teamAi.roles.longResearchName": Record<string, never>;
+  "teamAi.roles.memoryHint": Record<string, never>;
+  "teamAi.roles.memoryName": Record<string, never>;
+  "teamAi.roles.noticeBoth": Record<string, never>;
+  "teamAi.roles.noticeFiles": Record<string, never>;
+  "teamAi.roles.noticeMemory": Record<string, never>;
+  "teamAi.roles.workspaceAdminHint": Record<string, never>;
+  "teamAi.roles.workspaceAdminName": Record<string, never>;
+  "teamAi.stage.checkingLine": Record<string, never>;
+  "teamAi.stage.continue": Record<string, never>;
+  "teamAi.stage.doneDetail": Record<string, never>;
+  "teamAi.stage.doneLine": Record<string, never>;
+  "teamAi.stage.enable": Record<string, never>;
+  "teamAi.stage.enableFailedDetail": Record<string, never>;
+  "teamAi.stage.enableFailedLine": Record<string, never>;
+  "teamAi.stage.enabling": Record<string, never>;
+  "teamAi.stage.enablingLine": Record<string, never>;
+  "teamAi.stage.keyDetail": Record<string, never>;
+  "teamAi.stage.keyFailedLine": Record<string, never>;
+  "teamAi.stage.keyLine": Record<string, never>;
+  "teamAi.stage.later": Record<string, never>;
+  "teamAi.stage.loadErrorDetail": Record<string, never>;
+  "teamAi.stage.loadErrorLine": Record<string, never>;
+  "teamAi.stage.nameRequired": Record<string, never>;
+  "teamAi.stage.notOperatorDetail": Record<string, never>;
+  "teamAi.stage.notOperatorLine": Record<string, never>;
+  "teamAi.stage.offline": Record<string, never>;
+  "teamAi.stage.reentry": Record<string, never>;
+  "teamAi.stage.renameFailedNote": Record<string, never>;
+  "teamAi.stage.retry": Record<string, never>;
+  "teamAi.stage.setupDetail": Record<string, never>;
+  "teamAi.stage.setupLine": Record<string, never>;
+  "teamAi.stage.setupUnverifiedDetail": Record<string, never>;
+  "teamAi.stage.verifyingLine": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
   "timeline.thread.followOff": Record<string, never>;

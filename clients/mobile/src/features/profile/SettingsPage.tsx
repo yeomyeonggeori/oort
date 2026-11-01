@@ -108,6 +108,12 @@ import {
 import {useDevToolsEntry} from './devTools';
 import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSettings';
 import {LinkPreviewSettingRow, LinkPreviewSettingsPage} from './LinkPreviewSettings';
+import {TEAM_AI_HELPER_PAGE} from '@momo/core/features/settings/teamAiStageModel';
+import {
+  TeamAiHelperSettingRow,
+  TeamAiHelperSettingsPage,
+  useTeamAiHelperEntry,
+} from './TeamAiHelperSettings';
 import {
   AI_LIMITS_PAGE,
   TeamAiLimitsSettingRow,
@@ -180,6 +186,7 @@ import {
 export type SettingsSubPage =
   | 'language'
   | 'linkPreview'
+  | typeof TEAM_AI_HELPER_PAGE
   // 「사용 한도」 장(#5026). 이름은 `TeamAiLimitsSettings` 가 하이픈 낱말로 짓고 JSX 밖에서 선언한다(직접 문구 장부).
   | typeof AI_LIMITS_PAGE
   | 'usage'
@@ -194,7 +201,10 @@ export type SettingsPageName = 'main' | SettingsSubPage;
 /** 안쪽 장의 첫 요소 위 여백 — 설정 첫 장·시트와 같은 `space.md`. 스타일(`subContent`)과 기한 장의 펼침 셈(`revealAt`)이 함께 읽는다. */
 const SUB_PAGE_TOP = space.md;
 
-const SUB_PAGE_TITLE: Record<Exclude<SettingsSubPage, 'language' | 'linkPreview' | typeof AI_LIMITS_PAGE>, string> = {
+const SUB_PAGE_TITLE: Record<
+  Exclude<SettingsSubPage, 'language' | 'linkPreview' | typeof TEAM_AI_HELPER_PAGE | typeof AI_LIMITS_PAGE>,
+  string
+> = {
   usage: AGENT_USAGE_COPY.report,
   theme: '테마',
   deviceKey: DEVICE_KEY_TITLE,
@@ -276,6 +286,7 @@ export function SettingsPage({
             onOpenTheme={() => setPage('theme')}
             onOpenLanguage={() => setPage('language')}
             onOpenLinkPreview={() => setPage('linkPreview')}
+            onOpenTeamAiHelper={() => setPage(TEAM_AI_HELPER_PAGE)}
             onOpenAiLimits={() => setPage(AI_LIMITS_PAGE)}
             onOpenStatus={() => setStatusOpen(true)}
             onOpenDeviceKey={() => setPage('deviceKey')}
@@ -302,6 +313,12 @@ export function SettingsPage({
             <LanguageSettingsPage onBack={backToMain} />
           ) : page === 'linkPreview' ? (
             <LinkPreviewSettingsPage onBack={backToMain} />
+          ) : page === TEAM_AI_HELPER_PAGE ? (
+            <TeamAiHelperSettingsPage
+              workspaceId={workspaceId}
+              directory={directory}
+              onBack={backToMain}
+            />
           ) : page === AI_LIMITS_PAGE ? (
             <TeamAiLimitsSettingsPage workspaceId={workspaceId} onBack={backToMain} />
           ) : (
@@ -336,7 +353,7 @@ function SubPage({
   directory,
   onBack,
 }: {
-  page: Exclude<SettingsSubPage, 'language' | 'linkPreview' | typeof AI_LIMITS_PAGE>;
+  page: Exclude<SettingsSubPage, 'language' | 'linkPreview' | typeof TEAM_AI_HELPER_PAGE | typeof AI_LIMITS_PAGE>;
   workspaceId: string;
   member: Member;
   directory: Directory;
@@ -447,6 +464,7 @@ export function SettingsContent({
   onOpenTheme,
   onOpenLanguage,
   onOpenLinkPreview,
+  onOpenTeamAiHelper,
   onOpenAiLimits,
   onOpenStatus,
   onOpenDeviceKey,
@@ -467,6 +485,8 @@ export function SettingsContent({
   onOpenLanguage?: () => void;
   /** 「링크 미리보기」 장(작게·크게·끄기, #4883)을 연다. 없으면 행이 서지 않는다(캡처 하네스). */
   onOpenLinkPreview?: () => void;
+  /** 관리자의 「도우미」 장(이름·할 수 있는 일, #4945)을 연다. 없으면 행이 서지 않고 아무것도 읽지 않는다(캡처 하네스). */
+  onOpenTeamAiHelper?: () => void;
   /** 「사용 한도」 장(#5026)을 연다. 없으면 행이 서지 않는다(캡처 하네스). 소유자·관리자에게만 선다. */
   onOpenAiLimits?: () => void;
   /** 「상태 설정」 바텀시트를 연다. */
@@ -590,6 +610,13 @@ export function SettingsContent({
   const themeValue = themeSummary(themeId, choice);
   // 만들 수 있거나 이미 만든 연결이 있는 사람에게만 행이 선다(`useDevToolsEntry`). 정책이 오기 전에는 서지 않는다.
   const devTools = useDevToolsEntry(workspaceId, member.id, onOpenDevTools !== undefined);
+  // 관리자(소유자·관리자)에게만 「관리자 설정」 카드가 선다. 도우미 행은 설정 가방을 읽었고 도우미가 켜져 있을 때만 선다.
+  const isAdmin = memberFor(directory, member.id)?.role === 'owner' || memberFor(directory, member.id)?.role === 'admin';
+  const teamAi = useTeamAiHelperEntry(workspaceId, directory, isAdmin && onOpenTeamAiHelper !== undefined);
+  const teamAiRow =
+    teamAi.visible && onOpenTeamAiHelper ? (
+      <TeamAiHelperSettingRow helperName={teamAi.helperName} onPress={onOpenTeamAiHelper} />
+    ) : null;
 
   return (
     <>
@@ -981,11 +1008,12 @@ export function SettingsContent({
         ) : null}
       </GroupCard>
 
-      {(onOpenUsage || onOpenAiLimits) && (memberFor(directory, member.id)?.role === 'owner' || memberFor(directory, member.id)?.role === 'admin') ? (
+      {isAdmin && (onOpenUsage || teamAiRow || onOpenAiLimits) ? (
         <GroupCard label="관리자 설정">
           {onOpenUsage ? (
             <ListRow title={AGENT_USAGE_COPY.report} accessory="chevron" onPress={onOpenUsage} testID="settings-agent-usage" />
           ) : null}
+          {teamAiRow}
           {onOpenAiLimits ? <TeamAiLimitsSettingRow onPress={onOpenAiLimits} /> : null}
         </GroupCard>
       ) : null}
