@@ -78,6 +78,7 @@ import { TerminalDock } from "@/features/work/TerminalDock";
 import { toggleDock, useDockState } from "@/features/workbench/local/dockState";
 import { isDesktop } from "@/lib/tauri";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
+import { WorkPlanDock } from "@/features/work/WorkPlanDock";
 import { usePersonalCall } from "@/features/chat/usePersonalCall";
 import { closeWorkPanel, useWorkPanelTarget } from "@/features/agents/workLogStore";
 import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
@@ -1208,6 +1209,15 @@ export function ChatShell() {
             aria-label="채널 도구"
             data-testid="channel-header-controls"
           >
+            {/* 계획 독 (#4578): 이 대화에서 지금 돌거나 마지막으로 돈 작업 세션의 계획이 있을 때만 선다.
+                없으면 자리도 남기지 않는다. 「모두 보기」는 기존 작업 세션 패널을 연다. */}
+            {stressCount === 0 && channelId !== null && (
+              <WorkPlanDock
+                workspaceId={workspaceId}
+                channelId={channelId}
+                onOpenSession={openWorkSession}
+              />
+            )}
             {/* TC-1 (#1758): 헤더 SquareTerminal 은 하단 터미널 도크만 연다.
                 채널 컨텍스트의 관전 진입은 도크가 승계한다. 이 testid 를
                 `open-work-panel` 로 남기면 게이트가 도크를 패널로 착각한다.
