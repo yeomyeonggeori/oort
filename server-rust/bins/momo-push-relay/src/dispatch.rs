@@ -33,15 +33,18 @@ const REQUIRED_KEYS: &[&str] = &[
 /// The closed reason vocabulary (ADR-0120 부록 A, Accepted 2026-10-02: five; the
 /// sixth, `work_run_done`, is ADR-0162 증보 3 D14 / #3517; the seventh, `thread_reply`,
 /// is ADR-0206 증보 1 F5 / #4889: a new reply in a thread the member follows, under the
-/// plain `momo.message` category).
+/// plain `momo.message` category; the eighth, `test_notification`, is ADR-0206 D11·D14 /
+/// #4341: the test push a member sends to their own devices, under the new `momo.system`
+/// category, with its own static body).
 /// `work_session_idle` is the 「작업 끝남」 push; the server decides who gets it
 /// (the starter only, turns of 60 s or more, not while looking) — the relay only
 /// checks the label is one it knows. `work_run_done` is the same push for a hosted
 /// agent's work run (the requester only), under the same `momo.work` category.
 ///
 /// **Deploy order:** ship this relay BEFORE the notifier that can emit
-/// `work_run_done` or `thread_reply`; an old relay answers an unknown reason with a
-/// closed-vocabulary refusal, so the notifier's first such dispatch would fail.
+/// `work_run_done`, `thread_reply` or `test_notification`; an old relay answers an unknown
+/// reason with a closed-vocabulary refusal, so the notifier's first such dispatch would fail
+/// (for a test push the diagnostics then say `relay_outdated` and nothing retries it).
 const ALLOWED_REASONS: &[&str] = &[
     "dm",
     "mention",
@@ -50,6 +53,7 @@ const ALLOWED_REASONS: &[&str] = &[
     "work_session_idle",
     "work_run_done",
     "thread_reply",
+    "test_notification",
 ];
 /// The closed category vocabulary. `momo.approval.open` is ADR-0204 D7 (#3928):
 /// an approval that must be opened in the app to be decided (one 「열어서 결정」
@@ -61,12 +65,17 @@ const ALLOWED_REASONS: &[&str] = &[
 /// permanently (a 400 is settled, not retried). An old *app* is the other way
 /// round and is safe: it cannot decode the category, fails open to the placeholder
 /// and shows no buttons.
+///
+/// `momo.system` is ADR-0206 D14·D15 (#4341): a push that names no conversation (today the
+/// test push, later a failed scheduled message). No action buttons, and the relay speaks the
+/// reason's own static body ([`static_body_for`]). Same deploy order as above.
 const ALLOWED_CATEGORIES: &[&str] = &[
     "momo.message",
     "momo.mention",
     "momo.approval",
     "momo.approval.open",
     "momo.work",
+    "momo.system",
 ];
 
 /// Does this category name an approval? Both approval categories carry
@@ -86,6 +95,7 @@ fn carries_approval_id(category: &str) -> bool {
 /// | `momo.approval` | `default` | An agent is waiting on your decision. |
 /// | `momo.approval.open` | `default` | The same wait, for an approval that is decided in the app (ADR-0204 D7). It is no quieter: the person is just as needed. |
 /// | `momo.work` | `default` | It reaches one person through the same judgment as the rows above: a work-session card in your DM or naming you, the owner-only `resume_offer` (itself an `approval_request` message), or the owner-only `work_session_idle` 「작업 끝남」. The category follows the message's shape, not its urgency, so a silent row would make a DM quieter just because it carries a card. |
+/// | `momo.system` | `default` | A push that names no conversation (ADR-0206 D14): the test push a member asked for, so a silent one would defeat its purpose — they pressed the button to find out whether the phone rings. |
 ///
 /// `"default"` is the system sound. The person's own settings (sound off for
 /// oort, Focus, the silent switch) are applied by the OS on the device, so the
@@ -106,7 +116,31 @@ const CATEGORY_SOUNDS: &[(&str, Option<&str>)] = &[
     ("momo.approval", Some("default")),
     ("momo.approval.open", Some("default")),
     ("momo.work", Some("default")),
+    ("momo.system", Some("default")),
 ];
+
+/// The alert title of every push: the product name, never a person or a channel.
+const STATIC_TITLE: &str = "oort";
+
+/// The alert body when a reason has no sentence of its own.
+const DEFAULT_BODY: &str = "새 알림";
+
+/// The reasons that speak a sentence of their own (ADR-0206 D14: the static body is a table by
+/// reason, not one constant). Every sentence is fixed text — there is no way to put a name, a
+/// channel title or a message into one, because the value is a `&'static str` and nothing here
+/// formats. An old app that cannot decode the new reason shows exactly this text (it fails open to
+/// the relay's alert), which is why 「시험 알림이에요」 is the body and not 「새 알림」: a person who
+/// pressed 「시험 알림」 and sees 「새 알림」 cannot tell their own test from any push.
+const REASON_BODIES: &[(&str, &str)] = &[("test_notification", "시험 알림이에요")];
+
+/// The static alert body for `reason`.
+fn static_body_for(reason: &str) -> &'static str {
+    REASON_BODIES
+        .iter()
+        .find(|(name, _)| *name == reason)
+        .map(|(_, body)| *body)
+        .unwrap_or(DEFAULT_BODY)
+}
 
 /// The [`CATEGORY_SOUNDS`] row for `category`. A category the table does not
 /// name is silent, and `decode_closed` never lets one through.
@@ -300,8 +334,8 @@ impl ApnsPayload {
         ApnsPayload {
             aps: Aps {
                 alert: ApsAlert {
-                    title: "oort",
-                    body: "새 알림",
+                    title: STATIC_TITLE,
+                    body: static_body_for(&dispatch.reason),
                 },
                 badge: dispatch.badge,
                 sound: sound_for(&dispatch.category),
@@ -429,6 +463,7 @@ mod tests {
             ("momo.approval.open", "approval_request", Some("default")),
             ("momo.work", "resume_offer", Some("default")),
             ("momo.work", "work_session_idle", Some("default")),
+            ("momo.system", "test_notification", Some("default")),
         ];
         let rows: BTreeSet<&str> = table.iter().map(|(category, _, _)| *category).collect();
         let allowed: BTreeSet<&str> = ALLOWED_CATEGORIES.iter().copied().collect();
@@ -579,13 +614,14 @@ mod tests {
     }
 
     #[test]
-    fn the_category_vocabulary_is_exactly_five() {
+    fn the_category_vocabulary_is_exactly_six() {
         let expected: BTreeSet<&str> = [
             "momo.message",
             "momo.mention",
             "momo.approval",
             "momo.approval.open",
             "momo.work",
+            "momo.system",
         ]
         .into_iter()
         .collect();
@@ -698,8 +734,89 @@ mod tests {
         assert_eq!(keys.len(), 7, "a reason adds a label, not a field");
     }
 
+    /// ADR-0206 D11·D14·D15 (#4341): the test push is the eighth reason under the new
+    /// `momo.system` category. Its envelope names no conversation, so the channel, message and
+    /// thread ids are the nil-UUID sentinel — which `validate` accepts (it checks "not empty" and
+    /// parses a UUID only for `approval_id`) — and its alert body is its own static sentence.
     #[test]
-    fn the_reason_vocabulary_is_exactly_seven() {
+    fn test_notification_is_a_system_dispatch_with_the_static_test_body() {
+        let nil = "00000000-0000-0000-0000-000000000000";
+        let json = DISPATCH_JSON
+            .replace("\"reason\":\"mention\"", "\"reason\":\"test_notification\"")
+            .replace(
+                "\"category\":\"momo.mention\"",
+                "\"category\":\"momo.system\"",
+            )
+            .replace("33333333-3333-3333-3333-333333333333", nil)
+            .replace("44444444-4444-4444-4444-444444444444", nil);
+        let dispatch = PushDispatch::decode_closed(json.as_bytes()).unwrap();
+        assert_eq!(dispatch.reason, "test_notification");
+        assert_eq!(dispatch.category, "momo.system");
+        let encoded = serde_json::to_vec(&ApnsPayload::from_dispatch(&dispatch)).unwrap();
+        let object: Value = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(object["aps"]["alert"]["title"], "oort");
+        assert_eq!(object["aps"]["alert"]["body"], "시험 알림이에요");
+        assert_eq!(object["aps"]["category"], "momo.system");
+        assert_eq!(object["aps"]["sound"], "default");
+        assert_eq!(object["aps"]["thread-id"], nil);
+        assert_eq!(object["momo"]["reason"], "test_notification");
+        assert_eq!(object["momo"]["channel_id"], nil);
+        assert_eq!(object["momo"]["message_id"], nil);
+        assert!(object["momo"].get("approval_id").is_none());
+        let keys: BTreeSet<&str> = object["momo"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(keys.len(), 7, "a reason adds a label, not a field");
+
+        // `momo.system` is not an approval category: its key set has no `approval_id`, so one
+        // riding on it is a field-set violation (refused before the value is even looked at).
+        let with_approval = json.replace(
+            "\"channel_id\"",
+            "\"approval_id\":\"55555555-5555-5555-5555-555555555555\",\"channel_id\"",
+        );
+        assert_eq!(
+            PushDispatch::decode_closed(with_approval.as_bytes()).unwrap_err(),
+            DispatchError::InvalidFieldSet
+        );
+    }
+
+    /// The static alert text is a table by reason, written out here rather than read from the
+    /// code: only `test_notification` has a sentence of its own, every other reason keeps 「새 알림」,
+    /// and the title is `oort` for all. Putting a channel or a person into a sentence is not
+    /// expressible (the body is a `&'static str`); changing a row turns this red.
+    #[test]
+    fn every_reason_speaks_its_static_body_and_only_the_test_has_its_own() {
+        let table: &[(&str, &str)] = &[
+            ("dm", "새 알림"),
+            ("mention", "새 알림"),
+            ("approval_request", "새 알림"),
+            ("resume_offer", "새 알림"),
+            ("work_session_idle", "새 알림"),
+            ("work_run_done", "새 알림"),
+            ("thread_reply", "새 알림"),
+            ("test_notification", "시험 알림이에요"),
+        ];
+        let names: BTreeSet<&str> = table.iter().map(|(reason, _)| *reason).collect();
+        let allowed: BTreeSet<&str> = ALLOWED_REASONS.iter().copied().collect();
+        assert_eq!(names, allowed, "every allowed reason needs a body row");
+        for (reason, body) in table {
+            let json = DISPATCH_JSON.replace(
+                "\"reason\":\"mention\"",
+                &format!("\"reason\":\"{reason}\""),
+            );
+            let dispatch = PushDispatch::decode_closed(json.as_bytes()).unwrap();
+            let encoded = serde_json::to_vec(&ApnsPayload::from_dispatch(&dispatch)).unwrap();
+            let object: Value = serde_json::from_slice(&encoded).unwrap();
+            assert_eq!(object["aps"]["alert"]["body"], *body, "{reason}");
+            assert_eq!(object["aps"]["alert"]["title"], "oort", "{reason}");
+        }
+    }
+
+    #[test]
+    fn the_reason_vocabulary_is_exactly_eight() {
         let expected: BTreeSet<&str> = [
             "dm",
             "mention",
@@ -708,6 +825,7 @@ mod tests {
             "work_session_idle",
             "work_run_done",
             "thread_reply",
+            "test_notification",
         ]
         .into_iter()
         .collect();

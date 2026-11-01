@@ -1294,6 +1294,18 @@ pub fn build_app(state: AppState) -> Router {
             get(routes::notification_rules::get_push_kinds)
                 .patch(routes::notification_rules::patch_push_kinds),
         )
+        // ADR-0206 D11 (#4341) — 「왜 알림이 안 와요」. The caller's own blockers as closed
+        // codes, and a test push to the caller's own devices that bypasses the push judgment.
+        // Self-scoped (the member is the credential's) and human-only: the agent-bearer
+        // allow-list does not list these paths, and each handler checks `require_human` again.
+        .route(
+            "/v1/workspaces/{ws}/notification-diagnostics",
+            get(routes::notification_diagnostics::get),
+        )
+        .route(
+            "/v1/workspaces/{ws}/notification-diagnostics/test",
+            post(routes::notification_diagnostics::test),
+        )
         // ADR-0196 / #3164 — team memory v2: digest + receipt reads and the
         // settings switches. Human-only; visibility and write authority are the
         // `mem_*` RLS policies (the transaction binds app.member_id).

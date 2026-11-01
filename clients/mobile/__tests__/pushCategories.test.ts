@@ -33,14 +33,14 @@ function identifiers(category: string): string[] {
 }
 
 describe('모든 카테고리가 등록된다', () => {
-  it('계약의 카테고리 다섯 개가 한 번씩, 그 밖에는 없다', () => {
+  it('계약의 카테고리 여섯 개가 한 번씩, 그 밖에는 없다', () => {
     const registered = PUSH_CATEGORY_ACTIONS.map(([id]) => id);
     expect([...registered].sort()).toEqual(Object.values(PUSH_CATEGORY).sort());
     expect(new Set(registered).size).toBe(registered.length);
-    expect(registered).toHaveLength(5);
+    expect(registered).toHaveLength(6);
   });
 
-  it('시스템에도 다섯 개 모두 등록한다', async () => {
+  it('시스템에도 여섯 개 모두 등록한다', async () => {
     const register = jest.mocked(Notifications.setNotificationCategoryAsync);
     register.mockClear();
 
@@ -111,6 +111,10 @@ describe('다른 카테고리의 버튼', () => {
     expect(identifiers(PUSH_CATEGORY.message)).toEqual([PUSH_ACTION.quickReply]);
     expect(identifiers(PUSH_CATEGORY.mention)).toEqual([PUSH_ACTION.quickReply]);
     expect(actionsOf(PUSH_CATEGORY.work)).toEqual([]);
+  });
+
+  it('시스템 알림(시험 알림)은 버튼이 없다 — 답할 것도 결정할 것도 없다 (ADR-0206 D14·D15)', () => {
+    expect(actionsOf(PUSH_CATEGORY.system)).toEqual([]);
   });
 
   it('앱을 여는 버튼은 「열어서 결정」 하나뿐이다', () => {

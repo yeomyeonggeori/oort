@@ -25,7 +25,8 @@ use momo_workspace_actions::team_ai_limits::{
     limits_status_in_tx, monthly_usd_availability_in_tx, OperatorCaps, UsdAvailability,
 };
 use momo_workspace_actions::team_ai_roles::{
-    changed_keys, memory_prerequisite_in_tx, roles_changed_audit,
+    changed_keys, memory_prerequisite_in_tx, record_notice_in_tx, roles_changed_audit,
+    take_screen_notice,
 };
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -150,12 +151,20 @@ pub async fn patch(
     Extension(principal): Extension<Principal>,
     Path(workspace): Path<String>,
     Query(query): Query<SettingsQuery>,
-    Json(request): Json<Value>,
+    Json(mut request): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
     require_human(&principal, "workspace settings require a human bearer")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     require_workspace_operator(&state, &principal, workspace_id).await?;
     let include_status = wants_limits_status(&query)?;
+    // ADR-0201 증보 v3 B3 (#5040): a screen may carry the consent record of the 「공급자로 가는
+    // 내용」 line on the PATCH it already sends. It is a record, not a setting — so it is taken out
+    // of the body HERE, before the bag logic below sees the body: it never reaches the allowlist,
+    // is never stored or echoed, and is not a "key patched" in the settings audit row. Judged
+    // before the transaction opens: a claim the server cannot make sense of is a 400 with nothing
+    // touched. A body without it (an older client) is exactly what it always was.
+    let notice = take_screen_notice(&mut request)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
     let caps = state.team_ai_caps;
     let member_id = principal.member_id;
     let via = audit_via_token_id(&principal);
@@ -237,6 +246,14 @@ pub async fn patch(
                     )
                     .await?;
                 }
+            }
+            // The consent record rides in the same transaction and is written HERE for the same
+            // reason as the rows above: a refusal below COMMITS, and the admin did read the line.
+            // It sits after the write, so a PATCH that was refused before writing (400, 409
+            // `team_memory_off`, 404) leaves no record of a switch that did not move. Nothing
+            // gates on it: an older client sends none, and every bundle is on from the start.
+            if let Some(claim) = &notice {
+                record_notice_in_tx(conn, workspace_id, member_id, via, claim).await?;
             }
             write_audit(
                 conn,

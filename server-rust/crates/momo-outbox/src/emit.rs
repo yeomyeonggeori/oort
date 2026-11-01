@@ -8,15 +8,16 @@ use uuid::Uuid;
 /// The complete `outbox_kind` enum, in the order the migrations create the
 /// labels: `broadcast`/`agent_job` (`001_init.sql:412`), `push_candidate`
 /// (`011_push_notifier.sql:42`), `webhook_delivery`
-/// (`033_event_subscription.sql:11`). Rendered to the exact DB label by
+/// (`033_event_subscription.sql:11`), `push_system`
+/// (`170_notification_diagnostics_test_push.sql`). Rendered to the exact DB label by
 /// [`OutboxKind::as_db_label`].
 ///
-/// Each label is one consumer's feed and the four claim `WHERE` clauses exclude
+/// Each label is one consumer's feed and the claim `WHERE` clauses exclude
 /// each other by construction (`011_push_notifier.sql:8-13`): the relay claims
 /// `broadcast` **only** ([`crate::relay::claim_broadcast_batch`]), the
-/// AgentWorker/gateway `agent_job`, the NotifierWorker `push_candidate`, the
-/// webhook consumer `webhook_delivery`. Adding a variant here therefore does not
-/// widen what the relay drains.
+/// AgentWorker/gateway `agent_job`, the NotifierWorker `push_candidate` (and, in a second
+/// drain, `push_system`), the webhook consumer `webhook_delivery`. Adding a variant here
+/// therefore does not widen what the relay drains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutboxKind {
     /// SoT → Centrifugo fan-out for a channel (`partition_key = channel_id`).
@@ -52,6 +53,17 @@ pub enum OutboxKind {
     PushCandidate,
     /// Outbound webhook delivery.
     WebhookDelivery,
+    /// A push that names no message (ADR-0206 D15, #4341): today the test notification a member
+    /// sends to their own devices, later a scheduled message that failed for a system reason.
+    /// The row is id-only (`momo.push_system.v1`: reason, member id, an optional channel id, a
+    /// reference id and the collapse id the producer chose) and is consumed by the notifier's
+    /// second push drain.
+    ///
+    /// **Writers (and no others):** [`crate::push::emit_push_system`], inside the transaction of
+    /// the write that earns the push — the test route's rate-limit window and `last_test_id` for
+    /// the test notification. `push_candidate` gains no writer from this kind: it is a different
+    /// feed with its own claim, so a push that names no message never runs through judgment.
+    PushSystem,
 }
 
 impl OutboxKind {
@@ -62,6 +74,7 @@ impl OutboxKind {
             OutboxKind::AgentJob => "agent_job",
             OutboxKind::PushCandidate => "push_candidate",
             OutboxKind::WebhookDelivery => "webhook_delivery",
+            OutboxKind::PushSystem => "push_system",
         }
     }
 }
@@ -115,11 +128,12 @@ mod tests {
             OutboxKind::WebhookDelivery.as_db_label(),
             "webhook_delivery"
         );
+        assert_eq!(OutboxKind::PushSystem.as_db_label(), "push_system");
     }
 
     /// The Rust enum must cover the DB enum completely: the conformance test
-    /// `migration_runner_applies_all_59_and_matches_schema` asserts the four
-    /// labels exist in Postgres, and this asserts the same four are nameable
+    /// `migration_runner_applies_all_59_and_matches_schema` asserts the five
+    /// labels exist in Postgres, and this asserts the same five are nameable
     /// here. A label present in exactly one of the two lists is the drift this
     /// pair exists to catch (`push_candidate` was missing until B1.6).
     #[test]
@@ -129,6 +143,7 @@ mod tests {
             OutboxKind::AgentJob,
             OutboxKind::PushCandidate,
             OutboxKind::WebhookDelivery,
+            OutboxKind::PushSystem,
         ]
         .iter()
         .map(|kind| kind.as_db_label())
@@ -139,9 +154,10 @@ mod tests {
                 "broadcast",
                 "agent_job",
                 "push_candidate",
-                "webhook_delivery"
+                "webhook_delivery",
+                "push_system"
             ],
-            "must equal enum_range(NULL::outbox_kind) after 001/011/033"
+            "must equal enum_range(NULL::outbox_kind) after 001/011/033/170"
         );
     }
 }
