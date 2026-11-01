@@ -47,6 +47,7 @@ import {
 } from '@momo/core/features/expressions/types';
 import {circleLook} from '../src/design/sheetModel';
 import {FixedScheme, paletteFor} from '../src/design/theme';
+import {ExpressionAddMenu} from '../src/features/expressions/ExpressionAddMenu';
 import {PhotoPickRow} from '../src/features/expressions/ExpressionChapter';
 import {PhoneExpressions} from '../src/features/expressions/ExpressionProvider';
 import {
@@ -848,6 +849,60 @@ describe('앨범 알약', () => {
     expect(screen.getByText(label)).toBeTruthy();
     expect(screen.queryByText(/MiB|KiB/)).toBeNull();
   });
+});
+
+// #5099 M4(검증 줄 2회차 화면): 같은 시트의 「＋ 추가하기」 알약(`ExpressionAddMenu` 의 `trigger`)이 라이트에서 시트와 같은 색(`surfaceMuted`,
+// 시트와 1.009)이라 팀 이모지를 늘리는 유일한 입구에 그릇이 없었다. #5065 가 앨범 알약(`PhotoPickRow`)에 준 시트 위 보조 알약 규칙을 따른다 —
+// 채움·가장자리는 시트 머리의 원과 같은 규칙(`circleLook`), 그림자는 `elevationRest`. 다크는 `circleLook` 채움이 옛 값과 같은
+// `surfaceMuted` 라 채움만 재면 옛 모양과 구분되지 않는다 — 가장자리 고리와 그림자가 다크를 가른다.
+describe('「＋ 추가하기」 알약', () => {
+  it.each(['light', 'dark'] as const)(
+    '시트 위 보조 알약이다 — 앨범 알약과 같은 채움·가장자리·그림자이고 시트 바탕과 같은 색이 아니다 (%s)',
+    scheme => {
+      render(
+        <FixedScheme scheme={scheme}>
+          <ExpressionAddMenu
+            canAdd
+            offline={false}
+            onImport={jest.fn()}
+            onMake={jest.fn()}
+          />
+          <PhotoPickRow
+            photo={null}
+            pickLabel="앨범에서 고르기"
+            changeLabel="다른 사진 고르기"
+            previewLabel="고른 사진"
+            onPick={jest.fn()}
+            testID="pick"
+          />
+        </FixedScheme>,
+      );
+      const palette = paletteFor(scheme);
+      const style = (testID: string) =>
+        StyleSheet.flatten(screen.getByTestId(testID).props.style);
+      const trigger = style('expression-add-menu');
+      const albumPill = style('pick');
+      // 같은 규칙이다: 두 알약의 그릇이 한 값이다(한쪽만 바뀌면 같은 시트의 두 알약이 갈린다).
+      for (const key of [
+        'backgroundColor',
+        'borderColor',
+        'borderWidth',
+        'boxShadow',
+      ] as const) {
+        expect({key, value: trigger[key]}).toEqual({key, value: albumPill[key]});
+      }
+      // 그 값이 설계 토큰이다(두 알약이 같이 틀려도 빨개진다).
+      expect(trigger.boxShadow).toBe(palette.elevationRest);
+      expect(trigger.backgroundColor).toBe(circleLook(palette).fill);
+      expect(trigger.borderColor).toBe(circleLook(palette).ring);
+      // 결함 그대로의 값이 아니다: 시트 바탕(`sheet`)과 같지 않다. 라이트는 시트와 1.009 로만 갈리던 옛 보조 채움이 아니라 `surface` 다.
+      expect(trigger.backgroundColor).not.toBe(palette.sheet);
+      if (scheme === 'light') {
+        expect(trigger.backgroundColor).toBe(palette.surface);
+        expect(trigger.backgroundColor).not.toBe(palette.surfaceMuted);
+      }
+    },
+  );
 });
 
 describe('웹과 같은 문장·같은 전송', () => {

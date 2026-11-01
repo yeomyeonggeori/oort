@@ -285,7 +285,7 @@ export const catalog: MessageCatalog = {
   "expressions.draft.rights": [
     {
       "type": 0,
-      "value": "I have the right to save this picture to the team. If it shows a person, only the named person approves."
+      "value": "I have the right to register this picture in the team library. If it shows a person, only the named person approves."
     }
   ],
   "expressions.draft.source": [
@@ -944,7 +944,7 @@ export const catalog: MessageCatalog = {
   "expressions.photo.cutoutUnchanged": [
     {
       "type": 0,
-      "value": "The background could not be removed. The preview below is what will be saved."
+      "value": "The background could not be removed. The preview below is what will be registered."
     }
   ],
   "expressions.photo.displayNameLabel": [
