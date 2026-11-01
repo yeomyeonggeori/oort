@@ -1407,12 +1407,15 @@ async fn w13_with_code_off_the_card_is_not_offered_or_said_and_a_named_card_is_r
         prompt.contains("코드·파일 작업"),
         "the old hand-off line stands: {prompt}"
     );
-    // The rest of the helper is untouched by this switch.
+    // The rest of the helper is untouched by this switch: the eleven cards, the two invites and the
+    // roles card — the same list `w1` pins. (This said `12` while the invites were not on the
+    // helper's list; #4965 put them there, so the count is the list, not a number.)
+    let mut expected: Vec<String> = ELEVEN.iter().map(|id| id.to_string()).collect();
+    expected.extend(INVITE_CARDS.iter().map(|id| id.to_string()));
+    expected.push(ROLES_CARD.to_string());
     assert_eq!(
-        offered_ids(&requests[0])
-            .expect("the proposal tool is offered")
-            .len(),
-        12
+        offered_ids(&requests[0]).expect("the proposal tool is offered"),
+        expected
     );
 
     assert!(suggestion_cards(&su, &t).await.is_empty(), "no card");

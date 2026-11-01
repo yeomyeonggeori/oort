@@ -4544,7 +4544,11 @@ mod tests {
     fn the_helper_door_fills_one_day_only_where_an_invite_names_no_expiry() {
         let day = json!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS);
         assert_eq!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS, 1);
-        assert!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS < DEFAULT_INVITE_EXPIRES_IN_DAYS);
+        // Checked when the crate compiles: the helper's default must stay shorter than the week the
+        // other doors keep.
+        const {
+            assert!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS < DEFAULT_INVITE_EXPIRES_IN_DAYS);
+        }
         // Omitted, null, and the other keys left alone.
         for omitted in [
             json!({}),
