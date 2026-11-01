@@ -154,8 +154,19 @@ async fn waiting(
     line: &Line<'_>,
     wait: Duration,
 ) -> Result<Processed, Rejected> {
+    if let Some(rejected) = refused_before_a_slot(&bytes) {
+        return Err(rejected);
+    }
     let permit = permit_waiting(semaphore, line, wait).await?;
     run_with_permit(bytes, path, deadline, permit).await
+}
+
+/// What the **parent** can refuse from a body's first bytes alone, before it takes a decoder slot,
+/// stands in the line or starts a child (#4900). A video is never decoded here (ADR-0218 D4 is on
+/// hold), so it ends as [`Rejected::Video`], the card, whether or not a slot is free: without this
+/// a video was told "busy" whenever both slots were taken, for something no slot could ever make.
+fn refused_before_a_slot(bytes: &[u8]) -> Option<Rejected> {
+    (sniff(bytes) == Sniffed::Video).then_some(Rejected::Video)
 }
 
 /// A decoder slot: a free one is taken without standing in line; otherwise the line has room for
@@ -186,6 +197,9 @@ async fn supervised(
     deadline: Duration,
     semaphore: Arc<Semaphore>,
 ) -> Result<Processed, Rejected> {
+    if let Some(rejected) = refused_before_a_slot(&bytes) {
+        return Err(rejected);
+    }
     // Admission happens before detaching: canceled callers cannot accumulate
     // an unbounded queue of 5 MiB inputs waiting behind the two codec slots.
     let permit = semaphore.try_acquire_owned().map_err(|_| Rejected::Busy)?;
@@ -1152,13 +1166,26 @@ mod tests {
     /// documented caps — and not one a test built for itself: two places, three seconds. (One
     /// test, because the slots and the line are the process's own and other tests of this
     /// binary must not meet it half-way.)
+    ///
+    /// The two numbers are written out below as numbers (#4900). A test that takes its
+    /// expectation from the constant it is testing is green for any value of that constant: the
+    /// caps are what the process promises a person who is waiting behind an agent, so they are
+    /// pinned here by value and every measurement uses the value, not the name.
     #[tokio::test]
     async fn process_waiting_stands_in_the_process_wide_line_for_two_places_and_three_seconds() {
+        assert_eq!(WAIT_MAX, Duration::from_secs(3), "the documented wait cap");
+        assert_eq!(WAITERS_MAX, 2, "the documented line");
+        let wide = Line::process_wide();
+        assert_eq!(
+            (wide.max, wide.longest),
+            (2, Duration::from_secs(3)),
+            "the line `process_waiting` stands in is built from those two numbers"
+        );
         let held = decoder_slots().acquire_many_owned(2).await.unwrap();
-        // A caller that would wait 40 s waits `WAIT_MAX`, and is told Busy.
+        // A caller that would wait 40 s waits three seconds, and is told Busy.
         let started = Instant::now();
         let outcome = tokio::time::timeout(
-            WAIT_MAX + Duration::from_secs(4),
+            Duration::from_secs(7),
             process_waiting(vec![0; 8], Duration::from_secs(40)),
         )
         .await;
@@ -1168,15 +1195,14 @@ mod tests {
             "a wait that ran out is Busy: {outcome:?}"
         );
         assert!(
-            waited >= WAIT_MAX - Duration::from_millis(200)
-                && waited < WAIT_MAX + Duration::from_secs(2),
-            "it stood in line for the cap and no longer: {waited:?}"
+            waited >= Duration::from_millis(2_800) && waited < Duration::from_secs(4),
+            "it stood in line for three seconds and no longer: {waited:?}"
         );
         // Two callers fill the line; the third is refused at once.
-        let queued: Vec<_> = (0..WAITERS_MAX)
+        let queued: Vec<_> = (0..2)
             .map(|_| tokio::spawn(process_waiting(vec![0; 8], Duration::from_secs(40))))
             .collect();
-        until_standing(Line::process_wide().standing, WAITERS_MAX).await;
+        until_standing(Line::process_wide().standing, 2).await;
         let started = Instant::now();
         let third = tokio::time::timeout(
             Duration::from_millis(500),
@@ -1202,6 +1228,117 @@ mod tests {
             );
         }
         until_standing(Line::process_wide().standing, 0).await;
+    }
+
+    fn mp4_video() -> Vec<u8> {
+        let mut b = vec![0, 0, 0, 0x18];
+        b.extend_from_slice(b"ftypisom\0\0\x02\0isomiso2mp41");
+        b.extend_from_slice(&[0; 64]);
+        b
+    }
+    fn quicktime_video() -> Vec<u8> {
+        let mut b = vec![0, 0, 0, 0x14];
+        b.extend_from_slice(b"ftypqt  \0\0\0\0qt  ");
+        b.extend_from_slice(&[0; 64]);
+        b
+    }
+    fn webm_video() -> Vec<u8> {
+        let mut b = vec![0x1a, 0x45, 0xdf, 0xa3, 0x9f];
+        b.extend_from_slice(&[0; 64]);
+        b
+    }
+
+    /// #4900: a video is refused by the parent from its first bytes. Both slots are taken and the
+    /// line has no room, and the answer is still the card (`Video`), at once: not `Busy` (nothing
+    /// a slot does could ever help it), not a place in the line, not a child process (the decoder
+    /// path is one that does not exist, so a spawn would have been `Invalid`). A picture in the
+    /// very same situation **is** `Busy`, which is what makes the first half mean something.
+    #[tokio::test]
+    async fn a_video_asks_for_no_slot_no_place_in_line_and_no_child() {
+        static STANDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let sem = Arc::new(Semaphore::new(2));
+        let held = sem.clone().acquire_many_owned(2).await.unwrap();
+        let no_room = || Line {
+            standing: &STANDING,
+            max: 0,
+            longest: Duration::from_secs(5),
+        };
+        let picture = png_still();
+        for (what, bytes) in [
+            ("mp4", mp4_video()),
+            ("quicktime", quicktime_video()),
+            ("webm", webm_video()),
+        ] {
+            let direct = tokio::time::timeout(
+                Duration::from_millis(150),
+                supervised(
+                    bytes.clone(),
+                    std::path::PathBuf::from(NO_DECODER),
+                    DEADLINE,
+                    sem.clone(),
+                ),
+            )
+            .await;
+            assert!(
+                matches!(direct, Ok(Err(Rejected::Video))),
+                "{what}: a video that is not allowed to wait is a card, not busy: {direct:?}"
+            );
+            let started = Instant::now();
+            let waited = tokio::time::timeout(
+                Duration::from_millis(150),
+                waiting(
+                    bytes,
+                    std::path::PathBuf::from(NO_DECODER),
+                    DEADLINE,
+                    sem.clone(),
+                    &no_room(),
+                    Duration::from_secs(40),
+                ),
+            )
+            .await;
+            assert!(
+                matches!(waited, Ok(Err(Rejected::Video))),
+                "{what}: a video that may wait is a card too, at once: {waited:?}"
+            );
+            assert!(started.elapsed() < Duration::from_millis(140), "{what}");
+            assert_eq!(STANDING.load(std::sync::atomic::Ordering::Acquire), 0);
+        }
+        // The control: the same slots and the same line, a picture. It is busy, in both doors.
+        let direct = tokio::time::timeout(
+            Duration::from_millis(150),
+            supervised(
+                picture.clone(),
+                std::path::PathBuf::from(NO_DECODER),
+                DEADLINE,
+                sem.clone(),
+            ),
+        )
+        .await;
+        assert!(matches!(direct, Ok(Err(Rejected::Busy))), "{direct:?}");
+        let waited = tokio::time::timeout(
+            Duration::from_millis(150),
+            waiting(
+                picture,
+                std::path::PathBuf::from(NO_DECODER),
+                DEADLINE,
+                sem.clone(),
+                &no_room(),
+                Duration::from_secs(40),
+            ),
+        )
+        .await;
+        assert!(matches!(waited, Ok(Err(Rejected::Busy))), "{waited:?}");
+        assert_eq!(sem.available_permits(), 0, "the slots were never touched");
+        drop(held);
+        assert_eq!(sem.available_permits(), 2);
+    }
+
+    fn png_still() -> Vec<u8> {
+        let mut out = Cursor::new(Vec::new());
+        DynamicImage::new_rgba8(8, 6)
+            .write_to(&mut out, ImageFormat::Png)
+            .unwrap();
+        out.into_inner()
     }
 
     #[test]

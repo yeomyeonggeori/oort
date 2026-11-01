@@ -1356,6 +1356,7 @@ owner 결정은 모두 Accepted다. 아래는 앞서 planner가 물은 질문 �
 한 번 등록한 그림을 반응·본문·단독 큰 전송에 같이 쓴다. `emoji.create`/`sticker.create` 두 행동 대신 **`expression.create` 한 행동**을 추가한다. 기존 `oort_action_propose`의 action/args에 [ADR-0218 부록 B](0218-workspace-expressions.md#4-부록-b--고정-json-schema--props--행동)의 `AgentAction`을 넣는다. 후보는 1~4개이며 각 후보는 name/displayName/tags/subjectMemberId와 닫힌 `image`를 가진다. 모든 후보의 subjectMemberId는 같아야 한다.
 
 - `image.source=attachment`: 런 요청자가 **같은 대화**에 올린 완료·미삭제 첨부만. V4의 `find_requester_attachment_in_tx` 판정을 재사용하되 **기록된 매체 종류만 쓰임새별로 나눈다**: 아바타는 PNG/JPEG/WebP 그대로이고, 표현 출처는 여기에 **GIF**(ADR-0218 D3의 전체 프레임 검사를 지난다)와 **영상**(MP4/MOV/WebM — `video_processing_unavailable` 카드로 끝난다, D4 보류)을 더한다. 기록된 종류는 첫 거름일 뿐 바이트가 최종 판정한다. 남의 사진·다른 대화·알 수 없는 id는 같은 invalid arguments다. 서버 보관 범위를 워크스페이스 전체로 넓히는 사실을 승인 카드에 표시한다.
+  - **id를 얻는 길(#4900, 와이어 가산)**: `oort_conversation_read`의 메시지별 `imageAttachments`가 표현 출처 종류(PNG/JPEG/WebP에 **GIF**·영상 MP4/MOV/WebM)의 완료 첨부 `id`·`name`·`mime`·`sizeBytes`를 싣는다. 키 이름은 그대로이고 종류는 `mime`으로 가른다. 채널 판정(승인 채널·멤버)·삭제 메시지 제외·Drive 파일 id 비노출은 그대로이고, 아바타 판정은 여전히 PNG/JPEG/WebP만 받는다(목록에 있다고 아바타 출처가 되지 않는다).
 - `generated`: 에이전트가 자기 비용으로 만든 PNG/JPEG/정지 WebP/GIF 바이트 + 생성 prompt. base64 디코드 후 ≤1 MiB. 서버/팀 AI 생성 호출은 없다. prompt는 에이전트가 쓴 평문으로 카드에 표시하고 감사·로그에는 싣지 않는다.
 - `url`: HTTPS 링크 한 개. **GIF 사이트도 허용**한다. 공급자 API·대량 수집·미디어 직접 렌더는 없다. `momo-unfurl`의 DNS/IP pin·redirect 매 hop·시간·크기 가드로 받는다. 출처는 query/fragment/credential 없는 원래 공개 host/path만 기록한다.
 

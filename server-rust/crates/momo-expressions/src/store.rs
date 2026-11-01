@@ -187,6 +187,14 @@ pub async fn sweep_expired(read_pool: &PgPool, write_pool: &PgPool) -> Result<u6
     Ok(bytes)
 }
 
+/// What a draft becomes when it expires (the TTL sweep, and an approval that closes): its state, no
+/// reason code, and **no agent words** — `origin.prompt` is blanked to JSON null (#4900, migration
+/// 167). The row stays as a record; the kind, the source link and the original-photo pointer stay
+/// with it. One fragment for both statements, so the two ways to expire cannot drift apart: the
+/// immutability trigger lets `origin` change only into exactly this.
+pub(crate) const EXPIRED_DRAFT_SET: &str =
+    "state='expired',code=NULL,origin=jsonb_set(origin,'{prompt}','null'::jsonb)";
+
 /// Tenant-scoped sweep: byte reclamation only, never activated receipts/names.
 pub async fn sweep_in_tx(conn: &mut PgConnection, ws: Uuid) -> Result<u64, Error> {
     catalog(conn, ws).await?;
@@ -194,7 +202,7 @@ pub async fn sweep_in_tx(conn: &mut PgConnection, ws: Uuid) -> Result<u64, Error
         .bind(ws).fetch_all(&mut *conn).await?;
     let n=sqlx::query("DELETE FROM expression_draft_image i USING expression_draft d WHERE (i.workspace_id,i.draft_id)=(d.workspace_id,d.id) AND d.workspace_id=$1 AND d.state <> 'activated' AND d.expires_at <= clock_timestamp()")
         .bind(ws).execute(&mut *conn).await?.rows_affected();
-    sqlx::query("UPDATE expression_draft SET state='expired',code=NULL WHERE workspace_id=$1 AND state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp()")
+    sqlx::query(&format!("UPDATE expression_draft SET {EXPIRED_DRAFT_SET} WHERE workspace_id=$1 AND state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp()"))
         .bind(ws).execute(&mut *conn).await?;
     // Held assemblies (G3.6) follow the same hour, but their header goes with the bytes (it holds the
     // agent's prompt; a draft's header is a record). See `assembly::sweep_in_tx`.

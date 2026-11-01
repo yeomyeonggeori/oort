@@ -26,13 +26,22 @@
 //! * **One refusal in, one reason out.** A refused mint, a 404 and every wrong shape of answer end as a
 //!   fixed reason code (`attachment_not_available`, `drive_unavailable`); no transport message is ever
 //!   returned. Those messages carry the request URL, and this URL carries a credential.
-//! * **Nothing about the address in a log line.** The two lines this module writes name the run and a cause
-//!   (a database error, or an `Unread`, the private failure type); an `Unread` is built **already scrubbed**
-//!   ([`redact_self_media_urls`]), so it cannot be logged unscrubbed by a later edit, and a source guard
+//! * **Nothing about the address in a log line.** The two lines this module writes name the run and a cause:
+//!   a database error, or an `Unread` — the private failure type, which holds **a fixed word and nothing the
+//!   transport said** (`timeout`, `connect`, `body` or `request` for a request that failed; a status number;
+//!   the name of the rule a 200 broke). reqwest's own message for a failed request carries the request URL —
+//!   the api's private origin, the workspace id and the token — so it is never turned into text here, scrubbed
+//!   or not: nothing of it is kept to leak. A source guard
 //!   (`no_log_line_names_the_address_the_token_or_the_drive_id`) keeps the address, the token and the Drive
-//!   id out of every `tracing` call.
+//!   id out of every `tracing` call, and a loop test in `momo-server` reads the line a real failed read
+//!   writes.
 //! * **Nothing followed, nothing proxied.** A redirect is an answer, not a place to go; the client
 //!   ignores `HTTP(S)_PROXY`.
+//! * **A private-shaped origin, said once at boot.** The origin is operator configuration and the single-use
+//!   token goes to wherever it points. The grammar ([`internal_origin`]) says what a well-formed origin looks
+//!   like, not where it may point, so [`internal_origin_looks_private`] judges the *shape* of the host, and
+//!   [`warn_if_internal_origin_is_not_private`] puts one line in the boot log when a well-formed origin does
+//!   not look like a place on a private network — naming the variable, never printing its value.
 //! * **Exactly the declared bytes.** A body longer or shorter than the row says, or not the declared
 //!   image, is refused; the read stops at the declared length plus nothing.
 
@@ -41,8 +50,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{
-    bytes_match_mime, mint_for_attachment_in_tx, mint_for_run_in_tx, redact_self_media_urls,
-    self_media_url, SELF_MEDIA_TTL_SECS,
+    bytes_match_mime, mint_for_attachment_in_tx, mint_for_run_in_tx, self_media_url,
+    SELF_MEDIA_TTL_SECS,
 };
 use momo_workspace_actions::profile_avatar::{
     AttachmentBytes, DriveAttachmentBytes, RequesterAttachment,
@@ -140,6 +149,62 @@ pub fn internal_origin(raw: &str) -> Option<&str> {
     Some(raw)
 }
 
+/// Whether `origin` — one [`internal_origin`] accepts — is **shaped** like a place on a private network, which
+/// is where the api's private address always is (Railway's `api.railway.internal`, compose's `api`, the
+/// loopback of host networking). Private-shaped is one of:
+///
+/// * a loopback or private IPv4 literal (`127/8`, `10/8`, `172.16/12`, `192.168/16`, plus `100.64/10`, the
+///   shared address space Tailscale and carrier-grade NAT use — not publicly routable either). Link-local
+///   (`169.254/16`, the cloud metadata address) is **not**: nothing legitimate points a worker there;
+/// * a bare single-label name (`api`, `localhost`);
+/// * a name under a suffix reserved for private use: `.internal`, `.local`, `.localhost`, `.home.arpa`.
+///
+/// Anything else — a public name (`example.com`), a public address (`203.0.113.9`) — is not, and neither is a
+/// host a resolver could read as an address in a form this check does not judge (`2130706433`, `0x7f.1`,
+/// `127.1`: a numeric last label). The scheme does not matter: `https://` to a public host is still a
+/// public host. A text the grammar refuses is not private-shaped either.
+///
+/// This is a *shape* check for a boot-time warning ([`warn_if_internal_origin_is_not_private`]), not a gate:
+/// a name can resolve anywhere, and the value is operator configuration that neither a request nor a model
+/// can touch.
+pub fn internal_origin_looks_private(origin: &str) -> bool {
+    let Some(origin) = internal_origin(origin) else {
+        return false;
+    };
+    let rest = origin
+        .strip_prefix("http://")
+        .or_else(|| origin.strip_prefix("https://"))
+        .unwrap_or(origin);
+    let host = rest.split_once(':').map_or(rest, |(host, _port)| host);
+    if let Ok(address) = host.parse::<std::net::Ipv4Addr>() {
+        let [first, second, _, _] = address.octets();
+        return address.is_loopback()
+            || address.is_private()
+            || (first == 100 && (64..=127).contains(&second));
+    }
+    let last_label = host.rsplit('.').next().unwrap_or(host);
+    if last_label.bytes().all(|byte| byte.is_ascii_digit()) || last_label.starts_with("0x") {
+        return false;
+    }
+    !host.contains('.')
+        || ["internal", "local", "localhost", "home.arpa"]
+            .iter()
+            .any(|suffix| host.ends_with(&format!(".{suffix}")))
+}
+
+/// The boot-log line for an origin that is well-formed but does not look private
+/// ([`internal_origin_looks_private`]): the variable's **name only**, never its value (a mistyped value may
+/// hold what must not be logged). Silent for a private-shaped origin.
+pub fn warn_if_internal_origin_is_not_private(origin: &str) {
+    if !internal_origin_looks_private(origin) {
+        tracing::warn!(
+            "OORT_API_INTERNAL_ORIGIN does not look like a private-network address (a single-label service \
+             name, *.internal or *.local, a loopback or private IP); the worker's one-time attachment address \
+             goes to wherever it points. Use the api's private address, never a public one"
+        );
+    }
+}
+
 /// The one client attachments are read with: it follows **no redirect** (a 3xx is an answer, not a place
 /// to go) and ignores `HTTP(S)_PROXY` (a proxy would resolve the private name out of our sight). `None`
 /// only if the TLS backend cannot start; every read then answers "unavailable" rather than falling back
@@ -154,13 +219,13 @@ pub(crate) fn attachment_client() -> Option<reqwest::Client> {
         .ok()
 }
 
-/// Why a read through the api gave nothing. Every variant is built so that **nothing it holds can carry
-/// the token**: a transport message is stored only after [`redact_self_media_urls`] (so deriving `Debug`
-/// is as safe as `Display`).
+/// Why a read through the api gave nothing. Every variant holds **a fixed word or a number, never anything
+/// the transport said**, so nothing it holds can carry the token, the workspace or the api's private origin
+/// (and deriving `Debug` is as safe as `Display`).
 #[derive(Debug)]
 enum Unread {
-    /// The request did not complete. The transport's own message, **already scrubbed**.
-    Transport(String),
+    /// The request did not complete: only the kind of failure ([`transport`]).
+    Transport(&'static str),
     /// The api answered, but not with the picture. Its one refusal is a 404.
     Status(u16),
     /// A 200 whose body is not exactly the declared picture.
@@ -181,15 +246,30 @@ impl Unread {
 impl std::fmt::Display for Unread {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Unread::Transport(message) => write!(formatter, "transport: {message}"),
+            Unread::Transport(kind) => write!(formatter, "transport: {kind}"),
             Unread::Status(status) => write!(formatter, "status {status}"),
             Unread::Shape(what) => write!(formatter, "shape: {what}"),
         }
     }
 }
 
+/// The **kind** of a failed request, as a fixed word. reqwest's own text for the failure carries the request
+/// URL — the api's private origin, the workspace id and the token — so no part of that text is kept: not
+/// scrubbed, not shortened, not at all (this is the only place a `reqwest::Error` is looked at, and it is
+/// only asked yes/no questions). The kind is what an operator needs: a network that is not there
+/// (`connect`) against one that is slow (`timeout`), a body that broke off (`body`) and a server that took
+/// the request and hung up or spoke nonsense (`request`).
 fn transport(error: &reqwest::Error) -> Unread {
-    Unread::Transport(redact_self_media_urls(&error.to_string()))
+    let kind = if error.is_timeout() {
+        "timeout"
+    } else if error.is_connect() {
+        "connect"
+    } else if error.is_body() || error.is_decode() {
+        "body"
+    } else {
+        "request"
+    };
+    Unread::Transport(kind)
 }
 
 /// `GET url` and return **exactly** `declared` bytes of the declared image, or why not. `url` carries the
@@ -275,7 +355,8 @@ impl AttachmentBytes for ApiAttachmentBytes<'_> {
         match fetch(client, &url, declared).await {
             Ok(bytes) => Ok(bytes),
             Err(unread) => {
-                // The cause is the scrubbed text; the url and the token are not in scope of this line.
+                // The cause is a fixed word or a number (`Unread`); the url and the token are not in scope of
+                // this line, and nothing the transport said was kept to put on it.
                 tracing::warn!(run_id = %run_id, cause = %unread, "attachment read through the api failed");
                 Err(unread.reason())
             }
@@ -584,26 +665,229 @@ mod tests {
         );
     }
 
-    /// RED proof (#4934): the transport's own message carries the request URL, token included. What the
-    /// failure holds is the scrubbed text — and the assertion is not vacuous: the URL **was** in the message.
+    /// A loopback server that takes the request and then says nothing — and keeps the connection open.
+    async fn silent_stub() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buffer = [0u8; 8192];
+                    let _ = socket.read(&mut buffer).await;
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                });
+            }
+        });
+        origin
+    }
+
+    /// RED proof (#4934, #4974): what a failed request leaves behind is the **kind** of failure and nothing
+    /// the transport said. reqwest's own message carries the request URL — the premise, checked first so the
+    /// assertions after it are not vacuous — and `Unread` keeps none of it: not the token, not the api's
+    /// origin or port, not the workspace in the path, not even `self-media`.
     #[tokio::test]
-    async fn a_transport_failure_holds_no_token() {
+    async fn a_transport_failure_holds_a_kind_and_nothing_the_transport_said() {
         let closed = {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             format!("http://{}", listener.local_addr().unwrap())
         };
         let target = url(&closed);
         let raw = client().get(&target).send().await.unwrap_err().to_string();
-        assert!(
-            raw.contains(TOKEN),
-            "the premise: reqwest's own message carries the token ({raw})"
-        );
-        let unread = fetch(&client(), &target, 4096).await.unwrap_err();
-        let text = unread.to_string();
-        assert!(matches!(unread, Unread::Transport(_)));
-        assert!(!text.contains(TOKEN), "{text}");
-        assert!(text.contains("<redacted>"), "{text}");
-        assert_eq!(unread.reason(), "drive_unavailable");
+        for part in [
+            TOKEN,
+            closed.as_str(),
+            "/v1/self-media/",
+            "00000000-0000-0000-0000-000000001234",
+        ] {
+            assert!(
+                raw.contains(part),
+                "the premise: reqwest's own message carries `{part}` ({raw})"
+            );
+        }
+
+        let (hangs_up, _) = stub(Vec::new()).await;
+        // the head promises the declared 4096 bytes and the connection ends after 100 of them
+        let mut breaks_off = b"HTTP/1.1 200 OK\r\ncontent-type: image/png\r\ncontent-length: 4096\r\nconnection: close\r\n\r\n"
+            .to_vec();
+        breaks_off.extend_from_slice(&png(100));
+        let (breaks_off, _) = stub(breaks_off).await;
+        let silent = silent_stub().await;
+        let quick = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .no_proxy()
+            .timeout(Duration::from_millis(150))
+            .build()
+            .expect("the quick client builds");
+        let cases = [
+            (
+                "nothing listens",
+                fetch(&client(), &target, 4096).await,
+                "connect",
+            ),
+            (
+                "the server takes the request and hangs up",
+                fetch(&client(), &url(&hangs_up), 4096).await,
+                "request",
+            ),
+            (
+                "the body breaks off before the declared length",
+                fetch(&client(), &url(&breaks_off), 4096).await,
+                "body",
+            ),
+            (
+                "the server never answers",
+                fetch(&quick, &url(&silent), 4096).await,
+                "timeout",
+            ),
+        ];
+        for (what, result, kind) in cases {
+            let unread = result.unwrap_err();
+            assert!(
+                matches!(unread, Unread::Transport(got) if got == kind),
+                "{what}: {unread}"
+            );
+            assert_eq!(unread.reason(), "drive_unavailable", "{what}");
+            let shown = format!("{unread} | {unread:?}");
+            assert_eq!(unread.to_string(), format!("transport: {kind}"), "{what}");
+            for part in [
+                TOKEN,
+                "http",
+                "127.0.0.1",
+                "self-media",
+                "0000-0000",
+                "/v1/",
+                "redacted",
+            ] {
+                assert!(!shown.contains(part), "{what}: `{part}` in {shown}");
+            }
+        }
+    }
+
+    /// What `tracing` says while `run` runs, as text: level, target and message, no time and no colour.
+    fn logged_while(run: impl FnOnce()) -> String {
+        #[derive(Clone, Default)]
+        struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Sink {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let sink = Sink::default();
+        let writer = sink.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_ansi(false)
+            .without_time()
+            .with_writer(move || writer.clone())
+            .finish();
+        tracing::subscriber::with_default(subscriber, run);
+        let bytes = sink.0.lock().unwrap().clone();
+        String::from_utf8(bytes).expect("log output is text")
+    }
+
+    #[test]
+    fn an_origin_is_private_shaped_only_when_it_names_a_place_on_a_private_network() {
+        for private in [
+            // compose's service name, the loopback of host networking, Railway's private name
+            "http://api:8080",
+            "http://api",
+            "http://localhost:8080",
+            "http://127.0.0.1:8080",
+            "http://127.1.2.3",
+            "http://api.railway.internal:8080",
+            "https://api.railway.internal",
+            // the reserved private suffixes
+            "http://db.internal",
+            "http://api.default.svc.cluster.local:8080",
+            "http://printer.local",
+            "http://app.localhost",
+            "http://nas.home.arpa",
+            // private IPv4 ranges, and the shared address space (Tailscale)
+            "http://10.0.0.5",
+            "http://10.255.255.255:1",
+            "http://172.16.0.1",
+            "http://172.31.255.254",
+            "http://192.168.1.2:8080",
+            "http://100.64.0.1",
+            "http://100.127.255.254:8080",
+        ] {
+            assert!(internal_origin_looks_private(private), "{private}");
+        }
+        for not_private in [
+            // public names and addresses, either scheme
+            "http://example.com",
+            "https://example.org",
+            "https://example.org:8443",
+            "http://203.0.113.9:8080",
+            "http://8.8.8.8",
+            // a dotted name is not private because of a word inside it
+            "https://api.internal.example",
+            "http://localhost.example.com",
+            "http://a.internal.com",
+            // one step outside each private range
+            "http://169.254.169.254",
+            "http://172.15.255.255",
+            "http://172.32.0.1",
+            "http://11.0.0.1",
+            "http://192.169.0.1",
+            "http://100.63.255.255",
+            "http://100.128.0.1",
+            "http://0.0.0.0:8080",
+            // a resolver may read these as an address nobody judged
+            "http://0x7f.1",
+            "http://0x7f000001",
+            "http://127.1",
+            "http://2130706433",
+            "http://16909060",
+            "http://01.2.3.4",
+            // not an origin at all
+            "",
+            "http://API:8080",
+            "http://api:8080/x",
+            "http://user@api:8080",
+            "api:8080",
+        ] {
+            assert!(!internal_origin_looks_private(not_private), "{not_private}");
+        }
+    }
+
+    /// RED proof (#4974): the boot line is **read from the log output**, not from the code that writes it — one
+    /// line, the variable's name, and none of the value; and nothing at all for an origin that looks private.
+    #[test]
+    fn the_boot_line_for_an_origin_that_is_not_private_names_the_variable_and_never_the_value() {
+        for private in [
+            "http://api:8080",
+            "http://api.railway.internal:8080",
+            "http://127.0.0.1:8080",
+        ] {
+            let logged = logged_while(|| warn_if_internal_origin_is_not_private(private));
+            assert_eq!(logged, "", "{private}");
+        }
+        for public in [
+            "http://example.com:8080",
+            "https://203.0.113.9",
+            "http://169.254.169.254",
+        ] {
+            let logged = logged_while(|| warn_if_internal_origin_is_not_private(public));
+            assert_eq!(logged.lines().count(), 1, "one line for {public}: {logged}");
+            assert!(
+                logged.contains("WARN") && logged.contains("OORT_API_INTERNAL_ORIGIN"),
+                "{logged}"
+            );
+            let host = public
+                .split("//")
+                .nth(1)
+                .and_then(|rest| rest.split(':').next())
+                .unwrap();
+            assert!(
+                !logged.contains(host) && !logged.contains(public),
+                "the value is not printed: {logged}"
+            );
+        }
     }
 
     /// The code above this test, as text, with the comment lines gone. A guard on the **source**: it cannot
@@ -671,11 +955,23 @@ mod tests {
                 );
             }
         }
-        // the transport message is turned into text in exactly one place, and that place scrubs it
-        assert_eq!(
-            source.matches("error.to_string()").count(),
-            1,
-            "a transport error is stringified only by `transport`"
+        // a transport error is never turned into text: `transport` asks it yes/no questions and keeps one of
+        // four fixed words, because reqwest's own message carries the request URL and the URL the token
+        for text_of_an_error in [
+            "error.to_string()",
+            "e.to_string()",
+            "redact_self_media_urls",
+            "Box::leak",
+            ".leak(",
+        ] {
+            assert!(
+                !source.contains(text_of_an_error),
+                "`{text_of_an_error}` in the production source"
+            );
+        }
+        assert!(
+            source.contains("Transport(&'static str)"),
+            "what a failed request keeps is a fixed word, by type"
         );
         let transport_fn = source
             .split("fn transport(")
@@ -684,10 +980,12 @@ mod tests {
             .split("\n}\n")
             .next()
             .unwrap();
-        assert!(
-            transport_fn.contains("redact_self_media_urls(&error.to_string())"),
-            "and `transport` scrubs it: {transport_fn}"
-        );
+        for forbidden in ["to_string", "format!", "{error", "{e}", "Display"] {
+            assert!(
+                !transport_fn.contains(forbidden),
+                "`transport` writes `{forbidden}`: {transport_fn}"
+            );
+        }
     }
 
     #[test]

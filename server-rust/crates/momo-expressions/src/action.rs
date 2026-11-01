@@ -376,7 +376,8 @@ pub async fn choose_in_tx(
 
 /// Reclaim the bytes of every candidate of `approval_id` that is not activated (reject,
 /// expiry, cancel, and the siblings of a registration). The draft rows stay as records; their
-/// state becomes `expired`. The approval's own row is already locked by the caller.
+/// state becomes `expired` and the agent's words in them (`origin.prompt`) are blanked
+/// ([`crate::store::EXPIRED_DRAFT_SET`], #4900). The approval's own row is already locked by the caller.
 pub async fn reclaim_in_tx(
     conn: &mut PgConnection,
     workspace: Uuid,
@@ -384,7 +385,7 @@ pub async fn reclaim_in_tx(
 ) -> Result<u64, Error> {
     let freed = sqlx::query("DELETE FROM expression_draft_image i USING expression_draft d WHERE (i.workspace_id,i.draft_id)=(d.workspace_id,d.id) AND d.workspace_id=$1 AND d.approval_id=$2 AND d.state IN ('ready','manual_upload_required')")
         .bind(workspace).bind(approval_id).execute(&mut *conn).await?.rows_affected();
-    sqlx::query("UPDATE expression_draft SET state='expired',code=NULL WHERE workspace_id=$1 AND approval_id=$2 AND state IN ('ready','manual_upload_required')")
+    sqlx::query(&format!("UPDATE expression_draft SET {} WHERE workspace_id=$1 AND approval_id=$2 AND state IN ('ready','manual_upload_required')", crate::store::EXPIRED_DRAFT_SET))
         .bind(workspace).bind(approval_id).execute(&mut *conn).await?;
     Ok(freed)
 }

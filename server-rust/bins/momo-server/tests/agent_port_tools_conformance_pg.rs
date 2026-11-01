@@ -17061,6 +17061,236 @@ async fn a_workspace_image_can_be_the_avatar_only_if_the_agent_could_read_it() {
     );
 }
 
+/// **The conversation read names a GIF and a video too** (#4900, ADR-0186 X8-1): an agent that was
+/// sent one has no other way to learn its id. The page's own gate is untouched: the same approved
+/// channel the agent belongs to, complete files only, nothing from a deleted message, no Drive id.
+/// A listed type is not an accepted one: an avatar still takes PNG/JPEG/WebP, so a GIF's id named
+/// as an avatar finds nothing, while the same id is an expression source.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_conversation_read_names_a_gif_and_a_video_inside_the_same_gate() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let drive = Arc::new(MemDrive3787::default());
+    let base = start_server_with_drive_3787(app.clone(), drive).await;
+    let client = reqwest::Client::new();
+    let (ws, human, channel, agent) = (
+        fixture.workspace,
+        fixture.human,
+        fixture.channel,
+        fixture.hosted_agent,
+    );
+    let message = |channel: Uuid, body: &str| {
+        let (su, body) = (su.clone(), body.to_string());
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO message (workspace_id, channel_id, author_member_id, seq, body, \
+                    client_msg_id, hlc_ts, hlc_count) \
+                 SELECT $1, $2, $3, COALESCE(max(seq),0)+1, $4, gen_random_uuid(), 1, 0 \
+                   FROM message WHERE channel_id = $2 RETURNING id",
+            )
+            .bind(ws)
+            .bind(channel)
+            .bind(human)
+            .bind(body)
+            .fetch_one(&su)
+            .await
+            .expect("seed message")
+        }
+    };
+    let visible_msg = message(channel, "moving things").await;
+    let private_msg = message(fixture.private_channel, "secret clip").await;
+    sqlx::query(
+        "UPDATE channel_seq SET last_seq = GREATEST(last_seq, \
+            (SELECT COALESCE(max(seq), 0) FROM message m WHERE m.channel_id = channel_seq.channel_id)) \
+          WHERE workspace_id = $1",
+    )
+    .bind(ws)
+    .execute(&su)
+    .await
+    .unwrap();
+    let attach = |channel: Uuid, msg: Option<Uuid>, drive_id: &str, mime: &str, status: &str| {
+        let (su, drive_id, mime, status) = (
+            su.clone(),
+            drive_id.to_string(),
+            mime.to_string(),
+            status.to_string(),
+        );
+        async move {
+            sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO attachment (workspace_id, channel_id, uploader_member_id, message_id, \
+                    drive_file_id, name, mime, size_bytes, status) \
+                 VALUES ($1,$2,$3,$4,$5,'file',$6,70,$7) RETURNING id",
+            )
+            .bind(ws)
+            .bind(channel)
+            .bind(human)
+            .bind(msg)
+            .bind(drive_id)
+            .bind(mime)
+            .bind(status)
+            .fetch_one(&su)
+            .await
+            .expect("seed attachment")
+        }
+    };
+    // What is named: the three that were already, and the four an expression may start from.
+    let mut named = Vec::new();
+    for (drive_id, mime) in [
+        ("d-png", "image/png"),
+        ("d-jpeg", "image/jpeg"),
+        ("d-webp", "image/webp"),
+        ("d-gif", "image/gif"),
+        ("d-mp4", "video/mp4"),
+        ("d-mov", "video/quicktime"),
+        ("d-webm", "video/webm"),
+    ] {
+        named.push((
+            attach(channel, Some(visible_msg), drive_id, mime, "complete").await,
+            mime,
+        ));
+    }
+    // What is not: other types, a file still uploading, a file on no message, a file in a channel
+    // the agent is not in.
+    let mut unnamed = Vec::new();
+    for (drive_id, mime, status) in [
+        ("d-heic", "image/heic", "complete"),
+        ("d-svg", "image/svg+xml", "complete"),
+        ("d-pdf", "application/pdf", "complete"),
+        ("d-gif-pending", "image/gif", "pending"),
+    ] {
+        unnamed.push(attach(channel, Some(visible_msg), drive_id, mime, status).await);
+    }
+    unnamed.push(attach(channel, None, "d-gif-unbound", "image/gif", "complete").await);
+    unnamed.push(
+        attach(
+            fixture.private_channel,
+            Some(private_msg),
+            "d-gif-hidden",
+            "image/gif",
+            "complete",
+        )
+        .await,
+    );
+    let read = || async {
+        let (status, read) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_conversation_read",
+            json!({"channelId": channel}),
+        )
+        .await;
+        assert_eq!(status, 200, "{read}");
+        read
+    };
+    let first = read().await;
+    let rendered = first.to_string();
+    let listed: Vec<(String, String)> = structured(&first)["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .flat_map(|message| {
+            message["imageAttachments"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .map(|entry| {
+            (
+                entry["id"].as_str().expect("id").to_string(),
+                entry["mime"].as_str().expect("mime").to_string(),
+            )
+        })
+        .collect();
+    for (id, mime) in &named {
+        assert!(
+            listed.contains(&(id.to_string(), mime.to_string())),
+            "{mime} {id} is named with its type: {listed:?}"
+        );
+    }
+    assert_eq!(
+        listed.len(),
+        named.len(),
+        "nothing else is named: {listed:?}"
+    );
+    for id in &unnamed {
+        assert!(
+            !rendered.contains(&id.to_string()),
+            "{id} must not be named"
+        );
+    }
+    assert!(
+        !rendered.contains("d-gif") && !rendered.contains("d-mp4"),
+        "no Drive id"
+    );
+
+    // Listing is not accepting: the avatar judgement is what it was, the expression one takes it.
+    let (gif, _) = named[3];
+    let avatar_source = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::find_visible_image_attachment_in_tx(
+                conn,
+                ws,
+                agent,
+                &[channel],
+                gif,
+                5 << 20,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    assert!(avatar_source.is_none(), "a GIF is no avatar source");
+    let by_use = |usage: momo_messaging::RequesterAttachmentUse| {
+        let app = app.clone();
+        async move {
+            tenant_3786(&app, ws, move |conn| {
+                Box::pin(async move {
+                    momo_messaging::find_requester_attachment_for_in_tx(
+                        conn,
+                        ws,
+                        human,
+                        channel,
+                        gif,
+                        5 << 20,
+                        usage,
+                    )
+                    .await
+                })
+            })
+            .await
+            .unwrap()
+        }
+    };
+    assert!(by_use(momo_messaging::RequesterAttachmentUse::Avatar)
+        .await
+        .is_none());
+    assert!(
+        by_use(momo_messaging::RequesterAttachmentUse::ExpressionSource)
+            .await
+            .is_some(),
+        "the same id is an expression source"
+    );
+
+    // A deleted message names nothing, whatever it carried.
+    sqlx::query("UPDATE message SET state = 'deleted' WHERE id = $1")
+        .bind(visible_msg)
+        .execute(&su)
+        .await
+        .unwrap();
+    let after = read().await.to_string();
+    for (id, mime) in &named {
+        assert!(
+            !after.contains(&id.to_string()),
+            "{mime}: a deleted message names nothing"
+        );
+    }
+}
+
 async fn agent_invite_state_3788(
     su: &PgPool,
     workspace: Uuid,
@@ -29032,12 +29262,28 @@ async fn expression_create_refuses_bad_proposals_and_keeps_its_budget_to_itself(
 }
 
 /// Every way a card closes takes its candidates' bytes with it: a late tap that settles it as
-/// expired, the TTL sweep, and a run that is cancelled.
+/// expired, the TTL sweep, and a run that is cancelled. The rows stay as records, but the words
+/// the agent wrote into them (`origin.prompt`) go with the bytes (#4900, migration 167).
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn expression_create_every_close_reclaims_the_candidate_bytes() {
     let w = world_4829().await;
     let ws = w.fixture.workspace;
+    // (state, JSON type of the prompt) of the one candidate of `approval`.
+    let record_of = |approval: Uuid| {
+        let su = w.su.clone();
+        async move {
+            sqlx::query_as::<_, (String, String)>(
+                "SELECT state, jsonb_typeof(origin -> 'prompt') FROM expression_draft WHERE approval_id=$1",
+            )
+            .bind(approval)
+            .fetch_one(&su)
+            .await
+            .unwrap()
+        }
+    };
+    let words = |state: &str| (state.to_string(), "string".to_string());
+    let blanked = |state: &str| (state.to_string(), "null".to_string());
     let mut propose = |name: &'static str| {
         let w = &w;
         async move {
@@ -29058,6 +29304,11 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
     let late = propose("late_tap").await;
     let pick = choice_4829(&card_4829(&w, late).await, 0);
     assert_eq!(open_images_4829(&w, late).await, 3);
+    assert_eq!(
+        record_of(late).await,
+        words("ready"),
+        "control: it holds the agent's words"
+    );
     sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
         .bind(late)
         .execute(&w.su)
@@ -29069,6 +29320,11 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
         open_images_4829(&w, late).await,
         0,
         "the expiry arm reclaims"
+    );
+    assert_eq!(
+        record_of(late).await,
+        blanked("expired"),
+        "the expiry arm keeps the record and blanks the words"
     );
     let registered: i64 =
         sqlx::query_scalar("SELECT count(*) FROM expression WHERE approval_id=$1")
@@ -29091,10 +29347,16 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
         .unwrap();
     clock.commit().await.unwrap();
     assert_eq!(open_images_4829(&w, swept).await, 3);
+    assert_eq!(record_of(swept).await, words("ready"));
     momo_expressions::sweep_expired(&w.su, &w.app)
         .await
         .unwrap();
     assert_eq!(open_images_4829(&w, swept).await, 0, "the sweep reclaims");
+    assert_eq!(
+        record_of(swept).await,
+        blanked("expired"),
+        "the sweep blanks the words"
+    );
     // (3) a run that is cancelled retires its pending card and the candidates with it.
     let cancelled = propose("cancel_run").await;
     let run: Uuid = sqlx::query_scalar("SELECT run_id FROM approval WHERE id=$1")
@@ -29103,6 +29365,7 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
         .await
         .unwrap();
     assert_eq!(open_images_4829(&w, cancelled).await, 3);
+    assert_eq!(record_of(cancelled).await, words("ready"));
     momo_db::with_tenant_tx(&w.app, ws, move |conn| {
         Box::pin(async move {
             momo_agent::approval::cancel_pending_approvals_for_run_in_tx(
@@ -29121,6 +29384,11 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
         open_images_4829(&w, cancelled).await,
         0,
         "a cancelled run reclaims"
+    );
+    assert_eq!(
+        record_of(cancelled).await,
+        blanked("expired"),
+        "a cancelled run blanks the words"
     );
     let _ = &mut propose;
 }
@@ -31456,6 +31724,252 @@ async fn expression_create_refuses_the_cheap_things_before_it_fetches_or_decodes
         approvals + 2,
         "the refused fourth wrote no approval"
     );
+}
+
+/// **What the request itself shows is refused before any candidate is touched** (#4900). A bad
+/// later candidate (a generated picture that is not base64, not a picture, over 1 MiB; a link the
+/// guard refuses from the start) and a face outside this conversation are known without the
+/// network, Drive or the decoder, so the candidates in front of them cost nothing: the numbers
+/// below are how many outside requests the server made and how many files it read from Drive. The
+/// answer is the one `InvalidArguments` the proposal's own transaction would give.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_refuses_what_the_request_shows_before_it_reads_fetches_or_decodes() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    // The requester's own file in this conversation: reading it is a Drive read.
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("mine".into(), tiny_png_3787());
+    let message = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    let attachment = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(message),
+        "mine",
+        "image/png",
+        "complete",
+    )
+    .await;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    let outsider: Uuid =
+        sqlx::query_scalar("SELECT id FROM member WHERE workspace_id=$1 AND handle LIKE 'out-%'")
+            .bind(ws)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    let reads = || {
+        w.drive
+            .content_reads
+            .load(std::sync::atomic::Ordering::SeqCst)
+    };
+    // The two things that cost something when they are reached: a file read from Drive and a link
+    // fetched from outside. Candidate names are made from their place in the list.
+    let from_drive = json!({"source": "attachment", "attachmentId": attachment.to_string()});
+    let from_link = json!({"source": "url", "url": "https://cdn.example.test/ok.gif"});
+    let list = |face: Value, images: Vec<Value>| {
+        Value::Array(
+            images
+                .into_iter()
+                .enumerate()
+                .map(|(place, image)| candidate_4829(&format!("n{place}"), face.clone(), image))
+                .collect(),
+        )
+    };
+    let bad_base64 =
+        json!({"source": "generated", "mime": "image/png", "dataBase64": "!!!!", "prompt": "p"});
+    let web_page = json!({"source": "generated", "mime": "image/png",
+        "dataBase64": b64_3787(b"<html><script>alert(1)</script></html>"), "prompt": "p"});
+    let as_video = json!({"source": "generated", "mime": "image/png",
+        "dataBase64": b64_3787(&mp4_4829()), "prompt": "p"});
+    // A real picture one byte over 1 MiB: it starts like a picture and its base64 is within the
+    // wire's own length bound, so only the byte limit can refuse it.
+    let too_big = json!({"source": "generated", "mime": "image/png",
+        "dataBase64": b64_3787(&padded_png_4820(&tiny_png_3787(), 1024 * 1024 + 1)), "prompt": "p"});
+    let plain_http = json!({"source": "url", "url": "http://cdn.example.test/x.gif"});
+    let private_literal = json!({"source": "url", "url": "https://127.0.0.1/x.gif"});
+    let cases: Vec<(&str, Value)> = vec![
+        (
+            "base64 that does not decode, third",
+            list(
+                Value::Null,
+                vec![from_drive.clone(), from_link.clone(), bad_base64],
+            ),
+        ),
+        (
+            "a web page as the picture, second",
+            list(Value::Null, vec![from_link.clone(), web_page]),
+        ),
+        (
+            "a video as the generated picture, second",
+            list(Value::Null, vec![from_drive.clone(), as_video]),
+        ),
+        (
+            "more than 1 MiB decoded, second",
+            list(Value::Null, vec![from_link.clone(), too_big]),
+        ),
+        (
+            "a plain-http link, second",
+            list(Value::Null, vec![from_drive.clone(), plain_http]),
+        ),
+        (
+            "a link private from the start, third",
+            list(
+                Value::Null,
+                vec![from_link.clone(), from_drive.clone(), private_literal],
+            ),
+        ),
+        (
+            "a face outside this conversation",
+            list(
+                json!(outsider.to_string()),
+                vec![from_drive.clone(), from_link.clone()],
+            ),
+        ),
+    ];
+    let (approvals, drafts) = (
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1",
+        )
+        .await,
+    );
+    let mut answers = Vec::new();
+    for (label, candidates) in cases {
+        let (fetched, read) = (fetches_4829(&w), reads());
+        let (status, refused) = propose_4829(&w, candidates).await;
+        assert_eq!(
+            (status, error_code(&refused)),
+            (400, -32602),
+            "{label}: {refused}"
+        );
+        assert_eq!(
+            fetches_4829(&w),
+            fetched,
+            "{label}: a link in front of it was fetched"
+        );
+        assert_eq!(
+            reads(),
+            read,
+            "{label}: a file in front of it was read from Drive"
+        );
+        answers.push((label, refused["error"].clone()));
+    }
+    assert!(
+        answers.iter().all(|(_, error)| *error == answers[0].1),
+        "every cheap refusal is the one answer, whichever rule it was: {answers:?}"
+    );
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        approvals,
+        "no approval was created"
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        drafts,
+        "no draft was stored"
+    );
+
+    // The controls: the same two sources, with nothing wrong, ARE read and fetched (so the zeros
+    // above are measurements), and a face that is in this conversation is not refused.
+    let (fetched, read) = (fetches_4829(&w), reads());
+    let (status, proposed) = propose_4829(
+        &w,
+        list(Value::Null, vec![from_drive.clone(), from_link.clone()]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    assert_eq!(
+        (fetches_4829(&w), reads()),
+        (fetched + 1, read + 1),
+        "a good proposal reads its file and fetches its link"
+    );
+    let (fetched, read) = (fetches_4829(&w), reads());
+    let (status, proposed) =
+        propose_4829(&w, list(json!(w.face.to_string()), vec![from_link.clone()])).await;
+    assert_eq!(
+        status, 200,
+        "a person who is in this conversation can be the face: {proposed}"
+    );
+    assert_eq!((fetches_4829(&w), reads()), (fetched + 1, read));
+}
+
+/// #4900: a video attachment is the manual card because of what it IS, decided from its first
+/// bytes, so it is the same card while every decoder slot is taken. It used to be told to come
+/// back (`Unavailable`), for something no slot could ever make. The control: a picture meeting the
+/// same two taken slots IS told to come back.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_makes_a_video_attachment_a_card_while_every_decoder_slot_is_taken() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    let message = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "영상").await;
+    let mut attach = Vec::new();
+    for (drive_id, mime, bytes) in [
+        ("busy_mp4", "video/mp4", mp4_4829()),
+        ("busy_png", "image/png", tiny_png_3787()),
+    ] {
+        w.drive.files.lock().unwrap().insert(drive_id.into(), bytes);
+        attach.push(
+            seed_attachment_4385(
+                &w.su,
+                ws,
+                w.fixture.channel,
+                w.requester,
+                Some(message),
+                drive_id,
+                mime,
+                "complete",
+            )
+            .await,
+        );
+    }
+    let source = |id: Uuid| json!({"source": "attachment", "attachmentId": id.to_string()});
+    let slots = momo_expressions::media::decoder_slots();
+    let held = (
+        slots.clone().acquire_owned().await.unwrap(),
+        slots.clone().acquire_owned().await.unwrap(),
+    );
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829("busy_clip", Value::Null, source(attach[0]))]),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "a video is a card even while every decoder slot is taken: {proposed}"
+    );
+    let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
+    let draft = &card["action"]["expression"]["candidates"][0];
+    assert_eq!(draft["state"], "manual_upload_required", "{draft}");
+    assert_eq!(draft["code"], "video_processing_unavailable", "{draft}");
+    assert!(draft["media"].is_null(), "{draft}");
+    // The control: a picture waits for a slot within the call's own deadline and is told to come
+    // back when none frees up.
+    let (status, refused) = propose_4829(
+        &w,
+        json!([candidate_4829("busy_pic", Value::Null, source(attach[1]))]),
+    )
+    .await;
+    assert_eq!(
+        (status, error_code(&refused)),
+        (409, -32004),
+        "control: a picture meets the taken slots: {refused}"
+    );
+    drop(held);
 }
 
 /// **One preparation per agent at a time.** Two runs of one agent propose at once with a slow
