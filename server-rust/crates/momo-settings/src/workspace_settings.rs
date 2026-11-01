@@ -32,7 +32,28 @@ pub const ALLOWED_SETTINGS_KEYS: &[&str] = &[
     // (`welcomePrompt`, `roleLabels`), so no proposal can flip the switch that bounds proposals.
     // `momo_agent::initiative::SETTING_AGENT_INITIATIVE` spells the same key for the reader.
     "agent_initiative",
+    // ADR-0201 증보 v3 B3 (#4964): which role bundles of the team AI are on. An object of
+    // booleans keyed by `TEAM_AI_ROLES_KEYS`; absent key or field = on. Written by an
+    // administrator here, or by the admin-approved card `team_ai.roles.set` — and
+    // deliberately **not** by an agent's `workspace.settings.update`, which names two other
+    // keys (B13-I9). `momo_agent::team_ai_roles::SETTINGS_KEY` spells the same key for the reader.
+    "team_ai_roles",
 ];
+
+/// The six role bundles that can be switched (`chat_read` is not one: it is always on). A copy of
+/// `momo_agent::team_ai_roles::SWITCHABLE_BUNDLES` — this crate cannot see `momo-agent` — held
+/// equal by a drift test in `momo-workspace-actions`.
+pub const TEAM_AI_ROLES_KEYS: [&str; 6] = [
+    "workspace_admin",
+    "invite_access",
+    "long_research",
+    "files",
+    "memory",
+    "code",
+];
+
+/// The settings key of the role switches.
+pub const TEAM_AI_ROLES_SETTING: &str = "team_ai_roles";
 
 /// Human membership roles that may carry a display override. Agent labels are
 /// a client `null` rule and are refused here.
@@ -82,6 +103,10 @@ pub enum WorkspaceSettingsInvalid {
     TeamAiWebSearchShape,
     #[error("agent_initiative must be true or false")]
     AgentInitiativeShape,
+    #[error("team_ai_roles must be an object of bundle → true or false")]
+    TeamAiRolesShape,
+    #[error("unknown team_ai_roles bundle: {0}")]
+    TeamAiRolesUnknownBundle(String),
     #[error("welcome_prompt must be a string")]
     WelcomePromptShape,
     #[error("welcome_prompt must be at most {MAX_WELCOME_PROMPT_CHARS} characters")]
@@ -120,6 +145,12 @@ pub fn merge_workspace_settings(
             continue;
         }
         validate_settings_value(key, value)?;
+        if key == TEAM_AI_ROLES_SETTING {
+            // The one key merged a level down (see [`merge_team_ai_roles`]).
+            let merged = merge_team_ai_roles(current.get(key), value);
+            current.insert(key.clone(), merged);
+            continue;
+        }
         current.insert(key.clone(), value.clone());
     }
     Ok(Value::Object(current))
@@ -155,8 +186,51 @@ fn validate_settings_value(key: &str, value: &Value) -> Result<(), WorkspaceSett
                 Err(WorkspaceSettingsInvalid::AgentInitiativeShape)
             }
         }
+        TEAM_AI_ROLES_SETTING => validate_team_ai_roles(value),
         _ => Err(WorkspaceSettingsInvalid::UnknownKey(key.to_string())),
     }
+}
+
+/// `team_ai_roles` as PATCH sends it: an object whose keys are among [`TEAM_AI_ROLES_KEYS`] and
+/// whose values are a literal `true`/`false`, or `null` (drop that field = back to on).
+/// `chat_read` is refused with every other unknown name: it is not a switch.
+fn validate_team_ai_roles(value: &Value) -> Result<(), WorkspaceSettingsInvalid> {
+    let Some(fields) = value.as_object() else {
+        return Err(WorkspaceSettingsInvalid::TeamAiRolesShape);
+    };
+    for (bundle, switch) in fields {
+        if !TEAM_AI_ROLES_KEYS.contains(&bundle.as_str()) {
+            return Err(WorkspaceSettingsInvalid::TeamAiRolesUnknownBundle(
+                bundle.clone(),
+            ));
+        }
+        if !(switch.is_boolean() || switch.is_null()) {
+            return Err(WorkspaceSettingsInvalid::TeamAiRolesShape);
+        }
+    }
+    Ok(())
+}
+
+/// The one key merged **a level down**. Every other nested value is replaced whole, but a patch
+/// of `{"files": false}` that replaced the object would flip every bundle it did not name back
+/// to *on* (an absent field reads as on) — an edit of one switch silently widening the others.
+/// So a named field replaces, an omitted field stays, a `null` field is dropped. The result holds
+/// booleans only; `existing` is read only if it is an object.
+fn merge_team_ai_roles(existing: Option<&Value>, patch: &Value) -> Value {
+    let mut merged = match existing {
+        Some(Value::Object(fields)) => fields.clone(),
+        _ => Map::new(),
+    };
+    if let Some(fields) = patch.as_object() {
+        for (bundle, switch) in fields {
+            if switch.is_null() {
+                merged.remove(bundle);
+            } else {
+                merged.insert(bundle.clone(), switch.clone());
+            }
+        }
+    }
+    Value::Object(merged)
 }
 
 fn validate_allowed_agent_models(value: &Value) -> Result<(), WorkspaceSettingsInvalid> {
@@ -480,6 +554,99 @@ mod tests {
             "null = back to on"
         );
         assert_eq!(cleared["role_labels"], json!({"owner": "대표"}));
+    }
+
+    /// ADR-0201 증보 v3 B3 (#4964): `team_ai_roles` is a writable object of booleans over the six
+    /// switchable bundles. `chat_read`, an unknown bundle, a non-boolean and a non-object are 400.
+    #[test]
+    fn team_ai_roles_takes_only_booleans_for_the_six_switchable_bundles() {
+        assert!(ALLOWED_SETTINGS_KEYS.contains(&"team_ai_roles"));
+        for bundle in TEAM_AI_ROLES_KEYS {
+            for on in [true, false] {
+                let merged =
+                    merge_workspace_settings(&json!({}), &json!({"team_ai_roles": {bundle: on}}))
+                        .unwrap_or_else(|error| panic!("{bundle}: {error}"));
+                assert_eq!(merged["team_ai_roles"], json!({bundle: on}));
+            }
+        }
+        for (patch, expected) in [
+            (
+                json!({"team_ai_roles": {"chat_read": false}}),
+                WorkspaceSettingsInvalid::TeamAiRolesUnknownBundle("chat_read".into()),
+            ),
+            (
+                json!({"team_ai_roles": {"chat_read": true}}),
+                WorkspaceSettingsInvalid::TeamAiRolesUnknownBundle("chat_read".into()),
+            ),
+            (
+                json!({"team_ai_roles": {"filez": true}}),
+                WorkspaceSettingsInvalid::TeamAiRolesUnknownBundle("filez".into()),
+            ),
+            (
+                json!({"team_ai_roles": {"files": "off"}}),
+                WorkspaceSettingsInvalid::TeamAiRolesShape,
+            ),
+            (
+                json!({"team_ai_roles": {"files": 0}}),
+                WorkspaceSettingsInvalid::TeamAiRolesShape,
+            ),
+            (
+                json!({"team_ai_roles": ["files"]}),
+                WorkspaceSettingsInvalid::TeamAiRolesShape,
+            ),
+            (
+                json!({"team_ai_roles": false}),
+                WorkspaceSettingsInvalid::TeamAiRolesShape,
+            ),
+        ] {
+            assert_eq!(
+                merge_workspace_settings(&json!({}), &patch),
+                Err(expected),
+                "{patch}"
+            );
+        }
+    }
+
+    /// A patch that names one switch moves that switch and no other: the object is merged a level
+    /// down, `null` drops a field (back to on), and `null` for the key drops the whole object.
+    #[test]
+    fn a_team_ai_roles_patch_moves_only_the_switches_it_names() {
+        let existing = json!({
+            "role_labels": {"owner": "대표"},
+            "team_ai_roles": {"files": false, "invite_access": false}
+        });
+        let merged =
+            merge_workspace_settings(&existing, &json!({"team_ai_roles": {"memory": false}}))
+                .unwrap();
+        assert_eq!(
+            merged["team_ai_roles"],
+            json!({"files": false, "invite_access": false, "memory": false}),
+            "the switches the patch did not name stay as they were"
+        );
+        assert_eq!(merged["role_labels"], json!({"owner": "대표"}));
+
+        let back_on = merge_workspace_settings(
+            &merged,
+            &json!({"team_ai_roles": {"files": true, "invite_access": null}}),
+        )
+        .unwrap();
+        assert_eq!(
+            back_on["team_ai_roles"],
+            json!({"files": true, "memory": false}),
+            "`true` replaces, `null` drops the field"
+        );
+
+        let cleared = merge_workspace_settings(&back_on, &json!({"team_ai_roles": null})).unwrap();
+        assert!(cleared.get("team_ai_roles").is_none());
+        assert_eq!(cleared["role_labels"], json!({"owner": "대표"}));
+
+        // A stored value that is not an object is replaced, not merged into.
+        let repaired = merge_workspace_settings(
+            &json!({"team_ai_roles": "everything"}),
+            &json!({"team_ai_roles": {"code": false}}),
+        )
+        .unwrap();
+        assert_eq!(repaired["team_ai_roles"], json!({"code": false}));
     }
 
     /// ADR-0181 D8 / #1960: `welcome_prompt` is a writable settings key.

@@ -566,7 +566,9 @@ services:
       MOMO_ENV: ${MOMO_ENV:-staging}
       # momo_worker — BYPASSRLS drain across tenants (bootstrap_roles.sql).
       WORKER_DATABASE_URL: postgres://momo_worker:${WORKER_POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
-      # #4791: read requester-owned profile images through the same archive as api.
+      # #4791: read requester-owned profile images through the same archive as api. Since #4934 this is the
+      # FALLBACK: with OORT_API_INTERNAL_ORIGIN (below, set by default) the worker reads them through the api
+      # instead and these four go unused. They are kept for a stack that unsets that origin.
       MOMO_DRIVE_ARCHIVE_BACKEND: ${MOMO_DRIVE_ARCHIVE_BACKEND:-}
       MOMO_DRIVE_SA_KEY_PATH: ${MOMO_DRIVE_SA_KEY_PATH:-}
       MOMO_DRIVE_SHARED_DRIVE_ID: ${MOMO_DRIVE_SHARED_DRIVE_ID:-}
@@ -586,6 +588,14 @@ services:
       # of the requester's attachment under it. Unset = no address is minted. Not MOMO_PUBLIC_BASE_URL: that reaches
       # api only (ADR-0205 D1). The same value goes to `hermes` below.
       OORT_SELF_MEDIA_ORIGIN: ${OORT_SELF_MEDIA_ORIGIN:-}
+      # #4934 (ADR-0151 증보 3): where this worker reaches the api on the PRIVATE network — a bare `http(s)://host[:port]`,
+      # the compose name of the api service, never the public edge. With it, the picture a person sent (the one the team AI
+      # turns into their profile image) is read THROUGH the api: the worker mints a single-use address for that one
+      # attachment and spends it at `{origin}/v1/self-media/…`, so the api — the only process every deployment shape is
+      # sure can open the archive — is what reads the file. `-` (no colon): unset gets the default, an explicitly empty
+      # value turns it off and the worker reads MOMO_DRIVE_* above as before. `docker-compose.host-network.yml` points it
+      # at 127.0.0.1.
+      OORT_API_INTERNAL_ORIGIN: ${OORT_API_INTERNAL_ORIGIN-http://api:8080}
       # #4820 C2b 3부 (ADR-0218 G3.7 (b)): the operator's attestation that the Hermes behind this worker runs strict media
       # delivery (the `hermes` service below does, and its lock gate refuses to start without it). The hosted expression door
       # opens ONLY on an exact `1`; empty or unset = the door is shut and a photo turn is an ordinary turn.
