@@ -684,6 +684,8 @@ describe('머리의 자리 — 닫기 X 는 오른쪽 위, 안쪽 장의 ‹ 는
   const SUB_PAGES: Record<SettingsSubPage, true> = {
     language: true,
     linkPreview: true,
+    teamAiHelper: true,
+    'ai-limits': true,
     usage: true,
     theme: true,
     deviceKey: true,

@@ -15,10 +15,10 @@
 
 use momo_mcp::{
     dispatch, dispatch_with_tools, reason_of_sentence, refusal_reason, tool_failure, ArtifactRule,
-    ArtifactViolation, AssembleParams, HttpRequest, HttpResponse, Outcome, ToolCall,
-    ToolCapability, ToolEra, ToolFailure, ToolView, JSON_CONTENT_TYPE, LEGACY_PROTOCOL_VERSION,
-    MAX_BODY_BYTES, MODERN_PROTOCOL_VERSION, REASON_OTHER, REASON_TOOL_ARTIFACTS, REFUSAL_REASONS,
-    TOOL_CATALOG, TOOL_INBOX_READ,
+    ArtifactViolation, AssembleParams, HttpRequest, HttpResponse, Outcome, RunEventViolation,
+    ToolCall, ToolCapability, ToolEra, ToolFailure, ToolView, JSON_CONTENT_TYPE,
+    LEGACY_PROTOCOL_VERSION, MAX_BODY_BYTES, MODERN_PROTOCOL_VERSION, REASON_OTHER,
+    REASON_TOOL_ARTIFACTS, REFUSAL_REASONS, TOOL_CATALOG, TOOL_INBOX_READ,
 };
 use serde_json::{json, Value};
 
@@ -471,9 +471,12 @@ fn every_tool_failure_has_a_token() {
         match failure {
             // The fixed sentence stays, so the token is the plain arguments one: the names it
             // carries travel in `error.data`, not in the sentence.
-            ToolFailure::InvalidArguments | ToolFailure::InvalidAssembleParams(_) => {
-                "tool_arguments"
-            }
+            // A refused `oort_run_event` report keeps the plain sentence too (its field and rule
+            // travel in `error.data`), so it is NOT `tool_artifacts` even though it carries the
+            // same two keys.
+            ToolFailure::InvalidArguments
+            | ToolFailure::InvalidAssembleParams(_)
+            | ToolFailure::InvalidRunEvent(_) => "tool_arguments",
             ToolFailure::InvalidArtifacts(_) => REASON_TOOL_ARTIFACTS,
             ToolFailure::NotAuthorized | ToolFailure::HandleRefused => "tool_not_authorized",
             ToolFailure::Unavailable => "tool_unavailable",
@@ -494,6 +497,10 @@ fn every_tool_failure_has_a_token() {
         }),
         ToolFailure::InvalidAssembleParams(
             AssembleParams::from_names(["presets"]).expect("a closed name"),
+        ),
+        ToolFailure::InvalidRunEvent(
+            RunEventViolation::on("activities.label", ArtifactRule::Forbidden, Some(0))
+                .expect("a closed field"),
         ),
         ToolFailure::NotAuthorized,
         ToolFailure::HandleRefused,

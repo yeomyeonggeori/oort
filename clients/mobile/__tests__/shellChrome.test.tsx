@@ -1,5 +1,6 @@
 import type {Member} from '@momo/core/lib/api';
 import {contrast} from '@momo/core/design/color';
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
@@ -20,6 +21,7 @@ import {DS2_COMBOS} from '../src/design/ds2Tokens';
 import {EASE_OUT, TAB_FADE_MS} from '../src/design/motion';
 import {GlassSurface, LiquidGlassAllowed, resetBlurSupportForTests, resetLiquidGlassSupportForTests} from '../src/design/glass';
 import {HOME_ICONS} from '../src/design/icons';
+import {__resetEntryDrafts} from '../src/lib/entryDrafts';
 import {setHapticMode} from '../src/lib/haptics';
 import {SHEET_RADIUS, SHEET_TOP} from '../src/design/PageSheet';
 import {GroupCard, InputPill} from '../src/design/sheetParts';
@@ -29,6 +31,8 @@ import {
   dragBody,
   imageSources,
   radioRows,
+  releaseReduceMotion,
+  setReduceMotion as setSheetReduceMotion,
 } from './fixtures/sheetContract';
 import {Avatar} from '../src/features/conversation/Avatar';
 import {
@@ -1404,6 +1408,66 @@ describe('새 채널 시트 — 공용 부품 (#4458)', () => {
     const sheet = StyleSheet.flatten(screen.getByTestId('page-sheet').props.style);
     expect(sheet.top).toBeUndefined();
     expect(sheet.height).toBeGreaterThan(0);
+  });
+});
+
+// 알림이 새 입구로 들어오면(#4667) + 가 연 시트도 걷힌다. 이름을 쓰던 시트라면 그 이름은 알림이 걷은 것이지 사람이 버린 것이 아니다.
+describe('새 채널 시트 — 알림이 걷어도 쓰던 이름은 남는다 (#4667)', () => {
+  beforeEach(async () => {
+    __resetEntryDrafts();
+    await setSheetReduceMotion(true); // 슬라이드 없이 바로 걷혀 「닫혔다」가 동기 단정이 된다
+  });
+  afterEach(() => {
+    releaseReduceMotion();
+  });
+
+  async function reopenNewChannel() {
+    openMenu();
+    fireEvent.press(await screen.findByTestId('plus-menu-channel'));
+    expect(screen.getByTestId('new-channel-sheet')).toBeTruthy();
+  }
+
+  it('이름과 공개 범위를 쓰던 중 시트가 걷히면, 다시 연 새 채널 시트가 그 이름과 범위로 선다', async () => {
+    await openNewChannel();
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'ops-room');
+    fireEvent.press(screen.getByTestId('new-channel-kind-private'));
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    await waitFor(() => expect(screen.queryByTestId('new-channel-sheet')).toBeNull());
+
+    await reopenNewChannel();
+    expect(screen.getByTestId('new-channel-name').props.value).toBe('ops-room');
+    expect(radioRows(within(screen.getByTestId('new-channel-kind')))).toEqual([
+      {testID: 'new-channel-kind-public', selected: false, checks: 0},
+      {testID: 'new-channel-kind-private', selected: true, checks: 1},
+    ]);
+  });
+
+  it('사람이 X 로 닫은 시트는 평소처럼 빈 채로 다시 선다 — 맡기는 것은 알림이 걷을 때뿐이다', async () => {
+    await openNewChannel();
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'ops-room');
+    fireEvent.press(screen.getByTestId('new-channel-close'));
+    await waitFor(() => expect(screen.queryByTestId('new-channel-sheet')).toBeNull());
+
+    await reopenNewChannel();
+    expect(screen.getByTestId('new-channel-name').props.value).toBe('');
+  });
+
+  it('이름을 쓰지 않았으면 맡길 것이 없다 — 공개 범위만 고친 시트는 기본값으로 다시 선다', async () => {
+    await openNewChannel();
+    fireEvent.press(screen.getByTestId('new-channel-kind-private'));
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    await waitFor(() => expect(screen.queryByTestId('new-channel-sheet')).toBeNull());
+
+    await reopenNewChannel();
+    expect(screen.getByTestId('new-channel-name').props.value).toBe('');
+    expect(radioRows(within(screen.getByTestId('new-channel-kind')))[0]).toMatchObject({
+      testID: 'new-channel-kind-public',
+      selected: true,
+    });
   });
 });
 

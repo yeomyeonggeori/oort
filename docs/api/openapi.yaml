@@ -5434,7 +5434,9 @@ paths:
         requested/decided, and the terminal with its closed code. There is no
         cursor and no raw sequence — each row carries a 1-based `ordinal` in this
         run's ledger only. The only free text is the agent-reported `stage`
-        marker (at most 80 characters; render as plain text). A run outside this
+        marker (at most 80 characters; render as plain text) — and, behind
+        `include=activity`, the agent's own activity labels, plan steps and activity
+        ids (ADR-0200 증보 7; see `include`). A run outside this
         workspace and a run in a channel the caller is not an active member of
         are the same 404. Runs of managed or BYOA agents have an empty ledger.
       security: [{bearerAuth: []}]
@@ -5448,15 +5450,21 @@ paths:
           in: query
           required: false
           description: >
-            A comma-separated subset of `doorbell` and `tools` (`include=doorbell,tools`).
+            A comma-separated subset of `doorbell`, `tools` and `activity`
+            (`include=doorbell,tools,activity`).
             `doorbell` adds the `doorbell_rung` rows (ADR-0200 증보 2026-10-14). `tools` adds
             the `tool_call` rows — the oort tools the agent called on this run, at most 100,
             with `tool`, `durationMs` and a closed `code` — plus `toolTally` and
-            `toolCallRowsCapped` (ADR-0200 증보 2026-10-15 T4). Without them those rows and
+            `toolCallRowsCapped` (ADR-0200 증보 2026-10-15 T4). `activity` adds what the agent
+            says it is doing (ADR-0200 증보 7): one `activity` row per activity id — the newest
+            state of each, at most 100 — and the newest `plan` row, plus `activityTally` and
+            `activityRowsTrimmed`. That text is the AGENT'S OWN REPORT: render it as untrusted
+            plain text with an "agent-reported" label, never beside the server-measured rows
+            (`tool_call`, `claimed`) as if oort had observed it. Without them those rows and
             fields are left out, so a client that predates the kinds keeps parsing the
-            ledger. Any other value is a 400; a server that predates `tools` answers 400 to
-            it, and a client then re-reads without it.
-          schema: {type: string, pattern: "^\\s*(doorbell|tools)?\\s*(,\\s*(doorbell|tools)?\\s*)*$"}
+            ledger. Any other value is a 400; a server that predates `tools` or `activity`
+            answers 400 to it, and a client then re-reads without it.
+          schema: {type: string, pattern: "^\\s*(doorbell|tools|activity)?\\s*(,\\s*(doorbell|tools|activity)?\\s*)*$"}
       responses:
         "200":
           description: The ledger.
@@ -5689,21 +5697,32 @@ paths:
       operationId: updateChannelNotificationPref
       summary: Mute or unmute push notifications for one channel.
       description: >
-        Active channel members only. `muted: true` stores an indefinite mute;
-        `muted: false` deletes the preference. Mute suppresses every push
-        reason, including mentions and approval requests, without changing
-        unread/read-state.
+        Active channel members only. `muted: true` stores a mute; `muted: false`
+        deletes the preference. Mute suppresses every push reason, including
+        mentions and approval requests, without changing unread/read-state.
 
-        ADR-0206 D7 and D12 contract draft: the body may instead carry `level`
-        (`all`, `mentions` or `none`) and, with a mute (`muted: true` or `level:
-        none`), `mutedUntilMs` (epoch ms, in the future and within 366 days: 400
-        `muted_until_in_past` or `muted_until_too_far`). Exactly one of `muted`
-        and `level` is required. `level: all` is refused for a DM channel (400
+        ADR-0206 D12 (#4343): a mute may end. With `muted: true`, `mutedUntilMs`
+        (epoch ms) is the moment it ends; omitted or null is open-ended, so the
+        original `{muted: true}` body is unchanged. The end must be after now and
+        at most 366 days away, judged on the database clock (400
+        `muted_until_in_past` or `muted_until_too_far`), and `mutedUntilMs` with
+        `muted: false` is a 400 (no code). A later write replaces the earlier
+        one whole, so a plain `{muted: true}` over a timed mute makes it
+        open-ended. Nothing sweeps an ended mute: every reader compares the end
+        with the clock when it reads. The answer, like the channel list's
+        `muted`, is the mute as it reads now: `mutedUntilMs` is present only
+        while a timed mute is in progress. The audit record
+        `notification_pref.updated` carries `muted` and `mutedUntilMs` (`null`
+        for an open-ended mute or an un-mute).
+
+        ADR-0206 D7 contract draft (the channel-level slice, not served yet):
+        the body may instead carry `level` (`all`, `mentions` or `none`), exactly
+        one of `muted` and `level`, and `level: none` takes `mutedUntilMs` like
+        `muted: true`. `level: all` is refused for a DM channel (400
         `level_not_applicable`). The mute is a layer over the level, so a timed
         mute returns to the earlier level when it ends, and the legacy `muted`
-        body touches only the mute layer. Until #4343 (`mutedUntilMs`) and the
-        channel-level slice land, the server accepts only `{muted}` and answers
-        422 to the new fields.
+        body touches only the mute layer. Until that slice lands the server
+        answers 422 to `level`.
       security:
         - bearerAuth: []
       parameters:
@@ -5723,7 +5742,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/NotificationPrefResponse"
         "400":
-          description: Invalid request body or identifiers.
+          description: >
+            Invalid identifiers, or a refused mute window: `muted_until_in_past`
+            (the end is not after now), `muted_until_too_far` (more than 366 days
+            away), or `mutedUntilMs` together with `muted: false` (no code).
           content:
             application/json:
               schema:
@@ -13235,6 +13257,37 @@ paths:
         something.
 
 
+        ADR-0201 addendum 2026-10-31 (v3) B4-2 (#4965) — **where the one-time
+        value goes depends on the door that raised the card**, read from the
+        stored `approval.payload.via_ai.source` (`team_ai`, written by the
+        server in the proposal transaction; neither the agent's tool call nor
+        this request can set it). A card the Agent Port raised is unchanged
+        (ADR-0186 V3-5). For a card the team AI ("oort 도우미") raised:
+        `invite.create` answers **no** `secretOnce` and the payload gets no
+        `secretClaim`; instead the same transaction writes ONE message into the
+        conversation the request came from, authored by the helper, whose body
+        is a fixed sentence and the link (`props.kind =
+        team_ai_invite_link`, `props.preview` = the sentence a notification
+        shows instead of the body, `props.announce = true` so the push
+        judgment sends this line to nobody; no link preview is ever made of
+        it), so the invite and its message exist together or not at all.
+        `agent.invite`
+        keeps the pairing code for the approver alone (`secretOnce`, this
+        response only, `no-store`) and writes nothing into the conversation;
+        `deliverSecretToAgent: true` on it is a 400 `deliver_secret_not_supported`.
+        The audit rows of both (`invite.created` / `agent.invited` and
+        `action.approved`) carry `via_ai` — tool names, call counts, tokens,
+        milliseconds, no text. A card of either action raised after the request
+        had read something (a workspace read, a web search) is refused at the
+        decision (409 `action_args_invalid`, audit `action.refused`
+        `team_ai_read_context`), as is one whose helper role bundle
+        (`invite_access`) is switched off (`team_ai_role_off`) and an
+        `invite.create` the helper raised for an admin role
+        (`team_ai_invite_role`: the helper's door raises member links only,
+        and a link it makes without numbers is 1 use for 1 day; the Agent
+        Port door is unchanged).
+
+
         ADR-0204 D6 (#3927) - besides an access token, this is the ONE route a
         `typ = push_action` token (`POST /v1/auth/push-action-token`) may call,
         and only in its own workspace. The token substitutes for the access
@@ -17210,10 +17263,12 @@ components:
                 send-now (409),
                 the failure reason that the row now carries: `author_inactive`,
                 `not_member`, `root_unavailable`, `attachment_unavailable`,
-                `send_error`, `not_allowed`; ADR-0206 (contract draft, notification
-                settings v2): 400 `confirmation_required`, `invalid_time_zone`,
-                `invalid_schedule`, `unknown_sound`, `muted_until_in_past`,
-                `muted_until_too_far`, `level_not_applicable`, `keyword_too_short`,
+                `send_error`, `not_allowed`; ADR-0206 D12 (#4343, channel mute with an
+                end): 400 `muted_until_in_past` (the end is not after now),
+                `muted_until_too_far` (more than 366 days away); ADR-0206 (contract
+                draft, notification settings v2): 400 `confirmation_required`,
+                `invalid_time_zone`, `invalid_schedule`, `unknown_sound`,
+                `level_not_applicable`, `keyword_too_short`,
                 `keyword_too_long`, `too_many_keywords`; 409 `no_device`; 429
                 `rate_limited` (the test push only); ADR-0215 D2 (#4593, the
                 password a person is choosing: `POST /v1/join`, `POST /v1/claim`,
@@ -19668,8 +19723,10 @@ components:
           type: string
           description: >
             `doorbell_rung` only with `include=doorbell`; `tool_call` only with
-            `include=tools`. Clients reject a ledger holding a kind they do not know.
-          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled, doorbell_rung, tool_call]
+            `include=tools`; `activity` and `plan` only with `include=activity`, folded to the
+            newest row per activity id and the newest plan. Clients reject a ledger holding a
+            kind they do not know.
+          enum: [queued, claimed, started, stage, paused, resumed, approval_requested, approval_decided, succeeded, failed, timed_out, cancelled, doorbell_rung, tool_call, activity, plan]
         stage:
           type: string
           maxLength: 80
@@ -19708,7 +19765,85 @@ components:
           minimum: 0
           maximum: 600000
           description: "`tool_call` only: how long the server took, measured by the server."
-        createdAtMs: {type: integer, format: int64}
+        activity:
+          allOf: [{$ref: "#/components/schemas/AgentRunActivity"}]
+          description: >
+            `activity` only (with `include=activity`): the newest state of one activity id.
+            Agent-reported untrusted plain text.
+        plan:
+          type: array
+          maxItems: 12
+          items: {$ref: "#/components/schemas/AgentRunPlanStep"}
+          description: >
+            `plan` only (with `include=activity`): the newest whole plan — an empty array means
+            the agent cleared it. Agent-reported untrusted plain text.
+        createdAtMs:
+          type: integer
+          format: int64
+          description: On an `activity` row, the time of its last update.
+
+    AgentRunActivity:
+      type: object
+      additionalProperties: false
+      required: [id, kind, status, n, startedAtMs]
+      description: >
+        One activity as the agent's newest report left it (ADR-0200 증보 7). Everything but
+        `kind` and `status` is the agent's own text or number; oort checked only its length and
+        characters, never its meaning.
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 32
+          pattern: "^[A-Za-z0-9_-]+$"
+          description: >
+            The agent's meaningless number-name for this activity (`a1`). Plain text, shown as
+            reported: it can still carry a word the agent should not have used.
+        kind:
+          type: string
+          enum: [run, edit, read, search, web, other, delegate]
+        label:
+          type: string
+          minLength: 1
+          maxLength: 40
+          description: >
+            The agent's name for the work, no `/` or backslash and no control characters. Absent: show the
+            kind. Untrusted plain text.
+        status: {type: string, enum: [in_progress, completed, failed]}
+        n:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          description: How many things the item bundles (twelve files read is 12); 1 when not reported.
+        startedAtMs:
+          type: integer
+          format: int64
+          description: The id's FIRST report. A run that has ended does not make an `in_progress` activity running.
+
+    AgentRunPlanStep:
+      type: object
+      additionalProperties: false
+      required: [text, status]
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 60
+          description: The agent's name for the step. Untrusted plain text.
+        status: {type: string, enum: [pending, in_progress, completed]}
+
+    AgentRunActivityTally:
+      type: object
+      additionalProperties: false
+      required: [kind, completed, failed]
+      description: >
+        The units of ENDED activities of one kind: for each activity id, its LAST report if it
+        ended counts `n`. The agent's own report, not a count oort made, and it survives the
+        100-row roll. A kind with nothing ended is left out.
+      properties:
+        kind: {type: string, enum: [run, edit, read, search, web, other, delegate]}
+        completed: {type: integer, format: int64, minimum: 0}
+        failed: {type: integer, format: int64, minimum: 0}
 
     AgentRunToolTally:
       type: object
@@ -19731,8 +19866,10 @@ components:
         runId: {type: string, format: uuid}
         events:
           type: array
-          maxItems: 300
-          description: At most 200 rows, plus at most 100 `tool_call` rows with `include=tools`.
+          maxItems: 401
+          description: >
+            At most 200 rows, plus at most 100 `tool_call` rows with `include=tools`, plus at most
+            100 `activity` rows and one `plan` row with `include=activity`.
           items: {$ref: "#/components/schemas/AgentRunEvent"}
         toolTally:
           type: array
@@ -19743,6 +19880,16 @@ components:
           description: >
             Present only with `include=tools`. True when calls were counted past the
             100-row cap (the tally holds more calls than there are `tool_call` rows).
+        activityTally:
+          type: array
+          description: Present only with `include=activity`; in the order run, edit, read, search, web, other, delegate.
+          items: {$ref: "#/components/schemas/AgentRunActivityTally"}
+        activityRowsTrimmed:
+          type: boolean
+          description: >
+            Present only with `include=activity`. True when `activityTally` counts more ended
+            units than the ended activities still shown — part of it survives only as a total
+            because the 100-row roll removed the rest.
 
     AgentRunCancelResponse:
       type: object
@@ -20883,8 +21030,10 @@ components:
           type: integer
           format: int64
           description: >
-            Epoch ms, present only while a timed mute is in progress (ADR-0206 D12
-            contract draft).
+            Epoch ms when the authenticated member's timed mute ends, present
+            only while that mute is in progress (ADR-0206 D12, #4343): omitted for
+            an open-ended mute, and once the end has passed (`muted` is false then
+            too). On the channel list, the DM list and the DM open answer alike.
         notificationLevel:
           type: string
           enum: [all, mentions, none]
@@ -20906,8 +21055,10 @@ components:
       type: object
       additionalProperties: false
       description: >
-        Exactly one of `muted` and `level` (ADR-0206 D7, D12 contract draft; only
-        `muted` is accepted until the slices land).
+        `muted`, with an optional `mutedUntilMs` (ADR-0206 D12, served since
+        #4343). `level` is the ADR-0206 D7 contract draft: exactly one of `muted`
+        and `level` once the channel-level slice lands; until then `level` is an
+        unknown field (422).
       oneOf:
         - required: [muted]
         - required: [level]
@@ -20925,8 +21076,11 @@ components:
           format: int64
           nullable: true
           description: >
-            Epoch ms when the mute ends. Only with `muted: true` or `level:
-            none`. Omitted or null is open-ended.
+            Epoch ms when the mute ends (ADR-0206 D12). Only with `muted: true`
+            (and `level: none` once that is served); with `muted: false` it is a
+            400. It must be after now and at most 366 days away, judged on the
+            database clock (400 `muted_until_in_past`, `muted_until_too_far`).
+            Omitted or null is open-ended. Not an integer: 422.
 
     NotificationPrefResponse:
       type: object
@@ -20942,7 +21096,9 @@ components:
         mutedUntilMs:
           type: integer
           format: int64
-          description: Epoch ms, present only while a timed mute is in progress (ADR-0206 D12 contract draft).
+          description: >
+            Epoch ms, present only while a timed mute is in progress (ADR-0206
+            D12, #4343); omitted for an open-ended mute and for an un-mute.
 
     PutAgentProviderPinRequest:
       type: object
@@ -25888,7 +26044,13 @@ components:
             workspace's system author (`kind: agent`, display name 「GitHub」) that
             wrote the line. A client draws the notification line only when
             `source` is `github` and the message's `authorMemberId` equals
-            `github_author_member_id`; a display name alone is not proof. On a `type: tool_result` row the props are
+            `github_author_member_id`; a display name alone is not proof.
+            ADR-0201 증보 v3 B4-2 (#4965): the team AI's invite-link message
+            carries `kind: team_ai_invite_link`, `preview` and `announce: true`
+            (a quiet line — the push judgment sends it to nobody). That marker
+            is **server-owned**: a REST send or a webhook that sends
+            `kind: team_ai_invite_link` (or `announce`) has it stripped, so a
+            person's message never reads as the helper's link message. On a `type: tool_result` row the props are
             `{call_id, output, is_error}` and `body` repeats `output`. ADR-0186
             addendum v6 R-b/R-d (#3982): approval settlement updates the existing
             `approval_request` card instead of inserting an execution, rejection,
@@ -27609,7 +27771,10 @@ components:
             expiry arms, so an overdue card is not settled by it). Not part of
             the idempotency key: a replay of an already-executed decision
             answers the original receipt even if it now carries `true`, and that
-            200 does not imply anything was delivered.
+            200 does not imply anything was delivered. ADR-0201 addendum v3 B4-2
+            (#4965): a card the team AI raised has no such choice — its
+            `agent.invite` shows the pairing code to the approver alone — so
+            `true` on it is the same 400 receipt.
 
     ApprovalDecisionReceipt:
       type: object
@@ -27695,7 +27860,12 @@ components:
             the same `actionId` and `ref` with this key **absent**. It is not
             in `approval.payload`, the card props, the audit row, the outbox or
             the server log either; the durable record of an invite is a sha256
-            written inside the minting statement.
+            written inside the minting statement. Absent for an `invite.create`
+            the team AI raised (ADR-0201 addendum v3 B4-2, #4965): its link is
+            written by the server into the conversation as the helper's one
+            message instead — the one exception to "nowhere else" — and is the
+            only place the link is; the pairing code of its `agent.invite`
+            stays here.
 
     WorkspaceActionRef:
       type: object

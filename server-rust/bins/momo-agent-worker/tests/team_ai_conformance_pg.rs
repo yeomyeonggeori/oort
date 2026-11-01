@@ -644,11 +644,14 @@ async fn an_action_outside_the_allow_list_makes_no_card() {
     reset_instance(&su).await;
     let t = seed(&su, &pool, true).await;
     seed_link(&su, t.owner_id).await;
+    // The two invites left this list with #4965 (B4): they are cards now. What stays outside is
+    // the helper's own access widening (B4-6), a role change that has no executor (B4-5), the box
+    // (ADR-0210) and a declared-only action.
     for banned in [
-        "invite.create",
-        "agent.invite",
         "hosted.channels.grant",
         "member.role.set",
+        "host.session.open",
+        "webhook.create",
     ] {
         let provider =
             Arc::new(MockChatProvider::echo().with_tool_calls([propose(banned, json!({}))]));

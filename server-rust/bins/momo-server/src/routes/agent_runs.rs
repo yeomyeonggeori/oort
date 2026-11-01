@@ -95,12 +95,12 @@ use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    AgentRunActiveCountsDto, AgentRunActivePageResponse, AgentRunActiveQuery, AgentRunBundleDto,
-    AgentRunCancelResponse, AgentRunEventDto, AgentRunEventsQuery, AgentRunEventsResponse,
-    AgentRunHistoryQuery, AgentRunListQuery, AgentRunPageResponse, AgentRunProgressDto,
-    AgentRunProgressPageResponse, AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto,
-    AgentRunSummaryPageResponse, AgentRunToolTallyDto, AgentRunVisibleCountsDto, AheadRunDto,
-    CreateAgentRunRequest,
+    AgentRunActiveCountsDto, AgentRunActivePageResponse, AgentRunActiveQuery, AgentRunActivityDto,
+    AgentRunActivityTallyDto, AgentRunBundleDto, AgentRunCancelResponse, AgentRunEventDto,
+    AgentRunEventsQuery, AgentRunEventsResponse, AgentRunHistoryQuery, AgentRunListQuery,
+    AgentRunPageResponse, AgentRunPlanStepDto, AgentRunProgressDto, AgentRunProgressPageResponse,
+    AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto, AgentRunSummaryPageResponse,
+    AgentRunToolTallyDto, AgentRunVisibleCountsDto, AheadRunDto, CreateAgentRunRequest,
 };
 use crate::error::ApiError;
 use crate::routes::run_bundle::run_bundles_in_tx;
@@ -128,6 +128,9 @@ const BRANCH_LIMIT: usize = 512;
 const HOSTED_CONNECTION_NOT_ACTIVE: &str = "hosted_connection_not_active";
 const HOSTED_CHANNEL_NOT_APPROVED: &str = "hosted_channel_not_approved";
 const AGENT_PAUSED: &str = "agent_paused";
+
+/// ADR-0201 증보 v3 B5-10 (#4967): `type=work` aimed at the workspace's team AI (HTTP 409, before any write).
+const TEAM_AI_USE_MENTION: &str = "team_ai_use_mention";
 
 /// `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs`.
 pub async fn create(
@@ -187,6 +190,22 @@ pub async fn create(
                 else {
                     return Ok(Err(ApiError::not_found("active channel agent not found")));
                 };
+                // ADR-0201 증보 v3 B5-10 (#4967): the workspace's team AI is called by mention or DM,
+                // never by `type=work`. A work run has no trigger message, and the helper derives its
+                // requester from the trigger message alone (B13-I3) — so before this, the run was
+                // created and then closed without a word. It is a 409 with its own code instead, before
+                // any write: the channel agent was found (a stranger still gets the 404 above), and
+                // nothing about the helper is revealed to someone who could not address it anyway.
+                if momo_workspace_actions::team_ai::read_state_in_tx(conn, workspace_id)
+                    .await?
+                    .is_team_ai(agent_member_id)
+                {
+                    return Ok(Err(ApiError::coded(
+                        StatusCode::CONFLICT,
+                        TEAM_AI_USE_MENTION,
+                        "도우미는 멘션이나 DM으로 불러 주세요",
+                    )));
+                }
                 // ADR-0113 증보 2 E3 (#3938) — an agent that runs its owner's
                 // connected apps takes a work request from that human only
                 // (`type=work` passes the same predicate as a mention). Before
@@ -1173,6 +1192,23 @@ pub async fn events(
                 actor_member_id: event.actor_member_id.map(|id| id.to_string()),
                 tool: event.tool.clone(),
                 duration_ms: event.duration_ms,
+                activity: event.activity.as_ref().map(|activity| AgentRunActivityDto {
+                    id: activity.id.clone(),
+                    kind: activity.kind.clone(),
+                    label: activity.label.clone(),
+                    status: activity.status.clone(),
+                    n: activity.n,
+                    started_at_ms: epoch_ms(activity.started_at),
+                }),
+                plan: event.plan.as_ref().map(|steps| {
+                    steps
+                        .iter()
+                        .map(|step| AgentRunPlanStepDto {
+                            text: step.text.clone(),
+                            status: step.status.clone(),
+                        })
+                        .collect()
+                }),
                 created_at_ms: epoch_ms(event.created_at),
             })
             .collect(),
@@ -1188,13 +1224,25 @@ pub async fn events(
                 .collect()
         }),
         tool_call_rows_capped: ledger.tool_call_rows_capped,
+        activity_tally: ledger.activity_tally.map(|tally| {
+            tally
+                .into_iter()
+                .map(|row| AgentRunActivityTallyDto {
+                    kind: row.kind,
+                    completed: row.completed,
+                    failed: row.failed,
+                })
+                .collect()
+        }),
+        activity_rows_trimmed: ledger.activity_rows_trimmed,
     }))
 }
 
 /// `?include=` of the ledger read: a comma-separated subset of the closed set
-/// `{doorbell, tools}` (ADR-0200 증보 2026-10-14 / 2026-10-15 T4). Blank parts are
-/// ignored and a repeat is harmless; any other value is a 400, so a typo is never
-/// silently read as "nothing extra".
+/// `{doorbell, tools, activity}` (ADR-0200 증보 2026-10-14 / 2026-10-15 T4 / 증보 7 7-7).
+/// Blank parts are ignored and a repeat is harmless; any other value is a 400, so a typo is
+/// never silently read as "nothing extra". `activity` is what opens the agent-reported
+/// `activity` / `plan` rows; without it not one of them is returned.
 fn parse_run_event_include(raw: Option<&str>) -> Result<RunEventInclude, ApiError> {
     let mut include = RunEventInclude::default();
     for part in raw.unwrap_or("").split(',').map(str::trim) {
@@ -1202,9 +1250,10 @@ fn parse_run_event_include(raw: Option<&str>) -> Result<RunEventInclude, ApiErro
             "" => {}
             "doorbell" => include.doorbell = true,
             "tools" => include.tools = true,
+            "activity" => include.activity = true,
             _ => {
                 return Err(ApiError::bad_request(
-                    "include must be doorbell, tools or both",
+                    "include must be doorbell, tools, activity or a comma-separated mix of them",
                 ))
             }
         }
@@ -1814,37 +1863,59 @@ fn agent_job_broadcast_payload(
 mod tests {
     use super::*;
 
-    /// ADR-0200 증보 2026-10-15 T4: `include` is a comma set over `{doorbell, tools}`;
-    /// nothing asked for means neither, and an unknown token is a 400 (not "nothing").
+    /// ADR-0200 증보 2026-10-15 T4 / 증보 7 7-7: `include` is a comma set over
+    /// `{doorbell, tools, activity}`; nothing asked for means none of them (so the helper's
+    /// read tool, which reads with `RunEventInclude::default()`, never sees an agent's label),
+    /// and an unknown token is a 400 (not "nothing").
     #[test]
     fn the_ledger_include_is_a_closed_comma_set() {
         let none = RunEventInclude::default();
-        let doorbell = RunEventInclude {
-            doorbell: true,
-            tools: false,
+        assert_eq!(
+            none,
+            RunEventInclude {
+                doorbell: false,
+                tools: false,
+                activity: false,
+            },
+            "the default asks for nothing"
+        );
+        let only = |doorbell, tools, activity| RunEventInclude {
+            doorbell,
+            tools,
+            activity,
         };
-        let tools = RunEventInclude {
-            doorbell: false,
-            tools: true,
-        };
-        let both = RunEventInclude {
-            doorbell: true,
-            tools: true,
-        };
+        let doorbell = only(true, false, false);
+        let tools = only(false, true, false);
+        let activity = only(false, false, true);
+        let both = only(true, true, false);
+        let all = only(true, true, true);
         for (raw, want) in [
             (None, none),
             (Some(""), none),
             (Some(" "), none),
             (Some("doorbell"), doorbell),
             (Some("tools"), tools),
+            (Some("activity"), activity),
             (Some("doorbell,tools"), both),
             (Some("tools, doorbell"), both),
+            (Some("doorbell,tools,activity"), all),
+            (Some(" activity , tools , doorbell "), all),
             (Some("tools,tools"), tools),
+            (Some("activity,activity"), activity),
             (Some("tools,"), tools),
         ] {
             assert_eq!(parse_run_event_include(raw).unwrap(), want, "{raw:?}");
         }
-        for raw in ["tool", "TOOLS", "doorbell,args", "tools;doorbell", "*"] {
+        for raw in [
+            "tool",
+            "TOOLS",
+            "Activity",
+            "activities",
+            "plan",
+            "doorbell,args",
+            "tools;doorbell",
+            "*",
+        ] {
             assert!(parse_run_event_include(Some(raw)).is_err(), "{raw}");
         }
     }

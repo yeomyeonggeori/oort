@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "f7df48dfd8b49e4726564a1bc5290b12d032f278",
+  "baselineHead": "4096e496a0a3d9c4e11a6aa996f347bd984b9563",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -606,7 +606,7 @@
     "clients/web/src/features/notifications/permission.ts": 2,
     "clients/web/src/features/notifications/preference.ts": 3,
     "clients/web/src/features/onboarding/InviteStage.tsx": 8,
-    "clients/web/src/features/onboarding/OwnerOnboarding.tsx": 7,
+    "clients/web/src/features/onboarding/OwnerOnboarding.tsx": 5,
     "clients/web/src/features/onboarding/WorkspaceProfileStage.tsx": 21,
     "clients/web/src/features/onboarding/durableSlot.ts": 3,
     "clients/web/src/features/onboarding/fallbackHandle.ts": 5,
@@ -614,7 +614,7 @@
     "clients/web/src/features/onboarding/guide/KomettoGuide.tsx": 5,
     "clients/web/src/features/onboarding/guide/OnboardingFrame.tsx": 2,
     "clients/web/src/features/onboarding/guide/OnboardingGuideGallery.tsx": 37,
-    "clients/web/src/features/onboarding/ownerOnboardingStore.ts": 12,
+    "clients/web/src/features/onboarding/ownerOnboardingStore.ts": 11,
     "clients/web/src/features/onboarding/s1Copy.ts": 20,
     "clients/web/src/features/onboarding/s1Draft.ts": 4,
     "clients/web/src/features/onboarding/s2Copy.ts": 11,

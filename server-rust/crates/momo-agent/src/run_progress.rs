@@ -614,7 +614,8 @@ fn position_in_queue(
     (Some(index as i64 + 1), index as i64, ahead)
 }
 
-/// One ledger row as a client may see it. No `seq`, no free text beyond `stage`.
+/// One ledger row as a client may see it. No `seq`, no free text beyond the agent-reported
+/// `stage`, activity label / id and plan step.
 #[derive(Debug, Clone)]
 pub struct RunEventRow {
     /// 1-based position in this run's ledger — an ordering aid, not a counter of
@@ -637,18 +638,51 @@ pub struct RunEventRow {
     pub tool: Option<String>,
     /// `tool_call` rows only: the server-measured duration.
     pub duration_ms: Option<i32>,
+    /// `activity` rows only, and only with [`RunEventInclude::activity`]: the newest state of
+    /// one activity id (ADR-0200 증보 7 7-7). Agent-reported plain text.
+    pub activity: Option<ActivityView>,
+    /// `plan` rows only, and only with [`RunEventInclude::activity`]: the newest whole plan.
+    pub plan: Option<Vec<PlanStepView>>,
+    /// An `activity` row: the time of its last update (the first report is
+    /// [`ActivityView::started_at`]).
     pub created_at: DateTime<Utc>,
+}
+
+/// One activity as its newest report left it (ADR-0200 증보 7 7-7).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityView {
+    pub id: String,
+    pub kind: String,
+    pub label: Option<String>,
+    pub status: String,
+    pub n: i32,
+    /// The id's FIRST report, carried on every later row.
+    pub started_at: DateTime<Utc>,
+}
+
+/// One step of the newest plan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlanStepView {
+    pub text: String,
+    pub status: String,
 }
 
 /// Which opt-in ledger kinds a read asks for. Clients built before a kind reject a
 /// ledger holding a kind they do not know, so every kind added after the first
 /// release is returned only on request (`?include=`).
+///
+/// `Default` is **everything off**. That default is what keeps the helper's read tool
+/// (`get_agent_run`, `RunEventInclude::default()`) from ever carrying an agent's activity
+/// label or plan text into a model's context (ADR-0200 증보 7 7-7, 7-8).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RunEventInclude {
     /// `doorbell_rung` rows (ADR-0200 증보 2026-10-14).
     pub doorbell: bool,
     /// `tool_call` rows plus the tally (ADR-0200 증보 2026-10-15 T4).
     pub tools: bool,
+    /// `activity` / `plan` rows (folded to the newest) plus the activity total
+    /// (ADR-0200 증보 7 7-7).
+    pub activity: bool,
 }
 
 /// Per-tool totals of one run's oort calls (`agent_run_tool_tally`).
@@ -660,6 +694,15 @@ pub struct ToolTallyRow {
     pub duration_ms_sum: i64,
 }
 
+/// The units of ENDED activities of one kind (`agent_run_activity_tally`): the agent's own
+/// report, not a count oort made.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityTallyRow {
+    pub kind: String,
+    pub completed: i64,
+    pub failed: i64,
+}
+
 /// One run's ledger as a viewer may read it.
 #[derive(Debug, Clone, Default)]
 pub struct RunLedger {
@@ -669,6 +712,12 @@ pub struct RunLedger {
     /// `Some` only with `tools`: whether calls were counted past the row cap (the tally
     /// holds more calls than the ledger has `tool_call` rows).
     pub tool_call_rows_capped: Option<bool>,
+    /// `Some` only with [`RunEventInclude::activity`]: the ended units per kind, in the
+    /// vocabulary's order, kinds with nothing ended left out.
+    pub activity_tally: Option<Vec<ActivityTallyRow>>,
+    /// `Some` only with `activity`: the total is larger than the ended activities still
+    /// shown, so part of it survives only as a total (the roll removed the rest).
+    pub activity_rows_trimmed: Option<bool>,
 }
 
 /// The whole ledger of one run (≤ 200 rows), oldest first — or `None` when the run
@@ -677,8 +726,8 @@ pub struct RunLedger {
 ///
 /// `doorbell_rung` rows (ADR-0200 증보 2026-10-14) are returned only when the caller asks
 /// (`include_doorbell`): clients built before that kind reject a ledger with a kind they
-/// do not know, so the default read must stay what they can parse. `tool_call` rows are
-/// never returned here — see [`list_run_ledger_in_tx`].
+/// do not know, so the default read must stay what they can parse. `tool_call` and
+/// `activity`/`plan` rows are never returned here — see [`list_run_ledger_in_tx`].
 pub async fn list_run_events_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -694,6 +743,7 @@ pub async fn list_run_events_in_tx(
         RunEventInclude {
             doorbell: include_doorbell,
             tools: false,
+            activity: false,
         },
     )
     .await?
@@ -702,7 +752,13 @@ pub async fn list_run_events_in_tx(
 
 /// [`list_run_events_in_tx`] with every opt-in kind selectable. With `tools`, the
 /// `tool_call` rows (≤ 100 per run, ADR-0200 증보 T3) ride along — so the row bound is
-/// 300 — and the run's per-tool tally is returned beside them.
+/// 300 — and the run's per-tool tally is returned beside them. With `activity`, the
+/// agent-reported rows ride along **folded**: one row per activity id (the newest, ≤ 100
+/// ids by the roll of migration 168) and the newest plan (1) — so the bound is
+/// `200 + (tools: 100) + (activity: 100 + 1)` — beside the ended-unit total. The folded rows
+/// have their own bound and are not cut by the oldest-first `LIMIT` of the rest.
+///
+/// Without `activity` not one `activity` or `plan` row leaves this function.
 ///
 /// The rows carry `approval_id`, `actor_member_id` and `code` as stored, and this read touches
 /// no `approval` row: the team AI's `get_agent_run` calls it as `momo_helper_read`, a role with
@@ -740,6 +796,8 @@ pub async fn list_run_ledger_in_tx(
                 events: Vec::new(),
                 tool_tally: empty_tools(),
                 tool_call_rows_capped: include.tools.then_some(false),
+                activity_tally: include.activity.then(Vec::new),
+                activity_rows_trimmed: include.activity.then_some(false),
             }))
         }
         Some(false) => {}
@@ -749,12 +807,14 @@ pub async fn list_run_ledger_in_tx(
     } else {
         200
     };
+    // The agent-reported kinds never ride this query: they are folded and bounded below,
+    // and only when asked for.
     let rows = sqlx::query(
-        "SELECT row_number() OVER (ORDER BY e.seq) AS ordinal, \
-                e.kind, e.stage, e.code, e.approval_id, e.actor_member_id, \
+        "SELECT e.seq, e.kind, e.stage, e.code, e.approval_id, e.actor_member_id, \
                 e.tool, e.duration_ms, e.created_at \
            FROM agent_run_event e \
           WHERE e.workspace_id = $1 AND e.run_id = $2 \
+            AND e.kind NOT IN ('activity', 'plan') \
             AND ($3 OR e.kind <> 'doorbell_rung') \
             AND ($4 OR e.kind <> 'tool_call') \
           ORDER BY e.seq ASC \
@@ -767,25 +827,169 @@ pub async fn list_run_ledger_in_tx(
     .bind(limit)
     .fetch_all(&mut *conn)
     .await?;
-    let mut events = Vec::with_capacity(rows.len());
+    // `seq` orders the merge below and goes no further: it is not a client value.
+    let mut keyed: Vec<(i64, RunEventRow)> = Vec::with_capacity(rows.len());
     for row in &rows {
-        events.push(RunEventRow {
-            ordinal: row.try_get("ordinal")?,
-            kind: row.try_get("kind")?,
-            stage: row.try_get("stage")?,
-            code: row.try_get("code")?,
-            approval_id: row.try_get("approval_id")?,
-            actor_member_id: row.try_get("actor_member_id")?,
-            tool: row.try_get("tool")?,
-            duration_ms: row.try_get("duration_ms")?,
-            created_at: row.try_get("created_at")?,
+        keyed.push((
+            row.try_get("seq")?,
+            RunEventRow {
+                ordinal: 0,
+                kind: row.try_get("kind")?,
+                stage: row.try_get("stage")?,
+                code: row.try_get("code")?,
+                approval_id: row.try_get("approval_id")?,
+                actor_member_id: row.try_get("actor_member_id")?,
+                tool: row.try_get("tool")?,
+                duration_ms: row.try_get("duration_ms")?,
+                activity: None,
+                plan: None,
+                created_at: row.try_get("created_at")?,
+            },
+        ));
+    }
+
+    let mut activity_tally = None;
+    let mut activity_rows_trimmed = None;
+    if include.activity {
+        // The newest row of each activity id; `ORDER BY seq DESC LIMIT` keeps the newest
+        // ids if the roll ever left more than its bound.
+        let folded = sqlx::query(
+            "SELECT * FROM ( \
+               SELECT DISTINCT ON (e.activity_id) \
+                      e.seq, e.actor_member_id, e.activity_id, e.activity_kind, e.label, \
+                      e.activity_status, e.activity_n, e.activity_started_at, e.created_at \
+                 FROM agent_run_event e \
+                WHERE e.workspace_id = $1 AND e.run_id = $2 AND e.kind = 'activity' \
+                ORDER BY e.activity_id, e.seq DESC) newest \
+              ORDER BY newest.seq DESC \
+              LIMIT $3",
+        )
+        .bind(workspace_id)
+        .bind(run_id)
+        .bind(crate::run_activity::ACTIVITY_ROWS_PER_RUN)
+        .fetch_all(&mut *conn)
+        .await?;
+        let mut ended_shown: i64 = 0;
+        for row in &folded {
+            let status: String = row.try_get("activity_status")?;
+            let n: i32 = row.try_get("activity_n")?;
+            if status == "completed" || status == "failed" {
+                ended_shown += i64::from(n);
+            }
+            keyed.push((
+                row.try_get("seq")?,
+                RunEventRow {
+                    ordinal: 0,
+                    kind: "activity".to_string(),
+                    stage: None,
+                    code: None,
+                    approval_id: None,
+                    actor_member_id: row.try_get("actor_member_id")?,
+                    tool: None,
+                    duration_ms: None,
+                    activity: Some(ActivityView {
+                        id: row.try_get("activity_id")?,
+                        kind: row.try_get("activity_kind")?,
+                        label: row.try_get("label")?,
+                        status,
+                        n,
+                        started_at: row.try_get("activity_started_at")?,
+                    }),
+                    plan: None,
+                    created_at: row.try_get("created_at")?,
+                },
+            ));
+        }
+        // The newest whole plan; the older ones are superseded and never read.
+        let newest_plan = sqlx::query(
+            "SELECT e.seq, e.actor_member_id, e.plan, e.created_at \
+               FROM agent_run_event e \
+              WHERE e.workspace_id = $1 AND e.run_id = $2 AND e.kind = 'plan' \
+              ORDER BY e.seq DESC LIMIT 1",
+        )
+        .bind(workspace_id)
+        .bind(run_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+        if let Some(row) = newest_plan {
+            let stored: serde_json::Value = row.try_get("plan")?;
+            let steps = stored
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| {
+                            Some(PlanStepView {
+                                text: item.get("text")?.as_str()?.to_string(),
+                                status: item.get("status")?.as_str()?.to_string(),
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            keyed.push((
+                row.try_get("seq")?,
+                RunEventRow {
+                    ordinal: 0,
+                    kind: "plan".to_string(),
+                    stage: None,
+                    code: None,
+                    approval_id: None,
+                    actor_member_id: row.try_get("actor_member_id")?,
+                    tool: None,
+                    duration_ms: None,
+                    activity: None,
+                    plan: Some(steps),
+                    created_at: row.try_get("created_at")?,
+                },
+            ));
+        }
+        let total_rows = sqlx::query(
+            "SELECT kind, completed_units, failed_units \
+               FROM agent_run_activity_tally \
+              WHERE workspace_id = $1 AND run_id = $2",
+        )
+        .bind(workspace_id)
+        .bind(run_id)
+        .fetch_all(&mut *conn)
+        .await?;
+        let mut totals: Vec<ActivityTallyRow> = Vec::with_capacity(total_rows.len());
+        for row in &total_rows {
+            let completed: i64 = row.try_get("completed_units")?;
+            let failed: i64 = row.try_get("failed_units")?;
+            if completed > 0 || failed > 0 {
+                totals.push(ActivityTallyRow {
+                    kind: row.try_get("kind")?,
+                    completed,
+                    failed,
+                });
+            }
+        }
+        // The vocabulary's order, so the wire order does not depend on the table's.
+        totals.sort_by_key(|row| {
+            crate::run_activity::ACTIVITY_KINDS
+                .iter()
+                .position(|kind| *kind == row.kind)
+                .unwrap_or(usize::MAX)
         });
+        let counted: i64 = totals.iter().map(|row| row.completed + row.failed).sum();
+        activity_rows_trimmed = Some(counted > ended_shown);
+        activity_tally = Some(totals);
+    }
+
+    keyed.sort_by_key(|(seq, _)| *seq);
+    let mut events: Vec<RunEventRow> = Vec::with_capacity(keyed.len());
+    for (index, (_, mut event)) in keyed.into_iter().enumerate() {
+        event.ordinal = index as i64 + 1;
+        events.push(event);
     }
     if !include.tools {
         return Ok(Some(RunLedger {
             events,
             tool_tally: None,
             tool_call_rows_capped: None,
+            activity_tally,
+            activity_rows_trimmed,
         }));
     }
     let tally_rows = sqlx::query(
@@ -813,6 +1017,8 @@ pub async fn list_run_ledger_in_tx(
         events,
         tool_tally: Some(tally),
         tool_call_rows_capped: Some(counted > written),
+        activity_tally,
+        activity_rows_trimmed,
     }))
 }
 
@@ -974,6 +1180,8 @@ mod tests {
             actor_member_id: Some(actor_of(ordinal)),
             tool: None,
             duration_ms: None,
+            activity: None,
+            plan: None,
             created_at: at(ordinal),
         }
     }

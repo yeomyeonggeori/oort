@@ -50,10 +50,12 @@ import { LoopbackRefusalBanner, ProbeAnswer } from "@/features/settings/AiLinkSe
 import { AiOfflineBanner, AiPill } from "@/features/settings/aiAccountsParts";
 import { myAccountsBrowserTab } from "@/features/settings/aiMyAccountsModel";
 import { formatMoment } from "@/features/settings/oauthGrant";
+import { TeamAiLimitsSection } from "@/features/settings/TeamAiLimitsSection";
 import { TeamKeyForm } from "@/features/settings/TeamKeyForm";
 import { TeamUnlinkDialog } from "@/features/settings/TeamUnlinkDialog";
 import { PersonalKeysOperatorSection } from "./PersonalKeysOperatorSection";
 import { KeyConsoleLink } from "./KeyConsoleLink";
+import { TeamAiHelperCard } from "./TeamAiHelperCard";
 import { TeamAiNextStepCard } from "./TeamAiNextStepCard";
 
 // =============================================================================
@@ -498,6 +500,7 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
       </div>
 
       <TeamAiNextStepCard workspaceId={workspaceId} offline={offline} />
+      <TeamAiHelperCard workspaceId={workspaceId} />
       <section aria-labelledby="ai-team-defaults-title" className="flex min-w-0 flex-col" data-testid="ai-defaults">
         <div className="flex min-w-0 flex-wrap items-baseline gap-3 border-b border-line pb-2">
           <h3 id="ai-team-defaults-title" className="text-body font-bold text-ink">
@@ -513,6 +516,8 @@ export function AiTeamKeysPane({ offline, workspaceId, memberId }: PaneProps) {
           team={teamDefaults}
         />
       </section>
+
+      <TeamAiLimitsSection workspaceId={workspaceId} offline={offline} />
 
       {link && !denied && !linkQuery.isError && !linkQuery.isPending && (
         <PersonalKeysOperatorSection workspaceId={workspaceId} offline={offline} link={link} />

@@ -435,7 +435,119 @@ fn run_event_schema() -> Value {
             // ADR-0162 증보 3 D11. 1..=80 *characters* after trimming, no control /
             // bidi character, no `/` or backslash; the byte ceiling is the 4-byte-per-char
             // envelope of that, and the server applies the shared character rule.
-            "stage": nullable(text(MAX_STAGE_BYTES))
+            "stage": nullable(text(MAX_STAGE_BYTES)),
+            // ADR-0200 증보 7 — what the agent is doing, as closed kinds and short names.
+            "activities": nullable(run_activities_schema()),
+            "plan": nullable(run_plan_schema())
+        }
+    })
+}
+
+/// ADR-0200 증보 7 7-1 — the seven activity kinds `oort_run_event.activities` accepts.
+///
+/// **A deliberate second copy** of `momo_agent::ACTIVITY_KINDS`: this crate is protocol-only
+/// and may not depend on the domain crate, so the word lists are written here and one drift
+/// test in `momo-server` pins them (and the numbers below) to the domain's.
+pub const RUN_ACTIVITY_KINDS: [&str; 7] =
+    ["run", "edit", "read", "search", "web", "other", "delegate"];
+/// `activities[].status`.
+pub const RUN_ACTIVITY_STATUSES: [&str; 3] = ["in_progress", "completed", "failed"];
+/// `plan[].status`.
+pub const RUN_PLAN_STATUSES: [&str; 3] = ["pending", "in_progress", "completed"];
+/// Activities per call.
+pub const MAX_RUN_ACTIVITIES: u64 = 8;
+/// Plan steps.
+pub const MAX_RUN_PLAN_ITEMS: u64 = 12;
+/// `activities[].id`: the alphabet is narrow, so bytes and characters are the same.
+pub const MAX_ACTIVITY_ID_BYTES: u64 = 32;
+/// 40 characters at the UTF-8 worst case of 4 bytes each.
+pub const MAX_ACTIVITY_LABEL_BYTES: u64 = 160;
+/// 60 characters at the UTF-8 worst case of 4 bytes each.
+pub const MAX_PLAN_TEXT_BYTES: u64 = 240;
+
+fn run_activities_schema() -> Value {
+    json!({
+        "description": "What you are doing, as a list of CHANGES (at most 8 per call): send an \
+                        item when it starts or its state changes, and leave out an item that has \
+                        not changed (it keeps its last state). Close every activity you finish by \
+                        sending the same id as completed or failed. Name the kind of work, never \
+                        the work itself: no command, path, file name, commit title, secret, code, \
+                        copy of the request or reasoning in a label or an id. A call with a bad \
+                        item is refused whole and nothing is recorded: error.data names the \
+                        field; fix only that and send again with the same leaseHandle (at most \
+                        twice), then send stage and status alone.",
+        "type": "array",
+        "maxItems": MAX_RUN_ACTIVITIES,
+        "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "kind", "status"],
+            "properties": {
+                "id": {
+                    "description": "A meaningless number-name for one activity in this run (a1, \
+                                    r2); letters, digits, _ and - only, 1 to 32 characters. Not a \
+                                    file name and never a secret.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_ACTIVITY_ID_BYTES
+                },
+                "kind": {
+                    "description": "run (a command), edit (change files or data), read, search, \
+                                    web (a web request), other, or delegate (handing work to \
+                                    another agent or sub-bot).",
+                    "type": "string",
+                    "enum": RUN_ACTIVITY_KINDS
+                },
+                "label": nullable(json!({
+                    "description": "Optional: the name of the work, 1 to 40 characters, no / or \
+                                    backslash and no control characters. Left out, the viewer \
+                                    shows the kind. Length bounds count UTF-8 bytes, not \
+                                    characters.",
+                    "type": "string",
+                    "maxLength": MAX_ACTIVITY_LABEL_BYTES
+                })),
+                "status": {
+                    "description": "in_progress, completed or failed.",
+                    "type": "string",
+                    "enum": RUN_ACTIVITY_STATUSES
+                },
+                "n": nullable(json!({
+                    "description": "Optional: how many things this item bundles (twelve files \
+                                    read is 12); 1 to 100000, default 1.",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_REPORTED_COUNT
+                }))
+            }
+        }
+    })
+}
+
+fn run_plan_schema() -> Value {
+    json!({
+        "description": "Your whole plan, replacing the previous one: send every step each time, \
+                        send [] to clear it and leave the field out to keep the last one. At \
+                        most 12 steps. A step names the work, never the request or a secret.",
+        "type": "array",
+        "maxItems": MAX_RUN_PLAN_ITEMS,
+        "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["text", "status"],
+            "properties": {
+                "text": {
+                    "description": "The name of the step, 1 to 60 characters, same rules as a \
+                                    label. Length bounds count UTF-8 bytes, not characters.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": MAX_PLAN_TEXT_BYTES
+                },
+                "status": {
+                    "description": "pending, in_progress or completed.",
+                    "type": "string",
+                    "enum": RUN_PLAN_STATUSES
+                }
+            }
         }
     })
 }
@@ -1425,7 +1537,10 @@ pub const TOOL_CATALOG: [ToolDescriptor; 15] = [
                       file path, a commit title, code or a copy of the request in a stage: \
                       name the step. Progress belongs here and never in a chat message (no \
                       \"working on it\"). People see only what you report here and in \
-                      textDelta; oort cannot see your reasoning.",
+                      textDelta; oort cannot see your reasoning. The same call may also carry \
+                      activities (the kinds of work you are doing, sent as changes and closed \
+                      as completed or failed) and plan (your whole plan): their fields give the \
+                      rules, and one bad item refuses the whole call.",
         required_scope: SCOPE_RUNS_CALLBACK,
         schema: run_event_schema,
         annotations: None,
@@ -1764,6 +1879,12 @@ fn has_scope(scopes: &[String], required: &str) -> bool {
 /// [`ToolFailure::InvalidAssembleParams`], whose `error.data` names it from the closed list
 /// [`ASSEMBLE_PARAMS`] and never carries the value. A fault anywhere else (the shape of the call,
 /// an unknown key, the source, the prompt, the handle) stays the plain `InvalidArguments`.
+///
+/// **A third, by ADR-0200 증보 7 7-2 (#4656):** a fault inside `oort_run_event`'s new
+/// `activities` or `plan` answers [`ToolFailure::InvalidRunEvent`], whose `error.data` names
+/// the field from the closed list [`RUN_EVENT_REPORT_FIELDS`], the closed rule and the item's
+/// position — never the value. A fault anywhere else in the call (an unknown top-level key,
+/// the handle, `stage`, `status`) stays the plain `InvalidArguments`.
 pub fn validate_arguments(tool: &ToolDescriptor, arguments: &Value) -> Result<(), ToolFailure> {
     let mut path = String::new();
     match check(&tool.input_schema(), arguments, &mut path) {
@@ -1777,6 +1898,8 @@ pub fn validate_arguments(tool: &ToolDescriptor, arguments: &Value) -> Result<()
                 ToolFailure::InvalidArguments,
                 ToolFailure::InvalidAssembleParams,
             )),
+        Err(fault) if tool.name == TOOL_RUN_EVENT => Err(RunEventViolation::from_fault(&fault)
+            .map_or(ToolFailure::InvalidArguments, ToolFailure::InvalidRunEvent)),
         Err(_) => Err(ToolFailure::InvalidArguments),
     }
 }
@@ -1847,6 +1970,9 @@ fn declared_types(schema: &Value) -> Vec<&str> {
 struct Fault {
     path: String,
     rule: ArtifactRule,
+    /// The 0-based position of the array item that broke it, when one did (the innermost
+    /// array wins). A position is the caller's own count, not a value (ADR-0200 증보 7 7-2).
+    index: Option<usize>,
 }
 
 /// The coarse verdict of [`check`] on one schema — what the unit tests below
@@ -1861,6 +1987,7 @@ fn fault(path: &str, rule: ArtifactRule) -> Fault {
     Fault {
         path: path.to_owned(),
         rule,
+        index: None,
     }
 }
 
@@ -2031,8 +2158,11 @@ fn check(schema: &Value, value: &Value, path: &mut String) -> Result<(), Fault> 
             let element = schema
                 .get("items")
                 .ok_or_else(|| fault(path, ArtifactRule::Format))?;
-            for item in items {
-                check(element, item, path)?;
+            for (position, item) in items.iter().enumerate() {
+                check(element, item, path).map_err(|mut broken| {
+                    broken.index.get_or_insert(position);
+                    broken
+                })?;
             }
             Ok(())
         }
@@ -2304,6 +2434,80 @@ impl ArtifactViolation {
     }
 }
 
+/// The only field names an `oort_run_event` report refusal may carry (ADR-0200 증보 7 7-2).
+/// A closed list, so a name outside it cannot be said; the server pins it to
+/// `momo_agent::ReportField::ALL` in one drift test.
+pub const RUN_EVENT_REPORT_FIELDS: [&str; 9] = [
+    "activities",
+    "activities.id",
+    "activities.kind",
+    "activities.label",
+    "activities.status",
+    "activities.n",
+    "plan",
+    "plan.text",
+    "plan.status",
+];
+
+/// Which field of `oort_run_event.activities` / `plan` a report got wrong, how, and which
+/// item (ADR-0200 증보 7 7-2). Every part is `'static` or a number, so **no caller text can
+/// reach the wire, a log or an audit row through it** — not the bad value, and not an
+/// unknown key's name (that is a fault of the object that refused it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunEventViolation {
+    /// One of [`RUN_EVENT_REPORT_FIELDS`].
+    pub field: &'static str,
+    pub rule: ArtifactRule,
+    /// The 0-based position of the item (a count the caller made), `None` for a fault of the
+    /// whole array.
+    pub index: Option<u8>,
+}
+
+impl RunEventViolation {
+    /// A violation on one of the closed fields; `None` for any other path (those keep the
+    /// coarse answer).
+    pub fn on(field: &str, rule: ArtifactRule, index: Option<usize>) -> Option<Self> {
+        let field = RUN_EVENT_REPORT_FIELDS
+            .iter()
+            .copied()
+            .find(|known| *known == field)?;
+        Some(Self {
+            field,
+            rule,
+            index: index.and_then(|position| u8::try_from(position).ok()),
+        })
+    }
+
+    /// [`Self::on`] from the closed names the domain validator speaks (`ReportField::as_str`,
+    /// `ReportRule::as_str`): `None` for a name outside the closed lists.
+    pub fn from_names(field: &str, rule: &str, index: Option<usize>) -> Option<Self> {
+        let rule = match rule {
+            "enum" => ArtifactRule::Enum,
+            "required" => ArtifactRule::Required,
+            "forbidden" => ArtifactRule::Forbidden,
+            "range" => ArtifactRule::Range,
+            "format" => ArtifactRule::Format,
+            _ => return None,
+        };
+        Self::on(field, rule, index)
+    }
+
+    fn from_fault(fault: &Fault) -> Option<Self> {
+        Self::on(&fault.path, fault.rule, fault.index)
+    }
+
+    /// JSON-RPC `error.data`: `{field, rule, index?}`.
+    pub fn data(&self) -> Value {
+        let mut data = serde_json::Map::new();
+        data.insert("field".into(), json!(self.field));
+        data.insert("rule".into(), json!(self.rule.as_str()));
+        if let Some(index) = self.index {
+            data.insert("index".into(), json!(index));
+        }
+        Value::Object(data)
+    }
+}
+
 /// The canonical hyphenated uuid shape, case-insensitive. Purely lexical — the
 /// adapter still parses the value, and this only stops a wrong shape from
 /// reaching it.
@@ -2379,6 +2583,12 @@ pub enum ToolFailure {
     /// [`Self::InvalidArguments`], plus `error.data {code, params}` naming the wrong parameters
     /// from [`ASSEMBLE_PARAMS`] — names only, never a value — so the agent fixes exactly those.
     InvalidAssembleParams(AssembleParams),
+    /// `oort_run_event.activities` or `plan` broke its contract (ADR-0200 증보 7 7-2): the
+    /// same -32602 and the same fixed sentence as [`Self::InvalidArguments`], plus
+    /// `error.data {field, rule, index?}` naming the field from [`RUN_EVENT_REPORT_FIELDS`]
+    /// and the closed rule — never a value — so the agent fixes exactly that item and sends
+    /// the call again (nothing was recorded).
+    InvalidRunEvent(RunEventViolation),
     /// The connection, scope, membership or actor binding refused the call.
     NotAuthorized,
     /// #3903 — the same wire answer as [`Self::NotAuthorized`] (`not_authorized`,
@@ -2415,7 +2625,8 @@ impl ToolFailure {
             // stays migration 133's.
             ToolFailure::InvalidArguments
             | ToolFailure::InvalidArtifacts(_)
-            | ToolFailure::InvalidAssembleParams(_) => "invalid_arguments",
+            | ToolFailure::InvalidAssembleParams(_)
+            | ToolFailure::InvalidRunEvent(_) => "invalid_arguments",
             ToolFailure::NotAuthorized | ToolFailure::HandleRefused => "not_authorized",
             ToolFailure::Unavailable => "unavailable",
             ToolFailure::Conflict => "conflict",
@@ -2430,7 +2641,8 @@ impl ToolFailure {
         match self {
             ToolFailure::InvalidArguments
             | ToolFailure::InvalidArtifacts(_)
-            | ToolFailure::InvalidAssembleParams(_) => (400, -32602, "invalid tool arguments"),
+            | ToolFailure::InvalidAssembleParams(_)
+            | ToolFailure::InvalidRunEvent(_) => (400, -32602, "invalid tool arguments"),
             ToolFailure::NotAuthorized | ToolFailure::HandleRefused => {
                 (403, -32003, "tool is not authorized for this connection")
             }
@@ -2453,11 +2665,13 @@ impl ToolFailure {
         }
     }
 
-    /// JSON-RPC `error.data`: present only for [`Self::InvalidArtifacts`] and
-    /// [`Self::InvalidAssembleParams`] (`{code: "assembly_params_invalid", params: [names]}`).
+    /// JSON-RPC `error.data`: present only for [`Self::InvalidArtifacts`],
+    /// [`Self::InvalidAssembleParams`] (`{code: "assembly_params_invalid", params: [names]}`)
+    /// and [`Self::InvalidRunEvent`] (`{field, rule, index?}`).
     pub fn data(self) -> Option<Value> {
         match self {
             ToolFailure::InvalidArtifacts(violation) => Some(violation.data()),
+            ToolFailure::InvalidRunEvent(violation) => Some(violation.data()),
             ToolFailure::InvalidAssembleParams(params) => Some(json!({
                 "code": ASSEMBLY_PARAMS_INVALID,
                 "params": params.names().collect::<Vec<_>>(),
@@ -3846,6 +4060,364 @@ mod tests {
         assert_eq!(
             ToolFailure::InvalidArguments.message(),
             "invalid tool arguments"
+        );
+    }
+
+    fn run_event_tool() -> &'static ToolDescriptor {
+        TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_RUN_EVENT)
+            .expect("oort_run_event")
+    }
+
+    /// ADR-0200 증보 7 7-2 — `activities` and `plan` are published closed and bounded: an item
+    /// has no key for a command, a path or a result; the words are closed lists; the counts and
+    /// the byte envelopes (4 bytes per character) are the contract's numbers.
+    #[test]
+    fn run_event_activities_and_plan_are_published_closed_and_bounded() {
+        let schema = run_event_tool().input_schema();
+        let activities = &schema["properties"]["activities"];
+        assert_eq!(
+            activities["type"],
+            json!(["array", "null"]),
+            "optional is nullable"
+        );
+        assert_eq!(activities["maxItems"], json!(8));
+        let item = &activities["items"];
+        assert_eq!(item["additionalProperties"], json!(false));
+        assert_eq!(item["required"], json!(["id", "kind", "status"]));
+        let mut keys: Vec<&str> = item["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["id", "kind", "label", "n", "status"]);
+        assert_eq!(
+            item["properties"]["kind"]["enum"],
+            json!(RUN_ACTIVITY_KINDS)
+        );
+        assert_eq!(
+            item["properties"]["status"]["enum"],
+            json!(RUN_ACTIVITY_STATUSES)
+        );
+        assert_eq!(item["properties"]["id"]["maxLength"], json!(32));
+        assert_eq!(item["properties"]["label"]["maxLength"], json!(4 * 40));
+        assert_eq!(
+            item["properties"]["n"]["maximum"],
+            json!(MAX_REPORTED_COUNT)
+        );
+        assert_eq!(item["properties"]["n"]["minimum"], json!(1));
+        // required words are never nullable; optional ones always are
+        for required in ["id", "kind", "status"] {
+            assert!(
+                item["properties"][required]["type"].is_string(),
+                "{required}"
+            );
+        }
+        for optional in ["label", "n"] {
+            assert!(
+                item["properties"][optional]["type"].is_array(),
+                "{optional}"
+            );
+        }
+        let plan = &schema["properties"]["plan"];
+        assert_eq!(plan["maxItems"], json!(12));
+        assert_eq!(plan["items"]["additionalProperties"], json!(false));
+        assert_eq!(plan["items"]["required"], json!(["text", "status"]));
+        assert_eq!(
+            plan["items"]["properties"]["text"]["maxLength"],
+            json!(4 * 60)
+        );
+        assert_eq!(
+            plan["items"]["properties"]["status"]["enum"],
+            json!(RUN_PLAN_STATUSES)
+        );
+        // the closed field list of a refusal is exactly the dotted paths the schema declares
+        let mut declared: Vec<String> = vec!["activities".into(), "plan".into()];
+        for key in item["properties"].as_object().unwrap().keys() {
+            declared.push(format!("activities.{key}"));
+        }
+        for key in plan["items"]["properties"].as_object().unwrap().keys() {
+            declared.push(format!("plan.{key}"));
+        }
+        declared.sort_unstable();
+        let mut listed: Vec<String> = RUN_EVENT_REPORT_FIELDS
+            .iter()
+            .map(|f| f.to_string())
+            .collect();
+        listed.sort_unstable();
+        assert_eq!(declared, listed);
+    }
+
+    /// A well-formed report passes the schema layer, and `null` is "not reported" like every
+    /// other optional property.
+    #[test]
+    fn a_well_formed_run_event_report_passes_the_schema() {
+        let event = run_event_tool();
+        let ok = |arguments: Value| validate_arguments(event, &arguments);
+        assert_eq!(
+            ok(json!({
+                "leaseHandle": "x",
+                "stage": "단계",
+                "activities": [
+                    {"id": "a1", "kind": "read", "label": "읽기", "status": "completed", "n": 12},
+                    {"id": "r2", "kind": "delegate", "status": "in_progress", "label": null, "n": null}
+                ],
+                "plan": [{"text": "계획", "status": "pending"}]
+            })),
+            Ok(())
+        );
+        assert_eq!(
+            ok(json!({"leaseHandle": "x", "activities": null, "plan": null})),
+            Ok(())
+        );
+        assert_eq!(
+            ok(json!({"leaseHandle": "x", "activities": [], "plan": []})),
+            Ok(())
+        );
+        // exactly at every bound
+        let eight: Vec<Value> = (0..8)
+            .map(|i| json!({"id": format!("a{i}"), "kind": "run", "status": "failed"}))
+            .collect();
+        let twelve: Vec<Value> = (0..12)
+            .map(|i| json!({"text": format!("s{i}"), "status": "completed"}))
+            .collect();
+        assert_eq!(
+            ok(json!({"leaseHandle": "x", "activities": eight, "plan": twelve})),
+            Ok(())
+        );
+        assert_eq!(
+            ok(json!({"leaseHandle": "x", "activities": [
+                {"id": "x".repeat(32), "kind": "run", "status": "failed", "label": "x".repeat(160), "n": 100_000}
+            ]})),
+            Ok(())
+        );
+    }
+
+    /// ADR-0200 증보 7 7-2 — a refused report names the field from a closed list, the closed rule
+    /// and the item's position, never a value. Each row breaks exactly one thing.
+    #[test]
+    fn a_refused_run_event_report_names_its_field_rule_and_item() {
+        let event = run_event_tool();
+        let nine: Vec<Value> = (0..9)
+            .map(|i| json!({"id": format!("a{i}"), "kind": "run", "status": "failed"}))
+            .collect();
+        let thirteen: Vec<Value> = (0..13)
+            .map(|i| json!({"text": format!("s{i}"), "status": "pending"}))
+            .collect();
+        let good = json!({"id": "a0", "kind": "run", "status": "completed"});
+        let cases: Vec<(Value, &str, ArtifactRule, Option<u8>)> = vec![
+            (
+                json!({"activities": nine}),
+                "activities",
+                ArtifactRule::Range,
+                None,
+            ),
+            (
+                json!({"activities": "x"}),
+                "activities",
+                ArtifactRule::Format,
+                None,
+            ),
+            (
+                json!({"activities": [null]}),
+                "activities",
+                ArtifactRule::Format,
+                Some(0),
+            ),
+            (
+                json!({"activities": [good.clone(), {"id": "a1", "kind": "run", "status": "completed", "cmd": "x"}]}),
+                "activities",
+                ArtifactRule::Forbidden,
+                Some(1),
+            ),
+            (
+                json!({"activities": [good.clone(), {"id": "a1", "kind": "run"}]}),
+                "activities.status",
+                ArtifactRule::Required,
+                Some(1),
+            ),
+            (
+                json!({"activities": [{"kind": "run", "status": "completed"}]}),
+                "activities.id",
+                ArtifactRule::Required,
+                Some(0),
+            ),
+            (
+                json!({"activities": [{"id": "a1", "status": "completed"}]}),
+                "activities.kind",
+                ArtifactRule::Required,
+                Some(0),
+            ),
+            (
+                json!({"activities": [{"id": "a1", "kind": "think", "status": "completed"}]}),
+                "activities.kind",
+                ArtifactRule::Enum,
+                Some(0),
+            ),
+            (
+                json!({"activities": [{"id": "a1", "kind": "run", "status": "pending"}]}),
+                "activities.status",
+                ArtifactRule::Enum,
+                Some(0),
+            ),
+            (
+                json!({"activities": [{"id": "x".repeat(33), "kind": "run", "status": "failed"}]}),
+                "activities.id",
+                ArtifactRule::Range,
+                Some(0),
+            ),
+            (
+                json!({"activities": [{"id": "", "kind": "run", "status": "failed"}]}),
+                "activities.id",
+                ArtifactRule::Range,
+                Some(0),
+            ),
+            (
+                json!({"activities": [{"id": 1, "kind": "run", "status": "failed"}]}),
+                "activities.id",
+                ArtifactRule::Format,
+                Some(0),
+            ),
+            (
+                json!({"activities": [{"id": "a1", "kind": "run", "status": "failed", "label": "x".repeat(161)}]}),
+                "activities.label",
+                ArtifactRule::Range,
+                Some(0),
+            ),
+            (
+                json!({"activities": [{"id": "a1", "kind": "run", "status": "failed", "n": 0}]}),
+                "activities.n",
+                ArtifactRule::Range,
+                Some(0),
+            ),
+            (
+                json!({"activities": [{"id": "a1", "kind": "run", "status": "failed", "n": 100_001}]}),
+                "activities.n",
+                ArtifactRule::Range,
+                Some(0),
+            ),
+            (
+                json!({"activities": [{"id": "a1", "kind": "run", "status": "failed", "n": 1.5}]}),
+                "activities.n",
+                ArtifactRule::Format,
+                Some(0),
+            ),
+            (json!({"plan": thirteen}), "plan", ArtifactRule::Range, None),
+            (
+                json!({"plan": [{"text": "a", "status": "pending"}, {"status": "pending"}]}),
+                "plan.text",
+                ArtifactRule::Required,
+                Some(1),
+            ),
+            (
+                json!({"plan": [{"text": "x".repeat(241), "status": "pending"}]}),
+                "plan.text",
+                ArtifactRule::Range,
+                Some(0),
+            ),
+            (
+                json!({"plan": [{"text": "a", "status": "failed"}]}),
+                "plan.status",
+                ArtifactRule::Enum,
+                Some(0),
+            ),
+            (
+                json!({"plan": [{"text": "a", "status": "pending", "id": "x"}]}),
+                "plan",
+                ArtifactRule::Forbidden,
+                Some(0),
+            ),
+        ];
+        for (extra, field, rule, index) in cases {
+            let mut arguments = json!({"leaseHandle": "x"});
+            arguments
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let failure = validate_arguments(event, &arguments).expect_err(&format!("{arguments}"));
+            let ToolFailure::InvalidRunEvent(violation) = failure else {
+                panic!("{field}: a report fault must carry its field, got {failure:?}");
+            };
+            assert_eq!(
+                (violation.field, violation.rule, violation.index),
+                (field, rule, index),
+                "{arguments}"
+            );
+            // the wire: the fixed sentence, -32602, the closed code, `{field, rule, index?}` only
+            assert_eq!(failure.message(), "invalid tool arguments");
+            assert_eq!(failure.wire(), (400, -32602, "invalid tool arguments"));
+            assert_eq!(failure.code(), "invalid_arguments");
+            let data = failure.data().expect("detail");
+            let mut keys: Vec<&str> = data
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            keys.sort_unstable();
+            assert_eq!(
+                keys,
+                if index.is_some() {
+                    vec!["field", "index", "rule"]
+                } else {
+                    vec!["field", "rule"]
+                }
+            );
+        }
+    }
+
+    /// Everything else in an `oort_run_event` call keeps the plain, detail-free answer: an
+    /// unknown top-level key, the handle, `stage`, `status` — and the fault of a field that is
+    /// not on the closed list can never be said.
+    #[test]
+    fn run_event_faults_outside_the_report_fields_stay_plain() {
+        let event = run_event_tool();
+        for arguments in [
+            json!({"leaseHandle": "x", "artifacts": {"resultKind": "x"}}),
+            json!({"leaseHandle": "x", "steps": []}),
+            json!({"activities": []}),
+            json!({"leaseHandle": null, "activities": []}),
+            json!({"leaseHandle": "x", "stage": 3}),
+            json!({"leaseHandle": "x", "stage": "x".repeat(321)}),
+            json!({"leaseHandle": "x", "status": "done"}),
+            json!({"leaseHandle": "x", "eventId": "nope"}),
+        ] {
+            let failure = validate_arguments(event, &arguments).expect_err(&format!("{arguments}"));
+            assert_eq!(failure, ToolFailure::InvalidArguments, "{arguments}");
+            assert_eq!(failure.data(), None);
+        }
+        // a violation can be built only on the closed names
+        assert_eq!(
+            RunEventViolation::on("activities.cmd", ArtifactRule::Range, None),
+            None
+        );
+        assert_eq!(
+            RunEventViolation::on("leaseHandle", ArtifactRule::Required, None),
+            None
+        );
+        assert_eq!(
+            RunEventViolation::on("artifacts.tests", ArtifactRule::Range, None),
+            None
+        );
+        assert_eq!(
+            RunEventViolation::from_names("plan.text", "nope", None),
+            None
+        );
+        assert!(RunEventViolation::from_names("plan.text", "range", Some(2)).is_some());
+        // another tool's identical-looking fault is not a report fault
+        let complete = TOOL_CATALOG
+            .iter()
+            .find(|t| t.name == TOOL_RUN_COMPLETE)
+            .unwrap();
+        assert_eq!(
+            validate_arguments(
+                complete,
+                &json!({"leaseHandle": "x", "status": "succeeded", "activities": []})
+            ),
+            Err(ToolFailure::InvalidArguments)
         );
     }
 

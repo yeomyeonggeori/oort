@@ -16,11 +16,11 @@
 //!
 //! | test | revert that makes it red |
 //! |---|---|
-//! | `w1_no_settings_offers_the_eleven_cards_and_the_roles_card` | read an absent `team_ai_roles` as off (`TeamAiRoles::from_value(None)`) |
+//! | `w1_no_settings_offers_the_eleven_cards_the_invites_and_the_roles_card` | read an absent `team_ai_roles` as off (`TeamAiRoles::from_value(None)`) |
 //! | `w2_a_bundle_that_is_off_is_not_advertised_anywhere` | drop the bundle filter from `advertised_action_ids`, or build the prompt from the whole allow-list |
 //! | `w3_a_model_that_names_a_card_of_an_off_bundle_gets_no_card` | drop the `read_roles_in_tx` check from `propose_with_avatar_in_tx` |
 //! | `w4_a_direct_request_for_a_role_change_is_one_card_for_an_admin_only` | drop `team_ai.roles.set` from `TEAM_AI_ACTION_IDS`, or the requester pre-check |
-//! | `w5_after_a_read_the_next_call_is_not_offered_the_roles_card` | compute `tainted` as `false` in the worker loop |
+//! | `w5_after_a_read_the_next_call_is_not_offered_the_sensitive_cards` | compute `tainted` as `false` in the worker loop |
 //! | `w6_an_injected_roles_request_after_a_read_makes_no_card` | drop the `is_sensitive_action` check from `propose_with_avatar_in_tx` |
 //! | `w7_a_search_and_a_proposal_in_one_call_is_refused` | read `web_searches` out of `ViaAi::read_something` |
 //! | `w8_the_roles_card_refuses_chat_read_and_unknown_bundles` | accept `chat_read` in `team_ai_roles_set_args` |
@@ -572,6 +572,8 @@ fn everything_said_about_proposals(request: &ChatRequest) -> String {
     format!("{} {tool}", system_prompt(request))
 }
 
+const INVITE_CARDS: [&str; 2] = ["invite.create", "agent.invite"];
+
 const ELEVEN: [&str; 11] = [
     "agent.profile.update",
     "agent.rename",
@@ -588,11 +590,11 @@ const ELEVEN: [&str; 11] = [
 
 // --- the behaviour -------------------------------------------------------------------------------
 
-/// B15-A18 / owner Q2 B: a workspace that stores nothing is offered the eleven cards and the roles
-/// card, and the prompt names the roles card and the bundles.
+/// B15-A18 / owner Q2 B: a workspace that stores nothing is offered the eleven cards, the two invite
+/// cards (#4965) and the roles card, and the prompt names the roles card and the bundles.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn w1_no_settings_offers_the_eleven_cards_and_the_roles_card() {
+async fn w1_no_settings_offers_the_eleven_cards_the_invites_and_the_roles_card() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let pool = momo_worker_pool().await;
@@ -608,8 +610,12 @@ async fn w1_no_settings_offers_the_eleven_cards_and_the_roles_card() {
     assert_eq!(requests.len(), 1);
     let ids = offered_ids(&requests[0]).expect("the proposal tool is offered");
     let mut expected: Vec<String> = ELEVEN.iter().map(|id| id.to_string()).collect();
+    expected.extend(INVITE_CARDS.iter().map(|id| id.to_string()));
     expected.push(ROLES_CARD.to_string());
-    assert_eq!(ids, expected, "the eleven + the roles card, nothing stored");
+    assert_eq!(
+        ids, expected,
+        "the eleven + the invites + the roles card, nothing stored"
+    );
     let said = everything_said_about_proposals(&requests[0]);
     assert!(said.contains(ROLES_CARD), "{said}");
     assert!(
@@ -639,9 +645,11 @@ async fn w2_a_bundle_that_is_off_is_not_advertised_anywhere() {
 
     let requests = model.requests();
     assert_eq!(requests.len(), 1);
+    // The invites belong to another bundle (`invite_access`), still on: only the roles card and the
+    // two invites are offered, and nothing of the eleven.
     assert_eq!(
         offered_ids(&requests[0]).expect("the roles card keeps the tool alive"),
-        [ROLES_CARD]
+        ["invite.create", "agent.invite", ROLES_CARD]
     );
     let said = everything_said_about_proposals(&requests[0]);
     for gone in ELEVEN {
@@ -772,7 +780,7 @@ async fn w4_a_direct_request_for_a_role_change_is_one_card_for_an_admin_only() {
 /// roles card while everything else stays; the first call still had it.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn w5_after_a_read_the_next_call_is_not_offered_the_roles_card() {
+async fn w5_after_a_read_the_next_call_is_not_offered_the_sensitive_cards() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let pool = momo_worker_pool().await;
@@ -789,16 +797,36 @@ async fn w5_after_a_read_the_next_call_is_not_offered_the_roles_card() {
     let first = offered_ids(&requests[0]).expect("offered");
     assert!(first.iter().any(|id| id == ROLES_CARD), "{first:?}");
     assert!(system_prompt(&requests[0]).contains(ROLES_CARD));
-    let second = offered_ids(&requests[1]).expect("still offered, minus the sensitive card");
-    assert!(
-        !second.iter().any(|id| id == ROLES_CARD),
-        "the roles card must leave the enum after a read: {second:?}"
-    );
-    assert_eq!(second.len(), ELEVEN.len());
-    // The system prompt is built once and is the same on every call (what was read never touches
-    // it); it already told the model that a request which reads gives the card up.
-    assert_eq!(system_prompt(&requests[0]), system_prompt(&requests[1]));
-    assert!(system_prompt(&requests[1]).contains("읽기 도구나 웹 검색을 쓴 뒤에는"));
+    let second = offered_ids(&requests[1]).expect("still offered, minus the sensitive cards");
+    // B4-3: the roles card AND the two invites leave the enum; the eleven stay.
+    for gone in [ROLES_CARD, "invite.create", "agent.invite"] {
+        assert!(
+            !second.iter().any(|id| id == gone),
+            "{gone} must leave the enum after a read: {second:?}"
+        );
+    }
+    assert_eq!(second, ELEVEN);
+    // The first prompt names them and says a request that reads gives them up; the prompt of the
+    // call after the read is the same function on the same boolean: no sentence that invites a
+    // sensitive card, the one sentence to answer with in its place.
+    let (first_prompt, later_prompt) = (system_prompt(&requests[0]), system_prompt(&requests[1]));
+    assert!(first_prompt.contains("읽기 도구나 웹 검색을 쓴 뒤에는"));
+    assert!(first_prompt.contains("`invite.create`"));
+    assert_ne!(first_prompt, later_prompt);
+    for gone in [ROLES_CARD, "invite.create", "agent.invite", "files=파일"] {
+        assert!(
+            !later_prompt.contains(gone),
+            "`{gone}` after a read: {later_prompt}"
+        );
+    }
+    for said in [
+        momo_workspace_actions::team_ai::AFTER_READ_INVITE_SENTENCE,
+        momo_workspace_actions::team_ai::AFTER_READ_ROLES_SENTENCE,
+    ] {
+        assert!(later_prompt.contains(said), "{later_prompt}");
+    }
+    // The ordinary cards are still spoken of.
+    assert!(later_prompt.contains("member.display_name.set"));
 }
 
 /// B4-3 (injection, the proposal fence): text a channel member wrote asks for 「역할 켜 줘」; the
@@ -988,12 +1016,12 @@ async fn w9_another_workspaces_switches_do_not_reach_this_one() {
     assert_eq!(requests.len(), 2);
     assert_eq!(
         offered_ids(&requests[0]).expect("B offered").len(),
-        12,
+        14,
         "B stored nothing: all on"
     );
     assert_eq!(
         offered_ids(&requests[1]).expect("A offered"),
-        [ROLES_CARD],
+        ["invite.create", "agent.invite", ROLES_CARD],
         "A switched workspace_admin off"
     );
     assert_eq!(approvals(&su, &b).await.len(), 1, "B's card");
@@ -1379,12 +1407,15 @@ async fn w13_with_code_off_the_card_is_not_offered_or_said_and_a_named_card_is_r
         prompt.contains("코드·파일 작업"),
         "the old hand-off line stands: {prompt}"
     );
-    // The rest of the helper is untouched by this switch.
+    // The rest of the helper is untouched by this switch: the eleven cards, the two invites and the
+    // roles card — the same list `w1` pins. (This said `12` while the invites were not on the
+    // helper's list; #4965 put them there, so the count is the list, not a number.)
+    let mut expected: Vec<String> = ELEVEN.iter().map(|id| id.to_string()).collect();
+    expected.extend(INVITE_CARDS.iter().map(|id| id.to_string()));
+    expected.push(ROLES_CARD.to_string());
     assert_eq!(
-        offered_ids(&requests[0])
-            .expect("the proposal tool is offered")
-            .len(),
-        12
+        offered_ids(&requests[0]).expect("the proposal tool is offered"),
+        expected
     );
 
     assert!(suggestion_cards(&su, &t).await.is_empty(), "no card");
@@ -1572,6 +1603,15 @@ async fn w16_a_request_that_read_something_may_still_give_the_work_request_card(
     assert!(
         card_tool(&requests[1]).is_some(),
         "still offered after a read (not behind the taint rule)"
+    );
+    // The merge point with #4965: the prompt a call after a read is rebuilt (`system_prompt_for`)
+    // from the same `card_commands` the first one got, so it still tells the model about the card
+    // the tool still offers — the tool and the sentence cannot disagree after a read either.
+    assert!(system_prompt(&requests[0]).contains(WORK_REQUEST));
+    assert!(
+        system_prompt(&requests[1]).contains(WORK_REQUEST),
+        "the rebuilt prompt dropped the work-request sentence: {}",
+        system_prompt(&requests[1])
     );
     assert_eq!(suggestion_cards(&su, &t).await.len(), 1);
     let turn = turn_audit(&su, &t, run).await;

@@ -14,10 +14,11 @@
 //! ## The table
 //!
 //! [`BUNDLES`] is the one place that says what each bundle owns. `workspace_admin` owns the
-//! eleven cards of ADR-0201 증보 v2 F2 and `code` owns the work-request card (`card_suggest`'s
-//! `work.request.open`, #4972 S9); the others are empty slots, so a later slice (S2 invites,
-//! S4 long work, S7 files, S8 memory) adds an id to its row and nothing else: the filters
-//! below read the table.
+//! eleven cards of ADR-0201 증보 v2 F2, `invite_access` owns `invite.create` and `agent.invite`
+//! (S2, #4965), `long_research` owns the task-mode tool `task_continue` (S4, #4967) and `code`
+//! owns the work-request card (`card_suggest`'s `work.request.open`, #4972 S9); the others are
+//! empty slots, so a later slice (S7 files, S8 memory)
+//! adds an id to its row and nothing else: the filters below read the table.
 //! `team_ai.roles.set` itself belongs to **no** bundle — if it did, switching
 //! `workspace_admin` off would also remove the only chat path back on.
 //!
@@ -34,12 +35,14 @@ use serde_json::Value;
 
 use crate::actions::{
     ACTION_AGENT_INVITE, ACTION_AGENT_PROFILE_UPDATE, ACTION_AGENT_RENAME, ACTION_CHANNEL_CREATE,
-    ACTION_CHANNEL_MEMBER_ADD, ACTION_INVITE_CREATE, ACTION_MEMBER_AVATAR_SET,
-    ACTION_MEMBER_DISPLAY_NAME_SET, ACTION_PLUGIN_INSTALL, ACTION_TEAM_AI_ROLES_SET,
-    ACTION_WORKSPACE_MEMORY_UPDATE, ACTION_WORKSPACE_SETTINGS_UPDATE,
-    ACTION_WORKSPACE_UNFURL_UPDATE, ACTION_WORKSPACE_WORK_TIER_UPDATE, TEAM_AI_ACTION_IDS,
+    ACTION_CHANNEL_MEMBER_ADD, ACTION_HOST_SESSION_OPEN, ACTION_INVITE_CREATE,
+    ACTION_MEMBER_AVATAR_SET, ACTION_MEMBER_DISPLAY_NAME_SET, ACTION_MEMBER_ROLE_SET,
+    ACTION_PLUGIN_INSTALL, ACTION_TEAM_AI_ROLES_SET, ACTION_WORKSPACE_MEMORY_UPDATE,
+    ACTION_WORKSPACE_SETTINGS_UPDATE, ACTION_WORKSPACE_UNFURL_UPDATE,
+    ACTION_WORKSPACE_WORK_TIER_UPDATE, TEAM_AI_ACTION_IDS,
 };
 use crate::card_suggest::{COMMAND_WORK_REQUEST_OPEN, TEAM_AI_SUGGESTABLE_COMMAND_IDS};
+use crate::tools::TASK_CONTINUE;
 
 /// The workspace settings key that holds the switches (an object of booleans).
 pub const SETTINGS_KEY: &str = "team_ai_roles";
@@ -122,7 +125,8 @@ pub const BUNDLES: [RoleBundle; 6] = [
         command_ids: &[],
         notice: None,
     },
-    // S2 puts these two on `TEAM_AI_ACTION_IDS`; mapping them now means that edit is the only one.
+    // `TEAM_AI_ACTION_IDS` carries both since S2 (#4965). `member.role.set` joins this row when
+    // its executor exists (B4-5); it is on the sensitive list already.
     RoleBundle {
         id: INVITE_ACCESS,
         label: "초대·권한",
@@ -131,11 +135,13 @@ pub const BUNDLES: [RoleBundle; 6] = [
         command_ids: &[],
         notice: None,
     },
+    // S4 (#4967): the task-mode tool. It leaves the request's tool list with the bundle
+    // (`tool_allowed`), and a call of it that was never offered is refused by the worker.
     RoleBundle {
         id: LONG_RESEARCH,
         label: "긴 조사",
         action_ids: &[],
-        tool_names: &[],
+        tool_names: &[TASK_CONTINUE],
         command_ids: &[],
         notice: None,
     },
@@ -167,11 +173,25 @@ pub const BUNDLES: [RoleBundle; 6] = [
     },
 ];
 
-/// B4-3 오염 규칙 (the frame; S2 adds the two invite ids): once a request's model context holds
-/// anything it **read** — a workspace read tool's result or a web search's — these ids leave the
-/// `actionId` enum of every later call, and a proposal of one is refused. A person who asks
-/// directly (no read in the request) still gets the card.
-pub const SENSITIVE_ACTION_IDS: [&str; 1] = [ACTION_TEAM_AI_ROLES_SET];
+/// B4-3 오염 규칙: once a request's model context holds anything it **read** — a workspace read
+/// tool's result or a web search's (later: a file, a memory, a box result) — these ids leave the
+/// `actionId` enum and the prompt sentences of every later call, a proposal of one is refused, and
+/// a card of one that does not say its request read nothing is refused at the decision. A person
+/// who asks directly (no read in the request) still gets the card.
+///
+/// Five ids, by what a card of each one hands out: an invite link and an agent's pairing code
+/// (`invite.create`, `agent.invite`), a person's workspace role (`member.role.set`, not
+/// executable yet), a session on the team's box (`host.session.open`, ADR-0210, not in the
+/// registry yet) and the helper's own reach (`team_ai.roles.set`, S1). The two that do not exist
+/// yet are named so the day one is opened it is already covered — a deny-list can name an id before
+/// the action exists, an allow-list cannot.
+pub const SENSITIVE_ACTION_IDS: [&str; 5] = [
+    ACTION_INVITE_CREATE,
+    ACTION_AGENT_INVITE,
+    ACTION_MEMBER_ROLE_SET,
+    ACTION_HOST_SESSION_OPEN,
+    ACTION_TEAM_AI_ROLES_SET,
+];
 
 /// The bundle `id` names, or `None` (including for [`CHAT_READ`], which is not switchable).
 pub fn bundle(id: &str) -> Option<&'static RoleBundle> {
@@ -293,6 +313,17 @@ impl TeamAiRoles {
             .copied()
             .filter(|id| self.action_allowed(id))
             .filter(|id| !(tainted && is_sensitive_action(id)))
+            .collect()
+    }
+
+    /// What a read takes away from a request whose bundles are these: the ids it would be offered
+    /// if it had read nothing and is not offered now that it has (B4-3) — the sensitive ids of the
+    /// bundles that are on. The system prompt of a later call names them as withheld, so the
+    /// model is told what to say instead of being left to guess.
+    pub fn withheld_by_read(&self) -> Vec<&'static str> {
+        self.advertised_action_ids(false)
+            .into_iter()
+            .filter(|id| is_sensitive_action(id))
             .collect()
     }
 
@@ -512,30 +543,120 @@ mod tests {
         assert!(bundle(CHAT_READ).is_none(), "chat_read is not a bundle row");
     }
 
-    /// The filter every consumer reads: eleven + the roles card by default; a bundle that is off
-    /// takes its ids out and nothing else; the roles card stays while `workspace_admin` is off.
+    /// The filter every consumer reads: eleven + the two invites + the roles card by default; a
+    /// bundle that is off takes its ids out and nothing else; the roles card stays while
+    /// `workspace_admin` is off.
     #[test]
     fn advertised_ids_follow_the_switches() {
         let all = TeamAiRoles::default().advertised_action_ids(false);
         assert_eq!(all, TEAM_AI_ACTION_IDS);
-        assert_eq!(all.len(), 12);
+        assert_eq!(all.len(), 14);
 
         let no_admin = off(&[WORKSPACE_ADMIN]).advertised_action_ids(false);
-        assert_eq!(no_admin, [ACTION_TEAM_AI_ROLES_SET]);
+        assert_eq!(
+            no_admin,
+            [
+                ACTION_INVITE_CREATE,
+                ACTION_AGENT_INVITE,
+                ACTION_TEAM_AI_ROLES_SET
+            ]
+        );
+
+        // B3 / B4: `invite_access` off takes the two invite ids and nothing else out.
+        let no_invites = off(&[INVITE_ACCESS]).advertised_action_ids(false);
+        assert_eq!(no_invites.len(), 12);
+        assert!(!no_invites.contains(&ACTION_INVITE_CREATE));
+        assert!(!no_invites.contains(&ACTION_AGENT_INVITE));
+        assert!(no_invites.contains(&ACTION_TEAM_AI_ROLES_SET));
 
         // Bundles that own no id today change nothing, so a later slice's id appears the moment
         // it is added to its row and not before.
-        let no_files =
-            off(&[FILES, MEMORY, CODE, LONG_RESEARCH, INVITE_ACCESS]).advertised_action_ids(false);
+        let no_files = off(&[FILES, MEMORY, CODE, LONG_RESEARCH]).advertised_action_ids(false);
         assert_eq!(no_files, TEAM_AI_ACTION_IDS);
 
-        // After the request has read something the sensitive ids leave; the rest stay.
+        // After the request has read something the sensitive ids leave (B4-3: the two invites
+        // and the roles card — the ids on the allow-list); the other eleven stay.
         let tainted = TeamAiRoles::default().advertised_action_ids(true);
         assert_eq!(tainted.len(), 11);
-        assert!(!tainted.contains(&ACTION_TEAM_AI_ROLES_SET));
-        assert!(off(&[WORKSPACE_ADMIN])
+        for id in [
+            ACTION_INVITE_CREATE,
+            ACTION_AGENT_INVITE,
+            ACTION_TEAM_AI_ROLES_SET,
+        ] {
+            assert!(!tainted.contains(&id), "{id}");
+        }
+        assert!(off(&[WORKSPACE_ADMIN, INVITE_ACCESS])
             .advertised_action_ids(true)
             .is_empty());
+    }
+
+    /// What a read takes away is exactly the difference between the two enums — never an id the
+    /// request was not offered in the first place (a bundle that is off has nothing to lose).
+    #[test]
+    fn what_a_read_withholds_is_the_difference_of_the_two_enums() {
+        let roles = TeamAiRoles::default();
+        assert_eq!(
+            roles.withheld_by_read(),
+            [
+                ACTION_INVITE_CREATE,
+                ACTION_AGENT_INVITE,
+                ACTION_TEAM_AI_ROLES_SET
+            ]
+        );
+        let no_invites = off(&[INVITE_ACCESS]);
+        assert_eq!(no_invites.withheld_by_read(), [ACTION_TEAM_AI_ROLES_SET]);
+        for roles in [
+            roles,
+            no_invites,
+            off(&[WORKSPACE_ADMIN]),
+            off(&[WORKSPACE_ADMIN, INVITE_ACCESS]),
+        ] {
+            let clean = roles.advertised_action_ids(false);
+            let read = roles.advertised_action_ids(true);
+            let diff: Vec<&str> = clean
+                .iter()
+                .copied()
+                .filter(|id| !read.contains(id))
+                .collect();
+            assert_eq!(roles.withheld_by_read(), diff);
+        }
+    }
+
+    /// B4-3: the sensitive set is the five ids, exactly, and each one that is on the allow-list is
+    /// really removed by `tainted`. The two that are not on the allow-list yet are inert today and
+    /// must stay off it until their own slice opens them.
+    #[test]
+    fn the_sensitive_set_is_the_five_of_b4_3() {
+        assert_eq!(
+            SENSITIVE_ACTION_IDS,
+            [
+                "invite.create",
+                "agent.invite",
+                "member.role.set",
+                "host.session.open",
+                "team_ai.roles.set"
+            ]
+        );
+        for id in SENSITIVE_ACTION_IDS {
+            assert!(is_sensitive_action(id), "{id}");
+            if TEAM_AI_ACTION_IDS.contains(&id) {
+                assert!(
+                    !TeamAiRoles::default()
+                        .advertised_action_ids(true)
+                        .contains(&id),
+                    "{id} must leave a request that has read something"
+                );
+            }
+        }
+        for id in [ACTION_MEMBER_ROLE_SET, ACTION_HOST_SESSION_OPEN] {
+            assert!(
+                !TEAM_AI_ACTION_IDS.contains(&id),
+                "{id} is not the helper's yet"
+            );
+        }
+        // A card that is not sensitive stays proposable after a read.
+        assert!(!is_sensitive_action(ACTION_CHANNEL_CREATE));
+        assert!(!is_sensitive_action(ACTION_PLUGIN_INSTALL));
     }
 
     /// `action_allowed` is the same judgement for one id (what the proposal and the decision
@@ -650,12 +771,39 @@ mod tests {
         let mut table = BUNDLES;
         table[3].tool_names = &["read_attachment", "read_atachment"]; // files
         table[4].tool_names = &["search_memory"]; // memory
-        let known = ["read_attachment", "search_memory", "search_messages"];
+        let known = [
+            "read_attachment",
+            "search_memory",
+            "search_messages",
+            TASK_CONTINUE,
+        ];
         assert_eq!(unknown_tool_names(&table, &known), ["read_atachment"]);
         table[3].tool_names = &["read_attachment"];
         assert!(unknown_tool_names(&table, &known).is_empty());
-        // And an empty table of names (today's) has nothing to misspell.
+        // And the real table names only tools that exist (today: `task_continue`).
         assert!(unknown_tool_names(&BUNDLES, &known).is_empty());
+    }
+
+    /// B5-3 / B13-I5 (#4967): the task-mode tool is owned by `long_research` and by nothing else —
+    /// the request builder's `tool_allowed` filter drops it with that one bundle, and no other
+    /// switch moves it.
+    #[test]
+    fn task_continue_leaves_with_long_research_and_with_nothing_else() {
+        let all_on = TeamAiRoles::default();
+        assert!(all_on.tool_allowed(TASK_CONTINUE));
+        let research_off = all_on.with(LONG_RESEARCH, false);
+        assert!(!research_off.tool_allowed(TASK_CONTINUE));
+        assert!(!TeamAiRoles::none_on().tool_allowed(TASK_CONTINUE));
+        for other in [WORKSPACE_ADMIN, INVITE_ACCESS, FILES, MEMORY, CODE] {
+            assert!(
+                all_on.with(other, false).tool_allowed(TASK_CONTINUE),
+                "{other} must not move the task tool"
+            );
+        }
+        // The reads and the proposal tool are not bundle-gated: they stay with the bundle off.
+        assert!(research_off.tool_allowed("search_messages"));
+        assert!(research_off.tool_allowed(crate::tools::WORKSPACE_ACTION_PROPOSE));
+        assert_eq!(bundle(LONG_RESEARCH).unwrap().tool_names, [TASK_CONTINUE]);
     }
 
     #[test]

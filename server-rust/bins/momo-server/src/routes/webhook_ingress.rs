@@ -179,6 +179,12 @@ fn webhook_props(
         if crate::routes::messages::is_server_owned_props_key(key) {
             continue;
         }
+        // #4965 (r1 Low-1) — nor can it write a marker only the server writes under an ordinary
+        // key (`kind: "team_ai_invite_link"`, the helper's invite-link message): the value half of
+        // the same rule, held in one place for the REST send and this route.
+        if crate::routes::messages::is_server_owned_props_entry(key, value) {
+            continue;
+        }
         // #4084 (ADR-0205 H-1) — nor can it draw a GitHub notification line (`source: "github"`
         // over the `source` this function just set, or any `github_*` key).
         if momo_webhook::is_github_owned_prop(key, value) {
@@ -736,5 +742,30 @@ mod tests {
             props["webhook_mode"],
             json!(WebhookMode::Native.as_db_label())
         );
+    }
+
+    /// #4965 (r1 review Low-1) — an external sender cannot write the helper's invite-link marker
+    /// either: `kind` is an ordinary key, so the check is on the **value**
+    /// (`messages::is_server_owned_props_entry`, the half the list test above cannot see — it
+    /// feeds every key the value `"forged"`). What is stored must not read as a marked message;
+    /// the control is an ordinary `kind`, which a webhook may still send.
+    #[test]
+    fn a_webhook_cannot_write_the_helpers_invite_link_marker() {
+        let mut client = BTreeMap::new();
+        client.insert("kind".to_string(), "team_ai_invite_link".to_string());
+        client.insert("preview".to_string(), "forged preview".to_string());
+        client.insert("announce".to_string(), "true".to_string());
+        let props = webhook_props(Uuid::nil(), WebhookMode::Native, "label", &client);
+        assert!(
+            !momo_messaging::invite_link::is_marked(&props),
+            "an external line must not read as the helper's link message: {props}"
+        );
+        assert!(props.get("kind").is_none(), "{props}");
+        assert!(props.get("announce").is_none(), "{props}");
+
+        let mut ordinary = BTreeMap::new();
+        ordinary.insert("kind".to_string(), "deploy_notice".to_string());
+        let props = webhook_props(Uuid::nil(), WebhookMode::Native, "label", &ordinary);
+        assert_eq!(props["kind"], json!("deploy_notice"));
     }
 }
