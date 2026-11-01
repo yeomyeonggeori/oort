@@ -84,6 +84,9 @@ import {
 } from './mentionQuery';
 import type {QuoteDraft} from '@momo/core/features/timeline/quote';
 import {QuoteDraftBar} from './Quote';
+import {ComposerLinkPreview} from './ComposerLinkPreview';
+import {useComposerLinkPreview} from './useComposerLinkPreview';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {AttachMenu} from '../attachments/AttachMenu';
 import {AttachmentTray} from '../attachments/AttachmentTray';
 import {
@@ -1069,7 +1072,12 @@ export function placeholderRoom(fontScale: number): number {
 export {COMPOSER_OFFLINE_COPY};
 
 export interface ComposerSendOptions {
-  attachments: MessageAttachment[];
+  attachments?: MessageAttachment[];
+  /**
+   * #5016 — 입력칸 위 링크 미리보기의 ✕로 이 메시지의 미리보기를 끄고 보낸다(ADR-0170 증보 2026-11-01).
+   * 켠 때만 있다: 켜지 않은 전송은 이 필드 이전과 같은 호출(`onSend(body)`)이다.
+   */
+  suppressUnfurl?: boolean;
 }
 
 /**
@@ -1328,6 +1336,23 @@ export function Composer({
   const attachmentSurface = useAttachmentSurface(attachmentKey);
   const attachmentBlock = sendBlockReason(attachmentSurface.drafts);
   const attachmentBlockCopy = sendBlockCopy(attachmentSurface.drafts);
+
+  // 링크를 넣고 멈추면 입력창 위에 카드가 뜬다(#5016, 웹 입력칸 #5005 와 같은 규칙). 보낼 방은 첨부가 올라가는 방과
+  // 같다(워크스페이스·채널, 스레드면 뿌리 메시지까지) — 이 입력창은 채널과 스레드가 함께 쓰고, 방을 모르면(첨부 대상이
+  // 없는 하네스·시험) 아무것도 묻지 않는다. 오프라인에서는 묻지 않고, 풀리면 이어서 묻는다.
+  const formatMessage = useFormatMessage();
+  const linkPreview = useComposerLinkPreview({
+    workspaceId: attachmentWorkspaceId,
+    channelId: attachmentChannelId,
+    threadRootId: attachmentRootId,
+    text,
+    paused: offline === true,
+  });
+  const dismissLinkPreview = () => {
+    linkPreview.dismiss();
+    // 눌린 ✕가 사라지고 iOS 에는 live region 이 없다 — 결과를 소리로 알린다(`AttachmentTray` 와 같은 길).
+    AccessibilityInfo.announceForAccessibility(formatMessage('timeline.unfurl.previewDismissed'));
+  };
 
   // 메뉴가 **실제로 사라진 뒤에만** 네이티브 picker·카메라를 제시한다 (design-review
   // High-1). 닫히는 Modal과 같은 틱에 picker를 띄우면 iOS가 dismiss 중인 VC 위
@@ -1717,16 +1742,21 @@ export function Composer({
     if (draftKeyRef.current !== undefined) {
       clearDraft(draftKeyRef.current);
     }
+    // ✕로 끈 채 보낸다(켠 때만 — 켜지 않은 전송은 예전과 같은 호출이다). 값은 이 렌더의 것이고(글을 비우기 전에 읽는다),
+    // 보낸 뒤에는 글이 비어 ✕가 저절로 풀린다. `submit` 이 메모라 아래 의존성에 이 값이 들어 있어야 ✕가 닿는다.
+    const flags = linkPreview.suppressed ? {suppressUnfurl: true} : null;
     if (attachmentKey === null) {
-      onSend(body);
+      if (flags === null) onSend(body);
+      else onSend(body, flags);
       return;
     }
     const sent = takeSent(attachmentKey);
     if (sent.attachments.length === 0) {
-      onSend(body);
+      if (flags === null) onSend(body);
+      else onSend(body, flags);
       return;
     }
-    onSend(body, {attachments: sent.attachments});
+    onSend(body, {attachments: sent.attachments, ...flags});
   }, [
     setKeyBlocked,
     text,
@@ -1740,6 +1770,7 @@ export function Composer({
     showSlash,
     slashRows,
     acceptSlash,
+    linkPreview.suppressed,
   ]);
 
   // 보낼 수 있는가 — 두 조건이고 둘은 다른 종류다. 하나는 「보낼 것이 있는가」,
@@ -2409,6 +2440,14 @@ export function Composer({
           onClear={() => clearSurface(attachmentKey)}
         />
       )}
+
+      {/* 보내기 전 링크 미리보기(#5016): 첨부 트레이 바로 아래, 인용 줄 위다(웹과 같은 순서 — 인용이 입력창에 가장
+          가깝다). 알약 **밖**이라 ✕가 보내기를 일으키지 않는다. 높이 예산(`composerColumnBudget`)에는 넣지 않는다 —
+          첨부 트레이·인용 줄과 같은 취급이고, 줄 안 높이는 트레이와 같은 상한이 묶는다. */}
+      <ComposerLinkPreview
+        cards={linkPreview.cards}
+        onDismiss={dismissLinkPreview}
+      />
 
       {/* 입력창 **바로 위**. 지금 쓰고 있는 글이 무엇을 가리키는지는 그 글을
           쓰는 자리에 붙어 있어야 하고, 취소도 거기 있어야 한다 — 들어가는 길만
