@@ -34,6 +34,7 @@ import {
 } from '@momo/core/features/sidebar/dmVisibility';
 import {DM_REOPEN_FAILURE} from '@momo/core/features/channels/model';
 import {parseCollapsed, visibleRows} from '../src/features/home/collapsedSections';
+import {pendingApprovalsKey} from '../src/features/conversation/usePendingApprovals';
 import {workspaceKeys} from '../src/features/workspace/queries';
 import {buildWorkingCard, workingStep} from '../src/features/home/workingCard';
 import {
@@ -154,6 +155,11 @@ interface Routes {
    * 길로 읽는다. `'fail'` 은 500, `'pending'` 은 응답이 오지 않는다.
    */
   messages?: unknown[] | 'fail' | 'pending';
+  /**
+   * 승인 원장(`status=pending`)의 행(와이어 형상). 생략하면 비어 있다. 배열을 **참조로** 읽으므로 시험이 나중에 행을 더하거나 빼고
+   * 원장을 무효화하면 다음 조회가 그것을 본다(#5085: 카드가 원장을 따라 바뀌는 순간을 재려고).
+   */
+  approvals?: unknown[];
 }
 
 function installFetch(routes: Routes = {}): jest.Mock {
@@ -181,7 +187,9 @@ function installFetch(routes: Routes = {}): jest.Mock {
       if (routes.messages === 'fail') return jsonResponse(500, {error: {message: 'boom'}});
       return jsonResponse(200, {messages: routes.messages ?? []});
     }
-    if (url.includes('/approvals')) return jsonResponse(200, {approvals: []});
+    if (url.includes('/approvals')) {
+      return jsonResponse(200, {approvals: routes.approvals ?? []});
+    }
     if (url.includes('/work-sessions')) return jsonResponse(200, {sessions: []});
     if (url.includes('/dms')) {
       return jsonResponse(200, {
@@ -885,6 +893,86 @@ describe('홈 — 「작업 중」 카드', () => {
     await waitFor(() => expect(screen.getByTestId('home-working-state')).toHaveTextContent('승인 필요'));
     expect(screen.getByTestId('home-working-steps-3')).toBeTruthy();
     expect(screen.getByTestId('home-live-dot-still')).toBeTruthy();
+  });
+
+  // ---- 승인 원장이 레일보다 이긴다 (#5085, #5066 후속) ----------------------------------------------
+  //
+  // 서버는 승인에 걸린 run 을 DB 에서는 승인 대기로 세우지만 레일 프레임으로는 알리지 않는다(중간 프레임은 늘 `running`). 그래서 레일만
+  // 읽는 홈 카드는 사람을 기다리는 에이전트를 「작업 중」이라고 말했고, 같은 승인이 대화 화면에서는 「승인을 기다립니다」였다(#5066 은
+  // 대화 화면에만 원장 덮어쓰기를 더했다). 원장은 인박스·대화 화면과 같은 쿼리 캐시라서 시험은 원장 응답(`Routes.approvals`)에 행을 둔다.
+  describe('승인 원장이 레일보다 이긴다 (#5085)', () => {
+    const wireApproval = (over: Record<string, unknown> = {}) => ({
+      id: 'ap-1',
+      workspaceId: WS,
+      runId: 'run-1',
+      channelId: 'ch-agent-lab',
+      requestedBy: AGENT_ID,
+      actionType: 'tool_call',
+      status: 'pending',
+      expiresAtMs: Date.now() + 3_600_000,
+      ...over,
+    });
+    // 카드가 원장을 읽기도 전에 「안 바뀐다」를 단정하면 아무것도 증명하지 못한다(#839). 원장이 캐시에 들어온 것을 보고 나서 잰다.
+    const ledgerRows = (rows: number) =>
+      waitFor(() =>
+        expect(
+          queryClient!.getQueryData<unknown[]>(pendingApprovalsKey(WS)),
+        ).toHaveLength(rows),
+      );
+    const reread = () =>
+      act(async () => {
+        await queryClient!.invalidateQueries({queryKey: pendingApprovalsKey(WS)});
+      });
+
+    it('카드는 원장을 따른다: 대기가 아닌 승인은 그대로, 기다리는 승인이 서면 「승인 필요」, 결정돼 빠지면 다시 「작업 중」', async () => {
+      const ledger: unknown[] = [
+        // 다른 에이전트의 승인: 그 에이전트의 기다림이고 이 카드의 에이전트는 아니다(그 에이전트는 따로 열린 턴으로 세어진다).
+        wireApproval({id: 'ap-2', requestedBy: HERMES_ID}),
+        wireApproval({id: 'ap-3', status: 'approved'}), // 이미 결정된 승인
+        wireApproval({id: 'ap-4', expiresAtMs: Date.now() - 60_000}), // 기한이 지난 승인(서버가 정리하기 전의 몇 초)
+      ];
+      await mountHome({approvals: ledger});
+      await ledgerRows(3);
+      act(() => markAgentWorking(signal()));
+      const state = () => screen.getByTestId('home-working-state');
+      const line = () => screen.getByTestId('home-working-line');
+      await waitFor(() => expect(state()).toHaveTextContent('작업 중'));
+      // 원장은 이미 읽혔는데도 카드는 레일이 말하는 그대로다. 세 승인 중 이 에이전트를 기다림으로 세우는 것은 없고(결정된 승인과
+      // 기한이 지난 승인은 턴도 만들지 못해서 「그 밖에」는 3건이 아니라 다른 에이전트의 기다림 1건이다).
+      expect(screen.getByTestId('home-working-steps-2')).toBeTruthy();
+      expect(line()).toHaveTextContent(/푸시 중복 수정 PR 초안 작성 중/);
+      expect(line()).toHaveTextContent(/그 밖에 1건/);
+
+      // 이 에이전트가 올린 승인이 사람을 기다린다 → 같은 카드가 「승인 필요」를 말하고 에이전트가 쓰던 한 줄은 버린다.
+      ledger.push(wireApproval());
+      await reread();
+      await waitFor(() => expect(state()).toHaveTextContent('승인 필요'));
+      expect(state()).not.toHaveTextContent('작업 중');
+      expect(screen.getByTestId('home-working-steps-3')).toBeTruthy();
+      expect(screen.getByTestId('home-live-dot-still')).toBeTruthy();
+      expect(line()).toHaveTextContent(/#agent-lab/);
+      expect(line()).not.toHaveTextContent(/푸시 중복 수정/);
+
+      // 다른 곳에서 결정돼 원장에서 빠지면 카드는 레일이 말하는 그대로 돌아온다.
+      ledger.pop();
+      await reread();
+      await waitFor(() => expect(state()).toHaveTextContent('작업 중'));
+      expect(screen.getByTestId('home-working-steps-2')).toBeTruthy();
+      expect(line()).toHaveTextContent(/푸시 중복 수정 PR 초안 작성 중/);
+    });
+
+    it('레일이 아무 턴도 모르는데 사람을 기다리는 승인이 있으면 승인이 카드를 세우고, 누르면 그 대화가 열린다', async () => {
+      await mountHome({approvals: [wireApproval({runId: 'run-9'})]});
+      const cardNode = await waitFor(() => screen.getByTestId('home-working-card'));
+      expect(cardNode).toHaveTextContent(/김인턴/);
+      expect(screen.getByTestId('home-working-state')).toHaveTextContent('승인 필요');
+      expect(screen.getByTestId('home-working-line')).toHaveTextContent('#agent-lab');
+      expect(screen.getByTestId('home-working-steps-3')).toBeTruthy();
+      fireEvent.press(cardNode);
+      await waitFor(() =>
+        expect(screen.getByTestId('conversation-title')).toHaveTextContent(/agent-lab/),
+      );
+    });
   });
 
   it('동작 줄이기가 켜져 있으면 맥박이 멈춘다', async () => {

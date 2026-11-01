@@ -42,7 +42,9 @@ import {
 import {
   agentTurnsForMember,
   useAgentWorkingSignals,
+  withApprovalWaits,
 } from '../features/agents/workingSignal';
+import {useWorkspaceApprovalWaits} from '../features/conversation/usePendingApprovals';
 import {useChannels, useDirectory} from '../features/workspace/queries';
 import {useRealtime} from '../realtime/RealtimeProvider';
 import {useSession} from '../session/useSession';
@@ -169,7 +171,8 @@ export default function AgentsScreen({
   // so a per-second re-render of the whole list would run forever, in the
   // background of a screen nobody is looking at, to shave a window off a word
   // that would not change.
-  const signals = useAgentWorkingSignals();
+  const railSignals = useAgentWorkingSignals();
+  const approvalWaitList = useWorkspaceApprovalWaits();
   const {status: railStatus} = useRealtime();
 
   // 당겨서 새로고침 (goal RN-B4b / #1026). 이 화면이 서 있는 세 조회를 그대로
@@ -195,6 +198,10 @@ export default function AgentsScreen({
     {active},
   );
   const nowMs = Date.now();
+  // 승인 원장이 레일보다 이긴다(#3738, 대화 화면의 자리표시·레일과 같은 덮어쓰기 — #5066·#5085). 서버는 승인에 걸린 run 을 레일 프레임으로
+  // 알리지 않아서(중간 프레임은 늘 `running`) 레일만 보면 사람을 기다리는 에이전트도 「작업 중」이다. 이 목록은 에이전트 기준이라
+  // 열린 턴을 채널 너머로 읽으므로, 덮은 목록을 한 번 만들어 행마다 같은 것을 읽는다.
+  const signals = withApprovalWaits(railSignals, approvalWaitList, nowMs);
   const railLive = railStatus === 'connected';
 
   return (

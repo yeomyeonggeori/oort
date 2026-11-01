@@ -4,7 +4,12 @@ import {useQuery} from '@tanstack/react-query';
 import {useMemo} from 'react';
 import {useSession} from '../../session/useSession';
 import type {ApprovalWait} from '@momo/core/features/agents/workingSignal';
-import {approvalGates, approvalWaits, type ApprovalGate} from './approvalGate';
+import {
+  approvalGates,
+  approvalWaits,
+  workspaceApprovalWaits,
+  type ApprovalGate,
+} from './approvalGate';
 
 // =============================================================================
 // 이 대화의 대기 승인
@@ -52,7 +57,10 @@ export interface PendingApprovals {
 const EMPTY: ReadonlyMap<string, ApprovalGate> = new Map();
 const NO_WAITS: readonly ApprovalWait[] = [];
 
-export function usePendingApprovals(channelId: string): PendingApprovals {
+/**
+ * 대기 승인 원장 하나. 이 파일의 두 훅이 **같은** 쿼리를 읽는다 — 키·함수·켜는 조건이 갈라지면 대화 화면과 홈이 서로 다른 사실을 본다.
+ */
+function usePendingApprovalLedger() {
   const {workspaceId} = useSession();
   const provided = isSurfaceProvided('approvals');
   const query = useQuery({
@@ -60,19 +68,37 @@ export function usePendingApprovals(channelId: string): PendingApprovals {
     queryFn: () => fetchApprovals(workspaceId, 'pending'),
     enabled: provided && workspaceId !== '',
   });
+  return {approvals: query.data, provided};
+}
+
+export function usePendingApprovals(channelId: string): PendingApprovals {
+  const {approvals, provided} = usePendingApprovalLedger();
 
   const gates = useMemo(
     () =>
-      query.data === undefined
-        ? EMPTY
-        : approvalGates(query.data, channelId),
-    [query.data, channelId],
+      approvals === undefined ? EMPTY : approvalGates(approvals, channelId),
+    [approvals, channelId],
   );
 
   const waits = useMemo(
-    () => (query.data === undefined ? NO_WAITS : approvalWaits(query.data, channelId)),
-    [query.data, channelId],
+    () => (approvals === undefined ? NO_WAITS : approvalWaits(approvals, channelId)),
+    [approvals, channelId],
   );
 
   return {gates, waits, provided};
+}
+
+/**
+ * 워크스페이스 전체에서 사람을 기다리는 승인 (홈 「작업 중」 카드·에이전트 탭의 덮어쓰기 재료, #5085).
+ *
+ * 대화 화면의 `usePendingApprovals(channelId).waits` 와 **같은 캐시·같은 판정**이고 범위만 채널 하나에서 전체로 넓다. 원장을 아직 못
+ * 읽었거나(로딩·서버가 승인 경로를 안 실음·실패) 대기가 없으면 빈 목록이라 덮어쓰기는 아무것도 바꾸지 않는다 — 모르면 기다림으로
+ * 세우지 않는다.
+ */
+export function useWorkspaceApprovalWaits(): readonly ApprovalWait[] {
+  const {approvals} = usePendingApprovalLedger();
+  return useMemo(
+    () => (approvals === undefined ? NO_WAITS : workspaceApprovalWaits(approvals)),
+    [approvals],
+  );
 }
