@@ -708,6 +708,510 @@ export const catalog: MessageCatalog = {
       "value": "Applying language…"
     }
   ],
+  "settings.aiLimits.ceilingSearches": [
+    {
+      "type": 0,
+      "value": "The server operator capped this at "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " searches a day."
+    }
+  ],
+  "settings.aiLimits.ceilingTokens": [
+    {
+      "type": 0,
+      "value": "The server operator capped this at "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " tokens a day."
+    }
+  ],
+  "settings.aiLimits.cleared": [
+    {
+      "type": 0,
+      "value": "Limit turned off."
+    }
+  ],
+  "settings.aiLimits.description": [
+    {
+      "type": 0,
+      "value": "Limits on what the helper uses. There is no limit by default, because your team pays for its own key and decides. You can turn on a daily or monthly limit."
+    }
+  ],
+  "settings.aiLimits.errorEmpty": [
+    {
+      "type": 0,
+      "value": "Enter a value."
+    }
+  ],
+  "settings.aiLimits.errorInvalidCount": [
+    {
+      "type": 0,
+      "value": "Enter a whole number of 1 or more."
+    }
+  ],
+  "settings.aiLimits.errorInvalidUsd": [
+    {
+      "type": 0,
+      "value": "Enter an amount above 0, with up to six decimal places."
+    }
+  ],
+  "settings.aiLimits.errorOverCeiling": [
+    {
+      "type": 0,
+      "value": "You can enter at most "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": ", the limit the server operator set."
+    }
+  ],
+  "settings.aiLimits.errorTooLarge": [
+    {
+      "type": 0,
+      "value": "Enter "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " or less."
+    }
+  ],
+  "settings.aiLimits.errorZero": [
+    {
+      "type": 0,
+      "value": "0 can't be used as a limit. To remove the limit, turn the switch off."
+    }
+  ],
+  "settings.aiLimits.loadFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't load usage limits."
+    }
+  ],
+  "settings.aiLimits.loading": [
+    {
+      "type": 0,
+      "value": "Loading usage limits."
+    }
+  ],
+  "settings.aiLimits.notAdmin": [
+    {
+      "type": 0,
+      "value": "Only owners and admins can see this."
+    }
+  ],
+  "settings.aiLimits.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so limits can't be changed right now."
+    }
+  ],
+  "settings.aiLimits.operatorOff": [
+    {
+      "type": 0,
+      "value": "The server operator has paused the team AI."
+    }
+  ],
+  "settings.aiLimits.operatorSearchOff": [
+    {
+      "type": 0,
+      "value": "The server operator has turned web search off."
+    }
+  ],
+  "settings.aiLimits.pricingNote": [
+    {
+      "type": 0,
+      "value": "Calculated from public prices. It can differ from your provider's invoice."
+    }
+  ],
+  "settings.aiLimits.resetsDate": [
+    {
+      "type": 0,
+      "value": "Starts over on "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "settings.aiLimits.resetsDay": [
+    {
+      "type": 0,
+      "value": "Starts over "
+    },
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " at "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "settings.aiLimits.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "settings.aiLimits.rowHint": [
+    {
+      "type": 0,
+      "value": "Set daily and monthly limits on helper usage and see how much is used."
+    }
+  ],
+  "settings.aiLimits.save": [
+    {
+      "type": 0,
+      "value": "Save"
+    }
+  ],
+  "settings.aiLimits.saved": [
+    {
+      "type": 0,
+      "value": "Saved."
+    }
+  ],
+  "settings.aiLimits.saveFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't save the limit. Check your connection and try again."
+    }
+  ],
+  "settings.aiLimits.saveForbidden": [
+    {
+      "type": 0,
+      "value": "Only owners and admins can change limits."
+    }
+  ],
+  "settings.aiLimits.saving": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "settings.aiLimits.searchesLabel": [
+    {
+      "type": 0,
+      "value": "Daily web search limit"
+    }
+  ],
+  "settings.aiLimits.searchesOfLimit": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " searches"
+    }
+  ],
+  "settings.aiLimits.searchesToday": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " web searches today"
+    }
+  ],
+  "settings.aiLimits.searchesUnit": [
+    {
+      "type": 0,
+      "value": "searches"
+    }
+  ],
+  "settings.aiLimits.searchesValueLabel": [
+    {
+      "type": 0,
+      "value": "Web searches per day"
+    }
+  ],
+  "settings.aiLimits.searchHint": [
+    {
+      "type": 0,
+      "value": "When it is reached, the helper answers without web search until the next reset."
+    }
+  ],
+  "settings.aiLimits.stopHint": [
+    {
+      "type": 0,
+      "value": "When it is reached, the helper stops and offers a button to hand the request to another agent."
+    }
+  ],
+  "settings.aiLimits.title": [
+    {
+      "type": 0,
+      "value": "Usage limits"
+    }
+  ],
+  "settings.aiLimits.tokensLabel": [
+    {
+      "type": 0,
+      "value": "Daily token limit"
+    }
+  ],
+  "settings.aiLimits.tokensOfLimit": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " tokens"
+    }
+  ],
+  "settings.aiLimits.tokensToday": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " tokens used today"
+    }
+  ],
+  "settings.aiLimits.tokensUnit": [
+    {
+      "type": 0,
+      "value": "tokens"
+    }
+  ],
+  "settings.aiLimits.tokensValueLabel": [
+    {
+      "type": 0,
+      "value": "Tokens per day"
+    }
+  ],
+  "settings.aiLimits.unsupported": [
+    {
+      "type": 0,
+      "value": "This server doesn't support usage limits yet."
+    }
+  ],
+  "settings.aiLimits.usageMonth": [
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "% used this month"
+    }
+  ],
+  "settings.aiLimits.usageToday": [
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "% used today"
+    }
+  ],
+  "settings.aiLimits.usdApprox": [
+    {
+      "type": 0,
+      "value": "About "
+    },
+    {
+      "type": 1,
+      "value": "amount"
+    },
+    {
+      "type": 0,
+      "value": " or more"
+    }
+  ],
+  "settings.aiLimits.usdInactive": [
+    {
+      "type": 0,
+      "value": "The model in use has no known price, so this spending limit is not being applied. Consider a token limit as well."
+    }
+  ],
+  "settings.aiLimits.usdLabel": [
+    {
+      "type": 0,
+      "value": "Monthly spending limit"
+    }
+  ],
+  "settings.aiLimits.usdModelUnpriced": [
+    {
+      "type": 0,
+      "value": "The model in use has no known price, so a spending limit can't be turned on. Try a token limit."
+    }
+  ],
+  "settings.aiLimits.usdNoUsageYet": [
+    {
+      "type": 0,
+      "value": "You can turn this on after the helper has answered once."
+    }
+  ],
+  "settings.aiLimits.usdOfLimit": [
+    {
+      "type": 1,
+      "value": "spent"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "limit"
+    }
+  ],
+  "settings.aiLimits.usdThisMonth": [
+    {
+      "type": 1,
+      "value": "spent"
+    },
+    {
+      "type": 0,
+      "value": " this month"
+    }
+  ],
+  "settings.aiLimits.usdUnavailableNow": [
+    {
+      "type": 0,
+      "value": "A spending limit can't be turned on right now."
+    }
+  ],
+  "settings.aiLimits.usdUnit": [
+    {
+      "type": 0,
+      "value": "USD"
+    }
+  ],
+  "settings.aiLimits.usdUnpricedRuns": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " request"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " requests"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " on a model with no known price "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "is"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "are"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " not counted in the amount."
+    }
+  ],
+  "settings.aiLimits.usdValueLabel": [
+    {
+      "type": 0,
+      "value": "Amount per month (USD)"
+    }
+  ],
   "settings.appearance.linkPreviewCompact": [
     {
       "type": 0,

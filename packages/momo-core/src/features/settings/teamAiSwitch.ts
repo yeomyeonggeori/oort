@@ -115,7 +115,7 @@ export const TEAM_AI_SECTION_DESCRIPTION =
 export const TEAM_AI_SWITCH_LABEL = "도우미 쓰기";
 
 export const TEAM_AI_SWITCH_DESCRIPTION =
-  "켜면 「oort 도우미」 에이전트가 생기고, 부른 사람의 메시지 한 개와 채널·멤버 이름 목록만 AI 허브 › 기본 AI의 「팀 에이전트의 답」 줄에 정한 모델로 보내요. 다른 채널 글과 기억은 보내지 않아요. 하루 사용량에는 상한이 있어요.";
+  "켜면 「oort 도우미」 에이전트가 생기고, 부른 사람의 메시지 한 개와 채널·멤버 이름 목록만 AI 허브 › 기본 AI의 「팀 에이전트의 답」 줄에 정한 모델로 보내요. 다른 채널 글과 기억은 보내지 않아요. 사용량 한도는 정하지 않으면 없고, AI 허브 › 팀 AI 키의 「사용 한도」에서 정할 수 있어요.";
 
 export function teamAiSwitchBusyLabel(next: boolean): string {
   return next ? "도우미 켜는 중" : "도우미 끄는 중";
