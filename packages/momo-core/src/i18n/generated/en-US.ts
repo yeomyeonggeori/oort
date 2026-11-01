@@ -158,6 +158,38 @@ export const catalog: MessageCatalog = {
       "value": "Window"
     }
   ],
+  "desktop.notify.threadSummary": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thread reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thread replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,
@@ -362,6 +394,18 @@ export const catalog: MessageCatalog = {
       "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
     }
   ],
+  "settings.notifications.threadReplyDescription": [
+    {
+      "type": 0,
+      "value": "New replies from others in threads you follow."
+    }
+  ],
+  "settings.notifications.threadReplyName": [
+    {
+      "type": 0,
+      "value": "New replies in followed threads"
+    }
+  ],
   "settings.profile.languageBeta": [
     {
       "type": 0,
@@ -412,6 +456,42 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Use device language"
+    }
+  ],
+  "timeline.thread.followDismiss": [
+    {
+      "type": 0,
+      "value": "Dismiss"
+    }
+  ],
+  "timeline.thread.followFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't change following. Try again in a moment."
+    }
+  ],
+  "timeline.thread.followOff": [
+    {
+      "type": 0,
+      "value": "Not following this thread. Press to follow."
+    }
+  ],
+  "timeline.thread.followOn": [
+    {
+      "type": 0,
+      "value": "Following this thread. Press to stop following."
+    }
+  ],
+  "timeline.thread.followStart": [
+    {
+      "type": 0,
+      "value": "Follow thread"
+    }
+  ],
+  "timeline.thread.followStop": [
+    {
+      "type": 0,
+      "value": "Stop following"
     }
   ],
   "timeline.thread.open": [

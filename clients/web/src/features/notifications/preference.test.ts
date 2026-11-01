@@ -20,11 +20,12 @@ class MemoryStorage {
 afterEach(() => reloadDesktopNotificationKindsForTest(null));
 
 describe("desktop notification kinds preference", () => {
-  it("defaults: 승인·응답 필요·멘션·내 작업 끝남 켬, 새 DM과 DM 독 배지 끔 (#3339 결재)", () => {
+  it("defaults: 승인·응답 필요·멘션·참여한 스레드의 새 답글(#4890)·내 작업 끝남 켬, 새 DM과 DM 독 배지 끔 (#3339 결재)", () => {
     expect(desktopNotificationKinds()).toEqual(DEFAULT_DESKTOP_NOTIFICATION_KINDS);
     expect(desktopNotificationKinds()).toEqual({
       mention: true,
       approval: true,
+      "thread-reply": true,
       reminder: true,
       "pane-waiting": true,
       "work-mine-done": true,

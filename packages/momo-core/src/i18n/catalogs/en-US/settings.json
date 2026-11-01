@@ -12,5 +12,7 @@
   "settings.appearance.linkPreviewOff": "Off",
   "settings.appearance.linkPreviewCompactHint": "Shows a small picture on the left, with the address, a one-line title and a one-line description on the right.",
   "settings.appearance.linkPreviewRichHint": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small.",
-  "settings.appearance.linkPreviewOffHint": "Keeps only the link in the message and draws no card."
+  "settings.appearance.linkPreviewOffHint": "Keeps only the link in the message and draws no card.",
+  "settings.notifications.threadReplyName": "New replies in followed threads",
+  "settings.notifications.threadReplyDescription": "New replies from others in threads you follow."
 }

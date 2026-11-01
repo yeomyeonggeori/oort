@@ -21,6 +21,7 @@ export const messageKeys = [
   "desktop.menu.undo",
   "desktop.menu.view",
   "desktop.menu.window",
+  "desktop.notify.threadSummary",
   "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
@@ -55,6 +56,8 @@ export const messageKeys = [
   "settings.appearance.linkPreviewOffHint",
   "settings.appearance.linkPreviewRich",
   "settings.appearance.linkPreviewRichHint",
+  "settings.notifications.threadReplyDescription",
+  "settings.notifications.threadReplyName",
   "settings.profile.languageBeta",
   "settings.profile.languageCurrent",
   "settings.profile.languageHint",
@@ -63,6 +66,12 @@ export const messageKeys = [
   "settings.profile.languagePartialNotice",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
+  "timeline.thread.followDismiss",
+  "timeline.thread.followFailed",
+  "timeline.thread.followOff",
+  "timeline.thread.followOn",
+  "timeline.thread.followStart",
+  "timeline.thread.followStop",
   "timeline.thread.open",
   "timeline.thread.openUnread",
   "timeline.thread.replyCount",
@@ -99,6 +108,9 @@ export const argumentSpecs = {
   "desktop.menu.undo": {},
   "desktop.menu.view": {},
   "desktop.menu.window": {},
+  "desktop.notify.threadSummary": {
+    "count": "number"
+  },
   "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
@@ -133,6 +145,8 @@ export const argumentSpecs = {
   "settings.appearance.linkPreviewOffHint": {},
   "settings.appearance.linkPreviewRich": {},
   "settings.appearance.linkPreviewRichHint": {},
+  "settings.notifications.threadReplyDescription": {},
+  "settings.notifications.threadReplyName": {},
   "settings.profile.languageBeta": {},
   "settings.profile.languageCurrent": {
     "languageName": "string"
@@ -143,6 +157,12 @@ export const argumentSpecs = {
   "settings.profile.languagePartialNotice": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {},
+  "timeline.thread.followDismiss": {},
+  "timeline.thread.followFailed": {},
+  "timeline.thread.followOff": {},
+  "timeline.thread.followOn": {},
+  "timeline.thread.followStart": {},
+  "timeline.thread.followStop": {},
   "timeline.thread.open": {
     "count": "number"
   },
@@ -185,6 +205,7 @@ export interface MessageArgs {
   "desktop.menu.undo": Record<string, never>;
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
+  "desktop.notify.threadSummary": { count: number };
   "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
@@ -219,6 +240,8 @@ export interface MessageArgs {
   "settings.appearance.linkPreviewOffHint": Record<string, never>;
   "settings.appearance.linkPreviewRich": Record<string, never>;
   "settings.appearance.linkPreviewRichHint": Record<string, never>;
+  "settings.notifications.threadReplyDescription": Record<string, never>;
+  "settings.notifications.threadReplyName": Record<string, never>;
   "settings.profile.languageBeta": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
   "settings.profile.languageHint": Record<string, never>;
@@ -227,6 +250,12 @@ export interface MessageArgs {
   "settings.profile.languagePartialNotice": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "timeline.thread.followDismiss": Record<string, never>;
+  "timeline.thread.followFailed": Record<string, never>;
+  "timeline.thread.followOff": Record<string, never>;
+  "timeline.thread.followOn": Record<string, never>;
+  "timeline.thread.followStart": Record<string, never>;
+  "timeline.thread.followStop": Record<string, never>;
   "timeline.thread.open": { count: number };
   "timeline.thread.openUnread": { count: number; unread: number };
   "timeline.thread.replyCount": { count: number };
