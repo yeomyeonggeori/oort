@@ -3,8 +3,11 @@
 # EVERY start and checked by lockgate.py BEFORE the Hermes entrypoint (so before any listener) runs.
 # api_server selects the search-only `search` toolset, never the combined `web` toolset (#4794).
 # api_server also selects `image_gen` (image_generate) with the Codex subscription provider only (#4820).
-# agent.disabled_toolsets keeps the other locks; lockgate.py checks the final tool names, search backend and image provider.
-# Surface: memory, todo, session_search + Codex subscription web_search + Codex subscription image_generate.
+# `memory` and `session_search` are OFF (#4898, ADR-0203 augmentation of 2026-11-01): this Hermes keeps ONE history and ONE memory for every workspace
+# it serves, and both tools read what an earlier run of another workspace left there. Removing the toolsets is not enough for `memory`:
+# Hermes loads MEMORY.md / USER.md into every system prompt unless `memory.memory_enabled` / `memory.user_profile_enabled` are false (below).
+# agent.disabled_toolsets keeps the other locks; lockgate.py checks the final tool names, search backend, image provider and the memory switches.
+# Surface: todo + Codex subscription web_search + Codex subscription image_generate.
 # web_extract stays outside the allow-list. image_generate takes model-chosen image addresses that Hermes would fetch itself, so
 # the oort-owned plugin below refuses every address, path and non-inline value BEFORE the tool runs (ADR-0203 augmentation of
 # 2026-10-30, I1-I4); lockgate.py pins the plugin's bytes, requires it here, and exercises it with a canary at every start.
@@ -28,6 +31,8 @@ agent:
     - video_gen       # video generation and editing
     - x_search        # X (Twitter) search
     - skills          # skill_manage writes persistent instructions that outlive the chat (verified: creates a skill on the volume)
+    - memory          # memory: ONE MEMORY.md / USER.md per Hermes home, loaded into the system prompt of every session: what a run of one workspace writes, a run of another reads (#4898)
+    - session_search  # session_search: full-text search and read over the whole state.db, every earlier run of every workspace, tool-call arguments included (#4898)
     - tts             # text_to_speech
     - stt             # speech-to-text
     - kanban          # kanban_* task board
@@ -39,9 +44,7 @@ agent:
     - a2a             # agent-to-agent calls to other endpoints
 platform_toolsets:
   api_server:
-    - memory
     - todo
-    - session_search
     - search          # Hermes v0.22.2: web_search only; adding `web` would fail the lockgate
     - image_gen       # Hermes v0.22.2: image_generate only; the provider below is the only one the lockgate accepts (#4820)
 web:
@@ -49,6 +52,9 @@ web:
   keyless_fallback: false        # no anonymous third-party search fallback
 image_gen:
   provider: openai-codex         # gpt-image-2 via the existing Codex OAuth (no OPENAI_API_KEY); unset/fal/openai/... and any other key here fail the lockgate
+memory:
+  memory_enabled: false        # no MEMORY.md in any system prompt. `_init_memory` reads this flag, not the toolset: an existing file would stay injected otherwise (#4898)
+  user_profile_enabled: false  # the same for USER.md; the gate needs both explicitly false, and no `memory.provider`
 plugins:
   enabled:
     - oort-image-guard           # pre_tool_call guard for image_generate (infra/hermes/plugins/oort-image-guard); exactly this one, or the lockgate refuses

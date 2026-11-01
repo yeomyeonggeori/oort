@@ -17,6 +17,12 @@ image's own `hermes_cli.env_loader.load_hermes_dotenv` (infra/hermes/env_loader_
 line-by-line `agent.secret_scope.load_env_file`, and records what they apply in `lockgate["oracle"]` (`violated`, `line_violated`);
 `env-loader-oracle` does that for the whole named table and a few thousand seeded random inputs and compares the readers with the gate's
 functions. The judge in the shell script holds the gate to their answers.
+
+The scenarios about cross-run recall (#4898, ADR-0203 augmentation of 2026-11-01) do not rest on the config's own word either: `cross-run-tools-off`
+asks THIS image's real Hermes modules (a child process with `HERMES_HOME` on a scratch folder) what the shipped config exposes and whether a
+MEMORY.md an earlier run left would reach a system prompt, and asks the same of a copy with the two tools switched on, so a probe that cannot see them
+fails; `cross-run-tools-on` runs the real gate on single-fault copies of the config (the gate copy accepts their bytes, so only the rule under test
+can refuse) and demands each refusal by its own rule.
 """
 import hashlib
 import json
@@ -25,6 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 OORT = "/oort"
 DATA = "/opt/data"
@@ -462,7 +469,8 @@ def scenario_connector_configs():
         rc, record, tail = run_gate(env=CONNECTOR_ENV if name.startswith("connector/") else None)
         record = record or {}
         entries[name] = {"rc": rc, "ok": record.get("ok"), "accepted_as": record.get("config_accepted_as"), "problems": record.get("problems"),
-                         "selected_tools": record.get("selected_tools"), "image_guard": record.get("image_guard"),
+                         "selected_tools": record.get("selected_tools"), "resolved_tools": record.get("resolved_tools"),
+                         "memory_config": record.get("memory_config"), "image_guard": record.get("image_guard"),
                          "media_strict": record.get("media_strict"), "tail": tail}
     ok = all(entry["rc"] == 0 for entry in entries.values())
     return (0 if ok else 1), {"ok": ok, "problems": [], "entries": entries}, None
@@ -490,6 +498,119 @@ def scenario_connector_config_apps_missing():
     install()
     write(os.path.join(DATA, "config.yaml"), configs["connector/claude-oauth.fallback-codex-oauth"])
     return run_gate(env={**CONNECTOR_ENV, "OORT_COHOSTED_AGENT_CONNECTOR_APPS": None})
+
+
+RECALL_TOOLS = ("memory", "session_search")
+RECALL_MARKER = "oort-proof-recall-marker-4898"  # text a run of "another workspace" left in MEMORY.md; a made-up word, never a secret
+
+# What this image's REAL Hermes makes of one config.yaml in a fresh HERMES_HOME: the calls the gate makes (`_get_platform_tools`, `_select_tool_names`,
+# `get_tool_definitions`) and the ones agent/agent_init.py `_init_memory` makes before it builds the memory store whose snapshot enters the system
+# prompt. Hermes reads HERMES_HOME when its modules are imported, so this runs in a child process of its own. Nothing is dialed.
+RECALL_PROBE = r"""
+import json, os, sys
+sys.path.insert(0, "/opt/hermes")
+from hermes_cli.config import load_config
+from hermes_cli.tools_config import _get_platform_tools
+from model_tools import _select_tool_names, get_tool_definitions
+from tools.memory_tool import MemoryStore, check_memory_requirements, get_builtin_memory_config, get_builtin_memory_store_flags
+cfg = load_config()
+disabled = [str(x) for x in ((cfg.get("agent") or {}).get("disabled_toolsets") or [])]
+enabled = sorted(_get_platform_tools(cfg, "api_server"))
+selected = sorted(_select_tool_names(enabled, disabled, True))
+defs = get_tool_definitions(enabled_toolsets=enabled, disabled_toolsets=disabled, quiet_mode=True, skip_tool_search_assembly=True)
+resolved = sorted({d["function"]["name"] for d in defs})
+flags = list(get_builtin_memory_store_flags(cfg))
+settings = get_builtin_memory_config(cfg)
+marker = None
+if any(flags):
+    store = MemoryStore(memory_char_limit=settings.get("memory_char_limit", 2200), user_char_limit=settings.get("user_char_limit", 1375),
+                        memory_enabled=flags[0], user_profile_enabled=flags[1])
+    store.load_from_disk()
+    marker = os.environ["OORT_RECALL_MARKER"] in (store.format_for_system_prompt("memory") or "")
+print("PROBE " + json.dumps({"enabled": enabled, "selected": selected, "resolved": resolved, "memory_flags": flags,
+                             "memory_tool_available": bool(check_memory_requirements()), "store_built": any(flags), "marker_in_prompt": marker,
+                             "provider_set": bool(settings.get("provider"))}, sort_keys=True))
+"""
+
+
+def recall_probe(config_raw):
+    """The real Hermes' view of `config_raw` with a MEMORY.md that holds the marker on the same volume, as a dict (or {"error": [...]})."""
+    home = tempfile.mkdtemp(prefix="recall-probe-")  # a new folder every time: nothing is deleted, nothing is reused
+    os.makedirs(os.path.join(home, "memories"))
+    write(os.path.join(home, "config.yaml"), config_raw)
+    write(os.path.join(home, "memories", "MEMORY.md"), ("an earlier run of another workspace wrote this: " + RECALL_MARKER + "\n").encode("utf-8"))
+    env = dict(os.environ, HERMES_HOME=home, HOME=home, OORT_RECALL_MARKER=RECALL_MARKER, PYTHONDONTWRITEBYTECODE="1")
+    # the same schema migration the gate (and stage2 on the real volume) runs before it loads the file
+    subprocess.run([PY, os.path.join(HERMES_INSTALL, "scripts", "docker_config_migrate.py")], cwd=HERMES_INSTALL, env=env, capture_output=True, text=True, timeout=120)
+    done = subprocess.run([PY, "-c", RECALL_PROBE], cwd=HERMES_INSTALL, env=env, capture_output=True, text=True, timeout=300)
+    for line in done.stdout.splitlines():
+        if line.startswith("PROBE "):
+            return json.loads(line[len("PROBE "):])
+    return {"error": (done.stderr.strip().splitlines() + done.stdout.strip().splitlines())[-8:]}
+
+
+def with_recall_tools(text, toolsets=RECALL_TOOLS, flags=True):
+    """The shipped default config with the recall tools switched on the way an operator would: listed in api_server, their deny-list lines gone,
+    the memory switches on. `toolsets` picks which of the two; `flags=False` leaves the switches as shipped."""
+    out = text
+    for name in toolsets:
+        stripped = re.sub(r"(?m)^    - %s +#.*\n" % name, "", out)
+        assert stripped != out, "the deny-list has no %s line: update this scenario" % name
+        out = stripped.replace("  api_server:\n", "  api_server:\n    - %s\n" % name, 1)
+    if flags:
+        for key in ("memory_enabled", "user_profile_enabled"):
+            flipped = re.sub(r"(?m)^  %s: false" % key, "  %s: true" % key, out)
+            assert flipped != out, "the memory section has no %s line: update this scenario" % key
+            out = flipped
+    return out
+
+
+def scenario_cross_run_tools_off():
+    """#4898: the shipped default config exposes no recall tool and loads no memory file, measured on this image's own Hermes. (1) The REAL gate on the
+    shipped files: accepted, `selected_tools` and `resolved_tools` hold neither `memory` nor `session_search`, the positive control (`todo_list`) resolved
+    and the gate saw both memory switches explicitly false. (2) The real Hermes modules on the shipped config with a MEMORY.md that holds the marker on
+    the volume: neither tool, both switches false, no memory store built, so no marker can reach a prompt. (3) The control: the same probe on a copy with
+    the tools switched on sees both tools, the store and the marker, so a probe that was blind would fail here."""
+    install()
+    rc, record, tail = run_gate()
+    record = record or {}
+    shipped = read(os.path.join(DATA, "config.yaml"))
+    gate = {key: record.get(key) for key in ("ok", "problems", "config_accepted_as", "selected_tools", "resolved_tools", "memory_config")}
+    return rc, {"ok": record.get("ok"), "problems": record.get("problems") or [], "gate": {"rc": rc, **gate},
+                "real_shipped": recall_probe(shipped),
+                "real_opened": recall_probe(with_recall_tools(shipped.decode("utf-8")).encode("utf-8"))}, tail
+
+
+def scenario_cross_run_tools_on():
+    """#4898: the real gate on single-fault copies of the shipped config, each refused by its OWN rule. The gate copy accepts the copy's bytes by hash
+    (the same shape as `widened-plugin`), so what refuses is the rule under test and not the hash list. `session-search` and `memory-tool`: one toolset
+    on, switches as shipped; `memory-switches`: both switches on, toolsets off; `provider`: an external memory provider named; `all-on`: everything."""
+    install()
+    shipped = read(os.path.join(DATA, "config.yaml")).decode("utf-8")
+    gate_text = read(os.path.join(OORT, "lockgate.py")).decode("utf-8")
+    assert sha(shipped.encode("utf-8")) in gate_text, "the gate does not carry the shipped config's hash"
+    provider = re.sub(r"(?m)^(  user_profile_enabled: false.*)$", r"\1\n  provider: honcho", shipped)
+    assert provider != shipped
+    variants = {
+        "session-search": with_recall_tools(shipped, ("session_search",), flags=False),
+        "memory-tool": with_recall_tools(shipped, ("memory",), flags=False),
+        "memory-switches": re.sub(r"(?m)^  (memory_enabled|user_profile_enabled): false", r"  \1: true", shipped),
+        "provider": provider,
+        "all-on": with_recall_tools(shipped),
+    }
+    result = {}
+    for name, text in variants.items():
+        assert text != shipped
+        patched = "/tmp/lockgate_cross_run_%s.py" % name
+        write(patched, gate_text.replace(sha(shipped.encode("utf-8")), sha(text.encode("utf-8"))).encode("utf-8"))
+        install()
+        write(os.path.join(DATA, "config.yaml"), text.encode("utf-8"))
+        rc, record, tail = run_gate(gate=patched)
+        record = record or {}
+        result[name] = {"rc": rc, "accepted_as": record.get("config_accepted_as"), "problems": record.get("problems"),
+                        "selected_tools": record.get("selected_tools"), "resolved_tools": record.get("resolved_tools"),
+                        "memory_config": record.get("memory_config"), "tail": tail}
+    return 0, {"ok": True, "problems": [], "variants": result}, None
 
 
 def scenario_hermes_home_other():

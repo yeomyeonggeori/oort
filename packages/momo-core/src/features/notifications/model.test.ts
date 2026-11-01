@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { MessageNewEvent } from "../../lib/realtimeEvents";
 import {
+  admitThreadBanner,
   ANNOUNCED_CAP,
   armOpen,
   BODY_MAX,
+  EMPTY_THREAD_BANNER_LEDGER,
   notifiableKind,
   notificationBody,
   notifyDecision,
@@ -11,6 +13,8 @@ import {
   openTarget,
   OPEN_ARM_TTL_MS,
   rememberAnnounced,
+  THREAD_BANNER_CAP,
+  THREAD_BANNER_WINDOW_MS,
   type NotifyContext,
 } from "./model";
 import type { Message } from "../../lib/api";
@@ -842,5 +846,70 @@ describe("참여한 스레드의 새 답글 (#4890)", () => {
     // 걸러질 이유가 없으면 그때 한 번 묻는다.
     notifyDecision(reply(), context({ ...ask, ...notOpen }));
     expect(asked).toEqual([ROOT]);
+  });
+});
+
+describe("같은 스레드의 답글 여럿은 그 스레드로 착지한다 (#5017)", () => {
+  const ROOT = "019F96A4-E717-7F82-9750-58B2D7D28100";
+  const OTHER_ROOT = "019F96A4-E717-7F82-9750-58B2D7D28101";
+  const FIRST = "019F96A4-E717-7F82-9750-58B2D7D28201";
+  const SECOND = "019F96A4-E717-7F82-9750-58B2D7D28202";
+  const THIRD = "019F96A4-E717-7F82-9750-58B2D7D28203";
+
+  it("같은 채널·같은 스레드의 다른 답글이 쌓이면 스레드(rootId)를 지키고 가장 늦은 답글을 기억한다 — 채널로 물러나지 않는다", () => {
+    const armed = armOpen(
+      armOpen(armOpen(null, CHANNEL, NOW, undefined, FIRST, ROOT), CHANNEL, NOW + 300, undefined, SECOND, ROOT.toLowerCase()),
+      CHANNEL,
+      NOW + 600,
+      undefined,
+      THIRD,
+      ROOT
+    );
+    expect(armed).toMatchObject({ channelId: CHANNEL, messageId: THIRD, rootId: ROOT });
+    expect(openTarget(armed, NOW + 700)).toBe(`/c/${encodeURIComponent(CHANNEL)}?msg=${THIRD.toLowerCase()}`);
+  });
+
+  it("스레드가 다르거나, 스레드가 아닌 알림(멘션)이 끼면 예전처럼 채널이다 — 어느 스레드인지 추측하지 않는다", () => {
+    const first = armOpen(null, CHANNEL, NOW, undefined, FIRST, ROOT);
+    const otherThread = armOpen(first, CHANNEL, NOW + 300, undefined, SECOND, OTHER_ROOT);
+    expect(otherThread).toEqual({ channelId: CHANNEL, armedAtMs: NOW + 300 });
+    expect(openTarget(otherThread, NOW + 400)).toBe(`/c/${CHANNEL}`);
+    const mention = armOpen(first, CHANNEL, NOW + 300);
+    expect(mention).toEqual({ channelId: CHANNEL, armedAtMs: NOW + 300 });
+    // 스레드 알림이 먼저, 같은 스레드가 아닌 다른 채널이 끼면 둘 다 접힌다(멘션 인박스).
+    expect(openTarget(armOpen(first, OTHER_CHANNEL, NOW + 300, undefined, SECOND, ROOT), NOW + 400)).toBe(
+      "/inbox?filter=mentions"
+    );
+  });
+});
+
+describe("스레드 배너 상한 (#5017): 폰 푸시의 스레드당 분당 6건과 같은 값", () => {
+  const ROOT = "019F96A4-E717-7F82-9750-58B2D7D28100";
+  const OTHER_ROOT = "019F96A4-E717-7F82-9750-58B2D7D28101";
+
+  it("값은 한 곳에 못 박혀 있다: 60초에 6건 (서버 `bulk.rs` 의 INDIVIDUAL_PER_WINDOW·WINDOW_SECONDS 와 같다)", () => {
+    expect(THREAD_BANNER_CAP).toBe(6);
+    expect(THREAD_BANNER_WINDOW_MS).toBe(60_000);
+  });
+
+  it("한 스레드는 상한까지만 허락하고 넘으면 거절한다. 다른 스레드는 따로 세고, 창이 지나면 다시 허락하며, 장부는 늘어나지 않는다", () => {
+    let ledger = EMPTY_THREAD_BANNER_LEDGER;
+    const admit = (root: string, at: number): boolean => {
+      const verdict = admitThreadBanner(ledger, root, at);
+      ledger = verdict.ledger;
+      return verdict.admitted;
+    };
+    const first = Array.from({ length: 8 }, (_, n) => admit(ROOT, NOW + n * 1_000));
+    expect(first).toEqual([true, true, true, true, true, true, false, false]);
+    // 대소문자가 다른 같은 루트도 한 스레드다. 거절한 시도는 창을 밀지 않는다(시각을 적지 않는다).
+    expect(admit(ROOT.toLowerCase(), NOW + 30_000)).toBe(false);
+    // 다른 스레드의 첫 답글들은 이 스레드의 한도를 쓰지 않는다.
+    expect(admit(OTHER_ROOT, NOW + 31_000)).toBe(true);
+    // 첫 허락(NOW)에서 60초가 지난 뒤에는 그 자리가 비어 다시 한 건이 나간다(미끄러지는 창).
+    expect(admit(ROOT, NOW + THREAD_BANNER_WINDOW_MS)).toBe(true);
+    expect(admit(ROOT, NOW + THREAD_BANNER_WINDOW_MS + 1)).toBe(false);
+    // 창 밖의 항목은 다음 판정에서 버려진다: 한참 뒤에는 장부에 지난 스레드가 남지 않는다.
+    admit(OTHER_ROOT, NOW + 10 * THREAD_BANNER_WINDOW_MS);
+    expect([...ledger.keys()]).toEqual([OTHER_ROOT.toLowerCase()]);
   });
 });

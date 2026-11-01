@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
 import { catalog as ko } from "../../i18n/generated/ko-KR";
 import { createMessageCopy } from "../../testkit/i18n";
-import { createThreadFollowController, followIsUnavailable, threadFollowCopy } from "./threadFollow";
+import { createThreadFollowController, followIsUnavailable, followOnReplyHint, threadFollowCopy } from "./threadFollow";
 
 // =============================================================================
 // 스레드 머리의 따라가기 단추 규칙 (#4890). 서버는 가짜 응답이고, 여기서는 단추가 **무엇을 언제 바꾸는가**를 잰다:
@@ -74,7 +74,7 @@ describe("실패하면 누르기 전 값으로 되돌리고 안내를 세운다"
   ])("%s → 되돌림 + failed, 칸은 그대로 있다", async (_name, error) => {
     const { controller, onSettled } = setup(false, vi.fn(async () => Promise.reject(error)));
     await controller.toggle();
-    expect(controller.getSnapshot()).toEqual({ following: false, pending: false, failed: true, unavailable: false });
+    expect(controller.getSnapshot()).toEqual({ following: false, pending: false, failed: true, unavailable: false, touched: true });
     expect(onSettled).not.toHaveBeenCalled();
   });
 
@@ -108,7 +108,7 @@ describe("쓸 수 없는 곳(옛 서버·DM)에서는 칸을 숨기고 더 보�
     const send = vi.fn(async () => Promise.reject(error));
     const { controller } = setup(false, send);
     await controller.toggle();
-    expect(controller.getSnapshot()).toEqual({ following: false, pending: false, failed: false, unavailable: true });
+    expect(controller.getSnapshot()).toEqual({ following: false, pending: false, failed: false, unavailable: true, touched: true });
     await controller.toggle();
     expect(send).toHaveBeenCalledTimes(1);
   });
@@ -130,6 +130,16 @@ describe("서버가 알려 준 값은 사람이 누르기 전까지만 받는다
     expect(listener).toHaveBeenCalledTimes(1);
     expect(controller.sync(true)).toBe(true); // 받았다는 뜻이고, 같은 값이라 다시 알리지는 않는다
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("누른 적이 있는지(touched)는 서버 값을 받는 동안은 꺼져 있고, 한 번 누르면 켜져서 그대로다 — 실패한 누르기도 센다", async () => {
+    const { controller } = setup(false);
+    expect(controller.getSnapshot().touched).toBe(false);
+    controller.sync(true);
+    expect(controller.getSnapshot().touched).toBe(false);
+    const failing = setup(false, vi.fn(async () => Promise.reject(new ApiError(500, "boom"))));
+    await failing.controller.toggle();
+    expect(failing.controller.getSnapshot()).toMatchObject({ following: false, touched: true });
   });
 
   it("요청이 나가 있는 동안, 그리고 한 번 누른 뒤에는 옛 읽기가 늦게 와도 값을 뒤집지 못한다", async () => {
@@ -159,6 +169,8 @@ describe("문구: 지금 상태를 말로 한다", () => {
     expect(off.action).toBe("따라가기");
     expect(on.failed).toBe("따라가기를 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요.");
     expect(on.dismiss).toBe("닫기");
+    expect(on.replyHint).toBe("답하면 이 스레드를 따라가요.");
+    expect(off.replyHint).toBe(on.replyHint); // 상태와 무관한 한 문장이다(세울지는 `followOnReplyHint`)
   });
 
   it("영어도 같은 짝이다", () => {
@@ -169,6 +181,39 @@ describe("문구: 지금 상태를 말로 한다", () => {
     expect(threadFollowCopy(false, copyEn)).toMatchObject({
       label: "Not following this thread. Press to follow.",
       action: "Follow thread",
+      replyHint: "Replying makes you follow this thread.",
     });
+  });
+});
+
+describe("처음 답할 때의 힌트 (#5017): 말이 틀릴 수 있는 갈래에서는 서지 않는다", () => {
+  const ME = "00000000-0000-7000-8000-000000000101";
+  const OTHER = "00000000-0000-7000-8000-0000000005d1";
+  const base = {
+    available: true,
+    serverFollowing: false as boolean | undefined,
+    touched: false,
+    selfMemberId: ME as string | undefined,
+    rootAuthorId: OTHER,
+    replies: [{ authorMemberId: OTHER }] as ReadonlyArray<{ authorMemberId: string }>,
+    complete: true,
+  };
+
+  it("서버가 따라가지 않는다고 했고 아직 이 스레드에서 말한 적이 없으면 선다 — 답글이 없는 내 글의 스레드도 마찬가지다", () => {
+    expect(followOnReplyHint(base)).toBe(true);
+    expect(followOnReplyHint({ ...base, rootAuthorId: ME, replies: [] })).toBe(true);
+  });
+
+  it.each([
+    ["칸이 없는 곳(DM·작업 세션·서버 응답 전·쓸 수 없음)", { available: false }],
+    ["따라가는 스레드", { serverFollowing: true }],
+    ["옛 서버(following 키 없음): 답해도 따라가지 않는다", { serverFollowing: undefined }],
+    ["사람이 이 패널에서 누른 적이 있다: 끈 것은 답글로 돌아오지 않는다", { touched: true }],
+    ["내가 이미 답한 스레드(대소문자가 달라도)", { replies: [{ authorMemberId: ME.toUpperCase() }, { authorMemberId: OTHER }] }],
+    ["내 글에 답글이 달린 스레드: 루트 작성자는 첫 답글에서 이미 따라가기 시작했다", { rootAuthorId: ME }],
+    ["답글을 다 못 불러왔다: 안 보이는 쪽에 내 답글이 있을 수 있다", { complete: false }],
+    ["읽는 사람을 모른다", { selfMemberId: undefined }],
+  ])("%s → 서지 않는다", (_name, override) => {
+    expect(followOnReplyHint({ ...base, ...override })).toBe(false);
   });
 });

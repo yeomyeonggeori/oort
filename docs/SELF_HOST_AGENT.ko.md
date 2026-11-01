@@ -1966,7 +1966,10 @@ scripts/oort doctor --json
 
 ```yaml
 agent:
-  disabled_toolsets: [terminal, code_execution, browser]
+  disabled_toolsets: [terminal, code_execution, browser, memory, session_search]
+memory:                        # ADR-0203 R2: Hermes 하나가 모든 워크스페이스를 맡아서
+  memory_enabled: false        # 런 사이 기억·세션 검색을 두지 않아요
+  user_profile_enabled: false
 ```
 
    API 서버 toolset은 터미널·코드 실행·브라우저를 기본으로 켜 두고, API 서버
@@ -2018,7 +2021,8 @@ agent:
 Hermes는 이 파일을 판독기 둘로 읽고 게이트도 둘의 눈으로 판정해요. 값은 한 줄이어야 하고(값 안의
 줄바꿈은 거절해요), 어느 판독기든 읽는 이름은 목록에 있어야 해요. 그 밖의 이름은 값이 비어 있어도
 이름만 대고 시작을 거절해요(게이트는 값을 출력하지 않아요). 옆에 `.op.env`가 있거나
-`/opt/data/profiles/` 아래에 항목이 하나라도 있어도 거절해요(폴더가 없거나 비어 있는 것은 괜찮아요). 이미 도는
+`/opt/data/profiles/` 아래에 항목이 하나라도 있어도 거절해요(폴더가 없거나 비어 있는 것은 괜찮아요. 프로필을 만들었다 지웠다면 Hermes가 남기는 `.deleted` 표식도
+항목 하나로 세요). 이미 도는
 Hermes의 게이트를 바꾸기 전에 그 `.env`의 이름만 읽어서
 (`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env`는
 이름만 보여줘요) 목록에 없는 줄을 지우세요.
@@ -2127,7 +2131,10 @@ oort는 판단하거나 보증하지 않아요. 구독 토큰을 oort·채널·o
 
 ```yaml
 agent:
-  disabled_toolsets: [terminal, code_execution, browser, cronjob, delegation, web]
+  disabled_toolsets: [terminal, code_execution, browser, cronjob, delegation, web, memory, session_search]
+memory:                        # ADR-0203 R2, 첫 설정과 같아요
+  memory_enabled: false
+  user_profile_enabled: false
 mcp_servers:
   gmail:                       # com.momo.plugins.gmail -> 키 "gmail"
     url: https://<벤더 MCP 주소>
