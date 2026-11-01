@@ -4,5 +4,14 @@
   "timeline.thread.replyCount": "답글 {count, number}개",
   "timeline.thread.unreadChip": "새 답글 {count, number}",
   "timeline.thread.open": "스레드 열기, 답글 {count, number}개",
-  "timeline.thread.openUnread": "스레드 열기, 답글 {count, number}개, 새 답글 {unread, number}개"
+  "timeline.thread.openUnread": "스레드 열기, 답글 {count, number}개, 새 답글 {unread, number}개",
+  "timeline.thread.followOn": "이 스레드를 따라가고 있어요. 누르면 그만 따라가요.",
+  "timeline.thread.followOff": "이 스레드를 따라가지 않아요. 누르면 따라가요.",
+  "timeline.thread.followStop": "그만 따라가기",
+  "timeline.thread.followStart": "따라가기",
+  "timeline.thread.followFailed": "따라가기를 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요.",
+  "timeline.thread.followDismiss": "닫기",
+  "timeline.unfurl.previewDismiss": "이번 메시지는 미리보기 없이 보내기",
+  "timeline.unfurl.previewDismissed": "이번 메시지는 링크 미리보기 없이 보내요.",
+  "timeline.unfurl.previewGroup": "보내기 전 링크 미리보기"
 }

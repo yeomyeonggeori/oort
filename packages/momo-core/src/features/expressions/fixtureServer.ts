@@ -1,6 +1,7 @@
 import { matchesExpressionContract } from "./contracts";
 import { matchesExpressionChoice } from "./cards";
 import { FIXTURE_MEDIA } from "./fixtureMedia";
+import { PHOTO_BRANCHES, PHOTO_FAILURE_STATUS, PHOTO_PROVIDERS, type PhotoBranch, type PhotoFailureCode, type PhotoProvider } from "./photo";
 import { FIXTURE_LIST, FIXTURE_MEMBER_ID, FIXTURE_NOW_MS, FIXTURE_READY_DRAFT, FIXTURE_WORKSPACE_ID } from "./fixtures";
 import type { Expression, ExpressionChoice, ExpressionDraft, ExpressionMetadata, ExpressionPatch, ManualUploadCode } from "./types";
 
@@ -22,7 +23,20 @@ function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; 
  * In-memory REST fixture for S3 host transport adapters. This simulates wire and
  * preview revisions, not auth, RLS, fetching, conversion, or security enforcement.
  */
-export function createExpressionFixtureServer(options: { importFailure?: ManualUploadCode; nowMs?: number } = {}) {
+/** The server's own two sentences (momo-expressions `PHOTO_PROMPTS`; a test pins the pair against the Rust source). */
+export const PHOTO_FIXTURE_PROMPTS: Record<PhotoBranch, string> = {
+  cutout: "사진에서 피사체만 남기고 배경을 지운 그림",
+  caricature: "사진을 바탕으로 새로 그린 캐리커처",
+};
+
+export function createExpressionFixtureServer(options: {
+  importFailure?: ManualUploadCode;
+  nowMs?: number;
+  /** Opt in to the photo routes: which image model the fake team has (`none`: no model connected). */
+  photoModel?: "none" | PhotoProvider;
+  /** With a model: answer every photo request with this closed failure. */
+  photoFailure?: PhotoFailureCode;
+} = {}) {
   const base = `/v1/workspaces/${FIXTURE_WORKSPACE_ID}`;
   const catalogue = new Map(FIXTURE_LIST.items.map((item) => [item.id, clone(item)]));
   const drafts = new Map<string, ExpressionDraft>();
@@ -45,6 +59,25 @@ export function createExpressionFixtureServer(options: { importFailure?: ManualU
         return { status: 200, json: clone({ ...FIXTURE_LIST, version: String(version),
           reset: since !== String(version), baseVersion: since === String(version) ? since : null,
           items: since === String(version) ? [] : [...catalogue.values()].filter((item) => item.status === "active") }) };
+      }
+      if (options.photoModel !== undefined && request.method === "GET" && path === `${base}/expressions/photo-model`) {
+        const provider = options.photoModel === "none" ? null : options.photoModel;
+        return { status: 200, json: { available: provider !== null, provider, branches: [...PHOTO_BRANCHES], canManage: true } };
+      }
+      if (options.photoModel !== undefined && request.method === "POST" && path === `${base}/expressions/photo-drafts`) {
+        const body = request.body as (ExpressionMetadata & { branch?: string; acknowledgedProvider?: string }) | undefined;
+        if (!body || !matchesExpressionContract("Metadata", { name: body.name, displayName: body.displayName, tags: body.tags, subjectMemberId: body.subjectMemberId })
+          || !(PHOTO_BRANCHES as readonly string[]).includes(body.branch ?? "") || !(PHOTO_PROVIDERS as readonly string[]).includes(body.acknowledgedProvider ?? "")) return error(400, "expression_invalid");
+        if (options.photoModel === "none") return error(409, "image_model_unavailable");
+        if (body.acknowledgedProvider !== options.photoModel) return error(409, "image_model_changed");
+        if (options.photoFailure) return error(PHOTO_FAILURE_STATUS[options.photoFailure], options.photoFailure);
+        const branch = body.branch as PhotoBranch;
+        const draftId = `00000000-0000-4000-8000-${String(serial++).padStart(12, "0")}`;
+        const draft: ExpressionDraft = { ...clone(FIXTURE_READY_DRAFT), draftId, name: body.name, displayName: body.displayName, tags: body.tags,
+          subjectMemberId: body.subjectMemberId, expiresAtMs: now + 3600000, state: "ready", code: null, media: clone(FIXTURE_READY_DRAFT.media!),
+          origin: { kind: "generated", sourceUrl: null, prompt: PHOTO_FIXTURE_PROMPTS[branch], sourceAttachmentId: null } };
+        drafts.set(draftId, draft);
+        return { status: 201, json: clone({ draft, cutout: branch === "cutout" ? "erased" : null }) };
       }
       const prepare = request.method === "POST" && ["uploads", "import", "from-attachment"].some((suffix) => path === `${base}/expressions/${suffix}`);
       if (prepare) {

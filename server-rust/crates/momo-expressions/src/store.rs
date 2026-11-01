@@ -328,6 +328,21 @@ pub async fn create_draft(
     media: Option<Processed>,
     code: Option<&str>,
 ) -> Result<Value, Error> {
+    create_draft_with(pool, actor, meta, origin, media, code, json!({})).await
+}
+
+/// [`create_draft`] with names and numbers of the caller's own added to the `expression.staged`
+/// audit row (ADR-0218 D6: never bytes, a prompt or a link). The photo route records which
+/// provider, branch and cut-out outcome produced the picture.
+pub async fn create_draft_with(
+    pool: &PgPool,
+    actor: Actor,
+    meta: Metadata,
+    origin: Origin,
+    media: Option<Processed>,
+    code: Option<&str>,
+    audit_extra: Value,
+) -> Result<Value, Error> {
     meta.validate()?;
     // This direct API never accepts caller-supplied prompts or cards; a link's origin
     // is accepted only in its storable form (no query, credentials or fragment).
@@ -348,7 +363,7 @@ pub async fn create_draft(
         if let Some(media)=media {put_images(conn,actor.workspace,id,Some(1),&media).await?;}
         // The reason code of a failed receive is recorded here as well: the TTL sweep
         // clears the draft's own `code` (ADR-0218 D6, `staged` carries the reason).
-        crate::action::audit_staged(conn,actor.workspace,actor.member,id,&origin,code.as_deref(),sha.as_deref(),None,json!({})).await?;
+        crate::action::audit_staged(conn,actor.workspace,actor.member,id,&origin,code.as_deref(),sha.as_deref(),None,audit_extra).await?;
         draft_json(conn,&row).await
     })).await
 }

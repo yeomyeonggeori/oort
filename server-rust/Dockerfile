@@ -174,6 +174,7 @@ COPY server-rust/crates/momo-embed/Cargo.toml crates/momo-embed/
 COPY server-rust/crates/momo-github/Cargo.toml crates/momo-github/
 COPY server-rust/crates/momo-ephemeral/Cargo.toml crates/momo-ephemeral/
 COPY server-rust/crates/momo-expressions/Cargo.toml crates/momo-expressions/
+COPY server-rust/crates/momo-image-model/Cargo.toml crates/momo-image-model/
 COPY server-rust/crates/momo-messaging/Cargo.toml crates/momo-messaging/
 COPY server-rust/crates/momo-mcp/Cargo.toml crates/momo-mcp/
 COPY server-rust/crates/momo-outbox/Cargo.toml crates/momo-outbox/

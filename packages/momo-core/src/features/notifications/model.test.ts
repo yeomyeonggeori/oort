@@ -686,3 +686,161 @@ describe("사진만 보낸 DM·멘션의 배너 본문 (#4294)", () => {
     expect(JSON.stringify(n)).not.toContain("급여명세서");
   });
 });
+
+// =============================================================================
+// 참여한 스레드의 새 답글 (#4890, ADR-0206 증보 1). 따라가는지는 서버가 알려 준 값을 `isFollowingThread` 로 받고, 이 모듈은
+// 그것을 **맨 끝에서** 읽는다. 아래 셋은 사보타주 대상이다: 「내가 쓴 답글 제외」·「그 스레드를 보고 있으면 안 띄움」·「끈 종류 무시」.
+// =============================================================================
+
+describe("참여한 스레드의 새 답글 (#4890)", () => {
+  const ROOT = "019F96A4-E717-7F82-9750-58B2D7D28100";
+  const reply = (over: Partial<MessageNewEvent["payload"]> = {}) =>
+    event({ root_id: ROOT, props: {}, body: "확인했어요", ...over });
+  const follows = (value: boolean | undefined) => ({ isFollowingThread: () => value });
+  const notOpen = { isThreadVisible: () => false };
+
+  it("따라가는 스레드에 남이 쓴 답글은 배너가 된다 — 보낸 사람이 제목, 본문 한 줄", () => {
+    const decision = notifyDecision(reply(), context({ ...follows(true), ...notOpen }));
+    expect(decision).toMatchObject({
+      show: true,
+      notification: { kind: "thread-reply", channelId: CHANNEL, title: "구민수", body: "확인했어요" },
+    });
+  });
+
+  it("에이전트가 쓴 글 답글도 남이 쓴 답글이다 — 보낸 사람이 @핸들로 나온다", () => {
+    const decision = notifyDecision(
+      reply({ author_member_id: AGENT }),
+      context({ ...follows(true), ...notOpen })
+    );
+    expect(decision.show && decision.notification.title).toBe("@hermes");
+  });
+
+  it("서버가 따라가지 않는다고 했으면 not-followed, 아직 모르면 follow-unknown, 답을 줄 길이 없는 표면은 예전 그대로 not-notifiable", () => {
+    expect(notifyDecision(reply(), context({ ...follows(false), ...notOpen }))).toEqual({
+      show: false,
+      skip: "not-followed",
+    });
+    expect(notifyDecision(reply(), context({ ...follows(undefined), ...notOpen }))).toEqual({
+      show: false,
+      skip: "follow-unknown",
+    });
+    expect(notifyDecision(reply(), context(notOpen))).toEqual({ show: false, skip: "not-notifiable" });
+  });
+
+  it("내가 쓴 답글은 따라가는 스레드여도 알리지 않는다 (사보타주: 이 제외를 빼면 RED)", () => {
+    const decision = notifyDecision(
+      reply({ author_member_id: SELF }),
+      context({ ...follows(true), ...notOpen })
+    );
+    expect(decision).toEqual({ show: false, skip: "self" });
+  });
+
+  it("그 스레드를 보고 있으면(창이 앞이고 그 루트의 패널이 열려 있으면) 안 띄운다 (사보타주: 이 억제를 빼면 RED)", () => {
+    const watching = context({ ...follows(true), windowFocused: true, isThreadVisible: (id) => id === ROOT });
+    expect(notifyDecision(reply(), watching)).toEqual({ show: false, skip: "focused" });
+    // 창이 뒤에 있으면 열려 있어도 안 보고 있는 것이다.
+    expect(
+      notifyDecision(reply(), { ...watching, windowFocused: false }).show
+    ).toBe(true);
+  });
+
+  it("채널이 화면에 있어도 그 스레드 패널이 닫혀 있으면 본 것이 아니다 — 답글은 본류 목록의 줄이 아니다", () => {
+    const channelOnly = context({
+      ...follows(true),
+      windowFocused: true,
+      isTargetVisible: () => true,
+      isThreadVisible: () => false,
+    });
+    expect(notifyDecision(reply(), channelOnly).show).toBe(true);
+    // 다른 스레드가 열려 있는 것도 같다.
+    expect(
+      notifyDecision(reply(), { ...channelOnly, isThreadVisible: (id) => id === "다른 루트" }).show
+    ).toBe(true);
+  });
+
+  it("「대화에도 보내기」 답글은 본류에도 서므로 채널이 앞에 있으면 본 것이다", () => {
+    const channelOnly = context({
+      ...follows(true),
+      windowFocused: true,
+      isTargetVisible: () => true,
+      isThreadVisible: () => false,
+    });
+    expect(notifyDecision(reply({ also_in_channel: true }), channelOnly)).toEqual({
+      show: false,
+      skip: "focused",
+    });
+    // 채널이 다른 화면이면 본 것이 아니다.
+    expect(
+      notifyDecision(reply({ also_in_channel: true }), { ...channelOnly, isTargetVisible: () => false }).show
+    ).toBe(true);
+  });
+
+  it("이 기기에서 이 종류를 끄면 안 띄운다 — 다른 종류 스위치와 상관없다 (사보타주: 끔을 무시하면 RED)", () => {
+    const off = context({
+      ...follows(true),
+      ...notOpen,
+      kindEnabled: (kind) => kind !== "thread-reply",
+    });
+    expect(notifyDecision(reply(), off)).toEqual({ show: false, skip: "kind-disabled" });
+    // 멘션은 같은 기기에서 그대로 온다.
+    expect(
+      notifyDecision(
+        event({ root_id: ROOT }),
+        context({ ...follows(false), ...notOpen, kindEnabled: (kind) => kind !== "thread-reply" })
+      )
+    ).toMatchObject({ show: true, notification: { kind: "mention" } });
+  });
+
+  it("알림 일시 중지·채널 음소거는 스레드 답글에도 선다", () => {
+    expect(notifyDecision(reply(), context({ ...follows(true), ...notOpen, paused: true }))).toEqual({
+      show: false,
+      skip: "paused",
+    });
+    expect(notifyDecision(reply(), context({ ...follows(true), ...notOpen, isMuted: () => true }))).toEqual({
+      show: false,
+      skip: "muted",
+    });
+  });
+
+  it("나를 멘션한 답글은 멘션이 이긴다 — 따라가는지 서버에 묻지도 않는다", () => {
+    const asked: string[] = [];
+    const decision = notifyDecision(
+      event({ root_id: ROOT, props: { mention_member_ids: [SELF] } }),
+      context({ ...notOpen, isFollowingThread: (id) => (asked.push(id), false) })
+    );
+    expect(decision).toMatchObject({ show: true, notification: { kind: "mention" } });
+    expect(asked).toEqual([]);
+  });
+
+  it("진행 줄·삭제된 줄·DM은 스레드 답글 후보가 아니다", () => {
+    expect(
+      notifyDecision(reply({ type: "tool_call" }), context({ ...follows(true), ...notOpen }))
+    ).toEqual({ show: false, skip: "not-notifiable" });
+    expect(
+      notifyDecision(reply({ state: "deleted" }), context({ ...follows(true), ...notOpen }))
+    ).toEqual({ show: false, skip: "not-notifiable" });
+    // DM 채널의 글은 `dm` 종류가 맡는다: 따라가기를 읽지 않는다.
+    const asked: string[] = [];
+    notifyDecision(
+      reply(),
+      context({ ...notOpen, isDirect: () => true, isFollowingThread: (id) => (asked.push(id), true) })
+    );
+    expect(asked).toEqual([]);
+  });
+
+  it("서버에 묻는 일은 다른 이유로 걸러질 글에는 나가지 않는다 — 걸러진 글마다 요청이 가지 않게", () => {
+    const asked: string[] = [];
+    const ask = { isFollowingThread: (id: string) => (asked.push(id), undefined) };
+    notifyDecision(reply({ author_member_id: SELF }), context({ ...ask, ...notOpen }));
+    notifyDecision(reply(), context({ ...ask, ...notOpen, paused: true }));
+    notifyDecision(reply(), context({ ...ask, ...notOpen, isMuted: () => true }));
+    notifyDecision(reply(), context({ ...ask, ...notOpen, kindEnabled: () => false }));
+    notifyDecision(reply(), context({ ...ask, ...notOpen, isAnnounced: () => true }));
+    notifyDecision(reply({ hlc_ts: NOW - 10 * 60_000 }), context({ ...ask, ...notOpen }));
+    notifyDecision(reply(), context({ ...ask, windowFocused: true, isThreadVisible: () => true }));
+    expect(asked).toEqual([]);
+    // 걸러질 이유가 없으면 그때 한 번 묻는다.
+    notifyDecision(reply(), context({ ...ask, ...notOpen }));
+    expect(asked).toEqual([ROOT]);
+  });
+});
