@@ -45,6 +45,7 @@ use momo_outbox::ClaimedAgentJob;
 use momo_workspace_actions::team_ai::{
     self, FallbackReason, ProposalContext, ProposalRefusal, TeamAiWorkspace, ViaAi, WebSearch,
 };
+use momo_workspace_actions::team_ai_limits::{self, LimitHit, Usage};
 use momo_workspace_actions::team_ai_tools::{self, ToolOutcome};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -59,6 +60,9 @@ struct Gathered {
     requester: Option<momo_agent::card_suggest::SuggestionRequester>,
     trigger_text: String,
     used_today: i64,
+    /// This month's list-price spend in micro-dollars — read only when the workspace set a monthly
+    /// dollar limit (B9), otherwise `0` and never queried.
+    month_micro_usd: i64,
     roster: team_ai::Roster,
     candidates: Vec<(Uuid, String, String)>,
     recent_requests: i64,
@@ -159,6 +163,14 @@ impl AgentWorker {
                 };
                 let used_today =
                     team_ai::tokens_used_today_in_tx(conn, workspace_id, agent).await?;
+                let month_micro_usd = team_ai_limits::month_spend_if_limited_in_tx(
+                    conn,
+                    workspace_id,
+                    agent,
+                    &state.limits,
+                )
+                .await?
+                .cost_micro_usd;
                 let (roster, candidates) = match &requester {
                     Some(requester) => (
                         team_ai::load_roster_in_tx(
@@ -194,6 +206,7 @@ impl AgentWorker {
                     requester,
                     trigger_text,
                     used_today,
+                    month_micro_usd,
                     roster,
                     candidates,
                 }))
@@ -232,18 +245,23 @@ impl AgentWorker {
                     .await,
             );
         };
-        let cap = self.config.team_ai_daily_token_cap;
-        if gathered.used_today >= cap {
+        // ADR-0201 증보 v3 B9 (#4944): BYOK — the team decides. With no limit set and no operator
+        // ceiling nothing here ever stops a turn; the limits are judged BEFORE the model is asked,
+        // so a limit that is hit means zero model calls.
+        let caps = self.config.team_ai_caps();
+        let usage = Usage {
+            tokens_today: gathered.used_today,
+            month_micro_usd: gathered.month_micro_usd,
+        };
+        if let Some(hit) = team_ai_limits::judge(&gathered.state.limits, &caps, &usage) {
             return Some(
-                self.team_ai_fallback(
+                self.team_ai_limit_reached(
                     job,
                     payload,
                     run_id,
                     &requester,
                     &gathered.candidates,
-                    FallbackReason::OverBudget,
-                    None,
-                    "",
+                    hit,
                 )
                 .await,
             );
@@ -292,7 +310,9 @@ impl AgentWorker {
             WebSearch::Off
         } else if !wire_searches(wire) {
             WebSearch::NotSupported
-        } else if gathered.searches_today >= self.config.team_ai_daily_search_cap {
+        } else if team_ai_limits::search_cap(&gathered.state.limits, &caps)
+            .is_some_and(|cap| gathered.searches_today >= cap)
+        {
             WebSearch::DailyCapReached
         } else {
             WebSearch::Available
@@ -880,6 +900,39 @@ impl AgentWorker {
             usage,
             model,
             Ending::Closed(reason.as_str()),
+            None,
+        )
+        .await
+    }
+
+    /// A usage limit was hit before the model was asked (B9): one honest sentence that says whose
+    /// limit it was, the ordinary 「맡기기」 buttons (D5), and no model call. The reason stays
+    /// `over_budget` — a code every client knows — and `props.limit` adds the source and window.
+    async fn team_ai_limit_reached(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        requester: &momo_agent::card_suggest::SuggestionRequester,
+        candidates: &[(Uuid, String, String)],
+        hit: LimitHit,
+    ) -> Settlement {
+        let props = team_ai_limits::limit_fallback_props(
+            hit,
+            payload.agent_member_id,
+            requester.member_id,
+            payload.trigger_message_id,
+            candidates,
+        );
+        self.team_ai_finish(
+            job,
+            payload,
+            run_id,
+            Some(hit.sentence().to_string()),
+            props,
+            None,
+            "",
+            Ending::Closed(FallbackReason::OverBudget.as_str()),
             None,
         )
         .await

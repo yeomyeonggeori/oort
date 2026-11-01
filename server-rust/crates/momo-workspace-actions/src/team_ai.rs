@@ -37,6 +37,8 @@ use momo_agent::card_suggest::suggestion_requester_in_tx;
 use momo_agent::inert_display_name;
 use momo_agent::team_ai_roles::TeamAiRoles;
 
+use crate::team_ai_limits::TeamAiLimits;
+
 /// The handle of the team AI member.
 pub const TEAM_AI_HANDLE: &str = "oort-helper";
 /// Its display name (owner decision Q6: an agent member, plainly labelled).
@@ -71,9 +73,9 @@ pub use momo_agent::actions::TEAM_AI_ACTION_IDS;
 
 /// ADR-0201 D7: the hard cut. A model call that outlives this is a fallback.
 pub const MODEL_TIMEOUT_SECS: u64 = 20;
-/// ADR-0201 D4: a placeholder daily ceiling (tokens, prompt + completion) until
-/// the first measurement. Overridable by `TEAM_AI_DAILY_TOKEN_CAP`.
-pub const DEFAULT_DAILY_TOKEN_CAP: i64 = 200_000;
+// (ADR-0201 증보 v3 B9, #4944: the old fixed daily ceilings — 200,000 tokens, 50 searches — are
+// gone. BYOK means the team decides: no limit unless an administrator sets one
+// (`crate::team_ai_limits`), and the env caps are only an operator's ceiling.)
 /// ADR-0201 D6-5: pending team-AI cards one requester may have open.
 pub const MAX_PENDING_PER_REQUESTER: i64 = 3;
 /// ADR-0201 D6-5: pending team-AI cards a workspace may have open.
@@ -93,8 +95,6 @@ pub const MAX_TOOL_CALLS: usize = 6;
 /// H10: the whole tool path's wall clock **[추정]**. Each call still has the
 /// 20-second cut ([`MODEL_TIMEOUT_SECS`]).
 pub const TOOL_PATH_DEADLINE_SECS: u64 = 45;
-/// H5: workspace web searches per UTC day, until measured. `TEAM_AI_DAILY_SEARCH_CAP`.
-pub const DEFAULT_DAILY_SEARCH_CAP: i64 = 50;
 /// H5: provider-side searches one model call may make (Anthropic `max_uses`).
 pub const WEB_SEARCH_MAX_USES: i64 = 3;
 /// H5: the operator's web-search switch (`workspace.settings`, PATCH-able). Absent
@@ -124,6 +124,9 @@ pub struct TeamAiWorkspace {
     /// ADR-0201 증보 v3 B3: which role bundles are on (`team_ai_roles`, absent = all on).
     /// Read on every request, so a switch that was just turned off is off for the next one.
     pub roles: TeamAiRoles,
+    /// ADR-0201 증보 v3 B9: the usage limits the workspace's administrator set
+    /// (`team_ai_limits`, absent = **no limit**). Read on every request, like the roles.
+    pub limits: TeamAiLimits,
 }
 
 impl Default for TeamAiWorkspace {
@@ -133,6 +136,7 @@ impl Default for TeamAiWorkspace {
             member_id: None,
             web_search: true,
             roles: TeamAiRoles::default(),
+            limits: TeamAiLimits::default(),
         }
     }
 }
@@ -153,6 +157,7 @@ impl TeamAiWorkspace {
                 .and_then(Value::as_bool)
                 .unwrap_or(true),
             roles: TeamAiRoles::from_settings(settings),
+            limits: TeamAiLimits::from_settings(settings),
         }
     }
 
@@ -693,7 +698,9 @@ pub enum WebSearch {
     NotSupported,
     /// The operator switched it off (`team_ai_web_search: false`).
     Off,
-    /// [`DEFAULT_DAILY_SEARCH_CAP`] reached.
+    /// The day's search allowance is used up — the workspace's own `dailySearches` or the
+    /// operator's ceiling, whichever is lower (`team_ai_limits::search_cap`). The turn still
+    /// answers; only the search tool is withheld.
     DailyCapReached,
 }
 
@@ -1454,7 +1461,8 @@ pub enum FallbackReason {
     OutOfScope,
     /// The model did not answer within [`MODEL_TIMEOUT_SECS`] or errored.
     Slow,
-    /// The daily ceiling is reached.
+    /// A usage limit is reached — the workspace's own (B9) or the operator's ceiling. The line's
+    /// `props.limit` says which (`team_ai_limits::limit_fallback_props`).
     OverBudget,
     /// The proposal was refused by the registry/resolver (the sentence says so).
     CouldNotPropose,
@@ -1485,9 +1493,9 @@ impl FallbackReason {
             FallbackReason::Slow => {
                 "지금은 제가 제때 답하지 못했어요. 다른 에이전트에게 맡길 수 있어요."
             }
-            FallbackReason::OverBudget => {
-                "오늘 팀 AI 사용량을 다 썼어요. 내일 다시 쓸 수 있어요."
-            }
+            // B9-2: the sentence of a limit the team set. The worker says whose limit it was
+            // (`team_ai_limits::LimitHit::sentence`); this is the one a bare reason has.
+            FallbackReason::OverBudget => crate::team_ai_limits::TEAM_LIMIT_SENTENCE,
             FallbackReason::TooLong => {
                 "시간이 오래 걸려서 멈췄어요. 다른 에이전트에게 맡길 수 있어요."
             }

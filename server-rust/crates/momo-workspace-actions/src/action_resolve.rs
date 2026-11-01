@@ -3869,6 +3869,69 @@ mod tests {
         assert_eq!(schema["additionalProperties"], json!(false));
     }
 
+    /// ADR-0201 증보 v3 B9 / B13-I9 (#4944): the limit that bounds the helper is not something the
+    /// helper can write. `team_ai_limits` — spelled as the bag spells it or as the wire would, alone
+    /// or beside a legal key, `null` included, and with a value the settings door **would** accept —
+    /// is refused, and the schema the tool advertises does not list it. (The settings door itself is
+    /// the administrator's: `PATCH …/settings`, `workspace_operator` only.)
+    #[test]
+    fn a_settings_proposal_cannot_name_the_team_ai_limits() {
+        let action =
+            actions::action_by_id(actions::ACTION_WORKSPACE_SETTINGS_UPDATE).expect("registered");
+        for args in [
+            json!({"team_ai_limits": {"dailyTokens": 100}}),
+            json!({"teamAiLimits": {"dailyTokens": 100}}),
+            json!({"team_ai_limits": {"monthlyUsd": 1.5, "dailySearches": 3}}),
+            json!({"team_ai_limits": null}),
+            json!({"welcomePrompt": "환영해요", "team_ai_limits": {"monthlyUsd": 1}}),
+            json!({"welcomePrompt": "환영해요", "teamAiLimits": {"dailySearches": 3}}),
+            json!({"roleLabels": {"owner": "대표"}, "team_ai_limits": {"dailyTokens": 5}}),
+        ] {
+            assert!(
+                validated_action_args(action, &args, 0).is_err(),
+                "{args} must be refused"
+            );
+        }
+        // Anti-vacuity: the same call with only the legal keys is accepted.
+        assert!(validated_action_args(action, &json!({"welcomePrompt": "환영해요"}), 0).is_ok());
+        let schema = action.args_schema();
+        let advertised: Vec<&str> = schema["properties"]
+            .as_object()
+            .expect("an object schema")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert!(
+            advertised
+                .iter()
+                .all(|key| !key.to_lowercase().contains("limit")),
+            "the tool the helper reads must not advertise a limits key: {advertised:?}"
+        );
+    }
+
+    /// B13-I9 (#4944): `team_ai.roles.set` — the other card the helper may raise about itself — names
+    /// one of the six bundles and a switch, nothing else. A limit is not a bundle, and a limits
+    /// object cannot ride beside one.
+    #[test]
+    fn the_roles_card_cannot_name_the_team_ai_limits() {
+        let action = actions::action_by_id(actions::ACTION_TEAM_AI_ROLES_SET).expect("registered");
+        for args in [
+            json!({"bundle": "team_ai_limits", "enabled": false}),
+            json!({"bundle": "dailyTokens", "enabled": true}),
+            json!({"bundle": "files", "enabled": false, "team_ai_limits": {"dailyTokens": 1}}),
+            json!({"bundle": "files", "enabled": false, "teamAiLimits": {"monthlyUsd": 1}}),
+        ] {
+            assert!(
+                validated_action_args(action, &args, 0).is_err(),
+                "{args} must be refused"
+            );
+        }
+        // Anti-vacuity: the legal card is accepted.
+        assert!(
+            validated_action_args(action, &json!({"bundle": "files", "enabled": false}), 0).is_ok()
+        );
+    }
+
     /// `message.pin` / `message.unpin` (ADR-0186 증보 v5 U-e): the proposal is one message id
     /// and nothing else — no channel, no link, no text can be spelled — and the id is stored in
     /// its one canonical spelling, so the pin's comparison cannot be defeated by writing it

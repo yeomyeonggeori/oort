@@ -25,6 +25,7 @@
 //! | `a12_no_search_after_a_workspace_read` | H13-A12 | drop `!read_used` from the tool choice |
 //! | `a17_a18_no_secret_keys_and_no_bodies_in_audit` | H13-A17·A18 | widen `SETTINGS_READ_KEYS`, or put text in `team_ai.turn` |
 //! | `a19_the_daily_search_cap_withholds_the_tool` | H13-A19 | skip `record_web_searches_in_tx` or the cap check |
+//! | `b9_the_search_allowance_is_the_teams_to_set` | v3 B9 (#4944) | bring a fixed search default back, ignore `dailySearches`, or let a workspace value win over the env ceiling |
 //! | `the_tool_loop_is_bounded` | H9-I11, H10 | drop the `MAX_MODEL_CALLS` check |
 //! | `an_answer_after_a_read_or_search_triggers_no_link_fetch` | #3899 review (H5 → answer) | drop `withhold_link_previews_in_tx` from `team_ai_finish` |
 //!
@@ -1340,7 +1341,7 @@ async fn a19_the_daily_search_cap_withholds_the_tool() {
     let mut searched = text("두 번 찾아봤어요.");
     searched.web_search_requests = 2;
     let script = Script::new(vec![searched]);
-    let w = worker_with(script.clone(), |c| c.team_ai_daily_search_cap = 2).await;
+    let w = worker_with(script.clone(), |c| c.team_ai_daily_search_cap = Some(2)).await;
     let run = enqueue_in(&pool, &t, t.channel_id, t.owner_id, "@oort 뉴스 찾아 줘").await;
     drain(&w).await;
     assert_eq!(script.seen()[0].1.tools.len(), 1, "under the cap: offered");
@@ -1355,7 +1356,7 @@ async fn a19_the_daily_search_cap_withholds_the_tool() {
     assert_eq!(recorded, 2, "the provider's count is on the ledger");
 
     let script = Script::new(vec![text("오늘은 다 썼어요.")]);
-    let w = worker_with(script.clone(), |c| c.team_ai_daily_search_cap = 2).await;
+    let w = worker_with(script.clone(), |c| c.team_ai_daily_search_cap = Some(2)).await;
     enqueue_in(&pool, &t, t.channel_id, t.owner_id, "@oort 또 찾아 줘").await;
     drain(&w).await;
     let seen = script.seen();
@@ -1363,6 +1364,88 @@ async fn a19_the_daily_search_cap_withholds_the_tool() {
     assert!(seen[0].1.messages[0]
         .content
         .contains("오늘 웹 검색을 다 썼어요."));
+}
+
+/// **ADR-0201 증보 v3 B9 (#4944)** — the search allowance is the team's to set. No limit by
+/// default (the old fixed 50 is gone: 500 searches today still offers the tool), the workspace's
+/// own `dailySearches` when it is set (at the limit the tool is withheld, one under it is offered),
+/// and the operator's ceiling over a roomier workspace value.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn b9_the_search_allowance_is_the_teams_to_set() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_anthropic_link(&su, t.owner_id).await;
+    sqlx::query(
+        "INSERT INTO usage_ledger (workspace_id, agent_member_id, channel_id, model, web_search_requests) \
+         VALUES ($1, $2, $3, 'm', 500)",
+    )
+    .bind(t.workspace_id)
+    .bind(t.agent_id)
+    .bind(t.channel_id)
+    .execute(&su)
+    .await
+    .unwrap();
+    let set_limit = |limit: Value| {
+        let (su, workspace) = (su.clone(), t.workspace_id);
+        async move {
+            sqlx::query(
+                "UPDATE workspace SET settings = settings || jsonb_build_object('team_ai_limits', $2::jsonb) \
+                  WHERE id = $1",
+            )
+            .bind(workspace)
+            .bind(limit)
+            .execute(&su)
+            .await
+            .unwrap();
+        }
+    };
+    let offered = |ceiling: Option<i64>, prompt: &'static str| {
+        let (pool, su, t_ids) = (
+            pool.clone(),
+            su.clone(),
+            (t.workspace_id, t.channel_id, t.owner_id),
+        );
+        let tenant = Tenant {
+            workspace_id: t_ids.0,
+            channel_id: t_ids.1,
+            owner_id: t_ids.2,
+            member_id: t.member_id,
+            agent_id: t.agent_id,
+            channel_name: t.channel_name.clone(),
+        };
+        async move {
+            let script = Script::new(vec![text("검색 여부를 확인했어요.")]);
+            let w = worker_with(script.clone(), |c| c.team_ai_daily_search_cap = ceiling).await;
+            enqueue_in(&pool, &tenant, tenant.channel_id, tenant.owner_id, prompt).await;
+            drain(&w).await;
+            drop(su);
+            script.seen()[0].1.tools.len() == 1
+        }
+    };
+
+    assert!(
+        offered(None, "@oort 검색 한도 없음").await,
+        "no limit set: 500 searches today still offers the tool"
+    );
+    set_limit(json!({"dailySearches": 500})).await;
+    assert!(
+        !offered(None, "@oort 검색 500에서 막기").await,
+        "at the workspace's own limit the tool is withheld"
+    );
+    set_limit(json!({"dailySearches": 501})).await;
+    assert!(
+        offered(None, "@oort 검색 501").await,
+        "anti-vacuity: one search under the limit offers it"
+    );
+    set_limit(json!({"dailySearches": 1000})).await;
+    assert!(
+        !offered(Some(500), "@oort 운영자 천장").await,
+        "the operator's ceiling (500) holds over the workspace's roomier 1000"
+    );
 }
 
 /// H9-I11 / H10 — a model that keeps asking for reads is stopped after
