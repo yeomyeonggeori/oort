@@ -150,6 +150,15 @@ export interface ThreadRepliesLoad {
   following: boolean;
 }
 
+/**
+ * 보낼 때 한 번 정해지는 선택(#5016). 켠 때만 있다 — 요청은 closed-world라 켜지 않은 전송은 이 필드 이전과
+ * 바이트 단위로 같은 요청이어야 한다.
+ */
+export interface TimelineSendFlags {
+  /** 입력칸의 ✕로 이 메시지의 링크 미리보기를 끄고 보낸다(ADR-0170 증보 2026-11-01). */
+  suppressUnfurl?: boolean;
+}
+
 export interface UseTimelineResult {
   state: TimelineState;
   status: 'loading' | 'ready' | 'error';
@@ -197,6 +206,11 @@ export interface UseTimelineResult {
     attachments?: MessageAttachment[],
     /** 호출 경로가 이미 한 번 시도한 글의 키(#3638) — 같은 키라야 서버가 중복을 접는다. */
     clientMsgId?: string,
+    /**
+     * #5016 — 입력칸의 ✕로 이 메시지의 링크 미리보기를 끄고 보낸다. 켠 때만 요청에 키가 간다
+     * (`SendMessageOptions.suppressUnfurl`). 행이 들고 다니므로 「다시 보내기」도 같은 요청이다.
+     */
+    options?: TimelineSendFlags,
   ) => Promise<void>;
   /**
    * A message the caller already sent through another path (#3638: 개인 에이전트 호출은
@@ -231,6 +245,8 @@ export interface UseTimelineResult {
     rootId: string,
     body: string,
     attachments?: MessageAttachment[],
+    /** `send`의 같은 이름 인자와 같다(#5016). 답글 요청(`sendThreadReply`)에도 같은 규칙으로 실린다. */
+    options?: TimelineSendFlags,
   ) => Promise<void>;
   /** The echoes belonging to one thread (never shown in the channel list). */
   repliesPending: (rootId: string) => PendingMessage[];
@@ -425,14 +441,19 @@ export function useTimeline(
       try {
         const rootId = pendingRootRef.current[row.clientMsgId];
         const attachmentIds = row.attachments?.map(attachment => attachment.id);
+        // 입력칸 ✕로 끈 채 보낸 메시지의 재시도도 **같은 요청**이다(#5016). 서버는 이미 저장된 메시지의 재시도에서 이
+        // 필드를 다시 판단하지 않으므로, 여기서 떨구는 순간 사람이 끈 카드가 되살아난다. 켠 때만 키가 간다.
+        const suppress = row.suppressUnfurl === true ? {suppressUnfurl: true as const} : {};
+        const attached =
+          attachmentIds === undefined || attachmentIds.length === 0 ? {} : {attachmentIds};
+        const replyOptions = {...attached, ...suppress};
         const confirmed = await (rootId === undefined
           ? sendMessage(workspaceId, row.channelId, row.clientMsgId, row.body, {
               ...(row.replyToId === undefined
                 ? {}
                 : {replyToId: row.replyToId}),
-              ...(attachmentIds === undefined || attachmentIds.length === 0
-                ? {}
-                : {attachmentIds}),
+              ...attached,
+              ...suppress,
             })
           : sendThreadReply(
               workspaceId,
@@ -440,9 +461,8 @@ export function useTimeline(
               rootId,
               row.clientMsgId,
               row.body,
-              attachmentIds === undefined || attachmentIds.length === 0
-                ? undefined
-                : {attachmentIds},
+              // 아무것도 싣지 않는 답글은 예전과 같은 호출(옵션 자리가 비어 있음)이다.
+              Object.keys(replyOptions).length === 0 ? undefined : replyOptions,
             ));
         // The response IS the committed server echo (seq-authoritative), so
         // merging it is not optimistic rendering: it is the same reconcile the
@@ -467,6 +487,7 @@ export function useTimeline(
       replyToId?: string,
       attachments?: MessageAttachment[],
       reuseClientMsgId?: string,
+      flags?: TimelineSendFlags,
     ) => {
       const channel = channelId;
       if (channel === null || (body === '' && (attachments?.length ?? 0) === 0)) {
@@ -490,6 +511,7 @@ export function useTimeline(
         ...(attachments === undefined || attachments.length === 0
           ? {}
           : {attachments}),
+        ...(flags?.suppressUnfurl === true ? {suppressUnfurl: true} : {}),
       };
       updatePending(list => addPending(list, row));
       await post(row);
@@ -689,6 +711,7 @@ export function useTimeline(
       rootId: string,
       body: string,
       attachments?: MessageAttachment[],
+      flags?: TimelineSendFlags,
     ) => {
       const channel = channelId;
       if (channel === null || (body === '' && (attachments?.length ?? 0) === 0)) {
@@ -707,6 +730,7 @@ export function useTimeline(
         ...(attachments === undefined || attachments.length === 0
           ? {}
           : {attachments}),
+        ...(flags?.suppressUnfurl === true ? {suppressUnfurl: true} : {}),
       };
       updatePending(list => addPending(list, row));
       await post(row);
