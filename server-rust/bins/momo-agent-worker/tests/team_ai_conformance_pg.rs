@@ -435,6 +435,26 @@ async fn approvals(su: &PgPool, t: &Tenant) -> Vec<(Uuid, String, String, Value)
     .unwrap()
 }
 
+/// #5084 — a card the team AI raises parks the run, and the progress rail is told in the same
+/// transaction: the `(thinking, awaiting_approval)` frames of one run's rail, oldest first, as
+/// `(phase, idempotency key)`. The run id rides the payload upper-cased, hence the `upper`.
+async fn waiting_frames(su: &PgPool, t: &Tenant, run_id: Uuid) -> Vec<(String, String)> {
+    sqlx::query_as::<_, (String, String)>(
+        "SELECT payload->'data'->'payload'->>'phase', payload->>'idempotency_key' \
+           FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->>'type' = 'agent.status' \
+            AND payload->'data'->'payload'->>'run_status' = 'awaiting_approval' \
+            AND upper(payload->'data'->'payload'->>'run_id') = upper($2::text) \
+          ORDER BY id",
+    )
+    .bind(t.workspace_id)
+    .bind(run_id.to_string())
+    .fetch_all(su)
+    .await
+    .unwrap()
+}
+
 async fn agent_messages(su: &PgPool, t: &Tenant) -> Vec<(String, Option<String>, Value)> {
     sqlx::query_as::<_, (String, Option<String>, Value)>(
         "SELECT type::text, body, props FROM message \
@@ -532,6 +552,20 @@ async fn a_request_becomes_a_pending_card_the_approver_can_judge() {
         cards[0].3["proposed_by"],
         t.agent_id.to_string(),
         "the team AI proposed it"
+    );
+    // #5084 — the rail is told the run waits on a person: exactly one frame, named by the card's approval.
+    let waiting = waiting_frames(&su, &t, run_id).await;
+    assert_eq!(
+        waiting.len(),
+        1,
+        "a park is exactly one rail frame: {waiting:?}"
+    );
+    assert_eq!(waiting[0].0, "thinking", "{waiting:?}");
+    assert!(
+        waiting[0]
+            .1
+            .ends_with(&format!("awaiting_approval:{}", cards[0].0)),
+        "the hold is named by its approval: {waiting:?}"
     );
     // Nothing executed: the channel does not exist yet.
     let made: i64 = sqlx::query_scalar(

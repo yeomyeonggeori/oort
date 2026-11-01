@@ -366,9 +366,9 @@ pub use run_progress::{
 };
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,
-    opening_agent_status_payload, progress_agent_status_payload, terminal_agent_status_payload,
-    terminal_phase, AgentPhase, AgentRunAddress, AGENT_PARTIAL_EVENT_TYPE, AGENT_STATUS_EVENT_TYPE,
-    AGENT_STATUS_EVENT_VERSION,
+    awaiting_approval_agent_status_payload, opening_agent_status_payload,
+    progress_agent_status_payload, terminal_agent_status_payload, terminal_phase, AgentPhase,
+    AgentRunAddress, AGENT_PARTIAL_EVENT_TYPE, AGENT_STATUS_EVENT_TYPE, AGENT_STATUS_EVENT_VERSION,
 };
 pub use subscription::{
     agent_claude_subscription_blocked_in_tx, agent_connector_owner_in_tx,

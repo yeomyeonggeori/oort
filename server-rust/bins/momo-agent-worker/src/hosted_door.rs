@@ -34,7 +34,10 @@ use uuid::Uuid;
 
 use crate::payload::AgentJobPayload;
 use crate::provider::{ChatUsage, ProviderEndpoint};
-use crate::{emit_terminal_agent_status, AgentWorker, ClaimedAgentJob, Settlement};
+use crate::{
+    emit_awaiting_approval_agent_status, emit_terminal_agent_status, AgentWorker, ClaimedAgentJob,
+    Settlement,
+};
 
 /// What the person is told when the agent already has all its cards waiting. Said **before** the
 /// model is called, so it is the whole answer.
@@ -450,6 +453,22 @@ impl AgentWorker {
                 Box::pin(async move {
                     let outcome =
                         door::propose_in_tx(conn, &run, &request, made, photo_given).await?;
+                    // #5084 — a raised card is a run parked on a person (`propose_in_tx` parks it
+                    // before the card and either returns `Raised` or errors, so `Ok` is exactly
+                    // "parked"): the rail is told in this same transaction, after the card.
+                    if let Ok(raised) = &outcome {
+                        emit_awaiting_approval_agent_status(
+                            conn,
+                            momo_agent::AgentRunAddress {
+                                workspace_id: run.workspace_id,
+                                channel_id: run.channel_id,
+                                agent_member_id: run.agent_member_id,
+                                run_id: run.run_id,
+                            },
+                            raised.approval_id,
+                        )
+                        .await?;
+                    }
                     // The tokens were spent whether or not a card came of it — but a refusal falls
                     // back to the ordinary answer, whose commit writes the ledger row itself.
                     if outcome.is_ok() {
