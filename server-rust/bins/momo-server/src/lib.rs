@@ -1306,6 +1306,18 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/notification-diagnostics/test",
             post(routes::notification_diagnostics::test),
         )
+        // ADR-0206 D5·D13 (#4494 N3) — the caller's per-kind switches (kind × surface), sound
+        // slots, work hours and phone delay, with the server's own `effective` evaluation. Self-scoped
+        // (the member is the credential's) and human-only like the diagnostics above: the
+        // agent-bearer allow-list does not list this path and each handler checks `require_human`.
+        .route(
+            "/v1/workspaces/{ws}/notification-prefs",
+            get(routes::notification_prefs::get)
+                .patch(routes::notification_prefs::patch)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::notification_prefs::MAX_PATCH_BODY_BYTES,
+                )),
+        )
         // ADR-0196 / #3164 — team memory v2: digest + receipt reads and the
         // settings switches. Human-only; visibility and write authority are the
         // `mem_*` RLS policies (the transaction binds app.member_id).

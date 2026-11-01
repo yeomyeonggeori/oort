@@ -74,6 +74,7 @@ pub mod member_rename;
 pub mod memory;
 pub mod message;
 pub mod name_guard;
+pub mod notification_prefs;
 pub mod notification_rule;
 /// ADR-0208 — the owner-scope GUC (`app.member_id`) binders, shared by reminders and scheduled messages.
 pub mod owner_scope;
@@ -229,6 +230,12 @@ pub use message::{
     SendRejected, SentMessage, SentVia, StoredMessage, ThreadReplyPage, ThreadRollup,
     ThreadRootInvalid, ThreadRootState, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
     REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX, THREAD_SUMMARY_PARTICIPANTS,
+};
+pub use notification_prefs::{
+    get_prefs_in_tx, is_known_sound, kind_phone_switch_in_tx, parse_cells, parse_hhmm,
+    patch_prefs_in_tx, phone_switch_on, window_state, CellPatch, Cells, CellsPatch, KindSwitch,
+    NotificationKind, PrefsApplied, PrefsPatch, PrefsRejection, PrefsView, Quiet, Schedule,
+    WindowState, BUNDLED_SOUNDS, PHONE_DELAY_CHOICES, PHONE_DELAY_DEFAULT_SECS,
 };
 pub use notification_rule::{
     get_notification_rule_in_tx, get_push_kinds_in_tx, patch_notification_rule_in_tx,

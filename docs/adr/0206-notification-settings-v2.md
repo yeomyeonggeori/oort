@@ -833,6 +833,38 @@ D11·D15는 그대로이고, 구현이 격리 PG로 재현하며 정한 모양�
 - 폰 탭: 시험 알림은 열 대화가 없어서 앱만 열려요(채널이 목록에 없다는 「대화가 없어졌어요」를 내지 않아요). 알림 설정 화면으로 보내는 것은 상태·시험 화면(#4342)의 몫이에요.
 - `oort doctor`의 `push_system` 분류: relay 미구성이면 info, 구성이면 나이(기본 300초) 기준 FAIL이에요. `available_at`이 미래인 행의 처리는 N11 몫이에요.
 
+## 증보 3 (2026-11-02 기안, **Accepted** 2026-11-02 — planner 위임 결정, ADR-0100; #4494 N3 독립 보안 검수 1회차 Blocker 0·High 0·Medium 1·Low 3(모두 반영, `7b7c0fe48`). #4494 구현에서 확정한 것 — D5·D13·D16의 「구현이 정해요」 항목과 이슈 본문·코멘트와의 차이)
+
+D5·D13·D16은 그대로이고, 구현이 격리 PG로 재현하며 정한 모양만 적어요. 범위는 이 슬라이스가 낸 것(`notification_rule` 컬럼 6개와 시간대 함수(migration 172) · `GET/PATCH …/notification-prefs` · 판정의 종류 붙이기와 종류 스위치 · 진단 `kind_off`)뿐이에요.
+
+**planner 수용** (2026-11-02, #4494 독립 보안 검수 1회차 Blocker 0·High 0 뒤): 아래 편차 넷을 모두 받아요 — ① `threadReply`는 폰 칸만(1번) ② 승인 해소 알림은 `agentAnswer`(5번) ③ 켜진 일정의 요일 0개는 400(9번) ④ 시간대 함수 EXECUTE는 `momo_app`만(10번, DB 계약 표 행의 「`momo_app`·`momo_notifier`」는 N7이 notifier를 더할 때 맞춰요). planner가 검수 반영 차이(`7b7c0fe48`)를 확인하고 Accepted로 올렸어요(2026-11-02).
+
+**이슈 코멘트와 달라진 곳** (ADR을 따랐어요)
+1. **`threadReply`는 폰 칸만** 있어요(증보 1 F5). 이슈 코멘트(11-01)는 「폰·데스크탑 따로」라고 했지만 증보 1 F5가 데스크탑 칸을 「따라가는 스레드 목록 API가 먼저인 별도 증보」로 미뤘고, F11이 낸 데스크탑 배너 스위치는 이 기기 localStorage(`thread-reply`)예요. `threadReply.desktop`을 쓰면 400 `surface_not_applicable`이고 읽기 응답에는 그 칸이 없어요. 칸을 여는 것은 `NotificationKind::has_desktop` 한 줄이에요(행 부재 = 켬이라 migration이 없어요).
+
+**판정이 종류를 붙이는 방식** (D5·D16)
+2. 판정 SQL의 `recipients` CASE는 와이어 reason이 아니라 **arm 라벨**(`resume_offer`·`work_session_idle`·`work_run_done`·`approval`·`mentionHuman`·`mentionAgent`·`agentAnswer`·`dm`·`threadReply`)을 내고, `momo-push`의 표 `decode_arm` 한 곳이 라벨을 (와이어 reason, 종류)로 풀어요. reason은 종류보다 거칠고(셋이 `mention`) 종류는 reason보다 거칠어서(`workDone`은 둘) 둘 중 하나로는 스위치를 읽을 수 없어요. 모르는 라벨은 디코드 오류라 후보가 다시 시도돼요(푸시가 조용히 사라지지 않아요). `JudgedTarget.kind`는 `resume_offer`만 `None`이에요.
+3. **스위치는 `notification_rule.kinds->'<kind>'->'phone'`이 정확히 JSON `false`일 때만 꺼짐**이에요. 행 부재·NULL·틀린 모양·모르는 키는 켬이라 손으로 고친 jsonb가 푸시를 실수로 끌 수 없어요. 데스크탑 칸은 폰 푸시에 닿지 않아요. `workDone`은 칸이 아니라 `work_complete_push` 컬럼(D5 별칭)이고 `kinds`에는 저장되지 않아요.
+4. **모양 arm(작업 셋·`approval`·DM 채널의 `dm`)은 꺼지면 억제**예요: `approval`과 DM 채널의 `dm`은 스위치가 arm의 안쪽 CASE에 있고, 작업 둘(`work_session_idle`·`work_run_done`, `resume_offer`는 스위치가 없어요)은 바깥 WHERE의 `work_complete_push` 조건이에요(같은 억제 효과: 꺼져도 다른 reason으로 되살아나지 않아요). **이유 arm(`mentionHuman`·`mentionAgent`·`agentAnswer`)은 스위치가 바깥 WHEN에 있어 꺼지면 다음 arm으로 내려가요**(`threadReply`는 맨 아래라 내려갈 곳이 없어요). 명시 멘션 arm의 종류와 스위치는 **작성자 종류**(`member.kind`)가 정해요. 채널 음소거의 멘션 예외(`mention_overrides_mute`)는 와이어 reason `mention`을 공유하는 세 arm 모두에 그대로예요.
+5. **승인 해소 알림**(ADR-0204 증보 6 D6-5: 요청한 사람에게 가는 「거부·만료·끝」)의 종류는 `agentAnswer`예요. 와이어 reason이 `mention`이고 에이전트가 낸 결과라서요. `approval.phone`은 「내가 결정할 승인 요청」의 스위치라서 이 알림을 함께 끄지 않아요. 이 arm은 모양이 정하는 arm이라 꺼지면 억제예요. 그래서 `agentAnswer`를 끈 사람은 자기 요청의 「거절·만료·끝」 알림도 받지 않아요 — 이것을 화면 문구가 알려야 해요(UXUI, 검수 1회차 판단).
+
+**`GET/PATCH …/notification-prefs`** (D13)
+6. **모든 400은 첫 쓰기 전에 정해요.** `DbRejectable`의 약속(거절은 커밋되는 tx 안에서 첫 쓰기 전에 반환)을 지키려고, 순수 검사 → 행 읽기(있으면 `FOR UPDATE`) → 시간대 이름 → 확인 규칙 → 기본 행 만들기 → 잠금 아래에서 병합 → 이름 붙은 컬럼만 쓰기 순서예요. **시간대 이름**은 저장된 일정의 이름과 같으면 `pg_timezone_names` 전체 조회(호출당 약 15ms)를 생략하고 아직 풀리는지만 시간대 함수로 확인해요(일정은 통째로 바꿔서 클라이언트가 이름을 그대로 되돌려 보내요). 다른 이름과 더는 풀리지 않는 저장값은 전체 조회를 거쳐 거절돼요(검수 1회차 L-1). **본문은 8 KiB까지만** 읽어요 — D13의 「8KB 이하」를 라우트 한도로 강제해요(정직한 최대는 약 1.5 KiB, 넘으면 413). 거절된 PATCH만 보낸 멤버는 `notification_rule` 행이 없어요. 코드: `confirmation_required`·`invalid_time_zone`·`invalid_schedule`·`unknown_sound`·`unknown_kind`·`surface_not_applicable`·`invalid_phone_delay`. 모르는 필드·종류·표면·확인 토큰은 JSON 추출기의 422예요.
+7. **`warnings: ["approval_push_off"]`와 감사 `notification_prefs.approval_push_off`(`momo.notification_prefs.approval_push_off.v1`, `{surface:"phone"}`)는 이 쓰기가 `approval.phone`을 켬에서 끔으로 바꾼 때만** 나가요. 이미 꺼진 값을 다시 쓰거나, 켜거나, `null`로 되돌리거나, 데스크탑 칸을 바꾸는 것은 토큰도 경고도 감사도 없어요. 토큰만 보낸 본문은 변경이 아니라 400이에요. 그 밖의 prefs 쓰기는 감사하지 않아요(D5는 승인 하나만 정했어요).
+8. **`presentation.sounds`** 값은 번들 소리 id 또는 `none`만 받아요. 사용자 파일(`user:<sha256>`)은 그 파일이 있다는 것을 증명할 표(`member_sound`, #4345)가 먼저라서 지금은 400 `unknown_sound`예요. 키는 종류여야 해요(아니면 400 `unknown_kind`).
+9. **근무 시간**: 이 슬라이스는 모양과 시간대 이름을 검증해 저장하고(`tz`는 `pg_timezone_names`의 이름, `HH:MM`, `start != end`, 요일 0~6 중복 없음) `effective.quiet`를 시간대 함수와 순수 창 평가기로 계산해요. 판정에 거는 억제·진단 `quiet_hours`·DST 경계 시험은 N7이에요. 더한 규칙: **켜진 일정에 요일이 하나도 없으면 400 `invalid_schedule`**이에요(관통 종류만 빼고 모든 푸시가 영구히 조용해지는 「왜 안 오는지 모르는」 설정을 막아요). `passThrough`의 중복은 접고, 저장된 일정이 읽을 때 모르는 시간대면 「일정 없음」으로 읽고 로그 한 줄이에요.
+10. **시간대 함수** `notification_local_time(tz text, at timestamptz DEFAULT now()) → timestamp`(migration 172): 틀린 이름은 오류가 아니라 NULL이에요. SECURITY INVOKER·`search_path` 고정·읽는 표 없음. EXECUTE는 PUBLIC에서 거두고 **지금은 `momo_app`에게만** 줘요(migration과 두 역할 bootstrap의 재단언). DB 계약 표의 「`momo_app`·`momo_notifier`」 중 notifier 몫은 판정 후단이 함수를 부르는 N7이 호출과 함께 더해요(부르지 않는 권한을 미리 주지 않아요: 증보 1 F1과 같은 규칙).
+11. **진단 `kind_off`**는 요청이 `kind`를 이름 붙였고 그 종류의 **폰** 스위치가 꺼졌을 때, `channel_muted` 다음 자리에 `kind`와 함께 나와요. 판정과 같은 규칙을 읽어서 코드와 침묵이 어긋나지 않아요. `quiet_hours`는 아직 나오지 않아요.
+
+**호환·롤백**
+12. **notifier는 migration 172 뒤에 떠야 해요.** 새 판정 SQL이 `notification_rule.kinds`를 읽어서, 컬럼이 없으면 판정이 오류로 끝나 후보가 재시도되다 `failed`로 접혀요(푸시 유실). 배포 순서 relay → migrate → notifier → api(D14)가 이미 이 순서예요. 이 슬라이스는 새 reason·category가 없어서 relay와 앱은 영향이 없어요. 구 서버·구 notifier가 새 DB를 읽는 롤백은 새 컬럼을 무시해서 오늘의 동작이에요(음소거로 둔갑하지 않아요).
+
+**운영 역할 검증** (구현 워커는 클러스터 전체의 런타임 역할 비밀번호·속성을 바꾸는 시험이라 공용 PG에서 돌리지 않았고, 독립 검수 1회차가 일회용 클러스터에서 쟀어요)
+13. 운영 부트스트랩(runtime roles → migrate → runtime roles)으로 만든 DB에서 `prod_role_conformance_pg`가 **19 통과·0 실패, `permission denied` 0건**이에요. 같은 DB에서 검수 전용 시험이 직접 쟀어요: `momo_app`이 켜진 일정을 PATCH·GET하면 성공하고(시간대 함수 EXECUTE가 운영 부트스트랩에서도 살아 있어요), **함수 EXECUTE는 `momo_app`만 참**(`momo_notifier`·`momo_worker`·`momo_relay`·PUBLIC은 거짓, ACL `{postgres, momo_app}`). `momo_notifier`는 `notification_rule.kinds` SELECT만 되고 UPDATE·INSERT·DELETE와 함수 호출은 `permission denied`예요. notifier의 새 판정 SQL(`nr0.kinds` 읽기)도 권한 오류 없이 돌아요(표 단위 SELECT).
+
+**남는 위험 (증보 3)**
+31. **근무 시간의 `passThrough`에서 `approval`을 빼는 쓰기는 승인 끄기와 같은 확인·경고·감사를 거치지 않아요**(검수 1회차 L-3). 지금은 판정이 일정을 읽지 않아 효과가 없지만, N7이 일정을 판정에 적용하면 이것이 `approval_push_off`의 확인·경고·감사 없이 승인 푸시를 창 밖에서 침묵시키는 두 번째 길이에요. **N7 선행 조건**: `approval`을 `passThrough`에서 빼는 쓰기에 같은 확인·감사를 적용할지 N7이 정하고, 그 전에는 근무 시간 화면(N8)을 열지 않아요. 또 `effective.quiet`는 N7 전에도 「조용」을 낼 수 있는데 폰 판정은 일정을 읽지 않아요(더 받는 쪽이라 알림을 잃지는 않지만 화면이 거짓말이 될 수 있어요).
+
 ## owner 결정 (인용)
 
 - 2026-10-21 성재: 「버즈쪽에서 알림에서 에로사항을 엄청 느끼는 거 같아. 그 부분에 있어서 커스텀까지도 가능하게(직접 넣어서 말이야) 해줬으면 좋겠어.」

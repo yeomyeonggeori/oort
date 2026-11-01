@@ -79,6 +79,8 @@ pub mod memory;
 pub mod messages;
 /// ADR-0206 D11 (#4341) — 「왜 알림이 안 와요」 diagnostics and the test push (self-scoped, human only).
 pub mod notification_diagnostics;
+/// ADR-0206 D5·D13 (#4494 N3) — per-kind switches, presentation, work hours and delay (self-scoped, human only).
+pub mod notification_prefs;
 pub mod notification_rules;
 /// #1767 — operator-issued password reset + self password change.
 pub mod password;
