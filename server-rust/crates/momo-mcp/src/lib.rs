@@ -27,15 +27,17 @@ pub use oauth::{
     MAX_STATE_BYTES, PROTECTED_RESOURCE_WELL_KNOWN_PREFIX, RESPONSE_TYPE_CODE, TOKEN_TYPE_BEARER,
 };
 pub use tools::{
-    validate_arguments, ArtifactRule, ArtifactViolation, AssembleParams, ToolAnnotations,
-    ToolCapability, ToolDescriptor, ToolFailure, ToolSurface, ToolView, APPS_USED_ENTRY_KEYS,
-    APP_NOTICE_KEYS, APP_NOTICE_REPORTABLE_KINDS, ARTIFACT_KEYS, ASSEMBLE_PARAMS,
-    ASSEMBLY_PARAMS_INVALID, MAX_APPS_USED_ENTRIES, MAX_APPS_USED_TOOL_BYTES, MAX_ARTIFACT_COUNT,
-    MAX_REPORTED_COUNT, MAX_STAGE_BYTES, NEXT_ACTIONS, RESULT_KINDS, TEST_COUNT_KEYS,
-    TOOL_ACTION_CLAIM_SECRET, TOOL_ACTION_INITIATE, TOOL_ACTION_PROPOSE, TOOL_CARD_SUGGEST,
-    TOOL_CATALOG, TOOL_CONVERSATION_READ, TOOL_COUNT_KEYS, TOOL_EXPRESSION_ASSEMBLE,
-    TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_RELEASE, TOOL_JOB_RENEW, TOOL_JOB_START,
-    TOOL_MESSAGE_POST, TOOL_PING, TOOL_RUN_COMPLETE, TOOL_RUN_EVENT,
+    validate_arguments, ArtifactRule, ArtifactViolation, AssembleParams, RunEventViolation,
+    ToolAnnotations, ToolCapability, ToolDescriptor, ToolFailure, ToolSurface, ToolView,
+    APPS_USED_ENTRY_KEYS, APP_NOTICE_KEYS, APP_NOTICE_REPORTABLE_KINDS, ARTIFACT_KEYS,
+    ASSEMBLE_PARAMS, ASSEMBLY_PARAMS_INVALID, MAX_ACTIVITY_ID_BYTES, MAX_ACTIVITY_LABEL_BYTES,
+    MAX_APPS_USED_ENTRIES, MAX_APPS_USED_TOOL_BYTES, MAX_ARTIFACT_COUNT, MAX_PLAN_TEXT_BYTES,
+    MAX_REPORTED_COUNT, MAX_RUN_ACTIVITIES, MAX_RUN_PLAN_ITEMS, MAX_STAGE_BYTES, NEXT_ACTIONS,
+    RESULT_KINDS, RUN_ACTIVITY_KINDS, RUN_ACTIVITY_STATUSES, RUN_EVENT_REPORT_FIELDS,
+    RUN_PLAN_STATUSES, TEST_COUNT_KEYS, TOOL_ACTION_CLAIM_SECRET, TOOL_ACTION_INITIATE,
+    TOOL_ACTION_PROPOSE, TOOL_CARD_SUGGEST, TOOL_CATALOG, TOOL_CONVERSATION_READ, TOOL_COUNT_KEYS,
+    TOOL_EXPRESSION_ASSEMBLE, TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_RELEASE, TOOL_JOB_RENEW,
+    TOOL_JOB_START, TOOL_MESSAGE_POST, TOOL_PING, TOOL_RUN_COMPLETE, TOOL_RUN_EVENT,
 };
 
 pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
@@ -611,10 +613,19 @@ pub fn reason_of_sentence(sentence: &str) -> &'static str {
 pub fn refusal_reason(body: Option<&[u8]>) -> Option<&'static str> {
     let value: Value = serde_json::from_slice(body?).ok()?;
     let error = value.get("error")?;
+    // `oort_run_complete.artifacts` only: a refused `oort_run_event` report also carries
+    // `error.data {field, rule}` (ADR-0200 증보 7) but keeps the plain arguments sentence, so it
+    // is told by the sentence like every other refusal and never mislabelled `tool_artifacts`.
     if error
         .get("data")
         .and_then(Value::as_object)
-        .is_some_and(|data| data.contains_key("field") && data.contains_key("rule"))
+        .is_some_and(|data| {
+            data.contains_key("rule")
+                && data
+                    .get("field")
+                    .and_then(Value::as_str)
+                    .is_some_and(|field| field.starts_with("artifacts"))
+        })
     {
         return Some(REASON_TOOL_ARTIFACTS);
     }
