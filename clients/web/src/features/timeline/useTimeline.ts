@@ -19,6 +19,7 @@ import {
   type Message,
   type MessageAttachment,
   type SendMessageOptions,
+  type ThreadReadState,
 } from "@momo/core/lib/api";
 import {
   payloadToMessage,
@@ -77,6 +78,7 @@ import {
   type PinMap,
 } from "@momo/core/features/timeline/pins";
 import { endedStreamRunIds } from "@momo/core/features/timeline/streamStop";
+import { applyThreadReadState } from "@momo/core/features/timeline/threadSummary";
 import { seedEndedRuns } from "@/features/agents/endedRuns";
 import {
   clearMessageUnfurls,
@@ -180,6 +182,11 @@ export interface UseTimelineResult {
   /** ADR-0179 D3 — live-arrival grant still waiting for first mount. */
   isPlayEntrance: (messageId: string) => boolean;
   consumeEntrance: (messageId: string) => void;
+  /**
+   * 스레드 패널이 보낸 「여기까지 읽었어요」의 응답을 **든 루트**의 요약에 반영한다(#4878, #4889 2단계) —
+   * 따라가는 스레드면 안 읽은 수를 서버 값으로 맞춰 「새 답글 M」 칩이 사라지게 하고, 아니면 값을 지운다.
+   */
+  applyThreadRead: (rootId: string, read: ThreadReadState) => void;
   /**
    * Evict unmounted leftover grants (scrolled-up backlog). Timeline calls
    * this when the reader is not at the bottom. Mounted rows consume
@@ -311,6 +318,9 @@ export function useTimeline(
   );
   const consumeEntrance = useCallback((messageId: string) => {
     playOnMountRef.current.delete(messageId.toLowerCase());
+  }, []);
+  const applyThreadRead = useCallback((rootId: string, read: ThreadReadState) => {
+    setState((s) => applyThreadReadState(s, rootId, read));
   }, []);
   const capUnmountedArrivals = useCallback(() => {
     capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);
@@ -1050,6 +1060,7 @@ export function useTimeline(
     removeUnfurls,
     isPlayEntrance,
     consumeEntrance,
+    applyThreadRead,
     capUnmountedArrivals,
   };
 }

@@ -532,6 +532,9 @@ const WORKSPACE_ACTION_LABELS: Record<string, string> = {
   "workspace.work_tier.update": "워크스페이스 기본 재개 정책 바꾸기",
   // H7: 계약만 있다. 설치 경로가 생기기 전까지 서버가 카드를 만들지 않는다(#3889).
   "plugin.install": "앱 설치",
+  // ADR-0201 증보 v3 B3-T (#4964): 「파일 역할 꺼 줘」가 되는 카드. 방향(켬/끔)은 인자라서
+  // 인박스 줄은 말하지 않는다 — 서버 레지스트리 title 과 같은 말.
+  "team_ai.roles.set": "도우미 역할 켜고 끄기",
 };
 
 export function workspaceActionLabel(actionId?: string): string {

@@ -578,7 +578,11 @@ fn the_server_prompt_carries_the_conversation_policy() {
 
 #[test]
 fn the_team_ai_prompt_carries_the_conversation_rule() {
-    let prompt = system_prompt(&Roster::default(), WebSearch::Available);
+    let prompt = system_prompt(
+        &Roster::default(),
+        WebSearch::Available,
+        &momo_agent::actions::TEAM_AI_ACTION_IDS,
+    );
     // The block ends at the data header, not at the first `[데이터` (the first rule quotes it).
     let scope = between(&prompt, "규칙:", "규칙:", "[데이터 —");
     assert_golden("team AI prompt", &scope, OLD_TEAM_AI_RULES, TEAM_AI_RULES);

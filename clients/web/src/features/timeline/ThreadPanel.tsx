@@ -1,12 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, usePresence, useReducedMotion } from "motion/react";
 import { X } from "lucide-react";
-import { fetchThreadReplies, type Channel, type Message } from "@momo/core/lib/api";
+import {
+  fetchThreadReplies,
+  markThreadRead,
+  type Channel,
+  type Message,
+  type ThreadReadState,
+} from "@momo/core/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { startsAuthorGroup } from "@momo/core/features/timeline/model";
+import { createThreadReadSender } from "@momo/core/features/timeline/threadRead";
+import { readSignalSeq } from "@momo/core/features/timeline/threadSummary";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
 import { TimelineLiveRegionProvider } from "./timelineLiveRegion";
 import { ThreadSurfaceRoot } from "./commandSuggestSlot";
@@ -16,13 +24,20 @@ import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 import { overlayOwnsEscape } from "@/design/ui/escapeLayer";
 import { PANEL_MOTION } from "@/design/motion";
 import { cn } from "@/design/lib/cn";
+import { Tooltip } from "@/design/ui/tooltip";
+import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
+import { documentForeground } from "@/features/chat/useChannelViewingBeat";
+import { THREAD_REPLIES_LEAD_CLASS } from "./spacing";
 import { shouldFoldBundleLine } from "@momo/core/features/timeline/requestBundle";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runStatusForMessage } from "./runStatus";
 import type { RequestThreadLanding } from "./useRequestThreadLanding";
 import { watchForMessageId } from "@/features/inbox/anchor";
+import { viewThread } from "@/features/notifications/viewedThread";
 import type { RealtimeHandle } from "@/lib/realtime";
+import { ThreadFollowButton } from "./ThreadFollowButton";
+import { useThreadFollow } from "./useThreadFollow";
 
 const NO_REPLIES: Message[] = [];
 
@@ -60,7 +75,30 @@ type ThreadPanelProps = {
   onEntranceConsumed?: (messageId: string) => void;
   requestLanding?: RequestThreadLanding | null;
   realtime?: RealtimeHandle | null;
+  /**
+   * 「여기까지 읽었어요」 신호의 응답(#4878, #4889 2단계). 패널은 신호를 보내고(`createThreadReadSender`) 응답을 여기로
+   * 넘긴다 — 채널 목록의 루트 요약(「새 답글 M」 칩)이 **타임라인 상태의 루트**에서 그려지므로 그 상태를 고치는 것은 호스트의
+   * 일이다. 없으면(작업 세션 패널) 신호도 보내지 않는다.
+   */
+  onThreadRead?: (rootId: string, state: ThreadReadState) => void;
+  /**
+   * 머리에 「따라가기」를 둘 수 있는 곳인가(#4890). DM 채널의 스레드는 따라가지 않는다(모든 메시지가 이미 알림이다 — 서버도
+   * 400 `thread_follow_not_applicable`). 호스트가 채널 종류를 안다. 생략하면 둘 수 있다. 대화 표면(`actions` 가 있는 곳)만
+   * 서고, 작업 세션 패널은 사건 기록이라 따라갈 대화가 아니다.
+   */
+  followable?: boolean;
 };
+
+const CLOSE_LABEL = "스레드 닫기";
+
+/** 사람이 이 창을 보고 있는가 — 「보고 있음」 신호가 쓰는 어댑터 그대로(탭이 보이고 창이 포커스를 가졌다). */
+function useForeground(): boolean {
+  return useSyncExternalStore(
+    (notify) => documentForeground.subscribe(() => notify()),
+    () => documentForeground.isForeground(),
+    () => true
+  );
+}
 
 export function ThreadPanel(props: ThreadPanelProps) {
   const { root, onClose } = props;
@@ -115,6 +153,8 @@ function ThreadPanelFrame({
   onEntranceConsumed,
   requestLanding,
   realtime,
+  onThreadRead,
+  followable = true,
 }: ThreadPanelProps & { root: Message }) {
   const [isPresent, safeToRemove] = usePresence();
   const reduceMotion = useReducedMotion();
@@ -168,6 +208,14 @@ function ThreadPanelFrame({
       return { ...page, messages };
     },
   });
+  // 따라가기(#4890): 스레드 열기 응답의 `following` 이 처음 값이고, 누르면 낙관적으로 바뀐다(코어 `threadFollow` 가 규칙).
+  const follow = useThreadFollow({
+    workspaceId,
+    channelId,
+    rootId: root.id,
+    queryKey,
+    serverFollowing: query.data === undefined ? undefined : query.data.following === true,
+  });
   const refetchReplies = query.refetch;
   const refreshQueue = useMemo(() => ({ key: queryKey, active: true, running: false, dirty: false }), [queryKey]);
   useEffect(() => { refreshQueue.active = true; return () => { refreshQueue.active = false; }; }, [refreshQueue]);
@@ -191,9 +239,44 @@ function ThreadPanelFrame({
   const runStatusFor = (message: Message) => runStatusForMessage({ message, directory, myMemberId: actions?.myMemberId, runsByMessage });
 
   const allReplies = query.data?.messages ?? NO_REPLIES;
+
+  // 읽음 신호 (#4878, #4889 2단계): 스레드를 열어 둔 동안 화면에 든 답글의 최대 seq가 오르면 한 번 보낸다(열 때 첫 읽기,
+  // 새 답글이 그려질 때마다). 사람이 이 창을 보고 있을 때만이다 — 창이 뒤에 있는 동안 온 답글을 읽은 것으로 치지 않는다.
+  // 대화 표면(`actions`가 있는 곳)만: 작업 세션 패널의 행은 사건 기록이고 읽는 대화가 아니다. 보내는 이는 이 프레임이
+  // 사는 동안 하나이고(루트가 바뀌어도 루트별로 센다), 호출 인자는 ref로 읽어 호스트가 바뀌어도 새로 만들지 않는다.
+  const readTarget = useRef({ workspaceId, channelId, onThreadRead });
+  readTarget.current = { workspaceId, channelId, onThreadRead };
+  const readSender = useMemo(
+    () =>
+      createThreadReadSender({
+        send: (rootId, seq) =>
+          markThreadRead(readTarget.current.workspaceId, readTarget.current.channelId, rootId, seq),
+        onState: (rootId, state) => readTarget.current.onThreadRead?.(rootId, state),
+      }),
+    []
+  );
+  const foreground = useForeground();
+  const readsThread = actions !== undefined;
+  useEffect(() => {
+    if (!readsThread || !foreground) return;
+    readSender.note(root.id, readSignalSeq(allReplies));
+  }, [readsThread, foreground, readSender, root.id, allReplies]);
+  // 이 패널이 열려 있는 동안 어느 스레드를 보여 주는지 데스크탑 알림 판정에 알린다(#4890: 「그 스레드를 보고 있으면 안 띄움」).
+  // 닫히는 중(`isPresent` 가 거짓)은 이미 닫은 것이다. 읽음 신호와 같은 이유로 대화 표면만이다.
+  useEffect(() => {
+    if (!readsThread || !isPresent) return;
+    return viewThread(channelId, root.id);
+  }, [readsThread, isPresent, channelId, root.id]);
+  const showFollow = readsThread && followable && query.data !== undefined && !follow.view.unavailable;
+
   const replyIds = useRef(new Set<string>());
   replyIds.current = new Set(allReplies.map((message) => message.id.toLowerCase()));
   const replies = allReplies.filter((message) => !shouldFoldBundleLine(message, allReplies));
+  // 생각 줄(#4761)의 24px 자리는 **이 스레드에 run이 하나라도 있을 때만** 선다. run이 없는 평범한 스레드에서도 자리가 늘
+  // 서면 내 루트 아래에 빈 줄이 생긴다(#4878, owner 10-31 「루트 아래 빈 공간이 크다」). 요청 스레드·에이전트가 답한
+  // 스레드는 run이 있으므로 예전과 같다. 스레드에서 처음 에이전트를 부르는 답글은 run이 생기는 순간 줄이 서고 그때
+  // 자리가 한 번 생긴다(예약은 두 번째 요청부터).
+  const threadHasRuns = [root, ...replies].some((message) => (runStatusFor(message)?.length ?? 0) > 0);
   const [landingMissed, setLandingMissed] = useState(false);
   const landedTarget = useRef<number | null>(null);
   useEffect(() => {
@@ -277,18 +360,35 @@ function ThreadPanelFrame({
         className={cn("flex h-full min-h-0 min-w-0 flex-1 flex-col", PANEL_MOTION)}
         data-state={isPresent ? "open" : "closed"}
       >
+      {/* 머리의 닫기는 채널 머리의 아이콘 단추와 같은 문법이다(#4878: 24px 맨 아이콘이던 것을 `.a-ibtn` 34px 둥근 사각 +
+          아주 연한 선으로, 툴팁은 아래 — 머리 단추는 전부 공유 `Tooltip`을 입는다). */}
       <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-2">
         <h2 className="text-body font-semibold">스레드</h2>
-        <button
-          type="button"
-          onClick={closePanel}
-          aria-label="스레드 닫기"
-          data-testid="thread-close"
-          className="tap-target flex size-6 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-        >
-          <X className="size-4" />
-        </button>
+        <div className="flex items-center gap-2">
+          {showFollow && (
+            <ThreadFollowButton view={follow.view} copy={follow.copy} onToggle={follow.toggle} />
+          )}
+          <Tooltip label={CLOSE_LABEL} side="bottom">
+            <button
+              type="button"
+              onClick={closePanel}
+              aria-label={CLOSE_LABEL}
+              data-testid="thread-close"
+              className={channelHeaderControlClass()}
+            >
+              <X className="size-4" />
+            </button>
+          </Tooltip>
+        </div>
       </header>
+      {showFollow && follow.view.failed && (
+        <InlineBanner
+          message={follow.copy.failed}
+          actionLabel={follow.copy.dismiss}
+          onAction={follow.dismissError}
+          testId="thread-follow-failed"
+        />
+      )}
 
       <div
         className="min-h-0 flex-1 overflow-y-auto"
@@ -318,7 +418,7 @@ function ThreadPanelFrame({
           onOpenWorkSession={onOpenWorkSession}
           showRollup={false}
           runStatus={runStatusFor(root)}
-          showThought
+          showThought={threadHasRuns}
           playEntrance={isPlayEntrance?.(root.id) ?? false}
           onEntranceConsumed={
             onEntranceConsumed
@@ -326,10 +426,10 @@ function ThreadPanelFrame({
               : undefined
           }
         />
-        {/* 루트와 답글 사이에는 선을 긋지 않는다 (#1753). 둘은 32px 여백으로
-            갈리고, 빈 상태일 때만 그 상태 자체의 조용한 점선 상자가 영역을 말한다.
-            이 여백은 루트 툴바가 아래로 뒤집힐 때 쓰는 26px 띠도 함께 비워 둔다. */}
-        <div className="pt-8" data-testid="thread-replies">
+        {/* 루트와 답글 사이에는 선을 긋지 않는다 (#1753). 빈 상태일 때만 그 상태 자체의 조용한 점선 상자가 영역을
+            말한다. 이 칸은 **뒤집힌 루트 툴바가 걸치는 띠**다: 높이와 이유는 `THREAD_REPLIES_LEAD_CLASS`(spacing.ts)가
+            적고, 실제 엔진에서 잰다(`threadSurface.browser.test.ts`). */}
+        <div className={THREAD_REPLIES_LEAD_CLASS} data-testid="thread-replies">
           {(landingMissed || targetMissing) && <InlineBanner message="알림의 카드를 찾지 못했어요. 답글을 다시 불러와 주세요." actionLabel="다시 불러오기" onAction={() => void query.refetch()} testId="thread-landing-missing" />}
           <Skeleton ready={!query.isLoading} rows={3} className="p-4">
             {query.error && (
@@ -361,7 +461,7 @@ function ThreadPanelFrame({
                 // 말하지 않게 하기 위해서다.
                 showRollup={false}
                 runStatus={runStatusFor(reply)}
-                showThought
+                showThought={threadHasRuns}
                 playEntrance={isPlayEntrance?.(reply.id) ?? false}
                 onEntranceConsumed={
                   onEntranceConsumed

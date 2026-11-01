@@ -1,0 +1,37 @@
+[package]
+name = "momo-image-model"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ADR-0218 §8 (#4941) — the team-connected image model, asked to draw from a member's photo.
+#
+# A crate rather than a module in momo-server for the reason momo-provider-probe, momo-unfurl,
+# momo-drive and momo-ephemeral are crates: `reqwest` lives HERE, never in momo-server's
+# manifest, so a route handler cannot build an arbitrary outbound request (invariant #2). The
+# only thing the api can reach is `ImageModelClient::generate`, which issues exactly one request
+# of one of two fixed shapes (OpenAI `images/edits`, Gemini `interactions`) through the #2852
+# egress guard: guarded DNS resolver, no redirects, no proxy. Nothing it returns carries a
+# response body or an error string from the provider.
+[dependencies]
+# `EgressPolicy` is the single authority for which addresses a provider URL may reach
+# (ADR-0004 증보 5 D1); the reqwest adapter for it is momo-egress (#2976).
+momo-settings = { path = "../momo-settings" }
+momo-egress = { path = "../momo-egress" }
+
+async-trait.workspace = true
+base64.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tracing.workspace = true
+
+[dev-dependencies]
+axum.workspace = true
+futures.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
+
+[lints]
+workspace = true

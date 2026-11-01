@@ -4,7 +4,7 @@
 > Date: 2026-10-30
 > Scope: #4301(S2 칸 6, base `track/engine`): 설계 S0 + 플랫폼 독립 코어 C1. 서버·웹·폰 구현은 #4676·#4677·#4678(S3).
 > 증보: §7 (2026-10-30, #4820, **Accepted**) — AI와 만드는 움직이는 표현: 생성 출처의 원본 첨부 참조·서버 조립 계약·실패 사유·비용. 부록 B의 고정 JSON 블록은 바꾸지 않고, 스키마 변경은 §7의 델타를 구현 단계가 한 번에 합친다.
-> 증보 2: §8 (2026-10-31, #4931, **Proposed — owner 선택 대기**) — 사진 이모티콘의 「배경 정리」 방식 비교와 권장안, 팀 서버에서 호스팅 문을 여는 순서, 실제 Hermes 리허설. Accepted가 아니며 아무 계약도 바꾸지 않는다.
+> 증보 2: §8 (2026-10-31, #4931 설계 → #4941 결정·구현, **Accepted — owner 2026-10-31**) — 사진 이모티콘: 방식 비교(H0~H8)는 근거로 남기고, **H9~H12가 새 계약**이다: 팀에 연결된 이미지 모델(OpenAI·Gemini)에 사진 한 장을 서버가 직접 보내 「배경 지우기」·「캐리커처」 그림을 받고, 지금의 직접 초안 길로 등록한다. ADR-0186 v8 X8-1의 「서버/팀 AI 생성 호출은 없다」에 이 길 하나의 예외를 둔다.
 > Consumes: [ADR-0100](0100-decision-governance.md), [ADR-0137](0137-mobile-react-native-migration.md), [ADR-0151](0151-attachments-v0-drive-contract-port.md), [ADR-0170](0170-link-unfurl-server-surface.md), [ADR-0186 증보 v8](0186-agent-workspace-actions.md#증보-2026-10-30--팀-표현-행동-expressioncreate-v8-4301).
 
 ## 1. 결정의 근거와 범위
@@ -390,7 +390,7 @@ paths:
 - **들어가는 길(원본 → 도구). [owner 10-30 23:34 결정 ①로 고침 — 처음 쓴 「첫 구현은 text-to-image」를 대체한다.]** Hermes API 서버는 비전 입력(`data:image/` 또는 http(s), `api_server.py:470-540`)을 받아 모델이 그림을 **볼 수** 있게 하지만, 도구의 `image_url`·`reference_image_urls`는 모델이 쓰는 문자열이라 모델은 본 그림의 바이트를 `data:` URL로 다시 쓸 수 없다. 그래서 oort가 대신 **요청자가 같은 대화에 올린 완료·미삭제 이미지 첨부 한 장**을 가리키는 **짧게 사는 자기 주소**를 만들어 호스팅 요청 맥락에 한 줄로 싣고(C2a), 그림 도구가 그 주소를 `image_url`로 받아 원본을 편집한다(공급자가 `images/edits`로 보낸다, ADR-0203 I1-4).
   - **주소.** `{origin}/v1/self-media/{workspace}/{token}`. `origin`은 oort 서버의 공개 출처(`MOMO_PUBLIC_BASE_URL`과 같은 값)다. `MOMO_PUBLIC_BASE_URL`은 api 전용이므로(ADR-0205 D1) 워커에는 같은 값을 `OORT_SELF_MEDIA_ORIGIN`으로 따로 준다. 형식은 `https://<소문자 호스트>[:포트]` 하나뿐이다(끝 슬래시·`:443`·사용자 정보·대문자·비ASCII·IP처럼 보이는 호스트 거절). 값이 없거나 형식이 틀리면 주소를 만들지 않는다.
   - **토큰.** 32바이트 난수(추측 불가). DB에는 **SHA-256만** 둔다(migration 160 `self_media_token`, RLS FORCE, 로그·감사·outbox에는 토큰도 Drive id도 없다. 「해시만」은 이 표의 사실이지 토큰이 지나가는 모든 곳의 사실이 아니다: 남는 위험 (b)·(e)·(f)). 수명 **5분**(표의 천장은 10분), **한 번만** 쓴다(소비는 `UPDATE … WHERE used_at IS NULL AND expires_at > now()` 한 문장이라 동시에 둘이 이기지 못한다). 워크스페이스·런·에이전트·요청자·대화·첨부에 묶인다. 풀 때 **런이 아직 진행 중**(queued·running)이어야 하고, 첨부 소유를 다시 재판정한다(`find_requester_attachment_in_tx`의 규칙: 완료 이미지, ≤5 MiB, 요청자가 쓴 살아 있는 메시지, 그 대화). 만들 때는 같은 워크스페이스의 하루 지난 행을 지운다. **표 권한은 흐름이 쓰는 것만 둔다**(`self-media-token-lockdown`, migration 160과 두 bootstrap 파일에 같은 글자): `momo_worker`는 SELECT·INSERT·DELETE(만들기·청소), `momo_app`은 SELECT·UPDATE(풀기), relay·notifier·platform_admin은 없다. BYPASSRLS 역할은 RLS를 건너뛰므로 표 권한이 마지막 문인데, 해시만 담아도 쓰기가 열려 있으면 DB만 뚫린 역할이 임의의 (런·요청자·첨부) 행을 넣어 api의 Drive 자격으로 그 이미지를 읽게 할 수 있기 때문이다(보안 검수 L6 반영).
-  - **무엇을 가리키는가.** 요청 메시지(런의 트리거)의 첫 이미지 첨부 하나뿐이다. 첨부 id는 에이전트·모델·호출자 누구도 정하지 못한다(서버가 DB의 사실로만 고른다). 공동 Hermes(`operator_env` 핀) 턴에서만 만들고, 환영·요청자 없는 턴에서는 만들지 않는다.
+  - **무엇을 가리키는가.** 요청 메시지(런의 트리거)의 첫 이미지 첨부 하나뿐이다. 첨부 id는 에이전트·모델·호출자 누구도 정하지 못한다(서버가 DB의 사실로만 고른다). 공동 Hermes(`operator_env` 핀) 턴에서만 만들고, 환영·요청자 없는 턴에서는 만들지 않는다. (모델이 읽는 글에 실리는 주소에 대한 말이다. 워커가 **자기** 요청 하나에 쓰는 읽기 주소는 별개이고 첨부 id를 제안 인자에서 받되 같은 소유 술어를 통과해야 하며 어떤 글에도 실리지 않는다: [ADR-0151 증보 3](0151-attachments-v0-drive-contract-port.md#증보-3-2026-10-31-4934-워커의-첨부-읽기---api의-사설-주소로-단일-사용-주소-하나), #4934.)
   - **응답.** 리디렉션이 없다. 바이트는 oort가 직접 내주고 Drive 주소·Drive 헤더·Drive id는 나가지 않는다(`Content-Type`은 첨부 행의 mime이고 바이트가 그 이미지 형식으로 시작해야 한다). 남의 첨부, 없는 id, 다른 워크스페이스, 만료, 재사용, 끝난 런, 지워진 메시지, Drive 오류는 **모두 같은 404**다(주소로는 어느 쪽인지 알 수 없다). 소비 뒤 Drive 오류는 토큰을 태운다(단 한 번의 약속이 우선이다). GET만 받는다. 거절만 예산을 쓰고, 그 예산은 이 라우트의 **자기 한도**(`RATE_LIMIT_SELF_MEDIA_PER_WORKSPACE`, 기본 30)이며 호출자 주소와 **경로의 워크스페이스로 나뉜다**: 한 워크스페이스의 가짜 주소가 같은 Hermes 주소에서 오는 다른 워크스페이스의 정당한 받기를 막지 못한다(보안 검수 L7 반영). 경로의 워크스페이스를 바꿔 가며 예산을 피하지 못하도록 주소 전체의 상한(한도의 10배)이 따로 있고, 예산이 다 쓰인 키는 핸들러 앞에서 같은 429를 받는다. 남는 한계: 다른 워크스페이스의 id를 경로에 넣을 수 있는(그 id를 아는) 호출자는 그 워크스페이스의 한도를 자기 주소에서 쓸 수 있고, 주소 전체의 상한을 넘기는 홍수는 창이 지날 때까지 모든 워크스페이스에 429다.
   - **요청 맥락에는 한 줄만 싣는다.** 「첨부 사진 주소 — 그림 도구의 원본(image_url)으로만 쓰고, 5분 뒤 만료: …」. G6의 나머지 지시문은 이 줄이 아니다(C2b).
   - **도구 쪽 문.** oort-image-guard가 `image_url`에 한해 정확히 이 모양 하나만 통과시킨다(바이트 단위 비교, ADR-0203 I2). `reference_image_urls`는 계속 빈 값·작은 inline 그림만이다. 그 밖의 주소·경로는 지금처럼 모두 도구 실행 전에 거절한다.
@@ -438,7 +438,7 @@ X8-1의 목록에 이 증보가 더한다. 후보 ≤4와 같은 `subjectMemberI
 
 ### G8. 열지 않는 것과 구현·검수 인계
 
-- 열지 않는 것: 영상→GIF(#4819), 여러 개를 묶는 세트(팩), 외부 GIF API, 서버의 이미지 생성 호출, ffmpeg, 자동 얼굴 탐지, 그리고 **G4의 자기 주소 하나를 뺀** 모든 원본 전달 길이다. 곧 Drive 주소, 만료 시각을 붙인 서명 주소, 첨부 열람 경로의 주소, 임의 출처의 주소, 로컬 경로, 두 번 이상 쓰이는 주소, 리디렉션하는 주소, 첨부 id를 호출자가 고르게 하는 길은 계속 닫혀 있다. 원본 픽셀을 `images/edits`로 보내는 길은 **G4의 자기 주소를 `image_url`로 받을 때에 한해** 열린다(owner 10-30 23:34 결정 ①). 이 예외의 보안 검수는 등급 2다(원본 주소가 새는지, 다른 첨부·다른 길로 넓어지는지, 출처 비교의 정규화 우회).
+- 열지 않는 것: 영상→GIF(#4819), 여러 개를 묶는 세트(팩), 외부 GIF API, 서버의 이미지 생성 호출, ffmpeg, 자동 얼굴 탐지, 그리고 **G4의 자기 주소 하나를 뺀** 모든 원본 전달 길이다. 곧 Drive 주소, 만료 시각을 붙인 서명 주소, 첨부 열람 경로의 주소, 임의 출처의 주소, 로컬 경로, 두 번 이상 쓰이는 주소, 리디렉션하는 주소, 첨부 id를 호출자가 고르게 하는 길은 계속 닫혀 있다(워커가 **자기** 요청 하나에 쓰는 읽기 주소는 G4의 괄호대로 별개다 — [ADR-0151 증보 3](0151-attachments-v0-drive-contract-port.md#증보-3-2026-10-31-4934-워커의-첨부-읽기---api의-사설-주소로-단일-사용-주소-하나), #4934). 원본 픽셀을 `images/edits`로 보내는 길은 **G4의 자기 주소를 `image_url`로 받을 때에 한해** 열린다(owner 10-30 23:34 결정 ①). 이 예외의 보안 검수는 등급 2다(원본 주소가 새는지, 다른 첨부·다른 길로 넓어지는지, 출처 비교의 정규화 우회).
 - C(서버): G7의 델타를 부록 B·코어 스키마·fixture·OpenAPI·migration 열과 한 번에 합치고 `verify-contract.mjs`를 같이 고친다. 조립 함수(G3)를 #4676의 격리 경로 안에 두고 MCP 도구와 호스팅 문을 연결하며 G4의 전달 경로를 확인한다. 증거는 실제 비우회 PG 역할로 두 테넌트에서 `sourceAttachmentId`와 `assemblyId`의 소유 판정, 프리셋 네 개와 sprite 세 격자의 프레임 수·지연·≤1 MiB·4회 재생, 한도 초과·형식 불허·시간 초과의 실패 코드(조용한 절단 없음), 얼굴 선언 후보의 당사자 승인, 에이전트당 후보 ≤12 보관과 TTL 회수, 허용하지 않는 라이선스 의존이 없는 것이다. 사보타주는 지키는 줄마다 한다.
 - C의 요구사항(보안 검수 10-30): 호스팅 문이 `MEDIA:` 표시를 수확하려면 Hermes를 `HERMES_MEDIA_DELIVERY_STRICT=1`로 띄워야 한다. 기본(비엄격) 모드는 거부 목록에 없는 어떤 로컬 파일 경로도 전달 대상으로 인정한다([`gateway/platforms/base.py:1192-1195`](https://github.com/NousResearch/hermes-agent/blob/d923a5eb487a17c0a68801bba9ef0f56c81040a8/gateway/platforms/base.py#L1192-L1195)). 이 증보는 로컬 경로 읽기를 열지 않으며, 이 값을 시작 명령·게이트에 넣는 일은 C의 몫이었고 #4820 C2b 3부(2026-10-31)가 닫았다(G3.7 (b)·G4; ADR-0203 I2의 훅 가드는 `image_url`·`reference_image_urls`만 본다).
 - B(화면): 「AI와 만들기」(원본 그림 → 움직임 → 만들 에이전트), 후보 카드(움직이는 미리보기·4회 재생·동작 줄이기면 정지), 실패 카드의 코드별 한국어 줄, 「원본 사진」 줄, 개수만 보이는 비용 표시.
@@ -446,8 +446,8 @@ X8-1의 목록에 이 증보가 더한다. 후보 ≤4와 같은 `subjectMemberI
 
 ## 8. 증보 2026-10-31 — 사진 이모티콘의 「배경 정리」: 뜻과 방식 비교, 권장안 (#4931)
 
-> Status: **Proposed — owner 선택 대기** (2026-10-31). 근거: [#4931](https://github.com/yeomyeonggeori/oort/issues/4931) 본문의 owner 요청 「사진으로 이모티콘만들기(에이전트 활용해서 배경 크롭정도는 되면 좋겠다 생각)까지 다음 승격에 진행할 예정이니까 진행시작해줘.」
-> 범위: **설계와 측정 절차만이다.** 이 절은 코드·migration·env·계약을 바꾸지 않았고 Hermes·docker·로그인·그림 생성을 하나도 실행하지 않았다(전부 runtime-unverified). D1~D6과 G0~G8은 그대로다. owner가 H5의 권장안을 고르고 이 절이 Accepted가 될 때에만 G3.2의 한 문장(「누끼·배경 제거 없음」)이 바뀌며, 구현은 S5 이슈가 한다.
+> Status: **Accepted (2026-10-31, owner 결정)**. H0~H8은 S4(#4931)의 비교·측정이고, 그 권장안((a′), H5)은 아래 owner 결정으로 범위가 바뀌었다(H5의 머리 참조). 근거: [#4931](https://github.com/yeomyeonggeori/oort/issues/4931) 본문의 owner 요청 「사진으로 이모티콘만들기(에이전트 활용해서 배경 크롭정도는 되면 좋겠다 생각)까지 다음 승격에 진행할 예정이니까 진행시작해줘.」, 그리고 이 설계를 바꾼 [#4941](https://github.com/yeomyeonggeori/oort/issues/4941)의 owner 결정(2026-10-31): 「사진이모티콘쪽은 (1) 추천방식이랑 (2) GPT를 이용해서 캐리커쳐로 새로만들기 느낌으로 해서 투트릭 하자.」 「Hermes가 그림도구를 가져간다기보다 이미지 생성 모델을 쓰면 되는거 아니야 ? GPT가 연결돼 있으면 이미지 생성도 가능할 거 아니야. 없으면 뭐 원래가 안되고 그냥 원본이나 레퍼런스를 그대로 등록하는 수 밖엔 없고.」 「팀 AI나 도우미나 그런곳에 openAI나 gemini나 이미지 생성이 가능한 모델이 사용가능하면 이미지 모델도 활용이 가능하다이지, 없으면 못한다고 말하면서 해당 모델들을 연동하면 가능하다고 안내만 해주면 될듯. 다만 등록 자체는 레퍼런스 링크나 이미지를 주면 가능하게 하면 될거같아.」
+> 범위: **새 계약은 H9~H12다**(코드: `momo-image-model`·`momo-expressions::cutout`·`routes/expression_photo.rs`·웹 「AI와 만들기」). **바뀌지 않는 것**: D1~D6, G0~G8, 부록 A·B의 기존 블록·코어 스키마·`docs/api/openapi.yaml`, 호스팅 문(G3.7 (b))과 Hermes(닫힌 채 둔다), `oort_expression_assemble`·`expression.create`. G3.2의 「(누끼·배경 제거 없음)」은 **조립 경로(G3)에 그대로 적용된다**; 사진 경로의 배경 지우기는 H9의 별도 경로다. H5의 1·2(요청 값 `background`, 호스팅 지시문)는 **구현하지 않는다**(H9.1). migration은 없다.
 > 표기: **[확인]** 고정 소스·공식 문서·이 저장소의 코드를 읽어 확인(출처와 줄 번호, 2026-10-31) · **[추정]** 읽은 사실에서 이은 판단 · **[미확인]** 확인하지 못함. Hermes 소스는 G4와 같은 고정 commit `d923a5eb487a17c0a68801bba9ef0f56c81040a8`이다.
 > 같이 읽는 것: 실제 Hermes 리허설 절차 [docs/runbooks/hermes-photo-expression-rehearsal.md](../runbooks/hermes-photo-expression-rehearsal.md)(실행은 owner 승인 뒤 planner).
 
@@ -504,7 +504,9 @@ X8-1의 목록에 이 증보가 더한다. 후보 ≤4와 같은 `subjectMemberI
 - (d)는 어느 그림에나 통하지만 가중치 177~445 MB와 새 격리 예산이 필요하고 BRIA 계열은 라이선스로 탈락한다.
 - (a′)는 지금 길 위에서 에이전트가 단색 배경으로 그리게 하고 서버가 결정적으로 지운다. 새 의존·새 모델·새 외부 호출이 없고 실패하면 오늘과 같은 결과다.
 
-### H5. 권장안 — (a′) 단색 배경으로 그리게 하고 서버가 가장자리에서 지운다 (Proposed)
+### H5. 권장안 — (a′) 단색 배경으로 그리게 하고 서버가 가장자리에서 지운다 (S4 권장안; 범위는 H9.1로 바뀜)
+
+> **[#4941 반영]** owner가 그림을 Hermes가 아니라 팀 키의 이미지 모델로 만들라고 정했으므로(H9) 이 권장안의 1(요청 값 `background`)·2(호스팅 지시문)는 **구현하지 않는다**. 3·4의 알고리즘만 사진 경로에서 쓴다: 공급자 문서가 투명 배경을 약속한 모델(H10)은 모델 출력을 그대로 쓰고(자르기만), 약속하지 않은 모델에서만 단색 배경을 요청해 이 알고리즘으로 지운다. 수치(16·98 %·20 %·95 %)는 합성 그림 표(H12)로 확정했다. 아래 본문은 S4 당시의 글이다.
 
 owner가 고르고 이 절이 Accepted가 되면 S5가 아래를 구현한다. 수치(16·0.98·20%·95%)는 초안이며 리허설 B(`docs/runbooks/hermes-photo-expression-rehearsal.md`)와 S5 시험이 확정한다.
 
@@ -550,3 +552,82 @@ owner가 고르고 이 절이 Accepted가 되면 S5가 아래를 구현한다. �
 ### H8. 실제 Hermes 리허설 (절차는 runbook)
 
 G4의 미검증 목록(모델이 `MEDIA:`를 실제로 쓰는지, 5 MiB·시간 한도 안에서 그림이 들어오는지, 구독 한도 오류의 모양, 실제 Hermes가 자기 주소를 내려받는지, 모델이 주소를 `image_url`에 넣는지, Codex `images/edits`가 이 사진을 받는지)을 실제로 재는 절차를 [runbook](../runbooks/hermes-photo-expression-rehearsal.md)에 두었다. owner가 2026-10-31 21:06에 실행을 승인했고(코디네이터 전달) 실행은 planner가 이 맥에서 저장소 기본 설정의 Hermes로 한다. 그림은 합성 그림만 쓰고, 켜는 환경값은 이름과 순서만 적었으며(값 없음), 이 문서를 쓰는 동안 로그인·자격 파일은 쓰지 않았다. 이 리허설의 PASS는 **기본 설정 Hermes + 호스팅 문**이 동작한다는 근거이고 연결 모드 Hermes(그림 도구 없음, H7)는 재지 못한다. 리허설 B는 H5의 권장안이 쓸 수 있는지를 미리 잰다. 리허설은 이 절의 어느 결정도 대신하지 않는다.
+
+### H9. owner 결정과 계약 — 팀 키 이미지 모델 두 갈래 (Accepted, #4941)
+
+**H9.1 결정.** (1) 두 갈래: ① **배경 지우기**(피사체를 살린 그림, 배경은 투명) ② **캐리커처**(사진을 바탕으로 새로 그린 캐리커처 이모티콘). (2) 그림은 **팀에 연결된 이미지 생성 모델**이 만든다: OpenAI 또는 Gemini, 팀 AI 키(`provider_link`의 머리와 켜진 대체 홉, 환경 세 값 포함)에 있는 것. Hermes 그림 도구가 아니다. (3) 이미지 모델이 없으면 그림을 만들지 않는다: 「OpenAI나 Gemini의 이미지 모델을 연결하면 돼요」라고 안내하고 설정으로 가는 길을 둔다. 등록은 모델과 상관없이 늘 된다(가져오기: 링크·직접 올리기). (4) S4의 (a′)에서 **서버 알고리즘만** 남는다: H5의 1·2(요청 값 `background`, 호스팅 지시문·스킬 줄)와 호스팅 문·Agent Port 조립의 변경은 하지 않는다.
+
+**H9.2 ADR-0186 v8 X8-1의 예외.** X8-1 `generated`의 「서버/팀 AI 생성 호출은 없다」에 **예외 하나**를 둔다: *사람 멤버가 사진 한 장으로 요청한 이 경로(H9.5)에 한해* 서버가 팀 키로 이미지 모델을 한 번 호출한다. 비용은 **팀 몫**이다(키 주인에게 청구). 에이전트 행동(`expression.create`)·Agent Port·호스팅 문에는 이 예외가 없다: 그쪽의 생성은 여전히 에이전트의 몫이고 서버는 호출하지 않는다. 팀 AI 도우미가 같은 능력을 쓰는 것(ADR-0201 증보 v3 B6의 「그림」)은 이 증보 위에서 따로 정한다.
+
+**H9.3 한도.** [#4944](https://github.com/yeomyeonggeori/oort/issues/4944)와 같은 방향이다: 기본은 **제한 없음**, 관리자가 고르는 일일·월 한도는 #4944의 설정 위에 얹는다(이 증보는 한도 설정을 만들지 않는다). 폭주 막이(기술 안전장치)는 유지한다: 호출은 요청당 한 번(재시도 없음), **멤버당 동시 1건·인스턴스 동시 4건**(`routes/expression_photo.rs` `IN_FLIGHT`, 넘으면 503 + `Retry-After`; 자리는 호출을 하는 작업이 끝까지 쥐고 호출이 끝날 때 돌아온다, H11 (b)), **멤버당 시작 수 창(60초)당 10회**(H11 (e)), 호출 120초, 응답 12 MiB, 그림 5 MiB, 사람당 살아 있는 초안 4개(D2)는 호출 앞에서 먼저 막는다. 이 장치들은 **동시성**과 짧은 창의 시작 수를 막고 **전체 횟수**는 막지 않는다(H11의 남는 위험 (c)).
+
+**H9.4 고지와 동의.** 사진이 바깥 회사의 모델로 간다는 사실을 보내기 전에 알린다: 양식은 `photo-model`이 말한 회사 이름을 문장(「내 사진이 {회사}로 전송되는 것에 동의해요. 비용은 팀이 연결한 키로 청구돼요.」)에 넣고 체크해야 보낼 수 있다. 요청은 동의한 회사를 `acknowledgedProvider`로 싣고, 서버는 **지금 키가 닿는 회사**와 같은지 본다: 다르면(그 사이 운영자가 키를 바꿨다) 아무것도 보내지 않고 409 `image_model_changed`다. 동의는 요청 한 번의 것이고 저장·재사용하지 않는다. 얼굴 규칙 D6·G2는 그대로이며 **외부 전송을 막지 않는다**(G4 남는 위험 (a)와 같은 급): 얼굴이 든 사진은 당사자 본인만 등록한다(`subjectMemberId`는 본인 아니면 403).
+
+**H9.5 REST.** 정본은 `docs/api/openapi.yaml`의 두 연산(`getExpressionPhotoModel`·`createExpressionPhotoDraft`)과 아래 표, 그리고 코어 `photo.ts`다. 부록 A의 조각(S3에서 동결한 `docs/api/openapi.expressions.yaml`과 위 yaml 블록)은 바꾸지 않는다: 새 연산은 스펙 없이는 마운트할 수 없고(`dev_token_door_conformance_pg`의 계약-라우터 차이 시험이 마운트됐는데 스펙에 없는 경로를 빨강으로 잡는다) 샘플 없이는 랜딩하지 못한다(`scripts/openapi_sampled_on_rust.txt`). 게이트의 배포본에는 이미지 모델이 없으므로 `scripts/sample_expression_contract.py`는 그 배포가 주는 두 답을 실제 라우트에서 잰다: `GET photo-model`은 `available:false`, 잘 만든 `POST photo-drafts`는 `409 image_model_unavailable`(아무것도 보내지 않고 저장하지 않는다). 성공 응답(201)과 나머지 오류의 모양은 실 PG 시험이 단정하고, 스펙과의 일치는 `openapi_shape_check.py`로 긍정·부정 표본으로 확인했다.
+
+| method / `/v1/workspaces/{ws}` 뒤 경로 | 요청 → 응답 | 상태·권한 |
+|---|---|---|
+| `GET /expressions/photo-model` | → `PhotoModel` `{available, provider, branches, canManage}` | 200. 추가 가능자(사람, 게스트 아님, 추가 정책 충족; `preflight_add`). 못 추가하는 사람(게스트·에이전트·관리자 전용 정책의 일반 멤버)은 403 `expression_role_required`이고 본문에 회사 이름이 없다. `provider`는 `openai`·`gemini`·null(`available`과 함께 서거나 함께 null), `canManage`는 인스턴스 운영자인지(설정으로 보낼지 「운영자에게 알리라」고 할지를 가른다) |
+| `POST /expressions/photo-drafts` | multipart `metadata`(`PhotoMetadata`) + `file`, 또는 JSON `PhotoMetadata` + `attachmentId` + `channelId` → `PhotoDraftResult` `{draft: Draft, cutout}` | 201. 추가 가능자(사람). 인증·역할·정책·초안 한도를 **본문을 읽기 전에** 판정. 시작 수는 멤버당 창(60초)당 10회(넘으면 429 + `Retry-After`, 본문을 읽기 전에) |
+
+`PhotoMetadata` = `Metadata`(`name`·`displayName`·`tags`·`subjectMemberId`) + `branch`(`cutout`·`caricature`) + `acknowledgedProvider`(`openai`·`gemini`). 모든 객체가 `deny_unknown_fields`이고 **자유 글 칸이 없다**: 모델에 가는 글은 서버가 쓴 고정 문장뿐이다(프롬프트 주입 면이 없다). `cutout`은 `model`(모델이 투명 배경을 그렸다)·`erased`(서버가 지웠다)·`unchanged`(지우지 못했다)·null(캐리커처)이고, 화면은 이를 한 줄로 알린다(「배경을 지우지 못했어요」는 `unchanged`).
+
+| 상태 | `error.code` | 언제 |
+|---|---|---|
+| 409 | `image_model_unavailable` | 연결된 이미지 모델이 없다(키 없음·OpenAI/Gemini가 아님·OAuth/Anthropic 키·모의 모드), 또는 키가 그 모델을 쓸 수 없다(공급자 401·402·403·404, 한도 소진). 같은 안내 |
+| 409 | `image_model_changed` | 동의한 회사가 지금 키가 닿는 회사와 다름 |
+| 422 | `image_model_refused` | 공급자의 안전 장치가 이 사진을 거절(`moderation_blocked` 등) |
+| 502 | `image_model_failed` | 공급자 오류, 문서 모양이 아닌 답, 너무 큰 답, 쓸 수 없는 그림, 이그레스 거절 |
+| 504 | `image_model_timeout` | 120초 안에 답이 없음(공급자는 일을 끝내고 청구했을 수 있다) |
+| 503 | (코드 없음, `Retry-After`) | 멤버당 1건·인스턴스 4건이 차 있다(호출이 끝날 때까지), 또는 결정 슬롯이 모두 찼다 |
+| 429 | (코드 없음, `Retry-After`) | 멤버의 시작 수가 창당 한도(10)를 넘음 |
+| 그 밖 | 기존 코드 | 401·403 `expression_role_required`·409 `expression_quota`·409 `expression_name_reserved`·400 `expression_invalid`·413/415 `expression_media_invalid`·404 `not_found`(남의 사진 포함) |
+
+어떤 코드도 공급자가 쓴 문장을 싣지 않는다. 한국어·영어 문장은 클라이언트 사전(`expressions.photo.*`)이 가진다.
+
+**H9.6 본인의 사진만.** 사진은 두 길로만 온다: 이 요청에 실린 파일(요청자 본인의 것), 또는 `from-attachment`가 쓰는 규칙(`attachment_source`: 요청자가 올린 완료·미삭제 첨부, 요청자가 쓴 살아 있는 메시지, 요청자가 아직 멤버인 열린 채널)을 통과한 첨부. 남의 사진·다른 대화·다른 워크스페이스·없는 id·지워진 메시지의 사진은 구분 없는 같은 404다. Drive를 읽기 앞뒤로 두 번 판정한다(어느 한쪽만 남아도 시험이 잡는다: H12 사보타주).
+
+**H9.7 출처(origin)와 결과.** 초안의 `origin`은 `generated`, `prompt`는 서버가 쓴 고정 두 문장(`PHOTO_PROMPTS`: 「사진에서 피사체만 남기고 배경을 지운 그림」·「사진을 바탕으로 새로 그린 캐리커처」) 중 하나, `sourceUrl`·`sourceAttachmentId`는 null이다. 직접 API의 `draft_origin_ok`는 이 두 문장을 글자 그대로 받을 때만 `generated`를 받고(그림이 있고, 사유 코드가 없고, 링크가 없을 때), 그 밖의 `generated`는 여전히 거절한다. 화면은 이 문장을 「만든 방법」으로 보인다(에이전트가 쓴 글이 아니다). `origin`은 jsonb이고 CHECK 안이라 migration이 없다. 결과는 **정지 그림**(small·large·thumb PNG)이며 D3의 일반 경로(격리 디코더)를 지난다. 움직임(프리셋)은 조립 경로(G3)의 것이고 이 증보가 잇지 않는다(후속).
+
+### H10. 공급자 문서로 확인한 사실 (2026-10-31 읽음, 이름은 문서의 것)
+
+출처: OpenAI [이미지 생성 가이드](https://developers.openai.com/api/docs/guides/image-generation)와 [이미지 편집 API 참조](https://developers.openai.com/api/reference/resources/images/methods/edit), Google [Gemini 이미지 생성 가이드](https://ai.google.dev/gemini-api/docs/image-generation)와 [Interactions API 참조](https://ai.google.dev/api/interactions-api). 문서가 한 문장도 말하지 않은 것은 **[미확인]**이고 아래 표에서 「약속하지 않음」으로 취급한다.
+
+| 공급자·모델 | 투명 배경 | 이 서버의 처리 |
+|---|---|---|
+| OpenAI `gpt-image-2.5-sunburst`·`gpt-image-2.5-flare`(날짜 붙은 `-2026-09-08` 포함) | **지원**: 가이드 「For transparent backgrounds with either model, set `background: "transparent"` and use `output_format: "png"` or `"webp"`.」, 참조 「`gpt-image-2.5-sunburst` and `gpt-image-2.5-flare` support `opaque` and `transparent`」 | `background=transparent`·`output_format=png`을 요청하고, 받은 그림에 알파가 실제로 있으면 그대로 쓴다(자르기만, `cutout=model`) |
+| OpenAI `gpt-image-2`(`-2026-04-21`) | 참조 「transparency support is in preview」 | 지원으로 치지 않는다: 단색 배경을 요청하고 서버가 지운다(`erased`/`unchanged`) |
+| OpenAI `gpt-image-1.5`·`gpt-image-1`·`gpt-image-1-mini`·`chatgpt-image-latest` | 문서에 투명 약속 없음(`gpt-image-1`은 「was shut down on October 23, 2026」) | 같은 처리: 단색 배경 + 서버 지우기 |
+| Gemini 전 모델(`gemini-nano-banana-2.1`·`gemini-3.1-flash-lite-image`·`gemini-3.1-flash-image`·`gemini-3-pro-image`, 옛 `gemini-2.5-flash-image`) | **[미확인]**: 가이드·참조 어디에도 투명·알파 언급이 없다 | 같은 처리: 단색 배경 + 서버 지우기 |
+
+요청 모양(구현이 따른 것): **OpenAI** `POST https://api.openai.com/v1/images/edits`, `Authorization: Bearer`, 편집 참조의 `model`(기본 `gpt-image-2.5-sunburst`)·`prompt`·`n`·`size`(`1024x1024`)·`quality`(`medium`)·`background`·`output_format`·`safety_identifier`(최대 128자)를 `multipart/form-data`로, 사진은 가이드의 curl 예시와 같은 `image[]` 부분으로 보낸다. 응답은 `data[0].b64_json`(GPT 이미지 모델은 `url` 미지원). 안전 거절은 오류 코드 `moderation_blocked`. 가이드: 「you may need to complete」 API Organization Verification(안 된 조직은 403이 날 수 있고 서버는 이를 `image_model_unavailable`로 말한다), 「Complex prompts may take up to 2 minutes to process.」(호출 마감 120초의 근거). **Gemini** `POST https://generativelanguage.googleapis.com/v1beta/interactions`, 헤더 `x-goog-api-key`, 본문 `input`(`{"type":"text"}`·`{"type":"image","mime_type","data"}` 블록)과 `response_format {"type":"image","mime_type":"image/png","aspect_ratio":"1:1"}`와 `store:false`(저장하지 않음, 참조의 입력 전용 필드). 응답에서는 `steps[]`의 `model_output` 안 첫 `image` 블록의 `data`를 읽는다(가이드의 SDK 예시 모양). 옛 `generateContent`는 문서에서 「Legacy」로 표기돼 쓰지 않는다. 모델 id는 환경 `OORT_EXPRESSION_IMAGE_MODEL_OPENAI`·`OORT_EXPRESSION_IMAGE_MODEL_GEMINI`로 바꿀 수 있다(검사: 모델 id 문자 규칙).
+
+**[미확인]** (실제 키로 한 번 재야 한다, H12): OpenAI `images/edits`의 multipart 필드 이름 `image[]`(참조의 스키마는 JSON `images[]`로 적고 가이드의 예시는 `image[]`다), 신형 모델이 `quality=medium`·`size=1024x1024`·`safety_identifier`를 편집에서 받는지, 구독이 아닌 일반 API 키로 투명 PNG가 실제로 오는지·걸리는 시간·한도 오류 모양, Gemini Interactions의 **원본 응답 JSON**(참조의 예시는 `model_output` 안의 이미지 블록을 보여 주지 않는다)과 `response_format`·`store:false`를 편집 요청이 받는지, Gemini의 투명 지원, 두 공급자가 사진을 어떻게 보관하는지(H11 (b)).
+
+### H11. 보안 경계 — 등급 2 검수가 먼저 볼 것
+
+**(a) 이 증보가 넓히는 경계 하나.** `provider_link`·`provider_link_chain`은 운영자 트랜잭션(`app.provider_link_admin`, migration 039)에서만 읽히고, 그 트랜잭션의 문서는 「GUC는 라우트의 운영자 판정 **뒤에만** 묶는다」(ADR-0004 증보 1 D3)이다. 사진 경로는 **멤버의 요청**에서 이 트랜잭션을 묶어 열린 키를 이미지 클라이언트에 건넨다. 이를 한 함수(`read_team_key`)에 가두었다: 호출 앞에 권한 판정(아래 (b) 1)이 있고(`photo-model` 읽기도 `preflight_add` 뒤에서만 연다), 반환은 `ImageModelTarget`(키는 `Debug`에서 가려진다) 하나뿐이며, 키는 응답·로그·감사·오류 어디에도 필드로 나가지 않는다. 키는 한 문(`TeamKeySource`)으로만 열리고, 시험이 열린 횟수를 세어 권한·정책·초안 한도·요청 확인이 끝나기 전에는 0임을 못박는다. 대안(워커가 호출하는 비동기 작업)은 새 표(migration)와 작업 상태를 요구해 이번 범위 밖이다. 이 확대는 ADR-0004 증보 1 D3에 역방향 줄이 필요하다(planner).
+
+**(b) 요청 처리 순서가 곧 논거다**(`routes/expression_photo.rs` 머리 주석과 같은 순서): 1 인증·사람·추가 정책·초안 한도를 **본문을 읽기 전에**(`preflight_import`, 링크 가져오기와 같은 증명) → 2 요청 값을 확인하고 사진이 호출자의 것임을 증명(H9.6; JSON 길도 요청 값 확인이 첨부 조회보다 앞이다) → 3 슬롯(멤버 1·인스턴스 4) → 4 **사진을 격리 디코더에서 준비**(`momo-expression-decoder --prepare`): D3 정지 입력 검사, EXIF 방향 적용, 긴 변 1024 px, **픽셀에서 다시 인코딩**(알파가 있으면 PNG, 없으면 JPEG 품질 90) → 5 동의한 회사와 지금 키의 회사가 같은지 → 6 호출 한 번 → 7 받은 그림을 **격리 디코더에서** 다시(`--cutout` 또는 일반 경로) → 8 초안 저장(출처는 고정 문장). 어느 단계의 실패도 다음 단계를 열지 않는다. 슬롯을 잡은 뒤의 일(4~8)은 요청과 별개의 작업이 끝까지 쥐고 요청은 그 결과를 기다리기만 한다: 자리는 호출이 끝날 때 돌아오고, 만든 초안은 저장된다.
+
+**(c) 밖으로 나가는 것은 이것뿐이다**: 준비된 사진(EXIF·GPS·ICC·주석·꼬리 바이트·원래 파일 이름 없음), 서버가 쓴 고정 영어 지시문, 공급자의 모델 id, 가명 `safety_identifier`(워크스페이스·멤버 id에서 유도한 `oort-<uuid v5>`; 이름·메일·원래 id가 아니다). 멤버 이름·워크스페이스 이름·id·자유 글은 나가지 않는다. 사진을 가리키는 공개·서명 주소는 없다(바이트가 요청 본문에 있다).
+
+**(d) 키 취급.** 키는 한 요청의 한 헤더(OpenAI `Authorization`, Gemini `x-goog-api-key`)에만 실린다: 주소·본문·로그·감사·오류에 없다. 공급자의 오류 본문은 거절과 실패를 가르려고 16 KiB까지 읽고 버린다(키를 되풀이하는 공급자로 시험했다). 호출은 두 정확한 호스트(`api.openai.com`, `generativelanguage.googleapis.com`), https, 기본 포트, 고정 경로로만 나간다(운영자가 쓴 경로는 무시한다): 그 밖의 호스트의 키는 이미지 공급자가 아니다. 이그레스는 #2852 가드(검증된 주소만, 리다이렉트 없음, 프록시 없음)다.
+
+**(e) 크기·시간 상한**: 사진 입력 5 MiB(요청·첨부 모두), 준비된 사진 4 MiB, 응답 전체 12 MiB(`Content-Length`로 먼저, 아니면 읽다가), 그림 5 MiB, 호출 120초, 디코더 두 슬롯 공유(준비는 즉시 거절, 호출 뒤 디코드는 최대 3초 줄서기). 시작 수는 멤버당 창(60초)당 10회(`RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER`, 0이면 끔, 본문을 읽기 전에 429): 하루·월 상한이 아니라 짧은 창의 남용 막이다(#4944는 BYOK 기본 무제한이고 관리자 한도는 그 위에 얹힌다).
+
+**(f) 남는 위험.** (a) **사람 얼굴이 든 사진이 바깥 회사로 간다.** 얼굴 탐지는 없고 D6·G2의 당사자 규칙은 **등록**만 막는다. 동의 문장이 이를 알린다. (b) 공급자가 사진·그림을 얼마나 보관하는지는 공급자 정책이다: 이 서버는 `store:false`(Gemini)와 가명 id 말고 통제하지 못하고, 보관 기간을 단정하지 않는다([미확인]). (c) **호출 횟수의 전체 상한이 없다**(H9.3의 결정): 한 멤버가 등록·삭제를 되풀이하면 순차로 계속 호출할 수 있다(창당 시작 수 막이 (e)만 있다). 상한은 사람당 살아 있는 초안 4개와 워크스페이스 표현 1,000개(삭제 표시는 개수에서 빠진다)뿐이고, 관리자 한도(#4944)가 올 때까지 비용 폭주의 마지막 문은 열려 있다. (d) 시간 초과(504)는 공급자가 일을 끝내고 청구했을 수 있다. (e) 운영자가 연결한 키를 멤버 요청이 쓰는 것 자체(위 (a))가 신뢰 경계의 변경이다. (f) 두 공급자의 실제 응답은 실행해 보지 않았다([미확인], H10).
+
+### H12. 구현·시험·인계
+
+**구현**(migration 없음, 새 ADR 번호 없음, 정책 파일 변경 없음): 새 crate `server-rust/crates/momo-image-model`(reqwest는 여기에만, 서버 매니페스트에는 없다: 불변식 #2; `server-rust/Dockerfile`의 매니페스트 COPY 한 줄), `momo-expressions`(`cutout.rs`, 디코더 자식의 `--prepare`·`--cutout` 모드, `Origin::photo`·`PHOTO_PROMPTS`, `create_draft_with`), `momo-server`(`routes/expression_photo.rs`, `AppState::image_model`·`image_models`·`with_image_model`, 운영 `main.rs`에 연결), 코어 `features/expressions/photo.ts`(웹·폰 공용 계약)와 사전 `catalogs/*/expressions.json`, 웹 `ExpressionPhotoForm`·`ExpressionMakeEntry`. 화면 확인용 **개발 가짜 서버**: 코어 `fixtureServer.ts`가 두 경로를 켜면(`photoModel`·`photoFailure` 옵션) 답하고, 웹 개발 빌드는 `?expressions=fixture&photoModel=none|openai|gemini&photoFailure=<닫힌 코드>`로 켠다(스위치가 없으면 이 길이 없는 예전 가짜 서버 그대로). 선택 환경 변수 `OORT_EXPRESSION_IMAGE_MODEL_OPENAI`·`OORT_EXPRESSION_IMAGE_MODEL_GEMINI`는 모델 id만 바꾼다(호스트는 못 바꾼다).
+
+**배경 지우기 알고리즘**(`cutout.rs`, 정수 연산·명시적 큐·재귀 없음·같은 입력 같은 바이트, 2048×2048 이하만): 이미 알파가 있고 완전 투명이 2 % 이상이면 모델의 것으로 보고 자르기만(`model`). 아니면 가장자리 3픽셀 띠의 채널별 중앙값 색 `c`, 띠의 98 % 이상이 `c`와 모든 채널 차이 16 이하일 때만, 가장자리에서 4방향으로 이어진 `c` 근처 픽셀을 투명으로, 경계 한 겹은 차이 16→48에서 부분 알파와 색 되돌리기, 지운 비율이 20 % 미만이거나 95 % 초과이면 아무것도 지우지 않음(`unchanged`), 마지막으로 남은 사각형 + 4 % 여백으로 자른다. 수치는 §8 H5 초안과 같고 합성 그림 표로 확정했다.
+
+**증거**(숫자는 이 PR의 최종 실행): 시험 목록은 PR 본문이 정본이다. 요지: crate는 가짜 공급자(127.0.0.1)를 진짜 가드 클라이언트로 두드린다(두 공급자의 요청 모양·키 위치·거절·크기·시간·리다이렉트·이그레스·키를 되풀이하는 공급자), 합성 그림 표(단색 3종·가장자리에 닿는 피사체·안쪽 구멍 보존·그라데이션·잡음·바둑판·거의 평평한 가장자리·너무 크거나 작은 그림은 **바이트 동일**), 격리 자식(EXIF 방향·GPS/주석/꼬리 바이트 제거·움직이는 그림 거절·바쁜 디코더), 실 PG 두 테넌트(비우회 역할)로 두 갈래 성공·모델 없음·바깥 실패 아홉 가지·시간 초과·크기 초과·남의 사진 거절·권한 선행·동의·슬롯. **사보타주**(지키는 줄마다 깨서 RED 확인, 복구해 GREEN): 응답 크기 상한·그림 5 MiB 상한·시간 상한·`Debug` 키 가림·공급자 본문 로그·균일도 문턱·지운 비율 문턱·가장자리 연결 규칙·소유 검사(앞뒤 두 곳 모두)·모델 없음 분기·동의 확인·사진 준비 건너뛰기(원본 전송)·멤버 슬롯·인스턴스 상한·권한 선행. (앞쪽 한 곳의 소유 검사만 지우면 뒤쪽 재검사가 막아 GREEN으로 남는다: 겹침이 의도다.) 보안 검수 1회차 수리분: 자리를 일이 끝날 때까지 쥠(작업을 떼지 않으면 RED)·시작 수 면(층을 빼거나 다른 한도를 읽으면 RED)·`photo-model`의 추가 권한·키를 여는 순서(권한 앞·사진 준비 앞·요청 확인 앞으로 옮기면 RED)·요청 확인이 첨부 조회보다 앞.
+
+**runtime-unverified**: 실제 OpenAI·Gemini 호출(H10 [미확인] 전부), Linux 격리 한도(AS·CPU)에서의 `--prepare`·`--cutout`, 팀 서버 배포의 이그레스 정책·`PROVIDER_LINK_MASTER_KEY` 가용성, 웹 화면(Playwright)·실기기. 디자인 검수·캡처는 스택 검증에서 한다.
+
+**실제 키 확인 절차**(planner, owner 키로 한 번, 합성 그림만): 팀 키를 OpenAI(`https://api.openai.com/v1`) 일반 키로 연결 → 웹 「AI와 만들기」에서 사람 얼굴이 없는 합성 그림 한 장 → 배경 지우기·동의 → 기대 201, `cutout`이 `model`(투명 PNG)이거나 `unchanged`/`erased`(모델이 투명을 주지 않음: 그 사실과 시간을 기록) → 캐리커처 한 번 → 잘못된 키로 409 `image_model_unavailable` → 서버 로그에서 키·사진 조각 검색 0건. Gemini도 같은 순서로, 특히 응답 모양(`steps`)과 요청 필드 수락을 기록한다. 결과는 PR 본문 표로.
+
+**후속**(이 칸에서 하지 않는다): ⓪ 성공 경로(201)의 배포 샘플은 가짜 모델이 든 배포 프로필이 생길 때 같은 스크립트에 더한다, ① 폰 「AI와 만들기」(#4891): 같은 코어 `photo.ts`·사전으로 사진·갈래·동의 화면(초안 이슈는 인계 파일), ② 사진 경로 결과에 움직임(프리셋) 입히기(조립 경로와 잇기), ③ 관리자 한도(#4944)에 사진 호출 횟수 포함, ④ 가짜 모델이 든 배포 프로필(위 ⓪), ⑤ 역방향 줄: ADR-0186 v8 X8-1(예외 한 줄), ADR-0004 증보 1 D3(H11 (a)), ADR-0201 증보 v3 B6(「그림」은 이 증보 위), ⑥ S4의 (a′) 이슈 초안(`background` 요청 값·호스팅 지시문)은 이 결정으로 취소.

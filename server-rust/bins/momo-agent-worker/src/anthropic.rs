@@ -230,6 +230,11 @@ pub struct MessageStream {
     cache_creation_tokens: i64,
     output_tokens: Option<i64>,
     web_search_requests: i64,
+    /// Content blocks that show a provider-side tool ran (`server_tool_use`) and the results a
+    /// web search returned (`web_search_tool_result`) — counted from the stream itself, because
+    /// `usage` is a billing figure and can be missing while the content is what the model read.
+    server_tool_blocks: i64,
+    search_result_blocks: i64,
     stop_reason: Option<String>,
     outcome: Option<Result<ChatCompletion, ProviderError>>,
     events: usize,
@@ -367,6 +372,11 @@ impl MessageStream {
             "content_block_start" => {
                 let block = self.blocks.entry(index).or_default();
                 let start = event.get("content_block").unwrap_or(&Value::Null);
+                match start.get("type").and_then(Value::as_str) {
+                    Some("server_tool_use") => self.server_tool_blocks += 1,
+                    Some("web_search_tool_result") => self.search_result_blocks += 1,
+                    _ => {}
+                }
                 if start.get("type").and_then(Value::as_str) == Some("tool_use") {
                     block.tool_id = start.get("id").and_then(Value::as_str).map(str::to_string);
                     block.tool_name = start
@@ -496,7 +506,11 @@ impl MessageStream {
             tool_calls,
             usage,
             self.stop_reason.as_deref(),
-            self.web_search_requests,
+            searches_seen(
+                self.web_search_requests,
+                self.server_tool_blocks,
+                self.search_result_blocks,
+            ),
         )
     }
 }
@@ -550,6 +564,19 @@ fn web_searches_of(usage: &Value) -> Option<i64> {
     usage
         .pointer("/server_tool_use/web_search_requests")
         .and_then(Value::as_i64)
+}
+
+/// The searches a response made, as the rest of the worker counts them (the taint of a request
+/// that read the web, the daily search ledger): the billing figure, or — when the content shows
+/// more — what the content shows. The content is one block per provider-side tool call
+/// (`server_tool_use`, whatever its name: only `web_search` is ever offered, so any other name is
+/// read as a search too, the safe side) and one per `web_search_tool_result`; the larger of those
+/// two counts is the content's. `usage` can be absent or zero while the blocks are there.
+fn searches_seen(reported: i64, server_tool_blocks: i64, search_result_blocks: i64) -> i64 {
+    reported
+        .max(server_tool_blocks)
+        .max(search_result_blocks)
+        .max(0)
 }
 
 /// The provider's own server-side web search tool for a team-AI call
@@ -629,6 +656,7 @@ pub fn parse_message(body: &str) -> Result<ChatCompletion, ProviderError> {
         .ok_or_else(|| ProviderError::InvalidResponse("message has no content".to_string()))?;
     let mut text = String::new();
     let mut tool_calls = Vec::new();
+    let (mut server_tool_blocks, mut search_result_blocks) = (0i64, 0i64);
     for block in content {
         match block.get("type").and_then(Value::as_str) {
             Some("text") => {
@@ -636,6 +664,8 @@ pub fn parse_message(body: &str) -> Result<ChatCompletion, ProviderError> {
                     text.push_str(value);
                 }
             }
+            Some("server_tool_use") => server_tool_blocks += 1,
+            Some("web_search_tool_result") => search_result_blocks += 1,
             Some("tool_use") => {
                 let id = block.get("id").and_then(Value::as_str).unwrap_or("").trim();
                 let name = block
@@ -671,7 +701,11 @@ pub fn parse_message(body: &str) -> Result<ChatCompletion, ProviderError> {
         tool_calls,
         usage,
         payload.get("stop_reason").and_then(Value::as_str),
-        payload.get("usage").and_then(web_searches_of).unwrap_or(0),
+        searches_seen(
+            payload.get("usage").and_then(web_searches_of).unwrap_or(0),
+            server_tool_blocks,
+            search_result_blocks,
+        ),
     )
 }
 
@@ -1121,5 +1155,164 @@ mod tests {
             "server_tool_use":{"web_search_requests":1}}})
         .to_string();
         assert_eq!(parse_message(&body).unwrap().web_search_requests, 1);
+    }
+
+    fn search_call(id: &str) -> Value {
+        json!({"type":"server_tool_use","id":id,"name":"web_search","input":{"query":"oort"}})
+    }
+
+    fn search_result(id: &str) -> Value {
+        json!({"type":"web_search_tool_result","tool_use_id":id,
+            "content":[{"type":"web_search_result","url":"https://example.com","title":"t"}]})
+    }
+
+    fn own_proposal_call() -> Value {
+        json!({"type":"tool_use","id":"toolu_1","name":"workspace_action_propose","input":{}})
+    }
+
+    /// The search count follows the content of a whole response: blocks that show a search count
+    /// even when `usage` carries no `server_tool_use` figure, a reported zero does not erase them,
+    /// a larger billing figure still wins, and a response with no such block counts nothing (our
+    /// own tool call is not a search).
+    #[test]
+    fn a_whole_response_counts_its_searches_from_its_content_blocks() {
+        let text = json!({"type":"text","text":"찾아봤어요."});
+        let body = |blocks: Vec<Value>, figure: Option<i64>| {
+            let mut usage = json!({"input_tokens":5,"output_tokens":2});
+            if let Some(figure) = figure {
+                usage["server_tool_use"] = json!({"web_search_requests": figure});
+            }
+            json!({"type":"message","content":blocks,"stop_reason":"end_turn","usage":usage})
+                .to_string()
+        };
+        let cases: Vec<(&str, Vec<Value>, Option<i64>, i32)> = vec![
+            (
+                "a call and its result, no figure",
+                vec![search_call("a"), search_result("a"), text.clone()],
+                None,
+                1,
+            ),
+            (
+                "two searches, no figure",
+                vec![
+                    search_call("a"),
+                    search_result("a"),
+                    search_call("b"),
+                    search_result("b"),
+                    text.clone(),
+                ],
+                None,
+                2,
+            ),
+            (
+                "a result block alone",
+                vec![search_result("a"), text.clone()],
+                None,
+                1,
+            ),
+            (
+                "a reported zero does not erase the blocks",
+                vec![search_call("a"), search_result("a"), text.clone()],
+                Some(0),
+                1,
+            ),
+            (
+                "a larger billing figure wins",
+                vec![search_call("a"), search_result("a"), text.clone()],
+                Some(3),
+                3,
+            ),
+            (
+                "our own tool call is not a search",
+                vec![own_proposal_call(), text.clone()],
+                None,
+                0,
+            ),
+        ];
+        for (label, blocks, figure, expected) in cases {
+            let completion = parse_message(&body(blocks, figure)).expect(label);
+            assert_eq!(completion.web_search_requests, expected, "{label}");
+        }
+    }
+
+    /// The same count over the stream: the blocks arrive as `content_block_start` events and the
+    /// `message_delta` usage may carry no `server_tool_use` figure.
+    #[test]
+    fn a_streamed_response_counts_its_searches_from_its_content_blocks() {
+        let stream = |blocks: Vec<Value>, figure: Option<i64>| -> String {
+            let mut raw = sse(
+                "message_start",
+                json!({"type":"message_start","message":{"usage":{"input_tokens":30,"output_tokens":0}}}),
+            );
+            let mut index = 0;
+            for block in blocks {
+                raw.push_str(&sse(
+                    "content_block_start",
+                    json!({"type":"content_block_start","index":index,"content_block":block}),
+                ));
+                raw.push_str(&sse(
+                    "content_block_stop",
+                    json!({"type":"content_block_stop","index":index}),
+                ));
+                index += 1;
+            }
+            raw.push_str(&sse(
+                "content_block_start",
+                json!({"type":"content_block_start","index":index,
+                "content_block":{"type":"text","text":"찾아봤어요."}}),
+            ));
+            let mut usage = json!({"output_tokens":12});
+            if let Some(figure) = figure {
+                usage["server_tool_use"] = json!({"web_search_requests": figure});
+            }
+            raw.push_str(&sse(
+                "message_delta",
+                json!({"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":usage}),
+            ));
+            raw.push_str(&sse("message_stop", json!({"type":"message_stop"})));
+            raw
+        };
+        let cases: Vec<(&str, Vec<Value>, Option<i64>, i32)> = vec![
+            (
+                "a call and its result, no figure",
+                vec![search_call("a"), search_result("a")],
+                None,
+                1,
+            ),
+            (
+                "two searches, no figure",
+                vec![
+                    search_call("a"),
+                    search_result("a"),
+                    search_call("b"),
+                    search_result("b"),
+                ],
+                None,
+                2,
+            ),
+            (
+                "a reported zero does not erase the blocks",
+                vec![search_call("a"), search_result("a")],
+                Some(0),
+                1,
+            ),
+            (
+                "a larger billing figure wins",
+                vec![search_call("a"), search_result("a")],
+                Some(3),
+                3,
+            ),
+            (
+                "our own tool call is not a search",
+                vec![own_proposal_call()],
+                None,
+                0,
+            ),
+        ];
+        for (label, blocks, figure, expected) in cases {
+            let completion =
+                drive_chunked(&stream(blocks, figure), 37, &DiscardDeltas).expect(label);
+            assert_eq!(completion.web_search_requests, expected, "{label}");
+        }
     }
 }
