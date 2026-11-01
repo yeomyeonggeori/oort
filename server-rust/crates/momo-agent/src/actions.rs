@@ -458,6 +458,59 @@ pub fn team_ai_door_rows(action_id: &str, mut rows: Vec<Value>) -> Vec<Value> {
     rows
 }
 
+/// The roles the **helper's door** may put on an `invite.create` card (ADR-0201 증보 v3 B4-4,
+/// 「구현 확정 (#4965)」): below admin. An admin link is the strongest thing an invite can carry (it
+/// makes an admin account), and a card the helper raises is one a model wrote after a chat, so an
+/// admin link is made by a person on the screen (설정 › 멤버와 초대). A planner default (the r1
+/// security review's Low-3/Low-4, 2026-11-01) that the owner can flip.
+///
+/// This is the helper's *policy*. What a proposal can name at all is the shared schema's
+/// ([`INVITE_PROPOSABLE_ROLES`]: `member` and `admin` today), so together they leave `member` — the
+/// Agent Port door is not narrowed by this list and keeps its schema as it was. `guest` is here
+/// because the policy is 「below admin」; it becomes reachable the day the schema offers it.
+pub const TEAM_AI_INVITE_ROLES: [&str; 2] = ["member", "guest"];
+
+/// May the helper's door raise an `invite.create` card for this (normalised) role? Asked at the
+/// proposal and again at the decision.
+pub fn team_ai_may_invite_as(role: &str) -> bool {
+    TEAM_AI_INVITE_ROLES.contains(&role)
+}
+
+/// The expiry the helper's door writes on an `invite.create` card when its proposal names none:
+/// **one day** (24 hours; the schema's own minimum). A planner default (owner 2026-10-31 「기본값을
+/// 짧게」, the r1 review's Low-7) the owner can flip. A person's link and the Agent Port's keep
+/// [`DEFAULT_INVITE_EXPIRES_IN_DAYS`]; the single use is already everybody's default
+/// (`momo_settings::validated_max_uses`).
+pub const TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS: i64 = 1;
+
+/// The arguments a helper's proposal is validated as: `raw_args` with the **door's defaults**
+/// written in. Today that is one thing — an `invite.create` that names no expiry gets
+/// [`TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS`] — and it is filled in **before** the registry's
+/// validator runs, so the card's rows, the stored payload, the decision's re-validation, the
+/// invite row and the result line all read the same explicit number: what the approver is shown is
+/// what runs. A value the model did name (`expiresInDays: 7`) is never changed, and anything that
+/// is not an object is returned as it was for the validator to refuse.
+pub fn team_ai_door_args<'a>(action_id: &str, raw_args: &'a Value) -> std::borrow::Cow<'a, Value> {
+    if action_id != ACTION_INVITE_CREATE {
+        return std::borrow::Cow::Borrowed(raw_args);
+    }
+    let Some(object) = raw_args.as_object() else {
+        return std::borrow::Cow::Borrowed(raw_args);
+    };
+    if object
+        .get("expiresInDays")
+        .is_some_and(|value| !value.is_null())
+    {
+        return std::borrow::Cow::Borrowed(raw_args);
+    }
+    let mut object = object.clone();
+    object.insert(
+        "expiresInDays".to_string(),
+        json!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS),
+    );
+    std::borrow::Cow::Owned(Value::Object(object))
+}
+
 /// The result card's delivery row for an `invite.create` the team AI door raised: the link went
 /// to the conversation.
 pub const INVITE_CONVERSATION_RESULT_TEXT: &str = "도우미가 이 대화에 링크를 올렸어요";
@@ -4463,6 +4516,67 @@ mod tests {
         let lost = team_ai_door_rows(ACTION_INVITE_CREATE, vec![action_row("역할", "member")]);
         assert_eq!(lost.len(), 2);
         assert_eq!(lost[1]["label"], "링크 받는 곳");
+    }
+
+    /// B4-4 구현 확정 (#4965, r1 Low-4): the helper's door never raises an admin link, and the
+    /// Agent Port's schema did not move for it. Each role is named literally — a loop over
+    /// [`INVITE_PROPOSABLE_ROLES`] would pass if a role left the policy.
+    #[test]
+    fn the_helper_door_raises_no_admin_link_and_the_shared_schema_did_not_move() {
+        assert!(team_ai_may_invite_as("member"));
+        assert!(team_ai_may_invite_as("guest"));
+        assert!(!team_ai_may_invite_as("admin"));
+        assert!(!team_ai_may_invite_as("owner"));
+        assert!(!team_ai_may_invite_as(""));
+        assert!(!TEAM_AI_INVITE_ROLES.contains(&"admin"));
+        // The Agent Port door keeps the schema it had: member and admin, no guest.
+        assert_eq!(INVITE_PROPOSABLE_ROLES, ["member", "admin"]);
+        assert_eq!(
+            invite_create_args_schema()["properties"]["role"]["enum"],
+            json!(["member", "admin"])
+        );
+    }
+
+    /// B4-4 구현 확정 (#4965, r1 Low-7): the helper's door writes one day when no expiry is named
+    /// — and only then, and only for `invite.create`. The control cases are the ones the default
+    /// must not touch: an explicit number, another action, and arguments that are not an object.
+    #[test]
+    fn the_helper_door_fills_one_day_only_where_an_invite_names_no_expiry() {
+        let day = json!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS);
+        assert_eq!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS, 1);
+        assert!(TEAM_AI_DEFAULT_INVITE_EXPIRES_IN_DAYS < DEFAULT_INVITE_EXPIRES_IN_DAYS);
+        // Omitted, null, and the other keys left alone.
+        for omitted in [
+            json!({}),
+            json!({"expiresInDays": null}),
+            json!({"role": "member", "maxUses": 3}),
+        ] {
+            let filled = team_ai_door_args(ACTION_INVITE_CREATE, &omitted);
+            assert_eq!(filled["expiresInDays"], day, "{omitted}");
+            assert_eq!(filled["maxUses"], omitted["maxUses"], "{omitted}");
+            assert_eq!(filled["role"], omitted["role"], "{omitted}");
+        }
+        // A number the model named is never changed — in either direction.
+        for named in [1, 7, 30] {
+            let args = json!({"expiresInDays": named});
+            let kept = team_ai_door_args(ACTION_INVITE_CREATE, &args);
+            assert_eq!(kept["expiresInDays"], json!(named));
+            assert!(matches!(kept, std::borrow::Cow::Borrowed(_)));
+        }
+        // Another action is not an invite; non-objects are the validator's to refuse.
+        let other = json!({"name": "ideas"});
+        assert_eq!(
+            team_ai_door_args(ACTION_CHANNEL_CREATE, &other).as_ref(),
+            &other
+        );
+        for not_object in [json!(null), json!("7"), json!([1])] {
+            assert_eq!(
+                team_ai_door_args(ACTION_INVITE_CREATE, &not_object).as_ref(),
+                &not_object
+            );
+        }
+        // The Agent Port's own default is the SQL's seven days, unchanged.
+        assert_eq!(DEFAULT_INVITE_EXPIRES_IN_DAYS, 7);
     }
 
     /// B4-7: the helper card's audit provenance is names, counts and numbers — and an invented

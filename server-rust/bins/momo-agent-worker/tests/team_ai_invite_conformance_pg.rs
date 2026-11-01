@@ -24,6 +24,7 @@
 //! | `v4_an_injected_invite_request_after_a_read_makes_no_card_for_either_id` | B4-3, B13-I4, B15-A3 | take the invite ids out of `SENSITIVE_ACTION_IDS`, or compute `tainted` as `false` |
 //! | `v5_a_later_read_shows_the_link_message_and_a_pasted_link_as_placeholders` | B13-I2 | drop `mask_links` from `data_text` |
 //! | `v6_the_team_memory_never_reads_the_link_message` | B13-I2 | drop the marker predicate from `memory::LIVE` |
+//! | `v7_an_admin_invite_is_refused_with_the_screen_sentence_and_a_default_one_is_a_card` | r1 Low-4, Low-7 | drop the role check from the proposal, or `team_ai_door_args` |
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -1093,6 +1094,81 @@ async fn v6_the_team_memory_never_reads_the_link_message() {
         stats.expect("two live messages").count,
         2,
         "and is not counted"
+    );
+}
+
+/// r1 Low-4 / Low-7 (planner defaults, the owner can flip them): the helper's door makes no admin
+/// invite link and writes one use for one day when no numbers are named. A model that proposes an
+/// admin link — for the admin who asked — gets no card; the helper says where a person makes one
+/// (the settings screen), and the audit row carries a reason code and no text. The model WAS told
+/// (the prompt and the tool's hint both say member only), so this is not a model that never knew.
+/// The control is the same request with no role named: a card, with the numbers written into it.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn v7_an_admin_invite_is_refused_with_the_screen_sentence_and_a_default_one_is_a_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_link(&su, t.owner_id).await;
+
+    let sentence = momo_workspace_actions::team_ai::ADMIN_INVITE_SENTENCE;
+    let model = ScriptedModel::new([propose(INVITE, json!({"role": "admin"}))]);
+    let w = worker_with(model.clone()).await;
+    let run = enqueue(
+        &pool,
+        &t,
+        t.owner_id,
+        "@oort-helper 관리자 초대 링크 만들어 줘",
+        None,
+    )
+    .await;
+    drain(&w).await;
+    let said = everything_said_about_proposals(&model.requests()[0]);
+    for told in [
+        "초대 링크는 member 역할로만 제안해",
+        sentence,
+        "말하지 않으면 1회, 1일이 돼",
+        "invite.create takes role member only",
+        "1 use and 1 day",
+    ] {
+        assert!(said.contains(told), "`{told}` was not said: {said}");
+    }
+    assert!(
+        approvals(&su, &t).await.is_empty(),
+        "an admin link is no card"
+    );
+    let texts = agent_texts(&su, &t).await;
+    assert_eq!(
+        texts
+            .iter()
+            .filter(|text| text.as_str() == sentence)
+            .count(),
+        1,
+        "{texts:?}"
+    );
+    let turn = turn_audit(&su, &t, run).await;
+    assert_eq!(turn["outcome"], "refused_invite_role", "{turn}");
+    assert_eq!(turn["refused_action"], INVITE);
+
+    // The control: no role named is the member default — a card, with one use and one day in it.
+    let model = ScriptedModel::new([propose(INVITE, json!({}))]);
+    let w = worker_with(model).await;
+    enqueue(
+        &pool,
+        &t,
+        t.owner_id,
+        "@oort-helper 초대 링크 만들어 줘",
+        None,
+    )
+    .await;
+    drain(&w).await;
+    let cards = approvals(&su, &t).await;
+    assert_eq!(cards.len(), 1, "{cards:?}");
+    assert_eq!(
+        cards[0].2["action"]["args"],
+        json!({"role": "member", "maxUses": 1, "expiresInDays": 1})
     );
 }
 

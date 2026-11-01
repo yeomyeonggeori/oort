@@ -441,7 +441,9 @@ fn workspace_action_args_description(action_ids: &[&str]) -> String {
         lines.push(
             "invite.create and agent.invite are for an admin to approve: the link and the pairing \
              code are never given to you, the server delivers them after the approval, so do not \
-             ask for one, guess one or repeat one."
+             ask for one, guess one or repeat one. invite.create takes role member only (an admin \
+             link is made by a person on the settings screen); when the person names no maxUses \
+             or expiresInDays the link is for 1 use and 1 day."
                 .to_string(),
         );
     }

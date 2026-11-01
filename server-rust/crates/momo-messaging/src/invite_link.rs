@@ -10,6 +10,12 @@
 //!   no link in it). A projection that feeds a *model* ([`crate::context_message_body`], the helper's
 //!   read tools) replaces the message by [`PLACEHOLDER`]; a notification surface reads
 //!   `props.preview` ([`PREVIEW`]) instead of the body;
+//! * **the quiet line** — [`props`] also carries `announce: true`, the server-owned key the push
+//!   judgment reads first (`momo_push` judgment: a quiet line pushes **nobody**). Without it a DM's
+//!   other human is a `Dm` candidate, and an app installed before the notification text became
+//!   `props.preview` prints the whole body — the link — on a lock screen (the r1 security review of
+//!   #4965, Medium-1). The people in the conversation still see the link where it was posted;
+//!   it just never rides a push. No client reads `props.announce`, so nothing is drawn differently;
 //! * **the shape** — [`mask_links`] replaces any whitespace-delimited token that looks like a join
 //!   link (`…join?code=…`) by [`PLACEHOLDER`], marker or not. The helper's read tools run it on
 //!   everything they return, so a link a person pasted, or one whose message was never marked,
@@ -32,9 +38,11 @@ pub const PREVIEW: &str = "초대 링크를 올렸어요";
 /// What a model-bound projection says where a link was.
 pub const PLACEHOLDER: &str = "[초대 링크]";
 
-/// The marker props: a closed object with **no** link in it.
+/// The marker props: a closed object with **no** link in it. `announce` is a JSON **boolean**
+/// `true` — the push judgment compares it as `'true'::jsonb`, so the string `"true"` would not do —
+/// and a server-owned key a REST send or a webhook strips, so only this function can set it.
 pub fn props() -> Value {
-    json!({"kind": PROPS_KIND, "preview": PREVIEW})
+    json!({"kind": PROPS_KIND, "preview": PREVIEW, "announce": true})
 }
 
 /// The message body: the fixed sentence, then the link on its own line. The server writes it; a
@@ -104,6 +112,10 @@ mod tests {
         assert!(is_marked(&props));
         assert!(!props.to_string().contains("join?code"));
         assert!(!props.to_string().contains("Ab3"));
+        // The quiet-line marker is the JSON boolean the push judgment reads (`= 'true'::jsonb`),
+        // not the string a client could write.
+        assert_eq!(props["announce"], json!(true));
+        assert!(props["announce"].is_boolean());
         assert!(!is_marked(&json!({})));
         assert!(!is_marked(&json!({"kind": "tool_result"})));
     }

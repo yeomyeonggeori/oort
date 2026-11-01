@@ -2259,7 +2259,10 @@ async fn execute_workspace_action(
     //
     // After the subject gates above on purpose: a decider who is not eligible has been turned
     // away before this, so the answer below is never an oracle for a switch they may not read.
-    if let Some(refused) = team_ai_card_gate_in_tx(conn, approval, input, action, now).await? {
+    if let Some(refused) =
+        team_ai_card_gate_in_tx(conn, approval, input, action, &resolved.validated.args, now)
+            .await?
+    {
         return Ok(Ok(refused));
     }
 
@@ -3136,7 +3139,11 @@ async fn execute_channel_create(
 ///   read nothing (no `tools`, no `web_searches`) is judged as one that did;
 /// * provenance: an action only the helper may raise (`Proposers::TeamAiOnly`) must carry the
 ///   helper's mark — a card without it is not one the helper raised — and a card that does carry
-///   it must be for an action on the helper's own list.
+///   it must be for an action on the helper's own list;
+/// * for an `invite.create` the helper raised (B4-4 구현 확정, #4965): the role must be one the
+///   helper's door raises (`team_ai_may_invite_as` — below admin). `args` are the card's stored
+///   arguments as the decision re-validated them, so this reads the same role the executor would
+///   mint the link with, not a spelling of the payload.
 ///
 /// A card of any other action from any other door (the Agent Port) is not the helper's and is
 /// not touched here. The refused attempt is an `action.refused` audit row naming the reason; the
@@ -3146,6 +3153,7 @@ async fn team_ai_card_gate_in_tx(
     approval: &LockedApproval,
     input: &DecisionInput<'_>,
     action: &momo_agent::actions::WorkspaceAction,
+    args: &ActionArgs,
     now: chrono::DateTime<Utc>,
 ) -> Result<Option<Decision>, momo_db::DbError> {
     let action_id = action.id;
@@ -3164,6 +3172,15 @@ async fn team_ai_card_gate_in_tx(
                 Some((
                     "team_ai_read_context",
                     "the helper raised this card after reading workspace text",
+                ))
+            } else if matches!(
+                args,
+                ActionArgs::InviteCreate { role, .. }
+                    if !momo_agent::actions::team_ai_may_invite_as(role)
+            ) {
+                Some((
+                    "team_ai_invite_role",
+                    "the helper may not raise an invite link for this role",
                 ))
             } else {
                 None

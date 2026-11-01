@@ -1601,6 +1601,15 @@ async fn w16_a_request_that_read_something_may_still_give_the_work_request_card(
         card_tool(&requests[1]).is_some(),
         "still offered after a read (not behind the taint rule)"
     );
+    // The merge point with #4965: the prompt a call after a read is rebuilt (`system_prompt_for`)
+    // from the same `card_commands` the first one got, so it still tells the model about the card
+    // the tool still offers — the tool and the sentence cannot disagree after a read either.
+    assert!(system_prompt(&requests[0]).contains(WORK_REQUEST));
+    assert!(
+        system_prompt(&requests[1]).contains(WORK_REQUEST),
+        "the rebuilt prompt dropped the work-request sentence: {}",
+        system_prompt(&requests[1])
+    );
     assert_eq!(suggestion_cards(&su, &t).await.len(), 1);
     let turn = turn_audit(&su, &t, run).await;
     assert_eq!(turn["outcome"], "suggested_card");

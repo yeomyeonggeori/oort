@@ -125,6 +125,8 @@ fn wire_searches(wire: ProviderWire) -> bool {
 /// code and nothing else, so refusals can be counted.
 const OUTCOME_REFUSED_ROLE_OFF: &str = "refused_role_off";
 const OUTCOME_REFUSED_AFTER_READ: &str = "refused_after_read";
+/// B4-4 구현 확정 (#4965): an admin invite link, which a person makes on the screen.
+const OUTCOME_REFUSED_INVITE_ROLE: &str = "refused_invite_role";
 /// `team_ai.turn`'s `outcome` for a turn that ended with a `card_suggest` card (B8 C1, #4972).
 const OUTCOME_SUGGESTED_CARD: &str = "suggested_card";
 
@@ -834,6 +836,12 @@ impl AgentWorker {
                     self.team_ai_refused(job, payload, run_id,
                         team_ai::after_read_sentence(proposed_action.unwrap_or("")),
                         None, &model, OUTCOME_REFUSED_AFTER_READ, &trace, proposed_action).await
+                }
+                // B4-4 구현 확정: the helper does not make an admin invite link — it says where a
+                // person does. No card, no hand-off to another agent (nobody else can raise it).
+                ProposalRefusal::InviteRoleNotOffered => {
+                    self.team_ai_refused(job, payload, run_id, team_ai::ADMIN_INVITE_SENTENCE,
+                        None, &model, OUTCOME_REFUSED_INVITE_ROLE, &trace, proposed_action).await
                 }
                 ProposalRefusal::NoHumanRequester | ProposalRefusal::RunNotParkable => {
                     self.team_ai_close(job, payload, run_id, "team_ai_not_proposable").await

@@ -29,6 +29,10 @@
 //! | `i9_a_helper_that_left_the_conversation_makes_the_card_stale_before_any_mint` | B4-2 | drop the membership check before the mint |
 //! | `i10_another_workspace_cannot_decide_or_receive_it` | 두 테넌트 | decide without the workspace id |
 //! | `i11_the_link_message_never_reaches_a_later_model_context` | B13-I2 | drop the marker arm of `context_message_body` |
+//! | `i12_the_link_message_in_a_dm_wakes_nobody_while_an_ordinary_line_wakes_the_admin` | r1 Medium-1 | drop `announce: true` from `invite_link::props()` |
+//! | `i13_a_members_forged_link_marker_is_stripped_by_the_route` | r1 Low-1 | drop `is_server_owned_props_entry` from `props_value` |
+//! | `i14_the_helper_raises_no_admin_link_and_a_card_that_says_admin_is_refused_at_the_decision` | r1 Low-4 | drop the role check from the proposal, or from `team_ai_card_gate_in_tx` |
+//! | `i15_a_link_the_helper_makes_without_numbers_is_one_use_for_one_day` | r1 Low-7 | drop `team_ai_door_args` from the proposal |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -71,6 +75,98 @@ async fn app_pool() -> PgPool {
         ))
         .await
         .expect("connect as momo_app (bootstrap_roles.sql)")
+}
+
+/// The role the push judgment runs as in production (`momo_notifier`, bootstrap_roles.sql): the
+/// judgment polls every tenant, which is its one standing exception to the row-level fence.
+async fn notifier_pool() -> PgPool {
+    let options: PgConnectOptions = database_url().parse().expect("DATABASE_URL parses");
+    PgPoolOptions::new()
+        .max_connections(2)
+        .connect_with(
+            options.username("momo_notifier").password(
+                &std::env::var("MOMO_NOTIFIER_PASSWORD")
+                    .unwrap_or_else(|_| "momo_notifier_dev_pw".to_string()),
+            ),
+        )
+        .await
+        .expect("connect as momo_notifier (bootstrap_roles.sql)")
+}
+
+/// A DM of `members` — the DM's own key, the sequence row a channel has, one membership each.
+async fn seed_dm(su: &PgPool, workspace: Uuid, created_by: Uuid, members: &[Uuid]) -> Uuid {
+    let dm = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, dm_key, created_by) \
+         VALUES($1,$2,'dm',NULL,$3,$4)",
+    )
+    .bind(dm)
+    .bind(workspace)
+    .bind(format!("dm-{}", dm.simple()))
+    .bind(created_by)
+    .execute(su)
+    .await
+    .expect("seed a DM channel");
+    sqlx::query("INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)")
+        .bind(dm)
+        .bind(workspace)
+        .execute(su)
+        .await
+        .expect("the DM's sequence row");
+    for member in members {
+        sqlx::query(
+            "INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)",
+        )
+        .bind(workspace)
+        .bind(dm)
+        .bind(member)
+        .execute(su)
+        .await
+        .expect("seed a DM membership");
+    }
+    dm
+}
+
+/// A phone for `member` — without an active token the judgment drops a person at its
+/// `push_token` join, and "nobody is woken" would prove nothing.
+async fn seed_device(su: &PgPool, workspace: Uuid, member: Uuid) {
+    let device = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO device (id, workspace_id, member_id, platform) \
+         VALUES ($1, $2, $3, 'ios'::device_platform)",
+    )
+    .bind(device)
+    .bind(workspace)
+    .bind(member)
+    .execute(su)
+    .await
+    .expect("seed device");
+    sqlx::query(
+        "INSERT INTO push_token (workspace_id, device_id, member_id, apns_token, env, topic) \
+         VALUES ($1, $2, $3, $4, 'sandbox'::push_env, 'kim.dawn.momo.e2e')",
+    )
+    .bind(workspace)
+    .bind(device)
+    .bind(member)
+    .bind(Uuid::new_v4().simple().to_string().repeat(2))
+    .execute(su)
+    .await
+    .expect("seed push token");
+}
+
+/// Who the push judgment would wake for one committed message, and for what: `(member, reason)`.
+async fn judged(
+    notifier: &PgPool,
+    workspace: Uuid,
+    message: Uuid,
+) -> Vec<(Uuid, momo_push::PushReason)> {
+    let mut conn = notifier.acquire().await.expect("acquire notifier");
+    momo_push::judge_targets(&mut conn, workspace, message)
+        .await
+        .expect("judge_targets")
+        .into_iter()
+        .map(|target| (target.member_id, target.reason))
+        .collect()
 }
 
 fn resolve_psql() -> PathBuf {
@@ -419,7 +515,29 @@ impl Harness {
         via_tools: &[&str],
         web_searches: i32,
     ) -> Result<ProposalOk, ProposalRefusal> {
-        let (workspace, channel, helper) = (self.workspace, self.channel, self.helper);
+        self.raise_in(
+            self.channel,
+            requester,
+            action_id,
+            args,
+            via_tools,
+            web_searches,
+        )
+        .await
+    }
+
+    /// [`Self::raise`] in a conversation of the caller's choosing (a DM, where the push judgment
+    /// has a recipient for a line the helper writes).
+    async fn raise_in(
+        &self,
+        channel: Uuid,
+        requester: Uuid,
+        action_id: &str,
+        args: Value,
+        via_tools: &[&str],
+        web_searches: i32,
+    ) -> Result<ProposalOk, ProposalRefusal> {
+        let (workspace, helper) = (self.workspace, self.helper);
         let text = format!("@oort-helper {action_id}");
         let run_id = with_tenant_tx(&self.su, workspace, move |conn| {
             let text = text.clone();
@@ -550,13 +668,18 @@ impl Harness {
 
     /// Text messages the helper wrote in the channel: `(id, seq, body, props)`.
     async fn helper_texts(&self) -> Vec<(Uuid, i64, String, Value)> {
+        self.helper_texts_in(self.channel).await
+    }
+
+    /// [`Self::helper_texts`] for any conversation of the workspace.
+    async fn helper_texts_in(&self, channel: Uuid) -> Vec<(Uuid, i64, String, Value)> {
         sqlx::query_as::<_, (Uuid, i64, Option<String>, Value)>(
             "SELECT id, seq, body, props FROM message \
               WHERE workspace_id = $1 AND channel_id = $2 AND author_member_id = $3 \
                 AND type::text = 'text' ORDER BY seq",
         )
         .bind(self.workspace)
-        .bind(self.channel)
+        .bind(channel)
         .bind(self.helper)
         .fetch_all(&self.su)
         .await
@@ -710,9 +833,11 @@ async fn i1_the_helpers_invite_link_is_one_message_in_the_same_transaction() {
         "{body}"
     );
     assert_eq!(body.lines().count(), 2);
+    // The marker, the sentence a notification shows, and the quiet-line key (r1 Medium-1: a JSON
+    // boolean `true`, so the push judgment sends this line to nobody — i12 measures that).
     assert_eq!(
         props,
-        json!({"kind": "team_ai_invite_link", "preview": "초대 링크를 올렸어요"})
+        json!({"kind": "team_ai_invite_link", "preview": "초대 링크를 올렸어요", "announce": true})
     );
     let code = code_of(&body);
     assert!(code.len() >= 16, "a real code: {code}");
@@ -1434,5 +1559,297 @@ async fn i11_the_link_message_never_reaches_a_later_model_context() {
     assert!(
         page.to_string().contains(&code),
         "people still see the link"
+    );
+}
+
+// --- r1 review fixes (#4965): quiet line, forged marker, admin links, defaults ----------------------
+
+/// r1 Medium-1: the link message pushes **nobody**. In a DM the push judgment makes every other
+/// human a `Dm` candidate, and an app installed before the notification text became `props.preview`
+/// prints the whole body — the link — on a lock screen. The server's answer is the quiet-line key
+/// on that one message (`announce: true`, which the judgment reads first); this measures it with the
+/// real judgment (`momo_notifier`) on the real message the real decision wrote. The control is the
+/// same person in the same DM with an ordinary line by the same helper, who IS woken: without it
+/// "nobody" could be a property of the fixture (no phone, no seat), not of the marker.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn i12_the_link_message_in_a_dm_wakes_nobody_while_an_ordinary_line_wakes_the_admin() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let notifier = notifier_pool().await;
+    let h = harness(None, &app, &su).await;
+
+    let dm = seed_dm(&su, h.workspace, h.owner, &[h.owner, h.helper]).await;
+    seed_device(&su, h.workspace, h.owner).await;
+
+    // The control: an ordinary helper line in the DM wakes the admin, as a DM line.
+    let (workspace, helper) = (h.workspace, h.helper);
+    let ordinary = with_tenant_tx(&su, workspace, move |conn| {
+        Box::pin(async move {
+            let sent =
+                send_message_in_tx(conn, workspace, NewMessage::text(dm, helper, "안녕하세요"))
+                    .await?;
+            Ok(sent.message.id)
+        })
+    })
+    .await
+    .expect("an ordinary helper line in the DM");
+    assert_eq!(
+        judged(&notifier, h.workspace, ordinary).await,
+        vec![(h.owner, momo_push::PushReason::Dm)],
+        "the control: the admin has a phone and a seat, so an ordinary line wakes them"
+    );
+
+    // The link: the real card in the DM, the real decision, the real message.
+    let card = h
+        .raise_in(
+            dm,
+            h.owner,
+            INVITE,
+            json!({"role": "member", "maxUses": 5, "expiresInDays": 7}),
+            &[],
+            0,
+        )
+        .await
+        .expect("an admin's direct request in the DM is a card");
+    let decided = h.decide(&h.owner_token, card.approval_id, true).await;
+    assert_eq!(decided.status, 200, "{}", decided.body);
+    let link = h
+        .helper_texts_in(dm)
+        .await
+        .into_iter()
+        .find(|(_, _, _, props)| props["kind"] == "team_ai_invite_link")
+        .expect("the helper's link message is in the DM");
+    let (link_id, _, body, props) = link;
+    assert!(body.contains("/join?code="), "a real link: {body}");
+    assert_eq!(props["announce"], json!(true), "{props}");
+    assert_eq!(
+        judged(&notifier, h.workspace, link_id).await,
+        vec![],
+        "the link message is a quiet line: no lock screen shows it ({props})"
+    );
+}
+
+/// r1 Low-1: a person cannot write the helper's marker. The route strips `kind:
+/// "team_ai_invite_link"` (and the quiet-line key that travels with it) from a member's props, so
+/// what is stored does not read as a link message, and an agent's later context still carries the
+/// member's words — the forged marker would have swapped them for `[초대 링크]` and kept them out of
+/// the team memory.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn i13_a_members_forged_link_marker_is_stripped_by_the_route() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let h = harness(None, &app, &su).await;
+
+    let response = h
+        .http
+        .post(format!(
+            "{}/v1/workspaces/{}/channels/{}/messages",
+            h.base, h.workspace, h.channel
+        ))
+        .bearer_auth(&h.member_token)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": "내가 쓴 평범한 글이에요",
+            "props": {
+                "kind": "team_ai_invite_link",
+                "preview": "초대 링크를 올렸어요",
+                "announce": "true",
+                "note": "kept"
+            }
+        }))
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(response.status(), 201, "{:?}", response.text().await);
+    let stored: Value = sqlx::query_scalar(
+        "SELECT props FROM message WHERE workspace_id = $1 AND channel_id = $2 \
+           AND author_member_id = $3 ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(h.workspace)
+    .bind(h.channel)
+    .bind(h.member)
+    .fetch_one(&su)
+    .await
+    .expect("the member's message");
+    assert!(
+        !momo_messaging::invite_link::is_marked(&stored),
+        "a member's line must not read as the helper's link message: {stored}"
+    );
+    assert!(stored.get("kind").is_none(), "{stored}");
+    assert!(stored.get("announce").is_none(), "{stored}");
+    assert_eq!(
+        stored["note"],
+        json!("kept"),
+        "the route kept the ordinary key"
+    );
+    // What a model reads next: the member's own words, not the placeholder.
+    assert_eq!(
+        momo_messaging::context_message_body("text", Some("내가 쓴 평범한 글이에요"), &stored),
+        "내가 쓴 평범한 글이에요"
+    );
+}
+
+/// r1 Low-4 (planner default, the owner can flip it): the helper's door raises no **admin** invite
+/// link — an admin link is made by a person on the screen. Both fences: the proposal says no (no
+/// card, no pending approval), and a card that came in sideways with the role already `admin` is
+/// refused at the decision (409 `action_args_invalid`, an `action.refused` row naming the reason,
+/// nothing minted, nothing posted, the approval still pending). The controls are what must keep
+/// working: a link for the default role (member) is a card and runs, and its invite is a member's;
+/// `guest` stays refused as the shared schema had it (the Agent Port's schema did not move).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn i14_the_helper_raises_no_admin_link_and_a_card_that_says_admin_is_refused_at_the_decision()
+{
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let h = harness(None, &app, &su).await;
+
+    // The proposal: an admin link is refused even to the admin who asks.
+    assert_eq!(
+        h.raise(h.owner, INVITE, json!({"role": "admin"}), &[], 0)
+            .await,
+        Err(ProposalRefusal::InviteRoleNotOffered)
+    );
+    assert_eq!(
+        h.raise(
+            h.owner,
+            INVITE,
+            json!({"role": "admin", "maxUses": 1, "expiresInDays": 1}),
+            &[],
+            0
+        )
+        .await,
+        Err(ProposalRefusal::InviteRoleNotOffered)
+    );
+    // The schema's own refusal still comes first for what it never allowed.
+    assert_eq!(
+        h.raise(h.owner, INVITE, json!({"role": "guest"}), &[], 0)
+            .await,
+        Err(ProposalRefusal::InvalidArguments)
+    );
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM approval WHERE workspace_id = $1 AND status = 'pending'",
+    )
+    .bind(h.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(pending, 0, "a refused proposal draws no card");
+
+    // The control: no role named is the member default, and that is a card.
+    let control = h
+        .raise(h.owner, INVITE, json!({}), &[], 0)
+        .await
+        .expect("the default role is a card");
+
+    // The decision: a card drawn as member whose stored role now says admin (a way in other than
+    // the proposal) is refused, and stays pending.
+    let sideways = h.raise_invite().await;
+    sqlx::query(
+        "UPDATE approval SET payload = jsonb_set(payload, '{action,args,role}', '\"admin\"') \
+          WHERE id = $1",
+    )
+    .bind(sideways.approval_id)
+    .execute(&su)
+    .await
+    .unwrap();
+    let texts_before = h.helper_texts().await.len();
+    let decided = h.decide(&h.owner_token, sideways.approval_id, true).await;
+    assert_eq!(decided.status, 409, "{}", decided.body);
+    assert_eq!(decided.body["status"], "action_args_invalid");
+    assert_eq!(h.approval_status(sideways.approval_id).await, "pending");
+    assert_eq!(h.invites().await, 0, "nothing minted");
+    assert_eq!(h.helper_texts().await.len(), texts_before, "nothing posted");
+    let refused = h.audit_rows("action.refused").await;
+    assert_eq!(refused.len(), 1, "{refused:?}");
+    assert_eq!(refused[0]["reason"], "team_ai_invite_role");
+
+    // The control runs, and mints a member's link.
+    assert_eq!(
+        h.decide(&h.owner_token, control.approval_id, true)
+            .await
+            .status,
+        200
+    );
+    let roles: Vec<String> =
+        sqlx::query_scalar("SELECT role::text FROM invite_code WHERE workspace_id = $1")
+            .bind(h.workspace)
+            .fetch_all(&su)
+            .await
+            .unwrap();
+    assert_eq!(roles, vec!["member".to_string()]);
+}
+
+/// r1 Low-7 (planner default; owner 「기본값을 짧게」, the owner can flip it): a link the helper
+/// makes without numbers is **1 use for 1 day**. The default is written into the card — the rows the
+/// approver reads, the stored arguments and the invite row all say the same numbers — and a number
+/// the model did name is never changed (the controls: 5 uses and 7 days stay 5 and 7).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn i15_a_link_the_helper_makes_without_numbers_is_one_use_for_one_day() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let h = harness(None, &app, &su).await;
+
+    let omitted = h
+        .raise(h.owner, INVITE, json!({"role": "member"}), &[], 0)
+        .await
+        .expect("a card");
+    let args = h.approval_payload(omitted.approval_id).await["action"]["args"].clone();
+    assert_eq!(args["maxUses"], json!(1), "{args}");
+    assert_eq!(args["expiresInDays"], json!(1), "{args}");
+    let card_props: Value = sqlx::query_scalar("SELECT props FROM message WHERE id = $1")
+        .bind(omitted.card_message_id)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    let rows = card_props["action"]["rows"].to_string();
+    assert!(rows.contains("1회"), "the card shows one use: {rows}");
+    assert!(rows.contains("1일"), "the card shows one day: {rows}");
+    assert!(
+        !rows.contains("7일"),
+        "the card does not show a week: {rows}"
+    );
+
+    let named = h.raise_invite().await; // {"role":"member","maxUses":5,"expiresInDays":7}
+    assert_eq!(
+        h.decide(&h.owner_token, omitted.approval_id, true)
+            .await
+            .status,
+        200
+    );
+    assert_eq!(
+        h.decide(&h.owner_token, named.approval_id, true)
+            .await
+            .status,
+        200
+    );
+    // Each invite's own numbers: (max_uses, seconds from creation to expiry), oldest first.
+    let made: Vec<(i32, f64)> = sqlx::query_as(
+        "SELECT max_uses, extract(epoch FROM (expires_at - created_at))::float8 \
+           FROM invite_code WHERE workspace_id = $1 ORDER BY created_at",
+    )
+    .bind(h.workspace)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(made.len(), 2, "{made:?}");
+    let (uses, seconds) = made[0];
+    assert_eq!(uses, 1, "{made:?}");
+    assert!(
+        (seconds - 86_400.0).abs() < 120.0,
+        "the default expiry is 24 hours: {seconds}s"
+    );
+    let (uses, seconds) = made[1];
+    assert_eq!(uses, 5, "{made:?}");
+    assert!(
+        (seconds - 7.0 * 86_400.0).abs() < 120.0,
+        "a named expiry is kept: {seconds}s"
     );
 }
