@@ -75,6 +75,8 @@ import {
   WorkingRow,
   type MessageRowActions,
 } from './MessageRow';
+import {SystemLine} from './SystemLine';
+import {isSystemLineMessage, startGroupAfterSystemLine} from './systemLineRows';
 import {resolveQuote} from '@momo/core/features/timeline/quote';
 import {isStreamRunEnded} from '@momo/core/features/timeline/streamStop';
 import {useEndedRuns} from '../agents/endedRuns';
@@ -1288,7 +1290,8 @@ function TimelineInner({
   // 웹의 본류·스레드와 같은 함수다. 요청 스레드도 이 목록을 그대로 쓴다(`ThreadPanel` → `Timeline`).
   const built = useMemo(
     () =>
-      buildTimelineItems(presentableRows(messages).filter(message => {
+      // 중단 시스템 줄(`SystemLine`) 바로 다음 행은 작성자가 같아도 새 묶음이다(#5067) — 이유는 `startGroupAfterSystemLine`.
+      startGroupAfterSystemLine(buildTimelineItems(presentableRows(messages).filter(message => {
         if (showRollup && channelKind !== 'dm' && message.rootId !== undefined &&
           messages.some(root => root.id.toLowerCase() === message.rootId?.toLowerCase())) {
           const card = agentCardModel(message);
@@ -1300,7 +1303,7 @@ function TimelineInner({
         unreadCount,
         recoveryMarkers,
         pending,
-      }),
+      })),
     [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, showRollup, channelKind],
   );
   // 확정본이 등장 도중에 와도 오름이 도는 메아리를 그 자리에 둔다(#4455, design-review r1 H1). 폴드가 메아리를 걷고
@@ -2953,6 +2956,39 @@ function TimelineInner({
         );
         return requestThoughts && channelKind === 'dm' ? <View>{pendingRow}<RequestThinkingLine directory={directory} nowMs={nowMs} /></View> : pendingRow;
       }
+      // 앵커 행이면 측정 상자로 감싼다. 시스템 줄도 앵커가 될 수 있어서(첫 안 읽음·점프 대상) 두 길이 같은 래퍼를 쓴다.
+      const anchored = (seq: number, row: React.JSX.Element): React.JSX.Element => {
+        if (anchorSeq !== undefined && seq === anchorSeq) {
+          return (
+            <View
+              // The cleanup form, and it is the difference between a seam and a
+              // coin toss. Moving `anchorSeq` to another row mounts a new wrapper
+              // and unmounts the old one, and React does not promise which order
+              // those land in; the plain `ref={node => ref.current = node}` form
+              // is therefore free to attach the new node and THEN null it out on
+              // the old one's behalf. That is a measurement that reports 「미측정」
+              // for a row which is on screen — the exact reading the last batch
+              // was left holding. Returning a cleanup makes the detach name the
+              // node it is detaching, so it can only clear its own.
+              ref={node => {
+                if (!anchorRef) return undefined;
+                anchorRef.current = node;
+                return () => {
+                  if (anchorRef.current === node) anchorRef.current = null;
+                };
+              }}
+              collapsable={false}>
+              {row}
+            </View>
+          );
+        }
+        return row;
+      };
+      // 서버가 방에 알리는 중단 줄(#5067)은 누가 한 말이 아니다 — 말풍선이 아니라 가운데의 시스템 줄이고, 요청 칸·생각 줄·행 동작이 하나도 붙지 않는다.
+      // (작성자가 멈춘 사람이라 아래 「내 요청」 예약에 걸리면 이 줄 밑에 생각 줄이 설 수 있어서, 예약 앞에서 가른다.)
+      if (isSystemLineMessage(item.message)) {
+        return anchored(item.message.seq, <SystemLine text={item.message.body ?? ''} />);
+      }
       const requestKey = item.message.id.toLowerCase();
       const requestRuns = runsByMessage.get(requestKey) ?? NO_RUNS;
       const leadingRun = requestRuns.find(run => run.id === requestChips.get(requestKey)?.runIds[0]) ?? requestRuns[0];
@@ -3010,31 +3046,7 @@ function TimelineInner({
           standby={isStandbyItem(item) ? true : undefined}
         />
       );
-      if (anchorSeq !== undefined && item.message.seq === anchorSeq) {
-        return (
-          <View
-            // The cleanup form, and it is the difference between a seam and a
-            // coin toss. Moving `anchorSeq` to another row mounts a new wrapper
-            // and unmounts the old one, and React does not promise which order
-            // those land in; the plain `ref={node => ref.current = node}` form
-            // is therefore free to attach the new node and THEN null it out on
-            // the old one's behalf. That is a measurement that reports 「미측정」
-            // for a row which is on screen — the exact reading the last batch
-            // was left holding. Returning a cleanup makes the detach name the
-            // node it is detaching, so it can only clear its own.
-            ref={node => {
-              if (!anchorRef) return undefined;
-              anchorRef.current = node;
-              return () => {
-                if (anchorRef.current === node) anchorRef.current = null;
-              };
-            }}
-            collapsable={false}>
-            {row}
-          </View>
-        );
-      }
-      return row;
+      return anchored(item.message.seq, row);
     },
     [
       directory,
