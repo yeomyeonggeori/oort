@@ -184,7 +184,7 @@ describe("a slot the server could not make", () => {
     expect(within(failed).queryByTestId("stub-image")).toBeNull();
     // The picture that did get made stays choosable and says the ordinary sentence.
     expect(ready.getAttribute("data-state")).toBe("ready");
-    expect(within(ready).getByRole("status").textContent).toBe("이 그림을 팀 보관함에 저장할까요?");
+    expect(within(ready).getByRole("status").textContent).toBe("이 그림을 팀 보관함에 등록할까요?");
     expect(view.getByTestId("expression-approval-count").textContent).toBe("그림 1장");
   });
   it("keeps the card standing with a plain sentence for a reason this build has never seen", () => {

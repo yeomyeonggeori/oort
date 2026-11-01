@@ -335,8 +335,8 @@ export function ApprovalDecision({
             (sending === 'reject' || !canApprove) && styles.buttonInert,
             // 눌림은 **채움의 눌린 값**이다. 옅은 눌림 회색(`surfacePressed`)으로
             // 갈아 끼우면 채움의 흰 글자가 옅은 바탕에 앉는다(#3829 M4 — 라이트
-            // 1:1 근처). 상자는 `accentPressed`(atoms `PrimaryButton` 과 같은 값),
-            // 알약은 잉크 채움을 지키고 살짝 흐린다(웹 `hover:opacity-90` 의 짝).
+            // 1:1 근처). 상자는 `accentPressed`, 알약은 잉크 채움을 지키고 살짝
+            // 흐린다(웹 `hover:opacity-90` 의 짝 — atoms `PrimaryButton` 도 이 방식이다).
             pressed &&
               !busy &&
               canApprove &&
