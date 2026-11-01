@@ -59,11 +59,17 @@ export interface ComposerLinkPreviewState {
 export function useComposerLinkPreview({
   workspaceId,
   channelId,
+  threadRootId,
   text,
   paused = false,
 }: {
   workspaceId: string;
   channelId: string;
+  /**
+   * 스레드 입력칸이면 그 스레드의 뿌리 메시지(#5016). ✕가 같은 채널의 **다른 스레드**로 따라가지 않게 ✕의 범위에만
+   * 적는다 — 물어서 받아 둔 답은 주소만의 것이라 스레드와 상관없이 나눠 쓴다.
+   */
+  threadRootId?: string;
   /** 입력칸의 지금 글(초안). */
   text: string;
   /** 오프라인처럼 지금은 묻지 않는 때. 풀리면 이어서 묻는다. 이미 받은 카드와 ✕는 그대로 둔다. */
@@ -78,8 +84,8 @@ export function useComposerLinkPreview({
   // 지금은 묻지 않는 때: 오프라인이거나, 글에 키 모양이 있다. 받아 둔 카드와 ✕는 그대로 둔다.
   const holdsSecret = useMemo(() => containsSecretKey(text), [text]);
   const quiet = paused || holdsSecret;
-  // 채널을 옮겨 같은 링크 구성의 다른 초안이 열려도 ✕가 따라가지 않게 채널을 함께 적는다.
-  const scope = `${workspaceId}\n${channelId}\n${linksKey}`;
+  // 채널(스레드 입력칸이면 스레드도)을 옮겨 같은 링크 구성의 다른 초안이 열려도 ✕가 따라가지 않게 함께 적는다.
+  const scope = `${workspaceId}\n${channelId}\n${threadRootId ?? ""}\n${linksKey}`;
 
   const memory = useRef(new Map<string, Remembered>());
   const busyUntil = useRef(new Map<string, number>());

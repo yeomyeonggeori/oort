@@ -670,6 +670,473 @@ export const catalog: MessageCatalog = {
       "value": "언어를 적용하는 중이에요."
     }
   ],
+  "settings.aiLimits.ceilingSearches": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 하루 "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회까지로 제한했어요."
+    }
+  ],
+  "settings.aiLimits.ceilingTokens": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 하루 "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "토큰까지로 제한했어요."
+    }
+  ],
+  "settings.aiLimits.cleared": [
+    {
+      "type": 0,
+      "value": "한도를 껐어요."
+    }
+  ],
+  "settings.aiLimits.description": [
+    {
+      "type": 0,
+      "value": "도우미가 쓰는 양에 거는 한도예요. 기본은 제한 없음이고, 팀 키로 쓰는 만큼 팀이 정해요. 원하면 하루나 한 달 한도를 켤 수 있어요."
+    }
+  ],
+  "settings.aiLimits.errorEmpty": [
+    {
+      "type": 0,
+      "value": "값을 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorInvalidCount": [
+    {
+      "type": 0,
+      "value": "1 이상의 정수로 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorInvalidUsd": [
+    {
+      "type": 0,
+      "value": "0보다 큰 금액을 소수 여섯 자리까지 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorOverCeiling": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 정한 "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "까지만 적을 수 있어요."
+    }
+  ],
+  "settings.aiLimits.errorTooLarge": [
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 이하로 적어 주세요."
+    }
+  ],
+  "settings.aiLimits.errorZero": [
+    {
+      "type": 0,
+      "value": "0은 한도로 쓸 수 없어요. 한도를 없애려면 스위치를 꺼 주세요."
+    }
+  ],
+  "settings.aiLimits.loadFailed": [
+    {
+      "type": 0,
+      "value": "사용 한도를 불러오지 못했어요."
+    }
+  ],
+  "settings.aiLimits.loading": [
+    {
+      "type": 0,
+      "value": "사용 한도를 불러오고 있어요."
+    }
+  ],
+  "settings.aiLimits.notAdmin": [
+    {
+      "type": 0,
+      "value": "소유자나 관리자만 볼 수 있어요."
+    }
+  ],
+  "settings.aiLimits.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 한도를 바꿀 수 없어요."
+    }
+  ],
+  "settings.aiLimits.operatorOff": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 팀 AI를 멈춰 뒀어요."
+    }
+  ],
+  "settings.aiLimits.operatorSearchOff": [
+    {
+      "type": 0,
+      "value": "서버 운영자가 웹 검색을 꺼 뒀어요."
+    }
+  ],
+  "settings.aiLimits.pricingNote": [
+    {
+      "type": 0,
+      "value": "공개 단가로 계산한 금액이에요. 공급사 청구서와 다를 수 있어요."
+    }
+  ],
+  "settings.aiLimits.resetsDate": [
+    {
+      "type": 1,
+      "value": "date"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 새로 시작해요"
+    }
+  ],
+  "settings.aiLimits.resetsDay": [
+    {
+      "type": 1,
+      "value": "day"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "에 새로 시작해요"
+    }
+  ],
+  "settings.aiLimits.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "settings.aiLimits.rowHint": [
+    {
+      "type": 0,
+      "value": "도우미 사용량의 하루·한 달 한도를 정하고 사용량을 봐요."
+    }
+  ],
+  "settings.aiLimits.save": [
+    {
+      "type": 0,
+      "value": "저장"
+    }
+  ],
+  "settings.aiLimits.saved": [
+    {
+      "type": 0,
+      "value": "저장했어요."
+    }
+  ],
+  "settings.aiLimits.saveFailed": [
+    {
+      "type": 0,
+      "value": "한도를 저장하지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "settings.aiLimits.saveForbidden": [
+    {
+      "type": 0,
+      "value": "소유자나 관리자만 한도를 바꿀 수 있어요."
+    }
+  ],
+  "settings.aiLimits.saving": [
+    {
+      "type": 0,
+      "value": "저장 중"
+    }
+  ],
+  "settings.aiLimits.searchesLabel": [
+    {
+      "type": 0,
+      "value": "하루 웹 검색 한도"
+    }
+  ],
+  "settings.aiLimits.searchesOfLimit": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "settings.aiLimits.searchesToday": [
+    {
+      "type": 0,
+      "value": "오늘 웹 검색 "
+    },
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "settings.aiLimits.searchesUnit": [
+    {
+      "type": 0,
+      "value": "회"
+    }
+  ],
+  "settings.aiLimits.searchesValueLabel": [
+    {
+      "type": 0,
+      "value": "하루 웹 검색 횟수"
+    }
+  ],
+  "settings.aiLimits.searchHint": [
+    {
+      "type": 0,
+      "value": "넘으면 새로 시작할 때까지 도우미가 웹 검색 없이 답해요."
+    }
+  ],
+  "settings.aiLimits.stopHint": [
+    {
+      "type": 0,
+      "value": "넘으면 도우미가 멈추고 다른 에이전트에게 맡기는 버튼이 나와요."
+    }
+  ],
+  "settings.aiLimits.title": [
+    {
+      "type": 0,
+      "value": "사용 한도"
+    }
+  ],
+  "settings.aiLimits.tokensLabel": [
+    {
+      "type": 0,
+      "value": "하루 토큰 한도"
+    }
+  ],
+  "settings.aiLimits.tokensOfLimit": [
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 2,
+      "value": "limit",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 토큰"
+    }
+  ],
+  "settings.aiLimits.tokensToday": [
+    {
+      "type": 0,
+      "value": "오늘 "
+    },
+    {
+      "type": 2,
+      "value": "used",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " 토큰 사용"
+    }
+  ],
+  "settings.aiLimits.tokensUnit": [
+    {
+      "type": 0,
+      "value": "토큰"
+    }
+  ],
+  "settings.aiLimits.tokensValueLabel": [
+    {
+      "type": 0,
+      "value": "하루 토큰 수"
+    }
+  ],
+  "settings.aiLimits.unsupported": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 사용 한도를 지원하지 않아요."
+    }
+  ],
+  "settings.aiLimits.usageMonth": [
+    {
+      "type": 0,
+      "value": "이번 달 "
+    },
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "% 사용"
+    }
+  ],
+  "settings.aiLimits.usageToday": [
+    {
+      "type": 0,
+      "value": "오늘 "
+    },
+    {
+      "type": 2,
+      "value": "percent",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "% 사용"
+    }
+  ],
+  "settings.aiLimits.usdApprox": [
+    {
+      "type": 0,
+      "value": "약 "
+    },
+    {
+      "type": 1,
+      "value": "amount"
+    },
+    {
+      "type": 0,
+      "value": " 이상"
+    }
+  ],
+  "settings.aiLimits.usdInactive": [
+    {
+      "type": 0,
+      "value": "지금 쓰는 모델의 단가를 몰라 이 금액 한도는 걸리지 않아요. 토큰 한도를 함께 써 보세요."
+    }
+  ],
+  "settings.aiLimits.usdLabel": [
+    {
+      "type": 0,
+      "value": "한 달 금액 한도"
+    }
+  ],
+  "settings.aiLimits.usdModelUnpriced": [
+    {
+      "type": 0,
+      "value": "지금 쓰는 모델의 단가를 몰라 금액 한도를 켤 수 없어요. 토큰 한도를 써 보세요."
+    }
+  ],
+  "settings.aiLimits.usdNoUsageYet": [
+    {
+      "type": 0,
+      "value": "도우미가 한 번 답한 뒤에 켤 수 있어요."
+    }
+  ],
+  "settings.aiLimits.usdOfLimit": [
+    {
+      "type": 1,
+      "value": "spent"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "limit"
+    }
+  ],
+  "settings.aiLimits.usdThisMonth": [
+    {
+      "type": 0,
+      "value": "이번 달 "
+    },
+    {
+      "type": 1,
+      "value": "spent"
+    }
+  ],
+  "settings.aiLimits.usdUnavailableNow": [
+    {
+      "type": 0,
+      "value": "지금은 금액 한도를 켤 수 없어요."
+    }
+  ],
+  "settings.aiLimits.usdUnit": [
+    {
+      "type": 0,
+      "value": "달러"
+    }
+  ],
+  "settings.aiLimits.usdUnpricedRuns": [
+    {
+      "type": 0,
+      "value": "단가를 모르는 모델로 한 요청 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건은 금액에 넣지 않았어요."
+    }
+  ],
+  "settings.aiLimits.usdValueLabel": [
+    {
+      "type": 0,
+      "value": "한 달 금액(달러)"
+    }
+  ],
   "settings.appearance.linkPreviewCompact": [
     {
       "type": 0,
@@ -768,6 +1235,412 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "기기 언어 따르기"
+    }
+  ],
+  "teamAi.helper.aliasesLine": [
+    {
+      "type": 0,
+      "value": "부르는 이름: "
+    },
+    {
+      "type": 1,
+      "value": "names"
+    }
+  ],
+  "teamAi.helper.aliasNotDerivable": [
+    {
+      "type": 0,
+      "value": "이 이름은 짧은 부름 이름으로 만들 수 없어요. 대화에서는 @로 이름을 그대로 불러 주세요."
+    }
+  ],
+  "teamAi.helper.aliasReserved": [
+    {
+      "type": 0,
+      "value": "이 이름은 부름 이름으로 쓸 수 없어요."
+    }
+  ],
+  "teamAi.helper.description": [
+    {
+      "type": 0,
+      "value": "도우미의 이름과 할 수 있는 일을 정해요."
+    }
+  ],
+  "teamAi.helper.nameErrorForbidden": [
+    {
+      "type": 0,
+      "value": "이름은 소유자나 관리자만 바꿀 수 있어요."
+    }
+  ],
+  "teamAi.helper.nameErrorInvalid": [
+    {
+      "type": 0,
+      "value": "이름은 비어 있지 않아야 하고 100자를 넘을 수 없어요."
+    }
+  ],
+  "teamAi.helper.nameErrorOther": [
+    {
+      "type": 0,
+      "value": "이름을 바꾸지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "teamAi.helper.nameErrorReserved": [
+    {
+      "type": 0,
+      "value": "멘션에 쓸 수 없는 이름이에요. 다른 이름으로 적어 주세요."
+    }
+  ],
+  "teamAi.helper.nameErrorTaken": [
+    {
+      "type": 0,
+      "value": "다른 멤버가 쓰고 있거나 비슷해 보이는 이름이에요. 다른 이름으로 적어 주세요."
+    }
+  ],
+  "teamAi.helper.nameHint": [
+    {
+      "type": 0,
+      "value": "새 이름으로도 부를 수 있어요. 예전 부름 이름은 그대로 남고, 4개를 넘으면 오래된 것부터 빠져요."
+    }
+  ],
+  "teamAi.helper.nameLabel": [
+    {
+      "type": 0,
+      "value": "도우미 이름"
+    }
+  ],
+  "teamAi.helper.nameSave": [
+    {
+      "type": 0,
+      "value": "이름 저장"
+    }
+  ],
+  "teamAi.helper.nameSaved": [
+    {
+      "type": 0,
+      "value": "이름을 바꿨어요."
+    }
+  ],
+  "teamAi.helper.nameSaving": [
+    {
+      "type": 0,
+      "value": "저장 중"
+    }
+  ],
+  "teamAi.helper.rolesForbidden": [
+    {
+      "type": 0,
+      "value": "할 일은 소유자나 관리자만 바꿀 수 있어요."
+    }
+  ],
+  "teamAi.helper.rolesHeading": [
+    {
+      "type": 0,
+      "value": "할 수 있는 일"
+    }
+  ],
+  "teamAi.helper.rolesHint": [
+    {
+      "type": 0,
+      "value": "끄면 도우미가 그 일을 하지 않아요. 켜고 끄는 것은 관리자만 해요."
+    }
+  ],
+  "teamAi.helper.rolesMemoryOff": [
+    {
+      "type": 0,
+      "value": "팀 기억이 꺼져 있어요. 설정 › 기억에서 먼저 켜 주세요."
+    }
+  ],
+  "teamAi.helper.rolesOffline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 바꿀 수 없어요."
+    }
+  ],
+  "teamAi.helper.rolesSaveFailed": [
+    {
+      "type": 0,
+      "value": "할 일을 바꾸지 못했어요. 연결을 확인하고 다시 시도해 주세요."
+    }
+  ],
+  "teamAi.phone.loadFailed": [
+    {
+      "type": 0,
+      "value": "도우미 설정을 불러오지 못했어요."
+    }
+  ],
+  "teamAi.phone.loading": [
+    {
+      "type": 0,
+      "value": "도우미 설정을 불러오는 중이에요."
+    }
+  ],
+  "teamAi.phone.rowTitle": [
+    {
+      "type": 0,
+      "value": "도우미"
+    }
+  ],
+  "teamAi.roles.alwaysOn": [
+    {
+      "type": 0,
+      "value": "항상 켜져 있어요."
+    }
+  ],
+  "teamAi.roles.chatReadHint": [
+    {
+      "type": 0,
+      "value": "질문에 답하고, 부른 사람이 볼 수 있는 대화와 멤버를 읽고, 웹에서 찾아요."
+    }
+  ],
+  "teamAi.roles.chatReadName": [
+    {
+      "type": 0,
+      "value": "대화·읽기"
+    }
+  ],
+  "teamAi.roles.codeHint": [
+    {
+      "type": 0,
+      "value": "코드 일은 「작업 요청」 카드로 미리 채워 줘요. 도우미가 코드를 직접 돌리지는 않아요."
+    }
+  ],
+  "teamAi.roles.codeName": [
+    {
+      "type": 0,
+      "value": "코드"
+    }
+  ],
+  "teamAi.roles.filesHint": [
+    {
+      "type": 0,
+      "value": "첨부한 파일을 읽어요."
+    }
+  ],
+  "teamAi.roles.filesName": [
+    {
+      "type": 0,
+      "value": "파일"
+    }
+  ],
+  "teamAi.roles.inviteAccessHint": [
+    {
+      "type": 0,
+      "value": "초대 링크를 만들고 에이전트를 초대하는 일을 승인 카드로 올려요."
+    }
+  ],
+  "teamAi.roles.inviteAccessName": [
+    {
+      "type": 0,
+      "value": "초대·권한"
+    }
+  ],
+  "teamAi.roles.longResearchHint": [
+    {
+      "type": 0,
+      "value": "오래 걸리는 조사를 이어서 해요."
+    }
+  ],
+  "teamAi.roles.longResearchName": [
+    {
+      "type": 0,
+      "value": "긴 조사"
+    }
+  ],
+  "teamAi.roles.memoryHint": [
+    {
+      "type": 0,
+      "value": "팀 기억을 찾고, 기억할 만한 것을 제안해요."
+    }
+  ],
+  "teamAi.roles.memoryName": [
+    {
+      "type": 0,
+      "value": "기억"
+    }
+  ],
+  "teamAi.roles.noticeBoth": [
+    {
+      "type": 0,
+      "value": "파일과 기억을 켜면 도우미가 읽은 첨부 파일과 찾은 팀 기억의 내용이 팀 AI 공급자(팀 키를 발급한 AI 회사)에게 전달돼요."
+    }
+  ],
+  "teamAi.roles.noticeFiles": [
+    {
+      "type": 0,
+      "value": "파일을 켜면 도우미가 읽은 첨부 파일의 내용이 팀 AI 공급자(팀 키를 발급한 AI 회사)에게 전달돼요."
+    }
+  ],
+  "teamAi.roles.noticeMemory": [
+    {
+      "type": 0,
+      "value": "기억을 켜면 도우미가 찾은 팀 기억의 내용이 팀 AI 공급자(팀 키를 발급한 AI 회사)에게 전달돼요."
+    }
+  ],
+  "teamAi.roles.workspaceAdminHint": [
+    {
+      "type": 0,
+      "value": "채널 만들기, 프로필과 이름 바꾸기, 설정과 앱 설치를 승인 카드로 올려요."
+    }
+  ],
+  "teamAi.roles.workspaceAdminName": [
+    {
+      "type": 0,
+      "value": "워크스페이스 관리"
+    }
+  ],
+  "teamAi.stage.checkingLine": [
+    {
+      "type": 0,
+      "value": "팀 AI를 확인하는 중이에요."
+    }
+  ],
+  "teamAi.stage.continue": [
+    {
+      "type": 0,
+      "value": "계속"
+    }
+  ],
+  "teamAi.stage.doneDetail": [
+    {
+      "type": 0,
+      "value": "채팅에서 @로 불러 보세요."
+    }
+  ],
+  "teamAi.stage.doneLine": [
+    {
+      "type": 0,
+      "value": "도우미를 켰어요."
+    }
+  ],
+  "teamAi.stage.enable": [
+    {
+      "type": 0,
+      "value": "도우미 켜기"
+    }
+  ],
+  "teamAi.stage.enableFailedDetail": [
+    {
+      "type": 0,
+      "value": "키는 저장돼 있어요. 다시 시도하거나 건너뛰고 나중에 설정 › AI에서 켤 수 있어요."
+    }
+  ],
+  "teamAi.stage.enableFailedLine": [
+    {
+      "type": 0,
+      "value": "도우미를 켜지 못했어요."
+    }
+  ],
+  "teamAi.stage.enabling": [
+    {
+      "type": 0,
+      "value": "도우미 켜는 중"
+    }
+  ],
+  "teamAi.stage.enablingLine": [
+    {
+      "type": 0,
+      "value": "도우미를 켜는 중이에요."
+    }
+  ],
+  "teamAi.stage.keyDetail": [
+    {
+      "type": 0,
+      "value": "키를 넣으면 채팅에서 도우미가 질문에 답하고, 바꿀 일은 승인 카드로 올려요. 건너뛰면 도우미는 꺼진 채예요."
+    }
+  ],
+  "teamAi.stage.keyFailedLine": [
+    {
+      "type": 0,
+      "value": "키를 확인하지 못했어요."
+    }
+  ],
+  "teamAi.stage.keyLine": [
+    {
+      "type": 0,
+      "value": "팀 AI 키를 넣어 볼까요?"
+    }
+  ],
+  "teamAi.stage.later": [
+    {
+      "type": 0,
+      "value": "나중에"
+    }
+  ],
+  "teamAi.stage.loadErrorDetail": [
+    {
+      "type": 0,
+      "value": "연결을 확인하고 다시 시도하거나, 나중에 설정 › AI에서 해도 돼요."
+    }
+  ],
+  "teamAi.stage.loadErrorLine": [
+    {
+      "type": 0,
+      "value": "팀 AI를 확인하지 못했어요."
+    }
+  ],
+  "teamAi.stage.nameRequired": [
+    {
+      "type": 0,
+      "value": "이름을 적어 주세요."
+    }
+  ],
+  "teamAi.stage.notOperatorDetail": [
+    {
+      "type": 0,
+      "value": "운영자가 설정 › AI에서 키를 넣으면 도우미를 켤 수 있어요. 지금은 건너뛰어도 돼요."
+    }
+  ],
+  "teamAi.stage.notOperatorLine": [
+    {
+      "type": 0,
+      "value": "팀 AI 키는 서버 운영자가 넣어요."
+    }
+  ],
+  "teamAi.stage.offline": [
+    {
+      "type": 0,
+      "value": "연결이 끊겨 지금은 도우미를 켤 수 없어요. 다시 연결되면 이어서 할 수 있어요."
+    }
+  ],
+  "teamAi.stage.reentry": [
+    {
+      "type": 0,
+      "value": "건너뛰어도 돼요. 설정 › AI에서 언제든 키를 넣고 도우미를 켤 수 있어요."
+    }
+  ],
+  "teamAi.stage.renameFailedNote": [
+    {
+      "type": 0,
+      "value": "이름은 바꾸지 못했어요. 설정 › AI에서 다시 바꿔 보세요."
+    }
+  ],
+  "teamAi.stage.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "teamAi.stage.setupDetail": [
+    {
+      "type": 0,
+      "value": "키가 연결됐어요. 지금 정한 것은 나중에 설정 › AI에서 바꿀 수 있어요."
+    }
+  ],
+  "teamAi.stage.setupLine": [
+    {
+      "type": 0,
+      "value": "도우미의 이름과 할 일을 골라요."
+    }
+  ],
+  "teamAi.stage.setupUnverifiedDetail": [
+    {
+      "type": 0,
+      "value": "이 서버는 키를 직접 확인하지 않아요. 도우미가 처음 답할 때 키가 맞는지 알 수 있어요."
+    }
+  ],
+  "teamAi.stage.verifyingLine": [
+    {
+      "type": 0,
+      "value": "키를 확인하는 중이에요."
     }
   ],
   "timeline.thread.followDismiss": [

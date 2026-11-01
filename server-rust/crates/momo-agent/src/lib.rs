@@ -168,12 +168,14 @@ pub mod personal;
 pub mod provisioning;
 pub mod routing;
 pub mod run;
+pub mod run_activity;
 pub mod run_event;
 pub mod run_progress;
 pub mod status;
 pub mod subscription;
 pub mod subscription_transition;
 pub mod team_ai_roles;
+pub mod team_ai_task;
 pub mod thread_wake;
 pub mod tools;
 pub mod usage;
@@ -328,6 +330,12 @@ pub use run::{
     RunBindingRejected, RunStatus, RunTrigger, WelcomeKind, PROP_ANSWERS_MESSAGE_ID,
     TRIGGER_SUMMARY_LIMIT,
 };
+pub use run_activity::{
+    id_alphabet_ok, record_run_activity_in_tx, ActivityReport, RawActivity, RawPlanItem,
+    ReportFault, ReportField, ReportRule, ACTIVITY_KINDS, ACTIVITY_ROWS_PER_RUN, ACTIVITY_STATUSES,
+    MAX_ACTIVITIES_PER_CALL, MAX_ACTIVITY_ID_CHARS, MAX_ACTIVITY_LABEL_CHARS, MAX_ACTIVITY_N,
+    MAX_PLAN_ITEMS, MAX_PLAN_TEXT_CHARS, PLAN_ROWS_PER_RUN, PLAN_STATUSES,
+};
 pub use run_event::{
     append_run_event_in_tx, delete_expired_run_events_in_tx, record_tool_call_in_tx,
     workspaces_with_expired_run_events, AppendedRunEvent, ToolCallRecord, RUN_EVENT_RETENTION_DAYS,
@@ -336,8 +344,9 @@ pub use run_event::{
 pub use run_progress::{
     approval_is_named_to_viewer, assemble_run_progress, list_channel_run_progress_base_in_tx,
     list_run_events_in_tx, list_run_ledger_in_tx, redact_unseen_approvals_in_tx,
-    visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry, RunEventInclude,
-    RunEventRow, RunLedger, RunPhase, RunProgressBase, RunProgressRow, ToolTallyRow,
+    visible_channels_in_tx, ActivityTallyRow, ActivityView, AheadRun, JobFacts, LeaseState,
+    PlanStepView, QueueEntry, RunEventInclude, RunEventRow, RunLedger, RunPhase, RunProgressBase,
+    RunProgressRow, ToolTallyRow,
 };
 pub use woken::{
     active_hosted_connection_id_in_tx, load_woken_agent_facts_in_tx, woken_clock_start,

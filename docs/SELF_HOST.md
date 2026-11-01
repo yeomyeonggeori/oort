@@ -464,8 +464,11 @@ it none of these exist and no Hermes is started.
   gate means a container that restarts and never listens, so the probe
   reports `unreachable` (not connectable) instead of an unlocked Hermes.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` is your own declaration; here the gate
-  backs it. Editing `infra/hermes/config.yaml` or the start command takes that
-  back on yourself.
+  backs it. The gate also accepts only the config files of its own table (the
+  default config, and a connector-mode config per model fragment that
+  `infra/hermes/render_model_config.py --catalog` lists, #4935): a config with any other
+  byte does not start. Editing `infra/hermes/config.yaml` or the start command takes the
+  backing back on yourself, and the gate's table with it.
 - Hermes keeps its data (`hermesdata` volume → `/opt/data`) outside oort's
   database and `oort backup`; back it up yourself. `down -v` removes it.
 - Model authentication is a separate step (#4073). Without it the card appears

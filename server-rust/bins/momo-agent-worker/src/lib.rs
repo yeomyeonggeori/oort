@@ -2656,6 +2656,9 @@ impl AgentWorker {
                         PROVIDER_FAILED,
                     )
                     .await;
+                    // ADR-0201 증보 v3 B13-I7 (#4967): the run has failed for good, so the team AI's
+                    // task of it (if any) ends with it — its note must not outlive the run.
+                    self.team_ai_task_end_failed(job.workspace_id, run_id).await;
                 }
             }
             self.settle_failed(job.id, &format!("max attempts: {reason}"))
@@ -4248,6 +4251,9 @@ impl AgentWorker {
         let mut ticker = tokio::time::interval(self.config.poll_interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         tokio::pin!(shutdown);
+        // ADR-0201 증보 v3 B13-I7 (#4967): the team AI's task rows of runs that ended through a path
+        // that does not know tasks are closed (their notes gone) about once a minute.
+        let mut last_task_sweep: Option<Instant> = None;
         loop {
             tokio::select! {
                 _ = &mut shutdown => break,
@@ -4257,6 +4263,16 @@ impl AgentWorker {
                 }
             }
             self.drain_to_empty().await;
+            if last_task_sweep.is_none_or(|at| at.elapsed() >= Duration::from_secs(60)) {
+                last_task_sweep = Some(Instant::now());
+                match self.sweep_orphan_tasks().await {
+                    Ok(0) => {}
+                    Ok(closed) => {
+                        tracing::info!(closed, "team ai task sweep closed orphaned tasks")
+                    }
+                    Err(error) => tracing::warn!(error = %error, "team ai task sweep failed"),
+                }
+            }
         }
 
         listener.abort();

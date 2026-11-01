@@ -442,8 +442,8 @@ mod tests {
     }
 
     /// Every tool a bundle owns must be a tool the helper can be offered: the request's tool list
-    /// is filtered by these names, and a name that matches no tool filters nothing. (Today's table
-    /// owns none, so this is the guard the first slice that adds one runs into.)
+    /// is filtered by these names, and a name that matches no tool filters nothing. (`long_research`
+    /// owns `task_continue` since #4967; each later slice that adds a name runs into this guard.)
     #[test]
     fn every_bundle_tool_name_is_a_tool_the_helper_can_be_offered() {
         let mut known: Vec<&str> = crate::team_ai_tools::read_tool_definitions()
@@ -451,6 +451,8 @@ mod tests {
             .map(|tool| tool.name)
             .collect();
         known.push(momo_agent::tools::WORKSPACE_ACTION_PROPOSE);
+        // The task-mode tool is defined next to the proposal tool, outside the catalog.
+        known.push(momo_agent::tools::task_continue_definition().name);
         known.extend(
             momo_agent::tools::catalog_definitions()
                 .iter()

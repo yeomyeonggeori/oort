@@ -476,6 +476,49 @@ BEGIN
 END $$;
 -- END self-media-token-lockdown
 
+-- BEGIN team-ai-task-lockdown (#4967 security review r1 M1; ADR-0201 증보 v3 B13-I7). Identical in
+-- 169_team_ai_task.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
+-- between the markers. A row's note is model-written text that may carry what the helper read for one
+-- requester, and the BYPASSRLS roles skip RLS, so their table privileges are what keeps every tenant's
+-- notes away from a role with no business reading them. Each runtime role gets exactly what the code
+-- does: momo_worker runs the task (INSERT starts one, UPDATE claims, commits, ends and sweeps, SELECT
+-- reads it); momo_app only counts the concurrency slot (SELECT) and ends the task a cancel stops
+-- (UPDATE); nobody deletes a row (an ended row is kept, its note gone — a foreign-key cascade from the
+-- run or the workspace runs as the table's owner, so deleting a parent still clears its rows); relay,
+-- notifier and platform_admin do not touch it at all. Idempotent and order-proof (a pass before the
+-- table or the roles exist finishes what it can, the pass after lands the rest), and it fails loudly
+-- if the result is not what is written here.
+DO $$
+DECLARE
+  r text;
+  p text;
+  allowed text[];
+BEGIN
+  IF to_regclass('public.team_ai_task') IS NULL THEN
+    RETURN;
+  END IF;
+  REVOKE ALL ON TABLE public.team_ai_task FROM PUBLIC;
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+    allowed := CASE r
+      WHEN 'momo_app' THEN ARRAY['SELECT', 'UPDATE']
+      WHEN 'momo_worker' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+      ELSE ARRAY[]::text[]
+    END;
+    EXECUTE format('REVOKE ALL ON TABLE public.team_ai_task FROM %I', r);
+    IF cardinality(allowed) > 0 THEN
+      EXECUTE format('GRANT %s ON TABLE public.team_ai_task TO %I', array_to_string(allowed, ', '), r);
+    END IF;
+    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+      IF has_table_privilege(r, 'public.team_ai_task', p) IS DISTINCT FROM (p = ANY (allowed)) THEN
+        RAISE EXCEPTION 'role % must % % on team_ai_task',
+          r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END team-ai-task-lockdown
+
 -- momo_notifier: table-scoped GRANTs only (no ALL TABLES, no DELETE).
 -- Relations are absent on the pre-migrate pass; the post-migrate re-apply
 -- of this file is what actually lands these grants (#2193).
@@ -586,6 +629,11 @@ BEGIN
   -- tool-call tally. SELECT only — the tally DELETE runs on the RLS-bound momo_app pool.
   IF to_regclass('public.agent_run_tool_tally') IS NOT NULL THEN
     GRANT SELECT ON TABLE agent_run_tool_tally TO momo_notifier;
+  END IF;
+  -- ADR-0200 증보 7 / #4656 (migration 168): the same sweep read also finds a finished run by the
+  -- agent's ended-unit total. SELECT only — the DELETE runs on the RLS-bound momo_app pool.
+  IF to_regclass('public.agent_run_activity_tally') IS NOT NULL THEN
+    GRANT SELECT ON TABLE agent_run_activity_tally TO momo_notifier;
   END IF;
   IF to_regclass('public.agent') IS NOT NULL THEN
     GRANT SELECT ON TABLE agent TO momo_notifier;

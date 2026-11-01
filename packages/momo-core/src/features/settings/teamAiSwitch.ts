@@ -107,15 +107,36 @@ export function setTeamAiSwitch(
 
 // ---- 문구 ----------------------------------------------------------------------
 
-export const TEAM_AI_SECTION_TITLE = "oort 도우미";
+/**
+ * 서버가 도우미를 처음 만들 때 붙이는 표시 이름(`TEAM_AI_DEFAULT_DISPLAY_NAME`). 관리자가 바꾸면
+ * 이 이름이 아니라 멤버의 표시 이름이 정본이다(ADR-0201 증보 v3 B10). 이 상수는 멤버가 아직
+ * 없을 때와 온보딩 이름 칸의 처음 값에만 쓴다.
+ */
+export const TEAM_AI_DEFAULT_NAME = "oort 도우미";
+
+/**
+ * 화면이 도우미를 부르는 이름(B10-7 하드코딩 제거). 멤버가 있으면 그 표시 이름, 아직 없거나
+ * 이름이 비어 있으면 기본 이름이다. 문구는 이 값으로 채우고 「oort 도우미」를 글자로 쓰지 않는다.
+ */
+export function teamAiHelperName(
+  helper: { displayName?: string | null } | null | undefined
+): string {
+  const name = helper?.displayName?.trim();
+  return name ? name : TEAM_AI_DEFAULT_NAME;
+}
+
+export function teamAiSectionTitle(helperName: string): string {
+  return helperName;
+}
 
 export const TEAM_AI_SECTION_DESCRIPTION =
   "프로필 바꾸기, 에이전트 이름 바꾸기, 채널 만들기, 채널에 멤버 넣기처럼 간단한 부탁을 도우미가 바로 승인 카드로 올려요. 실행은 카드를 승인한 사람의 권한으로 해요.";
 
 export const TEAM_AI_SWITCH_LABEL = "도우미 쓰기";
 
-export const TEAM_AI_SWITCH_DESCRIPTION =
-  "켜면 「oort 도우미」 에이전트가 생기고, 부른 사람의 메시지 한 개와 채널·멤버 이름 목록만 AI 허브 › 기본 AI의 「팀 에이전트의 답」 줄에 정한 모델로 보내요. 다른 채널 글과 기억은 보내지 않아요. 하루 사용량에는 상한이 있어요.";
+export function teamAiSwitchDescription(helperName: string): string {
+  return `켜면 「${helperName}」 에이전트가 생기고, 부른 사람의 메시지 한 개와 채널·멤버 이름 목록만 AI 허브 › 기본 AI의 「팀 에이전트의 답」 줄에 정한 모델로 보내요. 다른 채널 글과 기억은 보내지 않아요. 사용량 한도는 정하지 않으면 없고, AI 허브 › 팀 AI 키의 「사용 한도」에서 정할 수 있어요.`;
+}
 
 export function teamAiSwitchBusyLabel(next: boolean): string {
   return next ? "도우미 켜는 중" : "도우미 끄는 중";

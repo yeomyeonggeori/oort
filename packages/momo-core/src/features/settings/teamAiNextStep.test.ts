@@ -3,13 +3,20 @@ import { describe, expect, it } from "vitest";
 import type { RosterMember } from "../../lib/api";
 import {
   readTeamAiAliasStatus,
+  readTeamAiNameStatus,
+  TEAM_AI_NEXT_STEP_COPY,
   teamAiAliasNotices,
   teamAiCallableLine,
   teamAiNextStepView,
   teamAiSeedName,
   teamAiTryLabel,
 } from "./teamAiNextStep";
-import { readTeamAiSwitch } from "./teamAiSwitch";
+import {
+  readTeamAiSwitch,
+  teamAiHelperName,
+  teamAiSectionTitle,
+  teamAiSwitchDescription,
+} from "./teamAiSwitch";
 
 const resolved = { linkPosition: 0, endpointLabel: "api.anthropic.com", linkResolved: true, modelId: null };
 
@@ -108,5 +115,63 @@ describe("별칭 상태와 채울 이름", () => {
     );
     expect(teamAiTryLabel("마케팅", "oort")).toBe("#마케팅에서 @oort 불러 보기");
     expect(teamAiTryLabel(null, "oort-helper")).toBe("채널에서 @oort-helper 불러 보기");
+  });
+});
+
+describe("이름을 바꾸면 별칭이 따라간다 (#4966 결과를 보인다, #4945)", () => {
+  it("기본 셋 뒤에 새 이름의 별칭이 더해져 읽힌다. @name 키는 별칭이 아니다", () => {
+    const status = readTeamAiAliasStatus({
+      team_ai_alias_status: {
+        "@name": "not_derivable",
+        비서봇: "registered",
+        claude: "registered",
+        oort: "registered",
+        오르트: "registered",
+      },
+    });
+    expect(status?.map((entry) => entry.alias)).toEqual(["oort", "오르트", "claude", "비서봇"]);
+    expect(teamAiCallableLine(status)).toBe("부르는 이름: @oort · @오르트 · @claude · @비서봇");
+    expect(readTeamAiNameStatus({ team_ai_alias_status: { "@name": "not_derivable" } })).toBe("not_derivable");
+    expect(readTeamAiNameStatus({ team_ai_alias_status: { "@name": "reserved" } })).toBe("reserved");
+    expect(readTeamAiNameStatus({ team_ai_alias_status: { "@name": "x", oort: "registered" } })).toBeNull();
+    expect(readTeamAiNameStatus({})).toBeNull();
+  });
+});
+
+describe("문구는 도우미의 표시 이름을 따라간다 (ADR-0201 증보 v3 B10-7, #4945)", () => {
+  it("멤버가 있으면 그 이름, 없으면 기본 이름을 문구에 채우고 「oort 도우미」를 글자로 쓰지 않는다", () => {
+    expect(teamAiHelperName({ displayName: " 비서봇 " })).toBe("비서봇");
+    expect(teamAiHelperName(null)).toBe("oort 도우미");
+    expect(teamAiHelperName({ displayName: "  " })).toBe("oort 도우미");
+    const name = teamAiHelperName({ displayName: "비서봇" });
+    const sentences = [
+      TEAM_AI_NEXT_STEP_COPY.title(name),
+      TEAM_AI_NEXT_STEP_COPY.lead(name),
+      TEAM_AI_NEXT_STEP_COPY.step2Title(name),
+      TEAM_AI_NEXT_STEP_COPY.step2Action(name),
+      TEAM_AI_NEXT_STEP_COPY.enabled(name),
+      teamAiSectionTitle(name),
+      teamAiSwitchDescription(name),
+      ...teamAiAliasNotices(
+        readTeamAiAliasStatus({ team_ai_alias_status: { oort: "display_name_match" } }),
+        () => null,
+        name
+      ),
+    ];
+    for (const sentence of sentences) {
+      expect(sentence, sentence).toContain("비서봇");
+      expect(sentence, sentence).not.toContain("oort 도우미");
+    }
+    expect(TEAM_AI_NEXT_STEP_COPY.enabled("비서봇")).toBe("비서봇을 켰어요.");
+    expect(TEAM_AI_NEXT_STEP_COPY.enabled("Hermes")).toBe("Hermes를 켰어요.");
+  });
+});
+
+// 서버 PR(#4944) 뒤 기본은 「제한 없음」이다. 카드 한 줄이 하루 상한이 있다고 말하면 그 순간부터 거짓이다.
+describe("다음 단계 카드의 사용량 문구", () => {
+  it("하루 상한이 있다고 말하지 않고, 한도를 정하는 곳을 가리킨다", () => {
+    expect(TEAM_AI_NEXT_STEP_COPY.capLine).not.toContain("상한");
+    expect(TEAM_AI_NEXT_STEP_COPY.capLine).toContain("정하지 않으면 없");
+    expect(TEAM_AI_NEXT_STEP_COPY.capLine).toContain("「사용 한도」");
   });
 });

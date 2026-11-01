@@ -107,6 +107,59 @@ export const messageKeys = [
   "mobile.locale.backToSettings",
   "mobile.locale.permissionNotice",
   "mobile.locale.saving",
+  "settings.aiLimits.ceilingSearches",
+  "settings.aiLimits.ceilingTokens",
+  "settings.aiLimits.cleared",
+  "settings.aiLimits.description",
+  "settings.aiLimits.errorEmpty",
+  "settings.aiLimits.errorInvalidCount",
+  "settings.aiLimits.errorInvalidUsd",
+  "settings.aiLimits.errorOverCeiling",
+  "settings.aiLimits.errorTooLarge",
+  "settings.aiLimits.errorZero",
+  "settings.aiLimits.loadFailed",
+  "settings.aiLimits.loading",
+  "settings.aiLimits.notAdmin",
+  "settings.aiLimits.offline",
+  "settings.aiLimits.operatorOff",
+  "settings.aiLimits.operatorSearchOff",
+  "settings.aiLimits.pricingNote",
+  "settings.aiLimits.resetsDate",
+  "settings.aiLimits.resetsDay",
+  "settings.aiLimits.retry",
+  "settings.aiLimits.rowHint",
+  "settings.aiLimits.save",
+  "settings.aiLimits.saved",
+  "settings.aiLimits.saveFailed",
+  "settings.aiLimits.saveForbidden",
+  "settings.aiLimits.saving",
+  "settings.aiLimits.searchesLabel",
+  "settings.aiLimits.searchesOfLimit",
+  "settings.aiLimits.searchesToday",
+  "settings.aiLimits.searchesUnit",
+  "settings.aiLimits.searchesValueLabel",
+  "settings.aiLimits.searchHint",
+  "settings.aiLimits.stopHint",
+  "settings.aiLimits.title",
+  "settings.aiLimits.tokensLabel",
+  "settings.aiLimits.tokensOfLimit",
+  "settings.aiLimits.tokensToday",
+  "settings.aiLimits.tokensUnit",
+  "settings.aiLimits.tokensValueLabel",
+  "settings.aiLimits.unsupported",
+  "settings.aiLimits.usageMonth",
+  "settings.aiLimits.usageToday",
+  "settings.aiLimits.usdApprox",
+  "settings.aiLimits.usdInactive",
+  "settings.aiLimits.usdLabel",
+  "settings.aiLimits.usdModelUnpriced",
+  "settings.aiLimits.usdNoUsageYet",
+  "settings.aiLimits.usdOfLimit",
+  "settings.aiLimits.usdThisMonth",
+  "settings.aiLimits.usdUnavailableNow",
+  "settings.aiLimits.usdUnit",
+  "settings.aiLimits.usdUnpricedRuns",
+  "settings.aiLimits.usdValueLabel",
   "settings.appearance.linkPreviewCompact",
   "settings.appearance.linkPreviewCompactHint",
   "settings.appearance.linkPreviewOff",
@@ -123,6 +176,73 @@ export const messageKeys = [
   "settings.profile.languagePartialNotice",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
+  "teamAi.helper.aliasesLine",
+  "teamAi.helper.aliasNotDerivable",
+  "teamAi.helper.aliasReserved",
+  "teamAi.helper.description",
+  "teamAi.helper.nameErrorForbidden",
+  "teamAi.helper.nameErrorInvalid",
+  "teamAi.helper.nameErrorOther",
+  "teamAi.helper.nameErrorReserved",
+  "teamAi.helper.nameErrorTaken",
+  "teamAi.helper.nameHint",
+  "teamAi.helper.nameLabel",
+  "teamAi.helper.nameSave",
+  "teamAi.helper.nameSaved",
+  "teamAi.helper.nameSaving",
+  "teamAi.helper.rolesForbidden",
+  "teamAi.helper.rolesHeading",
+  "teamAi.helper.rolesHint",
+  "teamAi.helper.rolesMemoryOff",
+  "teamAi.helper.rolesOffline",
+  "teamAi.helper.rolesSaveFailed",
+  "teamAi.phone.loadFailed",
+  "teamAi.phone.loading",
+  "teamAi.phone.rowTitle",
+  "teamAi.roles.alwaysOn",
+  "teamAi.roles.chatReadHint",
+  "teamAi.roles.chatReadName",
+  "teamAi.roles.codeHint",
+  "teamAi.roles.codeName",
+  "teamAi.roles.filesHint",
+  "teamAi.roles.filesName",
+  "teamAi.roles.inviteAccessHint",
+  "teamAi.roles.inviteAccessName",
+  "teamAi.roles.longResearchHint",
+  "teamAi.roles.longResearchName",
+  "teamAi.roles.memoryHint",
+  "teamAi.roles.memoryName",
+  "teamAi.roles.noticeBoth",
+  "teamAi.roles.noticeFiles",
+  "teamAi.roles.noticeMemory",
+  "teamAi.roles.workspaceAdminHint",
+  "teamAi.roles.workspaceAdminName",
+  "teamAi.stage.checkingLine",
+  "teamAi.stage.continue",
+  "teamAi.stage.doneDetail",
+  "teamAi.stage.doneLine",
+  "teamAi.stage.enable",
+  "teamAi.stage.enableFailedDetail",
+  "teamAi.stage.enableFailedLine",
+  "teamAi.stage.enabling",
+  "teamAi.stage.enablingLine",
+  "teamAi.stage.keyDetail",
+  "teamAi.stage.keyFailedLine",
+  "teamAi.stage.keyLine",
+  "teamAi.stage.later",
+  "teamAi.stage.loadErrorDetail",
+  "teamAi.stage.loadErrorLine",
+  "teamAi.stage.nameRequired",
+  "teamAi.stage.notOperatorDetail",
+  "teamAi.stage.notOperatorLine",
+  "teamAi.stage.offline",
+  "teamAi.stage.reentry",
+  "teamAi.stage.renameFailedNote",
+  "teamAi.stage.retry",
+  "teamAi.stage.setupDetail",
+  "teamAi.stage.setupLine",
+  "teamAi.stage.setupUnverifiedDetail",
+  "teamAi.stage.verifyingLine",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
   "timeline.thread.followOff",
@@ -272,6 +392,96 @@ export const argumentSpecs = {
   "mobile.locale.backToSettings": {},
   "mobile.locale.permissionNotice": {},
   "mobile.locale.saving": {},
+  "settings.aiLimits.ceilingSearches": {
+    "limit": "number"
+  },
+  "settings.aiLimits.ceilingTokens": {
+    "limit": "number"
+  },
+  "settings.aiLimits.cleared": {},
+  "settings.aiLimits.description": {},
+  "settings.aiLimits.errorEmpty": {},
+  "settings.aiLimits.errorInvalidCount": {},
+  "settings.aiLimits.errorInvalidUsd": {},
+  "settings.aiLimits.errorOverCeiling": {
+    "max": "number"
+  },
+  "settings.aiLimits.errorTooLarge": {
+    "max": "number"
+  },
+  "settings.aiLimits.errorZero": {},
+  "settings.aiLimits.loadFailed": {},
+  "settings.aiLimits.loading": {},
+  "settings.aiLimits.notAdmin": {},
+  "settings.aiLimits.offline": {},
+  "settings.aiLimits.operatorOff": {},
+  "settings.aiLimits.operatorSearchOff": {},
+  "settings.aiLimits.pricingNote": {},
+  "settings.aiLimits.resetsDate": {
+    "date": "string",
+    "time": "string"
+  },
+  "settings.aiLimits.resetsDay": {
+    "day": "string",
+    "time": "string"
+  },
+  "settings.aiLimits.retry": {},
+  "settings.aiLimits.rowHint": {},
+  "settings.aiLimits.save": {},
+  "settings.aiLimits.saved": {},
+  "settings.aiLimits.saveFailed": {},
+  "settings.aiLimits.saveForbidden": {},
+  "settings.aiLimits.saving": {},
+  "settings.aiLimits.searchesLabel": {},
+  "settings.aiLimits.searchesOfLimit": {
+    "limit": "number",
+    "used": "number"
+  },
+  "settings.aiLimits.searchesToday": {
+    "used": "number"
+  },
+  "settings.aiLimits.searchesUnit": {},
+  "settings.aiLimits.searchesValueLabel": {},
+  "settings.aiLimits.searchHint": {},
+  "settings.aiLimits.stopHint": {},
+  "settings.aiLimits.title": {},
+  "settings.aiLimits.tokensLabel": {},
+  "settings.aiLimits.tokensOfLimit": {
+    "limit": "number",
+    "used": "number"
+  },
+  "settings.aiLimits.tokensToday": {
+    "used": "number"
+  },
+  "settings.aiLimits.tokensUnit": {},
+  "settings.aiLimits.tokensValueLabel": {},
+  "settings.aiLimits.unsupported": {},
+  "settings.aiLimits.usageMonth": {
+    "percent": "number"
+  },
+  "settings.aiLimits.usageToday": {
+    "percent": "number"
+  },
+  "settings.aiLimits.usdApprox": {
+    "amount": "string"
+  },
+  "settings.aiLimits.usdInactive": {},
+  "settings.aiLimits.usdLabel": {},
+  "settings.aiLimits.usdModelUnpriced": {},
+  "settings.aiLimits.usdNoUsageYet": {},
+  "settings.aiLimits.usdOfLimit": {
+    "limit": "string",
+    "spent": "string"
+  },
+  "settings.aiLimits.usdThisMonth": {
+    "spent": "string"
+  },
+  "settings.aiLimits.usdUnavailableNow": {},
+  "settings.aiLimits.usdUnit": {},
+  "settings.aiLimits.usdUnpricedRuns": {
+    "count": "number"
+  },
+  "settings.aiLimits.usdValueLabel": {},
   "settings.appearance.linkPreviewCompact": {},
   "settings.appearance.linkPreviewCompactHint": {},
   "settings.appearance.linkPreviewOff": {},
@@ -290,6 +500,75 @@ export const argumentSpecs = {
   "settings.profile.languagePartialNotice": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {},
+  "teamAi.helper.aliasesLine": {
+    "names": "string"
+  },
+  "teamAi.helper.aliasNotDerivable": {},
+  "teamAi.helper.aliasReserved": {},
+  "teamAi.helper.description": {},
+  "teamAi.helper.nameErrorForbidden": {},
+  "teamAi.helper.nameErrorInvalid": {},
+  "teamAi.helper.nameErrorOther": {},
+  "teamAi.helper.nameErrorReserved": {},
+  "teamAi.helper.nameErrorTaken": {},
+  "teamAi.helper.nameHint": {},
+  "teamAi.helper.nameLabel": {},
+  "teamAi.helper.nameSave": {},
+  "teamAi.helper.nameSaved": {},
+  "teamAi.helper.nameSaving": {},
+  "teamAi.helper.rolesForbidden": {},
+  "teamAi.helper.rolesHeading": {},
+  "teamAi.helper.rolesHint": {},
+  "teamAi.helper.rolesMemoryOff": {},
+  "teamAi.helper.rolesOffline": {},
+  "teamAi.helper.rolesSaveFailed": {},
+  "teamAi.phone.loadFailed": {},
+  "teamAi.phone.loading": {},
+  "teamAi.phone.rowTitle": {},
+  "teamAi.roles.alwaysOn": {},
+  "teamAi.roles.chatReadHint": {},
+  "teamAi.roles.chatReadName": {},
+  "teamAi.roles.codeHint": {},
+  "teamAi.roles.codeName": {},
+  "teamAi.roles.filesHint": {},
+  "teamAi.roles.filesName": {},
+  "teamAi.roles.inviteAccessHint": {},
+  "teamAi.roles.inviteAccessName": {},
+  "teamAi.roles.longResearchHint": {},
+  "teamAi.roles.longResearchName": {},
+  "teamAi.roles.memoryHint": {},
+  "teamAi.roles.memoryName": {},
+  "teamAi.roles.noticeBoth": {},
+  "teamAi.roles.noticeFiles": {},
+  "teamAi.roles.noticeMemory": {},
+  "teamAi.roles.workspaceAdminHint": {},
+  "teamAi.roles.workspaceAdminName": {},
+  "teamAi.stage.checkingLine": {},
+  "teamAi.stage.continue": {},
+  "teamAi.stage.doneDetail": {},
+  "teamAi.stage.doneLine": {},
+  "teamAi.stage.enable": {},
+  "teamAi.stage.enableFailedDetail": {},
+  "teamAi.stage.enableFailedLine": {},
+  "teamAi.stage.enabling": {},
+  "teamAi.stage.enablingLine": {},
+  "teamAi.stage.keyDetail": {},
+  "teamAi.stage.keyFailedLine": {},
+  "teamAi.stage.keyLine": {},
+  "teamAi.stage.later": {},
+  "teamAi.stage.loadErrorDetail": {},
+  "teamAi.stage.loadErrorLine": {},
+  "teamAi.stage.nameRequired": {},
+  "teamAi.stage.notOperatorDetail": {},
+  "teamAi.stage.notOperatorLine": {},
+  "teamAi.stage.offline": {},
+  "teamAi.stage.reentry": {},
+  "teamAi.stage.renameFailedNote": {},
+  "teamAi.stage.retry": {},
+  "teamAi.stage.setupDetail": {},
+  "teamAi.stage.setupLine": {},
+  "teamAi.stage.setupUnverifiedDetail": {},
+  "teamAi.stage.verifyingLine": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
   "timeline.thread.followOff": {},
@@ -445,6 +724,59 @@ export interface MessageArgs {
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.permissionNotice": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "settings.aiLimits.ceilingSearches": { limit: number };
+  "settings.aiLimits.ceilingTokens": { limit: number };
+  "settings.aiLimits.cleared": Record<string, never>;
+  "settings.aiLimits.description": Record<string, never>;
+  "settings.aiLimits.errorEmpty": Record<string, never>;
+  "settings.aiLimits.errorInvalidCount": Record<string, never>;
+  "settings.aiLimits.errorInvalidUsd": Record<string, never>;
+  "settings.aiLimits.errorOverCeiling": { max: number };
+  "settings.aiLimits.errorTooLarge": { max: number };
+  "settings.aiLimits.errorZero": Record<string, never>;
+  "settings.aiLimits.loadFailed": Record<string, never>;
+  "settings.aiLimits.loading": Record<string, never>;
+  "settings.aiLimits.notAdmin": Record<string, never>;
+  "settings.aiLimits.offline": Record<string, never>;
+  "settings.aiLimits.operatorOff": Record<string, never>;
+  "settings.aiLimits.operatorSearchOff": Record<string, never>;
+  "settings.aiLimits.pricingNote": Record<string, never>;
+  "settings.aiLimits.resetsDate": { date: string; time: string };
+  "settings.aiLimits.resetsDay": { day: string; time: string };
+  "settings.aiLimits.retry": Record<string, never>;
+  "settings.aiLimits.rowHint": Record<string, never>;
+  "settings.aiLimits.save": Record<string, never>;
+  "settings.aiLimits.saved": Record<string, never>;
+  "settings.aiLimits.saveFailed": Record<string, never>;
+  "settings.aiLimits.saveForbidden": Record<string, never>;
+  "settings.aiLimits.saving": Record<string, never>;
+  "settings.aiLimits.searchesLabel": Record<string, never>;
+  "settings.aiLimits.searchesOfLimit": { limit: number; used: number };
+  "settings.aiLimits.searchesToday": { used: number };
+  "settings.aiLimits.searchesUnit": Record<string, never>;
+  "settings.aiLimits.searchesValueLabel": Record<string, never>;
+  "settings.aiLimits.searchHint": Record<string, never>;
+  "settings.aiLimits.stopHint": Record<string, never>;
+  "settings.aiLimits.title": Record<string, never>;
+  "settings.aiLimits.tokensLabel": Record<string, never>;
+  "settings.aiLimits.tokensOfLimit": { limit: number; used: number };
+  "settings.aiLimits.tokensToday": { used: number };
+  "settings.aiLimits.tokensUnit": Record<string, never>;
+  "settings.aiLimits.tokensValueLabel": Record<string, never>;
+  "settings.aiLimits.unsupported": Record<string, never>;
+  "settings.aiLimits.usageMonth": { percent: number };
+  "settings.aiLimits.usageToday": { percent: number };
+  "settings.aiLimits.usdApprox": { amount: string };
+  "settings.aiLimits.usdInactive": Record<string, never>;
+  "settings.aiLimits.usdLabel": Record<string, never>;
+  "settings.aiLimits.usdModelUnpriced": Record<string, never>;
+  "settings.aiLimits.usdNoUsageYet": Record<string, never>;
+  "settings.aiLimits.usdOfLimit": { limit: string; spent: string };
+  "settings.aiLimits.usdThisMonth": { spent: string };
+  "settings.aiLimits.usdUnavailableNow": Record<string, never>;
+  "settings.aiLimits.usdUnit": Record<string, never>;
+  "settings.aiLimits.usdUnpricedRuns": { count: number };
+  "settings.aiLimits.usdValueLabel": Record<string, never>;
   "settings.appearance.linkPreviewCompact": Record<string, never>;
   "settings.appearance.linkPreviewCompactHint": Record<string, never>;
   "settings.appearance.linkPreviewOff": Record<string, never>;
@@ -461,6 +793,73 @@ export interface MessageArgs {
   "settings.profile.languagePartialNotice": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "teamAi.helper.aliasesLine": { names: string };
+  "teamAi.helper.aliasNotDerivable": Record<string, never>;
+  "teamAi.helper.aliasReserved": Record<string, never>;
+  "teamAi.helper.description": Record<string, never>;
+  "teamAi.helper.nameErrorForbidden": Record<string, never>;
+  "teamAi.helper.nameErrorInvalid": Record<string, never>;
+  "teamAi.helper.nameErrorOther": Record<string, never>;
+  "teamAi.helper.nameErrorReserved": Record<string, never>;
+  "teamAi.helper.nameErrorTaken": Record<string, never>;
+  "teamAi.helper.nameHint": Record<string, never>;
+  "teamAi.helper.nameLabel": Record<string, never>;
+  "teamAi.helper.nameSave": Record<string, never>;
+  "teamAi.helper.nameSaved": Record<string, never>;
+  "teamAi.helper.nameSaving": Record<string, never>;
+  "teamAi.helper.rolesForbidden": Record<string, never>;
+  "teamAi.helper.rolesHeading": Record<string, never>;
+  "teamAi.helper.rolesHint": Record<string, never>;
+  "teamAi.helper.rolesMemoryOff": Record<string, never>;
+  "teamAi.helper.rolesOffline": Record<string, never>;
+  "teamAi.helper.rolesSaveFailed": Record<string, never>;
+  "teamAi.phone.loadFailed": Record<string, never>;
+  "teamAi.phone.loading": Record<string, never>;
+  "teamAi.phone.rowTitle": Record<string, never>;
+  "teamAi.roles.alwaysOn": Record<string, never>;
+  "teamAi.roles.chatReadHint": Record<string, never>;
+  "teamAi.roles.chatReadName": Record<string, never>;
+  "teamAi.roles.codeHint": Record<string, never>;
+  "teamAi.roles.codeName": Record<string, never>;
+  "teamAi.roles.filesHint": Record<string, never>;
+  "teamAi.roles.filesName": Record<string, never>;
+  "teamAi.roles.inviteAccessHint": Record<string, never>;
+  "teamAi.roles.inviteAccessName": Record<string, never>;
+  "teamAi.roles.longResearchHint": Record<string, never>;
+  "teamAi.roles.longResearchName": Record<string, never>;
+  "teamAi.roles.memoryHint": Record<string, never>;
+  "teamAi.roles.memoryName": Record<string, never>;
+  "teamAi.roles.noticeBoth": Record<string, never>;
+  "teamAi.roles.noticeFiles": Record<string, never>;
+  "teamAi.roles.noticeMemory": Record<string, never>;
+  "teamAi.roles.workspaceAdminHint": Record<string, never>;
+  "teamAi.roles.workspaceAdminName": Record<string, never>;
+  "teamAi.stage.checkingLine": Record<string, never>;
+  "teamAi.stage.continue": Record<string, never>;
+  "teamAi.stage.doneDetail": Record<string, never>;
+  "teamAi.stage.doneLine": Record<string, never>;
+  "teamAi.stage.enable": Record<string, never>;
+  "teamAi.stage.enableFailedDetail": Record<string, never>;
+  "teamAi.stage.enableFailedLine": Record<string, never>;
+  "teamAi.stage.enabling": Record<string, never>;
+  "teamAi.stage.enablingLine": Record<string, never>;
+  "teamAi.stage.keyDetail": Record<string, never>;
+  "teamAi.stage.keyFailedLine": Record<string, never>;
+  "teamAi.stage.keyLine": Record<string, never>;
+  "teamAi.stage.later": Record<string, never>;
+  "teamAi.stage.loadErrorDetail": Record<string, never>;
+  "teamAi.stage.loadErrorLine": Record<string, never>;
+  "teamAi.stage.nameRequired": Record<string, never>;
+  "teamAi.stage.notOperatorDetail": Record<string, never>;
+  "teamAi.stage.notOperatorLine": Record<string, never>;
+  "teamAi.stage.offline": Record<string, never>;
+  "teamAi.stage.reentry": Record<string, never>;
+  "teamAi.stage.renameFailedNote": Record<string, never>;
+  "teamAi.stage.retry": Record<string, never>;
+  "teamAi.stage.setupDetail": Record<string, never>;
+  "teamAi.stage.setupLine": Record<string, never>;
+  "teamAi.stage.setupUnverifiedDetail": Record<string, never>;
+  "teamAi.stage.verifyingLine": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
   "timeline.thread.followOff": Record<string, never>;

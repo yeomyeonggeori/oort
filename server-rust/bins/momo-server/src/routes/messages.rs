@@ -137,6 +137,18 @@ pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
         || matches!(key, "action" | "result" | "expression")
 }
 
+/// The value-conditioned half of the server-owned rule: a prop whose **key** is ordinary
+/// (`kind`) but whose **value** is a marker only the server writes. ADR-0201 증보 v3 B4-2 (#4965,
+/// r1 review Low-1): `team_ai_invite_link` is the helper's invite-link message — a model-bound
+/// projection hides it, the team memory skips it, a notification reads `props.preview` off it — so
+/// a person or an external sender who could write it could hide their own message from an agent's
+/// context and the team memory, or dress a line as the helper's. A REST send
+/// ([`props_value`]) and a webhook (`webhook_props`) are both held to it, beside
+/// [`is_server_owned_props_key`] and `dm_agent_membership` (REST only, #4980).
+pub(crate) fn is_server_owned_props_entry(key: &str, value: &str) -> bool {
+    key == "kind" && value == momo_messaging::invite_link::PROPS_KIND
+}
+
 /// `momo.instruction` — see [`crate::routes::work_instructions`].
 const INSTRUCTION_PROPS_KEY: &str = crate::routes::work_instructions::PROPS_KEY;
 
@@ -163,6 +175,7 @@ fn props_value(props: Option<&std::collections::BTreeMap<String, String>>) -> Va
     if let Some(props) = props {
         for (key, value) in props {
             if is_server_owned_props_key(key)
+                || is_server_owned_props_entry(key, value)
                 || momo_webhook::is_github_owned_prop(key, value)
                 || (key == "kind" && value == "dm_agent_membership")
             {
@@ -1999,6 +2012,44 @@ mod tests {
         props.insert("note".to_string(), "kept".to_string());
         let value = props_value(Some(&props));
         assert_eq!(value, serde_json::json!({"note": "kept"}));
+    }
+
+    /// #4965 (r1 review Low-1) — the helper's invite-link marker is the server's. `kind` is an
+    /// ordinary key, so it is the **value** `team_ai_invite_link` that is stripped: what is stored
+    /// must not read as a marked message (the property every consumer asks via
+    /// `invite_link::is_marked`), and `announce` — the quiet-line key that marker travels with —
+    /// goes too. The two controls make the strip the value's and the key's, not a blanket:
+    /// another `kind` stays, and the marker's value under another key stays.
+    #[test]
+    fn client_props_cannot_forge_the_helpers_invite_link_marker() {
+        let mut props = BTreeMap::new();
+        props.insert("kind".to_string(), "team_ai_invite_link".to_string());
+        props.insert("preview".to_string(), "forged preview".to_string());
+        props.insert("announce".to_string(), "true".to_string());
+        props.insert("note".to_string(), "kept".to_string());
+        let value = props_value(Some(&props));
+        assert!(
+            !momo_messaging::invite_link::is_marked(&value),
+            "a client's message must not read as the helper's link message: {value}"
+        );
+        assert!(value.get("kind").is_none(), "{value}");
+        assert!(value.get("announce").is_none(), "{value}");
+        assert_eq!(value["note"], Value::String("kept".into()));
+
+        let mut other_kind = BTreeMap::new();
+        other_kind.insert("kind".to_string(), "deploy_notice".to_string());
+        assert_eq!(
+            props_value(Some(&other_kind))["kind"],
+            Value::String("deploy_notice".into()),
+            "only the helper's marker value is the server's"
+        );
+        let mut other_key = BTreeMap::new();
+        other_key.insert("label".to_string(), "team_ai_invite_link".to_string());
+        assert_eq!(
+            props_value(Some(&other_key))["label"],
+            Value::String("team_ai_invite_link".into()),
+            "the value alone, under another key, is an ordinary string"
+        );
     }
 
     #[test]

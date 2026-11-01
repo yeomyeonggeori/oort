@@ -49,6 +49,7 @@ import {
   type Palette,
 } from '../../design/tokens';
 import {haptics} from '../../lib/haptics';
+import {useDismissOnEntry} from '../../lib/useDismissOnEntry';
 import {StageHero} from '../attachments/StageHero';
 import {phoneRequestBundle} from '../conversation/requestLoop';
 import {
@@ -100,6 +101,10 @@ export function DecisionStage({
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 알림이 새 입구로 들어오면 걷는다(#4667). 영웅 모션으로 돌아가는 `hero.close()` 가 아니라 부모의 `onClose` 다 — 그 모션은
+  // 무대를 연 카드로 돌아가는 것인데, 알림은 그 카드가 있는 자리에서 사람을 데려가는 입구다. 진행 중인 결정은 서버에 이미
+  // 나갔고 영수증은 무대 밖(`onSettled`)에서 받는다.
+  useDismissOnEntry(onClose);
   const [receipts, setReceipts] = useState<
     ReadonlyMap<string, ApprovalReceipt>
   >(new Map());
