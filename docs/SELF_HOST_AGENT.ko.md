@@ -2010,6 +2010,19 @@ agent:
 삭제하세요. 워크스페이스 하나만 Hermes 하나에 연결하세요(여러 워크스페이스의
 대화가 한 볼륨에 섞여요).
 
+볼륨 `.env`에는 허용 목록이 있어요(#4950). Hermes는 게이트가 끝난 뒤 이 파일의 모든 이름을
+적용하므로, `lockgate.py`는 파일에 이것만 두게 해요. 운영자가 넣는 모델 키
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`), 그리고 Hermes가 새 볼륨의 첫 기동에 써 넣는
+템플릿 11줄(나온 그대로)이에요. 연결 모드 Hermes의 Google 클라이언트 쌍
+(`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`)은 서비스 변수라서 이 파일에는 두지 않아요.
+Hermes는 이 파일을 판독기 둘로 읽고 게이트도 둘의 눈으로 판정해요. 값은 한 줄이어야 하고(값 안의
+줄바꿈은 거절해요), 어느 판독기든 읽는 이름은 목록에 있어야 해요. 그 밖의 이름은 값이 비어 있어도
+이름만 대고 시작을 거절해요(게이트는 값을 출력하지 않아요). 옆에 `.op.env`가 있거나
+`/opt/data/profiles/` 아래에 항목이 하나라도 있어도 거절해요(폴더가 없거나 비어 있는 것은 괜찮아요). 이미 도는
+Hermes의 게이트를 바꾸기 전에 그 `.env`의 이름만 읽어서
+(`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env`는
+이름만 보여줘요) 목록에 없는 줄을 지우세요.
+
 **제로 베이스 지름길 (#4072).** 1~7번은 이제 템플릿과 생성기가 대신 해요. 잠금을
 읽는 일과 모델 키는 여전히 운영자 몫이에요.
 
@@ -2042,20 +2055,21 @@ agent:
   Hermes가 만든 그림을 Hermes의 답에서 읽어 와요. 그래서 문은 **둘 다 켜야** 열려요.
   Hermes 쪽은 `HERMES_MEDIA_DELIVERY_STRICT=1`이에요(Hermes의 엄격한 미디어 전달이에요.
   꺼져 있으면 답에 적힌 `MEDIA:` 줄이 읽을 수 있는 아무 파일이나 내줘요). 템플릿과 compose가
-  알아서 넣고, `lockgate.py`는 그림 도구가 켜진 Hermes에 이 값이 정확히 `1`이 아니면
-  시작을 거절해요(볼륨 `.env`에 이 이름이 있어도 거절해요). 워커 쪽은 agent-worker의
+  알아서 넣고, `lockgate.py`는 이 값이 정확히 `1`이 아니면 그림 도구와 상관없이 어떤
+  모드에서도 시작을 거절해요(볼륨 `.env`에 이 이름이 있어도 거절해요). 워커 쪽은 agent-worker의
   `OORT_HOSTED_MEDIA_STRICT=1`이에요. 워커가 연결하는 Hermes가 그 엄격한 Hermes라는
   운영자의 확인이에요. 템플릿과 compose는 이 값을 **비워서** 보내요. 그래서 기본은 문이
   닫혀 있고, 사진 메시지는 오류 카드 없이 평소 대화로 처리돼요. Hermes 서비스가 새
   게이트로 돌고 있을 때만 켜세요. 기존 Railway 프로젝트는 이 순서로 고쳐요. ① hermes에
   `HERMES_MEDIA_DELIVERY_STRICT=1`을 먼저 더해요. ② 그다음 `HERMES_LOCKGATE_B64`와 시작
   명령의 체크섬을 함께 다시 배포해요(새 게이트는 ①이 없으면 Hermes를 띄우지 않으니 ②만
-  하면 에이전트가 멈춰요). ③ 배포 로그의 `LOCKGATE` 줄에서 `image_guard` 안의
+  하면 에이전트가 멈춰요). ③ 배포 로그의 `LOCKGATE` 줄에서
   `"media_strict": true`가 보이면 마지막으로 `OORT_HOSTED_MEDIA_STRICT=1`을 켜요.
   정확히 `1`일 때만 문이 열려요.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 여전히 **운영자 본인의 선언**이에요. 두
   배포 모양 모두 게이트가 뒷받침하지만, 설정·게이트·시작 명령을 고치면 그 뒷받침은
-  운영자가 직접 책임져요.
+  운영자가 직접 책임져요(게이트는 자기 표에 sha256이 없는 설정을 거절해요, #4935:
+  `python3 infra/hermes/render_model_config.py --catalog`).
 - **모델 인증은 이 작업 밖이에요**(#4073). 모델 없이도 Hermes는 뜨고 카드도 보여요.
   모델을 정하기 전까지 대화 한 번은 「Hermes가 아직 모델 provider에 연결되지 않았다」
   고 답해요.

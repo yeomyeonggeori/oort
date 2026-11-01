@@ -421,8 +421,10 @@ scripts/self_host_env.sh --compose up -d --wait
   반복하고 listen하지 않아서, 프로브는 잠기지 않은 Hermes 대신 `unreachable`(연결 불가)을
   보고해요.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 운영자 본인의 선언이고 여기서는 게이트가
-  뒷받침해요. `infra/hermes/config.yaml`이나 시작 명령을 고치면 그 뒷받침은 운영자가
-  직접 책임져요.
+  뒷받침해요. 게이트는 자기 표에 있는 설정 파일만 받아요(기본 설정과, 모델 조각마다 하나씩인
+  연결 모드 설정이에요. `infra/hermes/render_model_config.py --catalog`가 목록을 보여줘요, #4935).
+  바이트가 하나라도 다른 설정은 시작하지 않아요. `infra/hermes/config.yaml`이나 시작 명령을 고치면
+  그 뒷받침과 게이트의 표는 운영자가 직접 책임져요.
 - Hermes의 데이터(`hermesdata` 볼륨 → `/opt/data`)는 oort DB와 `oort backup` 밖에
   있어요. 백업은 직접 하세요. `down -v`는 이 볼륨도 지워요.
 - 모델 인증은 별도 단계예요(#4073). 없어도 카드는 보이고, 대화 한 번은 「Hermes가
