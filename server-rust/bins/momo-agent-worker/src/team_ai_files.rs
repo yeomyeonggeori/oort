@@ -143,9 +143,11 @@ impl AgentWorker {
             Err(reason) => return AttachmentRead::said(outcome_of_failed_read(reason)),
         };
         // Whichever reader gave them, the bytes are held to the row once more: exactly the declared
-        // length (a row that disagrees with its file is the server's to answer for), and what the declared
-        // type says — the archive path has no route to have checked. Bytes that are not what their type
-        // says are a permanent property of this file (#4970 review L1).
+        // length, and what the declared type says. This is where the **archive** path is judged — it has
+        // no route to have checked: there a row that disagrees with its file is the server's to answer for,
+        // and bytes that are not what their type says are a permanent property of this file (#4970 review
+        // L1). The api path does not get this far with either: its route has already refused both with its
+        // one 404 (see `outcome_of_failed_read`; ADR-0151 증보 4 남는 위험 7).
         if i64::try_from(bytes.len()).ok() != Some(target.size_bytes) {
             return AttachmentRead::said(files::UNREADABLE);
         }
@@ -205,9 +207,14 @@ impl AgentWorker {
 ///
 /// * `attachment_not_available` — the address could not be minted: the file went away since the lookup,
 ///   which is the answer a file that was never there gets;
-/// * `attachment_not_readable` — the address was given and the api then refused the bytes (it sniffs them):
-///   the file is not what its type says. A permanent property of the file;
-/// * anything else is the archive or the api failing — a hiccup.
+/// * `attachment_not_readable` — the address was given and the api's route then answered its one 404 (#4970
+///   review R2-2). Usually that is the route's sniff: the file is not what its type says, a permanent property
+///   of the file, and that is what is said. The same 404 also covers what the route does not tell apart: the
+///   file deleted since the address was given, the archive failing behind the route, a row that disagrees
+///   with its file. Those are not the file's fault and are told as if they were — known, and written down in
+///   ADR-0151 증보 4;
+/// * anything else is the archive or the api failing — a hiccup. (The archive read **directly** gives
+///   `drive_unavailable` for the same archive failure, so the same failure is told differently on the two paths.)
 fn outcome_of_failed_read(reason: &str) -> ToolOutcome {
     match reason {
         "attachment_not_available" => ToolOutcome::NotFound,
