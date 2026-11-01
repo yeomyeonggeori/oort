@@ -79,7 +79,7 @@ use momo_agent::{
     list_active_run_progress_base_in_tx, list_agent_run_summaries_in_tx,
     list_channel_run_progress_base_in_tx, list_channel_work_runs_in_tx, list_run_ledger_in_tx,
     load_agent_run_in_tx, load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx,
-    lock_run_for_cancel_in_tx, redact_unseen_approval_ids_in_tx, validated_active_run_limit,
+    lock_run_for_cancel_in_tx, redact_unseen_approvals_in_tx, validated_active_run_limit,
     validated_run_limit, visible_active_run_counts_in_tx, visible_channels_in_tx,
     workspace_active_run_totals_in_tx, ActiveRunScope, AgentRunSummaryRow, JobFacts, NewAgentRun,
     QueueEntry, RequestedRouting, RunEventInclude, RunProgressBase, RunProgressRow, RunStatus,
@@ -1120,9 +1120,11 @@ pub async fn active(
 /// this workspace, and a run whose channel the caller is not an active member of,
 /// are the same **404** — the answer is no existence oracle.
 ///
-/// A row's `approvalId` is told to a caller only under the rule `AgentRunProgress.approvalId`
-/// follows: they are an active member of the channel **the approval** was raised in, which
-/// need not be the run's (#5007). Any other row keeps everything but the id.
+/// A row's `approvalId` — and with it that row's `actorMemberId` and `code` — is told to a
+/// caller only under the rule `AgentRunProgress.approvalId` follows: they are an active member
+/// of the channel **the approval** was raised in, which need not be the run's (#5007). The row
+/// itself (`ordinal`, `kind`, `createdAtMs`) stays, and a row that names no approval is as it
+/// was.
 pub async fn events(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -1141,7 +1143,7 @@ pub async fn events(
             Box::pin(async move {
                 match list_run_ledger_in_tx(conn, workspace_id, run_id, member_id, include).await? {
                     Some(mut ledger) => {
-                        redact_unseen_approval_ids_in_tx(
+                        redact_unseen_approvals_in_tx(
                             conn,
                             workspace_id,
                             member_id,

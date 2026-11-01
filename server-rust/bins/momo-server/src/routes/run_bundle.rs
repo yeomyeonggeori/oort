@@ -38,7 +38,7 @@ use chrono::{DateTime, Utc};
 use momo_agent::approval::{
     effective_status, is_active_human_member_in_tx, run_approval_facts_in_tx,
 };
-use momo_agent::visible_channels_in_tx;
+use momo_agent::{approval_is_named_to_viewer, visible_channels_in_tx};
 use momo_db::{DbError, PgConnection};
 use momo_push::{may_approve_in_tx, ApprovalCard};
 use uuid::Uuid;
@@ -72,7 +72,7 @@ pub(crate) async fn run_bundles_in_tx(
     let mut viewer_is_human_member: Option<bool> = None;
     let mut bundles = HashMap::with_capacity(facts.len());
     for fact in facts {
-        if !visible.contains(&fact.channel_id) {
+        if !approval_is_named_to_viewer(Some(fact.channel_id), &visible) {
             continue;
         }
         let status = effective_status(&fact.status, fact.expires_at, now).to_string();

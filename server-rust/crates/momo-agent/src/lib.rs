@@ -334,7 +334,7 @@ pub use run_event::{
 };
 pub use run_progress::{
     approval_is_named_to_viewer, assemble_run_progress, list_channel_run_progress_base_in_tx,
-    list_run_events_in_tx, list_run_ledger_in_tx, redact_unseen_approval_ids_in_tx,
+    list_run_events_in_tx, list_run_ledger_in_tx, redact_unseen_approvals_in_tx,
     visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry, RunEventInclude,
     RunEventRow, RunLedger, RunPhase, RunProgressBase, RunProgressRow, ToolTallyRow,
 };
