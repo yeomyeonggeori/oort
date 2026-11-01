@@ -89,6 +89,9 @@ pub mod search;
 pub mod self_media;
 /// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
 pub mod sidebar_prefs;
+/// ADR-0201 증보 v3 B10 / #4966 — the team AI's aliases follow its display name
+/// (`sync_team_ai_aliases_in_tx`, migration 166).
+pub mod team_ai_alias;
 /// ADR-0206 증보 1 / #4889 — who follows which thread (`thread_follow`, migration 164).
 pub mod thread_follow;
 pub mod workspace_avatar;

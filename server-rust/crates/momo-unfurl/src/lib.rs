@@ -28,6 +28,7 @@ pub mod extract;
 pub mod fetch;
 pub mod normalize;
 pub mod parse;
+pub mod preview;
 pub mod proxy;
 pub mod remove;
 pub mod settings;
@@ -43,11 +44,15 @@ pub use fetch::{
 };
 pub use normalize::normalize_url;
 pub use parse::parse_card;
+pub use preview::{
+    fetch_preview, preview_icon_path, preview_image_path, PreviewCache, PreviewEntry, PreviewKey,
+    PreviewLimits, PreviewOutcome, Previewed,
+};
 pub use proxy::{
     fetch_record_icon, fetch_record_image, icon_path, image_path, proxy_goes_outbound,
     proxy_image_in_tx, CachedImage, ImageCache, ProxyError, ProxyImage, ProxyLimits, ProxySlot,
 };
-pub use remove::{remove_unfurls_in_tx, RemoveOutcome};
+pub use remove::{plant_tombstone_in_tx, remove_unfurls_in_tx, RemoveOutcome};
 pub use settings::{load_setting_in_tx, upsert_setting_in_tx, UnfurlSetting};
 pub use source::{
     fetch_source, parse_source_url, SourceFailure, SourceUrl, SourceUrlError, SOURCE_DEADLINE,
