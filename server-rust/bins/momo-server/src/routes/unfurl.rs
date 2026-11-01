@@ -412,17 +412,25 @@ fn ok_preview(workspace_id: Uuid, entry: &PreviewEntry) -> UnfurlPreviewDto {
 /// In the order that keeps every refusal ahead of the work it would have caused:
 ///
 /// 1. the caller is a person, the address is an http(s) address of a sane size — shape only, the
-///    same answer for everyone, before a connection is taken;
-/// 2. one short tenant transaction: an **active workspace member** who is a **current member of
-///    that channel** (the guest rule is the send's), and the workspace's switch (D4);
+///    same answer for everyone, before a connection is taken. A caller that is not a person does
+///    not get this far: an agent bearer or a developer token is a 403 and a work host's
+///    signature a 401, all three at the door (none has this route on its table);
+///    [`require_human`] is this handler's own second layer;
+/// 2. one short tenant transaction: an **active workspace member** — a `workspace_membership`
+///    row, `member.status = 'active'` and `member.deleted_at` unset, whatever the role
+///    (`momo_auth::active_workspace_role`) — who is a **current member of that channel** (the
+///    guest rule is the send's), and the workspace's switch (D4);
 /// 3. both switches (the instance's and the workspace's) have to be on, or nothing is fetched and
 ///    the answer is `failed`;
 /// 4. an answer this server already holds for this member and address is returned, for free;
 /// 5. otherwise one unit of the member's preview budget, then a place among the fetches in flight
 ///    and the trip itself ([`fetch_preview`]), outside any transaction. A place that is not there
-///    gives the unit back.
+///    gives the unit back; a trip that ends in `failed` does not (the site was asked, and the next
+///    ask for that address is answered from memory, free).
 ///
-/// Nothing is written to the database and nothing here logs the address, a query or a body.
+/// No part of a preview is written to the database (the address, the card and the id live in this
+/// process only), and nothing here logs the address, a query or a body. The one row this route can
+/// cause is the budget's own audit row for a first refusal (`rate_limit.exceeded`, D20).
 pub async fn preview(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -447,8 +455,8 @@ pub async fn preview(
             let active = momo_auth::active_workspace_role(conn, workspace_id, member_id)
                 .await?
                 .is_some();
-            // One refusal for "not in the workspace", "not in the channel" and "no such channel":
-            // the answer does not say which channels exist.
+            // One refusal for "not an active member of the workspace", "not in the channel" and
+            // "no such channel": the answer does not say which channels exist.
             if !active || !is_channel_member(conn, channel_id, member_id).await? {
                 return Ok(Err(ApiError::forbidden("not a channel member")));
             }
@@ -491,6 +499,8 @@ pub async fn preview(
     .await;
     match previewed {
         Previewed::Entry(entry) => Ok(Json(ok_preview(workspace_id, &entry)).into_response()),
+        // The site was asked, so the unit stays spent: only a missing place gives it back
+        // (`a_failed_preview_spends_the_budget_like_a_good_one`).
         Previewed::Failed => Ok(Json(failed_preview(url_key)).into_response()),
         // No place for the fetch (the member's share, the process's, or a name lookup's). Nothing
         // left the building, so the unit this request spent is given back.
@@ -525,6 +535,11 @@ pub async fn preview_icon(
 /// that is unknown, run out, another member's or another workspace's is the same 404 (a `{ws}`
 /// that is not the caller's workspace is the usual 403 first). From there it is the stored card's
 /// proxy, unchanged ([`serve_remote_image`]).
+///
+/// Nothing here asks the database whether the member is still active: suspension, removal and
+/// leaving the workspace each revoke every token the member holds (`revoke_member_tokens_in_tx`),
+/// so such a member is a 401 at the door and never gets this far. What this route itself checks is
+/// the entry — its workspace, its owner and its age.
 async fn serve_preview_image(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
