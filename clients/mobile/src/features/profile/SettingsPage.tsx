@@ -108,6 +108,11 @@ import {
 import {useDevToolsEntry} from './devTools';
 import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSettings';
 import {LinkPreviewSettingRow, LinkPreviewSettingsPage} from './LinkPreviewSettings';
+import {
+  AI_LIMITS_PAGE,
+  TeamAiLimitsSettingRow,
+  TeamAiLimitsSettingsPage,
+} from './TeamAiLimitsSettings';
 
 // =============================================================================
 // 「설정」 페이지 — 홈 머리의 내 얼굴이 여는 전체 화면 (#4457, owner 2026-10-25; 옛 `ProfileSheet` 의 자리).
@@ -175,6 +180,8 @@ import {LinkPreviewSettingRow, LinkPreviewSettingsPage} from './LinkPreviewSetti
 export type SettingsSubPage =
   | 'language'
   | 'linkPreview'
+  // 「사용 한도」 장(#5026). 이름은 `TeamAiLimitsSettings` 가 하이픈 낱말로 짓고 JSX 밖에서 선언한다(직접 문구 장부).
+  | typeof AI_LIMITS_PAGE
   | 'usage'
   | 'theme'
   | 'deviceKey'
@@ -187,7 +194,7 @@ export type SettingsPageName = 'main' | SettingsSubPage;
 /** 안쪽 장의 첫 요소 위 여백 — 설정 첫 장·시트와 같은 `space.md`. 스타일(`subContent`)과 기한 장의 펼침 셈(`revealAt`)이 함께 읽는다. */
 const SUB_PAGE_TOP = space.md;
 
-const SUB_PAGE_TITLE: Record<Exclude<SettingsSubPage, 'language' | 'linkPreview'>, string> = {
+const SUB_PAGE_TITLE: Record<Exclude<SettingsSubPage, 'language' | 'linkPreview' | typeof AI_LIMITS_PAGE>, string> = {
   usage: AGENT_USAGE_COPY.report,
   theme: '테마',
   deviceKey: DEVICE_KEY_TITLE,
@@ -269,6 +276,7 @@ export function SettingsPage({
             onOpenTheme={() => setPage('theme')}
             onOpenLanguage={() => setPage('language')}
             onOpenLinkPreview={() => setPage('linkPreview')}
+            onOpenAiLimits={() => setPage(AI_LIMITS_PAGE)}
             onOpenStatus={() => setStatusOpen(true)}
             onOpenDeviceKey={() => setPage('deviceKey')}
             onOpenDevTools={() => setPage('devTools')}
@@ -294,6 +302,8 @@ export function SettingsPage({
             <LanguageSettingsPage onBack={backToMain} />
           ) : page === 'linkPreview' ? (
             <LinkPreviewSettingsPage onBack={backToMain} />
+          ) : page === AI_LIMITS_PAGE ? (
+            <TeamAiLimitsSettingsPage workspaceId={workspaceId} onBack={backToMain} />
           ) : (
             <SubPage
               page={page}
@@ -326,7 +336,7 @@ function SubPage({
   directory,
   onBack,
 }: {
-  page: Exclude<SettingsSubPage, 'language' | 'linkPreview'>;
+  page: Exclude<SettingsSubPage, 'language' | 'linkPreview' | typeof AI_LIMITS_PAGE>;
   workspaceId: string;
   member: Member;
   directory: Directory;
@@ -437,6 +447,7 @@ export function SettingsContent({
   onOpenTheme,
   onOpenLanguage,
   onOpenLinkPreview,
+  onOpenAiLimits,
   onOpenStatus,
   onOpenDeviceKey,
   onOpenDevTools,
@@ -456,6 +467,8 @@ export function SettingsContent({
   onOpenLanguage?: () => void;
   /** 「링크 미리보기」 장(작게·크게·끄기, #4883)을 연다. 없으면 행이 서지 않는다(캡처 하네스). */
   onOpenLinkPreview?: () => void;
+  /** 「사용 한도」 장(#5026)을 연다. 없으면 행이 서지 않는다(캡처 하네스). 소유자·관리자에게만 선다. */
+  onOpenAiLimits?: () => void;
   /** 「상태 설정」 바텀시트를 연다. */
   onOpenStatus: () => void;
   onOpenDeviceKey: () => void;
@@ -968,9 +981,12 @@ export function SettingsContent({
         ) : null}
       </GroupCard>
 
-      {onOpenUsage && (memberFor(directory, member.id)?.role === 'owner' || memberFor(directory, member.id)?.role === 'admin') ? (
+      {(onOpenUsage || onOpenAiLimits) && (memberFor(directory, member.id)?.role === 'owner' || memberFor(directory, member.id)?.role === 'admin') ? (
         <GroupCard label="관리자 설정">
-          <ListRow title={AGENT_USAGE_COPY.report} accessory="chevron" onPress={onOpenUsage} testID="settings-agent-usage" />
+          {onOpenUsage ? (
+            <ListRow title={AGENT_USAGE_COPY.report} accessory="chevron" onPress={onOpenUsage} testID="settings-agent-usage" />
+          ) : null}
+          {onOpenAiLimits ? <TeamAiLimitsSettingRow onPress={onOpenAiLimits} /> : null}
         </GroupCard>
       ) : null}
 
