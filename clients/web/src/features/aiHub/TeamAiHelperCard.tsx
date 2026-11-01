@@ -18,6 +18,7 @@ import {
   patchTeamAiRoles,
   readTeamAiRoles,
   teamAiRolesErrorKind,
+  teamAiSettingsToggleNotice,
   type TeamAiBundle,
   type TeamAiRoles,
   type TeamAiSwitchableBundle,
@@ -50,7 +51,9 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
 //    저장 뒤 설정 가방을 다시 읽어 부르는 이름 줄을 새로 그린다.
 //  - 역할: `PATCH …/settings {team_ai_roles: {묶음: 불리언}}`. 누르는 즉시 그 묶음 하나만 저장한다
 //    (서버가 한 단계 아래로 병합하므로 다른 묶음은 움직이지 않는다). 파일·기억은 켜면 내용이
-//    공급자로 가므로 그 행 아래에 고지를 늘 보인다.
+//    공급자로 가므로 그 행 아래에 고지를 늘 보인다. 그 둘을 **켤 때** 같은 본문에 고지 기록
+//    (`team_ai_roles_notice`)을 실어 서버가 스위치와 한 트랜잭션에 남긴다(#5040) — 끄거나 고지 없는
+//    묶음이면 싣지 않는다.
 //
 // **확인된 뒤에만 선다**(`TeamAiSetting`·`TeamAiNextStepCard`와 같은 규율): 설정 가방을 읽지 못하면
 // (관리자가 아님, 옛 서버) 아무것도 그리지 않고, 도우미가 꺼져 있으면 서지 않는다(켜는 길은 다음 단계
@@ -124,7 +127,11 @@ export function TeamAiHelperCard({ workspaceId }: { workspaceId: string }) {
   const [pending, setPending] = useState<{ bundle: TeamAiSwitchableBundle; next: boolean } | null>(null);
   const toggle = useMutation({
     mutationFn: (change: { bundle: TeamAiSwitchableBundle; next: boolean }) =>
-      patchTeamAiRoles(workspaceId, { [change.bundle]: change.next }),
+      patchTeamAiRoles(
+        workspaceId,
+        { [change.bundle]: change.next },
+        teamAiSettingsToggleNotice(change.bundle, change.next)
+      ),
     onMutate: (change) => setPending(change),
     onSuccess: (next) => client.setQueryData(bagKey, next),
     onSettled: () => setPending(null),

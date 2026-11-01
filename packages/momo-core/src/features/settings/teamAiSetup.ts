@@ -10,7 +10,11 @@
 //      묶음만 `false`로 보낸다. 켜기보다 먼저 쓰는 이유: 끈 묶음이 있는 도우미는 처음 답하는
 //      순간부터 그 일을 하지 않아야 한다(켠 뒤에 끄면 그 사이에 한 번은 켜진 채로 돈다).
 //   3. 도우미 켜기(`PATCH …/settings {team_ai_fast_path: true}`) — 같은 트랜잭션에서 멤버와
-//      기본 별칭이 생긴다. 멤버 id는 응답 가방의 `team_ai_agent_member_id`다.
+//      기본 별칭이 생긴다. 멤버 id는 응답 가방의 `team_ai_agent_member_id`다. **고지 기록(#5040)이
+//      이 요청에 실린다**: 관리자는 최종 선택에서 켜진 파일·기억의 고지 줄을 보고 「도우미 켜기」를
+//      눌렀고(역할 단계를 마치는 순간), 역할이 기본(모두 켬)이면 역할 PATCH가 아예 없어서 켜는
+//      요청이 그 기록의 자리다. 파일·기억을 모두 껐으면 보인 줄이 없어 싣지 않는다. 기록이 없다고
+//      켜기를 막지 않는다 — 서버는 필드가 없는 요청도 그대로 받는다(옛 클라이언트).
 //   4. 이름(`PATCH …/agents/{agent} {displayName}`) — 기본 이름과 다를 때만. 멤버는 켠 뒤에야
 //      있으므로 마지막이다. 새 이름이 별칭에 더해지는 것은 서버가 같은 트랜잭션에서 한다.
 //
@@ -32,9 +36,12 @@ import {
   defaultTeamAiRoles,
   isTeamAiRolesChangeEmpty,
   patchTeamAiRoles,
+  TEAM_AI_NOTICE_BUNDLES,
   teamAiRolesChange,
+  teamAiRolesNotice,
   type TeamAiRoles,
   type TeamAiRolesChange,
+  type TeamAiRolesNotice,
 } from "./teamAiRoles";
 import {
   fetchWorkspaceSettingsBag,
@@ -93,7 +100,8 @@ export interface TeamAiSetupResult {
 export interface TeamAiSetupDeps {
   putDefaultAi: (linkPosition: number) => Promise<unknown>;
   patchRoles: (workspaceId: string, change: TeamAiRolesChange) => Promise<unknown>;
-  enable: (workspaceId: string) => Promise<unknown>;
+  /** 켜기. `notice`는 이 선택에서 보인 고지 줄의 기록이고(없으면 null), 켜는 요청에 함께 실린다. */
+  enable: (workspaceId: string, notice: TeamAiRolesNotice | null) => Promise<unknown>;
   rename: (workspaceId: string, memberId: string, name: string) => Promise<unknown>;
   readBag: (workspaceId: string) => Promise<unknown>;
 }
@@ -102,7 +110,9 @@ const REAL_DEPS: TeamAiSetupDeps = {
   putDefaultAi: (linkPosition) =>
     putProviderDefaultAi("teamAgent", { linkPosition, modelId: null }),
   patchRoles: patchTeamAiRoles,
-  enable: (workspaceId) => setTeamAiSwitch(workspaceId, true),
+  // 기록이 없으면 두 인자 호출 그대로다: 고지 줄을 보이지 않은 켜기와 같은 본문이 나간다.
+  enable: (workspaceId, notice) =>
+    notice === null ? setTeamAiSwitch(workspaceId, true) : setTeamAiSwitch(workspaceId, true, notice),
   rename: renameAgent,
   readBag: fetchWorkspaceSettingsBag,
 };
@@ -138,9 +148,15 @@ export async function runTeamAiSetup(
   }
 
   if (!progress.done.has("enable")) {
+    // 고지 기록(#5040): 최종 선택에서 켜진 파일·기억의 고지 줄을 보이고 켜는 순간이다. 켜는 요청과
+    // 한 트랜잭션에 남는다. 둘 다 껐으면 보인 줄이 없어 null이다.
+    const notice = teamAiRolesNotice(
+      "onboarding",
+      TEAM_AI_NOTICE_BUNDLES.filter((id) => input.roles[id])
+    );
     let memberId: string | null;
     try {
-      memberId = readTeamAiSwitch(await deps.enable(workspaceId)).memberId;
+      memberId = readTeamAiSwitch(await deps.enable(workspaceId, notice)).memberId;
     } catch (error) {
       throw new TeamAiSetupError("enable", error);
     }

@@ -9,17 +9,26 @@
 //!   writes [`roles_changed_audit`];
 //! * the card `team_ai.roles.set` (an admin approves in a chat) — [`set_role_in_tx`], which is
 //!   the same merge and the same write, plus the stale-card and prerequisite checks;
-//! * the onboarding role step and the settings screen (#4945) — [`record_notice_in_tx`] for the
-//!   consent record (a card's own record is [`card_notice_audit`]'s, and needs its approval).
+//! * the onboarding role step and the settings screen (#4945, #5040) — a screen carries
+//!   `team_ai_roles_notice` on the settings PATCH it already sends; [`take_screen_notice`] lifts it
+//!   out of the body and [`record_notice_in_tx`] writes the consent record (a card's own record is
+//!   [`card_notice_audit`]'s, and needs its approval).
 //!
 //! ## The consent record (「어떤 내용이 팀 AI 공급자에게 가는지」)
 //!
 //! When an admin turns `files` or `memory` **on**, the card or the onboarding step has shown
 //! them the sentence that says what goes to the team's AI provider. The record
 //! ([`card_notice_audit`] for a card, [`record_notice_in_tx`] for a screen) says who (actor),
-//! when (the row's own time) and which wording ([`momo_agent::team_ai_roles::NOTICE_VERSION`]).
+//! when (the row's own time) and which wording: a card quotes the server's own
+//! [`momo_agent::team_ai_roles::NOTICE_VERSION`] (the server wrote the sentence), a screen quotes
+//! the version **it** says it showed ([`ScreenNoticeClaim`]) — its words live in the client's
+//! catalog, and a record that stamped the server's newest version would let an older client's
+//! older words read as the newer ones.
 //! It is an `audit_log` row — no new table — and it never gates anything: the bundles are on
-//! from the start (owner answer 2026-11-01), so a missing record blocks nothing.
+//! from the start (owner answer 2026-11-01), so a missing record blocks nothing. What the server
+//! does refuse is a record it cannot make sense of ([`NoticeClaimInvalid`]): a claim about a
+//! wording or a bundle it does not know is a client that has drifted, and says so with a 400
+//! instead of leaving a record that says something else.
 
 use momo_agent::team_ai_roles::{self as roles, TeamAiRoles};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -92,11 +101,187 @@ pub enum ScreenNotice {
 }
 
 impl ScreenNotice {
+    /// Every screen, in the order the wire names them. `as_str` and [`Self::from_wire`] both read
+    /// this, so a screen added here is named and parsed in one place.
+    pub const ALL: [ScreenNotice; 2] = [ScreenNotice::Onboarding, ScreenNotice::Settings];
+
     pub fn as_str(self) -> &'static str {
         match self {
             ScreenNotice::Onboarding => "onboarding",
             ScreenNotice::Settings => "settings",
         }
+    }
+
+    /// The screen a request names. **`card` is not one**: a card's consent is the approval's own
+    /// record ([`card_notice_audit`]) and has no door a screen can knock on.
+    pub fn from_wire(raw: &str) -> Option<ScreenNotice> {
+        Self::ALL.into_iter().find(|screen| screen.as_str() == raw)
+    }
+}
+
+/// The key a screen carries the consent record under, on the body of `PATCH …/settings`
+/// (#5040). **Request-only**: it is not a setting, so it is not in
+/// `momo_settings::ALLOWED_SETTINGS_KEYS`, never stored in the bag and never echoed. The route
+/// takes it out with [`take_screen_notice`] before the bag logic sees the body.
+pub const SCREEN_NOTICE_FIELD: &str = "team_ai_roles_notice";
+
+/// Why a `team_ai_roles_notice` was refused. Each is a 400 at the route and nothing is written;
+/// the message is for a developer (a screen words its own errors).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NoticeClaimInvalid {
+    /// Not an object.
+    Shape,
+    /// A field other than `bundles`, `noticeVersion` and `via` — an approval id included: a
+    /// screen's record carries none (that is what makes it a screen's).
+    UnknownField(String),
+    /// `bundles` is missing, not an array, empty, too long, holds a non-string, or names a bundle twice.
+    Bundles,
+    /// A bundle that carries no notice (`code`, `invite_access`, …), `chat_read`, or a name that
+    /// is no bundle at all.
+    UnknownBundle(String),
+    /// `noticeVersion` is missing, not a string, or a wording the server does not list.
+    Version,
+    /// `via` is missing, or not `onboarding` / `settings`.
+    Via,
+}
+
+impl std::fmt::Display for NoticeClaimInvalid {
+    fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Shape => write!(
+                out,
+                "{SCREEN_NOTICE_FIELD} must be an object of bundles, noticeVersion and via"
+            ),
+            Self::UnknownField(name) => write!(out, "unknown {SCREEN_NOTICE_FIELD} field: {name}"),
+            Self::Bundles => write!(
+                out,
+                "{SCREEN_NOTICE_FIELD}.bundles must be a non-empty array of distinct bundle names that carry a notice"
+            ),
+            Self::UnknownBundle(name) => write!(
+                out,
+                "{SCREEN_NOTICE_FIELD}.bundles names a bundle that carries no notice: {name}"
+            ),
+            Self::Version => write!(
+                out,
+                "{SCREEN_NOTICE_FIELD}.noticeVersion must be a notice wording version the server lists"
+            ),
+            Self::Via => write!(
+                out,
+                "{SCREEN_NOTICE_FIELD}.via must be onboarding or settings"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for NoticeClaimInvalid {}
+
+/// What a screen says it showed, **already judged**: the only way to get one is [`parse_screen_notice`]
+/// (or [`take_screen_notice`]), so every field is a member of a closed set and the audit row holds
+/// the server's own spelling of it — nothing the client typed reaches the log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenNoticeClaim {
+    screen: ScreenNotice,
+    notice_version: &'static str,
+    bundles: Vec<&'static str>,
+}
+
+impl ScreenNoticeClaim {
+    pub fn screen(&self) -> ScreenNotice {
+        self.screen
+    }
+
+    /// The wording the screen showed — an entry of [`roles::NOTICE_VERSIONS`].
+    pub fn notice_version(&self) -> &'static str {
+        self.notice_version
+    }
+
+    /// The bundles whose line it showed, in the bundle table's order.
+    pub fn bundles(&self) -> &[&'static str] {
+        &self.bundles
+    }
+}
+
+/// [`parse_screen_notice`] against an explicit list of the wordings the server knows, so a test can
+/// hold a second version without a second wording shipping.
+pub fn parse_screen_notice_against(
+    value: &Value,
+    known_versions: &[&'static str],
+) -> Result<ScreenNoticeClaim, NoticeClaimInvalid> {
+    let Some(fields) = value.as_object() else {
+        return Err(NoticeClaimInvalid::Shape);
+    };
+    if let Some(unknown) = fields
+        .keys()
+        .find(|name| !matches!(name.as_str(), "bundles" | "noticeVersion" | "via"))
+    {
+        return Err(NoticeClaimInvalid::UnknownField(unknown.clone()));
+    }
+    let screen = fields
+        .get("via")
+        .and_then(Value::as_str)
+        .and_then(ScreenNotice::from_wire)
+        .ok_or(NoticeClaimInvalid::Via)?;
+    let notice_version = fields
+        .get("noticeVersion")
+        .and_then(Value::as_str)
+        .and_then(|sent| known_versions.iter().copied().find(|known| *known == sent))
+        .ok_or(NoticeClaimInvalid::Version)?;
+    // The bundles that carry a notice: the only ones a screen can have shown a line for.
+    let noticed: Vec<&'static str> = roles::SWITCHABLE_BUNDLES
+        .iter()
+        .copied()
+        .filter(|id| roles::notice_for(id).is_some())
+        .collect();
+    let items = fields
+        .get("bundles")
+        .and_then(Value::as_array)
+        .filter(|items| !items.is_empty() && items.len() <= roles::SWITCHABLE_BUNDLES.len())
+        .ok_or(NoticeClaimInvalid::Bundles)?;
+    let mut named: Vec<&'static str> = Vec::with_capacity(items.len());
+    for item in items {
+        let Some(name) = item.as_str() else {
+            return Err(NoticeClaimInvalid::Bundles);
+        };
+        let Some(id) = noticed.iter().copied().find(|id| *id == name) else {
+            return Err(NoticeClaimInvalid::UnknownBundle(name.to_string()));
+        };
+        if named.contains(&id) {
+            return Err(NoticeClaimInvalid::Bundles);
+        }
+        named.push(id);
+    }
+    // The bundle table's order, whatever order the screen listed them in.
+    let bundles = noticed
+        .into_iter()
+        .filter(|id| named.contains(id))
+        .collect();
+    Ok(ScreenNoticeClaim {
+        screen,
+        notice_version,
+        bundles,
+    })
+}
+
+/// Judge a `team_ai_roles_notice` against the wordings the server lists ([`roles::NOTICE_VERSIONS`]).
+pub fn parse_screen_notice(value: &Value) -> Result<ScreenNoticeClaim, NoticeClaimInvalid> {
+    parse_screen_notice_against(value, &roles::NOTICE_VERSIONS)
+}
+
+/// Take `team_ai_roles_notice` **out of** a settings PATCH body, judged. `None` when the body has
+/// none (an older client: nothing is recorded and nothing is blocked) or has `null`, and for a
+/// body that is not an object (the bag's own merge refuses that one). After this call the body is
+/// what the bag logic has always seen: the one key that is not a setting is gone, so it is never
+/// stored, never reaches the allowlist's 400 and never counts as a "key patched" in the settings
+/// audit row.
+pub fn take_screen_notice(
+    body: &mut Value,
+) -> Result<Option<ScreenNoticeClaim>, NoticeClaimInvalid> {
+    let Some(fields) = body.as_object_mut() else {
+        return Ok(None);
+    };
+    match fields.remove(SCREEN_NOTICE_FIELD) {
+        None | Some(Value::Null) => Ok(None),
+        Some(claim) => parse_screen_notice(&claim).map(Some),
     }
 }
 
@@ -128,14 +313,17 @@ impl NoticeSource {
 }
 
 /// The one shape of the consent record, for every writer: the bundles in `bundle_ids` that carry
-/// a notice, or `None` when none does. Private, so a record that says it came from a card cannot
-/// be built without the approval ([`card_notice_audit`]).
+/// a notice, or `None` when none does. `notice_version` is the wording the reader was shown —
+/// the caller's to name, never a default here: a card passes the server's own, a screen passes the
+/// version it said it showed. Private, so a record that says it came from a card cannot be built
+/// without the approval ([`card_notice_audit`]).
 fn notice_entry(
     workspace_id: Uuid,
     actor: Uuid,
     via_token_id: Option<Uuid>,
     bundle_ids: &[&str],
     source: NoticeSource,
+    notice_version: &str,
 ) -> Option<AuditEntry> {
     let bundles: Vec<&'static str> = roles::SWITCHABLE_BUNDLES
         .iter()
@@ -154,7 +342,7 @@ fn notice_entry(
                 roles::AUDIT_ROLES_NOTICE_SCHEMA,
                 json!({
                     "bundles": bundles,
-                    "notice_version": roles::NOTICE_VERSION,
+                    "notice_version": notice_version,
                     "via": source.via(),
                     "approval_id": source.approval_id(),
                 }),
@@ -179,30 +367,33 @@ pub fn card_notice_audit(
         via_token_id,
         bundle_ids,
         NoticeSource::Card { approval_id },
+        roles::NOTICE_VERSION,
     )
 }
 
-/// Write the consent record of a **screen** (onboarding or settings, #4945) in the caller's
-/// transaction. Returns whether a row was written — `false` when none of `bundle_ids` carries a
-/// notice. A card's consent is not writable from here: it is the approval's own record.
+/// Write the consent record of a **screen** (onboarding or settings, #4945/#5040) in the caller's
+/// transaction: who (`actor`), when (the row's own time), which bundles and which wording **the
+/// screen said it showed** (the `claim`, judged by [`parse_screen_notice`]). Returns whether a row
+/// was written — always `true` for a judged claim, whose bundles all carry a notice. A card's
+/// consent is not writable from here: it is the approval's own record.
 ///
 /// The caller owns the judgement that `actor` is the signed-in admin who was shown the line — this
-/// function records what it is told, like every audit writer; the screens' route gates on the
-/// workspace admin before it calls.
+/// function records what it is told, like every audit writer; the settings route gates on the
+/// workspace owner/admin (or the instance operator it already admits) before it calls.
 pub async fn record_notice_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     actor: Uuid,
     via_token_id: Option<Uuid>,
-    bundle_ids: &[&str],
-    screen: ScreenNotice,
+    claim: &ScreenNoticeClaim,
 ) -> Result<bool, DbError> {
     let Some(entry) = notice_entry(
         workspace_id,
         actor,
         via_token_id,
-        bundle_ids,
-        NoticeSource::Screen(screen),
+        claim.bundles(),
+        NoticeSource::Screen(claim.screen()),
+        claim.notice_version(),
     ) else {
         return Ok(false);
     };
@@ -405,6 +596,7 @@ mod tests {
             None,
             &[roles::MEMORY, roles::FILES, roles::CODE],
             NoticeSource::Screen(ScreenNotice::Onboarding),
+            roles::NOTICE_VERSION,
         )
         .expect("files and memory carry a notice");
         assert_eq!(screen.action, "team_ai.roles.notice_shown");
@@ -417,6 +609,232 @@ mod tests {
             .expect("a card that turns files on");
         assert_eq!(card.detail["via"], "card");
         assert_eq!(card.detail["approval_id"], approval.to_string());
+    }
+
+    fn claim_body(bundles: Value, version: Value, via: Value) -> Value {
+        json!({"bundles": bundles, "noticeVersion": version, "via": via})
+    }
+
+    /// #5040: what a screen sends becomes a claim whose every field is the server's own spelling
+    /// of a member of a closed set — and the version is the one the screen **named**, not the
+    /// server's newest. Held against a two-wording list so the two can differ.
+    #[test]
+    fn a_screens_claim_carries_the_version_it_named_and_the_bundles_in_table_order() {
+        let known: [&'static str; 2] = ["2026-01-01.v0", roles::NOTICE_VERSION];
+        let older = parse_screen_notice_against(
+            &claim_body(
+                json!(["memory", "files"]),
+                json!("2026-01-01.v0"),
+                json!("onboarding"),
+            ),
+            &known,
+        )
+        .expect("an older wording the server still lists");
+        assert_eq!(
+            older.notice_version(),
+            "2026-01-01.v0",
+            "the screen's wording, not the newest"
+        );
+        assert_eq!(
+            older.bundles(),
+            [roles::FILES, roles::MEMORY],
+            "table order, not request order"
+        );
+        assert_eq!(older.screen(), ScreenNotice::Onboarding);
+        let newest = parse_screen_notice_against(
+            &claim_body(
+                json!(["memory"]),
+                json!(roles::NOTICE_VERSION),
+                json!("settings"),
+            ),
+            &known,
+        )
+        .unwrap();
+        assert_eq!(newest.notice_version(), roles::NOTICE_VERSION);
+        assert_eq!(newest.bundles(), [roles::MEMORY]);
+        assert_eq!(newest.screen(), ScreenNotice::Settings);
+        // The real list takes the real wording.
+        assert!(parse_screen_notice(&claim_body(
+            json!(["files"]),
+            json!(roles::NOTICE_VERSION),
+            json!("settings")
+        ))
+        .is_ok());
+    }
+
+    /// #5040: a claim about something the server does not know is a 400, whichever field is wrong.
+    #[test]
+    fn a_claim_naming_something_unknown_is_refused_field_by_field() {
+        let good = |bundles: Value, version: Value, via: Value| claim_body(bundles, version, via);
+        let version = json!(roles::NOTICE_VERSION);
+        let refused: Vec<(&str, Value, NoticeClaimInvalid)> = vec![
+            ("not an object", json!("files"), NoticeClaimInvalid::Shape),
+            ("an array", json!(["files"]), NoticeClaimInvalid::Shape),
+            (
+                "a field a screen has no business sending",
+                json!({"bundles": ["files"], "noticeVersion": roles::NOTICE_VERSION,
+                       "via": "settings", "approvalId": "00000000-0000-0000-0000-000000000001"}),
+                NoticeClaimInvalid::UnknownField("approvalId".into()),
+            ),
+            (
+                "via is a card",
+                good(json!(["files"]), version.clone(), json!("card")),
+                NoticeClaimInvalid::Via,
+            ),
+            (
+                "via has another case",
+                good(json!(["files"]), version.clone(), json!("Settings")),
+                NoticeClaimInvalid::Via,
+            ),
+            (
+                "via is a number",
+                good(json!(["files"]), version.clone(), json!(1)),
+                NoticeClaimInvalid::Via,
+            ),
+            (
+                "a wording the server never shipped",
+                good(json!(["files"]), json!("2099-01-01.v9"), json!("settings")),
+                NoticeClaimInvalid::Version,
+            ),
+            (
+                "an empty wording",
+                good(json!(["files"]), json!(""), json!("settings")),
+                NoticeClaimInvalid::Version,
+            ),
+            (
+                "a wording that is a number",
+                good(json!(["files"]), json!(20261101), json!("settings")),
+                NoticeClaimInvalid::Version,
+            ),
+            (
+                "no bundles",
+                good(json!([]), version.clone(), json!("settings")),
+                NoticeClaimInvalid::Bundles,
+            ),
+            (
+                "bundles is not a list",
+                good(json!("files"), version.clone(), json!("settings")),
+                NoticeClaimInvalid::Bundles,
+            ),
+            (
+                "a bundle named twice",
+                good(
+                    json!(["files", "files"]),
+                    version.clone(),
+                    json!("settings"),
+                ),
+                NoticeClaimInvalid::Bundles,
+            ),
+            (
+                "a bundle that is not a string",
+                good(json!([7]), version.clone(), json!("settings")),
+                NoticeClaimInvalid::Bundles,
+            ),
+            (
+                "more names than there are bundles",
+                good(
+                    json!(["files", "memory", "code", "x", "y", "z", "w"]),
+                    version.clone(),
+                    json!("settings"),
+                ),
+                NoticeClaimInvalid::Bundles,
+            ),
+            (
+                "a bundle with no notice",
+                good(json!(["code"]), version.clone(), json!("settings")),
+                NoticeClaimInvalid::UnknownBundle("code".into()),
+            ),
+            (
+                "chat_read is no switch",
+                good(json!(["chat_read"]), version.clone(), json!("settings")),
+                NoticeClaimInvalid::UnknownBundle("chat_read".into()),
+            ),
+            (
+                "a typo",
+                good(
+                    json!(["files", "filez"]),
+                    version.clone(),
+                    json!("settings"),
+                ),
+                NoticeClaimInvalid::UnknownBundle("filez".into()),
+            ),
+        ];
+        for (what, body, expected) in refused {
+            assert_eq!(parse_screen_notice(&body), Err(expected), "{what}: {body}");
+        }
+        // A field that is simply missing is refused as the field it is.
+        assert_eq!(
+            parse_screen_notice(
+                &json!({"noticeVersion": roles::NOTICE_VERSION, "via": "settings"})
+            ),
+            Err(NoticeClaimInvalid::Bundles)
+        );
+        assert_eq!(
+            parse_screen_notice(&json!({"bundles": ["files"], "via": "settings"})),
+            Err(NoticeClaimInvalid::Version)
+        );
+        assert_eq!(
+            parse_screen_notice(
+                &json!({"bundles": ["files"], "noticeVersion": roles::NOTICE_VERSION})
+            ),
+            Err(NoticeClaimInvalid::Via)
+        );
+    }
+
+    /// #5040: the claim is lifted out of the settings body, so the bag logic never sees it; an
+    /// older client's body (no field) is left exactly as it was.
+    #[test]
+    fn the_claim_is_lifted_out_of_the_settings_body_and_an_absent_one_changes_nothing() {
+        let mut body = json!({
+            "team_ai_roles": {"files": true},
+            SCREEN_NOTICE_FIELD: claim_body(json!(["files"]), json!(roles::NOTICE_VERSION), json!("settings")),
+        });
+        let claim = take_screen_notice(&mut body).unwrap().expect("a claim");
+        assert_eq!(claim.bundles(), [roles::FILES]);
+        assert_eq!(
+            body,
+            json!({"team_ai_roles": {"files": true}}),
+            "only the setting is left"
+        );
+        // The bag merge accepts what is left (the key is not an allowlisted setting).
+        assert!(momo_settings::merge_workspace_settings(&json!({}), &body).is_ok());
+
+        let mut older = json!({"team_ai_roles": {"files": true}});
+        assert_eq!(take_screen_notice(&mut older), Ok(None));
+        assert_eq!(older, json!({"team_ai_roles": {"files": true}}));
+        let mut null = json!({SCREEN_NOTICE_FIELD: null, "team_ai_web_search": false});
+        assert_eq!(take_screen_notice(&mut null), Ok(None));
+        assert_eq!(
+            null,
+            json!({"team_ai_web_search": false}),
+            "null is lifted too, never stored"
+        );
+        let mut not_an_object = json!(["files"]);
+        assert_eq!(take_screen_notice(&mut not_an_object), Ok(None));
+        let mut bad = json!({SCREEN_NOTICE_FIELD: {"bundles": ["code"]}});
+        assert!(take_screen_notice(&mut bad).is_err());
+        // The notice field is not a setting: it never joins the allowlist.
+        assert!(!momo_settings::ALLOWED_SETTINGS_KEYS.contains(&SCREEN_NOTICE_FIELD));
+    }
+
+    /// A screen's record names the screen's wording; a card's names the server's.
+    #[test]
+    fn a_record_quotes_the_wording_its_writer_names() {
+        let workspace = Uuid::from_u128(1);
+        let admin = Uuid::from_u128(2);
+        let older = notice_entry(
+            workspace,
+            admin,
+            None,
+            &[roles::FILES],
+            NoticeSource::Screen(ScreenNotice::Settings),
+            "2026-01-01.v0",
+        )
+        .unwrap();
+        assert_eq!(older.detail["notice_version"], "2026-01-01.v0");
+        let card =
+            card_notice_audit(workspace, admin, None, &[roles::FILES], Uuid::from_u128(9)).unwrap();
+        assert_eq!(card.detail["notice_version"], roles::NOTICE_VERSION);
     }
 
     #[test]
