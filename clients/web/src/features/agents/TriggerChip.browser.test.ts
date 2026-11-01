@@ -53,7 +53,7 @@ interface Face {
   chip: TriggerChip;
 }
 
-function face(name: string, extra: Partial<AgentRunProgress> & { bundle?: unknown }, now = T): Face {
+function face(name: string, extra: Partial<AgentRunProgress>, now = T): Face {
   const chip = triggerChip([run(extra)], nameFor, now, {
     answerFor: () => ({ id: "answer-1", seq: 42 }),
   });
@@ -70,7 +70,7 @@ const FACES: Face[] = [
   face("답함(눌리는 단추)", { phase: "succeeded", status: "succeeded", finishedAtMs: T - SEC }),
   face("아직 받지 않았어요", {}, T + 10 * MIN),
   face("실패", { phase: "failed", status: "failed", endReason: "agent_error", finishedAtMs: T - SEC }),
-  face("끝(묶음)", { phase: "succeeded", status: "succeeded", bundle: { status: "approved", action_type: "workspace_action" } }),
+  face("끝(묶음)", { phase: "succeeded", status: "succeeded", bundle: { approvalId: "approval", status: "approved", decisionMode: "open", canDecide: false, actionType: "workspace_action" } }),
   face("거부", { phase: "cancelled", status: "cancelled", endReason: "approval_rejected" }),
   face("만료", { phase: "timed_out", status: "timed_out", endReason: "approval_expired" }),
 ];

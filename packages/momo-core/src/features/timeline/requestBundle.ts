@@ -1,4 +1,8 @@
-import type { AgentRunProgress, Message } from "../../lib/api";
+import type {
+  AgentRunProgress,
+  ApprovalDecisionMode,
+  Message,
+} from "../../lib/api";
 import type {
   AgentApprovalCard,
   ApprovalStatus,
@@ -20,7 +24,8 @@ import {
 
 /** 한 요청의 상태. 전달 지연·시간 초과·신호 소실은 이 상태가 아니에요. */
 export type RequestBundleState = keyof typeof REQUEST_WORD;
-export type DecisionMode = "inline" | "open";
+/** 서버의 한 판정(`decision_mode()`). 정의는 와이어 경계(`lib/api.ts`)에 있고 여기서 다시 쓰지 않아요. */
+export type DecisionMode = ApprovalDecisionMode;
 export type RequestBundleTone = "working" | "warn" | "ok" | "muted" | "danger";
 
 export const REQUEST_BUNDLE_FACE = {
@@ -193,16 +198,62 @@ export function parseRequestBundleSnapshot(
   };
 }
 
-/** run 진행 읽기의 bundle을 보존한 DTO 또는 카드 폴백을 함께 쓸 수 있어요. */
+/**
+ * run 진행에 **같은 승인의 카드 묶음을 덧댄** 모양. 카드는 서버가 종결 때 패치한 끝 상태(`result`·
+ * `code`)를 알고 run 진행의 `bundle`은 모르는 때가 있어서, 폰의 생각 줄은 카드의 스냅샷을 먼저
+ * 읽어요. 와이어의 `bundle`과 다른 칸이라 서로 덮어쓰지 않아요.
+ */
+export type RunWithBundleSnapshot = AgentRunProgress & {
+  bundleSnapshot?: RequestBundleSnapshot;
+};
+
+/**
+ * run 진행의 `bundle`(서버가 보는 사람 기준으로 읽은 승인 하나)을 묶음 모델의 말로 옮겨요.
+ * 값은 이미 와이어 경계(`agentRunProgressFromWire`)가 좁혀 놓았고 여기서는 다시 판정하지 않아요:
+ * `decisionMode`·`canDecide`는 서버 값 그대로예요. `bundle`이 없는 run(옛 서버·승인 없는 run)은
+ * `undefined`라서 칩·요약 줄이 예전처럼 `phase`로 읽어요. 덧댄 카드 스냅샷에 상태가 있으면
+ * 그것이 먼저예요.
+ */
 export function runBundleSnapshot(
-  run: AgentRunProgress & { bundle?: unknown }
+  run: Pick<AgentRunProgress, "bundle"> & {
+    bundleSnapshot?: RequestBundleSnapshot;
+  }
 ): RequestBundleSnapshot | undefined {
-  if (run.bundle === undefined || run.bundle === null) return undefined;
-  const bundle = parseRequestBundleSnapshot(run.bundle);
-  return bundle.status !== undefined ||
-    bundle.code !== undefined ||
-    bundle.result !== undefined
-    ? bundle
+  const overlay = run.bundleSnapshot;
+  if (
+    overlay !== undefined &&
+    (overlay.status !== undefined ||
+      overlay.code !== undefined ||
+      overlay.result !== undefined)
+  )
+    return overlay;
+  const bundle = run.bundle;
+  if (bundle === undefined) return undefined;
+  const intent = publicCopy(bundle.intent);
+  return {
+    approvalId: bundle.approvalId,
+    status: bundle.status,
+    canDecide: bundle.canDecide,
+    decisionMode: bundle.decisionMode,
+    actionType: bundle.actionType,
+    ...(intent !== undefined ? { intent } : {}),
+  };
+}
+
+/**
+ * 서버가 이 승인에 대해 **보는 사람**에게 해 준 결정 자격(`bundle.canDecide`).
+ * 그 run의 bundle이 가리키는 승인이 아니면 모르는 것이라 `undefined`예요(예전 승인의 카드를
+ * 새 승인의 자격으로 막지 않아요). 호출자는 `=== false`일 때만 단추를 거두고, `true`를 근거로
+ * 단추를 더 세우지 않아요: 오프라인·영수증·대기 목록 같은 현장의 문은 그대로 남아요.
+ */
+export function runBundleCanDecide(
+  run: Pick<AgentRunProgress, "bundle"> | undefined,
+  approvalId: string | null | undefined
+): boolean | undefined {
+  const bundle = run?.bundle;
+  if (bundle === undefined || approvalId === null || approvalId === undefined) return undefined;
+  return bundle.approvalId.toLowerCase() === approvalId.toLowerCase()
+    ? bundle.canDecide
     : undefined;
 }
 

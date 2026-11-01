@@ -15,7 +15,8 @@ import "@/lib/coreHost";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
-import type { Message } from "@momo/core/lib/api";
+import { agentRunProgressFromWire, type Message } from "@momo/core/lib/api";
+import { resetRunProgress, startRunProgress } from "@/features/agents/agentRunProgressStore";
 import { AgentCard } from "./AgentCard";
 import { resetSettledApprovalsForTest } from "./settledApprovals";
 import { isInternalHref, isReachableHref } from "./ActionResultCard";
@@ -305,6 +306,41 @@ describe("행동 승인 카드 (ADR-0186 부록 A)", () => {
     expect(byTestId(host, "approval-action-role")).toHaveLength(0);
     // 결정 컨트롤은 그대로 선다.
     expect(byTestId(host, "approval-approve")).toHaveLength(1);
+  });
+});
+
+// #4960. 서버가 run 진행 bundle로 「이 사람은 지금 못 한다」(보는 사람 기준 `canDecide:false`)고 말하면, 카드 props가
+// 아무 말이 없어도(`can_decide` 없음) 웹 타임라인 카드의 인라인 결정 컨트롤이 서지 않는다. 「한다」는 단추를 더 세우지
+// 않는다(이 표의 둘째 줄은 서버가 한다고 해도 **기존 카드와 같게** 선다는 대조군이다).
+describe("run 진행 bundle의 결정 자격이 웹 타임라인 카드에 닿는다 (#4960)", () => {
+  const CHANNEL = "00000000-0000-7000-8000-000000000201";
+  const progress = (canDecide: boolean) =>
+    agentRunProgressFromWire({
+      id: "0199aa11-2222-7000-8000-0000000000b2", channelId: CHANNEL, agentMemberId: HERMES,
+      status: "awaiting_approval", phase: "awaiting_approval", leaseState: "live", stepCount: 1,
+      createdAtMs: 1_753_400_000_000, updatedAtMs: 1_753_400_000_000,
+      bundle: { approvalId: APPROVAL_ID, status: "pending", decisionMode: "inline", canDecide, actionType: "tool_call" },
+    });
+
+  it.each([
+    ["서버가 못 한다고 하면 결정 컨트롤을 거둔다", false, 0],
+    ["서버가 한다고 하면 기존 카드처럼 결정 컨트롤이 선다", true, 1],
+  ] as const)("%s", async (_name, serverCanDecide, buttons) => {
+    const stop = startRunProgress({
+      workspaceId: WORKSPACE_ID, channelIds: [CHANNEL], realtime: null,
+      fetchProgress: async () => [progress(serverCanDecide)],
+    });
+    try {
+      await act(async () => { await Promise.resolve(); });
+      const host = mountCard({
+        approval_id: APPROVAL_ID, action_type: "shell", tool_name: "shell", title: "빌드 캐시 정리", status: "pending",
+      });
+      expect(byTestId(host, "approval-approve")).toHaveLength(buttons);
+      expect(byTestId(host, "approval-reject")).toHaveLength(buttons);
+    } finally {
+      stop();
+      resetRunProgress();
+    }
   });
 });
 

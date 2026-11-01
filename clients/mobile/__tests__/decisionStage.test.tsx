@@ -11,7 +11,12 @@ import {
 } from 'react-native';
 import {act, fireEvent, render, within} from '@testing-library/react-native';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import type {Member, Message, RosterMember} from '@momo/core/lib/api';
+import type {
+  AgentRunProgress,
+  Member,
+  Message,
+  RosterMember,
+} from '@momo/core/lib/api';
 import type {AgentApprovalCard} from '@momo/core/features/timeline/agentCardModel';
 import {
   DecisionStage,
@@ -1075,4 +1080,76 @@ test.each([
     ),
   );
   expect(view.getByTestId('request-bundle-headline').props.numberOfLines).toBe(lines);
+});
+
+// #4960. 서버가 run 진행 bundle로 「이 사람은 지금 못 한다」고 말하면(보는 사람 기준 `canDecide:false`) 폰의 묶음
+// 카드는 결정 단추를 거두고 기다리는 줄을 말한다. 카드 props·대기 목록은 아무 말이 없어도(여기서는 둘 다 열려 있다)
+// 서버 값이 이긴다. 「한다」는 단추를 더 세우지 않는다: 대기 목록(gate)이 없으면 서버가 해도 단추가 없다.
+function runWithBundle(canDecide: boolean, approvalId = '첫째'): AgentRunProgress {
+  return {
+    id: 'run-1',
+    channelId: 'channel',
+    agentMemberId: 'agent',
+    status: 'awaiting_approval',
+    phase: 'awaiting_approval',
+    leaseState: 'live',
+    stepCount: 1,
+    ahead: [],
+    createdAtMs: NOW,
+    updatedAtMs: NOW,
+    bundle: {
+      approvalId,
+      status: 'pending',
+      decisionMode: 'inline',
+      canDecide,
+      actionType: 'tool_call',
+    },
+  };
+}
+// 행 길이를 맞춘다: jest.each는 행보다 인자가 많으면 남는 자리에 done 콜백을 넣는다.
+test.each([
+  ['서버가 못 한다고 하면 결정 단추를 거둔다', false, false, '첫째'],
+  ['서버가 한다고 하면 결정 단추가 선다', true, true, '첫째'],
+  ['다른 승인의 bundle은 이 카드의 일이 아니라 단추가 그대로 선다', false, true, '예전-승인'],
+])(
+  'run bundle canDecide: %s',
+  async (_name, serverCanDecide, buttons, bundleApprovalId) => {
+    const item = entry('첫째', {bundle: {decisionMode: 'inline'}});
+    const view = render(
+      wrap(
+        <RequestBundleCard
+          card={item.card}
+          directory={directory}
+          viewerMemberId="self"
+          gate={item.gate}
+          nowMs={NOW}
+          run={runWithBundle(serverCanDecide, bundleApprovalId)}
+        />,
+      ),
+    );
+    await act(async () => {});
+    expect(view.queryByTestId('card-approval-첫째-approve') !== null).toBe(
+      buttons,
+    );
+    expect(view.queryByTestId('request-bundle-waiting') !== null).toBe(
+      !buttons,
+    );
+  },
+);
+test('run bundle이 한다고 말해도 대기 목록(gate)에 없으면 결정 단추는 서지 않아요', async () => {
+  const item = entry('첫째', {bundle: {decisionMode: 'inline'}});
+  const view = render(
+    wrap(
+      <RequestBundleCard
+        card={item.card}
+        directory={directory}
+        viewerMemberId="self"
+        gate={null}
+        nowMs={NOW}
+        run={runWithBundle(true)}
+      />,
+    ),
+  );
+  await act(async () => {});
+  expect(view.queryByTestId('card-approval-첫째-approve')).toBeNull();
 });

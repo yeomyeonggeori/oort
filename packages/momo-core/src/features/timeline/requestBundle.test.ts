@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { Message } from "../../lib/api";
-import { agentRequestBundle } from "./agentCardModel";
-import { remainingTime } from "./requestBundle";
+import type { AgentRunBundle, AgentRunProgress, Message } from "../../lib/api";
+import { agentCardModel, agentRequestBundle } from "./agentCardModel";
+import {
+  remainingTime,
+  requestBundleDecisionMode,
+  runBundleCanDecide,
+  runBundleSnapshot,
+} from "./requestBundle";
 
 // #4986. 조용한 줄의 남은 시간. 15분짜리 허락(DM 들이기)이 「1시간 남음」이라고 말해서, 결정할 사람이
 // 한 시간을 믿고 미루다 만료를 만났다. 단위는 남은 크기로 고르고, 단위 안에서는 내려서 실제보다 길게
@@ -68,5 +73,76 @@ describe("묶음 모델의 남은 시간 줄 (#4986)", () => {
     expect(closed.quietLine).toBe("자세히");
     const unknown = agentRequestBundle(approval(NOW, { expires_at_ms: undefined }), context)!;
     expect("remainingLine" in unknown).toBe(false);
+  });
+});
+
+// #4960. run 진행 bundle은 서버가 보는 사람 기준으로 판정한 값이고, 화면은 그 값을 그대로 읽는다.
+describe("run 진행 bundle의 서버 값 (#4763)", () => {
+  const bundle = (patch: Partial<AgentRunBundle> = {}): AgentRunBundle => ({
+    approvalId: "approval", status: "pending", decisionMode: "inline", canDecide: true,
+    actionType: "tool_call", intent: "소개를 바꿔도 될까요?", ...patch,
+  });
+  const run = (value?: AgentRunBundle) => ({ bundle: value }) as Pick<AgentRunProgress, "bundle">;
+
+  it("runBundleSnapshot은 서버 값을 그대로 옮긴다: decisionMode·canDecide·status·actionType·intent", () => {
+    expect(runBundleSnapshot(run(bundle()))).toEqual({
+      approvalId: "approval", status: "pending", decisionMode: "inline", canDecide: true,
+      actionType: "tool_call", intent: "소개를 바꿔도 될까요?",
+    });
+    expect(runBundleSnapshot(run(bundle({ decisionMode: "open", canDecide: false })))).toMatchObject({
+      decisionMode: "open", canDecide: false,
+    });
+  });
+
+  it("bundle이 없는 run(옛 서버·승인 없는 run)은 snapshot이 없다: 칩·요약 줄은 phase로 읽는다", () => {
+    expect(runBundleSnapshot(run(undefined))).toBeUndefined();
+  });
+
+  it("덧댄 카드 스냅샷에 상태가 있으면 그것이 먼저고, 상태가 없는 덧댐은 서버 bundle을 가리지 않는다", () => {
+    const overlay = { status: "approved", result: { status: "executed", rows: [], omittedRows: 0 } };
+    expect(runBundleSnapshot({ ...run(bundle()), bundleSnapshot: overlay })).toBe(overlay);
+    expect(runBundleSnapshot({ ...run(bundle()), bundleSnapshot: { approvalId: "approval" } })?.status).toBe("pending");
+  });
+
+  it("runBundleCanDecide는 이 승인의 bundle일 때만 말한다: 다른 승인의 카드는 모른다(undefined)", () => {
+    expect(runBundleCanDecide(run(bundle({ canDecide: false })), "approval")).toBe(false);
+    expect(runBundleCanDecide(run(bundle({ canDecide: true })), "APPROVAL")).toBe(true);
+    expect(runBundleCanDecide(run(bundle({ canDecide: false })), "older-approval")).toBeUndefined();
+    expect(runBundleCanDecide(run(bundle()), null)).toBeUndefined();
+    expect(runBundleCanDecide(run(undefined), "approval")).toBeUndefined();
+    expect(runBundleCanDecide(undefined, "approval")).toBeUndefined();
+  });
+});
+
+// 「클라이언트에서 decisionMode를 다시 계산하지 않아요」: 서버 값이 있으면 옛 공개 사실(실행 계획·행동 목록)보다
+// 그 값이 먼저다. 없을 때만(옛 서버) 폴백한다 — 그 폴백은 그대로 둔다.
+describe("결정 모드는 서버 값이 먼저다 (#4763)", () => {
+  const card = (props: Record<string, unknown>) => {
+    const model = agentCardModel({
+      id: "m", channelId: "c", seq: 1, hlcTs: 1, hlcCount: 0, authorMemberId: "agent",
+      type: "approval_request", body: "", state: "sent", createdAtMs: 1,
+      props: { approval_id: "approval", status: "pending", ...props },
+    } as Message);
+    if (model?.kind !== "approval") throw new Error("approval card");
+    return model;
+  };
+  const SPAWN = { execution: { kind: "work_session_spawn", host_candidates: [{ host_id: "h", display_name: "내 맥", host_type: "local", tier: "local", scope: "user", online: true, selectable: true }], default_host_id: "h" } };
+
+  it("서버가 inline이라 했으면 실행 계획이 있어도 inline이다", () => {
+    const withPlan = card({ action_type: "tool_call", tool_name: "shell", decision_mode: "inline", ...SPAWN });
+    expect(withPlan.execution).not.toBeNull();
+    expect(requestBundleDecisionMode(withPlan)).toBe("inline");
+  });
+
+  it("서버가 open이라 했으면 지금까지 inline이던 행동도 open이다", () => {
+    const action = { id: "channel.create", rows: [], required_role: "admin" };
+    const legacy = card({ action_type: "workspace_action", action });
+    expect(requestBundleDecisionMode(legacy)).toBe("inline");
+    expect(requestBundleDecisionMode(card({ action_type: "workspace_action", action, decision_mode: "open" }))).toBe("open");
+  });
+
+  it("서버가 모드를 안 보낸 옛 응답은 지금처럼 공개 사실로 읽는다(폴백)", () => {
+    expect(requestBundleDecisionMode(card({ action_type: "tool_call", tool_name: "shell", ...SPAWN }))).toBe("open");
+    expect(requestBundleDecisionMode(card({ action_type: "tool_call", tool_name: "shell" }))).toBe("inline");
   });
 });
