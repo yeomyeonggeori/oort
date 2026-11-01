@@ -7,6 +7,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type RosterMember } from "@momo/core/lib/api";
+import { TEAM_AI_NOTICE_VERSION } from "@momo/core/features/settings/teamAiRoles";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
 import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 import type { AppLocale } from "@/i18n/localeStore";
@@ -192,6 +193,12 @@ describe("이름 바꾸기: 별칭이 따라가는 결과를 보인다", () => {
   });
 });
 
+const settingsNotice = (bundle: string) => ({
+  bundles: [bundle],
+  noticeVersion: TEAM_AI_NOTICE_VERSION,
+  via: "settings",
+});
+
 describe("역할 켜고 끄기: 누르는 즉시 그 묶음 하나만 저장한다", () => {
   it("파일을 끄면 {files:false} 한 칸만 보내고, 팀 기억이 꺼져 있어 기억을 못 켜면 이유를 말하고 되돌린다", async () => {
     patchRoles.mockImplementation(async () => {
@@ -201,7 +208,7 @@ describe("역할 켜고 끄기: 누르는 즉시 그 묶음 하나만 저장한�
     await mount();
     await click("team-ai-helper-role-files");
     expect(patchRoles).toHaveBeenCalledTimes(1);
-    expect(patchRoles.mock.calls[0]).toEqual([WS, { files: false }]);
+    expect(patchRoles.mock.calls[0]).toEqual([WS, { files: false }, null]);
     expect(q("team-ai-helper-role-files")?.getAttribute("aria-checked")).toBe("false");
     expect(q("team-ai-helper-role-memory")?.getAttribute("aria-checked")).toBe("true");
 
@@ -212,8 +219,26 @@ describe("역할 켜고 끄기: 누르는 즉시 그 묶음 하나만 저장한�
     await mount();
     expect(q("team-ai-helper-role-memory")?.getAttribute("aria-checked")).toBe("false");
     await click("team-ai-helper-role-memory");
-    expect(patchRoles).toHaveBeenLastCalledWith(WS, { memory: true });
+    expect(patchRoles).toHaveBeenLastCalledWith(WS, { memory: true }, settingsNotice("memory"));
     expect(q("team-ai-helper-roles-error")?.textContent).toBe("팀 기억이 꺼져 있어요. 설정 › 기억에서 먼저 켜 주세요.");
     expect(q("team-ai-helper-role-memory")?.getAttribute("aria-checked")).toBe("false");
+  });
+
+  // #5040 (ADR-0201 증보 v3 B3): 켜는 순간이 동의다. 파일·기억을 켜면 같은 PATCH에 고지 기록이 실리고,
+  // 고지 줄이 없는 묶음을 켜거나 무엇이든 끌 때는 실리지 않는다.
+  it("파일·기억을 켤 때만 고지 기록을 같은 요청에 싣는다: 코드를 켜거나 기억을 끌 때는 싣지 않는다", async () => {
+    fetchBag.mockResolvedValue(bag({ team_ai_roles: { files: false, code: false } }));
+    patchRoles
+      .mockResolvedValueOnce(bag({ team_ai_roles: { files: true, code: false } }))
+      .mockResolvedValueOnce(bag({ team_ai_roles: { files: true, code: true } }))
+      .mockResolvedValueOnce(bag({ team_ai_roles: { files: true, code: true, memory: false } }));
+    await mount();
+    await click("team-ai-helper-role-files");
+    expect(patchRoles).toHaveBeenLastCalledWith(WS, { files: true }, settingsNotice("files"));
+    await click("team-ai-helper-role-code");
+    expect(patchRoles).toHaveBeenLastCalledWith(WS, { code: true }, null);
+    await click("team-ai-helper-role-memory");
+    expect(patchRoles).toHaveBeenLastCalledWith(WS, { memory: false }, null);
+    expect(patchRoles).toHaveBeenCalledTimes(3);
   });
 });

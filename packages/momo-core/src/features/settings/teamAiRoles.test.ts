@@ -15,7 +15,11 @@ import {
   teamAiNoticeKind,
   teamAiRolesChange,
   teamAiRolesErrorKind,
+  teamAiRolesNotice,
+  teamAiSettingsToggleNotice,
   TEAM_AI_BUNDLES,
+  TEAM_AI_NOTICE_BUNDLES,
+  TEAM_AI_NOTICE_VERSION,
   TEAM_AI_SWITCHABLE_BUNDLES,
 } from "./teamAiRoles";
 
@@ -79,5 +83,47 @@ describe("고지와 오류 종류", () => {
     expect(teamAiRolesErrorKind(new ApiError(403, "forbidden"))).toBe("forbidden");
     expect(teamAiRolesErrorKind(new ApiError(500, "boom"))).toBe("other");
     expect(teamAiRolesErrorKind(new Error("offline"))).toBe("other");
+  });
+});
+
+// ADR-0201 증보 v3 B3 (#5040): 화면이 「고지 줄을 보였다」고 서버에 남기는 기록.
+describe("고지 기록: 화면이 보였다고 남기는 것", () => {
+  it("고지가 있는 묶음만 표 순서로 중복 없이 담고, 판은 사전의 판이다. 보인 줄이 없으면 기록도 없다", () => {
+    expect(teamAiRolesNotice("settings", ["memory", "files", "files", "code"])).toEqual({
+      bundles: ["files", "memory"],
+      noticeVersion: TEAM_AI_NOTICE_VERSION,
+      via: "settings",
+    });
+    expect(teamAiRolesNotice("onboarding", ["code", "invite_access", "chat_read"])).toBeNull();
+    expect(teamAiRolesNotice("onboarding", [])).toBeNull();
+    // 서버 `NOTICE_VERSIONS`에 있어야 기록된다(모르는 판은 400). 이 값을 올리면 서버 목록에도 더한다.
+    expect(TEAM_AI_NOTICE_VERSION).toBe("2026-11-01.v1");
+  });
+
+  it("설정의 스위치는 파일·기억을 켤 때만 기록을 싣는다: 끄거나 다른 묶음이면 싣지 않는다", () => {
+    for (const bundle of TEAM_AI_SWITCHABLE_BUNDLES) {
+      const noticed = (TEAM_AI_NOTICE_BUNDLES as readonly string[]).includes(bundle);
+      expect(teamAiSettingsToggleNotice(bundle, true), `${bundle} on`).toEqual(
+        noticed ? { bundles: [bundle], noticeVersion: TEAM_AI_NOTICE_VERSION, via: "settings" } : null
+      );
+      expect(teamAiSettingsToggleNotice(bundle, false), `${bundle} off`).toBeNull();
+    }
+  });
+
+  it("PATCH 본문: 기록이 있으면 team_ai_roles_notice가 같은 본문에 실리고, 없으면 예전 본문 그대로다", async () => {
+    settingsRequest.mockResolvedValue({});
+    const notice = teamAiSettingsToggleNotice("files", true);
+    await patchTeamAiRoles("00000000-0000-7000-8000-000000000001", { files: true }, notice);
+    const [, init] = settingsRequest.mock.calls[0] as [string, { body: string }];
+    expect(JSON.parse(init.body)).toEqual({
+      team_ai_roles: { files: true },
+      team_ai_roles_notice: { bundles: ["files"], noticeVersion: TEAM_AI_NOTICE_VERSION, via: "settings" },
+    });
+    settingsRequest.mockClear();
+    for (const none of [undefined, null]) {
+      await patchTeamAiRoles("00000000-0000-7000-8000-000000000001", { files: false }, none);
+      const [, plain] = settingsRequest.mock.calls.at(-1) as [string, { body: string }];
+      expect(JSON.parse(plain.body)).toEqual({ team_ai_roles: { files: false } });
+    }
   });
 });

@@ -22,6 +22,13 @@ export const messageKeys = [
   "desktop.menu.view",
   "desktop.menu.window",
   "desktop.notify.threadSummary",
+  "expressions.kind.autoNote",
+  "expressions.kind.emoji",
+  "expressions.kind.hintEmoji",
+  "expressions.kind.hintSticker",
+  "expressions.kind.legend",
+  "expressions.kind.sticker",
+  "expressions.panel.viewEmpty",
   "expressions.photo.agentInstead",
   "expressions.photo.anotherPhoto",
   "expressions.photo.branchLabel",
@@ -259,6 +266,52 @@ export const messageKeys = [
   "timeline.unfurl.previewDismissed",
   "timeline.unfurl.previewGroup",
   "timeline.unfurl.video",
+  "timeline.workPlan.button",
+  "timeline.workPlan.buttonDone",
+  "timeline.workPlan.maybeStale",
+  "timeline.workPlan.notLive",
+  "timeline.workPlan.openAll",
+  "timeline.workPlan.sessionLabel",
+  "timeline.workPlan.stepCurrent",
+  "timeline.workPlan.stepDone",
+  "timeline.workPlan.stepPending",
+  "timeline.workPlan.title",
+  "timeline.workPlan.titleDone",
+  "timeline.workRecord.bundleRead",
+  "timeline.workRecord.bundleReadSearch",
+  "timeline.workRecord.bundleSearch",
+  "timeline.workRecord.capped",
+  "timeline.workRecord.durationMinutes",
+  "timeline.workRecord.durationMs",
+  "timeline.workRecord.durationSeconds",
+  "timeline.workRecord.emptyEnded",
+  "timeline.workRecord.emptyOpen",
+  "timeline.workRecord.failureAlreadyClaimed",
+  "timeline.workRecord.failureClaimExpired",
+  "timeline.workRecord.failureConflict",
+  "timeline.workRecord.failureInternal",
+  "timeline.workRecord.failureInvalidArguments",
+  "timeline.workRecord.failureNotAuthorized",
+  "timeline.workRecord.failureUnavailable",
+  "timeline.workRecord.kindDelegate",
+  "timeline.workRecord.kindEdit",
+  "timeline.workRecord.kindOther",
+  "timeline.workRecord.kindRead",
+  "timeline.workRecord.kindRun",
+  "timeline.workRecord.kindSearch",
+  "timeline.workRecord.kindWeb",
+  "timeline.workRecord.noteAgent",
+  "timeline.workRecord.noteComputer",
+  "timeline.workRecord.noteOort",
+  "timeline.workRecord.repeat",
+  "timeline.workRecord.sourceAgent",
+  "timeline.workRecord.sourceComputer",
+  "timeline.workRecord.sourceOort",
+  "timeline.workRecord.statusFailed",
+  "timeline.workRecord.statusRunning",
+  "timeline.workRecord.summary",
+  "timeline.workRecord.summaryFailed",
+  "timeline.workRecord.unsupported",
   "timeline.workRequest.composerBusy",
   "timeline.workRequest.fill",
   "timeline.workRequest.fillHint",
@@ -272,7 +325,23 @@ export const messageKeys = [
   "timeline.workRequest.openSheetLabel",
   "timeline.workRequest.openTools",
   "timeline.workRequest.sheetHint",
-  "timeline.workRequest.threadClosed"
+  "timeline.workRequest.threadClosed",
+  "timeline.workTool.actionClaimSecret",
+  "timeline.workTool.actionInitiate",
+  "timeline.workTool.actionPropose",
+  "timeline.workTool.cardSuggest",
+  "timeline.workTool.conversationRead",
+  "timeline.workTool.expressionAssemble",
+  "timeline.workTool.inboxRead",
+  "timeline.workTool.jobRelease",
+  "timeline.workTool.jobRenew",
+  "timeline.workTool.jobsClaim",
+  "timeline.workTool.jobStart",
+  "timeline.workTool.messagePost",
+  "timeline.workTool.ping",
+  "timeline.workTool.runComplete",
+  "timeline.workTool.runEvent",
+  "timeline.workTool.unknown"
 ] as const;
 
 export type MessageKey = typeof messageKeys[number];
@@ -306,6 +375,13 @@ export const argumentSpecs = {
   "desktop.notify.threadSummary": {
     "count": "number"
   },
+  "expressions.kind.autoNote": {},
+  "expressions.kind.emoji": {},
+  "expressions.kind.hintEmoji": {},
+  "expressions.kind.hintSticker": {},
+  "expressions.kind.legend": {},
+  "expressions.kind.sticker": {},
+  "expressions.panel.viewEmpty": {},
   "expressions.photo.agentInstead": {},
   "expressions.photo.anotherPhoto": {},
   "expressions.photo.branchLabel": {},
@@ -598,6 +674,83 @@ export const argumentSpecs = {
   "timeline.unfurl.previewDismissed": {},
   "timeline.unfurl.previewGroup": {},
   "timeline.unfurl.video": {},
+  "timeline.workPlan.button": {
+    "done": "number",
+    "total": "number"
+  },
+  "timeline.workPlan.buttonDone": {
+    "total": "number"
+  },
+  "timeline.workPlan.maybeStale": {},
+  "timeline.workPlan.notLive": {},
+  "timeline.workPlan.openAll": {},
+  "timeline.workPlan.sessionLabel": {},
+  "timeline.workPlan.stepCurrent": {},
+  "timeline.workPlan.stepDone": {},
+  "timeline.workPlan.stepPending": {},
+  "timeline.workPlan.title": {
+    "done": "number",
+    "total": "number"
+  },
+  "timeline.workPlan.titleDone": {},
+  "timeline.workRecord.bundleRead": {
+    "read": "number"
+  },
+  "timeline.workRecord.bundleReadSearch": {
+    "read": "number",
+    "search": "number"
+  },
+  "timeline.workRecord.bundleSearch": {
+    "search": "number"
+  },
+  "timeline.workRecord.capped": {
+    "shown": "number"
+  },
+  "timeline.workRecord.durationMinutes": {
+    "minutes": "number",
+    "seconds": "number"
+  },
+  "timeline.workRecord.durationMs": {
+    "ms": "number"
+  },
+  "timeline.workRecord.durationSeconds": {
+    "seconds": "number"
+  },
+  "timeline.workRecord.emptyEnded": {},
+  "timeline.workRecord.emptyOpen": {},
+  "timeline.workRecord.failureAlreadyClaimed": {},
+  "timeline.workRecord.failureClaimExpired": {},
+  "timeline.workRecord.failureConflict": {},
+  "timeline.workRecord.failureInternal": {},
+  "timeline.workRecord.failureInvalidArguments": {},
+  "timeline.workRecord.failureNotAuthorized": {},
+  "timeline.workRecord.failureUnavailable": {},
+  "timeline.workRecord.kindDelegate": {},
+  "timeline.workRecord.kindEdit": {},
+  "timeline.workRecord.kindOther": {},
+  "timeline.workRecord.kindRead": {},
+  "timeline.workRecord.kindRun": {},
+  "timeline.workRecord.kindSearch": {},
+  "timeline.workRecord.kindWeb": {},
+  "timeline.workRecord.noteAgent": {},
+  "timeline.workRecord.noteComputer": {},
+  "timeline.workRecord.noteOort": {},
+  "timeline.workRecord.repeat": {
+    "count": "number"
+  },
+  "timeline.workRecord.sourceAgent": {},
+  "timeline.workRecord.sourceComputer": {},
+  "timeline.workRecord.sourceOort": {},
+  "timeline.workRecord.statusFailed": {},
+  "timeline.workRecord.statusRunning": {},
+  "timeline.workRecord.summary": {
+    "calls": "number"
+  },
+  "timeline.workRecord.summaryFailed": {
+    "calls": "number",
+    "failed": "number"
+  },
+  "timeline.workRecord.unsupported": {},
   "timeline.workRequest.composerBusy": {},
   "timeline.workRequest.fill": {},
   "timeline.workRequest.fillHint": {},
@@ -615,7 +768,23 @@ export const argumentSpecs = {
   },
   "timeline.workRequest.openTools": {},
   "timeline.workRequest.sheetHint": {},
-  "timeline.workRequest.threadClosed": {}
+  "timeline.workRequest.threadClosed": {},
+  "timeline.workTool.actionClaimSecret": {},
+  "timeline.workTool.actionInitiate": {},
+  "timeline.workTool.actionPropose": {},
+  "timeline.workTool.cardSuggest": {},
+  "timeline.workTool.conversationRead": {},
+  "timeline.workTool.expressionAssemble": {},
+  "timeline.workTool.inboxRead": {},
+  "timeline.workTool.jobRelease": {},
+  "timeline.workTool.jobRenew": {},
+  "timeline.workTool.jobsClaim": {},
+  "timeline.workTool.jobStart": {},
+  "timeline.workTool.messagePost": {},
+  "timeline.workTool.ping": {},
+  "timeline.workTool.runComplete": {},
+  "timeline.workTool.runEvent": {},
+  "timeline.workTool.unknown": {}
 } as const;
 
 export interface MessageArgs {
@@ -641,6 +810,13 @@ export interface MessageArgs {
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
   "desktop.notify.threadSummary": { count: number };
+  "expressions.kind.autoNote": Record<string, never>;
+  "expressions.kind.emoji": Record<string, never>;
+  "expressions.kind.hintEmoji": Record<string, never>;
+  "expressions.kind.hintSticker": Record<string, never>;
+  "expressions.kind.legend": Record<string, never>;
+  "expressions.kind.sticker": Record<string, never>;
+  "expressions.panel.viewEmpty": Record<string, never>;
   "expressions.photo.agentInstead": Record<string, never>;
   "expressions.photo.anotherPhoto": Record<string, never>;
   "expressions.photo.branchLabel": Record<string, never>;
@@ -878,6 +1054,52 @@ export interface MessageArgs {
   "timeline.unfurl.previewDismissed": Record<string, never>;
   "timeline.unfurl.previewGroup": Record<string, never>;
   "timeline.unfurl.video": Record<string, never>;
+  "timeline.workPlan.button": { done: number; total: number };
+  "timeline.workPlan.buttonDone": { total: number };
+  "timeline.workPlan.maybeStale": Record<string, never>;
+  "timeline.workPlan.notLive": Record<string, never>;
+  "timeline.workPlan.openAll": Record<string, never>;
+  "timeline.workPlan.sessionLabel": Record<string, never>;
+  "timeline.workPlan.stepCurrent": Record<string, never>;
+  "timeline.workPlan.stepDone": Record<string, never>;
+  "timeline.workPlan.stepPending": Record<string, never>;
+  "timeline.workPlan.title": { done: number; total: number };
+  "timeline.workPlan.titleDone": Record<string, never>;
+  "timeline.workRecord.bundleRead": { read: number };
+  "timeline.workRecord.bundleReadSearch": { read: number; search: number };
+  "timeline.workRecord.bundleSearch": { search: number };
+  "timeline.workRecord.capped": { shown: number };
+  "timeline.workRecord.durationMinutes": { minutes: number; seconds: number };
+  "timeline.workRecord.durationMs": { ms: number };
+  "timeline.workRecord.durationSeconds": { seconds: number };
+  "timeline.workRecord.emptyEnded": Record<string, never>;
+  "timeline.workRecord.emptyOpen": Record<string, never>;
+  "timeline.workRecord.failureAlreadyClaimed": Record<string, never>;
+  "timeline.workRecord.failureClaimExpired": Record<string, never>;
+  "timeline.workRecord.failureConflict": Record<string, never>;
+  "timeline.workRecord.failureInternal": Record<string, never>;
+  "timeline.workRecord.failureInvalidArguments": Record<string, never>;
+  "timeline.workRecord.failureNotAuthorized": Record<string, never>;
+  "timeline.workRecord.failureUnavailable": Record<string, never>;
+  "timeline.workRecord.kindDelegate": Record<string, never>;
+  "timeline.workRecord.kindEdit": Record<string, never>;
+  "timeline.workRecord.kindOther": Record<string, never>;
+  "timeline.workRecord.kindRead": Record<string, never>;
+  "timeline.workRecord.kindRun": Record<string, never>;
+  "timeline.workRecord.kindSearch": Record<string, never>;
+  "timeline.workRecord.kindWeb": Record<string, never>;
+  "timeline.workRecord.noteAgent": Record<string, never>;
+  "timeline.workRecord.noteComputer": Record<string, never>;
+  "timeline.workRecord.noteOort": Record<string, never>;
+  "timeline.workRecord.repeat": { count: number };
+  "timeline.workRecord.sourceAgent": Record<string, never>;
+  "timeline.workRecord.sourceComputer": Record<string, never>;
+  "timeline.workRecord.sourceOort": Record<string, never>;
+  "timeline.workRecord.statusFailed": Record<string, never>;
+  "timeline.workRecord.statusRunning": Record<string, never>;
+  "timeline.workRecord.summary": { calls: number };
+  "timeline.workRecord.summaryFailed": { calls: number; failed: number };
+  "timeline.workRecord.unsupported": Record<string, never>;
   "timeline.workRequest.composerBusy": Record<string, never>;
   "timeline.workRequest.fill": Record<string, never>;
   "timeline.workRequest.fillHint": Record<string, never>;
@@ -892,4 +1114,20 @@ export interface MessageArgs {
   "timeline.workRequest.openTools": Record<string, never>;
   "timeline.workRequest.sheetHint": Record<string, never>;
   "timeline.workRequest.threadClosed": Record<string, never>;
+  "timeline.workTool.actionClaimSecret": Record<string, never>;
+  "timeline.workTool.actionInitiate": Record<string, never>;
+  "timeline.workTool.actionPropose": Record<string, never>;
+  "timeline.workTool.cardSuggest": Record<string, never>;
+  "timeline.workTool.conversationRead": Record<string, never>;
+  "timeline.workTool.expressionAssemble": Record<string, never>;
+  "timeline.workTool.inboxRead": Record<string, never>;
+  "timeline.workTool.jobRelease": Record<string, never>;
+  "timeline.workTool.jobRenew": Record<string, never>;
+  "timeline.workTool.jobsClaim": Record<string, never>;
+  "timeline.workTool.jobStart": Record<string, never>;
+  "timeline.workTool.messagePost": Record<string, never>;
+  "timeline.workTool.ping": Record<string, never>;
+  "timeline.workTool.runComplete": Record<string, never>;
+  "timeline.workTool.runEvent": Record<string, never>;
+  "timeline.workTool.unknown": Record<string, never>;
 }

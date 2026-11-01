@@ -1,4 +1,11 @@
 {
+  "expressions.kind.legend": "Kind",
+  "expressions.kind.emoji": "Emoji",
+  "expressions.kind.sticker": "Sticker",
+  "expressions.kind.hintEmoji": "A small picture. Use it between words and in reactions.",
+  "expressions.kind.hintSticker": "A large picture. It is sent big, and a moving one shows under Team GIF.",
+  "expressions.kind.autoNote": "Picked to match the picture's size and motion. You can change it.",
+  "expressions.panel.viewEmpty": "Nothing in this view yet",
   "expressions.photo.introText": "Send one photo to the image model your team connected and turn it into an emoji.",
   "expressions.photo.checking": "Checking the image model",
   "expressions.photo.checkFailed": "Could not check the image model. Please try again.",

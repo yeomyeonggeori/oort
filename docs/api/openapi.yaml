@@ -2144,6 +2144,25 @@ paths:
         operator's env `TEAM_AI_DAILY_TOKEN_CAP` / `TEAM_AI_DAILY_SEARCH_CAP`
         is a ceiling no workspace value gets past: empty = none, a positive
         number = the ceiling, `0` = off).
+        `team_ai_roles_notice` (object, ADR-0201 증보 v3 B3 / #5040) is the one
+        key of the body that is **not a setting**: the consent record of the line
+        saying which content goes to the team's AI provider, sent by the screen
+        that showed it — the onboarding role step on the PATCH that switches the
+        helper on, the settings screen on the PATCH that turns `files` or `memory`
+        on. It is taken out of the body before the merge, so it is never stored,
+        never echoed in the bag and not one of the keys the settings audit row
+        names. Its fields are `bundles` (one or two distinct names from `files`,
+        `memory` — the bundles that carry a notice; `code`, `chat_read` and any
+        other name are 400), `noticeVersion` (the wording the screen showed; it
+        must be one the server lists, and an unknown one is 400 rather than a
+        record of words nobody read) and `via` (`onboarding` or `settings`; `card`
+        is the approval's own record, not a door a screen can use). Any other
+        field is 400. It writes the audit row `team_ai.roles.notice_shown` — who
+        (the caller), when (the row's own time), which bundles, which wording,
+        which screen — in the same transaction and after the write, so a request
+        refused before it writes (400, 403, 404, 409 `team_memory_off`) leaves no
+        record. **Absence blocks nothing**: an older client sends none and every
+        bundle is on from the start; `null` reads as absent.
         `?include=team_ai_limits_status` returns the computed
         `team_ai_limits_status` in the response, as on the GET.
         `role_labels` is replaced whole — omit a role key to
@@ -2169,7 +2188,9 @@ paths:
           description: >
             Unknown key, malformed allowed_agent_models, role_labels, welcome_agent_member_id, welcome_prompt,
             team_ai_roles (an unknown bundle, `chat_read`, a non-boolean) or team_ai_limits (`0`, a negative, a
-            fraction for a count, a non-number, an unknown field, a non-object), inactive welcome agent, an unknown
+            fraction for a count, a non-number, an unknown field, a non-object), a `team_ai_roles_notice` the server
+            cannot read (an unlisted `noticeVersion`, a `via` other than `onboarding`/`settings`, a bundle that
+            carries no notice, an extra field), inactive welcome agent, an unknown
             `include`, or non-object body. A `monthlyUsd` limit the server cannot price is 400
             `team_ai_usd_limit_unavailable` (nothing written).
           content:
@@ -16171,6 +16192,18 @@ components:
             - active
           media:
             $ref: '#/components/schemas/ExpressionMedia'
+          kind:
+            type: string
+            enum:
+            - emoji
+            - sticker
+            description: >-
+              What this registration is for in the pickers (ADR-0218 supplement 4, section 10): `emoji`
+              is the small team emoji used between words and in reactions, `sticker` the large emoticon
+              sent on its own (a moving one is shown on the GIF tab). A classification only; message and
+              reaction sizes do not read it. The server always says it; the key is optional only so that
+              a payload from before the field (an older server or cache) still reads, and a missing
+              value means `sticker`, as every earlier registration is.
       - type: object
         additionalProperties: false
         required:
@@ -16250,6 +16283,18 @@ components:
             nullable: true
             enum:
             - null
+          kind:
+            type: string
+            enum:
+            - emoji
+            - sticker
+            description: >-
+              What this registration is for in the pickers (ADR-0218 supplement 4, section 10): `emoji`
+              is the small team emoji used between words and in reactions, `sticker` the large emoticon
+              sent on its own (a moving one is shown on the GIF tab). A classification only; message and
+              reaction sizes do not read it. The server always says it; the key is optional only so that
+              a payload from before the field (an older server or cache) still reads, and a missing
+              value means `sticker`, as every earlier registration is.
     ExpressionList:
       oneOf:
       - type: object
@@ -16778,6 +16823,18 @@ components:
           minLength: 64
           maxLength: 64
           pattern: ^[a-f0-9]{64}$
+        kind:
+          type: string
+          enum:
+          - emoji
+          - sticker
+          description: >-
+            The kind the person chose for this registration (ADR-0218 supplement 4, section 10). Left
+            out, the server applies its recommendation to the stored large picture when it registers
+            it: `sticker` when the picture moves or its longest edge is over 128 px, otherwise `emoji`.
+            An older client that never sends it gets that. A value outside the list is a 400
+            (`expression_invalid`; `expression_choice_invalid` on an approval decision), and a retry of
+            the same `(draftId, revision, sha256)` returns the first receipt whatever kind it names.
     ExpressionMutation:
       type: object
       additionalProperties: false
@@ -25563,7 +25620,8 @@ components:
         RFC 7396-shaped top-level merge patch. Unknown keys 400. role_labels
         is a whole-object replace (nested keys are not deep-merged); the one
         exception is team_ai_roles, merged one level down. null
-        deletes the named key.
+        deletes the named key. team_ai_roles_notice is the one request-only key:
+        not a setting, taken out of the body before the merge and never stored.
       additionalProperties: false
       properties:
         allowed_agent_models:
@@ -25640,6 +25698,41 @@ components:
             files: {type: boolean, nullable: true}
             memory: {type: boolean, nullable: true}
             code: {type: boolean, nullable: true}
+        team_ai_roles_notice:
+          nullable: true
+          type: object
+          description: >
+            ADR-0201 증보 v3 B3 (#5040). **Request-only — not a setting**: the
+            consent record that a screen showed the admin the line saying which
+            content goes to the team's AI provider. Taken out of the body before
+            the merge; never stored, never in the response bag. Writes the audit
+            row `team_ai.roles.notice_shown` (who, when, bundles, wording
+            version, screen) in the same transaction, after the write. Absent
+            or `null` records nothing and blocks nothing (an older client). An
+            unlisted `noticeVersion`, a `via` other than the two below, a bundle
+            that carries no notice, a repeated bundle or any other field is 400
+            and nothing is written.
+          additionalProperties: false
+          required: [bundles, noticeVersion, via]
+          properties:
+            bundles:
+              type: array
+              minItems: 1
+              maxItems: 2
+              uniqueItems: true
+              description: The bundles whose line the screen showed (the two that carry a notice).
+              items: {type: string, enum: [files, memory]}
+            noticeVersion:
+              type: string
+              description: >
+                The wording version the screen showed. One of the versions the server lists
+                (`momo_agent::team_ai_roles::NOTICE_VERSIONS`, newest last); a new wording appends
+                a version and never removes one while a client can still show it.
+              enum: ["2026-11-01.v1"]
+            via:
+              type: string
+              description: The screen. `card` is not here — a card's consent is the approval's own record.
+              enum: [onboarding, settings]
         team_ai_limits:
           nullable: true
           type: object

@@ -31,6 +31,9 @@ const PIN_CODE = codeOnly(
 const MIC_CODE = codeOnly(
   readFileSync(new URL("../huddles/HuddleMicMenu.tsx", import.meta.url), "utf8")
 );
+const DOCK_CODE = codeOnly(
+  readFileSync(new URL("../work/WorkPlanDock.tsx", import.meta.url), "utf8")
+);
 const ACTION_MODEL_CODE = codeOnly(
   readFileSync(
     new URL(
@@ -202,6 +205,7 @@ describe("#4591 every header control wears the design-system tooltip", () => {
     "ChannelContextControls.tsx(멤버)": { code: CONTROLS_CODE, sites: 1 },
     "ChannelHeaderMenu.tsx(⋮)": { code: MENU_CODE, sites: 1 },
     "HuddleHeaderControl.tsx(허들)": { code: HUDDLE_CODE, sites: 1 },
+    "WorkPlanDock.tsx(계획 독, #4578)": { code: DOCK_CODE, sites: 1 },
   };
 
   it("ChatShell의 머리 컨트롤 묶음을 실제로 잘라 냈다(빈 조각 위의 초록 방지)", () => {

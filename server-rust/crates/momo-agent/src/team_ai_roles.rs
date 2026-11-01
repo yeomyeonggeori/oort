@@ -75,9 +75,21 @@ pub const SWITCHABLE_BUNDLES: [&str; 6] = [
 ];
 
 /// What the 「어떤 내용이 팀 AI 공급자에게 가는지」 line was worded as, when an admin read it.
-/// **Bump this when either notice below changes**: the consent record names this value, and a
-/// record that quotes an old version says the admin did not read the new words.
+/// **Bump this when either notice below changes** — and append the new version to
+/// [`NOTICE_VERSIONS`]: the consent record names this value, and a record that quotes an old
+/// version says the admin did not read the new words.
 pub const NOTICE_VERSION: &str = "2026-11-01.v1";
+
+/// Every wording a **screen** may still be showing when it records that an admin read the line
+/// (`PATCH …/settings` `team_ai_roles_notice`, #5040): the screen's sentence lives in the client's
+/// i18n catalog, so the record has to say which version the screen showed — a server that stamped
+/// its own [`NOTICE_VERSION`] would let an older client's older words read as the newer ones.
+/// The request is refused (400) for a version not listed here, and the audit row carries the
+/// listed entry, never the string the client sent. [`NOTICE_VERSION`] is the newest and the last
+/// entry. **Append a new version when the wording changes; never remove one** while an installed
+/// client can still show it (a test holds every released version in this list). Spelled out
+/// rather than built from [`NOTICE_VERSION`], so bumping that constant cannot drop the old entry.
+pub const NOTICE_VERSIONS: [&str; 1] = ["2026-11-01.v1"];
 
 const NOTICE_FILES: &str =
     "파일을 켜면 도우미가 읽은 첨부 파일의 내용이 팀 AI 공급자(팀 키를 발급한 AI 회사)에게 전달돼요.";
@@ -826,6 +838,31 @@ mod tests {
         }
         assert!(notice_for(FILES).unwrap().contains("팀 AI 공급자"));
         assert!(notice_for(MEMORY).unwrap().contains("팀 AI 공급자"));
+    }
+
+    /// A screen may name only a wording the server lists. The newest wording is always listed
+    /// (bumping [`NOTICE_VERSION`] without listing it would refuse every record from the screens
+    /// that show the new words), no version is listed twice, and **no released version is ever
+    /// dropped** — an installed client can still show it, and would be refused for it.
+    #[test]
+    fn the_listed_notice_versions_end_with_the_current_one_hold_no_duplicate_and_lose_none() {
+        // Every wording that has shipped to a screen. Append when a new wording ships; never edit
+        // or remove a line.
+        const RELEASED: [&str; 1] = ["2026-11-01.v1"];
+        assert_eq!(NOTICE_VERSIONS.last(), Some(&NOTICE_VERSION));
+        for released in RELEASED {
+            assert!(
+                NOTICE_VERSIONS.contains(&released),
+                "{released} shipped to a screen and is no longer listed"
+            );
+        }
+        for (index, version) in NOTICE_VERSIONS.iter().enumerate() {
+            assert!(!version.is_empty());
+            assert!(
+                !NOTICE_VERSIONS[..index].contains(version),
+                "{version} is listed twice"
+            );
+        }
     }
 
     /// The role table in the prompt names every bundle and says nothing about what one allows.

@@ -8,6 +8,7 @@ import '../src/boot/coreHost';
 
 import {setLinkPreviewPreference} from '../src/features/conversation/linkPreviewPreference';
 import {resetUnfurlImagesForTest} from '../src/features/conversation/unfurlImage';
+import {__resetSpawnPort, registerSpawnPort} from '../src/features/work/ask/spawnPort';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -20,6 +21,10 @@ import {installAppClock, SHELL_WAIT_TEST_TIMEOUT_MS} from './fixtures/fakeClock'
 // `fetch` 에서 잰다: 링크를 쓰고 멈추면 이 채널로 미리보기를 묻고, ✕를 누른 메시지만 `POST …/messages` 본문에
 // `suppressUnfurl: true` 가 실리고, 누르지 않은 메시지는 그 키가 없다(요청은 closed-world라 옛 서버는 모르는 키를
 // 400으로 거절한다). 서버는 가짜 응답이다.
+//
+// #5037: 내 개인 에이전트를 부르는 `@별칭` 글은 `onSend` 가 `useTimeline.send` 가 아니라 `tryPersonalCall` 로 빠진다
+// (코어 `callPersonalAgent` 가 메시지를 직접 보낸다). 그 길에서도 ✕가 같은 본문 필드로 닿는지, 그리고 정말 호출
+// 길을 탔는지(`POST …/work-spawns` 가 나갔는지)를 같은 셸에서 잰다. 서명(Face ID)만 가짜다.
 // =============================================================================
 
 const WS = '22222222-2222-4222-8222-222222222222';
@@ -61,6 +66,59 @@ const ROSTER = [
 ];
 const CHANNELS = [{id: GENERAL, workspaceId: WS, kind: 'public', name: 'general', muted: false}];
 
+// #5037 — 내 개인 에이전트(로스터)와 그 에이전트를 부를 내 맥(작업 호스트). 이 둘이 있어야 `@my-claude` 글이 호출 길을 탄다.
+const MY_AGENT_ID = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
+const MY_AGENT = {
+  id: MY_AGENT_ID,
+  workspaceId: WS,
+  kind: 'agent',
+  status: 'active',
+  displayName: 'my-claude',
+  handle: 'my-claude',
+  channelCount: 1,
+  channelIds: [GENERAL],
+  capabilities: [],
+  createdAtMs: 0,
+  updatedAtMs: 0,
+  personalAgent: {
+    label: '내 Claude Code',
+    ownerId: SELF_ID,
+    ownerDisplayName: '곽성재',
+    harness: 'claude',
+    enabled: true,
+    mentionable: true,
+  },
+};
+const MY_MAC = {
+  id: 'mac-1',
+  workspaceId: WS,
+  scope: 'member',
+  ownerMemberId: SELF_ID,
+  type: 'workd',
+  displayName: 'MacBook',
+  capabilities: {},
+  createdAtMs: 1,
+  lastSeenAtMs: 10,
+  online: true,
+  folders: [{id: 'folder-q', displayName: '질문용 폴더', kind: 'question'}],
+  defaultFolderId: 'folder-q',
+};
+const SIGNATURE = {
+  deviceKeyId: 'key-1',
+  nonce: 'n',
+  issuedAtMs: 1,
+  expiresAtMs: 2,
+  signature: 'c2ln',
+  folderId: 'folder-q',
+  agentMemberId: MY_AGENT_ID,
+};
+// Face ID 서명자만 가짜다(`jest.mock` 공장은 `mock` 으로 시작하는 바깥 변수만 읽을 수 있다).
+const mockSigner = {sign: jest.fn(async () => SIGNATURE)};
+jest.mock('../src/features/work/ask/phoneSpawnPort', () => ({
+  ...jest.requireActual('../src/features/work/ask/phoneSpawnPort'),
+  lazyPhoneSigner: () => mockSigner,
+}));
+
 function jsonResponse(status: number, body: unknown): Response {
   return {
     status,
@@ -72,6 +130,9 @@ function jsonResponse(status: number, body: unknown): Response {
 let sentBodies: Array<Record<string, unknown>> = [];
 let previewChannels: string[] = [];
 let sentSeq = 100;
+let rosterBody: unknown[] = ROSTER;
+let workHostsBody: unknown[] = [];
+let spawnBodies: Array<Record<string, unknown>> = [];
 
 function installFetch(): jest.Mock {
   const mock = jest.fn(async (url: string, init?: RequestInit) => {
@@ -85,6 +146,10 @@ function installFetch(): jest.Mock {
         title: 'Title of a.example',
         domain: 'a.example',
       });
+    }
+    if (url.includes('/work-spawns') && init?.method === 'POST') {
+      spawnBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return jsonResponse(200, {workControl: {id: 'ctl-1', status: 'pending'}, replayed: false});
     }
     if (url.includes('/messages') && init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
@@ -108,10 +173,10 @@ function installFetch(): jest.Mock {
     if (url.includes('/channels') && !url.includes('/messages')) {
       return jsonResponse(200, {channels: CHANNELS});
     }
-    if (url.includes('/roster')) return jsonResponse(200, {members: ROSTER});
+    if (url.includes('/roster')) return jsonResponse(200, {members: rosterBody});
     if (url.includes('/read-state')) return jsonResponse(200, {read_states: []});
     if (url.includes('/work-sessions')) return jsonResponse(200, {workSessions: []});
-    if (url.includes('/work-hosts')) return jsonResponse(200, {workHosts: []});
+    if (url.includes('/work-hosts')) return jsonResponse(200, {workHosts: workHostsBody});
     if (url.includes('/profile')) {
       return jsonResponse(403, {error: {message: 'agent owner required'}});
     }
@@ -182,6 +247,10 @@ beforeEach(() => {
   sentBodies = [];
   previewChannels = [];
   sentSeq = 100;
+  rosterBody = ROSTER;
+  workHostsBody = [];
+  spawnBodies = [];
+  mockSigner.sign.mockClear();
   resetUnfurlImagesForTest(async () => 'data:image/png;base64,AAAA');
   setLinkPreviewPreference('compact');
   installFetch();
@@ -193,6 +262,7 @@ afterEach(() => {
   queryClient = null;
   jest.useRealTimers();
   resetUnfurlImagesForTest();
+  __resetSpawnPort();
 });
 
 describe('폰 채널 화면의 링크 미리보기 이음매 (#5016)', () => {
@@ -216,5 +286,41 @@ describe('폰 채널 화면의 링크 미리보기 이음매 (#5016)', () => {
     expect(sentBodies).toHaveLength(2);
     expect(sentBodies[1]).toMatchObject({body: LINK});
     expect(sentBodies[1]).not.toHaveProperty('suppressUnfurl');
+  });
+
+  /** `@my-claude <링크>` 를 쓰고, 카드가 서면 ✕를 눌러 보낸다. */
+  async function callWithPreviewOff(): Promise<string> {
+    rosterBody = [...ROSTER, MY_AGENT];
+    registerSpawnPort({wired: true, spawn: async () => ({kind: 'sent', controlId: 'c', replayed: false})});
+    const CALL = `@my-claude ${LINK}`;
+    await openChannel();
+    await act(async () => {
+      fireEvent.changeText(screen.getByTestId('composer-input'), CALL);
+    });
+    await settle(350);
+    await settle();
+    expect(screen.getByTestId('composer-link-preview')).toBeTruthy();
+    await press('composer-link-preview-dismiss');
+    await press('composer-send');
+    return CALL;
+  }
+
+  it('내 개인 에이전트를 부르는 `@별칭` 글도 ✕가 보내기 본문에 실리고, 호출은 그대로 나간다 (#5037)', async () => {
+    workHostsBody = [MY_MAC];
+    const CALL = await callWithPreviewOff();
+    // 호출 길을 탔다: 메시지가 먼저 나가고 그 id를 서명한 호출이 `work-spawns` 로 나간다.
+    await waitFor(() => expect(spawnBodies).toHaveLength(1));
+    expect(sentBodies).toHaveLength(1);
+    expect(sentBodies[0]).toMatchObject({body: CALL, suppressUnfurl: true});
+    expect(mockSigner.sign).toHaveBeenCalledTimes(1);
+  });
+
+  it('맥이 꺼져 호출 대신 평범한 전송으로 물러나도 ✕가 같은 본문 필드로 닿고, 서명도 호출도 없다 (#5037)', async () => {
+    workHostsBody = [{...MY_MAC, online: false}];
+    const CALL = await callWithPreviewOff();
+    await waitFor(() => expect(sentBodies).toHaveLength(1));
+    expect(sentBodies[0]).toMatchObject({body: CALL, suppressUnfurl: true});
+    expect(spawnBodies).toEqual([]);
+    expect(mockSigner.sign).not.toHaveBeenCalled();
   });
 });

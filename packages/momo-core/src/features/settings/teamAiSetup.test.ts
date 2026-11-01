@@ -1,7 +1,7 @@
 // ADR-0201 증보 v3 B3·B10 (#4945): 온보딩 「도우미 켜기」의 쓰기 순서와 실패 규칙.
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../lib/api";
-import { defaultTeamAiRoles } from "./teamAiRoles";
+import { defaultTeamAiRoles, TEAM_AI_NOTICE_VERSION } from "./teamAiRoles";
 import {
   newTeamAiSetupProgress,
   runTeamAiSetup,
@@ -156,5 +156,47 @@ describe("이름 입력과 거절 종류", () => {
     expect(teamAiRenameErrorKind(new ApiError(400, "displayName is required"))).toBe("invalid");
     expect(teamAiRenameErrorKind(new ApiError(403, "forbidden"))).toBe("forbidden");
     expect(teamAiRenameErrorKind(new Error("offline"))).toBe("other");
+  });
+});
+
+// ADR-0201 증보 v3 B3 (#5040): 온보딩의 고지 기록은 「도우미 켜기」 요청에 실린다.
+describe("온보딩 고지 기록: 켜는 요청에 실린다", () => {
+  const notice = (bundles: string[]) => ({ bundles, noticeVersion: TEAM_AI_NOTICE_VERSION, via: "onboarding" });
+  const run = async (roles: ReturnType<typeof defaultTeamAiRoles>) => {
+    const { spies } = deps();
+    await runTeamAiSetup(
+      { workspaceId: WS, linkPosition: 0, name: TEAM_AI_DEFAULT_NAME, roles },
+      newTeamAiSetupProgress(),
+      spies
+    );
+    return spies;
+  };
+
+  it("최종 선택에서 켜진 파일·기억만 담는다. 역할 PATCH가 없는 기본값에서도 그렇고, 모두 껐으면 싣지 않는다", async () => {
+    const base = defaultTeamAiRoles();
+    const defaults = await run(base);
+    expect(defaults.patchRoles).not.toHaveBeenCalled();
+    expect(defaults.enable.mock.calls).toEqual([[WS, notice(["files", "memory"])]]);
+    expect((await run({ ...base, memory: false })).enable.mock.calls).toEqual([[WS, notice(["files"])]]);
+    expect((await run({ ...base, files: false })).enable.mock.calls).toEqual([[WS, notice(["memory"])]]);
+    expect((await run({ ...base, files: false, memory: false, code: false })).enable.mock.calls).toEqual([[WS, null]]);
+    // 고지가 없는 묶음(코드·초대)을 껐다고 보인 줄이 달라지지 않는다.
+    expect((await run({ ...base, code: false, invite_access: false })).enable.mock.calls).toEqual([
+      [WS, notice(["files", "memory"])],
+    ]);
+  });
+
+  it("켜기가 실패하면 기록도 남지 않았으니 다시 시도에 다시 싣고, 켜진 뒤에는 다시 보내지 않는다", async () => {
+    const { spies } = deps();
+    spies.enable.mockRejectedValueOnce(new ApiError(503, "down"));
+    const progress = newTeamAiSetupProgress();
+    const input = { workspaceId: WS, linkPosition: 0, name: TEAM_AI_DEFAULT_NAME, roles: defaultTeamAiRoles() };
+    await runTeamAiSetup(input, progress, spies).catch(() => undefined);
+    await runTeamAiSetup(input, progress, spies);
+    await runTeamAiSetup(input, progress, spies);
+    expect(spies.enable.mock.calls).toEqual([
+      [WS, notice(["files", "memory"])],
+      [WS, notice(["files", "memory"])],
+    ]);
   });
 });

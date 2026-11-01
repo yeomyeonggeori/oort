@@ -22,6 +22,11 @@
 
 import { ApiError } from "../../lib/api";
 import { settingsRequest } from "./api";
+import {
+  TEAM_AI_ROLES_NOTICE_KEY,
+  withNoticeFallback,
+  type TeamAiRolesNotice,
+} from "./teamAiRoles";
 
 export const TEAM_AI_SETTINGS_KEY = "team_ai_fast_path";
 export const TEAM_AI_MEMBER_SETTINGS_KEY = "team_ai_agent_member_id";
@@ -91,18 +96,27 @@ export async function probeTeamAiSwitch(workspaceId: string): Promise<TeamAiSupp
   }
 }
 
-/** 켜기/끄기. 응답은 저장된 가방 전체다. */
+/**
+ * 켜기/끄기. 응답은 저장된 가방 전체다. `notice`는 온보딩이 역할 단계의 고지 기록을 켜는 요청에
+ * 실을 때만 넘긴다(#5040): 없으면 본문은 `{team_ai_fast_path}` 하나로 예전과 같고, 고지 줄을 보이지
+ * 않는 켜기(설정의 스위치·다음 단계 카드)는 넘기지 않는다.
+ */
 export function setTeamAiSwitch(
   workspaceId: string,
-  enabled: boolean
+  enabled: boolean,
+  notice?: TeamAiRolesNotice | null
 ): Promise<unknown> {
-  return settingsRequest<unknown>(
-    `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({ [TEAM_AI_SETTINGS_KEY]: enabled }),
-    }
-  );
+  return withNoticeFallback(notice, (sent) => {
+    const body: Record<string, unknown> = { [TEAM_AI_SETTINGS_KEY]: enabled };
+    if (sent) body[TEAM_AI_ROLES_NOTICE_KEY] = sent;
+    return settingsRequest<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }
+    );
+  });
 }
 
 // ---- 문구 ----------------------------------------------------------------------
