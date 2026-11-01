@@ -2048,6 +2048,97 @@ async fn a_preview_with_no_place_is_a_429_and_gives_the_unit_back() {
     assert_eq!(audit, 0, "no refusal was the budget's");
 }
 
+/// ADR-0170 증보 D20: the budget counts a request that **fetches**, whatever the fetch finds. The
+/// only unit given back is the one for a place that was not there, so a member cannot probe a
+/// site's (or a great many sites') failures for free. A refund added to the `failed` answer is the
+/// regression this holds: the third address below would then be a 200.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_failed_preview_spends_the_budget_like_a_good_one() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let (workspace, channel) = (fixture.workspace, fixture.channel);
+    let site = Arc::new(SiteHttp {
+        asked: std::sync::Mutex::new(Vec::new()),
+    });
+    // Two fetches per member per window, and the places among the fetches in flight left as they
+    // are: a 429 below can only be the budget's.
+    let base = start_preview_server(
+        app_pool.clone(),
+        site.clone(),
+        RateLimitConfig {
+            unfurl_preview_per_member_limit: 2,
+            ..RateLimitConfig::default()
+        },
+        ProxyLimits::default(),
+        true,
+    )
+    .await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, &fixture).await;
+    let ask = |url: &str| {
+        let (http, base, token, url) = (http.clone(), base.clone(), token.clone(), url.to_string());
+        async move { post_preview(&http, &base, workspace, channel, Some(&token), &url).await }
+    };
+    let asked = || asked_as(&site, FetchKind::Preview).len();
+
+    // The two ways a fetch ends in `failed` that the route cannot tell apart: the transport
+    // errors (the stand-in knows no such page), and the page arrives with nothing a card can show.
+    let down = "https://down.example/story";
+    let empty = "https://empty.example/p";
+    for url in [down, empty] {
+        let response = ask(url).await;
+        assert_eq!(response.status(), 200, "{url}");
+        let body: Value = response.json().await.unwrap();
+        assert_eq!(body, json!({ "url": url, "status": "failed" }), "{url}");
+    }
+    assert_eq!(asked(), 2, "both went to the transport, and both failed");
+
+    // A third address, one that has a card, is refused by the budget: two failures spent it.
+    let refused = ask("https://third.preview.example/").await;
+    assert_eq!(
+        refused.status(),
+        429,
+        "a failed preview spent its unit; it was not given back"
+    );
+    let retry_after: u64 = refused.headers()["retry-after"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .expect("whole seconds");
+    assert!((1..=60).contains(&retry_after), "Retry-After {retry_after}");
+    assert_eq!(asked(), 2, "a refusal never reached the transport");
+    // The refusal is the budget's (one audit row), not a missing place's (which writes none).
+    let rows: Vec<Value> = sqlx::query_scalar(
+        "SELECT detail FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'rate_limit.exceeded' AND actor_member_id = $2",
+    )
+    .bind(workspace)
+    .bind(fixture.member)
+    .fetch_all(&su)
+    .await
+    .expect("audit rows");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["surface"], "unfurl_preview");
+    assert_eq!(rows[0]["limit"], 2);
+
+    // What failed is remembered, and asking again is free: the same two addresses are still
+    // `failed` with the budget spent (a 200, not a 429), and the transport is not asked again.
+    for url in [down, empty] {
+        let response = ask(url).await;
+        assert_eq!(response.status(), 200, "{url} again");
+        assert_eq!(
+            response.json::<Value>().await.unwrap()["status"],
+            "failed",
+            "{url} again"
+        );
+    }
+    assert_eq!(asked(), 2, "a remembered failure costs the site nothing");
+}
+
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn a_destination_the_guard_refuses_is_a_plain_failed_preview_through_the_production_transport(
@@ -2410,4 +2501,296 @@ async fn a_message_sent_with_suppress_unfurl_gets_no_cards_and_one_without_still
         .await
         .unwrap();
     assert_eq!(linkless.status(), 201);
+}
+
+/// ADR-0170 증보 D21: 「미리보기 없이 보내기」 belongs to the message being sent, whatever shape the
+/// message has, and to nobody else's. A thread reply (`rootId`) and a quote (`replyToId`) go through
+/// the same send transaction as a plain message, so a misplaced plant would do one of two things:
+/// leave a card on a message whose author asked for none, or take the card away from the message
+/// that was replied to or quoted, which may be somebody else's. Both are held here. The same shapes
+/// without the key still get a card, so the empty results are the key's doing and not the shape's;
+/// and a colleague's suppressed reply and quote leave the owner's message, link and card, as it was.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn suppress_unfurl_covers_a_thread_reply_and_a_quote_and_never_reaches_the_message_it_answers(
+) {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    assert_runtime_role_is_not_privileged(&app_pool).await;
+    let fixture = seed(&su, &app_pool).await;
+    let (workspace, channel) = (fixture.workspace, fixture.channel);
+    // A colleague in the same channel: the author of the replies that are not the owner's.
+    let colleague = add_member(&su, workspace, channel).await;
+    join_channel(&app_pool, workspace, channel, colleague.member, "member").await;
+    sqlx::query(skip_stale_jobs()).execute(&su).await.ok();
+    let site = Arc::new(SiteHttp {
+        asked: std::sync::Mutex::new(Vec::new()),
+    });
+    let base = start_preview_server(
+        app_pool.clone(),
+        site.clone(),
+        RateLimitConfig::default(),
+        ProxyLimits::default(),
+        true,
+    )
+    .await;
+    let http = reqwest::Client::new();
+    let owner_token = login(&http, &base, &fixture).await;
+    let colleague_token = login(&http, &base, &colleague).await;
+    // Every message carries the same link, so every one of them would get a card.
+    let send = |token: &str, extra: Value| {
+        let (http, base, token) = (http.clone(), base.clone(), token.to_string());
+        async move {
+            let mut request = json!({
+                "clientMsgId": Uuid::new_v4(),
+                "type": "text",
+                "body": "https://news.example/story"
+            });
+            request
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let response = http
+                .post(format!(
+                    "{base}/v1/workspaces/{workspace}/channels/{channel}/messages"
+                ))
+                .bearer_auth(token)
+                .json(&request)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 201, "{request}");
+            response.json::<Value>().await.unwrap()["id"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+    };
+
+    // The owner's message that is replied to and quoted. It is not suppressed: it gets its card.
+    let root = send(&owner_token, json!({})).await;
+    // The owner's own replies and quotes, with the key and (as the control) without it.
+    let reply_suppressed = send(
+        &owner_token,
+        json!({"rootId": root, "suppressUnfurl": true}),
+    )
+    .await;
+    let quote_suppressed = send(
+        &owner_token,
+        json!({"replyToId": root, "suppressUnfurl": true}),
+    )
+    .await;
+    let reply_plain = send(&owner_token, json!({"rootId": root})).await;
+    let quote_plain = send(&owner_token, json!({"replyToId": root})).await;
+    // The colleague's reply and quote, with the key, to the owner's message.
+    let foreign_reply = send(
+        &colleague_token,
+        json!({"rootId": root, "suppressUnfurl": true}),
+    )
+    .await;
+    let foreign_quote = send(
+        &colleague_token,
+        json!({"replyToId": root, "suppressUnfurl": true}),
+    )
+    .await;
+
+    let worker = UnfurlWorker::new(
+        su.clone(),
+        site.clone(),
+        UnfurlConfig::for_tests(database_url(), true),
+    );
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.claimed, 7, "each of the seven links queued a job");
+    assert_eq!(stats.skipped, 4, "the four suppressed ones end as skipped");
+    // The three that get cards share one link: the first fetches it, the others find the answer.
+    assert_eq!((stats.fetched, stats.cached), (1, 2));
+
+    let cards = |message: &str| {
+        let (http, base, token, message) = (
+            http.clone(),
+            base.clone(),
+            owner_token.clone(),
+            message.to_string(),
+        );
+        async move {
+            let list: Value = http
+                .get(format!(
+                    "{base}/v1/workspaces/{workspace}/messages/{message}/unfurls"
+                ))
+                .bearer_auth(token)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            list["unfurls"].as_array().unwrap().len()
+        }
+    };
+    for (label, message) in [
+        ("owner's thread reply, suppressed", &reply_suppressed),
+        ("owner's quote, suppressed", &quote_suppressed),
+        ("colleague's thread reply, suppressed", &foreign_reply),
+        ("colleague's quote, suppressed", &foreign_quote),
+    ] {
+        assert_eq!(cards(message).await, 0, "{label}");
+    }
+    for (label, message) in [
+        ("the message that was replied to and quoted", &root),
+        ("thread reply, no key", &reply_plain),
+        ("quote, no key", &quote_plain),
+    ] {
+        assert_eq!(cards(message).await, 1, "{label}: a card");
+    }
+    assert_eq!(
+        asked_as(&site, FetchKind::Html).len(),
+        1,
+        "the link was fetched once, for the three messages that get a card"
+    );
+
+    // One tombstone for each suppressed message, in the name of the one who sent it, and none for
+    // the message that was answered or for the two without the key.
+    let tombstones = |message: &str| {
+        let su = su.clone();
+        let message = Uuid::parse_str(message).unwrap();
+        async move {
+            sqlx::query_as::<_, (Uuid,)>(
+                "SELECT removed_by FROM message_unfurl_tombstone WHERE message_id = $1",
+            )
+            .bind(message)
+            .fetch_all(&su)
+            .await
+            .unwrap()
+        }
+    };
+    for (label, message, author) in [
+        ("owner's thread reply", &reply_suppressed, fixture.member),
+        ("owner's quote", &quote_suppressed, fixture.member),
+        ("colleague's thread reply", &foreign_reply, colleague.member),
+        ("colleague's quote", &foreign_quote, colleague.member),
+    ] {
+        assert_eq!(tombstones(message).await, vec![(author,)], "{label}");
+    }
+    for (label, message) in [
+        ("the message that was answered", &root),
+        ("thread reply, no key", &reply_plain),
+        ("quote, no key", &quote_plain),
+    ] {
+        assert!(tombstones(message).await.is_empty(), "{label}");
+    }
+}
+
+/// ADR-0170 증보 D16: a preview request is judged on an **active** member of the workspace who is a
+/// current member of the channel. The second half alone (the channel row) is what a member who
+/// stopped being active still has, so each way of stopping is tried with the channel row and the
+/// token left exactly as they were. (Suspending, removing or leaving through the REST routes revokes
+/// every token of the member, `revoke_member_tokens_in_tx`, and would be a 401 at the door; this is
+/// the check the request makes for itself, and the one the other tests in this file never reach.)
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_member_the_workspace_does_not_count_as_active_may_not_preview_from_a_channel_it_is_still_in(
+) {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    assert_runtime_role_is_not_privileged(&app_pool).await;
+    let fixture = seed(&su, &app_pool).await;
+    let (workspace, channel) = (fixture.workspace, fixture.channel);
+    let colleague = add_member(&su, workspace, channel).await;
+    join_channel(&app_pool, workspace, channel, colleague.member, "member").await;
+    let site = Arc::new(SiteHttp {
+        asked: std::sync::Mutex::new(Vec::new()),
+    });
+    let base = start_preview_server(
+        app_pool.clone(),
+        site.clone(),
+        RateLimitConfig::default(),
+        ProxyLimits::default(),
+        true,
+    )
+    .await;
+    let http = reqwest::Client::new();
+    // Both sign in first: nothing below touches a token.
+    let owner_token = login(&http, &base, &fixture).await;
+    let token = login(&http, &base, &colleague).await;
+    let url = "https://news.example/story";
+    let asked = || asked_as(&site, FetchKind::Preview).len();
+    let preview = |token: &str| {
+        let (http, base, token) = (http.clone(), base.clone(), token.to_string());
+        async move { post_preview(&http, &base, workspace, channel, Some(&token), url).await }
+    };
+
+    // Control: the same member, the same channel, the same address, active: a preview.
+    assert_eq!(preview(&token).await.status(), 200);
+    assert_eq!(asked(), 1);
+
+    // Each way of not being active, with what undoes it. The conditions are the three of
+    // `momo_auth::active_workspace_role`: a `workspace_membership` row, `member.status = 'active'`,
+    // and `member.deleted_at` unset.
+    let member = colleague.member;
+    for (label, stop, undo) in [
+        (
+            "suspended",
+            "UPDATE member SET status = 'suspended' WHERE id = $1",
+            "UPDATE member SET status = 'active' WHERE id = $1",
+        ),
+        (
+            "deleted",
+            "UPDATE member SET deleted_at = now() WHERE id = $1",
+            "UPDATE member SET deleted_at = NULL WHERE id = $1",
+        ),
+        (
+            "no workspace membership",
+            "DELETE FROM workspace_membership WHERE member_id = $1",
+            "INSERT INTO workspace_membership (workspace_id, member_id, role) \
+             SELECT m.workspace_id, m.id, 'member'::membership_role FROM member m WHERE m.id = $1",
+        ),
+    ] {
+        sqlx::query(stop)
+            .bind(member)
+            .execute(&su)
+            .await
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+        let in_channel: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM membership \
+              WHERE channel_id = $1 AND member_id = $2 AND left_at IS NULL)",
+        )
+        .bind(channel)
+        .bind(member)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        assert!(in_channel, "{label}: the channel row is untouched");
+
+        // The address was already asked about, so a refusal that came late would be an answer
+        // from the cache: it is a 403 before anything is looked up, and the site is not asked.
+        let before = asked();
+        let refused = preview(&token).await;
+        assert_eq!(refused.status(), 403, "{label}");
+        assert_eq!(
+            asked(),
+            before,
+            "{label}: a refusal never reached the transport"
+        );
+        // The rest of the channel is not affected.
+        assert_eq!(
+            preview(&owner_token).await.status(),
+            200,
+            "{label}: another member is unaffected"
+        );
+
+        sqlx::query(undo)
+            .bind(member)
+            .execute(&su)
+            .await
+            .unwrap_or_else(|error| panic!("{label}: undo: {error}"));
+        assert_eq!(
+            preview(&token).await.status(),
+            200,
+            "{label}: active again, allowed again"
+        );
+    }
 }
