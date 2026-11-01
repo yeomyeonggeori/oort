@@ -22,6 +22,13 @@ export const messageKeys = [
   "desktop.menu.view",
   "desktop.menu.window",
   "desktop.notify.threadSummary",
+  "expressions.kind.autoNote",
+  "expressions.kind.emoji",
+  "expressions.kind.hintEmoji",
+  "expressions.kind.hintSticker",
+  "expressions.kind.legend",
+  "expressions.kind.sticker",
+  "expressions.panel.viewEmpty",
   "expressions.photo.agentInstead",
   "expressions.photo.anotherPhoto",
   "expressions.photo.branchLabel",
@@ -368,6 +375,13 @@ export const argumentSpecs = {
   "desktop.notify.threadSummary": {
     "count": "number"
   },
+  "expressions.kind.autoNote": {},
+  "expressions.kind.emoji": {},
+  "expressions.kind.hintEmoji": {},
+  "expressions.kind.hintSticker": {},
+  "expressions.kind.legend": {},
+  "expressions.kind.sticker": {},
+  "expressions.panel.viewEmpty": {},
   "expressions.photo.agentInstead": {},
   "expressions.photo.anotherPhoto": {},
   "expressions.photo.branchLabel": {},
@@ -796,6 +810,13 @@ export interface MessageArgs {
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
   "desktop.notify.threadSummary": { count: number };
+  "expressions.kind.autoNote": Record<string, never>;
+  "expressions.kind.emoji": Record<string, never>;
+  "expressions.kind.hintEmoji": Record<string, never>;
+  "expressions.kind.hintSticker": Record<string, never>;
+  "expressions.kind.legend": Record<string, never>;
+  "expressions.kind.sticker": Record<string, never>;
+  "expressions.panel.viewEmpty": Record<string, never>;
   "expressions.photo.agentInstead": Record<string, never>;
   "expressions.photo.anotherPhoto": Record<string, never>;
   "expressions.photo.branchLabel": Record<string, never>;

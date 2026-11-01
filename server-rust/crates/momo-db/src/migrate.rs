@@ -769,12 +769,17 @@ mod tests {
     /// (a value this file never uses, as 011 did), four `notification_rule` columns for the test
     /// push's per-minute window and its last test, and the `push_dispatch_log (member_id,
     /// created_at DESC)` index the diagnostics read. No new table, so no new RLS policy or grant.
+    ///
+    /// 171 is #4961's 「팀 표현의 종류 값」 (ADR-0218 증보 4 §10): `expression.kind` (`emoji` /
+    /// `sticker`), `NOT NULL DEFAULT 'sticker'` so every earlier row reads as a sticker, a closed
+    /// `CHECK`, and nothing else. No new table (so no new RLS policy), no new grant, and the identity
+    /// trigger of 158 keeps the new column immutable after INSERT without being touched.
     #[test]
-    fn discovers_contiguous_migrations_001_to_170() {
+    fn discovers_contiguous_migrations_001_to_171() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=170).collect();
+        let expected: Vec<i64> = (1..=171).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -782,7 +787,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=170 under {}",
+            "expected contiguous 001..=171 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -790,7 +795,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("170_notification_diagnostics_test_push"));
+            .starts_with("171_expression_kind"));
     }
 
     #[test]

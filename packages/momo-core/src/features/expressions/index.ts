@@ -2,6 +2,7 @@ export * from "./types";
 export * from "./contracts";
 export * from "./cache";
 export * from "./search";
+export * from "./kind";
 export * from "./message";
 export * from "./cards";
 export * from "./cardCopy";

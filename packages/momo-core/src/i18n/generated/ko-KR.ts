@@ -152,6 +152,48 @@ export const catalog: MessageCatalog = {
       "value": "건"
     }
   ],
+  "expressions.kind.autoNote": [
+    {
+      "type": 0,
+      "value": "그림의 크기와 움직임에 맞춰 골라 뒀어요. 바꿀 수 있어요."
+    }
+  ],
+  "expressions.kind.emoji": [
+    {
+      "type": 0,
+      "value": "이모지"
+    }
+  ],
+  "expressions.kind.hintEmoji": [
+    {
+      "type": 0,
+      "value": "작은 그림이에요. 글 사이와 반응에 써요."
+    }
+  ],
+  "expressions.kind.hintSticker": [
+    {
+      "type": 0,
+      "value": "큰 그림이에요. 크게 보내고, 움직이면 팀 GIF에 보여요."
+    }
+  ],
+  "expressions.kind.legend": [
+    {
+      "type": 0,
+      "value": "종류"
+    }
+  ],
+  "expressions.kind.sticker": [
+    {
+      "type": 0,
+      "value": "스티커"
+    }
+  ],
+  "expressions.panel.viewEmpty": [
+    {
+      "type": 0,
+      "value": "이 보기에는 아직 그림이 없어요"
+    }
+  ],
   "expressions.photo.agentInstead": [
     {
       "type": 0,

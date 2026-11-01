@@ -22,7 +22,11 @@
 
 import { ApiError } from "../../lib/api";
 import { settingsRequest } from "./api";
-import { TEAM_AI_ROLES_NOTICE_KEY, type TeamAiRolesNotice } from "./teamAiRoles";
+import {
+  TEAM_AI_ROLES_NOTICE_KEY,
+  withNoticeFallback,
+  type TeamAiRolesNotice,
+} from "./teamAiRoles";
 
 export const TEAM_AI_SETTINGS_KEY = "team_ai_fast_path";
 export const TEAM_AI_MEMBER_SETTINGS_KEY = "team_ai_agent_member_id";
@@ -102,15 +106,17 @@ export function setTeamAiSwitch(
   enabled: boolean,
   notice?: TeamAiRolesNotice | null
 ): Promise<unknown> {
-  const body: Record<string, unknown> = { [TEAM_AI_SETTINGS_KEY]: enabled };
-  if (notice) body[TEAM_AI_ROLES_NOTICE_KEY] = notice;
-  return settingsRequest<unknown>(
-    `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,
-    {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    }
-  );
+  return withNoticeFallback(notice, (sent) => {
+    const body: Record<string, unknown> = { [TEAM_AI_SETTINGS_KEY]: enabled };
+    if (sent) body[TEAM_AI_ROLES_NOTICE_KEY] = sent;
+    return settingsRequest<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }
+    );
+  });
 }
 
 // ---- 문구 ----------------------------------------------------------------------

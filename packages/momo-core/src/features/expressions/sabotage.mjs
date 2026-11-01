@@ -43,6 +43,19 @@ const mutations = [
   ["contracts.schema.json", '"attachmentId",\n        "channelId"', '"attachmentId"', "attachment-channel-required"],
   ["message.ts", 'content = content.slice(container[0].length);', 'break;', "nested-code-containers"],
   ["fixtureServer.ts", 'if (receipt) return', 'if (receipt && false) return', "same-choice-receipt"],
+  // #4961 (ADR-0218 증보 4 §10): 종류 값. 추천 규칙·칸 나누기·계약·보내기 한 줄씩.
+  ["kind.ts", "export const EXPRESSION_EMOJI_MAX_EDGE = 128;", "export const EXPRESSION_EMOJI_MAX_EDGE = 127;", "kind-threshold"],
+  ["kind.ts", "large.frameCount > 1 || ", "", "kind-motion-term"],
+  ["kind.ts", 'return isAnimatedExpression(item) ? "gif" : "emoticon";', 'return "emoticon";', "shelf-motion-split"],
+  ["kind.ts", '  if (expressionKindOf(item) === "emoji") return "team";', '  if (isAnimatedExpression(item)) return "gif";\n  if (expressionKindOf(item) === "emoji") return "team";', "shelf-moving-emoji-stays-team"],
+  ["kind.ts", 'if (tab === "emoji") return [];', 'if (tab === "emoji") return [...items];', "emoji-tab-holds-no-registration"],
+  ["kind.ts", 'return item.kind === "emoji" || item.kind === "sticker" ? item.kind : LEGACY_EXPRESSION_KIND;', "return item.kind ?? LEGACY_EXPRESSION_KIND;", "kind-closed-read"],
+  ["kind.ts", 'export const LEGACY_EXPRESSION_KIND: ExpressionKind = "sticker";', 'export const LEGACY_EXPRESSION_KIND: ExpressionKind = "emoji";', "kind-legacy-default"],
+  ["kind.ts", 'return OPENING_ORDER.find((shelf) => expressionsForTab(active, shelf).length > 0) ?? "team";', 'return "team";', "opening-shelf-first-filled"],
+  ["kind.ts", 'const active = items.filter((item) => item.status === "active");', "const active = items;", "opening-shelf-skips-hidden"],
+  ["cards.ts", "...(kind ? { kind } : {})", "", "choice-carries-kind"],
+  ["fixtureServer.ts", "kind: choice.kind ?? recommendExpressionKind(draft.media.large),", "kind: recommendExpressionKind(draft.media.large),", "fixture-server-kind-word"],
+  ["contracts.schema.json", '"pattern": "^[a-f0-9]{64}$"\n        },\n        "kind": {\n          "enum": [\n            "emoji",\n            "sticker"\n          ]', '"pattern": "^[a-f0-9]{64}$"\n        },\n        "kind": {\n          "enum": [\n            "emoji",\n            "sticker",\n            "huge"\n          ]', "choice-kind-closed"],
 ];
 for (const [file, needle, _replacement, name] of mutations) {
   assert.ok(readFileSync(join(directory, file), "utf8").includes(needle), `Mutation no longer applies: ${name}`);

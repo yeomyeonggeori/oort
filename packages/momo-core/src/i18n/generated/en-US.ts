@@ -190,6 +190,48 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "expressions.kind.autoNote": [
+    {
+      "type": 0,
+      "value": "Picked to match the picture's size and motion. You can change it."
+    }
+  ],
+  "expressions.kind.emoji": [
+    {
+      "type": 0,
+      "value": "Emoji"
+    }
+  ],
+  "expressions.kind.hintEmoji": [
+    {
+      "type": 0,
+      "value": "A small picture. Use it between words and in reactions."
+    }
+  ],
+  "expressions.kind.hintSticker": [
+    {
+      "type": 0,
+      "value": "A large picture. It is sent big, and a moving one shows under Team GIF."
+    }
+  ],
+  "expressions.kind.legend": [
+    {
+      "type": 0,
+      "value": "Kind"
+    }
+  ],
+  "expressions.kind.sticker": [
+    {
+      "type": 0,
+      "value": "Sticker"
+    }
+  ],
+  "expressions.panel.viewEmpty": [
+    {
+      "type": 0,
+      "value": "Nothing in this view yet"
+    }
+  ],
   "expressions.photo.agentInstead": [
     {
       "type": 0,

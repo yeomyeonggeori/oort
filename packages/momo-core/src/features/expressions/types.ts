@@ -18,6 +18,13 @@ export const EXPRESSION_LIMITS = {
 } as const;
 
 export type ExpressionVersion = string;
+/**
+ * ADR-0218 §10 J1: what a registration is for in the pickers. `emoji` is the small team emoji that
+ * goes between words and into reactions; `sticker` is the large emoticon sent on its own (a moving
+ * one is shown on the GIF tab). A classification only: message and reaction sizes (D1) do not read it.
+ */
+export const EXPRESSION_KINDS = ["emoji", "sticker"] as const;
+export type ExpressionKind = (typeof EXPRESSION_KINDS)[number];
 export type ExpressionStatus = "active" | "hidden" | "deleted";
 export type ExpressionAddPolicy = "members" | "admins";
 export type ExpressionVariant = "small" | "large" | "thumb";
@@ -62,6 +69,12 @@ export interface ExpressionMetadata {
 export interface Expression extends ExpressionMetadata {
   id: string;
   workspaceId: string;
+  /**
+   * ADR-0218 §10 J6: the server always says it, but the contract leaves it optional so that a
+   * payload from before the field (an older server or cache) still reads. Read it through
+   * `expressionKindOf`, which supplies the value such a payload means.
+   */
+  kind?: ExpressionKind;
   /** Never reassigned or renamed, including after deletion. */
   version: ExpressionVersion;
   status: ExpressionStatus;
@@ -126,6 +139,12 @@ export interface ExpressionChoice {
   revision: ExpressionVersion;
   /** Hash of the large rendition actually shown before approval. */
   sha256: string;
+  /**
+   * ADR-0218 §10 J3: the kind the person chose. Left out, the server applies the recommendation
+   * (`recommendExpressionKind`) to the stored large picture when it registers it, which is also
+   * what an older client that never sends it gets.
+   */
+  kind?: ExpressionKind;
 }
 export type ExpressionCreateRequest = ExpressionChoice;
 export interface ExpressionMutation {
