@@ -1225,6 +1225,21 @@ class CrossRunRecall(GateHarness):
         self.assertRefused(rc, record, "positive control failed")
         self.assertRefused(rc, record, self.FRAGMENT)
 
+    def test_a_config_the_hash_list_accepts_is_still_refused_by_the_rules(self):
+        # The list says which BYTES may start. It does not make a recall tool or a memory switch safe: an open config whose bytes were mixed into the
+        # list is refused all the same, by the rule and not by the hash (the in-image proof `cross-run-tools-on` does this with the real gate).
+        module = load(os.path.join(HERE, "render_model_config.py"), "render_model_config_for_cross_run_hash")
+        raw = module.repo_catalog(HERE)["default"].encode("utf-8")
+        for label, cfg, tools, fragment in (
+            ("a recall tool", healthy_cfg(), TOOLS | {"session_search"}, self.FRAGMENT),
+            ("a switch on", healthy_cfg(memory={**MEMORY_OFF, "memory_enabled": True}), TOOLS, "memory.memory_enabled must be explicitly false"),
+        ):
+            with self.subTest(case=label):
+                rc, record, _ = self.boot(cfg, tools, config_bytes=raw)
+                self.assertRefused(rc, record, fragment)
+                self.assertEqual(record["config_accepted_as"], "default")
+                self.assertFalse(any("accepted configs" in p for p in record["problems"]), record["problems"])
+
     def test_the_live_report_refuses_a_recall_tool_and_a_memory_switch_that_is_on(self):
         rc, kills, record = self.monitor(healthy_cfg())
         self.assertEqual((rc, kills), (0, []), record)

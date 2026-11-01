@@ -371,6 +371,8 @@ LINE_TABLE = [
     ('the later line of a name wins', 'A=1\nA=2\n', {'A': '2'}),
     ('a comment line', '# A=1\n', {}),
     ('an indented comment line', '   # A=1\n', {}),
+    ('a hash glued to the name is a comment', '#A=1\n', {}),
+    ('a hash and a tab before the name is a comment', '#\tA=1\n', {}),
     ('blank lines', '\n\n  \n', {}),
     ('no name', '=1\n', {}),
     ('a name with a blank in it', 'A B=1\n', {'A B': '1'}),
@@ -946,6 +948,24 @@ class LineReaderPort(unittest.TestCase):
         self.assertEqual(set(lockgate.LINE_BREAKS), ends_a_line)
         self.assertEqual(len(lockgate.LINE_BREAKS), len(set(lockgate.LINE_BREAKS)))
 
+    def test_a_name_only_an_earlier_text_of_the_chain_shows_to_the_line_reader_is_named(self):
+        # #4950 review round 2, Low-1: a gate that judged the line reader's names of the LAST text only passed every test, because the one-sided
+        # case of this table was a name only a LATER text shows. Here the line reader reads a name only in the file as it stands on disk (a
+        # blank between two marks, which the first load's clean-up strips: `env_texts` lists it second, after the text of the first load) and in
+        # no python-dotenv reading, and the settled file holds only an allowed name: a refusal that names it can come from the line reader's
+        # reading of that earlier text and from nothing else.
+        raw = b' \xef\xbb\xbf \xef\xbb\xbfOPENAI_API_KEY=1\n'
+        only_earlier = '\ufeff \ufeffOPENAI_API_KEY'
+        texts = lockgate.env_texts(raw)
+        line_names = [set(lockgate.line_assignments(text)) for text in texts]
+        loader_names = [{name for name, _value in lockgate.dotenv_assignments(text)} for text in texts]
+        self.assertEqual([i for i, names in enumerate(line_names) if only_earlier in names], [1], "an earlier text, not the first, not the last")
+        self.assertFalse(any(only_earlier in names for names in loader_names), "the loader never reads it: only the line reader can name it")
+        self.assertEqual(line_names[-1], {"OPENAI_API_KEY"}, "the settled file is clean")
+        with tempfile.TemporaryDirectory() as tmp:
+            problems = lockgate.volume_env_problems(write_env(tmp, raw))
+        self.assertTrue(any(only_earlier in problem for problem in problems), problems)
+
     def test_the_table_has_what_makes_the_two_readers_differ(self):
         # a table that left these out would not hold the copy to what the policy needs it for
         labels = " ".join(label for label, _text, _want in LINE_TABLE)
@@ -986,7 +1006,15 @@ class ProfilesFolder(unittest.TestCase):
             os.mkdir(path)
             os.symlink("/oort-proof/none", os.path.join(path, "oort-proof-link"))
 
-        for label, make in (("a folder", folder), ("a file", file), ("a hidden file", hidden), ("a dangling link", dangling)):
+        def tombstone(path):
+            # what Hermes itself leaves when a profile is deleted (hermes_constants.py `mark_named_profile_deleted`: `profiles/.deleted/<name>`,
+            # removed only by creating or restoring a profile of that name): a volume that once had a profile is not empty (#4950 review round 2)
+            os.makedirs(os.path.join(path, ".deleted"))
+            with open(os.path.join(path, ".deleted", "oort-proof-gone"), "w") as handle:
+                handle.write("deleted\n")
+
+        for label, make in (("a folder", folder), ("a file", file), ("a hidden file", hidden), ("a dangling link", dangling),
+                            ("Hermes' tombstone of a deleted profile", tombstone)):
             for env in (None, b"OPENAI_API_KEY=x\n"):
                 with self.subTest(entry=label, env=env):
                     problems = self.problems(make, env=env)

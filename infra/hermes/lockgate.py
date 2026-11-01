@@ -52,11 +52,18 @@ gate ran. `report` re-checks both on the live volume. The worker half is `OORT_H
 The volume's `.env` (#4886, #4950). Hermes loads `<HERMES_HOME>/.env` after this gate ran, with override, and applies every name in it,
 so the file is judged by what it MAY hold: the names of `VOLUME_ENV_SECRETS` (any value) and the eleven lines Hermes' own first-boot
 seed writes there, `VOLUME_ENV_SEEDED` (exactly those values). Any other name refuses the start by name, whatever its value or its
-spelling, and so does a `.op.env` next to it. Boot and `report` call the same function, `volume_env_problems`. To know which
+spelling, and so does a `.op.env` next to it and any entry under `profiles/` (Hermes serves a folder found there as a profile of its own, with an
+`.env` this gate does not read; its own `.deleted/` tombstone of a deleted profile counts too). Boot and `report` call the same function, `volume_env_problems`. To know which
 names the loader applies, the file is read the way Hermes reads it (hermes_cli/env_loader.py, v0.22.2): `env_cleanup` (its decoding
 and the NUL / whitespace clean-up it applies before loading, one load at a time) and python-dotenv's own statement parser with
 interpolation off (the image's module; outside the image, e.g. the offline tests, a fallback with the same grammar), the last
-assignment of a name winning and a bare `NAME` setting nothing. Hermes loads the file more than once and each load rewrites it,
+assignment of a name winning and a bare `NAME` setting nothing. Hermes reads the file with a SECOND tokenizer as well, the line-by-line `agent/secret_scope.py`
+`load_env_file` (credential pools and config reads use it, multiplexing or not), which can read a name the loader does not (a statement the loader
+cannot finish, a quoted value over two lines, a boundary only it cuts at): the gate judges the names of both (`line_assignments` is a copy of that
+function, held to it row by row in `test_lockgate_env.py` `LINE_TABLE` and input by input in the in-image proof, `line_reader_mismatch`), and no
+allowed name may carry a line boundary in its value (`_line_break_problems`: a rule that stands without knowing either reader's details). When a
+Hermes pin changes `agent/secret_scope.py`, `line_reader_mismatch` says so: fix `line_assignments` and `LINE_TABLE` from a new measurement of the real
+function (docs/RELEASING.md, the pin procedure). Hermes loads the file more than once and each load rewrites it,
 so the gate follows the file through those loads (`env_states`, at most `ENV_LOAD_CAP`; one that is still changing then is refused)
 and judges every text a load may parse (`env_texts`: each state of the file, cleaned up and as it stands), the problems of all of
 them together. No value is read for its meaning, so no reference in a value (`${...}`) has to be resolved: names do not depend on
@@ -705,8 +712,11 @@ def _line_break_problems(assignments):
 
 def _profile_problems(home):
     """The volume's `profiles` folder may be absent (a fresh volume has none: Hermes makes it only when a profile is created or imported) or
-    empty (a profile removed again). Hermes serves every profile folder it finds there as a profile of its own with an `.env` of its own,
-    which this gate does not read; no template writes one, so an ENTRY under it refuses the start (the folder itself is not what counts).
+    empty. Hermes serves every profile folder it finds there as a profile of its own with an `.env` of its own, which this gate does not
+    read; no template writes one, so an ENTRY under it refuses the start (the folder itself is not what counts). A volume that once had a
+    profile is NOT empty: Hermes tombstones a deleted profile as `profiles/.deleted/<name>` (hermes_constants.py `mark_named_profile_deleted`)
+    and never removes it, so that entry refuses the start like any other, and an operator who made and deleted a profile removes `.deleted`
+    once (#4950 review round 2: the refusal stays, a shared Hermes uses no profile).
     A link, a thing that is not a folder and a folder it cannot list are refused too (what they lead to is not known). Only the number
     is named."""
     path = os.path.join(home, PROFILES_DIR)
