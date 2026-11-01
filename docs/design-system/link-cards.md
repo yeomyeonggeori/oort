@@ -94,7 +94,7 @@
 
 ## 9. 보내기 전 입력칸 미리보기 (#5005·#5016, owner 2026-10-31 · 웹·데스크탑·폰)
 
-링크를 넣고 멈추면 **보내기 전에** 입력칸 위에 카드가 먼저 떠요. 카드 한 장은 타임라인 카드와 **같은 컴포넌트**(`UnfurlCard`)이고, 무엇을 보일지는 같은 코어 표시 모델이 정해요(§2 표 전 행, 작게·크게는 이 기기 설정을 따라요). 서버 계약은 [ADR-0170](../adr/0170-link-unfurl-server-surface.md) 증보 2026-11-01(Accepted)의 D14~D22예요. 코드는 `clients/web/src/features/chat/`의 `useComposerLinkPreview.ts`(언제·무엇을 묻나)와 `ComposerLinkPreview.tsx`(줄과 ✕)예요. 아래 표는 웹 채널 입력칸 기준이고, 스레드 입력칸과 폰 입력칸이 다른 점은 표 뒤의 「스레드 입력칸 · 폰 입력칸」에 있어요.
+링크를 넣고 멈추면 **보내기 전에** 입력칸 위에 카드가 먼저 떠요. 카드 한 장은 타임라인 카드와 **같은 컴포넌트**(`UnfurlCard`)이고, 무엇을 보일지는 같은 코어 표시 모델이 정해요(§2 표 전 행, 작게·크게는 이 기기 설정을 따라요). 서버 계약은 [ADR-0170](../adr/0170-link-unfurl-server-surface.md) 증보 2026-11-01(Accepted)의 D14~D22예요. 규칙(언제·무엇을 묻나)은 코어 `createComposerLinkPreviewController`(`packages/momo-core/src/features/timeline/composerLinkPreview.ts`) 한 곳이 정하고, 웹의 `clients/web/src/features/chat/useComposerLinkPreview.ts`와 폰의 같은 이름 훅은 그것을 입력칸에 붙이는 얇은 래퍼예요(#5037). 줄과 ✕는 웹 `ComposerLinkPreview.tsx`예요. 아래 표는 웹 채널 입력칸 기준이고, 스레드 입력칸과 폰 입력칸이 다른 점은 표 뒤의 「스레드 입력칸 · 폰 입력칸」에 있어요.
 
 | 항목 | 규칙 |
 |---|---|
@@ -110,7 +110,7 @@
 | 자리·높이 | 폼 **위**, 첨부 트레이와 같은 줄 모양(`attachment-tray`: 폰은 구분선이 있는 띠, 넓은 창은 입력 카드 가장자리에 맞춘 좌우 24)이에요. 높이는 트레이와 같은 상한(`max-h-tray-max`, 240) 안에서 스크롤해요. 작은 카드는 한두 장이 다 보이고, 크게 카드는 이 안에서 잘려 스크롤돼요. |
 | 끄기·그림 | 이 기기가 **끄기**이면 아무것도 묻지 않아요(초안의 링크를 서버로 보내지 않고, 보이지 않는 카드를 끄는 ✕도 없어요). 그림·아이콘은 미리보기 프록시 경로(`…/unfurl-previews/{id}/image|icon`)로만 받고, 코어의 같은 경로 문으로 걸러요. |
 
-**알려진 한계**(ADR-0170 증보의 「남는 위험」과 같은 뿌리): ① **예약 전송**은 ✕를 아직 싣지 못해요(서버가 예약 요청에서 이 필드를 받지 않아요, D21). ② **폰에서 개인 에이전트를 부르는 `@별칭` 메시지**는 ✕를 싣지 못해요(코어 `callPersonalAgent`가 메시지를 직접 보내고 그 요청이 이 필드를 받지 않아요). ③ 443이 아닌 포트의 링크는 입력칸에서 카드가 안 뜨는데 보낸 뒤에는 카드가 생길 수 있어요(D17). ④ 손으로 천천히 주소를 치다 350ms 넘게 멈추면 그 중간 상태도 한 번 물어요(예산 60에 여유를 둔 이유예요).
+**알려진 한계**(ADR-0170 증보의 「남는 위험」과 같은 뿌리): ① **예약 전송**은 ✕를 아직 싣지 못해요(서버가 예약 요청에서 이 필드를 받지 않아요, D21). ② 443이 아닌 포트의 링크는 입력칸에서 카드가 안 뜨는데 보낸 뒤에는 카드가 생길 수 있어요(D17). ③ 손으로 천천히 주소를 치다 350ms 넘게 멈추면 그 중간 상태도 한 번 물어요(예산 60에 여유를 둔 이유예요).
 
 ### 스레드 입력칸 · 폰 입력칸 (#5016)
 
@@ -118,25 +118,28 @@
 
 | 항목 | 스레드 입력칸(웹·데스크탑) | 폰 입력칸(채널·스레드) |
 |---|---|---|
-| 코드 | `ThreadComposer.tsx`가 같은 `useComposerLinkPreview`·`ComposerLinkPreview`를 써요. 시험 열쇠만 `thread-composer-link-preview`(채널 입력칸과 한 화면에 함께 서요) | `clients/mobile/src/features/conversation/`의 `useComposerLinkPreview.ts`(웹 훅의 짝)·`ComposerLinkPreview.tsx`. 채널과 스레드가 **같은 `Composer`**예요 |
+| 코드 | `ThreadComposer.tsx`가 같은 `useComposerLinkPreview`·`ComposerLinkPreview`를 써요. 시험 열쇠만 `thread-composer-link-preview`(채널 입력칸과 한 화면에 함께 서요) | `clients/mobile/src/features/conversation/`의 `useComposerLinkPreview.ts`(웹과 **같은 코어 컨트롤러**를 붙이는 얇은 훅)·`ComposerLinkPreview.tsx`. 채널과 스레드가 **같은 `Composer`**예요 |
 | 물을 채널 | 이 스레드가 선 채널(답글은 같은 채널로 나가요) | 입력창의 첨부 대상(워크스페이스·채널, 스레드면 뿌리 메시지)과 같아요. 대상을 모르는 하네스는 아무것도 안 물어요 |
 | 자리 | 첨부 트레이 바로 아래, 입력 그릇 위(트레이와 같은 `attachment-tray` 줄) | 첨부 트레이 바로 아래, 인용 줄·알약 **위**. 높이는 트레이와 같은 상한(240) 안에서 스크롤해요. 높이 예산(`composerColumnBudget`)에는 넣지 않아요(트레이·인용 줄과 같은 취급) |
 | 카드 | 타임라인과 같은 `UnfurlCard` | 타임라인과 같은 폰 `CardView`(§8)예요. 아이콘은 줄이 보였는지 묻는 목록이 없어서 카드가 서는 때 바로 받아요 |
 | ✕ | 첫 카드 오른쪽 위(웹 채널과 같음) | 첫 카드 오른쪽 위, 보이는 28·누르는 면 44. 작은 카드의 글은 그 자리를 비워 둬요. 눌리면 「이번 메시지는 링크 미리보기 없이 보내요.」를 소리로 알려요(`announceForAccessibility`) |
 | Esc | 있어요(멘션 목록 → 카드 → 인용) | 없어요(소프트 키보드). 닫는 길은 ✕ 하나 |
 | ✕의 범위 | 채널·**스레드**를 옮기면 풀려요(`threadRootId`) | 방·**스레드**를 옮기면 풀려요 |
-| 보낼 때 | `sendThreadReply`에 `suppressUnfurl: true`(켠 때만). 실패하면 글이 남아 ✕도 남고, 다시 보내도 같은 선택이에요 | 대기 행이 표시를 들고 있어(`PendingMessage.suppressUnfurl`) 실패한 전송·답글의 「다시 보내기」도 같은 요청이에요 |
+| 보낼 때 | `sendThreadReply`에 `suppressUnfurl: true`(켠 때만). 실패하면 글이 남아 ✕도 남고, 다시 보내도 같은 선택이에요 | 대기 행이 표시를 들고 있어(`PendingMessage.suppressUnfurl`) 실패한 전송·답글의 「다시 보내기」도 같은 요청이에요. 내 개인 에이전트를 부르는 `@별칭` 글(#5037)도 같아요: 코어 `callPersonalAgent`의 기본 전송 길이 같은 필드를 받고, 호출 길·호출하지 못해 평범한 전송으로 물러나는 길·그 사이 방을 옮긴 뒤의 직접 전송 **세 길 모두**에 실려요(웹은 `deliver`가 대기 행의 표시를 이미 실어요) |
 
-**폰에서 따로 볼 것**: ① 카드 링크를 누르면 입력창 안에서도 바깥 브라우저가 열려요(타임라인과 같은 컴포넌트라서). ② 큰 카드(약 260pt)는 240 상한 안에서 잘려 스크롤돼요. 키보드가 올라온 작은 화면에서 받아들일 만한지는 캡처로 봐야 해요(대안: 입력창 미리보기는 늘 작게). ③ 상태기계(차례·취소·429)는 웹 훅의 사본이에요 — 고치면 두 곳을 함께 고치고, 코어의 순수 컨트롤러로 올리는 것은 후속이에요.
+**폰에서 따로 볼 것**: ① 카드 링크를 누르면 입력창 안에서도 바깥 브라우저가 열려요(타임라인과 같은 컴포넌트라서). ② 큰 카드(약 260pt)는 240 상한 안에서 잘려 스크롤돼요. 키보드가 올라온 작은 화면에서 받아들일 만한지는 캡처로 봐야 해요(대안: 입력창 미리보기는 늘 작게). ③ 상태기계(차례·취소·429·✕ 범위)는 코어 컨트롤러 한 곳이에요(#5037) — 규칙을 바꾸면 코어를 고치고, 웹·폰 훅은 기기 설정 읽기와 렌더(`view`)·효과(`sync`)·정리(`dispose`) 호출만 가져요. 화면에 그릴 카드는 렌더마다 지금 글에서 뽑아서(`view`는 상태를 바꾸지 않아요), 지운 링크의 카드가 한 프레임도 남지 않아요.
 
 | 재는 곳 | |
 |---|---|
 | 주소 고르기·모양 맞추기·거절 | 코어 `unfurlDraft.test.ts`(서버 `extract.rs`·`normalize.rs` 시험을 같은 입력으로 재생) |
 | 같은 모델로 그리기 · Esc 순서 | 코어 `unfurl.test.ts`의 「composer preview cards」 · `composerKeys.test.ts` |
+| 상태기계의 전이: 기다림이 글마다 처음부터인 것과 요청을 끊는 열쇠가 따로인 것 · 늦은 답 · 끊긴 요청의 거절 · 기억 길이(25분·2분·48개) · 429(상한·한 번만) · 묻지 않는 때(오프라인·키·방 모름·끄기) · ✕의 범위 · 판 안정성 · 정리 | 코어 `composerLinkPreview.test.ts`(서버 호출만 손으로 여닫고 시계는 가짜예요) |
 | 기다림 · 같은 주소 · 3개 차례 · 늦은 답 · ✕ · 되살리기 · 429 · Esc · 오프라인 · 프록시 경로 | 웹 `composerLinkPreview.test.tsx`(진짜 `Composer`, 서버 호출만 손으로 여닫아요) |
+| 훅이 코어 컨트롤러에 입력칸의 수명을 잇는가(사라지면 끊기 · 폰 오프라인) | 웹 `useComposerLinkPreview.test.tsx` · 폰 `useComposerLinkPreview.test.tsx` |
 | 보내기 요청과 재시도에 표시가 실리는가 | 웹 `useTimeline.suppressUnfurl.test.tsx` · 코어 `unfurlPreview.test.ts`(요청 모양) · 폰 `useTimelineSuppressUnfurl.test.tsx` |
 | 스레드 입력창(웹): 기다림 · 채널 · 자리 · ✕ · 다른 스레드 · 429 · Esc | 웹 `threadComposerLinkPreview.test.tsx`(진짜 `ThreadComposer`) · `composerParity.test.ts`(채널·스레드가 같은 훅·줄을 써요) |
 | 폰 입력창: 기다림 · ✕ · 되살리기 · 429 · 방 없음 · 끄기 · 스레드 범위 | 폰 `composerLinkPreview.test.tsx`(진짜 `Composer`) |
 | 폰 호스트 이음매: 스레드 패널 → `sendReply` · 채널 화면 → `POST …/messages` 본문 | 폰 `threadPanelLinkPreview.test.tsx` · `conversationLinkPreview.test.tsx`(셸째 마운트, `fetch`에서 재요) |
+| `@별칭` 개인 에이전트 호출 길의 ✕(#5037): 기본 전송 길의 옵션 · 호출·방 이동 폴백의 본문 · 셸째 마운트(호출 길·맥이 꺼져 물러난 길) | 코어 `personalAgentCall.test.ts` · 폰 `personalAgentCall.test.tsx` · `conversationLinkPreview.test.tsx` |
 
 **아무것도 재지 않는 것**: 라이트·다크에서 실제로 어떻게 보이는지, 390/900/1440 폭, 크게 카드가 240 안에서 잘리는 모양, 실제 사이트의 그림·아이콘, 입력칸이 자랄 때 타임라인 바닥 고정, 데스크탑 셸에서의 Esc, 320px 스레드 패널에서 카드·✕의 폭과 가장자리, 폰 키보드 위에서 카드 줄이 입력창·인용 줄과 쌓이는 높이(375/390 폭·큰 글씨), ✕가 큰 카드·긴 제목과 겹치는지. 캡처와 독립 design-review는 스택 검증에서 해요(`runtime-unverified`).
