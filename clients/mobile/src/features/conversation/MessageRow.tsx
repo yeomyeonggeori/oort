@@ -197,6 +197,7 @@ import {LandedTintFade, ReduceMotionRefContext} from './LandedTintFade';
 import {canReplyBySwipe} from './replyTarget';
 import {ReplySwipeContainer, ReplySwipeGuardContext} from './ReplySwipeContainer';
 import {
+  PRESS_VISUAL_DELAY_MS,
   SEND_ARRIVE_EASE,
   SEND_ARRIVE_MS,
   SEND_ARRIVE_RISE_FACTOR,
@@ -771,6 +772,7 @@ function Chips({
           disabled={onToggle === undefined}
           hitSlop={CHIP_HIT_SLOP}
           onPress={() => onToggle?.(chip.emoji)}
+          unstable_pressDelay={PRESS_VISUAL_DELAY_MS}
           style={({pressed}) => [
             styles.chip,
             chip.mine && styles.chipMine,
@@ -857,6 +859,7 @@ function ReplyMarker({
       accessibilityLabel="이 답글이 달린 스레드 열기"
       hitSlop={META_HIT_SLOP}
       onPress={onOpen}
+      unstable_pressDelay={PRESS_VISUAL_DELAY_MS}
       style={({pressed}) => [pressed && styles.pressed]}
       testID="reply-marker">
       <Text style={styles.replyMarkLink} numberOfLines={1}>
@@ -2713,10 +2716,10 @@ function MessageRowInner({
   const attachmentGesture = useMemo(
     () => ({
       onLongPress: longPress.onLongPress,
-      delayLongPress: longPress.delayLongPress,
+      pressTiming: longPress.pressTiming,
       consumeTap: longPress.consumeTap,
     }),
-    [longPress.onLongPress, longPress.delayLongPress, longPress.consumeTap],
+    [longPress.onLongPress, longPress.pressTiming, longPress.consumeTap],
   );
   // 멘션을 누르면 프로필이다(#4319). 얼굴과 같은 문이라 `onOpenProfile` 이 없으면 멘션은 글자 스타일뿐이다.
   const openProfile = actions?.onOpenProfile;
@@ -3136,7 +3139,7 @@ function MessageRowInner({
         // that opted out of that would be a dead patch in the middle of it.
         onPress={actions ? onRowPress : undefined}
         onLongPress={longPress.onLongPress}
-        delayLongPress={longPress.delayLongPress}
+        {...longPress.pressTiming}
         disabled={actions === undefined}
         style={({pressed}) => [
           styles.rowInner,
@@ -3155,7 +3158,7 @@ function MessageRowInner({
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`${authorLabel} 프로필 보기`}
-                delayLongPress={longPress.delayLongPress}
+                {...longPress.pressTiming}
                 hitSlop={AVATAR_HIT_SLOP}
                 onLongPress={longPress.onLongPress}
                 onPress={event => {
@@ -3419,6 +3422,7 @@ function MessageRowInner({
                     if (requestCardTarget && actions.onOpenMessage) actions.onOpenMessage(requestCardTarget.channelId, requestCardTarget.id);
                     else actions.onOpenThread?.(message);
                   }}
+                  unstable_pressDelay={PRESS_VISUAL_DELAY_MS}
                   style={({pressed}) => [pressed && styles.pressed]}
                   testID="thread-rollup">
                   <Text style={styles.rollupLink}>
