@@ -8,7 +8,10 @@ use sqlx::{postgres::PgRow, Row};
 use uuid::Uuid;
 
 use crate::media::{Processed, Rendition};
-use crate::{hash, version, Choice, Error, Metadata, Origin, Patch, Report, LIVE_DRAFTS, QUOTA};
+use crate::{
+    hash, version, Choice, Error, Metadata, Origin, Patch, Report, LIVE_DRAFTS, PHOTO_PROMPTS,
+    QUOTA,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Actor {
@@ -393,6 +396,49 @@ pub async fn get_draft(pool: &PgPool, actor: Actor, id: Uuid) -> Result<Value, E
             }
             unexpired(&row)?;
             draft_json(conn, &row).await
+        })
+    })
+    .await
+}
+
+/// The caller's own **photo drafts** that are still alive (ADR-0218 §9 I1, #4992): what the photo
+/// route made, newest first. It is the way back to a picture the route finished after the screen
+/// that was waiting for it was gone — `GET /expression-drafts/{id}` needs an id nobody was left to
+/// receive.
+///
+/// A draft is listed when it is the caller's, a direct one (no approval owns it), `ready`, not
+/// expired, and its origin is `generated` with one of the two sentences the photo route writes
+/// ([`PHOTO_PROMPTS`]; the direct API accepts no other `generated` origin, `draft_origin_ok`). Every
+/// item is what [`get_draft`] answers for it. At most [`LIVE_DRAFTS`] come back: a person holds no
+/// more live drafts than that (D2), and the same bound is in the query, so the answer is bounded
+/// however the rows came to be.
+///
+/// A plain read: the catalog row is not locked (unlike [`list`] it has no version to agree on),
+/// nothing is written or swept — an expired row is simply not selected, and one that cannot be
+/// shown any more is left out rather than failing the list — and the person is authorised by
+/// [`transaction`] like every other read here.
+pub async fn list_photo_drafts(pool: &PgPool, actor: Actor) -> Result<Vec<Value>, Error> {
+    let sentences: Vec<String> = PHOTO_PROMPTS
+        .iter()
+        .map(|(_, sentence)| (*sentence).to_owned())
+        .collect();
+    transaction(pool, actor, move |conn| {
+        Box::pin(async move {
+            let rows = sqlx::query("SELECT * FROM expression_draft WHERE workspace_id=$1 AND creator=$2 AND approval_id IS NULL AND state='ready' AND expires_at>clock_timestamp() AND origin->>'kind'='generated' AND origin->>'prompt'=ANY($3) ORDER BY id DESC LIMIT $4")
+                .bind(actor.workspace).bind(actor.member).bind(&sentences).bind(LIVE_DRAFTS)
+                .fetch_all(&mut *conn).await?;
+            let mut items = Vec::with_capacity(rows.len());
+            for row in &rows {
+                match draft_json(conn, row).await {
+                    Ok(item) => items.push(item),
+                    // A draft whose pictures are gone by now (it expired under a concurrent sweep
+                    // between the select and here) is not one to show: it must not turn the whole
+                    // list into a 404.
+                    Err(Error::NotFound) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            Ok(items)
         })
     })
     .await
