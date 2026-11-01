@@ -36,6 +36,7 @@ import {
   MAKE_DEFAULT_SIZE,
   MAKE_PLAYS,
   MOTION_PRESETS,
+  STILL_MOTION,
   buildMakeRequest,
 } from '@momo/core/features/expressions/make';
 import type {
@@ -745,6 +746,22 @@ describe('AI와 만들기', () => {
     expect(
       screen.getByTestId('expression-make-photo').props.accessibilityLabel,
     ).toBe(ko.formatMessage('expressions.make.photoPick'));
+  });
+
+  // #5065 M1: 움직임 칸의 설명은 문장이다. 맨 `Text` 는 글자 단위로 끊어 「흔들려 / 요」·「두근 / 거려요」(캡처 4891-…-014)가 됐다.
+  it('움직임 칸의 설명은 어절 단위로 줄바꿈한다 — 프리셋 넷과 「움직임 없이」 모두 (#5065)', async () => {
+    wire();
+    await openMake();
+    const motions = [...MOTION_PRESETS, STILL_MOTION];
+    expect(motions).toHaveLength(5);
+    for (const motion of motions) {
+      const chip = screen.getByTestId(`expression-make-chip-${motion.id}`);
+      const description = within(chip).getByText(motion.description);
+      expect({id: motion.id, breaks: description.props.lineBreakStrategyIOS}).toEqual({
+        id: motion.id,
+        breaks: 'hangul-word',
+      });
+    }
   });
 
   // #5065 H1: 같은 부품을 쓰는 자리 — 「AI와 만들기」 첫 단계의 앨범 알약(캡처 4891-…-014 가 그릇 없는 글자로 찍힌 자리).

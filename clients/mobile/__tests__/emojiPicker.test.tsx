@@ -109,18 +109,53 @@ it('loads, fails inline, retries, then offers a search-clear action on no matche
       }),
   );
   picker();
-  expect(screen.getByText('이모지 목록을 불러오는 중입니다.')).toBeTruthy();
+  expect(screen.getByText('이모지 목록을 불러오는 중이에요.')).toBeTruthy();
   await act(async () => reject(new Error('bad bundle')));
-  expect(screen.getByText('이모지 목록을 불러오지 못했습니다.')).toBeTruthy();
+  expect(screen.getByText('이모지 목록을 불러오지 못했어요.')).toBeTruthy();
   fireEvent.press(screen.getByTestId('emoji-retry'));
   await screen.findByTestId('emoji-pick-🎉');
   fireEvent.changeText(screen.getByTestId('emoji-search'), '없는 이름');
   expect(
-    screen.getByText('찾는 이모지가 없습니다. 다른 이름으로 검색해 보세요.'),
+    screen.getByText('찾는 이모지가 없어요. 다른 이름으로 검색해 보세요.'),
   ).toBeTruthy();
   fireEvent.press(screen.getByText('검색 지우기'));
   expect(screen.getByTestId('emoji-pick-🎉')).toBeTruthy();
   expect(load).toHaveBeenCalledTimes(2);
+});
+
+// #5065 M1: 불러오는 중·실패·목록 없음·검색 결과 없음 네 문장은 완성된 한국어 문장이다. 맨 `Text` 는 iOS 기본 줄바꿈이라 글자 단위로
+// 끊어 「…검색해 보세 / 요.」가 됐다(design-review 캡처). 어절 우선 줄바꿈(`hangul-word`)이 렌더된 글자 노드에 실려 있는지 잰다.
+it('draws the loading, failed, no-catalog and no-match sentences with word-priority line breaks (#5065)', async () => {
+  let reject!: (reason: Error) => void;
+  load.mockImplementationOnce(
+    () =>
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+  );
+  picker();
+  const breaks = (sentence: string) =>
+    screen.getByText(sentence).props.lineBreakStrategyIOS;
+  expect(breaks('이모지 목록을 불러오는 중이에요.')).toBe('hangul-word');
+  await act(async () => reject(new Error('bad bundle')));
+  expect(breaks('이모지 목록을 불러오지 못했어요.')).toBe('hangul-word');
+  fireEvent.press(screen.getByTestId('emoji-retry'));
+  await screen.findByTestId('emoji-pick-🎉');
+  fireEvent.changeText(screen.getByTestId('emoji-search'), '없는 이름');
+  expect(breaks('찾는 이모지가 없어요. 다른 이름으로 검색해 보세요.')).toBe(
+    'hangul-word',
+  );
+  await act(async () => {
+    cleanup();
+  });
+  load.mockResolvedValueOnce([]);
+  picker();
+  await screen.findByText(
+    '이 기기에서 쓸 수 있는 이모지가 없어요. OS를 업데이트해 주세요.',
+  );
+  expect(
+    breaks('이 기기에서 쓸 수 있는 이모지가 없어요. OS를 업데이트해 주세요.'),
+  ).toBe('hangul-word');
 });
 
 it('reserves an empty team tab and passes its query to the documented extension seam', async () => {

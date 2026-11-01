@@ -32,7 +32,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
-import {REACTION_GLYPH_MAX_SCALE} from '../../design/atoms';
+import {REACTION_GLYPH_MAX_SCALE, Sentence} from '../../design/atoms';
 import {
   usePageSheetClose,
   usePageSheetScrollProps,
@@ -166,13 +166,15 @@ export function EmojiPicker({
     Keyboard.dismiss();
     onSelect(glyph);
   };
+  // 같은 시트의 다른 탭(`expressions.sheet.noMatch` 「찾는 표현이 없어요」)과 말씨를 맞춘다: 해요체(#5065, design-review L1).
+  // 네 문장이 한 삼항식이라 하나만 바꾸면 같은 탭 안에서 말씨가 다시 갈린다.
   const empty = failed
-    ? '이모지 목록을 불러오지 못했습니다.'
+    ? '이모지 목록을 불러오지 못했어요.'
     : catalog === null
-    ? '이모지 목록을 불러오는 중입니다.'
+    ? '이모지 목록을 불러오는 중이에요.'
     : catalog.length === 0
-    ? '이 기기에서 쓸 수 있는 이모지가 없습니다. OS를 업데이트해 주세요.'
-    : '찾는 이모지가 없습니다. 다른 이름으로 검색해 보세요.';
+    ? '이 기기에서 쓸 수 있는 이모지가 없어요. OS를 업데이트해 주세요.'
+    : '찾는 이모지가 없어요. 다른 이름으로 검색해 보세요.';
 
   return (
     <>
@@ -302,12 +304,13 @@ export function EmojiPicker({
           testID="emoji-grid"
           ListEmptyComponent={
             <View style={styles.notice} testID="emoji-empty">
-              <Text
+              {/* 완성된 한국어 문장은 어절 단위로 줄바꿈한다 — 맨 `Text` 는 「검색해 보세 / 요.」로 낱말 가운데서 끊었다(#5065 M1). */}
+              <Sentence
                 style={styles.label}
                 accessibilityRole={failed ? 'alert' : 'text'}
               >
                 {empty}
-              </Text>
+              </Sentence>
               {failed ? (
                 <Pressable
                   accessibilityRole="button"
