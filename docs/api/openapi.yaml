@@ -6035,10 +6035,13 @@ paths:
         blocker. That means the server holds nothing back, not that the device shows it: the
         OS permission, the per-device switch and Focus modes are known only to the client.
         Not codes: the phone delay while the desktop is in use, the channel level and the
-        server-wide budget drops (ADR-0206 D11). `kind_off` and `quiet_hours` are served once
-        the kind-switch and work-hours slices land; until then they are never returned and
-        `kind` is only validated against the closed list. `lastTest` is the latest test push
-        the caller sent, read from the dispatch records by its collapse id (`t:<id>`).
+        server-wide budget drops (ADR-0206 D11). `kind_off` (#4494) is returned when the request
+        names a `kind` and the caller's **phone** switch for it is off (`workDone` is
+        `workComplete` of `push-kinds`, the same stored value); it carries that `kind` and comes
+        after `channel_muted` in the order above. `quiet_hours` is served once the work-hours
+        slice judges the schedule; until then it is never returned. An unknown `kind` is a 400.
+        `lastTest` is the latest test push the caller sent, read from the dispatch records by
+        its collapse id (`t:<id>`).
       security:
         - bearerAuth: []
       parameters:
@@ -6055,7 +6058,7 @@ paths:
         - name: kind
           in: query
           required: false
-          description: Also evaluate `kind_off` and the `quiet_hours` pass-through for this kind.
+          description: Also evaluate `kind_off` (the phone switch of this kind) and, later, the `quiet_hours` pass-through for this kind.
           schema:
             $ref: "#/components/schemas/NotificationKind"
       responses:
@@ -6140,14 +6143,15 @@ paths:
       operationId: getNotificationPrefs
       summary: Read the caller's per-kind switches, presentation, work hours and delay.
       description: >
-        ADR-0206 D13 contract draft (served from the slice that stores it; 404
-        until then). The caller's own settings only (never a memberId from the
+        ADR-0206 D13 (#4494). The caller's own settings only (never a memberId from the
         request); human bearer only (an agent bearer is 403). Every kind is
         present with the stored value or its default (no stored row answers
-        today's behavior). `effective` is the server's own evaluation of the
-        pause and the work-hours schedule, so a desktop client reads it instead
-        of redoing the time-zone math. There is no event: another device
-        converges on its next read.
+        today's behavior, and reading writes nothing). `workDone.phone` is the same stored
+        value as `workComplete` of `notification-rules/push-kinds`. `effective` is the
+        server's own evaluation of the pause and the work-hours schedule, so a desktop client
+        reads it instead of redoing the time-zone math. A schedule that is off, or whose zone
+        the database no longer knows, is no schedule (`quiet.active` false), never an error.
+        There is no event: another device converges on its next read.
       security:
         - bearerAuth: []
       parameters:
@@ -6172,21 +6176,30 @@ paths:
       operationId: patchNotificationPrefs
       summary: Change only the named preferences.
       description: >
-        ADR-0206 D5·D13 contract draft. Every field optional; an omitted one keeps
+        ADR-0206 D5·D13 (#4494). Every field optional; an omitted one keeps
         what is stored when the write lands (merged under the row lock). An empty
-        body is a 400; an unknown field is refused by the JSON extractor (422).
+        body is a 400; an unknown field, kind, surface or confirmation token is refused by
+        the JSON extractor (422). **Every 400 below is decided before the first write**: a
+        refused patch leaves nothing behind, not even the default row.
         Changing the phone push of `approval` from on to off needs `confirm:
         ["approval_push_off"]`; without it 400 `confirmation_required`. With it the
         response carries `warnings: ["approval_push_off"]` and the write is
-        audited. `schedule.tz` must be a zone name in the database's
-        `pg_timezone_names` (400 `invalid_time_zone`; an abbreviation such as `PST`
-        or a POSIX form such as `UTC+9` is refused). A window with `start == end` is
-        400 `invalid_schedule`. A sound id must be known (400 `unknown_sound`). A
-        surface that does not apply to the kind (`desktop` of `agentAnswer`,
-        `keyword`, `scheduledFailed`) is a 400. `kinds` merges per cell and
-        `presentation.sounds` per kind; a `null` value resets to the default.
-        `schedule` is replaced whole and `schedule: null` removes it. Human bearer
-        only (an agent bearer is 403).
+        audited (`notification_prefs.approval_push_off`); writing an already-off switch
+        again, turning it on, resetting it or changing its desktop cell needs no token and
+        warns nothing. The token is a protocol-level guard against a client that skipped the
+        confirmation step, not a security control. `schedule.tz` must be a zone name in the
+        database's `pg_timezone_names` (400 `invalid_time_zone`; an abbreviation such as `PST`
+        or a POSIX form such as `UTC+9` is refused). A window with `start == end`, a clock
+        that is not `HH:MM`, a repeated or out-of-range day, or an enabled schedule with no
+        day is 400 `invalid_schedule`. A sound id must be a bundled one or `none` (400
+        `unknown_sound`; a personal file is not accepted yet); a sound slot of something that
+        is not a kind is 400 `unknown_kind`. A surface that does not apply to the kind
+        (`desktop` of `agentAnswer`, `keyword`, `threadReply`, `scheduledFailed`) is 400
+        `surface_not_applicable`. `phoneDelaySecs` other than 0, 60 or 300 is 400
+        `invalid_phone_delay`. `kinds` merges per cell and `presentation.sounds` per kind; a
+        `null` value resets to the default. `workDone.phone` writes the same stored value as
+        `push-kinds.workComplete`. `schedule` is replaced whole and `schedule: null` removes it.
+        Human bearer only (an agent bearer is 403).
       security:
         - bearerAuth: []
       parameters:
@@ -6206,9 +6219,10 @@ paths:
                 $ref: "#/components/schemas/NotificationPrefsResponse"
         "400":
           description: >
-            Empty body, `confirmation_required`, `invalid_time_zone`,
-            `invalid_schedule`, `unknown_sound` or a surface that does not apply to
-            the kind. An unknown field is a 422 from the JSON extractor.
+            Empty body, or `error.code` `confirmation_required`, `invalid_time_zone`,
+            `invalid_schedule`, `unknown_sound`, `unknown_kind`, `surface_not_applicable`
+            or `invalid_phone_delay`. An unknown field, kind, surface or confirmation token
+            is a 422 from the JSON extractor.
           content:
             application/json:
               schema:
@@ -21353,8 +21367,9 @@ components:
       required: [phone]
       description: >
         One kind on the two surfaces. `desktop` is absent where the surface does
-        not apply to the kind (`agentAnswer`, `keyword`, `scheduledFailed`); a
-        PATCH that sets it is a 400.
+        not apply to the kind (`agentAnswer`, `keyword`, `threadReply`,
+        `scheduledFailed`: the desktop cannot know them); a PATCH that sets it is a
+        400 `surface_not_applicable`.
       properties:
         phone:
           type: boolean
@@ -21477,7 +21492,7 @@ components:
       properties:
         kinds:
           type: object
-          required: [dm, mentionHuman, mentionAgent, agentAnswer, approval, workDone, keyword, channelAll, scheduledFailed]
+          required: [dm, mentionHuman, mentionAgent, agentAnswer, approval, workDone, keyword, channelAll, threadReply, scheduledFailed]
           properties:
             dm: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
             mentionHuman: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
@@ -21487,11 +21502,16 @@ components:
             workDone: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
             keyword: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
             channelAll: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
+            threadReply: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
             scheduledFailed: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
           description: >
             Defaults when nothing is stored: every phone switch on; desktop on
             except `dm` (off). `workDone.phone` is the same value as
-            `push-kinds.workComplete`.
+            `push-kinds.workComplete`. Only a switch that is stored as exactly `false` is off.
+            The push judgment reads the **phone** cells today (`dm`, `mentionHuman`,
+            `mentionAgent`, `agentAnswer`, `approval`, `workDone`, `threadReply`); `keyword`,
+            `channelAll` and `scheduledFailed` are stored now and judged by the slices that add
+            their pushes.
         presentation:
           $ref: "#/components/schemas/NotificationPresentation"
         schedule:
@@ -21540,6 +21560,7 @@ components:
             workDone: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
             keyword: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
             channelAll: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
+            threadReply: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
             scheduledFailed: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
         presentation:
           $ref: "#/components/schemas/PatchNotificationPresentation"
