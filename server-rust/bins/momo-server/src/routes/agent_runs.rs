@@ -874,13 +874,18 @@ async fn assemble_progress_in_tx(
                 .filter_map(|job| QueueEntry::from_payload(job.id, agent, &job.payload)),
         );
     }
-    let queue_channels: Vec<Uuid> = queue
+    // One read of the viewer's rooms answers both questions the assembly asks: which runs
+    // ahead in the queue may be named, and whether the approval a run is parked on was
+    // raised in a room the viewer is in (`approvalId` and its deadline follow the `bundle`'s
+    // rule, not the run's: the approval's room need not be the run's).
+    let named_channels: Vec<Uuid> = queue
         .iter()
         .map(|entry| entry.channel_id)
+        .chain(base.iter().filter_map(|run| run.approval_channel_id))
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    let visible = visible_channels_in_tx(conn, workspace_id, member_id, &queue_channels).await?;
+    let visible = visible_channels_in_tx(conn, workspace_id, member_id, &named_channels).await?;
 
     let rows = assemble_run_progress(base, &jobs, &queue, &visible);
     let run_ids: Vec<Uuid> = rows.iter().map(|row| row.summary.id).collect();
