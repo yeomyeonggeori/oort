@@ -1504,6 +1504,50 @@ async fn t11_after_a_read_the_task_never_searches_the_web() {
     }
 }
 
+/// Merge of #4965 and #4967: once the first step has read something, the prompt is rebuilt without
+/// the sensitive sentences (B4-3), and it still offers the task mode, because `task_continue` is
+/// reading work and stays on the tool list.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t13_a_read_before_continuing_keeps_the_task_offer() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_link(&su, t.owner_id).await;
+    let model = ScriptedModel::new([read_plugins(), cont(&["다음"], "N1")]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    let run = enqueue(
+        &pool,
+        &t,
+        t.owner_id,
+        "@oort-helper 플러그인을 오래 조사해 줘",
+    )
+    .await;
+    w.drain_once().await.unwrap();
+
+    let requests = model.requests();
+    assert_eq!(requests.len(), 2, "a read, then the call that continues");
+    let after_read = system_prompt(&requests[1]);
+    assert!(
+        after_read.contains("이번 요청은 이미 읽은 내용이 있어서"),
+        "the prompt was rebuilt after the read: {after_read}"
+    );
+    assert!(
+        after_read.contains("사람에게 먼저 묻지 말고 바로 시작해"),
+        "the rebuilt prompt still offers the task mode: {after_read}"
+    );
+    assert!(
+        tool(&requests[1], TASK_TOOL).is_some(),
+        "the task tool is still offered after the read"
+    );
+    assert!(
+        task_row(&su, run).await.is_some(),
+        "the continue after the read started a task"
+    );
+}
+
 /// B15-A10: the marker table belongs to the server alone — one tenant's rows are invisible to another
 /// under the api's own (non-bypass) role, a write into another tenant is refused by the policy, the
 /// row policy is FORCEd, and neither PUBLIC nor the helper's read role can touch it.
