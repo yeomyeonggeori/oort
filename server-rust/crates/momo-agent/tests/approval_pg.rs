@@ -46,6 +46,7 @@
 //! | `t1_5_tool_messages_consume_channel_seq_and_reach_the_outbox` | bypass `send_message_in_tx` for tool rows, or bump `channel_seq` by hand |
 //! | `t1_6_another_tenants_approval_cannot_be_locked_or_decided` | drop the `workspace_id` predicate in `lock_approval_in_tx`, or `FORCE ROW LEVEL SECURITY` on `approval` |
 //! | `t1_7_a_replayed_decision_is_idempotent` | drop `approval_decision_workspace_uniq` |
+//! | `t1_8_the_approval_reads_keep_their_own_workspace_predicate_when_rls_cannot_help` | drop `a.workspace_id = $1` from the list read (both the page's selection and the join back to its approvals) or from the run-approval read (#4763, #4985) or from the room lookup behind the ledger's approval ids (#5007) |
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -53,11 +54,12 @@ use std::sync::Mutex;
 
 use chrono::Utc;
 use momo_agent::approval::{
-    approval_payload, approval_request_props, attach_request_message_in_tx,
-    create_pending_approval_in_tx, default_expires_at, existing_decision_in_tx,
-    is_active_human_member_in_tx, list_approvals_in_tx, lock_approval_in_tx,
-    mark_approval_decided_in_tx, mark_approval_expired_in_tx, record_decision_in_tx,
-    resume_job_payload, NewApproval,
+    approval_channels_in_tx, approval_payload, approval_request_props,
+    attach_request_message_in_tx, create_pending_approval_in_tx, default_expires_at,
+    existing_decision_in_tx, is_active_human_member_in_tx, list_approval_page_in_tx,
+    list_approvals_in_tx, lock_approval_in_tx, mark_approval_decided_in_tx,
+    mark_approval_expired_in_tx, record_decision_in_tx, resume_job_payload,
+    run_approval_facts_in_tx, ApprovalScope, ApprovalStatusFilter, NewApproval,
 };
 use momo_agent::tools::{ToolCall, ACTION_TYPE_TOOL_CALL};
 use momo_agent::{
@@ -940,6 +942,103 @@ async fn t1_6_another_tenants_approval_cannot_be_locked_or_decided() {
     .expect("list");
     assert_eq!(owned.len(), 1, "the owning tenant still sees its approval");
     assert_eq!(owned[0].id, approval_id);
+}
+
+/// **The workspace predicate is its own guard** (ADR-0186 v6 R-f, #4763). Row-level
+/// security already keeps another tenant's rows out of a `momo_app` read, and the room join
+/// keeps a person out of rooms they are not in — so a test through the runtime role cannot
+/// tell whether the reads also name their workspace. This one takes both away: a
+/// connection that does not enforce RLS (the superuser pool stands in for any path that
+/// ever loses its tenant context), and a membership **planted** in the victim's room for the
+/// attacker's person. What is left to keep the victim's approval out is the predicate. (The
+/// list read names its workspace twice, when it selects the page and when it joins back to the
+/// approvals of that page; either keeps the row out, so the test holds that **one** of them
+/// is there, not each.)
+///
+/// The control asks the same connection about the victim's own workspace and finds it —
+/// so the empty answer above is the predicate, not a fixture that hides everything. The room
+/// lookup that decides which approval ids a run's ledger may name (#5007) is held to the
+/// same.
+#[tokio::test]
+#[ignore]
+async fn t1_8_the_approval_reads_keep_their_own_workspace_predicate_when_rls_cannot_help() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let victim = seed_tenant(&su).await;
+    let attacker = seed_tenant(&su).await;
+    let run_id = running_run(&app, &victim).await;
+    let approval_id = park_on_approval(&app, &victim, run_id, 3_600).await;
+
+    // The attacker's person, in the victim's room: the room join alone would let them through.
+    sqlx::query("INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)")
+        .bind(victim.workspace_id)
+        .bind(victim.channel_id)
+        .bind(attacker.human_id)
+        .execute(&su)
+        .await
+        .expect("plant a membership across tenants");
+
+    let mut conn = su.acquire().await.expect("a superuser connection");
+    for scope in [ApprovalScope::Team, ApprovalScope::Mine] {
+        let page = list_approval_page_in_tx(
+            &mut conn,
+            attacker.workspace_id,
+            attacker.human_id,
+            &ApprovalStatusFilter::All,
+            scope,
+            None,
+            100,
+        )
+        .await
+        .expect("list");
+        assert!(
+            page.rows.is_empty(),
+            "{scope:?}: naming the attacker's workspace, the victim's approval is not listed \
+             even with a room join that would admit it"
+        );
+    }
+    let facts = run_approval_facts_in_tx(&mut conn, attacker.workspace_id, &[run_id])
+        .await
+        .expect("run approval facts");
+    assert!(
+        facts.is_empty(),
+        "naming the attacker's workspace, the victim's run has no approval to report"
+    );
+
+    // The control: the same connection, the victim's own workspace.
+    let page = list_approval_page_in_tx(
+        &mut conn,
+        victim.workspace_id,
+        attacker.human_id,
+        &ApprovalStatusFilter::All,
+        ApprovalScope::Team,
+        None,
+        100,
+    )
+    .await
+    .expect("list");
+    assert_eq!(page.rows.len(), 1, "the planted membership does admit them");
+    assert_eq!(page.rows[0].id, approval_id);
+    let facts = run_approval_facts_in_tx(&mut conn, victim.workspace_id, &[run_id])
+        .await
+        .expect("run approval facts");
+    assert_eq!(facts.len(), 1);
+    assert_eq!(facts[0].approval_id, approval_id);
+
+    // The room lookup behind the ledger's approval ids (#5007): naming the attacker's
+    // workspace, the victim's approval has no room to report; naming the victim's, it does.
+    let rooms = approval_channels_in_tx(&mut conn, attacker.workspace_id, &[approval_id])
+        .await
+        .expect("approval rooms");
+    assert!(
+        rooms.is_empty(),
+        "naming the attacker's workspace, the victim's approval has no room to report: {rooms:?}"
+    );
+    let rooms = approval_channels_in_tx(&mut conn, victim.workspace_id, &[approval_id])
+        .await
+        .expect("approval rooms");
+    assert_eq!(rooms.get(&approval_id), Some(&victim.channel_id));
 }
 
 /// A replayed decision returns the first receipt rather than deciding twice.

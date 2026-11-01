@@ -835,16 +835,20 @@ async fn gated_channel_page(
         return Ok(None);
     }
     let page = list_channel_page(conn, channel_id, cursor, limit).await?;
-    // The **image** files attached to these messages (ADR-0186 증보 v3
-    // V3-2a): an agent can only propose a workspace file as its avatar if
-    // it can name one, and the attachment id is that name. Only complete
-    // PNG/JPEG/WebP rows of messages in a channel this read already
-    // authorised; the Drive file id is never projected.
+    // The **picture** files attached to these messages (ADR-0186 증보 v3
+    // V3-2a, X8-1): an agent can only propose a workspace file as an avatar
+    // or as the source of a team expression if it can name one, and the
+    // attachment id is that name. Complete PNG/JPEG/WebP rows, and since #4900
+    // the GIF and video (MP4/MOV/WebM) rows an expression may start from, of
+    // messages in a channel this read already authorised; the Drive file id
+    // is never projected. Listing a type is not accepting it: an avatar still
+    // takes PNG/JPEG/WebP only.
     let message_ids: Vec<Uuid> = page.iter().map(|paged| paged.message.id).collect();
-    let images = momo_messaging::image_attachments_for_messages_in_tx(
+    let images = momo_messaging::attachments_for_messages_in_tx(
         conn,
         caller.workspace_id,
         &message_ids,
+        momo_messaging::RequesterAttachmentUse::ExpressionSource,
     )
     .await?;
     let messages: Vec<Value> = page
@@ -2737,10 +2741,17 @@ async fn action_propose(
 /// at most (`media::process_waiting`); (4) a link's fetch slot is given back as soon as the
 /// bytes are here, before any wait for the decoder.
 ///
+/// **What the request itself already shows comes before any candidate is touched** (#4900): the
+/// face is a live human of this conversation (the resolver's own function), every link parses and
+/// is not private from the start, every generated picture is strict base64 within 1 MiB and
+/// starts like a picture. A bad third candidate is refused before the first two cost a Drive read,
+/// a fetch or a decoder slot.
+///
 /// * `attachment`: the file from Drive, then the isolated decoder. A file that is not a
 ///   picture is the same `InvalidArguments` a stranger's photo is; a GIF takes the decoder's
 ///   full-frame check like any other source; a video is a manual card
-///   (`video_processing_unavailable`, D4 on hold).
+///   (`video_processing_unavailable`, D4 on hold) decided from its first bytes, with no decoder
+///   slot, no place in the line and no child process.
 /// * `url`: the link through `momo-unfurl`'s guard (HTTPS, 443, address pin, hops, 5 s, 5 MiB).
 ///   A link that is private **from the start** refuses the whole proposal; every other
 ///   failure is a manual card with its closed reason and the safe source link.
@@ -2759,9 +2770,15 @@ async fn prepare_expression(
     use crate::routes::actions::{ActionArgs, ExpressionImageSpec};
     use base64::Engine as _;
     use momo_expressions::{intake, media, Origin};
-    let ActionArgs::ExpressionCreate { candidates, .. } = args else {
+    let ActionArgs::ExpressionCreate {
+        candidates,
+        subject,
+        ..
+    } = args
+    else {
         return Ok(None);
     };
+    let face = *subject;
     let started = std::time::Instant::now();
     let remaining = || momo_expressions::action::PREPARE_DEADLINE.saturating_sub(started.elapsed());
     let secret = state.agent_port.envelope_secret().to_string();
@@ -2825,6 +2842,22 @@ async fn prepare_expression(
             else {
                 return Ok(Err(ToolFailure::InvalidArguments));
             };
+            // The face, if any, is a live human of THIS conversation: judged by the function the
+            // proposal's resolver calls, before a candidate is fetched or decoded for a card that
+            // would be refused. The same `InvalidArguments` the resolver gives, so nobody learns
+            // here whether a person outside the room exists.
+            if let Some(face) = face {
+                if !momo_workspace_actions::action_resolve::face_is_human_in_room_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    face,
+                    channel_id,
+                )
+                .await?
+                {
+                    return Ok(Err(ToolFailure::InvalidArguments));
+                }
+            }
             let mut sources = Vec::with_capacity(wanted.len());
             let mut kept: Option<momo_expressions::assembly::Held> = None;
             for want in &wanted {
@@ -2888,12 +2921,41 @@ async fn prepare_expression(
     .await
     .map_err(|error| internal("agent_port.expression_prepare", error))??;
 
+    // **What the request itself already shows, for every candidate, before any of them is touched**
+    // (#4900). A link the guard refuses from the start, base64 that does not decode, a picture
+    // over 1 MiB, bytes that are not a picture: none of these needs the network, Drive or the
+    // decoder to be known, so they are refused here, once, and what is fine is kept for the loop
+    // (no second parse, no second decode).
+    let mut checked = Vec::with_capacity(candidates.len());
+    for candidate in candidates.iter() {
+        checked.push(match &candidate.image {
+            ExpressionImageSpec::Url(raw) => Checked::Url(
+                momo_unfurl::parse_source_url(raw).map_err(|_| ToolFailure::InvalidArguments)?,
+            ),
+            ExpressionImageSpec::Generated { data_base64, .. } => {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(data_base64)
+                    .map_err(|_| ToolFailure::InvalidArguments)?;
+                if bytes.len() > 1024 * 1024 {
+                    return Err(ToolFailure::InvalidArguments);
+                }
+                // The bytes decide the format, never the declared mime; a page, a video, a
+                // broken picture is the agent's own bad input.
+                if media::sniff(&bytes) != media::Sniffed::Image {
+                    return Err(ToolFailure::InvalidArguments);
+                }
+                Checked::Bytes(bytes)
+            }
+            _ => Checked::Nothing,
+        });
+    }
+
     // One preparation per agent at a time: a second one (another run, a retry that did not wait
     // for the answer) is told to come back, and fetches nothing.
     let _preparing = Preparing::enter(caller.agent_member_id).ok_or(ToolFailure::Unavailable)?;
 
     let mut prepared = Vec::with_capacity(candidates.len());
-    for (candidate, source) in candidates.iter().zip(looked_up) {
+    for ((candidate, source), checked) in candidates.iter().zip(looked_up).zip(checked) {
         if remaining().is_zero() {
             return Err(ToolFailure::Unavailable);
         }
@@ -2939,11 +3001,12 @@ async fn prepare_expression(
                 };
                 (Origin::attachment(), picture, None)
             }
-            ExpressionImageSpec::Url(raw) => {
+            ExpressionImageSpec::Url(_) => {
                 // Malformed, credentialed, fragment, http, private-from-the-start (any spelling)
-                // or a port other than 443: the whole proposal is refused, nothing is stored.
-                let url = momo_unfurl::parse_source_url(raw)
-                    .map_err(|_| ToolFailure::InvalidArguments)?;
+                // or a port other than 443: the whole proposal was refused above, nothing stored.
+                let Checked::Url(url) = checked else {
+                    return Err(ToolFailure::InvalidArguments);
+                };
                 let origin = Origin::url(url.origin());
                 if !state.unfurl_enabled {
                     // The instance's outgoing-request switch is off: no request is made.
@@ -2980,22 +3043,12 @@ async fn prepare_expression(
                     (origin, outcome, None)
                 }
             }
-            ExpressionImageSpec::Generated {
-                data_base64,
-                prompt,
-                ..
-            } => {
-                let bytes = base64::engine::general_purpose::STANDARD
-                    .decode(data_base64)
-                    .map_err(|_| ToolFailure::InvalidArguments)?;
-                if bytes.len() > 1024 * 1024 {
+            ExpressionImageSpec::Generated { prompt, .. } => {
+                // Strict base64, at most 1 MiB, and a picture by its first bytes: all judged
+                // above, for every candidate, before any of them was fetched or decoded.
+                let Checked::Bytes(bytes) = checked else {
                     return Err(ToolFailure::InvalidArguments);
-                }
-                // The bytes decide the format, never the declared mime; a page, a video, a
-                // broken picture is the agent's own bad input.
-                if media::sniff(&bytes) != media::Sniffed::Image {
-                    return Err(ToolFailure::InvalidArguments);
-                }
+                };
                 let processed =
                     media::process_waiting(bytes, remaining())
                         .await
@@ -3034,6 +3087,16 @@ struct PreparedExpression {
     /// The one kept assembly the candidates draw on, if any. The transaction locks it, proves it
     /// is still this agent's and live, and reclaims its bytes once the drafts exist (G3.6).
     assembly: Option<Uuid>,
+}
+
+/// What the request itself showed about one candidate, judged before any candidate is fetched or
+/// decoded (#4900) and kept so the loop does not judge it twice.
+enum Checked {
+    Nothing,
+    /// A link that parsed: HTTPS, public from the start, no credential or fragment.
+    Url(momo_unfurl::SourceUrl),
+    /// Generated bytes that are strict base64 within 1 MiB and sniff as a picture.
+    Bytes(Vec<u8>),
 }
 
 /// What one candidate of `expression.create` needs from the read transaction.

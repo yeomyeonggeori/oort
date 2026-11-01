@@ -10,6 +10,7 @@ import {
 } from '@momo/core/features/timeline/model';
 import {chipsFor, type ReactionMap} from '@momo/core/features/timeline/reactions';
 import {isPinned, type PinMap} from '@momo/core/features/timeline/pins';
+import type {UnfurlMap} from '@momo/core/features/timeline/unfurl';
 import type {Directory, DmGroupFacts} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {
@@ -35,6 +36,12 @@ import {useTapDismiss} from './tapDismiss';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
 import {ReduceMotionRefContext} from './LandedTintFade';
+import {
+  createRowViewability,
+  RowViewabilityContext,
+  type RowViewability,
+} from './rowViewability';
+import {NO_UNFURL_MAP, unfurlRowsFor} from './useMessageUnfurls';
 import {AnchoredScrollView, createNeutralAnchorStore} from './neutralAnchor';
 import {
   ARRIVAL_SURFACE_CHANNEL,
@@ -861,6 +868,7 @@ function TimelineInner({
   working,
   reactions,
   pins,
+  unfurls,
   approvalGates,
   approvalReceipts,
   approvalOffline,
@@ -945,6 +953,11 @@ function TimelineInner({
    * 통째로 들면 어디서 무엇이 고정되든 붙어 있는 행이 전부 다시 그려진다.
    */
   pins?: PinMap;
+  /**
+   * 링크 카드(ADR-0170 D5, #4883) — `message id -> 서버 투영`. 행마다의 카드는 여기서 유도한다(`unfurlRowsFor`): 행이
+   * 지도를 통째로 들면 어디서 카드가 바뀌든 붙어 있는 행이 전부 다시 그려진다. 없으면 카드는 그려지지 않는다.
+   */
+  unfurls?: UnfurlMap;
   /**
    * 결정 가능한 대기 승인, `approvalId` 로.
    *
@@ -1327,7 +1340,7 @@ function TimelineInner({
         // `showRollup` 이 거짓인 표면(스레드 패널)은 롤업을 아예 안 그리므로,
         // 그 표면에서 롤업은 접기를 막을 이유가 되지 못한다 — 없는 문은 문이
         // 아니다.
-        hasRollup: showRollup && rollupFor(item.message, threads) !== null,
+        hasRollup: showRollup && rollupFor(item.message, threads, myMemberId) !== null,
         hasReactions:
           chipsFor(reactions ?? NO_REACTIONS, item.message.id, myMemberId)
             .length > 0,
@@ -1452,6 +1465,11 @@ function TimelineInner({
   /** 목록이 마지막으로 「보인다」고 한 행들. 콜백이 렌더보다 먼저 읽는다. */
   const viewableKeysRef = useRef<readonly string[]>(NO_KEYS);
   /**
+   * 「이 줄이 한 번이라도 보였는가」(#4883)의 저장소 — 방마다 하나다(`listKey` 아래에서 만든다). 줄 키가 `m-<seq>` 라
+   * 두 방이 같은 키를 갖는다: 방을 옮기고도 저장소가 남으면 새 방의 줄이 보이기 전에 「보였다」가 된다.
+   */
+  const rowViewabilityRef = useRef<{room: string; store: RowViewability} | null>(null);
+  /**
    * 목록이 **자기 출발점에 앉았는가** — 진입 수렴이 끝났거나, 사람이 목록을
    * 잡았거나, 끝 근처에서 쉬고 있는 것이 관측됐다.
    *
@@ -1571,6 +1589,12 @@ function TimelineInner({
     if (metricsRef) metricsRef.current = geometryRef.current;
   }
   const listKey = contentRoom ?? 'empty';
+  // 링크 카드의 사이트 아이콘을 보인 줄에만 켜는 데 쓴다 — 가상화 목록의 마운트됨은 보임이 아니다(`rowViewability.ts`). 상태가
+  // 아니라 외부 저장소라 이 목록은 다시 그려지지 않는다. 새 방(= 새 스크롤뷰, `listKey`)은 빈 저장소에서 시작한다.
+  if (rowViewabilityRef.current === null || rowViewabilityRef.current.room !== listKey) {
+    rowViewabilityRef.current = {room: listKey, store: createRowViewability()};
+  }
+  const rowViewability = rowViewabilityRef.current.store;
 
   /** 출발점에 앉은 뒤 구분선이 창 안에 있으면 — 봤다. 래치를 건다. */
   const armLatchIfDividerSeen = useCallback(() => {
@@ -1651,7 +1675,11 @@ function TimelineInner({
    */
   const onViewableItemsChanged = useRef(
     ({viewableItems}: {viewableItems: ViewToken<FoldedTimelineItem>[]}) => {
-      viewableKeysRef.current = viewableItems.map(token => token.key);
+      const keys = viewableItems.map(token => token.key);
+      // 링크 카드의 사이트 아이콘이 「한 번 보인 줄」을 알 수 있게 알린다(#4883). 이 콜백은 필이 있는 표면에만 걸린다 —
+      // 필이 없는 표면(스레드 패널·하네스)은 아래 `value` 가 `null` 이라 줄이 늘 보인 것으로 친다.
+      rowViewabilityRef.current?.store.update(keys);
+      viewableKeysRef.current = keys;
       setRelationState(relationFromKeys(itemsRef.current, viewableKeysRef.current));
       const day = floatingDayFor(itemsRef.current, viewableKeysRef.current);
       setFloatingDay(current => (sameFloatingDay(current, day) ? current : day));
@@ -2905,6 +2933,7 @@ function TimelineInner({
           directory={directory}
           chips={chipsFor(reactions ?? NO_REACTIONS, item.message.id, myMemberId)}
           pinned={isPinned(pins ?? NO_PINS, item.message.id)}
+          unfurls={unfurlRowsFor(unfurls ?? NO_UNFURL_MAP, item.message.id)}
           pausedRepeat={item.pausedRepeat}
           deletedRepeat={item.deletedRepeat}
           landed={landedId !== null && uuidEq(item.message.id, landedId)}
@@ -2913,7 +2942,7 @@ function TimelineInner({
           actions={actions}
           // `null` 은 "이 표면에는 롤업이 없다"이고 `undefined` 였다면 행이 서버의
           // 롤업으로 되돌아간다 — 끄려는 자리에서 정확히 반대가 된다.
-          rollup={showRollup ? rollupFor(item.message, threads) : null}
+          rollup={showRollup ? rollupFor(item.message, threads, myMemberId) : null}
           // `undefined` turns the marker off for the whole surface. A thread
           // panel passes `markReplies={false}`: every row in there is a reply,
           // and a 답글 line on each would be noise wearing the shape of
@@ -2979,6 +3008,7 @@ function TimelineInner({
       directory,
       reactions,
       pins,
+      unfurls,
       myMemberId,
       nowMs,
       onResend,
@@ -3515,8 +3545,12 @@ function TimelineInner({
   // 부모의 직접 자식)은 그대로다.
   const motionScope = (
     <ReduceMotionRefContext.Provider value={reduceMotionRef}>
-      {notice}
-      {list}
+      {/* 보이는 줄을 아는 표면(필이 있는 대화)만 줄이 제공자를 만난다. 스레드 패널·하네스는 `null` 이라 카드의 아이콘이
+          마운트 때 켜진다 — 짧은 목록이라 마운트됨이 곧 보임에 가깝다(`rowViewability.ts`). */}
+      <RowViewabilityContext.Provider value={jumpPills ? rowViewability : null}>
+        {notice}
+        {list}
+      </RowViewabilityContext.Provider>
     </ReduceMotionRefContext.Provider>
   );
 

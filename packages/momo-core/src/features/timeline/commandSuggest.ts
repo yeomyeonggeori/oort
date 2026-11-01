@@ -1,5 +1,6 @@
 import type { Message } from "../../lib/api";
 import { attachParticle, attachRecipient } from "../../lib/koreanParticle";
+import { aiHubSection } from "../ai/aiHubModel";
 import {
   AGENT_SUGGESTABLE_COMMANDS,
   type AiConnectLine,
@@ -141,16 +142,106 @@ export function settingsOpenSection(args: unknown): SettingsOpenSection | undefi
   return oneOf(SETTINGS_OPEN_SECTIONS, section) ? section : undefined;
 }
 
+/**
+ * `work.request.open`의 harness (#4972 S9, ADR-0201 증보 v3 B8 C1) — 서버
+ * `momo_agent::card_suggest::WORK_REQUEST_HARNESSES`와 같은 둘. 「작업 요청」 시트가 늘 내놓는 도구이고
+ * (OpenCode는 맥이 알릴 때만 서므로 카드가 이름 붙이지 않는다), `ai.connect`의 `harness`와 같은
+ * 낱말이 같은 도구다. 팀 키를 뜻하는 `team_key`는 여기 없다.
+ */
+export const WORK_REQUEST_OPEN_HARNESSES = ["claude", "codex"] as const;
+
+export type WorkRequestHarness = (typeof WORK_REQUEST_OPEN_HARNESSES)[number];
+
+/**
+ * 도우미 카드가 글을 채워 여는 폰 시트(「내 맥에 보내기」)의 모드 — **작업 요청**(`work`). 글이 시킬 일이라서
+ * 물어보기(`ask`)로 열지 않는다. 폰 `AskMode`의 한 값과 같은 낱말이다.
+ */
+export const WORK_REQUEST_SHEET_MODE = "work" as const;
+
+/** 서버 `WORK_REQUEST_PROMPT_MAX_BYTES` — 시트에 채우는 글의 상한(UTF-8 바이트). */
+export const WORK_REQUEST_PROMPT_MAX_BYTES = 8_000;
+
+/** 서버 `work_request_open_label` 표와 같은 글자(골든 시험이 잰다). harness로만 가른다. */
+export function workRequestOpenLabel(harness: WorkRequestHarness | null): string {
+  switch (harness) {
+    case "claude":
+      return "내 맥의 Claude Code에 맡기기";
+    case "codex":
+      return "내 맥의 Codex에 맡기기";
+    default:
+      return "내 맥에 작업 맡기기";
+  }
+}
+
+/** 「작업 요청」 시트를 채우는 값. 카드가 아는 것은 이 둘이 전부다(폴더·채널·맥은 사람이 고른다). */
+export interface WorkRequestOpen {
+  /** 카드가 이름 붙인 도구. 없거나 이 빌드가 모르는 값이면 null — 시트가 평소 기본값을 쓴다. */
+  harness: WorkRequestHarness | null;
+  /** 시트에 미리 채우는 글. 서버가 정리한 값이다. 보내는 것은 사람이다. */
+  prompt: string;
+}
+
+/**
+ * 개인 에이전트의 하네스 낱말(`claude`·`claude_code`·`codex`, 로스터가 싣는 서명 낱말)을 카드가 쓰는 두
+ * 도구로 접는다. 모르는 낱말은 null — 카드가 아는 도구가 아니다.
+ */
+export function workRequestHarnessOfWire(wire: string): WorkRequestHarness | null {
+  if (wire === "claude" || wire === "claude_code") return "claude";
+  if (wire === "codex") return "codex";
+  return null;
+}
+
+/**
+ * 내 개인 에이전트가 하나도 없을 때 웹 카드가 보내는 곳 — 내 도구(Claude Code·Codex 로그인과 개인
+ * 에이전트)가 있는 AI 화면. 주소의 주인은 AI 허브 표다.
+ */
+export const WORK_REQUEST_TOOLS_PATH: string = aiHubSection("accounts").path;
+
+function utf8Bytes(text: string): number {
+  let bytes = 0;
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) ?? 0;
+    bytes += cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+  }
+  return bytes;
+}
+
+/**
+ * `work.request.open`의 `args`를 읽는다. 키는 `harness`·`prompt`뿐이고 `prompt`는 필수다(비어 있지
+ * 않은 글, 8,000바이트 안). 아니면 undefined(→ 한 줄 폴백).
+ *
+ * **`harness`만은 너그럽다**: 없거나 `null`이거나 이 빌드가 모르는 값(더 새 서버가 도구를 더한 경우)이면
+ * 그냥 「정해지지 않음」(null)이다 — 시트가 평소 기본값(마지막에 쓴 도구)으로 열린다. 서버는 enum 밖
+ * 값을 이미 거절하므로 서버가 만든 props에서는 일어나지 않는 일이고, 그런 값 때문에 쓸 만한 글까지
+ * 버리지 않는다.
+ */
+export function workRequestOpenArgs(args: unknown): WorkRequestOpen | undefined {
+  if (!isObj(args)) return undefined;
+  for (const key of Object.keys(args)) {
+    if (key !== "harness" && key !== "prompt") return undefined;
+  }
+  const prompt = args["prompt"];
+  if (typeof prompt !== "string" || prompt.trim() === "") return undefined;
+  if (utf8Bytes(prompt) > WORK_REQUEST_PROMPT_MAX_BYTES) return undefined;
+  const harness = args["harness"];
+  return {
+    harness: oneOf(WORK_REQUEST_OPEN_HARNESSES, harness) ? harness : null,
+    prompt,
+  };
+}
+
 export interface CommandSuggestCard {
   kind: "command_suggest";
-  /** 이 빌드가 아는 명령(G2): `ai.connect`, `settings.open`(#3939). */
-  commandId: "ai.connect" | "settings.open";
+  /** 이 빌드가 아는 명령(G2): `ai.connect`, `settings.open`(#3939), `work.request.open`(#4972). */
+  commandId: "ai.connect" | "settings.open" | "work.request.open";
   /** `ok`면 보는 사람별 카드, `degraded`면 누구에게나 한 줄. */
   shape: "ok" | "degraded";
-  /** `ok`일 때만 뜻이 있다. `ai.connect` 전용(`settings.open`은 null). */
+  /** `ok`일 때만 뜻이 있다. `ai.connect` 전용(그 밖의 명령은 null). */
   focus: AiConnectFocus;
   /** `settings.open`이고 `ok`일 때만 값이 있다. 그 밖에는 null. */
   section: SettingsOpenSection | null;
+  /** `work.request.open`이고 `ok`일 때만 값이 있다. 그 밖에는 null. */
+  workRequest: WorkRequestOpen | null;
   /** 제안 대상. 서버가 run의 트리거 작성자로 채운 값(G3). */
   forMemberId: string;
   /** 한 줄 문구에 쓰는 대상 이름(멤버 목록에서 찾은 것, props가 아니다). */
@@ -221,9 +312,15 @@ export function commandSuggestCard(
   if (typeof commandId !== "string" || !SUGGESTABLE_CLIENT_IDS.has(commandId)) {
     return null;
   }
-  // 이 빌드가 그리는 명령은 이 둘이다. 레지스트리에 새 제안 명령이 생겨도 이 파일이
+  // 이 빌드가 그리는 명령은 이 셋이다. 레지스트리에 새 제안 명령이 생겨도 이 파일이
   // 그 명령의 카드를 모르면 본문 폴백이다(AX-5가 여기에 갈래를 더한다).
-  if (commandId !== "ai.connect" && commandId !== "settings.open") return null;
+  if (
+    commandId !== "ai.connect" &&
+    commandId !== "settings.open" &&
+    commandId !== "work.request.open"
+  ) {
+    return null;
+  }
   const forMemberId = envelope["for_member_id"];
   if (typeof forMemberId !== "string" || forMemberId === "") return null;
   const target = memberFor(directory, forMemberId);
@@ -239,22 +336,40 @@ export function commandSuggestCard(
     label === undefined ||
     (typeof label === "string" && [...label].length <= COMMAND_SUGGEST_LABEL_MAX);
   const isSettings = commandId === "settings.open";
-  const focus = isSettings ? null : aiConnectFocus(envelope["args"] ?? {});
-  // `settings.open`은 `args`가 필수다(`?? {}`로 메우지 않는다 — 비면 한 줄 폴백).
+  const isWorkRequest = commandId === "work.request.open";
+  const isAiConnect = !isSettings && !isWorkRequest;
+  const focus = isAiConnect ? aiConnectFocus(envelope["args"] ?? {}) : null;
+  // `settings.open`·`work.request.open`은 `args`가 필수다(`?? {}`로 메우지 않는다 — 비면 한 줄 폴백).
   const section = isSettings ? settingsOpenSection(envelope["args"]) : undefined;
+  const workRequest = isWorkRequest ? workRequestOpenArgs(envelope["args"]) : undefined;
   const degraded =
-    extraKey || !labelOk || (isSettings ? section === undefined : focus === undefined);
+    extraKey ||
+    !labelOk ||
+    (isSettings
+      ? section === undefined
+      : isWorkRequest
+        ? workRequest === undefined
+        : focus === undefined);
 
   return {
     kind: "command_suggest",
     commandId,
     shape: degraded ? "degraded" : "ok",
-    focus: degraded || isSettings ? null : (focus as AiConnectFocus),
+    focus: degraded || !isAiConnect ? null : (focus as AiConnectFocus),
     section: degraded || !isSettings ? null : (section as SettingsOpenSection),
+    workRequest: degraded || !isWorkRequest ? null : (workRequest as WorkRequestOpen),
     forMemberId,
     forMemberName: memberNameParts(directory, forMemberId, target.displayName),
     agentName: author.displayName.trim() === "" ? `@${author.handle}` : author.displayName,
   };
+}
+
+/** 이 카드의 **대상 본인**이 보고 있는가(조작 카드가 서는 유일한 경우). */
+export function commandSuggestIsTarget(
+  card: CommandSuggestCard,
+  viewerMemberId: string | undefined
+): boolean {
+  return commandSuggestViewer(card, viewerMemberId, false) === "target";
 }
 
 /** 보는 사람. 판정은 이 셋뿐이다(G4 표). */
@@ -293,6 +408,11 @@ function nameText(name: MemberNameParts): string {
  * (`section` 없음)은 어느 화면인지 말하지 않고 「설정 열기」만 말한다.
  */
 export function commandSuggestOneLine(card: CommandSuggestCard): string {
+  if (card.commandId === "work.request.open") {
+    // 라벨은 harness로만 갈린다 — 글(prompt)은 남에게 보이는 줄에도 싣지 않는다.
+    const what = workRequestOpenLabel(card.workRequest?.harness ?? null);
+    return `${attachRecipient(nameText(card.forMemberName), "person")} 「${what}」 카드를 제안했어요`;
+  }
   if (card.commandId === "settings.open") {
     const what = card.section === null ? "설정 열기" : settingsOpenLabel(card.section);
     return `${attachRecipient(nameText(card.forMemberName), "person")} 「${what}」 카드를 제안했어요`;

@@ -400,6 +400,21 @@ pub struct SendMessageRequest {
     /// has proved the surface.
     #[serde(default)]
     pub apps: Option<Vec<String>>,
+    /// ADR-0170 증보 2026-11-01 D21 (#4884) — 「미리보기 없이 보내기」: this message gets **no link
+    /// cards**, ever.
+    ///
+    /// Optional and additive: absent and `false` are the same request, and a client sends the key
+    /// **only when it is `true`** (this request is closed-world, so an older server refuses an
+    /// unknown key with a 400). A dedicated field and not a `props` key for the reason
+    /// [`SendMessageRequest::props`] gives: props is a flat string map any client writes, and
+    /// what it carries is not something the server can vouch for. What the server does with it is
+    /// its own: **in the send transaction, on a real insert only**, it plants the message's
+    /// tombstone (`message_unfurl_tombstone`, the row 「카드 제거」 already uses), which the unfurl
+    /// worker looks for before it fetches anything. An idempotent retry answers the stored message
+    /// whatever this field says now. It reaches only this message's own cards. A developer token
+    /// may not send it (R12's allow-list names five keys and this is not one).
+    #[serde(default)]
+    pub suppress_unfurl: Option<bool>,
 }
 
 /// The `harnessRefine` block on [`SendMessageRequest`] (ADR-0158 D1~D4).
@@ -469,6 +484,14 @@ pub struct ThreadRollupDto {
     /// #4877 — every distinct member who has replied; the faces above are the newest
     /// `min(count, 3)` of them.
     pub participant_count: i32,
+    /// #4889 stage 2 (owner 10-31 23:49) — how many replies **the reader** has not read, never
+    /// counting their own. Present only on a page read for a reader who follows this thread
+    /// (`auto` or `followed`; `0` is "follows, nothing new"); absent for a thread they do not follow,
+    /// for an agent reader, and from every producer that is not a per-reader read — notably the
+    /// realtime `thread.updated` frame, which is one publication for the whole channel. snake_case
+    /// beside the keys above; the core's `threadRollup()` turns it into `unreadReplyCount`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread_reply_count: Option<i64>,
 }
 
 /// The quoted message carried beside a reply (ADR-0148 §3-2).
@@ -859,6 +882,27 @@ pub struct ThreadRepliesPage {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadFollowDto {
     pub following: bool,
+}
+
+/// `PUT …/messages/{root}/read` request (#4889 stage 2): how far the caller has read the thread.
+/// snake_case like the channel's `PUT read-state` body, and for the same reason one concept has one
+/// spelling on the wire (`last_read_reply_seq` / `unread_reply_count`, also the thread summary's).
+/// There is no member id: the cursor's owner is the bearer.
+#[derive(Debug, Deserialize)]
+pub struct ThreadReadRequestDto {
+    pub last_read_reply_seq: i64,
+}
+
+/// `PUT …/messages/{root}/read` response: the caller's read position **after** the write. For a thread
+/// the caller does not follow (no row, or stopped) it is `{following: false}` and nothing else — the
+/// signal wrote nothing and has no number to report.
+#[derive(Debug, Serialize)]
+pub struct ThreadReadStateDto {
+    pub following: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_read_reply_seq: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread_reply_count: Option<i64>,
 }
 
 /// Query string of the replies page. `limit` is lenient (a bad page size has a
@@ -2261,6 +2305,10 @@ pub struct AgentRunProgressDto {
     pub approval_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub approval_expires_at_ms: Option<i64>,
+    /// ADR-0186 v6 R-f: the request's bundle, as the viewer reads it. Absent when the
+    /// run never asked for an approval, or asked in a channel the viewer cannot see.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<AgentRunBundleDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_reason: Option<String>,
     /// 1 = next to be claimed. Absent unless the run is unclaimed and claimable.
@@ -2278,6 +2326,36 @@ pub struct AgentRunProgressDto {
     pub finished_at_ms: Option<i64>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+}
+
+/// openapi `AgentRunProgress.bundle` (ADR-0186 v6 R-f) — one approval of the run, read
+/// for **the viewer**: the one the run is parked on, else the latest it asked.
+///
+/// The keys are the ones `packages/momo-core` `parseRequestBundleSnapshot` reads off a
+/// run's bundle (#4760), so the shipped chip and summary line can read it as it is.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunBundleDto {
+    pub approval_id: String,
+    /// `pending`, `approved`, `rejected`, `expired` or `cancelled`, as of now: a
+    /// `pending` approval past its deadline reads `expired` before the sweep writes it
+    /// down (ADR-0186 증보 v5 U-f).
+    pub status: String,
+    /// `inline` or `open`: see [`ApprovalDto::decision_mode`].
+    pub decision_mode: &'static str,
+    /// Whether **this viewer** may decide it right now: pending, in time, and a person
+    /// the decision route would let through. Never true for anyone else.
+    pub can_decide: bool,
+    /// The card's one sentence: the question while pending, the outcome once settled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<String>,
+    /// While pending, the same sentence as `line`: the key the shipped summary line and
+    /// chip label read (`parseRequestBundleSnapshot`'s `intent`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intent: Option<String>,
+    /// `tool_call`, `workspace_action`, …: the chip tells an approved tool call that is
+    /// still running from an approved action that is done by it.
+    pub action_type: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -5532,6 +5610,26 @@ pub struct ApprovalDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at_ms: Option<i64>,
     pub created_at_ms: i64,
+    /// ADR-0186 v6 R-f: `inline` (decidable where it is shown) or `open` (must be
+    /// opened in the app). The answer of `momo_agent::actions::opens_in_app`, the one
+    /// list; the client never recomputes it.
+    pub decision_mode: &'static str,
+    /// ADR-0186 v6 R-f, where it lives: the approval's channel is a DM.
+    pub is_direct: bool,
+    /// ADR-0186 v6 R-f, where it lives: the thread the approval card sits in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub root_id: Option<String>,
+    /// ADR-0186 v6 R-f: the card's outcome, once the approval is settled.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<ApprovalResultDto>,
+}
+
+/// `ApprovalProjection.result` — the card's `result` object, narrowed to the one
+/// sentence the inbox row needs.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovalResultDto {
+    pub line: String,
 }
 
 /// Swift `ApprovalProjectionPageDTO` (:52).
@@ -5539,6 +5637,10 @@ pub struct ApprovalDto {
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalListResponse {
     pub approvals: Vec<ApprovalDto>,
+    /// ADR-0186 v6 R-f: present only when a further page exists, and only for a
+    /// read that is not `status=pending`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -5949,13 +6051,19 @@ pub struct SecretOnceDto {
     pub expires_at_ms: i64,
 }
 
-/// `GET …/approvals?status=&limit=`.
+/// `GET …/approvals?status=&scope=&limit=&cursor=`.
 #[derive(Debug, Default, Deserialize)]
 pub struct ApprovalListQuery {
     #[serde(default)]
     pub status: Option<String>,
+    /// `team` (default) or `mine` (ADR-0186 v6 R-f).
+    #[serde(default)]
+    pub scope: Option<String>,
     #[serde(default)]
     pub limit: Option<String>,
+    /// The `nextCursor` of the previous page (ADR-0186 v6 R-f).
+    #[serde(default)]
+    pub cursor: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -6169,6 +6277,50 @@ pub struct MessageUnfurlDto {
     pub is_video: bool,
 }
 
+/// `POST …/channels/{ch}/unfurl-previews` request (ADR-0170 증보 2026-11-01 D14, #4884).
+///
+/// Closed-world, and **one address only**: the draft's text never reaches the server (D2), and
+/// the address is in a body and not in a path or query because a link's query is often a token.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UnfurlPreviewRequest {
+    pub url: String,
+}
+
+/// The card of a link that is still in the composer (ADR-0170 증보 2026-11-01 D15).
+///
+/// The keys of [`MessageUnfurlDto`] without `messageId` (there is no message yet), under the same
+/// rules: every optional key is absent when unknown, and `imageUrl`/`iconUrl` are proxy paths on
+/// this origin, never a remote address. `status` is `ok` or `failed` and nothing else: a preview
+/// does not say *why* there is none. `id` exists only for `ok`, as the handle of the two paths.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnfurlPreviewDto {
+    pub url: String,
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_width: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_height: Option<i32>,
+    /// Only ever `true`; absent otherwise.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_video: bool,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageUnfurlListResponse {
@@ -6279,6 +6431,208 @@ mod tests {
         assert_usage_values(&request.usage.expect("usage"));
     }
 
+    /// The text of `docs/api/openapi.yaml`.
+    fn openapi_spec() -> String {
+        std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/openapi.yaml"
+        ))
+        .expect("read openapi.yaml")
+    }
+
+    /// The line after the key that ends `path` — each step a key and the indent it sits
+    /// at, searched forward from the step before. There is no YAML crate here: the spec
+    /// is indented by two, and the blocks these tests read are plain block mappings.
+    fn spec_key_line(lines: &[&str], path: &[(&str, usize)]) -> usize {
+        let mut at = 0;
+        for (key, indent) in path {
+            let header = format!("{}{key}:", " ".repeat(*indent));
+            at += lines[at..]
+                .iter()
+                .position(|line| line.trim_end() == header)
+                .unwrap_or_else(|| panic!("openapi.yaml has no `{header}` after line {at}"))
+                + 1;
+        }
+        at
+    }
+
+    /// The names under the `properties:` header at `path`'s end, sorted.
+    fn spec_properties(spec: &str, path: &[(&str, usize)]) -> Vec<String> {
+        let lines: Vec<&str> = spec.lines().collect();
+        let start = spec_key_line(&lines, path);
+        let header_indent = path.last().expect("a path").1;
+        let mut names = Vec::new();
+        for line in &lines[start..] {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let indent = line.len() - line.trim_start().len();
+            if indent <= header_indent {
+                break;
+            }
+            if indent == header_indent + 2 {
+                if let Some((name, _)) = line.trim().split_once(':') {
+                    names.push(name.to_string());
+                }
+            }
+        }
+        names.sort();
+        names
+    }
+
+    /// The `required` list of the schema at `path`'s end — flow style (`required: [a, b]`)
+    /// or a block list — sorted.
+    fn spec_required(spec: &str, path: &[(&str, usize)]) -> Vec<String> {
+        let lines: Vec<&str> = spec.lines().collect();
+        let start = spec_key_line(&lines, path);
+        let indent = path.last().expect("a path").1 + 2;
+        let header = format!("{}required:", " ".repeat(indent));
+        let at = lines[start..]
+            .iter()
+            .position(|line| line.starts_with(&header))
+            .unwrap_or_else(|| panic!("no `required` under {path:?}"))
+            + start;
+        let mut names: Vec<String> = match lines[at][header.len()..].trim() {
+            "" => lines[at + 1..]
+                .iter()
+                .take_while(|line| line.trim_start().starts_with("- "))
+                .map(|line| line.trim_start()[2..].trim().to_string())
+                .collect(),
+            flow => flow
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .split(',')
+                .map(|name| name.trim().to_string())
+                .collect(),
+        };
+        names.sort();
+        names
+    }
+
+    fn keys_of(value: &serde_json::Value) -> Vec<String> {
+        let mut keys: Vec<String> = value.as_object().expect("object").keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    /// **ADR-0186 v6 R-f, held to the spec in both directions.** The gate that samples
+    /// the live server (`verify_openapi_contract_rust.sh`) sees only the rows its
+    /// fixtures happen to make; this builds every optional key and holds the whole key
+    /// set of an approval row, of its `result`, and of a run's `bundle` to the spec's
+    /// properties (a key emitted but undeclared is drift, a key declared but never
+    /// emitted is a promise nothing keeps), and the always-present ones to `required`.
+    #[test]
+    fn the_request_loop_read_keys_are_the_specs_keys() {
+        let spec = openapi_spec();
+
+        let approval_full = serde_json::to_value(ApprovalDto {
+            id: "a".into(),
+            workspace_id: "w".into(),
+            run_id: "r".into(),
+            channel_id: "c".into(),
+            request_message_id: Some("m".into()),
+            requested_by: "b".into(),
+            action_type: "tool_call".into(),
+            payload: serde_json::json!({}),
+            status: "approved".into(),
+            decided_by: Some("h".into()),
+            decided_at_ms: Some(1),
+            decision_reason: Some("r".into()),
+            expires_at_ms: Some(2),
+            created_at_ms: 3,
+            decision_mode: "open",
+            is_direct: true,
+            root_id: Some("t".into()),
+            result: Some(ApprovalResultDto { line: "l".into() }),
+        })
+        .expect("serialize");
+        // The three keys this server never writes (the spec says so on each).
+        let never_emitted = ["estimatedMicroUsd", "isReversible", "onBehalfOf"];
+        let mut declared = spec_properties(&spec, &[("ApprovalProjection", 4), ("properties", 6)]);
+        declared.retain(|name| !never_emitted.contains(&name.as_str()));
+        assert_eq!(keys_of(&approval_full), declared);
+        assert_eq!(
+            keys_of(&approval_full["result"]),
+            spec_properties(
+                &spec,
+                &[
+                    ("ApprovalProjection", 4),
+                    ("properties", 6),
+                    ("result", 8),
+                    ("properties", 10)
+                ]
+            )
+        );
+
+        let approval_least = serde_json::to_value(ApprovalDto {
+            id: "a".into(),
+            workspace_id: "w".into(),
+            run_id: "r".into(),
+            channel_id: "c".into(),
+            request_message_id: None,
+            requested_by: "b".into(),
+            action_type: "tool_call".into(),
+            payload: serde_json::json!({}),
+            status: "pending".into(),
+            decided_by: None,
+            decided_at_ms: None,
+            decision_reason: None,
+            expires_at_ms: None,
+            created_at_ms: 3,
+            decision_mode: "inline",
+            is_direct: false,
+            root_id: None,
+            result: None,
+        })
+        .expect("serialize");
+        assert_eq!(
+            keys_of(&approval_least),
+            spec_required(&spec, &[("ApprovalProjection", 4)]),
+            "a row with nothing optional says exactly what the spec requires"
+        );
+
+        let bundle_path = [("AgentRunProgress", 4), ("bundle", 8)];
+        let bundle_full = serde_json::to_value(AgentRunBundleDto {
+            approval_id: "a".into(),
+            status: "pending".into(),
+            decision_mode: "inline",
+            can_decide: true,
+            line: Some("l".into()),
+            intent: Some("l".into()),
+            action_type: "tool_call".into(),
+        })
+        .expect("serialize");
+        assert_eq!(
+            keys_of(&bundle_full),
+            spec_properties(&spec, &[bundle_path[0], bundle_path[1], ("properties", 10)])
+        );
+        let bundle_least = serde_json::to_value(AgentRunBundleDto {
+            approval_id: "a".into(),
+            status: "approved".into(),
+            decision_mode: "open",
+            can_decide: false,
+            line: None,
+            intent: None,
+            action_type: "tool_call".into(),
+        })
+        .expect("serialize");
+        assert_eq!(keys_of(&bundle_least), spec_required(&spec, &bundle_path));
+
+        // The page: `nextCursor` is the one key beside `approvals`, and absent when none.
+        let page = |next_cursor: Option<String>| {
+            serde_json::to_value(ApprovalListResponse {
+                approvals: Vec::new(),
+                next_cursor,
+            })
+            .expect("serialize")
+        };
+        assert_eq!(
+            keys_of(&page(Some("c".into()))),
+            spec_properties(&spec, &[("ApprovalProjectionPage", 4), ("properties", 6)])
+        );
+        assert_eq!(keys_of(&page(None)), vec!["approvals".to_string()]);
+    }
+
     /// **The approval wire's exact key set, pinned** (goal SRV-B5c).
     ///
     /// `docs/api/openapi.yaml` described these two schemas in snake_case for a
@@ -6314,6 +6668,10 @@ mod tests {
             decision_reason: None,
             expires_at_ms: None,
             created_at_ms: 7,
+            decision_mode: "inline",
+            is_direct: false,
+            root_id: Some("t".into()),
+            result: Some(ApprovalResultDto { line: "l".into() }),
         })
         .expect("serialize");
         let mut keys: Vec<&str> = projection
@@ -6329,10 +6687,14 @@ mod tests {
                 "actionType",
                 "channelId",
                 "createdAtMs",
+                "decisionMode",
                 "id",
+                "isDirect",
                 "payload",
                 "requestMessageId",
                 "requestedBy",
+                "result",
+                "rootId",
                 "runId",
                 "status",
                 "workspaceId",

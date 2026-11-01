@@ -208,7 +208,14 @@ function fakePort(outcome: SpawnOutcome | (() => SpawnOutcome) = {
   return {port, requests};
 }
 
-function mount(port: SpawnPort, extra: {waitTimeoutMs?: number} = {}) {
+function mount(
+  port: SpawnPort,
+  extra: {
+    waitTimeoutMs?: number;
+    initialPrompt?: string;
+    initialHarness?: 'claude' | 'codex' | 'opencode';
+  } = {},
+) {
   const client = new QueryClient({
     defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {gcTime: 0}},
   });
@@ -805,4 +812,74 @@ describeCloseContract({
   closeLabel: '내 맥에 보내기 닫기',
   scrimTestID: 'page-sheet-scrim',
   scrimLabel: '내 맥에 보내기 닫기',
+});
+
+describe('⑨ 도우미의 「작업 요청 열기」 카드가 미리 채운 시트 (#4972)', () => {
+  const PROMPT = '로그인 화면의 비밀번호 보기 버튼이 눌리지 않아요. 원인을 찾아 고쳐 주세요.';
+  const selectedRows = (testIds: string[]) =>
+    testIds.map(id => [id, screen.getByTestId(id).props.accessibilityState?.selected === true]);
+
+  it('글이 채워진 채 「작업 요청」 모드로 열리고, 고른 도구가 서 있으며, 열렸다고 보내지는 않는다', async () => {
+    installFetch({});
+    const {port, requests} = fakePort();
+    mount(port, {initialPrompt: PROMPT, initialHarness: 'codex', waitTimeoutMs: 60_000});
+    await screen.findByTestId('ask-mac-form');
+    expect(screen.getByTestId('ask-mac-prompt').props.value).toBe(PROMPT);
+    expect(selectedRows(['ask-mac-mode-ask', 'ask-mac-mode-work'])).toEqual([
+      ['ask-mac-mode-ask', false],
+      ['ask-mac-mode-work', true],
+    ]);
+    expect(destinationText()).toBe('내 맥 · 성재의 MacBook · Codex');
+    // 작업 요청은 프로젝트 폴더를 고르기 전에는 보낼 수 없다 — 폴더·채널은 사람이 고른다.
+    expect(screen.getByTestId('ask-mac-send')).toBeDisabled();
+    expect(port.spawn).not.toHaveBeenCalled();
+
+    // 사람이 폴더·채널을 고르고 ✓를 누르면 포트가 불리고, 글은 카드가 채운 그대로 나간다.
+    fireEvent.press(screen.getByTestId('ask-mac-folder-fld_app'));
+    fireEvent.press(screen.getByTestId('ask-mac-channel-개발'));
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ask-mac-send'));
+    });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]).toMatchObject({
+      hostId: MAC,
+      folderId: 'fld_app',
+      tool: 'codex',
+      channelId: CH_DEV,
+      prompt: PROMPT,
+    });
+  });
+
+  it('고를 수 없는 도구(이 맥이 OpenCode를 알리지 않음)면 평소 기본값이 이기고 글은 남는다', async () => {
+    installFetch({});
+    mount(fakePort().port, {initialPrompt: PROMPT, initialHarness: 'opencode'});
+    await screen.findByTestId('ask-mac-form');
+    expect(destinationText()).toBe('내 맥 · 성재의 MacBook · Claude Code');
+    expect(screen.getByTestId('ask-mac-prompt').props.value).toBe(PROMPT);
+  });
+
+  it('글이 없는 열기(평소 입구)는 물어보기 모드로 비어 있다 — 카드의 글이 다음 시트에 남지 않는다', async () => {
+    installFetch({});
+    mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+    expect(screen.getByTestId('ask-mac-prompt').props.value).toBe('');
+    expect(selectedRows(['ask-mac-mode-ask', 'ask-mac-mode-work'])).toEqual([
+      ['ask-mac-mode-ask', true],
+      ['ask-mac-mode-work', false],
+    ]);
+  });
+
+  it('카드가 채운 글도 보내는 검사를 그대로 받는다(「/」로 시작하면 막힌다)', async () => {
+    installFetch({});
+    const {port} = fakePort();
+    mount(port, {initialPrompt: '/clear 다 지워 줘', waitTimeoutMs: 60_000});
+    await screen.findByTestId('ask-mac-form');
+    fireEvent.press(screen.getByTestId('ask-mac-folder-fld_app'));
+    fireEvent.press(screen.getByTestId('ask-mac-channel-개발'));
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ask-mac-send'));
+    });
+    expect(await screen.findByTestId('ask-mac-issue')).toBeTruthy();
+    expect(port.spawn).not.toHaveBeenCalled();
+  });
 });

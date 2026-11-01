@@ -484,6 +484,30 @@ pub struct RateLimitConfig {
     /// gets per window. A request refused here is retried by the client after `Retry-After` and
     /// shows its fallback meanwhile. See ADR-0170 증보 D13.
     pub unfurl_proxy_per_member_limit: u32,
+    /// `RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER` (default 10 per window). 0 disables.
+    /// Starting a picture from a photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H9/H11,
+    /// #4941), which can end in one call to the team's image model and so in a charge on the
+    /// team's own key. A short-window guard on **starts**, not an allowance: the owner's default
+    /// for how many pictures a team may draw is no cap (#4944), and a team that wants one sets it
+    /// there. A person works on one photo at a time (the route admits one per member) and every
+    /// finished one leaves a draft to look at (four may wait, `momo_expressions::LIVE_DRAFTS`),
+    /// so ordinary use is a few starts a minute. 10 is two full draft allowances plus two: a
+    /// person who fills their drafts and asks once more reaches the draft limit, not this. A start
+    /// the route then refuses (busy, over the draft limit) counts too, and the gate runs before
+    /// the body is read.
+    pub photo_draft_per_member_limit: u32,
+    /// `RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER` (default 60 per window). 0 disables.
+    /// A link a member typed into the composer, asked about before the message exists
+    /// (`POST …/channels/{ch}/unfurl-previews`), counted **only when the request makes this server
+    /// fetch the page**: an answer the server already holds for that member and address, a switch
+    /// that is off, and a request turned away for want of a place cost the remote site nothing and
+    /// spend nothing. This is the one request where the member names the address and the answer
+    /// comes straight back, so it is the proxy's other half of the same brake (the proxy's figure
+    /// is for pictures a page chose). 60 is a sustained one a second: the composer asks about a
+    /// link a moment after typing stops, once per address, and an address typed slowly leaves a
+    /// few half-written ones on the way; that fits with room to spare, and anything past it is
+    /// retried by the client after `Retry-After`. See ADR-0170 증보 2026-11-01 D20.
+    pub unfurl_preview_per_member_limit: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -502,6 +526,8 @@ impl Default for RateLimitConfig {
             scheduled_write_per_member_limit: 60,
             upload_start_per_member_limit: 60,
             unfurl_proxy_per_member_limit: 240,
+            photo_draft_per_member_limit: 10,
+            unfurl_preview_per_member_limit: 60,
         }
     }
 }
@@ -559,6 +585,12 @@ impl RateLimitConfig {
             unfurl_proxy_per_member_limit: lookup("RATE_LIMIT_UNFURL_PROXY_PER_MEMBER")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.unfurl_proxy_per_member_limit),
+            photo_draft_per_member_limit: lookup("RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.photo_draft_per_member_limit),
+            unfurl_preview_per_member_limit: lookup("RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.unfurl_preview_per_member_limit),
         }
     }
 }
@@ -1005,6 +1037,29 @@ fn subscription_agents_from_env() -> bool {
 }
 
 /// #3397 — read the Claude subscription-agent opt-in. Off unless an exact `true`.
+/// The operator's team-AI ceilings as this process reads them (ADR-0201 증보 v3 B9-3, #4944) — the
+/// same rule the agent-worker enforces by (`parse_operator_cap`): unset or empty = no ceiling, `0` =
+/// off, a positive number = the ceiling. The api only **explains** the ceiling, so a value it cannot
+/// read is a warning and "not shown", never a refusal to boot (the worker, which enforces, fails
+/// loudly on the same value).
+pub fn team_ai_caps_from_env() -> momo_workspace_actions::team_ai_limits::OperatorCaps {
+    use momo_workspace_actions::team_ai_limits::{parse_operator_cap, OperatorCaps};
+    let read = |key: &'static str| match parse_operator_cap(key, env(key).as_deref()) {
+        Ok(cap) => cap,
+        Err(invalid) => {
+            tracing::warn!(
+                variable = invalid.0,
+                "unreadable team AI ceiling; the settings screen will not show it"
+            );
+            None
+        }
+    };
+    OperatorCaps {
+        daily_tokens: read("TEAM_AI_DAILY_TOKEN_CAP"),
+        daily_searches: read("TEAM_AI_DAILY_SEARCH_CAP"),
+    }
+}
+
 fn claude_subscription_agents_from_env() -> bool {
     claude_subscription_agents_switch_on(env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref())
 }
@@ -3987,9 +4042,11 @@ mod tests {
                 defaults.scheduled_write_per_member_limit,
                 defaults.upload_start_per_member_limit,
                 defaults.unfurl_proxy_per_member_limit,
+                defaults.photo_draft_per_member_limit,
+                defaults.unfurl_preview_per_member_limit,
             ),
-            (120, 600, 60, 60, 240),
-            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 for the last one), docs/api/openapi.yaml and infra/.env.example with it"
+            (120, 600, 60, 60, 240, 10, 60),
+            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 and 2026-11-01 D20 for the unfurl ones, ADR-0218 §8 H11 for the photo one), docs/api/openapi.yaml and infra/.env.example with it"
         );
         for (name, limit) in [
             (
@@ -4000,6 +4057,8 @@ mod tests {
             ("scheduled write", defaults.scheduled_write_per_member_limit),
             ("upload start", defaults.upload_start_per_member_limit),
             ("unfurl proxy", defaults.unfurl_proxy_per_member_limit),
+            ("photo draft", defaults.photo_draft_per_member_limit),
+            ("unfurl preview", defaults.unfurl_preview_per_member_limit),
         ] {
             assert!(
                 limit > 0,
@@ -4015,6 +4074,10 @@ mod tests {
             defaults.upload_start_per_member_limit as usize
                 >= 2 * momo_messaging::MAX_ATTACHMENTS_PER_MESSAGE,
             "two full messages' worth of attachment uploads must fit in one window"
+        );
+        assert!(
+            i64::from(defaults.photo_draft_per_member_limit) >= 2 * momo_expressions::LIVE_DRAFTS,
+            "a person who fills the live-draft allowance and asks once more must meet the draft limit, not the rate"
         );
         assert!(
             defaults.message_send_per_agent_limit >= AgentPortConfig::default().per_agent_limit,
@@ -4071,10 +4134,30 @@ mod tests {
                 ..defaults
             }
         );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER", "12")),
+            RateLimitConfig {
+                photo_draft_per_member_limit: 12,
+                ..defaults
+            }
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER", "7")),
+            RateLimitConfig {
+                unfurl_preview_per_member_limit: 7,
+                ..defaults
+            },
+            "the preview name moves the preview field and nothing else"
+        );
         // 0 is the operator's off switch; a value that is not a number is not one.
         assert_eq!(
             RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MESSAGE_SEND_PER_AGENT", "0"))
                 .message_send_per_agent_limit,
+            0
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER", "0"))
+                .photo_draft_per_member_limit,
             0
         );
         assert_eq!(

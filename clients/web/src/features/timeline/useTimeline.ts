@@ -19,6 +19,7 @@ import {
   type Message,
   type MessageAttachment,
   type SendMessageOptions,
+  type ThreadReadState,
 } from "@momo/core/lib/api";
 import {
   payloadToMessage,
@@ -77,6 +78,7 @@ import {
   type PinMap,
 } from "@momo/core/features/timeline/pins";
 import { endedStreamRunIds } from "@momo/core/features/timeline/streamStop";
+import { applyThreadReadState } from "@momo/core/features/timeline/threadSummary";
 import { seedEndedRuns } from "@/features/agents/endedRuns";
 import {
   clearMessageUnfurls,
@@ -180,6 +182,11 @@ export interface UseTimelineResult {
   /** ADR-0179 D3 — live-arrival grant still waiting for first mount. */
   isPlayEntrance: (messageId: string) => boolean;
   consumeEntrance: (messageId: string) => void;
+  /**
+   * 스레드 패널이 보낸 「여기까지 읽었어요」의 응답을 **든 루트**의 요약에 반영한다(#4878, #4889 2단계) —
+   * 따라가는 스레드면 안 읽은 수를 서버 값으로 맞춰 「새 답글 M」 칩이 사라지게 하고, 아니면 값을 지운다.
+   */
+  applyThreadRead: (rootId: string, read: ThreadReadState) => void;
   /**
    * Evict unmounted leftover grants (scrolled-up backlog). Timeline calls
    * this when the reader is not at the bottom. Mounted rows consume
@@ -311,6 +318,9 @@ export function useTimeline(
   );
   const consumeEntrance = useCallback((messageId: string) => {
     playOnMountRef.current.delete(messageId.toLowerCase());
+  }, []);
+  const applyThreadRead = useCallback((rootId: string, read: ThreadReadState) => {
+    setState((s) => applyThreadReadState(s, rootId, read));
   }, []);
   const capUnmountedArrivals = useCallback(() => {
     capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);
@@ -497,6 +507,10 @@ export function useTimeline(
             ...(row.attachments === undefined || row.attachments.length === 0
               ? {}
               : { attachmentIds: row.attachments.map((a) => a.id) }),
+            // #5005 — 입력칸 ✕로 끈 채 보낸 메시지의 재시도도 **같은 요청**이다. 서버는 이미 저장된
+            // 메시지의 재시도에서 이 필드를 다시 판단하지 않으므로, 첫 요청이 닿지 못했다면 여기서
+            // 떨군 순간 사람이 끈 카드가 되살아난다.
+            ...(row.suppressUnfurl === true ? { suppressUnfurl: true } : {}),
           }
         );
         const spec = callSpecsRef.current.get(row.clientMsgId);
@@ -557,6 +571,7 @@ export function useTimeline(
         ...(options?.replyToId === undefined
           ? {}
           : { replyToId: options.replyToId }),
+        ...(options?.suppressUnfurl === true ? { suppressUnfurl: true } : {}),
         // Local clock, used only for grouping and the time label on a row that
         // has not been ordered yet. Ordering still waits for seq.
         createdAtMs: Date.now(),
@@ -1045,6 +1060,7 @@ export function useTimeline(
     removeUnfurls,
     isPlayEntrance,
     consumeEntrance,
+    applyThreadRead,
     capUnmountedArrivals,
   };
 }

@@ -53,6 +53,7 @@ pub mod dms;
 pub mod ephemeral;
 /// #1222 — 이벤트 구독: what leaves the workspace, and who said it could.
 pub mod event_subscriptions;
+pub mod expression_photo;
 pub mod expressions;
 pub mod github_app;
 pub mod github_ingress;
@@ -101,6 +102,8 @@ pub mod reminders;
 /// `props.requestedApps` marker (a marker, never a grant).
 pub(crate) mod requested_apps;
 pub mod roster;
+/// ADR-0186 v6 R-f / #4763 — `AgentRunProgress.bundle`: one approval of a run, read for the viewer.
+pub(crate) mod run_bundle;
 /// ADR-0208 / #4214 — scheduled messages (human-only, owner-scoped, outbox event on every change).
 pub mod scheduled_messages;
 pub mod search;

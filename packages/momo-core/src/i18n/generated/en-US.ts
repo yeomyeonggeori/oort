@@ -158,6 +158,388 @@ export const catalog: MessageCatalog = {
       "value": "Window"
     }
   ],
+  "desktop.notify.threadSummary": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thread reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thread replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "expressions.photo.agentInstead": [
+    {
+      "type": 0,
+      "value": "Ask an agent instead"
+    }
+  ],
+  "expressions.photo.anotherPhoto": [
+    {
+      "type": 0,
+      "value": "Start over with another photo"
+    }
+  ],
+  "expressions.photo.branchLabel": [
+    {
+      "type": 0,
+      "value": "How to make it"
+    }
+  ],
+  "expressions.photo.busy": [
+    {
+      "type": 0,
+      "value": "Drawing your picture (up to 2 minutes)"
+    }
+  ],
+  "expressions.photo.caricatureHint": [
+    {
+      "type": 0,
+      "value": "Draws a new caricature based on the photo."
+    }
+  ],
+  "expressions.photo.caricatureLabel": [
+    {
+      "type": 0,
+      "value": "Caricature"
+    }
+  ],
+  "expressions.photo.checkFailed": [
+    {
+      "type": 0,
+      "value": "Could not check the image model. Please try again."
+    }
+  ],
+  "expressions.photo.checking": [
+    {
+      "type": 0,
+      "value": "Checking the image model"
+    }
+  ],
+  "expressions.photo.consent": [
+    {
+      "type": 0,
+      "value": "I agree to send my photo to "
+    },
+    {
+      "type": 1,
+      "value": "provider"
+    },
+    {
+      "type": 0,
+      "value": ". The cost is billed to the key your team connected."
+    }
+  ],
+  "expressions.photo.consentMissing": [
+    {
+      "type": 0,
+      "value": "You need to agree to sending the photo first."
+    }
+  ],
+  "expressions.photo.cutoutErased": [
+    {
+      "type": 0,
+      "value": "The background was removed."
+    }
+  ],
+  "expressions.photo.cutoutHint": [
+    {
+      "type": 0,
+      "value": "Keeps the subject as it is and makes the background transparent."
+    }
+  ],
+  "expressions.photo.cutoutLabel": [
+    {
+      "type": 0,
+      "value": "Remove background"
+    }
+  ],
+  "expressions.photo.cutoutModel": [
+    {
+      "type": 0,
+      "value": "The model drew a transparent background."
+    }
+  ],
+  "expressions.photo.cutoutUnchanged": [
+    {
+      "type": 0,
+      "value": "The background could not be removed. The preview below is what will be saved."
+    }
+  ],
+  "expressions.photo.displayNameLabel": [
+    {
+      "type": 0,
+      "value": "Display name"
+    }
+  ],
+  "expressions.photo.displayNamePlaceholder": [
+    {
+      "type": 0,
+      "value": "My face"
+    }
+  ],
+  "expressions.photo.errorBusy": [
+    {
+      "type": 0,
+      "value": "Other pictures are being drawn. Please try again shortly."
+    }
+  ],
+  "expressions.photo.errorChanged": [
+    {
+      "type": 0,
+      "value": "The connected image model changed. Please check and agree again."
+    }
+  ],
+  "expressions.photo.errorFailed": [
+    {
+      "type": 0,
+      "value": "Could not draw the picture. Please try again shortly."
+    }
+  ],
+  "expressions.photo.errorGeneric": [
+    {
+      "type": 0,
+      "value": "Could not make it. Check your connection and input, then try again."
+    }
+  ],
+  "expressions.photo.errorMedia": [
+    {
+      "type": 0,
+      "value": "This photo cannot be opened. Choose another."
+    }
+  ],
+  "expressions.photo.errorName": [
+    {
+      "type": 0,
+      "value": "Check the name. Names that clash with standard emoji are not allowed."
+    }
+  ],
+  "expressions.photo.errorOffline": [
+    {
+      "type": 0,
+      "value": "You are offline. Try again when you are connected."
+    }
+  ],
+  "expressions.photo.errorQuota": [
+    {
+      "type": 0,
+      "value": "You have too many pending drafts. Register one or try again in an hour."
+    }
+  ],
+  "expressions.photo.errorRefused": [
+    {
+      "type": 0,
+      "value": "The image model declined this photo. Try another photo."
+    }
+  ],
+  "expressions.photo.errorRole": [
+    {
+      "type": 0,
+      "value": "You cannot add new pictures to this team right now."
+    }
+  ],
+  "expressions.photo.errorTimeout": [
+    {
+      "type": 0,
+      "value": "It took too long. Please try again."
+    }
+  ],
+  "expressions.photo.errorUnavailable": [
+    {
+      "type": 0,
+      "value": "The connected key cannot use an image model. Connect an OpenAI or Gemini image model or check its access."
+    }
+  ],
+  "expressions.photo.faceLabel": [
+    {
+      "type": 0,
+      "value": "People's faces"
+    }
+  ],
+  "expressions.photo.faceNone": [
+    {
+      "type": 0,
+      "value": "No person's face"
+    }
+  ],
+  "expressions.photo.faceOther": [
+    {
+      "type": 0,
+      "value": "Someone else or several people"
+    }
+  ],
+  "expressions.photo.faceOtherBlocked": [
+    {
+      "type": 0,
+      "value": "Only a single picture of your own face can be approved. Please do not upload other people's faces."
+    }
+  ],
+  "expressions.photo.faceSelf": [
+    {
+      "type": 0,
+      "value": "Only my own face"
+    }
+  ],
+  "expressions.photo.fieldsInvalid": [
+    {
+      "type": 0,
+      "value": "Use 2 to 30 lowercase letters, digits, underscores or hyphens for the name, up to 40 characters for the display name and up to 8 tags."
+    }
+  ],
+  "expressions.photo.fixedNote": [
+    {
+      "type": 0,
+      "value": "The name and picture cannot be changed after registering."
+    }
+  ],
+  "expressions.photo.introText": [
+    {
+      "type": 0,
+      "value": "Send one photo to the image model your team connected and turn it into an emoji."
+    }
+  ],
+  "expressions.photo.nameLabel": [
+    {
+      "type": 0,
+      "value": "Fixed name"
+    }
+  ],
+  "expressions.photo.namePlaceholder": [
+    {
+      "type": 0,
+      "value": "happy_face"
+    }
+  ],
+  "expressions.photo.noModelAsk": [
+    {
+      "type": 0,
+      "value": "The server operator connects models. Ask your operator."
+    }
+  ],
+  "expressions.photo.noModelDetail": [
+    {
+      "type": 0,
+      "value": "The connected models cannot draw pictures. Connect an OpenAI or Gemini image model to use this."
+    }
+  ],
+  "expressions.photo.noModelHeadline": [
+    {
+      "type": 0,
+      "value": "No image model is connected"
+    }
+  ],
+  "expressions.photo.noModelImport": [
+    {
+      "type": 0,
+      "value": "Add with Import instead"
+    }
+  ],
+  "expressions.photo.noModelManage": [
+    {
+      "type": 0,
+      "value": "Go to AI settings"
+    }
+  ],
+  "expressions.photo.originLabel": [
+    {
+      "type": 0,
+      "value": "How it was made:"
+    }
+  ],
+  "expressions.photo.photoHint": [
+    {
+      "type": 0,
+      "value": "Use a still PNG, JPEG, WebP or GIF up to 5 MiB."
+    }
+  ],
+  "expressions.photo.photoLabel": [
+    {
+      "type": 0,
+      "value": "Original photo"
+    }
+  ],
+  "expressions.photo.photoMissing": [
+    {
+      "type": 0,
+      "value": "Choose an original photo."
+    }
+  ],
+  "expressions.photo.photoPreviewAlt": [
+    {
+      "type": 0,
+      "value": "Preview of the chosen photo"
+    }
+  ],
+  "expressions.photo.photoSize": [
+    {
+      "type": 0,
+      "value": "The photo is too large. Choose one up to 5 MiB."
+    }
+  ],
+  "expressions.photo.photoType": [
+    {
+      "type": 0,
+      "value": "Choose a PNG, JPEG, WebP or GIF photo."
+    }
+  ],
+  "expressions.photo.providerGemini": [
+    {
+      "type": 0,
+      "value": "Google Gemini"
+    }
+  ],
+  "expressions.photo.providerOpenai": [
+    {
+      "type": 0,
+      "value": "OpenAI"
+    }
+  ],
+  "expressions.photo.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "expressions.photo.submit": [
+    {
+      "type": 0,
+      "value": "Make it"
+    }
+  ],
+  "expressions.photo.tagsLabel": [
+    {
+      "type": 0,
+      "value": "Tags (comma separated)"
+    }
+  ],
+  "expressions.photo.tagsPlaceholder": [
+    {
+      "type": 0,
+      "value": "photo, face"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,
@@ -200,6 +582,114 @@ export const catalog: MessageCatalog = {
       "value": "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded."
     }
   ],
+  "mobile.linkCard.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "mobile.linkCard.copied": [
+    {
+      "type": 0,
+      "value": "Link copied"
+    }
+  ],
+  "mobile.linkCard.copy": [
+    {
+      "type": 0,
+      "value": "Copy link"
+    }
+  ],
+  "mobile.linkCard.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t copy the link."
+    }
+  ],
+  "mobile.linkCard.loading": [
+    {
+      "type": 0,
+      "value": "Loading link preview"
+    }
+  ],
+  "mobile.linkCard.remove": [
+    {
+      "type": 0,
+      "value": "Remove preview"
+    }
+  ],
+  "mobile.linkCard.removeConfirm": [
+    {
+      "type": 0,
+      "value": "Remove"
+    }
+  ],
+  "mobile.linkCard.removeDetail": [
+    {
+      "type": 0,
+      "value": "Every link preview on this message disappears for everyone and won’t be made again. The message and its links stay."
+    }
+  ],
+  "mobile.linkCard.removeFailed": [
+    {
+      "type": 0,
+      "value": "Couldn’t remove the link preview. Check your connection and try again."
+    }
+  ],
+  "mobile.linkCard.removePending": [
+    {
+      "type": 0,
+      "value": "Removing…"
+    }
+  ],
+  "mobile.linkCard.removeTitle": [
+    {
+      "type": 0,
+      "value": "Remove this link preview?"
+    }
+  ],
+  "mobile.linkCard.share": [
+    {
+      "type": 0,
+      "value": "Share"
+    }
+  ],
+  "mobile.linkCard.sheetClose": [
+    {
+      "type": 0,
+      "value": "Close link actions"
+    }
+  ],
+  "mobile.linkCard.sheetTitle": [
+    {
+      "type": 0,
+      "value": "Link actions"
+    }
+  ],
+  "mobile.linkPreview.compactHint": [
+    {
+      "type": 0,
+      "value": "Shows a small picture on the left, with the address and title on the right."
+    }
+  ],
+  "mobile.linkPreview.richHint": [
+    {
+      "type": 0,
+      "value": "Shows a large picture on top, with the title and description below. Links without a large picture look like Small."
+    }
+  ],
+  "mobile.linkPreview.scopeNote": [
+    {
+      "type": 0,
+      "value": "Applies to this device only. Web and desktop are set separately."
+    }
+  ],
+  "mobile.linkPreview.title": [
+    {
+      "type": 0,
+      "value": "Link previews"
+    }
+  ],
   "mobile.locale.backToSettings": [
     {
       "type": 0,
@@ -216,6 +706,54 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Applying language…"
+    }
+  ],
+  "settings.appearance.linkPreviewCompact": [
+    {
+      "type": 0,
+      "value": "Small"
+    }
+  ],
+  "settings.appearance.linkPreviewCompactHint": [
+    {
+      "type": 0,
+      "value": "Shows a small picture on the left, with the address, a one-line title and a one-line description on the right."
+    }
+  ],
+  "settings.appearance.linkPreviewOff": [
+    {
+      "type": 0,
+      "value": "Off"
+    }
+  ],
+  "settings.appearance.linkPreviewOffHint": [
+    {
+      "type": 0,
+      "value": "Keeps only the link in the message and draws no card."
+    }
+  ],
+  "settings.appearance.linkPreviewRich": [
+    {
+      "type": 0,
+      "value": "Large"
+    }
+  ],
+  "settings.appearance.linkPreviewRichHint": [
+    {
+      "type": 0,
+      "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
+    }
+  ],
+  "settings.notifications.threadReplyDescription": [
+    {
+      "type": 0,
+      "value": "New replies from others in threads you follow."
+    }
+  ],
+  "settings.notifications.threadReplyName": [
+    {
+      "type": 0,
+      "value": "New replies in followed threads"
     }
   ],
   "settings.profile.languageBeta": [
@@ -268,6 +806,346 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Use device language"
+    }
+  ],
+  "timeline.thread.followDismiss": [
+    {
+      "type": 0,
+      "value": "Dismiss"
+    }
+  ],
+  "timeline.thread.followFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't change following. Try again in a moment."
+    }
+  ],
+  "timeline.thread.followOff": [
+    {
+      "type": 0,
+      "value": "Not following this thread. Press to follow."
+    }
+  ],
+  "timeline.thread.followOn": [
+    {
+      "type": 0,
+      "value": "Following this thread. Press to stop following."
+    }
+  ],
+  "timeline.thread.followStart": [
+    {
+      "type": 0,
+      "value": "Follow thread"
+    }
+  ],
+  "timeline.thread.followStop": [
+    {
+      "type": 0,
+      "value": "Stop following"
+    }
+  ],
+  "timeline.thread.open": [
+    {
+      "type": 0,
+      "value": "Open thread, "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.thread.openUnread": [
+    {
+      "type": 0,
+      "value": "Open thread, "
+    },
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 6,
+      "value": "unread",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " new reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " new replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.thread.replyCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.thread.unreadChip": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " new reply"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " new replies"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "timeline.unfurl.label": [
+    {
+      "type": 0,
+      "value": "Link preview: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "domain"
+    }
+  ],
+  "timeline.unfurl.previewDismiss": [
+    {
+      "type": 0,
+      "value": "Send this message without a preview"
+    }
+  ],
+  "timeline.unfurl.previewDismissed": [
+    {
+      "type": 0,
+      "value": "This message will be sent without a link preview."
+    }
+  ],
+  "timeline.unfurl.previewGroup": [
+    {
+      "type": 0,
+      "value": "Link preview before sending"
+    }
+  ],
+  "timeline.unfurl.video": [
+    {
+      "type": 0,
+      "value": "Video"
+    }
+  ],
+  "timeline.workRequest.composerBusy": [
+    {
+      "type": 0,
+      "value": "You have a draft in progress, so nothing was filled in. Clear the message box and press again."
+    }
+  ],
+  "timeline.workRequest.fill": [
+    {
+      "type": 0,
+      "value": "Fill the message box"
+    }
+  ],
+  "timeline.workRequest.fillHint": [
+    {
+      "type": 0,
+      "value": "Check the text, then send it yourself."
+    }
+  ],
+  "timeline.workRequest.fillLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": fill the message box"
+    }
+  ],
+  "timeline.workRequest.inDm": [
+    {
+      "type": 0,
+      "value": "This is a direct message, so it can't be filled into the message box. Press it from a channel."
+    }
+  ],
+  "timeline.workRequest.labelAny": [
+    {
+      "type": 0,
+      "value": "Hand a task to my Mac"
+    }
+  ],
+  "timeline.workRequest.labelClaude": [
+    {
+      "type": 0,
+      "value": "Hand it to Claude Code on my Mac"
+    }
+  ],
+  "timeline.workRequest.labelCodex": [
+    {
+      "type": 0,
+      "value": "Hand it to Codex on my Mac"
+    }
+  ],
+  "timeline.workRequest.noPersonalAgent": [
+    {
+      "type": 0,
+      "value": "No Claude Code or Codex is connected on your Mac yet. Connect one under My tools in AI first."
+    }
+  ],
+  "timeline.workRequest.openSheet": [
+    {
+      "type": 0,
+      "value": "Open task request"
+    }
+  ],
+  "timeline.workRequest.openSheetLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ": open task request"
+    }
+  ],
+  "timeline.workRequest.openTools": [
+    {
+      "type": 0,
+      "value": "Open my tools"
+    }
+  ],
+  "timeline.workRequest.sheetHint": [
+    {
+      "type": 0,
+      "value": "Check the text in the sheet, then send it yourself."
+    }
+  ],
+  "timeline.workRequest.threadClosed": [
+    {
+      "type": 0,
+      "value": "Open the thread and press again."
     }
   ]
 };

@@ -28,6 +28,16 @@
 //!
 //! Network I/O is deliberately **outside** every transaction: a relay that
 //! stops answering must not hold a database connection for its timeout.
+//!
+//! ## The bulk layer (ADR-0206 증보 1 F6, #4889)
+//!
+//! A reason that one burst of messages can multiply — today `thread_reply`
+//! ([`crate::bulk::is_bulk_reason`]) — goes through [`crate::bulk`] before its dispatch is claimed:
+//! a window of six pushes per (member, thread root) and minute with the rest folded under one
+//! `o:<root>:<window>` representative, then a server-wide per-minute budget. And a relay `429` for
+//! such a push is **dropped, not retried** (its dispatch-log row is settled `429` /
+//! `relay_http: dropped`, so a redelivery cannot send it either). Every other reason is untouched:
+//! a `429` still requeues the candidate with backoff.
 
 use std::sync::Arc;
 
@@ -38,12 +48,14 @@ use momo_outbox::{
     reclaim_stuck_push_candidates, requeue, ClaimedPushCandidate,
 };
 use momo_push::{
-    claim_dispatch, judge_candidate_targets, settle_dispatch_and_invalidate, settle_relay_refusal,
-    unread_badge, DispatchClaim, DispatchOutcome, DispatchTarget, JudgedTarget, PushCandidate,
-    PushDispatch, PushDispatcher, RefusalOutcome, RelayRefusal, SettleOutcome,
+    claim_dispatch, is_dispatch_settled, judge_candidate_targets, settle_dispatch,
+    settle_dispatch_and_invalidate, settle_relay_refusal, unread_badge, DispatchClaim,
+    DispatchOutcome, DispatchTarget, JudgedTarget, PushCandidate, PushDispatch, PushDispatcher,
+    RefusalOutcome, RelayRefusal, SettleOutcome,
 };
 use uuid::Uuid;
 
+use crate::bulk::{self, BulkLayer, Cause, Clock, Verdict};
 use crate::config::PushConfig;
 
 /// One drain iteration's tally, for logs and tests.
@@ -54,21 +66,84 @@ pub struct DrainStats {
     pub skipped_already_settled: usize,
     pub requeued: usize,
     pub failed: usize,
+    /// Bulk-layer targets that were **not** sent: folded under a window's representative, past the
+    /// server-wide budget, or dropped on a relay 429 ([`crate::bulk`]).
+    pub held_back: usize,
+}
+
+/// What became of one target.
+enum Dispatched {
+    /// Sent (or permanently refused by the relay — settled either way).
+    Sent,
+    /// The dispatch log already had it.
+    AlreadySettled,
+    /// A bulk-layer push that is deliberately not sent.
+    HeldBack,
+}
+
+/// What the bulk layer decided for one target before it is claimed.
+enum BulkPlan {
+    Send { collapse_id: String },
+    AlreadySettled,
+    HeldBack,
 }
 
 pub struct PushDrain {
     pool: PgPool,
     config: PushConfig,
     dispatcher: Arc<dyn PushDispatcher>,
+    bulk: BulkLayer,
+    /// The bulk counters already written to the log, so a pass logs only what changed.
+    bulk_logged: std::sync::Mutex<std::collections::BTreeMap<(&'static str, &'static str), u64>>,
 }
 
 impl PushDrain {
     pub fn new(pool: PgPool, config: PushConfig, dispatcher: Arc<dyn PushDispatcher>) -> Self {
+        let bulk = BulkLayer::new(config.bulk_push_per_minute);
         PushDrain {
             pool,
             config,
             dispatcher,
+            bulk,
+            bulk_logged: Default::default(),
         }
+    }
+
+    /// Replace the bulk layer's clock (epoch seconds). Production never calls this; a test holds or
+    /// moves the minute so a window cannot straddle a real minute boundary.
+    pub fn with_bulk_clock(mut self, clock: Clock) -> Self {
+        self.bulk = BulkLayer::new(self.config.bulk_push_per_minute).with_clock(clock);
+        self
+    }
+
+    /// `(reason, cause) -> pushes the bulk layer did not send since boot` (cause: `window`,
+    /// `budget` or `relay_429`).
+    pub fn bulk_counters(&self) -> std::collections::BTreeMap<(&'static str, &'static str), u64> {
+        self.bulk.counters()
+    }
+
+    /// One log line per pass for what the bulk layer held back since the last one, so an operator can
+    /// see a thread flood being folded, a budget being hit or the relay pushing back (ADR-0206 D7:
+    /// the counters are the "operating metric").
+    fn log_bulk_changes(&self) {
+        let now = self.bulk.counters();
+        let mut logged = self.bulk_logged.lock().expect("bulk log");
+        if *logged == now {
+            return;
+        }
+        for ((reason, cause), total) in &now {
+            let before = logged.get(&(*reason, *cause)).copied().unwrap_or(0);
+            if *total != before {
+                tracing::info!(
+                    reason = *reason,
+                    cause = *cause,
+                    since_last = *total - before,
+                    total = *total,
+                    "bulk push layer held pushes back"
+                );
+            }
+        }
+        *logged = now;
     }
 
     /// Return candidates a previous run left mid-flight. Once, before draining.
@@ -118,11 +193,16 @@ impl PushDrain {
                     total.skipped_already_settled += stats.skipped_already_settled;
                     total.requeued += stats.requeued;
                     total.failed += stats.failed;
+                    total.held_back += stats.held_back;
                     if claimed < batch_size as usize {
+                        self.log_bulk_changes();
                         return (total, None);
                     }
                 }
-                Err(error) => return (total, Some(error)),
+                Err(error) => {
+                    self.log_bulk_changes();
+                    return (total, Some(error));
+                }
             }
         }
     }
@@ -175,8 +255,9 @@ impl PushDrain {
                 .dispatch_one(workspace_id, &candidate, &collapse, &target)
                 .await
             {
-                Ok(true) => stats.dispatched += 1,
-                Ok(false) => stats.skipped_already_settled += 1,
+                Ok(Dispatched::Sent) => stats.dispatched += 1,
+                Ok(Dispatched::AlreadySettled) => stats.skipped_already_settled += 1,
+                Ok(Dispatched::HeldBack) => stats.held_back += 1,
                 Err(reason) => transient.push(reason),
             }
         }
@@ -191,22 +272,37 @@ impl PushDrain {
         }
     }
 
-    /// Dispatch one target. `Ok(true)` sent, `Ok(false)` already settled,
-    /// `Err(reason)` transient — the candidate must be retried.
+    /// Dispatch one target. `Err(reason)` is transient — the candidate must be retried.
+    ///
+    /// A bulk-layer reason is **planned** first ([`PushDrain::plan_bulk_push`]): which collapse id it
+    /// goes out under, or that it does not go out at all.
     async fn dispatch_one(
         &self,
         workspace_id: Uuid,
         candidate: &PushCandidate,
         collapse: &str,
         target: &JudgedTarget,
-    ) -> Result<bool, String> {
+    ) -> Result<Dispatched, String> {
         let message_id = candidate.message_id;
         let member_id = target.member_id;
         let token_id = target.token_id;
-        let collapse_owned = collapse.to_string();
+        let in_bulk_layer = bulk::is_bulk_reason(target.reason);
+        let collapse_owned = if in_bulk_layer {
+            match self
+                .plan_bulk_push(workspace_id, candidate, collapse, target)
+                .await?
+            {
+                BulkPlan::Send { collapse_id } => collapse_id,
+                BulkPlan::AlreadySettled => return Ok(Dispatched::AlreadySettled),
+                BulkPlan::HeldBack => return Ok(Dispatched::HeldBack),
+            }
+        } else {
+            collapse.to_string()
+        };
 
         // Claim the dispatch slot and read the badge in one tenant transaction,
         // then leave it before touching the network.
+        let claim_collapse = collapse_owned.clone();
         let claimed = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 let claim = claim_dispatch(
@@ -215,7 +311,7 @@ impl PushDrain {
                     message_id,
                     member_id,
                     token_id,
-                    &collapse_owned,
+                    &claim_collapse,
                 )
                 .await?;
                 let badge = match claim {
@@ -237,11 +333,11 @@ impl PushDrain {
         let log_id = match claim {
             DispatchClaim::AlreadySettled => {
                 tracing::debug!(
-                    collapse_id = %collapse,
+                    collapse_id = %collapse_owned,
                     member_id = %member_id,
                     "dispatch already settled; skipping"
                 );
-                return Ok(false);
+                return Ok(Dispatched::AlreadySettled);
             }
             DispatchClaim::Claimed { log_id } => log_id,
         };
@@ -254,7 +350,7 @@ impl PushDrain {
             apns_token: target.apns_token.clone(),
             apns_env: target.apns_env.clone(),
             apns_topic: target.apns_topic.clone(),
-            collapse_id: collapse.to_string(),
+            collapse_id: collapse_owned.clone(),
             badge,
             reason: target.reason,
             thread_id: target.thread_id,
@@ -266,6 +362,16 @@ impl PushDrain {
 
         let outcome = self.dispatcher.dispatch(&dispatch).await;
 
+        // A relay 429 for a bulk-layer push is dropped, not retried (ADR-0206 D7): the layer is
+        // best-effort and must not spend the retry budget and the backoff queue that approvals and
+        // DMs rely on. The claimed row is settled 429 / `relay_http: dropped`, so a redelivery of this
+        // candidate finds it `AlreadySettled`.
+        if in_bulk_layer && outcome.is_relay_rate_limited() {
+            self.settle_dropped(workspace_id, log_id).await;
+            self.bulk.count(Cause::Relay429);
+            return Ok(Dispatched::HeldBack);
+        }
+
         match outcome {
             DispatchOutcome::Accepted {
                 apns_status,
@@ -273,7 +379,7 @@ impl PushDrain {
             } => {
                 self.settle_receipt(workspace_id, log_id, target, apns_status, apns_reason)
                     .await;
-                Ok(true)
+                Ok(Dispatched::Sent)
             }
             DispatchOutcome::PermanentFailure {
                 relay_http_status,
@@ -285,18 +391,99 @@ impl PushDrain {
                 // tokens (review #424 M1). A relay 400 also leaves one audit row
                 // per token per hour and NEVER invalidates the token (ADR-0204 D9).
                 tracing::error!(
-                    collapse_id = %collapse,
+                    collapse_id = %collapse_owned,
                     relay_http_status,
                     reason = %reason,
                     "permanent dispatch failure; settled with the relay status"
                 );
                 self.settle_refusal(workspace_id, log_id, target, relay_http_status, &reason)
                     .await;
-                Ok(true)
+                Ok(Dispatched::Sent)
             }
             DispatchOutcome::TransientFailure(reason) => {
                 Err(format!("relay transient failure: {reason}"))
             }
+        }
+    }
+
+    /// Decide what a bulk-layer target does, **before** its dispatch is claimed (ADR-0206 D7's order):
+    ///
+    /// 1. the push of this very message is already settled (a redelivery) → nothing to count;
+    /// 2. the window's verdict: one of the first six, or folded;
+    /// 3. a folded message whose window representative already went out adds nothing;
+    /// 4. the server-wide budget. A push past it is not sent and leaves no log row.
+    ///
+    /// Steps 1–4 leave no `push_dispatch_log` row behind, so a folded or over-budget push can never
+    /// strand an unsettled claim that a redelivery would "take over" and send.
+    async fn plan_bulk_push(
+        &self,
+        workspace_id: Uuid,
+        candidate: &PushCandidate,
+        individual_collapse: &str,
+        target: &JudgedTarget,
+    ) -> Result<BulkPlan, String> {
+        let (member_id, token_id) = (target.member_id, target.token_id);
+        if self
+            .dispatch_settled(workspace_id, member_id, token_id, individual_collapse)
+            .await?
+        {
+            return Ok(BulkPlan::AlreadySettled);
+        }
+        let chosen = match self
+            .bulk
+            .decide(member_id, target.thread_id, candidate.message_id)
+        {
+            Verdict::Individual => individual_collapse.to_string(),
+            Verdict::Folded { window } => {
+                let representative = bulk::folded_collapse_id(target.thread_id, window);
+                if self
+                    .dispatch_settled(workspace_id, member_id, token_id, &representative)
+                    .await?
+                {
+                    return Ok(BulkPlan::HeldBack);
+                }
+                representative
+            }
+        };
+        if !self.bulk.try_spend() {
+            return Ok(BulkPlan::HeldBack);
+        }
+        Ok(BulkPlan::Send {
+            collapse_id: chosen,
+        })
+    }
+
+    /// [`momo_push::is_dispatch_settled`] in its own short tenant transaction.
+    async fn dispatch_settled(
+        &self,
+        workspace_id: Uuid,
+        member_id: Uuid,
+        token_id: Uuid,
+        collapse_id: &str,
+    ) -> Result<bool, String> {
+        let collapse_id = collapse_id.to_string();
+        with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                is_dispatch_settled(conn, workspace_id, member_id, token_id, &collapse_id).await
+            })
+        })
+        .await
+        .map_err(|error| format!("dispatch-log read failed: {error}"))
+    }
+
+    /// Settle a claimed bulk-layer dispatch the relay rate-limited as dropped (status 429, reason
+    /// `relay_http: dropped`): never sent, never retried, never mistaken for an APNs answer.
+    async fn settle_dropped(&self, workspace_id: Uuid, log_id: Uuid) {
+        let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(
+                async move { settle_dispatch(conn, log_id, 429, Some(bulk::DROPPED_REASON)).await },
+            )
+        })
+        .await;
+        if let Err(error) = result {
+            // The next delivery of the candidate finds the claim unsettled and would send it again:
+            // loud, but the push itself stays best-effort.
+            tracing::error!(%log_id, error = %error, "failed to settle a dropped bulk push");
         }
     }
 

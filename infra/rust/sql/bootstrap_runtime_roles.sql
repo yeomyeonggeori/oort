@@ -560,6 +560,13 @@ BEGIN
   IF to_regclass('public.channel_viewing') IS NOT NULL THEN
     GRANT SELECT ON TABLE channel_viewing TO momo_notifier;
   END IF;
+  -- ADR-0206 증보 1 F1 / #4889 2단계 (migration 165): the `thread_reply` arm of the push
+  -- judgment reads who follows the thread. SELECT only — the rows are made by momo_app
+  -- (follow API) and momo_worker (the agent worker's send), never by the notifier: its own
+  -- message writes are ThreadPolicy::Skip and never reach the automatic follow.
+  IF to_regclass('public.thread_follow') IS NOT NULL THEN
+    GRANT SELECT ON TABLE thread_follow TO momo_notifier;
+  END IF;
   IF to_regclass('public.agent_run') IS NOT NULL THEN
     GRANT SELECT, UPDATE ON TABLE agent_run TO momo_notifier;
   END IF;

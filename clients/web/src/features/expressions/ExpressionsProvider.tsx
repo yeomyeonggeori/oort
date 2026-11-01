@@ -4,6 +4,7 @@ import { watchExpressionChanges } from "@/lib/realtime";
 import { useEffect, useMemo, type ReactNode } from "react";
 import { useSession } from "@/app/session";
 import { useBrowserOffline } from "@/features/common/useOffline";
+import { photoFixtureFromQuery } from "@momo/core/features/expressions/photo";
 import { MANUAL_UPLOAD_CODES } from "@momo/core/features/expressions/types";
 import type { ManualUploadCode } from "@momo/core/features/expressions/types";
 import { ExpressionStore } from "./ExpressionStore";
@@ -17,7 +18,7 @@ export function TeamExpressionsProvider({ children }: { children: ReactNode }) {
     const query = new URLSearchParams(window.location.search);
     const failure = query.get("expressionFailure") as ManualUploadCode | null;
     const transport = import.meta.env.DEV && query.get("expressions") === "fixture"
-      ? createExpressionFixtureTransport(workspaceId, memberId, failure && MANUAL_UPLOAD_CODES.includes(failure) ? failure : undefined)
+      ? createExpressionFixtureTransport(workspaceId, memberId, failure && MANUAL_UPLOAD_CODES.includes(failure) ? failure : undefined, photoFixtureFromQuery(query))
       : expressionHttpTransport;
     return new ExpressionStore(workspaceId, memberId, transport);
   }, [workspaceId, memberId]);

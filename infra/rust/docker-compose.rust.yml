@@ -398,6 +398,14 @@ services:
       # relay host is the Hermes host, which AGENT_PROVIDER_LOCAL_HOSTS already lists exactly (egress opt-in).
       HERMES_LOGIN_RELAY_URL: ${HERMES_LOGIN_RELAY_URL:-}
       HERMES_LOGIN_RELAY_KEY: ${HERMES_LOGIN_RELAY_KEY:-}
+      # #4944 (ADR-0201 증보 v3 B9): the operator's ceiling on the team AI ("oort 도우미"), per UTC day. Both `:-`:
+      # EMPTY = NO CEILING (the old fixed 200,000 tokens / 50 searches are gone — BYOK, the team decides, and an
+      # administrator sets any limit in settings). A positive number is a ceiling no workspace value gets past;
+      # `0` is the emergency switch (TOKEN_CAP=0 turns the helper off, SEARCH_CAP=0 only web search). The
+      # agent-worker enforces it; the api reads the SAME two values only to say so on the settings screen —
+      # give both services the same ones.
+      TEAM_AI_DAILY_TOKEN_CAP: ${TEAM_AI_DAILY_TOKEN_CAP:-}
+      TEAM_AI_DAILY_SEARCH_CAP: ${TEAM_AI_DAILY_SEARCH_CAP:-}
       HERMES_APP_LOGIN_GOOGLE_PUBLISHING: ${HERMES_APP_LOGIN_GOOGLE_PUBLISHING:-}
       # MOMO-605 / DESK-1. Empty (the default) means the CORS layer is not
       # mounted at all, which is exactly the web deployment's same-origin case.
@@ -566,7 +574,10 @@ services:
       MOMO_ENV: ${MOMO_ENV:-staging}
       # momo_worker — BYPASSRLS drain across tenants (bootstrap_roles.sql).
       WORKER_DATABASE_URL: postgres://momo_worker:${WORKER_POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
-      # #4791: read requester-owned profile images through the same archive as api.
+      # #4791: read requester-owned profile images through the same archive as api. Since #4934 this is the
+      # FALLBACK: with OORT_API_INTERNAL_ORIGIN (below, set by default) the worker reads them through the api
+      # instead and these four go unused. They are kept for a stack that unsets that origin (the read-only
+      # archive mount that goes with them is in local.override.yml, with the reason it stays).
       MOMO_DRIVE_ARCHIVE_BACKEND: ${MOMO_DRIVE_ARCHIVE_BACKEND:-}
       MOMO_DRIVE_SA_KEY_PATH: ${MOMO_DRIVE_SA_KEY_PATH:-}
       MOMO_DRIVE_SHARED_DRIVE_ID: ${MOMO_DRIVE_SHARED_DRIVE_ID:-}
@@ -586,6 +597,14 @@ services:
       # of the requester's attachment under it. Unset = no address is minted. Not MOMO_PUBLIC_BASE_URL: that reaches
       # api only (ADR-0205 D1). The same value goes to `hermes` below.
       OORT_SELF_MEDIA_ORIGIN: ${OORT_SELF_MEDIA_ORIGIN:-}
+      # #4934 (ADR-0151 증보 3): where this worker reaches the api on the PRIVATE network — a bare `http(s)://host[:port]`,
+      # the compose name of the api service, never the public edge. With it, the picture a person sent (the one the team AI
+      # turns into their profile image) is read THROUGH the api: the worker mints a single-use address for that one
+      # attachment and spends it at `{origin}/v1/self-media/…`, so the api — the only process every deployment shape is
+      # sure can open the archive — is what reads the file. `-` (no colon): unset gets the default, an explicitly empty
+      # value turns it off and the worker reads MOMO_DRIVE_* above as before. `docker-compose.host-network.yml` points it
+      # at 127.0.0.1.
+      OORT_API_INTERNAL_ORIGIN: ${OORT_API_INTERNAL_ORIGIN-http://api:8080}
       # #4820 C2b 3부 (ADR-0218 G3.7 (b)): the operator's attestation that the Hermes behind this worker runs strict media
       # delivery (the `hermes` service below does, and its lock gate refuses to start without it). The hosted expression door
       # opens ONLY on an exact `1`; empty or unset = the door is shut and a photo turn is an ordinary turn.
@@ -593,6 +612,11 @@ services:
       # #3431 (ADR-0193 D18): same key and rule as api — the spawn tool keeps Claude
       # Code off shared hosts unless an exact `true`.
       MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED:-}
+      # #4944 (ADR-0201 증보 v3 B9): the team AI's operator ceilings — this is the process that ENFORCES them.
+      # Empty = no ceiling, a positive number = a ceiling over every workspace's own limit, `0` = off
+      # (TOKEN_CAP=0 the helper, SEARCH_CAP=0 web search). The api gets the same two values (above).
+      TEAM_AI_DAILY_TOKEN_CAP: ${TEAM_AI_DAILY_TOKEN_CAP:-}
+      TEAM_AI_DAILY_SEARCH_CAP: ${TEAM_AI_DAILY_SEARCH_CAP:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:

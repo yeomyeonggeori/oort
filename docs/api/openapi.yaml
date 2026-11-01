@@ -173,6 +173,9 @@ tags:
       ADR-0170 link unfurl server surface. Workspace on/off, message-level
       removal, and the authenticated image proxy. Cards arrive on
       `message.unfurl` broadcasts; personal render-fold is a client concern.
+      Before a message is sent, the composer can ask for the card of a link it
+      holds (`createUnfurlPreview`, ADR-0170 증보 2026-11-01) and send the message
+      with `suppressUnfurl` to give it no cards.
   - name: attachments
     description: Drive archive resumable uploads, completion, and authorized content proxy.
   - name: read-state
@@ -273,6 +276,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expressions/import:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -369,6 +381,199 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/workspaces/{ws}/expressions/photo-model:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    get:
+      operationId: getExpressionPhotoModel
+      summary: Which image model a photo would be sent to (ADR-0218 section 8 H9)
+      description: >
+        Says whether the team has connected an image model that can draw from a
+        photo, and if so which company would receive the photo. The form asks
+        before it shows the photo field. Only someone who may add a picture is
+        told (a human who is not a guest and whom the add policy lets in); anyone
+        else is refused before the team key is read. `available` and `provider`
+        stand and fall together. The key is never read out: only the company's
+        name is. A team key
+        is an image model only when it is a plain API key for `api.openai.com`
+        (OpenAI) or `generativelanguage.googleapis.com` (Gemini); an OAuth
+        subscription, an Anthropic key, a mock mode or any other host is not one.
+        `canManage` is true for an instance operator, who can connect a model in the
+        AI settings; anyone else is told to ask the operator. Registering a picture
+        by link or upload never needs a model.
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: The image model state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionPhotoModel'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            `expression_role_required` - not a human with the add role (guest,
+            agent, or a member the admins-only policy leaves out). The body names
+            no company.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Another workspace's bearer; the same body as every expression route.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/workspaces/{ws}/expressions/photo-drafts:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    post:
+      operationId: createExpressionPhotoDraft
+      summary: Draw a picture from the caller's own photo with the team image model (ADR-0218 section 8 H9)
+      description: >
+        Sends one photo of the caller's to the team-connected image model (OpenAI or
+        Gemini) and stages what comes back as the same direct draft every other way
+        of adding a picture ends in (`GET /expression-drafts/{draftId}`, activate
+        with `POST /expressions`). `branch` is `cutout` (the subject as it is, the
+        background removed) or `caricature` (a new caricature drawn from the photo).
+        The instructions sent to the model are fixed text written by the server;
+        there is no free-text field. The cost is the team's.
+
+
+        The photo is the caller's own: the file of this request, or an attachment the
+        caller uploaded to a channel they are in (JSON body, the `from-attachment`
+        rule); anyone else's photo is the same `404`. It is opened in the isolated
+        decoder, turned upright, shrunk to 1024 pixels and encoded again from its
+        pixels, so its EXIF, GPS, profile, comment and trailing bytes never leave.
+        `acknowledgedProvider` is the company the caller was told the photo goes to;
+        if the team key now reaches another one nothing is sent (`409
+        image_model_changed`). Authority, the add policy and the live-draft limit
+        are proved before the body is read; one photo per member and four per
+        instance may be in flight, and they stay in flight until the model's call
+        has ended (`503` with `Retry-After` otherwise). A start also spends a
+        per-member budget, `RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER` starts per window,
+        default 10 per 60 seconds (`429` with `Retry-After`, before the body is
+        read). The model has at most 120 seconds. `cutout` in the answer says what the server did with the
+        background: `model` (the model drew a transparent one), `erased` (removed
+        here from a single flat colour), `unchanged` (it could not be removed and the
+        picture is as drawn), or null for a caricature. The picture in `draft` is
+        exactly what registering would save.
+
+
+        No answer carries a word a provider wrote. `subjectMemberId` must be null or
+        the caller.
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - metadata
+              - file
+              properties:
+                metadata:
+                  $ref: '#/components/schemas/ExpressionPhotoMetadata'
+                file:
+                  type: string
+                  format: binary
+            encoding:
+              metadata:
+                contentType: application/json
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpressionPhotoAttachmentRequest'
+      responses:
+        '201':
+          description: Ready draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionPhotoDraftResult'
+        '400':
+          description: '`expression_invalid` - malformed body, branch or provider.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: >
+            `expression_role_required` - not a human with the add role (guest, agent,
+            admins-only policy), or `subjectMemberId` is another member.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: >
+            Another workspace's bearer, or a photo that is not the caller's (someone
+            else's, another channel's, deleted); one body for all of them.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: >
+            `image_model_unavailable` (no image model is connected, or the connected
+            key cannot use one), `image_model_changed` (the company the caller agreed
+            to is not the one the key reaches now), `expression_name_reserved`, or
+            `expression_quota` (4 live drafts already).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: '`expression_media_invalid` - the photo is over 5 MiB.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '415':
+          description: '`expression_media_invalid` - not a still PNG, JPEG, WebP or GIF.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: '`image_model_refused` - the provider declined this photo.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '502':
+          description: >
+            `image_model_failed` - a provider error, an answer that is not the
+            documented shape, one over the size bounds, or an address the egress
+            policy refused.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: >
+            One photo per member and four per instance are already in flight (until
+            the model's call has ended), or the decoder is busy; retry after the
+            `Retry-After` seconds. Nothing was sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '504':
+          description: >
+            `image_model_timeout` - no answer within 120 seconds. The provider may
+            have finished (and billed) the work.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expressions/from-attachment:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -394,6 +599,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expression-drafts/{draftId}:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -435,6 +649,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExpressionDraft'
+        '503':
+          description: >
+            The picture decoder is busy (both of its slots are taken): the server's own retryable
+            state, never a verdict on the file. Retry after the `Retry-After` seconds; nothing was
+            written. The link import answers the same way.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/workspaces/{ws}/expression-drafts/{draftId}/image:
     parameters:
     - $ref: '#/components/parameters/Expressionws'
@@ -1789,10 +2012,19 @@ paths:
         Members read `role_labels` through `WorkspaceDto.roleLabels` on that
         identity GET, and `welcome_agent_member_id` / `welcome_prompt` through
         the matching WorkspaceDto fields (ADR-0181).
+
+        `?include=team_ai_limits_status` adds one computed key,
+        `team_ai_limits_status` (ADR-0201 증보 v3 B9-4, #4944): the team AI's
+        limits as set, the cap that applies after the operator's ceiling,
+        today's and this month's usage and whether a monthly dollar limit can
+        be switched on. It is never stored and is not a PATCH-able key. Without
+        the parameter the response is exactly the stored bag (a workspace that
+        never wrote a key still reads `{}`). Any other `include` value is 400.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SettingsInclude"
       responses:
         "200":
           description: Current bag. Empty object when unset.
@@ -1836,7 +2068,39 @@ paths:
         false closes the door for cards an agent raises nobody asked for —
         `oort_action_initiate` is refused, and a card already waiting is not
         executed when approved, while rejecting it still works; only an
-        administrator writes it here, never an agent proposal).
+        administrator writes it here, never an agent proposal), and
+        `team_ai_roles` (object of booleans, ADR-0201 증보 v3 B3 / #4964: which
+        role bundles of the helper are on — `workspace_admin`, `invite_access`,
+        `long_research`, `files`, `memory`, `code`; an absent key or field is
+        **on**, `chat_read` is always on and is not a field, so naming it is 400.
+        This is the one key merged one level down: a named field replaces, an
+        omitted field stays, `null` drops the field (back to on), so a patch
+        that names one switch never moves another. Turning `memory` from off to
+        on while team memory is switched off is 409 `team_memory_off`. A change
+        writes the audit row `team_ai.roles.changed` with the key names only. An
+        agent's `workspace.settings.update` proposal cannot name this key),
+        and `team_ai_limits` (object, ADR-0201 증보 v3 B9 / #4944: the team AI's
+        usage limits — **absent means no limit at all**; `dailyTokens` and
+        `dailySearches` are whole numbers >= 1 (at most 10^12), `monthlyUsd` is
+        a number from 0.000001 to 1000000. `0`, a negative, a fraction for a
+        count, a non-number and an unknown field are 400; "no limit" is the
+        absence of a field, never `0`. Merged one level down like
+        `team_ai_roles` — a named field replaces, an omitted field stays, a
+        `null` field is dropped, and an object left with no field removes the
+        key — so a patch that names one limit never lifts another. Only a
+        workspace owner/admin writes it; an agent's `workspace.settings.update`
+        proposal cannot name this key. `monthlyUsd` is the public list-price
+        equivalent computed at read time (ADR-0147 증보 2026-10-30), not the
+        provider's invoice, and it can be switched on only while the helper's
+        last request ran on a model that has a price on file: before the helper
+        has answered anything, or while its last request ran on an unpriced
+        model, naming `monthlyUsd` is 400 `team_ai_usd_limit_unavailable` and
+        nothing is written. Clearing it (`null`) is always allowed. The server
+        operator's env `TEAM_AI_DAILY_TOKEN_CAP` / `TEAM_AI_DAILY_SEARCH_CAP`
+        is a ceiling no workspace value gets past: empty = none, a positive
+        number = the ceiling, `0` = off).
+        `?include=team_ai_limits_status` returns the computed
+        `team_ai_limits_status` in the response, as on the GET.
         `role_labels` is replaced whole — omit a role key to
         drop that override; `null` deletes the key (client default labels).
         Serialized body over 8192 bytes is 413. There is no PUT whole-replace.
@@ -1844,6 +2108,7 @@ paths:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/SettingsInclude"
       requestBody:
         required: true
         content:
@@ -1856,7 +2121,12 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/WorkspaceSettings"}
         "400":
-          description: Unknown key, malformed allowed_agent_models, role_labels, welcome_agent_member_id or welcome_prompt, inactive welcome agent, or non-object body.
+          description: >
+            Unknown key, malformed allowed_agent_models, role_labels, welcome_agent_member_id, welcome_prompt,
+            team_ai_roles (an unknown bundle, `chat_read`, a non-boolean) or team_ai_limits (`0`, a negative, a
+            fraction for a count, a non-number, an unknown field, a non-object), inactive welcome agent, an unknown
+            `include`, or non-object body. A `monthlyUsd` limit the server cannot price is 400
+            `team_ai_usd_limit_unavailable` (nothing written).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -1868,6 +2138,17 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "404":
           description: Workspace not visible under the tenant GUC.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: >
+            `team_memory_off` — the patch turns the `memory` role from off to on
+            while team memory is switched off (ADR-0201 증보 v3 B3, #4964).
+            Nothing was written. (The `team_ai_fast_path` provisioning conflict
+            `team_ai_unavailable` is also a 409, but it is answered after the
+            write: the helper's own switch is put back off and the rest of that
+            request stays committed — and audited, like any other write.)
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -1896,6 +2177,19 @@ paths:
         `display name is already in use`. The handle is not changed. Writes
         `member.display_name`, audit `member.renamed` (`kind:"agent"`) and a
         `member.renamed` outbox broadcast per co-member channel.
+
+        ADR-0201 증보 v3 B10 (#4966), when the agent is the workspace's team AI
+        (the 「oort 도우미」): the new name is also **added** to its aliases in
+        the same transaction (the approved `agent.rename` and `agent.profile.update`
+        cards go through the same write). The alias is `lower(NFC(name))` when that
+        is `[a-z0-9_가-힣-]{2,16}` (a name with a space gives none); the fixed
+        `oort`·`오르트`·`claude` and the aliases of earlier names stay, up to four per
+        workspace — a fifth removes the oldest first, one at a time (audit
+        `team_ai.alias.released`, reason `evicted`). The audit row `member.renamed`
+        carries `alias: {state, alias?, evicted[]}`. What became of the alias is in
+        `team_ai_alias_status` of the workspace settings. The team AI's display name
+        may not be one of `here`, `channel`, `everyone`, `all`, `admin`, `system`,
+        `모두`, `전체`, `oort-helper` (400).
       security: [{bearerAuth: []}]
       parameters:
         - {$ref: "#/components/parameters/WorkspaceId"}
@@ -1914,7 +2208,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/SelfMemberResponse"
         "400":
-          description: displayName failed the join normalization.
+          description: >
+            displayName failed the join normalization, or is a reserved word
+            (`display name is reserved`) for the team AI.
           content:
             application/json:
               schema:
@@ -11313,7 +11609,10 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
-          description: Not the author/channel member, or workspace scope mismatch.
+          description: >
+            Not the author/channel member, or workspace scope mismatch. Also an
+            approval card (`approval_request`): its sentence is the server's, so
+            its author may neither rewrite it nor stream into it (#4980).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -11780,6 +12079,160 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/workspaces/{workspaceId}/channels/{channelId}/unfurl-previews:
+    post:
+      tags: [unfurls]
+      operationId: createUnfurlPreview
+      summary: The card of a link that is still in the composer, asked before the message exists.
+      description: >
+        ADR-0170 증보 2026-11-01 D14–D20 (#4884). The body carries **one address and
+        nothing else** — never the draft's text — and it is a body and not a query
+        because a link's query is often a token. The answer is always 200 when the
+        request is allowed: `status` is `ok` (with the card) or `failed`, and `failed`
+        is the whole answer for every way of having no preview — the destination was
+        refused, the site is down or slow or too big or not HTML, the page has nothing a
+        card can show, a switch is off — so a preview never says *why*. `blocked` and
+        `pending` are not returned here.
+
+
+        **Who may ask**: a person who is an active member of the workspace (a
+        `workspace_membership` row, `member.status` `active`, not deleted; any role,
+        guests included) **and** a current member of the channel — the rule a send has, so
+        a guest may preview in the channels it is in and nowhere else. A channel that does
+        not exist is the same 403 as one the caller is not in. Nothing but a person gets
+        further: an agent bearer and a developer token are a 403 and a work host's
+        signature is a 401 (the answer to a bad signature), all three at the door, because
+        none of them has this route on its table. The instance switch
+        `MOMO_UNFURL_ENABLED` and the workspace switch (`unfurl-settings`) both have to be
+        on, or nothing is fetched and the answer is `failed`.
+
+
+        **What the server does**: it fetches the page through the same guarded transport as
+        a stored card (public addresses only, https, every redirect hop re-checked,
+        512 KiB, time limit) with one rule added: **port 443 only, on every hop**. It
+        keeps the answer in memory, for the member who asked, 30 minutes (`failed`: 2
+        minutes); no part of the preview is written to the database (the one row this
+        route can cause is the budget's audit row for a first refusal). The same address
+        asked again by the same member is answered from memory and costs nothing. A
+        request that must fetch spends the member's preview budget
+        (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`, default 60 per window) and a place among
+        the fetches in flight (the same places the picture proxy uses); either is
+        exhausted with 429 + `Retry-After` (see `RateLimited`), and a request turned away
+        for want of a place gets its budget back. A fetch that ends in `failed` does not:
+        the site was asked, so it spent its unit like any other.
+        A client should ask once the address looks finished (350 ms after typing stops, or
+        right after a paste), once per address.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UnfurlPreviewRequest"}
+      responses:
+        "200":
+          description: The card, or `failed`.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UnfurlPreview"}
+        "400":
+          description: >
+            The address is not an absolute http(s) address, carries credentials, or is
+            longer than 2048 bytes. Nothing was fetched.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not an active member of the workspace, or not a current member of the channel
+            (or no such channel), an agent bearer or a developer token, or workspace scope
+            mismatch. (A work host's signature is a 401, see above.)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/unfurl-previews/{previewId}/image:
+    get:
+      tags: [unfurls]
+      operationId: getUnfurlPreviewImage
+      summary: Stream a preview's picture through this origin.
+      description: >
+        ADR-0170 증보 2026-11-01 D19. `previewId` is the `id` of an `ok` preview and is
+        good only for the member it was made for, until the preview runs out. The bytes
+        come from the same proxy as `getUnfurlImage` (the same guard, type list, failure
+        memory, fetch budget and places): the client must not fetch the remote host and is
+        never given its address. An id that is unknown, run out, another member's or
+        another workspace's is the same 404. Nothing here asks the database whether the
+        member is still active: suspension, removal and leaving the workspace each revoke
+        every token the member holds, so a member who stopped being active that way is a
+        401 before this route.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: previewId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Image bytes.
+          content:
+            "image/*":
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Preview or picture not available (including a refused destination).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/unfurl-previews/{previewId}/icon:
+    get:
+      tags: [unfurls]
+      operationId: getUnfurlPreviewIcon
+      summary: Stream a preview's site icon through this origin.
+      description: >
+        ADR-0170 증보 2026-11-01 D19. Same authorization and same proxy as
+        `getUnfurlIcon` (port 443 only, 512 KiB, no SVG), for a preview's `iconUrl`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: previewId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Icon bytes.
+          content:
+            "image/*":
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Preview or icon not available (including a refused destination).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/reactions:
     get:
       tags: [messages]
@@ -12124,8 +12577,16 @@ paths:
         developer token is refused (the route is not on its closed table).
 
         Following does not send a push by itself; the new-reply push for followed
-        threads is the `thread_reply` reason (ADR-0206 증보 1 F4–F6), served after
-        its notifier slice.
+        threads is the `thread_reply` reason (ADR-0206 증보 1 F4–F6, #4889 stage 2):
+        one push per new reply from someone else, held back while the follower is
+        reading the channel, silenced by a channel mute or Do Not Disturb, and a
+        single push per message when a mention or a DM already reaches them. Its
+        envelope's `thread-id` is the thread's root, which is where a tap goes.
+
+        A **new** follow starts its read position (`PUT …/read`) at the thread's
+        current last reply: following is "from now on", so replies already there are
+        not counted as unread. Following again or stopping never moves an existing
+        position.
       security:
         - bearerAuth: []
       parameters:
@@ -12210,6 +12671,92 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "404":
           description: Root absent from this channel (including cross-channel roots).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/messages/{rootId}/read:
+    put:
+      tags: [messages]
+      operationId: markThreadRead
+      summary: Say how far you have read a thread (읽은 위치).
+      description: >
+        #4889 stage 2 (owner 10-31 23:49). Moves the caller's read position in the thread
+        whose root is `rootId` **forward** to `last_read_reply_seq` (a reply's channel `seq`).
+        The stored position becomes `LEAST(requested, the thread's last reply seq)` and is
+        written only when that is greater than what is stored: it never moves backward, so
+        a late or stale signal from another device cannot rewind it, and it never passes the
+        last reply that exists, so a request cannot mark replies that have not been written
+        as read. The replies past the position that other people wrote are what
+        `ThreadRollup.unread_reply_count` counts.
+
+
+        This is the **only** thing that moves the position. A `GET …/replies` does not (the
+        inbox and the work panels read replies without anybody looking at them), and neither
+        does the channel's `PUT …/read-state` (reading the channel does not show the replies
+        inside its threads). A client that has the thread open sends it when it opens and
+        whenever a new reply is drawn.
+
+
+        It writes no row. For a thread the caller does not follow (no record, or stopped)
+        and for a DM thread it changes nothing and answers `{following: false}`, so a client
+        may send it without knowing whether it follows. A stopped follow's position does keep
+        up while the row exists, so re-following does not resurface what was read.
+
+
+        Guard order is the thread read's: workspace scope (403) → active channel membership
+        (403, the same bytes for a channel that does not exist) → the root (404 when absent or
+        in another channel, 400 when it is itself a reply; a deleted root is accepted). A
+        negative position is 400. Human bearer only: an agent bearer is refused whatever its
+        scopes, and a developer token is refused (the route is not on its closed table).
+        Personal state: nothing is broadcast, so other devices see the new position on their
+        next read of the channel history.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - name: rootId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ThreadReadRequest"
+      responses:
+        "200":
+          description: The caller's read position after the signal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ThreadReadState"
+        "400":
+          description: >
+            Invalid id, a negative `last_read_reply_seq`, or the selected root is itself a
+            reply.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Not a channel member, workspace scope mismatch, or a non-human bearer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Root absent from this channel (including cross-channel roots).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "422":
+          description: The body is not JSON, or `last_read_reply_seq` is missing or not an integer.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -12540,8 +13087,30 @@ paths:
       summary: List approval projections visible to the caller.
       description: >
         Requires an active human member; only approvals on channels where the
-        caller has an active membership are returned. Ordered by expiry
-        (soonest first, NULLs last), then newest first.
+        caller has an active membership are returned (leaving a channel hides its
+        approvals at the next read, the ones the caller decided included).
+
+
+        **Order.** `status=pending` (the default, the to-decide queue) is ordered by
+        expiry (soonest first, NULLs last), then newest first, and is not paged: it
+        takes no `cursor` and never returns `nextCursor`. Every other `status`
+        (`approved`, `rejected`, `expired`, `cancelled`, `all`) is ordered newest
+        first by when the approval last moved (its decision, expiry or cancellation
+        time; for a pending one the time it was asked), then by id, and is paged by
+        keyset: pass the previous page's `nextCursor` as `cursor`. (A single settled
+        status used to come back in expiry order, so under a `limit` it returned the
+        oldest rows.)
+
+
+        **Scope.** `scope=team` (the default) is every approval on those channels
+        (an in-place channel grant only for a workspace owner or admin).
+        `scope=mine` narrows to the approvals the caller decided, requested (the
+        author of the run's trigger message, or the actor of a work run's
+        `agent.work.queued` row) or whose agent they own (`agent.owner_human_id`).
+        It narrows within the caller's channels and never widens them. An in-place
+        channel grant the caller requested (or owns the agent of) is listed under
+        `mine` even when they are not an owner or admin, though `team` lists it only
+        to one: it is theirs to follow, not theirs to decide.
       security:
         - bearerAuth: []
       parameters:
@@ -12549,11 +13118,23 @@ paths:
         - name: status
           in: query
           required: false
-          description: Approval status filter; defaults to `pending`.
+          description: >
+            Approval status filter; defaults to `pending`. `all` returns the five
+            statuses in one stream.
           schema:
             type: string
-            enum: [pending, approved, rejected, expired, cancelled]
+            enum: [pending, approved, rejected, expired, cancelled, all]
             default: pending
+        - name: scope
+          in: query
+          required: false
+          description: >
+            `team` (default) or `mine`: the approvals the caller decided, requested,
+            or owns the agent of.
+          schema:
+            type: string
+            enum: [team, mine]
+            default: team
         - name: limit
           in: query
           required: false
@@ -12563,6 +13144,14 @@ paths:
             default: 100
             minimum: 1
             maximum: 500
+        - name: cursor
+          in: query
+          required: false
+          description: >
+            The previous page's `nextCursor`, opaque. Refused (400) with
+            `status=pending`, and when it is not a cursor this server issued.
+          schema:
+            type: string
       responses:
         "200":
           description: Approval projections.
@@ -12571,7 +13160,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ApprovalProjectionPage"
         "400":
-          description: Invalid status filter.
+          description: Invalid status or scope filter, or a cursor that is not usable.
           content:
             application/json:
               schema:
@@ -14619,6 +15208,16 @@ components:
         No approval route accepts this scheme (ADR-0188 D3).
 
   parameters:
+    SettingsInclude:
+      in: query
+      name: include
+      required: false
+      description: >
+        A computed addition to the settings response (ADR-0201 증보 v3 B9-4, #4944). The only value is
+        `team_ai_limits_status`; any other is 400. Absent = the stored bag, unchanged.
+      schema:
+        type: string
+        enum: [team_ai_limits_status]
     Expressionws:
       in: path
       name: ws
@@ -14943,7 +15542,8 @@ components:
         (default 60 seconds) and per member: message sends — `POST …/messages` and
         `POST …/scheduled-messages/{id}/send-now` share one budget, default 120 for a
         person and 600 for an agent credential; scheduled-message creates and edits,
-        default 60; attachment upload starts, default 60. Cancelling a scheduled
+        default 60; attachment upload starts, default 60; starts of a picture from a
+        photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H11), default 10. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
         use) and every read except the two below are not budgeted. Retrying with the
         same `clientMsgId` after a 429 is safe. The link-card proxies
@@ -14958,7 +15558,19 @@ components:
         is already fetching as many as one member may (4), or it has no room for another
         name lookup. Such a refusal says nothing about the card, is not remembered, and
         gives back the unit of fetch budget the request spent; ask again shortly. A
-        client shows its fallback meanwhile. `POST /v1/join` also has a per-account password-guess
+        client shows its fallback meanwhile. `POST …/channels/{ch}/unfurl-previews`
+        (ADR-0170 증보 2026-11-01 D20, #4884) has a per-member budget of its own, default 60
+        per window (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`, 0 removes it), spent only by a
+        request that must fetch the page: an answer the server already holds for that
+        member and address, a switch that is off, and a request turned away for want of a
+        place spend nothing. A fetch that ends in `failed` still spent its unit and does
+        not get it back; the failure is held for 2 minutes and asking for that address
+        again meanwhile is free. It draws its places from the same pool as the card
+        proxies, so one member's previews, pictures and icons together never hold more
+        than that member's share (4); with no place it answers 429 with `Retry-After: 1`,
+        gives the unit back and remembers nothing. The preview pictures and icons
+        (`GET …/unfurl-previews/{id}/image|icon`) spend the card proxies' budget above.
+        `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
         already has an active account, is spent before the password is compared
         (a right password counts too), and answers 429 without comparing once
@@ -15831,6 +16443,163 @@ components:
           minLength: 36
           maxLength: 36
           pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+    ExpressionPhotoModel:
+      type: object
+      additionalProperties: false
+      required:
+      - available
+      - provider
+      - branches
+      - canManage
+      properties:
+        available:
+          type: boolean
+        provider:
+          nullable: true
+          type: string
+          enum:
+          - openai
+          - gemini
+          - null
+        branches:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum:
+            - cutout
+            - caricature
+        canManage:
+          type: boolean
+    ExpressionPhotoMetadata:
+      type: object
+      additionalProperties: false
+      required:
+      - branch
+      - acknowledgedProvider
+      - name
+      - displayName
+      - tags
+      - subjectMemberId
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 30
+          pattern: ^[a-z0-9_-]{2,30}$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 8
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          uniqueItems: true
+        subjectMemberId:
+          oneOf:
+          - type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          - nullable: true
+            enum:
+            - null
+        branch:
+          type: string
+          enum:
+          - cutout
+          - caricature
+        acknowledgedProvider:
+          type: string
+          enum:
+          - openai
+          - gemini
+    ExpressionPhotoAttachmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - branch
+      - acknowledgedProvider
+      - name
+      - displayName
+      - tags
+      - subjectMemberId
+      - attachmentId
+      - channelId
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 30
+          pattern: ^[a-z0-9_-]{2,30}$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 8
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          uniqueItems: true
+        subjectMemberId:
+          oneOf:
+          - type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          - nullable: true
+            enum:
+            - null
+        branch:
+          type: string
+          enum:
+          - cutout
+          - caricature
+        acknowledgedProvider:
+          type: string
+          enum:
+          - openai
+          - gemini
+        attachmentId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        channelId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+    ExpressionPhotoDraftResult:
+      type: object
+      additionalProperties: false
+      required:
+      - draft
+      - cutout
+      properties:
+        draft:
+          $ref: '#/components/schemas/ExpressionDraft'
+        cutout:
+          nullable: true
+          type: string
+          enum:
+          - model
+          - erased
+          - unchanged
+          - null
     ExpressionImportRequest:
       type: object
       additionalProperties: false
@@ -18746,8 +19515,68 @@ components:
         claimedAtMs: {type: integer, format: int64}
         latestStage: {type: string, maxLength: 80}
         lastEventAtMs: {type: integer, format: int64}
-        approvalId: {type: string, format: uuid}
-        approvalExpiresAtMs: {type: integer, format: int64}
+        approvalId:
+          type: string
+          format: uuid
+          description: >
+            The pending approval the run is parked on. Named only to a caller who is
+            an active member of the channel the approval was raised in (the rule
+            `bundle` follows), which need not be the run's own channel; absent
+            otherwise.
+        approvalExpiresAtMs:
+          type: integer
+          format: int64
+          description: The deadline of `approvalId`, under the same rule.
+        bundle:
+          type: object
+          additionalProperties: false
+          required: [approvalId, status, decisionMode, canDecide, actionType]
+          description: >
+            ADR-0186 v6 R-f. One approval of this run, read for **the caller**: the one
+            the run is parked on, else the latest it asked, whatever its status. What
+            the channel's status chip and the thread's summary line read in place of the
+            approval card. Absent when the run never asked for an approval, or asked in
+            a channel the caller is not an active member of.
+          properties:
+            approvalId: {type: string, format: uuid}
+            status:
+              type: string
+              enum: [pending, approved, rejected, expired, cancelled]
+              description: >
+                As of now: a `pending` approval past its deadline reads `expired`
+                before the sweep writes it down.
+            decisionMode:
+              type: string
+              enum: [inline, open]
+              description: See `ApprovalProjection.decisionMode`.
+            canDecide:
+              type: boolean
+              description: >
+                Whether **the caller** may decide it right now: `pending`, in time,
+                and a person the decision route would let through (an active human
+                member of its channel who meets the role, owner or pinned-person
+                condition the approval puts on its decider). `false` for everyone
+                else, for a settled approval, and for a platform operator who is not
+                a workspace admin. A viewer-relative value, never cacheable across
+                members.
+            line:
+              type: string
+              maxLength: 300
+              description: >
+                The card's one server-written sentence: the question while `pending`,
+                the outcome once settled. Absent when the card has none to give.
+            intent:
+              type: string
+              maxLength: 300
+              description: >
+                Present only while `pending`: the same sentence as `line`, under the
+                key the shipped clients read (`parseRequestBundleSnapshot`, #4760).
+            actionType:
+              type: string
+              description: >
+                `tool_call`, `workspace_action`, ... as `ApprovalProjection.actionType`.
+                Tells an approved tool call that is still running from an approved
+                action that is already done.
         endReason:
           type: string
           description: >
@@ -18862,9 +19691,22 @@ components:
             `doorbell_rung` it is `<edge>_<result>` (`leading|trailing|urgent` + `ok|failed`),
             never an HTTP status or host. On `tool_call` it is `ok` or one closed failure
             code (`invalid_arguments`, `not_authorized`, `unavailable`, `conflict`,
-            `already_claimed`, `claim_expired`, `internal`) — never an error message.
-        approvalId: {type: string, format: uuid}
-        actorMemberId: {type: string, format: uuid}
+            `already_claimed`, `claim_expired`, `internal`) — never an error message. On a
+            row that names an approval it is absent wherever `approvalId` is withheld.
+        approvalId:
+          type: string
+          format: uuid
+          description: >
+            Under the rule of `AgentRunProgress.approvalId`: named only to a caller who is an
+            active member of the channel the approval was raised in, which need not be the
+            run's own. For anyone else the row stays but loses `approvalId`, `actorMemberId`
+            and `code` together; an approval whose channel is unknown is named to no one.
+        actorMemberId:
+          type: string
+          format: uuid
+          description: >
+            Who asked or decided the approval on an approval row; absent wherever
+            `approvalId` is withheld.
         tool:
           type: string
           pattern: "^oort_[a-z_]{1,40}$"
@@ -19179,6 +20021,23 @@ components:
         (`GET …/approvals/{approval}/avatar-preview?v=<sha256>`, readable by
         that person only) and its result `ref` is `{type: member, id: <the
         person>}`.
+        `team_ai.roles.set` (`{bundle, enabled}`, `admin`; ADR-0201 증보 v3
+        B3-T, #4964) is team-AI-only the same way: 「파일 역할 꺼 줘」 said to the
+        helper becomes one card that switches ONE role bundle (`bundle` is one
+        of `workspace_admin`, `invite_access`, `long_research`, `files`,
+        `memory`, `code`; `chat_read` and any other name are refused as an
+        argument). An admin approves; approving runs the same merge and write
+        as `PATCH …/settings` for `{team_ai_roles: {<bundle>: <enabled>}}` with
+        the approver's authority and writes the audit row `team_ai.roles.changed`
+        (key names only). A card that turns `files` or `memory` on shows the
+        line saying what content goes to the team's AI provider, and approving
+        it writes the consent record `team_ai.roles.notice_shown` (who, when,
+        wording version). A request in which the helper has read anything — a
+        workspace read, a web search — cannot raise it, and a card whose
+        bundle (for the helper's cards) was switched off since is refused at
+        the decision with `action_args_invalid`. It is always decided in the
+        app, never from a lock-screen action. Its result `ref` is
+        `{type: workspace_settings, id: <workspace id>}`.
         `message.pin` and `message.unpin` (`{messageId}`, `admin`; ADR-0186
         증보 2026-10-27 v5 U-e, #4703) let an agent propose pinning or unpinning
         **one text message of the conversation the run was raised in**. The
@@ -19199,7 +20058,7 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "dm.agent.admit"]
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "dm.agent.admit"]
 
     InitiativeActionId:
       type: string
@@ -19231,22 +20090,33 @@ components:
         and the TS registry's `agentSuggestable: true` commands are measured
         against this enum by `clients/web/src/app/commandRegistry.test.ts`.
         Every member is a client command (risk `none`): a command that changes
-        server state is a WorkspaceActionId instead. Two members: `ai.connect`,
+        server state is a WorkspaceActionId instead. Three members: `ai.connect`,
         whose `args` are `harness` (`claude | codex | team_key`, no `grok` in v1)
-        and `scope` (`mine | team`), paired `team_key` with `team`; and
+        and `scope` (`mine | team`), paired `team_key` with `team`;
         `settings.open` (ADR-0201 v2 H6-4, #3939), whose only `args` key is the
         required `section`, one of the web settings nav's section ids
         (`profile | appearance | notifications | shortcuts | devices | workspace |
         members | memory | usage | code | updates`) plus `plugins`, the legacy id
         the core AI hub model resolves to the AI hub's apps page; the AI hub link
         row `ai` and the other legacy aliases are not values, and a value is
-        never a path). A client
+        never a path); and `work.request.open` (ADR-0201 v3 B8 C1, #4972), which
+        opens the person's own 「작업 요청」 sheet already filled in — `args` are
+        the required `prompt` (plain text, 1–8,000 UTF-8 bytes, the signed spawn's
+        own prompt rule: no control character but line feed and tab, nothing
+        invisible, and it may not start with `/`) and an optional `harness`
+        (`claude | codex`; `team_key` belongs to `ai.connect` and is refused
+        here). `harness` is the one `args` property two commands share, so the
+        tools publish it once with the union of the enums. The person reads the
+        prompt in the sheet and sends it themselves — the spawn is a control
+        signed by the owner's device key — so the server writes the card's message
+        and no approval and no audit row for it. A client
         that cannot reach a section shows the message body as text. The message the
         tool posts carries `props["momo.command_suggest"]` with exactly `v`,
         `command_id`, `args` (normalised), `for_member_id` (the run's trigger
-        author, set by the server) and `label` (derived by the server) — never
-        connection state or any secret.
-      enum: ["ai.connect", "settings.open"]
+        author, set by the server) and `label` (derived by the server from the
+        command and, for `work.request.open`, the `harness` alone — never the
+        prompt) — never connection state or any secret.
+      enum: ["ai.connect", "settings.open", "work.request.open"]
 
     WorkspaceAction:
       type: object
@@ -24045,6 +24915,22 @@ components:
             developer token (`dev_field_not_allowed`). An older server's
             closed-world request refuses the unknown key, so a client sends it
             only when the sender turned it on.
+        suppressUnfurl:
+          type: boolean
+          default: false
+          description: >
+            ADR-0170 증보 2026-11-01 D21 (#4884) — 「미리보기 없이 보내기」: this message
+            gets **no link cards**, ever. In the send transaction, and only for a real
+            insert, the server plants the message's unfurl tombstone — the row an author's
+            own `removeMessageUnfurls` plants — so the unfurl worker ends the message's
+            job as skipped without fetching anything; nothing else about the send
+            changes. It is not a `props` key (props is client-writable). It reaches only
+            this message's own cards. Absent and `false` are the same request. Chosen
+            once, at send: an idempotent retry (same `clientMsgId`) answers the stored
+            message whatever this says now, and a retry plants nothing. Not allowed on a
+            developer token (`dev_field_not_allowed`). An older server's closed-world
+            request refuses the unknown key, so a client sends it only when the sender
+            turned it on.
         type:
           type: string
           enum: [text, tool_call, tool_result, diff, artifact, approval_request, system]
@@ -24492,22 +25378,56 @@ components:
           description: >
             ADR-0186 증보 v5 U-b-3: the switch for cards an agent raises
             unasked. Absent = on; false = off.
+        team_ai_roles:
+          type: object
+          description: >
+            ADR-0201 증보 v3 B3 (#4964): which role bundles of the team AI
+            ("oort 도우미") are on. Absent key or absent field = on. A bundle
+            that is off is not advertised to the model and is refused again when
+            proposed and when approved. `chat_read` is always on and is not a
+            field.
+          additionalProperties: false
+          properties:
+            workspace_admin: {type: boolean}
+            invite_access: {type: boolean}
+            long_research: {type: boolean}
+            files: {type: boolean}
+            memory: {type: boolean}
+            code: {type: boolean}
+        team_ai_limits:
+          type: object
+          description: >
+            ADR-0201 증보 v3 B9 (#4944): the limits the team's administrator set on the team AI.
+            **Absent means no limit.** Only the fields that are set are present.
+          additionalProperties: false
+          properties:
+            dailyTokens: {type: integer, format: int64, minimum: 1, description: "Tokens (prompt + completion) per UTC day."}
+            dailySearches: {type: integer, format: int64, minimum: 1, description: "Provider-side web searches per UTC day."}
+            monthlyUsd: {type: number, minimum: 0.000001, maximum: 1000000, description: "Public list-price equivalent per UTC calendar month (read-time, not the provider's invoice)."}
+        team_ai_limits_status:
+          $ref: "#/components/schemas/TeamAiLimitsStatus"
         team_ai_alias_status:
           type: object
           description: >
-            Server-written (ADR-0201 증보 v2 H2-3); not PATCH-able. Per alias
-            (`oort`, `오르트`, `claude`): `registered`, `taken` (a member's
-            handle holds it — not registered, or released later) or
-            `display_name_match` (registered; a display name reads the same).
+            Server-written (ADR-0201 증보 v2 H2-3, v3 B10); not PATCH-able. Per alias
+            (`oort`, `오르트`, `claude`, and the alias of the name the helper was given):
+            `registered`, `taken` (a member's handle holds it — not registered, or
+            released later) or `display_name_match` (registered; a display name reads
+            the same). An alias that was given up to make room (four at most) has no
+            entry. The one key that is not an alias is `@name` (`@` cannot occur in an
+            alias): what the helper's *current display name* gave when it gave no alias —
+            `not_derivable` (a space, a character outside `[a-z0-9_가-힣-]`, or a length
+            outside 2..16; `@표시 이름` still calls the helper) or `reserved`.
           additionalProperties:
             type: string
-            enum: [registered, taken, display_name_match]
+            enum: [registered, taken, display_name_match, not_derivable, reserved]
 
     PatchWorkspaceSettingsRequest:
       type: object
       description: >
         RFC 7396-shaped top-level merge patch. Unknown keys 400. role_labels
-        is a whole-object replace (nested keys are not deep-merged). null
+        is a whole-object replace (nested keys are not deep-merged); the one
+        exception is team_ai_roles, merged one level down. null
         deletes the named key.
       additionalProperties: false
       properties:
@@ -24567,6 +25487,105 @@ components:
             boolean is stored: a string or a number is 400, because the door
             reads anything else as off. An agent's
             `workspace.settings.update` proposal cannot name this key.
+        team_ai_roles:
+          nullable: true
+          type: object
+          description: >
+            ADR-0201 증보 v3 B3 (#4964): the helper's role switches. Merged one
+            level down — a named field replaces, an omitted field stays, a
+            `null` field is dropped (back to on); `null` for the key drops the
+            whole object (all on). Unknown names (`chat_read` included) and
+            non-boolean values are 400. Turning `memory` from off to on while
+            team memory is switched off is 409 `team_memory_off`.
+          additionalProperties: false
+          properties:
+            workspace_admin: {type: boolean, nullable: true}
+            invite_access: {type: boolean, nullable: true}
+            long_research: {type: boolean, nullable: true}
+            files: {type: boolean, nullable: true}
+            memory: {type: boolean, nullable: true}
+            code: {type: boolean, nullable: true}
+        team_ai_limits:
+          nullable: true
+          type: object
+          description: >
+            ADR-0201 증보 v3 B9 (#4944): the team AI's usage limits. Merged one level down — a named
+            field replaces, an omitted field stays, a `null` field is dropped; `null` for the key
+            removes every limit. `0`, a negative, a fraction for a count, a non-number and an unknown
+            field are 400 (no limit is the absence of a field, never `0`). `monthlyUsd` is 400
+            `team_ai_usd_limit_unavailable` while the helper's last request ran on a model with no
+            price on file, or before it has answered anything. Owner/admin only.
+          additionalProperties: false
+          properties:
+            dailyTokens: {type: integer, format: int64, minimum: 1, maximum: 1000000000000, nullable: true}
+            dailySearches: {type: integer, format: int64, minimum: 1, maximum: 1000000000000, nullable: true}
+            monthlyUsd: {type: number, minimum: 0.000001, maximum: 1000000, nullable: true}
+
+    TeamAiLimitsStatus:
+      type: object
+      readOnly: true
+      description: >
+        ADR-0201 증보 v3 B9-4 (#4944). What the settings screen reads about the team AI's limits,
+        computed per request (never stored), only with `?include=team_ai_limits_status`. Day = UTC
+        day, month = UTC calendar month. `usage` is the helper's own ledger; a `null` limit is "no
+        limit". The dollar figure is the public list-price equivalent computed at read time
+        (ADR-0147 증보 2026-10-30), not the provider's invoice, and a run on a model with no price
+        adds tokens but no dollars (`monthUnpricedRuns`). The model's name is never returned — only
+        whether it is priced.
+      required: [limits, effective, operatorCeiling, usage, monthlyUsdAvailable, dayResetsAtMs, monthResetsAtMs]
+      properties:
+        limits:
+          type: object
+          description: What the administrator set (`team_ai_limits`), `null` where nothing is set.
+          required: [dailyTokens, dailySearches, monthlyUsd]
+          properties:
+            dailyTokens: {type: integer, format: int64, nullable: true}
+            dailySearches: {type: integer, format: int64, nullable: true}
+            monthlyUsd: {type: number, nullable: true}
+        effective:
+          type: object
+          description: >
+            The cap that applies after the operator's ceiling: the lower of the workspace's limit and
+            the ceiling, `null` for none. `0` is the operator's off switch (the helper for tokens,
+            web search for searches).
+          required: [dailyTokens, dailySearches]
+          properties:
+            dailyTokens: {type: integer, format: int64, nullable: true}
+            dailySearches: {type: integer, format: int64, nullable: true}
+        operatorCeiling:
+          type: object
+          description: >
+            The server operator's env ceilings as the api process reads them
+            (`TEAM_AI_DAILY_TOKEN_CAP`, `TEAM_AI_DAILY_SEARCH_CAP`; set the same values on the api and
+            the agent-worker — the worker enforces, the api only explains). `null` = no ceiling.
+          required: [dailyTokens, dailySearches, helperOff, searchOff]
+          properties:
+            dailyTokens: {type: integer, format: int64, nullable: true}
+            dailySearches: {type: integer, format: int64, nullable: true}
+            helperOff: {type: boolean, description: "TEAM_AI_DAILY_TOKEN_CAP=0 — the operator switched the helper off."}
+            searchOff: {type: boolean, description: "TEAM_AI_DAILY_SEARCH_CAP=0 — web search is off for everyone."}
+        usage:
+          type: object
+          required: [todayTokens, todaySearches, monthCostMicroUsd, monthRuns, monthUnpricedRuns, monthEstimatedRuns]
+          properties:
+            todayTokens: {type: integer, format: int64, description: "Prompt + completion tokens since 00:00 UTC."}
+            todaySearches: {type: integer, format: int64, description: "Provider-side web searches since 00:00 UTC."}
+            monthCostMicroUsd: {type: integer, format: int64, description: "Read-time list-price cost of the priced runs this month, in micro-dollars."}
+            monthRuns: {type: integer, format: int64}
+            monthUnpricedRuns: {type: integer, format: int64, description: "Runs on a model with no price on file (counted in tokens, not in dollars)."}
+            monthEstimatedRuns: {type: integer, format: int64, description: "Runs whose tokens or price are estimates: the dollar figure is a lower bound."}
+        monthlyUsdAvailable:
+          type: boolean
+          description: Whether a monthly dollar limit can be switched on now.
+        monthlyUsdUnavailableReason:
+          type: string
+          nullable: true
+          enum: [model_unpriced, no_usage_yet, null]
+          description: >
+            Why not (`null` when it can): `model_unpriced` (the helper's last request ran on a model with no price on file)
+            or `no_usage_yet` (the helper has not answered anything, so there is no model to price).
+        dayResetsAtMs: {type: integer, format: int64, description: "Epoch milliseconds of the next 00:00 UTC."}
+        monthResetsAtMs: {type: integer, format: int64, description: "Epoch milliseconds of 00:00 UTC on the first of next month."}
 
     RoleLabels:
       type: object
@@ -24706,6 +25725,75 @@ components:
         removed:
           type: boolean
           description: false when the cards were already gone (idempotent).
+
+    UnfurlPreviewRequest:
+      type: object
+      required: [url]
+      additionalProperties: false
+      description: >
+        One address. The draft's text is not part of this request and has no key here.
+      properties:
+        url:
+          type: string
+          maxLength: 2048
+          description: >
+            An absolute http(s) address, without credentials. A fragment is dropped.
+            The server normalizes it the way a stored card's address is normalized.
+
+    UnfurlPreview:
+      type: object
+      required: [url, status]
+      description: >
+        The keys of `MessageUnfurl` without `messageId` (there is no message yet), under
+        the same rules: every optional key is absent when unknown, and `imageUrl` and
+        `iconUrl` are paths on this origin, never a remote address. `status` is `ok` or
+        `failed` and nothing else; `failed` carries `url` and `status` only.
+      properties:
+        url:
+          type: string
+          format: uri
+          description: The normalized address that was asked about.
+        status:
+          type: string
+          enum: [ok, failed]
+        id:
+          type: string
+          format: uuid
+          description: >
+            Present only when `status` is `ok`: the handle of `imageUrl` and `iconUrl`.
+            Random, and good only for the member the preview was made for.
+        title: {type: string, description: "At most 180 characters, whitespace collapsed."}
+        description:
+          type: string
+          description: At most 280 characters. Absent when it would repeat the title.
+        domain: {type: string}
+        imageUrl:
+          type: string
+          description: >
+            `/v1/workspaces/{id}/unfurl-previews/{id}/image`, on this origin. Never a
+            remote host.
+        siteName:
+          type: string
+          description: og:site_name, at most 100 characters.
+        iconUrl:
+          type: string
+          description: >
+            `/v1/workspaces/{id}/unfurl-previews/{id}/icon`, on this origin. Never a
+            remote host and never the icon's own address.
+        imageWidth:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: >
+            Pixels, as the page declared them (og:image:width). A preview does not measure
+            the picture. Present together with `imageHeight` or not at all.
+        imageHeight:
+          type: integer
+          minimum: 1
+          maximum: 16384
+        isVideo:
+          type: boolean
+          description: "`true` when the page says it is a video. Absent otherwise."
 
     CreateAttachmentUploadRequest:
       type: object
@@ -25142,6 +26230,22 @@ components:
             #4877 — how many distinct members have replied (no upper bound). The
             faces in `participant_ids` are the newest `min(count, 3)` of them, so a
             client can write 「+2」 after the faces.
+        unread_reply_count:
+          type: integer
+          minimum: 0
+          description: >
+            #4889 stage 2 (owner 10-31 23:49) — **optional**, and per reader: how many
+            replies of this thread the reader has not read, never counting their own.
+            Present (`0` included) only on a history page read by a person who follows the
+            thread (`auto` or `followed`); absent for a thread they do not follow, for an
+            agent reader, and in every other place this summary appears. **The realtime
+            `thread.updated` payload never carries it**: that frame is one publication on
+            the channel for every member, so it cannot hold a number that differs per
+            person — a client that wants the live value re-reads the page, or keeps its
+            own count from the frame's `last_reply_seq` / `participant_ids[0]` and
+            resets it with `PUT …/messages/{rootId}/read`. An absent value is not zero:
+            the screen draws today's summary, with no emphasis and no 「새 답글」 chip.
+            The position behind it moves only on that explicit signal.
 
     MessagePage:
       type: object
@@ -25192,6 +26296,42 @@ components:
             The caller's follow state after the write: `true` after `PUT …/follow`,
             `false` after `DELETE …/follow`. An automatic and a direct follow are not
             told apart.
+
+    ThreadReadRequest:
+      type: object
+      required: [last_read_reply_seq]
+      properties:
+        last_read_reply_seq:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            The `seq` of the last reply the caller has read in this thread (typically the
+            newest reply they have drawn). snake_case like the channel's
+            `UpdateReadStateRequest`; the same spelling is used for this concept everywhere.
+
+    ThreadReadState:
+      type: object
+      required: [following]
+      properties:
+        following:
+          type: boolean
+          description: >
+            Whether the caller follows the thread (`auto` or `followed`). When `false` the
+            signal wrote nothing and the two numbers below are absent.
+        last_read_reply_seq:
+          type: integer
+          format: int64
+          description: >
+            The stored read position after the signal (never lower than before). Present only
+            when `following` is `true`.
+        unread_reply_count:
+          type: integer
+          minimum: 0
+          description: >
+            Replies other people wrote past the stored position (the caller's own are never
+            counted; deleted ones and non-text lines are not). Present only when `following`
+            is `true`; `0` means "follows, nothing new".
 
     WorkspaceMessageSearchHit:
       type: object
@@ -25445,6 +26585,8 @@ components:
         - payload
         - status
         - createdAtMs
+        - decisionMode
+        - isDirect
       properties:
         id:
           type: string
@@ -25518,9 +26660,15 @@ components:
         decidedBy:
           type: string
           format: uuid
+          description: >
+            The person who approved or rejected it. Absent for `pending`,
+            `expired` and `cancelled`: nobody decided those.
         decidedAtMs:
           type: integer
           format: int64
+          description: >
+            When it was settled: the decision, the expiry or the cancellation.
+            Absent while `pending`.
         decisionReason:
           type: string
         expiresAtMs:
@@ -25533,6 +26681,43 @@ components:
             Always present on the Rust server. Neither the Swift DTO nor this
             schema carried it before SRV-B5c, which under the gate's
             closed-object rule made every Rust approval row undeclared drift.
+        decisionMode:
+          type: string
+          enum: [inline, open]
+          description: >
+            ADR-0186 v6 R-f. `inline`: may be decided where it is shown. `open`: must
+            be opened in the app (a one-time value, a picture to look at, a host to
+            choose, a name change, an agent-initiated or unknown card, ...). The
+            answer of the server's one `opens_in_app` judgment, the one the lock-screen
+            category and the `push_action` refusal read; a client never recomputes it.
+        isDirect:
+          type: boolean
+          description: >
+            ADR-0186 v6 R-f, where it lives. The approval's channel is a direct
+            message. With `channelId` and `rootId`, the whole address.
+        rootId:
+          type: string
+          format: uuid
+          description: >
+            ADR-0186 v6 R-f, where it lives. The thread the approval card sits in (the
+            card message's `rootId`). Absent when the card is in the channel's main
+            stream, or the approval has no card.
+        result:
+          type: object
+          additionalProperties: false
+          required: [line]
+          description: >
+            ADR-0186 v6 R-f. The card's outcome, for a settled approval whose card was
+            patched with one. Absent while `pending`, and for a card that was settled
+            before the card carried its outcome (its body is still the question it
+            asked, which is no outcome).
+          properties:
+            line:
+              type: string
+              maxLength: 300
+              description: >
+                One server-written Korean sentence, e.g. 「승인됐어요」 or a
+                result line. The card's `result.line`, else its `body`.
 
     # ---- Plugin registry and delegated tool policy --------------------------
     InstallPluginRequest:
@@ -26447,6 +27632,11 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ApprovalProjection"
+        nextCursor:
+          type: string
+          description: >
+            ADR-0186 v6 R-f. Present only when a further page exists, and only for a
+            read that is not `status=pending`. Pass it back as `cursor`; opaque.
 
     ApprovalDecisionRequest:
       type: object

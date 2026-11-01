@@ -70,6 +70,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use chrono::Utc;
 use momo_agent::approval::is_active_channel_member_in_tx;
 use momo_agent::{
     active_run_cursor_in_tx, agent_run_cursor_is_visible_in_tx, assemble_run_progress,
@@ -78,10 +79,11 @@ use momo_agent::{
     list_active_run_progress_base_in_tx, list_agent_run_summaries_in_tx,
     list_channel_run_progress_base_in_tx, list_channel_work_runs_in_tx, list_run_ledger_in_tx,
     load_agent_run_in_tx, load_agent_run_with_visibility_in_tx, load_eligible_agent_in_tx,
-    lock_run_for_cancel_in_tx, validated_active_run_limit, validated_run_limit,
-    visible_active_run_counts_in_tx, visible_channels_in_tx, workspace_active_run_totals_in_tx,
-    ActiveRunScope, AgentRunSummaryRow, JobFacts, NewAgentRun, QueueEntry, RequestedRouting,
-    RunEventInclude, RunProgressBase, RunProgressRow, RunStatus, RunTrigger,
+    lock_run_for_cancel_in_tx, redact_unseen_approvals_in_tx, validated_active_run_limit,
+    validated_run_limit, visible_active_run_counts_in_tx, visible_channels_in_tx,
+    workspace_active_run_totals_in_tx, ActiveRunScope, AgentRunSummaryRow, JobFacts, NewAgentRun,
+    QueueEntry, RequestedRouting, RunEventInclude, RunProgressBase, RunProgressRow, RunStatus,
+    RunTrigger,
 };
 use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -94,13 +96,14 @@ use uuid::Uuid;
 
 use crate::dto::{
     AgentRunActiveCountsDto, AgentRunActivePageResponse, AgentRunActiveQuery, AgentRunActivityDto,
-    AgentRunActivityTallyDto, AgentRunCancelResponse, AgentRunEventDto, AgentRunEventsQuery,
-    AgentRunEventsResponse, AgentRunHistoryQuery, AgentRunListQuery, AgentRunPageResponse,
-    AgentRunPlanStepDto, AgentRunProgressDto, AgentRunProgressPageResponse, AgentRunProgressQuery,
-    AgentRunResponse, AgentRunSummaryDto, AgentRunSummaryPageResponse, AgentRunToolTallyDto,
-    AgentRunVisibleCountsDto, AheadRunDto, CreateAgentRunRequest,
+    AgentRunActivityTallyDto, AgentRunBundleDto, AgentRunCancelResponse, AgentRunEventDto,
+    AgentRunEventsQuery, AgentRunEventsResponse, AgentRunHistoryQuery, AgentRunListQuery,
+    AgentRunPageResponse, AgentRunPlanStepDto, AgentRunProgressDto, AgentRunProgressPageResponse,
+    AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto, AgentRunSummaryPageResponse,
+    AgentRunToolTallyDto, AgentRunVisibleCountsDto, AheadRunDto, CreateAgentRunRequest,
 };
 use crate::error::ApiError;
+use crate::routes::run_bundle::run_bundles_in_tx;
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, emit_rail_frame, emit_terminal_agent_status, epoch_ms,
     path_uuid, require_human, run_response, settle_db, workspace_scope, DbRejectable,
@@ -788,6 +791,7 @@ pub async fn progress(
     };
     let limit = validated_run_limit(query.limit.as_deref());
     let member_id = principal.member_id;
+    let now = Utc::now();
 
     let rows = settle_db(
         "agent_runs.progress",
@@ -809,6 +813,7 @@ pub async fn progress(
                     workspace_id,
                     member_id,
                     base,
+                    now,
                 )
                 .await?))
             })
@@ -817,7 +822,10 @@ pub async fn progress(
     )?;
 
     Ok(Json(AgentRunProgressPageResponse {
-        runs: rows.iter().map(progress_dto).collect(),
+        runs: rows
+            .into_iter()
+            .map(|(row, bundle)| progress_dto(&row, bundle))
+            .collect(),
     }))
 }
 
@@ -826,12 +834,16 @@ pub async fn progress(
 /// own predicate and handed to the pure assembly as plain facts (momo-agent owns
 /// no outbox SQL). Shared by the channel read and the workspace "running now"
 /// read so a row's `phase`, `leaseState` and `queuePosition` mean one thing.
+///
+/// Each row comes with its `bundle` (ADR-0186 v6 R-f): one approval of the run, read
+/// for `member_id` as of `now` (`routes::run_bundle`).
 async fn assemble_progress_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     base: Vec<RunProgressBase>,
-) -> Result<Vec<RunProgressRow>, momo_db::DbError> {
+    now: chrono::DateTime<Utc>,
+) -> Result<Vec<(RunProgressRow, Option<AgentRunBundleDto>)>, momo_db::DbError> {
     let wanting_job: Vec<(Uuid, Uuid)> = base
         .iter()
         .filter(|run| matches!(run.summary.status, RunStatus::Queued | RunStatus::Running))
@@ -863,15 +875,29 @@ async fn assemble_progress_in_tx(
                 .filter_map(|job| QueueEntry::from_payload(job.id, agent, &job.payload)),
         );
     }
-    let queue_channels: Vec<Uuid> = queue
+    // One read of the viewer's rooms answers both questions the assembly asks: which runs
+    // ahead in the queue may be named, and whether the approval a run is parked on was
+    // raised in a room the viewer is in (`approvalId` and its deadline follow the `bundle`'s
+    // rule, not the run's: the approval's room need not be the run's).
+    let named_channels: Vec<Uuid> = queue
         .iter()
         .map(|entry| entry.channel_id)
+        .chain(base.iter().filter_map(|run| run.approval_channel_id))
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
         .collect();
-    let visible = visible_channels_in_tx(conn, workspace_id, member_id, &queue_channels).await?;
+    let visible = visible_channels_in_tx(conn, workspace_id, member_id, &named_channels).await?;
 
-    Ok(assemble_run_progress(base, &jobs, &queue, &visible))
+    let rows = assemble_run_progress(base, &jobs, &queue, &visible);
+    let run_ids: Vec<Uuid> = rows.iter().map(|row| row.summary.id).collect();
+    let mut bundles = run_bundles_in_tx(conn, workspace_id, member_id, &run_ids, now).await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let bundle = bundles.remove(&row.summary.id);
+            (row, bundle)
+        })
+        .collect())
 }
 
 /// The pending delivery job behind each `(run, agent)`, keyed by run id.
@@ -899,7 +925,7 @@ async fn job_facts_in_tx(
     )
 }
 
-fn progress_dto(row: &RunProgressRow) -> AgentRunProgressDto {
+fn progress_dto(row: &RunProgressRow, bundle: Option<AgentRunBundleDto>) -> AgentRunProgressDto {
     AgentRunProgressDto {
         id: row.summary.id.to_string(),
         channel_id: row.summary.channel_id.to_string(),
@@ -915,6 +941,7 @@ fn progress_dto(row: &RunProgressRow) -> AgentRunProgressDto {
         last_event_at_ms: row.last_event_at.map(epoch_ms),
         approval_id: row.approval_id.map(|id| id.to_string()),
         approval_expires_at_ms: row.approval_expires_at.map(epoch_ms),
+        bundle,
         end_reason: row.end_reason.clone(),
         queue_position: row.queue_position,
         ahead_total: row.queue_position.map(|_| row.ahead_total),
@@ -988,6 +1015,7 @@ pub async fn active(
     };
     let limit = validated_active_run_limit(query.limit.as_deref());
     let member_id = principal.member_id;
+    let now = Utc::now();
 
     let (rows, next_cursor, counts, totals, claimed) = settle_db(
         "agent_runs.active",
@@ -1016,7 +1044,8 @@ pub async fn active(
                     limit,
                 )
                 .await?;
-                let rows = assemble_progress_in_tx(conn, workspace_id, member_id, base).await?;
+                let rows =
+                    assemble_progress_in_tx(conn, workspace_id, member_id, base, now).await?;
 
                 let counts =
                     visible_active_run_counts_in_tx(conn, workspace_id, member_id, scope).await?;
@@ -1075,7 +1104,10 @@ pub async fn active(
         .collect();
 
     Ok(Json(AgentRunActivePageResponse {
-        runs: rows.iter().map(progress_dto).collect(),
+        runs: rows
+            .into_iter()
+            .map(|(row, bundle)| progress_dto(&row, bundle))
+            .collect(),
         agents,
         next_cursor: next_cursor.map(|id| id.to_string()),
     }))
@@ -1087,6 +1119,12 @@ pub async fn active(
 /// resume from and no raw sequence to leak), oldest first. A run that is not in
 /// this workspace, and a run whose channel the caller is not an active member of,
 /// are the same **404** — the answer is no existence oracle.
+///
+/// A row's `approvalId` — and with it that row's `actorMemberId` and `code` — is told to a
+/// caller only under the rule `AgentRunProgress.approvalId` follows: they are an active member
+/// of the channel **the approval** was raised in, which need not be the run's (#5007). The row
+/// itself (`ordinal`, `kind`, `createdAtMs`) stays, and a row that names no approval is as it
+/// was.
 pub async fn events(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -1104,7 +1142,16 @@ pub async fn events(
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 match list_run_ledger_in_tx(conn, workspace_id, run_id, member_id, include).await? {
-                    Some(ledger) => Ok(Ok(ledger)),
+                    Some(mut ledger) => {
+                        redact_unseen_approvals_in_tx(
+                            conn,
+                            workspace_id,
+                            member_id,
+                            &mut ledger.events,
+                        )
+                        .await?;
+                        Ok(Ok(ledger))
+                    }
                     None => Ok(Err(ApiError::not_found("agent run not found"))),
                 }
             })

@@ -90,6 +90,8 @@ HAND_LITERALS = {
     "HERMES_LOGIN_RELAY_URL",  # #4079: the login relay sidecar, hermes.railway.internal:8643
     # #4820 C2b 3부: the two halves of the hosted expression door are typed by hand, so the README lists both.
     "OORT_HOSTED_MEDIA_STRICT", "HERMES_MEDIA_DELIVERY_STRICT",
+    # #4934: the api's private address the worker reads a requester's picture through is typed by hand too.
+    "OORT_API_INTERNAL_ORIGIN",
 }
 # Shared variables the operator creates by hand (the generator does not print them).
 # HERMES_API_KEY: `openssl rand -hex 32`, one value for hermes' API_SERVER_KEY and the
@@ -830,6 +832,32 @@ def self_media_errors(services: dict) -> list[str]:
     return errors
 
 
+API_INTERNAL_VAR = "OORT_API_INTERNAL_ORIGIN"
+
+
+def api_internal_errors(services: dict) -> list[str]:
+    """#4934 (ADR-0151 증보 3): agent-worker reads a requester's attachment THROUGH the api, at the api's private address.
+
+    A Railway volume attaches to one service, so the `local` archive is api's alone. The worker mints a single-use address
+    in the database and spends it itself at `{origin}/v1/self-media/{ws}/{token}`; the origin is the api's own declaration
+    (`privateHostname` + `port`, plain http on the private network), never the public edge (the single-use credential would
+    otherwise travel the internet to reach the service next door) and never derived from anything else. Only agent-worker
+    carries the name: no other service has a business reading a requester's picture."""
+    errors: list[str] = []
+    api = services["api"]
+    want = "http://%s:%s" % (api.get("privateHostname"), api.get("port"))
+    got = (services["agent-worker"].get("variables") or {}).get(API_INTERNAL_VAR)
+    if got != want:
+        errors.append(
+            "agent-worker %s %r must be %s (the api's own private address; without it the worker cannot read "
+            "a requester's picture on Railway, #4934)" % (API_INTERNAL_VAR, got, want)
+        )
+    for name, svc in services.items():
+        if name != "agent-worker" and API_INTERNAL_VAR in (svc.get("variables") or {}):
+            errors.append("%s must not carry %s (agent-worker only, #4934)" % (name, API_INTERNAL_VAR))
+    return errors
+
+
 HOSTED_STRICT_VAR = "OORT_HOSTED_MEDIA_STRICT"
 MEDIA_STRICT_VAR = "HERMES_MEDIA_DELIVERY_STRICT"
 
@@ -1041,6 +1069,7 @@ def collect_errors(
     # -- GitHub App key + public address: api only (ADR-0205, #4221) ----------
     errors.extend(github_errors(services))
     errors.extend(self_media_errors(services))
+    errors.extend(api_internal_errors(services))
     errors.extend(hosted_media_strict_errors(services))
 
     # -- Postgres image service ----------------------------------------------
@@ -1425,6 +1454,14 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["hermes"]["variables"][SELF_MEDIA_VAR] = "https://${{shared.MOMO_CENTRIFUGO_WS_URL}}"
     elif kind == "relay-self-media-origin":
         services["relay"]["variables"][SELF_MEDIA_VAR] = PUBLIC_BASE_VALUE
+    elif kind == "worker-api-internal-dropped":  # the worker could not read a requester's picture on Railway
+        del services["agent-worker"]["variables"][API_INTERNAL_VAR]
+    elif kind == "worker-api-internal-wrong-port":  # not the port the api listens on
+        services["agent-worker"]["variables"][API_INTERNAL_VAR] = "http://api.railway.internal:3000"
+    elif kind == "worker-api-internal-public-edge":  # the single-use credential would cross the public edge
+        services["agent-worker"]["variables"][API_INTERNAL_VAR] = PUBLIC_BASE_VALUE
+    elif kind == "relay-api-internal-origin":
+        services["relay"]["variables"][API_INTERNAL_VAR] = "http://api.railway.internal:8080"
     elif kind == "worker-hosted-strict-dropped":
         del services["agent-worker"]["variables"][HOSTED_STRICT_VAR]
     elif kind == "worker-hosted-strict-attested":  # the template would attest strict media delivery for the operator
@@ -1521,6 +1558,10 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("worker-self-media-dropped", "agent-worker OORT_SELF_MEDIA_ORIGIN"),
     ("hermes-self-media-wrong-host", "hermes OORT_SELF_MEDIA_ORIGIN"),
     ("relay-self-media-origin", "relay must not carry OORT_SELF_MEDIA_ORIGIN"),
+    ("worker-api-internal-dropped", "agent-worker OORT_API_INTERNAL_ORIGIN"),
+    ("worker-api-internal-wrong-port", "agent-worker OORT_API_INTERNAL_ORIGIN"),
+    ("worker-api-internal-public-edge", "agent-worker OORT_API_INTERNAL_ORIGIN"),
+    ("relay-api-internal-origin", "relay must not carry OORT_API_INTERNAL_ORIGIN"),
     ("worker-hosted-strict-dropped", "agent-worker OORT_HOSTED_MEDIA_STRICT"),
     ("worker-hosted-strict-attested", "agent-worker OORT_HOSTED_MEDIA_STRICT"),
     ("hermes-media-strict-dropped", "hermes HERMES_MEDIA_DELIVERY_STRICT"),
@@ -1555,11 +1596,12 @@ def prove_mutations(
                 raise SystemExit("mutation %s failed without naming its rule (%s): %s" % (kind, needle, joined))
             print("mutation %s RED (%s)" % (kind, needle))
         # README: drop one row → the table no longer covers a value the operator must type. The first row is the
-        # long-standing one; the other two are the hosted door's halves (#4820 C2b 3부).
+        # long-standing one; the next two are the hosted door's halves (#4820 C2b 3부); the last is #4934's.
         readme = readme_path.read_text()
         for service, var, label in (
             ("agent-worker", "WORKER_DATABASE_URL", "readme-row-missing"),
             ("agent-worker", HOSTED_STRICT_VAR, "readme-row-missing-hosted-strict"),
+            ("agent-worker", API_INTERNAL_VAR, "readme-row-missing-api-internal"),
             ("hermes", MEDIA_STRICT_VAR, "readme-row-missing-media-strict"),
         ):
             kept = [

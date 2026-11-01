@@ -187,6 +187,14 @@ pub async fn sweep_expired(read_pool: &PgPool, write_pool: &PgPool) -> Result<u6
     Ok(bytes)
 }
 
+/// What a draft becomes when it expires (the TTL sweep, and an approval that closes): its state, no
+/// reason code, and **no agent words** — `origin.prompt` is blanked to JSON null (#4900, migration
+/// 167). The row stays as a record; the kind, the source link and the original-photo pointer stay
+/// with it. One fragment for both statements, so the two ways to expire cannot drift apart: the
+/// immutability trigger lets `origin` change only into exactly this.
+pub(crate) const EXPIRED_DRAFT_SET: &str =
+    "state='expired',code=NULL,origin=jsonb_set(origin,'{prompt}','null'::jsonb)";
+
 /// Tenant-scoped sweep: byte reclamation only, never activated receipts/names.
 pub async fn sweep_in_tx(conn: &mut PgConnection, ws: Uuid) -> Result<u64, Error> {
     catalog(conn, ws).await?;
@@ -194,7 +202,7 @@ pub async fn sweep_in_tx(conn: &mut PgConnection, ws: Uuid) -> Result<u64, Error
         .bind(ws).fetch_all(&mut *conn).await?;
     let n=sqlx::query("DELETE FROM expression_draft_image i USING expression_draft d WHERE (i.workspace_id,i.draft_id)=(d.workspace_id,d.id) AND d.workspace_id=$1 AND d.state <> 'activated' AND d.expires_at <= clock_timestamp()")
         .bind(ws).execute(&mut *conn).await?.rows_affected();
-    sqlx::query("UPDATE expression_draft SET state='expired',code=NULL WHERE workspace_id=$1 AND state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp()")
+    sqlx::query(&format!("UPDATE expression_draft SET {EXPIRED_DRAFT_SET} WHERE workspace_id=$1 AND state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp()"))
         .bind(ws).execute(&mut *conn).await?;
     // Held assemblies (G3.6) follow the same hour, but their header goes with the bytes (it holds the
     // agent's prompt; a draft's header is a record). See `assembly::sweep_in_tx`.
@@ -328,6 +336,21 @@ pub async fn create_draft(
     media: Option<Processed>,
     code: Option<&str>,
 ) -> Result<Value, Error> {
+    create_draft_with(pool, actor, meta, origin, media, code, json!({})).await
+}
+
+/// [`create_draft`] with names and numbers of the caller's own added to the `expression.staged`
+/// audit row (ADR-0218 D6: never bytes, a prompt or a link). The photo route records which
+/// provider, branch and cut-out outcome produced the picture.
+pub async fn create_draft_with(
+    pool: &PgPool,
+    actor: Actor,
+    meta: Metadata,
+    origin: Origin,
+    media: Option<Processed>,
+    code: Option<&str>,
+    audit_extra: Value,
+) -> Result<Value, Error> {
     meta.validate()?;
     // This direct API never accepts caller-supplied prompts or cards; a link's origin
     // is accepted only in its storable form (no query, credentials or fragment).
@@ -348,7 +371,7 @@ pub async fn create_draft(
         if let Some(media)=media {put_images(conn,actor.workspace,id,Some(1),&media).await?;}
         // The reason code of a failed receive is recorded here as well: the TTL sweep
         // clears the draft's own `code` (ADR-0218 D6, `staged` carries the reason).
-        crate::action::audit_staged(conn,actor.workspace,actor.member,id,&origin,code.as_deref(),sha.as_deref(),None,json!({})).await?;
+        crate::action::audit_staged(conn,actor.workspace,actor.member,id,&origin,code.as_deref(),sha.as_deref(),None,audit_extra).await?;
         draft_json(conn,&row).await
     })).await
 }

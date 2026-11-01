@@ -18,6 +18,10 @@ momo-expressions = { path = "../momo-expressions" }
 # `momo-t3`'s share also uses), so the four agent-written text fields cannot drift apart.
 # This crate deliberately has no dependency on `momo-t3` (a boundary test in momo-server pins
 # it); momo-wire depends on momo-db only: no cycle.
+# #4972 (ADR-0201 증보 v3 B8 C1): the `work.request.open` card pre-fills the 「작업 요청」 sheet, whose
+# send path judges the prompt with `momo_wire::human_control::spawn_prompt_problem`. The card calls
+# that very function, so a prompt it accepts cannot be one the sheet's send is bound to refuse.
+# momo-wire depends on neither this crate nor anything above it (momo-expressions already links it).
 momo-wire = { path = "../momo-wire" }
 
 sqlx.workspace = true

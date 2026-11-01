@@ -21,6 +21,64 @@ export const messageKeys = [
   "desktop.menu.undo",
   "desktop.menu.view",
   "desktop.menu.window",
+  "desktop.notify.threadSummary",
+  "expressions.photo.agentInstead",
+  "expressions.photo.anotherPhoto",
+  "expressions.photo.branchLabel",
+  "expressions.photo.busy",
+  "expressions.photo.caricatureHint",
+  "expressions.photo.caricatureLabel",
+  "expressions.photo.checkFailed",
+  "expressions.photo.checking",
+  "expressions.photo.consent",
+  "expressions.photo.consentMissing",
+  "expressions.photo.cutoutErased",
+  "expressions.photo.cutoutHint",
+  "expressions.photo.cutoutLabel",
+  "expressions.photo.cutoutModel",
+  "expressions.photo.cutoutUnchanged",
+  "expressions.photo.displayNameLabel",
+  "expressions.photo.displayNamePlaceholder",
+  "expressions.photo.errorBusy",
+  "expressions.photo.errorChanged",
+  "expressions.photo.errorFailed",
+  "expressions.photo.errorGeneric",
+  "expressions.photo.errorMedia",
+  "expressions.photo.errorName",
+  "expressions.photo.errorOffline",
+  "expressions.photo.errorQuota",
+  "expressions.photo.errorRefused",
+  "expressions.photo.errorRole",
+  "expressions.photo.errorTimeout",
+  "expressions.photo.errorUnavailable",
+  "expressions.photo.faceLabel",
+  "expressions.photo.faceNone",
+  "expressions.photo.faceOther",
+  "expressions.photo.faceOtherBlocked",
+  "expressions.photo.faceSelf",
+  "expressions.photo.fieldsInvalid",
+  "expressions.photo.fixedNote",
+  "expressions.photo.introText",
+  "expressions.photo.nameLabel",
+  "expressions.photo.namePlaceholder",
+  "expressions.photo.noModelAsk",
+  "expressions.photo.noModelDetail",
+  "expressions.photo.noModelHeadline",
+  "expressions.photo.noModelImport",
+  "expressions.photo.noModelManage",
+  "expressions.photo.originLabel",
+  "expressions.photo.photoHint",
+  "expressions.photo.photoLabel",
+  "expressions.photo.photoMissing",
+  "expressions.photo.photoPreviewAlt",
+  "expressions.photo.photoSize",
+  "expressions.photo.photoType",
+  "expressions.photo.providerGemini",
+  "expressions.photo.providerOpenai",
+  "expressions.photo.retry",
+  "expressions.photo.submit",
+  "expressions.photo.tagsLabel",
+  "expressions.photo.tagsPlaceholder",
   "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
@@ -28,9 +86,35 @@ export const messageKeys = [
   "mobile.ios.microphoneUsage",
   "mobile.ios.photoLibraryAddUsage",
   "mobile.ios.photoLibraryUsage",
+  "mobile.linkCard.cancel",
+  "mobile.linkCard.copied",
+  "mobile.linkCard.copy",
+  "mobile.linkCard.copyFailed",
+  "mobile.linkCard.loading",
+  "mobile.linkCard.remove",
+  "mobile.linkCard.removeConfirm",
+  "mobile.linkCard.removeDetail",
+  "mobile.linkCard.removeFailed",
+  "mobile.linkCard.removePending",
+  "mobile.linkCard.removeTitle",
+  "mobile.linkCard.share",
+  "mobile.linkCard.sheetClose",
+  "mobile.linkCard.sheetTitle",
+  "mobile.linkPreview.compactHint",
+  "mobile.linkPreview.richHint",
+  "mobile.linkPreview.scopeNote",
+  "mobile.linkPreview.title",
   "mobile.locale.backToSettings",
   "mobile.locale.permissionNotice",
   "mobile.locale.saving",
+  "settings.appearance.linkPreviewCompact",
+  "settings.appearance.linkPreviewCompactHint",
+  "settings.appearance.linkPreviewOff",
+  "settings.appearance.linkPreviewOffHint",
+  "settings.appearance.linkPreviewRich",
+  "settings.appearance.linkPreviewRichHint",
+  "settings.notifications.threadReplyDescription",
+  "settings.notifications.threadReplyName",
   "settings.profile.languageBeta",
   "settings.profile.languageCurrent",
   "settings.profile.languageHint",
@@ -38,7 +122,36 @@ export const messageKeys = [
   "settings.profile.languageLoadError",
   "settings.profile.languagePartialNotice",
   "settings.profile.languageRetry",
-  "settings.profile.languageSystem"
+  "settings.profile.languageSystem",
+  "timeline.thread.followDismiss",
+  "timeline.thread.followFailed",
+  "timeline.thread.followOff",
+  "timeline.thread.followOn",
+  "timeline.thread.followStart",
+  "timeline.thread.followStop",
+  "timeline.thread.open",
+  "timeline.thread.openUnread",
+  "timeline.thread.replyCount",
+  "timeline.thread.unreadChip",
+  "timeline.unfurl.label",
+  "timeline.unfurl.previewDismiss",
+  "timeline.unfurl.previewDismissed",
+  "timeline.unfurl.previewGroup",
+  "timeline.unfurl.video",
+  "timeline.workRequest.composerBusy",
+  "timeline.workRequest.fill",
+  "timeline.workRequest.fillHint",
+  "timeline.workRequest.fillLabel",
+  "timeline.workRequest.inDm",
+  "timeline.workRequest.labelAny",
+  "timeline.workRequest.labelClaude",
+  "timeline.workRequest.labelCodex",
+  "timeline.workRequest.noPersonalAgent",
+  "timeline.workRequest.openSheet",
+  "timeline.workRequest.openSheetLabel",
+  "timeline.workRequest.openTools",
+  "timeline.workRequest.sheetHint",
+  "timeline.workRequest.threadClosed"
 ] as const;
 
 export type MessageKey = typeof messageKeys[number];
@@ -69,6 +182,68 @@ export const argumentSpecs = {
   "desktop.menu.undo": {},
   "desktop.menu.view": {},
   "desktop.menu.window": {},
+  "desktop.notify.threadSummary": {
+    "count": "number"
+  },
+  "expressions.photo.agentInstead": {},
+  "expressions.photo.anotherPhoto": {},
+  "expressions.photo.branchLabel": {},
+  "expressions.photo.busy": {},
+  "expressions.photo.caricatureHint": {},
+  "expressions.photo.caricatureLabel": {},
+  "expressions.photo.checkFailed": {},
+  "expressions.photo.checking": {},
+  "expressions.photo.consent": {
+    "provider": "string"
+  },
+  "expressions.photo.consentMissing": {},
+  "expressions.photo.cutoutErased": {},
+  "expressions.photo.cutoutHint": {},
+  "expressions.photo.cutoutLabel": {},
+  "expressions.photo.cutoutModel": {},
+  "expressions.photo.cutoutUnchanged": {},
+  "expressions.photo.displayNameLabel": {},
+  "expressions.photo.displayNamePlaceholder": {},
+  "expressions.photo.errorBusy": {},
+  "expressions.photo.errorChanged": {},
+  "expressions.photo.errorFailed": {},
+  "expressions.photo.errorGeneric": {},
+  "expressions.photo.errorMedia": {},
+  "expressions.photo.errorName": {},
+  "expressions.photo.errorOffline": {},
+  "expressions.photo.errorQuota": {},
+  "expressions.photo.errorRefused": {},
+  "expressions.photo.errorRole": {},
+  "expressions.photo.errorTimeout": {},
+  "expressions.photo.errorUnavailable": {},
+  "expressions.photo.faceLabel": {},
+  "expressions.photo.faceNone": {},
+  "expressions.photo.faceOther": {},
+  "expressions.photo.faceOtherBlocked": {},
+  "expressions.photo.faceSelf": {},
+  "expressions.photo.fieldsInvalid": {},
+  "expressions.photo.fixedNote": {},
+  "expressions.photo.introText": {},
+  "expressions.photo.nameLabel": {},
+  "expressions.photo.namePlaceholder": {},
+  "expressions.photo.noModelAsk": {},
+  "expressions.photo.noModelDetail": {},
+  "expressions.photo.noModelHeadline": {},
+  "expressions.photo.noModelImport": {},
+  "expressions.photo.noModelManage": {},
+  "expressions.photo.originLabel": {},
+  "expressions.photo.photoHint": {},
+  "expressions.photo.photoLabel": {},
+  "expressions.photo.photoMissing": {},
+  "expressions.photo.photoPreviewAlt": {},
+  "expressions.photo.photoSize": {},
+  "expressions.photo.photoType": {},
+  "expressions.photo.providerGemini": {},
+  "expressions.photo.providerOpenai": {},
+  "expressions.photo.retry": {},
+  "expressions.photo.submit": {},
+  "expressions.photo.tagsLabel": {},
+  "expressions.photo.tagsPlaceholder": {},
   "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
@@ -76,9 +251,35 @@ export const argumentSpecs = {
   "mobile.ios.microphoneUsage": {},
   "mobile.ios.photoLibraryAddUsage": {},
   "mobile.ios.photoLibraryUsage": {},
+  "mobile.linkCard.cancel": {},
+  "mobile.linkCard.copied": {},
+  "mobile.linkCard.copy": {},
+  "mobile.linkCard.copyFailed": {},
+  "mobile.linkCard.loading": {},
+  "mobile.linkCard.remove": {},
+  "mobile.linkCard.removeConfirm": {},
+  "mobile.linkCard.removeDetail": {},
+  "mobile.linkCard.removeFailed": {},
+  "mobile.linkCard.removePending": {},
+  "mobile.linkCard.removeTitle": {},
+  "mobile.linkCard.share": {},
+  "mobile.linkCard.sheetClose": {},
+  "mobile.linkCard.sheetTitle": {},
+  "mobile.linkPreview.compactHint": {},
+  "mobile.linkPreview.richHint": {},
+  "mobile.linkPreview.scopeNote": {},
+  "mobile.linkPreview.title": {},
   "mobile.locale.backToSettings": {},
   "mobile.locale.permissionNotice": {},
   "mobile.locale.saving": {},
+  "settings.appearance.linkPreviewCompact": {},
+  "settings.appearance.linkPreviewCompactHint": {},
+  "settings.appearance.linkPreviewOff": {},
+  "settings.appearance.linkPreviewOffHint": {},
+  "settings.appearance.linkPreviewRich": {},
+  "settings.appearance.linkPreviewRichHint": {},
+  "settings.notifications.threadReplyDescription": {},
+  "settings.notifications.threadReplyName": {},
   "settings.profile.languageBeta": {},
   "settings.profile.languageCurrent": {
     "languageName": "string"
@@ -88,7 +289,52 @@ export const argumentSpecs = {
   "settings.profile.languageLoadError": {},
   "settings.profile.languagePartialNotice": {},
   "settings.profile.languageRetry": {},
-  "settings.profile.languageSystem": {}
+  "settings.profile.languageSystem": {},
+  "timeline.thread.followDismiss": {},
+  "timeline.thread.followFailed": {},
+  "timeline.thread.followOff": {},
+  "timeline.thread.followOn": {},
+  "timeline.thread.followStart": {},
+  "timeline.thread.followStop": {},
+  "timeline.thread.open": {
+    "count": "number"
+  },
+  "timeline.thread.openUnread": {
+    "count": "number",
+    "unread": "number"
+  },
+  "timeline.thread.replyCount": {
+    "count": "number"
+  },
+  "timeline.thread.unreadChip": {
+    "count": "number"
+  },
+  "timeline.unfurl.label": {
+    "domain": "string",
+    "title": "string"
+  },
+  "timeline.unfurl.previewDismiss": {},
+  "timeline.unfurl.previewDismissed": {},
+  "timeline.unfurl.previewGroup": {},
+  "timeline.unfurl.video": {},
+  "timeline.workRequest.composerBusy": {},
+  "timeline.workRequest.fill": {},
+  "timeline.workRequest.fillHint": {},
+  "timeline.workRequest.fillLabel": {
+    "label": "string"
+  },
+  "timeline.workRequest.inDm": {},
+  "timeline.workRequest.labelAny": {},
+  "timeline.workRequest.labelClaude": {},
+  "timeline.workRequest.labelCodex": {},
+  "timeline.workRequest.noPersonalAgent": {},
+  "timeline.workRequest.openSheet": {},
+  "timeline.workRequest.openSheetLabel": {
+    "label": "string"
+  },
+  "timeline.workRequest.openTools": {},
+  "timeline.workRequest.sheetHint": {},
+  "timeline.workRequest.threadClosed": {}
 } as const;
 
 export interface MessageArgs {
@@ -113,6 +359,64 @@ export interface MessageArgs {
   "desktop.menu.undo": Record<string, never>;
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
+  "desktop.notify.threadSummary": { count: number };
+  "expressions.photo.agentInstead": Record<string, never>;
+  "expressions.photo.anotherPhoto": Record<string, never>;
+  "expressions.photo.branchLabel": Record<string, never>;
+  "expressions.photo.busy": Record<string, never>;
+  "expressions.photo.caricatureHint": Record<string, never>;
+  "expressions.photo.caricatureLabel": Record<string, never>;
+  "expressions.photo.checkFailed": Record<string, never>;
+  "expressions.photo.checking": Record<string, never>;
+  "expressions.photo.consent": { provider: string };
+  "expressions.photo.consentMissing": Record<string, never>;
+  "expressions.photo.cutoutErased": Record<string, never>;
+  "expressions.photo.cutoutHint": Record<string, never>;
+  "expressions.photo.cutoutLabel": Record<string, never>;
+  "expressions.photo.cutoutModel": Record<string, never>;
+  "expressions.photo.cutoutUnchanged": Record<string, never>;
+  "expressions.photo.displayNameLabel": Record<string, never>;
+  "expressions.photo.displayNamePlaceholder": Record<string, never>;
+  "expressions.photo.errorBusy": Record<string, never>;
+  "expressions.photo.errorChanged": Record<string, never>;
+  "expressions.photo.errorFailed": Record<string, never>;
+  "expressions.photo.errorGeneric": Record<string, never>;
+  "expressions.photo.errorMedia": Record<string, never>;
+  "expressions.photo.errorName": Record<string, never>;
+  "expressions.photo.errorOffline": Record<string, never>;
+  "expressions.photo.errorQuota": Record<string, never>;
+  "expressions.photo.errorRefused": Record<string, never>;
+  "expressions.photo.errorRole": Record<string, never>;
+  "expressions.photo.errorTimeout": Record<string, never>;
+  "expressions.photo.errorUnavailable": Record<string, never>;
+  "expressions.photo.faceLabel": Record<string, never>;
+  "expressions.photo.faceNone": Record<string, never>;
+  "expressions.photo.faceOther": Record<string, never>;
+  "expressions.photo.faceOtherBlocked": Record<string, never>;
+  "expressions.photo.faceSelf": Record<string, never>;
+  "expressions.photo.fieldsInvalid": Record<string, never>;
+  "expressions.photo.fixedNote": Record<string, never>;
+  "expressions.photo.introText": Record<string, never>;
+  "expressions.photo.nameLabel": Record<string, never>;
+  "expressions.photo.namePlaceholder": Record<string, never>;
+  "expressions.photo.noModelAsk": Record<string, never>;
+  "expressions.photo.noModelDetail": Record<string, never>;
+  "expressions.photo.noModelHeadline": Record<string, never>;
+  "expressions.photo.noModelImport": Record<string, never>;
+  "expressions.photo.noModelManage": Record<string, never>;
+  "expressions.photo.originLabel": Record<string, never>;
+  "expressions.photo.photoHint": Record<string, never>;
+  "expressions.photo.photoLabel": Record<string, never>;
+  "expressions.photo.photoMissing": Record<string, never>;
+  "expressions.photo.photoPreviewAlt": Record<string, never>;
+  "expressions.photo.photoSize": Record<string, never>;
+  "expressions.photo.photoType": Record<string, never>;
+  "expressions.photo.providerGemini": Record<string, never>;
+  "expressions.photo.providerOpenai": Record<string, never>;
+  "expressions.photo.retry": Record<string, never>;
+  "expressions.photo.submit": Record<string, never>;
+  "expressions.photo.tagsLabel": Record<string, never>;
+  "expressions.photo.tagsPlaceholder": Record<string, never>;
   "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
@@ -120,9 +424,35 @@ export interface MessageArgs {
   "mobile.ios.microphoneUsage": Record<string, never>;
   "mobile.ios.photoLibraryAddUsage": Record<string, never>;
   "mobile.ios.photoLibraryUsage": Record<string, never>;
+  "mobile.linkCard.cancel": Record<string, never>;
+  "mobile.linkCard.copied": Record<string, never>;
+  "mobile.linkCard.copy": Record<string, never>;
+  "mobile.linkCard.copyFailed": Record<string, never>;
+  "mobile.linkCard.loading": Record<string, never>;
+  "mobile.linkCard.remove": Record<string, never>;
+  "mobile.linkCard.removeConfirm": Record<string, never>;
+  "mobile.linkCard.removeDetail": Record<string, never>;
+  "mobile.linkCard.removeFailed": Record<string, never>;
+  "mobile.linkCard.removePending": Record<string, never>;
+  "mobile.linkCard.removeTitle": Record<string, never>;
+  "mobile.linkCard.share": Record<string, never>;
+  "mobile.linkCard.sheetClose": Record<string, never>;
+  "mobile.linkCard.sheetTitle": Record<string, never>;
+  "mobile.linkPreview.compactHint": Record<string, never>;
+  "mobile.linkPreview.richHint": Record<string, never>;
+  "mobile.linkPreview.scopeNote": Record<string, never>;
+  "mobile.linkPreview.title": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.permissionNotice": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "settings.appearance.linkPreviewCompact": Record<string, never>;
+  "settings.appearance.linkPreviewCompactHint": Record<string, never>;
+  "settings.appearance.linkPreviewOff": Record<string, never>;
+  "settings.appearance.linkPreviewOffHint": Record<string, never>;
+  "settings.appearance.linkPreviewRich": Record<string, never>;
+  "settings.appearance.linkPreviewRichHint": Record<string, never>;
+  "settings.notifications.threadReplyDescription": Record<string, never>;
+  "settings.notifications.threadReplyName": Record<string, never>;
   "settings.profile.languageBeta": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
   "settings.profile.languageHint": Record<string, never>;
@@ -131,4 +461,33 @@ export interface MessageArgs {
   "settings.profile.languagePartialNotice": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "timeline.thread.followDismiss": Record<string, never>;
+  "timeline.thread.followFailed": Record<string, never>;
+  "timeline.thread.followOff": Record<string, never>;
+  "timeline.thread.followOn": Record<string, never>;
+  "timeline.thread.followStart": Record<string, never>;
+  "timeline.thread.followStop": Record<string, never>;
+  "timeline.thread.open": { count: number };
+  "timeline.thread.openUnread": { count: number; unread: number };
+  "timeline.thread.replyCount": { count: number };
+  "timeline.thread.unreadChip": { count: number };
+  "timeline.unfurl.label": { domain: string; title: string };
+  "timeline.unfurl.previewDismiss": Record<string, never>;
+  "timeline.unfurl.previewDismissed": Record<string, never>;
+  "timeline.unfurl.previewGroup": Record<string, never>;
+  "timeline.unfurl.video": Record<string, never>;
+  "timeline.workRequest.composerBusy": Record<string, never>;
+  "timeline.workRequest.fill": Record<string, never>;
+  "timeline.workRequest.fillHint": Record<string, never>;
+  "timeline.workRequest.fillLabel": { label: string };
+  "timeline.workRequest.inDm": Record<string, never>;
+  "timeline.workRequest.labelAny": Record<string, never>;
+  "timeline.workRequest.labelClaude": Record<string, never>;
+  "timeline.workRequest.labelCodex": Record<string, never>;
+  "timeline.workRequest.noPersonalAgent": Record<string, never>;
+  "timeline.workRequest.openSheet": Record<string, never>;
+  "timeline.workRequest.openSheetLabel": { label: string };
+  "timeline.workRequest.openTools": Record<string, never>;
+  "timeline.workRequest.sheetHint": Record<string, never>;
+  "timeline.workRequest.threadClosed": Record<string, never>;
 }

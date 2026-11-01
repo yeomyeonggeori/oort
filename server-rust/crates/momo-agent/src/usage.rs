@@ -827,6 +827,108 @@ pub async fn agent_usage_in_tx(
         .map_err(DbError::from)
 }
 
+// ---------------------------------------------------------------------------
+// the team AI's limits (ADR-0201 증보 v3 B9, #4944)
+// ---------------------------------------------------------------------------
+
+/// What ONE agent has spent since the UTC calendar month began, as the **read-time list-price
+/// estimate** of ADR-0147 증보 2026-10-30 D4 — the very figure `GET …/usage/agents` shows, because
+/// it is computed by the same statement ([`agent_usage_in_tx`]). A monthly dollar limit and the
+/// screen that explains it therefore cannot disagree, and the pricing rules (workspace row over
+/// global, vendor prefix and dots normalised, longest prefix wins, a run on a model with no price
+/// counted in `unpriced_runs` and **not** in the dollars — B9-2) live in one place.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AgentMonthSpend {
+    /// Σ list-price cost of the priced runs, in micro-dollars.
+    pub cost_micro_usd: i64,
+    /// Ledger rows of the month (one per request).
+    pub runs: i64,
+    /// Rows whose model had no `model_pricing` row: in `runs`, not in `cost_micro_usd`.
+    pub unpriced_runs: i64,
+    /// Rows whose tokens or price are estimates (the figure is a lower bound, ADR-0147 D3).
+    pub estimated_runs: i64,
+}
+
+/// [`AgentMonthSpend`] of `agent_member_id` in `workspace_id`, from 00:00 UTC on the first of this
+/// month to now (both read from the database's clock, the one the ledger rows are stamped with).
+pub async fn agent_month_spend_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<AgentMonthSpend, DbError> {
+    let row = sqlx::query(
+        "SELECT date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' AS month_start, \
+                now() AS now",
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    let from: DateTime<Utc> = row.try_get("month_start").map_err(DbError::from)?;
+    let to: DateTime<Utc> = row.try_get("now").map_err(DbError::from)?;
+    let rows = agent_usage_in_tx(
+        conn,
+        workspace_id,
+        UsageWindow {
+            from,
+            to,
+            bucket: UsageBucket::Month,
+        },
+        &[agent_member_id],
+    )
+    .await?;
+    Ok(rows
+        .iter()
+        .fold(AgentMonthSpend::default(), |sum, row| AgentMonthSpend {
+            cost_micro_usd: sum.cost_micro_usd.saturating_add(row.cost_micro_usd),
+            runs: sum.runs + row.runs,
+            unpriced_runs: sum.unpriced_runs + row.unpriced_runs,
+            estimated_runs: sum.estimated_runs + row.estimated_runs,
+        }))
+}
+
+/// The model of this agent's most recent ledger row — what it **actually** ran on last, which is
+/// the only tenant-readable record of the model a 「기본 AI」-following agent resolved to (the row
+/// that names the team's default model is instance-global and readable only after the
+/// instance-operator check). `None` = the agent has never been charged for a request.
+pub async fn latest_ledger_model_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<String>, DbError> {
+    let model: Option<String> = sqlx::query_scalar(
+        "SELECT model FROM usage_ledger \
+          WHERE workspace_id = $1 AND agent_member_id = $2 \
+          ORDER BY created_at DESC, id DESC LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(model)
+}
+
+/// Does `model` have a `model_pricing` row **now**? The same match [`agent_usage_in_tx`] makes
+/// (global or this workspace's row, USD, in effect, the model id lower-cased with a leading
+/// `vendor/` dropped and dots turned into dashes, the row's `model` a prefix of that) — a test
+/// holds the two together. A priced zero is priced; "no row" is not.
+pub async fn pricing_available_for_model_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    model: &str,
+) -> Result<bool, DbError> {
+    let found: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM model_pricing mp \
+            WHERE (mp.workspace_id IS NULL OR mp.workspace_id = $1) \
+              AND mp.currency = 'USD' AND mp.effective_from <= now() \
+              AND starts_with(replace(regexp_replace(lower($2), '^[^/]+/', ''), '.', '-'), mp.model))",
+    )
+    .bind(workspace_id)
+    .bind(model)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(found)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

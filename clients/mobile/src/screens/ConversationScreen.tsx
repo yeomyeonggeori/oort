@@ -134,7 +134,9 @@ import {
   useLongPressHint,
 } from '../features/conversation/LongPressHint';
 import type {MessageRowActions} from '../features/conversation/MessageRow';
+import type {WorkRequestOpen} from '@momo/core/features/timeline/commandSuggest';
 import {ThreadPanel} from '../features/conversation/ThreadPanel';
+import {threadsAreFollowable} from '@momo/core/features/timeline/threadFollow';
 import {PinListPanel} from '../features/conversation/PinListPanel';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import {Timeline} from '../features/conversation/Timeline';
@@ -328,6 +330,7 @@ export default function ConversationScreen({
   onOpenConversation,
   onOpenAgent,
   onDelegateWork,
+  onAskMac,
   onOpenWorkSession,
   onOpenWorkList,
   onOpenSettings,
@@ -366,6 +369,12 @@ export default function ConversationScreen({
    * 않는다) 문은 서 있고, 호스티드 에이전트의 DM이 승인 전이면 409 문장으로 답한다.
    */
   onDelegateWork?: (prefill: {agentMemberId: string; channelId: string}) => void;
+  /**
+   * 도우미의 「작업 요청 열기」 카드(`work.request.open`, #4972)를 누르면 「내 맥에 보내기」 시트를
+   * **작업 요청 모드로, 글과 하네스를 미리 채워** 연다. 보내는 것은 사람이다. 셸이 시트를 쥐고 있어서
+   * 없으면(시트를 열 곳이 없는 표면) 카드는 한 줄로만 선다 — 누르면 아무 일도 없는 단추를 세우지 않는다.
+   */
+  onAskMac?: (prefill: WorkRequestOpen) => void;
   /**
    * 내 개인 에이전트를 부른 호출이 맥에 닿으면 만들어진 세션의 N3 대화로 간다 (#3638).
    * 못 찾으면 작업 목록으로 간다. 둘 다 셸의 같은 액션이다.
@@ -1571,6 +1580,7 @@ export default function ConversationScreen({
     togglePin,
     editBody,
     removeMessage,
+    removeUnfurls,
     loadOlder,
     resend,
     reload,
@@ -1639,6 +1649,8 @@ export default function ConversationScreen({
       onTogglePin: togglePin,
       onEdit: editBody,
       onDelete: removeMessage,
+      // 작성자가 링크 미리보기를 모두에게서 지운다(#4883). 시트가 작성자에게만 행을 세운다.
+      onRemoveUnfurls: removeUnfurls,
       onOpenThread: openThread,
       onQuote: onQuoteMessage,
       onJumpToQuoted,
@@ -1648,10 +1660,13 @@ export default function ConversationScreen({
       onOpenMemoryEvidence: openMemoryEvidence,
       // 다른 방으로 건너갈 셸이 없으면 열 곳이 없다 — 그때 「전문 보기」는 서지 않는다(#4705).
       ...(onOpenConversation !== undefined ? {onOpenMessage: openApprovalMessage} : {}),
+      // 시트를 열 셸이 없으면 도우미의 「작업 요청 열기」 카드에 누를 단추가 서지 않는다(#4972).
+      ...(onAskMac !== undefined ? {onOpenWorkRequest: onAskMac} : {}),
     }),
     [
       workspaceId,
       openMemoryEvidence,
+      onAskMac,
       onOpenConversation,
       openApprovalMessage,
       member.id,
@@ -1659,6 +1674,7 @@ export default function ConversationScreen({
       togglePin,
       editBody,
       removeMessage,
+      removeUnfurls,
       openThread,
       onQuoteMessage,
       onJumpToQuoted,
@@ -2103,6 +2119,8 @@ export default function ConversationScreen({
               working={working}
               reactions={timeline.reactions}
               pins={timeline.pins}
+              // 링크 카드(#4883) — 목록이 줄마다 자기 메시지의 카드를 유도한다.
+              unfurls={timeline.unfurls}
               myMemberId={member.id}
               loadingOlder={timeline.loadingOlder}
               reachedStart={timeline.reachedStart}
@@ -2253,8 +2271,10 @@ export default function ConversationScreen({
           approvalsProvided={approvalsProvided}
           onApprovalSettled={onApprovalSettled}
           onOpenMessage={openApprovalMessage}
+          onOpenWorkRequest={onAskMac}
           nowMs={nowMs}
           onClose={closeThread}
+          followable={threadsAreFollowable(channel?.kind)}
           onReplySent={bumpSelfSend}
           onOpenProfile={showMemberProfile}
           onReaderTookList={onReaderTookList}

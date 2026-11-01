@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{error::ApiError, AppState};
 
-fn failure(error: Error) -> ApiError {
+pub(crate) fn failure(error: Error) -> ApiError {
     let (status, code) = match error {
         Error::Invalid => (StatusCode::BAD_REQUEST, "expression_invalid"),
         Error::Role => (StatusCode::FORBIDDEN, "expression_role_required"),
@@ -29,10 +29,10 @@ fn failure(error: Error) -> ApiError {
     };
     ApiError::coded(status, code, code)
 }
-fn invalid() -> ApiError {
+pub(crate) fn invalid() -> ApiError {
     failure(Error::Invalid)
 }
-fn actor(ws: &str, p: &Principal) -> Result<Actor, ApiError> {
+pub(crate) fn actor(ws: &str, p: &Principal) -> Result<Actor, ApiError> {
     let workspace = Uuid::parse_str(ws).map_err(|_| invalid())?;
     if workspace != p.workspace_id {
         return Err(failure(Error::NotFound));
@@ -45,7 +45,7 @@ fn actor(ws: &str, p: &Principal) -> Result<Actor, ApiError> {
         member: p.member_id,
     })
 }
-fn human(p: &Principal) -> Result<(), ApiError> {
+pub(crate) fn human(p: &Principal) -> Result<(), ApiError> {
     if p.kind != PrincipalKind::Human {
         return Err(failure(Error::Role));
     }
@@ -110,7 +110,13 @@ async fn multipart(
     }
     Ok((meta, file.ok_or_else(invalid)?))
 }
-fn media_error(e: media::Rejected) -> ApiError {
+pub(crate) fn media_error(e: media::Rejected) -> ApiError {
+    // Both decoder slots taken is the SERVER's retryable state, never a property of the file (#4900):
+    // the 503 with `Retry-After` the link import and the photo route already answer, not a
+    // "format not supported" 415 that tells a person their picture is the problem.
+    if e == media::Rejected::Busy {
+        return ApiError::busy(2);
+    }
     ApiError::coded(
         if e == media::Rejected::TooLarge {
             StatusCode::PAYLOAD_TOO_LARGE

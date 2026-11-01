@@ -493,6 +493,12 @@
   /* 공용 툴팁의 세로 여백 6px (#4324). 가로 12는 `px-3`이다. */
   --spacing-tooltip-y: 6px;
 
+  /* 스레드 요약 줄의 겹친 얼굴 (#4878, owner 10-31 규격). 한 변 20과 겹침 6은 격자(4의 배수) 밖이라 이름으로
+   * 들어온다: `size-5`·`-ml-1.5`는 컴파일되지 않는다. 폰은 22pt이고(코어 `THREAD_FACE_SIZE`), 두 수는
+   * `threadFaceTokens.test.ts`가 코어 상수와 대조한다. 바탕색 2px 링은 `ring-2`(스톡 유틸)다. */
+  --spacing-thread-face: 20px;
+  --spacing-thread-face-overlap: 6px;
+
   /* Control heights are a separate dimension from spacing. */
   --spacing-control-sm: 28px;
   --spacing-control: 32px;
@@ -769,6 +775,14 @@
    * 여기서 빌려 쓰면 640 폭에서 3.54:1 이 되고, 그 토큰의 근거(320×16:9)는
    * 이 자리의 거짓이 된다. */
   --spacing-unfurl-hero: 336px;
+
+  /* 링크 카드 「작게」의 그림 칸 (#4882, owner 2026-10-31). 높이 64가 칸의 변이다:
+   * 아이콘 타일은 64×64, 작거나 정사각형인 그림은 자르지 않고 64×64 안에 통째로 넣고,
+   * 보통 그림만 가로를 넓혀 104×64로 자른다. 64는 4의 배수지만 리듬 스케일(최대 32)
+   * 밖이고 104는 4의 배수이되 그 위라서 이름으로 들어온다. 이전에는 이 칸이
+   * `--spacing-rail-tile`(44, 워크스페이스 레일 타일)을 빌려 쓰고 있었다. */
+  --spacing-unfurl-tile: 64px;
+  --spacing-unfurl-thumb: 104px;
 
   /* 첨부 트레이가 먹을 수 있는 최대 높이 (#1202 · design-review B-2).
    *

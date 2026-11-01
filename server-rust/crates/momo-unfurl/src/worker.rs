@@ -433,7 +433,7 @@ impl Settled {
 /// only slow its own job. The page's bytes move into the closure, nothing is cloned. A panic in
 /// the reading code ends the job as the quiet `failed` a page with nothing to show gets, and is
 /// logged without the page's address or text.
-async fn build_card_off_thread(
+pub(crate) async fn build_card_off_thread(
     fetched: Fetched,
     allow_development_http: bool,
 ) -> Option<CardFields> {

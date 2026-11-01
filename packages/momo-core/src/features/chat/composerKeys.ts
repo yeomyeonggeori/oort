@@ -60,6 +60,15 @@ export type ComposerKeyIntent =
    * Esc를 눌렀을 때 목록은 그대로인데 인용이 사라진다.
    */
   | "quote-cancel"
+  /**
+   * #5005 - 입력칸 위의 링크 미리보기 카드를 닫는다. ✕와 같은 선택이다(이번 메시지는 미리보기 없이 보내기).
+   *
+   * Esc 하나에 두 뜻을 겹치지 않는 규칙은 그대로다: 멘션 목록이 열려 있으면 목록이 먼저이고, 그 다음이 이
+   * 카드, 그 다음이 인용이다. 카드를 인용보다 앞에 두는 이유: 카드는 사람이 부른 적 없이 **저절로** 나타난
+   * 것이라 Esc로 물리치는 것이 가장 흔한 손짓이고, 인용은 사람이 일부러 건 것이라 카드를 보고 누른 Esc가
+   * 인용을 날리면 안 된다. Esc를 한 번 더 누르면 인용이 내려온다.
+   */
+  | "preview-dismiss"
   /** Not ours: let the textarea (or the IME) have it. */
   | "pass";
 
@@ -100,6 +109,12 @@ export interface ComposerKeyState {
    * 동작이 이전과 한 글자도 다르지 않아야 한다.
    */
   quoteOpen?: boolean;
+  /**
+   * #5005 - 이 입력칸 위에 링크 미리보기 카드가 떠 있다(그릴 카드가 하나 이상). 카드가 없으면 Esc는 이
+   * 키를 모르는 것처럼 지나간다. 옵셔널이라, 카드를 모르는 표면(폰 입력칸)이 이 키를 적지 않아도 동작이
+   * 이전과 한 글자도 다르지 않다.
+   */
+  previewOpen?: boolean;
 }
 
 /** True when the keystroke belongs to an in-flight IME composition. */
@@ -150,6 +165,7 @@ export function composerKeyIntent(
   if (event.key === "Escape") {
     if (event.composing) return "pass";
     if (state.mentionsOpen) return "mention-close";
+    if (state.previewOpen === true) return "preview-dismiss";
     if (state.quoteOpen === true) return "quote-cancel";
     return "pass";
   }

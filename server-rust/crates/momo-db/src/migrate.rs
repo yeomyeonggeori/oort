@@ -735,13 +735,28 @@ mod tests {
     /// (root, member) with the state `auto` / `followed` / `unfollowed`, tenant ENABLE + FORCE +
     /// `ws_isolation`. No grant for `momo_notifier` until the stage-2 judgment arm reads it.
     ///
+    /// 165 is #4889 stage 2 (ADR-0206 증보 1): `thread_follow.last_read_reply_seq bigint NOT NULL
+    /// DEFAULT 0` (the read position behind the thread summary's `unread_reply_count`) with a
+    /// `NOT VALID` CHECK `>= 0`, and `GRANT SELECT ON thread_follow TO momo_notifier` — the one grant
+    /// the `thread_reply` push arm needs (no INSERT / UPDATE / DELETE, no new BYPASSRLS role). No new
+    /// table, so no new RLS policy.
+    ///
+    /// 166 is #4966's 「별칭이 이름을 따라가요」 (ADR-0201 증보 v3 B10, slice S3): the helper's alias
+    /// set stops being fixed (`member_handle_alias_v2_set_ck` is dropped, the shape CHECK stays) and
+    /// the trigger `member_handle_alias_guard` takes over: an alias belongs to the workspace's team AI
+    /// member only, and a workspace holds at most four. No new table, no new grant.
+    ///
+    /// 167 is #4900's expiry rule for expression drafts (ADR-0218 D2): `expression_immutable()` lets
+    /// `origin` change in exactly one way — when a draft is `expired`, its `prompt` (the agent's words)
+    /// becomes JSON null — and the migration blanks the prompts of drafts that expired before it. No new
+    /// table, so no new RLS policy.
+    ///
     /// 168 is #4656's agent activity report (ADR-0200 증보 7): the two ledger kinds `activity` and
     /// `plan` on `agent_run_event` (seven new columns, the SQL backstop CHECKs, the shared text
     /// function), the per-run ended-unit total `agent_run_activity_tally` (tenant ENABLE + FORCE +
     /// `ws_isolation`, `momo_notifier` SELECT for the retention sweep), the roll function
     /// `agent_run_activity_trim`, the one writer `agent_run_activity_record`, and the stage trim /
-    /// append / frame-window functions made to look past the new kinds. 165 (#4889 stage 2) and 166
-    /// (#4966) are numbered by their own slots and land separately.
+    /// append / frame-window functions made to look past the new kinds.
     #[test]
     fn discovers_contiguous_migrations_001_to_168() {
         let dir = default_migrations_dir();

@@ -20,8 +20,27 @@
 //! What is deliberately not here: any Drive URL (the route proxies the bytes itself), any
 //! token or Drive id in a log line, an audit row or the outbox (the token table is the record,
 //! hash only; [`redact_self_media_urls`] is the scrub every error string passes), and any way
-//! to name an attachment that is not the trigger message's (no attachment id comes from a
-//! caller — not from the agent, not from the model, not from a request).
+//! to hand a **model** an address for an attachment that is not the trigger message's
+//! ([`mint_for_run_in_tx`] takes no attachment id: not from the agent, not from the model, not
+//! from a request).
+//!
+//! ## The second mint: the worker's own read (#4934, ADR-0151 증보 3)
+//!
+//! On Railway the api and the agent-worker are different services and the `local` archive is a
+//! volume only the api can mount, so the worker cannot read the picture a person asked to have
+//! turned into a profile image. [`mint_for_attachment_in_tx`] is the same token for that read: the
+//! worker mints it, **spends it itself** against the api's private address, and the bytes come back
+//! over the one route above. It names an attachment, which is the one widening of this module's old
+//! rule, and it is bounded by the same predicate the direct-Drive read has always used:
+//!
+//! * the id is the one the proposal arguments carry, and it passes
+//!   [`find_requester_attachment_in_tx`] — complete, an image, within the ceiling, on a live message
+//!   **the run's requester wrote in the run's own conversation** — before a row is written, and again
+//!   at [`redeem_in_tx`];
+//! * the token never becomes text a model reads (the worker holds it for one request and it is not in
+//!   any payload, message or error it writes), so nothing a model can say reaches the route;
+//! * it lives [`SELF_MEDIA_INTERNAL_TTL_SECS`], not five minutes: the read happens right after the
+//!   mint, and a token nobody spent is dead almost at once.
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -38,6 +57,9 @@ use crate::identity::is_channel_member;
 pub const SELF_MEDIA_PATH_PREFIX: &str = "/v1/self-media/";
 /// How long a minted address lives. The table's own ceiling is ten minutes.
 pub const SELF_MEDIA_TTL_SECS: i64 = 300;
+/// How long the worker's own read address lives (#4934): minted right before the worker spends it, so
+/// it covers the read deadline with room to spare and nothing more.
+pub const SELF_MEDIA_INTERNAL_TTL_SECS: i64 = 60;
 /// The same input ceiling a picture moved inside the server has (ADR-0218 G3.2).
 pub const SELF_MEDIA_MAX_BYTES: i64 = 5 * 1024 * 1024;
 /// 32 random bytes in unpadded URL-safe base64.
@@ -213,17 +235,13 @@ pub async fn trigger_photo_in_tx(
     run_id: Uuid,
     agent_member_id: Uuid,
 ) -> Result<Option<TriggerPhoto>, DbError> {
-    // Who asked: the author of the run's trigger message, a live human (the avatar flow's rule).
+    // Who asked, and where: the author of the run's trigger message, a live human (the avatar flow's
+    // rule), in a conversation both they and the agent are still in.
     let Some((requester, channel_id)) =
-        requester_of_run_in_tx(conn, workspace_id, run_id, agent_member_id).await?
+        requester_in_conversation_in_tx(conn, workspace_id, run_id, agent_member_id).await?
     else {
         return Ok(None);
     };
-    if !is_channel_member(conn, channel_id, agent_member_id).await?
-        || !is_channel_member(conn, channel_id, requester).await?
-    {
-        return Ok(None);
-    }
     // The picture: the first complete image of the trigger message itself. No id comes from outside.
     let attachment_id: Option<Uuid> = sqlx::query_scalar(
         "SELECT a.id FROM attachment a \
@@ -260,6 +278,28 @@ pub async fn trigger_photo_in_tx(
     }))
 }
 
+/// The person a run was raised by and the conversation it is in, **only while both that person and
+/// the agent are still members of it**. The one head of both mints: a hosted turn's trigger photo and
+/// the worker's own read begin from the same "who asked, and where".
+async fn requester_in_conversation_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<(Uuid, Uuid)>, DbError> {
+    let Some((requester, channel_id)) =
+        requester_of_run_in_tx(conn, workspace_id, run_id, agent_member_id).await?
+    else {
+        return Ok(None);
+    };
+    if !is_channel_member(conn, channel_id, agent_member_id).await?
+        || !is_channel_member(conn, channel_id, requester).await?
+    {
+        return Ok(None);
+    }
+    Ok(Some((requester, channel_id)))
+}
+
 /// [`mint_for_run_in_tx`] with an explicit TTL (seconds). The table refuses anything over ten
 /// minutes or not positive, so a wrong value here is an error, not a long-lived token.
 pub async fn mint_with_ttl_in_tx(
@@ -278,6 +318,103 @@ pub async fn mint_with_ttl_in_tx(
         channel_id,
         attachment_id,
     } = photo;
+    insert_token_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        requester,
+        channel_id,
+        attachment_id,
+        ttl_secs,
+    )
+    .await
+}
+
+/// Mint the worker's own read address (#4934) for the attachment `attachment_id` of this run's
+/// requester, with the production read TTL ([`SELF_MEDIA_INTERNAL_TTL_SECS`]). `None` — no live human
+/// requester, either of them gone from the conversation, or an attachment that is not the requester's
+/// complete image on a live message in this conversation — is every refusal alike, and writes nothing.
+///
+/// The caller is the agent-worker, and the token is for **its own** request to the api's private
+/// address: it must never be put into text a model reads (that is [`mint_for_run_in_tx`]'s address and
+/// nothing else's).
+pub async fn mint_for_attachment_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    attachment_id: Uuid,
+) -> Result<Option<SelfMediaGrant>, DbError> {
+    mint_for_attachment_with_ttl_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        attachment_id,
+        SELF_MEDIA_INTERNAL_TTL_SECS,
+    )
+    .await
+}
+
+/// [`mint_for_attachment_in_tx`] with an explicit TTL (seconds); the table's ten-minute ceiling and
+/// positivity check apply exactly as for [`mint_with_ttl_in_tx`].
+///
+/// The ownership rule is the one every requester-attachment read follows
+/// ([`find_requester_attachment_in_tx`]), asked **before** any row is written, so a refused id leaves
+/// no trace in the table; [`redeem_in_tx`] asks it again.
+pub async fn mint_for_attachment_with_ttl_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    attachment_id: Uuid,
+    ttl_secs: i64,
+) -> Result<Option<SelfMediaGrant>, DbError> {
+    let Some((requester, channel_id)) =
+        requester_in_conversation_in_tx(conn, workspace_id, run_id, agent_member_id).await?
+    else {
+        return Ok(None);
+    };
+    if find_requester_attachment_in_tx(
+        conn,
+        workspace_id,
+        requester,
+        channel_id,
+        attachment_id,
+        SELF_MEDIA_MAX_BYTES,
+    )
+    .await?
+    .is_none()
+    {
+        return Ok(None);
+    }
+    insert_token_in_tx(
+        conn,
+        workspace_id,
+        run_id,
+        agent_member_id,
+        requester,
+        channel_id,
+        attachment_id,
+        ttl_secs,
+    )
+    .await
+}
+
+/// Write one token row (hash only) for a binding the caller has **already proved**, after dropping the
+/// workspace's day-old rows. `None` only when the system has no entropy to make a token from.
+#[allow(clippy::too_many_arguments)]
+async fn insert_token_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    requester: Uuid,
+    channel_id: Uuid,
+    attachment_id: Uuid,
+    ttl_secs: i64,
+) -> Result<Option<SelfMediaGrant>, DbError> {
     let Some(token) = new_token() else {
         return Ok(None);
     };
@@ -572,6 +709,21 @@ mod tests {
                 expires_at
             }
         );
+    }
+
+    /// The worker's own read (#4934) asks the direct-Drive path's question with the route's ceiling, and
+    /// the route answers with its own: if the two numbers ever drifted, a picture the proposal accepted
+    /// would be one the route refuses (or the reverse). They are one number.
+    #[test]
+    fn the_route_and_the_avatar_read_share_one_size_ceiling() {
+        assert_eq!(
+            SELF_MEDIA_MAX_BYTES,
+            crate::agent_avatar::AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT as i64
+        );
+        // the read address lives 60 seconds (ADR-0151 증보 3 D4): shorter than the hosted one's 300 and inside
+        // the table's own ten-minute ceiling — a change of the number is a change of the ADR and of this test
+        assert_eq!(SELF_MEDIA_INTERNAL_TTL_SECS, 60);
+        assert_eq!(SELF_MEDIA_TTL_SECS, 300);
     }
 
     #[test]

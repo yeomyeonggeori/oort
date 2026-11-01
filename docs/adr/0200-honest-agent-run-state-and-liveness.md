@@ -3,7 +3,7 @@
 - Status: **Accepted** (2026-10-13 성재 결재 — 아래 「결재 기록」. 공개 API·DB 계약 변경이라 ADR-0100에 따라 이 Accepted가 구현 머지 조건이다.) 초안은 같은 날 Proposed였고 결재로 D4-5(`oort_ping`)가 추천안과 달라졌다.
 - Date: 2026-10-13
 - Deciders: 성재
-- 증보: 2026-10-14 (#3822) 도어벨 깨움 `doorbell_rung` · 2026-10-15 (#3838) oort 호출 기록 `tool_call`(T1~T5)·「지금 실행 중」 읽기(R1) · 2026-10-24 증보 3 (#4332) 깨웠는데 가져가지 않은 run 종결 `woken_not_collected`(30분)·환영 run 종결은 조용히·환영 대상 정책·notifier 열 읽기 · **2026-10-27 증보 4 (#4618) Accepted(planner 위임, owner 사후 보고 2026-10-27) — Agent Port 호출 기록 `agent_port.call`: 깨어서 무엇을 부르고 멈추는지** · **2026-10-27 증보 5 (#4622) Accepted(planner 위임, owner 방향 승인 2026-10-26 「ㄱㄱ」 — #4577 C·E) — D5 증보: 대화에는 무엇을 쓰나·진행은 stage로·빈 인사 금지·답 자리. 스레드 안에서 부른 일의 최종 답은 같은 스레드에(ADR-0148 증보), 채널 최상위 멘션의 새 스레드는 #4646** — 증보 5 절 · **2026-10-27 증보 6 (#4621) Accepted(planner 위임, owner 사후 보고 2026-10-27) — 에이전트 확인 박자 `cadence`: 「다음 확인 때 가져가요」의 근거(루틴형이면 박자와 마감, 모르면 「모름」)** — 증보 6 절(파일 끝).
+- 증보: 2026-10-14 (#3822) 도어벨 깨움 `doorbell_rung` · 2026-10-15 (#3838) oort 호출 기록 `tool_call`(T1~T5)·「지금 실행 중」 읽기(R1) · 2026-10-24 증보 3 (#4332) 깨웠는데 가져가지 않은 run 종결 `woken_not_collected`(30분)·환영 run 종결은 조용히·환영 대상 정책·notifier 열 읽기 · **2026-10-27 증보 4 (#4618) Accepted(planner 위임, owner 사후 보고 2026-10-27) — Agent Port 호출 기록 `agent_port.call`: 깨어서 무엇을 부르고 멈추는지** · **2026-10-27 증보 5 (#4622) Accepted(planner 위임, owner 방향 승인 2026-10-26 「ㄱㄱ」 — #4577 C·E) — D5 증보: 대화에는 무엇을 쓰나·진행은 stage로·빈 인사 금지·답 자리. 스레드 안에서 부른 일의 최종 답은 같은 스레드에(ADR-0148 증보), 채널 최상위 멘션의 새 스레드는 #4646** — 증보 5 절 · **2026-10-27 증보 6 (#4621) Accepted(planner 위임, owner 사후 보고 2026-10-27) — 에이전트 확인 박자 `cadence`: 「다음 확인 때 가져가요」의 근거(루틴형이면 박자와 마감, 모르면 「모름」)** — 증보 6 절 · **2026-11-01 증보 7 (#4655) Proposed — 에이전트 활동 보고 `activities[]`·`plan[]`(종류+짧은 라벨)·원장 종류 `activity`·`plan`·생각은 저장하지 않음·보고 박자 60초(owner 결정 Q1~Q3은 권장안, planner가 원문 확인 뒤 Accepted로 올려요)** — 증보 7 절(파일 끝).
 - 기안: Opus 5.5 (#3736 + #3737 묶음)
 - 관계: ADR-0162 증보 3(D9 「새 저장소 없음」, D11 「단계 표식은 realtime 없음」, D13 보드 가시성, D17 비목표, 부록 A lease·암묵 갱신) **일부를 이 ADR이 바꾼다**(아래 「바뀌는 기존 결정」), ADR-0171(도어벨), ADR-0186(승인 액션 — run을 park), ADR-0199(인박스 투영 — 같은 방식의 쓰기 시 투영), ADR-0198, ADR-0100
 - 표기: [V] 코드·문서 직접 확인 · **[추정]** 해석 · [확인 필요] 구현 전 사실 확인 · `runtime-unverified` 실행 안 함
@@ -106,9 +106,9 @@ actor_member_id uuid                  -- 에이전트 또는 사람(승인자·�
 created_at    timestamptz NOT NULL DEFAULT now()
 ```
 
-- `kind` 어휘(S1 구현 확정): `queued` · `claimed` · `started`(첫 `running`) · `stage` · `paused` · `resumed` · `approval_requested` · `approval_decided`(code=approved/rejected/expired/cancelled) · `succeeded` · `failed` · `timed_out` · `cancelled`. 도어벨은 run이 아니라 connection 단위 사실이라 원장 kind가 아니다(`hosted_agent_doorbell.last_fired_at/last_status`를 읽기에서 합친다). **→ 2026-10-14 증보가 `doorbell_rung`을 더해 이 문장을 바꾼다.** **→ 2026-10-15 증보(T1)가 `tool_call`을 더한다(14개, `?include=tools` 뒤에서만 읽힘).** 하위 봇 위임은 별도 kind 없이 `stage`(「위임: …」)로 보고한다. `lease_renewed`는 잡음이라 넣지 않는다. 수명주기 행은 `agent_run`/`approval` 트리거가, `claimed`·`stage`는 서버 코드가 같은 SQL 함수(`agent_run_event_append`)로 쓴다. 200행 상한은 `agent_run_event_trim`(DELETE는 이 함수에만, 트리거 경로의 notifier 역할에는 DELETE 없음).
+- `kind` 어휘(S1 구현 확정): `queued` · `claimed` · `started`(첫 `running`) · `stage` · `paused` · `resumed` · `approval_requested` · `approval_decided`(code=approved/rejected/expired/cancelled) · `succeeded` · `failed` · `timed_out` · `cancelled`. 도어벨은 run이 아니라 connection 단위 사실이라 원장 kind가 아니다(`hosted_agent_doorbell.last_fired_at/last_status`를 읽기에서 합친다). **→ 2026-10-14 증보가 `doorbell_rung`을 더해 이 문장을 바꾼다.** **→ 2026-10-15 증보(T1)가 `tool_call`을 더한다(14개, `?include=tools` 뒤에서만 읽힘).** **→ 증보 7(Proposed)이 `activity`·`plan`을 더한다(16개, `?include=activity` 뒤에서만 읽힘).** 하위 봇 위임은 별도 kind 없이 `stage`(「위임: …」)로 보고한다. `lease_renewed`는 잡음이라 넣지 않는다. 수명주기 행은 `agent_run`/`approval` 트리거가, `claimed`·`stage`는 서버 코드가 같은 SQL 함수(`agent_run_event_append`)로 쓴다. 200행 상한은 `agent_run_event_trim`(DELETE는 이 함수에만, 트리거 경로의 notifier 역할에는 DELETE 없음).
 - 쓰기는 **이미 있는 전이 지점의 같은 tx**에서 한다: run 생성(`agent_runs::create`), 도어벨 결과(송신기 — `momo_relay` 역할이 이미 `hosted_agent_doorbell`을 쓴다), `jobs_claim`, `record_gateway_event_in_tx`, `action_propose`/`card_suggest`의 park, 승인 결정·만료 스위프, `complete_gateway_run_in_tx`, 취소. 생산자별 호출에 의존하지 않도록 **상태 전이 헬퍼 한 곳**(`append_run_event_in_tx`)을 거치게 하고, 우회 INSERT는 시험으로 막는다.
-- **자유 텍스트를 새로 저장하지 않는다.** `stage`(≤80자, 기존 검증)와 닫힌 `code`뿐이다. `detail`은 여전히 감사 전용, `textDelta`는 저장하지 않는다(D5의 한계 참조). 표시는 일반 텍스트 이스케이프(증보 3 D15 그대로).
+- **자유 텍스트를 새로 저장하지 않는다.** `stage`(≤80자, 기존 검증)와 닫힌 `code`뿐이다. `detail`은 여전히 감사 전용, `textDelta`는 저장하지 않는다(D5의 한계 참조). 표시는 일반 텍스트 이스케이프(증보 3 D15 그대로). **→ 증보 7(Proposed, 7-3)이 이 문장을 이 범위에서 바꾼다: 에이전트가 쓴 글 열이 `stage`(≤80자)·활동 `label`(≤40자)·계획 `text`(≤60자) 셋이 되고 모두 같은 문자 규칙을 지난다(여기에 보이는 식별자 `activity_id`, 닫힌 글자 ≤32자가 더해진다).**
 - **크기 상한.** run당 최대 200행. 초과하면 가장 오래된 **`stage`** 행부터 지운다(수명주기 행 `queued/claimed/started/approval_*/종결`은 지우지 않는다). `output.stages`(12개)와 `step_count`는 호환을 위해 그대로 쓴다.
 - **보존.** `agent_run`과 함께 CASCADE. 별도로 종결 후 `SHARE_RETENTION_DAYS`(D13과 같은 상수)가 지나면 읽기가 거르고 notifier 정리가 삭제한다. 진행 중 run의 행은 지우지 않는다.
 - **RLS.** `ENABLE`+`FORCE`, `ws_isolation` 정책(`workspace_id = current_setting('app.workspace_id', true)::uuid`), `momo_app` 앱 역할 GRANT, 쓰기 경로 BYPASSRLS 금지(도어벨 송신기만 기존 `momo_relay` 예외 범위 안에서 `kind='doorbell'`을 쓴다 — [확인 필요]: 송신기가 INSERT하는 대신 앱 쪽 스위프가 `last_status` 변화를 원장으로 옮기는 안도 가능, 구현 슬라이스 S1이 하나로 고정).
@@ -170,9 +170,9 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 `docs/SELF_HOST_AGENT.md` §3.3.17.4의 생산 루틴 문구와 도구 설명(`momo-mcp/src/tools.rs`)을 고친다. 규약:
 
 0. **루틴 실행마다 시작 시 `oort_ping`을 1회**(`state:"idle"`). 추적되는 run 안에서는 `oort_run_event`가 5분 하트비트다 — ping 은 run 을 살려 두지 못한다(ping 만 하는 런타임은 `alive_idle`, 서버 정지 스위프 대상). leaseHandle 없이 바쁜 동안(추적되지 않는 회신)에만 5분마다 `state:"working"`. 30초 안 재호출은 `recorded:false`로 무시된다. Unavailable·429·5xx·시간 초과면 이번 wake 를 멈추고 루프로 재시도하지 않는다(S6 검수 M-2, L-1).
-1. **수령 직후 60초 안에 `oort_run_event`를 한 번** 보낸다: `stage="시작: <한 줄 요약>"`.
+1. **수령 직후 60초 안에 `oort_run_event`를 한 번** 보낸다: `stage="시작: <한 줄 요약>"`. (→ 증보 7(Proposed, 7-5): 10초 안이 권장이고 60초는 한도다. 말만 통일하고 한도는 그대로다.)
 2. **단계가 바뀔 때마다** `stage`를 보낸다. 형식: 한국어 동사구 **≤40자**(서버 상한은 80자), 비밀·URL 쿼리·토큰·경로 전체를 쓰지 않는다. 예: 「채널 이름 확인」「승인 카드 제안」「grokbot-lab 생성 대기」.
-3. **작업 중에는 최소 5분마다** 보고한다. 보낼 단계가 없으면 `stage` 없이 `status="running"`만 보낸다(원장 행은 안 만들지만 `last_run_event_at`이 갱신된다 — 「살아 있음」 신호).
+3. **작업 중에는 최소 5분마다** 보고한다. **→ 증보 7(Proposed, 7-5; owner 결정 Q3)이 「최소 60초마다」로 바꾼다.** 보낼 단계가 없으면 `stage` 없이 `status="running"`만 보낸다(원장 행은 안 만들지만 `last_run_event_at`이 갱신된다 — 「살아 있음」 신호).
 4. **하위 봇에게 위임하면 위임 자체를 단계로 보고한다**: 위임 때 `stage="위임: <봇> · <일>"`, 결과를 받으면 `stage="위임 결과 수신: <봇>"`. 서버는 하위 봇의 내부를 모른다.
 5. `oort_action_propose`로 park하면 서버가 `approval_requested`를 남기므로 따로 보고하지 않고 turn을 끝낸다(ADR-0186 규칙 유지).
 6. 루틴이 `Unavailable`을 받으면 같은 turn에서 재시도하지 말고 종료한다(다음 도어벨/폴링에서 재수립). 서버는 D4의 `last_tool_error_*`로 이를 기록한다.
@@ -932,3 +932,255 @@ planner 위임으로 수락하는 근거는 넷이에요(증보 2·4와 같은 �
   - 픽스처 행은 실제 호출 한 번의 `detail`을 본떠서 쓰는 쪽이 모양을 바꾸면 같이 빨개져요. 술어를 잡는 로더 시험은 superuser 연결로 로더를 직접 불러요(RLS가 가려 주는 술어와 순수 함수가 대신 거르는 창을 따로 잡으려고요). **읽는 일의 양을 재는 두 시험은 앱 역할(`momo_app`, 테넌트 지정)로 재요.** 플래너는 RLS 아래서 다른 계획을 고르기 때문이에요. 사보타주 표는 PR 본문에 있어요(1단계 41건 + 2단계 보강·수리 18건).
 - **#4621 (engine) 2단계.** workspace 게이트·OpenAPI 계약 게이트(`verify_openapi_contract_rust.sh`가 이 GET을 샘플해요)·독립 보안 검수(노출 범위·열세 번째 `audit_log` 읽기)·PR. 검증 증거의 정본은 PR 본문이에요.
 - 범위 밖(후속): 코어 파서의 `cadence` 읽기와 문구(#4619·#4620), 도어벨 깨움 분리(#4652), 박자 최근성·마감 기준점·일시정지(#4685), `audit_log` 인덱스·보존 정책.
+
+
+## 증보 7 (2026-11-01, #4655) — 에이전트 활동 보고 `activities[]`·`plan[]`: 종류+짧은 라벨, 생각은 저장하지 않음, 보고 박자 60초
+
+- Status: **Accepted**(2026-11-01 planner — owner 2026-10-27 「권장대로 해봐」(#4655 코멘트)로 Q1 종류+≤40자 라벨 보고 허용 · Q2 생각 저장 안 함 · Q3 보고 박자 60초를 결재. 이 절이 새로 연 7-Q1~Q4는 추천 (가)를 오케스트레이터 기본값으로 정했고 owner가 뒤집을 수 있어요). 공개 도구 표면(`oort_run_event` 필드 추가)·DB 계약(원장 종류 둘·열·합계 표)·노출(채널 멤버에게 보이는 에이전트 글 열 둘)이 바뀌므로 ADR-0100에 따라 Accepted가 #4656(구현) 머지 조건이에요.
+- 결재 기록: owner 2026-10-27 「권장대로 해봐」(#4655 코멘트의 결정 원문). 7-Q1 (가) 오래된 활동부터 굴리기 · 7-Q2 (가) `stage` 서버 상한 80 유지 · 7-Q3 (가) `toolCounts`에 `delegate`를 더하지 않음 · 7-Q4 (가) `stage`와 같은 방어 — planner 2026-11-01.
+- 기안: Sonnet 5.5 worker (#4655, 스택 S6). 설계이고 코드를 바꾸지 않았어요. migration 번호를 쓰지 않았어요(#4656이 착수 때 `origin/track/engine`과 열린 PR의 최고 번호를 보고 정해요).
+- 근거: 이슈 #4655(이 증보)·#4656(구현)·#4580(계획 이벤트 절반을 이 증보가 맡아요)·#4622(증보 5, 지시문 합본)·#4968(ADR-0201 v3 S5, 도우미 진행). 업계 사례는 공개 규격의 요지만 옮겼고 원문·실명은 쓰지 않았어요.
+- 표기: [V] 코드·문서 직접 확인(작업 폴더 `a0af35488` = track/engine 위. 읽기만 했고 실행하지 않았어요) · **[추정]** 이 증보가 정한 숫자·해석 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행 안 함.
+- **구현이 인용할 절 id**: 사실 `7-0`(F1~F13) · 결정 `7-1`~`7-10` · 불변식 `7-11` · 수용 기준 `7-A1`~`7-A16` · 슬라이스 `7-S1`~`7-S4` · 열린 질문 `7-Q1`~`7-Q4` · 역방향 줄·열어 두는 것·귀결 `7-R`.
+
+### 배경
+
+- 문제: 에이전트가 실제로 무슨 도구로 무엇을 하는지, 잘 하고 있는지가 oort에서 전혀 추적되지 않는다는 owner의 지적(2026-10-27, #4655)이에요. 서버가 스스로 보는 것은 oort 도구 호출뿐이고(T1 `tool_call`, 증보 4 `agent_port.call`), VM 안의 셸·편집·검색은 에이전트가 말해야만 알아요. 지금 에이전트가 말할 통로는 한 줄 `stage`와 끝의 `toolCounts`(개수)뿐이라 「무슨 도구로 무엇을」이 비어요.
+- 표준 통로가 없어요. MCP 진행 알림은 서버가 클라이언트의 요청에 진행을 알리는 방향이라 서버인 oort가 에이전트의 진행을 받을 수 없어요. ACP의 `session/update`는 하네스(`momo-workd`)가 소비하지만 원격 호스팅 run에는 없어요. 그래서 통로는 도구 호출 하나, 곧 이미 있는 `oort_run_event`의 스키마 확장이에요. 새 도구·새 scope·MCP Tasks 연동은 이 증보도 만들지 않아요(D6 유지).
+- 모양은 ACP를 따라요: 도구 호출 한 건이 한 행으로 제자리에서 상태가 바뀌고, 계획은 통째로 교체돼요. 닫힌 종류와 짧은 라벨만 받고 명령·경로·제목·생각은 받지 않아요. 외부 규격 본문은 이번에 새로 조회하지 않았고 우리 코드(`momo-workd` 투영)가 닫아 둔 어휘를 근거로 삼았어요(`runtime-unverified`).
+
+### 7-0. 확인한 사실 [V]
+
+| id | 사실 | 근거 |
+|---|---|---|
+| F1 | `oort_run_event` 입력은 `leaseHandle`(필수), `status`(running·thinking·streaming·cancelled, 생략하면 running), `detail`(2,048바이트, 감사 전용), `textDelta`(8,192바이트, 릴레이만), `eventId`(UUID), `stage`(최대 320바이트)이고 `additionalProperties:false`라 모르는 키는 거절돼요 | `momo-mcp/src/tools.rs` `run_event_schema`, `agent_gateway.rs` `normalized_event_status` |
+| F2 | `stage`는 서버가 1~80 **글자**(앞뒤 공백 제거), 제어·보이지 않는 글자·방향 글자(`is_unsafe_char`), `/`·`\` 금지로 검증해요. SQL 백스톱은 같은 규칙의 부분집합(`agent_run_event_stage_ck`). 지시문 규약은 「40자 안팎」이고 화면이 40자에서 줄여요. 맞지 않으면 호출 **전체**를 거절하고(`InvalidArguments`), lease가 살아 있을 때만 감사 행(`agent.run.report_rejected`, 코드 `stage_invalid`, 글 없음)을 남겨요 | `momo-t3` `validated_stage_markers`·`bounded_text`, 마이그레이션 114·128, `agent_port_tools.rs` run_event |
+| F3 | 원장 `agent_run_event`는 kind 14개(128·132·133)이고 추가 전용으로 쓰여요(코드가 UPDATE하지 않아요). DELETE는 trim 함수에만 있어요. run당 200행 상한은 `agent_run_event_trim`이 가장 오래된 `stage`부터(그다음 `claimed`) 지우고, `tool_call`은 세지도 지우지도 않아요(T3). `seq`는 전역 시퀀스라 클라이언트에 내보내지 않아요 | 128·133, `run_event.rs` |
+| F4 | D2: 「자유 텍스트를 새로 저장하지 않는다. `stage`(≤80자, 기존 검증)와 닫힌 `code`뿐이다」. `stage`는 `output.stages`(12개)에도 쓰이고 그때마다 `step_count`를 올려요(`LEAST(step_count+1, max_steps)`) | D2, `agent_gateway.rs` `record_stage_in_tx` |
+| F5 | `GET …/agent-runs/{run}/events?include=`는 닫힌 쉼표 집합 `{doorbell, tools}`이고 그 밖은 400이에요. 원장을 통째로(커서·원시 seq 없음) 오래된 순으로 읽고 상한은 200(`tools`면 +100)이에요. 응답은 `events[{ordinal, kind, stage, code, approvalId, actorMemberId, tool, durationMs, createdAtMs}]`와 `tools`일 때 `toolTally`·`toolCallRowsCapped`예요. `ordinal`은 그 읽기 안의 순번이에요 | `agent_runs.rs` `parse_run_event_include`, `run_progress.rs` `list_run_ledger_in_tx` |
+| F6 | TS 파서는 모르는 kind를 `unknown` 한 줄로 받고(#3824) 응답의 모르는 최상위 키·행 키를 무시해요. 그 전에 배포된 클라이언트는 모르는 kind가 있으면 원장 전체를 거부해요. `fetchAgentRunEvents`는 `include=doorbell`만 보내고 400이면 쿼리 없이 한 번 더 읽어요. 이 트리에는 `include=tools`를 읽는 코드가 없어요 | `packages/momo-core/src/lib/api.ts`, openapi `AgentRunEvent.kind` 설명 |
+| F7 | 원장 INSERT마다 얇은 프레임 `agent.run.event {run_id, channel_id, kind}`(글·순번 없음)이 같은 tx의 outbox로 채널 토픽에 나가요. `stage` 행은 직전에 **프레임이 나간** `stage` 행에서 2초 안이면 프레임을 내지 않아요(`framed=false`, BEFORE INSERT 트리거). `tool_call`은 늘 `framed=false`예요. 클라이언트는 프레임을 받으면 원장을 통째로 다시 읽어요 | 130·133 |
+| F8 | 쓰는 길: Agent Port `oort_run_event` → `record_gateway_event_in_tx`(run 행을 `FOR UPDATE`로 잠근 안). 같은 `eventId` 재전송은 `run_event_recorded`로 일찍 끝나고 승인 대기·종결 run은 409예요. 원장에 `stage`를 쓰는 것은 `hosted_lease`일 때뿐이에요. running·thinking·streaming 호출(status 기본값이 running이라 사실상 모든 호출)이 `mark_run_started_in_tx`로 `agent_run.updated_at`을 올리고(스톨 스위프 입력) 감사 행 `agent.gateway.status`를 남겨요(`detail`·`event_id`·`text_delta_bytes`, 단계 글은 없음) | `agent_gateway.rs`, `run.rs` `mark_run_started_in_tx`, `momo-outbox` `stalled.rs` |
+| F9 | run 읽기의 `last_event_at`(「마지막 보고」)은 `doorbell_rung`을 뺀 모든 원장 행의 최대 시각이에요. 행을 안 쓰는 호출(`status:"running"`만, 접힌 `stage`)은 올리지 않아요(`updated_at`·liveness는 올라요) | `run_progress.rs` `progress_select_sql` |
+| F10 | 하네스 투영(`momo-workd`)은 ACP `tool_call`의 **kind만**(제목 제외)과 `plan`(≤50항목×500자, 상태 pending·in_progress·completed)을 세션 이벤트로 싣고, 생각 조각은 이벤트 예산(분당 240) 때문에 일부러 버려요. ACP `ToolKind`는 read·edit·delete·move·search·execute·think·fetch·switch_mode·other 열 개예요 | `bins/momo-workd/src/projection.rs` |
+| F11 | 끝 보고 `artifacts.toolCounts`는 `run·edit·read·search·web·other` 여섯 키(각 0~100,000, 「에이전트 보고」)예요. 형식이 틀린 `artifacts`는 완료 전체를 거절하고 `error.data{field, rule}`로 어느 칸인지 알려 줘요(C3). 같은 방식의 상세가 `oort_expression_assemble`에도 있어요(ADR-0218 G3.8, 닫힌 인자 이름). 그 밖의 도구와 `oort_run_event`의 거절은 상세 없는 평범한 `invalid tool arguments`이고 시험이 그렇게 못 박아요 | ADR-0162 증보 5 C2·C3, `tools.rs` `ArtifactViolation`·`InvalidAssembleParams`·`only_artifacts_faults_carry_detail` |
+| F12 | 도우미(ADR-0201 v3) B5-7은 작업 모드 진행을 워커가 원장에 직접 쓰고 #4655·#4656이 들어오면 같은 어휘(종류 7개·`plan` ≤12·글 ≤60자)를 쓴다고 정했어요. B5-2는 서버 내부 표 `team_ai_task`에 계획(≤8항목)을 따로 둬요. 도우미의 읽기 도구 `get_agent_run`은 `RunEventInclude::default()`로 원장을 읽어 단계 이름만 모델 문맥에 넣어요. 원장의 수명주기 행(트리거)과 진행 목록 읽기는 호스팅 에이전트 run만 다루지만 `…/events` 읽기는 호스팅 여부를 보지 않아요 | ADR-0201 v3 B5-2·B5-7·B12·F12, `team_ai_tools.rs`, 128 `agent_run_event_is_hosted`, `run_progress.rs` |
+| F13 | 지시문 현행: `oort_run_event` 설명 「at least every five minutes」, 루틴 §3.3.17.4 c) 「시작 보고는 깬 뒤 10초 안(하드 한도 60초)·단계마다·최소 5분마다」, D5 1번 「60초 안」·3번 「최소 5분마다」. `HOSTED_ROUTINE_TEMPLATE`에는 박자 문장이 없고, `AGENT_CONVERSATION_PREAMBLE` 규칙 7은 「`oort_run_event` stage를 보낼 수 있으면 그렇게」예요 | `tools.rs`, `SELF_HOST_AGENT.ko.md`, `presets.ts`, `mention.rs` |
+
+**F5 증보 (2026-11-01, #5007) — 이벤트 장부의 승인 관련 필드.** F5의 응답 행 중 승인에 속한 필드 셋, `approvalId`·`actorMemberId`·`code`(`approval_requested`는 요청한 에이전트, `approval_decided`는 결정한 사람과 결과)는 ADR-0186 R-f가 `AgentRunProgress.approvalId`·`bundle`에 적용한 규칙과 같은 규칙을 따라요: **승인이 올라온 방의 활성 멤버에게만** 나가요(그 방은 run의 방과 달라도 돼요). 규칙 밖 사람에게는 승인 id가 있는 행에서 이 셋이 **함께** 빠지고, 행 자체(`ordinal`·`kind`·`createdAtMs`)·순서·행 수는 그대로예요. 승인 id가 없는 행(예: 종결 행의 `code`)은 건드리지 않고, 승인의 방을 알 수 없는 id(승인 행이 없거나 다른 워크스페이스 것)는 아무에게도 안 나가요. 판정은 `approval_is_named_to_viewer` 한 함수와 `visible_channels_in_tx` 한 조회예요(run 진행·`bundle`·장부가 같이 써요). 도우미 읽기 도구 `get_agent_run`(F12)은 `approval`을 읽지 못해 방을 판정할 수 없으므로, 승인 id가 있는 행의 `code`를 단계 줄에 싣지 않아요. 새 열·새 권한·migration이 없고 새 ADR 번호는 만들지 않아요.
+
+### 7-1. 어휘 — 종류 일곱, 상태 넷, ACP 표
+
+- **종류(`kind`) 일곱**: `run`(명령 실행) · `edit`(파일·자료 바꾸기) · `read`(읽기) · `search`(검색) · `web`(웹 요청) · `other`(그 밖) · `delegate`(다른 에이전트·하위 봇에게 맡기기). 앞의 여섯은 `toolCounts` 범주와 낱말·뜻이 같고(F11) `delegate` 하나가 더해졌어요. 표시 낱말은 클라이언트 i18n 사전의 몫이고 서버는 닫힌 토큰만 다뤄요.
+- **상태(`status`)**: ACP 철자를 그대로 써요. 활동은 `in_progress` · `completed` · `failed`, 계획 항목은 `pending` · `in_progress` · `completed`예요. 같은 낱말이 두 칸에서 같은 뜻이라 에이전트가 어휘를 둘 외울 필요가 없고, 계획은 하네스 경로(F10)와 같은 철자라 화면이 계획 블록 하나로 그릴 수 있어요. 「시작 전」인 활동은 없어요(에이전트는 하기 전의 일을 알리지 않아요).
+- 끝 보고 `artifacts.toolCounts`는 **바꾸지 않아요**(여섯 키, 7-Q3). 끝의 자기 보고 합계와 진행 중 활동 합계는 서로 다른 자기 보고라 맞춰 보지 않고(안 맞아도 오류가 아니에요) 읽는 쪽이 한 줄에 섞지 않아요. `delegate` 합계는 활동 합계에만 있어요.
+
+| ACP `ToolKind`(F10의 열 가지) | oort `kind` | 비고 |
+|---|---|---|
+| `read` | `read` | |
+| `edit` | `edit` | |
+| `delete` · `move` | `edit` | 파일을 지우거나 옮기는 것도 바꾸는 일이에요 |
+| `search` | `search` | |
+| `execute` | `run` | |
+| `fetch` | `web` | |
+| `think` · `switch_mode` | `other` | 생각은 저장하지 않아요(7-4). 도구 호출의 제목을 라벨로 옮기지 않아요 |
+| `other` | `other` | |
+| (원천 없음) | `delegate` | ACP에는 위임 종류가 없어요. 에이전트가 하위 봇·자식 run에 맡길 때 스스로 보고해요(D5 4번 「위임:」 stage의 활동판) |
+
+ACP 상태는 `pending` → 보내지 않아요 · `in_progress` → `in_progress` · `completed` → `completed` · `failed` → `failed`예요. ACP 계획 항목 `{content, priority, status}`는 `{text, status}`로 옮기고 `priority`는 버려요.
+
+- 이 표가 쓰이는 곳은 둘이에요. (a) ACP를 쓰는 어댑터(Hermes X1, 관리형 워커 E4)가 같은 어휘로 접을 때. (b) UXUI가 하네스 세션 경로(`tool_call_name`에 열 가지)와 원장(일곱)을 한 아이콘 표로 그릴 때. 하네스 세션 경로 자체는 이 증보가 바꾸지 않아요.
+- **서버는 줄이거나 고쳐 주지 않아요.** 어댑터가 라벨(40자)과 계획 글(60자)을 서버 규칙에 맞추고(제목을 옮기지 않고 종류만 보내도 돼요), 맞출 수 없으면 그 항목을 보내지 않아요. 서버가 조용히 자르면 거절 대신 조용한 변조가 되기 때문이에요.
+
+### 7-2. 보고 모양 — `oort_run_event`에 선택 필드 둘
+
+```
+oort_run_event {
+  leaseHandle, status?, detail?, textDelta?, eventId?, stage?,       // 지금 그대로
+  activities?: [ ≤8 ]  { id, kind, label?, status, n? },             // 새 칸
+  plan?:       [ ≤12 ] { text, status }                              // 새 칸
+}
+```
+
+| 칸 | 규칙 | 숫자 |
+|---|---|---|
+| `activities[].id` | 필수. 이 run 안에서 한 활동을 가리키는 뜻 없는 번호 이름(`a1`·`r2`). 글자는 `A-Z a-z 0-9 _ -`만. 읽는 사람에게 그대로 보여요(7-3) | 1~32자 [추정] |
+| `activities[].kind` | 필수. 7-1의 일곱 | 닫힘 |
+| `activities[].label` | 선택. 하는 일의 이름(7-3). 없으면 화면이 종류 낱말을 써요 | 1~40자 (Q1) |
+| `activities[].status` | 필수. `in_progress` · `completed` · `failed` | 닫힘 |
+| `activities[].n` | 선택. 그 항목이 묶은 일의 수(「읽기 12」). 생략하면 1 | 1~100,000 (`toolCounts`와 같은 천장 `MAX_REPORTED_COUNT`) |
+| `plan[].text` | 필수. 계획 한 단계의 이름 | 1~60자 |
+| `plan[].status` | 필수. `pending` · `in_progress` · `completed` | 닫힘 |
+| 개수 | 호출당 `activities` ≤8, `plan` ≤12 | [추정] |
+
+- `activities`는 **변화분**이고 항목은 그 id의 **전체 상태**예요: 적은 id의 상태만 쓰고 적지 않은 id는 그대로예요. 칸을 빼면 빠진 값으로 써요(`n` 생략은 1, `label` 생략은 라벨 없음). 한 호출 안에서 같은 id가 두 번이면 뒤의 것이 이겨요. `plan`은 **통째 교체**예요: 있으면(`[]`은 비움) 그 계획으로 바뀌고 없으면 그대로예요.
+- 한 호출에 `stage`·`status`·`activities`·`plan`을 같이 보낼 수 있고(권장: 단계 경계마다 한 번에, 7-5) 한 트랜잭션이라 전부 쓰이거나 전부 거절돼요. `activities`·`plan`만 든 호출도 `status` 기본값이 `running`이라 지금 규칙대로 `agent_run.updated_at`을 올려요(F8).
+- **능력 감지.** 옛 서버는 모르는 키를 거절해요(F1). 에이전트는 `tools/list`의 `oort_run_event` 스키마에 `activities`가 보일 때만 두 칸을 보내요(결과 칸 `resultKind`와 같은 규칙, SELF_HOST_AGENT §3.3.17.4 d).
+- **거절.** 호출 전체를 거절해요(-32602, 쓰기 0, lease 유지). 형식은 트랜잭션 밖에서 두 겹으로 판정해요: 스키마 겹(`validate_arguments`: 형·enum·필수·개수·바이트 길이·모르는 키)과 문자 겹(핸들러: 글자 수·금지 글자, 7-3). JSON-RPC `error.data`에 C3 모양의 닫힌 설명 `{field, rule, index?}`를 실어요: `field`는 `activities` · `activities.id` · `activities.kind` · `activities.label` · `activities.status` · `activities.n` · `plan` · `plan.text` · `plan.status` 중 하나, `rule`은 `enum` · `required` · `forbidden` · `range` · `format`, `index`는 몇 번째 항목인지(0부터, 위치라서 새 정보가 아니에요). 보낸 값은 되돌려 싣지 않고 로그·감사에도 없어요. lease가 살아 있을 때만 거절 감사 행(`agent.run.report_rejected`)에 닫힌 `reason`(`activities_invalid` · `plan_invalid`)·`field`·`rule`·몇 번째 거절인지를 남겨요(`stage_invalid`와 같은 경로). 이를 위해 `ToolFailure` 변종 하나를 더해요(`InvalidArtifacts`·`InvalidAssembleParams`와 같은 방식. `field`는 위 닫힌 목록에서만 고르고 호출자 글은 타입으로 막혀요). 「상세는 닫힌 목록의 위반에만」을 못 박는 시험 `only_artifacts_faults_carry_detail`(F11)은 지금 `oort_run_event`의 거절에 상세가 없음도 단정하므로, 이 증보가 새 칸에 한해서만 의도적으로 바꿔요(최상위의 모르는 키·`leaseHandle` 위반은 계속 평범한 거절, 7-S1).
+- **재시도 규칙(도구 설명과 루틴에 적어요).** ① 같은 `leaseHandle`로 지적된 칸만 고쳐 다시 보내요(거절된 호출은 기록되지 않으니 같은 `eventId`를 써도 돼요). ② 고쳐 보내기는 최대 2번. ③ 그래도 거절되면 `activities`·`plan` 없이 `stage`·`status`만 보내요. **생존·진행 보고가 새 칸에 매이지 않아요.**
+- **쓰는 곳.** 호스팅 lease의 Agent Port 호출뿐이에요(F8). REST gateway 콜백은 늘리지 않아요(#4647). 도우미 워커 같은 서버 안 기록자는 도구를 거치지 않고 같은 함수를 불러요(7-6, 7-10).
+- **종결된 run은 쓰지 않아요.** 종결 run이 받는 유일한 이벤트인 `cancelled` 확인 호출에 든 `activities`·`plan`은 형식이 맞으면 `stage`와 같이 버려요(쓰기 0, 거절 아님. 승인 대기·그 밖의 종결 run은 지금처럼 409).
+- **쓰지 않는 곳.** `output.stages`·`step_count`(`record_stage_in_tx`를 타지 않아요. 60초 박자에 `max_steps`가 먼저 차지 않게요), 감사 `detail`(감사 행 `agent.gateway.status`에는 활동·계획 **글 없이 개수만**), 알림·푸시.
+
+### 7-3. 글 규칙 — D2 「자유 텍스트를 새로 저장하지 않는다」 문장을 이 범위에서 바꾼다
+
+- **바뀌는 문장.** D2의 「자유 텍스트를 새로 저장하지 않는다. `stage`(≤80자, 기존 검증)와 닫힌 `code`뿐이다」는 이 범위에서 이렇게 읽어요: **에이전트가 쓴 일반 텍스트 열은 `stage`(≤80자) · 활동 `label`(≤40자) · 계획 `text`(≤60자) 셋이고, 셋 모두 같은 문자 규칙을 지난다.** 여기에 **식별자 `activity_id`**가 하나 더 있어요. 행을 제자리에서 갱신하고 접는 안정 키라 있어야 하고, 가장 좁은 닫힌 글자(`A-Za-z0-9_-`, ≤32자)만 받지만 채널 멤버에게 **그대로 보여요**. 그 안에 파일 이름·토큰 조각이 들어갈 수 있으므로 「글 열 셋 + 식별자 하나」로 세고, 같은 한계와 방어(아래)를 적용해요. `detail`은 여전히 감사 전용이고 `textDelta`는 저장하지 않아요.
+- **문자 규칙은 한 함수예요.** 앞뒤 공백을 지우고 글자 수로 1~상한, 제어 글자·보이지 않는 글자·방향 글자(`is_unsafe_char`) 금지, `/`·`\` 금지예요. 지금 `validated_stage_markers`는 상한 80이 상수라서 **길이를 인자로 받는 한 함수로 일반화**해 `stage`·`label`·`text`가 같은 코드를 지나게 해요(복사 금지, D2의 「검증 함수 재사용」과 같은 원칙). SQL 백스톱 CHECK도 `work_session_share_stage_markers_ok`의 문자 식을 길이 인자만 달리한 함수로 써요(Rust 규칙이 SQL 규칙의 상위집합이라 CHECK가 먼저 걸리지 않아요, 128과 같음). 도구 스키마의 `maxLength`는 바이트 단위라 글자 상한의 4배 봉투예요(label 160, text 240, id 32). `pattern`을 이 검증기가 집행하지 않으므로(`tools.rs` 주석) `id`의 글자 제한은 어댑터가 집행해요.
+- **정직한 한계.** 서버는 글자 종류와 길이만 보고 뜻은 못 봐요. 슬래시 없는 명령(`npm test`)·파일 이름·커밋 제목·비밀 토큰은 이 규칙으로 못 막아요(`id`는 글자가 더 좁을 뿐 `sk-abc123` 같은 조각은 실을 수 있어요). 방어는 겹겹이에요: ① 짧은 상한(40·60·32) ② 닫힌 종류 ③ 도구 설명·루틴의 금지(명령·경로·파일 이름·커밋 제목·요청 문구·비밀·추론을 쓰지 않는다. `id`는 뜻 없는 번호 이름) ④ 읽는 쪽이 「에이전트 보고」(믿지 않는 일반 텍스트)로 표시하고 이스케이프 ⑤ 청중이 `stage`와 같음(7-8) ⑥ 감사·푸시·기억·검색에 안 들어감(7-8). 하네스의 자격증명 마스킹(`redact_credentials`)을 서버 검증에 더할지는 이번에 넣지 않아요. 「stage와 같은 방어」가 결정이고 공유 crate로 옮기는 일이 따로 필요하며, 검증 함수가 한 곳이라 나중에 `stage`와 함께 조일 수 있어요(7-Q4). [확인 필요: 7-S2의 독립 보안 검수가 이 갈래를 정한다(`id` 포함)]
+- **`stage`의 서버 상한은 80으로 유지해요.** ADR-0186 증보 R-f와 `docs/design-system/agent-request-loop.md` §3.2가 「40으로 줄일지는 #4655가 `activities[].label ≤40`과 한 번에 정한다」고 미뤘고 여기서 닫아요(7-Q2). 줄이지 않는 이유: 배포된 루틴이 「40자 안팎」이라 41~80자 `stage`가 이미 나가고, 줄이면 그 호출이 거절돼 생존 신호까지 잃어요. 지시문 규약(40자)과 화면의 40자 줄임은 그대로예요. 새 칸(`label` 40·`text` 60)은 호환 부담이 없어 처음부터 좁게 시작해요.
+- **`label`은 선택이에요.** 어댑터(ACP를 접는 Hermes·관리형 워커)가 제목을 옮기지 않고 종류만 보낼 수 있게요(하네스의 「종류만」 선과 같아요). 라벨이 없으면 화면이 종류 낱말을 써요.
+
+### 7-4. 생각 — 저장하지 않아요 (Q2)
+
+- 어휘에 `think`가 없고 `thinking`은 run `status`일 뿐 글이 아니에요. ACP `agent_thought_chunk`는 어떤 어댑터도 옮기지 않고(하네스 투영이 이미 일부러 버려요, F10), ACP `think` 도구 호출은 `other`로 접되 제목을 라벨로 옮기지 않아요.
+- 에이전트가 줄 수 있는 현실적인 「생각」은 단계마다 한 줄 진행 메모, 곧 `stage`예요. `label`은 하는 **일의 이름**이지 생각이 아니에요. 서버가 둘을 가를 수 없으니 도구 설명과 루틴이 말해요(7-3의 한계).
+- `textDelta`는 그대로 릴레이 전용이에요. 스트림이 있을 때만 접힌 「생각 중」 행을 두는 것은 화면 몫이에요(`agent-request-loop.md` §3). 새 결정이 아니에요: D5 한계 문장과 ADR-0186 증보 R-a 2가 이미 같은 말을 해요.
+
+### 7-5. 보고 박자 — 시작 10초 · 단계 바뀔 때 · 진행 중 60초 (Q3)
+
+| 때 | 무엇을 | 지금(F13) | 이 증보 |
+|---|---|---|---|
+| 깬 뒤 | 시작 보고(`oort_job_start`의 stage) | 10초 안 권장, 60초 한도 | 같아요(말만 통일해요. 한도를 넘으면 화면은 「시작 보고 없음」 사실만 말해요) |
+| 단계·활동이 바뀔 때 | `stage`(+`activities`·`plan`) 한 호출 | 단계마다 | **즉시**, 한 호출에 묶어요 |
+| 일하는 동안 | 바뀐 것이 있으면 위 호출, 없으면 `status:"running"`만 | 최소 5분마다 | **최소 60초마다** |
+| 긴 명령이 도는 동안 | 보낼 수 없어요 | — | 서버는 「마지막 보고 n분 전」 사실만 말하고 추측하지 않아요 |
+
+- 박자는 **규약이지 서버가 강제하지 않아요.** 61초째에 서버는 아무것도 하지 않아요. 서버 임계값(D4의 20분·60분, D1-4의 2시간·24시간, 증보 3의 30분)은 그대로예요. 박자는 에이전트 지시와 화면 문구(「조용해요 · 마지막 보고 n분 전」)의 근거일 뿐이에요.
+- **묶어서 보내요.** 보고 호출은 모델 턴을 쓴다고 봐요 [추정]. 한 호출에 `stage`·`activities`·`plan`을 같이 보내고, 바뀐 것이 없는 박자에는 `status:"running"`만 보내요. 같은 활동을 같은 내용으로 다시 보내면 서버가 접어요(7-6).
+- **스크립트·타이머가 `running`을 쏘지 않아요.** 모델이 멈췄는데 「작업 중」이 서는 거짓이 돼요(D4-5의 `oort_ping`이 일 신호가 아닌 것과 같은 이유). 보고는 모델이 일하는 중에 직접 보내요. 서버가 가릴 수 없는 규약이에요.
+- 바뀌는 것은 `oort_run_event` 진행 박자 5분 → 60초 하나예요(D5 3번). `oort_ping`의 5분, 시작 보고 60초 한도, 서버 임계값은 이 증보가 바꾸지 않아요.
+- 비용(−): 진행 중 `oort_run_event`가 최대 5배가 돼 모델 턴·감사 행(`agent.gateway.status`)·T1 `tool_call` 100행이 더 빨리 차요(60초면 100분). T3 집계는 틀리지 않고 「처음 100개의 순서」가 보고 호출로 채워져요. 이 증보는 T2를 바꾸지 않아요(7-R).
+
+### 7-6. 저장·상한·실시간
+
+**원장 종류 둘.** `agent_run_event.kind`에 **`activity`**·**`plan`**을 더해요(14 → 16개, 새 마이그레이션이 `agent_run_event_kind_ck`를 바꿔요, 읽기는 `?include=activity` 뒤에서만, 7-7). 모양은 T1을 따라요: 새 열은 해당 종류 행에만 있고 CHECK가 「그 종류면 필요한 열이 모두 있고, 아니면 모두 없다」를 강제해요. `stage`·`code`·`approval_id`·`tool`·`duration_ms`는 두 종류에서 NULL이에요(`code`가 비어 있어 phase 판정에 새 어휘가 끼지 않아요).
+
+| 종류 | 새 열 | 비고 |
+|---|---|---|
+| `activity` | `activity_id`(글자 규칙 CHECK) · `activity_kind`(일곱) · `label`(NULL 허용, 문자 규칙 ≤40) · `activity_status`(셋) · `activity_n`(1~100,000) · `activity_started_at`(그 id의 첫 보고 시각) | 한 행 = 한 활동의 한 상태 |
+| `plan` | `plan`(jsonb 배열 ≤12, 항목 `{text, status}`, 문자 규칙 ≤60) | 한 행 = 그 시점의 계획 전체 |
+
+**쓰는 함수는 하나예요.** `momo-agent`의 `record_run_activity_in_tx`(와 SQL 함수 `agent_run_activity_record`)가 유일한 쓰기예요. Agent Port의 `record_gateway_event_in_tx`(`hosted_lease`일 때, `GatewayEventInput`에 두 칸을 더해요)와 서버 안 기록자(도우미 워커, 7-10)가 같은 함수를 불러요. 같은 run의 기록자끼리만 직렬화해요(쓰기 접기·상한·합계가 읽고 쓰는 일이라서요. T1의 advisory lock과 같은 방식이고 128의 잠금 순환(M-A)을 만들지 않는지는 E2가 확인해요). [확인 필요] 이 함수를 부르는 DB 역할이 두 종류의 INSERT와 trim의 DELETE 권한을 갖는지도 E2가 확인해요.
+
+**세 겹으로 행이 폭증하지 않아요.**
+1. **쓰기 접기.** 같은 `activity_id`의 마지막 행과 (종류·라벨·상태·n)이 모두 같으면 행도 합계도 쓰지 않아요(`stage` 반복을 접는 규칙과 같아요). 60초마다 같은 `activities[]`를 다시 보내도 **바뀐 것만 행이 돼요**. `plan`도 마지막 계획과 같으면 접어요. `agent_run_event_append`의 `stage` 접기는 「마지막 행」을 볼 때 `tool_call`처럼 `activity`·`plan` 행도 **건너뛰어요**(안 건너뛰면 사이에 활동 행이 끼어 같은 `stage`가 매번 새 행이 돼요, 133이 `tool_call`에 한 것과 같아요).
+2. **추가 전용 + 읽기 접기.** 행은 고치지 않고 쌓아요. 읽기가 id별 **최신 행**만(`plan`은 최신 하나만) 내려요(7-7).
+3. **굴리는 상한.** run당 `activity` 행 **100개**, `plan` 행 **10개** [추정]. 넘으면 `agent_run_activity_trim`(활동을 쓰는 쪽만 부르는 trim 함수, DELETE는 여기에만 있어요)이 이 순서로 지워요: ① **대체된 행**(자기 id의 최신이 아닌 행)을 오래된 것부터 ② 없으면 **끝난 활동**(`completed`·`failed`)의 최신 행을 오래된 것부터 ③ 그것도 없으면 **진행 중** 활동을 오래된 것부터(폴백). ①이 먼저라서 지워도 읽기 결과가 달라지지 않고, ②③은 그 id가 목록에서 통째로 빠져요(앞 순서가 비어야 뒤로 가므로 한 id의 옛 행만 남아 되살아나는 일이 없어요). `plan`은 모두 최신에 대체된 행이라 가장 오래된 것부터 지워요. `stage`·수명주기·`tool_call` 행은 이 trim이 세지도 지우지도 않아요. 거꾸로 200행 trim도 `activity`·`plan`을 세지 않아요(`kind NOT IN ('tool_call','activity','plan')`. 안 빼면 활동 양이 `stage` 행을 밀어내요).
+- **왜 굴리나.** 60초 박자에 보고 하나가 활동 1~4개면 100행이 25~50분 안에 차요. T3처럼 「넘으면 쓰지 않는다」면 긴 run의 「지금 무엇을 하나」가 굳고 처음 100개만 남아요. 이 기능의 목적이 「지금」이라서 최신 창이 맞아요. **서버가 잰 사실은 지우지 않고(T3 `tool_call`) 에이전트 자기 보고는 최신 창을 굴려요(D2 「초과하면 가장 오래된 `stage` 행부터 지운다」).** 새 원칙이 아니라 D2와 T3 두 문장을 그대로 읽은 거예요(T3도 「`stage`·`claimed`를 지우는 동작은 그대로다」라고 범위를 좁혔어요). 「행을 지우지 않는다」가 원장 전체의 원칙이었다면 이 문단과 7-A7을 T3 방식(넘으면 행 대신 집계)으로 바꿔요(7-Q1).
+- **`activity_started_at`.** 대체된 행이 지워져도 한 활동의 시작 시각이 남게 모든 행이 첫 보고 시각을 들고 가요(쓰는 함수가 같은 id의 마지막 행을 읽어 복사해요).
+
+**종류별 합계 표 `agent_run_activity_tally`**(새 테이블, `(workspace_id, run_id, kind)` PK, `completed_units`·`failed_units` bigint, RLS `ENABLE`+`FORCE` `ws_isolation`, `momo_app` GRANT). **값 = 각 활동 id의 *마지막* 보고가 끝난 값(`completed`·`failed`)일 때 그 `n`의 합**이에요. 같은 id를 다시 끝내면 앞의 값을 빼고 새 값을 더하고(`completed` → `failed`는 옮겨요) 다시 `in_progress`가 되면 빼요. 그래서 재전송·정정에 합계가 두 번 세어지지 않고 행을 지운 뒤에도 정확해요. 한계: 이미 지워진 id를 에이전트가 다시 끝내면 새 활동으로 세요. 이 합계는 **에이전트의 자기 보고 합**이지 oort가 센 사실이 아니에요.
+
+**보존.** 원장 행은 `agent_run`과 함께 지워지고(128의 run 삭제 트리거), 끝난 run은 `RUN_EVENT_RETENTION_DAYS`(30일) 뒤 보존 스윕이 지워요. 합계 표도 같은 수명이에요: 스윕의 읽기 절반(`workspaces_with_expired_run_events`)과 쓰기 절반(`delete_expired_run_events_in_tx`)에 이 표를 넣고 알림 역할에 SELECT를 줘요(133이 `agent_run_tool_tally`에 한 것과 같아요). run 삭제와의 연결은 128의 M-A(원장은 FK 없이 트리거)와 133(집계 표는 FK) 중 E2가 잠금 순환 없는 쪽을 골라요.
+
+**실시간.** 새 행도 같은 AFTER INSERT 트리거로 얇은 `agent.run.event` 프레임(`kind`만, 글·id 없음)을 같은 tx의 outbox로 내요. 2초 합치기는 `stage`·`activity`·`plan`이 **한 창을 나눠 써요**: 이 셋 중 직전에 **프레임이 나간** 행에서 2초 안이면 프레임을 내지 않아요(`framed=false`, BEFORE INSERT 트리거). 한 호출이 `stage`+`activities`+`plan`이면 프레임이 하나예요. 프레임은 재읽기 신호일 뿐이라(F7) 마지막 행이 프레임 없이 남을 수 있는 성질과 「active run은 타이머로도 다시 읽는다」는 클라이언트 규칙이 그대로예요.
+
+**`last_event_at`·스톨 입력.** `activity`·`plan` 행은 `last_event_at`에 **들어가요**(T5의 `tool_call`과 같은 이유로, 그 에이전트가 그 run에서 한 일이에요). 스톨 스위프 입력(`agent_run.updated_at`)은 새로 건드리지 않아요: 이미 모든 `oort_run_event`가 올려요(F8). 그래서 바뀐 게 없어 접힌 보고는 행도 `last_event_at`도 올리지 않지만 `updated_at`과 liveness는 올라요. 이 비대칭은 `status:"running"`만 보내는 지금의 하트비트와 같아요(F9). [확인 필요: T1 `tool_call` 100행이 차면 접힌 보고가 `last_event_at`을 못 올려 화면이 「n분째 보고 없음」으로 틀릴 수 있어요. 60초 박자에서는 약 100분 뒤예요. E2가 「마지막 보고 수신 시각」을 run 읽기에 따로 줄지 정해요]
+
+### 7-7. 읽기 — `?include=activity` 뒤에서만
+
+- `GET …/agent-runs/{run}/events`의 `include`가 닫힌 쉼표 집합 `{doorbell, tools, activity}`가 돼요(`include=doorbell,tools,activity` 가능). 모르는 값은 지금처럼 400이고 메시지가 세 값을 말해요. **`include`에 `activity`가 없으면 `activity`·`plan` 행은 한 줄도 나가지 않아요**(`RunEventInclude`에 `activity` 필드를 더하고 `Default`는 꺼짐). 이 기본값이 도우미의 읽기 도구 `get_agent_run`(F12)이 에이전트가 쓴 라벨·계획 글을 읽지 않는 것을 보장해요. 읽게 하려면 ADR-0201의 청중·오염 규칙(B4-3)과 함께 따로 결정해요.
+- 이유: 그 전에 배포된 맥·폰은 모르는 kind가 있으면 원장 전체를 거부하고(F6), `doorbell`·`tools`와 같은 문으로 맞추면 구 서버의 400 폴백(새 클라이언트가 쿼리 없이 한 번 다시 읽고 「활동 기록은 서버 업데이트 뒤에 보여요」)과 상한·정리 규칙을 한 곳에서 다뤄요.
+- 응답: `events`에 새 행이 **종류로 구분돼 같은 시간 순서로** 들어와요(`stage`도 에이전트 보고이면서 `events`에 있어요). 새 종류의 행은 읽기에서 접혀 있어요: `activity`는 id별 **최신 행 하나**, `plan`은 **최신 하나**예요. 행 모양은 `kind:"activity"`면 `activity:{id, kind, label?, status, n, startedAtMs}`(`createdAtMs`는 마지막 갱신 시각), `kind:"plan"`이면 `plan:[{text, status}]`예요. 그 밖에 `activityTally:[{kind, completed, failed}]`와 `activityRowsTrimmed: bool`(합계가 지금 보이는 끝난 행의 `n` 합보다 크면 true. 일부는 합계로만 남았다는 뜻이고 `toolCallRowsCapped`와 같은 쓰임)이 `include=activity`일 때만 실려요. 행 수 상한은 `200 + (tools면 100) + (activity면 100 + 1)`로, 새 종류는 자기 상한이 있어 오래된 순 `LIMIT`에 잘리지 않아요.
+- `ordinal`은 그 읽기 안의 순번이에요(키로 쓰지 않아요, 지금 규칙 그대로). 시간순은 `startedAtMs`와 `createdAtMs`로 그려요.
+- **목록·진행 읽기(`…/agent-runs/progress`, 채널·에이전트 run 목록)에는 활동·계획을 싣지 않아요.** 요약 필드(`latestActivity`·`planProgress`)가 레일·독에 필요한지는 UXUI가 쓰는 모양을 보고 별도 증보로 정해요. 그때까지 레일·독은 보이는 run에 대해 `…/events?include=activity`를 읽어요.
+- **읽는 쪽이 지킬 규칙(UXUI 슬라이스, 서버는 사실만 줘요).** ① `activity`·`plan` 행은 항상 「에이전트 보고」 꼬리표와 함께, 일반 텍스트로 이스케이프해 그리고 서버가 잰 줄(`tool_call`·`claimed` 등 「oort 기록」)과 한 칸에 섞지 않아요(ADR-0162 증보 5 C1의 `agentReported`와 같은 원칙). ② 종결된 run의 `in_progress` 활동은 진행 중으로 그리지 않아요(「끝 보고 없음」. 서버는 상태를 바꾸지 않아요, 원장은 사실의 기록이에요). ③ run이 조용하면(서버 liveness·`last_event_at`) 진행 표지를 걷고 「마지막으로 확인된 상태」로 말해요(D1 「클라이언트 TTL 금지」). ④ 재읽기는 프레임 합치기와 맞춰 2초 이상 간격으로 해요. ⑤ `label`이 없으면 종류 낱말이에요.
+- 반영 자리: `docs/api/openapi.yaml`의 `include` 쿼리 설명·`AgentRunEvent.kind` enum(16)·`AgentRunEvent.activity`·`plan`·`AgentRunEventsResponse.activityTally`·`activityRowsTrimmed`, 그리고 계약 게이트(`scripts/verify_openapi_contract_rust.sh`).
+
+### 7-8. 가시성·노출
+
+- **누가 읽나.** run의 채널의 **읽는 시점의 활성 멤버**예요(D3·D13과 같은 한 SQL, `left_at IS NULL`). DM run은 그 DM의 두 사람이에요. 멤버 아님·없는 run·다른 테넌트는 모두 같은 404라 존재 오라클이 없어요. 워크스페이스 관리자라도 그 채널 멤버가 아니면 못 읽어요. 읽는 사람별로 거르는 것은 조회(REST)가 해요: 프레임은 글도 id도 싣지 않아요.
+- **새로 보이는 것.** 전에는 채널 멤버가 에이전트가 쓴 글을 `stage` 한 줄씩(≤80자)만 봤어요. 이제 활동 라벨(≤40자)·계획 항목(≤60자)·활동 식별자(≤32자, 닫힌 글자)도 봐요. 글 열이 둘과 식별자 하나 늘고 양도 늘지만(run당 활동 ≤100행·계획 ≤12항목), **같은 청중·같은 문자 규칙·같은 「믿지 않는 일반 텍스트」 등급**이에요. 새 청중은 없어요.
+- **어디에도 복사하지 않아요.** 감사 행은 개수만(7-2), 푸시·인박스·알림 판정에 안 들어가고, 메시지 본문·검색·기억 색인이 원장을 읽지 않아요(7-A12가 표지로 확인해요). outbox 프레임은 `kind`만이에요.
+- **다른 에이전트·모델에게.** 외부 에이전트는 원장을 읽지 않아요(사람 REST). 도우미의 읽기 도구는 기본 `include`로 읽어 이 글을 보지 않아요(7-7). 라벨·계획은 어느 모델 문맥에도 들어가지 않아요.
+
+### 7-9. 도구 설명·지시문 갱신 범위 (#4622 합본)
+
+#4622(증보 5)가 이미 고친 자리에 낱말을 더하는 일이라 같은 표를 따라요. **권위 있는 자리는 도구 설명이에요**: `tools/list`는 에이전트가 깰 때마다 읽는 유일한 사본이고, 루틴 문구는 owner VM에 복사된 사본이라 낡아요(결과 칸의 기능 감지 선례). 도구 설명과 스키마는 같은 PR에서 바꿔요(광고와 수용이 어긋나지 않게).
+
+| 자리 | 바꾸는 것 |
+|---|---|
+| `server-rust/crates/momo-mcp/src/tools.rs` `oort_run_event` 스키마·설명 | `activities`·`plan` 칸(7-2). 설명: 「at least every five minutes」→ 60초, 단계 경계마다 한 호출에 묶어 보내요, 종류 일곱과 `n`, 라벨은 일의 이름이지 명령·경로·파일 이름·커밋 제목·요청 문구·비밀·추론이 아니에요, `id`는 뜻 없는 번호 이름이고 파일 이름·비밀을 쓰지 않아요, 끝낸 활동은 `completed`·`failed`로 닫아요, `plan`은 전체를 보내요, 스크립트·타이머로 `running`을 쏘지 않아요, 거절되면 7-2의 재시도 규칙 |
+| `docs/SELF_HOST_AGENT.md`·`.ko.md` §3.3.17.4 c)와 §3.3.17.4a 표 | 박자 5분 → 60초, 기능 감지(스키마에 `activities`가 보일 때만), 재시도 규칙, `oort_run_event` 행에 두 칸 |
+| `packages/momo-core/src/features/hostedAgents/presets.ts` `HOSTED_ROUTINE_TEMPLATE` | 한 문장: 한 호출에 묶어 60초마다(기능 감지 조건 포함) |
+| `server-rust/crates/momo-agent/src/mention.rs` `AGENT_CONVERSATION_PREAMBLE` | 규칙 7의 「`oort_run_event` stage」 옆에 `activities`·`plan`(가능하면) 한 낱말 묶음. 관리형·Hermes·팀 AI는 도구가 없으니 의미는 같아요(진행을 대화에 중계하지 않는다) |
+| 시험 | 규칙마다 **핵심 낱말 집합**이 그 자리 안에 모두 있는지 보고 낱말을 하나씩 지워 빨개지는지 스스로 확인해요(증보 5의 방식). `agent_conversation_rules.rs`·`presets.test.ts`·도구 설명 시험 |
+
+- 증보 5 규칙 7~10과 모순이 없어요: 「진행은 stage로, 대화로는 아니다」(7)는 그대로고 `activities`는 `stage`를 **대체하지 않아요**(`stage`는 단계의 이름, `activities`는 그 단계 안에서 한 일의 종류별 목록이에요). 「대화에는 결과·막힘·사람이 할 일만」(8)도 그대로예요: 활동 보고는 대화가 아니에요. 위임은 D5 4번의 `stage`(「위임: <봇> · <일>」)를 그대로 쓰고, 같은 호출에 `kind:"delegate"` 활동을 더해도 돼요.
+- 규약이지 보증이 아니에요(`runtime-unverified`, 증보 3 D16). 실제 모델이 박자·묶음·라벨 규칙을 따르는지는 `[manual]` 증거 전까지 카피에 「실시간」을 쓰지 않아요.
+- 이 슬라이스(7-S3)를 #4656에 합칠지 별도 이슈일지는 planner가 정해요.
+
+### 7-10. ADR-0201 증보 v3(Accepted 2026-11-01)와 맞춘 것
+
+작업 모드(B5)·진행 표시(#4968)가 같은 어휘를 쓰는 지점을 한 표로 맞췄어요. 어긋나면 이 증보가 어휘의 정본이고 0201은 인용해요.
+
+| ADR-0201 v3 | 이 증보 | 맞춤 |
+|---|---|---|
+| B5-7 「종류 run·edit·read·search·web·other·delegate, `plan` ≤12·글 ≤60자」 | 7-1·7-2 | 같은 숫자·낱말로 확정 |
+| B5-7 「워커가 원장에 직접 쓴다(`oort_run_event` 도구를 거치지 않는다)」 | 7-6 `record_run_activity_in_tx` | 도구 경로와 **같은 함수**: 같은 검증·접기·상한·합계예요. 둘이 다르게 조일 수 없어요 |
+| B5-2 `team_ai_task`의 계획(≤8항목, 서버 내부 상태) | 7-2 `plan`(≤12, 사람이 보는 계획) | **다른 값이에요.** 도우미는 내부 계획이 바뀔 때마다 보이는 계획을 같은 함수로 써요(8 ≤ 12라 상한 안). 내부 표는 읽는 API가 없어요(B5-2) |
+| B12 「쓴 양은 run 읽기 필드, `stage` 라벨에는 싣지 않는다」 | 7-2·7-6 | 활동·계획·라벨에 토큰·비용·검색 횟수 칸이 없어요. 쓴 양은 B12의 필드가 따로 말해요 |
+| B5-7 「채팅으로 진행을 중계하지 않는다」·「단계 사이 대기는 `phase=running`」 | 7-5, 증보 5 규칙 7 | 충돌 없음 |
+| F12 「`activities`·`plan`은 아직 들어오지 않았다」 | 7-S1 | 이 증보가 설계를 정해요. 구현은 #4656이고 #4968의 `activities`·`plan` 체크박스는 그 뒤예요(0201 B14-S5의 순서 그대로) |
+
+- **범위 [확인 필요].** 이 증보의 어휘·검증·읽기는 `…/events`가 읽는 원장 행에 붙어요(그 읽기는 호스팅 여부를 보지 않아요, F12). 그런데 원장의 수명주기 행(트리거)과 진행 목록 읽기는 **호스팅 에이전트 run만** 다뤄요(128 `agent_run_event_is_hosted`). 도우미는 관리형(호스팅 연결 없음)이라 B5-7의 `stage` 직접 쓰기와 이 증보의 활동 쓰기가 같은 문제를 가져요: 원장 쓰기·진행 읽기의 범위를 도우미 run으로 넓히는 일이에요. 이 증보는 범위를 넓히지 않고, ADR-0201 B14-S5(#4968)가 착수 전에 정해요.
+
+### 7-11. 바뀌는 것·바뀌지 않는 것·불변식
+
+- **바뀌는 기존 결정**(Accepted가 되면). ① D2의 「자유 텍스트를 새로 저장하지 않는다」(7-3). ② D2의 kind 어휘 14 → 16, `?include=activity` 뒤(7-6·7-7). ③ D5 3번 「최소 5분마다」 → 「최소 60초마다」, 1번은 말만 통일(7-5).
+- **바뀌지 않는 것.** D1~D4의 상태·대기열·생존 판정과 모든 임계값, 증보 3의 스위프, T1~T5(`tool_call`은 지우지 않고 200행 trim 밖), 증보 4·6, 증보 5의 규칙 7~10, `oort_ping`(5분)·시작 보고 한도(60초), `artifacts.toolCounts`(여섯 키), REST gateway 콜백, 하네스 세션 경로(`momo-workd`), 원장 범위(호스팅 run), 기본 `include`로 읽는 응답. 새 도구·새 scope·MCP Tasks 연동은 없어요(D6).
+- **불변식 대조.**
+  - REST send → channel_seq + message + outbox 단일 tx: 건드리지 않아요. 활동·계획 쓰기는 `record_gateway_event_in_tx`와 **같은 tx**에서 outbox 프레임과 함께 나가고, 클라이언트 직접 publish는 없어요. 순서는 `seq`, 재시도는 기존 `eventId` 멱등성이에요.
+  - 모든 테넌트 경로 `workspace_id` + RLS FORCE + tx마다 `SET LOCAL app.workspace_id`: 새 합계 표는 `ENABLE`+`FORCE`+`ws_isolation`이고 원장의 새 열은 같은 표의 같은 정책 아래예요. 쓰기 경로 BYPASSRLS 없음(기록자의 DB 역할은 7-6이 확인을 요구해요).
+  - `schema_v0.sql` 불변, 신규 migration으로 확장, sqlx 런타임 쿼리예요. 신규 테넌트 표는 RLS 정책 대상이에요.
+  - 공개 API(도구 스키마·읽기 응답·openapi) 변경 → 이 증보의 Accepted가 #4656 머지 조건이에요(ADR-0100).
+  - 에이전트는 `member.kind='agent'` 1급 멤버: 행의 `actor_member_id`가 그 에이전트예요.
+
+### 7-A. 수용 기준 — 구현이 내야 할 red proof (각 시험은 해당 분기를 지우면 실패해야 한다)
+
+| id | red proof | 지우면 실패해야 하는 것 |
+|---|---|---|
+| 7-A1 | `label`·`plan.text`에 `/`·`\`·제어·방향 글자가 있거나 41자·61자면 **호출 전체** 거절(-32602). `error.data`가 `{field, rule, index}`를 싣고 보낸 값은 응답·감사·로그 어디에도 없다. 쓰기 0(원장·합계·`output.stages`·`step_count` 불변). 정확히 40자·60자는 통과 | 문자 검사·길이 검사 각각, 거절 시 쓰기 0 |
+| 7-A2 | 9번째 활동·13번째 계획 항목·일곱 밖 종류·상태 밖 값·`id`의 밖 글자(점·슬래시·공백)·33자·모르는 키는 거절. `n`이 0·100,001이면 거절 | 닫힌 어휘·개수 상한 |
+| 7-A3 | 41~80자 `stage`는 지금처럼 통과, 81자는 거절(서버 상한 80 유지) | `stage` 상한이 줄지 않았음 |
+| 7-A4 | 한 호출이 `stage`+`activities`+`plan`이면 전부 쓰이고, `activities`가 거절되면 `stage`도 안 쓰인다. 같은 `eventId` 재전송은 행·합계·감사를 늘리지 않는다 | 한 트랜잭션·멱등 |
+| 7-A5 | 같은 id·같은 내용 반복은 행 0·합계 불변, 상태가 바뀌면 행 1. 읽기는 id별 최신 하나. 사이에 `activity`·`plan` 행이 끼어도 같은 `stage`는 접힌다 | 쓰기 접기·읽기 접기·`stage` 접기의 건너뛰기 |
+| 7-A6 | 합계: 같은 id를 `completed` n=5로 두 번 → 5, n=7로 정정 → 7(12 아님), `completed` → `failed`는 옮김, `in_progress`는 안 셈, 다시 `in_progress`가 되면 뺌 | 「마지막 끝난 값의 합」 정의 |
+| 7-A7 | 활동 행 100개를 넘기면 ① 대체된 행 ② 끝난 활동 ③ 진행 중 순서로 지운다. 진행 중 활동의 유일한 행은 끝난 활동이 남아 있는 동안 안 지워진다. 합계는 줄지 않고 `activityRowsTrimmed`가 켜진다. 지운 뒤에도 id별 최신 읽기가 옛 행을 되살리지 않는다 | 지우는 순서·합계 보존·되살림 없음 |
+| 7-A8 | trim 경계: 활동이 `stage`·수명주기·`tool_call` 행을 밀어내지 않고(200행 계산 밖), `stage` 201번째가 활동을 지우지 않는다 | `kind NOT IN` 술어 |
+| 7-A9 | 계획: 새 계획이 이전 항목을 모두 대체, 같은 계획 반복은 행 0, `[]`은 비움, `plan` 생략은 불변. 계획 행 11개째에 가장 오래된 행이 지워져도 읽기는 최신 하나 | 통째 교체·접기·행 상한 |
+| 7-A10 | 읽기 문: `include` 없으면 `activity`·`plan` 행 0, `include=doorbell,tools,activity`가 셋 다, 모르는 값 400, `RunEventInclude::default()`(도우미 읽기 도구 경로)에 0행, `activityTally`·`activityRowsTrimmed`는 `include=activity`일 때만 | include 필터·기본 꺼짐 |
+| 7-A11 | 가시성: 타 테넌트 읽기 0(합계 표도 두 테넌트 RLS), 채널 비멤버·DM 제3자·나간 멤버는 404, 존재 오라클 없음 | RLS·멤버 조건 |
+| 7-A12 | 노출 경계: 라벨·계획 글·`id`에 고유 표지를 넣은 run 뒤, 메시지·감사·outbox·푸시 후보·기억 입력의 모든 텍스트 열에서 그 표지가 `agent_run_event`(와 읽기 응답) **밖에 0회**이고 감사 행에는 개수만 있다. 푸시·인박스 0 | 복사하지 않음 |
+| 7-A13 | 실시간: 한 호출(`stage`+활동 8개+`plan`)이 프레임 1개(2초 창 공유), 프레임 JSON에 글·id 없음, 2초 뒤 다음 보고는 다시 프레임 | 창 공유·글 없음 |
+| 7-A14 | 생존·비용 경계: 활동만 든 호출도 `updated_at`을 올리고, 활동·계획은 `step_count`·`output.stages`를 안 건드린다(60초 박자 200번에도 `step_count` 불변). 종결·승인 대기 run은 409이고 활동 쓰기 0. `cancelled` 확인 호출에 든 형식이 맞는 `activities`·`plan`은 버려지고(쓰기 0, 거절 아님) `stage`와 같다 | `record_stage_in_tx` 비경유·종결 run 필터 |
+| 7-A15 | 서버 안 기록자(도우미 직접 쓰기)가 도구 경로와 같은 거절 코드·접기·상한·합계를 적용한다(같은 입력으로 두 경로 대조) | 함수 하나 |
+| 7-A16 | 지시문·도구 설명: `oort_run_event` 설명·루틴(두 언어)·프리셋에 규칙마다 핵심 낱말 집합(종류 일곱, 「60초」, 한 호출, 라벨은 일의 이름, 스크립트 금지, 기능 감지, 재시도 2번)이 있고 낱말을 지우면 빨개진다. 보고 박자 문장에 옛 「five minutes」·「5분마다」가 없다(단 `oort_ping`의 5분은 남아 있다) | 낱말 집합 사보타주·옛 박자 부재 |
+
+### 7-S. 구현 슬라이스 (Accepted 후, 한 슬라이스 = 한 이슈·브랜치·PR, base `track/engine`)
+
+| id | 내용 | 트랙·크기·등급 | 선행 |
+|---|---|---|---|
+| 7-S1 | 쓰기: 마이그레이션(kind CHECK 16·새 열·SQL 백스톱·합계 표·trim 함수·`agent_run_event_trim`/`append`/`set_framed` 술어·보존 스윕 확장), 길이 인자 검증 함수, `record_run_activity_in_tx`, `oort_run_event` 스키마와 `record_gateway_event_in_tx` 연결, `ReportRejection`·`ToolFailure` 변종(C3 확장, 7-2). 시험 7-A1~A9·A13·A14·A15 | 엔진·L·1(공개 도구 표면) | 이 증보 Accepted |
+| 7-S2 | 읽기: `include=activity`·`RunEventInclude`·응답 모양·openapi·계약 게이트, **독립 보안 검수 Blocker 0·High 0**(7-3의 한계·7-8의 노출). 시험 7-A10~A12 | 엔진·M·1 | 7-S1 |
+| 7-S3 | 도구 설명·루틴(두 언어)·프리셋·preamble 낱말·시험(7-9, #4622 합본). 도구 설명은 스키마와 같은 PR(7-S1)이거나 그 뒤 | 엔진+문서·S·1 | 7-S1 |
+| 7-S4 | (UXUI, 이 증보 밖) core 파서·타임라인 행 모델·패널의 활동 줄·레일의 최신 라벨·계획 「2 of 4」. 7-7의 읽는 쪽 규칙을 따라요 | UXUI | 7-S2 |
+
+- 이슈 대응: #4656 = 7-S1+7-S2(수용 기준 둘째 줄은 7-6의 굴리기에 맞게 고쳐요, 7-Q1). 7-S3은 #4656에 합치거나 별도 이슈(planner).
+- 이 증보가 흡수하지 않는 것: #4580의 **자식 run 목록 API**(`GET …/agent-runs/{run}/children`)와 Hermes todo 연결은 설계하지 않았어요. `delegate`는 에이전트가 말하는 한 줄이고 자식 run과 잇지 않아요(잇는 일은 #4580). #4580의 「계획 단계 이벤트(에이전트 보고)」 절반은 이 증보의 `plan`이 정해요.
+- 후속(별도 이슈): Hermes 진행 메모·todo → `stage`·`plan`(X1), 관리형 워커 도구 호출을 서버 관측 행으로(E4, #4647과 함께 판단), 도우미 진행(#4968), 운영 보고 밀도 실측(P0).
+- migration 번호는 쓰지 않았어요. #4656이 착수 때 정해요.
+
+### 7-Q. 열린 질문 (owner 또는 planner에게, 쉬운 말, 추천이 앞)
+
+- **7-Q1. 활동 기록이 가득 차면 어떻게 할까요?** (가, 추천) 오래된 것부터 지워요. 합계는 그대로 남고 화면은 늘 최근 100개를 보여 줘요. (나) 새 기록을 더 쓰지 않고 처음 100개만 남겨요(oort 호출 기록처럼). 긴 작업에서 중간부터 화면이 멈춘 것처럼 보여요. 「행을 지우지 않는다」가 모든 기록에 해당하는 원칙이면 (나)예요.
+- **7-Q2. 단계 메모(`stage`)의 서버 글자 수 상한을 40자로 줄일까요?** (가, 추천) 80자 그대로 두고 화면이 40자에서 줄여요. 지금 에이전트가 안 깨져요. (나) 40자로 줄여요. 41자 이상 보고가 거절돼 살아 있다는 신호까지 잃을 수 있어요.
+- **7-Q3. 끝 보고의 개수 칸(`toolCounts`)에 `delegate`를 더할까요?** (가, 추천) 더하지 않아요. 맡긴 횟수는 진행 중 활동 합계에만 있어요. (나) 더해요. ADR-0162 증보 5의 공개 칸이 바뀌어요.
+- **7-Q4. 라벨·계획 글·`id`에서 비밀 모양(키·토큰)을 서버가 걸러 낼까요?** (가, 추천) 지금은 단계 메모와 같은 방어만 써요. 같은 함수라 나중에 한꺼번에 조일 수 있어요. (나) 하네스의 자격증명 거르기를 서버에도 붙여요. 공유 crate 이동이 필요해 더 커요.
+- **planner 결정(2026-11-01)**: 7-Q1~Q4 모두 (가). owner가 다르게 원하면 해당 절(7-6·7-1·7-7·7-2)만 고쳐요.
+
+### 7-R. 역방향 줄 대상·열어 두는 것·귀결
+
+- **역방향 줄 대상**(결재 뒤 planner가 각 문서 머리에 한 줄만, 본문 결정은 바꾸지 않아요): ADR-0186 증보 R-f의 「40으로 줄일지는 #4655가 정한다」(→ 80 유지, 7-3) · `docs/design-system/agent-request-loop.md` §3.2의 같은 문장 · ADR-0201 증보 v3의 F12·B5-7·B14-S5(착륙 사실·어휘 정본) · ADR-0162 증보 5 C2(`toolCounts`는 그대로, 진행 중 합계는 이 증보) · #4580 본문(계획 절반 흡수, 자식 run 목록은 남음). ADR-0200 안의 앞방향 화살표(D2 kind 어휘·자유 텍스트 문장·D5 1·3번)는 이 증보와 함께 넣었어요.
+- **열어 두는 것.** ① 보고용 호출(`oort_run_event`)을 T1 `tool_call` 행에서 빼는 일(60초 박자로 100행이 100분에 차요. 집계는 틀리지 않아요). ② 목록·진행 읽기의 요약 필드(`latestActivity`·`planProgress`). ③ `include=activity`의 재읽기 비용(최악 ≈401행, 필요하면 `after` 커서). ④ 서버가 박자를 알려 주는 `report{everySeconds}` 힌트(루틴이 낡아도 박자를 지시해요). ⑤ 도우미 run으로 원장 범위 넓히기(7-10, #4968). ⑥ 자격증명 패턴 거절(7-Q4).
+- **귀결.** (+) 「무슨 도구로 무엇을 하고 있나」가 처음으로 서버에 남고 레일·독·패널·답 메시지 칩이 한 모델로 읽어요. (+) 생각은 저장하지 않고, 서버가 잰 사실과 에이전트 보고가 종류와 꼬리표로 갈려요. (+) 한 함수·한 검증·한 접기 규칙이라 외부 에이전트 경로와 도우미 경로가 어긋나지 않아요. (−) 에이전트가 쓴 글 열이 셋(`stage`·`label`·`text`)에 식별자 하나(`id`)가 되고 뜻은 서버가 못 봐요. 방어는 겹겹이지만 막는 것이 아니에요(7-3). (−) 진행 중 보고 호출이 최대 5배라 모델 턴·감사 행이 늘어요(7-5). 쓰기 폭증 지표를 7-S1이 측정해요. (−) 규약이라 에이전트가 안 따르면 활동·계획이 비어 보여요. 그래서 「마지막 보고 n분 전」을 항상 같이 보여요(D5 귀결과 같아요). (−) 읽기 응답이 커질 수 있어요(최악 ≈401행).
