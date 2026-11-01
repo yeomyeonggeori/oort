@@ -88,6 +88,7 @@ import {
   useTickingNow,
 } from '../features/agents/workingSignal';
 import {
+  applyApprovalWaits,
   parseTurnPlaceholderKey,
   turnPlaceholderKey,
 } from '@momo/core/features/agents/workingSignal';
@@ -551,14 +552,28 @@ export default function ConversationScreen({
   // 반대로 최대 5초 일찍 거두는데, 그것은 이 제품이 늘 고르는 방향이다 — 모르면
   // 모른다고 말하지, 아는 척 붙들고 있지 않는다.
   const staleBucket = Math.ceil(turnNowMs / TURN_STALENESS_GRID_MS);
+  // 승인 원장이 레일보다 이긴다(#3738, 웹 `ComposerActivityRail` 과 같은 덮어쓰기). 서버는 승인에 걸린 run 을 DB 에서는
+  // 승인 대기로 세우지만 레일 프레임으로는 알리지 않아서(중간 프레임은 늘 `running`) 레일만 보면 그 에이전트는 계속 「일하는
+  // 중」이다. 사람을 기다리는 카드가 이 채널에 있으면 그 에이전트의 턴은 승인 대기이고, 자리표시(`turnPlaceholderKey`)와
+  // 레일(`isRespondingLine`)이 둘 다 이 목록을 읽어서 「작업 중…」·「답하는 중」을 세우지 않는다(#5066, 검증 줄 H2).
+  const {
+    gates: approvalGates,
+    waits: approvalWaitList,
+    provided: approvalsProvided,
+  } = usePendingApprovals(channelId);
   const turns = useMemo(
     () =>
-      agentTurnsInChannel(
-        signals,
+      applyApprovalWaits(
+        agentTurnsInChannel(
+          signals,
+          channelId,
+          staleBucket * TURN_STALENESS_GRID_MS,
+        ),
         channelId,
+        approvalWaitList,
         staleBucket * TURN_STALENESS_GRID_MS,
       ),
-    [signals, channelId, staleBucket],
+    [signals, channelId, staleBucket, approvalWaitList],
   );
 
   // 아직 아무도 가져가지 않은 사람 요청의 에이전트들. 활동 줄이 그 근거 줄 맨 앞에 서버의 생존
@@ -1470,8 +1485,7 @@ export default function ConversationScreen({
   // 영수증은 **같은 순간에 서로 반대로** 움직인다 — 영수증을 행의 상태로 두면
   // 방금 누른 사람이 영수증 대신 예전 안내 문장을 보게 된다.
   // ===========================================================================
-  const {gates: approvalGates, provided: approvalsProvided} =
-    usePendingApprovals(channelId);
+  // (구독은 위 「이 채널에서 지금 열려 있는 턴」 곁에서 한다: 같은 목록이 자리표시와 레일에도 쓰인다. #5066)
   // **레일 상태(`railStatus`)가 아니다.** 레일은 웹소켓이고 결정은 REST 로
   // 나간다 — 레일이 재연결 중이어도 그 POST 는 멀쩡히 성공한다. 승인에는
   // 기한이 있으므로, 할 수 있는 결정을 막는 쪽이 더 비싸다.
