@@ -279,6 +279,14 @@ async function submitClaimFrom(host: HTMLElement) {
   });
 }
 
+/** S2 다음은 건너뛸 수 있는 팀 AI 단계다(#4945). 건너뛰면 서버에 쓰지 않고 셸로 간다. */
+async function skipTeamAiStage() {
+  await waitForUi(() => {
+    expect(document.querySelector('[data-testid="onboarding-team-ai-skip"]')).not.toBeNull();
+  });
+  click("onboarding-team-ai-skip");
+}
+
 async function submitS1() {
   await waitForUi(() => {
     expect(
@@ -341,7 +349,7 @@ describe("claim D1″ on the onboarding 2.0 frame (#2811)", () => {
       host.querySelector('[data-testid="kometto-guide"]')?.getAttribute("data-expression")
     ).toBe("idle");
     const dots = host.querySelector('[data-testid="onboarding-dots"]');
-    expect(dots?.getAttribute("data-total")).toBe("4");
+    expect(dots?.getAttribute("data-total")).toBe("5");
     expect(dots?.getAttribute("data-current")).toBe("1");
     for (const id of ["claim-password", "claim-confirm"]) {
       expect(host.querySelector(`[data-testid="${id}"]`)?.className, id).toContain(
@@ -367,7 +375,7 @@ describe("claim → S1 through App restore hold (B-1)", () => {
     ).toBe("2");
     expect(
       host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
-    ).toBe("4단계 중 2단계");
+    ).toBe("5단계 중 2단계");
     expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     expect(host.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     expect(host.querySelector('[data-testid="session-restoring"]')).toBeNull();
@@ -378,7 +386,7 @@ describe("claim → S1 through App restore hold (B-1)", () => {
 });
 
 describe("claim → S1 submit → S2", () => {
-  it("calls E1 and E2 once then renders S2 at dot 3 of 4", async () => {
+  it("calls E1 and E2 once then renders S2 at dot 3 of 5", async () => {
     const host = await mountApp();
     await submitClaimFrom(host);
     await waitForUi(() => {
@@ -405,10 +413,10 @@ describe("claim → S1 submit → S2", () => {
     ).toBe("3");
     expect(
       host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
-    ).toBe("4단계 중 3단계");
+    ).toBe("5단계 중 3단계");
     expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     expect(readDurable(OWNER_ONBOARDING_KEY)).toBe(
-      JSON.stringify({ invite: true })
+      JSON.stringify({ invite: true, "team-ai": true })
     );
     expect(peekFreshSignup()).toEqual({
       workspaceId: session.member.workspaceId,
@@ -451,7 +459,7 @@ describe("reload during S1 re-enters S1", () => {
     await submitS1();
     expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
     expect(readDurable(OWNER_ONBOARDING_KEY)).toBe(
-      JSON.stringify({ invite: true })
+      JSON.stringify({ invite: true, "team-ai": true })
     );
 
     unmountApp();
@@ -464,6 +472,7 @@ describe("reload during S1 re-enters S1", () => {
     expect(afterS1.querySelector('[data-testid="onboarding-s1"]')).toBeNull();
 
     click("onboarding-s2-skip");
+    await skipTeamAiStage();
     await waitForUi(() => {
       expect(afterS1.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     });
@@ -509,6 +518,7 @@ describe("재질문 S1의 「이대로 쓸게요」 (#3714)", () => {
       expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
     });
     click("onboarding-s2-skip");
+    await skipTeamAiStage();
     await waitForUi(() => {
       expect(reloaded.querySelector('[data-testid="app-shell"]')).not.toBeNull();
     });
@@ -535,6 +545,7 @@ describe("S1 identity survives into the shell (H-2)", () => {
     expect(getPersistedSession()?.member.displayName).toBe("성재");
     expect(getPersistedSession()?.member.handle).toBe("seongjae");
     click("onboarding-s2-skip");
+    await skipTeamAiStage();
     await waitForUi(() => {
       expect(host.querySelector('[data-testid="self-name"]')?.textContent).toBe(
         "성재"
@@ -582,6 +593,7 @@ describe("S1 pending survives S2 skip (H-R2-1)", () => {
     });
     expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
     click("onboarding-s2-skip");
+    await skipTeamAiStage();
     await waitForUi(() => {
       expect(host.querySelector('[data-testid="app-shell"]')).not.toBeNull();
     });

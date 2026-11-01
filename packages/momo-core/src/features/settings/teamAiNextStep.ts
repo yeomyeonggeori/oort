@@ -98,6 +98,20 @@ export function readTeamAiNameStatus(bag: unknown): TeamAiNameStatus | null {
   return value === "not_derivable" || value === "reserved" ? value : null;
 }
 
+/**
+ * 이 글자(별칭)를 핸들로 쓰는 멤버의 표시 이름. 지워진 멤버는 보지 않는다. 없으면 null.
+ * 막힌 별칭의 문장(`teamAiAliasNotices`)이 누가 쓰고 있는지 말할 때 쓴다.
+ */
+export function handleHolderName(
+  members: readonly Pick<RosterMember, "status" | "handle" | "displayName">[] | undefined,
+  alias: string
+): string | null {
+  const holder = (members ?? []).find(
+    (member) => member.status !== "deleted" && member.handle.toLowerCase() === alias
+  );
+  return holder?.displayName ?? null;
+}
+
 /** 부를 수 있는 별칭(등록됨 + 이름 겹침 경고). */
 export function callableAliases(status: readonly TeamAiAliasStatus[] | null): string[] {
   return (status ?? [])
@@ -203,11 +217,16 @@ export function teamAiTryLabel(channelName: string | null, name: string): string
   return `${where} @${name} 불러 보기`;
 }
 
+/** 부를 수 있는 별칭을 「@oort · @오르트」로 이은 글자. 없으면 null. 문장은 사전(`teamAi.helper.aliasesLine`)이 감싼다. */
+export function teamAiCallableNames(status: readonly TeamAiAliasStatus[] | null): string | null {
+  const names = callableAliases(status);
+  return names.length === 0 ? null : names.map((alias) => `@${alias}`).join(" · ");
+}
+
 /** 등록된 별칭 줄. 없으면 null. */
 export function teamAiCallableLine(status: readonly TeamAiAliasStatus[] | null): string | null {
-  const names = callableAliases(status);
-  if (names.length === 0) return null;
-  return `부르는 이름: ${names.map((alias) => `@${alias}`).join(" · ")}`;
+  const names = teamAiCallableNames(status);
+  return names === null ? null : `부르는 이름: ${names}`;
 }
 
 /**

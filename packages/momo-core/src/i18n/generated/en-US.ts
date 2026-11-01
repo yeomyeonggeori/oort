@@ -953,7 +953,7 @@ export const catalog: MessageCatalog = {
   "teamAi.roles.alwaysOn": [
     {
       "type": 0,
-      "value": "Always on"
+      "value": "Always on."
     }
   ],
   "teamAi.roles.chatReadHint": [

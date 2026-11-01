@@ -65,6 +65,7 @@ export function TeamKeyForm({
   surface = "card",
   saveErrorHint,
   testIdPrefix = "ai-connect-card",
+  showCancel = true,
 }: {
   link: ProviderLink;
   /** 연결이 끊겼는가. 끊겼으면 저장을 누르기 전에 막는다(review #2961 H1). */
@@ -88,6 +89,11 @@ export function TeamKeyForm({
   saveErrorHint?: (error: unknown, baseUrl: string) => string | null;
   /** 시험 id 머리. 두 표면이 같은 폼을 서로 다른 이름으로 찾는다. */
   testIdPrefix?: string;
+  /**
+   * 「취소」를 그릴까. 온보딩 단계는 폼이 화면의 본문이라 닫을 곳이 없고 「나중에」가 그 자리를 맡는다(#4945).
+   * 기본은 그린다: 채팅 카드와 설정 곁판은 폼을 접는다.
+   */
+  showCancel?: boolean;
 }) {
   const allowCustomAddress = surface === "settings";
   const presets = teamKeyPresets(link);
@@ -381,9 +387,11 @@ export function TeamKeyForm({
         >
           {save.isPending ? "저장 중" : confirmReplace ? "바꿔 저장하고 확인" : "저장하고 확인"}
         </Button>
-        <Button type="button" variant="ghost" size="sm" onClick={onCancel} data-testid={tid("key-cancel")}>
-          취소
-        </Button>
+        {showCancel && (
+          <Button type="button" variant="ghost" size="sm" onClick={onCancel} data-testid={tid("key-cancel")}>
+            취소
+          </Button>
+        )}
       </div>
     </form>
   );

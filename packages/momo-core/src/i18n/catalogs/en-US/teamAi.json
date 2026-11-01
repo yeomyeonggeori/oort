@@ -45,7 +45,7 @@
   "teamAi.helper.rolesSaveFailed": "Could not change what the helper does. Check your connection and try again.",
   "teamAi.helper.rolesMemoryOff": "Team memory is off. Turn it on first under Settings › Memory.",
   "teamAi.helper.rolesForbidden": "Only an owner or admin can change what the helper does.",
-  "teamAi.roles.alwaysOn": "Always on",
+  "teamAi.roles.alwaysOn": "Always on.",
   "teamAi.roles.chatReadName": "Chat and reading",
   "teamAi.roles.chatReadHint": "Answers questions, reads the chats and members the caller can see, and searches the web.",
   "teamAi.roles.workspaceAdminName": "Workspace management",

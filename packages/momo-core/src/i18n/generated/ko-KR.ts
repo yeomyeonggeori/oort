@@ -915,7 +915,7 @@ export const catalog: MessageCatalog = {
   "teamAi.roles.alwaysOn": [
     {
       "type": 0,
-      "value": "항상 켜져 있어요"
+      "value": "항상 켜져 있어요."
     }
   ],
   "teamAi.roles.chatReadHint": [

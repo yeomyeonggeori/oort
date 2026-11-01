@@ -45,7 +45,7 @@
   "teamAi.helper.rolesSaveFailed": "할 일을 바꾸지 못했어요. 연결을 확인하고 다시 시도해 주세요.",
   "teamAi.helper.rolesMemoryOff": "팀 기억이 꺼져 있어요. 설정 › 기억에서 먼저 켜 주세요.",
   "teamAi.helper.rolesForbidden": "할 일은 소유자나 관리자만 바꿀 수 있어요.",
-  "teamAi.roles.alwaysOn": "항상 켜져 있어요",
+  "teamAi.roles.alwaysOn": "항상 켜져 있어요.",
   "teamAi.roles.chatReadName": "대화·읽기",
   "teamAi.roles.chatReadHint": "질문에 답하고, 부른 사람이 볼 수 있는 대화와 멤버를 읽고, 웹에서 찾아요.",
   "teamAi.roles.workspaceAdminName": "워크스페이스 관리",
