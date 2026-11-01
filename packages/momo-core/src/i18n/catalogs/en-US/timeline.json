@@ -20,6 +20,7 @@
   "timeline.workRequest.fill": "Fill the message box",
   "timeline.workRequest.fillLabel": "{label}: fill the message box",
   "timeline.workRequest.fillHint": "Check the text, then send it yourself.",
+  "timeline.workRequest.inDm": "This is a direct message, so it can't be filled into the message box. Press it from a channel.",
   "timeline.workRequest.composerBusy": "You have a draft in progress, so nothing was filled in. Clear the message box and press again.",
   "timeline.workRequest.threadClosed": "Open the thread and press again.",
   "timeline.workRequest.noPersonalAgent": "No Claude Code or Codex is connected on your Mac yet. Connect one under My tools in AI first.",

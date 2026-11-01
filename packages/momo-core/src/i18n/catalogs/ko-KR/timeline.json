@@ -20,6 +20,7 @@
   "timeline.workRequest.fill": "입력창에 채우기",
   "timeline.workRequest.fillLabel": "{label}: 입력창에 채우기",
   "timeline.workRequest.fillHint": "채운 글을 확인하고 직접 보내 주세요.",
+  "timeline.workRequest.inDm": "이 대화는 DM이라 입력창에 채울 수 없어요. 채널에서 눌러 주세요.",
   "timeline.workRequest.composerBusy": "쓰던 글이 있어 채우지 않았어요. 입력창을 비우고 다시 눌러 주세요.",
   "timeline.workRequest.threadClosed": "스레드를 열고 다시 눌러 주세요.",
   "timeline.workRequest.noPersonalAgent": "내 맥에 연결한 Claude Code·Codex가 아직 없어요. AI의 내 도구에서 먼저 연결해 주세요.",

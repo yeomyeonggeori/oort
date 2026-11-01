@@ -1,6 +1,7 @@
 import { useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Laptop, PencilLine } from "lucide-react";
+import { uuidEq } from "@momo/core/lib/api";
 import {
   commandSuggestHead,
   commandSuggestIsTarget,
@@ -13,6 +14,7 @@ import { Button } from "@/design/ui/button";
 import { seedComposerText, seedThreadComposerText } from "@/features/chat/draftStore";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { CommandSuggestSlotProps } from "@/features/timeline/commandSuggestSlot";
+import { useChannels } from "@/features/workspace/useWorkspace";
 import { workRequestTarget } from "@/features/work/personalAgentCalling";
 
 // =============================================================================
@@ -33,6 +35,13 @@ import { workRequestTarget } from "@/features/work/personalAgentCalling";
 // 도구(`harness`)가 정해진 카드는 그 도구의 개인 에이전트를, 정해지지 않았거나 그 도구의 에이전트가 없으면
 // 내 개인 에이전트 중 첫째를 쓴다. 개인 에이전트가 하나도 없으면 채울 이름이 없으므로 그렇다고 말하고
 // AI 화면으로 보낸다 — 조용히 아무 일도 안 일어나는 단추를 세우지 않는다.
+//
+// ## DM에서는 채우지 않는다
+//
+// 도우미를 DM으로 부른 사람이 가장 많을 텐데, DM의 사람 메시지는 서버가 그 방의 에이전트를 부르는 신호다.
+// 거기에 `@<내 개인 에이전트> <코드 일>`을 보내면 도우미가 코드 일을 또 부탁받아 같은 카드를 다시 주고,
+// 서버는 DM에 없는 에이전트의 멘션을 착석 제안으로 읽는다. 그래서 DM(그룹 DM 포함)의 카드는 단추를 세우지
+// 않고 「채널에서 눌러 주세요」만 말한다 — 폰 시트가 집 채널에서 DM을 빼는 것(`homeChannels`)과 같은 줄이다.
 //
 // 문구는 에이전트·메시지의 문자열이 아니라 `harness`에서 사전으로 다시 만든다(라벨을 그리지 않는다 —
 // 피싱 문구 차단). 글(prompt)은 카드에 그리지 않는다: 그 글은 입력창에서만 읽힌다. 남이 보는 카드와 깨진
@@ -64,6 +73,9 @@ export function WorkRequestOpenSuggestion({
   const formatMessage = useFormatMessage();
   const navigate = useNavigate();
   const { workspaceId } = useSession();
+  // 이 카드가 선 방이 DM인가. 채널 목록은 `ChatShell`이 이미 같은 키로 읽어 둔 것이다(추가 요청 없음).
+  const { groups } = useChannels(workspaceId);
+  const inDm = groups.dms.some((channel) => uuidEq(channel.id, channelId));
   const headingId = useId();
   const [notice, setNotice] = useState<Notice | null>(null);
   const workRequest = card.workRequest;
@@ -91,6 +103,7 @@ export function WorkRequestOpenSuggestion({
 
   // 입력창에 `@<내 개인 에이전트> <글>`을 심는다. 보내는 것은 사람이다.
   const fill = () => {
+    if (inDm) return;
     const agent = workRequestTarget(directory.members, viewerMemberId ?? "", workRequest.harness);
     if (agent === null) {
       setNotice({ text: formatMessage("timeline.workRequest.noPersonalAgent"), tools: true });
@@ -145,24 +158,26 @@ export function WorkRequestOpenSuggestion({
         >
           {label}
         </span>
-        <Button
-          type="button"
-          size="sm"
-          // 눌리는 면은 좁은 폭에서 44(`tap-target`), 보이는 모양은 그대로.
-          className="tap-target"
-          onClick={fill}
-          aria-label={formatMessage("timeline.workRequest.fillLabel", { label })}
-          data-testid="work-request-suggest-fill"
-        >
-          <PencilLine aria-hidden="true" />
-          {formatMessage("timeline.workRequest.fill")}
-        </Button>
+        {!inDm && (
+          <Button
+            type="button"
+            size="sm"
+            // 눌리는 면은 좁은 폭에서 44(`tap-target`), 보이는 모양은 그대로.
+            className="tap-target"
+            onClick={fill}
+            aria-label={formatMessage("timeline.workRequest.fillLabel", { label })}
+            data-testid="work-request-suggest-fill"
+          >
+            <PencilLine aria-hidden="true" />
+            {formatMessage("timeline.workRequest.fill")}
+          </Button>
+        )}
       </div>
       <p
         className="min-w-0 break-keep px-3 pb-3 text-meta text-ink-muted"
         data-testid="work-request-suggest-hint"
       >
-        {formatMessage("timeline.workRequest.fillHint")}
+        {formatMessage(inDm ? "timeline.workRequest.inDm" : "timeline.workRequest.fillHint")}
       </p>
       {notice !== null && (
         <div

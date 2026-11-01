@@ -3,6 +3,7 @@
 // 보내는 것은 사람이다. 웹에는 별도의 「작업 요청」 시트가 없다 — 이 컴포저가 그 자리다.
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
@@ -18,6 +19,16 @@ import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 import type { AppLocale } from "@/i18n/localeStore";
 import { readDraft, THREAD_COMPOSER_SEED_EVENT, writeDraft, type ThreadComposerSeed } from "./draftStore";
 import { CommandSuggestion } from "./SettingsOpenCard";
+
+// 카드는 자기가 선 방이 DM인지 채널 목록(`ChatShell`이 같은 키로 읽어 둔 것)으로 안다.
+const channelGroups = vi.hoisted(() => ({ dms: [] as { id: string }[] }));
+vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/features/workspace/useWorkspace")>();
+  return {
+    ...actual,
+    useChannels: () => ({ groups: { channels: [], dms: channelGroups.dms } }),
+  };
+});
 
 const HUMAN = "019f9a01-0000-7000-8000-000000000101";
 const OTHER = "019f9a01-0000-7000-8000-000000000102";
@@ -138,6 +149,7 @@ function mount(
 
 beforeEach(() => {
   window.localStorage.clear();
+  channelGroups.dms = [];
 });
 afterEach(cleanup);
 
@@ -243,6 +255,28 @@ describe("WorkRequestOpenSuggestion (웹)", () => {
     mount(cardFor(withBoth, { prompt: PROMPT }), HUMAN, withBoth, "root-1");
     fireEvent.click(screen.getByTestId("work-request-suggest-fill"));
     expect(screen.getByTestId("work-request-suggest-notice").textContent).toContain("스레드를 열고 다시 눌러 주세요");
+  });
+
+  it("DM(그룹 DM 포함)에서는 단추를 세우지 않고 채널에서 누르라고 말하며, 아무것도 채우지 않는다", () => {
+    channelGroups.dms = [{ id: "c1" }];
+    mount(cardFor(withBoth, { harness: "codex", prompt: PROMPT }), HUMAN);
+    // 카드는 서되(머리·라벨) 누를 것이 없다: 도우미를 DM으로 부른 사람이 가장 많은데, DM의 사람 메시지는
+    // 그 방의 도우미를 다시 부르는 신호라 거기에 개인 에이전트 멘션과 코드 일을 채우면 같은 카드가 또 온다.
+    expect(screen.getByTestId("work-request-suggest").getAttribute("data-viewer")).toBe("target");
+    expect(screen.getByTestId("work-request-suggest-label").textContent).toBe("내 맥의 Codex에 맡기기");
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByTestId("work-request-suggest-hint").textContent).toBe(
+      "이 대화는 DM이라 입력창에 채울 수 없어요. 채널에서 눌러 주세요."
+    );
+    expect(readDraft("w", "c1")).toBe("");
+    expect(screen.queryByTestId("work-request-suggest-notice")).toBeNull();
+  });
+
+  it("다른 방이 DM이어도 이 방이 채널이면 채운다", () => {
+    channelGroups.dms = [{ id: "c-other-dm" }];
+    mount(cardFor(withBoth, { prompt: PROMPT }), HUMAN);
+    fireEvent.click(screen.getByTestId("work-request-suggest-fill"));
+    expect(readDraft("w", "c1")).toBe(`@my-claude ${PROMPT}`);
   });
 
   it("에이전트가 쓴 label은 화면에 나오지 않는다(라벨은 도구에서 사전으로 다시 만든다)", () => {

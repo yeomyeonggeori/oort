@@ -1084,6 +1084,12 @@ export const catalog: MessageCatalog = {
       "value": ": fill the message box"
     }
   ],
+  "timeline.workRequest.inDm": [
+    {
+      "type": 0,
+      "value": "This is a direct message, so it can't be filled into the message box. Press it from a channel."
+    }
+  ],
   "timeline.workRequest.labelAny": [
     {
       "type": 0,

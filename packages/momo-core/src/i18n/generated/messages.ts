@@ -142,6 +142,7 @@ export const messageKeys = [
   "timeline.workRequest.fill",
   "timeline.workRequest.fillHint",
   "timeline.workRequest.fillLabel",
+  "timeline.workRequest.inDm",
   "timeline.workRequest.labelAny",
   "timeline.workRequest.labelClaude",
   "timeline.workRequest.labelCodex",
@@ -322,6 +323,7 @@ export const argumentSpecs = {
   "timeline.workRequest.fillLabel": {
     "label": "string"
   },
+  "timeline.workRequest.inDm": {},
   "timeline.workRequest.labelAny": {},
   "timeline.workRequest.labelClaude": {},
   "timeline.workRequest.labelCodex": {},
@@ -478,6 +480,7 @@ export interface MessageArgs {
   "timeline.workRequest.fill": Record<string, never>;
   "timeline.workRequest.fillHint": Record<string, never>;
   "timeline.workRequest.fillLabel": { label: string };
+  "timeline.workRequest.inDm": Record<string, never>;
   "timeline.workRequest.labelAny": Record<string, never>;
   "timeline.workRequest.labelClaude": Record<string, never>;
   "timeline.workRequest.labelCodex": Record<string, never>;

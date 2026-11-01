@@ -941,6 +941,12 @@ export const catalog: MessageCatalog = {
       "value": ": 입력창에 채우기"
     }
   ],
+  "timeline.workRequest.inDm": [
+    {
+      "type": 0,
+      "value": "이 대화는 DM이라 입력창에 채울 수 없어요. 채널에서 눌러 주세요."
+    }
+  ],
   "timeline.workRequest.labelAny": [
     {
       "type": 0,
