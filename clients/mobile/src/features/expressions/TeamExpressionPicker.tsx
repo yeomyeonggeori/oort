@@ -20,6 +20,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {Sentence} from '../../design/atoms';
 import {usePageSheetScrollProps} from '../../design/PageSheet';
 import {useStyles} from '../../design/theme';
 import {
@@ -301,9 +302,10 @@ export function TeamExpressionPicker({
                 state === 'ready' ? 'emoji-team-empty' : `expression-${state}`
               }
             >
-              <Text style={styles.label} accessibilityLiveRegion="polite">
+              {/* 빈 보관함·검색 결과 없음 안내는 완성된 문장이다 — 어절 단위로 줄바꿈한다(맨 `Text` 는 「보세 / 요.」로 끊었다, #5065 M1). */}
+              <Sentence style={styles.label} accessibilityLiveRegion="polite">
                 {notice}
-              </Text>
+              </Sentence>
               {state === 'error' ? (
                 <Pressable
                   accessibilityRole="button"

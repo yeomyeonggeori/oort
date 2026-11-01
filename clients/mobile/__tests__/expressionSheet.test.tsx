@@ -325,6 +325,53 @@ describe('표현 시트', () => {
     expect(h.onSend).not.toHaveBeenCalled();
   });
 
+  // #5065 B1: 시트가 검색어를 쥐고 이모지 본문을 끼워 넣는데(`embedded`), 빈 결과의 「검색 지우기」가 본문 안의 상태만 비우면
+  // 화면의 검색어와 결과는 그대로라 눌러도 아무 일도 없는 죽은 단추가 된다(#4942 의 끼워 넣기에서 생긴 결함). 독립 고르개의 같은
+  // 단추는 `emojiPicker.test.tsx` 가 지킨다 — 여기서는 **시트의 검색 칸**과 **목록**이 눌림에 따라 돌아오는지를 렌더로 잰다.
+  it('이모지 탭: 빈 결과의 「검색 지우기」를 누르면 시트의 검색어가 비고 목록이 돌아온다 (#5065)', async () => {
+    const {store} = await loaded();
+    openSheet(store);
+    await screen.findByTestId('emoji-pick-🎉');
+    fireEvent.changeText(screen.getByTestId('expression-sheet-search'), 'zzzz');
+    // 아무것도 못 맞췄다: 격자가 비고, 빈 문장 아래에 지우기 단추가 서고, 검색 칸은 그대로 「zzzz」다.
+    expect(screen.queryByTestId('emoji-pick-🎉')).toBeNull();
+    expect(screen.getByTestId('emoji-empty')).toBeTruthy();
+    expect(screen.getByTestId('expression-sheet-search').props.value).toBe('zzzz');
+    fireEvent.press(screen.getByTestId('emoji-clear-search'));
+    // 눌림이 화면에 닿았다: 시트의 검색 칸이 비고, 본문이 처음 칸(자주 쓰는 것)으로 돌아온다.
+    expect(screen.getByTestId('expression-sheet-search').props.value).toBe('');
+    await screen.findByTestId('emoji-pick-🎉');
+    expect(screen.queryByTestId('emoji-empty')).toBeNull();
+  });
+
+  // #5065 M1·L1: 같은 검색어가 걸린 세 탭의 빈 결과 안내. 맨 `Text` 는 글자 단위로 끊어 「…검색해 보세 / 요.」(캡처 4942-…-017·019)가 됐고,
+  // 이모지 탭만 합쇼체(「없습니다」)라 한 시트 안에서 말씨가 갈렸다. 렌더된 글자 노드의 줄바꿈 속성과 문장 끝(해요체)을 잰다.
+  it('빈 결과 안내는 세 탭 모두 어절 단위로 줄바꿈하고 같은 말씨(해요체)로 끝난다 (#5065)', async () => {
+    const {store} = await loaded();
+    openSheet(store);
+    await screen.findByTestId('emoji-pick-🎉');
+    fireEvent.changeText(screen.getByTestId('expression-sheet-search'), 'zzzz');
+    const emptyLines: string[] = [];
+    const read = (container: string, sentence: string) => {
+      const node = within(screen.getByTestId(container)).getByText(sentence);
+      expect({container, breaks: node.props.lineBreakStrategyIOS}).toEqual({
+        container,
+        breaks: 'hangul-word',
+      });
+      emptyLines.push(sentence);
+    };
+    read('emoji-empty', '찾는 이모지가 없어요. 다른 이름으로 검색해 보세요.');
+    pressTab('team');
+    await screen.findByTestId('emoji-team-empty');
+    read('emoji-team-empty', '찾는 표현이 없어요. 다른 이름이나 태그로 검색해 보세요.');
+    pressTab('gif');
+    read('emoji-team-empty', '찾는 표현이 없어요. 다른 이름이나 태그로 검색해 보세요.');
+    // 말씨: 문장마다 「요.」로 끝난다 — 「…없습니다.」·「…하세요.」가 하나라도 섞이면 빨개진다.
+    const sentences = emptyLines.flatMap(line => line.split(/(?<=\.)\s+/));
+    expect(sentences.length).toBeGreaterThanOrEqual(6);
+    expect(sentences.filter(sentence => !/요\.$/.test(sentence))).toEqual([]);
+  });
+
   it('팀 이모지 탭: 고르면 `:이름:` 을 입력칸에 넣는다 — 미리보기도 보내기도 없다', async () => {
     const {store} = await loaded();
     const h = openSheet(store);

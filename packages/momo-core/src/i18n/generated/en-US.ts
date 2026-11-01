@@ -349,7 +349,7 @@ export const catalog: MessageCatalog = {
   "expressions.import.fileIssue": [
     {
       "type": 0,
-      "value": "Choose a PNG, JPEG, WebP or GIF of 5 MiB or less."
+      "value": "Choose a PNG, JPG, WebP or GIF of 5 MB or less."
     }
   ],
   "expressions.import.fixedNote": [
@@ -756,19 +756,19 @@ export const catalog: MessageCatalog = {
   "expressions.make.photoRule": [
     {
       "type": 0,
-      "value": "You can use a still PNG, JPEG, WebP or GIF of 5 MiB or less."
+      "value": "You can use a still PNG, JPG, WebP or GIF of 5 MB or less."
     }
   ],
   "expressions.make.photoSize": [
     {
       "type": 0,
-      "value": "The photo is too large. Choose one of 5 MiB or less."
+      "value": "The photo is too large. Choose one of 5 MB or less."
     }
   ],
   "expressions.make.photoType": [
     {
       "type": 0,
-      "value": "Choose a PNG, JPEG, WebP or GIF photo."
+      "value": "Choose a PNG, JPG, WebP or GIF photo."
     }
   ],
   "expressions.make.photoUnavailable": [
@@ -1136,7 +1136,7 @@ export const catalog: MessageCatalog = {
   "expressions.photo.photoHint": [
     {
       "type": 0,
-      "value": "Use a still PNG, JPEG, WebP or GIF up to 5 MiB."
+      "value": "Use a still PNG, JPG, WebP or GIF up to 5 MB."
     }
   ],
   "expressions.photo.photoLabel": [
@@ -1160,13 +1160,13 @@ export const catalog: MessageCatalog = {
   "expressions.photo.photoSize": [
     {
       "type": 0,
-      "value": "The photo is too large. Choose one up to 5 MiB."
+      "value": "The photo is too large. Choose one up to 5 MB."
     }
   ],
   "expressions.photo.photoType": [
     {
       "type": 0,
-      "value": "Choose a PNG, JPEG, WebP or GIF photo."
+      "value": "Choose a PNG, JPG, WebP or GIF photo."
     }
   ],
   "expressions.photo.providerGemini": [

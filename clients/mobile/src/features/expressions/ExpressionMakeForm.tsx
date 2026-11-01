@@ -486,7 +486,10 @@ export function ExpressionMakeForm({
                   />
                   <View style={styles.chipText}>
                     <Text style={styles.chipLabel}>{chip.label}</Text>
-                    <Text style={styles.chipDescription}>{chip.description}</Text>
+                    {/* 설명은 문장이다 — 어절 단위로 줄바꿈한다(맨 `Text` 는 「흔들려 / 요」·「두근 / 거려요」로 끊었다, #5065 M1). 같은 파일의 안내 줄은 이미 `Sentence` 다. */}
+                    <Sentence style={styles.chipDescription}>
+                      {chip.description}
+                    </Sentence>
                   </View>
                   {selected ? (
                     <Image

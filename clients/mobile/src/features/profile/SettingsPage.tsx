@@ -913,7 +913,7 @@ export function SettingsContent({
           {kinds.absent ? null : (
             <ListRow
               title="항상 오는 알림"
-              detail="승인 요청, 나를 부른 멘션, 다이렉트 메시지는 종류별로 끌 수 없습니다. 한꺼번에 멈추려면 알림 일시 중지를 쓰세요."
+              detail="승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없습니다. 한꺼번에 멈추려면 알림 일시 중지를 쓰세요."
               testID="profile-always-row"
             />
           )}

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "0f2134d2f7fa1714f1643996b669bfc54600ca26",
+  "baselineHead": "51a81e41226ffeaad35d454821afe41a7b6c69d7",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -149,7 +149,7 @@
     "clients/mobile/src/features/emoji/EmojiPicker.tsx": 33,
     "clients/mobile/src/features/emoji/catalog.ts": 1,
     "clients/mobile/src/features/expressions/ExpressionAddMenu.tsx": 6,
-    "clients/mobile/src/features/expressions/ExpressionChapter.tsx": 11,
+    "clients/mobile/src/features/expressions/ExpressionChapter.tsx": 9,
     "clients/mobile/src/features/expressions/ExpressionComposerPicker.tsx": 9,
     "clients/mobile/src/features/expressions/ExpressionDraftStep.tsx": 11,
     "clients/mobile/src/features/expressions/ExpressionImage.tsx": 13,

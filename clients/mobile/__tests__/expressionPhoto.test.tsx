@@ -9,7 +9,7 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react-native';
-import {AppState, Platform} from 'react-native';
+import {AppState, Platform, StyleSheet} from 'react-native';
 import * as api from '@momo/core/lib/api';
 import * as host from '@momo/core/runtime/host';
 import {catalog as enCatalog} from '@momo/core/i18n/generated/en-US';
@@ -36,6 +36,7 @@ import {
   createPhotoSceneTransport,
   type PhotoScene,
 } from '../measure/expressionPhoto';
+import {paletteFor} from '../src/design/theme';
 import {ExpressionMakeEntry} from '../src/features/expressions/ExpressionMakeEntry';
 import {
   ExpressionPhotoForm,
@@ -244,6 +245,20 @@ describe('모델 확인', () => {
 });
 
 describe('양식', () => {
+  // #5065 H1: 같은 부품(`PhotoPickRow`)을 쓰는 사진 양식의 앨범 알약도 시트 위 보조 알약이다(부품 시험은 `expressionAdd.test.tsx`).
+  it('앨범 알약은 시트 위 보조 알약이다 — `surface` 채움 + `elevationRest` 그림자 (#5065)', async () => {
+    const {store} = setup(OPENAI);
+    await mount(store);
+    await ready();
+    const palette = paletteFor('light');
+    const pill = StyleSheet.flatten(
+      screen.getByTestId('expression-photo-file').props.style,
+    );
+    expect(pill.backgroundColor).toBe(palette.surface);
+    expect(pill.boxShadow).toBe(palette.elevationRest);
+    expect(pill.backgroundColor).not.toBe(palette.surfaceMuted);
+  });
+
   it.each([
     ['openai', 'expressions.photo.providerOpenai'],
     ['gemini', 'expressions.photo.providerGemini'],
