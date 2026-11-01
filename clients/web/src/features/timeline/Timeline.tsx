@@ -30,7 +30,6 @@ function TimelineTail() {
 
 const TIMELINE_COMPONENTS = { Footer: TimelineTail };
 import {
-  threadRollup,
   type AgentRunProgress,
   type Channel,
   type Message,
@@ -60,6 +59,7 @@ import {
   type DeletedFoldFields,
 } from "@momo/core/features/timeline/deletedFold";
 import { isStreamRunEnded } from "@momo/core/features/timeline/streamStop";
+import { groupRepliesByRoot, liveThreadRollup } from "@momo/core/features/timeline/threadSummary";
 import { useEndedRuns } from "@/features/agents/endedRuns";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
@@ -127,6 +127,9 @@ import {
 // shift is measured against the anchor row itself, the oldest message that was
 // already on screen, by how far it moved.
 const START_INDEX = 1_000_000;
+
+/** 답글이 없는 루트가 부르는 빈 배열 — 렌더마다 새 배열을 만들지 않는다. */
+const NO_REPLIES: readonly Message[] = [];
 
 /**
  * 이 목록이 그리는 항목. 코어 스트림에 삭제 접기의 두 필드가 얹힌 것이다
@@ -391,6 +394,16 @@ export function Timeline({
   // 서버가 소속 root를 준 답글만 본류에서 빼요. 옛 서버의 root 없는 카드는 그대로예요.
   const mainMessages = useMemo(() => messages.filter((message) => !message.rootId), [messages]);
 
+  // 루트 아래 요약 줄(#5008): 서버가 페이지에서 준 요약은 읽은 때의 스냅샷이라, 그 뒤 실시간으로 온 답글의 수·얼굴·안 읽은 수는
+  // 이 목록이 이미 든 답글(`messages`에는 답글 프레임도 들어 있다 — 본류에서만 `mainMessages`가 뺀다)로 그 위에 얹는다.
+  // 규칙은 코어 `liveThreadRollup` 한 곳이다. 든 배열에서 파생하므로 되쏘기에도 같은 답이다.
+  const repliesByRoot = useMemo(() => groupRepliesByRoot(messages), [messages]);
+  const rollupFor = useCallback(
+    (message: Message) =>
+      liveThreadRollup(message, repliesByRoot.get(message.id.toLowerCase()) ?? NO_REPLIES, myMemberIdForFold),
+    [repliesByRoot, myMemberIdForFold]
+  );
+
   // 연달아 지워진 메시지는 한 줄로 접힌다 (감사 M-1). 폰이 먼저 고쳤고, 코어 승격과
   // 함께 실측한 결과 **웹도 같은 결함을 갖고 있었다**: 이 스트림은
   // `buildTimelineItems` 하나로 끝났고 그 안에 삭제 접기가 없다 — 연속 묘비 네 개는
@@ -456,7 +469,7 @@ export function Timeline({
         pending,
       }),
       (item) => ({
-        hasRollup: threadRollup(item.message) !== null,
+        hasRollup: rollupFor(item.message) !== null,
         hasReactions:
           chipsFor(reactions ?? {}, item.message.id, myMemberIdForFold)
             .length > 0,
@@ -471,6 +484,7 @@ export function Timeline({
     pending,
     reactions,
     myMemberIdForFold,
+    rollupFor,
     showIntro,
   ]);
 
@@ -911,6 +925,7 @@ export function Timeline({
               pausedRepeat={item.pausedRepeat}
               deletedRepeat={item.deletedRepeat}
               deletedFoldedIds={item.deletedFoldedIds}
+              rollup={rollupFor(item.message)}
               onOpenThread={onOpenThread}
               onQuoteMessage={onQuoteMessage}
               onJumpToMessage={onJumpToMessage}
