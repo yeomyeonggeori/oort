@@ -6172,7 +6172,9 @@ export function agentRunProgressPageFromWire(value: unknown): AgentRunProgress[]
 
 /**
  * 원장 행의 닫힌 어휘(openapi `AgentRunEvent.kind`). `doorbell_rung`은
- * `?include=doorbell`로 읽을 때만 온다(ADR-0200 증보 2026-10-14, #3824).
+ * `?include=doorbell`로, `tool_call`은 `?include=tools`로 읽을 때만 온다(ADR-0200 증보
+ * 2026-10-14 #3824, 증보 2026-10-15 T4 #4654). `activity`·`plan`(`?include=activity`, 증보 7)은
+ * 이 클라이언트가 아직 묻지 않으므로 아직 `unknown`이다(UXUI 슬라이스 7-S4).
  */
 export type AgentRunLedgerKnownKind =
   | "queued"
@@ -6187,7 +6189,8 @@ export type AgentRunLedgerKnownKind =
   | "failed"
   | "timed_out"
   | "cancelled"
-  | "doorbell_rung";
+  | "doorbell_rung"
+  | "tool_call";
 
 /**
  * 이 클라이언트가 아는 종류, 그리고 모르는 종류 하나(`unknown`). 서버는 클라이언트보다
@@ -6210,6 +6213,7 @@ const AGENT_RUN_LEDGER_KINDS = new Set<AgentRunLedgerKnownKind>([
   "timed_out",
   "cancelled",
   "doorbell_rung",
+  "tool_call",
 ]);
 
 /**
@@ -6263,6 +6267,14 @@ export interface AgentRunLedgerEvent {
   approvalId?: string;
   actorMemberId?: string;
   /**
+   * `tool_call` 행에만(`?include=tools`, ADR-0200 증보 2026-10-15 T1): 서버가 기록한 oort 도구 이름.
+   * 닫힌 모양(`^oort_[a-z_]{1,40}$`)이 아니면 싣지 않는다. 인자·결과 본문은 서버가 애초에 안 준다.
+   * 결과는 `code`(`ok` 또는 닫힌 실패 코드)에 있다.
+   */
+  tool?: string;
+  /** `tool_call` 행에만: 서버가 자기 시계로 잰 처리 시간(ms, 0~600000). 범위 밖이면 싣지 않는다. */
+  durationMs?: number;
+  /**
    * `activity` 행에만, 서버가 `?include=activity`일 때만 싣는다(ADR-0200 증보 7). **타입만 먼저
    * 둔다**: 지금 파서(`agentRunLedgerFromWire`)는 이 칸을 읽지 않고(모르는 행 키는 버린다) 이
    * 클라이언트는 `include=activity`를 보내지 않는다. 파서·행 모델은 UXUI 슬라이스(7-S4)가 채운다.
@@ -6273,13 +6285,70 @@ export interface AgentRunLedgerEvent {
   createdAtMs: number;
 }
 
+/**
+ * 한 도구의 이 run 합계(openapi `AgentRunToolTally`, ADR-0200 증보 2026-10-15 T3). 행 상한(100)을
+ * 넘은 호출까지 모두 센 값이다. `ok`+`error`가 그 도구의 호출 수다.
+ */
+export interface AgentRunToolTally {
+  /** 닫힌 oort 도구 이름(`^oort_[a-z_]{1,40}$`). */
+  tool: string;
+  ok: number;
+  error: number;
+  durationMsSum: number;
+}
+
 export interface AgentRunLedger {
   runId: string;
   events: AgentRunLedgerEvent[];
+  /**
+   * `?include=tools`에 **답한** 서버만 싣는다(빈 배열은 「물었고 호출이 없다」). 없으면 이 서버는
+   * `tools`를 모른다(구 서버·400으로 물러선 읽기): 호출이 0번이라는 뜻이 아니다. 모양이 틀린
+   * 합계도 「없음」으로 읽는다 — 파서는 전체를 거부하지 않는다.
+   */
+  toolTally?: AgentRunToolTally[];
+  /** `include=tools`일 때만: 호출이 `tool_call` 100행 상한 너머까지 세어졌다(합계가 행보다 많다). */
+  toolCallRowsCapped?: boolean;
   /** `?include=activity`일 때만(ADR-0200 증보 7). 타입만 먼저 둔다 — 파서는 7-S4가 채운다. */
   activityTally?: AgentRunActivityTally[];
   /** `?include=activity`일 때만: 합계가 보이는 끝난 활동보다 커서 일부는 합계로만 남았다. */
   activityRowsTrimmed?: boolean;
+}
+
+/** 서버가 `tool`에 쓰는 닫힌 모양(openapi `AgentRunEvent.tool`, migration CHECK와 같다). */
+const OORT_TOOL_NAME = /^oort_[a-z_]{1,40}$/;
+
+/** 서버가 잰 처리 시간의 천장(openapi `AgentRunEvent.durationMs`). */
+const MAX_TOOL_DURATION_MS = 600_000;
+
+function nonNegativeInteger(value: number | undefined): number | undefined {
+  return value !== undefined && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * `toolTally`는 배열이고 모든 칸이 닫힌 모양일 때만 읽는다. 하나라도 틀리면 **전체를 없음으로** 둔다:
+ * 일부만 남기면 합계가 조용히 줄어든다. 던지지 않는 이유는 합계가 덤이어서다 — 합계 때문에
+ * 같은 응답의 수명주기 줄까지 잃지 않는다.
+ */
+function toolTallyFromWire(value: unknown): AgentRunToolTally[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tally: AgentRunToolTally[] = [];
+  for (const entry of value) {
+    const tool = str(entry, "tool");
+    const ok = nonNegativeInteger(num(entry, "ok"));
+    const error = nonNegativeInteger(num(entry, "error"));
+    const durationMsSum = nonNegativeInteger(num(entry, "durationMsSum"));
+    if (
+      tool === undefined ||
+      !OORT_TOOL_NAME.test(tool) ||
+      ok === undefined ||
+      error === undefined ||
+      durationMsSum === undefined
+    ) {
+      return undefined;
+    }
+    tally.push({ tool, ok, error, durationMsSum });
+  }
+  return tally;
 }
 
 export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
@@ -6287,8 +6356,12 @@ export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
   const runId = str(source, "runId");
   const events = arrayField(source, "events");
   if (runId === undefined || events === null) throw new WireShapeError();
+  const toolTally = toolTallyFromWire(record(source)?.toolTally);
+  const toolCallRowsCapped = toolTally === undefined ? undefined : bool(source, "toolCallRowsCapped");
   return {
     runId: runId.toLowerCase(),
+    ...(toolTally === undefined ? {} : { toolTally }),
+    ...(toolCallRowsCapped === undefined ? {} : { toolCallRowsCapped }),
     events: events.map((entry) => {
       const row = record(entry);
       if (row === null) throw new WireShapeError();
@@ -6305,6 +6378,12 @@ export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
       const code = optionalString(row, "code");
       const approvalId = optionalString(row, "approvalId");
       const actorMemberId = optionalString(row, "actorMemberId");
+      // `tool`·`durationMs`는 `tool_call` 행의 열이다. 다른 종류 행에 실려 와도 읽지 않는다.
+      const rawTool = kind === "tool_call" ? optionalString(row, "tool") : undefined;
+      const tool = rawTool !== undefined && OORT_TOOL_NAME.test(rawTool) ? rawTool : undefined;
+      const rawDuration = kind === "tool_call" ? nonNegativeInteger(num(row, "durationMs")) : undefined;
+      const durationMs =
+        rawDuration !== undefined && rawDuration <= MAX_TOOL_DURATION_MS ? rawDuration : undefined;
       return {
         ordinal,
         kind: known ? (kind as AgentRunLedgerKnownKind) : "unknown",
@@ -6312,6 +6391,8 @@ export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
         createdAtMs,
         ...(stage === undefined ? {} : { stage }),
         ...(code === undefined ? {} : { code }),
+        ...(tool === undefined ? {} : { tool }),
+        ...(durationMs === undefined ? {} : { durationMs }),
         ...(approvalId === undefined ? {} : { approvalId: approvalId.toLowerCase() }),
         ...(actorMemberId === undefined
           ? {}
@@ -6348,41 +6429,63 @@ export async function fetchAgentRunProgress(
 /**
  * run 하나의 원장 전체(≤200행). 커서가 없으니 매번 통째로 다시 읽는다.
  *
- * `?include=doorbell`(#3824): 깨우는 신호 행(`doorbell_rung`)을 함께 달라는 요청이다.
- * 그 행을 아는 서버(#3830)만 싣고, 모르는 서버(v0.1.24 이전)는 쿼리를 읽지 않으므로
- * 그냥 예전 원장을 준다 — 그것이 옛 서버의 폴백이다. 다만 쿼리를 읽고 모르는 값이면
- * 400을 내는 서버가 생길 수 있어, 400이면 쿼리 없이 한 번 더 읽는다(`absentInclude`).
- * 이 클라이언트는 `doorbell` 외의 값을 보내지 않는다.
+ * `include`는 쉼표로 나눈 닫힌 집합이다(openapi `listAgentRunEvents`). 이 읽기가 묻는 값은 둘이다.
+ *
+ * - `doorbell`(#3824): 깨우는 신호 행(`doorbell_rung`). 그 행을 아는 서버(#3830)만 싣고, 모르는
+ *   서버(v0.1.24 이전)는 쿼리를 읽지 않으므로 그냥 예전 원장을 준다 — 그것이 옛 서버의 폴백이다.
+ * - `tools`(#4654, ADR-0200 증보 2026-10-15 T4): oort가 직접 잰 도구 호출 행(`tool_call`)과 합계
+ *   (`toolTally`·`toolCallRowsCapped`). 쿼리를 무시하는 서버는 합계 없이 200을 주고(호출 0번이 아니라
+ *   「모름」이다: `toolTally` 부재), 쿼리를 읽고 모르는 값에 400을 내는 서버는 아래 사다리로 간다.
+ *
+ * **한 번만 물러서기.** 400이면 물을 것을 한 칸씩 줄여 다시 읽는다: `doorbell,tools` → `doorbell`
+ * → 쿼리 없음. 「doorbell은 알고 tools는 모르는」 서버에는 두 번째 칸이 맞는 읽기다(깨움 줄을 잃지
+ * 않는다). 물러선 읽기가 **성공했을 때만** 빠진 값을 거절로 기억하고 다음부터는 묻지 않는다 — 같은
+ * 경로가 틀린 run id에도 400을 내므로, 끝칸(쿼리 없음)까지 400이면 아무것도 기억하지 않고 던진다.
+ * 기억하지 않으면 30초 폴링마다 400 왕복이 영원히 붙는다.
  */
 export async function fetchAgentRunEvents(
   workspaceId: string,
   runId: string,
-  options: { includeDoorbell?: boolean } = {}
+  options: { includeDoorbell?: boolean; includeTools?: boolean } = {}
 ): Promise<AgentRunLedger> {
   const base = `/v1/workspaces/${encodeURIComponent(
     workspaceId.toLowerCase()
   )}/agent-runs/${encodeURIComponent(runId.toLowerCase())}/events`;
-  if (options.includeDoorbell !== true || ledgerIncludeRejected) {
-    return agentRunLedgerFromWire(await request<unknown>(base));
+  const asked: string[] = [
+    ...(options.includeDoorbell === true && !ledgerDoorbellRejected ? ["doorbell"] : []),
+    ...(options.includeTools === true && !ledgerToolsRejected ? ["tools"] : []),
+  ];
+  const rungs: string[][] = [asked];
+  if (asked.includes("doorbell") && asked.includes("tools")) rungs.push(["doorbell"]);
+  if (asked.length > 0) rungs.push([]);
+  for (const [index, include] of rungs.entries()) {
+    try {
+      const ledger = agentRunLedgerFromWire(
+        await request<unknown>(include.length === 0 ? base : `${base}?include=${include.join(",")}`)
+      );
+      if (index > 0) {
+        if (asked.includes("tools") && !include.includes("tools")) ledgerToolsRejected = true;
+        if (asked.includes("doorbell") && !include.includes("doorbell")) ledgerDoorbellRejected = true;
+      }
+      return ledger;
+    } catch (error) {
+      if (index === rungs.length - 1 || !(error instanceof ApiError) || error.status !== 400) throw error;
+    }
   }
-  try {
-    return agentRunLedgerFromWire(await request<unknown>(`${base}?include=doorbell`));
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 400) throw error;
-    // 같은 경로가 틀린 run id에도 400을 낸다. 쿼리 없이 읽기가 **성공했을 때만** 이 서버가
-    // 쿼리를 거절한다고 기억한다 — 그렇지 않으면 400 한 번이 세션 내내 깨움 줄을 끈다.
-    const ledger = agentRunLedgerFromWire(await request<unknown>(base));
-    ledgerIncludeRejected = true;
-    return ledger;
-  }
+  // `rungs`는 비지 않고 마지막 칸은 위에서 던진다.
+  throw new WireShapeError();
 }
 
 /** 이 서버가 `?include=doorbell`을 400으로 거절했는가. 거절했으면 다시 묻지 않는다. */
-let ledgerIncludeRejected = false;
+let ledgerDoorbellRejected = false;
+
+/** 이 서버가 `include=tools`를 400으로 거절했는가(`doorbell`은 알아도). 거절했으면 다시 묻지 않는다. */
+let ledgerToolsRejected = false;
 
 /** 세션·워크스페이스가 바뀌면 다시 물어본다(다른 서버일 수 있다). 시험 seam이기도 하다. */
 export function resetRunLedgerIncludeProbe(): void {
-  ledgerIncludeRejected = false;
+  ledgerDoorbellRejected = false;
+  ledgerToolsRejected = false;
 }
 
 // ---- Hosted agent liveness (ADR-0200 D4, #3742) -----------------------------

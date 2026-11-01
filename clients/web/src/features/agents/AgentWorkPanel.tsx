@@ -83,6 +83,7 @@ import {
   RunListView,
 } from "./AgentRunLedgerView";
 import { useRunLedger, type RunLedgerView } from "./useRunLedger";
+import { OortRecordSection } from "./WorkTimelineView";
 import { StopRunControl } from "./StopRunControl";
 import {
   closeWorkPanel,
@@ -567,6 +568,16 @@ function PanelBody({
             />
           )}
         </>
+      )}
+
+      {/* 서버가 직접 잰 도구 호출(#4654). 위 「기록」(수명주기·에이전트 단계)과 **다른 칸**이다: 출처가 달라
+          한 목록에 섞지 않는다. 서버가 아는 run에만 서고, 원장을 아직 못 읽었으면 서지 않는다. */}
+      {server !== null && ledger.tools !== null && (
+        <OortRecordSection
+          record={ledger.tools}
+          open={isOpenRunPhase(server.phase)}
+          nowMs={nowMs}
+        />
       )}
 
       {log.droppedEntries > 0 && (

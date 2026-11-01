@@ -4,17 +4,22 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type AgentRunLedger } from "@momo/core/lib/api";
+import { agentRunLedgerFromWire, ApiError, type AgentRunLedger } from "@momo/core/lib/api";
 import type { ServerRunFacts } from "@momo/core/features/agents/workingSignal";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { RUN_LEDGER_POLL_MS, useRunLedger, type RunLedgerView } from "./useRunLedger";
 
 const fetchEvents = vi.fn<(ws: string, runId: string) => Promise<AgentRunLedger>>();
+// 무엇을 묻는지(`include` 옵션)는 호출 인자와 따로 모아서 잰다.
+const seen = vi.hoisted(() => ({ options: [] as unknown[] }));
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
   return {
     ...actual,
-    fetchAgentRunEvents: (ws: string, runId: string) => fetchEvents(ws, runId),
+    fetchAgentRunEvents: (ws: string, runId: string, options?: unknown) => {
+      seen.options.push(options);
+      return fetchEvents(ws, runId);
+    },
   };
 });
 
@@ -80,6 +85,7 @@ beforeEach(() => {
   // 영영 닿지 않으므로 주기(setInterval)만 가짜로 쓴다.
   vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
   fetchEvents.mockReset();
+  seen.options.length = 0;
   latest = null;
 });
 afterEach(() => {
@@ -155,6 +161,58 @@ describe("useRunLedger", () => {
     fetchEvents.mockResolvedValue(ledger("단계"));
     mount(RUN, facts(), true);
     await settle();
+    expect(latest?.counts).toEqual({ approvals: 0 });
+    expect(latest?.counts?.tools).toBeUndefined();
+  });
+  it("열면 깨우는 신호와 oort가 잰 도구 호출을 함께 묻는다 (#4654)", async () => {
+    fetchEvents.mockResolvedValue(ledger("단계"));
+    mount(RUN, facts());
+    await settle();
+    expect(seen.options).toEqual([{ includeDoorbell: true, includeTools: true }]);
+  });
+
+  it("합계가 오면 「oort 기록」 재료가 서고, 합계가 없으면 「모름」이다 (#4654)", async () => {
+    fetchEvents.mockResolvedValue(
+      agentRunLedgerFromWire({
+        runId: RUN,
+        events: [
+          { ordinal: 1, kind: "tool_call", tool: "oort_run_event", code: "ok", durationMs: 4, createdAtMs: T },
+        ],
+        toolTally: [{ tool: "oort_run_event", ok: 1, error: 0, durationMsSum: 4 }],
+        toolCallRowsCapped: false,
+      })
+    );
+    const render = mount(RUN, facts());
+    await settle();
+    expect(latest?.tools).toMatchObject({ supported: true, tally: { calls: 1, failed: 0 }, capped: false });
+    expect(latest?.tools?.rows.map((r) => r.label)).toEqual(["oort_run_event"]);
+    // 기록 칸의 줄에는 도구 호출이 없다.
+    expect(latest?.rows).toEqual([]);
+
+    fetchEvents.mockResolvedValue(ledger("단계"));
+    render(RUN, facts({ latestStage: "다음", lastEventAtMs: T + 1_000 }));
+    await settle();
+    expect(latest?.tools).toMatchObject({ supported: false, tally: null, rows: [] });
+  });
+
+  it("oort가 잰 호출은 요약의 「도구 N」에 섞이지 않는다: 에이전트가 한 일과 출처가 다르다 (#4654)", async () => {
+    fetchEvents.mockResolvedValue(
+      agentRunLedgerFromWire({
+        runId: RUN,
+        events: [
+          { ordinal: 1, kind: "tool_call", tool: "oort_job_start", code: "ok", durationMs: 4, createdAtMs: T },
+          { ordinal: 2, kind: "tool_call", tool: "oort_run_complete", code: "ok", durationMs: 6, createdAtMs: T + 1 },
+        ],
+        toolTally: [
+          { tool: "oort_job_start", ok: 1, error: 0, durationMsSum: 4 },
+          { tool: "oort_run_complete", ok: 1, error: 0, durationMsSum: 6 },
+        ],
+        toolCallRowsCapped: false,
+      })
+    );
+    mount(RUN, facts({ phase: "succeeded" }), true);
+    await settle();
+    expect(latest?.tools?.tally?.calls).toBe(2);
     expect(latest?.counts).toEqual({ approvals: 0 });
     expect(latest?.counts?.tools).toBeUndefined();
   });
