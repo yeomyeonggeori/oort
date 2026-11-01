@@ -477,6 +477,53 @@ describe('만드는 중', () => {
     await waitFor(() => expect(posts(request)).toHaveLength(2));
   });
 
+  // #5099 M2(검증 줄 2회차 화면): 만드는 동안(최대 2분) 사진 단추·갈래·얼굴·동의는 흐려지는데 잠긴 입력 칸 셋은 평소 그대로여서
+  // 눌러도 자판이 안 오르는 칸이 고칠 수 있는 칸처럼 보였다. 기준은 숫자가 아니라 **같은 화면의 잠긴 행**이다 — 한쪽 값만 바뀌면
+  // 한 화면이 잠김을 두 가지로 그린다.
+  it('만드는 동안 잠긴 입력 칸 셋(고정 이름·표시 이름·태그)은 잠긴 행과 같은 흐림이고 보조기술에도 잠겼다고 말하며, 끝나면 도로 살아난다 (#5099 M2)', async () => {
+    const {store} = setup({...OPENAI, hold: true});
+    await mount(store);
+    await ready();
+    const FIELDS = ['name', 'display-name', 'tags'].map(
+      key => `expression-photo-${key}`,
+    );
+    const opacityOf = (testID: string) =>
+      StyleSheet.flatten(screen.getByTestId(testID).props.style)?.opacity;
+    const locked = (testID: string) =>
+      screen.getByTestId(testID).props.accessibilityState?.disabled === true;
+    // 보내기 전의 살아 있는 칸은 흐리지 않고 잠겼다고 말하지도 않는다(`editable` 을 생략한 것을 잠김으로 읽지 않는다).
+    for (const id of FIELDS) {
+      expect({id, opacity: opacityOf(`${id}-pill`), locked: locked(id)}).toEqual({
+        id,
+        opacity: undefined,
+        locked: false,
+      });
+    }
+    await send({branch: 'caricature'});
+    await waitFor(() => expect(has('expression-photo-busy')).toBe(true));
+    // 기준: 같은 순간 잠긴 갈래 행의 흐림. 둘 다 1 이라서 맞는 빈 비교가 되지 않게 실제로 흐린지부터 본다.
+    const row = opacityOf('expression-photo-branch-cutout');
+    expect(row).toBeLessThan(1);
+    expect(disabled('expression-photo-branch-cutout')).toBe(true);
+    for (const id of FIELDS) {
+      expect({id, opacity: opacityOf(`${id}-pill`), locked: locked(id)}).toEqual({
+        id,
+        opacity: row,
+        locked: true,
+      });
+    }
+    // 기다리기를 그만두면(취소) 칸은 도로 살아난다.
+    await press('expression-photo-cancel');
+    await waitFor(() => expect(has('expression-photo-busy')).toBe(false));
+    for (const id of FIELDS) {
+      expect({id, opacity: opacityOf(`${id}-pill`), locked: locked(id)}).toEqual({
+        id,
+        opacity: undefined,
+        locked: false,
+      });
+    }
+  });
+
   it('화면을 닫아도 기다리기를 멈춘다(요청의 신호가 선다)', async () => {
     const {store, request} = setup({...OPENAI, hold: true});
     const {view} = await mount(store);

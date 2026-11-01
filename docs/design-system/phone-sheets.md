@@ -238,8 +238,8 @@ const afterClose = usePageSheetAction();
 | 임시 부품 | 모자란 것 | 정식 자리 |
 |---|---|---|
 | `SheetNotice` | 사실 한 문단 카드(옛 `NoticeBlock` 은 가로 여백 16 을 스스로 들어 시트 몸의 거터와 겹친다) | 공용 부품 후보 |
-| `Field` | `InputPill` 은 ref·invalid 를 못 받는다(검증이 막은 칸으로 초점을 옮기고 외곽선을 실패색으로) | `InputPill` 에 ref·invalid |
-| `TextArea` | 여러 줄 입력 — 알약은 여러 줄에서 모서리가 글자를 먹는다 | 공용 부품 후보 |
+| `Field` | `InputPill` 은 ref·invalid·잠김을 못 받는다(검증이 막은 칸으로 초점을 옮기고 외곽선을 실패색으로, `editable={false}` 면 잠긴 행(`rowDisabled`)과 같은 흐림 + 접근성 `disabled` — #5099) | `InputPill` 에 ref·invalid·잠김 |
+| `TextArea` | 여러 줄 입력 — 알약은 여러 줄에서 모서리가 글자를 먹는다. 잠김의 흐림은 `Field` 와 같다 | 공용 부품 후보 |
 | `FieldLabel` | 라벨 + 오른쪽 한 마디(「조금 남았어요」) | `GroupLabel` 에 보조 문자열 |
 
 라디오 행 `ChoiceRow` 도 처음엔 여기 임시본이 있었다. #4457 이 같은 이름·같은 props 의 정식 부품을 `sheetParts.tsx` 에 올려서 이 PR 이 세 시트(새 채널·내 맥에 보내기·작업 맡기기)를 그것으로 갈아 끼우고 임시본을 지웠다. 앞 표지(`leading`)를 쓰지 않는 호출에서는 두 구현의 행 구조(이름 칸 + 오른쪽 ✓ 칸)와 스타일 값이 같다.

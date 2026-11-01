@@ -25,8 +25,9 @@ import {ds2Radius, font, line, radius, SHEET, space, type Palette} from '../desi
 //                `SheetScroll` 의 거터와 겹쳐 32 가 된다.
 //   FieldLabel   섹션 라벨 + 오른쪽의 한 마디(「조금 남았어요」). `GroupLabel` 은 문자열 하나뿐이다.
 //   Field        한 줄 입력 알약 — `InputPill` 과 같은 모양인데 **ref 와 invalid 를 받는다**(검증이 실패한 칸으로 초점을
-//                옮긴다: `InputPill` 은 ref 를 안 넘긴다).
+//                옮긴다: `InputPill` 은 ref 를 안 넘긴다). `editable={false}` 면 잠긴 행처럼 흐려진다(#5099).
 //   TextArea     여러 줄 입력 상자 — 알약은 여러 줄에서 모서리가 글자를 먹으므로 입력 반경이다(`ds2Radius.row`).
+//                잠김의 흐림은 `Field` 와 같다.
 //
 // 모두 `Palette` 역할과 토큰만 읽는다. 입력의 외곽선은 `textFaint`(3:1, ADR-0189 D6)이고 실패하면 `dangerText` 다.
 // =============================================================================
@@ -76,21 +77,37 @@ type FieldProps = Omit<TextInputProps, 'keyboardAppearance'> & {
   invalid?: boolean;
 };
 
-/** 한 줄 입력 알약. `InputPill` 과 같은 모양 + ref + invalid. */
+/**
+ * 잠긴 입력(`editable={false}`)인가. `editable` 은 생략하면 켜진 것이라 **`false` 를 줬을 때만** 잠긴 것이다(`!editable` 로
+ * 읽으면 평소 칸이 전부 흐려진다).
+ */
+const isLocked = (editable: boolean | undefined): boolean => editable === false;
+
+/**
+ * 잠긴 입력은 눈에도 보조기술에도 잠긴 컨트롤로 선다 — 같은 화면의 잠긴 행(`ChoiceRow`·`ListRow` 의 `rowDisabled` 와 `disabled`
+ * 상태)과 같은 문법이다(#5099, 검증 줄 2회차 화면 M2). 흐림만 없으면 눌러도 자판이 안 오르는 칸이 고칠 수 있는 칸처럼 보인다.
+ */
+const lockedState = (
+  state: TextInputProps['accessibilityState'],
+): NonNullable<TextInputProps['accessibilityState']> => ({...state, disabled: true});
+
+/** 한 줄 입력 알약. `InputPill` 과 같은 모양 + ref + invalid + 잠김(`editable={false}`)의 흐림. */
 export const Field = forwardRef<TextInput, FieldProps & {icon?: ImageSourcePropType}>(
   function FieldView({icon, invalid = false, style, ...input}, ref) {
     const styles = useStyles(buildStyles);
     const palette = usePalette();
     const keyboardAppearance = useKeyboardAppearance();
+    const locked = isLocked(input.editable);
     return (
       <View
-        style={[styles.pill, invalid && styles.invalid]}
+        style={[styles.pill, invalid && styles.invalid, locked && styles.locked]}
         testID={input.testID ? `${input.testID}-pill` : undefined}>
         {icon ? <Image source={icon} style={styles.pillIcon} accessibilityElementsHidden /> : null}
         <TextInput
           ref={ref}
           placeholderTextColor={palette.textMuted}
           {...input}
+          accessibilityState={locked ? lockedState(input.accessibilityState) : input.accessibilityState}
           style={[styles.pillInput, style]}
           keyboardAppearance={keyboardAppearance}
         />
@@ -102,12 +119,13 @@ export const Field = forwardRef<TextInput, FieldProps & {icon?: ImageSourcePropT
 /** 여러 줄 입력 상자의 최소 높이 — 옛 시트들이 쓰던 값 그대로다(두세 줄이 보인다). */
 const AREA_MIN_HEIGHT = 132;
 
-/** 여러 줄 입력 상자. */
+/** 여러 줄 입력 상자. `Field` 와 같은 잠김(`editable={false}`)의 흐림을 입는다. */
 export const TextArea = forwardRef<TextInput, FieldProps & {minHeight?: number}>(
   function TextAreaView({invalid = false, minHeight = AREA_MIN_HEIGHT, style, ...input}, ref) {
     const styles = useStyles(buildStyles);
     const palette = usePalette();
     const keyboardAppearance = useKeyboardAppearance();
+    const locked = isLocked(input.editable);
     return (
       <TextInput
         ref={ref}
@@ -117,7 +135,8 @@ export const TextArea = forwardRef<TextInput, FieldProps & {minHeight?: number}>
         textAlignVertical="top"
         placeholderTextColor={palette.textMuted}
         {...input}
-        style={[styles.area, {minHeight}, invalid && styles.invalid, style]}
+        accessibilityState={locked ? lockedState(input.accessibilityState) : input.accessibilityState}
+        style={[styles.area, {minHeight}, invalid && styles.invalid, locked && styles.locked, style]}
         keyboardAppearance={keyboardAppearance}
       />
     );
@@ -171,4 +190,7 @@ const buildStyles = (color: Palette) =>
       color: color.text,
     },
     invalid: {borderColor: color.dangerText},
+    // 잠긴 입력의 흐림 — `design/sheetParts.tsx` 의 `rowDisabled`(잠긴 `ChoiceRow`·`ListRow`)와 같은 값이다. 시험이 같은 화면의
+    // 잠긴 행과 값이 같음을 잰다(한쪽만 바꾸면 한 화면이 잠김을 두 가지로 그린다).
+    locked: {opacity: 0.55},
   });
