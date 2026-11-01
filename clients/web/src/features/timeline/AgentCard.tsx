@@ -1265,6 +1265,10 @@ function CompletionReportBody({ card }: { card: CompletionReportCard }) {
 
 function ToolBody({ card }: { card: AgentToolCard }) {
   const live = card.status === "thinking" || card.status === "streaming";
+  // 「결과」 행은 말할 것이 있을 때만 선다: 결과 문장이 있거나(서버 폴백 본문은 코어가 이미 걷었다), 아직 도는
+  // 중이거나. 끝난 호출에 결과 문장이 없으면 상태 낱말은 칩이 말하고, 「결과가 없습니다.」 같은 빈 문장은
+  // 쓰지 않는다(#5009).
+  const outcome = card.frame.outcome || (live ? "실행 중입니다." : null);
   return (
     <CardFrame
       icon={<Terminal className="size-4" aria-hidden="true" />}
@@ -1284,10 +1288,12 @@ function ToolBody({ card }: { card: AgentToolCard }) {
       {card.frame.object && (
         <LabeledRow label="대상">{card.frame.object}</LabeledRow>
       )}
-      <LabeledRow label="결과" testId="agent-frame">
-        {card.frame.outcome ?? (live ? "실행 중입니다." : "결과가 없습니다.")}
-        {live && <StreamCaret />}
-      </LabeledRow>
+      {outcome !== null && (
+        <LabeledRow label="결과" testId="agent-frame">
+          {outcome}
+          {live && <StreamCaret />}
+        </LabeledRow>
+      )}
       {card.errorNote && (
         // Same rule as the turn card: silence is not failure, so a stalled run
         // gets the server note without the 오류 label and without the danger

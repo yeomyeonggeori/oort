@@ -28,11 +28,14 @@ vi.mock("./MessageRow", async (importOriginal) => ({
 vi.mock("./ThreadComposer", () => ({ ThreadComposer: () => null }));
 
 const CHANNEL = "channel";
-function row(type: "tool_call" | "tool_result", id: string, seq: number, props: Record<string, unknown>, extra: Partial<Message> = {}): Message {
+function row(type: Message["type"], id: string, seq: number, props: Record<string, unknown>, extra: Partial<Message> = {}): Message {
   return { id, channelId: CHANNEL, seq, hlcTs: seq, hlcCount: 0, authorMemberId: "agent", type, body: id, state: "sent", createdAtMs: seq, props, ...extra } as Message;
 }
 const started = (extra: Partial<Message> = {}) => row("tool_call", "call", 1, { name: "work.session.end", arguments: {}, call_id: "c1" }, extra);
 const finished = (extra: Partial<Message> = {}) => row("tool_result", "result", 2, { call_id: "c1", output: "ok", is_error: false }, extra);
+// #5009. 거부·만료·취소로 끝난 승인은 결과 행을 쓰지 않고 승인 카드가 제자리에서 고쳐진다. 카드 props 에는 호출의 `call_id` 가 있다.
+const approval = (status: string, extra: Partial<Message> = {}) =>
+  row("approval_request", "approval", 3, { approval_id: "ap-1", call_id: "c1", tool_name: "work.session.end", action_type: "tool_call", approval_status: status, status }, extra);
 const statusOf = (id: string) => document.querySelector(`[data-message-id="${id}"]`)?.textContent;
 
 beforeEach(() => {
@@ -78,5 +81,23 @@ describe("끝난 도구 호출은 본류와 스레드에서 닫힌 상태로 그
     mountThread([started({ rootId: "request" })]);
     await waitFor(() => expect(document.querySelector('[data-message-id="call"]')).toBeTruthy());
     expect(statusOf("call")).toBe("");
+  });
+});
+
+describe("거부·만료·취소로 끝난 승인은 호출 행을 중단으로 닫는다 (#5009)", () => {
+  it.each(["rejected", "expired", "cancelled"])("본류: %s 카드가 목록에 있으면 결과 행이 없어도 호출 행이 중단을 건네받는다", (status) => {
+    mountTimeline([started(), approval(status)]);
+    expect(statusOf("call")).toBe("cancelled");
+  });
+
+  it("본류: 승인됨 카드만으로는 닫지 않는다(실행 중일 수 있다)", () => {
+    mountTimeline([started(), approval("approved")]);
+    expect(statusOf("call")).toBe("");
+  });
+
+  it("스레드: 같은 짝짓기가 요청 스레드 안에서도 선다", async () => {
+    mountThread([started({ rootId: "request" }), approval("rejected", { rootId: "request" })]);
+    await waitFor(() => expect(screen.queryByTestId("thread-loading")).toBeNull());
+    await waitFor(() => expect(statusOf("call")).toBe("cancelled"));
   });
 });

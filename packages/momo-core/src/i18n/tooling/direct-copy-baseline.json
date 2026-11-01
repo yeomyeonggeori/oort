@@ -801,7 +801,7 @@
     "clients/web/src/features/sidebar/workspaceNav.ts": 1,
     "clients/web/src/features/sidebar/workspaceRailModel.ts": 3,
     "clients/web/src/features/timeline/ActionResultCard.tsx": 5,
-    "clients/web/src/features/timeline/AgentCard.tsx": 120,
+    "clients/web/src/features/timeline/AgentCard.tsx": 119,
     "clients/web/src/features/timeline/ApprovalActions.tsx": 43,
     "clients/web/src/features/timeline/ArtifactCard.tsx": 66,
     "clients/web/src/features/timeline/AttachmentList.tsx": 25,
