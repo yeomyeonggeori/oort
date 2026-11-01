@@ -128,6 +128,9 @@ const HOSTED_CONNECTION_NOT_ACTIVE: &str = "hosted_connection_not_active";
 const HOSTED_CHANNEL_NOT_APPROVED: &str = "hosted_channel_not_approved";
 const AGENT_PAUSED: &str = "agent_paused";
 
+/// ADR-0201 증보 v3 B5-10 (#4967): `type=work` aimed at the workspace's team AI (HTTP 409, before any write).
+const TEAM_AI_USE_MENTION: &str = "team_ai_use_mention";
+
 /// `POST /v1/workspaces/{ws}/channels/{ch}/agent-runs`.
 pub async fn create(
     State(state): State<AppState>,
@@ -186,6 +189,22 @@ pub async fn create(
                 else {
                     return Ok(Err(ApiError::not_found("active channel agent not found")));
                 };
+                // ADR-0201 증보 v3 B5-10 (#4967): the workspace's team AI is called by mention or DM,
+                // never by `type=work`. A work run has no trigger message, and the helper derives its
+                // requester from the trigger message alone (B13-I3) — so before this, the run was
+                // created and then closed without a word. It is a 409 with its own code instead, before
+                // any write: the channel agent was found (a stranger still gets the 404 above), and
+                // nothing about the helper is revealed to someone who could not address it anyway.
+                if momo_workspace_actions::team_ai::read_state_in_tx(conn, workspace_id)
+                    .await?
+                    .is_team_ai(agent_member_id)
+                {
+                    return Ok(Err(ApiError::coded(
+                        StatusCode::CONFLICT,
+                        TEAM_AI_USE_MENTION,
+                        "도우미는 멘션이나 DM으로 불러 주세요",
+                    )));
+                }
                 // ADR-0113 증보 2 E3 (#3938) — an agent that runs its owner's
                 // connected apps takes a work request from that human only
                 // (`type=work` passes the same predicate as a mention). Before
