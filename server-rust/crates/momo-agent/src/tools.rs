@@ -437,6 +437,14 @@ fn workspace_action_args_description(action_ids: &[&str]) -> String {
                 .to_string(),
         );
     }
+    if offers(crate::actions::ACTION_INVITE_CREATE) || offers(crate::actions::ACTION_AGENT_INVITE) {
+        lines.push(
+            "invite.create and agent.invite are for an admin to approve: the link and the pairing \
+             code are never given to you, the server delivers them after the approval, so do not \
+             ask for one, guess one or repeat one."
+                .to_string(),
+        );
+    }
     if offers(crate::actions::ACTION_TEAM_AI_ROLES_SET) {
         lines.push(format!(
             "team_ai.roles.set changes ONE bundle per card; bundle is one of {} (the chat and read role cannot be switched).",
@@ -500,9 +508,27 @@ macro_rules! propose_roles_item {
         "switch ONE of your own role bundles on or off with team_ai.roles.set"
     };
 }
+macro_rules! propose_invite_item {
+    () => {
+        "make a team invite link with invite.create or bring in an external agent with \
+         agent.invite (you are never given the link or the pairing code)"
+    };
+}
+const PROPOSE_DESCRIPTION_ADMIN_INVITE_ROLES: &str = propose_description!(
+    propose_admin_items!(),
+    "; ",
+    propose_invite_item!(),
+    "; ",
+    propose_roles_item!()
+);
+const PROPOSE_DESCRIPTION_ADMIN_INVITE: &str =
+    propose_description!(propose_admin_items!(), "; ", propose_invite_item!());
 const PROPOSE_DESCRIPTION_ADMIN_AND_ROLES: &str =
     propose_description!(propose_admin_items!(), "; ", propose_roles_item!());
 const PROPOSE_DESCRIPTION_ADMIN: &str = propose_description!(propose_admin_items!());
+const PROPOSE_DESCRIPTION_INVITE_ROLES: &str =
+    propose_description!(propose_invite_item!(), "; ", propose_roles_item!());
+const PROPOSE_DESCRIPTION_INVITE: &str = propose_description!(propose_invite_item!());
 const PROPOSE_DESCRIPTION_ROLES: &str = propose_description!(propose_roles_item!());
 
 /// The `workspace_action_propose` tool as one request is offered it: `action_ids` is the
@@ -515,19 +541,32 @@ pub fn workspace_action_propose_definition(action_ids: &[&str]) -> Option<ToolDe
     if action_ids.is_empty() {
         return None;
     }
+    // Three kinds of thing a description can speak about, each only while at least one id of it is
+    // offered: the workspace cards, the two invites (the `invite_access` bundle, ADR-0201 증보 v3
+    // B4) and the roles card. A bundle that is off, or an id a read took out (B4-3), leaves no word.
     let roles = action_ids.contains(&crate::actions::ACTION_TEAM_AI_ROLES_SET);
+    let invite = action_ids.iter().any(|id| is_invite_id(id));
     let admin = action_ids
         .iter()
-        .any(|id| *id != crate::actions::ACTION_TEAM_AI_ROLES_SET);
+        .any(|id| *id != crate::actions::ACTION_TEAM_AI_ROLES_SET && !is_invite_id(id));
     Some(ToolDefinition {
         name: WORKSPACE_ACTION_PROPOSE,
-        description: match (admin, roles) {
-            (true, true) => PROPOSE_DESCRIPTION_ADMIN_AND_ROLES,
-            (true, false) => PROPOSE_DESCRIPTION_ADMIN,
-            (false, _) => PROPOSE_DESCRIPTION_ROLES,
+        description: match (admin, invite, roles) {
+            (true, true, true) => PROPOSE_DESCRIPTION_ADMIN_INVITE_ROLES,
+            (true, true, false) => PROPOSE_DESCRIPTION_ADMIN_INVITE,
+            (true, false, true) => PROPOSE_DESCRIPTION_ADMIN_AND_ROLES,
+            (true, false, false) => PROPOSE_DESCRIPTION_ADMIN,
+            (false, true, true) => PROPOSE_DESCRIPTION_INVITE_ROLES,
+            (false, true, false) => PROPOSE_DESCRIPTION_INVITE,
+            (false, false, _) => PROPOSE_DESCRIPTION_ROLES,
         },
         parameters: workspace_action_propose_parameters(action_ids),
     })
+}
+
+/// The two ids of the `invite_access` bundle.
+fn is_invite_id(id: &str) -> bool {
+    id == crate::actions::ACTION_INVITE_CREATE || id == crate::actions::ACTION_AGENT_INVITE
 }
 
 /// `card_suggest`'s published schema, built from the allow-list so the enum

@@ -72,7 +72,7 @@ use momo_agent::actions::{
     memory_update_result_rows, plugin_install_result_body, plugin_install_result_rows,
     unfurl_update_result_body, unfurl_update_rows, work_tier_update_result_body,
     work_tier_update_rows, workspace_settings_result_body, ActionResult, ActionResultNext,
-    RequiredRole, SecretDelivery, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
+    RequiredRole, ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED,
     ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED, AUDIT_AGENT_AVATAR_UPDATED,
     AUDIT_AGENT_AVATAR_UPDATED_SCHEMA, AUDIT_AGENT_INVITED, AUDIT_AGENT_INVITED_SCHEMA,
     AUDIT_AGENT_PROFILE_UPDATED, AUDIT_AGENT_PROFILE_UPDATED_SCHEMA, AUDIT_CHANNELS_GRANTED,
@@ -86,6 +86,10 @@ use momo_agent::actions::{
     LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT, REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION,
     REF_TYPE_INVITE, REF_TYPE_MEMBER, REF_TYPE_MESSAGE, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED,
     SECRET_ONCE_INVITE_LINK, SECRET_ONCE_PAIRING,
+};
+use momo_agent::actions::{
+    invite_link_client_msg_id, raised_by_team_ai, secret_route, with_team_ai_audit_via,
+    SecretRoute, INVITE_CONVERSATION_RESULT_TEXT,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
@@ -118,9 +122,9 @@ use momo_messaging::{
     create_channel_detailed_in_tx, delete_staged_avatar_image_in_tx, emit_message_edited_in_tx,
     lock_agent_card_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
     patch_message_props_in_tx, read_avatar_image_bytes_in_tx, read_avatar_image_in_tx,
-    rename_agent_display_name_in_tx, set_pin_in_tx, settle_approval_card_in_tx,
+    rename_agent_display_name_in_tx, send_message_in_tx, set_pin_in_tx, settle_approval_card_in_tx,
     staged_image_matches_pin_in_tx, AgentCard, AgentCardPatch, CardStatusPatch, FieldPatch,
-    NewChannel, PinAction,
+    MessageType, NewChannel, NewMessage, PinAction,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -850,15 +854,19 @@ fn shows_a_value_to_the_lock_screen(credential_via: Option<&str>, secret_present
 
 /// Whether the action a `workspace_action` payload names offers its one-time
 /// value to the proposing agent **at the approver's choice**
-/// (`SecretDelivery::OptIn`). An unknown or missing id is `false`, so the early
-/// guard refuses.
+/// (`SecretDelivery::OptIn`) **and** the card came through the door that has the choice — the
+/// Agent Port's. A card the team AI raised has no box to tick (ADR-0201 증보 v3 B4-2), so for it
+/// this is `false` and a `deliverSecretToAgent` on the decision is refused like any other
+/// unsupported one. An unknown or missing id is `false`, so the early guard refuses.
 fn payload_offers_opt_in_delivery(payload: &Value) -> bool {
     payload
         .get("action")
         .and_then(|action| action.get("id"))
         .and_then(Value::as_str)
         .and_then(action_by_id)
-        .is_some_and(|action| action.secret_delivery == SecretDelivery::OptIn)
+        .is_some_and(|action| {
+            momo_agent::actions::offers_opt_in_delivery(action, raised_by_team_ai(payload))
+        })
 }
 
 /// The early `deliverSecretToAgent` guard as a pure function (so its whole truth
@@ -2007,8 +2015,17 @@ async fn execute_workspace_action(
     // `deliverSecretToAgent` was already judged against this very action by the
     // early guard in `decide_in_tx` (`deliver_flag_refused`), which runs before the
     // expiry arm; a second copy here could never disagree with it, so there is
-    // none. The slice that first gives an action `SecretDelivery::OptIn` adds the
-    // honoured path *here*, with its own test.
+    // none.
+    //
+    // **Where this decision's one-time value goes** (ADR-0201 증보 v3 B4-2) is decided by the
+    // door — the stored approval's `via_ai.source`, which the server wrote and the agent and the
+    // decision request cannot — and is read ONCE, here. The invite executor, the claim grant and the
+    // result rows below all take this value; none of them looks at the door again.
+    let route = secret_route(
+        action,
+        raised_by_team_ai(&approval.payload),
+        input.deliver_secret_to_agent,
+    );
 
     // The stored `args` are re-run through the **same** resolver the proposal
     // passed (`routes::actions::resolve_stored_action_in_tx`), for the reason ADR-0186
@@ -2448,6 +2465,7 @@ async fn execute_workspace_action(
                 approval,
                 input,
                 now,
+                route,
                 role,
                 *max_uses,
                 *expires_in_days,
@@ -2560,11 +2578,11 @@ async fn execute_workspace_action(
     // it is stored), and `payload.secretClaim` records only the permission, its
     // deadline and the ids the claim will act on. The card row says which way it
     // went, so what the approver read is what ran.
-    let deliver_to_agent = match action.secret_delivery {
-        SecretDelivery::Always => true,
-        SecretDelivery::OptIn => input.deliver_secret_to_agent,
-        SecretDelivery::None => false,
-    };
+    //
+    // The team AI door (B4-2) has no claim: its `invite.create` link was written into the
+    // conversation by the executor (`SecretRoute::Conversation`) and its `agent.invite` code
+    // stays with the approver (`SecretRoute::Approver`), so neither grants a `secretClaim`.
+    let deliver_to_agent = route == SecretRoute::ProposerClaim;
     if deliver_to_agent && executed.secret_once.is_some() {
         executed.secret_once = None;
         let kind = if action.id == momo_agent::actions::ACTION_AGENT_INVITE {
@@ -2609,10 +2627,16 @@ async fn execute_workspace_action(
         }
     }
     if action.id == momo_agent::actions::ACTION_INVITE_CREATE {
-        executed.result_rows.push(momo_agent::actions::action_row(
-            "초대 링크",
-            momo_agent::actions::INVITE_DELIVERY_TEXT,
-        ));
+        executed
+            .result_rows
+            .push(if route == SecretRoute::Conversation {
+                momo_agent::actions::action_row("링크 받는 곳", INVITE_CONVERSATION_RESULT_TEXT)
+            } else {
+                momo_agent::actions::action_row(
+                    "초대 링크",
+                    momo_agent::actions::INVITE_DELIVERY_TEXT,
+                )
+            });
     }
 
     // ---- 4. the shared tail ------------------------------------------------
@@ -2626,7 +2650,13 @@ async fn execute_workspace_action(
     for entry in &executed.audits {
         // An unasked card's rows say so (`origin`); every other card's are written as they were.
         let stamped = AuditEntry {
-            detail: momo_agent::initiative::decision_audit_detail(approval, entry.detail.clone()),
+            // B4-7: the helper's invite cards carry its provenance (tool names, counts, tokens,
+            // milliseconds — no text) on the domain row too.
+            detail: with_team_ai_audit_via(
+                action.id,
+                &approval.payload,
+                momo_agent::initiative::decision_audit_detail(approval, entry.detail.clone()),
+            ),
             ..entry.clone()
         };
         write_audit(conn, &stamped).await?;
@@ -2643,17 +2673,21 @@ async fn execute_workspace_action(
             .run(approval.run_id)
             .with_schema(
                 ACTION_APPROVED_AUDIT_SCHEMA,
-                momo_agent::initiative::decision_audit_detail(
-                    approval,
-                    stamp_via(
-                        input.credential_via,
-                        json!({
-                            "action_id": action.id,
-                            "approval_id": approval.id.to_string(),
-                            "proposed_by": approval.requested_by.to_string(),
-                            "decided_by": input.member_id.to_string(),
-                            "ref": action_ref_value,
-                        }),
+                with_team_ai_audit_via(
+                    action.id,
+                    &approval.payload,
+                    momo_agent::initiative::decision_audit_detail(
+                        approval,
+                        stamp_via(
+                            input.credential_via,
+                            json!({
+                                "action_id": action.id,
+                                "approval_id": approval.id.to_string(),
+                                "proposed_by": approval.requested_by.to_string(),
+                                "decided_by": input.member_id.to_string(),
+                                "ref": action_ref_value,
+                            }),
+                        ),
                     ),
                 ),
             ),
@@ -4590,16 +4624,24 @@ async fn execute_message_pin(
     }))
 }
 
-/// `invite.create`: mint the code as the approver and show the link once.
+/// `invite.create`: mint the code as the approver and put the link where [`SecretRoute`] says —
+/// the response's `secretOnce` (the original shape), the proposing agent's claim (decided by the
+/// tail; the executor still hands the value to it as `secretOnce`), or, for a card the team AI
+/// raised, **the conversation** (ADR-0201 증보 v3 B4-2): one message by the helper, in the same
+/// transaction, whose body the server composes. In that last case the link is a local of this
+/// function: it is written into that one message and is in no `Executed` field.
+#[allow(clippy::too_many_arguments)]
 async fn execute_invite_create(
     conn: &mut PgConnection,
     approval: &LockedApproval,
     input: &DecisionInput<'_>,
     now: chrono::DateTime<Utc>,
+    route: SecretRoute,
     role: &'static str,
     max_uses: i32,
     expires_in_days: Option<i64>,
 ) -> Result<Execution, momo_db::DbError> {
+    let to_conversation = route == SecretRoute::Conversation;
     // ---- can this server address its own link? -----------------------------
     //
     // Judged before the mint, not after. A code exists exactly once, in the
@@ -4617,6 +4659,18 @@ async fn execute_invite_create(
             now,
         )));
     };
+
+    // The link goes into the conversation the request came from, authored by the helper. Judged
+    // before the mint for the reason the origin is: a code that exists once, with nowhere to be
+    // posted, is an invite nobody can use and a row nobody asked for. A helper that has since left
+    // the conversation makes the card stale (409, the approval stays pending and can be rejected).
+    if to_conversation
+        && !is_active_channel_member_in_tx(conn, approval.channel_id, approval.requested_by).await?
+    {
+        return Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        )));
+    }
 
     let now_ms = now.timestamp_millis();
     let expires_at_ms = expires_in_days.map(|days| now_ms + days * 86_400_000);
@@ -4668,6 +4722,21 @@ async fn execute_invite_create(
             }),
         );
 
+    let secret_once = if to_conversation {
+        // The proposer's connection first, the channel's sequence after — the order every
+        // decision keeps (see `wake_proposer_in_tx`). The tail calls it again; it is idempotent,
+        // and for the helper (a managed agent with no hosted connection) it writes nothing.
+        wake_proposer_in_tx(conn, approval).await?;
+        post_invite_link_message_in_tx(conn, approval, &join_url).await?;
+        None
+    } else {
+        Some(SecretOnceDto {
+            kind: SECRET_ONCE_INVITE_LINK.to_string(),
+            value: join_url,
+            expires_at_ms: created.invite.expires_at_ms,
+        })
+    };
+
     Ok(Execution::Ran(Executed {
         audits: vec![audit],
         ref_type: REF_TYPE_INVITE,
@@ -4678,14 +4747,55 @@ async fn execute_invite_create(
             expires_in_days.unwrap_or(DEFAULT_INVITE_EXPIRES_IN_DAYS),
         ),
         result_rows: invite_result_rows(role, &expires_on),
-        secret_once: Some(SecretOnceDto {
-            kind: SECRET_ONCE_INVITE_LINK.to_string(),
-            value: join_url,
-            expires_at_ms: created.invite.expires_at_ms,
-        }),
+        secret_once,
         next: Some(INVITE_RESULT_NEXT),
         expression: None,
     }))
+}
+
+/// The one message that carries a team-AI invite link (ADR-0201 증보 v3 B4-2): authored by the
+/// helper (`approval.requested_by`), written into the channel the request came from
+/// (`approval.channel_id`), through the ordinary send spine — `channel_seq` bump, `message` INSERT
+/// and the outbox event in the caller's transaction, so it exists exactly when the invite does.
+///
+/// * The body is the server's sentence and the link ([`momo_messaging::invite_link::body`]); the
+///   props are the marker and carry no link. Nothing a model wrote is in either.
+/// * It is its own `client_msg_id`, so a retry posts one message, not two.
+/// * **No link preview**: the body matches `https?://`, so a trigger has queued an unfurl job, and
+///   the unfurl worker would fetch the join URL and keep what came back. The tombstone planted here
+///   (the one `suppressUnfurl` plants) makes the worker skip it, so the link is in no
+///   `message_unfurl` row and no cache.
+async fn post_invite_link_message_in_tx(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    link: &str,
+) -> Result<(), momo_db::DbError> {
+    let sent = send_message_in_tx(
+        conn,
+        approval.workspace_id,
+        NewMessage {
+            channel_id: approval.channel_id,
+            author_member_id: approval.requested_by,
+            message_type: MessageType::Text,
+            body: Some(momo_messaging::invite_link::body(link)),
+            props: momo_messaging::invite_link::props(),
+            root_id: None,
+            reply_to_id: None,
+            client_msg_id: Some(invite_link_client_msg_id(approval.id)),
+            run_id: Some(approval.run_id),
+            hlc_ts: None,
+            hlc_count: None,
+        },
+    )
+    .await?;
+    momo_unfurl::plant_tombstone_in_tx(
+        conn,
+        approval.workspace_id,
+        sent.message.id,
+        approval.requested_by,
+    )
+    .await?;
+    Ok(())
 }
 
 /// `payload.action.args`, or a value the normaliser will refuse.
@@ -5226,6 +5336,37 @@ mod tests {
         ] {
             assert!(!payload_offers_opt_in_delivery(&payload), "{payload}");
         }
+    }
+
+    /// ADR-0201 증보 v3 B4-2: the approver's box (`deliverSecretToAgent`) exists on the Agent
+    /// Port's `agent.invite` and nowhere else — not on the helper's `agent.invite`, whatever the
+    /// request body says, and not on either door's `invite.create`. The early guard reads exactly
+    /// this, so a helper card with the flag set is the 400 `deliver_secret_not_supported`.
+    #[test]
+    fn the_opt_in_box_exists_only_on_the_agent_ports_agent_invite() {
+        let agent_port = json!({"action": {"id": "agent.invite"}});
+        let helper = json!({"action": {"id": "agent.invite"}, "via_ai": {"source": "team_ai"}});
+        assert!(payload_offers_opt_in_delivery(&agent_port));
+        assert!(!payload_offers_opt_in_delivery(&helper));
+        for payload in [
+            json!({"action": {"id": "invite.create"}}),
+            json!({"action": {"id": "invite.create"}, "via_ai": {"source": "team_ai"}}),
+            json!({"action": {"id": "channel.create"}, "via_ai": {"source": "team_ai"}}),
+        ] {
+            assert!(!payload_offers_opt_in_delivery(&payload), "{payload}");
+        }
+        assert!(!deliver_flag_refused(
+            true,
+            ACTION_TYPE_WORKSPACE_ACTION,
+            true,
+            payload_offers_opt_in_delivery(&agent_port)
+        ));
+        assert!(deliver_flag_refused(
+            true,
+            ACTION_TYPE_WORKSPACE_ACTION,
+            true,
+            payload_offers_opt_in_delivery(&helper)
+        ));
     }
 
     /// The refusal body must decode as the receipt the client expects, or a 409

@@ -12965,6 +12965,31 @@ paths:
         something.
 
 
+        ADR-0201 addendum 2026-10-31 (v3) B4-2 (#4965) — **where the one-time
+        value goes depends on the door that raised the card**, read from the
+        stored `approval.payload.via_ai.source` (`team_ai`, written by the
+        server in the proposal transaction; neither the agent's tool call nor
+        this request can set it). A card the Agent Port raised is unchanged
+        (ADR-0186 V3-5). For a card the team AI ("oort 도우미") raised:
+        `invite.create` answers **no** `secretOnce` and the payload gets no
+        `secretClaim`; instead the same transaction writes ONE message into the
+        conversation the request came from, authored by the helper, whose body
+        is a fixed sentence and the link (`props.kind =
+        team_ai_invite_link`, `props.preview` = the sentence a notification
+        shows instead of the body; no link preview is ever made of it), so the
+        invite and its message exist together or not at all. `agent.invite`
+        keeps the pairing code for the approver alone (`secretOnce`, this
+        response only, `no-store`) and writes nothing into the conversation;
+        `deliverSecretToAgent: true` on it is a 400 `deliver_secret_not_supported`.
+        The audit rows of both (`invite.created` / `agent.invited` and
+        `action.approved`) carry `via_ai` — tool names, call counts, tokens,
+        milliseconds, no text. A card of either action raised after the request
+        had read something (a workspace read, a web search) is refused at the
+        decision (409 `action_args_invalid`, audit `action.refused`
+        `team_ai_read_context`), as is one whose helper role bundle
+        (`invite_access`) is switched off (`team_ai_role_off`).
+
+
         ADR-0204 D6 (#3927) - besides an access token, this is the ONE route a
         `typ = push_action` token (`POST /v1/auth/push-action-token`) may call,
         and only in its own workspace. The token substitutes for the access
@@ -27042,7 +27067,10 @@ components:
             expiry arms, so an overdue card is not settled by it). Not part of
             the idempotency key: a replay of an already-executed decision
             answers the original receipt even if it now carries `true`, and that
-            200 does not imply anything was delivered.
+            200 does not imply anything was delivered. ADR-0201 addendum v3 B4-2
+            (#4965): a card the team AI raised has no such choice — its
+            `agent.invite` shows the pairing code to the approver alone — so
+            `true` on it is the same 400 receipt.
 
     ApprovalDecisionReceipt:
       type: object
@@ -27128,7 +27156,12 @@ components:
             the same `actionId` and `ref` with this key **absent**. It is not
             in `approval.payload`, the card props, the audit row, the outbox or
             the server log either; the durable record of an invite is a sha256
-            written inside the minting statement.
+            written inside the minting statement. Absent for an `invite.create`
+            the team AI raised (ADR-0201 addendum v3 B4-2, #4965): its link is
+            written by the server into the conversation as the helper's one
+            message instead — the one exception to "nowhere else" — and is the
+            only place the link is; the pairing code of its `agent.invite`
+            stays here.
 
     WorkspaceActionRef:
       type: object

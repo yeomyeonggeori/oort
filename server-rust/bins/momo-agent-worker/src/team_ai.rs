@@ -306,10 +306,12 @@ impl AgentWorker {
         // model is offered (the tool's `actionId` enum, the tool list, the prompt) is built from
         // them; the proposal transaction and the decision read them again.
         //
-        // The system prompt is built ONCE, before anything is read, and is the same on every call
-        // of the request (`a10_text_inside_a_read_is_never_an_instruction` pins that: what was read
-        // never touches it). What changes after a read is the tool's enum, below — and the prompt
-        // already says the sensitive card leaves it.
+        // The system prompt is built before anything is read from `advertised_action_ids(false)`.
+        // After the request has read something (B4-3) it is built ONCE more from the same function
+        // with `tainted = true`, and from nothing else: the sensitive sentences leave it and the one
+        // sentence to answer with takes their place (`team_ai::system_prompt_for`).
+        // `a10_text_inside_a_read_is_never_an_instruction` pins that nothing the read returned is in
+        // either prompt. The tool's enum, below, is cut by the same function on the same boolean.
         let roles = gathered.state.roles;
         let mut messages = vec![
             ChatMessage::system(team_ai::system_prompt(
@@ -321,6 +323,7 @@ impl AgentWorker {
         ];
         let mut spend: Option<Spend> = None;
         let mut read_used = false;
+        let mut prompt_after_read = false;
         let started = Instant::now();
         let deadline = self.config.team_ai_request_deadline;
 
@@ -351,6 +354,15 @@ impl AgentWorker {
             // to offer is not offered at all.
             let tainted = read_used || trace.web_searches > 0;
             let offered = roles.advertised_action_ids(tainted);
+            if tainted && !prompt_after_read {
+                messages[0] = ChatMessage::system(team_ai::system_prompt_for(
+                    &gathered.roster,
+                    web,
+                    &offered,
+                    &roles.withheld_by_read(),
+                ));
+                prompt_after_read = true;
+            }
             let mut momo_tools: Vec<momo_agent::tools::ToolDefinition> =
                 momo_agent::tools::workspace_action_propose_definition(&offered)
                     .into_iter()
@@ -746,7 +758,8 @@ impl AgentWorker {
                 }
                 // B4-3: this request read something, so this card is not one it may raise.
                 ProposalRefusal::AfterRead => {
-                    self.team_ai_refused(job, payload, run_id, team_ai::AFTER_READ_ROLES_SENTENCE,
+                    self.team_ai_refused(job, payload, run_id,
+                        team_ai::after_read_sentence(proposed_action.unwrap_or("")),
                         None, &model, OUTCOME_REFUSED_AFTER_READ, &trace, proposed_action).await
                 }
                 ProposalRefusal::NoHumanRequester | ProposalRefusal::RunNotParkable => {
