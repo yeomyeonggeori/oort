@@ -764,12 +764,17 @@ mod tests {
     /// row is ended (`team_ai_task_ended_ck`). Tenant ENABLE + FORCE + `ws_isolation`; the grants are
     /// the minimum the code reads and writes (`team-ai-task-lockdown`, the same text in the migration
     /// and both role bootstraps).
+    ///
+    /// 170 is #4341's 「알림 진단과 시험 알림」 (ADR-0206 D11·D15): the `push_system` outbox label
+    /// (a value this file never uses, as 011 did), four `notification_rule` columns for the test
+    /// push's per-minute window and its last test, and the `push_dispatch_log (member_id,
+    /// created_at DESC)` index the diagnostics read. No new table, so no new RLS policy or grant.
     #[test]
-    fn discovers_contiguous_migrations_001_to_169() {
+    fn discovers_contiguous_migrations_001_to_170() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=169).collect();
+        let expected: Vec<i64> = (1..=170).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -777,7 +782,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=169 under {}",
+            "expected contiguous 001..=170 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -785,7 +790,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("169_team_ai_task"));
+            .starts_with("170_notification_diagnostics_test_push"));
     }
 
     #[test]

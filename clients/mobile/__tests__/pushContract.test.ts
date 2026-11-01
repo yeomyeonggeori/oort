@@ -60,6 +60,8 @@ describe('the JS push contract matches the Swift the extension runs', () => {
     // ADR-0204 D7 (#3928): the approval the lock screen must not decide.
     expect(PUSH_CATEGORY.approvalOpen).toBe(swiftCase('approvalOpen'));
     expect(PUSH_CATEGORY.work).toBe(swiftCase('work'));
+    // ADR-0206 D14·D15 (#4341): the category of a push that names no conversation.
+    expect(PUSH_CATEGORY.system).toBe(swiftCase('system'));
   });
 
   it('has exactly the same set of categories — a name in one place only is drift', () => {
@@ -159,6 +161,9 @@ describe('the JS push contract matches the Swift the extension runs', () => {
     // ADR-0206 증보 1 (#4889): a reply in a followed thread. The Swift gate above is held equal
     // to this list, so the extension and the lock-screen action accept it exactly when JS does.
     expect(PUSH_REASONS).toContain('thread_reply');
+    // ADR-0206 D11 (#4341): the test push. Same equality: the extension and the lock-screen
+    // action accept it exactly when JS does, and the relay's `ALLOWED_REASONS` spells it.
+    expect(PUSH_REASONS).toContain('test_notification');
   });
 
   it('renders work_run_done with fixed copy, never the agent reply (ADR-0162 D14)', () => {

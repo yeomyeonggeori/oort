@@ -1035,8 +1035,9 @@ impl Notifier {
                 let listener =
                     tokio::spawn(push_listen_loop(self.config.database_url.clone(), wake_tx));
                 let task = tokio::spawn(async move {
-                    // At-least-once recovery before the first claim.
+                    // At-least-once recovery before the first claim — both push feeds.
                     drain.reclaim_stuck().await;
+                    drain.reclaim_stuck_system().await;
                     let mut ticker = tokio::time::interval(interval);
                     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     let mut backoff = backoff::Backoff::new(interval, backoff::MAX_BACKOFF);
@@ -1052,9 +1053,12 @@ impl Notifier {
                             }
                         }
                         // #3377: a drain that fails (revoked grant, database down)
-                        // must not be retried every `interval` forever.
+                        // must not be retried every `interval` forever. The second feed
+                        // (`push_system`, ADR-0206 D15: the test push) drains on the same
+                        // tick and shares the same backoff.
                         let (_, error) = drain.drain_until_error(batch).await;
-                        match error {
+                        let (_, system_error) = drain.drain_system_until_error(batch).await;
+                        match error.or(system_error) {
                             None => backoff.succeeded(),
                             Some(error) => {
                                 let delay = backoff.failed();
@@ -1144,6 +1148,13 @@ fn build_push_drain(
     ))))
 }
 
+/// Does an `outbox` NOTIFY payload (the new row's kind) concern the push drains? Both feeds do:
+/// `push_candidate` (a message push) and `push_system` (ADR-0206 D15: the test push — without this
+/// it would wait for the poll tick instead of arriving in the second the person pressed the button).
+fn wakes_push_drain(kind: &str) -> bool {
+    matches!(kind, "push_candidate" | "push_system")
+}
+
 /// Hold a dedicated `LISTEN outbox` connection and nudge the push drain.
 ///
 /// A dropped connection degrades to poll-only (Swift parity): latency suffers,
@@ -1155,9 +1166,9 @@ async fn push_listen_loop(database_url: String, wake: tokio::sync::mpsc::Sender<
                 Ok(()) => loop {
                     match listener.recv().await {
                         Ok(notification) => {
-                            // The outbox trigger publishes the row's kind; only
-                            // push candidates concern this loop.
-                            if notification.payload() == "push_candidate" {
+                            // The outbox trigger publishes the row's kind; only the
+                            // two push feeds concern this loop.
+                            if wakes_push_drain(notification.payload()) {
                                 let _ = wake.try_send(());
                             }
                         }
@@ -1203,6 +1214,27 @@ fn presence_label(presence: CloudInstancePresence) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0206 D15: the LISTEN wake covers both push feeds and no other kind. A `push_system`
+    /// that did not wake the drain would sit until the poll tick; waking on every kind would make
+    /// each broadcast and agent job wake a drain that has nothing to claim.
+    #[test]
+    fn the_listen_wake_covers_both_push_feeds_and_nothing_else() {
+        assert!(wakes_push_drain("push_candidate"));
+        assert!(wakes_push_drain("push_system"));
+        for other in [
+            "broadcast",
+            "agent_job",
+            "webhook_delivery",
+            "",
+            "push_candidates",
+        ] {
+            assert!(
+                !wakes_push_drain(other),
+                "{other:?} must not wake the push drain"
+            );
+        }
+    }
 
     #[test]
     fn presence_labels_are_the_three_values() {
