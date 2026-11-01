@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { MessageNewEvent } from "../../lib/realtimeEvents";
+import { catalog as enCatalog } from "../../i18n/generated/en-US";
+import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
+import { createMessageService } from "../../i18n/service";
 import {
   ANNOUNCED_CAP,
   armOpen,
   BODY_MAX,
+  INVITE_LINK_KIND,
+  inviteLinkNotificationText,
   notifiableKind,
   notificationBody,
   notifyDecision,
@@ -54,6 +59,7 @@ function context(overrides: Partial<NotifyContext> = {}): NotifyContext {
     isMuted: () => false,
     isAnnounced: () => false,
     actorFor: (id) => (id === AGENT ? "@hermes" : "구민수"),
+    inviteLinkSentence: () => "사전의 고정 문장",
     nowMs: NOW,
     ...overrides,
   };
@@ -684,5 +690,87 @@ describe("사진만 보낸 DM·멘션의 배너 본문 (#4294)", () => {
     );
     expect(n.body).toBe("사진 1장");
     expect(JSON.stringify(n)).not.toContain("급여명세서");
+  });
+});
+
+describe("도우미 초대 링크 메시지의 배너 문장 (#5025, ADR-0201 증보 v3 B4-2)", () => {
+  const LINK = "https://oort.test/join?code=Ab3-_xQ7zK9";
+  const PREVIEW = "초대 링크를 올렸어요";
+  // 사전의 고정 문장은 호출자가 준다. 서버 문장과 **다른 값**을 줘서 어느 쪽이 쓰였는지 가린다.
+  const FALLBACK = "링크 없는 고정 문장";
+  const KIND = "team_ai_invite_link";
+  const dm = (over: Partial<NotifyContext> = {}) =>
+    context({ isDirect: () => true, actorFor: () => "도우미", inviteLinkSentence: () => FALLBACK, ...over });
+  const banner = (payload: Partial<MessageNewEvent["payload"]>, ctx: NotifyContext = dm()) => {
+    const decision = notifyDecision(event({ props: {}, ...payload }), ctx);
+    expect(decision.show).toBe(true);
+    if (!decision.show) throw new Error("expected a banner");
+    // 어떤 경우에도 링크는 배너 문장에 없다.
+    expect(JSON.stringify(decision.notification)).not.toContain("join?code");
+    return decision.notification;
+  };
+
+  // 서버 본문은 「문장 + 줄바꿈 + 링크」라 첫 줄만 쓰는 지금 코드도 우연히 안전하다. 그 우연에 기대지 않게
+  // 링크가 **첫 줄에 오는** 모양도 묶는다: 분기가 빠지면 이 두 줄이 빨개진다.
+  it.each([
+    ["서버가 보내는 그대로(문장, 링크)", `${PREVIEW}\n${LINK}`],
+    ["링크가 첫 줄", `${LINK}\n${PREVIEW}`],
+    ["한 줄에 문장과 링크", `${PREVIEW} ${LINK}`],
+  ])("표지가 있으면 본문 모양과 무관하게 preview를 말한다: %s", (_name, body) => {
+    const n = banner({ body, props: { kind: KIND, preview: PREVIEW } });
+    expect(n).toMatchObject({ kind: "dm", title: "도우미", body: PREVIEW });
+  });
+
+  it.each([
+    ["preview 없음", {}],
+    ["빈 preview", { preview: "" }],
+    ["공백뿐인 preview", { preview: "  \n " }],
+    ["글자가 아닌 preview", { preview: 42 }],
+  ])("preview를 못 쓰면 사전의 고정 문장으로 물러난다: %s", (_name, extra) => {
+    const n = banner({ body: `${LINK}\n${PREVIEW}`, props: { kind: KIND, ...extra } });
+    expect(n.body).toBe(FALLBACK);
+  });
+
+  it.each([
+    ["링크 그대로", LINK],
+    ["딥링크", "oort://join?code=Ab3-_xQ7zK9"],
+    ["퍼센트 인코딩", "https://oort.test/join%3Fcode%3DAb3-_xQ7zK9"],
+    ["문장에 섞인 링크", `${PREVIEW} ${LINK}`],
+  ])("preview가 링크 모양이면 쓰지 않는다: %s", (_name, preview) => {
+    const n = banner({ body: PREVIEW, props: { kind: KIND, preview } });
+    expect(n.body).toBe(FALLBACK);
+  });
+
+  it("표지가 없는 메시지는 지금까지 그대로다: 본문 첫 줄, preview 칸이 있어도 다른 종류면 쓰지 않는다", () => {
+    expect(banner({ body: "점심 먹었어요?\n메뉴는 비밀" }).body).toBe("점심 먹었어요?");
+    const other = banner({
+      body: "배포 끝났어요",
+      props: { kind: "tool_result", preview: "다른 문장" },
+    });
+    expect(other.body).toBe("배포 끝났어요");
+  });
+
+  it("사전의 고정 문장은 ko·en 모두 있고, 링크 모양이 아니다 (스스로 preview 검사를 통과한다)", () => {
+    for (const [locale, catalog] of [
+      ["ko-KR", koCatalog],
+      ["en-US", enCatalog],
+    ] as const) {
+      const sentence = createMessageService({ messageLocale: locale, catalog }).formatMessage(
+        "notifications.inviteLink.fallback"
+      );
+      expect(sentence.trim()).not.toBe("");
+      // 사전의 문장이 링크 모양이면 preview 검사가 이 값을 버린다 — 그러면 물러나는 자리의 문장이 곧 링크 모양이 된다.
+      expect(
+        inviteLinkNotificationText({ kind: INVITE_LINK_KIND, preview: sentence }, () => "물러남")
+      ).toBe(sentence);
+    }
+  });
+
+  it("멘션으로 가는 길에서도 같다: 채널의 멘션 배너도 preview를 말한다", () => {
+    const n = banner(
+      { body: `${LINK}\n${PREVIEW}`, props: { kind: KIND, preview: PREVIEW, mention_member_ids: [SELF] } },
+      context({ inviteLinkSentence: () => FALLBACK })
+    );
+    expect(n).toMatchObject({ kind: "mention", body: PREVIEW });
   });
 });

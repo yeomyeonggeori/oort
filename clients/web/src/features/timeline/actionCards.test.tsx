@@ -20,6 +20,8 @@ import { resetRunProgress, startRunProgress } from "@/features/agents/agentRunPr
 import { AgentCard } from "./AgentCard";
 import { resetSettledApprovalsForTest } from "./settledApprovals";
 import { isInternalHref, isReachableHref } from "./ActionResultCard";
+import { LINK_ONCE_LEAD } from "./ApprovalActions";
+import { APPROVED_RECEIPT } from "@/features/inbox/approvalsPanel";
 import { reachableSettingsSections } from "@/features/settings/settingsNav";
 import { actionDestination } from "@momo/core/features/commands/serverActions";
 import {
@@ -769,6 +771,75 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
 // 행을 내렸다 올려 카드가 새로 마운트되면 그 state가 사라져 버튼이 되살아났다(운영 실측).
 // 아래 시험은 **같은 낡은 pending 스냅샷으로 재마운트**해 그 순간을 그대로 만든다.
 // =============================================================================
+// =============================================================================
+// #5025 (#4965 후속) — 도우미 문(ADR-0201 증보 v3 B4-2). 도우미가 올린 `invite.create` 카드를 승인하면 서버는
+// 링크를 결정 응답이 아니라 **대화의 도우미 메시지**로 준다: 응답의 `result` 에는 `secretOnce` 가 없고, 결과 카드는
+// `secret_shown_once: false` 와 「링크 받는 곳」 행을 갖는다. 링크 상자(1회 값)가 설 일이 없는 카드가 바르게
+// 그려지는지를 렌더 DOM 에서 잰다 — 상자도, 상자의 리드 문장도, 「1회 표시됐어요」 고지도 서지 않는다.
+// 픽스처의 모양은 #4965 서버 시험(`team_ai_invite_conformance_pg`)이 DB 에서 단정한 그대로다.
+// =============================================================================
+
+describe("도우미 문: 링크 상자가 없는 승인과 결과 (#5025)", () => {
+  const REQUEST_ROW =
+    "승인하면 도우미가 이 대화에 링크를 올려요. 대화에 있는 사람은 모두 볼 수 있어요";
+  const RESULT_ROW = "도우미가 이 대화에 링크를 올렸어요";
+
+  /** 결정 응답: 부록 C 에서 `secretOnce` 만 뺀 것. 링크는 이 응답에 없다. */
+  function helperDecisionBody() {
+    const { secretOnce: _gone, ...result } = APPENDIX_C_BODY.result;
+    return { ...APPENDIX_C_BODY, result };
+  }
+
+  function helperRequestProps(): Record<string, unknown> {
+    const props = approvalProps();
+    const action = props.action as { rows: { label: string; value: string }[] };
+    action.rows.push({ label: "링크 받는 곳", value: REQUEST_ROW });
+    return props;
+  }
+
+  it("승인해도 버튼 자리에 링크 상자가 서지 않고 영수증 한 줄만 선다", async () => {
+    const host = mountCard(helperRequestProps());
+    // 결정 전: 행이 링크가 어디로 가는지 먼저 말한다.
+    openDetails(host);
+    expect(host.textContent ?? "").toContain(REQUEST_ROW);
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+
+    await decide(host, jsonResponse(helperDecisionBody()));
+    expect(byTestId(host, "approval-link-once")).toHaveLength(0);
+    expect(byTestId(host, "approval-link-once-value")).toHaveLength(0);
+    expect(byTestId(host, "approval-link-once-copy")).toHaveLength(0);
+    expect(host.textContent ?? "").not.toContain(LINK_ONCE_LEAD);
+    // 결정 컨트롤은 영수증에 자리를 내줬다(상자 없이도 카드는 결정 상태다).
+    expect(byTestId(host, "approval-approve")).toHaveLength(0);
+    expect(byTestId(host, "approval-reject")).toHaveLength(0);
+    expect(host.textContent ?? "").toContain(APPROVED_RECEIPT);
+    // 링크는 이 DOM 어디에도 없다(대화의 도우미 메시지에만 있다).
+    expect(document.body.textContent ?? "").not.toContain("join?code");
+  });
+
+  it("영속 결과 카드는 1회 고지 없이 「링크 받는 곳」 행을 그린다 (secret_shown_once: false)", () => {
+    const host = mountCard(
+      appendixBProps({
+        secret_shown_once: false,
+        rows: [
+          { label: "역할", value: "member" },
+          { label: "만료", value: "2026-09-29" },
+          { label: "링크 받는 곳", value: RESULT_ROW },
+        ],
+      }),
+      { type: "tool_result", body: "초대 링크를 만들었어요(member · 1회 · 7일)" }
+    );
+    expect(byTestId(host, "action-result-row")).toHaveLength(3);
+    expect(host.textContent ?? "").toContain(RESULT_ROW);
+    expect(byTestId(host, "action-result-note")[0]?.textContent).toBe("실행을 마쳤어요.");
+    // 「링크는 승인한 사람에게 1회 표시됐어요」는 거짓이 된다: 승인한 사람에게 보인 적이 없다.
+    expect(byTestId(host, "action-result-secret-once")).toHaveLength(0);
+    expect(host.textContent ?? "").not.toContain("1회 표시됐어요");
+    expect(byTestId(host, "approval-link-once")).toHaveLength(0);
+    expect(host.textContent ?? "").not.toContain("code=");
+  });
+});
+
 describe("승인 직후 재마운트해도 카드는 결정 상태다 (#3771)", () => {
   it("승인 → 같은 낡은 pending 스냅샷으로 재마운트 → 버튼이 없고 영수증 줄이 있다", async () => {
     const props = approvalProps();

@@ -2,6 +2,7 @@ import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "@/app/session";
+import { useMessages } from "@/i18n/useMessages";
 import { isDesktop } from "@/lib/tauri";
 import type { MessageNewEvent } from "@/lib/realtime";
 import { uuidEq } from "@momo/core/lib/api";
@@ -107,6 +108,12 @@ export function DesktopNotifications() {
   const canNotifyRef = useRef(canNotify);
   canNotifyRef.current = canNotify;
 
+  // 도우미 초대 링크 메시지의 배너가 서버의 preview를 못 쓸 때 말하는 고정 문장은 사전에서 지금 언어로 읽는다(#5025).
+  // 핸들러는 구독이 끊기지 않게 안정적이어야 하므로 ref로 읽는다.
+  const messages = useMessages();
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
   const handle = useCallback((event: MessageNewEvent) => {
     const current = contextRef.current;
     const nowMs = Date.now();
@@ -140,6 +147,8 @@ export function DesktopNotifications() {
           isAgent: member.kind === "agent",
         });
       },
+      inviteLinkSentence: () =>
+        messagesRef.current.formatMessage("notifications.inviteLink.fallback"),
       nowMs,
     });
     if (!decision.show) return;

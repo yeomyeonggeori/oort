@@ -225,6 +225,12 @@ export interface NotifyContext {
   isAnnounced: (messageId: string) => boolean;
   /** Sender as a display token: `@handle` for agents, the name for people. */
   actorFor: (memberId: string) => string;
+  /**
+   * 도우미 초대 링크 메시지(#5025)의 알림이 서버의 `props.preview` 를 못 쓸 때(없음·빔·링크 모양) 말하는
+   * **링크 없는 고정 문장**. 문구 사전의 것(`notifications.inviteLink.fallback`)을 호출자가 지금 언어로 읽어 준다:
+   * 이 모듈은 사전도 언어도 모른다. 함수인 이유는 그런 메시지가 올 때만 읽기 위해서다.
+   */
+  inviteLinkSentence: () => string;
   nowMs: number;
   maxAgeMs?: number;
   /**
@@ -285,12 +291,62 @@ export function notifyDecision(
   // 「무엇이 일어났나 + 어디서」 순서(#3339 시안): 승인은 종류 이름이 먼저다.
   if (kind === "approval") notification.title = `승인 필요 · ${notification.title}`;
   const body =
-    notificationBody(approvalTitle(message, kind) ?? message.body) ??
+    notificationBody(notificationSource(message, kind, context.inviteLinkSentence)) ??
     // 글 없이 사진·파일만 보낸 DM·멘션(#4294): 제목만 있는 배너가 되지 않게 개수로 말한다.
     // 본문이 있으면 본문이 이긴다(위 식이 이미 답했다). 승인 카드에는 첨부가 없다.
     (kind === "approval" ? undefined : (attachmentPreviewLine(message.attachments) ?? undefined));
   if (body !== undefined) notification.body = body;
   return { show: true, notification };
+}
+
+// ---- 도우미 초대 링크 메시지 (#5025, ADR-0201 증보 v3 B4-2) -----------------------
+
+/**
+ * 서버가 도우미의 초대 링크 메시지에 붙이는 `props.kind`(#4965, 서버 `momo-messaging`의
+ * `invite_link::PROPS_KIND`와 같은 낱말). 폰 알림 확장(Swift `PushInviteLinkCopy.kind`)이 같은 낱말을
+ * 읽는다 — 폰 시험이 둘을 맞댄다.
+ */
+export const INVITE_LINK_KIND = "team_ai_invite_link";
+
+/**
+ * 링크의 모양: 서버의 `…/join?code=…`(퍼센트 인코딩한 것도)이거나 `://`가 든 어떤 주소.
+ * 서버가 `preview`에 링크를 실을 일은 없다(닫힌 객체). 이 모양 검사는 그 계약이 어긋난 날에도 알림 문장에
+ * 링크가 0이게 하는 마지막 걸음쇠다: 모양이면 `preview`를 버리고 고정 문장으로 말한다.
+ * Swift `PushInviteLinkCopy.carriesLink`가 같은 세 조각을 센다.
+ */
+const INVITE_LINK_SHAPE = /join\?code=|join%3fcode%3d|:\/\//i;
+
+/**
+ * 도우미의 초대 링크 메시지가 알림에서 말하는 한 문장.
+ *
+ * 그 메시지의 본문은 「문장 + 링크」다. 알림은 본문 어디도 읽지 않는다 — 배너와 잠금 화면은 같은 방의 눈에
+ * 닿는 자리라서 링크는 대화 안에서만 보여야 한다(ADR-0201 증보 v3 B4-2: 푸시 미리보기에는 링크를 싣지
+ * 않는다). 서버가 링크 없이 써 준 `props.preview`가 알림 문장이고, 없거나 비었거나 링크 모양이면 호출자가
+ * 사전에서 읽어 준 고정 문장이다. 이 함수는 표지가 있는 메시지에만 문장을 낸다(`undefined`면 평범한 메시지).
+ */
+export function inviteLinkNotificationText(
+  props: Message["props"],
+  fallback: () => string
+): string | undefined {
+  if (props?.kind !== INVITE_LINK_KIND) return undefined;
+  const preview = typeof props.preview === "string" ? props.preview.trim() : "";
+  return preview !== "" && !INVITE_LINK_SHAPE.test(preview) ? preview : fallback();
+}
+
+/**
+ * 알림 본문이 읽을 글: 도우미 초대 링크 메시지는 그 문장, 승인 카드는 카드 제목, 나머지는 본문이다.
+ * 표지가 가장 먼저다 — 본문은 링크를 품은 글이라 어떤 갈래도 그것을 먼저 읽으면 안 된다.
+ */
+function notificationSource(
+  message: Message,
+  kind: NotifyKind,
+  inviteLinkSentence: () => string
+): string | undefined {
+  return (
+    inviteLinkNotificationText(message.props, inviteLinkSentence) ??
+    approvalTitle(message, kind) ??
+    message.body
+  );
 }
 
 /**

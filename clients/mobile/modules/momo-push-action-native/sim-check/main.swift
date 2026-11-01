@@ -1329,6 +1329,62 @@ do {
   check(await restDisplay(#","body":null,"state":7,"attachments":[\#(png)]"#)
     == PushDisplayContent(title: "이도현", body: "사진 1장"),
     "a state of the wrong type costs the message nothing: it is read as not deleted")
+
+  // ---- the team AI's invite-link message: the push says its preview, never its body (#5025) ---------------
+  //
+  // The body of that message is a sentence and a live link (ADR-0201 증보 v3 B4-2, #4965). The extension used to
+  // announce the whole body, so a DM from the helper put the link on the lock screen. Most bodies below carry
+  // the link on the FIRST line (the server's own order is sentence-then-link, which is safe by accident):
+  // deleting the branch in `displayBody` puts the link on the lock screen again and these checks say so.
+  typealias L = PushInviteLinkCopy
+  let inviteLink = "https://oort.test/join?code=Ab3-_xQ7zK9"
+  let inviteSentence = "초대 링크를 올렸어요"
+  let marker = #""kind":"team_ai_invite_link""#
+  let sentenceProps = #","props":{\#(marker),"preview":"\#(inviteSentence)"}"#
+  let shown = PushDisplayContent(title: "이도현", body: inviteSentence)
+  let linkFirst = #","body":"\#(inviteLink)\n\#(inviteSentence)""#
+  let oneLine = #","body":"\#(inviteSentence) \#(inviteLink)""#
+  let serverOrder = #","body":"\#(inviteSentence)\n\#(inviteLink)""#
+
+  let marked = await restDisplay(linkFirst + sentenceProps)
+  check(marked == shown, "marked + preview, link on the first line: 「이도현 / 초대 링크를 올렸어요」")
+  check(marked?.body.contains("join?code") == false, "the link never reaches the lock screen")
+  check(await restDisplay(oneLine + sentenceProps) == shown, "marked + preview, sentence and link on one line")
+  check(await restDisplay(serverOrder + sentenceProps) == shown, "marked + preview, the server's own body order")
+  check(await restDisplay(linkFirst + sentenceProps, reason: "mention", category: "momo.mention") == shown,
+    "the message decides, not the push reason: a mention push says the preview too")
+  check(await restDisplay(#","body":"\#(inviteLink)","props":{\#(marker),"preview":"  \#(inviteSentence)\n "}"#) == shown,
+    "the preview is trimmed")
+
+  let fixed = PushDisplayContent(title: "이도현", body: L.fallback)
+  check(await restDisplay(linkFirst + #","props":{\#(marker)}"#) == fixed, "marked, no preview: the fixed sentence")
+  check(await restDisplay(linkFirst + #","props":{\#(marker),"preview":""}"#) == fixed, "marked, empty preview: the fixed sentence")
+  check(await restDisplay(linkFirst + #","props":{\#(marker),"preview":"  \n "}"#) == fixed,
+    "marked, blank preview: the fixed sentence")
+  check(await restDisplay(linkFirst + #","props":{\#(marker),"preview":42}"#) == fixed,
+    "marked, a preview of the wrong type: the fixed sentence, and the message is not lost")
+  check(await restDisplay(linkFirst + #","props":{\#(marker),"preview":"\#(inviteLink)"}"#) == fixed,
+    "marked, a preview that is itself the link: the fixed sentence")
+  check(await restDisplay(linkFirst + #","props":{\#(marker),"preview":"\#(inviteSentence) \#(inviteLink)"}"#) == fixed,
+    "marked, a preview with the link inside the sentence: the fixed sentence")
+
+  check(await restDisplay(#","body":"회의 자료예요","props":{"kind":"tool_result","preview":"다른 문장"}"#)
+    == PushDisplayContent(title: "이도현", body: "회의 자료예요"),
+    "another kind's preview is not read: an unmarked message is announced as before (its text)")
+  check(await restDisplay(#","body":null,"state":"deleted","deletedAtMs":1"# + sentenceProps) == nil,
+    "a deleted invite-link message stays on the placeholder: its preview is not announced")
+  check(await restDisplay(#","body":null,"state":"sent""# + sentenceProps) == shown,
+    "a live one says its preview (control for the deleted one)")
+
+  check(L.kind == "team_ai_invite_link", "the marker the server writes")
+  check(L.sentence(preview: nil) == L.fallback && L.sentence(preview: "") == L.fallback, "no preview is the fixed sentence")
+  check(L.sentence(preview: " 안녕 \n") == "안녕", "a preview is trimmed")
+  check(L.carriesLink(inviteLink) && L.carriesLink("oort://join?code=Ab3") && L.carriesLink("momo:join?code=Ab3"),
+    "a join link is link-shaped in every spelling the server masks")
+  check(L.carriesLink("HTTPS://OORT.TEST/JOIN?CODE=Ab3") && L.carriesLink("https://oort.test/join%3Fcode%3DAb3"),
+    "case and percent-encoding do not hide it")
+  check(L.carriesLink("https://example.com/x") && !L.carriesLink(inviteSentence) && !L.carriesLink(L.fallback),
+    "any address is link-shaped; the sentences themselves are not")
 }
 
 print(failures == 0 ? "PASS" : "FAILED (\(failures))")
