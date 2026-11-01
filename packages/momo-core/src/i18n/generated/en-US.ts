@@ -215,7 +215,7 @@ export const catalog: MessageCatalog = {
   "expressions.add.makeDetail": [
     {
       "type": 0,
-      "value": "Pick a photo and an agent makes a moving team emoji"
+      "value": "Your team's image model turns one photo into an emoji"
     }
   ],
   "expressions.add.offlineHint": [

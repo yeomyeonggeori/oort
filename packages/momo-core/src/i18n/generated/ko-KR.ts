@@ -194,7 +194,7 @@ export const catalog: MessageCatalog = {
   "expressions.add.makeDetail": [
     {
       "type": 0,
-      "value": "사진을 고르면 에이전트가 움직이는 팀 이모티콘을 만들어요"
+      "value": "팀 이미지 모델이 사진 한 장을 이모티콘으로 만들어요"
     }
   ],
   "expressions.add.offlineHint": [

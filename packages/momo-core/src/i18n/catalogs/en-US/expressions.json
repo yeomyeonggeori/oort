@@ -5,7 +5,7 @@
   "expressions.add.import": "Import",
   "expressions.add.importDetail": "Register your own picture or link as a team emoji",
   "expressions.add.make": "Make with AI",
-  "expressions.add.makeDetail": "Pick a photo and an agent makes a moving team emoji",
+  "expressions.add.makeDetail": "Your team's image model turns one photo into an emoji",
   "expressions.add.adminsOnly": "Only admins can add new pictures on this team.",
   "expressions.add.backLabel": "Back to the team emoji list",
   "expressions.import.name": "Fixed name",
