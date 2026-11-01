@@ -236,7 +236,7 @@
     "clients/mobile/src/features/work/useWorkSessionLive.ts": 1,
     "clients/mobile/src/features/work/workStreamTiming.ts": 2,
     "clients/mobile/src/features/workspace/queries.ts": 6,
-    "clients/mobile/src/i18n/LanguageSettings.tsx": 5,
+    "clients/mobile/src/i18n/LanguageSettings.tsx": 3,
     "clients/mobile/src/i18n/LocaleProvider.tsx": 6,
     "clients/mobile/src/i18n/device.ts": 11,
     "clients/mobile/src/i18n/intl.ts": 24,

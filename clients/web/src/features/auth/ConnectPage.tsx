@@ -35,6 +35,7 @@ import {
 } from "@/lib/serverBase";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
+import { LanguageChip } from "@/i18n/LanguageChip";
 import { InlineBanner } from "@/features/common/States";
 import { RuntimeBadge } from "@/app/RuntimeBadge";
 import {
@@ -921,7 +922,7 @@ export function ConnectPage({
             <span />
           )}
           <OnboardingDots dots={dots} />
-          <span aria-hidden="true" />
+          <LanguageChip />
         </header>
       }
     >

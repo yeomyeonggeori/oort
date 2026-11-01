@@ -57,6 +57,7 @@ import {
   useDeviceLinkArrival,
 } from '../deeplink/deviceLink';
 import {useJoinPrefill} from '../deeplink/joinLink';
+import {LanguageChip} from '../i18n/LanguageChip';
 import {deviceLinkDevice} from '../features/deviceLink/deviceIdentity';
 import {focusTextInput} from '../features/deviceLink/focusTextInput';
 import {QrScannerSheet} from '../features/deviceLink/QrScannerSheet';
@@ -833,6 +834,7 @@ export default function ConnectScreen({
       <OnboardingPhoneScreen
         testID="connect-welcome"
         mainStyle={styles.welcomeMain}
+        top={<OnboardingTopBar dots={null} right={<LanguageChip />} />}
         decoration={dark ? <Stars /> : null}
         bottom={
           <>
@@ -941,6 +943,7 @@ export default function ConnectScreen({
                 />
               }
               dots={phoneOnboardingDots(route, joining ? 'join' : 'sign-in')}
+              right={<LanguageChip />}
             />
 
             <KomettoGuide
