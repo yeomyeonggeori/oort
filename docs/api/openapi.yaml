@@ -19224,7 +19224,13 @@ components:
             never an HTTP status or host. On `tool_call` it is `ok` or one closed failure
             code (`invalid_arguments`, `not_authorized`, `unavailable`, `conflict`,
             `already_claimed`, `claim_expired`, `internal`) — never an error message.
-        approvalId: {type: string, format: uuid}
+        approvalId:
+          type: string
+          format: uuid
+          description: >
+            Under the rule of `AgentRunProgress.approvalId`: named only to a caller who is an
+            active member of the channel the approval was raised in, which need not be the
+            run's own; absent otherwise (the row itself stays).
         actorMemberId: {type: string, format: uuid}
         tool:
           type: string
