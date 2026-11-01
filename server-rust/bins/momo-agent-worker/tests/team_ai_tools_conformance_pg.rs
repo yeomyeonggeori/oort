@@ -27,6 +27,7 @@
 //! | `a19_the_daily_search_cap_withholds_the_tool` | H13-A19 | skip `record_web_searches_in_tx` or the cap check |
 //! | `the_tool_loop_is_bounded` | H9-I11, H10 | drop the `MAX_MODEL_CALLS` check |
 //! | `an_answer_after_a_read_or_search_triggers_no_link_fetch` | #3899 review (H5 → answer) | drop `withhold_link_previews_in_tx` from `team_ai_finish` |
+//! | `a_run_read_says_no_outcome_word_on_an_approval_row` | #5007 (ADR-0200 F5 증보) | render `code` on a ledger row that names an approval, or drop it from a row that names none |
 //!
 //! H13-A9 (an agent-authored trigger → no tool, no answer) is
 //! `team_ai_conformance_pg::an_agent_authored_trigger_is_ignored`: the gate is
@@ -1495,4 +1496,99 @@ async fn every_read_tool_runs_under_the_role() {
             assert!(outcome.render(tool).contains(&run.to_string()), "{tool}");
         }
     }
+}
+
+/// #5007 — the helper's run read is a second reader of the run's ledger. A ledger row that names
+/// an approval keeps no `code` in the step line: on such a row `code` is how the approval ended,
+/// which belongs to the room the approval was raised in, and this role cannot read `approval`, so
+/// it cannot tell whether the requester is in that room. A row that names no approval
+/// (`failed · tool_error`) is the run's own and keeps its code.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_run_read_says_no_outcome_word_on_an_approval_row() {
+    use momo_workspace_actions::team_ai_tools::{
+        enter_helper_read_role, execute_read_tool_in_tx, load_scope_in_tx, ToolOutcome,
+    };
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    let run = enqueue_in(&pool, &t, t.channel_id, t.owner_id, "@oort 안녕").await;
+
+    // The ledger rows of a run that asked for an approval and was answered, asked for another that
+    // lapsed (an expiry has no decider), and then failed — as the table holds them (the helper's
+    // own run writes none; a hosted agent's does). The approval ids are soft references, as in the
+    // table.
+    let (approved, lapsed) = (Uuid::new_v4(), Uuid::new_v4());
+    for (kind, code, approval_id, actor) in [
+        ("approval_requested", None, Some(approved), Some(t.agent_id)),
+        (
+            "approval_decided",
+            Some("approved"),
+            Some(approved),
+            Some(t.owner_id),
+        ),
+        ("approval_requested", None, Some(lapsed), Some(t.agent_id)),
+        ("approval_decided", Some("expired"), Some(lapsed), None),
+        ("failed", Some("tool_error"), None, None),
+    ] {
+        sqlx::query(
+            "INSERT INTO agent_run_event (workspace_id, run_id, kind, code, approval_id, actor_member_id) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(t.workspace_id)
+        .bind(run)
+        .bind(kind)
+        .bind(code)
+        .bind(approval_id)
+        .bind(actor)
+        .execute(&su)
+        .await
+        .expect("plant a ledger row");
+    }
+    // The outcome words are in the table, so their absence below is the read's doing.
+    let stored: Vec<Option<String>> = sqlx::query_scalar(
+        "SELECT code FROM agent_run_event WHERE run_id = $1 AND kind = 'approval_decided' \
+          ORDER BY seq",
+    )
+    .bind(run)
+    .fetch_all(&su)
+    .await
+    .expect("stored outcomes");
+    assert_eq!(
+        stored,
+        [Some("approved".to_string()), Some("expired".to_string())]
+    );
+
+    let (ws, channel, owner, helper) = (t.workspace_id, t.channel_id, t.owner_id, t.agent_id);
+    let args = json!({"runId": run.to_string()});
+    let outcome = with_tenant_tx(&pool, ws, move |conn| {
+        let args = args.clone();
+        Box::pin(async move {
+            enter_helper_read_role(conn).await?;
+            let scope = load_scope_in_tx(conn, ws, helper, owner, channel).await?;
+            execute_read_tool_in_tx(conn, &scope, "get_agent_run", &args).await
+        })
+    })
+    .await
+    .unwrap_or_else(|error| panic!("get_agent_run failed under the role: {error}"));
+    let ToolOutcome::Data(text) = outcome else {
+        panic!("get_agent_run: expected data, got {outcome:?}");
+    };
+    let steps: Vec<&str> = text
+        .lines()
+        .filter(|line| line.starts_with("단계 "))
+        .collect();
+    assert_eq!(
+        steps,
+        [
+            "단계 1: approval_requested",
+            "단계 2: approval_decided",
+            "단계 3: approval_requested",
+            "단계 4: approval_decided",
+            "단계 5: failed · tool_error",
+        ],
+        "an approval row says no outcome word, decider or not; a row that names none keeps its code: {text}"
+    );
 }
