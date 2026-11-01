@@ -2,7 +2,7 @@
 
 - Status: **Accepted** (2026-07-15, 성재 — 권고안 D1-A~D5-A 전체 승인. Dawn 운영 항목(Apple Developer 계정·relay 배포)은 별도 실행 결정, 서버측 P-1/P-2는 웹 배치 후 발급). **부록 A(`work_session_idle` 5번째 reason): Accepted 2026-10-02, 성재 — 범위 한정(내가 시작한 세션·1분 이상·앱 비활성). A-8 참조.**
 - 증보: 2026-10-16 **ADR-0204** — D7(카테고리 `momo.approval.open` 추가, NSE 자리표시면 버튼 떼기, 승인 푸시는 결정 가능한 사람에게만), D8(에이전트 답·멈춤 → 요청자에게 와이어 `mention`, 보고 있으면 억제), D9(410·`BadDeviceToken` 무효화 = D4 이행). 어휘 증보는 relay 먼저(A-6 순서). 본문 결정은 바꾸지 않았다.
-- 증보: 2026-10-25 **ADR-0206**(알림 설정 v2, D14·D15) — 어휘 증보: reason `channel_message`·`keyword`·`test_notification`·`scheduled_failed`, category `momo.system`, reason별 정적 본문. 메시지 없는 푸시는 새 outbox kind `push_system`으로 보낸다. 모두 relay 먼저(A-6). 본문 결정(D2 id-only)은 바꾸지 않았다.
+- 증보: 2026-10-25 **ADR-0206**(알림 설정 v2, D14·D15) — 어휘 증보: reason `channel_message`·`keyword`·`test_notification`·`scheduled_failed`, category `momo.system`, reason별 정적 본문. 메시지 없는 푸시는 새 outbox kind `push_system`으로 보낸다. 모두 relay 먼저(A-6). 본문 결정(D2 id-only)은 바꾸지 않았다. 그중 `test_notification`·`momo.system`·정적 본문 표는 #4341이 먼저 냈다(부록 A-9).
 - 관련: `research/15-platform-expansion/01`(Slack 판정 교훈)·`02` §2-1(4사 relay 구조), ADR-0109(unread — 판정의 데이터 기반), ADR-0004(자격증명 비유입 — 같은 결의 content 비유입), ux-bible P8(알림 예산)·P9(판정 로직은 서버 한 곳)·P10(관측 내장), 로드맵 M5·EP-IOS(MOMO-040~043 승계)
 - 발단: 성재 인프라 발제(2026-07-15) 중 푸시. iOS(M5)의 전제조건이며 Dawn 운영 인프라가 필요해 **리드타임이 가장 긴 항목** — 웹 우선 결정과 무관하게 draft를 선행한다.
 
@@ -260,3 +260,42 @@ work-host 서명 미포팅으로 400 거부라(`server-rust/bins/momo-server/src
 ### 후속(범위 밖)
 폰 설정 토글·수신 UI는 #3342, 데스크탑 OS 알림 확장은 #3335 하위 이슈. 기기 앱 상태 보고(정확한 전경 신호)와
 팀 작업 끝남·DM의 푸시는 이 결정에 포함되지 않는다.
+
+## A-9. 어휘 증보 — `test_notification`·`momo.system`과 reason별 정적 본문 (ADR-0206 D11·D14·D15, #4341 — **Accepted** 2026-11-02, planner 위임 결정, ADR-0100; 독립 보안 검수 2회차 Blocker 0·High 0)
+
+ADR-0206 D14가 한 번에 묶은 어휘 증보 중, 시험 알림에 필요한 몫만 #4341이 먼저 냈다(`channel_message`·`keyword`·
+`scheduled_failed`는 그 슬라이스가 같은 방식으로 더한다). **와이어 계약은 그대로 id-only**(D2-A): 새 필드는 없고 새 라벨 둘과
+정적 문구 한 줄뿐이다.
+
+### 현행 어휘 (2026-11-02, 닫힌 집합)
+| 면 | 값 |
+|---|---|
+| `reason` 8종 | `dm` · `mention` · `approval_request` · `resume_offer` · `work_session_idle` · `work_run_done` · `thread_reply` · **`test_notification`** |
+| `category` 6종 | `momo.message` · `momo.mention` · `momo.approval` · `momo.approval.open` · `momo.work` · **`momo.system`**(버튼 없음, 소리 `default`) |
+| 정적 본문 | 제목은 늘 `oort`. 본문은 reason별 표: 기본 「새 알림」, `test_notification`은 「시험 알림이에요」(`dispatch.rs` `REASON_BODIES`, 값이 `&'static str`이라 이름·채널명·본문을 끼울 수 없다) |
+
+판정(`judge_targets`)이 고를 수 있는 reason은 이 중 일곱이다. `test_notification`은 판정이 **내지 않는다**(`PushReason::from_db`가 모른다):
+새 outbox kind `push_system`(migration 170)의 둘째 드레인만 만든다. 봉투의 `channel_id`·`message_id`·`thread_id`는 nil-UUID
+센티널이다 — relay `validate()`는 비어 있지 않은지만 보고 UUID 모양은 `approval_id`만 검사하며, Swift 파서는 nil UUID도 UUID로 읽는다.
+`push_dispatch_log.message_id`는 NULL로 남는다(nil UUID는 `message` FK 위반).
+
+### 배포 순서와 구·신 조합
+- **relay → migrate → notifier → api → 앱**(A-6과 같은 이유). 구 relay는 모르는 reason·category에 400을 돌려주고 notifier는 그 400을
+  영구 실패로 정산해 재시도하지 않는다 — 일반 푸시는 감사 한 줄(`push.relay.refused`, 토큰당 1시간에 1회)만 남지만, **시험 알림은 진단이
+  `relay_outdated`로 알린다**(기록된 `relay_http: HTTP 400: invalid momo.push.dispatch.v2 payload`를 코드로 바꿔 읽는다. 환경 불일치 400
+  `dispatch APNs environment does not match relay`는 `relay_outdated`가 아니라 `failed`다).
+- 구 앱은 새 reason·category를 파싱하지 못해 relay의 정적 본문(「시험 알림이에요」)으로 떨어진다(fail-open). 시험을 누른 사람이 본문으로
+  자기 시험임을 알아보게 하려고 기본 문구가 아니라 전용 문구를 둔다. 새 앱은 같은 어휘를 받고(`PUSH_REASONS`·`PUSH_CATEGORY`·Swift 두 곳),
+  탭하면 열 대화가 없어 앱만 열린다(「대화가 없어졌어요」를 내지 않는다. 알림 설정 화면으로 보내는 것은 #4342).
+- 시험 알림은 best-effort다: relay 429·5xx에도 재시도하지 않고 그 상태로 정산(`lastTest`가 `failed`)하며, relay에 닿지 못한 전송은 정산하지
+  않고 둔다(`queued` → `stalled`, 진단이 `relay_unreachable`을 추론).
+
+### 현행 구현 위치
+| 지점 | 파일 |
+|---|---|
+| relay 어휘·정적 본문 | `server-rust/bins/momo-push-relay/src/dispatch.rs` (`ALLOWED_REASONS` 8, `ALLOWED_CATEGORIES` 6, `CATEGORY_SOUNDS`, `REASON_BODIES`) |
+| 서버 어휘·센티널 봉투 | `server-rust/crates/momo-push/src/dispatch.rs`(`PushReason::TestNotification`·`PushCategory::System`), `…/system.rs` |
+| 생산자·소비자 | `momo-server/src/routes/notification_diagnostics.rs`(`POST …/test`), `momo-outbox/src/push.rs`(`emit_push_system`·`claim_push_system_batch`), `momo-notifier/src/push/system.rs` |
+| 진단 읽기 | `server-rust/crates/momo-push/src/diagnostics.rs`(`GET …/notification-diagnostics`) |
+| 폰 상수 | `clients/mobile/src/push/contract.ts`·`categories.ts`, `ios/MomoPushKit/PushNotification.swift`, `modules/momo-push-action-native/ios/MomoPushActionCore.swift` |
+| 시험 | relay 단위 + `scripts/verify_push_relay.sh`(8종·6범주·정적 본문), `momo-notifier/tests/push_system_conformance_pg.rs`(진짜 relay 라우터 포함), `momo-server/tests/notification_diagnostics_conformance_pg.rs`, `prod_role_conformance_pg.rs`, `pushContract.test.ts`·`pushTap.test.tsx` |

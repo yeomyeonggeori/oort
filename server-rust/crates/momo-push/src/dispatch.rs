@@ -60,6 +60,19 @@ pub enum PushReason {
     /// app. An old relay answers an unknown reason with a closed-vocabulary refusal, so the
     /// notifier's first such dispatch would be settled as a permanent failure and the push lost.
     ThreadReply,
+    /// The test notification a member sends to their own devices (ADR-0206 D11, #4341): the
+    /// eighth wire reason, under the new `momo.system` category. **Judgment never selects it** —
+    /// [`PushReason::from_db`] does not know the label — because it is produced only by the
+    /// `push_system` feed, which bypasses judgment on purpose: the question it answers is whether
+    /// the delivery path works at all, not whether this member would be notified. The envelope's
+    /// channel, message and thread ids are the nil-UUID sentinel (the relay checks they are
+    /// non-empty, not that they name a row).
+    ///
+    /// **Deploy order (ADR-0120 A-6):** the relay first, then migrate, the notifier, the server,
+    /// the app. An old relay answers an unknown reason or category with a closed-vocabulary
+    /// refusal; the notifier settles that 400 for good and the diagnostics report it as
+    /// `relay_outdated` instead of retrying.
+    TestNotification,
 }
 
 impl PushReason {
@@ -72,10 +85,14 @@ impl PushReason {
             PushReason::WorkSessionIdle => "work_session_idle",
             PushReason::WorkRunDone => "work_run_done",
             PushReason::ThreadReply => "thread_reply",
+            PushReason::TestNotification => "test_notification",
         }
     }
 
-    /// Decode the judgment SQL's `reason` column.
+    /// Decode the judgment SQL's `reason` column. **Only the reasons judgment can select:**
+    /// `test_notification` is a wire reason of the `push_system` feed and is deliberately not
+    /// decoded here, so a judgment statement that started to emit it would fail loudly (a decode
+    /// error, the candidate retries) instead of sending a test notification to a stranger.
     pub fn from_db(raw: &str) -> Option<Self> {
         match raw {
             "dm" => Some(PushReason::Dm),
@@ -107,6 +124,14 @@ pub enum PushCategory {
     /// buttons — which is the safe way for it to fail.
     ApprovalOpen,
     Work,
+    /// A push that names no conversation (ADR-0206 D14·D15, #4341): today the test notification,
+    /// later a failed scheduled message. No action buttons — there is nothing to reply to or
+    /// decide — and the relay speaks its static body for the reason.
+    ///
+    /// **Deploy order:** the relay first (it refuses a category it does not know), then the
+    /// server, then the app. An app build that predates the category cannot decode it and fails
+    /// open to the relay's static text, with no buttons, which is the safe way for it to fail.
+    System,
 }
 
 impl PushCategory {
@@ -117,6 +142,7 @@ impl PushCategory {
             PushCategory::Approval => "momo.approval",
             PushCategory::ApprovalOpen => "momo.approval.open",
             PushCategory::Work => "momo.work",
+            PushCategory::System => "momo.system",
         }
     }
 
@@ -344,41 +370,47 @@ mod tests {
         }
     }
 
-    /// ADR-0120 D2 build-time guard, and the reason this whole design exists.
-    ///
-    /// The relay-bound payload must carry **exactly** the id-only routing field
-    /// set. Revert that — add a `body`, a `sender_name`, a `channel_name` — and
-    /// this goes red. It mirrors `scripts/verify_push_notifier.sh:596-617`,
-    /// which asserts the same allow-list at runtime, and the Swift unit test
-    /// `NotifierWorkerTests.testDispatchPayloadIsIdOnly`.
-    #[test]
-    fn dispatch_payload_is_id_only() {
-        let dispatch = PushDispatch::new(&sample_target());
-        let value = serde_json::to_value(&dispatch).expect("serialize dispatch");
+    /// The exact id-only routing field set of the relay-bound payload.
+    const ID_ONLY_KEYS: [&str; 15] = [
+        "schema",
+        "server_id",
+        "workspace_id",
+        "device_id",
+        "device_platform",
+        "apns_token",
+        "apns_env",
+        "apns_topic",
+        "collapse_id",
+        "badge",
+        "reason",
+        "thread_id",
+        "category",
+        "channel_id",
+        "message_id",
+    ];
+
+    /// Key fragments that resemble a content-bearing field.
+    const CONTENT_SHAPED_FRAGMENTS: [&str; 13] = [
+        "body",
+        "text",
+        "name",
+        "handle",
+        "summary",
+        "title",
+        "preview",
+        "content",
+        "message_body",
+        "author",
+        "sender",
+        "excerpt",
+        "snippet",
+    ];
+
+    fn assert_dispatch_is_id_only(dispatch: &PushDispatch) {
+        let value = serde_json::to_value(dispatch).expect("serialize dispatch");
         let object = value.as_object().expect("dispatch is a JSON object");
-
-        let allowed: std::collections::BTreeSet<&str> = [
-            "schema",
-            "server_id",
-            "workspace_id",
-            "device_id",
-            "device_platform",
-            "apns_token",
-            "apns_env",
-            "apns_topic",
-            "collapse_id",
-            "badge",
-            "reason",
-            "thread_id",
-            "category",
-            "channel_id",
-            "message_id",
-        ]
-        .into_iter()
-        .collect();
-
+        let allowed: std::collections::BTreeSet<&str> = ID_ONLY_KEYS.into_iter().collect();
         let actual: std::collections::BTreeSet<&str> = object.keys().map(String::as_str).collect();
-
         assert_eq!(
             actual, allowed,
             "the id-only dispatch field set changed — this is an ADR-0120 D2 \
@@ -387,32 +419,11 @@ mod tests {
         assert_eq!(object["schema"], serde_json::json!(DISPATCH_SCHEMA));
     }
 
-    /// Defence in depth against the *shape* of a leak, not just today's names:
-    /// no key may even resemble a content-bearing field. A future `preview_text`
-    /// or `sender_handle` trips this even if someone also edits the allow-list
-    /// above.
-    #[test]
-    fn dispatch_payload_has_no_content_shaped_key() {
-        let dispatch = PushDispatch::new(&sample_target());
-        let value = serde_json::to_value(&dispatch).expect("serialize dispatch");
+    fn assert_dispatch_has_no_content_shaped_key(dispatch: &PushDispatch) {
+        let value = serde_json::to_value(dispatch).expect("serialize dispatch");
         let object = value.as_object().expect("dispatch is a JSON object");
-
         for key in object.keys() {
-            for fragment in [
-                "body",
-                "text",
-                "name",
-                "handle",
-                "summary",
-                "title",
-                "preview",
-                "content",
-                "message_body",
-                "author",
-                "sender",
-                "excerpt",
-                "snippet",
-            ] {
+            for fragment in CONTENT_SHAPED_FRAGMENTS {
                 assert!(
                     !key.to_ascii_lowercase().contains(fragment),
                     "content-shaped key '{key}' violates the id-only contract (ADR-0120 D2)"
@@ -421,25 +432,73 @@ mod tests {
         }
     }
 
+    /// The dispatch of one test notification (ADR-0206 D11): the same three guards apply to the
+    /// new reason and category — a sentinel-id envelope with a static body must not be a way to
+    /// widen the wire.
+    fn test_notification_dispatch() -> PushDispatch {
+        PushDispatch::new(&crate::system::test_notification_dispatch_target(
+            "momo-test",
+            Uuid::parse_str("00000000-0000-7000-8000-000000000001").unwrap(),
+            &crate::system::SystemTarget {
+                token_id: Uuid::parse_str("00000000-0000-7000-8000-0000000000e1").unwrap(),
+                device_id: Uuid::parse_str("00000000-0000-7000-8000-0000000000d1").unwrap(),
+                device_platform: "ios".to_string(),
+                apns_token: "deadbeefdeadbeef".to_string(),
+                apns_env: "sandbox".to_string(),
+                apns_topic: "com.momo.app".to_string(),
+            },
+            "t:00000000-0000-7000-8000-0000000000f1",
+            3,
+        ))
+    }
+
+    /// ADR-0120 D2 build-time guard, and the reason this whole design exists.
+    ///
+    /// The relay-bound payload must carry **exactly** the id-only routing field
+    /// set. Revert that — add a `body`, a `sender_name`, a `channel_name` — and
+    /// this goes red. It mirrors `scripts/verify_push_notifier.sh:596-617`,
+    /// which asserts the same allow-list at runtime, and the Swift unit test
+    /// `NotifierWorkerTests.testDispatchPayloadIsIdOnly`. The test notification's
+    /// envelope (ADR-0206 #4341) is held to the same set.
+    #[test]
+    fn dispatch_payload_is_id_only() {
+        assert_dispatch_is_id_only(&PushDispatch::new(&sample_target()));
+        assert_dispatch_is_id_only(&test_notification_dispatch());
+    }
+
+    /// Defence in depth against the *shape* of a leak, not just today's names:
+    /// no key may even resemble a content-bearing field. A future `preview_text`
+    /// or `sender_handle` trips this even if someone also edits the allow-list
+    /// above.
+    #[test]
+    fn dispatch_payload_has_no_content_shaped_key() {
+        assert_dispatch_has_no_content_shaped_key(&PushDispatch::new(&sample_target()));
+        assert_dispatch_has_no_content_shaped_key(&test_notification_dispatch());
+    }
+
     /// The payload must never carry the conversation itself even when the
     /// surrounding message is full of it. Serializing cannot reach message text,
     /// so we assert the rendered JSON is free of content the caller knows.
     #[test]
     fn dispatch_payload_cannot_carry_message_content() {
-        let dispatch = PushDispatch::new(&sample_target());
-        let json = serde_json::to_string(&dispatch).expect("serialize dispatch");
-
-        for secret in [
-            "hello world",
-            "김성재",
-            "Review before running",
-            "@intern",
-            "general",
+        for dispatch in [
+            PushDispatch::new(&sample_target()),
+            test_notification_dispatch(),
         ] {
-            assert!(
-                !json.contains(secret),
-                "conversation content '{secret}' reached the relay payload"
-            );
+            let json = serde_json::to_string(&dispatch).expect("serialize dispatch");
+
+            for secret in [
+                "hello world",
+                "김성재",
+                "Review before running",
+                "@intern",
+                "general",
+            ] {
+                assert!(
+                    !json.contains(secret),
+                    "conversation content '{secret}' reached the relay payload"
+                );
+            }
         }
     }
 
@@ -584,13 +643,13 @@ mod tests {
         );
     }
 
-    /// The category vocabulary is exactly these five strings. The relay validator
+    /// The category vocabulary is exactly these six strings. The relay validator
     /// (`momo-push-relay/src/dispatch.rs` `ALLOWED_CATEGORIES`), the phone's
     /// `clients/mobile/src/push/contract.ts` and the Swift `MomoPushCategory` each
     /// spell the same set and pin their own copy, so adding a category here without
     /// widening them turns one of those red instead of silently 400-ing in prod.
     #[test]
-    fn the_category_vocabulary_is_the_five_wire_categories() {
+    fn the_category_vocabulary_is_the_six_wire_categories() {
         // (category, wire string, does it name an approval) — written out, not derived
         // from the string: the relay's rule is an exact list, not a prefix, and an oracle
         // that computed it would agree with any new `momo.approval.*` by construction.
@@ -600,6 +659,8 @@ mod tests {
             (PushCategory::Approval, "momo.approval", true),
             (PushCategory::ApprovalOpen, "momo.approval.open", true),
             (PushCategory::Work, "momo.work", false),
+            // ADR-0206 D14·D15 (#4341): the test notification's category. No approval id.
+            (PushCategory::System, "momo.system", false),
         ];
         for (category, label, names_an_approval) in all {
             assert_eq!(category.as_str(), label);
@@ -621,25 +682,38 @@ mod tests {
         assert!(first.len() <= 64, "apns-collapse-id is capped at 64 bytes");
     }
 
-    /// The wire vocabulary is exactly these six strings (ADR-0120 부록 A,
-    /// Accepted 2026-10-02, plus `work_run_done` from ADR-0162 증보 3 D14). The
+    /// The wire vocabulary is exactly these eight strings (ADR-0120 부록 A,
+    /// Accepted 2026-10-02, plus `work_run_done` from ADR-0162 증보 3 D14, `thread_reply`
+    /// from ADR-0206 증보 1 F5 and `test_notification` from ADR-0206 D14·D15). The
     /// relay validator (`momo-push-relay/src/dispatch.rs` `ALLOWED_REASONS`) and the
     /// phone's `clients/mobile/src/push/contract.ts` spell the same set; each pins
     /// its own copy, so adding a reason here without widening them turns one of
     /// those red instead of silently 400-ing in prod.
+    ///
+    /// Seven of the eight are what the judgment SQL can select ([`PushReason::from_db`]
+    /// decodes them); `test_notification` is the one wire reason judgment never
+    /// produces — the `push_system` feed does — and `from_db` refusing it is held below.
     #[test]
-    fn the_judgment_vocabulary_is_the_six_wire_reasons() {
-        let all = [
+    fn the_wire_vocabulary_is_the_eight_reasons_and_judgment_selects_seven() {
+        let judged = [
             (PushReason::Dm, "dm"),
             (PushReason::Mention, "mention"),
             (PushReason::ApprovalRequest, "approval_request"),
             (PushReason::ResumeOffer, "resume_offer"),
             (PushReason::WorkSessionIdle, "work_session_idle"),
             (PushReason::WorkRunDone, "work_run_done"),
+            (PushReason::ThreadReply, "thread_reply"),
         ];
-        for (reason, label) in all {
+        for (reason, label) in judged {
             assert_eq!(reason.as_str(), label);
             assert_eq!(PushReason::from_db(label), Some(reason));
         }
+        assert_eq!(PushReason::TestNotification.as_str(), "test_notification");
+        assert_eq!(
+            PushReason::from_db("test_notification"),
+            None,
+            "judgment must never be able to select the test notification: a statement that \
+             emitted it would send a stranger a test push"
+        );
     }
 }

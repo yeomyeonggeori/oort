@@ -77,6 +77,8 @@ pub mod member_lifecycle;
 /// ADR-0196 / #3164 — team-memory digest + receipt reads and settings (RLS-filtered).
 pub mod memory;
 pub mod messages;
+/// ADR-0206 D11 (#4341) — 「왜 알림이 안 와요」 diagnostics and the test push (self-scoped, human only).
+pub mod notification_diagnostics;
 pub mod notification_rules;
 /// #1767 — operator-issued password reset + self password change.
 pub mod password;

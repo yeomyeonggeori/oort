@@ -6040,20 +6040,26 @@ paths:
       operationId: getNotificationDiagnostics
       summary: Why a push might not arrive, as closed codes the server can know.
       description: >
-        ADR-0206 D11 contract draft (served from #4341; 404 until then). The
-        caller's own state only; human bearer only (an agent bearer is 403).
-        `blockers` holds the closed codes the server can compute:
-        `paused`, `quiet_hours`, `channel_muted` (only with `channelId`),
-        `kind_off` (only with `kind`), `no_device`, `token_invalidated`,
-        `relay_unreachable` (inferred from recent dispatch records: the server
-        process has no relay client), `last_delivery_failed`. `ok` is true when
-        there is no blocker. That means the server holds nothing back, not that
-        the device shows it: the OS permission, the per-device switch and Focus
-        modes are known only to the client. Not codes: the phone delay while the
-        desktop is in use, the channel level and the server-wide budget drops
-        (ADR-0206 D11). `kind_off` and `quiet_hours` are served once the
-        kind-switch and work-hours slices land. `lastTest` is the latest test push
-        the caller sent, if any.
+        ADR-0206 D11 (#4341). The caller's own state only: the member is the credential's,
+        never a parameter. Human bearer only (an agent bearer is 403). `blockers` holds the
+        closed codes the *server* can know, in this order: `paused`, `quiet_hours`,
+        `channel_muted` (only with `channelId`), `kind_off`, `no_device`, `token_invalidated`,
+        `relay_unreachable`, `last_delivery_failed`. `no_device`: the caller has no push token
+        at all; `token_invalidated`: every token is dead (`sinceMs` is when the last one
+        died). `relay_unreachable` is inferred, because the api process has no relay client: a
+        dispatch of a current token that stayed unsettled for 2 minutes, or a test push nobody
+        processed for 30 seconds, within the last 15 minutes. `last_delivery_failed` reports
+        the latest settled dispatch of a current token (last 7 days; the bulk layer's drop
+        rows are skipped) when its status is 400 or above, and its `apnsReason` is a **code**
+        (an APNs reason, or `relay_vocabulary_refused`, `relay_environment_mismatch`,
+        `relay_http_<status>`), never a relay's own words. `ok` is true when there is no
+        blocker. That means the server holds nothing back, not that the device shows it: the
+        OS permission, the per-device switch and Focus modes are known only to the client.
+        Not codes: the phone delay while the desktop is in use, the channel level and the
+        server-wide budget drops (ADR-0206 D11). `kind_off` and `quiet_hours` are served once
+        the kind-switch and work-hours slices land; until then they are never returned and
+        `kind` is only validated against the closed list. `lastTest` is the latest test push
+        the caller sent, read from the dispatch records by its collapse id (`t:<id>`).
       security:
         - bearerAuth: []
       parameters:
@@ -6107,16 +6113,20 @@ paths:
       operationId: sendTestNotification
       summary: Send a test push to the caller's own devices.
       description: >
-        ADR-0206 D11 contract draft (served from #4341; 404 until then). A
-        separate path that **bypasses the push judgment**: its purpose is to
-        prove the delivery path, so it arrives even while the caller's
-        notifications are paused (the gates are what `getNotificationDiagnostics`
-        reports). It goes only to the caller's own active push tokens, as one
-        `push_system` outbox row (ADR-0206 D15) that the notifier signs and sends
-        with a static body. No request body. Human bearer only (an agent bearer is
-        403). 409 `no_device` when the caller has no active token. At most 3 per
-        minute per member: 429 `rate_limited`. The result is read from `lastTest`
-        of `getNotificationDiagnostics`.
+        ADR-0206 D11·D15 (#4341). A separate path that **bypasses the push judgment**: its
+        purpose is to prove the delivery path, so it arrives even while the caller's
+        notifications are paused (the gates are what `getNotificationDiagnostics` reports).
+        It goes only to the caller's own active push tokens — at most the 5 most recently
+        registered or refreshed, however many the caller has (`deviceCount` says how many it
+        goes to; `devices.active` of `getNotificationDiagnostics` is the real count) — as one
+        `push_system` outbox row (ADR-0206 D15, id-only, written in the same transaction as
+        the budget) that the notifier sends with the static body 「시험 알림이에요」. No
+        request body. Human bearer only (an agent bearer is 403). 409 with `error.code`
+        `no_device` when the caller has no active token (nothing is spent and nothing is
+        written). 429 with `error.code` `rate_limited` and a `Retry-After` of 1 to 60 seconds
+        past 3 per member per fixed 60-second window. The test is best effort: the relay's
+        429/5xx is not retried and shows as `failed`. The result is read from `lastTest` of
+        `getNotificationDiagnostics`.
       security:
         - bearerAuth: []
       parameters:
@@ -6137,7 +6147,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: "`no_device`: the caller has no active push token."
+          description: "`no_device` (`error.code`): the caller has no active push token."
           content:
             application/json:
               schema:
@@ -21353,9 +21363,9 @@ components:
 
     NotificationKind:
       type: string
-      enum: [dm, mentionHuman, mentionAgent, agentAnswer, approval, workDone, keyword, channelAll, scheduledFailed]
+      enum: [dm, mentionHuman, mentionAgent, agentAnswer, approval, workDone, keyword, channelAll, threadReply, scheduledFailed]
       description: >
-        ADR-0206 kind table. The server tags each push target with one of these
+        ADR-0206 kind table (`threadReply` is 증보 1). The server tags each push target with one of these
         when it judges. The engine owns this list.
 
     NotificationSurfaceSwitches:
@@ -21606,7 +21616,12 @@ components:
           description: "`last_delivery_failed`: the recorded HTTP status."
         apnsReason:
           type: string
-          description: "`last_delivery_failed`: the recorded reason code. Never message content."
+          description: >
+            `last_delivery_failed`: a **code**, never message content and never a relay's own
+            words: an APNs reason as APNs spelled it (`BadDeviceToken`, `Unregistered`, ...,
+            letters, digits and `_` only, at most 64 characters), or for a relay refusal
+            `relay_vocabulary_refused` (an old relay), `relay_environment_mismatch` or
+            `relay_http_<status>`. Absent when the record kept no reason.
 
     NotificationLastTest:
       type: object
@@ -21620,18 +21635,22 @@ components:
           type: string
           enum: [queued, stalled, sent, failed, relay_outdated]
           description: >
-            Read from the dispatch records of the test's collapse id. `queued`: no
-            record, or only an unsettled one, and younger than 30 s; `stalled`: the
-            same but older (the notifier may be off, or the device vanished before it
-            ran); `sent`: APNs answered 200 for a device; `failed`: settled records
-            without a 200 (APNs refusal, environment mismatch, relay 429);
-            `relay_outdated`: every settled record was an old relay refusing the new
-            vocabulary (not retried).
+            Read from the dispatch records of the test's collapse id (`t:<id>`), exactly,
+            never by scanning the outbox. `queued`: no record, or only unsettled ones, and
+            younger than 30 s; `stalled`: the same but 30 s or older (the notifier may be
+            off, the relay may be unreachable, or the device vanished before it ran);
+            `sent`: APNs answered 200 for at least one device; `relay_outdated`: every
+            attempt was the relay's closed-vocabulary refusal (an old relay; not retried);
+            `failed`: anything else once a record is settled and none is a 200 (an APNs
+            refusal, the relay's environment mismatch, a relay 429/5xx, or a mix of
+            settled and still-unsettled attempts).
         atMs:
           type: integer
           format: int64
+          description: When the test was made.
         apnsStatus:
           type: integer
+          description: "`sent`: 200. Otherwise the newest settled record's status."
 
     NotificationDiagnosticsResponse:
       type: object
@@ -21670,7 +21689,11 @@ components:
         deviceCount:
           type: integer
           minimum: 1
-          description: Active tokens the test goes to.
+          maximum: 5
+          description: >
+            Active tokens the test goes to: the caller's live tokens capped at 5 (the most
+            recently registered or refreshed). Not the caller's real device count — that is
+            `devices.active` of `getNotificationDiagnostics`, which has no cap.
 
     NotificationKeywordsResponse:
       type: object
