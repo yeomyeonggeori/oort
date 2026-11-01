@@ -24,16 +24,25 @@ export function ComposerLinkPreview({
   cards,
   suppressed,
   onDismiss,
+  testId = "composer-link-preview",
 }: {
   cards: readonly UnfurlPreviewCard[];
   /** ✕를 누른 직후: 카드는 사라졌고, 이 메시지가 어떻게 나가는지를 낭독으로만 알린다. */
   suppressed: boolean;
   /** ✕·Esc. 호출한 쪽이 입력칸으로 포커스를 돌려준다(버튼이 사라지면 포커스가 갈 곳을 잃는다). */
   onDismiss: () => void;
+  /**
+   * 시험 열쇠의 앞머리. 채널 입력칸과 스레드 입력칸은 한 화면에 함께 서므로(스레드 패널이 열려 있다) 같은
+   * 열쇠가 두 번 나오면 화면 시험이 어느 쪽인지 못 고른다 — 스레드는 자기 이름을 앞에 단다(`thread-composer-*`).
+   */
+  testId?: string;
 }) {
   const formatMessage = useFormatMessage();
   const preference = useLinkPreviewPreference();
   const dismissLabel = formatMessage("timeline.unfurl.previewDismiss");
+  // 파생 열쇠는 JSX 밖에서 만든다: 직접 문구 장부는 JSX 표현식 안의 문자열 조각을 문구로 센다.
+  const dismissTestId = `${testId}-dismiss`;
+  const statusTestId = `${testId}-status`;
   // 포커스가 카드나 ✕에 있을 때의 Esc. 입력칸에 있을 때의 Esc는 입력칸의 키 규칙이 받는다. 어느 키가
   // 「카드 닫기」인지는 같은 코어 규칙이 답한다(여기서 키 이름을 다시 적지 않는다).
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
@@ -59,7 +68,7 @@ export function ComposerLinkPreview({
           role="group"
           aria-label={formatMessage("timeline.unfurl.previewGroup")}
           className="attachment-tray"
-          data-testid="composer-link-preview"
+          data-testid={testId}
           onKeyDown={onKeyDown}
         >
           <div className="flex max-h-tray-max max-w-pane-lg flex-col gap-1 overflow-y-auto">
@@ -76,7 +85,7 @@ export function ComposerLinkPreview({
                     title={dismissLabel}
                     className="tap-target absolute right-1 top-1 layer-content-float flex size-control-sm items-center justify-center rounded-sm border border-line-strong bg-surface-raised text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
                     onClick={onDismiss}
-                    data-testid="composer-link-preview-dismiss"
+                    data-testid={dismissTestId}
                   >
                     <X className="size-4" aria-hidden="true" />
                   </button>
@@ -87,7 +96,7 @@ export function ComposerLinkPreview({
         </div>
       ) : null}
       {/* 늘 붙어 있는 낭독 노드: 조건부로 처음 생기는 라이브 리전은 낭독이 보장되지 않는다(예약 확정 줄과 같은 이유). */}
-      <p role="status" className="sr-only" data-testid="composer-link-preview-status">
+      <p role="status" className="sr-only" data-testid={statusTestId}>
         {suppressed ? formatMessage("timeline.unfurl.previewDismissed") : ""}
       </p>
     </>

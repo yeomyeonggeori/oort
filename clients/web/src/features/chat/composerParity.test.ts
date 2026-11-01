@@ -94,6 +94,19 @@ describe("컴포저 공용 표면 (#1688)", () => {
     );
   });
 
+  it("채널과 스레드가 같은 링크 미리보기 훅·카드 줄을 쓰고 ✕를 보낼 때 싣는다 (#5016)", () => {
+    for (const composer of [channel, thread]) {
+      expect(composer).toContain("useComposerLinkPreview(");
+      expect(composer).toContain("<ComposerLinkPreview");
+      // Esc 순서(멘션 목록 → 카드 → 인용)를 코어 규칙에 묻는 키 상태와, 켠 때만 가는 요청 필드.
+      expect(composer).toContain("previewOpen: linkPreview.cards.length > 0");
+      expect(composer).toContain("suppressUnfurl: true");
+    }
+    // 채널 입력창과 스레드 패널은 한 화면에 함께 서므로 시험 열쇠가 겹치지 않는다.
+    expect(thread).toContain('testId="thread-composer-link-preview"');
+    expect(thread).toContain("threadRootId: rootId");
+  });
+
   it("채널과 스레드가 입력 다음에 +·@·이모지·보내기 한 벌을 둔다 (#1749)", () => {
     expect(channel).toMatch(
       /data-testid="composer-input"[\s\S]*?<AttachButton[\s\S]*?data-testid="composer-mention-trigger"[\s\S]*?data-testid="composer-emoji-trigger"[\s\S]*?data-testid="composer-send"/

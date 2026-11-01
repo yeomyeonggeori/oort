@@ -290,10 +290,41 @@ KNOWN_CENTRIFUGO_SETTINGS = {
 
 
 
+def hermes_config_shas(repo_root: Path, errors: list[str]) -> list[str]:
+    """The sha256 of every config the gate and the start command accept, in the catalog's order: the renderer rebuilds them from the repo's
+    own pieces (same input, same bytes). lockgate.py carries the same table (`ACCEPTED_CONFIG_SHA256`); the two have to be one list."""
+    import importlib.util
+
+    def load(name: str):
+        spec = importlib.util.spec_from_file_location("catalog_check_" + name, repo_root / "infra" / "hermes" / (name + ".py"))
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    try:
+        renderer, gate = load("render_model_config"), load("lockgate")
+        catalog = renderer.repo_catalog(str(repo_root / "infra" / "hermes"))
+        shas = {name: renderer.sha256_of(text) for name, text in catalog.items()}
+    except Exception as exc:  # a renderer that cannot render the catalog is a catalog nobody can accept
+        errors.append("infra/hermes/render_model_config.py cannot rebuild the config catalog: %s" % exc.__class__.__name__)
+        return []
+    if dict(gate.ACCEPTED_CONFIG_SHA256) != {sha: name for name, sha in shas.items()} \
+            or list(gate.ACCEPTED_CONFIG_SHA256.values()) != list(shas):
+        errors.append(
+            "infra/hermes/lockgate.py ACCEPTED_CONFIG_SHA256 is not the config catalog `render_model_config.py --catalog` rebuilds "
+            "(names, hashes and order): update the table, then the start command and HERMES_LOCKGATE_B64"
+        )
+    return list(shas.values())
+
+
 def hermes_canonical(
-    config_sha: str, gate_sha: str, guard_sha: str, manifest_sha: str, relay_sha: str, probe_sha: str
+    config_shas: list[str], gate_sha: str, guard_sha: str, manifest_sha: str, relay_sha: str, probe_sha: str
 ) -> list[tuple[object, list[object]]]:
     """#4072: config and gate arrive as base64 variables and are PINNED to the repo bytes.
+
+    #4935: the config is pinned to a LIST of sha256 values, not one: the default config and the connector-mode config of each model
+    fragment (`infra/hermes/render_model_config.py --catalog`). `sha256sum <config> | cut -c1-64 | grep -qxF -e <h> ...` passes only when the
+    decoded file's hash is exactly one of them (whole-line, fixed-string match), and `|| { echo ... >&2; exit 78; }` says why it stopped.
 
     The sha256 check is what makes the start command fail-closed against an empty, stale or swapped
     variable: `printf " " | base64 -d` is an empty gate script that would exit 0 and start Hermes unchecked
@@ -323,8 +354,12 @@ def hermes_canonical(
         ("|", ["base64", "-d", ">", HERMES_GUARD_DIR + "/__init__.py"]),
         (";", ["printf", "%s", "$HERMES_IMAGE_GUARD_MANIFEST_B64"]),
         ("|", ["base64", "-d", ">", HERMES_GUARD_DIR + "/plugin.yaml"]),
-        (";", ["echo", "%s  %s" % (config_sha, HERMES_DATA + "/config.yaml")]),
-        ("|", ["sha256sum", "-c", "-"]),
+        (";", ["sha256sum", HERMES_DATA + "/config.yaml"]),
+        ("|", ["cut", "-c1-64"]),
+        ("|", ["grep", "-qxF"] + [word for sha in config_shas for word in ("-e", sha)]),
+        ("||", ["{", "echo", ANY, ">", "&", "2"]),
+        (";", ["exit", "78"]),
+        (";", ["}"]),
         (";", ["echo", "%s  %s" % (gate_sha, "/tmp/lockgate.py")]),
         ("|", ["sha256sum", "-c", "-"]),
         (";", ["echo", "%s  %s" % (guard_sha, HERMES_GUARD_DIR + "/__init__.py")]),
@@ -737,20 +772,22 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
     if extra_keys:
         errors.append("hermes has keys the catalog does not review (domain? replicas? restart?): %s" % ",".join(extra_keys))
     shas = []
-    for name in ("config.yaml", "lockgate.py", "plugins/oort-image-guard/__init__.py",
+    for name in ("lockgate.py", "plugins/oort-image-guard/__init__.py",
                  "plugins/oort-image-guard/plugin.yaml", "login_relay.py", "mcp_login_probe.py"):
         try:
             shas.append(hashlib.sha256((repo_root / "infra" / "hermes" / name).read_bytes()).hexdigest())
         except OSError as exc:
             errors.append("infra/hermes/%s unreadable: %s" % (name, exc.__class__.__name__))
-    if len(shas) == 6:
-        diff = canonical_diff(shell_commands(shell_script(hermes.get("startCommand"))), hermes_canonical(*shas))
+    config_shas = hermes_config_shas(repo_root, errors)
+    if len(shas) == 5 and config_shas:
+        diff = canonical_diff(shell_commands(shell_script(hermes.get("startCommand"))), hermes_canonical(config_shas, *shas))
         if diff:
             errors.append(
-                "hermes start command is not the canonical command list (gate-first, fail-closed, config, gate and "
-                "the two image-guard plugin files pinned to the sha256 of infra/hermes/config.yaml, lockgate.py and "
-                "plugins/oort-image-guard/*, the plugin installed before the gate; the login relay block only with a key, "
-                "its two files pinned the same way, key variables unset before exec): %s" % diff
+                "hermes start command is not the canonical command list (gate-first, fail-closed, config pinned to the sha256 LIST of "
+                "`render_model_config.py --catalog` (the default config and a connector-mode config for each model fragment), gate and "
+                "the two image-guard plugin files pinned to the sha256 of lockgate.py and plugins/oort-image-guard/*, the plugin "
+                "installed before the gate; the login relay block only with a key, its two files pinned the same way, key variables "
+                "unset before exec): %s" % diff
             )
     if (hermes.get("volume") or {}).get("mountPath") != HERMES_DATA:
         errors.append("hermes volume mountPath %r != %s" % ((hermes.get("volume") or {}).get("mountPath"), HERMES_DATA))
@@ -1318,6 +1355,24 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["relay"]["variables"]["MIGRATE_DATABASE_URL"] = "${{shared.MIGRATE_DATABASE_URL}}"
     elif kind == "sender-cent-api-key":  # G10
         services["webhook-sender"]["variables"]["CENT_API_KEY"] = "${{shared.CENT_API_KEY}}"
+    elif kind == "hermes-config-hash-dropped":  # #4935: one accepted config no longer in the start command's list
+        command = services["hermes"]["startCommand"]
+        listed = re.search(r"grep -qxF((?: -e [0-9a-f]{64})+)", command)
+        if listed is None:
+            raise SystemExit("mutation %s: no config hash list in the hermes start command" % kind)
+        last = re.findall(r" -e [0-9a-f]{64}", listed.group(1))[-1]
+        services["hermes"]["startCommand"] = command.replace(listed.group(1), listed.group(1)[: -len(last)], 1)
+    elif kind == "hermes-config-hash-foreign":  # #4935: a config nobody rebuilds from the repo's pieces is accepted
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qxF -e " + "0" * 64 + " -e ", kind
+        )
+    elif kind == "hermes-config-substring":  # #4935: whole-line match weakened to a substring match
+        services["hermes"]["startCommand"] = replace_once(services["hermes"]["startCommand"], "grep -qxF -e ", "grep -qF -e ", kind)
+    elif kind == "hermes-config-check-dropped":  # #4935: the config is not checked at all
+        services["hermes"]["startCommand"] = re.sub(
+            r"sha256sum /opt/data/config\.yaml \| cut -c1-64 \| grep -qxF(?: -e [0-9a-f]{64})+ \|\| \{ echo \"[^\"]*\" >&2; exit 78; \}; ",
+            "", services["hermes"]["startCommand"],
+        )
     elif kind == "hermes-guard-sha-stale":  # #4820 review: the pinned guard bytes no longer match the plugin file
         command = services["hermes"]["startCommand"]
         stale = re.search(r"echo \"([0-9a-f]{64})  /opt/data/plugins/oort-image-guard/__init__\.py", command)
@@ -1531,6 +1586,10 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("hermes-gate-sha-stale", "hermes start command is not the canonical command list"),
     ("hermes-no-sha-check", "hermes start command is not the canonical command list"),
     ("hermes-guard-sha-stale", "hermes start command is not the canonical command list"),
+    ("hermes-config-hash-dropped", "hermes start command is not the canonical command list"),
+    ("hermes-config-hash-foreign", "hermes start command is not the canonical command list"),
+    ("hermes-config-substring", "hermes start command is not the canonical command list"),
+    ("hermes-config-check-dropped", "hermes start command is not the canonical command list"),
     ("hermes-no-guard-install", "hermes start command is not the canonical command list"),
     ("hermes-image-floating", "hermes image"),
     ("hermes-oort-secret", "hermes variables outside its compose twin"),

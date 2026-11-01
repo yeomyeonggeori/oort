@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { RosterMember } from "../../lib/api";
 import {
   readTeamAiAliasStatus,
+  TEAM_AI_NEXT_STEP_COPY,
   teamAiAliasNotices,
   teamAiCallableLine,
   teamAiNextStepView,
@@ -108,5 +109,14 @@ describe("별칭 상태와 채울 이름", () => {
     );
     expect(teamAiTryLabel("마케팅", "oort")).toBe("#마케팅에서 @oort 불러 보기");
     expect(teamAiTryLabel(null, "oort-helper")).toBe("채널에서 @oort-helper 불러 보기");
+  });
+});
+
+// 서버 PR(#4944) 뒤 기본은 「제한 없음」이다. 카드 한 줄이 하루 상한이 있다고 말하면 그 순간부터 거짓이다.
+describe("다음 단계 카드의 사용량 문구", () => {
+  it("하루 상한이 있다고 말하지 않고, 한도를 정하는 곳을 가리킨다", () => {
+    expect(TEAM_AI_NEXT_STEP_COPY.capLine).not.toContain("상한");
+    expect(TEAM_AI_NEXT_STEP_COPY.capLine).toContain("정하지 않으면 없");
+    expect(TEAM_AI_NEXT_STEP_COPY.capLine).toContain("「사용 한도」");
   });
 });

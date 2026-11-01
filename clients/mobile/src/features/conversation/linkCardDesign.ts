@@ -24,4 +24,9 @@ export const LINK_CARD = {
   /** 재생 삼각형의 변(밑변 `3/4` 높이 `1/2`로 그린다). */
   playGlyphHero: 16,
   playGlyphThumb: 10,
+  /**
+   * 입력칸 미리보기(#5016)의 ✕ — 카드 오른쪽 위에 얹는 둥근 단추의 보이는 지름. 웹 `--spacing-control-sm`(28)과 같다.
+   * 누르는 면은 `slopTo(dismiss)` 가 44까지 채운다.
+   */
+  dismiss: 28,
 } as const;
