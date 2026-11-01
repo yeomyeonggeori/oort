@@ -408,7 +408,7 @@ async function installRealtimeSocket(page) {
  *                 헛초록으로 만든다.
  */
 async function installRoutes(context, scenario, delayMs) {
-  const state = { decisions: [], listCalls: 0 };
+  const state = { decisions: [], listCalls: 0, decidedIds: new Set() };
 
   await context.route("**/v1/**", async (route) => {
     const request = route.request();
@@ -447,6 +447,21 @@ async function installRoutes(context, scenario, delayMs) {
       });
     }
     if (path.endsWith("/read-state")) return json(route, { read_states: [] });
+    // 인박스는 서버 투영(`GET /inbox`, ADR-0199)이 원천이고 처리할 일(승인)은 클라이언트가 아래 `/approvals`를
+    // 따로 합친다. 이 게이트가 재는 것은 승인이므로 투영은 비어 있다. 이 줄이 없으면 포괄 응답 `{}`가
+    // 파싱에 실패해 인박스가 「불러오지 못했어요」로 서고 승인 행은 영영 그려지지 않는다(#5048).
+    if (path.endsWith("/inbox")) {
+      // 로딩 시나리오는 **투영**을 붙든다: 서버 투영이 인박스의 원천이라 그 응답이 오기 전에만 로딩 막대가 선다
+      // (`useMailbox`의 `isLoading`은 투영만 센다). 승인 원장이 늦는 동안의 모습은 이 게이트가 잠그지 않는다 —
+      // 그 자리는 인박스가 「비어 있어요」라고 말하는 별도 결함이다(#5048 인계).
+      if (scenario === "loading") await wait(delayMs);
+      // 진짜 장애: 인박스의 원천(투영)이 5xx로 답하지 못한다. 승인 원장만 실패하는 경우는 인박스가 오류가 아니라
+      // 「비어 있어요」로 접는다 — 그 자리는 이 게이트가 잠그지 않는 별도 결함이다(#5048 인계).
+      if (scenario === "error") {
+        return json(route, { error: { message: "internal error" } }, 500);
+      }
+      return json(route, { items: [], nextCursor: null });
+    }
 
     // 결정 POST. 목록보다 먼저 검사한다: 경로가 …/approvals/{id}/decision 이라
     // 목록 검사에 먼저 걸리면 결정이 목록으로 답해 버린다.
@@ -476,6 +491,7 @@ async function installRoutes(context, scenario, delayMs) {
       // 조용히 무너지는 코드를 초록으로 통과시킨다. 승인 갈래는 snake로 남겨
       // 두 와이어가 같은 게이트 안에서 함께 돌게 한다.
       if (!body.approve) {
+        state.decidedIds.add(String(body.approval_id).toLowerCase());
         return json(route, {
           approvalId: body.approval_id,
           status: "rejected",
@@ -483,6 +499,7 @@ async function installRoutes(context, scenario, delayMs) {
           decidedAtMs: nowMs,
         });
       }
+      state.decidedIds.add(String(body.approval_id).toLowerCase());
       return json(route, {
         ...decisionReceipt,
         approval_id: body.approval_id,
@@ -510,8 +527,14 @@ async function installRoutes(context, scenario, delayMs) {
       if (scenario === "spawn-blocked") {
         return json(route, { approvals: [spawnApproval({ blocked: true })] });
       }
+      // 결정된 행은 원장이 다시 읽을 때 대기 목록에서 빠진다(서버 답으로만 바뀐다 — 클라이언트가 흉내 내지 않는다).
       return json(route, {
-        approvals: [...pendingApprovals, settledApproval],
+        approvals: [
+          ...pendingApprovals.filter(
+            (approval) => !state.decidedIds.has(String(approval.id).toLowerCase())
+          ),
+          settledApproval,
+        ],
       });
     }
 
@@ -529,12 +552,27 @@ async function openInbox(page) {
   await page.getByTestId("login-email").fill("approvals@example.test");
   await page.getByTestId("login-password").fill("gate-only");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("rail-inbox").waitFor();
-  await page.getByTestId("rail-inbox").click();
+  // 목적지는 펼친 사이드바의 목록 열에 산다(`nav-inbox`). `rail-inbox`는 ⌘B로 접은 레일에만 서므로(WorkspaceRail,
+  // #3334) 펼친 채로 열리는 이 하네스는 그것을 영영 못 찾았다(#5048).
+  await page.getByTestId("nav-inbox").waitFor();
+  await page.getByTestId("nav-inbox").click();
   await page.getByTestId("inbox-route").waitFor();
 }
 
-async function newPage(browser, scenario, delayMs) {
+/**
+ * 인박스는 메일함이다(#3663, ADR-0199): 왼쪽 목록의 한 줄(`mailbox-row`)을 고르면 오른쪽 패널이 그 맥락을 열고,
+ * 결정 컨트롤은 그 **패널**에 선다. 옛 판처럼 행마다 컨트롤이 붙어 있지 않으므로 결정을 재는 시나리오는 먼저
+ * 처리할 일 탭에서 줄을 하나 골라야 한다(#5048). `hasText`는 같은 목록의 두 대기 행 중 어느 쪽인지 가른다.
+ */
+async function openApproval(page, { hasText } = {}) {
+  await page.getByTestId("inbox-tab-task").click();
+  await page.getByTestId("inbox-list").waitFor();
+  const rows = page.getByTestId("mailbox-row");
+  await (hasText === undefined ? rows.first() : rows.filter({ hasText }).first()).click();
+  await page.getByTestId("inbox-detail").waitFor();
+}
+
+async function newPage(browser, scenario, delayMs, { open = true, hasText } = {}) {
   const context = await browser.newContext({
     // 900x600: 이 레포에는 결정 컨트롤이 뷰포트 밖으로 밀린 전과가 두 번 있다.
     viewport: { width: 900, height: 600 },
@@ -544,6 +582,7 @@ async function newPage(browser, scenario, delayMs) {
   await installRealtimeSocket(page);
   const state = await installRoutes(context, scenario, delayMs);
   await openInbox(page);
+  if (open) await openApproval(page, { hasText });
   return { context, page, state };
 }
 
@@ -551,32 +590,46 @@ async function newPage(browser, scenario, delayMs) {
 
 /** 목록 + 결정 왕복. 승인함이 실제로 폐곡선인지 여기서 닫는다. */
 async function exerciseList(browser, delayMs) {
-  const { context, page, state } = await newPage(browser, "list", delayMs);
+  // 줄을 열지 않은 채 시작한다: 열기 전에는 결정 컨트롤이 어디에도 없어야 한다(아래 ①).
+  const { context, page, state } = await newPage(browser, "list", delayMs, {
+    open: false,
+  });
 
-  // 「결정 대기」 탭이 서 있어야 한다. 이 탭은 approvals 표면이 제공될 때만
-  // 세워지므로(availableInboxFilters), 판정 플립이 화면에 도달했다는 증거다.
-  const tab = page.getByTestId("inbox-tab-needs-action");
+  // 「처리할 일」 탭이 서 있어야 한다. 이 탭은 approvals 표면이 제공될 때만
+  // 세워지므로(mailboxTabs), 판정 플립이 화면에 도달했다는 증거다.
+  const tab = page.getByTestId("inbox-tab-task");
   if ((await tab.count()) !== 1) {
     throw new Error(
-      "needs-action tab: 승인 표면이 제공되는데도 결정 대기 탭이 서지 않았다"
+      "task tab: 승인 표면이 제공되는데도 처리할 일 탭이 서지 않았다"
     );
   }
+  await tab.click();
 
   await page.getByTestId("inbox-list").waitFor();
-  const rows = page.getByTestId("feed-row");
-  if ((await rows.count()) !== 3) {
+  const rows = page.getByTestId("mailbox-row");
+  // 대기 행 둘뿐이다: pending 페이지에 섞여 온 이미 결정된 행(settledApproval)은 줄이 되지 않는다.
+  if ((await rows.count()) !== 2) {
     throw new Error(
-      `approval rows: expected 3 rows at ${delayMs}ms, got ${await rows.count()}`
+      `approval rows: expected 2 pending rows at ${delayMs}ms (the settled one gets no row), got ${await rows.count()}`
     );
   }
 
-  // red proof seam ①: 컨트롤 수를 실제로 센다. 결정된 행에 컨트롤이 따라 붙으면
-  // 여기서 잡힌다.
+  // red proof seam ①: 컨트롤 수를 실제로 센다. 줄을 열기 전에는 컨트롤이 없고, 대기 행을 열면 그 한 건의
+  // 컨트롤만 선다. 결정된 행에 컨트롤이 따라 붙으면 줄이 셋이 되어 위에서 먼저 잡힌다.
   const approveButtons = page.getByTestId("inbox-approval-approve");
-  const approveCount = await approveButtons.count();
-  if (approveCount !== 2) {
+  if ((await approveButtons.count()) !== 0) {
     throw new Error(
-      `settled row control: expected 2 decision controls for 2 pending rows, got ${approveCount}`
+      "decision controls before opening a row: 줄을 열지 않았는데 결정 컨트롤이 서 있다"
+    );
+  }
+  await openApproval(page, { hasText: "명령 실행 허가" });
+  const approveCount = await approveButtons.count();
+  if (
+    approveCount !== 1 ||
+    (await page.getByTestId("inbox-approval-reject").count()) !== 1
+  ) {
+    throw new Error(
+      `decision controls: expected one approve + one reject for the opened pending row, got ${approveCount} approve`
     );
   }
 
@@ -595,8 +648,7 @@ async function exerciseList(browser, delayMs) {
     );
   }
 
-  // 밀도 주장: 900x600 한 화면에 결정 대기 목록이 통째로 들어오고, 그 마지막 행까지
-  // 스크롤 없이 결정할 수 있다. `boundingBox()`는 스크롤하지 않으므로 화면 밖이면
+  // 밀도 주장: 900x600 한 화면에서 연 대기 행의 결정 컨트롤까지 스크롤 없이 닿는다. `boundingBox()`는 스크롤하지 않으므로 화면 밖이면
   // 좌표가 그대로 밖에 나온다(Playwright의 click은 먼저 스크롤해 답이 항상 참이 된다).
   const lastBox = await approveButtons.last().boundingBox();
   const viewport = page.viewportSize();
@@ -608,7 +660,7 @@ async function exerciseList(browser, delayMs) {
     lastBox.y + lastBox.height > viewport.height
   ) {
     throw new Error(
-      `decision control viewport: ${viewport.width}x${viewport.height}에서 마지막 행의 승인 버튼이 스크롤 없이 화면 안에 없다 (${JSON.stringify(lastBox)})`
+      `decision control viewport: ${viewport.width}x${viewport.height}에서 연 행의 승인 버튼이 스크롤 없이 화면 안에 없다 (${JSON.stringify(lastBox)})`
     );
   }
 
@@ -643,7 +695,7 @@ async function exerciseList(browser, delayMs) {
   const note = page.getByTestId("inbox-decision-note");
   const noteRole = await note.getAttribute("role");
   const noteText = (await note.textContent()) ?? "";
-  if (noteRole !== "status" || !noteText.includes("승인을 기록했습니다")) {
+  if (noteRole !== "status" || !noteText.includes("승인을 기록했어요")) {
     throw new Error(
       `committed note: expected a neutral status note, got role=${noteRole} text=${noteText}`
     );
@@ -654,29 +706,17 @@ async function exerciseList(browser, delayMs) {
     throw new Error(`committed note: 계약을 넘어서는 약속을 했다 (${noteText})`);
   }
 
-  // 2R M6: 확정에 성공하면 그 행이 사라진다. 초점이 body로 떨어지면 키보드
-  // 사용자는 방금 일한 자리를 잃고 문서 맨 위에서 다시 Tab을 시작한다.
-  //
-  // 2R N-D: `!== body`로는 부족하다. 착지점은 **↑/↓ 핸들러를 가진 엘리먼트**여야
-  // 하고(그 핸들러는 `ul`에 있다), 바깥 상자에 앉으면 캐럿이 목록 근처에 있다는
-  // 사실만 남고 키는 아무데도 닿지 않는다. 그래서 착지한 엘리먼트를 이름으로
-  // 확인하고, 실제로 ↓가 행으로 이어지는지까지 눌러 본다.
-  const afterCommitFocus = await page.evaluate(
-    () => document.activeElement?.getAttribute("data-testid") ?? "body"
-  );
-  if (afterCommitFocus !== "inbox-list") {
-    throw new Error(
-      `commit focus: 확정 뒤 캐럿이 목록이 아니라 ${afterCommitFocus}에 있다`
-    );
-  }
-  await page.keyboard.press("ArrowDown");
-  const afterArrow = await page.evaluate(
-    () => document.activeElement?.getAttribute("data-testid") ?? "body"
-  );
-  if (afterArrow !== "feed-row") {
-    throw new Error(
-      `commit focus: 착지 뒤 ↓가 다음 행으로 이어지지 않았다 (${afterArrow})`
-    );
+  // 2R M6: 결정 뒤에 초점이 body로 떨어지면 키보드 사용자는 방금 일한 자리를 잃고 문서 맨 위에서 다시 Tab을
+  // 시작한다. 옛 판의 계약(착지는 목록 `ul`, ↓가 다음 `feed-row`로 이어진다)은 목록이 `ul` 로빙에서 메일함
+  // 목록으로 바뀌며 사라졌다(#5048). 남은 계약은 「초점이 문서 몸통으로 버려지지 않는다」이다.
+  const afterCommitFocus = await page.evaluate(() => {
+    const active = document.activeElement;
+    return active === null || active === document.body
+      ? "body"
+      : (active.getAttribute("data-testid") ?? active.tagName);
+  });
+  if (afterCommitFocus === "body") {
+    throw new Error("commit focus: 결정 뒤 초점이 문서 몸통으로 버려졌다");
   }
 
   // 결정 뒤에는 원장을 다시 읽는다. 행이 사라지는 것을 클라이언트가 흉내 내지
@@ -685,6 +725,15 @@ async function exerciseList(browser, delayMs) {
   if (state.listCalls <= beforeListCalls) {
     throw new Error(
       `ledger refetch: 결정 뒤 목록을 다시 읽지 않았다 (${beforeListCalls} -> ${state.listCalls})`
+    );
+  }
+  // 다시 읽은 원장의 답이 화면에 닿았다: 탭의 대기 수가 둘에서 하나로 줄었다.
+  const pendingAfter = Number(
+    ((await tab.innerText()).match(/\d+/) ?? ["NaN"])[0]
+  );
+  if (pendingAfter !== 1) {
+    throw new Error(
+      `ledger refetch: 원장이 다시 답했는데 처리할 일 수가 1로 줄지 않았다 (${pendingAfter})`
     );
   }
 
@@ -729,7 +778,6 @@ async function waitForEither(page, expectedTestId, wrongTestId, label) {
  */
 async function exerciseReject(browser, delayMs) {
   const { context, page, state } = await newPage(browser, "list", delayMs);
-  await page.getByTestId("inbox-list").waitFor();
 
   // #3819: 거부도 한 번에 결정된다.
   await page.getByTestId("inbox-approval-reject").first().click();
@@ -744,7 +792,7 @@ async function exerciseReject(browser, delayMs) {
   const text = (await note.textContent()) ?? "";
   if (
     (await note.getAttribute("role")) !== "status" ||
-    !text.includes("거부를 기록했습니다")
+    !text.includes("거부를 기록했어요")
   ) {
     throw new Error(`reject receipt: 거부 영수증이 정본이 아니다 (${text})`);
   }
@@ -757,7 +805,7 @@ async function exerciseReject(browser, delayMs) {
 
   // 2R L1: 이 영수증은 **그 목록에 대한 답**이다. 탭을 옮기면 가리키던 행은
   // 화면에 없는데 줄만 남아, 멘션 목록 위에 "거부를 기록했습니다"가 떠 있게 된다.
-  await page.getByTestId("inbox-tab-mentions").click();
+  await page.getByTestId("inbox-tab-mention").click();
   await page.waitForTimeout(300);
   if ((await page.getByTestId("inbox-decision-note").count()) !== 0) {
     throw new Error(
@@ -797,7 +845,6 @@ async function radioState(page, hostId) {
  */
 async function exerciseSpawnPicker(browser, delayMs) {
   const { context, page, state } = await newPage(browser, "spawn", delayMs);
-  await page.getByTestId("inbox-list").waitFor();
   await page.getByTestId("inbox-approval-host-group").waitFor();
 
   // ① RED PROOF: 자격 없는 줄은 눌리지 않는다.
@@ -1046,7 +1093,6 @@ async function exerciseSpawnBlocked(browser, delayMs) {
 /** 이미 다른 곳에서 결정된 요청. 정상적인 상태 전이이지 사고가 아니다. */
 async function exerciseSuperseded(browser, delayMs) {
   const { context, page } = await newPage(browser, "superseded", delayMs);
-  await page.getByTestId("inbox-list").waitFor();
   await page.getByTestId("inbox-approval-approve").first().click();
 
   // 인라인 오류(`inbox-approval-error`)가 먼저 그려지면 그것이 곧 회귀다:
@@ -1061,7 +1107,7 @@ async function exerciseSuperseded(browser, delayMs) {
   const note = page.getByTestId("inbox-decision-note");
   const role = await note.getAttribute("role");
   const text = (await note.textContent()) ?? "";
-  if (role !== "status" || !text.includes("이미 승인으로 기록되어 있었습니다")) {
+  if (role !== "status" || !text.includes("이미 승인으로 기록되어 있었어요")) {
     throw new Error(
       `superseded stays a note: expected role="status" + 원장 방향 문구, got role=${role} text=${text}`
     );
@@ -1071,7 +1117,12 @@ async function exerciseSuperseded(browser, delayMs) {
 
 /** 아직 배포되지 않은 서버. 미제공이지 장애가 아니다. */
 async function exerciseAbsent(browser, delayMs) {
-  const { context, page } = await newPage(browser, "absent", delayMs);
+  const { context, page } = await newPage(browser, "absent", delayMs, {
+    open: false,
+  });
+  // 이 빌드의 탭 표는 정적이라 승인 원장이 404여도 「처리할 일」 탭은 선다 — 그 탭이 말하는 것이 「미제공」이어야
+  // 장애(`inbox-error`)로 읽히지 않는다. 탭을 눌러 그 문장을 읽는다(#5048).
+  await page.getByTestId("inbox-tab-task").click();
   await waitForEither(
     page,
     "inbox-unavailable",
@@ -1087,7 +1138,9 @@ async function exerciseAbsent(browser, delayMs) {
 
 /** 진짜 장애. 다시 시도할 일이므로 오류 배너와 [다시 시도]가 서야 한다. */
 async function exerciseError(browser, delayMs) {
-  const { context, page } = await newPage(browser, "error", delayMs);
+  const { context, page } = await newPage(browser, "error", delayMs, {
+    open: false,
+  });
   await waitForEither(page, "inbox-error", "inbox-unavailable", "error state");
   const role = await page.getByTestId("inbox-error").getAttribute("role");
   if (role !== "alert") {
@@ -1098,10 +1151,12 @@ async function exerciseError(browser, delayMs) {
 
 /** 조용한 인박스는 설계가 작동한 모습이다. */
 async function exerciseEmpty(browser, delayMs) {
-  const { context, page } = await newPage(browser, "empty", delayMs);
+  const { context, page } = await newPage(browser, "empty", delayMs, {
+    open: false,
+  });
   await waitForEither(page, "inbox-empty", "inbox-error", "empty state");
   const text = (await page.getByTestId("inbox-empty").textContent()) ?? "";
-  if (!text.includes("조용한 게 정상입니다")) {
+  if (!text.includes("조용한 게 정상이에요")) {
     throw new Error(`empty state: 빈 상태가 실패처럼 말한다 (${text})`);
   }
   await context.close();
@@ -1109,16 +1164,31 @@ async function exerciseEmpty(browser, delayMs) {
 
 /** 로딩은 첫 응답이 오기 전에만 서고, 높이를 지키는 중립 막대여야 한다. */
 async function exerciseLoading(browser) {
-  const { context, page } = await newPage(browser, "list", 900);
-  await page.getByTestId("skeleton-row").first().waitFor({ timeout: 10_000 });
+  // 로딩의 원천은 승인 원장이 아니라 서버 투영이다(`installRoutes`의 `loading`). 승인 원장은 앱이 뜰 때(사이드바
+  // 「나에게 필요한 일」 수) 이미 읽기 시작하므로 옛 900ms 창은 라우트가 열린 뒤 CDP 왕복만으로도 닫혔다 —
+  // 로딩 막대를 볼 수 있을 만큼 길게 잡는다(#5048).
+  const { context, page } = await newPage(browser, "loading", 3_000, {
+    open: false,
+  });
+  // 인박스 안으로 한정한다. 사이드바 채널 섹션의 끝난 스켈레톤(숨은 막대)이 문서 앞에 남아 있어 페이지 전체의
+  // `.first()`는 영영 보이지 않을 그 요소를 기다린다(#5048).
+  const skeletonRows = page.locator(
+    '[data-testid="inbox-route"] [data-testid="skeleton-row"]'
+  );
+  await skeletonRows.first().waitFor({ timeout: 10_000 });
   if ((await page.getByTestId("inbox-empty").count()) !== 0) {
     throw new Error(
       "loading state: 응답을 기다리는 동안 '결정할 일이 없습니다'라고 말했다"
     );
   }
   await page.getByTestId("inbox-list").waitFor({ timeout: 10_000 });
-  if ((await page.getByTestId("skeleton-row").count()) !== 0) {
-    throw new Error("loading state: 목록이 온 뒤에도 스켈레톤이 남아 있다");
+  // 끝난 스켈레톤의 막대는 DOM에 숨은 채 남는다(`is-settled`). 사람이 보는 것은 보이는 막대뿐이다.
+  if (
+    (await page
+      .locator('[data-testid="inbox-route"] [data-testid="skeleton-row"]:visible')
+      .count()) !== 0
+  ) {
+    throw new Error("loading state: 목록이 온 뒤에도 스켈레톤이 보인다");
   }
   await context.close();
 }
@@ -1160,7 +1230,7 @@ async function main() {
     await server.stop();
   }
   console.log(
-    "GATE PASS: 결정 대기 탭 · 대기 행에만 결정 컨트롤 · 2단 무장과 초점 이동 ·"
+    "GATE PASS: 처리할 일 탭 · 연 대기 행에만 결정 컨트롤 · 한 번에 결정(확정 단계 없음)과 초점 유지 ·"
   );
   console.log(
     "           900x600 뷰포트 안 · 결정 왕복과 원장 재조회 · 이미 결정됨은 상태 전이 ·"

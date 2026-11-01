@@ -156,10 +156,9 @@ describe("행으로 그릴 메시지 (#4986)", () => {
     expect(chip(rows[0]!)).toBe("cancelled");
   });
 
-  it("종결 카드는 접히지 않고 호출 카드를 닫는다: 두 판정이 한 목록에서 함께 선다", () => {
+  it("종결 카드는 접히지 않고, 그 승인이 걸린 호출 행이 접힌다: 한 장만 말한다 (#5066)", () => {
     const rows = presentableRows([call("a"), approvalCard("a", "rejected")]);
-    expect(rows.map((message) => message.id)).toEqual(["call-a", "card-a"]);
-    expect(chip(rows[0]!)).toBe("cancelled");
+    expect(rows.map((message) => message.id)).toEqual(["card-a"]);
   });
 
   it("호출만 있으면 손대지 않고, 접을 줄이 없으면 그대로 돌려준다", () => {
@@ -168,5 +167,47 @@ describe("행으로 그릴 메시지 (#4986)", () => {
     expect(chip(rows[0]!)).toBe("thinking");
     const text = row("tool_result", "plain", { call_id: "z", output: "x", is_error: false });
     expect(presentableRows([text]).map((message) => message.id)).toEqual(["plain"]);
+  });
+});
+
+// #5066 (검증 줄 1회차 H2). 도구 승인 하나를 호출 카드와 승인 카드가 서로 다른 상태로 말했다(결정 대기 내내 호출 카드는
+// 「생각 중」, 기한이 지나도 서버가 정리하기 전까지 「생각 중」, 정리된 뒤엔 「중단됨」 대 「만료」). 이 시험은 두 장이
+// 한 목록에서 한 장이 되는 규칙을 코어에서 잰다: 승인이 걸린 호출은 승인 카드가 말하고 호출 행은 접힌다.
+describe("승인이 걸린 호출은 짝 승인 카드 한 장이 말한다 (#5066)", () => {
+  const ids = (messages: Message[]) => presentableRows(messages).map((message) => message.id);
+
+  it.each(["pending", "approved", "rejected", "expired", "cancelled"])(
+    "%s 승인: 같은 call_id 의 호출 행이 접히고 승인 카드는 남는다 — 어느 국면에도 호출 카드가 따로 상태를 말하지 않는다",
+    (status) => {
+      expect(ids([call("a"), approvalCard("a", status)])).toEqual(["card-a"]);
+    }
+  );
+
+  it("호출 행이 승인 카드보다 늦게 와도 목록 순서와 상관없이 접힌다", () => {
+    expect(ids([approvalCard("a", "pending"), call("a")])).toEqual(["card-a"]);
+  });
+
+  it("짝을 알아볼 수 없으면 접지 않는다: 카드 없음 · 다른 call_id · 다른 채널 · 지운 카드 · 승인 id 없는 카드", () => {
+    expect(ids([call("a")])).toEqual(["call-a"]);
+    expect(ids([call("a"), approvalCard("b", "pending")])).toEqual(["call-a", "card-b"]);
+    expect(ids([call("a"), approvalCard("a", "pending", {}, { channelId: "channel-2" })])).toEqual(["call-a", "card-a"]);
+    expect(ids([call("a"), approvalCard("a", "pending", {}, { state: "deleted" })])).toEqual(["call-a", "card-a"]);
+    expect(ids([call("a"), approvalCard("a", "pending", { approval_id: "" })])).toEqual(["call-a", "card-a"]);
+  });
+
+  it("호출 행만 접는다: 같은 call_id 의 결과 행·승인 카드·승인에 걸리지 않은 다른 호출은 그대로 선다", () => {
+    expect(ids([call("a"), approvalCard("a", "approved"), result("a")])).toEqual(["card-a", "result-a"]);
+    expect(ids([call("a"), approvalCard("a", "pending"), call("b")])).toEqual(["card-a", "call-b"]);
+    expect(ids([approvalCard("a", "pending")])).toEqual(["card-a"]);
+  });
+
+  it("접힌 호출 행의 이름을 결과 카드가 빌린다: 접기는 짝짓기 뒤에 한다", () => {
+    const rows = presentableRows([call("a"), approvalCard("a", "approved"), result("a")]);
+    expect(toolCardOf(rows[1]!).title).toBe("work.session.end 실행");
+  });
+
+  it("로그인 핸드오프 승인도 승인 카드 가족이라 그 호출 행을 접는다", () => {
+    const handoff = approvalCard("a", "pending", { kind: "login_handoff", tool_name: "work.session.login_handoff" });
+    expect(ids([call("a", { name: "work.session.login_handoff" }), handoff])).toEqual(["card-a"]);
   });
 });

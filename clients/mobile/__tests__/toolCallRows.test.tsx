@@ -72,33 +72,6 @@ const started = () =>
 const finished = (props: Record<string, unknown> = {}) =>
   row('tool_result', 2, {call_id: 'c1', output: '끝냈어요', is_error: false, ...props}, '끝냈어요');
 
-// #5009. 거부·만료·취소로 끝난 승인은 결과 행을 쓰지 않고 승인 카드가 제자리에서 고쳐진다(`approval_card.rs`). 카드 props 에는
-// 호출의 `call_id` 가 처음부터 실려 있다(`approval.rs` `approval_request_props`).
-// 끝난 승인 카드의 코드·문장은 서버가 정한 그대로다(`approval_outcome.rs` `outcome_code_and_line`).
-const OUTCOME: Record<string, [code: string, line: string]> = {
-  approved: ['approval_approved', '승인됐어요'],
-  rejected: ['approval_rejected', '거부됐어요'],
-  expired: ['approval_expired', '승인을 기다리다 만료됐어요'],
-  cancelled: ['human_cancelled', '요청을 멈췄어요'],
-};
-const settledApproval = (status: string) =>
-  row(
-    'approval_request',
-    3,
-    {
-      approval_id: 'ap-1',
-      call_id: 'c1',
-      tool_name: 'work.session.end',
-      action_type: 'tool_call',
-      approval_status: status,
-      status,
-      code: OUTCOME[status][0],
-      title: '도구 「work.session.end」 실행',
-      summary: OUTCOME[status][1],
-    },
-    OUTCOME[status][1],
-  );
-
 function renderTimeline(messages: Message[]) {
   return render(
     <Timeline
@@ -181,26 +154,86 @@ describe('끝난 도구 호출 카드는 폰 타임라인에서 닫힌 모양으
   });
 });
 
-describe('거부·만료·취소로 끝난 승인은 호출 카드를 중단으로 닫는다 (#5009)', () => {
-  it.each(['rejected', 'expired', 'cancelled'])(
-    '%s 카드가 있으면 결과 행이 없어도 호출 카드는 중단됨으로 닫히고 영어 폴백이 없다',
-    status => {
-      renderTimeline([started(), settledApproval(status)]);
-      // 승인 카드는 단계 카드가 아니라서 첫 단계 카드가 호출 행이다.
-      const call = callCard();
-      expect(call.getByText('중단됨')).toBeTruthy();
-      expect(call.getByTestId('step-mark-idle')).toBeTruthy();
-      expect(call.queryByTestId('step-mark-fail')).toBeNull();
-      expect(call.queryByText('생각 중')).toBeNull();
-      expect(screen.queryByText(/Tool call/)).toBeNull();
-    },
-  );
+// #5066 (검증 줄 1회차 H2). 승인이 걸린 호출은 호출 카드가 따로 말하지 않는다: 같은 목록에 짝 승인 카드가 있으면 코어
+// (`presentableRows`)가 그 호출 행을 접어서 승인 카드 한 장이 말한다. 옛 #5009 는 거부·만료·취소로 끝난 승인이 호출 카드를
+// 「중단됨」으로 닫았는데, 그 낱말은 바로 아래 승인 카드의 「만료」·「거부」와 다른 사실을 말했고, 결정을 기다리는 동안과 기한이
+// 지난 직후에는 닫지도 못해 「생각 중」으로 돌았다. 이 시험은 진짜 `Timeline` → `MessageRow` 가 그린 화면에서 한 번의 도구 승인이
+// 상태 낱말을 하나만 말하고, 그 낱말이 승인 카드의 것(사전: 승인 필요 · 만료 · 거부 · 취소)임을 잰다. 카드는 서버가 새 카드에
+// 싣는 모양(`decision_mode`·`intent`)이라 묶음 카드 문법으로 그려진다.
+describe('승인이 걸린 도구 호출은 폰 타임라인에서 승인 카드 한 장이 말한다 (#5066)', () => {
+  const DEADLINE = BASE_MS + 10 * 60_000;
+  const bundleApproval = (status: string, extra: Record<string, unknown> = {}) =>
+    row(
+      'approval_request',
+      3,
+      {
+        approval_id: 'ap-1',
+        call_id: 'c1',
+        tool_name: 'work.session.end',
+        action_type: 'tool_call',
+        approval_status: status,
+        status,
+        decision_mode: 'inline',
+        intent: '작업 세션을 끝내요',
+        expires_at_ms: DEADLINE,
+        ...extra,
+      },
+      '승인 요청',
+    );
+  const STALE_WORDS = ['생각 중', '중단됨'];
+  /** 화면에 선 상태 낱말은 승인 카드의 것 하나뿐이다: 상태 표지 하나, 호출 단계 카드와 도는 표지는 없다. */
+  function expectOneSpeaker(state: string, word: string) {
+    expect(screen.getAllByTestId(/^request-state-/)).toHaveLength(1);
+    expect(within(screen.getByTestId(`request-state-${state}`)).getByText(word)).toBeTruthy();
+    expect(screen.queryAllByTestId('agent-card-steps')).toHaveLength(0);
+    expect(screen.queryByTestId('step-mark-run')).toBeNull();
+    for (const stale of STALE_WORDS) expect(screen.queryByText(stale)).toBeNull();
+    expect(screen.queryByText(/Tool call/)).toBeNull();
+  }
 
-  it('승인됨 카드만으로는 닫지 않는다: 실행 중일 수 있어 「생각 중」이 그대로 돈다', () => {
-    renderTimeline([started(), settledApproval('approved')]);
-    const call = callCard();
-    expect(call.getByText('생각 중')).toBeTruthy();
-    expect(call.getByTestId('step-mark-run')).toBeTruthy();
+  it('결정을 기다리는 동안: 호출 카드는 「생각 중」으로 돌지 않고 승인 카드가 「승인 필요」를 말한다', () => {
+    renderTimeline([started(), bundleApproval('pending')]);
+    expectOneSpeaker('approval', '승인 필요');
+  });
+
+  it('기한이 지나면 서버가 카드를 고치기 전에도 시계로 「만료」다: 같은 카드가 낱말을 바꾸고 호출 카드는 여전히 없다', () => {
+    const view = renderTimeline([started(), bundleApproval('pending')]);
+    expectOneSpeaker('approval', '승인 필요');
+    view.rerender(
+      <Timeline
+        messages={[started(), bundleApproval('pending')]}
+        directory={DIRECTORY}
+        status="ready"
+        myMemberId={SELF_ID}
+        nowMs={DEADLINE + 1_000}
+      />,
+    );
+    expectOneSpeaker('expired', '만료');
+  });
+
+  it('서버가 카드를 고친 뒤에도 「만료」이고 「중단됨」으로 닫히지 않는다', () => {
+    renderTimeline([started(), bundleApproval('expired', {code: 'approval_expired', summary: '승인을 기다리다 만료됐어요'})]);
+    expectOneSpeaker('expired', '만료');
+  });
+
+  it('거부는 「거부」, 취소는 「취소」다', () => {
+    const view = renderTimeline([started(), bundleApproval('rejected', {code: 'approval_rejected', summary: '거부됐어요'})]);
+    expectOneSpeaker('declined', '거부');
+    view.unmount();
+    renderTimeline([started(), bundleApproval('cancelled', {code: 'human_cancelled', summary: '요청을 멈췄어요'})]);
+    expectOneSpeaker('cancelled', '취소');
+  });
+
+  it('승인됨 카드도 호출 카드를 따로 세우지 않는다: 승인 카드가 말한다', () => {
+    renderTimeline([started(), bundleApproval('approved')]);
+    expect(screen.getAllByTestId(/^request-state-/)).toHaveLength(1);
+    expect(screen.queryAllByTestId('agent-card-steps')).toHaveLength(0);
+  });
+
+  it('승인 카드가 없는 호출은 지금 그대로다: 호출 카드가 서고 「생각 중」이 맞는 말이다', () => {
+    renderTimeline([started()]);
+    expect(screen.getAllByTestId('agent-card-steps')).toHaveLength(1);
+    expect(callCard().getByText('생각 중')).toBeTruthy();
   });
 });
 

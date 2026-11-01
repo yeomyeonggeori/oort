@@ -160,6 +160,13 @@ npm run lane:phone          # the whole phone check, unattended (below)
 
 `ios/` requires `pod install` once (`cd ios && pod install`).
 
+**Metro started by a script or an agent** runs with `CHROME_PATH=/usr/bin/false`
+(the lane, `measure.sh` and `gate/run.mjs` already do; by hand:
+`CHROME_PATH=/usr/bin/false npm start`). Otherwise a tap on the dev build's
+"Open debugger" toast makes Metro launch the real Google Chrome from that shell,
+where it aborts at once and macOS shows "Google Chrome quit unexpectedly" (#5083).
+Run `npm start` without it only when you want the debugger window.
+
 ### Writing a test
 
 Import the shared tools from `__tests__/testkit` instead of declaring them again in the file
