@@ -5032,7 +5032,7 @@ async function openApprovalRow(page, { spawn }) {
   await rows.first().waitFor({ state: "visible" });
   const count = await rows.count();
   for (let index = 0; index < count; index += 1) {
-    await rows.nth(index).click();
+    await sceneClick(page, rows.nth(index));
     await page
       .getByTestId("inbox-approval-approve")
       .first()
@@ -10437,7 +10437,10 @@ async function captureHostedPairingScenes(browser, scheme) {
   const scrollCauses = [
     "causes",
     async (page) => {
-      await page.getByTestId("hosted-detect-causes").locator("summary").click();
+      await sceneClick(
+        page,
+        page.getByTestId("hosted-detect-causes").locator("summary")
+      );
       await page.getByTestId("hosted-detect-causes").scrollIntoViewIfNeeded();
       await page.waitForTimeout(100);
     },
