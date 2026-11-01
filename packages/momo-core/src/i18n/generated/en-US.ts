@@ -831,6 +831,24 @@ export const catalog: MessageCatalog = {
       "value": "Drawing your picture (up to 2 minutes)"
     }
   ],
+  "expressions.photo.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "expressions.photo.cancelHint": [
+    {
+      "type": 0,
+      "value": "This only stops waiting. The server may still finish a picture it already started."
+    }
+  ],
+  "expressions.photo.cancelled": [
+    {
+      "type": 0,
+      "value": "Canceled. The server may still finish a picture it already started."
+    }
+  ],
   "expressions.photo.caricatureHint": [
     {
       "type": 0,
@@ -1077,6 +1095,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Go to AI settings"
+    }
+  ],
+  "expressions.photo.noModelManagePhone": [
+    {
+      "type": 0,
+      "value": "Connect the image model in AI settings on the Mac or web app."
     }
   ],
   "expressions.photo.originLabel": [

@@ -123,6 +123,9 @@ export const messageKeys = [
   "expressions.photo.anotherPhoto",
   "expressions.photo.branchLabel",
   "expressions.photo.busy",
+  "expressions.photo.cancel",
+  "expressions.photo.cancelHint",
+  "expressions.photo.cancelled",
   "expressions.photo.caricatureHint",
   "expressions.photo.caricatureLabel",
   "expressions.photo.checkFailed",
@@ -163,6 +166,7 @@ export const messageKeys = [
   "expressions.photo.noModelHeadline",
   "expressions.photo.noModelImport",
   "expressions.photo.noModelManage",
+  "expressions.photo.noModelManagePhone",
   "expressions.photo.originLabel",
   "expressions.photo.photoHint",
   "expressions.photo.photoLabel",
@@ -405,6 +409,9 @@ export const argumentSpecs = {
   "expressions.photo.anotherPhoto": {},
   "expressions.photo.branchLabel": {},
   "expressions.photo.busy": {},
+  "expressions.photo.cancel": {},
+  "expressions.photo.cancelHint": {},
+  "expressions.photo.cancelled": {},
   "expressions.photo.caricatureHint": {},
   "expressions.photo.caricatureLabel": {},
   "expressions.photo.checkFailed": {},
@@ -447,6 +454,7 @@ export const argumentSpecs = {
   "expressions.photo.noModelHeadline": {},
   "expressions.photo.noModelImport": {},
   "expressions.photo.noModelManage": {},
+  "expressions.photo.noModelManagePhone": {},
   "expressions.photo.originLabel": {},
   "expressions.photo.photoHint": {},
   "expressions.photo.photoLabel": {},
@@ -673,6 +681,9 @@ export interface MessageArgs {
   "expressions.photo.anotherPhoto": Record<string, never>;
   "expressions.photo.branchLabel": Record<string, never>;
   "expressions.photo.busy": Record<string, never>;
+  "expressions.photo.cancel": Record<string, never>;
+  "expressions.photo.cancelHint": Record<string, never>;
+  "expressions.photo.cancelled": Record<string, never>;
   "expressions.photo.caricatureHint": Record<string, never>;
   "expressions.photo.caricatureLabel": Record<string, never>;
   "expressions.photo.checkFailed": Record<string, never>;
@@ -713,6 +724,7 @@ export interface MessageArgs {
   "expressions.photo.noModelHeadline": Record<string, never>;
   "expressions.photo.noModelImport": Record<string, never>;
   "expressions.photo.noModelManage": Record<string, never>;
+  "expressions.photo.noModelManagePhone": Record<string, never>;
   "expressions.photo.originLabel": Record<string, never>;
   "expressions.photo.photoHint": Record<string, never>;
   "expressions.photo.photoLabel": Record<string, never>;

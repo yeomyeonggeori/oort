@@ -810,6 +810,24 @@ export const catalog: MessageCatalog = {
       "value": "그림을 만드는 중이에요 (최대 2분)"
     }
   ],
+  "expressions.photo.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "expressions.photo.cancelHint": [
+    {
+      "type": 0,
+      "value": "기다리는 것만 멈춰요. 서버가 이미 시작한 그림은 끝까지 만들어질 수 있어요."
+    }
+  ],
+  "expressions.photo.cancelled": [
+    {
+      "type": 0,
+      "value": "취소했어요. 이미 시작한 그림은 서버에서 끝까지 만들어질 수 있어요."
+    }
+  ],
   "expressions.photo.caricatureHint": [
     {
       "type": 0,
@@ -1056,6 +1074,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "AI 설정으로 가기"
+    }
+  ],
+  "expressions.photo.noModelManagePhone": [
+    {
+      "type": 0,
+      "value": "이미지 모델은 맥·웹의 AI 설정에서 연결해요."
     }
   ],
   "expressions.photo.originLabel": [
