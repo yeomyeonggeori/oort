@@ -31,7 +31,7 @@ import {
   type OpenedReadSnapshot,
 } from "@/features/chat/openedReadState";
 import { useSession } from "@/app/session";
-import { useChannelViewingBeat } from "@/features/chat/useChannelViewingBeat";
+import { useChannelViewingBeat, useDocumentForeground } from "@/features/chat/useChannelViewingBeat";
 import { indexFallbackChannelId } from "@/features/sidebar/sidebarDmClosure";
 import { useDmVisibility } from "@/features/sidebar/useDmVisibility";
 import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
@@ -448,6 +448,10 @@ export function ChatShell() {
 
   const [thread, setThread] = useState<Message | null>(null);
   useEffect(() => setThread(null), [channelId]);
+  // 열린 스레드를 **보고 있는가**(패널이 떠 있고 창이 앞이다): 채널 목록의 그 루트 요약 줄은 남의 새 답글에도 안 읽은 수를 0으로
+  // 읽는다. 패널이 읽음 신호를 보내는 조건(`ThreadPanel`)과 같은 창 앞 판정이다(#5032). 작업 패널이 덮으면 스레드 패널이 없다.
+  // 스레드가 열려 있을 때만 구독한다 — 열려 있지 않으면 이 컴포넌트는 창 앞뒤 전환에 다시 그려지지 않는다.
+  const windowForeground = useDocumentForeground(thread !== null);
 
   // ── 걸어 둔 인용 (ADR-0148) ────────────────────────────────────────────────
   //
@@ -1478,6 +1482,7 @@ export function ChatShell() {
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
               channelKind={channel?.kind}
+              viewingThreadId={thread !== null && !workPanelOpen && windowForeground ? thread.id : null}
               channelName={label}
               channelTopic={channel?.topic}
               peer={peer}

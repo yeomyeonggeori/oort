@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, usePresence, useReducedMotion } from "motion/react";
 import { X } from "lucide-react";
@@ -26,7 +26,7 @@ import { PANEL_MOTION } from "@/design/motion";
 import { cn } from "@/design/lib/cn";
 import { Tooltip } from "@/design/ui/tooltip";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
-import { documentForeground } from "@/features/chat/useChannelViewingBeat";
+import { useDocumentForeground } from "@/features/chat/useChannelViewingBeat";
 import { THREAD_REPLIES_LEAD_CLASS } from "./spacing";
 import { shouldFoldBundleLine } from "@momo/core/features/timeline/requestBundle";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
@@ -90,15 +90,6 @@ type ThreadPanelProps = {
 };
 
 const CLOSE_LABEL = "스레드 닫기";
-
-/** 사람이 이 창을 보고 있는가 — 「보고 있음」 신호가 쓰는 어댑터 그대로(탭이 보이고 창이 포커스를 가졌다). */
-function useForeground(): boolean {
-  return useSyncExternalStore(
-    (notify) => documentForeground.subscribe(() => notify()),
-    () => documentForeground.isForeground(),
-    () => true
-  );
-}
 
 export function ThreadPanel(props: ThreadPanelProps) {
   const { root, onClose } = props;
@@ -255,7 +246,8 @@ function ThreadPanelFrame({
       }),
     []
   );
-  const foreground = useForeground();
+  // 사람이 이 창을 보고 있는가 — 채널 목록의 열린 스레드 요약(`viewingThreadId`)과 같은 값이다.
+  const foreground = useDocumentForeground();
   const readsThread = actions !== undefined;
   useEffect(() => {
     if (!readsThread || !foreground) return;

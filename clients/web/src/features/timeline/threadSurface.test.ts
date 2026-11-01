@@ -40,6 +40,16 @@ describe("스레드 표면 계약 (#1753)", () => {
     expect(panelSource).toContain("readTarget.current.onThreadRead?.(rootId, state)");
   });
 
+  it("열린 스레드를 보고 있는지 목록에 알린다 — 읽음 신호를 보내는 조건과 같은 창 앞 판정이다 (#5032)", () => {
+    // 패널이 열려 있고 창이 앞이면 그 루트의 요약 줄은 남의 새 답글에 칩이 +1 되지 않는다. 호스트가 이 값을 안 내리면 코어의
+    // `viewing`이 영영 안 켜지고, 패널과 목록이 서로 다른 「앞」을 읽으면 칩이 깜빡이거나 안 읽은 채로 사라진다.
+    expect(chatShellSource).toContain("const windowForeground = useDocumentForeground(thread !== null);");
+    expect(chatShellSource).toContain(
+      "viewingThreadId={thread !== null && !workPanelOpen && windowForeground ? thread.id : null}"
+    );
+    expect(panelSource).toContain("const foreground = useDocumentForeground();");
+  });
+
   it("루트 툴바가 판정할 자체 스크롤 경계를 이름 붙인다", () => {
     expect(panelSource).toContain('data-message-scroll-container=""');
   });
