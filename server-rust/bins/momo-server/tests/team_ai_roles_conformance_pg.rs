@@ -24,11 +24,14 @@
 //! | `s6_the_settings_patch_is_the_admins_door_and_moves_one_switch_at_a_time` | B3 저장 | merge `team_ai_roles` whole, drop the validator, or write the audit with values |
 //! | `s7_turning_memory_on_is_409_while_team_memory_is_off` | issue acceptance | drop `memory_prerequisite_in_tx` from the PATCH or from `set_role_in_tx` |
 //! | `s8_another_workspaces_switches_are_not_touched` | 두 테넌트 | write the settings without the workspace id |
-//! | `s9_what_a_settings_patch_commits_is_audited_when_it_answers_409` | B13-I5 감사 | write the two audit rows after the provisioning block instead of right after the write |
+//! | `s9_what_a_settings_patch_commits_is_audited_when_it_answers_409` | B13-I5 감사 (고지 기록 #5040) | write the audit rows and the consent record after the provisioning block instead of right after the write |
 //! | `s10_a_helper_only_card_runs_only_with_the_helpers_mark` | B13-I5 출처 | drop the unmarked-card arm of `card_provenance` |
 //! | `s11_a_decision_waits_for_a_settings_write_in_flight` | B13-I5 경쟁 | read the settings row in the gate without holding it |
 //! | `s12_the_decisions_read_holds_the_settings_row_in_the_mode_it_names` | B13-I5 경쟁 | swap the lock clauses of `read_roles_locked_in_tx`, or let an unreadable row read as all on |
 //! | `s13_a_platform_reader_who_is_not_an_admin_cannot_approve_the_roles_card` | B3-T | lower the roles card's `required_role` from `Admin` to `WorkspaceOperator` |
+//! | `s14_a_screen_that_shows_the_notice_leaves_one_record_with_the_wording_it_named` | B3 고지 (#5040) | drop `record_notice_in_tx` from the PATCH, or stop lifting `team_ai_roles_notice` out of the body (the allowlist 400s it) |
+//! | `s15_a_record_the_server_cannot_read_is_a_400_and_a_switch_that_did_not_move_leaves_none` | B3 고지 (#5040) | accept any wording or `via`, or write the record before the `team_memory_off` refusal |
+//! | `s16_another_workspace_neither_gets_nor_sees_the_record` | 두 테넌트 (#5040) | write the record under another workspace's id, or let a token reach another workspace's PATCH |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -655,15 +658,21 @@ async fn s2_a_card_that_turns_files_or_memory_on_leaves_one_notice_record() {
         2,
         "only the two cards that turned a noticed bundle on"
     );
-    // The same function the onboarding step calls writes the same shape.
+    // The same function a screen's PATCH reaches (#5040) writes the same shape. (A bundle with no
+    // notice never gets this far: the claim refuses it — see the unit tests and `s14`.)
+    let claim = momo_workspace_actions::team_ai_roles::parse_screen_notice(&json!({
+        "bundles": ["files"],
+        "noticeVersion": roles::NOTICE_VERSION,
+        "via": "onboarding",
+    }))
+    .expect("a judged claim");
     let mut conn = h.su.acquire().await.unwrap();
     let written = momo_workspace_actions::team_ai_roles::record_notice_in_tx(
         &mut conn,
         h.workspace,
         h.owner,
         None,
-        &[roles::FILES, roles::CODE],
-        momo_workspace_actions::team_ai_roles::ScreenNotice::Onboarding,
+        &claim,
     )
     .await
     .unwrap();
@@ -1232,10 +1241,16 @@ async fn s9_what_a_settings_patch_commits_is_audited_when_it_answers_409() {
     let roles_rows = h.audit_rows("team_ai.roles.changed").await.len();
     let updated_rows = h.audit_rows("workspace_setting.updated").await.len();
 
+    // The onboarding shape (#5040): files off, so the line the admin read was memory's. The claim
+    // rides on the same request.
     let (status, body) = h
         .patch(
             &h.owner_token,
-            json!({"team_ai_fast_path": true, "team_ai_roles": {"files": false}}),
+            json!({
+                "team_ai_fast_path": true,
+                "team_ai_roles": {"files": false},
+                "team_ai_roles_notice": notice_claim(json!(["memory"]), "onboarding"),
+            }),
         )
         .await;
     assert_eq!(status, 409, "{body}");
@@ -1269,8 +1284,14 @@ async fn s9_what_a_settings_patch_commits_is_audited_when_it_answers_409() {
         updated_rows + 1,
         "so is the write itself"
     );
+    // So is the consent record: the admin did read the line and pressed the button, whatever the
+    // provisioning answered next (#5040). It is written right after the write, before that block.
+    let records = h.notice_records().await;
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].0["via"], "onboarding");
+    assert_eq!(records[0].0["bundles"], json!(["memory"]));
 
-    // The success path writes the same two rows once the handle is free.
+    // The success path writes the same rows once the handle is free.
     sqlx::query("UPDATE member SET handle = 'renamed-agent' WHERE id = $1")
         .bind(holder)
         .execute(&su)
@@ -1279,7 +1300,11 @@ async fn s9_what_a_settings_patch_commits_is_audited_when_it_answers_409() {
     let (status, body) = h
         .patch(
             &h.owner_token,
-            json!({"team_ai_fast_path": true, "team_ai_roles": {"files": true}}),
+            json!({
+                "team_ai_fast_path": true,
+                "team_ai_roles": {"files": true},
+                "team_ai_roles_notice": notice_claim(json!(["files", "memory"]), "onboarding"),
+            }),
         )
         .await;
     assert_eq!(status, 200, "{body}");
@@ -1287,6 +1312,10 @@ async fn s9_what_a_settings_patch_commits_is_audited_when_it_answers_409() {
         h.audit_rows("team_ai.roles.changed").await.len(),
         roles_rows + 2
     );
+    // The retry is a second event, not a replacement: the record is a log.
+    let records = h.notice_records().await;
+    assert_eq!(records.len(), 2, "{records:?}");
+    assert_eq!(records[1].0["bundles"], json!(["files", "memory"]));
     assert_eq!(
         h.audit_rows("workspace_setting.updated").await.len(),
         updated_rows + 2
@@ -1626,4 +1655,371 @@ async fn s13_a_platform_reader_who_is_not_an_admin_cannot_approve_the_roles_card
     let (status, decided) = h.decide(&h.owner_token, card.approval_id, true).await;
     assert_eq!(status, 200, "{decided}");
     assert!(!h.roles().await.is_on(roles::FILES));
+}
+
+// --- the screens' consent record (#5040) ---------------------------------------------------------
+
+/// The consent record a screen carries on the settings PATCH it already sends.
+fn notice_claim(bundles: Value, via: &str) -> Value {
+    json!({"bundles": bundles, "noticeVersion": roles::NOTICE_VERSION, "via": via})
+}
+
+impl Harness {
+    /// Every `team_ai.roles.notice_shown` row of this workspace, oldest first: its detail, who
+    /// (the actor) and whether `created_at` — the row's own clock — is from the last minute.
+    async fn notice_records(&self) -> Vec<(Value, Option<Uuid>, bool)> {
+        sqlx::query_as(
+            "SELECT detail, actor_member_id, (now() - created_at) < interval '1 minute' \
+               FROM audit_log \
+              WHERE workspace_id = $1 AND action = 'team_ai.roles.notice_shown' \
+              ORDER BY created_at, id",
+        )
+        .bind(self.workspace)
+        .fetch_all(&self.su)
+        .await
+        .expect("notice records")
+    }
+}
+
+/// How many consent rows `workspace` shows to the NOBYPASSRLS app role under its own tenant scope.
+async fn notice_rows_seen_by_the_app_role(app: &PgPool, scope: Uuid) -> i64 {
+    with_tenant_tx(app, scope, move |conn| {
+        Box::pin(async move {
+            let count: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM audit_log WHERE action = 'team_ai.roles.notice_shown'",
+            )
+            .fetch_one(&mut *conn)
+            .await?;
+            Ok(count)
+        })
+    })
+    .await
+    .expect("count under the tenant scope")
+}
+
+/// B3 고지 (#5040): turning `files` on from the settings screen, with the claim that the screen
+/// showed the line, leaves ONE consent row — who (the admin), when (the row's clock), which bundle,
+/// which wording, through which screen — in the same transaction as the switch. The claim is not a
+/// setting: it is not stored, not echoed, and not a "key patched" in the settings audit row. The
+/// same PATCH from an older client (no claim) turns the switch on all the same and records nothing,
+/// and the onboarding screen's carrier — the PATCH that switches the helper on — records too.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn s14_a_screen_that_shows_the_notice_leaves_one_record_with_the_wording_it_named() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let h = harness(None, &app, &su).await;
+
+    // Off needs no record: nothing goes to the provider by turning a bundle off.
+    let (status, body) = h
+        .patch(
+            &h.owner_token,
+            json!({"team_ai_roles": {"files": false, "memory": false}}),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(h.notice_records().await.is_empty());
+    let updated_before = h.audit_rows("workspace_setting.updated").await.len();
+
+    let (status, body) = h
+        .patch(
+            &h.owner_token,
+            json!({
+                "team_ai_roles": {"files": true},
+                "team_ai_roles_notice": notice_claim(json!(["files"]), "settings"),
+            }),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(h.roles().await.is_on(roles::FILES), "the switch moved");
+    let records = h.notice_records().await;
+    assert_eq!(records.len(), 1, "{records:?}");
+    let (detail, actor, recent) = &records[0];
+    assert_eq!(detail["bundles"], json!(["files"]), "which bundle");
+    assert_eq!(
+        detail["notice_version"],
+        roles::NOTICE_VERSION,
+        "which wording"
+    );
+    assert_eq!(detail["via"], "settings", "through which screen");
+    assert_eq!(
+        detail["approval_id"],
+        Value::Null,
+        "a screen's record carries no approval"
+    );
+    assert_eq!(*actor, Some(h.owner), "who");
+    assert!(*recent, "when: the row's own clock");
+    // Not a setting: neither stored nor echoed, and not a key the settings audit row names.
+    assert!(body.get("team_ai_roles_notice").is_none(), "{body}");
+    assert!(h.settings().await.get("team_ai_roles_notice").is_none());
+    let updated = h.audit_rows("workspace_setting.updated").await;
+    assert_eq!(updated.len(), updated_before + 1);
+    assert_eq!(updated.last().unwrap()["keys"], json!(["team_ai_roles"]));
+    // The switch's own audit row is still the one it always was.
+    let changed = h.audit_rows("team_ai.roles.changed").await;
+    assert_eq!(changed.last().unwrap()["keys"], json!(["files"]));
+    assert_eq!(changed.last().unwrap()["source"], "settings");
+
+    // An older client: the same switch without the claim moves and records nothing.
+    let (status, body) = h
+        .patch(&h.owner_token, json!({"team_ai_roles": {"memory": true}}))
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(h.roles().await.is_on(roles::MEMORY));
+    assert_eq!(
+        h.notice_records().await.len(),
+        1,
+        "no claim, no record, nothing blocked"
+    );
+
+    // The onboarding screen: its claim rides on the PATCH that switches the helper on.
+    let other = harness_with(Some(h.base.clone()), &app, &su, false).await;
+    let (status, body) = other
+        .patch(
+            &other.owner_token,
+            json!({
+                "team_ai_fast_path": true,
+                "team_ai_roles_notice": notice_claim(json!(["memory", "files"]), "onboarding"),
+            }),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        body["team_ai_agent_member_id"].is_string(),
+        "the helper is on: {body}"
+    );
+    let records = other.notice_records().await;
+    assert_eq!(records.len(), 1, "{records:?}");
+    assert_eq!(records[0].0["via"], "onboarding");
+    assert_eq!(
+        records[0].0["bundles"],
+        json!(["files", "memory"]),
+        "table order"
+    );
+    assert_eq!(records[0].1, Some(other.owner));
+
+    // The wording a claim names is the wording that is recorded, not the server's newest. The
+    // route's list holds one version, so a second is listed here to let the two differ.
+    let older = momo_workspace_actions::team_ai_roles::parse_screen_notice_against(
+        &json!({"bundles": ["memory"], "noticeVersion": "2026-01-01.v0", "via": "settings"}),
+        &["2026-01-01.v0", roles::NOTICE_VERSION],
+    )
+    .expect("an older wording the (test) list holds");
+    let mut conn = h.su.acquire().await.unwrap();
+    let written = momo_workspace_actions::team_ai_roles::record_notice_in_tx(
+        &mut conn,
+        h.workspace,
+        h.owner,
+        None,
+        &older,
+    )
+    .await
+    .unwrap();
+    assert!(written);
+    drop(conn);
+    let records = h.notice_records().await;
+    assert_eq!(records.len(), 2, "{records:?}");
+    assert_eq!(
+        records[1].0["notice_version"], "2026-01-01.v0",
+        "the screen's wording, not NOTICE_VERSION"
+    );
+    assert_eq!(records[1].0["bundles"], json!(["memory"]));
+}
+
+/// B3 고지 (#5040): a claim the server cannot make sense of is a 400 and NOTHING is written — not
+/// the switch it rode on, not a record, not the settings audit row — whichever field is wrong. A
+/// PATCH that is refused before it writes (a bad settings value, a missing admin, the 409
+/// `team_memory_off`) leaves no record of a switch that did not move.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn s15_a_record_the_server_cannot_read_is_a_400_and_a_switch_that_did_not_move_leaves_none() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let h = harness(None, &app, &su).await;
+    let settings_before = h.settings().await;
+    let updated_before = h.audit_rows("workspace_setting.updated").await.len();
+
+    let wording = json!(roles::NOTICE_VERSION);
+    let bad_claims = [
+        (
+            "a wording the server never listed",
+            json!({"bundles": ["files"], "noticeVersion": "2099-01-01.v9", "via": "settings"}),
+        ),
+        (
+            "via is a card: that consent needs its approval",
+            json!({"bundles": ["files"], "noticeVersion": wording, "via": "card"}),
+        ),
+        (
+            "a bundle that carries no notice",
+            json!({"bundles": ["code"], "noticeVersion": wording, "via": "settings"}),
+        ),
+        (
+            "an approval id a screen has no business sending",
+            json!({"bundles": ["files"], "noticeVersion": wording, "via": "settings",
+                   "approvalId": "00000000-0000-0000-0000-000000000001"}),
+        ),
+        (
+            "no bundle at all",
+            json!({"bundles": [], "noticeVersion": wording, "via": "settings"}),
+        ),
+        ("not an object", json!("files")),
+    ];
+    for (what, claim) in bad_claims {
+        let (status, body) = h
+            .patch(
+                &h.owner_token,
+                json!({"team_ai_roles": {"files": false}, "team_ai_roles_notice": claim}),
+            )
+            .await;
+        assert_eq!(status, 400, "{what}: {body}");
+    }
+    assert_eq!(
+        h.settings().await,
+        settings_before,
+        "the switch it rode on did not move"
+    );
+    assert!(h.roles().await.is_on(roles::FILES));
+    assert!(h.notice_records().await.is_empty());
+    assert!(h.audit_rows("team_ai.roles.changed").await.is_empty());
+    assert_eq!(
+        h.audit_rows("workspace_setting.updated").await.len(),
+        updated_before,
+        "a refused request writes no settings audit row either"
+    );
+
+    // A valid claim on a PATCH the settings logic itself refuses (chat_read is no switch): no row.
+    let (status, body) = h
+        .patch(
+            &h.owner_token,
+            json!({
+                "team_ai_roles": {"chat_read": false},
+                "team_ai_roles_notice": notice_claim(json!(["files"]), "settings"),
+            }),
+        )
+        .await;
+    assert_eq!(status, 400, "{body}");
+    assert!(h.notice_records().await.is_empty());
+
+    // A member who is not an admin: 403, and the claim is not read, let alone recorded.
+    let (status, body) = h
+        .patch(
+            &h.member_token,
+            json!({
+                "team_ai_roles": {"files": false},
+                "team_ai_roles_notice": notice_claim(json!(["files"]), "settings"),
+            }),
+        )
+        .await;
+    assert_eq!(status, 403, "{body}");
+    assert!(h.notice_records().await.is_empty());
+
+    // Turning `memory` on while team memory is off is 409 and writes nothing — and a refusal
+    // that COMMITS must not carry the record of a switch that did not move.
+    sqlx::query(
+        "INSERT INTO mem_settings (workspace_id, scope, enabled, paused) \
+         VALUES ($1, 'workspace', false, false)",
+    )
+    .bind(h.workspace)
+    .execute(&h.su)
+    .await
+    .expect("team memory off");
+    let (status, body) = h
+        .patch(&h.owner_token, json!({"team_ai_roles": {"memory": false}}))
+        .await;
+    assert_eq!(status, 200, "{body}");
+    let (status, body) = h
+        .patch(
+            &h.owner_token,
+            json!({
+                "team_ai_roles": {"memory": true},
+                "team_ai_roles_notice": notice_claim(json!(["memory"]), "settings"),
+            }),
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["error"]["code"], "team_memory_off");
+    assert!(!h.roles().await.is_on(roles::MEMORY), "nothing written");
+    assert!(
+        h.notice_records().await.is_empty(),
+        "no switch moved, no record"
+    );
+}
+
+/// 두 테넌트 (#5040): A's record is A's. B has none; the NOBYPASSRLS app role sees A's row only
+/// under A's scope; and an admin of A cannot leave a record in B by naming B's settings path.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn s16_another_workspace_neither_gets_nor_sees_the_record() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let a = harness(None, &app, &su).await;
+    let b = harness(Some(a.base.clone()), &app, &su).await;
+    let b_before = b.settings().await;
+
+    let (status, body) = a
+        .patch(
+            &a.owner_token,
+            json!({
+                "team_ai_roles": {"files": true},
+                "team_ai_roles_notice": notice_claim(json!(["files"]), "settings"),
+            }),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(a.notice_records().await.len(), 1);
+    assert!(b.notice_records().await.is_empty(), "B has no record");
+    assert_eq!(b.settings().await, b_before, "B's bag did not move");
+    assert_eq!(
+        notice_rows_seen_by_the_app_role(&app, a.workspace).await,
+        1,
+        "A sees its own"
+    );
+    assert_eq!(
+        notice_rows_seen_by_the_app_role(&app, b.workspace).await,
+        0,
+        "B's scope cannot read A's record"
+    );
+
+    // A's admin names B's path: refused, and no record lands in B (or in A).
+    let response = a
+        .http
+        .patch(format!("{}/v1/workspaces/{}/settings", a.base, b.workspace))
+        .bearer_auth(&a.owner_token)
+        .json(&json!({
+            "team_ai_roles": {"files": true},
+            "team_ai_roles_notice": notice_claim(json!(["files"]), "settings"),
+        }))
+        .send()
+        .await
+        .expect("cross-workspace patch");
+    assert_ne!(
+        response.status().as_u16(),
+        200,
+        "A's token does not reach B's settings"
+    );
+    assert!(b.notice_records().await.is_empty());
+    assert_eq!(a.notice_records().await.len(), 1);
+
+    // B's own admin leaves B's own record, which A cannot see either.
+    let (status, body) = b
+        .patch(
+            &b.owner_token,
+            json!({
+                "team_ai_roles": {"memory": true},
+                "team_ai_roles_notice": notice_claim(json!(["memory"]), "settings"),
+            }),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(b.notice_records().await.len(), 1);
+    assert_eq!(
+        a.notice_records().await.len(),
+        1,
+        "A still has only its own"
+    );
+    assert_eq!(notice_rows_seen_by_the_app_role(&app, b.workspace).await, 1);
+    assert_eq!(notice_rows_seen_by_the_app_role(&app, a.workspace).await, 1);
 }
