@@ -44,6 +44,57 @@ hermes `startCommand`)가 이 릴리스에서 바뀌었다면 이미지 발행�
 
 ---
 
+## 1.2 승격 체크리스트 — 바뀐 점 모으기·전하기 (#5053)
+
+승격 때 통합자는 사용자에게 보이는 변화를 한 번에 모아 CHANGELOG·팀 채널·앱 안 소식으로 전한다. 재료는 PR 본문의
+**요약 칸**(`## 요약` 또는 `**요약**`)이다. 검증 줄이 회차마다 만든 초안([PIPELINE](planning/PIPELINE.md) §5 「바뀐 점」)을
+승격 때 한 번 더 모아 쓴다. 승격 한 번에 PR이 150건 안팎이므로 마지막에 한꺼번에 읽지 않는다.
+
+```sh
+git fetch origin
+scripts/collect_changes.py --since <지난 승격의 main 커밋> --output <결과 파일>
+```
+
+- 두 트랙의 첫째 부모 합치기(`Merge pull request #N`) 가운데 기준 커밋에 없는 PR만 모은다. PR 본문은 `gh`로 읽는다.
+  이 도구는 `git fetch`를 하지 않는다. 트랙별 직전 핀으로 좁힐 때는 `--since-engine`·`--since-uxui`와
+  `--engine-head`·`--uxui-head`를 쓴다.
+- 결과는 Markdown 파일 하나이고 저장소에 커밋하지 않는다: CHANGELOG `[Unreleased]` 영어 줄 초안, 사용자에게 보이는
+  변화 후보(주제별, 한국어), 요약 없는 PR 목록. 영어 문장은 도구가 만들 수 없다. 한국어 원문 옆의 `[en 번역 필요]`
+  표지를 영어로 옮겨 쓴 뒤 지운다. 주제는 낱말로 고른 후보이니 맞지 않으면 옮긴다.
+- **요약 없는 PR**(결과의 3절)은 경고일 뿐 막지 않는다. 승격 전에 그 PR 본문의 요약 칸을 채우고 다시 돌린다.
+  바뀐 것이 없으면 「N/A — 이유」를 적는다(경고에서 빠지고 4절에 센다). `scripts/goal_release.sh <issue> --review --pr <url>`도
+  같은 규칙으로 인계 때 먼저 알린다.
+
+순서대로 한다.
+
+1. **빌드 번호·버전을 먼저 정한 뒤** 앱 안 「업데이트 소식」 파일을 쓴다(#4937). 다음 폰 빌드 번호는
+   [`docs/runbooks/ios-testflight.md`](runbooks/ios-testflight.md) §2의 규칙으로, 데스크탑 버전은 채널마다(release `0.1.N`,
+   next `0.1.0-next.N`) 정한다. 그 뒤 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(ko·en, 항목 8개 이하)로
+   `packages/momo-core/src/features/releaseNotes/notes/v<버전>.ts` 한 파일에 적고 `notes/index.ts`에 더한다.
+   `phoneBuild`·`desktopFrom`은 그 소식을 **처음 담는 빌드에 컴파일되어 들어가므로**, 빌드를 만든 뒤에 고치면 그 빌드는
+   이미 옛 값을 갖는다. 폰은 `phoneBuild`가 자기 번호 **이하**인 소식 중 가장 새 것을 보므로, 그 빌드가 실제로 받을
+   번호보다 큰 값을 적으면 그 빌드는 소식을 못 본다. 붙는 규칙의 정본은 `releaseNotes/model.ts` 머리말이다.
+2. **CHANGELOG 갈림을 합친다.** 트랙마다 머리가 갈려 있을 수 있다. 합치기 전에 세 곳의 `## [` 머리를 나란히 본다:
+   `for ref in origin/main origin/track/engine origin/track/uxui; do git show "$ref:CHANGELOG.md" | grep -n '^## \['; done`.
+   예(2026-11-01): `origin/track/engine`에는 `[0.1.41]` 칸이 잘려 있고(발행 기록 PR), `origin/main`·`origin/track/uxui`는
+   같은 내용이 아직 `[Unreleased]`에 있다(46줄 모두 `[0.1.41]` 안에 있고, 엔진 칸에만 5줄이 더 있다). 이미 발행한
+   버전 칸은 **엔진의 것이 정본**이고, 옛 `[Unreleased]`의 줄 가운데 그 칸에 있는 것은 지운다. 새 줄(수집 초안을
+   영어로 옮긴 것)은 두 트랙을 합친 **뒤에** 승격 PR에서 `[Unreleased]`에 쓴다. 트랙에서 미리 쓰지 않는다 — 두
+   트랙이 같은 자리를 고쳐 충돌한다.
+3. **같은 글로 두 곳에 낸다.** (a) 팀 `#qa`의 업데이트 소식 게시(#4793): 버전·날짜, 바뀐 것 3~7줄(사용자 말로), 시험해
+   볼 것, 알려진 문제. 이름·대화 원문은 넣지 않는다. (b) 데스크탑 업데이트 창의 한 문장: 매니페스트의 `notes`는 릴리스
+   노트가 아니라 앱의 업데이트 패널에 그대로 보이는 **한 문장**이다([`NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §4). 1번 소식
+   파일의 ko `summary`를 그대로 쓰면 앱 안 소식·`#qa` 글·업데이트 창이 같은 말을 한다. 매니페스트에 싣는 발행은
+   owner 승인 경계이므로 여기서는 문장 준비까지다.
+4. **GitHub Release 본문 언어.** 지금은 한국어만이다(v0.1.41 본문, 2026-11-01 실측). 영어를 함께 쓸지는 **결정
+   대기(#5054)**. 정해질 때까지 §5의 digest 표 규칙은 그대로이고 본문 언어만 한국어를 따른다.
+5. **TestFlight 「What to Test」·App Store 「What's New」(로케일마다)의 규칙.** 무엇으로, 어느 로케일까지 채우는지는
+   문서 어디에도 없다(2026-11-01 실측: `docs/runbooks/ios-testflight.md`·`docs/cicd/03-store-readiness-gate.md`
+   포함). **결정 대기(#5054)**. 정해지면 `docs/runbooks/ios-testflight.md`에 한 절로 두고 여기서는 그 절을 가리킨다.
+   업로드·제출 자체는 M7 등급과 owner 승인 경계다([AGENTS](../AGENTS.md)).
+
+---
+
 ## 1.5 프리퍼블리시 체크리스트 (dispatch 전)
 
 발행을 dispatch 하기 **전에** 배포 CSP 게이트를 통과시킨다. 이 단계는
