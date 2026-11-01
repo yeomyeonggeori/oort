@@ -2454,7 +2454,10 @@ Do these in order — **Hermes is not started until step 2 is confirmed**.
 
 ```yaml
 agent:
-  disabled_toolsets: [terminal, code_execution, browser]
+  disabled_toolsets: [terminal, code_execution, browser, memory, session_search]
+memory:                        # ADR-0203 R2: one Hermes serves every workspace, so it
+  memory_enabled: false        # keeps no memory or session search across runs
+  user_profile_enabled: false
 ```
 
    The API server toolset keeps terminal, code execution and browser by
@@ -2633,7 +2636,10 @@ volume.
 
 ```yaml
 agent:
-  disabled_toolsets: [terminal, code_execution, browser, cronjob, delegation, web]
+  disabled_toolsets: [terminal, code_execution, browser, cronjob, delegation, web, memory, session_search]
+memory:                        # ADR-0203 R2, as in the first config
+  memory_enabled: false
+  user_profile_enabled: false
 mcp_servers:
   gmail:                       # com.momo.plugins.gmail -> key "gmail"
     url: https://<vendor MCP URL>

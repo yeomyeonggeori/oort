@@ -1966,7 +1966,10 @@ scripts/oort doctor --json
 
 ```yaml
 agent:
-  disabled_toolsets: [terminal, code_execution, browser]
+  disabled_toolsets: [terminal, code_execution, browser, memory, session_search]
+memory:                        # ADR-0203 R2: Hermes 하나가 모든 워크스페이스를 맡아서
+  memory_enabled: false        # 런 사이 기억·세션 검색을 두지 않아요
+  user_profile_enabled: false
 ```
 
    API 서버 toolset은 터미널·코드 실행·브라우저를 기본으로 켜 두고, API 서버
@@ -2128,7 +2131,10 @@ oort는 판단하거나 보증하지 않아요. 구독 토큰을 oort·채널·o
 
 ```yaml
 agent:
-  disabled_toolsets: [terminal, code_execution, browser, cronjob, delegation, web]
+  disabled_toolsets: [terminal, code_execution, browser, cronjob, delegation, web, memory, session_search]
+memory:                        # ADR-0203 R2, 첫 설정과 같아요
+  memory_enabled: false
+  user_profile_enabled: false
 mcp_servers:
   gmail:                       # com.momo.plugins.gmail -> 키 "gmail"
     url: https://<벤더 MCP 주소>

@@ -387,7 +387,7 @@ owner에게 사전 고지한다(운영 변수는 워커가 건드리지 않는�
    되돌린 뒤 5단계의 `problems`에 맞춰 원인(보통 3단계에서 놓친 `.env` 이름)을 고치고 다시 4단계부터 간다.
 
 **세션 검색·기억 도구를 끄는 변경(#4898)과 함께 볼 것.** 새 설정은 `memory`·`session_search`와 기억 스위치(`memory.memory_enabled`·`memory.user_profile_enabled`)를 끈다
-([ADR-0203 증보 2026-11-01](adr/0203-cohosted-agent-detection.md#증보-2026-11-01--공동-호스팅-hermes의-세션-검색기억-도구는-끈다-4898), 결재 전에는 Proposed). 이미 도는 볼륨의
+([ADR-0203 증보 2026-11-01](adr/0203-cohosted-agent-detection.md#증보-2026-11-01--공동-호스팅-hermes의-세션-검색기억-도구는-끈다-4898)). 이미 도는 볼륨의
 `/opt/data/memories/`에 `MEMORY.md`·`USER.md`가 있으면 새 설정은 읽지 않지만 파일은 남는다: 5단계 뒤에 **이름과 크기만** 보고(`ls -l /opt/data/memories`, 내용은 열지 않는다)
 운영자가 비운다(기록에는 지운 파일의 개수만 적는다). 세션 기록(`/opt/data/state.db`)은 Hermes가 계속 쓰며 이 변경이 지우지도 보관 기간을 정하지도 않는다. 이 변경은 게이트(`HERMES_LOCKGATE_B64`)·설정
 다섯의 해시·시작 명령 체크섬을 함께 바꾸므로 위 「함께 바뀌는 것」과 한 번에 간다. 되돌리기(6단계)는 저장해 둔 이전 값이면 되고 새 게이트는 옛 설정(두 도구가 켜진 설정)을 받지 않는다.
