@@ -231,3 +231,51 @@ Railway는 api와 agent-worker를 다른 서비스로 띄우고, `local` 저장�
 | D7 | `scripts/tests/check_railway_catalog.py --prove-mutations`의 5건(`worker-api-internal-dropped`·`-wrong-port`·`-public-edge`, `relay-api-internal-origin`, `readme-row-missing-api-internal`) | 값을 api 선언에서 도출하는 규칙, 다른 서비스 금지, README 행 |
 
 사보타주를 실제로 돌린 결과는 PR 본문이 정본이다.
+
+## 증보 4 (2026-11-01, #4970): 워커의 첨부 읽기를 글·PDF·그림까지 — 읽기용 발급, 같은 길, 같은 상한
+
+[ADR-0201 증보 v3 B6-1](0201-team-ai-fast-path-for-simple-workspace-requests.md)(Accepted)이 도우미의 읽기 도구 `read_attachment`를 정했고, 바이트는 증보 3의 길(api 사설 주소, 1회용 주소)을 그대로 쓰라고 했다. 그런데 증보 3의 길은 **발급·풀기·라우트·워커 읽기 네 곳 모두가 세 그림(png·jpeg·webp)만** 통과시킨다(D2·D6). 그대로는 글 파일과 PDF가 발급에서 거절되므로, 이 증보가 그 네 곳을 같은 모양으로 넓힌다. 새 길·새 라우트·새 비밀·migration은 없다.
+
+- Status: **Proposed** (독립 보안 검수 뒤 planner가 Accepted로). 등급 2: 공개 라우트가 내주는 종류가 늘어난다(ADR-0100).
+- **변경 전**: `mint_for_attachment_in_tx`와 `redeem_in_tx`가 `find_requester_attachment_in_tx`(아바타 용도: png·jpeg·webp)로 판정했고, 라우트와 워커의 `fetch`가 `bytes_match_mime`(세 그림)으로 끝에서 한 번 더 걸렀다.
+
+### 결정
+
+- **D1 · 용도 하나가 늘고, 판정 문장은 그대로 하나다.** `RequesterAttachmentUse::Read` = 세 그림 + `text/plain`·`text/markdown`·`text/csv`·`application/json` + `application/pdf`(닫힌 목록 여덟). 소유 판정의 SQL은 용도만 바꿔 같은 한 문장을 쓴다(작성자 본인·이 대화·완료·살아 있는 메시지·보관 안 된 채널·크기). 도구의 **첫 겹(조회)**만 `ReadAnyType`을 쓴다: 종류를 가리지 않고 「누구 것인가」만 묻는다(빈 목록 = 어떤 종류든. 다른 용도가 빈 목록이면 시험이 빨개진다). 그래서 요청자 본인의 파일이 읽지 않는 종류면 「그 종류는 못 읽어요」, 너무 크면 「너무 커요」라고 정직하게 말하고(본인 것이라 새는 것이 없다), **남의 파일은 크기·종류와 무관하게 같은 `not_found`**다. 발급·풀기에는 `ReadAnyType`을 쓰지 않는다.
+- **D2 · 발급.** `mint_for_read_in_tx`(60초·1회용·해시만, D4 그대로)는 `Read`로 행을 쓰기 **전에** 판정한다. 기존 `mint_for_attachment_in_tx`(아바타)는 세 그림만 그대로다. 아바타 용도로 PDF·글의 id를 내밀어도 주소를 받지 못한다(시험으로 못 박음).
+- **D3 · 풀기.** `redeem_in_tx`는 `Read`로 다시 판정한다. 그림은 지금까지와 같은 질문이고, 글·PDF를 가리키는 토큰은 읽기용 발급만 만든다. 위조한 행이 있어도 풀 때의 같은 술어(진행 중인 런, 두 사람의 멤버십, 요청자가 쓴 완료 파일)가 막는다 — 증보 3 「남는 위험 1」과 같은 범위다.
+- **D4 · sniff.** `bytes_match_mime`이 세 그림에 더해 `application/pdf`는 `%PDF-`로 시작할 때, 글 종류는 **비어 있지 않고 NUL 바이트가 없을 때**만 맞다고 한다(글에는 매직이 없다. UTF-8인지 한글 옛 인코딩인지는 읽는 쪽의 몫이다). 목록 밖의 종류는 어떤 바이트여도 내주지 않는다. 라우트의 응답 헤더(`Content-Disposition: attachment`, `nosniff`, `no-store`, 리디렉션 없음)는 그대로다.
+- **D5 · 상한은 하나, 5 MiB.** ADR-0201 B6-1의 「10MB」는 **[추정]**이었고, 라우트의 상한은 `SELF_MEDIA_MAX_BYTES`로 아바타 입력 상한과 한 숫자임을 시험이 못 박고 있다. 숫자를 둘로 쪼개면 조회가 받은 파일을 라우트가 거절하는 틈이 생기므로 하나로 둔다. 더 큰 파일은 요청자 본인에게 「너무 커요」다.
+- **D6 · 워커의 읽기.** `RequesterAttachment`가 용도를 싣고(`usage`), `ApiAttachmentBytes`가 그 용도로 발급을 고르며, `fetch_as`가 응답의 `Content-Type`이 **그 용도의 종류이고** 바이트가 그 종류일 때만 받는다(아바타는 여전히 세 그림). 어느 읽기 길(api 또는 보관소)이든 워커가 길이와 sniff를 한 번 더 본다.
+- **D7 · 글자 뽑기는 이 증보의 길 밖이지만 같은 PR이 한다.** 글 파일은 UTF-8(BOM 제거) 아니면 EUC-KR(오류 0일 때만), PDF는 lopdf(MIT)로 뽑되 **워커 프로세스 안에서 파싱하지 않는다.** 워커 바이너리를 `--attachment-text-child`로 **빈 환경**에서 다시 띄우고(DB 주소·마스터 키·공급자 키를 상속하지 않는다), 표준입력으로 바이트를 주고 표준출력의 JSON 한 줄(≤512KiB)을 읽는다. 마감(8초) 뒤에는 죽이고 거두며, 동시에 둘까지다(`momo-expressions`의 그림 해독 자식과 같은 모양). 문서 글자는 줄바꿈을 지키고, 제어 문자·보이지 않는 서식 문자(너비 0, 방향, BOM, 유니코드 태그 블록)를 지우고, 코드 울타리를 무력화한 뒤 **20,000자**에서 자른다.
+- **D8 · 그림은 다시 인코딩해서 모델에 간다.** 바이트가 정하는 종류(png·jpeg·정지 webp), 헤더 크기를 먼저 보고(4096×4096·1,600만 화소 상한) 디코더 한도 아래에서 해독, EXIF 방향을 반영해 긴 변 1568px로 맞춘 뒤 JPEG(투명하면 PNG)로 새로 인코딩한다. 위치·기기 같은 메타데이터는 남지 않는다. 모델 호출에는 **구조 부품**(Anthropic `image` 블록, Responses `input_image`)으로 실리고, 한 요청에 하나다. chat/completions 와이어는 같은 와이어가 텍스트 전용 게이트웨이와도 이야기하므로 닫아 두고 「이 연결로는 이미지를 못 봐요」라고 말한다.
+
+### 바뀌지 않는 것
+
+라우트의 경로·헤더·거절 한 모양·예산, `self_media_token` 표와 권한, C2a의 호스팅 주소(`mint_for_run_in_tx`, 5분)와 Hermes 가드, 아바타 흐름(세 그림만, `prepare_with`), `OORT_API_INTERNAL_ORIGIN`과 폴백 없음(D5), 토큰이 모델이 읽는 글에 실리지 않는 것(D3). 첨부 내용·추출한 글자·이미지는 감사·로그·행 어디에도 남지 않는다 — 감사에는 도구 이름과 닫힌 결과 코드만 있다(ADR-0201 B13-I6).
+
+### 남는 위험
+
+1. **라우트가 내주는 종류가 늘었다**(글·PDF). 토큰 하나는 첨부 하나·요청자 하나·대화 하나·런 하나에 묶이고, 1회용·60초이며, 풀 때 같은 소유 술어가 다시 걷는다. 그래도 손상된 워커가 위조한 행으로 읽을 수 있는 파일의 범위가 요청자의 그림에서 요청자의 글·PDF까지 넓어졌다(증보 3의 위험 1과 같은 부류).
+2. **PDF 파서는 공격자가 쓸 수 있는 형식을 읽는다.** lopdf는 스트림을 상한 없이 푼다. 자식 프로세스 + 빈 환경 + 마감 뒤 kill·회수 + 동시 2 + 출력 상한으로 가두었지만 **자식의 메모리 상한은 없다**(자원 한도를 걸려면 이 워크스페이스가 금지한 `unsafe`가 필요하다). 컨테이너의 메모리 한도와 OOM killer가 받침이고, 그때 죽는 쪽은 가장 큰 자식이다. 같은 시각의 요청자 수는 도우미의 일일·10분 상한이 막는다. 한글 PDF의 글자는 글꼴의 ToUnicode에 달려 있어 못 뽑으면 「글자를 뽑지 못했어요」라고 말한다(실측 안 함).
+3. **파일 내용·그림이 팀 키 공급자로 간다.** 이것이 ADR-0201 B3의 고지 대상이다. 그림은 다시 인코딩해도 그림 속 글자는 간다.
+4. **요청자 규칙은 「본인이 올린 파일, 이 대화」다**(B6-1 문장 그대로). 같은 방 동료가 올린 파일은 `not_found`다. 넓히려면 소유 술어에서 작성자 조건을 빼고 청중 규칙이 일하게 하면 되는 한 줄이며, owner가 정할 일이다.
+5. **청중 규칙은 오늘 요청자 규칙 뒤에서 홀로 거절할 일이 없다**(회신 채널이 곧 파일의 채널이다). 파일 찾기(F2)가 생겨 다른 채널의 파일 id를 대는 길이 열리는 날을 위한 줄이고, 손으로 만든 범위로 거절함을 시험이 증명한다.
+6. **이미지 입력은 Anthropic Messages·OpenAI Responses 와이어만** 연다. 실제 공급자 호출은 하지 않았다(`runtime-unverified`). 와이어별·모델별 능력표가 생기면 chat/completions도 열 수 있다.
+
+### runtime-unverified
+
+실제 공급자(Anthropic·OpenAI)에 그림을 실은 호출, 실제 Railway 사설망 위의 글·PDF 읽기, 한글 글꼴 PDF의 글자 뽑기, 컨테이너 메모리 한도 아래에서 악성 PDF가 자식만 죽이는지. 시험은 127.0.0.1 TCP, 실 PG18(두 테넌트, `momo_app`·`momo_worker`·`momo_helper_read`), 진짜 라우터, 진짜 자식 프로세스(워커 바이너리)로 했다.
+
+### red proof
+
+| 결정 | 시험 | 분기를 지우면 빨강 |
+|---|---|---|
+| D1 소유·한 문장 | `team_ai_files_conformance_pg::every_refusal_of_a_file_that_is_not_the_requesters_is_the_same_not_found_and_reads_no_byte`, `…::a_file_the_requester_owns_but_cannot_have_read_gets_an_honest_sentence`, `…::the_audience_rule_is_a_line_of_its_own`, `…::the_lookup_refuses_to_run_as_anything_but_the_helper_read_role`, `…::a_server_that_cannot_read_the_file_says_so_honestly` | 작성자·대화·살아 있는 메시지·완료 술어 중 하나를 지우면, 크기·종류 갈래를 지우면, 청중 규칙 줄을 지우면, `momo_helper_read` 확인을 지우면, api 실패를 다른 문구로 매기면 |
+| D1 용도 | `agent_avatar::read_use_tests::only_the_lookup_use_has_no_type_narrowing` | 다른 용도의 목록을 비우면 |
+| D2·D3·D4·D6 | `attachment_via_api_conformance_pg::a_text_file_a_pdf_and_a_picture_come_back_through_the_route_for_a_read`, `…::the_read_use_refuses_what_the_mint_the_route_and_the_worker_must_refuse`, `self_media::tests::the_avatar_read_takes_pictures_only_and_the_helpers_read_takes_its_own_types`, `team_ai_files_conformance_pg::the_archive_path_is_sniffed_too` | 읽기 발급을 아바타 판정으로 하면, 풀기를 아바타로 하면, `%PDF-`·NUL 규칙을 지우면, 워커 fetch가 종류를 안 보면, 워커의 길이·sniff 재확인(보관소 길)을 지우면, 아바타 발급을 넓히면 |
+| D4 단위 | `self_media::tests::the_sniff_checks_pdf_and_text_too` | `bytes_match_mime`의 PDF·글 갈래를 지우면 |
+| D7 | `team_ai_files_conformance_pg::a_pdf_is_read_by_the_supervised_child_and_a_scan_or_a_broken_one_says_so`, `…::a_pdf_is_never_parsed_in_the_workers_own_process`, `attachment_text_child::*`(진짜 자식 프로세스), `attachment_text::tests::*`, `team_ai_attachments::tests::*`, `team_ai_tools::tests::a_document_renders_to_twenty_thousand_characters_and_cannot_close_the_fence` | 자식을 못 띄울 때 워커 안에서 파싱하면, 자식의 빈 환경·마감 뒤 kill·회수·슬롯 둘 중 하나를 지우면, 문서 글자의 줄바꿈·제어·울타리·20,000자 중 하나를 지우면 |
+| D8 | `team_ai_files_conformance_pg::a_picture_reaches_the_model_as_a_structural_part_once_and_never_as_text`, `…::a_wire_that_cannot_see_pictures_says_so_and_reads_nothing`, `attachment_image::tests::*`, 와이어 단위 시험 | 부품이 아니라 글로 실으면, 한 요청 한 그림 규칙을 지우면, 다시 인코딩을 지우면(메타데이터 시험), chat/completions를 열면 |
+
+사보타주를 실제로 돌린 결과는 PR 본문이 정본이다.

@@ -84,6 +84,8 @@ this table only records why they are there.
 | libloading (nagisa/rust_libloading; already in the graph via ort, now also a direct dependency that checks `ORT_DYLIB_PATH` before ort sees it) | 0.9.0 | ISC | `server-rust/crates/momo-embed` | same |
 | tokenizers (Hugging Face) | 0.23.2 | Apache-2.0 | via fastembed, `momo-embed` | same |
 | clap (clap-rs; `default-features = false`, derive only: no colour, env or suggestion features; brings clap_builder, clap_derive, clap_lex and anstyle) | 4.6.7 | MIT OR Apache-2.0 | `server-rust/bins/oort-cli` (command-line parsing of the `oort` binary) | ADR-0216 D10, #4662 |
+| lopdf (J-F-Liu/lopdf; `default-features = false`: no rayon, chrono, jiff or time; brings cbc, ecb, block-padding, nom 8, rangemap and ttf-parser, and uses aes, flate2, md-5, sha2, weezl and encoding_rs that were already in the graph) | 0.41.0 | MIT | `server-rust/bins/momo-agent-worker` (pulls the letters out of a PDF for the team helper's `read_attachment`; parsed only in a supervised child process of the worker binary with an empty environment, never in the worker's own address space) | ADR-0201 증보 v3 B6-1, ADR-0151 증보 4, #4970 |
+| encoding_rs, image, base64 (already in the graph; now also direct dependencies of the worker) | 0.8.42; 0.25.10; 0.22.1 | (Apache-2.0 OR MIT) AND BSD-3-Clause; MIT OR Apache-2.0; MIT OR Apache-2.0 | `server-rust/bins/momo-agent-worker` (a text file in the Korean legacy encoding, a picture re-encoded before the team's model sees it, and its base64 on the wire) | same |
 
 ### Embedded model and ONNX Runtime (worker image; not Cargo crates)
 
