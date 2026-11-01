@@ -29,6 +29,11 @@ name: 4891-team-expression-add
     visible:
       id: "composer-pill"
     timeout: 30000
+# Debug LogBox strip first (subflows/dismiss-dev-logbox.yaml): it sits on the
+# composer dock and swallows the `composer-expression` tap below — the 11-01
+# verification run failed this flow in ~40s until this line was added. The composer
+# is empty here, which is what that subflow's tap needs.
+- runFlow: subflows/dismiss-dev-logbox.yaml
 # #4942: 표현 단추는 보내기 왼쪽에 늘 서 있다(도구 줄이 아니다) — 알약을 먼저 펼칠 필요가 없다. 「＋」는 시트의 「팀 이모지」 탭에 있다.
 - tapOn:
     id: "composer-expression"

@@ -110,7 +110,7 @@ describe("원본 사진 검사", () => {
     const { view } = mount(form());
     await waitFor(() => expect(agentSelect(view).value).not.toBe(""));
     choose(view, makeFixturePhoto("logo.svg", "image/svg+xml"));
-    expect(view.getByTestId("expression-make-photo-error").textContent).toBe("PNG, JPEG, WebP 또는 GIF 사진을 골라 주세요.");
+    expect(view.getByTestId("expression-make-photo-error").textContent).toBe("PNG, JPG, WebP 또는 GIF 사진을 골라 주세요.");
     expect(view.queryByTestId("expression-make-photo-preview")).toBeNull();
     fireEvent.click(view.getByTestId(chip("bounce")));
     send(view);
@@ -120,7 +120,7 @@ describe("원본 사진 검사", () => {
     const { view } = mount(form());
     await waitFor(() => expect(agentSelect(view).value).not.toBe(""));
     choose(view, sizedFile(5 * 1024 * 1024 + 1));
-    expect(view.getByTestId("expression-make-photo-error").textContent).toBe("사진이 너무 커요. 5 MiB 이하로 골라 주세요.");
+    expect(view.getByTestId("expression-make-photo-error").textContent).toBe("사진이 너무 커요. 5MB 이하로 골라 주세요.");
     choose(view, sizedFile(5 * 1024 * 1024));
     await view.findByTestId("expression-make-photo-preview");
     expect(view.getByTestId("expression-make-photo-error").textContent).toBe("");

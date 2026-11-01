@@ -1147,6 +1147,22 @@ describe('기능 손실 0 — 옛 프로필 시트가 하던 일이 설정 페�
     ]);
   });
 
+  // #5065 L1: 홈·인박스·＋ 메뉴·온보딩(`NOTIFY_MENTION_LABEL` 「나를 부른 멘션·답·DM」)은 「DM」이라고 부르는데 설정 알림 카드만
+  // 「다이렉트 메시지」였다(design-review L1). 렌더된 줄의 글에서 잰다.
+  it('「항상 오는 알림」 줄은 다른 표면과 같은 낱말 「DM」으로 말한다 (#5065)', async () => {
+    const page = await openSheet();
+    await waitFor(() =>
+      expect(within(page).getByTestId('profile-always-row')).toBeTruthy(),
+    );
+    const row = within(page).getByTestId('profile-always-row');
+    expect(
+      within(row).getByText(
+        '승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없습니다. 한꺼번에 멈추려면 알림 일시 중지를 쓰세요.',
+      ),
+    ).toBeTruthy();
+    expect(within(row).queryByText(/다이렉트 메시지/)).toBeNull();
+  });
+
   it('조건부 줄 — 일시 중지가 켜져 있고 보이는 상태 글이 있는 사람(온라인)', async () => {
     server.self = {
       ...baseSelf(),

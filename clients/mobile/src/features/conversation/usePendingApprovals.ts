@@ -3,7 +3,8 @@ import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces
 import {useQuery} from '@tanstack/react-query';
 import {useMemo} from 'react';
 import {useSession} from '../../session/useSession';
-import {approvalGates, type ApprovalGate} from './approvalGate';
+import type {ApprovalWait} from '@momo/core/features/agents/workingSignal';
+import {approvalGates, approvalWaits, type ApprovalGate} from './approvalGate';
 
 // =============================================================================
 // 이 대화의 대기 승인
@@ -39,11 +40,17 @@ export function pendingApprovalsKey(workspaceId: string): readonly unknown[] {
 export interface PendingApprovals {
   /** 이 채널의 대기 승인, `approvalId` 로 찾을 수 있게. */
   gates: ReadonlyMap<string, ApprovalGate>;
+  /**
+   * 이 채널에서 사람을 기다리는 승인(`applyApprovalWaits` 의 재료, #5066). 자리표시와 레일이 「승인 필요」 중인 에이전트를
+   * 「작업 중」·「답하는 중」이라고 말하지 않게 하는 근거다.
+   */
+  waits: readonly ApprovalWait[];
   /** 서버가 승인 경로를 실었는가. 안 실었으면 카드는 예전 문장을 유지한다. */
   provided: boolean;
 }
 
 const EMPTY: ReadonlyMap<string, ApprovalGate> = new Map();
+const NO_WAITS: readonly ApprovalWait[] = [];
 
 export function usePendingApprovals(channelId: string): PendingApprovals {
   const {workspaceId} = useSession();
@@ -62,5 +69,10 @@ export function usePendingApprovals(channelId: string): PendingApprovals {
     [query.data, channelId],
   );
 
-  return {gates, provided};
+  const waits = useMemo(
+    () => (query.data === undefined ? NO_WAITS : approvalWaits(query.data, channelId)),
+    [query.data, channelId],
+  );
+
+  return {gates, waits, provided};
 }
