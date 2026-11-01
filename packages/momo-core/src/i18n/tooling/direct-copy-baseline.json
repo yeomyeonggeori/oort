@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "4f64efa4142cbe244f7ea6b97217abd4beb535d5",
+  "baselineHead": "57b395e9372b98a69dc72aa9a9694f9328f47467",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -801,7 +801,7 @@
     "clients/web/src/features/sidebar/workspaceNav.ts": 1,
     "clients/web/src/features/sidebar/workspaceRailModel.ts": 3,
     "clients/web/src/features/timeline/ActionResultCard.tsx": 5,
-    "clients/web/src/features/timeline/AgentCard.tsx": 120,
+    "clients/web/src/features/timeline/AgentCard.tsx": 119,
     "clients/web/src/features/timeline/ApprovalActions.tsx": 43,
     "clients/web/src/features/timeline/ArtifactCard.tsx": 66,
     "clients/web/src/features/timeline/AttachmentList.tsx": 25,
