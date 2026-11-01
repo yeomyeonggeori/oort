@@ -158,6 +158,14 @@ export function useNotificationTapRouting(
           queryKey: teamBoardKey(workspaceId),
         });
       }
+      // ADR-0206 D15 (#4341): 시험 알림은 대화가 없는 알림이다 — 봉투의 채널·메시지·스레드가 모두
+      // nil-UUID 센티널이라 열 곳이 없다. 앱은 이미 열려 있고 사람은 있던 곳에 그대로 남는다. 그 자리에
+      // 「대화가 없어졌거나 볼 권한이 없습니다」를 띄우면 방금 누른 시험이 고장난 것처럼 보인다.
+      // 목적지를 알림 설정 화면으로 옮기는 것은 상태·시험 화면(#4342)의 일이다.
+      if (arrival.target.reason === 'test_notification') {
+        pendingRef.current = null;
+        return;
+      }
       pendingRef.current = {
         token,
         target: arrival.target,

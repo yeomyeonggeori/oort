@@ -47,7 +47,7 @@ pub const DEFAULT_BUDGET_PER_MINUTE: u32 = 30;
 /// How a relay-429'd push of this layer is settled in the dispatch log (status 429): the same shape as
 /// the other relay refusals (`relay_http:` prefix, so a token-health pass can never read it as an
 /// APNs answer), and a row that `AlreadySettled` stops from being sent again.
-pub const DROPPED_REASON: &str = "relay_http: dropped";
+pub const DROPPED_REASON: &str = momo_push::RELAY_DROPPED_REASON;
 
 /// Whether `reason` is one of the layer's. Today only `thread_reply`; `channel_message` and `keyword`
 /// (ADR-0206 D7) join when they ship.

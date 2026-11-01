@@ -1003,6 +1003,39 @@ describe('갈 수 없으면 한 문장 — 조용히 무시하지 않는다 (#25
     expect(channelReads.length).toBeGreaterThanOrEqual(2);
   });
 
+  it('시험 알림은 대화가 없는 알림이라 「없어졌거나 볼 권한이 없다」를 말하지 않는다 (ADR-0206 D15, #4341)', async () => {
+    const fetchMock = installFetch();
+    renderShell();
+    await waitForSidebar();
+    const NIL = '00000000-0000-0000-0000-000000000000';
+    const channelReadsBefore = fetchMock.mock.calls.filter(
+      ([url]) => String(url).includes('/channels') && !String(url).includes('/messages'),
+    ).length;
+
+    // 봉투: 채널·메시지·스레드가 모두 nil 센티널, 이유 test_notification, 분류 momo.system.
+    await tapWhileRunning(
+      apnsPayload({
+        channelId: NIL,
+        messageId: NIL,
+        threadId: NIL,
+        category: 'momo.system',
+        reason: 'test_notification',
+      }),
+    );
+    // 목록에 없는 방의 탭은 서버에 다시 묻고(위 시험) 문장을 낸다. 시험 알림은 그 길을 타지 않는다.
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 300));
+    });
+
+    expect(screen.queryByTestId('notification-tap-notice')).toBeNull();
+    expect(announce).not.toHaveBeenCalledWith(NOTIFICATION_TAP_COPY.channelGone);
+    expect(screen.queryByTestId('conversation-title')).toBeNull();
+    const channelReadsAfter = fetchMock.mock.calls.filter(
+      ([url]) => String(url).includes('/channels') && !String(url).includes('/messages'),
+    ).length;
+    expect(channelReadsAfter).toBe(channelReadsBefore);
+  });
+
   it('캐시에 없던 새 DM 은 다시 물어서 연다', async () => {
     installFetch({channelLists: [CHANNELS, [...CHANNELS, DM_CHANNEL]]});
     renderShell();

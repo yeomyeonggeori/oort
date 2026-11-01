@@ -58,6 +58,40 @@ use uuid::Uuid;
 use crate::bulk::{self, BulkLayer, Cause, Clock, Verdict};
 use crate::config::PushConfig;
 
+mod system;
+
+/// What the two settle paths need to know about the token a dispatch went to. A message push
+/// ([`JudgedTarget`]) and a system push ([`momo_push::SystemTarget`]) both reduce to it, so the
+/// receipt and the relay-refusal handling are written once.
+pub(crate) struct TokenFacts<'a> {
+    pub(crate) token_id: Uuid,
+    pub(crate) apns_env: &'a str,
+    pub(crate) apns_topic: &'a str,
+    pub(crate) device_platform: &'a str,
+}
+
+impl<'a> From<&'a JudgedTarget> for TokenFacts<'a> {
+    fn from(target: &'a JudgedTarget) -> Self {
+        TokenFacts {
+            token_id: target.token_id,
+            apns_env: &target.apns_env,
+            apns_topic: &target.apns_topic,
+            device_platform: &target.device_platform,
+        }
+    }
+}
+
+impl<'a> From<&'a momo_push::SystemTarget> for TokenFacts<'a> {
+    fn from(target: &'a momo_push::SystemTarget) -> Self {
+        TokenFacts {
+            token_id: target.token_id,
+            apns_env: &target.apns_env,
+            apns_topic: &target.apns_topic,
+            device_platform: &target.device_platform,
+        }
+    }
+}
+
 /// One drain iteration's tally, for logs and tests.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct DrainStats {
@@ -66,8 +100,10 @@ pub struct DrainStats {
     pub skipped_already_settled: usize,
     pub requeued: usize,
     pub failed: usize,
-    /// Bulk-layer targets that were **not** sent: folded under a window's representative, past the
-    /// server-wide budget, or dropped on a relay 429 ([`crate::bulk`]).
+    /// Targets that were **not** delivered on purpose or given up on: bulk-layer ones folded under a
+    /// window's representative, past the server-wide budget, or dropped on a relay 429
+    /// ([`crate::bulk`]), and best-effort test pushes the relay answered 429/5xx or that never
+    /// reached the relay (ADR-0206 D11, [`PushDrain::drain_system_once`]).
     pub held_back: usize,
 }
 
@@ -377,8 +413,14 @@ impl PushDrain {
                 apns_status,
                 apns_reason,
             } => {
-                self.settle_receipt(workspace_id, log_id, target, apns_status, apns_reason)
-                    .await;
+                self.settle_receipt(
+                    workspace_id,
+                    log_id,
+                    &TokenFacts::from(target),
+                    apns_status,
+                    apns_reason,
+                )
+                .await;
                 Ok(Dispatched::Sent)
             }
             DispatchOutcome::PermanentFailure {
@@ -396,8 +438,14 @@ impl PushDrain {
                     reason = %reason,
                     "permanent dispatch failure; settled with the relay status"
                 );
-                self.settle_refusal(workspace_id, log_id, target, relay_http_status, &reason)
-                    .await;
+                self.settle_refusal(
+                    workspace_id,
+                    log_id,
+                    &TokenFacts::from(target),
+                    relay_http_status,
+                    &reason,
+                )
+                .await;
                 Ok(Dispatched::Sent)
             }
             DispatchOutcome::TransientFailure(reason) => {
@@ -493,11 +541,11 @@ impl PushDrain {
         &self,
         workspace_id: Uuid,
         log_id: Uuid,
-        target: &JudgedTarget,
+        token: &TokenFacts<'_>,
         apns_status: i32,
         apns_reason: Option<String>,
     ) {
-        let token_id = target.token_id;
+        let token_id = token.token_id;
         let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 settle_dispatch_and_invalidate(
@@ -547,14 +595,14 @@ impl PushDrain {
         &self,
         workspace_id: Uuid,
         log_id: Uuid,
-        target: &JudgedTarget,
+        token: &TokenFacts<'_>,
         relay_http_status: i32,
         reason: &str,
     ) {
-        let token_id = target.token_id;
-        let apns_env = target.apns_env.clone();
-        let apns_topic = target.apns_topic.clone();
-        let device_platform = target.device_platform.clone();
+        let token_id = token.token_id;
+        let apns_env = token.apns_env.to_string();
+        let apns_topic = token.apns_topic.to_string();
+        let device_platform = token.device_platform.to_string();
         let reason = reason.to_string();
         let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -618,28 +666,34 @@ impl PushDrain {
         reason: &str,
         stats: &mut DrainStats,
     ) {
-        if row.attempts >= self.config.max_attempts {
+        self.requeue_row(row.id, row.attempts, reason, stats).await;
+    }
+
+    /// Return a claimed outbox row to `pending` with a backoff, or park it as `failed` when its
+    /// attempts are spent. Shared by both push feeds (`attempts` was already counted by the claim).
+    async fn requeue_row(&self, id: i64, attempts: i32, reason: &str, stats: &mut DrainStats) {
+        if attempts >= self.config.max_attempts {
             tracing::error!(
-                outbox_id = row.id,
-                attempts = row.attempts,
+                outbox_id = id,
+                attempts,
                 reason,
                 "max attempts reached; parking candidate as failed"
             );
-            self.settle_outbox_failed(row.id, &format!("max attempts: {reason}"), stats)
+            self.settle_outbox_failed(id, &format!("max attempts: {reason}"), stats)
                 .await;
             return;
         }
         stats.requeued += 1;
-        let backoff = backoff_seconds(row.attempts);
+        let backoff = backoff_seconds(attempts);
         tracing::warn!(
-            outbox_id = row.id,
-            attempts = row.attempts,
+            outbox_id = id,
+            attempts,
             backoff_seconds = backoff,
             reason,
             "transient dispatch failure; requeueing candidate"
         );
-        if let Err(error) = requeue(&self.pool, row.id, backoff, reason).await {
-            tracing::error!(outbox_id = row.id, error = %error, "failed to requeue candidate");
+        if let Err(error) = requeue(&self.pool, id, backoff, reason).await {
+            tracing::error!(outbox_id = id, error = %error, "failed to requeue candidate");
         }
     }
 }

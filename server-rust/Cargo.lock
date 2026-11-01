@@ -2078,6 +2078,7 @@ dependencies = [
  "momo-outbox",
  "momo-provider",
  "momo-push",
+ "momo-push-relay",
  "momo-settings",
  "momo-t3",
  "momo-webhook",

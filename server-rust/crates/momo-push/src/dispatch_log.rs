@@ -38,6 +38,12 @@ use serde_json::json;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
+/// The reason a **bulk-layer** push the relay rate-limited is settled with (status 429): the push
+/// was dropped on purpose, never retried and never mistaken for an APNs answer (ADR-0206 증보 1 F6).
+/// The notifier writes it (`bulk::DROPPED_REASON`) and the diagnostics skip such rows — a drop is
+/// the server's own choice to send fewer pushes, not a delivery failure.
+pub const RELAY_DROPPED_REASON: &str = "relay_http: dropped";
+
 /// The outcome of claiming a dispatch slot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DispatchClaim {
@@ -55,6 +61,40 @@ pub async fn claim_dispatch(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     message_id: Uuid,
+    member_id: Uuid,
+    token_id: Uuid,
+    collapse_id: &str,
+) -> Result<DispatchClaim, DbError> {
+    claim_dispatch_row(
+        conn,
+        workspace_id,
+        Some(message_id),
+        member_id,
+        token_id,
+        collapse_id,
+    )
+    .await
+}
+
+/// [`claim_dispatch`] for a push that names **no message** (ADR-0206 D15: the test notification).
+///
+/// The log row's `message_id` is NULL — the column allows it (`001_init.sql`) and the unique key
+/// is `(member, token, collapse id)`, which has no message in it. A nil UUID would not do: the
+/// column is a foreign key to `message`, and a row for a message that does not exist is refused.
+pub async fn claim_system_dispatch(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    token_id: Uuid,
+    collapse_id: &str,
+) -> Result<DispatchClaim, DbError> {
+    claim_dispatch_row(conn, workspace_id, None, member_id, token_id, collapse_id).await
+}
+
+async fn claim_dispatch_row(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Option<Uuid>,
     member_id: Uuid,
     token_id: Uuid,
     collapse_id: &str,
