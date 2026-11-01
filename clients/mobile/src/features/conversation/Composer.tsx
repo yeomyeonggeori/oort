@@ -612,6 +612,13 @@ const PILL_EDGE = StyleSheet.hairlineWidth;
 const BAR_PAD_X = CONV.composerGap - PILL_EDGE;
 
 /**
+ * 입력창 **글자의 왼쪽**, 알약 안쪽 가장자리에서 잰다(#5067) — 줄 여백 + 입력창 테두리 + 입력창 안쪽 여백. 글 칸의 들여쓰기(`fieldInset` — 접힘 한 줄은 + 원 하나, 펼침은 0)는
+ * 이 값에 **더해진다**. 답글 머리말(`ReplyDraftCard`)이 글자 열을 여기서 읽는다: 머리말에 숫자를 따로 적으면 입력창이 접히고 펼칠 때마다 어긋난다
+ * (옛 값은 접힘 한 줄 기준이라 초점이 든 펼친 입력창과 36pt 갈렸다).
+ */
+const INPUT_TEXT_LEFT = BAR_PAD_X + INPUT_BORDER + INPUT_PAD_X;
+
+/**
  * 알약 위·아래 안쪽 여백(`styles.bar`). 위 여백에서 입력창 한 줄(엄지 바닥 44)이 원 둘레에
  * 이미 더하는 몫 `(44 − 36) / 2 = 4` 를 한 번 더 뺀 것이다 — 그래서 한 줄일 때 원의 위·아래
  * 여백이 좌·우와 같은 9 가 된다. 입력창을 44 로 두는 이유는 글 칸의 엄지 바닥이고, 글 세로
@@ -2040,15 +2047,19 @@ export function Composer({
   // 이 수리 뒤 8번 모두 정상). 스프링은 접히는 내내 `shown` 이 서서 보간이 끝까지 붙어 있고 끝난 뒤의 숫자가 네이티브 값과 같아서 어긋나지 않는다.
   // `reduceMotion` 은 ref 라서 **렌더 중에 읽는다** — `useReduceMotion.ts` 머리말은 읽는 곳이 누르는 순간뿐이라고 적지만 여기는 의도된 예외다: 값이 의미를 갖는 것은 상태가 바뀌는 렌더뿐이고
   // (앱 뿌리가 저장소를 붙들어 첫 렌더부터 안다), 설정이 바뀌어도 다시 그리지 않으니 다음 상태 전이부터 반영된다. 상태판 훅으로 바꾸면 첫 답이 올 때마다 컴포저가 다시 그려진다(그 훅 머리말이 피하려던 소음).
-  const inputInset =
+  //
+  // 입력창 **지금 배치**의 왼쪽 들여쓰기는 이 함수 하나가 정한다(#5067): `extra` 는 들여쓰기 위에 얹는 고정 폭이다. 글 칸 상자는 `extra = 0` 을, 같은 알약 안 답글 머리말은 글자의 왼쪽
+  // (`INPUT_TEXT_LEFT`)을 받는다 — 접힘·펼침·스프링 중이 **같은 진행값**에서 나와 머리말의 글자 열이 입력 글자와 한 프레임도 안 갈린다. 두 곳이 각자 조건문을 들면 한쪽만 고쳐지는 날 갈린다.
+  const fieldInset = (extra: number) =>
     shown && !reduceMotion.current
       ? progress.interpolate({
           inputRange: [0, 1],
-          outputRange: [CONV.composerCircle, 0],
+          outputRange: [CONV.composerCircle + extra, extra],
         })
       : expanded
-        ? 0
-        : CONV.composerCircle;
+        ? extra
+        : CONV.composerCircle + extra;
+  const inputInset = fieldInset(0);
   // 오른쪽은 한 칸 더 비운다(#4942): 보내기 원 왼쪽에 표현 단추의 칸이 서 있고(`styles.expression` — 접힘·펼침 모두 알약 바닥에
   // 절대 배치) 글이 그 밑으로 흐르면 안 된다. 펼치면 글 칸이 두 원 **위**로 넓어지므로 양쪽 다 0 이다.
   const inputInsetRight =
@@ -2506,6 +2517,7 @@ export function Composer({
         <ReplyDraftCard
           target={replyTarget}
           directory={directory}
+          textLeft={fieldInset(INPUT_TEXT_LEFT)}
           onCancel={onCancelReply}
         />
       ) : null}
