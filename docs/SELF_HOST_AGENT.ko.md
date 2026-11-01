@@ -2012,10 +2012,13 @@ agent:
 
 볼륨 `.env`에는 허용 목록이 있어요(#4950). Hermes는 게이트가 끝난 뒤 이 파일의 모든 이름을
 적용하므로, `lockgate.py`는 파일에 이것만 두게 해요. 운영자가 넣는 모델 키
-(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`), 연결 모드 Hermes의 Google 클라이언트 쌍
-(`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`), 그리고 Hermes가 새 볼륨의 첫
-기동에 써 넣는 템플릿 11줄(나온 그대로)이에요. 그 밖의 이름은 값이 비어 있어도 이름만 대고
-시작을 거절해요(게이트는 값을 출력하지 않아요). 옆에 `.op.env`가 있어도 거절해요. 이미 도는
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`), 그리고 Hermes가 새 볼륨의 첫 기동에 써 넣는
+템플릿 11줄(나온 그대로)이에요. 연결 모드 Hermes의 Google 클라이언트 쌍
+(`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`)은 서비스 변수라서 이 파일에는 두지 않아요.
+Hermes는 이 파일을 판독기 둘로 읽고 게이트도 둘의 눈으로 판정해요. 값은 한 줄이어야 하고(값 안의
+줄바꿈은 거절해요), 어느 판독기든 읽는 이름은 목록에 있어야 해요. 그 밖의 이름은 값이 비어 있어도
+이름만 대고 시작을 거절해요(게이트는 값을 출력하지 않아요). 옆에 `.op.env`가 있거나
+`/opt/data/profiles/` 아래에 항목이 하나라도 있어도 거절해요(폴더가 없거나 비어 있는 것은 괜찮아요). 이미 도는
 Hermes의 게이트를 바꾸기 전에 그 `.env`의 이름만 읽어서
 (`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env`는
 이름만 보여줘요) 목록에 없는 줄을 지우세요.

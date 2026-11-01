@@ -237,11 +237,13 @@ variable**: not `DATABASE_URL`, not `PROVIDER_LINK_MASTER_KEY`, not a JWT key.
 
    **The volume's `.env` has an allow-list (#4950, ADR-0203 증보 2026-11-01).** Hermes loads
    `/opt/data/.env` after the gate and applies every name in it, so the gate lets the file hold only
-   the names its comments list (`VOLUME_ENV_SECRETS`: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
-   `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, any value) and the eleven template lines
-   Hermes' own first boot copies into a fresh volume (`VOLUME_ENV_SEEDED`, those values only). Any other
-   name stops the start by name (never by value), and so does a `.op.env` beside it; `report` judges the
-   same file with the same function after start. **Before replacing `HERMES_LOCKGATE_B64` on a project
+   the names its comments list (`VOLUME_ENV_SECRETS`: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, any value;
+   the Google connector client pair stays a service variable) and the eleven template lines
+   Hermes' own first boot copies into a fresh volume (`VOLUME_ENV_SEEDED`, those values only). Hermes reads
+   the file with two readers and the gate judges it as both do: a line break inside an allowed value, or a
+   name only the line-by-line reader reads, is refused too. Any other name stops the start by name (never
+   by value), and so does a `.op.env` beside it or any entry under `/opt/data/profiles/`; `report` judges
+   the same file with the same function after start. **Before replacing `HERMES_LOCKGATE_B64` on a project
    that already runs Hermes, read the NAMES in its `.env`** (never the values) and remove what is not on
    the list, or the next start is refused: the check is in `docs/RELEASING.md`, "Hermes step".
 4. api and agent-worker get the wiring from the hand-mapped table (host,

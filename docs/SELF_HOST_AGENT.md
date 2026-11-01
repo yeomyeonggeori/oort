@@ -2506,11 +2506,14 @@ one volume).
 
 The volume's `.env` has an allow-list (#4950). Hermes applies every name in it after the
 gate ran, so `lockgate.py` lets the file hold only a model key you put there
-(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`), the Google client pair of a connector Hermes
-(`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`) and the eleven template lines
-Hermes' first boot writes into a fresh volume (kept as they ship). Any other name, empty or
-not, stops the start by name (the gate never prints a value), and so does a `.op.env` beside
-it. Before you update the gate of a Hermes that already runs, read the names in its `.env`
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) and the eleven template lines Hermes' first boot
+writes into a fresh volume (kept as they ship). The Google client pair of a connector Hermes
+(`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`) is a service variable and does not
+belong in this file. Hermes reads the file with two readers and the gate judges it as both do:
+a value is one line (a line break inside a value is refused), and every name either reader
+reads has to be on the list. Any other name, empty or not, stops the start by name (the gate
+never prints a value), and so does a `.op.env` beside it or any entry under `/opt/data/profiles/`
+(no folder, or an empty one, is fine). Before you update the gate of a Hermes that already runs, read the names in its `.env`
 (`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env`
 prints names only) and delete the lines that are not on that list.
 
