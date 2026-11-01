@@ -453,8 +453,9 @@ it none of these exist and no Hermes is started.
 
 - The `hermes` service is the official image pinned by digest, on the private
   network only, with no published port. It runs `infra/hermes/lockgate.py gate`
-  before the Hermes entrypoint (chat, Codex subscription search and Codex
-  subscription image generation allow-list, without `web_extract`; connectors keep
+  before the Hermes entrypoint (todo list, Codex subscription search and Codex
+  subscription image generation allow-list, without `web_extract` and without `memory` and
+  `session_search`, which would let one workspace's run read what another's left; connectors keep
   all `web` tools and `image_gen` off) and checks the oort image guard plugin, which
   refuses image addresses and file paths before the tool runs (the one exception,
   when `OORT_SELF_MEDIA_ORIGIN` is set, is this oort's own short-lived address of the
