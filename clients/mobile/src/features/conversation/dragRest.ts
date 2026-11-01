@@ -20,10 +20,14 @@ import type {TapTouchHandlers} from './tapDismiss';
 //   `maintainVisibleContentPosition` 보정까지 섞인다. 손가락의 화면 높이(`pageY`, `tapDismiss` 가 이미 읽는 `onTouchMove` 와 같은 좌표)는 손가락이 움직인 만큼만 나온다.
 // - **아래로만 쌓는다.** 아래 = 이전 대화를 읽는 방향이다. 직전 위치보다 **위로 한 번이라도** 가면 누적은 0 이다(Buzz 와 같다 — 오르내리며 헤매는 손은 아무리 해도 문턱에 닿지 않는다).
 //   같은 높이(가로로만 움직임)는 쌓지도 지우지도 않는다.
-// - **목록이 손가락에 끌리는 동안만 센다**(`onScrollBeginDrag` ~ `onScrollEndDrag`). 손을 뗀 뒤의 **관성**은 손가락이 아니다 — 던진 목록이 아무리 멀리 미끄러져도 문턱에 닿지 않는다
-//   (Buzz 도 손가락이 없는 스크롤 알림은 0 으로 되돌린다). 손가락은 닿아 있으나 목록을 끌지 않는 움직임(관성 중 막 닿아 멈추려는 손가락의 첫 움직임, 목록 밖 응답자가 가져간 제스처)도 세지 않는다.
-//   프로그램 이동(점프·꼬리 따라가기)에는 손가락이 없으니 애초에 이 판정에 오지 않는다. 끌기가 시작되기 **전**의 움직임(터치 문턱 안)도 세지 않는다 — Buzz 가 `ScrollStartNotification` 에서
-//   0 으로 시작하는 것과 같다.
+// - **쉬는 것은 목록이 손가락에 끌리는 동안만 한다**(`onScrollBeginDrag` ~ `onScrollEndDrag`). 손을 뗀 뒤의 **관성**은 손가락이 아니다 — 던진 목록이 아무리 멀리 미끄러져도 문턱에 닿지 않는다
+//   (Buzz 도 손가락이 없는 스크롤 알림은 0 으로 되돌린다). 손가락은 닿아 있으나 목록을 끌지 않는 움직임(관성 중 막 닿아 멈추려는 손가락의 첫 움직임, 목록 밖 응답자가 가져간 제스처)은 끌기 시작 알림이
+//   오지 않는 한 쉬게 하지 않는다. 프로그램 이동(점프·꼬리 따라가기)에는 손가락이 없으니 애초에 이 판정에 오지 않는다.
+// - **이벤트가 도착한 순서를 믿지 않는다 — 끌기 시작 알림보다 앞선 이동도 쌓아 둔다(#5088).** `touchMove` 는 같은 대상의 앞선 `touchMove` 와 **합쳐진다**(RN `dispatchUniqueEvent`: 큐에 남은 앞선 것의
+//   **자리**에 최신 좌표가 들어간다). 목록이 보내는 `onScrollBeginDrag` 는 합쳐지지 않고 다른 대상(스크롤뷰)의 이벤트라, JS 가 잠깐 바쁘면(부하·렌더) 그 제스처의 이동 거의 전부가 하나로 합쳐져 끌기 시작
+//   알림 **앞에** 도착한다. 빠른 스와이프(120ms)는 그렇게 앞에 몰린 거리가 버려져 알림 뒤에 센 거리가 문턱에 못 닿은 채 손이 떨어졌다. 그래서 끌기 시작 전의 아래 이동도 같은 규칙(위로 가면 0)으로 쌓아
+//   두고, 끌기 시작 알림이 오는 순간 이미 문턱이면 그 자리에서 쉰다. 문턱은 이벤트 순서와 상관없이 「이 제스처에서 손가락이 아래로 간 거리」다. 대가: 느리게 미는 손은 끌기가 시작되기 전 터치 문턱(≈10pt)
+//   안에서 움직인 만큼도 쌓이므로 목록이 끌린 거리가 48pt 보다 그만큼 모자랄 때 쉰다(손가락 기준 — #4665).
 // - **한 제스처에 한 번.** 쉬라고 한 손가락은 뗄 때까지 다시 알리지 않는다. 손가락이 둘이면(확대·두 손가락 스크롤) 그 제스처는 세지 않는다.
 //
 // ## 순수 판정과 훅
@@ -31,7 +35,7 @@ import type {TapTouchHandlers} from './tapDismiss';
 // `dragRestStep` 은 순수 함수다 — 제스처 시퀀스를 그대로 재생해 시험한다(`dragRest.test.ts`). `useDragRest` 는 그것을 터치 이벤트와 목록의 끌기 시작·끝 알림에 붙이는 배선일 뿐이다.
 // 터치는 **관찰만** 한다(응답자를 잡지 않는다 — `tapDismiss.ts` 머리말과 같은 이유: 링크·칩·길게 누르기·행 탭이 그대로 산다).
 //
-// **예비안(런타임 미확인 — 스택 검증 메모).** 문턱에서 접는 순간 손가락 밑 목록이 튀면(`contentOffset` 점프) 문턱을 넘은 **손을 뗄 때** 접도록 이 한 곳(`move` 단계의 `rest`)을
+// **예비안(런타임 미확인 — 스택 검증 메모).** 문턱에서 접는 순간 손가락 밑 목록이 튀면(`contentOffset` 점프) 문턱을 넘은 **손을 뗄 때** 접도록 이 한 곳(`move` 단계와 `dragBegin` 단계의 `rest`)을
 // `up` 단계로 옮긴다. 그 밖의 다른 곳은 안 바뀐다.
 // =============================================================================
 
@@ -53,9 +57,9 @@ export const DRAG_REST_FOLLOW_HOLD_MS = 400;
 export interface DragRestState {
   /** 직전 손가락의 화면 높이(`pageY`). */
   lastY: number | null;
-  /** 아래로 쌓인 거리(pt). 위로 한 번 가면 0. */
+  /** 아래로 쌓인 거리(pt). 손가락이 닿은 때부터 쌓는다 — 끌기 시작 알림보다 앞선 이동도 담는다(#5088). 위로 한 번 가면 0. */
   travel: number;
-  /** 목록이 손가락에 끌리고 있다 — `onScrollBeginDrag` 부터 `onScrollEndDrag`(손을 떼는 순간) 까지. 관성은 여기에 들지 않는다. */
+  /** 목록이 손가락에 끌리고 있다 — `onScrollBeginDrag` 부터 `onScrollEndDrag`(손을 떼는 순간) 까지. **쉬는 것은 이 동안만** 한다(쌓는 것은 아니다). 관성은 여기에 들지 않는다. */
   dragging: boolean;
   /** 이 제스처는 세지 않는다 — 손가락이 둘이었다. 마지막 손가락이 떼어질 때까지 이어진다. */
   broken: boolean;
@@ -85,12 +89,12 @@ export type DragRestInput =
   | {kind: typeof DragRestKind.Up; touches: number}
   /** 시스템이 터치를 가져갔다(스크롤·전화·알림). */
   | {kind: typeof DragRestKind.Cancel}
-  /** 목록이 손가락에 끌리기 시작했다(`onScrollBeginDrag`). 이 순간부터 쌓는다. */
+  /** 목록이 손가락에 끌리기 시작했다(`onScrollBeginDrag`). 이 순간부터 쉴 수 있다 — 그동안 쌓인 것이 이미 문턱이면 이 단계에서 쉰다(#5088). */
   | {kind: typeof DragRestKind.DragBegin}
-  /** 손가락이 목록을 놓았다(`onScrollEndDrag`). 그 뒤의 관성은 쌓지 않는다. */
+  /** 손가락이 목록을 놓았다(`onScrollEndDrag`). 그 뒤의 관성은 손가락이 아니다 — 쉬지 않는다. */
   | {kind: typeof DragRestKind.DragEnd};
 
-/** 한 단계 전진. `rest` 는 문턱에 **처음** 닿은 단계에서만 참이다(한 제스처에 한 번). */
+/** 한 단계 전진. `rest` 는 문턱에 **처음** 닿은 단계(이동 또는 끌기 시작 알림)에서만 참이다(한 제스처에 한 번). */
 export function dragRestStep(
   state: DragRestState,
   input: DragRestInput,
@@ -114,12 +118,11 @@ export function dragRestStep(
       if (state.lastY === null) return {state: {...state, lastY: input.y}, rest: false};
       const delta = input.y - state.lastY;
       if (state.broken || state.fired) return {state: {...state, lastY: input.y}, rest: false};
-      // 위로 한 번이라도 가면 0. 같은 높이(delta === 0)는 그대로 둔다.
-      let travel = state.travel;
-      if (delta < 0) travel = 0;
-      // 목록이 손가락에 끌리는 동안의 아래 움직임만 쌓는다. 끌지 않는 손(관성 중 막 닿은 손가락·목록 밖 응답자의 제스처)은 쌓지 않는다.
-      else if (state.dragging) travel += delta;
-      if (travel >= DRAG_REST_PT) {
+      // 위로 한 번이라도 가면 0. 같은 높이(delta === 0)는 그대로 둔다. 아래 움직임은 목록이 끌리기 전에도 쌓는다(#5088) — 합쳐진 `touchMove` 가 끌기 시작 알림보다 앞서 올 수 있고,
+      // 그렇게 앞서 온 거리를 버리면 빠른 스와이프가 문턱에 못 닿는다. 쌓인 것은 끌기 시작 알림(`DragBegin`)이 가져다 쓴다.
+      const travel = delta < 0 ? 0 : state.travel + delta;
+      // 쉬는 것은 목록이 손가락에 끌리는 동안만 한다. 끌지 않는 손(관성 중 막 닿은 손가락·목록 밖 응답자의 제스처)은 끌기 시작 알림이 오지 않는 한 쌓기만 하고 쉬게 하지 않는다.
+      if (state.dragging && travel >= DRAG_REST_PT) {
         return {state: {...state, lastY: input.y, travel: 0, fired: true}, rest: true};
       }
       return {state: {...state, lastY: input.y, travel}, rest: false};
@@ -133,10 +136,15 @@ export function dragRestStep(
     case DragRestKind.Cancel:
       return {state: IDLE_DRAG_REST, rest: false};
     case DragRestKind.DragBegin:
-      // 새 끌기는 0 에서 시작한다 — 한 손가락이 끌기를 끝내고 다시 시작해도(Buzz 의 `ScrollStartNotification`) 앞의 누적을 이어받지 않는다.
-      return {state: {...state, dragging: true, travel: 0}, rest: false};
+      // 끌기 시작 알림은 이동보다 늦게 올 수 있다(합쳐진 `touchMove` 가 앞선다). 그동안 쌓인 아래 이동이 이미 문턱이면 지금 쉰다(한 제스처에 한 번 — 쉰 제스처는 쉴 때 누적을 0 으로 비웠고 그 뒤
+      // 이동은 쌓이지 않으니 여기서 다시 문턱에 닿지 않는다). 아니면 쌓인 것을 그대로 이어서 센다. 손가락이 둘이었던(`broken`) 제스처는 쌓인 것이 문턱을 넘었어도 알리지 않는다.
+      if (!state.broken && state.travel >= DRAG_REST_PT) {
+        return {state: {...state, dragging: true, travel: 0, fired: true}, rest: true};
+      }
+      return {state: {...state, dragging: true}, rest: false};
     case DragRestKind.DragEnd:
-      return {state: {...state, dragging: false}, rest: false};
+      // 이 끌기가 쌓은 것은 다 쓴 것이다 — 끝난 끌기가 다시 시작해도(Buzz 의 `ScrollStartNotification`) 앞의 누적을 이어받지 않는다. 새 제스처의 누적은 `Down` 이 0 에서 시작한다.
+      return {state: {...state, dragging: false, travel: 0}, rest: false};
   }
 }
 
@@ -145,7 +153,7 @@ export interface DragRestHandlers {
   onTouchMove: (event: GestureResponderEvent) => void;
   onTouchEnd: (event: GestureResponderEvent) => void;
   onTouchCancel: (event: GestureResponderEvent) => void;
-  /** 목록의 `onScrollBeginDrag` 에서 부른다. */
+  /** 목록의 `onScrollBeginDrag` 에서 부른다. 이동보다 늦게 오면(합쳐진 `touchMove` 가 앞선다) 이 호출이 쉬기를 부를 수 있다(#5088). */
   onScrollBeginDrag: () => void;
   /** 목록의 `onScrollEndDrag` 에서 부른다. */
   onScrollEndDrag: () => void;
@@ -214,7 +222,10 @@ export function useDragRest(onRest: () => void): DragRestHandlers {
       stateRef.current = dragRestStep(stateRef.current, {kind: DragRestKind.Cancel}).state;
     },
     onScrollBeginDrag: () => {
-      stateRef.current = dragRestStep(stateRef.current, {kind: DragRestKind.DragBegin}).state;
+      // 끌기 시작 알림이 이동보다 늦게 오면 그동안 쌓인 것이 이미 문턱일 수 있다(#5088) — 이동 처리기와 같이 `rest` 를 받아 부른다.
+      const step = dragRestStep(stateRef.current, {kind: DragRestKind.DragBegin});
+      stateRef.current = step.state;
+      if (step.rest) onRestRef.current();
     },
     onScrollEndDrag: () => {
       stateRef.current = dragRestStep(stateRef.current, {kind: DragRestKind.DragEnd}).state;

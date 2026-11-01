@@ -200,6 +200,29 @@ describe('목록을 아래로 끌어 48pt — 자판을 내리고 입력창이 �
     expect(dismiss).toHaveBeenCalledTimes(1);
   });
 
+  it('끌기 시작 알림이 이동보다 늦게 와도 쉰다 — 합쳐진 이동이 알림 앞에 몰려 온 순서(빠른 스와이프)에서 알림이 오는 순간 자판이 내려가고 접힌다 (#5088)', async () => {
+    await mount('쓰던 글');
+    start(300);
+    moveTo(422); // 122pt(화면 14%) — 이동 하나로 합쳐져 왔고 목록은 아직 끌기를 알리지 않았다
+    expect(dismiss).not.toHaveBeenCalled();
+    dragBegin(); // 끌기 시작 알림이 이동 뒤에 온다 — 그동안 쌓인 것이 이미 문턱이다(손을 떼기 전)
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    fireEvent(input(), 'blur'); // `Keyboard.dismiss()` 가 부른 네이티브 블러
+    settle();
+    expect(hasTools()).toBe(false);
+    expect(input().props.value).toBe('쓰던 글'); // 초안은 지우지 않는다
+  });
+
+  it('알림이 늦게 와도 47pt 면 쉬지 않고 그 뒤 1pt 를 더 가면 쉰다 — 쌓아 둔 것에 이어서 센다 (#5088)', async () => {
+    await mount('쓰던 글');
+    start(300);
+    moveTo(347); // 47pt
+    dragBegin();
+    expect(dismiss).not.toHaveBeenCalled();
+    moveTo(348); // 쌓아 둔 47pt + 1pt
+    expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+
   it('글이 없는 펼친 입력창(보낸 직후)도 48pt 에 자판이 내려가고 포커스를 잃어 접힌다', async () => {
     await mount(null);
     dragBegin();
