@@ -17,7 +17,9 @@ name: 115-list-tap-dismiss
 #   avatar       아바타를 누른다                             → 프로필이 열리고 자판도 내린다
 #   replymark    답글 표식을 누른다                          → 스레드가 열리고 자판도 내린다
 #   rollup       스레드 롤업 「답글 N개」를 누른다            → 스레드가 열리고 자판도 내린다
-#   drag         목록을 **빠르게** 훑는다(120ms)              → 자판은 `on-drag` 가 내리고 우리 판정은 안 불린다(dismiss=0) · 입력창은 펼친 채(스크롤만)
+#   drag         목록을 **빠르게 아래로** 훑는다(120ms, 화면 14%) → 아래 48pt 누적에서 우리 판정이 `Keyboard.dismiss` 를 한 번 부르고(dismiss=1) 자판 내림 · 접힘 · 글 유지 (#4665 — 이전에는 `on-drag` 가 첫 1px 에 자판만 걷고 입력창은 펼친 채였다)
+#   drag-short   목록을 **조금**(화면 4%, 문턱 밑) 아래로 끌었다      → 자판도 입력창도 그대로(dismiss=0) — 읽으려 살짝 민 손(#4665)
+#   drag-up      목록을 **위로** 훑는다(120ms, 화면 14%)             → 자판도 입력창도 그대로(dismiss=0) — 위로는 누적 0, 더는 첫 1px 에 걷지 않는다(#4665)
 #   hold         목록 빈 곳을 길게 누른다(시트 없음)           → 탭이 아니다: dismiss=0 · 입력창 펼친 채 · 글 유지(자판은 RN 이 기존 길로 거둘 수 있다)
 #   long         본문을 길게 누른다                          → 탭이 아니다(시트가 열린 사진에 dismiss=0) · 시트를 닫으면 자판이 돌아오고 입력창은 펼친 채(planner 결정 4)
 #   autocorrect  영어 자판에서 「Teh」를 쳐 자동 고침을 대기시킨 채 누른다 → 「The」로 확정돼도 접힌 채다
@@ -213,17 +215,58 @@ name: 115-list-tap-dismiss
       true: ${CASE == 'drag'}
     commands:
       - runFlow: subflows/list-tap-ready.yaml
-      # **빠른** 끌기(훑기): 손가락이 250ms 안에 떨어지므로 시간만으로는 탭과 가를 수 없다 — 10pt 넘게 움직였다는 판정만이 이것을 탭에서 가른다.
+      # **빠른 아래** 끌기(훑기): 화면 높이의 14%(16 Pro ≈ 122pt · SE ≈ 93pt)라 손가락이 아래로 48pt 누적을 넘는다(#4665). 손가락이 250ms 안에 떨어지므로 시간만으로는 탭과 가를 수 없다 —
+      # 10pt 넘게 움직였다는 판정만이 이것을 탭에서 가른다.
       - swipe:
           start: "50%,20%"
           end: "50%,34%"
           duration: 120
-      - extendedWaitUntil:
-          visible: ".*kb=down.*"
-          timeout: 15000
+      # 끌기도 탭과 같은 쉬기다(#4665): 누적이 문턱에 닿는 순간 우리 판정이 `Keyboard.dismiss` 를 한 번 부르고(`dismiss=1` — 이전 판의 `dismiss=0` 은 `on-drag` 가 첫 1px 에 네이티브로 자판을 걷던 때의
+      # 값이다), 자판이 내려가고 글이 있는 입력창은 쉬는 알약으로 접히며 초안은 그대로다.
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "-"
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+      - assertVisible: ".*dismiss=1 .*"
+      # 쉬는 알약을 다시 누르면 같은 자리에서 펼친다.
+      - runFlow:
+          file: subflows/list-tap-reopen.yaml
+          env:
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+# ---------------------------------------------------------------- drag-short
+- runFlow:
+    when:
+      true: ${CASE == 'drag-short'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      # 문턱 밑의 끌기: 화면 높이의 4%(16 Pro ≈ 35pt · SE ≈ 27pt) — 터치 문턱(10pt)을 넘어 목록은 끌리지만 아래로 48pt 에는 못 미친다. 읽으려고 살짝 민 손에는 자판이 남는다(#4665).
+      - swipe:
+          start: "50%,20%"
+          end: "50%,24%"
+          duration: 400
       - waitForAnimationToEnd:
           timeout: 6000
-      # 끌기는 탭이 아니다: 우리 판정이 `Keyboard.dismiss` 를 한 번도 안 불렀고(자판은 ScrollView 의 `on-drag` 가 내렸다), 글이 있으니 입력창은 #4456 대로 펼친 채다.
+      - assertVisible: ".*kb=up.*"
+      - assertVisible: ".*dismiss=0 .*"
+      - assertVisible:
+          id: "composer-tools"
+      - assertVisible: ".*last=- .*"
+      - assertVisible: ".*draft=오늘 리뷰 끝나면 알려줄게요$"
+# ---------------------------------------------------------------- drag-up
+- runFlow:
+    when:
+      true: ${CASE == 'drag-up'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      # 위로 끌기: 손가락이 위로 가면 누적은 0 이라 얼마를 끌어도 쉬지 않는다. 이전의 `on-drag` 는 방향과 상관없이 첫 1px 에 자판을 걷었다(#4665).
+      - swipe:
+          start: "50%,34%"
+          end: "50%,20%"
+          duration: 120
+      - waitForAnimationToEnd:
+          timeout: 6000
+      - assertVisible: ".*kb=up.*"
       - assertVisible: ".*dismiss=0 .*"
       - assertVisible:
           id: "composer-tools"
