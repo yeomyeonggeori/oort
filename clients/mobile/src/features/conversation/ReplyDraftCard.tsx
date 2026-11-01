@@ -1,6 +1,6 @@
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React from 'react';
-import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
+import {Animated, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 
 import {HEAD_MAX_SCALE} from '../../design/atoms';
 import {CONV_ICON_SIZE, CONV_ICONS} from '../../design/icons';
@@ -21,8 +21,10 @@ import type {ReplyTarget} from './replyTarget';
 //   둘째 줄(흐리게, 한 줄 말줄임)  원문 — 글이 없는 메시지는 「사진」·「파일」·「이모티콘」 같은 대체 글
 //   오른쪽 ✕      답글 취소 — 대상만 떼고 **쓴 글은 남는다**(글은 이 부품이 아니라 컴포저가 들고 있다)
 //
-// 글자 칸의 왼쪽은 입력창의 글자와 같은 선에 서고(원 + 간격 + 글 안쪽 여백), ✕ 는 보내기 원 바로 위 같은 줄에 선다 —
-// 알약 안의 세 열(왼쪽 원 · 글 · 오른쪽 원)이 머리말에서도 이어진다.
+// 글자 칸의 왼쪽은 입력창의 글자와 같은 선에 선다 — 그 선은 **입력창의 지금 배치**에서 읽는다(`textLeft`, #5067). 접힌 한 줄 알약은 글이 + 원 오른쪽에서 시작하고,
+// 초점이 들거나 글이 있어 펼쳐지면(글 칸 위·도구 줄 아래) 글이 알약 가장자리 쪽으로 넓어진다. 답글은 거의 늘 펼친 입력창에서 서므로 한 줄 입력창 기준의 숫자를
+// 머리말이 들고 있으면 36pt 갈린다(design-review M2). 값은 `Composer` 가 글 칸 상자와 **같은 진행값**에서 읽어 넘기므로 펼치고 접는 스프링 중에도 같은 선이다.
+// ✕ 는 보내기 원 바로 위 같은 줄에 선다 — 보내기 원은 두 배치 모두 알약 바닥의 같은 자리다.
 //
 // 큰 글씨: 두 줄 다 한 줄 말줄임이고 배율은 `HEAD_MAX_SCALE`(1.3)에서 멈춘다 — 입력창 위에 자판과 함께 서는 머리라서
 // 자라도 입력칸이 화면을 먹지 않게 하는 같은 상한이다. 문장은 한 번에 읽힌다(두 줄이 한 접근성 원소).
@@ -31,10 +33,16 @@ import type {ReplyTarget} from './replyTarget';
 export function ReplyDraftCard({
   target,
   directory,
+  textLeft,
   onCancel,
 }: {
   target: ReplyTarget;
   directory: Directory;
+  /**
+   * 머리말 글자의 왼쪽(pt) — 알약 안쪽 가장자리에서 잰다. 입력창 글자의 왼쪽과 같은 값이어야 하고, 그 값은 입력창의 지금 배치가 정한다(위 머리말).
+   * 스프링 중에는 입력창과 같은 보간값이 온다.
+   */
+  textLeft: number | Animated.AnimatedInterpolation<number>;
   /** ✕. 대상만 뗀다 — 입력칸의 글은 건드리지 않는다. */
   onCancel: () => void;
 }): React.JSX.Element {
@@ -44,7 +52,9 @@ export function ReplyDraftCard({
   const header = copy.header(target);
   const excerpt = copy.excerpt(target);
   return (
-    <View style={styles.card} testID="reply-draft-card">
+    <Animated.View
+      style={[styles.card, {paddingLeft: textLeft}]}
+      testID="reply-draft-card">
       <View
         accessible
         accessibilityLabel={`${header}, ${excerpt}`}
@@ -76,7 +86,7 @@ export function ReplyDraftCard({
           style={[styles.cross, {tintColor: palette.textMuted}]}
         />
       </Pressable>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -86,8 +96,7 @@ const buildStyles = (color: Palette) =>
       flexDirection: 'row',
       alignItems: 'center',
       paddingTop: space.xs,
-      // 입력창의 글자와 같은 선: 원(36) + 원 ↔ 알약 가장자리(9) + 원 ↔ 글 시작(9).
-      paddingLeft: CONV.composerGap + CONV.composerCircle + CONV.composerTextInset,
+      // 왼쪽(글자 열)은 여기 없다 — 입력창의 지금 배치에서 읽어 `textLeft` 로 들어온다.
       // ✕ 의 눌림 영역(44)이 보내기 원(36) 바로 위에 가운데를 맞춘다: 원의 가운데는 가장자리에서 9 + 18 = 27.
       paddingRight: CONV.composerGap + CONV.composerCircle / 2 - TOUCH_TARGET / 2,
     },
