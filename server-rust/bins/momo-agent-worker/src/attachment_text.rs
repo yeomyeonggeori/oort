@@ -21,9 +21,11 @@
 //! * **the child confines itself first** (`confine_self`, its first act, before it reads a byte): on
 //!   Linux a ceiling on its address space ([`CHILD_ADDRESS_SPACE_MAX`], `RLIMIT_AS` through the safe
 //!   `rlimit` wrapper `momo-expressions` already uses) and `oom_score_adj` 1000, so that when the
-//!   container's memory limit is reached the kernel's out-of-memory killer picks the child and not the
-//!   worker (which may hold a model — the killer takes the largest process, and the child is only the
-//!   largest by chance);
+//!   container's memory limit is reached the kernel's out-of-memory killer is steered to the child and
+//!   not the worker (which may hold a model — the killer takes the largest process, and the child is only
+//!   the largest by chance; the write is best effort and is ignored where `/proc` refuses it); and, on
+//!   every unix, no core dump (`RLIMIT_CORE` 0). It does so as a single thread — `main` starts no async
+//!   runtime on this path, because the address-space ceiling counts every thread's stack and arena;
 //! * **the supervisor watches** ([`MemoryGuard`]): every [`CHILD_MEMORY_POLL`] it reads the child's
 //!   resident memory (`/proc/<pid>/status` on Linux, `ps` elsewhere) and, above [`CHILD_MEMORY_MAX`],
 //!   kills that very pid and reaps it before the slot is given back;
@@ -183,11 +185,25 @@ pub fn pdf_text(bytes: &[u8]) -> Result<String, ExtractError> {
 }
 
 /// What the child does to itself before it reads a byte: the memory half of the confinement (module
-/// docs). On Linux `oom_score_adj` goes to 1000 — raising it needs no privilege, and the write is best
-/// effort because the ceiling below does not depend on it — and the address space is limited to
-/// [`CHILD_ADDRESS_SPACE_MAX`], or to the hard limit the child was already given when that is lower
-/// (lowering a limit is always allowed; raising a hard one is not). Elsewhere there is nothing to set.
+/// docs).
+///
+/// * **No core dump** (unix, #4970 review R2-5): `RLIMIT_CORE` goes to 0, soft and hard. A hostile file ends
+///   a child with a crash every so often (a stack that is too deep, an allocation that fails), and a core
+///   dump of it would hold the requester's document and the parser's state on the host's disk. Lowering a
+///   limit is always allowed, and the hard limit goes down with the soft one so that nothing which runs in
+///   the child can raise it again. A host that pipes dumps to a handler of its own decides for itself
+///   whether to honour a limit of 0 — that is the host's setting, not something this process can settle.
+/// * On Linux `oom_score_adj` goes to 1000 — raising it needs no privilege, and the write is best effort
+///   because the ceiling below does not depend on it — and the address space is limited to
+///   [`CHILD_ADDRESS_SPACE_MAX`], or to the hard limit the child was already given when that is lower
+///   (lowering a limit is always allowed; raising a hard one is not).
+///
+/// Anything that cannot be set is an `Err`, and a child that cannot confine itself reads nothing.
 fn confine_self() -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        rlimit::Resource::CORE.set(0, 0)?;
+    }
     #[cfg(target_os = "linux")]
     {
         let _ = std::fs::write("/proc/self/oom_score_adj", "1000");
@@ -657,6 +673,46 @@ mod tests {
             assert!(started.elapsed() < Duration::from_secs(5), "it never fired");
             std::thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    /// #4970 review R2-5: `confine_self` leaves the child no core dump. Limits belong to the process that
+    /// sets them — lowering them in the test process would change every test that runs beside this one — so
+    /// the test runs itself again as a probe (`OORT_4970_CONFINE_PROBE`), which confines itself and prints
+    /// the core limit it was left with. Soft **and** hard: a soft 0 under a hard `unlimited` can be raised
+    /// again by whatever runs in the child, and `unlimited` is also what a plain shell starts with.
+    #[cfg(unix)]
+    #[test]
+    fn a_child_leaves_itself_no_core_dump() {
+        const PROBE: &str = "OORT_4970_CONFINE_PROBE";
+        if std::env::var_os(PROBE).is_some() {
+            confine_self().expect("a child can confine itself");
+            let (soft, hard) = rlimit::Resource::CORE.get().expect("a limit can be read");
+            println!("OORT-4970-CORE {soft} {hard}");
+            return;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "attachment_text::tests::a_child_leaves_itself_no_core_dump",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(PROBE, "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the test binary can run itself");
+        // the harness prints `test <name> ... ` on the same line before the test's own output
+        let printed = String::from_utf8_lossy(&output.stdout);
+        let found: Vec<&str> = printed
+            .split_whitespace()
+            .skip_while(|word| *word != "OORT-4970-CORE")
+            .take(3)
+            .collect();
+        assert_eq!(
+            found,
+            ["OORT-4970-CORE", "0", "0"],
+            "the core-dump limit the confined child was left with (soft, hard); the probe printed {printed:?}"
+        );
     }
 
     #[test]

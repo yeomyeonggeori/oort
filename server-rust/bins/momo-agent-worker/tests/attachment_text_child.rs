@@ -15,7 +15,9 @@
 //! | `a_stream_that_inflates_far_past_its_size_is_ended_by_the_memory_watch` | the supervisor's memory watch (`over_memory` in the race, or its comparison with the ceiling), the kill by pid, the reap before the slot returns |
 //! | `the_shipped_ceiling_ends_a_child_that_inflates_past_it` | `CHILD_MEMORY_MAX` / `CHILD_MEMORY_POLL` as shipped (the guard the worker really uses, with only a sink added) |
 //! | `a_child_ends_itself_at_its_own_deadline_when_nothing_ends_it` | the watchdog thread `child_main_with` starts |
-//! | `a_child_confines_itself_before_it_reads_a_byte` (Linux) | `oom_score_adj` 1000 and the address-space ceiling `confine_self` sets |
+//! | `the_child_confines_itself_before_any_thread_pool_exists_and_still_reads` | the child branch of `main` running after the async runtime was built (#4970 review R2-1): the child must be its main thread and its watchdog, whatever `TOKIO_WORKER_THREADS` says, and a plain PDF must still read |
+//! | `a_child_confines_itself_before_it_reads_a_byte` (Linux) | `oom_score_adj` 1000, the address-space ceiling and the core-dump limit 0 `confine_self` sets |
+//! | `the_core_row_of_proc_limits_is_a_zero_limit_only_when_both_limits_are_zero` | reading the Linux test's `Max core file size` row (the row is parsed on every platform, so the parse is measured here and not first on CI) |
 
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
@@ -535,8 +537,131 @@ fn a_child_ends_itself_at_its_own_deadline_when_nothing_ends_it() {
     );
 }
 
-/// `oom_score_adj` and the address-space ceiling are the kernel's to enforce, so they are read back from
-/// the kernel: `/proc/<pid>/oom_score_adj` and `/proc/<pid>/limits` of a child blocked on its stdin.
+/// How many threads process `pid` has right now: the `Threads:` line of `/proc/<pid>/status` on Linux, the
+/// rows `ps -M` prints under its header (one per thread) elsewhere. `None` when the process is gone or the
+/// answer is not understood.
+fn threads_of(pid: u32) -> Option<usize> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix("Threads:"))?
+            .trim()
+            .parse()
+            .ok()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let listing = std::process::Command::new("/bin/ps")
+            .args(["-M", "-p", &pid.to_string()])
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        let rows = String::from_utf8_lossy(&listing.stdout)
+            .lines()
+            .count()
+            .checked_sub(1)?;
+        (rows > 0).then_some(rows)
+    }
+}
+
+/// #4970 review R2-1: the child limits its own address space as its first act, and that ceiling counts every
+/// thread's stack and allocator arena — so the child must be **one thread** (plus the watchdog it starts
+/// itself) when it does, not one worker per visible core. The real worker binary is run as the child, since
+/// only `main` decides whether a runtime exists before the child branch (this test binary re-running itself
+/// cannot see that). `TOKIO_WORKER_THREADS` is what a multi-threaded tokio runtime reads when it is built:
+/// the supervisor never sets it (the child has an empty environment), this test does so that a runtime
+/// started first is unmistakable — sixty-four workers, on any machine. The thread count is read while the
+/// child waits for its input (this test holds its stdin open), over a window that ends well after the
+/// watchdog exists, and then the same child is given an ordinary PDF and must read it.
+#[test]
+fn the_child_confines_itself_before_any_thread_pool_exists_and_still_reads() {
+    let mut child = std::process::Command::new(worker_binary())
+        .arg(CHILD_ARG)
+        .env_clear()
+        .env("TOKIO_WORKER_THREADS", "64")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("the worker binary starts as the child");
+    let pid = child.id();
+    let started = Instant::now();
+    let mut highest = 0usize;
+    let mut watchdog_seen_at: Option<Instant> = None;
+    loop {
+        if let Some(threads) = threads_of(pid) {
+            highest = highest.max(threads);
+            // the watchdog is the child's own second act: once a second thread exists it is waiting for input
+            if threads >= 2 && watchdog_seen_at.is_none() {
+                watchdog_seen_at = Some(Instant::now());
+            }
+        }
+        let settled = watchdog_seen_at.is_some_and(|at| at.elapsed() >= Duration::from_millis(500));
+        if settled || started.elapsed() > Duration::from_secs(8) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let mut input = child.stdin.take().expect("stdin was piped");
+    input
+        .write_all(&pdf_with(&["ORT-4970-ONE-THREAD"]))
+        .expect("the child is still reading");
+    drop(input);
+    let output = child.wait_with_output().expect("the child ends");
+    eprintln!("child threads while it waited for input: highest {highest}");
+    assert_eq!(
+        highest, 2,
+        "a child that confines itself before any thread pool exists is its main thread and its own \
+         watchdog (2); more means a runtime was started first, fewer that it never got as far as the watchdog"
+    );
+    assert!(
+        output.status.success(),
+        "the child ended with {:?}",
+        output.status
+    );
+    let answer: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("the child answers with one JSON line");
+    assert_eq!(answer["ok"], true, "{answer}");
+    assert!(
+        answer["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("ORT-4970-ONE-THREAD")),
+        "{answer}"
+    );
+}
+
+/// A row of `/proc/<pid>/limits` — `Max core file size        0        0        bytes` — is a zero limit
+/// when the soft **and** the hard value are `0` (a soft 0 under a hard `unlimited` can be raised again).
+fn core_limit_is_zero(row: &str) -> bool {
+    let fields: Vec<&str> = row.split_whitespace().collect();
+    fields.get(..4) == Some(&["Max", "core", "file", "size"][..])
+        && fields.get(4) == Some(&"0")
+        && fields.get(5) == Some(&"0")
+}
+
+#[test]
+fn the_core_row_of_proc_limits_is_a_zero_limit_only_when_both_limits_are_zero() {
+    let row = |soft: &str, hard: &str| {
+        format!("Max core file size        {soft:<20} {hard:<20} bytes     ")
+    };
+    assert!(core_limit_is_zero(&row("0", "0")));
+    // the shapes a container starts with: the child left alone would still be able to dump
+    assert!(!core_limit_is_zero(&row("0", "unlimited")));
+    assert!(!core_limit_is_zero(&row("unlimited", "unlimited")));
+    assert!(!core_limit_is_zero(&row("1048576", "0")));
+    // another row, or nothing at all, is never read as the core limit
+    assert!(!core_limit_is_zero(
+        "Max address space         0                    0                    bytes"
+    ));
+    assert!(!core_limit_is_zero(""));
+}
+
+/// `oom_score_adj`, the address-space ceiling and the core-dump limit are the kernel's to enforce, so they are
+/// read back from the kernel: `/proc/<pid>/oom_score_adj` and `/proc/<pid>/limits` of a child blocked on its
+/// stdin.
 #[cfg(target_os = "linux")]
 #[test]
 fn a_child_confines_itself_before_it_reads_a_byte() {
@@ -545,18 +670,22 @@ fn a_child_confines_itself_before_it_reads_a_byte() {
     let pid = probe.id();
     let ceiling = momo_agent_worker::attachment_text::CHILD_ADDRESS_SPACE_MAX.to_string();
     let started = Instant::now();
-    let (adj, row) = loop {
+    let (adj, row, core) = loop {
         let adj = std::fs::read_to_string(format!("/proc/{pid}/oom_score_adj")).unwrap_or_default();
         let limits = std::fs::read_to_string(format!("/proc/{pid}/limits")).unwrap_or_default();
-        let row = limits
-            .lines()
-            .find(|line| line.starts_with("Max address space"))
-            .unwrap_or_default()
-            .to_string();
-        if (adj.trim() == "1000" && row.contains(&ceiling))
+        let limit_row = |name: &str| {
+            limits
+                .lines()
+                .find(|line| line.starts_with(name))
+                .unwrap_or_default()
+                .to_string()
+        };
+        let row = limit_row("Max address space");
+        let core = limit_row("Max core file size");
+        if (adj.trim() == "1000" && row.contains(&ceiling) && core_limit_is_zero(&core))
             || started.elapsed() > Duration::from_secs(10)
         {
-            break (adj, row);
+            break (adj, row, core);
         }
         std::thread::sleep(Duration::from_millis(10));
     };
@@ -570,5 +699,9 @@ fn a_child_confines_itself_before_it_reads_a_byte() {
     assert!(
         row.contains(&ceiling),
         "the address-space ceiling is not in place: {row:?}"
+    );
+    assert!(
+        core_limit_is_zero(&core),
+        "the child must leave no core dump (soft and hard limit 0): {core:?}"
     );
 }
