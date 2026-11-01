@@ -259,6 +259,17 @@ export const messageKeys = [
   "timeline.unfurl.previewDismissed",
   "timeline.unfurl.previewGroup",
   "timeline.unfurl.video",
+  "timeline.workPlan.button",
+  "timeline.workPlan.buttonDone",
+  "timeline.workPlan.maybeStale",
+  "timeline.workPlan.notLive",
+  "timeline.workPlan.openAll",
+  "timeline.workPlan.sessionLabel",
+  "timeline.workPlan.stepCurrent",
+  "timeline.workPlan.stepDone",
+  "timeline.workPlan.stepPending",
+  "timeline.workPlan.title",
+  "timeline.workPlan.titleDone",
   "timeline.workRecord.bundleRead",
   "timeline.workRecord.bundleReadSearch",
   "timeline.workRecord.bundleSearch",
@@ -649,6 +660,25 @@ export const argumentSpecs = {
   "timeline.unfurl.previewDismissed": {},
   "timeline.unfurl.previewGroup": {},
   "timeline.unfurl.video": {},
+  "timeline.workPlan.button": {
+    "done": "number",
+    "total": "number"
+  },
+  "timeline.workPlan.buttonDone": {
+    "total": "number"
+  },
+  "timeline.workPlan.maybeStale": {},
+  "timeline.workPlan.notLive": {},
+  "timeline.workPlan.openAll": {},
+  "timeline.workPlan.sessionLabel": {},
+  "timeline.workPlan.stepCurrent": {},
+  "timeline.workPlan.stepDone": {},
+  "timeline.workPlan.stepPending": {},
+  "timeline.workPlan.title": {
+    "done": "number",
+    "total": "number"
+  },
+  "timeline.workPlan.titleDone": {},
   "timeline.workRecord.bundleRead": {
     "read": "number"
   },
@@ -1003,6 +1033,17 @@ export interface MessageArgs {
   "timeline.unfurl.previewDismissed": Record<string, never>;
   "timeline.unfurl.previewGroup": Record<string, never>;
   "timeline.unfurl.video": Record<string, never>;
+  "timeline.workPlan.button": { done: number; total: number };
+  "timeline.workPlan.buttonDone": { total: number };
+  "timeline.workPlan.maybeStale": Record<string, never>;
+  "timeline.workPlan.notLive": Record<string, never>;
+  "timeline.workPlan.openAll": Record<string, never>;
+  "timeline.workPlan.sessionLabel": Record<string, never>;
+  "timeline.workPlan.stepCurrent": Record<string, never>;
+  "timeline.workPlan.stepDone": Record<string, never>;
+  "timeline.workPlan.stepPending": Record<string, never>;
+  "timeline.workPlan.title": { done: number; total: number };
+  "timeline.workPlan.titleDone": Record<string, never>;
   "timeline.workRecord.bundleRead": { read: number };
   "timeline.workRecord.bundleReadSearch": { read: number; search: number };
   "timeline.workRecord.bundleSearch": { search: number };
