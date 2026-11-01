@@ -1,3 +1,4 @@
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import type { MessageAttachment } from '@momo/core/lib/api';
 import {
   act,
@@ -2157,5 +2158,16 @@ describe('hero4775', () => {
       fireEvent(root(), 'accessibilityEscape');
       expect(onClose).toHaveBeenCalledTimes(1);
     } finally { release(); }
+  });
+});
+
+describe('알림이 새 입구로 들어오면 (#4667)', () => {
+  it('뷰어가 걷힌다 — 되돌아가는 모션이 아니라 부모의 `onClose` 로 한 번', async () => {
+    const {onClose} = await mount();
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

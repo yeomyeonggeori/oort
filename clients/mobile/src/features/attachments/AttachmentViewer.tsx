@@ -51,6 +51,7 @@ import {
 } from '../../design/motion';
 import { font, line, radius, space, type Palette } from '../../design/tokens';
 import { useStyles } from '../../design/theme';
+import { useDismissOnEntry } from '../../lib/useDismissOnEntry';
 import { useReduceMotion } from '../../lib/useReduceMotion';
 import { useAttachmentPreview, measuredAttachmentSize, rememberAttachmentSize } from './content';
 import {initialStage, stageTransition, fitStageRect, stageExitRect, type StageRect} from '@momo/core/lib/stageTransition';
@@ -486,6 +487,9 @@ export function AttachmentViewer({
 }: AttachmentViewerProps): React.JSX.Element {
   const closeRequest = useRef(onClose);
   const [presented, setPresented] = useState(false);
+  // 알림이 새 입구로 들어오면 걷는다(#4667). 쓸어 내리는 되돌아가기 모션(`closeRequest`)이 아니라 부모의 `onClose` 다 —
+  // 그 모션은 뷰어를 연 행으로 돌아가는 것인데, 알림은 그 행이 있는 자리에서 사람을 데려가는 입구다.
+  useDismissOnEntry(onClose);
   return (
     <Modal
       visible

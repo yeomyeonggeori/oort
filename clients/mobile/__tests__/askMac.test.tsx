@@ -36,7 +36,15 @@ import {AskMacSheet} from '../src/shell/AskMacSheet';
 import {SheetNotice, TextArea} from '../src/shell/sheetForm';
 import {SHEET_ICONS} from '../src/design/icons';
 import {lightPalette} from '../src/design/tokens';
-import {describeCloseContract, imageSources, radioRows} from './fixtures/sheetContract';
+import {
+  describeCloseContract,
+  imageSources,
+  radioRows,
+  releaseReduceMotion,
+  setReduceMotion as setSheetReduceMotion,
+} from './fixtures/sheetContract';
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
+import {__resetEntryDrafts} from '../src/lib/entryDrafts';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {NON_SECRET_KEYS, nonSecretStore} from '../src/storage/kv';
@@ -881,5 +889,61 @@ describe('⑨ 도우미의 「작업 요청 열기」 카드가 미리 채운 �
     });
     expect(await screen.findByTestId('ask-mac-issue')).toBeTruthy();
     expect(port.spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe('⑩ 알림이 새 입구로 들어오면 — 쓰던 글을 지킨다 (#4667)', () => {
+  const DRAFT = '서버 로그에서 에러만 골라 줘';
+  beforeEach(async () => {
+    __resetEntryDrafts();
+    await setSheetReduceMotion(true); // 슬라이드 없이 바로 걷혀 「닫혔다」가 동기 단정이 된다
+  });
+  afterEach(() => {
+    releaseReduceMotion();
+  });
+
+  it('쓰던 글이 있으면 시트가 걷히고, 다음에 연 시트가 그 글로 선다', async () => {
+    installFetch({});
+    const first = mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+    fireEvent.changeText(screen.getByTestId('ask-mac-prompt'), DRAFT);
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    expect(first.onClose).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+    expect(screen.getByTestId('ask-mac-prompt').props.value).toBe(DRAFT);
+  });
+
+  it('도우미 카드가 미리 채운 시트는 맡겨 둔 옛 글이 덮지 않는다 — 카드는 그 글을 뜻한다', async () => {
+    installFetch({});
+    const first = mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+    fireEvent.changeText(screen.getByTestId('ask-mac-prompt'), DRAFT);
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    first.unmount();
+
+    mount(fakePort().port, {initialPrompt: '카드가 채운 글'});
+    await screen.findByTestId('ask-mac-form');
+    expect(screen.getByTestId('ask-mac-prompt').props.value).toBe('카드가 채운 글');
+  });
+
+  it('쓰지 않았으면 맡길 것이 없다 — 다시 연 시트는 비어 있다', async () => {
+    installFetch({});
+    const first = mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    first.unmount();
+
+    mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+    expect(screen.getByTestId('ask-mac-prompt').props.value).toBe('');
   });
 });

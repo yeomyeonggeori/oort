@@ -6,6 +6,7 @@ import {
 import {useExpressionItems} from '../expressions/ExpressionProvider';
 import {ExpressionImage} from '../expressions/ExpressionImage';
 import {hasProfileAvatarPreview} from '@momo/core/features/approvals/avatarPreview';
+import {messageEditDraftKey} from '../../lib/entryDrafts';
 import {haptics, hapticScope, type HapticEvent} from '../../lib/haptics';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {ThreadSummaryContent, useThreadSummaryView} from './ThreadSummary';
@@ -3748,6 +3749,7 @@ function MessageRowInner({
       {editing && actions ? (
         <MessageEditorSheet
           initialBody={body}
+          draftKey={messageEditDraftKey(message.id)}
           pending={editPending}
           error={editError}
           onCancel={() => setEditing(false)}
