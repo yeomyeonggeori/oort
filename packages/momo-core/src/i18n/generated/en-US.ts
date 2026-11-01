@@ -1730,6 +1730,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't change following. Try again in a moment."
     }
   ],
+  "timeline.thread.followHint": [
+    {
+      "type": 0,
+      "value": "Replying makes you follow this thread."
+    }
+  ],
   "timeline.thread.followOff": [
     {
       "type": 0,

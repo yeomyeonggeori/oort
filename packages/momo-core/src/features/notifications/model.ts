@@ -390,6 +390,46 @@ export function rememberAnnounced(
   return next.length > cap ? next.slice(next.length - cap) : next;
 }
 
+// ---- thread banner flood cap (#5017) ---------------------------------------
+
+/**
+ * 한 스레드의 답글이 이 기기에서 배너가 될 수 있는 건수 — `THREAD_BANNER_WINDOW_MS` 동안. 폰 푸시의 대량 층과 같은 값이다
+ * (ADR-0206 증보 1 F6: 스레드 루트당 60초에 개별 6건, `momo-notifier` `bulk.rs` 의 `INDIVIDUAL_PER_WINDOW`). 한 곳의 상수다.
+ *
+ * 폰과 다른 점 둘: 서버는 달력의 고정된 1분 창이라 경계에서 6+6이 나가지만, 여기는 미끄러지는 60초 창이라 **어느 60초에도 이 값을
+ * 넘지 않는다**. 그리고 폰은 7번째부터 「새 글이 여러 개 있어요」 한 건으로 합쳐 보내지만 배너에는 합칠 곳이 없다 — 한도를 넘은
+ * 답글은 배너가 **되지 않는다**(인박스·읽지 않음 표시에는 그대로 남는다).
+ */
+export const THREAD_BANNER_CAP = 6;
+export const THREAD_BANNER_WINDOW_MS = 60_000;
+
+/** 스레드 루트(소문자 id) → 그 창 안에서 배너로 허락한 시각들. 창 밖의 항목은 다음 판정에서 버려져 늘어나지 않는다. */
+export type ThreadBannerLedger = ReadonlyMap<string, readonly number[]>;
+
+export const EMPTY_THREAD_BANNER_LEDGER: ThreadBannerLedger = new Map();
+
+/**
+ * 이 스레드의 답글 하나를 배너로 허락하는가. 허락하면 시각을 적는다. 새 장부를 돌려주므로 호출부는 ref 에 쥐고 이 함수는
+ * 그것 없이 시험된다(`rememberAnnounced` 와 같은 모양). 판정은 다른 이유로 걸러지지 않아 **배너가 될 답글에만** 쓴다:
+ * 걸러질 글이 한도를 먹지 않게.
+ */
+export function admitThreadBanner(
+  ledger: ThreadBannerLedger,
+  rootId: string,
+  nowMs: number
+): { admitted: boolean; ledger: ThreadBannerLedger } {
+  const next = new Map<string, readonly number[]>();
+  for (const [key, stamps] of ledger) {
+    const live = stamps.filter((at) => nowMs - at < THREAD_BANNER_WINDOW_MS);
+    if (live.length > 0) next.set(key, live);
+  }
+  const key = rootId.toLowerCase();
+  const live = next.get(key) ?? [];
+  if (live.length >= THREAD_BANNER_CAP) return { admitted: false, ledger: next };
+  next.set(key, [...live, nowMs]);
+  return { admitted: true, ledger: next };
+}
+
 // ---- click landing ---------------------------------------------------------
 
 /**
@@ -419,6 +459,11 @@ export interface ArmedOpen {
    * 메시지가 끼면 사라지고, 그때는 채널로 간다 — 어느 카드를 뜻하는지 추측하지 않는다.
    */
   messageId?: string;
+  /**
+   * 무장된 알림이 **모두 같은 스레드의 답글**일 때만 있다(#5017). 카드(`messageId`)는 서로 달라도 가는 곳이 그 스레드 하나라서
+   * 묶인 배너를 눌러도 채널이 아니라 그 스레드로 착지한다. 이때 `messageId` 는 그중 가장 늦은 답글이다.
+   */
+  rootId?: string;
   armedAtMs: number;
 }
 
@@ -426,19 +471,26 @@ export interface ArmedOpen {
  * Arm (or re-arm) the landing target. Two notifications for the same channel
  * still point at it; two channels cancel each other out, because guessing which
  * of them someone meant is worse than landing on the list that holds both.
+ *
+ * 같은 스레드의 답글끼리는 채널 안에서도 한 곳을 가리킨다(#5017): `rootId` 가 같으면 카드가 달라도 스레드가 목적지이고
+ * 가장 늦은 답글을 기억한다. 스레드가 다르거나 스레드가 아닌 알림이 끼면 예전처럼 채널로 돌아간다.
  */
 export function armOpen(
   current: ArmedOpen | null,
   channelId: string,
   nowMs: number,
   ttlMs: number = OPEN_ARM_TTL_MS,
-  messageId?: string
+  messageId?: string,
+  rootId?: string
 ): ArmedOpen {
   const live = current !== null && nowMs - current.armedAtMs <= ttlMs;
   if (!live) {
-    return messageId === undefined
-      ? { channelId, armedAtMs: nowMs }
-      : { channelId, messageId, armedAtMs: nowMs };
+    return {
+      channelId,
+      ...(messageId === undefined ? {} : { messageId }),
+      ...(messageId === undefined || rootId === undefined ? {} : { rootId }),
+      armedAtMs: nowMs,
+    };
   }
   const same =
     current.channelId !== null && uuidEq(current.channelId, channelId);
@@ -447,8 +499,18 @@ export function armOpen(
     messageId !== undefined &&
     current.messageId !== undefined &&
     uuidEq(current.messageId, messageId);
-  return sameCard
-    ? { channelId: current.channelId, messageId, armedAtMs: nowMs }
+  const sameThread =
+    same &&
+    messageId !== undefined &&
+    rootId !== undefined &&
+    uuidEq(current.rootId, rootId);
+  return sameCard || sameThread
+    ? {
+        channelId: current.channelId,
+        messageId,
+        ...(rootId === undefined ? {} : { rootId }),
+        armedAtMs: nowMs,
+      }
     : { channelId: same ? current.channelId : null, armedAtMs: nowMs };
 }
 

@@ -1,4 +1,4 @@
-import { ApiError } from "../../lib/api";
+import { ApiError, uuidEq } from "../../lib/api";
 import type { MessageService } from "../../i18n/types";
 
 // =============================================================================
@@ -25,6 +25,11 @@ export interface ThreadFollowView {
   failed: boolean;
   /** 이 서버·이 스레드에서는 따라가기를 쓸 수 없다. 화면은 칸을 숨긴다. */
   unavailable: boolean;
+  /**
+   * 사람이 이 컨트롤러로 한 번이라도 눌렀다(#5017). 눌러서 끈 스레드는 답글을 달아도 돌아오지 않는다(ADR-0206 증보 1 F3)
+   * — 그래서 「답하면 따라가요」 힌트는 이 값이 켜지면 서지 않는다(`followOnReplyHint`). 실패한 누르기도 센다.
+   */
+  touched: boolean;
 }
 
 export interface ThreadFollowController {
@@ -68,8 +73,8 @@ export function createThreadFollowController(options: {
     pending: false,
     failed: false,
     unavailable: false,
+    touched: false,
   };
-  let touched = false;
   const listeners = new Set<() => void>();
 
   function set(next: Partial<ThreadFollowView>): void {
@@ -78,7 +83,8 @@ export function createThreadFollowController(options: {
       merged.following === view.following &&
       merged.pending === view.pending &&
       merged.failed === view.failed &&
-      merged.unavailable === view.unavailable
+      merged.unavailable === view.unavailable &&
+      merged.touched === view.touched
     ) {
       return;
     }
@@ -95,15 +101,14 @@ export function createThreadFollowController(options: {
       };
     },
     sync(following) {
-      if (touched || view.pending || view.unavailable) return false;
+      if (view.touched || view.pending || view.unavailable) return false;
       set({ following });
       return true;
     },
     async toggle() {
       if (view.pending || view.unavailable) return;
-      touched = true;
       const before = view.following;
-      set({ following: !before, pending: true, failed: false });
+      set({ following: !before, pending: true, failed: false, touched: true });
       try {
         const result = await options.send(!before);
         set({ following: result.following, pending: false });
@@ -137,6 +142,8 @@ export interface ThreadFollowCopy {
   failed: string;
   /** 안내를 닫는 단추의 글. */
   dismiss: string;
+  /** 입력창 곁 한 줄: 답하면 이 스레드를 따라간다(#5017). 세울지는 `followOnReplyHint` 가 정한다. */
+  replyHint: string;
 }
 
 export function threadFollowCopy(
@@ -148,5 +155,47 @@ export function threadFollowCopy(
     action: formatMessage(following ? "timeline.thread.followStop" : "timeline.thread.followStart"),
     failed: formatMessage("timeline.thread.followFailed"),
     dismiss: formatMessage("timeline.thread.followDismiss"),
+    replyHint: formatMessage("timeline.thread.followHint"),
   };
+}
+
+// ---- 입력창 곁 힌트 (#5017) -----------------------------------------------------------------
+
+/**
+ * 스레드에 **처음 답할 때** 입력창 곁에 한 줄 「답하면 이 스레드를 따라가요」를 세울지 (ADR-0206 증보 1 F3·F11).
+ *
+ * 말이 거짓이 되지 않는 때만 선다. 서버는 답글을 단 사람을 따라가게 만들지만(F2), 사람이 끈 스레드는 답글로 돌아오지
+ * 않는다(F3). 그런데 서버의 `following` 은 「행 없음」과 「그만 따라감」을 가르지 않는다(F8). 그래서 이 규칙은 **말이 틀릴 수 있는
+ * 모든 갈래에서 힌트를 접는다** — 못 알려 주는 쪽이 틀리게 알려 주는 쪽보다 낫다.
+ *
+ *   * 서버가 `following: false` 를 **말했다.** 옛 서버는 키가 없다(`undefined`): 거기서는 답해도 따라가지 않으므로 서지 않는다.
+ *   * 이 패널에서 사람이 따라가기 단추를 누른 적이 없다(`touched`): 누른 쪽이 끈 것이면 답글로 돌아오지 않는다.
+ *   * 이 사람이 이 스레드에서 이미 말했다: 불러온 답글 중 내 것이 있거나, 내 글에 답글이 달려 있다(루트 작성자는 첫 답글에서 이미
+ *     따라가기 시작했다 — 그런데도 `false` 면 끈 것이다). 「처음」이 아니다.
+ *   * 답글을 다 못 불러왔다(`complete` 가 거짓): 안 보이는 쪽에 내 답글이 있을 수 있어 「처음」을 말할 수 없다.
+ *
+ * 따라가는 스레드는 서버 값이 `true` 라서 서지 않고, 첫 답글을 보낸 뒤 다시 읽은 값이 `true` 로 오면 거둬진다.
+ */
+export function followOnReplyHint(input: {
+  /** 이 패널이 따라가기를 쓸 수 있고(읽는 대화 표면·DM 아님·서버가 답했다·쓸 수 있다) 칸이 서 있다. */
+  available: boolean;
+  /** 스레드 열기 응답이 **말한** `following`. 키가 없으면(옛 서버) `undefined`. */
+  serverFollowing: boolean | undefined;
+  /** `ThreadFollowView.touched`: 사람이 이 패널에서 누른 적이 있다. */
+  touched: boolean;
+  /** 읽는 사람. 모르면 힌트를 세우지 않는다. */
+  selfMemberId: string | undefined;
+  rootAuthorId: string;
+  /** 불러온 답글(루트 제외). */
+  replies: ReadonlyArray<{ authorMemberId: string }>;
+  /** 더 불러올 답글이 없다(`nextCursor` 없음). */
+  complete: boolean;
+}): boolean {
+  if (!input.available || input.serverFollowing !== false) return false;
+  if (input.touched || !input.complete) return false;
+  const self = input.selfMemberId;
+  if (self === undefined) return false;
+  if (input.replies.some((reply) => uuidEq(reply.authorMemberId, self))) return false;
+  if (uuidEq(input.rootAuthorId, self) && input.replies.length > 0) return false;
+  return true;
 }
