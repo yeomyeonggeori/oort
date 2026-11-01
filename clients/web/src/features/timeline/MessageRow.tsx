@@ -1,17 +1,13 @@
 import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import {
-  threadRollup,
-  type Message,
-  type RosterMember,
-  type ThreadRollup,
-} from "@momo/core/lib/api";
+import { threadRollup, type Message, type RosterMember } from "@momo/core/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
 import { openRunDecisionStage } from "@/features/decisionStage/stageEntry";
 import { AgentCard } from "./AgentCard";
 import { ThreadRequestSummary } from "./ThreadRequestSummary";
+import { ThreadSummaryLine } from "./ThreadSummary";
 import { RequestThoughtLine } from "@/features/agents/RequestThoughtLine";
 import { runBundleSnapshot } from "@momo/core/features/timeline/requestBundle";
 import { TeamAiDelegateStrip } from "./TeamAiDelegateStrip";
@@ -189,27 +185,6 @@ function timeLabel(atMs: number): string {
   ).padStart(2, "0")}`;
 }
 
-function relativeLabel(atMs: number, nowMs: number): string {
-  const minutes = Math.max(0, Math.round((nowMs - atMs) / 60_000));
-  if (minutes < 1) return "방금";
-  if (minutes < 60) return `${minutes}분 전`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}시간 전`;
-  return `${Math.round(hours / 24)}일 전`;
-}
-
-/**
- * 「답글 3개 · 마지막 5분 전」. 버튼으로도 글로도 그려지므로 문구는 한 곳에서
- * 나온다 (goal P3 1-1): 스레드를 열 수 있는 자리와 이미 열어 둔 자리가 같은 값을
- * 읽어야 두 표면이 서로 다른 말을 하지 않는다.
- */
-function rollupLabel(rollup: ThreadRollup): string {
-  return `답글 ${rollup.replyCount}개 · 마지막 ${relativeLabel(
-    rollup.lastReplyAtMs,
-    Date.now()
-  )}`;
-}
-
 /**
  * 발화자의 얼굴 (진단 H-11). Shared with the pending row so an optimistic echo
  * sits on the same grid.
@@ -238,8 +213,11 @@ function rollupLabel(rollup: ThreadRollup): string {
 export function Avatar({
   member,
   className,
+  testId = "row-avatar",
 }: {
   member: RosterMember | null;
+  /** 같은 얼굴을 다른 자리(스레드 요약 줄의 겹친 얼굴)에서 세는 시험이 행 아바타와 섞이지 않게 한다. */
+  testId?: string;
   /**
    * 크기를 바꾸는 호출처용(타임라인 행이 대화 밀도의 아바타 크기를 넘긴다, AP-2a #4189).
    * 기본은 `size-8`(32)이고 같은 `size` 그룹의 클래스가 오면 `cn`이 나중 것을 남긴다.
@@ -257,7 +235,7 @@ export function Avatar({
   return (
     <span
       aria-hidden="true"
-      data-testid="row-avatar"
+      data-testid={testId}
       data-avatar-kind={identity.kind}
       className={cn(
         // size-8 = AVATAR_SIZE(32). 두 값이 갈라지면 `avatarSize.test.ts`가 붉다.
@@ -1198,36 +1176,17 @@ export function MessageRow({
             {repeatLabel && (
               <span data-testid="paused-notice-repeat">{repeatLabel}</span>
             )}
-            {rollup &&
-              // 죽은 컨트롤을 만들지 않는다 (goal P3 1-1). 스레드 패널은
-              // `onOpenThread`를 넘기지 않는데 — 이미 그 스레드를 열어 둔 자리라
-              // "여는" 동작 자체가 없다 — R1은 그래도 <button>을 그렸다. 포커스가
-              // 잡히고 hover에 반응하면서 눌러도 아무 일이 없는 버튼이었다.
-              //
-              // **그리고 스레드 패널은 이제 이 줄을 아예 그리지 않는다**
-              // (goal RN-U2, `showRollup`). 위 `rollup` 이 그 자리에서 `null` 이므로
-              // 여기까지 오지 않는다. 아래 <span> 갈래는 여전히 남는데, 롤업은
-              // 있으나 열 곳이 없는 다른 표면(읽기 전용 마운트)이 그것이다 — 거기서
-              // 「답글 3개 · 마지막 5분 전」은 읽을 값이 있는 문장이다.
-              //
-              // 행이 이미 쓰고 있는 규칙을 그대로 따른다: 위의 `available.reply`는
-              // 핸들러가 없으면 답글 액션을 아예 내놓지 않는다("갈 곳 없는 답글은
-              // 막다른 길이다"). 같은 이유로 여기서도 갈 곳이 있을 때만 버튼이고,
-              // 없으면 읽는 글이다. 「답글 3개 · 마지막 5분 전」은 그 자체로 읽을
-              // 값이므로 정보는 그대로 남고 없어지는 것은 가짜 어포던스뿐이다.
-              (onOpenThread ? (
-                <button
-                  type="button"
-                  onClick={() => onOpenThread(message)}
-                  data-testid="thread-anchor"
-                  data-row-action=""
-                  className="rounded-sm press hover:text-ink focus-visible:focus-ring"
-                >
-                  {rollupLabel(rollup)}
-                </button>
-              ) : (
-                <span data-testid="thread-anchor">{rollupLabel(rollup)}</span>
-              ))}
+            {rollup && (
+              // 요약 줄은 얼굴·「답글 N개」·「새 답글 M」 칩이고, 무엇을 보일지는 코어(`threadSummary`)가 정한다 (#4878).
+              // 죽은 컨트롤을 만들지 않는다 (goal P3 1-1): 열 곳이 없으면(`onOpenThread` 없음 — 읽기 전용 마운트) 같은
+              // 모양의 글이고, 스레드 패널은 이 줄을 아예 그리지 않는다(`showRollup`, goal RN-U2: 위 `rollup`이 그 자리에서
+              // `null`이다). 행이 이미 쓰는 규칙과 같다: 위의 `available.reply`도 핸들러가 없으면 답글 액션을 내놓지 않는다.
+              <ThreadSummaryLine
+                rollup={rollup}
+                directory={directory}
+                onOpen={onOpenThread ? () => onOpenThread(message) : undefined}
+              />
+            )}
             {/* 스레드 요약 줄의 「작업 중」 칩 (#4619 E). 답글이 달리는 루트를 **누가 불렀든** 그 일이 지금
                 진행 중이면 요약 줄에 같은 칩이 선다. 루트가 아닌 답글이 일으킨 run은 루트를 알 길이 없어
                 (진행 읽기에 rootId가 없다) 여기 서지 않는다. */}
@@ -1476,7 +1435,7 @@ function DividerRow({
  * **`nowMs`를 받는 것이 H-4의 수리다.** 「오늘」인지 아는 데는 그 행의 시각만으로
  * 부족하고, 그것이 1차가 절대 표기만 그린 이유였다 — 오늘 대화를 보면서 「2026년 8월
  * 5일」을 읽고 그게 오늘인지 스스로 계산해야 했다. 상대 표기 함수는 이 파일에 이미
- * 있었고(`relativeLabel`) 스레드 롤업만 그것을 쓰고 있었다.
+ * 있었다(`relativeLabel`, 스레드 롤업이 쓰던 것 — 요약 줄에서 시간 문구가 빠지며 #4878이 지웠다).
  */
 export function DayDivider({ atMs, nowMs }: { atMs: number; nowMs: number }) {
   return (
