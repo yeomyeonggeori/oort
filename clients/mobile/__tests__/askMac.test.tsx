@@ -95,6 +95,8 @@ jest.mock('../src/features/deviceKey/useDeviceKey', () => ({
 
 const WS = '22222222-2222-4222-8222-222222222222';
 const SELF_ID = '11111111-1111-4111-8111-111111111111';
+/** 다른 워크스페이스(맡겨 둔 글이 넘어가면 안 되는 자리). */
+const OTHER_WS = '99999999-2222-4222-8222-999999999999';
 const OTHER_ID = '99999999-9999-4999-8999-999999999999';
 const CH_DEV = '44444444-4444-4444-8444-444444444441';
 const CH_PRIV = '44444444-4444-4444-8444-444444444442';
@@ -222,8 +224,11 @@ function mount(
     waitTimeoutMs?: number;
     initialPrompt?: string;
     initialHarness?: 'claude' | 'codex' | 'opencode';
+    /** 시트를 연 사람. 기본은 `SELF` — 맡겨 둔 글이 워크스페이스에 묶이는지 잴 때만 다른 워크스페이스의 사람을 넘긴다. */
+    member?: Member;
   } = {},
 ) {
+  const {member = SELF, ...sheetProps} = extra;
   const client = new QueryClient({
     defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {gcTime: 0}},
   });
@@ -235,8 +240,8 @@ function mount(
   };
   const view = render(
     <QueryClientProvider client={client}>
-      <SessionProvider member={SELF}>
-        <AskMacSheet port={port} {...handlers} {...extra} />
+      <SessionProvider member={member}>
+        <AskMacSheet port={port} {...handlers} {...sheetProps} />
       </SessionProvider>
     </QueryClientProvider>,
   );
@@ -931,6 +936,29 @@ describe('⑩ 알림이 새 입구로 들어오면 — 쓰던 글을 지킨다 (
     mount(fakePort().port, {initialPrompt: '카드가 채운 글'});
     await screen.findByTestId('ask-mac-form');
     expect(screen.getByTestId('ask-mac-prompt').props.value).toBe('카드가 채운 글');
+  });
+
+  it('맡겨 둔 글은 워크스페이스에 묶인다 — 같은 기기에서 다른 워크스페이스로 들어온 사람의 시트에는 나타나지 않는다', async () => {
+    installFetch({});
+    const first = mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+    fireEvent.changeText(screen.getByTestId('ask-mac-prompt'), DRAFT);
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    first.unmount();
+
+    // 같은 사람(내 맥을 가진)이 다른 워크스페이스로 들어왔다 — 시트가 서는 조건은 같고 워크스페이스 id 만 다르다.
+    const elsewhere = {...SELF, workspaceId: OTHER_WS};
+    const other = mount(fakePort().port, {member: elsewhere});
+    await screen.findByTestId('ask-mac-form');
+    expect(screen.getByTestId('ask-mac-prompt').props.value).toBe('');
+    other.unmount();
+
+    // 대조: 같은 워크스페이스로 돌아오면 앞의 글이 그대로 있다 — 위의 빈 칸이 헛돌지 않는다.
+    mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+    expect(screen.getByTestId('ask-mac-prompt').props.value).toBe(DRAFT);
   });
 
   it('쓰지 않았으면 맡길 것이 없다 — 다시 연 시트는 비어 있다', async () => {

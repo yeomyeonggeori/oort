@@ -19,7 +19,11 @@ import {SheetHeader} from '../design/SheetChrome';
 import {ChoiceRow, GroupCard, GroupLabel, InputPill, SheetScroll} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
 import {font, space, type Palette} from '../design/tokens';
-import {useHoldDraftOnEntry, useRestoredEntryDraft} from '../lib/entryDrafts';
+import {
+  newChannelDraftKey,
+  useHoldDraftOnEntry,
+  useRestoredEntryDraft,
+} from '../lib/entryDrafts';
 import {workspaceKeys} from '../features/workspace/queries';
 import {useSession} from '../session/useSession';
 
@@ -44,9 +48,6 @@ import {useSession} from '../session/useSession';
 // **왼쪽 ✓ = 채널 만들기**(이름이 규칙을 어기거나 만드는 중이면 회색·눌리지 않음), **오른쪽 원형 X = 닫기**. 옛 오른쪽 글자
 // 「만들기」 단추는 없다. 이름은 앞 아이콘(#)이 선 입력 알약(`InputPill`), 공개 범위는 묶음 카드의 라디오 행이다.
 // =============================================================================
-
-/** 알림이 걷어 간 새 채널 시트의 이름이 돌아오는 자리(`lib/entryDrafts.ts`, #4667). 시트는 한 번에 하나라 키도 하나다. */
-const DRAFT_KEY = 'new-channel';
 
 interface NewChannelDraft {
   name: string;
@@ -96,8 +97,10 @@ function SheetBody({
   const {workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
-  // 알림이 걷어 간 시트였다면 쓰던 이름과 공개 범위로 선다(#4667). 사람이 X 로 닫은 시트는 평소처럼 빈 채로 선다.
-  const restored = useRestoredEntryDraft<NewChannelDraft>(DRAFT_KEY);
+  // 알림이 걷어 간 시트였다면 쓰던 이름과 공개 범위로 선다(#4667). 사람이 X 로 닫은 시트는 평소처럼 빈 채로 선다. 자리는 워크스페이스로
+  // 묶인다(`lib/entryDrafts.ts`) — 다른 사람이 같은 기기로 로그인해도 앞 사람의 이름이 나타나지 않는다.
+  const draftKey = newChannelDraftKey(workspaceId);
+  const restored = useRestoredEntryDraft<NewChannelDraft>(draftKey);
   const [name, setName] = useState(restored?.name ?? '');
   const [kind, setKind] = useState<'public' | 'private'>(restored?.kind ?? 'public');
   const [touched, setTouched] = useState(false);
@@ -146,7 +149,7 @@ function SheetBody({
 
   const disabled = pending || issue !== null;
   // 이름을 쓰던 중에 알림이 이 시트를 걷어도 그 이름은 남는다(#4667). 만드는 중(`pending`)은 곧 끝나는 일이라 맡기지 않는다.
-  useHoldDraftOnEntry<NewChannelDraft>(DRAFT_KEY, () =>
+  useHoldDraftOnEntry<NewChannelDraft>(draftKey, () =>
     !pending && name !== '' ? {name, kind} : undefined,
   );
 

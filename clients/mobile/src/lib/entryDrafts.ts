@@ -53,8 +53,14 @@ export function useHoldDraftOnEntry<T>(
   });
 }
 
-/** 메시지 고치기 시트의 자리 — 같은 메시지의 고치기만 그 글을 돌려받는다(`MessageRow` 가 메시지 id 로 짓는다). */
+/**
+ * 맡겨 둔 글의 자리. **메시지 고치기**는 메시지 id(전역에서 유일해 다른 워크스페이스와 겹치지 않는다), **새 채널**과 **내 맥에
+ * 보내기**는 워크스페이스로 묶는다 — 한 기기에서 로그아웃하고 다른 사람이 로그인해도, 앞 사람이 알림에 밀려 놓친 이름·글이 뒤
+ * 사람의 시트에 나타나지 않는다(`work/delegate/session.ts` 가 `workspaceId` 로 묶는 것과 같은 규칙이다).
+ */
 export const messageEditDraftKey = (messageId: string): string => `message-edit:${messageId}`;
+export const newChannelDraftKey = (workspaceId: string): string => `${workspaceId}:new-channel`;
+export const askMacPromptDraftKey = (workspaceId: string): string => `${workspaceId}:ask-mac-prompt`;
 
 /** 시험 이음매: 맡겨 둔 것을 읽는다(지우지 않는다). */
 export function __peekEntryDraft<T>(key: string): T | undefined {

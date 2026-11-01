@@ -23,7 +23,9 @@ import {PageSheet} from '../src/design/PageSheet';
 import {ThemePickerModal} from '../src/design/ThemePickerPage';
 import {__resetEntryDrafts} from '../src/lib/entryDrafts';
 import {NOTIFICATION_TAP_COPY} from '../src/push/tapArrival';
+import {SessionProvider} from '../src/session/useSession';
 import AppShell from '../src/shell/AppShell';
+import {NewChannelSheet} from '../src/shell/NewChannelSheet';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {
@@ -419,6 +421,42 @@ describe('그릇 하나가 한꺼번에 덮는다 (#4667)', () => {
       dismissTemporarySurfaces();
     });
     expect(onDone).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('맡겨 둔 글의 자리는 워크스페이스에 묶인다 (#4667)', () => {
+  // 한 기기에서 로그아웃하고 다른 사람이 로그인해도, 앞 사람이 알림에 밀려 놓친 이름이 뒤 사람의 시트에 나타나면 안 된다
+  // (`work/delegate/session.ts` 가 `workspaceId` 로 묶는 것과 같은 규칙). 내 맥에 보내기의 같은 시험은 `askMac.test.tsx` ⑩.
+  const OTHER_WS = '99999999-2222-4222-8222-999999999999';
+
+  function mountSheet(member: Member) {
+    const client = new QueryClient({
+      defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {gcTime: 0}},
+    });
+    return render(
+      <QueryClientProvider client={client}>
+        <SessionProvider member={member}>
+          <NewChannelSheet onOpenConversation={jest.fn()} onClose={jest.fn()} />
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+  }
+
+  it('새 채널 — 다른 워크스페이스로 들어온 사람의 시트에는 앞 사람의 이름이 없고, 같은 워크스페이스로 돌아오면 있다', () => {
+    const first = mountSheet(SELF);
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'ops-room');
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    first.unmount();
+
+    const other = mountSheet({...SELF, workspaceId: OTHER_WS});
+    expect(screen.getByTestId('new-channel-name').props.value).toBe('');
+    other.unmount();
+
+    // 대조: 위의 빈 칸이 헛돌지 않는다.
+    mountSheet(SELF);
+    expect(screen.getByTestId('new-channel-name').props.value).toBe('ops-room');
   });
 });
 
