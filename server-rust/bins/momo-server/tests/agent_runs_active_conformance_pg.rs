@@ -29,7 +29,9 @@
 //! | `active_5_refusals_and_tenants` | accept an unknown `state`/`scope`, answer an unseen cursor with a page, or leak another tenant's runs |
 //! | `active_6_a_dm_run_is_its_two_peoples` | widen visibility beyond channel membership |
 //! | `active_7_a_runs_bundle_is_its_latest_approval_read_for_the_viewer` | make `canDecide` a constant, drop the room check on the approval's channel, skip the deadline (an overdue approval still reads `pending`), or read a settled card's sentence from its original question |
-//! | `active_8_the_channel_progress_read_carries_the_same_bundle` | leave the bundle out of the channel's own progress read, or hand it a viewer other than the caller |
+//! | `active_8_the_channel_progress_read_carries_the_same_bundle` | leave the bundle out of the channel's own progress read, or hand it a viewer other than the caller; name a run's pending approval (`approvalId`, its deadline) to a viewer who is not in the approval's room |
+//! | `active_9_a_viewer_outside_the_approvals_room_is_told_nothing_of_it` | stop treating a room the viewer left (or never joined) as out of sight (the bundle, `approvalId` or its deadline still reach them), or judge the two fields by the run's room instead of the approval's |
+//! | `active_10_a_deleted_card_or_a_card_of_another_room_gives_no_sentence` | quote a card its author deleted, or a card that is not in the approval's own room |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -1067,14 +1069,18 @@ async fn seed_ask(
     approval
 }
 
-fn bundle_of(page: &Value, run: Uuid) -> Option<&Value> {
+/// The row of `run` in a progress page.
+fn run_row(page: &Value, run: Uuid) -> &Value {
     page["runs"]
         .as_array()
         .unwrap_or_else(|| panic!("runs is an array in {page}"))
         .iter()
         .find(|row| row["id"].as_str().map(str::to_lowercase) == Some(run.to_string()))
         .unwrap_or_else(|| panic!("run {run} is listed in {page}"))
-        .get("bundle")
+}
+
+fn bundle_of(page: &Value, run: Uuid) -> Option<&Value> {
+    run_row(page, run).get("bundle")
 }
 
 /// A run's `bundle` is **one approval of it**, read for whoever asks: the one the run is
@@ -1435,8 +1441,13 @@ async fn active_7_a_runs_bundle_is_its_latest_approval_read_for_the_viewer() {
 /// run whose approval was rejected, and a run that never asked — read by the admin who may
 /// decide the parked one and by the member who may not.
 ///
+/// A run of this room whose pending approval was raised in a room the member is not in is
+/// the member's to see, its approval is not: the row carries no `bundle`, no `approvalId`
+/// and no deadline for them, and all three for the admin who is in both rooms.
+///
 /// Revert that makes it red: leave the bundle out of the channel read (or key it by anything
-/// but the run), or hand it a viewer other than the caller.
+/// but the run), hand it a viewer other than the caller, or name the pending approval of a
+/// room the viewer is not in.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn active_8_the_channel_progress_read_carries_the_same_bundle() {
@@ -1488,6 +1499,11 @@ async fn active_8_the_channel_progress_read_carries_the_same_bundle() {
     let ended = seed_run(&s.su, ws, agent, room, "cancelled", 120).await;
     seed_ask(&s.su, ws, ended, room, agent, rejected).await;
     let none = seed_run(&s.su, ws, agent, room, "running", 30).await;
+    let secret = seed_channel(&s.su, &s.app, ws, admin).await; // 박서연 is not in it
+    let mut walled = Ask::action("pending", "channel.create");
+    walled.card = Some((json!({}), "승인 요청: 채널 만들기"));
+    let raised_elsewhere = seed_run(&s.su, ws, agent, room, "awaiting_approval", 90).await;
+    let walled_approval = seed_ask(&s.su, ws, raised_elsewhere, secret, agent, walled).await;
 
     for (who, email, can_decide) in [
         ("admin", admin_email, true),
@@ -1529,5 +1545,253 @@ async fn active_8_the_channel_progress_read_carries_the_same_bundle() {
             bundle_of(&page, none).is_none(),
             "{who}: a run that never asked has no bundle: {page}"
         );
+
+        let walled_row = run_row(&page, raised_elsewhere);
+        if who == "admin" {
+            assert_eq!(
+                walled_row["approvalId"],
+                json!(walled_approval.to_string()),
+                "{who}: in both rooms: {walled_row}"
+            );
+            assert!(
+                walled_row["approvalExpiresAtMs"].as_i64().is_some(),
+                "{who}: {walled_row}"
+            );
+            assert_eq!(
+                walled_row["bundle"]["approvalId"],
+                json!(walled_approval.to_string()),
+                "{who}: {walled_row}"
+            );
+        } else {
+            assert_eq!(
+                walled_row["phase"],
+                json!("awaiting_approval"),
+                "{who}: the run is theirs to see: {walled_row}"
+            );
+            for key in ["approvalId", "approvalExpiresAtMs", "bundle"] {
+                assert!(
+                    walled_row.get(key).is_none(),
+                    "{who}: `{key}` of an approval raised in a room they are not in: {walled_row}"
+                );
+            }
+            assert!(
+                !page.to_string().contains(&walled_approval.to_string()),
+                "{who}: the approval's id is nowhere in the page: {page}"
+            );
+        }
     }
+}
+
+// ---------------------------------------------------------------------------
+// 9 — an approval raised in a room the viewer is not (or no longer) in: told nothing
+// ---------------------------------------------------------------------------
+
+/// The run is the viewer's to see (they are in its room); its pending approval was raised
+/// in another room. Both runs below are parked on such an approval: one in a room the
+/// viewer **left**, one in a room they **never joined**. The row carries no `bundle`, no
+/// `approvalId` and no deadline for them, and the approval's id is nowhere in the page —
+/// while the admin, who is in all three rooms, is told all of it. Back in the room, the
+/// viewer is told again; the room they never joined stays out of sight.
+///
+/// Revert that makes it red: read a room the viewer left (`left_at`) as still theirs (the
+/// `bundle`, `approvalId` and deadline all come back), skip the membership check (the
+/// never-joined room is named), or judge `approvalId` and its deadline by the run's room
+/// instead of the approval's.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn active_9_a_viewer_outside_the_approvals_room_is_told_nothing_of_it() {
+    let s = setup().await;
+    let ws = seed_workspace(&s.su).await;
+    let (admin, admin_email) = seed_human(&s.su, ws, "owner", "이도현").await;
+    let (member, member_email) = seed_human(&s.su, ws, "member", "박서연").await;
+    let room = seed_channel(&s.su, &s.app, ws, admin).await;
+    let elsewhere = seed_channel(&s.su, &s.app, ws, admin).await;
+    let never_joined = seed_channel(&s.su, &s.app, ws, admin).await;
+    join_channel(&s.su, ws, room, member).await;
+    join_channel(&s.su, ws, elsewhere, member).await;
+    let agent = seed_agent(&s.su, ws, admin, "달무리봇").await;
+
+    let question = "도구 「github.search_issues」을 실행해도 될까요?";
+    let mut ask = Ask::tool("pending");
+    ask.card = Some((json!({}), question));
+    let left_run = seed_run(&s.su, ws, agent, room, "awaiting_approval", 60).await;
+    let left_approval = seed_ask(&s.su, ws, left_run, elsewhere, agent, ask).await;
+    let mut ask = Ask::tool("pending");
+    ask.card = Some((json!({}), question));
+    let never_run = seed_run(&s.su, ws, agent, room, "awaiting_approval", 120).await;
+    let never_approval = seed_ask(&s.su, ws, never_run, never_joined, agent, ask).await;
+
+    let admin_token = login(&s.http, &s.base, ws, &admin_email).await;
+    let token = login(&s.http, &s.base, ws, &member_email).await;
+
+    // The control: in the run's room and in the approval's room, the person is told.
+    let before = active(&s.http, &s.base, &token, ws, "?limit=100").await;
+    let row = run_row(&before, left_run);
+    assert_eq!(
+        row["approvalId"],
+        json!(left_approval.to_string()),
+        "control: {row}"
+    );
+    assert!(
+        row["approvalExpiresAtMs"].as_i64().is_some(),
+        "control: {row}"
+    );
+    assert_eq!(
+        bundle_of(&before, left_run).expect("control: told")["approvalId"],
+        json!(left_approval.to_string()),
+        "control: {row}"
+    );
+
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(elsewhere)
+        .bind(member)
+        .execute(&s.su)
+        .await
+        .expect("leave the approval's room");
+
+    let after = active(&s.http, &s.base, &token, ws, "?limit=100").await;
+    for (label, run, approval) in [
+        ("left", left_run, left_approval),
+        ("never joined", never_run, never_approval),
+    ] {
+        let row = run_row(&after, run);
+        assert_eq!(
+            row["phase"],
+            json!("awaiting_approval"),
+            "{label}: the run itself is still theirs to see: {row}"
+        );
+        for key in ["bundle", "approvalId", "approvalExpiresAtMs"] {
+            assert!(
+                row.get(key).is_none(),
+                "{label}: `{key}` of an approval raised in a room they are not in: {row}"
+            );
+        }
+        assert!(
+            !after.to_string().contains(&approval.to_string()),
+            "{label}: the approval's id is nowhere in the page: {after}"
+        );
+    }
+
+    // The admin is in every room: told of both.
+    let as_admin = active(&s.http, &s.base, &admin_token, ws, "?limit=100").await;
+    for (run, approval) in [(left_run, left_approval), (never_run, never_approval)] {
+        let row = run_row(&as_admin, run);
+        assert_eq!(row["approvalId"], json!(approval.to_string()), "{row}");
+        assert!(row["approvalExpiresAtMs"].as_i64().is_some(), "{row}");
+        assert_eq!(
+            row["bundle"]["approvalId"],
+            json!(approval.to_string()),
+            "{row}"
+        );
+    }
+
+    // Back in the room: told again. The room never joined stays out of sight.
+    join_channel(&s.su, ws, elsewhere, member).await;
+    let back = active(&s.http, &s.base, &token, ws, "?limit=100").await;
+    let row = run_row(&back, left_run);
+    assert_eq!(row["approvalId"], json!(left_approval.to_string()), "{row}");
+    assert!(bundle_of(&back, left_run).is_some(), "{row}");
+    let row = run_row(&back, never_run);
+    assert!(row.get("approvalId").is_none(), "{row}");
+    assert!(row.get("bundle").is_none(), "{row}");
+}
+
+// ---------------------------------------------------------------------------
+// 10 — the card the sentence is read from: not a deleted one, not one of another room
+// ---------------------------------------------------------------------------
+
+/// A settled approval's sentence is read off its card, and only off a card that is still
+/// there and sits in the approval's own room. A card its author deleted gives the
+/// bundle no `line` and no `intent` (the status still reads); an approval whose card
+/// pointer reaches a card of another room quotes nothing of it, however it came to point
+/// there. Each has a control that reads its sentence while the card is in order.
+///
+/// Revert that makes it red: drop `deleted_at IS NULL` from the card join of the run
+/// approval read (the deleted card still speaks), or drop its `channel_id` match (the
+/// other room's sentence is quoted).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn active_10_a_deleted_card_or_a_card_of_another_room_gives_no_sentence() {
+    let s = setup().await;
+    let ws = seed_workspace(&s.su).await;
+    let (admin, admin_email) = seed_human(&s.su, ws, "owner", "이도현").await;
+    let room = seed_channel(&s.su, &s.app, ws, admin).await;
+    let other = seed_channel(&s.su, &s.app, ws, admin).await;
+    let agent = seed_agent(&s.su, ws, admin, "달무리봇").await;
+
+    let settled_card = |line: &'static str| {
+        Some((
+            json!({"status": "approved", "code": "approval_approved",
+                   "result": {"status": "approved", "line": line, "rows": []}}),
+            line,
+        ))
+    };
+    let own = "채널 「가온」을 만들었어요";
+    let theirs = "채널 「다온」을 만들었어요";
+
+    // An approval of `room` whose card the author will delete.
+    let mut ask = Ask::tool("approved");
+    ask.decided_by = Some(admin);
+    ask.card = settled_card(own);
+    let deleted_run = seed_run(&s.su, ws, agent, room, "running", 60).await;
+    let deleted = seed_ask(&s.su, ws, deleted_run, room, agent, ask).await;
+
+    // A card of `other`, and an approval of `room` made to point at it.
+    let mut ask = Ask::tool("approved");
+    ask.decided_by = Some(admin);
+    ask.card = settled_card(theirs);
+    let theirs_run = seed_run(&s.su, ws, agent, other, "running", 61).await;
+    let theirs_approval = seed_ask(&s.su, ws, theirs_run, other, agent, ask).await;
+    let mut ask = Ask::tool("approved");
+    ask.decided_by = Some(admin);
+    let strayed_run = seed_run(&s.su, ws, agent, room, "running", 62).await;
+    let strayed = seed_ask(&s.su, ws, strayed_run, room, agent, ask).await;
+    sqlx::query(
+        "UPDATE approval SET request_message_id = \
+           (SELECT request_message_id FROM approval WHERE id = $2) \
+          WHERE id = $1",
+    )
+    .bind(strayed)
+    .bind(theirs_approval)
+    .execute(&s.su)
+    .await
+    .expect("point the approval at the other room's card");
+
+    let token = login(&s.http, &s.base, ws, &admin_email).await;
+    let before = active(&s.http, &s.base, &token, ws, "?limit=100").await;
+    assert_eq!(
+        bundle_of(&before, deleted_run).expect("control: the deleted run's bundle")["line"],
+        json!(own),
+        "control: the card is in order"
+    );
+    assert_eq!(
+        bundle_of(&before, theirs_run).expect("control: the other room's bundle")["line"],
+        json!(theirs),
+        "control: the card speaks in its own room"
+    );
+    let bundle = bundle_of(&before, strayed_run).expect("the strayed approval still has a bundle");
+    assert_eq!(bundle["status"], json!("approved"), "{bundle}");
+    assert!(
+        bundle.get("line").is_none(),
+        "a card of another room is not this approval's card: {bundle}"
+    );
+    assert!(!run_row(&before, strayed_run).to_string().contains(theirs));
+
+    sqlx::query(
+        "UPDATE message SET state = 'deleted', body = NULL, deleted_at = clock_timestamp() \
+          WHERE id = (SELECT request_message_id FROM approval WHERE id = $1)",
+    )
+    .bind(deleted)
+    .execute(&s.su)
+    .await
+    .expect("delete the card");
+    let after = active(&s.http, &s.base, &token, ws, "?limit=100").await;
+    let bundle = bundle_of(&after, deleted_run).expect("the bundle still tells the status");
+    assert_eq!(bundle["status"], json!("approved"), "{bundle}");
+    assert!(
+        bundle.get("line").is_none(),
+        "a deleted card gives no sentence: {bundle}"
+    );
+    assert!(bundle.get("intent").is_none(), "{bundle}");
+    assert!(!run_row(&after, deleted_run).to_string().contains(own));
 }

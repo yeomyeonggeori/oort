@@ -12023,25 +12023,31 @@ paths:
         `pending` are not returned here.
 
 
-        **Who may ask**: a person (not an agent or a work host; a developer token is not
-        on the closed route table) who is an active member of the workspace **and** a
-        current member of the channel — the rule a send has, so a guest may preview in the
-        channels it is in and nowhere else. A channel that does not exist is the same 403
-        as one the caller is not in. The instance switch `MOMO_UNFURL_ENABLED` and the
-        workspace switch (`unfurl-settings`) both have to be on, or nothing is fetched and
-        the answer is `failed`.
+        **Who may ask**: a person who is an active member of the workspace (a
+        `workspace_membership` row, `member.status` `active`, not deleted; any role,
+        guests included) **and** a current member of the channel — the rule a send has, so
+        a guest may preview in the channels it is in and nowhere else. A channel that does
+        not exist is the same 403 as one the caller is not in. Nothing but a person gets
+        further: an agent bearer and a developer token are a 403 and a work host's
+        signature is a 401 (the answer to a bad signature), all three at the door, because
+        none of them has this route on its table. The instance switch
+        `MOMO_UNFURL_ENABLED` and the workspace switch (`unfurl-settings`) both have to be
+        on, or nothing is fetched and the answer is `failed`.
 
 
         **What the server does**: it fetches the page through the same guarded transport as
         a stored card (public addresses only, https, every redirect hop re-checked,
         512 KiB, time limit) with one rule added: **port 443 only, on every hop**. It
         keeps the answer in memory, for the member who asked, 30 minutes (`failed`: 2
-        minutes); nothing is written to the database. The same address asked again by the
-        same member is answered from memory and costs nothing. A request that must fetch
-        spends the member's preview budget (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`,
-        default 60 per window) and a place among the fetches in flight (the same places
-        the picture proxy uses); either is exhausted with 429 + `Retry-After` (see
-        `RateLimited`), and a request turned away for want of a place gets its budget back.
+        minutes); no part of the preview is written to the database (the one row this
+        route can cause is the budget's audit row for a first refusal). The same address
+        asked again by the same member is answered from memory and costs nothing. A
+        request that must fetch spends the member's preview budget
+        (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`, default 60 per window) and a place among
+        the fetches in flight (the same places the picture proxy uses); either is
+        exhausted with 429 + `Retry-After` (see `RateLimited`), and a request turned away
+        for want of a place gets its budget back. A fetch that ends in `failed` does not:
+        the site was asked, so it spent its unit like any other.
         A client should ask once the address looks finished (350 ms after typing stops, or
         right after a paste), once per address.
       security:
@@ -12070,8 +12076,9 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
           description: >
-            Not a member of the workspace and the channel (or no such channel), not a
-            person, or workspace scope mismatch.
+            Not an active member of the workspace, or not a current member of the channel
+            (or no such channel), an agent bearer or a developer token, or workspace scope
+            mismatch. (A work host's signature is a 401, see above.)
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -12088,7 +12095,10 @@ paths:
         come from the same proxy as `getUnfurlImage` (the same guard, type list, failure
         memory, fetch budget and places): the client must not fetch the remote host and is
         never given its address. An id that is unknown, run out, another member's or
-        another workspace's is the same 404.
+        another workspace's is the same 404. Nothing here asks the database whether the
+        member is still active: suspension, removal and leaving the workspace each revoke
+        every token the member holds, so a member who stopped being active that way is a
+        401 before this route.
       security:
         - bearerAuth: []
       parameters:
@@ -13025,7 +13035,10 @@ paths:
         `scope=mine` narrows to the approvals the caller decided, requested (the
         author of the run's trigger message, or the actor of a work run's
         `agent.work.queued` row) or whose agent they own (`agent.owner_human_id`).
-        It narrows within the caller's channels and never widens them.
+        It narrows within the caller's channels and never widens them. An in-place
+        channel grant the caller requested (or owns the agent of) is listed under
+        `mine` even when they are not an owner or admin, though `team` lists it only
+        to one: it is theirs to follow, not theirs to decide.
       security:
         - bearerAuth: []
       parameters:
@@ -15468,10 +15481,12 @@ components:
         per window (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`, 0 removes it), spent only by a
         request that must fetch the page: an answer the server already holds for that
         member and address, a switch that is off, and a request turned away for want of a
-        place spend nothing. It draws its places from the same pool as the card proxies, so
-        one member's previews, pictures and icons together never hold more than that
-        member's share (4); with no place it answers 429 with `Retry-After: 1`, gives the
-        unit back and remembers nothing. The preview pictures and icons
+        place spend nothing. A fetch that ends in `failed` still spent its unit and does
+        not get it back; the failure is held for 2 minutes and asking for that address
+        again meanwhile is free. It draws its places from the same pool as the card
+        proxies, so one member's previews, pictures and icons together never hold more
+        than that member's share (4); with no place it answers 429 with `Retry-After: 1`,
+        gives the unit back and remembers nothing. The preview pictures and icons
         (`GET …/unfurl-previews/{id}/image|icon`) spend the card proxies' budget above.
         `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
@@ -19418,8 +19433,18 @@ components:
         claimedAtMs: {type: integer, format: int64}
         latestStage: {type: string, maxLength: 80}
         lastEventAtMs: {type: integer, format: int64}
-        approvalId: {type: string, format: uuid}
-        approvalExpiresAtMs: {type: integer, format: int64}
+        approvalId:
+          type: string
+          format: uuid
+          description: >
+            The pending approval the run is parked on. Named only to a caller who is
+            an active member of the channel the approval was raised in (the rule
+            `bundle` follows), which need not be the run's own channel; absent
+            otherwise.
+        approvalExpiresAtMs:
+          type: integer
+          format: int64
+          description: The deadline of `approvalId`, under the same rule.
         bundle:
           type: object
           additionalProperties: false
