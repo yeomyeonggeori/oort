@@ -191,6 +191,25 @@ pub const MEMORY_SUGGEST: &str = "memory_suggest";
 /// is refused there.
 pub const WORKSPACE_ACTION_PROPOSE: &str = "workspace_action_propose";
 
+/// `task_continue` — the team AI's **task-mode** tool (ADR-0201 증보 v3 B5-3, #4967).
+///
+/// Arguments: `{"plan": ["남은 단계", …≤8], "note": "지금까지 알아낸 것"}`. Calling it ends the
+/// current step of the request and asks the worker to run the next one as a resume job of the
+/// same run; it writes the plan and the note into the run's `team_ai_task` row and nothing else.
+///
+/// It is offered only while the `long_research` bundle is on (`team_ai_roles::BUNDLES` lists it
+/// under that bundle, so the request builder's `tool_allowed` filter drops it with the bundle and
+/// the worker refuses a call of it that was never offered) and **only to the team AI**: it is
+/// deliberately not in [`CATALOG`], so no agent profile can list it and no generic tool path can
+/// run it. The worker handles it inline in `momo_agent_worker::team_ai`.
+pub const TASK_CONTINUE: &str = "task_continue";
+
+/// Closed bounds of what the tool may carry (B5-2). The schema below and
+/// [`crate::team_ai_task::parse_task_continue`] read the same numbers.
+pub const TASK_PLAN_ITEMS_MAX: usize = 8;
+pub const TASK_PLAN_ITEM_CHARS_MAX: usize = 60;
+pub const TASK_NOTE_CHARS_MAX: usize = 2_000;
+
 /// `approval.action_type` for a tool call, matching Swift
 /// `ApprovalRuntime.pausePlan` (`ApprovalRuntime.swift:36-45`).
 ///
@@ -569,6 +588,39 @@ pub fn workspace_action_propose_definition(action_ids: &[&str]) -> Option<ToolDe
 /// The two ids of the `invite_access` bundle.
 fn is_invite_id(id: &str) -> bool {
     id == crate::actions::ACTION_INVITE_CREATE || id == crate::actions::ACTION_AGENT_INVITE
+}
+
+/// The `task_continue` tool as the model sees it (ADR-0201 증보 v3 B5-3). The description says
+/// what the tool is for and the limits that make a long task safe; it carries no workspace data.
+pub fn task_continue_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: TASK_CONTINUE,
+        description: "한 번에 끝내기엔 긴 조사를 다음 단계로 이어 갈 때 불러. 부르면 이번 단계가 끝나고, \
+             같은 요청을 이어서 다음 단계가 시작돼. plan에는 앞으로 할 단계를 순서대로(첫 번째가 다음 \
+             단계에서 할 일), note에는 지금까지 알아낸 것과 다음 단계가 알아야 할 것만 적어. 다음 단계는 \
+             대화 전문이나 도구 결과를 기억하지 못하고 plan과 note만 받아. 비밀번호·키·초대 링크는 \
+             note에 쓰지 마. 조사가 끝났으면 이 도구를 부르지 말고 결과를 답으로 써.",
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "plan": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": TASK_PLAN_ITEMS_MAX,
+                    "items": {"type": "string", "maxLength": TASK_PLAN_ITEM_CHARS_MAX},
+                    "description": "남은 단계들. 한 줄씩, 짧게."
+                },
+                "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": TASK_NOTE_CHARS_MAX,
+                    "description": "지금까지 알아낸 것. 다음 단계가 이어 가는 데 필요한 것만."
+                }
+            },
+            "required": ["plan", "note"],
+            "additionalProperties": false
+        }),
+    }
 }
 
 /// `card_suggest`'s published schema, built from the allow-list so the enum

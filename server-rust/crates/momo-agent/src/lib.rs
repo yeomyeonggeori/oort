@@ -175,6 +175,7 @@ pub mod status;
 pub mod subscription;
 pub mod subscription_transition;
 pub mod team_ai_roles;
+pub mod team_ai_task;
 pub mod thread_wake;
 pub mod tools;
 pub mod usage;
