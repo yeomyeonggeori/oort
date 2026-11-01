@@ -48,6 +48,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { focusReturnsTo } from "./focus.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -730,6 +731,20 @@ function fail(message) {
   throw new Error(message);
 }
 
+/**
+ * 트레이의 초안을 비운다. 「모두 지우기」(`attachment-clear`)는 칩이 CLEAR_ALL_MIN_DRAFTS(4) 이상일 때만 서고
+ * 그보다 적으면 칩마다 지운다(AttachmentTray) — 그래서 있으면 누르고, 없으면 칩을 하나씩 지운다(#5048).
+ */
+async function clearDrafts(page) {
+  const clearAll = page.getByTestId("attachment-clear");
+  if ((await clearAll.count()) > 0) {
+    await clearAll.click();
+    return;
+  }
+  const remove = page.getByTestId("attachment-chip-remove");
+  while ((await remove.count()) > 0) await remove.first().click();
+}
+
 function expect(condition, message) {
   if (!condition) fail(message);
 }
@@ -1091,6 +1106,13 @@ async function exerciseTimeline(browser) {
     !/^[A-Z0-9+.-]+ ·/.test(meta),
     `카드의 타입이 사람이 읽는 낱말이 아니다 (읽은 값: ${meta})`
   );
+  // 내려받기·미리보기는 카드 위에 마우스가 있거나 키보드 초점이 있을 때만 선다(Buzz식 hover 노출,
+  // attachmentBuzz 시험). 쉬는 카드에는 없어야 하고, 올리면 하나가 서야 한다(#5048).
+  expect(
+    (await card.getByTestId("attachment-download").count()) === 0,
+    "쉬는 카드에 내려받기가 미리 서 있다"
+  );
+  await card.hover();
   expect(
     (await card.getByTestId("attachment-download").count()) === 1,
     "카드에 내려받기가 없다"
@@ -1174,12 +1196,14 @@ async function exercisePreview(browser) {
     height: img.getBoundingClientRect().height,
   }));
   expect(thumbFacts.src.startsWith("data:image/png"), "트레이 썸네일이 data: 가 아니다");
-  expect(thumbFacts.natural === 96, `썸네일이 96px 로 그려지지 않았다 (${thumbFacts.natural})`);
+  // 트레이 썸네일 한 변은 64px(`--spacing-tray-thumb`)이고 레티나용으로 그 두 배인 128px 정사각형으로 디코드한다
+  // (draftThumbnail.ts). 옛 48px/96px 값은 칩이 작던 때의 것이다(#5048).
+  expect(thumbFacts.natural === 128, `썸네일이 128px 로 그려지지 않았다 (${thumbFacts.natural})`);
   expect(
-    thumbFacts.width === 48 && thumbFacts.height === 48,
-    `썸네일 상자가 48px 정사각형이 아니다 (${thumbFacts.width}x${thumbFacts.height})`
+    thumbFacts.width === 64 && thumbFacts.height === 64,
+    `썸네일 상자가 64px 정사각형이 아니다 (${thumbFacts.width}x${thumbFacts.height})`
   );
-  await page_.getByTestId("attachment-clear").click();
+  await clearDrafts(page_);
 
   // ② 라이트박스: 열고, Esc 로 닫고, 포커스가 여는 버튼으로 돌아온다.
   const imageRow = page_.locator(
@@ -1190,7 +1214,8 @@ async function exercisePreview(browser) {
   await page_.getByTestId("image-lightbox-ready").waitFor({ timeout: 15_000 });
   await page_.keyboard.press("Escape");
   await page_.getByTestId("image-lightbox").waitFor({ state: "detached", timeout: 5_000 });
-  const focusBack = await opener.evaluate((node) => node === document.activeElement);
+  // 닫힘 전환이 끝난 뒤 프레임에 돌아오는 포커스를 기다려 잰다(gates/focus.mjs, #5048).
+  const focusBack = await focusReturnsTo(opener);
   expect(focusBack, "라이트박스를 닫은 뒤 포커스가 여는 버튼으로 돌아오지 않았다");
 
   // ③ PDF: 새 창이 열리고, 그 문서는 opener 가 없는 application/pdf blob 이다.
@@ -1198,6 +1223,8 @@ async function exercisePreview(browser) {
     `[data-testid="timeline-message"][data-message-id="${PDF_MSG.toLowerCase()}"]`
   );
   const openPdf = pdfRow.getByTestId("attachment-open-pdf");
+  // 열기·내려받기는 카드 위에 마우스가 있을 때만 선다(attachmentBuzz 시험, #5048).
+  await pdfRow.getByTestId("attachment-card").hover();
   expect((await openPdf.count()) === 1, "PDF 카드에 열기가 없다");
   expect(
     (await pdfRow.getByTestId("attachment-download").count()) === 1,
@@ -1727,7 +1754,7 @@ async function captureShots(browser) {
         ]);
       await page_.getByTestId("attachment-chip-thumb").waitFor({ timeout: 15_000 });
       await shot(page_, `tray-thumb-${scheme}`);
-      await page_.getByTestId("attachment-clear").click();
+      await clearDrafts(page_);
 
       await page_.waitForFunction(
         (id) =>
