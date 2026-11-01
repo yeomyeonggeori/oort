@@ -68,30 +68,60 @@ name: ensure-signed-in
       - assertVisible:
           id: "server-url-hint"
       - assertVisible: "요청 주소: ${SERVER_URL}/v1/…"
-      # `eraseText` here too (#4669): 「이메일 기억하기」 is ON by default on the
-      # phone, so a signed-out screen reached with storage INTACT (an expired
-      # session, a lane flow run alone) already holds the email this device
-      # remembered for that server. Typing then APPENDS and the login body
-      # carries `me@example.comme@example.com`. 00-login.yaml starts from
-      # `clearState`, so its field is empty by construction and needs none.
+      # The email field is NOT empty when this branch runs with storage INTACT
+      # (#4669): 「이메일 기억하기」 is ON by default on the phone, so a signed-out
+      # screen reached after an expired session, a logout, or a lane flow run
+      # alone already holds the email this device remembered for that server.
+      # Typing then APPENDS, and the login body carries
+      # `me@example.comme@example.com`. 00-login.yaml starts from `clearState`, so
+      # its field is empty by construction and needs none of this.
       #
-      # The tap lands at the RIGHT END of the field (`point` is a fraction of the
-      # element), and the erase is 100, for a reason measured on 11-02 (#5045):
-      # `eraseText` only deletes BEHIND the caret, and a plain tap puts the caret
-      # where the finger landed. The lane's emails are 32 characters
-      # (`lane-<epoch>-<pid>@momo.local`) and fill the field, so a tap at its
-      # middle left the caret inside the text — the erase took the front half, the
-      # new email went in at the caret, and the old tail stayed:
-      # `<new>@momo.local`, 43 characters, 「이메일 또는 비밀번호가 맞지 않습니다」. With
-      # the tap at the right end the caret is after the text and the same erase
-      # leaves the field empty (32 characters typed, 32 read back). It only showed
-      # for emails longer than about half the field — the `me@example.com` this
-      # step was written against never reached it.
-      - tapOn:
-          id: "email-input"
-          point: "97%,50%"
-      - eraseText: 100
-      - inputText: ${EMAIL}
+      # What clears it is "select all, then delete" and NOT `eraseText` alone.
+      # `eraseText` only deletes BEHIND the caret, and a tap puts the caret where
+      # the finger landed, so every plan of the form "tap somewhere, erase N"
+      # depends on how long the text is and where it ends relative to the tap.
+      # Measured on 11-02 against this field (#5045, #5089):
+      #   - tap at the middle + plain `eraseText`: the lane's 32-character email
+      #     left its tail, `<new>@momo.local`, 「이메일 또는 비밀번호가 맞지 않습니다」.
+      #   - tap at the right end (`point: "97%,50%"`) + `eraseText: 100`: passes
+      #     only while the text ENDS INSIDE the field. With about 90 characters in
+      #     it the caret landed mid-text, the front was erased and the tail stayed
+      #     (`lane-…@momo.local-ab…`), the same rejection.
+      # Three quick taps are iOS's own "select the whole line" for a one-line
+      # field, so ONE delete then empties it whatever the caret, the length or the
+      # device language was (the edit menu's 「전체 선택」 would depend on the
+      # language). Under heavy load the three taps are now and then read as a
+      # double tap (a WORD gets selected, the rest stays), so the pass runs twice
+      # (the second is a no-op on an empty field), and the step is only done when
+      # the field reads back EXACTLY the typed email. The `text` selector is a
+      # FULL match, so a doubled or tailed value does not satisfy it (measured); a
+      # miss re-runs the whole block, at most twice more, instead of failing 60
+      # seconds later on `sidebar-list`, three steps away from the field that was
+      # actually wrong.
+      #
+      # Do not assert "the field is empty" with `text: ".+"`: `text` also matches
+      # the accessibility label (「이메일」), so it matches an empty field too.
+      # `${EMAIL}` is read as a pattern; the lane's emails are regex-safe.
+      - retry:
+          maxRetries: 2
+          commands:
+            - tapOn:
+                id: "email-input"
+            - repeat:
+                times: 2
+                commands:
+                  - tapOn:
+                      id: "email-input"
+                      repeat: 3
+                      delay: 20
+                      retryTapIfNoChange: false
+                  - eraseText: 1
+            - inputText: ${EMAIL}
+            - extendedWaitUntil:
+                visible:
+                  id: "email-input"
+                  text: ${EMAIL}
+                timeout: 8000
       # `eraseText` first — see the note in 00-login.yaml; without it the
       # secure field hands the server a mangled password.
       - tapOn:
