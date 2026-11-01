@@ -62,8 +62,9 @@ reqwest.workspace = true
 # itself as (`attachment_text`), never in the worker's own address space. `image` (already in the
 # graph) re-encodes a picture before the model sees it, `base64` carries it on the wire, and
 # `encoding_rs` reads the Korean legacy encoding a text file may be in. No default features on lopdf:
-# no rayon, no date crates.
-lopdf = { version = "0.41", default-features = false }
+# no rayon, no date crates, no font crate. At least 0.42: earlier versions recurse without bound into
+# nested arrays and a ~21 KB file aborts the process (RUSTSEC-2026-0187).
+lopdf = { version = "0.46", default-features = false }
 image.workspace = true
 base64.workspace = true
 encoding_rs = "0.8"

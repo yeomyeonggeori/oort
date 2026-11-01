@@ -595,6 +595,32 @@ mod tests {
         let _ = pdf_text(&pdf[..pdf.len() / 2]);
     }
 
+    /// RUSTSEC-2026-0187: lopdf before 0.42 read nested arrays with unbounded recursion, so a ~21 KB
+    /// file ended the process with a stack overflow (`SIGABRT`, which `catch_unwind` cannot stop). The
+    /// child would have died and been answered as unreadable; the parser must now refuse the file
+    /// itself. This calls `pdf_text` in the test process, where an abort takes the test binary down.
+    #[test]
+    fn a_pdf_nested_ten_thousand_deep_is_refused_and_does_not_crash() {
+        let depth = 10_380;
+        let mut pdf = b"%PDF-1.7\n".to_vec();
+        let catalog_at = pdf.len();
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R /X ");
+        pdf.extend(vec![b'['; depth]);
+        pdf.extend(vec![b']'; depth]);
+        pdf.extend_from_slice(b" >>\nendobj\n");
+        let pages_at = pdf.len();
+        pdf.extend_from_slice(b"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n");
+        let xref_at = pdf.len();
+        pdf.extend_from_slice(
+            format!(
+                "xref\n0 3\n0000000000 65535 f \n{catalog_at:010} 00000 n \n{pages_at:010} 00000 n \n\
+                 trailer\n<< /Size 3 /Root 1 0 R >>\nstartxref\n{xref_at}\n%%EOF\n"
+            )
+            .as_bytes(),
+        );
+        assert!(pdf_text(&pdf).is_err());
+    }
+
     #[test]
     fn the_childs_answer_is_one_closed_json_line() {
         assert_eq!(
