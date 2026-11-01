@@ -5697,21 +5697,32 @@ paths:
       operationId: updateChannelNotificationPref
       summary: Mute or unmute push notifications for one channel.
       description: >
-        Active channel members only. `muted: true` stores an indefinite mute;
-        `muted: false` deletes the preference. Mute suppresses every push
-        reason, including mentions and approval requests, without changing
-        unread/read-state.
+        Active channel members only. `muted: true` stores a mute; `muted: false`
+        deletes the preference. Mute suppresses every push reason, including
+        mentions and approval requests, without changing unread/read-state.
 
-        ADR-0206 D7 and D12 contract draft: the body may instead carry `level`
-        (`all`, `mentions` or `none`) and, with a mute (`muted: true` or `level:
-        none`), `mutedUntilMs` (epoch ms, in the future and within 366 days: 400
-        `muted_until_in_past` or `muted_until_too_far`). Exactly one of `muted`
-        and `level` is required. `level: all` is refused for a DM channel (400
+        ADR-0206 D12 (#4343): a mute may end. With `muted: true`, `mutedUntilMs`
+        (epoch ms) is the moment it ends; omitted or null is open-ended, so the
+        original `{muted: true}` body is unchanged. The end must be after now and
+        at most 366 days away, judged on the database clock (400
+        `muted_until_in_past` or `muted_until_too_far`), and `mutedUntilMs` with
+        `muted: false` is a 400 (no code). A later write replaces the earlier
+        one whole, so a plain `{muted: true}` over a timed mute makes it
+        open-ended. Nothing sweeps an ended mute: every reader compares the end
+        with the clock when it reads. The answer, like the channel list's
+        `muted`, is the mute as it reads now: `mutedUntilMs` is present only
+        while a timed mute is in progress. The audit record
+        `notification_pref.updated` carries `muted` and `mutedUntilMs` (`null`
+        for an open-ended mute or an un-mute).
+
+        ADR-0206 D7 contract draft (the channel-level slice, not served yet):
+        the body may instead carry `level` (`all`, `mentions` or `none`), exactly
+        one of `muted` and `level`, and `level: none` takes `mutedUntilMs` like
+        `muted: true`. `level: all` is refused for a DM channel (400
         `level_not_applicable`). The mute is a layer over the level, so a timed
         mute returns to the earlier level when it ends, and the legacy `muted`
-        body touches only the mute layer. Until #4343 (`mutedUntilMs`) and the
-        channel-level slice land, the server accepts only `{muted}` and answers
-        422 to the new fields.
+        body touches only the mute layer. Until that slice lands the server
+        answers 422 to `level`.
       security:
         - bearerAuth: []
       parameters:
@@ -5731,7 +5742,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/NotificationPrefResponse"
         "400":
-          description: Invalid request body or identifiers.
+          description: >
+            Invalid identifiers, or a refused mute window: `muted_until_in_past`
+            (the end is not after now), `muted_until_too_far` (more than 366 days
+            away), or `mutedUntilMs` together with `muted: false` (no code).
           content:
             application/json:
               schema:
@@ -17249,10 +17263,12 @@ components:
                 send-now (409),
                 the failure reason that the row now carries: `author_inactive`,
                 `not_member`, `root_unavailable`, `attachment_unavailable`,
-                `send_error`, `not_allowed`; ADR-0206 (contract draft, notification
-                settings v2): 400 `confirmation_required`, `invalid_time_zone`,
-                `invalid_schedule`, `unknown_sound`, `muted_until_in_past`,
-                `muted_until_too_far`, `level_not_applicable`, `keyword_too_short`,
+                `send_error`, `not_allowed`; ADR-0206 D12 (#4343, channel mute with an
+                end): 400 `muted_until_in_past` (the end is not after now),
+                `muted_until_too_far` (more than 366 days away); ADR-0206 (contract
+                draft, notification settings v2): 400 `confirmation_required`,
+                `invalid_time_zone`, `invalid_schedule`, `unknown_sound`,
+                `level_not_applicable`, `keyword_too_short`,
                 `keyword_too_long`, `too_many_keywords`; 409 `no_device`; 429
                 `rate_limited` (the test push only); ADR-0215 D2 (#4593, the
                 password a person is choosing: `POST /v1/join`, `POST /v1/claim`,
@@ -21014,8 +21030,10 @@ components:
           type: integer
           format: int64
           description: >
-            Epoch ms, present only while a timed mute is in progress (ADR-0206 D12
-            contract draft).
+            Epoch ms when the authenticated member's timed mute ends, present
+            only while that mute is in progress (ADR-0206 D12, #4343): omitted for
+            an open-ended mute, and once the end has passed (`muted` is false then
+            too). On the channel list, the DM list and the DM open answer alike.
         notificationLevel:
           type: string
           enum: [all, mentions, none]
@@ -21037,8 +21055,10 @@ components:
       type: object
       additionalProperties: false
       description: >
-        Exactly one of `muted` and `level` (ADR-0206 D7, D12 contract draft; only
-        `muted` is accepted until the slices land).
+        `muted`, with an optional `mutedUntilMs` (ADR-0206 D12, served since
+        #4343). `level` is the ADR-0206 D7 contract draft: exactly one of `muted`
+        and `level` once the channel-level slice lands; until then `level` is an
+        unknown field (422).
       oneOf:
         - required: [muted]
         - required: [level]
@@ -21056,8 +21076,11 @@ components:
           format: int64
           nullable: true
           description: >
-            Epoch ms when the mute ends. Only with `muted: true` or `level:
-            none`. Omitted or null is open-ended.
+            Epoch ms when the mute ends (ADR-0206 D12). Only with `muted: true`
+            (and `level: none` once that is served); with `muted: false` it is a
+            400. It must be after now and at most 366 days away, judged on the
+            database clock (400 `muted_until_in_past`, `muted_until_too_far`).
+            Omitted or null is open-ended. Not an integer: 422.
 
     NotificationPrefResponse:
       type: object
@@ -21073,7 +21096,9 @@ components:
         mutedUntilMs:
           type: integer
           format: int64
-          description: Epoch ms, present only while a timed mute is in progress (ADR-0206 D12 contract draft).
+          description: >
+            Epoch ms, present only while a timed mute is in progress (ADR-0206
+            D12, #4343); omitted for an open-ended mute and for an un-mute.
 
     PutAgentProviderPinRequest:
       type: object
