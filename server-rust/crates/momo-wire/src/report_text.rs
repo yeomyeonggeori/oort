@@ -8,7 +8,7 @@
 //! share and the Agent Port stage marker) and `momo-agent` (the activity report, which by
 //! contract keeps no dependency on `momo-t3`) — and a copy would let the four fields drift
 //! apart: tightening this tightens them together (7-Q4). The SQL backstops
-//! (`work_session_share_stage_markers_ok`, `agent_report_text_ok`, migration 167) are subsets
+//! (`work_session_share_stage_markers_ok`, `agent_report_text_ok`, migration 168) are subsets
 //! of it, so a CHECK never fires before this rule does.
 
 /// Control characters include ESC (ANSI) and NUL; the rest is the invisible / direction-changing

@@ -4897,12 +4897,12 @@ mod report_vocabulary_pin {
                 );
             }
         }
-        // the roll's numbers are the migration's: 100 activity rows, 10 plan rows (migration 167)
+        // the roll's numbers are the migration's: 100 activity rows, 10 plan rows (migration 168)
         let migration = std::fs::read_to_string(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../server/Migrations/167_agent_run_activity.sql"
+            "/../../../server/Migrations/168_agent_run_activity.sql"
         ))
-        .expect("migration 167");
+        .expect("migration 168");
         assert!(migration.contains(&format!("count(*) - {}", momo_agent::ACTIVITY_ROWS_PER_RUN)));
         assert!(migration.contains(&format!("OFFSET {}", momo_agent::PLAN_ROWS_PER_RUN)));
         assert!(migration.contains(&format!("<= {}", momo_agent::MAX_PLAN_ITEMS)));
@@ -4922,7 +4922,7 @@ mod report_vocabulary_pin {
         {
             assert!(
                 migration.contains(&format!("'{word}'")),
-                "migration 167 does not name {word}"
+                "migration 168 does not name {word}"
             );
         }
     }

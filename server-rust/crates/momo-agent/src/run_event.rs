@@ -13,7 +13,7 @@
 //! but two: `tool_call` rows (ADR-0200 증보 2026-10-15) are written by `agent_run_tool_call_record`
 //! (migration 133, [`record_tool_call_in_tx`]) under their own 100-row cap that deletes nothing;
 //! the 200-row trim neither counts nor deletes them. And the agent's own `activity` / `plan` rows
-//! (ADR-0200 증보 7, migration 167) are written by `agent_run_activity_record`
+//! (ADR-0200 증보 7, migration 168) are written by `agent_run_activity_record`
 //! ([`crate::run_activity::record_run_activity_in_tx`]) under their own roll; the 200-row trim
 //! neither counts nor deletes those either, and the stage fold looks past them.
 //!

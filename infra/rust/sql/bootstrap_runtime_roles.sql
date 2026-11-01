@@ -580,7 +580,7 @@ BEGIN
   IF to_regclass('public.agent_run_tool_tally') IS NOT NULL THEN
     GRANT SELECT ON TABLE agent_run_tool_tally TO momo_notifier;
   END IF;
-  -- ADR-0200 증보 7 / #4656 (migration 167): the same sweep read also finds a finished run by the
+  -- ADR-0200 증보 7 / #4656 (migration 168): the same sweep read also finds a finished run by the
   -- agent's ended-unit total. SELECT only — the DELETE runs on the RLS-bound momo_app pool.
   IF to_regclass('public.agent_run_activity_tally') IS NOT NULL THEN
     GRANT SELECT ON TABLE agent_run_activity_tally TO momo_notifier;

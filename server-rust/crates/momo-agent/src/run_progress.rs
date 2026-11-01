@@ -710,7 +710,7 @@ pub async fn list_run_events_in_tx(
 /// `tool_call` rows (≤ 100 per run, ADR-0200 증보 T3) ride along — so the row bound is
 /// 300 — and the run's per-tool tally is returned beside them. With `activity`, the
 /// agent-reported rows ride along **folded**: one row per activity id (the newest, ≤ 100
-/// ids by the roll of migration 167) and the newest plan (1) — so the bound is
+/// ids by the roll of migration 168) and the newest plan (1) — so the bound is
 /// `200 + (tools: 100) + (activity: 100 + 1)` — beside the ended-unit total. The folded rows
 /// have their own bound and are not cut by the oldest-first `LIMIT` of the rest.
 ///

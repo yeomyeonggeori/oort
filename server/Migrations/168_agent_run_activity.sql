@@ -1,5 +1,5 @@
 -- =============================================================================
--- 167_agent_run_activity.sql — #4656 / ADR-0200 증보 7 (7-S1)
+-- 168_agent_run_activity.sql — #4656 / ADR-0200 증보 7 (7-S1)
 --
 -- What an agent says it is doing, kept in the run event ledger: two new closed ledger
 -- kinds, `activity` and `plan`, and a per-run total table.

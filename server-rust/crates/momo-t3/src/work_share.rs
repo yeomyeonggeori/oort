@@ -174,7 +174,7 @@ pub fn validated_state(raw: &str) -> Result<String, ShareRejection> {
 ///
 /// A stage marker (80), an activity label (40), a plan step (60) and an activity id (32, plus
 /// its own alphabet in `momo-agent`) all pass through that one function, so the four fields
-/// cannot drift apart. The SQL backstop (`agent_report_text_ok`, migration 167) is a subset of it.
+/// cannot drift apart. The SQL backstop (`agent_report_text_ok`, migration 168) is a subset of it.
 pub fn validated_report_text(
     raw: &str,
     field: &str,

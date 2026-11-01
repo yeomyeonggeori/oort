@@ -1,5 +1,5 @@
 //! The agent's own activity report — `activity` and `plan` rows of the run event ledger
-//! (migration 167, ADR-0200 증보 7, #4656).
+//! (migration 168, ADR-0200 증보 7, #4656).
 //!
 //! **One vocabulary, one validator, one writer.** The closed words (seven kinds, three
 //! statuses, the numbers) live here and nowhere else on the server; the Agent Port tool
@@ -46,7 +46,7 @@ pub const MAX_ACTIVITY_LABEL_CHARS: usize = 40;
 pub const MAX_PLAN_TEXT_CHARS: usize = 60;
 /// `activities[].n`: the same ceiling as `artifacts.toolCounts`.
 pub const MAX_ACTIVITY_N: i64 = 100_000;
-/// `activity` ledger rows a run keeps before the roll (migration 167).
+/// `activity` ledger rows a run keeps before the roll (migration 168).
 pub const ACTIVITY_ROWS_PER_RUN: i64 = 100;
 /// `plan` ledger rows a run keeps before the roll.
 pub const PLAN_ROWS_PER_RUN: i64 = 10;
@@ -361,7 +361,7 @@ fn validated_id(raw: &str) -> Result<String, (ReportField, ReportRule)> {
 /// the order itself: a caller that has not locked the row can deadlock with a concurrent
 /// tool-path call on the same run (the total table's foreign key needs KEY SHARE on a row the
 /// tool path holds `FOR UPDATE`, while the tool path waits for the advisory lock). The in-server
-/// helper (ADR-0201 B5-7, #4968) must lock the run row first; see migration 167, "LOCKS".
+/// helper (ADR-0201 B5-7, #4968) must lock the run row first; see migration 168, "LOCKS".
 ///
 /// This writes **no** `output.stages` entry and spends **no** step: it never goes through
 /// `record_stage_in_tx` (7-A14).
