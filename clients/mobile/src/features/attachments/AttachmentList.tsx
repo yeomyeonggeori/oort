@@ -29,6 +29,7 @@ import {
 import { usePalette, useStyles } from '../../design/theme';
 import { CONV_ICONS, CONV_ICON_SIZE } from '../../design/icons';
 import { CONV } from '../conversation/convDesign';
+import type { LongPressTiming } from '../conversation/useLongPress';
 import { useSession } from '../../session/useSession';
 import {
   measuredAttachmentSize,
@@ -63,7 +64,8 @@ const PREVIEW_ASPECT_RATIO = 16 / 9;
 
 export interface AttachmentGesture {
   onLongPress: () => void;
-  delayLongPress: number;
+  /** 행과 같은 한 쌍(칠하기 지연 + 길게 누르기) — `Pressable` 에 그대로 펼친다(#4664). */
+  pressTiming: LongPressTiming;
   consumeTap: () => boolean;
 }
 
@@ -179,7 +181,7 @@ function ImageTile({
     <Pressable
       accessibilityRole="imagebutton"
       accessibilityLabel={`${label}, 크게 보기`}
-      delayLongPress={gesture?.delayLongPress}
+      {...gesture?.pressTiming}
       onLongPress={gesture?.onLongPress}
       onPress={onPress}
       style={({ pressed }) => [styles.imageItem, pressed && styles.pressed]}
@@ -296,7 +298,7 @@ function FileCard({
           : `${ATTACH_COPY.download}, 공유하기`
       }`}
       accessibilityState={{ busy: download.status === 'downloading' }}
-      delayLongPress={gesture?.delayLongPress}
+      {...gesture?.pressTiming}
       onLongPress={gesture?.onLongPress}
       onPress={onPress}
       style={({ pressed }) => [
