@@ -67,6 +67,7 @@ pub mod huddle_sweep;
 pub mod identity;
 pub mod inbox;
 pub mod interaction;
+pub mod invite_link;
 pub mod member_avatar;
 pub mod member_rename;
 /// ADR-0196 / #3164 — team-memory digest + receipt reads and `mem_settings` writes (RLS only).

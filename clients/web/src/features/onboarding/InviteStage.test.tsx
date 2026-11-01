@@ -207,7 +207,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     expect(onSkip).not.toHaveBeenCalled();
   });
 
-  it("점은 claim 경로 넷 중 셋째다(ADR-0185 증보 §5-2)", () => {
+  it("점은 claim 경로 다섯 중 셋째다(ADR-0185 증보 §5-2, 팀 AI 단계 #4945)", () => {
     const host = mount(
       createElement(OwnerOnboarding, {
         session,
@@ -218,11 +218,11 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     const dots = host.querySelector('[data-testid="onboarding-dots"]');
     expect(dots, "dots").not.toBeNull();
-    expect(dots?.getAttribute("data-total")).toBe("4");
+    expect(dots?.getAttribute("data-total")).toBe("5");
     expect(dots?.getAttribute("data-current")).toBe("3");
     expect(
       host.querySelector('[data-testid="onboarding-dots-label"]')?.textContent
-    ).toBe("4단계 중 3단계");
+    ).toBe("5단계 중 3단계");
   });
 
   it("탈출구 문장이 재진입 위치를 말한다", () => {

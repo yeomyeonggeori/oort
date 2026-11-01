@@ -165,6 +165,20 @@ describe("팀 AI 다음 단계 카드", () => {
     expect(q(await mount(), "team-ai-next-step")).toBeNull();
   });
 
+  it("문구는 도우미 멤버의 표시 이름을 따라간다: 이름을 바꿨으면 「oort 도우미」를 글자로 쓰지 않는다 (#4945, B10-7)", async () => {
+    roster.rows = [
+      { id: HELPER, workspaceId: WS, kind: "agent", status: "active", handle: "oort-helper", displayName: "비서봇" } as RosterMember,
+    ];
+    fetchBag.mockResolvedValue({ team_ai_fast_path: false, team_ai_agent_member_id: HELPER });
+    const view = await mount();
+    const card = q(view, "team-ai-next-step");
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("다음 단계: 팀 AI(비서봇) 켜기");
+    expect(card?.textContent).toContain("채팅에서 비서봇을 불러");
+    expect(q(view, "team-ai-next-step-enable")?.textContent).toBe("비서봇 켜기");
+    expect(card?.textContent).not.toContain("oort 도우미");
+  });
+
   it("기본 AI 줄이 안 풀렸으면 켜기는 잠기고 이유를 말한다", async () => {
     fetchDefaultAi.mockResolvedValue({ teamAgent: null, summary: null });
     const view = await mount();
