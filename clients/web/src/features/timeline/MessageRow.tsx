@@ -1,6 +1,6 @@
 import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { threadRollup, type Message, type RosterMember } from "@momo/core/lib/api";
+import { threadRollup, type Message, type RosterMember, type ThreadRollup } from "@momo/core/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
@@ -311,6 +311,7 @@ export function MessageRow({
   onOpenWorkSession,
   onResend,
   showRollup = true,
+  rollup: listRollup,
   playEntrance = false,
   onEntranceConsumed,
   runStatus,
@@ -395,6 +396,13 @@ export function MessageRow({
    * **그 줄이 여기서 할 말이 없다**는 것이었고, 여기서 끊는 것이 그 조건이다.
    */
   showRollup?: boolean;
+  /**
+   * 목록이 이미 든 새 답글을 서버 요약 위에 얹어 만든 요약 줄의 값(#5008, 코어 `liveThreadRollup`).
+   * 서버 요약(`message.thread`)은 페이지를 읽은 때의 스냅샷이라, 그 뒤 실시간으로 온 답글은 이 값으로만 줄에 닿는다.
+   * 생략하면(`undefined`) 서버 요약을 그대로 읽는다 — 목록 밖의 마운트(받은 편지함 등)는 지금 그대로이고, `null`은
+   * 「이 루트에는 요약이 없다」로 읽는다. 그릴지는 여전히 `showRollup`이 정한다.
+   */
+  rollup?: ThreadRollup | null;
   /**
    * ADR-0179 D3. True only when this row entered as a live other-user
    * arrival. Default false: REST, work log, fixtures.
@@ -497,7 +505,7 @@ export function MessageRow({
   // 목록에서 다시 보이므로 한 번 잘못 말하면 그 말이 남는다.
   const previewText =
     message.body?.trim() || attachmentPreviewLine(attachments) || PIN_EMPTY_BODY_TEXT;
-  const rollup = showRollup ? threadRollup(message) : null;
+  const rollup = showRollup ? (listRollup === undefined ? threadRollup(message) : listRollup) : null;
   const showsEditedMark = message.state === "edited" && !editing;
   // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜
   // accent가 아닌지는 코어의 `PIN_ROW_MARK` 독스트링에 있다.
