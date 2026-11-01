@@ -690,7 +690,7 @@ pub async fn provider_spend_in_tx(
     let rows = sqlx::query(
         "WITH l AS ( \
            SELECT u.model, u.prompt_tokens, u.completion_tokens, u.cached_tokens, \
-                  u.cost_micro_usd, u.created_at, \
+                  u.cost_micro_usd, u.created_at, COALESCE(u.run_id, u.id) AS run_key, \
                   CASE WHEN position('/' in u.model) > 0 THEN 'openrouter' \
                        WHEN lower(u.model) ~ '^claude' THEN 'anthropic' \
                        WHEN lower(u.model) ~ '^(gpt|o[0-9]|chatgpt|codex)' THEN 'openai' \
@@ -700,7 +700,7 @@ pub async fn provider_spend_in_tx(
              FROM usage_ledger u \
             WHERE u.workspace_id = $1 AND u.created_at >= $2), \
          priced AS ( \
-           SELECT l.company, l.model, l.prompt_tokens, l.completion_tokens, \
+           SELECT l.company, l.model, l.prompt_tokens, l.completion_tokens, l.run_key, \
                   CASE WHEN l.cost_micro_usd > 0 THEN l.cost_micro_usd::numeric \
                        WHEN p.id IS NOT NULL THEN \
                          GREATEST(l.prompt_tokens - l.cached_tokens, 0) * p.input_micro_usd_per_token \
@@ -716,7 +716,7 @@ pub async fn provider_spend_in_tx(
                 ORDER BY (mp.workspace_id IS NULL) ASC, length(mp.model) DESC, \
                          mp.effective_from DESC \
                 LIMIT 1) p ON true) \
-         SELECT company, model, count(*)::bigint AS runs, \
+         SELECT company, model, count(DISTINCT run_key)::bigint AS runs, \
                 COALESCE(sum(prompt_tokens), 0)::bigint AS prompt_tokens, \
                 COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens, \
                 round(COALESCE(sum(cost), 0))::bigint AS cost_micro_usd, \
@@ -787,16 +787,16 @@ pub async fn agent_usage_in_tx(
                 LIMIT 1) p ON true \
             WHERE u.workspace_id = $1 AND u.created_at >= $2 AND u.created_at <= $3 \
               AND u.agent_member_id = ANY($4)) \
-         SELECT agent_member_id, model, source, count(*)::bigint AS runs, \
-                count(*) FILTER (WHERE prompt_tokens > 0 OR completion_tokens > 0 \
+         SELECT agent_member_id, model, source, count(DISTINCT COALESCE(run_id, id))::bigint AS runs, \
+                count(DISTINCT COALESCE(run_id, id)) FILTER (WHERE prompt_tokens > 0 OR completion_tokens > 0 \
                     OR cached_tokens > 0 OR reasoning_tokens > 0 \
                     OR (source = 'measured' AND NOT was_estimated))::bigint AS reported_runs, \
                 COALESCE(sum(GREATEST(prompt_tokens, 0)), 0)::bigint AS prompt_tokens, \
                 COALESCE(sum(GREATEST(completion_tokens, 0)), 0)::bigint AS completion_tokens, \
                 COALESCE(sum(LEAST(GREATEST(cached_tokens, 0), GREATEST(prompt_tokens, 0))), 0)::bigint AS cached_tokens, \
                 round(COALESCE(sum(list_cost), 0))::bigint AS cost_micro_usd, \
-                count(*) FILTER (WHERE price_id IS NULL)::bigint AS unpriced_runs, \
-                count(*) FILTER (WHERE was_estimated OR tier_uncertain OR prompt_tokens < 0 OR completion_tokens < 0 \
+                count(DISTINCT COALESCE(run_id, id)) FILTER (WHERE price_id IS NULL)::bigint AS unpriced_runs, \
+                count(DISTINCT COALESCE(run_id, id)) FILTER (WHERE was_estimated OR tier_uncertain OR prompt_tokens < 0 OR completion_tokens < 0 \
                     OR cached_tokens < 0 OR cached_tokens > prompt_tokens)::bigint AS estimated_runs \
            FROM priced GROUP BY agent_member_id, model, source \
           ORDER BY agent_member_id, model, source",
@@ -841,11 +841,12 @@ pub async fn agent_usage_in_tx(
 pub struct AgentMonthSpend {
     /// Σ list-price cost of the priced runs, in micro-dollars.
     pub cost_micro_usd: i64,
-    /// Ledger rows of the month (one per request).
+    /// Runs of the month: a task of many steps writes one ledger row per step and is **one** run
+    /// (`count(DISTINCT run_id)`, security review r1 L4c); a row with no run counts as its own.
     pub runs: i64,
-    /// Rows whose model had no `model_pricing` row: in `runs`, not in `cost_micro_usd`.
+    /// Runs whose model had no `model_pricing` row: in `runs`, not in `cost_micro_usd`.
     pub unpriced_runs: i64,
-    /// Rows whose tokens or price are estimates (the figure is a lower bound, ADR-0147 D3).
+    /// Runs whose tokens or price are estimates (the figure is a lower bound, ADR-0147 D3).
     pub estimated_runs: i64,
 }
 

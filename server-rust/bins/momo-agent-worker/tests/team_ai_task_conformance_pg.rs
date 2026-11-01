@@ -838,6 +838,25 @@ async fn t2_steps_go_on_and_end_in_one_report() {
     assert!(live_jobs(&su, &t).await.is_empty());
     // One ledger row per step: four calls, three steps.
     assert_eq!(ledger_of(&su, run).await, (3, 60));
+    // L4c (security review r1): the usage readers count RUNS, not ledger rows — a three-step task is one
+    // run (the usage screen and the monthly dollar limit read the same statement).
+    let (ws, agent) = (t.workspace_id, t.agent_id);
+    let (month, per_model) = with_tenant_tx(&pool, ws, move |conn| {
+        Box::pin(async move {
+            let month = momo_agent::agent_month_spend_in_tx(conn, ws, agent).await?;
+            let since = chrono::Utc::now() - chrono::Duration::days(1);
+            let per_model = momo_agent::usage::provider_spend_in_tx(conn, ws, since).await?;
+            Ok((month, per_model))
+        })
+    })
+    .await
+    .expect("usage readers");
+    assert_eq!(month.runs, 1, "a three-step task is one run, not three");
+    assert_eq!(
+        per_model.iter().map(|row| row.runs).sum::<i64>(),
+        1,
+        "per-model usage counts it once too"
+    );
     assert_eq!(
         turn_outcomes(&su, run).await,
         ["task_started", "task_step", "answered"]
@@ -2241,4 +2260,523 @@ async fn t20_a_row_cannot_point_at_another_workspaces_run_or_member() {
         .await,
         "a run that exists elsewhere and one that exists nowhere are refused the same way"
     );
+}
+
+/// `team_ai_limits` as the administrator's settings PATCH leaves it in the bag (the door itself is
+/// tested in `momo-server`).
+async fn set_limits(su: &PgPool, t: &Tenant, limits: Value) {
+    sqlx::query(
+        "UPDATE workspace SET settings = settings || jsonb_build_object('team_ai_limits', $2::jsonb) \
+          WHERE id = $1",
+    )
+    .bind(t.workspace_id)
+    .bind(limits)
+    .execute(su)
+    .await
+    .expect("team_ai_limits");
+}
+
+/// One ledger row of the helper, stamped now — what an earlier request of the day left behind.
+async fn spend_today(su: &PgPool, t: &Tenant, model: &str, tokens: i32, searches: i32) {
+    sqlx::query(
+        "INSERT INTO usage_ledger (workspace_id, agent_member_id, channel_id, model, prompt_tokens, \
+                                   completion_tokens, web_search_requests) \
+         VALUES ($1, $2, $3, $4, $5, 0, $6)",
+    )
+    .bind(t.workspace_id)
+    .bind(t.agent_id)
+    .bind(t.channel_id)
+    .bind(model)
+    .bind(tokens)
+    .bind(searches)
+    .execute(su)
+    .await
+    .expect("ledger row");
+}
+
+/// #4944 × #4967 (B9-2, B5-5, repair 0): a task step is stopped by the SAME judgement a quick answer
+/// is — `team_ai_limits::judge` — so nothing set is no limit at all, the operator's ceiling and
+/// switch and the team's own daily tokens and monthly dollars each stop it, and each says whose limit
+/// it was. A step that is stopped makes no model call and reports the note it has. The web-search
+/// allowance is the same function's (`search_cap`).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t21_a_steps_usage_limits_are_judged_by_the_quick_paths_function() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let team_sentence = "팀이 정한 사용량을 다 써서 여기서 멈췄어요. 관리자가 설정 › AI에서 바꿀 수 있어요. 지금까지 정리한 내용이에요.";
+    let off_sentence =
+        "서버 운영자가 팀 AI를 멈춰 둔 상태라서 작업도 여기서 멈췄어요. 지금까지 정리한 내용이에요.";
+
+    // (a) Nothing set, nothing in the env: a day that already spent five million tokens (twenty-five
+    //     times the old fixed 200,000) still runs the next step and ends in a real report.
+    {
+        let t = seed_fresh(&su, &pool).await;
+        spend_today(&su, &t, "limit-test-unpriced", 5_000_000, 0).await;
+        let model = ScriptedModel::new([cont(&["다음"], "N1"), say("끝났어요.")]);
+        let w = worker_with(model.clone(), |_| {}).await;
+        let run = enqueue(&pool, &t, t.owner_id, "@oort-helper 조사해 줘").await;
+        drain(&w).await;
+        assert_eq!(model.calls(), 2, "(a) no limit: the second step is run");
+        assert_eq!(agent_texts(&su, &t).await, ["끝났어요."], "(a)");
+        assert_ended_clean(&task_row(&su, run).await.unwrap(), "done");
+    }
+
+    // (b) The team's own daily limit: step 1 spends 15 tokens, the limit is 15, so step 2 never calls.
+    {
+        let t = seed_fresh(&su, &pool).await;
+        let model = ScriptedModel::new([cont(&["다음"], "N1 비공개 메모")]);
+        let w = worker_with(model.clone(), |_| {}).await;
+        let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
+        set_limits(&su, &t, json!({"dailyTokens": 15})).await;
+        drain(&w).await;
+        assert_eq!(
+            model.calls(),
+            1,
+            "(b) the team's limit stops step 2 before the model"
+        );
+        let texts = agent_texts(&su, &t).await;
+        assert_eq!(texts.len(), 1, "(b) ONE interim report: {texts:?}");
+        assert!(texts[0].starts_with(team_sentence), "(b) {}", texts[0]);
+        assert!(
+            texts[0].contains("N1 비공개 메모"),
+            "(b) the note rides the report"
+        );
+        let (status, code, _) = run_state(&su, run).await;
+        assert_eq!(
+            (status.as_str(), code.as_deref()),
+            ("failed", Some("task_limit"))
+        );
+        assert_ended_clean(&task_row(&su, run).await.unwrap(), "task_limit");
+    }
+
+    // (c) The team's monthly dollars: the read-time list price of the helper's own ledger rows. Step 1
+    //     spent 15 tokens at one micro-dollar each = 15 micro-dollars, the limit is 15.
+    {
+        let t = seed_fresh(&su, &pool).await;
+        let model = ScriptedModel::new([cont(&["다음"], "N1")]);
+        let w = worker_with(model.clone(), |_| {}).await;
+        let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
+        let ledger_model: String =
+            sqlx::query_scalar("SELECT model FROM usage_ledger WHERE run_id = $1 LIMIT 1")
+                .bind(run)
+                .fetch_one(&su)
+                .await
+                .unwrap();
+        sqlx::query(
+            "INSERT INTO model_pricing (workspace_id, model, currency, input_micro_usd_per_token, \
+                                        output_micro_usd_per_token, cache_read_micro_usd_per_token, \
+                                        effective_from) \
+             VALUES ($1, $2, 'USD', 1, 1, 1, now() - interval '120 days')",
+        )
+        .bind(t.workspace_id)
+        .bind(&ledger_model)
+        .execute(&su)
+        .await
+        .expect("model_pricing row");
+        set_limits(&su, &t, json!({"monthlyUsd": 0.000015})).await;
+        drain(&w).await;
+        assert_eq!(
+            model.calls(),
+            1,
+            "(c) the monthly dollar limit stops step 2"
+        );
+        let texts = agent_texts(&su, &t).await;
+        assert!(
+            texts.len() == 1 && texts[0].starts_with(team_sentence),
+            "(c) {texts:?}"
+        );
+        assert_ended_clean(&task_row(&su, run).await.unwrap(), "task_limit");
+    }
+
+    // (d) The operator's emergency switch (`TEAM_AI_DAILY_TOKEN_CAP=0`) flipped while a task runs: the
+    //     worker that takes step 2 has it, and says it is the operator's, not the settings'.
+    {
+        let t = seed_fresh(&su, &pool).await;
+        let model = ScriptedModel::new([cont(&["다음"], "N1")]);
+        let w = worker_with(model.clone(), |_| {}).await;
+        let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
+        let w_off = worker_with(model.clone(), |c| c.team_ai_daily_token_cap = Some(0)).await;
+        drain(&w_off).await;
+        assert_eq!(
+            model.calls(),
+            1,
+            "(d) the switch stops step 2 before the model"
+        );
+        let texts = agent_texts(&su, &t).await;
+        assert!(
+            texts.len() == 1 && texts[0].starts_with(off_sentence),
+            "(d) {texts:?}"
+        );
+        assert_ended_clean(&task_row(&su, run).await.unwrap(), "task_limit");
+    }
+
+    // (e) The web-search allowance of a step: with one search spent today, the team's limit of one
+    //     withholds the search tool; so does the operator's ceiling of zero; with neither, it is offered.
+    type Tune = fn(&mut WorkerConfig);
+    let cases: [(&str, Option<Value>, Tune, i32, bool); 3] = [
+        (
+            "no limit",
+            None,
+            (|_: &mut WorkerConfig| {}) as Tune,
+            1,
+            true,
+        ),
+        (
+            "the team's dailySearches",
+            Some(json!({"dailySearches": 1})),
+            (|_: &mut WorkerConfig| {}) as Tune,
+            1,
+            false,
+        ),
+        (
+            "the operator's search ceiling of zero",
+            None,
+            (|c: &mut WorkerConfig| c.team_ai_daily_search_cap = Some(0)) as Tune,
+            0,
+            false,
+        ),
+    ];
+    for (label, limits, tune, searches_spent, search_offered) in cases {
+        reset_instance(&su).await;
+        let t = seed(&su, &pool).await;
+        seed_anthropic_link(&su, t.owner_id).await;
+        if let Some(limits) = limits {
+            set_limits(&su, &t, limits).await;
+        }
+        if searches_spent > 0 {
+            spend_today(&su, &t, "limit-test-unpriced", 1, searches_spent).await;
+        }
+        let model = ScriptedModel::new([cont(&["다음"], "N1"), say("끝났어요.")]);
+        let w = worker_with(model.clone(), tune).await;
+        enqueue(&pool, &t, t.owner_id, "@oort-helper 조사해 줘").await;
+        drain(&w).await;
+        let requests = model.requests();
+        let step2 = requests.last().expect("step 2 was asked");
+        assert_eq!(
+            !step2.tools.is_empty(),
+            search_offered,
+            "(e) {label}: step 2's provider tools: {:?}",
+            step2.tools
+        );
+        if !search_offered {
+            assert!(
+                system_prompt(step2).contains("오늘 웹 검색을 다 썼어요"),
+                "(e) {label}: the prompt says why"
+            );
+        }
+    }
+}
+
+/// M3 (B15-A6): the commit is a compare-and-swap, and that is what holds when the claim did not.
+/// Worker A is inside step 2's model call when its claim runs out; worker B takes the step over, runs
+/// it and commits; then A's call returns and A commits the same step. A's commit writes nothing —
+/// `steps_done` is 2 (not 3), the note is B's, exactly one job exists for step 3 — while what A spent
+/// is on the ledger (spent is spent). Then the statement itself, one predicate at a time: a commit
+/// under the wrong token and a commit of the wrong step are each refused.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t22_a_late_commit_after_a_takeover_writes_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    // B's call (the third) is not held, so it takes the next entry; A's held call takes the one after.
+    let model = ScriptedModel::new([
+        cont(&["둘째"], "N1"),
+        cont(&["셋째 B"], "N2 — B가 쓴 노트"),
+        cont(&["셋째 A"], "N2 — A가 늦게 쓴 노트"),
+    ]);
+    let a = Arc::new(worker_with(model.clone(), |_| {}).await);
+    let b = worker_with(model.clone(), |_| {}).await;
+    let run = start_task(&su, &pool, &t, &a, t.owner_id, "@oort-helper 조사해 줘").await;
+
+    let (entered, release) = model.hold_call(2);
+    let runner = {
+        let a = a.clone();
+        tokio::spawn(async move { a.drain_once().await.expect("worker A drains step 2") })
+    };
+    wait_entered(&entered).await; // A is inside step 2's model call, holding the claim.
+                                  // A's claim on the step and A's lease on the job both run out.
+    sqlx::query(
+        "UPDATE team_ai_task SET claim_until = now() - interval '1 second' WHERE run_id = $1",
+    )
+    .bind(run)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '10 minutes', \
+                lease_expires_at = now() - interval '1 second' \
+          WHERE workspace_id = $1 AND kind = 'agent_job' AND status = 'processing'",
+    )
+    .bind(t.workspace_id)
+    .execute(&su)
+    .await
+    .unwrap();
+    let stats = b.drain_once().await.expect("worker B drains");
+    assert_eq!(stats.claimed, 1, "B really took the job over");
+    assert_eq!(
+        model.calls(),
+        3,
+        "B ran the step while A is still inside its call"
+    );
+    let row = task_row(&su, run).await.unwrap();
+    assert_eq!(row.steps_done, 2, "B committed step 2");
+    assert_eq!(row.note.as_deref(), Some("N2 — B가 쓴 노트"));
+
+    // A's call comes back and A commits the very same step.
+    release.notify_one();
+    runner.await.unwrap();
+    let row = task_row(&su, run).await.unwrap();
+    assert_eq!(row.steps_done, 2, "A's late commit moved nothing");
+    assert_eq!(
+        row.note.as_deref(),
+        Some("N2 — B가 쓴 노트"),
+        "and wrote no note of its own"
+    );
+    let step3: Vec<Value> = live_jobs(&su, &t)
+        .await
+        .into_iter()
+        .filter(|job| job["team_ai_task_step"] == 3)
+        .collect();
+    assert_eq!(step3.len(), 1, "one step-3 job, not two: {step3:?}");
+    assert_eq!(
+        run_state(&su, run).await.2,
+        2,
+        "and one G3 step per finished step"
+    );
+    assert_eq!(
+        ledger_of(&su, run).await,
+        (3, 45),
+        "spent is spent: A's late step is on the ledger too"
+    );
+
+    // The statement itself, one predicate at a time. A fresh task at `steps_done = 1`, step 2 claimed.
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([cont(&["다음"], "N1")]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
+    let (ws, token) = (t.workspace_id, Uuid::new_v4());
+    with_tenant_tx(&pool, ws, move |conn| {
+        Box::pin(async move {
+            let claimed =
+                momo_agent::team_ai_task::claim_step_in_tx(conn, ws, run, 2, token).await?;
+            assert!(matches!(
+                claimed,
+                momo_agent::team_ai_task::ClaimOutcome::Claimed(_)
+            ));
+            Ok(())
+        })
+    })
+    .await
+    .expect("claim step 2");
+    let commit = |token: Uuid, step: i32| {
+        let pool = pool.clone();
+        async move {
+            with_tenant_tx(&pool, ws, move |conn| {
+                Box::pin(async move {
+                    let plan = vec!["다음".to_string()];
+                    Ok(momo_agent::team_ai_task::commit_step_in_tx(
+                        conn,
+                        &momo_agent::team_ai_task::StepCommit {
+                            workspace_id: ws,
+                            run_id: run,
+                            token,
+                            step,
+                            plan: &plan,
+                            note: "남의 노트",
+                            model_calls: 1,
+                            tool_calls: 0,
+                            web_searches: 0,
+                        },
+                    )
+                    .await?
+                    .is_some())
+                })
+            })
+            .await
+            .expect("commit")
+        }
+    };
+    assert!(
+        !commit(Uuid::new_v4(), 2).await,
+        "a commit under somebody else's token is refused"
+    );
+    assert!(
+        !commit(token, 3).await,
+        "a commit of the wrong step is refused, whoever holds the claim"
+    );
+    let row = task_row(&su, run).await.unwrap();
+    assert_eq!(row.steps_done, 1, "neither moved the row");
+    assert_eq!(row.note.as_deref(), Some("N1"));
+    assert!(
+        commit(token, 2).await,
+        "anti-vacuity: the holder's own commit lands"
+    );
+    assert_eq!(task_row(&su, run).await.unwrap().steps_done, 2);
+}
+
+/// What the helper's newest message did with link previews: `(body, a preview job was queued by the
+/// 079 trigger, a tombstone withholds the fetch)`.
+async fn preview_state(su: &PgPool, t: &Tenant) -> (String, bool, bool) {
+    let row: (Uuid, String) = sqlx::query_as(
+        "SELECT id, body FROM message WHERE workspace_id = $1 AND author_member_id = $2 \
+          ORDER BY created_at DESC, seq DESC LIMIT 1",
+    )
+    .bind(t.workspace_id)
+    .bind(t.agent_id)
+    .fetch_one(su)
+    .await
+    .unwrap();
+    let job: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM unfurl_job WHERE message_id = $1)")
+            .bind(row.0)
+            .fetch_one(su)
+            .await
+            .unwrap();
+    let tombstone: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM message_unfurl_tombstone WHERE message_id = $1)",
+    )
+    .bind(row.0)
+    .fetch_one(su)
+    .await
+    .unwrap();
+    (row.1, job, tombstone)
+}
+
+/// M2 (the #3899 rule carried to a task): the report a task ends with is built from notes that may
+/// carry what earlier steps read, so — exactly as after a read or a search on the quick path — it gets
+/// no server-side link preview (the fetch would carry the URL's query out with no click), whatever
+/// THIS step called. The last step reads nothing and searches nothing, so only the step number can
+/// tell it from a quick answer; a plain answer keeps its preview, which is what proves the tombstone
+/// (not a missing job) does the work.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t23_a_tasks_report_gets_no_link_preview_even_when_its_last_step_read_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let leak = "https://attacker.example/?d=PHOENIX-비밀-4967";
+
+    type Tune = fn(&mut WorkerConfig);
+    let cases: [(&str, Tune, Vec<ChatCompletion>); 2] = [
+        (
+            "the final report",
+            (|_: &mut WorkerConfig| {}) as Tune,
+            vec![
+                cont(&["정리하기"], &format!("N1 {leak}")),
+                say(&format!("정리했어요. {leak}")),
+            ],
+        ),
+        (
+            "an interim report (a bound)",
+            (|c: &mut WorkerConfig| c.team_ai_task.max_steps = 2) as Tune,
+            vec![cont(&["다음"], "N1"), cont(&["더"], &format!("N2 {leak}"))],
+        ),
+    ];
+    for (label, tune, script) in cases {
+        let t = seed_fresh(&su, &pool).await;
+        let model = ScriptedModel::new(script);
+        let w = worker_with(model.clone(), tune).await;
+        let run = enqueue(&pool, &t, t.owner_id, "@oort-helper 조사해 줘").await;
+        drain(&w).await;
+        let row = task_row(&su, run).await.unwrap();
+        assert_eq!(row.state, "ended", "{label}");
+        // No step read anything and none searched (the scripts have no read and no search), so the
+        // only thing that can tell this report from a quick answer is the step number.
+        assert_eq!(row.tool_calls, 0, "{label}: no step read anything");
+        let (body, job, tombstone) = preview_state(&su, &t).await;
+        assert!(
+            body.contains(leak),
+            "{label}: the report was posted: {body}"
+        );
+        assert!(job, "{label}: the 079 trigger queued a preview job");
+        assert!(tombstone, "{label}: a task's report gets no preview fetch");
+    }
+
+    // The control: a quick answer that read nothing keeps its preview — the tombstone is the task's.
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([say("문서는 https://docs.example/start 에 있어요.")]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    enqueue(&pool, &t, t.owner_id, "@oort-helper 시작 문서 링크 줘").await;
+    drain(&w).await;
+    let (body, job, tombstone) = preview_state(&su, &t).await;
+    assert!(body.contains("https://docs.example/start"), "{body}");
+    assert!(job, "a plain answer still queues its preview");
+    assert!(!tombstone, "no task, no read, no search: previews stay on");
+}
+
+/// Stop a run the way the cancel route does (its own statements), and say whether it was running.
+async fn stop_the_run(pool: &PgPool, t: &Tenant, run: Uuid) -> bool {
+    let workspace_id = t.workspace_id;
+    with_tenant_tx(pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let cancelled = momo_agent::cancel_run_in_tx(
+                conn,
+                workspace_id,
+                run,
+                &json!({"code": "human_cancelled"}),
+            )
+            .await?;
+            momo_outbox::retire_pending_agent_jobs_for_run_in_tx(conn, workspace_id, run).await?;
+            Ok(cancelled)
+        })
+    })
+    .await
+    .expect("the stop")
+}
+
+/// L4a (B9-2): the web searches of a step that a stop cut short are on the ledger like its tokens, so
+/// the day's search allowance counts them. The stop is read before the NEXT model call, so the call
+/// that was in flight (a read, with two searches the provider ran) is the last — and it is not lost.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t24_a_stopped_steps_web_searches_count_toward_the_days_allowance() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let mut read = read_channel(&t.channel_name);
+    read.web_search_requests = 2;
+    let model = ScriptedModel::new([cont(&["다음"], "N1"), read, cont(&["그다음"], "N2")]);
+    let w = Arc::new(worker_with(model.clone(), |_| {}).await);
+    let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
+    let (entered, release) = model.hold_call(2);
+    let runner = {
+        let w = w.clone();
+        tokio::spawn(async move { w.drain_once().await.unwrap() })
+    };
+    wait_entered(&entered).await;
+    assert!(stop_the_run(&pool, &t, run).await);
+    release.notify_one();
+    runner.await.unwrap();
+
+    assert_eq!(
+        model.calls(),
+        2,
+        "no model call is made after the stop was read"
+    );
+    assert_ended_clean(&task_row(&su, run).await.unwrap(), "task_cancelled");
+    let on_the_ledger: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(web_search_requests), 0)::bigint FROM usage_ledger WHERE run_id = $1",
+    )
+    .bind(run)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        on_the_ledger, 2,
+        "the cut-short step's searches are on its ledger row"
+    );
+    let (ws, agent) = (t.workspace_id, t.agent_id);
+    let counted_today = with_tenant_tx(&pool, ws, move |conn| {
+        Box::pin(async move {
+            momo_workspace_actions::team_ai::searches_used_today_in_tx(conn, ws, agent).await
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(counted_today, 2, "and the day's allowance counts them");
 }

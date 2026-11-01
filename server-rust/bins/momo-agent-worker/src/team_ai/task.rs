@@ -296,12 +296,12 @@ impl AgentWorker {
         match gathered.run_status {
             Some(RunStatus::Cancelled) => {
                 return self
-                    .team_ai_task_drop(job, payload, run_id, None, &model, store::END_CANCELLED)
+                    .team_ai_task_drop(job, payload, run_id, None, 0, &model, store::END_CANCELLED)
                     .await
             }
             Some(RunStatus::Succeeded) | Some(RunStatus::TimedOut) | None => {
                 return self
-                    .team_ai_task_drop(job, payload, run_id, None, &model, store::END_RUN_ENDED)
+                    .team_ai_task_drop(job, payload, run_id, None, 0, &model, store::END_RUN_ENDED)
                     .await
             }
             Some(_) => {}
@@ -705,8 +705,17 @@ impl AgentWorker {
                 .await
             }
             StepEnd::Cancelled => {
-                self.team_ai_task_drop(job, payload, run_id, spend, &model, store::END_CANCELLED)
-                    .await
+                // The calls this step made before the stop was read spent tokens AND searches.
+                self.team_ai_task_drop(
+                    job,
+                    payload,
+                    run_id,
+                    spend,
+                    trace.web_searches,
+                    &model,
+                    store::END_CANCELLED,
+                )
+                .await
             }
             StepEnd::Retry(reason) => {
                 // Give the claim back so the retry does not wait it out, then retry the job.
@@ -907,20 +916,23 @@ impl AgentWorker {
 
     /// A step ends without a message: a stop (the cancel route already wrote its own line and ended
     /// the row — this only keeps what the step spent on the ledger and makes sure the row is ended)
-    /// or a run that ended through a path that does not know tasks.
+    /// or a run that ended through a path that does not know tasks. `searches` are the web searches
+    /// the cut-short step had already made: they are on the ledger row like its tokens, so the day's
+    /// search allowance (B9-2) counts them (security review r1 L4a).
+    #[allow(clippy::too_many_arguments)]
     async fn team_ai_task_drop(
         &self,
         job: &ClaimedAgentJob,
         payload: &AgentJobPayload,
         run_id: Uuid,
         spend: Option<Spend>,
+        searches: i32,
         model: &str,
         reason: &'static str,
     ) -> Settlement {
         let workspace_id = job.workspace_id;
         let agent = payload.agent_member_id;
         let channel_id = payload.channel_id;
-        let searches = 0;
         let ledger = spend.map(|usage| ledger_report(Some(usage), model, payload));
         let model_owned = model.to_string();
         let done = with_tenant_tx(&self.pool, workspace_id, move |conn| {
