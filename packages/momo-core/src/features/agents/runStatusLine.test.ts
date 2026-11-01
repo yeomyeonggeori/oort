@@ -162,13 +162,14 @@ describe("원장: 깨우는 신호와 모르는 종류 (#3824)", () => {
       runId: RUN.toUpperCase(),
       events: [
         { ordinal: 1, kind: "queued", createdAtMs: T },
-        { ordinal: 2, kind: "tool_call", code: "ok", createdAtMs: T + 1 },
-        { ordinal: 3, kind: "tool_call", code: "ok", createdAtMs: T + 2 },
+        // `tool_call`은 #4654부터 아는 종류다. 서버가 클라이언트보다 먼저 늘릴 새 종류는 가상의 낱말로 잰다.
+        { ordinal: 2, kind: "future_kind", code: "ok", createdAtMs: T + 1 },
+        { ordinal: 3, kind: "future_kind", code: "ok", createdAtMs: T + 2 },
         { ordinal: 4, kind: "claimed", createdAtMs: T + 3 },
       ],
     });
     expect(ledger.events.map((e) => e.kind)).toEqual(["queued", "unknown", "unknown", "claimed"]);
-    expect(ledger.events[1]?.rawKind).toBe("tool_call");
+    expect(ledger.events[1]?.rawKind).toBe("future_kind");
     const rows = ledgerRows(ledger.events);
     expect(rows.map((r) => r.text)).toEqual([
       "요청이 들어왔어요",
