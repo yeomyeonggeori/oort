@@ -64,6 +64,9 @@ export const messageKeys = [
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
   "timeline.unfurl.label",
+  "timeline.unfurl.previewDismiss",
+  "timeline.unfurl.previewDismissed",
+  "timeline.unfurl.previewGroup",
   "timeline.unfurl.video"
 ] as const;
 
@@ -143,6 +146,9 @@ export const argumentSpecs = {
     "domain": "string",
     "title": "string"
   },
+  "timeline.unfurl.previewDismiss": {},
+  "timeline.unfurl.previewDismissed": {},
+  "timeline.unfurl.previewGroup": {},
   "timeline.unfurl.video": {}
 } as const;
 
@@ -211,5 +217,8 @@ export interface MessageArgs {
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
   "timeline.unfurl.label": { domain: string; title: string };
+  "timeline.unfurl.previewDismiss": Record<string, never>;
+  "timeline.unfurl.previewDismissed": Record<string, never>;
+  "timeline.unfurl.previewGroup": Record<string, never>;
   "timeline.unfurl.video": Record<string, never>;
 }

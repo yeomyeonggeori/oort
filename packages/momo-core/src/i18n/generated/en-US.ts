@@ -432,6 +432,24 @@ export const catalog: MessageCatalog = {
       "value": "domain"
     }
   ],
+  "timeline.unfurl.previewDismiss": [
+    {
+      "type": 0,
+      "value": "Send this message without a preview"
+    }
+  ],
+  "timeline.unfurl.previewDismissed": [
+    {
+      "type": 0,
+      "value": "This message will be sent without a link preview."
+    }
+  ],
+  "timeline.unfurl.previewGroup": [
+    {
+      "type": 0,
+      "value": "Link preview before sending"
+    }
+  ],
   "timeline.unfurl.video": [
     {
       "type": 0,

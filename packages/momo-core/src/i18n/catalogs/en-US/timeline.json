@@ -1,4 +1,7 @@
 {
   "timeline.unfurl.label": "Link preview: {title}, {domain}",
+  "timeline.unfurl.previewDismiss": "Send this message without a preview",
+  "timeline.unfurl.previewDismissed": "This message will be sent without a link preview.",
+  "timeline.unfurl.previewGroup": "Link preview before sending",
   "timeline.unfurl.video": "Video"
 }

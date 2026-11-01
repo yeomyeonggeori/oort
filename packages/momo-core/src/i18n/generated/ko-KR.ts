@@ -411,6 +411,24 @@ export const catalog: MessageCatalog = {
       "value": "domain"
     }
   ],
+  "timeline.unfurl.previewDismiss": [
+    {
+      "type": 0,
+      "value": "이번 메시지는 미리보기 없이 보내기"
+    }
+  ],
+  "timeline.unfurl.previewDismissed": [
+    {
+      "type": 0,
+      "value": "이번 메시지는 링크 미리보기 없이 보내요."
+    }
+  ],
+  "timeline.unfurl.previewGroup": [
+    {
+      "type": 0,
+      "value": "보내기 전 링크 미리보기"
+    }
+  ],
   "timeline.unfurl.video": [
     {
       "type": 0,

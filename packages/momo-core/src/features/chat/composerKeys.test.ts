@@ -101,6 +101,21 @@ describe("composerKeyIntent", () => {
     expect(composerKeyIntent(key("ArrowDown"), IDLE)).toBe("pass");
   });
 
+  it("dismisses the link preview card on Escape, below the mention list and above the quote", () => {
+    const CARD: ComposerKeyState = { ...IDLE, previewOpen: true };
+    expect(composerKeyIntent(key("Escape"), CARD)).toBe("preview-dismiss");
+    // The topmost thing goes first: the mention list, then the card, then the quote.
+    expect(composerKeyIntent(key("Escape"), { ...CARD, mentionsOpen: true })).toBe("mention-close");
+    expect(composerKeyIntent(key("Escape"), { ...CARD, quoteOpen: true })).toBe("preview-dismiss");
+    expect(composerKeyIntent(key("Escape"), { ...IDLE, quoteOpen: true })).toBe("quote-cancel");
+    // An IME owns Escape while it composes, and a surface that never says `previewOpen` is unchanged.
+    expect(composerKeyIntent(key("Escape", { composing: true }), CARD)).toBe("pass");
+    expect(composerKeyIntent(key("Escape"), { ...IDLE, previewOpen: false })).toBe("pass");
+    // Escape is not a send key: the card never changes what Enter and Cmd+Enter do.
+    expect(composerKeyIntent(key("Enter"), CARD)).toBe("send");
+    expect(composerKeyIntent(key("Enter", { metaKey: true }), CARD)).toBe("send");
+  });
+
   it("closes the mention list on Escape unless the IME is composing", () => {
     expect(composerKeyIntent(key("Escape"), MENTIONS)).toBe("mention-close");
     expect(composerKeyIntent(key("Escape", { composing: true }), MENTIONS)).toBe(

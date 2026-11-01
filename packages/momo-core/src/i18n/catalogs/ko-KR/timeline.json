@@ -1,4 +1,7 @@
 {
   "timeline.unfurl.label": "링크 미리보기: {title}, {domain}",
+  "timeline.unfurl.previewDismiss": "이번 메시지는 미리보기 없이 보내기",
+  "timeline.unfurl.previewDismissed": "이번 메시지는 링크 미리보기 없이 보내요.",
+  "timeline.unfurl.previewGroup": "보내기 전 링크 미리보기",
   "timeline.unfurl.video": "동영상"
 }
