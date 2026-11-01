@@ -348,6 +348,52 @@ describe("tool card", () => {
     expect(card?.kind === "tool" && card.status).toBe("thinking");
   });
 
+  // #4995. 서버는 `tool_call` 행의 props 를 `{name, arguments, call_id}` 로만 쓴다(`tools.rs`
+  // `ToolCall::message_props`). 도구 이름을 `tool_name`/`tool` 에서만 찾던 때는 제목이 이름 없는 「도구 실행」이었다.
+  const serverToolCall = (extra: Record<string, unknown> = {}) =>
+    msg({
+      type: "tool_call",
+      body: "Tool call: work.session.end",
+      props: {
+        name: "work.session.end",
+        arguments: { session_id: "sess-secret-1" },
+        call_id: "call-secret-1",
+        ...extra,
+      },
+    });
+
+  it("names the tool from the server's `name` prop: the title is our Korean frame, not a nameless 도구 실행 (#4995)", () => {
+    const card = agentCardModel(serverToolCall());
+    expect(card?.kind).toBe("tool");
+    if (card?.kind !== "tool") return;
+    expect(card.title).toBe("work.session.end 실행");
+    expect(card.frame.verb).toBe("work.session.end 실행");
+  });
+
+  it("does not count the name it draws as withheld, and still hides arguments and call_id (#4995)", () => {
+    const card = agentCardModel(serverToolCall());
+    if (card?.kind !== "tool") throw new Error("not a tool card");
+    // arguments · call_id 둘뿐이다. `name` 은 제목에 그려지므로 숨김이 아니다(「그리는 것을 숨겼다고 말하지 않는다」).
+    expect(card.detail.withheld).toBe(2);
+    const rendered = JSON.stringify(card);
+    expect(rendered).not.toContain("sess-secret-1");
+    expect(rendered).not.toContain("call-secret-1");
+  });
+
+  it("reads the tool name from tool_name, then tool, then name (#4995)", () => {
+    const titleOf = (props: Record<string, unknown>) => {
+      const card = agentCardModel(msg({ type: "tool_call", props }));
+      if (card?.kind !== "tool") throw new Error("not a tool card");
+      return card.title;
+    };
+    expect(titleOf({ tool_name: "shell", tool: "other", name: "third" })).toBe("shell 실행");
+    expect(titleOf({ tool: "other", name: "third" })).toBe("other 실행");
+    expect(titleOf({ name: "third" })).toBe("third 실행");
+    // 이름이 없으면(비었거나 문자열이 아니면) 지금까지처럼 이름 없는 틀이다.
+    expect(titleOf({ name: "" })).toBe("도구 실행");
+    expect(titleOf({ name: 7 })).toBe("도구 실행");
+  });
+
   it("reads the server's error text, the same prop the turn record reads", () => {
     // A tool whose BODY is the artifact it tried to write has nowhere else to
     // carry the reason it failed, and the artifact card hoists this note.
