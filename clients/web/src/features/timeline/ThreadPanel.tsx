@@ -36,6 +36,7 @@ import type { RequestThreadLanding } from "./useRequestThreadLanding";
 import { watchForMessageId } from "@/features/inbox/anchor";
 import { viewThread } from "@/features/notifications/viewedThread";
 import type { RealtimeHandle } from "@/lib/realtime";
+import { followOnReplyHint } from "@momo/core/features/timeline/threadFollow";
 import { ThreadFollowButton } from "./ThreadFollowButton";
 import { useThreadFollow } from "./useThreadFollow";
 
@@ -268,6 +269,18 @@ function ThreadPanelFrame({
     return viewThread(channelId, root.id);
   }, [readsThread, isPresent, channelId, root.id]);
   const showFollow = readsThread && followable && query.data !== undefined && !follow.view.unavailable;
+  // 처음 답할 때 입력창 곁의 한 줄(#5017): 답하면 이 스레드를 따라간다. 말이 틀릴 수 있는 때는 서지 않는다(코어 규칙).
+  const followHint = followOnReplyHint({
+    available: showFollow,
+    serverFollowing: query.data?.following,
+    touched: follow.view.touched,
+    selfMemberId: actions?.myMemberId,
+    rootAuthorId: root.authorMemberId,
+    replies: allReplies,
+    complete: query.data?.nextCursor === undefined,
+  })
+    ? follow.copy.replyHint
+    : undefined;
 
   const replyIds = useRef(new Set<string>());
   replyIds.current = new Set(allReplies.map((message) => message.id.toLowerCase()));
@@ -488,6 +501,7 @@ function ThreadPanelFrame({
           directory={directory}
           channels={channels}
           onSent={() => void query.refetch()}
+          followHint={followHint}
         />
       )}
       </div>

@@ -114,6 +114,7 @@ export function ThreadComposer({
   directory,
   channels,
   onSent,
+  followHint,
 }: {
   workspaceId: string;
   channelId: string;
@@ -123,6 +124,8 @@ export function ThreadComposer({
   channels: Channel[];
   /** Refetch the thread; the reply also arrives on the realtime rail. */
   onSent: () => void;
+  /** 처음 답하는 사람에게 입력창 곁에 한 줄로 알릴 말(#5017). 세울지는 호스트가 정한다(`followOnReplyHint`). 없으면 줄이 없다. */
+  followHint?: string;
 }) {
   const { store: expressionStore } = useExpressions();
   const [draft, setDraft] = useState(() => readThreadDraft(workspaceId, rootId));
@@ -281,6 +284,8 @@ export function ThreadComposer({
     },
   });
   const showsSchedule = schedule.gate.entry === "shown";
+  // 힌트 줄은 입력창에 묶어 읽는다. 키 차단 안내가 서 있으면 그쪽이 먼저다(막힌 이유가 더 급하다).
+  const followHintId = followHint === undefined ? undefined : "thread-composer-follow-hint";
 
   const submit = () => {
     // 예약 요청이 나는 동안은 보내기도 잠긴다: 같은 글이 답글과 예약으로 둘 다 나가면 안 된다.
@@ -443,7 +448,7 @@ export function ThreadComposer({
               placeholder={THREAD_COMPOSER_PLACEHOLDER}
               aria-label={THREAD_COMPOSER_PLACEHOLDER}
               aria-describedby={
-                secretBlocked ? "thread-composer-secret-block" : undefined
+                secretBlocked ? "thread-composer-secret-block" : followHintId
               }
               aria-autocomplete="list"
               aria-expanded={autocomplete.visible}
@@ -591,6 +596,15 @@ export function ThreadComposer({
             </div>
           </div>
         </div>
+        {followHint !== undefined && (
+          <p
+            id={followHintId}
+            className="px-3 pt-2 text-meta text-ink-muted"
+            data-testid="thread-composer-follow-hint"
+          >
+            {followHint}
+          </p>
+        )}
       </div>
       <ComposerFormatTray
         open={format.open}
