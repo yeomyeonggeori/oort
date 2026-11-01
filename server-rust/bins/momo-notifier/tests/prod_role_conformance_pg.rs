@@ -27,7 +27,7 @@
 //! | `a_hosted_work_run_push_and_run_status_trigger_run_as_the_notifier_role` (#3740) | drop `GRANT SELECT, INSERT ON agent_run_event TO momo_notifier` — the migration-128 ledger trigger appends as the invoking role (verified red: `permission denied for table agent_run_event`) |
 //! | `an_approval_audience_is_judged_as_the_production_notifier_role` (ADR-0204 D7, #3928) | drop `GRANT SELECT (workspace_id, member_id, role) ON workspace_membership` — `may_approve_in_tx` reads it for every role-gated card (verified red: `permission denied for table workspace_membership`); or drop the `agent` / `work_host` SELECT the agent-owner and host-owner arms read |
 //! | `the_personal_agent_member_trigger_runs_as_every_role_that_writes_member` (#3591) | drop `GRANT UPDATE ON agent` from a role that can UPDATE `member` (the migration-123 trigger updates `agent` as the invoking role), or add the trigger's table to a lockdown |
-//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown, a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none) or the `self_media_token` lockdown (#4820 C2a L6: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/DELETE, relay/notifier none) that drifts — e.g. dropping the block from `bootstrap_runtime_roles.sql` hands relay and notifier-class write back to the BYPASSRLS roles |
+//! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown, a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none), the `self_media_token` lockdown (#4820 C2a L6: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/DELETE, relay/notifier none) or the `team_ai_task` lockdown (#4967 r1 M1: `momo_app` SELECT/UPDATE, `momo_worker` SELECT/INSERT/UPDATE, relay/notifier none) that drifts — e.g. dropping the block from `bootstrap_runtime_roles.sql` hands relay and notifier-class write back to the BYPASSRLS roles |
 //! | `a_dead_push_token_is_invalidated_by_the_production_notifier_role` (#3930) | drop `GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier` — the settle's `UPDATE push_token` dies with `permission denied for table push_token`, and rolls back to its savepoint, so ONLY this suite sees it; widen the grant past those two columns and the denied-write half goes red |
 //! | `closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_stream` (ADR-0204 증보 1 D8-a, #3987) | revoke `INSERT` on `outbox` from `momo_app` or `momo_worker` (the stream's closing write enqueues the `push_candidate` as the invoking role — the same privilege the 011 trigger already needs for the opening INSERT), or give the outbox a kind-specific lockdown |
 //! | `a_woken_uncollected_run_is_ended_by_the_production_notifier_role_with_column_scoped_reads` (ADR-0200 증보 3 E7, #4284) | drop a column from the `hosted_agent_connection` / `hosted_agent_liveness` / `hosted_agent_doorbell_ring` / `agent_provider_pin` GRANT the woken verdict reads (the sweep dies with `permission denied for table …` and rolls back to its savepoint, so ONLY this suite sees it); or grant the notifier `token` / `hosted_agent_doorbell` / a table-level SELECT on the new tables (the denied-read half goes red) |
@@ -1513,8 +1513,8 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     // `schema_migrations`, `work_cloud_host_transition`: #4372, see
     // `migration_owned_catalogs_are_read_only_for_every_runtime_role`), the `cloud_box*` tables (ADR-0197 D10 lockdown, see
     // below), the `scheduled_message*` tables (ADR-0208 D3 lockdown, see below) and
-    // `self_media_token` (#4820 C2a L6 lockdown, see below) are
-    // the only tables outside the rule; everything else must be readable and writable
+    // `self_media_token` (#4820 C2a L6 lockdown, see below) and `team_ai_task` (#4967 r1 M1
+    // lockdown, see below) are the only tables outside the rule; everything else must be readable and writable
     // by the three ALL-TABLES roles.
     let missing: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s', r.rolname, c.relname, p.priv) \
@@ -1526,6 +1526,7 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
             AND c.relname NOT LIKE 'cloud\\_box%' \
             AND c.relname NOT LIKE 'scheduled\\_message%' \
             AND c.relname <> 'self_media_token' \
+            AND c.relname <> 'team_ai_task' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
           ORDER BY 1",
     )
@@ -1605,6 +1606,35 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     .fetch_one(&db.su)
     .await
     .expect("self media table count");
+    // `team-ai-task-lockdown` (bootstrap_runtime_roles.sql, #4967 security review r1 M1): a row's note
+    // is model-written text that may carry what the helper read for one requester, and the BYPASSRLS
+    // roles skip RLS, so their table privileges keep every tenant's notes from a role with no business
+    // reading them. `momo_worker` runs the task (SELECT/INSERT/UPDATE), `momo_app` counts the slot and
+    // ends a cancelled task (SELECT/UPDATE), relay and notifier touch nothing; nobody deletes a row or
+    // holds TRUNCATE/REFERENCES/TRIGGER.
+    let team_ai_task_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
+                       has_table_privilege(r.rolname, c.oid, p.priv)) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier')) AS r(rolname) \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname = 'team_ai_task' \
+            AND has_table_privilege(r.rolname, c.oid, p.priv) \
+                IS DISTINCT FROM ((r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'UPDATE')) \
+                                  OR (r.rolname = 'momo_worker' AND p.priv IN ('SELECT', 'INSERT', 'UPDATE'))) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("team ai task privilege scan");
+    let team_ai_task_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = 'team_ai_task'",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("team ai task table count");
     db.finish().await;
     assert!(
         missing.is_empty(),
@@ -1629,6 +1659,14 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     assert!(
         self_media_drift.is_empty(),
         "self_media_token privileges drifted from the lockdown: {self_media_drift:?}"
+    );
+    assert_eq!(
+        team_ai_task_tables, 1,
+        "the scan must actually see the team_ai_task table, or it proves nothing"
+    );
+    assert!(
+        team_ai_task_drift.is_empty(),
+        "team_ai_task privileges drifted from the lockdown: {team_ai_task_drift:?}"
     );
 }
 
