@@ -6036,14 +6036,17 @@ paths:
         ADR-0206 D11·D15 (#4341). A separate path that **bypasses the push judgment**: its
         purpose is to prove the delivery path, so it arrives even while the caller's
         notifications are paused (the gates are what `getNotificationDiagnostics` reports).
-        It goes only to the caller's own active push tokens, as one `push_system` outbox row
-        (ADR-0206 D15, id-only, written in the same transaction as the budget) that the
-        notifier sends with the static body 「시험 알림이에요」. No request body. Human bearer
-        only (an agent bearer is 403). 409 with `error.code` `no_device` when the caller has
-        no active token (nothing is spent and nothing is written). 429 with `error.code`
-        `rate_limited` and a `Retry-After` past 3 per member per fixed 60-second window. The
-        test is best effort: the relay's 429/5xx is not retried and shows as `failed`. The
-        result is read from `lastTest` of `getNotificationDiagnostics`.
+        It goes only to the caller's own active push tokens — at most the 5 most recently
+        registered or refreshed, however many the caller has (`deviceCount` says how many it
+        goes to; `devices.active` of `getNotificationDiagnostics` is the real count) — as one
+        `push_system` outbox row (ADR-0206 D15, id-only, written in the same transaction as
+        the budget) that the notifier sends with the static body 「시험 알림이에요」. No
+        request body. Human bearer only (an agent bearer is 403). 409 with `error.code`
+        `no_device` when the caller has no active token (nothing is spent and nothing is
+        written). 429 with `error.code` `rate_limited` and a `Retry-After` of 1 to 60 seconds
+        past 3 per member per fixed 60-second window. The test is best effort: the relay's
+        429/5xx is not retried and shows as `failed`. The result is read from `lastTest` of
+        `getNotificationDiagnostics`.
       security:
         - bearerAuth: []
       parameters:
@@ -21584,7 +21587,11 @@ components:
         deviceCount:
           type: integer
           minimum: 1
-          description: Active tokens the test goes to.
+          maximum: 5
+          description: >
+            Active tokens the test goes to: the caller's live tokens capped at 5 (the most
+            recently registered or refreshed). Not the caller's real device count — that is
+            `devices.active` of `getNotificationDiagnostics`, which has no cap.
 
     NotificationKeywordsResponse:
       type: object

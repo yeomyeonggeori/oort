@@ -259,8 +259,8 @@ D1~D10은 이슈 #4223이 리서치 §6 권장안으로 확정한 것(성재 위
   - **판정(`judge_targets`)을 우회해요.** 목적이 「전송 경로 자체가 되는가」라서 일시 중지 중에도 시험은 가요(관문은 `GET`이 말해요). 호출자 본인의 활성 토큰에만 가요.
   - 같은 tx에서 `push_system` 행 1건(D15)을 써요. notifier가 relay 서명 키로 보내요. 활성 토큰이 하나도 없으면(행이 없거나 전부 무효) 409 `no_device`예요(진단 GET은 이를 `no_device`와 `token_invalidated`로 가려 말해요). 에이전트 bearer는 403이에요.
   - **속도 제한** [권장]: 멤버당 분당 3회이고 넘으면 429 `rate_limited`예요. 서버에는 per-member 속도 제한 장치가 없어서(ADR-0208 D10·보안 절 · #4234) 이 라우트가 직접 세요. outbox를 세지 않아요: 끝난 행은 인덱스에 안 잡혀(`001_init.sql:430-431`는 `pending`만 덮어요) 표를 훑게 돼요. 대신 `notification_rule` 행(없으면 만들어요, PATCH와 같아요)의 창 시작·횟수 컬럼 둘(D13)을 `FOR UPDATE`로 잠근 채 갱신하고, 같은 잠금 안에서 마지막 시험 컬럼 둘(`last_test_id`·`last_test_at`)도 써요. 한 행 잠금이라 직렬화되고 인덱스가 필요 없어요.
-  - **공유 relay 예산**: 시험 알림도 relay의 서버 단위 한도(맥락 표)를 같이 써요(멤버 × 분당 3). 시험 알림은 best-effort 층이라 relay 429를 받아도 다시 시도하지 않고 `failed`로 보여요. 남는 위험으로 둬요.
-  - 결과는 `GET`의 `lastTest {id, status, atMs, apnsStatus?}`로 읽어요. 마지막 시험의 id·시각은 위 컬럼에서 읽고, 결과는 그 id의 collapse id `t:<id>`로 `push_dispatch_log`를 (멤버, 토큰, collapse id) **정확 조회**해서 읽어요. outbox를 읽지도 훑지도 않아요. 기기가 여럿이면 하나로 모아요:
+  - **공유 relay 예산**: 시험 알림도 relay의 서버 단위 한도(맥락 표)를 같이 써요(멤버 × 분당 3 → **증보 2 「D11 정정」: 기기마다 relay를 불러서 실제 곱은 기기 수 × 분당 3이었고, 한 번이 닿는 기기를 최근 5대로 묶었어요(5 × 분당 3)**). 시험 알림은 best-effort 층이라 relay 429를 받아도 다시 시도하지 않고 `failed`로 보여요. 남는 위험으로 둬요.
+  - 결과는 `GET`의 `lastTest {id, status, atMs, apnsStatus?}`로 읽어요. 마지막 시험의 id·시각은 위 컬럼에서 읽고, 결과는 그 id의 collapse id `t:<id>`로 `push_dispatch_log`를 (멤버, 토큰, collapse id) **정확 조회**해서 읽어요(→ **증보 2 「D11 정정」: 질의에 `push_token_id IS NOT NULL`을 더해야 부분 유니크 색인을 타요**). outbox를 읽지도 훑지도 않아요. 기기가 여럿이면 하나로 모아요:
 
   | `status` | 뜻 |
   |---|---|
@@ -616,7 +616,7 @@ N-번호는 아직 발행하지 않은 새 이슈예요(발행은 planner, 초�
 6. **음소거 아래 단계가 숨어 있어요**(D7). 「끔」 아래의 `all`은 기한이 끝나야 드러나요. 읽기 모델의 `level`은 효과값이고 화면이 「~까지」 칩으로 설명해요.
 7. **`message_keyword_hit`은 정리 작업이 없어요.** 메시지 수명을 따르고 행은 일치 건수만큼이에요(약 100바이트). 하루 수만 건이 되면 inbox 보존 소탕(`inbox_retention_sweep.rs`)과 같은 두 풀 모양의 소탕을 후속으로 둬요.
 8. **notifier는 self-host 기본 스택에 없어요**(ADR-0208 남는 위험 7). `push_system`·지연·시험 알림은 그 스택에서 동작하지 않아요. 시험 알림은 `stalled`로 알려요.
-9. **「모든 새 글」로 에이전트 소음이 생길 수 있고 relay 서버 한도(분당 60, 호스티드·셀프호스트 값이 다를 수 있어요)를 먹을 수 있어요.** 분당 6건 상한·서버 전체 예산·경고로 줄였어요. 한도에 닿으면 429가 약 3분 이어질 때 푸시가 사라져요(기존 reason도 같아요). 대량 층(`channel_message`·`keyword`)과 시험 알림은 best-effort라 재시도 없이 버리고, 나머지는 기존대로 백오프로 다시 시도해요. 시험 알림(멤버 × 분당 3)은 공유 예산을 쓰는 길이에요.
+9. **「모든 새 글」로 에이전트 소음이 생길 수 있고 relay 서버 한도(분당 60, 호스티드·셀프호스트 값이 다를 수 있어요)를 먹을 수 있어요.** 분당 6건 상한·서버 전체 예산·경고로 줄였어요. 한도에 닿으면 429가 약 3분 이어질 때 푸시가 사라져요(기존 reason도 같아요). 대량 층(`channel_message`·`keyword`)과 시험 알림은 best-effort라 재시도 없이 버리고, 나머지는 기존대로 백오프로 다시 시도해요. 시험 알림(멤버 × 분당 3 — 증보 2 「D11 정정」: 한 번이 닿는 기기를 최근 5대로 묶어 5 × 분당 3)은 공유 예산을 쓰는 길이에요.
 10. **설정은 이벤트 없이 다음 조회에서 수렴해요.** 다른 기기가 바로 반영하지 않아요(ADR-0177 방식).
 11. **허들 시작 푸시(#2767)** 같은 새 푸시가 이 ADR의 종류 표·어휘 규칙을 무시하고 들어올 수 있어요. D20이 규칙을 남겨요.
 12. **구 앱 + 새 reason의 답장 유실**(D14). `channel_message`·`keyword` 알림은 구 앱에서 답장 버튼이 달려 뜨고, 그 답장은 오류 없이 버려져요. 새 기능(단계 `all`·키워드)을 켠 사용자의 폰이 구 빌드인 동안만 생겨요. 새 category를 따로 만드는 길은 기각했어요.
@@ -818,6 +818,13 @@ D11·D15는 그대로이고, 구현이 격리 PG로 재현하며 정한 모양�
 - `lastTest`: 200이 하나라도 있으면 `sent`, 정산된 기록이 없으면 30초 미만 `queued`·이상 `stalled`, **모든 시도**가 어휘 거절 400이면 `relay_outdated`(환경 불일치 400은 `failed`), 그 밖의 정산 기록(정산 전 시도가 섞인 경우 포함)은 `failed`예요. `apnsStatus`는 `sent`면 200, 아니면 가장 새 정산 기록의 상태예요.
 - `apnsReason`은 **코드만** 내요: relay 거절은 `relay_vocabulary_refused`·`relay_environment_mismatch`·`relay_http_<status>`로 바꾸고, APNs reason은 글자·숫자·`_` 64자 이하일 때만 그대로 통과해요(relay가 영수증에 문장을 끼워도 응답에 닿지 않아요). 어휘·환경 문구가 relay에서 바뀌면 진짜 relay 라우터를 도는 시험(`push_system_conformance_pg`)이 빨개져요.
 - 속도 제한은 **고정 60초 창**(첫 시험이 창을 열어요)에서 멤버당 3회예요. 활성 토큰이 없으면 슬롯을 쓰지 않고(409 `no_device`) `notification_rule` 행도 만들지 않아요. 429는 `error.code=rate_limited`와 `Retry-After`를 줘요. 시험은 `dnd`·다른 규칙 컬럼을 건드리지 않고 자기 컬럼 넷만 써요(구 PUT/PATCH도 그 넷을 건드리지 않아요).
+
+**D11 정정** (#4341 독립 보안 검수 1회차, 각각 시험이 고정해요 — 첫째·둘째는 D11 본문의 문장을 **대체하고**, 셋째는 더한 규칙이에요)
+- **「공유 relay 예산」: 시험 한 번이 닿는 기기는 최근 5대까지예요.** D11 본문의 「(멤버 × 분당 3)」은 시험 한 번이 relay 호출 한 번이라는 전제였는데 틀렸어요: 소비자는 활성 토큰마다 relay를 한 번씩 불러서 실제 곱은 **(활성 기기 수 × 분당 3)** 이었고, 기기 수는 요청한 사람이 정해요(기기 등록에 한도가 없어요). relay의 서버 단위 한도(기본 분당 60)를 한 멤버가 혼자 넘기면 다른 사람의 푸시가 429로 밀리고, 일반 푸시는 429를 약 3분 재시도한 뒤 `failed`로 접어서 반복하면 잃어요. 그래서 한 `push_system` 행은 멤버의 활성 토큰 중 **최근 등록·갱신 순(`push_token.updated_at`) 5개**에만 가요. 한 상수 `SYSTEM_PUSH_MAX_TARGETS`를 소비자(`system_targets`의 `LIMIT`)와 예약(`reserve_test_push_in_tx`가 세는 `deviceCount`)이 같이 써요. 실제 곱은 **5 × 분당 3 = 멤버당 분당 최대 15회**이고 「남는 위험」 9의 마지막 문장도 이 값으로 읽어요. 이 상한은 `push_system`의 모든 reason이 공유해요(ADR-0208의 예약 실패 푸시가 더하면 그 ADR이 올릴 수 있어요).
+  - `POST`의 `deviceCount`는 시험이 **가는** 기기 수(상한 적용)예요. 멤버의 실제 기기 수는 `GET`의 `devices.active`가 그대로 말해요(상한 없음). `devices`는 D11이 이미 정한 계약이라 바꾸지 않았어요.
+  - **남는 것**(후속 이슈): 시험 알림은 아직 notifier의 서버 전체 예산(대량 층 `try_spend`)에 들어가지 않아요. 멤버 넷이 한도까지 누르면(4 × 15 = 60) 그 시험만으로 서버 한도 60을 다 쓰고, 그 위의 다른 푸시는 429를 받을 수 있어요. 시험을 서버 전체 예산에 넣고 초과분을 `failed`로 정산하는 것과, 멤버당 활성 토큰 상한(등록 거절)은 별도 이슈예요.
+- **「lastTest 정확 조회」는 색인을 타는 조회예요.** D11 본문의 「(멤버, 토큰, collapse id) 정확 조회」는 질의가 토큰을 고르지 않고(기기마다 한 줄) `collapse_id = $3`만으로는 부분 유니크 색인 `push_dispatch_dedupe_uniq`(011, `WHERE push_token_id IS NOT NULL AND collapse_id IS NOT NULL`)의 조건을 증명하지 못해서, 플래너가 그 색인을 쓰지 못하고 멤버의 기록 범위를 훑었어요(로그는 정리 작업이 없고 `GET`은 한도가 없어서 오래 쓴 멤버일수록 `GET`마다 느려져요). 질의에 `AND push_token_id IS NOT NULL`을 더해요(notifier가 쓰는 기록은 항상 둘 다 채워요, 011). 그러면 `(member_id, collapse_id)`를 그 색인으로 찾아요: 합성 30만 행(멤버 1명)에서 순차 스캔 10.2ms·4,617 버퍼 → 인덱스 0.057ms·22 버퍼(`Index Searches: 5`). 시험 `the_last_test_read_is_served_by_the_partial_unique_index`가 질의 문구(`LAST_TEST_ROWS_SQL`) 그대로 `EXPLAIN`해서 색인 사용을 고정해요. 토큰 행이 지워져 `push_token_id`가 NULL이 된 기록(FK `ON DELETE SET NULL`)은 이 읽기에 잡히지 않아요 — `relay_unreachable`·`last_delivery_failed`가 이미 현재 활성 토큰과 조인해서 같은 기록을 안 보는 것과 같은 방향이에요.
+- **`Retry-After`는 1~60초예요.** 행 잠금을 기다린 요청은 창을 연 요청보다 먼저 시작했을 수 있어서(`now() < test_push_window_start`) 남은 시간이 창 하나에 그 차이를 더해 61초 넘게 나올 수 있었어요. 함수 `retry_after_secs`가 1..=60으로 묶어요.
 
 **D15 조정**
 - 시험 알림의 전송 오류 규칙: relay가 429·5xx로 **답한** 것은 그 상태로 정산(`lastTest` = `failed`)하고, relay에 **닿지 못한** 전송(전송 오류)은 정산하지 않고 둬요 — 그래야 `queued` → `stalled`가 되고 진단이 `relay_unreachable`을 추론해요. 어느 쪽도 outbox 행은 `done`이에요(재시도 없음, `oort doctor`에 영구 FAIL로 남지 않아요). 우리 쪽 DB 오류만 후보와 같은 백오프·`max_attempts`로 되살려요.
