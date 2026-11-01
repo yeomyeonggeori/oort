@@ -24,6 +24,26 @@ export const FLING_OUT = Easing.bezier(0.4, 0.4, 0.7, 1);
 export const TAB_FADE_MS = 150;
 
 /**
+ * 스크롤 컨테이너 안 눌림 면(메시지 행·채널 목록 행·사진 칸)을 **늦춰 칠하는** 시간 (#4664).
+ *
+ * 왜 늦추나. iOS 의 RN `ScrollView` 는 `delaysContentTouches = NO` 라 손이 닿는 순간 `Pressable` 이 곧바로 칠하고,
+ * 스크롤이 터치를 가져가도 `minPressDuration`(130ms)을 채울 때까지 풀지 않는다. 스크롤하려고 손만 댄 행이 눌림 색으로
+ * 번쩍였다(owner 10-27 요청: 눌림은 길게 누를 때만 보이고 스크롤할 때는 그대로). `Pressable` 의 `unstable_pressDelay`(= `Pressability` 의
+ * `delayPressIn`)로 이 시간 안에는 `onPressIn` 자체를 부르지 않는다. 지연 안에 스크롤이 터치를 가져가면(`onResponderTerminate`)
+ * 눌림 프레임이 0 이고, 지연보다 짧은 탭은 뗄 때 「활성 + 해제」가 한 번에 돌아 뗀 뒤 `minPressDuration` 동안 번쩍인다.
+ *
+ * **짝이 있다.** `Pressability` 는 길게 누르기 타이머를 `delayLongPress + delayPressIn` 로 세운다(`Pressability.js:478`).
+ * 지연만 더하면 시트가 `LONG_PRESS_MS + 이 값` 에 열려 `tapDismiss.TAP_MAX_MS` 와 어긋난다. 그래서 `delayLongPress` 에서 이 값을
+ * 빼 벽시계 250ms 를 지킨다 — 그 뺄셈은 `useLongPress` 한 곳에서만 하고 두 값을 한 쌍(`pressTiming`)으로 내보낸다.
+ *
+ * 값은 선례의 범위 안이다: Android `TAP_TIMEOUT` 100 · Flutter `kPressTimeout` 100 · UIKit `delaysContentTouches` 약 150.
+ * 100~150 의 어디가 손에 맞는지는 실기 실측이 정한다(`runtime-unverified`) — 되돌릴 숫자는 이것이다.
+ * 사다리의 `instant`(120ms)와 우연히 같을 뿐 그 값이 아니다: 사다리는 눌림 **채움이 전이하는 길이**이고 이것은 칠하기 **전에
+ * 기다리는 시간**이다. 머리 단추·FAB·탭바·시트 X 처럼 스크롤 밖의 눌림 면은 늦추지 않는다(Android `isInScrollingContainer` 와 같은 구분).
+ */
+export const PRESS_VISUAL_DELAY_MS = 120;
+
+/**
  * 착지 틴트("방금 여기로 왔다")가 물러나는 시간 (#3921). 곡선은 `EASE_OUT`.
  *
  * 오르트 구름의 모션 사다리 `standard`(웹 `--motion-standard` 240ms — 「상태 변화」)다.

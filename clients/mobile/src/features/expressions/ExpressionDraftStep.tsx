@@ -41,11 +41,20 @@ export function ExpressionDraftStep({
   onReplace,
   onApprove,
   onAnother,
+  promptLabel,
+  anotherLabel,
 }: {
   draft: ExpressionDraft;
   onReplace: (draft: ExpressionDraft) => void;
   onApprove: (choice: ExpressionChoice) => Promise<void>;
   onAnother: () => void;
+  /**
+   * 사진으로 만든 그림(#4984)만 준다: 서버가 이 그림에 쓴 고정 문장 앞에 붙는 이름(「만든 방법:」). 주지 않으면 그 문장을
+   * 보이지 않는다 — 가져온 그림에는 문장이 없고, 에이전트가 쓴 문장은 이 단계에서 보이지 않는다.
+   */
+  promptLabel?: string;
+  /** 「다른 …」 단추의 낱말. 주지 않으면 가져오기 쪽 낱말이다. */
+  anotherLabel?: string;
 }): React.JSX.Element {
   const formatMessage = useExpressionMessages();
   const styles = useStyles(buildStyles);
@@ -171,6 +180,11 @@ export function ExpressionDraftStep({
           {formatMessage('expressions.draft.source', {host: sourceHost})}
         </Text>
       ) : null}
+      {promptLabel && draft.origin.prompt ? (
+        <Sentence style={styles.meta} testID="expression-draft-prompt">
+          {`${promptLabel} ${draft.origin.prompt}`}
+        </Sentence>
+      ) : null}
       {preview ? (
         <Image
           source={{uri: preview.uri}}
@@ -230,7 +244,7 @@ export function ExpressionDraftStep({
       ) : null}
       <LiveLine text={error} tone="danger" testID="expression-draft-error" />
       <OutlineButton
-        label={formatMessage('expressions.draft.another')}
+        label={anotherLabel ?? formatMessage('expressions.draft.another')}
         onPress={onAnother}
         testID="expression-draft-another"
       />

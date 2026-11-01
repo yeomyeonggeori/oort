@@ -2,7 +2,7 @@
 # 「대화 목록을 눌러 입력창을 쉬게 한다」(#4614)의 이동을 한 번 재는 구동기. 앱을 띄우고 단계별 Maestro 호출(`maestro/116-list-tap-rest.yaml`)을 **셸 sleep 으로 정확히 띄워** 친 뒤,
 # 싱크가 장면 결과를 받을 때까지 기다린다(한 흐름 안의 Maestro 대기는 앱이 바쁘면 일찍 반환한다 — 116 머리말).
 #
-#   measure/run-list-rest.sh <udid> <태그> <SURFACE 예: DM-STEADY-FOCUS+actions+T220> <Metro 포트> <싱크 포트 파일> <싱크 태그 파일> <싱크 jsonl> [rec.mp4] [plan: typed|restored]
+#   measure/run-list-rest.sh <udid> <태그> <SURFACE 예: DM-STEADY-FOCUS+actions+T220> <Metro 포트> <싱크 포트 파일> <싱크 태그 파일> <싱크 jsonl> [rec.mp4] [plan: typed|restored|sent|drag]
 #
 # plan `typed`(기본) — 타자로 친다. 순서(앱이 뜬 시각 0 기준 근사). 사건마다 앞뒤 2.5~3초를 비워 `focus-windows.mjs` 의 창(앞 0.15초·뒤 0.9초)이 겹치지 않는다.
 #   A  빈 펼침에서 목록을 누른다     focus → list                 (글 없음: 접힘은 포커스를 잃는 `onBlur` 가 맡는다 — 기존 길의 기준선)
@@ -14,6 +14,9 @@
 # plan `restored` — SURFACE 에 `+draft<N>` 을 붙여 N줄 초안을 들고 시작한다(키가 큰 입력창). 쉬러 가고(list) 다시 펼치는(focus) 왕복을 세 번 한다:
 #   focus → tips → list(쉼 #1) → focus(펼침 #1) → list(쉼 #2) → focus(펼침 #2) → list(쉼 #3)
 # plan `sent` — 보낸 직후(포커스가 남은 빈 펼침)에 누른다: focus → tips → line1 → send → list (typed 의 D 만 따로, 짧은 장면으로)
+# plan `drag` — 누르는 대신 **끌어서** 쉰다(#4665, `runtime-unverified`): 한 줄 초안을 치고 아래로 끈다. 빠른 끌기(drag)와 문턱을 겨우 넘기고 뗀 끌기(dragedge)를 번갈아 하고 사이에 다시 펼친다:
+#   focus → tips → line1 → drag(쉼 #1) → focus(펼침) → dragedge(쉼 #2) → focus(펼침) → dragedge(쉼 #3)
+#   읽을 것은 `dismiss` 창의 반전·최대 한 걸음에 더해 **손을 뗀 뒤 꼬리에 목록이 끝으로 되돌아가는가**(바닥 행이 위로 읽으러 간 방향과 반대로 한 번에 움직이는가)다.
 set -u
 UDID="$1"; TAG="$2"; SURFACE="$3"; METRO="$4"; SINK_PORT_FILE="$5"; SINK_TAG_FILE="$6"; SINK_JSONL="$7"; REC="${8:-}"; PLAN="${9:-typed}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -50,6 +53,13 @@ if [ "$PLAN" = "sent" ]; then
   step line1 1.5
   step send 2.5
   step list 3
+elif [ "$PLAN" = "drag" ]; then
+  step line1 1.5
+  step drag 3       # 쉼 #1 (빠른 끌기)
+  step focus 3      # 펼침
+  step dragedge 3   # 쉼 #2 (문턱을 겨우 넘기고 뗌)
+  step focus 3      # 펼침
+  step dragedge 3   # 쉼 #3
 elif [ "$PLAN" = "restored" ]; then
   step list 3       # 쉼 #1
   step focus 3      # 펼침 #1

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "b7ec1693141101505ad860ea32175c028be91e9f",
+  "baselineHead": "b4816e58a71db3d47378a4639c18b487f467d635",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -156,6 +156,7 @@
     "clients/mobile/src/features/expressions/ExpressionImportForm.tsx": 25,
     "clients/mobile/src/features/expressions/ExpressionMakeForm.tsx": 60,
     "clients/mobile/src/features/expressions/ExpressionMakePreview.tsx": 10,
+    "clients/mobile/src/features/expressions/ExpressionPhotoForm.tsx": 25,
     "clients/mobile/src/features/expressions/ExpressionProvider.tsx": 4,
     "clients/mobile/src/features/expressions/ExpressionText.tsx": 1,
     "clients/mobile/src/features/expressions/TeamExpressionPicker.tsx": 57,
@@ -164,7 +165,7 @@
     "clients/mobile/src/features/expressions/makePreviewModel.ts": 2,
     "clients/mobile/src/features/expressions/photoPicker.ts": 12,
     "clients/mobile/src/features/expressions/store.ts": 27,
-    "clients/mobile/src/features/expressions/transport.ts": 6,
+    "clients/mobile/src/features/expressions/transport.ts": 8,
     "clients/mobile/src/features/home/WorkingCardStop.tsx": 7,
     "clients/mobile/src/features/home/collapsedSections.ts": 3,
     "clients/mobile/src/features/home/workingCard.ts": 13,
