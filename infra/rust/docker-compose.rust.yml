@@ -398,6 +398,14 @@ services:
       # relay host is the Hermes host, which AGENT_PROVIDER_LOCAL_HOSTS already lists exactly (egress opt-in).
       HERMES_LOGIN_RELAY_URL: ${HERMES_LOGIN_RELAY_URL:-}
       HERMES_LOGIN_RELAY_KEY: ${HERMES_LOGIN_RELAY_KEY:-}
+      # #4944 (ADR-0201 증보 v3 B9): the operator's ceiling on the team AI ("oort 도우미"), per UTC day. Both `:-`:
+      # EMPTY = NO CEILING (the old fixed 200,000 tokens / 50 searches are gone — BYOK, the team decides, and an
+      # administrator sets any limit in settings). A positive number is a ceiling no workspace value gets past;
+      # `0` is the emergency switch (TOKEN_CAP=0 turns the helper off, SEARCH_CAP=0 only web search). The
+      # agent-worker enforces it; the api reads the SAME two values only to say so on the settings screen —
+      # give both services the same ones.
+      TEAM_AI_DAILY_TOKEN_CAP: ${TEAM_AI_DAILY_TOKEN_CAP:-}
+      TEAM_AI_DAILY_SEARCH_CAP: ${TEAM_AI_DAILY_SEARCH_CAP:-}
       HERMES_APP_LOGIN_GOOGLE_PUBLISHING: ${HERMES_APP_LOGIN_GOOGLE_PUBLISHING:-}
       # MOMO-605 / DESK-1. Empty (the default) means the CORS layer is not
       # mounted at all, which is exactly the web deployment's same-origin case.
@@ -603,6 +611,11 @@ services:
       # #3431 (ADR-0193 D18): same key and rule as api — the spawn tool keeps Claude
       # Code off shared hosts unless an exact `true`.
       MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED:-}
+      # #4944 (ADR-0201 증보 v3 B9): the team AI's operator ceilings — this is the process that ENFORCES them.
+      # Empty = no ceiling, a positive number = a ceiling over every workspace's own limit, `0` = off
+      # (TOKEN_CAP=0 the helper, SEARCH_CAP=0 web search). The api gets the same two values (above).
+      TEAM_AI_DAILY_TOKEN_CAP: ${TEAM_AI_DAILY_TOKEN_CAP:-}
+      TEAM_AI_DAILY_SEARCH_CAP: ${TEAM_AI_DAILY_SEARCH_CAP:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:
