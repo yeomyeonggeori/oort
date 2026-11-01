@@ -16,8 +16,8 @@
 #   safe-mode .............. HERMES_SAFE_MODE=1 makes real Hermes skip every plugin: refused
 #   proxy / private / BOM .. the SSRF switches, in the environment, in config and in a BOM-prefixed volume .env; two marks in front
 #                            with a line the loader's clean-up rewrites (bom-env-file-double: Hermes drops both marks, the gate must
-#                            refuse) and two marks with nothing to rewrite (bom-env-file-kept: Hermes keeps one in the name and applies
-#                            nothing, the gate must not refuse) (#4886 review)
+#                            refuse) and two marks with nothing to rewrite (bom-env-file-kept: Hermes keeps one in the name and applies a
+#                            name with a mark in it, which the allow-list does not have either: the gate refuses it) (#4886 review, #4950)
 #   self-origin ............ the owner's 10-30 exception (#4820 C2a): OORT_SELF_MEDIA_ORIGIN set to a canonical origin boots,
 #                            and the canary accepts the one allowed address and refuses its 28 bypass variants through the
 #                            real Hermes dispatch path; unset keeps the exception off and adds one refused example
@@ -32,18 +32,23 @@
 #                            takes one spelling) or present in the volume's .env: refused before listening
 #   media-policy ........... the premise, measured with Hermes' own validate_media_delivery_path: strict keeps an old file
 #                            outside Hermes' cache dirs from being delivered (`true` too), unset delivers it
-#   env-shapes / env-inert-shapes  (#4886) the volume's .env read like Hermes' loader, by the REAL gate with this image's own
-#                            python-dotenv: an inline comment, `export<TAB>`, a single-quoted name and a quoted value + comment are refused;
-#                            a comment, an unterminated quote, a name with no value and the like are not. The judge does not take the
-#                            author's word for which are which: the same bytes go through THIS image's real `hermes_cli.env_loader`, and the
-#                            names it applies must be exactly the ones the shapes are said to apply and all be named by the gate
-#   env-reference-shapes ... a judged name given `${...}` (a variable only Hermes' service slot has, HOME, an unset name with a default):
-#                            refused for the reference itself, whatever the real loader ends with (#4886 review)
+#   env-shapes / env-inert-shapes  (#4886, #4950) the volume's .env read like Hermes' loader, by the REAL gate with this image's own
+#                            python-dotenv: an inline comment, `export<TAB>`, a single-quoted name, a quoted value + comment and names no
+#                            rule ever judged (media roots, the managed folder, the home folder, request forwarding ...) are refused, because
+#                            only the allow-list's names may stand in the file; a comment, an unterminated quote, a name with no value and the
+#                            like are not. The judge does not take the author's word for which are which: the same bytes go through THIS
+#                            image's real `hermes_cli.env_loader`, and the names it adds must be exactly the ones the shapes are said to apply
+#                            and all be named by the gate
+#   env-seed-template ...... (#4950) Hermes' first boot copies the image's own /opt/hermes/.env.example into a fresh volume's .env after the gate
+#                            ran: the gate's table of those eleven lines equals what the pinned image's file holds, the file as shipped passes
+#                            the gate, and the real loader ends with nothing the policy forbids when it loads it
+#   env-reference-shapes ... a name that is not allowed given `${...}` (a variable only Hermes' service slot has, HOME, an unset name with a
+#                            default): refused by name whatever it resolves to; the real loader applies every one (#4886 review, #4950)
 #   env-loader-oracle ...... the gate's reading against the REAL loader on the whole named table and 4000 seeded random inputs
 #                            (infra/hermes/env_loader_oracle.py): the loader runs on a copy in the service slot's environment, again on
 #                            the file it leaves until a load leaves it unchanged (at most 64 loads), and once more on each of those files
-#                            as it stands; the names it ends with a forbidden value for in any of those loads must all be named by the
-#                            gate, the gate's model of the files the loader leaves must equal the loader's own, a refusal beyond them
+#                            as it stands; the names it adds that the policy does not allow, in any of those loads, must all be named by
+#                            the gate, the gate's model of the files the loader leaves must equal the loader's own, a refusal beyond them
 #                            needs a designed reason, and the judge demands thresholds so an empty comparison fails
 #   hermes-home-other ...... a HERMES_HOME that names another folder than the one the gate reads is refused (the image sets /opt/data)
 #   env-parser-parity ...... the input table and rule tables of infra/hermes/test_lockgate_env.py (and the two test files that
@@ -86,7 +91,7 @@ scenario() {  # scenario <name> -> $OUT/<name>.json (the RESULT line)
 for name in healthy no-plugin edited-plugin widened-plugin not-enabled extra-image-gen-key security-private-urls \
   safe-mode proxy-env private-env bom-env-file bom-env-file-double bom-env-file-kept clean-env-file self-origin self-origin-bad \
   self-origin-env-file prefix-only-plugin strict-missing strict-wrong strict-env-file media-policy env-shapes env-inert-shapes \
-  env-reference-shapes hermes-home-other env-parser-parity env-loader-oracle; do
+  env-reference-shapes env-seed-template hermes-home-other env-parser-parity env-loader-oracle; do
   scenario "$name"
 done
 
@@ -173,6 +178,9 @@ done
 sleep 3
 docker logs "$NAME" >"$OUT/gateway-boot.log" 2>&1 || true
 docker exec "$NAME" ls -ln /opt/data/plugins/oort-image-guard >"$OUT/gateway-boot.ls" 2>&1 || true
+# #4950: the NAMES (never values) the real boot left in the volume's .env, and whether a .op.env exists: the report above judged that file with
+# the allow-list, and the judge below checks every name against it again (a fresh volume's .env is the template Hermes' stage2 seeds)
+docker exec "$NAME" /bin/sh -c 'if [ -f /opt/data/.env ]; then echo ENV_PRESENT; sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p" /opt/data/.env | sort -u; else echo ENV_ABSENT; fi; if [ -e /opt/data/.op.env ]; then echo OP_ENV_PRESENT; fi' >"$OUT/gateway-boot.envnames" 2>&1 || true
 docker exec -u hermes "$NAME" /opt/hermes/.venv/bin/python /fx/hermes_image_guard_live_probe.py >"$OUT/gateway-boot.probe" 2>"$OUT/gateway-boot.probe.err" || true
 docker inspect -f '{{.State.Running}}' "$NAME" >"$OUT/gateway-boot.running" 2>&1 || true
 docker rm -f "$NAME" >/dev/null 2>&1 || true
@@ -262,7 +270,8 @@ expect("private-env", 3, ["HERMES_ALLOW_PRIVATE_URLS"])
 against_loader("bom-env-file", 3, ["the volume's .env sets HTTPS_PROXY"], absent=["proxy.invalid"], violated=["HTTPS_PROXY"])
 # two marks and a rewrite: the loader drops both and applies the proxy; two marks and nothing to rewrite: it keeps one in the name
 against_loader("bom-env-file-double", 3, ["the volume's .env sets HTTPS_PROXY"], absent=["proxy.invalid"], violated=["HTTPS_PROXY"])
-against_loader("bom-env-file-kept", 0, violated=[])
+# the other half: two marks, nothing to rewrite: the loader keeps one in the name, so it applies a name with a mark in it (not allowed either)
+against_loader("bom-env-file-kept", 3, ["the volume's .env sets \ufeffHERMES_SAFE_MODE"], violated=["\ufeffHERMES_SAFE_MODE"])
 expect("clean-env-file", 0)
 so = expect("self-origin", 0)
 so_canary = (((so["lockgate"] or {}).get("image_guard") or {}).get("canary")) or {}
@@ -280,27 +289,29 @@ if not any("did not refuse the example" in problem for problem in (p_only["lockg
 expect("strict-missing", 3, ["must set HERMES_MEDIA_DELIVERY_STRICT=1"])
 expect("strict-wrong", 3, ["must set HERMES_MEDIA_DELIVERY_STRICT=1"])
 expect("strict-env-file", 3, ["the volume's .env sets HERMES_MEDIA_DELIVERY_STRICT"])
-# #4886: the volume's .env as Hermes' loader reads it. The REAL gate, the image's python-dotenv: every spelling the loader applies
-# is refused by name (never with its value), what it ignores is not, a HERMES_HOME that is not the folder read is refused, and the
-# tables of the changed test files pass in this image with python-dotenv present (nothing skipped).
-shapes = against_loader("env-shapes", 3, [
-    "the volume's .env enables HERMES_SAFE_MODE", "the volume's .env enables HERMES_ALLOW_PRIVATE_URLS",
-    "the volume's .env enables HERMES_ENABLE_PROJECT_PLUGINS", "the volume's .env enables HERMES_YOLO_MODE",
-    "the volume's .env enables HERMES_DASHBOARD", "the volume's .env sets OORT_SELF_MEDIA_ORIGIN",
-    "the volume's .env sets HERMES_MEDIA_DELIVERY_STRICT", "the volume's .env sets HTTPS_PROXY"],
-    absent=["proxy.invalid", "oort.example.com"],
-    violated=["HERMES_SAFE_MODE", "HERMES_ALLOW_PRIVATE_URLS", "HERMES_ENABLE_PROJECT_PLUGINS", "HERMES_YOLO_MODE", "HERMES_DASHBOARD",
-              "OORT_SELF_MEDIA_ORIGIN", "HERMES_MEDIA_DELIVERY_STRICT", "HTTPS_PROXY"])
+# #4886, #4950: the volume's .env as Hermes' loader reads it. The REAL gate, the image's python-dotenv: every spelling the loader applies
+# of a name outside the allow-list is refused by name (never with its value), what it ignores is not, a HERMES_HOME that is not the folder
+# read is refused, and the tables of the changed test files pass in this image with python-dotenv present (nothing skipped).
+SHAPE_NAMES = ["HERMES_SAFE_MODE", "HERMES_ALLOW_PRIVATE_URLS", "HERMES_ENABLE_PROJECT_PLUGINS", "HERMES_YOLO_MODE", "HERMES_DASHBOARD",
+               "OORT_SELF_MEDIA_ORIGIN", "HERMES_MEDIA_DELIVERY_STRICT", "HTTPS_PROXY", "HERMES_MEDIA_ALLOW_DIRS", "HERMES_MANAGED_DIR",
+               "HERMES_HOME", "GATEWAY_PROXY_URL", "OPENROUTER_API_KEY", "hermes_safe_mode"]
+shapes = against_loader("env-shapes", 3, ["the volume's .env sets %s (" % name for name in SHAPE_NAMES],
+                        absent=["proxy.invalid", "oort.example.com", "relay.invalid", "oort-proof"],
+                        violated=SHAPE_NAMES)
 if ((shapes["lockgate"] or {}).get("env_parser") or {}).get("impl") != "python-dotenv":
     failures.append("env-shapes: the gate did not use the image's python-dotenv: %r" % ((shapes["lockgate"] or {}).get("env_parser"),))
 against_loader("env-inert-shapes", 0, violated=[])
 # a judged name given a reference: refused for the reference itself (all five), whatever the real loader ends with. The loader
 # resolves them in the service slot's environment; what it ends with comes from the record (`violated` below).
-against_loader("env-reference-shapes", 3,
-               ["the volume's .env sets %s through a reference" % name for name in
-                ("HERMES_SAFE_MODE", "HERMES_DASHBOARD", "HTTPS_PROXY", "API_SERVER_KEY", "FAL_KEY")],
-               absent=["k" * 40],
-               violated=["HERMES_SAFE_MODE", "HERMES_DASHBOARD", "HTTPS_PROXY"])
+REFERENCE_NAMES = ["HERMES_SAFE_MODE", "HERMES_DASHBOARD", "HTTPS_PROXY", "API_SERVER_KEY", "FAL_KEY"]
+against_loader("env-reference-shapes", 3, ["the volume's .env sets %s (" % name for name in REFERENCE_NAMES], absent=["k" * 40],
+               violated=REFERENCE_NAMES)
+# #4950: Hermes' first boot copies the image's .env.example into a fresh volume AFTER the gate: the table of its eleven lines is the image's
+# file, the file passes the gate as it is shipped, and the real loader ends with nothing the policy forbids when it loads it
+seed = against_loader("env-seed-template", 0, violated=[])
+seed_record = (seed["lockgate"] or {}).get("seed") or {}
+if seed_record.get("image_has_the_file") is not True or seed_record.get("equal") is not True or len(seed_record.get("image_assignments") or {}) != 11:
+    failures.append("env-seed-template: the gate's table of Hermes' seeded lines is not what this image's .env.example holds: %r" % (seed_record,))
 expect("hermes-home-other", 3, ["HERMES_HOME is not the folder this gate reads"], absent=["not-the-volume"])
 expect("env-parser-parity", 0)
 unit = ((result("env-parser-parity")["lockgate"] or {}).get("unittest")) or {}
@@ -325,14 +336,16 @@ if not isinstance(orc.get("loads"), dict) or max([int(count) for count in orc["l
     failures.append("env-loader-oracle: no input needed 8 loads (the loads were not followed far enough): %r" % (orc.get("loads"),))
 if (orc.get("env_parser") or {}).get("version") != expected_dotenv:
     failures.append("env-loader-oracle: not this image's python-dotenv %s: %r" % (expected_dotenv, orc.get("env_parser")))
-for key, floor in (("cases", 4000), ("violating", 1500), ("clean", 1000), ("later_only", 150), ("as_stands_only", 15), ("states_compared", 3500)):
+for key, floor in (("cases", 4500), ("violating", 2500), ("clean", 700), ("later_only", 150), ("as_stands_only", 15), ("states_compared", 4000)):
     if not isinstance(orc.get(key), int) or orc[key] < floor:
         failures.append("env-loader-oracle: only %r %s (at least %d wanted): the comparison was too thin" % (orc.get(key), key, floor))
 if orc.get("detected") != sorted(oracle.JUDGED_KEYS):
-    failures.append("env-loader-oracle: judged names the loader violated and the gate named: %r (want %r)" % (orc.get("detected"), sorted(oracle.JUDGED_KEYS)))
-if (orc.get("needless") or {}).get("reference", 0) < 100:
-    failures.append("env-loader-oracle: the reference shapes were barely exercised: %r" % (orc.get("needless"),))
-if set(orc.get("needless") or {}) - {"reference", "mark in a proxy name", "name-only rule", "NUL in the statement"}:
+    failures.append("env-loader-oracle: forbidden names the loader applied and the gate named: %r (want %r)" % (orc.get("detected"), sorted(oracle.JUDGED_KEYS)))
+if (orc.get("needless") or {}).get("NUL in the statement", 0) < 20:
+    failures.append("env-loader-oracle: the statements with a NUL (which the loader cannot export) were barely exercised: %r" % (orc.get("needless"),))
+if orc.get("loader_own_names") != 0:
+    failures.append("env-loader-oracle: the loader adds names of its own to the environment (they were set aside): %r" % (orc.get("loader_own_names"),))
+if set(orc.get("needless") or {}) - {"NUL in the statement", "name the slot already has"}:
     failures.append("env-loader-oracle: refusals beyond the loader with no designed reason: %r" % (orc.get("needless"),))
 if not isinstance(orc.get("hermes_errors"), int) or orc["hermes_errors"] > 0.02 * (orc.get("cases") or 1):
     failures.append("env-loader-oracle: the loader raised on %r inputs: it was not run as Hermes runs it" % (orc.get("hermes_errors"),))
@@ -403,6 +416,19 @@ else:
     if not (p.get("origin_set") and p.get("self_address_is_none") and p.get("self_variant_is_block")
             and p.get("self_as_reference_is_block")):
         failures.append("gateway-boot: the live plugin does not judge the self-media address as designed: %r" % (p,))
+# #4950: the names the REAL boot left in the volume's .env are all on the allow-list (the report said so already; this names them), and no
+# .op.env appeared. A fresh volume's .env is Hermes' own seeded template.
+names_text = text("gateway-boot", "envnames").split()
+if "OP_ENV_PRESENT" in names_text:
+    failures.append("gateway-boot: the boot left a .op.env in the volume")
+live_names = [n for n in names_text if n not in ("ENV_PRESENT", "ENV_ABSENT", "OP_ENV_PRESENT")]
+unlisted = sorted(set(live_names) - set(oracle.SECRETS) - set(oracle.SEEDED))
+if unlisted:
+    failures.append("gateway-boot: the real boot left names in the volume's .env that the allow-list does not have: %r" % (unlisted,))
+if "ENV_PRESENT" not in names_text and "ENV_ABSENT" not in names_text:
+    failures.append("gateway-boot: the .env names were not read: %r" % (names_text[:5],))
+print("INFO gateway-boot: the volume's .env after the real boot: %s, %d name(s), all on the allow-list: %s"
+      % ("present" if "ENV_PRESENT" in names_text else "absent", len(live_names), not unlisted))
 if failures:
     print("\n".join("FAIL " + f for f in failures))
     sys.exit(1)
@@ -410,6 +436,6 @@ print("OK: %d in-image scenarios (gate) + 6 start-command runs + the live gatewa
     ["healthy", "no-plugin", "edited-plugin", "widened-plugin", "not-enabled", "extra-image-gen-key", "security-private-urls",
      "safe-mode", "proxy-env", "private-env", "bom-env-file", "bom-env-file-double", "bom-env-file-kept", "clean-env-file", "self-origin",
      "self-origin-bad", "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy",
-     "env-shapes", "env-inert-shapes", "env-reference-shapes", "hermes-home-other", "env-parser-parity", "env-loader-oracle"]))
+     "env-shapes", "env-inert-shapes", "env-reference-shapes", "env-seed-template", "hermes-home-other", "env-parser-parity", "env-loader-oracle"]))
 PY
 say "PASS (evidence in $OUT)"

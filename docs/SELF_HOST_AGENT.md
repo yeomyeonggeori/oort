@@ -2494,6 +2494,16 @@ erase it, delete the Hermes service and its volume in Railway. Connect only
 one workspace to one Hermes (conversations of several workspaces would share
 one volume).
 
+The volume's `.env` has an allow-list (#4950). Hermes applies every name in it after the
+gate ran, so `lockgate.py` lets the file hold only a model key you put there
+(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`), the Google client pair of a connector Hermes
+(`GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`) and the eleven template lines
+Hermes' first boot writes into a fresh volume (kept as they ship). Any other name, empty or
+not, stops the start by name (the gate never prints a value), and so does a `.op.env` beside
+it. Before you update the gate of a Hermes that already runs, read the names in its `.env`
+(`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env`
+prints names only) and delete the lines that are not on that list.
+
 **Zero-base shortcut (#4072).** Steps 1-7 are what the template and the
 generator now do for you; you still read the lock, and the model key stays yours.
 
@@ -2531,8 +2541,8 @@ generator now do for you; you still read the lock, and the model key stays yours
   it opens that door only when **both** halves are on. Hermes side:
   `HERMES_MEDIA_DELIVERY_STRICT=1`, Hermes' strict media delivery (without it a `MEDIA:`
   line in an answer would hand over any readable file); the template and compose set it
-  for you, and `lockgate.py` refuses to start Hermes with its picture tool unless it is
-  exactly `1` (and refuses the name in the volume's `.env`). Worker side:
+  for you, and `lockgate.py` refuses to start Hermes unless it is exactly `1` in every
+  mode, not only with its picture tool (and refuses the name in the volume's `.env`). Worker side:
   `OORT_HOSTED_MEDIA_STRICT=1` on agent-worker, your statement that the Hermes it dials
   is that strict one. The template and compose ship it **empty**, so by default the door
   is shut and a photo message is an ordinary conversation turn (no error card). Set it
@@ -2540,7 +2550,7 @@ generator now do for you; you still read the lock, and the model key stays yours
   in this order: (1) add `HERMES_MEDIA_DELIVERY_STRICT=1` to hermes; (2) redeploy
   `HERMES_LOCKGATE_B64` and the start command's checksum together (the new gate refuses
   to start Hermes without (1), so (2) alone stops the agent); (3) when the `LOCKGATE` line
-  of the deploy log shows `"media_strict": true` (inside `image_guard`), set
+  of the deploy log shows `"media_strict": true`, set
   `OORT_HOSTED_MEDIA_STRICT=1` last. Only an exact `1` opens the door. In both
   shipped shapes it is backed by the gate; if you edit the config, the gate or
   the start command, you take that backing back on yourself.

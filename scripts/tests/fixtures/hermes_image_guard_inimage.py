@@ -83,11 +83,12 @@ def oracle_modules():
 
 
 def loader_evidence(raw):
-    """What this image's REAL loader applies for a volume `.env` holding `raw`: the judged names it ends with a forbidden value for.
-    The scenario's own expectation says what its author thinks; this says what Hermes does."""
+    """What this image's REAL loader applies for a volume `.env` holding `raw`: the names it ends with that the policy does not allow
+    (#4950: any name outside the allow-list, a seeded one with another value). The scenario's own expectation says what its author
+    thinks; this says what Hermes does."""
     oracle, env_loader, _lockgate = oracle_modules()
-    applied, _left, error = oracle.hermes_load(env_loader, raw)
-    return {"loader_file": os.path.realpath(env_loader.__file__), "error": error, "violated": sorted(oracle.violations(applied))}
+    violated, error = oracle.loader_violations(env_loader, raw)
+    return {"loader_file": os.path.realpath(env_loader.__file__), "error": error, "violated": sorted(violated)}
 
 
 def with_loader(result, raw):
@@ -192,7 +193,7 @@ def scenario_private_env():
 
 def scenario_bom_env_file():
     install()
-    raw = b"\xef\xbb\xbfHTTPS_PROXY=http://proxy.invalid:3128\nOPENROUTER_API_KEY=keep\n"
+    raw = b"\xef\xbb\xbfHTTPS_PROXY=http://proxy.invalid:3128\nOPENAI_API_KEY=keep\n"
     write(os.path.join(DATA, ".env"), raw)
     return with_loader(run_gate(), raw)
 
@@ -201,16 +202,17 @@ def scenario_bom_env_file_double():
     """#4886 review: two byte order marks in front and a later line the loader's clean-up changes (a blank in front of it), so it
     rewrites the file and the loader decodes the rewritten one again: it drops BOTH marks and applies the proxy."""
     install()
-    raw = b"\xef\xbb\xbf\xef\xbb\xbfHTTPS_PROXY=http://proxy.invalid:3128\n OPENROUTER_API_KEY=keep\n"
+    raw = b"\xef\xbb\xbf\xef\xbb\xbfHTTPS_PROXY=http://proxy.invalid:3128\n OPENAI_API_KEY=keep\n"
     write(os.path.join(DATA, ".env"), raw)
     return with_loader(run_gate(), raw)
 
 
 def scenario_bom_env_file_kept():
     """#4886 review, the other half: two marks and nothing for the clean-up to change. The loader keeps one in the first name, so it
-    applies nothing under the plain name, and the gate reads the name with the mark in it as well: it must not refuse."""
+    applies nothing under the plain name but a name with a mark in it, which is not on the allow-list either (#4950): the gate reads the
+    same name and refuses it."""
     install()
-    raw = b"\xef\xbb\xbf\xef\xbb\xbfHERMES_SAFE_MODE=1\nOPENROUTER_API_KEY=keep\n"
+    raw = b"\xef\xbb\xbf\xef\xbb\xbfHERMES_SAFE_MODE=1\nOPENAI_API_KEY=keep\n"
     write(os.path.join(DATA, ".env"), raw)
     return with_loader(run_gate(), raw)
 
@@ -233,7 +235,7 @@ def scenario_self_origin_bad():
 def scenario_self_origin_env_file():
     """The volume's .env is loaded into Hermes after the gate: it may not carry the variable even with the same value."""
     install()
-    write(os.path.join(DATA, ".env"), ("OORT_SELF_MEDIA_ORIGIN=" + SELF_ORIGIN + "\nOPENROUTER_API_KEY=keep\n").encode("utf-8"))
+    write(os.path.join(DATA, ".env"), ("OORT_SELF_MEDIA_ORIGIN=" + SELF_ORIGIN + "\nOPENAI_API_KEY=keep\n").encode("utf-8"))
     return run_gate(env={"OORT_SELF_MEDIA_ORIGIN": SELF_ORIGIN})
 
 
@@ -257,7 +259,7 @@ def scenario_prefix_only_plugin():
 
 def scenario_clean_env_file():
     install()
-    write(os.path.join(DATA, ".env"), b"\xef\xbb\xbfOPENROUTER_API_KEY=keep\n")
+    write(os.path.join(DATA, ".env"), b"\xef\xbb\xbfOPENAI_API_KEY=keep\n")
     return run_gate()
 
 
@@ -276,7 +278,7 @@ def scenario_strict_wrong():
 def scenario_strict_env_file():
     """The volume's .env is loaded into Hermes after the gate: it may not carry the name even with the same value."""
     install()
-    write(os.path.join(DATA, ".env"), ("HERMES_MEDIA_DELIVERY_STRICT=1\nOPENROUTER_API_KEY=keep\n").encode("utf-8"))
+    write(os.path.join(DATA, ".env"), ("HERMES_MEDIA_DELIVERY_STRICT=1\nOPENAI_API_KEY=keep\n").encode("utf-8"))
     return run_gate()
 
 
@@ -290,33 +292,42 @@ ENV_SHAPES_APPLIED = (
     "'HERMES_MEDIA_DELIVERY_STRICT'=1",
     'export  HTTPS_PROXY="http://proxy.invalid:3128" # c',
 )
+ENV_SHAPES_APPLIED_UNLISTED = (  # #4950: names that were never judged, and a name that was judged by its value, given a harmless one
+    "HERMES_MEDIA_ALLOW_DIRS=/oort-proof/none",
+    "export HERMES_MANAGED_DIR='/oort-proof/none'",
+    "HERMES_HOME=/oort-proof/none",
+    "GATEWAY_PROXY_URL=https://relay.invalid",
+    "OPENROUTER_API_KEY=" + "o" * 12,
+    "HERMES_SAFE_MODE=0 # =1",
+    "hermes_safe_mode=1",
+)
 ENV_SHAPES_IGNORED = (
     "# HERMES_SAFE_MODE=1",
     'HERMES_SAFE_MODE="1',
     "HERMES_SAFE_MODE",
-    "HERMES_SAFE_MODE=0 # =1",
-    "hermes_safe_mode=1",
     'HERMES_SAFE_MODE="1" junk',
     "OORT_SELF_MEDIA_ORIGIN",
-    "HERMES_YOLO_MODE=1\nHERMES_YOLO_MODE=0",
+    "HERMES_YOLO_MODE=1\nHERMES_YOLO_MODE",
+    'OPENAI_API_KEY="one\nHERMES_SAFE_MODE=1"',
 )
 
 
 def scenario_env_shapes():
-    """#4886: spellings of the volume's .env that Hermes' loader (python-dotenv, then its own `${}` resolution) APPLIES and the old
-    reader did not see: inline comment, `export<TAB>`, a single-quoted name, a quoted value + comment, a `${NAME:-default}`. The REAL
-    gate reads them with the REAL python-dotenv of this image; every name must be refused."""
+    """#4886, #4950: spellings of the volume's .env that Hermes' loader (python-dotenv, then its own `${}` resolution) APPLIES: inline
+    comment, `export<TAB>`, a single-quoted name, a quoted value + comment, and names that no rule ever judged (where media may be
+    delivered from, the managed folder, the home folder, request forwarding, a lower-case spelling, a harmless value). The REAL gate
+    reads them with the REAL python-dotenv of this image; every name must be refused, because none is on the allow-list."""
     install()
-    raw = ("OPENROUTER_API_KEY=keep\n" + "\n".join(ENV_SHAPES_APPLIED) + "\n").encode("utf-8")
+    raw = ("OPENAI_API_KEY=keep\n" + "\n".join(ENV_SHAPES_APPLIED + ENV_SHAPES_APPLIED_UNLISTED) + "\n").encode("utf-8")
     write(os.path.join(DATA, ".env"), raw)
     return with_loader(run_gate(), raw)
 
 
 def scenario_env_inert_shapes():
-    """#4886: the other half: what the loader ignores (a comment, an unterminated quote, a name with no value, a lower-case name,
-    junk after the closing quote, a name repeated with a harmless last value) must not stop the start."""
+    """#4886: the other half: what the loader ignores (a comment, an unterminated quote, a name with no value, junk after the closing
+    quote, a name followed by a bare one of its own, a statement inside a quoted value) must not stop the start."""
     install()
-    raw = ("OPENROUTER_API_KEY=keep\n" + "\n".join(ENV_SHAPES_IGNORED) + "\n").encode("utf-8")
+    raw = ("OPENAI_API_KEY=keep\n" + "\n".join(ENV_SHAPES_IGNORED) + "\n").encode("utf-8")
     write(os.path.join(DATA, ".env"), raw)
     return with_loader(run_gate(), raw)
 
@@ -331,24 +342,46 @@ ENV_SHAPES_REFERENCES = (
 
 
 def scenario_env_reference_shapes():
-    """#4886 review: a judged name given a `${...}` reference. Hermes resolves it in ITS environment, where the service slot has
-    variables the gate's shell has not (and HOME is the volume), so the gate cannot know the answer: it refuses the reference itself,
-    for every one of these, whatever the real loader happens to end with (the record carries that for the judge)."""
+    """#4886 review, #4950: a name that is not allowed given a `${...}` reference. Hermes resolves it in ITS environment, where the
+    service slot has variables the gate's shell has not (and HOME is the volume); the gate reads no value, so none of this changes its
+    answer: every one is refused by name, and the real loader applies every one of them (the record carries that for the judge)."""
     install()
-    raw = ("OPENROUTER_API_KEY=keep\n" + "\n".join(ENV_SHAPES_REFERENCES) + "\n").encode("utf-8")
+    raw = ("OPENAI_API_KEY=keep\n" + "\n".join(ENV_SHAPES_REFERENCES) + "\n").encode("utf-8")
     write(os.path.join(DATA, ".env"), raw)
     return with_loader(run_gate(), raw)
 
 
+def scenario_env_seed_template():
+    """#4950: Hermes' first boot copies the image's own /opt/hermes/.env.example into a fresh volume's `.env` (docker/stage2-hook.sh
+    `seed_one`) AFTER the gate ran, so `report` and the next boot read it. The gate's table of those lines (`VOLUME_ENV_SEEDED`) has to be
+    what the pinned image's file holds, the file as the image ships it has to pass the gate, and the real loader must end with nothing
+    the policy forbids when it loads it. Refusing it would end every fresh install in a restart loop."""
+    install()
+    path = os.path.join(HERMES_INSTALL, ".env.example")
+    if not os.path.isfile(path):
+        return 1, {"ok": False, "problems": ["the image has no /opt/hermes/.env.example: Hermes seeds nothing, VOLUME_ENV_SEEDED has no premise"],
+                   "seed": {"image_has_the_file": False}}, None
+    example = read(path)
+    _oracle, _env_loader, lockgate = oracle_modules()
+    final = {name: value for name, value in dict(lockgate.dotenv_assignments(example.decode("utf-8"))).items() if value is not None}
+    write(os.path.join(DATA, ".env"), example)
+    rc, record, tail = run_gate()
+    record = dict(record or {})
+    record["seed"] = {"image_has_the_file": True, "example_sha256": sha(example), "image_assignments": final,
+                      "gate_table": dict(lockgate.VOLUME_ENV_SEEDED), "equal": final == dict(lockgate.VOLUME_ENV_SEEDED)}
+    record["oracle"] = loader_evidence(example)
+    return rc, record, tail
+
+
 def scenario_env_loader_oracle():
-    """#4886 review: the gate's reading of the volume's `.env` against Hermes' REAL loader, not against what its author expects. For
-    every input of the named table (each judged name on every spelling, reference, byte order mark and load-chain shape) and a few
-    thousand seeded random ones, `hermes_cli.env_loader.load_hermes_dotenv` of this image runs on a copy in the service slot's
-    environment, again on the file it leaves behind until a load leaves the file as it was (at most `oracle.LOAD_CAP` loads), and once
-    more on each of those files as it stands (its clean-up switched off). The names it ends with a forbidden value for in ANY of those
-    loads must all be named by the gate's problems; a refusal beyond them must have a designed reason; and the gate's model of the files
-    the loader leaves is held to the loader's own. Not a gate run: the record carries the counts, the judge in the shell script holds
-    them to thresholds so that an empty comparison cannot pass."""
+    """#4886 review, #4950: the gate's reading of the volume's `.env` against Hermes' REAL loader, not against what its author expects.
+    For every input of the named table (each name the policy forbids on every spelling, reference, byte order mark and load-chain shape,
+    the names it allows, the seeded lines) and a few thousand seeded random ones, `hermes_cli.env_loader.load_hermes_dotenv` of this image
+    runs on a copy in the service slot's environment, again on the file it leaves behind until a load leaves the file as it was (at most
+    `oracle.LOAD_CAP` loads), and once more on each of those files as it stands (its clean-up switched off). The names it adds that the
+    policy does not allow, in ANY of those loads, must all be named by the gate's problems; a refusal beyond them must have a designed
+    reason; and the gate's model of the files the loader leaves is held to the loader's own. Not a gate run: the record carries the counts,
+    the judge in the shell script holds them to thresholds so that an empty comparison cannot pass."""
     install()  # the volume as the start commands leave it, like every other scenario: Hermes' modules are imported against it
     oracle, env_loader, lockgate = oracle_modules()
     summary = oracle.run(env_loader, lockgate, oracle.table_cases() + oracle.random_cases(ORACLE_SEED, ORACLE_RANDOM))

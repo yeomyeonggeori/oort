@@ -144,7 +144,8 @@ class DefaultConfig(unittest.TestCase):
 
 
 class VolumeEnv(unittest.TestCase):
-    """A reused volume's own `.env` is loaded after the gate judged a scratch home (#4072 review M2)."""
+    """A reused volume's own `.env` is loaded after the gate judged a scratch home (#4072 review M2). Since #4950 it may hold only the
+    allowed names; the rules for every spelling are in test_lockgate_env.py."""
 
     def problems(self, text):
         with tempfile.TemporaryDirectory() as tmp:
@@ -156,7 +157,11 @@ class VolumeEnv(unittest.TestCase):
 
     def test_fresh_volume_and_a_template_of_comments_are_fine(self):
         self.assertEqual(self.problems(None), [])
-        self.assertEqual(self.problems("# HERMES_YOLO_MODE=1\n# API_SERVER_CORS_ORIGINS=*\nOPENROUTER_API_KEY=x\n"), [])
+        self.assertEqual(self.problems("# HERMES_YOLO_MODE=1\n# API_SERVER_CORS_ORIGINS=*\nOPENAI_API_KEY=x\n"), [])
+
+    def test_the_template_hermes_seeds_into_a_fresh_volume_is_fine(self):
+        seeded = "# a template\n" + "".join("%s=%s\n" % item for item in lockgate.VOLUME_ENV_SEEDED.items())
+        self.assertEqual(self.problems(seeded), [])
 
     def test_each_undoing_line_is_named_without_its_value(self):
         for line, name in (
@@ -166,19 +171,20 @@ class VolumeEnv(unittest.TestCase):
             ("API_SERVER_KEY=short", "API_SERVER_KEY"),
         ):
             with self.subTest(line=line):
-                found = self.problems("OPENROUTER_API_KEY=keep\n" + line + "\n")
+                found = self.problems("OPENAI_API_KEY=keep\n" + line + "\n")
                 self.assertEqual(len(found), 1)
                 self.assertIn(name, found[0])
                 self.assertNotIn("evil.example", found[0])
                 self.assertNotIn("short", found[0].replace("shorter", ""))
 
     def test_another_image_provider_key_is_named_without_its_value(self):
-        found = self.problems("OPENROUTER_API_KEY=keep\nexport FAL_KEY=fixture-secret-value\n")
+        found = self.problems("OPENAI_API_KEY=keep\nexport FAL_KEY=fixture-secret-value\n")
         self.assertEqual(len(found), 1)
         self.assertIn("FAL_KEY", found[0])
         self.assertNotIn("fixture-secret-value", found[0])
-        # An empty value or a comment is not a credential.
-        self.assertEqual(self.problems("FAL_KEY=\n# FAL_KEY=x\n"), [])
+        # A comment is not an assignment; an empty value is refused like any other (the name is not on the allow-list).
+        self.assertEqual(self.problems("# FAL_KEY=x\n"), [])
+        self.assertEqual(len(self.problems("FAL_KEY=\n")), 1)
 
     def test_an_unreadable_env_is_a_problem_not_a_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -295,6 +301,7 @@ class EnforcedWebToolPolicy(unittest.TestCase):
                 handle.write("# isolated boot fixture; load_config is doubled\n")
             env = {"API_SERVER_KEY": "test-only-" * 4, "HERMES_DATA_DIR": tmp, "HERMES_HOME": tmp,  # the image's ENV HERMES_HOME (#4886)
                    lockgate.MEDIA_STRICT_ENV: lockgate.MEDIA_STRICT_VALUE, **(extra_env or {})}
+            env = {name: value for name, value in env.items() if value is not None}  # a None removes the name
             with mock.patch.dict(os.environ, env, clear=True), \
                     mock.patch.dict(sys.modules, self.hermes_modules(cfg, tools)), \
                     mock.patch.object(sys, "path", list(sys.path)), \
