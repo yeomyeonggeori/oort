@@ -255,7 +255,7 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 
 [ADR-0201 증보 v3 B6-1](0201-team-ai-fast-path-for-simple-workspace-requests.md)(Accepted)이 도우미의 읽기 도구 `read_attachment`를 정했고, 바이트는 증보 3의 길(api 사설 주소, 1회용 주소)을 그대로 쓰라고 했다. 그런데 증보 3의 길은 **발급·풀기·라우트·워커 읽기 네 곳 모두가 세 그림(png·jpeg·webp)만** 통과시킨다(D2·D6). 그대로는 글 파일과 PDF가 발급에서 거절되므로, 이 증보가 그 네 곳을 같은 모양으로 넓힌다. 새 길·새 라우트·새 비밀·migration은 없다.
 
-- Status: **Proposed** (독립 보안 검수 뒤 planner가 Accepted로). 등급 2: 공개 라우트가 내주는 종류가 늘어난다(ADR-0100).
+- Status: **Accepted** (2026-11-02, planner — 독립 보안 검수 1회차 High 1·Medium 1·Low 5 → 수리, 2회차 Blocker 0·High 0·Medium 1·Low 4 → R2-1·R2-5 코드 수리·R2-2~R2-4 문서 반영, planner Linux 실측 PASS: 스레드 64개 설정에서도 자식이 PDF를 읽고(`{"ok":true}`·종료 0) N=2·16·64의 `VmSize` 102,968 kB·스레드 2로 같음, `--memory=1g` 자식 시험 15/15, `--memory=300m`에서 커널이 자식을 먼저 끝냄(`oom_kill` 1)). 등급 2: 공개 라우트가 내주는 종류가 늘어난다(ADR-0100).
 - **변경 전**: `mint_for_attachment_in_tx`와 `redeem_in_tx`가 `find_requester_attachment_in_tx`(아바타 용도: png·jpeg·webp)로 판정했고, 라우트와 워커의 `fetch`가 `bytes_match_mime`(세 그림)으로 끝에서 한 번 더 걸렀다.
 
 ### 결정
