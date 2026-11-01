@@ -513,6 +513,46 @@ mod tests {
         ));
     }
 
+    /// ADR-0170 증보 2026-11-01 D16 (#4884): the composer's link preview is a person's act and a
+    /// work host has no use for it, so none of its three routes is a signable path. A `MomoHost`
+    /// request to one is therefore answered exactly as a bad signature is — 401, with the one
+    /// message, before anything is read — and never reaches the handler's `require_human` (whose
+    /// 403 is for a principal that got that far; none does).
+    #[test]
+    fn the_link_preview_routes_are_not_signable_so_a_work_host_is_told_401_there() {
+        let ws = Uuid::from_u128(1);
+        let channel = Uuid::from_u128(2);
+        let preview = Uuid::from_u128(3);
+        let host = Uuid::from_u128(4);
+        // Control: the same helper and the same shape of path say yes to a route that is signable.
+        assert!(is_allowed_signed_path(
+            &Method::POST,
+            &format!("/v1/workspaces/{ws}/work-hosts/{host}/heartbeat")
+        ));
+        for path in [
+            format!("/v1/workspaces/{ws}/channels/{channel}/unfurl-previews"),
+            format!("/v1/workspaces/{ws}/unfurl-previews/{preview}/image"),
+            format!("/v1/workspaces/{ws}/unfurl-previews/{preview}/icon"),
+        ] {
+            for method in [
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::PATCH,
+                Method::DELETE,
+            ] {
+                assert!(
+                    !is_allowed_signed_path(&method, &path),
+                    "{method} {path} must not be signable"
+                );
+            }
+        }
+        assert_eq!(
+            signed_request_unauthorized().status,
+            axum::http::StatusCode::UNAUTHORIZED
+        );
+    }
+
     /// The generalisation #1114 needed: the pin exists where the path names a
     /// host, and is deliberately absent — not silently satisfied — where it does
     /// not.
