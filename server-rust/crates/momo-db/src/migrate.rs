@@ -745,12 +745,17 @@ mod tests {
     /// set stops being fixed (`member_handle_alias_v2_set_ck` is dropped, the shape CHECK stays) and
     /// the trigger `member_handle_alias_guard` takes over: an alias belongs to the workspace's team AI
     /// member only, and a workspace holds at most four. No new table, no new grant.
+    ///
+    /// 167 is #4900's expiry rule for expression drafts (ADR-0218 D2): `expression_immutable()` lets
+    /// `origin` change in exactly one way — when a draft is `expired`, its `prompt` (the agent's words)
+    /// becomes JSON null — and the migration blanks the prompts of drafts that expired before it. No new
+    /// table, so no new RLS policy.
     #[test]
-    fn discovers_contiguous_migrations_001_to_166() {
+    fn discovers_contiguous_migrations_001_to_167() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=166).collect();
+        let expected: Vec<i64> = (1..=167).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -758,7 +763,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=166 under {}",
+            "expected contiguous 001..=167 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -766,7 +771,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("166_team_ai_alias_follow_name"));
+            .starts_with("167_expression_draft_expiry_blanks_prompt"));
     }
 
     #[test]
