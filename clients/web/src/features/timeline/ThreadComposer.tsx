@@ -14,6 +14,7 @@ import { sendThreadReply, type Channel } from "@momo/core/lib/api";
 import {
   composerKeyIntent,
   isComposingEvent,
+  type ComposerKeyIntent,
 } from "@momo/core/features/chat/composerKeys";
 import { InlineBanner } from "@/features/common/States";
 import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
@@ -45,6 +46,8 @@ import { useComposerAutocomplete } from "@/features/chat/useComposerAutocomplete
 import { useComposerEmoji } from "@/features/chat/useComposerEmoji";
 import { useComposerFormat } from "@/features/chat/useComposerFormat";
 import { ComposerFormatTray } from "@/features/chat/ComposerFormatTray";
+import { ComposerLinkPreview } from "@/features/chat/ComposerLinkPreview";
+import { useComposerLinkPreview } from "@/features/chat/useComposerLinkPreview";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import {
   sendBlockCopy,
@@ -97,6 +100,12 @@ import { useComposerSchedule } from "@/features/scheduled/useComposerSchedule";
 // 서버에 없다. 막고 있던 것은 화면뿐이었다(mac 도 같은 자리에서 막혀 있다 —
 // `MessageThreadPanel.sendReply` 가 `attachmentIds` 를 안 싣는다).
 // =============================================================================
+
+/**
+ * 이 키 뜻이 입력창 위 링크 미리보기를 닫는 Esc인가(`composerKeys.ts` 의 `preview-dismiss`). 낱말을 JSX 표현식 밖에 두는
+ * 까닭: 직접 문구 장부는 JSX 안의 문자열을 문구로 세므로, 규칙의 이름이 장부에 문구로 오르지 않게 한다.
+ */
+const closesLinkPreview = (intent: ComposerKeyIntent): boolean => intent === "preview-dismiss";
 
 export function ThreadComposer({
   workspaceId,
@@ -162,6 +171,21 @@ export function ThreadComposer({
     enabled: !sending,
     surfaceKey: `${workspaceId}:${channelId}:${rootId}`,
   });
+
+  // 링크를 넣고 멈추면 입력창 위에 카드가 뜬다(#5016, 채널 입력창과 같은 훅·같은 카드). 보내면 같은 채널의
+  // 답글로 나가므로 물을 채널은 이 스레드가 선 채널이다. 오프라인에서는 묻지 않고, 풀리면 이어서 묻는다.
+  const linkPreview = useComposerLinkPreview({
+    workspaceId,
+    channelId,
+    threadRootId: rootId,
+    text: draft,
+    paused: offline,
+  });
+  /** ✕·Esc: 이번 답글은 미리보기 없이 보낸다. 눌린 버튼이 사라지므로 포커스는 입력창이 받는다. */
+  const dismissLinkPreview = () => {
+    linkPreview.dismiss();
+    ref.current?.focus();
+  };
 
   // 트레이는 **이 스레드의 것**이다. 채널 컴포저와 열쇠가 다르므로, 스레드에 붙인
   // 파일이 패널을 닫는 순간 채널 입력창에 나타나는 일이 없다.
@@ -280,6 +304,9 @@ export function ThreadComposer({
     // landed.
     sendThreadReply(workspaceId, channelId, rootId, crypto.randomUUID(), body, {
       attachmentIds: sent.attachmentIds,
+      // ✕로 끈 채 보낸다(켠 때만 키가 간다). 값은 이 렌더의 것이고, 실패하면 글이 남아 ✕도 남으므로 다시
+      // 보내도 같은 선택이다. 성공하면 글이 비어 저절로 풀린다.
+      ...(linkPreview.suppressed ? { suppressUnfurl: true } : {}),
     })
       .then((message) => {
         expressionStore?.recordSuccess(body, message.id);
@@ -317,6 +344,15 @@ export function ThreadComposer({
         onRetry={(localId) => retryDraft(trayKey, attachTarget, localId)}
         onClear={() => clearSurface(trayKey)}
         onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
+      />
+      {/* 보내기 전 링크 미리보기(#5016): 첨부 트레이와 같은 줄 모양으로 그 바로 아래, 입력 그릇 위다. 줄은 그릇 밖이라
+          ✕가 답글을 보내지 않고, 그릇을 눌러 캐럿을 돌려주는 규칙에 카드 링크가 섞이지 않는다. 채널 입력창과 한
+          화면에 서므로 시험 열쇠는 `thread-composer-` 를 앞에 단다. */}
+      <ComposerLinkPreview
+        cards={linkPreview.cards}
+        suppressed={linkPreview.suppressed}
+        onDismiss={dismissLinkPreview}
+        testId="thread-composer-link-preview"
       />
       <div className="p-3">
         {/* 이 스레드의 예약 배너(UI 명세 1.6 (b), 1.1): 이 호스트의 확인은 ③ 지속 배너가 맡는다. 「이 스레드에 예약된
@@ -468,10 +504,17 @@ export function ThreadComposer({
                     mentionsOpen: autocomplete.visible,
                     justComposed: justComposedRef.current,
                     enterSends: !isMobile,
+                    previewOpen: linkPreview.cards.length > 0,
                   }
                 );
                 if (autocomplete.handleIntent(intent)) {
                   event.preventDefault();
+                  return;
+                }
+                if (closesLinkPreview(intent)) {
+                  // 멘션 목록 다음이다(`composerKeys.ts`가 순서와 이유를 적는다). ✕와 같은 선택이다.
+                  event.preventDefault();
+                  dismissLinkPreview();
                   return;
                 }
                 if (intent !== "send") return;
