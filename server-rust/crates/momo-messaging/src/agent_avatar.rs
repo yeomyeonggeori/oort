@@ -706,12 +706,40 @@ pub fn is_avatar_preset(id: &str) -> bool {
 }
 
 /// A workspace image file an agent may use as an avatar.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Deliberately not `Debug`-derived: `drive_file_id` is the archive's own name for the file, and no log
+/// line, error or audit row has any business holding it (#4970 review, L5 — the siblings that carry the
+/// same field, `AttachmentTarget` and `RequesterAttachment`, are written by hand for the same reason).
+#[derive(Clone, PartialEq, Eq)]
 pub struct AvatarAttachmentSource {
     pub id: Uuid,
     pub channel_id: Uuid,
     pub drive_file_id: String,
     pub size_bytes: i64,
+    /// The recorded (lower-cased) media type — the first narrowing of what a caller does with the
+    /// bytes. Never the bytes' own say: those are sniffed again ([`crate::self_media::bytes_match_mime`]).
+    pub mime: String,
+}
+
+impl std::fmt::Debug for AvatarAttachmentSource {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Destructured so that a field added later has to be decided on here, not skipped silently.
+        let AvatarAttachmentSource {
+            id,
+            channel_id,
+            drive_file_id: _,
+            size_bytes,
+            mime,
+        } = self;
+        formatter
+            .debug_struct("AvatarAttachmentSource")
+            .field("id", id)
+            .field("channel_id", channel_id)
+            .field("drive_file_id", &"<redacted>")
+            .field("size_bytes", size_bytes)
+            .field("mime", mime)
+            .finish()
+    }
 }
 
 /// The attachment, **if and only if the proposing agent could read it**: it is
@@ -730,7 +758,7 @@ pub async fn find_visible_image_attachment_in_tx(
     max_bytes: i64,
 ) -> Result<Option<AvatarAttachmentSource>, DbError> {
     let row = sqlx::query(
-        "SELECT a.id, a.channel_id, a.drive_file_id, a.size_bytes \
+        "SELECT a.id, a.channel_id, a.drive_file_id, a.size_bytes, a.mime \
            FROM attachment a \
            JOIN channel c ON c.workspace_id = a.workspace_id AND c.id = a.channel_id \
            JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
@@ -758,6 +786,7 @@ pub async fn find_visible_image_attachment_in_tx(
         channel_id: row.try_get("channel_id")?,
         drive_file_id: row.try_get("drive_file_id")?,
         size_bytes: row.try_get("size_bytes")?,
+        mime: row.try_get("mime")?,
     }))
 }
 
@@ -803,12 +832,27 @@ pub enum RequesterAttachmentUse {
     /// which end as the `video_processing_unavailable` card (D4 is on hold). Nothing here
     /// widens what the decoder accepts: it decides on the bytes.
     ExpressionSource,
+    /// A person's own attachment **read for them** by the team's helper (ADR-0201 증보 v3 B6-1,
+    /// #4970; ADR-0151 증보 4): the avatar's three picture types plus the text and PDF types the
+    /// worker can pull letters out of ([`crate::self_media::READ_MIMES`]). The recorded type is
+    /// the first narrowing; the bytes are sniffed again at the route and in the worker, and the
+    /// extractor decides last.
+    Read,
+    /// The **lookup** half of [`Read`](Self::Read) (#4970): whose file is it, **whatever its type** — so a
+    /// person's own file of a type the helper does not read is told 「그 종류는 못 읽어요」 instead of
+    /// 「못 찾아요」 (it is their own file: nothing leaks), while somebody else's file of any type is `None`
+    /// as always. It is the only use with no type narrowing (an empty [`mimes`](Self::mimes) means "any"),
+    /// and it is **never** what a token is minted or redeemed under.
+    ReadAnyType,
 }
 
 impl RequesterAttachmentUse {
-    /// The recorded (lower-cased) media types this use accepts.
+    /// The recorded (lower-cased) media types this use accepts. **Empty means any type**, which only
+    /// [`ReadAnyType`](Self::ReadAnyType) says; a test pins that no other use is empty.
     pub const fn mimes(self) -> &'static [&'static str] {
         match self {
+            RequesterAttachmentUse::ReadAnyType => &[],
+            RequesterAttachmentUse::Read => &crate::self_media::READ_MIMES,
             RequesterAttachmentUse::Avatar => &["image/png", "image/jpeg", "image/webp"],
             RequesterAttachmentUse::ExpressionSource => &[
                 "image/png",
@@ -819,6 +863,17 @@ impl RequesterAttachmentUse {
                 "video/quicktime",
                 "video/webm",
             ],
+        }
+    }
+
+    /// The smallest recorded size this use admits. Every use that fetches bytes wants at least one (an
+    /// empty file is nothing to decode, sniff or read); **the lookup** admits an empty file too
+    /// (#4970 review, L1): it is the requester's own, and the honest answer to it is 「비어 있어요」,
+    /// not 「못 찾아요」. A file that is not the requester's is `None` whatever its size.
+    pub const fn min_bytes(self) -> i64 {
+        match self {
+            RequesterAttachmentUse::ReadAnyType => 0,
+            _ => 1,
         }
     }
 }
@@ -870,14 +925,14 @@ pub async fn find_requester_attachment_for_in_tx(
     usage: RequesterAttachmentUse,
 ) -> Result<Option<AvatarAttachmentSource>, DbError> {
     let row = sqlx::query(
-        "SELECT a.id, a.channel_id, a.drive_file_id, a.size_bytes \
+        "SELECT a.id, a.channel_id, a.drive_file_id, a.size_bytes, a.mime \
            FROM attachment a \
            JOIN channel c ON c.workspace_id = a.workspace_id AND c.id = a.channel_id \
            JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
           WHERE a.workspace_id = $1 AND a.id = $2 AND a.status = 'complete' \
             AND a.drive_file_id IS NOT NULL \
-            AND a.mime = ANY($6) \
-            AND a.size_bytes BETWEEN 1 AND $5 \
+            AND (cardinality($6::text[]) = 0 OR a.mime = ANY($6)) \
+            AND a.size_bytes BETWEEN $7 AND $5 \
             AND m.state <> 'deleted' AND m.deleted_at IS NULL \
             AND m.author_member_id = $4 \
             AND a.channel_id = $3 AND c.archived_at IS NULL",
@@ -888,6 +943,7 @@ pub async fn find_requester_attachment_for_in_tx(
     .bind(requester)
     .bind(max_bytes)
     .bind(usage.mimes())
+    .bind(usage.min_bytes())
     .fetch_optional(&mut *conn)
     .await?;
     let Some(row) = row else { return Ok(None) };
@@ -896,6 +952,7 @@ pub async fn find_requester_attachment_for_in_tx(
         channel_id: row.try_get("channel_id")?,
         drive_file_id: row.try_get("drive_file_id")?,
         size_bytes: row.try_get("size_bytes")?,
+        mime: row.try_get("mime")?,
     }))
 }
 
@@ -1321,5 +1378,61 @@ mod tests {
                 .chars()
                 .all(|c| c.is_ascii_lowercase() || c == '_'));
         }
+    }
+}
+
+#[cfg(test)]
+mod read_use_tests {
+    use super::*;
+
+    /// "Any type" is spelled by an empty list, and only [`RequesterAttachmentUse::ReadAnyType`] is allowed
+    /// to say it: a use that became empty by accident would drop its type narrowing without a word.
+    #[test]
+    fn only_the_lookup_use_has_no_type_narrowing() {
+        for usage in [
+            RequesterAttachmentUse::Avatar,
+            RequesterAttachmentUse::ExpressionSource,
+            RequesterAttachmentUse::Read,
+        ] {
+            assert!(!usage.mimes().is_empty(), "{usage:?}");
+        }
+        assert!(RequesterAttachmentUse::ReadAnyType.mimes().is_empty());
+        // Read is exactly the three pictures plus the text and PDF types, nothing the avatar flow
+        // would be handed
+        for mime in RequesterAttachmentUse::Avatar.mimes() {
+            assert!(RequesterAttachmentUse::Read.mimes().contains(mime));
+        }
+        assert!(!RequesterAttachmentUse::Avatar
+            .mimes()
+            .contains(&"application/pdf"));
+    }
+
+    /// An empty file is the lookup's to answer (the requester's own, told 「비어 있어요」); every use that
+    /// fetches bytes still wants at least one byte.
+    #[test]
+    fn only_the_lookup_use_admits_an_empty_file() {
+        assert_eq!(RequesterAttachmentUse::ReadAnyType.min_bytes(), 0);
+        for usage in [
+            RequesterAttachmentUse::Avatar,
+            RequesterAttachmentUse::ExpressionSource,
+            RequesterAttachmentUse::Read,
+        ] {
+            assert_eq!(usage.min_bytes(), 1, "{usage:?}");
+        }
+    }
+
+    /// The archive's name for a file is in no `{:?}`.
+    #[test]
+    fn an_avatar_source_never_prints_the_archives_name_for_the_file() {
+        let source = AvatarAttachmentSource {
+            id: Uuid::nil(),
+            channel_id: Uuid::nil(),
+            drive_file_id: "DRIVE-NAME-4970".to_string(),
+            size_bytes: 12,
+            mime: "image/png".to_string(),
+        };
+        let printed = format!("{source:?} {source:#?}");
+        assert!(!printed.contains("DRIVE-NAME-4970"), "{printed}");
+        assert!(printed.contains("image/png") && printed.contains("12"));
     }
 }

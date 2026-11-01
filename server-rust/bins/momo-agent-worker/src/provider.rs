@@ -138,6 +138,56 @@ impl ChatMessage {
     }
 }
 
+/// One picture that rides a model call **as a structural part** (ADR-0201 증보 v3 B6-1, #4970): not text
+/// in a message, so no sentence a person wrote can forge one. The bytes are what
+/// [`crate::attachment_image::prepare_model_image`] made — re-encoded, bounded, metadata gone — and
+/// the wire that carries them base64-encodes them itself.
+///
+/// `Debug` is written by hand: a picture is somebody's content, and a `{:?}` of a request must not
+/// print a byte of it. It prints the type and the length.
+#[derive(Clone, PartialEq, Eq)]
+pub struct ModelImage {
+    pub media_type: &'static str,
+    pub data: Vec<u8>,
+}
+
+impl std::fmt::Debug for ModelImage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "ModelImage {{ media_type: {:?}, bytes: {} }}",
+            self.media_type,
+            self.data.len()
+        )
+    }
+}
+
+impl ModelImage {
+    /// The picture as standard base64 (what Anthropic's `source.data` and a data URL carry).
+    pub fn base64(&self) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(&self.data)
+    }
+
+    /// `data:<type>;base64,<data>` — the OpenAI-family spelling of an inline picture.
+    pub fn data_url(&self) -> String {
+        format!("data:{};base64,{}", self.media_type, self.base64())
+    }
+}
+
+/// Can a call on this wire carry a picture as input? Decided by the wire, never by a provider's name
+/// (the way [`crate::team_ai`]'s `wire_searches` decides web search): Anthropic Messages takes an `image`
+/// block and OpenAI Responses an `input_image` part. `ChatCompletions` stays **no** — the same wire speaks
+/// to every OpenAI-compatible gateway and a text-only model there answers an `image_url` with an error,
+/// which would end the person's whole request instead of telling them honestly. Opening it needs a
+/// per-model capability, which is a follow-up (`runtime-unverified` for the two wires that are open).
+pub fn wire_sees_images(wire: ProviderWire) -> bool {
+    matches!(
+        wire,
+        ProviderWire::AnthropicMessages | ProviderWire::Responses
+    )
+}
+
 /// One turn's request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChatRequest {
@@ -512,6 +562,26 @@ pub trait ChatProvider: Send + Sync {
         let _ = sink;
         self.complete(endpoint, request).await
     }
+
+    /// The same turn with pictures riding the **last user message** as structural parts (#4970).
+    ///
+    /// The default **fails closed**: a provider that has not said how its wire carries a picture must
+    /// not answer a turn whose picture it silently dropped (the person would be answered about a
+    /// picture nobody looked at). With nothing to carry it is exactly [`complete`](Self::complete).
+    /// Only the wires that [`wire_sees_images`] says take a picture override it.
+    async fn complete_with_images(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+        images: &[ModelImage],
+    ) -> Result<ChatCompletion, ProviderError> {
+        if images.is_empty() {
+            return self.complete(endpoint, request).await;
+        }
+        Err(ProviderError::InvalidResponse(
+            "this provider cannot carry a picture".to_string(),
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -855,6 +925,36 @@ impl ChatProvider for WireRoutedProvider {
                     .complete_streaming(endpoint, request, sink)
                     .await
             }
+        }
+        .map_err(|error| error.scrub(&endpoint.bearer))
+    }
+
+    /// Routed by the wire like every call, and **only** the wires [`wire_sees_images`] opens carry a
+    /// picture: `ChatCompletions` fails closed here too, whatever a caller believed.
+    async fn complete_with_images(
+        &self,
+        endpoint: &ProviderEndpoint,
+        request: &ChatRequest,
+        images: &[ModelImage],
+    ) -> Result<ChatCompletion, ProviderError> {
+        if images.is_empty() {
+            return self.complete(endpoint, request).await;
+        }
+        self.precheck(endpoint).await?;
+        match endpoint.wire {
+            ProviderWire::Responses => {
+                self.responses
+                    .complete_with_images(endpoint, request, images)
+                    .await
+            }
+            ProviderWire::AnthropicMessages => {
+                self.anthropic
+                    .complete_with_images(endpoint, request, images)
+                    .await
+            }
+            ProviderWire::ChatCompletions => Err(ProviderError::InvalidResponse(
+                "this wire does not carry a picture".to_string(),
+            )),
         }
         .map_err(|error| error.scrub(&endpoint.bearer))
     }
@@ -1720,5 +1820,96 @@ mod tests {
             too_large.to_string(),
             "provider response is larger than 7 bytes"
         );
+    }
+}
+
+#[cfg(test)]
+mod picture_tests {
+    //! #4970: which wires carry a picture, and what happens on a provider that does not say.
+    use super::*;
+
+    fn picture() -> ModelImage {
+        ModelImage {
+            media_type: "image/jpeg",
+            data: vec![0xFF, 0xD8, 0xFF, 1],
+        }
+    }
+
+    fn request() -> ChatRequest {
+        ChatRequest {
+            provider: None,
+            model: "m".to_string(),
+            messages: vec![ChatMessage::user("hi")],
+            max_tokens: None,
+            tools: Vec::new(),
+            momo_tools: Vec::new(),
+        }
+    }
+
+    fn endpoint(wire: ProviderWire) -> ProviderEndpoint {
+        ProviderEndpoint {
+            base_url: "https://gateway.invalid/v1".to_string(),
+            bearer: "sk-test".to_string(),
+            source: "database",
+            wire,
+            account_id: None,
+        }
+    }
+
+    /// Decided by the wire, and only the two whose contract has a picture part.
+    #[test]
+    fn two_wires_see_pictures_and_the_shared_gateway_wire_does_not() {
+        assert!(wire_sees_images(ProviderWire::AnthropicMessages));
+        assert!(wire_sees_images(ProviderWire::Responses));
+        assert!(!wire_sees_images(ProviderWire::ChatCompletions));
+    }
+
+    /// A provider that never said how its wire carries a picture must not answer a turn whose picture
+    /// it would silently drop: the default fails closed, and with nothing to carry it is `complete`.
+    #[tokio::test]
+    async fn a_provider_that_does_not_say_fails_closed_for_a_picture_and_not_for_none() {
+        let provider = MockChatProvider::echo();
+        let endpoint = endpoint(ProviderWire::AnthropicMessages);
+        assert!(provider
+            .complete_with_images(&endpoint, &request(), &[])
+            .await
+            .is_ok());
+        let refused = provider
+            .complete_with_images(&endpoint, &request(), &[picture()])
+            .await
+            .unwrap_err();
+        assert!(!refused.is_retryable(), "a retry would drop it again");
+    }
+
+    /// The router refuses a picture on `chat/completions` itself, whatever the adapter behind it would
+    /// do, and sends nothing: the three adapters here are mocks that would answer anything.
+    #[tokio::test]
+    async fn the_router_never_sends_a_picture_down_the_chat_completions_wire() {
+        let router = WireRoutedProvider::new(
+            Arc::new(MockChatProvider::echo()),
+            Arc::new(MockChatProvider::echo()),
+            Arc::new(MockChatProvider::echo()),
+        );
+        let refused = router
+            .complete_with_images(
+                &endpoint(ProviderWire::ChatCompletions),
+                &request(),
+                &[picture()],
+            )
+            .await;
+        assert!(
+            matches!(refused, Err(ProviderError::InvalidResponse(_))),
+            "{refused:?}"
+        );
+        // …and the chat wire's own body never learns of a picture: its serializer reads text only
+        let body_text = serde_json::to_string(
+            &request()
+                .messages
+                .iter()
+                .map(|m| json!({"role": m.role, "content": m.content}))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert!(!body_text.contains("image"));
     }
 }

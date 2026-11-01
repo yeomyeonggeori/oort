@@ -46,6 +46,9 @@ pub struct RequesterAttachment<'a> {
     /// The ceiling a reader must not read past. One byte more than the ceiling is allowed back, so the
     /// decoder — not the reader — is what calls a too-large file too large.
     pub max_bytes: usize,
+    /// What the bytes are wanted for (#4970): an avatar proposal's three picture types, or the helper's
+    /// `read_attachment` (also text and PDF). It picks the token's rule and the types the answer may be.
+    pub usage: momo_messaging::RequesterAttachmentUse,
 }
 
 /// Fetch the bytes of an attachment the caller has already proved to be the requester's. The error is a
@@ -241,6 +244,7 @@ async fn prepare_inner(
                     drive_file_id: &source.drive_file_id,
                     size_bytes: source.size_bytes,
                     max_bytes: max,
+                    usage: momo_messaging::RequesterAttachmentUse::Avatar,
                 })
                 .await?;
             (bytes, max, "attachment")

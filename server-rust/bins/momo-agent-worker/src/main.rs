@@ -76,8 +76,29 @@ fn embed_check() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// A plain `main`, not `#[tokio::main]`: the child branch below has to run **before** a runtime exists.
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // #4970: the helper's PDF reader runs **this binary** as a supervised child with an empty
+    // environment. It must be the first thing `main` does — before logging, before any configuration
+    // is read — so the child never touches a secret it was not given. It is also before the async
+    // runtime (#4970 review R2-1): the child limits its own address space as its first act, and that
+    // ceiling counts every thread's stack and allocator arena. A multi-threaded runtime started first
+    // puts one worker per visible core under the ceiling (glibc reserves a virtual arena per thread), so
+    // on a host with many cores the child would be over it before it read a byte. This way the child is
+    // one thread (plus its own watchdog) however many cores there are.
+    if std::env::args().nth(1).as_deref() == Some(momo_agent_worker::attachment_text::CHILD_ARG) {
+        std::process::exit(momo_agent_worker::attachment_text::child_main(
+            momo_workspace_actions::team_ai_attachments::READ_MAX_BYTES as usize,
+        ));
+    }
+    // What `#[tokio::main]` expands to, minus the `expect`: the worker itself is the multi-threaded runtime.
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().any(|a| a == "--embed-check") {
         return embed_check();
     }

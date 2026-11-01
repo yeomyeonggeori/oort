@@ -57,13 +57,16 @@ use momo_outbox::ClaimedAgentJob;
 use momo_workspace_actions::team_ai::{
     self, FallbackReason, ProposalContext, ProposalRefusal, TeamAiWorkspace, ViaAi, WebSearch,
 };
+use momo_workspace_actions::team_ai_attachments as team_ai_files;
 use momo_workspace_actions::team_ai_limits::{self, LimitHit, Usage};
 use momo_workspace_actions::team_ai_tools::{self, ToolOutcome};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::payload::AgentJobPayload;
-use crate::provider::{ChatMessage, ChatRequest, ChatUsage, ProviderToolCall, ProviderWire};
+use crate::provider::{
+    ChatMessage, ChatRequest, ChatUsage, ModelImage, ProviderError, ProviderToolCall, ProviderWire,
+};
 use crate::{emit_terminal_agent_status, AgentWorker, ResolvedTransport, Settlement};
 
 /// What the first read of a team-AI turn found.
@@ -197,6 +200,11 @@ impl AgentWorker {
                     run_id,
                 )
                 .await?;
+                // #4970: the trigger turn lists the message's readable files — ids, types, sizes —
+                // only while the `files` bundle is on (no sentence, no id for a bundle that is off).
+                // A task step (#4967: no trigger in its payload) reads no attachments, so it lists none.
+                let files_on = state.roles.is_on(momo_agent::team_ai_roles::FILES)
+                    && trigger_message_id.is_some();
                 // A step job carries no trigger (B5-1: the requester and the request text come
                 // from the **run row**, the one place they are derived), so read it from there.
                 let trigger_message_id = match trigger_message_id {
@@ -206,7 +214,7 @@ impl AgentWorker {
                     }
                 };
                 let trigger_text: String = match trigger_message_id {
-                    Some(id) => sqlx_body(conn, workspace_id, id).await?,
+                    Some(id) => sqlx_body(conn, workspace_id, id, files_on).await?,
                     None => String::new(),
                 };
                 let task = momo_agent::team_ai_task::load_in_tx(conn, workspace_id, run_id).await?;
@@ -422,17 +430,22 @@ impl AgentWorker {
         // card). The tool, the prompt and the check on what the model names all read this one list.
         let card_commands = roles.advertised_command_ids();
         let mut messages = vec![
-            ChatMessage::system(team_ai::system_prompt_with_task(
+            ChatMessage::system(team_ai::system_prompt_for(
                 &gathered.roster,
                 web,
                 &roles.advertised_action_ids(false),
                 &card_commands,
+                &[],
                 task_prompt,
+                roles.is_on(momo_agent::team_ai_roles::FILES),
             )),
             ChatMessage::user(team_ai::user_turn(&gathered.trigger_text)),
         ];
         let mut spend: Option<Spend> = None;
         let mut read_used = false;
+        // #4970: the one picture this request may hold. It rides **every** model call after the read
+        // (the call re-sends it), so there is at most one, and it is dropped with this function.
+        let mut attached: Vec<ModelImage> = Vec::new();
         let mut prompt_after_read = false;
         let started = Instant::now();
         let deadline = self.config.team_ai_request_deadline;
@@ -473,6 +486,7 @@ impl AgentWorker {
                     &card_commands,
                     &roles.withheld_by_read(),
                     task_prompt,
+                    roles.is_on(momo_agent::team_ai_roles::FILES),
                 ));
                 prompt_after_read = true;
             }
@@ -519,9 +533,16 @@ impl AgentWorker {
                 .team_ai_model_timeout
                 .min(deadline.saturating_sub(elapsed));
             let call_started = Instant::now();
-            let attempt =
-                tokio::time::timeout(cut, self.provider.complete(&transport.endpoint, &request))
-                    .await;
+            let attempt = tokio::time::timeout(cut, async {
+                if attached.is_empty() {
+                    self.provider.complete(&transport.endpoint, &request).await
+                } else {
+                    self.provider
+                        .complete_with_images(&transport.endpoint, &request, &attached)
+                        .await
+                }
+            })
+            .await;
             trace.model_calls += 1;
             let call_ms = millis(call_started);
             let completion = match attempt {
@@ -545,7 +566,9 @@ impl AgentWorker {
                     // ceiling still moves.
                     spend = Spend::add(spend, Spend::of(None, prompt_chars));
                     trace.latency_ms = millis(started);
-                    let reason = if started.elapsed() >= deadline && trace.model_calls > 1 {
+                    let reason = if !attached.is_empty() && image_was_refused(&other) {
+                        FallbackReason::ImageRefused
+                    } else if started.elapsed() >= deadline && trace.model_calls > 1 {
                         FallbackReason::TooLong
                     } else {
                         FallbackReason::Slow
@@ -680,17 +703,49 @@ impl AgentWorker {
                     );
                     continue;
                 }
-                let outcome = match self
-                    .team_ai_read(
-                        workspace_id,
-                        agent,
-                        requester.member_id,
-                        channel_id,
-                        &name,
-                        &tool_call.arguments_json(),
-                    )
-                    .await
-                {
+                let read =
+                    if name == momo_agent::tools::normalize(team_ai_tools::TOOL_READ_ATTACHMENT) {
+                        // The `files` bundle's tool (#4970). A request that was not offered it does not
+                        // get it by naming it (B13-I5); the lookup re-reads the switch as well.
+                        if !roles.tool_allowed(team_ai_tools::TOOL_READ_ATTACHMENT) {
+                            Ok(team_ai_files::FILES_OFF)
+                        } else {
+                            match self
+                                .team_ai_read_attachment(
+                                    workspace_id,
+                                    agent,
+                                    requester.member_id,
+                                    channel_id,
+                                    run_id,
+                                    &tool_call.arguments_json(),
+                                    wire,
+                                    !attached.is_empty(),
+                                )
+                                .await
+                            {
+                                Ok(read) => {
+                                    // a picture is only ever handed back for a wire that can carry it
+                                    // (`team_ai_read_attachment` says so before it reads a byte)
+                                    if let Some(image) = read.image {
+                                        attached.push(image);
+                                    }
+                                    Ok(read.outcome)
+                                }
+                                Err(error) => Err(error),
+                            }
+                        }
+                    } else {
+                        self.team_ai_read(
+                            workspace_id,
+                            agent,
+                            requester.member_id,
+                            channel_id,
+                            &name,
+                            &tool_call.arguments_json(),
+                        )
+                        .await
+                    };
+                let outcome = match read {
                     Ok(outcome) => outcome,
                     Err(error) => {
                         return Some(
@@ -1613,6 +1668,7 @@ async fn sqlx_body(
     conn: &mut momo_db::PgConnection,
     workspace_id: Uuid,
     message_id: Uuid,
+    files_on: bool,
 ) -> Result<String, DbError> {
     let body: Option<String> = momo_db::sqlx::query_scalar(
         "SELECT body FROM message WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL",
@@ -1632,12 +1688,56 @@ async fn sqlx_body(
         })
         .take(20)
         .collect::<Vec<_>>();
-    Ok(trigger_turn_with_images(&body.unwrap_or_default(), &ids))
+    // #4970: the readable files of the message (ids, types, sizes — never a name) while `files` is on.
+    let listed = if files_on {
+        team_ai_files::attachment_list_block(
+            &team_ai_files::readable_attachments_of_message_in_tx(conn, workspace_id, message_id)
+                .await?,
+        )
+    } else {
+        String::new()
+    };
+    Ok(trigger_turn_with_attachments(
+        &body.unwrap_or_default(),
+        &ids,
+        &listed,
+    ))
 }
 
 // Reserve room for this trigger's server-owned image ids. The caller bounds the
 // final user turn again; appending after truncation would silently lose the ids.
+#[cfg(test)]
 fn trigger_turn_with_images(body: &str, ids: &[Uuid]) -> String {
+    trigger_turn_with_attachments(body, ids, "")
+}
+
+/// The least of the final turn that stays the person's own words, whatever is listed after them.
+const MIN_REQUEST_CHARS: usize = 600;
+
+/// The whole lines of `block` that fit in `room` characters (an empty string when not even one entry
+/// does: a header with nothing under it names no id).
+fn whole_lines_within(block: &str, room: usize) -> String {
+    if block.chars().count() <= room {
+        return block.to_string();
+    }
+    let mut kept = String::new();
+    for line in block.split_inclusive('\n') {
+        if kept.chars().count() + line.chars().count() > room {
+            break;
+        }
+        kept.push_str(line);
+    }
+    if kept.matches(" · ").count() == 0 {
+        return String::new();
+    }
+    kept
+}
+
+/// [`trigger_turn_with_images`] plus the readable-files block (#4970), which is server-owned too. The
+/// suffix is reserved **first**, so a long request is cut before an id is — but the files block yields
+/// to a floor of [`MIN_REQUEST_CHARS`] for the person's own words (a message with twenty pictures and a
+/// few documents must not squeeze its request down to a few characters): whole entries only.
+fn trigger_turn_with_attachments(body: &str, ids: &[Uuid], files_block: &str) -> String {
     let mut suffix = String::new();
     if !ids.is_empty() {
         suffix.push_str("\n[데이터: 이 메시지의 이미지 attachmentId]\n");
@@ -1645,10 +1745,29 @@ fn trigger_turn_with_images(body: &str, ids: &[Uuid]) -> String {
             suffix.push_str(&format!("{id}\n"));
         }
     }
+    let room = team_ai::MAX_TRIGGER_CHARS
+        .saturating_sub(MIN_REQUEST_CHARS)
+        .saturating_sub(suffix.chars().count());
+    suffix.push_str(&whole_lines_within(files_block, room));
     let body_budget = team_ai::MAX_TRIGGER_CHARS.saturating_sub(suffix.chars().count());
     let mut turn: String = body.chars().take(body_budget).collect();
     turn.push_str(&suffix);
     turn
+}
+
+/// Did the provider refuse a call **that carried a picture** because of the picture? The wire can carry one
+/// (`wire_sees_images`), but the model behind a compatible gateway may not read it, and then the provider
+/// answers the image block itself with a 4xx. Only the statuses that mean 「this request, as written, is
+/// not acceptable」 count — 400, 413, 415, 422: the same request without the picture had just been accepted
+/// (it is the call after the read that failed), so the picture is the difference. A 401/403 (the key),
+/// 404 (the model), 408 or 429 (time, rate) or any 5xx says nothing about pictures and stays what it was.
+fn image_was_refused<E>(
+    attempt: &Result<Result<crate::provider::ChatCompletion, ProviderError>, E>,
+) -> bool {
+    matches!(
+        attempt,
+        Ok(Err(ProviderError::HttpStatus(400 | 413 | 415 | 422, _)))
+    )
 }
 
 fn millis(since: Instant) -> i64 {
@@ -1668,5 +1787,97 @@ mod profile_tests_4791 {
             assert!(final_turn.contains(&id.to_string()));
         }
         assert_eq!(trigger_turn_with_images("짧은 부탁", &[]), "짧은 부탁");
+    }
+
+    /// #4970: the readable-files block is reserved **before** the request's own text is cut, like the
+    /// image ids, so a long request loses its tail and never an id; and a message with no files adds
+    /// nothing.
+    #[test]
+    fn a_long_request_keeps_its_file_list_inside_the_final_turn_budget() {
+        let files: Vec<(Uuid, String, i64)> = (1..=8)
+            .map(|i| (Uuid::from_u128(i), "application/pdf".to_string(), 123_456))
+            .collect();
+        let block = momo_workspace_actions::team_ai_attachments::attachment_list_block(&files);
+        let turn = trigger_turn_with_attachments(&"가".repeat(3000), &[], &block);
+        let final_turn = team_ai::user_turn(&turn);
+        assert_eq!(final_turn.chars().count(), team_ai::MAX_TRIGGER_CHARS);
+        for (id, _, _) in &files {
+            assert!(final_turn.contains(&id.to_string()), "{id} was cut");
+        }
+        assert!(final_turn.contains("read_attachment"));
+        // the person's own words still get most of the turn
+        assert!(
+            final_turn.chars().filter(|c| *c == '가').count() > 700,
+            "the request was squeezed out"
+        );
+        assert_eq!(
+            trigger_turn_with_attachments("짧은 부탁", &[], ""),
+            "짧은 부탁"
+        );
+    }
+
+    /// #4970: twenty pictures (the image-id block) and eight documents (the files block) in one message
+    /// still leave the person's request its floor; the pictures' ids are never cut, and the files block
+    /// keeps whole entries only.
+    #[test]
+    fn many_attachments_never_squeeze_the_request_below_its_floor() {
+        let ids: Vec<Uuid> = (1..=20).map(Uuid::from_u128).collect();
+        let files: Vec<(Uuid, String, i64)> = (101..=108)
+            .map(|i| (Uuid::from_u128(i), "application/pdf".to_string(), 123_456))
+            .collect();
+        let block = momo_workspace_actions::team_ai_attachments::attachment_list_block(&files);
+        let turn = trigger_turn_with_attachments(&"가".repeat(3000), &ids, &block);
+        let final_turn = team_ai::user_turn(&turn);
+        assert_eq!(final_turn.chars().count(), team_ai::MAX_TRIGGER_CHARS);
+        assert!(
+            final_turn.chars().filter(|c| *c == '가').count() >= MIN_REQUEST_CHARS,
+            "the request kept less than its floor"
+        );
+        for id in &ids {
+            assert!(
+                final_turn.contains(&id.to_string()),
+                "picture id {id} was cut"
+            );
+        }
+        // some entries fit, and each one that is there is whole
+        let listed = final_turn.matches("application/pdf · 123456바이트").count();
+        assert!(listed >= 1 && listed < files.len(), "{listed} entries");
+        for line in final_turn.lines().filter(|l| l.contains(" · ")) {
+            assert!(line.ends_with("바이트"), "a half-listed entry: {line}");
+        }
+        // room for nothing is no block, not a header over nothing
+        assert_eq!(whole_lines_within(&block, 10), "");
+        assert_eq!(whole_lines_within(&block, 10_000), block);
+    }
+
+    /// #4970 review L4: only a 4xx that says 「this request, as written, is not acceptable」 is the
+    /// picture's doing; the key, the model, time, rate and the provider's own faults are not.
+    #[test]
+    fn only_a_refusal_of_the_request_itself_counts_as_the_model_not_reading_pictures() {
+        use crate::provider::ChatCompletion;
+        type Attempt = Result<Result<ChatCompletion, ProviderError>, ()>;
+        let refused = |status: u16| -> Attempt {
+            Ok(Err(ProviderError::HttpStatus(
+                status,
+                "no images".to_string(),
+            )))
+        };
+        for status in [400, 413, 415, 422] {
+            assert!(image_was_refused(&refused(status)), "{status}");
+        }
+        for status in [401, 403, 404, 408, 429, 500, 502, 503] {
+            assert!(!image_was_refused(&refused(status)), "{status}");
+        }
+        let unreachable: Attempt = Ok(Err(ProviderError::Unreachable("down".into())));
+        assert!(!image_was_refused(&unreachable));
+        let timed_out: Attempt = Err(());
+        assert!(!image_was_refused(&timed_out));
+        let answered: Attempt = Ok(Ok(ChatCompletion {
+            text: "ok".into(),
+            usage: None,
+            tool_calls: Vec::new(),
+            web_search_requests: 0,
+        }));
+        assert!(!image_was_refused(&answered));
     }
 }

@@ -15,10 +15,10 @@
 //!
 //! [`BUNDLES`] is the one place that says what each bundle owns. `workspace_admin` owns the
 //! eleven cards of ADR-0201 증보 v2 F2, `invite_access` owns `invite.create` and `agent.invite`
-//! (S2, #4965), `long_research` owns the task-mode tool `task_continue` (S4, #4967) and `code`
-//! owns the work-request card (`card_suggest`'s `work.request.open`, #4972 S9); the others are
-//! empty slots, so a later slice (S7 files, S8 memory)
-//! adds an id to its row and nothing else: the filters below read the table.
+//! (S2, #4965), `long_research` owns the task-mode tool `task_continue` (S4, #4967), `files` owns
+//! its one tool (`read_attachment`, #4970 S7) and `code` owns the work-request card
+//! (`card_suggest`'s `work.request.open`, #4972 S9); the others are empty slots, so a later slice
+//! (S8 memory) adds an id to its row and nothing else: the filters below read the table.
 //! `team_ai.roles.set` itself belongs to **no** bundle — if it did, switching
 //! `workspace_admin` off would also remove the only chat path back on.
 //!
@@ -56,6 +56,11 @@ pub const LONG_RESEARCH: &str = "long_research";
 pub const FILES: &str = "files";
 pub const MEMORY: &str = "memory";
 pub const CODE: &str = "code";
+
+/// The one tool the `files` bundle owns (ADR-0201 증보 v3 B6-1, #4970 S7): the helper reads an
+/// attachment of the person who asked. Offered only while `files` is on ([`TeamAiRoles::tool_allowed`]),
+/// and refused at execution when it is off (B13-I5).
+pub const TOOL_READ_ATTACHMENT: &str = "read_attachment";
 
 /// The six switchable bundle ids, in the ADR's table order. `momo-settings` cannot see this
 /// crate, so it keeps its own copy of the six (`TEAM_AI_ROLES_KEYS`) and a drift test in
@@ -149,7 +154,7 @@ pub const BUNDLES: [RoleBundle; 6] = [
         id: FILES,
         label: "파일",
         action_ids: &[],
-        tool_names: &[],
+        tool_names: &[TOOL_READ_ATTACHMENT],
         command_ids: &[],
         notice: Some(NOTICE_FILES),
     },
@@ -780,8 +785,9 @@ mod tests {
         assert_eq!(unknown_tool_names(&table, &known), ["read_atachment"]);
         table[3].tool_names = &["read_attachment"];
         assert!(unknown_tool_names(&table, &known).is_empty());
-        // And the real table names only tools that exist (today: `task_continue`).
+        // And the shipped table names only tools that exist (`task_continue`, `read_attachment`).
         assert!(unknown_tool_names(&BUNDLES, &known).is_empty());
+        assert_eq!(bundle(FILES).unwrap().tool_names, [TOOL_READ_ATTACHMENT]);
     }
 
     /// B5-3 / B13-I5 (#4967): the task-mode tool is owned by `long_research` and by nothing else —
