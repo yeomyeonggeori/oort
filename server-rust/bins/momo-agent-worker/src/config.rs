@@ -165,6 +165,12 @@ pub struct WorkerConfig {
     /// `TEAM_AI_DAILY_SEARCH_CAP` (ADR-0201 증보 v2 H5): provider-side web searches
     /// the team AI may make per UTC day. `0` turns search off.
     pub team_ai_daily_search_cap: i64,
+    /// ADR-0201 증보 v3 B5-5 (#4967): the team AI's **task** bounds — steps, wall clock, model and
+    /// tool calls over the whole task, tasks running at once. Configuration values, not workspace
+    /// settings; the defaults are **[추정]** until measured. `TEAM_AI_TASK_MAX_STEPS`,
+    /// `TEAM_AI_TASK_MAX_WALL_SECS`, `TEAM_AI_TASK_MAX_MODEL_CALLS`, `TEAM_AI_TASK_MAX_TOOL_CALLS`,
+    /// `TEAM_AI_TASK_MAX_PER_WORKSPACE`, `TEAM_AI_TASK_MAX_PER_REQUESTER` (each at least 1).
+    pub team_ai_task: momo_agent::team_ai_task::TaskLimits,
 }
 
 /// The team-memory summary loop's knobs (#3162, ADR-0196 D10, plan §6.1/§6.6). Every default
@@ -638,6 +644,30 @@ fn env(key: &str) -> Option<String> {
     }
 }
 
+/// The task bounds from the environment (ADR-0201 증보 v3 B5-5): every key optional, each value at
+/// least 1 — a `0` would end every task before its first step, which is the switch's job
+/// (`long_research` off), not a limit's.
+fn team_ai_task_limits_from_env() -> Result<momo_agent::team_ai_task::TaskLimits, ConfigError> {
+    let defaults = momo_agent::team_ai_task::TaskLimits::default();
+    Ok(momo_agent::team_ai_task::TaskLimits {
+        max_steps: env_number("TEAM_AI_TASK_MAX_STEPS", defaults.max_steps)?.max(1),
+        max_wall_secs: env_number("TEAM_AI_TASK_MAX_WALL_SECS", defaults.max_wall_secs)?.max(1),
+        max_model_calls: env_number("TEAM_AI_TASK_MAX_MODEL_CALLS", defaults.max_model_calls)?
+            .max(1),
+        max_tool_calls: env_number("TEAM_AI_TASK_MAX_TOOL_CALLS", defaults.max_tool_calls)?.max(1),
+        max_per_workspace: env_number(
+            "TEAM_AI_TASK_MAX_PER_WORKSPACE",
+            defaults.max_per_workspace,
+        )?
+        .max(1),
+        max_per_requester: env_number(
+            "TEAM_AI_TASK_MAX_PER_REQUESTER",
+            defaults.max_per_requester,
+        )?
+        .max(1),
+    })
+}
+
 fn env_number<T: std::str::FromStr>(key: &'static str, fallback: T) -> Result<T, ConfigError> {
     match env(key) {
         Some(raw) => raw
@@ -737,6 +767,7 @@ impl WorkerConfig {
                 momo_workspace_actions::team_ai::DEFAULT_DAILY_SEARCH_CAP,
             )?
             .max(0),
+            team_ai_task: team_ai_task_limits_from_env()?,
         })
     }
 
@@ -776,6 +807,7 @@ impl WorkerConfig {
                 momo_workspace_actions::team_ai::TOOL_PATH_DEADLINE_SECS,
             ),
             team_ai_daily_search_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_SEARCH_CAP,
+            team_ai_task: momo_agent::team_ai_task::TaskLimits::default(),
         }
     }
 

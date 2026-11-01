@@ -13,10 +13,11 @@
 //!
 //! ## The table
 //!
-//! [`BUNDLES`] is the one place that says what each bundle owns. Today only
-//! `workspace_admin` owns anything (the eleven cards of ADR-0201 증보 v2 F2); the others are
-//! empty slots, so a later slice (S2 invites, S4 long work, S7 files, S8 memory, S9 code)
-//! adds an id to its row and nothing else: the filters below read the table.
+//! [`BUNDLES`] is the one place that says what each bundle owns. `workspace_admin` owns the
+//! eleven cards of ADR-0201 증보 v2 F2 and `long_research` owns the task-mode tool
+//! `task_continue` (S4, #4967); the others are empty slots, so a later slice (S2 invites, S7
+//! files, S8 memory, S9 code) adds an id to its row and nothing else: the filters below read
+//! the table.
 //! `team_ai.roles.set` itself belongs to **no** bundle — if it did, switching
 //! `workspace_admin` off would also remove the only chat path back on.
 //!
@@ -38,6 +39,7 @@ use crate::actions::{
     ACTION_WORKSPACE_MEMORY_UPDATE, ACTION_WORKSPACE_SETTINGS_UPDATE,
     ACTION_WORKSPACE_UNFURL_UPDATE, ACTION_WORKSPACE_WORK_TIER_UPDATE, TEAM_AI_ACTION_IDS,
 };
+use crate::tools::TASK_CONTINUE;
 
 /// The workspace settings key that holds the switches (an object of booleans).
 pub const SETTINGS_KEY: &str = "team_ai_roles";
@@ -120,11 +122,13 @@ pub const BUNDLES: [RoleBundle; 6] = [
         tool_names: &[],
         notice: None,
     },
+    // S4 (#4967): the task-mode tool. It leaves the request's tool list with the bundle
+    // (`tool_allowed`), and a call of it that was never offered is refused by the worker.
     RoleBundle {
         id: LONG_RESEARCH,
         label: "긴 조사",
         action_ids: &[],
-        tool_names: &[],
+        tool_names: &[TASK_CONTINUE],
         notice: None,
     },
     RoleBundle {
@@ -543,12 +547,39 @@ mod tests {
         let mut table = BUNDLES;
         table[3].tool_names = &["read_attachment", "read_atachment"]; // files
         table[4].tool_names = &["search_memory"]; // memory
-        let known = ["read_attachment", "search_memory", "search_messages"];
+        let known = [
+            "read_attachment",
+            "search_memory",
+            "search_messages",
+            TASK_CONTINUE,
+        ];
         assert_eq!(unknown_tool_names(&table, &known), ["read_atachment"]);
         table[3].tool_names = &["read_attachment"];
         assert!(unknown_tool_names(&table, &known).is_empty());
-        // And an empty table of names (today's) has nothing to misspell.
+        // And the real table names only tools that exist (today: `task_continue`).
         assert!(unknown_tool_names(&BUNDLES, &known).is_empty());
+    }
+
+    /// B5-3 / B13-I5 (#4967): the task-mode tool is owned by `long_research` and by nothing else —
+    /// the request builder's `tool_allowed` filter drops it with that one bundle, and no other
+    /// switch moves it.
+    #[test]
+    fn task_continue_leaves_with_long_research_and_with_nothing_else() {
+        let all_on = TeamAiRoles::default();
+        assert!(all_on.tool_allowed(TASK_CONTINUE));
+        let research_off = all_on.with(LONG_RESEARCH, false);
+        assert!(!research_off.tool_allowed(TASK_CONTINUE));
+        assert!(!TeamAiRoles::none_on().tool_allowed(TASK_CONTINUE));
+        for other in [WORKSPACE_ADMIN, INVITE_ACCESS, FILES, MEMORY, CODE] {
+            assert!(
+                all_on.with(other, false).tool_allowed(TASK_CONTINUE),
+                "{other} must not move the task tool"
+            );
+        }
+        // The reads and the proposal tool are not bundle-gated: they stay with the bundle off.
+        assert!(research_off.tool_allowed("search_messages"));
+        assert!(research_off.tool_allowed(crate::tools::WORKSPACE_ACTION_PROPOSE));
+        assert_eq!(bundle(LONG_RESEARCH).unwrap().tool_names, [TASK_CONTINUE]);
     }
 
     #[test]

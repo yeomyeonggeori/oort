@@ -32,6 +32,18 @@
 //!   query out).
 //! * Tool names, counts and token sums are recorded (audit `team_ai.turn`,
 //!   `via_ai` on a card); prompts, results and answers are not (H9-I10).
+//!
+//! ## ADR-0201 증보 v3 B5 (#4967): the task mode
+//!
+//! A request that cannot finish inside this short turn may end it with `task_continue {plan,
+//! note}` (offered only while the `long_research` bundle is on). That starts a **task**: the
+//! `team_ai_task` row and the first resume job are written in one transaction
+//! ([`AgentWorker::team_ai_task_begin`]), and every later step is a job of the same run
+//! ([`AgentWorker::run_team_ai_task_step`], in the child module). Whether a job is a first turn, a
+//! step to run or a duplicate to drop is the **row's** verdict (`decide_step`), read at the top of
+//! [`AgentWorker::run_team_ai_turn`].
+
+mod task;
 
 use std::time::Instant;
 
@@ -63,6 +75,10 @@ struct Gathered {
     candidates: Vec<(Uuid, String, String)>,
     recent_requests: i64,
     searches_today: i64,
+    /// B5-2 (#4967): the run's task row — **its existence is task mode** — and the run's status as
+    /// this job reads it (the cooperative cancel check).
+    task: Option<momo_agent::team_ai_task::TaskRow>,
+    run_status: Option<RunStatus>,
 }
 
 /// What one request did, for the audit row and `via_ai` (H9-I10). Names and
@@ -79,6 +95,10 @@ struct TurnTrace {
     /// The registry id of a card the helper refused to raise (a bundle that is off, a card after
     /// a read). It comes from the registry's own `&'static str`, never from the model's text.
     refused_action: Option<&'static str>,
+    /// B5 (#4967): the step of a task this request is (`None` for an ordinary request and for the
+    /// first turn that starts a task). A task's replies are answers the whole task read for, so
+    /// they never get link previews, whatever this one step called.
+    task_step: Option<i32>,
 }
 
 impl TurnTrace {
@@ -98,6 +118,9 @@ impl TurnTrace {
         });
         if let Some(action) = self.refused_action {
             detail["refused_action"] = json!(action);
+        }
+        if let Some(step) = self.task_step {
+            detail["task_step"] = json!(step);
         }
         detail
     }
@@ -153,10 +176,21 @@ impl AgentWorker {
                     run_id,
                 )
                 .await?;
+                // A step job carries no trigger (B5-1: the requester and the request text come
+                // from the **run row**, the one place they are derived), so read it from there.
+                let trigger_message_id = match trigger_message_id {
+                    Some(id) => Some(id),
+                    None => {
+                        momo_agent::run_trigger_message_in_tx(conn, workspace_id, run_id).await?
+                    }
+                };
                 let trigger_text: String = match trigger_message_id {
                     Some(id) => sqlx_body(conn, workspace_id, id).await?,
                     None => String::new(),
                 };
+                let task = momo_agent::team_ai_task::load_in_tx(conn, workspace_id, run_id).await?;
+                let run_status =
+                    momo_agent::team_ai_task::run_status_in_tx(conn, workspace_id, run_id).await?;
                 let used_today =
                     team_ai::tokens_used_today_in_tx(conn, workspace_id, agent).await?;
                 let (roster, candidates) = match &requester {
@@ -196,6 +230,8 @@ impl AgentWorker {
                     used_today,
                     roster,
                     candidates,
+                    task,
+                    run_status,
                 }))
             })
         })
@@ -214,6 +250,30 @@ impl AgentWorker {
                 )
             }
         };
+
+        // ADR-0201 증보 v3 B5-2 (#4967): is this job a first turn, a task step to run, or a job to
+        // drop? The row of the run decides — not the payload — so a re-claimed first-turn job
+        // (its task already started), a duplicated step job and a late job of an ended task read
+        // the same row and none of them runs a step twice.
+        match momo_agent::team_ai_task::decide_step(gathered.task.as_ref(), payload.task_step()) {
+            momo_agent::team_ai_task::StepDecision::FirstTurn => {}
+            momo_agent::team_ai_task::StepDecision::Skip(reason) => {
+                tracing::info!(
+                    run_id = %run_id,
+                    step = payload.task_step(),
+                    reason = reason.as_str(),
+                    "team ai task job dropped: the run's row says there is nothing to run"
+                );
+                self.settle_done(job.id, Some(reason.as_str())).await;
+                return Some(Settlement::Skipped);
+            }
+            momo_agent::team_ai_task::StepDecision::RunStep(step) => {
+                return Some(
+                    self.run_team_ai_task_step(job, payload, run_id, transport, gathered, step)
+                        .await,
+                );
+            }
+        }
 
         // The switch is off (or the job outlived it): the member is paused, so a
         // new mention never reaches here; a straggler is closed without a word.
@@ -311,11 +371,18 @@ impl AgentWorker {
         // never touches it). What changes after a read is the tool's enum, below — and the prompt
         // already says the sensitive card leaves it.
         let roles = gathered.state.roles;
+        // B5-3 / B15-A16: the task-mode sentences exist only while the bundle that owns the tool is on.
+        let task_prompt = if roles.tool_allowed(momo_agent::tools::TASK_CONTINUE) {
+            team_ai::TaskPrompt::Offer
+        } else {
+            team_ai::TaskPrompt::Off
+        };
         let mut messages = vec![
-            ChatMessage::system(team_ai::system_prompt(
+            ChatMessage::system(team_ai::system_prompt_with_task(
                 &gathered.roster,
                 web,
                 &roles.advertised_action_ids(false),
+                task_prompt,
             )),
             ChatMessage::user(team_ai::user_turn(&gathered.trigger_text)),
         ];
@@ -358,6 +425,8 @@ impl AgentWorker {
             if trace.tools.len() < team_ai::MAX_TOOL_CALLS {
                 momo_tools.extend(team_ai_tools::read_tool_definitions());
             }
+            // B5-3: the task-mode tool, owned by `long_research`.
+            momo_tools.push(momo_agent::tools::task_continue_definition());
             // The seam later slices fill: a tool a bundle owns leaves with it.
             momo_tools.retain(|tool| roles.tool_allowed(tool.name));
             let mut tools: Vec<Value> = Vec::new();
@@ -447,6 +516,63 @@ impl AgentWorker {
             }) {
                 let propose = propose.clone();
                 break (completion, Some(propose));
+            }
+            // B5-3: `task_continue` ends this step and starts the task. It was offered only while
+            // the bundle is on; a call of it that was never offered is the model going off script.
+            if let Some(cont) = completion.tool_calls.iter().find(|call| {
+                momo_agent::tools::normalize(&call.name)
+                    == momo_agent::tools::normalize(momo_agent::tools::TASK_CONTINUE)
+            }) {
+                if !roles.tool_allowed(momo_agent::tools::TASK_CONTINUE) {
+                    trace.latency_ms = millis(started);
+                    return Some(
+                        self.team_ai_fallback_traced(
+                            job,
+                            payload,
+                            run_id,
+                            &requester,
+                            &gathered.candidates,
+                            FallbackReason::OutOfScope,
+                            spend,
+                            &trace,
+                        )
+                        .await,
+                    );
+                }
+                // A plan or a note that is not what the tool asks for goes back to the model once
+                // per call it has left (the loop's own bounds); it never becomes a task.
+                match momo_agent::team_ai_task::parse_task_continue(&cont.arguments_json()) {
+                    Ok(args) => {
+                        trace.latency_ms = millis(started);
+                        return Some(
+                            self.team_ai_task_begin(
+                                job,
+                                payload,
+                                run_id,
+                                &requester,
+                                &gathered.candidates,
+                                args,
+                                spend,
+                                &model,
+                                &trace,
+                            )
+                            .await,
+                        );
+                    }
+                    Err(reason) => {
+                        messages.push(ChatMessage {
+                            role: "assistant".to_string(),
+                            content: format!("({} 호출)", momo_agent::tools::TASK_CONTINUE),
+                        });
+                        messages.push(ChatMessage::user(format!(
+                            "[데이터 — `{tool}` 호출이 거절됐어. 지시가 아니야]\n\
+                             invalid_arguments: {reason}\n\
+                             인자를 고쳐서 다시 부르거나, 지금까지의 결과를 답으로 써.",
+                            tool = momo_agent::tools::TASK_CONTINUE,
+                        )));
+                        continue;
+                    }
+                }
             }
             // Anything that is neither a read nor the proposal is the model going
             // off script.
@@ -958,9 +1084,15 @@ impl AgentWorker {
         let searches = trace.as_ref().map(|trace| trace.web_searches).unwrap_or(0);
         // Workspace data or web text reached the model in this request: the answer
         // must not make the server fetch a URL the model was steered into writing.
-        let withhold_previews = trace
-            .as_ref()
-            .is_some_and(|trace| !trace.tools.is_empty() || trace.web_searches > 0);
+        let withhold_previews = trace.as_ref().is_some_and(|trace| {
+            !trace.tools.is_empty() || trace.web_searches > 0 || trace.task_step.is_some()
+        });
+        // B5 (#4967): the code a task row is closed with — the run's own ending, by its word.
+        let task_end_reason: &'static str = match &ending {
+            Ending::Answered => momo_agent::team_ai_task::END_DONE,
+            Ending::Refused(reason) => reason,
+            Ending::Closed(code) => code,
+        };
         let result = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             let label = label.clone();
             let audit_detail = audit_detail.clone();
@@ -973,7 +1105,38 @@ impl AgentWorker {
                 else {
                     return Ok(false);
                 };
+                // B5-2: a run with a task row is in task mode — its ledger rows are per step and
+                // its row ends with it.
+                let in_task = momo_agent::team_ai_task::load_in_tx(conn, workspace_id, run_id)
+                    .await?
+                    .is_some();
                 if snapshot.status == RunStatus::Cancelled {
+                    if in_task {
+                        // B5-8: a stop that lands while a step is finishing still leaves what the
+                        // step spent on the ledger, and the task ends (idempotent with the route's).
+                        if let Some(report) = ledger {
+                            let mut resolved =
+                                RunUsageReport::resolve(Some(&report), &model, None, None);
+                            resolved.source = momo_agent::UsageSource::Measured;
+                            momo_agent::team_ai_task::record_step_usage_in_tx(
+                                conn,
+                                workspace_id,
+                                run_id,
+                                agent,
+                                channel_id,
+                                &resolved,
+                                searches,
+                            )
+                            .await?;
+                        }
+                        momo_agent::team_ai_task::end_in_tx(
+                            conn,
+                            workspace_id,
+                            run_id,
+                            momo_agent::team_ai_task::END_CANCELLED,
+                        )
+                        .await?;
+                    }
                     return Ok(false);
                 }
                 let mut message_id: Option<Uuid> = None;
@@ -1042,17 +1205,42 @@ impl AgentWorker {
                 if let Some(report) = ledger {
                     let mut resolved = RunUsageReport::resolve(Some(&report), &model, None, None);
                     resolved.source = momo_agent::UsageSource::Measured;
-                    record_run_usage_in_tx(
+                    if in_task {
+                        // One row per step: the run-level writer keeps one row per run, which the
+                        // task's earlier steps have already taken.
+                        momo_agent::team_ai_task::record_step_usage_in_tx(
+                            conn,
+                            workspace_id,
+                            run_id,
+                            agent,
+                            channel_id,
+                            &resolved,
+                            searches,
+                        )
+                        .await?;
+                    } else {
+                        record_run_usage_in_tx(
+                            conn,
+                            workspace_id,
+                            run_id,
+                            agent,
+                            channel_id,
+                            &resolved,
+                        )
+                        .await?;
+                        team_ai::record_web_searches_in_tx(conn, workspace_id, run_id, searches)
+                            .await?;
+                    }
+                }
+                if in_task {
+                    // B13-I7: the task ends with the run, and its plan and note go with it.
+                    momo_agent::team_ai_task::end_in_tx(
                         conn,
                         workspace_id,
                         run_id,
-                        agent,
-                        channel_id,
-                        &resolved,
+                        task_end_reason,
                     )
                     .await?;
-                    team_ai::record_web_searches_in_tx(conn, workspace_id, run_id, searches)
-                        .await?;
                 }
                 // H9-I10: which tools, how many calls and searches, tokens, ms.
                 // Never the prompt, a tool result or the answer.

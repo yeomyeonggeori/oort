@@ -745,12 +745,20 @@ mod tests {
     /// set stops being fixed (`member_handle_alias_v2_set_ck` is dropped, the shape CHECK stays) and
     /// the trigger `member_handle_alias_guard` takes over: an alias belongs to the workspace's team AI
     /// member only, and a workspace holds at most four. No new table, no new grant.
+    ///
+    /// 169 is #4967's 「도우미 작업 모드」 (ADR-0201 증보 v3 B5·B14-S4): the `team_ai_task` marker
+    /// table — one row per run, the row's existence is the task-mode judgement, `steps_done` and the
+    /// step claim keep a step from running twice, and the plan/note between steps are gone once the
+    /// row is ended (`team_ai_task_ended_ck`). Tenant ENABLE + FORCE + `ws_isolation`; granted to
+    /// `momo_app` and `momo_worker` only (SELECT, INSERT, UPDATE — no DELETE). 167 (#4900) and 168
+    /// (#4656) are reserved by other slices and land before this one: until they do, this one test is
+    /// the single expected failure of a branch that carries 169 alone.
     #[test]
-    fn discovers_contiguous_migrations_001_to_166() {
+    fn discovers_contiguous_migrations_001_to_169() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=166).collect();
+        let expected: Vec<i64> = (1..=169).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -758,7 +766,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=166 under {}",
+            "expected contiguous 001..=169 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -766,7 +774,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("166_team_ai_alias_follow_name"));
+            .starts_with("169_team_ai_task"));
     }
 
     #[test]
