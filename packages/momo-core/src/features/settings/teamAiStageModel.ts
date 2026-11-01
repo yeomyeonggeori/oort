@@ -138,4 +138,13 @@ export const TEAM_AI_QUERY_KEYS = {
   providerLink: ["settings", "provider-link"],
   providerLinkChain: ["settings", "provider-link-chain"],
   providerDefaultAi: ["settings", "provider-default-ai"],
+  /** 워크스페이스 설정 가방(관리자 전용). 웹 `teamAiSettingKey`와 같은 값이다. */
+  settingsBag: (workspaceId: string) =>
+    ["settings", "team-ai", workspaceId.toLowerCase()] as const,
 } as const;
+
+/**
+ * 폰 설정 페이지 위에 쌓이는 「도우미」 장의 이름표(`SettingsSubPage`). 화면 상태의 이름이라 문구가 아니다. 코어에 두는
+ * 까닭은 직접 문구 장부가 한 낱말 문자열을 문구로 세기 때문이다.
+ */
+export const TEAM_AI_HELPER_PAGE = "teamAiHelper" as const;
