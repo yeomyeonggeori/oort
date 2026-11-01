@@ -2014,6 +2014,113 @@ export const catalog: MessageCatalog = {
       "value": "Video"
     }
   ],
+  "timeline.workPlan.button": [
+    {
+      "type": 0,
+      "value": "Plan, "
+    },
+    {
+      "type": 2,
+      "value": "done",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " steps done"
+    }
+  ],
+  "timeline.workPlan.buttonDone": [
+    {
+      "type": 0,
+      "value": "Plan, all "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " steps done"
+    }
+  ],
+  "timeline.workPlan.maybeStale": [
+    {
+      "type": 0,
+      "value": "The record is long, so this may not be the latest plan."
+    }
+  ],
+  "timeline.workPlan.notLive": [
+    {
+      "type": 0,
+      "value": "This session is not running now. This is the last plan it reported."
+    }
+  ],
+  "timeline.workPlan.openAll": [
+    {
+      "type": 0,
+      "value": "See all"
+    }
+  ],
+  "timeline.workPlan.sessionLabel": [
+    {
+      "type": 0,
+      "value": "Work session"
+    }
+  ],
+  "timeline.workPlan.stepCurrent": [
+    {
+      "type": 0,
+      "value": "Current step"
+    }
+  ],
+  "timeline.workPlan.stepDone": [
+    {
+      "type": 0,
+      "value": "Done"
+    }
+  ],
+  "timeline.workPlan.stepPending": [
+    {
+      "type": 0,
+      "value": "Waiting"
+    }
+  ],
+  "timeline.workPlan.title": [
+    {
+      "type": 0,
+      "value": "Plan · "
+    },
+    {
+      "type": 2,
+      "value": "done",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    }
+  ],
+  "timeline.workPlan.titleDone": [
+    {
+      "type": 0,
+      "value": "Plan · Done"
+    }
+  ],
   "timeline.workRecord.bundleRead": [
     {
       "type": 0,
