@@ -3,6 +3,14 @@ import {
   emptyExpressionCache,
 } from '@momo/core/features/expressions/cache';
 import {matchesExpressionContract} from '@momo/core/features/expressions/contracts';
+import {
+  errorCodeOf,
+  photoModelRequest,
+  readPhotoDraftResult,
+  readPhotoModel,
+  type PhotoDraftResult,
+  type PhotoModel,
+} from '@momo/core/features/expressions/photo';
 import type {
   Expression,
   ExpressionAddPolicy,
@@ -19,6 +27,28 @@ import {
   type ExpressionUsage,
 } from '@momo/core/features/expressions/usage';
 import {tokenizeExpressions} from '@momo/core/features/expressions/message';
+
+/**
+ * 서버가 사진 길에서 답한 상태와 닫힌 `error.code`(있으면). 그 밖의 글 — 공급자가 쓴 말이 섞일 수 있는 본문 —
+ * 은 싣지 않는다. 웹 transport 의 `ExpressionHttpError` 와 같은 모양이라 화면이 같은 코어 판정
+ * (`photoFailureOf`)에 그대로 넣는다.
+ */
+export class ExpressionHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | undefined,
+  ) {
+    super(String(status));
+  }
+}
+
+/** 답이 성공이 아닐 때: 상태와 닫힌 코드만 꺼낸다(코어 `errorCodeOf` 가 모양을 확인한다). */
+function httpErrorOf(response: {status: number; json?: unknown}) {
+  return new ExpressionHttpError(
+    response.status,
+    errorCodeOf(JSON.stringify(response.json ?? null)),
+  );
+}
 
 export interface ExpressionFiles {
   write(key: string, bytes: Uint8Array): string;
@@ -229,6 +259,31 @@ export function createPhoneExpressionStore(
       )
         throw new Error('Expression draft unavailable');
       return value;
+    },
+    /**
+     * 팀에 이미지 모델이 연결돼 있는가, 있다면 사진이 어느 회사로 가는가(ADR-0218 §8 H9). 웹 `ExpressionStore.photoModel`
+     * 과 같은 약속이다: 성공이 아니면 상태와 닫힌 코드를 실은 오류, 모양이 어긋난 답도 오류다.
+     */
+    async photoModel(): Promise<PhotoModel> {
+      const response = await transport.request(photoModelRequest(root));
+      if (response.status !== 200) throw httpErrorOf(response);
+      const model = readPhotoModel(response.json);
+      // 상태를 아는 어긋난 답: 「연결이 끊겼어요」가 아니라 일반 실패로 읽힌다.
+      if (!model) throw new ExpressionHttpError(response.status, undefined);
+      return model;
+    },
+    /**
+     * 사진 한 장으로 만든 초안과 서버가 배경에 한 일. 요청은 코어 `photoDraftRequest` 가 만든 것이고, 부르는 쪽이
+     * `signal` 을 달아 기다리기를 그만둘 수 있다(서버는 이미 시작한 일을 끝까지 한다).
+     */
+    async photoDraft(request: ExpressionRequest): Promise<PhotoDraftResult> {
+      const response = await transport.request(request);
+      if (response.status !== 200 && response.status !== 201) {
+        throw httpErrorOf(response);
+      }
+      const result = readPhotoDraftResult(response.json, workspaceId);
+      if (!result) throw new ExpressionHttpError(response.status, undefined);
+      return result;
     },
     /** 보고 고른 초안을 등록한다. 돌려받은 그림을 목록에 바로 넣고, 못 맞으면 목록을 다시 받는다. */
     async mutate(request: ExpressionRequest): Promise<ExpressionMutation> {

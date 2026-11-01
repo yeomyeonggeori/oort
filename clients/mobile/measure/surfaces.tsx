@@ -125,6 +125,7 @@ import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
 import {SheetDragSurface} from './sheetDrag';
 import {SheetKitSurface} from './sheetKit';
+import {ExpressionPhotoSurface} from './expressionPhoto';
 import {ProfileSheetSurface} from './profileSheet';
 import {ConversationMenuSurface} from './conversationMenu';
 import {ConversationHeaderSurface} from './conversationHeader';
@@ -2238,6 +2239,12 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4319: 다른 사람 프로필 시트(`measure/profileSheet.tsx`, 배송되는 시트 + 고정 데이터·합성 사진, 가상 인물).
   if (name === 'profilesheet' || name.startsWith('profilesheet-')) {
     return <ProfileSheetSurface which={name.slice('profilesheet'.length).replace(/^-/, '')} />;
+  }
+  // #4984: 폰 「AI와 만들기」 사진 길(`measure/expressionPhoto.tsx`, 배송되는 양식 + 코어 가짜 서버 장면, 합성 그림·가상 이름).
+  if (name === 'expressionphoto' || name.startsWith('expressionphoto-')) {
+    return (
+      <ExpressionPhotoSurface which={name.slice('expressionphoto'.length).replace(/^-/, '')} />
+    );
   }
   // #4319: 대화 머리 ⋮ 시트(`measure/conversationMenu.tsx`, 배송되는 시트 + 고정 데이터, 가상 인물).
   if (name === 'convmenu' || name.startsWith('convmenu-')) {

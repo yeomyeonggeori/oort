@@ -35,7 +35,7 @@ import {useKeyboardHeight} from '../../lib/useKeyboardHeight';
 import {ExpressionAddMenu, useCanAddExpression} from './ExpressionAddMenu';
 import {ExpressionImage} from './ExpressionImage';
 import {ExpressionImportForm} from './ExpressionImportForm';
-import {ExpressionMakeForm} from './ExpressionMakeForm';
+import {ExpressionMakeEntry} from './ExpressionMakeEntry';
 import {useExpressions} from './ExpressionProvider';
 import {browseExpressions, type ExpressionView} from './expressionViews';
 import {
@@ -212,7 +212,7 @@ export function TeamExpressionPicker({
             onDone={() => setChapter('list')}
           />
         ) : (
-          <ExpressionMakeForm
+          <ExpressionMakeEntry
             onBack={() => setChapter('list')}
             onDone={() => setChapter('list')}
             onImport={() => setChapter('import')}
