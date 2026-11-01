@@ -7,6 +7,8 @@ import {
 import {useCallback, useEffect, useRef} from 'react';
 import type {GestureResponderEvent} from 'react-native';
 
+import {PRESS_VISUAL_DELAY_MS} from '../../design/motion';
+
 // =============================================================================
 // 길게 누르기 — 시트를 여는 제스처.
 //
@@ -23,7 +25,8 @@ import type {GestureResponderEvent} from 'react-native';
 // 이 배선은 방어를 **두 겹**으로 둔다. 아래쪽이 무너져도 위쪽이 남는 구조이고,
 // 그 순서가 중요하다.
 //
-//   1겹(플랫폼). 타이머는 `Pressable`의 `delayLongPress`가 돌린다. React
+//   1겹(플랫폼). 타이머는 `Pressable`의 `delayLongPress`가 돌린다(눌림 면을 늦춰
+//      칠하는 `unstable_pressDelay` 와 **한 쌍**으로 — 아래 `LONG_PRESS_TIMING`). React
 //      Native의 `Pressability`는 스크롤이 시작돼 ScrollView가 responder를
 //      가져가면 제스처를 **취소**한다 — 이것은 오래된, 확실히 살아 있는 경로다.
 //      즉 우리 코드가 한 줄도 돌지 않아도 "스크롤 중에 시트가 열린다"는 최악은
@@ -61,13 +64,33 @@ export interface LongPressTouchHandlers {
   onTouchCancel: (event: GestureResponderEvent) => void;
 }
 
+/**
+ * 스크롤 컨테이너 안 눌림 면이 `Pressable` 에 펼치는 **한 쌍** (#4664).
+ *
+ * 한 쌍인 이유: `Pressability` 는 길게 누르기를 `delayLongPress + delayPressIn` 에 울린다. 눌림 칠하기를 늦추는
+ * `unstable_pressDelay` 만 더하면 시트가 370ms 에 열리고, `delayLongPress` 만 줄이면 130ms 에 열린다. 둘이 갈라지지 않게
+ * 이 훅이 두 값을 한 객체로만 내보낸다 — 낱개 `delayLongPress` 는 더 이상 없다.
+ */
+export interface LongPressTiming {
+  /** RN 의 `delayLongPress` 는 눌림이 **칠해진 뒤** 재는 시간이다 → 코어의 총 시간에서 칠하기 지연을 뺀다. */
+  delayLongPress: number;
+  /** 눌림 면을 늦춰 칠하는 시간(`PRESS_VISUAL_DELAY_MS`). 지연 안에 스크롤이 시작되면 눌림은 한 번도 안 칠해진다. */
+  unstable_pressDelay: number;
+}
+
+/** 손이 닿은 때부터 시트까지 총 `LONG_PRESS_MS`(250ms) = 130 + 120. 시험이 합을 잰다(`pressDelay.test.tsx`). */
+const LONG_PRESS_TIMING: LongPressTiming = {
+  delayLongPress: LONG_PRESS_MS - PRESS_VISUAL_DELAY_MS,
+  unstable_pressDelay: PRESS_VISUAL_DELAY_MS,
+};
+
 export interface LongPress {
   /** 행을 감싸는 View 에 그대로 펼친다. */
   handlers: LongPressTouchHandlers;
   /** `Pressable` 의 `onLongPress` 에 그대로 연결한다. */
   onLongPress: () => void;
-  /** `Pressable` 의 `delayLongPress`. 코어의 상수를 그대로 쓴다. */
-  delayLongPress: number;
+  /** `Pressable` 에 `{...longPress.pressTiming}` 으로 펼친다. 낱개로 꺼내 쓰지 않는다(`LongPressTiming`). */
+  pressTiming: LongPressTiming;
   /**
    * 방금 이 제스처가 시트를 열었는가.
    *
@@ -153,5 +176,5 @@ export function useLongPress({
     [],
   );
 
-  return {handlers, onLongPress, delayLongPress: LONG_PRESS_MS, consumeTap};
+  return {handlers, onLongPress, pressTiming: LONG_PRESS_TIMING, consumeTap};
 }
