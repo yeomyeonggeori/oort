@@ -5,6 +5,7 @@ import {
   visibleUnfurls,
   type MessageUnfurl,
   type UnfurlCardModel,
+  type UnfurlCardSource,
   type UnfurlSize,
 } from '@momo/core/features/timeline/unfurl';
 import React, {useState} from 'react';
@@ -143,16 +144,33 @@ function AddressLine({
   );
 }
 
-function CardView({
+/**
+ * 카드 한 장. 입력칸 위 미리보기(#5016)도 이 컴포넌트를 그대로 쓴다 — 미리보기에는 아직 메시지가 없어 `messageId` 가
+ * 없을 뿐이고(`UnfurlCardSource`), 표시 모델은 `messageId` 를 읽지 않으므로 같은 규칙으로 같은 카드가 그려진다.
+ */
+export function CardView({
   unfurl,
   preference,
   rowKey,
   onLongPress,
+  eagerIcon = false,
+  endInset = 0,
 }: {
-  unfurl: MessageUnfurl;
+  unfurl: UnfurlCardSource;
   preference: Exclude<UnfurlSize, 'off'>;
   rowKey: string;
   onLongPress?: ((target: LinkCardTarget) => void) | undefined;
+  /**
+   * 목록 줄이 아닌 자리(입력칸 미리보기)의 카드는 「줄이 한 번 보였는가」를 물을 목록이 없다. 켜면 사이트 아이콘을
+   * 카드가 서는 때 바로 받는다 — 카드가 이미 화면 위에 있다. 목록이 없을 때 `useRowSeen` 이 `true` 를 주는 것에
+   * 기대지 않고 이름으로 적는다(그 위에 목록 제공자가 생기는 날 아이콘이 영영 막히지 않게).
+   */
+  eagerIcon?: boolean;
+  /**
+   * 카드 오른쪽 위에 겹쳐 서는 것(입력칸 미리보기의 ✕)이 가리지 않게, 작은 카드의 글이 비워 둘 오른쪽 여백.
+   * 큰 카드는 겹치는 자리가 그림 위라 비우지 않는다.
+   */
+  endInset?: number;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
@@ -160,7 +178,8 @@ function CardView({
   const expand = fontScale >= STACK_PILL_SCALE;
   // 사이트 아이콘은 줄이 한 번 보인 뒤에만 부른다 — 프록시가 그때 사이트로 나간다(ADR-0170 증보 D9).
   // 그림은 카드가 서면 바로 받는다(틀을 미리 잡아 두어 줄이 뛰지 않는다).
-  const seen = useRowSeen(rowKey);
+  const rowSeen = useRowSeen(rowKey);
+  const seen = eagerIcon || rowSeen;
   const image = useUnfurlImage(unfurl.imageUrl);
   const icon = useUnfurlImage(unfurl.iconUrl, {enabled: seen});
   const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
@@ -246,7 +265,11 @@ function CardView({
           {text}
         </>
       ) : (
-        <View style={styles.compactRow}>
+        <View
+          style={[
+            styles.compactRow,
+            endInset > 0 ? {paddingRight: space.sm + endInset} : null,
+          ]}>
           {picture.kind === 'tile' ? (
             <View style={styles.thumb} testID="unfurl-tile">
               {model.isVideo ? (
