@@ -365,4 +365,55 @@ describe("liveThreadRollup — 서버 스냅샷 위에 든 새 답글을 얹는�
     const index = groupRepliesByRoot([root(undefined), reply(14), reply(15, { rootId: ROOT.toUpperCase() })]);
     expect(index.get(ROOT)?.map((message) => message.seq)).toEqual([14, 15]);
   });
+
+  it("승인 카드 답글은 수·얼굴에 들고 안 읽은 수에는 안 든다 — 서버 reply_count는 쓰는 길로 세고 안 읽은 수는 text만 센다 (#5032)", () => {
+    const card = reply(14, { authorMemberId: C, type: "approval_request", body: "소개를 바꿔도 될까요?" });
+    // 인플레이스 승인 카드는 답글(root_id 있음)로 오는 유일한 승인 카드이고 서버가 센다: 수·얼굴·머리가 오른다. 안 읽은 수는 그대로다.
+    expect(live(snapshot, [card])).toMatchObject({
+      replyCount: 4,
+      unreadReplyCount: 1,
+      participantIds: [C, A, B],
+      lastReplySeq: 14,
+    });
+    // 서버 요약이 없는 요청 묶음의 첫 카드도 「답글 1개」와 얼굴이 선다(칩은 없다).
+    const first = live(undefined, [card]);
+    expect(first).toMatchObject({ replyCount: 1, participantIds: [C], lastReplySeq: 14 });
+    expect(first).not.toHaveProperty("unreadReplyCount");
+    // 작업 세션 이벤트 줄(system + root_id)은 서버가 Skip 길로 쓰고 안 센다 — 세면 세션 루트마다 「답글 N개」가 선다.
+    expect(live(snapshot, [reply(15, { authorMemberId: C, type: "system" })])).toMatchObject({
+      replyCount: 3,
+      participantIds: [A, B],
+    });
+    // 읽음 응답이 머리를 옮길 때도 같은 규칙으로 접는다: 카드는 수에 접히고 서버가 준 안 읽은 수가 그대로 이어받는다.
+    const state = reconcileMessages(emptyTimeline(), [root(snapshot), card]);
+    const read = applyThreadReadState(state, ROOT, { following: true, unreadReplyCount: 1 });
+    expect(read.messages.find((message) => message.id === ROOT)?.thread).toMatchObject({
+      last_reply_seq: 14,
+      reply_count: 4,
+      unread_reply_count: 1,
+    });
+  });
+
+  it("스레드를 보고 있으면(패널이 열리고 창이 앞) 남의 새 답글에도 안 읽은 수가 0이다 — 수·얼굴은 오르고, 값이 없으면 없는 채다 (#5032)", () => {
+    const fresh = reply(14, { authorMemberId: C });
+    // 읽음 신호의 응답이 오기 전(머리는 아직 13): 보고 있지 않으면 칩이 +1이고, 보고 있으면 0이다. 수·얼굴은 같다.
+    expect(liveThreadRollup(root(snapshot), [fresh], ME, false)).toMatchObject({ replyCount: 4, unreadReplyCount: 2 });
+    expect(liveThreadRollup(root(snapshot), [fresh], ME, true)).toMatchObject({
+      replyCount: 4,
+      unreadReplyCount: 0,
+      participantIds: [C, A, B],
+      lastReplySeq: 14,
+    });
+    // 열린 루트가 서버 값 1을 들고 있고 든 답글이 없어도 0이다(열자마자 읽는 중).
+    expect(liveThreadRollup(root(snapshot), [], ME, true)?.unreadReplyCount).toBe(0);
+    // 따라가지 않는 스레드·서버 요약이 없는 루트는 0을 지어내지 않는다 — 「말하지 않음」은 0이 아니다.
+    const { unread_reply_count: _following, ...unfollowed } = snapshot;
+    expect(liveThreadRollup(root(unfollowed), [fresh], ME, true)).not.toHaveProperty("unreadReplyCount");
+    expect(liveThreadRollup(root(undefined), [fresh], ME, true)).not.toHaveProperty("unreadReplyCount");
+    // 보고 있는 동안 응답이 서버 값으로 접으면 그 값이 이어받아 닫은 뒤에도 칩이 되살아나지 않는다.
+    const held = reconcileMessages(emptyTimeline(), [root(snapshot), fresh]);
+    const read = applyThreadReadState(held, ROOT, { following: true, unreadReplyCount: 0 });
+    const settled = read.messages.find((message) => message.id === ROOT)!;
+    expect(liveThreadRollup(settled, repliesOf(read.messages), ME, false)).toMatchObject({ replyCount: 4, unreadReplyCount: 0 });
+  });
 });
