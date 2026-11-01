@@ -2939,6 +2939,85 @@ pub struct NotificationRulesResponse {
     pub mention_overrides_mute: bool,
 }
 
+/// `GET …/notification-diagnostics` query (ADR-0206 D11, #4341). Both fields optional and read as
+/// text so the route can answer its own 400 sentences: a `channelId` that is not a UUID, a `kind`
+/// that is not one of the closed kinds.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationDiagnosticsQuery {
+    /// Also evaluate `channel_muted` for this channel (404 when the caller cannot see it).
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    /// A notification kind. Validated against the closed list now; `kind_off` and the work-hours
+    /// pass-through read it when their slices land.
+    #[serde(default)]
+    pub kind: Option<String>,
+}
+
+/// One blocker of `GET …/notification-diagnostics`: a closed `code` and only the values that go
+/// with it (ADR-0206 D11). `apnsReason` is a **code** (`BadDeviceToken`, `relay_vocabulary_refused`,
+/// …), never a relay's own words.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationBlockerDto {
+    pub code: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub until_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apns_status: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apns_reason: Option<String>,
+}
+
+/// `devices` of the diagnostics response: how many of the caller's push tokens are live and dead.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationDevicesDto {
+    pub active: i64,
+    pub invalidated: i64,
+}
+
+/// `lastTest` of the diagnostics response: the latest test push the caller sent and what became of
+/// it (`queued`, `stalled`, `sent`, `relay_outdated`, `failed`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationLastTestDto {
+    pub id: Uuid,
+    pub status: &'static str,
+    pub at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apns_status: Option<i32>,
+}
+
+/// `GET …/notification-diagnostics` response (ADR-0206 D11). `ok` means "the server holds nothing
+/// back", **not** "the device shows it": the OS permission, the per-device switch and Focus are
+/// known only to the client.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationDiagnosticsResponse {
+    pub checked_at_ms: i64,
+    pub ok: bool,
+    pub blockers: Vec<NotificationBlockerDto>,
+    pub devices: NotificationDevicesDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_test: Option<NotificationLastTestDto>,
+}
+
+/// `POST …/notification-diagnostics/test` response: the id of the test (its result is read from
+/// `lastTest`) and how many live tokens it goes to.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendTestNotificationResponse {
+    pub test_id: Uuid,
+    pub device_count: i64,
+}
+
 /// `PATCH …/notification-rules/push-kinds` request (ADR-0120 부록 A, #3341).
 /// Every field optional; at least one is required; unknown fields are refused.
 #[derive(Debug, Deserialize)]
