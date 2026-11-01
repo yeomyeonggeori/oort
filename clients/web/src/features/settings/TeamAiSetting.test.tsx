@@ -5,8 +5,14 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError } from "@momo/core/lib/api";
+import { ApiError, type RosterMember } from "@momo/core/lib/api";
 import { TeamAiSetting } from "./TeamAiSetting";
+
+const roster = vi.hoisted(() => ({ rows: [] as RosterMember[] }));
+vi.mock("@momo/core/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
+  return { ...actual, fetchRoster: () => Promise.resolve(roster.rows) };
+});
 
 const fetchBag = vi.hoisted(() => vi.fn());
 const probe = vi.hoisted(() => vi.fn());
@@ -35,6 +41,7 @@ beforeEach(() => {
   fetchBag.mockReset();
   probe.mockReset();
   setSwitch.mockReset();
+  roster.rows = [];
 });
 
 afterEach(() => {
@@ -83,6 +90,33 @@ describe("oort 도우미 스위치", () => {
     expect(card(view)).not.toBeNull();
     expect(toggle(view)?.getAttribute("aria-checked")).toBe("false");
     expect(probe).not.toHaveBeenCalled();
+  });
+
+  it("제목과 설명은 도우미 멤버의 표시 이름을 따라가고, 멤버가 없으면 기본 이름이다 (#4945, B10-7)", async () => {
+    fetchBag.mockResolvedValue({ team_ai_fast_path: false });
+    const before = await mount();
+    expect(card(before)?.textContent).toContain("oort 도우미");
+    act(() => root?.unmount());
+    root = null;
+    roster.rows = [
+      {
+        id: "00000000-0000-7000-8000-0000000000a1",
+        workspaceId: WS,
+        kind: "agent",
+        status: "active",
+        handle: "oort-helper",
+        displayName: "비서봇",
+      } as RosterMember,
+    ];
+    fetchBag.mockResolvedValue({
+      team_ai_fast_path: false,
+      team_ai_agent_member_id: "00000000-0000-7000-8000-0000000000a1",
+    });
+    const view = await mount();
+    const text = card(view)?.textContent ?? "";
+    expect(text).toContain("비서봇");
+    expect(text).toContain("켜면 「비서봇」 에이전트가 생기고");
+    expect(text).not.toContain("oort 도우미");
   });
 
   it("키가 없고 서버가 안다고 답하면 꺼진 스위치가 선다", async () => {

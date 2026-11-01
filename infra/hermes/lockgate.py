@@ -31,6 +31,15 @@ short-lived photo address under `OORT_SELF_MEDIA_ORIGIN`. This gate validates th
 and the volume's `.env`; unset means the exception is off), and the canary adds the one allowed address (accepted) and
 28 bypass variants (refused) when it is set, or one refused address of the allowed shape when it is not.
 
+Cross-run recall (#4898, ADR-0203 augmentation of 2026-11-01, R1-R5). One Hermes serves every workspace of the instance with ONE `state.db` and ONE
+`memories/` folder: `session_search` reads every earlier run's messages and tool-call arguments (no workspace, requester or channel is a filter), and
+`memory` writes the MEMORY.md / USER.md that every later session loads into its system prompt. Both are off: `ALLOWED_TOOLS` does not list them,
+`CROSS_RUN_TOOLS` names them for a message of their own, and the gate refuses a start in which either is selected by the toolsets (the names before
+Hermes' availability filter) or present in the tool definitions the model would be handed; `report` refuses them live the same way. What no tool list
+shows is `memory_problems`: Hermes loads the memory files into the system prompt whenever `memory.memory_enabled` / `memory.user_profile_enabled` are on,
+toolset or not, so both must be the boolean `false` and `memory.provider` empty. The positive control is `todo_list`. The records Hermes keeps in
+`state.db` are not touched by this: only the way for a run to read them is closed.
+
 Strict media delivery (#4820 C2b 3부, ADR-0218 G3.7 (b), #4935). Hermes turns a `MEDIA:` line of a final answer into the bytes of
 the file it names; outside strict mode that is ANY readable regular file that is not on a short denylist (gateway/platforms/
 base.py `validate_media_delivery_path`), so a model that was talked into writing `MEDIA:/opt/data/...` hands that file to the
@@ -43,11 +52,18 @@ gate ran. `report` re-checks both on the live volume. The worker half is `OORT_H
 The volume's `.env` (#4886, #4950). Hermes loads `<HERMES_HOME>/.env` after this gate ran, with override, and applies every name in it,
 so the file is judged by what it MAY hold: the names of `VOLUME_ENV_SECRETS` (any value) and the eleven lines Hermes' own first-boot
 seed writes there, `VOLUME_ENV_SEEDED` (exactly those values). Any other name refuses the start by name, whatever its value or its
-spelling, and so does a `.op.env` next to it. Boot and `report` call the same function, `volume_env_problems`. To know which
+spelling, and so does a `.op.env` next to it and any entry under `profiles/` (Hermes serves a folder found there as a profile of its own, with an
+`.env` this gate does not read; its own `.deleted/` tombstone of a deleted profile counts too). Boot and `report` call the same function, `volume_env_problems`. To know which
 names the loader applies, the file is read the way Hermes reads it (hermes_cli/env_loader.py, v0.22.2): `env_cleanup` (its decoding
 and the NUL / whitespace clean-up it applies before loading, one load at a time) and python-dotenv's own statement parser with
 interpolation off (the image's module; outside the image, e.g. the offline tests, a fallback with the same grammar), the last
-assignment of a name winning and a bare `NAME` setting nothing. Hermes loads the file more than once and each load rewrites it,
+assignment of a name winning and a bare `NAME` setting nothing. Hermes reads the file with a SECOND tokenizer as well, the line-by-line `agent/secret_scope.py`
+`load_env_file` (credential pools and config reads use it, multiplexing or not), which can read a name the loader does not (a statement the loader
+cannot finish, a quoted value over two lines, a boundary only it cuts at): the gate judges the names of both (`line_assignments` is a copy of that
+function, held to it row by row in `test_lockgate_env.py` `LINE_TABLE` and input by input in the in-image proof, `line_reader_mismatch`), and no
+allowed name may carry a line boundary in its value (`_line_break_problems`: a rule that stands without knowing either reader's details). When a
+Hermes pin changes `agent/secret_scope.py`, `line_reader_mismatch` says so: fix `line_assignments` and `LINE_TABLE` from a new measurement of the real
+function (docs/RELEASING.md, the pin procedure). Hermes loads the file more than once and each load rewrites it,
 so the gate follows the file through those loads (`env_states`, at most `ENV_LOAD_CAP`; one that is still changing then is refused)
 and judges every text a load may parse (`env_texts`: each state of the file, cleaned up and as it stands), the problems of all of
 them together. No value is read for its meaning, so no reference in a value (`${...}`) has to be resolved: names do not depend on
@@ -90,7 +106,15 @@ import urllib.error
 import urllib.request
 
 IMAGE_GUARD_TOOL = "image_generate"
-ALLOWED_TOOLS = frozenset({"memory", "todo_list", "session_search", "web_search", IMAGE_GUARD_TOOL})
+# `memory` and `session_search` left this list on purpose (#4898, ADR-0203 augmentation of 2026-11-01, R1-R5): see CROSS_RUN_TOOLS.
+ALLOWED_TOOLS = frozenset({"todo_list", "web_search", IMAGE_GUARD_TOOL})
+# The two tools that read (and, for `memory`, write) what an EARLIER run of this Hermes left behind. One Hermes serves every workspace of the
+# instance with ONE state.db (session_search reads it whole: no workspace, requester or channel is a filter) and ONE MEMORY.md / USER.md (loaded
+# into every session's system prompt), so a run of one workspace can read what a run of another wrote. They are refused whatever else holds.
+CROSS_RUN_TOOLS = frozenset({"session_search", "memory"})
+# Removing the `memory` toolset does not stop Hermes loading MEMORY.md / USER.md into the system prompt (agent_init.py `_init_memory` reads these
+# two flags, not the toolset), so both have to be explicitly false, and an external memory provider (`memory.provider`) keeps a store of its own.
+MEMORY_OFF_KEYS = ("memory_enabled", "user_profile_enabled")
 WEB_TOOLS = frozenset({"web_search", "web_extract"})
 IMAGE_TOOLS = frozenset({IMAGE_GUARD_TOOL})
 IMAGE_PROVIDER = "openai-codex"  # the only image provider: gpt-image-2 through the Codex subscription OAuth (#4820)
@@ -128,7 +152,7 @@ MEDIA_STRICT_VALUE = "1"
 SELF_ORIGIN_RE = re.compile(
     r"https://(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?(?::[1-9][0-9]{0,4})?"
 )
-REQUIRED_TOOL = "memory"  # positive control: the allow-list must resolve something real
+REQUIRED_TOOL = "todo_list"  # positive control: the allow-list must resolve something real (an allowed tool that needs no credential)
 INSTALL = "/opt/hermes"
 TRUTHY = ("1", "true", "yes", "on")
 
@@ -229,11 +253,16 @@ def tool_problems(cfg, tools):
 
     Search and image generation are subscription-only. A connector config narrows the allow-list back to
     chat-only even if Hermes ever stops honoring the required `disabled_toolsets: [web, image_gen]`.
+    The cross-run recall tools (`CROSS_RUN_TOOLS`: `session_search`, `memory`) are refused in every mode, with a message of their own (#4898).
     No credentials are read here.
     """
     tools = set(tools)
     problems = []
-    extra = sorted(tools - ALLOWED_TOOLS)
+    recall = sorted(tools & CROSS_RUN_TOOLS)
+    if recall:
+        problems.append("cross-run recall tools would be exposed (every workspace of this Hermes shares one session history and one memory): "
+                        + ",".join(recall))
+    extra = sorted(tools - ALLOWED_TOOLS - CROSS_RUN_TOOLS)
     if extra:
         problems.append("tools outside the allow-list would be exposed: " + ",".join(extra))
     if cfg.get("mcp_servers") and tools & WEB_TOOLS:
@@ -255,6 +284,33 @@ def tool_problems(cfg, tools):
             problems.append("image_gen must hold only 'provider' when image_generate is exposed (other keys: "
                             + ",".join(sorted(str(k) for k in set(image) - IMAGE_PROVIDER_ONLY_KEYS)) + ")")
     return problems
+
+
+def _memory_section(cfg):
+    section = cfg.get("memory")
+    return section if isinstance(section, dict) else {}
+
+
+def memory_problems(cfg):
+    """Hermes' built-in memory has to be off in the config, whatever tool is exposed (#4898, ADR-0203 augmentation of 2026-11-01, R3).
+
+    `memory.memory_enabled` and `memory.user_profile_enabled` are the switches Hermes reads when it loads MEMORY.md and USER.md into a session's
+    system prompt (agent/agent_init.py `_init_memory`; the toolset is not consulted), so taking the toolset away leaves a file an earlier run
+    wrote in every later run's prompt. Both must be the YAML boolean `false` (a missing key means Hermes' default, on), and `memory.provider`
+    must be empty (an external memory provider keeps a store of its own across sessions). Names only; nothing is read for its meaning."""
+    section = _memory_section(cfg)
+    problems = [f"memory.{key} must be explicitly false (Hermes loads MEMORY.md / USER.md into every session's system prompt otherwise: "
+                "one memory for every workspace)" for key in MEMORY_OFF_KEYS if section.get(key) is not False]
+    if section.get("provider"):
+        problems.append("memory.provider must be empty (an external memory provider keeps a store of its own across sessions)")
+    return problems
+
+
+def memory_evidence(cfg):
+    """What the gate saw of the memory switches, for the LOCKGATE line: booleans only (no value is echoed)."""
+    section = _memory_section(cfg)
+    return {**{key: section.get(key) if isinstance(section.get(key), bool) else None for key in MEMORY_OFF_KEYS},
+            "provider_set": bool(section.get("provider"))}
 
 
 DATA_DIR = "/opt/data"  # the Hermes volume; the gate judges a scratch HERMES_HOME, so the volume's .env is read here
@@ -656,8 +712,11 @@ def _line_break_problems(assignments):
 
 def _profile_problems(home):
     """The volume's `profiles` folder may be absent (a fresh volume has none: Hermes makes it only when a profile is created or imported) or
-    empty (a profile removed again). Hermes serves every profile folder it finds there as a profile of its own with an `.env` of its own,
-    which this gate does not read; no template writes one, so an ENTRY under it refuses the start (the folder itself is not what counts).
+    empty. Hermes serves every profile folder it finds there as a profile of its own with an `.env` of its own, which this gate does not
+    read; no template writes one, so an ENTRY under it refuses the start (the folder itself is not what counts). A volume that once had a
+    profile is NOT empty: Hermes tombstones a deleted profile as `profiles/.deleted/<name>` (hermes_constants.py `mark_named_profile_deleted`)
+    and never removes it, so that entry refuses the start like any other, and an operator who made and deleted a profile removes `.deleted`
+    once (#4950 review round 2: the refusal stays, a shared Hermes uses no profile).
     A link, a thing that is not a folder and a folder it cannot list are refused too (what they lead to is not known). Only the number
     is named."""
     path = os.path.join(home, PROFILES_DIR)
@@ -1033,11 +1092,11 @@ def hermes_image_guard_canary(origin=None):
 # The table is keyed by the hash and the name is the value, never the other way round: a name with a word like `api-key` or `oauth` in front
 # of a 64-digit hex value on one line is what secret scanners report as a leaked credential, and these hashes are public pins.
 ACCEPTED_CONFIG_SHA256 = {  # sha256 of the bytes -> the name of the config
-    "a48f95324ec631f1a84e0153d99f92eaa16bc7288486e45280b70c031b9a7ec1": "default",
-    "00534285190ce38979a0c27a179ea1a5e14e53963d6f109a40e2c92f6e0281dd": "connector/codex-oauth.fallback-claude-oauth",
-    "89d2deb246a8dae714f9014e8bbccd359842312ce3d9513b7a7b9be738fbd419": "connector/claude-oauth.fallback-codex-oauth",
-    "1490af584d554ec044c20f27f1feeddacfaa9e3917affac3db5749e48d6482d7": "connector/api-key-openai.fallback-api-key-anthropic",
-    "f49473d359080bca29771e6b939da4e339f27398e6d98ca4b24fa04206a41266": "connector/api-key-anthropic",
+    "619d1717d53167864221fa6d9c698376ef462dc75e7b03fc302ab1fffd4d7ad6": "default",
+    "eb8a4b4227da0ca959efe6ccab2789063c326c781cf08b83efbb5afa7f04a5e3": "connector/codex-oauth.fallback-claude-oauth",
+    "b553b153bce1560ffdf8a8efabefc9bf1880daa71cf96eacb6e8979a493dbe32": "connector/claude-oauth.fallback-codex-oauth",
+    "70098ae61b114bd1c14f1212ae434038ef502e2ecec370d934544a28a60fe186": "connector/api-key-openai.fallback-api-key-anthropic",
+    "622775b63e7840d6a08a566fff57c07df13cd6bf542695d631e0ef1a7fc0ae2a": "connector/api-key-anthropic",
 }
 
 
@@ -1116,7 +1175,9 @@ def gate(cfg_path):
                                     skip_tool_search_assembly=True)
         resolved = sorted({d["function"]["name"] for d in defs})
 
-        problems.extend(tool_problems(cfg, selected))
+        # `resolved` is what the model would be handed (after check_fn), `selected` what the toolsets name before it: a recall tool in either is refused
+        problems.extend(tool_problems(cfg, set(selected) | (set(resolved) & CROSS_RUN_TOOLS)))
+        problems.extend(memory_problems(cfg))
         guard_evidence = None
         if set(selected) & IMAGE_TOOLS:
             problems.extend(guard_file_problems)
@@ -1144,7 +1205,7 @@ def gate(cfg_path):
             problems.append("telemetry.shared_metrics must stay disabled")
         ok = not problems
         emit("LOCKGATE", ok=ok, config_sha256=sha, config_accepted_as=config_name, migrate_rc=migrate_rc, disabled_count=len(disabled),
-             enabled_toolsets=enabled, selected_tools=selected, resolved_tools=resolved,
+             enabled_toolsets=enabled, selected_tools=selected, resolved_tools=resolved, memory_config=memory_evidence(cfg),
              approvals_mode=mode, media_strict=original_env.get(MEDIA_STRICT_ENV) == MEDIA_STRICT_VALUE, image_guard=guard_evidence,
              env_parser=env_parser(), problems=problems)
         return 0 if ok else 3
@@ -1209,6 +1270,7 @@ def report():
         disabled = (live_cfg.get("agent") or {}).get("disabled_toolsets") or []
         selected = sorted(_select_tool_names(sorted(_get_platform_tools(live_cfg, "api_server")), disabled, True))
         violations = tool_problems(live_cfg, set(tools) | set(selected))
+        violations += memory_problems(live_cfg)  # the same switches the boot gate judged, on the live config
         data_dir = os.environ.get("HERMES_DATA_DIR", DATA_DIR)
         # The volume's `.env` and the strict media flag exactly as the boot gate judged them, whatever tool is exposed: the same function
         # `gate` calls (#4950). `report` measures ONCE, after the first /health: Hermes loads the `.env` again on every turn, so a file

@@ -21,6 +21,7 @@ import {
   type ThemeRef,
 } from '@momo/core/design/themeResolve';
 import type {Mode} from '@momo/core/design/themes';
+import {useDismissOnEntry} from '../lib/useDismissOnEntry';
 import {Screen} from './atoms';
 import {resolveThemeTokens} from './themeCatalog';
 import {SHEET_ICONS, SHEET_ICON_SIZE} from './icons';
@@ -252,6 +253,9 @@ export function ThemePickerModal({
 }: {
   onDone: () => void;
 }): React.JSX.Element {
+  // 알림이 새 입구로 들어오면 걷는다(#4667). 보통은 이 페이지를 연 설정 층이 같은 입구에서 함께 걷히지만(`navReducer`),
+  // 이 Modal 은 설정의 후손이 아니어도 설 수 있는 전체 화면이라 스스로도 받는다.
+  useDismissOnEntry(onDone);
   return (
     <Modal
       visible

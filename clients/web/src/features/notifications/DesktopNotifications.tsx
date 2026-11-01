@@ -1,4 +1,5 @@
 import { missingMemberLabel } from "@momo/core/features/workspace/directory";
+import { dismissTemporarySurfaces } from "@momo/core/features/notifications/entryDismiss";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "@/app/session";
@@ -12,11 +13,14 @@ import {
 } from "@/features/workspace/useWorkspace";
 import { actorToken } from "@momo/core/features/inbox/model";
 import {
+  admitThreadBanner,
   armOpen,
+  EMPTY_THREAD_BANNER_LEDGER,
   openTarget,
   rememberAnnounced,
   windowIsFront,
   type ArmedOpen,
+  type ThreadBannerLedger,
 } from "@momo/core/features/notifications/model";
 import { notifyThisDevice } from "./deviceNotify";
 import { osNotifier, type OsNotifyKind } from "./osNotifier";
@@ -48,6 +52,7 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
 // 따라가는 스레드의 답글(#4890)은 **서버가 말한 값**으로만 판정한다. 이 기기가 아는 것은 `threadFollowStore` 가 적은 서버의
 // 답뿐이고(스레드 열기·따라가기 응답), 모르는 스레드는 그 스레드 하나를 서버에 물은 뒤 다시 판정한다(`follow-unknown`).
 // 물음은 다른 이유(내 글·음소거·꺼 둔 종류·보는 중)로 걸러질 글에는 나가지 않는다. 누르면 그 답글이 있는 스레드가 열린다.
+// 같은 스레드의 답글이 한 묶음 배너가 되어도 그 스레드로 가고, 한 스레드의 배너는 분당 상한까지만 뜬다(#5017).
 //
 // While the member's 알림 일시 중지 is on, none of it becomes a banner (#4197):
 // the phone push is stopped by the server for the same rule, so this device
@@ -70,6 +75,16 @@ export function DesktopNotifications() {
   const { directory } = useDirectory(workspaceId);
   const navigate = useNavigate();
   const location = useLocation();
+  // 알림은 **새 입구**다(#4667). 사람은 열려 있던 대화상자·팔레트·서랍에서 그 메시지로 온 것이 아니라 배너에서 왔다 — 그 표면들이
+  // 그대로 떠 있으면 클릭한 메시지가 그 밑에 있다. 배너를 눌러 가는 두 길(브라우저 배너의 클릭, 데스크탑 창이 앞에 오는 순간)은
+  // 모두 이 한 함수를 지난다: 이동하기 직전에 방송 하나로 겹친 표면을 걷고(`dismissTemporarySurfaces`), 그다음 간다.
+  const landOnNotification = useCallback(
+    (route: string) => {
+      dismissTemporarySurfaces();
+      navigate(route);
+    },
+    [navigate]
+  );
   const selfId = session.member.id;
   const formatMessage = useFormatMessage();
   const formatRef = useRef(formatMessage);
@@ -92,6 +107,8 @@ export function DesktopNotifications() {
     typeof document === "undefined" ? true : document.hasFocus()
   );
   const announcedRef = useRef<string[]>([]);
+  // 스레드마다 분당 배너 상한의 장부(#5017). 폰 푸시의 대량 층과 같은 값이다(코어 `THREAD_BANNER_CAP`).
+  const threadBannersRef = useRef<ThreadBannerLedger>(EMPTY_THREAD_BANNER_LEDGER);
   const armedRef = useRef<ArmedOpen | null>(null);
   const armedThreadRef = useRef<{ messageId: string; rootId: string } | null>(null);
 
@@ -180,6 +197,13 @@ export function DesktopNotifications() {
     const threadReply = decision.notification.kind === "thread-reply";
     const title = approval ? memberFor(current.directory, event.payload.author_member_id)?.displayName ?? decision.notification.title : decision.notification.title;
     announcedRef.current = rememberAnnounced(announcedRef.current, messageId);
+    // 같은 스레드의 답글은 분당 상한까지만 배너가 된다(#5017). 넘은 답글은 알린 것으로 적었으니 다시 오지 않고, 배너도 무장도 없다.
+    const threadRoot = threadReply ? event.payload.root_id ?? undefined : undefined;
+    if (threadRoot !== undefined) {
+      const verdict = admitThreadBanner(threadBannersRef.current, threadRoot, nowMs);
+      threadBannersRef.current = verdict.ledger;
+      if (!verdict.admitted) return;
+    }
     // 데스크탑은 알림을 눌러 창이 앞에 오는 순간 이동한다(arm). 브라우저는 배너 클릭이 직접 간다.
     if (isDesktop()) {
       armedRef.current = armOpen(
@@ -188,7 +212,9 @@ export function DesktopNotifications() {
         nowMs,
         undefined,
         // 승인 알림은 그 카드로 착지한다(#3738). 스레드 답글은 그 답글로(#4890): 아래에서 스레드를 연다. 멘션·DM은 채널이다.
-        approval || threadReply ? messageId : undefined
+        approval || threadReply ? messageId : undefined,
+        // 같은 스레드의 답글 여럿은 그 스레드로(#5017).
+        threadRoot
       );
       armedThreadRef.current = armedRef.current.messageId && event.payload.root_id
         ? { messageId: armedRef.current.messageId, rootId: event.payload.root_id } : null;
@@ -216,6 +242,7 @@ export function DesktopNotifications() {
       ...(threadReply
         ? { summaryTitle: (count: number) => formatRef.current("desktop.notify.threadSummary", { count }) }
         : {}),
+      ...(threadRoot === undefined ? {} : { rootId: threadRoot }),
     });
   }, []);
 
@@ -239,9 +266,9 @@ export function DesktopNotifications() {
   // 브라우저 배너를 누르면 이 탭이 앞에 오고 대상으로 간다.
   useEffect(() => {
     if (desktop) return;
-    setBrowserOpenHandler((route) => navigate(route));
+    setBrowserOpenHandler(landOnNotification);
     return () => setBrowserOpenHandler(null);
-  }, [desktop, navigate]);
+  }, [desktop, landOnNotification]);
 
   // ---- window focus -------------------------------------------------------
 
@@ -256,7 +283,7 @@ export function DesktopNotifications() {
       }
       armedRef.current = null;
       armedThreadRef.current = null;
-      if (route !== null) navigate(route);
+      if (route !== null) landOnNotification(route);
     };
     const leave = () => {
       focusedRef.current = false;
@@ -272,7 +299,7 @@ export function DesktopNotifications() {
       window.removeEventListener("blur", leave);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [navigate]);
+  }, [landOnNotification]);
 
   // Someone who navigated on their own has answered the question the armed
   // target was there to answer; a later focus must not move them again.

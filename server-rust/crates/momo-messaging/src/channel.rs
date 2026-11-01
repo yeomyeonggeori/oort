@@ -12,6 +12,7 @@
 //! DM channels (which need a `dm_key`) are out of scope for B1 — this covers the
 //! public/private channels the messaging spine exercises.
 
+use chrono::{DateTime, Utc};
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
@@ -206,6 +207,7 @@ pub async fn create_channel_detailed_in_tx(
         archived_at_ms: row.try_get("archived_at_ms").map_err(DbError::from)?,
         // Nobody can have muted a channel that did not exist a statement ago.
         muted: false,
+        muted_until_ms: None,
     };
     let creator_membership = decode_channel_membership(&row).map_err(DbError::from)?;
     Ok(Some(CreatedChannel {
@@ -463,21 +465,119 @@ pub async fn remove_channel_member_in_tx(
 // notification preference (B4.1 — Swift `ChannelRoutes.updateNotificationPref`)
 // ---------------------------------------------------------------------------
 
-/// The write half of the `muted` flag every channel-list row already carries
-/// (ADR-0124). Returns `false` when the caller has no active membership in a
-/// live channel — the route turns that into Swift's 403.
+/// The longest a timed mute may run: 366 days, a leap year's worth, so "until this day next
+/// year" is never refused on the 29th of February (ADR-0206 D12).
+pub const CHANNEL_MUTE_MAX_DAYS: i64 = 366;
+
+/// What a member writes to one channel's mute (`PUT …/notification-pref`).
 ///
-/// v0 stores an indefinite mute as `muted_until = NULL` and un-mutes by
-/// **deleting** the row, which is why `muted` reads as `EXISTS(...)` rather than
-/// a boolean column: absence is the default, so a member who never touched the
-/// setting owns no row at all.
+/// `Mute` carries its end as an instant, or none for an open-ended mute — what `{muted: true}`
+/// has always meant. The shape leaves no room for the one refused pairing, a deadline on an
+/// un-mute; [`validate_channel_mute`] is where the wire pair becomes one of these.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChannelMuteWrite {
+    /// Delete the row: the default, nothing muted.
+    Unmute,
+    /// Upsert the row with this end (`None` = open-ended), replacing whatever it held.
+    Mute { until: Option<DateTime<Utc>> },
+}
+
+/// A member's mute on one channel as it reads **now**: the answer of a write, and the same two
+/// values each channel-list row carries.
+///
+/// `muted_until_ms` is set only for a timed mute still in progress. An open-ended mute has no end
+/// to report, and one whose end has passed is not a mute at all — nothing sweeps the row, every
+/// reader compares `muted_until` against `now()` itself (ADR-0206 D12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChannelMute {
+    pub muted: bool,
+    pub muted_until_ms: Option<i64>,
+}
+
+/// Why a mute write was refused (ADR-0206 D12). Every one is a 400. The first two carry a machine
+/// code a client branches on; a deadline on an un-mute carries none — no client is built to send
+/// one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum MutedUntilInvalid {
+    #[error("mutedUntilMs must be in the future")]
+    InPast,
+    #[error("mutedUntilMs must be within 366 days from now")]
+    TooFar,
+    #[error("mutedUntilMs is only valid with muted: true")]
+    NotMuted,
+}
+
+impl MutedUntilInvalid {
+    /// The wire `error.code`, for the refusals that have one.
+    pub fn code(self) -> Option<&'static str> {
+        match self {
+            MutedUntilInvalid::InPast => Some("muted_until_in_past"),
+            MutedUntilInvalid::TooFar => Some("muted_until_too_far"),
+            MutedUntilInvalid::NotMuted => None,
+        }
+    }
+}
+
+/// The wire pair `(muted, mutedUntilMs)` → what to write. `now` is the **database** clock
+/// ([`crate::db_now_in_tx`]) — the one every reader compares `muted_until` against — injected so a
+/// test can freeze it.
+///
+/// A deadline must fall in `(now, now + 366 days]`. One at `now` is already over (readers treat
+/// `muted_until <= now()` as unmuted), so it is refused as past rather than stored as a mute nobody
+/// could see. `None` is open-ended, so `{muted: true}` alone keeps meaning what it always did.
+pub fn validate_channel_mute(
+    muted: bool,
+    muted_until_ms: Option<i64>,
+    now: DateTime<Utc>,
+) -> Result<ChannelMuteWrite, MutedUntilInvalid> {
+    let Some(ms) = muted_until_ms else {
+        return Ok(if muted {
+            ChannelMuteWrite::Mute { until: None }
+        } else {
+            ChannelMuteWrite::Unmute
+        });
+    };
+    if !muted {
+        return Err(MutedUntilInvalid::NotMuted);
+    }
+    // A value chrono cannot even represent is as far in the past or the future as a value can be.
+    let Some(until) = DateTime::from_timestamp_millis(ms) else {
+        return Err(if ms < 0 {
+            MutedUntilInvalid::InPast
+        } else {
+            MutedUntilInvalid::TooFar
+        });
+    };
+    if until <= now {
+        return Err(MutedUntilInvalid::InPast);
+    }
+    if until > now + chrono::Duration::days(CHANNEL_MUTE_MAX_DAYS) {
+        return Err(MutedUntilInvalid::TooFar);
+    }
+    Ok(ChannelMuteWrite::Mute { until: Some(until) })
+}
+
+/// The write half of the `muted` flag every channel-list row already carries (ADR-0124), with an
+/// optional end (ADR-0206 D12, #4343). Returns `None` when the caller has no active membership in
+/// a live channel — the route turns that into Swift's 403 — and otherwise the mute **as it now
+/// reads**, not an echo of the request: the same predicate the readers use (`muted_until IS NULL OR
+/// muted_until > now()`) is evaluated on the row just stored, so a deadline that is already behind
+/// `now()` answers `muted: false` and no `mutedUntilMs`.
+///
+/// This function stores what it is given; the window of an acceptable deadline is
+/// [`validate_channel_mute`]'s, applied by the route before the first write.
+///
+/// An open-ended mute is `muted_until = NULL`, and un-muting **deletes** the row, which is why
+/// `muted` reads as `EXISTS(...)` rather than a boolean column: absence is the default, so a member
+/// who never touched the setting owns no row at all. A second `Mute` replaces the first whole — a
+/// plain `{muted: true}` over a timed mute makes it open-ended, as it always overwrote.
 pub async fn set_notification_pref_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     channel_id: Uuid,
     member_id: Uuid,
-    muted: bool,
-) -> Result<bool, DbError> {
+    write: ChannelMuteWrite,
+) -> Result<Option<ChannelMute>, DbError> {
     let allowed: bool = sqlx::query_scalar(
         "SELECT EXISTS( \
            SELECT 1 \
@@ -496,34 +596,49 @@ pub async fn set_notification_pref_in_tx(
     .fetch_one(&mut *conn)
     .await?;
     if !allowed {
-        return Ok(false);
+        return Ok(None);
     }
 
-    if muted {
-        sqlx::query(
-            "INSERT INTO notification_pref \
-               (workspace_id, member_id, channel_id, muted_until) \
-             VALUES ($1, $3, $2, NULL) \
-             ON CONFLICT (workspace_id, member_id, channel_id) \
-             DO UPDATE SET muted_until = NULL, updated_at = now()",
-        )
-        .bind(workspace_id)
-        .bind(channel_id)
-        .bind(member_id)
-        .execute(&mut *conn)
-        .await?;
-    } else {
-        sqlx::query(
-            "DELETE FROM notification_pref \
-              WHERE workspace_id = $1 AND channel_id = $2 AND member_id = $3",
-        )
-        .bind(workspace_id)
-        .bind(channel_id)
-        .bind(member_id)
-        .execute(&mut *conn)
-        .await?;
+    match write {
+        ChannelMuteWrite::Mute { until } => {
+            let row = sqlx::query(
+                "INSERT INTO notification_pref \
+                   (workspace_id, member_id, channel_id, muted_until) \
+                 VALUES ($1, $3, $2, $4) \
+                 ON CONFLICT (workspace_id, member_id, channel_id) \
+                 DO UPDATE SET muted_until = EXCLUDED.muted_until, updated_at = now() \
+                 RETURNING (muted_until IS NULL OR muted_until > now()) AS muted, \
+                           CASE WHEN muted_until > now() \
+                                THEN floor(extract(epoch from muted_until) * 1000)::bigint \
+                           END AS muted_until_ms",
+            )
+            .bind(workspace_id)
+            .bind(channel_id)
+            .bind(member_id)
+            .bind(until)
+            .fetch_one(&mut *conn)
+            .await?;
+            Ok(Some(ChannelMute {
+                muted: row.try_get("muted")?,
+                muted_until_ms: row.try_get("muted_until_ms")?,
+            }))
+        }
+        ChannelMuteWrite::Unmute => {
+            sqlx::query(
+                "DELETE FROM notification_pref \
+                  WHERE workspace_id = $1 AND channel_id = $2 AND member_id = $3",
+            )
+            .bind(workspace_id)
+            .bind(channel_id)
+            .bind(member_id)
+            .execute(&mut *conn)
+            .await?;
+            Ok(Some(ChannelMute {
+                muted: false,
+                muted_until_ms: None,
+            }))
+        }
     }
-    Ok(true)
 }
 
 /// Pool-level [`create_channel_in_tx`] wrapped in the tenant transaction.
@@ -599,6 +714,9 @@ pub struct ChannelSummary {
     pub archived_at_ms: Option<i64>,
     /// The CALLING member's push-suppression preference for this channel.
     pub muted: bool,
+    /// End of the CALLING member's timed mute, epoch ms — set **only while a timed mute is in
+    /// progress** (ADR-0206 D12, #4343). An open-ended mute and an expired one have none.
+    pub muted_until_ms: Option<i64>,
 }
 
 fn decode_channel_summary(row: &sqlx::postgres::PgRow) -> Result<ChannelSummary, sqlx::Error> {
@@ -617,6 +735,7 @@ fn decode_channel_summary(row: &sqlx::postgres::PgRow) -> Result<ChannelSummary,
         created_by: row.try_get("created_by")?,
         archived_at_ms: row.try_get("archived_at_ms")?,
         muted: row.try_get("muted")?,
+        muted_until_ms: row.try_get("muted_until_ms")?,
     })
 }
 
@@ -698,7 +817,14 @@ pub async fn list_workspace_channels_within(
                      AND np.channel_id = c.id \
                      AND np.member_id = $2 \
                      AND (np.muted_until IS NULL OR np.muted_until > now()) \
-                ) AS muted \
+                ) AS muted, \
+                ( SELECT floor(extract(epoch from np.muted_until) * 1000)::bigint \
+                    FROM notification_pref np \
+                   WHERE np.workspace_id = c.workspace_id \
+                     AND np.channel_id = c.id \
+                     AND np.member_id = $2 \
+                     AND np.muted_until > now() \
+                ) AS muted_until_ms \
            FROM channel c \
            JOIN membership actor_membership \
              ON actor_membership.channel_id = c.id \
@@ -838,6 +964,95 @@ mod tests {
                 .to_string(),
             "membership role must be admin, member, or guest"
         );
+    }
+
+    fn at(ms: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp_millis(ms).expect("representable instant")
+    }
+
+    /// ADR-0206 D12 (#4343). The window is `(now, now + 366 days]`; every edge is pinned, because
+    /// the two it is easiest to get wrong — a deadline *at* now, and exactly 366 days out — are
+    /// the ones a boundary written with `<` or `<=` flips silently.
+    #[test]
+    fn a_mute_deadline_must_fall_after_now_and_within_366_days() {
+        const DAY_MS: i64 = 86_400_000;
+        let now = at(1_800_000_000_000);
+        let now_ms = now.timestamp_millis();
+
+        assert_eq!(
+            validate_channel_mute(true, Some(now_ms - 1), now),
+            Err(MutedUntilInvalid::InPast)
+        );
+        assert_eq!(
+            validate_channel_mute(true, Some(now_ms), now),
+            Err(MutedUntilInvalid::InPast),
+            "a deadline at now is already over: readers treat `muted_until <= now()` as unmuted"
+        );
+        assert_eq!(
+            validate_channel_mute(true, Some(now_ms + 1), now),
+            Ok(ChannelMuteWrite::Mute {
+                until: Some(at(now_ms + 1))
+            })
+        );
+        assert_eq!(
+            validate_channel_mute(true, Some(now_ms + 366 * DAY_MS), now),
+            Ok(ChannelMuteWrite::Mute {
+                until: Some(at(now_ms + 366 * DAY_MS))
+            }),
+            "366 days exactly is the last accepted deadline"
+        );
+        assert_eq!(
+            validate_channel_mute(true, Some(now_ms + 366 * DAY_MS + 1), now),
+            Err(MutedUntilInvalid::TooFar)
+        );
+        assert_eq!(CHANNEL_MUTE_MAX_DAYS, 366);
+
+        // A number chrono cannot represent is as far from now as a number gets.
+        assert_eq!(
+            validate_channel_mute(true, Some(i64::MAX), now),
+            Err(MutedUntilInvalid::TooFar)
+        );
+        assert_eq!(
+            validate_channel_mute(true, Some(i64::MIN), now),
+            Err(MutedUntilInvalid::InPast)
+        );
+    }
+
+    /// No deadline is the old body, unchanged: `{muted: true}` stays an open-ended mute and
+    /// `{muted: false}` an un-mute. A deadline on an un-mute is the one pairing refused outright,
+    /// whatever the deadline is.
+    #[test]
+    fn no_deadline_keeps_the_old_meaning_and_an_unmute_takes_none() {
+        let now = at(1_800_000_000_000);
+        let future = now.timestamp_millis() + 60_000;
+        assert_eq!(
+            validate_channel_mute(true, None, now),
+            Ok(ChannelMuteWrite::Mute { until: None })
+        );
+        assert_eq!(
+            validate_channel_mute(false, None, now),
+            Ok(ChannelMuteWrite::Unmute)
+        );
+        for until in [future, 0, i64::MAX] {
+            assert_eq!(
+                validate_channel_mute(false, Some(until), now),
+                Err(MutedUntilInvalid::NotMuted),
+                "an un-mute has no end, so `{until}` must not be quietly dropped"
+            );
+        }
+    }
+
+    #[test]
+    fn the_refusals_a_client_branches_on_carry_a_code_and_the_other_does_not() {
+        assert_eq!(
+            MutedUntilInvalid::InPast.code(),
+            Some("muted_until_in_past")
+        );
+        assert_eq!(
+            MutedUntilInvalid::TooFar.code(),
+            Some("muted_until_too_far")
+        );
+        assert_eq!(MutedUntilInvalid::NotMuted.code(), None);
     }
 
     #[test]

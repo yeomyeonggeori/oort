@@ -148,6 +148,8 @@ fn wire_searches(wire: ProviderWire) -> bool {
 /// code and nothing else, so refusals can be counted.
 const OUTCOME_REFUSED_ROLE_OFF: &str = "refused_role_off";
 const OUTCOME_REFUSED_AFTER_READ: &str = "refused_after_read";
+/// B4-4 구현 확정 (#4965): an admin invite link, which a person makes on the screen.
+const OUTCOME_REFUSED_INVITE_ROLE: &str = "refused_invite_role";
 /// `team_ai.turn`'s `outcome` for a turn that ended with a `card_suggest` card (B8 C1, #4972).
 const OUTCOME_SUGGESTED_CARD: &str = "suggested_card";
 
@@ -401,10 +403,14 @@ impl AgentWorker {
         // model is offered (the tool's `actionId` enum, the tool list, the prompt) is built from
         // them; the proposal transaction and the decision read them again.
         //
-        // The system prompt is built ONCE, before anything is read, and is the same on every call
-        // of the request (`a10_text_inside_a_read_is_never_an_instruction` pins that: what was read
-        // never touches it). What changes after a read is the tool's enum, below — and the prompt
-        // already says the sensitive card leaves it.
+        // The system prompt is built before anything is read from `advertised_action_ids(false)`.
+        // After the request has read something (B4-3) it is built ONCE more from the same function
+        // with `tainted = true`, and from nothing else: the sensitive sentences leave it and the one
+        // sentence to answer with takes their place (`team_ai::system_prompt_for`). The task-mode
+        // sentence stays: `task_continue` is reading work, not behind the read rule, so the rebuilt
+        // prompt gets the same `task_prompt` the first call got (merge of #4965 and #4967).
+        // `a10_text_inside_a_read_is_never_an_instruction` pins that nothing the read returned is in
+        // either prompt. The tool's enum, below, is cut by the same function on the same boolean.
         let roles = gathered.state.roles;
         // B5-3 / B15-A16: the task-mode sentences exist only while the bundle that owns the tool is on.
         let task_prompt = if roles.tool_allowed(momo_agent::tools::TASK_CONTINUE) {
@@ -427,6 +433,7 @@ impl AgentWorker {
         ];
         let mut spend: Option<Spend> = None;
         let mut read_used = false;
+        let mut prompt_after_read = false;
         let started = Instant::now();
         let deadline = self.config.team_ai_request_deadline;
 
@@ -458,6 +465,17 @@ impl AgentWorker {
             // to offer is not offered at all.
             let tainted = read_used || trace.web_searches > 0;
             let offered = roles.advertised_action_ids(tainted);
+            if tainted && !prompt_after_read {
+                messages[0] = ChatMessage::system(team_ai::system_prompt_for(
+                    &gathered.roster,
+                    web,
+                    &offered,
+                    &card_commands,
+                    &roles.withheld_by_read(),
+                    task_prompt,
+                ));
+                prompt_after_read = true;
+            }
             let mut momo_tools: Vec<momo_agent::tools::ToolDefinition> =
                 momo_agent::tools::workspace_action_propose_definition(&offered)
                     .into_iter()
@@ -944,8 +962,15 @@ impl AgentWorker {
                 }
                 // B4-3: this request read something, so this card is not one it may raise.
                 ProposalRefusal::AfterRead => {
-                    self.team_ai_refused(job, payload, run_id, team_ai::AFTER_READ_ROLES_SENTENCE,
+                    self.team_ai_refused(job, payload, run_id,
+                        team_ai::after_read_sentence(proposed_action.unwrap_or("")),
                         None, &model, OUTCOME_REFUSED_AFTER_READ, &trace, proposed_action).await
+                }
+                // B4-4 구현 확정: the helper does not make an admin invite link — it says where a
+                // person does. No card, no hand-off to another agent (nobody else can raise it).
+                ProposalRefusal::InviteRoleNotOffered => {
+                    self.team_ai_refused(job, payload, run_id, team_ai::ADMIN_INVITE_SENTENCE,
+                        None, &model, OUTCOME_REFUSED_INVITE_ROLE, &trace, proposed_action).await
                 }
                 ProposalRefusal::NoHumanRequester | ProposalRefusal::RunNotParkable => {
                     self.team_ai_close(job, payload, run_id, "team_ai_not_proposable").await

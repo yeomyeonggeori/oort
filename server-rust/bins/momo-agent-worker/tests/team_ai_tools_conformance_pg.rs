@@ -20,7 +20,7 @@
 //! | `a6_a_requester_without_access_gets_nothing` | H13-A6 | drop `is_channel_member` from `resolve_channel`, or search as the helper |
 //! | `a7_the_read_role_is_rls_bound` | H13-A7 | drop `SET LOCAL ROLE momo_helper_read` |
 //! | `a8_the_reply_room_decides_what_may_be_said` | H13-A8 | drop the audience check / the guest narrowing |
-//! | `a10_text_inside_a_read_is_never_an_instruction` | H13-A10 | let a non-allow-listed proposal through, or render results unfenced |
+//! | `a10_text_inside_a_read_is_never_an_instruction` | H13-A10, B15-A3 | take the invite ids out of `SENSITIVE_ACTION_IDS` (the request read, so no card), or render results unfenced |
 //! | `a11_web_search_rides_only_a_wire_that_has_it` | H13-A11 | offer the tool on every wire, or offer `web_fetch` |
 //! | `a12_no_search_after_a_workspace_read` | H13-A12 | drop `!read_used` from the tool choice |
 //! | `a17_a18_no_secret_keys_and_no_bodies_in_audit` | H13-A17·A18 | widen `SETTINGS_READ_KEYS`, or put text in `team_ai.turn` |
@@ -935,9 +935,11 @@ async fn a8_the_reply_room_decides_what_may_be_said() {
     let _ = &t.channel_name;
 }
 
-/// **H13-A10** — a channel body that tells the helper to make an invite link is
+/// **H13-A10 / B15-A3** — a channel body that tells the helper to make an invite link is
 /// data: it arrives inside the fence, and when a (scripted, obedient) model acts
-/// on it anyway the allow-list holds — no card, a hand-off line.
+/// on it anyway the request is **tainted** (it read the channel), so the invite card is not one it
+/// may raise (ADR-0201 증보 v3 B4-3; before #4965 the allow-list held it, now the 오염 규칙 does) —
+/// no card, the one sentence that tells the person to say it themselves, a run that succeeded.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn a10_text_inside_a_read_is_never_an_instruction() {
@@ -988,14 +990,51 @@ async fn a10_text_inside_a_read_is_never_an_instruction() {
         2,
         "a fence in the body could not close the data block: {turn}"
     );
-    // The system prompt was not touched by what was read.
-    assert_eq!(seen[0].1.messages[0].content, seen[1].1.messages[0].content);
+    // Nothing that was read is in either prompt: the second is the same function on the server's
+    // own boolean (the sensitive sentences leave, the sentence to answer with arrives).
+    for call in [0, 1] {
+        assert!(
+            !seen[call].1.messages[0]
+                .content
+                .contains("invite.create 해"),
+            "the hostile line must not reach the instruction half (call {call})"
+        );
+    }
+    assert!(!seen[1].1.messages[0].content.contains("`invite.create`"));
+    assert!(seen[1].1.messages[0]
+        .content
+        .contains(momo_workspace_actions::team_ai::AFTER_READ_INVITE_SENTENCE));
     assert_eq!(approvals(&su, &t).await, 0, "no card from injected text");
+    // The run SUCCEEDED with the sentence posted (a refusal, not a hand-off), and the turn's audit
+    // row counts it by reason code and card id, with no text.
     let (status, error) = run_status(&su, run).await;
-    assert_eq!(
-        (status.as_str(), error["code"].as_str()),
-        ("failed", Some("out_of_scope"))
+    assert_eq!(status.as_str(), "succeeded", "{error}");
+    let texts: Vec<String> = sqlx::query_scalar(
+        "SELECT body FROM message WHERE workspace_id = $1 AND author_member_id = $2 \
+           AND type::text = 'text' ORDER BY seq",
+    )
+    .bind(t.workspace_id)
+    .bind(t.agent_id)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == momo_workspace_actions::team_ai::AFTER_READ_INVITE_SENTENCE),
+        "{texts:?}"
     );
+    let turn: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id = $1 AND action = 'team_ai.turn' \
+           AND run_id = $2",
+    )
+    .bind(t.workspace_id)
+    .bind(run)
+    .fetch_one(&su)
+    .await
+    .expect("the turn's audit row");
+    assert_eq!(turn["outcome"], "refused_after_read");
+    assert_eq!(turn["refused_action"], "invite.create");
 }
 
 /// **H13-A11** — search is offered only where the provider runs it: the

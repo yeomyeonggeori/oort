@@ -159,7 +159,7 @@ function session(): SessionContextValue {
 }
 
 /** 같은 인스턴스에 다른 `rootId`만 건네 다시 그릴 수 있게 트리를 함수로 둔다. */
-function tree(rootId: string) {
+function tree(rootId: string, followHint?: string) {
   return createElement(
     QueryClientProvider,
     { client },
@@ -176,6 +176,7 @@ function tree(rootId: string) {
           directory: makeDirectory([]),
           channels: CHANNELS,
           onSent: () => undefined,
+          ...(followHint === undefined ? {} : { followHint }),
         })
       )
     )
@@ -189,12 +190,12 @@ async function flush(ms = 0) {
   });
 }
 
-async function mount(rootId = ROOT) {
+async function mount(rootId = ROOT, followHint?: string) {
   host = document.createElement("div");
   document.body.append(host);
   mountedRoot = createRoot(host);
   await act(async () => {
-    mountedRoot?.render(tree(rootId));
+    mountedRoot?.render(tree(rootId, followHint));
   });
   await flush();
 }
@@ -388,5 +389,18 @@ describe("thread composer link preview (#5016)", () => {
     expect(byId(GROUP)).toBeNull();
     expect(document.activeElement).toBe(input());
     expect(sends).toHaveLength(1);
+  });
+});
+
+describe("thread composer follow hint (#5017)", () => {
+  it("draws the host's one line under the input frame and ties it to the input; without the prop there is no line", async () => {
+    await mount(ROOT, "답하면 이 스레드를 따라가요.");
+    const line = need("thread-composer-follow-hint");
+    expect(line.textContent).toBe("답하면 이 스레드를 따라가요.");
+    expect(input().getAttribute("aria-describedby")).toBe(line.id);
+    expect(need("thread-composer-frame").compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    act(() => mountedRoot?.render(tree(ROOT)));
+    expect(byId("thread-composer-follow-hint")).toBeNull();
+    expect(input().getAttribute("aria-describedby")).toBeNull();
   });
 });

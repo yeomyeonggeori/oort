@@ -1,3 +1,4 @@
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import React from 'react';
 import {
   AccessibilityInfo,
@@ -891,5 +892,14 @@ test('큰 글씨: 넘기기·닫기는 이전/다음 단추와 VoiceOver 동작�
       nativeEvent: {actionName: 'close'},
     }),
   );
+  expect(defaults.onClose).toHaveBeenCalledTimes(1);
+});
+
+test('알림이 새 입구로 들어오면 무대가 걷혀요 — 영웅 모션으로 돌아가지 않고 부모의 onClose 로 한 번 (#4667)', async () => {
+  await mount();
+  expect(defaults.onClose).not.toHaveBeenCalled();
+  act(() => {
+    dismissTemporarySurfaces();
+  });
   expect(defaults.onClose).toHaveBeenCalledTimes(1);
 });

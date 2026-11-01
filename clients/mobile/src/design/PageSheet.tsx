@@ -27,6 +27,7 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 
+import {useDismissOnEntry} from '../lib/useDismissOnEntry';
 import {useKeyboardHeight} from '../lib/useKeyboardHeight';
 import {useReduceMotionRef} from '../lib/useReduceMotion';
 import {FLING_OUT} from './motion';
@@ -560,6 +561,12 @@ function SheetFrame({
     (action: () => void) => slideOut(action),
     [slideOut],
   );
+  // 알림이 새 입구로 들어왔다(#4667) — 사람이 부른 닫기가 아니다. `close()` 가 아니라 `slideOut()` 이 곧바로 닫는다:
+  // `close()` 는 저장 안 한 입력이 있으면 「버릴까요?」를 묻고(`dirty`) 중첩 선택기가 있으면 한 겹만 벗기는데(`onNavigateBack`),
+  // 알림을 누른 사람에게 그 물음은 자기가 한 적 없는 닫기에 대한 것이고 목적지는 그 뒤에 서 있다. 쓰던 글은 입력이 든 시트가
+  // 같은 방송을 받으며 맡긴다(`lib/entryDrafts.ts`). 이미 닫는 중이면 `slideOut` 이 알아서 무시한다. 이 그릇을 쓰는 모든
+  // 시트가 한꺼번에 덮이는 이유가 이 한 줄이다 — 시트마다 구독하지 않는다.
+  useDismissOnEntry(() => slideOut());
 
   // 제자리로. 동작 줄이기가 켜져 있으면 미끄러지지 않고 바로 선다.
   const settle = useCallback(() => {

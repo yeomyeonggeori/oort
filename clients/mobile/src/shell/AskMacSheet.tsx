@@ -51,6 +51,11 @@ import {
 import {readAskLast, writeAskLast} from '../features/work/ask/session';
 import {spawnPort, type SpawnOutcome, type SpawnPort} from '../features/work/ask/spawnPort';
 import {useChannels} from '../features/workspace/queries';
+import {
+  askMacPromptDraftKey,
+  useHoldDraftOnEntry,
+  useRestoredEntryDraft,
+} from '../lib/entryDrafts';
 import {haptics} from '../lib/haptics';
 import {useSession} from '../session/useSession';
 import {FieldLabel, SheetNotice, TextArea} from './sheetForm';
@@ -223,10 +228,24 @@ function SheetBody({
   const [channelPick, setChannelPick] = useState<string | null>(
     preview?.channelId ?? null,
   );
-  const [prompt, setPrompt] = useState(preview?.prompt ?? initialPrompt ?? '');
+  // 알림이 걷어 간 시트였다면 쓰던 글로 선다(#4667). 도우미 카드가 미리 채운 글(`initialPrompt`)과 캡처의 고정판(`preview`)이
+  // 있으면 그쪽이 이긴다 — 카드는 그 글을 뜻하고 맡겨 둔 옛 글이 그 뜻을 덮으면 안 된다. 그때는 맡기지도 않는다.
+  // 자리는 워크스페이스로 묶인다(`lib/entryDrafts.ts`) — 다른 사람이 같은 기기로 로그인해도 앞 사람의 글이 나타나지 않는다.
+  const draftKey =
+    preview === undefined && initialPrompt === undefined
+      ? askMacPromptDraftKey(workspaceId)
+      : undefined;
+  const restoredPrompt = useRestoredEntryDraft<string>(draftKey);
+  const [prompt, setPrompt] = useState(
+    preview?.prompt ?? initialPrompt ?? restoredPrompt ?? '',
+  );
   const [issue, setIssue] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // 글을 쓰던 중에 알림이 이 시트를 걷어도 그 글은 남는다. 보내는 중(`pending`)은 이미 나가는 글이라 맡기지 않는다.
+  useHoldDraftOnEntry<string>(draftKey, () =>
+    !pending && prompt.trim() !== '' ? prompt : undefined,
+  );
   const [flagClosedByServer, setFlagClosedByServer] = useState(false);
   const openedRef = useRef(false);
   const sentRef = useRef<{
