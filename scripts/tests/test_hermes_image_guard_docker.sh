@@ -50,6 +50,15 @@
 #                            as it stands; the names it adds that the policy does not allow, in any of those loads, must all be named by
 #                            the gate, the gate's model of the files the loader leaves must equal the loader's own, a refusal beyond them
 #                            needs a designed reason, and the judge demands thresholds so an empty comparison fails
+#   connector-configs ...... (#4935) the REAL gate on every config of the catalog (infra/hermes/render_model_config.py --catalog): the default
+#                            config and the connector-mode config of each model fragment are each accepted by name; the connector ones
+#                            select no web search and no picture tool and carry no image_guard evidence, the default one the picture tool
+#   connector-config-edited / -nostrict / -apps-missing  the connector-mode config with one byte changed, without the strict flag, and without
+#                            the operator's attested app list: each refused before listening
+#   railway-start-connector / -connector-edited / -config-edited / -connector-nostrict  the real Railway start command with a connector-mode
+#                            config (its hash is in the command's list: it runs to the point where it would exec Hermes), with one byte
+#                            changed in a connector or the default config (stopped by the hash list before the gate prints anything), and
+#                            without the strict flag (every checksum passes, the gate refuses)
 #   hermes-home-other ...... a HERMES_HOME that names another folder than the one the gate reads is refused (the image sets /opt/data)
 #   env-parser-parity ...... the input table and rule tables of infra/hermes/test_lockgate_env.py (and the two test files that
 #                            changed with it), run by this image's python with python-dotenv: the fallback parser and the real one
@@ -91,7 +100,8 @@ scenario() {  # scenario <name> -> $OUT/<name>.json (the RESULT line)
 for name in healthy no-plugin edited-plugin widened-plugin not-enabled extra-image-gen-key security-private-urls \
   safe-mode proxy-env private-env bom-env-file bom-env-file-double bom-env-file-kept clean-env-file self-origin self-origin-bad \
   self-origin-env-file prefix-only-plugin strict-missing strict-wrong strict-env-file media-policy env-shapes env-inert-shapes \
-  env-reference-shapes env-seed-template hermes-home-other env-parser-parity env-loader-oracle; do
+  env-reference-shapes env-seed-template connector-configs connector-config-edited connector-config-nostrict connector-config-apps-missing \
+  hermes-home-other env-parser-parity env-loader-oracle; do
   scenario "$name"
 done
 
@@ -157,6 +167,27 @@ say "scenario railway-start-guard-variable-missing"
 docker_run --entrypoint /bin/sh -e HERMES_CONFIG_B64 -e HERMES_LOCKGATE_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
   -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/railway-start-missing.stdout" 2>"$OUT/railway-start-missing.stderr" && echo 0 >"$OUT/railway-start-missing.rc" || echo $? >"$OUT/railway-start-missing.rc"
 
+# --- the connector-mode config through the real Railway start command (#4935) ----------------------------------------------
+CONNECTOR_APPS="com.momo.plugins.gmail,com.momo.plugins.google-calendar,com.momo.plugins.google-drive"
+CONNECTOR_CONFIG="$OUT/connector-config.yaml"
+python3 "$ROOT/infra/hermes/render_model_config.py" --auth claude-oauth --fallback codex-oauth \
+  --connector-base "$ROOT/infra/hermes/google-connectors.config.yaml" >"$CONNECTOR_CONFIG"
+CONNECTOR_B64="$(b64 "$CONNECTOR_CONFIG")"
+CONNECTOR_EDITED_B64="$(python3 -c 'import base64, sys; print(base64.b64encode(open(sys.argv[1], "rb").read() + b"# edited\n").decode())' "$CONNECTOR_CONFIG")"
+DEFAULT_EDITED_B64="$(python3 -c 'import base64, sys; print(base64.b64encode(open(sys.argv[1], "rb").read() + b"# edited\n").decode())' "$ROOT/infra/hermes/config.yaml")"
+connector_start() {  # connector_start <name> <config b64> [strict value]
+  local name="$1" config_b64="$2" strict="${3-$STRICT_RAILWAY}"
+  say "scenario $name"
+  docker_run --entrypoint /bin/sh -e "HERMES_CONFIG_B64=$config_b64" -e HERMES_LOCKGATE_B64 -e HERMES_IMAGE_GUARD_B64 -e HERMES_IMAGE_GUARD_MANIFEST_B64 \
+    -e "HERMES_MEDIA_DELIVERY_STRICT=$strict" -e "OORT_COHOSTED_AGENT_CONNECTOR_APPS=$CONNECTOR_APPS" \
+    -e GOOGLE_OAUTH_CLIENT_ID=oort-proof-id -e GOOGLE_OAUTH_CLIENT_SECRET=oort-proof-secret \
+    -- -c "$(cat "$OUT/railway-start.sh")" >"$OUT/$name.stdout" 2>"$OUT/$name.stderr" && echo 0 >"$OUT/$name.rc" || echo $? >"$OUT/$name.rc"
+}
+connector_start railway-start-connector "$CONNECTOR_B64"
+connector_start railway-start-connector-edited "$CONNECTOR_EDITED_B64"
+connector_start railway-start-config-edited "$DEFAULT_EDITED_B64"
+connector_start railway-start-connector-nostrict "$CONNECTOR_B64" ""
+
 # --- the real gateway: compose command in full (gate, report, s6 init, gateway) with no network ---------------------------
 say "scenario gateway-boot (real gateway + real lockgate report, no network)"
 NAME="oort-guardproof-$$"
@@ -192,6 +223,7 @@ out, expected_dotenv, root = sys.argv[1], sys.argv[2], sys.argv[3]
 sys.dont_write_bytecode = True
 sys.path.insert(0, root + "/infra/hermes")
 import env_loader_oracle as oracle  # pure functions: the reading of the gate's problems, the same as the oracle scenario uses
+import render_model_config as renderer  # the config catalog the gate and the start command accept (#4935)
 failures = []
 
 
@@ -242,6 +274,9 @@ guard = (h["lockgate"] or {}).get("image_guard") or {}
 if (h["lockgate"] or {}).get("env_parser") != {"impl": "python-dotenv", "version": expected_dotenv}:
     failures.append("healthy: the gate did not read the volume's .env with the image's python-dotenv %s: %r"
                     % (expected_dotenv, (h["lockgate"] or {}).get("env_parser")))
+if (h["lockgate"] or {}).get("config_accepted_as") != "default" or (h["lockgate"] or {}).get("media_strict") is not True:
+    failures.append("healthy: the gate did not accept the default config by name with the strict flag recorded: %r"
+                    % ({k: (h["lockgate"] or {}).get(k) for k in ("config_accepted_as", "media_strict")},))
 canary = guard.get("canary") or {}
 if not guard.get("files_verified"):
     failures.append("healthy: files were not verified")
@@ -313,6 +348,26 @@ seed_record = (seed["lockgate"] or {}).get("seed") or {}
 if seed_record.get("image_has_the_file") is not True or seed_record.get("equal") is not True or len(seed_record.get("image_assignments") or {}) != 11:
     failures.append("env-seed-template: the gate's table of Hermes' seeded lines is not what this image's .env.example holds: %r" % (seed_record,))
 expect("hermes-home-other", 3, ["HERMES_HOME is not the folder this gate reads"], absent=["not-the-volume"])
+# #4935: every config of the catalog through the real gate: accepted by name, the connector ones with no search and no picture tool
+cc = expect("connector-configs", 0)
+entries = (cc["lockgate"] or {}).get("entries") or {}
+want_names = ["default"] + ["connector/" + name for name in renderer.FRAGMENT_SPECS]
+if sorted(entries) != sorted(want_names):
+    failures.append("connector-configs: the catalog the scenario ran is not the renderer's: %r (want %r)" % (sorted(entries), sorted(want_names)))
+for config_name, entry in entries.items():
+    if entry.get("rc") != 0 or entry.get("accepted_as") != config_name or entry.get("problems") or entry.get("media_strict") is not True:
+        failures.append("connector-configs: %s was not accepted by the real gate: %r" % (config_name, entry))
+    tools = set(entry.get("selected_tools") or [])
+    if config_name.startswith("connector/"):
+        if not tools or tools & {"web_search", "web_extract", "image_generate"} or entry.get("image_guard") is not None:
+            failures.append("connector-configs: %s selects a search or picture tool, or carries picture evidence: %r" % (config_name, entry))
+    elif "image_generate" not in tools:
+        failures.append("connector-configs: the default config no longer selects the picture tool: %r" % (entry,))
+edited = expect("connector-config-edited", 3, ["config.yaml is not one of the accepted configs"])
+if (edited["lockgate"] or {}).get("config_accepted_as") is not None:
+    failures.append("connector-config-edited: one changed byte was accepted as %r" % ((edited["lockgate"] or {}).get("config_accepted_as"),))
+expect("connector-config-nostrict", 3, ["must set HERMES_MEDIA_DELIVERY_STRICT=1"], absent=["accepted configs"])
+expect("connector-config-apps-missing", 3, ["OORT_COHOSTED_AGENT_CONNECTOR_APPS"], absent=["accepted configs"])
 expect("env-parser-parity", 0)
 unit = ((result("env-parser-parity")["lockgate"] or {}).get("unittest")) or {}
 if unit.get("rc") != 0 or not isinstance(unit.get("ran"), int) or unit["ran"] < 100 or unit.get("skipped"):
@@ -384,6 +439,24 @@ for name in ("compose-start-nostrict", "railway-start-nostrict"):
     if rc == "0" or "START_COMMAND_REACHED_EXEC" in stdout or "must set HERMES_MEDIA_DELIVERY_STRICT=1" not in stdout \
             or '"ok": false' not in stdout:
         failures.append("%s: the gate did not refuse a start without the strict flag (rc %s, stdout tail %r)" % (name, rc, stdout[-300:]))
+# #4935: the real Railway start command with a connector-mode config. Its hash is in the command's list, so it reaches the point where it
+# would exec Hermes with the gate passed and the config named; one changed byte (connector or default) is stopped by the hash list before the
+# gate prints anything; without the strict flag every checksum passes and the gate refuses.
+rc = text("railway-start-connector", "rc").strip()
+stdout = text("railway-start-connector", "stdout")
+if rc != "0" or "START_COMMAND_REACHED_EXEC" not in stdout or '"ok": true' not in stdout \
+        or '"config_accepted_as": "connector/claude-oauth.fallback-codex-oauth"' not in stdout:
+    failures.append("railway-start-connector: rc %s, stdout tail %r" % (rc, stdout[-300:]))
+for name in ("railway-start-connector-edited", "railway-start-config-edited"):
+    rc = text(name, "rc").strip()
+    stdout, stderr = text(name, "stdout"), text(name, "stderr")
+    if rc != "78" or "START_COMMAND_REACHED_EXEC" in stdout or "LOCKGATE" in stdout \
+            or "config.yaml is not one of the accepted configs" not in stderr:
+        failures.append("%s: one changed byte did not stop the start command before the gate (rc %s, stderr tail %r)" % (name, rc, stderr[-200:]))
+rc = text("railway-start-connector-nostrict", "rc").strip()
+stdout = text("railway-start-connector-nostrict", "stdout")
+if rc == "0" or "START_COMMAND_REACHED_EXEC" in stdout or "must set HERMES_MEDIA_DELIVERY_STRICT=1" not in stdout or '"ok": false' not in stdout:
+    failures.append("railway-start-connector-nostrict: the gate did not refuse a connector start without the strict flag (rc %s, stdout tail %r)" % (rc, stdout[-300:]))
 # the live gateway: the gate passed before it listened, the report (which runs the same rules on the live volume) found
 # nothing to shut down, the container is still up, and the plugin is loaded for the hermes uid from the real volume
 log = text("gateway-boot", "log")
@@ -432,10 +505,11 @@ print("INFO gateway-boot: the volume's .env after the real boot: %s, %d name(s),
 if failures:
     print("\n".join("FAIL " + f for f in failures))
     sys.exit(1)
-print("OK: %d in-image scenarios (gate) + 6 start-command runs + the live gateway boot" % len(
+print("OK: %d in-image scenarios (gate) + 10 start-command runs + the live gateway boot" % len(
     ["healthy", "no-plugin", "edited-plugin", "widened-plugin", "not-enabled", "extra-image-gen-key", "security-private-urls",
      "safe-mode", "proxy-env", "private-env", "bom-env-file", "bom-env-file-double", "bom-env-file-kept", "clean-env-file", "self-origin",
      "self-origin-bad", "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy",
-     "env-shapes", "env-inert-shapes", "env-reference-shapes", "env-seed-template", "hermes-home-other", "env-parser-parity", "env-loader-oracle"]))
+     "env-shapes", "env-inert-shapes", "env-reference-shapes", "env-seed-template", "connector-configs", "connector-config-edited",
+     "connector-config-nostrict", "connector-config-apps-missing", "hermes-home-other", "env-parser-parity", "env-loader-oracle"]))
 PY
 say "PASS (evidence in $OUT)"

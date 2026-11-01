@@ -2553,7 +2553,8 @@ generator now do for you; you still read the lock, and the model key stays yours
   of the deploy log shows `"media_strict": true`, set
   `OORT_HOSTED_MEDIA_STRICT=1` last. Only an exact `1` opens the door. In both
   shipped shapes it is backed by the gate; if you edit the config, the gate or
-  the start command, you take that backing back on yourself.
+  the start command, you take that backing back on yourself (and the gate refuses a config whose
+  sha256 is not in its table, #4935: `python3 infra/hermes/render_model_config.py --catalog`).
 - **Model authentication is not part of this** (#4073): Hermes starts and the
   card appears without it; a chat turn answers that Hermes is not connected to a
   provider until a model is set.

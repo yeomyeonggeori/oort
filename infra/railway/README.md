@@ -159,7 +159,7 @@ compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
 | hermes | `API_SERVER_HOST` | `0.0.0.0` (environments created after 2025-10-16; a legacy IPv6-only environment would need `::`, which is runtime-unverified) |
 | hermes | `API_SERVER_PORT` | `8642` |
 | hermes | `API_SERVER_KEY` | `${{shared.HERMES_API_KEY}}` — the shared variable you create by hand, see Hermes |
-| hermes | `HERMES_CONFIG_B64` | `base64 < infra/hermes/config.yaml \| tr -d '\n'` (one line) |
+| hermes | `HERMES_CONFIG_B64` | `base64 < infra/hermes/config.yaml \| tr -d '\n'` (one line). A connector-mode Hermes (Gmail, calendar, drive read-only) takes the connector-mode config instead: `python3 infra/hermes/render_model_config.py --auth <method> [--fallback <method>] --connector-base infra/hermes/google-connectors.config.yaml \| base64 \| tr -d '\n'`. The start command accepts exactly the five configs of `render_model_config.py --catalog` (#4935); compare with `--sha256`, never print a value |
 | hermes | `HERMES_LOCKGATE_B64` | `base64 < infra/hermes/lockgate.py \| tr -d '\n'` (one line) |
 | hermes | `HERMES_IMAGE_GUARD_B64` | `base64 < infra/hermes/plugins/oort-image-guard/__init__.py \| tr -d '\n'` (one line) — the oort guard that refuses every `image_generate` address, path and non-inline value before the tool runs (#4820, ADR-0203 I2) |
 | hermes | `HERMES_IMAGE_GUARD_MANIFEST_B64` | `base64 < infra/hermes/plugins/oort-image-guard/plugin.yaml \| tr -d '\n'` (one line) |
@@ -210,10 +210,11 @@ variable**: not `DATABASE_URL`, not `PROVIDER_LINK_MASTER_KEY`, not a JWT key.
    plugin, `HERMES_IMAGE_GUARD_B64` (`plugins/oort-image-guard/__init__.py`) and
    `HERMES_IMAGE_GUARD_MANIFEST_B64` (`plugins/oort-image-guard/plugin.yaml`).
 3. **Start order.** The start command writes the config, the gate and the guard plugin
-   (into `/opt/data/plugins/oort-image-guard`), checks all four against the sha256 of the repo files (an empty,
-   stale or swapped variable stops the service; `check_railway_catalog.py` recomputes the hashes,
-   so changing `config.yaml`, `lockgate.py` or a plugin file means updating the command in the
-   same change), runs `lockgate.py gate` and only then `exec`s the Hermes
+   (into `/opt/data/plugins/oort-image-guard`), checks the gate and the plugin files against the sha256 of the repo files and
+   the config against a LIST of sha256 values (an empty, stale or swapped variable stops the service; the five accepted
+   configs are the default config and a connector-mode config for each model fragment, `render_model_config.py --catalog`;
+   `check_railway_catalog.py` recomputes the hashes, so changing `config.yaml`, `google-connectors.config.yaml`, a model fragment,
+   `lockgate.py` or a plugin file means updating the command in the same change), runs `lockgate.py gate` and only then `exec`s the Hermes
    dispatcher. A non-zero gate (`set -e`) means the service never listens. When image generation is
    exposed the gate also hashes the installed plugin again, requires it as the only entry of
    `plugins.enabled`, refuses the switches that turn Hermes' private-address filter or the plugin off

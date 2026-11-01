@@ -390,6 +390,64 @@ def scenario_env_loader_oracle():
     return (0 if summary["ok"] else 1), {"ok": summary["ok"], "problems": [], "oracle": summary}, None
 
 
+CONNECTOR_APPS = "com.momo.plugins.gmail,com.momo.plugins.google-calendar,com.momo.plugins.google-drive"
+CONNECTOR_ENV = {"OORT_COHOSTED_AGENT_CONNECTOR_APPS": CONNECTOR_APPS, "GOOGLE_OAUTH_CLIENT_ID": "oort-proof-id",
+                 "GOOGLE_OAUTH_CLIENT_SECRET": "oort-proof-secret"}  # names as the connector config reads them; dummy values, nothing is dialed
+
+
+def catalog_configs():
+    """`{name: text}` of every config the gate accepts, rebuilt from the repo's own pieces by the repo's own renderer (stdlib only, mounted
+    read-only at /oort): the default config and the connector-mode config of each model fragment (#4935)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("render_model_config", os.path.join(OORT, "render_model_config.py"))
+    renderer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renderer)
+    return {name: text.encode("utf-8") for name, text in renderer.repo_catalog(OORT).items()}, renderer.sha256_of
+
+
+def scenario_connector_configs():
+    """#4935: the REAL gate on every config of the catalog, in this image, with the connector rules of the real Hermes `load_config` and
+    tool resolution: the default config and the connector-mode config of each of the four model fragments must each be accepted by name
+    (`config_accepted_as`), the connector ones with no web search and no picture tool selected and no `image_guard` evidence (they have
+    no picture plugin), the default one with the picture tool. Not one gate run: the record carries one result per config."""
+    configs, _sha = catalog_configs()
+    entries = {}
+    for name, raw in configs.items():
+        install()
+        write(os.path.join(DATA, "config.yaml"), raw)
+        rc, record, tail = run_gate(env=CONNECTOR_ENV if name.startswith("connector/") else None)
+        record = record or {}
+        entries[name] = {"rc": rc, "ok": record.get("ok"), "accepted_as": record.get("config_accepted_as"), "problems": record.get("problems"),
+                         "selected_tools": record.get("selected_tools"), "image_guard": record.get("image_guard"),
+                         "media_strict": record.get("media_strict"), "tail": tail}
+    ok = all(entry["rc"] == 0 for entry in entries.values())
+    return (0 if ok else 1), {"ok": ok, "problems": [], "entries": entries}, None
+
+
+def scenario_connector_config_edited():
+    """#4935: the connector-mode config with ONE byte changed (a trailing comment): refused, not accepted by any name."""
+    configs, _sha = catalog_configs()
+    install()
+    write(os.path.join(DATA, "config.yaml"), configs["connector/claude-oauth.fallback-codex-oauth"] + b"# edited\n")
+    return run_gate(env=CONNECTOR_ENV)
+
+
+def scenario_connector_config_nostrict():
+    """#4935: the connector-mode config without the strict media flag: refused by the gate (strict is required in every mode)."""
+    configs, _sha = catalog_configs()
+    install()
+    write(os.path.join(DATA, "config.yaml"), configs["connector/claude-oauth.fallback-codex-oauth"])
+    return run_gate(env={**CONNECTOR_ENV, STRICT_ENV: None})
+
+
+def scenario_connector_config_apps_missing():
+    """#4935: the connector-mode config without the operator's attested app list (K4): refused as before."""
+    configs, _sha = catalog_configs()
+    install()
+    write(os.path.join(DATA, "config.yaml"), configs["connector/claude-oauth.fallback-codex-oauth"])
+    return run_gate(env={**CONNECTOR_ENV, "OORT_COHOSTED_AGENT_CONNECTOR_APPS": None})
+
+
 def scenario_hermes_home_other():
     """#4886: the gate reads /opt/data; Hermes loads $HERMES_HOME/.env. This image sets HERMES_HOME=/opt/data (the healthy scenario
     passes with it); a HERMES_HOME that names another folder is refused."""
@@ -398,11 +456,13 @@ def scenario_hermes_home_other():
 
 
 def scenario_env_parser_parity():
-    """#4886: the input table and the rule tables of infra/hermes/test_lockgate_env.py (plus the two other test files that changed),
+    """#4886: the input table and the rule tables of infra/hermes/test_lockgate_env.py (plus the other test files that changed, among them the
+    config catalog of render_model_config.py, #4935),
     run by THIS image's python with the REAL python-dotenv: the fallback parser and the installed one must both reproduce every row.
     OORT_REQUIRE_DOTENV=1 makes a missing python-dotenv a failure and never a skip. Not a gate run: the record carries the counts."""
     environment = dict(os.environ, OORT_REQUIRE_DOTENV="1", PYTHONDONTWRITEBYTECODE="1")
-    done = subprocess.run([PY, "-B", "-m", "unittest", "-v", "test_lockgate_env", "test_lockgate_image_guard", "test_default_config"],
+    done = subprocess.run([PY, "-B", "-m", "unittest", "-v", "test_lockgate_env", "test_lockgate_image_guard", "test_default_config",
+                           "test_render_model_config"],
                           cwd=OORT, capture_output=True, text=True, timeout=900, env=environment)
     output = done.stderr + "\n" + done.stdout
     ran, skipped = re.search(r"Ran (\d+) tests?", output), re.search(r"skipped=(\d+)", output)

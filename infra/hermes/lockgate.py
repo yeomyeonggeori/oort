@@ -54,6 +54,10 @@ them together. No value is read for its meaning, so no reference in a value (`${
 values. The data folder this gate reads must be Hermes' own `$HERMES_HOME`, written out (`~` and `$HOME` mean another folder under
 Hermes' HOME than under this gate's), or the file judged is not the file loaded. The LOCKGATE line names the parser used.
 
+Accepted configs (#4935). The bytes of `config.yaml` are pinned: its sha256 has to be one of `ACCEPTED_CONFIG_SHA256`, the default config or the
+connector-mode config of one of the four model fragments (`infra/hermes/render_model_config.py --catalog` rebuilds the list from the repo's own
+pieces). Anything else is refused whatever it says; the LOCKGATE line names the accepted config (`config_accepted_as`) and its sha256.
+
 Connector mode (#3948, ADR-0203 증보 K2·K4). The tool-lock rule above is unchanged. The one thing that
 changes is `mcp_servers`:
 
@@ -896,6 +900,32 @@ def hermes_image_guard_canary(origin=None):
     return problems, evidence
 
 
+# --- the configs this gate accepts (#4935) -------------------------------------------------------------------------------------------
+# `config.yaml` is the one file whose every key steers Hermes, and this gate judges only some of them, so its BYTES are pinned: the sha256 of
+# the default config and of the connector-mode config of each model fragment, which `python3 infra/hermes/render_model_config.py --catalog`
+# rebuilds from the repo's own pieces (same input, same bytes, same hash; test_render_model_config.py holds this table to it). The Railway
+# start command carries the same list (scripts/tests/check_railway_catalog.py holds that to it), and compose mounts the repo file this table
+# names. Any other bytes are refused, whatever they say. `report` does not repeat the check: the image's own boot migrates the volume's copy
+# after the start command, so the live bytes are not these (the gate replays that migration on a scratch copy and judges what it resolves to).
+# The table is keyed by the hash and the name is the value, never the other way round: a name with a word like `api-key` or `oauth` in front
+# of a 64-digit hex value on one line is what secret scanners report as a leaked credential, and these hashes are public pins.
+ACCEPTED_CONFIG_SHA256 = {  # sha256 of the bytes -> the name of the config
+    "a48f95324ec631f1a84e0153d99f92eaa16bc7288486e45280b70c031b9a7ec1": "default",
+    "00534285190ce38979a0c27a179ea1a5e14e53963d6f109a40e2c92f6e0281dd": "connector/codex-oauth.fallback-claude-oauth",
+    "89d2deb246a8dae714f9014e8bbccd359842312ce3d9513b7a7b9be738fbd419": "connector/claude-oauth.fallback-codex-oauth",
+    "1490af584d554ec044c20f27f1feeddacfaa9e3917affac3db5749e48d6482d7": "connector/api-key-openai.fallback-api-key-anthropic",
+    "f49473d359080bca29771e6b939da4e339f27398e6d98ca4b24fa04206a41266": "connector/api-key-anthropic",
+}
+
+
+def config_problems(sha):
+    """`([problems], the name of the accepted config these bytes are, or None)`. Names and hashes only: no line of the file is printed."""
+    name = ACCEPTED_CONFIG_SHA256.get(sha)  # the whole hash, exactly
+    if name is not None:
+        return [], name
+    return ["config.yaml is not one of the accepted configs (sha256 %s; accepted: %s)" % (sha, ", ".join(ACCEPTED_CONFIG_SHA256.values()))], None
+
+
 def emit(tag, **fields):
     print(tag + " " + json.dumps(fields, sort_keys=True), flush=True)
 
@@ -903,11 +933,14 @@ def emit(tag, **fields):
 def gate(cfg_path):
     problems = []
     try:
-        raw = open(cfg_path, "rb").read()
+        with open(cfg_path, "rb") as handle:
+            raw = handle.read()
     except Exception as exc:  # unreadable config is a failure, never a pass
         emit("LOCKGATE", ok=False, problems=[f"cannot read config: {type(exc).__name__}"])
         return 4
     sha = hashlib.sha256(raw).hexdigest()
+    config_issues, config_name = config_problems(sha)
+    problems.extend(config_issues)
 
     env = os.environ
     original_env = dict(os.environ)  # the container's own environment, before HOME/HERMES_HOME are redirected below
@@ -986,7 +1019,7 @@ def gate(cfg_path):
         if shared.get("send") or shared.get("enabled"):
             problems.append("telemetry.shared_metrics must stay disabled")
         ok = not problems
-        emit("LOCKGATE", ok=ok, config_sha256=sha, migrate_rc=migrate_rc, disabled_count=len(disabled),
+        emit("LOCKGATE", ok=ok, config_sha256=sha, config_accepted_as=config_name, migrate_rc=migrate_rc, disabled_count=len(disabled),
              enabled_toolsets=enabled, selected_tools=selected, resolved_tools=resolved,
              approvals_mode=mode, media_strict=original_env.get(MEDIA_STRICT_ENV) == MEDIA_STRICT_VALUE, image_guard=guard_evidence,
              env_parser=env_parser(), problems=problems)
@@ -994,7 +1027,8 @@ def gate(cfg_path):
     except SystemExit:
         raise
     except BaseException as exc:  # any failure to verify is a failure
-        emit("LOCKGATE", ok=False, config_sha256=sha, problems=problems + [f"could not verify: {type(exc).__name__}: {str(exc)[:160]}"])
+        emit("LOCKGATE", ok=False, config_sha256=sha, config_accepted_as=config_name,
+             problems=problems + [f"could not verify: {type(exc).__name__}: {str(exc)[:160]}"])
         return 4
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

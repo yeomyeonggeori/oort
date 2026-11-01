@@ -268,7 +268,8 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
   api-chown-skipped push-key-reassigned predeploy-run-redefined relay-as-root \
   relay-superuser-dsn sender-cent-api-key hermes-no-gate hermes-gate-nonfatal \
   hermes-public hermes-public-string hermes-extra-key hermes-gate-sha-stale \
-  hermes-no-sha-check hermes-guard-sha-stale hermes-no-guard-install hermes-image-floating hermes-oort-secret hermes-cors-open \
+  hermes-no-sha-check hermes-guard-sha-stale hermes-config-hash-dropped hermes-config-hash-foreign hermes-config-substring \
+  hermes-config-check-dropped hermes-no-guard-install hermes-image-floating hermes-oort-secret hermes-cors-open \
   hermes-key-literal api-hermes-wildcard-host api-hermes-attest-dropped \
   worker-hermes-attest api-relay-key-chat-key api-relay-url-wrong worker-relay-key hermes-relay-key-chat-key hermes-relay-stale-sha \
   hermes-relay-key-not-unset hermes-relay-unconditional \
@@ -287,12 +288,12 @@ pass "catalog: start commands = canonical command lists (operators, order, value
 # ①b #4072 — the Hermes default config and the tool-lock gate's own rules. The
 # catalog above pins the start command to these files' sha256, so a gate that
 # is wrong here is wrong in both shapes. Stdlib only (no PyYAML skip).
-(cd "$ROOT" && python3 -m unittest infra/hermes/test_default_config.py infra/hermes/test_lockgate_connectors.py infra/hermes/test_image_guard.py infra/hermes/test_lockgate_image_guard.py infra/hermes/test_lockgate_env.py infra/hermes/test_login_relay.py) \
+(cd "$ROOT" && python3 -m unittest infra/hermes/test_default_config.py infra/hermes/test_lockgate_connectors.py infra/hermes/test_image_guard.py infra/hermes/test_lockgate_image_guard.py infra/hermes/test_lockgate_env.py infra/hermes/test_login_relay.py infra/hermes/test_render_model_config.py) \
   >"$TMP_ROOT/hermes-unit.out" 2>&1 || {
   cat "$TMP_ROOT/hermes-unit.out" >&2
   fail "infra/hermes offline tests failed"
 }
-pass "hermes: default config (22 toolsets off, no model, no connector), gate rules + volume .env, image guard plugin (accept/refuse table, zero network or file access) + its pinned files, config, SSRF switches and canary, the volume's .env read like Hermes' loader (one input table for the fallback parser and python-dotenv, the file may hold only the allowed names and Hermes' own seeded lines (every other name refused by name whatever its value, the exact-name list held to a copy the oracle keeps, a .op.env refused, boot and report calling one function, #4950), the byte order marks in front read exactly as the loader strips them, the file followed through the loads Hermes makes of it (a name applied at a later load, or from a file its clean-up leaves alone, is refused), HERMES_HOME = the folder read and written out (no tilde, no HOME), the report judging the file too; #4886; the comparison against the real loader is tested offline), login relay sidecar (fixed argv, URL allow-list, paste rebuild, key/env separation, process-group kill; fake CLI), offline"
+pass "hermes: default config (22 toolsets off, no model, no connector), gate rules + volume .env, image guard plugin (accept/refuse table, zero network or file access) + its pinned files, config, SSRF switches and canary, the volume's .env read like Hermes' loader (one input table for the fallback parser and python-dotenv, the file may hold only the allowed names and Hermes' own seeded lines (every other name refused by name whatever its value, the exact-name list held to a copy the oracle keeps, a .op.env refused, boot and report calling one function, #4950), the byte order marks in front read exactly as the loader strips them, the file followed through the loads Hermes makes of it (a name applied at a later load, or from a file its clean-up leaves alone, is refused), HERMES_HOME = the folder read and written out (no tilde, no HOME), the report judging the file too; #4886; the comparison against the real loader is tested offline), the config catalog (the default config and a connector-mode config per model fragment, rebuilt from the repo's own pieces and held to the gate's table and to the start command's hash list, #4935), login relay sidecar (fixed argv, URL allow-list, paste rebuild, key/env separation, process-group kill; fake CLI), offline"
 
 # ①c #4820 review — the REAL pinned Hermes image (the digest compose and railway.json share): the real lockgate.py, the oort
 # image guard plugin and Hermes' own dispatch path with NO network, the start-command text of compose and railway.json up to

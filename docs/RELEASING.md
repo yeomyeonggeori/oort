@@ -26,6 +26,10 @@ SELF_HOST 문면 확인.**
 릴리스는 **main 기준**이다. 태그는 승격 커밋에 앉힌다 — track 브랜치 HEAD가
 아니다.
 
+팀 서버의 공동 Hermes(`infra/hermes/lockgate.py`·`config.yaml`·`infra/railway/railway.json`의
+hermes `startCommand`)가 이 릴리스에서 바뀌었다면 이미지 발행과 **별개로** [§Hermes 단계](#hermes-단계-팀-서버-공동-hermes)를
+같은 배포 안에서 한다. 이미지 digest를 올려도 Hermes 서비스의 설정·게이트는 저절로 바뀌지 않는다.
+
 ---
 
 ## 1. 승격
@@ -344,9 +348,46 @@ curl -sI https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-ma
 
 ---
 
+## Hermes 단계 (팀 서버 공동 Hermes)
+
+팀 서버의 공동 Hermes(서비스 하나, api·agent-worker가 가리킨다)를 새 게이트로 올리는 절차다. 집행은 오케스트레이터이고
+owner에게 사전 고지한다(운영 변수는 워커가 건드리지 않는다). **이 절의 어떤 단계도 값을 적지 않는다**: 변수·`.env`·설정의
+값은 터미널 공유·이슈·PR·로그에 내지 않고, 이름·길이·sha256으로만 말한다. 근거는 [ADR-0203 증보 2026-11-01](adr/0203-cohosted-agent-detection.md)
+(#4950 허용 목록, #4935 설정 해시 목록·엄격 모드)다.
+
+**함께 바뀌는 것.** 게이트(`HERMES_LOCKGATE_B64`), 설정(`HERMES_CONFIG_B64`), 시작 명령의 체크섬, `HERMES_MEDIA_DELIVERY_STRICT=1`은
+**한 번에** 바꾼다. 새 게이트는 엄격 값이 없으면, 새 시작 명령은 자기 목록에 없는 설정이면 Hermes를 띄우지 않으므로 하나만 바꾸면 서비스가 멈춘다.
+
+1. **바꾸기 전 값 저장.** 서비스의 변수 전체와 시작 명령을 **값 그대로** 비공개 기록(planner 비공개 기록·시크릿 금고)에 저장한다. 저장소·이슈·PR에는
+   두지 않는다. 저장이 됐는지는 변수 **이름 목록과 각 값의 길이·sha256**으로만 확인한다. 이 저장본이 6단계의 되돌리기 재료다.
+2. **설정을 해시로 대조한다(값 미출력).** 운영 `HERMES_CONFIG_B64`를 디코드한 바이트의 sha256만 계산하고(`base64 -d | shasum -a 256`, 내용은 화면에 내지 않는다)
+   저장소가 같은 입력으로 다시 만드는 해시와 비교한다. 연결 모드 서비스는 운영이 쓰는 모델 선택으로
+   `python3 infra/hermes/render_model_config.py --auth <방식> [--fallback <방식>] --connector-base infra/hermes/google-connectors.config.yaml --sha256`
+   (전체 목록은 `--catalog`의 `connector/…` 줄)을 돌린다. 같으면 설정 변수는 그대로 둔다. 다르면 같은 명령의 **출력**으로 `HERMES_CONFIG_B64`를 만든다
+   (`… --connector-base … | base64 | tr -d '\n'`). 운영의 모델 선택이 카탈로그 네 가지 밖이면 멈춘다: 카탈로그에 더하는 결정(ADR 증보)이 먼저다.
+3. **볼륨 `.env`의 이름만 읽는다.** 새 게이트는 볼륨 `.env`에 허용 목록 밖의 이름이 있거나 `.op.env`가 있으면 Hermes를 띄우지 않는다. 서비스에 들어가
+   `/opt/data/.env`의 **이름만** 읽고(`sed -n 's/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p' /opt/data/.env | sort -u`,
+   값은 나오지 않는다), `/opt/data/.op.env`가 있는지 본다. 허용 이름은 `lockgate.py`의 `VOLUME_ENV_SECRETS`·`VOLUME_ENV_SEEDED`다(씨앗 줄은 값이 Hermes가
+   쓴 그대로여야 한다). 그 밖의 이름은 운영자가 지우고(지운 **이름**만 기록), 지우기 전에는 4단계로 가지 않는다.
+4. **한 번에 바꾼다.** ① `HERMES_MEDIA_DELIVERY_STRICT=1`을 더한다(이미 있으면 정확히 `1`인지 본다). ② `HERMES_LOCKGATE_B64`를 `base64 < infra/hermes/lockgate.py | tr -d '\n'`로,
+   시작 명령을 저장소 `infra/railway/railway.json`의 hermes `startCommand`와 같게 바꾸고(설정 해시 목록과 게이트 체크섬이 함께 들어 있다), 필요하면 2단계의
+   `HERMES_CONFIG_B64`도 같은 배포에서 바꾼다. 연결 모드 서비스가 이미 가진 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`·`GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`은
+   건드리지 않는다. 배포는 한 번이다.
+5. **기동 로그를 확인한다.** 배포 로그의 `LOCKGATE` 줄이 `"ok": true`, `config_accepted_as`가 대상에 맞는 이름(`default` 또는 `connector/…`), `"media_strict": true`이고,
+   연결 모드에서는 `selected_tools`에 `web_search`·`image_generate`가 없다. 이어서 `LOCKREPORT` 줄이 `"ok": true`이고 서비스가 healthy이고 oort의 AI 연결 카드가
+   정상이다. `LOCKGATE`가 `"ok": false`이거나 서비스가 멈추면 `problems`(이름·해시만 나온다)를 이슈에 적고 6단계로 간다.
+6. **되돌린다.** 1단계에서 저장한 값으로 변수와 시작 명령을 되돌려 다시 배포한다(옛 게이트가 옛 설정을 받아들인다). 볼륨의 데이터·로그인(`auth.json`)은 그대로다.
+   되돌린 뒤 5단계의 `problems`에 맞춰 원인(보통 3단계에서 놓친 `.env` 이름)을 고치고 다시 4단계부터 간다.
+
+이 단계에 들어 있지 않은 것: 그림 도구를 어느 Hermes가 갖는지의 결정과 `OORT_SELF_MEDIA_ORIGIN`·`OORT_HOSTED_MEDIA_STRICT`(ADR-0218 증보와
+[리허설 런북](runbooks/hermes-photo-expression-rehearsal.md))는 이 단계의 다음 일이다. 연결 모드 Hermes에는 그림 도구가 없다(ADR-0203 I3).
+
+---
+
 ## 이 문서가 하지 않는 것
 
 - 태그/Release 의 원격 쓰기 — 오케스트레이터. 워커는 초안과 문면만.
+- 팀 서버 Hermes 서비스의 실제 변수·시작 명령 변경 — 오케스트레이터가 owner 사전 고지 뒤에 집행한다([§Hermes 단계](#hermes-단계-팀-서버-공동-hermes)).
 - 실발행 dispatch — owner 가 `release` Environment 에서 승인한다. 워크플로
   계약은 multi-arch 이지만 첫 arm64 digest 실측은 아직 없다.
   공개 dmg 업로드도 같다(`gh release upload` 는 사람이 실행).

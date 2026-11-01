@@ -5,6 +5,7 @@ HERMES_CONFIG_B64. Stdlib only on purpose: a check that skips when PyYAML is mis
 The deny-list is read as a plain list; the boot gate (lockgate.py) is the judge of everything else, and its own
 rules are exercised in test_lockgate_connectors.py."""
 import copy
+import hashlib
 import importlib.util
 import io
 import json
@@ -297,14 +298,17 @@ class EnforcedWebToolPolicy(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             install_guard_files(tmp)  # the canary itself is exercised in test_lockgate_image_guard.py; stubbed here
             path = os.path.join(tmp, "config.yaml")
+            fixture = "# isolated boot fixture; load_config is doubled\n"
             with open(path, "w") as handle:
-                handle.write("# isolated boot fixture; load_config is doubled\n")
+                handle.write(fixture)
             env = {"API_SERVER_KEY": "test-only-" * 4, "HERMES_DATA_DIR": tmp, "HERMES_HOME": tmp,  # the image's ENV HERMES_HOME (#4886)
                    lockgate.MEDIA_STRICT_ENV: lockgate.MEDIA_STRICT_VALUE, **(extra_env or {})}
             env = {name: value for name, value in env.items() if value is not None}  # a None removes the name
+            # the config's own bytes are judged in test_lockgate_image_guard.py (`AcceptedConfigs`); here the fixture is the accepted one
             with mock.patch.dict(os.environ, env, clear=True), \
                     mock.patch.dict(sys.modules, self.hermes_modules(cfg, tools)), \
                     mock.patch.object(sys, "path", list(sys.path)), \
+                    mock.patch.object(lockgate, "ACCEPTED_CONFIG_SHA256", {hashlib.sha256(fixture.encode()).hexdigest(): "fixture"}), \
                     mock.patch.object(lockgate.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)), \
                     mock.patch.object(lockgate, "hermes_image_guard_canary", return_value=([], {"stubbed": True})), \
                     mock.patch.object(lockgate, "emit") as emit:

@@ -145,7 +145,9 @@ class FakeHermes:
 
 
 class GateHarness(unittest.TestCase):
-    def boot(self, cfg=None, tools=TOOLS, env=None, files=None, env_file=None, install_guard=True, fake=None):
+    def boot(self, cfg=None, tools=TOOLS, env=None, files=None, env_file=None, install_guard=True, fake=None, config_bytes=None):
+        """`config_bytes`: the bytes of config.yaml the gate hashes. Without them the file is a fixture (the config is doubled by `FakeHermes`)
+        and the gate accepts exactly that fixture; with them the gate's real `ACCEPTED_CONFIG_SHA256` judges them (`AcceptedConfigs`)."""
         cfg = healthy_cfg() if cfg is None else cfg
         fake = fake or FakeHermes(cfg, tools)
         with tempfile.TemporaryDirectory() as data:
@@ -155,13 +157,16 @@ class GateHarness(unittest.TestCase):
                 with open(os.path.join(data, ".env"), "wb") as handle:
                     handle.write(env_file)
             path = os.path.join(data, "config.yaml")
-            with open(path, "w") as handle:
-                handle.write("# isolated boot fixture; load_config is doubled\n")
+            fixture = b"# isolated boot fixture; load_config is doubled\n" if config_bytes is None else config_bytes
+            with open(path, "wb") as handle:
+                handle.write(fixture)
+            accepted = {hashlib.sha256(fixture).hexdigest(): "fixture"} if config_bytes is None else lockgate.ACCEPTED_CONFIG_SHA256
             # the image's own `ENV HERMES_HOME=/opt/data` (#4886): a test passes `{"HERMES_HOME": None}` or another folder to break it
             environment = baseline_env(data, {"HERMES_HOME": data, **(env or {})})
             with mock.patch.dict(os.environ, environment, clear=True), \
                     mock.patch.dict(sys.modules, fake.modules()), \
                     mock.patch.object(sys, "path", list(sys.path)), \
+                    mock.patch.object(lockgate, "ACCEPTED_CONFIG_SHA256", accepted), \
                     mock.patch.object(lockgate.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)), \
                     mock.patch.object(lockgate, "emit") as emit:
                 rc = lockgate.gate(path)
@@ -962,6 +967,79 @@ class EnvFileThroughTheGate(GateHarness):
                 self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]), record)
         rc, kills, record = self.monitor(healthy_cfg(), env_file=b"# HERMES_SAFE_MODE=1\nOPENAI_API_KEY=0 # =1\n")
         self.assertEqual((rc, kills), (0, []), record)
+
+
+class AcceptedConfigs(GateHarness):
+    """#4935: the bytes of config.yaml are pinned. The default config and the connector-mode config of each model fragment (rebuilt from the
+    repo's pieces by render_model_config.py) are accepted by name; any other bytes are refused whatever they say, beside every other rule. The
+    other tests of this file boot a fixture file and accept exactly that fixture (see `GateHarness.boot`)."""
+
+    @classmethod
+    def setUpClass(cls):
+        module = load(os.path.join(HERE, "render_model_config.py"), "render_model_config_for_accepted_configs")
+        cls.catalog = {name: text.encode("utf-8") for name, text in module.repo_catalog(HERE).items()}
+
+    def test_the_default_and_every_connector_config_are_accepted_by_name(self):
+        self.assertEqual(len(self.catalog), 5)
+        for name, raw in self.catalog.items():
+            with self.subTest(config=name):
+                rc, record, _ = self.boot(config_bytes=raw)
+                self.assertEqual((rc, record["problems"]), (0, []))
+                self.assertEqual(record["config_accepted_as"], name)
+                self.assertEqual(record["config_sha256"], hashlib.sha256(raw).hexdigest())
+
+    def test_one_changed_byte_is_refused_and_named_without_a_line_of_the_file(self):
+        for name, raw in self.catalog.items():
+            for label, changed in (("a comment added", raw + b"#\n"), ("no final newline", raw.rstrip(b"\n")), ("a blank line", raw + b"\n"),
+                                   ("one letter changed", raw.replace(b"max_turns", b"max_turn", 1) if b"max_turns" in raw else raw[:-2] + b"x\n"),
+                                   ("crlf line ends", raw.replace(b"\n", b"\r\n")), ("a blank in front", b" " + raw), ("empty", b"")):
+                with self.subTest(config=name, change=label):
+                    self.assertNotEqual(changed, raw)
+                    rc, record, _ = self.boot(config_bytes=changed)
+                    self.assertRefused(rc, record, "config.yaml is not one of the accepted configs")
+                    self.assertIsNone(record["config_accepted_as"])
+                    self.assertEqual(record["config_sha256"], hashlib.sha256(changed).hexdigest())
+                    text = " ".join(record["problems"])
+                    self.assertIn(hashlib.sha256(changed).hexdigest(), text)
+                    self.assertNotIn("max_turn", text.replace("max_turns", ""), "no line of the file is printed")
+
+    def test_the_other_rules_still_apply_beside_an_accepted_config_and_beside_a_refused_one(self):
+        default = self.catalog["default"]
+        rc, record, _ = self.boot(config_bytes=default, env={"HERMES_SAFE_MODE": "1"})
+        self.assertRefused(rc, record, "HERMES_SAFE_MODE")
+        self.assertFalse(any("accepted configs" in p for p in record["problems"]), record["problems"])
+        rc, record, _ = self.boot(config_bytes=default + b"#\n", env={"HERMES_SAFE_MODE": "1"})  # the gate does not stop at the first reason
+        self.assertRefused(rc, record, "HERMES_SAFE_MODE")
+        self.assertTrue(any("accepted configs" in p for p in record["problems"]), record["problems"])
+
+    def test_a_connector_config_boots_only_with_the_strict_flag_and_the_attested_apps(self):
+        cfg, tools = connector_cfg(), {"memory", "todo_list", "session_search"}
+        apps = {lockgate.APPS_ENV: "com.momo.plugins.gmail,com.momo.plugins.google-calendar"}
+        raw = self.catalog["connector/claude-oauth.fallback-codex-oauth"]
+        rc, record, _ = self.boot(cfg, tools, env=apps, install_guard=False, config_bytes=raw)
+        self.assertEqual((rc, record["problems"]), (0, []))
+        self.assertEqual((record["config_accepted_as"], record["media_strict"], record["image_guard"]), ("connector/claude-oauth.fallback-codex-oauth", True, None))
+        rc, record, _ = self.boot(cfg, tools, env={**apps, lockgate.MEDIA_STRICT_ENV: None}, install_guard=False, config_bytes=raw)
+        self.assertRefused(rc, record, "must set " + lockgate.MEDIA_STRICT_ENV + "=1")
+        self.assertIs(record["media_strict"], False)
+        rc, record, _ = self.boot(cfg, tools, env={**apps, lockgate.MEDIA_STRICT_ENV: "true"}, install_guard=False, config_bytes=raw)
+        self.assertRefused(rc, record, "must set " + lockgate.MEDIA_STRICT_ENV + "=1")
+        rc, record, _ = self.boot(cfg, tools, install_guard=False, config_bytes=raw)  # the apps list is the operator's attestation (K4)
+        self.assertRefused(rc, record, lockgate.APPS_ENV)
+
+    def test_the_live_report_does_not_repeat_the_check(self):
+        # The image's own boot migrates the volume's copy of config.yaml after the start command, so the live bytes are not the accepted ones.
+        rc, kills, record = self.monitor(healthy_cfg())
+        self.assertEqual((rc, kills), (0, []), record)
+        self.assertFalse(any("accepted configs" in p for p in record["problems"]))
+
+
+def connector_cfg():
+    """A parsed connector-mode config of the shape `connector_problems` accepts (the real ones are held to it in test_google_connector_config.py)."""
+    server = {"url": "https://mcp.example.com/mcp", "auth": "oauth", "trust": "untrusted", "sampling": {"enabled": False},
+              "tools": {"include": ["search_threads", "get_thread"], "resources": False, "prompts": False}}
+    return {"agent": {"disabled_toolsets": ["terminal", "code_execution", "browser", "cronjob", "delegation", "web", "image_gen"]},
+            "mcp_servers": {"gmail": copy.deepcopy(server), "google_calendar": copy.deepcopy(server)}}
 
 
 class HermesHomeIsTheFolderTheGateReads(GateHarness):

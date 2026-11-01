@@ -1054,3 +1054,40 @@ Hermes는 `<HERMES_HOME>/.env`를 게이트가 끝난 **뒤에** override로 적
 - **사보타주(스크래치 복사본에서 하나씩 깨고 시험 네 파일로 확인, 모두 RED)** 20가지: 허용 목록에 접두 비교·`*` 항목·대소문자 접기 넣기, 씨앗 값 고정 빼기, 씨앗 표 비우기, 첫 읽기만 판정, 마지막 대입 대신 모든 대입 판정, 빈 값 통과, `.op.env` 무시, `report`가 다른 함수 쓰기·`report`·게이트에서 볼륨 판정 빼기, 엄격 요구 빼기(게이트·`report`)·`true` 허용, 적재 추적 끄기, 이름의 표시 문자 벗기기, 값 출력, 오라클 복사본 목록 바꾸기·씨앗 값 고정 빼기. 같은 게이트를 **진짜 로더 소스에 대한 오라클**로도 깨 봤다(여섯 가지 모두 `missed` 발생, `ok` 거짓): 허용 이름 하나 더, 첫 읽기만 판정, 씨앗 값 고정 빼기, 표시 문자 벗기기, 대소문자 접기, 접두 허용.
 - **진짜 Hermes 로더 소스 대조**(로컬, 위 E4): 입력은 이미지 안 증명과 같다. `needless`는 NUL 때문에 로더가 예외를 낸 파일(그 파일에 NUL이 있고 로더가 실제로 예외를 낸 경우만)과 슬롯이 이미 가진 이름에 같은 값을 쓴 줄 둘뿐이고, 둘 다 게이트가 더 엄격한 방향이다.
 - **고정 이미지 안**(`scripts/tests/test_hermes_image_guard_docker.sh`, 도커): `env-seed-template`(표 = 이미지의 `.env.example` 11줄, 파일 그대로 통과), `env-shapes`·`env-inert-shapes`·`env-reference-shapes`·`env-loader-oracle`(이미지 자신의 로더), `gateway-boot`(실제 기동 뒤 `.env`의 이름이 모두 목록 안, `.op.env` 없음)가 새로 바뀌거나 더해졌다. `runtime-unverified`(이 칸은 도커를 못 쓴다).
+
+### C1. 문제 (#4935) — 시작 명령이 기본 설정 해시 하나만 받는다
+
+팀 서버의 공동 Hermes는 저장소 기본 설정이 아니라 「연결 모드」(모델 선택 + Gmail·캘린더·드라이브 읽기 전용 `mcp_servers`)로 돈다. 새 시작 명령은 `config.yaml`을 기본 설정의 sha256 **하나**와 맞추라고 하므로 연결 모드 설정을 그대로 얹을 수 없고, 연결 모드를 지우고 기본 설정을 얹으면 모델 선택과 세 연결이 사라진다. v0.1.41에서 Hermes를 올리지 못한 이유다.
+
+### C2. 결정 — 설정의 바이트는 정해진 해시 목록으로만 받는다
+
+`config.yaml`은 모든 키가 Hermes의 동작을 바꾸는 파일이고 게이트가 판정하는 키는 그중 일부다. 그래서 바이트를 고정한다: 받는 설정은 **다섯 개**, 기본 설정 그대로(`default`)와 네 모델 조각(`codex-oauth.fallback-claude-oauth`·`claude-oauth.fallback-codex-oauth`·`api-key-openai.fallback-api-key-anthropic`·`api-key-anthropic`) 각각의 연결 모드 설정(`connector/<조각>`)이다. 임의 설정은 지금처럼 거절한다.
+
+- **연결 모드 설정은 저장소 재료로 다시 만든다.** 연결 모드의 잠금 구간은 기본 설정의 것이 아니다(`web`·`image_gen`을 통째로 금지하고 그림 플러그인이 없다. K4-1·I3). 그래서 기본 설정 위에 조각을 얹지 않고 `google-connectors.config.yaml`(기존 연결 모드 기준 사본, I3 때문에 바뀌지 않는다)의 자기 `model:`·`fallback_model:`을 고른 조각으로 **같은 자리에서** 바꾼다. 나머지는 바이트 그대로다. 명령은 `python3 infra/hermes/render_model_config.py --auth <방식> [--fallback <방식>] --connector-base infra/hermes/google-connectors.config.yaml`이고 같은 입력이면 같은 바이트, 같은 sha256이다. `--sha256`은 해시만, `--catalog`는 위 다섯의 `이름  sha256` 목록을 낸다. 운영 값과 같은지는 해시로만 대조한다(값 미출력, RELEASING의 「Hermes 단계」).
+- **세 곳이 한 목록이다.** `lockgate.py`의 `ACCEPTED_CONFIG_SHA256`(게이트가 이름을 기록한다: LOCKGATE 줄의 `config_accepted_as`)·Railway 시작 명령의 `sha256sum <설정> | cut -c1-64 | grep -qxF -e <해시> … || { echo … >&2; exit 78; }`(정확한 한 줄 일치, 부분 일치 아님)·렌더러가 다시 만든 카탈로그. `scripts/tests/check_railway_catalog.py`가 렌더러에서 해시를 다시 계산해 시작 명령과 게이트 표가 그 목록과 같은지(이름·해시·순서) 매 PR에서 대조하고, 시작 명령의 해시를 하나 빼거나 낯선 해시를 더하거나 한 줄 일치를 부분 일치로 약화하거나 검사를 지우면 RED가 된다(변이 증명). compose는 읽기 전용으로 마운트한 저장소 파일(기본 설정)을 복사하고 확인은 게이트가 한다.
+- **`report`는 해시를 다시 재지 않는다.** 이미지의 자체 기동(stage2)이 시작 명령이 끝난 뒤 볼륨의 `config.yaml` 사본을 이주(migrate)하므로 기동 뒤의 바이트는 받은 바이트가 아니다. 게이트가 같은 이주를 scratch 사본에 되풀이해 그 결과를 판정하는 것은 그대로다.
+
+### C3. 엄격 모드는 모든 기동에서, 연결 모드도 (#4935)
+
+`HERMES_MEDIA_DELIVERY_STRICT=1`은 그림 도구가 노출될 때만이 아니라 **모든 기동에서** 프로세스 환경에 정확히 `1`로 있어야 한다. 메일·드라이브를 읽는 연결 모드 Hermes도 답의 `MEDIA:` 줄이 읽을 수 있는 아무 파일을 내보내는 길이 열려 있기 때문이다(I2의 하드 컨트롤 설명과 같은 이유). 받는 설정이 다섯뿐이므로 「도구에 따라 요구」와 「항상 요구」는 받는 모든 설정에서 같고, 항상 요구가 분기가 없어 더 단순하다. 볼륨 `.env`에는 이 이름을 적을 수 없다(E2의 허용 목록에 없다). `report`가 같은 규칙을 다시 재고, LOCKGATE 줄에 최상위 `media_strict`를 남긴다(연결 모드에는 `image_guard` 증거가 없다). 템플릿(compose·Railway)은 이미 이 값을 `1` 리터럴로 준다.
+
+### C4. 기각한 대안 (#4935)
+
+- **기본 설정 해시 하나를 연결 모드 해시로 바꾸기.** 기본 모드가 못 뜬다.
+- **해시 대신 의미 검사만.** 게이트가 판정하는 키는 일부다. 나머지 키(공급자 주소·훅·플러그인·외부 비밀 소스 등)는 Hermes의 동작을 바꾸므로 바이트를 고정하는 편이 닫힌다.
+- **연결 모드를 기본 설정 + 조각으로 합성.** 기본 설정의 `platform_toolsets`(검색·그림)·`web`·`image_gen`·`plugins`는 연결 모드의 K4-1·I3(그림·검색 배타)과 충돌한다. 연결 모드의 잠금 구간을 가진 기준 사본에서 모델 구간만 바꾸는 편이 그 규칙을 그대로 둔다.
+- **기본 설정 + 모델 조각도 받기.** 이 이슈의 범위 밖이고 받는 설정을 넓힌다. 필요하면 `FRAGMENT_SPECS`를 쓰는 카탈로그에 한 줄(이름)을 더하고 두 곳의 목록과 체크섬을 바꾸면 된다.
+
+### C5. 남는 위험·배포·되돌리기 (#4935)
+
+- 운영의 현재 설정이 다섯 중 어느 것과도 같지 않으면(해시 대조로만 안다) 운영 설정을 저장소가 만든 연결 모드 설정으로 바꾸는 것이 배포의 일부가 된다. 모델 선택이 카탈로그 밖이면 배포가 멈추고 카탈로그를 먼저 넓히는 결정이 필요하다.
+- 연결 모드는 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`(K4의 운영자 증명)와 `GOOGLE_OAUTH_CLIENT_ID`·`GOOGLE_OAUTH_CLIENT_SECRET`을 서비스에 두는 것을 전제한다(저장소 템플릿은 기본 모드라 이 변수들을 주지 않는다). 없으면 게이트가 K4 규칙으로 거절한다.
+- 게이트·설정·시작 명령 체크섬·엄격 값은 **한 번에** 바꾼다(하나만 바꾸면 서비스가 멈춘다). 되돌리기는 저장해 둔 이전 값으로 변수와 시작 명령을 되돌리는 것이다(RELEASING의 「Hermes 단계」 1·6).
+- `runtime-unverified`: 연결 모드 설정 다섯 개를 진짜 Hermes `load_config`·도구 해석으로 통과시키는 일, 진짜 시작 명령에 연결 모드 설정을 넣는 일(`connector-configs`·`railway-start-connector*`)은 도커가 필요해 이 칸에서 돌리지 못했다. Railway에서의 실제 기동과 연결 모드 서비스의 실제 변수는 확인하지 않았다.
+
+### E7 (이어서). #4935의 검증 경계
+
+- **오프라인**: [`test_render_model_config.py`](../../infra/hermes/test_render_model_config.py)가 연결 모드 렌더(자기 model 구간만 바뀌고 같은 자리, 나머지·`mcp_servers`는 기준 사본과 같은 바이트, 잠금 24개·`web`·`image_gen` 금지·그림/검색 구간 없음, PyYAML이 있으면 `connector_problems` 통과), 같은 입력이면 같은 바이트와 `--sha256`, 카탈로그(다섯, 고정 순서)와 게이트 표의 일치, 한 바이트 바꾼 설정·해시처럼만 보이는 값(앞부분만 같은 해시, 대소문자, 한 글자 더·덜)의 거절, 거절 입력(model 구간 없는 기준, `mcp_servers` 없는 기준, 옵션 충돌)을 잰다. [`test_lockgate_image_guard.py`](../../infra/hermes/test_lockgate_image_guard.py)의 `AcceptedConfigs`가 진짜 `gate()`에 카탈로그의 다섯을 넣어 이름으로 받는지, 한 바이트 바꾼 모양 7가지가 거절되고 줄을 출력하지 않는지, 다른 규칙과 함께 보고되는지, 연결 모드가 엄격 값 없이는 뜨지 않는지를 잰다.
+- **카탈로그 검사기**: 시작 명령의 해시 목록·게이트 표·렌더러를 하나로 묶고, 변이 증명 94가지 중 네 가지(해시 하나 빼기·낯선 해시 더하기·부분 일치로 약화·검사 지우기)가 새로 RED다.
+- **사보타주(스크래치 복사본, 모두 RED)** 9가지: 게이트가 아무 설정이나 받기·해시 앞부분만 비교·검사 지우기·표에서 연결 모드 하나 빼기·표의 기본 해시를 낡게·렌더러가 조각을 마지막에 붙이기·렌더러가 기준 사본의 model 구간을 그대로 두기·`mcp_servers` 없는 기준도 받기·카탈로그에서 기본 설정 빼기.
+- **고정 이미지 안**(`test_hermes_image_guard_docker.sh`, 도커): `connector-configs`(진짜 게이트가 다섯 설정을 이름으로 받고 연결 모드는 검색·그림 도구가 선택되지 않음), `connector-config-edited`·`-nostrict`·`-apps-missing`, 진짜 Railway 시작 명령의 `railway-start-connector`(연결 모드 설정이 목록 안이라 exec 직전까지 간다)·`-connector-edited`·`-config-edited`(한 바이트가 게이트가 아무것도 찍기 전에 멈춘다. rc 78)·`-connector-nostrict`.
