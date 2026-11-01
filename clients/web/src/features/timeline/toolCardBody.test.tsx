@@ -62,6 +62,13 @@ describe("도구 호출 카드의 결과 자리 (#5009)", () => {
     expect(screen.getByTestId("agent-frame").textContent).toContain("실행 중입니다.");
     expect(document.body.textContent).not.toContain("Tool call");
   });
+
+  it("출력이 빈 결과 카드도 빈 「결과」 행을 그리지 않는다: 빈 본문은 결과 문장이 없는 것이다(폰 frameSentence 와 같은 기준)", () => {
+    // 서버 `ToolResult::message_body` 는 출력 그대로라 도구가 아무것도 내지 않으면 본문이 빈 문자열이다.
+    mountRow([started(), row("tool_result", "result", 2, { call_id: "c1", output: "", is_error: false }, "")], "result");
+    expect(chip().dataset.status).toBe("done");
+    expect(screen.queryByTestId("agent-frame")).toBeNull();
+  });
 });
 
 describe("결과 카드의 제목 (#5009)", () => {
