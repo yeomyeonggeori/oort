@@ -27121,6 +27121,34 @@ async fn team_ai_four_profile_conversations_4791() {
         .unwrap();
     assert_eq!(human_name, "부탁한 사람");
     assert_eq!(agent_name, "별무리");
+    // ADR-0201 증보 v3 B10-3 (#4966): the approved `agent.rename` card moved the helper's aliases in
+    // the same write as the settings route does — the new name is one more alias beside the three.
+    let aliases: Vec<String> = sqlx::query_scalar(
+        "SELECT alias_norm FROM member_handle_alias WHERE workspace_id=$1 AND member_id=$2 \
+         ORDER BY alias_norm COLLATE \"C\"",
+    )
+    .bind(ws)
+    .bind(helper)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert!(
+        aliases.contains(&"별무리".to_string()) && aliases.len() == 4,
+        "the card's rename added its alias: {aliases:?}"
+    );
+    let rename_audit: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='member.renamed' \
+            AND detail->>'new'='별무리' AND detail->>'kind'='agent'",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        rename_audit["alias"],
+        json!({"state":"registered","alias":"별무리","evicted":[]}),
+        "B10-6: the rename's audit row says what became of the alias: {rename_audit}"
+    );
     assert!(member_pointers_4385(&w.su, f.human).await.1.is_some());
     assert!(member_pointers_4385(&w.su, helper).await.1.is_some());
     // Preparation failures are audited and count toward the same per-person limit.
@@ -27176,6 +27204,175 @@ async fn team_ai_four_profile_conversations_4791() {
             .err()
             .unwrap(),
         "rate_limited"
+    );
+}
+
+/// A pending helper card of `action_id` with `args`, asked for by the fixture's person in the fixture
+/// channel — the proposal half of what the worker does. Returns the approval to decide.
+async fn helper_card_4966(
+    w: &World4385,
+    helper: Uuid,
+    action_id: &'static str,
+    args: Value,
+) -> Uuid {
+    use momo_workspace_actions::team_ai;
+    let f = &w.fixture;
+    let (ws, channel, human) = (f.workspace, f.channel, f.human);
+    let worker = momo_worker_pool_3900().await;
+    let run = momo_db::with_tenant_tx(&w.su, ws, move |conn| {
+        Box::pin(async move {
+            let sent = momo_messaging::send_message_in_tx(
+                conn,
+                ws,
+                momo_messaging::NewMessage::text(channel, human, "너 이름을 바꿔 줘".to_string()),
+            )
+            .await?;
+            momo_agent::create_agent_run_in_tx(
+                conn,
+                ws,
+                momo_agent::NewAgentRun {
+                    channel_id: channel,
+                    trigger: momo_agent::RunTrigger::Mention {
+                        message_id: sent.message.id,
+                        agent_member_id: helper,
+                    },
+                    parent_run_id: None,
+                    max_steps: 50,
+                    depth: 0,
+                    input: json!({"schema":"momo.agent_run.input.v0","surface":"mention","prompt":"fixture","depth":0}),
+                },
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    let context = profile_context_4791(ws, run.id, channel, helper);
+    momo_db::with_tenant_tx(&worker, ws, move |conn| {
+        let args = args.clone();
+        Box::pin(async move {
+            team_ai::propose_with_avatar_in_tx(conn, &context, action_id, &args, None, None).await
+        })
+    })
+    .await
+    .unwrap()
+    .expect("the card is proposed")
+    .approval_id
+}
+
+/// `(display name, alias count)` of the helper and its workspace.
+async fn helper_name_and_aliases_4966(w: &World4385, helper: Uuid) -> (String, i64) {
+    sqlx::query_as(
+        "SELECT (SELECT display_name FROM member WHERE id=$1), \
+                (SELECT count(*) FROM member_handle_alias WHERE workspace_id=$2)",
+    )
+    .bind(helper)
+    .bind(w.fixture.workspace)
+    .fetch_one(&w.su)
+    .await
+    .unwrap()
+}
+
+/// ADR-0201 증보 v3 B10-5 (#4966): the team AI may not be named a reserved word. The card alphabet
+/// lets a spaced-out spelling (`a l l`) through at proposal time; the one write refuses it, and an
+/// approval then answers like any card whose arguments went stale — a 409 `action_args_invalid`,
+/// with the name, the aliases and the card's audit trail untouched. (A plain `all` never gets a
+/// card: the strict alphabet refuses it earlier.) The same holds for `agent.profile.update`.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn team_ai_rename_to_a_spaced_out_reserved_word_is_refused_at_the_decision_4966() {
+    let w = world_4385().await;
+    let ws = w.fixture.workspace;
+    let helper = enable_helper_3900(&w.su, &w.fixture).await;
+    let before = helper_name_and_aliases_4966(&w, helper).await;
+    for (action_id, args) in [
+        ("agent.rename", json!({"displayName":"a l l"})),
+        ("agent.profile.update", json!({"displayName":"h e r e"})),
+    ] {
+        let approval = helper_card_4966(&w, helper, action_id, args).await;
+        let (status, _, body) = decide_as(
+            &w.client,
+            &w.base,
+            ws,
+            &w.fixture.human_jwt,
+            approval,
+            true,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(
+            status, 409,
+            "{action_id}: refused like a card whose arguments went stale: {body}"
+        );
+        assert_eq!(
+            helper_name_and_aliases_4966(&w, helper).await,
+            before,
+            "{action_id}: the name and the aliases did not move"
+        );
+    }
+    let renamed: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='member.renamed' AND subject_member_id=$2",
+    )
+    .bind(ws)
+    .bind(helper)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(renamed, 0, "no rename was recorded");
+}
+
+/// ADR-0201 증보 v3 B10-3/B10-6 (#4966): an approved `agent.profile.update` that renames the helper
+/// moves its aliases in the same write (the same door as `agent.rename`), and the `member.renamed`
+/// audit row of that approval says so.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn team_ai_profile_update_that_renames_the_helper_moves_its_alias_4966() {
+    let w = world_4385().await;
+    let ws = w.fixture.workspace;
+    let helper = enable_helper_3900(&w.su, &w.fixture).await;
+    let approval = helper_card_4966(
+        &w,
+        helper,
+        "agent.profile.update",
+        json!({"displayName":"프로필봇"}),
+    )
+    .await;
+    let (status, _, body) = decide_as(
+        &w.client,
+        &w.base,
+        ws,
+        &w.fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let aliases: Vec<String> = sqlx::query_scalar(
+        "SELECT alias_norm FROM member_handle_alias WHERE workspace_id=$1 AND member_id=$2 \
+         ORDER BY alias_norm COLLATE \"C\"",
+    )
+    .bind(ws)
+    .bind(helper)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert!(
+        aliases.contains(&"프로필봇".to_string()) && aliases.len() == 4,
+        "the profile card's rename added its alias: {aliases:?}"
+    );
+    let detail: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='member.renamed' AND detail->>'approval_id'=$2",
+    )
+    .bind(ws)
+    .bind(approval.to_string())
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        detail["alias"],
+        json!({"state":"registered","alias":"프로필봇","evicted":[]}),
+        "{detail}"
     );
 }
 

@@ -6,6 +6,9 @@
 //! DELETE   /v1/workspaces/{ws}/messages/{id}/unfurls    author
 //! GET      /v1/workspaces/{ws}/unfurls/{id}/image       channel member (proxy)
 //! GET      /v1/workspaces/{ws}/unfurls/{id}/icon        channel member (proxy, 443 only)
+//! POST     /v1/workspaces/{ws}/channels/{ch}/unfurl-previews        channel member (#4884)
+//! GET      /v1/workspaces/{ws}/unfurl-previews/{id}/image           the member it was made for
+//! GET      /v1/workspaces/{ws}/unfurl-previews/{id}/icon            the member it was made for
 //! ```
 //!
 //! The two proxy routes can make this server GET a site the card names. A request the cache can
@@ -13,27 +16,33 @@
 //! fetch spends the member's fetch budget (`MemberWrite::UnfurlProxy`) and a place among the
 //! fetches in flight; either is refused with 429 + `Retry-After` (#4881 security review M-2).
 //!
+//! The preview routes (ADR-0170 증보 2026-11-01, #4884) answer for a link a member is still typing:
+//! the page comes from the same transport (`FetchKind::Preview`: the guard plus port 443), the
+//! answer lives in this process only (`momo_unfurl::PreviewCache`), and the picture and icon are
+//! served by the very same code as a stored card's ([`serve_remote_image`]).
+//!
 //! No SQL here. No reqwest here. Personal render-fold is the client half.
 
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::is_channel_member;
 use momo_unfurl::{
-    fetch_record_icon, fetch_record_image, icon_path, image_path, list_unfurls_in_tx,
-    load_setting_in_tx, load_unfurl_in_tx, proxy_goes_outbound, record_measured_size,
-    remove_unfurls_in_tx, upsert_setting_in_tx, ProxyError, ProxySlot, RemoveOutcome, UnfurlRecord,
-    UnfurlSetting,
+    fetch_preview, fetch_record_icon, fetch_record_image, icon_path, image_path,
+    list_unfurls_in_tx, load_setting_in_tx, load_unfurl_in_tx, normalize_url, preview_icon_path,
+    preview_image_path, proxy_goes_outbound, record_measured_size, remove_unfurls_in_tx,
+    upsert_setting_in_tx, PreviewEntry, PreviewKey, PreviewOutcome, Previewed, ProxyError,
+    ProxySlot, RemoveOutcome, UnfurlRecord, UnfurlSetting,
 };
 use uuid::Uuid;
 
 use crate::dto::{
     MessageUnfurlDto, MessageUnfurlListResponse, PutUnfurlSettingsRequest, RemoveUnfurlsResponse,
-    UnfurlSettingsResponse,
+    UnfurlPreviewDto, UnfurlPreviewRequest, UnfurlSettingsResponse,
 };
 use crate::error::ApiError;
 use crate::rate_limit::{
@@ -236,12 +245,31 @@ async fn proxy_remote_image(
         })
         .await;
     let record = settle_db("unfurl.image.authorize", outcome)?;
+    serve_remote_image(&state, &principal, workspace_id, &record, slot, true).await
+}
+
+/// The bytes of one of a card's two remote images, for a member who is already authorized, from
+/// the card row (or, for a preview, from [`PreviewEntry::as_record`]). Everything that makes this
+/// server go to a remote site is here and is the same for both: the member's fetch budget, a
+/// place among the fetches in flight, the guard, the type allow-list and the cache.
+///
+/// `remember_size` is whether the size the proxy measures from a picture may be written back
+/// (D12): a stored card has a row for it, a preview has none.
+async fn serve_remote_image(
+    state: &AppState,
+    principal: &Principal,
+    workspace_id: Uuid,
+    record: &UnfurlRecord,
+    slot: ProxySlot,
+    remember_size: bool,
+) -> Result<Response, ApiError> {
+    let member_id = principal.member_id;
     // Only a request that would make this server fetch from the remote site spends the member's
     // budget: a picture already in memory and an address that failed lately are free, so a
     // timeline of cached cards never meets the limit. A route layer cannot tell the two apart,
     // which is why this is asked here, after authorization and before the fetch.
-    let spent = if proxy_goes_outbound(&record, state.unfurl_cache.as_ref(), slot) {
-        match spend_member_write_unit(&state, MemberWrite::UnfurlProxy, &principal).await {
+    let spent = if proxy_goes_outbound(record, state.unfurl_cache.as_ref(), slot) {
+        match spend_member_write_unit(state, MemberWrite::UnfurlProxy, principal).await {
             Ok(unit) => unit,
             Err(retry_after_seconds) => return Ok(too_many_requests(retry_after_seconds)),
         }
@@ -251,7 +279,7 @@ async fn proxy_remote_image(
     let fetched = match slot {
         ProxySlot::Image => {
             fetch_record_image(
-                &record,
+                record,
                 state.unfurl_http.as_ref(),
                 state.unfurl_cache.as_ref(),
                 member_id,
@@ -260,7 +288,7 @@ async fn proxy_remote_image(
         }
         ProxySlot::Icon => {
             fetch_record_icon(
-                &record,
+                record,
                 state.unfurl_http.as_ref(),
                 state.unfurl_cache.as_ref(),
                 member_id,
@@ -278,7 +306,7 @@ async fn proxy_remote_image(
         // of budget this request spent is given back; ask again in a second.
         Err(ProxyError::Busy) => {
             if let Some(unit) = spent {
-                refund_member_write(&state, unit);
+                refund_member_write(state, unit);
             }
             return Ok(too_many_requests(1));
         }
@@ -286,9 +314,9 @@ async fn proxy_remote_image(
 
     // ADR-0170 amendment D12: a picture whose size the page did not declare gets the size read
     // from the bytes just received, once. Best effort: the picture is served either way.
-    if slot == ProxySlot::Image && record.image_width.is_none() {
+    if remember_size && slot == ProxySlot::Image && record.image_width.is_none() {
         if let Some((width, height)) = image.size {
-            remember_measured_size(&state, workspace_id, &record, width, height).await;
+            remember_measured_size(state, workspace_id, record, width, height).await;
         }
     }
 
@@ -323,4 +351,201 @@ async fn remember_measured_size(
     if let Err(error) = outcome {
         tracing::warn!(error = %error, "unfurl measured size was not recorded");
     }
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0170 증보 2026-11-01 (#4884) — the card of a link that is still in the composer.
+// ---------------------------------------------------------------------------
+
+/// The longest address a preview request may carry: the column bound a stored card's address has
+/// (`message_unfurl_source_ck`), checked on the raw body value so a megabyte of fragment is a 400
+/// before anything reads it.
+const PREVIEW_URL_MAX_BYTES: usize = 2048;
+
+/// `failed` is the whole answer for every way of having no preview (D15): the keys of an `ok` card
+/// are all absent and so is `id`.
+fn failed_preview(url: String) -> UnfurlPreviewDto {
+    UnfurlPreviewDto {
+        url,
+        status: "failed",
+        id: None,
+        title: None,
+        description: None,
+        domain: None,
+        image_url: None,
+        site_name: None,
+        icon_url: None,
+        image_width: None,
+        image_height: None,
+        is_video: false,
+    }
+}
+
+/// An `ok` preview. As for a stored card, the remote picture and icon addresses stop at the
+/// database row's twin (the cache entry): a client is only ever given the two preview paths.
+fn ok_preview(workspace_id: Uuid, entry: &PreviewEntry) -> UnfurlPreviewDto {
+    let card = &entry.card;
+    UnfurlPreviewDto {
+        url: entry.url.clone(),
+        status: "ok",
+        id: Some(entry.id.to_string()),
+        title: card.title.clone(),
+        description: card.description.clone(),
+        domain: card.domain.clone(),
+        image_url: card
+            .image_url
+            .as_ref()
+            .map(|_| preview_image_path(workspace_id, entry.id)),
+        site_name: card.site_name.clone(),
+        icon_url: card
+            .icon_url
+            .as_ref()
+            .map(|_| preview_icon_path(workspace_id, entry.id)),
+        image_width: card.image_width,
+        image_height: card.image_height,
+        is_video: card.is_video,
+    }
+}
+
+/// `POST /v1/workspaces/{ws}/channels/{ch}/unfurl-previews`
+///
+/// In the order that keeps every refusal ahead of the work it would have caused:
+///
+/// 1. the caller is a person, the address is an http(s) address of a sane size — shape only, the
+///    same answer for everyone, before a connection is taken;
+/// 2. one short tenant transaction: an **active workspace member** who is a **current member of
+///    that channel** (the guest rule is the send's), and the workspace's switch (D4);
+/// 3. both switches (the instance's and the workspace's) have to be on, or nothing is fetched and
+///    the answer is `failed`;
+/// 4. an answer this server already holds for this member and address is returned, for free;
+/// 5. otherwise one unit of the member's preview budget, then a place among the fetches in flight
+///    and the trip itself ([`fetch_preview`]), outside any transaction. A place that is not there
+///    gives the unit back.
+///
+/// Nothing is written to the database and nothing here logs the address, a query or a body.
+pub async fn preview(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, channel)): Path<(String, String)>,
+    Json(request): Json<UnfurlPreviewRequest>,
+) -> Result<Response, ApiError> {
+    require_human(&principal, "link previews require a human bearer")?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let channel_id = path_uuid(&channel, "invalid channel id")?;
+    let member_id = principal.member_id;
+    if request.url.len() > PREVIEW_URL_MAX_BYTES {
+        return Err(ApiError::bad_request("url is too long"));
+    }
+    // The same normalization the worker's cards go through, so a preview and the card it becomes
+    // are about the same address. No DNS and no connection: it only reads the shape (http or
+    // https, a host, no credentials).
+    let url_key = normalize_url(&request.url)
+        .map_err(|_| ApiError::bad_request("url must be an absolute http(s) address"))?;
+
+    let outcome: DbRejectable<bool> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let active = momo_auth::active_workspace_role(conn, workspace_id, member_id)
+                .await?
+                .is_some();
+            // One refusal for "not in the workspace", "not in the channel" and "no such channel":
+            // the answer does not say which channels exist.
+            if !active || !is_channel_member(conn, channel_id, member_id).await? {
+                return Ok(Err(ApiError::forbidden("not a channel member")));
+            }
+            Ok(Ok(load_setting_in_tx(conn, workspace_id).await?.enabled))
+        })
+    })
+    .await;
+    let workspace_enabled = settle_db("unfurl.preview.authorize", outcome)?;
+
+    // Off means off (D4, D16): nothing is fetched, nothing is spent, nothing is kept.
+    if !state.unfurl_enabled || !workspace_enabled {
+        return Ok(Json(failed_preview(url_key)).into_response());
+    }
+
+    let key = PreviewKey::new(workspace_id, member_id, url_key.clone());
+    match state.unfurl_previews.get(&key) {
+        Some(PreviewOutcome::Entry(entry)) => {
+            return Ok(Json(ok_preview(workspace_id, &entry)).into_response());
+        }
+        Some(PreviewOutcome::Failed) => {
+            return Ok(Json(failed_preview(url_key)).into_response());
+        }
+        None => {}
+    }
+
+    let spent = match spend_member_write_unit(&state, MemberWrite::UnfurlPreview, &principal).await
+    {
+        Ok(unit) => unit,
+        Err(retry_after_seconds) => return Ok(too_many_requests(retry_after_seconds)),
+    };
+    // `false`: this server's transport is `SafeUnfurlTransport::production(false)`, which never
+    // takes plain http, so the card builder must not take an http picture address either.
+    let previewed = fetch_preview(
+        state.unfurl_http.as_ref(),
+        state.unfurl_cache.as_ref(),
+        state.unfurl_previews.as_ref(),
+        key,
+        false,
+    )
+    .await;
+    match previewed {
+        Previewed::Entry(entry) => Ok(Json(ok_preview(workspace_id, &entry)).into_response()),
+        Previewed::Failed => Ok(Json(failed_preview(url_key)).into_response()),
+        // No place for the fetch (the member's share, the process's, or a name lookup's). Nothing
+        // left the building, so the unit this request spent is given back.
+        Previewed::Busy => {
+            if let Some(unit) = spent {
+                refund_member_write(&state, unit);
+            }
+            Ok(too_many_requests(1))
+        }
+    }
+}
+
+/// `GET /v1/workspaces/{ws}/unfurl-previews/{id}/image`
+pub async fn preview_image(
+    state: State<AppState>,
+    principal: Extension<Principal>,
+    path: Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    serve_preview_image(state, principal, path, ProxySlot::Image).await
+}
+
+/// `GET /v1/workspaces/{ws}/unfurl-previews/{id}/icon`
+pub async fn preview_icon(
+    state: State<AppState>,
+    principal: Extension<Principal>,
+    path: Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    serve_preview_image(state, principal, path, ProxySlot::Icon).await
+}
+
+/// A preview's picture or icon, for the member the preview was made for and nobody else: an id
+/// that is unknown, run out, another member's or another workspace's is the same 404 (a `{ws}`
+/// that is not the caller's workspace is the usual 403 first). From there it is the stored card's
+/// proxy, unchanged ([`serve_remote_image`]).
+async fn serve_preview_image(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((workspace, preview)): Path<(String, String)>,
+    slot: ProxySlot,
+) -> Result<Response, ApiError> {
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let preview_id = path_uuid(&preview, "invalid preview id")?;
+    let Some(entry) = state
+        .unfurl_previews
+        .entry(workspace_id, principal.member_id, preview_id)
+    else {
+        return Err(ApiError::not_found("unfurl preview not found"));
+    };
+    serve_remote_image(
+        &state,
+        &principal,
+        workspace_id,
+        &entry.as_record(),
+        slot,
+        false,
+    )
+    .await
 }
