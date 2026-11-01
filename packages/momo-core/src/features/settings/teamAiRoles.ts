@@ -97,6 +97,39 @@ export function teamAiRolesNotice(
 }
 
 /**
+ * 고지 기록 필드를 모르는 **옛 서버**(#5040 전)의 거절인가. 그 서버는 모르는 설정 키를 400
+ * 「unknown settings key: team_ai_roles_notice」로 돌려준다(`momo-settings`의 `UnknownKey`). 이 거절만
+ * 필드 없이 한 번 더 보낼 이유다(#5109). 새 서버가 기록 자체를 거절한 400(모르는 판·묶음·화면)은
+ * 화면과 서버가 어긋났다는 신호라 그대로 오류다.
+ */
+export function isOldServerNoticeRefusal(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    error.status === 400 &&
+    error.message.includes(`unknown settings key: ${TEAM_AI_ROLES_NOTICE_KEY}`)
+  );
+}
+
+/**
+ * 고지 기록을 실어 보내고, 옛 서버가 그 키를 몰라 거절하면 기록 없이 **한 번만** 다시 보낸다(#5109).
+ * 옛 서버는 키를 검사한 뒤 쓰기 전에 거절하므로 두 번째 요청이 같은 변경을 처음으로 쓴다. 기록은
+ * 남지 않지만 켜기는 된다 — 서버가 앱보다 늦게 올라가는 인스턴스에서도 파일·기억 켜기가 막히지 않는다
+ * (ADR-0201 증보 v3.2 한계 ②).
+ */
+export async function withNoticeFallback<T>(
+  notice: TeamAiRolesNotice | null | undefined,
+  send: (notice: TeamAiRolesNotice | null) => Promise<T>
+): Promise<T> {
+  if (!notice) return send(null);
+  try {
+    return await send(notice);
+  } catch (error) {
+    if (!isOldServerNoticeRefusal(error)) throw error;
+    return send(null);
+  }
+}
+
+/**
  * 설정 화면의 스위치 하나가 싣는 고지 기록. **켤 때만**, 고지 줄이 있는 묶음일 때만이다: 끄는 것은
  * 공급자로 가는 내용을 늘리지 않고, 다른 묶음은 보인 고지가 없다.
  */
@@ -172,15 +205,17 @@ export function patchTeamAiRoles(
   change: TeamAiRolesChange,
   notice?: TeamAiRolesNotice | null
 ): Promise<unknown> {
-  const body: Record<string, unknown> = { [TEAM_AI_ROLES_KEY]: change };
-  if (notice) body[TEAM_AI_ROLES_NOTICE_KEY] = notice;
-  return settingsRequest<unknown>(
-    `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,
-    {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    }
-  );
+  return withNoticeFallback(notice, (sent) => {
+    const body: Record<string, unknown> = { [TEAM_AI_ROLES_KEY]: change };
+    if (sent) body[TEAM_AI_ROLES_NOTICE_KEY] = sent;
+    return settingsRequest<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,
+      {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }
+    );
+  });
 }
 
 export type TeamAiNoticeKind = "files" | "memory" | "both";
