@@ -496,6 +496,18 @@ pub struct RateLimitConfig {
     /// the route then refuses (busy, over the draft limit) counts too, and the gate runs before
     /// the body is read.
     pub photo_draft_per_member_limit: u32,
+    /// `RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER` (default 60 per window). 0 disables.
+    /// A link a member typed into the composer, asked about before the message exists
+    /// (`POST …/channels/{ch}/unfurl-previews`), counted **only when the request makes this server
+    /// fetch the page**: an answer the server already holds for that member and address, a switch
+    /// that is off, and a request turned away for want of a place cost the remote site nothing and
+    /// spend nothing. This is the one request where the member names the address and the answer
+    /// comes straight back, so it is the proxy's other half of the same brake (the proxy's figure
+    /// is for pictures a page chose). 60 is a sustained one a second: the composer asks about a
+    /// link a moment after typing stops, once per address, and an address typed slowly leaves a
+    /// few half-written ones on the way; that fits with room to spare, and anything past it is
+    /// retried by the client after `Retry-After`. See ADR-0170 증보 2026-11-01 D20.
+    pub unfurl_preview_per_member_limit: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -515,6 +527,7 @@ impl Default for RateLimitConfig {
             upload_start_per_member_limit: 60,
             unfurl_proxy_per_member_limit: 240,
             photo_draft_per_member_limit: 10,
+            unfurl_preview_per_member_limit: 60,
         }
     }
 }
@@ -575,6 +588,9 @@ impl RateLimitConfig {
             photo_draft_per_member_limit: lookup("RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.photo_draft_per_member_limit),
+            unfurl_preview_per_member_limit: lookup("RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.unfurl_preview_per_member_limit),
         }
     }
 }
@@ -4004,9 +4020,10 @@ mod tests {
                 defaults.upload_start_per_member_limit,
                 defaults.unfurl_proxy_per_member_limit,
                 defaults.photo_draft_per_member_limit,
+                defaults.unfurl_preview_per_member_limit,
             ),
-            (120, 600, 60, 60, 240, 10),
-            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 for the unfurl one, ADR-0218 §8 H11 for the photo one), docs/api/openapi.yaml and infra/.env.example with it"
+            (120, 600, 60, 60, 240, 10, 60),
+            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 and 2026-11-01 D20 for the unfurl ones, ADR-0218 §8 H11 for the photo one), docs/api/openapi.yaml and infra/.env.example with it"
         );
         for (name, limit) in [
             (
@@ -4018,6 +4035,7 @@ mod tests {
             ("upload start", defaults.upload_start_per_member_limit),
             ("unfurl proxy", defaults.unfurl_proxy_per_member_limit),
             ("photo draft", defaults.photo_draft_per_member_limit),
+            ("unfurl preview", defaults.unfurl_preview_per_member_limit),
         ] {
             assert!(
                 limit > 0,
@@ -4099,6 +4117,14 @@ mod tests {
                 photo_draft_per_member_limit: 12,
                 ..defaults
             }
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER", "7")),
+            RateLimitConfig {
+                unfurl_preview_per_member_limit: 7,
+                ..defaults
+            },
+            "the preview name moves the preview field and nothing else"
         );
         // 0 is the operator's off switch; a value that is not a number is not one.
         assert_eq!(

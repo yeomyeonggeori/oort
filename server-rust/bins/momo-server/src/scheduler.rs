@@ -193,6 +193,9 @@ pub(crate) async fn deliver_schedule_in_tx(
         // ADR-0148 증보 (#4887): a timed thread reply does not carry 「대화에도 보내기」 yet (the
         // schedule row has no such column) — it lands in the thread only, as before.
         also_in_channel: false,
+        // ADR-0170 증보 2026-11-01 (#4884): the schedule row has no 「미리보기 없이 보내기」 column
+        // either — a timed message gets its cards as before.
+        suppress_unfurl: false,
         gates: gates.clone(),
     };
     let outcome = deliver_message_in_tx(conn, request).await?;

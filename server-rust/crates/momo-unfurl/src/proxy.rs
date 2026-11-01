@@ -318,7 +318,7 @@ impl ImageCache {
     /// A place among the fetches in flight, held until the fetch ends (success, failure or the
     /// caller going away): one of the process's and one of `member`'s own. `None` when either is
     /// already full.
-    fn try_start_fetch(&self, member: Uuid) -> Option<FetchPlace<'_>> {
+    pub(crate) fn try_start_fetch(&self, member: Uuid) -> Option<FetchPlace<'_>> {
         // The member's own share first, so a member over it never touches the process's count.
         let own = MemberPlace::take(
             &self.member_places,
@@ -336,7 +336,7 @@ impl ImageCache {
 
 /// A place among the fetches in flight: one of the process's and one of the member's own. Both go
 /// back when this is dropped, whichever way the fetch ended.
-struct FetchPlace<'a> {
+pub(crate) struct FetchPlace<'a> {
     _process: OwnedSemaphorePermit,
     _own: MemberPlace<'a>,
 }

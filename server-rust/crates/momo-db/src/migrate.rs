@@ -740,12 +740,17 @@ mod tests {
     /// `NOT VALID` CHECK `>= 0`, and `GRANT SELECT ON thread_follow TO momo_notifier` — the one grant
     /// the `thread_reply` push arm needs (no INSERT / UPDATE / DELETE, no new BYPASSRLS role). No new
     /// table, so no new RLS policy.
+    ///
+    /// 166 is #4966's 「별칭이 이름을 따라가요」 (ADR-0201 증보 v3 B10, slice S3): the helper's alias
+    /// set stops being fixed (`member_handle_alias_v2_set_ck` is dropped, the shape CHECK stays) and
+    /// the trigger `member_handle_alias_guard` takes over: an alias belongs to the workspace's team AI
+    /// member only, and a workspace holds at most four. No new table, no new grant.
     #[test]
-    fn discovers_contiguous_migrations_001_to_165() {
+    fn discovers_contiguous_migrations_001_to_166() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=165).collect();
+        let expected: Vec<i64> = (1..=166).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -753,7 +758,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=165 under {}",
+            "expected contiguous 001..=166 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -761,7 +766,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("165_thread_follow_read_position"));
+            .starts_with("166_team_ai_alias_follow_name"));
     }
 
     #[test]
