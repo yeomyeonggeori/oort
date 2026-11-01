@@ -293,7 +293,7 @@ class EnforcedWebToolPolicy(unittest.TestCase):
             path = os.path.join(tmp, "config.yaml")
             with open(path, "w") as handle:
                 handle.write("# isolated boot fixture; load_config is doubled\n")
-            env = {"API_SERVER_KEY": "test-only-" * 4, "HERMES_DATA_DIR": tmp,
+            env = {"API_SERVER_KEY": "test-only-" * 4, "HERMES_DATA_DIR": tmp, "HERMES_HOME": tmp,  # the image's ENV HERMES_HOME (#4886)
                    lockgate.MEDIA_STRICT_ENV: lockgate.MEDIA_STRICT_VALUE, **(extra_env or {})}
             with mock.patch.dict(os.environ, env, clear=True), \
                     mock.patch.dict(sys.modules, self.hermes_modules(cfg, tools)), \

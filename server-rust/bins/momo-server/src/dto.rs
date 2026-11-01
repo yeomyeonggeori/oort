@@ -400,6 +400,21 @@ pub struct SendMessageRequest {
     /// has proved the surface.
     #[serde(default)]
     pub apps: Option<Vec<String>>,
+    /// ADR-0170 증보 2026-11-01 D21 (#4884) — 「미리보기 없이 보내기」: this message gets **no link
+    /// cards**, ever.
+    ///
+    /// Optional and additive: absent and `false` are the same request, and a client sends the key
+    /// **only when it is `true`** (this request is closed-world, so an older server refuses an
+    /// unknown key with a 400). A dedicated field and not a `props` key for the reason
+    /// [`SendMessageRequest::props`] gives: props is a flat string map any client writes, and
+    /// what it carries is not something the server can vouch for. What the server does with it is
+    /// its own: **in the send transaction, on a real insert only**, it plants the message's
+    /// tombstone (`message_unfurl_tombstone`, the row 「카드 제거」 already uses), which the unfurl
+    /// worker looks for before it fetches anything. An idempotent retry answers the stored message
+    /// whatever this field says now. It reaches only this message's own cards. A developer token
+    /// may not send it (R12's allow-list names five keys and this is not one).
+    #[serde(default)]
+    pub suppress_unfurl: Option<bool>,
 }
 
 /// The `harnessRefine` block on [`SendMessageRequest`] (ADR-0158 D1~D4).
@@ -469,6 +484,14 @@ pub struct ThreadRollupDto {
     /// #4877 — every distinct member who has replied; the faces above are the newest
     /// `min(count, 3)` of them.
     pub participant_count: i32,
+    /// #4889 stage 2 (owner 10-31 23:49) — how many replies **the reader** has not read, never
+    /// counting their own. Present only on a page read for a reader who follows this thread
+    /// (`auto` or `followed`; `0` is "follows, nothing new"); absent for a thread they do not follow,
+    /// for an agent reader, and from every producer that is not a per-reader read — notably the
+    /// realtime `thread.updated` frame, which is one publication for the whole channel. snake_case
+    /// beside the keys above; the core's `threadRollup()` turns it into `unreadReplyCount`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread_reply_count: Option<i64>,
 }
 
 /// The quoted message carried beside a reply (ADR-0148 §3-2).
@@ -859,6 +882,27 @@ pub struct ThreadRepliesPage {
 #[serde(rename_all = "camelCase")]
 pub struct ThreadFollowDto {
     pub following: bool,
+}
+
+/// `PUT …/messages/{root}/read` request (#4889 stage 2): how far the caller has read the thread.
+/// snake_case like the channel's `PUT read-state` body, and for the same reason one concept has one
+/// spelling on the wire (`last_read_reply_seq` / `unread_reply_count`, also the thread summary's).
+/// There is no member id: the cursor's owner is the bearer.
+#[derive(Debug, Deserialize)]
+pub struct ThreadReadRequestDto {
+    pub last_read_reply_seq: i64,
+}
+
+/// `PUT …/messages/{root}/read` response: the caller's read position **after** the write. For a thread
+/// the caller does not follow (no row, or stopped) it is `{following: false}` and nothing else — the
+/// signal wrote nothing and has no number to report.
+#[derive(Debug, Serialize)]
+pub struct ThreadReadStateDto {
+    pub following: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_read_reply_seq: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread_reply_count: Option<i64>,
 }
 
 /// Query string of the replies page. `limit` is lenient (a bad page size has a
@@ -6175,6 +6219,50 @@ pub struct MessageUnfurlDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub site_name: Option<String>,
     /// Proxy path on this origin (`…/unfurls/{id}/icon`), never a remote address.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_width: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_height: Option<i32>,
+    /// Only ever `true`; absent otherwise.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub is_video: bool,
+}
+
+/// `POST …/channels/{ch}/unfurl-previews` request (ADR-0170 증보 2026-11-01 D14, #4884).
+///
+/// Closed-world, and **one address only**: the draft's text never reaches the server (D2), and
+/// the address is in a body and not in a path or query because a link's query is often a token.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UnfurlPreviewRequest {
+    pub url: String,
+}
+
+/// The card of a link that is still in the composer (ADR-0170 증보 2026-11-01 D15).
+///
+/// The keys of [`MessageUnfurlDto`] without `messageId` (there is no message yet), under the same
+/// rules: every optional key is absent when unknown, and `imageUrl`/`iconUrl` are proxy paths on
+/// this origin, never a remote address. `status` is `ok` or `failed` and nothing else: a preview
+/// does not say *why* there is none. `id` exists only for `ok`, as the handle of the two paths.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnfurlPreviewDto {
+    pub url: String,
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

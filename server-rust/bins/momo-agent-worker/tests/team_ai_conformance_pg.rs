@@ -11,7 +11,8 @@
 //!
 //! | test | revert that makes it red |
 //! |---|---|
-//! | `a_request_becomes_a_pending_card_the_approver_can_judge` | stop parking the run, drop `via_ai`, or skip the audit row |
+//! | `a_request_becomes_a_pending_card_the_approver_can_judge` | stop parking the run, drop `via_ai`, skip the audit row, or take `stamp_decision_mode` out of the card's props (`inline`) |
+//! | `a_rename_card_the_team_ai_raises_is_marked_to_be_opened_in_the_app` | take `stamp_decision_mode` out of the card's props, or stamp a fixed word instead of the one function's answer (`open`) |
 //! | `an_action_outside_the_allow_list_makes_no_card` | let the model's `actionId` through without `is_team_ai_action` |
 //! | `a_message_someone_else_wrote_is_never_an_instruction` | send the channel window (`recent_messages`) to the model |
 //! | `the_daily_ceiling_calls_no_model` | read the cap after the call, or not at all |
@@ -543,6 +544,23 @@ async fn a_request_becomes_a_pending_card_the_approver_can_judge() {
     assert!(messages
         .iter()
         .any(|m| m.0 == "approval_request" && m.2["proposed_via"]["kind"] == "team_ai"));
+    // ADR-0204 증보 6 D6-2 · D6-3 (#4980): the card itself carries the word the one function
+    // gives the payload it stored — `channel.create` is decided from the banner, so `inline` —
+    // and says one question with the channel quoted after it.
+    let card = messages
+        .iter()
+        .find(|m| m.0 == "approval_request")
+        .expect("the team AI's card");
+    assert_eq!(card.2["decision_mode"], "inline");
+    assert_eq!(
+        card.2["decision_mode"],
+        momo_agent::actions::decision_mode(&cards[0].2, &cards[0].3).as_str(),
+        "the card carries the one function's own answer for the payload it stored"
+    );
+    assert_eq!(
+        card.1.as_deref(),
+        Some("채널을 만들어도 될까요? · 「ideas」")
+    );
     let audited: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'team_ai.proposed'",
     )
@@ -564,6 +582,55 @@ async fn a_request_becomes_a_pending_card_the_approver_can_judge() {
         !flat.contains("만들어줘") && !flat.contains("ideas"),
         "audit holds ids and numbers only: {flat}"
     );
+}
+
+/// ADR-0204 증보 6 D6-2 · D6-3 (#4980), the other word: a name is decided in the app beside its
+/// old one (#4810), so the team AI's rename card carries `decision_mode: open` — the value the
+/// push category, the `push_action` refusal and the buttons read — and its body asks the name
+/// question. A card that lost the key (or always said `inline`) would send a client back to its
+/// own calculation.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn a_rename_card_the_team_ai_raises_is_marked_to_be_opened_in_the_app() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool, true).await;
+    seed_link(&su, t.owner_id).await;
+    let provider = Arc::new(MockChatProvider::echo().with_tool_calls([propose(
+        "agent.profile.update",
+        json!({"displayName": "별빛 도우미"}),
+    )]));
+    let w = worker_with(provider, |_| {}).await;
+    let (run_id, _) = enqueue(
+        &pool,
+        &t,
+        t.owner_id,
+        "human",
+        "@oort-helper 이름을 별빛 도우미로 바꿔줘",
+        None,
+    )
+    .await;
+    drain(&w).await;
+
+    let (status, _) = run_status(&su, run_id).await;
+    assert_eq!(status, "awaiting_approval", "the run is parked on a person");
+    let cards = approvals(&su, &t).await;
+    assert_eq!(cards.len(), 1);
+    assert_eq!(cards[0].3["action"]["id"], "agent.profile.update");
+    let messages = agent_messages(&su, &t).await;
+    let card = messages
+        .iter()
+        .find(|m| m.0 == "approval_request")
+        .expect("the team AI's card");
+    assert_eq!(card.2["decision_mode"], "open");
+    assert_eq!(
+        card.2["decision_mode"],
+        momo_agent::actions::decision_mode(&cards[0].2, &cards[0].3).as_str(),
+        "the card carries the one function's own answer for the payload it stored"
+    );
+    assert_eq!(card.1.as_deref(), Some("에이전트 이름을 바꿔도 될까요?"));
 }
 
 #[tokio::test]

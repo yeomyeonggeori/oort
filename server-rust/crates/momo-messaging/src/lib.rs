@@ -89,6 +89,9 @@ pub mod search;
 pub mod self_media;
 /// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
 pub mod sidebar_prefs;
+/// ADR-0201 증보 v3 B10 / #4966 — the team AI's aliases follow its display name
+/// (`sync_team_ai_aliases_in_tx`, migration 166).
+pub mod team_ai_alias;
 /// ADR-0206 증보 1 / #4889 — who follows which thread (`thread_follow`, migration 164).
 pub mod thread_follow;
 pub mod workspace_avatar;
@@ -293,8 +296,9 @@ pub use sidebar_prefs::{
     SECTION_MAX, SECTION_NAME_MAX_CHARS, SECTION_SORT_MAX_CHARS, SIDEBAR_PREFS_VERSION,
 };
 pub use thread_follow::{
-    is_following_thread_in_tx, set_thread_follow_in_tx, FollowRefused, STATE_AUTO, STATE_FOLLOWED,
-    STATE_UNFOLLOWED,
+    attach_unread_reply_counts, is_following_thread_in_tx, mark_thread_read_in_tx,
+    set_thread_follow_in_tx, thread_follow_views_in_tx, FollowRefused, FollowView, ThreadReadState,
+    STATE_AUTO, STATE_FOLLOWED, STATE_UNFOLLOWED,
 };
 pub use workspace_avatar::{
     create_pending_avatar_upload_in_tx, load_avatar_media_in_tx, read_current_avatar_media_in_tx,
