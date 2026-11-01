@@ -58,7 +58,11 @@ import {
 } from '../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
 import {useAgentLiveness} from '../features/agents/useAgentLiveness';
-import {useAgentWorkingSignals} from '../features/agents/workingSignal';
+import {
+  useAgentWorkingSignals,
+  withApprovalWaits,
+} from '../features/agents/workingSignal';
+import {useWorkspaceApprovalWaits} from '../features/conversation/usePendingApprovals';
 import {StatusDot} from '../features/presence/StatusDot';
 import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
 import {
@@ -461,7 +465,8 @@ export default function SidebarScreen({
   // 시계는 두지 않는다 — 카드는 경과 숫자를 그리지 않고, 스토어가 발행·해제마다
   // 다시 그리게 하며, 90초가 지난 턴은 레일의 15초 청소가 지운다(에이전트 목록과
   // 같은 거래, `AgentsScreen` 의 주석). 렌더 때의 벽시계가 TTL 을 한 번 더 건다.
-  const signals = useAgentWorkingSignals();
+  const railSignals = useAgentWorkingSignals();
+  const approvalWaitList = useWorkspaceApprovalWaits();
   const railLive = realtime.status === 'connected';
   const allChannels = useMemo(
     () => [...channelsQuery.groups.channels, ...channelsQuery.groups.dms],
@@ -471,6 +476,10 @@ export default function SidebarScreen({
   // 줄 맨 앞에 싣는다(#4285). 누구를 읽을지는 카드를 만들기 전에 알아야 한다. 읽지 않는 때(다른
   // 상태의 카드)는 쿼리가 서지 않는다.
   const cardNowMs = Date.now();
+  // 승인 원장이 레일보다 이긴다(#3738, 대화 화면의 자리표시·레일과 같은 덮어쓰기 — #5066·#5085). 서버는 승인에 걸린 run 을 레일
+  // 프레임으로 알리지 않아서(중간 프레임은 늘 `running`) 레일만 보면 사람을 기다리는 에이전트도 「작업 중」이다. 아래 두 호출이 **같은**
+  // 덮은 목록을 읽어야 한다: 근거 줄의 생존 판정을 카드와 다른 에이전트에게서 읽지 않게.
+  const signals = withApprovalWaits(railSignals, approvalWaitList, cardNowMs);
   const leadTurn = leadWorkingTurn(signals, cardNowMs);
   const waitingAgentId =
     leadTurn !== undefined && isUntakenHumanRun(leadTurn.server)
