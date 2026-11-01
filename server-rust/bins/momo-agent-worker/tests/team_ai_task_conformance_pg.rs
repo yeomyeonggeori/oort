@@ -1548,6 +1548,38 @@ async fn t13_a_read_before_continuing_keeps_the_task_offer() {
     );
 }
 
+/// Merge of #4970 and #4967: the first turn offers `read_attachment` (the `files` bundle is on by
+/// default) and its prompt says so; a step of the task does neither — the bytes path runs in the
+/// first turn only, and what it read reaches a step through the task's note.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t14_a_step_reads_no_attachments() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool).await;
+    seed_link(&su, t.owner_id).await;
+    let model = ScriptedModel::new([cont(&["다음"], "N1"), say("끝났어요.")]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    enqueue(&pool, &t, t.owner_id, "@oort-helper 오래 조사해 줘").await;
+    drain(&w).await;
+
+    let requests = model.requests();
+    assert_eq!(requests.len(), 2, "a first turn and one step");
+    assert!(
+        tool(&requests[0], "read_attachment").is_some(),
+        "the first turn offers the files tool"
+    );
+    assert!(system_prompt(&requests[0]).contains("첨부 읽기"));
+    let step = &requests[1];
+    assert!(
+        tool(step, "read_attachment").is_none(),
+        "a step is not offered the files tool"
+    );
+    assert!(!system_prompt(step).contains("첨부 읽기"));
+}
+
 /// B15-A10: the marker table belongs to the server alone — one tenant's rows are invisible to another
 /// under the api's own (non-bypass) role, a write into another tenant is refused by the policy, the
 /// row policy is FORCEd, and neither PUBLIC nor the helper's read role can touch it.

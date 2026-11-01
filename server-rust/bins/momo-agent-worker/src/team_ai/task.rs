@@ -495,6 +495,10 @@ impl AgentWorker {
                 momo_tools.extend(team_ai_tools::read_tool_definitions());
             }
             momo_tools.retain(|tool| roles.tool_allowed(tool.name));
+            // #4970 × #4967: a step reads no attachments. The bytes path (`team_ai_files`) runs in the
+            // first turn only, the step's prompt has no files sentence and its user turn lists no
+            // attachment; what the first turn read reaches a step through the task's note.
+            momo_tools.retain(|tool| tool.name != team_ai_tools::TOOL_READ_ATTACHMENT);
             let mut tools: Vec<Value> = Vec::new();
             if web == WebSearch::Available && !read_used && !last_call {
                 tools.push(crate::anthropic::web_search_tool(

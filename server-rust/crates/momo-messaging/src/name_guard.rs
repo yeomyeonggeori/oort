@@ -491,15 +491,22 @@ pub fn has_hidden_characters(raw: &str, allow_newlines: bool) -> bool {
 /// and in voice lines: control and format characters (zero-width, bidi, BOM,
 /// tags), line and paragraph separators, and the invisible Hangul fillers.
 pub fn has_invisible_or_control_characters(raw: &str) -> bool {
-    raw.chars().any(|c| {
-        c.is_control()
-            || is_line_break(c)
-            || is_invisible_letter(c)
-            || matches!(c as u32,
-                0x00AD | 0x034F | 0x061C | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E
-                | 0x2060..=0x206F | 0x2800 | 0xFEFF | 0xE0000..=0xE007F | 0xE0100..=0xE01EF
-                | 0x17B4..=0x17B5 | 0xFFF9..=0xFFFB | 0x1D173..=0x1D17A | 0x180B..=0x180F)
-    })
+    raw.chars()
+        .any(|c| c.is_control() || is_line_break(c) || is_invisible_format_char(c))
+}
+
+/// Whether `c` is a character no reader sees but a program (or a model) reads: zero-width and bidi
+/// marks, the BOM, the soft hyphen, the Unicode tag block and the variation-selector supplement, the
+/// invisible Hangul fillers, the combining grapheme joiner and the other default-ignorable formatters.
+/// **Not** a control character and **not** a line break — a caller that keeps lines (a document) asks
+/// this alone; a caller that refuses them (a name) asks [`has_invisible_or_control_characters`]. The
+/// basic variation selectors (U+FE00–U+FE0F) are not here: an emoji in a name may carry one.
+pub fn is_invisible_format_char(c: char) -> bool {
+    is_invisible_letter(c)
+        || matches!(c as u32,
+            0x00AD | 0x034F | 0x061C | 0x180E | 0x200B..=0x200F | 0x202A..=0x202E
+            | 0x2060..=0x206F | 0x2800 | 0xFEFF | 0xE0000..=0xE007F | 0xE0100..=0xE01EF
+            | 0x17B4..=0x17B5 | 0xFFF9..=0xFFFB | 0x1D173..=0x1D17A | 0x180B..=0x180F)
 }
 
 // ---------------------------------------------------------------------------

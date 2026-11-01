@@ -146,6 +146,10 @@ pub struct WorkerConfig {
     /// The assembler child the hosted door runs for a motion (`None` = `momo-expression-assembler` next
     /// to this executable, the way every picture path finds it). A hook for tests, like `momo-server`'s.
     pub assembler_program: Option<std::path::PathBuf>,
+    /// The program the helper's PDF reader runs as its child (#4970, ADR-0151 증보 4): `None` = **this
+    /// very executable** re-run with `--attachment-text-child`, which is what a deployment uses. A hook for
+    /// tests (whose own executable is not the worker), like [`assembler_program`](Self::assembler_program).
+    pub attachment_text_child: Option<std::path::PathBuf>,
     /// #3162 — the team-memory summary loop (`MEMORY_*` keys).
     pub memory: MemoryConfig,
     /// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` (#3431, ADR-0193 D18) — read
@@ -768,6 +772,7 @@ impl WorkerConfig {
                 env(momo_workspace_actions::hosted_expression::STRICT_ENV).as_deref(),
             ),
             assembler_program: None,
+            attachment_text_child: None,
             memory: MemoryConfig::from_env()?,
             claude_subscription_agents_enabled: claude_subscription_agents_switch_on(
                 env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref(),
@@ -810,6 +815,7 @@ impl WorkerConfig {
             api_internal_origin: None,
             hosted_media_strict: false,
             assembler_program: None,
+            attachment_text_child: None,
             memory: MemoryConfig::default(),
             claude_subscription_agents_enabled: false,
             team_ai_daily_token_cap: None,
@@ -842,6 +848,16 @@ impl WorkerConfig {
     /// `OORT_HOSTED_MEDIA_STRICT=1` is in the environment.
     pub fn with_hosted_media_strict(mut self, strict: bool) -> WorkerConfig {
         self.hosted_media_strict = strict;
+        self
+    }
+
+    /// The same config with the PDF text child to run (#4970), for tests whose own executable is not
+    /// the worker (they pass `env!("CARGO_BIN_EXE_momo-agent-worker")`).
+    pub fn with_attachment_text_child(
+        mut self,
+        program: impl Into<std::path::PathBuf>,
+    ) -> WorkerConfig {
+        self.attachment_text_child = Some(program.into());
         self
     }
 

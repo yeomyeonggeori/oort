@@ -55,7 +55,11 @@ legal/THIRD_PARTY_NOTICES.md ("Server direct additions"), currently p256
 ADR-0146 amendment 2026-09-28, clap (MIT OR Apache-2.0, command-line
 parsing of the `oort` CLI, ADR-0216 D10), and encoding_rs ((Apache-2.0 OR MIT)
 AND BSD-3-Clause, decoding fetched link-preview pages in the charset they declare,
-ADR-0170 amendment 2026-10-31 D8); all are also in the generated bundle.
+ADR-0170 amendment 2026-10-31 D8), and lopdf (MIT, pulling the letters out of a
+PDF the team helper was asked to read, in a supervised child process of the
+agent-worker, ADR-0201 amendment v3 B6-1 and ADR-0151 amendment 4, #4970; it
+brings cbc, ecb, block-padding, nom 8, rangemap and ttf-parser); all are also
+in the generated bundle.
 
 ADR-0218 D3 (#4676) enables image's GIF support: gif 0.14.2
 (MIT OR Apache-2.0), color_quant 1.1.0 (MIT), and weezl 0.1.12

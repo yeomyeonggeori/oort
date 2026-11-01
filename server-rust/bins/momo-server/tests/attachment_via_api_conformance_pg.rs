@@ -23,6 +23,8 @@
 //! | `a_worker_with_no_private_address_keeps_reading_its_own_archive` | `attachment_reader` ignoring the configuration |
 //! | `a_worker_whose_api_is_unreachable_fails_closed_and_does_not_fall_back_to_the_archive` | a silent fallback to the archive |
 //! | `the_api_refusing_after_the_mint_burns_the_address_and_the_worker_refuses` | a second attempt with the same address |
+//! | `a_text_file_a_pdf_and_a_picture_come_back_through_the_route_for_a_read` | (#4970) the read mint judging by the avatar's three types, the redeem not re-judging as a read, `bytes_match_mime` without `%PDF-`/text, the worker's fetch refusing the type |
+//! | `the_read_use_refuses_what_the_mint_the_route_and_the_worker_must_refuse` | (#4970) the author / live-message / type / ceiling predicates, the route's sniff — and the avatar use being widened by accident |
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -562,6 +564,30 @@ async fn read_direct(
             drive_file_id: "",
             size_bytes: size,
             max_bytes: MAX_BYTES,
+            usage: momo_messaging::RequesterAttachmentUse::Avatar,
+        })
+        .await
+}
+
+/// [`read_direct`] for any use (#4970): what the helper's `read_attachment` hands the reader.
+async fn read_as(
+    worker: &AgentWorker,
+    tenant: &Tenant,
+    attachment: Uuid,
+    size: i64,
+    usage: momo_messaging::RequesterAttachmentUse,
+) -> Result<Vec<u8>, &'static str> {
+    worker
+        .attachment_reader()
+        .read(&RequesterAttachment {
+            workspace_id: tenant.ws,
+            run_id: tenant.run,
+            agent_id: tenant.agent,
+            attachment_id: attachment,
+            drive_file_id: "",
+            size_bytes: size,
+            max_bytes: MAX_BYTES,
+            usage,
         })
         .await
 }
@@ -1247,4 +1273,349 @@ async fn the_api_refusing_after_the_mint_burns_the_address_and_the_worker_refuse
     .await
     .unwrap();
     assert_eq!(spent, 1, "the address is burned");
+}
+
+/// ADR-0151 증보 4 — the byte path is no longer pictures only. A requester's text file (UTF-8 and the
+/// Korean legacy encoding), a PDF and a picture each come back through the **real route**, byte for byte,
+/// for the helper's read; each costs one request to the api and one spent address, and no address, Drive
+/// id or letter of the file is in a row or a log line.
+///
+/// RED: judge the read mint by the avatar's three types (the mint refuses the text and the PDF), or let
+/// `redeem_in_tx` judge as an avatar (the route answers 404), or leave `bytes_match_mime` at three
+/// pictures (the route refuses), or let the worker's fetch accept pictures only.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn a_text_file_a_pdf_and_a_picture_come_back_through_the_route_for_a_read() {
+    let logs = capture_logs();
+    let server = start().await;
+    let tenant = seed_tenant(&server).await;
+    let worker = worker(&server, Some(&server.base));
+    // "회의록 다음 주 월요일 SENTINEL-4970-ROUTE" in EUC-KR — the encoding a Korean Notepad still writes;
+    // it is not valid UTF-8, and the route must serve it as it is
+    let euc_kr: Vec<u8> = b"\xc8\xb8\xc0\xc7\xb7\xcf \xb4\xd9\xc0\xbd \xc1\xd6 \xbf\xf9\xbf\xe4\xc0\xcf SENTINEL-4970-ROUTE"
+        .to_vec();
+    assert!(String::from_utf8(euc_kr.clone()).is_err());
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        (
+            "text/plain",
+            "안녕 oort\nSENTINEL-4970-ROUTE\n".as_bytes().to_vec(),
+        ),
+        ("text/plain", euc_kr),
+        ("text/markdown", b"# title\n\nbody".to_vec()),
+        ("text/csv", "a,b\n1,2\n".as_bytes().to_vec()),
+        ("application/json", br#"{"k":"v"}"#.to_vec()),
+        (
+            "application/pdf",
+            b"%PDF-1.7\n%fixture\n1 0 obj\n<<>>\nendobj\n%%EOF".to_vec(),
+        ),
+        ("image/png", png(32, 9)),
+        ("image/jpeg", jpeg(48, 5)),
+    ];
+    let mut drive_files = Vec::new();
+    for (mime, bytes) in &cases {
+        let (id, _, drive_file, size) = seed_picture(
+            &server,
+            tenant.ws,
+            tenant.channel,
+            tenant.alice,
+            mime,
+            bytes.clone(),
+        )
+        .await;
+        let read = read_as(
+            &worker,
+            &tenant,
+            id,
+            size as i64,
+            momo_messaging::RequesterAttachmentUse::Read,
+        )
+        .await
+        .unwrap_or_else(|reason| panic!("{mime}: {reason}"));
+        assert_eq!(
+            &read, bytes,
+            "{mime}: the bytes the api's archive holds, whole"
+        );
+        drive_files.push(drive_file);
+    }
+    assert_eq!(server.requests().len(), cases.len(), "one request each");
+    assert_eq!(
+        server.reads(),
+        cases.len(),
+        "the api read its archive once each"
+    );
+    let spent: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM self_media_token WHERE workspace_id = $1 AND used_at IS NOT NULL",
+    )
+    .bind(tenant.ws)
+    .fetch_one(&server.su)
+    .await
+    .unwrap();
+    // seed_tenant's own trigger photo was never read; the eight reads each spent their own address
+    assert_eq!(spent, cases.len() as i64);
+    let tokens: Vec<String> = server
+        .requests()
+        .iter()
+        .map(|path| path.rsplit('/').next().unwrap().to_string())
+        .collect();
+    let mut needles: Vec<&str> = tokens.iter().map(String::as_str).collect();
+    needles.extend(drive_files.iter().map(String::as_str));
+    needles.push("SENTINEL-4970-ROUTE");
+    assert_no_leak(&server, tenant.ws, &needles, &logs).await;
+}
+
+/// What the read must still refuse — and, as importantly, what the **avatar** flow must still refuse: the
+/// widening is for the helper's read only. Each case is a closed reason code, with the api asked only where
+/// the refusal is the route's own: a refusal before the route (the mint, the worker's own size check) is
+/// `attachment_not_available`, the route's own refusal of the helper's read — it sniffs the bytes — is
+/// `attachment_not_readable` (#4970 review L1: the requester's own file is not what its type says, which is
+/// said to them as a permanent property of the file and not as a file that is not there).
+///
+/// RED: widen the avatar mint to the read types (the PDF and the text file get an address), drop the
+/// author predicate from the mint or the redeem, drop the live-message predicate, drop the NUL rule from
+/// the text sniff or `%PDF-` from the PDF sniff (the route would serve them), or drop the worker's own
+/// size check (a file over the ceiling would be asked for).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn the_read_use_refuses_what_the_mint_the_route_and_the_worker_must_refuse() {
+    use momo_messaging::RequesterAttachmentUse::{Avatar, Read};
+    let server = start().await;
+    let worker = worker(&server, Some(&server.base));
+    let su = &server.su;
+
+    // (label, the use the reader is asked for, whether the api is asked, builder of the attachment)
+    struct Case {
+        label: &'static str,
+        usage: momo_messaging::RequesterAttachmentUse,
+        api_asked: bool,
+        tenant: Tenant,
+        id: Uuid,
+        size: i64,
+    }
+    let mut cases: Vec<Case> = Vec::new();
+    fn add(
+        cases: &mut Vec<Case>,
+        label: &'static str,
+        usage: momo_messaging::RequesterAttachmentUse,
+        api_asked: bool,
+        tenant: Tenant,
+        id: Uuid,
+        size: i64,
+    ) {
+        cases.push(Case {
+            label,
+            usage,
+            api_asked,
+            tenant,
+            id,
+            size,
+        })
+    }
+
+    // somebody else's text file
+    let tenant = seed_tenant(&server).await;
+    let (id, _, _, size) = seed_picture(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.bob,
+        "text/plain",
+        b"bob".to_vec(),
+    )
+    .await;
+    add(
+        &mut cases,
+        "a colleague's text file",
+        Read,
+        false,
+        tenant,
+        id,
+        size as i64,
+    );
+    // a type the read does not know
+    let tenant = seed_tenant(&server).await;
+    let (id, _, _, size) = seed_picture(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        "application/zip",
+        b"PK\x03\x04zip".to_vec(),
+    )
+    .await;
+    add(&mut cases, "a zip", Read, false, tenant, id, size as i64);
+    // a deleted message's file
+    let tenant = seed_tenant(&server).await;
+    let (id, message, _, size) = seed_picture(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        "text/plain",
+        b"gone".to_vec(),
+    )
+    .await;
+    sqlx::query(
+        "UPDATE message SET state = 'deleted'::message_state, deleted_at = now() WHERE id = $1",
+    )
+    .bind(message)
+    .execute(su)
+    .await
+    .unwrap();
+    add(
+        &mut cases,
+        "a deleted message's file",
+        Read,
+        false,
+        tenant,
+        id,
+        size as i64,
+    );
+    // an upload that never finished
+    let tenant = seed_tenant(&server).await;
+    let message = seed_message(su, tenant.ws, tenant.channel, tenant.alice).await;
+    let (id, _) = seed_attachment(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        message,
+        "text/plain",
+        4,
+        "pending",
+        Some(b"wait".to_vec()),
+    )
+    .await;
+    add(&mut cases, "a pending upload", Read, false, tenant, id, 4);
+    // over the ceiling: the worker's own check, before any address is minted
+    let tenant = seed_tenant(&server).await;
+    let message = seed_message(su, tenant.ws, tenant.channel, tenant.alice).await;
+    let (id, _) = seed_attachment(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        message,
+        "text/plain",
+        MAX_BYTES as i64 + 1,
+        "complete",
+        None,
+    )
+    .await;
+    add(
+        &mut cases,
+        "one byte over the ceiling",
+        Read,
+        false,
+        tenant,
+        id,
+        MAX_BYTES as i64 + 1,
+    );
+    // the avatar use is NOT widened: a PDF and a text file get no address for a profile picture
+    let tenant = seed_tenant(&server).await;
+    let (id, _, _, size) = seed_picture(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        "application/pdf",
+        b"%PDF-1.7 x".to_vec(),
+    )
+    .await;
+    add(
+        &mut cases,
+        "a PDF asked for as an avatar",
+        Avatar,
+        false,
+        tenant,
+        id,
+        size as i64,
+    );
+    let tenant = seed_tenant(&server).await;
+    let (id, _, _, size) = seed_picture(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        "text/plain",
+        b"words".to_vec(),
+    )
+    .await;
+    add(
+        &mut cases,
+        "a text file asked for as an avatar",
+        Avatar,
+        false,
+        tenant,
+        id,
+        size as i64,
+    );
+    // the route's own sniff: a text file that holds a NUL, a PDF that is not one
+    let tenant = seed_tenant(&server).await;
+    let (id, _, _, size) = seed_picture(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        "text/plain",
+        b"binary\0inside".to_vec(),
+    )
+    .await;
+    add(
+        &mut cases,
+        "a `text/plain` that holds a NUL",
+        Read,
+        true,
+        tenant,
+        id,
+        size as i64,
+    );
+    let tenant = seed_tenant(&server).await;
+    let (id, _, _, size) = seed_picture(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        "application/pdf",
+        b"<html>not a pdf</html>".to_vec(),
+    )
+    .await;
+    add(
+        &mut cases,
+        "an `application/pdf` that is not a PDF",
+        Read,
+        true,
+        tenant,
+        id,
+        size as i64,
+    );
+
+    for case in &cases {
+        let before = server.requests().len();
+        let answer = read_as(&worker, &case.tenant, case.id, case.size, case.usage).await;
+        let expected = if case.api_asked && case.usage == Read {
+            "attachment_not_readable"
+        } else {
+            "attachment_not_available"
+        };
+        assert_eq!(
+            answer,
+            Err(expected),
+            "{}: the reason is the refusing gate's own",
+            case.label
+        );
+        let asked = server.requests().len() - before;
+        assert_eq!(
+            asked,
+            usize::from(case.api_asked),
+            "{}: the api is asked only when the refusal is the route's own",
+            case.label
+        );
+        let minted = token_rows(&server, case.tenant.ws).await;
+        assert_eq!(
+            minted,
+            i64::from(case.api_asked),
+            "{}: a refusal before the route minted nothing",
+            case.label
+        );
+    }
 }
