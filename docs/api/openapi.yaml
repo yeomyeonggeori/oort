@@ -1839,7 +1839,17 @@ paths:
         false closes the door for cards an agent raises nobody asked for —
         `oort_action_initiate` is refused, and a card already waiting is not
         executed when approved, while rejecting it still works; only an
-        administrator writes it here, never an agent proposal).
+        administrator writes it here, never an agent proposal), and
+        `team_ai_roles` (object of booleans, ADR-0201 증보 v3 B3 / #4964: which
+        role bundles of the helper are on — `workspace_admin`, `invite_access`,
+        `long_research`, `files`, `memory`, `code`; an absent key or field is
+        **on**, `chat_read` is always on and is not a field, so naming it is 400.
+        This is the one key merged one level down: a named field replaces, an
+        omitted field stays, `null` drops the field (back to on), so a patch
+        that names one switch never moves another. Turning `memory` from off to
+        on while team memory is switched off is 409 `team_memory_off`. A change
+        writes the audit row `team_ai.roles.changed` with the key names only. An
+        agent's `workspace.settings.update` proposal cannot name this key).
         `role_labels` is replaced whole — omit a role key to
         drop that override; `null` deletes the key (client default labels).
         Serialized body over 8192 bytes is 413. There is no PUT whole-replace.
@@ -1859,7 +1869,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/WorkspaceSettings"}
         "400":
-          description: Unknown key, malformed allowed_agent_models, role_labels, welcome_agent_member_id or welcome_prompt, inactive welcome agent, or non-object body.
+          description: Unknown key, malformed allowed_agent_models, role_labels, welcome_agent_member_id, welcome_prompt or team_ai_roles (an unknown bundle, `chat_read`, a non-boolean), inactive welcome agent, or non-object body.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -1871,6 +1881,17 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "404":
           description: Workspace not visible under the tenant GUC.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: >
+            `team_memory_off` — the patch turns the `memory` role from off to on
+            while team memory is switched off (ADR-0201 증보 v3 B3, #4964).
+            Nothing was written. (The `team_ai_fast_path` provisioning conflict
+            `team_ai_unavailable` is also a 409, but it is answered after the
+            write: the helper's own switch is put back off and the rest of that
+            request stays committed — and audited, like any other write.)
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -11809,25 +11830,31 @@ paths:
         `pending` are not returned here.
 
 
-        **Who may ask**: a person (not an agent or a work host; a developer token is not
-        on the closed route table) who is an active member of the workspace **and** a
-        current member of the channel — the rule a send has, so a guest may preview in the
-        channels it is in and nowhere else. A channel that does not exist is the same 403
-        as one the caller is not in. The instance switch `MOMO_UNFURL_ENABLED` and the
-        workspace switch (`unfurl-settings`) both have to be on, or nothing is fetched and
-        the answer is `failed`.
+        **Who may ask**: a person who is an active member of the workspace (a
+        `workspace_membership` row, `member.status` `active`, not deleted; any role,
+        guests included) **and** a current member of the channel — the rule a send has, so
+        a guest may preview in the channels it is in and nowhere else. A channel that does
+        not exist is the same 403 as one the caller is not in. Nothing but a person gets
+        further: an agent bearer and a developer token are a 403 and a work host's
+        signature is a 401 (the answer to a bad signature), all three at the door, because
+        none of them has this route on its table. The instance switch
+        `MOMO_UNFURL_ENABLED` and the workspace switch (`unfurl-settings`) both have to be
+        on, or nothing is fetched and the answer is `failed`.
 
 
         **What the server does**: it fetches the page through the same guarded transport as
         a stored card (public addresses only, https, every redirect hop re-checked,
         512 KiB, time limit) with one rule added: **port 443 only, on every hop**. It
         keeps the answer in memory, for the member who asked, 30 minutes (`failed`: 2
-        minutes); nothing is written to the database. The same address asked again by the
-        same member is answered from memory and costs nothing. A request that must fetch
-        spends the member's preview budget (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`,
-        default 60 per window) and a place among the fetches in flight (the same places
-        the picture proxy uses); either is exhausted with 429 + `Retry-After` (see
-        `RateLimited`), and a request turned away for want of a place gets its budget back.
+        minutes); no part of the preview is written to the database (the one row this
+        route can cause is the budget's audit row for a first refusal). The same address
+        asked again by the same member is answered from memory and costs nothing. A
+        request that must fetch spends the member's preview budget
+        (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`, default 60 per window) and a place among
+        the fetches in flight (the same places the picture proxy uses); either is
+        exhausted with 429 + `Retry-After` (see `RateLimited`), and a request turned away
+        for want of a place gets its budget back. A fetch that ends in `failed` does not:
+        the site was asked, so it spent its unit like any other.
         A client should ask once the address looks finished (350 ms after typing stops, or
         right after a paste), once per address.
       security:
@@ -11856,8 +11883,9 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
           description: >
-            Not a member of the workspace and the channel (or no such channel), not a
-            person, or workspace scope mismatch.
+            Not an active member of the workspace, or not a current member of the channel
+            (or no such channel), an agent bearer or a developer token, or workspace scope
+            mismatch. (A work host's signature is a 401, see above.)
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -11874,7 +11902,10 @@ paths:
         come from the same proxy as `getUnfurlImage` (the same guard, type list, failure
         memory, fetch budget and places): the client must not fetch the remote host and is
         never given its address. An id that is unknown, run out, another member's or
-        another workspace's is the same 404.
+        another workspace's is the same 404. Nothing here asks the database whether the
+        member is still active: suspension, removal and leaving the workspace each revoke
+        every token the member holds, so a member who stopped being active that way is a
+        401 before this route.
       security:
         - bearerAuth: []
       parameters:
@@ -15256,10 +15287,12 @@ components:
         per window (`RATE_LIMIT_UNFURL_PREVIEW_PER_MEMBER`, 0 removes it), spent only by a
         request that must fetch the page: an answer the server already holds for that
         member and address, a switch that is off, and a request turned away for want of a
-        place spend nothing. It draws its places from the same pool as the card proxies, so
-        one member's previews, pictures and icons together never hold more than that
-        member's share (4); with no place it answers 429 with `Retry-After: 1`, gives the
-        unit back and remembers nothing. The preview pictures and icons
+        place spend nothing. A fetch that ends in `failed` still spent its unit and does
+        not get it back; the failure is held for 2 minutes and asking for that address
+        again meanwhile is free. It draws its places from the same pool as the card
+        proxies, so one member's previews, pictures and icons together never hold more
+        than that member's share (4); with no place it answers 429 with `Retry-After: 1`,
+        gives the unit back and remembers nothing. The preview pictures and icons
         (`GET …/unfurl-previews/{id}/image|icon`) spend the card proxies' budget above.
         `POST /v1/join` also has a per-account password-guess
         budget (default 5 per window, #4625): it applies only to an address that
@@ -19463,6 +19496,23 @@ components:
         (`GET …/approvals/{approval}/avatar-preview?v=<sha256>`, readable by
         that person only) and its result `ref` is `{type: member, id: <the
         person>}`.
+        `team_ai.roles.set` (`{bundle, enabled}`, `admin`; ADR-0201 증보 v3
+        B3-T, #4964) is team-AI-only the same way: 「파일 역할 꺼 줘」 said to the
+        helper becomes one card that switches ONE role bundle (`bundle` is one
+        of `workspace_admin`, `invite_access`, `long_research`, `files`,
+        `memory`, `code`; `chat_read` and any other name are refused as an
+        argument). An admin approves; approving runs the same merge and write
+        as `PATCH …/settings` for `{team_ai_roles: {<bundle>: <enabled>}}` with
+        the approver's authority and writes the audit row `team_ai.roles.changed`
+        (key names only). A card that turns `files` or `memory` on shows the
+        line saying what content goes to the team's AI provider, and approving
+        it writes the consent record `team_ai.roles.notice_shown` (who, when,
+        wording version). A request in which the helper has read anything — a
+        workspace read, a web search — cannot raise it, and a card whose
+        bundle (for the helper's cards) was switched off since is refused at
+        the decision with `action_args_invalid`. It is always decided in the
+        app, never from a lock-screen action. Its result `ref` is
+        `{type: workspace_settings, id: <workspace id>}`.
         `message.pin` and `message.unpin` (`{messageId}`, `admin`; ADR-0186
         증보 2026-10-27 v5 U-e, #4703) let an agent propose pinning or unpinning
         **one text message of the conversation the run was raised in**. The
@@ -19483,7 +19533,7 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "dm.agent.admit"]
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "team_ai.roles.set", "dm.agent.admit"]
 
     InitiativeActionId:
       type: string
@@ -24792,6 +24842,22 @@ components:
           description: >
             ADR-0186 증보 v5 U-b-3: the switch for cards an agent raises
             unasked. Absent = on; false = off.
+        team_ai_roles:
+          type: object
+          description: >
+            ADR-0201 증보 v3 B3 (#4964): which role bundles of the team AI
+            ("oort 도우미") are on. Absent key or absent field = on. A bundle
+            that is off is not advertised to the model and is refused again when
+            proposed and when approved. `chat_read` is always on and is not a
+            field.
+          additionalProperties: false
+          properties:
+            workspace_admin: {type: boolean}
+            invite_access: {type: boolean}
+            long_research: {type: boolean}
+            files: {type: boolean}
+            memory: {type: boolean}
+            code: {type: boolean}
         team_ai_alias_status:
           type: object
           description: >
@@ -24812,7 +24878,8 @@ components:
       type: object
       description: >
         RFC 7396-shaped top-level merge patch. Unknown keys 400. role_labels
-        is a whole-object replace (nested keys are not deep-merged). null
+        is a whole-object replace (nested keys are not deep-merged); the one
+        exception is team_ai_roles, merged one level down. null
         deletes the named key.
       additionalProperties: false
       properties:
@@ -24872,6 +24939,24 @@ components:
             boolean is stored: a string or a number is 400, because the door
             reads anything else as off. An agent's
             `workspace.settings.update` proposal cannot name this key.
+        team_ai_roles:
+          nullable: true
+          type: object
+          description: >
+            ADR-0201 증보 v3 B3 (#4964): the helper's role switches. Merged one
+            level down — a named field replaces, an omitted field stays, a
+            `null` field is dropped (back to on); `null` for the key drops the
+            whole object (all on). Unknown names (`chat_read` included) and
+            non-boolean values are 400. Turning `memory` from off to on while
+            team memory is switched off is 409 `team_memory_off`.
+          additionalProperties: false
+          properties:
+            workspace_admin: {type: boolean, nullable: true}
+            invite_access: {type: boolean, nullable: true}
+            long_research: {type: boolean, nullable: true}
+            files: {type: boolean, nullable: true}
+            memory: {type: boolean, nullable: true}
+            code: {type: boolean, nullable: true}
 
     RoleLabels:
       type: object

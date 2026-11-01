@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "83b83b6d8f8a9b375bd26b40da95038a0cfdea1e",
+  "baselineHead": "2f2093f6b508e21d78bb563b33fd6e0c33aa0480",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -95,7 +95,7 @@
     "clients/mobile/src/features/conversation/MessageActionSheet.tsx": 21,
     "clients/mobile/src/features/conversation/MessageBody.tsx": 45,
     "clients/mobile/src/features/conversation/MessageEditorSheet.tsx": 8,
-    "clients/mobile/src/features/conversation/MessageRow.tsx": 290,
+    "clients/mobile/src/features/conversation/MessageRow.tsx": 277,
     "clients/mobile/src/features/conversation/PinListPanel.tsx": 9,
     "clients/mobile/src/features/conversation/Quote.tsx": 34,
     "clients/mobile/src/features/conversation/RequestBundleCard.tsx": 46,
@@ -103,6 +103,7 @@
     "clients/mobile/src/features/conversation/TeamAiDelegateStrip.tsx": 22,
     "clients/mobile/src/features/conversation/TeamAiReplyMeta.tsx": 11,
     "clients/mobile/src/features/conversation/ThreadPanel.tsx": 12,
+    "clients/mobile/src/features/conversation/ThreadSummary.tsx": 4,
     "clients/mobile/src/features/conversation/Timeline.tsx": 54,
     "clients/mobile/src/features/conversation/TypingBar.tsx": 5,
     "clients/mobile/src/features/conversation/UnfurlCards.tsx": 22,
@@ -799,7 +800,7 @@
     "clients/web/src/features/timeline/MessageActions.tsx": 61,
     "clients/web/src/features/timeline/MessageBody.tsx": 33,
     "clients/web/src/features/timeline/MessageEditor.tsx": 6,
-    "clients/web/src/features/timeline/MessageRow.tsx": 62,
+    "clients/web/src/features/timeline/MessageRow.tsx": 56,
     "clients/web/src/features/timeline/PendingRow.tsx": 8,
     "clients/web/src/features/timeline/PinListMenu.tsx": 10,
     "clients/web/src/features/timeline/QuoteBlock.tsx": 20,

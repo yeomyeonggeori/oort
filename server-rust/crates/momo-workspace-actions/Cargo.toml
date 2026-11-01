@@ -21,6 +21,8 @@ momo-messaging = { path = "../momo-messaging" }
 momo-expressions = { path = "../momo-expressions" }
 momo-settings = { path = "../momo-settings" }
 
+# #4934: the avatar proposal reads its source picture through a trait (direct archive or the api).
+async-trait.workspace = true
 sqlx.workspace = true
 uuid.workspace = true
 chrono.workspace = true

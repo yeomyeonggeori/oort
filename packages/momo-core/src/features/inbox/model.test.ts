@@ -451,6 +451,8 @@ describe("워크스페이스 행동 승인 행 (#3729 · #3738)", () => {
       ["workspace.memory.update", "팀 기억 설정 바꾸기"],
       ["workspace.work_tier.update", "워크스페이스 기본 재개 정책 바꾸기"],
       ["plugin.install", "앱 설치"],
+      // ADR-0201 증보 v3 B3-T (#4964)
+      ["team_ai.roles.set", "도우미 역할 켜고 끄기"],
     ] as const) {
       const item = approvalItem(
         approval({ actionType: "workspace_action", workspaceActionId: id }),
