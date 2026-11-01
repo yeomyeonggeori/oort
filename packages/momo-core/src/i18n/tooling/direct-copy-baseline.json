@@ -190,7 +190,7 @@
     "clients/mobile/src/features/memory/queries.ts": 15,
     "clients/mobile/src/features/onboarding/KomettoGuide.tsx": 15,
     "clients/mobile/src/features/onboarding/NotificationPrimer.tsx": 32,
-    "clients/mobile/src/features/onboarding/OnboardingControls.tsx": 22,
+    "clients/mobile/src/features/onboarding/OnboardingControls.tsx": 26,
     "clients/mobile/src/features/onboarding/phoneFlow.ts": 44,
     "clients/mobile/src/features/plugins/queries.ts": 1,
     "clients/mobile/src/features/presence/FaceWithStatusDot.tsx": 1,
