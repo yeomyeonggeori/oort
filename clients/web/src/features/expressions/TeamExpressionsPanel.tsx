@@ -14,7 +14,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { loadCatalog } from "@/features/emoji/catalog";
 import { ExpressionDraftCard } from "./ExpressionDraftCard";
-import { ExpressionMakeForm } from "./ExpressionMakeForm";
+import { ExpressionMakeEntry } from "./ExpressionMakeEntry";
 import { EXPRESSION_FILE_ACCEPT, validExpressionFile } from "./media";
 import { ExpressionImage } from "./ExpressionImage";
 import { useExpressions } from "./context";
@@ -73,7 +73,7 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose }: { onPick: (to
     </div>
     {!canAdd && <p className="text-meta text-ink-muted">이 팀은 관리자만 새 그림을 올릴 수 있어요.</p>}
     {offline && <InlineBanner message="연결이 끊겼어요. 연결되면 그림을 다시 불러와요." separator={false} />}
-    {mode === "import" ? <ExpressionUploadForm onDone={backToList} /> : mode === "make" ? <ExpressionMakeForm onImport={() => setMode("import")} onClose={onClose} /> : <>
+    {mode === "import" ? <ExpressionUploadForm onDone={backToList} /> : mode === "make" ? <ExpressionMakeEntry onImport={() => setMode("import")} onDone={backToList} onClose={onClose} /> : <>
       <SegmentedControl legend="팀 표현 보기" value={view} onValueChange={setView} options={[{ value: "emoji", label: "이모지" }, { value: "sticker", label: "스티커" }, { value: "gif", label: "팀 GIF" }]} />
       <Input type="search" aria-label="우리 팀 표현 검색" placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       <p className="text-meta text-ink-muted">한 보관함의 그림을 반응이나 메시지에 쓸 수 있어요.</p>

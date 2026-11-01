@@ -7,8 +7,14 @@ import { GithubExternalLink } from "@/features/github/GithubExternalLink";
 import { useExpressions } from "./context";
 import { ExpressionImage } from "./ExpressionImage";
 
-export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false, pending = true }: {
+export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false, pending = true, promptLabel }: {
   draft: ExpressionDraft;
+  /**
+   * 출처 문장 앞의 말. 없으면 「에이전트가 쓴 설명」이다(ADR-0218 D5: 에이전트가 쓴 글은 그렇다고 표시한다).
+   * 서버가 직접 쓴 고정 문장(사진 길, H9.7)만 자기 말을 넘겨 받는다: 문장 내용으로 가르지 않는다,
+   * 에이전트가 같은 문장을 쓸 수 있기 때문이다.
+   */
+  promptLabel?: string;
   onReplace: (draft: ExpressionDraft) => void;
   onApprove: (choice: ExpressionChoice) => Promise<void>;
   busy?: boolean;
@@ -50,7 +56,7 @@ export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false,
     <p className="text-meta text-ink-muted">{draft.tags.join(" · ")}</p>
     <p className="text-body" role="status">{card.line}</p>
     {card.sourceLink && <GithubExternalLink href={card.sourceLink} className="text-signal-text underline focus-visible:focus-ring">출처: {new URL(card.sourceLink).hostname}</GithubExternalLink>}
-    {draft.origin.prompt && <p className="break-words text-meta text-ink-muted">에이전트가 쓴 설명: {draft.origin.prompt}</p>}
+    {draft.origin.prompt && <p className="break-words text-meta text-ink-muted" data-testid="expression-draft-prompt">{promptLabel ?? "에이전트가 쓴 설명:"} {draft.origin.prompt}</p>}
     {card.preview && <ExpressionImage key={`${draft.draftId}:${draft.revision}`} item={draft} size="large" onReady={() => setViewed(pin)} />}
     {card.canApprove && <>
       <label className="flex items-start gap-2 text-meta active:bg-surface-pressed"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} className="mt-1 focus-visible:focus-ring" />이 그림을 팀에 저장할 권한이 있어요. 사람 얼굴이 있다면 지정된 당사자만 승인해요.</label>

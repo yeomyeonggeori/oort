@@ -83,6 +83,8 @@ async function fill(view: RenderResult, { presets = ["bounce"], note = "", photo
 const send = (view: RenderResult) => fireEvent.click(view.getByTestId(SUBMIT));
 const errorText = (view: RenderResult) => view.getByTestId("expression-make-error").textContent;
 const hiddenOf = (view: RenderResult, id: string) => (view.getByTestId(id) as HTMLElement).hidden;
+/** 「AI와 만들기」는 사진 양식에서 시작한다(#4941): 에이전트에게 부탁하는 길은 그 안의 단추 하나다. 이 시험들의 서버는 사진 길을 모르는 고정 서버라 확인이 실패하는 쪽으로 서고, 그 줄에도 같은 단추가 있다. */
+const toAgentPath = async (view: RenderResult) => { fireEvent.click(await view.findByTestId("expression-photo-agent")); };
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -656,6 +658,7 @@ describe("＋ 메뉴", () => {
     const { view } = await mountPanel();
     await openMenu(view);
     fireEvent.keyDown(view.getAllByRole("menuitem")[1], { key: "Enter" });
+    await toAgentPath(view);
     await view.findByTestId("expression-make-form");
     const back = view.getByRole("button", { name: "목록으로" });
     await waitFor(() => expect(document.activeElement).toBe(back));
@@ -669,6 +672,7 @@ describe("＋ 메뉴", () => {
     const { view } = await mountPanel();
     await openMenu(view);
     fireEvent.keyDown(view.getAllByRole("menuitem")[1], { key: "Enter" });
+    await toAgentPath(view);
     await view.findByTestId("expression-make-empty");
     fireEvent.click(view.getByRole("button", { name: "가져오기" }));
     expect(await view.findByLabelText("고정 이름")).toBeTruthy();
@@ -687,6 +691,7 @@ describe("＋ 메뉴", () => {
     const { view } = await mountPanel(onClose);
     await openMenu(view);
     fireEvent.keyDown(view.getAllByRole("menuitem")[1], { key: "Enter" });
+    await toAgentPath(view);
     await view.findByTestId("expression-make-form");
     await fill(view);
     send(view);
@@ -720,6 +725,7 @@ describe("이모지 고르개 안에서", () => {
     const trigger = await mounted.view.findByTestId("expression-add-menu");
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown((await mounted.view.findAllByRole("menuitem"))[1], { key: "Enter" });
+    await toAgentPath(mounted.view);
     await mounted.view.findByTestId("expression-make-form");
     return mounted;
   }
@@ -756,6 +762,7 @@ describe("이모지 고르개 안에서", () => {
     // 이제 양식을 연 뒤 그 Escape 를 시험한다.
     fireEvent.keyDown(trigger, { key: "Enter" });
     fireEvent.keyDown((await mounted.view.findAllByRole("menuitem"))[1], { key: "Enter" });
+    await toAgentPath(mounted.view);
     await mounted.view.findByTestId("expression-make-form");
     return mounted;
   }
