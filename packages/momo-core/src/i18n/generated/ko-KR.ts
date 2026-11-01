@@ -1655,6 +1655,12 @@ export const catalog: MessageCatalog = {
       "value": "따라가기를 바꾸지 못했어요. 잠시 뒤에 다시 시도해 주세요."
     }
   ],
+  "timeline.thread.followHint": [
+    {
+      "type": 0,
+      "value": "답하면 이 스레드를 따라가요."
+    }
+  ],
   "timeline.thread.followOff": [
     {
       "type": 0,
