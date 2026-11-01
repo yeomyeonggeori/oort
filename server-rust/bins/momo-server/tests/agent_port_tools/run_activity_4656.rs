@@ -1957,6 +1957,282 @@ async fn the_tool_path_and_an_in_server_recorder_are_one_function() {
     }
 }
 
+/// Take the run row `FOR <mode> NOWAIT` as `momo_app` on a connection of its own and let go
+/// again: `Ok(())` = granted, `Err(sqlstate)` = refused (`55P03` = someone else holds the row in
+/// a conflicting mode). `mode` is one of the three names below; the statement for each is a
+/// fixed string, so no SQL is ever built from text.
+async fn try_lock_run(app: &PgPool, workspace: Uuid, run: Uuid, mode: &str) -> Result<(), String> {
+    let statement = match mode {
+        "UPDATE" => "SELECT 1 FROM agent_run WHERE workspace_id = $1 AND id = $2 FOR UPDATE NOWAIT",
+        "NO KEY UPDATE" => {
+            "SELECT 1 FROM agent_run WHERE workspace_id = $1 AND id = $2 FOR NO KEY UPDATE NOWAIT"
+        }
+        "KEY SHARE" => {
+            "SELECT 1 FROM agent_run WHERE workspace_id = $1 AND id = $2 FOR KEY SHARE NOWAIT"
+        }
+        other => panic!("not a lock mode this probe knows: {other}"),
+    };
+    let mut tx = app.begin().await.expect("tx");
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("guc");
+    let answer = sqlx::query(statement)
+        .bind(workspace)
+        .bind(run)
+        .fetch_one(&mut *tx)
+        .await;
+    tx.rollback().await.expect("rollback");
+    match answer {
+        Ok(_) => Ok(()),
+        Err(sqlx::Error::Database(error)) => {
+            Err(error.code().map(|c| c.to_string()).unwrap_or_default())
+        }
+        Err(other) => panic!("the lock probe failed for another reason: {other}"),
+    }
+}
+
+/// A `momo_app` transaction under this tenant's GUC, left open for the caller to use.
+async fn open_tenant_tx(
+    app: &PgPool,
+    workspace: Uuid,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut tx = app.begin().await.expect("tx");
+    sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+        .bind(workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("guc");
+    tx
+}
+
+/// `agent_run_activity_record` on this open transaction (the writer, called as the runtime role).
+async fn record_in(
+    tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
+    workspace: Uuid,
+    run: Uuid,
+    actor: Uuid,
+    activities: Value,
+) -> Result<i32, sqlx::Error> {
+    sqlx::query_scalar("SELECT agent_run_activity_record($1,$2,$3,$4,NULL)")
+        .bind(workspace)
+        .bind(run)
+        .bind(actor)
+        .bind(activities)
+        .fetch_one(&mut **tx)
+        .await
+}
+
+/// RED PROOF (ADR-0200 증보 7 7-6, the lock the #4656 security review asked the writer to take
+/// itself). The SQL writer locks the run row it writes for, `FOR NO KEY UPDATE`, in the same
+/// statement that checks the run is this agent's, so no caller has to lock the run first.
+/// Measured with `NOWAIT` from a second connection while the writer's transaction is still open:
+/// the row cannot be taken `FOR NO KEY UPDATE` (55P03) and cannot be taken `FOR UPDATE`, but it
+/// CAN be taken `FOR KEY SHARE` (the foreign-key checks of other tables never wait on it, which
+/// is what makes it NO KEY UPDATE and not UPDATE). A call that is refused (another agent as the
+/// actor, another tenant's session) returns 0 and holds NO lock on a run that is not its own.
+///
+/// The report is one in-progress activity: it writes no total row, so the foreign key of the
+/// total table takes no KEY SHARE and the writer's own lock is the only thing that can hold the
+/// row.
+///
+/// Tamper table (each applied and seen red):
+///   * check the run with a plain `EXISTS` (the first version)            -> the `NO KEY UPDATE NOWAIT` probe is granted while the writer is open
+///   * `FOR UPDATE` instead of `FOR NO KEY UPDATE`                        -> the `KEY SHARE NOWAIT` probe is refused
+///   * drop `AND agent_member_id = p_actor` from the locking select        -> another agent's call writes (1 ≠ 0) and holds the run row
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_recorder_locks_the_run_row_it_writes_for_and_only_that_row() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other_tenant = seed(&su).await;
+    let (ws, agent) = (fixture.workspace, fixture.hosted_agent);
+    let run = new_run(&su, &fixture, fixture.channel).await;
+
+    // control: with no writer open the row is free in every mode, so a refusal below is the writer's
+    for mode in ["UPDATE", "NO KEY UPDATE", "KEY SHARE"] {
+        assert_eq!(try_lock_run(&app, ws, run, mode).await, Ok(()), "{mode}");
+    }
+
+    // the agent's own call, transaction left open
+    let mut writer = open_tenant_tx(&app, ws).await;
+    let written = record_in(
+        &mut writer,
+        ws,
+        run,
+        agent,
+        json!([act("a1", "read", "in_progress", 1)]),
+    )
+    .await
+    .expect("record");
+    assert_eq!(written, 1);
+    assert_eq!(
+        try_lock_run(&app, ws, run, "NO KEY UPDATE").await,
+        Err("55P03".to_string()),
+        "the writer holds the run row: another writer of it has to wait"
+    );
+    assert_eq!(
+        try_lock_run(&app, ws, run, "UPDATE").await,
+        Err("55P03".to_string())
+    );
+    assert_eq!(
+        try_lock_run(&app, ws, run, "KEY SHARE").await,
+        Ok(()),
+        "…but not with the weak lock a foreign key takes: the lock is NO KEY UPDATE, not UPDATE"
+    );
+    writer.commit().await.expect("commit");
+    assert_eq!(
+        try_lock_run(&app, ws, run, "UPDATE").await,
+        Ok(()),
+        "the lock goes with the transaction"
+    );
+
+    // a refused call writes nothing and locks nothing: another agent as the actor, and a
+    // session of another tenant naming this tenant's run
+    let mut stranger = open_tenant_tx(&app, ws).await;
+    let refused = record_in(
+        &mut stranger,
+        ws,
+        run,
+        fixture.managed_agent,
+        json!([act("x1", "read", "in_progress", 1)]),
+    )
+    .await
+    .expect("record");
+    assert_eq!(refused, 0, "another agent's run: refused");
+    assert_eq!(
+        try_lock_run(&app, ws, run, "NO KEY UPDATE").await,
+        Ok(()),
+        "a refused caller holds nothing on the run"
+    );
+    stranger.commit().await.expect("commit");
+    let mut foreign = open_tenant_tx(&app, other_tenant.workspace).await;
+    let refused = record_in(
+        &mut foreign,
+        ws,
+        run,
+        agent,
+        json!([act("y1", "read", "in_progress", 1)]),
+    )
+    .await
+    .expect("record");
+    assert_eq!(refused, 0, "another tenant's session: refused");
+    assert_eq!(
+        try_lock_run(&app, ws, run, "NO KEY UPDATE").await,
+        Ok(()),
+        "a session of another tenant holds nothing on this tenant's run"
+    );
+    foreign.commit().await.expect("commit");
+    assert_eq!(
+        activity_rows(&su, run).await.len(),
+        1,
+        "only the agent's own call wrote a row"
+    );
+}
+
+/// RED PROOF (the deadlock the #4656 security review reproduced on a real PostgreSQL). A recorder
+/// that did NOT lock the run row first (the in-server helper of ADR-0201 B5-7, called straight)
+/// and the tool path (which holds the run row `FOR UPDATE` before it records) write to the same
+/// run at the same time, and each one's first report for a new (run, kind) goes through the
+/// total table's foreign key. The interleaving is made, not hoped for: the tool path's
+/// transaction takes the run row; the recorder is started and polled until PostgreSQL says it is
+/// waiting behind that transaction; only then does the tool path record. Both must commit with
+/// no `deadlock detected` (40P01), and both reports must be in the ledger and in the total.
+///
+/// Tamper table (applied and seen red):
+///   * check the run with a plain `EXISTS` (the first version) -> the recorder takes the advisory
+///     lock and then waits on the row the tool path holds, the tool path waits on the advisory lock:
+///     40P01 after one `deadlock_timeout`
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_recorder_that_did_not_lock_the_run_first_cannot_deadlock_the_tool_path() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let (ws, agent) = (fixture.workspace, fixture.hosted_agent);
+    let run = new_run(&su, &fixture, fixture.channel).await;
+
+    // the tool path: its transaction holds the run row FOR UPDATE before it records
+    let mut tool = open_tenant_tx(&app, ws).await;
+    let tool_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *tool)
+        .await
+        .expect("pid");
+    sqlx::query("SELECT 1 FROM agent_run WHERE workspace_id = $1 AND id = $2 FOR UPDATE")
+        .bind(ws)
+        .bind(run)
+        .fetch_one(&mut *tool)
+        .await
+        .expect("the tool path takes the run row");
+
+    // the recorder that does not take the run row first
+    let recorder = tokio::spawn({
+        let app = app.clone();
+        async move {
+            let mut tx = open_tenant_tx(&app, ws).await;
+            let written = record_in(
+                &mut tx,
+                ws,
+                run,
+                agent,
+                json!([act("h1", "read", "completed", 3)]),
+            )
+            .await?;
+            tx.commit().await?;
+            Ok::<i32, sqlx::Error>(written)
+        }
+    });
+
+    // wait until PostgreSQL says the recorder is parked behind the tool path's transaction
+    let mut parked = false;
+    for _ in 0..500 {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))",
+        )
+        .bind(tool_pid)
+        .fetch_one(&su)
+        .await
+        .expect("who waits");
+        if waiting > 0 {
+            parked = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert!(parked, "the recorder never queued behind the tool path");
+
+    // now the tool path records (a different kind, so its total row is new too)
+    let from_tool = record_in(
+        &mut tool,
+        ws,
+        run,
+        agent,
+        json!([act("t1", "edit", "completed", 5)]),
+    )
+    .await
+    .expect("the tool path must not be the victim of a deadlock");
+    tool.commit().await.expect("tool commit");
+    let from_recorder = recorder
+        .await
+        .expect("recorder task")
+        .expect("the recorder must not be the victim of a deadlock");
+    assert_eq!((from_tool, from_recorder), (1, 1));
+    assert_eq!(
+        tally(&su, run).await,
+        vec![("edit".to_string(), 5, 0), ("read".to_string(), 3, 0)],
+        "both reports moved the total"
+    );
+    assert_eq!(
+        activity_rows(&su, run).await.len(),
+        2,
+        "and both left their row"
+    );
+}
+
 /// RED PROOF (ADR-0200 증보 7 7-A11 tenant half + the SQL backstop of 7-3). Another tenant reads
 /// none of the agent's rows or totals and writes none (the policy and a foreign run both refuse),
 /// and the database refuses by itself what the server would refuse: a row of either kind that
@@ -1964,7 +2240,7 @@ async fn the_tool_path_and_an_in_server_recorder_are_one_function() {
 ///
 /// Tamper table:
 ///   * drop the `ws_isolation` policy (or FORCE) on `agent_run_activity_tally`  -> the other tenant counts rows
-///   * drop `agent_run.agent_member_id = p_actor` from the recorder's EXISTS      -> a foreign actor writes on the run
+///   * drop `agent_run.agent_member_id = p_actor` from the recorder's locking run check -> a foreign actor writes on the run
 ///   * drop `agent_report_text_ok(label, 40)` from the activity CHECK              -> the `/` label row is inserted
 ///   * drop `agent_run_plan_ok(plan)` from the plan CHECK                          -> the 13-step plan row is inserted
 ///   * drop the "columns the kinds never carry" arm                               -> an activity row with a `stage` is inserted

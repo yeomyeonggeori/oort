@@ -354,14 +354,16 @@ fn validated_id(raw: &str) -> Result<String, (ReportField, ReportRule)> {
 /// written (0 for a folded repeat, an empty report, or a run that is not this agent's in this
 /// tenant).
 ///
-/// **Precondition (every caller).** The caller is inside the tenant transaction
-/// (`app.workspace_id` set; RLS rejects a foreign workspace) and has ALREADY locked the run row
-/// (`FOR UPDATE` or `FOR NO KEY UPDATE`): the Agent Port path has (`lock_gateway_run_in_tx`).
-/// The SQL function takes a per-run advisory lock but not the row lock, so it does not enforce
-/// the order itself: a caller that has not locked the row can deadlock with a concurrent
-/// tool-path call on the same run (the total table's foreign key needs KEY SHARE on a row the
-/// tool path holds `FOR UPDATE`, while the tool path waits for the advisory lock). The in-server
-/// helper (ADR-0201 B5-7, #4968) must lock the run row first; see migration 168, "LOCKS".
+/// **Locking.** The caller is inside the tenant transaction (`app.workspace_id` set; RLS rejects
+/// a foreign workspace). It does NOT have to lock the run row first: the SQL function does it
+/// itself (`SELECT … FOR NO KEY UPDATE`, filtered by tenant and by `agent_member_id = actor`, so
+/// a refused caller locks nothing) before it takes the per-run advisory lock, which keeps one
+/// lock order for every caller and rules out the deadlock with the tool path that a caller
+/// without the row would otherwise risk (migration 168, "LOCKS"). The Agent Port path already
+/// holds the row `FOR UPDATE` (`lock_gateway_run_in_tx`); the function's lock is the same
+/// transaction's weaker lock on it and changes nothing for that path. The caller's database
+/// role needs UPDATE on `agent_run` (PostgreSQL asks for it for any row lock): `momo_app` has
+/// it, and the in-server helper (ADR-0201 B5-7, #4968) must confirm its own pool's role.
 ///
 /// This writes **no** `output.stages` entry and spends **no** step: it never goes through
 /// `record_stage_in_tx` (7-A14).

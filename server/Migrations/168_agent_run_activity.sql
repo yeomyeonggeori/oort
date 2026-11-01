@@ -56,35 +56,46 @@
 -- the frame carries the kind only, never the text or the id (the reader re-reads through the
 -- membership-checked REST route).
 --
--- LOCKS (the question 7-6 left to this migration). The function does NOT enforce the lock order
--- itself, so read the precondition:
---   * PRECONDITION FOR EVERY CALLER: hold the run row (`FOR UPDATE`, or `FOR NO KEY UPDATE`)
---     BEFORE calling. The Agent Port path does: it reaches this function inside
---     `record_gateway_event_in_tx`, which already holds the run row `FOR UPDATE`
---     (`lock_gateway_run_in_tx`), so same-run tool-path writers are serialized there and the
---     per-run advisory lock taken below is uncontended. The order is run row -> advisory lock ->
---     (the total table's FK check).
---   * A caller that does NOT hold the run row first can deadlock with a concurrent tool-path call
---     on the same run: it takes the advisory lock, its first INSERT into the total table for a
---     (run, kind) then needs KEY SHARE on the run row through the FK (which conflicts with the
---     tool path's FOR UPDATE), while the tool path waits for the advisory lock. No such caller
---     exists today: the in-server helper of ADR-0201 B5-7 is not wired yet, and a managed run
---     has no hosted lease, so the Agent Port path cannot reach it. #4968 must lock the run row
---     first. The function could enforce the order by replacing its run-existence check with
---     `SELECT 1 FROM agent_run ... FOR NO KEY UPDATE`; that is offered to the security review and
---     not done here, because it changes the lock footprint of every caller.
+-- LOCKS (the question 7-6 left to this migration). The function takes the run row itself, so no
+-- caller has to know a lock order:
+--   * `agent_run_activity_record` begins with `SELECT 1 FROM agent_run WHERE <tenant, run,
+--     agent_member_id = p_actor> FOR NO KEY UPDATE` and returns 0 when that finds no row. That one
+--     statement is the ownership check AND the run-row lock: a run that is not this agent's (or is
+--     another tenant's) is filtered out BEFORE any lock is taken, so a refused caller locks nothing.
+--     Only then does it take the per-run advisory lock, and only then does it write (the total
+--     table's foreign key needs KEY SHARE on the run row, which its own NO KEY UPDATE already
+--     covers). Every caller therefore acquires in the same order -- run row, advisory lock, total
+--     table -- whether or not it locked the run row before calling.
+--   * Why the function does it and not the caller. The first version left it to the caller as a
+--     precondition, and a caller that skipped it could deadlock with a concurrent tool-path call on
+--     the same run: it took the advisory lock, its first INSERT into the total table for a (run,
+--     kind) then needed KEY SHARE on the run row (which conflicts with the tool path's FOR UPDATE),
+--     while the tool path waited for the advisory lock. The #4656 security review reproduced it on a
+--     real PostgreSQL: one of the two is aborted with `deadlock detected` (in the review's run it
+--     was the agent's tool call). This is pinned by
+--     `a_recorder_that_did_not_lock_the_run_first_cannot_deadlock_the_tool_path`, and the lock
+--     itself by `the_recorder_locks_the_run_row_it_writes_for_and_only_that_row`.
+--   * The Agent Port path reaches this function inside `record_gateway_event_in_tx`, which already
+--     holds the run row `FOR UPDATE` (`lock_gateway_run_in_tx`). The function's NO KEY UPDATE is the
+--     same transaction's weaker lock on a row it already holds, so it neither waits nor changes
+--     what that path holds: the one existing caller's lock footprint is unchanged, and same-run
+--     tool-path writers are still serialised at the run row.
+--   * NO KEY UPDATE, not UPDATE: it conflicts with every other writer of the run row but not with
+--     FOR KEY SHARE, so the foreign-key checks of other tables that point at the run (this total
+--     table, 133's `agent_run_tool_tally`) never wait on it.
 --   * The total table has a foreign key to `agent_run` with ON DELETE CASCADE, like 133's
---     `agent_run_tool_tally`. Its KEY SHARE on the run row is compatible with the tool path's own
---     FOR UPDATE inside one transaction (the precondition above). The 128 reason for NOT putting
---     an FK on the ledger (the claim path holds the outbox row and waits on the run row) does not
---     apply to a writer that locks the run row first. The ledger itself stays FK-free.
+--     `agent_run_tool_tally`. The 128 reason for NOT putting an FK on the ledger (the claim path
+--     holds the outbox row and waits on the run row) does not apply to a writer that locks the run
+--     row first, and every writer of this function now does. The ledger itself stays FK-free.
 --
 -- ROLES: SECURITY INVOKER throughout, no SECURITY DEFINER, no BYPASSRLS. The Agent Port
 -- writes as `momo_app`, which holds SELECT/INSERT/UPDATE/DELETE on `agent_run_event` (128)
 -- and the `agent_run_event_seq` USAGE; the total table is granted to it here. The retention
 -- sweep's cross-tenant read runs as `momo_notifier` and gets SELECT on the total table
 -- (like 133); its DELETE runs as `momo_app` under RLS. A recorder that is not `momo_app`
--- needs its own GRANT (the in-server helper of ADR-0201 B5-7 must confirm its pool's role).
+-- needs its own GRANT (the in-server helper of ADR-0201 B5-7 must confirm its pool's role),
+-- and that list now includes UPDATE on `agent_run`: PostgreSQL lets only a role that holds it
+-- take the run-row lock above (`momo_app` does).
 --
 -- LOCK NOTE (operations): ALTER TABLE takes ACCESS EXCLUSIVE until commit. Adding nullable
 -- columns without a default is metadata-only. Every CHECK is added `NOT VALID` so no existing
@@ -342,7 +353,9 @@ COMMENT ON FUNCTION agent_run_activity_trim(uuid, uuid) IS
 -- caller; the CHECKs are the backstop), one entry per id with the later entry winning
 -- (the caller dedupes); `p_plan` is NULL (leave the plan) or the whole new plan (`[]`
 -- clears). Returns how many ledger rows it wrote. 0 when the run is not this agent's run in
--- this tenant (the same refusal 133's recorder gives) — it neither writes nor says why.
+-- this tenant (the same refusal 133's recorder gives) — it neither writes, locks nor says why.
+-- On the agent's own run it holds the run row `FOR NO KEY UPDATE` until the transaction ends
+-- (header, "LOCKS").
 -- -----------------------------------------------------------------------------
 CREATE FUNCTION agent_run_activity_record(
   p_workspace_id uuid,
@@ -366,16 +379,20 @@ DECLARE
   v_plan_last  jsonb;
   v_written    integer := 0;
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM agent_run
-     WHERE workspace_id = p_workspace_id AND id = p_run_id AND agent_member_id = p_actor
-  ) THEN
+  -- The ownership check and the run-row lock are ONE statement: a run that is not this agent's
+  -- in this tenant is filtered out before any lock is taken, so a refused caller locks nothing.
+  -- Taking the row first is what keeps the order run row -> advisory lock -> total table the
+  -- same for every caller (header, "LOCKS"). A row lock needs UPDATE on `agent_run`.
+  PERFORM 1 FROM agent_run
+   WHERE workspace_id = p_workspace_id AND id = p_run_id AND agent_member_id = p_actor
+   FOR NO KEY UPDATE;
+  IF NOT FOUND THEN
     RETURN 0;
   END IF;
 
   -- Serialises same-run recorders so the fold, the total and the roll read and write a
-  -- stable state. PRECONDITION (header, "LOCKS"): the caller already holds the run row. A
-  -- caller that does not can deadlock with the tool path through the total table's FK.
+  -- stable state. The run row is already held (above), so a caller that did not lock it before
+  -- calling cannot deadlock with the tool path through the total table's FK.
   PERFORM pg_advisory_xact_lock(hashtextextended('agent_run_activity:' || p_run_id::text, 0));
 
   IF p_activities IS NOT NULL THEN
@@ -446,7 +463,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION agent_run_activity_record(uuid, uuid, uuid, jsonb, jsonb) IS
-  'ADR-0200 증보 7 7-6: record one agent report (activities as changes, plan as a whole replacement) on the caller agent''s own run — fold repeats, move the ended-unit total, roll past 100/10 rows. SECURITY INVOKER; the only writer of activity/plan rows.';
+  'ADR-0200 증보 7 7-6: record one agent report (activities as changes, plan as a whole replacement) on the caller agent''s own run — lock that run row FOR NO KEY UPDATE first (a refused caller locks nothing), fold repeats, move the ended-unit total, roll past 100/10 rows. SECURITY INVOKER; the only writer of activity/plan rows.';
 
 -- -----------------------------------------------------------------------------
 -- The 200-row stage cap no longer counts `activity` / `plan` rows (they have their own
