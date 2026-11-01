@@ -757,12 +757,19 @@ mod tests {
     /// `ws_isolation`, `momo_notifier` SELECT for the retention sweep), the roll function
     /// `agent_run_activity_trim`, the one writer `agent_run_activity_record`, and the stage trim /
     /// append / frame-window functions made to look past the new kinds.
+    ///
+    /// 169 is #4967's 「도우미 작업 모드」 (ADR-0201 증보 v3 B5·B14-S4): the `team_ai_task` marker
+    /// table — one row per run, the row's existence is the task-mode judgement, `steps_done` and the
+    /// step claim keep a step from running twice, and the plan/note between steps are gone once the
+    /// row is ended (`team_ai_task_ended_ck`). Tenant ENABLE + FORCE + `ws_isolation`; the grants are
+    /// the minimum the code reads and writes (`team-ai-task-lockdown`, the same text in the migration
+    /// and both role bootstraps).
     #[test]
-    fn discovers_contiguous_migrations_001_to_168() {
+    fn discovers_contiguous_migrations_001_to_169() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=168).collect();
+        let expected: Vec<i64> = (1..=169).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -770,7 +777,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=168 under {}",
+            "expected contiguous 001..=169 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -778,7 +785,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("168_agent_run_activity"));
+            .starts_with("169_team_ai_task"));
     }
 
     #[test]

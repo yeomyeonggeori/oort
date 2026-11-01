@@ -967,6 +967,15 @@ pub async fn find_agent_run_by_trigger_in_tx(
 /// `NULL`, and `NOT (TRUE AND NULL)` is `NULL` — which `WHERE` drops, so every plain
 /// `awaiting_approval` run would have silently left the cap (the original `IS NOT DISTINCT FROM`
 /// was null-safe for the same reason).
+///
+/// A run in the team AI's **task mode** (a `team_ai_task` row exists, ADR-0201 증보 v3 B5-11, #4967)
+/// is not counted either. Between its steps the run reads `running` for up to an hour; counted, one
+/// long task would hold the helper's `max_concurrent_runs` (default 1) and every other member's quick
+/// request would be refused for as long. How many tasks may run is its own bound
+/// (`team_ai_task::TaskLimits`: three per workspace, one per requester), so the count only shrinks.
+/// The test is the row's **existence**, not a key in `input`: the run is `running`, not parked, and
+/// nothing writes a `hold` for it. **G3 (`agent.max_run_steps`) is a different counter** — see
+/// `team_ai_task`: a task step consumes one of the run's G3 steps and the run keeps its ceiling.
 pub async fn live_run_count_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -977,7 +986,10 @@ pub async fn live_run_count_in_tx(
           WHERE workspace_id = $1 AND agent_member_id = $2 \
             AND status IN ('queued','running','awaiting_approval','paused') \
             AND NOT (status = 'awaiting_approval' \
-                     AND COALESCE(input->>'hold', '') IN ('channel_grant', 'agent_initiated'))",
+                     AND COALESCE(input->>'hold', '') IN ('channel_grant', 'agent_initiated')) \
+            AND NOT EXISTS (SELECT 1 FROM team_ai_task t \
+                             WHERE t.workspace_id = agent_run.workspace_id \
+                               AND t.run_id = agent_run.id)",
     )
     .bind(workspace_id)
     .bind(agent_member_id)
@@ -1840,7 +1852,20 @@ pub async fn cancel_run_in_tx(
     .bind(error)
     .execute(&mut *conn)
     .await?;
-    Ok(updated.rows_affected() > 0)
+    let cancelled = updated.rows_affected() > 0;
+    if cancelled {
+        // ADR-0201 증보 v3 B5-8 (#4967): a stop ends the run's task in the same transaction — its
+        // plan and note go with it, and no step job is left with anything to continue (the cancel
+        // route retires the pending one). A run that is not in task mode has no row: a no-op.
+        crate::team_ai_task::end_in_tx(
+            conn,
+            workspace_id,
+            run_id,
+            crate::team_ai_task::END_CANCELLED,
+        )
+        .await?;
+    }
+    Ok(cancelled)
 }
 
 /// The `work_session` ids this run's `work_control` records touched — Swift's

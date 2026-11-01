@@ -211,6 +211,24 @@ impl LimitHit {
         }
     }
 
+    /// The same limit said **in the middle of a task** (B9-2 「작업 중에 닿으면 그 시점의 노트로 중간
+    /// 보고」, B5-5): it names whose limit it is exactly as [`Self::sentence`] does (a team limit
+    /// points at the settings, an operator's does not), and ends like every interim report — what
+    /// follows is the note, the one thing that survives.
+    pub fn task_sentence(self) -> &'static str {
+        match self {
+            LimitHit::TeamDay | LimitHit::TeamMonth => {
+                "팀이 정한 사용량을 다 써서 여기서 멈췄어요. 관리자가 설정 › AI에서 바꿀 수 있어요. 지금까지 정리한 내용이에요."
+            }
+            LimitHit::OperatorDay => {
+                "서버 운영자가 정한 하루 사용량을 다 써서 여기서 멈췄어요. 지금까지 정리한 내용이에요."
+            }
+            LimitHit::OperatorOff => {
+                "서버 운영자가 팀 AI를 멈춰 둔 상태라서 작업도 여기서 멈췄어요. 지금까지 정리한 내용이에요."
+            }
+        }
+    }
+
     /// Whose limit: `team` (the administrator's) or `operator` (the server's).
     pub fn source(self) -> &'static str {
         match self {
