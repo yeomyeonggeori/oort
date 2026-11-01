@@ -12832,7 +12832,10 @@ paths:
         `scope=mine` narrows to the approvals the caller decided, requested (the
         author of the run's trigger message, or the actor of a work run's
         `agent.work.queued` row) or whose agent they own (`agent.owner_human_id`).
-        It narrows within the caller's channels and never widens them.
+        It narrows within the caller's channels and never widens them. An in-place
+        channel grant the caller requested (or owns the agent of) is listed under
+        `mine` even when they are not an owner or admin, though `team` lists it only
+        to one: it is theirs to follow, not theirs to decide.
       security:
         - bearerAuth: []
       parameters:
@@ -19067,8 +19070,18 @@ components:
         claimedAtMs: {type: integer, format: int64}
         latestStage: {type: string, maxLength: 80}
         lastEventAtMs: {type: integer, format: int64}
-        approvalId: {type: string, format: uuid}
-        approvalExpiresAtMs: {type: integer, format: int64}
+        approvalId:
+          type: string
+          format: uuid
+          description: >
+            The pending approval the run is parked on. Named only to a caller who is
+            an active member of the channel the approval was raised in (the rule
+            `bundle` follows), which need not be the run's own channel; absent
+            otherwise.
+        approvalExpiresAtMs:
+          type: integer
+          format: int64
+          description: The deadline of `approvalId`, under the same rule.
         bundle:
           type: object
           additionalProperties: false

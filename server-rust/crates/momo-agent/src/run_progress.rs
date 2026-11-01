@@ -14,6 +14,8 @@
 //!   did not report as a stage marker.
 //! * It names no run, requester, channel or title the viewer cannot see: the
 //!   queue answer for a channel the viewer is not in is a **count** only.
+//! * It names no approval (its id or its deadline) raised in a channel the viewer is not
+//!   an active member of, whichever channel the run itself is in.
 //!
 //! ## Why the delivery job is an input, not a query
 //!
@@ -100,7 +102,10 @@ pub struct RunProgressRow {
     pub claimed_at: Option<DateTime<Utc>>,
     pub latest_stage: Option<String>,
     pub last_event_at: Option<DateTime<Utc>>,
+    /// The pending approval the run is parked on, named only when the viewer is an active
+    /// member of the channel the approval was raised in (the rule `bundle` follows).
     pub approval_id: Option<Uuid>,
+    /// The deadline of [`RunProgressRow::approval_id`], under the same rule.
     pub approval_expires_at: Option<DateTime<Utc>>,
     /// A closed machine code (`approval_expired`, …) for a finished run.
     pub end_reason: Option<String>,
@@ -124,6 +129,10 @@ pub struct RunProgressBase {
     pub latest_stage: Option<String>,
     pub last_event_at: Option<DateTime<Utc>>,
     pub approval_id: Option<Uuid>,
+    /// The channel the pending approval was raised in: it need not be the run's own, and
+    /// it is what decides whether a viewer may be told of the approval
+    /// ([`assemble_run_progress`]).
+    pub approval_channel_id: Option<Uuid>,
     pub approval_expires_at: Option<DateTime<Utc>>,
 }
 
@@ -183,13 +192,16 @@ fn progress_select_sql() -> String {
                 (SELECT max(e.created_at) FROM agent_run_event e \
                   WHERE e.workspace_id = r.workspace_id AND e.run_id = r.id \
                     AND e.kind <> 'doorbell_rung') AS last_event_at, \
-                ap.id AS approval_id, ap.expires_at AS approval_expires_at "
+                ap.id AS approval_id, ap.channel_id AS approval_channel_id, \
+                ap.expires_at AS approval_expires_at "
     )
 }
 
-/// The pending approval of an `awaiting_approval` run (at most one row).
+/// The pending approval of an `awaiting_approval` run (at most one row), with the channel
+/// it was raised in. The row is not filtered by who is asking: **the assembly drops it for a
+/// viewer who is not in that channel** ([`assemble_run_progress`]).
 const PROGRESS_APPROVAL_JOIN: &str = "LEFT JOIN LATERAL ( \
-                SELECT a.id, a.expires_at FROM approval a \
+                SELECT a.id, a.channel_id, a.expires_at FROM approval a \
                  WHERE r.status = 'awaiting_approval' \
                    AND a.workspace_id = r.workspace_id AND a.run_id = r.id \
                    AND a.status = 'pending' \
@@ -206,6 +218,7 @@ fn decode_progress_base(row: &sqlx::postgres::PgRow) -> Result<RunProgressBase, 
         latest_stage: row.try_get("latest_stage")?,
         last_event_at: row.try_get("last_event_at")?,
         approval_id: row.try_get("approval_id")?,
+        approval_channel_id: row.try_get("approval_channel_id")?,
         approval_expires_at: row.try_get("approval_expires_at")?,
     })
 }
@@ -491,7 +504,10 @@ pub async fn visible_channels_in_tx(
 ///
 /// * `jobs` is keyed by run id; a run with no pending job simply has no entry.
 /// * `queue` is every agent's claimable queue in claim order.
-/// * `visible` is the set of channels the viewer may name runs from.
+/// * `visible` is the set of channels the viewer may name runs **and approvals** from: a
+///   run's pending approval is named (`approval_id`, `approval_expires_at`) only when the
+///   channel it was raised in is in this set, the rule the `bundle` follows. The caller
+///   asks for the queue's channels and the approvals' channels in one go.
 pub fn assemble_run_progress(
     base: Vec<RunProgressBase>,
     jobs: &HashMap<Uuid, JobFacts>,
@@ -533,6 +549,9 @@ pub fn assemble_run_progress(
                 }
                 _ => (None, 0, Vec::new()),
             };
+            let approval_is_theirs = run
+                .approval_channel_id
+                .is_some_and(|channel| visible.contains(&channel));
             RunProgressRow {
                 phase,
                 lease_state,
@@ -540,8 +559,8 @@ pub fn assemble_run_progress(
                 claimed_at: run.claimed_at,
                 latest_stage: run.latest_stage,
                 last_event_at: run.last_event_at,
-                approval_id: run.approval_id,
-                approval_expires_at: run.approval_expires_at,
+                approval_id: run.approval_id.filter(|_| approval_is_theirs),
+                approval_expires_at: run.approval_expires_at.filter(|_| approval_is_theirs),
                 end_reason: run.end_reason,
                 queue_position,
                 ahead_total,
@@ -765,4 +784,77 @@ pub async fn list_run_ledger_in_tx(
         tool_tally: Some(tally),
         tool_call_rows_capped: Some(counted > written),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::run::RunStatus;
+
+    fn at(secs: i64) -> DateTime<Utc> {
+        DateTime::from_timestamp(secs, 0).expect("a timestamp")
+    }
+
+    /// A run of channel `own`, parked on `approval` = `(id, the channel it was raised in)`.
+    fn parked(own: Uuid, approval: Option<(Uuid, Uuid)>) -> RunProgressBase {
+        RunProgressBase {
+            summary: AgentRunSummaryRow {
+                id: Uuid::new_v4(),
+                channel_id: own,
+                trigger_message_id: None,
+                trigger_summary: None,
+                status: RunStatus::AwaitingApproval,
+                started_at: Some(at(1)),
+                finished_at: None,
+                created_at: at(1),
+                updated_at: at(2),
+            },
+            agent_member_id: Uuid::new_v4(),
+            step_count: 1,
+            end_reason: None,
+            claimed_at: None,
+            latest_stage: None,
+            last_event_at: None,
+            approval_id: approval.map(|(id, _)| id),
+            approval_channel_id: approval.map(|(_, channel)| channel),
+            approval_expires_at: approval.map(|_| at(3_600)),
+        }
+    }
+
+    fn assemble(base: Vec<RunProgressBase>, visible: &[Uuid]) -> Vec<RunProgressRow> {
+        let visible: HashSet<Uuid> = visible.iter().copied().collect();
+        assemble_run_progress(base, &HashMap::new(), &[], &visible)
+    }
+
+    #[test]
+    fn a_pending_approval_is_named_only_from_a_room_the_viewer_is_in() {
+        let (own, raised_in, other) = (Uuid::from_u128(1), Uuid::from_u128(2), Uuid::from_u128(3));
+        let approval = Uuid::from_u128(10);
+
+        // The approval's room is the viewer's: named, with its deadline.
+        let rows = assemble(
+            vec![parked(own, Some((approval, raised_in)))],
+            &[own, raised_in],
+        );
+        assert_eq!(rows[0].approval_id, Some(approval));
+        assert_eq!(rows[0].approval_expires_at, Some(at(3_600)));
+
+        // The run's room is the viewer's but the approval's is not: neither field.
+        let rows = assemble(
+            vec![parked(own, Some((approval, raised_in)))],
+            &[own, other],
+        );
+        assert_eq!(rows[0].approval_id, None);
+        assert_eq!(rows[0].approval_expires_at, None);
+
+        // The approval's room decides, not the run's: seen from the approval's room alone, it
+        // is named even though the run's own room is not the viewer's.
+        let rows = assemble(vec![parked(own, Some((approval, raised_in)))], &[raised_in]);
+        assert_eq!(rows[0].approval_id, Some(approval));
+
+        // A run parked on nothing names nothing, in whatever rooms.
+        let rows = assemble(vec![parked(own, None)], &[own, raised_in]);
+        assert_eq!(rows[0].approval_id, None);
+        assert_eq!(rows[0].approval_expires_at, None);
+    }
 }
