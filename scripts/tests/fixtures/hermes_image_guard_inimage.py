@@ -13,9 +13,10 @@ Every gate run carries `HERMES_MEDIA_DELIVERY_STRICT=1` unless a scenario remove
 requires it whenever the picture tool is exposed, exactly as the shipped templates provide it).
 
 The scenarios about the volume's `.env` (#4886) do not rest on what their author expects. Each one also feeds the same bytes to THIS
-image's own `hermes_cli.env_loader.load_hermes_dotenv` (infra/hermes/env_loader_oracle.py) and records what it applies in
-`lockgate["oracle"]`; `env-loader-oracle` does that for the whole named table and a few thousand seeded random inputs and compares
-the loader with the gate's functions. The judge in the shell script holds the gate to the loader's answer.
+image's own `hermes_cli.env_loader.load_hermes_dotenv` (infra/hermes/env_loader_oracle.py) and to its second reader of the file, the
+line-by-line `agent.secret_scope.load_env_file`, and records what they apply in `lockgate["oracle"]` (`violated`, `line_violated`);
+`env-loader-oracle` does that for the whole named table and a few thousand seeded random inputs and compares the readers with the gate's
+functions. The judge in the shell script holds the gate to their answers.
 """
 import hashlib
 import json
@@ -82,13 +83,22 @@ def oracle_modules():
     return oracle, env_loader, lockgate
 
 
+def line_reader():
+    """This image's own line-by-line reader of `.env` (`agent.secret_scope.load_env_file`, which the credential pool, the config readers and
+    the profile scope read the file through), wrapped for the oracle: `raw` bytes -> `{name: value}`."""
+    import importlib
+    oracle, _env_loader, _lockgate = oracle_modules()
+    return oracle.line_reader_of(importlib.import_module("agent.secret_scope").load_env_file)
+
+
 def loader_evidence(raw):
-    """What this image's REAL loader applies for a volume `.env` holding `raw`: the names it ends with that the policy does not allow
-    (#4950: any name outside the allow-list, a seeded one with another value). The scenario's own expectation says what its author
-    thinks; this says what Hermes does."""
+    """What this image's REAL readers apply for a volume `.env` holding `raw`: the names the loader ends with that the policy does not allow
+    (#4950: any name outside the allow-list, a seeded one with another value), and the names the line-by-line reader yields that it does not
+    allow either. The scenario's own expectation says what its author thinks; this says what Hermes does."""
     oracle, env_loader, _lockgate = oracle_modules()
     violated, error = oracle.loader_violations(env_loader, raw)
-    return {"loader_file": os.path.realpath(env_loader.__file__), "error": error, "violated": sorted(violated)}
+    return {"loader_file": os.path.realpath(env_loader.__file__), "error": error, "violated": sorted(violated),
+            "line_violated": sorted(oracle.line_violations(line_reader(), raw))}
 
 
 def with_loader(result, raw):
@@ -301,14 +311,19 @@ ENV_SHAPES_APPLIED_UNLISTED = (  # #4950: names that were never judged, and a na
     "HERMES_SAFE_MODE=0 # =1",
     "hermes_safe_mode=1",
 )
-ENV_SHAPES_IGNORED = (
+ENV_SHAPES_IGNORED = (  # no reader of the file sets anything for these
     "# HERMES_SAFE_MODE=1",
-    'HERMES_SAFE_MODE="1',
     "HERMES_SAFE_MODE",
-    'HERMES_SAFE_MODE="1" junk',
     "OORT_SELF_MEDIA_ORIGIN",
+    "   # HERMES_YOLO_MODE=1",
+)
+ENV_SHAPES_LINE_READ = (  # python-dotenv (the loader) sets nothing for these; Hermes' line-by-line reader of the file reads the name
+    'HERMES_SAFE_MODE="1',
+    'HERMES_SAFE_MODE="1" junk',
     "HERMES_YOLO_MODE=1\nHERMES_YOLO_MODE",
-    'OPENAI_API_KEY="one\nHERMES_SAFE_MODE=1"',
+    'OPENAI_API_KEY="one\nHERMES_DASHBOARD=true"',
+    "OPENAI_API_KEY=1\x0cHERMES_ALLOW_PRIVATE_URLS=1",
+    "OPENAI_API_KEY=1 # c\u2029HTTPS_PROXY=http://proxy.invalid:3128",
 )
 
 
@@ -324,12 +339,35 @@ def scenario_env_shapes():
 
 
 def scenario_env_inert_shapes():
-    """#4886: the other half: what the loader ignores (a comment, an unterminated quote, a name with no value, junk after the closing
-    quote, a name followed by a bare one of its own, a statement inside a quoted value) must not stop the start."""
+    """#4886: the other half: what no reader of the file reads (a comment, a name with no value) must not stop the start."""
     install()
     raw = ("OPENAI_API_KEY=keep\n" + "\n".join(ENV_SHAPES_IGNORED) + "\n").encode("utf-8")
     write(os.path.join(DATA, ".env"), raw)
     return with_loader(run_gate(), raw)
+
+
+def scenario_env_line_reader_shapes():
+    """#4950: what python-dotenv ignores but Hermes' line-by-line reader reads (a statement the loader cannot finish, a bare name that undoes
+    an earlier line only for the loader, a statement inside a quoted value, one after a boundary only that reader cuts at, the tail of a
+    comment) is read as a name by the credential pool and the config readers: the real gate refuses every name, by name. The record
+    carries what each real reader sees: the loader applies none of them, the line-by-line reader reads every one."""
+    install()
+    raw = ("OPENAI_API_KEY=keep\n" + "\n".join(ENV_SHAPES_LINE_READ) + "\n").encode("utf-8")
+    write(os.path.join(DATA, ".env"), raw)
+    return with_loader(run_gate(), raw)
+
+
+def scenario_profile_folder():
+    """#4950: the volume's `profiles` folder. Empty the start is fine (the image's own boot leaves it absent or empty); an entry under it
+    (Hermes serves it as a profile of its own, with an `.env` of its own) is refused by the real gate, by number."""
+    install()
+    os.makedirs(os.path.join(DATA, "profiles"), exist_ok=True)
+    empty = run_gate()
+    os.makedirs(os.path.join(DATA, "profiles", "oort-proof-profile"), exist_ok=True)
+    rc, record, tail = run_gate()
+    record = dict(record or {})
+    record["profiles"] = {"empty_rc": empty[0], "empty_problems": (empty[1] or {}).get("problems")}
+    return rc, record, tail
 
 
 ENV_SHAPES_REFERENCES = (
@@ -374,19 +412,25 @@ def scenario_env_seed_template():
 
 
 def scenario_env_loader_oracle():
-    """#4886 review, #4950: the gate's reading of the volume's `.env` against Hermes' REAL loader, not against what its author expects.
+    """#4886 review, #4950: the gate's reading of the volume's `.env` against Hermes' REAL readers, not against what its author expects.
     For every input of the named table (each name the policy forbids on every spelling, reference, byte order mark and load-chain shape,
-    the names it allows, the seeded lines) and a few thousand seeded random ones, `hermes_cli.env_loader.load_hermes_dotenv` of this image
-    runs on a copy in the service slot's environment, again on the file it leaves behind until a load leaves the file as it was (at most
-    `oracle.LOAD_CAP` loads), and once more on each of those files as it stands (its clean-up switched off). The names it adds that the
-    policy does not allow, in ANY of those loads, must all be named by the gate's problems; a refusal beyond them must have a designed
-    reason; and the gate's model of the files the loader leaves is held to the loader's own. Not a gate run: the record carries the counts,
-    the judge in the shell script holds them to thresholds so that an empty comparison cannot pass."""
+    the names it allows, the seeded lines, what only the line-by-line reader reads) and a few thousand seeded random ones,
+    `hermes_cli.env_loader.load_hermes_dotenv` of this image runs on a copy in the service slot's environment, again on the file it leaves
+    behind until a load leaves the file as it was (at most `oracle.LOAD_CAP` loads), and once more on each of those files as it stands (its
+    clean-up switched off); and the image's own `agent.secret_scope.load_env_file`, Hermes' second reader of the file, reads each of those
+    files. The names either reader yields that the policy does not allow, in ANY of those files, must all be named by the gate's problems;
+    a refusal beyond them must have a designed reason; the gate's model of the files the loader leaves is held to the loader's own, and its
+    copy of the line-by-line reader to the real one. Not a gate run: the record carries the counts, the judge in the shell script holds them
+    to thresholds so that an empty comparison cannot pass."""
     install()  # the volume as the start commands leave it, like every other scenario: Hermes' modules are imported against it
     oracle, env_loader, lockgate = oracle_modules()
-    summary = oracle.run(env_loader, lockgate, oracle.table_cases() + oracle.random_cases(ORACLE_SEED, ORACLE_RANDOM))
-    loader_file = os.path.realpath(env_loader.__file__)
-    summary.update({"loader_file": loader_file, "loader_sha256": sha(read(loader_file)), "env_parser": lockgate.env_parser()})
+    import importlib
+    secret_scope = importlib.import_module("agent.secret_scope")
+    summary = oracle.run(env_loader, lockgate, oracle.table_cases() + oracle.random_cases(ORACLE_SEED, ORACLE_RANDOM),
+                         line_reader=oracle.line_reader_of(secret_scope.load_env_file))
+    loader_file, reader_file = os.path.realpath(env_loader.__file__), os.path.realpath(secret_scope.__file__)
+    summary.update({"loader_file": loader_file, "loader_sha256": sha(read(loader_file)), "line_reader_file": reader_file,
+                    "line_reader_sha256": sha(read(reader_file)), "env_parser": lockgate.env_parser()})
     return (0 if summary["ok"] else 1), {"ok": summary["ok"], "problems": [], "oracle": summary}, None
 
 

@@ -100,7 +100,7 @@ scenario() {  # scenario <name> -> $OUT/<name>.json (the RESULT line)
 for name in healthy no-plugin edited-plugin widened-plugin not-enabled extra-image-gen-key security-private-urls \
   safe-mode proxy-env private-env bom-env-file bom-env-file-double bom-env-file-kept clean-env-file self-origin self-origin-bad \
   self-origin-env-file prefix-only-plugin strict-missing strict-wrong strict-env-file media-policy env-shapes env-inert-shapes \
-  env-reference-shapes env-seed-template connector-configs connector-config-edited connector-config-nostrict connector-config-apps-missing \
+  env-line-reader-shapes profile-folder env-reference-shapes env-seed-template connector-configs connector-config-edited connector-config-nostrict connector-config-apps-missing \
   hermes-home-other env-parser-parity env-loader-oracle; do
   scenario "$name"
 done
@@ -211,7 +211,7 @@ docker logs "$NAME" >"$OUT/gateway-boot.log" 2>&1 || true
 docker exec "$NAME" ls -ln /opt/data/plugins/oort-image-guard >"$OUT/gateway-boot.ls" 2>&1 || true
 # #4950: the NAMES (never values) the real boot left in the volume's .env, and whether a .op.env exists: the report above judged that file with
 # the allow-list, and the judge below checks every name against it again (a fresh volume's .env is the template Hermes' stage2 seeds)
-docker exec "$NAME" /bin/sh -c 'if [ -f /opt/data/.env ]; then echo ENV_PRESENT; sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p" /opt/data/.env | sort -u; else echo ENV_ABSENT; fi; if [ -e /opt/data/.op.env ]; then echo OP_ENV_PRESENT; fi' >"$OUT/gateway-boot.envnames" 2>&1 || true
+docker exec "$NAME" /bin/sh -c 'if [ -f /opt/data/.env ]; then echo ENV_PRESENT; sed -n "s/^[[:space:]]*\(export[[:space:]][[:space:]]*\)\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[[:space:]]*=.*/\2/p" /opt/data/.env | sort -u; else echo ENV_ABSENT; fi; if [ -e /opt/data/.op.env ]; then echo OP_ENV_PRESENT; fi; if [ -d /opt/data/profiles ]; then if [ -z "$(ls -A /opt/data/profiles)" ]; then echo PROFILES_EMPTY; else echo PROFILES_NOT_EMPTY; fi; else echo PROFILES_ABSENT; fi' >"$OUT/gateway-boot.envnames" 2>&1 || true
 docker exec -u hermes "$NAME" /opt/hermes/.venv/bin/python /fx/hermes_image_guard_live_probe.py >"$OUT/gateway-boot.probe" 2>"$OUT/gateway-boot.probe.err" || true
 docker inspect -f '{{.State.Running}}' "$NAME" >"$OUT/gateway-boot.running" 2>&1 || true
 docker rm -f "$NAME" >/dev/null 2>&1 || true
@@ -249,22 +249,28 @@ def expect(name, rc, fragments=(), absent=()):
 LOADER_PREFIX = "/opt/hermes/hermes_cli/env_loader"
 
 
-def against_loader(name, rc, fragments=(), absent=(), violated=None):
-    """`expect` plus the verdict of this image's REAL loader on the very same file (the scenario recorded it, #4886 review): it has to
-    come from the image's own loader, every name the loader ends with a forbidden value for has to be named by a gate problem, and
-    where the scenario says which names those are (`violated`) the loader has to agree: a shape its author calls applied that the
-    loader ignores is a wrong table, not a pass."""
+def against_loader(name, rc, fragments=(), absent=(), violated=None, line_violated=None):
+    """`expect` plus the verdict of this image's REAL readers on the very same file (the scenario recorded it, #4886 review): it has to
+    come from the image's own loader, every name the loader ends with a forbidden value for, and every name the image's line-by-line
+    reader (`agent.secret_scope.load_env_file`) yields that the policy does not allow, has to be named by a gate problem, and where the
+    scenario says which names those are (`violated`, `line_violated`) the readers have to agree: a shape its author calls applied that
+    the readers ignore is a wrong table, not a pass."""
     r = expect(name, rc, fragments, absent)
     o = (r["lockgate"] or {}).get("oracle") or {}
     if not str(o.get("loader_file", "")).startswith(LOADER_PREFIX):
         failures.append("%s: the loader's verdict is not from this image's own hermes_cli.env_loader: %r" % (name, o.get("loader_file")))
     if o.get("error"):
         failures.append("%s: the real loader raised %s on this file" % (name, o["error"]))
-    named, _ = oracle.named((r["lockgate"] or {}).get("problems", []))
+    seen = set(o.get("violated", [])) | set(o.get("line_violated", []))
+    named, _ = oracle.named((r["lockgate"] or {}).get("problems", []), seen)
     for missing in sorted(set(o.get("violated", [])) - named):
         failures.append("%s: the real loader ends with a forbidden %s but no gate problem names it" % (name, missing))
+    for missing in sorted(set(o.get("line_violated", [])) - named):
+        failures.append("%s: the real line-by-line reader yields a forbidden %r but no gate problem names it" % (name, missing))
     if violated is not None and sorted(o.get("violated", [])) != sorted(violated):
         failures.append("%s: the real loader applies %r, the scenario says %r" % (name, sorted(o.get("violated", [])), sorted(violated)))
+    if line_violated is not None and sorted(o.get("line_violated", [])) != sorted(line_violated):
+        failures.append("%s: the real line-by-line reader yields %r, the scenario says %r" % (name, sorted(o.get("line_violated", [])), sorted(line_violated)))
     return r
 
 
@@ -335,7 +341,16 @@ shapes = against_loader("env-shapes", 3, ["the volume's .env sets %s (" % name f
                         violated=SHAPE_NAMES)
 if ((shapes["lockgate"] or {}).get("env_parser") or {}).get("impl") != "python-dotenv":
     failures.append("env-shapes: the gate did not use the image's python-dotenv: %r" % ((shapes["lockgate"] or {}).get("env_parser"),))
-against_loader("env-inert-shapes", 0, violated=[])
+against_loader("env-inert-shapes", 0, violated=[], line_violated=[])
+# what python-dotenv ignores and Hermes' line-by-line reader reads: refused by name, and the real readers agree on what each one does
+LINE_READ_NAMES = ["HERMES_SAFE_MODE", "HERMES_YOLO_MODE", "HERMES_DASHBOARD", "HERMES_ALLOW_PRIVATE_URLS", "HTTPS_PROXY"]
+against_loader("env-line-reader-shapes", 3, ["the volume's .env sets %s (" % name for name in LINE_READ_NAMES], absent=["proxy.invalid"],
+               violated=[], line_violated=LINE_READ_NAMES)
+# #4950: an empty `profiles` folder is fine, an entry under it refuses the start by number (never by name)
+pf = expect("profile-folder", 3, ["1 entry under profiles/"], absent=["oort-proof-profile"])
+pf_record = (pf["lockgate"] or {}).get("profiles") or {}
+if pf_record.get("empty_rc") != 0 or pf_record.get("empty_problems") != []:
+    failures.append("profile-folder: an empty profiles folder stopped the start: %r" % (pf_record,))
 # a judged name given a reference: refused for the reference itself (all five), whatever the real loader ends with. The loader
 # resolves them in the service slot's environment; what it ends with comes from the record (`violated` below).
 REFERENCE_NAMES = ["HERMES_SAFE_MODE", "HERMES_DASHBOARD", "HTTPS_PROXY", "API_SERVER_KEY", "FAL_KEY"]
@@ -343,7 +358,7 @@ against_loader("env-reference-shapes", 3, ["the volume's .env sets %s (" % name 
                violated=REFERENCE_NAMES)
 # #4950: Hermes' first boot copies the image's .env.example into a fresh volume AFTER the gate: the table of its eleven lines is the image's
 # file, the file passes the gate as it is shipped, and the real loader ends with nothing the policy forbids when it loads it
-seed = against_loader("env-seed-template", 0, violated=[])
+seed = against_loader("env-seed-template", 0, violated=[], line_violated=[])
 seed_record = (seed["lockgate"] or {}).get("seed") or {}
 if seed_record.get("image_has_the_file") is not True or seed_record.get("equal") is not True or len(seed_record.get("image_assignments") or {}) != 11:
     failures.append("env-seed-template: the gate's table of Hermes' seeded lines is not what this image's .env.example holds: %r" % (seed_record,))
@@ -379,7 +394,7 @@ expect("env-loader-oracle", 0)
 orc = (result("env-loader-oracle")["lockgate"] or {}).get("oracle") or {}
 if not str(orc.get("loader_file", "")).startswith(LOADER_PREFIX):
     failures.append("env-loader-oracle: the loader is not this image's own hermes_cli.env_loader: %r" % (orc.get("loader_file"),))
-for kind in ("missed", "missed_after", "unexplained", "wrong_labels", "chain_mismatch", "unsettled"):
+for kind in ("missed", "missed_after", "unexplained", "wrong_labels", "chain_mismatch", "unsettled", "line_reader_mismatch"):
     if orc.get(kind) != 0:
         failures.append("env-loader-oracle: %s = %r (examples %r)" % (kind, orc.get(kind), (orc.get("examples") or {}).get(kind)))
 # the loads after the first, the files read as they stand and the gate's model of the loader's files were really compared: this image's
@@ -391,7 +406,11 @@ if not isinstance(orc.get("loads"), dict) or max([int(count) for count in orc["l
     failures.append("env-loader-oracle: no input needed 8 loads (the loads were not followed far enough): %r" % (orc.get("loads"),))
 if (orc.get("env_parser") or {}).get("version") != expected_dotenv:
     failures.append("env-loader-oracle: not this image's python-dotenv %s: %r" % (expected_dotenv, orc.get("env_parser")))
-for key, floor in (("cases", 4500), ("violating", 2500), ("clean", 700), ("later_only", 150), ("as_stands_only", 15), ("states_compared", 4000)):
+# Hermes' second reader of the file: the image's own `agent.secret_scope.load_env_file`, run on every file of every chain, and the gate's copy of it held to it
+if orc.get("line_reader") is not True or not str(orc.get("line_reader_file", "")).startswith("/opt/hermes/agent/secret_scope"):
+    failures.append("env-loader-oracle: the line-by-line reader is not this image's own agent.secret_scope: %r" % (orc.get("line_reader_file"),))
+for key, floor in (("cases", 4500), ("violating", 2500), ("clean", 700), ("later_only", 150), ("as_stands_only", 15), ("states_compared", 4000),
+                   ("line_reader_only", 1000), ("line_states_compared", 5000)):
     if not isinstance(orc.get(key), int) or orc[key] < floor:
         failures.append("env-loader-oracle: only %r %s (at least %d wanted): the comparison was too thin" % (orc.get(key), key, floor))
 if orc.get("detected") != sorted(oracle.JUDGED_KEYS):
@@ -400,7 +419,9 @@ if (orc.get("needless") or {}).get("NUL in the statement", 0) < 20:
     failures.append("env-loader-oracle: the statements with a NUL (which the loader cannot export) were barely exercised: %r" % (orc.get("needless"),))
 if orc.get("loader_own_names") != 0:  # not a failure: the oracle sets such names aside (`ignore`) so they are never the file's doing; recorded for the reader
     print("INFO env-loader-oracle: this image's loader adds %r name(s) of its own to the environment for an empty .env (set aside)" % (orc.get("loader_own_names"),))
-if set(orc.get("needless") or {}) - {"NUL in the statement", "name the slot already has"}:
+if (orc.get("needless") or {}).get("line break in an allowed value", 0) < 40:
+    failures.append("env-loader-oracle: the rule about a line break in an allowed value was barely exercised: %r" % (orc.get("needless"),))
+if set(orc.get("needless") or {}) - {"NUL in the statement", "name the slot already has", "line break in an allowed value"}:
     failures.append("env-loader-oracle: refusals beyond the loader with no designed reason: %r" % (orc.get("needless"),))
 if not isinstance(orc.get("hermes_errors"), int) or orc["hermes_errors"] > 0.02 * (orc.get("cases") or 1):
     failures.append("env-loader-oracle: the loader raised on %r inputs: it was not run as Hermes runs it" % (orc.get("hermes_errors"),))
@@ -494,14 +515,20 @@ else:
 names_text = text("gateway-boot", "envnames").split()
 if "OP_ENV_PRESENT" in names_text:
     failures.append("gateway-boot: the boot left a .op.env in the volume")
-live_names = [n for n in names_text if n not in ("ENV_PRESENT", "ENV_ABSENT", "OP_ENV_PRESENT")]
+# the gate refuses any entry under profiles/: the image's own boot must leave it absent or empty, or every second start would be refused
+if "PROFILES_NOT_EMPTY" in names_text:
+    failures.append("gateway-boot: the boot left an entry under profiles/ in the volume (the gate refuses the next start)")
+if not {"PROFILES_EMPTY", "PROFILES_ABSENT", "PROFILES_NOT_EMPTY"} & set(names_text):
+    failures.append("gateway-boot: the profiles folder was not looked at: %r" % (names_text[:5],))
+live_names = [n for n in names_text if n not in ("ENV_PRESENT", "ENV_ABSENT", "OP_ENV_PRESENT", "PROFILES_EMPTY", "PROFILES_ABSENT", "PROFILES_NOT_EMPTY")]
 unlisted = sorted(set(live_names) - set(oracle.SECRETS) - set(oracle.SEEDED))
 if unlisted:
     failures.append("gateway-boot: the real boot left names in the volume's .env that the allow-list does not have: %r" % (unlisted,))
 if "ENV_PRESENT" not in names_text and "ENV_ABSENT" not in names_text:
     failures.append("gateway-boot: the .env names were not read: %r" % (names_text[:5],))
-print("INFO gateway-boot: the volume's .env after the real boot: %s, %d name(s), all on the allow-list: %s"
-      % ("present" if "ENV_PRESENT" in names_text else "absent", len(live_names), not unlisted))
+print("INFO gateway-boot: the volume's .env after the real boot: %s, %d name(s), all on the allow-list: %s; profiles/: %s"
+      % ("present" if "ENV_PRESENT" in names_text else "absent", len(live_names), not unlisted,
+         [n for n in names_text if n.startswith("PROFILES_")]))
 if failures:
     print("\n".join("FAIL " + f for f in failures))
     sys.exit(1)
@@ -509,7 +536,7 @@ print("OK: %d in-image scenarios (gate) + 10 start-command runs + the live gatew
     ["healthy", "no-plugin", "edited-plugin", "widened-plugin", "not-enabled", "extra-image-gen-key", "security-private-urls",
      "safe-mode", "proxy-env", "private-env", "bom-env-file", "bom-env-file-double", "bom-env-file-kept", "clean-env-file", "self-origin",
      "self-origin-bad", "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy",
-     "env-shapes", "env-inert-shapes", "env-reference-shapes", "env-seed-template", "connector-configs", "connector-config-edited",
+     "env-shapes", "env-inert-shapes", "env-line-reader-shapes", "profile-folder", "env-reference-shapes", "env-seed-template", "connector-configs", "connector-config-edited",
      "connector-config-nostrict", "connector-config-apps-missing", "hermes-home-other", "env-parser-parity", "env-loader-oracle"]))
 PY
 say "PASS (evidence in $OUT)"
