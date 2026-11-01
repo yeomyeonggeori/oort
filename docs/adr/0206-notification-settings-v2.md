@@ -833,11 +833,11 @@ D11·D15는 그대로이고, 구현이 격리 PG로 재현하며 정한 모양�
 - 폰 탭: 시험 알림은 열 대화가 없어서 앱만 열려요(채널이 목록에 없다는 「대화가 없어졌어요」를 내지 않아요). 알림 설정 화면으로 보내는 것은 상태·시험 화면(#4342)의 몫이에요.
 - `oort doctor`의 `push_system` 분류: relay 미구성이면 info, 구성이면 나이(기본 300초) 기준 FAIL이에요. `available_at`이 미래인 행의 처리는 N11 몫이에요.
 
-## 증보 3 (2026-11-02 기안, **Proposed** — #4494 N3 독립 보안 검수 1회차 Blocker 0·High 0·Medium 1·Low 3(모두 반영) · Accepted로 올리는 것은 planner, ADR-0100. #4494 구현에서 확정한 것 — D5·D13·D16의 「구현이 정해요」 항목과 이슈 본문·코멘트와의 차이)
+## 증보 3 (2026-11-02 기안, **Accepted** 2026-11-02 — planner 위임 결정, ADR-0100; #4494 N3 독립 보안 검수 1회차 Blocker 0·High 0·Medium 1·Low 3(모두 반영, `7b7c0fe48`). #4494 구현에서 확정한 것 — D5·D13·D16의 「구현이 정해요」 항목과 이슈 본문·코멘트와의 차이)
 
 D5·D13·D16은 그대로이고, 구현이 격리 PG로 재현하며 정한 모양만 적어요. 범위는 이 슬라이스가 낸 것(`notification_rule` 컬럼 6개와 시간대 함수(migration 172) · `GET/PATCH …/notification-prefs` · 판정의 종류 붙이기와 종류 스위치 · 진단 `kind_off`)뿐이에요.
 
-**planner 수용** (2026-11-02, #4494 독립 보안 검수 1회차 Blocker 0·High 0 뒤): 아래 편차 넷을 모두 받아요 — ① `threadReply`는 폰 칸만(1번) ② 승인 해소 알림은 `agentAnswer`(5번) ③ 켜진 일정의 요일 0개는 400(9번) ④ 시간대 함수 EXECUTE는 `momo_app`만(10번, DB 계약 표 행의 「`momo_app`·`momo_notifier`」는 N7이 notifier를 더할 때 맞춰요). 상태는 Proposed 그대로이고 planner가 Accepted로 올려요.
+**planner 수용** (2026-11-02, #4494 독립 보안 검수 1회차 Blocker 0·High 0 뒤): 아래 편차 넷을 모두 받아요 — ① `threadReply`는 폰 칸만(1번) ② 승인 해소 알림은 `agentAnswer`(5번) ③ 켜진 일정의 요일 0개는 400(9번) ④ 시간대 함수 EXECUTE는 `momo_app`만(10번, DB 계약 표 행의 「`momo_app`·`momo_notifier`」는 N7이 notifier를 더할 때 맞춰요). planner가 검수 반영 차이(`7b7c0fe48`)를 확인하고 Accepted로 올렸어요(2026-11-02).
 
 **이슈 코멘트와 달라진 곳** (ADR을 따랐어요)
 1. **`threadReply`는 폰 칸만** 있어요(증보 1 F5). 이슈 코멘트(11-01)는 「폰·데스크탑 따로」라고 했지만 증보 1 F5가 데스크탑 칸을 「따라가는 스레드 목록 API가 먼저인 별도 증보」로 미뤘고, F11이 낸 데스크탑 배너 스위치는 이 기기 localStorage(`thread-reply`)예요. `threadReply.desktop`을 쓰면 400 `surface_not_applicable`이고 읽기 응답에는 그 칸이 없어요. 칸을 여는 것은 `NotificationKind::has_desktop` 한 줄이에요(행 부재 = 켬이라 migration이 없어요).
