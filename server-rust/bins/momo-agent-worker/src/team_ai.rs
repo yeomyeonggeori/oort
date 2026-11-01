@@ -76,11 +76,14 @@ struct TurnTrace {
     model_calls: i32,
     web_searches: i32,
     latency_ms: i64,
+    /// The registry id of a card the helper refused to raise (a bundle that is off, a card after
+    /// a read). It comes from the registry's own `&'static str`, never from the model's text.
+    refused_action: Option<&'static str>,
 }
 
 impl TurnTrace {
     fn audit_detail(&self, spend: Option<Spend>, outcome: &str) -> Value {
-        json!({
+        let mut detail = json!({
             "schema": "momo.team_ai_turn.v1",
             "outcome": outcome,
             "model": self.model,
@@ -92,7 +95,11 @@ impl TurnTrace {
             "latency_ms": self.latency_ms,
             "prompt_tokens": spend.map(|s| s.usage.prompt_tokens),
             "completion_tokens": spend.map(|s| s.usage.completion_tokens),
-        })
+        });
+        if let Some(action) = self.refused_action {
+            detail["refused_action"] = json!(action);
+        }
+        detail
     }
 }
 
@@ -103,10 +110,18 @@ fn wire_searches(wire: ProviderWire) -> bool {
     matches!(wire, ProviderWire::AnthropicMessages)
 }
 
+/// `team_ai.turn`'s `outcome` for a card the helper refused to raise (B13-I5, B4-3): a reason
+/// code and nothing else, so refusals can be counted.
+const OUTCOME_REFUSED_ROLE_OFF: &str = "refused_role_off";
+const OUTCOME_REFUSED_AFTER_READ: &str = "refused_after_read";
+
 /// How a settled team-AI turn ends the run.
 enum Ending {
     /// A reply was posted and the run succeeded.
     Answered,
+    /// A reply was posted and the run succeeded, and the reply is a refusal of the card the model
+    /// proposed: the audit row's `outcome` is this reason code.
+    Refused(&'static str),
     /// The run ends as a hand-off / refusal (`failed` with a code), nothing else to do.
     Closed(&'static str),
 }
@@ -287,8 +302,21 @@ impl AgentWorker {
             wire: wire.as_str(),
             ..TurnTrace::default()
         };
+        // ADR-0201 증보 v3 B3: the workspace's role bundles, as this request read them. What the
+        // model is offered (the tool's `actionId` enum, the tool list, the prompt) is built from
+        // them; the proposal transaction and the decision read them again.
+        //
+        // The system prompt is built ONCE, before anything is read, and is the same on every call
+        // of the request (`a10_text_inside_a_read_is_never_an_instruction` pins that: what was read
+        // never touches it). What changes after a read is the tool's enum, below — and the prompt
+        // already says the sensitive card leaves it.
+        let roles = gathered.state.roles;
         let mut messages = vec![
-            ChatMessage::system(team_ai::system_prompt(&gathered.roster, web)),
+            ChatMessage::system(team_ai::system_prompt(
+                &gathered.roster,
+                web,
+                &roles.advertised_action_ids(false),
+            )),
             ChatMessage::user(team_ai::user_turn(&gathered.trigger_text)),
         ];
         let mut spend: Option<Spend> = None;
@@ -316,12 +344,22 @@ impl AgentWorker {
             }
             // The tools this call may use. Reads stop being offered once the read
             // budget is spent; web search is never offered after a read (H5).
-            let mut momo_tools = momo_agent::tools::enabled_tool_definitions(&[
-                momo_agent::tools::WORKSPACE_ACTION_PROPOSE.to_string(),
-            ]);
+            //
+            // B3 / B4-3: the proposal tool's `actionId` enum is the allow-list minus every
+            // bundle that is off, and — once this request has read anything (a workspace read, or
+            // a search the provider ran) — minus the sensitive ids too. A tool with nothing left
+            // to offer is not offered at all.
+            let tainted = read_used || trace.web_searches > 0;
+            let offered = roles.advertised_action_ids(tainted);
+            let mut momo_tools: Vec<momo_agent::tools::ToolDefinition> =
+                momo_agent::tools::workspace_action_propose_definition(&offered)
+                    .into_iter()
+                    .collect();
             if trace.tools.len() < team_ai::MAX_TOOL_CALLS {
                 momo_tools.extend(team_ai_tools::read_tool_definitions());
             }
+            // The seam later slices fill: a tool a bundle owns leaves with it.
+            momo_tools.retain(|tool| roles.tool_allowed(tool.name));
             let mut tools: Vec<Value> = Vec::new();
             if web == WebSearch::Available && !read_used {
                 tools.push(crate::anthropic::web_search_tool(
@@ -542,6 +580,31 @@ impl AgentWorker {
             );
         }
 
+        // ADR-0201 증보 v3 B13-I5: a card of a bundle that was off when this request began was not
+        // offered, so the model named an id it was not shown. Say no here, before any picture work
+        // (the lookup, the Drive read, the decode, the refusal row `prepare` writes); the proposal
+        // transaction below judges again with the switches as they are by then. The tokens this
+        // request spent are charged by this hand-off, like every refusal that comes before the
+        // transaction.
+        let proposed_action: Option<&'static str> =
+            momo_agent::actions::action_by_id(&action_id).map(|action| action.id);
+        if !roles.action_allowed(&action_id) {
+            return Some(
+                self.team_ai_refused(
+                    job,
+                    payload,
+                    run_id,
+                    team_ai::ROLE_OFF_SENTENCE,
+                    usage,
+                    &model,
+                    OUTCOME_REFUSED_ROLE_OFF,
+                    &trace,
+                    proposed_action,
+                )
+                .await,
+            );
+        }
+
         let prepared_avatar = if let Some(action) = momo_agent::actions::action_by_id(&action_id) {
             match momo_workspace_actions::action_resolve::validated_action_args(
                 action,
@@ -675,6 +738,17 @@ impl AgentWorker {
                         Some("같은 대상에 승인을 기다리는 카드가 있어요. 그 카드를 먼저 처리해 주세요.".to_string()),
                         json!({}), None, &model, Ending::Answered, Some(trace.clone())).await
                 }
+                // B13-I5: the bundle that owns this card was switched off while the model was
+                // thinking (or the model named an id it was not offered). Say so, once.
+                ProposalRefusal::RoleOff => {
+                    self.team_ai_refused(job, payload, run_id, team_ai::ROLE_OFF_SENTENCE, None,
+                        &model, OUTCOME_REFUSED_ROLE_OFF, &trace, proposed_action).await
+                }
+                // B4-3: this request read something, so this card is not one it may raise.
+                ProposalRefusal::AfterRead => {
+                    self.team_ai_refused(job, payload, run_id, team_ai::AFTER_READ_ROLES_SENTENCE,
+                        None, &model, OUTCOME_REFUSED_AFTER_READ, &trace, proposed_action).await
+                }
                 ProposalRefusal::NoHumanRequester | ProposalRefusal::RunNotParkable => {
                     self.team_ai_close(job, payload, run_id, "team_ai_not_proposable").await
                 }
@@ -720,6 +794,39 @@ impl AgentWorker {
                 }),
             )
             .await
+    }
+
+    /// A reply that says no to the card the model proposed: the run succeeds with the sentence
+    /// posted, and the audit row's `outcome` is `outcome` (a reason code) with the registry id of
+    /// the refused card — never the text. `usage` is what is still to be charged: `None` when the
+    /// proposal transaction already wrote the ledger row.
+    #[allow(clippy::too_many_arguments)]
+    async fn team_ai_refused(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        sentence: &str,
+        usage: Option<Spend>,
+        model: &str,
+        outcome: &'static str,
+        trace: &TurnTrace,
+        refused_action: Option<&'static str>,
+    ) -> Settlement {
+        let mut trace = trace.clone();
+        trace.refused_action = refused_action;
+        self.team_ai_finish(
+            job,
+            payload,
+            run_id,
+            Some(sentence.to_string()),
+            json!({}),
+            usage,
+            model,
+            Ending::Refused(outcome),
+            Some(trace),
+        )
+        .await
     }
 
     /// End the run without posting anything (switch off, no human asked).
@@ -834,9 +941,10 @@ impl AgentWorker {
         let channel_id = payload.channel_id;
         let model = model.to_string();
         let ledger = usage.map(|usage| ledger_report(Some(usage), &model, payload));
-        let (succeeded, error_code) = match ending {
-            Ending::Answered => (true, None),
-            Ending::Closed(code) => (false, Some(code)),
+        let (succeeded, error_code, outcome) = match ending {
+            Ending::Answered => (true, None, "answered"),
+            Ending::Refused(reason) => (true, None, reason),
+            Ending::Closed(code) => (false, Some(code), code),
         };
         // H2-8 / H9-I9: whoever answers to `@claude`, the line says which model on
         // which wire actually spoke (a plain id — no key, no URL).
@@ -846,7 +954,7 @@ impl AgentWorker {
             .map(|trace| json!({"model": trace.model, "wire": trace.wire}));
         let audit_detail = trace
             .as_ref()
-            .map(|trace| trace.audit_detail(usage, error_code.unwrap_or("answered")));
+            .map(|trace| trace.audit_detail(usage, outcome));
         let searches = trace.as_ref().map(|trace| trace.web_searches).unwrap_or(0);
         // Workspace data or web text reached the model in this request: the answer
         // must not make the server fetch a URL the model was steered into writing.

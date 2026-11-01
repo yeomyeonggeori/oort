@@ -378,32 +378,24 @@ pub fn catalog_definitions() -> Vec<ToolDefinition> {
              connected tool (PRs, deploys, metrics).",
             parameters: crate::memory_suggest::parameters(),
         },
-        ToolDefinition {
-            name: WORKSPACE_ACTION_PROPOSE,
-            description: "Propose ONE simple workspace change that the person who asked wants \
-             (change the requesting person's own name with member.display_name.set, their photo \
-             with member.avatar.set, your agent name with agent.rename or photo with \
-             agent.profile.update avatar; create a channel, add people to a channel, \
-             change the workspace welcome text or role labels, turn link previews on or off, \
-             turn team memory off or pause it, change how work resumes when a host is lost, \
-             install one of the official apps GitHub, Notion, Linear or Google Drive). \
-             This only makes an approval card: nothing changes until a person approves it, so \
-             say you proposed it, never that it is done. Use only the listed actionIds. Do not \
-             use it for anything else, and never put a key, token or password in `args`.",
-            parameters: workspace_action_propose_parameters(),
-        },
+        // The catalog is the whole allow-list; a request is offered the part its workspace's role
+        // bundles leave on (`workspace_action_propose_definition`, ADR-0201 증보 v3 B3).
+        workspace_action_propose_definition(&crate::actions::TEAM_AI_ACTION_IDS)
+            .expect("the allow-list is not empty"),
     ]
 }
 
-/// The `args` description: each allowed action's keys, read from the registry's
+/// The `args` description: each offered action's keys, read from the registry's
 /// own schemas (`?` = optional), so the model is told the shape the server checks
-/// and a key added to a schema reaches the model without a second edit.
-fn workspace_action_args_description() -> String {
+/// and a key added to a schema reaches the model without a second edit. Only the ids
+/// this request is offered are described — a hint for an action the workspace's role
+/// bundles turned off would be guidance for a switch that is off.
+fn workspace_action_args_description(action_ids: &[&str]) -> String {
     let mut lines = vec![
         "The change's arguments (the action's own schema). Handles without @. Keys by actionId:"
             .to_string(),
     ];
-    for id in crate::actions::TEAM_AI_ACTION_IDS {
+    for id in action_ids {
         let Some(action) = crate::actions::action_by_id(id) else {
             continue;
         };
@@ -429,31 +421,45 @@ fn workspace_action_args_description() -> String {
             .unwrap_or_default();
         lines.push(format!("{id} {{{}}}", keys.join(", ")));
     }
-    lines.push(
-        "member.display_name.set {displayName} changes only the requesting human, with their approval. member.avatar.set accepts exactly one of {attachmentId} (their image in this conversation) or {avatar:{source:'generated',dataBase64}} (retrieved/generated PNG/JPEG/WebP, strict base64, <=44000 decoded bytes). agent.profile.update accepts avatar:{source:'attachment',attachmentId} or {source:'generated',dataBase64}, or a preset. No member target argument, no URL."
-            .to_string(),
-    );
-    lines.push(
-        "workspace.memory.update can only turn memory off (enabled:false) or pause/resume it."
-            .to_string(),
-    );
+    let offers = |id: &str| action_ids.contains(&id);
+    if offers(crate::actions::ACTION_MEMBER_DISPLAY_NAME_SET)
+        || offers(crate::actions::ACTION_MEMBER_AVATAR_SET)
+        || offers(crate::actions::ACTION_AGENT_PROFILE_UPDATE)
+    {
+        lines.push(
+            "member.display_name.set {displayName} changes only the requesting human, with their approval. member.avatar.set accepts exactly one of {attachmentId} (their image in this conversation) or {avatar:{source:'generated',dataBase64}} (retrieved/generated PNG/JPEG/WebP, strict base64, <=44000 decoded bytes). agent.profile.update accepts avatar:{source:'attachment',attachmentId} or {source:'generated',dataBase64}, or a preset. No member target argument, no URL."
+                .to_string(),
+        );
+    }
+    if offers(crate::actions::ACTION_WORKSPACE_MEMORY_UPDATE) {
+        lines.push(
+            "workspace.memory.update can only turn memory off (enabled:false) or pause/resume it."
+                .to_string(),
+        );
+    }
+    if offers(crate::actions::ACTION_TEAM_AI_ROLES_SET) {
+        lines.push(format!(
+            "team_ai.roles.set changes ONE bundle per card; bundle is one of {} (the chat and read role cannot be switched).",
+            crate::team_ai_roles::SWITCHABLE_BUNDLES.join(", ")
+        ));
+    }
     lines.join(" ")
 }
 
-/// `workspace_action_propose`'s published schema — the enum is the team AI's
-/// allow-list itself, so the model is never told an id the server refuses.
-fn workspace_action_propose_parameters() -> Value {
+/// `workspace_action_propose`'s published schema — the enum is the ids this request is
+/// offered, so the model is never told an id the server refuses.
+fn workspace_action_propose_parameters(action_ids: &[&str]) -> Value {
     json!({
         "type": "object",
         "properties": {
             "actionId": {
                 "type": "string",
-                "enum": crate::actions::TEAM_AI_ACTION_IDS,
+                "enum": action_ids,
                 "description": "Which change."
             },
             "args": {
                 "type": "object",
-                "description": workspace_action_args_description()
+                "description": workspace_action_args_description(action_ids)
             },
             "rationale": {
                 "type": "string",
@@ -462,6 +468,65 @@ fn workspace_action_propose_parameters() -> Value {
         },
         "required": ["actionId", "args"],
         "additionalProperties": false
+    })
+}
+
+// The tool's description is a `&'static str` (every `ToolDefinition` carries one), so the
+// variants a role bundle can leave behind are built at compile time, from the same pieces:
+// the head and tail are shared, only the list of things it may propose differs.
+macro_rules! propose_description {
+    ($($items:tt)*) => {
+        concat!(
+            "Propose ONE simple workspace change that the person who asked wants (",
+            $($items)*,
+            "). This only makes an approval card: nothing changes until a person approves it, so \
+             say you proposed it, never that it is done. Use only the listed actionIds. Do not \
+             use it for anything else, and never put a key, token or password in `args`."
+        )
+    };
+}
+macro_rules! propose_admin_items {
+    () => {
+        "change the requesting person's own name with member.display_name.set, their photo \
+         with member.avatar.set, your agent name with agent.rename or photo with \
+         agent.profile.update avatar; create a channel, add people to a channel, \
+         change the workspace welcome text or role labels, turn link previews on or off, \
+         turn team memory off or pause it, change how work resumes when a host is lost, \
+         install one of the official apps GitHub, Notion, Linear or Google Drive"
+    };
+}
+macro_rules! propose_roles_item {
+    () => {
+        "switch ONE of your own role bundles on or off with team_ai.roles.set"
+    };
+}
+const PROPOSE_DESCRIPTION_ADMIN_AND_ROLES: &str =
+    propose_description!(propose_admin_items!(), "; ", propose_roles_item!());
+const PROPOSE_DESCRIPTION_ADMIN: &str = propose_description!(propose_admin_items!());
+const PROPOSE_DESCRIPTION_ROLES: &str = propose_description!(propose_roles_item!());
+
+/// The `workspace_action_propose` tool as one request is offered it: `action_ids` is the
+/// `actionId` enum, and the description and the `args` hint speak only about those ids.
+///
+/// `None` when there is nothing to offer (every bundle that owns an id is off, and the request
+/// has already read something) — a tool whose enum is empty is not a tool. The caller passes
+/// [`crate::team_ai_roles::TeamAiRoles::advertised_action_ids`].
+pub fn workspace_action_propose_definition(action_ids: &[&str]) -> Option<ToolDefinition> {
+    if action_ids.is_empty() {
+        return None;
+    }
+    let roles = action_ids.contains(&crate::actions::ACTION_TEAM_AI_ROLES_SET);
+    let admin = action_ids
+        .iter()
+        .any(|id| *id != crate::actions::ACTION_TEAM_AI_ROLES_SET);
+    Some(ToolDefinition {
+        name: WORKSPACE_ACTION_PROPOSE,
+        description: match (admin, roles) {
+            (true, true) => PROPOSE_DESCRIPTION_ADMIN_AND_ROLES,
+            (true, false) => PROPOSE_DESCRIPTION_ADMIN,
+            (false, _) => PROPOSE_DESCRIPTION_ROLES,
+        },
+        parameters: workspace_action_propose_parameters(action_ids),
     })
 }
 

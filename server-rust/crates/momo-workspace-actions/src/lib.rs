@@ -5,4 +5,5 @@ pub mod action_resolve;
 pub mod hosted_expression;
 pub mod profile_avatar;
 pub mod team_ai;
+pub mod team_ai_roles;
 pub mod team_ai_tools;

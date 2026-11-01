@@ -1658,7 +1658,23 @@ mod tests {
             assert_eq!(row["agentDelivery"], json!(expected), "{row}");
         }
         // No executor, no secret, no credential ever rides in the catalog.
-        let text = rendered.to_string();
+        //
+        // One word is the exception: `code` is the NAME of a role bundle (the helper's 코드
+        // 역할, ADR-0201 증보 v3 B3), and the `team_ai.roles.set` row lists the six bundle ids as
+        // the enum of its `bundle` argument. That enum — and only that, which is asserted to be
+        // exactly the bundle table — is taken out of the scan; everything else is still read.
+        let mut scanned = rendered.clone();
+        for row in scanned["actions"].as_array_mut().expect("rows") {
+            if row["id"] == json!(actions::ACTION_TEAM_AI_ROLES_SET) {
+                let listed = row["argsSchema"]["properties"]["bundle"]["enum"].take();
+                assert_eq!(
+                    listed,
+                    json!(momo_agent::team_ai_roles::SWITCHABLE_BUNDLES),
+                    "the one enum excused from the secret scan is the bundle table"
+                );
+            }
+        }
+        let text = scanned.to_string();
         for absent in ["code", "secret", "token", "credential"] {
             assert!(
                 !text.contains(absent),
