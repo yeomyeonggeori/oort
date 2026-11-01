@@ -1261,7 +1261,7 @@ function Row({
         if (key !== null && actionTarget !== null) onRunAction(actionTarget, key);
       }}
       onPress={onPress}
-      delayLongPress={longPress.delayLongPress}
+      {...longPress.pressTiming}
       onLongPress={longPress.onLongPress}
       {...longPress.handlers}
       style={({pressed}) => [
