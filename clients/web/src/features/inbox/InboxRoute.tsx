@@ -502,11 +502,14 @@ export function InboxRoute() {
         </div>
       )}
 
-      {/* 에이전트가 한 일 전체는 활동에서 본다(#3337). 인박스는 나에게 필요한 것만 담는다. */}
+      {/* 에이전트가 한 일 전체는 활동에서 본다(#3337). 인박스는 나에게 필요한 것만 담는다.
+          이 줄은 칼럼 전체 폭이라 눌림은 채움만 한다: `press`(0.98배)는 넓은 면을 줄여 가장자리가 흔들린다. `press-instant-fill`이
+          `:active`에 크기 없이 `--surface-pressed`를 칠한다(#5094, #5048 D7, 넓은 줄 규칙). 쉬는 면이 이미 `--surface-hover`라
+          호버(`--surface-pressed`)와 눌림이 같은 채움을 쓴다 — 손가락(호버 없음)에서는 쉼 → 눌림이 눈에 보인다. */}
       <Link
         to="/activity"
         data-testid="inbox-activity-link"
-        className="press mx-4 mb-2 mt-2 flex h-control items-center justify-between rounded-lg bg-surface-hover px-3 text-body text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
+        className="press-instant-fill mx-4 mb-2 mt-2 flex h-control items-center justify-between rounded-lg bg-surface-hover px-3 text-body text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
       >
         <span>에이전트가 한 일 전체는 활동에서 봐요</span>
         <span className="flex items-center gap-1 text-ink">
