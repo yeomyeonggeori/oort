@@ -20,6 +20,7 @@ import {
   agentTurnsInChannel,
   applyApprovalWaits,
   useAgentWorkingSignals,
+  withApprovalWaits,
   type AgentWorkingSignal,
 } from "@/features/agents/agentWorkingSignal";
 import { AgentTurnBadge as AgentTurnStatusBadge } from "@/features/agents/AgentTurnBadge";
@@ -304,9 +305,13 @@ export function Sidebar({
   const approvalWaits = useApprovalWaits();
   const railLive = connStatus === "connected";
   const nowMs = Date.now();
+  // 작업 중 카드(채널 너머를 읽는다)도 채널 행 알약과 **같은** 승인 원장 덮어쓰기를 지난다(#5125): 서버는 승인에 걸린
+  // run 을 레일 프레임으로 알리지 않아서(중간 프레임은 늘 `running`) 원본 신호만 읽으면 사람을 기다리는 에이전트도
+  // 「작업 중」이다. 아래 두 곳이 **같은** 덮은 목록을 읽어야 한다 — 서버 생존 판정을 카드와 다른 에이전트에게서 읽지 않게.
+  const nowCardSignals = withApprovalWaits(turnSignals, approvalWaits, nowMs);
   // 작업 중 카드가 아무도 가져가지 않은 사람 요청을 말하면 그 에이전트의 서버 생존 판정(D4)을 읽어
   // 카드에 싣는다(#4285). 다른 상태의 카드는 쿼리를 세우지 않는다.
-  const nowCardAgentId = nowCardWaitingAgentId(turnSignals, nowMs);
+  const nowCardAgentId = nowCardWaitingAgentId(nowCardSignals, nowMs);
   const nowCardLiveness = useAgentLiveness(nowCardAgentId);
 
   // What the subscription cap left out (agentRail MAX_AGENT_SUBSCRIPTIONS).
@@ -984,9 +989,10 @@ export function Sidebar({
                 nowCard={
                   /* 작업 중 카드 (DS2-6, 시안 A `.a-side .a-now`). 열린 턴이 없으면 아무것도
                      그리지 않는다 — 빈 카드는 「조용하다」를 말하는 대신 자리만 차지한다. 채널
-                     행의 알약과 같은 가게(`turnSignals`)를 읽으므로 둘이 다르게 말할 수 없다. */
+                     행의 알약과 같은 가게(`turnSignals`)에 같은 승인 원장 덮어쓰기(#5125)를 얹어
+                     읽으므로 둘이 다르게 말할 수 없다. */
                   <SidebarNowCard
-                    signals={turnSignals}
+                    signals={nowCardSignals}
                     nowMs={nowMs}
                     live={railLive}
                     directory={directoryQuery.directory}
