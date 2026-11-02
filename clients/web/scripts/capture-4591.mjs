@@ -377,8 +377,8 @@ async function scene(browser, origin, scheme) {
     await settle(page);
     for (const [id, name] of [["open-terminal-dock", "5-tooltip-terminal"], ["channel-title-menu", "5-tooltip-menu"]]) {
       await page.getByTestId(id).hover();
-      await page.waitForTimeout(150);
-      const early = await page.getByTestId("tooltip").count();
+      // 지연 값(`TOOLTIP_DELAY_MS`)과 옮겨 다닐 때의 0은 `tooltipDelay.test.ts`와 `capture-5192.mjs`가 잰다(#5192). 여기서는 선다는 것만 본다:
+      // 두 번째 단추는 첫째의 알약이 방금 닫힌 직후라 지연 없이 바로 뜨는 것이 맞다.
       await page.waitForTimeout(700);
       const tip = await page.evaluate(() => {
         const el = document.querySelector('[data-testid="tooltip"]');
@@ -393,7 +393,7 @@ async function scene(browser, origin, scheme) {
         const pane = document.querySelector("main").getBoundingClientRect();
         return { bg: cs.backgroundColor, mutedSoft, shadow: cs.boxShadow, border: cs.borderTopWidth, inside: r.left >= pane.left && r.right <= pane.right && r.bottom <= pane.bottom };
       });
-      check(`${scheme} 툴팁(${id}): 마우스는 500ms 전엔 없고 뒤엔 선다`, early === 0 && tip !== null, `early=${early} tip=${JSON.stringify(tip)}`);
+      check(`${scheme} 툴팁(${id}): 마우스로 가리키면 선다`, tip !== null, `tip=${JSON.stringify(tip)}`);
       if (tip) {
         check(`${scheme} 툴팁(${id}): 연회색 알약(--muted-soft), 선·그림자 없음, 판 안에 든다`, tip.bg === tip.mutedSoft && tip.shadow === "none" && tip.border === "0px" && tip.inside, JSON.stringify(tip));
       }

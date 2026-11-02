@@ -1686,13 +1686,12 @@ async function captureShots(browser) {
         scheme,
         completeStatus: 409,
       });
-      // 행 액션 → 「답글 달기」. 이 표면으로 가는 길은 그것 하나다.
+      // 행 도구 막대 → 「답글 달기」. 이 표면으로 가는 길은 그것 하나다(#5192: 답글은 도구 막대의 몫이라 ⋮ 메뉴에는 없다).
       const row = page_.locator(
         `[data-testid="timeline-message"][data-message-id="${FILE_MSG.toLowerCase()}"]`
       );
       await row.hover();
-      await row.getByTestId("message-actions-trigger").click();
-      await page_.getByTestId("menu-reply").click();
+      await row.getByTestId("toolbar-reply").click();
       await page_.getByTestId("thread-composer-input").waitFor({ timeout: 15_000 });
       await page_
         .locator('[data-testid="thread-composer"] input[type="file"]')

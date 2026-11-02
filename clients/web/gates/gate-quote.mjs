@@ -853,17 +853,23 @@ async function exercise(browser) {
     );
   }
 
-  // ---- 8. 두 장치는 메뉴에서도 다른 말이다 -----------------------------------
+  // ---- 8. 두 장치는 다른 말이다: 답글은 도구 막대, 인용은 ⋯ 메뉴 (#5192) --------
+  // 이전에는 두 항목이 모두 메뉴에 있었다. 지금 답글은 도구 막대의 단추이고(반응·답글은 Buzz처럼 메뉴가 되풀이하지 않는다),
+  // 메뉴에는 인용만 있다. 「다른 낱말로 갈라 놓는다」는 ADR-0148의 약속은 두 자리를 합쳐서 지킨다.
   await openRowMenu(page, ORIGIN_MSG);
   const menu = page.getByTestId("message-action-menu");
   const menuText = (await menu.textContent()) ?? "";
-  if (
-    !menuText.includes("답글 달기") ||
-    !menuText.includes(QUOTE_ACTION_LABEL)
-  ) {
+  const replyName =
+    (await rowLocator(page, ORIGIN_MSG)
+      .getByTestId("toolbar-reply")
+      .getAttribute("aria-label")) ?? "";
+  if (replyName !== "답글 달기" || !menuText.includes(QUOTE_ACTION_LABEL)) {
     throw new Error(
-      `the menu must offer both devices with different words, read "${menuText}"`
+      `the two devices must be offered with different words (toolbar reply "${replyName}", menu "${menuText}")`
     );
+  }
+  if (menuText.includes("답글 달기") || (await menu.getByTestId("menu-reply").count()) !== 0) {
+    throw new Error(`the menu must not repeat the toolbar's reply, read "${menuText}"`);
   }
   // 두 항목은 서로 다른 낱말이어야 하고, 그 다름이 *어디로 가는지*를 말해야 한다.
   // 「인용하기」였을 때는 둘 다 「~하기/달기」로 끝나 메뉴에서 「답을 단다」로 똑같이

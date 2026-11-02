@@ -1001,8 +1001,8 @@ async function exerciseTimeline(browser) {
   const threadSource = rowLocator(page, LONG_MSG);
   await threadSource.scrollIntoViewIfNeeded();
   await threadSource.hover();
-  await threadSource.getByTestId("message-actions-trigger").click();
-  await page.getByTestId("menu-reply").click();
+  // 답글은 도구 막대의 몫이다(#5192): ⋮ 메뉴에는 없다.
+  await threadSource.getByTestId("toolbar-reply").click();
   const threadInput = page.getByTestId("thread-composer-input");
   await threadInput.waitFor({ state: "visible" });
   if (

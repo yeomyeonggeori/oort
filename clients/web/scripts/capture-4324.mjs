@@ -209,13 +209,11 @@ async function scene(browser, origin, scheme, width) {
     check(`${tag} 문서 가로 넘침 0`, (await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) <= 0);
     await page.screenshot({ path: shot("1-hover") });
 
-    // 2) 툴팁: 마우스는 500ms 뒤
+    // 2) 툴팁: 마우스로 가리키면 선다. 지연 값(`TOOLTIP_DELAY_MS`)·옮겨 다닐 때의 0은 `tooltipDelay.test.ts`와 `capture-5192.mjs`가 잰다(#5192).
     await row.getByTestId("toolbar-reply").hover();
-    await page.waitForTimeout(150);
-    const early = await page.getByTestId("tooltip").count();
     await page.waitForTimeout(700);
     const late = await page.getByTestId("tooltip").count();
-    check(`${tag} 툴팁: 마우스는 500ms 전엔 없고 뒤엔 선다`, early === 0 && late >= 1, `early=${early} late=${late}`);
+    check(`${tag} 툴팁: 마우스로 가리키면 선다`, late >= 1, `late=${late}`);
     await page.screenshot({ path: shot("2-tooltip") });
     await context.close();
   }
