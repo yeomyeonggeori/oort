@@ -21767,9 +21767,10 @@ components:
           description: >
             Active tokens the test goes to: the caller's live tokens capped at 5 (the most
             recently registered or refreshed). Not the caller's real device count — that is
-            `devices.active` of `getNotificationDiagnostics`, which is capped at 10. It says how
-            many the test is addressed to, not how many it reaches: a device the notifier's
-            server-wide budget has no room for is settled `failed` (429).
+            `devices.active` of `getNotificationDiagnostics`, which a member's registrations keep
+            at 10 or fewer (a member who was above 10 before that rule converges at their next
+            registration). It says how many the test is addressed to, not how many it reaches: a
+            device the notifier's server-wide budget has no room for is settled `failed` (429).
 
     NotificationKeywordsResponse:
       type: object

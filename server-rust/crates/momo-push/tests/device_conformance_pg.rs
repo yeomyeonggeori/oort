@@ -46,6 +46,8 @@
 //! | `the_cap_never_touches_another_members_tokens` | (#5091) drop `member_id = $2` from the cap statement |
 //! | `the_token_being_registered_is_never_the_one_dropped` | (#5091) drop the `(id = $3) DESC` ranking term |
 //! | `one_members_registrations_take_turns_so_a_burst_cannot_pass_the_cap` | (#5091) drop the member lock statement (nothing queues, thirteen tokens stay live) |
+//! | `a_registration_waiting_on_the_member_lock_ends_as_a_retryable_409_after_three_seconds` | (#5091 review M-1) drop the `lock_timeout` statement (the queued registration never gives up) / drop the 55P03·40P01 → 409 mapping (a 500) / make the bound 1 s or 30 s |
+//! | `a_burst_of_one_members_registrations_loses_no_lock_race_and_ends_at_exactly_the_cap` | (#5091 review M-2) move the member lock to after the token write, before the cap statement (registrations deadlock; the mapping turns them into 409s the test counts) / drop the lock statement |
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -777,8 +779,10 @@ async fn token_rows(su: &PgPool, device_id: Uuid) -> i64 {
         .expect("count token rows")
 }
 
-/// The `device.registered` audit detail written by `actor`'s registration of
-/// the device.
+/// The `device.registered` audit detail of `actor`'s **latest** registration of the device. A
+/// device registered twice by one actor has two rows, and a read with no order returns whichever
+/// the plan reaches first (a sequential scan and an index scan disagree) — so the order is part of
+/// the question (#5091 review L-1).
 async fn registration_audit(
     su: &PgPool,
     workspace_id: Uuid,
@@ -788,7 +792,8 @@ async fn registration_audit(
     sqlx::query_scalar(
         "SELECT detail FROM audit_log \
           WHERE workspace_id = $1 AND action = 'device.registered' \
-            AND target_id = $2 AND actor_member_id = $3",
+            AND target_id = $2 AND actor_member_id = $3 \
+          ORDER BY created_at DESC, id DESC LIMIT 1",
     )
     .bind(workspace_id)
     .bind(device_id)
@@ -2208,4 +2213,205 @@ async fn one_members_registrations_take_turns_so_a_burst_cannot_pass_the_cap() {
         // Nine old + four new = thirteen; the three stalest old ones (6, 7, 8) are the ones over.
         assert_eq!(is_live(&su, *token).await, k < 6, "old token index {k}");
     }
+}
+
+/// #5091 review M-1: a queued registration holds its pool connection while it waits for the
+/// member's lock, and how many queue is the requester's to choose — so the wait is **bounded**
+/// (`lock_timeout`, 3 s) and a registration that runs out of it
+/// answers the 409 the phone already retries, having written nothing.
+///
+/// Made deterministic: a transaction holds the member's lock and never lets go on its own. The
+/// registration that arrives must end **while the holder still holds it** (a hang is the failure,
+/// caught by a 30 s guard), after about the bound (not at once: 1 s of slack under it, ten over),
+/// as `RegistrationConflict`, with no device, token or audit row. Once the holder lets go the very
+/// same request is accepted.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn a_registration_waiting_on_the_member_lock_ends_as_a_retryable_409_after_three_seconds() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let (workspace, member) = (tenant.workspace_id, tenant.member_a);
+
+    // A registration "in flight": the member's lock is held, and stays held.
+    let mut holder = su.begin().await.expect("open the holding transaction");
+    sqlx::query(MEMBER_REGISTRATION_LOCK_SQL)
+        .bind(member_registration_lock_key(workspace, member))
+        .execute(&mut *holder)
+        .await
+        .expect("take the member's registration lock");
+
+    let (device_id, token) = (Uuid::new_v4(), fresh_apns_token());
+    let started = std::time::Instant::now();
+    let queued = tokio::spawn({
+        let (app, token) = (app.clone(), token.clone());
+        async move {
+            register_device(
+                &app,
+                workspace,
+                member,
+                None,
+                &registration(device_id, &token),
+            )
+            .await
+        }
+    });
+    let outcome = tokio::time::timeout(Duration::from_secs(30), queued)
+        .await
+        .expect(
+            "the queued registration never gave up: it waits on the member's lock without a bound",
+        )
+        .expect("the registration task finishes");
+    let waited = started.elapsed();
+
+    assert!(
+        matches!(outcome, Err(PushError::RegistrationConflict)),
+        "a registration that ran out of its lock budget must be the retryable 409: {outcome:?}"
+    );
+    // The ADR's three seconds, spelled out: reading the constant would let a changed bound pass.
+    let bound = Duration::from_secs(3);
+    assert!(
+        waited + Duration::from_secs(1) >= bound && waited < bound + Duration::from_secs(10),
+        "it must wait about the bound ({bound:?}), not give up at once or hang: waited {waited:?}"
+    );
+
+    // Nothing was written: the whole transaction rolled back.
+    let device_rows: i64 = sqlx::query_scalar("SELECT count(*) FROM device WHERE id = $1")
+        .bind(device_id)
+        .fetch_one(&su)
+        .await
+        .expect("count device rows");
+    let token_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM push_token WHERE apns_token = $1")
+            .bind(&token)
+            .fetch_one(&su)
+            .await
+            .expect("count token rows");
+    let audit_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'device.registered' AND target_id = $1",
+    )
+    .bind(device_id)
+    .fetch_one(&su)
+    .await
+    .expect("count audit rows");
+    assert_eq!(
+        (device_rows, token_rows, audit_rows),
+        (0, 0, 0),
+        "a registration that lost the lock race left something behind"
+    );
+
+    // The holder lets go: the phone's retry — the same request — goes through.
+    holder.commit().await.expect("let go of the lock");
+    let retried = register_device(
+        &app,
+        workspace,
+        member,
+        None,
+        &registration(device_id, &token),
+    )
+    .await
+    .expect("the retry succeeds")
+    .expect("the retry is not rejected");
+    assert!(retried.created, "the retry is an ordinary new device");
+}
+
+/// Rounds of the storm below. The deadlock this guards against shows up in well over one round in
+/// a run that moved the lock (a reviewer measured 81 in 60); twenty leaves no room to miss it.
+const STORM_ROUNDS: usize = 20;
+
+/// #5091 review M-2: the member lock is the **first** lock a registration takes, and that is what
+/// keeps concurrent registrations of one member from deadlocking. A lock taken *after* a token
+/// write lets registration A hold its token row while it waits for the lock, and registration B —
+/// holding the lock — wait in the cap statement for A's row: a cycle. The sequential tests above
+/// cannot see the difference (one of them passes with the lock moved there); a burst can.
+///
+/// One member, twenty rounds, each round eight registrations at once: four refreshes of tokens
+/// the member already has (live, or already dropped by the cap — a refresh revives it) and four
+/// brand-new devices, with the freshness order shuffled between rounds so the cap keeps choosing
+/// different victims. No registration may lose a lock race — a deadlock and a lock timeout both
+/// come back as the retryable `RegistrationConflict`, which nothing in this burst otherwise
+/// causes (every device and token is distinct) — and every round ends at exactly the cap.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn a_burst_of_one_members_registrations_loses_no_lock_race_and_ends_at_exactly_the_cap() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await; // eight connections: one per concurrent registration
+    let tenant = seed_tenant(&su).await;
+    let (workspace, member) = (tenant.workspace_id, tenant.member_a);
+
+    // Twelve devices the member has registered; two of them are already over the cap and dropped.
+    let mut known: Vec<(Uuid, String)> = Vec::new();
+    for _ in 0..(cap() + 2) {
+        let (device, token, _) = register_fresh(&app, workspace, member).await;
+        known.push((device, token));
+    }
+
+    let (mut lost_races, mut other) = (0usize, Vec::<String>::new());
+    let mut off_the_cap: Vec<(usize, usize)> = Vec::new();
+    for round in 0..STORM_ROUNDS {
+        // Shuffle who is stalest: every known token gets a different age each round.
+        for (k, (_, token)) in known.iter().enumerate() {
+            let id: Option<Uuid> =
+                sqlx::query_scalar("SELECT id FROM push_token WHERE apns_token = $1")
+                    .bind(token)
+                    .fetch_optional(&su)
+                    .await
+                    .expect("read the token id");
+            if let Some(id) = id {
+                age_token(&su, id, 30 * (((k + round) % 24) as i64 + 1)).await;
+            }
+        }
+
+        let mut registrations = Vec::new();
+        let mut brand_new = Vec::new();
+        for k in 0..4 {
+            registrations.push(known[(round * 5 + k * 3) % known.len()].clone());
+        }
+        for _ in 0..4 {
+            let (device, token) = (Uuid::new_v4(), fresh_apns_token());
+            brand_new.push((device, token.clone()));
+            registrations.push((device, token));
+        }
+        let tasks: Vec<_> = registrations
+            .into_iter()
+            .map(|(device, token)| {
+                let app = app.clone();
+                tokio::spawn(async move {
+                    register_device(&app, workspace, member, None, &registration(device, &token))
+                        .await
+                })
+            })
+            .collect();
+        for task in tasks {
+            match task.await.expect("a registration task finishes") {
+                Ok(Ok(_)) => {}
+                Ok(Err(rejection)) => other.push(format!("rejected: {rejection:?}")),
+                Err(PushError::RegistrationConflict) => lost_races += 1,
+                Err(error) => other.push(format!("{error:?}")),
+            }
+        }
+
+        known.extend(brand_new);
+        if known.len() > 24 {
+            let surplus = known.len() - 24;
+            known.drain(0..surplus);
+        }
+        let live = live_tokens(&su, member).await.len();
+        if live != cap() {
+            off_the_cap.push((round, live));
+        }
+    }
+
+    assert_eq!(
+        lost_races, 0,
+        "registrations lost a lock race (a deadlock or a lock timeout): the member lock is not the \
+         first lock a registration takes, or it is held too long"
+    );
+    assert!(other.is_empty(), "unexpected outcomes: {other:?}");
+    assert!(
+        off_the_cap.is_empty(),
+        "(round, live tokens) of the rounds that did not end at exactly the cap: {off_the_cap:?}"
+    );
 }

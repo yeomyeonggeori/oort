@@ -76,6 +76,13 @@
 //!    leave `cap + K - 1` live tokens, which only the member's next registration
 //!    would undo. Nothing else takes that lock and it is always the first one
 //!    taken, so it cannot be part of a lock cycle.
+//!    The wait is **bounded**: a registration waits at most
+//!    [`REGISTRATION_LOCK_WAIT_SECS`] for any lock (`lock_timeout`, local to the
+//!    transaction), and losing a lock race — `55P03` or a deadlock `40P01` — is the
+//!    409 the phone already retries ([`PushError::RegistrationConflict`]), nothing
+//!    committed. A queued request holds its pool connection while it waits, and one
+//!    member's burst is the requester's to size, so without the bound it would hold
+//!    the pool every other request shares (#5091 review M-1).
 
 use chrono::{DateTime, Utc};
 use momo_auth::{lock_session_for_registration, RegistrationSession};
@@ -84,7 +91,10 @@ use momo_messaging::active_workspace_role;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use crate::error::{classify_registration_write, DeviceInputError, DeviceRejection, PushError};
+use crate::error::{
+    classify_registration_write, lock_race_is_a_conflict, DeviceInputError, DeviceRejection,
+    PushError,
+};
 
 // ---------------------------------------------------------------------------
 // Validated input
@@ -361,6 +371,12 @@ pub async fn list_devices(
 /// Past it, the stalest registrations are invalidated by the registration that crossed the line.
 pub const MEMBER_MAX_ACTIVE_TOKENS: i64 = 10;
 
+/// How long one registration waits for a lock — the member's registration lock, a device row, a
+/// token row, the session row — before it gives up as a retryable 409 (ADR-0206 증보 4 G1, #5091
+/// review M-1). The bound is `lock_timeout`, set local to the registration's transaction; the same
+/// three seconds a scheduled-message request waits on the scheduler's locks.
+pub const REGISTRATION_LOCK_WAIT_SECS: u64 = 3;
+
 /// The statement every registration runs first: it queues a member's registrations behind one
 /// another until the transaction that holds the lock ends. Bound with
 /// [`member_registration_lock_key`]. `pub` (and hidden) only so a conformance test can hold the
@@ -412,6 +428,15 @@ pub async fn register_device(
     let registration = registration.clone();
     tenant_tx(pool, workspace_id, move |conn| {
         Box::pin(async move {
+            // `lock_timeout` first, so that every lock this transaction waits for — the member's
+            // registration lock below, the session, device and token rows after it — is a bounded
+            // wait (contract 7). Local to the transaction: it ends with it.
+            sqlx::query("SELECT set_config('lock_timeout', $1, true)")
+                .bind(format!("{REGISTRATION_LOCK_WAIT_SECS}s"))
+                .execute(&mut *conn)
+                .await
+                .map_err(DbError::from)?;
+
             if let Err(rejection) = require_active_member(conn, workspace_id, member_id).await? {
                 return Ok(Err(rejection));
             }
@@ -709,6 +734,9 @@ pub async fn register_device(
         })
     })
     .await
+    // A lock race (the bounded wait ran out, or the deadlock detector chose this transaction) is
+    // the retryable 409, not a 500: nothing was committed (#5091 review M-1).
+    .map_err(lock_race_is_a_conflict)
 }
 
 // ---------------------------------------------------------------------------
@@ -1017,6 +1045,10 @@ mod tests {
     #[test]
     fn the_member_cap_is_ten_and_its_lock_names_one_member_and_the_eviction_never_deletes() {
         assert_eq!(MEMBER_MAX_ACTIVE_TOKENS, 10, "the ADR's number");
+        assert_eq!(
+            REGISTRATION_LOCK_WAIT_SECS, 3,
+            "the ADR's bound, the scheduler's number"
+        );
         let (workspace, member) = (Uuid::from_u128(1), Uuid::from_u128(2));
         let key = member_registration_lock_key(workspace, member);
         assert_eq!(key, member_registration_lock_key(workspace, member));
