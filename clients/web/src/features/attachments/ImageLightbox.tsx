@@ -1,8 +1,9 @@
-import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Copy, Minus, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { cn } from "@/design/lib/cn";
 import {useStageHero, type StageSource} from "./useStageHero";
 import { Button } from "@/design/ui/button";
+import { useInlineConfirm } from "@/design/ui/inlineConfirm";
 import {
   Dialog,
   DialogContent,
@@ -12,6 +13,7 @@ import {
 } from "@/design/ui/dialog";
 import { AttachmentDownloadButton } from "@/features/attachments/AttachmentDownloadButton";
 import { useAttachmentPreview } from "@/features/attachments/content";
+import { canCopyImage, copyImageToClipboard } from "@/features/attachments/copyImage";
 import {
   imageLightboxViewState,
   lightboxInfoLines,
@@ -24,6 +26,7 @@ import {
   type LightboxPhotoBindings,
 } from "@/features/attachments/useImageLightboxZoom";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { IS_TAURI } from "@/lib/env";
 import {
   attachmentDisplayName,
@@ -31,22 +34,27 @@ import {
 } from "@momo/core/features/attachments/model";
 
 // =============================================================================
-// 이미지 미리보기 (#1686 · #3820 · #4751).
+// 이미지 미리보기 (#1686 · #3820 · #4751 · #4770 · #5190).
 //
-// 화면 전체가 뷰어이고, 무대는 블러된 앱이다(흰 머리 띠 없음). 사진은 남는 영역에 `object-contain`으로 가장 크게, 가운데에
-// 선다. 조작은 사진 위에 뜬 **둥근 유리 아이콘 버튼**(가는 테두리)이고, 글자 버튼은 없다:
+// 화면 전체가 뷰어이고, 무대는 블러된 앱 위의 어두운 한 겹이다(흰 머리 띠 없음). 사진은 남는 영역에 `object-contain`으로 가장 크게,
+// 가운데에 선다. 폰 뷰어(`clients/mobile/.../AttachmentViewer.tsx`)를 본으로 삼아 **칩이 아니라 글자가 사진 둘레에 떠 있다**:
 //
-//   위 왼쪽      보낸 사람(굵게) + 그 아래 날짜·시각. 파일 이름은 툴팁과 보조 글로 내려갔다. 데스크탑 셸에서는
-//               신호등 자리(`--titlebar-inset`)를 비운다.
-//   위 오른쪽    받기 · 닫기(X)
-//   양옆 가운데  이전 · 다음 (두 장 이상일 때만)
-//   아래 가운데  썸네일 줄(두 장 이상) + 「N장 중 n번」 캡션
+//   위 (40px 한 줄)  왼쪽 보낸 사람(굵게) · 그 아래 날짜·시각, 칩 없이 글자만. 오른쪽 받기 · 복사 · 닫기(X).
+//                   세로 가운데가 신호등 원 중심(y 20)이다. 데스크탑 셸에서는 왼쪽 신호등 자리(`--titlebar-inset`)를 비운다.
+//   양옆 가운데      이전 · 다음 (두 장 이상일 때만)
+//   아래 가운데      썸네일 줄(두 장 이상, 맨몸) 아래에 한 캡슐 `[−] 맞춤 [+] │ 3장 중 2번`
 //
-// 칩과 버튼은 전부 `glass`다: 유리를 끄면(투명도 줄이기·고대비) 같은 유틸이 불투명 면으로 돌아가고, 무대도 불투명한 어두운
-// 면이 된다(`tokens.css`의 `--lightbox-stage`). 글자는 칩 위에만 서므로 대비는 칩의 면과 짝이다.
+// 줄·양옆·아래는 스킴과 무관하게 어둡다(`color-scheme: dark`, 폰 뷰어의 검은 무대와 같은 이유): 유리와 글자 토큰이 다크 값으로 읽혀
+// 라이트 앱 위에서도 흰 알약이 뜨지 않는다. 글자 뒤에는 `--lightbox-scrim` 판이 깔려 확대한 밝은 사진 위에서도 읽힌다. 유리를
+// 끄면(투명도 줄이기·고대비) 같은 `glass` 유틸이 불투명 면으로 돌아가고, 무대도 불투명한 어두운 면이 된다(`--lightbox-stage-solid`).
 //
-// 확대 (#4770): 맞춤~4배. 트랙패드 오므리기·벌리기와 ⌘+스크롤은 커서가 중심이고, 두 번 클릭은 맞춤 ↔ 실제 크기, ⌘+ ⌘- ⌘0은
-// 키보드 길이다. 확대 중에는 끌어서 움직이고, 빈 무대 클릭 닫기와 ←/→ 넘기기는 꺼진다. Esc·닫기는 확대 중이면 맞춤을 마친 뒤 hero로 닫는다. 다른 장으로 넘기면 맞춤으로 돌아온다. 입력·계산은 `useImageLightboxZoom.ts`와 `imageLightboxModel.ts`가 한다.
+// 확대 (#4770 · #5190): 맞춤~4배. 트랙패드 오므리기·벌리기와 ⌘+스크롤은 커서가 중심이고, 두 번 클릭은 맞춤 ↔ 실제 크기다. 키는 + − 0
+// (⌘ 조합도)이고, 캡슐의 − + 가 같은 길이다. 확대 중에는 끌어서 움직이고 화살표 키도 사진을 옮기며(넘기기는 꺼진다), 빈 무대 클릭
+// 닫기도 꺼진다. Esc·닫기는 확대 중이면 맞춤을 마친 뒤 hero로 닫는다. 다른 장으로 넘기면 맞춤으로 돌아온다. 입력·계산은
+// `useImageLightboxZoom.ts`와 `imageLightboxModel.ts`가 한다.
+//
+// 데스크탑은 포인터·키보드라 폰과 다르게 가는 곳이 있다(인계 파일의 대응표): 조작 숨김(탭)이 없고, 아래로 쓸어 닫기 대신 Esc·X·빈 무대
+// 클릭이며, 저장·공유 대신 받기·복사다.
 // =============================================================================
 
 /**
@@ -179,7 +187,7 @@ function LightboxImage({
   );
 }
 
-/** 아래 썸네일 한 장. 고른 장은 굵은 테두리이고, 누르면 그 장으로 간다. */
+/** 아래 썸네일 한 장. 고른 장은 굵은 테두리이고 나머지는 흐리다(폰 뷰어의 `thumbDim`), 누르면 그 장으로 간다. */
 function LightboxThumb({
   workspaceId,
   channelId,
@@ -221,7 +229,7 @@ function LightboxThumb({
         "size-control-lg shrink-0 overflow-hidden rounded-md border-2 press focus-visible:focus-ring",
         selected
           ? "border-ink"
-          : "border-transparent hover:border-line-strong"
+          : "border-transparent opacity-70 hover:border-line-strong hover:opacity-100"
       )}
     >
       {preview.status === "ready" ? (
@@ -235,6 +243,56 @@ function LightboxThumb({
         <span aria-hidden="true" className="block size-full bg-surface-hover" />
       )}
     </button>
+  );
+}
+
+/**
+ * 위 줄의 「이미지 복사」. 바이트는 미리보기가 이미 든 `data:` 주소다(`copyImage.ts`). 아직 못 받았으면(불러오는 중·끊김) 눌러도 하지 않고
+ * `aria-disabled`로 말한다: 비활성화하면 초점이 <body>로 던져진다. 성공하면 단추가 잠깐 「복사했어요」를 말한다(`useInlineConfirm`).
+ */
+function LightboxCopyButton({
+  workspaceId,
+  channelId,
+  attachment,
+  onStarted,
+  onFailed,
+}: {
+  workspaceId: string;
+  channelId: string;
+  attachment: MessageAttachment;
+  onStarted: () => void;
+  onFailed: () => void;
+}) {
+  const formatMessage = useFormatMessage();
+  const preview = useAttachmentPreview(workspaceId, channelId, attachment.id, true);
+  // 받은 바이트는 준비된 미리보기에만 있다(`dataUrl`). 상태 이름을 문자열로 다시 적지 않고 값이 있느냐로 읽는다.
+  const dataUrl = (preview as { dataUrl?: string }).dataUrl;
+  const { confirmed, confirm } = useInlineConfirm();
+  const label = formatMessage(confirmed ? "timeline.lightbox.copied" : "timeline.lightbox.copy");
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className={GLASS_ROUND_BUTTON}
+        aria-label={label}
+        aria-disabled={dataUrl === undefined ? true : undefined}
+        title={label}
+        data-testid="image-lightbox-copy"
+        onClick={() => {
+          if (dataUrl === undefined) return;
+          onStarted();
+          copyImageToClipboard(dataUrl).then(confirm, onFailed);
+        }}
+      >
+        {confirmed ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+      </Button>
+      {/* 단추의 이름이 바뀌는 것만으로는 보조 기술이 읽지 않는다. 결과는 따로 읽어 준다. */}
+      <span role="status" className="sr-only">
+        {confirmed ? label : ""}
+      </span>
+    </>
   );
 }
 
@@ -263,9 +321,9 @@ export function ImageLightbox({
   opener: DialogFocusTarget | null;
   source?: StageSource;
   offline: boolean;
-  /** 위 왼쪽 칩의 첫 줄(보낸 사람). 모르면 파일 이름이 대신 선다. */
+  /** 위 왼쪽 글자 블록의 첫 줄(보낸 사람). 모르면 파일 이름이 대신 선다. */
   senderName?: string | null;
-  /** 위 왼쪽 칩의 둘째 줄(보낸 시각). 아직 서버 시각이 없으면 생략한다. */
+  /** 위 왼쪽 글자 블록의 둘째 줄(보낸 시각). 아직 서버 시각이 없으면 생략한다. */
   sentAtMs?: number | null;
   onSelect: (attachmentId: string) => void;
   onOpenChange: (open: boolean) => void;
@@ -277,12 +335,17 @@ export function ImageLightbox({
   const [downloadFailureIds, setDownloadFailureIds] = useState<Set<string>>(
     () => new Set()
   );
+  const [copyFailureIds, setCopyFailureIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const formatMessage = useFormatMessage();
   const selectedIndex = images.findIndex((image) => image.id === selectedId);
   const selected = selectedIndex >= 0 ? images[selectedIndex] : null;
   const multi = selected !== null && images.length > 1;
   const downloadFailed = selected
     ? downloadFailureIds.has(selected.id)
     : false;
+  const copyFailed = selected ? copyFailureIds.has(selected.id) : false;
   const fileName = selected
     ? attachmentDisplayName(selected)
     : "이미지 미리보기";
@@ -354,13 +417,16 @@ export function ImageLightbox({
         }}
         onKeyDown={(event) => {
           if (stageState.phase !== 'open') { event.preventDefault(); return; }
-          // ⌘+ ⌘- ⌘0. 먹었으면 브라우저·웹뷰의 쪽 확대는 막는다.
+          // + − 0 (⌘ 조합도). 먹었으면 브라우저·웹뷰의 쪽 확대는 막는다.
           if (zoom.handleKey(event)) {
             event.preventDefault();
             return;
           }
-          // ←/→ 넘기기는 확대 중에 꺼진다(맞춤으로 돌아오면 다시 켜진다).
-          if (zoom.isZoomed()) return;
+          // 확대 중에는 화살표가 사진을 옮기고 ←/→ 넘기기는 꺼진다(맞춤으로 돌아오면 다시 켜진다).
+          if (zoom.isZoomed()) {
+            if (zoom.panKey(event)) event.preventDefault();
+            return;
+          }
           if (!move(event.key)) return;
           event.preventDefault();
         }}
@@ -374,7 +440,7 @@ export function ImageLightbox({
         <DialogTitle className="sr-only">{fileName}</DialogTitle>
         <DialogDescription className="sr-only">
           {selected
-            ? `${lightboxPositionLabel(selectedIndex, images.length)} 이미지입니다. 왼쪽과 오른쪽 화살표로 이미지를 이동합니다.`
+            ? `${lightboxPositionLabel(selectedIndex, images.length)} 이미지입니다. 왼쪽과 오른쪽 화살표로 이미지를 이동하고, 더하기와 빼기 키로 확대합니다.`
             : "표시할 이미지가 없습니다."}
         </DialogDescription>
 
@@ -394,6 +460,15 @@ export function ImageLightbox({
                 separator={false}
                 message="파일을 내려받지 못했습니다. 연결을 확인한 뒤 다시 시도하세요."
                 testId="image-lightbox-download-error"
+              />
+            </div>
+          ) : null}
+          {copyFailed ? (
+            <div className="pointer-events-auto mb-3 w-full max-w-pane-md shrink-0 overflow-hidden rounded-lg bg-surface-raised shadow-lg">
+              <InlineBanner
+                separator={false}
+                message={formatMessage("timeline.lightbox.copyFailed")}
+                testId="image-lightbox-copy-error"
               />
             </div>
           ) : null}
@@ -433,14 +508,17 @@ export function ImageLightbox({
         <div
           className={cn("lightbox-chrome", !interactive && "invisible")}
           data-desktop-shell={IS_TAURI ? "" : undefined}
+          data-zoomed={zoom.zoomed ? "" : undefined}
+          data-testid="image-lightbox-header"
         >
           {info ? (
             <div
               data-testid="image-lightbox-info"
               title={info.fileName}
-              // 두 줄 모두 `--ink`다(보조 글자색 아님). 칩은 반투명 유리라 바닥이 사이드바 띠(어두운 테마에서는 짙은 남색)여도 글자가
-              // 읽혀야 하고, `--ink-muted`는 그 바닥에서 3.7~4.4:1까지 내려갔다(design-review). 위계는 굵기와 크기가 진다.
-              className="glass pointer-events-auto flex min-w-0 max-w-pane flex-col rounded-lg px-3 py-1 text-ink"
+              // 칩이 아니라 글자다(#5190): 알약은 신호등과 12px로 붙어 겹쳐 보였고 두 줄이라 단추 줄과 가운데가 어긋났다. 두 줄 모두
+              // `--ink`다(보조 글자색 아님): 글자 뒤는 어두운 무대와 `--lightbox-scrim` 판이고 그 합성의 대비는 tokens.contrast.test.ts가
+              // 잰다. 위계는 굵기와 크기가 진다.
+              className="pointer-events-auto flex min-w-0 max-w-pane flex-col justify-center text-ink"
             >
               <span className="truncate text-label font-semibold">
                 {info.primary}
@@ -485,6 +563,24 @@ export function ImageLightbox({
                 }
                 onFailed={() =>
                   setDownloadFailureIds((current) =>
+                    updateAttachmentIdSet(current, selected.id, true)
+                  )
+                }
+              />
+            ) : null}
+            {selected && canCopyImage() ? (
+              <LightboxCopyButton
+                key={selected.id}
+                workspaceId={workspaceId}
+                channelId={channelId}
+                attachment={selected}
+                onStarted={() =>
+                  setCopyFailureIds((current) =>
+                    updateAttachmentIdSet(current, selected.id, false)
+                  )
+                }
+                onFailed={() =>
+                  setCopyFailureIds((current) =>
                     updateAttachmentIdSet(current, selected.id, true)
                   )
                 }
@@ -539,51 +635,88 @@ export function ImageLightbox({
           </>
         ) : null}
 
-        <div className={cn("lightbox-foot", !interactive && "invisible")}>
-          {/* 확대 비율 칩. 아래 줄 윗변에 얹히고(흐름 밖) 마지막 확대 뒤 잠깐 머문다. 칸은 늘 서 있는 알림 영역이라 칩이
-              들어올 때 보조 기술이 읽는다. 움직임은 불투명도만(사다리 `motion-enter`), 동작 줄이기면 애니메이션이 없다. */}
-          <div role="status" className="lightbox-zoom-slot">
-            {zoom.chip !== null ? (
-              <span
-                data-numeric
-                data-testid="image-lightbox-zoom"
-                className="glass flex h-control-sm items-center rounded-full px-3 text-meta text-ink motion-enter motion-reduce:animate-none"
-              >
-                {zoom.chip}
-              </span>
-            ) : null}
-          </div>
+        <div
+          className={cn("lightbox-foot", !interactive && "invisible")}
+          data-zoomed={zoom.zoomed ? "" : undefined}
+        >
           {multi ? (
-            <>
-              <div
-                role="group"
-                aria-label="이미지 목록"
-                data-testid="image-lightbox-thumbs"
-                className="glass pointer-events-auto flex max-w-full items-center gap-2 overflow-x-auto rounded-2xl p-2"
-              >
-                {images.map((image, index) => (
-                  <LightboxThumb
-                    key={image.id}
-                    workspaceId={workspaceId}
-                    channelId={channelId}
-                    attachment={image}
-                    index={index}
-                    count={images.length}
-                    selected={image.id === selected.id}
-                    onSelect={id => { if (interactive) onSelect(id); }}
-                  />
-                ))}
+            <div
+              role="group"
+              aria-label="이미지 목록"
+              data-testid="image-lightbox-thumbs"
+              className="pointer-events-auto flex max-w-full items-center gap-2 overflow-x-auto p-1"
+            >
+              {images.map((image, index) => (
+                <LightboxThumb
+                  key={image.id}
+                  workspaceId={workspaceId}
+                  channelId={channelId}
+                  attachment={image}
+                  index={index}
+                  count={images.length}
+                  selected={image.id === selected.id}
+                  onSelect={id => { if (interactive) onSelect(id); }}
+                />
+              ))}
+            </div>
+          ) : null}
+          {/* 아래 도구 줄 한 알약(Buzz의 아래 줄 자리): 확대 − 배율 + 와 장 번호. 배율 글자는 늘 서 있는 알림 영역이라 바뀔 때 보조 기술이
+              읽는다(앞 판의 잠깐 떴다 지는 칩은 사라졌다). 폭 600 미만에서는 확대 묶음이 빠지고(핀치·두 번 탭), 한 장이면 알약째 빠진다. */}
+          {selected ? (
+            <div
+              data-testid="image-lightbox-controls"
+              data-solo={multi ? undefined : ""}
+              className="glass lightbox-capsule rounded-full"
+            >
+              <div className="lightbox-zoom-group">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="aria-disabled:opacity-50"
+                  aria-label={formatMessage("timeline.lightbox.zoomOut")}
+                  aria-disabled={photoNode !== null && zoom.zoomed ? undefined : true}
+                  title={formatMessage("timeline.lightbox.zoomOut")}
+                  data-testid="image-lightbox-zoom-out"
+                  onClick={() => zoom.step(-1)}
+                >
+                  <Minus aria-hidden="true" />
+                </Button>
+                <span
+                  role="status"
+                  data-numeric
+                  data-testid="image-lightbox-zoom"
+                  className="lightbox-readout text-meta text-ink"
+                >
+                  {zoom.label}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="aria-disabled:opacity-50"
+                  aria-label={formatMessage("timeline.lightbox.zoomIn")}
+                  aria-disabled={photoNode === null || zoom.maxed ? true : undefined}
+                  title={formatMessage("timeline.lightbox.zoomIn")}
+                  data-testid="image-lightbox-zoom-in"
+                  onClick={() => zoom.step(1)}
+                >
+                  <Plus aria-hidden="true" />
+                </Button>
+                {multi ? <span aria-hidden="true" className="mx-1 h-4 w-px bg-line-strong" /> : null}
               </div>
-              <p
-                data-numeric
-                aria-live="polite"
-                aria-atomic="true"
-                data-testid="image-lightbox-position"
-                className="glass pointer-events-auto flex h-control items-center rounded-full px-4 text-meta text-ink"
-              >
-                {lightboxPositionLabel(selectedIndex, images.length)}
-              </p>
-            </>
+              {multi ? (
+                <p
+                  data-numeric
+                  aria-live="polite"
+                  aria-atomic="true"
+                  data-testid="image-lightbox-position"
+                  className="px-3 text-meta text-ink"
+                >
+                  {lightboxPositionLabel(selectedIndex, images.length)}
+                </p>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </DialogContent>
