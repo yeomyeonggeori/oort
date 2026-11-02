@@ -76,7 +76,9 @@ describe.each(SCHEMES)('%s — 확정 버튼의 실제 스타일', (scheme, pale
       <ApprovalDecision approvalId="ap-1" onSettled={() => {}} testIDPrefix="row" />,
     );
     expect(screen.queryByTestId('row-commit')).toBeNull();
-    expect(flat('row-approve').backgroundColor).toBe(palette.accent);
+    // 주 액션 채움은 잉크다(#5134). 옛 판은 신호색(`accent`)이어서 알약·셸 주 단추와 갈렸다.
+    expect(flat('row-approve').backgroundColor).toBe(palette.primary);
+    expect(flat('row-approve').backgroundColor).not.toBe(palette.accent);
   });
 
   it('턴 중단 확정도 같은 파괴 채움을 든다', () => {

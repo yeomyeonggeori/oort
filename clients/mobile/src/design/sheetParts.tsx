@@ -50,7 +50,7 @@ import {
 //   GroupCardItem  가상화 목록(FlatList)의 한 줄을 같은 카드로 보이게 하는 틀
 //   ListRow        행: 앞 아이콘·이모지 · 이름 · 보조 줄 · 오른쪽 값 · 셰브론/펼침/복사/토글, 위험
 //   ChoiceRow      라디오 행: 앞 표지 · 이름 · 보조 줄 · 오른쪽 ✓ — 고른 줄은 강조색·굵게·✓ 셋 (#4457 이 올렸다)
-//   InputPill      입력 알약: 앞 아이콘 + 입력(ADR-0189 D6: 외곽선은 텍스트 입력에만 남는다)
+//   InputPill      입력 알약: 앞 아이콘 + 입력(ADR-0189 D6: 외곽선은 텍스트 입력에만 남는다) · 잠기면 잠긴 행처럼 흐려진다
 //   ActionTile     큰 행동 타일(아이콘 위, 이름 아래) · ActionTileRow 는 같은 폭으로 나란히
 //   SheetScroll    시트 몸의 스크롤 — 머리 아래 숨 쉴 틈·안전 영역·키보드 탭·큰 글씨에서도 끝까지 닿는다
 //   ConfirmStep    시트 안의 확인 단계(되돌릴 수 없는 일 앞의 한 번 더): 카드 + 「취소」·위험 단추
@@ -483,6 +483,11 @@ export function ChoiceRow({
 /**
  * 입력 알약: 앞 아이콘 + 한 줄 입력. 외곽선은 `textFaint`(3:1) — ADR-0189 D6 이 값을 받는 그릇에만
  * 남긴 선이다. Buzz 의 가는 선이 아니라 우리 규칙을 따른다.
+ *
+ * **잠기면**(`editable={false}` — 보내는 중·저장 중) 같은 시트의 잠긴 행(`ListRow`·`ChoiceRow` 의 `rowDisabled`)처럼 알약 전체가
+ * 흐려지고 접근성 상태가 `disabled` 가 된다(#5132 — `shell/sheetForm.tsx` 의 `Field`·`TextArea` 에 #5099 가 준 규칙과 같다). 흐림만
+ * 없으면 눌러도 자판이 안 오르는 칸이 고칠 수 있는 칸처럼 보인다. `editable` 은 생략하면 켜진 것이라 **`false` 를 줬을 때만** 잠긴
+ * 것이다(`!editable` 로 읽으면 평소 칸이 전부 흐려진다). 부르는 쪽이 이미 준 `accessibilityState` 는 지우지 않고 `disabled` 만 더한다.
  */
 export function InputPill({
   icon,
@@ -498,13 +503,21 @@ export function InputPill({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const keyboardAppearance = useKeyboardAppearance();
+  const locked = input.editable === false;
   return (
-    <View style={styles.pill} testID={input.testID ? `${input.testID}-pill` : undefined}>
+    <View
+      // 흐림은 잠긴 행과 **같은 스타일**이다(값을 따로 두지 않는다) — 한 화면이 잠김을 두 가지로 그리지 않는다.
+      style={[styles.pill, locked && styles.rowDisabled]}
+      testID={input.testID ? `${input.testID}-pill` : undefined}>
       {icon ? <Image source={icon} style={styles.pillIcon} accessibilityElementsHidden /> : null}
       <TextInput
         accessibilityLabel={accessibilityLabel}
         placeholderTextColor={palette.textMuted}
         {...input}
+        // 펼친 props 뒤에 둔다 — 잠기면 호출자가 준 상태(`busy` …)는 두고 `disabled` 만 더한다(`ChoiceRow` 와 같은 문법).
+        accessibilityState={
+          locked ? {...input.accessibilityState, disabled: true} : input.accessibilityState
+        }
         // 호출자의 `style` 은 알약 입력 스타일(`flex: 1` 포함)을 **덮지 않고 이어 붙는다**.
         style={[styles.pillInput, style]}
         // 키보드 모양은 앱의 스킴이 정한다(#4526). 펼친 props 뒤에 두고 타입에서도 뺐다 — 호출자가 바꿀 수 없다.
