@@ -44,8 +44,11 @@ const DIRECTORY = makeDirectory([
   member({id: AGENT, displayName: '헤르메스', handle: 'hermes', kind: 'agent', ownerHumanId: SELF}),
 ]);
 
-/** 서버가 중단 때 쓰는 문장 그대로(`CANCEL_SYSTEM_LINE`). 이 시험은 문장을 지어내지 않는다. */
-const SERVER_LINE = '사람이 실행을 중지했어요.';
+/**
+ * 서버가 중단 때 쓰는 문장(`CANCEL_SYSTEM_LINE` — #5079 가 「중지했어요」를 「중단했어요」로 바꿨다). 이 시험은 문장을 지어내지 않고, 앱은 문장을 가리지 않는다
+ * (시스템 줄 부품은 `body` 를 그대로 그린다) — 그래서 서버가 아직 옛 문장인 track 에서도 이 시험은 같다.
+ */
+const SERVER_LINE = '사람이 실행을 중단했어요.';
 
 function message(seq: number, over: Partial<Message> = {}): Message {
   return {

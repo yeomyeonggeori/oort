@@ -97,11 +97,14 @@ name: 20-stop
 #
 # The line is the server's own sentence (`CANCEL_SYSTEM_LINE`,
 # server-rust/bins/momo-server/src/routes/agent_runs.rs) — it is not client copy,
-# so the wording here follows that constant. It used to read 「실행이 사람에 의해
-# 중지되었습니다.」; the 11-01 verification run found the channel showing 「사람이
-# 실행을 중지했어요.」 while this wait timed out on the old sentence (#5045).
+# so the wording here follows that constant. It has said three things: 「실행이
+# 사람에 의해 중지되었습니다.」 (gone; #5045 found this wait timing out on it),
+# 「사람이 실행을 중지했어요.」 (the server on track/uxui until #5079 reaches it) and
+# 「사람이 실행을 중단했어요.」 (#5079, track/engine). The pattern takes the last two
+# so this flow stays green on a server from before and from after that promotion
+# (#5081); once both tracks carry #5079 it can shrink to 중단 alone.
 - extendedWaitUntil:
-    visible: ".*사람이 실행을 중지했어요.*"
+    visible: ".*사람이 실행을 (중지|중단)했어요.*"
     timeout: 60000
 
 # …and the turn is actually over: the working bar clears without the reply ever
