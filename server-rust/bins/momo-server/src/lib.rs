@@ -985,9 +985,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/complete",
             post(routes::attachments::complete),
         )
+        // `HEAD` is mounted next to `GET` on purpose, though axum would answer it from
+        // the GET handler: the same handler answers both (it reads the method), a
+        // `HEAD` opens nothing of the archive's, and the mounted table now says what
+        // the contract file says (ADR-0151 증보 5 D3, #4671).
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/content",
-            get(routes::attachments::content),
+            get(routes::attachments::content).head(routes::attachments::content),
         )
         // ADR-0151 증보 5 D5 (#4673) — a video's length, size and poster. The write is the
         // uploader's, before the send, and spends a per-member budget of its own like the upload

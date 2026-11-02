@@ -33,10 +33,14 @@
 //! | `a_payload_this_build_cannot_read_is_parked_never_sent` | guess at an unknown reason / accept an extra key |
 //! | `the_real_relay_accepts_the_test_push_and_speaks_its_static_body` | drop `test_notification`/`momo.system` from the relay vocabulary / put a name in the body |
 //! | `the_real_relays_refusal_texts_are_what_the_diagnostics_classify` | reword the relay's refusal without the classifier |
+//! | `a_test_past_the_server_budget_is_settled_429_and_never_sent` | (#5091) skip the budget spend (every token is sent) / leave the over-budget claim unsettled / settle it with another reason or leave the reason out of `SERVER_DROP_REASONS` (the diagnostics then say `last_delivery_failed` or `relay_unreachable`) |
+//! | `a_redelivered_test_does_not_spend_the_budget_twice` | (#5091) spend the budget before the claim (already-settled tokens cost budget a redelivery does not owe) |
+//! | `a_test_row_older_than_five_minutes_is_settled_unsent_and_a_younger_one_still_goes` | (#5091) drop the age check / move the limit to 60 s or 3600 s / skip the settled rows (`lastTest` reads `stalled`, the diagnostics infer `relay_unreachable`) |
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use axum::body::Bytes;
@@ -47,12 +51,14 @@ use axum::Router;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
-use momo_db::PgPool;
+use momo_db::{with_tenant_tx, PgPool};
 use momo_notifier::{PushConfig, PushDrain, RelayHttpDispatcher};
 use momo_outbox::{emit_outbox, emit_push_system, OutboxKind, PushSystemReason};
 use momo_push::{
-    apns_reason_code, is_relay_vocabulary_refusal, test_notification_collapse_id, DispatchOutcome,
-    PushDispatch, PushDispatcher,
+    apns_reason_code, compute_diagnostics, is_relay_vocabulary_refusal,
+    test_notification_collapse_id, BlockerCode, Diagnostics, DispatchOutcome, LastTestStatus,
+    PushDispatch, PushDispatcher, BUDGET_SPENT_REASON, BUDGET_SPENT_STATUS, TEST_EXPIRED_REASON,
+    TEST_EXPIRED_STATUS,
 };
 use serde_json::{json, Value};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -1309,4 +1315,408 @@ async fn the_real_relays_refusal_texts_are_what_the_diagnostics_classify() {
         "the relay's environment refusal changed its words: {recorded}"
     );
     std::fs::remove_file(&capture).ok();
+}
+
+// ---------------------------------------------------------------------------
+// #5091 — the test notification inside the server-wide budget, and not when it is old
+// (ADR-0206 증보 4 G2·G3)
+// ---------------------------------------------------------------------------
+
+/// A fixed epoch second for the bulk layer's held clock: the budget minute cannot roll over mid-test.
+const T0: i64 = 1_800_000_000;
+
+fn held_clock(now: &Arc<AtomicI64>) -> momo_notifier::bulk::Clock {
+    let now = now.clone();
+    Arc::new(move || now.load(Ordering::SeqCst))
+}
+
+/// The runtime API role (NOBYPASSRLS): the diagnostics `GET` runs as this.
+async fn momo_app_pool() -> PgPool {
+    let options: PgConnectOptions = database_url()
+        .parse()
+        .expect("DATABASE_URL parses as a postgres connect string");
+    let options = options
+        .username("momo_app")
+        .password(&role_password("MOMO_APP_PASSWORD", "momo_app_dev_pw"));
+    PgPoolOptions::new()
+        .max_connections(4)
+        .connect_with(options)
+        .await
+        .expect("connect as momo_app (run bootstrap_roles.sql first)")
+}
+
+/// What `GET …/notification-diagnostics` computes for `member`, as the API role.
+async fn diagnostics_of(app: &PgPool, workspace: Uuid, member: Uuid) -> Diagnostics {
+    with_tenant_tx(app, workspace, move |conn| {
+        Box::pin(async move { compute_diagnostics(conn, workspace, member, None, None).await })
+    })
+    .await
+    .expect("compute the diagnostics")
+}
+
+/// Record `test_id` as the member's last test, as the route's reservation does, `age_secs` ago.
+async fn mark_last_test(su: &PgPool, workspace: Uuid, member: Uuid, test_id: Uuid, age_secs: i64) {
+    sqlx::query(
+        "INSERT INTO notification_rule (workspace_id, member_id, last_test_id, last_test_at) \
+         VALUES ($1, $2, $3, now() - make_interval(secs => $4::double precision)) \
+         ON CONFLICT (workspace_id, member_id) \
+         DO UPDATE SET last_test_id = EXCLUDED.last_test_id, last_test_at = EXCLUDED.last_test_at",
+    )
+    .bind(workspace)
+    .bind(member)
+    .bind(test_id)
+    .bind(age_secs as f64)
+    .execute(su)
+    .await
+    .expect("record the member's last test");
+}
+
+/// A test row that has already waited `age_secs` (what a notifier that was stopped finds).
+async fn emit_test_aged(su: &PgPool, workspace: Uuid, member: Uuid, age_secs: i64) -> Uuid {
+    let test_id = emit_test(su, workspace, member).await;
+    sqlx::query(
+        "UPDATE outbox SET created_at = now() - make_interval(secs => $3::double precision) \
+          WHERE workspace_id = $1 AND kind = 'push_system' AND payload->>'ref_id' = $2",
+    )
+    .bind(workspace)
+    .bind(test_id.to_string())
+    .bind(age_secs as f64)
+    .execute(su)
+    .await
+    .expect("age the test row");
+    test_id
+}
+
+/// The collapse-id-scoped slice of a member's dispatch log.
+async fn log_of_test(su: &PgPool, workspace: Uuid, member: Uuid, test_id: Uuid) -> Vec<LogRow> {
+    let collapse = test_notification_collapse_id(test_id);
+    log_rows(su, workspace, member)
+        .await
+        .into_iter()
+        .filter(|row| row.collapse == collapse)
+        .collect()
+}
+
+/// Neither a delivery failure nor an unreachable relay: what a server-side drop must never become.
+fn assert_no_false_alarm(diagnostics: &Diagnostics) {
+    for blocker in &diagnostics.blockers {
+        assert!(
+            blocker.code != BlockerCode::LastDeliveryFailed
+                && blocker.code != BlockerCode::RelayUnreachable,
+            "the server's own drop was read as {:?}: {:?}",
+            blocker.code,
+            diagnostics.blockers
+        );
+    }
+}
+
+/// ADR-0206 증보 4 G2: a test spends the server-wide budget (the bulk layer's, one dispatch per
+/// token). With a budget of three and five tokens, three go to the relay and the other two are
+/// **settled** `429` / `notifier_budget_spent` — rows that exist, are closed and say what happened —
+/// so the test reads `sent`, the diagnostics have no `last_delivery_failed` and no
+/// `relay_unreachable`, no token is touched, and the counter says two. A second test in a minute
+/// with no budget at all sends nothing and reads `failed`·429 — not `queued`/`stalled`.
+///
+/// Sabotage: skip the spend (five relay calls); settle nothing (NULL rows, `lastTest` stays
+/// `queued`); settle with another reason; leave the reason out of `SERVER_DROP_REASONS` (the
+/// diagnostics call it `last_delivery_failed`).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier / momo_app roles"]
+async fn a_test_past_the_server_budget_is_settled_429_and_never_sent() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let notifier = momo_notifier_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let mut mine = Vec::new();
+    for _ in 0..5 {
+        mine.push(seed_token(&su, tenant.workspace, tenant.me).await.0);
+    }
+    let (theirs, _) = seed_token(&su, tenant.workspace, tenant.other).await;
+
+    // A budget of three for the minute, and a test to five tokens.
+    let first = emit_test(&su, tenant.workspace, tenant.me).await;
+    mark_last_test(&su, tenant.workspace, tenant.me, first, 0).await;
+    focus(&su, &[tenant.workspace]).await;
+    let mut config = PushConfig::for_target();
+    config.bulk_push_per_minute = 3;
+    let now = Arc::new(AtomicI64::new(T0));
+    let relay = RecordingRelay::accepting();
+    let push =
+        PushDrain::new(notifier.clone(), config, relay.clone()).with_bulk_clock(held_clock(&now));
+    let stats = push.drain_system_once(32).await.expect("drain");
+    assert_eq!(
+        (
+            stats.claimed,
+            stats.dispatched,
+            stats.held_back,
+            stats.failed
+        ),
+        (1, 3, 2, 0),
+        "{stats:?}"
+    );
+    assert_eq!(
+        relay.sent().len(),
+        3,
+        "the relay is called three times, not five"
+    );
+
+    let log = log_of_test(&su, tenant.workspace, tenant.me, first).await;
+    assert_eq!(
+        log.len(),
+        5,
+        "every token has a row: sent or settled, none missing"
+    );
+    assert!(
+        log.iter().all(|row| row.status.is_some()),
+        "no claim is left unsettled"
+    );
+    assert_eq!(log.iter().filter(|row| row.status == Some(200)).count(), 3);
+    let dropped: Vec<&LogRow> = log.iter().filter(|row| row.status != Some(200)).collect();
+    assert_eq!(dropped.len(), 2);
+    for row in dropped {
+        assert_eq!(row.status, Some(BUDGET_SPENT_STATUS));
+        assert_eq!(row.reason.as_deref(), Some(BUDGET_SPENT_REASON));
+        assert_eq!(row.message_id, None);
+    }
+    for token in &mine {
+        assert!(
+            !is_invalidated(&su, *token).await,
+            "a budget row never touches a token"
+        );
+    }
+    assert!(log_rows(&su, tenant.workspace, tenant.other)
+        .await
+        .is_empty());
+    assert!(!is_invalidated(&su, theirs).await);
+    assert_eq!(
+        push.bulk_counters()
+            .get(&("test_notification", "budget"))
+            .copied(),
+        Some(2),
+        "{:?}",
+        push.bulk_counters()
+    );
+    assert_eq!(outbox_state(&su, tenant.workspace).await[0].0, "done");
+
+    let diagnostics = diagnostics_of(&app, tenant.workspace, tenant.me).await;
+    assert_no_false_alarm(&diagnostics);
+    assert!(diagnostics.ok, "{:?}", diagnostics.blockers);
+    let last = diagnostics.last_test.expect("the last test");
+    assert_eq!(last.status, LastTestStatus::Sent, "three devices got it");
+
+    // The next minute's budget is nothing at all: a second test sends nothing and says so.
+    let second = emit_test(&su, tenant.workspace, tenant.me).await;
+    mark_last_test(&su, tenant.workspace, tenant.me, second, 0).await;
+    focus(&su, &[tenant.workspace]).await;
+    let mut none = PushConfig::for_target();
+    none.bulk_push_per_minute = 0;
+    let relay_none = RecordingRelay::accepting();
+    let push_none = PushDrain::new(notifier.clone(), none, relay_none.clone())
+        .with_bulk_clock(held_clock(&now));
+    let stats = push_none.drain_system_once(32).await.expect("drain");
+    assert_eq!(
+        (stats.claimed, stats.dispatched, stats.held_back),
+        (1, 0, 5),
+        "{stats:?}"
+    );
+    assert!(relay_none.sent().is_empty(), "nothing reaches the relay");
+    let log = log_of_test(&su, tenant.workspace, tenant.me, second).await;
+    assert_eq!(log.len(), 5);
+    assert!(log.iter().all(|row| {
+        row.status == Some(BUDGET_SPENT_STATUS)
+            && row.reason.as_deref() == Some(BUDGET_SPENT_REASON)
+    }));
+    let diagnostics = diagnostics_of(&app, tenant.workspace, tenant.me).await;
+    assert_no_false_alarm(&diagnostics);
+    let last = diagnostics.last_test.expect("the last test");
+    assert_eq!(
+        (last.status, last.apns_status),
+        (LastTestStatus::Failed, Some(BUDGET_SPENT_STATUS)),
+        "settled and failed with the honest status, not queued or stalled"
+    );
+    assert_eq!(outbox_state(&su, tenant.workspace).await[1].0, "done");
+}
+
+/// A redelivered row (the notifier crashed after settling part of it) owes the budget only for the
+/// targets it still has to send: the two tokens already settled are skipped **without** spending, so
+/// the other three all go out under a budget of three. Spending before the claim would charge the
+/// two that were already sent.
+///
+/// The two settled tokens are the freshest, so they come first in the order the targets are walked:
+/// a spend before the claim burns the budget on them.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier / momo_app roles"]
+async fn a_redelivered_test_does_not_spend_the_budget_twice() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let notifier = momo_notifier_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let mut tokens = Vec::new();
+    for _ in 0..5 {
+        tokens.push(seed_token(&su, tenant.workspace, tenant.me).await.0);
+    }
+    let test_id = emit_test(&su, tenant.workspace, tenant.me).await;
+    focus(&su, &[tenant.workspace]).await;
+    // An earlier run settled the two freshest tokens (the last two seeded).
+    for token in &tokens[3..] {
+        sqlx::query(
+            "INSERT INTO push_dispatch_log \
+               (workspace_id, member_id, push_token_id, collapse_id, apns_status) \
+             VALUES ($1, $2, $3, $4, 200)",
+        )
+        .bind(tenant.workspace)
+        .bind(tenant.me)
+        .bind(*token)
+        .bind(test_notification_collapse_id(test_id))
+        .execute(&su)
+        .await
+        .expect("an earlier run settled this token");
+    }
+
+    let mut config = PushConfig::for_target();
+    config.bulk_push_per_minute = 3;
+    let now = Arc::new(AtomicI64::new(T0));
+    let relay = RecordingRelay::accepting();
+    let push = PushDrain::new(notifier, config, relay.clone()).with_bulk_clock(held_clock(&now));
+    let stats = push.drain_system_once(32).await.expect("drain");
+    assert_eq!(
+        (
+            stats.claimed,
+            stats.dispatched,
+            stats.skipped_already_settled,
+            stats.held_back
+        ),
+        (1, 3, 2, 0),
+        "the three tokens still owed all fit in a budget of three: {stats:?}"
+    );
+    assert_eq!(relay.sent().len(), 3);
+    assert!(
+        !push
+            .bulk_counters()
+            .contains_key(&("test_notification", "budget")),
+        "nothing was refused: {:?}",
+        push.bulk_counters()
+    );
+}
+
+/// ADR-0206 증보 4 G3: a notifier that was stopped finds a backlog. Test rows older than five
+/// minutes are **not sent** — no relay call — and are settled: each current token of the member gets
+/// a row closed `408` / `notifier_test_expired`, the outbox row is `done` with a note. The test the
+/// person last pressed then reads `failed`·408 — not `stalled`, and the diagnostics do not infer a
+/// relay that cannot be reached from a test this notifier itself threw away. A row four and a half
+/// minutes old is still sent (the limit is five), by its own member's tokens only.
+///
+/// Sabotage: drop the age check (the stale rows are sent); the limit 300 → 60 s (the 4½-minute row is
+/// held) or → 3600 s (the 6-minute row is sent); skip the settled rows (`lastTest` is `stalled`).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier / momo_app roles"]
+async fn a_test_row_older_than_five_minutes_is_settled_unsent_and_a_younger_one_still_goes() {
+    let _guard = drain_test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let notifier = momo_notifier_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let mut mine = Vec::new();
+    for _ in 0..3 {
+        mine.push(seed_token(&su, tenant.workspace, tenant.me).await.0);
+    }
+    let mut theirs = Vec::new();
+    for _ in 0..2 {
+        theirs.push(seed_token(&su, tenant.workspace, tenant.other).await.0);
+    }
+
+    // `me`: two stale tests (six minutes and an hour), the newer of the two is the last pressed.
+    // `other`: a test four and a half minutes old, which is still young enough.
+    let stale_a = emit_test_aged(&su, tenant.workspace, tenant.me, 360).await;
+    let stale_b = emit_test_aged(&su, tenant.workspace, tenant.me, 3600).await;
+    let young = emit_test_aged(&su, tenant.workspace, tenant.other, 270).await;
+    mark_last_test(&su, tenant.workspace, tenant.me, stale_a, 360).await;
+    mark_last_test(&su, tenant.workspace, tenant.other, young, 270).await;
+    focus(&su, &[tenant.workspace]).await;
+
+    let relay = RecordingRelay::accepting();
+    let now = Arc::new(AtomicI64::new(T0));
+    let push = PushDrain::new(notifier, PushConfig::for_target(), relay.clone())
+        .with_bulk_clock(held_clock(&now));
+    let stats = push.drain_system_once(32).await.expect("drain");
+    assert_eq!(
+        (
+            stats.claimed,
+            stats.dispatched,
+            stats.held_back,
+            stats.failed
+        ),
+        (3, 2, 6, 0),
+        "{stats:?}"
+    );
+
+    // The relay saw the young row's two dispatches and nothing of the stale ones.
+    let sent = relay.sent();
+    assert_eq!(sent.len(), 2, "{sent:?}");
+    let young_collapse = test_notification_collapse_id(young);
+    assert!(sent
+        .iter()
+        .all(|dispatch| dispatch.collapse_id == young_collapse));
+    assert_eq!(
+        log_of_test(&su, tenant.workspace, tenant.other, young)
+            .await
+            .len(),
+        2
+    );
+
+    // Each stale test has a closed row per current token of `me`, and none is left unsettled.
+    for stale in [stale_a, stale_b] {
+        let log = log_of_test(&su, tenant.workspace, tenant.me, stale).await;
+        assert_eq!(log.len(), 3, "one row per current token");
+        for row in &log {
+            assert_eq!(row.status, Some(TEST_EXPIRED_STATUS));
+            assert_eq!(row.reason.as_deref(), Some(TEST_EXPIRED_REASON));
+            assert!(mine.contains(&row.token));
+        }
+    }
+    for token in mine.iter().chain(theirs.iter()) {
+        assert!(!is_invalidated(&su, *token).await);
+    }
+
+    // The outbox rows are all finished; the stale ones say why.
+    let state = outbox_state(&su, tenant.workspace).await;
+    assert_eq!(state.len(), 3);
+    assert!(
+        state.iter().all(|(status, _, _)| status == "done"),
+        "{state:?}"
+    );
+    let noted = state
+        .iter()
+        .filter(|(_, _, note)| {
+            note.as_deref()
+                .is_some_and(|text| text.starts_with("expired:"))
+        })
+        .count();
+    assert_eq!(noted, 2, "{state:?}");
+    assert_eq!(
+        push.bulk_counters()
+            .get(&("test_notification", "expired"))
+            .copied(),
+        Some(6),
+        "{:?}",
+        push.bulk_counters()
+    );
+
+    // What the person sees: the stale test is `failed`·408 with no invented alarm; the young one `sent`.
+    let mine_now = diagnostics_of(&app, tenant.workspace, tenant.me).await;
+    assert_no_false_alarm(&mine_now);
+    let last = mine_now.last_test.expect("the last test");
+    assert_eq!(
+        (last.status, last.apns_status),
+        (LastTestStatus::Failed, Some(TEST_EXPIRED_STATUS))
+    );
+    let theirs_now = diagnostics_of(&app, tenant.workspace, tenant.other).await;
+    assert_eq!(
+        theirs_now.last_test.expect("the other's last test").status,
+        LastTestStatus::Sent
+    );
 }

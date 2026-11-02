@@ -21,6 +21,9 @@ pub mod app_notice;
 pub mod app_runtimes;
 pub mod approvals;
 pub mod apps_used;
+/// ADR-0151 증보 5 D3 (#4671) — the answer to a read of an attachment's bytes: `200`,
+/// `206`, `416` and `HEAD`. It decides nothing about who may read.
+pub(crate) mod attachment_bytes;
 /// ADR-0151 — the Drive attachment surface: upload session, completion, and the
 /// content proxy, plus the stub archive's own upload endpoint.
 pub mod attachment_media;

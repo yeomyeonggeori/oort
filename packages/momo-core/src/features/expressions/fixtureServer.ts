@@ -2,7 +2,7 @@ import { matchesExpressionContract } from "./contracts";
 import { matchesExpressionChoice } from "./cards";
 import { recommendExpressionKind } from "./kind";
 import { FIXTURE_MEDIA } from "./fixtureMedia";
-import { PHOTO_BRANCHES, PHOTO_FAILURE_STATUS, PHOTO_PROVIDERS, type PhotoBranch, type PhotoFailureCode, type PhotoProvider } from "./photo";
+import { PHOTO_BRANCHES, PHOTO_FAILURE_STATUS, PHOTO_PROVIDERS, type PhotoBranch, type PhotoCutout, type PhotoFailureCode, type PhotoProvider } from "./photo";
 import { FIXTURE_LIST, FIXTURE_MEMBER_ID, FIXTURE_NOW_MS, FIXTURE_READY_DRAFT, FIXTURE_WORKSPACE_ID } from "./fixtures";
 import type { Expression, ExpressionChoice, ExpressionDraft, ExpressionMetadata, ExpressionPatch, ManualUploadCode } from "./types";
 
@@ -24,11 +24,22 @@ function clone<T>(value: T): T { return JSON.parse(JSON.stringify(value)) as T; 
  * In-memory REST fixture for S3 host transport adapters. This simulates wire and
  * preview revisions, not auth, RLS, fetching, conversion, or security enforcement.
  */
-/** The server's own two sentences (momo-expressions `PHOTO_PROMPTS`; a test pins the pair against the Rust source). */
-export const PHOTO_FIXTURE_PROMPTS: Record<PhotoBranch, string> = {
+/**
+ * The server's own sentences (momo-expressions `PHOTO_PROMPTS`; a test pins them against the Rust source).
+ * A sentence says what was made, so the cut-out branch has two: the one for a picture whose background is
+ * gone (`cutout: "model" | "erased"`) and `cutout_unchanged` for the one the server could not erase
+ * (`cutout: "unchanged"`), which must not say the background was erased (ADR-0218 H9.7, #5133).
+ */
+export const PHOTO_FIXTURE_PROMPTS: Record<PhotoBranch | "cutout_unchanged", string> = {
   cutout: "사진에서 피사체만 남기고 배경을 지운 그림",
   caricature: "사진을 바탕으로 새로 그린 캐리커처",
+  cutout_unchanged: "사진에서 피사체를 살려 그렸지만 배경은 지우지 못한 그림",
 };
+
+/** The `prompt` the real server writes for a photo draft: the branch's sentence, unless the cut-out left the picture as drawn. */
+function photoFixturePrompt(branch: PhotoBranch, cutout: PhotoCutout): string {
+  return PHOTO_FIXTURE_PROMPTS[branch === "cutout" && cutout === "unchanged" ? "cutout_unchanged" : branch];
+}
 
 export function createExpressionFixtureServer(options: {
   importFailure?: ManualUploadCode;
@@ -37,6 +48,8 @@ export function createExpressionFixtureServer(options: {
   photoModel?: "none" | PhotoProvider;
   /** With a model: answer every photo request with this closed failure. */
   photoFailure?: PhotoFailureCode;
+  /** With a model: what the fake server's cut-out did to the picture of the cut-out branch (default `erased`; a caricature has no such step). */
+  photoCutout?: Exclude<PhotoCutout, null>;
 } = {}) {
   const base = `/v1/workspaces/${FIXTURE_WORKSPACE_ID}`;
   const catalogue = new Map(FIXTURE_LIST.items.map((item) => [item.id, clone(item)]));
@@ -73,12 +86,13 @@ export function createExpressionFixtureServer(options: {
         if (body.acknowledgedProvider !== options.photoModel) return error(409, "image_model_changed");
         if (options.photoFailure) return error(PHOTO_FAILURE_STATUS[options.photoFailure], options.photoFailure);
         const branch = body.branch as PhotoBranch;
+        const cutout: PhotoCutout = branch === "cutout" ? (options.photoCutout ?? "erased") : null;
         const draftId = `00000000-0000-4000-8000-${String(serial++).padStart(12, "0")}`;
         const draft: ExpressionDraft = { ...clone(FIXTURE_READY_DRAFT), draftId, name: body.name, displayName: body.displayName, tags: body.tags,
           subjectMemberId: body.subjectMemberId, expiresAtMs: now + 3600000, state: "ready", code: null, media: clone(FIXTURE_READY_DRAFT.media!),
-          origin: { kind: "generated", sourceUrl: null, prompt: PHOTO_FIXTURE_PROMPTS[branch], sourceAttachmentId: null } };
+          origin: { kind: "generated", sourceUrl: null, prompt: photoFixturePrompt(branch, cutout), sourceAttachmentId: null } };
         drafts.set(draftId, draft);
-        return { status: 201, json: clone({ draft, cutout: branch === "cutout" ? "erased" : null }) };
+        return { status: 201, json: clone({ draft, cutout }) };
       }
       const prepare = request.method === "POST" && ["uploads", "import", "from-attachment"].some((suffix) => path === `${base}/expressions/${suffix}`);
       if (prepare) {

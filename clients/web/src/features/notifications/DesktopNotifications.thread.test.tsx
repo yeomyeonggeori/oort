@@ -40,9 +40,14 @@ const showNotification = vi.hoisted(() => vi.fn());
 const fetchNotificationRules = vi.hoisted(() => vi.fn());
 const fetchThreadReplies = vi.hoisted(() => vi.fn());
 
+// 이 파일은 **셸이 배너의 클릭을 알려 주지 못하는 곳**(다른 OS·옛 셸)의 옛 어림 경로를 잰다(#5059). 클릭을 알려 주는 셸의
+// 경로는 `DesktopNotifications.click.test.tsx` 가 잰다.
 vi.mock("@/lib/tauri", () => ({
   isDesktop: () => true,
   showNotification: (...args: unknown[]) => showNotification(...args),
+  notificationClickSupported: () => Promise.resolve(false),
+  showClickableNotification: () => Promise.resolve("refused"),
+  onNotificationClick: () => Promise.resolve(() => undefined),
 }));
 
 vi.mock("@momo/core/features/settings/notificationRules", async (importOriginal) => {

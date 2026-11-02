@@ -221,6 +221,25 @@ fn app_commands_are_gated_by_the_capability() {
     assert!(authority
         .resolve_access("dock_badge_set", "other", "other", &local)
         .is_none());
+    // The banner pair that reports a click (#5059) is the main window's alone too. The click
+    // itself is an event the window listens to, which `core:default` already allows.
+    for command in [
+        "notification_click_supported",
+        "notification_show_clickable",
+    ] {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_some(),
+            "{command} must be granted to the main window"
+        );
+        assert!(
+            authority
+                .resolve_access(command, "other", "other", &local)
+                .is_none(),
+            "{command} must not be granted to another window"
+        );
+    }
     // Control: a command no capability grants is refused, which is only true
     // once the app manifest exists.
     assert!(authority
