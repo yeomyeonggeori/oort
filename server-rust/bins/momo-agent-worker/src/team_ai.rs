@@ -1378,6 +1378,11 @@ impl AgentWorker {
         let withhold_previews = trace.as_ref().is_some_and(|trace| {
             !trace.tools.is_empty() || trace.web_searches > 0 || trace.task_step.is_some()
         });
+        // B5 (#4968): the step this request is, and what it did — a task's last step reports its
+        // reads like every step before it (the ledger rows are per step, B5-7).
+        let task_progress = trace
+            .as_ref()
+            .and_then(|trace| trace.task_step.map(|step| (step, task::step_counts(trace))));
         // B5 (#4967): the code a task row is closed with — the run's own ending, by its word.
         let task_end_reason: &'static str = match &ending {
             // A `card_suggest` card is a first-turn ending (a step is offered no card tool), and it
@@ -1543,6 +1548,21 @@ impl AgentWorker {
                     }
                 }
                 if in_task {
+                    // The step that ends the task reports its activities too. The visible plan is
+                    // left as the previous step wrote it: the ledger records what was said, and a
+                    // reader does not draw a finished run's plan as in progress (ADR-0200 증보 7 7-7).
+                    if let Some((step, counts)) = task_progress {
+                        task::record_step_progress(
+                            conn,
+                            workspace_id,
+                            run_id,
+                            agent,
+                            step,
+                            counts,
+                            None,
+                        )
+                        .await?;
+                    }
                     // B13-I7: the task ends with the run, and its plan and note go with it.
                     momo_agent::team_ai_task::end_in_tx(
                         conn,
