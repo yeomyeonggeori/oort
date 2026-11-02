@@ -2775,6 +2775,22 @@
   padding: var(--spacing-tooltip-y) var(--spacing-3);
   white-space: nowrap;
   pointer-events: none;
+
+  /* 판 안에 머물기 (#4230): 툴팁은 판(`overflow: clip`) 안에 그려져서 가장자리를 넘으면 글자가 잘린다. `tooltipFit.ts`가 열릴 때
+   * 재서 `--tooltip-shift`(가로 이동, 오른쪽이 양수)와, 판보다 넓을 때만 `--tooltip-max`와 `[data-capped]`(그 폭에서 줄바꿈)를
+   * 넣는다. 없으면 0·상한 없음이라 가운데·오른쪽 끝 정렬 그대로다. 두 값은 단위 없는 px 숫자다(여기서 `* 1px`로 곱한다). 이동은 여백으로 한다: 가운데 정렬(`left` 기준)은 시작 여백이,
+   * 오른쪽 끝 정렬(`right` 기준)은 끝 여백의 음수가 같은 쪽으로 민다. */
+  margin-inline-start: calc(var(--tooltip-shift, 0) * 1px);
+  margin-inline-end: calc(var(--tooltip-shift, 0) * -1px);
+
+  /* 줄바꿈 상태: 한국어는 어절에서 꺾는다(`keep-all`, 「채/널」로 끊지 않는다). 끊을 곳 없는 긴 영문 이름은 앱 전체의 기본 규칙
+   * (`:where(p, span, …) { overflow-wrap: anywhere }`, 툴팁도 span이라 상속한다)이 어디서든 꺾는다: 여기서 다시 적지 않는다. */
+  &[data-capped] {
+    inline-size: max-content;
+    max-inline-size: calc(var(--tooltip-max) * 1px);
+    white-space: normal;
+    word-break: keep-all;
+  }
 }
 
 /* 컴포저 선택 서식 트레이 (#1902). 선택 영역 위(여유 없으면 아래)에 고정한다.

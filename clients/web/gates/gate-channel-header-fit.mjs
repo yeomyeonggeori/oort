@@ -18,7 +18,10 @@
 //   7. 줄바꿈 정책   컨트롤이 제목 아랫줄로 내려가는 것은 **옆에 제목 몫(바닥 3rem)이 모자랄 때만**이다. 뷰포트 안인지만 보면
 //                    「제목 칸이 폭 0으로 시작한다」는 약속이 깨져도(필요 없이 줄이 바뀐다) 초록이다. 반대로 한 줄에 서면 제목
 //                    칸이 바닥 이상이다.
-//   8. 장면이 진짜다 기대한 단추 집합이 그대로 서 있고, 글자 크기·밀도 속성이 계산된 값에 실제로 닿았다.
+//   8. 툴팁         컨트롤마다 키보드 초점으로 툴팁을 열면 그 상자가 자기를 자르는 판(`.app-pane`, `overflow: clip`)과 창 안이고, 네 줄 안이며, 글이 상자를 넘지 않는다.
+//                    툴팁은 포털이 아니라 판 안에 그려져서 가장자리를 넘으면 글자가 잘린다(B1 캡처의 「툴팁도 잘려요」).
+//                    줄이 바뀐 아랫줄의 첫 단추와, 이름을 글에 담는 ⋮(「{이름} 채널 메뉴」)가 그 경우다.
+//   9. 장면이 진짜다 기대한 단추 집합이 그대로 서 있고, 글자 크기·밀도 속성이 계산된 값에 실제로 닿았다.
 //
 // 폭은 표(320·390·600·720·900·1440)만이 아니라 **16px 간격 훑기**(320~1440)도 한다. 줄이 바뀌는 문턱과 제목 칸이 바닥에 닿는
 // 폭은 표의 여섯 폭 사이에 있고, 레이아웃 결함은 그 문턱에서 나온다(표의 폭만으로는 핸들·바닥 단정이 한 번도 문턱을 못 밟는다).
@@ -68,6 +71,8 @@ const SWEEP_WIDTHS = Array.from({ length: (1440 - 320) / 16 + 1 }, (_, index) =>
 const HEIGHT = 800;
 /** 제목 칸의 바닥. `tokens.css` `channel-head-body`의 `min-inline-size: 3rem`(루트 16px). */
 const TITLE_FLOOR = 48;
+/** 줄바꿈한 툴팁의 줄 수 상한. 긴 영문 이름(85자)이 폰 320에서 세 줄이다: 판에 맞추려고 폭을 너무 좁혀 길쭉해지면 넘는다. */
+const TOOLTIP_MAX_LINES = 4;
 /** 글자 크기·밀도의 루트 속성 값. 계산된 값은 `design/appearance/{typography-scale,density}.css`가 정한다. */
 const FONT_SIZES = [
   { id: "smaller", scale: 14 / 15 },
@@ -85,6 +90,7 @@ const NAMES = {
   en: "release-2026-08-oncall-handover-deploy-decision-customer-impact-rollback-criteria",
   emoji: "🚀🔥-launch-war-room-🧯-롤백-🎯-고객-영향-점검-회의-👩🏽‍💻👨🏻‍🚀",
   short: "general",
+  latin: "channelnamewithoutanyhyphenorspaceatallkeepsgoingandgoingforalongtimeuntilitends",
 };
 const LONG_TOPIC =
   "release-2026-08 운영 토픽: 온콜 교대, 배포 판단, 고객 영향, 롤백 조건을 이 채널에서 함께 기록합니다. " +
@@ -95,6 +101,8 @@ const SCENES = [
   { id: "ko", kind: "channel", name: NAMES.ko, topic: "" },
   { id: "en", kind: "channel", name: NAMES.en, topic: "" },
   { id: "emoji", kind: "channel", name: NAMES.emoji, topic: "" },
+  // 하이픈도 공백도 없는 긴 이름: 줄바꿈 지점이 없어서 툴팁의 `overflow-wrap`이 없으면 글이 상자를 넘는다.
+  { id: "latin", kind: "channel", name: NAMES.latin, topic: "" },
   { id: "ko+topic", kind: "channel", name: NAMES.ko, topic: LONG_TOPIC },
   { id: "short+topic", kind: "channel", name: NAMES.short, topic: LONG_TOPIC },
   { id: "dm", kind: "dm", name: LONG_PEER, topic: "" },
@@ -649,6 +657,89 @@ async function settle(page) {
   );
 }
 
+/**
+ * 툴팁: 머리 컨트롤마다 키보드 초점으로 툴팁을 열어, 툴팁 상자가 판(과 창) 안인지 잰다. 기본 글자 크기·밀도에서 표의 폭만 잰다.
+ * 키보드 초점은 지연 없이 즉시 뜬다(`Tooltip`, 마우스로 간 초점은 안 띄운다). 그래서 진짜 Tab 키를 한 번 눌러 입력 방식을 키보드로
+ * 만든 뒤에 `focus()`한다: Shift 같은 수식 키로는 웨빗이 첫 프로그램 초점을 `:focus-visible`로 치지 않는다(실측).
+ * 호버는 두 엔진 모두 되지만 컨트롤마다 500ms 지연이라 게이트에 느리다.
+ */
+async function sweepTooltips(page, scene, withPlan, engineName, report) {
+  const label = `${engineName} · ${scene.id} · 독 ${withPlan ? "있음" : "없음"} · 툴팁`;
+  await page.evaluate(() => {
+    const root = document.documentElement;
+    root.setAttribute("data-font-size", "default");
+    root.setAttribute("data-density", "comfortable");
+  });
+  const blur = () =>
+    page.evaluate(() => {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    });
+  let opened = 0;
+  let failed = 0;
+  for (const width of WIDTHS) {
+    await page.setViewportSize({ width, height: HEIGHT });
+    await settle(page);
+    await page.keyboard.press("Tab");
+    await blur();
+    const buttons = page.locator('[data-testid="channel-header-controls"] button');
+    const count = await buttons.count();
+    for (let index = 0; index < count; index += 1) {
+      const button = buttons.nth(index);
+      const id = (await button.getAttribute("data-testid")) ?? `button#${index}`;
+      await blur();
+      await button.focus();
+      const shown = await page
+        .getByTestId("tooltip")
+        .first()
+        .waitFor({ state: "attached", timeout: 1_500 })
+        .then(
+          () => true,
+          () => false
+        );
+      if (!shown) continue;
+      const m = await page.evaluate(() => {
+        const tip = document.querySelector('[data-testid="tooltip"]');
+        const pane = document.querySelector(".app-pane");
+        const box = tip.getBoundingClientRect();
+        const paneBox = pane ? pane.getBoundingClientRect() : { left: 0, right: window.innerWidth };
+        const style = getComputedStyle(tip);
+        const padding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
+        return {
+          left: box.left,
+          right: box.right,
+          lines: Math.round((box.height - padding) / Number.parseFloat(style.lineHeight)),
+          paneLeft: Math.max(0, paneBox.left),
+          paneRight: Math.min(window.innerWidth, paneBox.right),
+          overflow: tip.scrollWidth - tip.clientWidth,
+          text: tip.textContent,
+        };
+      });
+      opened += 1;
+      const problems = [];
+      if (m.left < m.paneLeft - 0.5 || m.right > m.paneRight + 0.5) {
+        problems.push(`상자 [${m.left.toFixed(1)}→${m.right.toFixed(1)}]가 판(${m.paneLeft.toFixed(1)}→${m.paneRight.toFixed(1)}) 밖이다`);
+      }
+      // 판 안에만 넣으려고 폭을 너무 좁혀 길쭉해지면 안 된다.
+      if (m.lines > TOOLTIP_MAX_LINES) problems.push(`${m.lines}줄(> ${TOOLTIP_MAX_LINES})로 길쭉하다`);
+      // 줄바꿈할 곳이 없는 글이 상자를 넘으면(overflow-wrap) 상자는 판 안이어도 글자가 판 밖으로 나간다.
+      if (m.overflow > 1) problems.push(`글이 상자를 ${m.overflow}px 넘친다`);
+      if (problems.length > 0) {
+        failed += 1;
+        report.failures.push({
+          label,
+          state: `${width}px`,
+          check: "tooltip",
+          text: `${id}의 툴팁 「${m.text}」: ${problems.join(", ")}`,
+        });
+      }
+    }
+  }
+  await blur();
+  report.tooltips += opened;
+  report.tooltipsFailed += failed;
+  report.perScene.push(`${label}: ${opened - failed}/${opened} 통과`);
+}
+
 /** 한 장면(이름 종류 × 독 유무)이 훑을 상태 목록: 표의 폭은 글자 크기 3 × 밀도 3 전부, 훑기 폭은 두 극단만. */
 function statesToMeasure() {
   const list = [];
@@ -735,7 +826,14 @@ async function main() {
     portEnvVar: "HEADER_FIT_GATE_PORT",
     extraArgs: distOverride ? ["--outDir", distOverride] : [],
   });
-  const report = { states: 0, failedStates: 0, failures: [], perScene: [] };
+  const report = {
+    states: 0,
+    failedStates: 0,
+    tooltips: 0,
+    tooltipsFailed: 0,
+    failures: [],
+    perScene: [],
+  };
   try {
     for (const engineName of engineNames) {
       const browser = await ENGINES[engineName].launch();
@@ -745,6 +843,7 @@ async function main() {
             const { context, page } = await openScene(browser, scene, withPlan);
             try {
               await sweepScene(page, scene, withPlan, engineName, report);
+              await sweepTooltips(page, scene, withPlan, engineName, report);
             } finally {
               await context.close();
             }
@@ -764,6 +863,11 @@ async function main() {
   if (report.states !== expectedStates) {
     throw new Error(`쟀어야 할 장면은 ${expectedStates}개인데 ${report.states}개를 쟀다`);
   }
+  // 툴팁도 센 수를 못 박는다: 하나도 안 떴으면(초점이 :focus-visible이 아니었다) 아래 판정이 비어 늘 초록이다.
+  const minTooltips = engineNames.length * sceneRuns * WIDTHS.length * 2;
+  if (report.tooltips < minTooltips) {
+    throw new Error(`툴팁을 ${minTooltips}개 이상 열어야 하는데 ${report.tooltips}개만 열렸다`);
+  }
 
   if (report.failures.length > 0) {
     const byCheck = new Map();
@@ -771,7 +875,7 @@ async function main() {
       byCheck.set(failure.check, (byCheck.get(failure.check) ?? 0) + 1);
     }
     console.error(
-      `GATE FAIL: 장면 ${report.states}개 중 ${report.failedStates}개가 어겼다 ` +
+      `GATE FAIL: 장면 ${report.states}개 중 ${report.failedStates}개, 툴팁 ${report.tooltips}개 중 ${report.tooltipsFailed}개가 어겼다 ` +
         `(항목별 ${[...byCheck.entries()].map(([check, count]) => `${check} ${count}`).join(", ")})`
     );
     for (const line of report.perScene) console.error(`  ${line}`);
@@ -786,8 +890,9 @@ async function main() {
   }
   for (const line of report.perScene) console.log(`  ${line}`);
   console.log(
-    `GATE PASS: 장면 ${report.states}개(엔진 ${engineNames.join("·")})에서 머리의 모든 컨트롤이 뷰포트 안이고, ` +
-      "서로·아이콘·제목·토픽과 겹치지 않으며, 그 자리에서 눌린다. 제목은 한 줄 말줄임이고 전문은 글과 툴팁에 남는다."
+    `GATE PASS: 장면 ${report.states}개와 툴팁 ${report.tooltips}개(엔진 ${engineNames.join("·")})에서 머리의 모든 컨트롤이 뷰포트 안이고, ` +
+      "서로·아이콘·제목·토픽과 겹치지 않으며, 그 자리에서 눌린다. 컨트롤은 제목 옆에 설 수 있을 때만 아랫줄로 내려가 오른쪽 끝에 붙는다. " +
+      "제목은 한 줄 말줄임이고 전문은 글과 툴팁에 남으며, 툴팁은 판 안에 머문다."
   );
 }
 
