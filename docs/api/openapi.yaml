@@ -11611,16 +11611,29 @@ paths:
         `getAttachmentContent` gives, so the route does not reveal whose files exist.
 
 
-        The content checks answer 400 and are therefore seen only by the file's own uploader. The
-        stored type must be `video/mp4`, `video/quicktime` or `video/webm`, and the object's first
-        bytes must be that container's (an `ftyp` box at offset 4 for MP4 and QuickTime, the EBML
-        header for WebM). `durationMs` is 1 to 86,400,000. `width` and `height` are 1 to 16,384. A
-        poster is `image/jpeg` or `image/webp` whose bytes say so, at most 1,280 pixels on a side by
-        its header, and at most 256 KiB decoded. A JPEG that is cut off after its frame header
-        passes (the server reads a header and does not decode); a client decoder is what rejects it.
+        **The shape of the request is judged first**, before the caller is looked up against the
+        file, and answers 400 to anyone who sends it: `durationMs` is an integer from 1 to 86,400,000;
+        `width` and `height` are integers from 1 to 16,384; a poster is `image/jpeg` or `image/webp`
+        whose bytes say so (the magic number must be the label's), strict base64, at most 256 KiB
+        decoded and at most 1,280 pixels on a side by its header. These checks look at the body alone
+        and say nothing about any file. A JPEG that is cut off after its frame header passes (the
+        server reads a header and does not decode); a client decoder is what rejects it. The poster
+        is stored and served as it was sent, EXIF and any bytes after the image included; a client
+        strips what it does not mean to share before it sends.
 
 
-        The request body is at most 512 KiB (413 above that). The write is audited as
+        **Only the checks that read the file come after the authorization** and are therefore seen
+        only by the file's own uploader (400): the stored type must be `video/mp4`,
+        `video/quicktime` or `video/webm`, and the object's first bytes must be that container's
+        (an `ftyp` box at offset 4 for MP4 and QuickTime, the EBML header for WebM).
+
+
+        The request body is at most 512 KiB (413 above that). A body the JSON reader cannot use is
+        answered by the framework before the route runs: 400 when it is not JSON, 415 when it is not
+        sent as `application/json`, 422 when it is JSON of the wrong shape (a missing field, a
+        fractional or non-numeric value, a key this route does not know). The route spends a
+        per-member write budget of its own, default 60 per window (`RATE_LIMIT_MEDIA_WRITE_PER_MEMBER`,
+        0 removes it), before the body is read; a refused request counts. The write is audited as
         `attachment.media_set` with the kind and whether there is a poster, never the numbers or the
         picture. An agent bearer or a developer token cannot reach this route.
       security:
@@ -11646,9 +11659,11 @@ paths:
                 $ref: "#/components/schemas/AttachmentMedia"
         "400":
           description: >
-            A number outside its range, a poster that is not the image its label says, too large or
-            too big by its header, malformed base64, an attachment whose stored type is not a video
-            type, or whose bytes are not that container.
+            The request is wrong in itself: a body that is not JSON, a number outside its range, a
+            poster that is not the image its label says, too large or too big by its header, or
+            malformed base64 (all judged before the file is looked at). Or, for the file's own
+            uploader only: an attachment whose stored type is not a video type, or whose bytes are
+            not that container.
           content:
             application/json:
               schema:
@@ -11672,6 +11687,15 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "413":
           description: The request body is larger than 512 KiB.
+        "415":
+          description: The body is not sent as `application/json`. Answered by the framework; the body is plain text.
+        "422":
+          description: >
+            The body is JSON but not this request: a missing field, a fractional or non-numeric
+            value (`durationMs` is an integer), or a key the route does not know. Answered by the
+            framework; the body is plain text.
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/attachments/{attachmentId}/poster:
     get:
@@ -15832,7 +15856,9 @@ components:
         (default 60 seconds) and per member: message sends — `POST …/messages` and
         `POST …/scheduled-messages/{id}/send-now` share one budget, default 120 for a
         person and 600 for an agent credential; scheduled-message creates and edits,
-        default 60; attachment upload starts, default 60; starts of a picture from a
+        default 60; attachment upload starts, default 60; video length, size and poster writes
+        (`PUT …/attachments/{id}/media`, ADR-0151 amendment 5 D5, `RATE_LIMIT_MEDIA_WRITE_PER_MEMBER`),
+        default 60; starts of a picture from a
         photo (`POST …/expressions/photo-drafts`, ADR-0218 §8 H11), default 10. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
         use) and every read except the two below are not budgeted. Retrying with the

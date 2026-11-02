@@ -15,9 +15,14 @@
 //! more ([`may_hold_media`]: the uploader's own, finished, not yet on a message) and answers a failure
 //! of *that* with the same flat 404.
 //!
-//! The write's **content** checks (is it a video type, do the bytes say so, are the numbers and the
-//! poster inside their ranges) come **after** that authorization and answer 400. They are therefore
-//! only ever seen by the file's own uploader, who knows what they uploaded.
+//! The write's checks come in two groups, and the order between them is the point. The **shape of
+//! the request** (the numbers inside their ranges, the poster's label, base64, bytes and size) is
+//! judged first, before any connection is taken, and answers 400 to whoever sent it: it reads the
+//! body and nothing else, so it says nothing about any file. The checks that **read the file** (is
+//! its stored type a video type, do its first bytes say so) come after the authorization and answer
+//! 400 only to the file's own uploader, who knows what they uploaded. (A body the JSON reader cannot
+//! use never gets here: the framework answers 400, 415 or 422 first, and the member-write budget
+//! sits in front of all of it.)
 //!
 //! ## What is not here
 //!

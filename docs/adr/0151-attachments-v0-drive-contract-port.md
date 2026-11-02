@@ -543,6 +543,7 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 14. 열린 업로드 4개와 디스크 예약은 정상 사용자를 막을 수 있다. 예약은 보수적이라 60초 청소 주기 사이에 만료된 세션의 남은 바이트가 계산에 남는다.
 15. 데스크탑 IPC가 선형으로 늘면 300 MiB 한 건에 메모리가 약 +2.6 GiB다(64 MiB에서 +569 MiB를 잰 값에서 늘린 추정이며 측정이 아니다). #4639 전에는 올리지 않는다(순서는 C4-2 ← #4639 의존이 지킨다).
 16. 웹·데스크탑이 올린 영상은 포스터가 없다(이월).
+17. **포스터는 EXIF·덧붙은 바이트까지 그대로 저장·전달한다.** 서버는 그림을 디코드·재인코딩하지 않으므로(D5) 검증을 통과한 포스터의 EXIF·XMP와 헤더 뒤에 덧붙은 바이트(256 KiB 이내)가 열람자 모두에게 그대로 가고, 포스터 가로세로는 헤더가 선언한 값이다. `nosniff`·`attachment`로 렌더 위험은 닫혀 있다. 올리는 클라이언트(F1)가 EXIF를 벗겨 보낸다.
 
 ### runtime-unverified
 
@@ -592,9 +593,9 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 | D4 공개 문장 | `check_security_claims.py`(기존 린트) | ATT-1이 조건부로 좁혀지고 새 claim(ATT-9)이 스트림 시험 둘을 증명으로 건다. 증명 이름이 틀리거나 비면 E1·E2가 빨강이다. 린트는 문장이 스트림 주소를 말하는지는 못 보므로 새 id 없이 ATT-1 문장만 고치는 방식은 초록이라 잡지 못한다 | C3b |
 | D4 CSP | `desktopShellContract.test.ts` 확장, `gate-csp-deploy.mjs` | 데스크탑 `media-src`가 `'self' http: https:`이고 `blob:`이 없으며 `img-src 'self' data:`는 그대로다. 웹은 `media-src` 없이 `default-src 'self'`다. `blob:`을 더하면 빨강 | C7 |
 | D4 미디어 요소 | `only_the_player_creates_media_elements`(정적) | `<video`·`<audio`·`new Audio(`에 더해 `createElement("video")`·`createElement("audio")`·`jsx("video"` 패턴이 재생기 컴포넌트 하나 밖에 없다. 다른 컴포넌트가 만들면 빨강 | C7 |
-| D5 권한 | `the_media_write_is_the_uploaders_before_the_send_only` | 업로더 본인·`complete`·미묶임에서만 200이다. 남의 첨부·묶인 뒤·`pending`·영상 아닌 mime은 같은 404다. 술어 하나를 지우면 빨강 | C5 |
+| D5 권한 | `the_media_write_is_the_uploaders_before_the_send_only` | 업로더 본인·`complete`·미묶임에서만 200이다. 남의 첨부·묶인 뒤·`pending`은 같은 404다(영상 아닌 mime은 이 행이 아니라 아래 「영상 확인」 행의 400이다: 인가가 먼저라 업로더 본인만 보는 400이다). 술어 하나를 지우면 빨강 | C5 |
 | D5 포스터 검증 | `a_poster_is_validated_by_its_bytes_not_its_label` | `image/jpeg`로 선언한 HTML·PNG·GIF·SVG·**헤더(SOF) 앞에서 자른 JPEG**·256 KiB + 1 B·치수 1,281은 각각 400이고 정상 JPEG·WebP는 200이다. 매직·치수·크기 검사 하나를 지우면 그 케이스가 통과해 빨강. 헤더만 읽는 `image_dimensions`는 SOF 뒤에서 잘린 JPEG를 통과시킨다(서버가 디코드하지 않아 위험은 없고 클라이언트 디코더 몫이라 이 시험은 그것을 400으로 단정하지 않는다) | C5 |
-| D5 영상 확인 | `a_non_video_or_a_fake_video_cannot_hold_media` | 저장된 mime이 닫힌 목록 밖이거나 첫 바이트에 `ftyp`·EBML이 없으면 400이다. 길이 0·24시간 + 1 ms·치수 16,385도 400이다. 매직 검사나 범위 검사를 지우면 빨강 | C5 |
+| D5 영상 확인 | `a_non_video_or_a_fake_video_cannot_hold_media` | 저장된 mime이 닫힌 목록 밖이거나 첫 바이트에 `ftyp`·EBML이 없으면 400이다(인가 뒤라 그 파일의 업로더 본인만 본다. 남의 파일이면 위 「권한」 행의 404다). 길이 0·24시간 + 1 ms·치수 16,385도 400이고 이 셋은 요청의 모양이라 인가 앞에서 누구에게나 400이다. 매직 검사나 범위 검사를 지우면 빨강 | C5 |
 | D5 읽기 | `the_poster_route_is_the_content_route_for_everyone_else` | 포스터 GET이 content와 같은 인가 매트릭스를 같은 404로 내고(지운 메시지 포함) 헤더 셋이 같다. 술어를 지우면 빨강 | C5 |
 | D5 페이로드 | `a_poster_is_never_in_a_payload` | 메시지 투영·`message.new` 프레임·outbox 페이로드에 `media`(길이·치수·`hasPoster`)만 있고 포스터 바이트·base64가 없으며 `PAGED_ATTACHMENT_JOIN`이 `poster_bytes`를 고르지 않는다. 포스터를 실으면 빨강 | C5 |
 | D5 회수 | `media_rows_follow_the_attachment` | 첨부 행이 지워지면 `attachment_media`도 CASCADE로 사라지고 FK 전수 시험이 새 FK를 `(known)`으로 센다. CASCADE를 지우면 빨강 | C5 |

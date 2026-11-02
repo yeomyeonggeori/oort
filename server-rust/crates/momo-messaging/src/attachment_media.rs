@@ -69,9 +69,11 @@ pub const POSTER_MAX_DIMENSION: u32 = 1_280;
 pub const VIDEO_PREFIX_BYTES: usize = 12;
 
 /// Why a media declaration, a poster or the object itself was refused. Each is a **400** and each
-/// has its own sentence, because the client that sent it can act on which one it was; none of them
-/// is reachable by anyone who is not the file's uploader (the authorization precedes them), so the
-/// sentences confirm nothing about a file the caller could not already see.
+/// has its own sentence, because the client that sent it can act on which one it was. The route
+/// judges the request's own shape first (the numbers and the poster: `Duration`, `Dimensions`,
+/// `Poster*`), for whoever sent it — they read the body and say nothing about any file — and the two
+/// that read the file (`NotAVideo`, `VideoBytes`) only after the authorization, so only the file's
+/// uploader ever sees those.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum MediaRejected {
     #[error("durationMs must be an integer from 1 to 86400000")]
