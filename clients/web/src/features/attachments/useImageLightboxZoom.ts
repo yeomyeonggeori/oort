@@ -7,12 +7,14 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { ZOOM_CHIP_LINGER_MS } from "@/design/motion";
 import {
   LIGHTBOX_FIT_VIEW,
+  LIGHTBOX_KEY_PAN_DIVISOR,
+  LIGHTBOX_MAX_ZOOM,
   clampLightboxView,
   isLightboxFit,
   lightboxActualSizeZoom,
+  lightboxPanDelta,
   lightboxWheelFactor,
   lightboxZoomKeyAction,
   lightboxZoomLabel,
@@ -28,7 +30,8 @@ import {
 // 배율·이동의 정본은 `ref`(`view`)다. 매 사건마다 React를 다시 그리지 않으려고, 사진의 변환은 CSS 변수(`--lightbox-zoom`,
 // `--lightbox-pan-x`, `--lightbox-pan-y`)로 직접 꽂는다(CSSOM이라 CSP·프리플라이트의 `inline_style`에 걸리지 않는다:
 // `slider.tsx`의 `--slider-fraction`과 같은 길). 변수를 읽는 규칙은 tokens.css의 `lightbox-photo` 유틸이다. React 상태는
-// 화면 결정에 필요한 것만 든다: 확대 중인가(`zoomed`: 바깥 클릭·←/→·Esc·커서), 끄는 중인가(`dragging`), 칩 글자.
+// 화면 결정에 필요한 것만 든다: 확대 중인가(`zoomed`: 바깥 클릭·←/→·Esc·커서), 끄는 중인가(`dragging`), 맨 끝 배율인가(`maxed`),
+// 배율 글자(`label`: 아래 캡슐이 늘 보여 준다. 앞 판의 잠깐 떴다 지는 칩은 사라졌다, #5190).
 //
 // 입력은 네 갈래다.
 //   · 휠: `ctrlKey`(트랙패드 오므리기·벌리기는 이 모양으로 온다) 또는 `metaKey`(⌘+스크롤). 커서가 중심이다. React의 `onWheel`은
@@ -36,8 +39,8 @@ import {
 //   · `gesture*`: 데스크탑 셸(WKWebView)과 사파리는 핀치를 `wheel`이 아니라 이 WebKit 전용 사건으로 준다. `scale`은 시작
 //     대비 누적값이다. 두 갈래가 함께 오는 환경이 있어도 이중으로 확대하지 않도록, 제스처 중에는 `ctrlKey` 휠을 무시한다.
 //   · 포인터: 확대 중에 사진을 끈다. `setPointerCapture`로 사진 밖에서 놓아도 끝이 온다.
-//   · 두 번 클릭·키(⌘+ ⌘- ⌘0): 띄엄띄엄한 단계라 변환을 부드럽게 잇는다(`data-smooth`). 연속 입력(휠·핀치·끌기)은 이행이
-//     손가락을 따라가지 못하게 하므로 끈다.
+//   · 두 번 클릭·키(+ − 0, ⌘ 조합도)·캡슐의 − +·확대 중 화살표 이동: 띄엄띄엄한 단계라 변환을 부드럽게 잇는다(`data-smooth`).
+//     연속 입력(휠·핀치·끌기)은 이행이 손가락을 따라가지 못하게 하므로 끈다.
 // =============================================================================
 
 /** WebKit 전용 `gesture*` 사건. `lib.dom`에 없어서 쓰는 칸만 적는다. */
@@ -74,15 +77,26 @@ export interface ImageLightboxZoom {
   /** 렌더에 쓰는 값. 사건 처리 안에서는 `isZoomed()`를 읽는다(방금 바뀐 값을 바로 본다). */
   zoomed: boolean;
   isZoomed: () => boolean;
-  /** 칩에 적을 글자. 없으면 칩이 서지 않는다. */
-  chip: string | null;
-  /** 맞춤으로 돌아간다(Esc·⌘0). */
+  /** 캡슐에 적을 배율 글자: 맞춤이면 「맞춤」, 아니면 자연 크기 대비 「150%」. 늘 있다. */
+  label: string;
+  /** 맨 끝 배율(맞춤의 4배)인가. 캡슐의 + 가 이때 눌려도 아무 일도 하지 않는다고 말한다. */
+  maxed: boolean;
+  /** 맞춤으로 돌아간다(Esc·0). */
   reset: () => void;
   fitForClose: () => Promise<void>;
-  /** ⌘+ ⌘- ⌘0. 먹었으면 `true`: 호출자가 `preventDefault`한다. */
+  /** 한 단계 키우고(1)·줄인다(-1). 캡슐의 + − 와 키가 같은 길이다. */
+  step: (direction: 1 | -1) => void;
+  /** + − 0 (⌘·Ctrl 조합도). 먹었으면 `true`: 호출자가 `preventDefault`한다. */
   handleKey: (event: {
     key: string;
     code?: string;
+    metaKey?: boolean;
+    ctrlKey?: boolean;
+    altKey?: boolean;
+  }) => boolean;
+  /** 확대 중 화살표 키로 사진을 옮긴다. 맞춤이거나 화살표가 아니면 `false`다(넘기기 길이 열려 있다). */
+  panKey: (event: {
+    key: string;
     metaKey?: boolean;
     ctrlKey?: boolean;
     altKey?: boolean;
@@ -103,10 +117,10 @@ export function useImageLightboxZoom({ resetKey, enabled = true }: { resetKey: s
   const view = useRef<LightboxView>(LIGHTBOX_FIT_VIEW);
   const drag = useRef<DragState | null>(null);
   const gesture = useRef<{ baseZoom: number } | null>(null);
-  const chipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [zoomed, setZoomed] = useState(false);
+  const [maxed, setMaxed] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [chip, setChip] = useState<string | null>(null);
+  const [label, setLabel] = useState(() => lightboxZoomLabel(LIGHTBOX_FIT_VIEW.zoom, null));
 
   const viewerRef = useCallback((node: HTMLElement | null) => {
     viewerNode.current = node;
@@ -145,26 +159,6 @@ export function useImageLightboxZoom({ resetKey, enabled = true }: { resetKey: s
     };
   }, []);
 
-  const hideChip = useCallback(() => {
-    if (chipTimer.current !== null) {
-      clearTimeout(chipTimer.current);
-      chipTimer.current = null;
-    }
-    setChip(null);
-  }, []);
-
-  const showChip = useCallback(
-    (text: string) => {
-      if (chipTimer.current !== null) clearTimeout(chipTimer.current);
-      setChip(text);
-      chipTimer.current = setTimeout(() => {
-        chipTimer.current = null;
-        setChip(null);
-      }, ZOOM_CHIP_LINGER_MS);
-    },
-    []
-  );
-
   /** 사진에 변환을 꽂는다. `smooth`일 때만 이행이 켜진다(띄엄띄엄한 단계). */
   const applyView = useCallback((node: HTMLImageElement, next: LightboxView, smooth: boolean) => {
     if (smooth) node.setAttribute("data-smooth", "");
@@ -179,8 +173,10 @@ export function useImageLightboxZoom({ resetKey, enabled = true }: { resetKey: s
       view.current = next;
       if (photoNode.current !== null) applyView(photoNode.current, next, smooth);
       setZoomed(!isLightboxFit(next.zoom));
+      setMaxed(next.zoom >= LIGHTBOX_MAX_ZOOM);
+      setLabel(lightboxZoomLabel(next.zoom, fitScale()));
     },
-    [applyView]
+    [applyView, fitScale]
   );
 
   const photoRef = useCallback(
@@ -206,29 +202,27 @@ export function useImageLightboxZoom({ resetKey, enabled = true }: { resetKey: s
       const next = zoomLightboxViewAt(before, nextZoom, point, geometry);
       if (next.zoom === before.zoom && next.x === before.x && next.y === before.y) return;
       paint(next, smooth);
-      if (next.zoom !== before.zoom) showChip(lightboxZoomLabel(next.zoom, fitScale()));
     },
-    [fitScale, measure, paint, showChip]
+    [measure, paint]
   );
 
-  /** 맞춤으로. `announce`면 칩이 「맞춤」을 말한다. 이미 맞춤이어도 칩은 선다(키를 눌렀다는 답이다). */
+  /** 맞춤으로. 이미 맞춤이면 할 일이 없다(캡슐의 글자가 이미 「맞춤」이다). */
   const fit = useCallback(
-    (smooth: boolean, announce: boolean) => {
+    (smooth: boolean) => {
       const before = view.current;
       if (before.zoom !== LIGHTBOX_FIT_VIEW.zoom || before.x !== 0 || before.y !== 0) paint(LIGHTBOX_FIT_VIEW, smooth);
-      if (announce) showChip(lightboxZoomLabel(LIGHTBOX_FIT_VIEW.zoom, fitScale()));
     },
-    [fitScale, paint, showChip]
+    [paint]
   );
 
-  const reset = useCallback(() => fit(true, true), [fit]);
+  const reset = useCallback(() => fit(true), [fit]);
   const fitForClose = useCallback(() => new Promise<void>(resolve => {
     drag.current = null;
     gesture.current = null;
     setDragging(false);
     const node = photoNode.current;
     if (!node || isLightboxFit(view.current.zoom) || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      fit(false, false);
+      fit(false);
       resolve();
       return;
     }
@@ -243,7 +237,7 @@ export function useImageLightboxZoom({ resetKey, enabled = true }: { resetKey: s
     };
     node.addEventListener('transitionend', end);
     fitCleanups.current.add(finish);
-    fit(true, false);
+    fit(true);
     // The CSS ladder owns the duration. Fallback covers zero-duration CSS and interrupted transitions.
     const duration = getComputedStyle(node).transitionDuration.split(',').reduce((max, value) =>
       Math.max(max, parseFloat(value) * (value.trim().endsWith('ms') ? 1 : 1000) || 0), 0);
@@ -251,16 +245,48 @@ export function useImageLightboxZoom({ resetKey, enabled = true }: { resetKey: s
   }), [fit]);
 
 
+  /** 한 단계 키우고·줄인다. 뷰어 한가운데가 중심이다(커서가 없다). */
+  const step = useCallback<ImageLightboxZoom["step"]>(
+    (direction) => {
+      if (!enabledRef.current || photoNode.current === null) return;
+      zoomTo(stepLightboxZoom(view.current.zoom, direction), null, true);
+    },
+    [zoomTo]
+  );
+
   const handleKey = useCallback<ImageLightboxZoom["handleKey"]>(
     (event) => {
       if (!enabledRef.current || photoNode.current === null) return false;
       const action = lightboxZoomKeyAction(event);
       if (action === null) return false;
-      if (action === "fit") fit(true, true);
-      else zoomTo(stepLightboxZoom(view.current.zoom, action === "in" ? 1 : -1), null, true);
+      if (action === "fit") fit(true);
+      else step(action === "in" ? 1 : -1);
       return true;
     },
-    [fit, zoomTo]
+    [fit, step]
+  );
+
+  /**
+   * 확대 중 화살표 키. 맞춤에서는 `false`를 돌려주어 ←/→가 다음·이전 장으로 간다. 확대 중에는 키를 먹고(`true`) 한 걸음(뷰어 짧은 변의
+   * 1/8)씩 사진을 옮긴다: 끌 손이 없는 사람도 확대한 사진의 구석을 볼 수 있다. 이미 끝이라 못 움직여도 키는 먹는다(넘기기로 새지 않는다).
+   */
+  const panKey = useCallback<ImageLightboxZoom["panKey"]>(
+    (event) => {
+      if (!enabledRef.current || photoNode.current === null || isLightboxFit(view.current.zoom)) return false;
+      const measured = measure();
+      if (measured === null) return false;
+      const { geometry } = measured;
+      const delta = lightboxPanDelta(
+        event,
+        Math.round(Math.min(geometry.viewWidth, geometry.viewHeight) / LIGHTBOX_KEY_PAN_DIVISOR)
+      );
+      if (delta === null) return false;
+      const before = view.current;
+      const next = clampLightboxView({ zoom: before.zoom, x: before.x + delta.x, y: before.y + delta.y }, geometry);
+      if (next.x !== before.x || next.y !== before.y) paint(next, true);
+      return true;
+    },
+    [measure, paint]
   );
 
   // 다른 장으로 넘기거나 닫았다 다시 열면 맞춤에서 시작한다. 사진 노드는 장마다 새로 서므로(`key`) 옛 변수가 남지 않는다.
@@ -269,12 +295,10 @@ export function useImageLightboxZoom({ resetKey, enabled = true }: { resetKey: s
     gesture.current = null;
     paint(LIGHTBOX_FIT_VIEW, false);
     setDragging(false);
-    hideChip();
-  }, [resetKey, paint, hideChip]);
+  }, [resetKey, paint]);
 
   useEffect(
     () => () => {
-      if (chipTimer.current !== null) clearTimeout(chipTimer.current);
       for (const finish of [...fitCleanups.current]) finish();
     },
     []
@@ -382,7 +406,7 @@ export function useImageLightboxZoom({ resetKey, enabled = true }: { resetKey: s
     (event: ReactMouseEvent<HTMLImageElement>) => {
       if (!enabledRef.current) return;
       if (isZoomed()) {
-        fit(true, true);
+        fit(true);
         return;
       }
       zoomTo(lightboxActualSizeZoom(fitScale()), { x: event.clientX, y: event.clientY }, true);
@@ -394,10 +418,13 @@ export function useImageLightboxZoom({ resetKey, enabled = true }: { resetKey: s
     viewerRef,
     zoomed,
     isZoomed,
-    chip,
+    label,
+    maxed,
     reset,
     fitForClose,
+    step,
     handleKey,
+    panKey,
     photo: {
       ref: photoRef,
       zoomed,

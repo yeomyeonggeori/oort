@@ -1,6 +1,11 @@
 {
   "timeline.unfurl.label": "Link preview: {title}, {domain}",
   "timeline.unfurl.video": "Video",
+  "timeline.lightbox.copy": "Copy image",
+  "timeline.lightbox.copied": "Copied",
+  "timeline.lightbox.copyFailed": "Couldn't copy the image. Download the file instead.",
+  "timeline.lightbox.zoomIn": "Zoom in",
+  "timeline.lightbox.zoomOut": "Zoom out",
   "timeline.thread.replyCount": "{count, plural, one {# reply} other {# replies}}",
   "timeline.thread.unreadChip": "{count, plural, one {# new reply} other {# new replies}}",
   "timeline.thread.open": "Open thread, {count, plural, one {# reply} other {# replies}}",
