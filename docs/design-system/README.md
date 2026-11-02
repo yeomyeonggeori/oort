@@ -586,6 +586,8 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 기계 자가 **닫은** 축: 호버/포커스/터치 4상태 마운트 수, 행당 탭스톱(정적 스냅샷, 행 요소 정거장 포함), 본문 텍스트 Range ∩ 툴바 상자 = 0 (`assertHoverToolbarClearsBodyText`, 자기 행+이웃 행·시스템 줄; 자는 `clients/web/scripts/lib/hoverToolbarOverlap.mjs` 한 벌이고 레인 `capture-5173.mjs`·실제 엔진 시험 `SystemLine.straddle.browser.test.ts`가 같은 자를 쓴다), 툴바 React 버튼 클릭 → 피커 오픈, 본문 드래그 선택 무간섭(`assertActionableRowDragSelect`), 스크롤러 상단 뒤집기(`assertHoverToolbarInsideScroller`).
 
+**#5192가 더한 기계**: ⋮ 메뉴의 구조(묶음 순서·묶음 사이에만 선 구분선·지우기 맨 아래·위험색)와 「도구 막대 ∪ 메뉴 = 시트 = 전체 인벤토리, 두 곳에 겹치지 않음」은 `MessageActions.test.ts`·`MessageHoverToolbar.test.tsx`가, 아이콘의 글리프 이름(행마다 하나·서로 다름)은 같은 파일이, 툴팁 시간(처음 · 옮겨 다님 · 쉰 뒤 · 키보드 · 터치 · 닫는 길)은 `tooltipDelay.test.ts`가 가짜 시계로 경계에서 잰다. 실제 엔진(Chromium·WebKit)에서 내 메시지·남의 메시지·에이전트 메시지 × 900·1440 × 밝음·어두움으로 호버·키보드·우클릭 메뉴가 열리고 판 안에 머무는지, 툴팁이 목표 시간 안에 뜨는지(처음 ≤ 200ms · 옮겨 감 ≤ 80ms · 빠른 통과 0개)는 레인 `capture-5192.mjs`가 잰다. 900폭에서 도구 막대가 앞 행 끝줄을 덮는 것은 #4231 1번의 기존 결함이라 레인은 변경 전 값(16자)이 늘지 않았는지만 가둔다.
+
 기계 자가 **아직 안 재는** 축: 순회 중 탭스톱 +1(유닛이 행당 1 불변; 캡처 `countTabStopsToComposer`가 전체 비용만 잰다), 다크 그릇 분리(토큰 §2.2 산술 + 사람 리뷰), 슬롯 클릭 직후 재배열(유닛이 마운트가 유지되는 동안 고정 — 포커스가 마운트를 유지할 수 있다).
 
 ### 스케일에 값을 하나 더하고 싶을 때
