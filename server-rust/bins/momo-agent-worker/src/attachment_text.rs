@@ -23,14 +23,24 @@
 //!   `rlimit` wrapper `momo-expressions` already uses) and `oom_score_adj` 1000, so that when the
 //!   container's memory limit is reached the kernel's out-of-memory killer is steered to the child and
 //!   not the worker (which may hold a model — the killer takes the largest process, and the child is only
-//!   the largest by chance; the write is best effort and is ignored where `/proc` refuses it); and, on
-//!   every unix, no core dump (`RLIMIT_CORE` 0). It does so as a single thread — `main` starts no async
+//!   the largest by chance; the write is best effort and is ignored where `/proc` refuses it); on every
+//!   unix, no core dump (`RLIMIT_CORE` 0); and on Linux the process is marked **not dumpable**
+//!   (`PR_SET_DUMPABLE` 0, through the safe `rustix` — #5072), which no core-dump handler can ignore the way a
+//!   host that pipes cores can ignore a limit. It does so as a single thread — `main` starts no async
 //!   runtime on this path, because the address-space ceiling counts every thread's stack and arena;
 //! * **the supervisor watches** ([`MemoryGuard`]): every [`CHILD_MEMORY_POLL`] it reads the child's
 //!   resident memory (`/proc/<pid>/status` on Linux, `ps` elsewhere) and, above [`CHILD_MEMORY_MAX`],
 //!   kills that very pid and reaps it before the slot is given back;
 //! * **the child has a deadline of its own** ([`CHILD_SELF_DEADLINE`]): a watchdog thread ends the
 //!   process when the supervisor is no longer there to (the worker itself was killed).
+//!
+//! After the limits and the watchdog thread the child **locks itself down** (`attachment_lockdown`, #5072): a
+//! system-call filter that, on every thread, refuses a file by name, a socket, another program and another
+//! process for the rest of its life. A parser that were somehow talked into running code could then neither
+//! read `/proc/<worker>/environ` nor reach the database, a shell or the worker's memory. Every step of the
+//! confinement is required: a child that cannot take one reads nothing and tells its supervisor **which**
+//! ([`ConfineStep`], a closed list), so a host that refuses a limit is one warning line away from a diagnosis
+//! and not a PDF reader that is silently open.
 //!
 //! macOS enforces no address-space ceiling, so there only the supervisor's watch bounds the memory
 //! (the image this ships in is Linux). The watch is a sample, not a fence: what a child allocates inside
@@ -47,6 +57,8 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Semaphore;
+
+use crate::attachment_lockdown::lock_down;
 
 /// The argument that turns this binary into the PDF text child (see `main.rs`).
 pub const CHILD_ARG: &str = "--attachment-text-child";
@@ -184,32 +196,90 @@ pub fn pdf_text(bytes: &[u8]) -> Result<String, ExtractError> {
     Ok(text.chars().take(CHILD_TEXT_STOP_CHARS * 2).collect())
 }
 
-/// What the child does to itself before it reads a byte: the memory half of the confinement (module
-/// docs).
+/// The steps of the child's confinement, as a closed list. The child tells its supervisor which one it could not
+/// take as one of these words and nothing the operating system said: the supervisor logs the word (and only a
+/// word it knows), so a host that refuses a step is one warning line from a diagnosis, and the child — which
+/// parses bytes an attacker wrote — cannot put text of its own into that log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfineStep {
+    /// `RLIMIT_CORE` to 0, soft and hard.
+    CoreLimit,
+    /// `RLIMIT_AS` (Linux).
+    AddressSpace,
+    /// `PR_SET_DUMPABLE` to 0 (Linux).
+    Dumpable,
+    /// The thread that ends the child at its own deadline.
+    Watchdog,
+    /// The system-call filter (Linux).
+    Filter,
+}
+
+impl ConfineStep {
+    /// Every step, in the order the child takes them.
+    pub const ALL: [ConfineStep; 5] = [
+        ConfineStep::CoreLimit,
+        ConfineStep::AddressSpace,
+        ConfineStep::Dumpable,
+        ConfineStep::Watchdog,
+        ConfineStep::Filter,
+    ];
+
+    /// The word for the log and for the child's answer.
+    pub const fn word(self) -> &'static str {
+        match self {
+            ConfineStep::CoreLimit => "core_limit",
+            ConfineStep::AddressSpace => "address_space",
+            ConfineStep::Dumpable => "dumpable",
+            ConfineStep::Watchdog => "watchdog",
+            ConfineStep::Filter => "filter",
+        }
+    }
+}
+
+/// What the child does to itself before it reads a byte: the limits half of the confinement (module docs); the
+/// filter that follows is [`lock_down`].
 ///
 /// * **No core dump** (unix, #4970 review R2-5): `RLIMIT_CORE` goes to 0, soft and hard. A hostile file ends
 ///   a child with a crash every so often (a stack that is too deep, an allocation that fails), and a core
 ///   dump of it would hold the requester's document and the parser's state on the host's disk. Lowering a
 ///   limit is always allowed, and the hard limit goes down with the soft one so that nothing which runs in
-///   the child can raise it again. A host that pipes dumps to a handler of its own decides for itself
-///   whether to honour a limit of 0 — that is the host's setting, not something this process can settle.
+///   the child can raise it again.
+/// * **Not dumpable** (Linux, #5072 — the half of R2-5 a limit cannot do): `PR_SET_DUMPABLE` goes to 0. A host
+///   that pipes cores to a handler of its own (`core_pattern` starting with `|`) does not ask the dumping
+///   process's `RLIMIT_CORE` — the kernel ignores the limit for a pipe and leaves it to the handler — but it
+///   does ask whether the process is dumpable first, for a file and for a pipe alike. The same flag also makes
+///   `/proc/<pid>/` of this process belong to root, so a process of the same user (the worker) cannot read
+///   its `environ`, `mem` or `fd` either. **It is the last of the three** on purpose: from then on the
+///   child's own `/proc/self/*` files are root's and an unprivileged write to `oom_score_adj` would be refused.
 /// * On Linux `oom_score_adj` goes to 1000 — raising it needs no privilege, and the write is best effort
 ///   because the ceiling below does not depend on it — and the address space is limited to
 ///   [`CHILD_ADDRESS_SPACE_MAX`], or to the hard limit the child was already given when that is lower
 ///   (lowering a limit is always allowed; raising a hard one is not).
 ///
-/// Anything that cannot be set is an `Err`, and a child that cannot confine itself reads nothing.
-fn confine_self() -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        rlimit::Resource::CORE.set(0, 0)?;
-    }
+/// Anything that cannot be set is an `Err` naming the step, and a child that cannot confine itself reads nothing.
+fn confine_self() -> Result<(), ConfineStep> {
+    // the one write that needs `/proc/self` to still be ours: before the process stops being dumpable
     #[cfg(target_os = "linux")]
     {
         let _ = std::fs::write("/proc/self/oom_score_adj", "1000");
-        let (_, hard) = rlimit::Resource::AS.get()?;
+    }
+    #[cfg(unix)]
+    {
+        rlimit::Resource::CORE
+            .set(0, 0)
+            .map_err(|_| ConfineStep::CoreLimit)?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let (_, hard) = rlimit::Resource::AS
+            .get()
+            .map_err(|_| ConfineStep::AddressSpace)?;
         let ceiling = CHILD_ADDRESS_SPACE_MAX.min(hard);
-        rlimit::Resource::AS.set(ceiling, ceiling)?;
+        rlimit::Resource::AS
+            .set(ceiling, ceiling)
+            .map_err(|_| ConfineStep::AddressSpace)?;
+        rustix::process::set_dumpable_behavior(rustix::process::DumpableBehavior::NotDumpable)
+            .map_err(|_| ConfineStep::Dumpable)?;
     }
     Ok(())
 }
@@ -237,14 +307,20 @@ pub fn child_main(max_input: usize) -> i32 {
 }
 
 /// [`child_main`] with the child's own deadline chosen by the caller (a test re-runs itself as the child
-/// with a short one). The first two acts are the confinement: nothing the file says has been read yet when
-/// the limits and the watchdog are in place, and a child that cannot have them reads nothing.
+/// with a short one). The first acts are the confinement, in this order: the limits ([`confine_self`]), the
+/// watchdog thread, and the system-call filter ([`lock_down`]) — last, and on every thread, so that the
+/// watchdog is under it too. Nothing the file says has been read yet when they are in place, and a child that
+/// cannot take one of them reads nothing and says which ([`ConfineStep`]).
 pub fn child_main_with(max_input: usize, self_deadline: Duration) -> i32 {
     use std::io::{Read, Write};
-    if confine_self().is_err()
-        || spawn_watchdog(self_deadline, || std::process::exit(WATCHDOG_EXIT_CODE)).is_err()
-    {
-        return CONFINE_FAILED_EXIT_CODE;
+    let confined = confine_self()
+        .and_then(|()| {
+            spawn_watchdog(self_deadline, || std::process::exit(WATCHDOG_EXIT_CODE))
+                .map_err(|_| ConfineStep::Watchdog)
+        })
+        .and_then(|()| lock_down().map_err(|_| ConfineStep::Filter));
+    if let Err(step) = confined {
+        return confine_failed(step);
     }
     let mut bytes = Vec::new();
     let read = std::io::stdin()
@@ -269,6 +345,33 @@ pub fn child_main_with(max_input: usize, self_deadline: Duration) -> i32 {
         return 1;
     }
     0
+}
+
+/// The child could not take `step`: it says so in one JSON line — the step's word, nothing the system said —
+/// and ends with [`CONFINE_FAILED_EXIT_CODE`], having read nothing.
+fn confine_failed(step: ConfineStep) -> i32 {
+    use std::io::Write;
+    let answer = json!({"ok": false, "code": "confine_failed", "step": step.word()});
+    let mut out = std::io::stdout().lock();
+    let _ = out
+        .write_all(answer.to_string().as_bytes())
+        .and_then(|_| out.write_all(b"\n"))
+        .and_then(|_| out.flush());
+    CONFINE_FAILED_EXIT_CODE
+}
+
+/// The step a child that could not confine itself named, for the supervisor's log: one of [`ConfineStep`]'s
+/// words or `"unknown"`. A child parses attacker bytes, so whatever else it printed is never logged.
+fn confine_step_in(data: &[u8]) -> &'static str {
+    let Ok(value) = serde_json::from_slice::<Value>(data) else {
+        return "unknown";
+    };
+    let named = value.get("step").and_then(Value::as_str);
+    ConfineStep::ALL
+        .into_iter()
+        .map(ConfineStep::word)
+        .find(|word| Some(*word) == named)
+        .unwrap_or("unknown")
 }
 
 // ---------------------------------------------------------------------------
@@ -444,8 +547,14 @@ async fn run_child(
             return Err(ExtractError::Unreadable);
         }
         let status = child.wait().await.map_err(|_| ExtractError::Unavailable)?;
-        // A child that could not confine itself read nothing: that is this machine, not the file.
+        // A child that could not confine itself read nothing: that is this machine, not the file. Every PDF
+        // fails this way until the host allows the step, so the line names it (a word from a closed list).
         if status.code() == Some(CONFINE_FAILED_EXIT_CODE) {
+            tracing::warn!(
+                step = confine_step_in(&data),
+                "the PDF child could not confine itself and read nothing; this host refuses a step the child \
+                 requires, so no PDF is read here until it allows it"
+            );
             return Err(ExtractError::Unavailable);
         }
         if !status.success() {
@@ -738,6 +847,235 @@ mod tests {
             found,
             ["OORT-4970-CORE", "0", "0"],
             "the core-dump limit the confined child was left with (soft, hard); the probe printed {printed:?}"
+        );
+    }
+
+    /// #5072: the step a child that could not confine itself names is one of the closed words or `unknown`.
+    /// The child parses attacker bytes, so nothing else it prints reaches the supervisor's log.
+    #[test]
+    fn the_step_a_child_names_is_a_word_of_the_closed_list_and_nothing_else() {
+        for step in ConfineStep::ALL {
+            let answer = json!({"ok": false, "code": "confine_failed", "step": step.word()});
+            assert_eq!(confine_step_in(answer.to_string().as_bytes()), step.word());
+        }
+        // the words are distinct, or two steps would read as one
+        let mut words: Vec<&str> = ConfineStep::ALL
+            .into_iter()
+            .map(ConfineStep::word)
+            .collect();
+        words.sort_unstable();
+        words.dedup();
+        assert_eq!(words.len(), ConfineStep::ALL.len());
+        // anything else — a word of its own, another type, text that is not JSON, nothing — is `unknown`
+        for other in [
+            br#"{"ok":false,"code":"confine_failed","step":"DATABASE_URL=postgres://x"}"#
+                .as_slice(),
+            br#"{"ok":false,"code":"confine_failed","step":7}"#.as_slice(),
+            br#"{"ok":false,"code":"confine_failed"}"#.as_slice(),
+            b"filter",
+            b"",
+        ] {
+            assert_eq!(confine_step_in(other), "unknown");
+        }
+    }
+
+    /// The probe's verdict for one attempt: `allowed`, or the errno that refused it. A socket that has nobody to
+    /// accept yet answers "would block", which is the system call being allowed to run.
+    #[cfg(target_os = "linux")]
+    fn probe_verdict(result: std::io::Result<()>) -> String {
+        match result {
+            Ok(()) => "allowed".to_string(),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => "allowed".to_string(),
+            Err(error) => format!("errno {}", error.raw_os_error().unwrap_or(-1)),
+        }
+    }
+
+    /// #5072 (ADR-0151 증보 6 B): what a locked-down child is refused, measured **in a real process that did it**.
+    /// The filter is irreversible, so the test runs itself again as a probe (`OORT_5072_LOCKDOWN_PROBE=<address>`):
+    /// the probe asks for the same eight things twice, before and after `confine_self` + the watchdog +
+    /// `lock_down` — the order the child takes them in.
+    ///
+    /// Before, every one of them works. That is the control: a refusal that the machine's own sandbox already
+    /// makes would show up here, and "after" would prove nothing. After, each is refused with `EPERM` itself —
+    /// not "no such file" and not "access denied", which a missing path or a file mode would say — and what a PDF
+    /// read still needs (memory, the clock, a thread's sleep, standard output) is untouched.
+    ///
+    /// Measured here: `openat`, `socket`, `connect`, `accept4`, `execve`, `pidfd_open`. The rest of the filter's list
+    /// is held by `attachment_lockdown::tests`, which runs the compiled filter on every entry.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_locked_down_child_is_refused_every_file_socket_program_and_process_it_asks_for() {
+        const PROBE: &str = "OORT_5072_LOCKDOWN_PROBE";
+        const PARENT: &str = "OORT_5072_PARENT";
+        const THIS_TEST: &str = "attachment_text::tests::a_locked_down_child_is_refused_every_file_socket_program_and_process_it_asks_for";
+        if let Some(address) = std::env::var_os(PROBE) {
+            let address = address.to_string_lossy().to_string();
+            let parent: i32 = std::env::var(PARENT).unwrap().parse().unwrap();
+            // sockets that exist before the lock-down, so that `connect` and `accept` are asked about on their own
+            let udp =
+                std::net::UdpSocket::bind("127.0.0.1:0").expect("a socket before the lock-down");
+            let listener = std::net::TcpListener::bind("127.0.0.1:0")
+                .expect("a listener before the lock-down");
+            listener.set_nonblocking(true).unwrap();
+            let scratch =
+                std::env::temp_dir().join(format!("oort-5072-probe-{}", std::process::id()));
+            let attempt = |when: &str| {
+                let pid = rustix::process::Pid::from_raw(parent).expect("a pid");
+                let attempts: Vec<(&str, std::io::Result<()>)> = vec![
+                    ("open a file", std::fs::File::open("/etc/passwd").map(drop)),
+                    (
+                        "open the worker's environ",
+                        std::fs::File::open(format!("/proc/{parent}/environ")).map(drop),
+                    ),
+                    ("create a file", std::fs::File::create(&scratch).map(drop)),
+                    (
+                        "make a socket",
+                        std::net::UdpSocket::bind("127.0.0.1:0").map(drop),
+                    ),
+                    ("connect a socket it already had", udp.connect(&address)),
+                    (
+                        "accept on a listener it already had",
+                        listener.accept().map(drop),
+                    ),
+                    (
+                        "start a program",
+                        std::process::Command::new("/bin/true").status().map(drop),
+                    ),
+                    (
+                        "look at the worker as a process",
+                        rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty())
+                            .map(drop)
+                            .map_err(std::io::Error::from),
+                    ),
+                ];
+                for (what, result) in attempts {
+                    println!("OORT-5072 | {when} | {what} | {}", probe_verdict(result));
+                }
+            };
+            attempt("before");
+            confine_self().expect("the limits can be taken");
+            // read back now: once the filter is on, the probe cannot open a file to read it
+            let oom_score_adj = std::fs::read_to_string("/proc/self/oom_score_adj")
+                .map(|text| text.trim().to_string())
+                .unwrap_or_else(|error| format!("unreadable: {error}"));
+            spawn_watchdog(Duration::from_secs(120), || {
+                std::process::exit(WATCHDOG_EXIT_CODE)
+            })
+            .expect("the watchdog starts");
+            lock_down().expect("the filter can be installed");
+            attempt("after");
+            // what the kernel says about the process itself (asked of the kernel, not of our own bookkeeping)
+            println!(
+                "OORT-5072 | after | dumpable | {:?}",
+                rustix::process::dumpable_behavior().expect("the flag can be read")
+            );
+            println!("OORT-5072 | after | oom_score_adj | {oom_score_adj}");
+            // what reading a PDF still needs: memory (and the calls the allocator makes for it), a thread's
+            // sleep, the clock
+            let mut big = vec![0u8; 64 * 1024 * 1024];
+            for chunk in big.chunks_mut(4096) {
+                chunk[0] = 1;
+            }
+            let started = std::time::Instant::now();
+            std::thread::sleep(Duration::from_millis(20));
+            let worked = big.iter().step_by(4096).all(|byte| *byte == 1)
+                && started.elapsed() >= Duration::from_millis(20);
+            println!(
+                "OORT-5072 | after | allocate, touch and sleep | {}",
+                if worked { "allowed" } else { "broken" }
+            );
+            // unlinking is not on the list: the probe clears up after itself
+            let _ = std::fs::remove_file(&scratch);
+            std::process::exit(0);
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", THIS_TEST, "--nocapture", "--test-threads=1"])
+            .env(PROBE, listener.local_addr().unwrap().to_string())
+            .env(PARENT, std::process::id().to_string())
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the test binary can run itself");
+        // the harness prints `test <name> ... ` on the same line before the probe's first line
+        let printed = String::from_utf8_lossy(&output.stdout).to_string();
+        let verdicts: Vec<(String, String, String)> = printed
+            .lines()
+            .filter_map(|line| line.split_once("OORT-5072 | ").map(|(_, rest)| rest))
+            .filter_map(|rest| {
+                let mut parts = rest.split(" | ");
+                Some((
+                    parts.next()?.to_string(),
+                    parts.next()?.to_string(),
+                    parts.next()?.trim().to_string(),
+                ))
+            })
+            .collect();
+        let verdict_of = |when: &str, what: &str| {
+            verdicts
+                .iter()
+                .find(|(w, t, _)| w == when && t == what)
+                .map(|(_, _, verdict)| verdict.clone())
+                .unwrap_or_else(|| format!("(no line) in {printed:?}"))
+        };
+        const EPERM: &str = "errno 1";
+        for what in [
+            "open a file",
+            "open the worker's environ",
+            "create a file",
+            "make a socket",
+            "connect a socket it already had",
+            "accept on a listener it already had",
+            "start a program",
+        ] {
+            assert_eq!(
+                verdict_of("before", what),
+                "allowed",
+                "{what}: the control — without the lock-down the probe can do it"
+            );
+            assert_eq!(
+                verdict_of("after", what),
+                EPERM,
+                "{what}: after the lock-down it is refused by the filter itself"
+            );
+        }
+        // `pidfd_open` needs a kernel from 5.3 and a runtime that lets it through: where the control is not
+        // "allowed" this line measures nothing, and says so instead of passing quietly
+        let before = verdict_of("before", "look at the worker as a process");
+        if before == "allowed" {
+            assert_eq!(
+                verdict_of("after", "look at the worker as a process"),
+                EPERM,
+                "looking at another process"
+            );
+        } else {
+            eprintln!("pidfd_open was already refused before the lock-down ({before}): that line is not measured here");
+        }
+        assert_eq!(
+            verdict_of("after", "allocate, touch and sleep"),
+            "allowed",
+            "a lock-down that breaks the allocator or the clock reads no PDF"
+        );
+        // not dumpable, whoever runs the test (asked of the kernel through `PR_GET_DUMPABLE`) …
+        assert_eq!(
+            verdict_of("after", "dumpable"),
+            "NotDumpable",
+            "the child must not be dumpable"
+        );
+        // … and `oom_score_adj` was written before that flag made `/proc/self` root's. Only an unprivileged user
+        // is refused the write afterwards: where the test runs as root this line measures nothing, and says so.
+        assert_eq!(
+            verdict_of("after", "oom_score_adj"),
+            "1000",
+            "the out-of-memory killer must be steered to the child"
+        );
+        if rustix::process::geteuid().is_root() {
+            eprintln!(
+                "this run is root: the order of `oom_score_adj` and the not-dumpable flag is not measured here \
+                 (root may write a root-owned file); an unprivileged run is"
+            );
+        }
+        let _ = std::fs::remove_file(
+            std::env::temp_dir().join(format!("oort-5072-probe-{}", std::process::id())),
         );
     }
 
