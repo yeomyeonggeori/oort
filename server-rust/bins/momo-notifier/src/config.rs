@@ -122,11 +122,13 @@ pub struct PushConfig {
     pub drain_interval: Duration,
     /// Attempts before a candidate is parked as `failed`.
     pub max_attempts: i32,
-    /// `NOTIFIER_BULK_PUSH_PER_MINUTE` — how many dispatches the **bulk layer** (today the
-    /// `thread_reply` reason, ADR-0206 증보 1 F6) may send per minute across every tenant, default
+    /// `NOTIFIER_BULK_PUSH_PER_MINUTE` — how many dispatches the **best-effort layers** (the
+    /// `thread_reply` reason, ADR-0206 증보 1 F6, **and the test notification**, 증보 4 G2) may send
+    /// per minute across every tenant, from one shared budget, default
     /// [`crate::bulk::DEFAULT_BUDGET_PER_MINUTE`] (30: half of the relay's default per-server limit,
-    /// so approvals, mentions and DMs keep the other half). A push past it is not sent and its
-    /// candidate completes; `0` sends no bulk push at all.
+    /// so approvals, mentions and DMs keep the other half). A `thread_reply` push past it is not sent
+    /// and its candidate completes; a test token past it is settled `429` / `notifier_budget_spent`;
+    /// `0` sends neither.
     pub bulk_push_per_minute: u32,
 }
 

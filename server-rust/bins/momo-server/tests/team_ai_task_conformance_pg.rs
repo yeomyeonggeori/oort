@@ -9,6 +9,8 @@
 //! | `s4_a_task_runs_reads_say_what_that_run_spent_and_no_other_run_does` | #4968 B12, ADR-0201 증보 v3.3 | the spend is summed by anything but the run (the agent, the channel), shown for a run that is not a task, or the channel read stops listing a task run (or lists every managed run) |
 //! | `s5_no_figure_a_read_carries_is_a_persons` | #4968, ADR-0147 증보 D6 | a requester key, a requester-grouped sum or a requester column on the ledger appears |
 //! | `s6_another_workspace_reads_nothing_of_a_task_run` | #4968, RLS | the spend or the listing crosses a workspace |
+//! | `s7_a_stop_reaches_a_failed_run_whose_task_is_still_active` | #5029 (r1 L3a) | the route or `cancel_run_in_tx` stops taking a `failed` run with an active task, or takes a `failed` run without one (or with an ended one), or a `succeeded`/`timed_out` run under a stray active row |
+//! | `s8_a_stop_that_races_the_tasks_end_answers_409_not_500` | #5029 (r1 L-1) | the route turns the stop's no-op statement back into a 500 (no re-read), or answers 200 for a cancellation that never happened |
 //!
 //! The worker half (steps, claims, bounds, requester, the ledger, the sweep, the table's isolation) is
 //! `momo-agent-worker/tests/team_ai_task_conformance_pg.rs`.
@@ -1153,4 +1155,374 @@ async fn s6_another_workspace_reads_nothing_of_a_task_run() {
     .await
     .expect("the worker's role reads");
     assert_eq!(own.get(&run).map(|spent| spent.prompt_tokens), Some(100));
+}
+
+/// A mention run of the helper in the fixture's room (the trigger is the requester's message), `running`.
+async fn mention_run(app: &PgPool, su: &PgPool, f: &Fixture) -> Uuid {
+    let (workspace, channel, helper, requester) = (f.workspace, f.channel, f.helper, f.requester);
+    let run = with_tenant_tx(app, workspace, move |conn| {
+        Box::pin(async move {
+            let sent = send_message_in_tx(
+                conn,
+                workspace,
+                NewMessage::text(
+                    channel,
+                    requester,
+                    "@oort-helper 오래 조사해 줘".to_string(),
+                ),
+            )
+            .await?;
+            let created = create_agent_run_in_tx(
+                conn,
+                workspace,
+                NewAgentRun {
+                    channel_id: channel,
+                    trigger: RunTrigger::Mention {
+                        message_id: sent.message.id,
+                        agent_member_id: helper,
+                    },
+                    parent_run_id: None,
+                    max_steps: 50,
+                    depth: 0,
+                    input: json!({"schema": "momo.agent_run.input.v0", "surface": "mention",
+                                  "prompt": "조사", "depth": 0}),
+                },
+            )
+            .await?;
+            Ok(created.id)
+        })
+    })
+    .await
+    .expect("a mention run");
+    sqlx::query("UPDATE agent_run SET status = 'running', started_at = now() WHERE id = $1")
+        .bind(run)
+        .execute(su)
+        .await
+        .unwrap();
+    run
+}
+
+async fn set_run_status(su: &PgPool, run: Uuid, status: &str) {
+    sqlx::query("UPDATE agent_run SET status = $2::run_status WHERE id = $1")
+        .bind(run)
+        .bind(status)
+        .execute(su)
+        .await
+        .unwrap();
+}
+
+async fn run_status_of(su: &PgPool, run: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id = $1")
+        .bind(run)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+/// `(state, end_reason, note)` of a run's task row.
+async fn task_of(su: &PgPool, run: Uuid) -> (String, Option<String>, Option<String>) {
+    sqlx::query_as("SELECT state, end_reason, note FROM team_ai_task WHERE run_id = $1")
+        .bind(run)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+async fn insert_active_task(su: &PgPool, f: &Fixture, run: Uuid) {
+    sqlx::query(
+        "INSERT INTO team_ai_task (workspace_id, run_id, agent_member_id, steps_done, plan, note) \
+         VALUES ($1, $2, $3, 1, '[\"다음 단계\"]'::jsonb, '남아 있으면 안 되는 노트')",
+    )
+    .bind(f.workspace)
+    .bind(run)
+    .bind(f.helper)
+    .execute(su)
+    .await
+    .unwrap();
+}
+
+/// #5029 (r1 L3a): a run that reads `failed` while its task is still active is not over — the route
+/// takes a stop from any member of the room (not from a stranger), ends the task and retires the job
+/// that waits. Every other case keeps its 409: a `failed` run whose task has ended, a `failed` run with
+/// no task, and a `succeeded` or `timed_out` run whatever an active row says.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn s7_a_stop_reaches_a_failed_run_whose_task_is_still_active() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let f = seed(&su, &app).await;
+    let base = start_server(app.clone()).await;
+    let client = reqwest::Client::new();
+    let workspace = f.workspace;
+    let cancel = |run: Uuid, jwt: String| {
+        let client = client.clone();
+        let url = format!("{base}/v1/workspaces/{workspace}/agent-runs/{run}/cancel");
+        async move { client.post(url).bearer_auth(jwt).send().await.unwrap() }
+    };
+
+    // A task between two attempts: the run reads `failed`, its row is active, its next job waits.
+    let run = mention_run(&app, &su, &f).await;
+    set_run_status(&su, run, "failed").await;
+    insert_active_task(&su, &f, run).await;
+    let step_job = momo_agent::team_ai_task::step_job_payload(
+        workspace,
+        run,
+        f.helper,
+        f.channel,
+        2,
+        "team-ai-default",
+        Some("instance_default"),
+    );
+    let job_id = emit_outbox(
+        &su,
+        workspace,
+        OutboxKind::AgentJob,
+        "publish",
+        &step_job,
+        Some(f.helper),
+    )
+    .await
+    .expect("the waiting step job");
+
+    // A stranger to the room still cannot stop it — and nothing changes.
+    let refused = cancel(run, f.outsider_jwt.clone()).await;
+    assert!(
+        matches!(refused.status().as_u16(), 403 | 404),
+        "a non-member's stop is refused: {}",
+        refused.status()
+    );
+    assert_eq!(run_status_of(&su, run).await, "failed");
+    assert_eq!(task_of(&su, run).await.0, "active");
+
+    // A member of the room who is not the requester can.
+    let stopped = cancel(run, f.bystander_jwt.clone()).await;
+    assert_eq!(stopped.status().as_u16(), 200, "{:?}", stopped.text().await);
+    assert_eq!(run_status_of(&su, run).await, "cancelled");
+    assert_eq!(
+        task_of(&su, run).await,
+        (
+            "ended".to_string(),
+            Some("task_cancelled".to_string()),
+            None
+        ),
+        "the stop ends the task and its note goes"
+    );
+    let (job_status, last_error): (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, last_error FROM outbox WHERE id = $1")
+            .bind(job_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(
+        job_status, "done",
+        "the waiting job is retired with the run"
+    );
+    assert_eq!(
+        last_error.as_deref(),
+        Some(momo_outbox::RUN_CANCELLED_JOB_LAST_ERROR)
+    );
+    // A second stop is the route's idempotent 200.
+    assert_eq!(
+        cancel(run, f.requester_jwt.clone()).await.status().as_u16(),
+        200
+    );
+
+    // Two tenants: a member of ANOTHER workspace cannot stop this workspace's task — by its own
+    // workspace's path (no such run there) or by this one's (not its workspace) — and nothing changes.
+    let other = seed(&su, &app).await;
+    let foreign = mention_run(&app, &su, &f).await;
+    set_run_status(&su, foreign, "failed").await;
+    insert_active_task(&su, &f, foreign).await;
+    for (case, ws) in [
+        ("through its own workspace", other.workspace),
+        ("through the task's workspace", f.workspace),
+    ] {
+        let response = client
+            .post(format!(
+                "{base}/v1/workspaces/{ws}/agent-runs/{foreign}/cancel"
+            ))
+            .bearer_auth(&other.requester_jwt)
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            matches!(response.status().as_u16(), 403 | 404),
+            "another workspace's member is refused {case}: {}",
+            response.status()
+        );
+        assert_eq!(run_status_of(&su, foreign).await, "failed", "{case}");
+        assert_eq!(task_of(&su, foreign).await.0, "active", "{case}");
+    }
+    // Anti-vacuity: the same run is stopped by a member of its own room.
+    assert_eq!(
+        cancel(foreign, f.bystander_jwt.clone())
+            .await
+            .status()
+            .as_u16(),
+        200
+    );
+
+    // Everything else keeps its 409, with the status the run really has, and writes nothing.
+    let refuse = |run: Uuid, status: &'static str, case: &'static str| {
+        let cancel = &cancel;
+        let jwt = f.requester_jwt.clone();
+        let su = su.clone();
+        async move {
+            let response = cancel(run, jwt).await;
+            assert_eq!(response.status().as_u16(), 409, "{case}");
+            let body = response.text().await.unwrap();
+            assert!(
+                body.contains(&format!("agent run is already {status}")),
+                "{case}: {body}"
+            );
+            assert_eq!(run_status_of(&su, run).await, status, "{case}: no write");
+        }
+    };
+    // (1) failed, its task ended
+    let ended = mention_run(&app, &su, &f).await;
+    set_run_status(&su, ended, "failed").await;
+    insert_active_task(&su, &f, ended).await;
+    sqlx::query(
+        "UPDATE team_ai_task SET state = 'ended', end_reason = 'task_failed', plan = NULL, \
+                note = NULL, ended_at = now() WHERE run_id = $1",
+    )
+    .bind(ended)
+    .execute(&su)
+    .await
+    .unwrap();
+    refuse(ended, "failed", "a failed run whose task has ended").await;
+    // (2) failed, no task
+    let plain = mention_run(&app, &su, &f).await;
+    set_run_status(&su, plain, "failed").await;
+    refuse(plain, "failed", "a failed run with no task").await;
+    // (3) not failed, a stray active row
+    for status in ["succeeded", "timed_out"] {
+        let stray = mention_run(&app, &su, &f).await;
+        set_run_status(&su, stray, status).await;
+        insert_active_task(&su, &f, stray).await;
+        refuse(stray, status, "a finished run under a stray active row").await;
+        assert_eq!(
+            task_of(&su, stray).await.0,
+            "active",
+            "{status}: the row is not touched by the refusal"
+        );
+    }
+}
+
+/// Wait until some backend of this database is blocked on a row lock taken by a `SELECT … FOR UPDATE`
+/// of `agent_run` — the stop, parked behind the closing transaction — or fail loudly.
+async fn wait_for_the_stop_to_wait_on_the_run_lock(su: &PgPool) {
+    for _ in 0..300 {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE datname = current_database() AND wait_event_type = 'Lock' \
+                AND query LIKE '%FROM agent_run r%FOR UPDATE%'",
+        )
+        .fetch_one(su)
+        .await
+        .unwrap();
+        if waiting > 0 {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("the stop never waited for the run's lock");
+}
+
+/// #5029 review r1 L-1: a stop that is waiting for the run's lock while the task ends — the worker's
+/// closing transaction commits the run `failed` and its row `ended` — is a run that has left the
+/// stoppable set: the answer is the 409 every other finished run gets, and nothing is written. (The
+/// read under the lock sees the new status but the old state of the row, so the stop's own statement
+/// finds nothing to cancel; that is not a server fault.)
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn s8_a_stop_that_races_the_tasks_end_answers_409_not_500() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let f = seed(&su, &app).await;
+    let base = start_server(app.clone()).await;
+    let client = reqwest::Client::new();
+    let workspace = f.workspace;
+
+    // A task in flight: the run is `running`, its row is active.
+    let run = mention_run(&app, &su, &f).await;
+    insert_active_task(&su, &f, run).await;
+    let cancel_lines = "SELECT count(*) FROM message WHERE workspace_id = $1 \
+                        AND props->>'kind' = 'agent_run_cancelled'";
+    let cancel_audits =
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'agent.run.cancelled'";
+    let (lines_before, audits_before) = (
+        count(&su, cancel_lines, &f).await,
+        count(&su, cancel_audits, &f).await,
+    );
+
+    // The worker's closing transaction holds the run's lock and has ended the run and its task — but
+    // has not committed yet.
+    let mut closing = su.begin().await.expect("the closing transaction");
+    sqlx::query("SELECT 1 FROM agent_run WHERE id = $1 FOR UPDATE")
+        .bind(run)
+        .fetch_one(&mut *closing)
+        .await
+        .expect("take the run's lock");
+    sqlx::query("UPDATE agent_run SET status = 'failed', finished_at = now() WHERE id = $1")
+        .bind(run)
+        .execute(&mut *closing)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE team_ai_task SET state = 'ended', end_reason = 'task_limit', plan = NULL, \
+                note = NULL, claim_token = NULL, claim_until = NULL, ended_at = now() \
+          WHERE run_id = $1",
+    )
+    .bind(run)
+    .execute(&mut *closing)
+    .await
+    .unwrap();
+
+    // A member of the room taps 중단 now: the stop reads the run, and waits for its lock.
+    let stop = {
+        let client = client.clone();
+        let url = format!("{base}/v1/workspaces/{workspace}/agent-runs/{run}/cancel");
+        let jwt = f.bystander_jwt.clone();
+        tokio::spawn(async move { client.post(url).bearer_auth(jwt).send().await.unwrap() })
+    };
+    wait_for_the_stop_to_wait_on_the_run_lock(&su).await;
+    closing
+        .commit()
+        .await
+        .expect("the closing transaction commits");
+
+    let response = stop.await.unwrap();
+    let status = response.status().as_u16();
+    let body = response.text().await.unwrap();
+    assert_eq!(
+        status, 409,
+        "a stop that lost the race is a 409, not a server error: {body}"
+    );
+    assert!(
+        body.contains("agent run is already failed"),
+        "and it names what the run is now: {body}"
+    );
+    assert_eq!(
+        run_status_of(&su, run).await,
+        "failed",
+        "the stop wrote nothing"
+    );
+    assert_eq!(
+        task_of(&su, run).await,
+        ("ended".to_string(), Some("task_limit".to_string()), None),
+        "the task stays as its own end left it"
+    );
+    assert_eq!(
+        count(&su, cancel_lines, &f).await,
+        lines_before,
+        "no 「중단」 line was written"
+    );
+    assert_eq!(
+        count(&su, cancel_audits, &f).await,
+        audits_before,
+        "no cancel audit row was written"
+    );
 }

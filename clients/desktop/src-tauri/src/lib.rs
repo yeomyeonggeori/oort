@@ -4,7 +4,7 @@
 //
 //   deep link     momo://join arrives from the OS -> `momo:deep-link` event
 //   discovery     _momo._tcp browse               -> `momo:discovery` event
-//   notification  mentions/approvals              -> commands
+//   notification  mentions/approvals              -> commands (+ a banner click -> `momo:notification-click`, macOS, #5059)
 //   keychain      refresh token at rest           -> commands
 //   session       the refresh rotation + its proof -> commands (#3106; the
 //                 webview gets the access token and a handle, never the token)
@@ -59,6 +59,11 @@ mod keychain;
 #[cfg(desktop)]
 mod locale;
 mod notification;
+// A banner click reported to the web layer (#5059): the shell keeps the banner's handle and emits
+// `momo:notification-click` on a click. macOS only; elsewhere `notification_show_clickable`
+// shows a plain banner and the web layer keeps its focus approximation.
+#[cfg(target_os = "macos")]
+mod notification_click;
 // The shell's own refresh rotation with the refresh-key proof (#3106,
 // ADR-0146 D-7 증보 #3079): the webview asks for a rotation and gets the
 // access token and a handle, never the refresh token.
@@ -192,6 +197,8 @@ pub fn run() {
             notification::notification_permission,
             notification::notification_request_permission,
             notification::notification_show,
+            notification::notification_click_supported,
+            notification::notification_show_clickable,
             notification::dock_badge_set,
             window_vibrancy::window_vibrancy_set,
             window_vibrancy::app_theme_set,

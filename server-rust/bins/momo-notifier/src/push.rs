@@ -102,8 +102,9 @@ pub struct DrainStats {
     pub failed: usize,
     /// Targets that were **not** delivered on purpose or given up on: bulk-layer ones folded under a
     /// window's representative, past the server-wide budget, or dropped on a relay 429
-    /// ([`crate::bulk`]), and best-effort test pushes the relay answered 429/5xx or that never
-    /// reached the relay (ADR-0206 D11, [`PushDrain::drain_system_once`]).
+    /// ([`crate::bulk`]), and best-effort test pushes the relay answered 429/5xx, that never reached
+    /// the relay, that found the server-wide budget spent or that waited too long to be sent
+    /// (ADR-0206 D11 and 증보 4 G2·G3, [`PushDrain::drain_system_once`]).
     pub held_back: usize,
 }
 
@@ -153,7 +154,7 @@ impl PushDrain {
     }
 
     /// `(reason, cause) -> pushes the bulk layer did not send since boot` (cause: `window`,
-    /// `budget` or `relay_429`).
+    /// `budget`, `relay_429` or, for a test notification, `expired`).
     pub fn bulk_counters(&self) -> std::collections::BTreeMap<(&'static str, &'static str), u64> {
         self.bulk.counters()
     }
@@ -651,6 +652,14 @@ impl PushDrain {
             tracing::error!(outbox_id = id, error = %error, "failed to mark candidate done");
         }
         let _ = stats;
+    }
+
+    /// [`PushDrain::settle_outbox_done`] with the reason in the row's terminal note: a deliberate
+    /// drop is a finished row (`oort doctor` does not count it), and the note says why.
+    async fn settle_outbox_done_with_note(&self, id: i64, note: &str) {
+        if let Err(error) = mark_done(&self.pool, id, Some(note)).await {
+            tracing::error!(outbox_id = id, error = %error, "failed to mark push row done");
+        }
     }
 
     async fn settle_outbox_failed(&self, id: i64, reason: &str, stats: &mut DrainStats) {

@@ -6056,8 +6056,9 @@ paths:
         died). `relay_unreachable` is inferred, because the api process has no relay client: a
         dispatch of a current token that stayed unsettled for 2 minutes, or a test push nobody
         processed for 30 seconds, within the last 15 minutes. `last_delivery_failed` reports
-        the latest settled dispatch of a current token (last 7 days; the bulk layer's drop
-        rows are skipped) when its status is 400 or above, and its `apnsReason` is a **code**
+        the latest settled dispatch of a current token (last 7 days; the rows the server itself
+        settled without sending are skipped: the bulk layer's drops and a test past the
+        server-wide budget or too old) when its status is 400 or above, and its `apnsReason` is a **code**
         (an APNs reason, or `relay_vocabulary_refused`, `relay_environment_mismatch`,
         `relay_http_<status>`), never a relay's own words. `ok` is true when there is no
         blocker. That means the server holds nothing back, not that the device shows it: the
@@ -6135,7 +6136,11 @@ paths:
         `no_device` when the caller has no active token (nothing is spent and nothing is
         written). 429 with `error.code` `rate_limited` and a `Retry-After` of 1 to 60 seconds
         past 3 per member per fixed 60-second window. The test is best effort: the relay's
-        429/5xx is not retried and shows as `failed`. The result is read from `lastTest` of
+        429/5xx is not retried and shows as `failed`. It also spends the notifier's server-wide
+        per-minute dispatch budget, one per device, shared with other best-effort pushes; a device
+        past it is not sent and the test shows `failed` with `apnsStatus` 429 (ADR-0206 증보 4 G2).
+        A test the notifier only picks up more than 5 minutes after it was made is not sent and
+        shows `failed` with `apnsStatus` 408 (증보 4 G3). The result is read from `lastTest` of
         `getNotificationDiagnostics`.
       security:
         - bearerAuth: []
@@ -11558,15 +11563,98 @@ paths:
         8). A file a deleted message carried is read by nobody - not the room, not the author
         who uploaded it, not a workspace admin - and answers the same 404 (ADR-0151 amendment 2).
         The caller must be an active member of the channel in every case, the uploader included.
+
+        **Byte ranges (ADR-0151 amendment 5 D3).** One `Range: bytes=...` header with a single
+        range is honoured: `bytes=a-b`, `bytes=a-` and `bytes=-n` answer `206` with
+        `Content-Range: bytes first-last/size` and only those bytes (an end past the file is
+        clamped to its last byte, and a suffix at least as long as the file is the whole file). A
+        start at or past the end of the file, or `bytes=-0`, answers `416` with
+        `Content-Range: bytes */size`. The following are **ignored** and answered `200` with the
+        whole file, as RFC 9110 allows: a list of ranges (never expanded into a multipart body), a
+        unit other than `bytes`, a malformed or inverted spec, a number that does not fit an
+        unsigned 64-bit integer (more than 20 digits), a second `Range` header, an `If-Range`
+        header (this server sends no validator, so it can never match), and an empty file.
+
+        **The order is part of the contract.** `Range` is read only after authentication, active
+        channel membership, the readable predicate and `status = complete` have all passed. A
+        request that fails any of them is answered exactly as it is without a `Range` header (403
+        for a non-member, the one 404 for everything else), so `Range` cannot be used to ask
+        whether a file exists or how large it is: a `416` is only ever sent for a file the caller
+        may read.
+
+
+        `Content-Length`, `Content-Range` and `Content-Type` come from the attachment's database
+        row, not from the archive; an archive that reports a different length than the row is
+        refused with `502` before any byte is sent. Every `200`, `206` and `416` carries
+        `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`,
+        `Cache-Control: private, no-store, no-transform` and `Accept-Ranges: bytes` - a ranged
+        answer is a download like any other and is never rendered inline.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/ChannelId"
         - $ref: "#/components/parameters/AttachmentId"
+        - name: Range
+          in: header
+          required: false
+          description: >
+            One byte range, `bytes=first-last`, `bytes=first-` or `bytes=-suffixLength`. Anything
+            else is ignored (see the operation description).
+          schema:
+            type: string
+        - name: If-Range
+          in: header
+          required: false
+          description: >
+            Always ignored: this server sends no `ETag` or `Last-Modified`, so a conditional range
+            can never match and the answer is the whole file.
+          schema:
+            type: string
       responses:
         "200":
-          description: Original attachment bytes, streamed from Drive alt=media.
+          description: >
+            Original attachment bytes, streamed from Drive. Sent when the request has no usable
+            `Range` (see the operation description), and for an empty file.
+          headers:
+            Content-Length:
+              description: The attachment's size in bytes, from the database row.
+              schema:
+                type: integer
+                format: int64
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: >
+            The requested byte range of the attachment. `Content-Type` is the attachment's mime
+            (never `multipart/byteranges`: lists of ranges are ignored, not expanded).
+          headers:
+            Content-Range:
+              $ref: "#/components/headers/ContentRangeSatisfied"
+            Content-Length:
+              description: The number of bytes in the range (`last - first + 1`).
+              schema:
+                type: integer
+                format: int64
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
           content:
             "*/*":
               schema:
@@ -11584,11 +11672,132 @@ paths:
           description: >
             Completed attachment not found: unknown id, pending or failed upload, another
             channel's or tenant's attachment, a draft (no message carries it) that the caller
-            did not upload, or a file a deleted message carried. All of these answer identically.
+            did not upload, or a file a deleted message carried. All of these answer identically,
+            with or without a `Range` header.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "416":
+          description: >
+            The range cannot be satisfied: its start is at or past the end of the file, or it is
+            `bytes=-0`. Sent only for an attachment the caller may read. The body is the usual
+            error JSON.
+          headers:
+            Content-Range:
+              $ref: "#/components/headers/ContentRangeUnsatisfied"
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: >
+            The archive failed, was refused by the instance's own credentials, or reported a
+            different length than the attachment's row. Nothing of the file was sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Drive archive is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    head:
+      tags: [attachments]
+      operationId: headAttachmentContent
+      summary: The status and headers a GET of the attachment content would answer, with no body.
+      description: >
+        Answers the status and headers a `GET` of the same request would (including the `Range`
+        handling and the `Content-Length` of the bytes a `GET` would send), with a zero-byte body.
+        **It does not read the archive**: size and mime come from the attachment's database row,
+        and nothing is opened, so a `HEAD` that answers `200` can still be followed by a `GET`
+        that the archive fails. The same authorization applies, in the same order, and a request
+        that fails it answers the same status a `GET` would. Methods other than `GET` and `HEAD`
+        on this path are `405`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - $ref: "#/components/parameters/AttachmentId"
+        - name: Range
+          in: header
+          required: false
+          description: Same as on `GET`.
+          schema:
+            type: string
+        - name: If-Range
+          in: header
+          required: false
+          description: Always ignored, as on `GET`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The headers of the whole file; no body.
+          headers:
+            Content-Length:
+              description: The attachment's size in bytes, from the database row.
+              schema:
+                type: integer
+                format: int64
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
+        "206":
+          description: The headers of the requested range; no body.
+          headers:
+            Content-Range:
+              $ref: "#/components/headers/ContentRangeSatisfied"
+            Content-Length:
+              description: The number of bytes in the range (`last - first + 1`).
+              schema:
+                type: integer
+                format: int64
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active channel membership required.
+        "404":
+          description: >
+            Completed attachment not found; the same refusals as `GET`, answered identically with
+            or without a `Range` header.
+        "416":
+          description: The range cannot be satisfied (see `GET`); no body.
+          headers:
+            Content-Range:
+              $ref: "#/components/headers/ContentRangeUnsatisfied"
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
 
   /v1/workspaces/{workspaceId}/search/messages:
     get:
@@ -15650,6 +15859,44 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+
+  headers:
+    AttachmentContentDisposition:
+      description: >
+        Always `attachment`. Attachment bytes are served from the API's own origin, so they are
+        downloaded, never rendered inline - a `206` included.
+      schema:
+        type: string
+        enum: ["attachment"]
+    AttachmentNoSniff:
+      description: Always `nosniff`.
+      schema:
+        type: string
+        enum: ["nosniff"]
+    AttachmentCacheControl:
+      description: >
+        Always `private, no-store, no-transform`. `no-transform` asks an edge not to compress or
+        otherwise rewrite the bytes, which would break the offsets a `Content-Range` promises.
+      schema:
+        type: string
+        enum: ["private, no-store, no-transform"]
+    AcceptRangesBytes:
+      description: Always `bytes`.
+      schema:
+        type: string
+        enum: ["bytes"]
+    ContentRangeSatisfied:
+      description: >
+        `bytes <first>-<last>/<size>` - the bytes sent and the attachment's whole size from the
+        database row.
+      schema:
+        type: string
+        pattern: '^bytes [0-9]+-[0-9]+/[0-9]+$'
+    ContentRangeUnsatisfied:
+      description: '`bytes */<size>` - the attachment''s whole size from the database row.'
+      schema:
+        type: string
+        pattern: '^bytes \*/[0-9]+$'
 
   responses:
     Unauthorized:
@@ -21743,15 +21990,19 @@ components:
             `sent`: APNs answered 200 for at least one device; `relay_outdated`: every
             attempt was the relay's closed-vocabulary refusal (an old relay; not retried);
             `failed`: anything else once a record is settled and none is a 200 (an APNs
-            refusal, the relay's environment mismatch, a relay 429/5xx, or a mix of
-            settled and still-unsettled attempts).
+            refusal, the relay's environment mismatch, a relay 429/5xx, the notifier's own
+            server-wide budget spent (429), a test that waited more than 5 minutes and was
+            not sent (408), or a mix of settled and still-unsettled attempts).
         atMs:
           type: integer
           format: int64
           description: When the test was made.
         apnsStatus:
           type: integer
-          description: "`sent`: 200. Otherwise the newest settled record's status."
+          description: >
+            `sent`: 200. Otherwise the newest settled record's status. 429 is either the relay
+            pushing back or the notifier's server-wide budget being spent, and 408 is a test that
+            was not sent because it waited too long; the status alone does not say which 429.
 
     NotificationDiagnosticsResponse:
       type: object
@@ -21774,6 +22025,10 @@ components:
             active:
               type: integer
               minimum: 0
+              description: >
+                Live push tokens of the caller. A member keeps at most 10: a registration that
+                would leave more invalidates the stalest (ADR-0206 증보 4 G1). A member who was
+                above 10 before that rule converges at their next registration.
             invalidated:
               type: integer
               minimum: 0
@@ -21794,7 +22049,10 @@ components:
           description: >
             Active tokens the test goes to: the caller's live tokens capped at 5 (the most
             recently registered or refreshed). Not the caller's real device count — that is
-            `devices.active` of `getNotificationDiagnostics`, which has no cap.
+            `devices.active` of `getNotificationDiagnostics`, which a member's registrations keep
+            at 10 or fewer (a member who was above 10 before that rule converges at their next
+            registration). It says how many the test is addressed to, not how many it reaches: a
+            device the notifier's server-wide budget has no room for is settled `failed` (429).
 
     NotificationKeywordsResponse:
       type: object

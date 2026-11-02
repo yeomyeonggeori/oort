@@ -1,5 +1,6 @@
-import { isDesktop, showNotification } from "@/lib/tauri";
+import { isDesktop } from "@/lib/tauri";
 import { showBrowserNotification, type BrowserNotifyTarget } from "./browserNotify";
+import { showDesktopBanner, type BannerArm } from "./bannerClicks";
 
 // =============================================================================
 // OS 알림의 마지막 관문: 같은 종류를 한 묶음으로 쌓는다 (#3339).
@@ -32,6 +33,19 @@ export interface OsNotifyItem {
    * 답글마다 `route` 의 카드가 달라 「한 곳을 가리킴」으로 읽히지 않던 것을 이 값이 잇는다.
    */
   rootId?: string;
+  /**
+   * 옛 어림(창이 앞에 온 순간 이동)이 쓰는 재료(#5059). 데스크탑 셸이 이 배너의 클릭을 알려 주지 못한다고 답했을 때만
+   * 쓰인다 — 클릭이 오는 배너에는 필요 없다. 메시지에서 온 알림만 갖는다.
+   */
+  arm?: BannerArm;
+}
+
+/**
+ * 묶인 배너가 보내질 때 함께 가는 정보. 브라우저 배너는 `kind`·`route` 만 읽는다. `arms` 는 묶음에 든 알림들의 어림 재료이고,
+ * 하나라도 있을 때만 붙는다.
+ */
+export interface OsNotifyTarget extends BrowserNotifyTarget {
+  arms?: readonly BannerArm[];
 }
 
 /**
@@ -86,7 +100,7 @@ export function summarize(items: readonly OsNotifyItem[]): { title: string; body
 }
 
 export interface OsNotifierDeps {
-  send: (title: string, body: string | undefined, target: BrowserNotifyTarget) => Promise<boolean>;
+  send: (title: string, body: string | undefined, target: OsNotifyTarget) => Promise<boolean>;
   windowMs?: number;
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
@@ -105,7 +119,14 @@ export function createOsNotifier(deps: OsNotifierDeps) {
     clearTimer(slot.timer);
     const { title, body } = summarize(slot.items);
     const route = routeFor(slot.items);
-    void deps.send(title, body, { kind, ...(route === undefined ? {} : { route }) }).catch(() => false);
+    const arms = slot.items.flatMap((item) => (item.arm === undefined ? [] : [item.arm]));
+    void deps
+      .send(title, body, {
+        kind,
+        ...(route === undefined ? {} : { route }),
+        ...(arms.length === 0 ? {} : { arms }),
+      })
+      .catch(() => false);
   }
 
   return {
@@ -135,9 +156,10 @@ let shared: OsNotifier | null = null;
 /** 앱에 하나다: 메시지 레일과 로컬 칸이 같은 묶음을 쓴다. */
 export function osNotifier(): OsNotifier {
   shared ??= createOsNotifier({
-    // 데스크탑은 셸로, 브라우저는 옵트인한 탭의 Notification API로(#3340). 같은 묶음 규칙이다.
+    // 데스크탑은 셸로, 브라우저는 옵트인한 탭의 Notification API로(#3340). 같은 묶음 규칙이다. 셸이 클릭을 알려 주면
+    // 배너의 클릭이 곧 이동이다(#5059, `bannerClicks.ts`).
     send: (title, body, target) =>
-      isDesktop() ? showNotification(title, body) : showBrowserNotification(title, body, target),
+      isDesktop() ? showDesktopBanner(title, body, target) : showBrowserNotification(title, body, target),
   });
   return shared;
 }

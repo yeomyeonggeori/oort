@@ -10,7 +10,7 @@
     "GHCR_THIRD_PARTY_NOTICES.txt": "43ef7a1f4157c5fe166c0009be7b40232178e8380724729d68d0c3052464a164",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "NOTICE": "cea87fec9a3f3a86abbc443a5a0eea592ce6c296f7da92c4e40db9687e93c683",
-    "THIRD_PARTY_NOTICES.md": "f4655b4b4e6e81090938c277adb8ac8f12e04719c5509d545c1554bca009f4b8"
+    "THIRD_PARTY_NOTICES.md": "6d9900db6f00a0ef02b640ae47a18c6a5ecc3f96327358361e94f52dc60d0169"
   },
   "inputs": {
     "clarify_sha256": "06d582a72150cf2c0d3604f47640a3eee3cc9e84ad06d41e48adcd413f1affad",
@@ -30,7 +30,7 @@
   },
   "outputs": {
     "bundle_sha256": "43ef7a1f4157c5fe166c0009be7b40232178e8380724729d68d0c3052464a164",
-    "sha256_manifest_sha256": "efeb629e5e51faa3a440cbe0eed93da54db30c50a2b6ae303411bd16fe958daf"
+    "sha256_manifest_sha256": "6bab8d9dde88c5562f0d9efecd873ba67aa3cc938bda626563622746ef68ec67"
   },
   "packages": [
     {
