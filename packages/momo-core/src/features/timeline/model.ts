@@ -436,6 +436,34 @@ export function canEditMessage(
   return uuidEq(message.authorMemberId, myMemberId);
 }
 
+/**
+ * 이슈 #5191 - 빈 입력칸의 ↑ 가 고칠 메시지: 이 대화에서 **내** 마지막 글 있는 고칠 수 있는 메시지.
+ *
+ * `⋯` 메뉴 맨 아래의 「고치기」를 사람들이 찾지 못해서 입력칸에서 ↑ 한 번으로 가는 길을 더했고(Slack식), 그 길이 어느
+ * 메시지에 닿는지를 정하는 판정이다. 규칙은 하나씩 이유가 있다.
+ *
+ * - **`canEditMessage` 를 그대로 쓴다.** 고칠 수 있는 것의 정의가 둘이 되면 메뉴에는 없는 글을 ↑ 가 열거나 그 반대가 된다.
+ * - **글이 있어야 한다.** 첨부만 보낸 메시지는 `canEditMessage` 가 열어 주지만(캡션을 나중에 달 수 있다) 편집기가 빈 상자로
+ *   열린다. ↑ 는 「방금 쓴 글의 오타」를 위한 키라 그런 줄은 건너뛰고 그 앞의 글 있는 메시지를 고친다. 공백뿐인 글도 글이 아니다.
+ * - **채널의 본류만 본다.** 스레드 답글은 채널 줄에 서지 않고(`rootId` 가 있는 행은 본류에서 걸러진다) 편집기는 보이는 행
+ *   안에서 열려야 하므로, 채널 입력칸의 ↑ 가 안 보이는 답글을 열면 안 된다.
+ *
+ * `messages` 는 seq 오름차순이다(`TimelineState.messages`). 끝에서부터 첫 일치가 가장 최근이다.
+ */
+export function lastEditableMessage(
+  messages: readonly Message[],
+  myMemberId: string | undefined
+): Message | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.rootId) continue;
+    if (!canEditMessage(message, myMemberId)) continue;
+    if (!message.body || message.body.trim().length === 0) continue;
+    return message;
+  }
+  return undefined;
+}
+
 /** The same authority as {@link canEditMessage}, without the text-only rule. */
 export function canDeleteMessage(
   message: Message,
