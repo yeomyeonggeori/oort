@@ -513,6 +513,8 @@ pub(crate) fn run_response(run: &momo_agent::AgentRunRow) -> crate::dto::AgentRu
         error: run.error.clone(),
         agent_reported: crate::routes::agent_gateway::agent_reported_of(run.output.as_ref()),
         apps_used: crate::routes::apps_used::of_output(run.output.as_ref()),
+        // The detail read fills it (a team-AI task run only); every other caller has none.
+        spent: None,
         started_at_ms: run.started_at.map(epoch_ms),
         finished_at_ms: run.finished_at.map(epoch_ms),
         created_at_ms: epoch_ms(run.created_at),

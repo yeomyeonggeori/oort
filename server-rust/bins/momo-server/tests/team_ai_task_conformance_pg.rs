@@ -6,6 +6,9 @@
 //! | `s1_a_work_request_aimed_at_the_helper_is_a_409_and_writes_nothing` | B5-10, B15-A5 | the `agent_runs::create` check is dropped (the run is created and silently closed again) |
 //! | `s2_the_409_is_the_helpers_alone` | B5-10 | the check refuses every agent, or the wrong id |
 //! | `s3_a_stop_by_any_member_of_the_room_ends_the_task_and_retires_its_job` | B5-8, B15-A8, B13-I7 | `cancel_run_in_tx` stops ending the task, or the cancel stops retiring the pending step job |
+//! | `s4_a_task_runs_reads_say_what_that_run_spent_and_no_other_run_does` | #4968 B12, ADR-0201 증보 v3.3 | the spend is summed by anything but the run (the agent, the channel), shown for a run that is not a task, or the channel read stops listing a task run (or lists every managed run) |
+//! | `s5_no_figure_a_read_carries_is_a_persons` | #4968, ADR-0147 증보 D6 | a requester key, a requester-grouped sum or a requester column on the ledger appears |
+//! | `s6_another_workspace_reads_nothing_of_a_task_run` | #4968, RLS | the spend or the listing crosses a workspace |
 //!
 //! The worker half (steps, claims, bounds, requester, the ledger, the sweep, the table's isolation) is
 //! `momo-agent-worker/tests/team_ai_task_conformance_pg.rs`.
@@ -53,6 +56,22 @@ async fn superuser_pool() -> PgPool {
         .connect(&database_url())
         .await
         .expect("connect as superuser")
+}
+
+/// The agent worker's role: BYPASSRLS, so the row policy does not stand between it and another
+/// workspace's rows — only the statement's own predicates do.
+async fn momo_worker_pool() -> PgPool {
+    let options: PgConnectOptions = database_url().parse().expect("DATABASE_URL parses");
+    PgPoolOptions::new()
+        .max_connections(4)
+        .connect_with(
+            options.username("momo_worker").password(
+                &std::env::var("MOMO_WORKER_PASSWORD")
+                    .unwrap_or_else(|_| "momo_worker_dev_pw".to_string()),
+            ),
+        )
+        .await
+        .expect("connect as momo_worker after bootstrap_roles.sql")
 }
 
 async fn momo_app_pool() -> PgPool {
@@ -214,6 +233,7 @@ struct Fixture {
     /// The person who asked, and another member of the room.
     requester: Uuid,
     requester_jwt: String,
+    bystander: Uuid,
     bystander_jwt: String,
     /// A workspace member who is not in the room.
     outsider_jwt: String,
@@ -287,6 +307,7 @@ async fn seed(su: &PgPool, app: &PgPool) -> Fixture {
         channel,
         requester,
         requester_jwt,
+        bystander,
         bystander_jwt,
         outsider_jwt,
         helper,
@@ -561,4 +582,575 @@ async fn s3_a_stop_by_any_member_of_the_room_ends_the_task_and_retires_its_job()
         task_state(su.clone()).await.1.as_deref(),
         Some("task_cancelled")
     );
+}
+
+// --- #4968 (S5): what a run read says about a task ---------------------------------------------------
+
+/// A `running` mention run of `agent` triggered by `requester`'s message in the fixture's room, with
+/// one ledger row per `(prompt, completion, searches, estimated)` and — for `task` — the task's row.
+async fn seed_run(
+    su: &PgPool,
+    app: &PgPool,
+    f: &Fixture,
+    agent: Uuid,
+    requester: Uuid,
+    task: bool,
+    steps: &[(i32, i32, i32, bool)],
+) -> Uuid {
+    let (workspace, channel) = (f.workspace, f.channel);
+    let run = with_tenant_tx(app, workspace, move |conn| {
+        Box::pin(async move {
+            let sent = send_message_in_tx(
+                conn,
+                workspace,
+                NewMessage::text(channel, requester, "@oort-helper 조사해 줘".to_string()),
+            )
+            .await?;
+            let created = create_agent_run_in_tx(
+                conn,
+                workspace,
+                NewAgentRun {
+                    channel_id: channel,
+                    trigger: RunTrigger::Mention {
+                        message_id: sent.message.id,
+                        agent_member_id: agent,
+                    },
+                    parent_run_id: None,
+                    max_steps: 50,
+                    depth: 0,
+                    input: json!({"schema": "momo.agent_run.input.v0", "surface": "mention",
+                                  "prompt": "조사", "depth": 0}),
+                },
+            )
+            .await?;
+            Ok(created.id)
+        })
+    })
+    .await
+    .expect("a mention run");
+    sqlx::query("UPDATE agent_run SET status = 'running', started_at = now() WHERE id = $1")
+        .bind(run)
+        .execute(su)
+        .await
+        .unwrap();
+    if task {
+        sqlx::query(
+            "INSERT INTO team_ai_task (workspace_id, run_id, agent_member_id, steps_done, plan, note) \
+             VALUES ($1, $2, $3, 1, '[\"다음 단계\"]'::jsonb, '노트')",
+        )
+        .bind(workspace)
+        .bind(run)
+        .bind(agent)
+        .execute(su)
+        .await
+        .unwrap();
+    }
+    for (prompt, completion, searches, estimated) in steps {
+        sqlx::query(
+            "INSERT INTO usage_ledger (workspace_id, run_id, agent_member_id, channel_id, model, \
+                                       prompt_tokens, completion_tokens, was_estimated, web_search_requests) \
+             VALUES ($1, $2, $3, $4, 'team-ai-default', $5, $6, $7, $8)",
+        )
+        .bind(workspace)
+        .bind(run)
+        .bind(agent)
+        .bind(channel)
+        .bind(prompt)
+        .bind(completion)
+        .bind(estimated)
+        .bind(searches)
+        .execute(su)
+        .await
+        .unwrap();
+    }
+    run
+}
+
+async fn read_json(client: &reqwest::Client, url: String, jwt: &str) -> (u16, Value) {
+    let response = client.get(url).bearer_auth(jwt).send().await.unwrap();
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+/// The three reads a run's spend rides: the workspace's running-now list, the channel's progress list
+/// (`state=all`) and one run's detail.
+fn active_url(base: &str, f: &Fixture) -> String {
+    format!(
+        "{base}/v1/workspaces/{}/agent-runs?state=active",
+        f.workspace
+    )
+}
+fn channel_url(base: &str, f: &Fixture) -> String {
+    format!(
+        "{base}/v1/workspaces/{}/channels/{}/agent-runs/progress?state=all",
+        f.workspace, f.channel
+    )
+}
+fn detail_url(base: &str, f: &Fixture, run: Uuid) -> String {
+    format!("{base}/v1/workspaces/{}/agent-runs/{run}", f.workspace)
+}
+
+/// The row of `run` in a page's `runs`.
+fn row_of(page: &Value, run: Uuid) -> Option<&Value> {
+    page["runs"]
+        .as_array()?
+        .iter()
+        .find(|row| row["id"].as_str().map(str::to_lowercase) == Some(run.to_string()))
+}
+
+fn spent_json(prompt: i64, completion: i64, searches: i64, estimated: bool) -> Value {
+    json!({"promptTokens": prompt, "completionTokens": completion,
+           "webSearches": searches, "estimated": estimated})
+}
+
+/// B12 (#4968): a team-AI task run's reads say what **that run** spent — the sums of its own ledger
+/// rows, the estimate flag included — on the running-now list, the channel's progress list and the
+/// run's detail, for every member of the room. No other run says it: not the helper's quick answer, not
+/// another agent's run (the figure is the shared helper's, never a personal agent's), and the channel
+/// list names a task run but not those. The same helper, the same channel and the same ledger agent
+/// are in every run here, so a sum taken by the agent or the channel instead of the run is told apart.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn s4_a_task_runs_reads_say_what_that_run_spent_and_no_other_run_does() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let f = seed(&su, &app).await;
+    let base = start_server(app.clone()).await;
+    let client = reqwest::Client::new();
+
+    let a = seed_run(
+        &su,
+        &app,
+        &f,
+        f.helper,
+        f.requester,
+        true,
+        &[(100, 40, 1, false), (50, 20, 0, true)],
+    )
+    .await;
+    let b = seed_run(
+        &su,
+        &app,
+        &f,
+        f.helper,
+        f.bystander,
+        true,
+        &[(7, 3, 2, false)],
+    )
+    .await;
+    let quick = seed_run(
+        &su,
+        &app,
+        &f,
+        f.helper,
+        f.requester,
+        false,
+        &[(1000, 500, 4, false)],
+    )
+    .await;
+    let other = seed_run(
+        &su,
+        &app,
+        &f,
+        f.other_agent,
+        f.requester,
+        false,
+        &[(900, 400, 3, false)],
+    )
+    .await;
+    let (spent_a, spent_b) = (spent_json(150, 60, 1, true), spent_json(7, 3, 2, false));
+
+    // The running-now list: both tasks carry their own figure; the other two runs carry none.
+    let (status, active) = read_json(&client, active_url(&base, &f), &f.bystander_jwt).await;
+    assert_eq!(status, 200, "{active}");
+    assert_eq!(row_of(&active, a).expect("task a listed")["spent"], spent_a);
+    assert_eq!(row_of(&active, b).expect("task b listed")["spent"], spent_b);
+    for run in [quick, other] {
+        let row =
+            row_of(&active, run).expect("listed, anti-vacuity: it has ledger rows of its own");
+        assert!(
+            row.get("spent").is_none(),
+            "no figure for a run that is not a task: {row}"
+        );
+    }
+
+    // The channel's list: the task runs (a managed agent's, now listed) and nothing else managed.
+    let (status, channel) = read_json(&client, channel_url(&base, &f), &f.requester_jwt).await;
+    assert_eq!(status, 200, "{channel}");
+    let listed: Vec<String> = channel["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_lowercase())
+        .collect();
+    assert_eq!(
+        {
+            let mut ids = listed.clone();
+            ids.sort();
+            ids
+        },
+        {
+            let mut ids = vec![a.to_string(), b.to_string()];
+            ids.sort();
+            ids
+        },
+        "the channel's progress list names the team AI's task runs and no other managed run"
+    );
+    assert_eq!(row_of(&channel, a).unwrap()["spent"], spent_a);
+    assert_eq!(row_of(&channel, b).unwrap()["spent"], spent_b);
+
+    // The run's detail, for anyone in the room.
+    for jwt in [&f.requester_jwt, &f.bystander_jwt] {
+        let (status, detail) = read_json(&client, detail_url(&base, &f, a), jwt).await;
+        assert_eq!(status, 200, "{detail}");
+        assert_eq!(detail["spent"], spent_a);
+    }
+    for run in [quick, other] {
+        let (status, detail) =
+            read_json(&client, detail_url(&base, &f, run), &f.requester_jwt).await;
+        assert_eq!(status, 200, "{detail}");
+        assert!(detail.get("spent").is_none(), "{detail}");
+    }
+
+    // Nothing for someone who is not in the room.
+    let (status, hidden) = read_json(&client, detail_url(&base, &f, a), &f.outsider_jwt).await;
+    assert!(matches!(status, 403 | 404), "{status}");
+    assert!(!hidden.to_string().contains("promptTokens"), "{hidden}");
+    let (status, _) = read_json(&client, channel_url(&base, &f), &f.outsider_jwt).await;
+    assert_eq!(status, 403);
+    let (_, outsider_active) = read_json(&client, active_url(&base, &f), &f.outsider_jwt).await;
+    assert!(row_of(&outsider_active, a).is_none() && row_of(&outsider_active, b).is_none());
+
+    // One more step of b changes b and only b.
+    sqlx::query(
+        "INSERT INTO usage_ledger (workspace_id, run_id, agent_member_id, channel_id, model, \
+                                   prompt_tokens, completion_tokens, web_search_requests) \
+         VALUES ($1, $2, $3, $4, 'team-ai-default', 11, 9, 0)",
+    )
+    .bind(f.workspace)
+    .bind(b)
+    .bind(f.helper)
+    .bind(f.channel)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (_, detail_a) = read_json(&client, detail_url(&base, &f, a), &f.requester_jwt).await;
+    let (_, detail_b) = read_json(&client, detail_url(&base, &f, b), &f.requester_jwt).await;
+    assert_eq!(detail_a["spent"], spent_a, "a's figure did not move");
+    assert_eq!(detail_b["spent"], spent_json(18, 12, 2, false));
+
+    // The end line: an ended task keeps its row, so it keeps its figure — on the detail and, once it
+    // is not running, on `state=all` but not on the running-now list.
+    with_tenant_tx(&app, f.workspace, move |conn| {
+        Box::pin(async move {
+            momo_agent::team_ai_task::end_in_tx(
+                conn,
+                f.workspace,
+                a,
+                momo_agent::team_ai_task::END_DONE,
+            )
+            .await?;
+            Ok(())
+        })
+    })
+    .await
+    .expect("end the task");
+    sqlx::query("UPDATE agent_run SET status = 'succeeded', finished_at = now() WHERE id = $1")
+        .bind(a)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (_, detail_a) = read_json(&client, detail_url(&base, &f, a), &f.requester_jwt).await;
+    assert_eq!(detail_a["spent"], spent_a);
+    let (_, channel) = read_json(&client, channel_url(&base, &f), &f.requester_jwt).await;
+    assert_eq!(row_of(&channel, a).unwrap()["spent"], spent_a);
+    assert_eq!(row_of(&channel, a).unwrap()["phase"], "succeeded");
+    let (_, active) = read_json(&client, active_url(&base, &f), &f.requester_jwt).await;
+    assert!(
+        row_of(&active, a).is_none(),
+        "a finished run is not running now"
+    );
+}
+
+/// The catalog tripwire of ADR-0147 증보 2026-10-30 D6 — 「원장에는 요청자 열이 없다」: the columns of
+/// `usage_ledger` that name a person other than the agent.
+async fn ledger_columns_naming_a_person(conn: &mut momo_db::PgConnection) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT column_name::text FROM information_schema.columns \
+          WHERE table_schema = 'public' AND table_name = 'usage_ledger' \
+            AND (column_name ~* 'requester|author|trigger|asker|caller|human' \
+                 OR column_name IN ('member_id', 'actor_member_id')) \
+          ORDER BY column_name",
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .unwrap()
+}
+
+/// ADR-0147 증보 2026-10-30 D6, for #4968: **no figure a read carries is a person's.** Two requesters
+/// ask the helper twice each; every run's figure is that run's own, no value anywhere is the sum a
+/// requester's two runs would make, the figure's keys are the closed four, no key of any page names a
+/// requester or an author, and the ledger has no column that could say who asked (the tripwire is
+/// shown to fire by adding such a column in a transaction that is rolled back).
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn s5_no_figure_a_read_carries_is_a_persons() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let f = seed(&su, &app).await;
+    let base = start_server(app.clone()).await;
+    let client = reqwest::Client::new();
+
+    // Requester 1: 100/40/1 and 30/10/0 (a person's sum would be 130/50/1). Requester 2: 5/5/0 and
+    // 8/2/1 (a person's sum would be 13/7/1).
+    let runs = [
+        (
+            seed_run(
+                &su,
+                &app,
+                &f,
+                f.helper,
+                f.requester,
+                true,
+                &[(100, 40, 1, false)],
+            )
+            .await,
+            (100, 40, 1),
+        ),
+        (
+            seed_run(
+                &su,
+                &app,
+                &f,
+                f.helper,
+                f.requester,
+                true,
+                &[(30, 10, 0, false)],
+            )
+            .await,
+            (30, 10, 0),
+        ),
+        (
+            seed_run(
+                &su,
+                &app,
+                &f,
+                f.helper,
+                f.bystander,
+                true,
+                &[(5, 5, 0, false)],
+            )
+            .await,
+            (5, 5, 0),
+        ),
+        (
+            seed_run(
+                &su,
+                &app,
+                &f,
+                f.helper,
+                f.bystander,
+                true,
+                &[(8, 2, 1, false)],
+            )
+            .await,
+            (8, 2, 1),
+        ),
+    ];
+    let pages = [
+        read_json(&client, active_url(&base, &f), &f.bystander_jwt)
+            .await
+            .1,
+        read_json(&client, channel_url(&base, &f), &f.bystander_jwt)
+            .await
+            .1,
+    ];
+    let mut details = Vec::new();
+    for (run, _) in &runs {
+        details.push(
+            read_json(&client, detail_url(&base, &f, *run), &f.requester_jwt)
+                .await
+                .1,
+        );
+    }
+
+    // Every run's figure is its own.
+    for page in &pages {
+        for (run, (prompt, completion, searches)) in &runs {
+            let row = row_of(page, *run).expect("listed");
+            assert_eq!(
+                row["spent"],
+                spent_json(*prompt, *completion, *searches, false),
+                "{row}"
+            );
+        }
+    }
+    for ((_, (prompt, completion, searches)), detail) in runs.iter().zip(&details) {
+        assert_eq!(
+            detail["spent"],
+            spent_json(*prompt, *completion, *searches, false)
+        );
+    }
+
+    // No value is a person's sum, and no key names a person.
+    let person_sums = [130, 50, 13, 7];
+    let mut keys: Vec<String> = Vec::new();
+    fn walk(value: &Value, keys: &mut Vec<String>, spent_values: &mut Vec<i64>, in_spent: bool) {
+        match value {
+            Value::Object(map) => {
+                for (key, inner) in map {
+                    keys.push(key.to_lowercase());
+                    walk(inner, keys, spent_values, in_spent || key == "spent");
+                }
+            }
+            Value::Array(items) => items
+                .iter()
+                .for_each(|item| walk(item, keys, spent_values, in_spent)),
+            Value::Number(number) if in_spent => spent_values.extend(number.as_i64()),
+            _ => {}
+        }
+    }
+    let mut spent_values: Vec<i64> = Vec::new();
+    for body in pages.iter().chain(&details) {
+        walk(body, &mut keys, &mut spent_values, false);
+    }
+    assert!(!spent_values.is_empty(), "anti-vacuity: figures were read");
+    for sum in person_sums {
+        assert!(
+            !spent_values.contains(&sum),
+            "{sum} is what one requester's two runs add up to, and no read carries it: {spent_values:?}"
+        );
+    }
+    for key in &keys {
+        assert!(
+            !key.contains("requester") && !key.contains("author"),
+            "a key names a person: {key}"
+        );
+    }
+    // Neither requester's member id is in any page or detail at all — there is nothing to group by.
+    for body in pages.iter().chain(&details) {
+        let text = body.to_string().to_lowercase();
+        for person in [f.requester, f.bystander] {
+            assert!(
+                !text.contains(&person.to_string()),
+                "a requester's id is in a read: {text}"
+            );
+        }
+    }
+    for page in &pages {
+        for (run, _) in &runs {
+            let spent = row_of(page, *run).unwrap()["spent"].as_object().unwrap();
+            let mut names: Vec<&str> = spent.keys().map(String::as_str).collect();
+            names.sort_unstable();
+            assert_eq!(
+                names,
+                [
+                    "completionTokens",
+                    "estimated",
+                    "promptTokens",
+                    "webSearches"
+                ]
+            );
+        }
+    }
+
+    // The ledger has no column that could say who asked — and the check is a real one.
+    let mut conn = su.acquire().await.unwrap();
+    assert_eq!(
+        ledger_columns_naming_a_person(&mut conn).await,
+        Vec::<String>::new(),
+        "ADR-0147 D6: the ledger has no requester column"
+    );
+    drop(conn);
+    let mut tx = su.begin().await.unwrap();
+    sqlx::query("ALTER TABLE usage_ledger ADD COLUMN requester_member_id uuid")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert_eq!(
+        ledger_columns_naming_a_person(&mut tx).await,
+        ["requester_member_id"],
+        "the tripwire fires when such a column exists"
+    );
+    tx.rollback().await.unwrap();
+}
+
+/// RLS, for the new reads: another workspace's member reads nothing of a task run — not its figure on
+/// the detail, not a row on either list — and the other workspace's own lists carry none of it.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn s6_another_workspace_reads_nothing_of_a_task_run() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let one = seed(&su, &app).await;
+    let two = seed(&su, &app).await;
+    let base = start_server(app.clone()).await;
+    let client = reqwest::Client::new();
+    let run = seed_run(
+        &su,
+        &app,
+        &one,
+        one.helper,
+        one.requester,
+        true,
+        &[(100, 40, 1, false)],
+    )
+    .await;
+    let mine = seed_run(
+        &su,
+        &app,
+        &two,
+        two.helper,
+        two.requester,
+        true,
+        &[(1, 1, 0, false)],
+    )
+    .await;
+
+    // Their own: the figure is there (anti-vacuity).
+    let (_, own) = read_json(&client, detail_url(&base, &one, run), &one.requester_jwt).await;
+    assert_eq!(own["spent"], spent_json(100, 40, 1, false));
+    // Workspace two's member, workspace one's run: by the other workspace's path and by its own.
+    for url in [detail_url(&base, &one, run), detail_url(&base, &two, run)] {
+        let (status, body) = read_json(&client, url, &two.requester_jwt).await;
+        assert!(matches!(status, 403 | 404), "{status} {body}");
+        assert!(!body.to_string().contains("promptTokens"), "{body}");
+    }
+    for url in [active_url(&base, &two), channel_url(&base, &two)] {
+        let (status, page) = read_json(&client, url, &two.requester_jwt).await;
+        assert_eq!(status, 200, "{page}");
+        assert!(
+            row_of(&page, run).is_none(),
+            "workspace one's run is not in workspace two's list"
+        );
+        assert_eq!(
+            row_of(&page, mine).unwrap()["spent"],
+            spent_json(1, 1, 0, false)
+        );
+    }
+
+    // The statement's own workspace predicate — the one a BYPASSRLS role depends on, since no policy
+    // stands in its way: as the worker's role, asking for workspace one's run under workspace two's
+    // id finds nothing, and under its own id it finds the figure (anti-vacuity).
+    let worker = momo_worker_pool().await;
+    let (one_ws, two_ws) = (one.workspace, two.workspace);
+    let foreign = with_tenant_tx(&worker, two_ws, move |conn| {
+        Box::pin(
+            async move { momo_agent::team_ai_task::spent_by_run_in_tx(conn, two_ws, &[run]).await },
+        )
+    })
+    .await
+    .expect("the worker's role reads");
+    assert!(foreign.is_empty(), "{foreign:?}");
+    let own = with_tenant_tx(&worker, one_ws, move |conn| {
+        Box::pin(
+            async move { momo_agent::team_ai_task::spent_by_run_in_tx(conn, one_ws, &[run]).await },
+        )
+    })
+    .await
+    .expect("the worker's role reads");
+    assert_eq!(own.get(&run).map(|spent| spent.prompt_tokens), Some(100));
 }
