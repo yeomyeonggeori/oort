@@ -85,6 +85,8 @@ import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
 import { HumanPresenceLabel } from "@/features/presence/HumanPresence";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
+import { EditRequestContext, useEditRequestChannel } from "@/features/timeline/editRequest";
+import { lastEditableMessage } from "@momo/core/features/timeline/model";
 import { useTypingReceive } from "@/features/chat/useTyping";
 import {
   makeStressRoster,
@@ -449,6 +451,15 @@ export function ChatShell() {
 
   const [thread, setThread] = useState<Message | null>(null);
   useEffect(() => setThread(null), [channelId]);
+  // 열린 스레드의 루트는 **채널 타임라인의 그 줄**을 따른다(#5191). `thread` 는 연 순간의 사본이라, 패널 안에서 루트를 고쳐도
+  // 패널의 루트 줄은 옛 글 그대로였다. 타임라인에 그 줄이 없으면(알림·검색으로 연 스레드) 사본이 그대로 쓰인다.
+  const threadRoot = useMemo(
+    () =>
+      thread === null
+        ? null
+        : (timeline.state.messages.find((message) => uuidEq(message.id, thread.id)) ?? thread),
+    [thread, timeline.state.messages]
+  );
   // 열린 스레드를 **보고 있는가**(패널이 떠 있고 창이 앞이다): 채널 목록의 그 루트 요약 줄은 남의 새 답글에도 안 읽은 수를 0으로
   // 읽는다. 패널이 읽음 신호를 보내는 조건(`ThreadPanel`)과 같은 창 앞 판정이다(#5032). 작업 패널이 덮으면 스레드 패널이 없다.
   // 스레드가 열려 있을 때만 구독한다 — 열려 있지 않으면 이 컴포넌트는 창 앞뒤 전환에 다시 그려지지 않는다.
@@ -978,6 +989,24 @@ export function ChatShell() {
     if (input instanceof HTMLTextAreaElement) input.focus();
   }, []);
 
+  // #5191 - 빈 입력칸의 ↑ = 이 대화에서 내 마지막 글 있는 메시지 고치기(Slack식). 고치는 중인지는 행이 쥐므로(`MessageRow`) 여기서는
+  // 대상을 정해 **요청 하나**를 내려 보내고, 요청으로 열린 편집기가 끝나면(저장·취소) 초점을 입력칸으로 돌려받는다.
+  const editRequest = useEditRequestChannel(focusComposer);
+  const requestEdit = editRequest.requestEdit;
+  const bringTimelineRowIntoView = useCallback((messageId: string) => {
+    // 가상 목록이라 대상 행이 마운트돼 있지 않을 수 있다(오래 안 쓴 방에서 내 마지막 글이 위에 있는 경우). 마운트돼 있으면
+    // 목록을 건드리지 않는다: 이미 보이는 줄을 가운데로 다시 맞추면 읽던 자리가 흔들린다.
+    const mounted = document.querySelector(`[data-testid="timeline-message"][data-message-id="${messageId.toLowerCase()}"]`);
+    if (mounted === null) timelineJump.current?.bringIntoView({ messageId });
+  }, []);
+  const editLastMessage = useCallback((): boolean => {
+    const target = lastEditableMessage(messages, session.member.id);
+    if (target === undefined) return false;
+    bringTimelineRowIntoView(target.id);
+    requestEdit(target.id);
+    return true;
+  }, [messages, session.member.id, bringTimelineRowIntoView, requestEdit]);
+
   useEffect(() => {
     applyFirstAgentFocus();
   }, [channelId]);
@@ -1441,6 +1470,7 @@ export function ChatShell() {
         >
           {hasChannel ? (
             <ChannelAudienceContext.Provider value={channelAudience}>
+            <EditRequestContext.Provider value={editRequest.channel}>
             <Timeline
               tail={
                 openCard ? (
@@ -1524,6 +1554,7 @@ export function ChatShell() {
               welcomePhase={welcome.phase}
               welcomeHoldWriteAction={welcome.holdWriteAction}
             />
+            </EditRequestContext.Provider>
             </ChannelAudienceContext.Provider>
           ) : (
             <Skeleton ready={!channelsQuery.isLoading} rows={6} className="p-4">
@@ -1603,6 +1634,7 @@ export function ChatShell() {
             onCancelQuote={() => setQuote(null)}
             onSend={timeline.send}
             personalCall={personalCall}
+            onEditLast={editLastMessage}
           />
         )}
       </div>
@@ -1612,7 +1644,7 @@ export function ChatShell() {
         <ThreadPanel
           workspaceId={workspaceId}
           channelId={channelId}
-          root={thread}
+          root={threadRoot}
           requestLanding={requestThreadLanding}
           realtime={realtime}
           directory={directory}
