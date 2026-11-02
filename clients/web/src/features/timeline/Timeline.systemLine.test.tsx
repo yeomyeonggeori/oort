@@ -11,7 +11,7 @@ import { OpenMemberProfileContext } from "@/features/directory/memberProfileCont
 import { koreanLocale } from "@/testing/koLocale";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
 import type { AppLocale } from "@/i18n/localeStore";
-import { MARKER_DIVIDER_PAD_CLASS } from "./spacing";
+import { MARKER_DIVIDER_PAD_CLASS, SYSTEM_LINE_STRADDLE_CLEAR_CLASS } from "./spacing";
 import { Timeline } from "./Timeline";
 
 // =============================================================================
@@ -246,6 +246,9 @@ describe("중단 시스템 줄이 서는 모양", () => {
     expect(sentence.className).toContain("text-center");
     expect(sentence.className).toContain("text-meta");
     expect(sentence.className).toContain("text-ink-muted");
+    // 타임라인은 이웃 행의 호버 툴바가 서는 표면이다: 글줄을 감싼 상자가 툴바 straddle 띠를 비우고(#5173), 줄 자신이 그 문턱의 컨테이너다.
+    expect(line.className).toContain("@container");
+    expect((sentence.parentElement as HTMLElement).className).toContain(SYSTEM_LINE_STRADDLE_CLEAR_CLASS);
   });
 
   it("줄 바로 다음 행은 작성자(멈춘 사람)가 같아도 새 묶음으로 시작한다 - 이름 머리가 걷히지 않는다", () => {

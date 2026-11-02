@@ -9,7 +9,7 @@ import type { Message } from "@momo/core/lib/api";
 import type { MailboxEntry } from "@momo/core/features/inbox/mailbox";
 import type { FeedItem } from "@momo/core/features/inbox/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
-import { MARKER_DIVIDER_PAD_CLASS } from "@/features/timeline/spacing";
+import { MARKER_DIVIDER_PAD_CLASS, SYSTEM_LINE_STRADDLE_CLEAR_CLASS } from "@/features/timeline/spacing";
 import { InboxDetail } from "./InboxDetail";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -472,6 +472,8 @@ describe("InboxDetail: 실행 중단 시스템 줄 (#5128)", () => {
     expect(sentence.className).toContain("text-center");
     expect(sentence.className).toContain("text-meta");
     expect(sentence.className).toContain("text-ink-muted");
+    // 이 창은 호버 툴바가 없다: 타임라인과 달리 툴바 straddle 띠를 비우는 여유를 받지 않는다(좁은 패널에서도 줄은 34 그대로, #5173).
+    expect((sentence.parentElement as HTMLElement).className).not.toContain(SYSTEM_LINE_STRADDLE_CLEAR_CLASS);
     // 초점 정거장이 아니다: 칸 안에 단추·링크·입력·tabindex 가 하나도 없다(칸 자신도 포함).
     const stops = [cell, ...Array.from(cell.querySelectorAll("*"))].filter((el) =>
       el.matches('a, button, input, textarea, select, [tabindex], [role="button"]')
