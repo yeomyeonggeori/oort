@@ -43,6 +43,12 @@
 //! | `t23_a_tasks_report_gets_no_link_preview_even_when_its_last_step_read_nothing` | r1 M2 (#3899) | drop `trace.task_step.is_some()` from `team_ai_finish`'s `withhold_previews` |
 //! | `t24_a_stopped_steps_web_searches_count_toward_the_days_allowance` | r1 L4a, B9-2 | pass `0` instead of the trace's `web_searches` to `team_ai_task_drop` |
 //! | `t25_a_task_and_the_work_request_card_never_both_end_one_request` | #4972 × #4967, B13-I4 | check `card_suggest` before `task_continue`, or offer a step the card tool |
+//! | `t26_a_stop_between_attempts_still_stops_the_task` | #5029 (r1 L3a) | take the active-task arm out of `cancel_run_in_tx`'s status guard, or widen it past an active row (a `failed` run without one, or with an ended one, is stopped) |
+//! | `t27_a_step_job_that_waits_out_its_attempts_ends_the_task` | #5029 (r1 L3b) | let `team_ai_task_wait` drop the job at the limit without ending the task, or end the task before the limit |
+//! | `t28_a_step_that_cannot_commit_because_its_helper_is_gone_ends_the_task` | #5029 (r1 L3c) | drop the `end_in_tx` of `team_ai_task_commit`'s `Committed::Gone` branch |
+//! | `t29_a_step_that_answers_after_its_helper_is_gone_ends_the_task` | #5029 (r1 L3c) | drop the `end_in_tx` of `team_ai_finish`'s no-run branch |
+//! | `t30_a_first_turn_that_cannot_start_a_task_leaves_no_row` | #5029 (r1 L3c) | drop the `end_in_tx` of `team_ai_task_begin`'s `Began::Gone` branch |
+//! | `t31_the_last_attempts_failure_ends_the_task_and_an_earlier_one_does_not` | #5029 (r1 L3d) | drop `team_ai_task_end_failed` from `settle_retryable`'s last attempt, or call it on every failure |
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -2970,4 +2976,422 @@ async fn t25_a_task_and_the_work_request_card_never_both_end_one_request() {
     let texts = agent_texts(&su, &t).await;
     assert_eq!(texts.len(), 1, "{texts:?}");
     assert!(texts[0].starts_with("AI 응답이 끊겨서 여기서 멈췄어요."));
+}
+
+// --- #5029 (security review r1 L3): the narrow paths on which a task neither stops nor ends -----------
+
+/// Make every claim of `run`'s task fail inside the database — a transient error of the kind the worker
+/// retries — without touching any other run's row. `restore_claims_of` takes it away again.
+async fn fail_claims_of(su: &PgPool, run: Uuid) {
+    let name = format!("t5029_{}", run.simple());
+    sqlx::query(&format!(
+        "CREATE OR REPLACE FUNCTION {name}() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN RAISE EXCEPTION 'injected claim failure'; END $$"
+    ))
+    .execute(su)
+    .await
+    .expect("failure function");
+    sqlx::query(&format!(
+        "CREATE TRIGGER {name} BEFORE UPDATE ON team_ai_task FOR EACH ROW \
+         WHEN (NEW.run_id = '{run}'::uuid AND NEW.claim_token IS NOT NULL) \
+         EXECUTE FUNCTION {name}()"
+    ))
+    .execute(su)
+    .await
+    .expect("failure trigger");
+}
+
+async fn restore_claims_of(su: &PgPool, run: Uuid) {
+    let name = format!("t5029_{}", run.simple());
+    sqlx::query(&format!("DROP TRIGGER IF EXISTS {name} ON team_ai_task"))
+        .execute(su)
+        .await
+        .expect("drop the trigger");
+    sqlx::query(&format!("DROP FUNCTION IF EXISTS {name}()"))
+        .execute(su)
+        .await
+        .expect("drop the function");
+}
+
+/// Make the waiting agent jobs of the workspace claimable now (a backoff is not worth sitting out).
+async fn jobs_due_now(su: &PgPool, t: &Tenant) {
+    sqlx::query(
+        "UPDATE outbox SET available_at = now() WHERE workspace_id = $1 AND kind = 'agent_job' \
+            AND status = 'pending'",
+    )
+    .bind(t.workspace_id)
+    .execute(su)
+    .await
+    .unwrap();
+}
+
+/// Active task rows of the workspace: what the per-workspace and per-requester caps count (the slots)
+/// and what holds a note.
+async fn active_tasks(su: &PgPool, t: &Tenant) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM team_ai_task WHERE workspace_id = $1 AND state = 'active'",
+    )
+    .bind(t.workspace_id)
+    .fetch_one(su)
+    .await
+    .unwrap()
+}
+
+/// The helper is no longer in the room: its run cannot be called any more.
+async fn helper_leaves(su: &PgPool, t: &Tenant) {
+    sqlx::query("UPDATE membership SET left_at = now() WHERE channel_id = $1 AND member_id = $2")
+        .bind(t.channel_id)
+        .bind(t.agent_id)
+        .execute(su)
+        .await
+        .unwrap();
+}
+
+/// Only the cancel statement (no job retirement): does it take the run?
+async fn cancel_statement(pool: &PgPool, t: &Tenant, run: Uuid) -> bool {
+    let workspace_id = t.workspace_id;
+    with_tenant_tx(pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            momo_agent::cancel_run_in_tx(
+                conn,
+                workspace_id,
+                run,
+                &json!({"code": "human_cancelled"}),
+            )
+            .await
+        })
+    })
+    .await
+    .expect("the cancel statement")
+}
+
+/// A task row for a run that has none yet (what another attempt of the same turn would have written).
+async fn insert_task_row(su: &PgPool, t: &Tenant, run: Uuid) {
+    sqlx::query(
+        "INSERT INTO team_ai_task (workspace_id, run_id, agent_member_id, steps_done, plan, note) \
+         VALUES ($1, $2, $3, 1, '[\"다음\"]'::jsonb, '남아 있으면 안 되는 노트')",
+    )
+    .bind(t.workspace_id)
+    .bind(run)
+    .bind(t.agent_id)
+    .execute(su)
+    .await
+    .expect("a task row");
+}
+
+/// L3a: a run that reads `failed` while its task is still active is not over, so a stop is taken by the
+/// run (and ends the task, retires the waiting job); everything else keeps its refusal — a `failed` run
+/// whose task has ended, a `failed` run with no task, and a `succeeded` or `timed_out` run whatever an
+/// active row says.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t26_a_stop_between_attempts_still_stops_the_task() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([
+        cont(&["다음"], "N1 남아 있으면 안 되는 노트"),
+        say("호출되면 안 돼요"),
+    ]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
+
+    // The step's attempt fails inside the database and its job is handed back to wait.
+    fail_claims_of(&su, run).await;
+    let stats = w.drain_once().await.unwrap();
+    assert_eq!(
+        (stats.claimed, stats.requeued),
+        (1, 1),
+        "the attempt failed and the job was handed back"
+    );
+    // Anti-vacuity: the run reads `failed` while its task is active and its job waits.
+    assert_eq!(run_state(&su, run).await.0, "failed");
+    assert_eq!(task_row(&su, run).await.unwrap().state, "active");
+    assert_eq!(live_jobs(&su, &t).await.len(), 1);
+
+    // The stop is taken: run cancelled, task ended with its note gone, the waiting job retired.
+    assert!(
+        stop_the_run(&pool, &t, run).await,
+        "a stop reaches a failed run whose task is active"
+    );
+    assert_eq!(run_state(&su, run).await.0, "cancelled");
+    assert_ended_clean(&task_row(&su, run).await.unwrap(), "task_cancelled");
+    assert!(
+        live_jobs(&su, &t).await.is_empty(),
+        "the waiting job is retired with the run"
+    );
+    restore_claims_of(&su, run).await;
+    drain(&w).await;
+    assert_eq!(model.calls(), 1, "nothing runs after the stop");
+    assert_eq!(
+        ledger_of(&su, run).await,
+        (1, 15),
+        "what step 1 spent stays"
+    );
+
+    // The other cases keep their refusal.
+    // (1) a failed run whose task has ended
+    sqlx::query("UPDATE agent_run SET status = 'failed' WHERE id = $1")
+        .bind(run)
+        .execute(&su)
+        .await
+        .unwrap();
+    assert!(
+        !cancel_statement(&pool, &t, run).await,
+        "a failed run whose task has ended is not stopped"
+    );
+    assert_eq!(run_state(&su, run).await.0, "failed");
+    // (2) a failed run with no task at all
+    let plain = enqueue(&pool, &t, t.owner_id, "@oort-helper 짧게 답해 줘").await;
+    sqlx::query("UPDATE agent_run SET status = 'failed' WHERE id = $1")
+        .bind(plain)
+        .execute(&su)
+        .await
+        .unwrap();
+    assert!(task_row(&su, plain).await.is_none());
+    assert!(
+        !cancel_statement(&pool, &t, plain).await,
+        "a failed run with no task is not stopped"
+    );
+    assert_eq!(run_state(&su, plain).await.0, "failed");
+    // (3) an active row under a run that is not `failed`
+    for status in ["succeeded", "timed_out"] {
+        let stray = enqueue(&pool, &t, t.owner_id, "@oort-helper 또 짧게 답해 줘").await;
+        sqlx::query("UPDATE agent_run SET status = $2::run_status WHERE id = $1")
+            .bind(stray)
+            .bind(status)
+            .execute(&su)
+            .await
+            .unwrap();
+        insert_task_row(&su, &t, stray).await;
+        assert!(
+            !cancel_statement(&pool, &t, stray).await,
+            "a {status} run is not stopped, whatever an active row says"
+        );
+        assert_eq!(run_state(&su, stray).await.0, status);
+        assert_eq!(
+            task_row(&su, stray).await.unwrap().state,
+            "active",
+            "{status}: the row is not touched"
+        );
+    }
+}
+
+/// L3b: a step job that has spent its attempts without being able to run its step does not just go away
+/// — the task ends with `task_failed` and an interim report built from its note, and no row is left.
+/// Below the limit the job only waits.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t27_a_step_job_that_waits_out_its_attempts_ends_the_task() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([cont(&["다음"], "N1 지금까지 찾은 것")]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
+
+    // Somebody else holds a live claim on step 2.
+    sqlx::query(
+        "UPDATE team_ai_task SET claim_token = $2, claim_until = now() + interval '10 minutes' \
+          WHERE run_id = $1",
+    )
+    .bind(run)
+    .bind(Uuid::new_v4())
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // Below the limit the job only waits: the task stays, nothing is said, the job comes back.
+    let stats = w.drain_once().await.unwrap();
+    assert_eq!((stats.claimed, stats.requeued), (1, 1));
+    assert_eq!(
+        task_row(&su, run).await.unwrap().state,
+        "active",
+        "below its attempt limit the job only waits"
+    );
+    assert!(agent_texts(&su, &t).await.is_empty());
+    assert_eq!(live_jobs(&su, &t).await.len(), 1);
+
+    // Its next claim is its last attempt.
+    let last = w.config().max_attempts;
+    sqlx::query(
+        "UPDATE outbox SET attempts = $2, available_at = now() \
+          WHERE workspace_id = $1 AND kind = 'agent_job' AND status = 'pending'",
+    )
+    .bind(t.workspace_id)
+    .bind(last - 1)
+    .execute(&su)
+    .await
+    .unwrap();
+    let stats = w.drain_once().await.unwrap();
+    assert_eq!(stats.claimed, 1);
+    assert_eq!(model.calls(), 1, "the step never ran");
+    assert_ended_clean(&task_row(&su, run).await.unwrap(), "task_failed");
+    let (status, code, _) = run_state(&su, run).await;
+    assert_eq!(
+        (status.as_str(), code.as_deref()),
+        ("failed", Some("task_failed"))
+    );
+    assert!(live_jobs(&su, &t).await.is_empty(), "no job is left");
+    assert_eq!(active_tasks(&su, &t).await, 0, "no slot is left");
+    let texts = agent_texts(&su, &t).await;
+    assert_eq!(texts.len(), 1, "one interim report: {texts:?}");
+    assert!(
+        texts[0].starts_with("작업을 이어 가지 못해서 여기서 멈췄어요."),
+        "{texts:?}"
+    );
+    assert!(
+        texts[0].contains("N1 지금까지 찾은 것"),
+        "the report carries the note: {texts:?}"
+    );
+}
+
+/// L3c, a step's commit: a run that cannot be called any more (its helper has left the room) keeps no
+/// task row, slot or note — the step that cannot commit ends the task.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t28_a_step_that_cannot_commit_because_its_helper_is_gone_ends_the_task() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([
+        cont(&["다음"], "N1 남아 있으면 안 되는 노트"),
+        cont(&["그다음"], "N2 쓰이면 안 되는 노트"),
+    ]);
+    let w = Arc::new(worker_with(model.clone(), |_| {}).await);
+    let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
+    let (entered, release) = model.hold_call(2);
+    let runner = {
+        let w = w.clone();
+        tokio::spawn(async move { w.drain_once().await.unwrap() })
+    };
+    wait_entered(&entered).await;
+    // Anti-vacuity: the step is under way — the row is active and claimed, one slot is taken.
+    let row = task_row(&su, run).await.unwrap();
+    assert_eq!((row.state.as_str(), row.claim_live), ("active", true));
+    assert_eq!(active_tasks(&su, &t).await, 1);
+
+    helper_leaves(&su, &t).await;
+    release.notify_one();
+    runner.await.unwrap();
+    assert_eq!(model.calls(), 2);
+    assert_ended_clean(&task_row(&su, run).await.unwrap(), "task_agent_gone");
+    assert_eq!(active_tasks(&su, &t).await, 0, "no slot is left");
+    assert!(live_jobs(&su, &t).await.is_empty(), "no next step");
+    assert!(agent_texts(&su, &t).await.is_empty());
+}
+
+/// L3c, a step's end: the same for a step that ends with an answer.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t29_a_step_that_answers_after_its_helper_is_gone_ends_the_task() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([
+        cont(&["다음"], "N1 남아 있으면 안 되는 노트"),
+        say("최종 보고예요."),
+    ]);
+    let w = Arc::new(worker_with(model.clone(), |_| {}).await);
+    let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
+    let (entered, release) = model.hold_call(2);
+    let runner = {
+        let w = w.clone();
+        tokio::spawn(async move { w.drain_once().await.unwrap() })
+    };
+    wait_entered(&entered).await;
+    let row = task_row(&su, run).await.unwrap();
+    assert_eq!((row.state.as_str(), row.claim_live), ("active", true));
+    assert_eq!(active_tasks(&su, &t).await, 1);
+
+    helper_leaves(&su, &t).await;
+    release.notify_one();
+    runner.await.unwrap();
+    assert_eq!(model.calls(), 2);
+    assert_ended_clean(&task_row(&su, run).await.unwrap(), "task_agent_gone");
+    assert_eq!(active_tasks(&su, &t).await, 0, "no slot is left");
+    assert!(live_jobs(&su, &t).await.is_empty());
+    assert!(
+        agent_texts(&su, &t).await.is_empty(),
+        "nothing is posted by a helper that is not in the room"
+    );
+}
+
+/// L3c, a task's start: a first turn that finds its run uncallable leaves no row behind — also a row
+/// that another attempt of the same turn wrote meanwhile.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t30_a_first_turn_that_cannot_start_a_task_leaves_no_row() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([cont(&["다음"], "N1")]);
+    let (entered, release) = model.hold_call(1);
+    let w = Arc::new(worker_with(model.clone(), |_| {}).await);
+    let run = enqueue(&pool, &t, t.owner_id, "@oort-helper 조사해 줘").await;
+    let runner = {
+        let w = w.clone();
+        tokio::spawn(async move { w.drain_once().await.unwrap() })
+    };
+    wait_entered(&entered).await;
+    // While the model thinks, another attempt of this turn has written the row — and the helper leaves.
+    insert_task_row(&su, &t, run).await;
+    assert_eq!(active_tasks(&su, &t).await, 1);
+    helper_leaves(&su, &t).await;
+    release.notify_one();
+    runner.await.unwrap();
+
+    assert_ended_clean(&task_row(&su, run).await.unwrap(), "task_agent_gone");
+    assert_eq!(active_tasks(&su, &t).await, 0, "no slot is left");
+    assert!(live_jobs(&su, &t).await.is_empty());
+}
+
+/// L3d: the hook on a job's last attempt. A failure that still has attempts left leaves the task alone
+/// (its note stays, the run reads `failed`, the job waits); the failure of the last attempt fails the
+/// job for good, posts one notice, and ends the task with `task_failed` — no row is left.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t31_the_last_attempts_failure_ends_the_task_and_an_earlier_one_does_not() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([cont(&["다음"], "N1 남아 있으면 안 되는 노트")]);
+    let w = worker_with(model.clone(), |config| config.max_attempts = 2).await;
+    let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
+    fail_claims_of(&su, run).await;
+
+    // Attempt 1 of 2 fails: the task goes on, the run reads `failed`, the job waits.
+    let stats = w.drain_once().await.unwrap();
+    assert_eq!((stats.claimed, stats.requeued, stats.failed), (1, 1, 0));
+    let row = task_row(&su, run).await.unwrap();
+    assert_eq!(
+        row.state, "active",
+        "an attempt with attempts left ends nothing"
+    );
+    assert_eq!(row.note.as_deref(), Some("N1 남아 있으면 안 되는 노트"));
+    assert_eq!(run_state(&su, run).await.0, "failed");
+    assert!(agent_texts(&su, &t).await.is_empty());
+    assert_eq!(live_jobs(&su, &t).await.len(), 1);
+
+    // Attempt 2 of 2 fails too: the job fails for good and the task ends with it.
+    jobs_due_now(&su, &t).await;
+    let stats = w.drain_once().await.unwrap();
+    assert_eq!((stats.claimed, stats.failed), (1, 1));
+    assert_ended_clean(&task_row(&su, run).await.unwrap(), "task_failed");
+    assert_eq!(run_state(&su, run).await.0, "failed");
+    assert!(live_jobs(&su, &t).await.is_empty());
+    assert_eq!(active_tasks(&su, &t).await, 0, "no slot is left");
+    assert_eq!(
+        agent_texts(&su, &t).await.len(),
+        1,
+        "one failure notice for the person who asked"
+    );
+    restore_claims_of(&su, run).await;
+    assert_eq!(model.calls(), 1, "the failing step never reached the model");
 }

@@ -6,6 +6,7 @@
 //! | `s1_a_work_request_aimed_at_the_helper_is_a_409_and_writes_nothing` | B5-10, B15-A5 | the `agent_runs::create` check is dropped (the run is created and silently closed again) |
 //! | `s2_the_409_is_the_helpers_alone` | B5-10 | the check refuses every agent, or the wrong id |
 //! | `s3_a_stop_by_any_member_of_the_room_ends_the_task_and_retires_its_job` | B5-8, B15-A8, B13-I7 | `cancel_run_in_tx` stops ending the task, or the cancel stops retiring the pending step job |
+//! | `s4_a_stop_reaches_a_failed_run_whose_task_is_still_active` | #5029 (r1 L3a) | the route or `cancel_run_in_tx` stops taking a `failed` run with an active task, or takes a `failed` run without one (or with an ended one), or a `succeeded`/`timed_out` run under a stray active row |
 //!
 //! The worker half (steps, claims, bounds, requester, the ledger, the sweep, the table's isolation) is
 //! `momo-agent-worker/tests/team_ai_task_conformance_pg.rs`.
@@ -561,4 +562,222 @@ async fn s3_a_stop_by_any_member_of_the_room_ends_the_task_and_retires_its_job()
         task_state(su.clone()).await.1.as_deref(),
         Some("task_cancelled")
     );
+}
+
+/// A mention run of the helper in the fixture's room (the trigger is the requester's message), `running`.
+async fn mention_run(app: &PgPool, su: &PgPool, f: &Fixture) -> Uuid {
+    let (workspace, channel, helper, requester) = (f.workspace, f.channel, f.helper, f.requester);
+    let run = with_tenant_tx(app, workspace, move |conn| {
+        Box::pin(async move {
+            let sent = send_message_in_tx(
+                conn,
+                workspace,
+                NewMessage::text(
+                    channel,
+                    requester,
+                    "@oort-helper 오래 조사해 줘".to_string(),
+                ),
+            )
+            .await?;
+            let created = create_agent_run_in_tx(
+                conn,
+                workspace,
+                NewAgentRun {
+                    channel_id: channel,
+                    trigger: RunTrigger::Mention {
+                        message_id: sent.message.id,
+                        agent_member_id: helper,
+                    },
+                    parent_run_id: None,
+                    max_steps: 50,
+                    depth: 0,
+                    input: json!({"schema": "momo.agent_run.input.v0", "surface": "mention",
+                                  "prompt": "조사", "depth": 0}),
+                },
+            )
+            .await?;
+            Ok(created.id)
+        })
+    })
+    .await
+    .expect("a mention run");
+    sqlx::query("UPDATE agent_run SET status = 'running', started_at = now() WHERE id = $1")
+        .bind(run)
+        .execute(su)
+        .await
+        .unwrap();
+    run
+}
+
+async fn set_run_status(su: &PgPool, run: Uuid, status: &str) {
+    sqlx::query("UPDATE agent_run SET status = $2::run_status WHERE id = $1")
+        .bind(run)
+        .bind(status)
+        .execute(su)
+        .await
+        .unwrap();
+}
+
+async fn run_status_of(su: &PgPool, run: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id = $1")
+        .bind(run)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+/// `(state, end_reason, note)` of a run's task row.
+async fn task_of(su: &PgPool, run: Uuid) -> (String, Option<String>, Option<String>) {
+    sqlx::query_as("SELECT state, end_reason, note FROM team_ai_task WHERE run_id = $1")
+        .bind(run)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+async fn insert_active_task(su: &PgPool, f: &Fixture, run: Uuid) {
+    sqlx::query(
+        "INSERT INTO team_ai_task (workspace_id, run_id, agent_member_id, steps_done, plan, note) \
+         VALUES ($1, $2, $3, 1, '[\"다음 단계\"]'::jsonb, '남아 있으면 안 되는 노트')",
+    )
+    .bind(f.workspace)
+    .bind(run)
+    .bind(f.helper)
+    .execute(su)
+    .await
+    .unwrap();
+}
+
+/// #5029 (r1 L3a): a run that reads `failed` while its task is still active is not over — the route
+/// takes a stop from any member of the room (not from a stranger), ends the task and retires the job
+/// that waits. Every other case keeps its 409: a `failed` run whose task has ended, a `failed` run with
+/// no task, and a `succeeded` or `timed_out` run whatever an active row says.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn s4_a_stop_reaches_a_failed_run_whose_task_is_still_active() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let f = seed(&su, &app).await;
+    let base = start_server(app.clone()).await;
+    let client = reqwest::Client::new();
+    let workspace = f.workspace;
+    let cancel = |run: Uuid, jwt: String| {
+        let client = client.clone();
+        let url = format!("{base}/v1/workspaces/{workspace}/agent-runs/{run}/cancel");
+        async move { client.post(url).bearer_auth(jwt).send().await.unwrap() }
+    };
+
+    // A task between two attempts: the run reads `failed`, its row is active, its next job waits.
+    let run = mention_run(&app, &su, &f).await;
+    set_run_status(&su, run, "failed").await;
+    insert_active_task(&su, &f, run).await;
+    let step_job = momo_agent::team_ai_task::step_job_payload(
+        workspace,
+        run,
+        f.helper,
+        f.channel,
+        2,
+        "team-ai-default",
+        Some("instance_default"),
+    );
+    let job_id = emit_outbox(
+        &su,
+        workspace,
+        OutboxKind::AgentJob,
+        "publish",
+        &step_job,
+        Some(f.helper),
+    )
+    .await
+    .expect("the waiting step job");
+
+    // A stranger to the room still cannot stop it — and nothing changes.
+    let refused = cancel(run, f.outsider_jwt.clone()).await;
+    assert!(
+        matches!(refused.status().as_u16(), 403 | 404),
+        "a non-member's stop is refused: {}",
+        refused.status()
+    );
+    assert_eq!(run_status_of(&su, run).await, "failed");
+    assert_eq!(task_of(&su, run).await.0, "active");
+
+    // A member of the room who is not the requester can.
+    let stopped = cancel(run, f.bystander_jwt.clone()).await;
+    assert_eq!(stopped.status().as_u16(), 200, "{:?}", stopped.text().await);
+    assert_eq!(run_status_of(&su, run).await, "cancelled");
+    assert_eq!(
+        task_of(&su, run).await,
+        (
+            "ended".to_string(),
+            Some("task_cancelled".to_string()),
+            None
+        ),
+        "the stop ends the task and its note goes"
+    );
+    let (job_status, last_error): (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, last_error FROM outbox WHERE id = $1")
+            .bind(job_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(
+        job_status, "done",
+        "the waiting job is retired with the run"
+    );
+    assert_eq!(
+        last_error.as_deref(),
+        Some(momo_outbox::RUN_CANCELLED_JOB_LAST_ERROR)
+    );
+    // A second stop is the route's idempotent 200.
+    assert_eq!(
+        cancel(run, f.requester_jwt.clone()).await.status().as_u16(),
+        200
+    );
+
+    // Everything else keeps its 409, with the status the run really has, and writes nothing.
+    let refuse = |run: Uuid, status: &'static str, case: &'static str| {
+        let cancel = &cancel;
+        let jwt = f.requester_jwt.clone();
+        let su = su.clone();
+        async move {
+            let response = cancel(run, jwt).await;
+            assert_eq!(response.status().as_u16(), 409, "{case}");
+            let body = response.text().await.unwrap();
+            assert!(
+                body.contains(&format!("agent run is already {status}")),
+                "{case}: {body}"
+            );
+            assert_eq!(run_status_of(&su, run).await, status, "{case}: no write");
+        }
+    };
+    // (1) failed, its task ended
+    let ended = mention_run(&app, &su, &f).await;
+    set_run_status(&su, ended, "failed").await;
+    insert_active_task(&su, &f, ended).await;
+    sqlx::query(
+        "UPDATE team_ai_task SET state = 'ended', end_reason = 'task_failed', plan = NULL, \
+                note = NULL, ended_at = now() WHERE run_id = $1",
+    )
+    .bind(ended)
+    .execute(&su)
+    .await
+    .unwrap();
+    refuse(ended, "failed", "a failed run whose task has ended").await;
+    // (2) failed, no task
+    let plain = mention_run(&app, &su, &f).await;
+    set_run_status(&su, plain, "failed").await;
+    refuse(plain, "failed", "a failed run with no task").await;
+    // (3) not failed, a stray active row
+    for status in ["succeeded", "timed_out"] {
+        let stray = mention_run(&app, &su, &f).await;
+        set_run_status(&su, stray, status).await;
+        insert_active_task(&su, &f, stray).await;
+        refuse(stray, status, "a finished run under a stray active row").await;
+        assert_eq!(
+            task_of(&su, stray).await.0,
+            "active",
+            "{status}: the row is not touched by the refusal"
+        );
+    }
 }

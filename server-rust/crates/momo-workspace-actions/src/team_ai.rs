@@ -1108,6 +1108,9 @@ pub const TASK_PROVIDER_ERROR_SENTENCE: &str =
 /// An admin switched the 긴 조사 role off while the task was running (B13-I5).
 pub const TASK_ROLE_OFF_SENTENCE: &str =
     "관리자가 긴 조사 역할을 꺼서 여기서 멈췄어요. 지금까지 정리한 내용이에요.";
+/// The next step could not be run within the job's retry budget (#5029).
+pub const TASK_STALLED_SENTENCE: &str =
+    "작업을 이어 가지 못해서 여기서 멈췄어요. 지금까지 정리한 내용이에요.";
 
 /// The interim report of a task that stops early: `sentence`, then the note (when there is one),
 /// cut at [`TASK_REPORT_CHARS_MAX`].

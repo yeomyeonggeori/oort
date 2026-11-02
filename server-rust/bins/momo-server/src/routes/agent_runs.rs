@@ -1326,7 +1326,9 @@ const CANCEL_ERROR_CODE: &str = "human_cancelled";
 /// line, a second audit row, or re-retire jobs. Any other terminal status is a
 /// 409 carrying the status it actually has, because "already succeeded" is not
 /// "stopped" and answering 200 would tell a person their stop worked when what
-/// really happened is that the agent finished first.
+/// really happened is that the agent finished first. The one exception is a
+/// `failed` run whose team-AI task is still active (`CancellableRun::is_stoppable`): it is
+/// not over, so a stop is taken.
 ///
 /// ## What the transaction settles
 ///
@@ -1406,7 +1408,9 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
         )));
     }
     let already_cancelled = run.status == RunStatus::Cancelled;
-    if !already_cancelled && !run.status.is_cancellable() {
+    // `is_stoppable` is `is_cancellable` plus one case (#5029): a `failed` run whose team-AI task is
+    // still active is not over.
+    if !already_cancelled && !run.is_stoppable() {
         return Ok(Err(ApiError::new(
             StatusCode::CONFLICT,
             format!("agent run is already {}", run.status.as_db_label()),

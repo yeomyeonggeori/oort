@@ -125,6 +125,9 @@ impl AgentWorker {
             Box::pin(async move {
                 let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
                 else {
+                    // A run that cannot be called any more keeps no task row (#5029; normally there
+                    // is none yet, and this is then a no-op).
+                    store::end_in_tx(conn, workspace_id, run_id, store::END_AGENT_GONE).await?;
                     return Ok(Began::Gone);
                 };
                 // What this step spent is real whatever comes of the task: it is written first and
@@ -417,7 +420,11 @@ impl AgentWorker {
         .await;
         let task = match claimed {
             Ok(ClaimOutcome::Claimed(row)) => row,
-            Ok(ClaimOutcome::Taken) => return self.team_ai_task_wait(job).await,
+            Ok(ClaimOutcome::Taken) => {
+                return self
+                    .team_ai_task_wait(job, payload, run_id, &task.note, &trace)
+                    .await
+            }
             Ok(ClaimOutcome::Gone) => {
                 self.settle_done(job.id, Some(store::SkipReason::StepDone.as_str()))
                     .await;
@@ -776,6 +783,9 @@ impl AgentWorker {
             Box::pin(async move {
                 let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
                 else {
+                    // A run that cannot be called any more has no next step: its task ends with it,
+                    // so no row, slot or note is left behind (#5029).
+                    store::end_in_tx(conn, workspace_id, run_id, store::END_AGENT_GONE).await?;
                     return Ok(Committed::Gone);
                 };
                 // Spent is spent: the row is written before any judgement and stays in every outcome.
@@ -979,13 +989,31 @@ impl AgentWorker {
     }
 
     /// Another worker holds a live claim on this very step: do not call the model, come back later.
-    /// A job that has been back often enough is dropped — the holder either commits (and this job is
-    /// moot) or lets the claim expire (and the holder's own job is re-claimed to take it over).
-    async fn team_ai_task_wait(&self, job: &ClaimedAgentJob) -> Settlement {
+    /// A job that has been back as often as its attempts allow does not just disappear — a step
+    /// job that goes away without ending the task would leave a row nobody continues (#5029). The
+    /// task ends here with `task_failed` and an interim report built from `note`, like every other
+    /// early end of a task: one message, the run's end and the row's end in one transaction.
+    async fn team_ai_task_wait(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        note: &str,
+        trace: &TurnTrace,
+    ) -> Settlement {
         if job.attempts >= self.config.max_attempts {
-            self.settle_done(job.id, Some("team ai task step is held by another worker"))
+            return self
+                .team_ai_task_interim(
+                    job,
+                    payload,
+                    run_id,
+                    team_ai::TASK_STALLED_SENTENCE,
+                    note,
+                    store::END_FAILED,
+                    None,
+                    trace,
+                )
                 .await;
-            return Settlement::Skipped;
         }
         let backoff = backoff_seconds(job.attempts);
         if let Err(error) = requeue(
