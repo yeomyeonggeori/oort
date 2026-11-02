@@ -25,6 +25,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { chromium } from "playwright";
+import { assertHoverToolbarClearsBodyText as assertHoverToolbarClearsNeighborText } from "./lib/hoverToolbarOverlap.mjs";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 import { assertQrModulePitch } from "./qrModulePitch.mjs";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
@@ -5224,85 +5225,9 @@ async function assertHoverToolbarPlacement(page, where) {
  * 아래 뒤집기는 아래 행 윗단에 앉으므로 자기 행만이 아니라 바로 이웃도 본다.
  */
 async function assertHoverToolbarClearsBodyText(page, where) {
-  const info = await page.evaluate(`(() => {
-    function intersects(a, b) {
-      return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-    }
-    function hitChars(barRect, body) {
-      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-      let chars = 0;
-      let area = 0;
-      let sample = "";
-      while (walker.nextNode()) {
-        const node = walker.currentNode;
-        const text = node.textContent || "";
-        for (let i = 0; i < text.length; i++) {
-          if (text[i] === "\\n" || text[i] === " ") continue;
-          const range = document.createRange();
-          range.setStart(node, i);
-          range.setEnd(node, i + 1);
-          const r = range.getBoundingClientRect();
-          if (r.width === 0 && r.height === 0) continue;
-          if (!intersects(barRect, r)) continue;
-          chars += 1;
-          const w = Math.min(barRect.right, r.right) - Math.max(barRect.left, r.left);
-          const h = Math.min(barRect.bottom, r.bottom) - Math.max(barRect.top, r.top);
-          area += Math.max(0, w) * Math.max(0, h);
-          if (sample.length < 24) sample += text[i];
-        }
-      }
-      return { chars, area: Math.round(area), sample };
-    }
-    const allRows = Array.from(
-      document.querySelectorAll('[data-testid="timeline-message"]')
-    );
-    const bars = Array.from(
-      document.querySelectorAll('[data-testid="message-hover-toolbar"]')
-    );
-    return bars.map((bar) => {
-      const row = bar.closest('[data-testid="timeline-message"]');
-      if (!row) return { seq: null, chars: -1, area: -1, neighbor: null };
-      const idx = allRows.indexOf(row);
-      const neighbors = [allRows[idx - 1], allRows[idx + 1]].filter(Boolean);
-      const t = bar.getBoundingClientRect();
-      const bodies = [
-        { seq: row.getAttribute("data-seq"), neighbor: "self", el: row.querySelector("[data-row-body]") },
-        ...neighbors.map((n) => ({
-          seq: n.getAttribute("data-seq"),
-          neighbor: n === allRows[idx - 1] ? "prev" : "next",
-          el: n.querySelector("[data-row-body]"),
-        })),
-      ].filter((item) => item.el);
-      let worst = {
-        seq: row.getAttribute("data-seq"),
-        neighbor: "self",
-        chars: 0,
-        area: 0,
-        sample: "",
-        fromTop: Math.round(t.top - row.getBoundingClientRect().top),
-        straddle: bar.getAttribute("data-straddle") || "",
-      };
-      for (const body of bodies) {
-        const hit = hitChars(t, body.el);
-        if (hit.chars > worst.chars) {
-          worst = { ...worst, ...hit, seq: body.seq, neighbor: body.neighbor };
-        }
-      }
-      return worst;
-    });
-  })()`);
-  if (info.length === 0) {
-    throw new Error(`[호버 툴바 본문 ${where}] 잴 툴바가 없다`);
-  }
-  const hit = info.find((item) => item.chars > 0);
-  if (hit) {
-    throw new Error(
-      `[호버 툴바 본문 ${where}] seq ${hit.seq}(${hit.neighbor}): 본문 ${hit.chars}자(${hit.area}px²)를 덮는다 「${hit.sample}」`
-    );
-  }
-  console.log(
-    `  호버 툴바 본문 ${where}: ${info.length}개, 글자 교차 0(자기+이웃) · 상단 ${info[0].fromTop}px · straddle ${info[0].straddle || "top"}`
-  );
+  // 자는 `./lib/hoverToolbarOverlap.mjs` 한 벌이다: 이웃은 행(`timeline-message`)과 시스템 줄(`system-line`)이다(#5173).
+  // 이슈 전용 레인 `capture-5173.mjs` 와 실제 엔진 시험 `SystemLine.straddle.browser.test.ts` 가 같은 자를 쓴다.
+  return assertHoverToolbarClearsNeighborText(page, where);
 }
 
 /**
