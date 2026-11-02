@@ -81,6 +81,11 @@ export interface PendingApprovals {
 const EMPTY: ReadonlyMap<string, ApprovalGate> = new Map();
 const NO_WAITS: readonly ApprovalWait[] = [];
 
+/** 서버가 승인 경로를 실었는가(`serverSurfaces` 표). 읽는 훅과 지키는 훅이 **같은 한 곳**을 읽는다. */
+function approvalsProvided(): boolean {
+  return isSurfaceProvided('approvals');
+}
+
 /**
  * 대기 승인 원장 쿼리 **한 벌**. 읽는 훅과 지키는 훅이 같은 이 옵션을 펼쳐 쓴다 — 키·함수·켜는 조건이 갈라지면 서로 다른 캐시 항목을
  * 읽어 대화 화면과 홈이 서로 다른 사실을 본다.
@@ -96,7 +101,7 @@ function pendingApprovalsQuery(workspaceId: string, provided: boolean) {
 /** 이 파일의 읽는 훅 둘이 **같은** 쿼리를 읽는다. 다시 읽는 주기는 여기 없다(위 「이 캐시가 제때 바뀌는 길」). */
 function usePendingApprovalLedger() {
   const {workspaceId} = useSession();
-  const provided = isSurfaceProvided('approvals');
+  const provided = approvalsProvided();
   const query = useQuery(pendingApprovalsQuery(workspaceId, provided));
   return {approvals: query.data, provided};
 }
@@ -111,7 +116,7 @@ function usePendingApprovalLedger() {
  */
 export function usePendingApprovalLedgerKeeper(): boolean {
   const {workspaceId} = useSession();
-  const provided = isSurfaceProvided('approvals');
+  const provided = approvalsProvided();
   useQuery({
     ...pendingApprovalsQuery(workspaceId, provided),
     refetchOnWindowFocus: true,
