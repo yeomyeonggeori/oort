@@ -26,11 +26,11 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use momo_auth::{active_workspace_role, Principal};
-use momo_messaging::is_channel_member;
+use momo_messaging::{is_channel_member, NotificationKind};
 use momo_outbox::{emit_push_system, PushSystemReason};
 use momo_push::{
     compute_diagnostics, reserve_test_push_in_tx, test_notification_collapse_id, Blocker,
-    Diagnostics, TestPushSlot, NOTIFICATION_KINDS, TEST_PUSH_PER_WINDOW,
+    Diagnostics, TestPushSlot, TEST_PUSH_PER_WINDOW,
 };
 use uuid::Uuid;
 
@@ -53,6 +53,7 @@ fn blocker_dto(blocker: Blocker) -> NotificationBlockerDto {
         channel_id: blocker.channel_id,
         apns_status: blocker.apns_status,
         apns_reason: blocker.apns_reason,
+        kind: blocker.kind.map(NotificationKind::as_str),
     }
 }
 
@@ -96,13 +97,15 @@ pub async fn get(
             Some(Uuid::parse_str(raw).map_err(|_| ApiError::bad_request("invalid channelId"))?)
         }
     };
-    // Validated now (400 for an unknown kind) so the contract is stable; `kind_off` and the
-    // work-hours pass-through read it when the slices that store those land.
-    if let Some(kind) = query.kind.as_deref() {
-        if !NOTIFICATION_KINDS.contains(&kind) {
-            return Err(ApiError::bad_request("invalid kind"));
-        }
-    }
+    // The closed kind table (400 for an unknown kind). `kind_off` reads it (N3); the work-hours
+    // pass-through reads it when that slice lands (N7).
+    let kind: Option<NotificationKind> = match query.kind.as_deref() {
+        None => None,
+        Some(raw) => Some(
+            NotificationKind::from_wire(raw)
+                .ok_or_else(|| ApiError::bad_request("invalid kind"))?,
+        ),
+    };
 
     let outcome: DbRejectable<Diagnostics> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -123,6 +126,7 @@ pub async fn get(
                     workspace_id,
                     member_id,
                     channel_id,
+                    kind,
                 )
                 .await?))
             })

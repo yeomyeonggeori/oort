@@ -408,6 +408,17 @@ BEGIN
   END LOOP;
 END $$;
 
+-- #4494 (migration 172): the work-hours time-zone helper (ADR-0206 D13) is executable by momo_app only, not
+-- PUBLIC. It reads no table. Migration 172 can run before the runtime roles exist, so reassert the grant here.
+-- momo_notifier gets its own EXECUTE from the slice whose judgment tail calls it (N7), not before.
+DO $$
+BEGIN
+  IF to_regprocedure('public.notification_local_time(text,timestamptz)') IS NOT NULL THEN
+    EXECUTE 'REVOKE ALL ON FUNCTION public.notification_local_time(text, timestamptz) FROM PUBLIC';
+    EXECUTE 'GRANT EXECUTE ON FUNCTION public.notification_local_time(text, timestamptz) TO momo_app';
+  END IF;
+END $$;
+
 -- BEGIN catalog-readonly-lockdown (#4372; SEC-04 follow-up). Identical in bootstrap_roles.sql and
 -- bootstrap_runtime_roles.sql; tests compare the text between the markers.
 -- plugin_registry (013), schema_migrations (momo_db::migrate / migrate.sh) and work_cloud_host_transition
