@@ -735,6 +735,41 @@ async fn s4_a_stop_reaches_a_failed_run_whose_task_is_still_active() {
         200
     );
 
+    // Two tenants: a member of ANOTHER workspace cannot stop this workspace's task — by its own
+    // workspace's path (no such run there) or by this one's (not its workspace) — and nothing changes.
+    let other = seed(&su, &app).await;
+    let foreign = mention_run(&app, &su, &f).await;
+    set_run_status(&su, foreign, "failed").await;
+    insert_active_task(&su, &f, foreign).await;
+    for (case, ws) in [
+        ("through its own workspace", other.workspace),
+        ("through the task's workspace", f.workspace),
+    ] {
+        let response = client
+            .post(format!(
+                "{base}/v1/workspaces/{ws}/agent-runs/{foreign}/cancel"
+            ))
+            .bearer_auth(&other.requester_jwt)
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            matches!(response.status().as_u16(), 403 | 404),
+            "another workspace's member is refused {case}: {}",
+            response.status()
+        );
+        assert_eq!(run_status_of(&su, foreign).await, "failed", "{case}");
+        assert_eq!(task_of(&su, foreign).await.0, "active", "{case}");
+    }
+    // Anti-vacuity: the same run is stopped by a member of its own room.
+    assert_eq!(
+        cancel(foreign, f.bystander_jwt.clone())
+            .await
+            .status()
+            .as_u16(),
+        200
+    );
+
     // Everything else keeps its 409, with the status the run really has, and writes nothing.
     let refuse = |run: Uuid, status: &'static str, case: &'static str| {
         let cancel = &cancel;
