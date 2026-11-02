@@ -3260,6 +3260,7 @@ async fn t28_a_step_that_cannot_commit_because_its_helper_is_gone_ends_the_task(
     let model = ScriptedModel::new([
         cont(&["다음"], "N1 남아 있으면 안 되는 노트"),
         cont(&["그다음"], "N2 쓰이면 안 되는 노트"),
+        cont(&["다시"], "N3 새 요청의 노트"),
     ]);
     let w = Arc::new(worker_with(model.clone(), |_| {}).await);
     let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
@@ -3282,6 +3283,21 @@ async fn t28_a_step_that_cannot_commit_because_its_helper_is_gone_ends_the_task(
     assert_eq!(active_tasks(&su, &t).await, 0, "no slot is left");
     assert!(live_jobs(&su, &t).await.is_empty(), "no next step");
     assert!(agent_texts(&su, &t).await.is_empty());
+
+    // The slot really is free: with the helper back, the same person's next long request starts a task
+    // (a row left behind would have taken the requester's one slot and answered `task_busy`).
+    sqlx::query("UPDATE membership SET left_at = NULL WHERE channel_id = $1 AND member_id = $2")
+        .bind(t.channel_id)
+        .bind(t.agent_id)
+        .execute(&su)
+        .await
+        .unwrap();
+    let again = enqueue(&pool, &t, t.owner_id, "@oort-helper 다시 조사해 줘").await;
+    w.drain_once().await.unwrap();
+    let row = task_row(&su, again)
+        .await
+        .expect("the next request started a task");
+    assert_eq!((row.state.as_str(), row.steps_done), ("active", 1));
 }
 
 /// L3c, a step's end: the same for a step that ends with an answer.
