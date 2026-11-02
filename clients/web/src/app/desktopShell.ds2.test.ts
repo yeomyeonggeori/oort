@@ -84,6 +84,22 @@ describe("창 바닥과 떠 있는 판 (시안 `.a-win` · `.a-main`)", () => {
     expect(TOKENS).toMatch(/--w-sidebar: calc\(var\(--spacing-rail\) \+ var\(--w-sidebar-list\)\);/);
   });
 
+  it("셸의 사이드바 폭은 넓은 창 계층에서만 본문 칸에 컴포저 바닥을 내준다: 루트의 324는 그대로다 (#5093)", () => {
+    // 루트의 324는 위 단정 그대로다. 양보는 셸 안에서, 600px 이상 계층 안에서만 그 변수를 덮는다
+    // (306 = 컴포저 입력 바닥 240 + 판 오른쪽 인셋 8 + 입력 상자 밖 58). 렌더된 폭은 `shellNarrowFloor.browser.test.ts`가 잰다.
+    const shell = utility("app-shell");
+    const wide = shell.slice(
+      shell.indexOf("@media (width >= 600px) {"),
+      shell.indexOf("&[data-settings-surface]")
+    );
+    expect(wide).toMatch(
+      /--w-sidebar:\s*min\(\s*calc\(var\(--spacing-rail\) \+ var\(--w-sidebar-list\)\),\s*calc\(100vw - 306px\)\s*\);/
+    );
+    // 격자 열은 덮은 변수를 읽는다(그래서 열 폭이 양보한다). 폰 계층(<600)은 서랍이라 이 선언을 읽지 않는다.
+    expect(shell).toMatch(/grid-template-columns: var\(--w-sidebar\) 1fr;/);
+    expect(shell.slice(shell.indexOf("@media (width < 600px) {"))).not.toMatch(/--w-sidebar:/);
+  });
+
   it("상단 줄은 바닥 위에 녹는다: 바탕 없음, 아래 테두리도 없다(#4591: 토글 중심 20.0 = 띠 가운데)", () => {
     const titlebar = utility("app-titlebar");
     expect(titlebar).toMatch(/background-color: transparent;/);
