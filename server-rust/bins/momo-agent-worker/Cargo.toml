@@ -83,6 +83,24 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 
+# #5072 (ADR-0151 증보 6 B): once its limits are in place the PDF child refuses itself a file by name, a socket,
+# another program and another process (`attachment_lockdown`), and marks itself not dumpable. Linux only — the
+# image is Linux, and another unix has neither the call nor a need for it.
+#   rustix       the safe `prctl` wrapper (`PR_SET_DUMPABLE`). Already in the lock file (tempfile, oort-cli): no new
+#                crate, and the workspace's `unsafe_code = "forbid"` stands (Apache-2.0 WITH LLVM-exception OR
+#                Apache-2.0 OR MIT).
+#   seccompiler  builds and installs the system-call filter through a safe API (installing one takes a raw
+#                `seccomp(2)` call, which the workspace forbids us to write). The one new crate: Firecracker's, the
+#                rust-vmm project's, Apache-2.0 OR BSD-3-Clause, no dependency beyond `libc`.
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", features = ["process"] }
+seccompiler = "0.5"
+
+# `libc`: the system-call numbers the filter names, `EPERM`, and — on every unix — `SIGSYS`, the signal a host's own
+# profile ends the PDF child with if it answers `seccomp(2)` by killing (#5072 review R1-4). Already in the lock file.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 # #4820 C2b 2부 (tests/hosted_door_pg.rs): the suite draws its own pictures and writes them the way
 # Hermes' API server does (`data:image/png;base64,…`). Both crates are normal dependencies now (#4970).
