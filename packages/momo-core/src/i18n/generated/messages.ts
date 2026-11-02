@@ -250,6 +250,11 @@ export const messageKeys = [
   "teamAi.stage.setupLine",
   "teamAi.stage.setupUnverifiedDetail",
   "teamAi.stage.verifyingLine",
+  "timeline.lightbox.copied",
+  "timeline.lightbox.copy",
+  "timeline.lightbox.copyFailed",
+  "timeline.lightbox.zoomIn",
+  "timeline.lightbox.zoomOut",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
   "timeline.thread.followHint",
@@ -672,6 +677,11 @@ export const argumentSpecs = {
   "teamAi.stage.setupLine": {},
   "teamAi.stage.setupUnverifiedDetail": {},
   "teamAi.stage.verifyingLine": {},
+  "timeline.lightbox.copied": {},
+  "timeline.lightbox.copy": {},
+  "timeline.lightbox.copyFailed": {},
+  "timeline.lightbox.zoomIn": {},
+  "timeline.lightbox.zoomOut": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
   "timeline.thread.followHint": {},
@@ -1126,6 +1136,11 @@ export interface MessageArgs {
   "teamAi.stage.setupLine": Record<string, never>;
   "teamAi.stage.setupUnverifiedDetail": Record<string, never>;
   "teamAi.stage.verifyingLine": Record<string, never>;
+  "timeline.lightbox.copied": Record<string, never>;
+  "timeline.lightbox.copy": Record<string, never>;
+  "timeline.lightbox.copyFailed": Record<string, never>;
+  "timeline.lightbox.zoomIn": Record<string, never>;
+  "timeline.lightbox.zoomOut": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
   "timeline.thread.followHint": Record<string, never>;

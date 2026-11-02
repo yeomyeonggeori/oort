@@ -214,8 +214,10 @@ export function lightboxZoomLabel(zoom: number, fitScale: number | null): string
 export type LightboxZoomKeyAction = "in" | "out" | "fit";
 
 /**
- * ⌘+ · ⌘- · ⌘0 (Windows·Linux는 Ctrl). 눈에 보이는 글자(`key`)와 물리 키(`code`) 어느 쪽이든 맞으면 받는다: 미국 배열의 ⌘=은
- * `key`가 「=」이고, 독일 배열의 ⌘+는 `code`가 `Equal`이 아니다. ⌥가 붙은 조합은 받지 않는다.
+ * + · − · 0 으로 확대·축소·맞춤. **수식 키 없이** 받는다(#5190: 사진 앱·미리보기의 손길이고 뷰어는 글자를 치는 곳이 아니다). ⌘ · Ctrl이
+ * 붙은 조합(⌘+ ⌘- ⌘0, Windows·Linux는 Ctrl)도 그대로 받는다: 그렇지 않으면 웹뷰가 쪽 확대를 해 버린다(#4770). 눈에 보이는
+ * 글자(`key`)와 물리 키(`code`) 어느 쪽이든 맞으면 받는다: 미국 배열의 `=`는 ⇧ 없는 「+」 자리이고, 독일 배열의 ⌘+는 `code`가
+ * `Equal`이 아니다. ⌥가 붙은 조합은 받지 않는다(OS·입력기가 특수 문자를 만드는 길이다).
  */
 export function lightboxZoomKeyAction(event: {
   key: string;
@@ -224,12 +226,51 @@ export function lightboxZoomKeyAction(event: {
   ctrlKey?: boolean;
   altKey?: boolean;
 }): LightboxZoomKeyAction | null {
-  if (!(event.metaKey === true || event.ctrlKey === true) || event.altKey === true) return null;
+  if (event.altKey === true) return null;
   const { key, code } = event;
   if (key === "+" || key === "=" || code === "Equal" || code === "NumpadAdd") return "in";
   if (key === "-" || key === "_" || code === "Minus" || code === "NumpadSubtract") return "out";
   if (key === "0" || code === "Digit0" || code === "Numpad0") return "fit";
   return null;
+}
+
+/** 한 번의 화살표 키가 옮기는 거리: 뷰어 짧은 변의 이 몫. 화면이 크면 보폭도 큰 만큼 키 한 번이 사진의 같은 비율을 움직인다. */
+export const LIGHTBOX_KEY_PAN_DIVISOR = 8;
+
+/** 화살표 키 → 사진이 가는 방향(스크롤처럼: → 는 오른쪽을 더 보여 주므로 사진이 왼쪽으로 간다). 키 이름은 속성 이름이다. */
+const PAN_DIRECTION = {
+  ArrowLeft: { x: 1, y: 0 },
+  ArrowRight: { x: -1, y: 0 },
+  ArrowUp: { x: 0, y: 1 },
+  ArrowDown: { x: 0, y: -1 },
+} as const;
+
+/**
+ * 확대 중 화살표 키가 사진을 옮기는 양(화면 픽셀). 수식 키가 붙었거나 화살표가 아니면 `null`이다(⌘← 는 브라우저의 길이다).
+ */
+export function lightboxPanDelta(
+  event: { key: string; metaKey?: boolean; ctrlKey?: boolean; altKey?: boolean },
+  step: number
+): { x: number; y: number } | null {
+  if (event.metaKey === true || event.ctrlKey === true || event.altKey === true) return null;
+  if (!Object.hasOwn(PAN_DIRECTION, event.key)) return null;
+  const direction = PAN_DIRECTION[event.key as keyof typeof PAN_DIRECTION];
+  return { x: direction.x * step, y: direction.y * step };
+}
+
+/**
+ * 미리보기가 들고 있는 `data:image/…;base64,` 주소를 형식과 base64 본문으로 가른다. 이미지가 아니거나 base64가 아니면 `null`이다:
+ * 복사는 이 눈으로 걸러 낸 바이트만 클립보드에 쓴다.
+ */
+export function parseImageDataUrl(dataUrl: string): { mime: string; base64: string } | null {
+  if (!dataUrl.startsWith("data:")) return null;
+  const comma = dataUrl.indexOf(",");
+  if (comma < 0) return null;
+  const [mime, ...flags] = dataUrl.slice(5, comma).split(";");
+  if (!flags.includes("base64")) return null;
+  const type = mime.trim().toLowerCase();
+  if (!/^image\/[a-z0-9.+-]+$/.test(type)) return null;
+  return { mime: type, base64: dataUrl.slice(comma + 1) };
 }
 
 /**

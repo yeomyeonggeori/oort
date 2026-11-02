@@ -1685,6 +1685,36 @@ export const catalog: MessageCatalog = {
       "value": "키를 확인하는 중이에요."
     }
   ],
+  "timeline.lightbox.copied": [
+    {
+      "type": 0,
+      "value": "복사했어요"
+    }
+  ],
+  "timeline.lightbox.copy": [
+    {
+      "type": 0,
+      "value": "이미지 복사"
+    }
+  ],
+  "timeline.lightbox.copyFailed": [
+    {
+      "type": 0,
+      "value": "이미지를 복사하지 못했어요. 파일을 내려받아 쓰세요."
+    }
+  ],
+  "timeline.lightbox.zoomIn": [
+    {
+      "type": 0,
+      "value": "확대"
+    }
+  ],
+  "timeline.lightbox.zoomOut": [
+    {
+      "type": 0,
+      "value": "축소"
+    }
+  ],
   "timeline.thread.followDismiss": [
     {
       "type": 0,

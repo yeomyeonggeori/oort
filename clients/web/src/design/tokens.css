@@ -173,10 +173,19 @@
    * 블러 위에 까는 옅은 어둠이다. 다이얼로그 공용 스크림(`--scrim`)이 이미 뒤를 어둡게 하므로 **그 위에 한 겹 더**다
    * (합성하면 라이트 약 .47 · 다크 약 .60: 다크는 앱이 이미 어두워 스크림만으로 무겁고, 더 깔면 블러가 안 보인다).
    * `-solid`는 유리를 끈 무대(시스템 투명도 줄이기·고대비)의 불투명한 어두운 면이다. 둘 다 어느 스킴에서든 어두운 쪽이다:
-   * 사진을 보는 무대라 스킴을 따라 밝아지지 않는다. 글자·조작은 전부 `glass` 칩 위에 서므로(칩이 자기 면과 짝으로 대비를
-   * 진다) 이 값이 대비를 정하지 않는다. */
-  --lightbox-stage: light-dark(rgba(20,18,16,.2), rgba(0,0,0,.1));
+   * 사진을 보는 무대라 스킴을 따라 밝아지지 않는다.
+   *
+   * 2판(#5190): 라이트의 한 겹을 .2 → .46으로 올렸다(합성 라이트 약 .47 → .64, 다크는 그대로 .60). 밝은 앱 위에서는 .47이 칙칙한
+   * 회색이라 사진이 뜨지 않았고, 폰 뷰어는 어느 테마에서나 어두운 무대다(`photoStage`). 블러는 그대로 보인다: 앱의 큰 면과
+   * 색 덩어리가 어두운 톤으로 비친다. 글자·조작은 이제 **스킴과 무관한 어두운 유리**와 아래 `--lightbox-scrim` 위에 서고
+   * (`lightbox-chrome·side·foot`이 `color-scheme: dark`), 그 합성의 대비는 `tokens.contrast.test.ts`가 잰다. */
+  --lightbox-stage: light-dark(rgba(20,18,16,.46), rgba(0,0,0,.1));
   --lightbox-stage-solid: light-dark(rgb(31,29,27), rgb(14,15,18));
+  /* 위 줄·아래 줄 뒤의 어둠 (#5190). 머리 글자(보낸 사람·시각)는 칩이 아니라 무대 위에 바로 서므로, **확대해서** 밝은 사진이 줄 아래로
+   * 들어오면 읽히게 판(plateau)을 깔고 사진 쪽으로 풀어 준다(폰 뷰어의 `viewerScrimPlateau·Fade`와 같은 생각). 맞춤에서는 사진이 줄
+   * 밖(위·아래 여백)에 서므로 판이 없다: 띠가 무대에 남지 않는다. 한 색뿐이고 어느 스킴에서든 같다: 순흑이 아닌 무대 톤
+   * (`--lightbox-stage-solid` 다크 값)에 알파만 둔다. */
+  --lightbox-scrim: rgba(14,15,18,.64);
 
   /* --- 별칭 (이행 중, ADR-0189 D6) --------------------------------------
    * 옛 이름을 쓰는 소비처가 새 역할을 가리키게 한다. 새 코드는 오른쪽 이름을
@@ -4159,20 +4168,64 @@
   }
 }
 
-/* 위 줄: 왼쪽에 보낸 사람 칩, 오른쪽에 받기·닫기. 줄 자체는 빈 무대라서 포인터를 받지 않는다(빈 곳을 누르면 무대가 받아
- * 닫는다). 칩과 버튼이 `pointer-events-auto`로 자기 자리를 되찾는다. 데스크탑 셸(`data-desktop-shell`)에서는 왼쪽 신호등
- * 자리(`--titlebar-inset`)를 비운다: 상단 줄·온보딩 스텝 줄과 같은 한 값을 읽고, 전체 화면에서는 그 값이 접힌다.
- * 위 여백 4는 40px 상단 줄 안에서 34px 아이콘 버튼의 중심이 신호등 중심(20)과 맞는 값이다(`app-titlebar` 토글과 같은 자리). */
+/* 위 줄 (#4751 → #5190). 40px 한 줄이고, 세로 가운데가 신호등 원 중심이다: 상단 줄(`app-titlebar`)과 같은 높이
+ * `--spacing-control-lg`에 가운데 맞춤이라, 신호등(y 22 − 2)·상단 줄 토글·여기의 단추와 글자 블록이 모두 20.0에 선다.
+ * 왼쪽에 보낸 사람·시각(칩 없이 글자만), 오른쪽에 받기·복사·닫기. 줄 자체는 빈 무대라서 포인터를 받지 않는다(빈 곳을 누르면
+ * 무대가 받아 닫는다). 글자 블록과 버튼이 `pointer-events-auto`로 자기 자리를 되찾는다.
+ * 데스크탑 셸(`data-desktop-shell`)에서는 왼쪽 신호등 자리(`--titlebar-inset`)를 비운다: 상단 줄·온보딩 스텝 줄과 같은 한 값을
+ * 읽고, 전체 화면에서는 그 값이 접힌다. 앞 판의 2줄 알약은 위 여백 4에서 시작해 신호등보다 키가 크고 가운데가 4px 아래라 오른쪽
+ * 단추 줄과 어긋났고, 신호등과 12px 간격으로 붙어 겹쳐 보였다(owner 데스크탑 검수 2026-11-02).
+ *
+ * 이 줄은 **스킴과 무관하게 어둡다**(`color-scheme: dark`: 유리·글자·테두리 토큰이 다크 값으로 읽힌다). 라이트 앱 위에서 흰 유리 알약이
+ * 어두운 무대에 뜨던 것이 폰 뷰어(어느 테마에서나 검은 무대)와 가장 크게 갈린 점이었다. 글자는 칩이 아니라 무대 위에 바로 서므로
+ * 확대하면(`data-zoomed`) 뒤에 `--lightbox-scrim` 판이 깔리고(`::before`, 줄 높이까지는 판이고 그 아래로 풀린다), 밝은 사진이 줄 아래로
+ * 들어와도 읽힌다. 맞춤에서는 사진이 줄 밖(위 여백 64)에 서서 판이 필요 없다. 판은 사진 위·글자 아래에 선다: `isolation`이 이 줄을 한
+ * 겹으로 묶고, 줄 안에서는 아래 `> *`가 글자·단추를 판 뒤가 아니라 앞에 그린다. */
 @utility lightbox-chrome {
   position: absolute;
   inset-block-start: 0;
   inset-inline: 0;
+  isolation: isolate;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--spacing-3);
-  padding: var(--spacing-1) var(--spacing-3) 0;
+  block-size: var(--spacing-control-lg);
+  padding-inline: var(--spacing-3);
+  color-scheme: dark;
+  color: var(--ink);
   pointer-events: none;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline: 0;
+    block-size: calc(var(--spacing-control-lg) * 2 + var(--spacing-6));
+    background-image: linear-gradient(
+      to bottom,
+      var(--lightbox-scrim) var(--spacing-control-lg),
+      color-mix(in srgb, var(--lightbox-scrim) 45%, transparent) calc(var(--spacing-control-lg) + var(--spacing-6)),
+      transparent
+    );
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease-standard);
+    pointer-events: none;
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
+  }
+
+  &[data-zoomed]::before {
+    opacity: 1;
+  }
+
+  /* 판을 글자·단추 **뒤**에 세우는 길은 z-index가 아니라 그리기 차례다(이름 있는 층 말고는 z-index를 쓰지 않는다,
+   * overlayLayers.test.ts): `::before`는 위치를 가진 첫 자식이고, 위치를 가진 뒤 형제가 그 위에 그려진다. */
+  & > * {
+    position: relative;
+  }
 
   &[data-desktop-shell] {
     padding-inline-start: var(--titlebar-inset);
@@ -4183,7 +4236,10 @@
  * 위에, 사진(또는 불러오는 중·실패 칸)이 남는 높이에 선다. 둘레 여백: 가로 32, 세로 64(위 칩 줄 40 + 24: 칩이 두 줄이라 글자를 크게
  * 하면 52를 넘는데 52로 두면 가로 사진이 칩 아래 가장자리에 붙었다, 아래는 같은 값이라 사진이 창 가운데에 선다). 2장 이상이면
  * 양옆 이전/다음 버튼(34 + 바깥 8 + 사이 8)이 선 자리만큼 가로가 넓어지고(`data-multi`), 썸네일 줄이 있으면 그 높이(56 + 사진과의
- * 사이 16)만큼 아래가 더 비는다(`data-thumbs`). 폰 폭(600 미만)은 버튼이 44px 터치 타깃으로 자란다. */
+ * 사이 16)만큼 아래가 더 비는다(`data-thumbs`). 폰 폭(600 미만)은 버튼이 44px 터치 타깃으로 자란다.
+ * (#5190) 아래 덩어리는 썸네일 줄(40 + 안쪽 여백 8) · 사이 8 · 캡슐(34 + 안쪽 여백 8) · 바닥 여백 12 · 사진과의 사이 16 = 126이다. 썸네일
+ * 줄이 유리 상자에서 맨몸이 되었어도 높이는 같은 40 + 8로 서고, 두 줄(썸네일·캡슐) 말고는 아래에 아무것도 없다. 한 장이면 캡슐만
+ * 서서 캡슐(34 + 8) · 바닥 12 · 사이 16 = 70이다(위는 64 그대로: 사진이 3px 위로 앉을 뿐이다). */
 @utility lightbox-body {
   position: absolute;
   inset: 0;
@@ -4192,6 +4248,7 @@
   align-items: center;
   justify-content: center;
   padding-block: calc(var(--spacing-control-lg) + var(--spacing-6));
+  padding-block-end: calc(var(--spacing-icon-button) + var(--spacing-2) + var(--spacing-3) + var(--spacing-4));
   padding-inline: var(--spacing-8);
 
   &[data-multi] {
@@ -4200,7 +4257,8 @@
 
   &[data-thumbs] {
     padding-block-end: calc(
-      var(--spacing-control-lg) + var(--spacing-3) + var(--spacing-control-lg) + var(--spacing-4) + var(--spacing-4)
+      var(--spacing-control-lg) + var(--spacing-2) + var(--spacing-2) + var(--spacing-icon-button) + var(--spacing-2) +
+        var(--spacing-3) + var(--spacing-4)
     );
   }
 
@@ -4218,6 +4276,8 @@
   inset-block: 0;
   display: flex;
   align-items: center;
+  color-scheme: dark;
+  color: var(--ink);
   pointer-events: none;
 
   &[data-side="start"] {
@@ -4228,17 +4288,82 @@
   }
 }
 
-/* 아래 가운데: 위에 썸네일 줄(있으면), 아래에 「N장 중 n번」 캡션. 칸은 포인터를 받지 않는다. */
+/* 아래 가운데 (#4751 → #5190): 위에 썸네일 줄(두 장 이상일 때만, 유리 상자 없이 맨몸), 아래에 한 캡슐 `[−] 맞춤 [+] │ 3장 중 2번`.
+ * 칸은 포인터를 받지 않는다. 위 줄과 같은 어두운 범위이고, 확대하면(`data-zoomed`) 같은 `--lightbox-scrim` 판이 뒤에 깔린다: 위 칸 32px에서
+ * 풀려 오르고(밝은 사진이 줄 아래에 들어와도 썸네일·캡슐이 읽힌다), 맞춤에서는 사진이 줄 밖(아래 여백)에 선다. */
 @utility lightbox-foot {
   position: absolute;
   inset-block-end: 0;
   inset-inline: 0;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--spacing-2);
-  padding: 0 var(--spacing-3) var(--spacing-3);
+  padding: var(--spacing-8) var(--spacing-3) var(--spacing-3);
+  color-scheme: dark;
+  color: var(--ink);
   pointer-events: none;
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(
+      to bottom,
+      transparent,
+      color-mix(in srgb, var(--lightbox-scrim) 45%, transparent) var(--spacing-4),
+      var(--lightbox-scrim) var(--spacing-8)
+    );
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease-standard);
+    pointer-events: none;
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
+  }
+
+  &[data-zoomed]::before {
+    opacity: 1;
+  }
+
+  /* 위 줄과 같다: 판은 위치를 가진 첫 자식이고 썸네일 줄·캡슐은 그 뒤에 위치를 가지고 그려진다(z-index 없이). */
+  & > * {
+    position: relative;
+  }
+}
+
+/* 확대 단추와 장 번호가 한 알약에 선다(Buzz의 아래 도구 줄 자리). 유리는 JSX의 `glass`다. 폭 600 미만(손가락)에서는 확대 묶음이
+ * 빠지고(핀치·두 번 탭이 그 길이다), 사진이 한 장이면 캡슐에 남는 것이 없어 통째로 빠진다(`data-solo`). */
+@utility lightbox-capsule {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+  padding: var(--spacing-1);
+  pointer-events: auto;
+
+  @media (width < 600px) {
+    &[data-solo] {
+      display: none;
+    }
+  }
+}
+
+@utility lightbox-zoom-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-1);
+
+  @media (width < 600px) {
+    display: none;
+  }
+}
+
+/* 배율 글자 칸. 「맞춤」과 「400%」가 같은 폭에 서서 − + 가 글자 길이에 따라 흔들리지 않는다(48 = 32 + 16). */
+@utility lightbox-readout {
+  min-inline-size: calc(var(--spacing-8) + var(--spacing-4));
+  text-align: center;
 }
 
 /* 확대한 사진 (#4770). 변환은 CSS 변수가 든다: `useImageLightboxZoom`이 CSSOM으로 `--lightbox-zoom`·`--lightbox-pan-x`·
@@ -4270,18 +4395,6 @@
       transition: none;
     }
   }
-}
-
-/* 확대 비율 칩이 서는 자리 (#4770). 아래 줄(`lightbox-foot`)의 윗변에 얹힌다: 썸네일 줄이 있든 없든 그 바로 위에 뜨고, 칩이
- * 서고 걷혀도 아래 줄의 자리를 밀지 않는다(흐름 밖). 칸은 포인터를 받지 않는다. */
-@utility lightbox-zoom-slot {
-  position: absolute;
-  inset-inline: 0;
-  inset-block-end: 100%;
-  display: flex;
-  justify-content: center;
-  padding-block-end: var(--spacing-2);
-  pointer-events: none;
 }
 
 /* Marketplace is a decision surface: on a wide viewport its chosen app must
