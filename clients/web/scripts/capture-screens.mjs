@@ -7622,8 +7622,8 @@ async function captureScheme(browser, scheme) {
   // 2h. 반응 고르기 (#1742). 자작 피커: 검색·카테고리·빈도·스킨톤, 포인터는
   //     트리거 기준 popover. 라이브러리는 여전히 없다 (CSP + 오프라인 셸).
   await actionRow.hover();
-  await sceneClick(login, login.getByTestId("message-actions-trigger").last());
-  await sceneClick(login, login.getByTestId("menu-react-more"));
+  // 다른 반응 고르기는 도구 막대의 몫이다(#5192): ⋮ 메뉴 안에는 없다.
+  await sceneClick(login, login.getByTestId("toolbar-react-more").last());
   await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
   await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
