@@ -2332,6 +2332,34 @@
   color: var(--ink-muted);
 }
 
+/* 본문 머리의 세 칸 (#4230). 머리(`channel-head`)는 `flex-wrap` 한 줄이 기본이고 안에 칸이 둘이다.
+ * 판이 `overflow: clip`이라 머리 밖으로 밀린 컨트롤은 스크롤로도 닿지 않는다. 그래서 순서는 **컨트롤이 먼저, 제목이 나중**이다.
+ *
+ *   channel-head-main   서랍 단추(폰)·종류 아이콘·제목 칸. 기본 폭은 `min-content`: 지금 줄일 수 없는 것(단추·아이콘·틈)과
+ *                       제목 칸의 바닥(아래)을 더한 값이다. 컨트롤 묶음이 그 옆에 못 서면 줄이 바뀌고, 서면 남는 폭을 전부 받는다.
+ *   channel-head-body   제목(+핸들·토픽)이 서는 칸. 기본 폭과 `inline-size`가 0이라 **긴 이름·토픽의 글 폭이 윗 칸의 기본 폭을
+ *                       부풀리지 못한다**(부풀리면 컨트롤이 밀리던 예전 결함이 그대로다). 바닥 3rem은 제목이 흔적 없이 사라지지
+ *                       않는 최소다(말줄임표와 글자 두어 개): 이보다 좁아져야 하면 제목을 더 깎는 대신 컨트롤 묶음이 아랫줄로 내려온다.
+ *   channel-head-tools  컨트롤 묶음. 안의 단추는 전부 `shrink-0`이라 줄지 않는다. 한 줄에 서면 그대로, 아랫줄로 내려오면 오른쪽 끝에
+ *                       붙는다(`margin-inline-start: auto`). 아랫줄에서도 줄 폭보다 넓을 때만(폰 320, 판이 좁은 600대) 줄 폭으로 줄어
+ *                       그 안의 `flex-wrap`이 단추를 다음 줄로 보낸다.
+ *
+ * `flex-basis: min-content`가 줄바꿈 판정에 쓰이는 방식은 크롬·웨빗이 같다(`gate:channel-header-fit`이 두 엔진에서 잰다). */
+@utility channel-head-main {
+  flex: 1 1 min-content;
+  min-inline-size: 0;
+}
+@utility channel-head-body {
+  flex: 1 1 0;
+  inline-size: 0;
+  min-inline-size: 3rem;
+}
+@utility channel-head-tools {
+  flex: 0 1 auto;
+  min-inline-size: 0;
+  margin-inline-start: auto;
+}
+
 /* 떠 있는 컴포저 (시안 `.a-dcomp`): 좌우 24 · 아래 18 · 반경 20 · float 그림자 +
  * 1px 선 고리 · 흰 면. 시안은 타임라인 위에 절대 위치로 얹지만 여기서는 흐름
  * 안에 선다(PR 차이 표: 높이가 트레이·라우팅 줄·줄바꿈으로 바뀌고, 타임라인의
