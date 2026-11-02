@@ -8,7 +8,7 @@
 // permission, no keychain) when there is no shell underneath.
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
-// notification,keychain,session_refresh,updater,detect,harness_status,opener,
+// notification,notification_click,keychain,session_refresh,updater,detect,harness_status,opener,
 // pdf_viewer,downloads,pty,git_read,work_host,device_key}.rs` and the
 // command/event contract is documented in `clients/desktop/README.md`. Keep
 // the three in sync — a renamed command fails at runtime, not at compile time.
@@ -20,6 +20,12 @@
 
 import { IS_TAURI } from "./env";
 import { keyPlatformOf } from "@momo/core/features/workbench/keymap";
+import {
+  CLICKABLE_OUTCOME,
+  readClickableOutcome,
+  type ClickableOutcome,
+  type NotificationClick,
+} from "@momo/core/features/notifications/bannerClick";
 import type { HostedAgentProbe as HostedAgentProbeWire } from "@momo/core/features/hostedAgents/detect";
 import type { LocalHarnessProbe } from "@momo/core/features/hostedAgents/detect";
 import type { LocalWorkHostStatus } from "@momo/core/features/settings/thisMacHost";
@@ -45,6 +51,8 @@ export const DESKTOP_EVENT = {
   discovery: "momo:discovery",
   /** Bytes downloaded so far while an update installs. */
   updateProgress: "momo:update-progress",
+  /** One banner the shell reports clicks for was clicked (#5059). macOS only. */
+  notificationClick: "momo:notification-click",
 } as const;
 
 // ---- module plumbing --------------------------------------------------------
@@ -1264,6 +1272,11 @@ export async function requestNotificationPermission(): Promise<DesktopNotificati
   return next;
 }
 
+/** Permission is granted (asking at most once per run); the two show paths gate on the same answer. */
+async function permissionGranted(): Promise<boolean> {
+  return (await ensureNotificationPermission()) === "granted";
+}
+
 /**
  * Show one native notification. Returns false when it was not shown — in a
  * browser, or because permission is not granted. A refused notification is a
@@ -1271,13 +1284,75 @@ export async function requestNotificationPermission(): Promise<DesktopNotificati
  */
 export async function showNotification(title: string, body?: string): Promise<boolean> {
   if (!IS_TAURI) return false;
-  if ((await ensureNotificationPermission()) !== "granted") return false;
+  if (!(await permissionGranted())) return false;
   try {
     return await invoke<boolean>("notification_show", { title, body });
   } catch (error) {
     console.warn("[momo] native notification failed", error);
     return false;
   }
+}
+
+/** What the shell says when a banner it reports clicks for is clicked: the page's own id and route, unchanged. */
+export type NotificationClickPayload = NotificationClick;
+
+/** `clickable`: a click on it arrives as an event. `plain`: shown, but no event will come. `refused`: not shown. */
+export type ClickableNotificationOutcome = ClickableOutcome;
+
+let clickSupportPromise: Promise<boolean> | null = null;
+
+/**
+ * Can this shell tell which banner was clicked (#5059)? Asked once per run and kept, because two callers decide on it
+ * (whether a banner is shown clickable, and whether the old 「창이 앞에 왔다」 guess stays armed) and they must never
+ * disagree. A browser tab, a shell on another OS, and a shell build that has no such command all answer `false` — the
+ * last one is the rejected call, so an older shell keeps the guess instead of losing the landing.
+ */
+export function notificationClickSupported(): Promise<boolean> {
+  if (!IS_TAURI) return Promise.resolve(false);
+  clickSupportPromise ??= invoke<unknown>("notification_click_supported").then(
+    (supported) => supported === true,
+    () => false
+  );
+  return clickSupportPromise;
+}
+
+/**
+ * Show one banner whose click the shell reports (#5059). `click.id` is the page's own token for this banner and
+ * `click.target` the route a click should open; both come back unchanged in `onNotificationClick`, and only on a click.
+ * Call it only where `notificationClickSupported()` is true — elsewhere the answer is `plain` at best.
+ *
+ * The page must have written `click.id` down BEFORE calling this (`shownBanners.ts`): the click can arrive before this
+ * promise settles, and a click for an id the page does not know is ignored.
+ */
+export async function showClickableNotification(
+  title: string,
+  body: string | undefined,
+  click: NotificationClickPayload
+): Promise<ClickableNotificationOutcome> {
+  if (!IS_TAURI) return CLICKABLE_OUTCOME.refused;
+  if (!(await permissionGranted())) return CLICKABLE_OUTCOME.refused;
+  try {
+    return readClickableOutcome(
+      await invoke<unknown>("notification_show_clickable", {
+        title,
+        body,
+        id: click.id,
+        target: click.target,
+      })
+    );
+  } catch (error) {
+    console.warn("[momo] clickable native notification failed", error);
+    return CLICKABLE_OUTCOME.refused;
+  }
+}
+
+/**
+ * A banner this shell reports clicks for was clicked. In a browser tab it resolves at once to a no-op. The payload is
+ * whatever crossed the IPC boundary: a caller must match it against what the page itself showed (`shownBanners.ts`)
+ * and never use it as a route as it arrives.
+ */
+export function onNotificationClick(handler: (click: NotificationClickPayload) => void): Promise<() => void> {
+  return listen<NotificationClickPayload>(DESKTOP_EVENT.notificationClick, handler);
 }
 
 /**
