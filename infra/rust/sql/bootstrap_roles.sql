@@ -523,6 +523,61 @@ BEGIN
 END $$;
 -- END team-ai-task-lockdown
 
+-- BEGIN attachment-media-lockdown (#4673 C5; ADR-0151 증보 5 D5). Identical in
+-- 173_attachment_media.sql, bootstrap_roles.sql and bootstrap_runtime_roles.sql; tests compare the text
+-- between the markers. The poster is one frame of a member's video and the BYPASSRLS roles skip RLS, so their
+-- table privileges are what keeps every tenant's frames away from a role with no business reading them. Each
+-- runtime role gets exactly what the code uses: momo_app writes the row (INSERT, and UPDATE for the idempotent
+-- replace) and reads it (SELECT: the poster route and the projection's LEFT JOIN); momo_helper_read, the
+-- role the team AI's read tools run as, reads every column but the poster bytes (the page statements it
+-- runs join this table for the media summary and never select the bytes); nobody deletes a row (a foreign-key
+-- cascade from the attachment, channel or workspace runs as the table's owner, so deleting a parent still
+-- clears its rows); relay, worker, notifier and platform_admin do not touch it at all. Idempotent and
+-- order-proof (a pass before the table or the roles exist finishes what it can, the pass after lands the
+-- rest), and it fails loudly if the result is not what is written here.
+DO $$
+DECLARE
+  r text;
+  p text;
+  c text;
+  allowed text[];
+BEGIN
+  IF to_regclass('public.attachment_media') IS NULL THEN
+    RETURN;
+  END IF;
+  REVOKE ALL ON TABLE public.attachment_media FROM PUBLIC;
+  FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin', 'momo_helper_read'] LOOP
+    CONTINUE WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r);
+    allowed := CASE r
+      WHEN 'momo_app' THEN ARRAY['SELECT', 'INSERT', 'UPDATE']
+      ELSE ARRAY[]::text[]
+    END;
+    EXECUTE format('REVOKE ALL ON TABLE public.attachment_media FROM %I', r);
+    IF cardinality(allowed) > 0 THEN
+      EXECUTE format('GRANT %s ON TABLE public.attachment_media TO %I', array_to_string(allowed, ', '), r);
+    END IF;
+    IF r = 'momo_helper_read' THEN
+      EXECUTE format(
+        'GRANT SELECT (workspace_id, attachment_id, duration_ms, width, height, poster_mime, poster_width, poster_height, created_at) ON TABLE public.attachment_media TO %I',
+        r);
+    END IF;
+    FOREACH p IN ARRAY ARRAY['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'] LOOP
+      IF has_table_privilege(r, 'public.attachment_media', p) IS DISTINCT FROM (p = ANY (allowed)) THEN
+        RAISE EXCEPTION 'role % must % % on attachment_media',
+          r, CASE WHEN p = ANY (allowed) THEN 'hold' ELSE 'not hold' END, p;
+      END IF;
+    END LOOP;
+    FOREACH c IN ARRAY ARRAY['workspace_id', 'attachment_id', 'duration_ms', 'width', 'height', 'poster_mime', 'poster_width', 'poster_height', 'poster_bytes', 'created_at'] LOOP
+      IF has_column_privilege(r, 'public.attachment_media', c, 'SELECT')
+         IS DISTINCT FROM (r = 'momo_app' OR (r = 'momo_helper_read' AND c <> 'poster_bytes')) THEN
+        RAISE EXCEPTION 'role % must % SELECT on attachment_media.%',
+          r, CASE WHEN r = 'momo_app' OR (r = 'momo_helper_read' AND c <> 'poster_bytes') THEN 'hold' ELSE 'not hold' END, c;
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END attachment-media-lockdown
+
 -- Migration 009 can run before these runtime roles exist (the production
 -- internal-smoke order). Reassert the locked join boundary after role creation:
 -- only the NOBYPASSRLS API role may resolve one invite code to its workspace.
