@@ -24,8 +24,8 @@
 //! ## What is *not* here
 //!
 //! * **No SQL.** Every statement is `momo_messaging::attachment`'s.
-//! * **No HTTP client.** Every archive call is `momo_drive`'s, through a trait
-//!   with five methods. `reqwest` is still not a dependency of this binary.
+//! * **No HTTP client.** Every archive call is `momo_drive`'s, through the
+//!   `DriveArchive` trait. `reqwest` is still not a dependency of this binary.
 //! * **No 307.** Swift's content route could answer a redirect, but only the
 //!   unported S3 client ever produced one, and the spec documents no redirect
 //!   for this operation.
@@ -43,7 +43,7 @@
 
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{header, HeaderMap, StatusCode, Uri};
+use axum::http::{header, HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::Principal;
@@ -333,7 +333,7 @@ pub async fn complete(
     Ok(Json(attachment_response(&settled, "complete")))
 }
 
-/// `GET /v1/workspaces/{ws}/channels/{ch}/attachments/{id}/content`
+/// `GET|HEAD /v1/workspaces/{ws}/channels/{ch}/attachments/{id}/content`
 ///
 /// The authorization proxy. An **active member of the channel** may read a
 /// completed attachment **a live message carries** — not only its uploader, because
@@ -350,10 +350,22 @@ pub async fn complete(
 /// another channel's, another tenant's (invisible under RLS) all answer
 /// identically, so the route cannot be used to enumerate what exists — or whose
 /// drafts do.
+///
+/// **`Range` and `HEAD` come last (ADR-0151 증보 5 D3, #4671).** The order is the
+/// contract: authentication, active channel membership, the readable predicate,
+/// `status = complete` — and only **after** all four does the request's `Range` get
+/// read. A request that fails any of them is answered exactly as it was before
+/// ranges existed (403 for a non-member, the one 404 for the rest) whatever `Range`
+/// it carries, so a 416 is only ever sent for a file the reader may read and a
+/// `Range` header cannot ask whether a file exists or how big it is. What follows —
+/// the `200`/`206`/`416` table, the headers, the `HEAD` that opens nothing — is
+/// [`attachment_bytes`](crate::routes::attachment_bytes).
 pub async fn content(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path((workspace, channel, attachment)): Path<(String, String, String)>,
+    method: Method,
+    headers: HeaderMap,
 ) -> Result<Response, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let channel_id = path_uuid(&channel, "invalid channel id")?;
@@ -380,32 +392,27 @@ pub async fn content(
 
     let Some(drive_file_id) = attachment
         .drive_file_id
+        .clone()
         .filter(|_| attachment.status == "complete")
     else {
         return Err(ApiError::not_found("completed attachment not found"));
     };
-
-    let archived = state
-        .drive
-        .file_content(&drive_file_id, MAX_ATTACHMENT_BYTES)
-        .await
-        .map_err(drive_error)?;
 
     // `Content-Disposition: attachment` is deliberate and is not cosmetic: the
     // proxy serves caller-supplied bytes from the API's own origin, so anything
     // the browser might render inline — an uploaded `.html`, an SVG carrying a
     // script — would run as same-origin content. Forcing a download makes the
     // stored mime a label rather than an execution instruction. `nosniff` closes
-    // the same door for a browser that would otherwise guess.
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, archived.mime)
-        .header(header::CONTENT_LENGTH, archived.size_bytes.to_string())
-        .header(header::CONTENT_DISPOSITION, "attachment")
-        .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-        .header(header::CACHE_CONTROL, "private, no-store")
-        .body(Body::from_stream(archived.body))
-        .map_err(|error| ApiError::internal("attachments.content.response", error))
+    // the same door for a browser that would otherwise guess. A 206 is a download
+    // like any other: the same headers go on every answer.
+    crate::routes::attachment_bytes::respond(
+        &*state.drive,
+        &attachment,
+        &drive_file_id,
+        &headers,
+        method == Method::HEAD,
+    )
+    .await
 }
 
 /// `PUT /__momo_stub/drive/uploads/{token}` — the in-process upload endpoint
