@@ -25,6 +25,16 @@
 //!   the table's own CHECK (`team_ai_task_ended_ck`) makes "종결 뒤 노트 삭제" a property of the
 //!   database rather than of this module's discipline.
 //!
+//! ## What a task reports (#4968, ADR-0201 증보 v3.3)
+//!
+//! Every step also says what it did, in the vocabulary of the run event ledger and through the very
+//! writer a hosted agent's `oort_run_event` call reaches ([`record_progress_in_tx`], which ends in
+//! [`crate::run_activity::record_run_activity_in_tx`]): a progress line ([`stage_label`], judged by
+//! the shared short-text rule), the activities of the step ([`StepCounts`], counted by the server
+//! from the calls it ran, no label) and the plan that remains ([`progress_report`]). The run's spend
+//! is one grouped read of its own ledger rows ([`spent_by_run_in_tx`], [`RunSpent`]) — one run, never
+//! a person. What a task keeps for itself, its note, has no way into any of it.
+//!
 //! ## What this module does not decide
 //!
 //! The model loop, the replies and the sentences live in `momo_agent_worker::team_ai` and
@@ -32,12 +42,19 @@
 //! same place for the api (`live_run_count_in_tx` excludes a task run from the concurrency count;
 //! `cancel_run_in_tx` ends the task) and the worker (claims, commits, ends).
 
+use std::collections::HashMap;
+
 use momo_db::DbError;
+use momo_wire::report_text::{checked_report_text, is_unsafe_char};
 use serde_json::{json, Value};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::run::RunStatus;
+use crate::run_activity::{
+    record_run_activity_in_tx, ActivityReport, RawActivity, RawPlanItem, ReportFault,
+    MAX_ACTIVITY_N, MAX_PLAN_ITEMS, MAX_PLAN_TEXT_CHARS,
+};
 use crate::tools::{TASK_NOTE_CHARS_MAX, TASK_PLAN_ITEMS_MAX, TASK_PLAN_ITEM_CHARS_MAX};
 use crate::usage::ResolvedUsage;
 
@@ -76,8 +93,12 @@ pub const END_PROVIDER_ERROR: &str = "task_provider_error";
 pub const END_ROLE_OFF: &str = "task_role_off";
 /// The run ended through a path that does not know tasks; the sweep closed the row.
 pub const END_RUN_ENDED: &str = "run_ended";
-/// The job ran out of attempts (the worker's own retry budget) and the run failed for good.
+/// The job ran out of attempts (the worker's own retry budget) and the run failed for good — the
+/// last attempt failed, or a step job spent its whole budget unable to run its step (#5029).
 pub const END_FAILED: &str = "task_failed";
+/// The helper itself can no longer act in the run's room (it left, or was deactivated), so the run
+/// cannot be called and the task ends with it (#5029): no row, slot or note outlives that.
+pub const END_AGENT_GONE: &str = "task_agent_gone";
 
 // ---------------------------------------------------------------------------
 // the bounds (B5-5: [추정] defaults, configuration values)
@@ -663,22 +684,65 @@ pub async fn record_step_usage_in_tx(
     Ok(())
 }
 
-/// What a task has spent so far, read from the ledger (the system of record): tokens and web
-/// searches over every step of the run.
-pub async fn spent_in_tx(
+/// What one run has spent, read from the ledger (the system of record): the sums of that run's
+/// `usage_ledger` rows, one row per step. The read side of ADR-0201 증보 v3 B12 ("그 run 한 건의
+/// 토큰·검색 횟수") and the only figure of spend a run read carries.
+///
+/// **One run, never a person.** The ledger has no requester column and this struct has no field a
+/// requester could be read from (ADR-0147 증보 2026-10-30 D6: 「누가 팀 AI를 많이 불렀나」는 계산하지도
+/// 표시하지도 않는다). The sums are grouped by run id and by nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunSpent {
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    /// The provider's own web searches (`usage_ledger.web_search_requests`).
+    pub web_searches: i64,
+    /// Some of the tokens are oort's estimate because the provider reported none (ADR-0147 D3).
+    pub estimated: bool,
+}
+
+/// The spend of every task-mode run among `run_ids`, keyed by run id. A run that is **not** a task
+/// (no `team_ai_task` row) has no entry — which also is what keeps another agent's tokens out of a
+/// run read: only the team AI's task runs carry the row, and the team AI is a shared agent whose
+/// spend every member may read (ADR-0147 D1, B12). An ended task keeps its row, so the end line can
+/// read the same figure.
+pub async fn spent_by_run_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
-    run_id: Uuid,
-) -> Result<(i64, i64), DbError> {
-    Ok(sqlx::query_as(
-        "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0)::bigint, \
-                COALESCE(SUM(web_search_requests), 0)::bigint \
-           FROM usage_ledger WHERE workspace_id = $1 AND run_id = $2",
+    run_ids: &[Uuid],
+) -> Result<HashMap<Uuid, RunSpent>, DbError> {
+    if run_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query(
+        "SELECT t.run_id, \
+                COALESCE(SUM(u.prompt_tokens), 0)::bigint AS prompt_tokens, \
+                COALESCE(SUM(u.completion_tokens), 0)::bigint AS completion_tokens, \
+                COALESCE(SUM(u.web_search_requests), 0)::bigint AS web_searches, \
+                COALESCE(bool_or(u.was_estimated), false) AS estimated \
+           FROM team_ai_task t \
+           LEFT JOIN usage_ledger u \
+                  ON u.workspace_id = t.workspace_id AND u.run_id = t.run_id \
+          WHERE t.workspace_id = $1 AND t.run_id = ANY($2) \
+          GROUP BY t.run_id",
     )
     .bind(workspace_id)
-    .bind(run_id)
-    .fetch_one(&mut *conn)
-    .await?)
+    .bind(run_ids)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut spent = HashMap::with_capacity(rows.len());
+    for row in &rows {
+        spent.insert(
+            row.try_get::<Uuid, _>("run_id")?,
+            RunSpent {
+                prompt_tokens: row.try_get("prompt_tokens")?,
+                completion_tokens: row.try_get("completion_tokens")?,
+                web_searches: row.try_get("web_searches")?,
+                estimated: row.try_get("estimated")?,
+            },
+        );
+    }
+    Ok(spent)
 }
 
 // ---------------------------------------------------------------------------
@@ -730,13 +794,15 @@ pub struct TaskContinueArgs {
     pub note: String,
 }
 
-/// Characters that never reach the plan, the note or a progress line: controls, soft hyphen,
-/// bidi marks and overrides, line and paragraph separators, the invisible operators. The same
-/// family `agent_run_event`'s stage CHECK refuses, so a progress line built from the plan can
-/// never fail its own insert.
+/// Characters that never reach the plan, the note or a progress line. **This is not a list of its
+/// own**: it is the predicate of the one short-text rule an agent's words pass through
+/// (`momo_wire::report_text::is_unsafe_char` — controls, soft hyphen, bidi marks and overrides, line
+/// and paragraph separators, the invisible operators, the default-ignorable fillers, variation
+/// selectors, tag characters). A private, narrower list used to stand here, so a plan line with a
+/// Hangul filler or an emoji variation selector became a progress line the rule itself refuses
+/// (#4968).
 fn is_invisible(c: char) -> bool {
-    c.is_control()
-        || matches!(c, '\u{00ad}' | '\u{061c}' | '\u{200b}'..='\u{200f}' | '\u{2028}'..='\u{202e}' | '\u{2060}'..='\u{206f}' | '\u{feff}')
+    is_unsafe_char(c)
 }
 
 /// One line of plan: invisible characters dropped, whitespace collapsed, cut at the line limit.
@@ -800,32 +866,190 @@ pub fn parse_task_continue(arguments: &Value) -> Result<TaskContinueArgs, &'stat
     Ok(TaskContinueArgs { plan: lines, note })
 }
 
+/// The limit of a progress line, in characters: the Agent Port stage marker's own
+/// (`momo_t3::work_share::MAX_STAGE_MARKER_CHARS`). This crate cannot depend on `momo-t3` (a boundary
+/// test in momo-server pins that), so a test in the worker pins the two numbers together.
+pub const STAGE_LABEL_CHARS_MAX: usize = 80;
+
+/// One line of the model's own words, made to fit the short-text rule people read it under — the
+/// progress line's `next` part and the visible plan's steps. `/` and `\` become a space (a short name
+/// is not a path), everything [`is_invisible`] names goes, whitespace collapses, and the line is cut
+/// at `max_chars`. The result is empty or **a text `momo_wire::report_text::checked_report_text`
+/// accepts for `max_chars`**: that is the contract, and the unit tests measure it with that very
+/// function rather than with a rule of this module's own.
+pub fn display_line(raw: &str, max_chars: usize) -> String {
+    let spaced: String = raw
+        .chars()
+        .map(|c| if matches!(c, '/' | '\\') { ' ' } else { c })
+        .collect();
+    clean_line(&spaced, max_chars)
+}
+
+/// The lines of the **visible plan**: what is left of the task's remaining plan lines once they are
+/// made readable ([`display_line`]) — a line that says nothing then (a bare `/`) is left out. This is
+/// the one place the progress line's denominator and the visible plan ([`progress_report`]) both take
+/// their lines from, so a reader's `stepCount + plan.len()` is always the line's `m`.
+fn visible_plan_lines(plan: &[String]) -> Vec<String> {
+    plan.iter()
+        .map(|line| display_line(line, MAX_PLAN_TEXT_CHARS))
+        .filter(|line| !line.is_empty())
+        .take(MAX_PLAN_ITEMS)
+        .collect()
+}
+
 /// The progress line a step writes to the run's event ledger (ADR-0200 D2 `stage`, no new kind):
-/// `조사 중 · 3／6 · 가격 비교하는 중`. `steps_done` steps are finished and `plan` is what remains,
-/// so the denominator is `steps_done + plan.len()`. At most 80 characters, none of the characters
-/// the ledger refuses, never empty.
+/// `조사 중 · 3／6 · 가격 비교하는 중`. `steps_done` steps are finished and the plan is what remains,
+/// so the denominator is `steps_done` plus the length of the **visible** plan
+/// ([`visible_plan_lines`], the same lines [`progress_report`] writes), and the line names the first
+/// of them — the step the visible plan marks `in_progress`.
 ///
-/// The count is written with a **fullwidth solidus** (`／`, U+FF0F): the ledger's stage CHECK
-/// (`work_session_share_stage_markers_ok`, migration 114) refuses an ASCII `/` and `\` anywhere in
-/// a marker, so the ADR's `3/6` cannot be stored as typed. Anything that wants the numbers should
-/// read them from structured fields (S5), not parse this line.
+/// **Judged by the rule a stage marker passes through**: the finished line goes through
+/// `checked_report_text(…, 80)` — the function the Agent Port's `oort_run_event.stage` is judged by
+/// (ADR-0200 증보 7 7-3) — and a line it refuses falls back to the head (`조사 중 · 3／6`), which it
+/// always accepts. So the line is at most 80 characters, free of every character the rule names,
+/// never empty, and a plan line the model made odd can neither fail the ledger's CHECK nor stop the
+/// step. The note and the trigger text have no way in: only the plan's first line does.
+///
+/// The count is written with a **fullwidth solidus** (`／`, U+FF0F): the rule and the ledger's stage
+/// CHECK (`work_session_share_stage_markers_ok`, migration 114) refuse an ASCII `/` and `\` anywhere
+/// in a marker, so the ADR's `3/6` cannot be stored as typed. Anything that wants the numbers reads
+/// them from the run read (`stepCount`, and the visible plan's length: ADR-0201 증보 v3.3), not from
+/// this line.
 pub fn stage_label(steps_done: i32, plan: &[String]) -> String {
-    let total = steps_done.max(0) as usize + plan.len();
+    let lines = visible_plan_lines(plan);
+    let total = steps_done.max(0) as usize + lines.len();
     let head = format!("조사 중 · {}／{}", steps_done.max(0), total.max(1));
-    let next: String = plan
-        .first()
-        .map(|line| {
-            line.chars()
-                .filter(|c| !matches!(c, '/' | '\\') && !is_invisible(*c))
-                .collect()
-        })
-        .unwrap_or_default();
-    let label = if next.trim().is_empty() {
-        head
-    } else {
-        format!("{head} · {}", next.trim())
+    let candidate = match lines.first() {
+        Some(next) => format!("{head} · {next}"),
+        None => head.clone(),
     };
-    label.chars().take(80).collect()
+    judged_label(&candidate, &head)
+}
+
+/// The progress line's last gate, apart from [`stage_label`] so it can be tested on lines the
+/// cleaning never makes: the candidate is cut at the limit and judged by
+/// `checked_report_text` — the stage marker's own rule — and a candidate it refuses is replaced by
+/// `head`, which it always accepts.
+fn judged_label(candidate: &str, head: &str) -> String {
+    let cut: String = candidate.chars().take(STAGE_LABEL_CHARS_MAX).collect();
+    checked_report_text(&cut, STAGE_LABEL_CHARS_MAX).unwrap_or_else(|_| head.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// what a step reports: activities and the visible plan (ADR-0200 증보 7, #4968)
+// ---------------------------------------------------------------------------
+
+/// What one step did, in the kinds of the activity vocabulary (ADR-0200 증보 7 7-1). Counts of calls
+/// the server itself made on the helper's behalf, never the model's words.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StepCounts {
+    /// Reads of the workspace (every read tool but the message search; an attachment read too).
+    pub reads: i32,
+    /// The message search.
+    pub searches: i32,
+    /// The provider's own web searches.
+    pub web: i32,
+}
+
+impl StepCounts {
+    pub fn is_empty(&self) -> bool {
+        self.reads <= 0 && self.searches <= 0 && self.web <= 0
+    }
+}
+
+/// What [`record_progress_in_tx`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgressWrite {
+    /// Ledger rows written (0 when the report repeated what the ledger already held — the writer's
+    /// own fold — or the run is not this agent's).
+    Written(i32),
+    /// The shared rule refused the report. Every text in it is the server's own or the model's plan
+    /// line after [`display_line`], so this is a bug of this module, never the model's doing: the
+    /// caller **logs it and goes on** (a progress decoration must not stop a step), and a test that
+    /// feeds the worst plan lines fails when it happens.
+    Refused(ReportFault),
+}
+
+/// The activity id of one kind in one step: `s2_read`. A number-name with no content, so a channel
+/// member who reads it learns nothing the kind does not say.
+fn step_activity_id(step: i32, kind: &str) -> String {
+    format!("s{}_{kind}", step.max(0))
+}
+
+/// The report of one step: its activities (`completed`, no label — the kind names the work and
+/// there is nothing to leak) and, when `plan` is given, the visible plan: the lines that remain,
+/// the first `in_progress` and the rest `pending`. The plan is replaced whole (`Some(&[])` clears
+/// it); `None` leaves it as it is.
+///
+/// The visible plan is **what remains**, because that is all the task row keeps (B5-2); the steps
+/// already done are `agent_run.step_count`, so a reader's "n of m" is `step_count` of
+/// `step_count + plan.len()` — the very numbers of [`stage_label`], which takes its lines from the
+/// same [`visible_plan_lines`]. Pure, so the shared rule's
+/// verdict on the worst plan lines is testable without a database.
+pub fn progress_report(
+    step: i32,
+    counts: StepCounts,
+    plan: Option<&[String]>,
+) -> Result<ActivityReport, ReportFault> {
+    let mut activities: Vec<RawActivity> = Vec::new();
+    for (kind, n) in [
+        ("read", counts.reads),
+        ("search", counts.searches),
+        ("web", counts.web),
+    ] {
+        if n > 0 {
+            activities.push(RawActivity {
+                id: step_activity_id(step, kind),
+                kind: kind.to_string(),
+                label: None,
+                status: "completed".to_string(),
+                n: Some(i64::from(n).min(MAX_ACTIVITY_N)),
+            });
+        }
+    }
+    let visible: Option<Vec<RawPlanItem>> = plan.map(|lines| {
+        visible_plan_lines(lines)
+            .into_iter()
+            .enumerate()
+            .map(|(index, text)| RawPlanItem {
+                text,
+                status: if index == 0 { "in_progress" } else { "pending" }.to_string(),
+            })
+            .collect()
+    });
+    ActivityReport::validate(
+        (!activities.is_empty()).then_some(activities.as_slice()),
+        visible.as_deref(),
+    )
+}
+
+/// Write one step's report to the run's event ledger through **the** writer
+/// ([`record_run_activity_in_tx`], the very function the Agent Port tool path calls — the same
+/// validation, fold, roll and total; ADR-0201 B5-7, ADR-0200 증보 7 7-10), inside the caller's
+/// transaction: a step's progress is written, or lost with the step, together with its commit.
+///
+/// The caller is the worker, connected as `momo_worker`. That role holds the verbs the writer needs
+/// (UPDATE on `agent_run` for the run-row lock, INSERT/DELETE on `agent_run_event`, the sequence,
+/// and the total table): a worker test runs this through that role and fails if one is missing.
+/// `agent_member_id` must be the run's own agent — the writer refuses (writes 0) for anyone else.
+pub async fn record_progress_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    step: i32,
+    counts: StepCounts,
+    plan: Option<&[String]>,
+) -> Result<ProgressWrite, DbError> {
+    if counts.is_empty() && plan.is_none() {
+        return Ok(ProgressWrite::Written(0));
+    }
+    match progress_report(step, counts, plan) {
+        Ok(report) => Ok(ProgressWrite::Written(
+            record_run_activity_in_tx(conn, workspace_id, run_id, agent_member_id, &report).await?,
+        )),
+        Err(fault) => Ok(ProgressWrite::Refused(fault)),
+    }
 }
 
 #[cfg(test)]
@@ -955,10 +1179,12 @@ mod tests {
         }
     }
 
-    /// The progress line can always be inserted: at most 80 characters, none the ledger's CHECK
-    /// refuses, never empty.
+    /// #4968 (acceptance 1): a progress line is judged by the rule an Agent Port stage marker passes
+    /// through, and that is how it is **measured** here — with `checked_report_text` itself, not with a
+    /// predicate of this module's own (the narrower private list this test used to ask is exactly
+    /// what let a Hangul filler through). Worst lines a model can write, every step number.
     #[test]
-    fn the_stage_label_fits_the_ledgers_check() {
+    fn the_stage_label_is_what_the_shared_rule_accepts() {
         assert_eq!(
             stage_label(
                 3,
@@ -967,11 +1193,192 @@ mod tests {
             "조사 중 · 3／6 · 가격 비교하는 중"
         );
         assert_eq!(stage_label(2, &[]), "조사 중 · 2／2");
-        let nasty = stage_label(1, &["a/b\\c\u{202e}\u{0000}가".repeat(40)]);
-        assert!(nasty.chars().count() <= 80);
-        assert!(!nasty.contains('/') && !nasty.contains('\\'));
-        assert!(!nasty.chars().any(is_invisible));
-        assert!(!nasty.is_empty());
+        let worst: Vec<String> = vec![
+            "a/b\\c\u{202e}\u{0000}가".repeat(40),
+            "\u{3164}\u{3164}".to_string(),
+            "비교\u{fe0f}하기".to_string(),
+            "\u{e0041}tag".to_string(),
+            "\u{034f}x".to_string(),
+            format!("{}\u{ffa0}", "x".repeat(70)),
+            "/////".to_string(),
+            "   ".to_string(),
+            String::new(),
+            "가".repeat(500),
+            "A/B 비교, C\\D 정리".to_string(),
+        ];
+        for line in &worst {
+            for steps in [0, 1, 7, 20] {
+                let label = stage_label(steps, &[line.clone(), "다음".to_string()]);
+                assert_eq!(
+                    checked_report_text(&label, STAGE_LABEL_CHARS_MAX).as_deref(),
+                    Ok(label.as_str()),
+                    "the shared rule must accept {label:?} unchanged (plan line {line:?}, step {steps})"
+                );
+                assert!(label.chars().count() <= STAGE_LABEL_CHARS_MAX, "{label:?}");
+                assert!(label.starts_with("조사 중 · "), "{label:?}");
+            }
+        }
+        // What the model wrote survives where the rule allows it; a path separator or an invisible
+        // character parts the words instead (the way `clean_line` has always treated one).
+        assert_eq!(
+            stage_label(1, &["A/B 비교".to_string()]),
+            "조사 중 · 1／2 · A B 비교"
+        );
+        assert_eq!(
+            stage_label(1, &["비교\u{fe0f}하기".to_string()]),
+            "조사 중 · 1／2 · 비교 하기"
+        );
+    }
+
+    /// The contract `display_line` states: empty, or a text the shared rule accepts unchanged.
+    #[test]
+    fn a_display_line_is_empty_or_accepted_by_the_shared_rule() {
+        for raw in [
+            "가격 비교하기",
+            "a/b",
+            "a\\b",
+            "\u{3164}",
+            "x\u{fe0f}\u{200d}y",
+            "\n\t 줄바꿈  끼움 \n",
+            "가".repeat(200).as_str(),
+            "",
+            "////",
+        ] {
+            for max in [1, 20, MAX_PLAN_TEXT_CHARS, STAGE_LABEL_CHARS_MAX] {
+                let line = display_line(raw, max);
+                assert!(line.chars().count() <= max, "{line:?}");
+                if !line.is_empty() {
+                    assert_eq!(
+                        checked_report_text(&line, max).as_deref(),
+                        Ok(line.as_str()),
+                        "{raw:?} at {max}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The last gate is the shared rule and nothing else: a candidate that the cleaning never makes
+    /// (a separator, a filler, a control character, nothing at all) is replaced by the head; a clean
+    /// one passes unchanged; a long one is cut at the limit first.
+    #[test]
+    fn the_judge_replaces_a_line_the_shared_rule_refuses() {
+        let head = "조사 중 · 1／2";
+        for refused in [
+            "조사 중 · 1／2 · a/b",
+            "조사 중 · 1／2 · a\\b",
+            "조사 중 · 1／2 · \u{3164}",
+            "조사 중 · 1／2 · x\u{7}y",
+            "조사 중 · 1／2 · \u{202e}rtl",
+            "",
+            "   ",
+        ] {
+            assert_eq!(judged_label(refused, head), head, "{refused:?}");
+        }
+        assert_eq!(
+            judged_label("조사 중 · 1／2 · 가격 비교", head),
+            "조사 중 · 1／2 · 가격 비교"
+        );
+        let long = format!("{head} · {}", "가".repeat(200));
+        let cut = judged_label(&long, head);
+        assert_eq!(cut.chars().count(), STAGE_LABEL_CHARS_MAX);
+        assert!(cut.starts_with(head));
+    }
+
+    /// #4968: the progress line's `m` is `n` plus the **visible** plan's length, for every mix of plan
+    /// lines — a line that says nothing once it is made readable is in neither the plan nor the count
+    /// (the reader's "n of m" and the line must be the same numbers).
+    #[test]
+    fn the_progress_lines_denominator_is_the_visible_plans_length() {
+        let plan: Vec<String> = ["/", "가격 비교", "\u{3164}", "정리", "\\"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(stage_label(2, &plan), "조사 중 · 2／4 · 가격 비교");
+        let mixes: Vec<Vec<String>> = vec![
+            plan.clone(),
+            vec!["/".to_string()],
+            vec![],
+            vec!["가".to_string(); 8],
+            vec!["a/b".to_string(), "///".to_string(), "c".to_string()],
+        ];
+        for lines in &mixes {
+            for steps in [0, 1, 5, 20] {
+                let label = stage_label(steps, lines);
+                let head = label.split(" · ").nth(1).expect("the count");
+                let (n, m) = head.split_once('／').expect("n／m");
+                let (n, m): (usize, usize) = (n.parse().unwrap(), m.parse().unwrap());
+                let report =
+                    progress_report(steps, StepCounts::default(), Some(lines)).expect("accepted");
+                assert_eq!(n, steps as usize);
+                assert_eq!(
+                    m.max(1),
+                    (n + report.plan_steps().expect("a plan")).max(1),
+                    "{lines:?} at step {steps}: {label}"
+                );
+            }
+        }
+    }
+
+    /// The report of a step: kinds from the closed vocabulary, one activity per kind that was used,
+    /// the plan as what remains (first `in_progress`) — and none of it refused for the worst lines.
+    #[test]
+    fn a_steps_report_is_accepted_whole_for_the_worst_plan_lines() {
+        let counts = StepCounts {
+            reads: 3,
+            searches: 1,
+            web: 2,
+        };
+        let worst: Vec<String> = vec![
+            "a/b\\c".to_string(),
+            "\u{3164}".to_string(),
+            "x\u{fe0f}".to_string(),
+            "/".to_string(),
+            "가".repeat(200),
+        ];
+        let report = progress_report(2, counts, Some(&worst)).expect("accepted");
+        assert_eq!(report.activity_count(), 3);
+        // `"/"` and `"\u{3164}"` leave nothing; the other three remain.
+        assert_eq!(report.plan_steps(), Some(3));
+        // No activity for what was not done; no plan when none is given.
+        let quiet = progress_report(3, StepCounts::default(), None).expect("accepted");
+        assert!(quiet.is_empty());
+        let only_reads = progress_report(
+            3,
+            StepCounts {
+                reads: 1,
+                ..StepCounts::default()
+            },
+            None,
+        )
+        .expect("accepted");
+        assert_eq!(
+            (only_reads.activity_count(), only_reads.plan_steps()),
+            (1, None)
+        );
+        // A plan whose lines all vanish clears the visible plan rather than showing nothing true.
+        let cleared =
+            progress_report(2, StepCounts::default(), Some(&["/".to_string()])).expect("accepted");
+        assert_eq!(cleared.plan_steps(), Some(0));
+        // The id is a number-name inside the rule's alphabet for every step number.
+        for step in [0, 1, 9, 20, i32::MAX] {
+            for kind in ["read", "search", "web"] {
+                let id = step_activity_id(step, kind);
+                assert!(
+                    id.chars().count() <= 32 && crate::run_activity::id_alphabet_ok(&id),
+                    "{id}"
+                );
+            }
+        }
+    }
+
+    /// A count past the writer's ceiling is cut to it, not refused.
+    #[test]
+    fn a_huge_count_is_cut_to_the_ceiling() {
+        let counts = StepCounts {
+            reads: i32::MAX,
+            ..StepCounts::default()
+        };
+        assert!(progress_report(1, counts, None).is_ok());
     }
 
     /// A step job carries ids and the step number, and a lowercase run id (the cancel's retire

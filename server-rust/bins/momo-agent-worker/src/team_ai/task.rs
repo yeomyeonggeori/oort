@@ -75,6 +75,51 @@ enum StepEnd {
     Retry(String),
 }
 
+/// What one step did, in the kinds of the activity vocabulary (ADR-0200 증보 7 7-1), counted from
+/// the calls **the server ran for it** — the read tools it executed and the searches the provider
+/// reported — never from anything the model wrote. The message search is `search`, every other
+/// read (an attachment included) is `read`, the provider's web searches are `web`.
+pub(super) fn step_counts(trace: &TurnTrace) -> store::StepCounts {
+    let search = momo_agent::tools::normalize(team_ai_tools::TOOL_SEARCH_MESSAGES);
+    let mut counts = store::StepCounts::default();
+    for name in &trace.tools {
+        if momo_agent::tools::normalize(name) == search {
+            counts.searches = counts.searches.saturating_add(1);
+        } else {
+            counts.reads = counts.reads.saturating_add(1);
+        }
+    }
+    counts.web = trace.web_searches.max(0);
+    counts
+}
+
+/// Write one step's activities and (when given) the visible plan to the run's ledger through the
+/// one writer, in the caller's transaction (ADR-0201 B5-7). A report the shared rule refuses is
+/// logged — by closed words only: which field, which rule — and the step goes on: a progress
+/// decoration must not stop a task, and the worst plan lines are tested to be accepted.
+pub(super) async fn record_step_progress(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent: Uuid,
+    step: i32,
+    counts: store::StepCounts,
+    plan: Option<&[String]>,
+) -> Result<(), DbError> {
+    if let store::ProgressWrite::Refused(fault) =
+        store::record_progress_in_tx(conn, workspace_id, run_id, agent, step, counts, plan).await?
+    {
+        tracing::warn!(
+            run_id = %run_id,
+            step,
+            field = fault.field.as_str(),
+            rule = fault.rule.as_str(),
+            "team ai task: a progress report was refused by the shared rule"
+        );
+    }
+    Ok(())
+}
+
 impl AgentWorker {
     /// The first turn asked to continue: write the task row (`steps_done = 1`), the first progress
     /// line and the job of step 2 — **one transaction** — or refuse honestly. Every refusal is a
@@ -106,6 +151,7 @@ impl AgentWorker {
         let mut audit_trace = trace.clone();
         audit_trace.task_step = Some(1);
         let audit_detail = audit_trace.audit_detail(spend, "task_started");
+        let counts = step_counts(trace);
         let job_payload = store::step_job_payload(
             workspace_id,
             run_id,
@@ -125,6 +171,9 @@ impl AgentWorker {
             Box::pin(async move {
                 let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
                 else {
+                    // A run that cannot be called any more keeps no task row (#5029; normally there
+                    // is none yet, and this is then a no-op).
+                    store::end_in_tx(conn, workspace_id, run_id, store::END_AGENT_GONE).await?;
                     return Ok(Began::Gone);
                 };
                 // What this step spent is real whatever comes of the task: it is written first and
@@ -181,6 +230,17 @@ impl AgentWorker {
                     run_id,
                     AppendedRunEvent::Stage(&store::stage_label(1, &args.plan)),
                     agent,
+                )
+                .await?;
+                // The step's activities and the visible plan, in the same transaction as its line.
+                record_step_progress(
+                    conn,
+                    workspace_id,
+                    run_id,
+                    agent,
+                    1,
+                    counts,
+                    Some(&args.plan),
                 )
                 .await?;
                 emit_outbox(
@@ -417,7 +477,11 @@ impl AgentWorker {
         .await;
         let task = match claimed {
             Ok(ClaimOutcome::Claimed(row)) => row,
-            Ok(ClaimOutcome::Taken) => return self.team_ai_task_wait(job).await,
+            Ok(ClaimOutcome::Taken) => {
+                return self
+                    .team_ai_task_wait(job, payload, run_id, &task.note, &trace)
+                    .await
+            }
             Ok(ClaimOutcome::Gone) => {
                 self.settle_done(job.id, Some(store::SkipReason::StepDone.as_str()))
                     .await;
@@ -757,6 +821,7 @@ impl AgentWorker {
             trace.web_searches,
         );
         let audit_detail = trace.audit_detail(spend, "task_step");
+        let counts = step_counts(trace);
         let job_payload = store::step_job_payload(
             workspace_id,
             run_id,
@@ -776,6 +841,9 @@ impl AgentWorker {
             Box::pin(async move {
                 let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
                 else {
+                    // A run that cannot be called any more has no next step: its task ends with it,
+                    // so no row, slot or note is left behind (#5029).
+                    store::end_in_tx(conn, workspace_id, run_id, store::END_AGENT_GONE).await?;
                     return Ok(Committed::Gone);
                 };
                 // Spent is spent: the row is written before any judgement and stays in every outcome.
@@ -825,6 +893,18 @@ impl AgentWorker {
                     run_id,
                     AppendedRunEvent::Stage(&store::stage_label(step, &args.plan)),
                     agent,
+                )
+                .await?;
+                // Only the holder of the claim got here (the compare-and-swap above), so a step
+                // that lost — a takeover, a stop — leaves no activity and no plan behind.
+                record_step_progress(
+                    conn,
+                    workspace_id,
+                    run_id,
+                    agent,
+                    step,
+                    counts,
+                    Some(&args.plan),
                 )
                 .await?;
                 emit_outbox(
@@ -979,13 +1059,31 @@ impl AgentWorker {
     }
 
     /// Another worker holds a live claim on this very step: do not call the model, come back later.
-    /// A job that has been back often enough is dropped — the holder either commits (and this job is
-    /// moot) or lets the claim expire (and the holder's own job is re-claimed to take it over).
-    async fn team_ai_task_wait(&self, job: &ClaimedAgentJob) -> Settlement {
+    /// A job that has been back as often as its attempts allow does not just disappear — a step
+    /// job that goes away without ending the task would leave a row nobody continues (#5029). The
+    /// task ends here with `task_failed` and an interim report built from `note`, like every other
+    /// early end of a task: one message, the run's end and the row's end in one transaction.
+    async fn team_ai_task_wait(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        run_id: Uuid,
+        note: &str,
+        trace: &TurnTrace,
+    ) -> Settlement {
         if job.attempts >= self.config.max_attempts {
-            self.settle_done(job.id, Some("team ai task step is held by another worker"))
+            return self
+                .team_ai_task_interim(
+                    job,
+                    payload,
+                    run_id,
+                    team_ai::TASK_STALLED_SENTENCE,
+                    note,
+                    store::END_FAILED,
+                    None,
+                    trace,
+                )
                 .await;
-            return Settlement::Skipped;
         }
         let backoff = backoff_seconds(job.attempts);
         if let Err(error) = requeue(
@@ -1073,5 +1171,60 @@ impl AgentWorker {
             .await?;
         }
         Ok(closed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #4968: the kinds of a step are counted from the calls **the server ran** — the message search
+    /// is `search`, every other read (the attachment read too) is `read`, the provider's searches are
+    /// `web` — whatever spelling the model used for a tool's name, and a provider's nonsense (a
+    /// negative count) is no count.
+    #[test]
+    fn a_steps_counts_follow_the_calls_the_server_ran() {
+        let trace = TurnTrace {
+            tools: [
+                "search_messages",
+                "read_channel",
+                "read_thread",
+                "read_attachment",
+                "search_messages",
+            ]
+            .map(String::from)
+            .to_vec(),
+            web_searches: 2,
+            ..TurnTrace::default()
+        };
+        assert_eq!(
+            step_counts(&trace),
+            store::StepCounts {
+                reads: 3,
+                searches: 2,
+                web: 2
+            }
+        );
+        let spelled = TurnTrace {
+            tools: vec!["Search-Messages".to_string()],
+            ..TurnTrace::default()
+        };
+        assert_eq!(step_counts(&spelled).searches, 1);
+        let odd = TurnTrace {
+            web_searches: -4,
+            ..TurnTrace::default()
+        };
+        assert!(step_counts(&odd).is_empty());
+    }
+
+    /// #4968: the progress line's limit is the Agent Port stage marker's. `momo-agent` cannot depend
+    /// on `momo-t3` (a boundary test in momo-server pins that), so the two numbers are tied together
+    /// here, where both crates are in reach.
+    #[test]
+    fn the_progress_lines_limit_is_the_stage_markers() {
+        assert_eq!(
+            store::STAGE_LABEL_CHARS_MAX,
+            momo_t3::work_share::MAX_STAGE_MARKER_CHARS
+        );
     }
 }

@@ -46,12 +46,12 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let latest: RunLedgerView | null = null;
 
-function Probe({ runId, f, counts }: { runId: string | null; f: ServerRunFacts | null; counts?: boolean }) {
-  latest = useRunLedger(runId, f, counts);
+function Probe({ runId, f }: { runId: string | null; f: ServerRunFacts | null }) {
+  latest = useRunLedger(runId, f);
   return null;
 }
 
-function mount(runId: string | null, f: ServerRunFacts | null, counts = false) {
+function mount(runId: string | null, f: ServerRunFacts | null) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -63,7 +63,7 @@ function mount(runId: string | null, f: ServerRunFacts | null, counts = false) {
         createElement(
           QueryClientProvider,
           { client },
-          createElement(SessionProvider, { value: session }, createElement(Probe, { runId: nextRun, f: nextFacts, counts }))
+          createElement(SessionProvider, { value: session }, createElement(Probe, { runId: nextRun, f: nextFacts }))
         )
       );
     });
@@ -157,18 +157,19 @@ describe("useRunLedger", () => {
     expect(latest?.isError).toBe(true);
     expect(fetchEvents).toHaveBeenCalledTimes(1);
   });
-  it("도구 include/tally를 모르는 읽기에서 도구 횟수를 0으로 지어내지 않는다", async () => {
-    fetchEvents.mockResolvedValue(ledger("단계"));
-    mount(RUN, facts(), true);
-    await settle();
-    expect(latest?.counts).toEqual({ approvals: 0 });
-    expect(latest?.counts?.tools).toBeUndefined();
-  });
-  it("열면 깨우는 신호와 oort가 잰 도구 호출을 함께 묻는다 (#4654)", async () => {
+  it("활동 include를 모르는 읽기에서 에이전트 보고를 0으로 지어내지 않는다: 「모름」이고 요약은 단계만 센다 (#4657)", async () => {
     fetchEvents.mockResolvedValue(ledger("단계"));
     mount(RUN, facts());
     await settle();
-    expect(seen.options).toEqual([{ includeDoorbell: true, includeTools: true }]);
+    expect(latest?.activity).toMatchObject({ supported: false, rows: [], plan: null, tally: null });
+    expect(latest?.report).toEqual({ stages: 1, kinds: [] });
+    expect(latest?.events.map((event) => event.kind)).toEqual(["stage"]);
+  });
+  it("열면 깨우는 신호·oort가 잰 도구 호출·에이전트가 알린 활동을 함께 묻는다 (#4654·#4657)", async () => {
+    fetchEvents.mockResolvedValue(ledger("단계"));
+    mount(RUN, facts());
+    await settle();
+    expect(seen.options).toEqual([{ includeDoorbell: true, includeTools: true, includeActivity: true }]);
   });
 
   it("합계가 오면 「oort 기록」 재료가 서고, 합계가 없으면 「모름」이다 (#4654)", async () => {
@@ -195,25 +196,49 @@ describe("useRunLedger", () => {
     expect(latest?.tools).toMatchObject({ supported: false, tally: null, rows: [] });
   });
 
-  it("oort가 잰 호출은 요약의 「도구 N」에 섞이지 않는다: 에이전트가 한 일과 출처가 다르다 (#4654)", async () => {
+  it("oort가 잰 호출은 요약에 섞이지 않는다: 요약의 숫자는 에이전트가 알린 것뿐이다 (#4654·#4657)", async () => {
     fetchEvents.mockResolvedValue(
       agentRunLedgerFromWire({
         runId: RUN,
         events: [
           { ordinal: 1, kind: "tool_call", tool: "oort_job_start", code: "ok", durationMs: 4, createdAtMs: T },
           { ordinal: 2, kind: "tool_call", tool: "oort_run_complete", code: "ok", durationMs: 6, createdAtMs: T + 1 },
+          { ordinal: 3, kind: "stage", stage: "문서 읽기", createdAtMs: T + 2 },
+          { ordinal: 4, kind: "activity", createdAtMs: T + 3, activity: { id: "a1", kind: "run", status: "completed", n: 12, startedAtMs: T + 3 } },
         ],
         toolTally: [
           { tool: "oort_job_start", ok: 1, error: 0, durationMsSum: 4 },
           { tool: "oort_run_complete", ok: 1, error: 0, durationMsSum: 6 },
         ],
         toolCallRowsCapped: false,
+        activityTally: [{ kind: "run", completed: 12, failed: 0 }],
+        activityRowsTrimmed: false,
       })
     );
-    mount(RUN, facts({ phase: "succeeded" }), true);
+    mount(RUN, facts({ phase: "succeeded" }));
     await settle();
     expect(latest?.tools?.tally?.calls).toBe(2);
-    expect(latest?.counts).toEqual({ approvals: 0 });
-    expect(latest?.counts?.tools).toBeUndefined();
+    // 요약은 oort 호출 둘이 아니라 에이전트가 알린 단계 1·명령 12를 말한다.
+    expect(latest?.report).toEqual({ stages: 1, kinds: [{ toolKind: "run", count: 12 }] });
+    expect(latest?.activity).toMatchObject({ supported: true, trimmed: false });
+    expect(latest?.activity?.rows.map((row) => row.id)).toEqual(["agent|activity|a1"]);
+    // 기록 칸의 줄에는 도구 호출도 활동도 없다(단계만).
+    expect(latest?.rows.map((row) => row.kind)).toEqual(["stage"]);
+  });
+
+  it("계획의 「지금 단계」는 서버가 running이라 할 때만 선다: 승인을 기다리는 열린 run은 일하는 중이 아니다 (#4657)", async () => {
+    fetchEvents.mockResolvedValue(
+      agentRunLedgerFromWire({
+        runId: RUN,
+        events: [{ ordinal: 1, kind: "plan", createdAtMs: T, plan: [{ text: "표 정리", status: "in_progress" }] }],
+        activityTally: [],
+      })
+    );
+    const render = mount(RUN, facts({ phase: "awaiting_approval" }));
+    await settle();
+    expect(latest?.activity?.plan).toMatchObject({ hasCurrent: false, live: false });
+    render(RUN, facts({ phase: "running", lastEventAtMs: T + 1_000 }));
+    await settle();
+    expect(latest?.activity?.plan).toMatchObject({ hasCurrent: true, live: true });
   });
 });

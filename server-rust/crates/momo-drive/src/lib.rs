@@ -9,8 +9,9 @@
 //! **Bytes bypass momo-server on the way up, and are proxied on the way down.**
 //! [`DriveArchive::create_resumable_upload`] mints a Google resumable session
 //! whose URL the client uploads to directly — the server never sees the body —
-//! while [`DriveArchive::file_content`] streams the bytes back through the
-//! authenticated content route. Upload bandwidth goes to Drive; read
+//! while [`DriveArchive::file_range`] streams the bytes back through the
+//! authenticated content route — a byte range at a time, whole-file reads
+//! included (ADR-0151 증보 5 D3). Upload bandwidth goes to Drive; read
 //! authorization stays with PostgreSQL and RLS (ADR-0151 D3). A Drive URL is
 //! never handed to a client for reading.
 //!
@@ -41,8 +42,12 @@
 //! — [`DriveBackendConfig`] is built from the environment at boot and is not
 //! reachable from a handler.
 
+#[cfg(test)]
+mod fake_google;
 pub mod google;
 pub mod local;
+#[cfg(test)]
+mod range_tests;
 pub mod stub;
 
 use std::sync::Arc;
@@ -301,6 +306,111 @@ impl std::fmt::Debug for DriveContent {
     }
 }
 
+/// An inclusive byte range `start..=end` of one object, **already resolved
+/// against that object's size** by the caller (ADR-0151 증보 5 D3).
+///
+/// The content route reads the HTTP `Range` header only after the reader has
+/// passed every authorization check, resolves it against the *database row's*
+/// size, and hands the archive two checked integers — never header text. That is
+/// why Google is sent `bytes=<start>-<end>` built from numbers, and why a
+/// client's raw value, a multi-range list or an over-long header cannot reach
+/// the upstream.
+///
+/// `end` is below `i64::MAX`, so [`ByteRange::length`] cannot overflow and every
+/// length an archive reports (`i64`) can name the whole object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ByteRange {
+    start: u64,
+    end: u64,
+}
+
+impl ByteRange {
+    /// `None` unless `start <= end < i64::MAX`.
+    pub fn new(start: u64, end: u64) -> Option<ByteRange> {
+        (start <= end && end < i64::MAX as u64).then_some(ByteRange { start, end })
+    }
+
+    pub fn start(self) -> u64 {
+        self.start
+    }
+
+    pub fn end(self) -> u64 {
+        self.end
+    }
+
+    /// How many bytes the range holds (at least one).
+    pub fn length(self) -> u64 {
+        self.end - self.start + 1
+    }
+}
+
+/// A range read in progress ([`DriveArchive::file_range`]).
+pub struct DriveRangeContent {
+    /// The archive's own idea of the object's **whole** length — not the
+    /// range's. The route compares it with the database row it already holds
+    /// and refuses a disagreement (502), so a header is never built from a size
+    /// the archive alone claims.
+    pub total_size_bytes: i64,
+    /// Exactly [`ByteRange::length`] bytes. A body that runs dry or fails part
+    /// way is an `Err` item, never a clean end: the route has already promised a
+    /// `Content-Length`, and a short body that ended quietly would look like a
+    /// complete download.
+    pub body: BoxStream<'static, Result<Bytes, DriveError>>,
+}
+
+impl std::fmt::Debug for DriveRangeContent {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DriveRangeContent")
+            .field("total_size_bytes", &self.total_size_bytes)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Narrow `body` (an object's bytes from offset 0) to `range`: the bytes before
+/// it are read and dropped, the bytes after it are never pulled, and a body that
+/// ends before the range does is an error rather than a short success.
+///
+/// Used by the [`DriveArchive::file_range`] default and by Google's 206, whose
+/// body starts at the range already (`start` 0).
+pub(crate) fn slice_body(
+    body: BoxStream<'static, Result<Bytes, DriveError>>,
+    range: ByteRange,
+) -> BoxStream<'static, Result<Bytes, DriveError>> {
+    use futures::StreamExt;
+    futures::stream::try_unfold(
+        (body, range.start(), range.length()),
+        |(mut body, mut skip, mut remaining)| async move {
+            if remaining == 0 {
+                return Ok(None);
+            }
+            loop {
+                match body.next().await {
+                    None => return Err(DriveError::UpstreamFailure),
+                    Some(Err(error)) => return Err(error),
+                    Some(Ok(mut chunk)) => {
+                        let held = chunk.len() as u64;
+                        if skip >= held {
+                            skip -= held;
+                            continue;
+                        }
+                        if skip > 0 {
+                            chunk = chunk.slice(skip as usize..);
+                            skip = 0;
+                        }
+                        if chunk.len() as u64 > remaining {
+                            chunk.truncate(remaining as usize);
+                        }
+                        remaining -= chunk.len() as u64;
+                        return Ok(Some((chunk, (body, skip, remaining))));
+                    }
+                }
+            }
+        },
+    )
+    .boxed()
+}
+
 /// Why an archive call failed. One variant per Swift `DriveArchiveError` case,
 /// because the route's status table is keyed on them
 /// (`AttachmentRoutes.httpError`, :470-479) and a merged variant would merge two
@@ -332,7 +442,7 @@ impl DriveError {
 
 /// The workspace's byte archive.
 ///
-/// Six methods; a route reaches five (delete is the reclaim sweep's). The
+/// Seven methods; a route reaches six (delete is the reclaim sweep's). The
 /// trait is what makes the stub and Google backends substitutable **without a
 /// test-only branch in a handler**: the attachment routes are written once and
 /// the operator's environment decides which archive they run against.
@@ -357,6 +467,46 @@ pub trait DriveArchive: Send + Sync + std::fmt::Debug {
 
     async fn file_content(&self, file_id: &str, max_bytes: i64)
         -> Result<DriveContent, DriveError>;
+
+    /// Read one inclusive byte range of an object (ADR-0151 증보 5 D3, #4671).
+    ///
+    /// **The content route's one read.** A whole-file `GET` is the range
+    /// `0..=size-1`, so the route has a single archive path whatever the request
+    /// said. The caller resolved `range` against the database row's size; the
+    /// archive reports its own idea of the object's whole length in
+    /// [`DriveRangeContent::total_size_bytes`] and the caller refuses a
+    /// disagreement. The archive still refuses what it can see itself: an object
+    /// over `max_bytes` ([`DriveError::ContentTooLarge`]), a range that is not
+    /// inside the object ([`DriveError::UpstreamFailure`]).
+    ///
+    /// The body holds exactly [`ByteRange::length`] bytes, or ends in an error.
+    /// **Memory must not follow the object's size**, and **no archive lock may be
+    /// held while the body streams** — a slow reader must not stop uploads or
+    /// metadata reads.
+    ///
+    /// The default exists for test doubles: it reads through
+    /// [`DriveArchive::file_content`] and cuts the range out, which is correct but
+    /// buffers whatever `file_content` buffers. **Every backend that serves real
+    /// traffic overrides it** (local, Google, stub and the unavailable archive do,
+    /// explicitly) — a default that fell through to the local archive's
+    /// `file_content` would hold a whole 300 MiB object per reader, which is the
+    /// failure this method exists to remove.
+    async fn file_range(
+        &self,
+        file_id: &str,
+        range: ByteRange,
+        max_bytes: i64,
+    ) -> Result<DriveRangeContent, DriveError> {
+        let content = self.file_content(file_id, max_bytes).await?;
+        let total = u64::try_from(content.size_bytes).map_err(|_| DriveError::UpstreamFailure)?;
+        if range.end() >= total {
+            return Err(DriveError::UpstreamFailure);
+        }
+        Ok(DriveRangeContent {
+            total_size_bytes: content.size_bytes,
+            body: slice_body(content.body, range),
+        })
+    }
 
     /// Permanently delete one object (#3284, ADR-0161 D5 reclaim).
     ///
@@ -431,6 +581,15 @@ impl DriveArchive for UnavailableDriveArchive {
         _file_id: &str,
         _max_bytes: i64,
     ) -> Result<DriveContent, DriveError> {
+        Err(DriveError::Unavailable)
+    }
+
+    async fn file_range(
+        &self,
+        _file_id: &str,
+        _range: ByteRange,
+        _max_bytes: i64,
+    ) -> Result<DriveRangeContent, DriveError> {
         Err(DriveError::Unavailable)
     }
 }

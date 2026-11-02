@@ -40,20 +40,21 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
     interrupted_upload, nonempty, refuse_before_body, uploaded_size_refusal, valid_drive_id,
-    DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession, ReceivedLength,
-    UploadBody, MAX_ATTACHMENT_BYTES, UPLOAD_SESSION_TTL,
+    ByteRange, DriveArchive, DriveContent, DriveError, DriveFile, DriveRangeContent,
+    DriveUploadSession, ReceivedLength, UploadBody, MAX_ATTACHMENT_BYTES, UPLOAD_SESSION_TTL,
 };
 
 const OBJECTS_DIR: &str = "objects";
@@ -68,6 +69,10 @@ const PART_SUFFIX: &str = "part";
 /// object writer left in `objects/`). No id can contain a `.`, so a name with
 /// this suffix is never a live object or metadata file.
 const TMP_SUFFIX: &str = ".tmp";
+/// How much of an object one read pulls from disk and hands on (ADR-0151 증보 5
+/// D3: 64 KiB–1 MiB). A range read holds at most this much per reader, whatever
+/// the object's size — the memory bound of the content route.
+const READ_CHUNK_BYTES: usize = 256 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredMeta {
@@ -104,6 +109,8 @@ pub struct LocalDriveArchive {
     session_ttl: Duration,
     lock: Mutex<()>,
     read_only: bool,
+    /// The calls that make an upload survive a crash — see [`Disk`].
+    disk: Arc<dyn Disk>,
 }
 
 impl LocalDriveArchive {
@@ -123,6 +130,7 @@ impl LocalDriveArchive {
             session_ttl: UPLOAD_SESSION_TTL,
             lock: Mutex::new(()),
             read_only: true,
+            disk: Arc::new(OsDisk),
         })
     }
 
@@ -146,7 +154,15 @@ impl LocalDriveArchive {
             session_ttl: UPLOAD_SESSION_TTL,
             lock: Mutex::new(()),
             read_only: false,
+            disk: Arc::new(OsDisk),
         })
+    }
+
+    /// Replace the disk calls with a test's recording stand-in (see [`Disk`]).
+    #[cfg(test)]
+    fn with_disk(mut self, disk: Arc<dyn Disk>) -> LocalDriveArchive {
+        self.disk = disk;
+        self
     }
 
     /// Replace [`UPLOAD_SESSION_TTL`] for sessions this instance mints.
@@ -358,9 +374,66 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<(), DriveError> {
 }
 
 /// Move a finished file from `incoming/` to its place in `objects/`.
-fn publish(from: &Path, to: &Path) -> Result<(), DriveError> {
+fn publish(disk: &dyn Disk, from: &Path, to: &Path) -> Result<(), DriveError> {
     refuse_symlink(to)?;
-    fs::rename(from, to).map_err(|_| DriveError::UpstreamFailure)
+    disk.rename(from, to)
+        .map_err(|_| DriveError::UpstreamFailure)
+}
+
+/// The three calls that decide whether an upload survives a crash, in the order
+/// the upload makes them (ADR-0151 증보 5 D2): make the finished part durable
+/// ([`Disk::sync_file`]), rename it into `objects/` ([`Disk::rename`] — metadata
+/// first, object last), make those renames durable ([`Disk::sync_dir`]).
+///
+/// They sit behind a trait for one reason: so a test can **record** that they
+/// happen, and in what order, and **make one of them fail**. A stand-in cannot see
+/// the kernel; it does see this archive's side of the contract. Take a call out of
+/// the upload's flow and the record changes — nothing sits beside the call that a
+/// test could be satisfied by while the real call is replaced. What [`OsDisk`]
+/// does with each call is one line, and that line is the one thing in-process
+/// tests cannot see (the Linux `strace` run in the #4671 hand-off does).
+#[async_trait]
+trait Disk: Send + Sync + std::fmt::Debug {
+    /// `fsync` of a finished part: its bytes and its length reach the disk. Called
+    /// after the last byte was written and **before** the part is renamed into
+    /// `objects/`: `flush` only hands the bytes to the kernel, and a 300 MiB part
+    /// is a large window of dirty pages.
+    async fn sync_file(&self, file: &tokio::fs::File) -> std::io::Result<()>;
+
+    /// Move `from` to `to`.
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+
+    /// `fsync` of a directory: the renames made inside it reach the disk. Called
+    /// **after** the object is renamed into `objects/`; without it a crash could
+    /// lose the name of an object whose bytes were already durable.
+    fn sync_dir(&self, dir: &Path) -> std::io::Result<()>;
+}
+
+/// The real thing.
+#[derive(Debug, Clone, Copy)]
+struct OsDisk;
+
+#[async_trait]
+impl Disk for OsDisk {
+    async fn sync_file(&self, file: &tokio::fs::File) -> std::io::Result<()> {
+        file.sync_all().await
+    }
+
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        fs::rename(from, to)
+    }
+
+    #[cfg(unix)]
+    fn sync_dir(&self, dir: &Path) -> std::io::Result<()> {
+        fs::File::open(dir)?.sync_all()
+    }
+
+    /// A directory cannot be opened for `fsync` outside Unix; the server runs on
+    /// Unix volumes, and elsewhere this is a no-op rather than a failure.
+    #[cfg(not(unix))]
+    fn sync_dir(&self, _dir: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// Removes a body file under `incoming/` when dropped, however the upload
@@ -383,7 +456,12 @@ impl Drop for PartFile {
 /// pool when the future is dropped would land after [`PartFile`] had already
 /// cleaned up. Every write after it goes to that file descriptor, so a dropped
 /// future can only ever leave an unlinked inode behind.
-async fn stream_into(part: &Path, mut body: UploadBody, declared: i64) -> Result<i64, DriveError> {
+async fn stream_into(
+    disk: &dyn Disk,
+    part: &Path,
+    mut body: UploadBody,
+    declared: i64,
+) -> Result<i64, DriveError> {
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -398,10 +476,50 @@ async fn stream_into(part: &Path, mut body: UploadBody, declared: i64) -> Result
             .await
             .map_err(|_| DriveError::UpstreamFailure)?;
     }
+    // A body the declaration refuses is dropped unsynced: only one that is about
+    // to be published pays for the `fsync`.
+    let measured = length.finish()?;
     file.flush()
         .await
         .map_err(|_| DriveError::UpstreamFailure)?;
-    length.finish()
+    // ADR-0151 증보 5 D2: the part is made durable **before** it is renamed into
+    // `objects/`. `flush` only hands the bytes to the kernel; a 300 MiB part is a
+    // large window of dirty pages, and a host that dies inside it would leave an
+    // object PostgreSQL believes is `complete` cut short on disk. This runs here,
+    // outside the archive lock, so a long `fsync` never holds up another upload.
+    disk.sync_file(&file)
+        .await
+        .map_err(|_| DriveError::UpstreamFailure)?;
+    Ok(measured)
+}
+
+/// `length` bytes of `file` from its current position, handed on in chunks of at
+/// most [`READ_CHUNK_BYTES`]. A file that ends before `length` bytes were read
+/// (truncated under the reader) is an error item, not a short success: the
+/// caller has already promised that many bytes.
+fn read_chunks(
+    file: tokio::fs::File,
+    length: u64,
+) -> futures::stream::BoxStream<'static, Result<Bytes, DriveError>> {
+    futures::stream::try_unfold((file, length), |(mut file, remaining)| async move {
+        if remaining == 0 {
+            return Ok(None);
+        }
+        let want = remaining.min(READ_CHUNK_BYTES as u64);
+        let mut chunk = BytesMut::with_capacity(want as usize);
+        // `take` is the bound: a buffer the allocator rounded up could otherwise
+        // be filled past what is left of the range.
+        let read = (&mut file)
+            .take(want)
+            .read_buf(&mut chunk)
+            .await
+            .map_err(|_| DriveError::UpstreamFailure)?;
+        if read == 0 {
+            return Err(DriveError::UpstreamFailure);
+        }
+        Ok(Some((chunk.freeze(), (file, remaining - read as u64))))
+    })
+    .boxed()
 }
 
 /// Wall clock in Unix epoch milliseconds — the unit a session file stores, so
@@ -528,6 +646,55 @@ impl DriveArchive for LocalDriveArchive {
         })
     }
 
+    /// A range of one object, read from disk a chunk at a time (ADR-0151 증보 5
+    /// D3, #4671). Unlike [`DriveArchive::file_content`] — which still reads a
+    /// whole object into memory under the lock and is kept for the small-file
+    /// callers — nothing here grows with the object, and the lock is gone before
+    /// the first byte is read.
+    async fn file_range(
+        &self,
+        file_id: &str,
+        range: ByteRange,
+        max_bytes: i64,
+    ) -> Result<DriveRangeContent, DriveError> {
+        // The lock covers what has to agree with a publish or a delete: both
+        // halves of the object are present, and one descriptor is open. It is
+        // released at the end of this block, before any byte is read. The stream
+        // owns the descriptor and nothing else, so a reader that stops polling
+        // stalls only itself — never an upload, a session or a metadata read.
+        let (file, total) = {
+            let _guard = self.lock.lock().await;
+            read_meta(&self.root, file_id)?;
+            let object = object_path(&self.root, file_id)?;
+            refuse_symlink(&object)?;
+            let file = fs::File::open(&object).map_err(|_| DriveError::FileNotFound)?;
+            let measured = file.metadata().map_err(|_| DriveError::FileNotFound)?;
+            if !measured.is_file() {
+                return Err(DriveError::FileNotFound);
+            }
+            (file, measured.len())
+        };
+        let total_size_bytes = i64::try_from(total).map_err(|_| DriveError::ContentTooLarge)?;
+        if total_size_bytes > max_bytes {
+            return Err(DriveError::ContentTooLarge);
+        }
+        // The caller resolved the range against its own record of the size. An
+        // object shorter than that record is a disagreement to refuse now, not a
+        // body that runs dry after the headers have gone out.
+        if range.end() >= total {
+            return Err(DriveError::UpstreamFailure);
+        }
+        let mut file = tokio::fs::File::from_std(file);
+        file.set_max_buf_size(READ_CHUNK_BYTES);
+        file.seek(std::io::SeekFrom::Start(range.start()))
+            .await
+            .map_err(|_| DriveError::UpstreamFailure)?;
+        Ok(DriveRangeContent {
+            total_size_bytes,
+            body: read_chunks(file, range.length()),
+        })
+    }
+
     async fn accept_stub_upload(
         &self,
         token: &str,
@@ -553,7 +720,7 @@ impl DriveArchive for LocalDriveArchive {
                 .join(INCOMING_DIR)
                 .join(format!("{}.{PART_SUFFIX}", Uuid::new_v4())),
         );
-        let measured = stream_into(&part.0, body, first.size_bytes).await?;
+        let measured = stream_into(self.disk.as_ref(), &part.0, body, first.size_bytes).await?;
 
         // 4. Checked again, spent, published — one critical section. `part`
         // removes the body file on the way out unless the publish moved it.
@@ -621,13 +788,27 @@ impl LocalDriveArchive {
         // Metadata first, then the object. A reader needs both, so neither half
         // is readable alone; a failure takes back only what this call placed —
         // the landed check proved both paths empty a moment ago, under the lock.
-        if let Err(error) = publish(&meta_part, &meta) {
+        if let Err(error) = publish(self.disk.as_ref(), &meta_part, &meta) {
             let _ = fs::remove_file(&meta_part);
             return Err(error);
         }
-        if let Err(error) = publish(part, &object) {
+        if let Err(error) = publish(self.disk.as_ref(), part, &object) {
             let _ = fs::remove_file(&meta);
             return Err(error);
+        }
+        // Both renames are in the page cache until their directory is synced, and
+        // a crash before then could lose the *names* of an object whose bytes are
+        // already durable (gone, not cut short). Fail closed like everything else
+        // here: if the directory cannot be made durable, take back what this call
+        // placed — the client starts a new session, as it does for any failure.
+        // Both files are in `objects/`, so one call covers them.
+        let made_durable = object
+            .parent()
+            .is_some_and(|dir| self.disk.sync_dir(dir).is_ok());
+        if !made_durable {
+            let _ = fs::remove_file(&object);
+            let _ = fs::remove_file(&meta);
+            return Err(DriveError::UpstreamFailure);
         }
         Ok(())
     }
@@ -2037,6 +2218,475 @@ mod tests {
         assert_eq!(
             reader.delete(&pending.drive_file_id).await.unwrap_err(),
             DriveError::AccessDenied
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // range reads (ADR-0151 증보 5 D3, #4671)
+    // -----------------------------------------------------------------------
+
+    /// An object of `len` bytes (a repeating pattern, so offsets matter) stored
+    /// through the archive's own upload path. Returns its file id.
+    async fn stored_pattern(archive: &LocalDriveArchive, len: usize) -> String {
+        let bytes: Vec<u8> = (0..len).map(|index| (index % 251) as u8).collect();
+        let session = archive
+            .create_resumable_upload(
+                Uuid::nil(),
+                "pattern.bin",
+                "application/octet-stream",
+                len as i64,
+            )
+            .await
+            .expect("session");
+        archive
+            .accept_stub_upload(
+                &token_from(&session),
+                Some("application/octet-stream"),
+                Some(len as u64),
+                body(&bytes),
+            )
+            .await
+            .expect("upload");
+        session.drive_file_id
+    }
+
+    fn pattern(len: usize) -> Vec<u8> {
+        (0..len).map(|index| (index % 251) as u8).collect()
+    }
+
+    fn range_of(start: u64, end: u64) -> ByteRange {
+        ByteRange::new(start, end).expect("a well-formed range")
+    }
+
+    /// **Red proof (D3 메모리, the part that runs everywhere).** A range read hands
+    /// the bytes on in chunks no larger than [`READ_CHUNK_BYTES`], however big the
+    /// range: memory per reader is a chunk, not the object. (The RSS figure for
+    /// 300 MiB objects is `tests/local_read_memory.rs`, on Linux.)
+    ///
+    /// Read the whole range into one buffer and a single chunk is as large as the
+    /// range, which this refuses.
+    #[tokio::test]
+    async fn a_range_read_streams_in_bounded_chunks() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let len = 3 * READ_CHUNK_BYTES + 12_345;
+        let id = stored_pattern(&archive, len).await;
+        let expected = pattern(len);
+
+        let content = archive
+            .file_range(&id, range_of(10, len as u64 - 11), MAX_ATTACHMENT_BYTES)
+            .await
+            .expect("range");
+        assert_eq!(content.total_size_bytes, len as i64);
+        let mut body = content.body;
+        let (mut chunks, mut largest, mut got) = (0usize, 0usize, Vec::new());
+        while let Some(chunk) = body.next().await {
+            let chunk = chunk.expect("chunk");
+            largest = largest.max(chunk.len());
+            chunks += 1;
+            got.extend_from_slice(&chunk);
+        }
+        assert_eq!(got, &expected[10..len - 10], "exactly the asked bytes");
+        assert!(
+            chunks >= 3,
+            "a range this long arrives in pieces ({chunks})"
+        );
+        assert!(
+            largest <= READ_CHUNK_BYTES,
+            "no chunk may exceed the bound: {largest} > {READ_CHUNK_BYTES}"
+        );
+    }
+
+    /// **Red proof (D3 락).** A reader that has pulled one chunk and then stops
+    /// polling holds the **stream** and nothing else: a metadata read, a new upload
+    /// session, a second reader and a delete all finish while it sits there.
+    ///
+    /// Move the archive's lock guard into the stream and every one of them waits
+    /// for the parked reader — this test then times out.
+    #[tokio::test]
+    async fn a_slow_reader_does_not_hold_the_archive_lock() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let len = 4 * READ_CHUNK_BYTES;
+        let id = stored_pattern(&archive, len).await;
+        let other = stored_pattern(&archive, 1_000).await;
+
+        let parked = archive
+            .file_range(&id, range_of(0, len as u64 - 1), MAX_ATTACHMENT_BYTES)
+            .await
+            .expect("range");
+        let mut body = parked.body;
+        let first = body.next().await.expect("a first chunk").expect("chunk");
+        assert!(!first.is_empty());
+        // From here the reader is parked: it is not polled again until the end.
+
+        let budget = Duration::from_secs(2);
+        tokio::time::timeout(budget, archive.file_metadata(&id))
+            .await
+            .expect("file_metadata waited for the parked reader")
+            .expect("metadata");
+        tokio::time::timeout(
+            budget,
+            archive.create_resumable_upload(Uuid::nil(), "new.bin", "application/octet-stream", 1),
+        )
+        .await
+        .expect("a new session waited for the parked reader")
+        .expect("session");
+        let second = tokio::time::timeout(
+            budget,
+            archive.file_range(&other, range_of(0, 999), MAX_ATTACHMENT_BYTES),
+        )
+        .await
+        .expect("a second reader waited for the parked one")
+        .expect("range");
+        assert_eq!(collect_range(second).await, pattern(1_000));
+        tokio::time::timeout(budget, archive.delete_file(&other))
+            .await
+            .expect("a delete waited for the parked reader")
+            .expect("delete");
+
+        // The parked reader itself is fine and finishes.
+        let mut rest = first.to_vec();
+        while let Some(chunk) = body.next().await {
+            rest.extend_from_slice(&chunk.expect("chunk"));
+        }
+        assert_eq!(rest, pattern(len));
+    }
+
+    async fn collect_range(content: DriveRangeContent) -> Vec<u8> {
+        let mut body = content.body;
+        let mut out = Vec::new();
+        while let Some(chunk) = body.next().await {
+            out.extend_from_slice(&chunk.expect("chunk"));
+        }
+        out
+    }
+
+    /// A [`Disk`] that does what the real one does, writes down what it was asked
+    /// and in what order, and can be told to fail one named call (once).
+    #[derive(Debug, Default)]
+    struct RecordingDisk {
+        events: std::sync::Mutex<Vec<&'static str>>,
+        fail_once: std::sync::Mutex<Option<&'static str>>,
+    }
+
+    impl RecordingDisk {
+        /// What was asked since the last call, in order.
+        fn taken(&self) -> Vec<&'static str> {
+            std::mem::take(&mut *self.events.lock().expect("never poisoned"))
+        }
+
+        fn fail_next(&self, call: &'static str) {
+            *self.fail_once.lock().expect("never poisoned") = Some(call);
+        }
+
+        fn step(&self, call: &'static str) -> std::io::Result<()> {
+            self.events.lock().expect("never poisoned").push(call);
+            let injected = self
+                .fail_once
+                .lock()
+                .expect("never poisoned")
+                .take_if(|wanted| *wanted == call)
+                .is_some();
+            if injected {
+                return Err(std::io::Error::other("injected failure"));
+            }
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl Disk for RecordingDisk {
+        async fn sync_file(&self, file: &tokio::fs::File) -> std::io::Result<()> {
+            self.step("sync_file")?;
+            OsDisk.sync_file(file).await
+        }
+
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            self.step("rename")?;
+            OsDisk.rename(from, to)
+        }
+
+        fn sync_dir(&self, dir: &Path) -> std::io::Result<()> {
+            self.step("sync_dir")?;
+            OsDisk.sync_dir(dir)
+        }
+    }
+
+    fn archive_with_recording_disk(dir: &Path) -> (LocalDriveArchive, Arc<RecordingDisk>) {
+        let disk = Arc::new(RecordingDisk::default());
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9")
+            .expect("open")
+            .with_disk(disk.clone());
+        (archive, disk)
+    }
+
+    /// **Red proof (D2 공개 순서, #4671; review L-1 and L-2).** An upload is made
+    /// durable in this order: the finished part is `fsync`ed, **then** the metadata
+    /// and the object are renamed into `objects/`, **then** that directory is
+    /// `fsync`ed. The recording disk is the archive's own side of those calls: the
+    /// record is what the upload asked of it, so taking a call out of the flow —
+    /// `flush` where `fsync` was, no directory sync, the directory synced before the
+    /// renames — changes the record and goes red. (A call left in place with the
+    /// real syscall swapped out *behind* the trait is not visible here; that line is
+    /// one `file.sync_all()` and the Linux `strace` run in the hand-off sees it.)
+    #[tokio::test]
+    async fn an_upload_is_made_durable_before_it_is_published_and_its_directory_after() {
+        let (dir, _guard) = temp_root();
+        let (archive, disk) = archive_with_recording_disk(&dir);
+        let id = stored_pattern(&archive, 70_000).await;
+        assert_eq!(
+            disk.taken(),
+            vec!["sync_file", "rename", "rename", "sync_dir"],
+            "the part is made durable, then metadata and object are renamed, then the directory is"
+        );
+        // A body the declaration refuses is never made durable nor published.
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "short.bin", "application/octet-stream", 10)
+            .await
+            .expect("session");
+        let refused = archive
+            .accept_stub_upload(
+                &token_from(&session),
+                Some("application/octet-stream"),
+                None,
+                body(b"short"),
+            )
+            .await
+            .expect_err("5 of 10 declared bytes");
+        assert!(matches!(refused, DriveError::InvalidArguments(_)));
+        assert_eq!(
+            disk.taken(),
+            Vec::<&str>::new(),
+            "a refused body is neither synced nor renamed"
+        );
+        archive
+            .file_metadata(&id)
+            .await
+            .expect("the first object landed");
+    }
+
+    /// **Red proof (review L-2).** A directory that cannot be made durable does not
+    /// leave a published object behind: the call fails closed, takes back the
+    /// metadata and the object it placed, and the capability is spent (the client
+    /// starts a new session, as for any failed publish).
+    ///
+    /// Leave the published pair in place after the failed directory sync and the
+    /// object is readable although the upload reported failure.
+    #[tokio::test]
+    async fn a_directory_that_cannot_be_synced_takes_the_publish_back() {
+        let (dir, _guard) = temp_root();
+        let (archive, disk) = archive_with_recording_disk(&dir);
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        disk.fail_next("sync_dir");
+        let refused = archive
+            .accept_stub_upload(&token, Some("text/plain"), None, body(b"hello"))
+            .await;
+        assert_eq!(refused, Err(DriveError::UpstreamFailure));
+        assert_eq!(
+            disk.taken(),
+            vec!["sync_file", "rename", "rename", "sync_dir"],
+            "the directory sync was reached and failed"
+        );
+        assert_eq!(
+            archive
+                .file_metadata(&session.drive_file_id)
+                .await
+                .expect_err("nothing is published"),
+            DriveError::FileNotFound
+        );
+        assert_eq!(
+            fs::read_dir(archive.root.join(OBJECTS_DIR))
+                .expect("objects")
+                .count(),
+            0,
+            "neither the object nor its metadata stays behind"
+        );
+        assert_eq!(
+            incoming(&archive),
+            Vec::<String>::new(),
+            "no partial file stays behind"
+        );
+        assert_eq!(
+            archive
+                .accept_stub_upload(&token, Some("text/plain"), None, body(b"hello"))
+                .await
+                .expect_err("the capability was spent"),
+            DriveError::FileNotFound
+        );
+    }
+
+    /// **Red proof (review L-1).** A part that cannot be made durable is not
+    /// published and does not spend the capability — like every refusal before
+    /// storage — so the same URL can be tried again, and the retry lands.
+    #[tokio::test]
+    async fn a_part_that_cannot_be_synced_is_not_published_and_the_url_stays_usable() {
+        let (dir, _guard) = temp_root();
+        let (archive, disk) = archive_with_recording_disk(&dir);
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        disk.fail_next("sync_file");
+        let refused = archive
+            .accept_stub_upload(&token, Some("text/plain"), None, body(b"hello"))
+            .await;
+        assert_eq!(refused, Err(DriveError::UpstreamFailure));
+        assert_eq!(
+            disk.taken(),
+            vec!["sync_file"],
+            "nothing was renamed after the failed sync"
+        );
+        assert_eq!(
+            fs::read_dir(archive.root.join(OBJECTS_DIR))
+                .expect("objects")
+                .count(),
+            0
+        );
+        assert_eq!(incoming(&archive), Vec::<String>::new());
+        archive
+            .accept_stub_upload(&token, Some("text/plain"), None, body(b"hello"))
+            .await
+            .expect("the URL was not spent, so the retry lands");
+        assert_eq!(
+            disk.taken(),
+            vec!["sync_file", "rename", "rename", "sync_dir"]
+        );
+        assert_eq!(
+            collect(
+                archive
+                    .file_content(&session.drive_file_id, MAX_ATTACHMENT_BYTES)
+                    .await
+                    .expect("content")
+            )
+            .await,
+            b"hello"
+        );
+    }
+
+    /// What a range read refuses before a byte is read: an object that was never
+    /// published (no metadata, or no bytes), one that is gone, and a path that is a
+    /// symlink out of the archive.
+    #[tokio::test]
+    async fn a_range_read_refuses_what_is_not_a_published_object() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let id = stored_pattern(&archive, 1_000).await;
+        let asked = range_of(0, 9);
+
+        assert_eq!(
+            archive
+                .file_range(
+                    "local-00000000-0000-0000-0000-000000000000",
+                    asked,
+                    MAX_ATTACHMENT_BYTES
+                )
+                .await
+                .expect_err("never stored"),
+            DriveError::FileNotFound
+        );
+        assert!(matches!(
+            archive
+                .file_range("../escape", asked, MAX_ATTACHMENT_BYTES)
+                .await
+                .expect_err("not an opaque id"),
+            DriveError::InvalidArguments(_)
+        ));
+
+        // The bytes without their metadata (half of a publish) are not readable.
+        let meta = meta_path(&archive.root, &id).expect("meta path");
+        let held = fs::read(&meta).expect("meta");
+        fs::remove_file(&meta).expect("remove meta");
+        assert_eq!(
+            archive
+                .file_range(&id, asked, MAX_ATTACHMENT_BYTES)
+                .await
+                .expect_err("no metadata"),
+            DriveError::FileNotFound
+        );
+        fs::write(&meta, held).expect("restore meta");
+        archive
+            .file_range(&id, asked, MAX_ATTACHMENT_BYTES)
+            .await
+            .expect("readable again");
+
+        // A deleted object is gone.
+        archive.delete_file(&id).await.expect("delete");
+        assert_eq!(
+            archive
+                .file_range(&id, asked, MAX_ATTACHMENT_BYTES)
+                .await
+                .expect_err("deleted"),
+            DriveError::FileNotFound
+        );
+
+        // An object path that is a symlink — to a file outside the archive — is
+        // never opened.
+        let outside = dir.join("outside.txt");
+        fs::write(&outside, b"not the archive's").expect("outside");
+        let object = object_path(&archive.root, &id).expect("object path");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, &object).expect("symlink");
+            fs::write(
+                &meta,
+                br#"{"name":"x","mime":"text/plain","size_bytes":17}"#,
+            )
+            .expect("meta");
+            assert_eq!(
+                archive
+                    .file_range(&id, range_of(0, 3), MAX_ATTACHMENT_BYTES)
+                    .await
+                    .expect_err("a symlink"),
+                DriveError::AccessDenied
+            );
+        }
+    }
+
+    /// **Red proof.** An object that is cut short under a reader ends the body in an
+    /// error item: the route has already promised a `Content-Length`, and a stream
+    /// that simply stopped would look like a finished download.
+    #[tokio::test]
+    async fn an_object_truncated_under_the_reader_ends_the_body_in_an_error() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let len = 4 * READ_CHUNK_BYTES;
+        let id = stored_pattern(&archive, len).await;
+        let content = archive
+            .file_range(&id, range_of(0, len as u64 - 1), MAX_ATTACHMENT_BYTES)
+            .await
+            .expect("range");
+        let mut body = content.body;
+        let first = body.next().await.expect("first").expect("chunk");
+        // Cut the file to one chunk and a bit while the reader is parked.
+        let object = object_path(&archive.root, &id).expect("path");
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&object)
+            .expect("open for truncate")
+            .set_len(first.len() as u64 + 1_000)
+            .expect("truncate");
+        let mut received = first.len();
+        let mut failure = None;
+        while let Some(item) = body.next().await {
+            match item {
+                Ok(chunk) => received += chunk.len(),
+                Err(error) => {
+                    failure = Some(error);
+                    break;
+                }
+            }
+        }
+        assert_eq!(failure, Some(DriveError::UpstreamFailure));
+        assert_eq!(
+            received,
+            first.len() + 1_000,
+            "what was still there arrived"
         );
     }
 }

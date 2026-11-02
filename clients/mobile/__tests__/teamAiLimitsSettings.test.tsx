@@ -131,8 +131,10 @@ describe('사용 한도 장: 기본은 제한 없음', () => {
       expect(input(field)).toBeNull();
     }
     expect(screen.getByText(copy('settings.aiLimits.description'))).toBeTruthy();
-    expect(text(idOf('dailyTokens', 'detail'))).toBe(copy('settings.aiLimits.tokensToday', {used: 124_000}));
-    expect(text(idOf('dailySearches', 'detail'))).toBe(copy('settings.aiLimits.searchesToday', {used: 3}));
+    // 나란한 두 줄은 한 틀이다(#5102): 오늘 + 수량 + 사용. 사전을 `copy()`로 되읽으면 사전이 되돌아가도 같이 되돌아가 늘 통과하니
+    // 사용량 문장은 값(글자)으로 잰다.
+    expect(text(idOf('dailyTokens', 'detail'))).toBe('오늘 124,000 토큰 사용');
+    expect(text(idOf('dailySearches', 'detail'))).toBe('오늘 3회 사용');
     // 한도가 없으니 비율도 초기화 시각도 없다.
     expect(screen.queryByTestId(idOf('dailyTokens', 'headline'))).toBeNull();
     expect(screen.queryByTestId(idOf('dailyTokens', 'resets'))).toBeNull();
@@ -146,13 +148,11 @@ describe('사용 한도 장: 기본은 제한 없음', () => {
     expect(isOn('dailyTokens')).toBe(true);
     expect(input('dailyTokens')?.props.value).toBe('500000');
     // 62%는 관리자 값(500,000)이 아니라 천장까지 따진 실효 한도(200,000)로 잰다.
-    expect(text(idOf('dailyTokens', 'headline'))).toBe(copy('settings.aiLimits.usageToday', {percent: 62}));
-    expect(text(idOf('dailyTokens', 'detail'))).toBe(
-      copy('settings.aiLimits.tokensOfLimit', {used: 124_000, limit: 200_000}),
-    );
+    expect(text(idOf('dailyTokens', 'headline'))).toBe('오늘 62% 사용');
+    expect(text(idOf('dailyTokens', 'detail'))).toBe('124,000 / 200,000 토큰');
     expect(text(idOf('dailyTokens', 'resets'))).toMatch(/새로 시작해요$/);
-    expect(screen.getByText(copy('settings.aiLimits.ceilingTokens', {limit: 200_000}))).toBeTruthy();
-    expect(text(idOf('monthlyUsd', 'headline'))).toBe(copy('settings.aiLimits.usageMonth', {percent: 62}));
+    expect(screen.getByText('서버 운영자가 하루 200,000 토큰까지로 제한했어요.')).toBeTruthy();
+    expect(text(idOf('monthlyUsd', 'headline'))).toBe('이번 달 62% 사용');
   });
 });
 
@@ -244,7 +244,7 @@ describe('운영자: 천장은 입력 상한이고, 끄면 입력을 막는다',
     fetchBag.mockResolvedValue(bagOf(CEILING));
     mountPage();
     await ready();
-    expect(screen.getByText(copy('settings.aiLimits.ceilingTokens', {limit: 200_000}))).toBeTruthy();
+    expect(screen.getByText('서버 운영자가 하루 200,000 토큰까지로 제한했어요.')).toBeTruthy();
     fireEvent.press(toggle('dailyTokens'));
     fireEvent.changeText(input('dailyTokens') as never, '200001');
     fireEvent.press(screen.getByTestId(idOf('dailyTokens', 'save')));

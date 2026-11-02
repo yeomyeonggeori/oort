@@ -99,8 +99,9 @@ use crate::dto::{
     AgentRunActivityTallyDto, AgentRunBundleDto, AgentRunCancelResponse, AgentRunEventDto,
     AgentRunEventsQuery, AgentRunEventsResponse, AgentRunHistoryQuery, AgentRunListQuery,
     AgentRunPageResponse, AgentRunPlanStepDto, AgentRunProgressDto, AgentRunProgressPageResponse,
-    AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto, AgentRunSummaryPageResponse,
-    AgentRunToolTallyDto, AgentRunVisibleCountsDto, AheadRunDto, CreateAgentRunRequest,
+    AgentRunProgressQuery, AgentRunResponse, AgentRunSpentDto, AgentRunSummaryDto,
+    AgentRunSummaryPageResponse, AgentRunToolTallyDto, AgentRunVisibleCountsDto, AheadRunDto,
+    CreateAgentRunRequest,
 };
 use crate::error::ApiError;
 use crate::routes::run_bundle::run_bundles_in_tx;
@@ -727,7 +728,7 @@ pub async fn detail(
     let member_id = principal.member_id;
     let kind = principal.kind;
 
-    let run = settle_db(
+    let (run, spent) = settle_db(
         "agent_runs.detail",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -742,13 +743,22 @@ pub async fn detail(
                         "work run is not bound to this actor",
                     )));
                 }
-                Ok(Ok(run))
+                // ADR-0201 v3 B12: a team-AI task run says what it has spent — this run's own
+                // ledger sums (a run without a task row has none), read after the room check so
+                // a caller the run is hidden from learns nothing.
+                let spent =
+                    momo_agent::team_ai_task::spent_by_run_in_tx(conn, workspace_id, &[run.id])
+                        .await?
+                        .remove(&run.id);
+                Ok(Ok((run, spent)))
             })
         })
         .await,
     )?;
 
-    Ok(Json(run_response(&run)))
+    let mut response = run_response(&run);
+    response.spent = spent.as_ref().map(AgentRunSpentDto::from);
+    Ok(Json(response))
 }
 
 /// Swift `canReadRun` (:626-641).
@@ -910,9 +920,14 @@ async fn assemble_progress_in_tx(
     let rows = assemble_run_progress(base, &jobs, &queue, &visible);
     let run_ids: Vec<Uuid> = rows.iter().map(|row| row.summary.id).collect();
     let mut bundles = run_bundles_in_tx(conn, workspace_id, member_id, &run_ids, now).await?;
+    // ADR-0201 v3 B12 (#4968): the run's own ledger sums, for a team-AI task run only — one
+    // grouped read for the whole page, keyed by run id and by nothing else.
+    let mut spent =
+        momo_agent::team_ai_task::spent_by_run_in_tx(conn, workspace_id, &run_ids).await?;
     Ok(rows
         .into_iter()
-        .map(|row| {
+        .map(|mut row| {
+            row.spent = spent.remove(&row.summary.id);
             let bundle = bundles.remove(&row.summary.id);
             (row, bundle)
         })
@@ -961,6 +976,7 @@ fn progress_dto(row: &RunProgressRow, bundle: Option<AgentRunBundleDto>) -> Agen
         approval_id: row.approval_id.map(|id| id.to_string()),
         approval_expires_at_ms: row.approval_expires_at.map(epoch_ms),
         bundle,
+        spent: row.spent.as_ref().map(AgentRunSpentDto::from),
         end_reason: row.end_reason.clone(),
         queue_position: row.queue_position,
         ahead_total: row.queue_position.map(|_| row.ahead_total),
@@ -1299,6 +1315,14 @@ const CANCEL_PROPS_KIND: &str = "agent_run_cancelled";
 const CANCEL_AUDIT_ACTION: &str = "agent.run.cancelled";
 const CANCEL_AUDIT_SCHEMA: &str = "momo.agent_run.cancelled.v1";
 
+/// The 409 a stop gets for a run that is not something a stop can act on, naming the status it has.
+fn run_already(status: RunStatus) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        format!("agent run is already {}", status.as_db_label()),
+    )
+}
+
 /// `agent_run.error.code` (Swift :492). The run ended, and this is *why* — an
 /// error object that names a person's decision rather than a failure, which is
 /// what keeps a cancelled run out of any "what broke" reading of the column.
@@ -1326,7 +1350,9 @@ const CANCEL_ERROR_CODE: &str = "human_cancelled";
 /// line, a second audit row, or re-retire jobs. Any other terminal status is a
 /// 409 carrying the status it actually has, because "already succeeded" is not
 /// "stopped" and answering 200 would tell a person their stop worked when what
-/// really happened is that the agent finished first.
+/// really happened is that the agent finished first. The one exception is a
+/// `failed` run whose team-AI task is still active (`CancellableRun::is_stoppable`): it is
+/// not over, so a stop is taken.
 ///
 /// ## What the transaction settles
 ///
@@ -1406,11 +1432,10 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
         )));
     }
     let already_cancelled = run.status == RunStatus::Cancelled;
-    if !already_cancelled && !run.status.is_cancellable() {
-        return Ok(Err(ApiError::new(
-            StatusCode::CONFLICT,
-            format!("agent run is already {}", run.status.as_db_label()),
-        )));
+    // `is_stoppable` is `is_cancellable` plus one case (#5029): a `failed` run whose team-AI task is
+    // still active is not over.
+    if !already_cancelled && !run.is_stoppable() {
+        return Ok(Err(run_already(run.status)));
     }
 
     // Read before the idempotent early-return, exactly as Swift does (:466-489):
@@ -1439,11 +1464,18 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
     )
     .await?;
     if !cancelled {
-        // The row was locked and read as cancellable a few statements ago, so a
-        // no-op here means the guard and the read disagree — a bug in one of
-        // them, not a client outcome. Surfacing it as a 500 beats reporting a
-        // cancellation that never happened.
-        return Err(momo_db::DbError::from(sqlx::Error::RowNotFound));
+        // The row was locked and read as cancellable a few statements ago. The one way a no-op is not a
+        // bug is the widened arm (#5029): the read judged "a task is still active" on the snapshot it
+        // took before it got the lock, the statement judges it on a snapshot of its own, and a task that
+        // ended in between — the worker's closing transaction committed while this stop waited for the
+        // lock, or a close that takes no run lock — shows only to the statement. The run has left the
+        // stoppable set: say what it is now, like any other finished run (review r1 L-1). If the facts
+        // still call it stoppable, the guard and the read disagree — a bug in one of them, not a client
+        // outcome — and surfacing a 500 beats reporting a cancellation that never happened.
+        return match lock_run_for_cancel_in_tx(conn, workspace_id, run_id, member_id).await? {
+            Some(now) if !now.is_stoppable() => Ok(Err(run_already(now.status))),
+            _ => Err(momo_db::DbError::from(sqlx::Error::RowNotFound)),
+        };
     }
 
     // The system line goes through the message spine, so it takes a real

@@ -67,7 +67,10 @@ use crate::payload::AgentJobPayload;
 use crate::provider::{
     ChatMessage, ChatRequest, ChatUsage, ModelImage, ProviderError, ProviderToolCall, ProviderWire,
 };
-use crate::{emit_terminal_agent_status, AgentWorker, ResolvedTransport, Settlement};
+use crate::{
+    emit_awaiting_approval_agent_status, emit_terminal_agent_status, AgentWorker,
+    ResolvedTransport, Settlement,
+};
 
 /// What the first read of a team-AI turn found.
 struct Gathered {
@@ -960,6 +963,22 @@ impl AgentWorker {
                     prepared_avatar.as_ref(),
                 )
                 .await?;
+                // #5084 — a raised card is a run parked on a person (the proposal parks the run
+                // before the card and either returns `ProposalOk` or errors, so `Ok` is exactly
+                // "parked"): the rail is told in this same transaction, after the card.
+                if let Ok(ok) = &outcome {
+                    emit_awaiting_approval_agent_status(
+                        conn,
+                        momo_agent::AgentRunAddress {
+                            workspace_id,
+                            channel_id,
+                            agent_member_id: agent,
+                            run_id,
+                        },
+                        ok.approval_id,
+                    )
+                    .await?;
+                }
                 // The ledger row is written whether or not a card came of it: the
                 // tokens were spent, and the daily ceiling reads this table.
                 let mut resolved =
@@ -1378,6 +1397,11 @@ impl AgentWorker {
         let withhold_previews = trace.as_ref().is_some_and(|trace| {
             !trace.tools.is_empty() || trace.web_searches > 0 || trace.task_step.is_some()
         });
+        // B5 (#4968): the step this request is, and what it did — a task's last step reports its
+        // reads like every step before it (the ledger rows are per step, B5-7).
+        let task_progress = trace
+            .as_ref()
+            .and_then(|trace| trace.task_step.map(|step| (step, task::step_counts(trace))));
         // B5 (#4967): the code a task row is closed with — the run's own ending, by its word.
         let task_end_reason: &'static str = match &ending {
             // A `card_suggest` card is a first-turn ending (a step is offered no card tool), and it
@@ -1397,6 +1421,16 @@ impl AgentWorker {
             Box::pin(async move {
                 let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
                 else {
+                    // A run that cannot be called any more (its helper left the room or was
+                    // deactivated) keeps no task row: the task ends with it (#5029). A run without
+                    // a task has no row, and this is then a no-op.
+                    momo_agent::team_ai_task::end_in_tx(
+                        conn,
+                        workspace_id,
+                        run_id,
+                        momo_agent::team_ai_task::END_AGENT_GONE,
+                    )
+                    .await?;
                     return Ok(false);
                 };
                 // B5-2: a run with a task row is in task mode — its ledger rows are per step and
@@ -1543,6 +1577,21 @@ impl AgentWorker {
                     }
                 }
                 if in_task {
+                    // The step that ends the task reports its activities too. The visible plan is
+                    // left as the previous step wrote it: the ledger records what was said, and a
+                    // reader does not draw a finished run's plan as in progress (ADR-0200 증보 7 7-7).
+                    if let Some((step, counts)) = task_progress {
+                        task::record_step_progress(
+                            conn,
+                            workspace_id,
+                            run_id,
+                            agent,
+                            step,
+                            counts,
+                            None,
+                        )
+                        .await?;
+                    }
                     // B13-I7: the task ends with the run, and its plan and note go with it.
                     momo_agent::team_ai_task::end_in_tx(
                         conn,

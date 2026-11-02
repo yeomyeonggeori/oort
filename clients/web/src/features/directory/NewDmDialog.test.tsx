@@ -7,7 +7,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Channel, RosterMember } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
+import { dismissTemporarySurfaces } from "@momo/core/features/notifications/entryDismiss";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { __resetEntryDrafts } from "@/lib/entryDrafts";
 import { NewDmProvider } from "./NewDmDialog";
 import { useOpenNewDm } from "./useNewDm";
 
@@ -137,6 +139,7 @@ beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 beforeEach(() => {
+  __resetEntryDrafts();
   channelsState.dms = [dmWithDohyun];
   openDirectMessage.mockReset();
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -269,5 +272,55 @@ describe("새 다이렉트 메시지 모달 (#3662)", () => {
       rows()[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     });
     expect(document.activeElement).toBe(input);
+  });
+});
+
+describe("알림 클릭이 닫은 모달은 쓰던 검색어를 돌려준다 (#5058)", () => {
+  const typeQuery = async (value: string) => {
+    const input = document.querySelector<HTMLInputElement>('[data-testid="new-dm-search"]')!;
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(async () => {
+      set.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  };
+  const searchValue = () => document.querySelector<HTMLInputElement>('[data-testid="new-dm-search"]')!.value;
+
+  it("검색어를 쓰던 중 알림 클릭이 닫으면, 다시 연 모달이 그 검색어와 거른 목록으로 선다 — 한 번만이다", async () => {
+    const h = await mount();
+    await openDialog(h);
+    await typeQuery("seoyeon");
+
+    await act(async () => {
+      dismissTemporarySurfaces();
+    });
+    expect(dialog()).toBeNull();
+
+    await openDialog(h);
+    expect(searchValue()).toBe("seoyeon");
+    expect(rows().map((r) => r.getAttribute("data-member-id"))).toEqual([SEOYEON]);
+
+    // 돌려받은 모달을 사람이 닫으면 평소처럼 버려진다 — 다음에 연 모달은 비어 있다.
+    await act(async () => {
+      document.querySelector<HTMLElement>('[data-testid="new-dm-close"]')!.click();
+    });
+    expect(dialog()).toBeNull();
+    await openDialog(h);
+    expect(searchValue()).toBe("");
+  });
+
+  it("사람이 닫기로 닫은 모달은 맡기지 않는다 — 다시 연 모달은 비어 있다", async () => {
+    const h = await mount();
+    await openDialog(h);
+    await typeQuery("seoyeon");
+
+    await act(async () => {
+      document.querySelector<HTMLElement>('[data-testid="new-dm-close"]')!.click();
+    });
+    expect(dialog()).toBeNull();
+
+    await openDialog(h);
+    expect(searchValue()).toBe("");
+    expect(rows()).toHaveLength(3);
   });
 });

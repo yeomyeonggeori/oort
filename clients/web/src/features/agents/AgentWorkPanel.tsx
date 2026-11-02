@@ -33,6 +33,7 @@ import {
   runPhaseDetail,
 } from "@momo/core/features/agents/runPhase";
 import { runDurationBreakdown } from "@momo/core/features/agents/runDuration";
+import { workHealth, workHealthLine } from "@momo/core/features/agents/workHealth";
 import {
   agentLabel,
   TURN_STALE_SENTENCE,
@@ -42,13 +43,12 @@ import {
   RUN_LEDGER_KEPT_SENTENCE,
   RUN_LEDGER_LIMIT_SENTENCE,
   RUN_LOCAL_ONLY_SENTENCE,
-  RUN_STREAM_SENTENCE,
   runEmptyState,
   runList,
 } from "@momo/core/features/agents/runLedger";
 import type { AgentRunProgress, Channel, RosterMember } from "@momo/core/lib/api";
 import { cancelWordingFor } from "@momo/core/features/agents/runCancel";
-import { isOpenRunPhase } from "@momo/core/features/agents/runPhase";
+import { isOpenRunPhase, isQueuedPhase, isRunningPhase } from "@momo/core/features/agents/runPhase";
 import { useSession } from "@/app/session";
 import { useInertRefWhile } from "@/app/inert";
 import {
@@ -83,7 +83,8 @@ import {
   RunListView,
 } from "./AgentRunLedgerView";
 import { useRunLedger, type RunLedgerView } from "./useRunLedger";
-import { OortRecordSection } from "./WorkTimelineView";
+import { AgentReportSection, OortRecordSection } from "./WorkTimelineView";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { StopRunControl } from "./StopRunControl";
 import {
   closeWorkPanel,
@@ -454,6 +455,7 @@ function PanelBody({
   directory: Directory;
   selfMemberId: string;
 }) {
+  const formatMessage = useFormatMessage();
   if (log === null) {
     // 스토어가 구독을 걸기 전의 한 프레임. 높이를 지키는 중립 막대이고 shimmer는
     // 없다(SKILL §5). 한 프레임짜리 상태이지만 자리를 비워 두면 이 분기가 길어질
@@ -470,6 +472,15 @@ function PanelBody({
   // 않는다).
   const streamEntries =
     server === null ? log.entries : log.entries.filter((e) => e.kind !== "phase");
+  // 건강 줄(#4657): 서버가 적어 둔 사실만으로 말한다. 시간 신호는 연결이 살아 있을 때만 센다(끊긴 화면의 「n분 전」은
+  // 우리 시계가 혼자 흘러간 숫자다). 말할 신호가 없으면 줄이 서지 않는다.
+  const healthLine =
+    server === null
+      ? null
+      : workHealthLine(
+          workHealth({ facts: server, events: ledger.events, nowMs, live: railLive }),
+          formatMessage
+        );
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -514,6 +525,16 @@ function PanelBody({
           data-testid="agent-work-panel-durations"
         >
           {runDurationBreakdown(server, nowMs)}
+        </p>
+      )}
+
+      {healthLine !== null && (
+        <p
+          className="break-keep border-b border-line px-4 py-2 text-timestamp text-ink-muted"
+          data-numeric
+          data-testid="agent-work-panel-health"
+        >
+          {healthLine}
         </p>
       )}
 
@@ -570,6 +591,18 @@ function PanelBody({
         </>
       )}
 
+      {/* 에이전트가 스스로 알린 활동·계획(#4657, ADR-0200 증보 7). 서버가 잰 줄과 **다른 칸**이고 항상 「에이전트
+          보고」 꼬리표가 달린다. 아직 아무도 가져가지 않은 요청에는 알릴 것이 없어 서지 않는다. 점은 서버가 지금
+          돈다고 말하고 연결도 살아 있을 때만 선다. */}
+      {server !== null && ledger.activity !== null && !isQueuedPhase(server.phase) && (
+        <AgentReportSection
+          record={ledger.activity}
+          open={isOpenRunPhase(server.phase)}
+          live={railLive && isRunningPhase(server.phase)}
+          nowMs={nowMs}
+        />
+      )}
+
       {/* 서버가 직접 잰 도구 호출(#4654). 위 「기록」(수명주기·에이전트 단계)과 **다른 칸**이다: 출처가 달라
           한 목록에 섞지 않는다. 서버가 아는 run에만 서고, 원장을 아직 못 읽었으면 서지 않는다. */}
       {server !== null && ledger.tools !== null && (
@@ -599,7 +632,7 @@ function PanelBody({
                 className="break-keep px-4 pb-1 text-timestamp text-ink-muted"
                 data-testid="agent-work-panel-stream-limit"
               >
-                {RUN_STREAM_SENTENCE}
+                {formatMessage("timeline.workStream.limit")}
               </p>
             </>
           )}

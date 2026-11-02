@@ -5414,7 +5414,13 @@ paths:
         agent's claimable queue (1 = next), the latest reported stage, and for a
         finished run a closed `endReason`. Runs ahead in channels the caller is
         not a member of are counted in `aheadTotal` and never named. Active human
-        members of this channel only. Managed and BYOA agents' runs are not listed.
+        members of this channel only. Managed and BYOA agents' runs are not listed,
+        with one exception (ADR-0201 증보 v3.3, #4968): a run of the workspace's team AI
+        that has gone into task mode (a long investigation continued step by step,
+        ADR-0201 B5) is listed, because it lives for minutes and keeps its own ledger
+        rows — a progress line per step, its activities and its plan. Its row carries
+        `spent`. The team AI's quick answers (seconds, no task) stay unlisted like every
+        other managed run.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -5455,8 +5461,9 @@ paths:
         and `cursor`) and `activeTotal`, the agent's non-terminal runs in the
         whole workspace as a bare number. No id, channel, requester or title of
         a run in a channel the caller cannot see appears anywhere; an agent with
-        no visible run is not listed. Human members only. The channel progress
-        read and the channel run list are unchanged.
+        no visible run is not listed. Human members only. The row of a team AI
+        task run (ADR-0201 B5) also carries `spent` (#4968). The channel run list is
+        unchanged.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -11556,15 +11563,98 @@ paths:
         8). A file a deleted message carried is read by nobody - not the room, not the author
         who uploaded it, not a workspace admin - and answers the same 404 (ADR-0151 amendment 2).
         The caller must be an active member of the channel in every case, the uploader included.
+
+        **Byte ranges (ADR-0151 amendment 5 D3).** One `Range: bytes=...` header with a single
+        range is honoured: `bytes=a-b`, `bytes=a-` and `bytes=-n` answer `206` with
+        `Content-Range: bytes first-last/size` and only those bytes (an end past the file is
+        clamped to its last byte, and a suffix at least as long as the file is the whole file). A
+        start at or past the end of the file, or `bytes=-0`, answers `416` with
+        `Content-Range: bytes */size`. The following are **ignored** and answered `200` with the
+        whole file, as RFC 9110 allows: a list of ranges (never expanded into a multipart body), a
+        unit other than `bytes`, a malformed or inverted spec, a number that does not fit an
+        unsigned 64-bit integer (more than 20 digits), a second `Range` header, an `If-Range`
+        header (this server sends no validator, so it can never match), and an empty file.
+
+        **The order is part of the contract.** `Range` is read only after authentication, active
+        channel membership, the readable predicate and `status = complete` have all passed. A
+        request that fails any of them is answered exactly as it is without a `Range` header (403
+        for a non-member, the one 404 for everything else), so `Range` cannot be used to ask
+        whether a file exists or how large it is: a `416` is only ever sent for a file the caller
+        may read.
+
+
+        `Content-Length`, `Content-Range` and `Content-Type` come from the attachment's database
+        row, not from the archive; an archive that reports a different length than the row is
+        refused with `502` before any byte is sent. Every `200`, `206` and `416` carries
+        `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff`,
+        `Cache-Control: private, no-store, no-transform` and `Accept-Ranges: bytes` - a ranged
+        answer is a download like any other and is never rendered inline.
       security:
         - bearerAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/ChannelId"
         - $ref: "#/components/parameters/AttachmentId"
+        - name: Range
+          in: header
+          required: false
+          description: >
+            One byte range, `bytes=first-last`, `bytes=first-` or `bytes=-suffixLength`. Anything
+            else is ignored (see the operation description).
+          schema:
+            type: string
+        - name: If-Range
+          in: header
+          required: false
+          description: >
+            Always ignored: this server sends no `ETag` or `Last-Modified`, so a conditional range
+            can never match and the answer is the whole file.
+          schema:
+            type: string
       responses:
         "200":
-          description: Original attachment bytes, streamed from Drive alt=media.
+          description: >
+            Original attachment bytes, streamed from Drive. Sent when the request has no usable
+            `Range` (see the operation description), and for an empty file.
+          headers:
+            Content-Length:
+              description: The attachment's size in bytes, from the database row.
+              schema:
+                type: integer
+                format: int64
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: >
+            The requested byte range of the attachment. `Content-Type` is the attachment's mime
+            (never `multipart/byteranges`: lists of ranges are ignored, not expanded).
+          headers:
+            Content-Range:
+              $ref: "#/components/headers/ContentRangeSatisfied"
+            Content-Length:
+              description: The number of bytes in the range (`last - first + 1`).
+              schema:
+                type: integer
+                format: int64
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
           content:
             "*/*":
               schema:
@@ -11582,11 +11672,132 @@ paths:
           description: >
             Completed attachment not found: unknown id, pending or failed upload, another
             channel's or tenant's attachment, a draft (no message carries it) that the caller
-            did not upload, or a file a deleted message carried. All of these answer identically.
+            did not upload, or a file a deleted message carried. All of these answer identically,
+            with or without a `Range` header.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "416":
+          description: >
+            The range cannot be satisfied: its start is at or past the end of the file, or it is
+            `bytes=-0`. Sent only for an attachment the caller may read. The body is the usual
+            error JSON.
+          headers:
+            Content-Range:
+              $ref: "#/components/headers/ContentRangeUnsatisfied"
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: >
+            The archive failed, was refused by the instance's own credentials, or reported a
+            different length than the attachment's row. Nothing of the file was sent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Drive archive is not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    head:
+      tags: [attachments]
+      operationId: headAttachmentContent
+      summary: The status and headers a GET of the attachment content would answer, with no body.
+      description: >
+        Answers the status and headers a `GET` of the same request would (including the `Range`
+        handling and the `Content-Length` of the bytes a `GET` would send), with a zero-byte body.
+        **It does not read the archive**: size and mime come from the attachment's database row,
+        and nothing is opened, so a `HEAD` that answers `200` can still be followed by a `GET`
+        that the archive fails. The same authorization applies, in the same order, and a request
+        that fails it answers the same status a `GET` would. Methods other than `GET` and `HEAD`
+        on this path are `405`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - $ref: "#/components/parameters/AttachmentId"
+        - name: Range
+          in: header
+          required: false
+          description: Same as on `GET`.
+          schema:
+            type: string
+        - name: If-Range
+          in: header
+          required: false
+          description: Always ignored, as on `GET`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The headers of the whole file; no body.
+          headers:
+            Content-Length:
+              description: The attachment's size in bytes, from the database row.
+              schema:
+                type: integer
+                format: int64
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
+        "206":
+          description: The headers of the requested range; no body.
+          headers:
+            Content-Range:
+              $ref: "#/components/headers/ContentRangeSatisfied"
+            Content-Length:
+              description: The number of bytes in the range (`last - first + 1`).
+              schema:
+                type: integer
+                format: int64
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active channel membership required.
+        "404":
+          description: >
+            Completed attachment not found; the same refusals as `GET`, answered identically with
+            or without a `Range` header.
+        "416":
+          description: The range cannot be satisfied (see `GET`); no body.
+          headers:
+            Content-Range:
+              $ref: "#/components/headers/ContentRangeUnsatisfied"
+            Content-Disposition:
+              $ref: "#/components/headers/AttachmentContentDisposition"
+            X-Content-Type-Options:
+              $ref: "#/components/headers/AttachmentNoSniff"
+            Cache-Control:
+              $ref: "#/components/headers/AttachmentCacheControl"
+            Accept-Ranges:
+              $ref: "#/components/headers/AcceptRangesBytes"
 
   /v1/workspaces/{workspaceId}/search/messages:
     get:
@@ -15648,6 +15859,44 @@ components:
         type: string
         minLength: 1
         maxLength: 128
+
+  headers:
+    AttachmentContentDisposition:
+      description: >
+        Always `attachment`. Attachment bytes are served from the API's own origin, so they are
+        downloaded, never rendered inline - a `206` included.
+      schema:
+        type: string
+        enum: ["attachment"]
+    AttachmentNoSniff:
+      description: Always `nosniff`.
+      schema:
+        type: string
+        enum: ["nosniff"]
+    AttachmentCacheControl:
+      description: >
+        Always `private, no-store, no-transform`. `no-transform` asks an edge not to compress or
+        otherwise rewrite the bytes, which would break the offsets a `Content-Range` promises.
+      schema:
+        type: string
+        enum: ["private, no-store, no-transform"]
+    AcceptRangesBytes:
+      description: Always `bytes`.
+      schema:
+        type: string
+        enum: ["bytes"]
+    ContentRangeSatisfied:
+      description: >
+        `bytes <first>-<last>/<size>` - the bytes sent and the attachment's whole size from the
+        database row.
+      schema:
+        type: string
+        pattern: '^bytes [0-9]+-[0-9]+/[0-9]+$'
+    ContentRangeUnsatisfied:
+      description: '`bytes */<size>` - the attachment''s whole size from the database row.'
+      schema:
+        type: string
+        pattern: '^bytes \*/[0-9]+$'
 
   responses:
     Unauthorized:
@@ -19770,6 +20019,8 @@ components:
                 `tool_call`, `workspace_action`, ... as `ApprovalProjection.actionType`.
                 Tells an approved tool call that is still running from an approved
                 action that is already done.
+        spent:
+          $ref: "#/components/schemas/AgentRunSpent"
         endReason:
           type: string
           description: >
@@ -19797,6 +20048,37 @@ components:
         finishedAtMs: {type: integer, format: int64}
         createdAtMs: {type: integer, format: int64}
         updatedAtMs: {type: integer, format: int64}
+
+    AgentRunSpent:
+      type: object
+      additionalProperties: false
+      required: [promptTokens, completionTokens, webSearches, estimated]
+      description: >
+        ADR-0201 증보 v3 B12 (#4968). What **one run** has spent: the sums of that run's own
+        usage-ledger rows (a task of several steps writes one row per step; a stopped or cut-off
+        step's spend stays). Present only on the team AI's task runs (ADR-0201 B5) — the one shared
+        agent whose spend every member of the room may read (ADR-0147 증보 2026-10-30 D1) — and
+        absent for every other run, so a personal agent's tokens are never shown here. The task
+        card and its end line read it while the task runs and after it ends (an ended task keeps
+        it). **One run, never a person**: there is no requester, no member and no grouping key in
+        it, and the ledger has no requester column (ADR-0147 증보 2026-10-30 D6: who called the
+        team AI most is neither computed nor shown). Money is not here — the dollar figure is
+        read-time arithmetic over the public price table (`usage/agents`). The run detail read
+        (`GET /v1/workspaces/{workspaceId}/agent-runs/{runId}`, whose operation this spec does not
+        describe) returns the same object as a top-level `spent` of a team AI task run.
+      properties:
+        promptTokens: {type: integer, format: int64, minimum: 0}
+        completionTokens: {type: integer, format: int64, minimum: 0}
+        webSearches:
+          type: integer
+          format: int64
+          minimum: 0
+          description: The provider's own web searches (the ledger's `web_search_requests`).
+        estimated:
+          type: boolean
+          description: >
+            Some of the tokens are oort's estimate because the provider reported none
+            (ADR-0147 D3). A figure that may be an estimate says so.
 
     AgentRunProgressPage:
       type: object
