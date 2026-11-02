@@ -513,6 +513,46 @@ mod tests {
         assert_eq!(later.message, at_create.message);
     }
 
+    /// The wire contract names the refusal: each of the four operations that answer it, and
+    /// the registry of error codes a client branches on, say `guest_invites_paused`. There is
+    /// no YAML crate here, so an operation is the stretch from its `operationId:` line to the
+    /// next one; if the spec stops naming the code on a door, this goes red with the door's name.
+    #[test]
+    fn the_openapi_names_the_paused_code_on_every_door_that_answers_it() {
+        let spec = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/openapi.yaml"
+        ))
+        .expect("read openapi.yaml");
+        for operation in [
+            "createWorkspaceInvite",
+            "regenerateWorkspaceInvite",
+            "redeemWorkspaceInvite",
+            "publicJoin",
+        ] {
+            let header = format!("operationId: {operation}\n");
+            let start = spec
+                .find(&header)
+                .unwrap_or_else(|| panic!("openapi.yaml has no `{operation}`"));
+            let rest = &spec[start + header.len()..];
+            let end = rest.find("operationId:").unwrap_or(rest.len());
+            assert!(
+                rest[..end].contains(GUEST_INVITES_PAUSED_CODE),
+                "`{operation}` must name `{GUEST_INVITES_PAUSED_CODE}`"
+            );
+        }
+        let registry = spec
+            .find("Stable machine code for a refusal a client branches on")
+            .expect("openapi.yaml has the error-code registry");
+        let end = spec[registry..]
+            .find("dev_cannot_decide")
+            .map_or(spec.len(), |at| registry + at);
+        assert!(
+            spec[registry..end].contains(GUEST_INVITES_PAUSED_CODE),
+            "the error-code registry must list `{GUEST_INVITES_PAUSED_CODE}`"
+        );
+    }
+
     /// The preview is a recognition hint. The wire must never grow a field that
     /// could redeem the invite.
     #[test]
