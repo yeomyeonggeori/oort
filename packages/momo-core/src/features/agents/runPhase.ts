@@ -35,6 +35,19 @@ export function isOpenRunPhase(phase: AgentRunPhase): boolean {
   );
 }
 
+/**
+ * 서버가 `running`이라고 말하는가: 에이전트가 **지금** 일한다. 진행 점과 계획의 「지금 단계」를 세울 자격이다
+ * (가져감·승인 대기·일시 정지는 열려 있어도 일하는 중이 아니다). 웹이 낱말을 직접 적지 않도록 코어가 비교한다.
+ */
+export function isRunningPhase(phase: AgentRunPhase): boolean {
+  return phase === "running";
+}
+
+/** 아직 아무도 가져가지 않은 요청인가. 에이전트가 알릴 것이 아직 없다. */
+export function isQueuedPhase(phase: AgentRunPhase): boolean {
+  return phase === "queued";
+}
+
 /** 열린 phase를 턴 상태로. 끝난 phase는 null. */
 export function turnStateOfPhase(phase: AgentRunPhase): AgentTurnState | null {
   switch (phase) {

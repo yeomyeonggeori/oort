@@ -158,3 +158,47 @@ describe("fetchAgentRunEvents include=tools", () => {
     expect(urls(fetchMock)).toEqual([`/v1/workspaces/${WS}/agent-runs/${RUN}/events?include=doorbell`]);
   });
 });
+
+describe("fetchAgentRunEvents include=activity (#4657)", () => {
+  const all = { includeDoorbell: true, includeTools: true, includeActivity: true };
+  const path = (include: string) => `/v1/workspaces/${WS}/agent-runs/${RUN}/events${include === "" ? "" : `?include=${include}`}`;
+  const knows = (input: RequestInfo | URL, allowed: readonly string[]) => {
+    const query = String(input).split("include=")[1];
+    return query === undefined || query.split(",").every((value) => allowed.includes(value));
+  };
+
+  it("셋을 한 번에 묻고, activity만 모르는 서버에는 가장 새 값부터 한 번 물러서며 다음부터는 곧장 doorbell,tools를 묻는다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+      knows(input, ["doorbell", "tools"]) ? ok() : bad()
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(fetchAgentRunEvents(WS, RUN, all)).resolves.toMatchObject({ runId: RUN });
+    await fetchAgentRunEvents(WS, RUN, all);
+    expect(urls(fetchMock)).toEqual([path("doorbell,tools,activity"), path("doorbell,tools"), path("doorbell,tools")]);
+  });
+
+  it("doorbell만 아는 서버: 세 칸째에서 읽고 둘 다 기억한다. 쿼리 없이도 400이면(틀린 id) 아무것도 기억하지 않는다", async () => {
+    installHost();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) =>
+      knows(input, ["doorbell"]) ? ok() : bad()
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await fetchAgentRunEvents(WS, RUN, all);
+    await fetchAgentRunEvents(WS, RUN, all);
+    expect(urls(fetchMock)).toEqual([
+      path("doorbell,tools,activity"),
+      path("doorbell,tools"),
+      path("doorbell"),
+      path("doorbell"),
+    ]);
+    resetRunLedgerIncludeProbe();
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async () => bad());
+    await expect(fetchAgentRunEvents(WS, RUN, all)).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    fetchMock.mockImplementation(async () => ok());
+    await fetchAgentRunEvents(WS, RUN, all);
+    expect(urls(fetchMock).at(-1)).toBe(path("doorbell,tools,activity"));
+  });
+});
