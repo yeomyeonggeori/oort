@@ -253,6 +253,7 @@ export function Composer({
   onCancelQuote,
   onSend,
   personalCall,
+  onEditLast,
 }: {
   /** ADR-0149 - 「작성 중」 발행은 워크스페이스로 스코프된 라우트다. */
   workspaceId: string;
@@ -312,6 +313,12 @@ export function Composer({
    * 싣는다. 없으면 이 컴포저는 예전 그대로 메시지만 보낸다. 판정은 안내용이고 문은 서버다.
    */
   personalCall?: PersonalCallController;
+  /**
+   * #5191 - 빈 입력칸에서 ↑: 이 대화에서 내 마지막 글 있는 메시지를 고치게 한다(Slack식). 열었으면 `true`, 고칠 메시지가
+   * 없어 아무것도 안 했으면 `false`(그때 ↑ 는 원래 키로 남는다). 없으면 이 컴포저는 예전 그대로다 — 이 prop 을 적지 않는
+   * 호출부는 코어에 `textEmpty` 도 보내지 않아, ↑ 의 동작이 한 글자도 다르지 않다. (스레드 입력칸은 별도 컴포넌트라 이 길이 없다.)
+   */
+  onEditLast?: () => boolean;
 }) {
   // 초안은 이 채널의 것이다. 첫 렌더에서 바로 읽는 이유는 한 프레임의 빈 입력창이
   // 「초안이 없다」로 읽히기 때문이다 — 그 프레임에 사람이 타이핑을 시작하면 복원이
@@ -774,6 +781,8 @@ export function Composer({
         enterSends: !isMobile,
         quoteOpen: quote !== null,
         previewOpen: linkPreview.cards.length > 0,
+        // #5191 - 입력칸이 한 글자도 없을 때만 ↑ 가 「내 마지막 메시지 고치기」가 된다. 이 키를 받을 곳이 없으면 적지 않는다.
+        ...(onEditLast !== undefined ? { textEmpty: text.length === 0 } : {}),
       }
     );
 
@@ -798,6 +807,10 @@ export function Composer({
         // 멘션 목록 다음, 인용 앞이다(`composerKeys.ts`가 순서와 이유를 적는다). ✕와 같은 선택이다.
         event.preventDefault();
         dismissLinkPreview();
+        return;
+      case "edit-last":
+        // 열었을 때만 키를 먹는다. 고칠 글이 없으면 ↑ 는 textarea 의 것으로 남는다(빈 입력칸이라 눈에 보이는 일이 없다).
+        if (onEditLast?.() === true) event.preventDefault();
         return;
       case "quote-cancel":
         // Esc는 「지금 열려 있는 것을 닫는다」이고, 멘션 목록이 닫혀 있을 때 이

@@ -1,6 +1,6 @@
 import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { threadRollup, type Message, type RosterMember, type ThreadRollup } from "@momo/core/lib/api";
+import { threadRollup, uuidEq, type Message, type RosterMember, type ThreadRollup } from "@momo/core/lib/api";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
@@ -111,6 +111,8 @@ import { absoluteApiBase } from "@/lib/serverBase";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
 import { MessageEditor } from "./MessageEditor";
+import { EditRequestContext } from "./editRequest";
+import { onNextPointerMove } from "@/features/sidebar/pointerTrail";
 import { ReactionChips } from "./ReactionChips";
 import type { ReactionChip } from "@momo/core/features/timeline/reactions";
 import {
@@ -429,6 +431,11 @@ export function MessageRow({
   const [editing, setEditing] = useState(false);
   const [editPending, setEditPending] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  // #5191 — 밖(입력칸의 ↑ 키)에서 온 「고쳐 줘」 요청: 이 행을 가리키면 이 행이 받아 자기 편집기를 연다(`editRequest.ts`).
+  const editRequests = useContext(EditRequestContext);
+  const handledEditNonce = useRef<number | null>(null);
+  // 지금 열린 편집기를 연 요청. 끝날 때(저장·취소) 요청한 쪽에 알려 초점을 돌려주게 한다. 메뉴로 연 편집기는 null이다.
+  const editOpenedBy = useRef<number | null>(null);
   const [deletePending, setDeletePending] = useState(false);
   // One slot for the failures that have nowhere else to sit (a reaction, a
   // delete). B8: a Korean sentence, never the wire string, and never a toast —
@@ -598,6 +605,30 @@ export function MessageRow({
     Boolean(actions) &&
     (hasAnyAction(available) || canCopy || canCopyLink);
 
+  // #5191 — 요청이 이 행을 가리키면 편집기를 연다. 요청은 받는 즉시 비운다(같은 요청이 두 번 열리지 않게). 그 사이 이 행이
+  // 지워졌거나 고칠 수 없게 됐다면 열지 않고 요청만 비운다 — 편집기가 열릴 자격은 메뉴의 「고치기」와 같은 판정이다.
+  useEffect(() => {
+    const request = editRequests?.request;
+    if (!request || !actions) return;
+    if (!uuidEq(request.messageId, message.id)) return;
+    if (handledEditNonce.current === request.nonce) return;
+    handledEditNonce.current = request.nonce;
+    editRequests.consume(request.nonce);
+    if (!canEditMessage(message, actions.myMemberId)) return;
+    editOpenedBy.current = request.nonce;
+    setEditError(null);
+    setEditing(true);
+  }, [editRequests, actions, message]);
+
+  /** 편집기를 닫는 문은 하나다: 저장 성공과 취소가 같이 지난다. 요청으로 열린 편집기였다면 요청한 쪽에 끝났다고 알린다. */
+  const finishEdit = () => {
+    setEditing(false);
+    setEditError(null);
+    const nonce = editOpenedBy.current;
+    editOpenedBy.current = null;
+    if (nonce !== null) editRequests?.finished(nonce);
+  };
+
   const callbacks: MessageActionCallbacks = {
     onReply: () => onOpenThread?.(message),
     onQuote: () => onQuoteMessage?.(message),
@@ -701,6 +732,35 @@ export function MessageRow({
   const actionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const onRowKeyDown = useRowRovingFocus(rowRef);
   const selectionWithinRow = useSelectionWithinRow(rowRef);
+  // 편집이 끝나면 호버 툴바를 붙들던 두 상태를 **실제 값**으로 되돌린다(실측 #5191, Chromium·WebKit 공통: 저장 뒤 포인터를 치워도
+  // 그 행의 툴바가 남았다). ① 지워진 입력칸은 `blur` 를 내지 않아 「초점 있음」이 남는다. ② 「고치기」는 포털 메뉴에서 눌렀고, 그 항목(또는
+  // 편집기)이 포인터 밑에서 사라지면 이 행은 `mouseleave` 를 받지 못해 「호버 중」이 남는다.
+  // ①은 DOM 이 아는 사실(`contains(activeElement)`)을 바로 읽는다. ②는 `:hover` 자체가 낡을 수 있어(WebKit 은 포인터 밑 요소가 사라지면 다음
+  // 포인터 이동의 hit-test 때까지 옛 값을 쥔다) **다음 포인터 이동 뒤 한 번** 읽는다 — 포인터가 아직 행 위면 호버는 그대로 두므로 맞는 값은
+  // 건드리지 않고, 한 번이면 된다: 그 뒤의 `mouseenter`·`mouseleave` 는 다시 이 행에 정상으로 닿는다. 편집이 막 끝났을 때만 건다(행마다
+  // 마운트 때 거는 리스너가 아니다).
+  const wasEditing = useRef(false);
+  useEffect(() => {
+    if (editing) {
+      wasEditing.current = true;
+      return undefined;
+    }
+    if (!wasEditing.current) return undefined;
+    wasEditing.current = false;
+    const node = rowRef.current;
+    if (!node) return undefined;
+    if (!node.contains(document.activeElement)) setRowFocused(false);
+    let frame = 0;
+    const release = onNextPointerMove(() => {
+      frame = requestAnimationFrame(() => {
+        if (!node.matches(":hover")) setRowHovered(false);
+      });
+    });
+    return () => {
+      release();
+      cancelAnimationFrame(frame);
+    };
+  }, [editing]);
   const openReactionPicker = (opener?: HTMLElement | null) => {
     // 메뉴 항목은 다이얼로그가 열릴 때 포털과 함께 사라진다. 그 항목을 opener로
     // 잡으면 Esc 뒤 포커스가 body로 떨어지므로, 살아 남은 트리거를 쓴다.
@@ -1016,16 +1076,13 @@ export function MessageRow({
               initialBody={message.body ?? ""}
               pending={editPending}
               error={editError}
-              onCancel={() => {
-                setEditing(false);
-                setEditError(null);
-              }}
+              onCancel={finishEdit}
               onSave={(body) => {
                 setEditPending(true);
                 setEditError(null);
                 void actions
                   .onEditMessage(message, body)
-                  .then(() => setEditing(false))
+                  .then(finishEdit)
                   .catch((error: unknown) =>
                     setEditError(editFailureMessage(error))
                   )
