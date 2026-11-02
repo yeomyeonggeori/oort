@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,6 +31,7 @@ const drawImage = vi.fn();
 const { addFiles, dropDraft, readSurface, resetAttachmentDraftsForTest, surfaceKey } =
   await import("./draftStore");
 const { AttachmentTray } = await import("./AttachmentTray");
+const { THUMB_EDGE_PX, THUMB_RENDER_PX } = await import("./draftThumbnail");
 
 const KEY = surfaceKey("ws", "ch");
 const TARGET = { workspaceId: "ws", channelId: "ch" };
@@ -112,6 +116,21 @@ describe("composer tray thumbnail", () => {
     expect(drawImage).toHaveBeenCalledTimes(1);
   });
 
+  it("draws the canvas at twice the card edge, and the edge is the card token", async () => {
+    const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "..", "design", "tokens.css"), "utf8");
+    const edge = Number(/--spacing-tray-card:\s*(\d+)px/.exec(css)?.[1]);
+    expect(Number.isFinite(edge)).toBe(true);
+    // 카드의 한 변과 캔버스가 갈라지면 레티나에서 흐려진다(카드 × 2 이상).
+    expect(THUMB_EDGE_PX).toBe(edge);
+    expect(THUMB_RENDER_PX).toBeGreaterThanOrEqual(edge * 2);
+    addFiles(KEY, TARGET, [file("curve.png", "image/png")]);
+    renderTray();
+    await flush();
+    expect(drawImage).toHaveBeenCalledTimes(1);
+    const args = drawImage.mock.calls[0] as unknown as number[];
+    expect(args.slice(-2)).toEqual([THUMB_RENDER_PX, THUMB_RENDER_PX]);
+  });
+
   it("keeps the icon for files that are not safe raster images", async () => {
     addFiles(KEY, TARGET, [
       file("drain.log", "text/plain"),
@@ -133,11 +152,15 @@ describe("composer tray thumbnail", () => {
     await flush();
     renderTray();
     const [imageChip, logChip] = [...host.querySelectorAll('[data-testid="attachment-chip"]')];
-    // 썸네일 칩: 정사각 상자뿐이고 눈에 보이는 이름 줄이 없다 (이름은 sr-only).
-    expect(imageChip?.className).toMatch(/size-tray-thumb/);
+    // 썸네일 카드: 정사각 상자뿐이고 눈에 보이는 이름 줄이 없다 (이름은 sr-only).
+    expect(imageChip?.getAttribute("data-card-shape")).toBe("thumb");
+    expect(imageChip?.className).toMatch(/h-tray-card/);
+    expect(imageChip?.className).toMatch(/data-\[card-shape=thumb\]:w-tray-card\b/);
     expect(imageChip?.querySelector('[data-testid="attachment-chip-name"]')?.className).toMatch(/sr-only/);
-    // 파일 칩: 이름이 보인다.
-    expect(logChip?.className).not.toMatch(/\bsize-tray-thumb\b/);
+    // 파일 카드: 같은 높이에 가로로 넓고, 이름이 보인다.
+    expect(logChip?.getAttribute("data-card-shape")).toBe("file");
+    expect(logChip?.className).toMatch(/h-tray-card/);
+    expect(logChip?.querySelector('[data-testid="attachment-chip-name"]')?.className).not.toMatch(/sr-only/);
     expect(logChip?.querySelector('[data-testid="attachment-chip-name"]')?.textContent).toBe("drain.log");
   });
 
@@ -149,10 +172,14 @@ describe("composer tray thumbnail", () => {
     expect(host.innerHTML).not.toContain("geGngQ");
     expect(host.querySelector("h2")).toBeNull();
     const chip = host.querySelector('[data-testid="attachment-chip"]');
-    expect(chip?.getAttribute("title")).toBe("이미지");
-    // 진행 표시는 칩 안에 있고, 제거 × 는 칩 안에서 탭으로 닿는다.
+    // 네이티브 툴팁은 달지 않는다: 호버할 때마다 큰 툴팁이 뜨는 것이 owner 가 짚은 방해다(#5200).
+    // 이름은 낭독에 있다.
+    expect(chip?.hasAttribute("title")).toBe(false);
+    expect(chip?.querySelector('[data-testid="attachment-chip-name"]')?.textContent).toBe("이미지");
+    // 진행 표시와 제거 × 는 카드 안에 있다. ×는 줄의 탭 정거장이 아니다(카드가 로빙 정거장이다).
     expect(chip?.querySelector('[data-testid="attachment-chip-progress"]')).not.toBeNull();
     expect(chip?.querySelector('[data-testid="attachment-chip-remove"]')).not.toBeNull();
+    expect(chip?.querySelector('[data-testid="attachment-chip-remove"]')?.getAttribute("tabindex")).toBe("-1");
   });
 
   it("offers clear-all only when the chips are many", async () => {

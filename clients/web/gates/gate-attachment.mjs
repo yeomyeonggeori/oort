@@ -100,6 +100,14 @@ function trayMaxPx() {
   return Number(match[1]);
 }
 
+/** 트레이 이미지 카드의 한 변(#5200)의 정본도 `tokens.css` 다. 썸네일은 그 두 배로 그려진다. */
+function trayCardPx() {
+  const css = readFileSync(resolve(webRoot, "src/design/tokens.css"), "utf8");
+  const match = css.match(/--spacing-tray-card:\s*(\d+)px/);
+  if (match === null) throw new Error("tokens.css의 --spacing-tray-card를 읽지 못했다");
+  return Number(match[1]);
+}
+
 /** 다음 행동 문구의 정본도 코어다 (design-review M-1). */
 function issueNext(issue) {
   const source = readFileSync(
@@ -134,6 +142,7 @@ function mimeLabelText() {
 
 const COPY = attachCopy();
 const TRAY_MAX = trayMaxPx();
+const TRAY_CARD = trayCardPx();
 const MIME_LABEL_TEXT = mimeLabelText();
 const MISMATCH_COPY = issueCopy("mismatch");
 const TOO_LARGE_COPY = issueCopy("too-large");
@@ -1174,12 +1183,23 @@ async function exercisePreview(browser) {
     height: img.getBoundingClientRect().height,
   }));
   expect(thumbFacts.src.startsWith("data:image/png"), "트레이 썸네일이 data: 가 아니다");
-  expect(thumbFacts.natural === 96, `썸네일이 96px 로 그려지지 않았다 (${thumbFacts.natural})`);
+  // #5200: 카드 한 변은 `--spacing-tray-card` 이고, 캔버스는 그 두 배(레티나에서 흐리지 않게)다.
   expect(
-    thumbFacts.width === 48 && thumbFacts.height === 48,
-    `썸네일 상자가 48px 정사각형이 아니다 (${thumbFacts.width}x${thumbFacts.height})`
+    thumbFacts.natural === TRAY_CARD * 2,
+    `썸네일이 카드(${TRAY_CARD}px)의 2배로 그려지지 않았다 (${thumbFacts.natural})`
   );
-  await page_.getByTestId("attachment-clear").click();
+  // 정사각형인 것은 카드다(그림은 카드의 1px 테두리 안쪽).
+  const cardBox = await page_.getByTestId("attachment-chip").first().boundingBox();
+  expect(
+    cardBox.width === TRAY_CARD && cardBox.height === TRAY_CARD,
+    `이미지 카드가 ${TRAY_CARD}px 정사각형이 아니다 (${cardBox.width}x${cardBox.height})`
+  );
+  expect(
+    thumbFacts.width >= TRAY_CARD - 2 && thumbFacts.height >= TRAY_CARD - 2,
+    `썸네일이 카드를 채우지 않는다 (${thumbFacts.width}x${thumbFacts.height})`
+  );
+  // 하나뿐이면 「모두 지우기」는 서지 않는다(넷부터). 카드의 ×로 뺀다.
+  await page_.getByTestId("attachment-chip-remove").click();
 
   // ② 라이트박스: 열고, Esc 로 닫고, 포커스가 여는 버튼으로 돌아온다.
   const imageRow = page_.locator(
@@ -1456,6 +1476,8 @@ async function exerciseOverflow(browser) {
     return {
       listClient: list.clientHeight,
       listScroll: list.scrollHeight,
+      listClientW: list.clientWidth,
+      listScrollW: list.scrollWidth,
       trayHeight: Math.round(tray.getBoundingClientRect().height),
       composerHeight: Math.round(composer.getBoundingClientRect().height),
       windowHeight: window.innerHeight,
@@ -1467,9 +1489,15 @@ async function exerciseOverflow(browser) {
     measured.listClient <= TRAY_MAX + 1,
     `트레이 목록이 상한(${TRAY_MAX}px)을 넘었다: ${measured.listClient}px`
   );
+  // #5200: 카드는 입력창 안 **한 줄**이다. 20개를 채우면 줄바꿈으로 자라는 것이 아니라 가로로 밀린다.
+  // 그래서 앞 판의 「세로로 스크롤한다」는 단정은 「세로로 자라지 않고 가로로 넘친다」로 바뀌었다.
   expect(
-    measured.listScroll > measured.listClient,
-    "20개가 상한 안에 다 들어갔다 — 이 판이 재려던 상황이 아니다"
+    measured.listScroll <= measured.listClient + 1,
+    `카드가 한 줄을 넘어 세로로 자랐다 (${measured.listScroll}/${measured.listClient}px)`
+  );
+  expect(
+    measured.listScrollW > measured.listClientW + 4,
+    "20개가 한 줄에 다 들어갔다 — 이 판이 재려던 상황이 아니다"
   );
   expect(
     measured.composerHeight < measured.windowHeight,
@@ -1504,7 +1532,7 @@ async function exerciseOverflow(browser) {
 
   await context.close();
   console.log(
-    `[B-2] 트레이 ${measured.trayHeight}px (목록 ${measured.listClient}/${measured.listScroll}), ` +
+    `[B-2] 트레이 ${measured.trayHeight}px (한 줄 ${measured.listClient}px · 가로 ${measured.listClientW}/${measured.listScrollW}), ` +
       `컴포저 ${measured.composerHeight} < 창 ${measured.windowHeight}, 대화 ${measured.messages}행 유지`
   );
   console.log(
@@ -1816,13 +1844,17 @@ async function main() {
   try {
     const browser = await chromium.launch();
     try {
-      await exerciseComposer(browser);
-      await exerciseProgress(browser);
-      await exerciseNarrow(browser);
-      await exerciseOverflow(browser);
-      await exerciseFailure(browser);
-      await exerciseTimeline(browser);
-      await exercisePreview(browser);
+      // ATTACH_GATE_ONLY=composer,progress,narrow,overflow,failure,timeline,preview 로 구역을 고른다
+      // (#5200: 타임라인 구역이 따로 낡아 있어 컴포저 쪽만 돌릴 길이 필요했다). 비우면 전부다.
+      const only = (process.env.ATTACH_GATE_ONLY ?? "").split(",").filter(Boolean);
+      const run = (name, section) => (only.length === 0 || only.includes(name) ? section(browser) : undefined);
+      await run("composer", exerciseComposer);
+      await run("progress", exerciseProgress);
+      await run("narrow", exerciseNarrow);
+      await run("overflow", exerciseOverflow);
+      await run("failure", exerciseFailure);
+      await run("timeline", exerciseTimeline);
+      await run("preview", exercisePreview);
       if (process.env.ATTACH_GATE_SHOTS === "1") await captureShots(browser);
     } finally {
       await browser.close();
