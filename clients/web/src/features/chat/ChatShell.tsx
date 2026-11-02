@@ -1123,11 +1123,17 @@ export function ChatShell() {
           `.a-mhd`: 높이 60 · 좌 24 우 18 · 제목 17/800 · 토픽 13.5)다. 폰에서는
           세로 여백이 py-row-fixed(6)×2다. `py-row`가 아닌 이유: 그것은 대화 밀도를 따르는 대화 행의 값이라 머리 키가
           밀도에 따라 변한다(#4189, 폰 폭에서 53/57/61px로 실측). */}
+      {/* #4230: 머리는 두 묶음이다. **컨트롤 묶음(`channel-head-tools`)이 제 폭을 먼저 갖는다.** 제목 묶음
+          (`channel-head-main`)은 그다음 남는 폭을 받고, 제목은 한 줄 말줄임이다(전문은 `title`과 글 그대로의 낭독).
+          예전에는 반대였다: 제목 묶음이 제 글 폭을 다 잡고 컨트롤 묶음이 남는 자리(기준 0)만 받아, 이름이 조금만 길어도
+          컨트롤이 판 밖으로 밀렸다(판이 `overflow: clip`이라 스크롤로도 못 닿는다). 제목 몫이 바닥(3rem)보다 좁아져야 하는
+          폭(폰 320, 단추가 다 선 대화의 390·600)에서는 컨트롤 묶음이 제목 아래 줄로 내려온다(`flex-wrap`).
+          단추를 줄이거나 숨기지 않는다. */}
       <header
         data-testid="channel-header"
-        className="channel-head flex min-w-0 items-center py-row-fixed"
+        className="channel-head flex min-w-0 flex-wrap items-center gap-y-1 py-row-fixed"
       >
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="channel-head-main flex items-center gap-2">
           {/* 폰에서 채널 목록으로 돌아가는 길 (goal B6). 사이드바가 열이 아니라
               서랍이므로, 목록은 이 컨트롤로만 다시 열린다. */}
           <SidebarDrawerToggle />
@@ -1140,6 +1146,10 @@ export function ChatShell() {
               <Hash className="size-4" />
             )}
           </span>
+          {/* 제목 칸(`channel-head-body`): 서랍 단추·아이콘 뒤에서 남는 폭을 전부 받는다. 안에서는 제목이 글 폭만큼
+              서고 토픽이 그 뒤 남은 자리를 받는다. 칸의 기본 폭은 0이라 긴 이름·긴 토픽이 윗 묶음의 폭을 부풀리지
+              못한다(그래서 컨트롤 묶음을 밀어내지 못한다). */}
+          <div className="channel-head-body flex items-center gap-2">
           {/* 검수 피드백 #3 ② / #1865: 채널 이름은 한 줄 제목이다. 채널을 다루는
               메뉴는 우측 ⋮ 로 옮겼다. 진짜 채널(공개/비공개)에서만 그 메뉴가
               선다 — DM은 이름을 바꾸거나 나갈 대상이 아니고, 스트레스 픽스처는
@@ -1149,11 +1159,15 @@ export function ChatShell() {
             <h1
               tabIndex={-1}
               className="channel-head-title min-w-0 truncate text-ink outline-none focus-visible:focus-ring"
+              title={labelParts?.text ?? label}
             >
               {labelParts?.text ?? label}
             </h1>
           ) : stressCount === 0 && channel?.kind === "dm" && peer ? (
-            <h1 className="channel-head-title flex min-w-0 items-center">
+            <h1
+              className="channel-head-title flex min-w-0 items-center"
+              title={labelParts?.text ?? label}
+            >
               <button
                 type="button"
                 data-testid="dm-profile-trigger"
@@ -1175,6 +1189,7 @@ export function ChatShell() {
                 "channel-head-title min-w-0 truncate",
                 labelParts?.isAgent && stressCount === 0 && "text-agent"
               )}
+              title={stressCount > 0 ? undefined : labelParts?.text ?? label}
             >
               {stressCount > 0
                 ? `스크롤 측정 (${stressCount})`
@@ -1183,7 +1198,7 @@ export function ChatShell() {
           )}
           {stressCount === 0 && labelParts?.handle && (
             <span
-              className="shrink-0 text-meta text-ink-muted"
+              className="min-w-0 truncate text-meta text-ink-muted"
               data-testid="channel-handle"
             >
               {labelParts.handle}
@@ -1201,28 +1216,32 @@ export function ChatShell() {
           <span className="sr-only" data-testid="message-count">
             메시지 {messages.length}개
           </span>
-        </div>
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
           {/* 토픽 한 줄 (시안 A `.a-mhd .tp`). 읽기 전용 글자이고 컨트롤이 아니다:
               토픽을 읽고 고치는 문은 여전히 ⋮ 메뉴 하나다(BZ-2). 넓은 창에서만
               선다 — 폰 헤더 한 줄은 제목이 먼저다(`wide-only`).
 
-              오른쪽 무리 **안의 첫 자리**인 이유: 왼쪽 무리에 두면 긴 토픽이 그
-              무리의 기본 폭을 부풀려 오른쪽 컨트롤이 창 밖으로 밀린다(실측,
-              gate:channel-header). 여기서는 기본 폭 0으로 남는 자리만 받아
-              먼저 잘린다. */}
+              제목 뒤의 **남는 자리만** 받는다(기본 폭 0, `flex-1`): 제목이 먼저 서고, 제목이 칸을 다 쓰면 토픽은 0이 되어
+              먼저 사라진다. 이 칸은 기본 폭이 0이라 긴 토픽이 컨트롤 묶음을 밀어내지 못한다(#4230 이전에는 오른쪽 무리
+              안에 둬야 했다: 왼쪽 무리가 글 폭을 잡고 있어서, 실측 gate:channel-header). `ms-1`은 칸 틈 8과 합쳐 예전
+              제목-토픽 틈 12를 지킨다. */}
           {stressCount === 0 &&
             channel &&
             channel.kind !== "dm" &&
             channel.topic?.trim() && (
               <span
-                className="channel-head-topic wide-only flex-1"
+                className="channel-head-topic wide-only ms-1 flex-1"
                 data-testid="channel-header-topic"
                 title={channel.topic.trim()}
               >
                 {channel.topic.trim()}
               </span>
             )}
+          </div>
+        </div>
+        {/* 컨트롤 묶음: 제 폭을 먼저 갖는다. 제목 바닥 옆에 못 서면 줄이 바뀌어 제목 아래로 내려오고, 그 줄에서도
+            모자라면(폰 320, 판이 좁은 600대에서 단추가 다 선 대화) 묶음 안에서 줄이 바뀐다(`flex-wrap`).
+            어느 쪽이든 단추는 뷰포트 안에 남는다. */}
+        <div className="channel-head-tools flex items-center justify-end gap-2">
           {timeline.resume.resubscribeCount > 0 && (
             <span
               className="text-timestamp text-ink-muted"
@@ -1233,7 +1252,7 @@ export function ChatShell() {
             </span>
           )}
           <div
-            className="flex min-w-0 items-center gap-1"
+            className="flex min-w-0 flex-wrap items-center justify-end gap-1"
             role="group"
             aria-label="채널 도구"
             data-testid="channel-header-controls"

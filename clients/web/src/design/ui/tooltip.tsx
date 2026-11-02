@@ -1,6 +1,7 @@
 import * as React from "react";
 import { cn } from "@/design/lib/cn";
 import { TOOLTIP_DELAY_MS, TOOLTIP_MOTION } from "@/design/motion";
+import { fitTooltipElement } from "./tooltipFit";
 
 // 공용 툴팁 (#4324). Buzz `shared/ui/tooltip.tsx`의 동작을 우리 토큰으로 옮긴 것이다.
 //
@@ -19,6 +20,8 @@ import { TOOLTIP_DELAY_MS, TOOLTIP_MOTION } from "@/design/motion";
 //     위로는 잘린다. 단추에 네이티브 `title`을 같이 두지 않는다(둘이 같이 뜬다). 규칙의 문서는 design-system §2.9.
 //   · 띠 안(셸의 상단 줄 오른쪽 자리의 다운로드 단추, #4587)에서도 같은 부품이다: 알약의 글자는 `--ink-base`라서 띠 범위가
 //     `--ink`를 on-band로 다시 묶어도 면과 짝이 맞는다(`tooltip-surface`, tokens.css).
+//   · 자기를 가둔 판 안에 머문다(#4230). 툴팁은 포털이 아니라 이 자리에 그려지므로 판이 `overflow: clip`이면 가장자리를 넘는 글자가
+//     잘린다. 열릴 때 한 번 재서 판(과 창) 안으로 밀어 넣고, 판보다 넓으면 판 폭에서 줄바꿈한다(`tooltipFit.ts`).
 
 export type TooltipSide = "top" | "bottom";
 
@@ -69,6 +72,12 @@ export function Tooltip({
 }: TooltipProps) {
   const [open, setOpen] = React.useState(defaultOpen);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tipRef = React.useRef<HTMLSpanElement>(null);
+
+  // 그려진 뒤 칠하기 전에 잰다: 한 프레임도 가장자리를 넘은 채로 보이지 않는다.
+  React.useLayoutEffect(() => {
+    if (open && tipRef.current !== null) fitTooltipElement(tipRef.current, align);
+  }, [open, label, align]);
 
   const clear = React.useCallback(() => {
     if (timer.current !== null) {
@@ -108,6 +117,7 @@ export function Tooltip({
       {children}
       {open && (
         <span
+          ref={tipRef}
           aria-hidden="true"
           data-testid="tooltip"
           data-side={side}

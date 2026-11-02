@@ -45,6 +45,7 @@ src-tauri/
   src/discovery.rs    # _momo._tcp browse
   src/notification.rs # permission + show (+ show_clickable, #5059)
   src/notification_click.rs # macOS: keep each banner's handle, report its click (#5059)
+  src/tray.rs         # macOS: the menu-bar icon + its menu, drawn from one command, `tray_status_set` (#5193)
   src/opener.rs       # hand one https URL to the OS browser
   src/downloads.rs    # save an attachment into Downloads; probe / reveal / open it by file name (#4587)
   src/detect.rs       # passive local hosted-agent signatures (T-5)
@@ -58,7 +59,9 @@ src-tauri/
   capabilities/       # core:default + core:window:allow-start-dragging for the
                       # web's data-tauri-drag-region top bars (#2671) +
                       # notification:allow-is-permission-granted for the
-                      # notification plugin's page script (#2676) + one
+                      # notification plugin's page script (#2676) + core:tray:deny-* for
+                      # every command of tauri's own JS tray API, which `core:default`
+                      # would open once the `tray-icon` feature is on (#5193) + one
                       # allow-<command> per app command. build.rs declares an
                       # app ACL manifest (#2772), so an app command without a
                       # grant is refused.
@@ -70,6 +73,8 @@ src-tauri/
                       # commands, same fence (D3-f, #2878)
                       # downloads.json: the five download_* commands, same fence (#4587)
   icons/              # generated via `cargo tauri icon app-icon.png`
+  icons/tray/         # the menu-bar icon's four template PNGs (18pt: @1x 18x18, @2x 36x36; black + alpha), made from the brand mark by
+                      # `scripts/desktop/render_tray_icons.sh` (`--check` compares them with the mark). `src/tray.rs` embeds the @2x pair.
 ```
 
 # Bridge contract
@@ -89,6 +94,7 @@ All payloads are camelCase. Commands are invoked by the exact names below.
 | `momo:discovery` | `{ servers: DiscoveredServer[], scanning: boolean }` | The known server set changed, and once more when a scan ends (`scanning: false`). |
 | `momo:update-progress` | `{ downloaded: number, total: number \| null }` | Bytes moved while `updater_install` runs. `total` is null when the server sent no Content-Length. |
 | `momo:notification-click` | `{ id: string, target: string }` | A banner shown through `notification_show_clickable` (`clickable`) was clicked — and only a click (#5059). Both fields are the request's, unchanged. The page must match them against its own record of shown banners (`features/notifications/bannerClicks.ts`) and never use the payload as a route as it arrives. macOS only. |
+| `momo:tray-action` | `{ action: "new-message" }` \| `{ action: "run", id: string }` | A menu-bar menu entry that needs the page was picked (#5193): 「새 메시지」 (`new-message`), or a running job's row (`run`, with the row `id` the page sent in `tray_status_set`). 「oort 열기」 sends nothing: the shell brings the window forward by itself, and so does every other pick. The page must read the shape (`@momo/core/features/notifications/trayAction`), match `id` against the rows it last sent (`features/notifications/TrayStatus.tsx`) and never use the payload as a route as it arrives. macOS only. |
 
 ```ts
 interface DiscoveredServer {
@@ -117,6 +123,7 @@ interface HostedAgentProbe {
 | `notification_click_supported` | — | `boolean` | `true` only on macOS, where the shell keeps each banner's handle and reports its click (#5059). The web bundle asks once per run; a shell build without this command is refused, which the bundle reads as `false` and keeps the old focus guess. Granted to the `main` window only. |
 | `notification_show_clickable` | `{ title: string, body?: string, id: string, target: string }` | `"clickable" \| "plain" \| "refused"` | Shows one banner and, where it can, reports its click as `momo:notification-click` carrying `{ id, target }` unchanged (#5059). `clickable` = a click will arrive as an event; `plain` = shown through the plugin as before and **no event will come** (another OS, more than 8 banners already waiting, a thread that could not start, a malformed `id` — `[A-Za-z0-9_-]`, ≤ 64 bytes — or `target` — an absolute app path starting with one `/`, ≤ 512 bytes, no scheme/backslash/control characters); `refused` = permission is not granted. A dismissed banner, or one cleared from Notification Center, emits nothing. Granted to the `main` window only. |
 | `dock_badge_set` | `{ count: number }` | `void` \| error | Dock badge = the web bundle's 「나에게 필요한 일」 count (`useNeedsMeCount`); `0` clears it, capped at 999. Granted to the `main` window only (#3339). |
+| `tray_status_set` | `{ status: { unread: number, compose: boolean, labels: { running, none, newMessage, open, quit }, running: { id, title, state }[], more: string \| null } }` | `void` \| error | Draws the menu-bar icon and its menu (#5193). `unread` is the very number `dock_badge_set` gets (`useDockBadgeCount`): above 0 the icon is the mark with a dot, otherwise the mark. Both are macOS **template** images (the OS tints them for a light or a dark bar). `labels` and `state` are already in the person's language (the shell holds no copy); `compose` enables 「새 메시지」; `running` is at most 6 rows (`MAX_RUN_ROWS`), most urgent first, each `id` `[A-Za-z0-9_-]` ≤ 64 bytes and unique, `title` cleaned of control/bidi characters and cut at 24 characters (the state after it is never cut), every label non-blank, ≤ 256 bytes, no control/bidi characters; `more` is the dimmed 「외 N개」 line. Anything else is an error and the menu keeps what it had. Quit is macOS's own Quit item (the app menu's Cmd+Q path). The first valid call creates the icon; it lives until the app exits. Left and right click open the same menu. A pick that needs the page arrives as `momo:tray-action`. Other desktops answer `Ok(())` after the same validation. Granted to the `main` window only; tauri's own JS tray API (`plugin:tray\|*`) is **denied** in `capabilities/default.json` (`core:default` would otherwise open it once the `tray-icon` feature is on), which `shell_contract.rs` and `desktopShellContract.test.ts` pin. The wire shape is pinned by `tests/fixtures/tray_status.json`, read by the shell's test and by `trayModel.test.ts`. |
 | `window_vibrancy_set` | `{ enabled: boolean, material?: "sidebar" \| "under-window-background" \| "hud-window" }` | `void` \| error | 「유리 배경」의 창 쪽(ADR-0189 증보 3 D6, #4190). macOS: `enabled` 면 이전 블러 층을 지우고 `NSVisualEffectView`(기본 `sidebar`, 모르는 이름도 `sidebar`)를 웹뷰 뒤에 깐 **다음** 웹뷰 캔버스만 투명으로 만든다(wry `drawsBackground`, 비공개 API). 끄면 층만 지운다. 창은 처음부터 불투명이고 런타임에 투명으로 만들지 않는다. macOS가 아니면 `Ok(())`. 웹은 이 호출이 성공한 **뒤에** `data-glass`를 찍고, 끌 때는 `data-glass`를 **먼저** 걷는다. Granted to the `main` window only. |
 | `app_theme_set` | `{ scheme: "light" \| "dark" \| "system" }` | `void` | 앱 네이티브 appearance를 웹이 보여 주는 스킴에 맞춘다(`Sidebar` 재질은 페이지가 아니라 창의 effective appearance로 밝게·어둡게 흐려진다). 모르는 값은 `system`. 이 호출은 페이지의 `prefers-color-scheme`도 바꾸므로 웹은 유리가 켜져 있고 스킴이 고정일 때만 `light`·`dark`를 보내고 그 밖에는 `system`으로 돌려준다. Granted to the `main` window only (#4190). |
 | `keychain_available` | — | `boolean` | Probes the credential store. |

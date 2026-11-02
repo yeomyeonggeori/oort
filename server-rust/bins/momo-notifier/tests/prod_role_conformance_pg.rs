@@ -1517,9 +1517,9 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     // `schema_migrations`, `work_cloud_host_transition`: #4372, see
     // `migration_owned_catalogs_are_read_only_for_every_runtime_role`), the `cloud_box*` tables (ADR-0197 D10 lockdown, see
     // below), the `scheduled_message*` tables (ADR-0208 D3 lockdown, see below) and
-    // `self_media_token` (#4820 C2a L6 lockdown, see below) and `team_ai_task` (#4967 r1 M1
-    // lockdown, see below) are the only tables outside the rule; everything else must be readable and writable
-    // by the three ALL-TABLES roles.
+    // `self_media_token` (#4820 C2a L6 lockdown, see below), `team_ai_task` (#4967 r1 M1
+    // lockdown, see below) and `attachment_media` (#4673 C5 lockdown, see below) are the only tables
+    // outside the rule; everything else must be readable and writable by the three ALL-TABLES roles.
     let missing: Vec<String> = sqlx::query_scalar(
         "SELECT format('%s:%s:%s', r.rolname, c.relname, p.priv) \
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
@@ -1531,6 +1531,7 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
             AND c.relname NOT LIKE 'scheduled\\_message%' \
             AND c.relname <> 'self_media_token' \
             AND c.relname <> 'team_ai_task' \
+            AND c.relname <> 'attachment_media' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
           ORDER BY 1",
     )
@@ -1639,6 +1640,50 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     .fetch_one(&db.su)
     .await
     .expect("team ai task table count");
+    // `attachment-media-lockdown` (bootstrap_runtime_roles.sql, #4673 C5; ADR-0151 증보 5 D5): the
+    // poster is one frame of a member's video, and the BYPASSRLS roles skip RLS, so their table
+    // privileges are what keeps every tenant's frames from a role with no business reading them.
+    // `momo_app` writes (INSERT, UPDATE for the idempotent replace) and reads (SELECT); the team AI's
+    // read role `momo_helper_read` reads every column but the poster's bytes (the page statements it
+    // runs join this table for the summary); nobody deletes (the foreign key cascades as the owner);
+    // relay, worker and notifier touch nothing.
+    let attachment_media_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s:%s has=%s', r.rolname, c.relname, p.priv, \
+                       has_table_privilege(r.rolname, c.oid, p.priv)) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier'), ('momo_helper_read')) AS r(rolname) \
+           CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE'), ('TRUNCATE'), ('REFERENCES'), ('TRIGGER')) AS p(priv) \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
+            AND c.relname = 'attachment_media' \
+            AND has_table_privilege(r.rolname, c.oid, p.priv) \
+                IS DISTINCT FROM (r.rolname = 'momo_app' AND p.priv IN ('SELECT', 'INSERT', 'UPDATE')) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("attachment media privilege scan");
+    let attachment_media_column_drift: Vec<String> = sqlx::query_scalar(
+        "SELECT format('%s:%s has=%s', r.rolname, a.attname, \
+                       has_column_privilege(r.rolname, c.oid, a.attnum, 'SELECT')) \
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+           JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped \
+           CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker'), ('momo_notifier'), ('momo_helper_read')) AS r(rolname) \
+          WHERE n.nspname = 'public' AND c.relname = 'attachment_media' \
+            AND has_column_privilege(r.rolname, c.oid, a.attnum, 'SELECT') \
+                IS DISTINCT FROM (r.rolname = 'momo_app' \
+                                  OR (r.rolname = 'momo_helper_read' AND a.attname <> 'poster_bytes')) \
+          ORDER BY 1",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("attachment media column privilege scan");
+    let attachment_media_tables: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
+          WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = 'attachment_media'",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("attachment media table count");
     db.finish().await;
     assert!(
         missing.is_empty(),
@@ -1671,6 +1716,19 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     assert!(
         team_ai_task_drift.is_empty(),
         "team_ai_task privileges drifted from the lockdown: {team_ai_task_drift:?}"
+    );
+    assert_eq!(
+        attachment_media_tables, 1,
+        "the scan must actually see the attachment_media table, or it proves nothing"
+    );
+    assert!(
+        attachment_media_drift.is_empty(),
+        "attachment_media privileges drifted from the lockdown: {attachment_media_drift:?}"
+    );
+    assert!(
+        attachment_media_column_drift.is_empty(),
+        "attachment_media column privileges drifted from the lockdown (the poster's bytes are momo_app's alone): \
+         {attachment_media_column_drift:?}"
     );
 }
 
