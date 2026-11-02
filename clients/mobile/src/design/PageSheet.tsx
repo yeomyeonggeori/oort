@@ -149,6 +149,8 @@ interface SheetControl {
   keyboardHeight: number;
   /** 머리 끌기 핸들러. 머리의 뿌리 `View` 에 펼친다(`SheetHeader`). */
   dragHandlers: DragHandlers;
+  /** 시트가 닫히는 중이거나 이미 사라졌는가 — 부르는 때의 값을 읽는다(`usePageSheetGone`). */
+  isGone: () => boolean;
 }
 
 const SheetControlContext = createContext<SheetControl | null>(null);
@@ -304,6 +306,21 @@ export function usePageSheetClose(): (() => void) | null {
   return useContext(SheetControlContext)?.close ?? null;
 }
 
+const notGone = (): boolean => false;
+
+/**
+ * 시트가 **닫히는 중이거나 이미 사라졌는가**를 부르는 때마다 읽는 함수(#5058). 시트 안에서 요청을 보내 놓고 기다리던 일이
+ * 끝났을 때 「이제 다른 곳으로 이동해도 되는가」를 묻는 데 쓴다 — 새 채널 만들기가 끝난 뒤 새 채널로 데려가는 길이 그렇다.
+ * 알림이 시트를 걷고 목적지에 세웠는데 요청이 뒤늦게 끝났다고 사람을 다른 방으로 끌고 가면 안 된다.
+ *
+ * 렌더에서 값을 읽지 않는 이유: 기다리던 일의 뒷부분(`await` 뒤·`onSuccess`)은 그 일을 시작한 렌더의 닫힌 값을 쥐고 있다. 그래서 함수를
+ * 주고 **끝난 때** 읽게 한다. 두 경우를 함께 센다 — 닫는 슬라이드가 도는 동안(아직 마운트돼 있다)과 부모가 시트를 걷어 버린 뒤.
+ * 시트 밖에서는 늘 거짓이다(사라질 시트가 없다).
+ */
+export function usePageSheetGone(): () => boolean {
+  return useContext(SheetControlContext)?.isGone ?? notGone;
+}
+
 const runNow = (action: () => void): void => action();
 
 /**
@@ -366,6 +383,7 @@ export function PageSheet({
   scrimLabel = '시트 닫기',
   dirty = false,
   onDiscardPrompt,
+  keepOnEntry = false,
 }: {
   onClose: () => void;
   /** A nested picker replaces this sheet's content (#4322). Dismiss gestures
@@ -392,6 +410,14 @@ export function PageSheet({
    * 생략하면 iOS 액션 시트(「버릴까요?」)다.
    */
   onDiscardPrompt?: (discard: () => void) => void;
+  /**
+   * 알림이 새 입구로 들어와도 **걷히지 않는** 시트(#5058). 기본(거짓)은 걷힌다(#4667) — 알림의 목적지를 시트가 덮은 채로 두지
+   * 않기 위해서다. 참은 둘이 모두 맞는 시트뿐이다: ① 사람이 연 것이 아니라 앱이 한 번 세운 것이라 걷히면 다시 열 문이 없고,
+   * ② 걷히면 그 시트가 기다리던 일이 함께 멈춘다. 사람이 연 시트는 걷혀도 연 문이 그대로 남아 있으니 해당하지 않는다. 참인 시트는
+   * 목적지 위에 남고 사람이 X 로 닫아야 메시지가 보인다 — 그 값을 치를 만한 시트만 쓴다. 지금은 `DeviceKeyLinkGate` 하나이고
+   * 고른 이유·뺀 이유는 `docs/design-system/phone-sheets.md` §2 에 있다.
+   */
+  keepOnEntry?: boolean;
 }): React.JSX.Element {
   return (
     <Modal
@@ -411,7 +437,8 @@ export function PageSheet({
           scrimTestID={scrimTestID}
           scrimLabel={scrimLabel}
           dirty={dirty}
-          onDiscardPrompt={onDiscardPrompt}>
+          onDiscardPrompt={onDiscardPrompt}
+          keepOnEntry={keepOnEntry}>
           {children}
         </SheetFrame>
       </SafeAreaProvider>
@@ -434,6 +461,7 @@ function SheetFrame({
   scrimLabel,
   dirty,
   onDiscardPrompt,
+  keepOnEntry,
   children,
 }: {
   onClose: () => void;
@@ -444,6 +472,7 @@ function SheetFrame({
   scrimLabel: string;
   dirty: boolean;
   onDiscardPrompt?: (discard: () => void) => void;
+  keepOnEntry: boolean;
   children: React.ReactNode;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -475,6 +504,16 @@ function SheetFrame({
   promptRef.current = onDiscardPrompt;
   const travel = useRef(new Animated.Value(height)).current;
   const closing = useRef(false);
+  // 시트가 사라졌는가. 부모가 슬라이드 없이 시트를 걷어 버리면(`closing` 이 거짓인 채로) 언마운트만 남으므로 따로 센다.
+  // 값을 읽는 쪽은 `usePageSheetGone` — 닫는 슬라이드가 도는 동안과 사라진 뒤를 함께 말한다.
+  const gone = useRef(false);
+  useEffect(() => {
+    gone.current = false;
+    return () => {
+      gone.current = true;
+    };
+  }, []);
+  const isGone = useCallback(() => closing.current || gone.current, []);
   // 본문의 세로 스크롤들이 알려 온 오프셋. 시트의 본문 끌기는 이 값이 전부 맨 위일 때만 선다.
   const scrolls = useMemo(() => new Map<symbol, number>(), []);
   // 같은 열쇠로, 그 스크롤의 내용이 뷰포트를 넘치는가. 넘치는(또는 모르는) 스크롤이 하나라도 있으면 본문은 시작 응답자를 잡지 않는다.
@@ -565,8 +604,13 @@ function SheetFrame({
   // `close()` 는 저장 안 한 입력이 있으면 「버릴까요?」를 묻고(`dirty`) 중첩 선택기가 있으면 한 겹만 벗기는데(`onNavigateBack`),
   // 알림을 누른 사람에게 그 물음은 자기가 한 적 없는 닫기에 대한 것이고 목적지는 그 뒤에 서 있다. 쓰던 글은 입력이 든 시트가
   // 같은 방송을 받으며 맡긴다(`lib/entryDrafts.ts`). 이미 닫는 중이면 `slideOut` 이 알아서 무시한다. 이 그릇을 쓰는 모든
-  // 시트가 한꺼번에 덮이는 이유가 이 한 줄이다 — 시트마다 구독하지 않는다.
-  useDismissOnEntry(() => slideOut());
+  // 시트가 한꺼번에 덮이는 이유가 이 한 줄이다 — 시트마다 구독하지 않는다. 걷히면 안 되는 시트(`keepOnEntry`, #5058)는 구독은
+  // 두고 부를 때 값을 본다: 값이 바뀌어도 구독이 갈리지 않는다(방송 도중에 구독이 갈리면 그 표면이 방송을 놓친다).
+  const keepRef = useRef(keepOnEntry);
+  keepRef.current = keepOnEntry;
+  useDismissOnEntry(() => {
+    if (!keepRef.current) slideOut();
+  });
 
   // 제자리로. 동작 줄이기가 켜져 있으면 미끄러지지 않고 바로 선다.
   const settle = useCallback(() => {
@@ -727,8 +771,8 @@ function SheetFrame({
   const bodyPan = useMemo(() => makePan('body'), [makePan]);
 
   const control = useMemo<SheetControl>(
-    () => ({close, closeThen, keyboardHeight: lifted, dragHandlers: headerPan.panHandlers}),
-    [close, closeThen, lifted, headerPan],
+    () => ({close, closeThen, keyboardHeight: lifted, dragHandlers: headerPan.panHandlers, isGone}),
+    [close, closeThen, lifted, headerPan, isGone],
   );
   const scrollPort = useMemo<SheetScrollPort>(() => ({scrolls, overflows, frozen}), [scrolls, overflows, frozen]);
 
