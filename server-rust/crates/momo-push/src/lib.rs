@@ -47,8 +47,9 @@ pub use approvers::{may_approve_in_tx, ApprovalCard, CardAudience};
 pub use candidate::PushCandidate;
 pub use device::{
     invalidate_member_push_tokens_in_tx, invalidate_session_push_tokens_in_tx, list_devices,
-    register_device, revoke_device, DeviceRecord, DeviceRegistration, PushTokenRecord,
-    RegisterOutcome, RevokeOutcome,
+    member_registration_lock_key, register_device, revoke_device, DeviceRecord, DeviceRegistration,
+    PushTokenRecord, RegisterOutcome, RevokeOutcome, MEMBER_MAX_ACTIVE_TOKENS,
+    MEMBER_REGISTRATION_LOCK_SQL,
 };
 pub use diagnostics::{
     apns_reason_code, classify_last_test, compute_diagnostics, is_relay_vocabulary_refusal,
