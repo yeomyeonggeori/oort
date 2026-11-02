@@ -1000,7 +1000,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": " web searches today"
+      "value": " searches used today"
     }
   ],
   "settings.aiLimits.searchesUnit": [

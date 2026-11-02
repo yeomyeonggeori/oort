@@ -204,6 +204,24 @@
 //! `WHERE` clause: absence of a `notification_rule` row is `dnd=false,
 //! mention_overrides_mute=false`, which is the pre-증보 behaviour exactly.
 //!
+//! ## Kind switches (ADR-0206 D5, #4494 N3)
+//!
+//! A member's per-kind **phone** switches (`notification_rule.kinds`, and `work_complete_push` for
+//! `workDone`) are part of the arm conditions. The statement tags every target with the arm it stood
+//! on (`arm`) and [`decode_arm`] turns that into the wire reason and the [`NotificationKind`]. A missing
+//! row or cell is on and **only a literal JSON `false` is off**, so no row is today's behavior and a
+//! hand-edited `kinds` cannot silence a push by accident. Where a switched-off arm sends the message
+//! depends on what the arm is *about*:
+//!
+//! * An arm about the **message's shape** — the three work reasons, `approval`, and a DM channel's
+//!   `dm` — claims the message whether or not its switch is on, and an off switch **suppresses**. It
+//!   must never fall through to a weaker reason that would push the same card as something else: an
+//!   approval card in an agent DM does not come back as a `dm` push, a work answer does not come back as
+//!   a `dm`, and turning `dm` off silences the agent's answer in that DM too.
+//! * An arm about **why this person**, which can coexist with other reasons for one message —
+//!   `mentionHuman`, `mentionAgent`, `agentAnswer` — **falls through** to the next arm when off (so a
+//!   person who turned `mentionHuman` off still hears a DM). `threadReply` is last: nowhere to fall to.
+//!
 //! ## What is *not* read
 //!
 //! `message.body` appears nowhere in these statements. A target carries ids,
@@ -228,7 +246,7 @@ use std::collections::HashMap;
 use momo_agent::actions::{decision_mode, DecisionMode};
 use momo_agent::PROP_ANSWERS_MESSAGE_ID;
 use momo_db::DbError;
-use momo_messaging::STREAM_PROPS_KEY;
+use momo_messaging::{NotificationKind, STREAM_PROPS_KEY};
 use serde_json::Value;
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
@@ -258,6 +276,11 @@ pub struct JudgedTarget {
     pub apns_env: String,
     pub apns_topic: String,
     pub reason: PushReason,
+    /// The notification kind judgment tagged this target with (ADR-0206 D5) — the unit the member's
+    /// kind switches and every later stage of the judgment (work hours, the phone delay, sender
+    /// rules) speak. `None` only for `resume_offer`, which is not a switchable kind. It is **not** the
+    /// wire reason: three kinds share `mention`, and `workDone` is two reasons.
+    pub kind: Option<NotificationKind>,
     pub thread_id: Uuid,
     pub category: PushCategory,
     pub approval_id: Option<Uuid>,
@@ -292,6 +315,46 @@ pub async fn judge_candidate_targets(
         Some(candidate.channel_id),
     )
     .await
+}
+
+/// The judgment statement's `arm` labels — the kind-level answer of its `recipients` CASE — as the wire
+/// reason and the notification kind they stand for (ADR-0206 D5). An arm is finer than a reason (three
+/// arms are `mention`) and finer than a kind (two arms are `workDone`), which is why the statement says
+/// *which arm* and this table says what that means, in one place:
+///
+/// | arm | reason | kind |
+/// |---|---|---|
+/// | `resume_offer` | `resume_offer` | — (always sent) |
+/// | `work_session_idle`, `work_run_done` | the same | `workDone` |
+/// | `approval` | `approval_request` | `approval` |
+/// | `mentionHuman`, `mentionAgent` | `mention` | the same (by the author's kind) |
+/// | `agentAnswer` | `mention` | `agentAnswer` (the agent's answer to you, and the settled-approval
+/// notice to the person who asked) |
+/// | `dm` | `dm` | `dm` |
+/// | `threadReply` | `thread_reply` | `threadReply` |
+///
+/// Every arm the statement can produce must be a row here: an unknown label fails the decode, so a
+/// candidate retries instead of a push silently vanishing. `tests/judgment_arms.rs` pins that the SQL
+/// text and this table name the same set.
+pub(crate) fn decode_arm(label: &str) -> Option<(PushReason, Option<NotificationKind>)> {
+    Some(match label {
+        "resume_offer" => (PushReason::ResumeOffer, None),
+        "work_session_idle" => (
+            PushReason::WorkSessionIdle,
+            Some(NotificationKind::WorkDone),
+        ),
+        "work_run_done" => (PushReason::WorkRunDone, Some(NotificationKind::WorkDone)),
+        "approval" => (
+            PushReason::ApprovalRequest,
+            Some(NotificationKind::Approval),
+        ),
+        "mentionHuman" => (PushReason::Mention, Some(NotificationKind::MentionHuman)),
+        "mentionAgent" => (PushReason::Mention, Some(NotificationKind::MentionAgent)),
+        "agentAnswer" => (PushReason::Mention, Some(NotificationKind::AgentAnswer)),
+        "dm" => (PushReason::Dm, Some(NotificationKind::Dm)),
+        "threadReply" => (PushReason::ThreadReply, Some(NotificationKind::ThreadReply)),
+        _ => return None,
+    })
 }
 
 async fn judge_targets_for_source(
@@ -417,7 +480,8 @@ async fn judge_targets_for_source(
                                   AND viewing.member_id = mem.id \
                                   AND viewing.seen_at >= now() \
                                       - make_interval(secs => $4::double precision)) \
-                        THEN 'mention' END \
+                             AND nr0.kinds->'agentAnswer'->'phone' IS DISTINCT FROM 'false'::jsonb \
+                        THEN 'agentAnswer' END \
                     WHEN (SELECT props_kind FROM msg) = 'resume_offer' \
                          AND lower(mem.id::text) = lower((SELECT owner_member_id FROM msg)) \
                       THEN 'resume_offer' \
@@ -476,13 +540,22 @@ async fn judge_targets_for_source(
                     WHEN (SELECT message_type FROM msg) = 'approval_request' \
                          AND mem.kind = 'human' THEN \
                       CASE WHEN EXISTS (SELECT 1 FROM card WHERE status = 'pending') \
-                           THEN 'approval_request' END \
+                                AND nr0.kinds->'approval'->'phone' IS DISTINCT FROM 'false'::jsonb \
+                           THEN 'approval' END \
                     WHEN EXISTS ( \
                       SELECT 1 FROM jsonb_array_elements_text((SELECT mention_ids FROM msg)) t(v) \
                        WHERE lower(t.v) = lower(ms.member_id::text) \
-                    ) THEN 'mention' \
-                    WHEN (SELECT channel_kind FROM msg) = 'dm' THEN 'dm' \
-                    WHEN mem.id = (SELECT asker_id FROM asked) THEN \
+                    ) AND CASE WHEN (SELECT author_kind FROM msg) = 'agent' \
+                               THEN nr0.kinds->'mentionAgent'->'phone' IS DISTINCT FROM 'false'::jsonb \
+                               ELSE nr0.kinds->'mentionHuman'->'phone' IS DISTINCT FROM 'false'::jsonb \
+                          END \
+                    THEN CASE WHEN (SELECT author_kind FROM msg) = 'agent' \
+                              THEN 'mentionAgent' ELSE 'mentionHuman' END \
+                    WHEN (SELECT channel_kind FROM msg) = 'dm' THEN \
+                      CASE WHEN nr0.kinds->'dm'->'phone' IS DISTINCT FROM 'false'::jsonb \
+                           THEN 'dm' END \
+                    WHEN mem.id = (SELECT asker_id FROM asked) \
+                         AND nr0.kinds->'agentAnswer'->'phone' IS DISTINCT FROM 'false'::jsonb THEN \
                       CASE WHEN NOT (SELECT streaming FROM msg) \
                             AND NOT EXISTS ( \
                             SELECT 1 FROM read_state seen \
@@ -507,7 +580,7 @@ async fn judge_targets_for_source(
                                     THEN now() ELSE (SELECT created_at FROM msg) END \
                                     - make_interval(secs => $4::double precision) \
                             ) \
-                        THEN 'mention' END \
+                        THEN 'agentAnswer' END \
                     WHEN (SELECT root_id FROM msg) IS NOT NULL \
                          AND (SELECT message_type FROM msg) = 'text' \
                          AND (SELECT channel_kind FROM msg) <> 'dm' \
@@ -517,7 +590,8 @@ async fn judge_targets_for_source(
                               AND tf.root_id = (SELECT root_id FROM msg) \
                               AND tf.member_id = ms.member_id \
                               AND tf.state IN ('auto', 'followed') \
-                         ) THEN \
+                         ) \
+                         AND nr0.kinds->'threadReply'->'phone' IS DISTINCT FROM 'false'::jsonb THEN \
                       CASE WHEN NOT (SELECT streaming FROM msg) \
                             AND NOT EXISTS ( \
                             SELECT 1 FROM read_state seen \
@@ -542,9 +616,9 @@ async fn judge_targets_for_source(
                                     THEN now() ELSE (SELECT created_at FROM msg) END \
                                     - make_interval(secs => $4::double precision) \
                             ) \
-                        THEN 'thread_reply' END \
+                        THEN 'threadReply' END \
                     ELSE NULL \
-                  END AS reason \
+                  END AS arm \
              FROM membership ms \
              JOIN member mem \
                ON mem.id = ms.member_id \
@@ -552,6 +626,9 @@ async fn judge_targets_for_source(
               AND mem.status = 'active' \
               AND mem.deleted_at IS NULL \
               AND mem.kind = 'human' \
+             LEFT JOIN notification_rule nr0 \
+               ON nr0.workspace_id = $1 \
+              AND nr0.member_id = ms.member_id \
             WHERE ms.channel_id = (SELECT channel_id FROM msg) \
               AND ms.workspace_id = $1 \
               AND ms.left_at IS NULL \
@@ -567,7 +644,7 @@ async fn judge_targets_for_source(
                 t.apns_token, \
                 t.env::text AS env, \
                 t.topic, \
-                r.reason, \
+                r.arm, \
                 COALESCE((SELECT root_id FROM msg), (SELECT channel_id FROM msg)) AS thread_id, \
                 (SELECT message_type FROM msg) AS message_type, \
                 (SELECT props_kind FROM msg) AS props_kind, \
@@ -590,17 +667,18 @@ async fn judge_targets_for_source(
              ON nr.workspace_id = $1 \
             AND nr.member_id = r.member_id \
            LEFT JOIN card a ON true \
-          WHERE r.reason IS NOT NULL \
+          WHERE r.arm IS NOT NULL \
             AND NOT ( \
               COALESCE(nr.dnd, false) \
               AND (nr.dnd_until IS NULL OR nr.dnd_until > now()) \
             ) \
-            AND NOT (r.reason IN ('work_session_idle', 'work_run_done') \
+            AND NOT (r.arm IN ('work_session_idle', 'work_run_done') \
                      AND NOT COALESCE(nr.work_complete_push, true)) \
             AND ( \
               np.member_id IS NULL \
               OR (np.muted_until IS NOT NULL AND np.muted_until <= now()) \
-              OR (r.reason = 'mention' AND COALESCE(nr.mention_overrides_mute, false)) \
+              OR (r.arm IN ('mentionHuman', 'mentionAgent', 'agentAnswer') \
+                  AND COALESCE(nr.mention_overrides_mute, false)) \
             ) \
           ORDER BY r.member_id, t.id",
     )
@@ -625,13 +703,13 @@ async fn judge_targets_for_source(
     let mut may_approve: HashMap<(Uuid, Uuid), bool> = HashMap::new();
     let mut audiences: HashMap<Uuid, CardAudience> = HashMap::new();
     for row in rows {
-        let reason_label: String = row.get("reason");
-        let Some(reason) = PushReason::from_db(&reason_label) else {
-            // An unknown reason means the judgment SQL and this enum drifted.
+        let arm_label: String = row.get("arm");
+        let Some((reason, kind)) = decode_arm(&arm_label) else {
+            // An unknown arm means the judgment SQL and this table drifted.
             // Dropping the target silently would be a lost notification, so
             // treat it as a decode failure and let the candidate retry.
             return Err(DbError::Sqlx(sqlx::Error::Decode(
-                format!("unknown push reason from judgment: {reason_label}").into(),
+                format!("unknown push arm from judgment: {arm_label}").into(),
             )));
         };
         let message_type: String = row.get("message_type");
@@ -708,6 +786,7 @@ async fn judge_targets_for_source(
             apns_env: row.get("env"),
             apns_topic: row.get("topic"),
             reason,
+            kind,
             thread_id: row.get("thread_id"),
             category,
             // An approval id is meaningful only for the two approval categories —
@@ -761,4 +840,126 @@ pub async fn unread_badge(
     .await?
     .flatten();
     Ok(badge.unwrap_or(0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    /// Every arm label the statement can produce. A new `THEN '<label>'` in the `recipients` CASE
+    /// must be a row of [`decode_arm`] (an unknown label fails the decode so the candidate retries),
+    /// and a row of [`decode_arm`] the statement no longer produces is dead.
+    const ARM_LABELS: [&str; 9] = [
+        "resume_offer",
+        "work_session_idle",
+        "work_run_done",
+        "approval",
+        "mentionHuman",
+        "mentionAgent",
+        "agentAnswer",
+        "dm",
+        "threadReply",
+    ];
+
+    /// The judgment statement's text, from its first CTE to its `ORDER BY` — the same slice
+    /// `tests/judgment_projection.rs` reads, taken from this file.
+    fn statement() -> &'static str {
+        const SOURCE: &str = include_str!("judgment.rs");
+        let start = SOURCE
+            .find("\"WITH msg AS ( \\")
+            .expect("the judgment statement starts with `WITH msg AS (`");
+        let end = start
+            + SOURCE[start..]
+                .find("ORDER BY r.member_id, t.id")
+                .expect("the judgment statement ends with its ORDER BY");
+        &SOURCE[start..end]
+    }
+
+    #[test]
+    fn the_sql_and_the_arm_table_name_the_same_arms() {
+        // The `recipients` CTE's `arm` CASE only: other CTEs have quoted literals of their own
+        // (`ELSE '{}'::jsonb`).
+        let sql = statement();
+        let from = sql.find("recipients AS (").expect("the recipients CTE");
+        let sql = &sql[from..from + sql[from..].find("END AS arm").expect("the arm CASE")];
+        let mut produced = BTreeSet::new();
+        // A label is a quoted literal right after `THEN` (an arm) or `ELSE` (the author-kind split of
+        // the explicit-mention arm).
+        for marker in ["THEN '", "ELSE '"] {
+            for (at, _) in sql.match_indices(marker) {
+                let rest = &sql[at + marker.len()..];
+                let label = &rest[..rest.find('\'').expect("a closed string literal")];
+                produced.insert(label.to_string());
+            }
+        }
+        let known: BTreeSet<String> = ARM_LABELS.iter().map(|label| label.to_string()).collect();
+        assert_eq!(
+            produced, known,
+            "the statement's arm labels and ARM_LABELS (and decode_arm) must agree"
+        );
+        for label in ARM_LABELS {
+            assert!(decode_arm(label).is_some(), "{label} must decode");
+        }
+        assert!(
+            decode_arm("mention").is_none(),
+            "a wire reason is not an arm"
+        );
+        assert!(decode_arm("channel_message").is_none());
+    }
+
+    #[test]
+    fn every_arm_but_the_resume_offer_names_one_notification_kind() {
+        for label in ARM_LABELS {
+            let (_, kind) = decode_arm(label).unwrap();
+            assert_eq!(kind.is_none(), label == "resume_offer", "{label}");
+        }
+        // Three arms share the wire reason `mention`, two share the kind `workDone`.
+        let mention: Vec<_> = ARM_LABELS
+            .iter()
+            .filter(|label| decode_arm(label).unwrap().0 == PushReason::Mention)
+            .collect();
+        assert_eq!(mention.len(), 3);
+        let work: Vec<_> = ARM_LABELS
+            .iter()
+            .filter(|label| decode_arm(label).unwrap().1 == Some(NotificationKind::WorkDone))
+            .collect();
+        assert_eq!(work.len(), 2);
+    }
+
+    /// The switch rule the SQL spells (`kinds->'<kind>'->'phone' IS DISTINCT FROM 'false'::jsonb`) is
+    /// the one [`momo_messaging::phone_switch_on`] spells: every switchable arm's SQL names exactly its
+    /// kind's cell, so renaming a kind on one side cannot silently leave the switch dead.
+    #[test]
+    fn each_switch_in_the_sql_names_a_kind_of_the_closed_table() {
+        let sql = statement();
+        let mut named = BTreeSet::new();
+        for (at, _) in sql.match_indices("nr0.kinds->'") {
+            let rest = &sql[at + "nr0.kinds->'".len()..];
+            let kind = &rest[..rest.find('\'').unwrap()];
+            assert!(
+                NotificationKind::from_wire(kind).is_some(),
+                "`{kind}` is not a notification kind"
+            );
+            assert!(
+                rest.starts_with(&format!("{kind}'->'phone' IS DISTINCT FROM 'false'::jsonb")),
+                "the switch of `{kind}` must read only a literal false as off"
+            );
+            named.insert(kind.to_string());
+        }
+        let expected: BTreeSet<String> = [
+            "dm",
+            "mentionHuman",
+            "mentionAgent",
+            "agentAnswer",
+            "approval",
+            "threadReply",
+        ]
+        .iter()
+        .map(|kind| kind.to_string())
+        .collect();
+        // `workDone` is the `work_complete_push` column, not a cell; the kinds without an arm yet
+        // (`keyword`, `channelAll`, `scheduledFailed`) get theirs from the slices that add the arm.
+        assert_eq!(named, expected);
+    }
 }

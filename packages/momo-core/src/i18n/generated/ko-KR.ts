@@ -739,7 +739,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "토큰까지로 제한했어요."
+      "value": " 토큰까지로 제한했어요."
     }
   ],
   "settings.aiLimits.cleared": [
@@ -953,7 +953,7 @@ export const catalog: MessageCatalog = {
   "settings.aiLimits.searchesToday": [
     {
       "type": 0,
-      "value": "오늘 웹 검색 "
+      "value": "오늘 "
     },
     {
       "type": 2,
@@ -962,7 +962,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "회"
+      "value": "회 사용"
     }
   ],
   "settings.aiLimits.searchesUnit": [

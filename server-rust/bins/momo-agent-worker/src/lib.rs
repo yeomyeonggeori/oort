@@ -880,6 +880,16 @@ impl AgentWorker {
             agent_member_id: payload.agent_member_id,
             run_id,
         };
+        // #5084 — the key of the `thinking` frame this start publishes. The first start of a run is
+        // `thinking`; a **resumed** start (the job an approval releases) is the frame that takes the
+        // rail off 「승인 대기」, and under the same key as the first one Centrifugo's 5-minute cache
+        // would swallow it whenever the person approved within five minutes of the turn's start —
+        // leaving the badge on 승인 대기 for a run that is working again. One key per approval, so
+        // a second hold's resume is its own frame too.
+        let thinking_key = match payload.resume_from_approval_id {
+            Some(approval_id) => format!("thinking:resumed:{approval_id}"),
+            None => "thinking".to_string(),
+        };
         let started = with_tenant_tx(&self.pool, job.workspace_id, move |conn| {
             Box::pin(async move {
                 let started = mark_run_started_in_tx(conn, run_id).await?;
@@ -917,7 +927,7 @@ impl AgentWorker {
                             started_address,
                             momo_agent::AgentPhase::Thinking,
                             now_ms(),
-                            "thinking",
+                            &thinking_key,
                         ),
                     )
                     .await?;
@@ -1862,6 +1872,21 @@ impl AgentWorker {
                 if !park_run_for_approval_in_tx(conn, run_id, expires_at).await? {
                     return Err(DbError::from(momo_db::sqlx::Error::RowNotFound));
                 }
+                // #5084 — the rail is told the run now waits on a person. In the park's own
+                // transaction, after the card (so a reader who sees 「승인 대기」 can find the
+                // card), and only when the guarded park above actually moved the run: a retried
+                // turn that finds it already parked returned before this line.
+                emit_awaiting_approval_agent_status(
+                    conn,
+                    momo_agent::AgentRunAddress {
+                        workspace_id,
+                        channel_id,
+                        agent_member_id,
+                        run_id,
+                    },
+                    approval_id,
+                )
+                .await?;
 
                 write_audit(
                     conn,
@@ -4665,6 +4690,23 @@ async fn emit_terminal_agent_status(
         return Ok(());
     };
     emit_rail_frame(conn, workspace_id, channel_id, &frame).await
+}
+
+/// Publish the `(thinking, awaiting_approval)` rail frame for a run this worker's transaction just
+/// parked on a person (#5084) — the worker-side twin of `momo-server`'s
+/// `routes::shared::emit_awaiting_approval_agent_status`, the same few lines around the same
+/// builder ([`momo_agent::awaiting_approval_agent_status_payload`]).
+///
+/// It must be called on the **park's own connection** and only once the guarded park has returned
+/// `true`: the frame then commits with the run's new status and the card, or not at all, and a
+/// retried turn that lost the park never reaches it.
+async fn emit_awaiting_approval_agent_status(
+    conn: &mut PgConnection,
+    address: momo_agent::AgentRunAddress,
+    approval_id: Uuid,
+) -> Result<(), DbError> {
+    let frame = momo_agent::awaiting_approval_agent_status_payload(address, now_ms(), approval_id);
+    emit_rail_frame(conn, address.workspace_id, address.channel_id, &frame).await
 }
 
 /// Put one already-shaped rail frame on the outbox — the worker's twin of
