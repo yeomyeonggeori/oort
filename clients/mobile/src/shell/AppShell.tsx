@@ -18,6 +18,7 @@ import {useReduceMotionRef} from '../lib/useReduceMotion';
 import type {Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
 import {AgentWorkingRail} from '../features/agents/AgentWorkingRail';
+import {ApprovalsLiveSync} from '../features/inbox/ApprovalsLiveSync';
 import {OnlineRollCall} from '../features/presence/OnlineRollCall';
 import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
 import {useDirectory} from '../features/workspace/queries';
@@ -363,6 +364,9 @@ export function Shell({
           you had not already opened. It detaches itself when the background
           policy parks the socket; see the file's own note on why. */}
       <AgentWorkingRail />
+      {/* Renders nothing. 승인 카드가 올라오면 승인 원장을 바로 다시 읽는다(#5125): 홈 「작업 중」 카드·에이전트 탭이
+          원장을 따라 제때 바뀐다. 구독은 위 레일이 이미 가진 채널 구독을 나눠 쓴다. */}
+      <ApprovalsLiveSync />
       {/* Renders nothing and receives nothing. 이 폰이 작업공간 출석부에 세어져서 동료의 점에 「온라인」으로
           보이게 한다(ADR-0160 ②, #4692). 구독 하나이고 소켓을 따라 오르내린다. */}
       <OnlineRollCall />
