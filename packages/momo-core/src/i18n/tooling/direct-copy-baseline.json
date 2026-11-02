@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "354708cbc30d121c5a8f54deb8e636af20bc7b52",
+  "baselineHead": "9c05dcfa0dfdd15b7526d95235a790f50814e2d0",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
