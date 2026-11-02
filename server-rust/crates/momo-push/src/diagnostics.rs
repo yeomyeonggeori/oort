@@ -25,13 +25,16 @@
 //! `apns_reason` in the log can hold the start of a relay's refusal text. [`apns_reason_code`] turns
 //! it into a **code** before it leaves this module, so a response never carries a relay's prose.
 //!
-//! `kind_off` (N3) and `quiet_hours` (N7) are part of the closed set but this module never emits
-//! them: the conditions they report (a per-kind switch, a work-hours schedule) are stored by later
-//! slices, so until then they do not exist for a member — and a test pins that.
+//! `kind_off` (N3, #4494) is emitted when the request names a `kind` whose **phone** switch the member
+//! turned off ([`momo_messaging::kind_phone_switch_in_tx`], the same rule the push judgment applies). It
+//! reads the member's stored switch and nothing else, so `ok: true` is still not "that push arrives".
+//! `quiet_hours` (N7) is part of the closed set but this module does not emit it yet: the work-hours
+//! schedule is stored by N3 and judged by N7, so until then the condition does not exist for a member —
+//! and a test pins that.
 
 use chrono::{DateTime, Utc};
 use momo_db::DbError;
-use momo_messaging::pause_in_force;
+use momo_messaging::{kind_phone_switch_in_tx, pause_in_force, NotificationKind};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
@@ -101,7 +104,7 @@ pub enum BlockerCode {
     /// Stored by the work-hours slice (N7). Never emitted before that.
     QuietHours,
     ChannelMuted,
-    /// Stored by the per-kind switch slice (N3). Never emitted before that.
+    /// The request named a kind whose phone switch is off (N3, #4494).
     KindOff,
     NoDevice,
     TokenInvalidated,
@@ -136,23 +139,6 @@ impl BlockerCode {
     }
 }
 
-/// The notification kinds the server tags a push target with (ADR-0206 종류 표 and 증보 1 F5). The
-/// engine owns this list; the diagnostics `?kind=` is validated against it so an unknown kind is a
-/// 400 today and `kind_off` / the `quiet_hours` pass-through can read it later without a contract
-/// change.
-pub const NOTIFICATION_KINDS: [&str; 10] = [
-    "dm",
-    "mentionHuman",
-    "mentionAgent",
-    "agentAnswer",
-    "approval",
-    "workDone",
-    "keyword",
-    "channelAll",
-    "threadReply",
-    "scheduledFailed",
-];
-
 /// One blocker with the values that go with its code (D11's 「덧붙는 값」 column). Only the fields
 /// that belong to the code are `Some`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -170,6 +156,8 @@ pub struct Blocker {
     pub apns_status: Option<i32>,
     /// `last_delivery_failed`: a **code** ([`apns_reason_code`]), never a relay's prose.
     pub apns_reason: Option<String>,
+    /// `kind_off`: the kind whose phone switch is off.
+    pub kind: Option<NotificationKind>,
 }
 
 impl Blocker {
@@ -182,6 +170,7 @@ impl Blocker {
             channel_id: None,
             apns_status: None,
             apns_reason: None,
+            kind: None,
         }
     }
 }
@@ -334,6 +323,7 @@ pub async fn compute_diagnostics(
     workspace_id: Uuid,
     member_id: Uuid,
     channel_id: Option<Uuid>,
+    kind: Option<NotificationKind>,
 ) -> Result<Diagnostics, DbError> {
     // One row whether or not the member has a `notification_rule` row (absence = no pause, no test).
     let rule = sqlx::query(
@@ -381,6 +371,17 @@ pub async fn compute_diagnostics(
             let mut blocker = Blocker::bare(BlockerCode::ChannelMuted);
             blocker.channel_id = Some(channel_id);
             blocker.until_ms = until.map(ms);
+            blockers.push(blocker);
+        }
+    }
+
+    // kind_off — the request named a kind and the member's phone switch for it is off. The same
+    // rule the push judgment applies (only a literal `false` is off; `workDone` is
+    // `work_complete_push`), so the code and the silence cannot disagree.
+    if let Some(kind) = kind {
+        if !kind_phone_switch_in_tx(conn, workspace_id, member_id, kind).await? {
+            let mut blocker = Blocker::bare(BlockerCode::KindOff);
+            blocker.kind = Some(kind);
             blockers.push(blocker);
         }
     }
@@ -673,19 +674,6 @@ mod tests {
                 "relay_unreachable",
                 "last_delivery_failed",
             ]
-        );
-    }
-
-    /// The `?kind=` list is the kind table of ADR-0206 (ten kinds, `threadReply` from 증보 1).
-    #[test]
-    fn the_notification_kinds_are_the_ten_of_the_kind_table() {
-        assert_eq!(NOTIFICATION_KINDS.len(), 10);
-        let unique: std::collections::BTreeSet<&str> = NOTIFICATION_KINDS.into_iter().collect();
-        assert_eq!(unique.len(), 10);
-        assert!(NOTIFICATION_KINDS.contains(&"threadReply"));
-        assert!(
-            !NOTIFICATION_KINDS.contains(&"channel_message"),
-            "a wire reason is not a kind"
         );
     }
 

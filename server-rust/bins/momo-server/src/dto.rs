@@ -2185,12 +2185,48 @@ pub struct AgentRunResponse {
     /// ignored rather than refused.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apps_used: Option<Value>,
+    /// ADR-0201 증보 v3 B12 (#4968) — what **this one run** has spent, read from the usage
+    /// ledger. Present only on the detail read of a team-AI task run; absent for every other
+    /// run (and on every other read of this DTO), so a run serializes exactly as before. A
+    /// deployed client builds its run from named fields, so the extra key is ignored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spent: Option<AgentRunSpentDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finished_at_ms: Option<i64>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+}
+
+/// openapi `AgentRunSpent` — the sums of one run's usage-ledger rows (ADR-0201 증보 v3 B12).
+///
+/// **One run, never a person**: four numbers and a flag, no member, no requester, no
+/// grouping key. The ledger has no requester column, and ADR-0147 증보 2026-10-30 D6 says
+/// 「누가 팀 AI를 많이 불렀나」는 계산하지도 표시하지도 않는다. Money is not here: the dollar
+/// figure is read-time arithmetic over `model_pricing` (`usage/agents`), and a client that
+/// wants 「약 $x 이상」 has the tokens to do it with.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunSpentDto {
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    /// The provider's own web searches.
+    pub web_searches: i64,
+    /// Some of the tokens are oort's estimate (the provider reported none). ADR-0147 D3: a
+    /// figure that may be an estimate says so.
+    pub estimated: bool,
+}
+
+impl From<&momo_agent::team_ai_task::RunSpent> for AgentRunSpentDto {
+    fn from(spent: &momo_agent::team_ai_task::RunSpent) -> Self {
+        Self {
+            prompt_tokens: spent.prompt_tokens,
+            completion_tokens: spent.completion_tokens,
+            web_searches: spent.web_searches,
+            estimated: spent.estimated,
+        }
+    }
 }
 
 /// Swift `AgentRunPageDTO` (:1266) — the channel work-run list's envelope.
@@ -2309,6 +2345,10 @@ pub struct AgentRunProgressDto {
     /// run never asked for an approval, or asked in a channel the viewer cannot see.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle: Option<AgentRunBundleDto>,
+    /// ADR-0201 증보 v3 B12 (#4968): what this run has spent. Present only for a team-AI task
+    /// run (the run read's field the task card and its end line refresh from); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spent: Option<AgentRunSpentDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_reason: Option<String>,
     /// 1 = next to be claimed. Absent unless the run is unclaimed and claimable.
@@ -2956,6 +2996,150 @@ pub struct NotificationRulesResponse {
     pub mention_overrides_mute: bool,
 }
 
+// ---------------------------------------------------------------------------
+// notification-prefs (ADR-0206 D5·D13, #4494 N3)
+// ---------------------------------------------------------------------------
+
+/// A closed confirmation token (D5). Today only `approval_push_off`; an unknown token is a 422 from
+/// the JSON extractor like any unknown field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationConfirmToken {
+    ApprovalPushOff,
+}
+
+/// One kind's cells in a `PATCH …/notification-prefs`. Per cell: omitted keeps what is stored,
+/// `null` resets to the kind's default, a boolean sets it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchNotificationSurfacesRequest {
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub phone: OptionalPatch<bool>,
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub desktop: OptionalPatch<bool>,
+}
+
+/// `kinds` of a `PATCH …/notification-prefs`: the ten kinds of the closed table. An unknown kind is
+/// a 422 (`deny_unknown_fields`), which is also what keeps `workDone` and the rest the engine's list.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PatchNotificationKindsRequest {
+    #[serde(default)]
+    pub dm: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub mention_human: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub mention_agent: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub agent_answer: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub approval: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub work_done: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub keyword: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub channel_all: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub thread_reply: Option<PatchNotificationSurfacesRequest>,
+    #[serde(default)]
+    pub scheduled_failed: Option<PatchNotificationSurfacesRequest>,
+}
+
+/// `presentation` of a `PATCH …/notification-prefs`: sound slots per kind (a bundled id or `none`),
+/// `null` resets that kind to its default sound. The keys are kinds; an unknown key is a 400.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PatchNotificationPresentationRequest {
+    pub sounds: BTreeMap<String, Option<String>>,
+}
+
+/// 근무 시간 (D13) on the wire, request and response alike. Replaced whole, never merged.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NotificationScheduleDto {
+    pub enabled: bool,
+    pub tz: String,
+    pub days: Vec<u8>,
+    pub start: String,
+    pub end: String,
+    pub pass_through: Vec<momo_messaging::NotificationKind>,
+}
+
+/// `PATCH …/notification-prefs` request. Every field optional; an omitted one keeps what is stored
+/// when the write lands (merged under the row lock). An empty body is a 400 and an unknown field a
+/// 422.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PatchNotificationPrefsRequest {
+    #[serde(default)]
+    pub kinds: Option<PatchNotificationKindsRequest>,
+    #[serde(default)]
+    pub presentation: Option<PatchNotificationPresentationRequest>,
+    /// Omitted = keep, `null` = remove the schedule, an object = replace it whole.
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub schedule: OptionalPatch<NotificationScheduleDto>,
+    /// 0, 60 or 300 (400 `invalid_phone_delay` otherwise).
+    #[serde(default)]
+    pub phone_delay_secs: Option<i64>,
+    #[serde(default)]
+    pub keyword_overrides_mute: Option<bool>,
+    #[serde(default)]
+    pub approval_time_sensitive: Option<bool>,
+    #[serde(default)]
+    pub confirm: Option<Vec<NotificationConfirmToken>>,
+}
+
+/// One kind in the response: its switch on each surface that applies to it (`desktop` is absent
+/// where the surface does not apply to the kind).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationSurfaceSwitchesDto {
+    pub phone: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desktop: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationPresentationDto {
+    /// Stored slots only; a kind that is absent plays its default sound.
+    pub sounds: BTreeMap<&'static str, String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationQuietDto {
+    pub active: bool,
+    pub resumes_at_ms: Option<i64>,
+}
+
+/// The server's own evaluation (D13): a client reads it and never redoes the time-zone math.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationEffectiveDto {
+    pub paused: bool,
+    pub paused_until_ms: Option<i64>,
+    pub quiet: NotificationQuietDto,
+}
+
+/// `GET|PATCH …/notification-prefs` response (ADR-0206 D13). Every kind is present with its stored
+/// value or its default, so no stored row answers today's behavior.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotificationPrefsResponse {
+    pub kinds: BTreeMap<&'static str, NotificationSurfaceSwitchesDto>,
+    pub presentation: NotificationPresentationDto,
+    pub schedule: Option<NotificationScheduleDto>,
+    pub phone_delay_secs: i16,
+    pub keyword_overrides_mute: bool,
+    pub approval_time_sensitive: bool,
+    pub effective: NotificationEffectiveDto,
+    /// A patch response only: `["approval_push_off"]` when this write turned approval push off.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<&'static str>,
+}
+
 /// `GET …/notification-diagnostics` query (ADR-0206 D11, #4341). Both fields optional and read as
 /// text so the route can answer its own 400 sentences: a `channelId` that is not a UUID, a `kind`
 /// that is not one of the closed kinds.
@@ -2965,8 +3149,8 @@ pub struct NotificationDiagnosticsQuery {
     /// Also evaluate `channel_muted` for this channel (404 when the caller cannot see it).
     #[serde(default)]
     pub channel_id: Option<String>,
-    /// A notification kind. Validated against the closed list now; `kind_off` and the work-hours
-    /// pass-through read it when their slices land.
+    /// A notification kind from the closed table (400 otherwise). `kind_off` reads it (N3); the
+    /// work-hours pass-through reads it when that slice lands (N7).
     #[serde(default)]
     pub kind: Option<String>,
 }
@@ -2990,6 +3174,9 @@ pub struct NotificationBlockerDto {
     pub apns_status: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apns_reason: Option<String>,
+    /// `kind_off`: the kind whose phone switch is off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<&'static str>,
 }
 
 /// `devices` of the diagnostics response: how many of the caller's push tokens are live and dead.

@@ -513,6 +513,8 @@ pub(crate) fn run_response(run: &momo_agent::AgentRunRow) -> crate::dto::AgentRu
         error: run.error.clone(),
         agent_reported: crate::routes::agent_gateway::agent_reported_of(run.output.as_ref()),
         apps_used: crate::routes::apps_used::of_output(run.output.as_ref()),
+        // The detail read fills it (a team-AI task run only); every other caller has none.
+        spent: None,
         started_at_ms: run.started_at.map(epoch_ms),
         finished_at_ms: run.finished_at.map(epoch_ms),
         created_at_ms: epoch_ms(run.created_at),
@@ -559,6 +561,27 @@ pub(crate) async fn emit_terminal_agent_status(
         return Ok(());
     };
     emit_rail_frame(conn, workspace_id, channel_id, &frame).await
+}
+
+/// Publish the `(thinking, awaiting_approval)` rail frame for a run the caller's transaction just
+/// parked on a person (#5084) — the server-side twin of `momo-agent-worker`'s
+/// `emit_awaiting_approval_agent_status`, the same few lines around the same builder
+/// ([`momo_agent::awaiting_approval_agent_status_payload`]).
+///
+/// Called on the **park's own connection**, after the approval and its card, and only on the arm where
+/// the guarded park returned `true`: the frame then commits with the run's new status, or not at all.
+/// Like every rail frame it is partitioned on the channel, so it queues behind the card it points at.
+pub(crate) async fn emit_awaiting_approval_agent_status(
+    conn: &mut PgConnection,
+    address: momo_agent::AgentRunAddress,
+    approval_id: Uuid,
+) -> Result<(), DbError> {
+    let frame = momo_agent::awaiting_approval_agent_status_payload(
+        address,
+        epoch_ms(chrono::Utc::now()),
+        approval_id,
+    );
+    emit_rail_frame(conn, address.workspace_id, address.channel_id, &frame).await
 }
 
 /// Put one already-shaped progress-rail frame on the outbox (goal SRV-B3d).

@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { agentRunLedgerFromWire } from "@momo/core/lib/api";
 import {
   workTimelineSections,
@@ -12,7 +14,7 @@ import {
 import { LocaleProvider } from "@/i18n/LocaleProvider";
 import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 import type { AppLocale } from "@/i18n/localeStore";
-import { OortRecordSection, WorkTimelineSections } from "./WorkTimelineView";
+import { OortRecordSection, WorkTimelineRows, WorkTimelineSections } from "./WorkTimelineView";
 
 // =============================================================================
 // 작업 타임라인의 칸과 줄 (#4654). 무엇을 접고 어떻게 가르는지는 core가 가진다
@@ -38,7 +40,14 @@ afterEach(() => {
   host?.remove();
   root = null;
   host = null;
+  vi.unstubAllGlobals();
 });
+
+function rerender(element: ReactElement): void {
+  act(() => {
+    root?.render(createElement(LocaleProvider, { locale: korean, children: element }));
+  });
+}
 
 function render(element: ReactElement): HTMLElement {
   host = document.createElement("div");
@@ -174,5 +183,114 @@ describe("「oort 기록」 칸의 네 상태", () => {
     host?.remove();
     const ended = render(createElement(OortRecordSection, { record, open: false, nowMs: T }));
     expect(text(q(ended, "agent-work-panel-oort-empty"))).toBe("이 일에서 oort가 잰 도구 호출은 없었어요.");
+  });
+});
+
+describe("줄의 모션 (#4657, A1 모션 규칙)", () => {
+  const rowsOf = (...over: Array<Partial<WorkTimelineRow> & Pick<WorkTimelineRow, "id">>) =>
+    over.map((o, index) => row({ source: "agent", toolKind: "edit", atMs: T + index, ...o }));
+  const li = (el: ParentNode) => qa(el, "work-timeline-row");
+
+  it("같은 id의 줄은 같은 DOM 노드에서 상태만 바뀌고, 새로 도착한 줄만 도착 표지를 받으며, 점은 진행 중인 마지막 행 하나뿐이다", () => {
+    const first = rowsOf(
+      { id: "agent|activity|a1", label: "리포트 고치기", status: "running" },
+      { id: "agent|activity|a2", label: "테스트 돌리기", status: "running", toolKind: "run" }
+    );
+    const el = render(createElement(WorkTimelineRows, { rows: first, nowMs: T, live: true }));
+    const [a1, a2] = li(el) as [Element, Element];
+    // 처음 그릴 때 이미 있던 줄은 움직이지 않는다. 점은 진행 중인 마지막 행(a2) 하나.
+    expect(li(el).map((node) => node.hasAttribute("data-arrived"))).toEqual([false, false]);
+    expect(qa(el, "work-timeline-dot")).toHaveLength(1);
+    expect(a2.contains(q(el, "work-timeline-dot"))).toBe(true);
+
+    // a1이 끝나고 새 줄 a3이 붙는다.
+    rerender(
+      createElement(WorkTimelineRows, {
+        rows: rowsOf(
+          { id: "agent|activity|a1", label: "리포트 고치기", status: "done" },
+          { id: "agent|activity|a2", label: "테스트 돌리기", status: "running", toolKind: "run" },
+          { id: "agent|activity|a3", label: "요약 쓰기", status: "running", toolKind: "other" }
+        ),
+        nowMs: T,
+        live: true,
+      })
+    );
+    const after = li(el);
+    expect(after[0]).toBe(a1); // 제자리 행: 같은 노드
+    expect(after[1]).toBe(a2);
+    expect(a1.getAttribute("data-status")).toBe("done");
+    expect(q(a1, "work-timeline-status")).toBeNull(); // 끝남은 조용하다
+    expect(after.map((node) => node.hasAttribute("data-arrived"))).toEqual([false, false, true]);
+    // 점은 새로 진행 중인 마지막 행으로 옮겨 갔다: 여전히 하나다.
+    expect(qa(el, "work-timeline-dot")).toHaveLength(1);
+    expect((after[2] as Element).contains(q(el, "work-timeline-dot"))).toBe(true);
+
+    // 연결이 끊기면 점이 걷히고 칩은 에이전트색(data-live)을 잃는다. 줄은 그대로다.
+    rerender(createElement(WorkTimelineRows, { rows: rowsOf(
+      { id: "agent|activity|a1", label: "리포트 고치기", status: "done" },
+      { id: "agent|activity|a2", label: "테스트 돌리기", status: "running", toolKind: "run" },
+      { id: "agent|activity|a3", label: "요약 쓰기", status: "running", toolKind: "other" }
+    ), nowMs: T, live: false }));
+    expect(qa(el, "work-timeline-dot")).toHaveLength(0);
+    expect(qa(el, "work-timeline-status").some((chip) => chip.hasAttribute("data-live"))).toBe(false);
+    expect(li(el)[0]).toBe(a1);
+  });
+
+  it("동작 줄이기에서는 점이 멈춘 채 서고, 시각·개수는 초 단위 숫자 없이 고정 폭 숫자다", () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("reduce"),
+      addEventListener() {},
+      removeEventListener() {},
+    }));
+    const el = render(
+      createElement(WorkTimelineRows, {
+        rows: rowsOf({ id: "agent|activity|a1", label: "리포트 고치기", status: "running", count: 3 }),
+        nowMs: T,
+        live: true,
+      })
+    );
+    const dot = q(el, "work-timeline-dot") as Element;
+    expect(dot.hasAttribute("data-still")).toBe(true);
+    expect(text(q(el, "work-timeline-time"))).toMatch(/^\d{2}:\d{2}$/);
+    expect(q(el, "work-timeline-time")?.hasAttribute("data-numeric")).toBe(true);
+    expect(text(q(el, "work-timeline-repeat"))).toContain("3번");
+    expect(text(el)).not.toMatch(/\d+초/);
+    act(() => root?.unmount());
+    host?.remove();
+    vi.unstubAllGlobals();
+    vi.stubGlobal("matchMedia", () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+    const moving = render(
+      createElement(WorkTimelineRows, {
+        rows: rowsOf({ id: "agent|activity|a1", label: "리포트 고치기", status: "running" }),
+        nowMs: T,
+        live: true,
+      })
+    );
+    expect(q(moving, "work-timeline-dot")?.hasAttribute("data-still")).toBe(false);
+  });
+
+  it("모션의 값은 새 숫자가 아니라 기존 사다리다: 새 줄은 불투명도만 표준 길이, 상태는 즉시 길이, 동작 줄이기는 0 (숫자는 브라우저 시험이 잰다)", () => {
+    // 이 계약의 숫자(A1 모션 규칙 1·2). 숫자 손기입은 `motion.css`에만 두는 것이 규칙이라(`raw_motion`) 시험도 상수와
+    // 조립한 정규식으로 읽는다.
+    const STANDARD = 240;
+    const INSTANT = 120;
+    const motion = readFileSync(resolve(process.cwd(), "src/design/motion.css"), "utf8");
+    const tokens = readFileSync(resolve(process.cwd(), "src/design/tokens.css"), "utf8");
+    const view = readFileSync(resolve(process.cwd(), "src/features/agents/WorkTimelineView.tsx"), "utf8");
+    // 새 줄: `motion-enter` = 불투명도 키프레임 + `--motion-standard`. 이동(transform)이 없다.
+    expect(motion).toMatch(/@utility motion-enter \{\s*animation: motion-fade-in var\(--motion-standard\)/);
+    const fade = motion.slice(motion.indexOf("@keyframes motion-fade-in"), motion.indexOf("@keyframes motion-fade-out"));
+    expect(fade).toMatch(/opacity/);
+    expect(fade).not.toMatch(/transform|translate|margin|top|height/);
+    expect(motion).toMatch(new RegExp(`--motion-standard:\\s*${STANDARD}ms`));
+    expect(motion).toMatch(new RegExp(`--motion-instant:\\s*${INSTANT}ms`));
+    // 상태 변화: 색 전환만이고 기본 전환 길이가 `--motion-instant`다.
+    expect(tokens).toMatch(/--default-transition-duration:\s*var\(--motion-instant\)/);
+    expect(view).toContain("transition-colors");
+    expect(view).toContain("data-arrived:motion-enter");
+    // 동작 줄이기: 사다리가 0ms가 된다.
+    const reduced = motion.slice(motion.indexOf("@media (prefers-reduced-motion: reduce)"));
+    expect(reduced).toMatch(new RegExp(`--motion-instant:\\s*${0}ms`));
+    expect(reduced).toMatch(new RegExp(`--motion-standard:\\s*${0}ms`));
   });
 });

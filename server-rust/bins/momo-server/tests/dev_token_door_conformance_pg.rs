@@ -2487,12 +2487,10 @@ const CONTRACT_WITHOUT_MOUNT: Drift = &[
         ],
     ),
     (
-        "notification v1 operations in openapi.yaml (`notification-prefs`, `notification-keywords`): the router mounts `…/notification-rules` and `…/channels/{ch}/notification-pref` instead (`notification-diagnostics` is mounted since #4341)",
+        "notification v1 operations in openapi.yaml (`notification-keywords`): the router mounts `…/notification-rules` and `…/channels/{ch}/notification-pref` instead (`notification-diagnostics` is mounted since #4341, `notification-prefs` since #4494)",
         &[
             ("GET", "/v1/workspaces/{}/notification-keywords"),
             ("PUT", "/v1/workspaces/{}/notification-keywords"),
-            ("GET", "/v1/workspaces/{}/notification-prefs"),
-            ("PATCH", "/v1/workspaces/{}/notification-prefs"),
         ],
     ),
     (

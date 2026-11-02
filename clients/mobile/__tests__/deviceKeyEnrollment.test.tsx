@@ -1,4 +1,5 @@
 import type {DeviceKey} from '@momo/core/features/auth/deviceKeys';
+import {dismissTemporarySurfaces} from '@momo/core/features/notifications/entryDismiss';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
@@ -49,6 +50,7 @@ import {
   sessionPort,
 } from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {releaseReduceMotion, setReduceMotion} from './fixtures/sheetContract';
 
 /**
  * The Mac's own function, from clients/web as it ships. Loaded with `require`
@@ -973,6 +975,27 @@ describe('the QR link gate', () => {
       timeout: 8000,
     });
   }, 15000);
+
+  it('알림이 새 입구로 들어와도 시트는 걷히지 않는다 — 한 번만 서는 승인 대기라 걷히면 다시 열 문이 없다 (#5058)', async () => {
+    // 동작 줄이기를 켠다: 걷힌다면 곧바로 사라져, 남아 있다는 단정이 시계를 기다리지 않고 결정적으로 선다.
+    await setReduceMotion(true);
+    try {
+      noteConnectRoute('qr');
+      renderGate();
+      await waitFor(() => expect(screen.getByTestId('device-key-link-sheet')).toBeTruthy());
+
+      act(() => {
+        dismissTemporarySurfaces();
+      });
+      expect(screen.getByTestId('device-key-link-sheet')).toBeTruthy();
+
+      // 사람이 직접 닫는 길은 그대로다 — X 가 닫는다.
+      fireEvent.press(screen.getByTestId('device-key-link-close'));
+      await waitFor(() => expect(screen.queryByTestId('device-key-link-sheet')).toBeNull());
+    } finally {
+      releaseReduceMotion();
+    }
+  });
 
   it('on a simulator: says so honestly and registers nothing', async () => {
     mockNative = {...phone(), secureEnclaveAvailable: false, status: jest.fn(async () => 'unsupported')};
