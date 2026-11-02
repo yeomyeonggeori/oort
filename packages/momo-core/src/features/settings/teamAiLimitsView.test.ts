@@ -240,7 +240,7 @@ describe("문장 (ko, 한국 시간)", () => {
     const copy = limitRowCopy(rowOf(ON, "dailyTokens"), ON, SEOUL, NOW);
     expect(copy.headline).toBe("오늘 62% 사용");
     expect(copy.detail).toBe("124,000 / 200,000 토큰");
-    expect(copy.notes).toEqual(["서버 운영자가 하루 200,000토큰까지로 제한했어요."]);
+    expect(copy.notes).toEqual(["서버 운영자가 하루 200,000 토큰까지로 제한했어요."]);
     expect(copy.label).toBe("하루 토큰 한도");
     expect(copy.unit).toBe("토큰");
   });
@@ -271,7 +271,39 @@ describe("문장 (ko, 한국 시간)", () => {
       resets: null,
       notes: [],
     });
-    expect(limitRowCopy(rowOf(none, "dailySearches"), none, SEOUL, NOW).detail).toBe("오늘 웹 검색 3회");
+    expect(limitRowCopy(rowOf(none, "dailySearches"), none, SEOUL, NOW).detail).toBe("오늘 3회 사용");
+  });
+
+  // #5102: 나란한 사용량 줄은 어순과 띄어쓰기가 한 틀이다. 검증 줄 2회차(L4)는 「오늘 0 토큰 사용」 옆에 「오늘 웹 검색 0회」가
+  // 서서 수가 낱말 앞에 오기도 뒤에 오기도 한다고, 「{limit}토큰까지로」와 「{used} 토큰」이 섞였다고 짚었다.
+  // 틀: 「오늘·이번 달 + 수량 + 사용」. 수는 기간 바로 뒤에 서고, 무엇의 수인지(「웹 검색」)는 바로 위 행 라벨이 말한다.
+  // 단위 띄어쓰기: 세는 말(회·%)은 수에 붙이고, 명사 단위(토큰)는 띄운다(사전의 나머지 단위 단계·번·개·초·분·명·건도 붙는다).
+  it("사용량 줄은 한 틀이다: 오늘 + 수량 + 사용, 회·%는 수에 붙고 토큰은 띄어진다", () => {
+    const off = status();
+    const on = status({
+      limits: { dailyTokens: 500_000, dailySearches: 80, monthlyUsd: null },
+      effective: { dailyTokens: 200_000, dailySearches: 50 },
+      operatorCeiling: { dailyTokens: 200_000, dailySearches: 50, helperOff: false, searchOff: false },
+    });
+    const row = (s: TeamAiLimitsStatus, field: LimitRow["field"]) =>
+      limitRowCopy(rowOf(s, field), s, SEOUL, NOW);
+    const today = [
+      row(off, "dailyTokens").detail,
+      row(off, "dailySearches").detail,
+      row(on, "dailyTokens").headline,
+      row(on, "dailySearches").headline,
+    ];
+    expect(today).toEqual(["오늘 124,000 토큰 사용", "오늘 3회 사용", "오늘 62% 사용", "오늘 6% 사용"]);
+    for (const line of today) expect(line).toMatch(/^오늘 [\d,]+(?: 토큰|회|%) 사용$/);
+    const ofLimit = [row(on, "dailyTokens").detail, row(on, "dailySearches").detail];
+    expect(ofLimit).toEqual(["124,000 / 200,000 토큰", "3 / 50회"]);
+    for (const line of ofLimit) expect(line).toMatch(/^[\d,]+ \/ [\d,]+(?: 토큰|회)$/);
+    const ceilings = [row(on, "dailyTokens").notes[0], row(on, "dailySearches").notes[0]];
+    expect(ceilings).toEqual([
+      "서버 운영자가 하루 200,000 토큰까지로 제한했어요.",
+      "서버 운영자가 하루 50회까지로 제한했어요.",
+    ]);
+    for (const line of ceilings) expect(line).toMatch(/^서버 운영자가 하루 [\d,]+(?: 토큰|회)까지로 제한했어요\.$/);
   });
 
   it("관리자 값 없이 운영자 천장만 있어도 그 천장에 대한 사용 비율을 말한다", () => {
@@ -399,5 +431,34 @@ describe("문장 (en)", () => {
     expect(usd.notes).toEqual([
       "1 request on a model with no known price is not counted in the amount.",
     ]);
+  });
+
+  // #5102: 영어도 같은 틀이다. 「3 web searches today」에는 「used」가 없어 옆의 「124,000 tokens used today」와 달랐다.
+  it("사용량 줄은 한 틀이다: 수량 + used + 기간, 단위 낱말은 입력칸 옆 단위와 같다", () => {
+    const off = status();
+    const on = status({
+      limits: { dailyTokens: 500_000, dailySearches: 80, monthlyUsd: null },
+      effective: { dailyTokens: 200_000, dailySearches: 50 },
+      operatorCeiling: { dailyTokens: 200_000, dailySearches: 50, helperOff: false, searchOff: false },
+    });
+    const row = (s: TeamAiLimitsStatus, field: LimitRow["field"]) => limitRowCopy(rowOf(s, field), s, US, NOW);
+    const today = [
+      row(off, "dailyTokens").detail,
+      row(off, "dailySearches").detail,
+      row(on, "dailyTokens").headline,
+      row(on, "dailySearches").headline,
+    ];
+    expect(today).toEqual([
+      "124,000 tokens used today",
+      "3 searches used today",
+      "62% used today",
+      "6% used today",
+    ]);
+    for (const line of today) expect(line).toMatch(/^[\d,]+(?:%| tokens| searches) used today$/);
+    expect(row(on, "dailyTokens").unit).toBe("tokens");
+    expect(row(on, "dailySearches").unit).toBe("searches");
+    const ofLimit = [row(on, "dailyTokens").detail, row(on, "dailySearches").detail];
+    expect(ofLimit).toEqual(["124,000 of 200,000 tokens", "3 of 50 searches"]);
+    for (const line of ofLimit) expect(line).toMatch(/^[\d,]+ of [\d,]+ (?:tokens|searches)$/);
   });
 });

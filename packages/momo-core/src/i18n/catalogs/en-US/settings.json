@@ -35,7 +35,7 @@
   "settings.aiLimits.tokensOfLimit": "{used, number} of {limit, number} tokens",
   "settings.aiLimits.searchesOfLimit": "{used, number} of {limit, number} searches",
   "settings.aiLimits.tokensToday": "{used, number} tokens used today",
-  "settings.aiLimits.searchesToday": "{used, number} web searches today",
+  "settings.aiLimits.searchesToday": "{used, number} searches used today",
   "settings.aiLimits.usdOfLimit": "{spent} of {limit}",
   "settings.aiLimits.usdThisMonth": "{spent} this month",
   "settings.aiLimits.usdApprox": "About {amount} or more",
