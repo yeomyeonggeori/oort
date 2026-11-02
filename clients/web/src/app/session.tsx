@@ -27,6 +27,7 @@ import {
   subscribeSessionRestoreHold,
 } from "@/features/auth/onboardingSessionHold";
 import { clearAllDrafts } from "@/features/chat/draftStore";
+import { clearEntryDrafts } from "@/lib/entryDrafts";
 import { clearDownloadHistory } from "@/features/downloads/downloadsStore";
 import { clearAllFirstMentionRecords } from "@/features/hostedAgents/firstMentionStore";
 import { clearApprovalAvatarPreviews } from "@/features/timeline/useApprovalAvatarPreview";
@@ -161,6 +162,7 @@ export function useRestoredSession(): SessionLifecycle {
     clearSession();
     clearApprovalAvatarPreviews(); // 본인 전용 사진: 계정 경계를 넘어 남지 않게.
     clearDownloadHistory(); // 받은 파일의 이름도 다음 사람에게 남지 않게(디스크의 파일은 그대로).
+    clearEntryDrafts(); // 알림 클릭이 걷어 간 대화상자의 입력도: 같은 페이지에서 다음 사람이 이어 들어와도 보이지 않게(#5058).
     setSession(null);
     setStatus("anonymous");
   }, [expired]);
@@ -209,6 +211,9 @@ export function useRestoredSession(): SessionLifecycle {
     clearAllFirstMentionRecords();
     clearApprovalAvatarPreviews();
     clearDownloadHistory(); // 받은 파일의 이름은 이 기기에서 이 사람의 흔적이다(#4587).
+    // 알림 클릭이 걷어 간 대화상자의 입력(`lib/entryDrafts.ts`)도 같은 이유로 지운다 — 메모리에만 있지만, 같은 페이지에서 같은
+    // 워크스페이스로 다른 사람이 이어 들어오면 앞 사람의 검색어·상태 문구가 그 사람의 대화상자에 나타난다(#5058).
+    clearEntryDrafts();
     setSession(null);
     setStatus("anonymous");
   }, []);

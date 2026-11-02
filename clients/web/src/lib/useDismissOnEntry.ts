@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { onEntryDismiss } from "@momo/core/features/notifications/entryDismiss";
+import { onEntryDismiss, onEntryHold } from "@momo/core/features/notifications/entryDismiss";
 
 /**
  * 알림이 새 입구로 들어올 때(`dismissTemporarySurfaces()`, #4667) 이 표면을 **자기 닫는 길로** 닫는다.
@@ -16,4 +16,15 @@ export function useDismissOnEntry(onDismiss: () => void): void {
   const latest = useRef(onDismiss);
   latest.current = onDismiss;
   useEffect(() => onEntryDismiss(() => latest.current()), []);
+}
+
+/**
+ * 알림 입구가 표면을 닫기 **전에** 불린다 — 쓰던 입력을 맡기는 자리(#5058). 위 훅과 같은 ref 규칙이다(폰의 같은 이름의 훅,
+ * `clients/mobile/src/lib/useDismissOnEntry.ts`). 코어가 맡기는 구독자를 어느 닫는 구독자보다 먼저 부르므로, 대화상자가 걷히거나
+ * 그 안의 입력이 언마운트되기 전에 값을 읽을 수 있다.
+ */
+export function useHoldOnEntry(onHold: () => void): void {
+  const latest = useRef(onHold);
+  latest.current = onHold;
+  useEffect(() => onEntryHold(() => latest.current()), []);
 }

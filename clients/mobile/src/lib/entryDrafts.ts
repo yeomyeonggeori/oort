@@ -17,6 +17,10 @@ import {useHoldOnEntry} from './useDismissOnEntry';
 // 이 앱 실행 안의 **메모리에만** 둔다. 디스크에 쓰지 않는다(`work/delegate/session.ts` 와 같은 이유 — 사람이 쓴 본문이고
 // 보내기 전에는 서버도 본 적이 없다). 앱이 죽으면 사라지는 것이 약속이다. 돌려주면 지운다: 두 번째로 연 시트에 같은
 // 글이 또 나타나지 않고, 그 시트를 사람이 닫으면 평소처럼 버려진다.
+//
+// **로그아웃이 비운다**(`clearEntryDrafts`, #5058). 한 실행 안에서 같은 워크스페이스로 다른 사람이 이어 들어와도 앞 사람이
+// 알림에 밀려 놓친 이름·글이 나타나지 않는다. 자리의 키가 워크스페이스로 묶이는 것은 다른 워크스페이스를 막고, 이것은 같은
+// 워크스페이스의 다른 사람을 막는다 — 둘은 서로의 대신이 아니다. 부르는 자리는 `session/useSession.tsx` 의 두 곳이다.
 // =============================================================================
 
 const held = new Map<string, unknown>();
@@ -67,7 +71,15 @@ export function __peekEntryDraft<T>(key: string): T | undefined {
   return peek<T>(key);
 }
 
-/** 시험 이음매. */
-export function __resetEntryDrafts(): void {
+/**
+ * 맡겨 둔 글을 모두 비운다. 로그아웃(`signOut`)과 로그인 화면으로 돌아오는 순간(`useAuthGate` 가 세션 없음·만료를 볼 때 — 토큰
+ * 만료 포함)에 부른다(#5058). 읽어 가는 쪽(`useRestoredEntryDraft`)은 자기 키만 지우므로, 모두 비우는 길은 이것 하나다.
+ */
+export function clearEntryDrafts(): void {
   held.clear();
+}
+
+/** 시험 이음매. 운영 코드는 `clearEntryDrafts` 를 쓴다. */
+export function __resetEntryDrafts(): void {
+  clearEntryDrafts();
 }
