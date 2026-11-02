@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   LIGHTBOX_FIT_VIEW,
+  LIGHTBOX_KEY_PAN_DIVISOR,
   LIGHTBOX_MAX_ZOOM,
   clampLightboxView,
   clampLightboxZoom,
@@ -10,12 +11,14 @@ import {
   lightboxActualSizeZoom,
   lightboxAttachments,
   lightboxInfoLines,
+  lightboxPanDelta,
   lightboxPositionLabel,
   lightboxSentAtLabel,
   lightboxWheelFactor,
   lightboxZoomKeyAction,
   lightboxZoomLabel,
   nextImageLightboxIndex,
+  parseImageDataUrl,
   stepLightboxZoom,
   updateAttachmentIdSet,
   zoomLightboxViewAt,
@@ -279,12 +282,44 @@ describe("image lightbox zoom math (#4770)", () => {
     expect(key({ key: "0", code: "Numpad0", ctrlKey: true })).toBe("fit");
   });
 
-  it("leaves a bare plus, minus or zero and option-modified combinations to the browser", () => {
-    expect(lightboxZoomKeyAction({ key: "=", code: "Equal" })).toBeNull();
-    expect(lightboxZoomKeyAction({ key: "0", code: "Digit0" })).toBeNull();
-    expect(lightboxZoomKeyAction({ key: "_", code: "Minus" })).toBeNull();
+  // #5190: 사진 앱처럼 수식 키 없이도 된다. 그래도 ⌥ 조합(OS·입력기가 특수 문자를 만든다)과 다른 글자는 받지 않는다.
+  it("reads a bare plus, minus or zero as a zoom key too, by character or by physical key, and leaves option combinations and other keys alone", () => {
+    expect(lightboxZoomKeyAction({ key: "=", code: "Equal" })).toBe("in");
+    expect(lightboxZoomKeyAction({ key: "+", code: "Equal" })).toBe("in");
+    expect(lightboxZoomKeyAction({ key: "+", code: "NumpadAdd" })).toBe("in");
+    expect(lightboxZoomKeyAction({ key: "-", code: "Minus" })).toBe("out");
+    expect(lightboxZoomKeyAction({ key: "_", code: "Minus" })).toBe("out");
+    expect(lightboxZoomKeyAction({ key: "-", code: "NumpadSubtract" })).toBe("out");
+    expect(lightboxZoomKeyAction({ key: "0", code: "Digit0" })).toBe("fit");
+    expect(lightboxZoomKeyAction({ key: "0", code: "Numpad0" })).toBe("fit");
     expect(lightboxZoomKeyAction({ key: "=", code: "Equal", metaKey: true, altKey: true })).toBeNull();
-    expect(lightboxZoomKeyAction({ key: "k", code: "KeyK", metaKey: true })).toBeNull();
+    expect(lightboxZoomKeyAction({ key: "0", code: "Digit0", altKey: true })).toBeNull();
+    for (const [key, code] of [["k", "KeyK"], ["1", "Digit1"], ["Enter", "Enter"], ["ArrowRight", "ArrowRight"], [" ", "Space"], ["Escape", "Escape"]] as const) {
+      expect(lightboxZoomKeyAction({ key, code }), key).toBeNull();
+      expect(lightboxZoomKeyAction({ key, code, metaKey: true }), `meta ${key}`).toBeNull();
+    }
+  });
+
+  it("maps arrow keys to a scroll-like pan step and ignores modified or non-arrow keys", () => {
+    expect(lightboxPanDelta({ key: "ArrowRight" }, 88)).toEqual({ x: -88, y: 0 });
+    expect(lightboxPanDelta({ key: "ArrowLeft" }, 88)).toEqual({ x: 88, y: 0 });
+    expect(lightboxPanDelta({ key: "ArrowDown" }, 88)).toEqual({ x: 0, y: -88 });
+    expect(lightboxPanDelta({ key: "ArrowUp" }, 88)).toEqual({ x: 0, y: 88 });
+    expect(lightboxPanDelta({ key: "ArrowRight", metaKey: true }, 88)).toBeNull();
+    expect(lightboxPanDelta({ key: "ArrowRight", ctrlKey: true }, 88)).toBeNull();
+    expect(lightboxPanDelta({ key: "ArrowRight", altKey: true }, 88)).toBeNull();
+    expect(lightboxPanDelta({ key: "a" }, 88)).toBeNull();
+    expect(LIGHTBOX_KEY_PAN_DIVISOR).toBe(8);
+  });
+
+  it("splits an image data url into its type and base64 body, and refuses anything else", () => {
+    expect(parseImageDataUrl("data:image/png;base64,AAAA")).toEqual({ mime: "image/png", base64: "AAAA" });
+    expect(parseImageDataUrl("data:IMAGE/WebP;base64,QUJD")).toEqual({ mime: "image/webp", base64: "QUJD" });
+    expect(parseImageDataUrl("data:image/svg+xml;base64,PHN2Zz4=")?.mime).toBe("image/svg+xml");
+    expect(parseImageDataUrl("data:text/html;base64,PGI+")).toBeNull();
+    expect(parseImageDataUrl("data:image/png,not-base64")).toBeNull();
+    expect(parseImageDataUrl("https://example.test/a.png")).toBeNull();
+    expect(parseImageDataUrl("data:image/png;base64")).toBeNull();
   });
 
   it("keeps the picture point under the cursor fixed while zooming in, from fit and from an already panned view", () => {
