@@ -72,7 +72,7 @@ export function __peekEntryDraft<T>(key: string): T | undefined {
 }
 
 /**
- * 맡겨 둔 글을 모두 비운다. 로그아웃(`signOut`)과 로그인 화면으로 돌아오는 순간(`useAuthGate` 가 `signedOut` 일 때 — 토큰
+ * 맡겨 둔 글을 모두 비운다. 로그아웃(`signOut`)과 로그인 화면으로 돌아오는 순간(`useAuthGate` 가 세션 없음·만료를 볼 때 — 토큰
  * 만료 포함)에 부른다(#5058). 읽어 가는 쪽(`useRestoredEntryDraft`)은 자기 키만 지우므로, 모두 비우는 길은 이것 하나다.
  */
 export function clearEntryDrafts(): void {

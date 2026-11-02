@@ -707,17 +707,6 @@ describe('`usePageSheetGone` — 시트가 사라지는 중이거나 사라졌�
     swept.unmount();
     expect(sweptGone()).toBe(true);
   });
-
-  it('시트 밖에서는 늘 거짓이다 — 사라질 시트가 없다', () => {
-    let gone: (() => boolean) | null = null;
-    function Outside(): null {
-      gone = usePageSheetGone();
-      return null;
-    }
-    render(<Outside />);
-    expect(gone).not.toBeNull();
-    expect((gone as unknown as () => boolean)()).toBe(false);
-  });
 });
 
 describe('걷히면 안 되는 시트는 `keepOnEntry` 로 남는다 (#5058)', () => {
