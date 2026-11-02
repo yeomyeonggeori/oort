@@ -341,18 +341,9 @@ export function ThreadComposer({
       data-composer-shell=""
       data-testid="thread-composer"
     >
-      <AttachmentTray
-        drafts={tray.drafts}
-        rejected={tray.rejected}
-        folders={tray.folders}
-        onRemove={(localId) => dropDraft(trayKey, localId)}
-        onRetry={(localId) => retryDraft(trayKey, attachTarget, localId)}
-        onClear={() => clearSurface(trayKey)}
-        onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
-      />
-      {/* 보내기 전 링크 미리보기(#5016): 첨부 트레이와 같은 줄 모양으로 그 바로 아래, 입력 그릇 위다. 줄은 그릇 밖이라
+      {/* 보내기 전 링크 미리보기(#5016): 입력 그릇 위, 그릇 밖의 한 줄이다. 줄은 그릇 밖이라
           ✕가 답글을 보내지 않고, 그릇을 눌러 캐럿을 돌려주는 규칙에 카드 링크가 섞이지 않는다. 채널 입력창과 한
-          화면에 서므로 시험 열쇠는 `thread-composer-` 를 앞에 단다. */}
+          화면에 서므로 시험 열쇠는 `thread-composer-` 를 앞에 단다. 첨부 줄(#5200)은 이 줄이 아니라 그릇 **안**이다. */}
       <ComposerLinkPreview
         cards={linkPreview.cards}
         suppressed={linkPreview.suppressed}
@@ -428,16 +419,30 @@ export function ThreadComposer({
             data-sending={sending ? "" : undefined}
             data-warn={secretBlocked ? "" : undefined}
             data-testid="thread-composer-frame"
+            data-composer-frame=""
             onClick={(event) => {
+              // 첨부 카드는 초점을 받는 자기 컨트롤이다(Backspace/Delete 로 뺀다).
               if (
                 event.target instanceof Element &&
-                event.target.closest("button")
+                event.target.closest("button, [data-attachment-card]")
               ) {
                 return;
               }
               ref.current?.focus();
             }}
           >
+            {/* 첨부 줄(ADR-0151 D2, #5200): 채널 입력창과 같은 컴포넌트가 그릇 **안**, 글 칸 위에 선다. 카드를 뺀 뒤
+                초점은 옆 카드나 이 글 칸으로 간다. */}
+            <AttachmentTray
+              drafts={tray.drafts}
+              rejected={tray.rejected}
+              folders={tray.folders}
+              onRemove={(localId) => dropDraft(trayKey, localId)}
+              onRetry={(localId) => retryDraft(trayKey, attachTarget, localId)}
+              onClear={() => clearSurface(trayKey)}
+              onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
+              returnFocus={() => ref.current?.focus()}
+            />
             <textarea
               ref={ref}
               value={draft}

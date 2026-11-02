@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "a56f20f083a82ab75a68e67caea91bf079854842",
+  "baselineHead": "f5496ab8d3439ec69a8bfb11df7a6e87f627013f",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -406,13 +406,14 @@
     "clients/web/src/features/aiHub/useAiHubOverview.ts": 12,
     "clients/web/src/features/attachments/AttachmentDownloadButton.tsx": 4,
     "clients/web/src/features/attachments/AttachmentOpenPdfButton.tsx": 5,
-    "clients/web/src/features/attachments/AttachmentTray.tsx": 30,
+    "clients/web/src/features/attachments/AttachmentTray.tsx": 15,
     "clients/web/src/features/attachments/ImageLightbox.tsx": 52,
     "clients/web/src/features/attachments/content.ts": 14,
     "clients/web/src/features/attachments/draftStore.ts": 9,
     "clients/web/src/features/attachments/draftThumbnail.ts": 9,
     "clients/web/src/features/attachments/imageLightboxModel.ts": 26,
     "clients/web/src/features/attachments/pdfOpenModel.ts": 5,
+    "clients/web/src/features/attachments/trayModel.ts": 32,
     "clients/web/src/features/attachments/uploadTransport.ts": 13,
     "clients/web/src/features/attachments/useComposerDropZone.ts": 3,
     "clients/web/src/features/attachments/useImageLightboxZoom.ts": 18,

@@ -170,9 +170,16 @@ describe("컴포저 공용 표면 (#1688)", () => {
       expect(composer).toContain("focus-visible-within:focus-ring");
       expect(composer).not.toContain("focus-within:focus-ring");
       expect(composer).not.toContain("focus:border");
-      expect(composer).toContain('event.target.closest("button")');
+      // 버튼과 첨부 카드(#5200: 초점을 받고 Backspace/Delete 로 빼는 자기 컨트롤)는 자기 클릭을 지킨다.
+      // 그릇이 캐럿을 글 칸으로 돌려주면 방금 카드에 둔 초점이 튕겨 나간다.
+      expect(composer).toContain('event.target.closest("button, [data-attachment-card]")');
       expect(composer).toContain(".current?.focus()");
+      // 카드에 키보드 초점이 있으면 그릇의 링을 접는 규칙(tokens.css)이 이 표식으로 두 그릇을 잡는다(#5200).
+      expect(composer).toContain('data-composer-frame=""');
     }
+    expect(tokens).toMatch(
+      /^\[data-composer-frame\]:has\(\[data-attachment-card\]:focus-visible\)\s*\{\s*outline:\s*none;/m
+    );
     const channelInputClass = channel.match(
       /<textarea[\s\S]*?data-testid="composer-input"[\s\S]*?className="([^"]*)"\s*\/>/
     )?.[1];
