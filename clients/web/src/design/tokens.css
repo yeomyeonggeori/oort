@@ -1499,6 +1499,29 @@
     transition: grid-template-columns var(--duration-sidebar)
       var(--motion-ease-standard);
 
+    /* 사이드바 열은 본문 칸이 컴포저 바닥을 지키도록 양보한다 (#5093, #5048 D4).
+     * 사이드바가 240에서 324(레일 56 + 목록 열 268)가 된 뒤 펼친 셸의 컴포저는 `창 폭 − 390`이라 600px 창에서
+     * 210px였다. 바닥(gate-work-panel `MIN_COMPOSER_WIDTH` 240) 아래로 떨어진 폭은 **600~629px뿐**이고 630~719px는
+     * 수리 전에도 바닥 위였다(650 → 260 · 719 → 329).
+     *
+     * 문턱을 더하지 않고 열이 양보한다. 「주 표면이 바닥을 갖고 모자란 폭은 부차 표면이 낸다」는 이 파일의 문법
+     * (`route-region` · `chat-region` · `thread-pane`)을 사이드바 열에도 적용한 것이다. 600 문턱(`MOBILE_SHELL_QUERY`)은
+     * 열이 240이던 때의 값이지만 건드리지 않는다: 옮기면 `@media (width < 600px)` 블록 전부와 JS가 함께 움직인다.
+     * 새 문턱(630)도 만들지 않는다: 미디어 쿼리는 `var()`를 읽지 못해 파생값이 조용히 틀린다(`thread-pane` 주석).
+     * 아래 `min()`은 문턱 없이 이어진다: 630px 이상에서는 324 그대로이고, 600px에서 294(레일 56 + 목록 열 238)다.
+     *
+     * 306 = 컴포저 입력 바닥 240 + 판 오른쪽 인셋 8 + 입력 상자 밖의 58(폼 좌우 24×2 + 카드 안쪽 4×2 + 카드 테두리
+     * 1×2). 컴포저 크롬이 움직이면 이 숫자도 함께 움직인다: gate:work-panel `narrow-shell-*`이 렌더된 컴포저 폭으로 잰다.
+     * 목록 열은 `--spacing-pane-sm`(192)을 지킨다(창 600 이상이면 238).
+     *
+     * `100vw`인 이유: 값이 길이로 풀려야 접힘 전환(`useSidebarCollapsePaint`가 `grid-template-columns`의
+     * transitionend를 기다린다)이 그대로 돈다. 셸이 곧 창이다. 루트의 `--w-sidebar`(324)는 그대로이고, 이 선언은 셸에서만
+     * 그것을 덮는다: 아래 격자 열과 「내 작업」의 띠 폭(`--shell-band-w`)이 같은 실제 폭을 읽는다. */
+    --w-sidebar: min(
+      calc(var(--spacing-rail) + var(--w-sidebar-list)),
+      calc(100vw - 306px)
+    );
+
     /* 창 바닥 (DS2-6 #2718, 시안 A `.a-win`). 창 전체가 그라데이션이고, 사이드바는
      * 그 위에 녹아 자기 바탕이 없다. 본문은 그 위에 떠 있는 판 하나다(`app-pane`).
      * 그라데이션 식은 `canvas-gradient`와 같다(160°, 가운데 42%). 셸이 그 유틸을
@@ -2363,6 +2386,21 @@
 
     & > form {
       padding: var(--spacing-2) var(--spacing-6) 18px;
+    }
+
+    /* 컴포저의 후보 목록(`@`·`#`·`:`)과 `/` 명령 목록은 폼 안에 절대 위치로 서고, 가로는 폰 폭의 폼 여백(`p-3`, 12)에
+     * 맞춘 `left-3`·`right-3`이다. 넓은 창의 폼 여백은 위에서 24라서 12에 두면 목록이 카드의 가장자리보다 12 바깥으로
+     * 튀어나온다(#5094, #5048 D6). 여백이 바뀌는 바로 이 블록에서 같은 값(`--spacing-6`)으로 따라간다 — 폼 여백과 목록
+     * 가장자리가 한 곳에서 같이 움직이므로 한쪽만 고쳐 어긋나지 않는다. 폰 폭은 그대로 12다.
+     * `ComposerAutocompleteList`의 세 뿌리(후보 목록 · 상태 상자 · 명령 목록)가 `data-composer-popover`를 달고, 양쪽 가장자리에
+     * 서는 명령 목록(`menu`)만 오른쪽도 맞춘다(너비가 정해진 목록은 오른쪽을 쓰지 않는다). 스레드 컴포저는 이 독 밖이라
+     * 자기 `left-0`을 그대로 쓴다. */
+    & > form > [data-composer-popover] {
+      left: var(--spacing-6);
+    }
+
+    & > form > [data-composer-popover="menu"] {
+      right: var(--spacing-6);
     }
   }
 }

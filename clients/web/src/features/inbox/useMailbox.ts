@@ -27,6 +27,7 @@ import {
   composeMailbox,
   dmEntry,
   isUnreadSeq,
+  mailboxFilterHasTasks,
   mentionEntry,
   orderMailbox,
   serverEntry,
@@ -92,17 +93,25 @@ export interface Mailbox {
   fetchMore: () => void;
   /**
    * 어떤 원천이 아직 첫 응답을 못 받았다. 서버 경로는 투영과 승인 원장을 함께 센다(#5092): 원장이
-   * 늦는 동안 투영만 비어 있다고 「비어 있어요」가 번쩍이지 않게 하는 값이다.
+   * 늦는 동안 투영만 비어 있다고 「비어 있어요」가 번쩍이지 않게 하는 값이다. 원장은 승인이 섞인
+   * 탭(`mailboxFilterHasTasks`)에서만 세고, 채널·디렉터리가 오는 중인 것은 세지 않는다(#5116).
    */
   isLoading: boolean;
   /**
    * 보여 줄 줄이 없을 때 「비어 있다」고 말하면 거짓이 되는 실패가 있다. 구 서버 경로는 시도한
    * 원천이 모두 실패했을 때, 서버 경로는 투영이 실패했거나 승인 원장이 실패했을 때(#5092).
-   * 일부만 실패하면 있는 만큼 그린다: 화면은 이 탭에 보일 줄이 없을 때만 이 값을 읽는다.
+   * 일부만 실패하면 있는 만큼 그린다: 화면은 이 탭에 보일 줄이 없을 때만 이 값을 읽는다. 원장의
+   * 실패도 승인이 섞인 탭에서만 센다(#5116).
    */
   error: boolean;
   /** 승인 원장이 없는 서버: 「처리할 일」 칸을 장애가 아닌 미제공으로 말한다. */
   tasksAbsent: boolean;
+  /**
+   * 승인 원장이 답했고 이 목록의 처리할 일 줄이 그 답에서 온다(#5116). 이때 목록에 없는 승인은 더 이상
+   * 결정을 기다리지 않는다 — 다른 기기에서 결정했거나 만료됐다. 원장이 아직 한 번도 답하지 않았거나
+   * (로딩·실패) 미제공이거나 투영이 실패해 목록을 비운 동안은 「없음」이 답이 아니므로 `false`다.
+   */
+  ledgerAnswered: boolean;
   /** 상한 때문에 일부 채널을 읽지 못했다. */
   capped: boolean;
   updatedAtMs: number;
@@ -185,9 +194,13 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
   // 원장이 늦거나 실패했는데 투영만 빈 채로 답했다고 「비어 있어요」라고 말하면 대기 중인 승인을
   // 모르는 채 조용한 게 정상이라고 말하는 일이다(#5092). 구 서버 경로(`useComposedMailbox`)는 이미
   // 승인 원장의 로딩과 실패를 센다: 서버 경로도 같은 원천을 센다.
-  const ledgerLoading = tasksProvided && needsAction.isLoading;
+  //
+  // 그 말은 **승인이 섞인 탭에만** 건다(#5116): 멘션·답글·DM·스레드 탭의 내용은 원장과 무관하다. 로딩은 원장
+  // 자신의 첫 응답만 센다 — `needsAction.isLoading`은 채널·디렉터리가 오는 중인 것까지 세는 값이다.
+  const tasksInTab = tasksProvided && mailboxFilterHasTasks(filter);
+  const ledgerLoading = tasksInTab && needsAction.ledgerLoading;
   // 404(`absent`)는 장애가 아니라 미제공이다: 화면이 「처리할 일」 탭에서 따로 말한다.
-  const ledgerFailed = tasksProvided && !needsAction.absent && needsAction.error;
+  const ledgerFailed = tasksInTab && !needsAction.absent && needsAction.error;
 
   const serverFilter = toServerFilter(filter);
   const query = useInfiniteQuery({
@@ -243,10 +256,12 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
 
   if (absent) return { ...composed, source: "composed" };
 
+  // 투영이 답하지 못했는데 승인만 그리면 그것이 인박스 전부로 읽힌다: 오류를 말한다.
+  const listed = serverOn && !(query.isError && !query.data);
+
   return {
     source: serverOn ? "server" : "probing",
-    // 투영이 답하지 못했는데 승인만 그리면 그것이 인박스 전부로 읽힌다: 오류를 말한다.
-    entries: serverOn && !(query.isError && !query.data) ? entries : [],
+    entries: listed ? entries : [],
     serverUnreadCount: query.data?.pages[0]?.unreadCount ?? null,
     hasMore: query.hasNextPage,
     isFetchingMore: query.isFetchingNextPage,
@@ -255,10 +270,16 @@ export function useMailbox(filter: MailboxFilter | "reminders" = "all"): Mailbox
     isLoading: surface.isPending || (serverOn && (query.isLoading || ledgerLoading)),
     error: surface.isError || (serverOn && (query.isError || ledgerFailed)),
     tasksAbsent: !tasksProvided || needsAction.absent,
+    ledgerAnswered: listed && ledgerHasAnswered(tasksProvided, needsAction),
     capped: false,
     updatedAtMs: Math.max(query.dataUpdatedAt, needsAction.updatedAtMs),
     refetch: refetchServer,
   };
+}
+
+/** 승인 원장이 성공한 답을 한 번이라도 줬다(미제공이 아니다). 그 답이 처리할 일 줄의 원천이다. */
+function ledgerHasAnswered(tasksProvided: boolean, needsAction: Feed): boolean {
+  return tasksProvided && !needsAction.absent && needsAction.updatedAtMs > 0;
 }
 
 /** 구 서버 후퇴 경로: 이미 있는 읽기 계약을 클라이언트에서 모은다. */
@@ -497,6 +518,7 @@ function useComposedMailbox(
       (tasksProvided && needsAction.isLoading)),
     error,
     tasksAbsent: !tasksProvided || needsAction.absent,
+    ledgerAnswered: ledgerHasAnswered(tasksProvided, needsAction),
     capped,
     updatedAtMs: Math.max(
       dmResults.updatedAtMs,

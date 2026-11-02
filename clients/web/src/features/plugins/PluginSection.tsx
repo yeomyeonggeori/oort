@@ -1165,27 +1165,10 @@ function PluginScopeConsentDialog({
                       <span className="flex min-w-0 flex-col gap-1">
                         <span className="text-body font-medium text-ink">{scopeSentence(scope)}</span>
                         <span className="break-all font-mono text-timestamp text-ink-muted">{scope}</span>
-                        {/* 결정 문구는 이 클라이언트의 문장이다(MOMO-642 9).
-                            여기 있던 줄은 매니페스트의 tools[].description,
-                            즉 배포자가 자기 언어로 쓴 자유 문구였고, 출하 시드
-                            4종 전부 영문이라 한국어 결정 화면에 영어가 섞였다.
-                            제3자 매니페스트가 어떤 언어로 오든 같은 일이 난다.
-                            그래서 이 줄은 그 권한이 여는 도구를 **식별**한다:
-                            무엇을 허용하는지는 위의 권한 문장과 아래의 위험도·
-                            승인 칩이 한국어로 말하고, 도구는 바로 위 스코프 id와
-                            같은 방식으로 이름 그대로 선다. 배포자가 쓴 산문은
-                            지워지지 않고 증거 표면(앱 상세 > 도구와 권한)에
-                            남는다 — 결정 표면과 증거 표면의 구분은 회수
-                            다이얼로그에서 배포자·라이선스·출처를 걷어낸 것과
-                            같은 선이다(MOMO-642 8). */}
-                        {scopeTools.length > 0 && (
-                          <span className="text-meta text-ink-muted">
-                            연결된 도구:{" "}
-                            <span className="break-all font-mono">
-                              {scopeTools.map((tool) => tool.name).join(", ")}
-                            </span>
-                          </span>
-                        )}
+                        {/* 위험도·승인 칩은 도구 이름 줄보다 **먼저** 선다(#5094, #5048 D5). 결정의 근거는 이 칩이고, 도구
+                            줄은 길이를 정하지 못한다: 출하 GitHub `github:read`는 도구가 26개라 이름 줄이 열 몇 줄로
+                            접히고, 그 **뒤**에 서 있던 칩이 760x480 창에서 스크롤 상자 아래(폴드 밖)로 밀렸다. 이제 칩은
+                            권한 문장·스코프 id 바로 아래에 서므로 도구가 몇 개든 첫 화면에 남는다. */}
                         {scopeBadges.length > 0 && (
                           <span
                             className="flex flex-wrap gap-1"
@@ -1196,6 +1179,30 @@ function PluginScopeConsentDialog({
                                 {badge.label}
                               </StatusChip>
                             ))}
+                          </span>
+                        )}
+                        {/* 결정 문구는 이 클라이언트의 문장이다(MOMO-642 9).
+                            여기 있던 줄은 매니페스트의 tools[].description,
+                            즉 배포자가 자기 언어로 쓴 자유 문구였고, 출하 시드
+                            4종 전부 영문이라 한국어 결정 화면에 영어가 섞였다.
+                            제3자 매니페스트가 어떤 언어로 오든 같은 일이 난다.
+                            그래서 이 줄은 그 권한이 여는 도구를 **식별**한다:
+                            무엇을 허용하는지는 위의 권한 문장과 위험도·승인
+                            칩이 한국어로 말하고, 도구는 스코프 id와 같은
+                            방식으로 이름 그대로 선다. 배포자가 쓴 산문은
+                            지워지지 않고 증거 표면(앱 상세 > 도구와 권한)에
+                            남는다 — 결정 표면과 증거 표면의 구분은 회수
+                            다이얼로그에서 배포자·라이선스·출처를 걷어낸 것과
+                            같은 선이다(MOMO-642 8). */}
+                        {scopeTools.length > 0 && (
+                          <span
+                            className="text-meta text-ink-muted"
+                            data-testid="plugin-scope-tools"
+                          >
+                            연결된 도구:{" "}
+                            <span className="break-all font-mono">
+                              {scopeTools.map((tool) => tool.name).join(", ")}
+                            </span>
                           </span>
                         )}
                       </span>

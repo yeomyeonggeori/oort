@@ -4567,7 +4567,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // 코드에는 있고 사진에는 없었다. `initialArmed` 가 그 도달 불가를 닫는다.
     //
     // 세 줄을 한 장에 세운다. 논점이 **위계**라서 한 줄만 찍으면 사진에 안 나온다:
-    //   ① 승인 확정 — 주 액션 채움(`accent`)
+    //   ① 승인 — 주 액션 채움(잉크 `primary`. #5134 전에는 신호색 `accent` 였다)
     //   ② 거부 확정 — 파괴 채움(`dangerFill`). 이 goal 이 고친 자리다.
     //   ③ 턴 중단 확정 — 같은 파괴 채움을 쓰는 두 번째 컨트롤
     // 라이트 판은 `-momoMeasure LIGHT-DESTRUCTIVE-CONFIRM`.

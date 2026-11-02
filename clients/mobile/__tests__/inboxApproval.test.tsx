@@ -1,3 +1,5 @@
+import type {SignalChoice} from '@momo/core/design/appearance';
+import {contrast} from '@momo/core/design/color';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -10,11 +12,14 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo} from 'react-native';
+import {AccessibilityInfo, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {resolveAppearance} from '../src/design/appearanceState';
+import {DEFAULT_THEME_ID} from '../src/design/ds2Tokens';
+import {FixedScheme, type ColorScheme} from '../src/design/theme';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -266,6 +271,12 @@ function installFetch(overrides: RouteOverrides = {}): Fixture {
 
 let queryClient: QueryClient | null = null;
 
+/**
+ * 외형(스킴·신호)을 못 박고 싶은 시험만 채운다(#5134). 비어 있으면 셸은 프로바이더 밖의 기본
+ * (라이트·새벽하늘·기본 신호)으로 그려진다 — 기존 시험은 이 값을 건드리지 않는다.
+ */
+let fixedAppearance: {scheme: ColorScheme; signal: SignalChoice} | null = null;
+
 function renderShell() {
   queryClient = new QueryClient({
     defaultOptions: {
@@ -273,10 +284,19 @@ function renderShell() {
       mutations: {retry: false, gcTime: 0},
     },
   });
-  return render(
+  const shell = (
     <QueryClientProvider client={queryClient}>
       <AppShell member={SELF} />
-    </QueryClientProvider>,
+    </QueryClientProvider>
+  );
+  return render(
+    fixedAppearance === null ? (
+      shell
+    ) : (
+      <FixedScheme scheme={fixedAppearance.scheme} signal={fixedAppearance.signal}>
+        {shell}
+      </FixedScheme>
+    ),
   );
 }
 
@@ -365,6 +385,7 @@ afterEach(() => {
   cleanup();
   queryClient?.clear();
   queryClient = null;
+  fixedAppearance = null;
   jest.restoreAllMocks();
 });
 
@@ -732,6 +753,67 @@ describe('한 번 탭하면 결정된다 (#3819)', () => {
       ).toBeTruthy(),
     );
     expect(fixture.decisions()).toHaveLength(1);
+  });
+});
+
+// ---- 인박스의 「승인」은 잉크다 (#5134) ------------------------------------------
+//
+// `ApprovalDecision` 의 `box` 모양은 인박스(`InboxScreen`)만 쓴다 — 대화 안 에이전트 카드는 알약
+// (`MessageRow`), 결정 무대·요청 묶음은 요청 모양이다. 옛 판은 상자만 승인 채움이 신호색(`accent`)이어서
+// 한 앱에서 승인 단추가 갈렸고, 커스텀 강조색이 인박스의 「승인」만 칠했다. 모양별 값(쉼·잠김·진행·눌림)은
+// `approvalDecisionBox.test.tsx` 가 48조합으로 잰다. 여기서는 **인박스 화면이 실제로 그 모양을 입는지**를
+// 화면이 그려 낸 값으로 확인한다.
+describe('인박스 결정 대기 행의 「승인」은 잉크다 (#5134)', () => {
+  it('라이트·다크·커스텀 강조색에서 채움은 잉크이고 신호색이 칠하지 않는다', async () => {
+    type Style = Record<string, unknown>;
+    const pressableStyle = (testID: string, pressed: boolean): Style => {
+      type Node = {props: Record<string, any>; parent: Node | null};
+      let node: Node | null = screen.getByTestId(testID) as unknown as Node;
+      while (node !== null && typeof node.props.style !== 'function') node = node.parent;
+      if (node === null) throw new Error(`${testID}: Pressable style 함수를 찾지 못했다`);
+      return StyleSheet.flatten(node.props.style({pressed})) as Style;
+    };
+    const VIEWS: ReadonlyArray<readonly [string, ColorScheme, SignalChoice]> = [
+      ['라이트', 'light', null],
+      ['다크', 'dark', null],
+      ['라이트 · 커스텀 강조색 #3A6BD8', 'light', {custom: '#3A6BD8'}],
+    ];
+    const wrong: string[] = [];
+    for (const [view, scheme, signal] of VIEWS) {
+      fixedAppearance = {scheme, signal};
+      installFetch();
+      await openPendingRow();
+      const palette = resolveAppearance(DEFAULT_THEME_ID, scheme, signal).palette;
+      const testID = `inbox-approval-${PENDING}-approve`;
+      const rest = pressableStyle(testID, false);
+      const pressed = pressableStyle(testID, true);
+      const label = StyleSheet.flatten(
+        within(screen.getByTestId(testID)).getByText(/./).props.style,
+      ) as Style;
+      if (rest.backgroundColor !== palette.primary) {
+        wrong.push(`${view}: 채움 ${String(rest.backgroundColor)} ≠ primary ${palette.primary}`);
+      }
+      if (rest.backgroundColor === palette.accent) {
+        wrong.push(`${view}: 채움이 신호색(accent) ${palette.accent}`);
+      }
+      if (label.color !== palette.onPrimary) {
+        wrong.push(`${view}: 글자 ${String(label.color)} ≠ onPrimary ${palette.onPrimary}`);
+      }
+      const ratio = contrast(String(label.color), String(rest.backgroundColor));
+      if (!(ratio >= 4.5)) wrong.push(`${view}: 라벨 대비 ${ratio.toFixed(2)} < 4.5`);
+      // 눌림은 채움을 갈아 끼우지 않고 흐림만 낮춘다.
+      if (pressed.backgroundColor !== palette.primary || !(Number(pressed.opacity) < 1)) {
+        wrong.push(
+          `${view}: 눌림 채움 ${String(pressed.backgroundColor)}·흐림 ${String(pressed.opacity)}`,
+        );
+      }
+      // 같은 시험 안에서 다음 외형으로 다시 세운다 — 세션·저장소는 유지하고 화면만 내린다.
+      await act(async () => {});
+      cleanup();
+      queryClient?.clear();
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    expect(wrong).toEqual([]);
   });
 });
 

@@ -25,7 +25,7 @@ import {ds2Radius, font, line, radius, SHEET, space, type Palette} from '../desi
 //                `SheetScroll` 의 거터와 겹쳐 32 가 된다.
 //   FieldLabel   섹션 라벨 + 오른쪽의 한 마디(「조금 남았어요」). `GroupLabel` 은 문자열 하나뿐이다.
 //   Field        한 줄 입력 알약 — `InputPill` 과 같은 모양인데 **ref 와 invalid 를 받는다**(검증이 실패한 칸으로 초점을
-//                옮긴다: `InputPill` 은 ref 를 안 넘긴다). `editable={false}` 면 잠긴 행처럼 흐려진다(#5099).
+//                옮긴다: `InputPill` 은 ref 를 안 넘긴다). `editable={false}` 면 잠긴 행처럼 흐려진다(#5099 — `InputPill` 도 같다, #5132).
 //   TextArea     여러 줄 입력 상자 — 알약은 여러 줄에서 모서리가 글자를 먹으므로 입력 반경이다(`ds2Radius.row`).
 //                잠김의 흐림은 `Field` 와 같다.
 //
@@ -91,7 +91,7 @@ const lockedState = (
   state: TextInputProps['accessibilityState'],
 ): NonNullable<TextInputProps['accessibilityState']> => ({...state, disabled: true});
 
-/** 한 줄 입력 알약. `InputPill` 과 같은 모양 + ref + invalid + 잠김(`editable={false}`)의 흐림. */
+/** 한 줄 입력 알약. `InputPill` 과 같은 모양 + ref + invalid. 잠김(`editable={false}`)의 흐림은 `InputPill` 도 같다(#5132). */
 export const Field = forwardRef<TextInput, FieldProps & {icon?: ImageSourcePropType}>(
   function FieldView({icon, invalid = false, style, ...input}, ref) {
     const styles = useStyles(buildStyles);

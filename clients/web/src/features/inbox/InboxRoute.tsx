@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import { useSession } from "@/app/session";
@@ -183,14 +183,29 @@ export function InboxRoute() {
         : (mailbox.entries.find((entry) => entry.key === selected.key) ?? null),
     [mailbox.entries, selected]
   );
-  const active: MailboxEntry | null = live ?? selected;
+
+  // **승인은 예외다** (#5116). 승인 원장이 답했는데 고른 승인이 목록에 없으면 그 승인은 더 이상 결정을
+  // 기다리지 않는다: 이 클라이언트가 방금 결정했든, 다른 기기에서 결정됐든(원장은 카드의 `message.edited`
+  // 신호로 바로 다시 읽힌다, `ApprovalsLiveSync`) 같다. 스냅샷은 읽은 멘션 같은 줄을 손 밑에서 치우지
+  // 않으려는 장치이지 결정이 끝난 승인을 선택된 채 붙들어 두는 장치가 아니다 — 되돌릴 수 없는 액션이라
+  // 낡은 컨트롤이 남는 값이 다르다. 이 렌더부터 패널과 줄이 없고, 아래 효과가 선택을 놓고 초점을 잇는다.
+  const approvalGone =
+    selected !== null &&
+    selected.task !== undefined &&
+    live === null &&
+    mailbox.ledgerAnswered;
+  const active: MailboxEntry | null = approvalGone ? null : (live ?? selected);
 
   const counts = useMemo(() => mailboxCounts(mailbox.entries), [mailbox.entries]);
 
   const shown = useMemo(() => {
     if (filter === "reminders") return [];
     const filtered = filterMailbox(mailbox.entries, filter);
-    if (selected === null || filtered.some((e) => e.key === selected.key)) {
+    if (
+      selected === null ||
+      approvalGone ||
+      filtered.some((e) => e.key === selected.key)
+    ) {
       return filtered;
     }
     // 고른 줄이 필터 밖으로 빠졌다(읽음으로 바뀐 줄이 「안 읽음」에서 빠지는 식).
@@ -202,11 +217,44 @@ export function InboxRoute() {
           ? 1
           : b.atMs - a.atMs
     );
-  }, [mailbox.entries, filter, selected, active]);
+  }, [mailbox.entries, filter, selected, active, approvalGone]);
 
   useEffect(() => {
     setNote(null);
   }, [filter]);
+
+  // 원장이 뺀 승인의 자리를 이웃 줄로 잇는다(#5116). 디자인 시스템의 「행이 사라질 때 초점은 다음 행으로,
+  // 다음이 없으면 앞 행으로, 행이 하나도 없으면 목록으로」 규칙을 따른다. **줄을 대신 고르지는 않는다**:
+  // 초점은 줄에 앉을 뿐 선택이 아니다(Enter·클릭이 선택이다, `MailboxList`). 다음 줄을 자동으로 열면
+  // 안 읽은 줄이 읽음이 되고(열어서 읽는 것이 읽음이다), 되돌릴 수 없는 결정 컨트롤이 방금 누른 자리에
+  // 그대로 선다 — 누른 손이 다음 승인을 결정하게 된다.
+  const listPaneRef = useRef<HTMLDivElement | null>(null);
+  // 마지막으로 그린 목록의 줄 순서: 사라진 줄이 어디에 있었는지는 사라진 뒤에는 알 수 없다.
+  const shownKeys = useRef<string[]>([]);
+  useEffect(() => {
+    if (!approvalGone) shownKeys.current = shown.map((entry) => entry.key);
+  });
+  useEffect(() => {
+    if (!approvalGone || selected === null) return;
+    const before = shownKeys.current;
+    const at = before.indexOf(selected.key);
+    const remaining = new Set(shown.map((entry) => entry.key));
+    const neighbor = [
+      ...before.slice(at + 1),
+      ...before.slice(0, Math.max(at, 0)).reverse(),
+    ].find((key) => remaining.has(key));
+    setSelected(null);
+    // 초점이 패널·줄과 함께 사라졌을 때만 옮긴다. 사용자가 이미 다른 곳(사이드바, 다른 줄)에 있으면 뺏지 않는다.
+    const focused = document.activeElement;
+    if (focused !== null && focused !== document.body && document.body.contains(focused)) {
+      return;
+    }
+    const pane = listPaneRef.current;
+    const row = Array.from(
+      pane?.querySelectorAll<HTMLElement>("[data-mailbox-row]") ?? []
+    ).find((element) => element.getAttribute("data-entry-key") === neighbor);
+    (row ?? pane)?.focus();
+  }, [approvalGone, selected, shown]);
 
   const select = useCallback(
     (entry: MailboxEntry) => {
@@ -401,14 +449,16 @@ export function InboxRoute() {
         <div className="flex min-h-0 flex-1">
           {!listHidden && (
             <div
+              ref={listPaneRef}
+              tabIndex={-1}
               role="tabpanel"
               id={webMailboxPanelId(filter)}
               aria-labelledby={webMailboxTabId(filter)}
               data-testid="inbox-list-pane"
               className={
                 isMobile
-                  ? "min-h-0 flex-1 overflow-y-auto"
-                  : "min-h-0 w-[22rem] shrink-0 overflow-y-auto border-r border-line"
+                  ? "min-h-0 flex-1 overflow-y-auto focus-visible:focus-ring"
+                  : "min-h-0 w-[22rem] shrink-0 overflow-y-auto border-r border-line focus-visible:focus-ring"
               }
             >
               {state === "error" ? (
@@ -502,11 +552,14 @@ export function InboxRoute() {
         </div>
       )}
 
-      {/* 에이전트가 한 일 전체는 활동에서 본다(#3337). 인박스는 나에게 필요한 것만 담는다. */}
+      {/* 에이전트가 한 일 전체는 활동에서 본다(#3337). 인박스는 나에게 필요한 것만 담는다.
+          이 줄은 칼럼 전체 폭이라 눌림은 채움만 한다: `press`(0.98배)는 넓은 면을 줄여 가장자리가 흔들린다. `press-instant-fill`이
+          `:active`에 크기 없이 `--surface-pressed`를 칠한다(#5094, #5048 D7, 넓은 줄 규칙). 쉬는 면이 이미 `--surface-hover`라
+          호버(`--surface-pressed`)와 눌림이 같은 채움을 쓴다 — 손가락(호버 없음)에서는 쉼 → 눌림이 눈에 보인다. */}
       <Link
         to="/activity"
         data-testid="inbox-activity-link"
-        className="press mx-4 mb-2 mt-2 flex h-control items-center justify-between rounded-lg bg-surface-hover px-3 text-body text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
+        className="press-instant-fill mx-4 mb-2 mt-2 flex h-control items-center justify-between rounded-lg bg-surface-hover px-3 text-body text-ink-muted hover:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
       >
         <span>에이전트가 한 일 전체는 활동에서 봐요</span>
         <span className="flex items-center gap-1 text-ink">
