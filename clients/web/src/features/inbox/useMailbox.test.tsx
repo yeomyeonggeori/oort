@@ -69,7 +69,9 @@ const feedContext = {
 };
 const needsFeed = {
   items: [],
+  // `isLoading`은 채널·디렉터리가 오는 중인 것까지 센다. 원장 자신의 첫 응답 대기는 `ledgerLoading`이다.
   isLoading: false,
+  ledgerLoading: false,
   error: false,
   absent: false,
   updatedAtMs: 0,
@@ -240,16 +242,31 @@ describe("useMailbox: 승인 원장은 투영과 따로 실패하고 따로 늦�
   afterEach(() => {
     needsFeed.error = false;
     needsFeed.isLoading = false;
+    needsFeed.ledgerLoading = false;
     needsFeed.absent = false;
+    needsFeed.updatedAtMs = 0;
   });
+
+  // 승인이 섞이는 탭(전체·안 읽음·처리할 일)과 아닌 탭. 원장의 말(오류·로딩)은 앞의 셋에만 걸린다(#5116).
+  const WITH_TASKS = ["all", "unread", "task"] as const;
+  const WITHOUT_TASKS = ["mention", "reply", "dm", "thread"] as const;
 
   it("원장이 5xx이면 투영이 비어 있어도 서버 경로가 오류를 말한다", async () => {
     needsFeed.error = true;
-    for (const filter of ["all", "unread", "task"] as const) {
+    for (const filter of WITH_TASKS) {
       await render(filter);
       expect(latest?.source, filter).toBe("server");
       expect(latest?.entries, filter).toEqual([]);
       expect(latest?.error, filter).toBe(true);
+    }
+  });
+
+  it("승인이 섞이지 않는 탭은 원장이 실패해도 오류를 말하지 않는다 (#5116)", async () => {
+    needsFeed.error = true;
+    for (const filter of WITHOUT_TASKS) {
+      await render(filter);
+      expect(latest?.source, filter).toBe("server");
+      expect(latest?.error, filter).toBe(false);
     }
   });
 
@@ -262,12 +279,56 @@ describe("useMailbox: 승인 원장은 투영과 따로 실패하고 따로 늦�
   });
 
   it("원장이 첫 응답을 기다리는 동안은 투영이 이미 답했어도 서버 경로가 로딩이다", async () => {
-    needsFeed.isLoading = true;
-    for (const filter of ["all", "unread", "task"] as const) {
+    needsFeed.ledgerLoading = true;
+    for (const filter of WITH_TASKS) {
       await render(filter);
       expect(latest?.source, filter).toBe("server");
       expect(latest?.isLoading, filter).toBe(true);
     }
+  });
+
+  it("승인이 섞이지 않는 탭은 원장을 기다리지 않는다 (#5116)", async () => {
+    needsFeed.ledgerLoading = true;
+    for (const filter of WITHOUT_TASKS) {
+      await render(filter);
+      expect(latest?.source, filter).toBe("server");
+      expect(latest?.isLoading, filter).toBe(false);
+    }
+  });
+
+  it("채널·디렉터리가 오는 중인 것은 세지 않는다: 원장이 답했으면 로딩이 아니다 (#5116)", async () => {
+    needsFeed.isLoading = true; // 컨텍스트(채널·디렉터리)가 아직 온다. 원장 자신은 답했다.
+    needsFeed.ledgerLoading = false;
+    for (const filter of WITH_TASKS) {
+      await render(filter);
+      expect(latest?.isLoading, filter).toBe(false);
+    }
+  });
+
+  it("원장이 답했다는 사실(ledgerAnswered)은 성공한 응답이 있을 때만 참이다 (#5116)", async () => {
+    await render("all");
+    expect(latest?.ledgerAnswered, "아직 한 번도 답하지 않음").toBe(false);
+
+    needsFeed.updatedAtMs = 1_800_000_000_000;
+    await render("all");
+    expect(latest?.ledgerAnswered, "성공한 답이 있음").toBe(true);
+
+    needsFeed.absent = true;
+    await render("all");
+    expect(latest?.ledgerAnswered, "미제공(404)이면 없음이 답이 아니다").toBe(false);
+    needsFeed.absent = false;
+
+    // 투영이 답하지 못해 목록 자체를 비운 동안: 승인이 목록에 없는 것은 원장의 답이 아니다.
+    // (앞에서 받아 둔 투영 캐시가 목록을 살리지 않도록 새 캐시·새 루트로 다시 묻는다. 훅은 처음 만난
+    // QueryClient를 붙들어서 Provider의 client만 바꿔서는 캐시가 바뀌지 않는다.)
+    await act(async () => root?.unmount());
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    root = createRoot(host as HTMLElement);
+    api.fetchInbox.mockRejectedValue(new ApiError(500, "boom"));
+    await render("task");
+    expect(latest?.error).toBe(true);
+    expect(latest?.entries).toEqual([]);
+    expect(latest?.ledgerAnswered, "목록을 비운 동안").toBe(false);
   });
 });
 

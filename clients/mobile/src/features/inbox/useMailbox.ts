@@ -18,6 +18,7 @@ import {
   composeMailbox,
   dmEntry,
   isUnreadSeq,
+  mailboxFilterHasTasks,
   mentionEntry,
   orderMailbox,
   serverEntry,
@@ -128,6 +129,18 @@ export function useMailbox(
 
   const composed = useComposedMailbox(enabled && absent, needsAction, tasksProvided);
 
+  // 승인(처리할 일)은 투영에 저장되지 않아서 승인 원장은 투영과 **따로** 오고 따로 실패하고 따로 늦는다.
+  // 원장이 늦거나 실패했는데 투영만 빈 채로 답했다고 「비어 있어요」라고 말하면 대기 중인 승인을 모르는 채
+  // 조용한 게 정상이라고 말하는 일이다(웹 `useMailbox`의 같은 줄, #5092). 구 서버 경로(`useComposedMailbox`)는
+  // 이미 승인 원장의 로딩과 실패를 센다: 서버 경로도 같은 원천을 센다.
+  //
+  // 그 말은 **승인이 섞인 탭에만** 건다(#5116): DM·스레드·답글 칩의 내용은 원장과 무관하다. 로딩은 원장 자신의
+  // 첫 응답만 센다 — `needsAction.isLoading`은 채널·디렉터리가 오는 중인 것까지 세는 값이다.
+  const tasksInTab = tasksProvided && mailboxFilterHasTasks(filter);
+  const ledgerLoading = tasksInTab && needsAction.ledgerLoading;
+  // 404(`absent`)는 장애가 아니라 미제공이다: 「결정 대기」 칩이 따로 말한다.
+  const ledgerFailed = tasksInTab && !needsAction.absent && needsAction.error;
+
   const serverFilter = toServerFilter(filter);
   const query = useInfiniteQuery({
     queryKey: ['inbox', workspaceId, serverFilter],
@@ -184,8 +197,10 @@ export function useMailbox(
     hasMore: query.hasNextPage,
     isFetchingMore: query.isFetchingNextPage,
     fetchMore: () => void query.fetchNextPage(),
-    isLoading: enabled && (surface.isPending || (serverOn && query.isLoading)),
-    error: surface.isError || (serverOn && query.isError),
+    isLoading:
+      enabled &&
+      (surface.isPending || (serverOn && (query.isLoading || ledgerLoading))),
+    error: surface.isError || (serverOn && (query.isError || ledgerFailed)),
     capped: false,
     updatedAtMs: Math.max(query.dataUpdatedAt, needsAction.updatedAtMs),
     refetch,
