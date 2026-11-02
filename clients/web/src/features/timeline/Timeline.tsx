@@ -918,7 +918,7 @@ export function Timeline({
           // 서버가 방에 알리는 중단 줄(#5079)은 누가 한 말이 아니다 — 말풍선이 아니라 가운데의 시스템 줄이고, 반응·답글·행 동작이
           // 하나도 붙지 않는다. 판정은 코어 `isRunCancelledNotice` 하나(폰과 같다).
           if (isSystemLineMessage(item.message)) {
-            return <SystemLine message={item.message} />;
+            return <SystemLine message={item.message} clearsToolbarBand />;
           }
           return (
             <MessageRow
