@@ -990,14 +990,18 @@ pub fn build_app(state: AppState) -> Router {
             get(routes::attachments::content),
         )
         // ADR-0151 증보 5 D5 (#4673) — a video's length, size and poster. The write is the
-        // uploader's, before the send; the read is the content route's own authorization, so the
-        // picture is as visible as the bytes and no more. Absent from the agent-route allow-list and
-        // from a developer token's closed table, like the three above.
+        // uploader's, before the send, and spends a per-member budget of its own like the upload
+        // start beside it (review M-1: a write of up to 256 KiB into Postgres per request); the read
+        // is the content route's own authorization, so the picture is as visible as the bytes and
+        // no more. Absent from the agent-route allow-list and from a developer token's closed
+        // table, like the three above.
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/media",
-            put(routes::attachment_media::set_media).layer(axum::extract::DefaultBodyLimit::max(
-                routes::attachment_media::MAX_MEDIA_BODY_BYTES,
-            )),
+            put(routes::attachment_media::set_media)
+                .route_layer(member_write(rate_limit::MemberWrite::MediaWrite))
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    routes::attachment_media::MAX_MEDIA_BODY_BYTES,
+                )),
         )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/poster",
