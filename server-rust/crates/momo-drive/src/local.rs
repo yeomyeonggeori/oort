@@ -40,6 +40,7 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -108,6 +109,8 @@ pub struct LocalDriveArchive {
     session_ttl: Duration,
     lock: Mutex<()>,
     read_only: bool,
+    /// The calls that make an upload survive a crash — see [`Disk`].
+    disk: Arc<dyn Disk>,
 }
 
 impl LocalDriveArchive {
@@ -127,6 +130,7 @@ impl LocalDriveArchive {
             session_ttl: UPLOAD_SESSION_TTL,
             lock: Mutex::new(()),
             read_only: true,
+            disk: Arc::new(OsDisk),
         })
     }
 
@@ -150,7 +154,15 @@ impl LocalDriveArchive {
             session_ttl: UPLOAD_SESSION_TTL,
             lock: Mutex::new(()),
             read_only: false,
+            disk: Arc::new(OsDisk),
         })
+    }
+
+    /// Replace the disk calls with a test's recording stand-in (see [`Disk`]).
+    #[cfg(test)]
+    fn with_disk(mut self, disk: Arc<dyn Disk>) -> LocalDriveArchive {
+        self.disk = disk;
+        self
     }
 
     /// Replace [`UPLOAD_SESSION_TTL`] for sessions this instance mints.
@@ -362,32 +374,65 @@ fn write_new(path: &Path, bytes: &[u8]) -> Result<(), DriveError> {
 }
 
 /// Move a finished file from `incoming/` to its place in `objects/`.
-fn publish(from: &Path, to: &Path) -> Result<(), DriveError> {
+fn publish(disk: &dyn Disk, from: &Path, to: &Path) -> Result<(), DriveError> {
     refuse_symlink(to)?;
-    #[cfg(test)]
-    durability_log::note("rename");
-    fs::rename(from, to).map_err(|_| DriveError::UpstreamFailure)
+    disk.rename(from, to)
+        .map_err(|_| DriveError::UpstreamFailure)
 }
 
-/// Test-only record of the order in which an upload becomes durable and then
-/// visible (the part is `sync_all`ed, then renamed). An `fsync` cannot be
-/// observed from a test any other way. The log is per thread, so tests that run
-/// in parallel — each on its own current-thread runtime — never see each other's
-/// events.
-#[cfg(test)]
-mod durability_log {
-    use std::cell::RefCell;
+/// The three calls that decide whether an upload survives a crash, in the order
+/// the upload makes them (ADR-0151 증보 5 D2): make the finished part durable
+/// ([`Disk::sync_file`]), rename it into `objects/` ([`Disk::rename`] — metadata
+/// first, object last), make those renames durable ([`Disk::sync_dir`]).
+///
+/// They sit behind a trait for one reason: so a test can **record** that they
+/// happen, and in what order, and **make one of them fail**. A stand-in cannot see
+/// the kernel; it does see this archive's side of the contract. Take a call out of
+/// the upload's flow and the record changes — nothing sits beside the call that a
+/// test could be satisfied by while the real call is replaced. What [`OsDisk`]
+/// does with each call is one line, and that line is the one thing in-process
+/// tests cannot see (the Linux `strace` run in the #4671 hand-off does).
+#[async_trait]
+trait Disk: Send + Sync + std::fmt::Debug {
+    /// `fsync` of a finished part: its bytes and its length reach the disk. Called
+    /// after the last byte was written and **before** the part is renamed into
+    /// `objects/`: `flush` only hands the bytes to the kernel, and a 300 MiB part
+    /// is a large window of dirty pages.
+    async fn sync_file(&self, file: &tokio::fs::File) -> std::io::Result<()>;
 
-    thread_local! {
-        static EVENTS: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+    /// Move `from` to `to`.
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+
+    /// `fsync` of a directory: the renames made inside it reach the disk. Called
+    /// **after** the object is renamed into `objects/`; without it a crash could
+    /// lose the name of an object whose bytes were already durable.
+    fn sync_dir(&self, dir: &Path) -> std::io::Result<()>;
+}
+
+/// The real thing.
+#[derive(Debug, Clone, Copy)]
+struct OsDisk;
+
+#[async_trait]
+impl Disk for OsDisk {
+    async fn sync_file(&self, file: &tokio::fs::File) -> std::io::Result<()> {
+        file.sync_all().await
     }
 
-    pub(super) fn note(event: &'static str) {
-        EVENTS.with(|log| log.borrow_mut().push(event));
+    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        fs::rename(from, to)
     }
 
-    pub(super) fn take() -> Vec<&'static str> {
-        EVENTS.with(|log| std::mem::take(&mut *log.borrow_mut()))
+    #[cfg(unix)]
+    fn sync_dir(&self, dir: &Path) -> std::io::Result<()> {
+        fs::File::open(dir)?.sync_all()
+    }
+
+    /// A directory cannot be opened for `fsync` outside Unix; the server runs on
+    /// Unix volumes, and elsewhere this is a no-op rather than a failure.
+    #[cfg(not(unix))]
+    fn sync_dir(&self, _dir: &Path) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
@@ -411,7 +456,12 @@ impl Drop for PartFile {
 /// pool when the future is dropped would land after [`PartFile`] had already
 /// cleaned up. Every write after it goes to that file descriptor, so a dropped
 /// future can only ever leave an unlinked inode behind.
-async fn stream_into(part: &Path, mut body: UploadBody, declared: i64) -> Result<i64, DriveError> {
+async fn stream_into(
+    disk: &dyn Disk,
+    part: &Path,
+    mut body: UploadBody,
+    declared: i64,
+) -> Result<i64, DriveError> {
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -432,16 +482,14 @@ async fn stream_into(part: &Path, mut body: UploadBody, declared: i64) -> Result
     file.flush()
         .await
         .map_err(|_| DriveError::UpstreamFailure)?;
-    // ADR-0151 증보 5 D2: the part is `sync_all`ed **before** it is renamed into
+    // ADR-0151 증보 5 D2: the part is made durable **before** it is renamed into
     // `objects/`. `flush` only hands the bytes to the kernel; a 300 MiB part is a
     // large window of dirty pages, and a host that dies inside it would leave an
     // object PostgreSQL believes is `complete` cut short on disk. This runs here,
     // outside the archive lock, so a long `fsync` never holds up another upload.
-    file.sync_all()
+    disk.sync_file(&file)
         .await
         .map_err(|_| DriveError::UpstreamFailure)?;
-    #[cfg(test)]
-    durability_log::note("sync_all");
     Ok(measured)
 }
 
@@ -672,7 +720,7 @@ impl DriveArchive for LocalDriveArchive {
                 .join(INCOMING_DIR)
                 .join(format!("{}.{PART_SUFFIX}", Uuid::new_v4())),
         );
-        let measured = stream_into(&part.0, body, first.size_bytes).await?;
+        let measured = stream_into(self.disk.as_ref(), &part.0, body, first.size_bytes).await?;
 
         // 4. Checked again, spent, published — one critical section. `part`
         // removes the body file on the way out unless the publish moved it.
@@ -740,13 +788,27 @@ impl LocalDriveArchive {
         // Metadata first, then the object. A reader needs both, so neither half
         // is readable alone; a failure takes back only what this call placed —
         // the landed check proved both paths empty a moment ago, under the lock.
-        if let Err(error) = publish(&meta_part, &meta) {
+        if let Err(error) = publish(self.disk.as_ref(), &meta_part, &meta) {
             let _ = fs::remove_file(&meta_part);
             return Err(error);
         }
-        if let Err(error) = publish(part, &object) {
+        if let Err(error) = publish(self.disk.as_ref(), part, &object) {
             let _ = fs::remove_file(&meta);
             return Err(error);
+        }
+        // Both renames are in the page cache until their directory is synced, and
+        // a crash before then could lose the *names* of an object whose bytes are
+        // already durable (gone, not cut short). Fail closed like everything else
+        // here: if the directory cannot be made durable, take back what this call
+        // placed — the client starts a new session, as it does for any failure.
+        // Both files are in `objects/`, so one call covers them.
+        let made_durable = object
+            .parent()
+            .is_some_and(|dir| self.disk.sync_dir(dir).is_ok());
+        if !made_durable {
+            let _ = fs::remove_file(&object);
+            let _ = fs::remove_file(&meta);
+            return Err(DriveError::UpstreamFailure);
         }
         Ok(())
     }
@@ -2300,25 +2362,85 @@ mod tests {
         out
     }
 
-    /// **Red proof (D2 공개 순서, #4671).** The body is `sync_all`ed **before** it is
-    /// renamed into `objects/` — the metadata first and the object last, both
-    /// after the `fsync`. An `fsync` cannot be seen from outside the process, so
-    /// the archive records the order in which it happened in a test-only log.
-    ///
-    /// Replace `sync_all` with `flush` and the log has no `sync_all`; call it
-    /// after the renames and it is not first.
+    /// A [`Disk`] that does what the real one does, writes down what it was asked
+    /// and in what order, and can be told to fail one named call (once).
+    #[derive(Debug, Default)]
+    struct RecordingDisk {
+        events: std::sync::Mutex<Vec<&'static str>>,
+        fail_once: std::sync::Mutex<Option<&'static str>>,
+    }
+
+    impl RecordingDisk {
+        /// What was asked since the last call, in order.
+        fn taken(&self) -> Vec<&'static str> {
+            std::mem::take(&mut *self.events.lock().expect("never poisoned"))
+        }
+
+        fn fail_next(&self, call: &'static str) {
+            *self.fail_once.lock().expect("never poisoned") = Some(call);
+        }
+
+        fn step(&self, call: &'static str) -> std::io::Result<()> {
+            self.events.lock().expect("never poisoned").push(call);
+            let injected = self
+                .fail_once
+                .lock()
+                .expect("never poisoned")
+                .take_if(|wanted| *wanted == call)
+                .is_some();
+            if injected {
+                return Err(std::io::Error::other("injected failure"));
+            }
+            Ok(())
+        }
+    }
+
+    #[async_trait]
+    impl Disk for RecordingDisk {
+        async fn sync_file(&self, file: &tokio::fs::File) -> std::io::Result<()> {
+            self.step("sync_file")?;
+            OsDisk.sync_file(file).await
+        }
+
+        fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+            self.step("rename")?;
+            OsDisk.rename(from, to)
+        }
+
+        fn sync_dir(&self, dir: &Path) -> std::io::Result<()> {
+            self.step("sync_dir")?;
+            OsDisk.sync_dir(dir)
+        }
+    }
+
+    fn archive_with_recording_disk(dir: &Path) -> (LocalDriveArchive, Arc<RecordingDisk>) {
+        let disk = Arc::new(RecordingDisk::default());
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9")
+            .expect("open")
+            .with_disk(disk.clone());
+        (archive, disk)
+    }
+
+    /// **Red proof (D2 공개 순서, #4671; review L-1 and L-2).** An upload is made
+    /// durable in this order: the finished part is `fsync`ed, **then** the metadata
+    /// and the object are renamed into `objects/`, **then** that directory is
+    /// `fsync`ed. The recording disk is the archive's own side of those calls: the
+    /// record is what the upload asked of it, so taking a call out of the flow —
+    /// `flush` where `fsync` was, no directory sync, the directory synced before the
+    /// renames — changes the record and goes red. (A call left in place with the
+    /// real syscall swapped out *behind* the trait is not visible here; that line is
+    /// one `file.sync_all()` and the Linux `strace` run in the hand-off sees it.)
     #[tokio::test]
-    async fn an_upload_is_synced_before_it_is_renamed_into_place() {
+    async fn an_upload_is_made_durable_before_it_is_published_and_its_directory_after() {
         let (dir, _guard) = temp_root();
-        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
-        let _ = durability_log::take();
+        let (archive, disk) = archive_with_recording_disk(&dir);
         let id = stored_pattern(&archive, 70_000).await;
         assert_eq!(
-            durability_log::take(),
-            vec!["sync_all", "rename", "rename"],
-            "the part is made durable, then the metadata and the object are renamed"
+            disk.taken(),
+            vec!["sync_file", "rename", "rename", "sync_dir"],
+            "the part is made durable, then metadata and object are renamed, then the directory is"
         );
-        // A body the declaration refuses is never synced: nothing is published.
+        // A body the declaration refuses is never made durable nor published.
         let session = archive
             .create_resumable_upload(Uuid::nil(), "short.bin", "application/octet-stream", 10)
             .await
@@ -2334,7 +2456,7 @@ mod tests {
             .expect_err("5 of 10 declared bytes");
         assert!(matches!(refused, DriveError::InvalidArguments(_)));
         assert_eq!(
-            durability_log::take(),
+            disk.taken(),
             Vec::<&str>::new(),
             "a refused body is neither synced nor renamed"
         );
@@ -2342,6 +2464,109 @@ mod tests {
             .file_metadata(&id)
             .await
             .expect("the first object landed");
+    }
+
+    /// **Red proof (review L-2).** A directory that cannot be made durable does not
+    /// leave a published object behind: the call fails closed, takes back the
+    /// metadata and the object it placed, and the capability is spent (the client
+    /// starts a new session, as for any failed publish).
+    ///
+    /// Leave the published pair in place after the failed directory sync and the
+    /// object is readable although the upload reported failure.
+    #[tokio::test]
+    async fn a_directory_that_cannot_be_synced_takes_the_publish_back() {
+        let (dir, _guard) = temp_root();
+        let (archive, disk) = archive_with_recording_disk(&dir);
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        disk.fail_next("sync_dir");
+        let refused = archive
+            .accept_stub_upload(&token, Some("text/plain"), None, body(b"hello"))
+            .await;
+        assert_eq!(refused, Err(DriveError::UpstreamFailure));
+        assert_eq!(
+            disk.taken(),
+            vec!["sync_file", "rename", "rename", "sync_dir"],
+            "the directory sync was reached and failed"
+        );
+        assert_eq!(
+            archive
+                .file_metadata(&session.drive_file_id)
+                .await
+                .expect_err("nothing is published"),
+            DriveError::FileNotFound
+        );
+        assert_eq!(
+            fs::read_dir(archive.root.join(OBJECTS_DIR))
+                .expect("objects")
+                .count(),
+            0,
+            "neither the object nor its metadata stays behind"
+        );
+        assert_eq!(
+            incoming(&archive),
+            Vec::<String>::new(),
+            "no partial file stays behind"
+        );
+        assert_eq!(
+            archive
+                .accept_stub_upload(&token, Some("text/plain"), None, body(b"hello"))
+                .await
+                .expect_err("the capability was spent"),
+            DriveError::FileNotFound
+        );
+    }
+
+    /// **Red proof (review L-1).** A part that cannot be made durable is not
+    /// published and does not spend the capability — like every refusal before
+    /// storage — so the same URL can be tried again, and the retry lands.
+    #[tokio::test]
+    async fn a_part_that_cannot_be_synced_is_not_published_and_the_url_stays_usable() {
+        let (dir, _guard) = temp_root();
+        let (archive, disk) = archive_with_recording_disk(&dir);
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 5)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        disk.fail_next("sync_file");
+        let refused = archive
+            .accept_stub_upload(&token, Some("text/plain"), None, body(b"hello"))
+            .await;
+        assert_eq!(refused, Err(DriveError::UpstreamFailure));
+        assert_eq!(
+            disk.taken(),
+            vec!["sync_file"],
+            "nothing was renamed after the failed sync"
+        );
+        assert_eq!(
+            fs::read_dir(archive.root.join(OBJECTS_DIR))
+                .expect("objects")
+                .count(),
+            0
+        );
+        assert_eq!(incoming(&archive), Vec::<String>::new());
+        archive
+            .accept_stub_upload(&token, Some("text/plain"), None, body(b"hello"))
+            .await
+            .expect("the URL was not spent, so the retry lands");
+        assert_eq!(
+            disk.taken(),
+            vec!["sync_file", "rename", "rename", "sync_dir"]
+        );
+        assert_eq!(
+            collect(
+                archive
+                    .file_content(&session.drive_file_id, MAX_ATTACHMENT_BYTES)
+                    .await
+                    .expect("content")
+            )
+            .await,
+            b"hello"
+        );
     }
 
     /// What a range read refuses before a byte is read: an object that was never
