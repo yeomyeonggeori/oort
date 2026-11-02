@@ -196,3 +196,41 @@ describe("셸 IPC 전송로 (#2701 R1)", () => {
     expect(cspDirective(csp, "img-src")).toEqual(["'self'", "data:"]);
   });
 });
+
+// -----------------------------------------------------------------------------
+// #5193 — 메뉴 막대 아이콘: 페이지의 길은 명령 하나뿐이다
+//
+// 아이콘과 메뉴는 Rust가 만든다(`src/tray.rs`). 페이지는 `tray_status_set` 하나로 상태를 보낼 뿐이다. 그런데 tauri의
+// `tray-icon` 기능을 켜면 `core:default`가 품고 있는 `core:tray:default`(「모든 명령」)가 살아난다 — 페이지가 자기
+// 상태 항목을 만들고 아이콘·메뉴를 바꿀 수 있게 된다. 그래서 capability가 `core:tray` 명령을 하나도 빠짐없이 막는다.
+// 셸 시험(`shell_contract.rs`)이 tauri 자신의 해석기로 같은 것을 재고, 이 시험은 CI가 도는 웹 쪽에서 파일을 읽어 지킨다.
+// 명령 목록은 tauri 2.11의 `core:tray`다. 이 목록에 없는 명령이 새로 생기면 셸 시험이 붉어진다(목록을 매니페스트에서 읽는다).
+// -----------------------------------------------------------------------------
+
+const TRAY_PLUGIN_COMMANDS = [
+  "new",
+  "get-by-id",
+  "remove-by-id",
+  "set-icon",
+  "set-menu",
+  "set-tooltip",
+  "set-title",
+  "set-visible",
+  "set-temp-dir-path",
+  "set-icon-as-template",
+  "set-icon-with-as-template",
+  "set-show-menu-on-left-click",
+];
+
+describe("메뉴 막대 아이콘의 권한 (#5193)", () => {
+  const ids = permissionIds(capability);
+
+  it("main 창은 상태 명령 하나를 받는다", () => {
+    expect(ids).toContain("allow-tray-status-set");
+  });
+
+  it("tauri의 JS 트레이 API(core:tray)는 명령마다 막혀 있고, 허용하는 줄은 하나도 없다", () => {
+    const tray = ids.filter((id) => id.startsWith("core:tray:"));
+    expect(tray.slice().sort()).toEqual(TRAY_PLUGIN_COMMANDS.map((c) => `core:tray:deny-${c}`).sort());
+  });
+});

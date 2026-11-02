@@ -60,17 +60,26 @@ export interface AdeControl {
  *   턴이 하나도 없으면 시계를 아예 마운트하지 않는다. 세션만으로 이루어진
  *   요약은 쿼리가 갱신될 때만 바뀌므로, 초당 한 번 다시 그릴 이유가 없다 —
  *   `hasChannelTurn` 이 컴포저에서 같은 판단을 하는 그 이유다.
+ * @param sessionsEnabled 세션 반쪽(원장과 호스트 목록 읽기)을 읽는가. 기본은 읽는다. 관제 표면이 서 있지 않은 곳
+ *   (온라인 호스트가 없다, 서버에 그 경로가 없다)에서 이 훅을 부르는 쪽(메뉴 막대 상태, #5193)이 끈다: 서랍과 요약 줄은
+ *   `SurfaceGate` 뒤에 있어서 그런 곳에서는 아예 마운트되지 않지만, 셸에 늘 마운트된 호출은 그 문이 없으므로 직접 끈다 —
+ *   꺼 두지 않으면 호스트가 없는 워크스페이스에서도 원장을 20초마다 묻는다. 꺼져 있으면 쿼리를 열지 않고, 이미 캐시에
+ *   남은 옛 세션도 쓰지 않는다(없는 호스트의 세션을 「실행 중」으로 말하지 않는다). 턴 반쪽은 실시간 스토어에서 오므로
+ *   이 값과 무관하게 그대로 흐른다.
  */
-export function useAdeControl(clockAlways: boolean): AdeControl {
+export function useAdeControl(
+  clockAlways: boolean,
+  sessionsEnabled: boolean = true
+): AdeControl {
   const { workspaceId } = useSession();
   const { directory } = useDirectory(workspaceId);
-  const sessionsQuery = useWorkSessions(workspaceId, ADE_SESSION_POLL_MS);
-  const hostsQuery = useWorkHosts(workspaceId);
+  const sessionsQuery = useWorkSessions(workspaceId, ADE_SESSION_POLL_MS, sessionsEnabled);
+  const hostsQuery = useWorkHosts(workspaceId, undefined, sessionsEnabled);
   const signals = useAgentWorkingSignals();
   const nowMs = useTickingNow(clockAlways || signals.size > 0);
 
-  const sessions = sessionsQuery.data;
-  const hosts = hostsQuery.data;
+  const sessions = sessionsEnabled ? sessionsQuery.data : undefined;
+  const hosts = sessionsEnabled ? hostsQuery.data : undefined;
 
   const items = useMemo(
     () => {
@@ -95,7 +104,7 @@ export function useAdeControl(clockAlways: boolean): AdeControl {
     items,
     counts: adeCounts(items),
     nowMs,
-    sessionsFailed: sessionsQuery.isError,
+    sessionsFailed: sessionsEnabled && sessionsQuery.isError,
     retrySessions,
   };
 }

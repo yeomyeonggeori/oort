@@ -8,7 +8,7 @@
 // permission, no keychain) when there is no shell underneath.
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
-// notification,notification_click,keychain,session_refresh,updater,detect,harness_status,opener,
+// notification,notification_click,tray,keychain,session_refresh,updater,detect,harness_status,opener,
 // pdf_viewer,downloads,pty,git_read,work_host,device_key}.rs` and the
 // command/event contract is documented in `clients/desktop/README.md`. Keep
 // the three in sync — a renamed command fails at runtime, not at compile time.
@@ -53,6 +53,8 @@ export const DESKTOP_EVENT = {
   updateProgress: "momo:update-progress",
   /** One banner the shell reports clicks for was clicked (#5059). macOS only. */
   notificationClick: "momo:notification-click",
+  /** A menu-bar menu entry that needs the page was picked (#5193). macOS only. */
+  trayAction: "momo:tray-action",
 } as const;
 
 // ---- module plumbing --------------------------------------------------------
@@ -1371,6 +1373,48 @@ export async function setDockBadge(count: number): Promise<boolean> {
     console.warn("[momo] dock badge failed", error);
     return false;
   }
+}
+
+/**
+ * The state the menu-bar icon draws (#5193). Every push carries all of it: the Dock badge's number, the
+ * running work, and the menu's words already in the person's language (the shell holds no copy). The
+ * shape and its limits are `clients/desktop/src-tauri/src/tray.rs`; `trayModel.ts` builds it.
+ */
+export interface TrayStatusWire {
+  unread: number;
+  compose: boolean;
+  labels: { running: string; none: string; newMessage: string; open: string; quit: string };
+  running: { id: string; title: string; state: string }[];
+  more: string | null;
+}
+
+/**
+ * Draw the menu-bar icon and its menu. Fire-and-forget like `setDockBadge`: a browser, an older shell
+ * without the command, or another OS than macOS simply has no menu-bar icon, which is not an error.
+ * `true` only when the shell took the status.
+ */
+export async function setTrayStatus(status: TrayStatusWire): Promise<boolean> {
+  if (!IS_TAURI) return false;
+  try {
+    // A count that is not a finite number would serialize to `null`, which the shell's `u32` refuses.
+    const unread = Number.isFinite(status.unread)
+      ? Math.max(0, Math.min(Math.trunc(status.unread), 0xffffffff))
+      : 0;
+    await invoke<void>("tray_status_set", { status: { ...status, unread } });
+    return true;
+  } catch (error) {
+    console.warn("[momo] tray status failed", error);
+    return false;
+  }
+}
+
+/**
+ * A menu-bar menu entry that needs the page was picked. In a browser tab it resolves at once to a no-op.
+ * The payload is whatever crossed the IPC boundary: a caller must read its shape (`readTrayAction`) and
+ * match a row id against the rows the page itself sent, and never act on it as it arrives.
+ */
+export function onTrayAction(handler: (payload: unknown) => void): Promise<() => void> {
+  return listen<unknown>(DESKTOP_EVENT.trayAction, handler);
 }
 
 // ---- OS credential store ----------------------------------------------------

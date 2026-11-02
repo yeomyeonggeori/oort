@@ -80,6 +80,17 @@ window-vibrancy = "0.6"
 # backend under tauri-plugin-notification, so no crate is added, only this edge (and the NOTICE
 # row). MIT OR Apache-2.0.
 mac-notification-sys = "0.6"
+# The menu-bar icon and its menu (#5193): built in Rust only (`src/tray.rs`), macOS only (the other
+# desktops get no tray in this stage). `tray-icon` is tauri's own optional edge to the `tray-icon`
+# crate, which `Cargo.lock` already carries (0.24.1, MIT OR Apache-2.0), so this is a feature flag
+# and no crate is added. Turning it on makes tauri's JS tray API (`plugin:tray|*`) reachable through
+# `core:default`; `capabilities/default.json` therefore denies every one of those commands and
+# `shell_contract.rs` measures that the page cannot call them.
+tauri = { version = "2", features = ["tray-icon"] }
+# Decodes the two embedded tray template PNGs (`src/tray.rs`). tauri's `image-png` feature would add
+# the `image` crate, which is not in this graph; `png` 0.18.1 already is (muda and tray-icon use it),
+# so this is one dependency edge and no crate (and a NOTICE row). MIT OR Apache-2.0.
+png = "0.18"
 # Human device key, R2 (ADR-0146 개정 2026-09-28 D-1·D-3·D-5, #3025): a Secure
 # Enclave P-256 key behind userPresence, the three signed statements built in
 # Rust (never by the webview), and a native confirmation before every
