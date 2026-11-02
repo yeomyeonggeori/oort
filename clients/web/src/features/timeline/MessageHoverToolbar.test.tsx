@@ -633,14 +633,14 @@ function openContextMenu(over: Partial<MessageActionAvailability>, copyOver: Par
 }
 
 describe("#5192 ⋮ 메뉴 구조", () => {
-  it("내 메시지: 묶음 사이에만 구분선, 지우기가 맨 아래", () => {
+  it("내 메시지: 고치기가 첫 줄, 묶음 사이에만 구분선, 지우기는 혼자 맨 아래", () => {
     mountToolbarWith({});
     expect(menuSequence("message-action-menu", "menu-")).toEqual([
-      "quote", "pin", "remind",
+      "edit", "quote", "pin", "remind",
       "|",
       "copy", "copy-link",
       "|",
-      "edit", "delete",
+      "delete",
     ]);
   });
 

@@ -53,7 +53,6 @@ describe("⋯ 메뉴 「여기부터 안 읽음」", () => {
     expect(keys).toContain("mark-unread");
     expect(keys.indexOf("mark-unread")).toBeGreaterThan(keys.indexOf("remind"));
     expect(keys.indexOf("mark-unread")).toBeLessThan(keys.indexOf("copy"));
-    expect(keys.indexOf("mark-unread")).toBeLessThan(keys.indexOf("edit"));
   });
 
   it("읽음 상태 문법은 Mail 을 쓴다 (숨김 EyeOff 가 아니다)", () => {

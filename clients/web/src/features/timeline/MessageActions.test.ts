@@ -9,6 +9,9 @@ import {
 } from "@momo/core/features/timeline/copyLabels";
 import {
   actionKeepsMenuOpen,
+  MESSAGE_ACTION_GROUP,
+  MESSAGE_ACTION_GROUP_PLACEMENT,
+  MESSAGE_ACTION_PLACE,
   MESSAGE_ACTION_SURFACES,
   messageActionGroups,
   messageActionItems,
@@ -45,16 +48,17 @@ const REACTION_KEYS: MessageActionItemKey[] = [
 
 /**
  * Buzz 대응표(#5192)가 정한 ⋯·우클릭 목록. 반응·답글은 도구 막대가 직접 보여 주므로 메뉴에 없다.
- * 묶음: 이 메시지를 두고 하는 일 | 복사 | 내 메시지(지우기는 맨 아래). 순서를 바꾸는 것은 표를 바꾸는 결정이라 일부러 값을 적어 둔다.
+ * 묶음: 이 메시지에 하는 일(고치기가 첫 줄, Buzz와 같다) | 복사 | 지우기(구분선 아래 혼자). 순서를 바꾸는 것은 표를 바꾸는
+ * 결정이라 일부러 값을 적어 둔다.
  */
 const MENU_AUTHOR_KEYS: MessageActionItemKey[] = [
+  "edit",
   "quote",
   "pin",
   "remind",
   "mark-unread",
   "copy",
   "copy-link",
-  "edit",
   "delete",
 ];
 
@@ -108,14 +112,14 @@ describe("메시지 액션 세 표면", () => {
     }
   });
 
-  it("묶음: 이 메시지를 두고 하는 일 | 복사 | 내 메시지. 구분선은 묶음 사이에만 서고 빈 묶음은 없다", () => {
+  it("묶음: 이 메시지에 하는 일(고치기 첫 줄) | 복사 | 지우기. 구분선은 묶음 사이에만 서고 빈 묶음은 없다", () => {
     const groups = (a: MessageActionAvailability, c: MessageActionCopyState) =>
       messageActionGroups(messageActionItemsForSurface("menu", a, c)).map(keysOf);
 
     expect(groups(available, copyReady)).toEqual([
-      ["quote", "pin", "remind", "mark-unread"],
+      ["edit", "quote", "pin", "remind", "mark-unread"],
       ["copy", "copy-link"],
-      ["edit", "delete"],
+      ["delete"],
     ]);
     // 남의 메시지: 내 메시지 묶음이 통째로 빠지고, 마지막 묶음 뒤에 구분선이 남지 않는다.
     expect(groups({ ...available, edit: false, delete: false }, copyReady)).toEqual([
@@ -135,12 +139,29 @@ describe("메시지 액션 세 표면", () => {
     ).toEqual([]);
   });
 
-  it("지우기는 메뉴의 맨 아래이고, 위험 톤은 지우기 하나뿐이다", () => {
+  it("고치기는 내 메시지 메뉴의 첫 줄(Buzz), 지우기는 구분선 아래 혼자 맨 아래이고 위험 톤은 지우기 하나뿐이다", () => {
     const menu = messageActionItemsForSurface("menu", available, copyReady);
+    expect(menu[0].key).toBe("edit");
     expect(menu[menu.length - 1].key).toBe("delete");
     expect(menu.filter((item) => item.tone === "danger").map((item) => item.key)).toEqual(["delete"]);
-    // 고치기는 지우기와 같은 묶음의 바로 앞이다(고치기 자리를 #5191과 맞춘 값).
-    expect(menu[menu.length - 2].key).toBe("edit");
+    // 지우기는 자기 묶음에 혼자라서 고치기와 붙어 있지 않다(자주 쓰는 동작 옆의 되돌릴 수 없는 동작은 잘못 누르기 쉽다).
+    const groups = messageActionGroups(menu).map(keysOf);
+    expect(groups[groups.length - 1]).toEqual(["delete"]);
+    expect(groups[0]).toContain("edit");
+    // 남의 메시지에는 고치기·지우기가 없으니 첫 줄은 인용이다.
+    const other = messageActionItemsForSurface("menu", { ...available, edit: false, delete: false }, copyReady);
+    expect(other[0].key).toBe("quote");
+  });
+
+  it("고치기·지우기는 어떤 행에서도 도구 막대에 올리지 않는다(결정: Buzz·Slack 모두 ⋮ 안), 시트에는 있다", () => {
+    const toolbar = keysOf(messageToolbarItems(available, copyReady));
+    expect(toolbar).not.toContain("edit");
+    expect(toolbar).not.toContain("delete");
+    expect(MESSAGE_ACTION_GROUP_PLACEMENT[MESSAGE_ACTION_GROUP.message]).toEqual([MESSAGE_ACTION_PLACE.menu]);
+    expect(MESSAGE_ACTION_GROUP_PLACEMENT[MESSAGE_ACTION_GROUP.destructive]).toEqual([MESSAGE_ACTION_PLACE.menu]);
+    const sheet = keysOf(messageActionItemsForSurface("sheet", available, copyReady));
+    expect(sheet).toContain("edit");
+    expect(sheet).toContain("delete");
   });
 
   it("저자 인벤토리의 라벨: 나중에 알림은 고정 뒤에, 링크 복사는 복사 뒤에 있다", () => {
