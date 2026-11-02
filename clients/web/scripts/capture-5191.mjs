@@ -174,7 +174,9 @@ function makeServer(variant = "default") {
 
 function patchProjection(row, body) {
   // 서버가 내는 편집 투영: 첨부·스레드 롤업이 없다(`routes/messages.rs` `edit`).
-  const { attachments: _a, thread: _t, ...rest } = row;
+  const rest = { ...row };
+  delete rest.attachments;
+  delete rest.thread;
   return { ...rest, body, state: "edited", editedAtMs: NOW + 90_000 };
 }
 
@@ -415,7 +417,6 @@ async function startEditFromMenu(page, row) {
 
 async function runCell(page, server, cell, tag, ctx = {}) {
   const name = `${tag} ${cell.label}`;
-  const scope = ctx.scope ?? page;
   const row = ctx.row ? ctx.row(cell.id) : rowById(page, cell.id);
   const found = await row.waitFor({ state: "visible", timeout: 4000 }).then(() => true, () => false);
   check(`${name}: 행이 화면에 있다`, found);
@@ -526,7 +527,7 @@ const THREAD_CELLS = [
 ];
 
 /** 내 첨부만(글 없음): 서버는 받지만 「글이 있는 메시지」가 아니다. 이 칸은 단정이 아니라 **관찰**을 적는다. */
-async function observePhotoOnly(page, tag) {
+async function observePhotoOnly(page) {
   const row = rowById(page, ID.photoOnly);
   const found = await row.waitFor({ state: "visible", timeout: 4000 }).then(() => true, () => false);
   if (!found) return note(`첨부만(글 없음): 행을 못 찾았다`);
@@ -835,7 +836,7 @@ async function runTable(browserType, origin, scheme, tag) {
   const { browser, context, page } = await open(browserType, origin, scheme, server);
   try {
     for (const cell of MAIN_CELLS) await runCell(page, server, cell, tag);
-    await observePhotoOnly(page, tag);
+    await observePhotoOnly(page);
     await observeContextOnText(page, tag);
   } finally {
     await context.close();
