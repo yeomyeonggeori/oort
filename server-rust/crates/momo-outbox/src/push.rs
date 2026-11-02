@@ -382,6 +382,12 @@ pub struct ClaimedPushSystem {
     pub attempts: i32,
     pub workspace_id: uuid::Uuid,
     pub payload: String,
+    /// How long the row has existed — the database's `now() - created_at` at the claim, in seconds.
+    /// The database's clock on both sides, so a notifier host whose clock is off cannot make a
+    /// fresh row look old or an old one fresh. A consumer that must not send a row that waited too
+    /// long (the test notification, ADR-0206 증보 4 G3) decides on this; a requeued row keeps the
+    /// age it started with, because `created_at` is not touched by a retry.
+    pub age_secs: f64,
 }
 
 /// Claim up to `batch_size` pending `push_system` rows and flip them to `processing` in one
@@ -391,7 +397,7 @@ pub async fn claim_push_system_batch(
     pool: &PgPool,
     batch_size: i64,
 ) -> Result<Vec<ClaimedPushSystem>, sqlx::Error> {
-    let rows = sqlx::query_as::<_, (i64, i32, uuid::Uuid, String)>(
+    let rows = sqlx::query_as::<_, (i64, i32, uuid::Uuid, String, f64)>(
         "WITH claimed AS ( \
              SELECT id FROM outbox \
               WHERE kind = 'push_system' \
@@ -405,18 +411,22 @@ pub async fn claim_push_system_batch(
             SET status = 'processing', attempts = o.attempts + 1 \
            FROM claimed c \
           WHERE o.id = c.id \
-          RETURNING o.id, o.attempts, o.workspace_id, o.payload::text",
+          RETURNING o.id, o.attempts, o.workspace_id, o.payload::text, \
+                    EXTRACT(EPOCH FROM (now() - o.created_at))::float8",
     )
     .bind(batch_size)
     .fetch_all(pool)
     .await?
     .into_iter()
-    .map(|(id, attempts, workspace_id, payload)| ClaimedPushSystem {
-        id,
-        attempts,
-        workspace_id,
-        payload,
-    })
+    .map(
+        |(id, attempts, workspace_id, payload, age_secs)| ClaimedPushSystem {
+            id,
+            attempts,
+            workspace_id,
+            payload,
+            age_secs,
+        },
+    )
     .collect();
     Ok(rows)
 }

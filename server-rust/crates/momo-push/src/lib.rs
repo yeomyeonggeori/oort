@@ -63,9 +63,10 @@ pub use dispatch::{
 };
 pub use dispatch_log::{
     claim_dispatch, claim_system_dispatch, dead_token_reason, is_dispatch_settled, settle_dispatch,
-    settle_dispatch_and_invalidate, settle_relay_refusal, DeadTokenReason, DispatchClaim,
-    RefusalOutcome, RelayRefusal, SettleOutcome, AUDIT_RELAY_REFUSED, AUDIT_RELAY_REFUSED_SCHEMA,
-    RELAY_DROPPED_REASON,
+    settle_dispatch_and_invalidate, settle_relay_refusal, settle_system_dispatch_unsent,
+    DeadTokenReason, DispatchClaim, RefusalOutcome, RelayRefusal, SettleOutcome,
+    AUDIT_RELAY_REFUSED, AUDIT_RELAY_REFUSED_SCHEMA, BUDGET_SPENT_REASON, BUDGET_SPENT_STATUS,
+    RELAY_DROPPED_REASON, SERVER_DROP_REASONS, TEST_EXPIRED_REASON, TEST_EXPIRED_STATUS,
 };
 pub use error::{DeviceInputError, DeviceRejection, PushError};
 pub use judgment::{
@@ -75,4 +76,5 @@ pub use judgment::{
 pub use system::{
     system_dispatch_target, system_targets, test_notification_collapse_id,
     test_notification_dispatch_target, SystemPush, SystemTarget, SYSTEM_PUSH_MAX_TARGETS,
+    TEST_NOTIFICATION_MAX_AGE_SECS,
 };

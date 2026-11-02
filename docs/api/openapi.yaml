@@ -6049,8 +6049,9 @@ paths:
         died). `relay_unreachable` is inferred, because the api process has no relay client: a
         dispatch of a current token that stayed unsettled for 2 minutes, or a test push nobody
         processed for 30 seconds, within the last 15 minutes. `last_delivery_failed` reports
-        the latest settled dispatch of a current token (last 7 days; the bulk layer's drop
-        rows are skipped) when its status is 400 or above, and its `apnsReason` is a **code**
+        the latest settled dispatch of a current token (last 7 days; the rows the server itself
+        settled without sending are skipped: the bulk layer's drops and a test past the
+        server-wide budget or too old) when its status is 400 or above, and its `apnsReason` is a **code**
         (an APNs reason, or `relay_vocabulary_refused`, `relay_environment_mismatch`,
         `relay_http_<status>`), never a relay's own words. `ok` is true when there is no
         blocker. That means the server holds nothing back, not that the device shows it: the
@@ -6128,7 +6129,11 @@ paths:
         `no_device` when the caller has no active token (nothing is spent and nothing is
         written). 429 with `error.code` `rate_limited` and a `Retry-After` of 1 to 60 seconds
         past 3 per member per fixed 60-second window. The test is best effort: the relay's
-        429/5xx is not retried and shows as `failed`. The result is read from `lastTest` of
+        429/5xx is not retried and shows as `failed`. It also spends the notifier's server-wide
+        per-minute dispatch budget, one per device, shared with other best-effort pushes; a device
+        past it is not sent and the test shows `failed` with `apnsStatus` 429 (ADR-0206 증보 4 G2).
+        A test the notifier only picks up more than 5 minutes after it was made is not sent and
+        shows `failed` with `apnsStatus` 408 (증보 4 G3). The result is read from `lastTest` of
         `getNotificationDiagnostics`.
       security:
         - bearerAuth: []
@@ -21703,15 +21708,19 @@ components:
             `sent`: APNs answered 200 for at least one device; `relay_outdated`: every
             attempt was the relay's closed-vocabulary refusal (an old relay; not retried);
             `failed`: anything else once a record is settled and none is a 200 (an APNs
-            refusal, the relay's environment mismatch, a relay 429/5xx, or a mix of
-            settled and still-unsettled attempts).
+            refusal, the relay's environment mismatch, a relay 429/5xx, the notifier's own
+            server-wide budget spent (429), a test that waited more than 5 minutes and was
+            not sent (408), or a mix of settled and still-unsettled attempts).
         atMs:
           type: integer
           format: int64
           description: When the test was made.
         apnsStatus:
           type: integer
-          description: "`sent`: 200. Otherwise the newest settled record's status."
+          description: >
+            `sent`: 200. Otherwise the newest settled record's status. 429 is either the relay
+            pushing back or the notifier's server-wide budget being spent, and 408 is a test that
+            was not sent because it waited too long; the status alone does not say which 429.
 
     NotificationDiagnosticsResponse:
       type: object
@@ -21734,6 +21743,10 @@ components:
             active:
               type: integer
               minimum: 0
+              description: >
+                Live push tokens of the caller. A member keeps at most 10: a registration that
+                would leave more invalidates the stalest (ADR-0206 증보 4 G1). A member who was
+                above 10 before that rule converges at their next registration.
             invalidated:
               type: integer
               minimum: 0
@@ -21754,7 +21767,9 @@ components:
           description: >
             Active tokens the test goes to: the caller's live tokens capped at 5 (the most
             recently registered or refreshed). Not the caller's real device count — that is
-            `devices.active` of `getNotificationDiagnostics`, which has no cap.
+            `devices.active` of `getNotificationDiagnostics`, which is capped at 10. It says how
+            many the test is addressed to, not how many it reaches: a device the notifier's
+            server-wide budget has no room for is settled `failed` (429).
 
     NotificationKeywordsResponse:
       type: object

@@ -29,6 +29,20 @@
 //!   recently registered or refreshed active tokens; the rest are not tried. A system push has no
 //!   message to bound it and a member chooses how many devices they register, so the cap is what
 //!   keeps one `POST` from spending the relay's server-wide budget (#4341 review H-1).
+//! * **Inside the server-wide budget** (ADR-0206 증보 4 G2, #5091) — every token a test is sent to
+//!   spends one dispatch of the same per-minute budget the bulk layer uses
+//!   ([`crate::bulk::BulkLayer::try_spend_for`]), so together they never pass
+//!   `NOTIFIER_BULK_PUSH_PER_MINUTE`. A token that finds it spent is **settled**, not dropped
+//!   silently: its dispatch-log row is claimed and closed `429` /
+//!   [`momo_push::BUDGET_SPENT_REASON`], because a test's result *is* that row — without it
+//!   `lastTest` would read `queued` and then `stalled`, and the diagnostics would infer a relay that
+//!   cannot be reached. The claim comes **before** the spend, so a redelivered row spends nothing
+//!   for the targets it already settled.
+//! * **Not too old** (ADR-0206 증보 4 G3, #5091) — a test row older than
+//!   [`momo_push::TEST_NOTIFICATION_MAX_AGE_SECS`] when it is claimed (a notifier that was stopped
+//!   for a while finds its backlog) is **not sent**: each of the member's current tokens gets a
+//!   dispatch-log row closed `408` / [`momo_push::TEST_EXPIRED_REASON`] and the outbox row is `done`
+//!   with a note. A test asks "does it work now"; a push that arrives minutes later answers nothing.
 
 use momo_db::sqlx;
 use momo_db::with_tenant_tx;
@@ -37,12 +51,15 @@ use momo_outbox::{
     PushSystemReason,
 };
 use momo_push::{
-    claim_system_dispatch, settle_dispatch, system_targets, test_notification_dispatch_target,
-    unread_badge, DispatchClaim, DispatchOutcome, PushDispatch, SystemTarget,
+    claim_system_dispatch, settle_dispatch, settle_system_dispatch_unsent, system_targets,
+    test_notification_dispatch_target, unread_badge, DispatchClaim, DispatchOutcome, PushDispatch,
+    SystemTarget, BUDGET_SPENT_REASON, BUDGET_SPENT_STATUS, TEST_EXPIRED_REASON,
+    TEST_EXPIRED_STATUS, TEST_NOTIFICATION_MAX_AGE_SECS,
 };
 use uuid::Uuid;
 
 use super::{DrainStats, PushDrain, TokenFacts};
+use crate::bulk::Cause;
 
 /// The HTTP status inside a transient failure's text (`HTTP 429`, `HTTP 503`), or `None` for a
 /// transport failure that has no status (the relay was never reached, or never answered).
@@ -100,10 +117,15 @@ impl PushDrain {
                     total.failed += stats.failed;
                     total.held_back += stats.held_back;
                     if claimed < batch_size as usize {
+                        // Tests held back (budget spent, expired) are counted with the bulk layer's.
+                        self.log_bulk_changes();
                         return (total, None);
                     }
                 }
-                Err(error) => return (total, Some(error)),
+                Err(error) => {
+                    self.log_bulk_changes();
+                    return (total, Some(error));
+                }
             }
         }
     }
@@ -124,18 +146,82 @@ impl PushDrain {
                 return;
             }
         };
-        let delivered = match payload.reason {
+        // `Ok(None)`: delivered (or nothing to deliver) and finished. `Ok(Some(note))`: deliberately
+        // not sent, finished with the note. `Err`: our own database failed, retry the row.
+        let delivered: Result<Option<String>, String> = match payload.reason {
             PushSystemReason::TestNotification => {
-                self.deliver_test_notification(row.workspace_id, &payload, stats)
-                    .await
+                if row.age_secs > TEST_NOTIFICATION_MAX_AGE_SECS as f64 {
+                    self.expire_test_notification(row.workspace_id, &payload, row.age_secs, stats)
+                        .await
+                        .map(Some)
+                } else {
+                    self.deliver_test_notification(row.workspace_id, &payload, stats)
+                        .await
+                        .map(|()| None)
+                }
             }
         };
         match delivered {
-            Ok(()) => self.settle_outbox_done(row.id, stats).await,
+            Ok(None) => self.settle_outbox_done(row.id, stats).await,
+            Ok(Some(note)) => self.settle_outbox_done_with_note(row.id, &note).await,
             // Our own database failed (never the relay's answer): the row is retried, and the
             // claim in the dispatch log keeps a retry from sending a target twice.
             Err(reason) => self.requeue_row(row.id, row.attempts, &reason, stats).await,
         }
+    }
+
+    /// A test row that waited longer than [`TEST_NOTIFICATION_MAX_AGE_SECS`] before it was claimed:
+    /// nothing is sent. Each of the member's current tokens (the same most-recent set a fresh test
+    /// would have gone to) gets its dispatch-log row claimed and closed `408` /
+    /// `notifier_test_expired` in one tenant transaction, so `lastTest` reads `failed` instead of
+    /// `stalled` and the diagnostics do not infer an unreachable relay from a test this notifier
+    /// itself discarded. Returns the note for the finished outbox row; `Err` is a database failure
+    /// on our side and means "retry the row" (it is still too old next time).
+    async fn expire_test_notification(
+        &self,
+        workspace_id: Uuid,
+        payload: &PushSystemPayload,
+        age_secs: f64,
+        stats: &mut DrainStats,
+    ) -> Result<String, String> {
+        let member_id = payload.member_id;
+        let collapse = payload.collapse_id.clone();
+        let settled = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let targets = system_targets(conn, workspace_id, member_id).await?;
+                for target in &targets {
+                    settle_system_dispatch_unsent(
+                        conn,
+                        workspace_id,
+                        member_id,
+                        target.token_id,
+                        &collapse,
+                        TEST_EXPIRED_STATUS,
+                        TEST_EXPIRED_REASON,
+                    )
+                    .await?;
+                }
+                Ok(targets.len())
+            })
+        })
+        .await
+        .map_err(|error| format!("settling an expired test failed: {error}"))?;
+        for _ in 0..settled {
+            self.bulk
+                .count_for(PushSystemReason::TestNotification.as_str(), Cause::Expired);
+        }
+        stats.held_back += settled;
+        tracing::info!(
+            collapse_id = %payload.collapse_id,
+            age_secs = age_secs as i64,
+            max_age_secs = TEST_NOTIFICATION_MAX_AGE_SECS,
+            targets = settled,
+            "stale test notification settled unsent"
+        );
+        Ok(format!(
+            "expired: {}s old, a test is not sent after {TEST_NOTIFICATION_MAX_AGE_SECS}s",
+            age_secs as i64
+        ))
     }
 
     /// Send one test notification to the payload's member's active tokens (the most recent
@@ -200,6 +286,22 @@ impl PushDrain {
             DispatchClaim::Claimed { log_id } => log_id,
         };
 
+        // The server-wide budget (ADR-0206 증보 4 G2), spent only for a token this run owns — one
+        // already settled returned above without costing anything. A token that finds it spent is
+        // settled, not forgotten: see the module docs for why a test's row must exist.
+        if !self
+            .bulk
+            .try_spend_for(PushSystemReason::TestNotification.as_str())
+        {
+            self.settle_budget_spent(workspace_id, log_id).await?;
+            stats.held_back += 1;
+            tracing::debug!(
+                collapse_id = %payload.collapse_id,
+                "test notification past the server-wide budget; settled, not sent"
+            );
+            return Ok(());
+        }
+
         let dispatch = PushDispatch::new(&test_notification_dispatch_target(
             &self.config.server_id,
             workspace_id,
@@ -260,6 +362,20 @@ impl PushDrain {
             }
         }
         Ok(())
+    }
+
+    /// Close a claimed test dispatch the server-wide budget had no room for: `429` /
+    /// `notifier_budget_spent`. Not an APNs answer and not the relay's (it was never called), so no
+    /// `relay_http:` prefix; it never touches the token. `Err` is our database failing, and the row
+    /// is retried rather than left unsettled.
+    async fn settle_budget_spent(&self, workspace_id: Uuid, log_id: Uuid) -> Result<(), String> {
+        with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                settle_dispatch(conn, log_id, BUDGET_SPENT_STATUS, Some(BUDGET_SPENT_REASON)).await
+            })
+        })
+        .await
+        .map_err(|error| format!("settling a budget-spent test failed: {error}"))
     }
 
     /// Settle a best-effort test push the relay answered 429/5xx: the answer's status and the

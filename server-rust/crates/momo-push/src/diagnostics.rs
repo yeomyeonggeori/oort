@@ -17,8 +17,9 @@
 //! minutes, or a test push nobody processed), and `last_delivery_failed` reports the latest settled
 //! row. Both read only the member's **current active tokens'** rows from the last days — an old
 //! token's failure or an old 410 must not stay on the screen after the person fixed it — and skip
-//! the bulk layer's drop rows ([`RELAY_DROPPED_REASON`]): a drop is the server's own choice to send
-//! fewer pushes, not a delivery failure.
+//! the rows the server itself chose to settle without sending ([`SERVER_DROP_REASONS`]: the bulk
+//! layer's drop, a test past the server-wide budget, a test that waited too long): a drop is the
+//! server's own choice to send fewer pushes, not a delivery failure.
 //!
 //! ## Nothing here quotes the relay
 //!
@@ -38,7 +39,7 @@ use momo_messaging::{kind_phone_switch_in_tx, pause_in_force, NotificationKind};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
-use crate::dispatch_log::RELAY_DROPPED_REASON;
+use crate::dispatch_log::SERVER_DROP_REASONS;
 use crate::system::SYSTEM_PUSH_MAX_TARGETS;
 
 /// Test pushes one member may send per window (ADR-0206 D11: 「멤버당 분당 3회」).
@@ -487,14 +488,14 @@ pub async fn compute_diagnostics(
             AND l.member_id = $2 \
             AND l.apns_status IS NOT NULL \
             AND l.created_at > now() - make_interval(secs => $3::double precision) \
-            AND l.apns_reason IS DISTINCT FROM $4 \
+            AND (l.apns_reason IS NULL OR l.apns_reason <> ALL($4::text[])) \
           ORDER BY l.created_at DESC, l.id DESC \
           LIMIT 1",
     )
     .bind(workspace_id)
     .bind(member_id)
     .bind(DELIVERY_LOOKBACK_SECS)
-    .bind(RELAY_DROPPED_REASON)
+    .bind(SERVER_DROP_REASONS.map(String::from).to_vec())
     .fetch_optional(&mut *conn)
     .await?;
     if let Some(row) = latest {
