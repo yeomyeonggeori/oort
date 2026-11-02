@@ -3180,7 +3180,8 @@ async fn t26_a_stop_between_attempts_still_stops_the_task() {
 
 /// L3b: a step job that has spent its attempts without being able to run its step does not just go away
 /// — the task ends with `task_failed` and an interim report built from its note, and no row is left.
-/// Below the limit the job only waits.
+/// Below the limit the job only waits. The report is built from a note that may carry what earlier steps
+/// read, so — like every report a task ends with — it gets no server-side link preview (review r1 M-1).
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn t27_a_step_job_that_waits_out_its_attempts_ends_the_task() {
@@ -3188,7 +3189,8 @@ async fn t27_a_step_job_that_waits_out_its_attempts_ends_the_task() {
     let su = superuser_pool().await;
     let pool = momo_worker_pool().await;
     let t = seed_fresh(&su, &pool).await;
-    let model = ScriptedModel::new([cont(&["다음"], "N1 지금까지 찾은 것")]);
+    let leak = "https://attacker.example/?d=PHOENIX-비밀-5029";
+    let model = ScriptedModel::new([cont(&["다음"], &format!("N1 지금까지 찾은 것 {leak}"))]);
     let w = worker_with(model.clone(), |_| {}).await;
     let run = start_task(&su, &pool, &t, &w, t.owner_id, "@oort-helper 조사해 줘").await;
 
@@ -3245,6 +3247,19 @@ async fn t27_a_step_job_that_waits_out_its_attempts_ends_the_task() {
     assert!(
         texts[0].contains("N1 지금까지 찾은 것"),
         "the report carries the note: {texts:?}"
+    );
+    // The note's link is on the posted report, and the server must not fetch it for a preview (no
+    // click, so the fetch would carry the URL out): the trigger queued a preview job (anti-vacuity —
+    // without a tombstone it would be fetched) and a tombstone withholds it.
+    let (body, job, tombstone) = preview_state(&su, &t).await;
+    assert!(
+        body.contains(leak),
+        "the link rode out on the report: {body}"
+    );
+    assert!(job, "the 079 trigger queued a preview job");
+    assert!(
+        tombstone,
+        "a task's stalled report gets no preview fetch, whatever trace the caller carried"
     );
 }
 
