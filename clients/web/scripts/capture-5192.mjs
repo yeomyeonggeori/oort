@@ -13,11 +13,12 @@
 //   도구 막대   호버로 서고, 아이콘이 뜻에 맞는 Lucide 글리프(⋮ = ellipsis-vertical, 반응 더하기 = smile-plus)다.
 //   ⋮ 메뉴      짧은 목록: 반응 줄·다른 반응 고르기·답글이 없다(도구 막대 몫), 묶음 사이에만 구분선, 지우기가 맨 아래·위험색,
 //               판 안(가로는 본문 판, 세로는 창)에 머문다. 키보드: Enter 로 열고 방향키가 항목을 돌고 Esc 가 초점을 ⋮ 로 돌려준다.
-//   우클릭 메뉴 ⋮ 메뉴와 같은 목록·같은 순서다.
+//   우클릭 메뉴 ⋮ 메뉴와 같은 목록·같은 순서다. **글자 위 우클릭도 두 엔진 모두 열린다**(macOS WebKit 은 우클릭한 낱말을 먼저 고르는데
+//               그 선택을 양보로 읽던 것을 #5192 가 고쳤다). 사용자가 먼저 고른 선택(더블클릭) 위 우클릭은 두 엔진 모두 기본 메뉴에 양보한다.
 //   툴팁        처음 가리키면 ≤ 200ms 안에 선다(목표 ≤ 150, 정확한 경계는 `tooltipDelay.test.ts`가 가짜 시계로 잰다),
 //               옆 단추로 옮기면 바로 선다(≤ 80ms, 한 번에 하나), 빠른 통과는 안 뜨고, 키보드 초점은 즉시 뜬다.
-//   겹침        넓은 판(1440)은 도구 막대 ∩ 이웃 글자 = 0 (레인 공용 자 `lib/hoverToolbarOverlap.mjs`). 좁은 판(900)은 #4231 1번의
-//               기존 결함이라 값을 적고 「변경 전(16자)보다 늘지 않았다」만 단정한다.
+//   겹침        넓은 판(1440)은 도구 막대 ∩ 이웃 글자 = 0 (레인 공용 자 `lib/hoverToolbarOverlap.mjs`). 좁은 판(900)의 겹침은 #4231 1번의
+//               기존 결함이고 값이 실행마다 0↔16으로 흔들려 로그에만 적는다. 대신 도구 막대 너비(223)가 커지지 않았는지를 결정적으로 단정한다.
 //
 // 백엔드는 없다: `/v1/**` 는 고정 응답이고 소켓은 구독만 받는다. 인물은 전부 가상이다(레포는 공개).
 // 단언이 하나라도 실패하면 종료 코드 1(고치기 전 번들에서는 붉은 것이 정상: 그것이 「고치기 전 RED」다).
@@ -45,11 +46,12 @@ const FIRST_TIP_MAX_MS = 200;
 /** 옆 단추로 옮겼을 때 툴팁이 서기까지의 상한(ms): 지연이 없으니 렌더 한두 프레임이다. */
 const HOP_TIP_MAX_MS = 80;
 /**
- * #4231 1번(900폭 호버 툴바가 위 행 본문과 겹침)은 이 이슈 이전부터 있던 결함이고 이 변경은 막대의 크기·자리를 바꾸지 않았다.
- * 변경 전 번들에서 같은 장면의 값이 16자였다(막대가 행 위 경계에서 36px 위로 올라가 이웃 행의 끝줄을 덮는다). 좁은 열에서는
- * 단정(0)이 아니라 「늘지 않았다」만 가둔다: 막대 상자를 키우거나 옮기는 변경이 이 값을 올리면 붉어진다.
+ * 호버 도구 막대의 너비 상한(css px). 변경 전·후 모두 223×42였고, 내·남의·에이전트 행이 같다(고치기 연필을 올려 보면 내 행만 257로 +34).
+ * #4231 1번(900폭에서 도구 막대가 앞 행 끝줄을 덮음)은 이 이슈 이전부터 있던 결함이다. 덮는 글자 수는 앞 행의 마지막 줄이 막대 왼쪽 끝에
+ * 닿느냐에 달려 **실행마다 0과 16 사이로 흔들려서**(같은 번들·같은 레인을 반복해도 그렇다) 상한 가드로 쓰지 못한다(값은 로그에만 적는다).
+ * 대신 원인인 도구 막대의 **크기**를 결정적으로 가둔다: 막대를 키우는 변경은 덮는 글자를 늘리고 내·남의 행의 모양을 갈라 놓는다.
  */
-const KNOWN_NARROW_OVERLAP_MAX_CHARS = 16;
+const TOOLBAR_MAX_WIDTH = 223.5;
 /** 이 폭부터는 본문 판이 넉넉해 막대 아래 이웃 글자가 없어야 한다(0 단정). */
 const WIDE_PANE_MIN_VIEWPORT = 1100;
 
@@ -331,6 +333,32 @@ async function center(page, testId) {
   return box ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : null;
 }
 
+/** 행 안의 우클릭 자리 둘: 글자 없는 자리(행 자신이 맞는 점)와 글자 위(본문 첫 글 노드의 가운데 쪽). */
+async function rowSpots(page, id) {
+  return page.evaluate((id) => {
+    const rowEl = document.querySelector(`[data-testid="timeline-message"][data-message-id="00000000-0000-7000-8000-0000000b${id}"]`);
+    const r = rowEl.getBoundingClientRect();
+    const body = rowEl.querySelector("[data-row-body]") ?? rowEl;
+    let text = null;
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode() && text === null) {
+      const node = walker.currentNode;
+      if (!(node.textContent || "").trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      const b = range.getBoundingClientRect();
+      if (b.width > 0) text = { x: b.left + Math.min(b.width / 2, 60), y: b.top + b.height / 2 };
+    }
+    // 글자 없는 자리: 행 자신(`article`)이 맞는 점을 오른쪽부터 훑어 고른다. 가장자리 점은 엔진에 따라 스크롤바나 스크롤러가 가져간다
+    // (WebKit 에서 실제로 그랬다). 행의 안쪽 여백·거터와 본문 사이 틈이 이 점이 된다.
+    let empty = null;
+    for (let x = r.right - 4; x > r.left + 4 && empty === null; x -= 4) {
+      if (document.elementFromPoint(x, r.top + 20) === rowEl) empty = { x, y: r.top + 20 };
+    }
+    return { empty, text };
+  }, id);
+}
+
 async function runKind(page, tag, k, shotTag) {
   const name = `${tag} ${k.name}`;
   const row = await hoverRow(page, k);
@@ -338,6 +366,11 @@ async function runKind(page, tag, k, shotTag) {
   // ---- 도구 막대 ----------------------------------------------------------------
   const bar = await rectOf(page, '[data-testid="message-hover-toolbar"]');
   check(`${name}: 호버로 도구 막대가 선다(화면에 하나만)`, bar !== null && (await toolbarCount(page)) === 1, `count=${await toolbarCount(page)}`);
+  note(`도구 막대 상자 ${bar ? `${bar.w}×${bar.h}` : "없음"}`);
+  check(`${name}: 도구 막대 너비가 변경 전(223px)보다 커지지 않았다(막대를 키우면 좁은 판 겹침 #4231 1번이 커진다)`, bar !== null && bar.w <= TOOLBAR_MAX_WIDTH, `w=${bar?.w}`);
+  // 고치기 연필은 도구 막대에 올리지 않는다(Buzz·Slack 모두 ⋮ 안): 내 메시지의 막대도 남의 메시지와 같은 단추 6개(반응 3 · 더하기 · 답글 · ⋮)다.
+  const itemCount = await row.locator('[data-testid="message-hover-toolbar"] [data-toolbar-item]').count();
+  check(`${name}: 도구 막대 단추는 6개로 내·남의·에이전트 행이 같다(고치기 연필 없음)`, itemCount === 6, `count=${itemCount}`);
   const trigger = row.locator('[data-testid="message-actions-trigger"]');
   const dots = await glyphs(trigger);
   const more = await glyphs(row.locator('[data-testid="toolbar-react-more"]'));
@@ -352,10 +385,11 @@ async function runKind(page, tag, k, shotTag) {
   check(`${name}: ⋮ 를 누르면 메뉴가 열린다`, opened);
   await page.waitForTimeout(250);
   const seq = (await menuSequence(page, "message-action-menu", "menu-")) ?? [];
-  const wantTop = ["quote", "pin", "remind", "mark-unread", "|", "copy", "copy-link"];
-  const want = k.own ? [...wantTop, "|", "edit", "delete"] : wantTop;
+  // 내 글 메시지: 고치기가 첫 줄(Buzz와 같다), 지우기는 구분선 아래 혼자 맨 아래. 남의·에이전트 메시지에는 고치기·지우기가 없다.
+  const wantOther = ["quote", "pin", "remind", "mark-unread", "|", "copy", "copy-link"];
+  const want = k.own ? ["edit", "quote", "pin", "remind", "mark-unread", "|", "copy", "copy-link", "|", "delete"] : wantOther;
   note(`메뉴 순서: ${seq.join(" ")}`);
-  check(`${name}: 메뉴는 짧은 목록이다(묶음 사이에만 구분선, 지우기가 맨 아래)`, JSON.stringify(seq) === JSON.stringify(want), `want=${want.join(" ")} got=${seq.join(" ")}`);
+  check(`${name}: 메뉴는 짧은 목록이다(고치기 첫 줄, 묶음 사이에만 구분선, 지우기는 혼자 맨 아래)`, JSON.stringify(seq) === JSON.stringify(want), `want=${want.join(" ")} got=${seq.join(" ")}`);
   const noRepeat = await page.evaluate(() => {
     const menu = document.querySelector('[data-testid="message-action-menu"]');
     if (!menu) return null;
@@ -410,28 +444,7 @@ async function runKind(page, tag, k, shotTag) {
   // (b) 글자 위: Chromium 은 앱 메뉴가 열린다. macOS WebKit(WKWebView 의 엔진)은 우클릭한 낱말을 먼저 선택하고, 이 행 안의 펼친 선택은
   // 앱 메뉴가 브라우저 기본 메뉴에 양보하는 설계(`selectionIsWithinRow`)다. 그래서 WebKit 의 (b)는 「열렸거나, 설계된 양보」면 통과다.
   // 변경 전 번들에서도 똑같다(진단 `probe-webkit-rightclick.mjs`): 이 변경이 만든 동작이 아니다.
-  const spots = await page.evaluate((id) => {
-    const rowEl = document.querySelector(`[data-testid="timeline-message"][data-message-id="00000000-0000-7000-8000-0000000b${id}"]`);
-    const r = rowEl.getBoundingClientRect();
-    const body = rowEl.querySelector("[data-row-body]") ?? rowEl;
-    let text = null;
-    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-    while (walker.nextNode() && text === null) {
-      const node = walker.currentNode;
-      if (!(node.textContent || "").trim()) continue;
-      const range = document.createRange();
-      range.selectNodeContents(node);
-      const b = range.getBoundingClientRect();
-      if (b.width > 0) text = { x: b.left + Math.min(b.width / 2, 60), y: b.top + b.height / 2 };
-    }
-    // 글자 없는 자리: 행 자신(`article`)이 맞는 점을 오른쪽부터 훑어 고른다. 가장자리 점은 엔진에 따라 스크롤바나 스크롤러가 가져간다
-    // (WebKit 에서 실제로 그랬다). 행의 안쪽 여백·거터와 본문 사이 틈이 이 점이 된다.
-    let empty = null;
-    for (let x = r.right - 4; x > r.left + 4 && empty === null; x -= 4) {
-      if (document.elementFromPoint(x, r.top + 20) === rowEl) empty = { x, y: r.top + 20 };
-    }
-    return { empty, text };
-  }, k.id);
+  const spots = await rowSpots(page, k.id);
   const clearSelection = async () => {
     await page.evaluate(() => document.getSelection()?.removeAllRanges());
     await page.waitForTimeout(120);
@@ -445,8 +458,15 @@ async function runKind(page, tag, k, shotTag) {
       const el = document.elementFromPoint(x, y);
       return el ? `${el.tagName.toLowerCase()}[${el.getAttribute("data-testid") ?? ""}] 행 안=${rowEl ? rowEl.contains(el) : false}` : "(없음)";
     }, { x: spot.x, y: spot.y, id: k.id });
+    // contextmenu 처리가 **끝난 바로 그 순간**(모든 핸들러 뒤, 메뉴가 포커스를 가져가기 전)의 선택을 읽는다. 메뉴가 열리며 포커스가 옮겨 가면
+    // 엔진의 낱말 선택이 저절로 풀리는 엔진이 있어서, 나중에 읽으면 「앱이 지웠는지」 「저절로 풀렸는지」를 못 가른다(사보타주로 확인).
+    await page.evaluate(() => {
+      window.__selAtCtx = null;
+      document.addEventListener("contextmenu", () => { setTimeout(() => { window.__selAtCtx = document.getSelection()?.toString() ?? ""; }, 0); }, { once: true, capture: true });
+    });
     await page.mouse.click(spot.x, spot.y, { button: "right" });
     const opened = await page.locator('[data-testid="message-context-menu"]').waitFor({ state: "visible", timeout: 1500 }).then(() => true, () => false);
+    const selAtCtx = await page.evaluate(() => window.__selAtCtx);
     const sequence = (await menuSequence(page, "message-context-menu", "context-")) ?? [];
     const sel = await page.evaluate((id) => {
       const rowEl = document.querySelector(`[data-message-id="00000000-0000-7000-8000-0000000b${id}"]`);
@@ -455,8 +475,15 @@ async function runKind(page, tag, k, shotTag) {
     }, k.id);
     await page.keyboard.press("Escape");
     await page.locator('[data-testid="message-context-menu"]').waitFor({ state: "hidden", timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(150);
+    // 메뉴가 닫힌 뒤(우리가 선택을 지우기 전)의 상태: 엔진이 만든 낱말 선택이 남아 있으면 안 되고, 포인터가 아직 행 위라서 호버 도구 막대가
+    // 그대로 서야 한다(선택이 있는 동안 숨는 도구 막대가 돌아오는지).
+    const after = await page.evaluate((id) => {
+      const rowEl = document.querySelector(`[data-testid="timeline-message"][data-message-id="00000000-0000-7000-8000-0000000b${id}"]`);
+      return { selAfter: document.getSelection()?.toString() ?? "", barAfter: rowEl ? rowEl.querySelectorAll('[data-testid="message-hover-toolbar"]').length : -1 };
+    }, k.id);
     await clearSelection();
-    return { opened, sequence, hit, ...sel };
+    return { opened, sequence, hit, selAtCtx, ...sel, ...after };
   };
   const sameList = (r) => r.opened && JSON.stringify(r.sequence) === JSON.stringify(seq);
   check(`${name}: 글자 없는 자리를 찾았다(행 자신이 맞는 점)`, spots.empty !== null);
@@ -474,17 +501,12 @@ async function runKind(page, tag, k, shotTag) {
     await clearSelection();
   }
   if (spots.text) {
+    // 글자 위 우클릭: **모든 엔진에서** 앱 메뉴가 열린다. macOS WebKit(WKWebView 의 엔진)은 우클릭한 낱말을 contextmenu 직전에 스스로
+    // 고르는데, 예전 규칙은 그 선택을 사용자가 고른 것으로 읽고 기본 메뉴에 양보했다(앱 메뉴가 안 열림, #5192).
     const textHit = await rightClick(spots.text);
-    if (ENGINE === "chromium") {
-      check(`${name}: 우클릭(글자 위)도 열리고 ⋮ 메뉴와 같은 목록이다`, sameList(textHit), `우클릭=${textHit.sequence.join(" ")}`);
-    } else {
-      check(
-        `${name}: 우클릭(글자 위): 앱 메뉴가 열리거나, 이 행 안의 펼친 선택에 양보한다(설계, 변경 전과 같음)`,
-        sameList(textHit) || (!textHit.opened && textHit.yielded),
-        `opened=${textHit.opened} 선택=${JSON.stringify(textHit.text)} 양보=${textHit.yielded}`
-      );
-      note(`WebKit 글자 위 우클릭: ${textHit.opened ? "앱 메뉴 열림" : `앱 메뉴 양보(선택 「${textHit.text}」)`}`);
-    }
+    check(`${name}: 우클릭(글자 위)도 열리고 ⋮ 메뉴와 같은 목록이다`, sameList(textHit), `opened=${textHit.opened} 선택=${JSON.stringify(textHit.text)} 양보=${textHit.yielded} 우클릭=${textHit.sequence.join(" ")}`);
+    check(`${name}: 우클릭(글자 위) 뒤 엔진이 만든 낱말 선택이 남지 않는다(contextmenu 처리 직후 · 메뉴가 열린 동안 · 닫은 뒤 모두 비어 있다)`, textHit.selAtCtx === "" && textHit.text === "" && textHit.selAfter === "", `직후=${JSON.stringify(textHit.selAtCtx)} 메뉴 열린 동안=${JSON.stringify(textHit.text)} 닫은 뒤=${JSON.stringify(textHit.selAfter)}`);
+    check(`${name}: 우클릭(글자 위)로 메뉴를 닫은 뒤 호버 도구 막대가 그대로 선다(선택에 눌려 숨지 않음)`, textHit.barAfter === 1, `barAfter=${textHit.barAfter}`);
   }
 
   // ---- 겹침: 도구 막대 ∩ 이웃 글자 = 0 -----------------------------------------
@@ -501,17 +523,41 @@ async function runKind(page, tag, k, shotTag) {
   if (page.viewportSize().width >= WIDE_PANE_MIN_VIEWPORT) {
     check(`${name}: 도구 막대 ∩ 이웃(행·시스템 줄) 글자 = 0`, verdict === "", verdict);
   } else {
-    // 프로브: 좁은 열의 겹침은 #4231 1번의 기존 결함이다. 값을 적고, 변경 전보다 늘지 않았는지만 단정한다.
-    note(`프로브(#4231 1번, 기존): ${verdict === "" ? "겹침 없음" : verdict}`);
-    check(
-      `${name}: 도구 막대가 덮는 이웃 글자가 변경 전(${KNOWN_NARROW_OVERLAP_MAX_CHARS}자)보다 늘지 않았다`,
-      worstChars <= KNOWN_NARROW_OVERLAP_MAX_CHARS,
-      `worst=${worstChars}자`
-    );
+    // 프로브(단정 아님): 좁은 열의 겹침은 #4231 1번의 기존 결함이고 값이 실행마다 흔들린다(위 TOOLBAR_MAX_WIDTH 주석).
+    note(`프로브(#4231 1번, 기존, 단정 아님): 덮는 이웃 글자 ${worstChars}자 · ${verdict === "" ? "겹침 없음" : verdict}`);
   }
   await page.mouse.move(2, 2);
   await page.waitForTimeout(200);
   void row;
+}
+
+/**
+ * 사용자가 우클릭 **전에** 고른 선택(더블클릭)은 여전히 브라우저 기본 메뉴에 양보한다(복사 등): 앱 메뉴가 안 열리고, 선택이 남고,
+ * contextmenu 가 preventDefault 되지 않는다(= 기본 메뉴가 뜰 자격). 두 엔진 모두, 세 종류 행 모두. #5192 가 「엔진이 만든 선택」을
+ * 양보에서 빼면서 **이 보존해야 할 동작을 같이 깨뜨리지 않았는지** 재는 단정이다. 앞 장면의 네이티브 메뉴 잔상에 기대지 않도록 새
+ * 컨텍스트에서 따로 돈다.
+ */
+async function runSelectionYield(page, tag, k) {
+  const name = `${tag} ${k.name}`;
+  await page.mouse.move(2, 2);
+  await rowOf(page, k.id).scrollIntoViewIfNeeded();
+  const spots = await rowSpots(page, k.id);
+  if (!spots.text) { check(`${name}: 글자 위 자리를 찾았다`, false); return; }
+  await page.mouse.dblclick(spots.text.x, spots.text.y);
+  const picked = await page.evaluate(() => document.getSelection()?.toString() ?? "");
+  await page.evaluate(() => {
+    window.__ctxPrevented = null;
+    document.addEventListener("contextmenu", (event) => { setTimeout(() => { window.__ctxPrevented = event.defaultPrevented; }, 0); }, { once: true, capture: true });
+  });
+  await page.mouse.click(spots.text.x, spots.text.y, { button: "right" });
+  await page.waitForTimeout(400);
+  const got = await page.evaluate(() => ({
+    menu: document.querySelectorAll('[data-testid="message-context-menu"]').length,
+    sel: document.getSelection()?.toString() ?? "",
+    prevented: window.__ctxPrevented,
+  }));
+  note(`고른 선택 위 우클릭: 고른 글 ${JSON.stringify(picked)} · 앱 메뉴 ${got.menu} · 남은 선택 ${JSON.stringify(got.sel)} · preventDefault ${got.prevented}`);
+  check(`${name}: 고른 선택(더블클릭) 위 우클릭은 기본 메뉴에 양보한다(앱 메뉴 안 열림 · 선택 유지 · preventDefault 안 함)`, picked.trim() !== "" && got.menu === 0 && got.sel === picked && got.prevented === false, `고른 글=${JSON.stringify(picked)} 앱 메뉴=${got.menu} 선택=${JSON.stringify(got.sel)} preventDefault=${got.prevented}`);
 }
 
 /** 키보드: 행에 초점 → Tab 으로 ⋮ → 툴팁 즉시 → Enter 로 열기 → 방향키 → Esc 가 초점을 ⋮ 로 돌려준다. 세 종류의 행 모두. */
@@ -646,6 +692,7 @@ async function runViewport(browserType, origin, scheme, width, height) {
   };
   try {
     for (const k of KINDS) await scene((page) => runKind(page, tag, k, shotTag));
+    for (const k of KINDS) await scene((page) => runSelectionYield(page, tag, k));
     await scene((page) => runTooltipTiming(page, tag, shotTag));
     for (const k of KINDS) {
       await scene(async (page) => {
