@@ -18,7 +18,11 @@
 //! 2. **A server-wide budget.** This layer may send at most `budget_per_minute` dispatches (one per
 //!    token) per minute across all tenants, so a flood of replies cannot starve the relay's per-server
 //!    limit that approvals, mentions and DMs also spend. A push past the budget is not sent and its
-//!    candidate completes (it is still in the app).
+//!    candidate completes (it is still in the app). **The test notification draws from the same
+//!    budget** ([`BulkLayer::try_spend_for`], ADR-0206 증보 4 G2): one dispatch per token, so what the
+//!    two best-effort layers can spend together stays at `budget_per_minute`. A test has no message
+//!    left in the app, so what it cannot send it **settles** (see `push/system.rs`), where this
+//!    layer's own pushes leave no row.
 //! 3. **A relay 429 is not retried** for this layer (see [`crate::push`]): it is best-effort, so it
 //!    must not eat the retry budget and the backoff queue that approvals and DMs rely on.
 //!
@@ -43,6 +47,9 @@ pub const WINDOW_SECONDS: i64 = 60;
 /// `NOTIFIER_BULK_PUSH_PER_MINUTE` default: half of the relay's default per-server limit (60), so the
 /// other half is always there for approvals, mentions and DMs.
 pub const DEFAULT_BUDGET_PER_MINUTE: u32 = 30;
+
+/// The counter label of the bulk layer's own reason (the wire reason `thread_reply`).
+pub const THREAD_REPLY_LABEL: &str = "thread_reply";
 
 /// How a relay-429'd push of this layer is settled in the dispatch log (status 429): the same shape as
 /// the other relay refusals (`relay_http:` prefix, so a token-health pass can never read it as an
@@ -71,7 +78,7 @@ pub enum Verdict {
     Folded { window: i64 },
 }
 
-/// Why a bulk push was not sent, for the counters.
+/// Why a push of the best-effort layers was not sent, for the counters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Cause {
     /// Folded into the window's representative.
@@ -80,6 +87,9 @@ pub enum Cause {
     Budget,
     /// The relay answered 429; dropped without a retry.
     Relay429,
+    /// A test notification that waited too long to be sent and was settled unsent (ADR-0206 증보 4
+    /// G3).
+    Expired,
 }
 
 impl Cause {
@@ -88,6 +98,7 @@ impl Cause {
             Cause::Window => "window",
             Cause::Budget => "budget",
             Cause::Relay429 => "relay_429",
+            Cause::Expired => "expired",
         }
     }
 }
@@ -181,13 +192,23 @@ impl BulkLayer {
         };
         window.decided.insert(message, verdict);
         if matches!(verdict, Verdict::Folded { .. }) {
-            Self::count_in(&mut state, Cause::Window);
+            Self::count_in(&mut state, THREAD_REPLY_LABEL, Cause::Window);
         }
         verdict
     }
 
-    /// Take one dispatch from this minute's server-wide budget. `false` = the budget is spent.
+    /// Take one dispatch from this minute's server-wide budget for a `thread_reply` push.
+    /// `false` = the budget is spent.
     pub fn try_spend(&self) -> bool {
+        self.try_spend_for(THREAD_REPLY_LABEL)
+    }
+
+    /// Take one dispatch from this minute's server-wide budget **for `reason`** — the wire reason
+    /// that is spending it, which is also the counter label of the push it could not send. There is
+    /// one budget for every caller (ADR-0206 증보 4 G2: the test notification spends from the same
+    /// minute and the same count as `thread_reply`), so a spent budget is spent for all of them.
+    /// `false` = the budget is spent, and the refusal is counted under `(reason, "budget")`.
+    pub fn try_spend_for(&self, reason: &'static str) -> bool {
         let minute = self.minute();
         let mut state = self.state.lock().expect("bulk layer state");
         if state.budget_minute != minute {
@@ -195,24 +216,26 @@ impl BulkLayer {
             state.budget_used = 0;
         }
         if state.budget_used >= self.budget_per_minute {
-            Self::count_in(&mut state, Cause::Budget);
+            Self::count_in(&mut state, reason, Cause::Budget);
             return false;
         }
         state.budget_used += 1;
         true
     }
 
-    /// Count a push of the layer that did not go out, for the log line and the tests.
+    /// Count a `thread_reply` push that did not go out, for the log line and the tests.
     pub fn count(&self, cause: Cause) {
-        let mut state = self.state.lock().expect("bulk layer state");
-        Self::count_in(&mut state, cause);
+        self.count_for(THREAD_REPLY_LABEL, cause);
     }
 
-    fn count_in(state: &mut State, cause: Cause) {
-        *state
-            .counters
-            .entry(("thread_reply", cause.as_str()))
-            .or_insert(0) += 1;
+    /// Count a push of `reason` that did not go out, for the log line and the tests.
+    pub fn count_for(&self, reason: &'static str, cause: Cause) {
+        let mut state = self.state.lock().expect("bulk layer state");
+        Self::count_in(&mut state, reason, cause);
+    }
+
+    fn count_in(state: &mut State, reason: &'static str, cause: Cause) {
+        *state.counters.entry((reason, cause.as_str())).or_insert(0) += 1;
     }
 
     /// `(reason, cause) -> pushes not sent since boot`. The reason label is the wire reason.
@@ -340,6 +363,41 @@ mod tests {
         assert!(
             !BulkLayer::new(0).try_spend(),
             "a budget of 0 sends no bulk push at all"
+        );
+    }
+
+    /// ADR-0206 증보 4 G2: a test notification and a thread reply draw from **one** budget — spending
+    /// for either lowers what is left for both, so together they never pass `budget_per_minute` —
+    /// while the counters keep them apart by wire reason. Sabotage: give the test its own bucket
+    /// (the fourth spend succeeds) or label every refusal `thread_reply` (the second key is gone).
+    #[test]
+    fn tests_and_thread_replies_spend_one_budget_and_are_counted_apart() {
+        let now = Arc::new(AtomicI64::new(1_800_000_000));
+        let layer = layer_at(now.clone(), 3);
+        assert!(layer.try_spend_for("test_notification"));
+        assert!(layer.try_spend());
+        assert!(layer.try_spend_for("test_notification"));
+        assert!(
+            !layer.try_spend(),
+            "three spent between them: a thread reply is refused"
+        );
+        assert!(
+            !layer.try_spend_for("test_notification"),
+            "and so is a test"
+        );
+        assert_eq!(layer.counters()[&("thread_reply", "budget")], 1);
+        assert_eq!(layer.counters()[&("test_notification", "budget")], 1);
+        layer.count_for("test_notification", Cause::Expired);
+        assert_eq!(layer.counters()[&("test_notification", "expired")], 1);
+        assert_eq!(
+            layer.counters().len(),
+            3,
+            "nothing is counted under a key nobody asked for"
+        );
+        now.fetch_add(60, Ordering::SeqCst);
+        assert!(
+            layer.try_spend_for("test_notification"),
+            "a new minute refills the one budget"
         );
     }
 

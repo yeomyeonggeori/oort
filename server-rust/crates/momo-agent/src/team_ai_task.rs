@@ -93,8 +93,12 @@ pub const END_PROVIDER_ERROR: &str = "task_provider_error";
 pub const END_ROLE_OFF: &str = "task_role_off";
 /// The run ended through a path that does not know tasks; the sweep closed the row.
 pub const END_RUN_ENDED: &str = "run_ended";
-/// The job ran out of attempts (the worker's own retry budget) and the run failed for good.
+/// The job ran out of attempts (the worker's own retry budget) and the run failed for good — the
+/// last attempt failed, or a step job spent its whole budget unable to run its step (#5029).
 pub const END_FAILED: &str = "task_failed";
+/// The helper itself can no longer act in the run's room (it left, or was deactivated), so the run
+/// cannot be called and the task ends with it (#5029): no row, slot or note outlives that.
+pub const END_AGENT_GONE: &str = "task_agent_gone";
 
 // ---------------------------------------------------------------------------
 // the bounds (B5-5: [추정] defaults, configuration values)

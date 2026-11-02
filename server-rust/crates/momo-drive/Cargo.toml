@@ -11,7 +11,7 @@ rust-version.workspace = true
 # capability is only a wall if the HTTP client it wraps cannot be reached
 # around. `reqwest` is a dependency of THIS crate, never of `momo-server`, so an
 # attachment handler cannot build a request of its own — the only thing it can
-# reach is the [`DriveArchive`] trait, whose five methods are the entire
+# reach is the [`DriveArchive`] trait, whose methods are the entire
 # outbound surface.
 #
 # **There is deliberately no `momo-db` and no `sqlx` here** (ADR-0151 D3): the
@@ -43,7 +43,9 @@ tracing.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+# `net`: the loopback stand-in for Google Drive (`src/fake_google.rs`) and the
+# memory test's own listener-free reads. Features only; Cargo.lock does not move.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "net"] }
 
 [lints]
 workspace = true

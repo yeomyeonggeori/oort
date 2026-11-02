@@ -1421,6 +1421,16 @@ impl AgentWorker {
             Box::pin(async move {
                 let Some(snapshot) = lock_gateway_run_in_tx(conn, workspace_id, run_id).await?
                 else {
+                    // A run that cannot be called any more (its helper left the room or was
+                    // deactivated) keeps no task row: the task ends with it (#5029). A run without
+                    // a task has no row, and this is then a no-op.
+                    momo_agent::team_ai_task::end_in_tx(
+                        conn,
+                        workspace_id,
+                        run_id,
+                        momo_agent::team_ai_task::END_AGENT_GONE,
+                    )
+                    .await?;
                     return Ok(false);
                 };
                 // B5-2: a run with a task row is in task mode — its ledger rows are per step and

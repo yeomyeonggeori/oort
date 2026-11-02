@@ -431,7 +431,7 @@ pub async fn get_draft(pool: &PgPool, actor: Actor, id: Uuid) -> Result<Value, E
 /// receive.
 ///
 /// A draft is listed when it is the caller's, a direct one (no approval owns it), `ready`, not
-/// expired, and its origin is `generated` with one of the two sentences the photo route writes
+/// expired, and its origin is `generated` with one of the sentences the photo route writes
 /// ([`PHOTO_PROMPTS`]; the direct API accepts no other `generated` origin, `draft_origin_ok`). Every
 /// item is what [`get_draft`] answers for it. At most [`LIVE_DRAFTS`] come back: a person holds no
 /// more live drafts than that (D2), and the same bound is in the query, so the answer is bounded
