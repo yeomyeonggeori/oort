@@ -11590,6 +11590,150 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /v1/workspaces/{workspaceId}/channels/{channelId}/attachments/{attachmentId}/media:
+    put:
+      tags: [attachments]
+      operationId: setAttachmentMedia
+      summary: Set (replace) a video attachment's length, size and poster before it is sent.
+      description: >
+        ADR-0151 amendment 5 D5 (#4673). The device that picked the video measures its length and
+        size and takes a frame, so the card that later shows the file is drawn at the right shape
+        with a picture in it. The server does not look inside the video: the numbers are the
+        sender's declaration, checked for range only, and the poster is checked by its bytes (magic
+        number, header size, byte size) and never decoded.
+
+
+        Allowed only for **the uploader**, of a **complete** file that **no message carries yet**.
+        The write is a whole replace: a second write without a poster clears the first one's
+        poster. A caller who is not an active member of the channel gets 403. Everyone else - another
+        member, an upload that is not complete, a file a message already carries, a deleted
+        message's file, another channel's or tenant's file, an unknown id - gets the same 404
+        `getAttachmentContent` gives, so the route does not reveal whose files exist.
+
+
+        The content checks answer 400 and are therefore seen only by the file's own uploader. The
+        stored type must be `video/mp4`, `video/quicktime` or `video/webm`, and the object's first
+        bytes must be that container's (an `ftyp` box at offset 4 for MP4 and QuickTime, the EBML
+        header for WebM). `durationMs` is 1 to 86,400,000. `width` and `height` are 1 to 16,384. A
+        poster is `image/jpeg` or `image/webp` whose bytes say so, at most 1,280 pixels on a side by
+        its header, and at most 256 KiB decoded. A JPEG that is cut off after its frame header
+        passes (the server reads a header and does not decode); a client decoder is what rejects it.
+
+
+        The request body is at most 512 KiB (413 above that). The write is audited as
+        `attachment.media_set` with the kind and whether there is a poster, never the numbers or the
+        picture. An agent bearer or a developer token cannot reach this route.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - $ref: "#/components/parameters/AttachmentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetAttachmentMediaRequest"
+      responses:
+        "200":
+          description: >
+            Stored. The summary the message projections will carry once the file is sent -
+            never the poster itself.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttachmentMedia"
+        "400":
+          description: >
+            A number outside its range, a poster that is not the image its label says, too large or
+            too big by its header, malformed base64, an attachment whose stored type is not a video
+            type, or whose bytes are not that container.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active channel membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            Completed attachment not found: unknown id, an upload that is not complete, another
+            member's file, a file a message already carries, a deleted message's file, or another
+            channel's or tenant's attachment. All of these answer identically.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: The request body is larger than 512 KiB.
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/attachments/{attachmentId}/poster:
+    get:
+      tags: [attachments]
+      operationId: getAttachmentPoster
+      summary: Read a video attachment's poster image (the first frame its sender took).
+      description: >
+        ADR-0151 amendment 5 D5 (#4673). The same authorization as `getAttachmentContent`, the same
+        refusals in the same words, and the same download headers: `Content-Disposition:
+        attachment`, `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`, so
+        the picture is a download to a browser that is pointed at it, never a page. A member who may
+        read the file may read its poster, and no one else.
+
+
+        A readable file with nothing to show (a photo, a document, a video nobody measured, or a
+        measurement without a frame) answers its own 404, `attachment poster not found`. The poster
+        is never in a message projection, a realtime frame or an outbox payload: `hasPoster` on
+        `AttachmentMedia` says whether this route has something to serve.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+        - $ref: "#/components/parameters/AttachmentId"
+      responses:
+        "200":
+          description: The poster image, exactly the bytes the sender stored.
+          headers:
+            Content-Disposition:
+              schema: {type: string, enum: [attachment]}
+            X-Content-Type-Options:
+              schema: {type: string, enum: [nosniff]}
+            Cache-Control:
+              schema: {type: string}
+              description: "`private, no-store`"
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+            image/webp:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active channel membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            Completed attachment not found (the same causes and the same sentence as
+            `getAttachmentContent`), or a readable attachment that has no poster
+            (`attachment poster not found`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/search/messages:
     get:
       tags: [messages]
@@ -26124,6 +26268,51 @@ components:
           format: uri
           description: Opaque Google resumable upload capability URL.
 
+    SetAttachmentMediaRequest:
+      type: object
+      additionalProperties: false
+      required: [durationMs, width, height]
+      properties:
+        durationMs:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 86400000
+          description: >
+            The video's length in milliseconds, as the sender measured it. An integer: a client rounds
+            first. Checked for range only.
+        width:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: The video's width in pixels, as the sender measured it. Checked for range only.
+        height:
+          type: integer
+          minimum: 1
+          maximum: 16384
+          description: The video's height in pixels, as the sender measured it. Checked for range only.
+        poster:
+          $ref: "#/components/schemas/AttachmentPosterUpload"
+
+    AttachmentPosterUpload:
+      type: object
+      additionalProperties: false
+      required: [mime, dataBase64]
+      description: >
+        One frame of the video. Optional on the request: a device that could measure the video but
+        not take a frame sends none, and the media then has `hasPoster: false`.
+      properties:
+        mime:
+          type: string
+          enum: [image/jpeg, image/webp]
+          description: Must be what the bytes are (a magic-number check, not a trust in this label).
+        dataBase64:
+          type: string
+          maxLength: 349528
+          description: >
+            The image in standard base64 (RFC 4648 section 4, padded, no whitespace), at most 256 KiB
+            decoded and at most 1,280 pixels on a side by its header.
+
     CreateMemberAvatarUploadRequest:
       type: object
       additionalProperties: false
@@ -26477,6 +26666,40 @@ components:
           description: >
             Measured attachment length in bytes after complete. A create-time
             declaration of `0` is unknown and is replaced by this value.
+        media:
+          $ref: "#/components/schemas/AttachmentMedia"
+
+    AttachmentMedia:
+      type: object
+      required: [kind, durationMs, width, height, hasPoster]
+      description: >
+        The video summary of an attachment (ADR-0151 amendment 5 D5, #4673). Present **only** on
+        an attachment whose sender put a length and size on it (`setAttachmentMedia`) before the
+        message was sent: a photo, a document, and a video from a client that does not measure one
+        carry no `media` key at all (video from the web and desktop clients has none yet). It rides
+        every projection of the message - the send's answer, the channel and thread pages and the
+        realtime `message.new` frame. The numbers are the sender's declaration, checked for range
+        only, so a client clamps the card it draws from them. **The poster's bytes are in none of
+        them**: `hasPoster` says whether `getAttachmentPoster` has something to serve.
+      properties:
+        kind:
+          type: string
+          enum: [video]
+        durationMs:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 86400000
+        width:
+          type: integer
+          minimum: 1
+          maximum: 16384
+        height:
+          type: integer
+          minimum: 1
+          maximum: 16384
+        hasPoster:
+          type: boolean
 
     ThreadRollup:
       type: object

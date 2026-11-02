@@ -989,6 +989,20 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/content",
             get(routes::attachments::content),
         )
+        // ADR-0151 증보 5 D5 (#4673) — a video's length, size and poster. The write is the
+        // uploader's, before the send; the read is the content route's own authorization, so the
+        // picture is as visible as the bytes and no more. Absent from the agent-route allow-list and
+        // from a developer token's closed table, like the three above.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/media",
+            put(routes::attachment_media::set_media).layer(axum::extract::DefaultBodyLimit::max(
+                routes::attachment_media::MAX_MEDIA_BODY_BYTES,
+            )),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/poster",
+            get(routes::attachment_media::poster),
+        )
         // ADR-0122 / HD-1 — PostgreSQL lifecycle + transactional outbox;
         // LiveKit is only the optional media plane and grant verifier.
         .route(
