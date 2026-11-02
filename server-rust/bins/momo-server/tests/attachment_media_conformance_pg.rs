@@ -977,10 +977,11 @@ async fn a_poster_is_validated_by_its_bytes_not_its_label() {
         &json!({"durationMs": 1000, "width": 1, "height": 1, "kind": "audio"}),
     )
     .await;
-    assert!(
-        unknown_key.status == 400 || unknown_key.status == 422,
-        "{}",
-        unknown_key.status
+    assert_eq!(
+        unknown_key.status,
+        422,
+        "an unknown key is a body the extractor cannot read into the request: {}",
+        String::from_utf8_lossy(&unknown_key.body)
     );
     assert_eq!(media_rows(&su, &video).await, 0);
     assert_eq!(
