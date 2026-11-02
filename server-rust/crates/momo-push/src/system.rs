@@ -64,6 +64,19 @@ pub struct SystemTarget {
 /// failed-schedule push inherits the cap and may raise it by its own ADR).
 pub const SYSTEM_PUSH_MAX_TARGETS: i64 = 5;
 
+/// How long a test notification may wait, from the moment it was pressed to the moment the notifier
+/// claims it, and still be sent: five minutes (ADR-0206 증보 4 G3).
+///
+/// A test asks "does the delivery path work now", so an answer that arrives minutes late says
+/// nothing — and a notifier that was stopped for a while would otherwise send its whole backlog the
+/// moment it starts. The number sits between the ladder the diagnostics already use — a test is
+/// `stalled` to the person at 30 s ([`crate::TEST_STALLED_AFTER_SECS`]), "no longer in flight" at
+/// 2 minutes, and no evidence about the relay now at 15 ([`crate::diagnostics::RELAY_LOOKBACK_SECS`])
+/// — and above the longest a *fresh* test is retried after our own database failed (the backoff
+/// 2·4·8·16·32·60·60 s is 182 s over `NOTIFIER_MAX_ATTEMPTS` = 8), so a retry is never cut short.
+/// It is measured from `outbox.created_at` by the database's own clock.
+pub const TEST_NOTIFICATION_MAX_AGE_SECS: i64 = 300;
+
 /// The active tokens of **one** member, in the tenant the transaction is bound to — the most recent
 /// [`SYSTEM_PUSH_MAX_TARGETS`] of them, newest first.
 ///
