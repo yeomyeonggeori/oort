@@ -25,7 +25,12 @@
 //! * **`file_content`** reads metadata first and enforces the ceiling twice —
 //!   once against the declared size, then again against the bytes as they
 //!   arrive. An archive that under-reports its size cannot make the proxy stream
-//!   more than policy allows.
+//!   more than policy allows. It serves the small-file callers (avatars,
+//!   expression pictures, the agent's tools) and keeps its 60-second total limit.
+//! * **`file_range`** is the content route's read (ADR-0151 증보 5 D3, #4671): one
+//!   `alt=media` call with a server-built `Range: bytes=<s>-<e>`, no metadata call
+//!   first, an exact 206 or a 502, and no total time limit — only a connect limit
+//!   and a silence-between-chunks limit.
 //!
 //! Every failure collapses to a [`DriveError`] whose message names no upstream
 //! detail. Google's own error bodies are never forwarded.
@@ -45,8 +50,8 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
-    nonempty, upload_content_length_header_value, valid_drive_id, DriveArchive, DriveContent,
-    DriveError, DriveFile, DriveUploadSession,
+    nonempty, slice_body, upload_content_length_header_value, valid_drive_id, ByteRange,
+    DriveArchive, DriveContent, DriveError, DriveFile, DriveRangeContent, DriveUploadSession,
 };
 
 const DRIVE_API_BASE: &str = "https://www.googleapis.com/drive/v3";
@@ -59,8 +64,21 @@ const DRIVE_SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
 const GOOGLE_TOKEN_URI: &str = "https://oauth2.googleapis.com/token";
 
 const API_TIMEOUT: Duration = Duration::from_secs(15);
+/// A whole-object read for the small-file callers of [`DriveArchive::file_content`]
+/// (avatars, pictures for expressions, the agent's tools). **Not** the content
+/// route's read: [`DriveArchive::file_range`] has no total time limit at all.
 const CONTENT_TIMEOUT: Duration = Duration::from_secs(60);
 const TOKEN_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a connection may take to open. Set on the client, so it covers every
+/// call this archive makes.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long the upstream may stay silent — before its response headers and
+/// between two chunks of its body (ADR-0151 증보 5 D3). The clock **restarts on
+/// every read**, so a 300 MiB range that keeps flowing is never cut; a stalled
+/// connection is, after this long. It replaces the content read's old 60-second
+/// *total* limit, which cut a 300 MiB body off mid-stream for any reader slower
+/// than about 42 Mbit/s after `Content-Length` had already gone out.
+pub(crate) const CONTENT_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The service-account fields this crate uses. `private_key` is never logged,
 /// never returned, and never leaves this struct except as an [`EncodingKey`].
@@ -102,6 +120,10 @@ pub struct GoogleDriveArchive {
     client_email: String,
     signing_key: EncodingKey,
     http: reqwest::Client,
+    /// The Drive v3 base every call is made against: [`DRIVE_API_BASE`] always,
+    /// except in this crate's own tests, which point it at a recording stand-in
+    /// on 127.0.0.1. There is no way to set it from outside the crate.
+    api_base: String,
     token: Arc<Mutex<Option<CachedToken>>>,
     folders: Arc<Mutex<HashMap<Uuid, String>>>,
 }
@@ -144,17 +166,36 @@ impl GoogleDriveArchive {
         }
         let signing_key = EncodingKey::from_rsa_pem(key.private_key.as_bytes())
             .map_err(|_| DriveError::Unavailable)?;
-        let http = reqwest::Client::builder()
-            .build()
-            .map_err(|_| DriveError::Unavailable)?;
+        let http = http_client(CONTENT_IDLE_TIMEOUT).map_err(|_| DriveError::Unavailable)?;
         Ok(GoogleDriveArchive {
             shared_drive_id: shared_drive_id.to_string(),
             client_email: key.client_email,
             signing_key,
             http,
+            api_base: DRIVE_API_BASE.to_string(),
             token: Arc::new(Mutex::new(None)),
             folders: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    /// An archive that talks to a stand-in on 127.0.0.1 with a bearer token it
+    /// already holds — no key file, no token exchange, no network beyond the
+    /// loopback. Compiled for this crate's tests only, so the pinned endpoints in
+    /// [`GoogleDriveArchive::new`] cannot be bypassed by anything that ships.
+    #[cfg(test)]
+    pub(crate) fn against_stand_in(api_base: &str, idle_timeout: Duration) -> GoogleDriveArchive {
+        GoogleDriveArchive {
+            shared_drive_id: "0StandInDrive".to_string(),
+            client_email: "stand-in@momo.test".to_string(),
+            signing_key: EncodingKey::from_secret(b"stand-in"),
+            http: http_client(idle_timeout).expect("a client with only timeouts builds"),
+            api_base: api_base.trim_end_matches('/').to_string(),
+            token: Arc::new(Mutex::new(Some(CachedToken {
+                token: "stand-in-token".to_string(),
+                expires_at: i64::MAX,
+            }))),
+            folders: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     /// A live access token, minted on demand and reused until a minute before it
@@ -272,7 +313,7 @@ impl GoogleDriveArchive {
             escape_query(parent_id),
         );
         let search = build_url(
-            DRIVE_API_BASE,
+            &self.api_base,
             "/files",
             &[
                 ("corpora", "drive"),
@@ -295,7 +336,7 @@ impl GoogleDriveArchive {
             return Ok(id.to_string());
         }
         let create = build_url(
-            DRIVE_API_BASE,
+            &self.api_base,
             "/files",
             &[("supportsAllDrives", "true"), ("fields", "id")],
         )?;
@@ -318,7 +359,7 @@ impl GoogleDriveArchive {
 
     async fn generate_file_id(&self) -> Result<String, DriveError> {
         let url = build_url(
-            DRIVE_API_BASE,
+            &self.api_base,
             "/files/generateIds",
             &[("count", "1"), ("space", "drive")],
         )?;
@@ -397,7 +438,7 @@ impl DriveArchive for GoogleDriveArchive {
             ));
         }
         let url = build_url(
-            DRIVE_API_BASE,
+            &self.api_base,
             &format!("/files/{file_id}"),
             &[
                 ("supportsAllDrives", "true"),
@@ -440,7 +481,7 @@ impl DriveArchive for GoogleDriveArchive {
         // Never delete what is not on this archive's shared drive: the service
         // account may see other files, and a stored id is only a string.
         let probe = build_url(
-            DRIVE_API_BASE,
+            &self.api_base,
             &format!("/files/{file_id}"),
             &[("supportsAllDrives", "true"), ("fields", "id,driveId")],
         )?;
@@ -453,7 +494,7 @@ impl DriveArchive for GoogleDriveArchive {
             Err(error) => return delete_outcome_of_probe_error(error),
         }
         let url = build_url(
-            DRIVE_API_BASE,
+            &self.api_base,
             &format!("/files/{file_id}"),
             &[("supportsAllDrives", "true")],
         )?;
@@ -479,7 +520,7 @@ impl DriveArchive for GoogleDriveArchive {
             return Err(DriveError::ContentTooLarge);
         }
         let url = build_url(
-            DRIVE_API_BASE,
+            &self.api_base,
             &format!("/files/{file_id}"),
             &[("alt", "media"), ("supportsAllDrives", "true")],
         )?;
@@ -521,6 +562,127 @@ impl DriveArchive for GoogleDriveArchive {
             body: Box::pin(body) as futures::stream::BoxStream<'static, Result<Bytes, DriveError>>,
         })
     }
+
+    /// One range of one object, forwarded to Drive (ADR-0151 증보 5 D3, #4671).
+    ///
+    /// * **One call, no metadata first.** The caller already holds the row's size
+    ///   and mime, so the preliminary `files.get` that [`Self::file_content`]
+    ///   makes is gone; the total comes from the 206's `Content-Range`. (The
+    ///   shared-drive predicate that call carried is still applied where it
+    ///   matters most — [`Self::file_metadata`] runs it when an upload
+    ///   `complete`s, and the id stored in PostgreSQL is one this archive minted.)
+    /// * **Drive is sent `bytes=<start>-<end>` built from two integers** — never
+    ///   the client's header text, a list of ranges, or anything of unbounded
+    ///   length.
+    /// * **Only an exact 206 is accepted.** Anything else is the archive
+    ///   disagreeing with the caller, who resolved the range against its own
+    ///   record of the object: a 200 (Drive ignored `Range`; passing its whole
+    ///   body on as a range would be wrong bytes under a 206), a 416 (the object
+    ///   is shorter than the row says), a `Content-Range` for other bytes or
+    ///   with a total of `*`. All of those are [`DriveError::UpstreamFailure`]
+    ///   (502); the total of a good one is handed back for the caller to compare
+    ///   with the row.
+    /// * **No total time limit.** The client's connect limit and its idle limit
+    ///   (the clock restarts on every read) are the only clocks, so a body that
+    ///   keeps flowing is never cut.
+    async fn file_range(
+        &self,
+        file_id: &str,
+        range: ByteRange,
+        max_bytes: i64,
+    ) -> Result<DriveRangeContent, DriveError> {
+        if !valid_drive_id(file_id) {
+            return Err(DriveError::InvalidArguments(
+                "Drive file id is invalid".into(),
+            ));
+        }
+        // A range that reaches the ceiling cannot be inside an object the policy
+        // allows.
+        if u64::try_from(max_bytes).map_or(true, |ceiling| range.end() >= ceiling) {
+            return Err(DriveError::ContentTooLarge);
+        }
+        let url = build_url(
+            &self.api_base,
+            &format!("/files/{file_id}"),
+            &[("alt", "media"), ("supportsAllDrives", "true")],
+        )?;
+        let token = self.access_token().await?;
+        let response = self
+            .http
+            .get(url)
+            .bearer_auth(token)
+            .header(
+                reqwest::header::RANGE,
+                format!("bytes={}-{}", range.start(), range.end()),
+            )
+            .send()
+            .await
+            .map_err(|_| DriveError::UpstreamFailure)?;
+        if response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            return Err(mapped_error(response.status().as_u16()));
+        }
+        let (first, last, total) = response
+            .headers()
+            .get(reqwest::header::CONTENT_RANGE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(parse_content_range)
+            .ok_or(DriveError::UpstreamFailure)?;
+        if first != range.start() || last != range.end() {
+            return Err(DriveError::UpstreamFailure);
+        }
+        let total_size_bytes = i64::try_from(total).map_err(|_| DriveError::UpstreamFailure)?;
+        if total_size_bytes > max_bytes {
+            return Err(DriveError::ContentTooLarge);
+        }
+        if response
+            .content_length()
+            .is_some_and(|announced| announced != range.length())
+        {
+            return Err(DriveError::UpstreamFailure);
+        }
+        let upstream = response
+            .bytes_stream()
+            .map(|chunk| chunk.map_err(|_| DriveError::UpstreamFailure))
+            .boxed();
+        // Exactly the bytes that were asked for: a body that ends early is an
+        // error item, and one that runs on is cut where the range ends.
+        let whole = ByteRange::new(0, range.length() - 1).ok_or(DriveError::UpstreamFailure)?;
+        Ok(DriveRangeContent {
+            total_size_bytes,
+            body: slice_body(upstream, whole),
+        })
+    }
+}
+
+/// The one HTTP client this archive uses, built the same way for the real archive
+/// and for the tests' stand-in: a connect limit, and a limit on how long the
+/// upstream may stay silent (before its headers and between two chunks of its
+/// body) — **no limit on the whole request**, which is what lets a 300 MiB range
+/// that keeps flowing finish. The API calls keep their own per-request totals.
+fn http_client(idle_timeout: Duration) -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .connect_timeout(CONNECT_TIMEOUT)
+        .read_timeout(idle_timeout)
+        .build()
+}
+
+/// `bytes <first>-<last>/<total>` — the one form a 206 for a single range
+/// carries. Every number is digits only and at most twenty of them (and so fits
+/// a `u64` or is refused), and `first <= last < total`. Anything else — a `*`
+/// total, a sign, a space, an inverted span — is a header this archive does not
+/// trust.
+fn parse_content_range(value: &str) -> Option<(u64, u64, u64)> {
+    let (span, total) = value.strip_prefix("bytes ")?.split_once('/')?;
+    let (first, last) = span.split_once('-')?;
+    let (first, last, total) = (decimal(first)?, decimal(last)?, decimal(total)?);
+    (first <= last && last < total).then_some((first, last, total))
+}
+
+fn decimal(text: &str) -> Option<u64> {
+    if text.is_empty() || text.len() > 20 || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok()
 }
 
 /// Google's status codes → the archive's vocabulary (Swift `mappedError`).
