@@ -1,7 +1,7 @@
 import React from 'react';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {StyleSheet} from 'react-native';
-import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import {
   AGENT_USAGE_COPY as COPY, fetchAgentUsage, saveSubscriptionFee,
   type AgentUsageResponse,
@@ -65,6 +65,28 @@ it('lets admins set a shared fee, keeps a refused draft, and clears with null', 
   fireEvent.press(screen.getByRole('button', {name: '구독 정액 저장'}));
   await waitFor(() => expect(saveSubscriptionFee).toHaveBeenLastCalledWith('w', 'a', null));
   await screen.findByText(COPY.saved);
+});
+// #5132(#5099 후속): 저장하는 동안 정액 칸은 `editable={!saving}` 으로 잠기는데 알약이 평소 모양 그대로였다. 호출하는 쪽은 그대로
+// (`SubscriptionEditor` 무변경)이고 `InputPill` 이 잠김을 그린다 - 값은 부품 시험(`sheetKit` 「입력 알약」)이 잠긴 행과의 등식으로 재고,
+// 여기서는 **실제 저장하는 동안**에 그 길이 닿는지와 저장이 끝나면(여기서는 거절) 칸이 도로 살아나는지를 잰다.
+it('dims the fee input and says it is disabled only while saving - it comes back alive when the save fails', async () => {
+  jest.mocked(fetchAgentUsage).mockResolvedValue(data(true)); mount();
+  const input = await screen.findByLabelText(COPY.subscription);
+  const dimmed = () => flat(screen.getByTestId('subscription-a-pill')).opacity;
+  // 대조: 저장 전의 같은 칸은 흐리지 않고 잠겼다고 말하지 않는다(아래가 알약의 평소 모양에서 온 값이 아니라는 증거).
+  expect(dimmed()).toBeUndefined();
+  expect(input.props.accessibilityState).toBeUndefined();
+  let refuse: (error: Error) => void = () => {};
+  jest.mocked(saveSubscriptionFee).mockReturnValueOnce(new Promise((_, reject) => {refuse = reject;}));
+  fireEvent.changeText(input, '20');
+  fireEvent.press(screen.getByRole('button', {name: '구독 정액 저장'}));
+  await waitFor(() => expect(dimmed()).toBeLessThan(1));
+  expect(input.props.accessibilityState).toMatchObject({disabled: true});
+  await act(async () => {refuse(new Error('403'));});
+  await screen.findByText(COPY.saveError);
+  expect(dimmed()).toBeUndefined();
+  expect(input.props.accessibilityState).toBeUndefined();
+  expect(input.props.value).toBe('20');
 });
 
 // #4912: 설정 안쪽 장(`SubPage`)의 스크롤은 가로 여백을 주지 않는다. 장마다 제 가터(`SAFE_GUTTER`)를 지는데

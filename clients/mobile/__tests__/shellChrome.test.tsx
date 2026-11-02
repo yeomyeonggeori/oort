@@ -609,6 +609,27 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(posts()).toHaveLength(1);
   });
 
+  // #5132(#5099 후속): 만드는 동안 이름 칸은 `editable={!pending}` 으로 잠기는데 알약이 평소 모양 그대로여서 눌러도 자판이 안 오르는 칸이
+  // 고칠 수 있는 칸처럼 보였다. 호출하는 쪽은 그대로(`NewChannelSheet` 무변경)이고 `InputPill` 이 잠김을 그린다 — 값은 부품 시험(`sheetKit`
+  // 「입력 알약」)이 잠긴 행과의 등식으로 재고, 여기서는 **실제 시트의 만드는 동안**에 그 길이 닿는지 잰다.
+  it('만드는 동안 이름 칸이 흐려지고 잠겼다고 말한다 — 보내기 전에는 평소 모양이다 (#5132)', async () => {
+    installFetch(0, undefined, 'hang');
+    await renderReady();
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('plus-menu-channel'));
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'design-review');
+    const dimmed = () => StyleSheet.flatten(screen.getByTestId('new-channel-name-pill').props.style)?.opacity;
+    const announced = () => screen.getByTestId('new-channel-name').props.accessibilityState;
+    // 대조: 보내기 전의 같은 칸은 흐리지 않고 잠겼다고 말하지 않는다(아래가 알약의 평소 모양에서 온 값이 아니라는 증거).
+    expect(dimmed()).toBeUndefined();
+    expect(announced()).toBeUndefined();
+    fireEvent.press(screen.getByTestId('new-channel-create'));
+    await waitFor(() => expect(screen.getByTestId('new-channel-create-busy')).toBeTruthy());
+    expect(dimmed()).toBeLessThan(1);
+    expect(announced()).toMatchObject({disabled: true});
+  });
+
   it('규칙 줄과 이름 오류 줄은 어절 단위로 접는다 — 「대 / 문자는」처럼 어절 가운데서 갈리지 않는다 (design-review r1a M1)', async () => {
     installFetch();
     await renderReady();
