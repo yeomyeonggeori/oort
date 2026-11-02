@@ -1,12 +1,24 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: core:default, plus start_dragging for the web bundle's data-tauri-drag-region top bars (#2671), plus the read-only permission probe the notification plugin's page script sends at every launch (#2676), plus one grant per app command. The build declares an app ACL manifest (build.rs, #2772), so an app command without a grant here is refused. The PTY commands are not here: they live in pty.json.",
+  "description": "Main window: core:default, plus start_dragging for the web bundle's data-tauri-drag-region top bars (#2671), plus the read-only permission probe the notification plugin's page script sends at every launch (#2676), plus one grant per app command. `core:default` carries `core:tray:default`, which opens tauri's whole JS tray API once the `tray-icon` feature is on (the menu-bar icon, #5193), so every `core:tray` command is denied here: the tray is built in Rust and the page's only way to it is `tray_status_set`. The build declares an app ACL manifest (build.rs, #2772), so an app command without a grant here is refused. The PTY commands are not here: they live in pty.json.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
+    "core:tray:deny-new",
+    "core:tray:deny-get-by-id",
+    "core:tray:deny-remove-by-id",
+    "core:tray:deny-set-icon",
+    "core:tray:deny-set-menu",
+    "core:tray:deny-set-tooltip",
+    "core:tray:deny-set-title",
+    "core:tray:deny-set-visible",
+    "core:tray:deny-set-temp-dir-path",
+    "core:tray:deny-set-icon-as-template",
+    "core:tray:deny-set-icon-with-as-template",
+    "core:tray:deny-set-show-menu-on-left-click",
     "allow-locale-preference-read",
     "allow-locale-preference-write",
     "allow-locale-menu-set",
@@ -21,6 +33,7 @@
     "allow-notification-click-supported",
     "allow-notification-show-clickable",
     "allow-dock-badge-set",
+    "allow-tray-status-set",
     "allow-window-vibrancy-set",
     "allow-app-theme-set",
     "allow-keychain-available",

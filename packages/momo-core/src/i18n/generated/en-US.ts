@@ -190,6 +190,53 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "desktop.tray.more": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " more"
+    }
+  ],
+  "desktop.tray.newMessage": [
+    {
+      "type": 0,
+      "value": "New message"
+    }
+  ],
+  "desktop.tray.none": [
+    {
+      "type": 0,
+      "value": "Nothing running"
+    }
+  ],
+  "desktop.tray.open": [
+    {
+      "type": 0,
+      "value": "Open oort"
+    }
+  ],
+  "desktop.tray.running": [
+    {
+      "type": 0,
+      "value": "Running"
+    }
+  ],
+  "desktop.tray.stateBlocked": [
+    {
+      "type": 0,
+      "value": "Waiting"
+    }
+  ],
+  "desktop.tray.stateWorking": [
+    {
+      "type": 0,
+      "value": "Working"
+    }
+  ],
   "expressions.kind.autoNote": [
     {
       "type": 0,
