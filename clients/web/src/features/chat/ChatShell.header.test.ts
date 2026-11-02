@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { channelHeaderControlClass } from "./channelHeaderControl";
 
 /** Comments in this repository quote counter-examples verbatim; strip them. */
 function codeOnly(source: string): string {
@@ -10,6 +11,15 @@ function codeOnly(source: string): string {
 
 const SHELL = readFileSync(new URL("./ChatShell.tsx", import.meta.url), "utf8");
 const SHELL_CODE = codeOnly(SHELL);
+const TOKENS = readFileSync(new URL("../../design/tokens.css", import.meta.url), "utf8");
+
+/** `@utility <name> { ... }`의 본문(첫 줄의 `{` 다음부터 열 0의 `}` 앞까지). 없으면 터진다. */
+function utilityBody(name: string): string {
+  const start = TOKENS.indexOf(`@utility ${name} {`);
+  if (start < 0) throw new Error(`tokens.css에 @utility ${name}이 없다`);
+  const end = TOKENS.indexOf("\n}", start);
+  return TOKENS.slice(start, end);
+}
 const MENU = readFileSync(
   new URL("./ChannelHeaderMenu.tsx", import.meta.url),
   "utf8"
@@ -108,13 +118,13 @@ describe("BZ-2 right control group rearranges existing actions", () => {
     expect(HUDDLE_CODE).toMatch(/testId="huddle-leave"/);
   });
 
-  it("lets the right group shrink so a live huddle cannot cover the title", () => {
-    expect(SHELL_CODE).toMatch(
-      /className="flex min-w-0 flex-1 items-center justify-end gap-2"/
-    );
+  it("keeps the control group able to wrap itself, so a live huddle cannot cover the title or leave the pane", () => {
+    // #4230: 예전에는 오른쪽 무리가 `flex-1`(기준 0)로 남는 자리만 받아 컨트롤이 줄 안에서 넘쳤다. 지금은 컨트롤 묶음이
+    // 제 폭을 먼저 갖고, 못 서면 줄이 바뀐다. 이 묶음 자신도 `flex-wrap`이라 아랫줄에서도 모자라면 단추가 다음 줄로 간다.
     const at = SHELL.indexOf('data-testid="channel-header-controls"');
     const window = SHELL.slice(Math.max(0, at - 200), at);
-    expect(window).toMatch(/min-w-0/);
+    expect(window).toMatch(/\bmin-w-0\b/);
+    expect(window).toMatch(/\bflex-wrap\b/);
     expect(window).not.toMatch(/shrink-0/);
   });
 
@@ -158,6 +168,88 @@ describe("BZ-2 right control group rearranges existing actions", () => {
     );
     expect(onClose).toMatch(/setTopicOpen\(true\)/);
     expect(onClose).toMatch(/actions\.leave\.open\(\)/);
+  });
+});
+
+// =============================================================================
+// #4230 — 긴 채널 이름에서도 머리 컨트롤이 판 안에 남는다: 컨트롤이 먼저 폭을 갖고, 제목이 남는 폭에서 한 줄로 줄어든다.
+//
+// 렌더된 상자(뷰포트 안·겹침 없음·눌림)는 `gates/gate-channel-header-fit.mjs`가 실브라우저에서 잰다(320~1440 × 글자 크기 3 ×
+// 밀도 3 × 이름 종류 × 계획 독). 여기 있는 것은 그 기하를 만드는 **구조**의 약속이다: 한 줄만 바뀌어도 아래가 빨개진다.
+// =============================================================================
+
+describe("#4230 머리는 컨트롤 묶음이 먼저 폭을 갖고 제목이 남는 폭에서 한 줄로 줄어든다", () => {
+  const AT_HEADER = SHELL_CODE.indexOf('data-testid="channel-header"');
+  const HEADER = SHELL_CODE.slice(AT_HEADER, SHELL_CODE.indexOf("</header>", AT_HEADER));
+
+  it("머리를 실제로 잘라 냈다(빈 조각 위의 초록 방지)", () => {
+    expect(AT_HEADER).toBeGreaterThan(0);
+    expect(HEADER).toContain('data-testid="channel-header-controls"');
+    expect(HEADER).toContain("<h1");
+  });
+
+  it("머리는 줄이 바뀔 수 있고, 안에는 제목 묶음과 컨트롤 묶음 둘뿐이다", () => {
+    expect(HEADER).toMatch(/className="channel-head flex min-w-0 flex-wrap items-center /);
+    expect(HEADER.match(/className="channel-head-main /g)).toHaveLength(1);
+    expect(HEADER.match(/className="channel-head-tools /g)).toHaveLength(1);
+    // 제목 묶음이 먼저, 컨트롤 묶음이 나중이다(줄이 바뀌면 컨트롤이 제목 아래로 내려온다).
+    expect(HEADER.indexOf("channel-head-main")).toBeLessThan(HEADER.indexOf("channel-head-tools"));
+  });
+
+  it("제목·핸들·토픽은 한 칸(기본 폭 0)에 있고, 컨트롤 묶음에는 토픽이 없다", () => {
+    const bodyAt = HEADER.indexOf('className="channel-head-body ');
+    const toolsAt = HEADER.indexOf('className="channel-head-tools ');
+    expect(bodyAt).toBeGreaterThan(0);
+    const body = HEADER.slice(bodyAt, toolsAt);
+    const tools = HEADER.slice(toolsAt);
+    expect(body).toContain("<h1");
+    expect(body).toContain('data-testid="channel-handle"');
+    expect(body).toContain('data-testid="channel-header-topic"');
+    // 긴 토픽이 컨트롤 묶음을 부풀리면 이 결함이 돌아온다(예전 gate:channel-header 실측과 같은 이유).
+    expect(tools).not.toContain('data-testid="channel-header-topic"');
+    expect(tools).not.toContain("<h1");
+  });
+
+  it("세 칸의 flex 규칙: 제목 칸은 폭 0에서 남는 폭을 받고, 컨트롤 묶음은 제 폭이 기준이다", () => {
+    const main = utilityBody("channel-head-main");
+    expect(main).toMatch(/flex: 1 1 min-content;/);
+    expect(main).toMatch(/min-inline-size: 0;/);
+    // 제목 칸이 폭 0이어야 긴 이름의 글 폭이 윗 칸의 min-content 를 부풀리지 못한다.
+    const body = utilityBody("channel-head-body");
+    expect(body).toMatch(/flex: 1 1 0;/);
+    expect(body).toMatch(/inline-size: 0;/);
+    expect(body).toMatch(/min-inline-size: 3rem;/);
+    const tools = utilityBody("channel-head-tools");
+    expect(tools).toMatch(/flex: 0 1 auto;/);
+    expect(tools).toMatch(/margin-inline-start: auto;/);
+  });
+
+  it("컨트롤 단추는 줄지 않는다(모든 머리 단추가 쓰는 클래스가 shrink-0이다)", () => {
+    expect(channelHeaderControlClass()).toMatch(/\bshrink-0\b/);
+    expect(channelHeaderControlClass({ wide: true })).toMatch(/\bshrink-0\b/);
+    expect(channelHeaderControlClass({ pressed: true })).toMatch(/\bshrink-0\b/);
+  });
+
+  it("제목은 한 줄 말줄임이고 전문이 title 로 남는다(채널·DM·스트레스 세 변형 모두)", () => {
+    const titles = [...HEADER.matchAll(/<h1[\s\S]*?>/g)].map((match) => match[0]);
+    expect(titles).toHaveLength(3);
+    for (const open of titles) {
+      expect(open).toMatch(/\btitle=\{/);
+      expect(open).toMatch(/channel-head-title/);
+      expect(open).toMatch(/\bmin-w-0\b/);
+    }
+    // 채널·스트레스 제목은 한 줄 말줄임을 직접 든다. DM 은 안의 단추가 든다.
+    expect(titles.filter((open) => /\btruncate\b/.test(open))).toHaveLength(2);
+    expect(HEADER).toMatch(/data-testid="dm-profile-trigger"[\s\S]*?min-w-0 truncate/);
+  });
+
+  it("구분용 핸들도 칸 안에서 줄어든다(shrink-0이면 제목 칸 바닥에서 컨트롤 쪽으로 넘친다)", () => {
+    const handle = /<span\s+className="([^"]*)"\s+data-testid="channel-handle"/.exec(HEADER);
+    expect(handle).not.toBeNull();
+    const classes = (handle?.[1] ?? "").split(/\s+/);
+    expect(classes).toContain("min-w-0");
+    expect(classes).toContain("truncate");
+    expect(classes).not.toContain("shrink-0");
   });
 });
 
