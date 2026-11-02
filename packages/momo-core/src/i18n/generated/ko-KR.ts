@@ -1834,6 +1834,73 @@ export const catalog: MessageCatalog = {
       "value": "동영상"
     }
   ],
+  "timeline.workHealth.dwell": [
+    {
+      "type": 0,
+      "value": "같은 단계에 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분째"
+    }
+  ],
+  "timeline.workHealth.failedActivities": [
+    {
+      "type": 0,
+      "value": "실패한 활동 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workHealth.quiet": [
+    {
+      "type": 0,
+      "value": "조용해요 · 마지막 보고 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분 전"
+    }
+  ],
+  "timeline.workHealth.rejectedApprovals": [
+    {
+      "type": 0,
+      "value": "거절된 승인 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workHealth.retries": [
+    {
+      "type": 0,
+      "value": "oort 호출 재시도 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번"
+    }
+  ],
   "timeline.workPlan.button": [
     {
       "type": 0,
@@ -2199,6 +2266,12 @@ export const catalog: MessageCatalog = {
       "value": "진행 중"
     }
   ],
+  "timeline.workRecord.statusUnclosed": [
+    {
+      "type": 0,
+      "value": "끝 보고 없음"
+    }
+  ],
   "timeline.workRecord.summary": [
     {
       "type": 0,
@@ -2242,6 +2315,46 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "oort 호출 기록은 서버 업데이트 뒤에 보여요."
+    }
+  ],
+  "timeline.workReport.emptyEnded": [
+    {
+      "type": 0,
+      "value": "이 일에서 에이전트가 알린 활동은 없었어요."
+    }
+  ],
+  "timeline.workReport.emptyOpen": [
+    {
+      "type": 0,
+      "value": "아직 에이전트가 알린 활동이 없어요."
+    }
+  ],
+  "timeline.workReport.planNotLive": [
+    {
+      "type": 0,
+      "value": "지금은 돌고 있지 않아요. 마지막으로 알린 계획이에요."
+    }
+  ],
+  "timeline.workReport.tally": [
+    {
+      "type": 0,
+      "value": "끝낸 활동 합계 · "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.workReport.trimmed": [
+    {
+      "type": 0,
+      "value": "오래된 활동 일부는 합계로만 남았어요."
+    }
+  ],
+  "timeline.workReport.unsupported": [
+    {
+      "type": 0,
+      "value": "에이전트가 알린 활동은 서버 업데이트 뒤에 보여요."
     }
   ],
   "timeline.workRequest.composerBusy": [
@@ -2334,6 +2447,161 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "스레드를 열고 다시 눌러 주세요."
+    }
+  ],
+  "timeline.workStream.limit": [
+    {
+      "type": 0,
+      "value": "이 패널을 연 뒤에 도착한 흐르는 글과 도구 호출만 이 칸에 보이고, 이 칸의 내용은 저장하지 않아요."
+    }
+  ],
+  "timeline.workSummary.agentReported": [
+    {
+      "type": 0,
+      "value": "에이전트 보고"
+    }
+  ],
+  "timeline.workSummary.duration": [
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분"
+    }
+  ],
+  "timeline.workSummary.durationHours": [
+    {
+      "type": 2,
+      "value": "hours",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "시간 "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "분"
+    }
+  ],
+  "timeline.workSummary.durationShort": [
+    {
+      "type": 0,
+      "value": "1분 미만"
+    }
+  ],
+  "timeline.workSummary.kindDelegate": [
+    {
+      "type": 0,
+      "value": "맡김 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindEdit": [
+    {
+      "type": 0,
+      "value": "편집 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindOther": [
+    {
+      "type": 0,
+      "value": "기타 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindRead": [
+    {
+      "type": 0,
+      "value": "읽기 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindRun": [
+    {
+      "type": 0,
+      "value": "명령 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindSearch": [
+    {
+      "type": 0,
+      "value": "검색 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindWeb": [
+    {
+      "type": 0,
+      "value": "웹 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.openPanel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    },
+    {
+      "type": 0,
+      "value": ". 작업 패널 열기"
+    }
+  ],
+  "timeline.workSummary.stages": [
+    {
+      "type": 0,
+      "value": "단계 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
     }
   ],
   "timeline.workTool.actionClaimSecret": [
