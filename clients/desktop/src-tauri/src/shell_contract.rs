@@ -442,6 +442,120 @@ fn tauri_grants_the_window_glass_commands_to_the_local_main_window_only() {
     }
 }
 
+/// The menu-bar icon's one command (#5193) is in the ACL manifest, in the desktop handler table
+/// only, and answers the main window's bundled origin alone: not a remote page loaded into the main
+/// window, not another window. A page that could call it from elsewhere could draw its own text
+/// into the menu bar.
+#[test]
+fn tauri_grants_the_tray_status_command_to_the_local_main_window_only() {
+    let manifest = quoted_list(BUILD_RS, "const APP_COMMANDS");
+    let blocks = handler_blocks(LIB_RS);
+    let desktop = blocks
+        .iter()
+        .find(|b| b.contains(&"updater_check".to_string()))
+        .expect("desktop handler table");
+    let mobile = blocks
+        .iter()
+        .find(|b| !b.contains(&"updater_check".to_string()))
+        .expect("mobile handler table");
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    let command = "tray_status_set";
+    // The command takes `State<TrayState>`: a build that registers the command and forgets to manage the
+    // state compiles, passes every other test, and fails on the first call in the running app.
+    assert!(
+        LIB_RS.contains(".manage(tray::TrayState::default())"),
+        "tray::TrayState is not managed in lib.rs"
+    );
+    assert!(
+        manifest.iter().any(|c| c == command),
+        "{command} not in build.rs APP_COMMANDS"
+    );
+    assert!(desktop.iter().any(|c| c == command), "{command} desktop");
+    assert!(!mobile.iter().any(|c| c == command), "{command} mobile");
+    assert!(authority
+        .resolve_access(command, "main", "main", &local)
+        .is_some());
+    for url in [
+        "https://evil.example/",
+        "https://oort-team.up.railway.app/",
+        "http://127.0.0.1:8080/",
+    ] {
+        let remote = tauri::ipc::Origin::Remote {
+            url: url.parse().unwrap(),
+        };
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &remote)
+                .is_none(),
+            "{command} from {url}"
+        );
+    }
+    assert!(authority
+        .resolve_access(command, "other", "other", &local)
+        .is_none());
+}
+
+/// The page does not get tauri's own tray API (#5193). `core:default` carries `core:tray:default`
+/// ("enables all commands"), and the commands behind it exist only while tauri's `tray-icon` feature
+/// is on — which this crate turns on for the menu-bar icon. Without a refusal the page could create
+/// its own status items, swap the icon and replace the menu, none of it through the one command that
+/// validates and bounds what the menu shows. The tray is built in Rust and the page's whole part is
+/// `tray_status_set`, so every `plugin:tray|*` command must stay refused for the main window.
+///
+/// The command list is read from the ACL manifest the build generated, not typed here: a command a
+/// later tauri adds to `core:tray` is checked without anyone remembering to list it.
+#[test]
+fn the_page_cannot_call_tauris_own_tray_api() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/gen/schemas/acl-manifests.json"
+    );
+    let acl: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut commands: Vec<String> = Vec::new();
+    for (name, permission) in acl["core:tray"]["permissions"]
+        .as_object()
+        .expect("core:tray permissions")
+    {
+        if name.starts_with("allow-") {
+            for command in permission["commands"]["allow"]
+                .as_array()
+                .expect("allow list")
+            {
+                commands.push(command.as_str().expect("command name").to_owned());
+            }
+        }
+    }
+    // The loop below must not be able to pass by finding nothing.
+    for expected in ["new", "set_menu", "set_icon", "remove_by_id", "set_visible"] {
+        assert!(
+            commands.iter().any(|c| c == expected),
+            "core:tray no longer lists {expected}: {commands:?}"
+        );
+    }
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    for command in &commands {
+        let key = format!("plugin:tray|{command}");
+        assert!(
+            authority
+                .resolve_access(&key, "main", "main", &local)
+                .is_none(),
+            "{key} is reachable from the page; deny it in capabilities/default.json"
+        );
+    }
+    // Controls: the resolver answers for the window's other core commands (so it is not refusing
+    // everything), and the page's one tray command is the granted one.
+    assert!(authority
+        .resolve_access("plugin:window|is_fullscreen", "main", "main", &local)
+        .is_some());
+    assert!(authority
+        .resolve_access("tray_status_set", "main", "main", &local)
+        .is_some());
+}
+
 /// The glass invariants (the doc comment of `window_vibrancy.rs`): the window is created
 /// opaque, and the private-API switch is a pair. tauri-build refuses a pair that disagrees,
 /// but only when the build runs; this fails earlier and says why.
