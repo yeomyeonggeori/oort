@@ -46,11 +46,11 @@ import { clockLabel } from "./runLedger";
 // 6. **「모름」은 0이 아니다.** 서버가 `include=tools`에 답하지 않았으면(`toolTally` 부재) 합계는
 //    `null`이고 `supported`는 false다: 호출이 0번이라는 뜻이 아니다. 빈 합계(`[]`)만이 「물었고 없다」다.
 //
-// ## 지금 만드는 행 (v0)
-//   oort 출처의 `tool_call` 호출 행만 `oortToolRows`가 만든다. 에이전트 보고(`stage`·`activity`·`plan`)와
-//   내 컴퓨터는 **출처·종류·문구가 이미 정해져 있고** 생산자는 #4657·#4658이 더한다 — 그 행을 만들어
-//   `workTimelineSections`에 넘기면 칸·배지·접기가 그대로 동작한다. 수명주기·승인·깨움·끝 줄은 기존
-//   `ledgerRows`(기록 칸)가 그대로 맡는다.
+// ## 지금 만드는 행
+//   oort 출처의 `tool_call` 호출 행은 `oortToolRows`가, 에이전트 출처의 활동 행(`activity`)은 `workReport`의
+//   `agentActivityRows`가 만든다(#4657). 그 행을 `workTimelineSections`에 넘기면 칸·배지·접기가 그대로
+//   동작한다. 내 컴퓨터(하네스) 행의 생산자는 #4658이 더한다. 에이전트의 `stage` 줄과 수명주기·승인·깨움·끝 줄은
+//   기존 `ledgerRows`(기록 칸)가 그대로 맡는다. 계획(`plan`)은 행이 아니라 계획 블록이다(`workReport` 머리 5).
 // =============================================================================
 
 export type WorkTimelineSource = "oort" | "agent" | "computer";
@@ -83,10 +83,13 @@ export type WorkToolKind =
   | "delegate";
 
 /**
- * `running` 진행 중 · `done` 끝남(성공이라고 단정하지 않는다) · `failed` 실패.
- * 끝난 run의 `in_progress` 활동을 `running`으로 그리지 않는 것은 읽는 쪽 규칙이다(7-7 ②).
+ * `running` 진행 중 · `done` 끝남(성공이라고 단정하지 않는다) · `failed` 실패 · `unclosed` 끝 보고 없음.
+ *
+ * `unclosed`는 run은 끝났는데 에이전트가 그 활동의 끝을 알리지 않은 경우다(ADR-0200 증보 7 7-7 ②): 서버는
+ * 상태를 바꾸지 않으므로 읽는 쪽이 `running`으로도 `done`으로도 그리지 않는다. 묶음·반복에도 들어가지 않는다
+ * (둘 다 `done`만 모으므로 새 상태가 기본으로 안전하다).
  */
-export type WorkTimelineStatus = "running" | "done" | "failed";
+export type WorkTimelineStatus = "running" | "done" | "failed" | "unclosed";
 
 /** 묶음 행의 종류별 수. */
 export interface WorkTimelinePart {
@@ -261,6 +264,18 @@ export function foldWorkTimeline(
     out.push(row);
   }
   return out;
+}
+
+/**
+ * 진행 중인 **마지막** 행의 id. 화면에서 움직이는 것은 이 행의 점 하나뿐이다(A1 모션 규칙 3): 진행 중 행이
+ * 여럿(병렬 도구)이어도 나머지는 정지다. 진행 중 행이 없으면 null이다. 접은 뒤의 행을 넘긴다.
+ */
+export function lastRunningRowId(rows: readonly WorkTimelineRow[]): string | null {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    if (row !== undefined && row.status === "running") return row.id;
+  }
+  return null;
 }
 
 export interface WorkTimelineSection {
@@ -463,7 +478,7 @@ export interface WorkTimelineRowCopy {
   duration: string | null;
   /** 실패 이유 한 줄. 닫힌 코드만 낱말이 되고 모르는 코드는 null이다(코드를 그대로 내지 않는다). */
   failure: string | null;
-  /** 실패·진행 중만 낱말이 있다. 끝남은 조용하다. */
+  /** 실패·진행 중·끝 보고 없음만 낱말이 있다. 끝남은 조용하다. */
   statusWord: string | null;
   /** 줄 옆의 때(「14:05」, 오늘이 아니면 날짜가 붙는다). */
   time: string;
@@ -505,7 +520,9 @@ export function workTimelineRowCopy(
         ? formatMessage("timeline.workRecord.statusFailed")
         : row.status === "running"
           ? formatMessage("timeline.workRecord.statusRunning")
-          : null,
+          : row.status === "unclosed"
+            ? formatMessage("timeline.workRecord.statusUnclosed")
+            : null,
     time: clockLabel(row.atMs, nowMs),
   };
 }
