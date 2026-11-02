@@ -17,5 +17,12 @@
   "desktop.menu.hide": "Hide oort",
   "desktop.menu.hideOthers": "Hide others",
   "desktop.menu.quit": "Quit oort",
+  "desktop.tray.running": "Running",
+  "desktop.tray.none": "Nothing running",
+  "desktop.tray.newMessage": "New message",
+  "desktop.tray.open": "Open oort",
+  "desktop.tray.stateWorking": "Working",
+  "desktop.tray.stateBlocked": "Waiting",
+  "desktop.tray.more": "{count, number} more",
   "desktop.notify.threadSummary": "{count, plural, one {# thread reply} other {# thread replies}}"
 }
