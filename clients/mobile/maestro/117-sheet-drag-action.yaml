@@ -3,7 +3,7 @@ name: 117-sheet-drag-action
 env:
   # 기본값은 없다 — 내용 맞춤 단이라 시트 위 끝이 내용·기기마다 다르다. `measure/sheet-drag-run.mjs` 가 `maestro hierarchy` 로 읽어 넘긴다.
   #   HX 가운데 x · HY 머리 제목 줄 y · HY_SHORT/HY_FAR/HY_FLICK 거기서 문턱 아래/위/튕김 거리만큼 내린 자리
-  #   ROWY 첫 행동 줄 y · ROW_FAR · GAPY 머리 바로 아래 빈 자리 y · GAP_FAR · FLICK_MS 튕김 시간
+  #   ROWY 첫 행동 줄 y · ROW_FAR · GAPY 머리 바로 아래 빈 자리 y · GAP_FAR
   SHOT: "sheet-drag-action"
   GAP_STAYS: "false" # SE: 행동 시트가 넘쳐 머리 아래 빈 자리를 시트가 잡지 않는다 — 장면 ④ 가 「안 닫힘」이고 뒤의 닫힘 번호가 하나씩 당겨진다
   N4: "4" # ⑤ 뒤의 닫힘 번호
@@ -95,11 +95,11 @@ env:
     id: "sheet-close"
 - takeScreenshot: ${SHOT}-4-gap-stays
 # @end
-# ⑤ 빠른 튕김
+# ⑤ 빠른 튕김 — 튕김 시간 60ms 는 기기와 무관한 상수라 틀에 숫자로 둔다(숫자 칸에 자리표시자를 쓰면 `maestro check-syntax` 가 거부한다, #5081).
 - swipe:
     start: "${HX}, ${HY}"
     end: "${HX}, ${HY_FLICK}"
-    duration: ${FLICK_MS}
+    duration: 60
 - extendedWaitUntil:
     visible: "닫힘 ${N4}"
     timeout: 8000
