@@ -8,12 +8,12 @@
 # legal sufficiency. Debian OS-layer licenses are inventoried separately
 # inside each image; GPL/LGPL there are copyleft, not permissive.
 #
-# cargo.lock.sha256: f55e20ce25dd5ceea4bc666179f35f8c3a4e28ae37e93b5af8219492ef01e05b
+# cargo.lock.sha256: b81ad15218a964628a7700b6337dab5db8008a40060e5ce933ed4b951fe431d1
 # web.package-lock.sha256: 0e4507662218a825c370dcef97ee7d5ff5bad8f5238da3f50bbb5f5e85ba2c2d
 # clarify.sha256: 06d582a72150cf2c0d3604f47640a3eee3cc9e84ad06d41e48adcd413f1affad
-# cargo.packages: 430
+# cargo.packages: 431
 # npm.packages: 474
-# unique.license.blobs: 460
+# unique.license.blobs: 461
 #
 ## Package index
 # ecosystem <TAB> name <TAB> version <TAB> spdx <TAB> copyright <TAB> source <TAB> file_sha256[,file_sha256]
@@ -300,6 +300,7 @@ cargo	ryu	1.0.23	Apache-2.0 OR BSL-1.0	copyright notice that is included in or a
 cargo	safetensors	0.8.0	Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4
 cargo	scopeguard	1.2.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,fb77f0a9c53e473abe5103c8632ef9f0f2874d4fb3f17cb2d8c661aab9cee9d7
 cargo	sec1	0.8.1	Apache-2.0 OR MIT	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5,57a4d75c1d095bb94754a478f3cd15e60ac66a5c5627d844be01a918eea5fe88
+cargo	seccompiler	0.5.0	Apache-2.0 OR BSD-3-Clause	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30,051a73a9b3811f17c6b6ba5659d0258cee303a47af0e79ec4b05e6566e021750
 cargo	security-framework	3.7.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69
 cargo	security-framework-sys	2.17.0	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]	package-tree	a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2,91e934255ba3b2f21103d68c5581c23ef34aa95c4628e4405b8c901935e11c69
 cargo	semver	1.0.28	MIT OR Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works	package-tree	62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a,23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3
@@ -7402,6 +7403,37 @@ Repository: github:eemeli/yaml
 > OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
 > TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
 > THIS SOFTWARE.
+-----
+
+### sha256:051a73a9b3811f17c6b6ba5659d0258cee303a47af0e79ec4b05e6566e021750
+# as-filed: LICENSE-BSD-3-Clause
+-----
+Copyright 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+this list of conditions and the following disclaimer in the documentation
+and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its contributors
+may be used to endorse or promote products derived from this software without
+specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 -----
 
 ### sha256:053a75a14b7508a897466b65e12797201a06b0e9b5066d1223da72cac99601b5

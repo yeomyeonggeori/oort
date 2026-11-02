@@ -22,7 +22,7 @@
 //! | `a_failed_fetch_logs_a_cause_and_never_the_token` | writing anything the transport said into the failure line (the api's origin, the workspace, the token), or dropping the kind of failure |
 //! | `a_worker_with_no_private_address_keeps_reading_its_own_archive` | `attachment_reader` ignoring the configuration |
 //! | `a_worker_whose_api_is_unreachable_fails_closed_and_does_not_fall_back_to_the_archive` | a silent fallback to the archive |
-//! | `the_api_refusing_after_the_mint_burns_the_address_and_the_worker_refuses` | a second attempt with the same address |
+//! | `the_api_refusing_after_the_mint_burns_the_address_and_the_worker_refuses` | a second attempt with the same address; (#5072) the route answering an archive that failed, or a row that disagrees with its bytes, with its 404 again (the helper would say "unreadable format", the avatar "not available") |
 //! | `a_text_file_a_pdf_and_a_picture_come_back_through_the_route_for_a_read` | (#4970) the read mint judging by the avatar's three types, the redeem not re-judging as a read, `bytes_match_mime` without `%PDF-`/text, the worker's fetch refusing the type |
 //! | `the_read_use_refuses_what_the_mint_the_route_and_the_worker_must_refuse` | (#4970) the author / live-message / type / ceiling predicates, the route's sniff — and the avatar use being widened by accident |
 
@@ -1241,13 +1241,25 @@ async fn a_worker_whose_api_is_unreachable_fails_closed_and_does_not_fall_back_t
 }
 
 /// The api spends the address before it reads its archive (the contract: a token is single use). When the
-/// archive then cannot produce the file, the address stays spent, the worker is told "not available", and
+/// archive then cannot produce the file, the address stays spent, the worker is told **the storage failed**
+/// (`drive_unavailable`, the reason the worker's own direct read of the archive gives for the same thing) and
 /// it does not ask again.
+///
+/// That is what #5072 (ADR-0151 증보 6) changed: the route used to answer this with its one 404, which the
+/// avatar flow read as "the photo is not there" (`attachment_not_available`) and the helper's read as "your
+/// file is in a format that cannot be read" (`attachment_not_readable`, a permanent sentence). The route now
+/// answers a failing archive and a row that disagrees with its bytes with a 502, and both uses are told the
+/// truth: try again shortly. The 404 that stays is the file's own (the bytes are not the type it claims).
+///
+/// RED: let the route answer the archive's failure with its 404 again (the helper's read says
+/// `attachment_not_readable`, the avatar's `attachment_not_available`).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a disposable PG18"]
 async fn the_api_refusing_after_the_mint_burns_the_address_and_the_worker_refuses() {
+    use momo_messaging::RequesterAttachmentUse::Read;
     let server = start().await;
     let tenant = seed_tenant(&server).await;
+    let worker = worker(&server, Some(&server.base));
     server
         .archive
         .files
@@ -1255,24 +1267,93 @@ async fn the_api_refusing_after_the_mint_burns_the_address_and_the_worker_refuse
         .unwrap()
         .remove(&tenant.photo_drive_file);
     let size = png(64, 1).len() as i64;
-    let result = read_direct(
-        &worker(&server, Some(&server.base)),
-        &tenant,
-        tenant.photo,
-        size,
-    )
-    .await;
-    assert_eq!(result.err(), Some("attachment_not_available"));
+    let result = read_direct(&worker, &tenant, tenant.photo, size).await;
+    assert_eq!(
+        result.err(),
+        Some("drive_unavailable"),
+        "the avatar flow: the storage failed, the photo is not thereby missing"
+    );
     assert_eq!(server.requests().len(), 1, "one attempt, not a retry");
     assert_eq!(server.reads(), 1, "the api did try its archive");
-    let spent: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM self_media_token WHERE workspace_id = $1 AND used_at IS NOT NULL",
+    let spent = |server: &Server, ws: Uuid| {
+        let su = server.su.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM self_media_token WHERE workspace_id = $1 AND used_at IS NOT NULL",
+            )
+            .bind(ws)
+            .fetch_one(&su)
+            .await
+            .unwrap()
+        }
+    };
+    assert_eq!(spent(&server, tenant.ws).await, 1, "the address is burned");
+
+    // the helper's read of the requester's own text file, gone from the archive in the same way, is the same
+    // hiccup — and not the permanent "this format cannot be read" it was told before #5072
+    let (gone, _, gone_file, gone_size) = seed_picture(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        "text/plain",
+        b"hello".to_vec(),
     )
-    .bind(tenant.ws)
-    .fetch_one(&server.su)
-    .await
-    .unwrap();
-    assert_eq!(spent, 1, "the address is burned");
+    .await;
+    server.archive.files.lock().unwrap().remove(&gone_file);
+    assert_eq!(
+        read_as(&worker, &tenant, gone, gone_size as i64, Read)
+            .await
+            .err(),
+        Some("drive_unavailable"),
+        "the helper's read: a file the archive no longer gives is the storage's failure"
+    );
+    // a row that disagrees with the bytes the archive holds (the row says ten, the archive has five)
+    let message = seed_message(&server.su, tenant.ws, tenant.channel, tenant.alice).await;
+    let (short, _) = seed_attachment(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        message,
+        "text/plain",
+        10,
+        "complete",
+        Some(b"short".to_vec()),
+    )
+    .await;
+    assert_eq!(
+        read_as(&worker, &tenant, short, 10, Read).await.err(),
+        Some("drive_unavailable"),
+        "the helper's read: a row that disagrees with its bytes is the storage's failure, not the file's format"
+    );
+    // …while a file that really is not the type it claims is still the file's own problem
+    let (html, _, _, html_size) = seed_picture(
+        &server,
+        tenant.ws,
+        tenant.channel,
+        tenant.alice,
+        "application/pdf",
+        b"<html>not a pdf</html>".to_vec(),
+    )
+    .await;
+    assert_eq!(
+        read_as(&worker, &tenant, html, html_size as i64, Read)
+            .await
+            .err(),
+        Some("attachment_not_readable"),
+        "the 404 that stays: the bytes are not the declared type"
+    );
+    assert_eq!(
+        server.requests().len(),
+        4,
+        "one request each, never a retry"
+    );
+    assert_eq!(
+        spent(&server, tenant.ws).await,
+        4,
+        "every address was burned"
+    );
 }
 
 /// ADR-0151 증보 4 — the byte path is no longer pictures only. A requester's text file (UTF-8 and the

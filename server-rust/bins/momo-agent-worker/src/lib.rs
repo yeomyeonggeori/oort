@@ -79,6 +79,7 @@
 pub mod a2a;
 pub mod anthropic;
 pub mod attachment_image;
+mod attachment_lockdown;
 pub mod attachment_text;
 pub mod completion_report;
 pub mod config;

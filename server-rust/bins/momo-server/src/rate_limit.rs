@@ -556,7 +556,9 @@ pub(crate) async fn per_ip_refused(
 
 /// [`per_ip_refused`] for a surface whose one refusal is a different status. `refused` is the
 /// status that spends the address's budget; every other answer — a served response above all —
-/// spends nothing. #4820 C2a: the self-media route answers every refusal with one 404.
+/// spends nothing. #4820 C2a: the self-media route answers every refusal with one 404. (Since #5072 one thing it
+/// answers is not charged: an archive that failed behind a token that was already spent is a 502 — it is not a
+/// guess, and a storage outage must not lock a workspace's pictures out.)
 ///
 /// `scope` splits one surface's budget further than the address: `Some(scope)` is a second part of
 /// the key (`{key_prefix}:{scope}:{ip}`), so two scopes on one address never share a budget. The
@@ -634,7 +636,8 @@ fn refused_key(key_prefix: &str, scope: Option<&str>, ip: &str) -> String {
 /// `GET /v1/self-media/{ws}/{token}` answers one 404 for everything it refuses (unknown, other
 /// workspace, expired, spent, run over, not the requester's file). Only that 404 spends the
 /// budget, and a key whose budget is spent is turned away (429 + `Retry-After`) before the handler
-/// and its database transaction run. A served picture spends nothing.
+/// and its database transaction run. A served picture spends nothing, and neither does the 502 a caller who
+/// has already spent a good token is told when the archive behind it failed (#5072, ADR-0151 증보 6).
 ///
 /// **Its own limit, split by the workspace in the path** (security review L7). The co-hosted
 /// Hermes reaches the api from one address for every workspace, and its picture tool lets any

@@ -23,10 +23,13 @@
 //! on the private network, never anything a request or a model supplies; the path is fixed, the
 //! workspace is the run's, the token is the one just minted.
 //!
-//! * **One refusal in, one reason out.** A refused mint, a 404 and every wrong shape of answer end as a
+//! * **One refusal in, one reason out.** A refused mint, a 404, a 502 and every wrong shape of answer end as a
 //!   fixed reason code (`attachment_not_available`, `attachment_not_readable` — the helper's read only —
 //!   `drive_unavailable`); no transport message is ever
-//!   returned. Those messages carry the request URL, and this URL carries a credential.
+//!   returned. Those messages carry the request URL, and this URL carries a credential. The route's two
+//!   answers after a spent token are told apart (ADR-0151 증보 6, #5072): its 404 is the one refusal (the
+//!   file is not the type it claims, or the address was not good), its 502 is the archive failing — a
+//!   hiccup, `drive_unavailable`, the same word the worker's direct read of the archive gives.
 //! * **Nothing about the address in a log line.** The two lines this module writes name the run and a cause:
 //!   a database error, or an `Unread` — the private failure type, which holds **a fixed word and nothing the
 //!   transport said** (`timeout`, `connect`, `body` or `request` for a request that failed; a status number;
@@ -227,7 +230,8 @@ pub(crate) fn attachment_client() -> Option<reqwest::Client> {
 enum Unread {
     /// The request did not complete: only the kind of failure ([`transport`]).
     Transport(&'static str),
-    /// The api answered, but not with the picture. Its one refusal is a 404.
+    /// The api answered, but not with the picture. Its refusal is a 404 (the address was not good, or the
+    /// file is not the type it claims); its 502 is the archive behind it failing (ADR-0151 증보 6).
     Status(u16),
     /// A 200 whose body is not exactly the declared picture.
     Shape(&'static str),
@@ -250,7 +254,12 @@ impl Unread {
 /// them) or sends bytes that are not what the type says, **the file is not what its type says**. That is a
 /// permanent property of the file, not a vanished one (a vanished file is the mint's own refusal,
 /// `attachment_not_available`) and not the server failing — and the caller says so (#4970 review L1). A wrong
-/// header, a wrong length, any other status and the network failing stay `drive_unavailable`.
+/// header, a wrong length, any other status — the route's 502, the archive failing behind it, among them (#5072) —
+/// and the network failing stay `drive_unavailable`.
+///
+/// What the 404 still cannot tell apart is the address itself failing between the mint and the spend (the run
+/// ended, the message was deleted, the minute ran out): the route cannot say which of its refusals this is without
+/// telling a stranger, and the window is the length of one request (ADR-0151 증보 6 남는 위험).
 fn failure_reason(usage: RequesterAttachmentUse, unread: &Unread) -> &'static str {
     match (usage, unread) {
         (RequesterAttachmentUse::Read, Unread::Status(404))
@@ -686,7 +695,13 @@ mod tests {
             failure_reason(Avatar, &Unread::Shape("not_the_declared_image")),
             "drive_unavailable"
         );
+        assert_eq!(
+            failure_reason(Avatar, &Unread::Status(502)),
+            "drive_unavailable"
+        );
         for unread in [
+            // the route's own answer for an archive that failed behind a spent address (ADR-0151 증보 6): a hiccup
+            Unread::Status(502),
             Unread::Status(500),
             Unread::Status(429),
             Unread::Shape("content_type"),
@@ -766,6 +781,7 @@ mod tests {
     async fn only_a_404_is_the_apis_refusal_and_any_other_status_is_unavailable() {
         for (status, reason) in [
             ("404 Not Found", "attachment_not_available"),
+            ("502 Bad Gateway", "drive_unavailable"),
             ("429 Too Many Requests", "drive_unavailable"),
             ("500 Internal Server Error", "drive_unavailable"),
             ("403 Forbidden", "drive_unavailable"),
