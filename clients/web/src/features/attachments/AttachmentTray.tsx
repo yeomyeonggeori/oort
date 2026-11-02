@@ -93,7 +93,7 @@ import {
 // =====================================================================
 
 /** 줄 상자를 만드는 공백 한 칸. 빈 <p> 는 높이가 0 이라 예약이 되지 않는다. */
-const NBSP = " ";
+const NBSP = "\u00a0";
 
 const KIND_ICON: Record<CardKind, LucideIcon> = {
   image: ImageIcon,
