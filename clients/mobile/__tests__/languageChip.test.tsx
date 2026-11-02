@@ -1,12 +1,16 @@
 import {localeAutonyms, type LocalePreferencePort} from '@momo/core/i18n';
 import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
-import {Linking} from 'react-native';
+import {Linking, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {ThemeProvider} from '../src/design/theme';
+import {HOME_ICON_SIZE, HOME_ICONS} from '../src/design/icons';
+import {ListRow} from '../src/design/sheetParts';
+import {FixedScheme, ThemeProvider} from '../src/design/theme';
+import {darkPalette, lightPalette} from '../src/design/tokens';
+import {OnboardingGhostButton} from '../src/features/onboarding/OnboardingControls';
 import {createMobileLocaleController, type MobileLocaleController} from '../src/i18n/controller';
 import {LanguageSettingsPage} from '../src/i18n/LanguageSettings';
 import {MobileLocaleProvider} from '../src/i18n/LocaleProvider';
@@ -142,5 +146,81 @@ describe('언어 칩: 폰 (#4670)', () => {
     render(<ConnectScreen />);
     expect(await screen.findByTestId('connect-welcome')).toBeTruthy();
     expect(screen.queryByTestId('language-chip')).toBeNull();
+  });
+});
+
+// =============================================================================
+// 검증 줄 2회차 화면 검수(#5101): L1 칩의 「고른다」 표지, L2 언어 목록 카드의 줄 사이 구분선.
+// 값으로 잰다 — 글리프의 출처(ListRow 펼침과 같은 PNG)·크기·색 역할, 구분선 개수와 자리.
+// =============================================================================
+describe('언어 칩 다듬기 (#5101)', () => {
+  const expandOf = (id: string) => screen.getByTestId(`${id}-expand`, {includeHiddenElements: true});
+  const flat = (node: {props: {style?: unknown}}) => StyleSheet.flatten(node.props.style as never) as Record<string, unknown>;
+
+  it('L1: 첫 화면 칩 뒤에 ⌄ 가 붙는다 — 이미 있는 펼침 글리프(ListRow와 같은 PNG·크기)이고 글자와 같은 색 역할이며, 낭독에서 빠지고, 「뒤로」에는 없다', async () => {
+    // 1) 제품의 칩: 환영 화면(M0)과 로그인 폼(M-b) 둘 다 ⌄ 를 내고, 낭독 이름은 그대로다.
+    const current = await controller();
+    render(firstScreen(current));
+    await screen.findByTestId('connect-welcome');
+    const glyph = within(chip()).getByTestId('language-chip-expand', {includeHiddenElements: true});
+    expect(glyph.props.source).toBe(HOME_ICONS.down);
+    expect(glyph.props.accessibilityElementsHidden).toBe(true);
+    expect(flat(chip()).flexDirection).toBe('row');
+    expect(chip().props.accessibilityLabel).toBe('현재 언어: 한국어');
+    fireEvent.press(screen.getByTestId('welcome-address'));
+    expect(within(chip()).getByTestId('language-chip-expand', {includeHiddenElements: true})).toBeTruthy();
+    screen.unmount();
+
+    // 2) 부품: 같은 PNG·같은 크기(ListRow 펼침 행과 나란히), 고르는 단추가 아닌 「뒤로」에는 글리프도 줄 배치도 없다.
+    render(
+      <ThemeProvider>
+        <ListRow title="행" accessory="expand" onPress={() => {}} testID="row" />
+        <OnboardingGhostButton label="한국어" accessory="expand" onPress={() => {}} testID="probe" />
+        <OnboardingGhostButton label="뒤로" onPress={() => {}} testID="back" />
+      </ThemeProvider>,
+    );
+    const row = expandOf('row');
+    const probe = expandOf('probe');
+    expect(probe.props.source).toBe(row.props.source);
+    expect({width: flat(probe).width, height: flat(probe).height}).toEqual({width: flat(row).width, height: flat(row).height});
+    expect(flat(probe).width).toBe(HOME_ICON_SIZE.down);
+    expect(screen.queryByTestId('back-expand', {includeHiddenElements: true})).toBeNull();
+    expect(flat(screen.getByTestId('back')).flexDirection).toBeUndefined();
+    screen.unmount();
+
+    // 3) 색 역할: ⌄ 는 곁의 글자와 같은 textMuted 이고, 밝음·어두움 모두 그렇다.
+    for (const [scheme, palette] of [['light', lightPalette], ['dark', darkPalette]] as const) {
+      render(
+        <FixedScheme scheme={scheme}>
+          <OnboardingGhostButton label="한국어" accessory="expand" onPress={() => {}} testID="probe" />
+        </FixedScheme>,
+      );
+      const label = within(screen.getByTestId('probe')).getByText('한국어');
+      expect([scheme, flat(label).color]).toEqual([scheme, palette.textMuted]);
+      expect([scheme, flat(expandOf('probe')).tintColor]).toEqual([scheme, palette.textMuted]);
+      screen.unmount();
+    }
+  });
+
+  it('L2: 언어 목록 카드는 줄 사이에 구분선이 선다 — 시트와 설정 페이지 모두, 라디오 묶음은 그대로 셋을 품는다', async () => {
+    const current = await controller();
+    render(firstScreen(current));
+    await screen.findByTestId('connect-welcome');
+
+    fireEvent.press(chip());
+    const sheet = await screen.findByTestId('language-sheet');
+    // 선택지가 셋(기기 언어 · 한국어 · English)이니 줄 사이 선은 둘이고, 선은 묶음 안(줄 사이)에 선다.
+    const group = within(sheet).getByTestId('language-radiogroup');
+    expect(group.props).toMatchObject({accessibilityRole: 'radiogroup', accessibilityLabel: '언어'});
+    expect(within(group).getAllByRole('radio')).toHaveLength(3);
+    expect(within(group).getAllByTestId('group-divider')).toHaveLength(2);
+    expect(within(sheet).getAllByTestId('group-divider')).toHaveLength(2);
+
+    screen.unmount();
+    render(settingsPage(current));
+    await screen.findByTestId('language-en-US');
+    const page = within(screen.getByTestId('settings-language-page'));
+    expect(within(page.getByTestId('language-radiogroup')).getAllByRole('radio')).toHaveLength(3);
+    expect(page.getAllByTestId('group-divider')).toHaveLength(2);
   });
 });

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "881603f0434aa6bf7153b20bd0f19355bce2ac57",
+  "baselineHead": "ff9be05ae0bf5876a3bb06f18323e0d4865aee45",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -190,7 +190,7 @@
     "clients/mobile/src/features/memory/queries.ts": 15,
     "clients/mobile/src/features/onboarding/KomettoGuide.tsx": 15,
     "clients/mobile/src/features/onboarding/NotificationPrimer.tsx": 32,
-    "clients/mobile/src/features/onboarding/OnboardingControls.tsx": 22,
+    "clients/mobile/src/features/onboarding/OnboardingControls.tsx": 26,
     "clients/mobile/src/features/onboarding/phoneFlow.ts": 44,
     "clients/mobile/src/features/plugins/queries.ts": 1,
     "clients/mobile/src/features/presence/FaceWithStatusDot.tsx": 1,

@@ -5171,11 +5171,17 @@
   background-color: transparent;
 }
 
+/* 칸은 자식 순서에 맡기지 않고 못 박는다(#5101, 검증 줄 M1). 첫 화면(D0)에는 진행 점이 없어 줄의 자식이 둘뿐이고,
+ * 칸을 정하지 않으면 끝 칸의 자식(언어 칩)이 가운데 `auto` 칸에 들어가 D1에서 오른쪽 끝으로 옮겨 간다
+ * (`justify-self: end`는 칩 폭만 한 그 칸 안에서 아무 일도 못 한다). 점이 있든 없든 첫 자식은 첫 칸, 마지막
+ * 자식은 셋째 칸이고, 점은 그 사이(가운데)에 선다. */
 .onboarding-frame > .onboarding-step-chrome > :first-child {
+  grid-column: 1;
   justify-self: start;
 }
 
 .onboarding-frame > .onboarding-step-chrome > :last-child {
+  grid-column: 3;
   justify-self: end;
 }
 
