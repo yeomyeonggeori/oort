@@ -14,6 +14,7 @@ import { ApiError, type MembershipRole } from "../../lib/api";
 import {
   DEFAULT_ROLE_LABELS,
   ROLE_KEYS,
+  roleKeyLabel,
   type RoleKey,
   type RoleLabels,
 } from "../directory/model";
@@ -232,11 +233,24 @@ export function autoTargetLabel(
   return host.revokedAtMs ? `${host.displayName} (해지됨)` : host.displayName;
 }
 
-/** `InviteRoutes.normalizedRole`. Labels are defaults; use `inviteRoles`. */
+/**
+ * `error.code` of the refusal the server gives, on every invite door, while guest
+ * invites are paused until invites can name the channels a guest may see
+ * (ADR-0128 D1, ADR-0219 GS-0). A 400 on create, regenerate, redeem and join.
+ */
+export const GUEST_INVITES_PAUSED_CODE = "guest_invites_paused";
+
+/**
+ * `InviteRoutes.normalizedRole`. Labels are defaults; use `inviteRoles`.
+ *
+ * Guest is not offered: the server refuses it while guest invites are paused
+ * (`GUEST_INVITES_PAUSED_CODE`), and a role the server turns away must not be a
+ * choice on the screen. Invites made before the pause still list as guest rows
+ * (`inviteRoleName`, `inviteStatus`).
+ */
 export const INVITE_ROLES: Choice[] = [
   { id: "member", label: DEFAULT_ROLE_LABELS.member, detail: "채널을 읽고 써요." },
   { id: "admin", label: DEFAULT_ROLE_LABELS.admin, detail: "초대와 워크스페이스 설정을 다뤄요." },
-  { id: "guest", label: DEFAULT_ROLE_LABELS.guest, detail: "초대받은 채널만 봐요." },
 ];
 
 /**
@@ -253,6 +267,18 @@ export function inviteRoles(labels?: RoleLabels | null): Choice[] {
     if (trimmed === "") return choice;
     return { ...choice, label: trimmed };
   });
+}
+
+/**
+ * A role's name in the invite list. The list reads all four roles, not only the
+ * ones `inviteRoles` offers: an invite made before the pause is still a guest row
+ * and should read as 게스트 (or the workspace's own word for it), not as the raw
+ * wire value. A value no role table knows is shown as it is.
+ */
+export function inviteRoleName(role: string, labels?: RoleLabels | null): string {
+  return (ROLE_KEYS as readonly string[]).includes(role)
+    ? roleKeyLabel(role as RoleKey, labels)
+    : role;
 }
 
 export const INVITE_EXPIRY_DAYS = [1, 7, 30] as const;
@@ -647,8 +673,15 @@ export function workHostRegistryMessage(): string {
   return "등록된 호스트 목록을 불러오지 못했어요. 잠시 뒤에 다시 불러오세요.";
 }
 
-/** Invite status for the list, derived from the server row (never guessed). */
+/**
+ * Invite status for the list, derived from the server row (never guessed).
+ *
+ * A guest invite that is otherwise live reads 멈춤: the server refuses to spend it
+ * while guest invites are paused (ADR-0128 D1, ADR-0219 GS-0). The dead states
+ * come first, because a revoked, spent or expired code is over whatever its role.
+ */
 export function inviteStatus(invite: {
+  role?: string;
   revokedAtMs?: number;
   expiresAtMs: number;
   usedCount: number;
@@ -657,5 +690,6 @@ export function inviteStatus(invite: {
   if (invite.revokedAtMs) return { tone: "muted", label: "해지됨" };
   if (invite.usedCount >= invite.maxUses) return { tone: "muted", label: "모두 사용됨" };
   if (invite.expiresAtMs <= Date.now()) return { tone: "warn", label: "만료됨" };
+  if (invite.role === "guest") return { tone: "muted", label: "멈춤" };
   return { tone: "ok", label: "사용 가능" };
 }

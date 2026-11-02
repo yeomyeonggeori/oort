@@ -1290,6 +1290,12 @@ export const catalog: MessageCatalog = {
       "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
     }
   ],
+  "settings.invite.guestInvitesPaused": [
+    {
+      "type": 0,
+      "value": "Guest invites are paused until channel-specific invites are available."
+    }
+  ],
   "settings.notifications.threadReplyDescription": [
     {
       "type": 0,

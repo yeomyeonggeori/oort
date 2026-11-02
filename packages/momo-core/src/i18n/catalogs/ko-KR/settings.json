@@ -13,6 +13,7 @@
   "settings.appearance.linkPreviewCompactHint": "왼쪽에 작은 그림을 두고, 오른쪽에 주소와 제목 한 줄, 설명 한 줄을 보여줘요.",
   "settings.appearance.linkPreviewRichHint": "글을 위에, 큰 그림을 아래에 둬요. 제목과 설명은 두 줄까지 보여줘요. 큰 그림이 없는 링크는 작게와 같아요.",
   "settings.appearance.linkPreviewOffHint": "메시지 속 링크만 남기고 카드는 그리지 않아요.",
+  "settings.invite.guestInvitesPaused": "게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있어요.",
   "settings.aiLimits.title": "사용 한도",
   "settings.aiLimits.description": "도우미가 쓰는 양에 거는 한도예요. 기본은 제한 없음이고, 팀 키로 쓰는 만큼 팀이 정해요. 원하면 하루나 한 달 한도를 켤 수 있어요.",
   "settings.aiLimits.tokensLabel": "하루 토큰 한도",

@@ -1,5 +1,6 @@
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import { GUEST_INVITES_PAUSED_CODE } from "../settings/model";
 import { passwordRuleCopy } from "./passwordRuleCopy";
 
 // =============================================================================
@@ -16,11 +17,28 @@ export type ConnectField = "server" | "email" | "password" | "code";
 const INVITE_CODE_STATUSES = new Set([403, 404, 409, 410]);
 
 /**
+ * The server turns a guest code away with a 400 that names itself (guest invites
+ * are paused, ADR-0128 D1 / ADR-0219 GS-0). It is a verdict on the code, not on
+ * the form, so it is told apart by its `error.code` and not by the bare 400,
+ * which also carries field-shape refusals.
+ */
+function isGuestInvitePaused(cause: unknown): boolean {
+  return (
+    cause instanceof ApiError &&
+    cause.status === 400 &&
+    cause.code === GUEST_INVITES_PAUSED_CODE
+  );
+}
+
+/**
  * Join failures that belong on S1 with the code field, not on S2 (which has
  * no code field). Password / transport / 5xx stay on the account step.
  */
 export function joinFailureBelongsOnGateway(cause: unknown): boolean {
-  return cause instanceof ApiError && INVITE_CODE_STATUSES.has(cause.status);
+  return (
+    (cause instanceof ApiError && INVITE_CODE_STATUSES.has(cause.status)) ||
+    isGuestInvitePaused(cause)
+  );
 }
 
 /**
@@ -111,6 +129,14 @@ function joinFailureCopyBody(cause: unknown): ConnectFailure {
   if (failure.status === 400) {
     const rule = passwordRuleCopy(failure.code);
     if (rule) return { message: rule, suggestSignIn: false, retryable: false };
+    // A guest code: there is no new link to ask for, so the sentence does not say so.
+    if (isGuestInvitePaused(failure)) {
+      return {
+        message: `게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있습니다. ${ASK_ADMIN_SIGN_IN}`,
+        suggestSignIn: false,
+        retryable: false,
+      };
+    }
   }
   const detail = failure.message.toLowerCase();
   switch (failure.status) {
