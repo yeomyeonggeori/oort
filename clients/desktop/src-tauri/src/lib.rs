@@ -5,6 +5,7 @@
 //   deep link     momo://join arrives from the OS -> `momo:deep-link` event
 //   discovery     _momo._tcp browse               -> `momo:discovery` event
 //   notification  mentions/approvals              -> commands (+ a banner click -> `momo:notification-click`, macOS, #5059)
+//   menu bar      icon + menu, built here          -> one command `tray_status_set` (+ a pick -> `momo:tray-action`, macOS, #5193)
 //   keychain      refresh token at rest           -> commands
 //   session       the refresh rotation + its proof -> commands (#3106; the
 //                 webview gets the access token and a handle, never the token)
@@ -112,6 +113,11 @@ mod shell_contract;
 mod terminal_app;
 #[cfg(desktop)]
 mod updater;
+// The menu-bar icon and its menu (#5193): drawn here from one narrow command, `tray_status_set`.
+// macOS only; the other desktops validate the status and draw nothing. Granted to the `main`
+// window by `capabilities/default.json`, which also denies tauri's own JS tray API.
+#[cfg(desktop)]
+mod tray;
 // 「유리 배경」의 셸 쪽(AP-3 #4190, ADR-0189 증보 3 D6): 창 뒤 블러(`window_vibrancy_set`)와 앱
 // 네이티브 appearance(`app_theme_set`). macOS가 아니면 둘 다 `Ok(())`다. 데스크탑 표에만 있다.
 #[cfg(desktop)]
@@ -175,6 +181,7 @@ pub fn run() {
         // a `dialog:*` permission to the webview.
         .plugin(tauri_plugin_dialog::init())
         .manage(updater::UpdaterState::default())
+        .manage(tray::TrayState::default())
         .manage(pty::PtyState::default())
         .manage(work_host::WorkHostState::default())
         .manage(device_key::DeviceKeyState::default())
@@ -200,6 +207,7 @@ pub fn run() {
             notification::notification_click_supported,
             notification::notification_show_clickable,
             notification::dock_badge_set,
+            tray::tray_status_set,
             window_vibrancy::window_vibrancy_set,
             window_vibrancy::app_theme_set,
             keychain::keychain_available,

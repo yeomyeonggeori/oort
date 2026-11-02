@@ -22,6 +22,13 @@ export const messageKeys = [
   "desktop.menu.view",
   "desktop.menu.window",
   "desktop.notify.threadSummary",
+  "desktop.tray.more",
+  "desktop.tray.newMessage",
+  "desktop.tray.none",
+  "desktop.tray.open",
+  "desktop.tray.running",
+  "desktop.tray.stateBlocked",
+  "desktop.tray.stateWorking",
   "expressions.kind.autoNote",
   "expressions.kind.emoji",
   "expressions.kind.hintEmoji",
@@ -406,6 +413,15 @@ export const argumentSpecs = {
   "desktop.notify.threadSummary": {
     "count": "number"
   },
+  "desktop.tray.more": {
+    "count": "number"
+  },
+  "desktop.tray.newMessage": {},
+  "desktop.tray.none": {},
+  "desktop.tray.open": {},
+  "desktop.tray.running": {},
+  "desktop.tray.stateBlocked": {},
+  "desktop.tray.stateWorking": {},
   "expressions.kind.autoNote": {},
   "expressions.kind.emoji": {},
   "expressions.kind.hintEmoji": {},
@@ -908,6 +924,13 @@ export interface MessageArgs {
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
   "desktop.notify.threadSummary": { count: number };
+  "desktop.tray.more": { count: number };
+  "desktop.tray.newMessage": Record<string, never>;
+  "desktop.tray.none": Record<string, never>;
+  "desktop.tray.open": Record<string, never>;
+  "desktop.tray.running": Record<string, never>;
+  "desktop.tray.stateBlocked": Record<string, never>;
+  "desktop.tray.stateWorking": Record<string, never>;
   "expressions.kind.autoNote": Record<string, never>;
   "expressions.kind.emoji": Record<string, never>;
   "expressions.kind.hintEmoji": Record<string, never>;

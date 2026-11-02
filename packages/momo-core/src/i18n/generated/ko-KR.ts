@@ -152,6 +152,57 @@ export const catalog: MessageCatalog = {
       "value": "건"
     }
   ],
+  "desktop.tray.more": [
+    {
+      "type": 0,
+      "value": "외 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개"
+    }
+  ],
+  "desktop.tray.newMessage": [
+    {
+      "type": 0,
+      "value": "새 메시지"
+    }
+  ],
+  "desktop.tray.none": [
+    {
+      "type": 0,
+      "value": "실행 중 없음"
+    }
+  ],
+  "desktop.tray.open": [
+    {
+      "type": 0,
+      "value": "oort 열기"
+    }
+  ],
+  "desktop.tray.running": [
+    {
+      "type": 0,
+      "value": "실행 중"
+    }
+  ],
+  "desktop.tray.stateBlocked": [
+    {
+      "type": 0,
+      "value": "대기"
+    }
+  ],
+  "desktop.tray.stateWorking": [
+    {
+      "type": 0,
+      "value": "작업 중"
+    }
+  ],
   "expressions.kind.autoNote": [
     {
       "type": 0,

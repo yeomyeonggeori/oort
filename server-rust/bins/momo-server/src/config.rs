@@ -472,6 +472,15 @@ pub struct RateLimitConfig {
     /// request. The gate runs before the Drive call. 60 is three full 20-file
     /// messages' worth of starts in one window.
     pub upload_start_per_member_limit: u32,
+    /// `RATE_LIMIT_MEDIA_WRITE_PER_MEMBER` (default 60 per window). 0 disables.
+    /// Setting a video's length, size and poster (`PUT …/channels/{ch}/attachments/{id}/media`,
+    /// ADR-0151 증보 5 D5, #4673), which writes up to 256 KiB into Postgres per request (a replace
+    /// writes it again) and reads the object's first bytes from the archive. The gate runs before
+    /// the body is read and a refused request counts. The same size of budget as an upload start,
+    /// because it is the second half of the same act: a phone sends one write per video it uploads,
+    /// so 60 is three full 20-file messages' worth of videos in one window, while a loop that
+    /// replaces the same poster at request speed is held to about one a second.
+    pub media_write_per_member_limit: u32,
     /// `RATE_LIMIT_UNFURL_PROXY_PER_MEMBER` (default 240 per window). 0 disables.
     /// Link-card pictures and icons fetched through the proxy (`GET …/unfurls/{id}/image` and
     /// `…/icon`), counted **only when the request makes this server fetch from the card's remote
@@ -525,6 +534,7 @@ impl Default for RateLimitConfig {
             message_send_per_agent_limit: 600,
             scheduled_write_per_member_limit: 60,
             upload_start_per_member_limit: 60,
+            media_write_per_member_limit: 60,
             unfurl_proxy_per_member_limit: 240,
             photo_draft_per_member_limit: 10,
             unfurl_preview_per_member_limit: 60,
@@ -582,6 +592,9 @@ impl RateLimitConfig {
             upload_start_per_member_limit: lookup("RATE_LIMIT_UPLOAD_START_PER_MEMBER")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.upload_start_per_member_limit),
+            media_write_per_member_limit: lookup("RATE_LIMIT_MEDIA_WRITE_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.media_write_per_member_limit),
             unfurl_proxy_per_member_limit: lookup("RATE_LIMIT_UNFURL_PROXY_PER_MEMBER")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.unfurl_proxy_per_member_limit),
@@ -4044,9 +4057,10 @@ mod tests {
                 defaults.unfurl_proxy_per_member_limit,
                 defaults.photo_draft_per_member_limit,
                 defaults.unfurl_preview_per_member_limit,
+                defaults.media_write_per_member_limit,
             ),
-            (120, 600, 60, 60, 240, 10, 60),
-            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 and 2026-11-01 D20 for the unfurl ones, ADR-0218 §8 H11 for the photo one), docs/api/openapi.yaml and infra/.env.example with it"
+            (120, 600, 60, 60, 240, 10, 60, 60),
+            "a default changed: update ADR-0208 증보 1 (ADR-0170 증보 D13 and 2026-11-01 D20 for the unfurl ones, ADR-0218 §8 H11 for the photo one, ADR-0151 증보 5 D5 for the media write), docs/api/openapi.yaml and infra/.env.example with it"
         );
         for (name, limit) in [
             (
@@ -4059,6 +4073,7 @@ mod tests {
             ("unfurl proxy", defaults.unfurl_proxy_per_member_limit),
             ("photo draft", defaults.photo_draft_per_member_limit),
             ("unfurl preview", defaults.unfurl_preview_per_member_limit),
+            ("media write", defaults.media_write_per_member_limit),
         ] {
             assert!(
                 limit > 0,
@@ -4074,6 +4089,11 @@ mod tests {
             defaults.upload_start_per_member_limit as usize
                 >= 2 * momo_messaging::MAX_ATTACHMENTS_PER_MESSAGE,
             "two full messages' worth of attachment uploads must fit in one window"
+        );
+        assert!(
+            defaults.media_write_per_member_limit as usize
+                >= 2 * momo_messaging::MAX_ATTACHMENTS_PER_MESSAGE,
+            "a video per attachment of two full messages must fit in one window: one media write follows each upload"
         );
         assert!(
             i64::from(defaults.photo_draft_per_member_limit) >= 2 * momo_expressions::LIVE_DRAFTS,
@@ -4149,6 +4169,14 @@ mod tests {
             },
             "the preview name moves the preview field and nothing else"
         );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MEDIA_WRITE_PER_MEMBER", "14")),
+            RateLimitConfig {
+                media_write_per_member_limit: 14,
+                ..defaults
+            },
+            "the media write name moves the media write field and not the upload start's"
+        );
         // 0 is the operator's off switch; a value that is not a number is not one.
         assert_eq!(
             RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MESSAGE_SEND_PER_AGENT", "0"))
@@ -4158,6 +4186,11 @@ mod tests {
         assert_eq!(
             RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PHOTO_DRAFT_PER_MEMBER", "0"))
                 .photo_draft_per_member_limit,
+            0
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MEDIA_WRITE_PER_MEMBER", "0"))
+                .media_write_per_member_limit,
             0
         );
         assert_eq!(
