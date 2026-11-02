@@ -597,6 +597,120 @@ async fn a_body_that_goes_silent_is_cut_at_the_idle_limit_with_an_error() {
     );
 }
 
+/// **Red proof (review M-2).** Every download without a `Range` header asks Drive
+/// for `bytes=0-<size-1>` — a request for the whole object — and RFC 9110 lets a
+/// server answer that with a plain `200` and the whole body. If Drive does, the
+/// archive takes that body as the range (it is exactly the bytes asked for), or
+/// every Google download would be a 502.
+///
+/// The `200` is taken **only** when it can be proven to be exactly what was asked:
+/// the request began at 0 and the `Content-Length` — the length of the whole
+/// object the 200 carries — equals the length asked for. A 200 to a partial range
+/// (Drive ignored it: its whole body is longer than what was asked), a 200 of a
+/// shorter object than the caller believes, and a 200 with no `Content-Length` to
+/// check all stay 502.
+///
+/// Remove the fallback and the first half goes red; accept any 200 that begins at 0
+/// and the second half goes red.
+#[tokio::test]
+async fn a_whole_object_request_may_be_answered_with_a_200_and_nothing_else_is_taken_for_one() {
+    let bytes = object();
+    let last = OBJECT_LEN as u64 - 1;
+    let whole = range(0, last);
+
+    // Drive answers the whole-object request with 200 + Content-Length == N.
+    let stand_in = serve(
+        bytes.clone(),
+        Behavior {
+            full_range_as_200: true,
+            ..Behavior::default()
+        },
+    )
+    .await;
+    let google = GoogleDriveArchive::against_stand_in(&stand_in.api_base, Duration::from_secs(10));
+    let content = google
+        .file_range("stand-in-file", whole, MAX_ATTACHMENT_BYTES)
+        .await
+        .expect("a 200 that is exactly the whole range is taken");
+    assert_eq!(content.total_size_bytes, OBJECT_LEN as i64);
+    assert_eq!(collect(content).await, bytes, "every byte, once");
+    assert_eq!(
+        stand_in.requests().last().expect("the call").ranges,
+        vec![format!("bytes=0-{last}")],
+        "the archive still asked for exactly the range; only the answer is tolerated"
+    );
+    // The same stand-in answers a partial range with a real 206: the fallback is
+    // for the whole-object answer only.
+    let content = google
+        .file_range("stand-in-file", range(0, 9), MAX_ATTACHMENT_BYTES)
+        .await
+        .expect("a partial range gets a 206");
+    assert_eq!(collect(content).await, &bytes[..10]);
+
+    // Every other 200 stays a 502.
+    let short: Vec<u8> = bytes[..OBJECT_LEN - 5].to_vec();
+    for (what, object, behavior, asked) in [
+        (
+            "Drive ignored a partial range that begins at 0: its whole body is longer than asked",
+            bytes.clone(),
+            Behavior {
+                ignore_range: true,
+                ..Behavior::default()
+            },
+            range(0, 9),
+        ),
+        (
+            "a whole-object 200 of an object shorter than the caller believes",
+            short,
+            Behavior {
+                full_range_as_200: true,
+                ..Behavior::default()
+            },
+            whole,
+        ),
+        (
+            "a 200 with no Content-Length to check the body against",
+            bytes.clone(),
+            Behavior {
+                full_range_as_200: true,
+                omit_content_length: true,
+                ..Behavior::default()
+            },
+            whole,
+        ),
+        (
+            "Drive ignored a range that does not begin at 0",
+            bytes.clone(),
+            Behavior {
+                ignore_range: true,
+                ..Behavior::default()
+            },
+            range(10, 19),
+        ),
+        (
+            "a 200 to a range that does not begin at 0 whose whole body happens to be as long as the range (wrong bytes if taken)",
+            bytes[..10].to_vec(),
+            Behavior {
+                ignore_range: true,
+                ..Behavior::default()
+            },
+            range(10, 19),
+        ),
+    ] {
+        let stand_in = serve(object, behavior).await;
+        let google =
+            GoogleDriveArchive::against_stand_in(&stand_in.api_base, Duration::from_secs(10));
+        assert_eq!(
+            google
+                .file_range("stand-in-file", asked, MAX_ATTACHMENT_BYTES)
+                .await
+                .expect_err(what),
+            DriveError::UpstreamFailure,
+            "{what}"
+        );
+    }
+}
+
 /// **Red proof (D3 백엔드, Google 시계).** The same idle limit also covers the wait
 /// **before the response starts**: an upstream that accepts the connection and
 /// never sends a header ends the call in an error after the idle limit. With no

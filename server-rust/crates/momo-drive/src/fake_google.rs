@@ -47,6 +47,13 @@ pub(crate) struct Behavior {
     pub unknown_total: bool,
     /// Accept the request and stay silent this long before sending any header.
     pub delay_headers: Option<Duration>,
+    /// Answer a request for the whole object (`bytes=0-<last byte or more>`) with
+    /// a plain `200` and the whole body, as RFC 9110 lets a server do. Every other
+    /// range still gets an honest `206`.
+    pub full_range_as_200: bool,
+    /// Leave `Content-Length` off a `200` (the body then ends when the connection
+    /// closes), so a client has nothing to check the body's length against.
+    pub omit_content_length: bool,
 }
 
 pub(crate) struct FakeGoogle {
@@ -153,11 +160,22 @@ async fn handle(
     let asked = (!behavior.ignore_range && ranges.len() == 1)
         .then(|| single_range(&ranges[0]))
         .flatten();
+    // A request for the whole object is answered like a request with no range.
+    let asked = asked.filter(|&(first, last)| {
+        !(behavior.full_range_as_200 && first == 0 && last >= len.saturating_sub(1))
+    });
     let (head, body): (String, &[u8]) = match asked {
-        None => (
-            format!("HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nConnection: close\r\n\r\n"),
-            &object[..],
-        ),
+        None => {
+            let length = if behavior.omit_content_length {
+                String::new()
+            } else {
+                format!("Content-Length: {len}\r\n")
+            };
+            (
+                format!("HTTP/1.1 200 OK\r\n{length}Connection: close\r\n\r\n"),
+                &object[..],
+            )
+        }
         Some((first, _)) if first >= len => (
             format!(
                 "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */{len}\r\n\
