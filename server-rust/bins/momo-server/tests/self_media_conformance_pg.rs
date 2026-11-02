@@ -10,8 +10,10 @@
 //! `momo_worker`**, the role the agent-worker mints with (`momo_app` holds no INSERT on the token
 //! table: `self-media-token-lockdown`). The Drive archive is an in-process map that (a) answers a
 //! deliberately leaky mime string so a response that passed it through would show, (b) counts content
-//! reads so a refusal that reached Drive would show, and (c) can be told to stop holding itself to the
-//! ceiling the route hands it, so the route's own length check is what a test measures.
+//! reads so a refusal that reached Drive would show, (c) can be told to stop holding itself to the
+//! ceiling the route hands it, so the route's own length check is what a test measures, and (d) can be told
+//! to fail — before a byte or in the middle of the stream — so the answer for an archive that failed behind a
+//! spent address is what a test measures (#5072, ADR-0151 증보 6: one 502, never the 404).
 
 use std::collections::{BTreeSet, HashMap};
 use std::net::SocketAddr;
@@ -127,6 +129,20 @@ struct MapArchive {
     /// fails before the route sees it); an archive that does not is what the route's own length check
     /// exists for, and a test of that check needs one.
     uncapped: AtomicBool,
+    /// How the archive fails the reads that follow (a test sets it): see [`Fault`].
+    fault: Mutex<Fault>,
+}
+
+/// How [`MapArchive`] misbehaves.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum Fault {
+    /// It serves what it holds.
+    #[default]
+    None,
+    /// `file_content` fails before a single byte (the archive is down).
+    Down,
+    /// `file_content` succeeds and the stream then breaks after its first chunk (the archive fails mid-read).
+    BreaksMidStream,
 }
 
 #[async_trait]
@@ -151,6 +167,10 @@ impl DriveArchive for MapArchive {
         max_bytes: i64,
     ) -> Result<DriveContent, DriveError> {
         self.reads.fetch_add(1, Ordering::SeqCst);
+        let fault = *self.fault.lock().unwrap();
+        if fault == Fault::Down {
+            return Err(DriveError::UpstreamFailure);
+        }
         let bytes = self
             .files
             .lock()
@@ -161,10 +181,21 @@ impl DriveArchive for MapArchive {
         if bytes.len() as i64 > max_bytes && !self.uncapped.load(Ordering::SeqCst) {
             return Err(DriveError::ContentTooLarge);
         }
+        let size_bytes = bytes.len() as i64;
+        let body = if fault == Fault::BreaksMidStream {
+            let first = bytes[..bytes.len() / 2].to_vec();
+            futures::stream::iter(vec![
+                Ok(axum::body::Bytes::from(first)),
+                Err(DriveError::UpstreamFailure),
+            ])
+            .boxed()
+        } else {
+            futures::stream::once(async move { Ok(axum::body::Bytes::from(bytes)) }).boxed()
+        };
         Ok(DriveContent {
             mime: LEAKY_DRIVE_MIME.to_string(),
-            size_bytes: bytes.len() as i64,
-            body: futures::stream::once(async move { Ok(axum::body::Bytes::from(bytes)) }).boxed(),
+            size_bytes,
+            body,
         })
     }
 }
@@ -407,6 +438,18 @@ async fn get(server: &Server, path: &str) -> Seen {
     seen(response).await
 }
 
+/// [`get`] from a given address: the refusal budget is keyed on the caller's address, and a request that
+/// arrives with none is charged to nobody, so a test of the budget must say where it comes from.
+async fn get_from(server: &Server, ip: &str, path: &str) -> Seen {
+    let response = client()
+        .get(format!("{}{}", server.base, path))
+        .header("x-forwarded-for", ip)
+        .send()
+        .await
+        .expect("request");
+    seen(response).await
+}
+
 async fn seen(response: reqwest::Response) -> Seen {
     let status = response.status().as_u16();
     let headers = response
@@ -514,9 +557,15 @@ async fn the_picture_is_served_once_with_a_fixed_header_list_and_no_drive_trace(
     );
 }
 
-/// Every reason a request is not served is the byte-identical 404 (status, headers that matter, body)
-/// and never reaches Drive: malformed, unknown, another workspace's, expired, spent, the run is over,
-/// somebody else's file, a deleted request, bytes that are not the declared image, a Drive miss.
+/// Every reason a request is not served **before its token is spent** — and a stored file that is not the
+/// type it claims — is the byte-identical 404 (status, headers that matter, body) and never reaches Drive,
+/// bar the one case where the bytes are the question: malformed, unknown, another workspace's, expired,
+/// spent, the run is over, somebody else's file, a deleted request, bytes that are not the declared image.
+///
+/// What this test used to include and no longer does is the archive failing behind a spent token (a Drive
+/// miss): that is the second shape, one 502 for a caller who has proved the token (#5072, ADR-0151 증보 6),
+/// and `after_the_token_is_spent_a_failing_archive_is_one_502_that_names_nothing_and_spends_no_budget` holds
+/// it. The 404 that stays is the property of the file; the 502 is the property of the storage.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a disposable PG18"]
 async fn every_refusal_is_one_identical_404_that_never_reads_drive() {
@@ -653,20 +702,6 @@ async fn every_refusal_is_one_identical_404_that_never_reads_drive() {
         "this one does read Drive: the bytes are what is wrong"
     );
 
-    // Drive no longer has the file
-    let tenant = seed_tenant(&server).await;
-    server
-        .archive
-        .files
-        .lock()
-        .unwrap()
-        .remove(&tenant.drive_file);
-    let token = mint(&server, &tenant, 300).await;
-    refusals.push((
-        "a Drive miss",
-        get(&server, &address(&tenant, &token)).await,
-    ));
-
     let (label0, first) = &refusals[0];
     for (label, seen) in &refusals {
         assert_eq!(seen.status, 404, "{label}");
@@ -687,14 +722,14 @@ async fn every_refusal_is_one_identical_404_that_never_reads_drive() {
             "{label}: the headers are the same"
         );
     }
-    assert!(refusals.len() >= 12);
-    // every refusal that needed no bytes left Drive alone: the only reads are the one served picture,
-    // the HTML case and the missing-file case
+    assert_eq!(refusals.len(), 12, "the twelve refusals the 404 stands for");
+    // every refusal that needed no bytes left Drive alone: the only reads are the one served picture
+    // and the HTML case
     assert_eq!(reads_after_serving, 1);
     assert_eq!(
         server.archive.reads.load(Ordering::SeqCst),
-        1 + 1 + 1,
-        "reads: the served picture, the HTML bytes, the Drive miss — and nothing else"
+        1 + 1,
+        "reads: the served picture and the HTML bytes — and nothing else"
     );
 }
 
@@ -791,9 +826,14 @@ async fn refusals_spend_the_per_address_budget_and_serving_does_not() {
 
 /// The declared length is a promise the route holds the archive to (security review L2): bytes one
 /// short of what the row declares, one over it, or far over it — all of which still start like the
-/// declared image — are refused with the one 404. They are never served short and never cut down to
-/// fit. The archive here does not hold itself to the ceiling the route passes it, so what refuses
-/// the long ones is the route's own check, not the archive's.
+/// declared image — are refused. They are never served short and never cut down to fit.
+///
+/// Since #5072 (ADR-0151 증보 6) the refusal is the **second shape** — the 502 a caller who has proved the
+/// token is told when the storage did not give the bytes the row promised — and not the 404: the row and
+/// the archive disagreeing is a property of the storage, and the helper tells the person to try again
+/// shortly for it instead of that their own file cannot be read. The archive here does not hold itself to
+/// the ceiling the route passes it, so what refuses the long ones is the route's own check, not the
+/// archive's.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a disposable PG18"]
 async fn a_stream_one_byte_short_or_long_is_refused_and_never_truncated() {
@@ -802,15 +842,15 @@ async fn a_stream_one_byte_short_or_long_is_refused_and_never_truncated() {
     let tenant = seed_tenant(&server).await; // the row declares 4096 bytes
     let declared = 4096usize;
 
-    // the control: the declared length, served whole — so a 404 below is about the length
+    // the control: the declared length, served whole — so a refusal below is about the length
     let token = mint(&server, &tenant, 300).await;
     let whole = get(&server, &address(&tenant, &token)).await;
     assert_eq!(whole.status, 200, "the declared length is served");
     assert_eq!(whole.body, png_bytes(declared));
 
-    // the one refusal everything below must equal
-    let baseline = get(&server, &address(&tenant, &"N".repeat(43))).await;
-    assert_eq!(baseline.status, 404);
+    // the 404 the length cases must NOT be: the refusal of a token that was never good
+    let not_good = get(&server, &address(&tenant, &"N".repeat(43))).await;
+    assert_eq!(not_good.status, 404);
     let fingerprint = |seen: &Seen| {
         seen.headers
             .iter()
@@ -819,6 +859,7 @@ async fn a_stream_one_byte_short_or_long_is_refused_and_never_truncated() {
             .collect::<BTreeSet<_>>()
     };
 
+    let mut storage_shape: Option<Seen> = None;
     for (label, length) in [
         ("one byte short", declared - 1),
         ("one byte long", declared + 1),
@@ -835,16 +876,29 @@ async fn a_stream_one_byte_short_or_long_is_refused_and_never_truncated() {
         let refused = get(&server, &address(&tenant, &token)).await;
         assert_eq!(
             refused.status,
-            404,
-            "{label}: a stream that is not the declared length is not served (got {} body bytes)",
+            502,
+            "{label}: a stream that is not the declared length is not served, and the caller who proved the \
+             token is told the storage failed, not that the token was bad (got {} body bytes)",
             refused.body.len()
         );
-        assert_eq!(refused.body, baseline.body, "{label}: the same body");
-        assert_eq!(
-            fingerprint(&refused),
-            fingerprint(&baseline),
-            "{label}: the same headers"
+        assert!(
+            !refused.body.starts_with(b"\x89PNG"),
+            "{label}: nothing of the picture is served, short or cut down to fit"
         );
+        assert_ne!(
+            refused.body, not_good.body,
+            "{label}: this is not the 404 of a token that was never good"
+        );
+        if let Some(first) = &storage_shape {
+            assert_eq!(refused.body, first.body, "{label}: the same body");
+            assert_eq!(
+                fingerprint(&refused),
+                fingerprint(first),
+                "{label}: the same headers"
+            );
+        } else {
+            storage_shape = Some(refused);
+        }
         assert_eq!(
             server.archive.reads.load(Ordering::SeqCst),
             reads_before + 1,
@@ -859,6 +913,185 @@ async fn a_stream_one_byte_short_or_long_is_refused_and_never_truncated() {
         .unwrap();
         assert_eq!(spent, 1, "{label}: the token was spent either way");
     }
+}
+
+/// #5072 (ADR-0151 증보 6): once the token is spent the caller has proved it, so an archive that fails
+/// behind it is told apart from a file that is not the type it claims — **one 502, one fixed body**, whatever
+/// failed: the archive down before a byte, broken in the middle of the stream, the file gone from it, the
+/// bytes one short, the bytes one over. The answer
+///
+/// * names nothing: no file id, no archive string, no cause — the same body for every way to fail, and the
+///   same header list as every other error this route sends;
+/// * is not the 404, so it is not charged to the caller's refusal budget. The budget here is **two**; five
+///   failures later the workspace's picture is still served, and the budget is still exactly two (a third
+///   refusal is turned away) — a storage outage must not lock a workspace's pictures out the way 404s would.
+///
+/// RED: answer these with `refused()` again (the status is 404 and the first budget assertion fails),
+/// give each cause its own body or status, put the archive's string or the file id in the body, or charge
+/// the 502 to the budget (the picture after the failures is turned away with 429).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a disposable PG18"]
+async fn after_the_token_is_spent_a_failing_archive_is_one_502_that_names_nothing_and_spends_no_budget(
+) {
+    let server = start_with(RateLimitConfig {
+        self_media_per_workspace_limit: 2,
+        ..RateLimitConfig::default()
+    })
+    .await;
+    server.archive.uncapped.store(true, Ordering::SeqCst);
+    let tenant = seed_tenant(&server).await; // the row declares 4096 bytes
+    let declared = 4096usize;
+    // every request below comes from this one address, so one budget is what they would all spend
+    const CALLER: &str = "198.51.100.60";
+
+    let mut answers: Vec<(&str, Seen)> = Vec::new();
+    for how in [
+        "the archive is down",
+        "the stream breaks in the middle",
+        "the file is gone from the archive",
+        "one byte short",
+        "one byte long",
+    ] {
+        match how {
+            "the archive is down" => *server.archive.fault.lock().unwrap() = Fault::Down,
+            "the stream breaks in the middle" => {
+                *server.archive.fault.lock().unwrap() = Fault::BreaksMidStream
+            }
+            "the file is gone from the archive" => {
+                server
+                    .archive
+                    .files
+                    .lock()
+                    .unwrap()
+                    .remove(&tenant.drive_file);
+            }
+            "one byte short" => {
+                server
+                    .archive
+                    .files
+                    .lock()
+                    .unwrap()
+                    .insert(tenant.drive_file.clone(), png_bytes(declared - 1));
+            }
+            _ => {
+                server
+                    .archive
+                    .files
+                    .lock()
+                    .unwrap()
+                    .insert(tenant.drive_file.clone(), png_bytes(declared + 1));
+            }
+        }
+        let token = mint(&server, &tenant, 300).await;
+        let reads_before = server.archive.reads.load(Ordering::SeqCst);
+        let answer = get_from(&server, CALLER, &address(&tenant, &token)).await;
+        assert_eq!(
+            server.archive.reads.load(Ordering::SeqCst),
+            reads_before + 1,
+            "{how}: the archive was asked"
+        );
+        let spent: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM self_media_token WHERE token_hash = $1 AND used_at IS NOT NULL",
+        )
+        .bind(token_hash(&token).to_vec())
+        .fetch_one(&server.su)
+        .await
+        .unwrap();
+        assert_eq!(spent, 1, "{how}: the token is burned, as the contract says");
+        answers.push((how, answer));
+        // put the archive back for the next way to fail
+        *server.archive.fault.lock().unwrap() = Fault::None;
+        server
+            .archive
+            .files
+            .lock()
+            .unwrap()
+            .insert(tenant.drive_file.clone(), png_bytes(declared));
+    }
+
+    let fingerprint = |seen: &Seen| {
+        seen.headers
+            .iter()
+            .filter(|(name, _)| name != "date")
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    };
+    let (label0, first) = &answers[0];
+    for (label, answer) in &answers {
+        assert_eq!(answer.status, 502, "{label}");
+        assert_eq!(
+            answer.body, first.body,
+            "{label} vs {label0}: one body, whatever failed"
+        );
+        assert_eq!(
+            fingerprint(answer),
+            fingerprint(first),
+            "{label}: one header list"
+        );
+        assert!(
+            answer.headers.iter().all(|(name, _)| name != "location"),
+            "{label}: no redirect"
+        );
+    }
+    // what the body says is one fixed envelope, and nothing of the storage is in it or in the headers
+    let body: serde_json::Value = serde_json::from_slice(&first.body).expect("the error envelope");
+    assert_eq!(
+        body["error"].as_object().map(|object| object.len()),
+        Some(1),
+        "a message and nothing else: {body}"
+    );
+    let everything = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&first.body),
+        first
+            .headers
+            .iter()
+            .map(|(name, value)| format!("{name}: {value}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
+    .to_lowercase();
+    for forbidden in [
+        tenant.drive_file.to_lowercase(),
+        LEAKY_DRIVE_MIME.to_string(),
+        "drive".to_string(),
+        "google".to_string(),
+        "upstream".to_string(),
+        "not found".to_string(),
+    ] {
+        assert!(
+            !everything.contains(&forbidden),
+            "the 502 must name nothing of the storage ({forbidden}): {everything}"
+        );
+    }
+
+    // five failures spent no budget: this workspace's picture is still served from the same address …
+    let served = get_from(
+        &server,
+        CALLER,
+        &address(&tenant, &mint(&server, &tenant, 300).await),
+    )
+    .await;
+    assert_eq!(
+        served.status, 200,
+        "five storage failures did not lock the workspace's pictures out"
+    );
+    // … and the budget is real and untouched: exactly two refusals (the 404 of a token that is not good),
+    // then the address is turned away
+    let mut statuses = Vec::new();
+    for round in 0..3u8 {
+        let fake = format!("{}{}", "N".repeat(42), char::from(b'a' + round));
+        statuses.push(
+            get_from(&server, CALLER, &address(&tenant, &fake))
+                .await
+                .status,
+        );
+    }
+    assert_eq!(
+        statuses,
+        [404, 404, 429],
+        "the per-workspace budget of two was whole after five 502s"
+    );
 }
 
 /// One workspace's refusals never block another workspace's picture (security review L7). The
