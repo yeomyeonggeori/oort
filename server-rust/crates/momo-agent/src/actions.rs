@@ -1004,9 +1004,10 @@ impl WorkspaceAction {
 
 /// The roles a **proposal** may ask for.
 ///
-/// `momo_settings::normalized_invite_role` also accepts `guest`; a proposal may
-/// not. Narrowing here rather than there is deliberate — the REST surface serves
-/// a human admin who can see the whole workspace, and this one serves a card
+/// `guest` is never one of them. Guest invites are paused for every door
+/// (`momo_settings::GUEST_INVITES_ENABLED`, ADR-0128 D1, ADR-0219 GS-0), and the
+/// day they open, a proposal still may not ask for one: the REST surface serves a
+/// human admin who can see the whole workspace, and this one serves a card
 /// somebody reads in a channel.
 pub const INVITE_PROPOSABLE_ROLES: [&str; 2] = ["member", "admin"];
 /// The proposal ceiling on `maxUses`. The REST validator allows 10,000.
@@ -3487,9 +3488,9 @@ mod tests {
             schema["properties"]["role"]["enum"],
             json!(INVITE_PROPOSABLE_ROLES)
         );
-        // `guest` is a role `momo_settings::normalized_invite_role` accepts and a
-        // proposal may not ask for; `owner` is refused by both. That the *REST*
-        // validator is genuinely wider is measured where both are in scope
+        // A proposal may not ask for `guest` or `owner`. That the domain validator
+        // refuses `guest` as well (the pause) and is genuinely wider on the other
+        // two numbers is measured where both are in scope
         // (`routes::actions::the_registry_ceilings_are_enforced_by_the_domain_as_well`)
         // — this crate cannot depend on `momo-settings`.
         assert!(!INVITE_PROPOSABLE_ROLES.contains(&"guest"));
