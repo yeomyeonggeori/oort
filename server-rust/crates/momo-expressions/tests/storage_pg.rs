@@ -7,7 +7,9 @@ use momo_db::sqlx::{
     Row,
 };
 use momo_db::{with_tenant_tx, PgPool};
-use momo_expressions::{self as e, Actor, Choice, Error, Metadata, Origin, Report};
+use momo_expressions::{
+    self as e, cutout::Outcome, Actor, Choice, Error, Metadata, Origin, Report,
+};
 use serde_json::{json, Value};
 use std::sync::Once;
 use uuid::Uuid;
@@ -692,9 +694,19 @@ async fn an_expired_draft_keeps_its_record_but_not_the_agents_words() {
         }
     };
     // Words, no words, and a draft that is still live.
-    let old = made(owner, "words_old", Origin::photo("cutout").unwrap()).await;
+    let old = made(
+        owner,
+        "words_old",
+        Origin::photo("cutout", Some(Outcome::Erased)).unwrap(),
+    )
+    .await;
     let plain = made(member, "no_words", Origin::upload()).await;
-    let live = made(owner, "words_live", Origin::photo("caricature").unwrap()).await;
+    let live = made(
+        owner,
+        "words_live",
+        Origin::photo("caricature", None).unwrap(),
+    )
+    .await;
     let (old, plain, live) = (id_of(&old), id_of(&plain), id_of(&live));
     let ws = owner.workspace;
     let before_old = origin_of(&su, ws, old).await;
@@ -811,7 +823,7 @@ async fn migration_167_blanks_the_words_of_drafts_that_expired_before_it() {
         &api,
         owner,
         meta("expired_before"),
-        Origin::photo("cutout").unwrap(),
+        Origin::photo("cutout", Some(Outcome::Erased)).unwrap(),
         Some(pixels()),
         None,
     )

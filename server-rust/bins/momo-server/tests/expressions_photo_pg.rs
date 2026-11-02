@@ -191,6 +191,18 @@ fn drawn_caricature() -> Vec<u8> {
     disc(&mut image, 60, [40, 40, 200, 255]);
     png_of(&image)
 }
+/// What a model draws when it draws a whole scene instead of a subject on one background: a gradient
+/// across the picture, so no edge is one flat colour and the cut-out step has nothing to erase (the
+/// same picture `tests/photo.rs` sends through the real decoder child and gets `Untouched` for).
+fn drawn_scene() -> Vec<u8> {
+    let mut image = image::RgbaImage::new(600, 600);
+    for (x, _, pixel) in image.enumerate_pixels_mut() {
+        let v = (x * 255 / 599) as u8;
+        *pixel = image::Rgba([v, v, v, 255]);
+    }
+    disc(&mut image, 150, [255, 0, 0, 255]);
+    png_of(&image)
+}
 
 /// A phone photo: sideways by its EXIF, with a comment naming where it was taken and bytes after
 /// its end — everything the route must keep from leaving.
@@ -1063,6 +1075,49 @@ async fn both_branches_draw_a_draft_the_member_can_activate_and_the_model_sees_o
     ] {
         assert!(!logged.contains(never), "the logs hold {never:?}");
     }
+}
+
+/// #5133: a cut-out the step could not erase is stored with the sentence for that, not with the one
+/// that says its background was erased — and it is still a draft the member can find again (the
+/// list selects by the server's sentences) and register like any other.
+#[tokio::test]
+#[ignore = "real PG; security-nightly workspace ignored pass"]
+async fn a_cut_out_that_could_not_erase_the_background_is_stored_without_saying_it_did() {
+    let w = boot().await;
+    w.connect_fake().await;
+    // The picture the fake model returns is one the cut-out step leaves exactly as it is; without
+    // this the test would say nothing about the route.
+    let scene = image::load_from_memory(&drawn_scene()).unwrap().to_rgba8();
+    assert_eq!(
+        momo_expressions::cutout::cut_out(&scene).outcome,
+        momo_expressions::cutout::Outcome::Untouched
+    );
+    w.fake.say(Reply::Picture(drawn_scene()));
+    let name = unique("kept");
+    let made = w
+        .json(
+            w.photo(&w.member, &w.meta("cutout", &name), &photo_from_home())
+                .await,
+            201,
+        )
+        .await;
+    assert_eq!(made["cutout"], "unchanged");
+    let draft = &made["draft"];
+    assert_eq!(draft["origin"]["kind"], "generated");
+    assert_eq!(draft["origin"]["prompt"], PHOTO_PROMPTS[2].1);
+    assert_ne!(
+        draft["origin"]["prompt"], PHOTO_PROMPTS[0].1,
+        "the sentence of an erased background"
+    );
+    // The way back to it finds it, with the same sentence, and it registers like any other draft.
+    let id = draft["draftId"].as_str().unwrap().to_string();
+    let listed = w.json(w.photo_drafts(&w.member).await, 200).await;
+    assert_eq!(draft_ids(&listed), vec![id.clone()]);
+    assert_eq!(listed["items"][0]["origin"]["prompt"], PHOTO_PROMPTS[2].1);
+    assert_eq!(listed["items"][0], w.draft(&w.member, &id).await);
+    let active = w.json(w.activate(&w.member, draft).await, 201).await;
+    assert_eq!(active["expression"]["origin"]["kind"], "generated");
+    assert_eq!(active["expression"]["name"], name);
 }
 
 #[tokio::test]

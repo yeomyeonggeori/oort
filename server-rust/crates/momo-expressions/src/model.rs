@@ -4,6 +4,7 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::cutout::Outcome;
 use crate::Error;
 
 pub const QUOTA: i64 = 1000;
@@ -276,9 +277,24 @@ impl Origin {
         }
     }
     /// A picture the team's image model drew from a member's photo (ADR-0218 §8 H9): `generated`,
-    /// with the one sentence this server wrote for the branch. `None` for a branch that is not one.
-    pub fn photo(branch: &str) -> Option<Self> {
-        let (_, sentence) = PHOTO_PROMPTS.iter().find(|(name, _)| *name == branch)?;
+    /// with the one sentence this server wrote for what was made. `cutout` is what the cut-out step
+    /// reported for the picture and belongs to the cut-out branch alone: a picture the step left
+    /// exactly as the model drew it ([`Outcome::Untouched`]) does not get the sentence that says its
+    /// background was erased (H9.7, #5133). `None` for a pair that is not one: a branch the route
+    /// does not have, a cut-out with no outcome, a caricature with one. The caller must say what
+    /// happened; there is no default sentence to fall back on.
+    pub fn photo(branch: &str, cutout: Option<Outcome>) -> Option<Self> {
+        let key = match (branch, cutout) {
+            // Matched on the outcome itself: a fourth outcome is a compile error here, not a
+            // picture that quietly carries a sentence that is not true of it.
+            ("cutout", Some(outcome)) => match outcome {
+                Outcome::Untouched => "cutout_unchanged",
+                Outcome::Erased | Outcome::Model => "cutout",
+            },
+            ("caricature", None) => "caricature",
+            _ => return None,
+        };
+        let (_, sentence) = PHOTO_PROMPTS.iter().find(|(name, _)| *name == key)?;
         Some(Self {
             kind: "generated".into(),
             source_url: None,
@@ -287,12 +303,26 @@ impl Origin {
     }
 }
 
-/// The two sentences a picture drawn by the team's image model carries as its `prompt` (ADR-0218
-/// §8 H9). They are written here: no member, agent or provider writes a word of them, which is why
-/// the direct API may accept a `generated` origin that carries exactly one of them and no other.
-pub const PHOTO_PROMPTS: [(&str, &str); 2] = [
+/// The sentences a picture drawn by the team's image model carries as its `prompt` (ADR-0218 §8
+/// H9.7, #5133). They are written here: no member, agent or provider writes a word of them, which
+/// is why the direct API may accept a `generated` origin that carries exactly one of them and no
+/// other, and why the list of a member's photo drafts selects by them.
+///
+/// The first column is the key [`Origin::photo`] resolves `(branch, outcome)` to: the two branches'
+/// names, and `cutout_unchanged` for the cut-out branch whose picture the cut-out step left as the
+/// model drew it. A cut-out the model drew transparent (`Model`) or the server erased (`Erased`) has
+/// no background left, and says so; one that could not be erased does not say it.
+///
+/// Append, never reword or reorder: a stored draft holds its sentence verbatim and is never
+/// rewritten, so the earlier sentences must stay accepted for as long as such drafts exist, and the
+/// tests index them by position.
+pub const PHOTO_PROMPTS: [(&str, &str); 3] = [
     ("cutout", "사진에서 피사체만 남기고 배경을 지운 그림"),
     ("caricature", "사진을 바탕으로 새로 그린 캐리커처"),
+    (
+        "cutout_unchanged",
+        "사진에서 피사체를 살려 그렸지만 배경은 지우지 못한 그림",
+    ),
 ];
 
 /// `Origin.sourceUrl` (contracts.schema.json) with the schema's slack removed:
@@ -355,13 +385,13 @@ pub fn valid_source_url(link: &str) -> bool {
 
 /// Which `(origin, picture, reason)` combinations a direct draft may be created with.
 /// No caller-supplied prompts or cards: a `generated` origin belongs to the agent
-/// action, except the photo route's own (two fixed sentences, [`PHOTO_PROMPTS`]); the rest of this
+/// action, except the photo route's own (its fixed sentences, [`PHOTO_PROMPTS`]); the rest of this
 /// sentence is the old rule, unchanged: a `generated` origin belongs to the agent
 /// action, never to this API. A picture and a reason are mutually exclusive, and the
 /// `source_*` reasons exist only for a link import.
 pub fn draft_origin_ok(origin: &Origin, has_media: bool, code: Option<&str>) -> bool {
     // The one `generated` origin this API takes: the photo route's (ADR-0218 §8 H9). A picture, no
-    // reason code, no link, and one of the server's own two sentences, verbatim.
+    // reason code, no link, and one of the server's own sentences, verbatim.
     if origin.kind == "generated" {
         return has_media
             && code.is_none()
@@ -548,11 +578,11 @@ mod tests {
         }
     }
 
-    /// The fixture server of the shared TypeScript core answers the photo route with these two
+    /// The fixture server of the shared TypeScript core answers the photo route with these
     /// sentences (`PHOTO_FIXTURE_PROMPTS`); a screen built on it must say what the real server says.
     /// Read from the file, not compiled in: the release image carries no client sources.
     #[test]
-    fn the_clients_fixture_server_speaks_the_same_two_sentences() {
+    fn the_clients_fixture_server_speaks_the_same_sentences() {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../../packages/momo-core/src/features/expressions/fixtureServer.ts"
@@ -562,6 +592,94 @@ mod tests {
             assert!(
                 source.contains(&format!("{branch}: \"{sentence}\"")),
                 "fixtureServer.ts PHOTO_FIXTURE_PROMPTS must carry {branch}: {sentence}"
+            );
+        }
+    }
+
+    /// #5133: the sentence says what was made. A cut-out the step could not erase is not written as
+    /// one whose background was erased; one that was erased or drawn transparent still is. The
+    /// wording is spelled out here on purpose: the first two are the sentences stored drafts already
+    /// carry, byte for byte, and a change to any of the three has to be made on purpose.
+    #[test]
+    fn a_cut_out_that_kept_its_background_does_not_say_it_was_erased() {
+        let erased = "사진에서 피사체만 남기고 배경을 지운 그림";
+        let caricature = "사진을 바탕으로 새로 그린 캐리커처";
+        let kept = "사진에서 피사체를 살려 그렸지만 배경은 지우지 못한 그림";
+        for (branch, cutout, want, why) in [
+            (
+                "cutout",
+                Some(Outcome::Erased),
+                erased,
+                "the server erased a flat background",
+            ),
+            (
+                "cutout",
+                Some(Outcome::Model),
+                erased,
+                "the model drew it transparent",
+            ),
+            (
+                "cutout",
+                Some(Outcome::Untouched),
+                kept,
+                "nothing could be erased",
+            ),
+            (
+                "caricature",
+                None,
+                caricature,
+                "a caricature has no background step",
+            ),
+        ] {
+            let origin = Origin::photo(branch, cutout).unwrap_or_else(|| panic!("{why}"));
+            assert_eq!(origin.kind, "generated", "{why}");
+            assert_eq!(origin.source_url, None, "{why}");
+            assert_eq!(origin.prompt.as_deref(), Some(want), "{why}");
+        }
+        // What the issue is about, measured on what the function returns and not on a literal of
+        // this test: the sentence of a picture that kept its background does not claim an erase.
+        let prompt = Origin::photo("cutout", Some(Outcome::Untouched))
+            .and_then(|origin| origin.prompt)
+            .unwrap();
+        assert!(!prompt.contains("배경을 지운"), "{prompt}");
+        assert!(prompt.contains("지우지 못한"), "{prompt}");
+
+        // A pair that is not one is `None`: the caller has to say what happened, and a key of the
+        // table is not a branch.
+        for (branch, cutout, why) in [
+            ("cutout", None, "a cut-out with no word on its background"),
+            (
+                "caricature",
+                Some(Outcome::Untouched),
+                "a caricature has no cut-out step",
+            ),
+            (
+                "cutout_unchanged",
+                None,
+                "a key of the table is not a branch",
+            ),
+            (
+                "cutout_unchanged",
+                Some(Outcome::Untouched),
+                "a key of the table is not a branch, with an outcome either",
+            ),
+            ("anything-else", None, "not a branch"),
+        ] {
+            assert!(Origin::photo(branch, cutout).is_none(), "{why}");
+        }
+
+        // The table itself: every sentence is its own, and the direct API takes each one.
+        let distinct: HashSet<&str> = PHOTO_PROMPTS
+            .iter()
+            .map(|(_, sentence)| *sentence)
+            .collect();
+        assert_eq!(distinct.len(), PHOTO_PROMPTS.len());
+        let keys: HashSet<&str> = PHOTO_PROMPTS.iter().map(|(key, _)| *key).collect();
+        assert_eq!(keys.len(), PHOTO_PROMPTS.len());
+        for (key, sentence) in PHOTO_PROMPTS {
+            assert!(
+                draft_origin_ok(&origin("generated", None, Some(sentence)), true, None),
+                "{key}"
             );
         }
     }
@@ -775,28 +893,35 @@ mod tests {
                 "unknown kind",
             ),
             (
-                Origin::photo("cutout").unwrap(),
+                Origin::photo("cutout", Some(Outcome::Erased)).unwrap(),
                 true,
                 None,
                 true,
                 "the photo route's cut-out sentence",
             ),
             (
-                Origin::photo("caricature").unwrap(),
+                Origin::photo("cutout", Some(Outcome::Untouched)).unwrap(),
+                true,
+                None,
+                true,
+                "the photo route's sentence for a cut-out that kept its background",
+            ),
+            (
+                Origin::photo("caricature", None).unwrap(),
                 true,
                 None,
                 true,
                 "the photo route's caricature sentence",
             ),
             (
-                Origin::photo("cutout").unwrap(),
+                Origin::photo("cutout", Some(Outcome::Erased)).unwrap(),
                 false,
                 Some("generation_failed"),
                 false,
                 "a photo origin without a picture",
             ),
             (
-                Origin::photo("cutout").unwrap(),
+                Origin::photo("cutout", Some(Outcome::Erased)).unwrap(),
                 true,
                 Some("generation_failed"),
                 false,
@@ -835,7 +960,7 @@ mod tests {
                 "generated with no prompt at all",
             ),
         ];
-        assert!(Origin::photo("anything-else").is_none());
+        assert!(Origin::photo("anything-else", None).is_none());
         for (origin, has_media, code, allowed, why) in rows {
             assert_eq!(
                 draft_origin_ok(&origin, has_media, code),

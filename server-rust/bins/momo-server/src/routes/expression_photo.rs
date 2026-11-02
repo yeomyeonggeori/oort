@@ -32,7 +32,8 @@
 //!    failure the member sees is one closed code.
 //! 6. **What comes back is decoded in the isolated child too** (`process_cutout` for a cut-out,
 //!    the ordinary picture path for a caricature) and stored as a draft whose origin is the one
-//!    fixed sentence for the branch. The member sees exactly the picture that would be saved.
+//!    fixed sentence for what was made: the branch and, for a cut-out, what the step did to the
+//!    background. The member sees exactly the picture that would be saved.
 //!
 //! ## The one boundary this route widens
 //!
@@ -655,7 +656,9 @@ async fn finish(
             None,
         ),
     };
-    let origin = Origin::photo(asked.branch.as_str()).ok_or_else(invalid)?;
+    // The sentence says what was made: a cut-out the step could not erase is not a picture whose
+    // background was erased (ADR-0218 §8 H9.7, #5133), so the outcome goes in with the branch.
+    let origin = Origin::photo(asked.branch.as_str(), outcome).ok_or_else(invalid)?;
     let draft = expressions::create_draft_with(
         &state.pool,
         actor,
