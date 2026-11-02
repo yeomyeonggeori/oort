@@ -2,6 +2,67 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "attachments.tray.noticeDismiss": [
+    {
+      "type": 0,
+      "value": "Got it"
+    }
+  ],
+  "attachments.tray.overflow": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " file doesn't"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " files don't"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " fit: a message holds up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "attachments.tray.removeNamed": [
+    {
+      "type": 0,
+      "value": "Remove attachment "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,

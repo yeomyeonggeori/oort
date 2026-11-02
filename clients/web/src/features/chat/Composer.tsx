@@ -840,19 +840,8 @@ export function Composer({
       data-composer-shell=""
       data-testid="composer"
     >
-      {/* 첨부 트레이 (ADR-0151 D2). 인용 칩보다 **위**다: 순서는 여전히
-          맥락 → 처리 → 입력이고, 파일은 이 메시지가 무엇을 나르는가라서 인용보다
-          한 겹 바깥이다. 첨부가 없으면 서지 않는다. */}
-      <AttachmentTray
-        drafts={tray.drafts}
-        rejected={tray.rejected}
-        folders={tray.folders}
-        onRemove={(localId) => dropDraft(trayKey, localId)}
-        onRetry={(localId) => retryDraft(trayKey, attachTarget, localId)}
-        onClear={() => clearSurface(trayKey)}
-        onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
-      />
-      {/* 인용 칩(ADR-0148)은 카드 안 맥락 띠로 옮겼다(#4317). 읽는 순서는 그대로 맥락 -> 처리 -> 입력이다. */}
+      {/* 인용 칩(ADR-0148)은 카드 안 맥락 띠로 옮겼다(#4317). 읽는 순서는 그대로 맥락 -> 처리 -> 입력이다.
+          첨부 줄(ADR-0151 D2)도 이제 입력 카드 **안**, 글 칸 바로 위에 선다(#5200). */}
       {/* 입력창 바로 위: 이번 메시지에 무엇이 적용되는지가 글을 쓰는 자리에서
           보여야 한다. Cursor가 모델 피커를 입력창 하단 바에 둔 이유와 같고
           (레퍼런스 §2), 상속 상태에서도 사라지지 않는 이유는 "바꾸지 않으면
@@ -992,13 +981,16 @@ export function Composer({
           // 고대비에서는 고리가 다시 --line-strong이 된다(tokens.css).
           className="composer-card @container focus-visible-within:focus-ring data-warn:border-warn"
           data-testid="composer-frame"
+          data-composer-frame=""
           data-warn={secretBlocked ? "" : undefined}
           onClick={(event) => {
             // 버튼과 그 자식(svg/path)은 자기 액션을 가진다. 나머지 그릇 면적은 한
             // 입력 컨트롤의 일부이므로 액션 행의 빈 폭을 눌러도 캐럿을 돌려준다.
+            // 첨부 카드는 초점을 받는 자기 컨트롤이다(Backspace/Delete 로 뺀다). 눌러서 캐럿을 글 칸으로
+            // 돌려주면 방금 카드에 둔 초점이 튕겨 나간다.
             if (
               event.target instanceof Element &&
-              event.target.closest("button")
+              event.target.closest("button, [data-attachment-card]")
             ) {
               return;
             }
@@ -1018,6 +1010,19 @@ export function Composer({
               {contextHost !== null && <ComposerHostChip host={contextHost} />}
             </ComposerContextBand>
           )}
+          {/* 첨부 줄 (ADR-0151 D2, #5200). 입력칸 테두리 **안**, 글 칸 위다(Codex 입력창). 맥락 띠 아래인 이유는
+              순서가 여전히 맥락 → 처리 → 입력이고, 파일은 이 메시지가 나르는 것이라 글에 가장 가깝기 때문이다.
+              첨부가 없으면 서지 않는다. 카드를 뺀 뒤 초점은 옆 카드나 이 글 칸으로 간다. */}
+          <AttachmentTray
+            drafts={tray.drafts}
+            rejected={tray.rejected}
+            folders={tray.folders}
+            onRemove={(localId) => dropDraft(trayKey, localId)}
+            onRetry={(localId) => retryDraft(trayKey, attachTarget, localId)}
+            onClear={() => clearSurface(trayKey)}
+            onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
+            returnFocus={() => inputRef.current?.focus()}
+          />
           <label className="sr-only" htmlFor="composer-input">
             {composerFieldLabel(channelLabel, recipient)}
           </label>

@@ -2,6 +2,42 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "attachments.tray.noticeDismiss": [
+    {
+      "type": 0,
+      "value": "확인"
+    }
+  ],
+  "attachments.tray.overflow": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개는 한 메시지의 상한("
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개)을 넘어 넣지 못했습니다."
+    }
+  ],
+  "attachments.tray.removeNamed": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 첨부 빼기"
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
