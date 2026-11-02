@@ -11914,9 +11914,11 @@ paths:
       description: >
         ADR-0151 amendment 5 D5 (#4673). The same authorization as `getAttachmentContent`, the same
         refusals in the same words, and the same download headers: `Content-Disposition:
-        attachment`, `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store`, so
-        the picture is a download to a browser that is pointed at it, never a page. A member who may
-        read the file may read its poster, and no one else.
+        attachment`, `X-Content-Type-Options: nosniff` and `Cache-Control: private, no-store,
+        no-transform`, so the picture is a download to a browser that is pointed at it, never a
+        page, and an edge is asked not to rewrite it. (`Accept-Ranges` is the one header of the
+        content route this answer leaves out: a poster has no ranges to offer, and `Range` is
+        ignored.) A member who may read the file may read its poster, and no one else.
 
 
         A readable file with nothing to show (a photo, a document, a video nobody measured, or a
@@ -11934,12 +11936,11 @@ paths:
           description: The poster image, exactly the bytes the sender stored.
           headers:
             Content-Disposition:
-              schema: {type: string, enum: [attachment]}
+              $ref: "#/components/headers/AttachmentContentDisposition"
             X-Content-Type-Options:
-              schema: {type: string, enum: [nosniff]}
+              $ref: "#/components/headers/AttachmentNoSniff"
             Cache-Control:
-              schema: {type: string}
-              description: "`private, no-store`"
+              $ref: "#/components/headers/AttachmentCacheControl"
           content:
             image/jpeg:
               schema:

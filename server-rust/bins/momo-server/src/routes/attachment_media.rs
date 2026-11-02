@@ -29,7 +29,9 @@
 //! * **No SQL, no parser.** Every statement is `momo_messaging::attachment_media`'s and the server
 //!   does not look inside the video (see that module's header).
 //! * **No new archive call.** The container check reads the first bytes through the same
-//!   [`momo_drive::DriveArchive::file_content`] the content route streams from.
+//!   [`momo_drive::DriveArchive::file_range`] the content route reads from, resolved against the
+//!   row's size exactly as that route does: twelve bytes at most, whatever the object's size, and
+//!   no archive lock held while they stream.
 //! * **No change to `routes::attachments`.** `content` is another slice's (C3, `Range`); the refusal
 //!   sentences this module repeats are held equal to it by a test over real HTTP.
 
@@ -38,8 +40,9 @@ use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
 use axum::response::Response;
 use axum::{Extension, Json};
+use futures::StreamExt;
 use momo_auth::Principal;
-use momo_drive::MAX_ATTACHMENT_BYTES;
+use momo_drive::{ByteRange, DriveArchive, DriveError, MAX_ATTACHMENT_BYTES};
 use momo_messaging::{
     is_attachment_channel_member, load_attachment_in_tx, load_poster_in_tx,
     load_readable_attachment_in_tx, may_hold_media, require_video_mime, set_attachment_media_in_tx,
@@ -160,14 +163,7 @@ pub async fn set_media(
 
     // 3. the file
     require_video_mime(&found.mime).map_err(rejected)?;
-    let prefix = state
-        .drive
-        .file_content(&drive_file_id, MAX_ATTACHMENT_BYTES)
-        .await
-        .map_err(drive_error)?
-        .read_prefix(VIDEO_PREFIX_BYTES)
-        .await
-        .map_err(drive_error)?;
+    let prefix = first_bytes(&*state.drive, &found, &drive_file_id).await?;
     video_magic_matches(&found.mime, &prefix).map_err(rejected)?;
 
     // 4. the write
@@ -207,12 +203,59 @@ pub async fn set_media(
     Ok(Json(settle_db("attachment_media.set", written)?))
 }
 
+/// The first [`VIDEO_PREFIX_BYTES`] bytes of the object (fewer when it is shorter), by the archive's
+/// range read: the range is resolved against **the row's** size — the archive is never asked for a
+/// byte past the end — and the archive's own idea of the length must be the row's, or the read is
+/// refused with the 502 the content route gives the same disagreement.
+///
+/// An empty object has no range to read and no container magic either: it answers no bytes, and the
+/// caller turns that into the 400 for bytes that are not the video type they are labelled as.
+async fn first_bytes(
+    drive: &dyn DriveArchive,
+    attachment: &Attachment,
+    drive_file_id: &str,
+) -> Result<Vec<u8>, ApiError> {
+    let Some(last_byte) = u64::try_from(attachment.size_bytes)
+        .ok()
+        .and_then(|size| size.checked_sub(1))
+    else {
+        return Ok(Vec::new());
+    };
+    let range = ByteRange::new(0, last_byte.min(VIDEO_PREFIX_BYTES as u64 - 1))
+        .ok_or_else(|| drive_error(DriveError::UpstreamFailure))?;
+    // The ceiling, not any effective limit: a file that is complete stays readable whatever an
+    // operator later lowers what may be uploaded (ADR-0151 증보 5 D1).
+    let mut archived = drive
+        .file_range(drive_file_id, range, MAX_ATTACHMENT_BYTES)
+        .await
+        .map_err(drive_error)?;
+    if archived.total_size_bytes != attachment.size_bytes {
+        tracing::warn!(
+            row_bytes = attachment.size_bytes,
+            archive_bytes = archived.total_size_bytes,
+            "attachment media refused: the archive's length disagrees with the row"
+        );
+        return Err(drive_error(DriveError::UpstreamFailure));
+    }
+    let mut prefix = Vec::with_capacity(VIDEO_PREFIX_BYTES);
+    while let Some(chunk) = archived.body.next().await {
+        prefix.extend_from_slice(&chunk.map_err(drive_error)?);
+        if prefix.len() >= VIDEO_PREFIX_BYTES {
+            break;
+        }
+    }
+    prefix.truncate(VIDEO_PREFIX_BYTES);
+    Ok(prefix)
+}
+
 /// `GET /v1/workspaces/{ws}/channels/{ch}/attachments/{id}/poster`
 ///
 /// The poster of a video, to everyone the content route would serve that video to, in its own words:
 /// a non-member's 403, and one flat 404 for everything unreadable — **and the same headers**
-/// (`attachment`, `nosniff`, `no-store`: the proxy serves caller-supplied bytes from the API's own
-/// origin, so a picture is a download to a browser that is pointed at it, never a page).
+/// (`Content-Disposition: attachment`, `nosniff`, `Cache-Control: private, no-store, no-transform`:
+/// the proxy serves caller-supplied bytes from the API's own origin, so a picture is a download to a
+/// browser that is pointed at it, never a page, and an edge is asked not to rewrite it). The one
+/// header of the content route this answer leaves out is `Accept-Ranges`: it has no ranges to offer.
 ///
 /// A readable file with no poster (a photo, a video nobody measured, a measurement without a frame)
 /// is a 404 of its own sentence. Only someone who may read the file ever sees it.
@@ -253,7 +296,7 @@ pub async fn poster(
         .header(header::CONTENT_LENGTH, poster.bytes.len().to_string())
         .header(header::CONTENT_DISPOSITION, "attachment")
         .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
-        .header(header::CACHE_CONTROL, "private, no-store")
+        .header(header::CACHE_CONTROL, "private, no-store, no-transform")
         .body(Body::from(poster.bytes))
         .map_err(|error| ApiError::internal("attachment_media.poster.response", error))
 }
@@ -261,6 +304,7 @@ pub async fn poster(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::StreamExt;
     use uuid::Uuid;
 
     /// Both refusals are the content route's own sentences. The test over real HTTP
@@ -340,6 +384,141 @@ mod tests {
             momo_auth::required_dev_scope(first.method, first.template).is_some(),
             "control: the developer table does open its own first row"
         );
+    }
+
+    /// An archive that records the one range it was asked for and answers a canned object.
+    #[derive(Debug)]
+    struct RangeProbe {
+        total_size_bytes: i64,
+        bytes: Vec<u8>,
+        asked: std::sync::Mutex<Vec<(u64, u64)>>,
+        fail_after: Option<usize>,
+    }
+
+    #[async_trait::async_trait]
+    impl DriveArchive for RangeProbe {
+        async fn create_resumable_upload(
+            &self,
+            _channel_id: Uuid,
+            _name: &str,
+            _mime: &str,
+            _size_bytes: i64,
+        ) -> Result<momo_drive::DriveUploadSession, DriveError> {
+            Err(DriveError::Unavailable)
+        }
+
+        async fn file_metadata(&self, _file_id: &str) -> Result<momo_drive::DriveFile, DriveError> {
+            Err(DriveError::Unavailable)
+        }
+
+        async fn file_content(
+            &self,
+            _file_id: &str,
+            _max_bytes: i64,
+        ) -> Result<momo_drive::DriveContent, DriveError> {
+            panic!("the first bytes are read by the range read, never by opening the whole object");
+        }
+
+        async fn file_range(
+            &self,
+            _file_id: &str,
+            range: ByteRange,
+            _max_bytes: i64,
+        ) -> Result<momo_drive::DriveRangeContent, DriveError> {
+            self.asked
+                .lock()
+                .expect("asked")
+                .push((range.start(), range.end()));
+            let wanted = self.bytes[range.start() as usize..=range.end() as usize].to_vec();
+            let items: Vec<Result<axum::body::Bytes, DriveError>> = match self.fail_after {
+                Some(n) => vec![
+                    Ok(axum::body::Bytes::from(wanted[..n].to_vec())),
+                    Err(DriveError::UpstreamFailure),
+                ],
+                None => vec![Ok(axum::body::Bytes::from(wanted))],
+            };
+            Ok(momo_drive::DriveRangeContent {
+                total_size_bytes: self.total_size_bytes,
+                body: futures::stream::iter(items).boxed(),
+            })
+        }
+    }
+
+    fn row_of_size(size_bytes: i64) -> Attachment {
+        Attachment {
+            id: Uuid::from_u128(1),
+            channel_id: Uuid::from_u128(2),
+            uploader_member_id: Uuid::from_u128(3),
+            message_id: None,
+            drive_file_id: Some("f".into()),
+            name: "clip.mp4".into(),
+            mime: "video/mp4".into(),
+            size_bytes,
+            status: "complete".into(),
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    fn probe(total: i64, len: usize, fail_after: Option<usize>) -> RangeProbe {
+        RangeProbe {
+            total_size_bytes: total,
+            bytes: (0..len).map(|i| i as u8).collect(),
+            asked: std::sync::Mutex::new(Vec::new()),
+            fail_after,
+        }
+    }
+
+    /// The prefix is read by one range read **resolved against the row's size** — never past the end of
+    /// a short object, never more than twelve bytes of a long one — and a disagreement between the
+    /// archive's length and the row's is the content route's own 502, before any byte is used.
+    #[tokio::test]
+    async fn the_first_bytes_are_one_range_resolved_against_the_rows_size() {
+        // a long object: twelve bytes, from the start
+        let long = probe(1_000_000, 1_000_000, None);
+        let prefix = first_bytes(&long, &row_of_size(1_000_000), "f")
+            .await
+            .expect("prefix");
+        assert_eq!(prefix, (0..12u8).collect::<Vec<_>>());
+        assert_eq!(*long.asked.lock().unwrap(), vec![(0, 11)]);
+        // exactly twelve bytes
+        let exact = probe(12, 12, None);
+        assert_eq!(
+            first_bytes(&exact, &row_of_size(12), "f")
+                .await
+                .expect("prefix")
+                .len(),
+            12
+        );
+        assert_eq!(*exact.asked.lock().unwrap(), vec![(0, 11)]);
+        // a short object: only the bytes that exist are asked for
+        let short = probe(5, 5, None);
+        assert_eq!(
+            first_bytes(&short, &row_of_size(5), "f")
+                .await
+                .expect("prefix")
+                .len(),
+            5
+        );
+        assert_eq!(*short.asked.lock().unwrap(), vec![(0, 4)]);
+        // an empty object has nothing to ask for: the archive is not touched
+        let empty = probe(0, 0, None);
+        assert!(first_bytes(&empty, &row_of_size(0), "f")
+            .await
+            .expect("empty")
+            .is_empty());
+        assert!(empty.asked.lock().unwrap().is_empty());
+        // an archive whose length is not the row's is refused (the content route's 502)
+        let liar = probe(999, 20, None);
+        let refused = first_bytes(&liar, &row_of_size(20), "f")
+            .await
+            .expect_err("a lying length");
+        assert_eq!(refused.status, StatusCode::BAD_GATEWAY);
+        // and a body that fails part way is an error, never a short prefix passed off as the whole
+        let broken = probe(20, 20, Some(3));
+        let failed = first_bytes(&broken, &row_of_size(20), "f")
+            .await
+            .expect_err("a broken body");
+        assert_eq!(failed.status, StatusCode::BAD_GATEWAY);
     }
 
     #[test]

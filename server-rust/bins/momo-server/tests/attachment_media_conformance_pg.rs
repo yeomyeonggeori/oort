@@ -42,8 +42,8 @@ use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::sqlx::Row;
 use momo_db::PgPool;
 use momo_drive::{
-    DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession, StubDriveArchive,
-    UploadBody,
+    ByteRange, DriveArchive, DriveContent, DriveError, DriveFile, DriveRangeContent,
+    DriveUploadSession, StubDriveArchive, UploadBody,
 };
 use momo_messaging::attachment_reclaim::{
     reclaim_unbound_attachment_in_tx, AttachmentReclaimOutcome, UNBOUND_TTL,
@@ -180,6 +180,21 @@ struct CountingArchive {
     gate: Option<Arc<Gate>>,
 }
 
+impl CountingArchive {
+    /// One read of an object's bytes was asked for: count it, and hold it at the gate when it is
+    /// the gate's object.
+    async fn reached(&self, file_id: &str) {
+        self.content_reads.fetch_add(1, Ordering::SeqCst);
+        if let Some(gate) = &self.gate {
+            let held = gate.file_id.lock().expect("gate").as_deref() == Some(file_id);
+            if held {
+                gate.entered.notify_one();
+                gate.release.notified().await;
+            }
+        }
+    }
+}
+
 /// Holds one object's content read — the moment between the write's two transactions — until the
 /// test lets go, so a send can be made to land exactly there.
 #[derive(Debug, Default)]
@@ -216,15 +231,20 @@ impl DriveArchive for CountingArchive {
         file_id: &str,
         max_bytes: i64,
     ) -> Result<DriveContent, DriveError> {
-        self.content_reads.fetch_add(1, Ordering::SeqCst);
-        if let Some(gate) = &self.gate {
-            let held = gate.file_id.lock().expect("gate").as_deref() == Some(file_id);
-            if held {
-                gate.entered.notify_one();
-                gate.release.notified().await;
-            }
-        }
+        self.reached(file_id).await;
         self.inner.file_content(file_id, max_bytes).await
+    }
+
+    /// The route reads through the range read (as the content route does), so the counter and the
+    /// gate sit here too and the stub's own range read is the one exercised.
+    async fn file_range(
+        &self,
+        file_id: &str,
+        range: ByteRange,
+        max_bytes: i64,
+    ) -> Result<DriveRangeContent, DriveError> {
+        self.reached(file_id).await;
+        self.inner.file_range(file_id, range, max_bytes).await
     }
 
     async fn accept_stub_upload(
@@ -1154,6 +1174,13 @@ async fn a_non_video_or_a_fake_video_cannot_hold_media() {
             "image/png",
             mp4(),
         ),
+        // shorter than the container's box tag: the archive is asked only for bytes that exist
+        (
+            "a file shorter than the box tag",
+            "tiny.mp4",
+            "video/mp4",
+            b"ftyp".to_vec(),
+        ),
     ] {
         let file = upload_and_complete(&http, &base, &alice, ws, ch, name, mime, &bytes).await;
         let before = reads.load(Ordering::SeqCst);
@@ -1185,6 +1212,13 @@ async fn a_non_video_or_a_fake_video_cannot_hold_media() {
             quicktime(),
         ),
         ("a webm", "ok.webm", "video/webm", webm()),
+        // exactly the twelve bytes the check reads: a file no longer than its own prefix
+        (
+            "an mp4 of exactly twelve bytes",
+            "min.mp4",
+            "video/mp4",
+            b"\0\0\0\x0cftypmp42".to_vec(),
+        ),
     ] {
         let file = upload_and_complete(&http, &base, &alice, ws, ch, name, mime, &bytes).await;
         let answer = put_media(&http, &base, &alice, scope, &file, &body).await;
@@ -1378,23 +1412,28 @@ async fn the_poster_route_is_the_content_route_for_everyone_else() {
     // the download rule is the content route's: an attachment, never sniffed, never cached
     let bytes_route = get_as(&http, &content_of(&video, ch), &bob).await;
     assert_eq!(bytes_route.status, 200);
-    for name in ["content-disposition", "x-content-type-options"] {
+    for name in [
+        "content-disposition",
+        "x-content-type-options",
+        "cache-control",
+    ] {
         assert_eq!(
             shared.header(name),
             bytes_route.header(name),
-            "{name} is the content route's"
+            "{name} is the content route's, value for value"
         );
     }
     assert_eq!(shared.header("content-disposition"), "attachment");
     assert_eq!(shared.header("x-content-type-options"), "nosniff");
     let cache = shared.header("cache-control");
     assert!(
-        cache.contains("private") && cache.contains("no-store"),
-        "never cached: {cache:?}"
+        cache.contains("private") && cache.contains("no-store") && cache.contains("no-transform"),
+        "never cached, never rewritten by an edge: {cache:?}"
     );
-    assert!(
-        bytes_route.header("cache-control").contains("no-store"),
-        "the premise: the content route says no-store too"
+    assert_eq!(
+        shared.header("accept-ranges"),
+        "",
+        "a poster has no ranges to offer, so it does not say it has"
     );
 
     // ---- 4. the wrong channel ----------------------------------------------------------
