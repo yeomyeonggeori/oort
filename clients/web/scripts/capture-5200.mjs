@@ -13,6 +13,7 @@
 // 옵션: --dist(기본 dist) --out(기본 captures/5200/<label>) --label(기본 after)
 //       --port(기본 5520) --soft(실패해도 끝까지 돌고 종료 코드 0) --no-shots
 //       --combos(쉼표 목록: light-1440,dark-1440,light-720,dark-720,touch,thread-light,thread-dark. 기본 전부)
+//       --engine(chromium 기본 | webkit: 데스크탑 셸의 WKWebView 에 가까운 번들 WebKit)
 // 캡처는 저장소에 올리지 않는다: --out 을 스크래치로 준다(captures/ 는 옛 이슈의 증거 폴더다).
 // =============================================================================
 import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
@@ -20,7 +21,7 @@ import { createServer } from "node:http";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
-import { chromium } from "playwright";
+import { chromium, webkit } from "playwright";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -39,6 +40,7 @@ const PORT = Number(arg("port", 5520));
 const SINK_PORT = PORT + 1;
 const SOFT = arg("soft", false) === true;
 const SHOTS = arg("no-shots", false) !== true;
+const ENGINE = String(arg("engine", "chromium"));
 const COMBOS = String(arg("combos", "all")).split(",");
 const wanted = (name) => COMBOS.includes("all") || COMBOS.includes(name);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -862,7 +864,7 @@ async function runThread(browser, scheme) {
   check("스레드: 카드가 한 줄이고 가로로 밀린다", m.cards.every((c) => near(c.box.y, m.cards[0].box.y, 1)) && (m.listScrollWidth ?? 0) > (m.listClientWidth ?? 0), `${m.listScrollWidth}/${m.listClientWidth}`);
   check("스레드: 글 칸이 줄 아래에 있고 입력창이 줄만큼 자란다", m.input !== null && m.tray !== null && m.input.y >= m.tray.b - 1 && near(m.frame.h - base.frame.h, m.tray.h, 3), `Δ${(m.frame.h - base.frame.h).toFixed(0)} 줄 ${m.tray?.h.toFixed(0)}`);
   check("스레드: X 가 작고 그림 가운데를 덮지 않는다", m.cards.every((c) => c.removeVisual !== null && c.removeVisual.w <= 20.5 && !intersects(c.remove, center(c.box, 0.5))));
-  await shot(page, "thread-n4", 1440, "thread-composer");
+  await shot(page, `${tag}-n4`, 1440, "thread-composer");
   await cards(page).first().focus();
   await page.keyboard.press("Delete");
   await wait(120);
@@ -906,7 +908,7 @@ async function runTouch(browser) {
 mkdirSync(OUT, { recursive: true });
 const staticServer = await startStatic();
 const sinkServer = await startByteSink();
-const browser = await chromium.launch({ headless: true });
+const browser = await (ENGINE === "webkit" ? webkit : chromium).launch({ headless: true });
 let crashed = null;
 try {
   for (const scheme of ["light", "dark"]) {
