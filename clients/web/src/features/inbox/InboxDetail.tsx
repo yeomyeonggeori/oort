@@ -337,9 +337,10 @@ export function InboxDetail({
     });
   }, [client, workspaceId, entry.key]);
 
-  // 이 클라이언트가 이미 결정한 승인(#5092): 패널은 고른 줄의 스냅샷을 들고 있어서 원장이
-  // 그 행을 대기에서 뺀 뒤에도 같은 `approvalId`로 남는다. 영수증이 있으면 컨트롤 대신
-  // 결정 결과가 서고, 이미 결정된 건에 두 번째 결정이 나가지 못한다.
+  // 이 클라이언트가 이미 결정한 승인(#5092): 결정이 닿은 뒤 원장이 다시 답하기 전에도(재조회가 오는 동안,
+  // 또는 오프라인·실패로 답이 오지 않는 동안) 패널은 고른 줄의 스냅샷으로 같은 `approvalId`를 들고 있다.
+  // 영수증이 있으면 컨트롤 대신 결정 결과가 서고, 이미 결정된 건에 두 번째 결정이 나가지 못한다.
+  // 원장이 답한 뒤에는 `InboxRoute`가 이 승인을 선택에서 놓아 패널 자체가 닫힌다(#5116).
   const settledReceipt = useSettledApproval(entry.task?.approvalId);
   const settledLine =
     settledReceipt === null ? null : settledStatusLine(settledReceipt.status);
