@@ -125,7 +125,7 @@
 
 **지금.** 웹 설정 › 멤버와 초대의 역할 선택지에 게스트가 이미 있고 설명이 「초대받은 채널만 봐요」다(`clients/web/src/features/settings/InviteSection.tsx:110`·`:217-222`, 선택지 정의 `packages/momo-core/src/features/settings/model.ts:236-240`). 서버는 guest 코드를 수락하면 공개 채널 전부에 가입시킨다(`SET/join.rs:768-771`, `:1242-1285`). 기존 계정이 게스트 코드를 쓰는 길도 같은 입구라 GS-0이 함께 거절한다(감사 I-2).
 
-**입구 잠금(GS-0).** 새 설계를 기다리지 않는다. GS-0은 아래 거절을 **스위치 값과 무관하게** 건다(새 입구 모델 없이 옛 수락 경로를 열 수 없다). 동시에 이름 붙은 스위치 하나 `GUEST_INVITES_ENABLED`(**코드 상수**, 기본 `false`. 환경 변수·인스턴스 설정으로 켜지 않는다 — 경계 칸이 다 착륙하기 전에 운영자가 켜는 길을 두지 않기 위해서다. 켜는 일은 GS-8의 켜기 조건이 다 찬 뒤의 코드 변경 PR 하나다. 그 뒤 운영자가 고르는 인스턴스 설정이 필요하면 그때 더한다)를 정의만 한다. 스위치를 읽어 새 초대 입구를 여는 쪽은 GS-8이고, 켜는 조건은 GS-8의 수용 기준이 정한다(§8). 재개의 조건이 이 스위치 한 곳에 걸리므로 거절이 상수로 흩어지지 않는다.
+**입구 잠금(GS-0).** 새 설계를 기다리지 않는다. GS-0은 guest 역할을 만들고·복사하고·쓰는 **모든 문이 한 질문 `invite_role_paused`만 묻게** 하고, 그 질문은 이름 붙은 스위치 하나 `GUEST_INVITES_ENABLED`(**코드 상수**, 기본 `false`. 환경 변수·인스턴스 설정으로 켜지 않는다 — 경계 칸이 다 착륙하기 전에 운영자가 켜는 길을 두지 않기 위해서다. 켜는 일은 GS-8의 켜기 조건이 다 찬 뒤의 코드 변경 PR 하나다. 그 뒤 운영자가 고르는 인스턴스 설정이 필요하면 그때 더한다)만 읽는다(구현 #5199). **GS-8은 스위치를 켜기 전에** 이 질문을 「채널 집합이 없는 guest 초대(옛 코드)는 스위치와 무관하게 거절, 채널 집합이 있는 새 초대만 스위치를 본다」로 바꾼다 — 스위치를 켜는 것만으로 옛 수락 경로(공개 채널 자동 가입)가 다시 열리면 안 된다. 스위치를 읽어 새 초대 입구를 여는 쪽은 GS-8이고, 켜는 조건은 GS-8의 수용 기준이 정한다(§8). 재개의 조건이 이 스위치 한 곳에 걸리므로 거절이 상수로 흩어지지 않는다.
 
 1. `POST /v1/workspaces/{ws}/invites`에서 role이 guest인 요청을 400으로 거절한다(`SET/invite.rs:65-86`의 `normalized_invite_role`이 guest를 받는 자리).
 2. 이미 발급된 guest 코드는 수락 두 길(`POST /v1/join`, 로그인한 멤버의 `…/invites/redeem`)에서 같은 이유로 거절한다. 기존 계정이 쓰는 경우도 같다. `join_public_channels`에서 guest만 빼면 채널이 0개가 되어 `NoPublicChannels` 409(`SET/join.rs:769-771`)로 떨어지고 사용자에게 이유 모를 실패만 남는다.
@@ -646,7 +646,7 @@ CREATE POLICY workspace_membership_guest_definer ON workspace_membership
 
 | method / `/v1/workspaces/{ws}` 뒤 경로 | 요청 → 응답 | 상태·권한 |
 |---|---|---|
-| `POST /invites` (확장) | role이 guest이면 `GuestInviteSpec` 필수 → 기존 응답 + `invite.guest` | 201. 관리자. 400 `guest_invite_invalid`(채널 0개·21개 이상, DM·보관 채널, 기간 없음, 최대 초과, 사용 횟수 1 아님). GS-0 단계와, GS-8 이후 스위치 `GUEST_INVITES_ENABLED`가 꺼져 있는 동안(기본)은 guest면 400 `guest_invites_unavailable` |
+| `POST /invites` (확장) | role이 guest이면 `GuestInviteSpec` 필수 → 기존 응답 + `invite.guest` | 201. 관리자. 400 `guest_invite_invalid`(채널 0개·21개 이상, DM·보관 채널, 기간 없음, 최대 초과, 사용 횟수 1 아님). GS-0 단계와, GS-8 이후 스위치 `GUEST_INVITES_ENABLED`가 꺼져 있는 동안(기본)은 guest면 400 `guest_invites_paused` |
 | `POST /v1/join`, `POST /invites/redeem` (확장) | guest 코드 → 기존 응답 + `guest: {expiresAtMs, channelIds}` | 201 / 200. 계정이 이미 있으면(증명 뒤에만) 409 `guest_invite_existing_account`. 초대 채널이 모두 사라졌으면 409 `guest_invite_no_channels` |
 | `GET /guests?state=active\|expiring\|expired\|no_expiry` | → `GuestList` | 200. **관리자만** |
 | `GET /guests/me` | → `GuestSelf` | 200. 게스트 본인만. 그 밖은 404 `not_found` |
@@ -793,7 +793,7 @@ Slack 조사의 C1~C6와 감사의 Q1~Q15를 **한 목록으로 합쳤다.** 코
 
 | 칸 | 트랙 | 크기 | 등급 | 선행 | 수용 기준 요지 |
 |---|---|---|---|---|---|
-| GS-0 입구 잠금 | 엔진 (+웹 한 줄은 통보) | S | 2 | O9 | guest 초대 생성과 수락 두 길을 **스위치 값과 무관하게** 거절한다(기존 계정이 쓰는 경우 포함, 이유를 사용자에게 말함). 스위치 `GUEST_INVITES_ENABLED`(코드 상수, 기본 `false`)는 정의만 하고 읽는 쪽은 GS-8의 새 입구다. 웹 초대 시트에서 게스트 선택지 제거. 역할 변경은 막지 않음. 운영 게스트 수를 읽기 전용으로 세어 PR 본문에 적음(O7 입력). 사보타주: 거절 분기를 지우면 시험이 빨강 |
+| GS-0 입구 잠금 | 엔진 (+웹 한 줄은 통보) | S | 2 | O9 | guest 초대를 만들기·다시 만들기·쓰기(로그인한 멤버)·공개 가입 네 문에서 400 `guest_invites_paused`로 거절한다(기존 계정이 쓰는 경우 포함, 이유를 사용자에게 말함). 모든 문은 `invite_role_paused` 한 질문만 묻고, 그 질문은 스위치 `GUEST_INVITES_ENABLED`(코드 상수, 기본 `false`)만 읽는다. GS-8은 켜기 전에 옛 코드 거절을 스위치와 떼어 놓는다(D4). 웹 초대 시트에서 게스트 선택지 제거. 역할 변경은 막지 않음. 운영 게스트 수를 읽기 전용으로 세어 PR 본문에 적음(O7 입력). 사보타주: 거절 분기를 지우면 시험이 빨강 |
 | GS-1 판정 기초 | 엔진 | M | 2 | — | §4.2 열·CHECK·부분 인덱스(기간 필수 트리거는 GS-11), §4.3 채널 role 트리거(`search_path` 고정·`public.` 한정), §4.4 함수(`is_guest`는 사람에게만 닫는 쪽 실패, `guest_in_audience` 포함) + 팀 기억 쓰기 금지 함수 셋 교체, Rust `guest_scope` 한 모듈, `is_channel_member`를 `visible_channel` 문장으로. T3 진리표(워크스페이스 행이 없는 멤버 사람/비사람 포함). `EXPLAIN` 비교(행마다 부르는 자리는 집합 반환 함수·뷰·직접 술어). 새 표·정의자 점검은 `momo-db/tests/conformance_pg.rs`·`tenant_catalog_pg.rs`(RLS+FORCE+정책, 정의자 `search_path`)가 통과함을 PR 본문에 적음. 옛 데이터 건수(채널 role 불일치·채널 admin 게스트)를 PR 본문에 적음 |
 | GS-2 전수 회귀 틀 | 엔진 | M | 2 | GS-1 | T2 하네스(표면 표를 소스에서 기계 추출: 라우터 등록·별도 Router·Agent Port 도구·사람용 MCP·구독 네임스페이스·job 종류 · 분류 9종 · 두 채널 픽스처 · 404 동일성), T6 표식 훑기(경계 밖 표식 픽스처 · 비게스트 짝 · 사보타주), T5 콘텐츠 표 래칫(콘텐츠 표 목록 · 허용 목록 · 새 `workspace_id` 표 분류), `claims.yaml` GUEST-1·2·5 + 사보타주 대조(`runs: pr-ci`), 지금 새는 길에 `known_open`으로 칸 번호를 단다. **강제 지점은 PR CI 하나**: PG 시험은 `infra/security-pack/selection.txt`의 `tenant-isolation`에, T5·분류표 완전성은 `rust` 레인에서 돈다(local gate는 증거 자리). Security pack 시간 예산 안인지 잰 값을 PR 본문에 적음. 정책 파일 audit |
 | GS-3 사람이 보이는 길 | 엔진 | M | 2 | GS-1, GS-2 | D-1 DM 열기, P-3 아바타, D-4 에이전트 후보·합류 카드 문구 확인, P-1 게스트 응답의 이메일·시간대 제거. 해당 `known_open` 삭제. O6 결과를 따른다 |
