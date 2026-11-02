@@ -1531,7 +1531,7 @@ fn count_of(
 /// * each seeded kind lands in its own reason: a live message, a deleted message, a schedule, a
 ///   young file, a pending and a failed row, a huddle row, an avatar object;
 /// * every foreign key into `attachment` is one the SQL names `(known)` — a migration that adds a
-///   fifth turns this red until the reference table, the predicate and the SQL are updated;
+///   seventh turns this red until the reference table, the predicate and the SQL are updated;
 /// * the `reserved` mirror drifting from the real reservation rows (the trigger bypassed) is
 ///   reported, so the check is not a mirror that agrees with itself;
 /// * a candidate's id sitting inside a json column (`message.props`) is reported by the
@@ -1627,8 +1627,9 @@ async fn the_operators_check_sql_agrees_with_the_sweep_and_would_notice_a_refere
         .collect();
     assert_eq!(
         fks.len(),
-        5,
-        "the five foreign keys into attachment (A1-A4 and the self-media token, ADR-0151 증보 2): {fks:?}"
+        6,
+        "the six foreign keys into attachment (A1-A4, the self-media token and the video media row, \
+         ADR-0151 증보 2 A1-A6): {fks:?}"
     );
     assert!(
         fks.iter().all(|key| key.ends_with("(known)")),
