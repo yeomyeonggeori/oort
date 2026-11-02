@@ -4658,13 +4658,12 @@ async function assertMentionTrigger(page, where, ids) {
   ) {
     throw new Error(`[@] 발동 ${where}: ${JSON.stringify(proof)}`);
   }
-  // 알려진 결함(#5048 인계 D6): 후보 목록은 `left-3`(12px)에 서는데 넓은 창(≥600)의 그릇 카드는 폼 안쪽 24px에 선다
-  // (tokens.css `composer-card` · `& > form` 패딩 `--spacing-6`). 목록이 카드보다 12px 왼쪽으로 튀어나온다 — 앱 화면 코드라
-  // 이 이슈에서 고치지 않는다. 옛 단정(입력 글자와 left ±1)은 카드가 생기기 전의 기준이라 버리고, 어긋남은 경고로 매 실행에
-  // 남긴다. 고쳐지면 이 갈래를 `frameLeftDelta` 단정(±1)으로 되돌린다.
+  // 후보 목록은 입력 글자가 아니라 그릇 카드의 왼쪽 가장자리(±1)에 선다. 넓은 창(≥600)에서는 폼 여백이 24라서 카드가 안쪽에 서고,
+  // 목록은 `composer-dock`의 ≥600 블록이 같은 24로 따라간다(#5094, #5048 D6 — 한때 `left-3` 12px에 남아 카드보다 12px 바깥으로
+  // 튀어나왔고 이 자리는 경고만 냈다). 스레드 컴포저는 자기 그릇(`thread-composer-frame`)에 `left-0`으로 선다.
   if (Math.abs(proof.frameLeftDelta) > 1) {
-    console.warn(
-      `KNOWN DEFECT (#5048 D6): [@] 후보 목록이 그릇 카드보다 ${-proof.frameLeftDelta}px 왼쪽으로 튀어나온다 ${where}`
+    throw new Error(
+      `[@] 후보 목록이 그릇 카드의 왼쪽 가장자리에 서지 않는다(그릇 기준 ${proof.frameLeftDelta}px) ${where}: ${JSON.stringify(proof)}`
     );
   }
   console.log(
@@ -4693,6 +4692,7 @@ async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
   const proof = await page.evaluate(`(() => {
     const input = document.querySelector('[data-testid="${ids.input}"]');
     const list = document.querySelector('[data-testid="${trigger.list}"]');
+    const frame = input?.closest('[data-testid$="composer-frame"]');
     const first = list?.querySelector('[role="option"]');
     return {
       value: input?.value ?? null,
@@ -4704,6 +4704,11 @@ async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
       active: input?.getAttribute("aria-activedescendant") ?? null,
       firstId: first?.id ?? null,
       firstText: first?.textContent ?? null,
+      // [@]와 같은 단정(#5094, #5048 D6): 목록은 그릇 카드의 왼쪽 가장자리에 선다(#·: 도 같은 뿌리·같은 자리).
+      frameLeftDelta:
+        frame && list
+          ? Math.round(list.getBoundingClientRect().left - frame.getBoundingClientRect().left)
+          : null,
     };
   })()`);
   if (
@@ -4715,6 +4720,8 @@ async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
     proof.controls !== proof.listId ||
     proof.active !== proof.firstId ||
     proof.options < (trigger.minOptions ?? 1) ||
+    proof.frameLeftDelta === null ||
+    Math.abs(proof.frameLeftDelta) > 1 ||
     (trigger.expectFirst !== undefined &&
       !(proof.firstText ?? "").includes(trigger.expectFirst))
   ) {
@@ -4727,7 +4734,7 @@ async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
   await page.screenshot({ path: shot });
   shots.push(shot);
   console.log(
-    `  자동완성 ${trigger.typed} ${scheme}: ${proof.label} · 후보 ${proof.options} · 첫 줄 ${proof.firstText}`
+    `  자동완성 ${trigger.typed} ${scheme}: ${proof.label} · 후보 ${proof.options} · 첫 줄 ${proof.firstText} · 그릇 기준 left ${proof.frameLeftDelta}px`
   );
   await page.keyboard.press("Escape");
   await list.waitFor({ state: "hidden" });
@@ -14092,13 +14099,6 @@ async function assertEnterMotionPressAfterFill(page, label, opts = {}) {
  * `:active` transform must be none. Prints visited count and the widest
  * offenders (even when green). FeedRow at 1040px goes red with `.press`.
  */
-/**
- * 「넓은 줄은 채움만, 크기는 줄이지 않는다」 규칙을 어기는 줄 중 **앱 쪽 결함으로 이미 알려진 것**(#5048 인계 D7).
- * 인박스 아래 「활동 열기」 줄(`inbox-activity-link`, 칼럼 전체 폭)이 `press`(0.98 배)를 입고 있다. 목록에 더하는 일은
- * 신중해야 한다: 이 이름만 경고로 내리고 나머지 넓은 줄은 그대로 실패시킨다. 앱이 고쳐지면 이 이름을 지운다.
- */
-const KNOWN_WIDE_PRESS_DEFECTS = new Set(["inbox-activity-link"]);
-
 async function assertWideRowsFillOnly(page, label) {
   const { visited, candidates } = await page.evaluate(
     ({ WIDE_MIN_PX: minPx, WIDE_MIN_FRAC: minFrac }) => {
@@ -14182,13 +14182,11 @@ async function assertWideRowsFillOnly(page, label) {
     const none =
       transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)";
     if (!none) {
-      const entry = `<${c.tag}> ${c.testId || c.text} width=${c.width} column=${c.column} transform=${transform}`;
-      if (c.testId && KNOWN_WIDE_PRESS_DEFECTS.has(c.testId)) {
-        // 알려진 결함(#5048 인계 D7): 앱 화면 코드라 이 이슈에서 고치지 않고, 경고로 매 실행에 남긴다.
-        console.warn(`KNOWN DEFECT (#5048 D7): 넓은 눌림 면이 크기를 줄인다 — ${entry}`);
-      } else {
-        failures.push(entry);
-      }
+      // 허용 목록은 없다. 인박스의 「활동 열기」 줄(`inbox-activity-link`)이 마지막 예외였고 #5094(#5048 D7)가
+      // `press-instant-fill`로 고쳐 지웠다 — 이제 넓은 줄이 눌림에 줄어들면 어느 줄이든 실패다.
+      failures.push(
+        `<${c.tag}> ${c.testId || c.text} width=${c.width} column=${c.column} transform=${transform}`
+      );
     }
   }
   await page.evaluate(() => {

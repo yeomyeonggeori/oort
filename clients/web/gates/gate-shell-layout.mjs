@@ -955,6 +955,15 @@ async function assertDesktopSidebarFocusMode(page, size) {
  * for both the long-name four-scope fixture and the shipped one-scope GitHub
  * fixture, while the independent title+footer assertion stays green.
  *
+ * Red proof for chip order (#5094, #5048 D5): in PluginSection.tsx move the
+ * `plugin-scope-badges-*` span back below the `plugin-scope-tools` span (the
+ * "연결된 도구" line), rebuild, run this gate. Only the shipped GitHub check at
+ * 760x480 fails, with {"firstBadgesVisible":false,"badgesBeforeTools":false,
+ * "toolNameCount":26,"toolsLineHeight":198}: github:read's 26 tool names fold into
+ * ~12 lines and push the chips under the scrollbox fold. That block runs only at
+ * 760x480; the four-scope fixture's first-badge assertion above stays green under
+ * the same sabotage because its tool lines are short (124 ok + 1 FAIL measured).
+ *
  * Red proof for focus: revert focusPluginScopeChangeFallback to returning true
  * after focus() without checking disabled/aria-disabled/activeElement, and
  * remove mutation.isPending from its effect dependencies. This gate's catalog
@@ -1243,12 +1252,14 @@ async function assertPluginScopeConsent(page, size) {
       const confirm = document.querySelector('[data-testid="plugin-scope-confirm"]');
       const scrollbox = document.querySelector('[data-testid="plugin-scope-consent-body"]');
       const firstBadges = document.querySelector('[data-testid^="plugin-scope-badges-"]');
-      if (!panel || !title || !confirm || !scrollbox || !firstBadges) return { missing: true };
+      const firstTools = document.querySelector('[data-testid="plugin-scope-tools"]');
+      if (!panel || !title || !confirm || !scrollbox || !firstBadges || !firstTools) return { missing: true };
       const p = panel.getBoundingClientRect();
       const t = title.getBoundingClientRect();
       const c = confirm.getBoundingClientRect();
       const s = scrollbox.getBoundingClientRect();
       const b = firstBadges.getBoundingClientRect();
+      const tools = firstTools.getBoundingClientRect();
       return {
         title: title.textContent,
         titleVisible: t.top >= p.top && t.bottom <= p.bottom && t.top >= 0,
@@ -1258,27 +1269,28 @@ async function assertPluginScopeConsent(page, size) {
           b.top >= s.top && b.bottom <= s.bottom &&
           b.top >= p.top && b.bottom <= p.bottom &&
           b.top >= 0 && b.bottom <= window.innerHeight + 1,
+        badgesBeforeTools: b.bottom <= tools.top + 0.5,
+        // 이름은 쉼표로 이어 붙어 있다(「연결된 도구:」 낱말에는 쉼표가 없다).
+        toolNameCount: firstTools.textContent.split(",").length,
+        toolsLineHeight: Math.round(tools.height),
       };
     })()`);
-    // 알려진 결함(#5048 인계 D5): 출하 시드 GitHub의 `github:read`는 연결된 도구가 26개라 「연결된 도구」 줄이 열 몇 줄로
-    // 접히고, 그 **뒤**에 서는 위험도·승인 칩(`plugin-scope-badges-*`)이 760x480 창에서 스크롤 상자 아래로 밀린다
-    // (앱 화면 코드 결함이라 이 이슈에서 고치지 않는다 — 인계의 별도 이슈 초안). 결정 근거 칩이 폴드 아래인 사실은
-    // 아래 경고로 매 실행에 남기고, 제목·확인 버튼이 함께 보이고 칩이 두 낱말을 싣는다는 것까지를 단정한다.
-    // 위 다중-scope 픽스처의 「첫 칩이 보인다」 단정은 그대로 살아 있다. 결함이 고쳐지면 이 경고 갈래를 단정으로 되돌린다.
-    if (githubLayout.firstBadgesVisible !== true) {
-      console.warn(
-        `KNOWN DEFECT (#5048 D5): ${size.name} 출하 시드 GitHub 첫 권한의 위험도·승인 칩이 스크롤 없이 보이지 않는다 ` +
-          JSON.stringify({ firstBadgesVisible: githubLayout.firstBadgesVisible })
-      );
-    }
+    // #5094(#5048 D5): 출하 시드 GitHub의 `github:read`는 연결된 도구가 26개라 「연결된 도구」 줄이 열 몇 줄로 접힌다. 위험도·승인 칩
+    // (`plugin-scope-badges-*`)이 그 **뒤**에 서 있을 때는 760x480 창에서 스크롤 상자 아래(폴드 밖)로 밀렸고, 이 게이트는 그 사실을
+    // 경고(`KNOWN DEFECT`)로만 남겼다. 이제 칩은 도구 줄보다 **먼저** 선다 — 첫 권한의 칩이 스크롤 없이 보이고(`firstBadgesVisible`)
+    // 같은 행의 도구 줄보다 위에 있다(`badgesBeforeTools`)는 것을 단정한다. `toolNameCount`는 이 단정이 정말 긴 목록(26개)을 재고
+    // 있다는 전제다: 출하 시드가 줄어 이 값이 작아지면 순서·폴드 단정이 아무것도 재지 못하므로 같이 빨개진다.
     check(
-      `${size.name} 출하 시드 GitHub도 제목과 확인 버튼이 열자마자 함께 보인다`,
+      `${size.name} 출하 시드 GitHub도 제목과 확인 버튼이 열자마자 함께 보이고, 위험도·승인 칩이 연결된 도구 목록보다 먼저 보인다`,
       githubLayout.missing !== true &&
         githubLayout.title?.includes("GitHub") &&
         githubLayout.titleVisible === true &&
         githubLayout.confirmVisible === true &&
         githubLayout.firstBadgeText?.includes("승인:") &&
-        githubLayout.firstBadgeText?.includes("위험도:"),
+        githubLayout.firstBadgeText?.includes("위험도:") &&
+        githubLayout.firstBadgesVisible === true &&
+        githubLayout.badgesBeforeTools === true &&
+        githubLayout.toolNameCount >= 20,
       JSON.stringify(githubLayout)
     );
     await page.getByTestId("plugin-scope-cancel").click();
