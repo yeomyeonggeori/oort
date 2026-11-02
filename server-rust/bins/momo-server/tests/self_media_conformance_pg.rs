@@ -834,6 +834,14 @@ async fn refusals_spend_the_per_address_budget_and_serving_does_not() {
 /// shortly for it instead of that their own file cannot be read. The archive here does not hold itself to
 /// the ceiling the route passes it, so what refuses the long ones is the route's own check, not the
 /// archive's.
+///
+/// **The length is judged before the type** (ADR-0151 증보 6 A1; review R1-5 of #5072): bytes that are the wrong
+/// length *and* not the declared image (HTML under `image/png`, one byte short and one byte long) are the 502 of
+/// the storage disagreeing with the row, not the 404 of a file that is not what its type says — the type of bytes
+/// that are not the promised bytes is not a question the route asks. The same HTML bytes at the right length are
+/// the 404 (`every_refusal_is_one_identical_404_…` holds that one).
+///
+/// RED: ask the type before the length (the two HTML cases are then the 404).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a disposable PG18"]
 async fn a_stream_one_byte_short_or_long_is_refused_and_never_truncated() {
@@ -860,17 +868,20 @@ async fn a_stream_one_byte_short_or_long_is_refused_and_never_truncated() {
     };
 
     let mut storage_shape: Option<Seen> = None;
-    for (label, length) in [
-        ("one byte short", declared - 1),
-        ("one byte long", declared + 1),
-        ("far longer", declared * 2),
+    for (label, bytes) in [
+        ("one byte short", png_bytes(declared - 1)),
+        ("one byte long", png_bytes(declared + 1)),
+        ("far longer", png_bytes(declared * 2)),
+        // not the declared image either: the length is what is judged first
+        ("one byte short and not an image", vec![b'<'; declared - 1]),
+        ("one byte long and not an image", vec![b'<'; declared + 1]),
     ] {
         server
             .archive
             .files
             .lock()
             .unwrap()
-            .insert(tenant.drive_file.clone(), png_bytes(length));
+            .insert(tenant.drive_file.clone(), bytes);
         let token = mint(&server, &tenant, 300).await;
         let reads_before = server.archive.reads.load(Ordering::SeqCst);
         let refused = get(&server, &address(&tenant, &token)).await;

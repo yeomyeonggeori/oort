@@ -18,7 +18,8 @@
 //! | `a_child_ends_itself_at_its_own_deadline_when_nothing_ends_it` | the watchdog thread `child_main_with` starts |
 //! | `the_child_confines_itself_before_any_thread_pool_exists_and_still_reads` | the child branch of `main` running after the async runtime was built (#4970 review R2-1): the child must be its main thread and its watchdog, whatever `TOKIO_WORKER_THREADS` says, and a plain PDF must still read |
 //! | `a_child_confines_itself_before_it_reads_a_byte` (Linux) | `oom_score_adj` 1000 (written **before** the process stops being dumpable), the address-space ceiling and the core-dump limit 0 `confine_self` sets; the process not dumpable (its `/proc/<pid>/` is root's); `no_new_privs` and one more seccomp filter than the test process on **every** thread, the watchdog's too (`apply_filter_all_threads`; `Seccomp: 2` alone is the container runtime's own) (#5072) |
-//! | `a_child_whose_host_refuses_the_filter_reads_nothing_and_names_the_step` (Linux) | the child going on to read after `lock_down` failed; the step word `filter` the child tells its supervisor (#5072) |
+//! | `a_host_that_refuses_any_one_step_gets_a_child_that_reads_nothing_and_names_it` (Linux) | the child going on to read after any one of the five steps failed — `core_limit`, `address_space`, `dumpable`, `watchdog`, `filter` — an error ignored with `let _ =`; the step word the child tells its supervisor (#5072, review R1-2) |
+//! | `a_child_the_host_ended_with_sigsys_is_the_servers_fault_and_every_other_signal_is_the_files` | the supervisor reading a death by `SIGSYS` (a host whose own policy kills the child) as the file's: a permanent sentence for a host problem (#5072, review R1-4); and the opposite mistake, reading `SIGABRT` — the parser's own stack-overflow ending — as the host's |
 //! | `a_long_pdf_reads_under_the_filter_and_the_limits` | a filter or a limit that breaks the allocator on a document bigger than a page (#5072) |
 //! | `the_core_row_of_proc_limits_is_a_zero_limit_only_when_both_limits_are_zero` | reading the Linux test's `Max core file size` row (the row is parsed on every platform, so the parse is measured here and not first on CI) |
 
@@ -346,6 +347,68 @@ async fn a_child_that_could_not_confine_itself_is_named_by_one_warning_line_and_
         "nothing the child made up reaches the log: {printed:?}"
     );
     for path in [named, made_up] {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+/// #5072, review R1-4: a host whose **own** policy ends the child — a runtime profile that answers `seccomp(2)` (or any
+/// call the child makes) with a kill where the child's own filter answers with an error — leaves the supervisor a child
+/// that died of `SIGSYS` and said nothing. That is this machine and not the file (nothing a file can do ends a child
+/// with `SIGSYS`; only a system-call filter does), so it is the "try again shortly" branch with one warning line that
+/// names it (`step="host_killed"`), exactly like the child that told the supervisor which step it could not take. Before
+/// this, the death read as an unreadable file and told the person a permanent thing about their own document.
+///
+/// The other end of it is measured too: `SIGABRT` (what the parser's own stack-overflow handler and a failed
+/// allocation end with — the review of #4970 saw three of fourteen hostile PDFs end that way), `SIGSEGV` and `SIGKILL`
+/// are the file's doing and stay the permanent sentence, with no `host_killed` line. A supervisor that read every
+/// signal as the host's would blame the server for the file.
+///
+/// The "children" are shell scripts that end themselves with the signal (core dump off), so this runs on every unix.
+///
+/// RED: no `SIGSYS` branch (the first case is `Unreadable`, and no line), or one that takes any signal (the others).
+#[cfg(unix)]
+#[tokio::test]
+async fn a_child_the_host_ended_with_sigsys_is_the_servers_fault_and_every_other_signal_is_the_files(
+) {
+    let _serial = serial().await;
+    let logs = captured_logs();
+    let mut scripts = Vec::new();
+    let mut run = |signal: &'static str| {
+        let child = script(
+            &format!("signal-{}", signal.to_lowercase()),
+            &format!("ulimit -c 0\nkill -s {signal} $$\nsleep 5"),
+        );
+        scripts.push(child.clone());
+        (signal, child)
+    };
+    let cases = [run("SYS"), run("ABRT"), run("SEGV"), run("KILL")];
+    for (signal, child) in cases {
+        let from = logs.0.lock().unwrap().len();
+        let answer = read_with(&child, pdf_with(&["x"]), Duration::from_secs(10)).await;
+        let printed = String::from_utf8_lossy(&logs.0.lock().unwrap()[from..]).to_string();
+        if signal == "SYS" {
+            assert_eq!(
+                answer,
+                Err(ExtractError::Unavailable),
+                "a child the host ended with SIGSYS is the server's fault, not the file's"
+            );
+            assert!(
+                printed.contains(r#"step="host_killed""#),
+                "one warning line names it: {printed:?}"
+            );
+        } else {
+            assert_eq!(
+                answer,
+                Err(ExtractError::Unreadable),
+                "a child ended by SIG{signal} is the file's doing"
+            );
+            assert!(
+                !printed.contains("host_killed"),
+                "SIG{signal} is not the host's policy: {printed:?}"
+            );
+        }
+    }
+    for path in scripts {
         let _ = std::fs::remove_file(path);
     }
 }
@@ -884,32 +947,105 @@ fn a_child_confines_itself_before_it_reads_a_byte() {
 }
 
 /// #5072 (the failure path, which the Docker host this runs on cannot be made to take on its own): a host that
-/// refuses the filter. The test runs itself as a launcher that first installs a filter of its own refusing
-/// `seccomp(2)` — a stand-in for a runtime that does not let a process confine itself — and then starts the real
-/// worker binary as the child with a PDF on its stdin. The child must read **nothing** (the PDF's letters are
-/// nowhere in its answer), end with the status the supervisor maps to "this machine, not the file" (2), and name
-/// the step as the closed word `filter`.
+/// refuses **exactly one** thing the child asks of it, for each of the five steps of the confinement. The test runs
+/// itself as a launcher that first installs a filter of its own refusing just that call — a stand-in for a runtime
+/// that does not let a process confine itself that way — and then starts the real worker binary as the child with a
+/// PDF on its stdin. The child must read **nothing** (the PDF's letters are nowhere in its answer), end with the
+/// status the supervisor maps to "this machine, not the file" (2), and name the step as its closed word.
 ///
-/// RED: a child that goes on to read after `lock_down` failed (the letters come out), or that ends with another
-/// status, or names another step.
+/// The calls refused, one per step: `prlimit64` for `RLIMIT_CORE` (`core_limit`) and for `RLIMIT_AS`
+/// (`address_space`; the 64-bit x86 spellings of `getrlimit` and `setrlimit` too, in case a libc uses them),
+/// `prctl(PR_SET_DUMPABLE)` (`dumpable`), thread creation (`watchdog`: `clone3` answers "no such call", which makes
+/// glibc fall back to `clone`, which is refused for a new thread and nothing else — the launcher itself must still
+/// be able to start the child) and `seccomp(2)` (`filter`).
+///
+/// RED, per step: the child goes on to read after the step failed (the letters come out and it ends with 0 — an
+/// error ignored with `let _ =`), or ends with another status, or names another step. Review R1-2 of #5072: the
+/// first version of this test held `filter` alone, and ignoring the other four steps' errors left every test green.
 #[cfg(target_os = "linux")]
 #[test]
-fn a_child_whose_host_refuses_the_filter_reads_nothing_and_names_the_step() {
-    use seccompiler::{apply_filter, BpfProgram, SeccompAction, SeccompFilter, SeccompRule};
+fn a_host_that_refuses_any_one_step_gets_a_child_that_reads_nothing_and_names_it() {
+    use seccompiler::{
+        apply_filter, BpfProgram, SeccompAction, SeccompCmpArgLen, SeccompCmpOp, SeccompCondition,
+        SeccompFilter, SeccompRule,
+    };
     const LAUNCHER: &str = "OORT_5072_LAUNCHER";
-    if let Some(worker) = std::env::var_os(LAUNCHER) {
-        // refuse `seccomp(2)` from here on: the child, started below, inherits this filter across `exec`
-        let rules: std::collections::BTreeMap<i64, Vec<SeccompRule>> =
-            [(libc::SYS_seccomp, Vec::new())].into_iter().collect();
-        let filter = SeccompFilter::new(
-            rules,
-            SeccompAction::Allow,
-            SeccompAction::Errno(libc::EPERM as u32),
-            std::env::consts::ARCH.try_into().unwrap(),
-        )
-        .unwrap();
-        let program: BpfProgram = filter.try_into().unwrap();
-        apply_filter(&program).expect("the launcher can refuse seccomp(2) to its child");
+    const STEPS: [&str; 5] = [
+        "core_limit",
+        "address_space",
+        "dumpable",
+        "watchdog",
+        "filter",
+    ];
+    if let Some(spec) = std::env::var_os(LAUNCHER) {
+        let spec = spec.to_string_lossy().to_string();
+        let (step, worker) = spec.split_once('|').expect("step|worker");
+        // a filter that answers `errno` to the calls `rules` name (an empty list of conditions: every use of the call)
+        let refuse = |rules: Vec<(i64, Vec<SeccompRule>)>, errno: i32| {
+            let filter = SeccompFilter::new(
+                rules.into_iter().collect(),
+                SeccompAction::Allow,
+                SeccompAction::Errno(errno as u32),
+                std::env::consts::ARCH.try_into().unwrap(),
+            )
+            .unwrap();
+            let program: BpfProgram = filter.try_into().unwrap();
+            apply_filter(&program).expect("the launcher can refuse a call to its child");
+        };
+        // the calls whose `index`th argument is `value` (the resource of a limit, the option of a prctl)
+        let when_arg = |index: u8, op: SeccompCmpOp, value: u64| -> Vec<SeccompRule> {
+            vec![SeccompRule::new(vec![SeccompCondition::new(
+                index,
+                SeccompCmpArgLen::Dword,
+                op,
+                value,
+            )
+            .unwrap()])
+            .unwrap()]
+        };
+        let eperm = libc::EPERM;
+        match step {
+            "core_limit" | "address_space" => {
+                let resource = if step == "core_limit" {
+                    libc::RLIMIT_CORE
+                } else {
+                    libc::RLIMIT_AS
+                } as u64;
+                #[allow(unused_mut)]
+                let mut rules =
+                    vec![(libc::SYS_prlimit64, when_arg(1, SeccompCmpOp::Eq, resource))];
+                // 64-bit x86 also has the older calls (the resource is their first argument)
+                #[cfg(target_arch = "x86_64")]
+                rules.extend([
+                    (libc::SYS_getrlimit, when_arg(0, SeccompCmpOp::Eq, resource)),
+                    (libc::SYS_setrlimit, when_arg(0, SeccompCmpOp::Eq, resource)),
+                ]);
+                refuse(rules, eperm);
+            }
+            "dumpable" => refuse(
+                vec![(
+                    libc::SYS_prctl,
+                    when_arg(0, SeccompCmpOp::Eq, libc::PR_SET_DUMPABLE as u64),
+                )],
+                eperm,
+            ),
+            "watchdog" => {
+                // `clone3`: "no such call", so that glibc falls back to `clone` …
+                refuse(vec![(libc::SYS_clone3, Vec::new())], libc::ENOSYS);
+                // … which is refused when it asks for a new thread (CLONE_THREAD) and for nothing else, so that this
+                // launcher can still start the child (`posix_spawn` clones without it)
+                let thread = libc::CLONE_THREAD as u64;
+                refuse(
+                    vec![(
+                        libc::SYS_clone,
+                        when_arg(0, SeccompCmpOp::MaskedEq(thread), thread),
+                    )],
+                    eperm,
+                );
+            }
+            "filter" => refuse(vec![(libc::SYS_seccomp, Vec::new())], eperm),
+            other => panic!("unknown step {other}"),
+        }
         let status = std::process::Command::new(worker)
             .arg(CHILD_ARG)
             .env_clear()
@@ -920,44 +1056,47 @@ fn a_child_whose_host_refuses_the_filter_reads_nothing_and_names_the_step() {
             .expect("the worker binary starts");
         std::process::exit(status.code().unwrap_or(99));
     }
-    let mut launcher = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            "a_child_whose_host_refuses_the_filter_reads_nothing_and_names_the_step",
-            "--nocapture",
-            "--test-threads=1",
-        ])
-        .env(LAUNCHER, worker_binary())
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
-    let mut input = launcher.stdin.take().unwrap();
-    input
-        .write_all(&pdf_with(&["SENTINEL-5072-NEVER-READ"]))
-        .unwrap();
-    drop(input);
-    let output = launcher.wait_with_output().unwrap();
-    let printed = String::from_utf8_lossy(&output.stdout).to_string();
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "the child ends with the status the supervisor reads as 'this machine, not the file': {printed:?}"
-    );
-    assert!(
-        !printed.contains("SENTINEL-5072-NEVER-READ"),
-        "a child that could not lock itself down read the document anyway: {printed:?}"
-    );
-    // the harness prints `test <name> ... ` before the child's line: take the JSON from its first brace
-    let json_at = printed
-        .find("{\"")
-        .expect("the child answered with a JSON line");
-    let answer: serde_json::Value =
-        serde_json::from_str(printed[json_at..].lines().next().unwrap()).expect("one JSON line");
-    assert_eq!(answer["ok"], false, "{answer}");
-    assert_eq!(answer["code"], "confine_failed", "{answer}");
-    assert_eq!(answer["step"], "filter", "{answer}");
+    for step in STEPS {
+        let mut launcher = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "a_host_that_refuses_any_one_step_gets_a_child_that_reads_nothing_and_names_it",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env(LAUNCHER, format!("{step}|{}", worker_binary().display()))
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut input = launcher.stdin.take().unwrap();
+        input
+            .write_all(&pdf_with(&["SENTINEL-5072-NEVER-READ"]))
+            .unwrap();
+        drop(input);
+        let output = launcher.wait_with_output().unwrap();
+        let printed = String::from_utf8_lossy(&output.stdout).to_string();
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "{step}: the child ends with the status the supervisor reads as 'this machine, not the file': {printed:?}"
+        );
+        assert!(
+            !printed.contains("SENTINEL-5072-NEVER-READ"),
+            "{step}: a child that could not take this step read the document anyway: {printed:?}"
+        );
+        // the harness prints `test <name> ... ` before the child's line: take the JSON from its first brace
+        let json_at = printed
+            .find("{\"")
+            .unwrap_or_else(|| panic!("{step}: the child answered with a JSON line: {printed:?}"));
+        let answer: serde_json::Value =
+            serde_json::from_str(printed[json_at..].lines().next().unwrap())
+                .expect("one JSON line");
+        assert_eq!(answer["ok"], false, "{step}: {answer}");
+        assert_eq!(answer["code"], "confine_failed", "{step}: {answer}");
+        assert_eq!(answer["step"], step, "{step}: {answer}");
+    }
 }
 
 /// A document of `pages` pages with `lines` lines each. Built with the crate the child reads it with.

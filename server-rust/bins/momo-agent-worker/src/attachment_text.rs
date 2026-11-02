@@ -35,12 +35,15 @@
 //!   process when the supervisor is no longer there to (the worker itself was killed).
 //!
 //! After the limits and the watchdog thread the child **locks itself down** (`attachment_lockdown`, #5072): a
-//! system-call filter that, on every thread, refuses a file by name, a socket, another program and another
-//! process for the rest of its life. A parser that were somehow talked into running code could then neither
-//! read `/proc/<worker>/environ` nor reach the database, a shell or the worker's memory. Every step of the
-//! confinement is required: a child that cannot take one reads nothing and tells its supervisor **which**
-//! ([`ConfineStep`], a closed list), so a host that refuses a limit is one warning line away from a diagnosis
-//! and not a PDF reader that is silently open.
+//! system-call filter that, on every thread, refuses — whatever the container runtime's own profile allows — a
+//! file by name (to open it, and to delete, rename or make one), a socket, another program, and another process
+//! (to look into it, to signal it, to change its limits). A parser that were somehow talked into running code
+//! could then neither read `/proc/<worker>/environ` nor reach the database, a shell, or the worker's memory by any
+//! of the ways the filter's list names. What the list leaves open, measured, is in that module's docs. Every step
+//! of the confinement is required: a child that cannot take one reads nothing and tells its supervisor
+//! **which** ([`ConfineStep`], a closed list), so a host that refuses a limit is one warning line away from a
+//! diagnosis and not a PDF reader that is silently open. A host whose own policy *kills* the child on one of those
+//! calls (`SIGSYS`) is read the same way — this machine, not the file — and logged as `host_killed`.
 //!
 //! macOS enforces no address-space ceiling, so there only the supervisor's watch bounds the memory
 //! (the image this ships in is Linux). The watch is a sample, not a fence: what a child allocates inside
@@ -91,6 +94,9 @@ pub const CHILD_SELF_DEADLINE: Duration = Duration::from_secs(CHILD_DEADLINE.as_
 pub const WATCHDOG_EXIT_CODE: i32 = 124;
 /// The exit status of a child that could not confine itself and so read nothing.
 const CONFINE_FAILED_EXIT_CODE: i32 = 2;
+/// What the supervisor logs, in the place of a [`ConfineStep`], for a child the host's own system-call policy ended
+/// with `SIGSYS`: it is the supervisor's own word (the child died before it could say anything).
+const HOST_KILLED: &str = "host_killed";
 
 // The numbers stand in the order the module docs promise, or this does not compile: the child's own deadline is
 // after the supervisor's (the supervisor's kill is the normal end, this one is for a supervisor that is gone),
@@ -498,6 +504,20 @@ async fn over_memory(pid: Option<u32>, guard: &MemoryGuard) {
     }
 }
 
+/// Whether `status` is a death by `SIGSYS` (where the platform has signals).
+fn ended_by_sigsys(status: &std::process::ExitStatus) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.signal() == Some(libc::SIGSYS)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = status;
+        false
+    }
+}
+
 async fn run_child(
     bytes: Vec<u8>,
     path: PathBuf,
@@ -554,6 +574,20 @@ async fn run_child(
                 step = confine_step_in(&data),
                 "the PDF child could not confine itself and read nothing; this host refuses a step the child \
                  requires, so no PDF is read here until it allows it"
+            );
+            return Err(ExtractError::Unavailable);
+        }
+        // A child the host's own policy ended — a profile that answers a call with `SIGSYS` where the child's own
+        // filter answers with an error — is this machine and not the file, like the child that could not
+        // confine itself. Nothing a file can do ends a child with `SIGSYS`: only a system-call filter does, and the
+        // child's own ends it that way for a foreign ABI alone. The other signals are the file's doing and stay
+        // unreadable — `SIGABRT` is what the parser's own stack-overflow handler and a failed allocation end with
+        // (the review of #4970 measured three of fourteen hostile PDFs ending that way).
+        if ended_by_sigsys(&status) {
+            tracing::warn!(
+                step = HOST_KILLED,
+                "the PDF child was ended by this host's own system-call policy (SIGSYS) and read nothing; no PDF \
+                 is read here until the policy allows what the child does"
             );
             return Err(ExtractError::Unavailable);
         }
@@ -892,45 +926,74 @@ mod tests {
 
     /// #5072 (ADR-0151 증보 6 B): what a locked-down child is refused, measured **in a real process that did it**.
     /// The filter is irreversible, so the test runs itself again as a probe (`OORT_5072_LOCKDOWN_PROBE=<address>`):
-    /// the probe asks for the same eight things twice, before and after `confine_self` + the watchdog +
+    /// the probe asks for the same eighteen things twice, before and after `confine_self` + the watchdog +
     /// `lock_down` — the order the child takes them in.
     ///
     /// Before, every one of them works. That is the control: a refusal that the machine's own sandbox already
     /// makes would show up here, and "after" would prove nothing. After, each is refused with `EPERM` itself —
-    /// not "no such file" and not "access denied", which a missing path or a file mode would say — and what a PDF
-    /// read still needs (memory, the clock, a thread's sleep, standard output) is untouched.
+    /// not "no such file" and not "access denied", which a missing path or a file mode would say — the files it asked
+    /// to delete, rename and change are untouched, what a PDF read still needs (memory, the clock, a thread's
+    /// sleep, standard output) works, and a process that **aborts** still ends with `SIGABRT` (the one `tgkill` the
+    /// filter lets through is the one `abort()` makes, at itself).
     ///
-    /// Measured here: `openat`, `socket`, `connect`, `accept4`, `execve`, `pidfd_open`. The rest of the filter's list
-    /// is held by `attachment_lockdown::tests`, which runs the compiled filter on every entry.
+    /// The socket it makes is a Unix datagram socket, which takes `socket(2)` and nothing else: a filter that
+    /// forgot `socket` would be caught here, where a UDP socket (`socket` then `bind`) would have been refused by
+    /// the `bind` the filter also names (review R1-2 of #5072).
+    ///
+    /// Measured here: `openat`, `socket`, `connect`, `accept4`, `execve`, `pidfd_open`, `kill`, `prctl` with
+    /// `PR_SET_DUMPABLE` (it must not turn the dump back on: the `dumpable` line below reads the flag from the kernel
+    /// after the attempt), and the calls that
+    /// delete, rename, change the mode and the owner of, make a directory, remove a directory, make a symlink and make
+    /// a hard link — each asked through `std`, so that **the libc picks the system call**, which is the
+    /// architecture's (`rename` is `renameat` on aarch64: the first version of the filter's list missed it and this
+    /// probe found it). The rest of the filter's list is held by `attachment_lockdown::tests`, which runs the
+    /// compiled filter on every entry.
     #[cfg(target_os = "linux")]
     #[test]
     fn a_locked_down_child_is_refused_every_file_socket_program_and_process_it_asks_for() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::process::ExitStatusExt;
         const PROBE: &str = "OORT_5072_LOCKDOWN_PROBE";
         const PARENT: &str = "OORT_5072_PARENT";
+        const SCRATCH: &str = "OORT_5072_SCRATCH";
         const THIS_TEST: &str = "attachment_text::tests::a_locked_down_child_is_refused_every_file_socket_program_and_process_it_asks_for";
         if let Some(address) = std::env::var_os(PROBE) {
             let address = address.to_string_lossy().to_string();
             let parent: i32 = std::env::var(PARENT).unwrap().parse().unwrap();
+            let scratch = std::path::PathBuf::from(std::env::var_os(SCRATCH).unwrap());
             // sockets that exist before the lock-down, so that `connect` and `accept` are asked about on their own
             let udp =
                 std::net::UdpSocket::bind("127.0.0.1:0").expect("a socket before the lock-down");
             let listener = std::net::TcpListener::bind("127.0.0.1:0")
                 .expect("a listener before the lock-down");
             listener.set_nonblocking(true).unwrap();
-            let scratch =
-                std::env::temp_dir().join(format!("oort-5072-probe-{}", std::process::id()));
+            // the files and directories each attempt acts on, made now: after the lock-down nothing can be made
+            for when in ["before", "after"] {
+                for what in ["delete", "rename", "mode", "owner", "linksrc"] {
+                    let path = scratch.join(format!("{when}-{what}"));
+                    std::fs::write(&path, b"x").expect("a file before the lock-down");
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+                        .expect("its mode");
+                }
+                std::fs::create_dir(scratch.join(format!("{when}-rmdir")))
+                    .expect("a directory before the lock-down");
+            }
             let attempt = |when: &str| {
                 let pid = rustix::process::Pid::from_raw(parent).expect("a pid");
+                let at = |what: &str| scratch.join(format!("{when}-{what}"));
                 let attempts: Vec<(&str, std::io::Result<()>)> = vec![
                     ("open a file", std::fs::File::open("/etc/passwd").map(drop)),
                     (
                         "open the worker's environ",
                         std::fs::File::open(format!("/proc/{parent}/environ")).map(drop),
                     ),
-                    ("create a file", std::fs::File::create(&scratch).map(drop)),
+                    (
+                        "create a file",
+                        std::fs::File::create(at("created")).map(drop),
+                    ),
                     (
                         "make a socket",
-                        std::net::UdpSocket::bind("127.0.0.1:0").map(drop),
+                        std::os::unix::net::UnixDatagram::unbound().map(drop),
                     ),
                     ("connect a socket it already had", udp.connect(&address)),
                     (
@@ -946,6 +1009,45 @@ mod tests {
                         rustix::process::pidfd_open(pid, rustix::process::PidfdFlags::empty())
                             .map(drop)
                             .map_err(std::io::Error::from),
+                    ),
+                    ("delete a file", std::fs::remove_file(at("delete"))),
+                    (
+                        "rename a file",
+                        std::fs::rename(at("rename"), at("renamed")),
+                    ),
+                    (
+                        "change a file's mode",
+                        std::fs::set_permissions(
+                            at("mode"),
+                            std::fs::Permissions::from_mode(0o600),
+                        ),
+                    ),
+                    ("make a directory", std::fs::create_dir(at("dir"))),
+                    ("remove a directory", std::fs::remove_dir(at("rmdir"))),
+                    (
+                        "change a file's owner",
+                        std::os::unix::fs::chown(at("owner"), None, None),
+                    ),
+                    (
+                        "make a symlink",
+                        std::os::unix::fs::symlink("elsewhere", at("link")),
+                    ),
+                    (
+                        "make a hard link",
+                        std::fs::hard_link(at("linksrc"), at("hardlink")),
+                    ),
+                    (
+                        "signal the worker",
+                        rustix::process::test_kill_process(pid).map_err(std::io::Error::from),
+                    ),
+                    // the one `prctl` the filter refuses: nothing running in the child may turn the dump back on
+                    // (before the lock-down this is a no-op on a process that is still dumpable)
+                    (
+                        "turn the dump back on",
+                        rustix::process::set_dumpable_behavior(
+                            rustix::process::DumpableBehavior::Dumpable,
+                        )
+                        .map_err(std::io::Error::from),
                     ),
                 ];
                 for (what, result) in attempts {
@@ -964,6 +1066,33 @@ mod tests {
             .expect("the watchdog starts");
             lock_down().expect("the filter can be installed");
             attempt("after");
+            // what the refusals left alone (asking whether a path exists is not a call the filter names)
+            let yes_no = |yes: bool| if yes { "yes" } else { "no" };
+            let after = |what: &str| scratch.join(format!("after-{what}"));
+            println!(
+                "OORT-5072 | after | the file it asked to delete is still there | {}",
+                yes_no(after("delete").exists())
+            );
+            println!(
+                "OORT-5072 | after | the file it asked to rename is still where it was | {}",
+                yes_no(after("rename").exists() && !after("renamed").exists())
+            );
+            println!(
+                "OORT-5072 | after | the directory it asked to remove is still there | {}",
+                yes_no(after("rmdir").is_dir())
+            );
+            println!(
+                "OORT-5072 | after | the link it asked to make is not there | {}",
+                yes_no(!after("hardlink").exists() && !after("link").exists())
+            );
+            println!(
+                "OORT-5072 | after | the file it asked to change still has its mode | {}",
+                yes_no(
+                    std::fs::metadata(after("mode"))
+                        .map(|meta| meta.permissions().mode() & 0o777 == 0o644)
+                        .unwrap_or(false)
+                )
+            );
             // what the kernel says about the process itself (asked of the kernel, not of our own bookkeeping)
             println!(
                 "OORT-5072 | after | dumpable | {:?}",
@@ -984,18 +1113,22 @@ mod tests {
                 "OORT-5072 | after | allocate, touch and sleep | {}",
                 if worked { "allowed" } else { "broken" }
             );
-            // unlinking is not on the list: the probe clears up after itself
-            let _ = std::fs::remove_file(&scratch);
-            std::process::exit(0);
+            // a child that aborts (a stack that is too deep, an allocation that fails) must still end as it did:
+            // `abort()` signals its own process, which is the one `tgkill` the filter lets through
+            std::process::abort();
         }
+        let scratch = std::env::temp_dir().join(format!("oort-5072-probe-{}", std::process::id()));
+        std::fs::create_dir_all(&scratch).unwrap();
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", THIS_TEST, "--nocapture", "--test-threads=1"])
             .env(PROBE, listener.local_addr().unwrap().to_string())
             .env(PARENT, std::process::id().to_string())
+            .env(SCRATCH, &scratch)
             .stdin(std::process::Stdio::null())
             .output()
             .expect("the test binary can run itself");
+        let _ = std::fs::remove_dir_all(&scratch);
         // the harness prints `test <name> ... ` on the same line before the probe's first line
         let printed = String::from_utf8_lossy(&output.stdout).to_string();
         let verdicts: Vec<(String, String, String)> = printed
@@ -1026,6 +1159,16 @@ mod tests {
             "connect a socket it already had",
             "accept on a listener it already had",
             "start a program",
+            "delete a file",
+            "rename a file",
+            "change a file's mode",
+            "make a directory",
+            "remove a directory",
+            "change a file's owner",
+            "make a symlink",
+            "make a hard link",
+            "signal the worker",
+            "turn the dump back on",
         ] {
             assert_eq!(
                 verdict_of("before", what),
@@ -1037,6 +1180,16 @@ mod tests {
                 EPERM,
                 "{what}: after the lock-down it is refused by the filter itself"
             );
+        }
+        // the refusals left what they were asked to change as it was
+        for what in [
+            "the file it asked to delete is still there",
+            "the file it asked to rename is still where it was",
+            "the file it asked to change still has its mode",
+            "the directory it asked to remove is still there",
+            "the link it asked to make is not there",
+        ] {
+            assert_eq!(verdict_of("after", what), "yes", "{what}");
         }
         // `pidfd_open` needs a kernel from 5.3 and a runtime that lets it through: where the control is not
         // "allowed" this line measures nothing, and says so instead of passing quietly
@@ -1074,8 +1227,13 @@ mod tests {
                  (root may write a root-owned file); an unprivileged run is"
             );
         }
-        let _ = std::fs::remove_file(
-            std::env::temp_dir().join(format!("oort-5072-probe-{}", std::process::id())),
+        // the probe ends by aborting: `SIGABRT` and not a different ending (without the one `tgkill` the filter
+        // leaves open, `abort()` has no way to signal its own process and ends some other way)
+        assert_eq!(
+            output.status.signal(),
+            Some(libc::SIGABRT),
+            "a locked-down child that aborts must still end by SIGABRT: {:?}",
+            output.status
         );
     }
 

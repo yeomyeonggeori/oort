@@ -92,11 +92,14 @@ uuid.workspace = true
 #   seccompiler  builds and installs the system-call filter through a safe API (installing one takes a raw
 #                `seccomp(2)` call, which the workspace forbids us to write). The one new crate: Firecracker's, the
 #                rust-vmm project's, Apache-2.0 OR BSD-3-Clause, no dependency beyond `libc`.
-#   libc         only for the system-call numbers the filter names and `EPERM`; already in the lock file.
 [target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
 rustix = { version = "1", features = ["process"] }
 seccompiler = "0.5"
+
+# `libc`: the system-call numbers the filter names, `EPERM`, and — on every unix — `SIGSYS`, the signal a host's own
+# profile ends the PDF child with if it answers `seccomp(2)` by killing (#5072 review R1-4). Already in the lock file.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 # #4820 C2b 2부 (tests/hosted_door_pg.rs): the suite draws its own pictures and writes them the way
