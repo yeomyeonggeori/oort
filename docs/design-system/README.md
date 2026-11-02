@@ -564,11 +564,11 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 2. **한 탭스톱.** 툴바 항목은 행의 로빙 그룹에 편입된다. 행당 추가 탭스톱 ≤ 1. rest 정거장은 행 자신이며, 키보드 포커스(`:focus-visible`)일 때만 ⋯로 핸드오프한다. 마우스 mousedown 포커스는 핸드오프하지 않는다(본문 드래그 선택).
 3. **메뉴에만 남는 것.** 고치기/지우기는 overflow `⋯`와 우클릭 메뉴에만 있다.
 4. **터치.** `(hover: none)`에서는 툴바를 그리지 않는다. 길게 누르기 시트는 그대로다.
-5. **본문 겹침 금지 (B11 R2 Blocker).** 툴바는 행 상단 경계를 걸치는 플로팅 그릇이다. 위쪽이 스크롤러 상단에 막히면 행 하단으로 뒤집는다. 자기 행·이웃 행의 본문 텍스트 Range와 교차 면적 0. 겹침은 계약이 아니다.
+5. **본문 겹침 금지 (B11 R2 Blocker).** 툴바는 행 상단 경계를 걸치는 플로팅 그릇이다. 위쪽이 스크롤러 상단에 막히면 행 하단으로 뒤집는다. 자기 행·이웃 행의 본문 텍스트 Range와 교차 면적 0. 겹침은 계약이 아니다. **이웃은 행(`timeline-message`)만이 아니라 행 사이에 서는 글줄(`system-line`, 실행 중단 줄)도 센다(#5173).** 툴바는 이웃 칸 위에 `키 − 행 패딩`(34~38)만큼 얹히므로 가운데 글줄은 좁은 열에서 통째로 그 밑에 선다 — 글줄이 그 띠를 **자기 위·아래 여유로 비운다**(`SYSTEM_LINE_STRADDLE_CLEAR_CLASS`, 산식은 `spacing.ts`). 툴바가 서는 표면(타임라인)에서 호버가 되는 입력의 좁은 열(`@max-2xl`)에서만이다 — 넓은 열은 글자가 툴바와 가로로 떨어져 있고, 손가락 기기와 툴바가 없는 받은 편지함 맥락 창은 덮을 것이 없어 34 그대로다.
 
 정본 구현: `clients/web/src/features/timeline/MessageActions.tsx` (`MessageHoverToolbar`).
 
-기계 자가 **닫은** 축: 호버/포커스/터치 4상태 마운트 수, 행당 탭스톱(정적 스냅샷, 행 요소 정거장 포함), 본문 텍스트 Range ∩ 툴바 상자 = 0 (`assertHoverToolbarClearsBodyText`, 자기 행+이웃 행), 툴바 React 버튼 클릭 → 피커 오픈, 본문 드래그 선택 무간섭(`assertActionableRowDragSelect`), 스크롤러 상단 뒤집기(`assertHoverToolbarInsideScroller`).
+기계 자가 **닫은** 축: 호버/포커스/터치 4상태 마운트 수, 행당 탭스톱(정적 스냅샷, 행 요소 정거장 포함), 본문 텍스트 Range ∩ 툴바 상자 = 0 (`assertHoverToolbarClearsBodyText`, 자기 행+이웃 행·시스템 줄; 자는 `clients/web/scripts/lib/hoverToolbarOverlap.mjs` 한 벌이고 레인 `capture-5173.mjs`·실제 엔진 시험 `SystemLine.straddle.browser.test.ts`가 같은 자를 쓴다), 툴바 React 버튼 클릭 → 피커 오픈, 본문 드래그 선택 무간섭(`assertActionableRowDragSelect`), 스크롤러 상단 뒤집기(`assertHoverToolbarInsideScroller`).
 
 기계 자가 **아직 안 재는** 축: 순회 중 탭스톱 +1(유닛이 행당 1 불변; 캡처 `countTabStopsToComposer`가 전체 비용만 잰다), 다크 그릇 분리(토큰 §2.2 산술 + 사람 리뷰), 슬롯 클릭 직후 재배열(유닛이 마운트가 유지되는 동안 고정 — 포커스가 마운트를 유지할 수 있다).
 
