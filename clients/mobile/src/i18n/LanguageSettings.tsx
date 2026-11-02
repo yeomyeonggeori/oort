@@ -65,8 +65,10 @@ export function LanguageChoices({onChosen}: {onChosen?: () => void}): React.JSX.
   const englishUi = effectiveLocale === 'en-US';
   return (
     <SettingsSection>
-      <GroupCard>
-        <View accessibilityRole="radiogroup" accessibilityLabel={label} accessibilityState={{busy: pending}}>
+      {/* The radiogroup role belongs OUTSIDE the card (#5101, same shape as ExpressionPhotoForm's branch picker): GroupCard draws a
+          divider between its children, so a role wrapper inside it leaves the card one child and no divider between the rows. */}
+      <View accessibilityRole="radiogroup" accessibilityLabel={label} accessibilityState={{busy: pending}} testID="language-radiogroup">
+        <GroupCard>
           {languageChoices(CATALOG_LOCALES).map(choice => (
             // No beta tag, on screen or spoken (owner 10-31, #4936): the row is just the autonym.
             <ChoiceRow
@@ -79,8 +81,8 @@ export function LanguageChoices({onChosen}: {onChosen?: () => void}): React.JSX.
               testID={`language-${choice.preference}`}
             />
           ))}
-        </View>
-      </GroupCard>
+        </GroupCard>
+      </View>
       {pending ? (
         <View style={styles.pending} accessibilityLiveRegion="polite">
           <ActivityIndicator color={palette.textMuted} />

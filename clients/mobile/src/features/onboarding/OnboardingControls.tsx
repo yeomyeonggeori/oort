@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -25,8 +26,9 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import type {OnboardingDots as OnboardingDotsModel} from '@momo/core/features/onboarding/guide';
 
+import {HOME_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
-import {font, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {font, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useReduceMotion} from '../../lib/useReduceMotion';
 import {OnboardingCanvas, OnboardingDots} from './KomettoGuide';
 
@@ -265,28 +267,48 @@ export function OnboardingButton({
 export function OnboardingGhostButton({
   label,
   onPress,
+  accessory,
   accessibilityLabel,
   accessibilityHint,
   testID,
 }: {
   label: string;
   onPress: () => void;
+  /**
+   * `expand`: 글자 뒤에 ⌄ 를 붙여 「여기서 고른다」를 말한다(언어 칩, #5101). `ListRow accessory="expand"` 와 같은
+   * 글리프·크기이고(phone-sheets.md §4) 색은 글자와 같다. 글리프는 장식이라 보조기술에서 숨고 이름·힌트가 말한다.
+   * 「뒤로」·「취소」는 주지 않는다 — 고르는 단추가 아니다.
+   */
+  accessory?: 'expand';
   /** 글자와 다르게 읽을 때만(언어 칩의 「현재 언어: 한국어」). 없으면 글자 그대로다. */
   accessibilityLabel?: string;
   accessibilityHint?: string;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const expand = accessory === 'expand';
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
       accessibilityHint={accessibilityHint}
       onPress={onPress}
-      style={({pressed}) => [styles.ghost, pressed && styles.pressedText]}
+      style={({pressed}) => [
+        styles.ghost,
+        expand && styles.ghostWithGlyph,
+        pressed && styles.pressedText,
+      ]}
       testID={testID}
     >
       <Text style={styles.ghostLabel}>{label}</Text>
+      {expand ? (
+        <Image
+          source={HOME_ICONS.down}
+          style={styles.ghostGlyph}
+          accessibilityElementsHidden
+          testID={testID ? `${testID}-expand` : undefined}
+        />
+      ) : null}
     </Pressable>
   );
 }
@@ -527,6 +549,19 @@ const buildStyles = (color: Palette) =>
       minHeight: TOUCH_TARGET,
       minWidth: TOUCH_TARGET,
       justifyContent: 'center',
+    },
+    // ⌄ 가 붙은 칩(언어 칩)은 글자 뒤에 글리프를 한 줄로 둔다. 「뒤로」·「취소」는 이 줄을 쓰지 않는다.
+    ghostWithGlyph: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: space.xs,
+    },
+    // `ListRow accessory="expand"` 와 같은 PNG·크기. 색은 곁의 글자(`ghostLabel`)와 같은 역할이다 — 이 글리프가
+    // 칩이 고르는 단추임을 말하는 유일한 표지라 글자만큼 읽혀야 한다.
+    ghostGlyph: {
+      width: HOME_ICON_SIZE.down,
+      height: HOME_ICON_SIZE.down,
+      tintColor: color.textMuted,
     },
     ghostLabel: {
       color: color.textMuted,
