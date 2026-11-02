@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -162,5 +165,145 @@ describe("공용 툴팁", () => {
     focusVisible(center.button, true);
     act(() => center.button.focus());
     expect(center.tip()?.className).toContain("-translate-x-1/2");
+  });
+});
+
+// =============================================================================
+// #4230 — 툴팁은 자기를 가둔 판 안에 머문다. 판(`overflow: clip`)은 툴팁이 가장자리를 넘으면 글자를 자른다.
+// 상자는 jsdom이 못 재므로 가짜로 끼운다(계산 자체는 `tooltipFit.test.ts`가 숫자로, 진짜 상자는 `gate:channel-header-fit`이 잰다).
+// 여기서 지키는 것은 **연결**이다: 열릴 때 재서 변수를 넣고, 닫혔다 다시 열려도 낡은 값이 남지 않으며, CSS가 그 변수를 읽는다.
+// =============================================================================
+
+// jsdom 환경의 `URL`은 노드의 것이 아니라 `readFileSync(new URL(...))`이 거부된다: 경로 문자열로 읽는다.
+const TOKENS = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), "../tokens.css"),
+  "utf8"
+);
+
+/** `@utility <name> { ... }`의 본문(중첩 블록은 들여써서 열 0의 `}`가 유틸리티의 끝이다). */
+function utilityBody(name: string): string {
+  const start = TOKENS.indexOf(`@utility ${name} {`);
+  if (start < 0) throw new Error(`tokens.css에 @utility ${name}이 없다`);
+  return TOKENS.slice(start, TOKENS.indexOf("\n}", start));
+}
+
+interface PaneLayout {
+  pane: { left: number; right: number };
+  anchor: { left: number; right: number };
+  tipWidth: number;
+}
+
+function mockPaneLayout(layout: PaneLayout) {
+  const rect = (box: { left: number; right: number }) =>
+    ({
+      left: box.left,
+      right: box.right,
+      top: 0,
+      bottom: 20,
+      width: box.right - box.left,
+      height: 20,
+      x: box.left,
+      y: 0,
+      toJSON: () => ({}),
+    }) as DOMRect;
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    if (this.hasAttribute("data-pane")) return rect(layout.pane);
+    // `Tooltip`의 래퍼(`relative inline-flex`)가 트리거의 상자다.
+    if (this.classList.contains("relative")) return rect(layout.anchor);
+    return rect({ left: 0, right: 0 });
+  });
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+    return this.getAttribute("data-testid") === "tooltip" ? layout.tipWidth : 0;
+  });
+  const real = window.getComputedStyle.bind(window);
+  vi.spyOn(window, "getComputedStyle").mockImplementation(((el: Element, pseudo?: string | null) =>
+    el.hasAttribute("data-pane")
+      ? ({ overflowX: "clip" } as CSSStyleDeclaration)
+      : real(el, pseudo)) as typeof window.getComputedStyle);
+}
+
+function mountInPane(layout: PaneLayout, align: "center" | "end" = "center") {
+  mockPaneLayout(layout);
+  const pane = document.createElement("div");
+  pane.setAttribute("data-pane", "");
+  document.body.append(pane);
+  root = createRoot(pane);
+  act(() =>
+    root?.render(
+      createElement(Tooltip, {
+        label: "계획 12단계 중 1단계 완료",
+        side: "bottom",
+        align,
+        children: createElement("button", { type: "button", "aria-label": "계획" }, "x"),
+      })
+    )
+  );
+  const button = pane.querySelector("button") as HTMLButtonElement;
+  const tip = () => pane.querySelector<HTMLElement>('[data-testid="tooltip"]');
+  return { button, tip };
+}
+
+describe("판 안에 머문다 (#4230)", () => {
+  it("열릴 때 판 왼쪽을 넘는 만큼 안으로 민다: --tooltip-shift (줄이 바뀐 아랫줄의 첫 단추)", () => {
+    vi.useFakeTimers();
+    const { button, tip } = mountInPane({
+      pane: { left: 324, right: 592 },
+      anchor: { left: 350.4, right: 410.4 },
+      tipWidth: 149,
+    });
+    focusVisible(button, true);
+    act(() => button.focus());
+    // 자연 위치 왼쪽 끝은 380.4 - 74.5 = 305.9, 판 왼쪽 + 틈 4 = 328 → 22.1을 민다.
+    expect(Number.parseFloat(tip()?.style.getPropertyValue("--tooltip-shift") ?? "")).toBeCloseTo(22.1, 5);
+    expect(tip()?.hasAttribute("data-capped")).toBe(false);
+  });
+
+  it("판보다 넓으면 판 폭에서 줄바꿈한다: --tooltip-max와 data-capped (⋮의 「{긴 이름} 채널 메뉴」, 오른쪽 끝 정렬)", () => {
+    vi.useFakeTimers();
+    const { button, tip } = mountInPane(
+      { pane: { left: 0, right: 390 }, anchor: { left: 340, right: 374 }, tipWidth: 407 },
+      "end"
+    );
+    focusVisible(button, true);
+    act(() => button.focus());
+    expect(tip()?.hasAttribute("data-capped")).toBe(true);
+    expect(tip()?.style.getPropertyValue("--tooltip-max")).toBe("382");
+    expect(Number.parseFloat(tip()?.style.getPropertyValue("--tooltip-shift") ?? "")).toBeCloseTo(12, 5);
+  });
+
+  it("판 안이면 아무 값도 넣지 않고, 닫았다 다시 열면 낡은 값이 남지 않는다", () => {
+    vi.useFakeTimers();
+    const layout: PaneLayout = {
+      pane: { left: 0, right: 390 },
+      anchor: { left: 10, right: 44 },
+      tipWidth: 150,
+    };
+    const { button, tip } = mountInPane(layout);
+    focusVisible(button, true);
+    act(() => button.focus());
+    expect(tip()?.style.getPropertyValue("--tooltip-shift")).not.toBe("");
+    act(() => button.blur());
+    expect(tip()).toBeNull();
+
+    // 다른 자리(판 한가운데)에서 다시 열면 새 요소가 값 없이 선다.
+    layout.anchor = { left: 200, right: 234 };
+    act(() => button.focus());
+    expect(tip()?.style.getPropertyValue("--tooltip-shift")).toBe("");
+    expect(tip()?.hasAttribute("data-capped")).toBe(false);
+  });
+
+  it("tooltip-surface가 그 변수와 줄바꿈 표지를 읽는다 (연결이 끊기면 값만 넣고 안 움직인다)", () => {
+    const surface = utilityBody("tooltip-surface");
+    // 두 변수는 단위 없는 px 숫자라 CSS가 `* 1px`로 곱한다.
+    expect(surface).toMatch(/margin-inline-start: calc\(var\(--tooltip-shift, 0\) \* 1px\);/);
+    // 오른쪽 끝 정렬(`right: 0`)은 끝 여백의 음수가 같은 쪽으로 민다.
+    expect(surface).toMatch(/margin-inline-end: calc\(var\(--tooltip-shift, 0\) \* -1px\);/);
+    const capped = surface.slice(surface.indexOf("&[data-capped] {"));
+    expect(capped).toMatch(/inline-size: max-content;/);
+    expect(capped).toMatch(/max-inline-size: calc\(var\(--tooltip-max\) \* 1px\);/);
+    expect(capped).toMatch(/white-space: normal;/);
+    expect(capped).toMatch(/word-break: keep-all;/);
+    // 기본 면은 그대로 한 줄이다.
+    expect(surface.slice(0, surface.indexOf("&[data-capped] {"))).toMatch(/white-space: nowrap;/);
   });
 });
