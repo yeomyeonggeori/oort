@@ -125,6 +125,7 @@ import { WorkSessionIdleCard } from "@/features/work/WorkSessionIdleCard";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { workSessionIdleNotice } from "@momo/core/features/work/workSessionModel";
 import { selectionIsWithinRow } from "./messageContextMenuModel";
+import { useContextMenuYield } from "./useContextMenuYield";
 import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
 import { UnfurlCards } from "./UnfurlCards";
 import { useSession } from "@/app/session";
@@ -163,6 +164,11 @@ const AGENT_TEXT = "text-agent";
  * Radix's trigger is disabled before the contextmenu event reaches it, so it
  * never calls preventDefault in this branch. That preserves the browser's own
  * selection copy commands instead of replacing them with whole-message actions.
+ *
+ * "Selected" means the person's own selection. A selection the engine makes
+ * by itself for the right-click (macOS WebKit selects the clicked word before
+ * `contextmenu`) must not count: `useContextMenuYield` tells them apart, and
+ * clears the engine's (#5192).
  */
 function useSelectionWithinRow(ref: RefObject<HTMLElement | null>): boolean {
   const [selected, setSelected] = useState(false);
@@ -701,6 +707,7 @@ export function MessageRow({
   const actionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const onRowKeyDown = useRowRovingFocus(rowRef);
   const selectionWithinRow = useSelectionWithinRow(rowRef);
+  const contextMenuYield = useContextMenuYield(rowRef);
   const openReactionPicker = (opener?: HTMLElement | null) => {
     // 메뉴 항목은 다이얼로그가 열릴 때 포털과 함께 사라진다. 그 항목을 opener로
     // 잡으면 Esc 뒤 포커스가 body로 떨어지므로, 살아 남은 트리거를 쓴다.
@@ -798,14 +805,12 @@ export function MessageRow({
         if (next instanceof Node && event.currentTarget.contains(next)) return;
         setRowFocused(false);
       }}
-      // State disables the Radix trigger before a normal right-click. The
-      // capture guard covers the same gesture synchronously if React has not
-      // committed the immediately preceding selectionchange yet.
-      onContextMenuCapture={(event) => {
-        if (selectionIsWithinRow(rowRef.current, document.getSelection())) {
-          event.stopPropagation();
-        }
-      }}
+      // State disables the Radix trigger before a normal right-click on the
+      // person's own selection. The capture guard covers the same gesture
+      // synchronously if React has not committed the immediately preceding
+      // selectionchange yet, and keeps the engine's own right-click word
+      // selection from yielding the app menu (macOS WebKit, #5192).
+      {...contextMenuYield}
       {...(actionable ? longPress : {})}
       className={cn(
         // `group` lets the gutter clock react to a hover anywhere on the row.
