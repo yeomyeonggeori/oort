@@ -56,6 +56,8 @@ import {SettingsOverlay} from './settingsOverlay';
 //   status          중간 단 시트 + 입력 알약 + ✓ 비활성(입력 전). autoFocus 라 소프트 키보드가 올라온다 —
 //                   시트가 키보드 위에 앉고 입력 칸이 가려지지 않는지 본다
 //   status-ready    같은 시트, 입력 뒤(✓ 활성)
+//   status-locked   같은 시트가 저장하는 중(#5132) — 입력 알약·추천 행이 같이 잠겨 **같은 흐림**이고 ✓ 는 회색(잠긴 칸이라
+//                   자판은 안 올라온다)
 //   message[-delete]       메시지 행동 시트(배송되는 것) · 삭제 확인 단계
 //   channel[-leave|-dm]    대화 행 시트(배송되는 것) · 나가기 확인 · DM 행
 //   newdm[-empty]          새 DM 시트(배송되는 것, 씨앗을 뿌린 명부)
@@ -295,15 +297,22 @@ function HeadersKit(): React.JSX.Element {
 
 // ---- 중간 단 + 입력: 키보드가 올라와도 가려지지 않는다 --------------------------
 
-function StatusSheet({ready}: {ready: boolean}): React.JSX.Element {
-  const [text, setText] = useState(ready ? '집중하는 중' : '');
+function StatusSheet({
+  ready,
+  locked = false,
+}: {
+  ready: boolean;
+  /** 저장하는 중: 입력 알약(`editable={false}`)과 추천 행(`disabled`)이 같이 잠기고 ✓ 가 회색이다 — 잠김의 두 모양을 한 장에 둔다. */
+  locked?: boolean;
+}): React.JSX.Element {
+  const [text, setText] = useState(ready || locked ? '집중하는 중' : '');
   return (
     <Backdrop>
       <PageSheet height="medium" onClose={noop} accessibilityLabel="상태 설정" testID="sheetkit-status-sheet">
         <SheetHeader
           title="상태 설정"
           closeLabel="상태 설정 닫기"
-          confirm={{label: '상태 저장', onPress: noop, disabled: text.trim() === ''}}
+          confirm={{label: '상태 저장', onPress: noop, disabled: locked || text.trim() === ''}}
         />
         <SheetScroll>
           <InputPill
@@ -312,13 +321,14 @@ function StatusSheet({ready}: {ready: boolean}): React.JSX.Element {
             placeholder="무엇을 하고 있나요?"
             value={text}
             onChangeText={setText}
-            autoFocus
+            autoFocus={!locked}
+            editable={!locked}
             testID="sheetkit-status-input"
           />
           <GroupCard label="추천" inset="icon">
-            <ListRow leading={<RowEmoji emoji="📅" />} title="회의 중" onPress={noop} />
-            <ListRow leading={<RowEmoji emoji="🍚" />} title="점심 먹는 중" onPress={noop} />
-            <ListRow leading={<RowEmoji emoji="🏠" />} title="재택 근무" onPress={noop} />
+            <ListRow leading={<RowEmoji emoji="📅" />} title="회의 중" disabled={locked} onPress={noop} />
+            <ListRow leading={<RowEmoji emoji="🍚" />} title="점심 먹는 중" disabled={locked} onPress={noop} />
+            <ListRow leading={<RowEmoji emoji="🏠" />} title="재택 근무" disabled={locked} onPress={noop} />
           </GroupCard>
         </SheetScroll>
       </PageSheet>
@@ -696,6 +706,8 @@ export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
       return <StatusSheet ready={false} />;
     case 'status-ready':
       return <StatusSheet ready />;
+    case 'status-locked':
+      return <StatusSheet ready locked />;
     case 'message':
       return <MessageSheetSurface confirmDelete={false} />;
     case 'message-delete':
