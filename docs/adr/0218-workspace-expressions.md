@@ -7,7 +7,7 @@
 > 증보 2: §8 (2026-10-31, #4931 설계 → #4941 결정·구현, **Accepted — owner 2026-10-31**) — 사진 이모티콘: 방식 비교(H0~H8)는 근거로 남기고, **H9~H12가 새 계약**이다: 팀에 연결된 이미지 모델(OpenAI·Gemini)에 사진 한 장을 서버가 직접 보내 「배경 지우기」·「캐리커처」 그림을 받고, 지금의 직접 초안 길로 등록한다. ADR-0186 v8 X8-1의 「서버/팀 AI 생성 호출은 없다」에 이 길 하나의 예외를 둔다.
 > 증보 3: §9 (2026-11-01, #4992, **Accepted** 2026-11-02 planner) — 사진 초안 되찾기·돈이 든 그림 지키기: 내 사진 초안 목록 읽기 하나, 호출 뒤 디코더 바쁨 재시도, 격리 디코더 `--prepare` 출력 모양, 키 여는 문 시험. H9~H12의 결정은 바꾸지 않는다.
 > 증보 4: §10 (2026-11-02, #4961, **Accepted** 2026-11-02 planner) — 팀 표현의 종류 값: 등록마다 `emoji`(작은 팀 이모지)·`sticker`(큰 이모티콘) 하나. 등록(활성화) 순간에 사람이 고르거나 큰 그림으로 추천하고, 옛 등록은 `sticker`다. §1의 4(「별도 `kind=sticker`가 없다」)를 **고르개의 분류 값 하나**로 좁혀 더한다. 메시지·반응의 와이어와 D1의 크기 규칙은 바뀌지 않는다. migration 171.
-> 증보 5: §11 (2026-11-02, #5133, **Proposed** — 워커 기안, planner가 검토해 Accepted로 올린다) — 사진 초안의 출처 문장 셋: 서버가 쓰는 고정 문장을 둘에서 셋으로 한다. 배경을 지우지 못한 그림(`cutout: "unchanged"`)은 「배경을 지운 그림」이라고 쓰지 않는다. H9~H12의 결정·와이어·DB는 바뀌지 않는다. migration 없음.
+> 증보 5: §11 (2026-11-02, #5133, **Accepted** 2026-11-02 planner) — 사진 초안의 출처 문장 셋: 서버가 쓰는 고정 문장을 둘에서 셋으로 한다. 배경을 지우지 못한 그림(`cutout: "unchanged"`)은 「배경을 지운 그림」이라고 쓰지 않는다. H9~H12의 결정·와이어·DB는 바뀌지 않는다. migration 없음.
 > Consumes: [ADR-0100](0100-decision-governance.md), [ADR-0137](0137-mobile-react-native-migration.md), [ADR-0151](0151-attachments-v0-drive-contract-port.md), [ADR-0170](0170-link-unfurl-server-surface.md), [ADR-0186 증보 v8](0186-agent-workspace-actions.md#증보-2026-10-30--팀-표현-행동-expressioncreate-v8-4301).
 
 ## 1. 결정의 근거와 범위
@@ -757,7 +757,7 @@ H11 (a)의 「키는 한 문으로만 열리고 시험이 열린 횟수를 센�
 
 ## 11. 증보 2026-11-02 — 사진 초안의 출처 문장 셋: 배경을 못 지운 그림은 지웠다고 쓰지 않는다 (#5133)
 
-> Status: **Proposed (2026-11-02, #5133 워커 기안 — planner가 검토해 Accepted로 올린다)**. ADR-0100: 직접 API가 받는 `generated` 출처의 문장 집합이 둘에서 셋으로 넓어지므로 이 참조가 머지 조건이다. 근거: #5099(폰 화면 검수)가 찾은 모순 — [#5133](https://github.com/yeomyeonggeori/oort/issues/5133).
+> Status: **Accepted (2026-11-02, planner — #5133 단위·코어 시험과 새 실 PG 시험 실행 확인)**. 기안 2026-11-02 Proposed. ADR-0100: 직접 API가 받는 `generated` 출처의 문장 집합이 둘에서 셋으로 넓어지므로 이 참조가 머지 조건이다. 근거: #5099(폰 화면 검수)가 찾은 모순 — [#5133](https://github.com/yeomyeonggeori/oort/issues/5133).
 > 범위: 서버가 사진 초안의 `origin.prompt`에 쓰는 고정 문장(`PHOTO_PROMPTS`)과 그것을 고르는 규칙. **바뀌지 않는 것**: H9~H12의 결정 전부(두 갈래·동의·한도·요청 순서·키 여는 문 하나), 와이어(필드·코드 0개; 응답의 `cutout` 값 `model`·`erased`·`unchanged`), DB(새 열·migration 없음), 앞의 두 문장의 글자.
 
 ### K1. 문제
