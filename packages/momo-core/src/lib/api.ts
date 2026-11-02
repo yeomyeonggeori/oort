@@ -6172,9 +6172,9 @@ export function agentRunProgressPageFromWire(value: unknown): AgentRunProgress[]
 
 /**
  * 원장 행의 닫힌 어휘(openapi `AgentRunEvent.kind`). `doorbell_rung`은
- * `?include=doorbell`로, `tool_call`은 `?include=tools`로 읽을 때만 온다(ADR-0200 증보
- * 2026-10-14 #3824, 증보 2026-10-15 T4 #4654). `activity`·`plan`(`?include=activity`, 증보 7)은
- * 이 클라이언트가 아직 묻지 않으므로 아직 `unknown`이다(UXUI 슬라이스 7-S4).
+ * `?include=doorbell`로, `tool_call`은 `?include=tools`로, `activity`·`plan`은
+ * `?include=activity`로 읽을 때만 온다(ADR-0200 증보 2026-10-14 #3824, 증보 2026-10-15 T4 #4654,
+ * 증보 7 7-7 #4657).
  */
 export type AgentRunLedgerKnownKind =
   | "queued"
@@ -6190,7 +6190,9 @@ export type AgentRunLedgerKnownKind =
   | "timed_out"
   | "cancelled"
   | "doorbell_rung"
-  | "tool_call";
+  | "tool_call"
+  | "activity"
+  | "plan";
 
 /**
  * 이 클라이언트가 아는 종류, 그리고 모르는 종류 하나(`unknown`). 서버는 클라이언트보다
@@ -6214,6 +6216,8 @@ const AGENT_RUN_LEDGER_KINDS = new Set<AgentRunLedgerKnownKind>([
   "cancelled",
   "doorbell_rung",
   "tool_call",
+  "activity",
+  "plan",
 ]);
 
 /**
@@ -6275,12 +6279,15 @@ export interface AgentRunLedgerEvent {
   /** `tool_call` 행에만: 서버가 자기 시계로 잰 처리 시간(ms, 0~600000). 범위 밖이면 싣지 않는다. */
   durationMs?: number;
   /**
-   * `activity` 행에만, 서버가 `?include=activity`일 때만 싣는다(ADR-0200 증보 7). **타입만 먼저
-   * 둔다**: 지금 파서(`agentRunLedgerFromWire`)는 이 칸을 읽지 않고(모르는 행 키는 버린다) 이
-   * 클라이언트는 `include=activity`를 보내지 않는다. 파서·행 모델은 UXUI 슬라이스(7-S4)가 채운다.
+   * `activity` 행에만, 서버가 `?include=activity`일 때만 싣는다(ADR-0200 증보 7 7-7). id별 최신
+   * 상태 하나다. **에이전트 자기 보고**라 믿지 않는 일반 텍스트다. 모양이 틀린 `activity` 칸은 그 행을
+   * `unknown`으로 내리고 원장 전체를 거부하지 않는다.
    */
   activity?: AgentRunActivity;
-  /** `plan` 행에만(같은 조건): 최신 계획 전체. 빈 배열은 에이전트가 비웠다는 뜻이다. */
+  /**
+   * `plan` 행에만(같은 조건): 최신 계획 전체. 빈 배열은 에이전트가 비웠다는 뜻이다. 한 단계라도 모양이
+   * 틀리면 그 행을 `unknown`으로 내린다: 일부만 남기면 「4단계 중 2단계」의 4가 조용히 줄어든다.
+   */
   plan?: AgentRunPlanStep[];
   createdAtMs: number;
 }
@@ -6308,7 +6315,11 @@ export interface AgentRunLedger {
   toolTally?: AgentRunToolTally[];
   /** `include=tools`일 때만: 호출이 `tool_call` 100행 상한 너머까지 세어졌다(합계가 행보다 많다). */
   toolCallRowsCapped?: boolean;
-  /** `?include=activity`일 때만(ADR-0200 증보 7). 타입만 먼저 둔다 — 파서는 7-S4가 채운다. */
+  /**
+   * `?include=activity`에 **답한** 서버만 싣는다(빈 배열은 「물었고 끝난 활동이 없다」). 없으면 이 서버는
+   * `activity`를 모른다(구 서버·400으로 물러선 읽기): 보고가 없다는 뜻이 아니다. `toolTally`와 같은
+   * 규칙으로 모양이 틀린 합계는 「없음」으로 읽고 원장을 거부하지 않는다. **에이전트의 자기 보고 합**이다.
+   */
   activityTally?: AgentRunActivityTally[];
   /** `?include=activity`일 때만: 합계가 보이는 끝난 활동보다 커서 일부는 합계로만 남았다. */
   activityRowsTrimmed?: boolean;
@@ -6351,6 +6362,76 @@ function toolTallyFromWire(value: unknown): AgentRunToolTally[] | undefined {
   return tally;
 }
 
+/** 활동 식별자의 닫힌 모양(openapi `AgentRunActivity.id`). */
+const ACTIVITY_ID = /^[A-Za-z0-9_-]{1,32}$/;
+
+/** 한 활동이 묶는 일의 수 천장(openapi `AgentRunActivity.n`, `toolCounts`와 같은 값). */
+const MAX_ACTIVITY_N = 100_000;
+
+/**
+ * `activity` 행의 본문. 식별자·종류·상태·시작 시각 중 하나라도 없거나 틀리면 undefined(그 행은 모르는
+ * 종류가 된다). `n`이 틀리면 「보고하지 않음」의 1이다: 서버는 항상 1 이상을 쓰므로 틀린 값은 서버가 앞서
+ * 간 것이고, 거기서 큰 수를 짓지 않는다. 종류·상태는 닫힌 낱말이지만 서버가 먼저 늘릴 수 있어 문자열로 둔다.
+ */
+function activityFromWire(value: unknown): AgentRunActivity | undefined {
+  const id = str(value, "id");
+  const kind = str(value, "kind");
+  const status = str(value, "status");
+  const startedAtMs = num(value, "startedAtMs");
+  if (
+    id === undefined ||
+    !ACTIVITY_ID.test(id) ||
+    kind === undefined ||
+    kind === "" ||
+    status === undefined ||
+    status === "" ||
+    startedAtMs === undefined
+  ) {
+    return undefined;
+  }
+  const label = str(value, "label");
+  const n = num(value, "n");
+  return {
+    id,
+    kind,
+    status,
+    startedAtMs,
+    n: n !== undefined && Number.isInteger(n) && n >= 1 && n <= MAX_ACTIVITY_N ? n : 1,
+    ...(label === undefined || label.trim() === "" ? {} : { label }),
+  };
+}
+
+/** `plan` 행의 본문. 배열이고 모든 단계가 글과 상태를 가질 때만 읽는다(`[]`는 비웠다는 뜻으로 읽는다). */
+function planFromWire(value: unknown): AgentRunPlanStep[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const steps: AgentRunPlanStep[] = [];
+  for (const entry of value) {
+    const text = str(entry, "text");
+    const status = str(entry, "status");
+    if (text === undefined || text.trim() === "" || status === undefined || status === "") {
+      return undefined;
+    }
+    steps.push({ text, status });
+  }
+  return steps;
+}
+
+/** `toolTallyFromWire`와 같은 규칙: 하나라도 틀리면 전체를 없음으로(일부만 남기면 합계가 조용히 줄어든다). */
+function activityTallyFromWire(value: unknown): AgentRunActivityTally[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const tally: AgentRunActivityTally[] = [];
+  for (const entry of value) {
+    const kind = str(entry, "kind");
+    const completed = nonNegativeInteger(num(entry, "completed"));
+    const failed = nonNegativeInteger(num(entry, "failed"));
+    if (kind === undefined || kind === "" || completed === undefined || failed === undefined) {
+      return undefined;
+    }
+    tally.push({ kind, completed, failed });
+  }
+  return tally;
+}
+
 export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
   const source = responseRecord(value);
   const runId = str(source, "runId");
@@ -6358,10 +6439,15 @@ export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
   if (runId === undefined || events === null) throw new WireShapeError();
   const toolTally = toolTallyFromWire(record(source)?.toolTally);
   const toolCallRowsCapped = toolTally === undefined ? undefined : bool(source, "toolCallRowsCapped");
+  const activityTally = activityTallyFromWire(record(source)?.activityTally);
+  const activityRowsTrimmed =
+    activityTally === undefined ? undefined : bool(source, "activityRowsTrimmed");
   return {
     runId: runId.toLowerCase(),
     ...(toolTally === undefined ? {} : { toolTally }),
     ...(toolCallRowsCapped === undefined ? {} : { toolCallRowsCapped }),
+    ...(activityTally === undefined ? {} : { activityTally }),
+    ...(activityRowsTrimmed === undefined ? {} : { activityRowsTrimmed }),
     events: events.map((entry) => {
       const row = record(entry);
       if (row === null) throw new WireShapeError();
@@ -6373,7 +6459,14 @@ export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
       }
       // 모르는 종류는 원장을 거부하지 않고 `unknown` 한 줄로 남긴다(#3824). 행의
       // 모양(순번·시각) 자체가 틀린 것은 여전히 거부한다.
-      const known = AGENT_RUN_LEDGER_KINDS.has(kind as AgentRunLedgerKnownKind);
+      // `activity`·`plan`은 자기 종류의 행에만 본문이 있다. 본문이 틀린 행은 모르는 종류로 내리고
+      // 원장은 그대로 읽는다(위 `unknown`과 같은 이유: 행 하나 때문에 기록이 통째로 사라지지 않게).
+      const activity = kind === "activity" ? activityFromWire(row.activity) : undefined;
+      const plan = kind === "plan" ? planFromWire(row.plan) : undefined;
+      const known =
+        AGENT_RUN_LEDGER_KINDS.has(kind as AgentRunLedgerKnownKind) &&
+        !(kind === "activity" && activity === undefined) &&
+        !(kind === "plan" && plan === undefined);
       const stage = optionalString(row, "stage");
       const code = optionalString(row, "code");
       const approvalId = optionalString(row, "approvalId");
@@ -6393,6 +6486,8 @@ export function agentRunLedgerFromWire(value: unknown): AgentRunLedger {
         ...(code === undefined ? {} : { code }),
         ...(tool === undefined ? {} : { tool }),
         ...(durationMs === undefined ? {} : { durationMs }),
+        ...(activity === undefined ? {} : { activity }),
+        ...(plan === undefined ? {} : { plan }),
         ...(approvalId === undefined ? {} : { approvalId: approvalId.toLowerCase() }),
         ...(actorMemberId === undefined
           ? {}
@@ -6436,17 +6531,20 @@ export async function fetchAgentRunProgress(
  * - `tools`(#4654, ADR-0200 증보 2026-10-15 T4): oort가 직접 잰 도구 호출 행(`tool_call`)과 합계
  *   (`toolTally`·`toolCallRowsCapped`). 쿼리를 무시하는 서버는 합계 없이 200을 주고(호출 0번이 아니라
  *   「모름」이다: `toolTally` 부재), 쿼리를 읽고 모르는 값에 400을 내는 서버는 아래 사다리로 간다.
+ * - `activity`(#4657, 증보 7 7-7): 에이전트가 스스로 알린 활동·계획 행(`activity`·`plan`)과 합계
+ *   (`activityTally`·`activityRowsTrimmed`). `tools`와 같은 모양이다: 합계 부재 = 「모름」.
  *
- * **한 번만 물러서기.** 400이면 물을 것을 한 칸씩 줄여 다시 읽는다: `doorbell,tools` → `doorbell`
- * → 쿼리 없음. 「doorbell은 알고 tools는 모르는」 서버에는 두 번째 칸이 맞는 읽기다(깨움 줄을 잃지
- * 않는다). 물러선 읽기가 **성공했을 때만** 빠진 값을 거절로 기억하고 다음부터는 묻지 않는다 — 같은
- * 경로가 틀린 run id에도 400을 내므로, 끝칸(쿼리 없음)까지 400이면 아무것도 기억하지 않고 던진다.
- * 기억하지 않으면 30초 폴링마다 400 왕복이 영원히 붙는다.
+ * **한 번만 물러서기.** 400이면 물을 것을 **가장 새로 생긴 것부터** 한 칸씩 줄여 다시 읽는다:
+ * `doorbell,tools,activity` → `doorbell,tools` → `doorbell` → 쿼리 없음(서버가 늘린 순서의 거꾸로라서
+ * 「doorbell은 알고 tools는 모르는」 서버에는 가운데 칸이 맞는 읽기다: 깨움 줄을 잃지 않는다). 물러선 읽기가
+ * **성공했을 때만** 빠진 값을 거절로 기억하고 다음부터는 묻지 않는다 — 같은 경로가 틀린 run id에도 400을
+ * 내므로, 끝칸(쿼리 없음)까지 400이면 아무것도 기억하지 않고 던진다. 기억하지 않으면 30초 폴링마다
+ * 400 왕복이 영원히 붙는다.
  */
 export async function fetchAgentRunEvents(
   workspaceId: string,
   runId: string,
-  options: { includeDoorbell?: boolean; includeTools?: boolean } = {}
+  options: { includeDoorbell?: boolean; includeTools?: boolean; includeActivity?: boolean } = {}
 ): Promise<AgentRunLedger> {
   const base = `/v1/workspaces/${encodeURIComponent(
     workspaceId.toLowerCase()
@@ -6454,16 +6552,19 @@ export async function fetchAgentRunEvents(
   const asked: string[] = [
     ...(options.includeDoorbell === true && !ledgerDoorbellRejected ? ["doorbell"] : []),
     ...(options.includeTools === true && !ledgerToolsRejected ? ["tools"] : []),
+    ...(options.includeActivity === true && !ledgerActivityRejected ? ["activity"] : []),
   ];
-  const rungs: string[][] = [asked];
-  if (asked.includes("doorbell") && asked.includes("tools")) rungs.push(["doorbell"]);
-  if (asked.length > 0) rungs.push([]);
+  // 물어볼 값은 서버가 늘린 순서(doorbell, tools, activity)로 줄을 서 있으므로 앞쪽 접두를 차례로 시도하면
+  // 가장 새 값부터 물러선다. 물은 것이 없으면 한 칸(쿼리 없음)뿐이다.
+  const rungs: string[][] = asked.map((_, cut) => asked.slice(0, asked.length - cut));
+  rungs.push([]);
   for (const [index, include] of rungs.entries()) {
     try {
       const ledger = agentRunLedgerFromWire(
         await request<unknown>(include.length === 0 ? base : `${base}?include=${include.join(",")}`)
       );
       if (index > 0) {
+        if (asked.includes("activity") && !include.includes("activity")) ledgerActivityRejected = true;
         if (asked.includes("tools") && !include.includes("tools")) ledgerToolsRejected = true;
         if (asked.includes("doorbell") && !include.includes("doorbell")) ledgerDoorbellRejected = true;
       }
@@ -6482,10 +6583,14 @@ let ledgerDoorbellRejected = false;
 /** 이 서버가 `include=tools`를 400으로 거절했는가(`doorbell`은 알아도). 거절했으면 다시 묻지 않는다. */
 let ledgerToolsRejected = false;
 
+/** 이 서버가 `include=activity`를 400으로 거절했는가(`doorbell`·`tools`는 알아도). 거절했으면 다시 묻지 않는다. */
+let ledgerActivityRejected = false;
+
 /** 세션·워크스페이스가 바뀌면 다시 물어본다(다른 서버일 수 있다). 시험 seam이기도 하다. */
 export function resetRunLedgerIncludeProbe(): void {
   ledgerDoorbellRejected = false;
   ledgerToolsRejected = false;
+  ledgerActivityRejected = false;
 }
 
 // ---- Hosted agent liveness (ADR-0200 D4, #3742) -----------------------------

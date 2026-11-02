@@ -43,12 +43,17 @@
 //! | `t23_a_tasks_report_gets_no_link_preview_even_when_its_last_step_read_nothing` | r1 M2 (#3899) | drop `trace.task_step.is_some()` from `team_ai_finish`'s `withhold_previews` |
 //! | `t24_a_stopped_steps_web_searches_count_toward_the_days_allowance` | r1 L4a, B9-2 | pass `0` instead of the trace's `web_searches` to `team_ai_task_drop` |
 //! | `t25_a_task_and_the_work_request_card_never_both_end_one_request` | #4972 × #4967, B13-I4 | check `card_suggest` before `task_continue`, or offer a step the card tool |
-//! | `t26_a_stop_between_attempts_still_stops_the_task` | #5029 (r1 L3a) | take the active-task arm out of `cancel_run_in_tx`'s status guard, or widen it past an active row (a `failed` run without one, or with an ended one, is stopped) |
-//! | `t27_a_step_job_that_waits_out_its_attempts_ends_the_task` | #5029 (r1 L3b) | let `team_ai_task_wait` drop the job at the limit without ending the task, or end the task before the limit |
-//! | `t28_a_step_that_cannot_commit_because_its_helper_is_gone_ends_the_task` | #5029 (r1 L3c) | drop the `end_in_tx` of `team_ai_task_commit`'s `Committed::Gone` branch |
-//! | `t29_a_step_that_answers_after_its_helper_is_gone_ends_the_task` | #5029 (r1 L3c) | drop the `end_in_tx` of `team_ai_finish`'s no-run branch |
-//! | `t30_a_first_turn_that_cannot_start_a_task_leaves_no_row` | #5029 (r1 L3c) | drop the `end_in_tx` of `team_ai_task_begin`'s `Began::Gone` branch |
-//! | `t31_the_last_attempts_failure_ends_the_task_and_an_earlier_one_does_not` | #5029 (r1 L3d) | drop `team_ai_task_end_failed` from `settle_retryable`'s last attempt, or call it on every failure |
+//! | `t26_each_step_reports_what_it_did_and_the_plan_that_remains` | #4968 B5-7, 증보 7 | drop the `record_step_progress` call of the first turn, of a step's commit or of the last step's finish; count a kind wrong; write the plan in a different shape than "first in progress, rest pending" |
+//! | `t27_the_note_the_request_and_what_was_read_never_reach_the_ledgers_text` | #4968 (fence), B13-I6 | let the note, the request or a read result into a stage, a label, an id or a plan step |
+//! | `t28_every_stage_and_plan_text_a_task_writes_passes_the_agent_ports_rule` | #4968 acceptance 1 | judge a progress line or a visible plan step by anything but the shared short-text rule (`is_unsafe_char`, `checked_report_text`), or count the line's `m` from anything but the visible plan |
+//! | `t29_a_quick_answer_writes_no_activity_and_no_plan` | #4968 (quick path unchanged) | report progress for a request that is not a task |
+//! | `t30_the_writer_runs_as_the_workers_role_and_a_read_only_role_cannot` | #4968, 168 header ROLES | call the writer as a role without the verbs it needs (and the check that a read-only role is refused) |
+//! | `t31_a_stop_between_attempts_still_stops_the_task` | #5029 (r1 L3a) | take the active-task arm out of `cancel_run_in_tx`'s status guard, or widen it past an active row (a `failed` run without one, or with an ended one, is stopped) |
+//! | `t32_a_step_job_that_waits_out_its_attempts_ends_the_task` | #5029 (r1 L3b) | let `team_ai_task_wait` drop the job at the limit without ending the task, or end the task before the limit |
+//! | `t33_a_step_that_cannot_commit_because_its_helper_is_gone_ends_the_task` | #5029 (r1 L3c) | drop the `end_in_tx` of `team_ai_task_commit`'s `Committed::Gone` branch |
+//! | `t34_a_step_that_answers_after_its_helper_is_gone_ends_the_task` | #5029 (r1 L3c) | drop the `end_in_tx` of `team_ai_finish`'s no-run branch |
+//! | `t35_a_first_turn_that_cannot_start_a_task_leaves_no_row` | #5029 (r1 L3c) | drop the `end_in_tx` of `team_ai_task_begin`'s `Began::Gone` branch |
+//! | `t36_the_last_attempts_failure_ends_the_task_and_an_earlier_one_does_not` | #5029 (r1 L3d) | drop `team_ai_task_end_failed` from `settle_retryable`'s last attempt, or call it on every failure |
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -532,6 +537,72 @@ async fn stage_labels(su: &PgPool, run: Uuid) -> Vec<String> {
     .unwrap()
 }
 
+/// One `activity` ledger row (migration 168): an id in one state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActivityRow {
+    id: String,
+    kind: String,
+    label: Option<String>,
+    status: String,
+    n: i32,
+    actor: Option<Uuid>,
+}
+
+/// The `activity` rows of one run, in write order (every state of every id, nothing folded).
+async fn activity_rows(su: &PgPool, run: Uuid) -> Vec<ActivityRow> {
+    sqlx::query_as::<_, (String, String, Option<String>, String, i32, Option<Uuid>)>(
+        "SELECT activity_id, activity_kind, label, activity_status, activity_n, actor_member_id \
+           FROM agent_run_event WHERE run_id = $1 AND kind = 'activity' ORDER BY seq",
+    )
+    .bind(run)
+    .fetch_all(su)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|(id, kind, label, status, n, actor)| ActivityRow {
+        id,
+        kind,
+        label,
+        status,
+        n,
+        actor,
+    })
+    .collect()
+}
+
+/// The whole plan of every `plan` ledger row of one run, in write order.
+async fn plan_rows(su: &PgPool, run: Uuid) -> Vec<Value> {
+    sqlx::query_scalar::<_, Value>(
+        "SELECT plan FROM agent_run_event WHERE run_id = $1 AND kind = 'plan' ORDER BY seq",
+    )
+    .bind(run)
+    .fetch_all(su)
+    .await
+    .unwrap()
+}
+
+/// `(kind, completed, failed)`: the ended units of the run's activities (migration 168's total).
+async fn activity_tally(su: &PgPool, run: Uuid) -> Vec<(String, i64, i64)> {
+    sqlx::query_as::<_, (String, i64, i64)>(
+        "SELECT kind, completed_units, failed_units FROM agent_run_activity_tally \
+          WHERE run_id = $1 ORDER BY kind",
+    )
+    .bind(run)
+    .fetch_all(su)
+    .await
+    .unwrap()
+}
+
+/// A plan as the ledger holds it: `[{text, status}]`.
+fn plan_of(items: &[(&str, &str)]) -> Value {
+    Value::Array(
+        items
+            .iter()
+            .map(|(text, status)| json!({"text": text, "status": status}))
+            .collect(),
+    )
+}
+
 async fn turn_outcomes(su: &PgPool, run: Uuid) -> Vec<String> {
     sqlx::query_scalar::<_, String>(
         "SELECT detail->>'outcome' FROM audit_log \
@@ -600,6 +671,14 @@ fn read_plugins() -> ChatCompletion {
     ChatCompletion {
         usage: usage(),
         tool_calls: vec![call("list_plugins", json!({}))],
+        ..ChatCompletion::default()
+    }
+}
+
+fn search(query: &str) -> ChatCompletion {
+    ChatCompletion {
+        usage: usage(),
+        tool_calls: vec![call("search_messages", json!({"query": query}))],
         ..ChatCompletion::default()
     }
 }
@@ -1335,6 +1414,12 @@ async fn t8_a_stop_ends_the_task_and_the_spend_stays() {
     );
     assert_eq!(run_state(&su, run).await.0, "cancelled");
     assert!(agent_texts(&su, &t).await.is_empty());
+    // #4968: the step a stop got to leaves no plan in the ledger — only step 1's is there.
+    assert_eq!(
+        plan_rows(&su, run).await,
+        vec![plan_of(&[("다음", "in_progress")])],
+        "the stopped step's plan (`그다음`) was never written"
+    );
 
     // Between two calls of one step: a stop is read before EVERY model call, so the call after the
     // stop is never made (the one in flight when it landed is the last).
@@ -2619,6 +2704,18 @@ async fn t22_a_late_commit_after_a_takeover_writes_nothing() {
     // A's call comes back and A commits the very same step.
     release.notify_one();
     runner.await.unwrap();
+    // #4968: the step that lost leaves nothing in the ledger either — B's plan is the one on show, and
+    // A's never reached it (the report is written only by the holder of the claim, after the swap).
+    let plans = plan_rows(&su, run).await;
+    assert_eq!(
+        plans.last(),
+        Some(&plan_of(&[("셋째 B", "in_progress")])),
+        "{plans:?}"
+    );
+    assert!(
+        !plans.iter().any(|plan| plan.to_string().contains("셋째 A")),
+        "the late step's plan is in no ledger row: {plans:?}"
+    );
     let row = task_row(&su, run).await.unwrap();
     assert_eq!(row.steps_done, 2, "A's late commit moved nothing");
     assert_eq!(
@@ -2978,6 +3075,468 @@ async fn t25_a_task_and_the_work_request_card_never_both_end_one_request() {
     assert!(texts[0].starts_with("AI 응답이 끊겨서 여기서 멈췄어요."));
 }
 
+// --- #4968 (S5): what a task reports to the run's ledger -----------------------------------------------
+
+/// The step count and the plan length the ledger holds right now — the two numbers a reader's
+/// 「n of m」 is made of (`m = n + plan.len()`, ADR-0201 증보 v3.3), both server facts.
+async fn progress_numbers(su: &PgPool, run: Uuid) -> (i32, usize) {
+    let (_, _, step_count) = run_state(su, run).await;
+    let plan_len = plan_rows(su, run)
+        .await
+        .last()
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
+    (step_count, plan_len)
+}
+
+/// The progress line says `n／m` — the very numbers a reader gets from the run read: `n` finished
+/// steps of `n + plan.len()` (ADR-0201 증보 v3.3).
+fn assert_label_says(label: &str, n: i32, m: usize) {
+    assert!(
+        label.starts_with(&format!("조사 중 · {n}／{m}")),
+        "the line says {n}／{m}: {label}"
+    );
+}
+
+/// #4968, ADR-0201 B5-7 / ADR-0200 증보 7: every step writes what it did, and the plan that remains,
+/// to the run's ledger — through the one writer, as the worker's own role, in the step's own
+/// transaction — and the numbers a reader needs are the server's own: `step_count` of
+/// `step_count + plan.len()` is the very `n／m` of the progress line. The last step reports its
+/// reads too (and leaves the plan as the step before wrote it); the kinds are the server's own count
+/// (the message search is `search`, the other reads are `read`, the provider's searches are `web`),
+/// never a label.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t26_each_step_reports_what_it_did_and_the_plan_that_remains() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([
+        // step 1 (the first turn): a read and two provider searches, then the task starts
+        ChatCompletion {
+            web_search_requests: 2,
+            ..read_channel(&t.channel_name)
+        },
+        cont(
+            &["가격 비교하기", "후기 읽기", "정리하기"],
+            "N1: 시작했어요.",
+        ),
+        // step 2: a message search and a read, then it goes on
+        search("가격"),
+        read_channel(&t.channel_name),
+        cont(&["후기 읽기", "정리하기"], "N2: 가격을 찾았어요."),
+        // step 3: a read, then the answer
+        read_plugins(),
+        say("최종 보고예요."),
+    ]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    let run = enqueue(
+        &pool,
+        &t,
+        t.owner_id,
+        "@oort-helper 오래 걸리는 조사 부탁해",
+    )
+    .await;
+    let helper = t.agent_id;
+    let done = |id: &str, kind: &str, n: i32| ActivityRow {
+        id: id.to_string(),
+        kind: kind.to_string(),
+        label: None,
+        status: "completed".to_string(),
+        n,
+        actor: Some(helper),
+    };
+    // After step 1.
+    assert_eq!(w.drain_once().await.unwrap().claimed, 1);
+    assert_eq!(
+        activity_rows(&su, run).await,
+        vec![done("s1_read", "read", 1), done("s1_web", "web", 2)],
+        "step 1: the read and the searches, by kind, `completed`, no label"
+    );
+    assert_eq!(
+        plan_rows(&su, run).await,
+        vec![plan_of(&[
+            ("가격 비교하기", "in_progress"),
+            ("후기 읽기", "pending"),
+            ("정리하기", "pending")
+        ])],
+        "the plan that remains: the next step in progress, the rest pending"
+    );
+    let (n, plan_len) = progress_numbers(&su, run).await;
+    assert_eq!((n, plan_len), (1, 3));
+    assert_label_says(
+        stage_labels(&su, run).await.last().unwrap(),
+        n,
+        n as usize + plan_len,
+    );
+
+    // After step 2.
+    assert_eq!(w.drain_once().await.unwrap().claimed, 1);
+    assert_eq!(
+        activity_rows(&su, run).await,
+        vec![
+            done("s1_read", "read", 1),
+            done("s1_web", "web", 2),
+            done("s2_read", "read", 1),
+            done("s2_search", "search", 1)
+        ]
+    );
+    let plans = plan_rows(&su, run).await;
+    assert_eq!(
+        plans.last(),
+        Some(&plan_of(&[
+            ("후기 읽기", "in_progress"),
+            ("정리하기", "pending")
+        ]))
+    );
+    let (n, plan_len) = progress_numbers(&su, run).await;
+    assert_eq!((n, plan_len), (2, 2));
+    assert_label_says(
+        stage_labels(&su, run).await.last().unwrap(),
+        n,
+        n as usize + plan_len,
+    );
+
+    // After the last step: its read is reported, the plan is left as step 2 wrote it, and the totals
+    // are the writer's own.
+    assert_eq!(w.drain_once().await.unwrap().claimed, 1);
+    let (status, code, _) = run_state(&su, run).await;
+    assert_eq!((status.as_str(), code), ("succeeded", None));
+    let activities = activity_rows(&su, run).await;
+    assert_eq!(activities.len(), 5, "{activities:?}");
+    assert_eq!(activities.last(), Some(&done("s3_read", "read", 1)));
+    assert_eq!(
+        plan_rows(&su, run).await,
+        plans,
+        "the last step writes no plan: the ledger records what was said"
+    );
+    assert_eq!(
+        activity_tally(&su, run).await,
+        vec![
+            ("read".to_string(), 3, 0),
+            ("search".to_string(), 1, 0),
+            ("web".to_string(), 2, 0)
+        ]
+    );
+    assert!(
+        activities
+            .iter()
+            .all(|row| row.label.is_none() && row.actor == Some(helper)),
+        "no label anywhere, and every row is the helper's own"
+    );
+}
+
+/// #4968 (the fence): the note, the request and what a read returned have no way into the ledger's
+/// text. A canary rides each of the three through the model (anti-vacuity: each is shown to reach it)
+/// and none is found in a stage, a label, an id or a plan step; what the plan holds is exactly the
+/// lines the model wrote.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t27_the_note_the_request_and_what_was_read_never_reach_the_ledgers_text() {
+    const REQUEST: &str = "CANARY-REQUEST-4968-a1b2";
+    const NOTE: &str = "CANARY-NOTE-4968-c3d4";
+    const READ: &str = "CANARY-READ-4968-e5f6";
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    // A message the step's read will return.
+    let (ws, channel, member) = (t.workspace_id, t.channel_id, t.member_id);
+    with_tenant_tx(&pool, ws, move |conn| {
+        Box::pin(async move {
+            send_message_in_tx(
+                conn,
+                ws,
+                NewMessage::text(channel, member, format!("가격표는 이래요 {READ}")),
+            )
+            .await?;
+            Ok(())
+        })
+    })
+    .await
+    .expect("a channel message");
+    let model = ScriptedModel::new([
+        read_channel(&t.channel_name),
+        cont(&["첫째 일", "둘째 일"], &format!("메모 {NOTE}")),
+        say("끝났어요."),
+    ]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    let run = enqueue(
+        &pool,
+        &t,
+        t.owner_id,
+        &format!("@oort-helper 조사해 줘 {REQUEST}"),
+    )
+    .await;
+    drain(&w).await;
+
+    // Anti-vacuity: each canary really reached the model, so a leak had somewhere to come from.
+    let requests = model.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(user_turn(&requests[0]).contains(REQUEST));
+    assert!(requests[1]
+        .messages
+        .iter()
+        .any(|m| m.content.contains(READ)));
+    assert!(user_turn(&requests[2]).contains(NOTE));
+
+    let rows: Vec<String> = sqlx::query_scalar(
+        "SELECT concat_ws(' | ', stage, label, activity_id, plan::text, code) \
+           FROM agent_run_event WHERE run_id = $1",
+    )
+    .bind(run)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert!(
+        rows.len() >= 3,
+        "a stage, an activity and a plan at least: {rows:?}"
+    );
+    let text = rows.join("\n");
+    for canary in [REQUEST, NOTE, READ] {
+        assert!(
+            !text.contains(canary),
+            "{canary} reached the ledger: {text}"
+        );
+    }
+    assert_eq!(
+        plan_rows(&su, run).await,
+        vec![plan_of(&[
+            ("첫째 일", "in_progress"),
+            ("둘째 일", "pending")
+        ])],
+        "the plan is exactly what the model wrote"
+    );
+}
+
+/// #4968, acceptance 1: the progress line and the visible plan are judged by the rule an Agent Port
+/// stage marker passes through — measured here with the Agent Port's own validators
+/// (`validated_stage_markers`, `validated_report_text`), for plan lines at their worst: a path
+/// separator, an invisible selector, a filler, a bidi override, a tag character, three hundred
+/// characters, a line that is nothing but a slash. Every step still commits, so a strange plan stops
+/// nothing; the model's words survive wherever the rule allows them.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t28_every_stage_and_plan_text_a_task_writes_passes_the_agent_ports_rule() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let long = "가".repeat(300);
+    let lines = [
+        "가격/후기 비교\\정리",
+        "비교\u{fe0f}하기",
+        "\u{3164}\u{3164}",
+        "\u{202e}rtl 방향",
+        "\u{e0041}tag 문자",
+        long.as_str(),
+        "/",
+    ];
+    let model = ScriptedModel::new([cont(&lines, "N1"), cont(&lines, "N2"), say("끝났어요.")]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    let run = enqueue(&pool, &t, t.owner_id, "@oort-helper 조사해 줘").await;
+
+    assert_eq!(w.drain_once().await.unwrap().claimed, 1);
+    // Anti-vacuity: the task's own plan still holds the separator — the care is taken where people
+    // read, not where the model writes.
+    let internal = task_row(&su, run).await.unwrap().plan.unwrap().to_string();
+    assert!(
+        internal.contains("가격/후기"),
+        "the row keeps the model's plan: {internal}"
+    );
+    // The line's `n／m` is the reader's `stepCount` of `stepCount + visible plan`: a plan line that says
+    // nothing once it is made readable (a bare `/`) is left out of the plan **and** of the count.
+    let (n, plan_len) = progress_numbers(&su, run).await;
+    assert_label_says(
+        stage_labels(&su, run).await.last().unwrap(),
+        n,
+        n as usize + plan_len,
+    );
+    assert_eq!(w.drain_once().await.unwrap().claimed, 1);
+    let (n, plan_len) = progress_numbers(&su, run).await;
+    assert_label_says(
+        stage_labels(&su, run).await.last().unwrap(),
+        n,
+        n as usize + plan_len,
+    );
+    assert_eq!(w.drain_once().await.unwrap().claimed, 1);
+    assert_eq!(run_state(&su, run).await.0, "succeeded");
+
+    let labels = stage_labels(&su, run).await;
+    assert_eq!(
+        labels,
+        [
+            "조사 중 · 1／6 · 가격 후기 비교 정리",
+            "조사 중 · 2／7 · 가격 후기 비교 정리"
+        ]
+    );
+    for label in &labels {
+        assert_eq!(
+            momo_t3::work_share::validated_stage_markers(std::slice::from_ref(label))
+                .expect("the Agent Port's own stage validator accepts the line"),
+            vec![label.clone()],
+            "and does not change it"
+        );
+        assert!(label.chars().count() <= momo_t3::work_share::MAX_STAGE_MARKER_CHARS);
+    }
+    assert_eq!(
+        momo_agent::team_ai_task::STAGE_LABEL_CHARS_MAX,
+        momo_t3::work_share::MAX_STAGE_MARKER_CHARS,
+        "the helper's limit is the stage marker's"
+    );
+    let plans = plan_rows(&su, run).await;
+    assert!(!plans.is_empty());
+    let expected = plan_of(&[
+        ("가격 후기 비교 정리", "in_progress"),
+        ("비교 하기", "pending"),
+        ("rtl 방향", "pending"),
+        ("tag 문자", "pending"),
+        (&"가".repeat(60), "pending"),
+    ]);
+    for plan in &plans {
+        assert_eq!(
+            plan, &expected,
+            "the worst lines, as the rule lets them be read"
+        );
+        for step in plan.as_array().unwrap() {
+            let text = step["text"].as_str().unwrap();
+            assert_eq!(
+                momo_t3::work_share::validated_report_text(text, "plan step", 60).as_deref(),
+                Ok(text),
+                "{text:?}"
+            );
+        }
+    }
+}
+
+/// #4968 (the quick path is unchanged): a request that is not a task — answered in one turn, with
+/// reads or without — writes no activity, no plan and no progress line, and starts no row.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t29_a_quick_answer_writes_no_activity_and_no_plan() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let model = ScriptedModel::new([
+        read_channel(&t.channel_name),
+        say("읽어 봤어요. 이게 답이에요."),
+    ]);
+    let w = worker_with(model.clone(), |_| {}).await;
+    let run = enqueue(&pool, &t, t.owner_id, "@oort-helper 이 채널 요약해 줘").await;
+    drain(&w).await;
+
+    // Anti-vacuity: the read happened and the request was answered.
+    assert_eq!(model.calls(), 2);
+    assert_eq!(turn_outcomes(&su, run).await, ["answered"]);
+    assert_eq!(run_state(&su, run).await.0, "succeeded");
+
+    assert!(task_row(&su, run).await.is_none());
+    assert!(activity_rows(&su, run).await.is_empty());
+    assert!(plan_rows(&su, run).await.is_empty());
+    assert!(stage_labels(&su, run).await.is_empty());
+}
+
+/// #4968, migration 168's ROLES note: the in-server writer runs as the worker's own role
+/// (`momo_worker`: UPDATE on `agent_run` for the run-row lock, INSERT and DELETE on the ledger, the
+/// sequence, the totals) — and the same call as a read-only role (the helper's read role) is refused,
+/// which is what makes the first half a measurement. A member that is not the run's agent writes
+/// nothing.
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn t30_the_writer_runs_as_the_workers_role_and_a_read_only_role_cannot() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    let t = seed_fresh(&su, &pool).await;
+    let run = enqueue(&pool, &t, t.owner_id, "@oort-helper 조사해 줘").await;
+    let (ws, agent, other) = (t.workspace_id, t.agent_id, t.other_agent_id);
+    let counts = momo_agent::team_ai_task::StepCounts {
+        reads: 2,
+        ..Default::default()
+    };
+    let plan = vec!["가".to_string(), "나".to_string()];
+
+    let wrote = with_tenant_tx(&pool, ws, {
+        let plan = plan.clone();
+        move |conn| {
+            let plan = plan.clone();
+            Box::pin(async move {
+                momo_agent::team_ai_task::record_progress_in_tx(
+                    conn,
+                    ws,
+                    run,
+                    agent,
+                    1,
+                    counts,
+                    Some(&plan),
+                )
+                .await
+            })
+        }
+    })
+    .await
+    .expect("momo_worker can run the writer");
+    assert_eq!(
+        wrote,
+        momo_agent::team_ai_task::ProgressWrite::Written(2),
+        "one activity row and one plan row"
+    );
+
+    // The negative control: the helper's read-only role cannot.
+    let refused = with_tenant_tx(&pool, ws, move |conn| {
+        Box::pin(async move {
+            momo_workspace_actions::team_ai_tools::enter_helper_read_role(conn).await?;
+            momo_agent::team_ai_task::record_progress_in_tx(
+                conn,
+                ws,
+                run,
+                agent,
+                2,
+                momo_agent::team_ai_task::StepCounts {
+                    reads: 1,
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+        })
+    })
+    .await;
+    assert!(refused.is_err(), "a read-only role is refused: {refused:?}");
+
+    // Someone who is not the run's agent writes nothing.
+    let stranger = with_tenant_tx(&pool, ws, move |conn| {
+        Box::pin(async move {
+            momo_agent::team_ai_task::record_progress_in_tx(
+                conn,
+                ws,
+                run,
+                other,
+                3,
+                momo_agent::team_ai_task::StepCounts {
+                    reads: 1,
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("the call itself is not an error");
+    assert_eq!(
+        stranger,
+        momo_agent::team_ai_task::ProgressWrite::Written(0)
+    );
+    assert_eq!(
+        activity_rows(&su, run).await.len(),
+        1,
+        "only the first call wrote"
+    );
+}
+
 // --- #5029 (security review r1 L3): the narrow paths on which a task neither stops nor ends -----------
 
 /// Make every claim of `run`'s task fail inside the database — a transient error of the kind the worker
@@ -3085,7 +3644,7 @@ async fn insert_task_row(su: &PgPool, t: &Tenant, run: Uuid) {
 /// active row says.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn t26_a_stop_between_attempts_still_stops_the_task() {
+async fn t31_a_stop_between_attempts_still_stops_the_task() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let pool = momo_worker_pool().await;
@@ -3184,7 +3743,7 @@ async fn t26_a_stop_between_attempts_still_stops_the_task() {
 /// read, so — like every report a task ends with — it gets no server-side link preview (review r1 M-1).
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn t27_a_step_job_that_waits_out_its_attempts_ends_the_task() {
+async fn t32_a_step_job_that_waits_out_its_attempts_ends_the_task() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let pool = momo_worker_pool().await;
@@ -3267,7 +3826,7 @@ async fn t27_a_step_job_that_waits_out_its_attempts_ends_the_task() {
 /// task row, slot or note — the step that cannot commit ends the task.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn t28_a_step_that_cannot_commit_because_its_helper_is_gone_ends_the_task() {
+async fn t33_a_step_that_cannot_commit_because_its_helper_is_gone_ends_the_task() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let pool = momo_worker_pool().await;
@@ -3318,7 +3877,7 @@ async fn t28_a_step_that_cannot_commit_because_its_helper_is_gone_ends_the_task(
 /// L3c, a step's end: the same for a step that ends with an answer.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn t29_a_step_that_answers_after_its_helper_is_gone_ends_the_task() {
+async fn t34_a_step_that_answers_after_its_helper_is_gone_ends_the_task() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let pool = momo_worker_pool().await;
@@ -3356,7 +3915,7 @@ async fn t29_a_step_that_answers_after_its_helper_is_gone_ends_the_task() {
 /// that another attempt of the same turn wrote meanwhile.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn t30_a_first_turn_that_cannot_start_a_task_leaves_no_row() {
+async fn t35_a_first_turn_that_cannot_start_a_task_leaves_no_row() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let pool = momo_worker_pool().await;
@@ -3387,7 +3946,7 @@ async fn t30_a_first_turn_that_cannot_start_a_task_leaves_no_row() {
 /// job for good, posts one notice, and ends the task with `task_failed` — no row is left.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
-async fn t31_the_last_attempts_failure_ends_the_task_and_an_earlier_one_does_not() {
+async fn t36_the_last_attempts_failure_ends_the_task_and_an_earlier_one_does_not() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let pool = momo_worker_pool().await;

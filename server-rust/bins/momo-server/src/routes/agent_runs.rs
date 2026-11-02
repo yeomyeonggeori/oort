@@ -99,8 +99,9 @@ use crate::dto::{
     AgentRunActivityTallyDto, AgentRunBundleDto, AgentRunCancelResponse, AgentRunEventDto,
     AgentRunEventsQuery, AgentRunEventsResponse, AgentRunHistoryQuery, AgentRunListQuery,
     AgentRunPageResponse, AgentRunPlanStepDto, AgentRunProgressDto, AgentRunProgressPageResponse,
-    AgentRunProgressQuery, AgentRunResponse, AgentRunSummaryDto, AgentRunSummaryPageResponse,
-    AgentRunToolTallyDto, AgentRunVisibleCountsDto, AheadRunDto, CreateAgentRunRequest,
+    AgentRunProgressQuery, AgentRunResponse, AgentRunSpentDto, AgentRunSummaryDto,
+    AgentRunSummaryPageResponse, AgentRunToolTallyDto, AgentRunVisibleCountsDto, AheadRunDto,
+    CreateAgentRunRequest,
 };
 use crate::error::ApiError;
 use crate::routes::run_bundle::run_bundles_in_tx;
@@ -727,7 +728,7 @@ pub async fn detail(
     let member_id = principal.member_id;
     let kind = principal.kind;
 
-    let run = settle_db(
+    let (run, spent) = settle_db(
         "agent_runs.detail",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -742,13 +743,22 @@ pub async fn detail(
                         "work run is not bound to this actor",
                     )));
                 }
-                Ok(Ok(run))
+                // ADR-0201 v3 B12: a team-AI task run says what it has spent — this run's own
+                // ledger sums (a run without a task row has none), read after the room check so
+                // a caller the run is hidden from learns nothing.
+                let spent =
+                    momo_agent::team_ai_task::spent_by_run_in_tx(conn, workspace_id, &[run.id])
+                        .await?
+                        .remove(&run.id);
+                Ok(Ok((run, spent)))
             })
         })
         .await,
     )?;
 
-    Ok(Json(run_response(&run)))
+    let mut response = run_response(&run);
+    response.spent = spent.as_ref().map(AgentRunSpentDto::from);
+    Ok(Json(response))
 }
 
 /// Swift `canReadRun` (:626-641).
@@ -910,9 +920,14 @@ async fn assemble_progress_in_tx(
     let rows = assemble_run_progress(base, &jobs, &queue, &visible);
     let run_ids: Vec<Uuid> = rows.iter().map(|row| row.summary.id).collect();
     let mut bundles = run_bundles_in_tx(conn, workspace_id, member_id, &run_ids, now).await?;
+    // ADR-0201 v3 B12 (#4968): the run's own ledger sums, for a team-AI task run only — one
+    // grouped read for the whole page, keyed by run id and by nothing else.
+    let mut spent =
+        momo_agent::team_ai_task::spent_by_run_in_tx(conn, workspace_id, &run_ids).await?;
     Ok(rows
         .into_iter()
-        .map(|row| {
+        .map(|mut row| {
+            row.spent = spent.remove(&row.summary.id);
             let bundle = bundles.remove(&row.summary.id);
             (row, bundle)
         })
@@ -961,6 +976,7 @@ fn progress_dto(row: &RunProgressRow, bundle: Option<AgentRunBundleDto>) -> Agen
         approval_id: row.approval_id.map(|id| id.to_string()),
         approval_expires_at_ms: row.approval_expires_at.map(epoch_ms),
         bundle,
+        spent: row.spent.as_ref().map(AgentRunSpentDto::from),
         end_reason: row.end_reason.clone(),
         queue_position: row.queue_position,
         ahead_total: row.queue_position.map(|_| row.ahead_total),

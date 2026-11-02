@@ -1000,7 +1000,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": " web searches today"
+      "value": " searches used today"
     }
   ],
   "settings.aiLimits.searchesUnit": [
@@ -2014,6 +2014,69 @@ export const catalog: MessageCatalog = {
       "value": "Video"
     }
   ],
+  "timeline.workHealth.dwell": [
+    {
+      "type": 0,
+      "value": "On the same step for "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "timeline.workHealth.failedActivities": [
+    {
+      "type": 0,
+      "value": "Failed activities "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workHealth.quiet": [
+    {
+      "type": 0,
+      "value": "Quiet · last report "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min ago"
+    }
+  ],
+  "timeline.workHealth.rejectedApprovals": [
+    {
+      "type": 0,
+      "value": "Rejected approvals "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workHealth.retries": [
+    {
+      "type": 0,
+      "value": "oort call retries "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
   "timeline.workPlan.button": [
     {
       "type": 0,
@@ -2396,6 +2459,12 @@ export const catalog: MessageCatalog = {
       "value": "In progress"
     }
   ],
+  "timeline.workRecord.statusUnclosed": [
+    {
+      "type": 0,
+      "value": "No end reported"
+    }
+  ],
   "timeline.workRecord.summary": [
     {
       "type": 6,
@@ -2477,6 +2546,46 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "oort's call record will show once the server is updated."
+    }
+  ],
+  "timeline.workReport.emptyEnded": [
+    {
+      "type": 0,
+      "value": "The agent reported no activity on this run."
+    }
+  ],
+  "timeline.workReport.emptyOpen": [
+    {
+      "type": 0,
+      "value": "The agent has not reported any activity yet."
+    }
+  ],
+  "timeline.workReport.planNotLive": [
+    {
+      "type": 0,
+      "value": "This run is not working now. This is the last plan the agent reported."
+    }
+  ],
+  "timeline.workReport.tally": [
+    {
+      "type": 0,
+      "value": "Finished activity · "
+    },
+    {
+      "type": 1,
+      "value": "parts"
+    }
+  ],
+  "timeline.workReport.trimmed": [
+    {
+      "type": 0,
+      "value": "Some older activity is kept only in the total."
+    }
+  ],
+  "timeline.workReport.unsupported": [
+    {
+      "type": 0,
+      "value": "The activity the agent reports will show once the server is updated."
     }
   ],
   "timeline.workRequest.composerBusy": [
@@ -2569,6 +2678,182 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Open the thread and press again."
+    }
+  ],
+  "timeline.workStream.limit": [
+    {
+      "type": 0,
+      "value": "This section shows only the streamed text and tool calls that arrived after you opened this panel, and it does not keep them."
+    }
+  ],
+  "timeline.workSummary.agentReported": [
+    {
+      "type": 0,
+      "value": "Agent report"
+    }
+  ],
+  "timeline.workSummary.duration": [
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "timeline.workSummary.durationHours": [
+    {
+      "type": 2,
+      "value": "hours",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " hr "
+    },
+    {
+      "type": 2,
+      "value": "minutes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " min"
+    }
+  ],
+  "timeline.workSummary.durationShort": [
+    {
+      "type": 0,
+      "value": "Under 1 min"
+    }
+  ],
+  "timeline.workSummary.kindDelegate": [
+    {
+      "type": 0,
+      "value": "Handoffs "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindEdit": [
+    {
+      "type": 0,
+      "value": "Edits "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindOther": [
+    {
+      "type": 0,
+      "value": "Other "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindRead": [
+    {
+      "type": 0,
+      "value": "Reads "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindRun": [
+    {
+      "type": 0,
+      "value": "Commands "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindSearch": [
+    {
+      "type": 0,
+      "value": "Searches "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.kindWeb": [
+    {
+      "type": 0,
+      "value": "Web "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    }
+  ],
+  "timeline.workSummary.openPanel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "summary"
+    },
+    {
+      "type": 0,
+      "value": ". Open work panel"
+    }
+  ],
+  "timeline.workSummary.stages": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " step"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " steps"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "timeline.workTool.actionClaimSecret": [

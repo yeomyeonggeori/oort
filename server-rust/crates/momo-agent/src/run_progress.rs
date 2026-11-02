@@ -117,6 +117,10 @@ pub struct RunProgressRow {
     pub ahead_total: i64,
     /// The subset of those the viewer can see (channels the viewer is a member of).
     pub ahead: Vec<AheadRun>,
+    /// What the run has spent, **only for a team-AI task run** (ADR-0201 증보 v3 B12; one run, never
+    /// a person — [`crate::team_ai_task::RunSpent`]). The pure assembly leaves it `None`; the route
+    /// fills it from the ledger in the same transaction as the read.
+    pub spent: Option<crate::team_ai_task::RunSpent>,
 }
 
 /// The run-side half of a progress row: everything that lives in `agent_run`,
@@ -228,7 +232,12 @@ fn decode_progress_base(row: &sqlx::postgres::PgRow) -> Result<RunProgressBase, 
 /// Hosted-agent runs of one channel (mention runs and work runs alike), newest
 /// first, WITHOUT their delivery-job facts. The caller has already proven the
 /// viewer is an active member of `channel_id`. Only runs whose agent has a hosted
-/// connection are listed (the ledger exists for no other kind, ADR-0200 D6).
+/// connection are listed (the ledger's lifecycle rows exist for no other kind, ADR-0200 D6) —
+/// **and the team AI's task runs** (ADR-0201 증보 v3.3, #4968): a run with a `team_ai_task` row is
+/// the one managed-agent run that keeps its own ledger rows (a progress line per step, its
+/// activities and its plan) and lives for minutes, so it is the one that needs a progress line.
+/// The team AI's quick answers (no row; seconds) stay out, exactly as every other managed or BYOA
+/// run does.
 pub async fn list_channel_run_progress_base_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -241,7 +250,9 @@ pub async fn list_channel_run_progress_base_in_tx(
            FROM agent_run r \
            {PROGRESS_APPROVAL_JOIN} \
           WHERE r.workspace_id = $1 AND r.channel_id = $2 \
-            AND agent_run_event_is_hosted(r.workspace_id, r.agent_member_id) \
+            AND (agent_run_event_is_hosted(r.workspace_id, r.agent_member_id) \
+                 OR EXISTS (SELECT 1 FROM team_ai_task t \
+                             WHERE t.workspace_id = r.workspace_id AND t.run_id = r.id)) \
             AND ($3::boolean = false OR r.status IN ('queued','running','awaiting_approval','paused')) \
           ORDER BY r.created_at DESC, r.id DESC \
           LIMIT $4",
@@ -584,6 +595,7 @@ pub fn assemble_run_progress(
                 ahead,
                 agent_member_id: run.agent_member_id,
                 summary: run.summary,
+                spent: None,
             }
         })
         .collect()
