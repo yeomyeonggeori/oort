@@ -2185,12 +2185,48 @@ pub struct AgentRunResponse {
     /// ignored rather than refused.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apps_used: Option<Value>,
+    /// ADR-0201 증보 v3 B12 (#4968) — what **this one run** has spent, read from the usage
+    /// ledger. Present only on the detail read of a team-AI task run; absent for every other
+    /// run (and on every other read of this DTO), so a run serializes exactly as before. A
+    /// deployed client builds its run from named fields, so the extra key is ignored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spent: Option<AgentRunSpentDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub started_at_ms: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub finished_at_ms: Option<i64>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+}
+
+/// openapi `AgentRunSpent` — the sums of one run's usage-ledger rows (ADR-0201 증보 v3 B12).
+///
+/// **One run, never a person**: four numbers and a flag, no member, no requester, no
+/// grouping key. The ledger has no requester column, and ADR-0147 증보 2026-10-30 D6 says
+/// 「누가 팀 AI를 많이 불렀나」는 계산하지도 표시하지도 않는다. Money is not here: the dollar
+/// figure is read-time arithmetic over `model_pricing` (`usage/agents`), and a client that
+/// wants 「약 $x 이상」 has the tokens to do it with.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunSpentDto {
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    /// The provider's own web searches.
+    pub web_searches: i64,
+    /// Some of the tokens are oort's estimate (the provider reported none). ADR-0147 D3: a
+    /// figure that may be an estimate says so.
+    pub estimated: bool,
+}
+
+impl From<&momo_agent::team_ai_task::RunSpent> for AgentRunSpentDto {
+    fn from(spent: &momo_agent::team_ai_task::RunSpent) -> Self {
+        Self {
+            prompt_tokens: spent.prompt_tokens,
+            completion_tokens: spent.completion_tokens,
+            web_searches: spent.web_searches,
+            estimated: spent.estimated,
+        }
+    }
 }
 
 /// Swift `AgentRunPageDTO` (:1266) — the channel work-run list's envelope.
@@ -2309,6 +2345,10 @@ pub struct AgentRunProgressDto {
     /// run never asked for an approval, or asked in a channel the viewer cannot see.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bundle: Option<AgentRunBundleDto>,
+    /// ADR-0201 증보 v3 B12 (#4968): what this run has spent. Present only for a team-AI task
+    /// run (the run read's field the task card and its end line refresh from); absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spent: Option<AgentRunSpentDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_reason: Option<String>,
     /// 1 = next to be claimed. Absent unless the run is unclaimed and claimable.
