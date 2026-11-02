@@ -29,7 +29,7 @@
 //! | `a_reply_also_sent_to_the_channel_still_reaches_a_follower_once` | give the reply a second reason / a second dispatch |
 //! | `a_thread_reply_push_never_crosses_a_tenant` | drop `tf.workspace_id = $1` from the arm's `thread_follow` lookup |
 //! | `a_tool_line_or_a_dm_in_a_followed_thread_pushes_no_thread_reply` | drop `message_type = 'text'` from the arm |
-//! | `twenty_replies_in_a_minute_are_seven_pushes_and_the_seventh_is_the_folded_one` | raise the cap 6 to 7, or stop folding, or fold under the message's own collapse id |
+//! | `twenty_replies_in_a_minute_are_seven_pushes_and_the_seventh_is_the_folded_one` | raise the cap 6 to 7, or stop folding, or fold under the message's own collapse id, or hand the claimed candidates to the drain in heap order (drop the last `ORDER BY id` of `claim_push_candidate_batch`: red only on an aged heap, #5130) |
 //! | `another_thread_has_its_own_window` | key the window by (member, channel) instead of (member, thread root) |
 //! | `the_window_starts_over_with_the_next_minute` | never reset the window, or fold by a clock the test cannot move |
 //! | `the_server_wide_budget_caps_bulk_pushes_and_leaves_a_mention_alone` | ignore the budget, or spend it on mentions too |
@@ -994,8 +994,18 @@ async fn candidate_statuses(su: &PgPool, ws: Uuid) -> Vec<(String, i64)> {
 /// (`o:<root>:<minute>`), and the other thirteen send nothing. Same for every follower. The first
 /// reply is not delayed (there is no time-based merging).
 ///
+/// "The first six" and "the seventh" are the **oldest** replies because the drain works through the
+/// claimed candidates oldest first — `claim_push_candidate_batch` hands them back in `id` order, by an
+/// `ORDER BY` of its own (#5130). The window gives its six individual slots to whichever messages it
+/// meets first, so a claim that came back in heap order would push the wrong six; the order is the
+/// claim's contract, not something the test sorts into place afterwards.
+///
 /// Sabotage: raise the cap 6 → 7 (eight pushes); fold under the message's own `m:` id (the
-/// representative assertion goes red, and the other thirteen would each send); never fold (twenty).
+/// representative assertion goes red, and the other thirteen would each send); never fold (twenty);
+/// drop the last `ORDER BY id` of `claim_push_candidate_batch` (the claim's `UPDATE … RETURNING` is
+/// then in whatever order the planner's join finds the rows: id order on a fresh table, where it
+/// joins by nested loop, and heap order on an aged one, where it joins by hash — so this one goes
+/// red on a DB that many tests have churned and stays green on a fresh one).
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_notifier / momo_app roles"]
 async fn twenty_replies_in_a_minute_are_seven_pushes_and_the_seventh_is_the_folded_one() {
@@ -1025,6 +1035,8 @@ async fn twenty_replies_in_a_minute_are_seven_pushes_and_the_seventh_is_the_fold
     for who in ["author", "follower"] {
         let pushes = mine(&room, &sent, who, "thread_reply");
         assert_eq!(pushes.len(), 7, "{who}: twenty replies are seven pushes");
+        // `sent` is in the order the drain worked through the candidates, which is the order
+        // the claim handed them back in: oldest first (#5130, see the doc comment above).
         for (n, dispatch) in pushes[..6].iter().enumerate() {
             assert_eq!(
                 dispatch.message_id,

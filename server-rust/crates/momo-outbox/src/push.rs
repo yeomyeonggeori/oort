@@ -154,11 +154,22 @@ pub struct ClaimedPushCandidate {
 }
 
 /// Claim up to `batch_size` pending `push_candidate` rows and flip them to
-/// `processing` in one statement.
+/// `processing` in one statement. The rows come back **oldest first (ascending
+/// `id`)**.
 ///
 /// `FOR UPDATE SKIP LOCKED` makes the claim loss-free and keeps two notifier
 /// instances off the same row — the same arbitration the relay and agent worker
 /// use. `kind = 'push_candidate'` is the mutual-exclusion boundary.
+///
+/// **Two `ORDER BY id`s, two jobs (#5130).** The one inside `claimed` decides *which* rows a
+/// short batch takes (the oldest). The one on the last `SELECT` decides *what order they are
+/// handed back in*, and the statement cannot do without it: `UPDATE … RETURNING` promises no
+/// order, and the planner joins `claimed` to `outbox` however is cheapest — on a small table that
+/// has been churned a long time that is a hash join probed by a sequential scan of `outbox`,
+/// which returns the rows in *heap* order. The notifier takes the order it is handed as its work
+/// order: the bulk layer's window (ADR-0206 증보 1 F6) gives its six individual pushes to the
+/// first messages it meets, so a batch handed back in heap order pushes the wrong six replies and
+/// folds the wrong ones.
 pub async fn claim_push_candidate_batch(
     pool: &PgPool,
     batch_size: i64,
@@ -172,12 +183,14 @@ pub async fn claim_push_candidate_batch(
               ORDER BY id \
               FOR UPDATE SKIP LOCKED \
               LIMIT $1 \
+         ), updated AS ( \
+             UPDATE outbox o \
+                SET status = 'processing', attempts = o.attempts + 1 \
+               FROM claimed c \
+              WHERE o.id = c.id \
+              RETURNING o.id, o.attempts, o.workspace_id, o.payload::text AS payload \
          ) \
-         UPDATE outbox o \
-            SET status = 'processing', attempts = o.attempts + 1 \
-           FROM claimed c \
-          WHERE o.id = c.id \
-          RETURNING o.id, o.attempts, o.workspace_id, o.payload::text",
+         SELECT id, attempts, workspace_id, payload FROM updated ORDER BY id",
     )
     .bind(batch_size)
     .fetch_all(pool)
@@ -387,6 +400,11 @@ pub struct ClaimedPushSystem {
 /// Claim up to `batch_size` pending `push_system` rows and flip them to `processing` in one
 /// statement. `kind = 'push_system'` is the mutual-exclusion boundary: this claim never takes a
 /// `push_candidate` (or any other kind), and [`claim_push_candidate_batch`] never takes this one.
+///
+/// The rows come back oldest first, by the same last-`SELECT` `ORDER BY id` and for the same
+/// reason as [`claim_push_candidate_batch`] (`UPDATE … RETURNING` promises no order). No system
+/// push depends on it today — each one is independent — but the two claims of one consumer keep
+/// one contract, so a later reason that does care cannot find the other claim unordered.
 pub async fn claim_push_system_batch(
     pool: &PgPool,
     batch_size: i64,
@@ -400,12 +418,14 @@ pub async fn claim_push_system_batch(
               ORDER BY id \
               FOR UPDATE SKIP LOCKED \
               LIMIT $1 \
+         ), updated AS ( \
+             UPDATE outbox o \
+                SET status = 'processing', attempts = o.attempts + 1 \
+               FROM claimed c \
+              WHERE o.id = c.id \
+              RETURNING o.id, o.attempts, o.workspace_id, o.payload::text AS payload \
          ) \
-         UPDATE outbox o \
-            SET status = 'processing', attempts = o.attempts + 1 \
-           FROM claimed c \
-          WHERE o.id = c.id \
-          RETURNING o.id, o.attempts, o.workspace_id, o.payload::text",
+         SELECT id, attempts, workspace_id, payload FROM updated ORDER BY id",
     )
     .bind(batch_size)
     .fetch_all(pool)
