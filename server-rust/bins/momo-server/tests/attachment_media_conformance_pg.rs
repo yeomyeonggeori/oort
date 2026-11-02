@@ -21,6 +21,9 @@
 //! | `the_poster_route_is_the_content_route_for_everyone_else` | drop the membership check, the readable load, or the `complete` gate from `poster` → the matching row of the matrix answers something other than the content route's own refusal |
 //! | `a_poster_is_never_in_a_payload` | add the poster column to a projection (`PAGED_ATTACHMENT_JOIN` or `message_attachments_in_tx`) → the page, the send echo or the outbox row carries it; drop `momo_helper_read`'s grant → the team AI's page read answers 42501 |
 //! | `media_rows_follow_the_attachment` | make the FK `ON DELETE NO ACTION` → the reclaim's delete fails and the row stays |
+//! | `a_send_arriving_mid_write_waits_for_it_and_carries_what_it_wrote` (review M-2) | pass `false` for `for_update` in the write's second transaction (`load_attachment_in_tx(.., false)`) → the send does not wait, its echo and frame carry no `media`, and the table gets the row afterwards |
+//! | `a_send_that_wins_while_the_object_is_read_leaves_the_write_refused` (review M-2) | drop `may_hold_media(locked, ..)` from the write's second transaction → the write lands after the send has already bound the file |
+//! | `the_media_write_spends_a_member_budget_of_its_own` (review M-1) | drop the `member_write(MemberWrite::MediaWrite)` layer from the route → the fourth write answers 200; point `MediaWrite` at the upload start's limit → the same; give it the upload start's key prefix → the third write answers 429 (the member's earlier upload start already spent a unit of the shared counter) |
 //! | `the_media_table_is_tenant_scoped_and_locked_down` | drop `FORCE ROW LEVEL SECURITY`, the `WITH CHECK`, or the composite FK → the matching step; grant `momo_app` DELETE → the privilege step |
 
 use std::io::Cursor;
@@ -47,6 +50,7 @@ use momo_messaging::attachment_reclaim::{
 };
 use momo_messaging::avatar_reclaim::DriveDelete;
 use momo_messaging::{create_channel, ChannelKind, HistoryCursor, NewChannel};
+use momo_server::config::RateLimitConfig;
 use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -172,6 +176,17 @@ async fn start_server(pool: PgPool) -> String {
 struct CountingArchive {
     inner: StubDriveArchive,
     content_reads: Arc<AtomicUsize>,
+    /// When set, a content read of the gate's object waits until the test lets it go.
+    gate: Option<Arc<Gate>>,
+}
+
+/// Holds one object's content read — the moment between the write's two transactions — until the
+/// test lets go, so a send can be made to land exactly there.
+#[derive(Debug, Default)]
+struct Gate {
+    file_id: Mutex<Option<String>>,
+    entered: tokio::sync::Notify,
+    release: tokio::sync::Notify,
 }
 
 #[async_trait]
@@ -202,6 +217,13 @@ impl DriveArchive for CountingArchive {
         max_bytes: i64,
     ) -> Result<DriveContent, DriveError> {
         self.content_reads.fetch_add(1, Ordering::SeqCst);
+        if let Some(gate) = &self.gate {
+            let held = gate.file_id.lock().expect("gate").as_deref() == Some(file_id);
+            if held {
+                gate.entered.notify_one();
+                gate.release.notified().await;
+            }
+        }
         self.inner.file_content(file_id, max_bytes).await
     }
 
@@ -220,6 +242,15 @@ impl DriveArchive for CountingArchive {
 
 /// A server whose archive counts content reads; the counter is the second value.
 async fn start_counting_server(pool: PgPool) -> (String, Arc<AtomicUsize>) {
+    start_counting_server_with(pool, None, None).await
+}
+
+/// [`start_counting_server`] with the member-write budgets the test names and/or an archive gate.
+async fn start_counting_server_with(
+    pool: PgPool,
+    limits: Option<RateLimitConfig>,
+    gate: Option<Arc<Gate>>,
+) -> (String, Arc<AtomicUsize>) {
     let reads = Arc::new(AtomicUsize::new(0));
     let counter = reads.clone();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -230,13 +261,17 @@ async fn start_counting_server(pool: PgPool) -> (String, Arc<AtomicUsize>) {
     let archive: Arc<dyn DriveArchive> = Arc::new(CountingArchive {
         inner: StubDriveArchive::new(&base),
         content_reads: counter,
+        gate,
     });
-    let state = AppState::new(
+    let mut state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
     )
     .with_drive(archive);
+    if let Some(limits) = limits {
+        state = state.with_rate_limit(limits);
+    }
     let app = build_app(state);
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
@@ -983,6 +1018,47 @@ async fn a_poster_is_validated_by_its_bytes_not_its_label() {
         "an unknown key is a body the extractor cannot read into the request: {}",
         String::from_utf8_lossy(&unknown_key.body)
     );
+    assert_eq!(media_rows(&su, &video).await, 0);
+    // a body the extractor cannot read at all, the statuses `docs/api/openapi.yaml` lists beside 400:
+    // not JSON (400), not sent as JSON (415), JSON of the wrong shape — a missing field, a
+    // fractional length (422)
+    for (what, content_type, body, expected) in [
+        (
+            "a body that is not JSON",
+            "application/json",
+            "{not json",
+            400,
+        ),
+        ("an empty body", "application/json", "", 400),
+        (
+            "JSON sent as text",
+            "text/plain",
+            r#"{"durationMs":1,"width":1,"height":1}"#,
+            415,
+        ),
+        (
+            "a missing field",
+            "application/json",
+            r#"{"durationMs":1,"width":1}"#,
+            422,
+        ),
+        (
+            "a fractional length",
+            "application/json",
+            r#"{"durationMs":1.5,"width":1,"height":1}"#,
+            422,
+        ),
+    ] {
+        let answer = http
+            .put(attachment_url(&base, ws, ch, &video, "media"))
+            .bearer_auth(&alice)
+            .header(reqwest::header::CONTENT_TYPE, content_type)
+            .body(body)
+            .send()
+            .await
+            .expect("put raw body");
+        assert_eq!(answer.status(), expected, "{what}");
+    }
     assert_eq!(media_rows(&su, &video).await, 0);
     assert_eq!(
         reads.load(Ordering::SeqCst),
@@ -1769,6 +1845,378 @@ async fn media_rows_follow_the_attachment() {
         media_rows(&su, &video).await,
         0,
         "…and its media row and poster went with it"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// D5 · the write and the send are ordered, and the write has a budget (review r1 M-1, M-2)
+// ---------------------------------------------------------------------------
+
+/// The row of the media table and the summary the room was told, side by side.
+fn summary_of(echo: &Value) -> Option<Value> {
+    echo["attachments"][0].get("media").cloned()
+}
+
+async fn message_frame(su: &PgPool, ws: Uuid, ch: Uuid, message: &str) -> Value {
+    sqlx::query_scalar(
+        "SELECT payload FROM outbox \
+          WHERE workspace_id = $1 AND partition_key = $2 \
+            AND payload->'data'->'payload'->>'id' = $3 \
+          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(ws)
+    .bind(ch)
+    .bind(message)
+    .fetch_one(su)
+    .await
+    .expect("the message.new outbox row")
+}
+
+/// **Red proof (review r1 M-2, the lock).** A send that arrives while a media write is in flight is
+/// ordered with it, never interleaved: the write holds the attachment row `FOR UPDATE` from before
+/// its INSERT, the send takes the same lock to bind the file, so the send **waits** and then carries
+/// what the write stored. Without the lock the send binds and answers at once, the room is told a
+/// file with no `media`, and the write lands afterwards — the numbers and the poster of a sent file
+/// change after the room saw it.
+///
+/// The write's INSERT is slowed by a trigger that sleeps (for this one file only), so its
+/// transaction is open while the send arrives; the test waits until the database says the write's
+/// backend is asleep in it before it sends, so the order is made, not hoped for. The trigger and its
+/// function are dropped as soon as the race is over.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_send_arriving_mid_write_waits_for_it_and_carries_what_it_wrote() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+    let video = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "race.mp4",
+        "video/mp4",
+        &mp4(),
+    )
+    .await;
+    let video_id = Uuid::parse_str(&video).expect("uuid");
+
+    // slow the write's INSERT, for this file only
+    let function = format!("c5_slow_media_{}", Uuid::new_v4().simple());
+    sqlx::query(&format!(
+        "CREATE FUNCTION {function}() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN IF NEW.attachment_id = '{video_id}' THEN PERFORM pg_sleep(1.5); END IF; RETURN NEW; END $$"
+    ))
+    .execute(&su)
+    .await
+    .expect("slow function");
+    sqlx::query(&format!(
+        "CREATE TRIGGER {function} BEFORE INSERT OR UPDATE ON attachment_media \
+         FOR EACH ROW EXECUTE FUNCTION {function}()"
+    ))
+    .execute(&su)
+    .await
+    .expect("slow trigger");
+
+    let put = {
+        let (http, base, alice, video) = (http.clone(), base.clone(), alice.clone(), video.clone());
+        tokio::spawn(async move {
+            put_media(
+                &http,
+                &base,
+                &alice,
+                (ws, ch),
+                &video,
+                &json!({"durationMs": 1111, "width": 640, "height": 360}),
+            )
+            .await
+        })
+    };
+    // wait until the write's backend is asleep inside its INSERT
+    let mut asleep = false;
+    for _ in 0..250 {
+        let sleepers: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE datname = current_database() AND wait_event = 'PgSleep' \
+                AND query LIKE '%INSERT INTO attachment_media%'",
+        )
+        .fetch_one(&su)
+        .await
+        .expect("activity");
+        if sleepers > 0 {
+            asleep = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    let sent_at = std::time::Instant::now();
+    let (message, echo) = if asleep {
+        post_with_files(
+            &http,
+            &base,
+            &alice,
+            ws,
+            ch,
+            "mid-write send",
+            None,
+            &[&video],
+        )
+        .await
+    } else {
+        (String::new(), Value::Null)
+    };
+    let waited = sent_at.elapsed();
+    let put = put.await.expect("join the write");
+
+    // the race is over: take the trigger away before anything can fail
+    sqlx::query(&format!("DROP TRIGGER {function} ON attachment_media"))
+        .execute(&su)
+        .await
+        .expect("drop trigger");
+    sqlx::query(&format!("DROP FUNCTION {function}()"))
+        .execute(&su)
+        .await
+        .expect("drop function");
+
+    assert!(
+        asleep,
+        "the write reached its INSERT and slept there (the premise of the race)"
+    );
+    assert_eq!(put.status, 200, "{}", put.refusal());
+    assert!(
+        waited >= std::time::Duration::from_millis(300),
+        "the send waited for the write's lock instead of racing past it (took {waited:?})"
+    );
+    let row = media_row(&su, &video).await.expect("the write is stored");
+    assert_eq!((row.0, row.1, row.2), (1111, 640, 360));
+    let frame = message_frame(&su, ws, ch, &message).await;
+    let told = summary_of(&echo).expect("the send's answer carries what the write stored");
+    assert_eq!(
+        told["durationMs"],
+        json!(row.0),
+        "the send's answer and the table agree"
+    );
+    assert_eq!(
+        frame["data"]["payload"]["attachments"][0].get("media"),
+        Some(&told),
+        "the room's frame says what the send's answer says"
+    );
+}
+
+/// **Red proof (review r1 M-2, the second look).** The write checks the file twice, once before it
+/// reads the object and once in the transaction that writes. A send that binds the file in between
+/// must leave the write **refused** — nothing stored, the same flat 404 — because by then the room
+/// has seen the file as it was. The archive read is held at exactly that moment (a gate on the
+/// object), the send goes through, and only then is the read let go.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_send_that_wins_while_the_object_is_read_leaves_the_write_refused() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let gate = Arc::new(Gate::default());
+    let (base, reads) =
+        start_counting_server_with(app_pool.clone(), None, Some(gate.clone())).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+    let video = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "gated.mp4",
+        "video/mp4",
+        &mp4(),
+    )
+    .await;
+    let drive_file: String =
+        sqlx::query_scalar("SELECT drive_file_id FROM attachment WHERE id = $1")
+            .bind(Uuid::parse_str(&video).expect("uuid"))
+            .fetch_one(&su)
+            .await
+            .expect("drive file id");
+    *gate.file_id.lock().expect("gate") = Some(drive_file);
+
+    let put = {
+        let (http, base, alice, video) = (http.clone(), base.clone(), alice.clone(), video.clone());
+        tokio::spawn(async move {
+            put_media(
+                &http,
+                &base,
+                &alice,
+                (ws, ch),
+                &video,
+                &media_body(Some(poster("image/jpeg", &jpeg(160, 90)))),
+            )
+            .await
+        })
+    };
+    // the write has passed its first look and is reading the object
+    tokio::time::timeout(std::time::Duration::from_secs(10), gate.entered.notified())
+        .await
+        .expect("the write reached the archive read");
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+    // the send binds the file now
+    let (message, echo) = post_with_files(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "wins the race",
+        None,
+        &[&video],
+    )
+    .await;
+    gate.release.notify_one();
+    let put = put.await.expect("join the write");
+
+    assert_eq!(put.status, 404, "the write finds the file already sent");
+    assert_eq!(put.refusal(), CONTENT_NOT_FOUND);
+    assert_eq!(
+        media_row(&su, &video).await,
+        None,
+        "nothing was stored for a file a message already carries"
+    );
+    assert!(
+        summary_of(&echo).is_none(),
+        "the send's answer had no media: {echo}"
+    );
+    let frame = message_frame(&su, ws, ch, &message).await;
+    assert!(
+        frame["data"]["payload"]["attachments"][0]
+            .get("media")
+            .is_none(),
+        "…and neither did the room's frame, which still tells the truth about the table"
+    );
+}
+
+/// **Red proof (review r1 M-1).** The media write spends a per-member budget of its own, before the
+/// body is read: with a budget of three, the fourth write in the window answers 429 with
+/// `Retry-After` and the standard body, stores nothing and **never reaches the archive**, and leaves
+/// one audit row naming the surface. The budget is the member's own (another member writes freely)
+/// and is not the upload start's (starting an upload is still allowed at the moment the media
+/// writes are refused).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn the_media_write_spends_a_member_budget_of_its_own() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let limits = RateLimitConfig {
+        media_write_per_member_limit: 3,
+        ..RateLimitConfig::default()
+    };
+    let (base, reads) = start_counting_server_with(app_pool.clone(), Some(limits), None).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let bob = login(&http, &base, fixture.workspace, &fixture.bob).await;
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+    let scope = (ws, ch);
+    let video = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "loop.mp4",
+        "video/mp4",
+        &mp4(),
+    )
+    .await;
+    let write = |duration: i64| json!({"durationMs": duration, "width": 640, "height": 360});
+
+    // ---- 1. three writes are inside the budget ------------------------------------------
+    for duration in [1001, 1002, 1003] {
+        let answer = put_media(&http, &base, &alice, scope, &video, &write(duration)).await;
+        assert_eq!(answer.status, 200, "{duration}: {}", answer.refusal());
+    }
+    assert_eq!(reads.load(Ordering::SeqCst), 3);
+
+    // ---- 2. the fourth is the first over: 429, nothing stored, the archive never asked ----
+    let refused = put_media(&http, &base, &alice, scope, &video, &write(7777)).await;
+    assert_eq!(refused.status, 429, "the fourth write in the window");
+    let retry_after: u64 = refused
+        .header("retry-after")
+        .parse()
+        .expect("a 429 carries Retry-After in whole seconds");
+    assert!((1..=60).contains(&retry_after), "Retry-After {retry_after}");
+    assert_eq!(
+        refused.json(),
+        json!({"error": {"message": "rate limit exceeded"}}),
+        "the standard envelope every other limiter here answers"
+    );
+    assert_eq!(
+        media_row(&su, &video).await.map(|row| row.0),
+        Some(1003),
+        "the refused write stored nothing: the row is the third write's"
+    );
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        3,
+        "a refused write never reaches the archive"
+    );
+    // a refused request is counted too: the gate runs before the body is read, so even a body that
+    // would be a 400 is a 429 now (the budget is spent on requests, not on good requests)
+    let junk = put_media(
+        &http,
+        &base,
+        &alice,
+        scope,
+        &video,
+        &json!({"durationMs": 0}),
+    )
+    .await;
+    assert_eq!(junk.status, 429);
+
+    // ---- 3. one audit row names the surface -----------------------------------------------
+    let audits: Vec<Value> = sqlx::query_scalar(
+        "SELECT detail FROM audit_log \
+          WHERE workspace_id = $1 AND actor_member_id = $2 AND action = 'rate_limit.exceeded'",
+    )
+    .bind(ws)
+    .bind(fixture.alice.member)
+    .fetch_all(&su)
+    .await
+    .expect("audit rows");
+    assert_eq!(audits.len(), 1, "a burst leaves one row: {audits:?}");
+    assert_eq!(audits[0]["surface"], json!("media_write"));
+    assert_eq!(audits[0]["limit"], json!(3));
+    assert_eq!(audits[0]["kind"], json!("human"));
+
+    // ---- 4. the budget is the member's own and the surface's own ---------------------------
+    let bobs =
+        upload_and_complete(&http, &base, &bob, ws, ch, "bobs.mp4", "video/mp4", &mp4()).await;
+    let answer = put_media(&http, &base, &bob, scope, &bobs, &write(2001)).await;
+    assert_eq!(
+        answer.status,
+        200,
+        "another member's budget is untouched: {}",
+        answer.refusal()
+    );
+    let started = http
+        .post(uploads_url(&base, ws, ch))
+        .bearer_auth(&alice)
+        .json(&json!({"name": "next.mp4", "mime": "video/mp4", "size": 10}))
+        .send()
+        .await
+        .expect("start another upload");
+    assert_eq!(
+        started.status(),
+        201,
+        "starting an upload is a different budget: it is still open while the media writes are refused"
     );
 }
 
