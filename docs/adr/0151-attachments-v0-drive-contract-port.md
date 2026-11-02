@@ -96,6 +96,8 @@ Slack 초기 파일 업로드는 서버 경유 단순 POST였고, 이후 외부 
 
 **A5(술어 밖, #4820 C2a 2026-10-31)**: 원본 사진 짧은 주소 `self_media_token.attachment_id`(`160_self_media_token.sql`, `ON DELETE CASCADE`). 쓰는 곳은 agent-worker의 `self_media::mint_for_run_in_tx` 하나이고, 런 요청자가 같은 대화에 올린 완료·미삭제 이미지 첨부만 가리킨다. 그 첨부는 메시지에 묶여 있어(A1) 후보가 아니므로 술어에 넣지 않는다. 묶임이 풀린 뒤 회수되면 5분·1회용 토큰은 CASCADE로 함께 지워지고, Hermes의 받기는 다른 거절과 같은 404다. 점검 SQL 4절은 이 FK를 `(known)`으로 센다.
 
+**A6(술어 밖, #4673 C5 2026-11-02)**: 영상 메타·포스터 `attachment_media (workspace_id, attachment_id)` (`173_attachment_media.sql`, 복합 FK `attachment_media_attachment_fkey` → `attachment (workspace_id, id)` `ON DELETE CASCADE`). 쓰는 곳은 `momo_messaging::attachment_media::set_attachment_media_in_tx` 하나이고(`PUT …/media`: 업로더가, 완료됐고 아직 메시지에 묶이지 않은 영상 첨부에만), 읽는 곳은 포스터 라우트와 메시지 투영의 `LEFT JOIN`이다. 첨부 행이 지워지면 회수 청소기의 삭제도 CASCADE로 이 행을 함께 지우므로(청소기는 `momo_app`으로 돌고 이 표의 DELETE 권한이 없어도 된다: FK 동작은 표 소유자 권한이다) 후보 술어에 넣지 않는다. 이 행은 첨부를 붙잡는 참조가 아니라 첨부에 딸린 부속이다. 점검 SQL 4절은 이 FK를 `(known)`으로 센다.
+
 **B. FK 없는 소프트 참조 — 읽는 이가 있는가**
 
 | # | 자리 | 무엇이 들어가나 | 누가 첨부를 찾는 데 쓰나 | 판정 |
@@ -113,7 +115,7 @@ Slack 초기 파일 업로드는 서버 경유 단순 POST였고, 이후 외부 
 
 **C. 서버가 모르는 참조 — 클라이언트 초안**: 첨부 초안은 **세션 메모리뿐**이고 디스크에 남지 않는다(웹 `features/attachments/draftStore.ts:36-46`은 `File`을 들고 있어 localStorage로 갈 수 없다; 폰 `features/attachments/draftStore.ts`는 모듈 전역 `Map`, 로그아웃은 `clearAllAttachmentDrafts`; 폰 MMKV `composerDrafts`와 웹 localStorage 초안은 **본문 글자만**이고 첨부 id가 없다, 30일 `DRAFT_TTL_MS`). 서버가 모르는 유일한 참조는 열려 있는 컴포저의 메모리다. 업로드 세션은 길어야 일주일이고 `created_at`은 세션 시작이며 `complete`는 그 안에 일어나므로 **완료된 파일은 최소 23일의 유예**를 갖는다. 30일 넘게 같은 컴포저 탭을 열어 둔 채 첨부를 안 보낸 경우에만 보낼 때 「첨부를 찾을 수 없음」을 만나고 다시 올리면 된다. 원본은 올린 사람의 기기에 있으므로 지우는 쪽에서 데이터를 잃는 일은 없다. 30일은 이 위험을 덮는다.
 
-**전수가 계속 맞는지**: 첨부를 가리키는 FK가 새로 생기면 점검 SQL 4절이 `UNKNOWN`을 내고, PG 시험이 FK 다섯 개(A1~A4와 A5)가 전부 `(known)`임을 단정하므로 CI가 빨개진다. 그때 이 표와 술어와 점검 SQL을 함께 고친다.
+**전수가 계속 맞는지**: 첨부를 가리키는 FK가 새로 생기면 점검 SQL 4절이 `UNKNOWN`을 내고, PG 시험이 FK 여섯 개(A1~A4, A5, A6)가 전부 `(known)`임을 단정하므로 CI가 빨개진다. 그때 이 표와 술어와 점검 SQL을 함께 고친다.
 
 ### 이슈 #4443 문구와 다른 곳
 
@@ -416,6 +418,7 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
   - **만드는 곳은 보내는 기기다.** 폰이 첫 구현이다. 웹·데스크탑은 로컬 파일을 `<video>`로 읽어야 해서 `media-src blob:`이 필요하므로 이월한다(그때까지 웹·데스크탑이 올린 영상은 포스터 없이 카드로 보인다). **서버는 영상을 파싱하지도 변환하지도 않는다.** ffmpeg는 이미지에 없고 라이선스·공격면·CPU가 문제이며, 증보 4 D7이 파서를 자식 프로세스에 가둔 전례처럼 적대 형식의 파싱은 가둬야 한다. HLS·서버 변환은 아이디어로만 둔다.
   - **저장은 PG다.** 첨부 id에 1:1인 표 `attachment_media`(`workspace_id` 열과 `ws_isolation` 정책을 명시하고 `ON DELETE CASCADE`, RLS FORCE)에 `duration_ms`(1..86,400,000), `width`·`height`(1..16,384), 포스터 `poster_mime`(`image/jpeg`·`image/webp`), `poster_width`·`poster_height`(1,280 이하), `poster_bytes`(`bytea`, 256 KiB 이하)를 둔다. 보관소에는 서버가 바이트를 쓰는 API가 없고(131 아바타 이미지가 같은 이유로 PG에 둔다), 포스터를 둘째 첨부 행으로 두면 「묶이지 않은 초안은 업로더만 읽고 30일 뒤 청소된다」는 규칙에 걸려 다른 멤버에게 안 보이거나 지워진다.
   - **쓰기**: `PUT /v1/workspaces/{ws}/channels/{ch}/attachments/{id}/media`, JSON `{durationMs, width, height, poster: {mime, dataBase64}}`(본문 상한 512 KiB). **업로더 본인이 `complete`이고 아직 메시지에 묶이지 않은 첨부에만** 쓴다(멱등 교체). 서버 검증: 저장된 mime이 닫힌 영상 목록(`video/mp4`·`video/quicktime`·`video/webm`)이고 `read_prefix`로 읽은 첫 바이트에 `ftyp`(mp4·mov, 오프셋 4) 또는 EBML(`1A 45 DF A3`, webm) 매직이 있다. **새 파서 crate는 쓰지 않는다**(이슈 #4673의 「mp4 헤더 검사」는 이 매직 확인으로 줄인다). 포스터는 `sniff_image_mime`(JPEG·WebP 매직)·`image_dimensions`(헤더 치수)·크기로 바이트를 검증한다. 길이·치수는 **선언값의 범위만** 검증한다(클라이언트가 거짓이면 레이아웃만 틀어진다).
+  - **예산**(검수 1회차 M-1): 이 쓰기는 호출 하나가 PG에 최대 256 KiB를 쓰고(재쓰기도 새로 쓴다) 보관소에서 첫 바이트를 읽으므로 업로드 시작처럼 멤버 × 표면 예산을 쓴다: 표면 `media_write`, 기본 60/창, `RATE_LIMIT_MEDIA_WRITE_PER_MEMBER`(0이면 끔), 키는 업로드 시작과 따로 둔다. 게이트는 본문을 읽기 전에 거절하고 거절된 요청도 센다. 멤버별 **묶이지 않은 media 행 수 상한**은 C6·후속이다(그때까지는 이 예산과 초안 회수가 상한이다).
   - **읽기**: `GET …/attachments/{id}/poster`가 content와 같은 인가·같은 헤더 셋·같은 404를 쓴다. 메시지 투영의 `attachments[]`에는 영상일 때만 `media: {kind, durationMs, width, height, hasPoster}`를 **더한다**(가산). 포스터 바이트는 투영·`message.new` 프레임·outbox 페이로드 어디에도 싣지 않고, 목록 질의는 `poster_bytes`를 고르지 않는다.
   - **신뢰**: 포스터가 그 영상의 실제 프레임이라는 보장은 없다(남는 위험). 클라이언트는 선언한 길이·치수를 믿지 않고 자리 높이·비율을 clamp한다(16,384까지 선언할 수 있다). `ftyp`로 시작하지 않는 오래된 `.mov`는 매직 때문에 media를 못 받고 카드로 남는다(의도). 쓰기는 감사한다(`attachment.media_set`, 종류만이고 내용·이름은 없다). 회수는 행 CASCADE가 따라간다.
 - **D6 · 폰 영상 압축 기본값** (구현은 F1 #4586, 값은 여기서 정한다) [권장].
@@ -541,6 +544,7 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 14. 열린 업로드 4개와 디스크 예약은 정상 사용자를 막을 수 있다. 예약은 보수적이라 60초 청소 주기 사이에 만료된 세션의 남은 바이트가 계산에 남는다.
 15. 데스크탑 IPC가 선형으로 늘면 300 MiB 한 건에 메모리가 약 +2.6 GiB다(64 MiB에서 +569 MiB를 잰 값에서 늘린 추정이며 측정이 아니다). #4639 전에는 올리지 않는다(순서는 C4-2 ← #4639 의존이 지킨다).
 16. 웹·데스크탑이 올린 영상은 포스터가 없다(이월).
+17. **포스터는 EXIF·덧붙은 바이트까지 그대로 저장·전달한다.** 서버는 그림을 디코드·재인코딩하지 않으므로(D5) 검증을 통과한 포스터의 EXIF·XMP와 헤더 뒤에 덧붙은 바이트(256 KiB 이내)가 열람자 모두에게 그대로 가고, 포스터 가로세로는 헤더가 선언한 값이다. `nosniff`·`attachment`로 렌더 위험은 닫혀 있다. 올리는 클라이언트(F1)가 EXIF를 벗겨 보낸다.
 
 ### runtime-unverified
 
@@ -590,9 +594,9 @@ F5는 설정 주석이라 시험이 없다. `docker compose config`가 기본 �
 | D4 공개 문장 | `check_security_claims.py`(기존 린트) | ATT-1이 조건부로 좁혀지고 새 claim(ATT-9)이 스트림 시험 둘을 증명으로 건다. 증명 이름이 틀리거나 비면 E1·E2가 빨강이다. 린트는 문장이 스트림 주소를 말하는지는 못 보므로 새 id 없이 ATT-1 문장만 고치는 방식은 초록이라 잡지 못한다 | C3b |
 | D4 CSP | `desktopShellContract.test.ts` 확장, `gate-csp-deploy.mjs` | 데스크탑 `media-src`가 `'self' http: https:`이고 `blob:`이 없으며 `img-src 'self' data:`는 그대로다. 웹은 `media-src` 없이 `default-src 'self'`다. `blob:`을 더하면 빨강 | C7 |
 | D4 미디어 요소 | `only_the_player_creates_media_elements`(정적) | `<video`·`<audio`·`new Audio(`에 더해 `createElement("video")`·`createElement("audio")`·`jsx("video"` 패턴이 재생기 컴포넌트 하나 밖에 없다. 다른 컴포넌트가 만들면 빨강 | C7 |
-| D5 권한 | `the_media_write_is_the_uploaders_before_the_send_only` | 업로더 본인·`complete`·미묶임에서만 200이다. 남의 첨부·묶인 뒤·`pending`·영상 아닌 mime은 같은 404다. 술어 하나를 지우면 빨강 | C5 |
+| D5 권한 | `the_media_write_is_the_uploaders_before_the_send_only` | 업로더 본인·`complete`·미묶임에서만 200이다. 남의 첨부·묶인 뒤·`pending`은 같은 404다(영상 아닌 mime은 이 행이 아니라 아래 「영상 확인」 행의 400이다: 인가가 먼저라 업로더 본인만 보는 400이다). 술어 하나를 지우면 빨강 | C5 |
 | D5 포스터 검증 | `a_poster_is_validated_by_its_bytes_not_its_label` | `image/jpeg`로 선언한 HTML·PNG·GIF·SVG·**헤더(SOF) 앞에서 자른 JPEG**·256 KiB + 1 B·치수 1,281은 각각 400이고 정상 JPEG·WebP는 200이다. 매직·치수·크기 검사 하나를 지우면 그 케이스가 통과해 빨강. 헤더만 읽는 `image_dimensions`는 SOF 뒤에서 잘린 JPEG를 통과시킨다(서버가 디코드하지 않아 위험은 없고 클라이언트 디코더 몫이라 이 시험은 그것을 400으로 단정하지 않는다) | C5 |
-| D5 영상 확인 | `a_non_video_or_a_fake_video_cannot_hold_media` | 저장된 mime이 닫힌 목록 밖이거나 첫 바이트에 `ftyp`·EBML이 없으면 400이다. 길이 0·24시간 + 1 ms·치수 16,385도 400이다. 매직 검사나 범위 검사를 지우면 빨강 | C5 |
+| D5 영상 확인 | `a_non_video_or_a_fake_video_cannot_hold_media` | 저장된 mime이 닫힌 목록 밖이거나 첫 바이트에 `ftyp`·EBML이 없으면 400이다(인가 뒤라 그 파일의 업로더 본인만 본다. 남의 파일이면 위 「권한」 행의 404다). 길이 0·24시간 + 1 ms·치수 16,385도 400이고 이 셋은 요청의 모양이라 인가 앞에서 누구에게나 400이다. 매직 검사나 범위 검사를 지우면 빨강 | C5 |
 | D5 읽기 | `the_poster_route_is_the_content_route_for_everyone_else` | 포스터 GET이 content와 같은 인가 매트릭스를 같은 404로 내고(지운 메시지 포함) 헤더 셋이 같다. 술어를 지우면 빨강 | C5 |
 | D5 페이로드 | `a_poster_is_never_in_a_payload` | 메시지 투영·`message.new` 프레임·outbox 페이로드에 `media`(길이·치수·`hasPoster`)만 있고 포스터 바이트·base64가 없으며 `PAGED_ATTACHMENT_JOIN`이 `poster_bytes`를 고르지 않는다. 포스터를 실으면 빨강 | C5 |
 | D5 회수 | `media_rows_follow_the_attachment` | 첨부 행이 지워지면 `attachment_media`도 CASCADE로 사라지고 FK 전수 시험이 새 FK를 `(known)`으로 센다. CASCADE를 지우면 빨강 | C5 |
