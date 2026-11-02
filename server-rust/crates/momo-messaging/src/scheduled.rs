@@ -480,6 +480,9 @@ pub async fn schedule_attachments_in_tx(
             name: row.try_get("name")?,
             mime: row.try_get("mime")?,
             size_bytes: row.try_get("size_bytes")?,
+            // The schedule list draws a held file as a plain card; the video summary is read
+            // when the message goes out (`message_attachments_in_tx`), not on this list.
+            media: None,
         });
     }
     Ok(out)

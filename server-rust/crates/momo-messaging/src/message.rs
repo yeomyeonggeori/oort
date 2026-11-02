@@ -3083,6 +3083,7 @@ mod tests {
             name: "보고서.pdf".into(),
             mime: "application/pdf".into(),
             size_bytes: 2048,
+            media: None,
         };
         let payload = build_broadcast_payload(
             Uuid::from_u128(1),

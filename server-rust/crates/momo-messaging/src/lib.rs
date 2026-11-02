@@ -51,6 +51,7 @@ pub mod agent_avatar;
 pub mod agent_card;
 pub mod approval_card;
 pub mod attachment;
+pub mod attachment_media;
 pub mod attachment_reclaim;
 pub mod avatar_reclaim;
 pub mod channel;
@@ -123,9 +124,14 @@ pub use attachment::{
     create_pending_upload_in_tx, is_attachment_channel_member, link_attachments_in_tx,
     load_attachment_in_tx, load_readable_attachment_in_tx, message_attachments_in_tx,
     settle_upload_in_tx, validate_attachment_id_list, validate_attachment_mime,
-    validate_attachment_name, Attachment, AttachmentLinkRejected, AttachmentSpecInvalid,
-    MessageAttachment, ATTACHMENT_TEXT_MAX_CHARS, MAX_ATTACHMENTS_PER_MESSAGE,
-    MAX_ATTACHMENT_BYTES,
+    validate_attachment_name, Attachment, AttachmentLinkRejected, AttachmentMedia,
+    AttachmentSpecInvalid, MessageAttachment, ATTACHMENT_TEXT_MAX_CHARS,
+    MAX_ATTACHMENTS_PER_MESSAGE, MAX_ATTACHMENT_BYTES, MEDIA_KIND_VIDEO,
+};
+pub use attachment_media::{
+    load_poster_in_tx, may_hold_media, require_video_mime, set_attachment_media_in_tx,
+    validate_media_declaration, validate_poster, video_magic_matches, MediaDeclaration,
+    MediaRejected, Poster, PosterImage, VIDEO_PREFIX_BYTES,
 };
 pub use channel::{
     add_channel_member_in_tx, clamp_channel_list_limit, create_channel,
