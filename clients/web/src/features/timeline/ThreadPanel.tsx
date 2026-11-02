@@ -314,10 +314,21 @@ function ThreadPanelFrame({
   }, [requestLanding, root.id, allReplies]);
   const targetMissing = requestLanding?.rootId.toLowerCase() === root.id.toLowerCase() && !query.isLoading && !query.isFetching && !query.error && !allReplies.some((message) => message.id.toLowerCase() === requestLanding.messageId.toLowerCase());
 
-  /** Per-row actions, with this row's chips and pin state folded in. */
+  /**
+   * Per-row actions, with this row's chips and pin state folded in.
+   *
+   * 고치기만 한 겹 감싼다(#5191): `actions.onEditMessage` 는 **채널 타임라인**의 상태를 고치고, 스레드 답글은 거기 없다(본류가
+   * 거르는 행이다). 그래서 저장한 사람의 이 패널은 응답을 받고도 옛 글을 그대로 그렸고, 다른 기기·다른 사람에게서 오는
+   * `message.edited` 에코(위 구독이 목록을 다시 읽는다)가 도착해야 바뀌었다 — 에코가 늦거나 끊기면 「저장이 안 됐다」로 읽혔다.
+   * 저장이 끝나면 에코를 기다리지 않고 이 목록을 다시 읽는다. 목록은 첨부·롤업·풀린 인용을 싣는 읽기라 편집 투영의 구멍도 없다.
+   */
   const rowActions = (message: Message): MessageRowActions | undefined =>
     actions && {
       ...actions,
+      onEditMessage: async (target, body) => {
+        await actions.onEditMessage(target, body);
+        refreshReplies();
+      },
       chips: chipsFor(reactions ?? {}, message.id, actions.myMemberId),
       pinned: isPinned(pins ?? {}, message.id),
     };

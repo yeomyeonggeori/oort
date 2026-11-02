@@ -69,6 +69,16 @@ export type ComposerKeyIntent =
    * 인용을 날리면 안 된다. Esc를 한 번 더 누르면 인용이 내려온다.
    */
   | "preview-dismiss"
+  /**
+   * #5191 - 빈 입력칸의 ↑: 이 대화에서 **내** 마지막 글 있는 메시지를 고친다(Slack식).
+   *
+   * 메시지 고치기는 `⋯` 메뉴 맨 아래에 있어 사람들이 찾지 못했다(#5191). 그래서 가장 손에 익은 길을 하나 더 연다:
+   * 방금 보낸 글의 오타는 입력칸에서 ↑ 한 번이면 고쳐진다. 열리는 자리와 대상은 호출부(`lastEditableMessage`)가 정한다.
+   *
+   * 키가 이 뜻이 되는 것은 **입력칸이 비어 있고** 수식키가 없고 한글 조합이 열려 있지 않고 멘션 목록이 닫혀 있을 때뿐이다.
+   * 글이 든 입력칸의 ↑ 는 커서를 옮기는 원래 키이고(`pass`), 멘션 목록이 열려 있으면 ↑ 는 그 목록의 것이다.
+   */
+  | "edit-last"
   /** Not ours: let the textarea (or the IME) have it. */
   | "pass";
 
@@ -115,6 +125,13 @@ export interface ComposerKeyState {
    * 이전과 한 글자도 다르지 않다.
    */
   previewOpen?: boolean;
+  /**
+   * #5191 - 입력칸이 **비어 있다**(글이 한 글자도 없다). `true`일 때만 ↑ 가 `edit-last` 가 된다. 공백만 든 글은 빈 것이
+   * 아니다: 그 입력칸의 ↑ 는 여전히 커서의 것이다.
+   *
+   * 옵셔널이라 이 키를 적지 않는 표면(스레드 입력칸·폰 입력칸)은 동작이 이전과 한 글자도 다르지 않다.
+   */
+  textEmpty?: boolean;
 }
 
 /** True when the keystroke belongs to an in-flight IME composition. */
@@ -158,8 +175,23 @@ export function composerKeyIntent(
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     // `composing` only (not `justComposed`): arrows do not commit a
     // composition, so a released-key window says nothing about them.
-    if (event.composing || !state.mentionsOpen) return "pass";
-    return event.key === "ArrowDown" ? "mention-next" : "mention-prev";
+    if (event.composing) return "pass";
+    if (state.mentionsOpen) {
+      return event.key === "ArrowDown" ? "mention-next" : "mention-prev";
+    }
+    // #5191 - 목록이 닫혀 있고 입력칸이 비어 있을 때의 맨 ↑. 수식키가 붙은 ↑ (⌥↑ 줄 맨 앞, ⌘↑ 글 맨 앞, ⇧↑ 선택 늘이기)는
+    // 운영체제와 브라우저의 것이다.
+    if (
+      event.key === "ArrowUp" &&
+      state.textEmpty === true &&
+      !event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
+      return "edit-last";
+    }
+    return "pass";
   }
 
   if (event.key === "Escape") {
@@ -171,6 +203,45 @@ export function composerKeyIntent(
   }
 
   return "pass";
+}
+
+/** What one keystroke means inside the box that edits a sent message (#5191). */
+export type MessageEditorKeyIntent = "save" | "cancel" | "pass";
+
+/**
+ * 메시지를 고치는 입력칸의 키: Enter = 저장 · Esc = 취소 · Shift+Enter = 줄바꿈.
+ *
+ * **컴포저의 규칙과 같다**고 약속한 키들이라, 따로 쓰지 않고 `composerKeyIntent` 위에 선다: 한글 조합을 끝내는
+ * Enter 는 Chromium 순서(`isComposing`)로도 WebKit 순서(`justComposed`)로도 저장이 아니다. 편집기는 한글 문장을
+ * 여는 곳이라 이 guard 가 새면 쓰던 글이 조합 중간에 저장된다. Esc 도 조합 중에는 IME 의 것이다(후보 창을 닫는
+ * 키이고, 편집을 버리는 키가 아니다).
+ */
+export function messageEditorKeyIntent(
+  event: ComposerKeyEvent,
+  state: { justComposed: boolean }
+): MessageEditorKeyIntent {
+  if (event.key === "Enter") {
+    const intent = composerKeyIntent(event, {
+      mentionsOpen: false,
+      justComposed: state.justComposed,
+      enterSends: true,
+    });
+    return intent === "send" ? "save" : "pass";
+  }
+  if (event.key === "Escape") return event.composing ? "pass" : "cancel";
+  return "pass";
+}
+
+/**
+ * 「조합이 막 끝났다」 깃발(`justComposed`)을 이 키 뒤에도 쥐고 있어야 하는가.
+ *
+ * 깃발은 조합을 끝낸 **바로 그 keydown 한 번**을 위한 것이다. 조합을 끝낼 수 있는 키는 Enter 와 Tab 뿐이므로(컴포저의
+ * `onKeyDown` 첫머리가 같은 말을 한다), 다른 키가 눌렸다면 조합이 키 입력 없이 끝났다는 증거다(보내기 단추를 누르는 중의 클릭).
+ * 그때 깃발이 남으면 다음 Enter 가 조합 끝으로 오인돼 삼켜진다. 편집기(`MessageEditor`)는 이 판정을 여기서 가져간다 — 웹
+ * 파일에 키 이름을 또 적지 않으려는 것이고(직접 문구 장부는 문자열 리터럴 수를 센다), 두 입력칸이 같은 규칙을 한 곳에서 읽게 하려는 것이다.
+ */
+export function keyKeepsCompositionGuard(key: string): boolean {
+  return key === "Enter" || key === "Tab";
 }
 
 /**
