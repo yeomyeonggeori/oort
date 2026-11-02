@@ -7,6 +7,7 @@
 //! | `s2_the_409_is_the_helpers_alone` | B5-10 | the check refuses every agent, or the wrong id |
 //! | `s3_a_stop_by_any_member_of_the_room_ends_the_task_and_retires_its_job` | B5-8, B15-A8, B13-I7 | `cancel_run_in_tx` stops ending the task, or the cancel stops retiring the pending step job |
 //! | `s4_a_stop_reaches_a_failed_run_whose_task_is_still_active` | #5029 (r1 L3a) | the route or `cancel_run_in_tx` stops taking a `failed` run with an active task, or takes a `failed` run without one (or with an ended one), or a `succeeded`/`timed_out` run under a stray active row |
+//! | `s5_a_stop_that_races_the_tasks_end_answers_409_not_500` | #5029 (r1 L-1) | the route turns the stop's no-op statement back into a 500 (no re-read), or answers 200 for a cancellation that never happened |
 //!
 //! The worker half (steps, claims, bounds, requester, the ledger, the sweep, the table's isolation) is
 //! `momo-agent-worker/tests/team_ai_task_conformance_pg.rs`.
@@ -815,4 +816,121 @@ async fn s4_a_stop_reaches_a_failed_run_whose_task_is_still_active() {
             "{status}: the row is not touched by the refusal"
         );
     }
+}
+
+/// Wait until some backend of this database is blocked on a row lock taken by a `SELECT … FOR UPDATE`
+/// of `agent_run` — the stop, parked behind the closing transaction — or fail loudly.
+async fn wait_for_the_stop_to_wait_on_the_run_lock(su: &PgPool) {
+    for _ in 0..300 {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE datname = current_database() AND wait_event_type = 'Lock' \
+                AND query LIKE '%FROM agent_run r%FOR UPDATE%'",
+        )
+        .fetch_one(su)
+        .await
+        .unwrap();
+        if waiting > 0 {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("the stop never waited for the run's lock");
+}
+
+/// #5029 review r1 L-1: a stop that is waiting for the run's lock while the task ends — the worker's
+/// closing transaction commits the run `failed` and its row `ended` — is a run that has left the
+/// stoppable set: the answer is the 409 every other finished run gets, and nothing is written. (The
+/// read under the lock sees the new status but the old state of the row, so the stop's own statement
+/// finds nothing to cancel; that is not a server fault.)
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn s5_a_stop_that_races_the_tasks_end_answers_409_not_500() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let f = seed(&su, &app).await;
+    let base = start_server(app.clone()).await;
+    let client = reqwest::Client::new();
+    let workspace = f.workspace;
+
+    // A task in flight: the run is `running`, its row is active.
+    let run = mention_run(&app, &su, &f).await;
+    insert_active_task(&su, &f, run).await;
+    let cancel_lines = "SELECT count(*) FROM message WHERE workspace_id = $1 \
+                        AND props->>'kind' = 'agent_run_cancelled'";
+    let cancel_audits =
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'agent.run.cancelled'";
+    let (lines_before, audits_before) = (
+        count(&su, cancel_lines, &f).await,
+        count(&su, cancel_audits, &f).await,
+    );
+
+    // The worker's closing transaction holds the run's lock and has ended the run and its task — but
+    // has not committed yet.
+    let mut closing = su.begin().await.expect("the closing transaction");
+    sqlx::query("SELECT 1 FROM agent_run WHERE id = $1 FOR UPDATE")
+        .bind(run)
+        .fetch_one(&mut *closing)
+        .await
+        .expect("take the run's lock");
+    sqlx::query("UPDATE agent_run SET status = 'failed', finished_at = now() WHERE id = $1")
+        .bind(run)
+        .execute(&mut *closing)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE team_ai_task SET state = 'ended', end_reason = 'task_limit', plan = NULL, \
+                note = NULL, claim_token = NULL, claim_until = NULL, ended_at = now() \
+          WHERE run_id = $1",
+    )
+    .bind(run)
+    .execute(&mut *closing)
+    .await
+    .unwrap();
+
+    // A member of the room taps 중단 now: the stop reads the run, and waits for its lock.
+    let stop = {
+        let client = client.clone();
+        let url = format!("{base}/v1/workspaces/{workspace}/agent-runs/{run}/cancel");
+        let jwt = f.bystander_jwt.clone();
+        tokio::spawn(async move { client.post(url).bearer_auth(jwt).send().await.unwrap() })
+    };
+    wait_for_the_stop_to_wait_on_the_run_lock(&su).await;
+    closing
+        .commit()
+        .await
+        .expect("the closing transaction commits");
+
+    let response = stop.await.unwrap();
+    let status = response.status().as_u16();
+    let body = response.text().await.unwrap();
+    assert_eq!(
+        status, 409,
+        "a stop that lost the race is a 409, not a server error: {body}"
+    );
+    assert!(
+        body.contains("agent run is already failed"),
+        "and it names what the run is now: {body}"
+    );
+    assert_eq!(
+        run_status_of(&su, run).await,
+        "failed",
+        "the stop wrote nothing"
+    );
+    assert_eq!(
+        task_of(&su, run).await,
+        ("ended".to_string(), Some("task_limit".to_string()), None),
+        "the task stays as its own end left it"
+    );
+    assert_eq!(
+        count(&su, cancel_lines, &f).await,
+        lines_before,
+        "no 「중단」 line was written"
+    );
+    assert_eq!(
+        count(&su, cancel_audits, &f).await,
+        audits_before,
+        "no cancel audit row was written"
+    );
 }

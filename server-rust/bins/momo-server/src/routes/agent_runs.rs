@@ -1299,6 +1299,14 @@ const CANCEL_PROPS_KIND: &str = "agent_run_cancelled";
 const CANCEL_AUDIT_ACTION: &str = "agent.run.cancelled";
 const CANCEL_AUDIT_SCHEMA: &str = "momo.agent_run.cancelled.v1";
 
+/// The 409 a stop gets for a run that is not something a stop can act on, naming the status it has.
+fn run_already(status: RunStatus) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        format!("agent run is already {}", status.as_db_label()),
+    )
+}
+
 /// `agent_run.error.code` (Swift :492). The run ended, and this is *why* — an
 /// error object that names a person's decision rather than a failure, which is
 /// what keeps a cancelled run out of any "what broke" reading of the column.
@@ -1411,10 +1419,7 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
     // `is_stoppable` is `is_cancellable` plus one case (#5029): a `failed` run whose team-AI task is
     // still active is not over.
     if !already_cancelled && !run.is_stoppable() {
-        return Ok(Err(ApiError::new(
-            StatusCode::CONFLICT,
-            format!("agent run is already {}", run.status.as_db_label()),
-        )));
+        return Ok(Err(run_already(run.status)));
     }
 
     // Read before the idempotent early-return, exactly as Swift does (:466-489):
@@ -1443,11 +1448,18 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
     )
     .await?;
     if !cancelled {
-        // The row was locked and read as cancellable a few statements ago, so a
-        // no-op here means the guard and the read disagree — a bug in one of
-        // them, not a client outcome. Surfacing it as a 500 beats reporting a
-        // cancellation that never happened.
-        return Err(momo_db::DbError::from(sqlx::Error::RowNotFound));
+        // The row was locked and read as cancellable a few statements ago. The one way a no-op is not a
+        // bug is the widened arm (#5029): the read judged "a task is still active" on the snapshot it
+        // took before it got the lock, the statement judges it on a snapshot of its own, and a task that
+        // ended in between — the worker's closing transaction committed while this stop waited for the
+        // lock, or a close that takes no run lock — shows only to the statement. The run has left the
+        // stoppable set: say what it is now, like any other finished run (review r1 L-1). If the facts
+        // still call it stoppable, the guard and the read disagree — a bug in one of them, not a client
+        // outcome — and surfacing a 500 beats reporting a cancellation that never happened.
+        return match lock_run_for_cancel_in_tx(conn, workspace_id, run_id, member_id).await? {
+            Some(now) if !now.is_stoppable() => Ok(Err(run_already(now.status))),
+            _ => Err(momo_db::DbError::from(sqlx::Error::RowNotFound)),
+        };
     }
 
     // The system line goes through the message spine, so it takes a real
