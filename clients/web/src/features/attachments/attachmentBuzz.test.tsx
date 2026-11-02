@@ -30,7 +30,6 @@ vi.mock("@/features/attachments/content", async (importOriginal) => {
 
 const { AttachmentList } = await import("../timeline/AttachmentList");
 const { lightboxPositionLabel, lightboxSentAtLabel, lightboxZoomLabel } = await import("./imageLightboxModel");
-const { ZOOM_CHIP_LINGER_MS } = await import("@/design/motion");
 
 const HASH = "geGngQxZ3pLmK9aVbT2wRq-pQ";
 const img = (id: string, name = `${HASH}.webp`) => ({
@@ -335,7 +334,8 @@ describe("image lightbox zoom", () => {
 
   const lb = (sel: string) => document.body.querySelector<HTMLElement>(sel);
   const photo = () => lb('[data-testid="image-lightbox-ready"] img')!;
-  const chip = () => lb('[data-testid="image-lightbox-zoom"]');
+  /** 아래 캡슐의 배율 글자. 늘 서 있다(앞 판의 잠깐 떴다 지는 칩은 사라졌다, #5190). */
+  const readout = () => lb('[data-testid="image-lightbox-zoom"]');
   const zoomOf = () => Number(photo().style.getPropertyValue("--lightbox-zoom"));
   const panOf = () => ({
     x: parseFloat(photo().style.getPropertyValue("--lightbox-pan-x")),
@@ -387,7 +387,7 @@ describe("image lightbox zoom", () => {
     expect(isZoomed()).toBe(true);
     expect(pointUnder(at).x).toBeCloseTo(before.x, 6);
     expect(pointUnder(at).y).toBeCloseTo(before.y, 6);
-    expect(chip()?.textContent).toBe(lightboxZoomLabel(zoomOf(), 0.5));
+    expect(readout()?.textContent).toBe(lightboxZoomLabel(zoomOf(), 0.5));
 
     const afterPinch = zoomOf();
     const scroll = wheel({ metaKey: true, deltaY: -10, clientX: at.x, clientY: at.y });
@@ -409,11 +409,11 @@ describe("image lightbox zoom", () => {
     wheel({ deltaY: -50, clientX: 500, clientY: 350 });
     expect(zoomOf()).toBe(1);
     expect(isZoomed()).toBe(false);
-    expect(chip()).toBeNull();
+    expect(readout()?.textContent).toBe("맞춤");
 
     for (let turn = 0; turn < 80; turn += 1) wheel({ ctrlKey: true, deltaY: -30, clientX: 500, clientY: 350 });
     expect(zoomOf()).toBe(4);
-    expect(chip()?.textContent).toBe(lightboxZoomLabel(4, 0.5));
+    expect(readout()?.textContent).toBe(lightboxZoomLabel(4, 0.5));
   });
 
   it("toggles between fit and the picture's actual size on a double click, and names the ratio on the chip", () => {
@@ -421,14 +421,14 @@ describe("image lightbox zoom", () => {
     // 맞춤이 자연 크기의 50%(600/1200): 실제 크기는 맞춤의 2배, 커서(560, 380)가 중심이다.
     doubleClick(560, 380);
     expect(zoomOf()).toBe(2);
-    expect(chip()?.textContent).toBe("100%");
+    expect(readout()?.textContent).toBe("100%");
     expect(panOf()).toEqual({ x: -60, y: -30 });
     expect(isZoomed()).toBe(true);
 
     doubleClick();
     expect(zoomOf()).toBe(1);
     expect(isZoomed()).toBe(false);
-    expect(chip()?.textContent).toBe("맞춤");
+    expect(readout()?.textContent).toBe("맞춤");
     expect(panOf()).toEqual({ x: 0, y: 0 });
   });
 
@@ -438,7 +438,7 @@ describe("image lightbox zoom", () => {
     open();
     doubleClick();
     expect(zoomOf()).toBe(2);
-    expect(chip()?.textContent).toBe("200%");
+    expect(readout()?.textContent).toBe("200%");
   });
 
   it("turns off outside-click closing and arrow keys while zoomed, and Escape fits before closing", async () => {
@@ -470,19 +470,92 @@ describe("image lightbox zoom", () => {
     expect(zoomOf()).toBeCloseTo(1.25, 6);
     press({ key: "+", code: "Equal", metaKey: true, shiftKey: true });
     expect(zoomOf()).toBeCloseTo(1.5625, 6);
-    expect(chip()?.textContent).toBe(lightboxZoomLabel(zoomOf(), 0.5));
+    expect(readout()?.textContent).toBe(lightboxZoomLabel(zoomOf(), 0.5));
     press({ key: "-", code: "Minus", metaKey: true });
     expect(zoomOf()).toBeCloseTo(1.25, 6);
     const fitKey = press({ key: "0", code: "Digit0", metaKey: true });
     expect(fitKey.defaultPrevented).toBe(true);
     expect(zoomOf()).toBe(1);
     expect(isZoomed()).toBe(false);
-    expect(chip()?.textContent).toBe("맞춤");
+    expect(readout()?.textContent).toBe("맞춤");
+  });
 
-    // 수식 키 없는 「=」는 그냥 글자다.
-    const bare = press({ key: "=", code: "Equal" });
-    expect(bare.defaultPrevented).toBe(false);
+  // #5190: 사진 앱처럼 수식 키 없이 + − 0 으로도 된다.
+  it("zooms with a bare plus, minus and zero too, and leaves other keys and option combinations alone", () => {
+    open();
+    const plus = press({ key: "+", code: "Equal", shiftKey: true });
+    expect(plus.defaultPrevented).toBe(true);
+    expect(zoomOf()).toBeCloseTo(1.25, 6);
+    press({ key: "=", code: "Equal" });
+    expect(zoomOf()).toBeCloseTo(1.5625, 6);
+    press({ key: "-", code: "Minus" });
+    expect(zoomOf()).toBeCloseTo(1.25, 6);
+    const fitKey = press({ key: "0", code: "Digit0" });
+    expect(fitKey.defaultPrevented).toBe(true);
     expect(zoomOf()).toBe(1);
+    expect(readout()?.textContent).toBe("맞춤");
+
+    const other = press({ key: "k", code: "KeyK" });
+    expect(other.defaultPrevented).toBe(false);
+    const option = press({ key: "=", code: "Equal", altKey: true });
+    expect(option.defaultPrevented).toBe(false);
+    expect(zoomOf()).toBe(1);
+  });
+
+  // 캡슐의 − + 는 키와 같은 길이다. 맨 끝에서는 `aria-disabled`로 말하고(비활성화하면 초점이 <body>로 던져진다) 눌러도 아무 일 없다.
+  it("zooms from the capsule's minus and plus, and says when there is nowhere further to go", () => {
+    open();
+    const minus = () => lb('[data-testid="image-lightbox-zoom-out"]')!;
+    const plus = () => lb('[data-testid="image-lightbox-zoom-in"]')!;
+    expect(minus().getAttribute("aria-disabled"), "nothing smaller than fit").toBe("true");
+    expect(plus().getAttribute("aria-disabled")).toBeNull();
+    act(() => minus().click());
+    expect(zoomOf()).toBe(1);
+
+    act(() => plus().click());
+    expect(zoomOf()).toBeCloseTo(1.25, 6);
+    expect(readout()?.textContent).toBe(lightboxZoomLabel(1.25, 0.5));
+    expect(minus().getAttribute("aria-disabled")).toBeNull();
+    act(() => minus().click());
+    expect(zoomOf(), "back to exactly fit").toBe(1);
+
+    for (let turn = 0; turn < 12; turn += 1) act(() => plus().click());
+    expect(zoomOf()).toBe(4);
+    expect(plus().getAttribute("aria-disabled"), "four times fit is the end").toBe("true");
+    act(() => plus().click());
+    expect(zoomOf()).toBe(4);
+    expect(document.activeElement, "a button at its end keeps focus instead of dropping it to the body").not.toBe(document.body);
+  });
+
+  // 확대 중 화살표는 사진을 옮기고(스크롤처럼: → 는 오른쪽을 더 본다) 넘기기로 새지 않는다. 한 걸음은 뷰어 짧은 변(700)의 1/8 = 88.
+  it("pans the zoomed picture with the arrow keys, clamps at the edge, and never pages while zoomed", () => {
+    open(3);
+    doubleClick();
+    expect(zoomOf()).toBe(2);
+    const right = press({ key: "ArrowRight" });
+    expect(right.defaultPrevented).toBe(true);
+    expect(panOf()).toEqual({ x: -88, y: 0 });
+    press({ key: "ArrowRight" });
+    expect(panOf(), "2x of 1200x800 in a 1000x700 window leaves 100 each side").toEqual({ x: -100, y: 0 });
+    press({ key: "ArrowLeft" });
+    expect(panOf()).toEqual({ x: -12, y: 0 });
+    press({ key: "ArrowDown" });
+    expect(panOf()).toEqual({ x: -12, y: -50 });
+    press({ key: "ArrowUp" });
+    press({ key: "ArrowUp" });
+    expect(panOf()).toEqual({ x: -12, y: 50 });
+    expect(position(), "no paging while zoomed").toBe(lightboxPositionLabel(0, 3));
+    const command = press({ key: "ArrowRight", metaKey: true });
+    expect(command.defaultPrevented, "command+arrow is the browser's").toBe(false);
+    expect(panOf()).toEqual({ x: -12, y: 50 });
+
+    // 맞춤으로 돌아오면 화살표는 다시 넘기기다.
+    press({ key: "0", code: "Digit0" });
+    expect(isZoomed()).toBe(false);
+    press({ key: "ArrowRight" });
+    expect(position()).toBe(lightboxPositionLabel(1, 3));
+    const down = press({ key: "ArrowDown" });
+    expect(down.defaultPrevented, "arrow up and down do nothing at fit").toBe(false);
   });
 
   it("drags the zoomed picture with the pointer and never past the window edge", () => {
@@ -524,7 +597,7 @@ describe("image lightbox zoom", () => {
     expect(position()).toBe(lightboxPositionLabel(2, 3));
     expect(isZoomed()).toBe(false);
     expect(zoomOf()).toBe(1);
-    expect(chip()).toBeNull();
+    expect(readout()?.textContent).toBe("맞춤");
 
     doubleClick();
     expect(isZoomed()).toBe(true);
@@ -542,26 +615,17 @@ describe("image lightbox zoom", () => {
     expect(zoomOf()).toBe(1);
   });
 
-  it("shows the ratio chip for a moment after the last change and then takes it away", () => {
+  it("keeps the readout current: fit in words at the start, a percentage while zoomed, fit again when it comes back", () => {
     open();
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    expect(readout()?.textContent).toBe("맞춤");
+    expect(readout()?.getAttribute("role"), "a live status so the change is read out").toBe("status");
     doubleClick();
-    expect(chip()).not.toBeNull();
-    act(() => {
-      vi.advanceTimersByTime(ZOOM_CHIP_LINGER_MS - 1);
-    });
-    expect(chip(), "still showing just before the linger runs out").not.toBeNull();
-    // 새 확대가 머무는 시간을 다시 시작한다.
+    expect(readout()?.textContent, "a double click goes to the picture's own size").toBe("100%");
     wheel({ ctrlKey: true, deltaY: -10, clientX: 500, clientY: 350 });
-    act(() => {
-      vi.advanceTimersByTime(ZOOM_CHIP_LINGER_MS - 1);
-    });
-    expect(chip()).not.toBeNull();
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
-    expect(chip()).toBeNull();
-    expect(isZoomed(), "the zoom itself stays").toBe(true);
+    expect(readout()?.textContent).toBe(lightboxZoomLabel(zoomOf(), 0.5));
+    expect(readout()?.textContent).not.toBe("100%");
+    doubleClick();
+    expect(readout()?.textContent).toBe("맞춤");
   });
 
   it("follows a WebKit pinch by its cumulative scale and ignores the ctrl wheel that may arrive with it", () => {
@@ -586,5 +650,108 @@ describe("image lightbox zoom", () => {
     gesture("gestureend");
     wheel({ ctrlKey: true, deltaY: 20, clientX: 560, clientY: 380 });
     expect(zoomOf()).toBeLessThan(3);
+  });
+});
+
+// 이미지 복사 (#5190). 폰 뷰어는 공유 시트의 「복사」가 이 일을 하고, 데스크탑·웹은 위 줄의 단추가 한다.
+//
+// 재는 것 (되돌리면 실패해야 하는 것들):
+//   1. 단추가 미리보기의 바이트를 PNG 한 항목으로 클립보드에 쓴다(진짜 `write` 인자를 받아 형식과 크기를 잰다).
+//   2. 성공하면 단추가 잠깐 「복사했어요」를 말하고 알림 영역도 읽는다. 클립보드가 거절하면 무대 안에서(위 줄이 아니라) 실패를 말한다.
+//   3. 이미지를 못 쓰는 환경에는 단추를 그리지 않는다(눌러도 아무 일 없는 죽은 컨트롤을 두지 않는다).
+// 문구는 사전에서 온다. 시험 환경은 로케일이 없어 영어 사전이 읽히므로(`useFormatMessage`) 영어 값으로 잰다.
+describe("image lightbox, copy image", () => {
+  const lb = (sel: string) => document.body.querySelector<HTMLElement>(sel);
+  const openFirst = () =>
+    act(() => {
+      q('[data-testid="attachment-image"] button')?.click();
+    });
+  const flush = () =>
+    act(async () => {
+      await new Promise((done) => setTimeout(done, 0));
+    });
+
+  type Written = { items: Record<string, unknown> };
+  let writes: Written[][];
+  let refuse: boolean;
+
+  function enableClipboard() {
+    class FakeClipboardItem {
+      constructor(public items: Record<string, unknown>) {}
+    }
+    vi.stubGlobal("ClipboardItem", FakeClipboardItem);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        write: async (items: Written[]) => {
+          writes.push(items);
+          if (refuse) throw new Error("NotAllowedError");
+        },
+      },
+    });
+  }
+
+  beforeEach(() => {
+    writes = [];
+    refuse = false;
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    Reflect.deleteProperty(navigator, "clipboard");
+  });
+
+  it("draws no copy button where the environment cannot write images", () => {
+    render([img("i1")]);
+    openFirst();
+    expect(lb('[data-testid="image-lightbox"]')).not.toBeNull();
+    expect(lb('[data-testid="image-lightbox-copy"]')).toBeNull();
+  });
+
+  it("writes the picture's bytes to the clipboard as one PNG item and confirms it", async () => {
+    enableClipboard();
+    render([img("i1")]);
+    openFirst();
+    const button = lb('[data-testid="image-lightbox-copy"]')!;
+    expect(button.getAttribute("aria-label")).toBe("Copy image");
+    expect(button.textContent, "an icon button has no text").toBe("");
+    expect(button.classList.contains("tap-target")).toBe(true);
+    act(() => button.click());
+    await flush();
+
+    expect(writes).toHaveLength(1);
+    const [item] = writes[0];
+    expect(Object.keys(item.items)).toEqual(["image/png"]);
+    const blob = (await item.items["image/png"]) as Blob;
+    expect(blob.type).toBe("image/png");
+    // 미리보기 주소 `data:image/png;base64,AAAA`는 0 바이트 셋이다: 바이트를 그대로 건넸다는 증거다(크기가 다르면 다른 것을 썼다).
+    expect(blob.size).toBe(3);
+
+    expect(lb('[data-testid="image-lightbox-copy"]')!.getAttribute("aria-label")).toBe("Copied");
+    const status = [...document.body.querySelectorAll('[role="status"]')].map((node) => node.textContent);
+    expect(status).toContain("Copied");
+    expect(lb('[data-testid="image-lightbox-copy-error"]')).toBeNull();
+  });
+
+  it("tells a refused copy inside the stage on an opaque face, not in the top row, and clears it on the next try", async () => {
+    enableClipboard();
+    refuse = true;
+    render([img("i1")]);
+    openFirst();
+    act(() => lb('[data-testid="image-lightbox-copy"]')!.click());
+    await flush();
+
+    const banner = lb('[data-testid="image-lightbox-copy-error"]');
+    expect(banner, "the failed copy is told").not.toBeNull();
+    expect(banner!.textContent).toContain("Couldn't copy the image");
+    expect(banner!.closest('[data-testid="image-lightbox-stage"]'), "in the stage flow").not.toBeNull();
+    expect(banner!.closest(".lightbox-chrome"), "not squeezed into the top row").toBeNull();
+    expect(banner!.parentElement!.classList.contains("bg-surface-raised"), "opaque face").toBe(true);
+    expect(lb('[data-testid="image-lightbox-copy"]')!.getAttribute("aria-label"), "no false success").toBe("Copy image");
+
+    refuse = false;
+    act(() => lb('[data-testid="image-lightbox-copy"]')!.click());
+    await flush();
+    expect(lb('[data-testid="image-lightbox-copy-error"]')).toBeNull();
+    expect(writes).toHaveLength(2);
   });
 });

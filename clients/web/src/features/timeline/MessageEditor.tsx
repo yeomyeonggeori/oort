@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { MESSAGE_EDITOR_KEYS_HINT } from "@momo/core/features/chat/composerCopy";
+import { isComposingEvent, keyKeepsCompositionGuard, messageEditorKeyIntent } from "@momo/core/features/chat/composerKeys";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import { useAutoGrow } from "./useAutoGrow";
@@ -14,6 +15,10 @@ import { useAutoGrow } from "./useAutoGrow";
 //
 // Two keyboard shortcuts, both the ones people already have in their fingers
 // from the composer: Enter saves, Shift+Enter is a newline, Esc cancels.
+//
+// 「입력칸 규칙과 같게」(#5191): 한글을 쓰는 중에는 Enter·Esc 가 IME 의 것이다. 조합을 끝내는 Enter 는 저장이 아니고
+// (Chromium 은 `isComposing`, WebKit 은 `compositionend` 가 keydown 보다 먼저라 그 한 번의 키를 `justComposed` 로 잡는다),
+// 후보 창을 닫는 Esc 는 편집을 버리지 않는다. 판정은 코어(`messageEditorKeyIntent`)가 컴포저와 한 벌로 갖는다.
 // =============================================================================
 
 export function MessageEditor({
@@ -32,6 +37,9 @@ export function MessageEditor({
 }) {
   const [draft, setDraft] = useState(initialBody);
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  // 조합이 막 끝났고 아직 키가 떼어지지 않았다 — 다음 keydown 이 그 조합을 끝낸 바로 그 키일 수 있다(WebKit 순서). 컴포저와
+  // 같은 세 줄이다: 조합 시작이 닫고, 조합 끝이 열고, 키를 떼면 닫는다.
+  const justComposedRef = useRef(false);
 
   // 고치려는 글이 이미 세 줄이면 세 줄이 보여야 한다. R1은 `rows={2}` 고정이라
   // 수정이 두 줄짜리 창구를 스크롤하는 일이 됐다 (R2 M4). 여덟 줄에서 멈추는
@@ -71,13 +79,38 @@ export function MessageEditor({
         aria-label="메시지 고치기"
         data-testid="message-editor-input"
         onChange={(event) => setDraft(event.target.value)}
+        onCompositionStart={() => {
+          justComposedRef.current = false;
+        }}
+        onCompositionEnd={() => {
+          justComposedRef.current = true;
+        }}
+        onKeyUp={() => {
+          justComposedRef.current = false;
+        }}
+        onBlur={() => {
+          justComposedRef.current = false;
+        }}
         onKeyDown={(event) => {
-          if (event.key === "Escape") {
+          // 조합을 끝낼 수 없는 키는 조합이 끝났다는 증거다: 조합이 키 입력 없이 끝났다면(보내기를 누르는 중에 클릭) 깃발이 남아 다음 Enter 를 삼킨다.
+          if (!keyKeepsCompositionGuard(event.key)) justComposedRef.current = false;
+          const intent = messageEditorKeyIntent(
+            {
+              key: event.key,
+              shiftKey: event.shiftKey,
+              metaKey: event.metaKey,
+              ctrlKey: event.ctrlKey,
+              altKey: event.altKey,
+              composing: isComposingEvent(event.nativeEvent),
+            },
+            { justComposed: justComposedRef.current }
+          );
+          if (intent === "cancel") {
             event.preventDefault();
             onCancel();
             return;
           }
-          if (event.key === "Enter" && !event.shiftKey) {
+          if (intent === "save") {
             event.preventDefault();
             submit();
           }
