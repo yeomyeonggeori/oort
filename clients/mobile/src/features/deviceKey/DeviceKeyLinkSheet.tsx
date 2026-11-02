@@ -93,12 +93,17 @@ export function DeviceKeyLinkGate(): React.JSX.Element | null {
   // M3(알림 미리 안내)가 먼저다 — 두 화면이 겹치면 어느 쪽이 무엇을 묻는지
   // 모른다.
   if (gate === 'ask' || gate === 'checking' || primerHeld) return null;
+  // 알림이 새 입구로 들어와도 이 시트는 걷히지 않는다(`keepOnEntry`, #5058). 이 문은 QR 연결 직후 **한 번** 앱이 세운 것이다:
+  // `open` 은 지역 상태라 한 번 닫히면 다시 열 문이 없고(`armed` 는 첫 렌더에서 한 번만 읽는다), `poll: open` 이 멈춰 맥의 승인을
+  // 기다리던 일도 함께 끝난다. 사람이 연 시트는 걷혀도 연 문이 남아 있지만 이 시트에는 그 문이 없다. 값은 알림의 메시지가 시트
+  // 밑에 서는 것 — 사람이 X 로 닫으면 보인다.
   return (
     <PageSheet
       onClose={() => setOpen(false)}
       accessibilityLabel={DEVICE_KEY_TITLE}
       scrimLabel={`${DEVICE_KEY_TITLE} 닫기`}
       testID="device-key-link-sheet"
+      keepOnEntry
     >
       <LinkSheetBody state={state} onClose={() => setOpen(false)} />
     </PageSheet>

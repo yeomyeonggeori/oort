@@ -19,14 +19,25 @@ import {Text} from 'react-native';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {PageSheet} from '../src/design/PageSheet';
+import {PageSheet, usePageSheetGone} from '../src/design/PageSheet';
 import {ThemePickerModal} from '../src/design/ThemePickerPage';
-import {__resetEntryDrafts} from '../src/lib/entryDrafts';
+import {workspaceKeys} from '../src/features/workspace/queries';
+import {
+  __peekEntryDraft,
+  __resetEntryDrafts,
+  newChannelDraftKey,
+  useHoldDraftOnEntry,
+} from '../src/lib/entryDrafts';
 import {NOTIFICATION_TAP_COPY} from '../src/push/tapArrival';
-import {SessionProvider} from '../src/session/useSession';
+import {SessionProvider, useAuthGate, useSession} from '../src/session/useSession';
 import AppShell from '../src/shell/AppShell';
 import {NewChannelSheet} from '../src/shell/NewChannelSheet';
-import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
+import {
+  __resetSessionStore,
+  clearSession,
+  markAuthExpired,
+  sessionPort,
+} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {
   releaseReduceMotion,
@@ -461,6 +472,279 @@ describe('맡겨 둔 글의 자리는 워크스페이스에 묶인다 (#4667)', 
 });
 
 // =============================================================================
+// #5058 — 알림 입구 후속: 로그아웃이 맡긴 글을 비운다 · 만드는 동안 시트가 걷히면 끌고 가지 않는다 · 걷히면 안 되는 시트.
+// =============================================================================
+
+describe('로그아웃은 알림이 맡긴 글을 비운다 (#5058)', () => {
+  // 같은 실행에서 같은 워크스페이스로 다른 사람이 이어 들어오면 앞 사람이 알림에 밀려 놓친 이름이 그 사람의 시트에 나타날 수 있었다.
+  // 키가 워크스페이스로 묶이는 것(위)은 **다른 워크스페이스**를 막고, 이것은 **같은 워크스페이스의 다른 사람**을 막는다.
+  const NEXT_PERSON = '77777777-1111-4111-8111-777777777777';
+
+  /** 앱이 실제로 쓰는 `signOut` 을 그 provider 에서 그대로 꺼내 온다(`signOutPushRevoke.test.tsx` 와 같은 방법). */
+  function mountSheet(member: Member) {
+    let signOut: (() => void) | null = null;
+    function Probe(): React.JSX.Element | null {
+      signOut = useSession().signOut;
+      return null;
+    }
+    const client = new QueryClient({
+      defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {gcTime: 0}},
+    });
+    const view = render(
+      <QueryClientProvider client={client}>
+        <SessionProvider member={member}>
+          <Probe />
+          <NewChannelSheet onOpenConversation={jest.fn()} onClose={jest.fn()} />
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+    return {
+      unmount: () => view.unmount(),
+      signOut: () => {
+        if (signOut === null) throw new Error('signOut 을 잡지 못했다');
+        signOut();
+      },
+    };
+  }
+
+  it('새 채널 이름을 쓰다 알림에 걷힌 시트의 글은 로그아웃 뒤 같은 워크스페이스로 이어 들어온 사람의 시트에 나타나지 않는다', () => {
+    // 로그아웃이 부르는 서버 요청(`POST /v1/auth/logout`)은 알 바 아니다 — 응답만 있으면 된다.
+    globalThis.fetch = jest.fn(async () =>
+      jsonResponse(200, {status: 'ok'}),
+    ) as unknown as typeof fetch;
+    const first = mountSheet(SELF);
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'ops-room');
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    // 맡겨졌다 — 아래의 빈 칸이 「애초에 아무것도 없었다」로 헛돌지 않는다는 증거.
+    expect(__peekEntryDraft(newChannelDraftKey(WS))).toEqual({name: 'ops-room', kind: 'public'});
+
+    act(() => first.signOut());
+    expect(__peekEntryDraft(newChannelDraftKey(WS))).toBeUndefined();
+    first.unmount();
+
+    // 같은 워크스페이스, 다른 사람.
+    mountSheet({...SELF, id: NEXT_PERSON, handle: 'next'});
+    expect(screen.getByTestId('new-channel-name').props.value).toBe('');
+  });
+
+  describe('`signOut` 을 거치지 않고 로그인 화면으로 돌아오는 길도 비운다', () => {
+    // 앱 뿌리(`App.tsx`)가 하는 그대로 게이트를 읽는다. 세션 없이 서서 로그인하고, 쓰던 글이 맡겨진 뒤, 세션이 끝난다.
+    function mountGate() {
+      __resetSessionStore();
+      function Gate(): null {
+        useAuthGate();
+        return null;
+      }
+      function Holder(): null {
+        useHoldDraftOnEntry('holder', () => '쓰던 글');
+        return null;
+      }
+      render(
+        <>
+          <Gate />
+          <Holder />
+        </>,
+      );
+      act(() => sessionPort.applyLogin(LOGIN_BODY));
+      act(() => {
+        dismissTemporarySurfaces();
+      });
+      // 맡겨졌고 로그인만으로는 지워지지 않았다 — 아래의 「사라졌다」가 헛돌지 않는다는 증거.
+      expect(__peekEntryDraft('holder')).toBe('쓰던 글');
+    }
+
+    it('복원이 거절돼 저장된 세션이 지워지면(로그인 화면)', () => {
+      mountGate();
+      act(() => clearSession());
+      expect(__peekEntryDraft('holder')).toBeUndefined();
+    });
+
+    it('토큰이 만료되면(저장된 세션은 남은 채 로그인 화면)', () => {
+      mountGate();
+      act(() => markAuthExpired());
+      expect(__peekEntryDraft('holder')).toBeUndefined();
+    });
+  });
+});
+
+describe('만드는 동안 시트가 걷히면 새 채널로 끌고 가지 않는다 (#5058)', () => {
+  // 요청은 시트가 아니라 서버가 끝낸다. 알림이 시트를 걷고 목적지에 세운 뒤에 응답이 와도 사람을 새 채널로 끌고 가면 알림의 목적지를 덮는다.
+  const CREATED = {id: 'ch-new', workspaceId: WS, kind: 'public', name: 'ops-room', muted: false};
+
+  /** 서버의 응답을 시험이 쥔다 — 「요청이 나가 있는 동안」을 시험이 정한다. */
+  function holdCreate() {
+    let answer: (() => void) | null = null;
+    globalThis.fetch = jest.fn(async (url: string, init?: {method?: string}) => {
+      if (url.endsWith('/channels') && init?.method === 'POST') {
+        await new Promise<void>(resolve => {
+          answer = resolve;
+        });
+        return jsonResponse(201, {channel: CREATED});
+      }
+      return jsonResponse(200, {});
+    }) as unknown as typeof fetch;
+    return {
+      answer: async () => {
+        await act(async () => {
+          answer?.();
+        });
+      },
+    };
+  }
+
+  function mountCreate() {
+    // 목록을 읽는 화면이 없으므로 캐시가 치워지지 않게 한다(`gcTime`).
+    const client = new QueryClient({
+      defaultOptions: {queries: {retry: false, gcTime: Infinity}, mutations: {gcTime: 0}},
+    });
+    const onOpenConversation = jest.fn();
+    const onClose = jest.fn();
+    render(
+      <QueryClientProvider client={client}>
+        <SessionProvider member={SELF}>
+          <NewChannelSheet onOpenConversation={onOpenConversation} onClose={onClose} />
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+    return {client, onOpenConversation, onClose};
+  }
+
+  async function startCreating() {
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'ops-room');
+    fireEvent.press(screen.getByTestId('new-channel-create'));
+    await waitFor(() =>
+      expect(screen.getByTestId('new-channel-create').props.accessibilityState).toMatchObject({
+        busy: true,
+      }),
+    );
+  }
+
+  const listed = (client: QueryClient) =>
+    client.getQueryData<Array<{id: string}>>(workspaceKeys.channels(WS))?.some(c => c.id === 'ch-new');
+
+  it('대조: 아무 일도 없으면 만들어진 채널이 열린다 — 시트를 닫고 새 채널로 간다', async () => {
+    const server = holdCreate();
+    const {client, onOpenConversation, onClose} = mountCreate();
+    await startCreating();
+
+    await server.answer();
+
+    await waitFor(() => expect(onOpenConversation).toHaveBeenCalledTimes(1));
+    expect(onOpenConversation).toHaveBeenCalledWith('ch-new', 'ops-room');
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(listed(client)).toBe(true);
+  });
+
+  it('알림이 착지해 시트가 걷혔다면 응답이 와도 새 채널로 데려가지 않는다 — 채널은 만들어져 목록에 있다', async () => {
+    const server = holdCreate();
+    const {client, onOpenConversation, onClose} = mountCreate();
+    await startCreating();
+
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await server.answer();
+
+    await waitFor(() => expect(listed(client)).toBe(true));
+    expect(onOpenConversation).not.toHaveBeenCalled();
+    // 늦은 `onClose()` 도 없다 — 그 사이 사람이 새로 연 시트를 닫아 버린다.
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('시트가 미끄러져 내려가는 중(아직 마운트돼 있다)에 응답이 와도 같다', async () => {
+    await setSheetReduceMotion(false);
+    const server = holdCreate();
+    const {client, onOpenConversation, onClose} = mountCreate();
+    await startCreating();
+
+    fireEvent.press(screen.getByTestId('new-channel-close'));
+    // 슬라이드가 도는 동안은 아직 닫히지 않았다 — 사라지는 중이다.
+    expect(onClose).not.toHaveBeenCalled();
+    await server.answer();
+
+    await waitFor(() => expect(listed(client)).toBe(true));
+    expect(onOpenConversation).not.toHaveBeenCalled();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), {timeout: 8000});
+    expect(onOpenConversation).not.toHaveBeenCalled();
+  }, 20_000);
+});
+
+describe('`usePageSheetGone` — 시트가 사라지는 중이거나 사라졌는가 (#5058)', () => {
+  it('떠 있는 동안은 거짓이고, 닫는 슬라이드가 시작되면 참이며(아직 마운트), 부모가 슬라이드 없이 걷어도 참이다', async () => {
+    await setSheetReduceMotion(false);
+    const probes: Array<() => boolean> = [];
+    function Probe(): null {
+      probes.push(usePageSheetGone());
+      return null;
+    }
+
+    // 사람이 스크림을 눌러 닫는 시트: 슬라이드가 도는 동안 `onClose` 는 아직이지만 사라지는 중이다.
+    const onClose = jest.fn();
+    const sliding = render(
+      <PageSheet onClose={onClose} accessibilityLabel="미끄러지는 시트">
+        <Probe />
+      </PageSheet>,
+    );
+    const slidingGone = probes[probes.length - 1];
+    expect(slidingGone()).toBe(false);
+    // 슬라이드가 막 시작해 스크림이 아직 투명하다 — 숨은 요소도 찾는다(`sheetContract` 의 스크림 시험과 같다).
+    fireEvent.press(screen.getByTestId('page-sheet-scrim', {includeHiddenElements: true}));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(slidingGone()).toBe(true);
+    sliding.unmount();
+
+    // 부모가 슬라이드 없이 걷은 시트: 닫는 슬라이드는 한 번도 시작하지 않았지만 사라졌다.
+    const swept = render(
+      <PageSheet onClose={jest.fn()} accessibilityLabel="걷힌 시트">
+        <Probe />
+      </PageSheet>,
+    );
+    const sweptGone = probes[probes.length - 1];
+    expect(sweptGone()).toBe(false);
+    swept.unmount();
+    expect(sweptGone()).toBe(true);
+  });
+
+  it('시트 밖에서는 늘 거짓이다 — 사라질 시트가 없다', () => {
+    let gone: (() => boolean) | null = null;
+    function Outside(): null {
+      gone = usePageSheetGone();
+      return null;
+    }
+    render(<Outside />);
+    expect(gone).not.toBeNull();
+    expect((gone as unknown as () => boolean)()).toBe(false);
+  });
+});
+
+describe('걷히면 안 되는 시트는 `keepOnEntry` 로 남는다 (#5058)', () => {
+  it('PageSheet — `keepOnEntry` 시트는 방송에도 닫히지 않고, 옆의 보통 시트는 닫힌다', () => {
+    const onKeptClose = jest.fn();
+    const onPlainClose = jest.fn();
+    render(
+      <>
+        <PageSheet onClose={onKeptClose} keepOnEntry accessibilityLabel="남는 시트" testID="kept-sheet">
+          <Text>남는 시트</Text>
+        </PageSheet>
+        <PageSheet onClose={onPlainClose} accessibilityLabel="걷히는 시트" testID="plain-sheet">
+          <Text>걷히는 시트</Text>
+        </PageSheet>
+      </>,
+    );
+
+    act(() => {
+      dismissTemporarySurfaces();
+    });
+
+    expect(onPlainClose).toHaveBeenCalledTimes(1);
+    expect(onKeptClose).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
 // 소스 훑기 — 표면이 하나 더 생겨도 입구를 빠뜨리지 않는다. 렌더가 맞는지는 위의 시험들과 호스트별 시험이 잰다. 여기가 잡는 것은
 // 「구독 없는 Modal 이 들어왔다」·「입구가 방송 없이 이동한다」뿐이다.
 // =============================================================================
@@ -521,5 +805,20 @@ describe('소스 훑기 — 입구를 빠뜨리지 않는다 (#4667)', () => {
     expect(door.indexOf('dismissTemporarySurfaces()')).toBeLessThan(door.indexOf('dispatch(action)'));
     // 착지 둘(대화·세션)과 못 가는 둘(실패 문장·목록 조회 실패)이 모두 그 문으로 간다.
     expect(hook.match(/\benter\(/g)?.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('`keepOnEntry`(걷히지 않는 시트)를 쓰는 곳은 이유가 적힌 목록뿐이다 — 하나 더 늘리려면 이유를 여기 적어야 한다 (#5058)', () => {
+    // 참인 시트는 알림의 목적지 위에 남아 사람이 X 로 닫아야 메시지가 보인다(#4667 이 고친 증상 그대로). 그 값을 치를 만한 시트만 선다.
+    const KEEPS: Record<string, string> = {
+      'features/deviceKey/DeviceKeyLinkSheet.tsx':
+        'QR 연결 직후 앱이 한 번 세운 승인 대기 시트 — 걷히면 다시 열 문이 없고 맥 승인을 기다리던 폴링이 함께 멈춘다',
+    };
+    const users = sources()
+      .filter(file => rel(file) !== 'design/PageSheet.tsx')
+      .filter(file => /\bkeepOnEntry\b/.test(code(file)))
+      .map(rel)
+      .sort();
+    expect(users).toEqual(Object.keys(KEEPS).sort());
+    for (const reason of Object.values(KEEPS)) expect(reason.length).toBeGreaterThan(8);
   });
 });
