@@ -26,6 +26,7 @@ import { useOffline } from "@/features/common/useOffline";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
+import { newDmDraftKey, useHoldDraftOnEntry, useRestoredEntryDraft } from "@/lib/entryDrafts";
 import { existingDmChannelId, newDmCandidates, peerDot } from "./newDmModel";
 import {
   NewDmOpenContext,
@@ -118,7 +119,11 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
   const navigate = useNavigate();
   const dm = useOpenDm();
   const offline = useOffline();
-  const [query, setQuery] = useState("");
+  // 알림 클릭이 닫은 대화상자였다면 쓰던 검색어로 선다(#5058). 사람이 닫기로 닫은 대화상자는 평소처럼 빈 채로 선다 —
+  // 이 모달은 열려 있는 동안에만 마운트돼 검색어가 따라오지 않는 것이 본래 약속이고, 맡기는 것은 방송이 올 때뿐이다.
+  const draftKey = newDmDraftKey(workspaceId);
+  const restoredQuery = useRestoredEntryDraft<string>(draftKey);
+  const [query, setQuery] = useState(restoredQuery ?? "");
   const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -128,6 +133,8 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
   );
   const groups = useMemo(() => groupDirectory(candidates, query), [candidates, query]);
   const busy = dm.pendingMemberId !== null;
+  // 대화를 여는 요청이 나가 있으면 곧 끝나는 일이라(성공하면 검색어는 쓰임을 다했다) 맡기지 않는다.
+  useHoldDraftOnEntry<string>(draftKey, () => (!busy && query.trim() !== "" ? query : undefined));
 
   const pick = useCallback(
     async (member: RosterMember) => {
