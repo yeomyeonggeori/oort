@@ -435,18 +435,22 @@ export function admitThreadBanner(
 /**
  * How long a shown notification stays the reason the window is being looked at.
  *
- * KNOWN APPROXIMATION. `notification_show` (MOMO-603) is fire-and-forget: the
- * shell reports permission and delivery, never a click, so the web layer cannot
- * be told which banner was clicked. What it can observe is that clicking a
- * macOS notification activates the app, and the window was unfocused when the
- * banner was shown (that is a precondition of showing it at all). So the target
- * is armed at show time and consumed by the next focus.
+ * KNOWN APPROXIMATION, used only where the shell cannot report a click (#5059:
+ * macOS reports it; this window is armed for another OS, a shell build without
+ * the command, and a banner the shell shows plain). `notification_show`
+ * (MOMO-603) is fire-and-forget: the shell reports permission and delivery,
+ * never a click, so the web layer cannot be told which banner was clicked. What
+ * it can observe is that clicking a macOS notification activates the app, and
+ * the window was unfocused when the banner was shown (that is a precondition of
+ * showing it at all). So the target is armed at show time and consumed by the
+ * next focus.
  *
  * The failure mode is honest and small: someone who ignores the banner and
  * switches to momo within this window lands on the mentioned channel instead of
  * where they left off — one sidebar click away, and usually where they were
  * heading. The proper fix is a click event from the shell, which needs a Rust
- * notification path that keeps the handle (`clients/desktop/README.md`).
+ * notification path that keeps the handle: `notification_show_clickable` and
+ * `momo:notification-click` (`clients/desktop/README.md`).
  */
 export const OPEN_ARM_TTL_MS = 20_000;
 
