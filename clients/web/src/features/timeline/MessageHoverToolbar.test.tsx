@@ -21,6 +21,7 @@ import {
   useFrequentEmojis,
 } from "@/features/emoji/frequencyStore";
 import {
+  MessageActionContextMenu,
   MessageHoverToolbar,
   type MessageActionCallbacks,
 } from "./MessageActions";
@@ -559,3 +560,184 @@ describe("#4324 도구 막대 툴팁", () => {
     );
   });
 });
+
+// =============================================================================
+// #5192: 「더 많은 기능」(⋮) 메뉴. 데스크탑 검수에서 투박하다는 지적을 받아 Buzz를 참고해 다시 짰다.
+// 메뉴는 짧은 목록이고(반응 줄·답글은 도구 막대 몫), 묶음 사이에만 구분선이 서며, 지우기가 맨 아래다.
+// ⋮ 와 우클릭은 같은 목록이다. 아이콘은 뜻에 맞는 Lucide 글리프다.
+// =============================================================================
+
+function mountToolbarWith(
+  over: Partial<MessageActionAvailability>,
+  copyOver: Partial<typeof copyState> = {},
+  menuOpen = true
+): HTMLElement {
+  const host = document.createElement("div");
+  document.body.append(host);
+  mountedRoot = createRoot(host);
+  function Harness() {
+    const [open, setOpen] = useState(menuOpen);
+    return createElement(MessageHoverToolbar, {
+      available: { ...available, ...over },
+      copyState: { ...copyState, ...copyOver },
+      callbacks,
+      onOpenPicker: () => undefined,
+      menuOpen: open,
+      onMenuOpenChange: setOpen,
+      mineEmojis: new Set<string>(),
+    });
+  }
+  act(() => mountedRoot?.render(createElement(Harness)));
+  return host;
+}
+
+/** 메뉴 판 안의 행과 구분선을 문서 순서로: 행은 test id 접두사를 뗀 키, 구분선은 `|`. */
+function menuSequence(menuTestId: string, prefix: string): string[] {
+  const menu = document.querySelector(`[data-testid="${menuTestId}"]`);
+  expect(menu, menuTestId).not.toBeNull();
+  return Array.from(
+    (menu as Element).querySelectorAll<HTMLElement>('[role="menuitem"], [role="separator"]')
+  ).map((el) =>
+    el.getAttribute("role") === "separator"
+      ? "|"
+      : (el.dataset.testid ?? "").slice(prefix.length)
+  );
+}
+
+function openContextMenu(over: Partial<MessageActionAvailability>, copyOver: Partial<typeof copyState> = {}) {
+  const host = document.createElement("div");
+  document.body.append(host);
+  mountedRoot = createRoot(host);
+  act(() =>
+    mountedRoot?.render(
+      createElement(
+        MessageActionContextMenu,
+        {
+          enabled: true,
+          available: { ...available, ...over },
+          copyState: { ...copyState, ...copyOver },
+          callbacks,
+          onOpenPicker: () => undefined,
+          children: createElement("article", { "data-testid": "ctx-row" }, "본문"),
+        }
+      )
+    )
+  );
+  const row = host.querySelector('[data-testid="ctx-row"]') as HTMLElement;
+  act(() => {
+    row.dispatchEvent(
+      new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 24, clientY: 24, button: 2 })
+    );
+  });
+  return host;
+}
+
+describe("#5192 ⋮ 메뉴 구조", () => {
+  it("내 메시지: 묶음 사이에만 구분선, 지우기가 맨 아래", () => {
+    mountToolbarWith({});
+    expect(menuSequence("message-action-menu", "menu-")).toEqual([
+      "quote", "pin", "remind",
+      "|",
+      "copy", "copy-link",
+      "|",
+      "edit", "delete",
+    ]);
+  });
+
+  it("남의 메시지: 내 메시지 묶음이 빠지고 마지막 뒤에 구분선이 남지 않는다", () => {
+    mountToolbarWith({ edit: false, delete: false });
+    expect(menuSequence("message-action-menu", "menu-")).toEqual([
+      "quote", "pin", "remind",
+      "|",
+      "copy", "copy-link",
+    ]);
+  });
+
+  it("메뉴 안에 반응 줄·다른 반응 고르기·답글이 없고, 그 셋은 도구 막대에 있다", () => {
+    mountToolbarWith({});
+    const menu = document.querySelector('[data-testid="message-action-menu"]') as HTMLElement;
+    expect(menu.querySelector('[data-testid^="menu-react"]')).toBeNull();
+    expect(menu.querySelector('[data-testid="menu-reply"]')).toBeNull();
+    expect(menu.querySelector('[aria-label="빠른 반응"]')).toBeNull();
+    const bar = document.querySelector('[data-testid="message-hover-toolbar"]') as HTMLElement;
+    expect(bar.querySelector('[data-testid="toolbar-react-more"]')).not.toBeNull();
+    expect(bar.querySelector('[data-testid="toolbar-reply"]')).not.toBeNull();
+    expect(bar.querySelectorAll('[data-testid^="toolbar-react-"]').length).toBeGreaterThan(1);
+  });
+
+  it("우클릭 메뉴는 ⋮ 메뉴와 같은 목록·같은 순서다", () => {
+    mountToolbarWith({});
+    const dots = menuSequence("message-action-menu", "menu-");
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    document.body.replaceChildren();
+    openContextMenu({});
+    expect(menuSequence("message-context-menu", "context-")).toEqual(dots);
+  });
+
+  it("메뉴가 빌 행은 ⋮ 단추도 우클릭 판도 없다(빈 판을 열지 않는다), 반응·답글 단추는 그대로 있다", () => {
+    const only = {
+      quote: false, pin: false, remind: false, markUnread: false, edit: false, delete: false,
+    };
+    const none = { canCopy: false, canCopyLink: false };
+    const host = mountToolbarWith(only, none, false);
+    expect(host.querySelector('[data-testid="message-actions-trigger"]')).toBeNull();
+    expect(host.querySelector('[data-testid="toolbar-react-more"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="toolbar-reply"]')).not.toBeNull();
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    document.body.replaceChildren();
+    openContextMenu(only, none);
+    expect(document.querySelector('[data-testid="message-context-menu"]')).toBeNull();
+  });
+
+  it("도구 막대의 반응·답글 단추는 모델의 표를 따른다(꺼지면 단추도 구분선도 없다)", () => {
+    const host = mountToolbarWith({ react: false, reply: false }, {}, false);
+    expect(host.querySelector('[data-testid^="toolbar-react-"]')).toBeNull();
+    expect(host.querySelector('[data-testid="toolbar-reply"]')).toBeNull();
+    expect(host.querySelector('[data-testid="message-actions-trigger"]')).not.toBeNull();
+    const bar = host.querySelector('[data-testid="message-hover-toolbar"]') as HTMLElement;
+    expect(bar.querySelector(".bg-line")).toBeNull();
+  });
+});
+
+describe("#5192 아이콘", () => {
+  const glyph = (el: Element | null) =>
+    Array.from(el?.querySelectorAll("svg") ?? []).map(
+      (svg) => /lucide-[a-z0-9-]+/.exec(svg.getAttribute("class") ?? "")?.[0] ?? "(lucide 아님)"
+    );
+
+  it("더 많은 기능은 세로 점(⋮), 반응 더하기는 +가 붙은 웃는 얼굴이다", () => {
+    const host = mountToolbarWith({}, {}, false);
+    expect(glyph(host.querySelector('[data-testid="message-actions-trigger"]'))).toEqual([
+      "lucide-ellipsis-vertical",
+    ]);
+    expect(glyph(host.querySelector('[data-testid="toolbar-react-more"]'))).toEqual([
+      "lucide-smile-plus",
+    ]);
+  });
+
+  it("메뉴 행마다 장식 아이콘이 정확히 하나(aria-hidden)이고, 서로 다른 글리프다", () => {
+    // 읽음 표시(`markUnread`)까지 켠 가장 긴 목록으로 잰다: 켜지 않으면 그 행의 글리프는 단정 밖이 된다.
+    mountToolbarWith({ markUnread: true });
+    const rows = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-testid="message-action-menu"] [role="menuitem"]')
+    );
+    expect(rows.map((row) => row.dataset.testid)).toContain("menu-mark-unread");
+    expect(rows.length).toBe(8);
+    const names = rows.map((row) => {
+      const svgs = Array.from(row.querySelectorAll("svg"));
+      expect(svgs.length, row.dataset.testid).toBe(1);
+      expect(svgs[0].getAttribute("aria-hidden"), row.dataset.testid).toBe("true");
+      return glyph(row)[0];
+    });
+    expect(names.every((name) => name.startsWith("lucide-"))).toBe(true);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it("고정된 메시지는 고정 풀기 글리프(PinOff)로 바뀐다", () => {
+    mountToolbarWith({}, { pinned: true });
+    expect(glyph(document.querySelector('[data-testid="menu-pin"]'))).toEqual(["lucide-pin-off"]);
+  });
+});
+

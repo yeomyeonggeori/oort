@@ -10,8 +10,10 @@ import {
 import {
   actionKeepsMenuOpen,
   MESSAGE_ACTION_SURFACES,
+  messageActionGroups,
   messageActionItems,
   messageActionItemsForSurface,
+  messageToolbarItems,
   type MessageActionCopyState,
   type MessageActionItemKey,
 } from "./messageActionModel";
@@ -36,51 +38,116 @@ const copyReady: MessageActionCopyState = {
   pinned: false,
 };
 
-const AUTHOR_KEYS: MessageActionItemKey[] = [
+const REACTION_KEYS: MessageActionItemKey[] = [
   ...QUICK_REACTIONS.map((emoji) => `react:${emoji}` as const),
   "react-more",
-  "reply",
+];
+
+/**
+ * Buzz 대응표(#5192)가 정한 ⋯·우클릭 목록. 반응·답글은 도구 막대가 직접 보여 주므로 메뉴에 없다.
+ * 묶음: 이 메시지를 두고 하는 일 | 복사 | 내 메시지(지우기는 맨 아래). 순서를 바꾸는 것은 표를 바꾸는 결정이라 일부러 값을 적어 둔다.
+ */
+const MENU_AUTHOR_KEYS: MessageActionItemKey[] = [
   "quote",
-  "copy",
-  "copy-link",
   "pin",
   "remind",
   "mark-unread",
+  "copy",
+  "copy-link",
   "edit",
   "delete",
 ];
 
+/** 도구 막대가 직접 보여 주는 항목(반응 여섯 + 더 고르기 + 답글). 반응 칸 수는 빈도 저장소가 정한다. */
+const TOOLBAR_KEYS: MessageActionItemKey[] = [...REACTION_KEYS, "reply"];
+
+/** 길게 누르기 시트는 도구 막대가 없는 터치 표면이라 전부다: 반응 · 답글 · 메뉴 목록. */
+const SHEET_AUTHOR_KEYS: MessageActionItemKey[] = [
+  ...TOOLBAR_KEYS,
+  ...MENU_AUTHOR_KEYS,
+];
+
+const keysOf = (items: Array<{ key: MessageActionItemKey }>) =>
+  items.map((item) => item.key);
+
 describe("메시지 액션 세 표면", () => {
-  it("⋯, 우클릭, 길게 누르기가 같은 액션과 같은 순서를 쓴다", () => {
-    const bySurface = MESSAGE_ACTION_SURFACES.map((surface) =>
-      messageActionItemsForSurface(surface, available, copyReady).map(
-        (item) => item.key
-      )
+  it("⋯와 우클릭은 늘 같은 목록·같은 순서이고, 시트는 전체 인벤토리다", () => {
+    const [menu, context, sheet] = MESSAGE_ACTION_SURFACES.map((surface) =>
+      keysOf(messageActionItemsForSurface(surface, available, copyReady))
     );
 
-    expect(bySurface[1]).toEqual(bySurface[0]);
-    expect(bySurface[2]).toEqual(bySurface[0]);
-    expect(bySurface[0]).toEqual(AUTHOR_KEYS);
+    expect(context).toEqual(menu);
+    expect(menu).toEqual(MENU_AUTHOR_KEYS);
+    expect(sheet).toEqual(SHEET_AUTHOR_KEYS);
   });
 
-  it("저자 인벤토리는 고정 뒤에 나중에 알림을 두고 링크 복사는 복사 뒤에 둔다", () => {
-    const keys = messageActionItems(available, copyReady).map((item) => item.key);
+  it("반응·답글은 도구 막대의 몫이라 포인터 메뉴가 되풀이하지 않는다(Buzz: 메뉴 안에 반응 줄이 없다)", () => {
+    const menu = keysOf(messageActionItemsForSurface("menu", available, copyReady));
+    expect(menu.filter((key) => key.startsWith("react"))).toEqual([]);
+    expect(menu).not.toContain("reply");
+    expect(keysOf(messageToolbarItems(available, copyReady))).toEqual(TOOLBAR_KEYS);
+  });
+
+  it("도구 막대 ∪ 메뉴 = 시트 = 전체 인벤토리: 어떤 동작도 포인터에서 사라지지 않고 두 곳에 겹치지도 않는다", () => {
+    const scenarios: Array<[string, Partial<MessageActionAvailability>, Partial<MessageActionCopyState>]> = [
+      ["내 글 메시지", {}, {}],
+      ["남의 메시지", { edit: false, delete: false }, {}],
+      ["에이전트 메시지(고치기·지우기 없음, 읽음 표시 없음)", { edit: false, delete: false, markUnread: false }, {}],
+      ["답글 불가·반응 불가", { reply: false, react: false }, {}],
+      ["복사 불가", {}, { canCopy: false, canCopyLink: false }],
+    ];
+    for (const [name, overAvailable, overCopy] of scenarios) {
+      const a = { ...available, ...overAvailable };
+      const c = { ...copyReady, ...overCopy };
+      const all = keysOf(messageActionItems(a, c)).sort();
+      const toolbar = keysOf(messageToolbarItems(a, c));
+      const menu = keysOf(messageActionItemsForSurface("menu", a, c));
+      expect([...toolbar, ...menu].sort(), name).toEqual(all);
+      expect(keysOf(messageActionItemsForSurface("sheet", a, c)).sort(), name).toEqual(all);
+      expect(toolbar.filter((key) => menu.includes(key)), `${name}: 겹침`).toEqual([]);
+    }
+  });
+
+  it("묶음: 이 메시지를 두고 하는 일 | 복사 | 내 메시지. 구분선은 묶음 사이에만 서고 빈 묶음은 없다", () => {
+    const groups = (a: MessageActionAvailability, c: MessageActionCopyState) =>
+      messageActionGroups(messageActionItemsForSurface("menu", a, c)).map(keysOf);
+
+    expect(groups(available, copyReady)).toEqual([
+      ["quote", "pin", "remind", "mark-unread"],
+      ["copy", "copy-link"],
+      ["edit", "delete"],
+    ]);
+    // 남의 메시지: 내 메시지 묶음이 통째로 빠지고, 마지막 묶음 뒤에 구분선이 남지 않는다.
+    expect(groups({ ...available, edit: false, delete: false }, copyReady)).toEqual([
+      ["quote", "pin", "remind", "mark-unread"],
+      ["copy", "copy-link"],
+    ]);
+    // 묶음이 하나만 남으면 구분선이 없다.
+    expect(groups({ ...available, edit: false, delete: false, quote: false, pin: false, remind: false, markUnread: false }, copyReady)).toEqual([
+      ["copy", "copy-link"],
+    ]);
+    // 아무것도 없으면 묶음도 없다(빈 판을 열지 않는다).
+    expect(
+      groups(
+        { ...available, quote: false, pin: false, remind: false, markUnread: false, edit: false, delete: false },
+        { ...copyReady, canCopy: false, canCopyLink: false }
+      )
+    ).toEqual([]);
+  });
+
+  it("지우기는 메뉴의 맨 아래이고, 위험 톤은 지우기 하나뿐이다", () => {
+    const menu = messageActionItemsForSurface("menu", available, copyReady);
+    expect(menu[menu.length - 1].key).toBe("delete");
+    expect(menu.filter((item) => item.tone === "danger").map((item) => item.key)).toEqual(["delete"]);
+    // 고치기는 지우기와 같은 묶음의 바로 앞이다(고치기 자리를 #5191과 맞춘 값).
+    expect(menu[menu.length - 2].key).toBe("edit");
+  });
+
+  it("저자 인벤토리의 라벨: 나중에 알림은 고정 뒤에, 링크 복사는 복사 뒤에 있다", () => {
+    const keys = keysOf(messageActionItems(available, copyReady));
     expect(keys).toHaveLength(16);
     expect(keys.indexOf("copy-link")).toBe(keys.indexOf("copy") + 1);
-    expect(keys.slice(0, keys.indexOf("copy") + 1)).toEqual([
-      ...QUICK_REACTIONS.map((emoji) => `react:${emoji}` as const),
-      "react-more",
-      "reply",
-      "quote",
-      "copy",
-    ]);
-    expect(keys.slice(keys.indexOf("copy-link") + 1)).toEqual([
-      "pin",
-      "remind",
-      "mark-unread",
-      "edit",
-      "delete",
-    ]);
+    expect(keys.indexOf("remind")).toBe(keys.indexOf("pin") + 1);
     expect(
       messageActionItems(available, copyReady).find((item) => item.key === "remind")
         ?.label
@@ -178,10 +245,10 @@ describe("메시지 액션 세 표면", () => {
     expect(item?.accessibleLabel).toBe(COPY_LINK_DONE_LABEL);
   });
 
-  it("클립보드 항목과 반응 고르기는 메뉴를 닫지 않는다", () => {
+  it("클립보드 항목만 메뉴를 닫지 않는다(반응 고르기는 이제 메뉴에 없다)", () => {
     expect(actionKeepsMenuOpen("copy")).toBe(true);
     expect(actionKeepsMenuOpen("copy-link")).toBe(true);
-    expect(actionKeepsMenuOpen("react-more")).toBe(true);
+    expect(actionKeepsMenuOpen("react-more")).toBe(false);
     expect(actionKeepsMenuOpen("delete")).toBe(false);
     expect(actionKeepsMenuOpen("remind")).toBe(false);
   });
