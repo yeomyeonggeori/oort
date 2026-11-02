@@ -67,7 +67,10 @@ use crate::payload::AgentJobPayload;
 use crate::provider::{
     ChatMessage, ChatRequest, ChatUsage, ModelImage, ProviderError, ProviderToolCall, ProviderWire,
 };
-use crate::{emit_terminal_agent_status, AgentWorker, ResolvedTransport, Settlement};
+use crate::{
+    emit_awaiting_approval_agent_status, emit_terminal_agent_status, AgentWorker,
+    ResolvedTransport, Settlement,
+};
 
 /// What the first read of a team-AI turn found.
 struct Gathered {
@@ -960,6 +963,22 @@ impl AgentWorker {
                     prepared_avatar.as_ref(),
                 )
                 .await?;
+                // #5084 — a raised card is a run parked on a person (the proposal parks the run
+                // before the card and either returns `ProposalOk` or errors, so `Ok` is exactly
+                // "parked"): the rail is told in this same transaction, after the card.
+                if let Ok(ok) = &outcome {
+                    emit_awaiting_approval_agent_status(
+                        conn,
+                        momo_agent::AgentRunAddress {
+                            workspace_id,
+                            channel_id,
+                            agent_member_id: agent,
+                            run_id,
+                        },
+                        ok.approval_id,
+                    )
+                    .await?;
+                }
                 // The ledger row is written whether or not a card came of it: the
                 // tokens were spent, and the daily ceiling reads this table.
                 let mut resolved =

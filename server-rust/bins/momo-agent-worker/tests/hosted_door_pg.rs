@@ -816,6 +816,52 @@ async fn ledger_rows(su: &PgPool, run: Uuid) -> i64 {
         .unwrap()
 }
 
+/// #5084 — a card raised by the door parks the run, and the progress rail is told in the same
+/// transaction: the `(thinking, awaiting_approval)` frames of one run's rail, oldest first, as
+/// `(phase, idempotency key)`. The run id rides the payload upper-cased, hence the `upper`.
+async fn waiting_frames(su: &PgPool, workspace_id: Uuid, run: Uuid) -> Vec<(String, String)> {
+    sqlx::query(
+        "SELECT payload->'data'->'payload'->>'phase' AS phase, \
+                payload->>'idempotency_key' AS key \
+           FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->>'type' = 'agent.status' \
+            AND payload->'data'->'payload'->>'run_status' = 'awaiting_approval' \
+            AND upper(payload->'data'->'payload'->>'run_id') = upper($2::text) \
+          ORDER BY id",
+    )
+    .bind(workspace_id)
+    .bind(run.to_string())
+    .fetch_all(su)
+    .await
+    .expect("read the run's waiting frames")
+    .into_iter()
+    .map(|row| (row.get("phase"), row.get("key")))
+    .collect()
+}
+
+/// One park, one frame, named by the approval the door raised.
+async fn assert_parked_once_on_the_rail(su: &PgPool, workspace_id: Uuid, run: Uuid) {
+    let approval: Uuid = sqlx::query_scalar("SELECT id FROM approval WHERE run_id = $1")
+        .bind(run)
+        .fetch_one(su)
+        .await
+        .expect("the door raised one approval");
+    let waiting = waiting_frames(su, workspace_id, run).await;
+    assert_eq!(
+        waiting.len(),
+        1,
+        "a park is exactly one rail frame: {waiting:?}"
+    );
+    assert_eq!(waiting[0].0, "thinking", "{waiting:?}");
+    assert!(
+        waiting[0]
+            .1
+            .ends_with(&format!("awaiting_approval:{approval}")),
+        "the hold is named by its approval: {waiting:?}"
+    );
+}
+
 /// Nothing a person's channel, the outbox or the broadcast rail carries may hold a picture, a
 /// `MEDIA:` mark or the request block (MiB of base64 must never ride them).
 async fn assert_no_picture_anywhere(su: &PgPool, t: &Tenant) {
@@ -1083,6 +1129,12 @@ async fn a_still_photo_turn_becomes_one_generated_candidate_card_and_commits_no_
     assert_eq!(drafts[0].state, "ready");
     assert_eq!(drafts[0].pointer, attachment);
     assert_eq!(run_status(&su, run).await, "awaiting_approval");
+    // #5084 — and the rail says so, once, on this tenant's rail only.
+    assert_parked_once_on_the_rail(&su, a.workspace_id, run).await;
+    assert!(
+        waiting_frames(&su, b.workspace_id, run).await.is_empty(),
+        "the other tenant's rail carries none of it"
+    );
     assert_eq!(ledger_rows(&su, run).await, 1, "the tokens were spent");
     let reason: Option<String> = sqlx::query_scalar(
         "SELECT last_error FROM outbox WHERE kind = 'agent_job' AND (payload->>'run_id')::uuid = $1",
@@ -1150,6 +1202,8 @@ async fn a_retried_attempt_whose_run_reads_failed_still_raises_the_card() {
     assert!(is_card(&messages[0]));
     assert_eq!(messages[0].props["status"], "pending");
     assert_eq!(run_status(&su, run).await, "awaiting_approval");
+    // #5084 — parked again after the retry: still exactly one frame.
+    assert_parked_once_on_the_rail(&su, t.workspace_id, run).await;
     let error: Option<Value> = sqlx::query_scalar("SELECT error FROM agent_run WHERE id = $1")
         .bind(run)
         .fetch_one(&su)

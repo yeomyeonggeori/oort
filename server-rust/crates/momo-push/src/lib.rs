@@ -54,7 +54,7 @@ pub use diagnostics::{
     apns_reason_code, classify_last_test, compute_diagnostics, is_relay_vocabulary_refusal,
     reserve_test_push_in_tx, retry_after_secs, Blocker, BlockerCode, DeviceCounts, Diagnostics,
     LastTest, LastTestStatus, TestDispatchRow, TestPushSlot, LAST_TEST_ROWS_SQL,
-    NOTIFICATION_KINDS, TEST_PUSH_PER_WINDOW, TEST_PUSH_WINDOW_SECS, TEST_STALLED_AFTER_SECS,
+    TEST_PUSH_PER_WINDOW, TEST_PUSH_WINDOW_SECS, TEST_STALLED_AFTER_SECS,
 };
 pub use dispatch::{
     category_for, collapse_id, DispatchOutcome, DispatchTarget, PushCategory, PushDispatch,

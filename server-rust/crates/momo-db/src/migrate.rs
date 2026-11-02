@@ -774,12 +774,18 @@ mod tests {
     /// `sticker`), `NOT NULL DEFAULT 'sticker'` so every earlier row reads as a sticker, a closed
     /// `CHECK`, and nothing else. No new table (so no new RLS policy), no new grant, and the identity
     /// trigger of 158 keeps the new column immutable after INSERT without being touched.
+    ///
+    /// 172 is #4494's 「알림 설정 v2」 (ADR-0206 D5·D13, M-b2): six `notification_rule` columns
+    /// (`kinds`, `presentation`, `schedule`, `phone_delay_secs`, `keyword_overrides_mute`,
+    /// `approval_time_sensitive`) and the time-zone helper `notification_local_time` (a wrong zone
+    /// name is NULL, not an error; executable by `momo_app` only). No new table, so no new RLS
+    /// policy; the helper's grant is reasserted in both role bootstraps.
     #[test]
-    fn discovers_contiguous_migrations_001_to_171() {
+    fn discovers_contiguous_migrations_001_to_172() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=171).collect();
+        let expected: Vec<i64> = (1..=172).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -787,7 +793,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=171 under {}",
+            "expected contiguous 001..=172 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -795,7 +801,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("171_expression_kind"));
+            .starts_with("172_notification_prefs_v2"));
     }
 
     #[test]

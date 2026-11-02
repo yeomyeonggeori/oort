@@ -266,6 +266,11 @@ export const messageKeys = [
   "timeline.unfurl.previewDismissed",
   "timeline.unfurl.previewGroup",
   "timeline.unfurl.video",
+  "timeline.workHealth.dwell",
+  "timeline.workHealth.failedActivities",
+  "timeline.workHealth.quiet",
+  "timeline.workHealth.rejectedApprovals",
+  "timeline.workHealth.retries",
   "timeline.workPlan.button",
   "timeline.workPlan.buttonDone",
   "timeline.workPlan.maybeStale",
@@ -309,9 +314,16 @@ export const messageKeys = [
   "timeline.workRecord.sourceOort",
   "timeline.workRecord.statusFailed",
   "timeline.workRecord.statusRunning",
+  "timeline.workRecord.statusUnclosed",
   "timeline.workRecord.summary",
   "timeline.workRecord.summaryFailed",
   "timeline.workRecord.unsupported",
+  "timeline.workReport.emptyEnded",
+  "timeline.workReport.emptyOpen",
+  "timeline.workReport.planNotLive",
+  "timeline.workReport.tally",
+  "timeline.workReport.trimmed",
+  "timeline.workReport.unsupported",
   "timeline.workRequest.composerBusy",
   "timeline.workRequest.fill",
   "timeline.workRequest.fillHint",
@@ -326,6 +338,20 @@ export const messageKeys = [
   "timeline.workRequest.openTools",
   "timeline.workRequest.sheetHint",
   "timeline.workRequest.threadClosed",
+  "timeline.workStream.limit",
+  "timeline.workSummary.agentReported",
+  "timeline.workSummary.duration",
+  "timeline.workSummary.durationHours",
+  "timeline.workSummary.durationShort",
+  "timeline.workSummary.kindDelegate",
+  "timeline.workSummary.kindEdit",
+  "timeline.workSummary.kindOther",
+  "timeline.workSummary.kindRead",
+  "timeline.workSummary.kindRun",
+  "timeline.workSummary.kindSearch",
+  "timeline.workSummary.kindWeb",
+  "timeline.workSummary.openPanel",
+  "timeline.workSummary.stages",
   "timeline.workTool.actionClaimSecret",
   "timeline.workTool.actionInitiate",
   "timeline.workTool.actionPropose",
@@ -674,6 +700,21 @@ export const argumentSpecs = {
   "timeline.unfurl.previewDismissed": {},
   "timeline.unfurl.previewGroup": {},
   "timeline.unfurl.video": {},
+  "timeline.workHealth.dwell": {
+    "minutes": "number"
+  },
+  "timeline.workHealth.failedActivities": {
+    "count": "number"
+  },
+  "timeline.workHealth.quiet": {
+    "minutes": "number"
+  },
+  "timeline.workHealth.rejectedApprovals": {
+    "count": "number"
+  },
+  "timeline.workHealth.retries": {
+    "count": "number"
+  },
   "timeline.workPlan.button": {
     "done": "number",
     "total": "number"
@@ -743,6 +784,7 @@ export const argumentSpecs = {
   "timeline.workRecord.sourceOort": {},
   "timeline.workRecord.statusFailed": {},
   "timeline.workRecord.statusRunning": {},
+  "timeline.workRecord.statusUnclosed": {},
   "timeline.workRecord.summary": {
     "calls": "number"
   },
@@ -751,6 +793,14 @@ export const argumentSpecs = {
     "failed": "number"
   },
   "timeline.workRecord.unsupported": {},
+  "timeline.workReport.emptyEnded": {},
+  "timeline.workReport.emptyOpen": {},
+  "timeline.workReport.planNotLive": {},
+  "timeline.workReport.tally": {
+    "parts": "string"
+  },
+  "timeline.workReport.trimmed": {},
+  "timeline.workReport.unsupported": {},
   "timeline.workRequest.composerBusy": {},
   "timeline.workRequest.fill": {},
   "timeline.workRequest.fillHint": {},
@@ -769,6 +819,44 @@ export const argumentSpecs = {
   "timeline.workRequest.openTools": {},
   "timeline.workRequest.sheetHint": {},
   "timeline.workRequest.threadClosed": {},
+  "timeline.workStream.limit": {},
+  "timeline.workSummary.agentReported": {},
+  "timeline.workSummary.duration": {
+    "minutes": "number"
+  },
+  "timeline.workSummary.durationHours": {
+    "hours": "number",
+    "minutes": "number"
+  },
+  "timeline.workSummary.durationShort": {},
+  "timeline.workSummary.kindDelegate": {
+    "count": "number"
+  },
+  "timeline.workSummary.kindEdit": {
+    "count": "number"
+  },
+  "timeline.workSummary.kindOther": {
+    "count": "number"
+  },
+  "timeline.workSummary.kindRead": {
+    "count": "number"
+  },
+  "timeline.workSummary.kindRun": {
+    "count": "number"
+  },
+  "timeline.workSummary.kindSearch": {
+    "count": "number"
+  },
+  "timeline.workSummary.kindWeb": {
+    "count": "number"
+  },
+  "timeline.workSummary.openPanel": {
+    "name": "string",
+    "summary": "string"
+  },
+  "timeline.workSummary.stages": {
+    "count": "number"
+  },
   "timeline.workTool.actionClaimSecret": {},
   "timeline.workTool.actionInitiate": {},
   "timeline.workTool.actionPropose": {},
@@ -1054,6 +1142,11 @@ export interface MessageArgs {
   "timeline.unfurl.previewDismissed": Record<string, never>;
   "timeline.unfurl.previewGroup": Record<string, never>;
   "timeline.unfurl.video": Record<string, never>;
+  "timeline.workHealth.dwell": { minutes: number };
+  "timeline.workHealth.failedActivities": { count: number };
+  "timeline.workHealth.quiet": { minutes: number };
+  "timeline.workHealth.rejectedApprovals": { count: number };
+  "timeline.workHealth.retries": { count: number };
   "timeline.workPlan.button": { done: number; total: number };
   "timeline.workPlan.buttonDone": { total: number };
   "timeline.workPlan.maybeStale": Record<string, never>;
@@ -1097,9 +1190,16 @@ export interface MessageArgs {
   "timeline.workRecord.sourceOort": Record<string, never>;
   "timeline.workRecord.statusFailed": Record<string, never>;
   "timeline.workRecord.statusRunning": Record<string, never>;
+  "timeline.workRecord.statusUnclosed": Record<string, never>;
   "timeline.workRecord.summary": { calls: number };
   "timeline.workRecord.summaryFailed": { calls: number; failed: number };
   "timeline.workRecord.unsupported": Record<string, never>;
+  "timeline.workReport.emptyEnded": Record<string, never>;
+  "timeline.workReport.emptyOpen": Record<string, never>;
+  "timeline.workReport.planNotLive": Record<string, never>;
+  "timeline.workReport.tally": { parts: string };
+  "timeline.workReport.trimmed": Record<string, never>;
+  "timeline.workReport.unsupported": Record<string, never>;
   "timeline.workRequest.composerBusy": Record<string, never>;
   "timeline.workRequest.fill": Record<string, never>;
   "timeline.workRequest.fillHint": Record<string, never>;
@@ -1114,6 +1214,20 @@ export interface MessageArgs {
   "timeline.workRequest.openTools": Record<string, never>;
   "timeline.workRequest.sheetHint": Record<string, never>;
   "timeline.workRequest.threadClosed": Record<string, never>;
+  "timeline.workStream.limit": Record<string, never>;
+  "timeline.workSummary.agentReported": Record<string, never>;
+  "timeline.workSummary.duration": { minutes: number };
+  "timeline.workSummary.durationHours": { hours: number; minutes: number };
+  "timeline.workSummary.durationShort": Record<string, never>;
+  "timeline.workSummary.kindDelegate": { count: number };
+  "timeline.workSummary.kindEdit": { count: number };
+  "timeline.workSummary.kindOther": { count: number };
+  "timeline.workSummary.kindRead": { count: number };
+  "timeline.workSummary.kindRun": { count: number };
+  "timeline.workSummary.kindSearch": { count: number };
+  "timeline.workSummary.kindWeb": { count: number };
+  "timeline.workSummary.openPanel": { name: string; summary: string };
+  "timeline.workSummary.stages": { count: number };
   "timeline.workTool.actionClaimSecret": Record<string, never>;
   "timeline.workTool.actionInitiate": Record<string, never>;
   "timeline.workTool.actionPropose": Record<string, never>;

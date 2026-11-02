@@ -150,8 +150,9 @@ describe("사용 한도: 기본은 제한 없음", () => {
       expect(input(view, field)).toBeNull();
     }
     expect(view.textContent).toContain("기본은 제한 없음");
-    expect(view.textContent).toContain("오늘 124,000 토큰 사용");
-    expect(view.textContent).toContain("오늘 웹 검색 3회");
+    // 나란한 두 줄은 한 틀이다(#5102): 오늘 + 수량 + 사용. 수는 「오늘」 바로 뒤에 서고, 이름은 행 라벨이 말한다.
+    expect(pick(view, "team-ai-limit-dailyTokens-detail")?.textContent).toBe("오늘 124,000 토큰 사용");
+    expect(pick(view, "team-ai-limit-dailySearches-detail")?.textContent).toBe("오늘 3회 사용");
     // 한도가 없으니 비율도 초기화 시각도 없다.
     expect(view.textContent).not.toContain("% 사용");
     expect(view.textContent).not.toContain("새로 시작해요");
@@ -168,7 +169,7 @@ describe("사용 한도: 기본은 제한 없음", () => {
     expect(pick(view, "team-ai-limit-dailyTokens-headline")?.textContent).toBe("오늘 62% 사용");
     expect(pick(view, "team-ai-limit-dailyTokens-detail")?.textContent).toBe("124,000 / 200,000 토큰");
     expect(pick(view, "team-ai-limit-dailyTokens-resets")?.textContent).toMatch(/에 새로 시작해요$/);
-    expect(view.textContent).toContain("서버 운영자가 하루 200,000토큰까지로 제한했어요.");
+    expect(view.textContent).toContain("서버 운영자가 하루 200,000 토큰까지로 제한했어요.");
     expect(pick(view, "team-ai-limit-monthlyUsd-headline")?.textContent).toBe("이번 달 62% 사용");
     expect(input(view, "monthlyUsd")?.value).toBe("20");
   });
@@ -265,7 +266,7 @@ describe("운영자: 천장은 입력 상한이고, 끄면 입력을 막는다",
   it("천장을 넘는 값은 보내지 않고, 천장 그대로는 보낸다", async () => {
     fetchBag.mockResolvedValue(bagOf(CEILING));
     const view = await mount();
-    expect(view.textContent).toContain("서버 운영자가 하루 200,000토큰까지로 제한했어요.");
+    expect(view.textContent).toContain("서버 운영자가 하루 200,000 토큰까지로 제한했어요.");
     await press(toggle(view, "dailyTokens"));
     await type(input(view, "dailyTokens"), "200001");
     await press(saveButton(view, "dailyTokens"));
