@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
@@ -52,6 +55,11 @@ import { resetAgentWorking } from "@/features/agents/agentWorkingSignal";
 import { resetSchedulerDisabledForTest } from "@/features/scheduled/useScheduled";
 import { clearDraft } from "@/features/chat/draftStore";
 import { Composer } from "./Composer";
+
+// jsdom 환경에서 `import.meta.url`은 file URL이 아닐 수 있어 경로로 푼다.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const TOKENS_CSS = readFileSync(join(HERE, "..", "..", "design", "tokens.css"), "utf8");
+const LIST_SRC = readFileSync(join(HERE, "ComposerAutocompleteList.tsx"), "utf8");
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const ME = "00000000-0000-7000-8000-000000000101";
@@ -289,4 +297,28 @@ describe("컴포저 후보 목록은 그릇 카드의 가장자리에 선다 (#5
     },
     240_000
   );
+});
+
+// 브라우저가 없는 곳(엔진 없는 CI 유닛 레인 · 에이전트 격리)에서도 도는 절반. 위 시험은 `skipIf`라 엔진이 없으면 아무것도 못 재므로,
+// 규칙이 **그 자리에 있다**는 것만은 글자로 잠근다(`desktopShell.ds2.test.ts`가 `composer-dock`의 여백 줄을 글자로 잠그는 것과 같은 방식).
+// 값은 위의 엔진 시험이 잰다. 사보타주: ≥600 블록에서 규칙을 지우거나 표지를 지우면 붉다.
+describe("컴포저 후보 목록 가장자리 규칙은 브라우저 없이도 잠겨 있다 (#5094, #5048 D6)", () => {
+  it("composer-dock ≥600 블록이 폼 여백과 같은 값으로 목록 가장자리를 옮기고, 세 뿌리가 표지를 단다", () => {
+    const dockAt = TOKENS_CSS.indexOf("@utility composer-dock {");
+    expect(dockAt).toBeGreaterThan(-1);
+    const dockEnd = TOKENS_CSS.indexOf("\n@utility ", dockAt + 1);
+    const dock = TOKENS_CSS.slice(dockAt, dockEnd);
+    const wideAt = dock.indexOf("@media (width >= 600px)");
+    expect(wideAt).toBeGreaterThan(-1);
+    const wide = dock.slice(wideAt);
+    // 폼 여백의 가로 값(24 = --spacing-6)과 목록 가장자리가 **같은 블록의 같은 토큰**이다.
+    expect(/& > form \{\s*padding: var\(--spacing-2\) var\(--spacing-(\d+)\) 18px;/.exec(wide)?.[1]).toBe("6");
+    expect(wide).toMatch(/& > form > \[data-composer-popover\] \{\s*left: var\(--spacing-6\);\s*\}/);
+    expect(wide).toMatch(/& > form > \[data-composer-popover="menu"\] \{\s*right: var\(--spacing-6\);\s*\}/);
+    // 폰 폭(블록 밖)은 목록 규칙이 없다: `left-3`·`right-3` 그대로.
+    expect(dock.slice(0, wideAt)).not.toContain("data-composer-popover");
+    // 세 뿌리(후보 `ul` · 상태 상자는 `list`, 명령 패널은 `menu`): 표지가 지워지면 규칙이 아무것도 못 옮긴다.
+    expect(LIST_SRC.match(/data-composer-popover="list"/g)).toHaveLength(2);
+    expect(LIST_SRC.match(/data-composer-popover="menu"/g)).toHaveLength(1);
+  });
 });
