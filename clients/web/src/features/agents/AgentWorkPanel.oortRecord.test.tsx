@@ -8,6 +8,7 @@ import { agentRunLedgerFromWire } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { ledgerRows } from "@momo/core/features/agents/runLedger";
 import { workToolRecord } from "@momo/core/features/agents/workTimeline";
+import { runReportSummary, workActivityRecord } from "@momo/core/features/agents/workReport";
 import type { ServerRunFacts } from "@momo/core/features/agents/workingSignal";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
@@ -93,8 +94,11 @@ function ledgerView(wire: Record<string, unknown>, read = true): RunLedgerView {
   const ledger = agentRunLedgerFromWire({ runId: RUN, ...wire });
   return {
     rows: ledgerRows(ledger.events),
+    events: ledger.events,
     doorbell: null,
     tools: read ? workToolRecord(ledger) : null,
+    activity: read ? workActivityRecord(ledger, { open: true, working: true }) : null,
+    report: read ? runReportSummary(ledger) : null,
     isLoading: false,
     isError: false,
   };
