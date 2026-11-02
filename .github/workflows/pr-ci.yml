@@ -527,6 +527,13 @@ jobs:
     # 러너 실측(이 PR): `cargo test --workspace` 콜드 107초 · 캐시 히트 77초,
     # 잡 전체 1분32초. 20분은 그 ~10배 여유다.
     timeout-minutes: 20
+    # 시험 빌드의 디버그 정보를 줄인다(#5182). 서버를 통째로 링크하는 시험 바이너리가
+    # 수십 개라 전체 디버그 정보로는 ubuntu-latest 러너 디스크가 거의 차서, 임시 폴더에
+    # 100MB를 쓰는 `momo-drive` 시험이 디스크 부족으로 깨졌다(#5180). `line-tables-only`는
+    # 패닉의 파일:줄을 남긴다.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -557,7 +564,11 @@ jobs:
       - name: cargo test --workspace (server-rust)
         # --locked: Cargo.lock을 고쳐야 하는 매니페스트 변경이 락 커밋 없이
         # 들어오면 여기서 빨강. 락 갱신은 리뷰 대상이지 CI의 부작용이 아니다.
-        run: cargo test --workspace --locked --manifest-path server-rust/Cargo.toml
+        # 앞뒤 `df -h /`는 러너 디스크 여유의 증거다(#5182).
+        run: |
+          df -h /
+          cargo test --workspace --locked --manifest-path server-rust/Cargo.toml
+          df -h /
 
       - name: cargo-deny 설치
         uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2
