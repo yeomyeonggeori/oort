@@ -1,9 +1,9 @@
 import { missingMemberLabel } from "@momo/core/features/workspace/directory";
 import { dismissTemporarySurfaces } from "@momo/core/features/notifications/entryDismiss";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "@/app/session";
-import { isDesktop } from "@/lib/tauri";
+import { isDesktop, notificationClickSupported, onNotificationClick } from "@/lib/tauri";
 import type { MessageNewEvent } from "@/lib/realtime";
 import { uuidEq } from "@momo/core/lib/api";
 import {
@@ -23,6 +23,7 @@ import {
   type ThreadBannerLedger,
 } from "@momo/core/features/notifications/model";
 import { notifyThisDevice } from "./deviceNotify";
+import { claimBanner, clearBanners, setPlainBannerHandler, type BannerArm } from "./bannerClicks";
 import { osNotifier, type OsNotifyKind } from "./osNotifier";
 import { setBrowserOpenHandler, useBrowserPermission } from "./browserNotify";
 import { useServerPause } from "./useServerPause";
@@ -54,6 +55,13 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
 // 물음은 다른 이유(내 글·음소거·꺼 둔 종류·보는 중)로 걸러질 글에는 나가지 않는다. 누르면 그 답글이 있는 스레드가 열린다.
 // 같은 스레드의 답글이 한 묶음 배너가 되어도 그 스레드로 가고, 한 스레드의 배너는 분당 상한까지만 뜬다(#5017).
 //
+// 배너를 눌러 가는 길 (#5059, #4667 후속). 데스크탑 셸이 배너의 클릭을 알려 주면(macOS) 눌린 배너가 곧 이동이다:
+// 셸이 배너마다 핸들을 쥐고 있다가 클릭 때만 `momo:notification-click` 을 쏘고, 여기서는 그 페이로드를 **앱이 만든 배너의
+// 장부**(`bannerClicks.ts`)와 대조해 장부에 적힌 목적지로 간다. 이 길에서는 「창이 앞에 왔다」를 클릭으로 어림하지 않는다 —
+// 배너를 무시하고 20초 안에 돌아와도 이동하지 않는다. 옛 어림(알림이 올 때 목적지를 무장하고 다음 창 포커스에서 소비)은
+// 셸이 클릭을 못 알리는 곳에만 남는다: 다른 OS, 클릭 길이 없는 옛 셸, 동시에 기다리는 배너가 한도를 넘어 일반 배너로
+// 뜬 것(그 배너의 재료로만 무장한다).
+//
 // While the member's 알림 일시 중지 is on, none of it becomes a banner (#4197):
 // the phone push is stopped by the server for the same rule, so this device
 // reads the server's answer (`useServerPause`) instead of deciding alone.
@@ -68,6 +76,20 @@ import { useFormatMessage } from "@/i18n/useFormatMessage";
  * complete record — a bounded rail is better than an unbounded socket count.
  */
 const WATCH_CAP = 30;
+
+/** 옛 어림: 알림 하나의 재료를 무장 상태(`armOpen`)에 보탠다. 이벤트 시점 무장과 일반 배너 무장이 같은 규칙을 쓴다. */
+function applyArm(
+  armedRef: MutableRefObject<ArmedOpen | null>,
+  threadRef: MutableRefObject<{ messageId: string; rootId: string } | null>,
+  arm: BannerArm,
+  nowMs: number
+): void {
+  armedRef.current = armOpen(armedRef.current, arm.channelId, nowMs, undefined, arm.messageId, arm.threadRoot);
+  threadRef.current =
+    armedRef.current.messageId && arm.eventRootId
+      ? { messageId: armedRef.current.messageId, rootId: arm.eventRootId }
+      : null;
+}
 
 export function DesktopNotifications() {
   const { session, workspaceId, realtime } = useSession();
@@ -111,6 +133,9 @@ export function DesktopNotifications() {
   const threadBannersRef = useRef<ThreadBannerLedger>(EMPTY_THREAD_BANNER_LEDGER);
   const armedRef = useRef<ArmedOpen | null>(null);
   const armedThreadRef = useRef<{ messageId: string; rootId: string } | null>(null);
+  // 셸이 배너의 클릭을 알려 준다고 답했는가(#5059). 그렇다면 알림이 올 때 목적지를 무장하지 않는다 — 클릭이 직접 간다.
+  // 답이 오기 전의 알림은 옛 방식으로 무장되고, 답이 「그렇다」로 오면 그 무장을 거둔다(아래 효과).
+  const clickReportsRef = useRef(false);
 
   const channels = useMemo(
     () => [...groups.channels, ...groups.dms],
@@ -204,21 +229,17 @@ export function DesktopNotifications() {
       threadBannersRef.current = verdict.ledger;
       if (!verdict.admitted) return;
     }
-    // 데스크탑은 알림을 눌러 창이 앞에 오는 순간 이동한다(arm). 브라우저는 배너 클릭이 직접 간다.
-    if (isDesktop()) {
-      armedRef.current = armOpen(
-        armedRef.current,
-        channelId,
-        nowMs,
-        undefined,
-        // 승인 알림은 그 카드로 착지한다(#3738). 스레드 답글은 그 답글로(#4890): 아래에서 스레드를 연다. 멘션·DM은 채널이다.
-        approval || threadReply ? messageId : undefined,
-        // 같은 스레드의 답글 여럿은 그 스레드로(#5017).
-        threadRoot
-      );
-      armedThreadRef.current = armedRef.current.messageId && event.payload.root_id
-        ? { messageId: armedRef.current.messageId, rootId: event.payload.root_id } : null;
-    }
+    // 승인 알림은 그 카드로 착지한다(#3738). 스레드 답글은 그 답글로(#4890): 아래에서 스레드를 연다. 멘션·DM은 채널이다.
+    // 같은 스레드의 답글 여럿은 그 스레드로(#5017).
+    const arm: BannerArm = {
+      channelId,
+      ...(approval || threadReply ? { messageId } : {}),
+      ...(threadRoot === undefined ? {} : { threadRoot }),
+      ...(event.payload.root_id ? { eventRootId: event.payload.root_id } : {}),
+    };
+    // 셸이 클릭을 못 알리면 알림을 눌러 창이 앞에 오는 순간 이동한다(arm). 알려 주면 무장하지 않는다(#5059): 배너의 클릭이
+    // 직접 간다. 브라우저는 배너 클릭이 직접 간다.
+    if (isDesktop() && !clickReportsRef.current) applyArm(armedRef, armedThreadRef, arm, nowMs);
     // 같은 종류는 한 묶음으로 쌓아 보낸다(osNotifier). 보내기는 fire and forget:
     // 브라우저나 거절된 권한은 false로 끝나는 정상 상태다.
     const kindMap: Record<typeof decision.notification.kind, OsNotifyKind> = {
@@ -243,6 +264,8 @@ export function DesktopNotifications() {
         ? { summaryTitle: (count: number) => formatRef.current("desktop.notify.threadSummary", { count }) }
         : {}),
       ...(threadRoot === undefined ? {} : { rootId: threadRoot }),
+      // 셸이 이 배너의 클릭을 못 알릴 때만 쓰이는 어림 재료(#5059).
+      arm,
     });
   }, []);
 
@@ -269,6 +292,60 @@ export function DesktopNotifications() {
     setBrowserOpenHandler(landOnNotification);
     return () => setBrowserOpenHandler(null);
   }, [desktop, landOnNotification]);
+
+  // ---- banner clicks from the shell (#5059) ---------------------------------
+
+  // 셸이 배너의 클릭을 알려 주는가. 한 번 묻고 기억한다(`notificationClickSupported`) — 배너를 보내는 쪽(`showDesktopBanner`)도
+  // 같은 답을 쓰므로 둘이 어긋나지 않는다. 「그렇다」면 답이 오기 전에 무장된 것을 거둔다: 그 알림의 배너는 클릭으로 간다.
+  useEffect(() => {
+    if (!desktop) return;
+    let live = true;
+    void notificationClickSupported().then((supported) => {
+      if (!live || !supported) return;
+      clickReportsRef.current = true;
+      armedRef.current = null;
+      armedThreadRef.current = null;
+    });
+    return () => {
+      live = false;
+    };
+  }, [desktop]);
+
+  // 셸이 알려 온 클릭을 장부와 대조해 간다. 구독은 한 번만 만든다: `navigate` 는 경로가 바뀔 때마다 새 함수라서(라우터 v6)
+  // 그 변화에 다시 구독하면 그 사이에 온 클릭을 놓친다. 그래서 가장 최근의 이동 함수를 ref 로 읽는다.
+  const landRef = useRef(landOnNotification);
+  landRef.current = landOnNotification;
+  useEffect(() => {
+    if (!desktop) return;
+    let cancelled = false;
+    let stop: (() => void) | null = null;
+    void onNotificationClick((click) => {
+      const route = claimBanner(click);
+      if (route !== null) landRef.current(route);
+    }).then(
+      (unlisten) => {
+        if (cancelled) unlisten();
+        else stop = unlisten;
+      },
+      () => undefined
+    );
+    return () => {
+      cancelled = true;
+      stop?.();
+      // 이 화면이 내려간다(로그아웃): 앞 사람의 대화 주소가 장부에 남지 않게.
+      clearBanners();
+    };
+  }, [desktop]);
+
+  // 셸이 「떴지만 클릭은 못 알린다」고 한 배너(한도 초과 등)는 옛 어림이 마지막 길이다: 그 배너의 재료로 무장한다.
+  useEffect(() => {
+    if (!desktop) return;
+    setPlainBannerHandler((arms) => {
+      const nowMs = Date.now();
+      for (const arm of arms) applyArm(armedRef, armedThreadRef, arm, nowMs);
+    });
+    return () => setPlainBannerHandler(null);
+  }, [desktop]);
 
   // ---- window focus -------------------------------------------------------
 
