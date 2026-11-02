@@ -1868,6 +1868,36 @@ export const catalog: MessageCatalog = {
       "value": "Checking the key."
     }
   ],
+  "timeline.lightbox.copied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "timeline.lightbox.copy": [
+    {
+      "type": 0,
+      "value": "Copy image"
+    }
+  ],
+  "timeline.lightbox.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't copy the image. Download the file instead."
+    }
+  ],
+  "timeline.lightbox.zoomIn": [
+    {
+      "type": 0,
+      "value": "Zoom in"
+    }
+  ],
+  "timeline.lightbox.zoomOut": [
+    {
+      "type": 0,
+      "value": "Zoom out"
+    }
+  ],
   "timeline.thread.followDismiss": [
     {
       "type": 0,
