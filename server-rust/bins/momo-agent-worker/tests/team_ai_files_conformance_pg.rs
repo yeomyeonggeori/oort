@@ -2349,9 +2349,10 @@ async fn status_stub(status_line: &'static str) -> String {
 }
 
 /// The file is the requester's and the rules pass, but the server cannot read it: the api is down, the api
-/// has an error, or it refuses the bytes. The first two are the fixed 「서버가 이 파일을 읽지 못했어요」
-/// (a hiccup: try again); the api refusing the bytes of the requester's own file is the file's permanent
-/// problem, said as such — and none says why in more detail than that.
+/// has an error, the api's own storage failed behind a spent address (its 502, ADR-0151 증보 6 / #5072), or it
+/// refuses the bytes. The first three are the fixed 「서버가 이 파일을 읽지 못했어요」 (a hiccup: try again); the
+/// api refusing the bytes of the requester's own file is the file's permanent problem, said as such — and none
+/// says why in more detail than that.
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
 async fn a_server_that_cannot_read_the_file_says_so_honestly() {
@@ -2371,6 +2372,13 @@ async fn a_server_that_cannot_read_the_file_says_so_honestly() {
         (
             "the api has an error",
             status_stub("500 Internal Server Error").await,
+            "unreadable",
+        ),
+        // the api took the address and its storage then failed, or disagreed with the row about the length: the
+        // route says 502, which is not the file's fault and is told as the hiccup it is (#5072)
+        (
+            "the api's storage failed behind a spent address",
+            status_stub("502 Bad Gateway").await,
             "unreadable",
         ),
         // the api handed out the address and then refused the bytes — it sniffs them first: the requester's
