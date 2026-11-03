@@ -1943,6 +1943,12 @@ export const catalog: MessageCatalog = {
       "value": "바뀐 점"
     }
   ],
+  "releaseNotes.detail.others": [
+    {
+      "type": 0,
+      "value": "그 밖에 바뀐 점"
+    }
+  ],
   "releaseNotes.detail.tryIt": [
     {
       "type": 0,
@@ -2022,6 +2028,186 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "폰"
+    }
+  ],
+  "releaseNotes.topic.agents": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "releaseNotes.topic.attachments": [
+    {
+      "type": 0,
+      "value": "첨부"
+    }
+  ],
+  "releaseNotes.topic.conversations": [
+    {
+      "type": 0,
+      "value": "대화"
+    }
+  ],
+  "releaseNotes.topic.notifications": [
+    {
+      "type": 0,
+      "value": "알림"
+    }
+  ],
+  "releaseNotes.topic.settings": [
+    {
+      "type": 0,
+      "value": "설정"
+    }
+  ],
+  "releaseNotes.v0141.agentsChanged": [
+    {
+      "type": 0,
+      "value": "에이전트 목록과 프로필에 이번 달 비용이 보이고, 관리자는 월간 보고서를 볼 수 있어요. 사람끼리의 DM에서 에이전트를 부르면 모두에게 동의를 먼저 물어보고, 모두 동의하면 에이전트가 들어와요."
+    }
+  ],
+  "releaseNotes.v0141.agentsTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 비용과 DM에 에이전트 부르기"
+    }
+  ],
+  "releaseNotes.v0141.agentsTryIt": [
+    {
+      "type": 0,
+      "value": "에이전트 목록과 프로필을 열어 보세요. 관리자라면 데스크탑은 설정 › 사용량, 폰은 설정 › 에이전트 월 보고를 열어 보세요. DM에서는 @로 에이전트를 불러 동의 카드가 뜨는지 봐 주세요."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsChanged": [
+    {
+      "type": 0,
+      "value": "채널 알림이 켜져 있는지 꺼져 있는지 종 아이콘과 글자로 보여 줘요. 누르면 바로 바뀌고, 저장하지 못하면 그 채널만 원래대로 돌아가요."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTitle": [
+    {
+      "type": 0,
+      "value": "채널 알림 켜짐·꺼짐 표시"
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTryIt": [
+    {
+      "type": 0,
+      "value": "폰은 대화 정보 페이지, ⋮ 메뉴, 채널 행 메뉴에서 알림 줄을 눌러 보세요. 데스크탑은 채널 머리의 ⋮ 메뉴와 사이드바 행 메뉴에서 눌러 보세요."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightChanged": [
+    {
+      "type": 0,
+      "value": "입력창이 폰은 4줄, 데스크탑은 5줄까지 늘어난 뒤 안에서 스크롤돼요. 긴 글을 붙여 넣어도 높이가 맞고, 마지막 줄이 잘리지 않아요."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTitle": [
+    {
+      "type": 0,
+      "value": "입력창 높이"
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTryIt": [
+    {
+      "type": 0,
+      "value": "여러 줄을 입력해 보고, 긴 글을 붙여 넣어 보세요."
+    }
+  ],
+  "releaseNotes.v0141.emojiChanged": [
+    {
+      "type": 0,
+      "value": "폰의 반응과 상태에서 표준 이모지를 모두 쓸 수 있어요. 이모지 고르개의 「우리 팀」 칸에서는 팀 이모지, 스티커, GIF를 쓰고 새로 등록해요."
+    }
+  ],
+  "releaseNotes.v0141.emojiTitle": [
+    {
+      "type": 0,
+      "value": "이모지와 팀 이모지"
+    }
+  ],
+  "releaseNotes.v0141.emojiTryIt": [
+    {
+      "type": 0,
+      "value": "폰은 빠른 반응 줄의 +를 눌러 이름으로 찾아 보세요. 폰과 데스크탑 모두 이모지 고르개의 「우리 팀」 칸을 열어 보세요."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationChanged": [
+    {
+      "type": 0,
+      "value": "대화 맨 위 띠가 없어지고 뒤로, 이름, ⋮ 유리 단추 셋이 떠 있어요. 앱으로 돌아오거나 잠금을 풀면 연결이 더 빨리 돌아오고, 대화 맨 위에서 당기면 연결을 다시 확인해요. 메시지를 길게 누르거나 반응을 달 때 가벼운 진동도 와요."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTitle": [
+    {
+      "type": 0,
+      "value": "폰 대화 머리와 다시 연결"
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTryIt": [
+    {
+      "type": 0,
+      "value": "대화를 열어 위로 올려 보고, 앱을 잠시 나갔다 돌아와 보세요. 연결이 끊긴 띠가 보이면 「지금 다시 연결」을 눌러 보세요."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerChanged": [
+    {
+      "type": 0,
+      "value": "사진을 누르면 누른 자리에서 커지며 열리고, 닫으면 그 자리로 돌아가요. 뒤로 가기, Esc, 아래로 끌기로 닫을 수 있고, 동작 줄이기를 켜면 바로 열리고 닫혀요."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTitle": [
+    {
+      "type": 0,
+      "value": "사진 열고 닫기"
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTryIt": [
+    {
+      "type": 0,
+      "value": "대화에 올라온 사진을 눌러 열고, 여러 방법으로 닫아 보세요."
+    }
+  ],
+  "releaseNotes.v0141.settingsChanged": [
+    {
+      "type": 0,
+      "value": "설정 › 프로필 › 언어에서 기기 언어 따르기, 한국어, English를 골라요. 바꾸면 바로 적용되지만 아직 모든 화면이 바뀌지는 않아요. 폰은 설정 › 테마 › 테마 스타일이 전체 화면 고르개를 열어요."
+    }
+  ],
+  "releaseNotes.v0141.settingsTitle": [
+    {
+      "type": 0,
+      "value": "언어 설정과 폰 테마 고르기"
+    }
+  ],
+  "releaseNotes.v0141.settingsTryIt": [
+    {
+      "type": 0,
+      "value": "언어를 바꿔 설정 화면의 글자가 바뀌는지 보세요. 폰에서는 테마 스타일도 하나 골라 보세요."
+    }
+  ],
+  "releaseNotes.v0141.summary": [
+    {
+      "type": 0,
+      "value": "대화 화면이 더 보기 좋아지고, 언어 설정과 팀 이모지, 에이전트 비용이 들어왔어요."
+    }
+  ],
+  "releaseNotes.v0141.typingChanged": [
+    {
+      "type": 0,
+      "value": "입력창 아래에서 누가 쓰고 있는지 이름을 굵게 보여 주고, 점 셋이 움직여요. 동작 줄이기를 켜면 점은 멈춰 있어요."
+    }
+  ],
+  "releaseNotes.v0141.typingTitle": [
+    {
+      "type": 0,
+      "value": "작성 중 표시"
+    }
+  ],
+  "releaseNotes.v0141.typingTryIt": [
+    {
+      "type": 0,
+      "value": "대화에서 다른 사람이나 에이전트가 답을 쓰는 동안 입력창 아래를 봐 주세요."
     }
   ],
   "releaseNotes.version.current": [
