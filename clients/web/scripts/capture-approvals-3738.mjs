@@ -270,8 +270,8 @@ async function raise(page) {
   await page.waitForTimeout(400);
 }
 
-// `ONLY=expiry-soon` 처럼 장면 이름(cards · inbox · expiry-soon · expired)을 주면 그것만 돈다. ① ② ④ 는 묶음 카드 문법 이전의
-// test id(`approval-action-role` 등)에 기대고 있어 지금은 붉다(#5174 와 무관한 낡음). ③ 은 #5174 L7 이 쓴다.
+// `ONLY=expiry-soon` 처럼 장면 이름(cards · inbox · expiry-soon · expired, 쉼표로 여럿)을 주면 그것만 돈다. 비우면 넷 다 돈다(검증 줄 기본).
+// 넷 모두 지금 화면에서 초록이다(#5251): ①은 묶음 카드의 「자세히」를 열어 읽고, ③은 #5174 L7 의 한 줄 시간 말을 잰다.
 const ONLY = (process.env.ONLY || "").split(",").filter(Boolean);
 const runs = (name) => ONLY.length === 0 || ONLY.includes(name);
 
