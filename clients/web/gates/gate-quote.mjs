@@ -1184,10 +1184,23 @@ async function exerciseTouch(browser, menuKeys) {
     .evaluateAll((nodes) =>
       nodes.map((node) => node.getAttribute("data-testid")?.slice("sheet-".length))
     );
-  if (JSON.stringify(sheetKeys) !== JSON.stringify(menuKeys)) {
+  // 길게 누르기 시트는 **전체 목록**이다: 손가락에는 호버 도구 막대가 없어서 도구 막대 몫(빠른 반응·「더 보기」·답글)이 시트에 함께
+  // 선다(`messageActionItemsForSurface`, #5192가 답글·반응을 ⋯ 메뉴에서 도구 막대로 옮겼다). 그래서 ⋯ 메뉴와 같다고 단정하는 것은
+  // 도구 막대 몫을 뺀 행동이고, 도구 막대 몫은 시트에 **정말 있어야** 한다(터치가 답글·반응에 닿는 유일한 길이다).
+  const sheetActionKeys = sheetKeys.filter(
+    (key) => !key.startsWith("react-") && key !== "reply"
+  );
+  if (JSON.stringify(sheetActionKeys) !== JSON.stringify(menuKeys)) {
     throw new Error(
-      `long-press and ⋯ actions drifted: ${JSON.stringify(sheetKeys)} != ${JSON.stringify(menuKeys)}`
+      `long-press and ⋯ actions drifted: ${JSON.stringify(sheetActionKeys)} != ${JSON.stringify(menuKeys)}`
     );
+  }
+  for (const key of ["react-more", "reply"]) {
+    if (!sheetKeys.includes(key)) {
+      throw new Error(
+        `the long-press sheet lost ${key}, the only touch path to a toolbar action: ${JSON.stringify(sheetKeys)}`
+      );
+    }
   }
   await sheet.getByTestId("sheet-copy").click();
   await sheet.getByTestId("sheet-copy").getByText("복사됨").waitFor();

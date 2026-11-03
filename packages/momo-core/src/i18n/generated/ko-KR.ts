@@ -89,6 +89,219 @@ export const catalog: MessageCatalog = {
       "value": "이메일 기억하기"
     }
   ],
+  "connection.action.reconnectNow": [
+    {
+      "type": 0,
+      "value": "지금 다시 연결"
+    }
+  ],
+  "connection.action.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "connection.approval.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."
+    }
+  ],
+  "connection.approval.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."
+    }
+  ],
+  "connection.boot.unreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 저장된 로그인은 그대로 있고, 연결되면 이어서 시도해요."
+    }
+  ],
+  "connection.card.connecting": [
+    {
+      "type": 0,
+      "value": "연결 중…"
+    }
+  ],
+  "connection.card.lastSynced": [
+    {
+      "type": 0,
+      "value": "마지막 동기화 "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    }
+  ],
+  "connection.card.offlineDetail": [
+    {
+      "type": 0,
+      "value": "받아 둔 내용만 보여요. 연결되면 자동으로 이어져요."
+    }
+  ],
+  "connection.card.offlineTitle": [
+    {
+      "type": 0,
+      "value": "오프라인이에요"
+    }
+  ],
+  "connection.card.realtimeDownDetail": [
+    {
+      "type": 0,
+      "value": "새 글이 늦게 보일 수 있어요."
+    }
+  ],
+  "connection.card.realtimeDownTitle": [
+    {
+      "type": 0,
+      "value": "실시간 연결이 끊겼어요"
+    }
+  ],
+  "connection.card.recovered": [
+    {
+      "type": 0,
+      "value": "다시 연결됐어요"
+    }
+  ],
+  "connection.card.serverUnreachableDetail": [
+    {
+      "type": 0,
+      "value": "잠시 뒤 다시 시도할게요."
+    }
+  ],
+  "connection.card.serverUnreachableTitle": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요"
+    }
+  ],
+  "connection.card.serverUpdatingDetail": [
+    {
+      "type": 0,
+      "value": "곧 다시 연결돼요."
+    }
+  ],
+  "connection.card.serverUpdatingTitle": [
+    {
+      "type": 0,
+      "value": "서버를 업데이트하고 있어요"
+    }
+  ],
+  "connection.card.unknownDetail": [
+    {
+      "type": 0,
+      "value": "다시 시도해 주세요. 계속되면 연결 기록을 복사해 알려 주세요."
+    }
+  ],
+  "connection.card.unknownTitle": [
+    {
+      "type": 0,
+      "value": "연결에 문제가 있어요"
+    }
+  ],
+  "connection.composer.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요."
+    }
+  ],
+  "connection.composer.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요."
+    }
+  ],
+  "connection.load.channelListTitle": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.conversationTitle": [
+    {
+      "type": 0,
+      "value": "대화를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.membersTitle": [
+    {
+      "type": 0,
+      "value": "멤버 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.reasonOffline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 연결되면 다시 불러올 수 있어요."
+    }
+  ],
+  "connection.load.reasonServer": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."
+    }
+  ],
+  "connection.load.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "문제가 생겼어요. 다시 시도해 주세요."
+    }
+  ],
+  "connection.load.threadTitle": [
+    {
+      "type": 0,
+      "value": "스레드를 불러오지 못했어요"
+    }
+  ],
+  "connection.send.failed": [
+    {
+      "type": 0,
+      "value": "보내지 못했어요"
+    }
+  ],
+  "connection.send.resend": [
+    {
+      "type": 0,
+      "value": "다시 보내기"
+    }
+  ],
+  "connection.send.resendAll": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 모두 다시 보내기"
+    }
+  ],
+  "connection.session.expired": [
+    {
+      "type": 0,
+      "value": "로그인이 만료됐어요. 다시 로그인해 주세요."
+    }
+  ],
+  "connection.upload.failedNoArchive": [
+    {
+      "type": 0,
+      "value": "이 서버에는 파일 보관소가 연결돼 있지 않아요"
+    }
+  ],
+  "connection.upload.failedOffline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 올리지 못했어요"
+    }
+  ],
+  "connection.upload.failedServer": [
+    {
+      "type": 0,
+      "value": "서버가 응답하지 않아 올리지 못했어요"
+    }
+  ],
   "desktop.menu.close": [
     {
       "type": 0,
@@ -3064,6 +3277,30 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "축소"
+    }
+  ],
+  "timeline.send.discard": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "timeline.send.failed": [
+    {
+      "type": 0,
+      "value": "전송 실패"
+    }
+  ],
+  "timeline.send.resend": [
+    {
+      "type": 0,
+      "value": "다시 보내기"
+    }
+  ],
+  "timeline.send.sending": [
+    {
+      "type": 0,
+      "value": "전송 중"
     }
   ],
   "timeline.thread.followDismiss": [

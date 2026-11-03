@@ -57,6 +57,21 @@ const ACTION_MENU_CODE = codeOnly(
   readFileSync(new URL("./channelActions.tsx", import.meta.url), "utf8")
 );
 
+/** `ChatShell`의 머리(`<header …>`부터 `</header>`까지) 코드. 없으면 터진다. */
+const HEADER_CODE = (() => {
+  const at = SHELL_CODE.indexOf('data-testid="channel-header"');
+  if (at < 0) throw new Error("ChatShell에 channel-header가 없다");
+  return SHELL_CODE.slice(at, SHELL_CODE.indexOf("</header>", at));
+})();
+
+/** `ChatShell`의 `renderControlsEnd`(멤버 수 · 허들 · ⋮) 본문. 없으면 터진다. */
+function renderControlsEndCode(): string {
+  const start = SHELL_CODE.indexOf("const renderControlsEnd");
+  const end = SHELL_CODE.indexOf("const headerTailShown");
+  if (start < 0 || end < start) throw new Error("ChatShell에 renderControlsEnd가 없다");
+  return SHELL_CODE.slice(start, end);
+}
+
 describe("BZ-2 channel header is one title row", () => {
   it("does not keep the topic in the always-visible header", () => {
     expect(SHELL_CODE).not.toMatch(/ChannelTopicControl/);
@@ -86,14 +101,29 @@ describe("BZ-2 right control group rearranges existing actions", () => {
     expect(SHELL_CODE).toMatch(/data-testid="channel-header-controls"/);
     expect(SHELL).toMatch(/aria-label="채널 도구"/);
     const group = SHELL_CODE.slice(
-      SHELL_CODE.indexOf("channel-header-controls")
+      SHELL_CODE.indexOf('data-testid="channel-header-controls"')
     );
-    const memberAt = group.indexOf("ChannelMemberPanel");
-    const huddleAt = group.indexOf("HuddleHeaderControl");
-    const menuAt = group.indexOf("ChannelHeaderMenu");
+    // 끝 묶음(멤버 수 · 허들 · ⋮)은 `renderControlsEnd`가 그린다(#5206: ⋮가 외톨이가 되지 않게 묶는 곳). 묶음은 터미널·고정 목록 뒤다.
+    const endAt = group.indexOf("renderControlsEnd(huddle)");
+    expect(endAt).toBeGreaterThan(0);
+    expect(group.indexOf("open-terminal-dock")).toBeGreaterThan(0);
+    expect(group.indexOf("<PinListMenu")).toBeGreaterThan(group.indexOf("open-terminal-dock"));
+    expect(endAt).toBeGreaterThan(group.indexOf("<PinListMenu"));
+    // 끝 묶음 안의 순서: 멤버 수 → 허들 → ⋮.
+    const end = renderControlsEndCode();
+    const gluedAt = end.indexOf("huddleControlShown(huddle, offline)");
+    expect(gluedAt).toBeGreaterThan(0);
+    const glued = end.slice(gluedAt);
+    const memberAt = glued.indexOf("{members}");
+    const huddleAt = glued.indexOf("{huddleControl}");
+    const menuAt = glued.indexOf("{menu}");
     expect(memberAt).toBeGreaterThan(0);
     expect(huddleAt).toBeGreaterThan(memberAt);
     expect(menuAt).toBeGreaterThan(huddleAt);
+    // 세 단추의 실제 컴포넌트가 이 함수 안에 있다.
+    expect(end.indexOf("<ChannelMemberPanel")).toBeGreaterThan(0);
+    expect(end.indexOf("<HuddleHeaderControl")).toBeGreaterThan(end.indexOf("<ChannelMemberPanel"));
+    expect(end.indexOf("<ChannelHeaderMenu")).toBeGreaterThan(end.indexOf("<HuddleHeaderControl"));
   });
 
   it("keeps the member count on the existing list surface", () => {
@@ -243,13 +273,171 @@ describe("#4230 머리는 컨트롤 묶음이 먼저 폭을 갖고 제목이 남
     expect(HEADER).toMatch(/data-testid="dm-profile-trigger"[\s\S]*?min-w-0 truncate/);
   });
 
-  it("구분용 핸들도 칸 안에서 줄어든다(shrink-0이면 제목 칸 바닥에서 컨트롤 쪽으로 넘친다)", () => {
-    const handle = /<span\s+className="([^"]*)"\s+data-testid="channel-handle"/.exec(HEADER);
+  it("구분용 핸들은 제 칸(channel-head-handle) 안에 있고 줄지 않는다(말줄임 조각 금지)", () => {
+    // #5206: 예전에는 핸들이 `min-w-0 truncate`라 좁은 폭에서 「@」 조각만 남았다. 지금은 핸들 자신이 줄지 않고(통째로),
+    // 칸이 통째로 안 들어가면 핸들을 보이지 않는 둘째 줄로 보낸다.
+    const slot = /<span className="channel-head-handle" data-testid="channel-handle-slot">([\s\S]*?)<\/span>\s*<\/span>/.exec(HEADER);
+    expect(slot).not.toBeNull();
+    const handle = /<span\s+className="([^"]*)"\s+data-testid="channel-handle"/.exec(slot?.[1] ?? "");
     expect(handle).not.toBeNull();
     const classes = (handle?.[1] ?? "").split(/\s+/);
-    expect(classes).toContain("min-w-0");
-    expect(classes).toContain("truncate");
-    expect(classes).not.toContain("shrink-0");
+    expect(classes).toContain("shrink-0");
+    expect(classes).toContain("whitespace-nowrap");
+    expect(classes).not.toContain("truncate");
+    expect(classes).not.toContain("min-w-0");
+  });
+});
+
+// =============================================================================
+// #5206 · #5184 — 제목이 읽히는 몫을 지키고, 핸들은 통째로, 허들 이름은 제목 뒤 남는 폭만.
+//
+// 렌더된 기하(제목 몫·핸들 보임/숨음·칩 양보·머리 줄 수)는 `gate:channel-header-fit`이 크로미엄·웨빗에서 잰다. 여기 있는 것은
+// 그 기하를 만드는 **구조**의 약속이다.
+// =============================================================================
+
+describe("#5206 제목 몫 문턱: 폰은 3rem, 넓은 창은 제목 글자 8자 몫", () => {
+  it("제목 칸의 바닥은 폰 폭 3rem, 넓은 창(600 이상) --text-heading × 8이다", () => {
+    const body = utilityBody("channel-head-body");
+    expect(body).toMatch(/min-inline-size: 3rem;/);
+    // 넓은 창의 바닥은 글자 크기 설정을 따른다: rem 고정값이 아니라 제목 글자 크기(--text-heading)의 8배.
+    expect(body).toMatch(
+      /@media \(width >= 600px\) \{\s*min-inline-size: calc\(var\(--text-heading\) \* 8\);\s*\}/
+    );
+    // 옛 3rem이 넓은 창에서도 이긴다면(미디어 규칙이 없다면) 720~768의 제목이 다시 53~101px로 줄어든다.
+    expect(body.indexOf("3rem")).toBeLessThan(body.indexOf("* 8"));
+  });
+});
+
+describe("#5206 같은 이름 DM의 핸들은 통째로 보이거나 통째로 숨고, title·낭독 이름에 든다", () => {
+  const slot = utilityBody("channel-head-handle");
+
+  it("핸들 칸은 한 줄 높이에서 줄바꿈하고 넘치는 둘째 줄을 숨긴다", () => {
+    // 칸은 flex 상자다(핸들을 둘째 줄로 보내려면 `display: flex`가 있어야 하고, 없애면 핸들이 통째로 사라진다).
+    expect(slot).toMatch(/display: flex;\s*flex-wrap: wrap;/);
+    expect(slot).toMatch(/overflow: hidden;/);
+    expect(slot).toMatch(/block-size: var\(--text-meta--line-height\);/);
+    // 칸은 핸들의 글 폭까지만 자란다(그 이상은 제목의 몫).
+    expect(slot).toMatch(/max-inline-size: max-content;/);
+    expect(slot).toMatch(/flex: 100 1 0;/);
+  });
+
+  it("칸 맨 앞의 폭 0짜리 조각이 높이를 가져 첫 줄을 차지한다(없으면 핸들이 칸보다 넓어도 첫 줄에 남는다)", () => {
+    const before = /&::before \{([\s\S]*?)\}/.exec(slot);
+    expect(before).not.toBeNull();
+    expect(before?.[1]).toMatch(/content: "";/);
+    expect(before?.[1]).toMatch(/inline-size: 0;/);
+    expect(before?.[1]).toMatch(/block-size: var\(--text-meta--line-height\);/);
+  });
+
+  it("DM 제목의 title은 핸들까지 담은 전체 이름(label)이고, 채널·스트레스 제목은 그대로다", () => {
+    const titles = [...HEADER_CODE.matchAll(/<h1[\s\S]*?>/g)].map((match) => match[0]);
+    expect(titles).toHaveLength(3);
+    const dm = titles.filter((open) => /flex min-w-0 items-center/.test(open));
+    expect(dm).toHaveLength(1);
+    expect(dm[0]).toMatch(/title=\{label\}/);
+    expect(titles.filter((open) => /title=\{label\}/.test(open))).toHaveLength(1);
+    // 낭독 이름도 label(핸들 포함): 이름 단추의 aria-label.
+    expect(HEADER_CODE).toMatch(/aria-label=\{`\$\{label\} 프로필 열기`\}/);
+  });
+});
+
+describe("#5184 허들 참가자 이름 글은 제목 칸의 꼬리에서 제목이 다 선 뒤 남는 폭만 받는다", () => {
+  it("꼬리 칸은 기준 폭 0에서 남는 폭을 받고 스스로 컨테이너다", () => {
+    const tail = utilityBody("channel-head-tail");
+    expect(tail).toMatch(/flex: 1 1 0;/);
+    expect(tail).toMatch(/min-inline-size: 0;/);
+    expect(tail).toMatch(/container: channel-tail \/ inline-size;/);
+    // 폰 폭에는 칸이 없다(안에 설 토픽·이름 글이 전부 `wide-only`라 빈 칸이 칸 틈 8을 제목에서 가져간다): 기본은 none, 600 이상에서 flex.
+    expect(tail).toMatch(/display: none;/);
+    expect(tail).toMatch(/@media \(width >= 600px\) \{\s*display: flex;\s*\}/);
+  });
+
+  it("이름 글은 꼬리 칸이 8rem 이상일 때만 선다(조각이 아니라 통째로 숨는다), 폰 폭에서는 서지 않는다", () => {
+    const names = utilityBody("channel-head-names");
+    // 기본은 숨김이다: 규칙의 맨 앞 선언이 `display: none`이어야 한다(중첩된 `[data-joined]` 규칙의 none과 헷갈리지 않게 맨 앞을 짚는다).
+    expect(names).toMatch(/\{\s*display: none;\s*flex: 0 1 auto;/);
+    expect(names).toMatch(
+      /@media \(width >= 600px\) \{\s*@container channel-tail \(inline-size >= 8rem\) \{\s*display: block;/
+    );
+  });
+
+  it("꼬리 칸에는 토픽과 허들 이름 글이 있고, 컨트롤 묶음에는 이름 글이 없다", () => {
+    const tailAt = HEADER_CODE.indexOf('className="channel-head-tail"');
+    const toolsAt = HEADER_CODE.indexOf('className="channel-head-tools ');
+    expect(tailAt).toBeGreaterThan(0);
+    const tail = HEADER_CODE.slice(tailAt, toolsAt);
+    expect(tail).toContain('data-testid="channel-header-topic"');
+    expect(tail).toContain("<HuddleHeaderNames");
+    expect(HEADER_CODE.slice(toolsAt)).not.toContain("<HuddleHeaderNames");
+    // 꼬리가 비면 칸 자체를 두지 않는다(빈 칸도 칸 틈 8을 제목에서 가져간다).
+    expect(HEADER_CODE).toContain("headerTailShown(huddle) && (");
+  });
+
+  it("Live 칩은 이름 글을 품지 않는다(칩 폭이 컨트롤 묶음의 기본 폭을 부풀려 제목이 먼저 깎이던 결함)", () => {
+    const chipAt = HUDDLE_CODE.indexOf("function HuddleLiveChip");
+    const chip = HUDDLE_CODE.slice(chipAt, HUDDLE_CODE.indexOf("export function HuddleHeaderNames"));
+    expect(chip).not.toContain('data-testid="huddle-participants"');
+    expect(chip).not.toMatch(/truncate/);
+    // 전문은 칩의 낭독과 title에 남는다.
+    expect(chip).toMatch(/className="sr-only">\{huddleParticipantSummary\(huddle\)\}/);
+    expect(chip).toMatch(/title=\{names\}/);
+  });
+
+  it("참가 중에는 전문이 칩 래퍼 밖의 sr-only 한 곳에 있다(칩이 양보해 display: none이 돼도 낭독에서 안 빠지고, 칩은 announce={false}라 둘로 안 읽힌다)", () => {
+    expect(HUDDLE_CODE).toMatch(/<HuddleLiveChip huddle=\{huddle\.active\} announce=\{false\} \/>/);
+    expect(HUDDLE_CODE).toMatch(/<span className="sr-only">\s*\{huddleParticipantSummary\(huddle\.active\)\}\s*<\/span>/);
+    // 칩 자신의 낭독은 announce일 때만 선다.
+    expect(HUDDLE_CODE).toMatch(/\{announce && \(\s*<span className="sr-only">\{huddleParticipantSummary\(huddle\)\}<\/span>\s*\)\}/);
+  });
+
+  it("이름 글은 aria-hidden(칩이 같은 전문을 낭독한다)이고, 참가 중에는 칩과 함께 양보한다", () => {
+    const namesAt = HUDDLE_CODE.indexOf("export function HuddleHeaderNames");
+    const names = HUDDLE_CODE.slice(namesAt, HUDDLE_CODE.indexOf("function HuddleIconButton"));
+    expect(names).toMatch(/aria-hidden="true"/);
+    // 참가 중이면 `data-joined`가 서고, tokens.css의 `[data-joined]` 규칙이 칩과 같은 문턱에서 이름 글을 접는다.
+    expect(names).toMatch(/data-joined=\{huddle\.joined \|\| undefined\}/);
+    // 참가 중 칩 래퍼도 같은 문턱의 규칙(`channel-head-live-joined`)을 받는다.
+    expect(HUDDLE_CODE).toMatch(/className="wide-only channel-head-live-joined min-w-0"/);
+  });
+
+  it("참가 중 칩·이름은 머리 안쪽 폭이 26rem 밑이면 같은 문턱에서 양보하고, 머리가 그 컨테이너다", () => {
+    const chip = utilityBody("channel-head-live-joined");
+    expect(chip).toMatch(/@container channel-head \(inline-size < 26rem\) \{\s*display: none;/);
+    // 이름 글은 속성 선택자(특이도가 높아 소스 순서와 무관하게 이긴다)로 같은 문턱에서 접는다.
+    const names = utilityBody("channel-head-names");
+    expect(names).toMatch(
+      /&\[data-joined\] \{\s*@container channel-head \(inline-size < 26rem\) \{\s*display: none;/
+    );
+    expect(utilityBody("channel-head")).toMatch(/container: channel-head \/ inline-size;/);
+  });
+});
+
+describe("#5206 ⋮는 혼자 한 줄에 서지 않는다: 바로 앞 컨트롤과 줄바꿈 한 덩어리다", () => {
+  const end = renderControlsEndCode();
+
+  it("허들 컨트롤이 있으면 허들과, 없으면 멤버 수와 한 덩어리(flex-nowrap)다", () => {
+    // 덩어리는 줄지 않는 flex 한 줄이다(`shrink-0`): 단추를 줄이지 않고 줄바꿈 때 통째로 움직인다.
+    expect(end.match(/className="flex shrink-0 items-center gap-1"/g)).toHaveLength(2);
+    const glued = end.slice(end.indexOf("huddleControlShown(huddle, offline)"));
+    // 감싸개에는 `data-testid`가 없다: 기존 `gate:channel-header`의 순서 읽기가 testid 없는 감싸개를 투명하게 걸어 들어간다.
+    const unitOpen = '<div className="flex shrink-0 items-center gap-1">';
+    // 첫 가지: 멤버 수는 덩어리 밖, 허들 + ⋮는 덩어리 안.
+    const firstBranch = glued.slice(0, glued.indexOf(") : "));
+    expect(firstBranch).toMatch(
+      new RegExp(`\\{members\\}\\s*${unitOpen}\\s*\\{huddleControl\\}\\s*\\{menu\\}\\s*</div>`)
+    );
+    // 둘째 가지: 멤버 수 + ⋮가 덩어리 안.
+    const secondBranch = glued.slice(glued.indexOf(") : "));
+    expect(secondBranch).toMatch(
+      new RegExp(`${unitOpen}\\s*\\{members\\}\\s*\\{menu\\}\\s*</div>`)
+    );
+  });
+
+  it("⋮가 덩어리 밖에 따로 서는 곳이 없다(ChannelHeaderMenu는 이 함수 안에서 한 번만 만든다)", () => {
+    expect(SHELL_CODE.match(/<ChannelHeaderMenu\b/g)).toHaveLength(1);
+    expect(end.match(/<ChannelHeaderMenu\b/g)).toHaveLength(1);
+    // 단추 크기·순서는 그대로: 덩어리는 단추를 줄이지 않는다.
+    expect(end).not.toMatch(/\bhidden\b/);
   });
 });
 
