@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "2e1a6914235cb1607dcbda6da970b6915f7578f4",
+  "baselineHead": "23a9a1fd84a9491636d05bd6e0a0acb1c4114c0d",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -43,10 +43,11 @@
     "clients/mobile/src/features/agents/AgentUsage.tsx": 19,
     "clients/mobile/src/features/agents/MessageRunStatus.tsx": 26,
     "clients/mobile/src/features/agents/RequestStatusChip.tsx": 18,
-    "clients/mobile/src/features/agents/RequestThinkingLine.tsx": 33,
+    "clients/mobile/src/features/agents/RequestThinkingLine.tsx": 32,
     "clients/mobile/src/features/agents/RespondingDots.tsx": 6,
-    "clients/mobile/src/features/agents/RunLedgerSheet.tsx": 20,
+    "clients/mobile/src/features/agents/RunLedgerSheet.tsx": 19,
     "clients/mobile/src/features/agents/StopTurnControl.tsx": 13,
+    "clients/mobile/src/features/agents/WorkTimelineParts.tsx": 7,
     "clients/mobile/src/features/agents/agentRunProgressStore.ts": 1,
     "clients/mobile/src/features/agents/channelTags.tsx": 2,
     "clients/mobile/src/features/agents/endedRuns.ts": 1,

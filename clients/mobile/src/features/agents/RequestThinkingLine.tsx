@@ -1,4 +1,4 @@
-import type {AgentRunLedgerEvent, AgentRunProgress} from '@momo/core/lib/api';
+import type {AgentRunProgress} from '@momo/core/lib/api';
 import {
   isOpenRunPhase,
   runPhaseLabel,
@@ -16,6 +16,12 @@ import {
   type WorkLog,
 } from '@momo/core/features/agents/workLog';
 import {
+  runReportChipParts,
+  runReportChipText,
+  runReportSummary,
+  type RunReportSummary,
+} from '@momo/core/features/agents/workReport';
+import {
   requestBundleState,
   REQUEST_BUNDLE_FACE,
   runBundleSnapshot,
@@ -28,6 +34,7 @@ import {useQuery} from '@tanstack/react-query';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -36,6 +43,7 @@ import {
   View,
 } from 'react-native';
 import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
+import {CONV_ICON_SIZE, CONV_ICONS} from '../../design/icons';
 import {
   font,
   line,
@@ -44,6 +52,7 @@ import {
   type Palette,
 } from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useRealtime} from '../../realtime/RealtimeProvider';
 import {useSession} from '../../session/useSession';
 import {Avatar} from '../conversation/Avatar';
@@ -53,6 +62,7 @@ import {
   runLedgerQueryOptions,
   useRunLedgerFrames,
 } from './runLedgerQuery';
+import {RunLedgerSheet} from './RunLedgerSheet';
 
 /**
  * 한 줄과 표적을 함께 예약해요. #4620 입력창 레일(`ActivityRail`)과 표적은 같은 44예요. 높이는 연결하지 않았어요: 레일은 도크의 흐름 안에서
@@ -85,34 +95,31 @@ function requestThinkingWord(progress: AgentRunProgress): string {
   ].word;
 }
 
-export function requestThinkingSummary(
+/** 아직 원장을 못 읽었을 때의 요약 재료: 시간만 말하고 에이전트 보고 숫자는 지어내지 않아요(웹 `RequestThoughtLine`과 같아요). */
+const NO_REPORT: RunReportSummary = {stages: 0, kinds: []};
+
+/**
+ * 끝난 요청의 요약 칩 재료(#4658, 웹 `RequestThoughtLine`과 같은 말): 「13분 · 단계 6 · 명령 12」 + 꼬리표 「에이전트 보고」. 걸린 시간은
+ * 서버 시계의 사실이고 그 뒤 숫자는 에이전트가 스스로 알린 것이라 끝에 꼬리표가 붙어요. oort가 잰 도구 호출은 출처가 달라 섞지
+ * 않아요(#4654). 열린 run이거나 끝난 시각을 모르면 null이에요(시간을 지어내지 않아요).
+ */
+export function requestThinkingChip(
   progress: AgentRunProgress,
-  events?: readonly AgentRunLedgerEvent[],
-): string {
-  if (thinkingActive(progress)) {
-    return requestThinkingWord(progress);
+  report: RunReportSummary | null,
+  formatMessage: ReturnType<typeof useFormatMessage>,
+): {body: string; tail: string | null; text: string} | null {
+  if (isOpenRunPhase(progress.phase) || progress.finishedAtMs === undefined) {
+    return null;
   }
-  const parts: string[] = [requestThinkingWord(progress)];
-  if (
-    progress.startedAtMs !== undefined &&
-    progress.finishedAtMs !== undefined
-  ) {
-    const minutes = Math.floor(
-      Math.max(0, progress.finishedAtMs - progress.startedAtMs) / 60_000,
-    );
-    parts.push(minutes < 1 ? '1분 미만 작업' : `${minutes}분 작업`);
-  }
-  if (events !== undefined) {
-    // 원장이 잘 모르는 새 종류도 rawKind로 보존해요. 없는 수를 run.stepCount로 추측하지 않아요.
-    const tools = events.filter(
-      event => event.rawKind === 'agent_port.call',
-    ).length;
-    const approvals = events.filter(
-      event => event.kind === 'approval_requested',
-    ).length;
-    parts.push(`도구 ${tools}`, `승인 ${approvals}`);
-  }
-  return parts.join(' · ');
+  const duration = Math.max(
+    0,
+    progress.finishedAtMs - (progress.startedAtMs ?? progress.createdAtMs),
+  );
+  const summary = report ?? NO_REPORT;
+  return {
+    ...runReportChipParts(duration, summary, formatMessage),
+    text: runReportChipText(duration, summary, formatMessage),
+  };
 }
 
 export function RequestThinkingLine({
@@ -157,9 +164,12 @@ function ThinkingBody({
   height: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const {workspaceId} = useSession();
   const realtime = useRealtime();
   const [expanded, setExpanded] = useState(false);
+  // 끝난 요청은 줄을 눌러 펼치지 않고 작업 기록 시트를 연다(웹은 작업 패널을 연다). 과정은 시트에 있다.
+  const [recordOpen, setRecordOpen] = useState(false);
   const active = thinkingActive(progress);
   const query = useQuery({
     ...runLedgerQueryOptions(workspaceId, progress.id.toLowerCase()),
@@ -180,12 +190,18 @@ function ThinkingBody({
       }),
     [query.data],
   );
-  const summary = requestThinkingSummary(progress, query.data?.events);
   const state = requestBundleState({
     ...runBundleSnapshot(progress),
     run: progress,
   });
   const phaseWord = requestThinkingWord(progress);
+  // 끝난 요청의 요약 칩(웹과 같은 말). 요약의 숫자는 에이전트가 말한 것만이다: 원장을 못 읽은 동안은 시간만 말한다.
+  const chip = requestThinkingChip(
+    progress,
+    query.data === undefined ? null : runReportSummary(query.data),
+    formatMessage,
+  );
+  const finished = !isOpenRunPhase(progress.phase);
   const name =
     memberFor(directory, progress.agentMemberId)?.displayName ?? '에이전트';
   const lastPhase = useRef<string | null>(null);
@@ -213,15 +229,26 @@ function ThinkingBody({
       : progress.phase === 'running' && stage !== ''
       ? stage
       : undefined;
+  // 끝난 요청이 끝났다는 말: 끝(done)은 확인 표시가 말하고, 그 밖의 끝(실패·거부·만료·취소)은 낱말이 줄 앞에 남는다(이 줄이 그 낱말을 말하는
+  // 유일한 자리인 경우가 있다 — 승인 거부·만료는 예외 줄이 서지 않는다).
+  const isDone = state === 'done';
+  const endWord = isDone ? '' : `${phaseWord} · `;
   return (
     <View>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={`${name} · ${summary}. 과정 ${
-          expanded ? '접기' : '펼치기'
-        }`}
-        accessibilityState={{expanded}}
-        onPress={() => setExpanded(value => !value)}
+        accessibilityLabel={
+          chip !== null
+            ? `${name} · ${phaseWord} · ${chip.text}`
+            : `${name} · ${phaseWord}${finished ? '' : `. 과정 ${expanded ? '접기' : '펼치기'}`}`
+        }
+        accessibilityHint={
+          finished ? formatMessage('timeline.agentRail.openRecord', {name}) : undefined
+        }
+        accessibilityState={finished ? undefined : {expanded}}
+        onPress={() =>
+          finished ? setRecordOpen(true) : setExpanded(value => !value)
+        }
         style={[styles.row, {height}]}
         testID="request-thinking-line"
       >
@@ -230,13 +257,45 @@ function ThinkingBody({
           memberId={progress.agentMemberId}
           size={line.label}
         />
-        <Text
-          numberOfLines={1}
-          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-          style={styles.lead}
-        >
-          {`${name} · ${summary}${detail ? ` · ${detail}` : ''}`}
-        </Text>
+        {chip !== null && isDone ? (
+          <Image
+            source={CONV_ICONS.check}
+            style={styles.check}
+            accessible={false}
+            testID="request-thinking-done"
+          />
+        ) : null}
+        {chip !== null ? (
+          // 보이는 글은 몸과 꼬리표로 나눠 그린다: 좁은 칸에서 몸이 줄임표를 받아도 「에이전트 보고」(숫자가 누구의 말인지)는 남는다.
+          <View style={styles.chipLine}>
+            <Text
+              numberOfLines={1}
+              maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+              style={styles.chipBody}
+              testID="request-thinking-chip-body"
+            >
+              {`${name} · ${endWord}${chip.body}`}
+            </Text>
+            {chip.tail !== null ? (
+              <Text
+                numberOfLines={1}
+                maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                style={styles.chipTail}
+                testID="request-thinking-chip-tail"
+              >
+                {` · ${chip.tail}`}
+              </Text>
+            ) : null}
+          </View>
+        ) : (
+          <Text
+            numberOfLines={1}
+            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+            style={styles.lead}
+          >
+            {`${name} · ${phaseWord}${detail ? ` · ${detail}` : ''}`}
+          </Text>
+        )}
         {active &&
         realtime.status === 'connected' &&
         realtime.subscriptionsWanted &&
@@ -245,7 +304,8 @@ function ThinkingBody({
           <RespondingDots />
         ) : null}
       </Pressable>
-      {expanded ? (
+      {/* 펼친 채로 run이 끝나면 인라인 과정은 접힌다: 끝난 요청의 줄은 눌러서 시트를 여는 입구이고(과정은 시트에 있다), 줄을 다시 눌러 접을 길이 없다. */}
+      {expanded && !finished ? (
         <View style={styles.process} testID="request-thinking-process">
           <Sentence style={styles.meta}>{RUN_LEDGER_LIMIT_SENTENCE}</Sentence>
           {query.isLoading ? (
@@ -272,6 +332,13 @@ function ThinkingBody({
             <LiveThought key={progress.id} progress={progress} />
           ) : null}
         </View>
+      ) : null}
+      {recordOpen ? (
+        <RunLedgerSheet
+          progress={progress}
+          directory={directory}
+          onClose={() => setRecordOpen(false)}
+        />
       ) : null}
     </View>
   );
@@ -349,6 +416,26 @@ const buildStyles = (color: Palette) =>
       fontSize: font.meta,
       lineHeight: line.meta,
       color: color.textMuted,
+    },
+    // 끝난 요청의 요약 칩: 몸은 줄어들 수 있고 꼬리표는 줄지 않는다.
+    chipLine: {flex: 1, flexDirection: 'row', alignItems: 'baseline'},
+    chipBody: {
+      flexShrink: 1,
+      fontSize: font.meta,
+      lineHeight: line.meta,
+      color: color.textMuted,
+      fontVariant: ['tabular-nums'],
+    },
+    chipTail: {
+      flexShrink: 0,
+      fontSize: font.meta,
+      lineHeight: line.meta,
+      color: color.textMuted,
+    },
+    check: {
+      width: CONV_ICON_SIZE.check,
+      height: CONV_ICON_SIZE.check,
+      tintColor: color.ok,
     },
     process: {gap: space.sm, paddingVertical: space.sm},
     meta: {
