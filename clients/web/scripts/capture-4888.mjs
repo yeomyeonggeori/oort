@@ -216,7 +216,9 @@ function check(name, ok, detail = "") {
 async function shot(page, tag, name) {
   if (!SHOTS) return;
   mkdirSync(OUT_DIR, { recursive: true });
-  await page.waitForTimeout(250);
+  // 직전 클릭이 남긴 호버(헤더 툴팁·행 호버 툴바)가 사진에 찍히지 않게 포인터를 치우고 가라앉힌다.
+  await page.mouse.move(2, 2);
+  await page.waitForTimeout(450);
   await page.screenshot({ path: resolve(OUT_DIR, `4888-${tag.replace(/\s+/g, "-")}-${name}.png`) });
 }
 
