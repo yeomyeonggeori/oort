@@ -62,7 +62,7 @@
     "clients/mobile/src/features/attachments/AttachMenu.tsx": 44,
     "clients/mobile/src/features/attachments/AttachmentList.tsx": 45,
     "clients/mobile/src/features/attachments/AttachmentTray.tsx": 33,
-    "clients/mobile/src/features/attachments/AttachmentViewer.tsx": 98,
+    "clients/mobile/src/features/attachments/AttachmentViewer.tsx": 97,
     "clients/mobile/src/features/attachments/PhotoGridCard.tsx": 62,
     "clients/mobile/src/features/attachments/PhotoMorphFrame.tsx": 24,
     "clients/mobile/src/features/attachments/StageHero.tsx": 2,

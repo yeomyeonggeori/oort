@@ -250,11 +250,16 @@ function DownloadStatus({
   state,
   saving,
   lastBy,
+  onRetrySave,
+  gesture,
 }: {
   state: DownloadState;
   saving: SaveAttachment;
   /** 마지막으로 누른 것 — 카드(공유)와 ↓(저장)의 상태가 한 줄을 나눠 쓴다. */
   lastBy: 'save' | 'share';
+  /** 저장 실패 줄을 누르면 하는 일 — ↓ 와 같은 저장이다(`FileCard` 의 `onSave`). */
+  onRetrySave: (event?: GestureResponderEvent) => void;
+  gesture?: AttachmentGesture;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
@@ -262,7 +267,8 @@ function DownloadStatus({
   const key = savedLast ? saveNoticeKey(saving.state) : null;
   if (key !== null) {
     const text = formatMessage(key);
-    // 거부는 눌린다(설정 열기). 나머지는 읽기만 한다 — 실패는 ↓ 를 다시 누르면 다시 시도한다.
+    // 「· 동사」 줄은 누르면 그 일을 한다(#5273): 거부 → 설정 열기, 실패 → 다시 저장. 나머지(하는 중·영수증)는 읽기만 한다.
+    // 저장 실패 줄을 눌러도 카드가 쥐고 있던 탭(공유 시트)이 열리지 않는다 — 이 줄이 탭을 쥔다.
     if (saving.state.status === 'denied') {
       return (
         <Pressable
@@ -278,11 +284,26 @@ function DownloadStatus({
         </Pressable>
       );
     }
+    if (saving.state.status === 'failed') {
+      return (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={text}
+          hitSlop={{ top: slopTo(line.meta), bottom: slopTo(line.meta) }}
+          // ↓ 와 같은 규율: 길게 누르기는 메시지 메뉴의 것이고, 그 뒤에 따라오는 탭은 저장을 시작하지 않는다(`onSave`).
+          {...gesture?.pressTiming}
+          onLongPress={gesture?.onLongPress}
+          onPress={onRetrySave}
+          testID="attachment-save-retry"
+        >
+          <Text style={styles.downloadFailed} testID="attachment-save-status">
+            {text}
+          </Text>
+        </Pressable>
+      );
+    }
     return (
-      <Text
-        style={saving.state.status === 'failed' ? styles.downloadFailed : styles.downloadBusy}
-        testID="attachment-save-status"
-      >
+      <Text style={styles.downloadBusy} testID="attachment-save-status">
         {text}
       </Text>
     );
@@ -442,7 +463,13 @@ function FileCard({
             {attachmentMetaLine(attachment)}
           </Text>
           {onPlay === undefined ? (
-            <DownloadStatus state={download} saving={saving} lastBy={lastBy} />
+            <DownloadStatus
+              state={download}
+              saving={saving}
+              lastBy={lastBy}
+              onRetrySave={onSave}
+              gesture={gesture}
+            />
           ) : null}
         </View>
         {onPlay !== undefined ? (

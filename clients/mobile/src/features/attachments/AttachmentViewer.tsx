@@ -497,6 +497,57 @@ export function AttachmentViewer({
   );
 }
 
+interface NoticePillProps {
+  text: string;
+  /** 실패의 알약은 위험색 글자로 선다. */
+  failed: boolean;
+  /** 있으면 누르는 알약이다. 알약 안의 「· 동사」(「· 설정 열기」「· 다시 시도」)는 눌러서 그 일을 한다. */
+  onPress?: () => void;
+  /** 누르는 알약(`Pressable`)의 testID. 글자의 `attachment-viewer-status` 는 늘 그대로다. */
+  testID?: string;
+}
+
+/**
+ * 아래 조작 덩어리의 상태 알약(내려받는 중 · 사진에 저장했어요 · 저장하지 못했어요 · 사진 접근이 꺼져 있어요 …).
+ *
+ * `onPress` 가 없으면 읽기만 한다(`pointerEvents="none"` — 탭이 사진으로 내려가 조작 숨김·보임이 된다). `onPress` 가 있으면 눌린다: 같은 모양의
+ * 알약 둘이 하나는 눌리고 하나는 탭이 사진으로 새서 조작을 숨기는 일이 없게 눌리는 알약은 한 곳에서 선다(#5273). 알약은 글줄 높이라 누르는 면 44 는
+ * `hitSlop` 이 채운다(`NOTICE_HEIGHT`).
+ */
+function NoticePill({ text, failed, onPress, testID }: NoticePillProps): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  if (onPress === undefined) {
+    return (
+      <Text
+        pointerEvents="none"
+        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+        style={[styles.notice, failed && styles.noticeFailed]}
+        testID="attachment-viewer-status"
+      >
+        {text}
+      </Text>
+    );
+  }
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={text}
+      hitSlop={{ top: slopTo(NOTICE_HEIGHT), bottom: slopTo(NOTICE_HEIGHT) }}
+      onPress={onPress}
+      style={styles.noticeHit}
+      testID={testID}
+    >
+      <Text
+        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+        style={[styles.notice, failed && styles.noticeFailed]}
+        testID="attachment-viewer-status"
+      >
+        {text}
+      </Text>
+    </Pressable>
+  );
+}
+
 function ViewerFrame({
   workspaceId,
   channelId,
@@ -816,6 +867,28 @@ function ViewerFrame({
   // 저장 알약의 글. [공유]를 마지막으로 눌렀으면 저장의 알약은 서지 않는다(남은 영수증·실패가 공유의 알약을 가리지 않게).
   const saveKey = pressedBy === 'save' ? saveNoticeKey(saving.state) : null;
   const saveNotice = saveKey === null ? null : formatMessage(saveKey);
+  // 상태 알약은 마지막으로 누른 단추의 일을 말한다. 저장의 영수증만 걷히고, 실패·거부는 다음 저장이 지울 때까지 선다.
+  // 알약 안의 「· 동사」는 누르면 그 일을 한다(#5273): 거부 → 설정 앱, 저장 실패 → 다시 저장, 내려받기(공유) 실패 → 다시 공유.
+  // 같은 모양의 알약이 어떤 것은 눌리고 어떤 것은 탭이 사진으로 새서 조작을 숨기지 않는다. 하는 중·영수증은 읽기만 한다.
+  let pill: NoticePillProps | null = null;
+  if (saveNotice !== null) {
+    pill =
+      saving.state.status === 'denied'
+        ? { text: saveNotice, failed: false, onPress: saving.openSettings, testID: 'attachment-viewer-save-settings' }
+        : saving.state.status === 'failed'
+          ? { text: saveNotice, failed: true, onPress: save, testID: 'attachment-viewer-save-retry' }
+          : { text: saveNotice, failed: false };
+  } else if (pressedBy === 'share' && download.status !== 'idle') {
+    pill =
+      download.status === 'downloading'
+        ? { text: ATTACH_COPY.downloading, failed: false }
+        : {
+            text: `${ATTACH_COPY.downloadFailed} · ${ATTACH_COPY.retry}`,
+            failed: true,
+            onPress: sendOut,
+            testID: 'attachment-viewer-share-retry',
+          };
+  }
 
   const hasSender = senderName !== undefined && senderName.trim() !== '';
   const hasTime = sentAtMs !== undefined && Number.isFinite(sentAtMs);
@@ -1022,53 +1095,7 @@ function ViewerFrame({
               durationHintSeconds={videoHandle.durationHintSeconds}
             />
           ) : null}
-          {/* 상태 알약 — 마지막으로 누른 단추의 일을 말한다. 저장의 영수증만 걷히고, 실패·거부는 다음 저장이 지울 때까지 선다. */}
-          {saveNotice !== null ? (
-            saving.state.status === 'denied' ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={saveNotice}
-                hitSlop={{ top: slopTo(NOTICE_HEIGHT), bottom: slopTo(NOTICE_HEIGHT) }}
-                onPress={saving.openSettings}
-                style={styles.noticeHit}
-                testID="attachment-viewer-save-settings"
-              >
-                <Text
-                  maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-                  style={styles.notice}
-                  testID="attachment-viewer-status"
-                >
-                  {saveNotice}
-                </Text>
-              </Pressable>
-            ) : (
-              <Text
-                pointerEvents="none"
-                maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-                style={[
-                  styles.notice,
-                  saving.state.status === 'failed' && styles.noticeFailed,
-                ]}
-                testID="attachment-viewer-status"
-              >
-                {saveNotice}
-              </Text>
-            )
-          ) : pressedBy === 'share' && download.status !== 'idle' ? (
-            <Text
-              pointerEvents="none"
-              maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-              style={[
-                styles.notice,
-                download.status === 'failed' && styles.noticeFailed,
-              ]}
-              testID="attachment-viewer-status"
-            >
-              {download.status === 'downloading'
-                ? ATTACH_COPY.downloading
-                : `${ATTACH_COPY.downloadFailed} · ${ATTACH_COPY.retry}`}
-            </Text>
-          ) : null}
+          {pill !== null ? <NoticePill {...pill} /> : null}
           {total > 1 ? (
             <>
               <ScrollView

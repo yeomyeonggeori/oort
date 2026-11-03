@@ -46,6 +46,7 @@ import {StageHero} from '../src/features/attachments/StageHero';
 import { rememberAttachmentSize, resetAttachmentContentForTest } from '../src/features/attachments/content';
 import { DISMISS_DISTANCE_PT } from '../src/features/attachments/viewerDismiss';
 import {
+  NOTICE_HEIGHT,
   VIEWER,
   VIEWER_GLASS_TONE,
   VIEWER_STAGE,
@@ -1541,6 +1542,47 @@ describe('⑦ 저장은 사진 보관함에 추가하고, 공유는 공유 시�
     expect(mediaLibrary.__state.saved).toHaveLength(1);
   });
 
+  it('저장 실패 알약의 「다시 시도」는 눌린다 — 누르면 저장을 다시 한다(탭이 사진으로 새서 조작이 숨지 않는다) (#5273, 검수 4회차 M1)', async () => {
+    granted();
+    mediaLibrary.__state.saveFailure = new Error('boom');
+    await mount();
+    fireEvent.press(save());
+    await waitFor(() => expect(status()).toBe('저장하지 못했어요 · 다시 시도'));
+    expect(mediaLibrary.saveToLibraryAsync).toHaveBeenCalledTimes(1);
+    // 알약의 모양을 지금 읽어 둔다(저장이 시작되면 이 알약은 사라진다). 아래 단정은 누른 결과를 본 뒤에 한다.
+    const pill = screen.queryByTestId('attachment-viewer-save-retry');
+    const shape = pill === null ? null : { role: pill.props.accessibilityRole, label: pill.props.accessibilityLabel, slop: pill.props.hitSlop };
+
+    // 사람이 누르는 것은 보이는 글자다. 예전에는 이 탭이 사진으로 내려가 조작이 숨었고 저장은 다시 일어나지 않았다.
+    mediaLibrary.__state.saveFailure = null;
+    fireEvent.press(screen.getByTestId('attachment-viewer-status'));
+    await waitFor(() => expect(status()).toBe('사진에 저장했어요'));
+    expect(mediaLibrary.saveToLibraryAsync).toHaveBeenCalledTimes(2);
+    expect(mediaLibrary.__state.saved).toHaveLength(1);
+    // 하는 중·영수증은 읽기만 한다(눌리는 알약이 아니다).
+    expect(screen.queryByTestId('attachment-viewer-save-retry')).toBeNull();
+
+    // 눌린 알약은 바로 옆 「· 설정 열기」 알약과 같은 역할이다: 누르는 단추, 누르는 면은 44 까지.
+    expect(shape?.role).toBe('button');
+    expect(shape?.label).toBe('저장하지 못했어요 · 다시 시도');
+    expect(NOTICE_HEIGHT + (shape?.slop.top ?? 0) + (shape?.slop.bottom ?? 0)).toBeGreaterThanOrEqual(TOUCH_TARGET);
+  });
+
+  it('내려받기(공유) 실패 알약의 「다시 시도」도 눌린다 — 누르면 다시 내려받아 공유 시트를 연다 (#5273)', async () => {
+    const sheet = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as never);
+    sheet.mockRejectedValueOnce(new Error('boom'));
+    await mount();
+    fireEvent.press(share());
+    await waitFor(() => expect(status()).toBe('내려받기 실패 · 다시 시도'));
+    expect(sheet).toHaveBeenCalledTimes(1);
+    const role = screen.queryByTestId('attachment-viewer-share-retry')?.props.accessibilityRole;
+
+    fireEvent.press(screen.getByTestId('attachment-viewer-status'));
+    await waitFor(() => expect(sheet).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByTestId('attachment-viewer-status')).toBeNull());
+    expect(role).toBe('button');
+  });
+
   it('공유는 지금처럼 내려받아 공유 시트를 열고 사진 보관함에 닿지 않는다', async () => {
     const sheet = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as never);
     await mount();
@@ -1860,7 +1902,9 @@ describe('⑪ 조작 뒤의 스크림과 유리 틴트 — 밝은 사진 위에�
     jest.spyOn(Share, 'share').mockRejectedValueOnce(new Error('boom'));
     await mount();
     fireEvent.press(screen.getByTestId('attachment-viewer-share'));
-    const notice = await screen.findByTestId('attachment-viewer-status');
+    // 「내려받는 중」 다음에 실패 알약이 선다. 실패 알약은 눌리는 알약이라 새 뿌리 아래에 다시 서므로(#5273) 먼저 잡은 노드를 들고 있지 않고 실패가 선 뒤에 읽는다.
+    await waitFor(() => expect(screen.getByTestId('attachment-viewer-status').props.children).toBe('내려받기 실패 · 다시 시도'));
+    const notice = screen.getByTestId('attachment-viewer-status');
     const style = flatten(notice.props.style);
     expect(style.backgroundColor).toBe(VIEWER_GLASS_TONE.fallback);
     expect(contrast(composite(VIEWER_STAGE.danger, BLACK), composite(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(4.5);
