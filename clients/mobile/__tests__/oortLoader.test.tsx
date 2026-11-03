@@ -3,7 +3,6 @@ import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
-import NetInfo from '@react-native-community/netinfo';
 import {AccessibilityInfo, Animated, StyleSheet} from 'react-native';
 
 import {OortLoader} from '../src/design/brand/OortLoader';
@@ -29,10 +28,14 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {Booting} from '../App';
 import {FixedScheme} from '../src/design/theme';
 import {darkPalette, lightPalette} from '../src/design/tokens';
+import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
 import {
-  connectionBannerText,
-  ConversationHeader,
-} from '../src/features/conversation/ConversationHeader';
+  connectedScene,
+  connectingScene,
+  offlineScene,
+  realtimeDownScene,
+  type BandScene,
+} from './fixtures/connectionBand';
 
 // =============================================================================
 // 오르트 로더 (#3961, 시안 A 「공전」) — 폰.
@@ -839,26 +842,30 @@ describe('컴포넌트 — 당김(progress) · #3962 가 쓰고 #3992 가 각도
 // ---- 3b. 배선: 연결 띠와 첫 로딩 ---------------------------------------------------------
 
 describe('배선 — 연결 띠(대화 머리)와 첫 로딩(Booting)', () => {
-  const header = (railStatus: 'connected' | 'connecting' | 'disconnected') =>
-    render(
-      <ConversationHeader
-        title="agent-lab"
-        kind="public"
-        directory={makeDirectory([])}
-        onBack={() => {}}
-        railStatus={railStatus}
-      />,
-    );
+  // 띠가 말하는 것은 코어 연결 상태 모델이 정한다(#5222). 장면은 실제 모델에 사건을 먹여 짓는다(`fixtures/connectionBand.ts`).
+  const headerElement = (scene: BandScene) => (
+    <ConversationHeader
+      title="agent-lab"
+      kind="public"
+      directory={makeDirectory([])}
+      onBack={() => {}}
+      band={scene.band}
+    />
+  );
+  const header = (scene: BandScene) => render(headerElement(scene));
 
-  it.each(['connecting', 'disconnected'] as const)(
-    '연결 띠(%s): 문장은 그대로이고 곁에서 로더가 돈다 — 옛 8pt 점은 없다',
-    async status => {
+  it.each([
+    ['연결 중', connectingScene, '연결 중…'],
+    ['실시간만 끊김', realtimeDownScene, '실시간 연결이 끊겼어요'],
+  ] as const)(
+    '연결 띠(%s): 곁에서 로더가 돈다 — 옛 8pt 점은 없다',
+    async (_name, make, sentence) => {
       reduceMotion(false);
       const {handles} = spyOnLoop();
-      header(status);
+      header(make());
       await settle();
       const banner = screen.getByTestId('connection-banner');
-      expect(banner).toHaveTextContent(connectionBannerText(status) as string);
+      expect(banner).toHaveTextContent(sentence);
       const loader = screen.getByTestId('connection-loader', HIDDEN);
       expect(loader).toBeTruthy();
       // 띠 안에 있고, 20pt 정사각이다.
@@ -867,31 +874,21 @@ describe('배선 — 연결 띠(대화 머리)와 첫 로딩(Booting)', () => {
     },
   );
 
-  it('기기가 오프라인이면(NetInfo) 같은 마크가 멈춘다 — 웹 browser-offline 과 같은 규칙, 문장은 그대로', async () => {
+  it('기기가 오프라인이면 같은 마크가 멈춘다 — 웹 browser-offline 과 같은 규칙. 문장은 「오프라인이에요」로 원인을 말한다(#5222)', async () => {
     reduceMotion(false);
     const {handles} = spyOnLoop();
-    header('disconnected');
+    const view = header(realtimeDownScene());
     await settle();
     expect(live(handles)).toHaveLength(1);
-    act(() => {
-      (NetInfo as unknown as {__emit: (state: unknown) => void}).__emit({
-        isConnected: false,
-        isInternetReachable: false,
-      });
-    });
+    view.rerender(headerElement(offlineScene()));
     await settle();
-    // 도는 반복은 멈췄고(정지), 띠의 문장은 그대로다.
+    // 도는 반복은 멈췄고(정지), 띠의 문장은 원인을 말한다. 위성은 홈에 꽂힌 자세(-45deg)다.
     expect(live(handles)).toHaveLength(0);
-    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('오프라인이에요');
     const satellite = flatten(screen.getByTestId('connection-loader-satellite', HIDDEN).props.style);
     expect((satellite.transform as Array<Record<string, unknown>>)[0]).toEqual({rotate: '-45deg'});
-    // 다시 온라인이면 다시 돈다.
-    act(() => {
-      (NetInfo as unknown as {__emit: (state: unknown) => void}).__emit({
-        isConnected: true,
-        isInternetReachable: true,
-      });
-    });
+    // 다시 온라인이면(실시간만 끊김으로 돌아오면) 다시 돈다.
+    view.rerender(headerElement(realtimeDownScene()));
     await settle();
     expect(live(handles)).toHaveLength(1);
   });
@@ -899,7 +896,7 @@ describe('배선 — 연결 띠(대화 머리)와 첫 로딩(Booting)', () => {
   it('연결됐으면 띠도 로더도 없다', async () => {
     reduceMotion(false);
     const {handles} = spyOnLoop();
-    header('connected');
+    header(connectedScene());
     await settle();
     expect(screen.queryByTestId('connection-banner')).toBeNull();
     expect(screen.queryByTestId('connection-loader', HIDDEN)).toBeNull();
@@ -909,18 +906,10 @@ describe('배선 — 연결 띠(대화 머리)와 첫 로딩(Booting)', () => {
   it('연결되면 띠가 사라지면서 로더의 반복이 멈춘다(떠 있는 반복이 남지 않는다)', async () => {
     reduceMotion(false);
     const {handles} = spyOnLoop();
-    const view = header('connecting');
+    const view = header(connectingScene());
     await settle();
     expect(live(handles)).toHaveLength(1);
-    view.rerender(
-      <ConversationHeader
-        title="agent-lab"
-        kind="public"
-        directory={makeDirectory([])}
-        onBack={() => {}}
-        railStatus="connected"
-      />,
-    );
+    view.rerender(headerElement(connectedScene()));
     await settle();
     expect(live(handles)).toHaveLength(0);
   });
