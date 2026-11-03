@@ -878,9 +878,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.header_fit == 'true'
     runs-on: ubuntu-latest
-    # 행 방지용 상한. 로컬 실측(맥, `npm --prefix clients/web run gate:channel-header-fit`, 빌드 5초 포함): 2분 34초
-    # (부하 평균 25 안팎)와 3분 8초(부하 평균이 50~280으로 튄 때). 느린 쪽 ×3 ≈ 9분 30초. 러너의 설치(`npm ci` 둘)와
-    # 크로미엄·OS 의존 내려받기 몫(1~2분)을 더하고, 첫 러너 실행의 불확실성(리눅스 글꼴, 코어 수)을 남겨 15분으로 둔다.
+    # 행 방지용 상한. 로컬 실측(맥, `npm --prefix clients/web run gate:channel-header-fit`, 빌드 포함) 세 번: 2분 34초
+    # (부하 평균 25 안팎), 3분 8초(부하 평균이 50~280으로 튄 때), 7분 26초(부하 평균 43~67에 다른 시험을 병행). 평균 4분
+    # 23초, ×3 ≈ 13분. 러너의 설치(`npm ci` 둘)와 크로미엄·OS 의존 내려받기 몫(1~2분)을 더하고, 첫 러너 실행의 불확실성
+    # (리눅스 글꼴, 코어 수)을 남겨 15분으로 둔다.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
