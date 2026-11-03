@@ -193,9 +193,11 @@ import {
 //
 // ## 그림 비율에 맞는 최대 배율 (#5224) — `viewerZoom.ts`
 //
-// 보통 사진은 그대로다(최대 3배·두 번 탭 2배). 채움 배율(창을 가득 채우는 배율)이 5 를 넘는 **아주 긴 그림**(세로 화면에서 약 2.3:1 이상 — 21:9 파노라마·긴 캡처)만
-// 최대 배율을 채움 배율까지(상한 48) 올리고 두 번 탭도 거기로 보낸다(가로로 긴 그림은 높이 맞춤, 세로로 긴 그림은 폭 맞춤 — 끌어서 읽는다). 다시 두 번 탭하면 처음 크기다.
-// 2072×110 은 폭에 맞추면 높이 약 21pt 라 3배(62pt)로는 읽을 수 없고, 41배면 화면 높이를 채운다.
+// 보통 사진은 그대로다(최대 3배·두 번 탭 2배). 채움 배율(창을 가득 채우는 배율)이 5 를 넘는 **아주 긴 그림**(세로 화면에서 약 2.3:1 이상 — 21:9 파노라마·긴 캡처)은
+//   · 최대 배율(핀치 상한)이 채움 배율까지(상한 48) 올라간다 — 2072×110 은 폭에 맞추면 높이 약 21pt 라 3배(62pt)로는 읽을 수 없고, 41배면 화면 높이를 채운다.
+//   · 두 번 탭은 **원본 글자가 또렷하게 남는 크기까지만** 키운다(owner 결정, 2단계): 원본 1픽셀 = 화면 1pt 가 되는 배율(2072×110 은 약 5.15배 — 보이는 높이 110pt)을
+//     `clamp(…, 2, 최대 배율)` 로 자른다. 더 크게는 두 손가락으로 벌린다. 원본 크기는 불러온 그림의 크기(`natural`)이고 모르면 높이·폭 맞춤까지 간다.
+//   다시 두 번 탭하면 처음 크기다. 가로로 긴 그림은 높이, 세로로 긴 그림은 폭이 기준이다 — 끌어서 읽는다.
 //
 // ## Hero와 확대의 경계 (#4775)
 //
@@ -298,8 +300,9 @@ function ViewerPage({
     const zoomTo = (rect: ZoomRect, animated: boolean) =>
       zoomRef.current?.scrollResponderZoomTo({ ...rect, animated }, animated);
     const size = {width: fitted.width, height: fitted.height};
-    // 보통 사진은 2배, 아주 긴 그림은 화면을 채우는 배율(높이 맞춤·폭 맞춤 — `viewerZoom.ts`). 다시 두 번 탭하면 처음 크기다.
-    const scale = doubleTapScale(size, {width, height});
+    // 보통 사진은 2배, 아주 긴 그림은 원본 1픽셀 = 화면 1pt 까지(원본 크기 = 불러온 그림의 크기 `natural`, 모르면 높이·폭 맞춤까지 — `viewerZoom.ts`).
+    // 다시 두 번 탭하면 처음 크기다.
+    const scale = doubleTapScale(size, {width, height}, natural);
     return {
       toggleAt: (point, animated) => {
         if (zoomedRef.current) zoomTo(fullRect(size), animated);
@@ -310,7 +313,7 @@ function ViewerPage({
         if (zoomedRef.current) zoomTo(fullRect(size), animated);
       },
     };
-  }, [fitted.x, fitted.y, fitted.width, fitted.height, ready, width, height]);
+  }, [fitted.x, fitted.y, fitted.width, fitted.height, ready, width, height, natural]);
   useEffect(() => {
     const pages = zoomPages.current; // 모음 자체는 바뀌지 않는다 — 칸만 채우고 비운다
     pages[position] = handle;

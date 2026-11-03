@@ -2470,33 +2470,69 @@ describe('⑬ 화면 어디서든 두 손가락 확대 — 빈 곳 받이와 아
     expect(fitted.height * max).toBeCloseTo(WINDOW.height, 6); // 끝까지 키우면 그림 높이가 창 높이를 채운다
   });
 
-  it('아주 긴 그림은 두 번 탭이 높이 맞춤으로 가고, 다시 두 번 탭하면 처음 크기로 돌아온다 — 그림 밖 빈 곳을 눌러도 같다', async () => {
+  it('아주 긴 그림의 두 번 탭은 원본 1픽셀 = 화면 1pt 까지만 키우고(2072×110 → 보이는 높이 110pt), 다시 두 번 탭하면 처음 크기로 돌아온다 — 그림 밖 빈 곳을 눌러도 같다', async () => {
     useWindow();
     rememberAttachmentSize('a', 2072, 110);
     await mount({ images: first });
     const fitted = fittedOf();
-    const fill = WINDOW.height / fitted.height;
-    // 그림 밖 빈 곳(위쪽) 두 번 탭 → 높이 맞춤. 사각형은 맞춤 사각형을 `fill` 로 나눈 크기이고 탭한 가로 위치가 가운데 온다.
+    const fill = WINDOW.height / fitted.height; // 화면 높이를 채우는 배율(약 37.7) — 최대 배율이고 두 번 탭은 거기까지 가지 않는다
+    const native = 2072 / WINDOW.width; // 원본 1px = 1pt (약 5.18)
+    expect(native).toBeLessThan(fill);
+    // 그림 밖 빈 곳(위쪽) 두 번 탭 → 원본 크기. 사각형은 맞춤 사각형을 `native` 로 나눈 크기이고 탭한 가로 위치가 가운데 온다.
     const tapX = 300;
     afterTapWindow(() => {
       tap(blank(), tapX, 100);
       tap(blank(), tapX, 100);
     });
     const rect = lastRect();
-    expect(rect.width).toBeCloseTo(fitted.width / fill, 9);
-    expect(rect.height).toBeCloseTo(fitted.height / fill, 9);
+    expect(rect.width).toBeCloseTo(fitted.width / native, 9);
+    expect(rect.height).toBeCloseTo(fitted.height / native, 9);
     expect(rect.x + rect.width / 2).toBeCloseTo(tapX, 9);
-    // 네이티브는 사각형을 창에 맞춰 키운다 — 그 배율이 곧 높이 맞춤이다.
-    expect(Math.min(WINDOW.width / rect.width, WINDOW.height / rect.height)).toBeCloseTo(fill, 6);
+    // 네이티브는 사각형을 창에 맞춰 키운다 — 그 배율이 곧 원본 크기다: 보이는 높이 = 원본 높이 110(pt), 보이는 폭 = 원본 폭 2072(pt).
+    const reached = Math.min(WINDOW.width / rect.width, WINDOW.height / rect.height);
+    expect(reached).toBeCloseTo(native, 6);
+    expect(fitted.height * reached).toBeCloseTo(110, 6);
+    expect(fitted.width * reached).toBeCloseTo(2072, 6);
     expect(zoomTo()).toHaveBeenLastCalledWith(expect.objectContaining({ animated: true }), true);
 
     // 네이티브가 확대를 알린 뒤 다시 두 번 탭 → 처음 크기(맞춤 사각형 전체).
-    zoomBy(fill);
+    zoomBy(native);
     zoomTo().mockClear();
     afterTapWindow(() => {
       tap(photo(), 200, fitted.y + 5);
       tap(photo(), 200, fitted.y + 5);
     });
     expect(zoomTo()).toHaveBeenLastCalledWith({ x: 0, y: 0, width: fitted.width, height: fitted.height, animated: true }, true);
+  });
+
+  it('원본이 아주 커서(12000×900) 원본 크기 배율이 채움보다 크면 두 번 탭이 화면 높이를 채우는 데서 멈춘다', async () => {
+    useWindow();
+    rememberAttachmentSize('a', 12000, 900);
+    await mount({ images: first });
+    const fitted = fittedOf(); // 400×30
+    const fill = WINDOW.height / fitted.height; // 26.67
+    expect(12000 / WINDOW.width).toBeGreaterThan(fill); // 원본 크기 배율 30
+    afterTapWindow(() => {
+      tap(blank(), 200, 100);
+      tap(blank(), 200, 100);
+    });
+    const rect = lastRect();
+    expect(Math.min(WINDOW.width / rect.width, WINDOW.height / rect.height)).toBeCloseTo(fill, 6);
+    expect(fitted.height * fill).toBeCloseTo(WINDOW.height, 6);
+  });
+
+  it('원본이 작은 긴 그림(600×30)은 원본 크기 배율이 2 밑이라 보통 사진의 두 번 탭 2배로 간다', async () => {
+    useWindow();
+    rememberAttachmentSize('a', 600, 30);
+    await mount({ images: first });
+    const fitted = fittedOf();
+    expect(600 / WINDOW.width).toBeLessThan(2);
+    afterTapWindow(() => {
+      tap(blank(), 200, 100);
+      tap(blank(), 200, 100);
+    });
+    const rect = lastRect();
+    expect(rect.width).toBeCloseTo(fitted.width / 2, 9);
+    expect(rect.height).toBeCloseTo(fitted.height / 2, 9);
   });
 });

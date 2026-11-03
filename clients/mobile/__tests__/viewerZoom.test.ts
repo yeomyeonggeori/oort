@@ -5,6 +5,7 @@ import {
   isVeryLong,
   LONG_FILL_SCALE,
   maxZoomScale,
+  nativePointScale,
   ZOOM_CEILING,
   ZOOM_DOUBLE_TAP,
   ZOOM_MAX,
@@ -143,6 +144,118 @@ describe('아주 긴 그림 — 화면을 채우는 배율까지 키우고, 두 
       // 네이티브는 이 사각형을 창에 맞춰 키운다: 배율 = min(창폭/사각폭, 창높이/사각높이) — 의도한 배율과 같다.
       expect(Math.min(PHONE.width / zoom.width, PHONE.height / zoom.height)).toBeCloseTo(scale, 6);
       // 쪽 안에 머문다.
+      expect(zoom.x).toBeGreaterThanOrEqual(0);
+      expect(zoom.y).toBeGreaterThanOrEqual(0);
+      expect(zoom.x + zoom.width).toBeLessThanOrEqual(rect.width + 1e-9);
+      expect(zoom.y + zoom.height).toBeLessThanOrEqual(rect.height + 1e-9);
+    }
+  });
+});
+
+// =============================================================================
+// 2단계 (owner 결정 「나」, 2026-11-03): 아주 긴 그림의 두 번 탭은 **원본 글자가 또렷하게 남는 크기까지만** 키운다.
+//
+//   두 번 탭 목표 = 원본 1픽셀이 화면 1pt 가 되는 배율(가로로 긴 그림은 보이는 높이 = 원본 높이 px, 세로로 긴 그림은 폭) — 3배 화면에서는 원본 픽셀의 3배다.
+//   그 값을 `clamp(원본pt배율, 2, 채움 배율)` 로 자른다(밑은 보통 사진의 두 번 탭 2, 위는 높이·폭 맞춤).
+//   더 크게는 두 손가락으로 벌린다 — 최대 배율(핀치 상한)은 그대로 채움 배율이다(상한 48). 보통 사진은 그대로다.
+//   원본 크기를 모르면 1단계 규칙(채움)으로 돌아간다.
+// =============================================================================
+describe('아주 긴 그림의 두 번 탭 — 원본 1픽셀 = 화면 1pt 까지만 (2단계)', () => {
+  const sized = (width: number, height: number, viewport = PHONE) => {
+    const natural = {width, height};
+    return {natural, rect: fitted(natural, viewport), viewport};
+  };
+
+  it('2072×110: 원본 높이 110px → 두 번 탭하면 보이는 높이가 110pt 근처(약 5.15배) — 채움(약 41배)까지 가지 않는다', () => {
+    const {natural, rect} = sized(2072, 110);
+    const target = doubleTapScale(rect, PHONE, natural);
+    expect(target).toBeCloseTo(2072 / PHONE.width, 6); // 5.154…
+    expect(rect.height * target).toBeCloseTo(110, 6); // 원본 높이 px = 화면 높이 pt
+    expect(rect.width * target).toBeCloseTo(2072, 6); // 원본 폭 px = 내용 폭 pt
+    expect(target).toBeLessThan(fillScale(rect, PHONE)); // 채움 배율보다 한참 밑이다
+    expect(maxZoomScale(rect, PHONE)).toBeCloseTo(fillScale(rect, PHONE), 9); // 핀치 상한은 그대로 채움 배율
+  });
+
+  it('3200×400(실제 화면 캡처 모양, 8:1): 약 7.96배 — 보이는 높이 400pt, 채움(약 17배)보다 밑', () => {
+    const {natural, rect} = sized(3200, 400);
+    const target = doubleTapScale(rect, PHONE, natural);
+    expect(isVeryLong(rect, PHONE)).toBe(true);
+    expect(rect.height * target).toBeCloseTo(400, 6);
+    expect(target).toBeGreaterThan(ZOOM_DOUBLE_TAP);
+    expect(target).toBeLessThan(fillScale(rect, PHONE));
+  });
+
+  it('세로로 긴 110×2072: 같은 규칙이 폭에 걸린다 — 보이는 폭이 원본 폭 110pt(약 2.37배)', () => {
+    const {natural, rect} = sized(110, 2072);
+    const target = doubleTapScale(rect, PHONE, natural);
+    expect(target).toBeCloseTo(2072 / PHONE.height, 6); // 긴 쪽(높이)을 기준으로 잰다
+    expect(rect.width * target).toBeCloseTo(110, 6);
+    expect(rect.height * target).toBeCloseTo(2072, 6);
+  });
+
+  it('원본이 아주 커서(12000×900) 원본 크기가 채움보다 크면 채움(높이 맞춤)에서 멈춘다', () => {
+    const {natural, rect} = sized(12000, 900);
+    expect(12000 / PHONE.width).toBeGreaterThan(fillScale(rect, PHONE)); // 원본pt 배율 29.9 > 채움 29.0
+    expect(doubleTapScale(rect, PHONE, natural)).toBeCloseTo(fillScale(rect, PHONE), 9);
+    expect(rect.height * doubleTapScale(rect, PHONE, natural)).toBeCloseTo(PHONE.height, 6);
+  });
+
+  it('원본이 작으면(600×30, 20:1) 원본 크기 배율이 2 밑이라 보통 사진의 두 번 탭 2배로 올려 받는다', () => {
+    const {natural, rect} = sized(600, 30);
+    expect(isVeryLong(rect, PHONE)).toBe(true);
+    expect(600 / PHONE.width).toBeLessThan(ZOOM_DOUBLE_TAP); // 1.49
+    expect(doubleTapScale(rect, PHONE, natural)).toBe(ZOOM_DOUBLE_TAP);
+  });
+
+  it('원본 크기를 모르면(없음·null·쓸 수 없는 값) 1단계 규칙 — 채움(높이 맞춤)으로 돌아간다', () => {
+    const {rect} = sized(2072, 110);
+    const fill = maxZoomScale(rect, PHONE);
+    expect(doubleTapScale(rect, PHONE)).toBe(fill);
+    expect(doubleTapScale(rect, PHONE, null)).toBe(fill);
+    expect(doubleTapScale(rect, PHONE, undefined)).toBe(fill);
+    for (const bad of [{width: 0, height: 0}, {width: 2072, height: 0}, {width: -1, height: 110}, {width: Number.NaN, height: 110}, {width: Infinity, height: 110}]) {
+      expect(doubleTapScale(rect, PHONE, bad)).toBe(fill);
+    }
+  });
+
+  it('보통 사진은 원본이 아무리 커도 그대로 2배다 — 원본 크기를 쓰지 않는다', () => {
+    for (const [width, height] of [[4032, 3024], [1200, 900], [1920, 1080], [3024, 4032], [1170, 2532], [2200, 1000]] as const) {
+      const {natural, rect} = sized(width, height);
+      expect(isVeryLong(rect, PHONE)).toBe(false);
+      expect(doubleTapScale(rect, PHONE, natural)).toBe(ZOOM_DOUBLE_TAP);
+    }
+  });
+
+  it('nativePointScale: 맞춤 사각형의 긴 쪽 기준으로 「원본 1px = 1pt」 배율을 돌려주고, 모르면 undefined 다', () => {
+    const wide = sized(2072, 110);
+    expect(nativePointScale(wide.rect, wide.natural)).toBeCloseTo(2072 / 402, 9);
+    const tall = sized(110, 2072);
+    expect(nativePointScale(tall.rect, tall.natural)).toBeCloseTo(2072 / 874, 9);
+    expect(nativePointScale(wide.rect)).toBeUndefined();
+    expect(nativePointScale(wide.rect, null)).toBeUndefined();
+    expect(nativePointScale(wide.rect, {width: 0, height: 110})).toBeUndefined();
+    expect(nativePointScale({width: 0, height: 0}, wide.natural)).toBeUndefined();
+  });
+
+  it('어떤 긴 그림이든 두 번 탭 배율은 2 이상 최대 배율 이하이고, 원본 크기 배율이 그 사이면 그 값이다', () => {
+    for (const [width, height] of [[2072, 110], [3200, 400], [2560, 1080], [6000, 300], [110, 2072], [200, 4000], [12000, 900], [600, 30], [100_000, 100]] as const) {
+      const {natural, rect} = sized(width, height);
+      const target = doubleTapScale(rect, PHONE, natural);
+      const max = maxZoomScale(rect, PHONE);
+      expect(target).toBeGreaterThanOrEqual(ZOOM_DOUBLE_TAP);
+      expect(target).toBeLessThanOrEqual(max);
+      const native = nativePointScale(rect, natural) as number;
+      if (native >= ZOOM_DOUBLE_TAP && native <= max) expect(target).toBeCloseTo(native, 9);
+    }
+  });
+
+  it('두 번 탭이 넘기는 사각형은 이 목표 배율로 키운다 — 그림 밖 빈 곳을 눌러도 쪽 안에 머문다', () => {
+    const {natural, rect} = sized(2072, 110);
+    const target = doubleTapScale(rect, PHONE, natural);
+    for (const point of [{x: 200, y: rect.height / 2}, {x: 40, y: -300}, {x: 360, y: rect.height + 300}]) {
+      const zoom = zoomRectAt(point, rect, target);
+      // 네이티브는 사각형을 창에 맞춰 키운다: 배율 = min(창폭/사각폭, 창높이/사각높이) = 목표 배율.
+      expect(Math.min(PHONE.width / zoom.width, PHONE.height / zoom.height)).toBeCloseTo(target, 6);
       expect(zoom.x).toBeGreaterThanOrEqual(0);
       expect(zoom.y).toBeGreaterThanOrEqual(0);
       expect(zoom.x + zoom.width).toBeLessThanOrEqual(rect.width + 1e-9);
