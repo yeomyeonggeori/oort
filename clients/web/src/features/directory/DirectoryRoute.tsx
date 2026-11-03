@@ -7,6 +7,10 @@ import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { Input } from "@/design/ui/input";
 import { Button } from "@/design/ui/button";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import { causeOfFailure } from "@momo/core/features/connection/failure";
+import { deviceOnlineNow } from "@/lib/deviceOnline";
 import { useDirectory } from "@/features/workspace/useWorkspace";
 import { CONTENT_CLASS, MemberRow, ROW_CLASS } from "./MemberRow";
 import { countLabel, groupDirectory, hasOtherMembers } from "@momo/core/features/directory/model";
@@ -225,10 +229,10 @@ export function DirectoryRoute() {
         {roster.pending && groups.total === 0 ? (
           <DirectorySkeleton rows={6} />
         ) : roster.failed && groups.total === 0 ? (
-          <InlineBanner
-            message="멤버 명부를 불러오지 못했습니다."
-            actionLabel="다시 시도"
-            onAction={() => void rosterQuery.refetch()}
+          <LoadFailureBox
+            titleKey={CONNECTION_KEYS.loadMembersTitle}
+            cause={causeOfFailure(rosterQuery.error, deviceOnlineNow())}
+            onRetry={() => void rosterQuery.refetch()}
             testId="directory-error"
           />
         ) : !hasOthers ? (

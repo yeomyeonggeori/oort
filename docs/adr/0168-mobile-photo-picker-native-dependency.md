@@ -1,6 +1,6 @@
 # ADR-0168: 모바일 사진·파일 picker 네이티브 의존성 — Expo 모듈 낱개 연장
 
-- Status: **Accepted** (2026-08-23 성재 승인 — "다 승인할게" 위임 집행, 기록=Fable/momo-main. 기안 같은 날 — M-2 발사 선행 조건 충족. 증보 1 2026-10-21: 앱 안 최근 사진 그리드와 사진 보관함 읽기 권한(`expo-media-library`), 성재 결재 원문은 증보 절에 인용. 증보 2 2026-11-03: 영상 첨부를 앱 안에서 재생하는 `expo-video`와 재생 인증 — **Proposed**, planner 수락 대기)
+- Status: **Accepted** (2026-08-23 성재 승인 — "다 승인할게" 위임 집행, 기록=Fable/momo-main. 기안 같은 날 — M-2 발사 선행 조건 충족. 증보 1 2026-10-21: 앱 안 최근 사진 그리드와 사진 보관함 읽기 권한(`expo-media-library`), 성재 결재 원문은 증보 절에 인용. 증보 2 2026-11-03: 영상 첨부를 앱 안에서 재생하는 `expo-video`와 재생 인증 — **Proposed**, planner 수락 대기. 증보 3 2026-11-03: 첨부 「저장」 — 사진 보관함에 추가 전용으로 쓰기·파일은 파일 앱에서 위치 고르기, 증보 1 D5·D6의 「쓰기 금지」·Add 문구를 대체, 성재 「1. 권장.」, 새 의존 없음)
 - 관련: ADR-0137 D1(스택=bare RN+**Expo 모듈 낱개**·EAS 미도입 — 본 ADR은 그 정책의 첫 "새 네이티브 권한 표면" 적용), ADR-0120(푸시 NSE — 서명 표면 비접촉 확인 대상), UXUI 완성도 파도 계획 `docs/planning/research/2026-08-23-uxui-completeness-wave-plan.md` §2 M-2
 - 실측 근거: 2026-08-23 재연 QA — D8 셀프호스트에서 첨부 업로드가 `no-archive`(파일 보관소 미연결)로 막히는 것 실측(`claudedocs/uxui-qa-d8-20260823/`). picker는 클라 표면이고 보관소는 서버 배포 구성이므로 **분리 결정**임을 여기 명시한다.
 
@@ -136,3 +136,40 @@
 ### 한계와 미검증
 - 시뮬레이터(iPhone 17 Pro 402×874, iOS 26.5, 한국어)에서 확인한 것: 포스터 카드·영상기 아이콘 카드, 눌러 열어 재생(구간 읽기 206), 멈춤·재생·탐색·소리·끝·다시 재생, 사진과 섞인 묶음 넘기기, 라이트·다크. 실기기 미확인(`runtime-unverified`): 긴 영상의 메모리·발열, 셀룰러에서의 시작 시간, 300 MiB급 파일, 15분 만료를 넘기는 재생과 복구, AirPlay를 끈 것이 실제 수신기에서 막히는지, 하드웨어 음소거 스위치와 소리 정책.
 - 포스터 캐시(`oort-attachments`)는 사진 미리보기와 같이 로그아웃에도 비우지 않는다(기존 동작이고 최대 256 KiB씩이다).
+
+## 증보 3 — 첨부 「저장」: 사진 보관함에 추가 전용으로 쓰기, 파일은 파일 앱에서 위치 고르기 (2026-11-03)
+
+- Status: **Accepted** (2026-11-03 성재 결재 「1. 권장.」, #5209 이슈 코멘트. 등급 1: 권한·개인정보 문구. **새 의존은 없다** — `expo-media-library`(증보 1)와 `expo-file-system`이 이미 있다.)
+- 발단·결재 인용(2026-11-03, #5209): owner 폰 검수에서, 내려받은 영상·사진이 **내 사진이나 파일에서 보일 것**이라 기대했는데 「저장」과 「공유」가 같은 일(iOS 공유 시트)이었다. 앱은 사진 보관함에 쓰지 않는다고 선언해 있었다(증보 1 D5·D6: Info.plist `NSPhotoLibraryAddUsageDescription` 「oort는 사진을 보관함에 저장하지 않아요」, `projectShape.test.ts`가 쓰기 API를 막음). 「사진·영상 「저장」을 사진 보관함에 바로 추가(추가 전용 권한, 처음 한 번 묻기)로 바꿀지, 그 밖의 파일은 「파일에 저장」으로」에 owner가 「1. 권장.」으로 답했다(권장 = 바꾼다 — 카카오톡과 같은 기대이고, 추가 전용이라 보관함을 읽지 않는다). 「공유」는 공유 시트 그대로다.
+- 본문·증보 1과의 관계: 증보 1 D5의 「카드는 사진 보관함을 읽기만 한다 — 쓰기·앨범·삭제 API는 부르지 않는다」와 D6의 Add 문구(「저장하지 않아요」)를 **이 증보가 대체한다.** 사진 카드(읽기)는 그대로이고 D5의 그 문장은 카드 한정으로 읽는다. 삭제·앨범·즐겨찾기 금지는 그대로다. 증보 2(`expo-video`)와는 독립이다 — 재생은 사진 권한을 쓰지 않고, 영상 뷰어의 [저장]은 이 증보의 같은 훅(`useSaveAttachment`)으로 영상을 사진 보관함에 더한다. 증보 2 D1의 「Info.plist 기존 문구는 그대로」는 이 증보 **전** 기준이다.
+
+### D1. 쓰기는 한 길이다 — `saveToLibraryAsync`, 추가 전용
+- 사진·영상 「저장」은 받은 파일을 `expo-media-library/legacy`의 `saveToLibraryAsync(localUri)` 한 함수로 사진 보관함에 **더한다**. iOS에서 이 함수는 `UIImageWriteToSavedPhotosAlbum`·`UISaveVideoAtPathToSavedPhotosAlbum`(GIF는 `PHAssetCreationRequest`)을 부르고 추가 권한만 필요하다. `createAssetAsync`는 쓰지 않는다 — 읽기·쓰기 권한으로 점검하고 만든 자산을 읽어 돌려주는데, 우리는 보관함을 읽지 않는다고 약속했다.
+- 이 호출은 `photosNative.ts`(증보 1 D2의 유일한 importer) 한 곳에만 있다. `projectShape.test.ts`가 (a) `saveToLibraryAsync`가 그 파일 밖에 나타나거나 (b) 나머지 쓰기·삭제·앨범·즐겨찾기 API(`createAssetAsync`·`addAssetsToAlbumAsync`·`removeAssetsFromAlbumAsync`·`deleteAssetsAsync`·`createAlbumAsync`·`deleteAlbumsAsync`·`setAssetFavoriteAsync`, PhotoKit 직접 호출)가 어디든 나타나면 빨개진다.
+
+### D2. 권한 — 저장을 누른 순간에만, 내려받기보다 먼저, 추가 전용으로
+- 권한은 `writeOnly = true`(`PHAccessLevel.addOnly`)로만 묻는다. 순서: 프롬프트 없는 읽기 → 미결정이면 시스템 프롬프트 **한 번** → 허용이 아니면 **내려받지 않고** 「사진 접근이 꺼져 있어요 · 설정 열기」. iOS는 한 번 거부한 앱에 다시 묻지 않으므로(증보 1 D3) 거부에는 프롬프트를 세우지 않는다. 읽기·쓰기 프롬프트는 사진 카드의 「허용」만 띄운다.
+- 선제 요청 금지(증보 1 D3의 1)는 그대로다: 뷰어를 열거나 카드를 그리는 것으로는 권한을 읽지도 묻지도 않는다(`attachmentSave.test.tsx`가 마운트의 호출 횟수 0을 센다).
+- **네이티브 모듈이 마지막으로 물은 수준을 기억한다.** `MediaLibraryModule.swift`의 `writeOnly`는 `getPermissionsAsync`·`requestPermissionsAsync`가 바꾸고, 읽기 쪽 호출(`getAssetsAsync` …)이 어느 수준을 점검할지 그 값이 정한다. 추가 전용으로 물은 뒤에는 프롬프트 없는 읽기(`getPermissionsAsync()`)로 읽기 수준으로 되돌린다(`inAddScope`). 사진 카드가 열릴 때마다 읽기 수준으로 다시 읽는 순서에 기대지 않기 위해서다.
+
+### D3. 길은 MIME이 정한다
+- 사진 갈래는 보관함이 실제로 받는 형식만이다: 이미지 jpeg·png·gif·heic·heif·webp·tiff·bmp·avif, 영상 mp4·quicktime(mov)·x-m4v. 그 밖(SVG·WebM·PSD·PDF …)은 **처음부터 파일 갈래**다. SVG는 `UIImage(data:)`가 읽지 못하고 WebM은 `UIVideoAtPathIsCompatibleWithSavedPhotosAlbum`이 거절해서 눌러도 언제나 실패하는데, 그것을 「다시 시도」로 안내하지 않는다. 큰 래스터 이미지(8 MB 초과)는 파일 카드로 서도 사진 갈래다.
+- `saveToLibraryAsync`는 확장자로 이미지·영상을 가르고 없으면 던진다. 이름에 확장자가 없거나 형식과 어긋난 첨부는 맞는 확장자의 임시 사본(`oort-photo-attach`, 앱 캐시)을 넘기고 끝나면 지운다.
+
+### D4. 파일 앱 — 새 의존 없이 폴더 고르기
+- 「파일에 저장」은 `expo-file-system`의 `Directory.pickDirectoryAsync()`(시스템 폴더 선택 창)로 사람이 위치를 고르게 하고, 그 폴더에 **첨부 이름으로** 복사한다(캐시 파일 이름 앞의 첨부 id를 떼고, 같은 이름이 있으면 `이름 2.확장자`). 고르지 않고 닫으면 실패가 아니라 취소다(네이티브 예외 코드 `ERR_FILE_PICKING_CANCELLED`로 읽고 메시지 글자는 읽지 않는다).
+- 폴더 선택 창의 완료 단추 글자는 시스템이 정한다(「열기」) — 우리가 바꿀 수 없다. 표준 「파일에 저장」 내보내기 창(`UIDocumentPickerViewController(forExporting:)`)은 네이티브 코드가 필요해 이 증보의 범위 밖이다.
+- 되돌릴 조건: 폴더 선택 창이 실기기에서 어색하다는 판정이 나면 파일 갈래를 공유 시트(`useShareAttachment`)로 되돌리고 안내 문구만 얹는다. 파일 앱 쪽은 포트(`saveToFiles`) 한 개라 그 교체는 한 파일이다.
+
+### D5. Info.plist와 문구
+- `NSPhotoLibraryAddUsageDescription`: 「저장을 누른 사진과 영상을 내 사진 보관함에 추가해요. 이 허용으로 보관함을 읽지는 않아요.」(en: "Adds the photos and videos you choose to save to your photo library. This permission does not let oort read your library."). 이 문구는 「저장」을 처음 눌렀을 때 뜨는 추가 전용 프롬프트에 그대로 실린다. 사전 키 `mobile.ios.photoLibraryAddUsage`가 정본이고 `InfoPlist.strings`(ko·en)는 생성물이다. 읽기 키(`NSPhotoLibraryUsageDescription`)는 그대로다.
+- 「보관함을 읽지는 않아요」가 사실이려면 저장이 추가 전용으로만 권한을 물어야 한다 — `projectShape.test.ts`가 `nativeLibrarySave` 안의 권한 호출을 `requestPermissionsAsync(true)`·`getPermissionsAsync(true)`로 못 박는다.
+- 개인정보 문서: `legal/privacy-policy.md`·`docs/legal/03-app-privacy-datamap.md`·`PrivacyInfo.xcprivacy`에는 사진 보관함 서술이 없고 이 기능은 새 데이터를 수집하지 않는다 — 받은 첨부를 기기의 보관함·파일 앱에 둘 뿐 서버로 보내는 것은 없다. 고칠 문서가 없다.
+
+### 영향
+- Info.plist 문구가 바뀌므로 **새 개발 빌드**가 필요하다(TestFlight 재빌드 1회, 앱 심사 표면의 문구 변경). 새 의존이 없어 NOTICE 변경도 없다.
+- 사진 접근 프롬프트가 **「저장」을 처음 누를 때**(추가 전용) 새로 생긴다. 사진 카드의 읽기·쓰기 프롬프트와는 별개다.
+
+### 한계와 미검증
+- 단위 시험(jest)이 잰 것: 길(MIME → 갈래·확장자), 권한 순서(읽기 → 프롬프트 한 번 → 거부면 내려받지 않음), 포트의 호출 인자(`writeOnly`·읽기 수준 복귀·임시 사본), 폴더 선택 취소의 코드 판독, 상태 기계(영수증만 걷힘·실패와 거부는 남음·두 번 눌러도 한 번), 뷰어·파일 카드의 화면 상태, 가드(`projectShape`).
+- `runtime-unverified`(이 증보를 쓴 시점): 실제 시스템 추가 전용 프롬프트에 위 문구가 실리는 모습, 보관함(사진 앱)에 저장된 항목이 보이는지, `Directory.pickDirectoryAsync()`가 보안 범위 폴더로 복사에 성공하는지(소스 읽기로는 네이티브가 고르는 순간 접근을 열고 복사는 시스템에 위임한다), 폴더 선택 창의 모양과 「열기」 단추, 라이트·다크 화면, iCloud Drive·제3자 제공자 폴더, VoiceOver 로터의 「파일에 저장」·「사진에 저장」 낭독. 추가 전용 → 읽기·쓰기 승급 때 iOS가 프롬프트를 다시 띄우는지도 미확인이다.
