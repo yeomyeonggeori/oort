@@ -23,7 +23,10 @@ import {
 //
 // 3. channelActions 「읽음 처리」 (sidebar row / header, BT-1): reason
 //    `mark_read_menu` → `read_intent: "explicit_open"`. Explicit user
-//    action, same discriminator as opening the channel.
+//    action, same discriminator as opening the channel. The menu bar's
+//    「모두 읽음 처리」 (#5195, `useMailboxReadActions.markChannelsRead`) is
+//    that same action over the channels that hold unread mentions or DMs:
+//    same reason.
 //
 // 4. useInbox `useMarkRead` (mention cursor advance): reason
 //    `inbox_mention` → omit `read_intent`. The user marked one mention

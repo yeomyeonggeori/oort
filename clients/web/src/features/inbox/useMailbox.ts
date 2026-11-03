@@ -76,6 +76,8 @@ const THREAD_CHANNEL_CAP = 12;
 const THREAD_PAGE = 50;
 const THREAD_ROOT_CAP = 10;
 const STALE_MS = 15_000;
+/** 메뉴 막대 「모두 읽음 처리」가 한 번에 보내는 요청 수(`markChannelsRead`). */
+const READ_ALL_CONCURRENCY = 4;
 
 /** `probing`: 아직 어느 서버인지 모른다. `server`: 투영 API. `composed`: 구 서버 후퇴. */
 export type MailboxSource = "probing" | "server" | "composed";
@@ -637,5 +639,46 @@ export function useMailboxReadActions() {
     [workspaceId, invalidate]
   );
 
-  return { markRead, markUnread, markAllRead };
+  /**
+   * 메뉴 막대 「모두 읽음 처리」(#5195): 받은 채널들의 읽음 위치를 올린다(`PUT read-state`, 사유 `mark_read_menu` =
+   * 「읽음 처리」 메뉴와 같은 명시 행동). **인박스의 `read-all`과 다르다**: 항목만 읽음이 되고 채널 위치와 `mention_count`가
+   * 그대로인 그 길(ADR-0199 D3)로는 독 배지와 메뉴 막대의 점이 안 꺼진다. 위치를 올리면 서버가 같은 트랜잭션에서
+   * `mention_count`를 다시 세고 그 채널의 인박스 항목을 읽음으로 채운다 — 점·배지·인박스가 한 규칙으로 바뀐다.
+   * 어느 채널을 올릴지는 호출부(`readAllTargets`)가 정한다.
+   *
+   * 채널마다 한 요청이고 `READ_ALL_CONCURRENCY`개씩 보낸다. 한 채널의 실패가 나머지를 멈추지 않는다 — 읽은 만큼은
+   * 읽힌 채로 남고, 실패는 수로 돌려준다. 실패한 채널은 위치가 그대로라 점이 남아 다시 누를 수 있다.
+   */
+  const markChannelsRead = useCallback(
+    async (targets: readonly { channelId: string; seq: number }[]) => {
+      let failed = 0;
+      let next = 0;
+      const worker = async () => {
+        for (;;) {
+          const target = targets[next++];
+          if (target === undefined) return;
+          try {
+            const state = await advertiseReadState(
+              workspaceId,
+              target.channelId,
+              target.seq,
+              "mark_read_menu"
+            );
+            applyReadStateToCache(client, workspaceId, state);
+          } catch {
+            failed += 1;
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(READ_ALL_CONCURRENCY, targets.length) }, worker)
+      );
+      void client.invalidateQueries({ queryKey: ["read-state", workspaceId] });
+      invalidate();
+      return { marked: targets.length - failed, failed };
+    },
+    [workspaceId, client, invalidate]
+  );
+
+  return { markRead, markUnread, markAllRead, markChannelsRead };
 }
