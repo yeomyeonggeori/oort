@@ -6,8 +6,8 @@
 //! or every lineage of a member — calls ONE of the two functions here, inside
 //! the transaction that revokes the tokens, so the session and everything
 //! registered under it end in one commit. One call per path is the point: a
-//! new "thing that lives as long as a session" is added here, not at seven
-//! call sites.
+//! new "thing that lives as long as a session" is added here, not at each
+//! call site (no number of them is written down: a count in a comment went stale once).
 //!
 //! | path                                   | tokens | push | device key | scheduled messages (ADR-0208 D14) |
 //! |----------------------------------------|--------|------|------------|------|
@@ -16,6 +16,13 @@
 //! | refresh-token reuse ([`LineageEnd::RefreshReuse`]) | ended | ended | **kept** (#3097) | held if that lineage last wrote them |
 //! | member-wide ([`end_member_sessions_in_tx`]) | ended | ended | revoked `member_sessions_ended` | every pending and failed one held |
 //! | a root's signed letter (`device_keys::revoke`) | — | — | revoked `signed` | — |
+//!
+//! A member-wide end also ends the member's **pending reset link** (an operator-issued
+//! `password_reset` claim, ADR-0215 D4) — the one thing besides a session that can set their
+//! password. A link that outlived the sessions it was meant to recover would let whoever holds
+//! it take the account after the owner already recovered it some other way. Except for the
+//! member's own password change, and for a refresh-token reuse should one ever end a whole
+//! member ([`ends_pending_reset_links`]).
 //!
 //! **Held** means `failed` + `sessions_ended`, not cancelled: a schedule planted by a stolen
 //! session must not go out on its own after the account is recovered, and a legitimate one is not
@@ -31,6 +38,7 @@
 //! key's lineage), and it moves onto the owner's next sign-in only with a
 //! letter the key itself signs (`momo_auth::device_key::rebind_device_key_in_tx`).
 
+use momo_auth::consume_pending_password_resets_in_tx;
 use momo_auth::device_key::{
     revoke_member_device_keys_in_tx, revoke_session_device_keys_in_tx, DeviceKeyRevocationReason,
 };
@@ -94,10 +102,40 @@ pub(crate) async fn end_session_lineage_in_tx(
     Ok(())
 }
 
+/// Whether ending every session of a member for `cause` also ends their pending reset link
+/// (ADR-0215 D4). Everything does **except the member's own password change and a
+/// refresh-token reuse**.
+///
+/// A change is the act of "someone who knows the current password", which cannot tell the
+/// owner from a thief. If a change ended the link, a thief who knows the password could change
+/// it again and again (inside the per-member limit) and keep cutting every link an operator
+/// issues, and since the change also ends every session and device key, that link is the only
+/// recovery the owner has left. The suspension, removal, leaving, and a reset (a claim spent, a
+/// device-signed reset) are not things a password alone can do.
+///
+/// An exhaustive `match` with no `_` arm: a new cause does not compile until someone decides
+/// which side of this line it is on. The two lineage-level causes never reach the member-wide
+/// end today; they are listed so they are decided too. A device unlink is on the side of the
+/// rule (a member-wide end ends the link). A refresh-token reuse is on the other side, for the
+/// reason a password change is: whoever holds a copy of the token can raise it.
+fn ends_pending_reset_links(cause: RevocationCause) -> bool {
+    match cause {
+        RevocationCause::PasswordChanged => false,
+        // A copied refresh token can raise a reuse; it must not be able to cut a recovery link.
+        RevocationCause::RefreshReuse => false,
+        RevocationCause::PasswordReset
+        | RevocationCause::Suspended
+        | RevocationCause::Removed
+        | RevocationCause::Left
+        | RevocationCause::DeviceUnlinked => true,
+    }
+}
+
 /// Every session of the member ended (password change or reset, suspension,
 /// removal, leaving the workspace, an admin ending the member's sessions). `cause` is the path
 /// that ended them; it is recorded, as an enumerated value, on the audit rows of the scheduled
-/// messages this holds.
+/// messages this holds, and it decides whether the member's pending reset link ends too
+/// ([`ends_pending_reset_links`]).
 pub(crate) async fn end_member_sessions_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -111,12 +149,46 @@ pub(crate) async fn end_member_sessions_in_tx(
     // ADR-0208 D14: nothing this person armed may go out on its own now that every sign-in of
     // theirs is gone (the password changed, they were suspended, removed, or left).
     hold_member_schedules_in_tx(conn, workspace_id, member_id, cause).await?;
+    // ADR-0215 D4: the operator's pending link ends in the same commit as the sessions it was a
+    // way back into. Never waits for a claim row somebody else holds (`SKIP LOCKED`).
+    if ends_pending_reset_links(cause) {
+        consume_pending_password_resets_in_tx(conn, workspace_id, member_id)
+            .await
+            .map_err(DbError::from)?;
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0215 D4: every member-wide end ends the pending reset link, except the member's own
+    /// password change and a refresh-token reuse.
+    #[test]
+    fn only_the_members_own_change_and_a_token_reuse_leave_a_pending_reset_link_alone() {
+        for cause in [
+            RevocationCause::PasswordChanged,
+            RevocationCause::RefreshReuse,
+        ] {
+            assert!(
+                !ends_pending_reset_links(cause),
+                "{cause:?} must leave a pending reset link alone"
+            );
+        }
+        for cause in [
+            RevocationCause::PasswordReset,
+            RevocationCause::Suspended,
+            RevocationCause::Removed,
+            RevocationCause::Left,
+            RevocationCause::DeviceUnlinked,
+        ] {
+            assert!(
+                ends_pending_reset_links(cause),
+                "{cause:?} must end a pending reset link"
+            );
+        }
+    }
 
     /// The path table above, as the code decides it.
     #[test]
