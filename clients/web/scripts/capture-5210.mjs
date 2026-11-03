@@ -18,13 +18,22 @@
 //       --engine(chromium 기본 | webkit)
 // 캡처는 저장소에 올리지 않는다: --out 을 스크래치로 준다.
 // =============================================================================
-import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, webkit } from "playwright";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+// 못 보낸 줄의 원인 문장(#5221·#5249)은 한국어 사전(connection.json)에서 읽는다: 손으로 적으면 이 캡처가 문장이 고쳐지는 것을 막는 쪽이 된다
+// (capture-5239 와 같은 규칙). 이 모의 서버의 실패는 코드 없는 500 — 서버가 직접 답하고 거절한 것이라 분류는 `rejected` 다
+// (`causeOfFailure`: 코드 없는 502·504·503 과 응답 없음만 「서버에 닿지 못함」).
+const KO_CONNECTION = JSON.parse(
+  readFileSync(resolve(WEB_ROOT, "../../packages/momo-core/src/i18n/catalogs/ko-KR/connection.json"), "utf8")
+);
+const REJECTED_REASON = KO_CONNECTION["connection.send.reasonRejected"];
+if (typeof REJECTED_REASON !== "string" || REJECTED_REASON === "") throw new Error("한국어 사전에 connection.send.reasonRejected 가 없다");
 
 function arg(name, fallback) {
   const at = process.argv.indexOf(`--${name}`);
@@ -374,6 +383,7 @@ async function measureFailure(page) {
     };
     const rowEl = document.querySelector('[data-testid="timeline-pending"][data-status="failed"]');
     const line = rowEl?.querySelector('[data-testid="pending-failed"]');
+    const reason = rowEl?.querySelector('[data-testid="pending-failed-reason"]');
     const resend = rowEl?.querySelector('[data-testid="pending-resend"]');
     const discard = rowEl?.querySelector('[data-testid="pending-discard"]');
     const glyph = (el) => rect(el?.querySelector("svg"));
@@ -383,6 +393,7 @@ async function measureFailure(page) {
       rowBox: rect(rowEl),
       lineBox: rect(line),
       lineText: line?.textContent ?? null,
+      reasonKind: reason?.getAttribute("data-failure-kind") ?? null,
       lineOverflowX: line ? line.scrollWidth - line.clientWidth : null,
       resendBox: rect(resend),
       discardBox: rect(discard),
@@ -409,7 +420,9 @@ function checkShape(m, width) {
   const minHit = width < 600 ? 44 : 24;
   const inside = (box) =>
     box !== null && box.x >= 0 && box.y >= 0 && box.right <= m.viewport.w + 0.5 && box.bottom <= m.viewport.h + 0.5;
-  check("failure-line: 짧은 「전송 실패」만 글자다", m.lineText === "전송 실패", JSON.stringify(m.lineText));
+  // 줄의 글자는 원인 한 문장뿐이다: 분류(rejected)와 사전의 그 문장이 그대로 서고, 상태 코드·서버 원문("capture: upstream unavailable")·옛 「전송 실패」는 없다.
+  // 아이콘 단추에는 글자가 없어(아래 icons 단정) 줄 전체의 글자 = 문장이다.
+  check("failure-line: 글자는 원인 한 문장뿐이다(코드 없는 500 → rejected, 사전 문장)", m.lineText === REJECTED_REASON && m.reasonKind === "rejected", JSON.stringify([m.lineText, m.reasonKind]));
   check("icons: 새로고침과 X 가 둘 다 서 있다", m.resendBox !== null && m.discardBox !== null);
   if (m.resendBox === null || m.discardBox === null) return;
   check("icons: 글자 단추가 아니다(단추 안에 글자 없음)", m.resendText === "" && m.discardText === "", `${JSON.stringify(m.resendText)} ${JSON.stringify(m.discardText)}`);

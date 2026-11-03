@@ -320,6 +320,18 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server, so you can't decide right now. Once we're connected again, you can approve or deny here."
     }
   ],
+  "connection.boot.offlineDetail": [
+    {
+      "type": 0,
+      "value": "Try again once you're connected to a network."
+    }
+  ],
+  "connection.boot.offlineQrDetail": [
+    {
+      "type": 0,
+      "value": "Once you're connected to a network, you can scan the QR code."
+    }
+  ],
   "connection.boot.unreachable": [
     {
       "type": 0,

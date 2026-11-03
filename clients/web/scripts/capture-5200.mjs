@@ -852,9 +852,15 @@ async function runThread(browser, scheme) {
   await openChannel(page);
   const row = page.locator('[data-testid="timeline-message"][data-message-id="0199dddd-0000-7000-8000-000000000002"]');
   await row.hover();
-  await row.getByTestId("message-actions-trigger").click();
-  await page.getByTestId("menu-reply").click();
-  await page.getByTestId("thread-composer-input").waitFor({ timeout: 15_000 });
+  // 답글은 호버 도구 막대의 단추다: 답글 묶음은 막대에만 서고 ⋯ 메뉴에는 `menu-reply` 가 없다(#5192, `MESSAGE_ACTION_GROUP_PLACEMENT`).
+  await row.getByTestId("toolbar-reply").click();
+  // 이 단추가 스레드 입력창을 여는 것이 아래 스레드 단정들의 전제다. 안 열리면 시간 초과로 스크립트가 죽지 않고 이 단정이 붉어진다.
+  const threadOpened = await page.getByTestId("thread-composer-input").waitFor({ timeout: 15_000 }).then(() => true, () => false);
+  check("스레드: 호버 도구 막대의 답글 단추가 스레드 입력창을 연다", threadOpened);
+  if (!threadOpened) {
+    await context.close();
+    return;
+  }
   const base = await measure(page, THREAD_IDS);
   await page.locator('[data-testid="thread-composer"] input[type="file"]').first().setInputFiles([png("스레드 캡처.png", 0), png("스레드 화면.png", 1), video("녹화-온보딩-시연.mp4"), pdf("분기별-온보딩-리뷰-최종-v3.pdf")]);
   await waitCount(page, 4);

@@ -588,3 +588,84 @@ describe('⑥ 뷰어 안의 쓸기는 아래 행의 「밀어서 답글」로 �
     expect(onCommit).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('⑦ 재생 실패·영상 사라짐 상태에는 죽은 재생 줄도 겹친 시스템 기호도 없다 (#5273, 화면 검수 4회차 B1)', () => {
+  // 실패(FAILED)·사라짐(GONE)의 화면은 오류 문장과 (실패면) 「다시 시도」 하나다. 예전에는 아래 재생 줄(▶ · 막대 · 소리)이 쉼 모양 그대로 서 있었다 —
+  // 실패한 항목 위의 플레이어는 재생하지 않으므로 ▶ 를 눌러도 아무 일이 없었다(죽은 단추). 그리고 네이티브 영상 뷰가 오류 문장과 「다시 시도」 사이에 자기
+  // 「재생 불가」 표지를 그렸다(앱이 그리지 않은 기호). 사진만 보는 [저장]·[공유]도 같은 까닭으로 걷는다(내려받기도 같은 서버 답을 받는다).
+  //
+  // 아래 「없다」 단정이 빈 질의로 초록이 되지 않게 모든 시험이 **같은 질의가 멀쩡한 재생에서는 전부 찾는 것**을 먼저 확인한다.
+  const PLAYBACK_SURFACE = [
+    'attachment-viewer-video', // 네이티브 영상 면(겹친 시스템 기호를 그리는 쪽)
+    'attachment-viewer-video-controls', // 재생 줄
+    'attachment-viewer-video-toggle', // ▶
+    'attachment-viewer-video-seek', // 막대
+    'attachment-viewer-video-mute', // 소리
+  ] as const;
+  const ACTIONS = ['attachment-viewer-save', 'attachment-viewer-share'] as const;
+  const VIEWER_POSTER = 'attachment-viewer-video-poster';
+  /** 지금 화면에 서 있는 것 / 없는 것을 이름으로 돌려준다 — 틀리면 어느 것이 틀렸는지가 실패 메시지에 그대로 찍힌다. */
+  const standing = (ids: readonly string[]) => ids.filter(id => screen.queryByTestId(id) !== null);
+  const missing = (ids: readonly string[]) => ids.filter(id => screen.queryByTestId(id) === null);
+  const failure = () => ({ status: 'error', error: { message: 'x' } });
+
+  it('재생 중 오류가 복구되지 않아 실패로 서면 재생 줄·영상 면·포스터·[저장]·[공유]가 걷히고 「다시 시도」만 남는다 — 누르면 모두 돌아온다', async () => {
+    await openFromCard([video()]);
+    const active = player();
+    // 대조: 멀쩡한 재생에서는 같은 질의가 전부 찾는다.
+    expect(missing([...PLAYBACK_SURFACE, ...ACTIONS, VIEWER_POSTER])).toEqual([]);
+
+    await act(async () => {
+      active.__emit('statusChange', failure());
+    });
+    await waitFor(() => expect(active.sources).toHaveLength(3)); // 조용한 복구 한 번 — 아직 재생 상태다
+    expect(missing([...PLAYBACK_SURFACE])).toEqual([]);
+    await act(async () => {
+      active.__emit('statusChange', failure()); // 복구한 자리에서 또 실패 → 실패로 선다
+    });
+    const retry = await screen.findByTestId('attachment-viewer-video-retry');
+
+    expect(screen.getByTestId('attachment-viewer-video-status').props.children).toBe('영상을 재생하지 못했어요');
+    expect(standing([...PLAYBACK_SURFACE, ...ACTIONS, VIEWER_POSTER])).toEqual([]);
+
+    // 「다시 시도」는 처음부터 다시 연다 — 그러면 재생 줄·영상 면·[저장]·[공유]가 돌아오고 오류 문장은 걷힌다.
+    fireEvent.press(retry);
+    await waitFor(() => expect(active.sources).toHaveLength(4));
+    await screen.findByTestId('attachment-viewer-video-controls');
+    expect(missing([...PLAYBACK_SURFACE, ...ACTIONS])).toEqual([]);
+    expect(screen.queryByTestId('attachment-viewer-video-retry')).toBeNull();
+    expect(screen.queryByTestId('attachment-viewer-video-status')).toBeNull();
+  });
+
+  it('영상이 사라지면(404) 안내만 남는다 — 재생 줄도 「다시 시도」도 [저장]·[공유]도 없고, 사진으로 넘기면 [저장]·[공유]가 돌아온다', async () => {
+    probeAttachmentContent.mockResolvedValue(404);
+    const { width } = Dimensions.get('window');
+    render(
+      <AttachmentViewer
+        workspaceId="ws"
+        channelId="ch"
+        images={[photo('p1'), video()]}
+        startIndex={1}
+        onClose={jest.fn()}
+      />,
+    );
+    fireEvent(screen.getByTestId('attachment-viewer-modal'), 'show');
+    expect((await screen.findByTestId('attachment-viewer-video-status')).props.children).toBe(
+      '이 영상은 더 이상 볼 수 없어요',
+    );
+
+    expect(standing([...PLAYBACK_SURFACE, ...ACTIONS, VIEWER_POSTER])).toEqual([]);
+    expect(screen.queryByTestId('attachment-viewer-video-retry')).toBeNull();
+    // 틀은 남는다: 뒤로 가기, 묶음을 넘기는 썸네일 줄과 위치.
+    expect(missing(['attachment-viewer-back', 'attachment-viewer-strip', 'attachment-viewer-position'])).toEqual([]);
+
+    // 사진 쪽으로 넘기면 사라진 영상의 손잡이가 풀려 [저장]·[공유]가 사진의 것으로 돌아온다.
+    await act(async () => {
+      fireEvent(screen.getByTestId('attachment-viewer-scroll'), 'momentumScrollEnd', {
+        nativeEvent: { contentOffset: { x: 0 * width, y: 0 } },
+      });
+    });
+    await waitFor(() => expect(missing([...ACTIONS])).toEqual([]));
+    expect(screen.queryByTestId('attachment-viewer-video-status')).toBeNull();
+  });
+});
