@@ -849,7 +849,7 @@ export function Timeline({
           titleKey={CONNECTION_KEYS.loadNewerTitle}
           onRetry={() => onRetry?.()}
           testId="timeline-error-line"
-          className="absolute inset-x-0 top-0 z-10 bg-pane"
+          className="layer-content-float absolute inset-x-0 top-0 bg-pane"
         />
       )}
       <TimelineLiveRegionProvider>

@@ -30,7 +30,7 @@ export function SessionNotice({ onRetryRestore }: { onRetryRestore: () => Promis
         tone="neutral"
         message={formatMessage(CONNECTION_KEYS.sessionExpired)}
         testId="session-expired-notice"
-        className="fixed inset-x-0 top-0 z-50 bg-surface"
+        className="layer-content-float fixed inset-x-0 top-0 bg-surface"
       />
     );
   }
@@ -51,7 +51,7 @@ export function SessionNotice({ onRetryRestore }: { onRetryRestore: () => Promis
           });
         }}
         testId="boot-unreachable-notice"
-        className="fixed inset-x-0 top-0 z-50 bg-surface"
+        className="layer-content-float fixed inset-x-0 top-0 bg-surface"
       />
     );
   }
