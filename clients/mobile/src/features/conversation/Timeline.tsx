@@ -916,6 +916,7 @@ function TimelineInner({
   onRetry,
   onResend,
   onResendPending,
+  onDiscardPending,
   actions,
   emptyOverride,
   selfSendToken,
@@ -1025,6 +1026,8 @@ function TimelineInner({
   onRetry?: () => void;
   onResend?: (message: Message) => void;
   onResendPending?: (clientMsgId: string) => void;
+  /** 보내지 못한 메아리를 이 기기에서 지운다(#5210). 없으면 행이 X 를 그리지 않는다. */
+  onDiscardPending?: (clientMsgId: string) => void;
   /**
    * What each row may do. Absent on read-only mounts — the measurement harness
    * renders this component with no session behind it, and a row that offered
@@ -2987,6 +2990,7 @@ function TimelineInner({
                 : 0
             }
             onResend={onResendPending}
+            onDiscard={onDiscardPending}
             arrivalSurface={arrivalSurface}
           />
         );
@@ -3103,6 +3107,7 @@ function TimelineInner({
       nowMs,
       onResend,
       onResendPending,
+      onDiscardPending,
       actions,
       anchorSeq,
       anchorRef,

@@ -38,6 +38,171 @@ export const catalog: MessageCatalog = {
       "value": " 첨부 빼기"
     }
   ],
+  "attachments.video.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 동영상, "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": ", 재생"
+    }
+  ],
+  "attachments.video.cardLabelNoDuration": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 동영상, 재생"
+    }
+  ],
+  "attachments.video.failed": [
+    {
+      "type": 0,
+      "value": "영상을 재생하지 못했어요"
+    }
+  ],
+  "attachments.video.gone": [
+    {
+      "type": 0,
+      "value": "이 영상은 더 이상 볼 수 없어요"
+    }
+  ],
+  "attachments.video.loading": [
+    {
+      "type": 0,
+      "value": "영상을 불러오는 중"
+    }
+  ],
+  "attachments.video.mute": [
+    {
+      "type": 0,
+      "value": "소리 끄기"
+    }
+  ],
+  "attachments.video.pause": [
+    {
+      "type": 0,
+      "value": "일시정지"
+    }
+  ],
+  "attachments.video.play": [
+    {
+      "type": 0,
+      "value": "재생"
+    }
+  ],
+  "attachments.video.replay": [
+    {
+      "type": 0,
+      "value": "처음부터 다시 재생"
+    }
+  ],
+  "attachments.video.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "attachments.video.saveHint": [
+    {
+      "type": 0,
+      "value": "영상을 사진 보관함에 저장해요"
+    }
+  ],
+  "attachments.video.seekLabel": [
+    {
+      "type": 0,
+      "value": "재생 위치"
+    }
+  ],
+  "attachments.video.seekValue": [
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "attachments.video.thumbHint": [
+    {
+      "type": 0,
+      "value": "이 영상으로 이동"
+    }
+  ],
+  "attachments.video.thumbLabel": [
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번째 영상"
+    }
+  ],
+  "attachments.video.unmute": [
+    {
+      "type": 0,
+      "value": "소리 켜기"
+    }
+  ],
+  "attachments.viewer.mixedCaption": [
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번"
+    }
+  ],
+  "attachments.viewer.mixedCaptionLabel": [
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번째"
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -87,6 +252,243 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "이메일 기억하기"
+    }
+  ],
+  "connection.action.reconnectNow": [
+    {
+      "type": 0,
+      "value": "지금 다시 연결"
+    }
+  ],
+  "connection.action.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "connection.approval.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."
+    }
+  ],
+  "connection.approval.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."
+    }
+  ],
+  "connection.boot.unreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 저장된 로그인은 그대로 있고, 연결되면 이어서 시도해요."
+    }
+  ],
+  "connection.card.connecting": [
+    {
+      "type": 0,
+      "value": "연결 중…"
+    }
+  ],
+  "connection.card.lastSynced": [
+    {
+      "type": 0,
+      "value": "마지막 동기화 "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    }
+  ],
+  "connection.card.offlineDetail": [
+    {
+      "type": 0,
+      "value": "받아 둔 내용만 보여요. 연결되면 자동으로 이어져요."
+    }
+  ],
+  "connection.card.offlineTitle": [
+    {
+      "type": 0,
+      "value": "오프라인이에요"
+    }
+  ],
+  "connection.card.realtimeDownDetail": [
+    {
+      "type": 0,
+      "value": "새 글이 늦게 보일 수 있어요."
+    }
+  ],
+  "connection.card.realtimeDownTitle": [
+    {
+      "type": 0,
+      "value": "실시간 연결이 끊겼어요"
+    }
+  ],
+  "connection.card.recovered": [
+    {
+      "type": 0,
+      "value": "다시 연결됐어요"
+    }
+  ],
+  "connection.card.serverUnreachableDetail": [
+    {
+      "type": 0,
+      "value": "잠시 뒤 다시 시도할게요."
+    }
+  ],
+  "connection.card.serverUnreachableTitle": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요"
+    }
+  ],
+  "connection.card.serverUpdatingDetail": [
+    {
+      "type": 0,
+      "value": "곧 다시 연결돼요."
+    }
+  ],
+  "connection.card.serverUpdatingTitle": [
+    {
+      "type": 0,
+      "value": "서버를 업데이트하고 있어요"
+    }
+  ],
+  "connection.card.unknownDetail": [
+    {
+      "type": 0,
+      "value": "다시 시도해 주세요. 계속되면 연결 기록을 복사해 알려 주세요."
+    }
+  ],
+  "connection.card.unknownTitle": [
+    {
+      "type": 0,
+      "value": "연결에 문제가 있어요"
+    }
+  ],
+  "connection.composer.offline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요."
+    }
+  ],
+  "connection.composer.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요."
+    }
+  ],
+  "connection.load.channelListTitle": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.conversationTitle": [
+    {
+      "type": 0,
+      "value": "대화를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.membersTitle": [
+    {
+      "type": 0,
+      "value": "멤버 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.newerTitle": [
+    {
+      "type": 0,
+      "value": "새 글을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.reasonOffline": [
+    {
+      "type": 0,
+      "value": "오프라인이에요. 연결되면 다시 불러올 수 있어요."
+    }
+  ],
+  "connection.load.reasonServer": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."
+    }
+  ],
+  "connection.load.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "문제가 생겼어요. 다시 시도해 주세요."
+    }
+  ],
+  "connection.load.threadTitle": [
+    {
+      "type": 0,
+      "value": "스레드를 불러오지 못했어요"
+    }
+  ],
+  "connection.send.failed": [
+    {
+      "type": 0,
+      "value": "보내지 못했어요"
+    }
+  ],
+  "connection.send.reasonOffline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 보내지 못했어요"
+    }
+  ],
+  "connection.send.reasonRejected": [
+    {
+      "type": 0,
+      "value": "서버가 받지 못했어요"
+    }
+  ],
+  "connection.send.reasonServer": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 보내지 못했어요"
+    }
+  ],
+  "connection.send.resend": [
+    {
+      "type": 0,
+      "value": "다시 보내기"
+    }
+  ],
+  "connection.send.resendAll": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 모두 다시 보내기"
+    }
+  ],
+  "connection.session.expired": [
+    {
+      "type": 0,
+      "value": "로그인이 만료됐어요. 다시 로그인해 주세요."
+    }
+  ],
+  "connection.upload.failedNoArchive": [
+    {
+      "type": 0,
+      "value": "이 서버에는 파일 보관소가 연결돼 있지 않아요"
+    }
+  ],
+  "connection.upload.failedOffline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 올리지 못했어요"
+    }
+  ],
+  "connection.upload.failedServer": [
+    {
+      "type": 0,
+      "value": "서버가 응답하지 않아 올리지 못했어요"
     }
   ],
   "desktop.menu.close": [
@@ -212,6 +614,12 @@ export const catalog: MessageCatalog = {
       "value": "건"
     }
   ],
+  "desktop.tray.closeNotice": [
+    {
+      "type": 0,
+      "value": "창을 닫아도 메뉴 막대에서 계속 알림을 받아요"
+    }
+  ],
   "desktop.tray.more": [
     {
       "type": 0,
@@ -243,6 +651,66 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "oort 열기"
+    }
+  ],
+  "desktop.tray.readAll": [
+    {
+      "type": 0,
+      "value": "모두 읽음 처리"
+    }
+  ],
+  "desktop.tray.remainApprovals": [
+    {
+      "type": 0,
+      "value": "승인 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건은 남아 있어요"
+    }
+  ],
+  "desktop.tray.remainBoth": [
+    {
+      "type": 0,
+      "value": "승인 "
+    },
+    {
+      "type": 2,
+      "value": "approvals",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건, 응답 필요 "
+    },
+    {
+      "type": 2,
+      "value": "panes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "칸은 남아 있어요"
+    }
+  ],
+  "desktop.tray.remainPanes": [
+    {
+      "type": 0,
+      "value": "응답 필요 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "칸은 남아 있어요"
     }
   ],
   "desktop.tray.running": [
@@ -1514,6 +1982,54 @@ export const catalog: MessageCatalog = {
       "value": "이 표현을 지금 쓸 수 없어요. 다시 골라 주세요."
     }
   ],
+  "mobile.attachmentSave.failed": [
+    {
+      "type": 0,
+      "value": "저장하지 못했어요 · 다시 시도"
+    }
+  ],
+  "mobile.attachmentSave.photosDenied": [
+    {
+      "type": 0,
+      "value": "사진 접근이 꺼져 있어요 · 설정 열기"
+    }
+  ],
+  "mobile.attachmentSave.savedToFiles": [
+    {
+      "type": 0,
+      "value": "파일에 저장했어요"
+    }
+  ],
+  "mobile.attachmentSave.savedToPhotos": [
+    {
+      "type": 0,
+      "value": "사진에 저장했어요"
+    }
+  ],
+  "mobile.attachmentSave.saveHintPhotos": [
+    {
+      "type": 0,
+      "value": "사진 보관함에 저장해요"
+    }
+  ],
+  "mobile.attachmentSave.saving": [
+    {
+      "type": 0,
+      "value": "저장하는 중이에요"
+    }
+  ],
+  "mobile.attachmentSave.toFiles": [
+    {
+      "type": 0,
+      "value": "파일에 저장"
+    }
+  ],
+  "mobile.attachmentSave.toPhotos": [
+    {
+      "type": 0,
+      "value": "사진에 저장"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,
@@ -1547,7 +2063,7 @@ export const catalog: MessageCatalog = {
   "mobile.ios.photoLibraryAddUsage": [
     {
       "type": 0,
-      "value": "oort는 사진을 보관함에 저장하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요."
+      "value": "저장을 누른 사진과 영상을 내 사진 보관함에 추가해요. 이 허용으로 보관함을 읽지는 않아요."
     }
   ],
   "mobile.ios.photoLibraryUsage": [
@@ -2128,6 +2644,12 @@ export const catalog: MessageCatalog = {
       "value": "바뀐 점"
     }
   ],
+  "releaseNotes.detail.others": [
+    {
+      "type": 0,
+      "value": "그 밖에 바뀐 점"
+    }
+  ],
   "releaseNotes.detail.tryIt": [
     {
       "type": 0,
@@ -2207,6 +2729,186 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "폰"
+    }
+  ],
+  "releaseNotes.topic.agents": [
+    {
+      "type": 0,
+      "value": "에이전트"
+    }
+  ],
+  "releaseNotes.topic.attachments": [
+    {
+      "type": 0,
+      "value": "첨부"
+    }
+  ],
+  "releaseNotes.topic.conversations": [
+    {
+      "type": 0,
+      "value": "대화"
+    }
+  ],
+  "releaseNotes.topic.notifications": [
+    {
+      "type": 0,
+      "value": "알림"
+    }
+  ],
+  "releaseNotes.topic.settings": [
+    {
+      "type": 0,
+      "value": "설정"
+    }
+  ],
+  "releaseNotes.v0141.agentsChanged": [
+    {
+      "type": 0,
+      "value": "에이전트 목록과 프로필에 이번 달 비용이 보이고, 관리자는 월간 보고서를 볼 수 있어요. 사람끼리의 DM에서 에이전트를 부르면 모두에게 동의를 먼저 물어보고, 모두 동의하면 에이전트가 들어와요."
+    }
+  ],
+  "releaseNotes.v0141.agentsTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 비용과 DM에 에이전트 부르기"
+    }
+  ],
+  "releaseNotes.v0141.agentsTryIt": [
+    {
+      "type": 0,
+      "value": "에이전트 목록과 프로필을 열어 보세요. 관리자라면 데스크탑은 설정 › 사용량, 폰은 설정 › 에이전트 월 보고를 열어 보세요. DM에서는 @로 에이전트를 불러 동의 카드가 뜨는지 봐 주세요."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsChanged": [
+    {
+      "type": 0,
+      "value": "채널 알림이 켜져 있는지 꺼져 있는지 종 아이콘과 글자로 보여 줘요. 누르면 바로 바뀌고, 저장하지 못하면 그 채널만 원래대로 돌아가요."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTitle": [
+    {
+      "type": 0,
+      "value": "채널 알림 켜짐·꺼짐 표시"
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTryIt": [
+    {
+      "type": 0,
+      "value": "폰은 대화 정보 페이지, ⋮ 메뉴, 채널 행 메뉴에서 알림 줄을 눌러 보세요. 데스크탑은 채널 머리의 ⋮ 메뉴와 사이드바 행 메뉴에서 눌러 보세요."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightChanged": [
+    {
+      "type": 0,
+      "value": "입력창이 폰은 4줄, 데스크탑은 5줄까지 늘어난 뒤 안에서 스크롤돼요. 긴 글을 붙여 넣어도 높이가 맞고, 마지막 줄이 잘리지 않아요."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTitle": [
+    {
+      "type": 0,
+      "value": "입력창 높이"
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTryIt": [
+    {
+      "type": 0,
+      "value": "여러 줄을 입력해 보고, 긴 글을 붙여 넣어 보세요."
+    }
+  ],
+  "releaseNotes.v0141.emojiChanged": [
+    {
+      "type": 0,
+      "value": "폰의 반응과 상태에서 표준 이모지를 모두 쓸 수 있어요. 이모지 고르개의 「우리 팀」 칸에서는 팀 이모지, 스티커, GIF를 쓰고 새로 등록해요."
+    }
+  ],
+  "releaseNotes.v0141.emojiTitle": [
+    {
+      "type": 0,
+      "value": "이모지와 팀 이모지"
+    }
+  ],
+  "releaseNotes.v0141.emojiTryIt": [
+    {
+      "type": 0,
+      "value": "폰은 빠른 반응 줄의 +를 눌러 이름으로 찾아 보세요. 폰과 데스크탑 모두 이모지 고르개의 「우리 팀」 칸을 열어 보세요."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationChanged": [
+    {
+      "type": 0,
+      "value": "대화 맨 위 띠가 없어지고 뒤로, 이름, ⋮ 유리 단추 셋이 떠 있어요. 앱으로 돌아오거나 잠금을 풀면 연결이 더 빨리 돌아오고, 대화 맨 위에서 당기면 연결을 다시 확인해요. 메시지를 길게 누르거나 반응을 달 때 가벼운 진동도 와요."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTitle": [
+    {
+      "type": 0,
+      "value": "폰 대화 머리와 다시 연결"
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTryIt": [
+    {
+      "type": 0,
+      "value": "대화를 열어 위로 올려 보고, 앱을 잠시 나갔다 돌아와 보세요. 연결이 끊긴 띠가 보이면 「지금 다시 연결」을 눌러 보세요."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerChanged": [
+    {
+      "type": 0,
+      "value": "사진을 누르면 누른 자리에서 커지며 열리고, 닫으면 그 자리로 돌아가요. 뒤로 가기, Esc, 아래로 끌기로 닫을 수 있고, 동작 줄이기를 켜면 바로 열리고 닫혀요."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTitle": [
+    {
+      "type": 0,
+      "value": "사진 열고 닫기"
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTryIt": [
+    {
+      "type": 0,
+      "value": "대화에 올라온 사진을 눌러 열고, 여러 방법으로 닫아 보세요."
+    }
+  ],
+  "releaseNotes.v0141.settingsChanged": [
+    {
+      "type": 0,
+      "value": "설정 › 프로필 › 언어에서 기기 언어 따르기, 한국어, English를 골라요. 바꾸면 바로 적용되지만 아직 모든 화면이 바뀌지는 않아요. 폰은 설정 › 테마 › 테마 스타일이 전체 화면 고르개를 열어요."
+    }
+  ],
+  "releaseNotes.v0141.settingsTitle": [
+    {
+      "type": 0,
+      "value": "언어 설정과 폰 테마 고르기"
+    }
+  ],
+  "releaseNotes.v0141.settingsTryIt": [
+    {
+      "type": 0,
+      "value": "언어를 바꿔 설정 화면의 글자가 바뀌는지 보세요. 폰에서는 테마 스타일도 하나 골라 보세요."
+    }
+  ],
+  "releaseNotes.v0141.summary": [
+    {
+      "type": 0,
+      "value": "대화 화면이 더 보기 좋아지고, 언어 설정과 팀 이모지, 에이전트 비용이 들어왔어요."
+    }
+  ],
+  "releaseNotes.v0141.typingChanged": [
+    {
+      "type": 0,
+      "value": "입력창 아래에서 누가 쓰고 있는지 이름을 굵게 보여 주고, 점 셋이 움직여요. 동작 줄이기를 켜면 점은 멈춰 있어요."
+    }
+  ],
+  "releaseNotes.v0141.typingTitle": [
+    {
+      "type": 0,
+      "value": "작성 중 표시"
+    }
+  ],
+  "releaseNotes.v0141.typingTryIt": [
+    {
+      "type": 0,
+      "value": "대화에서 다른 사람이나 에이전트가 답을 쓰는 동안 입력창 아래를 봐 주세요."
     }
   ],
   "releaseNotes.version.current": [
@@ -2796,10 +3498,28 @@ export const catalog: MessageCatalog = {
       "value": "글을 위에, 큰 그림을 아래에 둬요. 제목과 설명은 두 줄까지 보여줘요. 큰 그림이 없는 링크는 작게와 같아요."
     }
   ],
+  "settings.connection.noServer": [
+    {
+      "type": 0,
+      "value": "이 기기에 저장된 서버 주소가 없어요."
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,
       "value": "게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있어요."
+    }
+  ],
+  "settings.notifications.alwaysDetail": [
+    {
+      "type": 0,
+      "value": "승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없어요. 한꺼번에 멈추려면 알림 일시 중지를 써요."
+    }
+  ],
+  "settings.notifications.checking": [
+    {
+      "type": 0,
+      "value": "알림 설정을 확인하는 중이에요."
     }
   ],
   "settings.notifications.threadReplyDescription": [
@@ -3300,6 +4020,30 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "축소"
+    }
+  ],
+  "timeline.send.discard": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "timeline.send.failed": [
+    {
+      "type": 0,
+      "value": "전송 실패"
+    }
+  ],
+  "timeline.send.resend": [
+    {
+      "type": 0,
+      "value": "다시 보내기"
+    }
+  ],
+  "timeline.send.sending": [
+    {
+      "type": 0,
+      "value": "전송 중"
     }
   ],
   "timeline.thread.followDismiss": [

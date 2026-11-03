@@ -216,6 +216,7 @@ import {AvatarApprovalSurface} from './avatarApproval';
 import {PinApprovalSurface} from './pinApproval';
 import {ThemeLiveSurface} from './themeLive';
 import {PhotoViewerSurface} from './photoViewer';
+import {ShareAttachSurface} from './shareAttachment';
 
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
@@ -2164,6 +2165,26 @@ const releaseNotesEn = () =>
     },
   });
 
+/**
+ * 승인 카드 하나의 고정 fixture. `approval-card`(결정 전·후 셋)와 `approved`(승인된 뒤, #5172)가 **같은 메시지**로 서서 두 표면이
+ * 서로 다른 카드를 보여 주는 일이 없게 한 곳에서 짓는다. `over` 는 카드 props 를 덮는다(서버가 나중에 고쳐 둔 상태 등).
+ */
+function approvalCardMessage(over: Record<string, unknown> = {}): Message {
+  return {
+    ...MESSAGE,
+    id: '00000000-0000-7000-8000-0000000000b1',
+    type: 'approval_request',
+    body: '툴 호출 승인',
+    authorMemberId: AGENT,
+    props: {
+      approval_id: 'ap-1',
+      title: 'github.search_issues 실행 허가',
+      approval_status: 'pending',
+      ...over,
+    },
+  } as unknown as Message;
+}
+
 export function Surface({name}: {name: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 이슈 #1112 — 고정 여부만 다른 두 시트. 낱말이 상태를 따라 뒤집히는 것을 한
@@ -2327,6 +2348,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     return (
       <NotifyPrimerSurface which={name.slice('notify-primer'.length).replace(/^-/, '')} />
     );
+  }
+
+  // #5207: 첨부 내려받기 공유 시트(시트가 열리고 닫힐 때 목록 자리·닫는 탭이 아래로 새는가). 실제 대화에 파일 카드, 여는 것은 Maestro 의 실제 탭.
+  if (name.startsWith('share-attach')) {
+    return <ShareAttachSurface which={name.slice('share-attach'.length).replace(/^-/, '')} />;
   }
 
   // #4180: 첨부 메뉴(+ 원에서 펼쳐지는 카드). 실제 머리·타임라인·컴포저, 여는 것은 Maestro 의 실제 탭.
@@ -2660,18 +2686,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     // ---- U4-4 M1 (#1084): 승인 카드가 막다른 길이 아니게 됐다 -----------------
     case 'approval-card': {
-      const approvalMessage = {
-        ...MESSAGE,
-        id: '00000000-0000-7000-8000-0000000000b1',
-        type: 'approval_request',
-        body: '툴 호출 승인',
-        authorMemberId: AGENT,
-        props: {
-          approval_id: 'ap-1',
-          title: 'github.search_issues 실행 허가',
-          approval_status: 'pending',
-        },
-      } as unknown as Message;
+      const approvalMessage = approvalCardMessage();
       const gates = new Map([
         [
           'ap-1',
@@ -2710,6 +2725,36 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- #5172: 승인된 뒤의 카드 -----------------------------------------------
+    //
+    // `approval-card` 는 셋째 카드만 승인된 모양이라 「승인됨」 장면만 증거로 쓰려는 캡처(`-momoMeasure APPROVED`)에는 맞는 표면이
+    // 없었다 — 이름을 모르는 하네스는 아래 `default:` 의 오류 안내 화면을 찍었고, 그 사진이 승인된 카드의 증거로 받아들여졌다.
+    // 같은 카드(`approvalCardMessage`)가 승인된 뒤를 두 길로 말한다:
+    //   ① 방금 승인을 누른 직후 — 이 화면의 영수증(`approvalReceipts`)이 카드를 덮는다.
+    //   ② 대화를 다시 열었을 때 — 서버가 카드의 `approval_status` 를 `approved` 로 고쳐 두었고 이 화면에는 영수증이 없다.
+    // 둘 다 배송되는 `MessageRow` 가 그린다.
+    case 'approved':
+      return (
+        <Frame label="승인됨 — 방금 승인한 카드(영수증) / 다시 열었을 때(서버가 알려 준 상태) (#5172)">
+          <MessageRow
+            message={approvalCardMessage()}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalReceipts={
+              new Map([['ap-1', {note: '승인을 기록했어요.', status: 'approved'}]])
+            }
+          />
+          <MessageRow
+            message={approvalCardMessage({approval_status: 'approved'})}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+        </Frame>
+      );
     // ---- U4-4 M2 (#1083): 시간과 경계 ----------------------------------------
     case 'group': {
       // 한 사람이 연달아 쓴 그룹. 이 goal 의 논점 둘이 여기서만 보인다:
@@ -3044,6 +3089,67 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- #5210: 보내지 못한 메시지의 아이콘 둘 -----------------------------------
+    //
+    // 새로고침(다시 보내기) · 빨간 X(지우기). owner 에게 보여 줄 장면이라 확정 행 → 글이 실패한 행 → 첨부가 실패한
+    // 행을 한 화면에 세운다. 캡처: `-momoMeasure SEND-FAILED`(다크) · `-momoMeasure LIGHT-SEND-FAILED`(라이트).
+    case 'send-failed': {
+      const failed = (
+        clientMsgId: string,
+        body: string,
+        extra: Record<string, unknown> = {},
+      ) => ({
+        clientMsgId,
+        channelId: 'ch',
+        authorMemberId: SELF,
+        body,
+        status: 'failed',
+        sinceSeq: null,
+        createdAtMs: NOW,
+        ...extra,
+      });
+      return (
+        <Frame label="보내지 못한 메시지 — 새로고침(다시 보내기) · 빨간 X(지우기)">
+          <MessageRow
+            message={
+              {
+                ...MESSAGE,
+                id: 'confirmed',
+                seq: 60,
+                thread: undefined,
+                authorMemberId: OTHER,
+                body: '금요일 배포 공지 초안이에요. 이대로 올려도 될까요?',
+              } as Message
+            }
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <PendingRow
+            pending={failed('c-1', '좋아요, 제목만 조금 짧게 바꿔서 올릴게요.') as never}
+            startsGroup
+            directory={DIRECTORY}
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+          <PendingRow
+            pending={
+              failed('c-2', '견적서와 회의록 같이 보내요', {
+                attachments: [
+                  {id: 'att-1', name: '견적서-2026-11.pdf', mime: 'application/pdf', sizeBytes: 186_368},
+                  {id: 'att-2', name: '회의록-1102.pdf', mime: 'application/pdf', sizeBytes: 65_536},
+                ],
+              }) as never
+            }
+            startsGroup
+            directory={DIRECTORY}
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+        </Frame>
+      );
+    }
     // ---- U4-5M (#1097): 폰 위생 · 착지 틴트 · 기준선 ------------------------
     //
     // 셋 다 **한 장에 한 논점**이다. 위생 결함은 옆에 비교 대상이 없으면 사진에서
@@ -3094,6 +3200,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             startsGroup={false}
             directory={DIRECTORY}
             onResend={() => {}}
+            onDiscard={() => {}}
           />
         </Frame>
       );
@@ -5199,7 +5306,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         <Frame label={`알 수 없는 표면: ${name}`}>
           <Text style={styles.label}>
             sheet · delete · editor · editor-error · row · row-lead ·
-            approval-card · approval-notes · avatar · composer-offline ·
+            approval-card · approved · approval-notes · avatar · composer-offline ·
             composer-placeholder · composer-growth ·
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
             team-board · work-detail · agent-sessions ·

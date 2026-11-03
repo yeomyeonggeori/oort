@@ -2,11 +2,15 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PICKER_EMOJI } from "@/features/emoji/EmojiPickerDialog";
+import { HOVER_TOOLBAR_NEIGHBOR_SELECTOR } from "../../../scripts/lib/hoverToolbarOverlap.mjs";
 import {
+  belowStraddleRect,
   HOVER_TOOLBAR_REACTION_SEED,
   HOVER_TOOLBAR_SLOT_COUNT,
   rectsIntersect,
+  shouldFlipToolbarBelow,
   shouldShowHoverToolbar,
+  TOOLBAR_NEIGHBOR_SELECTOR,
   toolbarClipsScrollerTop,
 } from "./hoverToolbarModel";
 
@@ -118,6 +122,58 @@ describe("toolbarClipsScrollerTop", () => {
     expect(
       toolbarClipsScrollerTop({ top: 80 }, { top: 45, height: 700 })
     ).toBe(false);
+  });
+});
+
+// 390 열의 숫자 그대로(#5179 레인 실측): 막대 x 151~374, 위 자리 y 329~371(키 42), 포인터 행 y 365~399, 앞 행 마지막 줄 x 56~214 y 337~355.
+describe("shouldFlipToolbarBelow (#5179)", () => {
+  const bar = { left: 151, right: 374, top: 329, bottom: 371 };
+  const row = { top: 365, bottom: 399 };
+  const scroller = { top: 120, bottom: 800, height: 680 };
+  const reaching = { left: 56, right: 214, top: 337, bottom: 355 };
+  const short = { left: 56, right: 121, top: 337, bottom: 355 };
+  const nextHead = { left: 56, right: 150, top: 415, bottom: 433 };
+  const nextLong = { left: 56, right: 360, top: 410, bottom: 428 };
+  const never = () => {
+    throw new Error("이 이웃은 재면 안 된다");
+  };
+
+  it("아래 자리는 위 자리와 같은 산식으로 선다: 행 하단에서 행 안 깊이만큼 위", () => {
+    // 위 자리의 막대 하단이 행 안으로 6 들어온다 → 아래 자리의 상단은 행 하단 − 6, 키는 그대로.
+    expect(belowStraddleRect(bar, row)).toEqual({ left: 151, right: 374, top: 393, bottom: 435 });
+  });
+
+  it("앞 이웃 글자에 안 닿으면 위 그대로이고 뒤 이웃은 재지도 않는다", () => {
+    expect(shouldFlipToolbarBelow({ bar, row, scroller, prevText: () => [short], nextText: never })).toBe(false);
+    expect(shouldFlipToolbarBelow({ bar, row, scroller, prevText: () => [], nextText: never })).toBe(false);
+  });
+
+  it("앞 이웃 마지막 줄을 덮고 아래 자리는 뒤 이웃 글자를 안 덮으면 아래로 뒤집는다", () => {
+    expect(shouldFlipToolbarBelow({ bar, row, scroller, prevText: () => [reaching], nextText: () => [nextHead] })).toBe(true);
+  });
+
+  it("아래로 뒤집으면 뒤 이웃 글자를 새로 덮을 때는 위 그대로다(한 겹침을 다른 겹침으로 바꾸지 않는다)", () => {
+    expect(shouldFlipToolbarBelow({ bar, row, scroller, prevText: () => [reaching], nextText: () => [nextLong] })).toBe(false);
+  });
+
+  it("아래 자리가 스크롤러 아래로 잘리면 위 그대로다", () => {
+    const tight = { top: 120, bottom: 420, height: 300 };
+    expect(shouldFlipToolbarBelow({ bar, row, scroller: tight, prevText: () => [reaching], nextText: () => [] })).toBe(false);
+  });
+
+  it("위가 스크롤러 위에 막히면 이웃을 재기 전에 뒤집는다(옛 규칙 H-4가 먼저)", () => {
+    const clipped = { top: 340, bottom: 800, height: 460 };
+    expect(shouldFlipToolbarBelow({ bar, row, scroller: clipped, prevText: never, nextText: never })).toBe(true);
+  });
+
+  it("행을 못 찾으면(타임라인 밖) 이웃 글자는 보지 않고 위 그대로다", () => {
+    expect(shouldFlipToolbarBelow({ bar, row: null, scroller, prevText: never, nextText: never })).toBe(false);
+  });
+});
+
+describe("이웃 목록 (#5179)", () => {
+  it("뒤집기 규칙의 이웃 목록은 겹침 단정의 자와 같은 목록이다(자가 본 칸을 규칙도 본다)", () => {
+    expect(TOOLBAR_NEIGHBOR_SELECTOR).toBe(HOVER_TOOLBAR_NEIGHBOR_SELECTOR);
   });
 });
 

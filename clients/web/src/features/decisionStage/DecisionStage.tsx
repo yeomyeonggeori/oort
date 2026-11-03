@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Check, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useSession } from "@/app/session";
+import { useOffline } from "@/features/common/useOffline";
 import { IS_TAURI } from "@/lib/env";
 import { cn } from "@/design/lib/cn";
 import { STAGE_HERO_WINDOW_MS } from "@/design/motion";
@@ -43,7 +44,8 @@ export function DecisionStage({ request, open, onClose }: {
   open: boolean;
   onClose: () => void;
 }) {
-  const { workspaceId, connStatus } = useSession();
+  const { workspaceId } = useSession();
+  const offline = useOffline();
   const [nowMs, setNowMs] = useState(Date.now);
   const [selection, setSelection] = useState(() => createDecisionStage(
     request.cards.map((entry) => ({
@@ -75,7 +77,6 @@ export function DecisionStage({ request, open, onClose }: {
   activeId.current = current?.id;
   const hero = useStageHero({ open, selectedId: current?.id ?? null, source: request.source, onClose });
   const { state: stage, content, panel, enter, noPhoto, requestClose: closeHero } = hero;
-  const offline = connStatus !== "connected";
   const sameWorkspace = workspaceId === request.workspaceId;
   const sending = () => Boolean(panel.current?.querySelector("[data-decision][data-busy]"));
   const navigable = () => open && stage.phase === "open" && !feedback && !complete && !sending();

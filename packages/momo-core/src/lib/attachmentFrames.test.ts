@@ -52,6 +52,35 @@ describe("realtime attachments", () => {
     expect(parsed.map((a) => a.id)).toEqual(["att-1", "att-3"]);
   });
 
+  it("carries a video's media summary through the live frame (#5208)", () => {
+    const media = { kind: "video", durationMs: 42_000, width: 1280, height: 720, hasPoster: true };
+    const parsed = attachmentsFromWire([
+      { id: "att-v", name: "IMG_0001.MOV", mime: "video/quicktime", sizeBytes: 61_200_000, media },
+    ]);
+    expect(parsed).toEqual([
+      { id: "att-v", name: "IMG_0001.MOV", mime: "video/quicktime", sizeBytes: 61_200_000, media },
+    ]);
+  });
+
+  it("drops only a malformed media summary and keeps the attachment (#5208)", () => {
+    const parsed = attachmentsFromWire([
+      {
+        id: "att-v",
+        name: "IMG_0001.MOV",
+        mime: "video/quicktime",
+        sizeBytes: 9,
+        media: { kind: "video", durationMs: -1, width: 1, height: 1, hasPoster: true },
+      },
+    ]);
+    expect(parsed).toHaveLength(1);
+    expect("media" in (parsed[0] ?? {})).toBe(false);
+  });
+
+  it("does not invent a media key for a photo or a document (#5208)", () => {
+    const parsed = attachmentsFromWire([{ id: "a", name: "a.png", mime: "image/png", sizeBytes: 1 }]);
+    expect("media" in (parsed[0] ?? {})).toBe(false);
+  });
+
   it("answers empty for anything that is not an array", () => {
     expect(attachmentsFromWire(undefined)).toEqual([]);
     expect(attachmentsFromWire(null)).toEqual([]);

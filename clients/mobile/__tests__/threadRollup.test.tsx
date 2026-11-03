@@ -198,7 +198,7 @@ function panelTimeline(messages: Message[]): UseTimelineResult {
     recoveryMarkers: [],
     pending: [],
     send: async () => {},
-    resend: async () => {},
+    resend: async () => {}, discard: () => null,
     toggleReaction: async () => {},
     editBody: async () => {},
     removeMessage: async () => {},

@@ -3,6 +3,24 @@ export const messageKeys = [
   "attachments.tray.noticeDismiss",
   "attachments.tray.overflow",
   "attachments.tray.removeNamed",
+  "attachments.video.cardLabel",
+  "attachments.video.cardLabelNoDuration",
+  "attachments.video.failed",
+  "attachments.video.gone",
+  "attachments.video.loading",
+  "attachments.video.mute",
+  "attachments.video.pause",
+  "attachments.video.play",
+  "attachments.video.replay",
+  "attachments.video.retry",
+  "attachments.video.saveHint",
+  "attachments.video.seekLabel",
+  "attachments.video.seekValue",
+  "attachments.video.thumbHint",
+  "attachments.video.thumbLabel",
+  "attachments.video.unmute",
+  "attachments.viewer.mixedCaption",
+  "attachments.viewer.mixedCaptionLabel",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -10,6 +28,44 @@ export const messageKeys = [
   "connect.language.hint",
   "connect.rememberEmail.hint",
   "connect.rememberEmail.label",
+  "connection.action.reconnectNow",
+  "connection.action.retry",
+  "connection.approval.offline",
+  "connection.approval.serverUnreachable",
+  "connection.boot.unreachable",
+  "connection.card.connecting",
+  "connection.card.lastSynced",
+  "connection.card.offlineDetail",
+  "connection.card.offlineTitle",
+  "connection.card.realtimeDownDetail",
+  "connection.card.realtimeDownTitle",
+  "connection.card.recovered",
+  "connection.card.serverUnreachableDetail",
+  "connection.card.serverUnreachableTitle",
+  "connection.card.serverUpdatingDetail",
+  "connection.card.serverUpdatingTitle",
+  "connection.card.unknownDetail",
+  "connection.card.unknownTitle",
+  "connection.composer.offline",
+  "connection.composer.serverUnreachable",
+  "connection.load.channelListTitle",
+  "connection.load.conversationTitle",
+  "connection.load.membersTitle",
+  "connection.load.newerTitle",
+  "connection.load.reasonOffline",
+  "connection.load.reasonServer",
+  "connection.load.reasonUnknown",
+  "connection.load.threadTitle",
+  "connection.send.failed",
+  "connection.send.reasonOffline",
+  "connection.send.reasonRejected",
+  "connection.send.reasonServer",
+  "connection.send.resend",
+  "connection.send.resendAll",
+  "connection.session.expired",
+  "connection.upload.failedNoArchive",
+  "connection.upload.failedOffline",
+  "connection.upload.failedServer",
   "desktop.menu.close",
   "desktop.menu.copy",
   "desktop.menu.cut",
@@ -29,10 +85,15 @@ export const messageKeys = [
   "desktop.menu.view",
   "desktop.menu.window",
   "desktop.notify.threadSummary",
+  "desktop.tray.closeNotice",
   "desktop.tray.more",
   "desktop.tray.newMessage",
   "desktop.tray.none",
   "desktop.tray.open",
+  "desktop.tray.readAll",
+  "desktop.tray.remainApprovals",
+  "desktop.tray.remainBoth",
+  "desktop.tray.remainPanes",
   "desktop.tray.running",
   "desktop.tray.stateBlocked",
   "desktop.tray.stateWorking",
@@ -233,6 +294,14 @@ export const messageKeys = [
   "expressions.sheet.tabTeam",
   "expressions.sheet.title",
   "expressions.sheet.unavailable",
+  "mobile.attachmentSave.failed",
+  "mobile.attachmentSave.photosDenied",
+  "mobile.attachmentSave.savedToFiles",
+  "mobile.attachmentSave.savedToPhotos",
+  "mobile.attachmentSave.saveHintPhotos",
+  "mobile.attachmentSave.saving",
+  "mobile.attachmentSave.toFiles",
+  "mobile.attachmentSave.toPhotos",
   "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
@@ -326,6 +395,7 @@ export const messageKeys = [
   "releaseNotes.action.details",
   "releaseNotes.detail.back",
   "releaseNotes.detail.changed",
+  "releaseNotes.detail.others",
   "releaseNotes.detail.tryIt",
   "releaseNotes.page.back",
   "releaseNotes.page.description",
@@ -338,6 +408,36 @@ export const messageKeys = [
   "releaseNotes.surface.desktop",
   "releaseNotes.surface.label",
   "releaseNotes.surface.phone",
+  "releaseNotes.topic.agents",
+  "releaseNotes.topic.attachments",
+  "releaseNotes.topic.conversations",
+  "releaseNotes.topic.notifications",
+  "releaseNotes.topic.settings",
+  "releaseNotes.v0141.agentsChanged",
+  "releaseNotes.v0141.agentsTitle",
+  "releaseNotes.v0141.agentsTryIt",
+  "releaseNotes.v0141.channelNotificationsChanged",
+  "releaseNotes.v0141.channelNotificationsTitle",
+  "releaseNotes.v0141.channelNotificationsTryIt",
+  "releaseNotes.v0141.composerHeightChanged",
+  "releaseNotes.v0141.composerHeightTitle",
+  "releaseNotes.v0141.composerHeightTryIt",
+  "releaseNotes.v0141.emojiChanged",
+  "releaseNotes.v0141.emojiTitle",
+  "releaseNotes.v0141.emojiTryIt",
+  "releaseNotes.v0141.phoneConversationChanged",
+  "releaseNotes.v0141.phoneConversationTitle",
+  "releaseNotes.v0141.phoneConversationTryIt",
+  "releaseNotes.v0141.photoViewerChanged",
+  "releaseNotes.v0141.photoViewerTitle",
+  "releaseNotes.v0141.photoViewerTryIt",
+  "releaseNotes.v0141.settingsChanged",
+  "releaseNotes.v0141.settingsTitle",
+  "releaseNotes.v0141.settingsTryIt",
+  "releaseNotes.v0141.summary",
+  "releaseNotes.v0141.typingChanged",
+  "releaseNotes.v0141.typingTitle",
+  "releaseNotes.v0141.typingTryIt",
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
@@ -409,7 +509,10 @@ export const messageKeys = [
   "settings.appearance.linkPreviewOffHint",
   "settings.appearance.linkPreviewRich",
   "settings.appearance.linkPreviewRichHint",
+  "settings.connection.noServer",
   "settings.invite.guestInvitesPaused",
+  "settings.notifications.alwaysDetail",
+  "settings.notifications.checking",
   "settings.notifications.threadReplyDescription",
   "settings.notifications.threadReplyName",
   "settings.profile.languageCurrent",
@@ -492,6 +595,10 @@ export const messageKeys = [
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.send.discard",
+  "timeline.send.failed",
+  "timeline.send.resend",
+  "timeline.send.sending",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
   "timeline.thread.followHint",
@@ -625,6 +732,40 @@ export const argumentSpecs = {
   "attachments.tray.removeNamed": {
     "name": "string"
   },
+  "attachments.video.cardLabel": {
+    "duration": "string",
+    "name": "string"
+  },
+  "attachments.video.cardLabelNoDuration": {
+    "name": "string"
+  },
+  "attachments.video.failed": {},
+  "attachments.video.gone": {},
+  "attachments.video.loading": {},
+  "attachments.video.mute": {},
+  "attachments.video.pause": {},
+  "attachments.video.play": {},
+  "attachments.video.replay": {},
+  "attachments.video.retry": {},
+  "attachments.video.saveHint": {},
+  "attachments.video.seekLabel": {},
+  "attachments.video.seekValue": {
+    "position": "string",
+    "total": "string"
+  },
+  "attachments.video.thumbHint": {},
+  "attachments.video.thumbLabel": {
+    "position": "number"
+  },
+  "attachments.video.unmute": {},
+  "attachments.viewer.mixedCaption": {
+    "position": "number",
+    "total": "number"
+  },
+  "attachments.viewer.mixedCaptionLabel": {
+    "position": "number",
+    "total": "number"
+  },
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -636,6 +777,48 @@ export const argumentSpecs = {
   "connect.language.hint": {},
   "connect.rememberEmail.hint": {},
   "connect.rememberEmail.label": {},
+  "connection.action.reconnectNow": {},
+  "connection.action.retry": {},
+  "connection.approval.offline": {},
+  "connection.approval.serverUnreachable": {},
+  "connection.boot.unreachable": {},
+  "connection.card.connecting": {},
+  "connection.card.lastSynced": {
+    "relativeTime": "string"
+  },
+  "connection.card.offlineDetail": {},
+  "connection.card.offlineTitle": {},
+  "connection.card.realtimeDownDetail": {},
+  "connection.card.realtimeDownTitle": {},
+  "connection.card.recovered": {},
+  "connection.card.serverUnreachableDetail": {},
+  "connection.card.serverUnreachableTitle": {},
+  "connection.card.serverUpdatingDetail": {},
+  "connection.card.serverUpdatingTitle": {},
+  "connection.card.unknownDetail": {},
+  "connection.card.unknownTitle": {},
+  "connection.composer.offline": {},
+  "connection.composer.serverUnreachable": {},
+  "connection.load.channelListTitle": {},
+  "connection.load.conversationTitle": {},
+  "connection.load.membersTitle": {},
+  "connection.load.newerTitle": {},
+  "connection.load.reasonOffline": {},
+  "connection.load.reasonServer": {},
+  "connection.load.reasonUnknown": {},
+  "connection.load.threadTitle": {},
+  "connection.send.failed": {},
+  "connection.send.reasonOffline": {},
+  "connection.send.reasonRejected": {},
+  "connection.send.reasonServer": {},
+  "connection.send.resend": {},
+  "connection.send.resendAll": {
+    "count": "number"
+  },
+  "connection.session.expired": {},
+  "connection.upload.failedNoArchive": {},
+  "connection.upload.failedOffline": {},
+  "connection.upload.failedServer": {},
   "desktop.menu.close": {},
   "desktop.menu.copy": {},
   "desktop.menu.cut": {},
@@ -657,12 +840,24 @@ export const argumentSpecs = {
   "desktop.notify.threadSummary": {
     "count": "number"
   },
+  "desktop.tray.closeNotice": {},
   "desktop.tray.more": {
     "count": "number"
   },
   "desktop.tray.newMessage": {},
   "desktop.tray.none": {},
   "desktop.tray.open": {},
+  "desktop.tray.readAll": {},
+  "desktop.tray.remainApprovals": {
+    "count": "number"
+  },
+  "desktop.tray.remainBoth": {
+    "approvals": "number",
+    "panes": "number"
+  },
+  "desktop.tray.remainPanes": {
+    "count": "number"
+  },
   "desktop.tray.running": {},
   "desktop.tray.stateBlocked": {},
   "desktop.tray.stateWorking": {},
@@ -885,6 +1080,14 @@ export const argumentSpecs = {
   "expressions.sheet.tabTeam": {},
   "expressions.sheet.title": {},
   "expressions.sheet.unavailable": {},
+  "mobile.attachmentSave.failed": {},
+  "mobile.attachmentSave.photosDenied": {},
+  "mobile.attachmentSave.savedToFiles": {},
+  "mobile.attachmentSave.savedToPhotos": {},
+  "mobile.attachmentSave.saveHintPhotos": {},
+  "mobile.attachmentSave.saving": {},
+  "mobile.attachmentSave.toFiles": {},
+  "mobile.attachmentSave.toPhotos": {},
   "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
@@ -993,6 +1196,7 @@ export const argumentSpecs = {
   "releaseNotes.action.details": {},
   "releaseNotes.detail.back": {},
   "releaseNotes.detail.changed": {},
+  "releaseNotes.detail.others": {},
   "releaseNotes.detail.tryIt": {},
   "releaseNotes.page.back": {},
   "releaseNotes.page.description": {},
@@ -1007,6 +1211,36 @@ export const argumentSpecs = {
   "releaseNotes.surface.desktop": {},
   "releaseNotes.surface.label": {},
   "releaseNotes.surface.phone": {},
+  "releaseNotes.topic.agents": {},
+  "releaseNotes.topic.attachments": {},
+  "releaseNotes.topic.conversations": {},
+  "releaseNotes.topic.notifications": {},
+  "releaseNotes.topic.settings": {},
+  "releaseNotes.v0141.agentsChanged": {},
+  "releaseNotes.v0141.agentsTitle": {},
+  "releaseNotes.v0141.agentsTryIt": {},
+  "releaseNotes.v0141.channelNotificationsChanged": {},
+  "releaseNotes.v0141.channelNotificationsTitle": {},
+  "releaseNotes.v0141.channelNotificationsTryIt": {},
+  "releaseNotes.v0141.composerHeightChanged": {},
+  "releaseNotes.v0141.composerHeightTitle": {},
+  "releaseNotes.v0141.composerHeightTryIt": {},
+  "releaseNotes.v0141.emojiChanged": {},
+  "releaseNotes.v0141.emojiTitle": {},
+  "releaseNotes.v0141.emojiTryIt": {},
+  "releaseNotes.v0141.phoneConversationChanged": {},
+  "releaseNotes.v0141.phoneConversationTitle": {},
+  "releaseNotes.v0141.phoneConversationTryIt": {},
+  "releaseNotes.v0141.photoViewerChanged": {},
+  "releaseNotes.v0141.photoViewerTitle": {},
+  "releaseNotes.v0141.photoViewerTryIt": {},
+  "releaseNotes.v0141.settingsChanged": {},
+  "releaseNotes.v0141.settingsTitle": {},
+  "releaseNotes.v0141.settingsTryIt": {},
+  "releaseNotes.v0141.summary": {},
+  "releaseNotes.v0141.typingChanged": {},
+  "releaseNotes.v0141.typingTitle": {},
+  "releaseNotes.v0141.typingTryIt": {},
   "releaseNotes.version.current": {},
   "releaseNotes.version.label": {
     "version": "string"
@@ -1121,7 +1355,10 @@ export const argumentSpecs = {
   "settings.appearance.linkPreviewOffHint": {},
   "settings.appearance.linkPreviewRich": {},
   "settings.appearance.linkPreviewRichHint": {},
+  "settings.connection.noServer": {},
   "settings.invite.guestInvitesPaused": {},
+  "settings.notifications.alwaysDetail": {},
+  "settings.notifications.checking": {},
   "settings.notifications.threadReplyDescription": {},
   "settings.notifications.threadReplyName": {},
   "settings.profile.languageCurrent": {
@@ -1208,6 +1445,10 @@ export const argumentSpecs = {
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.send.discard": {},
+  "timeline.send.failed": {},
+  "timeline.send.resend": {},
+  "timeline.send.sending": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
   "timeline.thread.followHint": {},
@@ -1415,6 +1656,24 @@ export interface MessageArgs {
   "attachments.tray.noticeDismiss": Record<string, never>;
   "attachments.tray.overflow": { count: number; max: number };
   "attachments.tray.removeNamed": { name: string };
+  "attachments.video.cardLabel": { duration: string; name: string };
+  "attachments.video.cardLabelNoDuration": { name: string };
+  "attachments.video.failed": Record<string, never>;
+  "attachments.video.gone": Record<string, never>;
+  "attachments.video.loading": Record<string, never>;
+  "attachments.video.mute": Record<string, never>;
+  "attachments.video.pause": Record<string, never>;
+  "attachments.video.play": Record<string, never>;
+  "attachments.video.replay": Record<string, never>;
+  "attachments.video.retry": Record<string, never>;
+  "attachments.video.saveHint": Record<string, never>;
+  "attachments.video.seekLabel": Record<string, never>;
+  "attachments.video.seekValue": { position: string; total: string };
+  "attachments.video.thumbHint": Record<string, never>;
+  "attachments.video.thumbLabel": { position: number };
+  "attachments.video.unmute": Record<string, never>;
+  "attachments.viewer.mixedCaption": { position: number; total: number };
+  "attachments.viewer.mixedCaptionLabel": { position: number; total: number };
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
@@ -1422,6 +1681,44 @@ export interface MessageArgs {
   "connect.language.hint": Record<string, never>;
   "connect.rememberEmail.hint": Record<string, never>;
   "connect.rememberEmail.label": Record<string, never>;
+  "connection.action.reconnectNow": Record<string, never>;
+  "connection.action.retry": Record<string, never>;
+  "connection.approval.offline": Record<string, never>;
+  "connection.approval.serverUnreachable": Record<string, never>;
+  "connection.boot.unreachable": Record<string, never>;
+  "connection.card.connecting": Record<string, never>;
+  "connection.card.lastSynced": { relativeTime: string };
+  "connection.card.offlineDetail": Record<string, never>;
+  "connection.card.offlineTitle": Record<string, never>;
+  "connection.card.realtimeDownDetail": Record<string, never>;
+  "connection.card.realtimeDownTitle": Record<string, never>;
+  "connection.card.recovered": Record<string, never>;
+  "connection.card.serverUnreachableDetail": Record<string, never>;
+  "connection.card.serverUnreachableTitle": Record<string, never>;
+  "connection.card.serverUpdatingDetail": Record<string, never>;
+  "connection.card.serverUpdatingTitle": Record<string, never>;
+  "connection.card.unknownDetail": Record<string, never>;
+  "connection.card.unknownTitle": Record<string, never>;
+  "connection.composer.offline": Record<string, never>;
+  "connection.composer.serverUnreachable": Record<string, never>;
+  "connection.load.channelListTitle": Record<string, never>;
+  "connection.load.conversationTitle": Record<string, never>;
+  "connection.load.membersTitle": Record<string, never>;
+  "connection.load.newerTitle": Record<string, never>;
+  "connection.load.reasonOffline": Record<string, never>;
+  "connection.load.reasonServer": Record<string, never>;
+  "connection.load.reasonUnknown": Record<string, never>;
+  "connection.load.threadTitle": Record<string, never>;
+  "connection.send.failed": Record<string, never>;
+  "connection.send.reasonOffline": Record<string, never>;
+  "connection.send.reasonRejected": Record<string, never>;
+  "connection.send.reasonServer": Record<string, never>;
+  "connection.send.resend": Record<string, never>;
+  "connection.send.resendAll": { count: number };
+  "connection.session.expired": Record<string, never>;
+  "connection.upload.failedNoArchive": Record<string, never>;
+  "connection.upload.failedOffline": Record<string, never>;
+  "connection.upload.failedServer": Record<string, never>;
   "desktop.menu.close": Record<string, never>;
   "desktop.menu.copy": Record<string, never>;
   "desktop.menu.cut": Record<string, never>;
@@ -1441,10 +1738,15 @@ export interface MessageArgs {
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
   "desktop.notify.threadSummary": { count: number };
+  "desktop.tray.closeNotice": Record<string, never>;
   "desktop.tray.more": { count: number };
   "desktop.tray.newMessage": Record<string, never>;
   "desktop.tray.none": Record<string, never>;
   "desktop.tray.open": Record<string, never>;
+  "desktop.tray.readAll": Record<string, never>;
+  "desktop.tray.remainApprovals": { count: number };
+  "desktop.tray.remainBoth": { approvals: number; panes: number };
+  "desktop.tray.remainPanes": { count: number };
   "desktop.tray.running": Record<string, never>;
   "desktop.tray.stateBlocked": Record<string, never>;
   "desktop.tray.stateWorking": Record<string, never>;
@@ -1645,6 +1947,14 @@ export interface MessageArgs {
   "expressions.sheet.tabTeam": Record<string, never>;
   "expressions.sheet.title": Record<string, never>;
   "expressions.sheet.unavailable": Record<string, never>;
+  "mobile.attachmentSave.failed": Record<string, never>;
+  "mobile.attachmentSave.photosDenied": Record<string, never>;
+  "mobile.attachmentSave.savedToFiles": Record<string, never>;
+  "mobile.attachmentSave.savedToPhotos": Record<string, never>;
+  "mobile.attachmentSave.saveHintPhotos": Record<string, never>;
+  "mobile.attachmentSave.saving": Record<string, never>;
+  "mobile.attachmentSave.toFiles": Record<string, never>;
+  "mobile.attachmentSave.toPhotos": Record<string, never>;
   "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
@@ -1738,6 +2048,7 @@ export interface MessageArgs {
   "releaseNotes.action.details": Record<string, never>;
   "releaseNotes.detail.back": Record<string, never>;
   "releaseNotes.detail.changed": Record<string, never>;
+  "releaseNotes.detail.others": Record<string, never>;
   "releaseNotes.detail.tryIt": Record<string, never>;
   "releaseNotes.page.back": Record<string, never>;
   "releaseNotes.page.description": Record<string, never>;
@@ -1750,6 +2061,36 @@ export interface MessageArgs {
   "releaseNotes.surface.desktop": Record<string, never>;
   "releaseNotes.surface.label": Record<string, never>;
   "releaseNotes.surface.phone": Record<string, never>;
+  "releaseNotes.topic.agents": Record<string, never>;
+  "releaseNotes.topic.attachments": Record<string, never>;
+  "releaseNotes.topic.conversations": Record<string, never>;
+  "releaseNotes.topic.notifications": Record<string, never>;
+  "releaseNotes.topic.settings": Record<string, never>;
+  "releaseNotes.v0141.agentsChanged": Record<string, never>;
+  "releaseNotes.v0141.agentsTitle": Record<string, never>;
+  "releaseNotes.v0141.agentsTryIt": Record<string, never>;
+  "releaseNotes.v0141.channelNotificationsChanged": Record<string, never>;
+  "releaseNotes.v0141.channelNotificationsTitle": Record<string, never>;
+  "releaseNotes.v0141.channelNotificationsTryIt": Record<string, never>;
+  "releaseNotes.v0141.composerHeightChanged": Record<string, never>;
+  "releaseNotes.v0141.composerHeightTitle": Record<string, never>;
+  "releaseNotes.v0141.composerHeightTryIt": Record<string, never>;
+  "releaseNotes.v0141.emojiChanged": Record<string, never>;
+  "releaseNotes.v0141.emojiTitle": Record<string, never>;
+  "releaseNotes.v0141.emojiTryIt": Record<string, never>;
+  "releaseNotes.v0141.phoneConversationChanged": Record<string, never>;
+  "releaseNotes.v0141.phoneConversationTitle": Record<string, never>;
+  "releaseNotes.v0141.phoneConversationTryIt": Record<string, never>;
+  "releaseNotes.v0141.photoViewerChanged": Record<string, never>;
+  "releaseNotes.v0141.photoViewerTitle": Record<string, never>;
+  "releaseNotes.v0141.photoViewerTryIt": Record<string, never>;
+  "releaseNotes.v0141.settingsChanged": Record<string, never>;
+  "releaseNotes.v0141.settingsTitle": Record<string, never>;
+  "releaseNotes.v0141.settingsTryIt": Record<string, never>;
+  "releaseNotes.v0141.summary": Record<string, never>;
+  "releaseNotes.v0141.typingChanged": Record<string, never>;
+  "releaseNotes.v0141.typingTitle": Record<string, never>;
+  "releaseNotes.v0141.typingTryIt": Record<string, never>;
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
@@ -1821,7 +2162,10 @@ export interface MessageArgs {
   "settings.appearance.linkPreviewOffHint": Record<string, never>;
   "settings.appearance.linkPreviewRich": Record<string, never>;
   "settings.appearance.linkPreviewRichHint": Record<string, never>;
+  "settings.connection.noServer": Record<string, never>;
   "settings.invite.guestInvitesPaused": Record<string, never>;
+  "settings.notifications.alwaysDetail": Record<string, never>;
+  "settings.notifications.checking": Record<string, never>;
   "settings.notifications.threadReplyDescription": Record<string, never>;
   "settings.notifications.threadReplyName": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
@@ -1904,6 +2248,10 @@ export interface MessageArgs {
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.send.discard": Record<string, never>;
+  "timeline.send.failed": Record<string, never>;
+  "timeline.send.resend": Record<string, never>;
+  "timeline.send.sending": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
   "timeline.thread.followHint": Record<string, never>;

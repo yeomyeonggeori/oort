@@ -5,6 +5,7 @@ import {
   messageUnfurlFromWire,
   type MessageUnfurl,
 } from "../features/timeline/unfurl";
+import { attachmentMediaFromWire } from "./attachmentMedia";
 import { num, str } from "./wire";
 
 
@@ -389,7 +390,9 @@ export function attachmentsFromWire(value: unknown): MessageAttachment[] {
       dropped += 1;
       continue;
     }
-    parsed.push({ id, name, mime, sizeBytes });
+    // #5208 — 영상의 길이·치수·포스터 유무. 어긋난 요약은 요약만 버리고 첨부는 남긴다(키 자체를 만들지 않는다).
+    const media = attachmentMediaFromWire((entry as { media?: unknown }).media);
+    parsed.push(media === undefined ? { id, name, mime, sizeBytes } : { id, name, mime, sizeBytes, media });
   }
   // 화면에는 말하지 않지만 **개발자 채널에는 흔적을 남긴다** (리뷰 N-D).
   //

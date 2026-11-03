@@ -202,3 +202,45 @@ export function huddleParticipantSummary(huddle: Huddle): string {
   if (names.length <= 2) return names.join(", ");
   return `${names.slice(0, 2).join(", ")} 외 ${names.length - 2}명`;
 }
+
+/**
+ * 채널 머리의 허들 표면이 읽는 사실 셋 (#5206 · #5184). 웹 `useHuddle`의 컨트롤러가 이 모양을 그대로 만족한다.
+ */
+export interface HuddleHeaderFacts {
+  /** 오디오가 붙었다. REST 투영과 별개의 진실 면이라, 붙은 뒤에는 나가기·마이크가 투영의 어떤 상태보다 앞선다. */
+  joined: boolean;
+  status: HuddleLoadStatus;
+  /** 서 있는 허들. 없으면 `null`. */
+  active: Huddle | null;
+}
+
+/**
+ * 머리의 허들 컨트롤이 무언가를 그리는가. 「그리는가」의 판단은 이 한 곳이다: 컨트롤은 거짓이면 아무것도 그리지 않고, 머리는 ⋮를
+ * 허들 컨트롤과 줄바꿈 한 덩어리로 묶을지(허들이 선 때) 멤버 수와 묶을지(안 선 때)를 같은 판단으로 정한다. 둘이 갈라지면 ⋮가
+ * 없는 컨트롤과 묶이거나 혼자 한 줄에 선다.
+ *
+ * - 오디오가 붙었으면(`joined`) 늘 그린다(나가기·마이크는 오프라인에서도 쓸 수 있다).
+ * - 오프라인이면 아무것도 없다.
+ * - 이 서버에 허들이 없으면(`unconfigured`) 컨트롤도 배너도 없다(goal B6, 없는 기능은 말하지 않는다).
+ * - 나머지(불러오는 중의 회전 표지, 오류의 다시 불러오기, 시작·참가 단추)는 모두 그린다.
+ */
+export function huddleControlShown(
+  facts: Pick<HuddleHeaderFacts, "joined" | "status">,
+  offline: boolean
+): boolean {
+  if (facts.joined) return true;
+  if (offline) return false;
+  return facts.status !== "unconfigured";
+}
+
+/**
+ * 머리에 허들 참가자 이름 글이 설 허들. 이름 글은 Live 칩을 세우는 판단과 같은 사실 위에 서야 한다(칩 없는 이름·이름 없는 칩
+ * 금지): 오디오가 붙었으면 서 있는 허들이고, 아니면 온라인이고 투영이 준비된(`ready`) 때의 서 있는 허들이다. 없으면 `null`.
+ */
+export function huddleNamesTarget(
+  facts: HuddleHeaderFacts,
+  offline: boolean
+): Huddle | null {
+  if (facts.joined) return facts.active;
+  return !offline && facts.status === "ready" ? facts.active : null;
+}

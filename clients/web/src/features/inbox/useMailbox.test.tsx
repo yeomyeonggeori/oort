@@ -386,4 +386,37 @@ describe("읽음 처리: 서버 항목은 PUT, 구 서버 항목은 채널 커�
     });
     expect(api.markInboxReadAll).toHaveBeenCalledWith(WS, { filter: "reply" });
   });
+
+  // 메뉴 막대 「모두 읽음 처리」(#5195). 인박스의 read-all은 항목만 읽음으로 하고 채널 위치와 `mention_count`를 그대로 두어서
+  // (ADR-0199 D3) 독 배지와 메뉴 막대의 점이 안 꺼진다. 그래서 채널마다 읽음 위치를 올린다 — 사유는 「읽음 처리」 메뉴와 같다.
+  it("채널마다 읽음 위치를 올리고, 한 채널의 실패는 나머지를 멈추지 않으며 실패를 센다. 동시에 4개까지다", async () => {
+    await render("all");
+    let inFlight = 0;
+    let peak = 0;
+    api.advertiseReadState.mockImplementation(async (_ws: string, channelId: string, seq: number) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await Promise.resolve();
+      await Promise.resolve();
+      inFlight -= 1;
+      if (channelId === "ch-bad") throw new Error("down");
+      return { channelId, lastReadSeq: seq, latestSeq: seq, unreadCount: 0, mentionCount: 0, markedUnreadBeforeSeq: null };
+    });
+    const targets = [
+      ...Array.from({ length: 7 }, (_, i) => ({ channelId: `ch-${i}`, seq: 10 + i })),
+      { channelId: "ch-bad", seq: 3 },
+    ];
+    let result: { marked: number; failed: number } | undefined;
+    await act(async () => {
+      result = await actions?.markChannelsRead(targets);
+    });
+    expect(api.advertiseReadState.mock.calls.map((c) => [c[1], c[2], c[3]]).sort()).toEqual(
+      targets.map((t) => [t.channelId, t.seq, "mark_read_menu"]).sort()
+    );
+    expect(result).toEqual({ marked: 7, failed: 1 });
+    expect(peak).toBe(4);
+    // 인박스 항목만 읽는 길이 아니다: 그 길은 점을 못 끈다.
+    expect(api.markInboxReadAll).not.toHaveBeenCalled();
+    expect(api.markInboxItemRead).not.toHaveBeenCalled();
+  });
 });

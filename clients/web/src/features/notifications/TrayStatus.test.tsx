@@ -2,11 +2,14 @@
 
 import { act, createElement, Fragment } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { onEntryDismiss } from "@momo/core/features/notifications/entryDismiss";
 import type { AdeItem } from "@momo/core/features/work/adeControl";
+import type { ReadState } from "@momo/core/lib/api";
 import { holdGlobalShortcuts } from "@/app/globalShortcutHold";
 import type { TrayStatusWire } from "@/lib/tauri";
+import { CLOSE_NOTICE_STORAGE_KEY } from "./closeNotice";
 import { DockBadge } from "./DockBadge";
 import {
   reloadDesktopNotificationKindsForTest,
@@ -16,6 +19,10 @@ import { TrayStatus } from "./TrayStatus";
 
 const hoisted = vi.hoisted(() => ({
   needsMe: 4,
+  approvals: 0,
+  panes: 0,
+  readRows: [] as unknown[],
+  showNotification: vi.fn(async (_text: string, _body?: string, _options?: { ask?: boolean }) => true),
   items: [] as unknown[],
   adeProvided: true,
   adeArgs: [] as unknown[][],
@@ -32,6 +39,8 @@ vi.mock("@/lib/tauri", () => ({
   isDesktop: () => true,
   setDockBadge: (n: number) => hoisted.setDockBadge(n),
   setTrayStatus: (s: unknown) => hoisted.setTrayStatus(s),
+  showNotification: (text: string, body?: string, options?: { ask?: boolean }) =>
+    hoisted.showNotification(text, body, options),
   onTrayAction: (handler: (payload: unknown) => void) => {
     hoisted.trayHandler = handler;
     return Promise.resolve(() => {
@@ -40,7 +49,15 @@ vi.mock("@/lib/tauri", () => ({
   },
 }));
 vi.mock("@/app/session", () => ({ useSession: () => ({ workspaceId: "w" }) }));
-vi.mock("@/features/inbox/useNeedsMe", () => ({ useNeedsMeCount: () => hoisted.needsMe }));
+vi.mock("@/features/inbox/useNeedsMe", () => ({
+  useNeedsMeCount: () => hoisted.needsMe,
+  useNeedsMe: () => ({
+    approvals: hoisted.approvals,
+    panes: hoisted.panes,
+    mentions: 0,
+    total: hoisted.needsMe,
+  }),
+}));
 vi.mock("@/features/workspace/useWorkspace", () => ({
   useChannels: () => ({ groups: { channels: [], dms: [{ id: "dm1" }, { id: "dm2" }] } }),
   useReadStates: () => ({
@@ -48,7 +65,9 @@ vi.mock("@/features/workspace/useWorkspace", () => ({
       ["dm1", { unreadCount: 2 }],
       ["dm2", { unreadCount: 3 }],
     ]),
+    data: hoisted.readRows,
   }),
+  applyReadStateToCache: () => undefined,
 }));
 vi.mock("@momo/core/features/workspace/directory", () => ({
   unreadFor: (m: Map<string, { unreadCount: number }>, id: string) => m.get(id) ?? null,
@@ -98,8 +117,43 @@ const session: AdeItem = {
 beforeAll(() => {
   env.IS_REACT_ACT_ENVIRONMENT = true;
 });
+function readRow(channelId: string, over: Partial<ReadState> = {}): ReadState {
+  return {
+    channelId,
+    lastReadSeq: 10,
+    latestSeq: 10,
+    unreadCount: 0,
+    mentionCount: 0,
+    markedUnreadBeforeSeq: null,
+    ...over,
+  };
+}
+let fetchMock: ReturnType<typeof vi.fn>;
+
 beforeEach(() => {
   hoisted.needsMe = 4;
+  hoisted.approvals = 0;
+  hoisted.panes = 0;
+  hoisted.readRows = [];
+  hoisted.showNotification.mockClear();
+  hoisted.showNotification.mockImplementation(async () => true);
+  // 모의 `/v1`: 읽음 위치를 올리는 요청(PUT read-state)에 그 채널의 새 상태로 답한다.
+  fetchMock = vi.fn(async (url: unknown, init?: { body?: string }) => {
+    const channel = decodeURIComponent(String(url).split("/channels/")[1]?.split("/")[0] ?? "");
+    const body = JSON.parse(init?.body ?? "{}") as { last_read_seq: number };
+    return new Response(
+      JSON.stringify({
+        channel_id: channel,
+        last_read_seq: body.last_read_seq,
+        latest_seq: body.last_read_seq,
+        unread_count: 0,
+        mention_count: 0,
+        marked_unread_before_seq: null,
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  });
+  vi.stubGlobal("fetch", fetchMock);
   hoisted.items = [];
   hoisted.adeProvided = true;
   hoisted.adeArgs = [];
@@ -121,6 +175,7 @@ afterEach(() => {
   act(() => root?.unmount());
   host?.remove();
   root = null;
+  vi.unstubAllGlobals();
   reloadDesktopNotificationKindsForTest(null);
 });
 
@@ -131,9 +186,16 @@ function mount() {
   root = createRoot(host);
   render();
 }
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 function render() {
   act(() =>
-    root?.render(createElement(Fragment, null, createElement(DockBadge), createElement(TrayStatus)))
+    root?.render(
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(Fragment, null, createElement(DockBadge), createElement(TrayStatus))
+      )
+    )
   );
 }
 const lastStatus = () => hoisted.setTrayStatus.mock.lastCall?.[0] as TrayStatusWire;
@@ -182,7 +244,39 @@ describe("TrayStatus: 셸로 보내기 (#5193)", () => {
     const labels = lastStatus().labels;
     act(() => root?.unmount());
     root = null;
-    expect(lastStatus()).toEqual({ unread: 0, compose: false, labels, running: [], more: null });
+    expect(lastStatus()).toEqual({
+      unread: 0,
+      compose: false,
+      readAll: false,
+      labels,
+      running: [],
+      more: null,
+      remaining: null,
+    });
+  });
+
+  it("「모두 읽음 처리」는 읽을 채널이 있을 때만 켜지고, 남은 일 줄은 승인·응답 필요 칸이 있을 때만 붙는다 (#5195)", () => {
+    mount();
+    // 읽을 것도 남는 것도 없다: 항목은 꺼지고 줄이 없다.
+    expect(lastStatus()).toMatchObject({ readAll: false, remaining: null });
+    hoisted.readRows = [readRow("dm1", { latestSeq: 3, lastReadSeq: 1, unreadCount: 2 })];
+    render();
+    expect(lastStatus().readAll).toBe(true);
+    // 승인이 남아 있다: 눌러도 점이 남는 까닭을 한 줄로 말한다(항목이 꺼져 있어도 그 줄은 있다).
+    hoisted.readRows = [];
+    hoisted.approvals = 2;
+    render();
+    expect(lastStatus()).toMatchObject({
+      readAll: false,
+      remaining: "2 approvals are still waiting for you",
+    });
+    hoisted.approvals = 0;
+    hoisted.panes = 1;
+    render();
+    expect(lastStatus().remaining).toBe("1 pane is still waiting for you");
+    hoisted.approvals = 1;
+    render();
+    expect(lastStatus().remaining).toBe("1 approval and 1 pane are still waiting for you");
   });
 });
 
@@ -278,6 +372,101 @@ describe("TrayStatus: 메뉴에서 고른 것 (#5193)", () => {
     act(() => root?.unmount());
     root = null;
     expect(hoisted.unlistened).toBe(1);
+  });
+});
+
+describe("TrayStatus: 모두 읽음 처리 (#5195)", () => {
+  const MENTION_CH = "0a1b2c3d-0000-4000-8000-0000000000c1";
+  const PLAIN_CH = "0a1b2c3d-0000-4000-8000-0000000000c2";
+  const putCalls = () =>
+    fetchMock.mock.calls
+      .filter((call) => (call[1] as { method?: string } | undefined)?.method === "PUT")
+      .map((call) => ({
+        url: decodeURIComponent(String(call[0])),
+        body: JSON.parse((call[1] as { body: string }).body) as Record<string, unknown>,
+      }));
+
+  it("멘션이 있는 채널과 안 읽은 DM의 읽음 위치만 최신으로 올린다 — 승인·칸·그냥 안 읽은 채널은 건드리지 않는다", async () => {
+    hoisted.readRows = [
+      readRow(MENTION_CH, { latestSeq: 40, lastReadSeq: 30, unreadCount: 10, mentionCount: 2 }),
+      readRow(PLAIN_CH, { latestSeq: 50, lastReadSeq: 20, unreadCount: 30 }),
+      readRow("dm1", { latestSeq: 7, lastReadSeq: 5, unreadCount: 2 }),
+      readRow("dm2"),
+    ];
+    hoisted.approvals = 3;
+    hoisted.panes = 1;
+    mount();
+    await act(async () => {});
+    pick({ action: "read-all" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+    // 「읽음 처리」 메뉴와 같은 명시 행동(`explicit_open`)으로, 채널마다 PUT 하나다.
+    const puts = putCalls();
+    expect(puts.map((p) => p.url.split("/channels/")[1])).toEqual([
+      `${MENTION_CH}/read-state`,
+      "dm1/read-state",
+    ]);
+    expect(puts.map((p) => p.body)).toEqual([
+      { last_read_seq: 40, read_intent: "explicit_open" },
+      { last_read_seq: 7, read_intent: "explicit_open" },
+    ]);
+    // 승인과 칸에는 읽음이 없다: 결정 요청이나 작업 이동이 아무것도 가지 않았다. 창도 이 쪽에서 부르지 않는다.
+    expect(hoisted.navigate).not.toHaveBeenCalled();
+    expect(hoisted.openNewDm).not.toHaveBeenCalled();
+    expect(hoisted.openWorkPanel).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.every((call) => String(call[0]).includes("/read-state"))).toBe(true);
+  });
+
+  it("읽을 채널이 없으면 아무것도 보내지 않는다", async () => {
+    hoisted.readRows = [readRow(PLAIN_CH, { unreadCount: 30, latestSeq: 50 }), readRow("dm2")];
+    mount();
+    await act(async () => {});
+    pick({ action: "read-all" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("TrayStatus: 창을 치웠다는 안내 (#5196)", () => {
+  const settle = async () =>
+    act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    });
+
+  it("처음 한 번만 OS 알림으로 말하고, 보인 뒤에는 다시 말하지 않는다", async () => {
+    mount();
+    await act(async () => {});
+    pick({ action: "window-hidden" });
+    await settle();
+    expect(hoisted.showNotification).toHaveBeenCalledTimes(1);
+    // 권한을 묻지 않는 호출이다(`ask: false`): 창이 막 사라진 순간에 OS 권한 창이 뜨지 않는다.
+    expect(hoisted.showNotification).toHaveBeenCalledWith(
+      "Closing the window keeps oort in the menu bar, so you still get notifications",
+      undefined,
+      { ask: false }
+    );
+    expect(localStorage.getItem(CLOSE_NOTICE_STORAGE_KEY)).not.toBeNull();
+    pick({ action: "window-hidden" });
+    await settle();
+    expect(hoisted.showNotification).toHaveBeenCalledTimes(1);
+  });
+
+  it("배너가 안 떴으면(알림이 꺼져 있다) 쓰지 않는다: 나중에 켜면 그때가 처음이다", async () => {
+    hoisted.showNotification.mockImplementation(async () => false);
+    mount();
+    await act(async () => {});
+    pick({ action: "window-hidden" });
+    await settle();
+    expect(hoisted.showNotification).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(CLOSE_NOTICE_STORAGE_KEY)).toBeNull();
+    hoisted.showNotification.mockImplementation(async () => true);
+    pick({ action: "window-hidden" });
+    await settle();
+    expect(hoisted.showNotification).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem(CLOSE_NOTICE_STORAGE_KEY)).not.toBeNull();
   });
 });
 

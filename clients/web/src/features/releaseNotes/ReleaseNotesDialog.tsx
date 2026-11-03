@@ -35,7 +35,7 @@ export function ReleaseNotesDialog({
   onClose: () => void;
   onDetails: () => void;
 }) {
-  const { messages, noteLocale } = useReleaseNotesMessages();
+  const { messages } = useReleaseNotesMessages();
   const contentRef = useRef<HTMLDivElement | null>(null);
   const items = itemsForSurface(note, DESKTOP_SURFACE);
   const shown = items.slice(0, SHOWN_TITLES);
@@ -59,12 +59,12 @@ export function ReleaseNotesDialog({
             {note.releasedOn}
           </p>
         </div>
-        <DialogDescription className="break-keep">{note.summary[noteLocale]}</DialogDescription>
+        <DialogDescription className="break-keep">{messages.formatMessage(note.summary)}</DialogDescription>
         {shown.length > 0 ? (
           <ul className="flex min-w-0 flex-col gap-1" data-testid="release-notes-dialog-titles">
             {shown.map((item) => (
               <li key={item.id} className="break-keep text-body text-ink">
-                {item.copy[noteLocale].title}
+                {messages.formatMessage(item.title)}
               </li>
             ))}
             {hidden > 0 ? (
