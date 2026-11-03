@@ -390,7 +390,8 @@ describe("WelcomeKickoffEditor (#1800 패턴)", () => {
     expect(patchWorkspaceSettings).not.toHaveBeenCalled();
   });
 
-  it("server 400 surfaces the banner sentence", async () => {
+  // #5221: 서버 원문은 화면에 나가지 않는다(영어 검증 문장은 사용자가 할 수 있는 일을 말하지 않는다). 안전한 한 문장이 선다.
+  it("server 400 surfaces a safe sentence, never the server's own wording", async () => {
     const denied = new ApiError(400, "welcome_prompt must be at most 2000 characters");
     patchWorkspaceSettings.mockRejectedValue(denied);
     const host = mountSection({ role: "owner" });
@@ -408,7 +409,8 @@ describe("WelcomeKickoffEditor (#1800 패턴)", () => {
     });
     await vi.waitFor(() => {
       const error = host.querySelector('[data-testid="workspace-welcome-save-error"]');
-      expect(error?.textContent).toContain("welcome_prompt must be at most 2000 characters");
+      expect(error?.textContent).toContain("요청을 끝내지 못했어요. 잠시 뒤에 다시 시도해 주세요.");
+      expect(error?.textContent).not.toContain("welcome_prompt");
       expect(error?.getAttribute("role")).toBe("alert");
       expect(error?.className).toContain("text-meta");
       expect(error?.className).toContain("text-danger");

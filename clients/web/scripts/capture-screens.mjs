@@ -349,11 +349,11 @@ const MOBILE_VIEWPORT = { width: 390, height: 844 };
 const IPHONE_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1";
 
-// goal B8 B2: the shell's connection banner waits out a 15s dwell before it
-// claims the rail is down (features/common/connectionAlert.ts SUSTAINED_DOWN_MS).
-// Kept a second over it so the capture is not racing the threshold it is meant
-// to photograph.
-const SUSTAINED_DOWN_WAIT_MS = 16_000;
+// goal B8 B2 / #5220: the connection signal waits out the model's 10s grace
+// before it claims the rail is down (core features/connection/thresholds.ts
+// DISPLAY_GRACE_MS). Kept a second over it so the capture is not racing the
+// threshold it is meant to photograph.
+const SUSTAINED_DOWN_WAIT_MS = 11_000;
 
 /**
  * 폰에서 손가락으로 눌러야 하는 컨트롤과 그 최소 크기(px). 44px는 WCAG 2.5.5 /
@@ -8987,13 +8987,15 @@ async function captureScheme(browser, scheme) {
   await b8.screenshot({ path: hintShot });
   shots.push(hintShot);
 
-  // B8 B2: the connection banner. The capture's realtime URL is deliberately
-  // unreachable, which is EXACTLY the QA case (a socket that never came up), so
-  // this frame needs no mock: it needs the dwell. The wait is longer than the
-  // 15s threshold on purpose, because a banner that appears at 14.9s in a test
-  // and 15.1s in the product is a banner nobody can review.
+  // B8 B2 / #5220: the connection signal. At 1440 the list column is visible, so
+  // it is the sidebar connection card (the top strip only stands when the list
+  // column is collapsed or the sidebar is a drawer). The capture's realtime URL
+  // is deliberately unreachable, which is EXACTLY the QA case (a socket that
+  // never came up), so this frame needs no mock: it needs the dwell. The wait is
+  // longer than the 10s threshold on purpose, because a card that appears at
+  // 9.9s in a test and 10.1s in the product is a card nobody can review.
   await b8.waitForTimeout(SUSTAINED_DOWN_WAIT_MS);
-  await b8.getByTestId("connection-banner").waitFor({ state: "visible" });
+  await b8.getByTestId("connection-card").waitFor({ state: "visible" });
   const bannerShot = beginSceneFromShotPath(`${OUT_DIR}/b8-connection-banner-${scheme}.png`);
   await b8.screenshot({ path: bannerShot });
   shots.push(bannerShot);

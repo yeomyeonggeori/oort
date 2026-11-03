@@ -390,10 +390,10 @@ export function Composer({
   const isMobile = useIsMobileShell();
   const railLive = connStatus === "connected";
   // 레일 상태와 **다른 질문**이다. `railLive`는 웹소켓이 붙어 있는가이고, 전송은
-  // REST POST로 나간다 — 레일이 재연결 중이어도 그 POST는 멀쩡히 성공한다. 여기서
-  // 필요한 것은 「이 요청이 나갈 수 있는가」이고, 그 답을 가장 잘 아는 것은 브라우저
-  // 자신(`navigator.onLine`)과 레일이 재연결을 포기한 종단 절단 둘의 합이다
-  // (`useOffline`, 승인 경로가 같은 판단을 한다).
+  // REST POST로 나간다 — 레일이 끊겨 있어도 그 POST는 멀쩡히 성공한다. 여기서
+  // 필요한 것은 「이 요청이 나갈 수 있는가」이고, 그 답은 연결 상태 모델의 게이트
+  // (`useOffline`, #5220)가 한다: 기기 오프라인이거나 서버에 닿지 못함이 확정일 때만
+  // 막고, 실시간(소켓)만 끊긴 것은 막지 않는다. 승인 경로가 같은 판단을 한다.
   const offline = useOffline();
   // 링크를 넣고 멈추면 입력칸 위에 카드가 뜬다(#5005). 오프라인에서는 묻지 않고, 풀리면 이어서 묻는다.
   const linkPreview = useComposerLinkPreview({

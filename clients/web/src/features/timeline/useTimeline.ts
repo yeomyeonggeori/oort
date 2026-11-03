@@ -26,10 +26,32 @@ import {
   pinnedPayloadToWire,
   type RealtimeHandle,
 } from "@/lib/realtime";
+import { subscribeRestOutcome } from "@momo/core/lib/http";
+import { causeOfFailure } from "@momo/core/features/connection/failure";
+import type { ConnectionCause } from "@momo/core/features/connection/model";
+import { deviceOnlineNow } from "@/lib/deviceOnline";
+import {
+  BROWSER_ONLINE_EVENT,
+  PAGE_LEAVE_EVENT,
+  isFailedRow,
+  isSendingRow,
+  isServerAnswer,
+  pickAutoResends,
+  recordSendFailure,
+  resendAllContinuesAfter,
+  type SendFailureKind,
+  type SendFailureRecord,
+} from "@momo/core/features/connection/sendFailure";
+import {
+  forgetFailedSend,
+  readFailedSends,
+  rememberFailedSend,
+} from "@/features/chat/draftStore";
 import {
   addPending,
   applyEditedMessage,
   applyTombstone,
+  discardPending,
   emptyTimeline,
   failPending,
   reconcileMessages,
@@ -98,6 +120,7 @@ export const MAX_SIMULTANEOUS_ARRIVALS = 3;
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
 
+
 export interface ResumeInfo {
   /** How the last (re)subscribe resolved. */
   lastRecovered: boolean | null;
@@ -127,6 +150,11 @@ export interface TimelineSendOptions
 export interface UseTimelineResult {
   state: TimelineState;
   status: "loading" | "ready" | "error";
+  /**
+   * 머리 읽기가 실패했을 때 그 실패가 말하는 원인(#5221). 연결 쪽 원인이 아니면(서버가 직접 거절했거나 알 수 없음) `null`.
+   * `status`가 `error`가 아니면 항상 `null`이다.
+   */
+  loadCause: ConnectionCause | null;
   resume: ResumeInfo;
   /** Reconnect markers, rendered inline as "재연결됨, 여기까지 복구" — one per recovery that brought in someone else's new messages (#4328). */
   recoveryMarkers: RecoveryMarker[];
@@ -142,6 +170,18 @@ export interface UseTimelineResult {
   send: (body: string, options?: TimelineSendOptions) => Promise<void>;
   /** Re-run a failed echo with the SAME idempotency key. */
   resend: (clientMsgId: string) => Promise<void>;
+  /**
+   * 보내지 못한 메시지를 이 기기에서만 지운다(#5210). 판정은 코어 `discardPending` 이고
+   * 서버로 가는 길이 없다. 지운 행을 돌려주고, 지우지 않았으면(보내는 중·이미 없음) null.
+   */
+  discard: (clientMsgId: string) => PendingMessage | null;
+  /**
+   * 실패한 모든 행을 보낸 순서대로 같은 키로 다시 보낸다(#5221). 손으로 누른 것이므로 서버가 거절했던 글도 포함한다.
+   * 네트워크로 또 실패하면 멈춘다(뒤의 글이 앞의 글을 앞지르지 않게). 서버가 거절한 글은 건너뛰고 이어 간다.
+   */
+  resendAll: () => Promise<void>;
+  /** 실패한 행마다 원인 한 줄의 종류(#5221). 알 수 없는 오류는 항목이 없다. 되살린 행도 남겨 둔 종류가 돌아온다. */
+  failureKinds: ReadonlyMap<string, SendFailureKind>;
   loadOlder: () => Promise<void>;
   reload: () => void;
   loadingOlder: boolean;
@@ -217,6 +257,7 @@ export function useTimeline(
 ): UseTimelineResult {
   const [state, setState] = useState<TimelineState>(emptyTimeline);
   const [status, setStatus] = useState<UseTimelineResult["status"]>("loading");
+  const [loadCause, setLoadCause] = useState<ConnectionCause | null>(null);
   const [resume, setResume] = useState<ResumeInfo>({
     lastRecovered: null,
     lastBackfillCount: 0,
@@ -298,6 +339,9 @@ export function useTimeline(
   const newestSeqRef = useRef<number | null>(null);
   // 레일 없이 기록만 읽은 채널. 레일이 뒤늦게 와서 효과가 다시 돌 때 화면의 기록을 지우지 않는다.
   const restOnlyChannelRef = useRef<string | null>(null);
+  // 받아 둔 글이 있으면(= 머리 읽기가 실패했어도 레일이 글을 줬다) 다시 읽기가 그 글을 비우지 않는다. 비우면 「받아 둔 글은
+  // 유지」가 다시 시도를 누르는 순간 깨진다.
+  const keepOnReloadRef = useRef(false);
   const firstSubscribeRef = useRef(true);
   const markerCounterRef = useRef(0);
   // 이 채널 방문에서 타임라인에 든 줄 id(접은 열쇠, `messageIdKey`). 줄을 들이는 길은 `applyBatch` 하나라
@@ -442,6 +486,31 @@ export function useTimeline(
     []
   );
 
+  // 보내지 못한 글의 장부(#5221). 코어 `PendingMessage`는 폰과 나눠 쓰므로 건드리지 않고 행 곁에 clientMsgId로 둔다
+  // (`callSpecsRef`와 같은 모양). 자동 재전송의 판정(어떤 실패를 몇 번 얼마 동안)은 코어 `pickAutoResends` 하나다.
+  const failuresRef = useRef(new Map<string, SendFailureRecord>());
+  const [failureKinds, setFailureKinds] = useState<ReadonlyMap<string, SendFailureKind>>(
+    () => new Map()
+  );
+  const syncFailureKinds = useCallback(() => {
+    const next = new Map<string, SendFailureKind>();
+    for (const [id, record] of failuresRef.current) {
+      if (record.kind !== null) next.set(id, record.kind);
+    }
+    setFailureKinds(next);
+  }, []);
+  // 채널을 떠날 때 아직 날아가던 요청의 열쇠. 그 요청이 실패로 끝나면 이 기기에 남겨 돌아왔을 때 실패 행이 되게 한다.
+  const orphansRef = useRef(new Set<string>());
+  /** 이 글은 끝났다(보냈다·지웠다·서버가 이미 받았다): 장부와 이 기기의 저장본에서 지운다. */
+  const forgetRow = useCallback(
+    (row: Pick<PendingMessage, "clientMsgId" | "channelId">) => {
+      orphansRef.current.delete(row.clientMsgId);
+      forgetFailedSend(workspaceId, row.channelId, row.clientMsgId);
+      if (failuresRef.current.delete(row.clientMsgId)) syncFailureKinds();
+    },
+    [workspaceId, syncFailureKinds]
+  );
+
   // Which channel the hook is currently showing, read by in-flight sends that
   // resolved after the user moved on. Without it a POST for channel A could
   // merge its row into channel B's timeline.
@@ -486,7 +555,8 @@ export function useTimeline(
   const { store: expressionStore } = useExpressions();
 
   const post = useCallback(
-    async (row: PendingMessage) => {
+    /** 보냈으면 true, 실패했으면 false. */
+    async (row: PendingMessage, automatic = false): Promise<boolean> => {
       try {
         const deliver = () =>
           sendMessage(
@@ -535,19 +605,41 @@ export function useTimeline(
         expressionStore?.recordSuccess(row.body, confirmed.id);
         if (channelRef.current === row.channelId) applyBatch([confirmed]);
         updatePending((list) => removePending(list, row.clientMsgId));
+        forgetRow(row);
         if (spec && callResult) {
           // 메시지는 확정됐다. 이후의 재시도는 메시지가 아니라 호출 쪽의 것이다.
           callSpecsRef.current.delete(row.clientMsgId);
           spec.onResult(callResult);
         }
-      } catch {
+        return true;
+      } catch (error) {
         // The row stays where it is and states 전송 실패 with a retry (R-1 §3),
         // which is the same inline failure path a server-stored `failed`
         // message row uses. No toast, no banner far from the message.
-        updatePending((list) => failPending(list, row.clientMsgId));
+        const record = recordSendFailure(
+          failuresRef.current.get(row.clientMsgId),
+          error,
+          deviceOnlineNow(),
+          Date.now(),
+          automatic
+        );
+        const listed = pendingRef.current.some((p) => p.clientMsgId === row.clientMsgId);
+        const orphan = orphansRef.current.delete(row.clientMsgId);
+        // 목록에도 없고 떠난 채널의 고아도 아니면 서버의 echo 가 이미 정착시킨 행이다(응답만 늦게 실패했다):
+        // 글은 서버에 있으므로 되살릴 것이 없다.
+        if (listed || orphan) {
+          failuresRef.current.set(row.clientMsgId, record);
+          syncFailureKinds();
+          if (listed) updatePending((list) => failPending(list, row.clientMsgId));
+          // 개인 에이전트 호출의 계획은 함수를 들고 있어 남길 수 없다. 그런 전송만 메모리에 둔다(지금까지와 같다).
+          if (!callSpecsRef.current.has(row.clientMsgId)) {
+            rememberFailedSend(workspaceId, row, record.kind);
+          }
+        }
+        return false;
       }
     },
-    [workspaceId, applyBatch, updatePending, expressionStore]
+    [workspaceId, applyBatch, updatePending, expressionStore, forgetRow, syncFailureKinds]
   );
 
   const send = useCallback(
@@ -590,12 +682,102 @@ export function useTimeline(
   const resend = useCallback(
     async (clientMsgId: string) => {
       const row = pendingRef.current.find((p) => p.clientMsgId === clientMsgId);
-      if (!row || row.status === "sending") return;
+      if (!row || isSendingRow(row)) return;
       updatePending((list) => retryPending(list, clientMsgId));
-      await post(row);
+      await post(row, false);
     },
     [post, updatePending]
   );
+
+  const resendAll = useCallback(async () => {
+    // 지금 실패한 행의 사본(보낸 순서). 도는 동안 정착·삭제된 행은 건너뛴다.
+    const failed = pendingRef.current.filter(isFailedRow);
+    for (const snapshot of failed) {
+      const row = pendingRef.current.find((p) => p.clientMsgId === snapshot.clientMsgId);
+      if (!row || !isFailedRow(row)) continue;
+      updatePending((list) => retryPending(list, row.clientMsgId));
+      const sent = await post(row, false);
+      // 네트워크로 또 실패하면 멈춘다(뒤의 글이 앞의 글을 앞지르지 않게). 서버가 거절한 글은 건너뛰고 이어 간다.
+      if (!sent && !resendAllContinuesAfter(failuresRef.current.get(row.clientMsgId))) break;
+    }
+  }, [post, updatePending]);
+
+  // 결정 ⑤: 네트워크로 못 보낸 글만 연결이 돌아오면 같은 멱등 키로 저절로 다시 보낸다(한 글 3회·5분). 한 번에 한
+  // 행이고, 실패하면 다음 신호까지 쉰다. 기기가 꺼져 있다고 알면 신호(online)를 기다린다.
+  const autoRunningRef = useRef(false);
+  const autoResendPass = useCallback(async () => {
+    if (autoRunningRef.current || deviceOnlineNow() === false) return;
+    autoRunningRef.current = true;
+    try {
+      for (;;) {
+        const [id] = pickAutoResends(pendingRef.current, failuresRef.current, Date.now());
+        const row = id === undefined ? undefined : pendingRef.current.find((p) => p.clientMsgId === id);
+        if (row === undefined) return;
+        updatePending((list) => retryPending(list, row.clientMsgId));
+        if (!(await post(row, true))) return;
+      }
+    } finally {
+      autoRunningRef.current = false;
+    }
+  }, [post, updatePending]);
+
+  // 「연결이 돌아왔다」는 신호 둘: 브라우저가 온라인을 알렸다, 서버가 답했다(5xx 응답은 아니다). 실패한 행이 없으면
+  // 콜백은 아무 일도 하지 않는다. S-A 모델이 「서버에 닿음」을 선언·해제하는 것과 같은 사실이다.
+  useEffect(() => {
+    const trigger = () => {
+      void autoResendPass();
+    };
+    window.addEventListener(BROWSER_ONLINE_EVENT, trigger);
+    const unsubscribe = subscribeRestOutcome((outcome) => {
+      if (isServerAnswer(outcome)) trigger();
+    });
+    return () => {
+      window.removeEventListener(BROWSER_ONLINE_EVENT, trigger);
+      unsubscribe();
+    };
+  }, [autoResendPass]);
+
+  const discard = useCallback(
+    (clientMsgId: string): PendingMessage | null => {
+      const result = discardPending(pendingRef.current, clientMsgId);
+      if (result.discarded === null) return null;
+      // 개인 에이전트 호출의 계획은 이 전송의 것이었다. 행이 사라지면 아무도 다시 읽지 않는다.
+      callSpecsRef.current.delete(clientMsgId);
+      forgetRow(result.discarded);
+      updatePending(() => result.list);
+      return result.discarded;
+    },
+    [updatePending, forgetRow]
+  );
+
+  // 이 채널을 떠날 때(채널 이동·화면 닫힘)와 페이지를 떠날 때(새로고침·창 닫기): 아직 날아가는 요청의 결과는 알 수
+  // 없다. 그 글을 이 기기에 「못 보낸 글」로 남겨 돌아왔을 때 같은 키의 실패 행이 되게 한다(서버가 이미 받았다면
+  // 채널을 열 때 확정 메시지와 만나 정리된다). 이미 실패한 행은 실패한 순간에 남겨 두었다.
+  useEffect(() => {
+    if (!channelId) return;
+    // 장부는 한 번 만든 Map 하나를 끝까지 쓴다(다시 대입하지 않는다). 정리 함수가 같은 Map 을 읽는다.
+    const failures = failuresRef.current;
+    const keepInFlight = (leaving: boolean) => {
+      for (const row of pendingRef.current) {
+        if (row.channelId !== channelId || !isSendingRow(row)) continue;
+        if (callSpecsRef.current.has(row.clientMsgId)) continue;
+        if (leaving) orphansRef.current.add(row.clientMsgId);
+        rememberFailedSend(workspaceId, row, null);
+      }
+    };
+    const onPageHide = () => keepInFlight(false);
+    window.addEventListener(PAGE_LEAVE_EVENT, onPageHide);
+    return () => {
+      window.removeEventListener(PAGE_LEAVE_EVENT, onPageHide);
+      keepInFlight(true);
+      // 떠난 채널 행의 기록은 더 읽는 곳이 없다(돌아오면 남겨 둔 저장본에서 새로 만든다).
+      let changed = false;
+      for (const row of pendingRef.current) {
+        if (row.channelId === channelId && failures.delete(row.clientMsgId)) changed = true;
+      }
+      if (changed) syncFailureKinds();
+    };
+  }, [workspaceId, channelId, syncFailureKinds]);
 
   const backfillAfter = useCallback(
     async (channel: string, stillCurrent: () => boolean) => {
@@ -648,8 +830,13 @@ export function useTimeline(
   // in state for the rest of the session and be reported as still sending.
   useEffect(() => {
     const open = unsettledPending(state.messages, pendingRef.current);
-    if (open.length !== pendingRef.current.length) updatePending(() => open);
-  }, [state.messages, updatePending]);
+    if (open.length !== pendingRef.current.length) {
+      // 정착한 행은 이 기기의 저장본에서도 지운다(되살아난 실패 행이 사실은 서버에 있던 글인 경우가 이것이다).
+      const keep = new Set(open.map((p) => p.clientMsgId));
+      for (const row of pendingRef.current) if (!keep.has(row.clientMsgId)) forgetRow(row);
+      updatePending(() => open);
+    }
+  }, [state.messages, updatePending, forgetRow]);
 
   useEffect(() => {
     if (!channelId) return;
@@ -657,8 +844,11 @@ export function useTimeline(
     // #3676: 기록(REST 머리)은 실시간 레일과 무관하게 읽을 수 있다. 레일이 아직 없거나 끝내 안 와도
     // 타임라인이 스켈레톤에 머물지 않고 ready/error 로 끝나야 한다. 레일이 나중에 오면 이 효과가
     // 다시 돌며 구독을 붙이는데, 그때 이미 화면에 있는 기록을 스켈레톤으로 되돌리지 않는다.
-    const keepLoaded = restOnlyChannelRef.current === channelId;
+    // 다시 읽기(`reload`)가 받아 둔 글이 있는 채로 불렸다면 그 글을 비우지 않고 머리만 다시 읽는다(#5221).
+    const keepLoaded = restOnlyChannelRef.current === channelId || keepOnReloadRef.current;
+    keepOnReloadRef.current = false;
     restOnlyChannelRef.current = realtime ? null : channelId;
+    setLoadCause(null);
     firstSubscribeRef.current = true;
     newestSeqRef.current = null;
     markerCounterRef.current = 0;
@@ -666,7 +856,27 @@ export function useTimeline(
     replayWatchRef.current = null;
     consumedArrivalIdsRef.current = new Set();
     playOnMountRef.current = new Set();
-    updatePending(() => []);
+    // 다른 채널의 행은 비우고, 이 채널의 행은 남긴다(같은 채널에서 이 효과만 다시 도는 경우: 레일이 늦게 와 구독을
+    // 붙일 때). 여기에 이 기기가 남겨 둔 이 채널의 못 보낸 글을 더한다(#5221). 되살린 행은 자동 재전송 대상이
+    // 아니다(처음 실패한 때를 몰라 5분을 셀 수 없다): 장부에는 원인 한 줄의 종류만 남긴다.
+    const restored = readFailedSends(workspaceId, channelId, authorMemberId);
+    updatePending((list) => {
+      const mine = list.filter((p) => p.channelId === channelId);
+      const have = new Set(mine.map((p) => p.clientMsgId));
+      const back = restored.filter((r) => !have.has(r.row.clientMsgId));
+      for (const { row, kind } of back) {
+        if (!failuresRef.current.has(row.clientMsgId)) {
+          failuresRef.current.set(row.clientMsgId, {
+            failure: null,
+            kind,
+            firstFailedAt: row.createdAtMs,
+            autoAttempts: 0,
+          });
+        }
+      }
+      return [...mine, ...back.map((r) => r.row)].sort((a, b) => a.createdAtMs - b.createdAtMs);
+    });
+    syncFailureKinds();
     if (!keepLoaded) {
       setState(emptyTimeline());
       setStatus("loading");
@@ -689,8 +899,10 @@ export function useTimeline(
         setReachedStart(page.nextBefore === undefined);
         setStatus("ready");
       })
-      .catch(() => {
-        if (!cancelled) setStatus("error");
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadCause(causeOfFailure(error, deviceOnlineNow()));
+        setStatus("error");
       });
 
     // 1b) The channel's reaction map, in parallel and deliberately not fatal.
@@ -854,6 +1066,8 @@ export function useTimeline(
     loadPins,
     addMarker,
     updatePending,
+    syncFailureKinds,
+    authorMemberId,
     reloadNonce,
   ]);
 
@@ -916,7 +1130,10 @@ export function useTimeline(
     hydrateUnfurls,
   ]);
 
-  const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
+  const reload = useCallback(() => {
+    keepOnReloadRef.current = newestSeqRef.current !== null;
+    setReloadNonce((n) => n + 1);
+  }, []);
 
   // ---- message actions (B11) ------------------------------------------------
 
@@ -1039,11 +1256,15 @@ export function useTimeline(
   return {
     state,
     status,
+    loadCause,
     resume,
     recoveryMarkers,
     pending,
     send,
     resend,
+    discard,
+    resendAll,
+    failureKinds,
     loadOlder,
     reload,
     loadingOlder,

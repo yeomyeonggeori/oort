@@ -68,6 +68,7 @@ afterEach(() => {
   }
   mountedHost?.remove();
   mountedHost = null;
+  Object.defineProperty(window.navigator, "onLine", { configurable: true, value: true });
   vi.unstubAllGlobals();
 });
 
@@ -170,7 +171,10 @@ function mountProfile(options: {
   labels?: RoleLabels;
   roster?: RosterMember[];
   connStatus?: SessionContextValue["connStatus"];
+  /** 기기 오프라인은 브라우저가 안다. 소켓만 끊긴 것(`connStatus`)과 다른 사실이다(#5201 결정 ③). */
+  deviceOffline?: boolean;
 }): { host: HTMLElement; client: QueryClient } {
+  Object.defineProperty(window.navigator, "onLine", { configurable: true, value: options.deviceOffline !== true });
   const roster = options.roster ?? ROSTER;
   const client = new QueryClient({
     defaultOptions: {
@@ -620,11 +624,22 @@ describe("멤버 프로필 역할 변경", () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 
-  it("오프라인이면 컨트롤을 잠그고 기존 배너 사유를 가리킨다", async () => {
+  it("실시간만 끊겨도 컨트롤은 열려 있고 오프라인 배너도 없다(결정 ③)", async () => {
     mountProfile({
       viewer: OWNER,
       targetId: MEMBER_ID,
       connStatus: "disconnected",
+    });
+    await waitForDialog();
+    expect(document.querySelector('[data-testid="member-profile-offline"]')).toBeNull();
+    expect(roleSelect()?.disabled).toBe(false);
+  });
+
+  it("오프라인이면 컨트롤을 잠그고 기존 배너 사유를 가리킨다", async () => {
+    mountProfile({
+      viewer: OWNER,
+      targetId: MEMBER_ID,
+      deviceOffline: true,
     });
     await waitForDialog();
     expect(document.querySelector('[data-testid="member-profile-offline"]')).not.toBeNull();

@@ -536,6 +536,7 @@ export function ThreadPanel({
                 // 확정된 답글을 아래 깔린 채널 목록이 메아리로 한 번 더 그리지 않게 이름을 준다(#4455 design-review r2 M4).
                 arrivalSurface={threadArrivalSurface(root.id)}
                 onResendPending={clientMsgId => void timeline.resend(clientMsgId)}
+                onDiscardPending={clientMsgId => void timeline.discard(clientMsgId)}
                 jumpTarget={jumpTarget}
                 onReaderTookList={onReaderTookList}
               />

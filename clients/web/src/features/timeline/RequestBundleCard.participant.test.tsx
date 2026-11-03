@@ -51,7 +51,13 @@ function consentCard(target: string, approvalId: string, extra: Record<string, u
   } as unknown as Message;
 }
 
-function draw(viewer: string, options: { message?: Message; directory?: typeof DIRECTORY; connStatus?: "connected" | "disconnected" } = {}) {
+/** 기기 오프라인은 브라우저가 안다(`navigator.onLine`). 실시간(소켓)만 끊긴 것과 다른 사실이다(#5201 결정 ③). */
+function setBrowserOnline(online: boolean) {
+  Object.defineProperty(window.navigator, "onLine", { configurable: true, value: online });
+}
+
+function draw(viewer: string, options: { message?: Message; directory?: typeof DIRECTORY; connStatus?: "connected" | "disconnected"; deviceOffline?: boolean } = {}) {
+  setBrowserOnline(options.deviceOffline !== true);
   const card = agentCardModel(options.message ?? consentCard(TARGET, "a1"));
   if (card === null) throw new Error("no card for these props");
   return render(
@@ -69,7 +75,7 @@ beforeEach(() => {
   localStorage.clear(); sessionStorage.clear(); resetSettledApprovalsForTest();
 });
 afterAll(() => { delete (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT; });
-afterEach(() => { cleanup(); });
+afterEach(() => { cleanup(); setBrowserOnline(true); });
 
 describe("the consent card names the one person it waits for (#4920)", () => {
   it.each([["the person who asked", REQUESTER], ["another person in a group conversation", PEER]] as const)("%s reads one sentence that names the decider, with no decision control", (_who, viewer) => {
@@ -120,17 +126,24 @@ describe("the consent card names the one person it waits for (#4920)", () => {
 
   it("someone who can never decide is not told to come back online to decide", () => {
     for (const viewer of [REQUESTER, PEER]) {
-      const view = draw(viewer, { connStatus: "disconnected" });
+      const view = draw(viewer, { deviceOffline: true });
       expect(within(view.container).getAllByText(TARGET_LINE)).toHaveLength(1);
       expect(view.container.textContent ?? "").not.toContain("연결이 끊겨");
       expect(view.queryByTestId("approval-approve")).toBeNull();
       cleanup();
     }
     // The decider is the one for whom the connection matters, and the offline sentence stands in for the controls.
-    const decider = draw(TARGET, { connStatus: "disconnected" });
+    const decider = draw(TARGET, { deviceOffline: true });
     expect(within(decider.container).getAllByText(OFFLINE_LINE)).toHaveLength(1);
     expect(waitingLines(decider.container)).toHaveLength(0);
     expect(decider.queryByTestId("approval-approve")).toBeNull();
+  });
+
+  // 결정은 REST이고 소켓은 수신용이다. 실시간만 끊겼다고 결정할 수 있는 사람의 단추를 잠그지 않는다(#5220, #5201 결정 ③).
+  it("a dropped realtime rail alone does not lock the decider's controls", () => {
+    const decider = draw(TARGET, { connStatus: "disconnected" });
+    expect(decider.queryByTestId("approval-approve")).not.toBeNull();
+    expect(within(decider.container).queryAllByText(OFFLINE_LINE)).toHaveLength(0);
   });
 
   it("a card that has been decided says no waiting sentence", () => {

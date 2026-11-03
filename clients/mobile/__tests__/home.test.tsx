@@ -19,12 +19,16 @@ import {AccessibilityInfo, ActionSheetIOS, Image, StyleSheet} from 'react-native
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import type {SignalChoice} from '@momo/core/design/appearance';
+import {resolveAppearance} from '../src/design/appearanceState';
 import {BAR_CONTROL_MAX_SCALE} from '../src/design/atoms';
+import {DS2_COMBOS} from '../src/design/ds2Tokens';
 import {HOME_ICON_SIZE, HOME_ICONS} from '../src/design/icons';
 import {FixedScheme} from '../src/design/theme';
 import {darkPalette, lightPalette} from '../src/design/tokens';
 import {GroupCard} from '../src/design/sheetParts';
 import {describeCloseContract} from './fixtures/sheetContract';
+import {AgentTurnBadge} from '../src/features/agents/turnSurfaces';
 import {
   markAgentWorking,
   resetAgentWorking,
@@ -1013,7 +1017,8 @@ describe.each([
 
   it('카드 안의 글자(이름·한 줄·작업 중·승인 필요)가 모든 유리 바탕에서 4.5 이상', () => {
     for (const ground of cardGrounds) {
-      for (const ink of [p.text, p.textMuted, p.agent, p.accentText]) {
+      // 「승인 필요」는 사람 몫 색(`warn`)이다 — 신호색(`accentText`)이 아니다(#5170 M1, 아래 시험이 그려진 값을 잰다).
+      for (const ink of [p.text, p.textMuted, p.agent, p.warn]) {
         expect(contrast(ink, ground)).toBeGreaterThanOrEqual(4.5);
       }
     }
@@ -1871,5 +1876,86 @@ describe.each([
     expect(props.accessibilityLabel).toBeUndefined();
     expect(props.alt).toBeUndefined();
     expect(props.accessible).not.toBe(true);
+  });
+});
+
+// =============================================================================
+// #5170 M1 — 홈 「에이전트 작업」 카드의 「승인 필요」는 사람 몫 색(`warn`) 하나다.
+//
+// 같은 에이전트의 같은 상태를 에이전트 탭 배지(`AgentTurnBadge`)·대화의 승인 카드 칩·웹 사이드바 카드·정본(`agent-work-display.md` §5,
+// `agent-request-loop.md` §2.2)은 경고색(`--warn`)으로 말하는데, 홈 카드만 신호색(`accentText` — 안 읽음 수·경계·커서의 색)으로 칠했다.
+// 홈에서는 그 주황 낱말이 바로 아래 안 읽음 배지와 같은 계열이라 「새 글」 쪽으로 읽혔다(검증 줄 3회차 폰 화면 검수 M1).
+//
+// 이 시험은 소스의 이름이 아니라 **그려진 값**을 잰다: 카드를 여섯 테마×모드와 강조색 둘(신호색이 움직이는 조합)에서 그려, 낱말·점의 색이
+// (1) 그 조합의 `warn` 이고 (2) 같은 자리에 선 에이전트 탭 배지의 낱말 색과 같은지 읽는다. 강조색 조합이 중요한 까닭: 옛 판은 신호색을
+// 입어서 강조색을 고르면 이 낱말만 따라 움직였다 — `warn` 은 움직이지 않는다.
+// =============================================================================
+
+describe('#5170 M1 — 홈 카드의 「승인 필요」는 경고색이다', () => {
+  const CUSTOM: SignalChoice = {custom: '#3A6BD8'};
+  const VIEWS = [
+    ...DS2_COMBOS.map(([theme, mode]) => ({
+      key: `${theme}/${mode}`,
+      theme,
+      mode,
+      signal: null as SignalChoice,
+    })),
+    {key: 'dawnsky/light · 커스텀 강조색', theme: 'dawnsky' as const, mode: 'light' as const, signal: CUSTOM},
+    {key: 'dawnsky/dark · 커스텀 강조색', theme: 'dawnsky' as const, mode: 'dark' as const, signal: CUSTOM},
+  ];
+
+  /** 같은 조합 안에 카드와 에이전트 탭 배지를 나란히 그려 낱말 색·점 색을 읽는다. */
+  function drawn(view: (typeof VIEWS)[number], live: boolean) {
+    const model = card(keyed(signal({state: 'awaiting_approval'})), live);
+    if (model === null) throw new Error('승인 필요 카드가 서지 않았다');
+    const {unmount} = render(
+      <FixedScheme scheme={view.mode} theme={view.theme} signal={view.signal}>
+        <WorkingCard card={model} onPress={() => {}} />
+        <AgentTurnBadge
+          state="awaiting_approval"
+          text="승인 필요"
+          label="승인 필요"
+          live={live}
+          testID="agents-tab-badge"
+        />
+      </FixedScheme>,
+    );
+    const out = {
+      word: flat(screen.getByTestId('home-working-state').props.style).color,
+      // 승인 대기·끊긴 레일은 맥박이 없다 — 점은 늘 `home-live-dot-still` 이다.
+      dot: flat(screen.getByTestId('home-live-dot-still').props.style).backgroundColor,
+      badge: flat(within(screen.getByTestId('agents-tab-badge')).getByText('승인 필요').props.style).color,
+    };
+    unmount();
+    return out;
+  }
+
+  it('낱말과 점이 그 조합의 경고색(warn)이고, 에이전트 탭 배지와 같은 한 톤이다 — 신호색이 아니다', () => {
+    const wrong: string[] = [];
+    let separated = 0;
+    for (const view of VIEWS) {
+      const palette = resolveAppearance(view.theme, view.mode, view.signal).palette;
+      const {word, dot, badge} = drawn(view, true);
+      if (word !== palette.warn) wrong.push(`${view.key}: 낱말 ${String(word)} ≠ warn ${palette.warn}`);
+      if (dot !== palette.warn) wrong.push(`${view.key}: 점 ${String(dot)} ≠ warn ${palette.warn}`);
+      if (badge !== word) wrong.push(`${view.key}: 에이전트 탭 배지 ${String(badge)} ≠ 홈 카드 낱말 ${String(word)}`);
+      if (word === palette.accentText) wrong.push(`${view.key}: 낱말이 신호색(accentText) ${palette.accentText}`);
+      if (palette.warn !== palette.accentText) separated += 1;
+    }
+    expect(wrong).toEqual([]);
+    // 이 걸음이 헛돌지 않는다: 모든 조합에서 경고색과 신호색은 실제로 다른 값이었다(같으면 위 「신호색이 아니다」는 아무것도 못 잡는다).
+    expect(separated).toBe(VIEWS.length);
+  });
+
+  it('끊긴 레일 위의 낱말은 확인된 사실이 아니라서 색을 벗는다 — 경고색을 입지 않는다(에이전트 탭 배지와 같은 규칙)', () => {
+    const wrong: string[] = [];
+    for (const view of VIEWS) {
+      const palette = resolveAppearance(view.theme, view.mode, view.signal).palette;
+      const {word, dot, badge} = drawn(view, false);
+      if (word !== palette.textMuted) wrong.push(`${view.key}: 낱말 ${String(word)} ≠ textMuted ${palette.textMuted}`);
+      if (dot !== palette.textMuted) wrong.push(`${view.key}: 점 ${String(dot)} ≠ textMuted ${palette.textMuted}`);
+      if (badge === palette.warn) wrong.push(`${view.key}: 끊긴 레일의 배지가 경고색을 입는다`);
+    }
+    expect(wrong).toEqual([]);
   });
 });
