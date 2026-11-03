@@ -376,8 +376,8 @@ function latestUnansweredMention(
 }
 
 /**
- * 네 상태 중 빈/로딩/오류를 도출한다. 오프라인 문장은 셸 ConnectionBanner 가
- * 말하고, 이 표면은 컨트롤만 잠근다 (캐시된 내용은 계속 그린다).
+ * 네 상태 중 빈/로딩/오류를 도출한다. 오프라인 문장은 셸의 연결 카드(접히면
+ * 위쪽 띠)가 말하고, 이 표면은 컨트롤만 잠근다 (캐시된 내용은 계속 그린다).
  */
 export function firstMentionView(input: {
   target: FirstMentionTarget | null;

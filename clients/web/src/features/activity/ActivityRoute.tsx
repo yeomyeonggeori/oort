@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useSession } from "@/app/session";
+import { useOffline } from "@/features/common/useOffline";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import {
   ACTIVITY_FILTER_TABS,
@@ -57,7 +58,7 @@ const EMPTY_COPY: Record<ActivityFilter, { headline: string; detail: string }> =
 };
 
 export function ActivityRoute() {
-  const { connStatus, session } = useSession();
+  const { session } = useSession();
   const [params, setParams] = useSearchParams();
   const filter = parseActivityFilter(params.get("filter"));
   // 이 표면의 두 원천이 **둘 다** 이 서버에 없다 (goal B12): 승인 원장(404)과
@@ -73,7 +74,7 @@ export function ActivityRoute() {
     () => feed.items.filter((item) => matchesActivityFilter(item, filter)),
     [feed.items, filter]
   );
-  const offline = connStatus === "disconnected";
+  const offline = useOffline();
 
   // 2R B2: 위 판정은 **둘 중 하나라도 있으면** 이 표면을 연다. 승인이 제공으로
   // 뒤집힌 지금 그 조건은 참이 되었고, 그래서 이 라우트는 다시 요청을 보낸다.
