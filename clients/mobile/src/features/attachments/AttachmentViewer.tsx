@@ -94,10 +94,11 @@ import {
 } from './viewerDesign';
 import {
   DOUBLE_TAP_MS,
+  doubleTapScale,
   fullRect,
   isDoubleTap,
   isZoomed,
-  ZOOM_MAX,
+  maxZoomScale,
   ZOOM_MIN,
   ZOOMED_A11Y_VALUE,
   zoomRectAt,
@@ -159,11 +160,11 @@ import {
 //
 // ## 확대 (#4769) — 쪽 안의 스크롤뷰가 하고, 응답자는 그 **안**에 있다
 //
-// 쪽마다 iOS 스크롤뷰(`maximumZoomScale` 3 · `minimumZoomScale` 1 · `centerContent`)를 두고 사진을 그 안에 놓는다 — 두 손가락 확대·끌어 옮기기·
+// 쪽마다 iOS 스크롤뷰(`maximumZoomScale` 3 — 아주 긴 그림만 화면을 채우는 배율까지, #5224 · `minimumZoomScale` 1 · `centerContent`)를 두고 사진을 그 안에 놓는다 — 두 손가락 확대·끌어 옮기기·
 // 놓으면 1 로 돌아오기는 UIKit 이 한다(새 의존 없음). JS 가 하는 일은 셋이다(값과 계산은 `viewerZoom.ts`).
 //   ① 확대 상태를 `onScroll`·`onScrollEndDrag` 의 `zoomScale` 로 읽어, 확대 중이면 가로 넘기기(`scrollEnabled`)와 쓸어 닫기(`enabled`)를 끈다.
 //      원래 크기로 돌아오면 다시 켠다.
-//   ② 두 번 탭이면 `scrollResponderZoomTo` 로 탭한 곳 둘레 2배 ↔ 원래 크기(동작 줄이기면 움직임 없이 바로).
+//   ② 두 번 탭이면 `scrollResponderZoomTo` 로 탭한 곳 둘레 2배(아주 긴 그림은 높이·폭 맞춤) ↔ 원래 크기(동작 줄이기면 움직임 없이 바로).
 //   ③ 장이 바뀌면(썸네일·넘기기) 앞 장의 확대를 푼다.
 //
 // **응답자는 확대 스크롤뷰의 자손이어야 한다.** 위 「응답을 쥐는 자리」와 같은 까닭이다: iOS 스크롤뷰는 superview 사슬에 JS 응답자가 있으면 스크롤·확대를
@@ -174,12 +175,34 @@ import {
 //
 // **한 번 탭은 두 번 탭 문턱(`DOUBLE_TAP_MS`)만큼 늦다**: 두 번째 탭이 오는지 보고서야 조작을 숨긴다(안 그러면 두 번 탭이 조작을 깜박이게 한다).
 //
+// ## 화면 어디서든 확대 (#5224) — 빈 곳 받이는 확대 스크롤뷰의 **안**에 있다
+//
+// 팀 피드백: 가로로 엄청 긴 화면 캡처는 가운데 얇은 선처럼 보이고, **정확히 그 선 위에서만** 핀치가 확대됐다(카카오톡은 그림 밖 검은 빈 곳에서도 되고,
+// 엄지는 그림·검지는 빈 곳이어도 된다). 원인은 위 「응답은 확대 스크롤뷰의 자손이어야 한다」의 거울상이었다: 사진을 맞춤 크기로 줄이고(#4775) 나면
+// 그림 밖 빈 곳의 터치는 확대 스크롤뷰 **자신**이 맞는 대상이 되어, 응답이 그 **조상**으로 올라갔다 — 앞 판의 빈 곳 응답자(쪽을 감싼 View)와 그 위의 뿌리
+// (`frameHandlers`). 조상이 JS 응답자이면 iOS 는 확대·팬을 시작하지 못한다(`_shouldDisableScrollInteraction`). 시뮬레이터에서 손가락 자리를 정해 합성한 핀치로
+// 확정했다: 고치기 전에는 그림 밖 두 손가락도, 그림 위 한 손가락 + 빈 곳 한 손가락도 확대되지 않았다. 감싼 View 의 응답자만 빼도, 빈 곳에 받이만 두고 응답자를 안 달아도
+// 여전히 안 됐다 — 뿌리의 `frameHandlers` 가 사진 밖 빈 곳을 쥐는 것으로 보인다. 쥐는 뷰가 **스크롤뷰 안**에 있어야 한다. 같은 합성이 그림 위 두 손가락은 확대시켜서(고친 뒤 빌드)
+// 합성이 진짜 핀치라는 것은 대조로 확인했다.
+//
+// 그래서 **빈 곳 받이**(`attachment-viewer-blank`)를 확대 스크롤뷰의 내용 안, 사진 쪽 View 의 **뒤**에 둔다: 쪽 전체(창 크기)를 덮는 투명한 View 이고, 내용 컨테이너
+// (맞춤 사진 크기)의 좌상단에서 (-x, -y) 만큼 물러나 컨테이너 밖으로 넘친다. 내용 크기(확대·팬의 범위)는 그대로 맞춤 사진이다 — 검은 여백을 확대·팬하지 않는다(#4775).
+// Fabric 의 히트 테스트(`betterHitTest:`)는 넘침이 보이는(`overflow: visible`) 뷰의 범위 밖에 있는 자식도 맞추므로 넘친 받이도 맞는다(시뮬레이터에서 확인). 받이가 맞은 빈 곳의
+// 터치는 사진 위와 같은 응답자(`pageHandlers`)가 쥐고 같은 규칙을 쓴다 — 한 번 탭(조작 숨김)·두 번 탭(확대)·아래로 쓸어 닫기·가로 넘기기 양보·둘째 손가락 거절(방패).
+// 확대 중에도 받이는 내용과 함께 커져 창을 계속 덮는다(같은 중심에서 같은 배율).
+//
+// ## 그림 비율에 맞는 최대 배율 (#5224) — `viewerZoom.ts`
+//
+// 보통 사진은 그대로다(최대 3배·두 번 탭 2배). 채움 배율(창을 가득 채우는 배율)이 5 를 넘는 **아주 긴 그림**(세로 화면에서 약 2.3:1 이상 — 21:9 파노라마·긴 캡처)만
+// 최대 배율을 채움 배율까지(상한 48) 올리고 두 번 탭도 거기로 보낸다(가로로 긴 그림은 높이 맞춤, 세로로 긴 그림은 폭 맞춤 — 끌어서 읽는다). 다시 두 번 탭하면 처음 크기다.
+// 2072×110 은 폭에 맞추면 높이 약 21pt 라 3배(62pt)로는 읽을 수 없고, 41배면 화면 높이를 채운다.
+//
 // ## Hero와 확대의 경계 (#4775)
 //
 // Modal 자체의 전환은 없다. 썸네일을 잰 뒤 `StageHero`가 맞춤 사진 영역으로 자라고, 조작은 도착 후에 선다.
 // 닫기는 현재 첨부 ID를 다시 잰다. 확대 중이면 네이티브 맞춤 완료 후 hero가 시작하고, 끌어 닫기는 놓은 위치를 잇는다.
-// 확대 스크롤 내용도 실제 맞춤 사진 크기다(검은 여백을 확대·팬하지 않는다). 사진 밖의 손짓은 가로 pager 자손인
-// 전체 쪽 wrapper가 받으므로, 여백에서 시작한 옆 넘기기도 살아 있다. 상태 기계는 공용 `stageTransition`에 있다.
+// 확대 스크롤 내용도 실제 맞춤 사진 크기다(검은 여백을 확대·팬하지 않는다). 사진 밖의 손짓은 확대 스크롤뷰 안의
+// 빈 곳 받이가 받으므로(위 「화면 어디서든 확대」), 여백에서 시작한 옆 넘기기·핀치도 살아 있다. 상태 기계는 공용 `stageTransition`에 있다.
 //
 // ## 조작을 숨길 때 보조기술
 //
@@ -222,7 +245,6 @@ function ViewerPage({
   width,
   height,
   responder,
-  blankResponder,
   zoomPages,
   onZoomedChange,
 }: {
@@ -234,10 +256,11 @@ function ViewerPage({
   width: number;
   /** 쪽의 높이 — 사진은 화면 가득이라 창 높이다(두 번 탭이 키울 사각형의 크기). */
   height: number;
-  /** 사진 위에 닿은 손가락을 쥐는 핸들러 — 확대 스크롤뷰의 **자손**에 펼친다(파일 머리 「확대」). */
+  /**
+   * 사진 위에 닿은 손가락을 쥐는 핸들러 — 확대 스크롤뷰의 **자손**에 펼친다(파일 머리 「확대」). 사진 쪽 View 와 **빈 곳 받이** 둘에 같이 펼친다
+   * (파일 머리 「화면 어디서든 확대」) — 쪽 안의 어느 자리에 닿든 쥐는 뷰는 확대 스크롤뷰의 조상이 아니다.
+   */
   responder: GestureResponderHandlers;
-  /** Full-page blank margins remain descendants of the horizontal pager after zoom content is fitted. */
-  blankResponder: GestureResponderHandlers;
   /** 프레임이 쥔 확대 손잡이 모음. 쪽은 올라와 있는 동안 자기 자리를 채운다. */
   zoomPages: MutableRefObject<Array<PageZoom | null>>;
   /** 이 쪽의 확대 여부가 **바뀔 때만** 부른다. */
@@ -275,17 +298,19 @@ function ViewerPage({
     const zoomTo = (rect: ZoomRect, animated: boolean) =>
       zoomRef.current?.scrollResponderZoomTo({ ...rect, animated }, animated);
     const size = {width: fitted.width, height: fitted.height};
+    // 보통 사진은 2배, 아주 긴 그림은 화면을 채우는 배율(높이 맞춤·폭 맞춤 — `viewerZoom.ts`). 다시 두 번 탭하면 처음 크기다.
+    const scale = doubleTapScale(size, {width, height});
     return {
       toggleAt: (point, animated) => {
         if (zoomedRef.current) zoomTo(fullRect(size), animated);
         // centerContent places the fitted content at the hero's window-space origin.
-        else if (ready) zoomTo(zoomRectAt({x: point.x - fitted.x, y: point.y - fitted.y}, size), animated);
+        else if (ready) zoomTo(zoomRectAt({x: point.x - fitted.x, y: point.y - fitted.y}, size, scale), animated);
       },
       reset: animated => {
         if (zoomedRef.current) zoomTo(fullRect(size), animated);
       },
     };
-  }, [fitted.x, fitted.y, fitted.width, fitted.height, ready]);
+  }, [fitted.x, fitted.y, fitted.width, fitted.height, ready, width, height]);
   useEffect(() => {
     const pages = zoomPages.current; // 모음 자체는 바뀌지 않는다 — 칸만 채우고 비운다
     pages[position] = handle;
@@ -295,13 +320,13 @@ function ViewerPage({
   }, [zoomPages, position, handle]);
 
   return (
-    <View style={{width, height}} {...blankResponder}>
     <ScrollView
       ref={zoomRef}
       style={[styles.zoomScroll, { width, height }]}
       contentContainerStyle={[styles.zoomContent, {width: fitted.width, height: fitted.height}]}
       // 사진이 아직 없으면 키울 것이 없다(「불러오는 중」 글자를 키우지 않는다) — 최소와 같으면 iOS 는 확대를 켜지 않는다.
-      maximumZoomScale={ready ? ZOOM_MAX : ZOOM_MIN}
+      // 보통 사진은 3배, 아주 긴 그림만 화면을 채우는 배율까지(#5224 — `viewerZoom.ts` 의 `maxZoomScale`).
+      maximumZoomScale={ready ? maxZoomScale({width: fitted.width, height: fitted.height}, {width, height}) : ZOOM_MIN}
       minimumZoomScale={ZOOM_MIN}
       bouncesZoom
       bounces={false}
@@ -317,6 +342,18 @@ function ViewerPage({
       onScrollEndDrag={report}
       testID="attachment-viewer-zoom"
     >
+      {/* 빈 곳 받이 (#5224): 쪽 전체를 덮는 투명한 View. 내용 컨테이너(맞춤 사진 크기)의 좌상단에서 (-x, -y) 만큼 물러나 창과 같은 크기로 서서 컨테이너 밖으로
+          넘친다 — 내용 크기(확대·팬의 범위)는 그대로 맞춤 사진이고, 넘친 자손도 맞추는 것은 Fabric 스크롤뷰의 히트 테스트다. 그림 밖 빈 곳의 터치는 확대 스크롤뷰 **자신**이
+          아니라 이 받이가 맞고 쥔다 — 응답자가 스크롤뷰의 조상이면 iOS 는 핀치를 시작하지 못한다(파일 머리 「화면 어디서든 확대」). 사진 쪽 View 보다 **먼저**
+          그려 사진 뒤에 선다(그림 위의 터치는 사진이, 나머지는 이 받이가 맞춘다). */}
+      <View
+        // `absoluteFill` 은 절대 위치의 바탕이고, 자리(left·top)와 크기는 쪽에서 준다(맞춤 사각형을 창 크기로 넓힌 만큼). 그 바탕의 right·bottom 0 은 크기가
+        // 정해져 있어 쓰이지 않는다 — 크기가 정해진 절대 위치 자식은 앞쪽 오프셋(left·top)을 따른다.
+        style={[StyleSheet.absoluteFill, {left: -fitted.x, top: -fitted.y, width, height}]}
+        collapsable={false}
+        testID="attachment-viewer-blank"
+        {...responder}
+      />
       <View
         style={[styles.viewerPage, {width: fitted.width, height: fitted.height}]}
         // 레이아웃 속성만 있는 View 는 평탄화되어 네이티브 뷰가 사라질 수 있다 — 그러면 닿는 대상이 못 된다.
@@ -345,7 +382,6 @@ function ViewerPage({
         )}
       </View>
     </ScrollView>
-    </View>
   );
 }
 
@@ -895,7 +931,6 @@ function ViewerFrame({
                 width={width}
                 height={height}
                 responder={pageHandlers}
-                blankResponder={frameHandlers}
                 zoomPages={zoomPages}
                 onZoomedChange={onZoomedChange}
               />

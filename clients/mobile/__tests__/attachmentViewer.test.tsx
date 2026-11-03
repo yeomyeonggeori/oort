@@ -761,7 +761,13 @@ describe('③ 응답을 쥐는 자리 — 가로 넘김을 죽이지 않는다 (
     const scroll = scrollView();
     for (const index of [0, 1, 2]) {
       const pages = screen.getAllByTestId('attachment-viewer-page');
-      for (const target of [photo(index), pages[index] as Instance]) {
+      const blanks = screen.getAllByTestId('attachment-viewer-blank');
+      // 그림 위(사진·쪽 View) 와 그림 밖 빈 곳(빈 곳 받이, #5224 — 쪽 전체를 덮는 투명한 View).
+      for (const [target, expected] of [
+        [photo(index), 'attachment-viewer-page'],
+        [pages[index] as Instance, 'attachment-viewer-page'],
+        [blanks[index] as Instance, 'attachment-viewer-blank'],
+      ] as const) {
         const touch = finger(target);
         expect(touch.down(200, 300).granted).toBe(true);
         const grabbed = touch.responder as Instance;
@@ -769,7 +775,7 @@ describe('③ 응답을 쥐는 자리 — 가로 넘김을 죽이지 않는다 (
         expect(isAncestor(grabbed, scroll)).toBe(false);
         // 쥔 것은 스크롤뷰 **안**의 쪽이다.
         expect(isAncestor(scroll, grabbed)).toBe(true);
-        expect(grabbed.props.testID).toBe('attachment-viewer-page');
+        expect(grabbed.props.testID).toBe(expected);
         touch.up();
       }
     }
@@ -1930,15 +1936,20 @@ describe('⑫ 확대 — 두 손가락 확대와 두 번 탭 (#4769)', () => {
     await mount();
     for (const index of [0, 1, 2]) {
       const pages = screen.getAllByTestId('attachment-viewer-page');
-      for (const target of [photo(index), pages[index] as Instance]) {
+      const blanks = screen.getAllByTestId('attachment-viewer-blank');
+      for (const [target, expected] of [
+        [photo(index), 'attachment-viewer-page'],
+        [pages[index] as Instance, 'attachment-viewer-page'],
+        [blanks[index] as Instance, 'attachment-viewer-blank'], // 그림 밖 빈 곳 (#5224)
+      ] as const) {
         const touch = finger(target);
         expect(touch.down(200, 300).granted).toBe(true);
         const grabbed = touch.responder as Instance;
         // iOS 가 스크롤을 막는 조건의 거울상(`_shouldDisableScrollInteraction`): 응답자는 스크롤뷰의 superview 사슬에 있으면 안 된다.
         expect(isAncestor(grabbed, zoomScroll(index))).toBe(false);
-        // 쥔 것은 확대 스크롤뷰 **안**의 쪽 View 다(스크롤뷰 안의 `Pressable` 과 같은 모양).
+        // 쥔 것은 확대 스크롤뷰 **안**의 쪽 View·빈 곳 받이다(스크롤뷰 안의 `Pressable` 과 같은 모양).
         expect(isAncestor(zoomScroll(index), grabbed)).toBe(true);
-        expect(grabbed.props.testID).toBe('attachment-viewer-page');
+        expect(grabbed.props.testID).toBe(expected);
         touch.up();
       }
     }
@@ -2259,5 +2270,233 @@ describe('알림이 새 입구로 들어오면 (#4667)', () => {
       dismissTemporarySurfaces();
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// =============================================================================
+// 화면 어디서든 두 손가락 확대 + 아주 긴 그림 (#5224, 팀 피드백 2026-11-03).
+//
+// 가로로 엄청 긴 화면 캡처는 가운데 얇은 선처럼 보이고, **정확히 그 선 위에서만** 핀치가 확대됐다. 원인(RN 0.86 Fabric 소스로 확인 —
+// `RCTScrollViewComponentView._shouldDisableScrollInteraction` → `touchesShouldCancelInContentView:`): 그림 밖 빈 곳의 터치는 확대
+// 스크롤뷰 자신이 맞는 대상이라 응답이 그 **조상**(쪽을 감싼 래퍼 View)에게 갔고, 조상이 JS 응답자이면 iOS 스크롤뷰는 확대·팬을 시작하지 못한다.
+//
+// 고침: 래퍼의 응답자를 없애고, 확대 스크롤뷰의 **내용 안**에 쪽 전체를 덮는 투명한 「빈 곳 받이」(`attachment-viewer-blank`)를 사진 뒤에 둔다.
+// Fabric 의 스크롤뷰 히트 테스트(`betterHitTest:`)는 내용 컨테이너 밖으로 넘친 자손도 맞춘다 — 그래서 빈 곳의 터치도 스크롤뷰의 **자손**이 쥐고,
+// 사진 위와 같은 규칙(탭·두 번 탭·쓸어 닫기·가로 넘기기 양보)을 쓴다.
+//
+// jest 에는 네이티브 히트 테스트·스크롤뷰가 없다. 여기서 재는 것은 **JS 가 정하는 것**이다: 받이의 자리와 크기(쪽 전체를 덮는가), 응답자의 자리(스크롤뷰의
+// 조상이 아닌가), 받이가 쥐었을 때의 규칙, 배율. 실제 핀치는 시뮬레이터(XCUITest)로 재고, 못 잰 부분은 인계에 `runtime-unverified` 로 적는다.
+// =============================================================================
+describe('⑬ 화면 어디서든 두 손가락 확대 — 빈 곳 받이와 아주 긴 그림 (#5224)', () => {
+  const WINDOW = { width: 400, height: 800 };
+  const RESPONDER_PROPS = [
+    'onStartShouldSetResponder',
+    'onStartShouldSetResponderCapture',
+    'onMoveShouldSetResponder',
+    'onMoveShouldSetResponderCapture',
+    'onResponderGrant',
+  ] as const;
+  const zoomScroll = (index = 0) => screen.getAllByTestId('attachment-viewer-zoom')[index] as Instance;
+  const blank = (index = 0) => screen.getAllByTestId('attachment-viewer-blank')[index] as Instance;
+  const page = (index = 0) => screen.getAllByTestId('attachment-viewer-page')[index] as Instance;
+  const zoomTo = () => ScrollView.prototype.scrollResponderZoomTo as unknown as jest.Mock;
+  const lastRect = () => (zoomTo().mock.lastCall as [{ x: number; y: number; width: number; height: number }])[0];
+  const useWindow = () =>
+    jest.spyOn(require('react-native'), 'useWindowDimensions').mockReturnValue({ ...WINDOW, scale: 2, fontScale: 1 });
+  const first = [IMAGES[0] as MessageAttachment];
+  /** 확대 스크롤뷰의 창과 내용 크기에서 읽은 맞춤 사각형 — `centerContent` 가 내용을 놓는 자리(창 가운데)다. */
+  function fittedOf(index = 0) {
+    const frame = flatten(zoomScroll(index).props.style);
+    const content = flatten(zoomScroll(index).props.contentContainerStyle);
+    return {
+      x: (Number(frame.width) - Number(content.width)) / 2,
+      y: (Number(frame.height) - Number(content.height)) / 2,
+      width: Number(content.width),
+      height: Number(content.height),
+    };
+  }
+  const zoomBy = (scale: number, index = 0) =>
+    act(() => {
+      fireEvent(zoomScroll(index), 'scroll', { nativeEvent: { zoomScale: scale } });
+    });
+
+  beforeEach(() => {
+    zoomTo().mockClear();
+  });
+
+  it.each([
+    { shape: '세로 200×800', natural: { width: 200, height: 800 } },
+    { shape: '정사각 800×800', natural: { width: 800, height: 800 } },
+    { shape: '가로 1600×800', natural: { width: 1600, height: 800 } },
+    { shape: '극단 가로 2072×110', natural: { width: 2072, height: 110 } },
+    { shape: '극단 세로 110×2072', natural: { width: 110, height: 2072 } },
+  ])('빈 곳 받이: $shape — 확대 스크롤뷰 안, 사진 뒤에서 쪽 전체(그림 밖 빈 곳 포함)를 덮는다', async ({ natural }) => {
+    useWindow();
+    rememberAttachmentSize('a', natural.width, natural.height);
+    await mount({ images: first });
+    const fitted = fittedOf();
+    const catcher = blank();
+    const style = flatten(catcher.props.style);
+    // 확대 스크롤뷰 **안**에 있다 — 그래야 빈 곳의 터치를 쥐는 뷰가 스크롤뷰의 조상이 되지 않는다.
+    expect(isAncestor(zoomScroll(), catcher)).toBe(true);
+    // 쪽 전체: 내용(맞춤 사각형, 창 가운데)의 좌상단에서 (-x, -y) 만큼 물러나 창과 같은 크기로 선다 → 창 좌표 (0,0)–(창 폭, 창 높이).
+    expect(style).toMatchObject({ position: 'absolute', width: WINDOW.width, height: WINDOW.height });
+    expect(fitted.x + Number(style.left)).toBeCloseTo(0, 9);
+    expect(fitted.y + Number(style.top)).toBeCloseTo(0, 9);
+    // 사진 쪽 View 와 같은 내용 컨테이너 아래에서 사진보다 **먼저**(= 뒤에) 선다 — 그림 위의 터치는 사진이, 나머지는 받이가 맞춘다.
+    expect(hostChain(catcher)[1] === hostChain(page())[1]).toBe(true);
+    const order = zoomScroll()
+      .findAll((node: Instance) => typeof node.type === 'string' && ['attachment-viewer-blank', 'attachment-viewer-page'].includes(node.props.testID))
+      .map((node: Instance) => node.props.testID);
+    expect(order).toEqual(['attachment-viewer-blank', 'attachment-viewer-page']);
+    // 네이티브 뷰가 평탄화되면 닿는 대상이 못 된다(쪽 View 와 같은 이유).
+    expect(catcher.props.collapsable).toBe(false);
+    // 확대 스크롤뷰의 내용 크기는 그대로 맞춤 사각형이다(받이가 내용을 부풀려 검은 여백을 확대·팬하게 하지 않는다 — #4775).
+    expect(flatten(zoomScroll().props.contentContainerStyle)).toMatchObject({ width: fitted.width, height: fitted.height });
+  });
+
+  it('확대 스크롤뷰와 가로 스크롤뷰 사이에는 터치를 쥘 수 있는 뷰가 없다 — 있으면 빈 곳의 응답자가 스크롤뷰의 조상이 되어 iOS 가 확대를 시작하지 못한다', async () => {
+    await mount();
+    const pager = scrollView();
+    for (const index of [0, 1, 2]) {
+      const above = hostChain(zoomScroll(index)).slice(1);
+      const stop = above.indexOf(pager);
+      expect(stop).toBeGreaterThan(-1);
+      for (const node of above.slice(0, stop)) {
+        for (const name of RESPONDER_PROPS) expect(node.props[name]).toBeUndefined();
+      }
+    }
+  });
+
+  it('빈 곳 받이에 닿은 손가락은 받이가 쥔다 — 모든 쪽, 스크롤뷰의 자손이고 뒤의 메시지 행은 가져가지 못한다', async () => {
+    const { rowGrants } = await mount({}, { inRow: true });
+    for (const index of [0, 1, 2]) {
+      const touch = finger(blank(index));
+      expect(touch.down(200, 40).granted).toBe(true);
+      const grabbed = touch.responder as Instance;
+      expect(grabbed.props.testID).toBe('attachment-viewer-blank');
+      expect(isAncestor(grabbed, zoomScroll(index))).toBe(false); // iOS 가 확대를 막는 조건의 거울상
+      expect(isAncestor(zoomScroll(index), grabbed)).toBe(true);
+      touch.up();
+    }
+    expect(rowGrants).not.toHaveBeenCalled();
+  });
+
+  it('빈 곳을 한 번 누르면 조작이 숨고, 한 번 더 누르면 돌아온다 (그대로 두는 것)', async () => {
+    await mount();
+    expect(chromeIsShown()).toBe(true);
+    tapOnce(blank());
+    expect(chromeIsShown()).toBe(false);
+    tapOnce(blank());
+    expect(chromeIsShown()).toBe(true);
+  });
+
+  it('빈 곳에서 시작한 아래로 쓸기도 닫는다 — 모자라면 제자리로 돌아온다 (그대로 두는 것)', async () => {
+    const { onClose, progress } = await mount();
+    const short = finger(blank());
+    short.down(200, 100);
+    dragSlowly(short, 200, 100, DISMISS_DISTANCE_PT - 1);
+    expect(progress.current).toBe(DISMISS_DISTANCE_PT - 1); // 받이도 끌기를 가져간다
+    short.up();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(progress.current).toBe(0);
+    const long = finger(blank());
+    long.down(200, 100);
+    dragSlowly(long, 200, 100, DISMISS_DISTANCE_PT + 1);
+    long.up();
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it('빈 곳에서 시작한 가로 쓸기는 가져가지 않고 응답을 양보한다 — 옆으로 넘기기가 산다 (그대로 두는 것)', async () => {
+    const { onClose, progress } = await mount();
+    const touch = finger(blank());
+    touch.down(300, 100);
+    for (const [x, y] of [[270, 104], [220, 110], [150, 116], [60, 120]] as const) touch.move(x, y);
+    expect(progress.current).toBeNull();
+    expect(touch.yields()).toBe(true); // 가로 ScrollView 가 응답을 달라고 하면 내준다
+    touch.up();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('핀치: 빈 곳에 두 손가락이 한꺼번에 닿아도, 한 손가락 뒤에 둘째가 닿아도 받이가 쥔 채다 — 뿌리·행이 가져가지 못하고 뷰어는 닫히지 않는다', async () => {
+    const { rowGrants, onClose, progress } = await mount({}, { inRow: true });
+    const both = finger(blank());
+    expect(both.down(200, 100, 2).granted).toBe(true);
+    expect(both.responder?.props.testID).toBe('attachment-viewer-blank');
+    dragSlowly(both, 200, 100, DISMISS_DISTANCE_PT + 40);
+    expect(progress.current).toBeNull(); // 핀치는 끌기를 가져가지 않는다
+    both.up();
+
+    const later = finger(blank());
+    later.down(200, 100);
+    const held = later.responder;
+    expect(later.second()?.props.testID).toBe('attachment-viewer-shield'); // 청하는 것은 방패뿐이다 — 뿌리도 행도 아니다
+    expect(later.responder === held).toBe(true); // 받이가 거절했다
+    expect(later.responder?.props.testID).toBe('attachment-viewer-blank');
+    expect(rowGrants).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('빈 곳을 두 번 탭해도 확대한다 — 그림 위와 같은 사각형 규칙: 그림 위쪽 빈 곳은 그림의 가장자리로 모인다', async () => {
+    useWindow();
+    await mount({ images: first });
+    const fitted = fittedOf();
+    afterTapWindow(() => {
+      tap(blank(), 200, 100);
+      tap(blank(), 200, 100);
+    });
+    // 4:3 사진(400×300)이 창 가운데(y 250)에 선다. (200,100) 은 사진 위쪽 빈 곳 — 내용 좌표 y = 100 - 250 = -150 → 사진 맨 위로 모인다.
+    expect(fitted).toMatchObject({ x: 0, y: 250, width: 400, height: 300 });
+    expect(zoomTo()).toHaveBeenLastCalledWith({ x: 100, y: 0, width: 200, height: 150, animated: true }, true);
+    expect(chromeIsShown()).toBe(true); // 두 번 탭은 한 번 탭을 두 번 하지 않는다
+  });
+
+  it('보통 사진의 최대 배율은 3배 그대로고, 사진이 오기 전에는 1이다', async () => {
+    useWindow();
+    render(<AttachmentViewer workspaceId="ws" channelId="ch" images={first} startIndex={0} onClose={jest.fn()} />);
+    expect(zoomScroll().props.maximumZoomScale).toBe(1);
+    await screen.findAllByTestId('attachment-viewer-image');
+    expect(zoomScroll().props.maximumZoomScale).toBe(3);
+  });
+
+  it('극단 가로 그림의 최대 배율은 화면 높이를 채우는 배율이다 — 폭에 맞추면 약 21pt 의 얇은 선이라 3배(62pt)로는 읽을 수 없다', async () => {
+    useWindow();
+    rememberAttachmentSize('a', 2072, 110);
+    await mount({ images: first });
+    const fitted = fittedOf();
+    expect(fitted.height).toBeCloseTo((WINDOW.width * 110) / 2072, 9);
+    const max = Number(zoomScroll().props.maximumZoomScale);
+    expect(max).toBeGreaterThan(30);
+    expect(fitted.height * max).toBeCloseTo(WINDOW.height, 6); // 끝까지 키우면 그림 높이가 창 높이를 채운다
+  });
+
+  it('아주 긴 그림은 두 번 탭이 높이 맞춤으로 가고, 다시 두 번 탭하면 처음 크기로 돌아온다 — 그림 밖 빈 곳을 눌러도 같다', async () => {
+    useWindow();
+    rememberAttachmentSize('a', 2072, 110);
+    await mount({ images: first });
+    const fitted = fittedOf();
+    const fill = WINDOW.height / fitted.height;
+    // 그림 밖 빈 곳(위쪽) 두 번 탭 → 높이 맞춤. 사각형은 맞춤 사각형을 `fill` 로 나눈 크기이고 탭한 가로 위치가 가운데 온다.
+    const tapX = 300;
+    afterTapWindow(() => {
+      tap(blank(), tapX, 100);
+      tap(blank(), tapX, 100);
+    });
+    const rect = lastRect();
+    expect(rect.width).toBeCloseTo(fitted.width / fill, 9);
+    expect(rect.height).toBeCloseTo(fitted.height / fill, 9);
+    expect(rect.x + rect.width / 2).toBeCloseTo(tapX, 9);
+    // 네이티브는 사각형을 창에 맞춰 키운다 — 그 배율이 곧 높이 맞춤이다.
+    expect(Math.min(WINDOW.width / rect.width, WINDOW.height / rect.height)).toBeCloseTo(fill, 6);
+    expect(zoomTo()).toHaveBeenLastCalledWith(expect.objectContaining({ animated: true }), true);
+
+    // 네이티브가 확대를 알린 뒤 다시 두 번 탭 → 처음 크기(맞춤 사각형 전체).
+    zoomBy(fill);
+    zoomTo().mockClear();
+    afterTapWindow(() => {
+      tap(photo(), 200, fitted.y + 5);
+      tap(photo(), 200, fitted.y + 5);
+    });
+    expect(zoomTo()).toHaveBeenLastCalledWith({ x: 0, y: 0, width: fitted.width, height: fitted.height, animated: true }, true);
   });
 });
