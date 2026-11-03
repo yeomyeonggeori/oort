@@ -454,6 +454,7 @@ export const messageKeys = [
   "timeline.workHealth.dwell",
   "timeline.workHealth.failedActivities",
   "timeline.workHealth.quiet",
+  "timeline.workHealth.quietShort",
   "timeline.workHealth.rejectedApprovals",
   "timeline.workHealth.retries",
   "timeline.workPlan.button",
@@ -465,6 +466,7 @@ export const messageKeys = [
   "timeline.workPlan.stepCurrent",
   "timeline.workPlan.stepDone",
   "timeline.workPlan.stepPending",
+  "timeline.workPlan.switching",
   "timeline.workPlan.title",
   "timeline.workPlan.titleDone",
   "timeline.workRecord.bundleRead",
@@ -472,8 +474,8 @@ export const messageKeys = [
   "timeline.workRecord.bundleSearch",
   "timeline.workRecord.capped",
   "timeline.workRecord.durationMinutes",
-  "timeline.workRecord.durationMs",
   "timeline.workRecord.durationSeconds",
+  "timeline.workRecord.durationUnderTenth",
   "timeline.workRecord.emptyEnded",
   "timeline.workRecord.emptyOpen",
   "timeline.workRecord.failureAlreadyClaimed",
@@ -1114,6 +1116,7 @@ export const argumentSpecs = {
   "timeline.workHealth.quiet": {
     "minutes": "number"
   },
+  "timeline.workHealth.quietShort": {},
   "timeline.workHealth.rejectedApprovals": {
     "count": "number"
   },
@@ -1134,6 +1137,7 @@ export const argumentSpecs = {
   "timeline.workPlan.stepCurrent": {},
   "timeline.workPlan.stepDone": {},
   "timeline.workPlan.stepPending": {},
+  "timeline.workPlan.switching": {},
   "timeline.workPlan.title": {
     "done": "number",
     "total": "number"
@@ -1156,12 +1160,10 @@ export const argumentSpecs = {
     "minutes": "number",
     "seconds": "number"
   },
-  "timeline.workRecord.durationMs": {
-    "ms": "number"
-  },
   "timeline.workRecord.durationSeconds": {
     "seconds": "number"
   },
+  "timeline.workRecord.durationUnderTenth": {},
   "timeline.workRecord.emptyEnded": {},
   "timeline.workRecord.emptyOpen": {},
   "timeline.workRecord.failureAlreadyClaimed": {},
@@ -1735,6 +1737,7 @@ export interface MessageArgs {
   "timeline.workHealth.dwell": { minutes: number };
   "timeline.workHealth.failedActivities": { count: number };
   "timeline.workHealth.quiet": { minutes: number };
+  "timeline.workHealth.quietShort": Record<string, never>;
   "timeline.workHealth.rejectedApprovals": { count: number };
   "timeline.workHealth.retries": { count: number };
   "timeline.workPlan.button": { done: number; total: number };
@@ -1746,6 +1749,7 @@ export interface MessageArgs {
   "timeline.workPlan.stepCurrent": Record<string, never>;
   "timeline.workPlan.stepDone": Record<string, never>;
   "timeline.workPlan.stepPending": Record<string, never>;
+  "timeline.workPlan.switching": Record<string, never>;
   "timeline.workPlan.title": { done: number; total: number };
   "timeline.workPlan.titleDone": Record<string, never>;
   "timeline.workRecord.bundleRead": { read: number };
@@ -1753,8 +1757,8 @@ export interface MessageArgs {
   "timeline.workRecord.bundleSearch": { search: number };
   "timeline.workRecord.capped": { shown: number };
   "timeline.workRecord.durationMinutes": { minutes: number; seconds: number };
-  "timeline.workRecord.durationMs": { ms: number };
   "timeline.workRecord.durationSeconds": { seconds: number };
+  "timeline.workRecord.durationUnderTenth": Record<string, never>;
   "timeline.workRecord.emptyEnded": Record<string, never>;
   "timeline.workRecord.emptyOpen": Record<string, never>;
   "timeline.workRecord.failureAlreadyClaimed": Record<string, never>;

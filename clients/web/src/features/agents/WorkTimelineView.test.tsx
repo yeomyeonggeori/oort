@@ -139,7 +139,7 @@ describe("「oort 기록」 칸의 네 상태", () => {
     const lines = qa(el, "work-timeline-row");
     expect(lines.map((l) => text(q(l, "work-timeline-label")))).toEqual([
       "일 가져가기",
-      "진행 알리기 · 3번",
+      "진행 알리기 3",
       "맡은 시간 늘리기",
       "맡은 시간 늘리기",
     ]);
@@ -152,7 +152,7 @@ describe("「oort 기록」 칸의 네 상태", () => {
     expect(q(lines[1] as Element, "work-timeline-duration")).toBeNull();
     expect(q(lines[3] as Element, "work-timeline-status")).toBeNull();
     // 합계는 서버가 센 값(행 상한을 넘은 호출까지)이고, 상한 문장은 줄로 선 수를 말한다.
-    expect(text(q(el, "agent-work-panel-oort-summary"))).toBe("도구 호출 131번 · 실패 1번");
+    expect(text(q(el, "agent-work-panel-oort-summary"))).toBe("도구 호출 131 · 실패 1");
     expect(text(q(el, "agent-work-panel-oort-capped"))).toContain("처음 6번만 줄로 보여요");
     expect(q(el, "agent-work-panel-oort-unsupported")).toBeNull();
   });
@@ -253,7 +253,7 @@ describe("줄의 모션 (#4657, A1 모션 규칙)", () => {
     expect(dot.hasAttribute("data-still")).toBe(true);
     expect(text(q(el, "work-timeline-time"))).toMatch(/^\d{2}:\d{2}$/);
     expect(q(el, "work-timeline-time")?.hasAttribute("data-numeric")).toBe(true);
-    expect(text(q(el, "work-timeline-repeat"))).toContain("3번");
+    expect(text(q(el, "work-timeline-repeat")).trim()).toBe("3");
     expect(text(el)).not.toMatch(/\d+초/);
     act(() => root?.unmount());
     host?.remove();

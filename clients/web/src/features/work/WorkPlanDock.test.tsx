@@ -136,7 +136,7 @@ describe("독의 마크업", () => {
     expect(q("work-plan-popover")).toBeNull();
 
     act(() => dock?.click());
-    expect(q("work-plan-title")?.textContent).toBe("계획 · 5단계 중 2단계");
+    expect(q("work-plan-title")?.textContent).toBe("계획 · 5단계 중 2단계 완료");
     // 열리면 보조기술이 제목을 읽는다: 대화상자의 이름이 제목이다.
     expect(q("work-plan-title")?.id).not.toBe("");
     expect(q("work-plan-popover")?.getAttribute("aria-labelledby")).toBe(q("work-plan-title")?.id);
@@ -177,6 +177,48 @@ describe("독의 마크업", () => {
     act(() => dock?.click());
     expect(q("work-plan-title")?.textContent).toBe("계획 · 모두 마쳤어요");
     expect(qa("work-plan-step").every((step) => step.getAttribute("data-step") === "done")).toBe(true);
+  });
+
+  it("남은 수는 옆 단추(멤버 수)와 같은 맨 숫자다: 채운 원 배지가 아니다 (#5174 L4)", () => {
+    mount(view());
+    const count = q("work-plan-remaining");
+    expect(count?.textContent).toBe("2");
+    expect(count?.hasAttribute("data-numeric")).toBe(true);
+    // 그릇(둥근 면·안쪽 여백·글자 크기)을 만드는 클래스가 하나도 없다: 숫자는 단추의 글자 문법을 그대로 따른다.
+    expect(count?.getAttribute("class")).toBeNull();
+  });
+
+  it("단계 목록은 초점을 받고 이름이 있다: 계획 50개도 방향키·PageDown으로 읽는다 (#5166)", () => {
+    const long: WorkPlanItem[] = Array.from({ length: 50 }, (_, index) => ({
+      content: `단계 ${index + 1}`,
+      status: index < 10 ? "completed" : "pending",
+    }));
+    mount(view({ progress: workPlanProgress(long, true) ?? undefined }));
+    act(() => q("work-plan-dock")?.click());
+    const list = q("work-plan-steps");
+    expect(qa("work-plan-step")).toHaveLength(50);
+    // 초점을 받을 수 있고(tab 순서에 든다), 이름은 머리 제목이다.
+    expect(list?.tabIndex).toBe(0);
+    expect(list?.getAttribute("aria-labelledby")).toBe(q("work-plan-title")?.id);
+    expect(list?.className).toContain("focus-visible:focus-ring");
+    act(() => list?.focus());
+    expect(document.activeElement).toBe(list);
+  });
+
+  it("다른 세션의 계획을 읽는 중이면 목록이 읽는 중임을 알리고 그 사실을 한 줄로 말한다 (#5166)", () => {
+    mount(view({ switching: true }));
+    act(() => q("work-plan-dock")?.click());
+    expect(q("work-plan-steps")?.getAttribute("aria-busy")).toBe("true");
+    expect(qa("work-plan-note").map((note) => note.textContent)).toEqual([
+      "고른 세션의 계획을 불러오는 중이에요. 위 목록은 마지막으로 읽은 계획이에요.",
+    ]);
+    act(() => root?.unmount());
+    root = null;
+    host?.remove();
+    mount(view());
+    act(() => q("work-plan-dock")?.click());
+    expect(q("work-plan-steps")?.hasAttribute("aria-busy")).toBe(false);
+    expect(q("work-plan-note")).toBeNull();
   });
 
   it("세션이 여럿이면 팝오버 머리에서 고르고, 「모두 보기」는 기존 화면을 열며 팝오버를 닫는다", () => {
@@ -476,6 +518,99 @@ describe("독이 서는 때", () => {
     act(() => q("work-plan-open-all")?.click());
     expect(opened).toEqual([SESSION_ID]);
     expect(workPanelSnapshot()).toBeNull();
+  });
+});
+
+describe("세션을 바꿀 때 (#5166)", () => {
+  const SESSION_B = "019F9A34-5405-7FDA-9FB2-C6806F69D8B7";
+  const ROOT_B = "019F9A34-5406-77A9-AB33-B011D56B91F9";
+  const PLAN_B: WorkPlanItem[] = [
+    { content: "배포 확인", status: "completed" },
+    { content: "알림 보내기", status: "pending" },
+  ];
+
+  /** B 세션의 스레드 줄: `statusRow`와 같은 모양이고 세션 id만 B다. */
+  function statusRowB(seq: number, plan: WorkPlanItem[]): Message {
+    const row = statusRow(seq, plan) as unknown as { props: { event: { work_session_id: string } } };
+    row.props.event.work_session_id = SESSION_B;
+    return row as unknown as Message;
+  }
+
+  it("팝오버를 연 채 다른 세션을 고르면 새 계획을 읽는 동안에도 독이 서 있고 팝오버는 열린 채 새 내용으로 바뀐다", async () => {
+    let resolveB: (page: { messages: Message[] }) => void = () => undefined;
+    const pageB = new Promise<{ messages: Message[] }>((resolve) => {
+      resolveB = resolve;
+    });
+    api.fetchWorkSessions.mockResolvedValue([
+      session(),
+      session({ id: SESSION_B, rootMessageId: ROOT_B, label: "배포 점검", status: "ended", endedAtMs: T, startedAtMs: T - 5000 }),
+    ]);
+    // B의 스레드는 늦게 온다: 키가 바뀐 그 한 순간에 B의 `data`가 없다(60초 신선 시간 때문에 캐시된 스레드로는 재현되지 않는다).
+    api.fetchThreadReplies.mockImplementation((_ws: string, _channel: string, rootId: string) =>
+      rootId === ROOT_B ? pageB : Promise.resolve({ messages: [statusRow(1, PLAN_2_OF_4)] })
+    );
+    mountDock();
+    await until(() => q("work-plan-dock") !== null, "독");
+    const dock = q("work-plan-dock");
+    act(() => dock?.click());
+    expect(q("work-plan-title")?.textContent).toBe("계획 · 4단계 중 2단계 완료");
+    const select = q("work-plan-session-select") as HTMLSelectElement;
+
+    // 한 번이라도 사라지면 안 된다: 변이를 지켜보다가 독 노드가 DOM에서 빠진 적이 있으면 기록한다.
+    let dockRemoved = false;
+    const watcher = new MutationObserver(() => {
+      if (!document.body.contains(dock)) dockRemoved = true;
+    });
+    watcher.observe(document.body, { childList: true, subtree: true });
+
+    act(() => {
+      select.value = SESSION_B;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    // B를 읽는 동안: 독은 같은 노드로 서 있고, 팝오버는 열려 있고, 목록은 마지막으로 읽은 값에 「읽는 중」 표시가 붙는다.
+    expect(q("work-plan-dock")).toBe(dock);
+    expect(q("work-plan-popover")).not.toBeNull();
+    expect((q("work-plan-session-select") as HTMLSelectElement).value).toBe(SESSION_B);
+    expect(q("work-plan-steps")?.getAttribute("aria-busy")).toBe("true");
+    expect(qa("work-plan-note").map((note) => note.textContent)).toEqual([
+      "고른 세션의 계획을 불러오는 중이에요. 위 목록은 마지막으로 읽은 계획이에요.",
+      "지금은 돌고 있지 않아요. 마지막으로 알린 계획이에요.",
+    ].slice(0, 1));
+
+    resolveB({ messages: [statusRowB(1, PLAN_B)] });
+    await until(() => q("work-plan-title")?.textContent === "계획 · 2단계 중 1단계 완료", "B의 계획");
+    watcher.disconnect();
+    expect(dockRemoved).toBe(false);
+    expect(q("work-plan-dock")).toBe(dock);
+    expect(q("work-plan-popover")).not.toBeNull();
+    expect(q("work-plan-steps")?.hasAttribute("aria-busy")).toBe(false);
+    expect(qa("work-plan-step").map((step) => step.textContent?.replace(/\s+/g, " ").trim())).toEqual([
+      "배포 확인완료",
+      "알림 보내기대기",
+    ]);
+  });
+
+  it("읽기가 실패하면 마지막 값을 붙들지 않고 독이 선다고 우기지 않는다", async () => {
+    api.fetchWorkSessions.mockResolvedValue([
+      session(),
+      session({ id: SESSION_B, rootMessageId: ROOT_B, label: "배포 점검", status: "ended", endedAtMs: T, startedAtMs: T - 5000 }),
+    ]);
+    api.fetchThreadReplies.mockImplementation((_ws: string, _channel: string, rootId: string) =>
+      rootId === ROOT_B ? Promise.reject(new Error("읽지 못했다")) : Promise.resolve({ messages: [statusRow(1, PLAN_2_OF_4)] })
+    );
+    mountDock();
+    await until(() => q("work-plan-dock") !== null, "독");
+    act(() => q("work-plan-dock")?.click());
+    const select = q("work-plan-session-select") as HTMLSelectElement;
+    act(() => {
+      select.value = SESSION_B;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    // 실패한 읽기는 낡은 값을 새 세션의 계획인 척 두지 않는다: 독이 서지 않는다(읽지 못한 것을 「계획 없음」이라 말하지도 않는다).
+    await until(() => q("work-plan-dock") === null, "읽기 실패 뒤 독 없음");
   });
 });
 

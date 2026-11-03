@@ -169,10 +169,10 @@ describe("작업 패널의 「oort 기록」 칸", () => {
       "oort",
     ]);
     expect(qa(oort as Element, "work-timeline-label").map((label) => label.textContent)).toEqual([
-      "진행 알리기 · 2번",
+      "진행 알리기 2",
       "맡은 시간 늘리기",
     ]);
-    expect(q(oort as Element, "agent-work-panel-oort-summary")?.textContent).toBe("도구 호출 3번 · 실패 1번");
+    expect(q(oort as Element, "agent-work-panel-oort-summary")?.textContent).toBe("도구 호출 3 · 실패 1");
   });
 
   it("구 서버(합계 없는 응답)에서도 칸이 서서 「서버 업데이트 뒤에 보여요」라고 말한다", () => {
