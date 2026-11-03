@@ -3530,6 +3530,12 @@ export const catalog: MessageCatalog = {
       "value": " min ago"
     }
   ],
+  "timeline.workHealth.quietShort": [
+    {
+      "type": 0,
+      "value": "Quiet"
+    }
+  ],
   "timeline.workHealth.rejectedApprovals": [
     {
       "type": 0,
@@ -3633,6 +3639,12 @@ export const catalog: MessageCatalog = {
       "value": "Waiting"
     }
   ],
+  "timeline.workPlan.switching": [
+    {
+      "type": 0,
+      "value": "Loading the plan for the selected session. The list above is the last plan read."
+    }
+  ],
   "timeline.workPlan.title": [
     {
       "type": 0,
@@ -3651,6 +3663,10 @@ export const catalog: MessageCatalog = {
       "type": 2,
       "value": "total",
       "style": null
+    },
+    {
+      "type": 0,
+      "value": " done"
     }
   ],
   "timeline.workPlan.titleDone": [
@@ -3736,17 +3752,6 @@ export const catalog: MessageCatalog = {
       "value": "s"
     }
   ],
-  "timeline.workRecord.durationMs": [
-    {
-      "type": 2,
-      "value": "ms",
-      "style": null
-    },
-    {
-      "type": 0,
-      "value": "ms"
-    }
-  ],
   "timeline.workRecord.durationSeconds": [
     {
       "type": 2,
@@ -3756,6 +3761,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "s"
+    }
+  ],
+  "timeline.workRecord.durationUnderTenth": [
+    {
+      "type": 0,
+      "value": "Under 0.1s"
     }
   ],
   "timeline.workRecord.emptyEnded": [
@@ -3874,34 +3885,9 @@ export const catalog: MessageCatalog = {
   ],
   "timeline.workRecord.repeat": [
     {
-      "type": 6,
+      "type": 2,
       "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " time"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " times"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "style": null
     }
   ],
   "timeline.workRecord.sourceAgent": [

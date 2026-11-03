@@ -3283,10 +3283,16 @@ export const catalog: MessageCatalog = {
       "value": "분 전"
     }
   ],
+  "timeline.workHealth.quietShort": [
+    {
+      "type": 0,
+      "value": "조용해요"
+    }
+  ],
   "timeline.workHealth.rejectedApprovals": [
     {
       "type": 0,
-      "value": "거절된 승인 "
+      "value": "거부된 승인 "
     },
     {
       "type": 2,
@@ -3303,10 +3309,6 @@ export const catalog: MessageCatalog = {
       "type": 2,
       "value": "count",
       "style": null
-    },
-    {
-      "type": 0,
-      "value": "번"
     }
   ],
   "timeline.workPlan.button": [
@@ -3390,6 +3392,12 @@ export const catalog: MessageCatalog = {
       "value": "대기"
     }
   ],
+  "timeline.workPlan.switching": [
+    {
+      "type": 0,
+      "value": "고른 세션의 계획을 불러오는 중이에요. 위 목록은 마지막으로 읽은 계획이에요."
+    }
+  ],
   "timeline.workPlan.title": [
     {
       "type": 0,
@@ -3411,7 +3419,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "단계"
+      "value": "단계 완료"
     }
   ],
   "timeline.workPlan.titleDone": [
@@ -3497,17 +3505,6 @@ export const catalog: MessageCatalog = {
       "value": "초"
     }
   ],
-  "timeline.workRecord.durationMs": [
-    {
-      "type": 2,
-      "value": "ms",
-      "style": null
-    },
-    {
-      "type": 0,
-      "value": "ms"
-    }
-  ],
   "timeline.workRecord.durationSeconds": [
     {
       "type": 2,
@@ -3517,6 +3514,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "초"
+    }
+  ],
+  "timeline.workRecord.durationUnderTenth": [
+    {
+      "type": 0,
+      "value": "0.1초 미만"
     }
   ],
   "timeline.workRecord.emptyEnded": [
@@ -3638,10 +3641,6 @@ export const catalog: MessageCatalog = {
       "type": 2,
       "value": "count",
       "style": null
-    },
-    {
-      "type": 0,
-      "value": "번"
     }
   ],
   "timeline.workRecord.sourceAgent": [
@@ -3689,10 +3688,6 @@ export const catalog: MessageCatalog = {
       "type": 2,
       "value": "calls",
       "style": null
-    },
-    {
-      "type": 0,
-      "value": "번"
     }
   ],
   "timeline.workRecord.summaryFailed": [
@@ -3707,16 +3702,12 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "번 · 실패 "
+      "value": " · 실패 "
     },
     {
       "type": 2,
       "value": "failed",
       "style": null
-    },
-    {
-      "type": 0,
-      "value": "번"
     }
   ],
   "timeline.workRecord.unsupported": [
