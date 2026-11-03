@@ -243,7 +243,8 @@ function DownloadStatus({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
-  const key = lastBy === 'save' ? saveNoticeKey(saving.state) : null;
+  const savedLast = lastBy === 'save';
+  const key = savedLast ? saveNoticeKey(saving.state) : null;
   if (key !== null) {
     const text = formatMessage(key);
     // 거부는 눌린다(설정 열기). 나머지는 읽기만 한다 — 실패는 ↓ 를 다시 누르면 다시 시도한다.
@@ -268,6 +269,14 @@ function DownloadStatus({
         testID="attachment-save-status"
       >
         {text}
+      </Text>
+    );
+  }
+  // 마지막으로 ↓ 를 눌렀으면 이 줄은 저장의 것이다. 앞서 공유가 남긴 실패(`state`)는 저장의 영수증이 걷힌 뒤에 되살아나지 않는다.
+  if (savedLast) {
+    return (
+      <Text style={styles.downloadIdle} testID="attachment-download-idle">
+        {ATTACH_COPY.download}
       </Text>
     );
   }

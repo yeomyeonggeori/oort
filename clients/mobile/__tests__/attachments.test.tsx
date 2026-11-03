@@ -19,6 +19,7 @@ import { AccessibilityInfo, Linking, Share } from 'react-native';
 import { TOUCH_TARGET } from '../src/design/tokens';
 import { AttachmentList } from '../src/features/attachments/AttachmentList';
 import { resetAttachmentContentForTest } from '../src/features/attachments/content';
+import { SAVE_RECEIPT_MS } from '../src/features/attachments/useSaveAttachment';
 import {
   MessageRow,
   type MessageRowActions,
@@ -466,6 +467,29 @@ describe('파일 카드의 ↓ 는 「저장」이다 — 카드 탭(공유)과 
     mediaLibrary.__state.saveFailure = null;
     fireEvent.press(save());
     await waitFor(() => expect(line()).toBe('사진에 저장했어요'));
+  });
+
+  it('저장의 영수증이 걷히면 줄은 원래 말로 돌아온다 — 앞서 공유가 남긴 실패가 되살아나지 않는다', async () => {
+    jest.useFakeTimers();
+    try {
+      fileSystem.__state.failure = new Error('network');
+      render(<AttachmentList channelId="ch" attachments={[attachment()]} />);
+      // 공유가 실패했다 — 「내려받기 실패 · 다시 시도」가 서 있다.
+      fireEvent.press(screen.getByTestId('attachment-item'));
+      await waitFor(() => expect(screen.getByTestId('attachment-download-failed')).toBeTruthy());
+      // ↓ 로 저장한다 — 저장이 줄을 가져가고, 걷힌 뒤에는 공유의 묵은 실패가 아니라 원래 말이다.
+      fileSystem.__state.failure = null;
+      fireEvent.press(save());
+      await waitFor(() => expect(line()).toBe('파일에 저장했어요'));
+      act(() => {
+        jest.advanceTimersByTime(SAVE_RECEIPT_MS);
+      });
+      expect(line()).toBeUndefined();
+      expect(screen.queryByTestId('attachment-download-failed')).toBeNull();
+      expect(screen.getByTestId('attachment-download-idle')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('VoiceOver 는 카드 하나로 읽으므로 저장은 로터의 동작이다 — 같은 저장이다', async () => {
