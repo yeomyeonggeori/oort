@@ -158,10 +158,37 @@ describe('폰 묶음 카드의 「다시 요청」 — 웹 `AgentCard` 와 같�
     expect(button()).toBeNull();
   });
 
-  it('다른 곳에서 남이 먼저 거부한 것을 영수증으로 따라잡았으면 서고, 영수증의 결정자를 읽는다', () => {
+  it('다른 곳에서 남이 먼저 거부한 것을 영수증으로 따라잡았으면 영수증 줄과 함께 서고, 영수증의 결정자를 읽는다', () => {
     renderCard(closedCard('pending'), {
       receipts: new Map([['ap-1', {status: 'rejected', note: '다른 곳에서 먼저 결정됐어요.', decidedByMemberId: OTHER_ID}]]),
     });
+    expect(screen.getByTestId('request-bundle-receipt')).toHaveTextContent('다른 곳에서 먼저 결정됐어요.');
+    expect(button()).toHaveTextContent('다시 요청');
+  });
+
+  // 2단계. 웹과 같은 조건: 만료 카드는 이 세션의 영수증 줄이 함께 있으면 서지 않는다(웹은 그 카드의 푸터를 영수증 줄이 차지한다 —
+  // `AgentCard.nextAction.test.tsx` 의 같은 장면). 실패·거부 카드는 영수증 줄과 함께 선다. 판정은 코어 `cardReproposeReason` 한 곳이다.
+  it('만료 카드에 이 세션의 영수증 줄이 함께 있으면 서지 않는다 — 웹과 같은 조건', () => {
+    // 기한 뒤에 승인을 눌렀다가 서버가 「이미 만료」로 답한 사람: 카드 스냅샷은 아직 대기이고 영수증이 만료를 말한다.
+    renderCard(closedCard('pending'), {
+      receipts: new Map([['ap-1', {status: 'expired', note: '기한이 지나 만료로 기록됐어요.', decidedByMemberId: SELF_ID}]]),
+    });
+    expect(screen.getByTestId('request-state-expired')).toHaveTextContent('만료');
+    expect(screen.getByTestId('request-bundle-receipt')).toHaveTextContent('기한이 지나 만료로 기록됐어요.');
+    expect(button()).toBeNull();
+    expect(screen.queryByTestId('request-bundle-closed-next')).toBeNull();
+  });
+
+  it('공백뿐인 영수증 줄은 줄이 아니다: 만료 카드에 선다', () => {
+    renderCard(closedCard('expired'), {receipts: new Map([['ap-1', {status: 'expired', note: '   '}]])});
+    expect(button()).toHaveTextContent('다시 요청');
+  });
+
+  it('방금 내가 승인했다가 실패로 닫힌 카드는 영수증 줄과 함께 선다 — 웹 `AgentCard.nextAction.test.tsx` 와 같은 장면', () => {
+    renderCard(closedCard('approved', {decided_by: SELF_ID, result: {status: 'failed'}}), {
+      receipts: new Map([['ap-1', {status: 'approved', note: '승인을 기록했어요.', decidedByMemberId: SELF_ID}]]),
+    });
+    expect(screen.getByTestId('request-bundle-receipt')).toHaveTextContent('승인을 기록했어요.');
     expect(button()).toHaveTextContent('다시 요청');
   });
 

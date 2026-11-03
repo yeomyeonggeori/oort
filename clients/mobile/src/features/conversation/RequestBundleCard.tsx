@@ -134,14 +134,15 @@ export function RequestBundleCard({
     ? model.details.rows
     : model.details.rows.filter(row => !card.detail.rows.includes(row));
   const headline = approvalHeadTitle({...card, title: model.headline});
-  // 닫힌 카드의 다음 행동 「다시 요청」(#5171). 서는 조건은 웹 `AgentCard` 와 같은 코어 함수 둘이 정한다: 상태와 거부한 사람(`cardReproposeReason`),
-  // 올린 이가 에이전트인가(`reproposeTarget`). 거부한 사람은 영수증이 먼저 안다(카드의 `decided_by` 는 서버 프레임이 올 때까지 없다).
+  // 닫힌 카드의 다음 행동 「다시 요청」(#5171). 서는 조건은 웹 `AgentCard` 와 같은 코어 함수 둘이 정한다: 상태·거부한 사람·영수증 줄(`cardReproposeReason`:
+  // 만료 카드가 이미 영수증 줄을 말하면 서지 않는다), 올린 이가 에이전트인가(`reproposeTarget`). 거부한 사람은 영수증이 먼저 안다(카드의
+  // `decided_by` 는 서버 프레임이 올 때까지 없다).
   const decidedById = receipt?.decidedByMemberId ?? card.decidedByMemberId;
   const iDecided =
     decidedById !== undefined && uuidEq(decidedById, viewerMemberId);
   const reproposeReason = card.isResumeOffer
     ? null
-    : cardReproposeReason(model.state, iDecided);
+    : cardReproposeReason(model.state, iDecided, receipt?.note);
   const reproposeTo =
     reproposeReason !== null && onRepropose !== undefined
       ? reproposeTarget(card, directory)

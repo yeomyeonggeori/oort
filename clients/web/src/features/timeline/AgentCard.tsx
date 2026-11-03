@@ -10,7 +10,7 @@ import {
   expirySoonCopy,
   reproposeDraft,
   reproposeTarget,
-  closedCardReproposeReason,
+  cardReproposeReason,
   type ReproposeReason,
 } from "@momo/core/features/approvals/expiry";
 import {
@@ -410,15 +410,18 @@ function ReproposeButton({
 function ExpiredApprovalFooter({
   card,
   directory,
+  repropose,
 }: {
   card: AgentApprovalCard;
   directory: Directory;
+  /** 코어 한 표(`cardReproposeReason`)가 이 만료 카드에 「다시 요청」을 건네는가(만료 카드의 이유는 만료뿐이라 null 이 아니면 건넨다). */
+  repropose: boolean;
 }) {
   const target = reproposeTarget(card, directory);
   return (
     <div className="border-t border-line" data-testid="approval-expired">
       <p className="px-3 py-2 text-meta text-ink-muted">{EXPIRED_CARD_COPY}</p>
-      {target !== null && (
+      {repropose && target !== null && (
         <ReproposeButton target={target} className="flex flex-col gap-1 px-3 pb-2" />
       )}
     </div>
@@ -543,13 +546,14 @@ function ApprovalBody({
   const decidedAtMs = receipt?.decidedAtMs ?? card.decidedAtMs;
   const decidedById = receipt?.decidedByMemberId ?? card.decidedByMemberId;
   const decidedBy = decidedById ? memberFor(directory, decidedById) : null;
-  // 거부·실패로 닫힌 카드의 다음 행동은 「다시 요청」이다 (#4986, 요청 고리 상태표 §2.2). 거부는 거부한
-  // 사람 본인에게는 세우지 않는다: 다음 행동은 요청한 쪽의 몫이고, 방금 스스로 닫은 사람에게는 되돌릴 것이 없다.
+  // 닫힌 카드의 다음 행동은 「다시 요청」이다 (#4986, 요청 고리 상태표 §2.2). 서는 조건의 표는 코어 한 곳(`cardReproposeReason`)이고 폰이
+  // 같은 함수를 읽는다 (#5171): 만료는 영수증 줄이 없을 때만, 실패는 늘, 거부는 거부한 본인을 빼고. 거부는 방금 스스로 닫은 사람에게
+  // 되돌릴 것이 없다(다음 행동은 요청한 쪽의 몫이다).
   const iDecided = decidedById !== undefined && uuidEq(decidedById, session.member.id);
-  const closedReason = bundle ? closedCardReproposeReason(bundle.state, iDecided) : null;
+  const reproposeReason = bundle ? cardReproposeReason(bundle.state, iDecided, receipt?.note) : null;
   const nextAction =
-    closedReason !== null ? (
-      <ClosedCardNextAction card={card} directory={directory} reason={closedReason} />
+    reproposeReason !== null ? (
+      <ClosedCardNextAction card={card} directory={directory} reason={reproposeReason} />
     ) : null;
 
   // 카드가 컨트롤 대신 말할 줄. 판정도 순서도 코어가 진다 (design-review M-3).
@@ -638,7 +642,7 @@ function ApprovalBody({
             {nextAction}
           </>
         ) : expired ? (
-          <ExpiredApprovalFooter card={card} directory={directory} />
+          <ExpiredApprovalFooter card={card} directory={directory} repropose={reproposeReason !== null} />
         ) : settled ? (
           // #3818: 서버가 이미 결정을 적은 카드(`props.status`·`decided_by`)는 영수증
           // 저장소가 몰라도 컨트롤이 서지 않는다. 결정 사실은 아래 원장 줄이 말한다.
