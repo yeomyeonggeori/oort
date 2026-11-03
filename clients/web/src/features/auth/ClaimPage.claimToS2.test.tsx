@@ -19,6 +19,8 @@ import {
   resetOwnerOnboardingLoadState,
 } from "@/features/onboarding/ownerOnboardingStore";
 import { releaseSessionRestore } from "@/features/auth/onboardingSessionHold";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
 
 const restoreSession = vi.hoisted(() => vi.fn());
 const claimOwnerPassword = vi.hoisted(() => vi.fn());
@@ -235,8 +237,11 @@ async function mountApp(): Promise<HTMLElement> {
   mountedHost = host;
   mountedRoot = createRoot(host);
   await act(async () => {
+    // 한국어 사전을 올려서 사람이 읽는 문장 그대로 단정한다(provider 없이는 영어 사전으로 읽는다).
     mountedRoot?.render(
-      createElement(QueryClientProvider, { client }, createElement(App))
+      <LocaleProvider locale={await koreanLocaleForTest()}>
+        {createElement(QueryClientProvider, { client }, createElement(App))}
+      </LocaleProvider>
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -341,10 +346,11 @@ describe("claim D1″ on the onboarding 2.0 frame (#2811)", () => {
     expect(host.querySelector(".brand-lockup")).toBeNull();
     const title = host.querySelector('[data-testid="claim-title"]');
     expect(title?.tagName).toBe("H1");
-    expect(title?.textContent).toBe("이 서버의 첫 주인이에요.");
-    expect(host.querySelector('[data-testid="kometto-guide-detail"]')?.textContent).toBe(
-      "비밀번호를 정해요."
-    );
+    // 입력 전 머리는 두 종류의 링크(첫 주인·재설정)에 중립이다. 종류는 응답을 받은 뒤에야 안다
+    // (ADR-0215 D6): 「첫 주인」이라 말하면 재설정 링크를 연 멤버에게 거짓말이 된다.
+    expect(title?.textContent).toBe("새 비밀번호를 정해요.");
+    expect(title?.textContent).not.toContain("첫 주인");
+    expect(host.querySelector('[data-testid="kometto-guide-detail"]')).toBeNull();
     expect(
       host.querySelector('[data-testid="kometto-guide"]')?.getAttribute("data-expression")
     ).toBe("idle");

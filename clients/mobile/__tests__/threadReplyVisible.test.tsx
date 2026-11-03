@@ -189,9 +189,9 @@ function renderTimeline(over: {markReplies?: boolean} = {}) {
 describe('채널 타임라인에서', () => {
   it('답글 행이 답글이라고 말하고, 누구에게인지도 말한다', () => {
     renderTimeline();
-    // 「↳ 김인턴님에게 답글」 — 글리프와 이름이 한 줄에.
+    // 「↳ 김인턴님 스레드에 답글」 — 글리프와 이름이 한 줄에, 둘째 줄이 원문이다(#4888).
     expect(screen.getAllByTestId('reply-marker')).toHaveLength(1);
-    expect(screen.getByText('↳ 김인턴님에게 답글')).toBeTruthy();
+    expect(screen.getByText('↳ 김인턴님 스레드에 답글')).toBeTruthy();
   });
 
   it('루트를 아직 안 불렀으면 답글이라고만 한다 — 없는 이름을 지어내지 않는다', () => {
@@ -205,7 +205,7 @@ describe('채널 타임라인에서', () => {
         actions={actions()}
       />,
     );
-    expect(screen.getByText('↳ 답글')).toBeTruthy();
+    expect(screen.getByText('↳ 스레드에 답글')).toBeTruthy();
   });
 
   it('루트에는 롤업이 붙는다 — 답글을 단 결과가 화면에 남는다', () => {
