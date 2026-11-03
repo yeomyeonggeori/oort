@@ -8,8 +8,10 @@ env:
 #   ① 시트를 **닫으려고 바로 위(답글 줄)를 누르면** 시트가 닫히면서 그 탭이 아래로 새어 스레드가 열렸다.
 #   ② 시트가 열리고 닫혀도 대화 목록의 자리가 그대로여야 한다(맨 아래였으면 맨 아래, 읽던 자리면 그 자리).
 #
-# 표면 `-momoMeasure SHARE-ATTACH-probe`(`measure/shareAttachment.tsx`)는 진짜 머리·타임라인·컴포저가 선 대화에 파일(영상) 카드를 세운다
-# (맨 끝 `v1.mp4`, 어제의 중간 `v0.mp4`). 서버·레일만 없다 — 첨부 바이트는 `measure/share-stub.mjs` 가 대신 답하고, 카드를 누르는 것도 시트를 닫는 것도
+# 표면 `-momoMeasure SHARE-ATTACH-probe`(`measure/shareAttachment.tsx`)는 진짜 머리·타임라인·컴포저가 선 대화에 파일 카드(WebM 영상)를 세운다
+# (맨 끝 `v1.webm`, 어제의 중간 `v0.webm`). WebM 인 까닭(#5268): mp4·mov 영상은 #5208(#5235)부터 앱 안 영상 뷰어로 열려 공유 시트가 서지 않는다 —
+# 앱이 못 읽는 WebM 만 파일 카드 → 내려받기 → 공유 시트 길로 남는다(jest `shareSheet.test.tsx` 와 같은 재료).
+# 서버·레일만 없다 — 첨부 바이트는 `measure/share-stub.mjs` 가 대신 답하고, 카드를 누르는 것도 시트를 닫는 것도
 # 이 흐름의 **실제 탭**이다. 화면 맨 위 한 줄(`share-probe`)이 앱이 아는 그대로를 적는다:
 #   app=<앱 상태> share=<never|open|closed> thread=<스레드가 열린 횟수> touch=<목록 영역이 받은 터치 수> base=<기준 y> y=<지금 y> drift=<기준에서 벗어난 최댓값> moves=<보고 수>
 #
@@ -36,7 +38,7 @@ env:
 
 # ---- A. 맨 아래에서 읽던 대로: 카드 → 시트 → 시트 바로 위의 답글 줄을 눌러 닫는다 -------------------------------------------------
 - tapOn:
-    text: "v1.mp4.*"
+    text: "v1.webm.*"
 - extendedWaitUntil:
     visible: "복사"
     timeout: 30000
@@ -67,12 +69,12 @@ env:
 
 # ---- B. 맨 아래가 아닌 곳(읽던 자리)에서: 어제의 중간 카드 → 시트 → 아래로 쓸어 닫는다 ---------------------------------------------
 - scrollUntilVisible:
-    element: "v0.mp4.*"
+    element: "v0.webm.*"
     direction: UP
     timeout: 40000
 - waitForAnimationToEnd
 - tapOn:
-    text: "v0.mp4.*"
+    text: "v0.webm.*"
 - extendedWaitUntil:
     visible: "복사"
     timeout: 30000

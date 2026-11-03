@@ -77,7 +77,7 @@ import {CONV, composerFloat, PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from 
 import {DockFollowContext} from './dockFollow';
 import {useMakeLanding} from './makeLanding';
 import {COMPOSER_INPUT_TYPOGRAPHY, useComposerInputLayout} from './useComposerInputLayout';
-import {clearDraft, readDraft, saveDraft} from './drafts';
+import {clearDraft, readDraft, saveDraft, subscribeDraftSeed} from './drafts';
 import {Avatar} from './Avatar';
 import {
   applyMention,
@@ -1501,6 +1501,24 @@ export function Composer({
     setText(restored);
     setCaret(restored.length);
     setMentionOpen(false);
+  }, [draftKey]);
+
+  // 밖에서 심는 글 (`seedDraft`, 승인 카드의 「다시 요청」 #5171). 저장소에는 `seedDraft` 가 적고, 이미 마운트된 입력창은 이
+  // 알림으로만 안다. 쓰던 글이 있으면 덮지 않고 거절한다. 글을 놓는 몸은 위 `draftKey` 전환 효과와 같다.
+  useEffect(() => {
+    if (draftKey === undefined) return undefined;
+    return subscribeDraftSeed(draftKey, seeded => {
+      if (currentTextRef.current.trim() !== '') return false;
+      currentTextRef.current = seeded;
+      restedRef.current = false;
+      setRestedFlag(false);
+      restFromRef.current = null;
+      setRestFrom(null);
+      setText(seeded);
+      setCaret(seeded.length);
+      setMentionOpen(false);
+      return true;
+    });
   }, [draftKey]);
 
   // Derived during render, not in an effect: an effect would compute the list

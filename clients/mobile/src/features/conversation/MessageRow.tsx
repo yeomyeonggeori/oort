@@ -1670,11 +1670,14 @@ function AgentCard({
   decisionRef,
   requestRun,
   onOpenDecision,
+  onRepropose,
 }: {
   card: AgentCardModel;
   viewerMemberId?: string;
   requestRun?: AgentRunProgress;
   onOpenDecision?: (approvalId: string) => void;
+  /** 닫힌 묶음 카드의 「다시 요청」이 이 화면의 입력창에 초안을 넣는다 (`MessageRowActions.onRepropose`). */
+  onRepropose?: (draft: string) => boolean;
   /** 행의 로터가 같은 결정을 부르는 손잡이 (#2595). */
   decisionRef?: React.Ref<ApprovalDecisionHandle>;
   /** 결과 카드의 「결정」 줄이 사람 이름을 푸는 데 쓴다. */
@@ -1716,7 +1719,8 @@ function AgentCard({
     if (hasRequestBundle(card)) {
       return <RequestBundleCard card={card} directory={directory} viewerMemberId={viewerMemberId}
         gate={approval} receipt={receipt} nowMs={nowMs} offline={approvalOffline} run={requestRun}
-        decisionRef={decisionRef} onSettled={onApprovalSettled} onOpenMessage={onOpenMessage} onOpenDecision={onOpenDecision} />;
+        decisionRef={decisionRef} onSettled={onApprovalSettled} onOpenMessage={onOpenMessage} onOpenDecision={onOpenDecision}
+        onRepropose={onRepropose} />;
     }
     // 「전문 보기」를 세울 카드인가. 행의 로터(`MessageRowInner`)가 같은 함수로 같은 답을 읽는다.
     const messagePreview = openableMessagePreview(
@@ -2215,6 +2219,12 @@ export interface MessageRowActions {
    * 서지 않는다: 열 곳을 모르는 표면에 눌러도 아무 일 없는 버튼을 두지 않는다.
    */
   onOpenMessage?: (channelId: string, messageId: string) => void;
+  /**
+   * 닫힌 승인 카드(만료·거부·실패)의 「다시 요청」이 **이 화면의** 입력창에 초안을 넣는다 (#5171). 넣었으면 `true`, 입력창이 쓰던
+   * 글을 들고 있어서 거절했으면 `false`다(웹 `seedComposerText` 와 같은 규칙). 없으면(입력창이 없는 표면) 단추가 서지 않는다 —
+   * 눌러도 아무 일 없는 버튼을 두지 않는다.
+   */
+  onRepropose?: (draft: string) => boolean;
 }
 
 export interface MessageRowProps {
@@ -3395,6 +3405,7 @@ function MessageRowInner({
                 decisionRef={decisionRef}
                 requestRun={requestRun}
                 onOpenDecision={actions?.onOpenDecision}
+                onRepropose={actions?.onRepropose}
               />
             ) : null}
 
