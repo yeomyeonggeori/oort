@@ -6,7 +6,6 @@ import {
   completeUpload,
   draftFor,
   failUpload,
-  issueForStatus,
   progressUpload,
   removeDraft as removeDraftFrom,
   requeueUpload,
@@ -18,10 +17,14 @@ import {
   type UploadIssue,
 } from '@momo/core/features/attachments/model';
 import {
-  ApiError,
   completeAttachmentUpload,
   createAttachmentUpload,
 } from '@momo/core/lib/api';
+import {
+  verdictForRequestFailure,
+  verdictForTransferFailure,
+} from '@momo/core/features/connection/uploadFailure';
+import {deviceOnlineNow} from '../connection/deviceOnline';
 
 import type {PickedAttachmentFile} from './picker';
 import {putAttachmentBytes, type UploadHandle} from './uploadTransport';
@@ -124,14 +127,10 @@ async function uploadOne(
     );
   } catch (error: unknown) {
     if (generation !== sessionGeneration) return;
+    // 상태 코드가 아니라 분류로 말한다(#5222): 닿지 못함(오프라인 · 서버에 닿지 못함)이면 보관소 이야기를 하지 않고 그 원인으로, 칩은 「다시 올리기」다.
+    const verdict = verdictForRequestFailure(error, deviceOnlineNow());
     update(key, list =>
-      failUpload(
-        list,
-        draft.localId,
-        error instanceof ApiError
-          ? issueForStatus(error.status)
-          : 'unavailable',
-      ),
+      failUpload(list, draft.localId, verdict.issue, verdict.cause),
     );
     return;
   }
@@ -164,14 +163,13 @@ async function uploadOne(
       update(key, list => rewindUpload(list, draft.localId));
       return;
     }
+    const verdict = verdictForTransferFailure(
+      result.failure,
+      result.status,
+      deviceOnlineNow(),
+    );
     update(key, list =>
-      failUpload(
-        list,
-        draft.localId,
-        result.failure === 'status' && result.status !== undefined
-          ? issueForStatus(result.status)
-          : 'unavailable',
-      ),
+      failUpload(list, draft.localId, verdict.issue, verdict.cause),
     );
     return;
   }
@@ -187,14 +185,9 @@ async function uploadOne(
     update(key, list => completeUpload(list, draft.localId, row.id));
   } catch (error: unknown) {
     if (generation !== sessionGeneration) return;
+    const verdict = verdictForRequestFailure(error, deviceOnlineNow());
     update(key, list =>
-      failUpload(
-        list,
-        draft.localId,
-        error instanceof ApiError
-          ? issueForStatus(error.status)
-          : 'unavailable',
-      ),
+      failUpload(list, draft.localId, verdict.issue, verdict.cause),
     );
   }
 }
