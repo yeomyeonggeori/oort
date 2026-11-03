@@ -244,6 +244,11 @@ async function openTurn(): Promise<void> {
   await waitFor(() =>
     expect(screen.getByTestId('composer-working')).toBeTruthy(),
   );
+  // 중단 컨트롤은 레일을 누르면 열리는 시트 안에 있다(#4620): 옛 활동 줄이 들고 있던 컨트롤이 `turn-stop-<id>-*` 그대로 옮겨 갔다.
+  fireEvent.press(screen.getByTestId('composer-working'));
+  await waitFor(() =>
+    expect(screen.getByTestId(`turn-stop-${KIM_AGENT}-arm`)).toBeTruthy(),
+  );
 }
 
 const ARM = `turn-stop-${KIM_AGENT}-arm`;
@@ -455,15 +460,40 @@ describe('한 줄이 여러 실행을 접고 있을 때 (2R M3)', () => {
 });
 
 describe('확정 패널이 들어앉을 자리 (2R H1)', () => {
-  it('활동 줄의 행은 감쌀 수 있는 행이다', async () => {
-    // 픽셀은 Jest에서 잴 수 없다. 잴 수 있는 것은 **구조**이고, 그것이 실제
-    // 결정이다: 확정 패널은 `flexBasis: '100%'`로 한 줄 전체를 요구하는데 RN의
-    // 행은 기본이 `nowrap`이라, 부모가 감싸지 않으면 문장이 0폭으로 눌리고
-    // 「중단 확정」이 화면 밖으로 밀린다.
+  it('시트의 중단 자리는 한 줄 `nowrap` 행이 아니다 — 확정 패널이 0폭으로 눌리지 않고 두 단추가 모두 선다', async () => {
+    // 픽셀은 Jest에서 잴 수 없다. 잴 수 있는 것은 **구조**이고, 그것이 실제 결정이다: 확정 패널은 `flexBasis: '100%'`로 한 줄
+    // 전체를 요구하는데 RN의 행은 기본이 `nowrap`이라, 부모가 가로 한 줄이면 문장이 0폭으로 눌리고 「중단 확정」이 화면 밖으로
+    // 밀린다. 레일 시트의 중단 자리는 세로 상자(기본 `column`)이거나 감싸는 행이어야 한다.
     installFetch();
     await openTurn();
-    const row = screen.getByTestId(`composer-working-row-${KIM_AGENT}`);
-    expect(flatStyle(row.props.style).flexWrap).toBe('wrap');
+    const holder = screen.getByTestId(ARM).parent?.parent;
+    const chain: Array<Record<string, unknown>> = [];
+    for (
+      let node: ReturnType<typeof screen.getByTestId> | null | undefined = screen.getByTestId(ARM);
+      node != null && node.props.testID !== 'composer-working-sheet';
+      node = node.parent
+    ) {
+      chain.push(flatStyle(node.props.style));
+    }
+    expect(holder).toBeTruthy();
+    for (const style of chain) {
+      if (style.flexDirection === 'row') expect(style.flexWrap).toBe('wrap');
+    }
+    fireEvent.press(screen.getByTestId(ARM));
+    await waitFor(() => expect(screen.getByTestId(COMMIT)).toBeTruthy());
+    expect(screen.getByTestId(DISMISS)).toBeTruthy();
+  });
+
+  it('결과 문장은 시트 안 그 에이전트 행 아래에서도 말한다 — 시트가 화면의 영수증 자리를 덮는다 (#4620)', async () => {
+    installFetch(() => Promise.reject(new TypeError('Network request failed')));
+    await openTurn();
+    fireEvent.press(screen.getByTestId(ARM));
+    await waitFor(() => expect(screen.getByTestId(COMMIT)).toBeTruthy());
+    pressAfterGuard(COMMIT);
+    await waitFor(() =>
+      expect(screen.getByTestId('composer-working-outcome-error')).toBeTruthy(),
+    );
+    expect(screen.getByTestId('composer-working-outcome-error')).toHaveTextContent(/중단하지 못했어요/);
   });
 });
 

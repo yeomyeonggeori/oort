@@ -3,6 +3,7 @@ import {
   IDLE_CUTOFF_MS,
   type AgentWorkingSignal,
 } from '@momo/core/features/agents/workingSignal';
+import {RAIL_WORD} from '@momo/core/features/agents/activityRail';
 import {TURN_STALE_SENTENCE} from '@momo/core/features/agents/turnCopy';
 import {centrifugoAgentChannelName} from '@momo/core/lib/realtimeEvents';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
@@ -708,8 +709,8 @@ describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () 
     await waitFor(() =>
       expect(screen.getByTestId('composer-working')).toBeTruthy(),
     );
-    // 살아 있는 동안에는 경과 시계가 있다. `queued` 프레임이 시작 시각을 줬다.
-    expect(screen.getByTestId('composer-working')).toHaveTextContent(/\d+s/);
+    // 레일의 글자에는 시계가 없다(#4620): 살아 있는 동안에도 초 단위 숫자가 없다.
+    expect(screen.getByTestId('composer-working-text')).not.toHaveTextContent(/\d+\s*(s|초)/);
     expect(screen.queryByTestId('composer-working-stale')).toBeNull();
 
     await cutSocket();
@@ -718,8 +719,7 @@ describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () 
     await waitFor(() =>
       expect(screen.getByTestId('composer-working-stale')).toBeTruthy(),
     );
-    // ② 시계는 멈추는 게 아니라 사라진다 — 죽은 소켓 위에서 세는 숫자는 우리의
-    //    낙관을 재는 것이지 에이전트의 턴을 재는 것이 아니다.
+    // ② 숫자는 애초에 없다(#4620) — 죽은 소켓 위에서 세는 숫자는 우리의 낙관을 재는 것이지 에이전트의 턴을 재는 것이 아니다.
     expect(screen.getByTestId('composer-working')).not.toHaveTextContent(/\d+s/);
     // ②' 그리고 스크린리더도 같은 것을 듣는다.
     //
@@ -735,17 +735,16 @@ describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () 
     // 그래서 라벨은 사라진 것이 아니라 **줄로 내려갔다**: 각 줄의 `Text`가 자기
     // 문장을 지고(Text는 기본이 접근 요소다), 스테일 줄도 자기 라벨을 지며, 중단
     // 버튼은 자기 요소다. 읽히지 않는 것은 없다.
+    // 레일 줄은 **누르는 한 원소**다(#4620): 중단 컨트롤은 줄이 아니라 눌러서 여는 시트 안에 있으므로 줄을 하나로 합쳐도 가려지는
+    // 행동이 없다. 라벨이 에이전트 상태와 끊김 이유를 함께 말한다.
     const bar = screen.getByTestId('composer-working');
-    expect(bar.props.accessible).not.toBe(true);
-    // 막대 **안**에서 찾는다: 홈의 「작업 중」 카드(DS2-3)가 대화 층 밑에 마운트된 채
-    // 같은 턴을 같은 낱말로 말하므로, 화면 전체에서 찾으면 둘이 걸린다.
-    expect(within(bar).getByLabelText(/김인턴.*승인을 기다립니다|김인턴.*답하는 중/)).toBeTruthy();
-    expect(screen.getByLabelText(TURN_STALE_SENTENCE)).toBeTruthy();
+    expect(String(bar.props.accessibilityLabel)).toMatch(/김인턴/);
+    expect(String(bar.props.accessibilityLabel)).toContain(TURN_STALE_SENTENCE);
     // 끊긴 레일의 줄에는 얼굴도 움직이는 점도 없다(#4020): 아무도 일하는 중이 아니다.
     expect(
       within(bar).queryByTestId('responding-dots', {includeHiddenElements: true}),
     ).toBeNull();
-    expect(within(bar).queryByTestId('responding-avatar')).toBeNull();
+    expect(within(bar).queryByTestId('composer-working-avatars')).toBeNull();
     // ③ 헤더 부제가 활동 줄과 같은 말을 한다. 「연결 중…」이면 같은 화면에서 두
     //    문장이 서로를 부정한다 (M3).
     expect(screen.getByTestId('conversation-title').parent).toBeTruthy();
@@ -780,8 +779,8 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
     // 「작업 중」 대신 「답하는 중」이고, 얼굴과 점이 붙는다.)
     const bar = screen.getByTestId('composer-working');
     expect(bar).toHaveTextContent(/김인턴/);
-    expect(bar).toHaveTextContent(/답하는 중/);
-    expect(within(bar).getByTestId('responding-avatar')).toBeTruthy();
+    expect(bar).toHaveTextContent(new RegExp(RAIL_WORD.working));
+    expect(within(bar).getByTestId('composer-working-avatars')).toBeTruthy();
     // 점은 보조기술에서 숨겨져 있다(문장이 상태를 말한다): 숨은 원소까지 찾는다.
     expect(
       within(bar).getByTestId('responding-dots', {includeHiddenElements: true}),
@@ -813,12 +812,12 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
     );
     await waitFor(() =>
       expect(screen.getByTestId('composer-working')).toHaveTextContent(
-        /승인을 기다립니다/,
+        new RegExp(RAIL_WORD.approval),
       ),
     );
     const bar = screen.getByTestId('composer-working');
     expect(bar).not.toHaveTextContent(/작업 중/);
-    expect(bar).not.toHaveTextContent(/답하는 중/);
+    expect(bar).not.toHaveTextContent(new RegExp(RAIL_WORD.working));
     expect(
       within(bar).queryByTestId('responding-dots', {includeHiddenElements: true}),
     ).toBeNull();
@@ -853,7 +852,7 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
       await deliver(statusFrame(), 20);
       await deliver(statusFrame({phase: 'streaming', run_status: 'running'}), 40);
       await waitFor(() =>
-        expect(screen.getByTestId('composer-working')).toHaveTextContent(/답하는 중/),
+        expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(RAIL_WORD.working)),
       );
       // 바탕: 프레임만 있으면 줄은 「답하는 중」이고 답이 나타날 자리에 「작업 중…」 자리표시가 선다.
       expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
@@ -867,10 +866,10 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
       await workingByFrames();
       seedLedger([pending()]);
       await waitFor(() =>
-        expect(screen.getByTestId('composer-working')).toHaveTextContent(/승인을 기다립니다/),
+        expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(RAIL_WORD.approval)),
       );
       const bar = screen.getByTestId('composer-working');
-      expect(bar).not.toHaveTextContent(/답하는 중/);
+      expect(bar).not.toHaveTextContent(new RegExp(RAIL_WORD.working));
       expect(
         within(bar).queryByTestId('responding-dots', {includeHiddenElements: true}),
       ).toBeNull();
@@ -884,7 +883,7 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
       await act(async () => {
         await new Promise(resolve => setTimeout(resolve, 50));
       });
-      expect(screen.getByTestId('composer-working')).toHaveTextContent(/답하는 중/);
+      expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(RAIL_WORD.working));
       expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
     });
 
@@ -898,7 +897,9 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
       await act(async () => {
         await new Promise(resolve => setTimeout(resolve, 50));
       });
-      expect(screen.getByTestId('composer-working')).toHaveTextContent(/답하는 중/);
+      // 레일은 한 줄이라 다른 에이전트의 승인이 앞에 서고 이 에이전트(아직 일하는 중)는 「+1」로 합쳐진다. 이 에이전트의 턴은 그대로다:
+      // 답이 나타날 자리표시가 서 있다.
+      expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(`${RAIL_WORD.approval} \\+1`));
       expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
     });
   });
