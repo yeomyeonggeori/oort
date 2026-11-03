@@ -5,6 +5,8 @@
 // 실제 앱(빌드한 dist)을 mock /v1 위에 띄워 로더가 서는 자리를 **구현된 화면 그대로**
 // 라이트·다크 1440 으로 찍고, 같은 화면에서 움직임 GIF 를 뽑는다.
 //
+// 문장은 사전에서 와 기기 언어를 따르므로 컨텍스트마다 `locale: "ko-KR"`을 준다(카드 선택자가 한국어 단추 이름을 읽는다).
+//
 //   연결 카드      레일이 10초 안 올라오면 사이드바 아래 카드가 선다(#5220, 모델의 「끊김」). 도는 중,
 //                  「지금 다시 연결」 누른 뒤(「연결 중」), 브라우저 오프라인(정지 마크), 동작 줄이기(정지 + 숨).
 //   첫 로딩        세션 복원을 붙잡아 둔 동안의 큰 로더(코메토 + 위성)와 「불러오는 중」.
@@ -177,7 +179,7 @@ async function recordGif(page, { clip, frames, from = 0, scale, out, workDir }) 
 async function captureScheme(browser, scheme, shots, gifs) {
   // ---- 연결 카드 (움직임) --------------------------------------------------
   {
-    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, reducedMotion: "no-preference" });
+    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, locale: "ko-KR", reducedMotion: "no-preference" });
     await installMocks(context);
     const page = await context.newPage();
     await signIn(page);
@@ -229,7 +231,7 @@ async function captureScheme(browser, scheme, shots, gifs) {
 
   // ---- 연결 카드 (동작 줄이기) ------------------------------------------------
   {
-    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, reducedMotion: "reduce" });
+    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, locale: "ko-KR", reducedMotion: "reduce" });
     await installMocks(context);
     const page = await context.newPage();
     await signIn(page);
@@ -243,7 +245,7 @@ async function captureScheme(browser, scheme, shots, gifs) {
 
   // ---- 첫 로딩 (복원을 붙잡아 둔 동안) -------------------------------------------
   for (const reducedMotion of ["no-preference", "reduce"]) {
-    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, reducedMotion });
+    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2, colorScheme: scheme, locale: "ko-KR", reducedMotion });
     await installMocks(context);
     const page = await context.newPage();
     await signIn(page);
