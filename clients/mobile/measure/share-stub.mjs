@@ -7,7 +7,7 @@
  * 그래서 **배송되는 내려받기·공유 코드가 그대로 돈다**(앱 코드에 시험용 틈을 내지 않았다).
  *
  * 답하는 파일은 **요청 때 만든 영상 모양 바이트**다(저장소에 영상 파일이 없다). 영상으로 디코드되지는 않지만 공유 시트는 파일 이름·종류·크기만 읽으므로
- * 시트가 서는 모양은 같다. 첨부 id 가 크기를 정한다:
+ * 시트가 서는 모양은 같다. 하네스의 카드는 WebM(#5268 — mp4·mov 는 #5235부터 앱 안 영상 뷰어로 열려 공유 시트 길을 타지 않는다)이라 응답도 `video/webm` 이다. 첨부 id 가 크기를 정한다:
  *   video-small   6 MB    (기본 — 내려받기가 1초 안팎이라 한 번 돌리기 빠르다)
  *   video-big     58.4 MB (보고된 영상의 크기 — 내려받기 진행 줄이 여러 번 바뀐다)
  * 그 밖의 id 는 404 다 — 실패 상태를 찍을 때 쓴다.
@@ -15,6 +15,7 @@
  * **진짜 영상이 필요할 때(#5209)**: `SHARE_STUB_REAL_VIDEO=<mp4 경로>` 를 주면 `video-small` 이 그 파일의 바이트로 답한다. 영상 모양 바이트는 공유 시트는 통과해도
  * 사진 보관함은 통과하지 못한다(`UIVideoAtPathIsCompatibleWithSavedPhotosAlbum` 이 디코드 가능한 영상만 받는다) — 「저장」을 재려면 진짜 H.264 mp4 여야 한다
  * (`ffmpeg -f lavfi -i testsrc=duration=2:size=320x240:rate=15 -pix_fmt yuv420p -c:v libx264 clip.mp4`).
+ * 다만 #5268 이후 이 하네스의 카드는 WebM 이라 ↓ 는 보관함이 아니라 파일 앱으로 간다 — mp4 영상의 보관함 저장은 앱 안 영상 뷰어의 [저장]이 맡는다(#5235).
  *
  * 천천히 보내서(조각 사이에 `SHARE_STUB_CHUNK_DELAY_MS`) `onProgress` 가 여러 번 불리게 한다. 0 이면 한 번에 보낸다.
  *
@@ -40,11 +41,10 @@ const FILES = {
 
 const CONTENT = /\/attachments\/([^/]+)\/content$/;
 
-/** MP4 의 첫 상자(`ftyp`) 뒤를 0 으로 채운 바이트. 영상 파일로 읽히지 않아도 이름·크기·종류만 보는 공유 시트에는 충분하다. */
+/** WebM(Matroska)의 EBML 머리표(0x1A45DFA3) 뒤를 0 으로 채운 바이트. 영상 파일로 읽히지 않아도 이름·크기·종류만 보는 공유 시트에는 충분하다. */
 function fileBytes(size) {
   const bytes = Buffer.alloc(size);
-  bytes.writeUInt32BE(24, 0);
-  bytes.write('ftypisom', 4, 'ascii');
+  bytes.writeUInt32BE(0x1a45dfa3, 0);
   return bytes;
 }
 
@@ -71,7 +71,7 @@ createServer(async (request, response) => {
     return;
   }
   process.stdout.write(`200 ${url.pathname} (${size} bytes)\n`);
-  response.writeHead(200, {'Content-Type': 'video/mp4', 'Content-Length': size});
+  response.writeHead(200, {'Content-Type': 'video/webm', 'Content-Length': size});
   const bytes = REAL_VIDEO && decodeURIComponent(id ?? '') === 'video-small' ? REAL_VIDEO : fileBytes(size);
   for (let at = 0; at < size; at += CHUNK_BYTES) {
     if (response.destroyed) return;

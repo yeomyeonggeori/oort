@@ -17,8 +17,11 @@ import type {ScrollLogEntry} from '../src/features/conversation/Timeline';
 import {setServerBase} from '../src/storage/serverBase';
 
 // =============================================================================
-// 첨부 내려받기 공유 시트 캡처·계측 표면 (#5207). 진짜 머리·타임라인·컴포저가 선 대화에 파일(영상) 첨부 카드가 맨 끝에 있고, 카드를 누르는 것도
+// 첨부 내려받기 공유 시트 캡처·계측 표면 (#5207). 진짜 머리·타임라인·컴포저가 선 대화에 파일 카드(WebM 영상)가 맨 끝에 있고, 카드를 누르는 것도
 // 시트를 닫는 것도 Maestro 의 **실제 탭**이다(`maestro/5207-share-sheet.yaml`). 서버·레일만 없다 — 첨부 바이트는 `share-stub.mjs` 가 대신 답한다.
+//
+// 카드가 WebM 인 까닭(#5268): mp4·mov·m4v 영상은 #5208(#5235)부터 앱 안 영상 뷰어로 열려 이 시트 길을 타지 않는다(`isInAppPlayableVideo`).
+// 앱이 못 읽는 영상(WebM)만 파일 카드 → 내려받기 → 공유 시트로 남으므로, 이 표면은 그 길의 카드를 세운다(jest `shareSheet.test.tsx` 와 같은 재료).
 //
 //   node measure/share-stub.mjs &                       # 첨부 바이트(영상 모양)와 기록 한 줄(POST /log)을 받는다. SHARE_STUB_LOG=<파일> 로 기록을 남긴다
 //   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure SHARE-ATTACH[-<FLAGS>] \
@@ -104,7 +107,7 @@ const SCRIPT: Draft[] = [
     author: index % 2 === 0 ? PEER : SELF,
     body,
     // 어제의 중간 카드: 읽던 자리(맨 아래가 아닌 곳)에서 시트를 열어도 자리가 그대로인가를 잰다.
-    ...(index === 9 ? {file: 'v0.mp4'} : {}),
+    ...(index === 9 ? {file: 'v0.webm'} : {}),
   })),
   {author: SELF, body: '좋은 아침이에요. 오늘 일정부터 볼게요'},
   {author: PEER, body: '네, 열 시에 리뷰 있어요'},
@@ -114,7 +117,7 @@ const SCRIPT: Draft[] = [
   {author: PEER, body: '엇', rootSeq: 19},
   {author: PEER, body: '메시지'},
   {author: SELF, body: '해결해 두겠습니다'},
-  {author: SELF, body: '컨셉 영상 제작이 거의 막바지 단계가 되었습니다', file: 'v1.mp4'},
+  {author: SELF, body: '컨셉 영상 제작이 거의 막바지 단계가 되었습니다', file: 'v1.webm'},
 ];
 
 function build(big: boolean): Message[] {
@@ -146,7 +149,7 @@ function build(big: boolean): Message[] {
               {
                 id: big ? 'video-big' : 'video-small',
                 name: entry.file,
-                mime: 'video/mp4',
+                mime: 'video/webm',
                 sizeBytes: big ? 61_235_000 : 6_291_456,
               },
             ],
