@@ -6,6 +6,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
 import type { CreatedInvite, InviteCode } from "@momo/core/features/settings/api";
+import { LocaleContext } from "@/i18n/localeContext";
+import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
+import type { AppLocale } from "@/i18n/localeStore";
 import { InviteSection } from "./InviteSection";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -30,9 +33,11 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+let korean: AppLocale;
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  korean = await koreanLocaleForTest();
 });
 
 function invite(over: Partial<InviteCode> = {}): InviteCode {
@@ -75,20 +80,25 @@ afterEach(() => {
   host = null;
 });
 
-async function render(offline = false, settle = true): Promise<HTMLElement> {
+async function render(
+  offline = false,
+  settle = true,
+  locale: AppLocale | null = null
+): Promise<HTMLElement> {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
+  const section = createElement(
+    QueryClientProvider,
+    { client },
+    createElement(InviteSection, { workspaceId: WS, offline })
+  );
   act(() =>
     root?.render(
-      createElement(
-        QueryClientProvider,
-        { client },
-        createElement(InviteSection, { workspaceId: WS, offline })
-      )
+      locale ? createElement(LocaleContext.Provider, { value: locale }, section) : section
     )
   );
   if (settle) {
@@ -195,5 +205,76 @@ describe("설정 › 멤버와 초대", () => {
     });
     await vi.waitFor(() => expect(h.querySelector('[role="alert"]')).not.toBeNull());
     expect(byId(h, "invite-issued")).toBeNull();
+  });
+
+  // 게스트 초대는 멈춰 있다 (ADR-0128 D1, ADR-0219 GS-0). 서버가 거절하는 역할을 화면이 권하면
+  // 저장할 수 없는 폼이다.
+  it("역할 선택지에 게스트가 없고 멤버가 기본이다", async () => {
+    const h = await render();
+    const radios = [...h.querySelectorAll<HTMLInputElement>('input[name="invite-role"]')];
+    expect(radios.map((radio) => radio.value)).toEqual(["member", "admin"]);
+    expect(radios.find((radio) => radio.checked)?.value).toBe("member");
+    expect(byId(h, "invite-create-form")?.textContent).not.toContain("초대받은 채널만 봐요");
+  });
+
+  it("멈추기 전에 만든 게스트 초대는 멈춤으로 읽히고 역할 이름은 게스트다", async () => {
+    fetchWorkspace.mockResolvedValue({
+      id: WS,
+      slug: "dawn",
+      name: "새벽팀",
+      updatedAtMs: 1,
+      roleLabels: { guest: "손님" },
+      welcomeAgentMemberId: null,
+      welcomePrompt: "",
+      subscriptionAgentsEnabled: false,
+    });
+    listInvites.mockResolvedValue([
+      invite({ id: "g1", codePreview: "GST001", role: "guest" }),
+      invite({ id: "g2", codePreview: "GST002", role: "guest", revokedAtMs: NOW - 10 }),
+      invite({ id: "m1", codePreview: "MEM001", role: "member" }),
+    ]);
+    const h = await render();
+    const rows = [...h.querySelectorAll('[data-testid="invite-list"] li')].map(
+      (row) => row.textContent ?? ""
+    );
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toContain("멈춤");
+    expect(rows[0]).not.toContain("사용 가능");
+    expect(rows[0]).toContain("손님");
+    expect(rows[0]).not.toContain("guest");
+    // 회수한 게스트 초대는 회수가 마지막 말이다.
+    expect(rows[1]).toContain("해지됨");
+    expect(rows[1]).not.toContain("멈춤");
+    // 멤버 초대는 그대로다.
+    expect(rows[2]).toContain("사용 가능");
+    expect(rows[2]).toContain("멤버");
+  });
+
+  it("서버가 게스트 초대 멈춤을 말하면 사전 문구로 읽힌다 — 한국어와 영어", async () => {
+    createInvite.mockRejectedValue(
+      new ApiError(
+        400,
+        "guest invites are paused until channel-scoped invites are available",
+        "guest_invites_paused"
+      )
+    );
+    const submit = async (h: HTMLElement) => {
+      await act(async () => {
+        (byId(h, "invite-create") as HTMLButtonElement).click();
+      });
+      await vi.waitFor(() => expect(h.querySelector('[role="alert"]')).not.toBeNull());
+      return h.querySelector('[role="alert"]')?.textContent ?? "";
+    };
+    // 한국어 로케일: 사전의 한국어 문장이고 서버의 영어 문장이 아니다.
+    const ko = await submit(await render(false, true, korean));
+    expect(ko).toBe("게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있어요.");
+    expect(ko).not.toContain("guest invites are paused");
+    act(() => root?.unmount());
+    root = null;
+    host?.remove();
+    host = null;
+    // 제공자가 없는 화면은 영어 사전으로 읽는다(영어 사전은 코어에 실려 있다).
+    const en = await submit(await render());
+    expect(en).toBe("Guest invites are paused until channel-specific invites are available.");
   });
 });

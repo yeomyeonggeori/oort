@@ -154,13 +154,13 @@ describe("문장은 사전을 거친다", () => {
 
   it("단추 이름·제목은 두 언어로, 한정 문장은 필요한 때만, 단계 낱말은 색에만 기대지 않는다", () => {
     if (live === null || stopped === null || finished === null) throw new Error("fixture");
-    // 한국어는 「4단계 중 2단계」, 영어는 「2 of 4」.
+    // 한국어는 「4단계 중 2단계 완료」, 영어는 「2 of 4 done」. 보이는 머리에도 「완료」가 있어 「둘째 단계를 하는 중」으로 읽히지 않는다(#5174 L3).
     const ko2 = workPlanCopy(live, { maybeStale: false }, copyKo);
     expect(ko2.button).toBe("계획 4단계 중 2단계 완료");
-    expect(ko2.title).toBe("계획 · 4단계 중 2단계");
+    expect(ko2.title).toBe("계획 · 4단계 중 2단계 완료");
     const en2 = workPlanCopy(live, { maybeStale: false }, copyEn);
     expect(en2.button).toBe("Plan, 2 of 4 steps done");
-    expect(en2.title).toBe("Plan · 2 of 4");
+    expect(en2.title).toBe("Plan · 2 of 4 done");
 
     // 다 끝나면 제목이 「모두 마쳤어요」이고, 멈춘 세션이어도 「돌고 있지 않아요」를 붙이지 않는다.
     const done = workPlanCopy(finished, { maybeStale: false }, copyKo);
@@ -176,6 +176,11 @@ describe("문장은 사전을 거친다", () => {
     expect(workPlanCopy(live, { maybeStale: true }, copyKo).notes).toEqual([
       "기록이 길어서 마지막 계획이 아닐 수 있어요.",
     ]);
+    // 방금 다른 세션을 골라 그 계획을 읽는 중이면 그 사실을 먼저 말한다(#5166). 읽는 중이 아니면 말하지 않는다.
+    expect(workPlanCopy(live, { maybeStale: false, switching: true }, copyKo).notes).toEqual([
+      "고른 세션의 계획을 불러오는 중이에요. 위 목록은 마지막으로 읽은 계획이에요.",
+    ]);
+    expect(workPlanCopy(live, { maybeStale: false, switching: false }, copyKo).notes).toEqual([]);
 
     expect(live.steps.map((step) => workPlanStepWord(step, copyKo))).toEqual([
       "완료",

@@ -132,7 +132,7 @@ export function WorkTimelineRows({
                 {copy.label}
                 {copy.repeat !== null && (
                   <span className="text-ink-muted" data-numeric data-testid="work-timeline-repeat">
-                    {" "}· {copy.repeat}
+                    {" "}{copy.repeat}
                   </span>
                 )}
               </span>

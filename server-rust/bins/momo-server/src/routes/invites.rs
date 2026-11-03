@@ -16,6 +16,11 @@
 //! **The code leaves the server exactly once per mint.** Create and regenerate
 //! answer 201 with the raw code; nothing else ever can, because the durable
 //! record is a sha256 written by `momo_invite_code_hash()` inside the statement.
+//!
+//! **Guest invites are paused** until channel-scoped invites exist (ADR-0128 D1,
+//! ADR-0219 GS-0; the switch is `momo_settings::GUEST_INVITES_ENABLED`). Create,
+//! regenerate (which copies the role of the code it replaces) and member-self
+//! redeem each answer `400 guest_invites_paused`, the answer the public join gives.
 
 use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
@@ -29,6 +34,7 @@ use momo_settings::{
     normalized_invite_code, normalized_invite_role, normalized_revoke_reason, read_invite,
     redeem_invite_for_member, regenerate_invite, revoke_invite, validated_expires_at_ms,
     validated_max_uses, InviteCode, InviteMutationInvalid, InviteRedeemInvalid, InviteRedemption,
+    InviteSpecInvalid, GUEST_INVITES_PAUSED_CODE, GUEST_INVITES_PAUSED_MESSAGE,
     INVITE_CREATED_AUDIT_ACTION, INVITE_CREATED_AUDIT_SCHEMA,
 };
 use serde::Deserialize;
@@ -84,6 +90,26 @@ fn invite_dto(invite: InviteCode) -> InviteCodeDto {
     }
 }
 
+/// A request-shape refusal as the wire carries it: `400`, and the refusals that
+/// name themselves (`error.code`) keep their code.
+fn spec_error(error: InviteSpecInvalid) -> ApiError {
+    match error.code() {
+        Some(code) => ApiError::coded(StatusCode::BAD_REQUEST, code, error.to_string()),
+        None => ApiError::bad_request(error.to_string()),
+    }
+}
+
+/// Guest invites are paused (ADR-0128 D1, ADR-0219 GS-0): the one answer create,
+/// regenerate and redeem give, the same status, code and sentence the public join
+/// gives (`momo_settings::JoinRejection::GuestInvitesPaused`).
+fn guest_invites_paused() -> ApiError {
+    ApiError::coded(
+        StatusCode::BAD_REQUEST,
+        GUEST_INVITES_PAUSED_CODE,
+        GUEST_INVITES_PAUSED_MESSAGE,
+    )
+}
+
 pub async fn list(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -126,13 +152,11 @@ pub async fn create(
 
     // Shape first: a bad role, an out-of-range use count, or an expiry already in
     // the past never reaches a statement.
-    let role = normalized_invite_role(request.role.as_deref())
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
-    let max_uses = validated_max_uses(request.max_uses)
-        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let role = normalized_invite_role(request.role.as_deref()).map_err(spec_error)?;
+    let max_uses = validated_max_uses(request.max_uses).map_err(spec_error)?;
     let expires_at_ms =
         validated_expires_at_ms(request.expires_at_ms, chrono::Utc::now().timestamp_millis())
-            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            .map_err(spec_error)?;
 
     let outcome: DbRejectable<momo_settings::CreatedInvite> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -248,6 +272,10 @@ pub async fn revoke(
                                 InviteMutationInvalid::NotFoundOrRevoked.to_string(),
                             )));
                         }
+                        // Only regenerate answers this one; the arm keeps the match closed.
+                        Err(InviteMutationInvalid::GuestInvitesPaused) => {
+                            return Ok(Err(guest_invites_paused()));
+                        }
                     };
                 if revoked.newly_revoked {
                     write_audit(
@@ -291,6 +319,11 @@ pub async fn regenerate(
                 }
                 let created = match regenerate_invite(conn, invite_id, member_id).await? {
                     Ok(created) => created,
+                    // A regenerate copies the role of the code it replaces, so it is
+                    // refused with the create's answer; the old code is left as it was.
+                    Err(InviteMutationInvalid::GuestInvitesPaused) => {
+                        return Ok(Err(guest_invites_paused()));
+                    }
                     Err(error) => {
                         return Ok(Err(ApiError::new(StatusCode::CONFLICT, error.to_string())));
                     }
@@ -373,6 +406,7 @@ pub async fn redeem(
                     Err(InviteRedeemInvalid::Unusable) => Ok(Err(ApiError::bad_request(
                         InviteRedeemInvalid::Unusable.to_string(),
                     ))),
+                    Err(InviteRedeemInvalid::GuestInvitesPaused) => Ok(Err(guest_invites_paused())),
                 }
             })
         })
@@ -454,6 +488,69 @@ mod tests {
         assert!(!query(Some("1"), None).include_revoked());
         assert!(!query(Some("yes"), None).include_revoked());
         assert!(!query(None, None).include_revoked());
+    }
+
+    /// The paused role is a 400 that names itself, whichever step of the request
+    /// notices it; the other request-shape refusals stay code-less 400s.
+    #[test]
+    fn a_paused_role_is_a_400_that_names_itself_at_every_door() {
+        let at_create = spec_error(InviteSpecInvalid::GuestInvitesPaused);
+        assert_eq!(at_create.status, StatusCode::BAD_REQUEST);
+        assert_eq!(at_create.code, Some("guest_invites_paused"));
+        for other in [
+            InviteSpecInvalid::Role,
+            InviteSpecInvalid::MaxUses,
+            InviteSpecInvalid::ExpiresAtMs,
+        ] {
+            let api = spec_error(other);
+            assert_eq!(api.status, StatusCode::BAD_REQUEST, "{other:?}");
+            assert_eq!(api.code, None, "{other:?}");
+        }
+        // Regenerate and redeem notice it later, in the domain, and answer the same.
+        let later = guest_invites_paused();
+        assert_eq!(later.status, at_create.status);
+        assert_eq!(later.code, at_create.code);
+        assert_eq!(later.message, at_create.message);
+    }
+
+    /// The wire contract names the refusal: each of the four operations that answer it, and
+    /// the registry of error codes a client branches on, say `guest_invites_paused`. There is
+    /// no YAML crate here, so an operation is the stretch from its `operationId:` line to the
+    /// next one; if the spec stops naming the code on a door, this goes red with the door's name.
+    #[test]
+    fn the_openapi_names_the_paused_code_on_every_door_that_answers_it() {
+        let spec = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../docs/api/openapi.yaml"
+        ))
+        .expect("read openapi.yaml");
+        for operation in [
+            "createWorkspaceInvite",
+            "regenerateWorkspaceInvite",
+            "redeemWorkspaceInvite",
+            "publicJoin",
+        ] {
+            let header = format!("operationId: {operation}\n");
+            let start = spec
+                .find(&header)
+                .unwrap_or_else(|| panic!("openapi.yaml has no `{operation}`"));
+            let rest = &spec[start + header.len()..];
+            let end = rest.find("operationId:").unwrap_or(rest.len());
+            assert!(
+                rest[..end].contains(GUEST_INVITES_PAUSED_CODE),
+                "`{operation}` must name `{GUEST_INVITES_PAUSED_CODE}`"
+            );
+        }
+        let registry = spec
+            .find("Stable machine code for a refusal a client branches on")
+            .expect("openapi.yaml has the error-code registry");
+        let end = spec[registry..]
+            .find("dev_cannot_decide")
+            .map_or(spec.len(), |at| registry + at);
+        assert!(
+            spec[registry..end].contains(GUEST_INVITES_PAUSED_CODE),
+            "the error-code registry must list `{GUEST_INVITES_PAUSED_CODE}`"
+        );
     }
 
     /// The preview is a recognition hint. The wire must never grow a field that

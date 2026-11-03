@@ -94,7 +94,7 @@ describe("원장 → 기록 줄 (ADR-0200 D2)", () => {
     const text = (code: string) =>
       ledgerRows([ev({ kind: "approval_decided", code })])[0]?.text;
     expect(text("approved")).toBe("승인됐어요");
-    expect(text("rejected")).toBe("거절됐어요");
+    expect(text("rejected")).toBe("거부됐어요");
     expect(text("cancelled")).toBe("승인 요청이 취소됐어요");
     expect(text("something_new")).toBe("승인 결정이 기록됐어요");
   });

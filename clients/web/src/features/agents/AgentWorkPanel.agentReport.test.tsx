@@ -199,7 +199,7 @@ describe("작업 패널의 「에이전트 보고」 칸", () => {
     // 계획 블록: 줄 위. 완료·완료·지금·대기가 모양과 낱말로도 갈린다.
     const plan = q(report, "agent-work-panel-plan") as Element;
     const rows = q(report, "work-timeline-rows") as Element;
-    expect(text(q(plan, "agent-work-panel-plan-title"))).toBe("계획 · 4단계 중 2단계");
+    expect(text(q(plan, "agent-work-panel-plan-title"))).toBe("계획 · 4단계 중 2단계 완료");
     expect(qa(plan, "agent-work-panel-plan-step").map((step) => step.getAttribute("data-step"))).toEqual(["done", "done", "current", "pending"]);
     expect(qa(plan, "agent-work-panel-plan-step").map((step) => text(step.querySelector(".sr-only")))).toEqual(["완료", "완료", "지금 단계", "대기"]);
     expect(before(plan, rows)).toBe(true);
@@ -297,7 +297,11 @@ describe("작업 패널의 「에이전트 보고」 칸", () => {
       act(() => root?.unmount());
       host?.remove();
     };
-    expect(text(q(mount(), "agent-work-panel-health"))).toBe("조용해요 · 마지막 보고 8분 전 · 같은 단계에 12분째 · 실패한 활동 1");
+    // 머리 줄(`agent-work-panel-detail`)이 「마지막 보고 n분 전」을 이미 말해서 건강 줄은 그 시간을 되풀이하지 않는다(#5174 L1).
+    const panelEl = mount();
+    expect(text(q(panelEl, "agent-work-panel-health"))).toBe("조용해요 · 같은 단계에 12분째 · 실패한 활동 1");
+    expect(text(q(panelEl, "agent-work-panel-detail"))).toContain("마지막 보고");
+    expect(text(q(panelEl, "agent-work-panel-health"))).not.toContain("마지막 보고");
     // 연결이 끊기면 시간 신호는 서지 않고(끊긴 화면의 「n분 전」은 우리 시계 혼자 흘러간 숫자다) 개수만 남는다.
     unmount();
     hoisted.conn = "disconnected";

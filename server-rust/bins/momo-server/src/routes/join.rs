@@ -14,6 +14,8 @@
 //!   → 401 invalid_credentials                             existing account, wrong password
 //!   → 409 join_email_unavailable                          existing account that a public
 //!                                                         code may not resume
+//!   → 400 guest_invites_paused                            the code carries a paused role
+//!                                                         (judged on the code alone)
 //!   → 429 (+ Retry-After)                                 that account's guess budget is spent
 //!   → 503 (+ Retry-After)                                 a membership change holds the lock
 //!                                                         this door stands in line for
@@ -30,6 +32,14 @@
 //! [`JoinRejection::EmailUnavailable`] carry their `error.code`, and a spent budget
 //! becomes a 429 with its `Retry-After`. A membership lock that is not free is a 503 with
 //! its own (`ApiError::busy`, #4636): the door does not wait for it.
+//!
+//! ## A paused role is refused on the code alone
+//!
+//! Guest invites are paused until channel-scoped invites exist (ADR-0128 D1,
+//! ADR-0219 GS-0; the switch is `momo_settings::GUEST_INVITES_ENABLED`). A usable code
+//! with that role is a `400` carrying `guest_invites_paused`, decided before the ban
+//! check and before the existing-account gate, so an address with an account and one
+//! without get the same answer and no password guess is spent.
 //!
 //! ## Why it is mounted outside the auth middleware
 //!
@@ -400,6 +410,11 @@ mod tests {
                 503,
                 "the server is busy; retry shortly",
             ),
+            (
+                JoinRejection::GuestInvitesPaused,
+                400,
+                "guest invites are paused until channel-scoped invites are available",
+            ),
         ];
         for (rejection, status, message) in cases {
             let api = rejection_error(rejection);
@@ -408,16 +423,20 @@ mod tests {
         }
     }
 
-    /// The wire shape of the two refusals #4625 added: each names itself beside its
-    /// status and sentence, and no other refusal grows a code by accident.
+    /// The wire shape of the refusals that name themselves — the two #4625 added and
+    /// the paused role: each carries its code beside its status and sentence, and no
+    /// other refusal grows a code by accident.
     #[test]
-    fn the_account_refusals_name_themselves_and_no_other_refusal_does() {
+    fn the_named_refusals_carry_their_code_and_no_other_refusal_does() {
         let wrong = rejection_error(JoinRejection::InvalidCredentials);
         assert_eq!(wrong.status, StatusCode::UNAUTHORIZED);
         assert_eq!(wrong.code, Some("invalid_credentials"));
         let unavailable = rejection_error(JoinRejection::EmailUnavailable);
         assert_eq!(unavailable.status, StatusCode::CONFLICT);
         assert_eq!(unavailable.code, Some("join_email_unavailable"));
+        let paused = rejection_error(JoinRejection::GuestInvitesPaused);
+        assert_eq!(paused.status, StatusCode::BAD_REQUEST);
+        assert_eq!(paused.code, Some("guest_invites_paused"));
         for rejection in [
             JoinRejection::InviteInvalid,
             JoinRejection::InviteExpired,
