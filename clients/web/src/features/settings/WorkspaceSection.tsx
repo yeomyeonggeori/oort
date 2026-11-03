@@ -6,6 +6,8 @@ import { Input } from "@/design/ui/input";
 import { ListboxSelect } from "@/design/ui/listbox-select";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureNote, loadCauseOf } from "@/features/common/LoadFailureBox";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { putAttachmentBytes } from "@/features/attachments/uploadTransport";
 import { useWorkspaceAvatar } from "@/features/sidebar/useWorkspaceAvatar";
 import { useSession } from "@/app/session";
@@ -145,10 +147,10 @@ function WorkspaceUnfurlSetting({
       )}
       {query.isError && !denied && (
         <CardBody>
-          <InlineBanner
-            message="링크 확인 설정을 불러오지 못했어요."
-            actionLabel="다시 시도"
-            onAction={() => void query.refetch()}
+          <LoadFailureNote
+            titleKey={CONNECTION_KEYS.loadLinkPreviewSettingTitle}
+            cause={loadCauseOf(query.error)}
+            onRetry={() => void query.refetch()}
             separator={false}
             className="px-0"
             testId="workspace-unfurls-error"

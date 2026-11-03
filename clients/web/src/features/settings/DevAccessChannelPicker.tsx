@@ -1,12 +1,14 @@
 import { useMemo } from "react";
 import { DEV_CHANNEL_MAX } from "@momo/core/features/auth/devAccessModel";
 import { ChoiceList, type ChoiceListItem } from "@/features/hostedAgents/ChoiceList";
-import { InlineBanner, Skeleton } from "@/features/common/States";
+import { Skeleton } from "@/features/common/States";
 import {
   channelLabel,
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
+import { LoadFailureNote, loadCauseOf } from "@/features/common/LoadFailureBox";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 
 // Reading this as: settings for internal team users on web+Tauri,
 // density 6/10, motion 2/10.
@@ -72,10 +74,10 @@ export function DevAccessChannelPicker({
 
   if (channels.isError) {
     return (
-      <InlineBanner
-        message="채널 목록을 불러오지 못했어요. 다시 시도해 주세요."
-        actionLabel="다시 시도"
-        onAction={() => void channels.refetch()}
+      <LoadFailureNote
+        titleKey={CONNECTION_KEYS.loadChannelListTitle}
+        cause={loadCauseOf(channels.error)}
+        onRetry={() => void channels.refetch()}
         className="px-0"
         separator={false}
         testId="dev-access-channels-error"

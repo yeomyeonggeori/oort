@@ -426,6 +426,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load activity"
     }
   ],
+  "connection.load.agentChannelsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list, so we can't show which channels this agent is in"
+    }
+  ],
   "connection.load.agentHistoryTitle": [
     {
       "type": 0,

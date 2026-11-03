@@ -29,6 +29,7 @@
   "connection.load.agentRosterTitle": "Couldn't load the agent list",
   "connection.load.agentProfileTitle": "Couldn't load the agent profile",
   "connection.load.agentHistoryTitle": "Couldn't load the agent's work history",
+  "connection.load.agentChannelsTitle": "Couldn't load the channel list, so we can't show which channels this agent is in",
   "connection.load.agentRunTitle": "Couldn't load the task details",
   "connection.load.activityTitle": "Couldn't load activity",
   "connection.load.deviceKeysTitle": "Couldn't load the device keys",

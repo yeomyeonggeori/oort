@@ -29,6 +29,8 @@ import { useRecheckWhenElapsed } from "./useRecheckWhenElapsed";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
+import { LoadFailureNote, loadCauseOf } from "@/features/common/LoadFailureBox";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 
 // Design Read: settings for internal team users on web+Tauri, density 6/10,
 // motion 2/10.
@@ -72,11 +74,12 @@ const OFFLINE_REASON = "연결이 끊겨 지금은 규칙을 바꿀 수 없어�
 const FORBIDDEN_COPY =
   "사람 멤버만 알림 규칙을 정할 수 있어요. 에이전트 계정이거나 이 워크스페이스의 멤버가 아니면 쓸 수 없어요. 멤버라면 워크스페이스에 다시 참여한 뒤 열어 보세요.";
 
-function loadFailureCopy(error: unknown): { message: string; retry: boolean } {
+// 403은 실패가 아니라 이 계정에 닫힌 상태라 안내 문장을 그대로 말하고, 그 밖의 실패는 원인을 말하는 한 줄과 다시 시도다(#5242).
+function loadFailureCopy(error: unknown): { message: string; retry: false } | { retry: true } {
   if (error instanceof ApiError && error.status === 403) {
     return { message: FORBIDDEN_COPY, retry: false };
   }
-  return { message: "알림 규칙을 불러오지 못했어요.", retry: true };
+  return { retry: true };
 }
 
 export function NotificationRulesSection({ offline }: { offline: boolean }) {
@@ -150,10 +153,10 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
         ) : failure ? (
           <CardBody>
             {failure.retry ? (
-            <InlineBanner
-              message={failure.message}
-              actionLabel="다시 불러오기"
-              onAction={() => void rules.refetch()}
+            <LoadFailureNote
+              titleKey={CONNECTION_KEYS.loadNotificationRulesTitle}
+              cause={loadCauseOf(rules.error)}
+              onRetry={() => void rules.refetch()}
               separator={false}
               className="px-0"
               testId="notification-rules-error"

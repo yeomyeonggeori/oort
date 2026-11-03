@@ -7,6 +7,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { NotificationRules } from "@momo/core/features/settings/notificationRules";
 import { ApiError } from "@momo/core/lib/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { NetworkError } from "@momo/core/lib/http";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { NotificationRulesSection } from "./NotificationRulesSection";
 import { reloadDesktopNotificationKindsForTest } from "@/features/notifications/preference";
 
@@ -59,7 +63,9 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 
-beforeAll(() => {
+let ko: AppLocale;
+beforeAll(async () => {
+  ko = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -177,7 +183,8 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-async function mountSection(offline = false): Promise<HTMLElement> {
+/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
+async function mountSection(offline = false, korean = false): Promise<HTMLElement> {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Infinity },
@@ -198,7 +205,7 @@ async function mountSection(offline = false): Promise<HTMLElement> {
     )
   );
   await act(async () => {
-    mountedRoot?.render(tree);
+    mountedRoot?.render(korean ? createElement(LocaleProvider, { locale: ko, children: tree }) : tree);
     await Promise.resolve();
   });
   return host;
@@ -514,6 +521,33 @@ describe("NotificationRulesSection DND regression", () => {
     expect(error.querySelector("button")).toBeNull();
     expect(host.querySelector('[data-testid="operator-notice"]')).toBeNull();
     expect(host.querySelector('[data-testid="notification-rules-dnd"]')).toBeNull();
+  });
+
+  // #5242: 옛 「알림 규칙을 불러오지 못했어요.」는 원인을 말하는 한 줄이다. 403(사람 멤버만)은 그대로 안내 톤이다.
+  it("다른 실패는 제목 뒤에 원인이 붙은 한 줄과 다시 시도를 준다", async () => {
+    const cases: [Error, string][] = [
+      [new NetworkError("unreachable", 15_000), "알림 규칙을 불러오지 못했어요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [new ApiError(500, "boom", "internal"), "알림 규칙을 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [error, sentence] of cases) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+      fetchNotificationRules.mockReset();
+      fetchNotificationRules.mockRejectedValue(error);
+      const host = await mountSection(false, true);
+      await vi.waitFor(() => {
+        expect(host.querySelector('[data-testid="notification-rules-error"]')).not.toBeNull();
+      });
+      const note = host.querySelector<HTMLElement>('[data-testid="notification-rules-error"]')!;
+      expect(note.getAttribute("role")).toBe("alert");
+      expect(note.textContent).toContain(sentence);
+      expect(note.textContent).not.toMatch(/\d{3}/);
+      expect(note.textContent).not.toContain("사람 멤버만");
+      act(() => mountedRoot?.unmount());
+      mountedHost?.remove();
+      mountedRoot = null;
+      mountedHost = null;
+      vi.restoreAllMocks();
+    }
   });
 
   it("다른 실패는 다시 불러오기 단추를 주고 누르면 다시 묻는다", async () => {

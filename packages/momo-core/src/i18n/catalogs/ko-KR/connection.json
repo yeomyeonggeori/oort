@@ -29,6 +29,7 @@
   "connection.load.agentRosterTitle": "에이전트 목록을 불러오지 못했어요",
   "connection.load.agentProfileTitle": "에이전트 프로필을 불러오지 못했어요",
   "connection.load.agentHistoryTitle": "에이전트 작업 이력을 불러오지 못했어요",
+  "connection.load.agentChannelsTitle": "채널 목록을 불러오지 못해 어디에 들어가 있는지 확인할 수 없어요",
   "connection.load.agentRunTitle": "작업 상세를 불러오지 못했어요",
   "connection.load.activityTitle": "활동을 불러오지 못했어요",
   "connection.load.deviceKeysTitle": "기기 키 목록을 불러오지 못했어요",

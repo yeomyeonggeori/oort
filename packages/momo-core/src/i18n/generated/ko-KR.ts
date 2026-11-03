@@ -384,6 +384,12 @@ export const catalog: MessageCatalog = {
       "value": "활동을 불러오지 못했어요"
     }
   ],
+  "connection.load.agentChannelsTitle": [
+    {
+      "type": 0,
+      "value": "채널 목록을 불러오지 못해 어디에 들어가 있는지 확인할 수 없어요"
+    }
+  ],
   "connection.load.agentHistoryTitle": [
     {
       "type": 0,

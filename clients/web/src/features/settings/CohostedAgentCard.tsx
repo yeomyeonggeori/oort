@@ -25,6 +25,8 @@ import { AiLineRow, AiSection, AiSectionHead } from "./aiAccountsParts";
 import { CohostedModelSection, loggedInFrom, useCohostedModels } from "./CohostedModelSection";
 import { ModelLoginPanel } from "./ModelLoginPanel";
 import { cohostedPromptKey, markCohostedPromptShown, wasCohostedPromptShown } from "./cohostedPrompt";
+import { LoadFailureNote, loadCauseOf } from "@/features/common/LoadFailureBox";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 
 // Reading this as: AI hub (top of every pane) card (instance operator only) for internal team users on
 // web+Tauri, density 6/10, motion 1/10.
@@ -59,10 +61,10 @@ export function CohostedAgentCard({ offline, workspaceId }: { offline: boolean; 
     return (
       <AiSection labelledBy={HEADING_ID} testId="ai-cohosted">
         <AiSectionHead id={HEADING_ID} title={COPY.title} scope="이 서버" locked />
-        <InlineBanner
-          message="같은 서버의 Hermes 상태를 불러오지 못했어요."
-          actionLabel="다시 시도"
-          onAction={() => void status.refetch()}
+        <LoadFailureNote
+          titleKey={CONNECTION_KEYS.loadHermesStatusTitle}
+          cause={loadCauseOf(status.error)}
+          onRetry={() => void status.refetch()}
           testId="ai-cohosted-error"
         />
       </AiSection>

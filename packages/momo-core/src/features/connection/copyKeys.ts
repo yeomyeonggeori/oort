@@ -59,6 +59,7 @@ export const CONNECTION_KEYS = {
   loadAgentRosterTitle: "connection.load.agentRosterTitle",
   loadAgentProfileTitle: "connection.load.agentProfileTitle",
   loadAgentHistoryTitle: "connection.load.agentHistoryTitle",
+  loadAgentChannelsTitle: "connection.load.agentChannelsTitle",
   loadAgentRunTitle: "connection.load.agentRunTitle",
   loadActivityTitle: "connection.load.activityTitle",
   loadDeviceKeysTitle: "connection.load.deviceKeysTitle",
