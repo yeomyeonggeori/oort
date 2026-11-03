@@ -1,49 +1,51 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { argumentSpecs, loadMessageCatalog, messageKeys } from "../../i18n";
+import { createMessageCopy } from "../../testkit/i18n";
 import { CONNECTION_KEYS } from "./copyKeys";
 import type { ConnectionView } from "./model";
 import { blockedKey, type BlockedFrame } from "./blockedReason";
-import { messageKeys } from "../../i18n/generated/messages";
 
 // =============================================================================
 // #5260: 막힌 자리의 한 문장은 **막은 원인**을 말한다. 두 가지를 잰다.
 //   1. 사전: 모든 틀이 ko·en에서 두 원인의 문장을 모두 갖고, 서버에 닿지 못한 것을 「오프라인」이라 말하는 틀이 없다.
+//      생성된 사전(컴파일된 메시지)을 실제로 풀어 읽는다 — 원본 JSON이 아니라 앱이 읽는 것을 잰다.
 //   2. 규칙(`blockedKey`): 원인마다 고르는 키.
 // 기대 문장은 사전의 값을 되풀이하지 않고 **성질**로 적는다(값을 되풀이하면 사전과 시험이 함께 틀려도 초록이다).
 // =============================================================================
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const CATALOGS = join(HERE, "../../i18n/catalogs");
+const blockedKeys = messageKeys.filter((key) => key.startsWith("blocked."));
+const frames = [...new Set(blockedKeys.map((key) => key.split(".")[1] as string))].sort();
 
-function readBlocked(locale: "ko-KR" | "en-US"): Record<string, string> {
-  return JSON.parse(readFileSync(join(CATALOGS, locale, "blocked.json"), "utf8")) as Record<string, string>;
+async function format(locale: "ko-KR" | "en-US"): Promise<Record<string, string>> {
+  const copy = createMessageCopy({
+    messageLocale: locale,
+    catalog: await loadMessageCatalog(locale),
+  }) as unknown as (key: string, values?: Record<string, unknown>) => string;
+  return Object.fromEntries(
+    blockedKeys.map((key) => {
+      const spec = (argumentSpecs as unknown as Record<string, Record<string, string>>)[key] ?? {};
+      // 값을 받는 틀(`{relativeTime}`)은 알아볼 수 있는 값을 넣어 푼다.
+      const values = Object.fromEntries(Object.keys(spec).map((name) => [name, "3m"]));
+      return [key, copy(key, values)];
+    })
+  );
 }
 
-const ko = readBlocked("ko-KR");
-const en = readBlocked("en-US");
-
-const frames = [...new Set(Object.keys(ko).map((key) => key.split(".")[1] as string))].sort();
-
 describe("blocked.* 사전: 원인별 완결된 문장 틀", () => {
-  it("틀이 하나 이상이고 ko·en의 키 집합이 같다", () => {
-    expect(frames.length).toBeGreaterThan(20);
-    expect(Object.keys(en).sort()).toEqual(Object.keys(ko).sort());
+  it("틀이 충분하고 모든 키가 blocked.<틀>.(offline|serverUnreachable) 세 칸이다", () => {
+    expect(frames.length).toBeGreaterThan(50);
+    for (const key of blockedKeys) expect(key).toMatch(/^blocked\.[a-zA-Z0-9]+\.(offline|serverUnreachable)$/);
   });
 
   it("모든 틀이 두 원인(offline · serverUnreachable)의 문장을 모두 갖는다", () => {
     for (const frame of frames) {
-      expect(Object.keys(ko), frame).toContain(`blocked.${frame}.offline`);
-      expect(Object.keys(ko), frame).toContain(`blocked.${frame}.serverUnreachable`);
-    }
-    // 키는 세 칸(blocked.<틀>.<원인>)이고 원인은 둘뿐이다.
-    for (const key of Object.keys(ko)) {
-      expect(key).toMatch(/^blocked\.[a-zA-Z0-9]+\.(offline|serverUnreachable)$/);
+      expect(blockedKeys, frame).toContain(`blocked.${frame}.offline`);
+      expect(blockedKeys, frame).toContain(`blocked.${frame}.serverUnreachable`);
     }
   });
 
-  it("ko: 기기 오프라인만 「오프라인」이라 말하고, 서버에 닿지 못함은 서버에 닿지 못했다고 말한다", () => {
+  it("ko: 기기 오프라인만 「오프라인」이라 말하고, 서버에 닿지 못함은 서버에 닿지 못했다고 말한다", async () => {
+    const ko = await format("ko-KR");
     for (const frame of frames) {
       const offline = ko[`blocked.${frame}.offline`] as string;
       const server = ko[`blocked.${frame}.serverUnreachable`] as string;
@@ -54,10 +56,12 @@ describe("blocked.* 사전: 원인별 완결된 문장 틀", () => {
       // 원인을 가리지 않던 옛 머리는 어느 문장에도 남지 않는다.
       expect(offline, frame).not.toContain("연결이 끊");
       expect(server, frame).not.toContain("연결이 끊");
+      expect(offline, frame).toMatch(/[가-힣]/);
     }
   });
 
-  it("en: 기기 오프라인만 offline이라 말하고, 서버에 닿지 못함은 서버에 닿지 못한다고 말한다", () => {
+  it("en: 기기 오프라인만 offline이라 말하고, 서버에 닿지 못함은 서버에 닿지 못한다고 말한다", async () => {
+    const en = await format("en-US");
     for (const frame of frames) {
       const offline = en[`blocked.${frame}.offline`] as string;
       const server = en[`blocked.${frame}.serverUnreachable`] as string;
@@ -70,20 +74,24 @@ describe("blocked.* 사전: 원인별 완결된 문장 틀", () => {
     }
   });
 
-  it("값(인자)을 받지 않는 완결된 문장이다: 조각을 이어 붙이는 틀이 아니다", () => {
-    for (const text of [...Object.values(ko), ...Object.values(en)]) {
-      expect(text).not.toMatch(/[{}]/);
-      expect(text.trim()).toBe(text);
-      expect(text).toMatch(/[.!?]$/);
+  it("완결된 문장이다: 마침표로 끝나고 풀리지 않은 자리({ })가 남지 않는다", async () => {
+    for (const locale of ["ko-KR", "en-US"] as const) {
+      for (const [key, text] of Object.entries(await format(locale))) {
+        expect(text, `${locale} ${key}`).not.toMatch(/[{}]/);
+        expect(text.trim(), `${locale} ${key}`).toBe(text);
+        expect(text, `${locale} ${key}`).toMatch(/[.!?]$/);
+      }
     }
   });
 
-  it("모든 blocked.* 키가 생성된 메시지 키 표에 있다(i18n:generate를 돌렸다)", () => {
-    const generated = messageKeys.filter((key) => key.startsWith("blocked."));
-    expect([...generated].sort()).toEqual(Object.keys(ko).sort());
-    // 다른 feature 파일이 이 파일의 키를 가로채지 않는다.
-    const features = readdirSync(join(CATALOGS, "ko-KR")).filter((file) => file === "blocked.json");
-    expect(features).toEqual(["blocked.json"]);
+  it("값을 받는 틀은 마지막 동기화 시각 하나만 받는다", () => {
+    const withValues = blockedKeys.filter(
+      (key) => Object.keys((argumentSpecs as unknown as Record<string, Record<string, string>>)[key] ?? {}).length > 0
+    );
+    expect(withValues.length).toBeGreaterThan(0);
+    for (const key of withValues) {
+      expect(Object.keys((argumentSpecs as unknown as Record<string, Record<string, string>>)[key] ?? {})).toEqual(["relativeTime"]);
+    }
   });
 });
 
@@ -105,7 +113,7 @@ function view(over: Partial<ConnectionView>): ConnectionView {
   };
 }
 
-const FRAME = frames[0] as BlockedFrame;
+const FRAME = "changeIt" as BlockedFrame;
 
 describe("blockedKey: 원인마다 고르는 키", () => {
   it("기기 오프라인 → offline 틀", () => {
