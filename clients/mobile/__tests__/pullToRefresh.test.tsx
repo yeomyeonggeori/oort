@@ -9,7 +9,10 @@ import '../src/boot/coreHost';
 import AppShell from '../src/shell/AppShell';
 import HostedConnectionsScreen from '../src/screens/HostedConnectionsScreen';
 import {SessionProvider} from '../src/session/useSession';
-import {CONNECTING_BAND_DELAY_MS} from '../src/realtime/connectionDisplay';
+import {
+  CONNECTING_BAND_DELAY_MS,
+  HEALED_MS,
+} from '@momo/core/features/connection/thresholds';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {
@@ -345,6 +348,11 @@ describe('대화 당겨서 다시 맞추기 — owner 10-30 (#4783)', () => {
       __clients: {connectCount: number; disconnect: () => void}[];
     }).__clients;
     const client = clients[clients.length - 1];
+    // 오래 건강하던 소켓이 끊기는 장면이다: 붙은 지 `HEALED_MS` 를 넘겨야 코어 연결 상태 모델이 틈을 새로 시작한다(#5222). 그 안의 재끊김은
+    // 옛 틈을 이어 세므로 조용한 첫 1초가 없다.
+    act(() => {
+      jest.advanceTimersByTime(HEALED_MS);
+    });
     act(() => {
       client.disconnect();
       jest.advanceTimersByTime(CONNECTING_BAND_DELAY_MS - 1);

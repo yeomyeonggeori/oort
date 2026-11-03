@@ -15,7 +15,6 @@
   "mobile.attachmentSave.savedToFiles": "파일에 저장했어요",
   "mobile.attachmentSave.failed": "저장하지 못했어요 · 다시 시도",
   "mobile.attachmentSave.photosDenied": "사진 접근이 꺼져 있어요 · 설정 열기",
-  "mobile.connection.reconnectNow": "지금 다시 연결",
   "mobile.linkPreview.title": "링크 미리보기",
   "mobile.linkPreview.compactHint": "왼쪽에 작은 그림, 오른쪽에 주소와 제목을 보여줘요.",
   "mobile.linkPreview.richHint": "큰 그림을 위에, 제목과 설명을 아래에 보여줘요. 큰 그림이 없는 링크는 작게와 같아요.",

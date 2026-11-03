@@ -3,11 +3,11 @@
 // #3738 · #3729 캡처: 에이전트가 올린 승인 카드를 놓치지 않게.
 //
 //   card-*        새 행동 카드 다섯 (channel.create · channel.member.add · agent.rename ·
-//                 hosted.channels.grant · workspace.settings.update). 사이드바 채널
-//                 알약이 「작업 중」이 아니라 「승인 대기」인 것도 같은 사진에 있다.
+//                 hosted.channels.grant · workspace.settings.update), 「자세히」를 연 모습.
+//                 사이드바 채널 알약이 「작업 중」이 아니라 「승인 필요」인 것도 같은 사진에 있다.
 //   inbox-tasks   인박스 「처리할 일」 — 행동 승인 줄이 우리말 제목으로 선다.
 //   expiry-soon   만료 10분 전 경고 줄.
-//   expired       만료 뒤: 컨트롤이 없고 「다시 제안해 달라고 하기」 → 입력창에 초안.
+//   expired       만료 뒤: 컨트롤이 없고 「다시 요청」 → 입력창에 초안.
 //
 // 라이트·다크 × 1440×900. 백엔드는 없다: `/v1/**`는 고정 응답이다.
 //
@@ -257,13 +257,21 @@ async function open(browser, origin, scheme, scene, hash) {
   return { context, page };
 }
 
+/** 묶음 카드의 「자세히」를 연다(#4986). 서버 행·결정 권한은 접힌 안에만 있고, 닫힌 안은 DOM 에도 없다. */
+async function openDetails(page) {
+  const details = page.getByTestId("agent-card").first().getByTestId("request-bundle-details");
+  await details.locator("summary").click();
+  // 본문 목록이 먼저이고, 원본 보기(`agent-payload`) 안에도 목록이 하나 더 있어 첫 것만 기다린다.
+  await details.locator("dl").first().waitFor({ timeout: 5_000 });
+}
+
 async function raise(page) {
   await page.locator('[data-testid="agent-card"]').first().evaluate((el) => el.scrollIntoView({ block: "center", behavior: "auto" }));
   await page.waitForTimeout(400);
 }
 
-// `ONLY=expiry-soon` 처럼 장면 이름(cards · inbox · expiry-soon · expired)을 주면 그것만 돈다. ① ② ④ 는 묶음 카드 문법 이전의
-// test id(`approval-action-role` 등)에 기대고 있어 지금은 붉다(#5174 와 무관한 낡음). ③ 은 #5174 L7 이 쓴다.
+// `ONLY=expiry-soon` 처럼 장면 이름(cards · inbox · expiry-soon · expired, 쉼표로 여럿)을 주면 그것만 돈다. 비우면 넷 다 돈다(검증 줄 기본).
+// 넷 모두 지금 화면에서 초록이다(#5251): ①은 묶음 카드의 「자세히」를 열어 읽고, ③은 #5174 L7 의 한 줄 시간 말을 잰다.
 const ONLY = (process.env.ONLY || "").split(",").filter(Boolean);
 const runs = (name) => ONLY.length === 0 || ONLY.includes(name);
 
@@ -277,22 +285,37 @@ async function scenes(browser, origin, scheme) {
     const { context, page } = await open(browser, origin, scheme, { cards: [spec] }, `/c/${CH}`);
     await page.getByTestId("agent-card").first().waitFor({ timeout: 15_000 });
     await raise(page);
-    const rows = await page.locator('[data-testid="approval-action-row"]').count();
-    check(`${tag} card-${key}: 서버 행 ${CARDS[key].rows.length}개가 그대로 선다`, rows === CARDS[key].rows.length, String(rows));
-    const roleText = (await page.getByTestId("approval-action-role").textContent()) ?? "";
+    // 한 줄로 접힌 카드가 기본이다(#4986). 행·권한 문장은 「자세히」를 열어야 읽고, 사진에도 열린 카드가 찍힌다.
+    await openDetails(page);
+    await raise(page);
+    const shown = await page.locator('[data-testid="approval-action-row"]').evaluateAll((els) =>
+      els.map((el) => ({
+        label: el.querySelector("dt")?.textContent ?? "",
+        // 접근 범위 강조 줄은 서버 값 밑에 덧붙는 한 줄이라 값에서 뺀다.
+        value: [...(el.querySelector("dd")?.childNodes ?? [])]
+          .filter((n) => !(n instanceof Element && n.matches('[data-testid="approval-access-widening"]')))
+          .map((n) => n.textContent ?? "")
+          .join(""),
+      }))
+    );
+    check(`${tag} card-${key}: 서버 행 ${CARDS[key].rows.length}개가 보낸 순서·글 그대로 선다`, JSON.stringify(shown) === JSON.stringify(CARDS[key].rows), JSON.stringify(shown));
+    // 값 칸(`dd`)을 통째로 같음 비교한다. `includes`는 「관리자만 승인할 수 있어요.」가 다른 역할 문장
+    // 「대상 에이전트의 소유자 또는 관리자만 …」의 꼬리라서 틀린 문장도 통과시켰다.
+    const roleText = (await page.getByTestId("approval-action-role").locator("dd").textContent()) ?? "";
     const expectRole = {
       admin: "관리자만 승인할 수 있어요.",
       agent_editor: "대상 에이전트의 소유자 또는 관리자만 승인할 수 있어요.",
       workspace_operator: "워크스페이스 운영자(관리자)만 승인할 수 있어요.",
     }[CARDS[key].role];
-    check(`${tag} card-${key}: 결정 권한 문장`, roleText.includes(expectRole), roleText);
+    check(`${tag} card-${key}: 결정 권한 문장`, roleText === expectRole, roleText);
     if (key === "channel-create") {
       check(`${tag} card-channel-create: 접근 범위 강조 줄`, (await page.getByTestId("approval-access-widening").count()) === 1);
     }
     // 사이드바 채널 알약: 승인 원장이 레일보다 이긴다.
     const pill = page.locator('[data-testid="channel-item"][data-channel-id="' + CH + '"] [data-testid="agent-turn-badge"]');
     await pill.waitFor({ timeout: 10_000 });
-    check(`${tag} card-${key}: 채널 알약이 「승인 대기」`, ((await pill.textContent()) ?? "").includes("승인 대기") && (await pill.getAttribute("data-state")) === "awaiting_approval");
+    // 알약 낱말은 요청 고리 사전의 「승인 필요」다(#4760 이 「승인 대기」를 대신했다). 상태값은 그대로 awaiting_approval.
+    check(`${tag} card-${key}: 채널 알약이 「승인 필요」`, ((await pill.textContent()) ?? "").includes("승인 필요") && (await pill.getAttribute("data-state")) === "awaiting_approval");
     await page.screenshot({ path: shotPath(`card-${key}`) });
     await context.close();
   }
@@ -309,11 +332,11 @@ async function scenes(browser, origin, scheme) {
     check(`${tag} inbox-tasks: 행동 승인 줄이 우리말 제목`, text.includes("채널 만들기 허가를 요청했어요") && text.includes("에이전트 이름 바꾸기 허가를 요청했어요") && !text.includes("workspace_action"), text);
     await rowsLoc.first().click();
     await page.waitForTimeout(500);
+    // 문이 없으면 건너뛰지 않고 붉게 한다: `if (count)`로 감싸면 문이 사라진 날 이 확인이 조용히 초록이 된다.
     const door = page.getByTestId("inbox-open-conversation");
-    if (await door.count()) {
-      const href = (await door.getAttribute("href")) ?? "";
-      check(`${tag} inbox-tasks: 「대화에서 보기」가 그 카드로 간다`, href.includes("?msg=") && href.includes(specs[0].messageId.toLowerCase()), href);
-    }
+    const doorShown = await door.waitFor({ timeout: 5_000 }).then(() => true, () => false);
+    const href = doorShown ? ((await door.getAttribute("href")) ?? "") : "";
+    check(`${tag} inbox-tasks: 「대화에서 보기」가 그 카드로 간다`, doorShown && href.includes("?msg=") && href.includes(specs[0].messageId.toLowerCase()), doorShown ? href : "문이 없어요");
     await page.screenshot({ path: shotPath("inbox-tasks") });
     await context.close();
   }

@@ -5,12 +5,15 @@
 // 이 게이트가 지키는 것(감사 문서 §8의 화면 몫):
 //   A 실시간만 끊김: 1초 안은 침묵, 1초부터 「연결 중」(단추 없음), 10초부터 「끊김」(단추 있음) — 그리고
 //     그 내내 보내기와 승인이 **열려 있다**(결정 ③). 다시 연결을 누르면 붙고 2초 「다시 연결됐어요」.
-//   B 기기 오프라인: 즉시 「오프라인」(단추 없음, 마크 정지), 보내기가 막히고 초안은 남는다.
-//   C 서버에 닿지 못함: 서로 다른 요청 3건이 실패하면 카드(단추 있음), 보내기가 막힌다. 응답 한 건에 풀린다.
+//   B 기기 오프라인: 즉시 「오프라인」(단추 없음, 마크 정지), 보내기가 막히고 초안은 남는다. 입력창 위 줄과 승인 줄이
+//     「오프라인이라 …」를 말한다(#5239).
+//   C 서버에 닿지 못함: 서로 다른 요청 3건이 실패하면 카드(단추 있음), 보내기가 막힌다. 응답 한 건에 풀린다. 입력창 위
+//     줄이 「서버에 닿지 못해 …」를 말하고 오프라인이라고 말하지 않는다(#5239).
 //   D 한 자리에서만: 목록 열이 보이면 카드(띠 없음), ⌘B로 접으면 띠(카드 없음), 폰 폭에서도 띠.
 //
 // 번들은 `clients/web/dist`다. 다른 워크트리가 같은 포트를 쥐고 있으면 가드가 요란하게 죽는다.
 
+import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -28,6 +31,17 @@ import {
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.CONNECTION_GATE_PORT || 5231);
 const origin = `http://127.0.0.1:${port}`;
+
+// 막힘 줄의 문장은 한국어 사전이 정본이다(#5239). 손으로 적으면 이 게이트가 문장이 고쳐지는 것을 막는 쪽이 된다.
+const KO = JSON.parse(
+  readFileSync(resolve(webRoot, "../../packages/momo-core/src/i18n/catalogs/ko-KR/connection.json"), "utf8")
+);
+function koLine(key) {
+  const text = KO[key];
+  if (typeof text !== "string" || text === "") throw new Error(`한국어 사전에 ${key}가 없다`);
+  return text;
+}
+const textOf = async (locator) => ((await locator.textContent()) ?? "").replace(/\s+/g, " ").trim();
 
 const results = [];
 /** 목록 열 접기(⌘B / Ctrl+B)의 수식 키는 브라우저가 알리는 플랫폼을 따른다(Playwright는 실행 호스트 그대로다). */
@@ -143,6 +157,15 @@ async function scenarioDeviceOffline(browser) {
     check(sent === 0, `기기 오프라인인데 글이 ${sent}건 나갔다`);
     check((await page.getByTestId("composer-offline").count()) === 1, "막힌 컴포저가 이유 줄을 말하지 않는다");
     check(
+      (await textOf(page.getByTestId("composer-offline"))) === koLine("connection.composer.offline"),
+      "기기 오프라인인데 입력창 줄이 「오프라인이라 …」가 아니다"
+    );
+    check(
+      (await page.getByTestId("approval-note-offline").count()) === 1 &&
+        (await textOf(page.getByTestId("approval-note-offline"))) === koLine("connection.approval.offline"),
+      "기기 오프라인인데 승인 줄이 「오프라인이라 …」가 아니다"
+    );
+    check(
       (await page.getByTestId("composer-input").inputValue()).includes("오프라인에서는"),
       "막힌 동안 쓰던 글(초안)이 사라졌다"
     );
@@ -151,7 +174,7 @@ async function scenarioDeviceOffline(browser) {
     await until(async () => (await page.getByTestId("composer-offline").count()) === 0, "컴포저가 다시 열림");
     const again = await trySend(page, backend, "다시 연결됐으니 나가요");
     check(again === 1, `돌아온 뒤 글이 ${again}건 나갔다(1건이어야 한다)`);
-    results.push("B 기기 오프라인: 즉시 「오프라인」 · 마크 정지 · 단추 없음 · 보내기 막힘 · 초안 유지 · 돌아오면 열림");
+    results.push("B 기기 오프라인: 즉시 「오프라인」 · 마크 정지 · 단추 없음 · 보내기 막힘 · 입력창·승인 줄 「오프라인이라 …」 · 초안 유지 · 돌아오면 열림");
   } finally {
     await context.close();
   }
@@ -173,6 +196,12 @@ async function scenarioServerUnreachable(browser) {
     const sent = await trySend(page, backend, "서버가 안 닿으면 나가면 안 돼요");
     check(sent === 0, `서버에 닿지 못하는데 글이 ${sent}건 나갔다`);
     check((await page.getByTestId("composer-offline").count()) === 1, "막힌 컴포저가 이유 줄을 말하지 않는다");
+    const unreachableLine = await textOf(page.getByTestId("composer-offline"));
+    check(
+      unreachableLine === koLine("connection.composer.serverUnreachable"),
+      `서버에 닿지 못하는데 입력창 줄이 「서버에 닿지 못해 …」가 아니다 ("${unreachableLine}")`
+    );
+    check(!unreachableLine.includes("오프라인"), "서버에 닿지 못하는데 입력창 줄이 오프라인이라고 말한다");
 
     backend.rest("ok");
     await page.locator(`[data-channel-id="${GENERAL_ID}"]`).first().click(); // 응답 한 건이 풀어 준다
@@ -180,7 +209,7 @@ async function scenarioServerUnreachable(browser) {
     await until(async () => (await page.getByTestId("composer-offline").count()) === 0, "컴포저가 다시 열림");
     const again = await trySend(page, backend, "서버가 돌아왔어요");
     check(again === 1, `돌아온 뒤 글이 ${again}건 나갔다(1건이어야 한다)`);
-    results.push("C 서버에 닿지 못함: 서로 다른 요청 3건 → 카드 · 단추 있음 · 보내기 막힘 · 응답 한 건에 풀림");
+    results.push("C 서버에 닿지 못함: 서로 다른 요청 3건 → 카드 · 단추 있음 · 보내기 막힘 · 입력창 줄 「서버에 닿지 못해 …」 · 응답 한 건에 풀림");
   } finally {
     await context.close();
   }
