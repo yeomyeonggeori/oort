@@ -4,7 +4,7 @@ import {Animated, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {HEAD_MAX_SCALE} from '../../design/atoms';
 import {SHEET_ICONS} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
-import {font, line, radius, space, type Palette} from '../../design/tokens';
+import {font, line, radius, slopTo, space, type Palette} from '../../design/tokens';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // =============================================================================
@@ -14,11 +14,16 @@ import {useFormatMessage} from '../../i18n/useFormatMessage';
 // 기본) — 상태는 이 부품이 아니라 컴포저가 들고(보내면 꺼지고 답글 대상이 바뀌면 꺼진다), 이 부품은 그리고 누르게만 한다.
 //
 // 모양: 입력 줄 바로 위, 답글 머리말과 같은 글자 열(`textLeft`)에 서는 한 줄. 네모 칸 + 글. 눌림 영역은 44pt가 되도록 슬롭으로 채운다(줄 자체는
-// 얇게 둬 알약이 키보드 위에서 더 자라지 않게 한다). 한 접근성 원소(`checkbox` 역할, 켜짐 상태가 따라온다) — 이름은 보이는 글이다.
+// 얇게 둬 알약이 키보드 위에서 더 자라지 않게 한다 — 같은 저장소의 메타 줄 눌림과 같은 산수, M-14). 한 접근성 원소(`checkbox` 역할, 켜짐
+// 상태가 따라온다) — 이름은 보이는 글이다. 눌리는 면은 칸 + 글 전체다(가로는 글의 폭만큼, 따로 늘리지 않는다).
 // =============================================================================
 
 const CHECK_SIZE = 18;
-const SLOP = {top: 8, bottom: 8, left: 8, right: 64} as const;
+/** 줄의 높이는 칸(18)이 정한다(글의 줄 높이는 그보다 낮다). 세로 슬롭은 그 높이를 44 로 채운다. */
+export const ALSO_IN_CHANNEL_ROW_HEIGHT = Math.max(CHECK_SIZE, line.meta);
+const SLOP_Y = slopTo(ALSO_IN_CHANNEL_ROW_HEIGHT);
+const SLOP_X = 8;
+const SLOP = {top: SLOP_Y, bottom: SLOP_Y, left: SLOP_X, right: SLOP_X} as const;
 
 export function AlsoInChannelCheck({
   checked,

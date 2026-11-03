@@ -3005,8 +3005,9 @@ function TimelineInner({
                 ? quoteLookup(item.pending.replyToId)?.attachments?.length ?? 0
                 : 0
             }
+            // 대화 목록의 에코만 어느 스레드의 것인지 말한다. 스레드 화면(`markReplies` 꺼짐)의 행은 전부 그 스레드의 답글이라 줄이 소음이다.
             replyHome={
-              item.pending.rootId === undefined
+              !markReplies || item.pending.rootId === undefined
                 ? undefined
                 : {
                     rootId: item.pending.rootId,

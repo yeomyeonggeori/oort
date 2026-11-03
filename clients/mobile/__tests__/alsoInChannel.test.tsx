@@ -6,6 +6,11 @@ import {act, cleanup, fireEvent, render, renderHook, screen} from '@testing-libr
 import React from 'react';
 
 import '../src/boot/polyfills';
+import {
+  ALSO_IN_CHANNEL_ROW_HEIGHT,
+  AlsoInChannelCheck,
+} from '../src/features/conversation/AlsoInChannelCheck';
+import {TOUCH_TARGET} from '../src/design/tokens';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {useTimeline} from '../src/features/conversation/useTimeline';
 
@@ -179,6 +184,12 @@ describe('보내지 못한 스레드 답글의 에코', () => {
     expect(onDiscardPending).toHaveBeenCalledWith('client-1');
   });
 
+  it('스레드 화면(markReplies=false)의 에코에는 답글 줄이 없다 — 그 화면의 행은 전부 그 스레드의 답글이다', () => {
+    channel([rootWith(SUMMARY_NEW)], {pending: [echo({status: 'sending'})], mainFlow: false, markReplies: false, showRollup: false});
+    expect(screen.getByTestId('pending-row')).toBeTruthy();
+    expect(screen.queryByTestId('reply-marker')).toBeNull();
+  });
+
   it('확정본이 나중에 도착하면 — 본류에서는 걸러져 있어도 — 실패 에코가 정착해 사라진다(이미 간 답글이 「전송 실패」로 남지 않는다)', () => {
     channel([rootWith(SUMMARY_NEW), reply(11, '밀어서 보낸 답글', {seq: 11})], {pending: [echo()]});
     expect(screen.queryByTestId('pending-row')).toBeNull();
@@ -274,5 +285,16 @@ describe('useTimeline — 「대화에도 보내기」 답글의 에코와 다�
     expect(calls[1][5]).toEqual({alsoInChannel: true}); // 같은 요청
     expect(view.result.current.pending).toEqual([]);
     expect(view.result.current.state.messages.filter(m => m.rootId === ROOT_ID)).toHaveLength(1);
+  });
+});
+
+// M-14 — 누를 것은 전부 44pt 다. 체크 줄은 얇게 서고(알약이 자라지 않게) 눌림 영역은 슬롭이 채운다. 그려진 트리에서 값을 읽는다.
+describe('「대화에도 보내기」 체크의 눌림 영역 (M-14)', () => {
+  it('세로는 슬롭과 더해 44pt 이상이고, 슬롭이 줄 높이를 훔치지 않는다', () => {
+    render(<AlsoInChannelCheck checked={false} onChange={jest.fn()} textLeft={0} />);
+    const slop = screen.getByTestId('also-in-channel-check').props.hitSlop as {top: number; bottom: number; left: number; right: number};
+    expect(ALSO_IN_CHANNEL_ROW_HEIGHT + slop.top + slop.bottom).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    // 올림 1pt 넘치는 것은 괜찮지만 그 이상은 이웃(답글 머리말의 ✕·입력 줄)을 훔친다.
+    expect(ALSO_IN_CHANNEL_ROW_HEIGHT + slop.top + slop.bottom).toBeLessThanOrEqual(TOUCH_TARGET + 1);
   });
 });
