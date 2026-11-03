@@ -7,6 +7,7 @@ import {OortLoader} from '../src/design/brand/OortLoader';
 import {useStyles} from '../src/design/theme';
 import {font, space, type Palette} from '../src/design/tokens';
 import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
+import {bandFor} from './connectionStrip';
 
 // =============================================================================
 // 오르트 로더 캡처 표면 (#3961). 실제 컴포넌트를 그 자리 그대로 세운다.
@@ -15,7 +16,7 @@ import {ConversationHeader} from '../src/features/conversation/ConversationHeade
 //   (라이트: LIGHT-OORT-LOADER-<WHICH>)
 //
 //   banner-connecting     대화 머리의 연결 띠 「연결 중…」 (실제 ConversationHeader)
-//   banner-disconnected   같은 띠 「연결이 끊겼습니다」
+//   banner-disconnected   같은 띠 「실시간 연결이 끊겼어요」 + 「지금 다시 연결」 (문장·단추는 코어 연결 상태 모델이 정한다, #5222)
 //   boot                  첫 로딩: 로그인 상태를 되살리는 화면 (실제 Booting, 라벨 있음)
 //   boot-plain            첫 로딩: 앱을 여는 화면 (실제 Booting, 라벨 없음)
 //   sizes                 크기별 한 장: 20(띠) · 24 · 40 · 56(첫 로딩), small 과 display 마크
@@ -50,7 +51,7 @@ export function OortLoaderSurface({which}: {which: string}): React.JSX.Element {
       </View>
     );
   }
-  const status = which === 'banner-disconnected' ? 'disconnected' : 'connecting';
+  const band = bandFor(which === 'banner-disconnected' ? 'realtimeDown' : 'connecting');
   return (
     <View style={styles.screen}>
       <ConversationHeader
@@ -59,7 +60,8 @@ export function OortLoaderSurface({which}: {which: string}): React.JSX.Element {
         kind="public"
         directory={DIRECTORY}
         onBack={() => {}}
-        railStatus={status}
+        band={band}
+        onReconnect={() => {}}
       />
     </View>
   );

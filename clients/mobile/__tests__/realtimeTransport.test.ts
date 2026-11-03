@@ -8,7 +8,7 @@ import {
   TOKEN_RESPONSE_MAX_AGE_MS,
   type RealtimeTransport,
 } from '../src/realtime/centrifugeTransport';
-import {DISPLAY_GRACE_MS} from '../src/realtime/connectionDisplay';
+import {DISPLAY_GRACE_MS, type DisplayEvent} from '../src/realtime/connectionDisplay';
 import {
   formatRealtimeDiagnostics,
   realtimeDiagnostics,
@@ -68,11 +68,13 @@ function emitAppState(status: string): void {
 let clock = 0;
 let transport: RealtimeTransport | null = null;
 let statuses: RealtimeStatus[] = [];
+let socketEvents: DisplayEvent[] = [];
 
 function start(): FakeClient {
   transport = createRealtimeTransport({
     url: 'wss://example.invalid/connection/websocket',
     onStatus: status => statuses.push(status),
+    onSocketEvent: event => socketEvents.push(event),
     getToken: async () => 'token',
     now: () => clock,
   });
@@ -93,6 +95,7 @@ beforeEach(() => {
   appState.handlers = [];
   clock = 0;
   statuses = [];
+  socketEvents = [];
 });
 
 afterEach(() => {
@@ -123,6 +126,42 @@ describe('display grace, through the transport', () => {
     client.__emit('connecting', {code: 1, reason: 'transport closed'});
     advance(DISPLAY_GRACE_MS * 3);
     expect(statuses.slice(-2)).toEqual(['connecting', 'disconnected']);
+  });
+});
+
+describe('the socket events the connection model is fed (#5222)', () => {
+  it('reports what the socket reported - raw statuses and a deliberate reopen - and never the display clock\'s own result', () => {
+    const client = start();
+    // The fake client reports its opening handshake: `connecting`, then `connected`.
+    expect(socketEvents).toEqual([
+      {kind: 'raw', status: 'connecting'},
+      {kind: 'raw', status: 'connected'},
+    ]);
+
+    // The socket drops: the raw status goes out at once, untouched by any display delay.
+    client.state = 'connecting';
+    client.__emit('connecting', {code: 1, reason: 'transport closed'});
+    expect(socketEvents.slice(-1)).toEqual([{kind: 'raw', status: 'connecting'}]);
+
+    // The ten-second display deadline runs out. `statuses` hears the outage; the model must not hear
+    // a result that was produced by a clock it does not own (it counts the gap from its own start).
+    advance(DISPLAY_GRACE_MS);
+    expect(statuses.slice(-1)).toEqual(['disconnected']);
+    expect(socketEvents.slice(2)).toEqual([{kind: 'raw', status: 'connecting'}]);
+    expect(socketEvents.some(event => event.kind === 'grace-expired')).toBe(false);
+
+    // The person asks for a reconnect (the one path a foreground return, a network change and 「지금 다시 연결」 all use).
+    void transport!.reconnect();
+    expect(socketEvents).toContainEqual({kind: 'resume'});
+  });
+
+  it('an ended socket (the server said do not reconnect) is reported as ended, not as a gap', () => {
+    const client = start();
+    client.state = 'disconnected';
+    // A refusal that nothing will reopen (3503 is in the policy's "held" list, `backgroundPolicy.test.ts`); a token ending
+    // (3500) would be retried with a new token instead and is not terminal.
+    client.__emit('disconnected', {code: 3503, reason: 'connection limit'});
+    expect(socketEvents.filter(event => event.kind === 'terminal')).toEqual([{kind: 'terminal'}]);
   });
 });
 

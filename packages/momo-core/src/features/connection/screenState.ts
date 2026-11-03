@@ -45,6 +45,8 @@ export type ConnectionAction =
 // 사건·행동의 생성자. 화면 코드가 `kind` 문자열을 손으로 적지 않게 한다(오타가 컴파일에서 막히고, 웹의 직접
 // 문구 장부에 기술 낱말이 쌓이지 않는다).
 export const socketEvent = (at: number, status: RealtimeStatus): ConnectionEvent => ({ kind: "socket", at, status });
+/** 소켓이 끝났고 아무도 다시 열지 않는다(폰: 서버가 「다시 연결하지 마라」 했다, #4895). 기다릴 틈이 없이 곧바로 끊김이다. */
+export const endedSocketEvent = (at: number): ConnectionEvent => ({ kind: "socket", at, status: "disconnected", ended: true });
 export const resumeEvent = (at: number): ConnectionEvent => ({ kind: "resume", at });
 export const deviceEvent = (at: number, online: boolean | null): ConnectionEvent => ({ kind: "device", at, online });
 export const restEvent = (outcome: RestOutcome): ConnectionEvent => ({ kind: "rest", outcome });
