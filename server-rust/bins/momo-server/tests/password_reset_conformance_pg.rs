@@ -1540,7 +1540,9 @@ async fn audit_details(su: &PgPool, workspace: Uuid, action: &str) -> Vec<Value>
 /// Nothing usable sent is one 400 (not the extractor's 415 / 422); a wrong one is a 403 that
 /// changes nothing — the previous live link is the same row, no issue audit row is written, and
 /// exactly one refusal row records it (never a value the caller sent); a plain member is turned
-/// away by the ladder, not by the password, and leaves no refusal row.
+/// away by the ladder, not by the password, and leaves no refusal row. And it is the operator's
+/// own and nobody else's: a real password that belongs to someone else in the workspace, and an
+/// operator with no stored password, are wrong passwords too.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn the_issue_asks_for_the_operators_own_password_and_a_refusal_changes_nothing() {
@@ -1711,6 +1713,128 @@ async fn the_issue_asks_for_the_operators_own_password_and_a_refusal_changes_not
             .len(),
         1,
         "the ladder's 403 is not a wrong password"
+    );
+
+    // The password that opens the issue is the issuing operator's own: a real password that
+    // belongs to someone else in the workspace (the target's, another admin's, another owner's)
+    // is as wrong as an invented one, whichever operator types it.
+    let admin = seed_human(&su, tenant.workspace, "admin", "admin", ADMIN_PASSWORD).await;
+    let admin_other = seed_human(&su, tenant.workspace, "admin-b", "admin", ADMIN_B_PASSWORD).await;
+    let owner_other = seed_human(&su, tenant.workspace, "owner-b", "owner", OWNER_B_PASSWORD).await;
+    let admin_access = access_of(&http, &base, tenant.workspace, &admin).await;
+    for (who, access, password) in [
+        (
+            "an owner with the target's password",
+            &owner,
+            tenant.member.password.as_str(),
+        ),
+        (
+            "an owner with an admin's password",
+            &owner,
+            admin.password.as_str(),
+        ),
+        (
+            "an owner with another owner's password",
+            &owner,
+            owner_other.password.as_str(),
+        ),
+        (
+            "an admin with an owner's password",
+            &admin_access,
+            tenant.owner.password.as_str(),
+        ),
+        (
+            "an admin with another admin's password",
+            &admin_access,
+            admin_other.password.as_str(),
+        ),
+        (
+            "an admin with the target's password",
+            &admin_access,
+            tenant.member.password.as_str(),
+        ),
+    ] {
+        let response = issue_as(
+            &http,
+            &base,
+            tenant.workspace,
+            access,
+            tenant.member.id,
+            password,
+        )
+        .await;
+        let status = response.status().as_u16();
+        let body: Value = response.json().await.unwrap_or(json!({}));
+        assert_eq!(
+            status, 403,
+            "the issue opens with the issuing operator's own password only, not {who}: {body}"
+        );
+        assert_eq!(
+            body["error"]["code"],
+            json!("current_password_incorrect"),
+            "{who}: {body}"
+        );
+    }
+    assert_eq!(
+        live_reset_hashes(&su, tenant.workspace, tenant.member.id).await,
+        hashes_before,
+        "another person's password minted nothing: the live link is the row it was"
+    );
+
+    // An operator with no usable stored password (none, empty, not a hash) proves nothing:
+    // whatever is typed, the stored value itself included, is a wrong password.
+    for (stored_as, stored) in [
+        ("no password", None::<&str>),
+        ("an empty password", Some("")),
+        ("a value that is not a hash", Some("plain-text-not-a-hash")),
+    ] {
+        sqlx::query("UPDATE human SET password_hash = $2 WHERE member_id = $1")
+            .bind(admin.id)
+            .bind(stored)
+            .execute(&su)
+            .await
+            .expect("take the operator's stored password away");
+        for typed in ["anything-at-all", "plain-text-not-a-hash", ADMIN_PASSWORD] {
+            let response = issue_as(
+                &http,
+                &base,
+                tenant.workspace,
+                &admin_access,
+                tenant.member.id,
+                typed,
+            )
+            .await;
+            let status = response.status().as_u16();
+            let body: Value = response.json().await.unwrap_or(json!({}));
+            assert_eq!(
+                status, 403,
+                "an operator stored with {stored_as} issues with nothing, not with {typed:?}: {body}"
+            );
+            assert_eq!(
+                body["error"]["code"],
+                json!("current_password_incorrect"),
+                "{stored_as} / {typed:?}: {body}"
+            );
+        }
+    }
+    assert_eq!(
+        live_reset_hashes(&su, tenant.workspace, tenant.member.id).await,
+        hashes_before,
+        "an operator with no stored password minted nothing: the live link is the row it was"
+    );
+    assert_eq!(
+        audit_details(&su, tenant.workspace, "member.password_reset.issued")
+            .await
+            .len(),
+        1,
+        "only the one proper issue wrote an issue row"
+    );
+    assert_eq!(
+        audit_details(&su, tenant.workspace, "member.password_reset.refused")
+            .await
+            .len(),
+        2,
+        "one refusal row per operator and window: the owner's and the admin's"
     );
 
     // None of that touched the previous live link: it still opens.
