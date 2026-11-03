@@ -1639,6 +1639,7 @@ export default function ConversationScreen({
     removeUnfurls,
     loadOlder,
     resend,
+    discard,
     reload,
   } = timeline;
   const openThread = useCallback((message: Message) => {
@@ -1661,6 +1662,11 @@ export default function ConversationScreen({
   const onResendPending = useCallback(
     (clientMsgId: string) => void resend(clientMsgId),
     [resend],
+  );
+  // 같은 이유로 고정된 동일성이다(위 머리말). 지운 행을 돌려받는 호출자는 아직 없다(「지우고 고쳐 쓰기」는 후속).
+  const onDiscardPending = useCallback(
+    (clientMsgId: string) => void discard(clientMsgId),
+    [discard],
   );
   const closeThread = useCallback(() => {
     setThread(null);
@@ -2204,6 +2210,7 @@ export default function ConversationScreen({
               onRetry={reload}
               onResend={onResend}
               onResendPending={onResendPending}
+              onDiscardPending={onDiscardPending}
               jumpTarget={jumpTarget ?? undefined}
               onJumpMissed={onJumpMissed}
               onJumpLanded={clearJumpNotice}

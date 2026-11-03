@@ -3094,6 +3094,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             startsGroup={false}
             directory={DIRECTORY}
             onResend={() => {}}
+            onDiscard={() => {}}
           />
         </Frame>
       );
