@@ -28,7 +28,7 @@ import { Tooltip } from "@/design/ui/tooltip";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import { useDocumentForeground } from "@/features/chat/useChannelViewingBeat";
 import { THREAD_REPLIES_LEAD_CLASS } from "./spacing";
-import { shouldFoldBundleLine } from "@momo/core/features/timeline/requestBundle";
+import { presentableRows } from "@momo/core/features/timeline/toolCallSettle";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runStatusForMessage } from "./runStatus";
@@ -276,7 +276,7 @@ function ThreadPanelFrame({
 
   const replyIds = useRef(new Set<string>());
   replyIds.current = new Set(allReplies.map((message) => message.id.toLowerCase()));
-  const replies = allReplies.filter((message) => !shouldFoldBundleLine(message, allReplies));
+  const replies = presentableRows(allReplies);
   // 생각 줄(#4761)의 24px 자리는 **이 스레드에 run이 하나라도 있을 때만** 선다. run이 없는 평범한 스레드에서도 자리가 늘
   // 서면 내 루트 아래에 빈 줄이 생긴다(#4878, owner 10-31 「루트 아래 빈 공간이 크다」). 요청 스레드·에이전트가 답한
   // 스레드는 run이 있으므로 예전과 같다. 스레드에서 처음 에이전트를 부르는 답글은 run이 생기는 순간 줄이 서고 그때

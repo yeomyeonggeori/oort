@@ -8,7 +8,6 @@ env:
   HY_SHORT: "175" # 문턱(시트 높이의 25%) 아래로 60 끈 자리
   HY_FAR: "415" # 문턱 위로 300 끈 자리
   HY_FLICK: "296" # 짧게(100) 튕긴 자리
-  FLICK_MS: "60" # 튕김 시간(ms)
   ROWY: "271" # 첫 사람 줄 y(눌리는 줄 — Pressable)
   ROW_FAR: "571"
   BLANKY: "162" # 「받는 사람」 라벨 y(눌리지 않는 자리)
@@ -113,11 +112,11 @@ env:
 - assertVisible:
     id: "new-dm-list"
 - takeScreenshot: ${SHOT}-4-blank-scrolled
-# ⑤ 빠른 튕김
+# ⑤ 빠른 튕김 — 튕김 시간 60ms 는 기기와 무관한 상수라 틀에 숫자로 둔다(숫자 칸에 자리표시자를 쓰면 `maestro check-syntax` 가 거부한다, #5081).
 - swipe:
     start: "${HX}, ${HY}"
     end: "${HX}, ${HY_FLICK}"
-    duration: ${FLICK_MS}
+    duration: 60
 - extendedWaitUntil:
     visible: "닫힘 3"
     timeout: 8000

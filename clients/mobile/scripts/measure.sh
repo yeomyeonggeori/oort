@@ -71,7 +71,10 @@ if [ "$(metro_root "$METRO_PORT")" = "$PROJECT_ROOT" ]; then
 else
   METRO_PORT="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
   echo "==> metro :$METRO_PORT (started for this run — :8081 is not this checkout)"
-  node node_modules/react-native/cli.js start --port "$METRO_PORT" \
+  # CHROME_PATH=/usr/bin/false keeps a stray tap on the dev build's debugger
+  # toast from launching the real Chrome out of this shell — see lane-phone.sh
+  # (#5083).
+  CHROME_PATH=/usr/bin/false node node_modules/react-native/cli.js start --port "$METRO_PORT" \
     > "$OUT_DIR/metro.log" 2>&1 &
   OWN_METRO_PID=$!
   trap 'kill "$STUB_PID" 2>/dev/null || true; [ -n "$OWN_METRO_PID" ] && kill "$OWN_METRO_PID" 2>/dev/null || true; [ -n "$ORIGINAL_CONTENT_SIZE" ] && xcrun simctl ui booted content_size "$ORIGINAL_CONTENT_SIZE" >/dev/null 2>&1 || true' EXIT

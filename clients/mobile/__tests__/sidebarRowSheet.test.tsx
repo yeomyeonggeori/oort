@@ -14,11 +14,14 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {DM_CLOSE_FAILURE, DM_CLOSE_LABEL} from '@momo/core/features/channels/model';
+import {LONG_PRESS_MS} from '@momo/core/features/timeline/longPressModel';
+import {PRESS_VISUAL_DELAY_MS} from '../src/design/motion';
 import {AGENT_LIST_ACTION} from '../src/screens/SidebarScreen';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {installAppClock} from './fixtures/fakeClock';
+import {flat} from './testkit';
 
 // =============================================================================
 // 사이드바 행 길게 누르기 → 시트 (#4229, Buzz식). 행 → 시트 → 서버 요청까지 **실제 화면**으로 잰다:
@@ -293,6 +296,50 @@ describe('길게 누르기가 시트를 연다', () => {
       'mute-toggle',
       'leave',
     ]);
+  });
+
+  it('채널 행: 스크롤하려는 손에는 물들지 않고(지연 안에 취소되면 눌림 0프레임), 길게 누르기는 닿은 지 250ms 에 시트를 연다 (#4664)', async () => {
+    // `pressDelay.test.tsx` 와 같은 손가락(RN 응답 시스템의 호출을 그대로 한다 — `fireEvent.press`·`longPress` 는 `Pressability` 타이머를 건너뛴다).
+    await mount();
+    const id = 'sidebar-row-channel:ch-general';
+    const host = () => screen.getByTestId(id) as unknown as {props: Record<string, (event: unknown) => unknown>};
+    const fill = () => flat(host().props.style).backgroundColor;
+    const touch = (touching: boolean) => {
+      const point = {identifier: 0, pageX: 100, pageY: 200, locationX: 100, locationY: 200, timestamp: Date.now()};
+      return {persist() {}, currentTarget: {measure() {}}, nativeEvent: {...point, touches: touching ? [point] : [], changedTouches: [point]}};
+    };
+    const down = () =>
+      act(() => {
+        host().props.onTouchStart(touch(true));
+        host().props.onResponderGrant(touch(true));
+      });
+    const wait = (ms: number) =>
+      act(() => {
+        jest.advanceTimersByTime(ms);
+      });
+    const rest = fill();
+
+    // 지연 직전에 스크롤이 터치를 가져간다. 그 뒤 2초가 지나도 행은 칠해진 적이 없다.
+    down();
+    expect(fill()).toBe(rest);
+    wait(PRESS_VISUAL_DELAY_MS - 1);
+    expect(fill()).toBe(rest);
+    act(() => {
+      host().props.onResponderTerminate(touch(true));
+      host().props.onTouchCancel(touch(true));
+    });
+    wait(2000);
+    expect(fill()).toBe(rest);
+    expect(screen.queryByTestId('channel-action-sheet')).toBeNull();
+
+    // 대조: 같은 행을 버티는 손가락에는 지연 뒤에 칠해지고, 시트는 닿은 지 250ms 에 열린다.
+    down();
+    wait(PRESS_VISUAL_DELAY_MS);
+    expect(fill()).not.toBe(rest);
+    wait(LONG_PRESS_MS - PRESS_VISUAL_DELAY_MS - 1);
+    expect(screen.queryByTestId('channel-action-sheet')).toBeNull();
+    wait(1);
+    expect(screen.getByTestId('channel-action-sheet')).toBeTruthy();
   });
 
   it('길게 누르기는 무거운 햅틱 한 번이다 — 대화 머리 ⋮ 의 탭(가벼운 한 번)과 갈린다 (#4319)', async () => {

@@ -7,7 +7,9 @@ import {
   type LoginResponse,
 } from '@momo/core/lib/api';
 import {
+  EMAIL_AUTOFILL_HINT,
   joinFailureCopy,
+  passwordAutofillHint,
   prefillFocus,
   signInFailureCopy,
   type ConnectFailure,
@@ -55,9 +57,11 @@ import {
   useDeviceLinkArrival,
 } from '../deeplink/deviceLink';
 import {useJoinPrefill} from '../deeplink/joinLink';
+import {LanguageChip} from '../i18n/LanguageChip';
 import {deviceLinkDevice} from '../features/deviceLink/deviceIdentity';
 import {focusTextInput} from '../features/deviceLink/focusTextInput';
 import {QrScannerSheet} from '../features/deviceLink/QrScannerSheet';
+import {RememberEmailRow} from '../features/onboarding/RememberEmailRow';
 import {KomettoGuide, OnboardingCanvas} from '../features/onboarding/KomettoGuide';
 import {
   OnboardingButton,
@@ -93,6 +97,7 @@ import {useReduceMotionRef} from '../lib/useReduceMotion';
 import {isOnlineFromNetInfo} from '../query/queryClient';
 import {SESSION_EXPIRED_NOTICE} from '../session/authGate';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {createMobileRememberedLogin} from '../storage/rememberedLogin';
 import {
   normalizeServerUrl,
   SERVER_URL_PLACEHOLDER,
@@ -243,7 +248,12 @@ export default function ConnectScreen({
   // overwrite a stored address but never something being typed, and the two are
   // indistinguishable by looking at the string.
   const [serverTyped, setServerTyped] = useState(false);
-  const [email, setEmail] = useState('');
+  // 「이메일 기억하기」(#4669). 이메일은 서버 주소를 따라 채워진다: 이 서버에 기억한 이메일이 있으면 그것으로 시작하고,
+  // 서버를 바꾸면 사람이 치지 않은 칸만 그 서버의 것으로 바뀐다.
+  const [remembered] = useState(createMobileRememberedLogin);
+  const [rememberOn, setRememberOn] = useState(() => remembered.isEnabled());
+  const emailTyped = useRef(false);
+  const [email, setEmail] = useState(() => remembered.recall(getServerBase() ?? '') ?? '');
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -427,6 +437,13 @@ export default function ConnectScreen({
   const check = serverUrl.trim() === '' ? null : normalizeServerUrl(serverUrl);
   const joining = mode === 'join';
 
+  // 서버가 바뀌면 그 서버에 기억한 이메일로 따라간다. 사람이 이메일 칸에 친 글자가 있으면 그것이 이긴다.
+  const reseedBase = check?.ok === true ? check.base : null;
+  useEffect(() => {
+    if (emailTyped.current || reseedBase === null) return;
+    setEmail(remembered.recall(reseedBase) ?? '');
+  }, [reseedBase, remembered]);
+
   const canSubmit =
     check?.ok === true &&
     email.trim() !== '' &&
@@ -460,6 +477,8 @@ export default function ConnectScreen({
         );
       } else {
         await login(email.trim(), password);
+        // 로그인에 성공한 뒤에만 기억한다(오타는 남기지 않는다). 이 아래는 화면이 내려가는 중에도 한 번 돈다.
+        remembered.remember(checked.base, email);
       }
       // Success is not handled here on purpose — see the header note. The
       // session store has already notified and this tree is on its way out, so
@@ -472,7 +491,7 @@ export default function ConnectScreen({
       // the form follows it instead of leaving the person to find the toggle.
       if (failure.suggestSignIn) setMode('signIn');
     }
-  }, [displayName, email, inviteCode, joining, password, serverUrl]);
+  }, [displayName, email, inviteCode, joining, password, remembered, serverUrl]);
 
   // A failure is also SAID, once, when it arrives (#2678 R1) — the web banner is
   // `role="alert"`. On the phone that is `announceForAccessibility`, as in the
@@ -815,6 +834,7 @@ export default function ConnectScreen({
       <OnboardingPhoneScreen
         testID="connect-welcome"
         mainStyle={styles.welcomeMain}
+        top={<OnboardingTopBar dots={null} right={<LanguageChip />} />}
         decoration={dark ? <Stars /> : null}
         bottom={
           <>
@@ -923,6 +943,7 @@ export default function ConnectScreen({
                 />
               }
               dots={phoneOnboardingDots(route, joining ? 'join' : 'sign-in')}
+              right={<LanguageChip />}
             />
 
             <KomettoGuide
@@ -1039,11 +1060,15 @@ export default function ConnectScreen({
                 keyboardAppearance={keyboardAppearance}
                 style={[styles.input, focusRow === 'email' && styles.inputFocus]}
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={next => {
+                  emailTyped.current = true;
+                  setEmail(next);
+                }}
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
-                textContentType="emailAddress"
+                // 암호 자동 채움의 짝: 이메일 칸은 `username`, 비밀번호 칸은 `password`(가입은 `newPassword`).
+                textContentType={EMAIL_AUTOFILL_HINT}
                 accessibilityLabel="이메일"
                 returnKeyType="next"
                 onSubmitEditing={() => fields.current.password?.focus()}
@@ -1070,6 +1095,7 @@ export default function ConnectScreen({
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
+                textContentType={passwordAutofillHint(mode)}
                 autoCapitalize="none"
                 accessibilityLabel="비밀번호"
                 returnKeyType={joining ? 'next' : 'go'}
@@ -1085,6 +1111,17 @@ export default function ConnectScreen({
                 testID="password-input"
               />
             </Field>
+
+            {joining ? null : (
+              <RememberEmailRow
+                checked={rememberOn}
+                onChange={next => {
+                  // 끄는 순간 저장된 이메일이 전부 지워진다(코어 규칙). 칸에 떠 있는 글자는 로그인 중인 사람의 것이다.
+                  remembered.setEnabled(next);
+                  setRememberOn(next);
+                }}
+              />
+            )}
 
             {joining ? (
               <Field

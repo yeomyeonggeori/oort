@@ -50,6 +50,11 @@ name: 00-login
 # M0 환영 (#2819): QR is the lead; the address form is one tap behind
 # 「주소로 로그인」. Asserting the question pins the new first screen.
 - assertVisible: "데스크탑의 QR을 찍어 연결해요."
+# Debug LogBox strip first (subflows/dismiss-dev-logbox.yaml): 「주소로 로그인」 sits
+# on the same bottom band, and a tap made while the strip is up is swallowed — the
+# tap reports COMPLETED, `server-url-input` never shows, and this flow dies on the
+# 10s wait below (11-01 verification, 3 of 3 cold runs).
+- runFlow: subflows/dismiss-dev-logbox.yaml
 - tapOn:
     id: "welcome-address"
 - extendedWaitUntil:

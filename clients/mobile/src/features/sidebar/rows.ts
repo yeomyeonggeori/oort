@@ -16,6 +16,7 @@ import {
 } from '@momo/core/features/workspace/directory';
 import type {ChannelGroups} from '../workspace/queries';
 import type {DmVerdict} from './dmVerdicts';
+import {rowEmphasis, type RowEmphasis} from './rowEmphasis';
 
 /**
  * 대화 목록을 못 불러왔을 때 목록 자리의 `ErrorState` 가 드는 머리줄.
@@ -116,6 +117,11 @@ export interface SidebarRow {
   muted: boolean;
   unreadCount: number;
   mentionCount: number;
+  /**
+   * 이 줄이 새 글에 대해 하는 말: 이름·아이콘이 회색인가, 굵은가, 오른쪽 칩이 무엇인가(#4953). 문법은 `rowEmphasis.ts`
+   * 한 곳이고 `Row` 는 색 토큰으로 옮기기만 한다.
+   */
+  emphasis: RowEmphasis;
   /** The whole row as one sentence, for VoiceOver. */
   accessibilityLabel: string;
   /**
@@ -155,7 +161,8 @@ export interface SidebarInput {
   query: string;
   /**
    * 서버 읽음 투영이 어디까지 왔나. 접는 판정의 입력이다(오는 중이면 접힌 채, 못 읽었으면 접지
-   * 않는다). 생략하면 `ready` 다.
+   * 않는다). 줄의 회색도 이것을 읽는다: 못 읽었으면 새 글 없는 줄을 회색(= 다 읽었다)으로 칠하지 않는다(`rowEmphasis`).
+   * 생략하면 `ready` 다.
    */
   readPhase?: ReadProjectionPhase;
   /**
@@ -231,7 +238,7 @@ function accessibilityLabelFor(
   row: Omit<SidebarRow, 'accessibilityLabel' | 'searchText'>,
 ): string {
   const parts: string[] = [];
-  if (row.kind === 'channel') parts.push(`채널 ${row.title}`);
+  if (row.kind === 'channel') parts.push(`#${row.title}`);
   else if (row.kind === 'dm') parts.push(`다이렉트 메시지 ${row.title}`);
   else parts.push(`에이전트 ${row.title}`);
   if (row.handle) parts.push(row.handle);
@@ -240,7 +247,7 @@ function accessibilityLabelFor(
   // Counts are spelled out rather than left as a bare number beside a name,
   // which VoiceOver would read as part of the name.
   if (row.mentionCount > 0) parts.push(`멘션 ${row.mentionCount}개`);
-  if (row.unreadCount > 0) parts.push(`안 읽은 메시지 ${row.unreadCount}개`);
+  if (row.unreadCount > 0) parts.push(`새 메시지 ${row.unreadCount}개`);
   return parts.join(', ');
 }
 
@@ -258,6 +265,17 @@ function withLabel(
     .toLowerCase();
   return {...row, accessibilityLabel: accessibilityLabelFor(row), searchText};
 }
+
+/**
+ * 읽음 투영의 국면마다, 새 글 없는 줄을 회색(= 다 읽었다)으로 그려도 되는가(`rowEmphasis` 의 `mayDim`). 실패(`error`)면 안 읽음 수를
+ * 모르므로 회색을 칠하지 않는다. 오는 중은 조용한 쪽(회색)이다 — 새 글이 있는 줄만 나중에 떠오른다. 표로 둔 것은 직접 문구
+ * 장부가 낱말 하나짜리 비교 리터럴도 세기 때문이고, 새 국면이 생기면 이 표가 컴파일에서 빨갛게 된다.
+ */
+const READ_PHASE_MAY_DIM: Readonly<Record<ReadProjectionPhase, boolean>> = {
+  loading: true,
+  error: false,
+  ready: true,
+};
 
 function channelRow(
   channel: Channel,
@@ -279,6 +297,10 @@ function channelRow(
   const open =
     input.openChannelId !== null && uuidEq(channel.id, input.openChannelId);
   const read = open ? null : unreadFor(input.unreadByChannel, channel.id);
+  // D3: never `read.unreadCount`. See the header — that field is blind to a
+  // mark set on another device.
+  const unreadCount = read ? composedUnreadCount(read) : 0;
+  const mentionCount = read?.mentionCount ?? 0;
   return withLabel({
     key: `${kind}:${idKey(channel.id)}`,
     kind,
@@ -290,10 +312,17 @@ function channelRow(
     labelKind: label.kind,
     isPrivate: channel.kind === 'private',
     muted: channel.muted,
-    // D3: never `read.unreadCount`. See the header — that field is blind to a
-    // mark set on another device.
-    unreadCount: read ? composedUnreadCount(read) : 0,
-    mentionCount: read?.mentionCount ?? 0,
+    unreadCount,
+    mentionCount,
+    // 새 글이 있는 줄만 또렷하다(#4953). 문법은 `rowEmphasis.ts`, 여기는 그 입력을 모은다.
+    emphasis: rowEmphasis({
+      unreadCount,
+      mentionCount,
+      muted: channel.muted,
+      tracksRead: true,
+      mayDim: input.readPhase === undefined || READ_PHASE_MAY_DIM[input.readPhase],
+      selected: open,
+    }),
   }, peer ? [`@${peer.handle}`] : []);
 }
 
@@ -314,6 +343,15 @@ function agentRow(member: RosterMember, directory: Directory): SidebarRow {
     muted: false,
     unreadCount: 0,
     mentionCount: 0,
+    // 갈 곳이지 대화가 아니다: 읽음이 없으므로 강조도 흐림도 없다.
+    emphasis: rowEmphasis({
+      unreadCount: 0,
+      mentionCount: 0,
+      muted: false,
+      tracksRead: false,
+      mayDim: true,
+      selected: false,
+    }),
   }, [`@${member.handle}`]);
 }
 

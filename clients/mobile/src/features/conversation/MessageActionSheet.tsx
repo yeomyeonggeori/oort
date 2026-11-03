@@ -34,6 +34,7 @@ import { CONV_ICONS, CONV_ICON_SIZE } from '../../design/icons';
 import { EmojiPicker } from '../emoji/EmojiPicker';
 import { emojiFrequency } from '../emoji/preferences';
 import {useEmojiTriggerFocus} from '../emoji/useEmojiTriggerFocus';
+import {useMakeLanding} from './makeLanding';
 
 /** hh:mm, 24-hour, local. The row's own clock is never used for ordering. */
 export function timeLabel(atMs: number): string {
@@ -175,6 +176,8 @@ function SheetBody({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const afterClose = usePageSheetAction();
+  // 「AI와 만들기」 요청을 보낸 뒤 그 DM 으로 가는 길(#4962) — 대화 화면이 컨텍스트로 준다. 없으면 시트는 「확인」으로 끝난다.
+  const openMadeConversation = useMakeLanding();
   const emojiTrigger = useEmojiTriggerFocus(pickerOpen);
   const [confirmingDelete, setConfirmingDelete] =
     useState(startInDeleteConfirm);
@@ -189,8 +192,9 @@ function SheetBody({
     (message.body ?? '').trim() ||
     (attachmentPreviewLine(message.attachments) ?? '');
 
-  // 두 항목이 나란히 선다. 같은 「답」이지만 가는 곳이 다르다: 「답글 달기」는 대화를 옆으로 치우고
-  // (다른 화면이 열린다), 「인용하기」는 여기 남아서 저 줄을 가리킨다(ADR-0148). 낱말을 이 파일이
+  // 두 항목이 나란히 선다. 같은 「답」이지만 가는 곳이 다르다: 「답글 달기」는 그 메시지의 **스레드**에 단다 —
+  // 같은 화면의 입력칸이 답글 머리말과 함께 열리고(#4869, 오른쪽→왼쪽 밀기와 같은 길 — VoiceOver 가 이 항목으로 간다),
+  // 그 길이 닫힌 행은 스레드 화면이 열린다. 「인용하기」는 본류에 남아서 저 줄을 가리킨다(ADR-0148). 낱말을 이 파일이
   // 고르지 않는 것이 그 구별을 지키는 방법이다. 순서는 「읽어서 가져가는 것」 다음에 「고치는 것」이고
   // 파괴적인 쪽이 아래(따로 선 카드)로 간다. 고정은 복사 다음, 고치기 앞이다 — 채널을 바꾸지 메시지를
   // 바꾸지 않는다. 복사는 **묘비에도 있다**(지워진 메시지는 애초에 이 시트로 오지 않는다).
@@ -247,7 +251,7 @@ function SheetBody({
     return (
       <EmojiPicker
         onClose={() => setPickerOpen(false)}
-        team={{render: ({query}) => <TeamExpressionPicker query={query} onSelect={token => afterClose(() => onToggleReaction(token))} />}}
+        team={{render: ({query}) => <TeamExpressionPicker query={query} onSelect={token => afterClose(() => onToggleReaction(token))} onOpenConversation={openMadeConversation} />}}
         onSelect={glyph => afterClose(() => onToggleReaction(glyph))}
       />
     );

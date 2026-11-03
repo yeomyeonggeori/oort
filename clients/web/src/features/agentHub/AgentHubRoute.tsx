@@ -248,7 +248,7 @@ function AgentListRow({
           {/* 「활성」은 증명이 한 번 성공했다는 뜻이다. 지금 응답하는지는 이 라벨이 따로
               말한다(ADR-0200 D4): 목록에서 두 낱말이 한 행에 나란히 서야 혼동되지 않는다. */}
           <AgentLivenessLabel agentId={agent.id} />
-          <AgentUsageLine agentId={agent.id} />
+          <AgentUsageLine agentId={agent.id} compact />
           {current && (
             <span className="flex items-center gap-1">
               <AgentTurnBadge

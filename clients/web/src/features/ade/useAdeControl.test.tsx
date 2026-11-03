@@ -46,7 +46,11 @@ vi.mock("@/features/agents/agentWorkingSignal", () => ({
   useAgentWorkingSignals: () => hoisted.signals,
   useTickingNow: () => 1_700_000_100_000,
   isStaleSignal: () => false,
+  // 대기 승인이 없으면 신호를 그대로 돌려준다(진짜 함수의 빈 목록 갈래와 같다).
+  withApprovalWaits: (all: ReadonlyMap<string, unknown>) => all,
 }));
+// 승인 대기(#5125, uxui에서 합쳐 옴)는 이 인자와 무관하다 — 진짜 쿼리 경로는 `AdeSummaryLine.approval.test.tsx`가 잰다.
+vi.mock("@/features/inbox/useInbox", () => ({ useApprovalWaits: () => [] }));
 
 const env = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let root: Root | null = null;

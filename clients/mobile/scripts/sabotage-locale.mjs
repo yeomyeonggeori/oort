@@ -41,7 +41,8 @@ const sourceMutants = [
   {name: 'R7 recheck: PluralRules removed', file: 'intl', ext: 'ts', from: 'if (!supportsLocale() || !supportsPluralRules() || !supportsRelativeTimeFormat()) {', to: 'if (!supportsLocale() || !supportsRelativeTimeFormat()) {', suite: LOCALE, test: 'fails closed when the loader leaves a PluralRules'},
   // #4833 review, Medium 2 and 3.
   {name: 'M2 unreadable stored preference blocks boot again', file: 'controller', ext: 'ts', from: "if (entry.code === 'device-read-failed') bootFailed = true;", to: "if (entry.code === 'preference-read-failed' || entry.code === 'device-read-failed') bootFailed = true;", suite: LOCALE, test: 'stored preference'},
-  {name: 'M3 language row label without the beta tag', file: 'LanguageSettings', ext: 'tsx', from: "                    accessibilityLabel={`${localeAutonyms[id]}, ${beta}`}\n", to: '', suite: LOCALE, test: 'switches the whole mounted context'},
+  // #4936 (owner 10-31): the beta tag is gone; the one partial-support line must stay English-UI only.
+  {name: 'M3 partial-support line also on the Korean UI', file: 'LanguageSettings', ext: 'tsx', from: "const englishUi = effectiveLocale === 'en-US';", to: 'const englishUi = true;', suite: LOCALE, test: 'switches the whole mounted context'},
 ];
 
 const NODE_MODULES_CORE_MAPPERS = new Set(['^@momo/core/(.*)$', '^@babel/runtime/(.*)$']);

@@ -5,6 +5,7 @@ import type {
 } from '@momo/core/features/timeline/agentCardModel';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {SecretOnce} from '@momo/core/features/approvals/secretOnce';
+import type {ApprovalWait} from '@momo/core/features/agents/workingSignal';
 
 // =============================================================================
 // 타임라인 승인 카드가 결정 가능한가
@@ -94,6 +95,54 @@ export function approvalGates(
     });
   }
   return gates;
+}
+
+/**
+ * 이 채널에서 **사람을 기다리는** 승인들 (읽는 쪽 덮어쓰기의 재료, #5066).
+ *
+ * 승인 원장이 레일보다 이긴다(#3738): 에이전트가 이 채널에 올린 대기 승인이 살아 있으면 그 에이전트의 다음 수는 사람에게
+ * 있다. 서버는 run 을 승인 대기로 세워도(`park_run_for_approval_in_tx`) 레일 프레임으로는 그것을 알리지 않고(중간 프레임은
+ * 늘 `running`, `status.rs` `progress_agent_status_payload`), 레일은 마지막으로 본 프레임인 「일하는 중」에 머문다. 웹은 이
+ * 덮어쓰기를 컴포저 레일과 사이드바에서 하는데(`useApprovalWaits`) 폰은 하지 않아서, 같은 승인이 한 화면에서 승인 카드는
+ * 「승인 필요」, 자리표시는 「작업 중…」, 레일은 「답하는 중」이라고 말했다. 이 목록을 `applyApprovalWaits` 에 넣는다.
+ *
+ * 「이 채널의 대기 승인」은 `approvalGates` 가 이미 정한 판정이다(채널로 거르고, 대기가 아닌 것은 대기로 읽지 않는다 — 「모르면
+ * 기다림으로 세우지 않는다」). 그 판정을 한 번 더 쓰지 않고 그 결과를 읽는다: 컨트롤이 서는 승인과 줄이 기다린다고 말하는 승인이
+ * 갈라질 길이 없다. 기한이 지난 승인을 거르는 것은 시계가 있는 쪽(`applyApprovalWaits`)의 일이다.
+ */
+export function approvalWaits(
+  approvals: readonly Approval[] | undefined,
+  channelId: string,
+): readonly ApprovalWait[] {
+  const waits: ApprovalWait[] = [];
+  const pending = approvalGates(approvals, channelId);
+  for (const approval of approvals ?? []) {
+    if (!pending.has(approval.id)) continue;
+    waits.push({
+      channelId: approval.channelId,
+      requestedBy: approval.requestedBy,
+      runId: approval.runId,
+      ...(approval.expiresAtMs !== undefined
+        ? {expiresAtMs: approval.expiresAtMs}
+        : {}),
+    });
+  }
+  return waits;
+}
+
+/**
+ * 워크스페이스 **전체**에서 사람을 기다리는 승인들 — 채널이 하나가 아닌 표면(홈 「작업 중」 카드·에이전트 탭)의 재료 (#5085).
+ *
+ * 대화 화면은 한 채널의 대기를 `approvalWaits(approvals, channelId)` 로 읽는다. 이 함수는 새 판정을 두지 않고 **그 함수를 승인이 있는
+ * 채널마다 한 번씩** 불러 이어 붙인다: 대화 화면의 줄과 홈 카드·에이전트 탭이 같은 승인을 두고 「기다린다」·「아니다」가 갈라질 길이
+ * 없다(대기가 아닌 것은 대기로 읽지 않는다는 `approvalGates` 의 규율이 그대로 따라온다).
+ */
+export function workspaceApprovalWaits(
+  approvals: readonly Approval[] | undefined,
+): readonly ApprovalWait[] {
+  const channelIds = new Set<string>();
+  for (const approval of approvals ?? []) channelIds.add(approval.channelId);
+  return [...channelIds].flatMap(channelId => approvalWaits(approvals, channelId));
 }
 
 /**

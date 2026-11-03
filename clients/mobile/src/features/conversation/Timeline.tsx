@@ -32,6 +32,7 @@ import {
 } from 'react-native';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {DockFollowContext} from './dockFollow';
+import {DRAG_REST_FOLLOW_HOLD_MS, joinTouchHandlers, useDragRest} from './dragRest';
 import {useTapDismiss} from './tapDismiss';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
@@ -81,13 +82,16 @@ import {
   WorkingRow,
   type MessageRowActions,
 } from './MessageRow';
+import {SystemLine} from './SystemLine';
+import {isSystemLineMessage, startGroupAfterSystemLine} from './systemLineRows';
 import {resolveQuote} from '@momo/core/features/timeline/quote';
 import {isStreamRunEnded} from '@momo/core/features/timeline/streamStop';
 import {useEndedRuns} from '../agents/endedRuns';
 import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
 import {triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
-import {shouldFoldBundleLine} from '@momo/core/features/timeline/requestBundle';
+import type {RunWithBundleSnapshot} from '@momo/core/features/timeline/requestBundle';
+import {presentableRows} from '@momo/core/features/timeline/toolCallSettle';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
 import {hasRequestBundle, requestLoopIndex} from './requestLoop';
 import {agentCardModel} from '@momo/core/features/timeline/agentCardModel';
@@ -95,6 +99,33 @@ import {RequestThinkingLine} from '../agents/RequestThinkingLine';
 import type {AgentRunProgress} from '@momo/core/lib/api';
 
 const noRefresh = async (): Promise<void> => {};
+
+/**
+ * 당김이 **꺼진 동안** 목록의 `refreshControl` 자리를 채우는 빈 요소 (#4949).
+ *
+ * 목록의 `refreshControl` prop 을 `undefined` 와 요소 사이로 오가게 하면 안 된다. RN 0.86 iOS 의
+ * `ScrollView` 는 컨트롤이 있을 때 `{refreshControl}{contentContainer}` 두 자식을, 없을 때
+ * `{contentContainer}` 하나를 그린다(`ScrollView.js` 1838~1858). 자식의 모양이 바뀌면 React 는 같은
+ * 자리의 첫 자식이 달라졌다고 보고 **내용 컨테이너를 통째로 내렸다 다시 세운다** — 모든 행이 다시
+ * 마운트되고 새 컨테이너는 높이 0 에서 다시 자란다. 목록은 바닥을 따라가는 중이었으므로 그 첫
+ * `onContentSizeChange` 에서 끝으로 활강한다: 앱에 돌아올 때마다 위에서 아래로 빠르게 훑는 현상이다
+ * (owner 10-31, v0.1.41).
+ *
+ * 방아쇠는 `pullEnabled` 가 연결 상태를 따라 뒤집히는 것이다 — 연결 복구 중에는 이력이 남은 방도
+ * 당겨서 다시 맞추게 열어 두기 때문이다(#4783). 앱 복귀는 소켓을 일부러 다시 여니(`resume`) 이력이 긴
+ * 방은 복귀 한 번에 두 번(복구 시작·끝) 뒤집혔다. 이력을 다 읽은 짧은 방은 늘 켜져 있어 겪지 않았고,
+ * 시험의 `ScrollView` 모형은 `[refreshControl, <View>]` 두 자리를 늘 고정해 그려서 이 차이를 보여 주지
+ * 못했다(`timelinePullStable.test.tsx` 가 실제 구조로 잰다).
+ *
+ * 그래서 꺼진 동안에는 **아무것도 그리지 않는 요소**를 같은 자리에 둔다. 자식은 늘 두 자리이고 바뀌는
+ * 것은 첫 자리의 내용뿐이라 내용 컨테이너는 그대로다. 네이티브에는 아무 뷰도 서지 않으므로 꺼진
+ * 목록은 예전처럼 당김 없이 그냥 튕긴다. iOS 전용이다(안드로이드는 컨트롤이 스크롤뷰를 감싸는
+ * 구조라 이 방법이 맞지 않는다 — 이 앱에는 안드로이드 대상이 없다).
+ */
+function NoPullSlot(): null {
+  return null;
+}
+const NO_PULL_SLOT = <NoPullSlot />;
 const NO_RUNS: readonly AgentRunProgress[] = [];
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
@@ -1274,10 +1305,14 @@ function TimelineInner({
     [metricsRef],
   );
 
+  // 행으로 그릴 메시지는 코어 한 함수가 정한다(#4995): 끝난 도구 호출을 같은 `call_id` 의 결과로 닫고
+  // (서버는 호출 행을 다시 고치지 않아서 카드가 「생각 중」으로 계속 돈다) 종결 카드가 설명하는 옛 줄을
+  // 접는다. 두 판정은 **접기 전** 목록을 함께 봐야 하므로 여기서 짝짓기를 다시 구현하지 않는다.
+  // 웹의 본류·스레드와 같은 함수다. 요청 스레드도 이 목록을 그대로 쓴다(`ThreadPanel` → `Timeline`).
   const built = useMemo(
     () =>
-      buildTimelineItems(messages.filter(message => {
-        if (shouldFoldBundleLine(message, messages)) return false;
+      // 중단 시스템 줄(`SystemLine`) 바로 다음 행은 작성자가 같아도 새 묶음이다(#5067) — 이유는 `startGroupAfterSystemLine`.
+      startGroupAfterSystemLine(buildTimelineItems(presentableRows(messages).filter(message => {
         if (showRollup && channelKind !== 'dm' && message.rootId !== undefined &&
           messages.some(root => root.id.toLowerCase() === message.rootId?.toLowerCase())) {
           const card = agentCardModel(message);
@@ -1289,7 +1324,7 @@ function TimelineInner({
         unreadCount,
         recoveryMarkers,
         pending,
-      }),
+      })),
     [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, showRollup, channelKind],
   );
   // 확정본이 등장 도중에 와도 오름이 도는 메아리를 그 자리에 둔다(#4455, design-review r1 H1). 폴드가 메아리를 걷고
@@ -2748,10 +2783,18 @@ function TimelineInner({
   // 부른다: JS 가 아는 길이(`VirtualizedList.scrollToEnd` 는 어림이다)가 아니라 **네이티브 `scrollToEnd`** — 그 순간의 창과 콘텐츠 길이로 끝을 셈한다. 바닥을 따라가는 중이 아니면(과거를 읽는 중,
   // 점프가 가는 중 — `beginJumpTravel` 이 따라가기를 붙든다) 아무것도 안 한다.
   const dockFollow = useContext(DockFollowContext);
+  // 끌기로 입력창이 쉬기 시작한 시각 + `DRAG_REST_FOLLOW_HOLD_MS` (#4665). `restFromDrag` 가 건다. 시한이 있는 막이라 따로 풀 곳이 없다.
+  const dragRestHoldUntilRef = useRef(0);
+  // 읽는 사람이 목록을 쥐고 있다 — 손가락이 목록을 끌고 있거나, 끌기로 입력창이 쉬기 시작한 지 얼마 안 됐다. 이 동안은 입력창이 줄어드는 프레임에도 바닥으로 끌어가지 않는다(아래 두 자리).
+  const readerHoldsList = useCallback(() => fingerOnListRef.current || Date.now() < dragRestHoldUntilRef.current, []);
   useEffect(() => {
     if (dockFollow === null) return undefined;
     return dockFollow.register(() => {
       if (!followingRef.current) return;
+      // 읽는 사람이 목록을 쥔 동안은 바닥으로 끌어가지 않는다(#4665). 아래로 끌다가 입력창이 쉬면(`dragRest.ts`) 목록은 아직 바닥에서 120pt 안이라 「따라가는 중」으로 남아 있는데,
+      // 그때 네이티브 `scrollToEnd` 를 부르면 손가락 밑에서 목록이 끝으로 튀고 입력창이 줄어드는 프레임마다 다시 튄다. 손가락이 먼저다(`followGlide` 와 같은 원칙). 손을 뗀 직후의
+      // 접힘 꼬리(몇 프레임)도 같다 — 그 몇 프레임이 방금 위로 읽으러 간 목록을 끝으로 되돌린다(`DRAG_REST_FOLLOW_HOLD_MS`).
+      if (readerHoldsList()) return;
       // `getScrollResponder()` 는 ScrollView 인스턴스를 준다(타입은 `Element` 라 좁혀서 읽는다). 그 `scrollToEnd` 는 네이티브 명령이다.
       const scroller = listRef.current?.getScrollResponder() as unknown as
         | {scrollToEnd?: (options?: {animated?: boolean}) => void}
@@ -2759,15 +2802,34 @@ function TimelineInner({
         | undefined;
       scroller?.scrollToEnd?.({animated: false});
     });
-  }, [dockFollow, listRef]);
+  }, [dockFollow, listRef, readerHoldsList]);
 
-  // 목록의 탭 = 자판을 내리고 입력창을 쉬게 한다 (#4614, `tapDismiss.ts`). 터치를 **관찰만** 한다 — 응답자를 잡지 않으므로 링크·칩·길게 누르기·행 탭의 스레드 열기는 그대로이고, 어느 요소의
-  // 탭이든(자기 동작이 있어도) 손을 뗀 뒤에 이 처리기가 나머지를 거둔다. 자판은 여기서 직접 내리고(`Keyboard.dismiss` — 입력창이 안 쥔 자판은 없다), 글이 남은 입력창을 접는 것은 다리(`dockFollow.rest`)가 맡는다.
-  const onListTap = useCallback(() => {
+  // 목록이 입력창에게 쉬라고 한다. 자판은 여기서 직접 내리고(`Keyboard.dismiss` — 입력창이 안 쥔 자판은 없다), 글이 남은 입력창을 접는 것은 다리(`dockFollow.rest`)가 맡는다.
+  // 탭(#4614)과 끌기(#4665)가 **같은 함수**를 부른다 — 「쉬기」가 둘로 갈라지지 않는다.
+  const restDock = useCallback(() => {
     Keyboard.dismiss();
     dockFollow?.rest();
   }, [dockFollow]);
-  const tapTouch = useTapDismiss(onListTap);
+  // 목록의 탭 = 쉬기 (#4614, `tapDismiss.ts`). 터치를 **관찰만** 한다 — 응답자를 잡지 않으므로 링크·칩·길게 누르기·행 탭의 스레드 열기는 그대로이고, 어느 요소의
+  // 탭이든(자기 동작이 있어도) 손을 뗀 뒤에 이 처리기가 나머지를 거둔다.
+  const tapTouch = useTapDismiss(restDock);
+  // 끌기로 쉴 때만 목록이 잠시 바닥을 따라가지 않는다 — 손을 뗀 뒤 접힘 스프링의 꼬리가 방금 위로 읽으러 간 목록을 끝으로 되돌리지 않게(`DRAG_REST_FOLLOW_HOLD_MS`). 탭은 손가락이 없어서 이 막이 없다.
+  const restFromDrag = useCallback(() => {
+    dragRestHoldUntilRef.current = Date.now() + DRAG_REST_FOLLOW_HOLD_MS;
+    restDock();
+  }, [restDock]);
+  // 목록을 손가락으로 아래로 끌어 48pt 누적 = 같은 쉬기 (#4665, `dragRest.ts`). 같은 터치 이벤트를 읽는 탭 판정과 한 벌로 묶고, 목록이 손가락에 끌리는 동안(`onScrollBeginDrag` ~
+  // `onScrollEndDrag`)만 센다 — 손을 뗀 뒤의 관성·프로그램 이동은 손가락이 아니다. 그래서 아래 `keyboardDismissMode` 는 `none` 이다(`on-drag` 는 문턱보다 먼저 첫 1px 에 자판을 걷는다).
+  const dragRest = useDragRest(restFromDrag);
+  const listTouch = useMemo(() => joinTouchHandlers(tapTouch, dragRest), [tapTouch, dragRest]);
+  const onListDragBegin = useCallback(() => {
+    onScrollBeginDrag();
+    dragRest.onScrollBeginDrag();
+  }, [onScrollBeginDrag, dragRest]);
+  const onListDragEnd = useCallback(() => {
+    onScrollEndDrag();
+    dragRest.onScrollEndDrag();
+  }, [onScrollEndDrag, dragRest]);
 
   // The viewport changed size rather than the content growing. A reader who was
   // at the bottom stays at the bottom; one who was reading history is left
@@ -2783,9 +2845,10 @@ function TimelineInner({
     (event: LayoutChangeEvent) => {
       noteGeometry({viewportHeight: event.nativeEvent.layout.height});
       resolvePendingVerdict();
-      if (followingRef.current) listRef.current?.scrollToEnd({animated: false});
+      // 읽는 사람이 목록을 쥔 동안은 끌어가지 않는다(#4665) — 아래로 끌다가 입력창이 쉬어 창이 늘어나는 프레임에 `scrollToEnd` 가 손가락 밑 목록을 끝으로 되돌리면 안 된다(위 도크 처리기와 같은 이유).
+      if (followingRef.current && !readerHoldsList()) listRef.current?.scrollToEnd({animated: false});
     },
-    [listRef, noteGeometry, resolvePendingVerdict],
+    [listRef, noteGeometry, readerHoldsList, resolvePendingVerdict],
   );
 
   // ---- 두 필이 데려가는 곳 (#1892) ------------------------------------------
@@ -2887,7 +2950,8 @@ function TimelineInner({
       const run = runs[0];
       if (run) {
         const bundle = requests.bundleFor(run);
-        const progress = bundle === undefined ? run : {...run, bundle};
+        const progress: RunWithBundleSnapshot =
+          bundle === undefined ? run : {...run, bundleSnapshot: bundle};
         byMessage.set(messageId, progress);
       }
     }
@@ -2927,6 +2991,39 @@ function TimelineInner({
           />
         );
         return requestThoughts && channelKind === 'dm' ? <View>{pendingRow}<RequestThinkingLine directory={directory} nowMs={nowMs} /></View> : pendingRow;
+      }
+      // 앵커 행이면 측정 상자로 감싼다. 시스템 줄도 앵커가 될 수 있어서(첫 안 읽음·점프 대상) 두 길이 같은 래퍼를 쓴다.
+      const anchored = (seq: number, row: React.JSX.Element): React.JSX.Element => {
+        if (anchorSeq !== undefined && seq === anchorSeq) {
+          return (
+            <View
+              // The cleanup form, and it is the difference between a seam and a
+              // coin toss. Moving `anchorSeq` to another row mounts a new wrapper
+              // and unmounts the old one, and React does not promise which order
+              // those land in; the plain `ref={node => ref.current = node}` form
+              // is therefore free to attach the new node and THEN null it out on
+              // the old one's behalf. That is a measurement that reports 「미측정」
+              // for a row which is on screen — the exact reading the last batch
+              // was left holding. Returning a cleanup makes the detach name the
+              // node it is detaching, so it can only clear its own.
+              ref={node => {
+                if (!anchorRef) return undefined;
+                anchorRef.current = node;
+                return () => {
+                  if (anchorRef.current === node) anchorRef.current = null;
+                };
+              }}
+              collapsable={false}>
+              {row}
+            </View>
+          );
+        }
+        return row;
+      };
+      // 서버가 방에 알리는 중단 줄(#5067)은 누가 한 말이 아니다 — 말풍선이 아니라 가운데의 시스템 줄이고, 요청 칸·생각 줄·행 동작이 하나도 붙지 않는다.
+      // (작성자가 멈춘 사람이라 아래 「내 요청」 예약에 걸리면 이 줄 밑에 생각 줄이 설 수 있어서, 예약 앞에서 가른다.)
+      if (isSystemLineMessage(item.message)) {
+        return anchored(item.message.seq, <SystemLine text={item.message.body ?? ''} />);
       }
       const requestKey = item.message.id.toLowerCase();
       const requestRuns = runsByMessage.get(requestKey) ?? NO_RUNS;
@@ -2995,31 +3092,7 @@ function TimelineInner({
           standby={isStandbyItem(item) ? true : undefined}
         />
       );
-      if (anchorSeq !== undefined && item.message.seq === anchorSeq) {
-        return (
-          <View
-            // The cleanup form, and it is the difference between a seam and a
-            // coin toss. Moving `anchorSeq` to another row mounts a new wrapper
-            // and unmounts the old one, and React does not promise which order
-            // those land in; the plain `ref={node => ref.current = node}` form
-            // is therefore free to attach the new node and THEN null it out on
-            // the old one's behalf. That is a measurement that reports 「미측정」
-            // for a row which is on screen — the exact reading the last batch
-            // was left holding. Returning a cleanup makes the detach name the
-            // node it is detaching, so it can only clear its own.
-            ref={node => {
-              if (!anchorRef) return undefined;
-              anchorRef.current = node;
-              return () => {
-                if (anchorRef.current === node) anchorRef.current = null;
-              };
-            }}
-            collapsable={false}>
-            {row}
-          </View>
-        );
-      }
-      return row;
+      return anchored(item.message.seq, row);
     },
     [
       directory,
@@ -3497,15 +3570,18 @@ function TimelineInner({
       // 먼 「최신으로」가 가는 동안만 한 판·창을 넓힌다(#4689 원인 B, `FAR_LATEST_BATCH`). `undefined` 는 목록의 기본값(10·21)이다.
       maxToRenderPerBatch={widenTail ? FAR_LATEST_BATCH : undefined}
       windowSize={widenTail ? FAR_LATEST_WINDOW : undefined}
-      refreshControl={pullEnabled ? refreshControl : undefined}
+      // 당김이 꺼져도 자리는 비우지 않는다 — `NoPullSlot` 머리말. `onRefresh` 가 없는 표면(스레드 패널)은 처음부터 없다.
+      refreshControl={
+        onRefresh === undefined ? undefined : pullEnabled ? refreshControl : NO_PULL_SLOT
+      }
       onScroll={pullScroll.onScroll}
-      // 탭 판정(#4614): 읽기만 하는 터치 처리기 넷. 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
-      onTouchStart={tapTouch.onTouchStart}
-      onTouchMove={tapTouch.onTouchMove}
-      onTouchEnd={tapTouch.onTouchEnd}
-      onTouchCancel={tapTouch.onTouchCancel}
-      onScrollBeginDrag={onScrollBeginDrag}
-      onScrollEndDrag={onScrollEndDrag}
+      // 탭 판정(#4614)과 끌기 판정(#4665): 읽기만 하는 터치 처리기 넷(둘을 한 벌로 묶었다). 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
+      onTouchStart={listTouch.onTouchStart}
+      onTouchMove={listTouch.onTouchMove}
+      onTouchEnd={listTouch.onTouchEnd}
+      onTouchCancel={listTouch.onTouchCancel}
+      onScrollBeginDrag={onListDragBegin}
+      onScrollEndDrag={onListDragEnd}
       // 떠 있는 날짜 알약만 관성을 본다(DS2-4 B-1) — 따라가기 판정은 여기 없다.
       onMomentumScrollBegin={jumpPills ? onMomentumScrollBegin : undefined}
       onMomentumScrollEnd={jumpPills ? onMomentumScrollEnd : undefined}
@@ -3536,7 +3612,11 @@ function TimelineInner({
       // `on-drag` asks nothing of where the drag ends: moving the conversation at
       // all puts the keyboard away, which is the gesture people already make when
       // they want to read instead of type.
-      keyboardDismissMode="on-drag"
+      //
+      // **#4665 (owner 10-27): 첫 1px 에 걷지 않고 손가락이 아래로 48pt 누적될 때 걷는다.** `on-drag` 는 읽으려고 살짝 밀어도 자판을 걷었고, 그때 글이 남은 입력창은 펼친 채라(#4456)
+      // 「스크롤하면 입력창이 접힌다」가 안 됐다. 이제 끌기도 탭과 같은 쉬기(`restDock` — 자판 내림 + 글이 남은 입력창은 한 줄 알약)로 가고 **언제**는 `dragRest.ts` 가 정한다. 모드를
+      // `none` 으로 두는 이유: `on-drag` 로 두면 UIKit 이 그 문턱보다 먼저 첫 1px 에 자판을 걷는다. 위로 끌기는 더는 자판을 걷지 않는다(누적 0 — Buzz 와 같다).
+      keyboardDismissMode="none"
       // The other half of the rule is `handled`, and it is deliberately NOT
       // `never`. Both dismiss on a tap; they disagree about what else that tap
       // does, and `never` makes the scroll view swallow it — so while the

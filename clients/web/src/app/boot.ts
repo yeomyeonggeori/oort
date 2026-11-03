@@ -68,6 +68,40 @@ export const BOOT_RESTORE_BUDGET_MS = budget(
 );
 
 /**
+ * How long the first paint may wait for the Korean dictionary chunk before the
+ * app opens in the bundled English one (#4915).
+ *
+ * `i18n/boot.ts` is the first of the two gates in main.tsx's `Promise.all`, and
+ * unlike the session gate it had no deadline: a chunk request that never
+ * answered kept the root empty for as long as the browser kept the socket.
+ *
+ * Why 2 500 ms (the first reason is an estimate, the last one is a hard line):
+ *   - The chunk is 16.8 kB, 4.0 kB gzip (measured in a production build,
+ *     2026-11-01), and it is requested only after the 1 MB entry chunk has
+ *     arrived, so the connection is already warm. On a slow-3G-class link
+ *     (assume 400 kbps and 400 ms RTT) that is one round trip plus 80 ms of
+ *     transfer, about 0.5 s, and about 1.3 s if a fresh TLS connection is
+ *     needed. Past 2.5 s the request is stuck, not slow.
+ *   - It is the house number for "one network call is holding the boot"
+ *     (BOOT_RESTORE_BUDGET_MS), and web.dev's "good" bound for the largest
+ *     contentful paint.
+ *   - The chunk is a lazy one, so the service worker does not precache it
+ *     (momoServiceWorker in vite.config.ts): a first offline start really does
+ *     depend on this request.
+ *   - It must stay far below REQUEST_TIMEOUT_MS (15 000): at that size the
+ *     request deadline fires first and the wait is back.
+ *
+ * Nothing is lost by opening early. English is bundled, and the store applies a
+ * chunk that lands later (i18n/localeStore.ts), the same rule as every budget in
+ * this file: results appear when they arrive; they do not hold the screen while
+ * they do not exist yet.
+ */
+export const LOCALE_CATALOG_BUDGET_MS = budget(
+  env.VITE_MOMO_LOCALE_BUDGET_MS,
+  2_500
+);
+
+/**
  * Resolve when `work` settles or when `budgetMs` elapses, whichever is first.
  *
  * Never rejects and never cancels: `work` keeps running, and a rejection it
