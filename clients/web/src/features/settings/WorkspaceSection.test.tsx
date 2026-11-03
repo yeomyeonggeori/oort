@@ -11,6 +11,11 @@ import { DEFAULT_ROLE_LABELS } from "@momo/core/features/directory/model";
 import { roleLabelsSaveMessage } from "@momo/core/features/settings/model";
 import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { ConnectionContext } from "@/features/common/connectionContext";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { connectionScene, type ConnectionScene } from "@/testing/connectionViews";
+import { koreanLocale } from "@/testing/koLocale";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
 import type { AppLocale } from "@/i18n/localeStore";
@@ -200,6 +205,8 @@ function mountSection(options: {
   loading?: boolean;
   /** 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
   korean?: boolean;
+  /** 막은 원인(#5260): 코어 모델이 돌린 모습 위에 한국어 사전으로 그린다. `offline`은 모델의 게이트에서 읽는다. */
+  scene?: ConnectionScene;
 }): HTMLElement {
   const client = new QueryClient({
     defaultOptions: {
@@ -232,7 +239,18 @@ function mountSection(options: {
     createElement(
       SessionProvider,
       { value: sessionValue() },
-      createElement(WorkspaceSection, { workspaceId: WS, offline: options.offline ?? false })
+      options.scene === undefined
+        ? createElement(WorkspaceSection, { workspaceId: WS, offline: options.offline ?? false })
+        : createElement(LocaleProvider, {
+            locale: ko,
+            children: createElement(ConnectionContext.Provider, {
+              value: connectionScene(options.scene),
+              children: createElement(WorkspaceSection, {
+                workspaceId: WS,
+                offline: !connectionScene(options.scene).view.canSend,
+              }),
+            }),
+          })
     )
   );
   act(() => mountedRoot?.render(options.korean ? createElement(LocaleProvider, { locale: ko, children: tree }) : tree));
@@ -701,7 +719,7 @@ describe("링크 확인(서버) 스위치 (S5b)", () => {
     const toggle = unfurlSwitch(host);
     expect(toggle?.disabled).toBe(true);
     expect(toggle?.getAttribute("aria-describedby")).toContain("workspace-unfurls-offline");
-    expect(host.textContent).toContain("연결이 끊겨 지금은 이 설정을 바꿀 수 없어요.");
+    expect(host.textContent).toContain("You're offline, so you can't change this setting right now.");
     act(() => toggle?.click());
     expect(updateWorkspaceUnfurlSettings).not.toHaveBeenCalled();
   });
@@ -719,11 +737,35 @@ describe("워크스페이스 페이지 상태 (S5b)", () => {
 
   it("오프라인이면 표시명·웰컴 저장 이유가 서고 입력이 읽기 전용이다", () => {
     const host = mountSection({ role: "owner", offline: true });
-    expect(host.textContent).toContain("연결이 끊겨 지금은 표시 이름을 저장할 수 없어요.");
-    expect(host.textContent).toContain("연결이 끊겨 지금은 웰컴 설정을 저장할 수 없어요.");
-    expect(host.textContent).toContain("연결이 끊겨 지금은 워크스페이스를 만들 수 없어요.");
+    expect(host.textContent).toContain("You're offline, so you can't save the display name right now.");
+    expect(host.textContent).toContain("You're offline, so you can't save the welcome settings right now.");
+    expect(host.textContent).toContain("You're offline, so you can't create a workspace right now.");
     const owner = host.querySelector('[data-testid="role-label-owner"]') as HTMLInputElement;
     expect(owner.readOnly).toBe(true);
+  });
+
+  // #5260: 잠금 사유가 막은 원인을 말한다. 문장은 손으로 적는다(사전의 값을 되풀이하면 코드와 시험이 함께 틀려도 초록이다).
+  it("기기 오프라인이면 저장 이유가 「오프라인이라 …」이다", () => {
+    const host = mountSection({ role: "owner", scene: "deviceOffline" });
+    expect(host.textContent).toContain("오프라인이라 지금은 표시 이름을 저장할 수 없어요.");
+    expect(host.textContent).toContain("오프라인이라 지금은 웰컴 설정을 저장할 수 없어요.");
+    expect(host.textContent).toContain("오프라인이라 지금은 워크스페이스를 만들 수 없어요.");
+  });
+
+  it("서버에 닿지 못하면 저장 이유가 「서버에 닿지 못해 …」이고 오프라인이라 하지 않는다", () => {
+    const host = mountSection({ role: "owner", scene: "serverUnreachable" });
+    expect(host.textContent).toContain("서버에 닿지 못해 지금은 표시 이름을 저장할 수 없어요.");
+    expect(host.textContent).toContain("서버에 닿지 못해 지금은 웰컴 설정을 저장할 수 없어요.");
+    expect(host.textContent).toContain("서버에 닿지 못해 지금은 워크스페이스를 만들 수 없어요.");
+    expect(host.textContent).not.toContain("오프라인");
+    expect((host.querySelector('[data-testid="role-label-owner"]') as HTMLInputElement).readOnly).toBe(true);
+  });
+
+  it.each(["unknown", "realtimeDown"] as const)("%s이면 모델이 막지 않는다: 이유 문장 없이 입력이 열려 있다", (scene) => {
+    const host = mountSection({ role: "owner", scene });
+    expect(host.textContent).not.toContain("저장할 수 없어요");
+    expect(host.textContent).not.toContain("만들 수 없어요");
+    expect((host.querySelector('[data-testid="role-label-owner"]') as HTMLInputElement).readOnly).toBe(false);
   });
 
   it("확정된 비운영자에게는 아바타 변경 단추가 없다", () => {

@@ -264,7 +264,7 @@ describe("팀 AI 다음 단계 카드", () => {
     const view = await mount(true);
     const enable = q(view, "team-ai-next-step-enable");
     expect(enable?.getAttribute("aria-disabled")).toBe("true");
-    expect(view.textContent).toContain("연결이 끊겨 지금은 켤 수 없어요.");
+    expect(view.textContent).toContain("You're offline, so you can't turn this on right now.");
     await click(enable);
     expect(setSwitch).not.toHaveBeenCalled();
   });

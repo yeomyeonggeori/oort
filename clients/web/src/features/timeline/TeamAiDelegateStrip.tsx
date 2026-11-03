@@ -14,6 +14,7 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 도우미가 넘기는 줄 아래의 「○○에게 맡기기」 (ADR-0201 D5, #3836).
@@ -149,7 +150,7 @@ export function TeamAiDelegateStrip({
       )}
       {showButtons && offline && state.kind !== "sent" && (
         <p className="text-meta text-ink-muted">
-          연결이 끊겨 지금은 맡길 수 없어요.
+          <BlockedReason frame="delegate" />
         </p>
       )}
       {showButtons && state.kind === "error" && (

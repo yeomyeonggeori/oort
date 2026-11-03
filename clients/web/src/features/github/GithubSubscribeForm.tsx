@@ -21,6 +21,7 @@ import {
 } from "@momo/core/features/github/model";
 import { Field, SelectField } from "@/features/settings/SettingsFields";
 import { githubOverviewPrefix } from "./githubQueries";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 채널에 저장소를 구독하는 폼 (ADR-0205 D5·D6, 수용 11, #3955).
@@ -356,7 +357,7 @@ export function GithubSubscribeForm({
 
       {step === "form" && (
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {offline && <p className="text-meta text-ink-muted">연결이 끊겨 있어서 지금은 구독할 수 없어요.</p>}
+          {offline && <p className="text-meta text-ink-muted"><BlockedReason frame="subscribe" /></p>}
           <Button
             type="submit"
             size="sm"

@@ -3,6 +3,7 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/design/ui/dialog";
 import { PERSONAL_KEYS_COPY as COPY } from "@momo/core/features/ai/personalKeys";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 const OFFLINE_ID = "ai-personal-revoke-offline";
 
@@ -53,7 +54,7 @@ export function PersonalKeyRevokeDialog({
           )}
           {offline && (
             <p id={OFFLINE_ID} className="break-keep text-meta text-ink-muted">
-              {copy.offline}
+              <BlockedReason frame="revokeKey" />
             </p>
           )}
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pt-1">

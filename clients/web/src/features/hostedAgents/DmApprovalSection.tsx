@@ -27,7 +27,6 @@ import {
   DM_APPROVAL_EMPTY_HEADLINE,
   DM_APPROVAL_HEADLINE,
   DM_APPROVAL_LOADING_LABEL,
-  DM_APPROVAL_OFFLINE_NOTE,
   DM_APPROVAL_OPEN_CONFIRM,
   DM_APPROVAL_OPEN_LABEL,
   DM_APPROVAL_OWNER_ONLY_LEAD,
@@ -37,6 +36,7 @@ import {
 import { LoadFailureNote } from "@/features/common/LoadFailureBox";
 import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 설정 › 에이전트 자격 › 1:1 대화 (ADR-0162 증보 2 / #2915).
@@ -169,7 +169,7 @@ export function DmApprovalSection({
             id={OFFLINE_NOTE_ID}
             className="break-keep text-meta text-ink-muted"
           >
-            {DM_APPROVAL_OFFLINE_NOTE}
+            <BlockedReason frame="changeHere" />
           </p>
         )}
         <p role="status" aria-live="polite" className="sr-only">

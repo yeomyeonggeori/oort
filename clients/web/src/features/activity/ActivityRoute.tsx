@@ -24,6 +24,7 @@ import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavai
 import { LoadFailureBox } from "@/features/common/LoadFailureBox";
 import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import { BlockedListLine } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 활동 (R-1 §1, the second global surface). One line per thing an agent did:
@@ -123,12 +124,9 @@ export function ActivityRoute() {
         <InlineBanner
           tone="neutral"
           message={
-            feed.updatedAtMs > 0
-              ? `오프라인, 마지막 동기화 ${relativeLabel(
-                  feed.updatedAtMs,
-                  Date.now()
-                )}. 아래는 그때의 상태입니다.`
-              : "오프라인. 아직 이 목록을 한 번도 받지 못했습니다."
+            <BlockedListLine
+              relativeTime={feed.updatedAtMs > 0 ? relativeLabel(feed.updatedAtMs, Date.now()) : null}
+            />
           }
           testId="activity-offline"
         />

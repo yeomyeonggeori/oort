@@ -109,6 +109,7 @@ import {
   isSurfaceProvided,
   type SurfaceId,
 } from "@momo/core/features/capabilities/serverSurfaces";
+import { BlockedReason, useBlockedReason } from "@/features/common/BlockedReason";
 
 /**
  * 허브의 탭 셋과 각 탭이 서 있는 서버 표면 (goal B12).
@@ -431,7 +432,7 @@ export function AgentHubRoute() {
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼어요. 마지막으로 받은 내용은 계속 볼 수 있고, 변경은 다시 연결된 뒤에 할 수 있어요."
+          message={<BlockedReason frame="keepViewChangeLater" />}
           testId="agent-hub-offline"
         />
       )}
@@ -701,8 +702,10 @@ function AgentProfileSection({
   // 뜻은 아니고, 여기가 그 둘이 갈라지는 유일한 화면이다.
   const editing = useAgentEditingCapability(agent.id);
   const editable = editing.support === "ready";
+  // 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260).
+  const offlineEditReason = useBlockedReason("changeIt");
   const editDisabledReason = offline
-    ? "연결이 끊긴 동안에는 바꿀 수 없어요."
+    ? offlineEditReason
     : editing.support === "checking"
       ? "이 서버가 프로필 편집을 받는지 확인 중이에요."
       : (editing.reason ?? null);

@@ -45,6 +45,7 @@ import { CardBody } from "./workTierPolicy";
 import { LoadFailureNote } from "@/features/common/LoadFailureBox";
 import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import { BlockedReason, useBlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: settings for internal team users on web+Tauri,
 // density 6/10, motion 2/10.
@@ -206,8 +207,10 @@ function DeviceKeysBody({
   // with why — the phone says 「QR 연결 필요」 and the person looks for it here.
   const unapprovable = unapprovablePhoneKeys(keys).sort((a, b) => b.createdAtMs - a.createdAtMs);
   const lockedReasonId = useId();
+  // 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260).
+  const offlineText = useBlockedReason("approveOrDisconnect");
   const lockedReason = offline
-    ? "연결이 끊겨서 지금은 승인하거나 끊을 수 없어요."
+    ? offlineText
     : bound
       ? null
       : mute
@@ -539,7 +542,7 @@ function ThisMacRoot({
         </div>
         {offline && (
           <span id={reasonId} className="text-meta text-ink-muted">
-            연결이 끊겨서 지금은 다시 연결할 수 없어요.
+            <BlockedReason frame="relinkKey" />
           </span>
         )}
       </div>
@@ -671,7 +674,7 @@ function ThisMacRoot({
       )}
       {offline && (
         <span id={reasonId} className="text-meta text-ink-muted">
-          연결이 끊겨서 지금은 등록할 수 없어요.
+          <BlockedReason frame="register" />
         </span>
       )}
     </div>

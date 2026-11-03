@@ -74,6 +74,7 @@ import {
 } from "@momo/core/features/work/sessionHandoff";
 import { TakeoverBlock } from "./TakeoverBlock";
 import { WorkSessionDetail } from "./WorkSessionDetail";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 작업 세션 패널 (AX-3 / MOMO-618). The web sibling of the mac Work Console
@@ -1055,7 +1056,7 @@ export function WorkPanel({
       {!live && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겨 갱신이 멈췄습니다. 아래는 마지막으로 확인된 상태입니다."
+          message={<BlockedReason frame="updatesPausedStale" />}
           testId="work-panel-offline"
         />
       )}

@@ -454,7 +454,7 @@ describe("PauseUntilDialog 네 상태", () => {
   it("오프라인이면 이유를 말하고 선택과 확인이 잠긴다", async () => {
     const onConfirm = vi.fn();
     mount({ offline: true, onConfirm });
-    expect(q("pause-until-offline")!.textContent).toContain("연결이 끊겨");
+    expect(q("pause-until-offline")!.textContent).toContain("You're offline, so you can't change this right now.");
     expect(trigger().disabled).toBe(true);
     openList();
     expect(listbox()).toBeNull();

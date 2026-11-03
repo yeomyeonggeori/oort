@@ -45,6 +45,7 @@ import {
 import { SettingsNav } from "./shell/SettingsNav";
 import { SettingsPageHeader } from "./shell/SettingsPageHeader";
 import { SettingsShell } from "./shell/SettingsShell";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 설정 셸 (R-1 §5 / #1867 / #3578 S1): 앱 사이드바·타이틀바를 대체하는 전면 레이아웃.
@@ -240,7 +241,7 @@ export function SettingsRoute() {
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼어요. 저장은 다시 연결된 뒤에 할 수 있어요."
+          message={<BlockedReason frame="saveAfterReconnect" />}
           testId="settings-offline-banner"
         />
       )}

@@ -39,6 +39,7 @@ import {
   AddWorkspaceOpenContext,
   AddWorkspaceOpenStateContext,
 } from "./useAddWorkspace";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 워크스페이스 추가 다이얼로그 (검수 피드백 #4a-2).
@@ -377,7 +378,7 @@ function AddWorkspacePanel({
           {offline && (
             <InlineBanner
               tone="neutral"
-              message="연결이 끊겼어요. 워크스페이스 만들기는 다시 연결된 뒤에 할 수 있어요."
+              message={<BlockedReason frame="createWorkspaceLater" />}
               testId="add-workspace-offline"
             />
           )}

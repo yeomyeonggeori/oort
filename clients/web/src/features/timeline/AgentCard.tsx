@@ -131,6 +131,7 @@ import { approvalBundleCard, approvalBundleContext, openApprovalDecisionStage } 
 import { requestBundleModel, requestBundleState, runBundleCanDecide, type RequestBundleModel } from "@momo/core/features/timeline/requestBundle";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { RequestBundleCard } from "./RequestBundleCard";
+import { useBlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // Agent card (R-1 §4). Structured, calm, dense: a title row (icon, name, status
@@ -877,6 +878,8 @@ function LoginHandoffBody({
   const cardRef = useRef<HTMLElement | null>(null);
   const approvalsProvided = isSurfaceProvided("approvals");
   const offline = useOffline();
+  // 막았을 때의 문장: 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260).
+  const blockedText = useBlockedReason("loginHandoff");
 
   // 로컬 영수증이 스냅샷보다 새로울 수 있는 것은 승인 카드와 같다. 다만 국면은
   // 코어가 정했으므로, 여기서는 **아직 대기인가**만 로컬로 뒤집는다.
@@ -900,6 +903,7 @@ function LoginHandoffBody({
     underControl,
     decidableHere: true,
     offline,
+    offlineText: blockedText,
     approvalsProvided,
     unsupportedText: `${serverSurface("approvals").absentReason} ${
       serverSurface("approvals").fallback

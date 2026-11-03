@@ -253,6 +253,24 @@ describe("InboxDetail", () => {
     expect(h.querySelector('[data-testid="inbox-reply-offline"]')).not.toBeNull();
   });
 
+  // #5260: 답장 줄도 막은 원인을 말한다. 부모(`InboxRoute`)가 하는 대로 막았는지는 모델의 게이트(`canSend`)에서 읽는다.
+  it.each([
+    ["deviceOffline", "오프라인이라 답장을 보낼 수 없어요. 다시 연결되면 여기서 답할 수 있어요."],
+    ["serverUnreachable", "서버에 닿지 못해 답장을 보낼 수 없어요. 다시 연결되면 여기서 답할 수 있어요."],
+  ] as const)("답장 + %s이면 답장 줄이 그 원인을 말한다", async (scene, line) => {
+    const h = await mount(entry({}), !connectionScene(scene).view.canSend, scene);
+    expect(h.querySelector('[data-testid="inbox-reply-input"]')).toBeNull();
+    const note = h.querySelector('[data-testid="inbox-reply-offline"]');
+    expect(note?.textContent?.replace(/\s+/g, " ").trim()).toBe(line);
+    if (scene === "serverUnreachable") expect(note?.textContent).not.toContain("오프라인");
+  });
+
+  it.each(["unknown", "realtimeDown"] as const)("답장 + %s이면 모델이 막지 않는다: 줄 없이 답장 입력이 열려 있다", async (scene) => {
+    const h = await mount(entry({}), !connectionScene(scene).view.canSend, scene);
+    expect(h.querySelector('[data-testid="inbox-reply-offline"]')).toBeNull();
+    expect(h.querySelector('[data-testid="inbox-reply-input"]')).not.toBeNull();
+  });
+
   it("맥락을 못 불러오면 오류와 다시 시도", async () => {
     api.fetchMessages.mockRejectedValue(new Error("boom"));
     const h = await mount(entry({}));
