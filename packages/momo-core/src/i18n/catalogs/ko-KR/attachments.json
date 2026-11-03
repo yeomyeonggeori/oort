@@ -1,0 +1,5 @@
+{
+  "attachments.tray.removeNamed": "{name} 첨부 빼기",
+  "attachments.tray.overflow": "{count, number}개는 한 메시지의 상한({max, number}개)을 넘어 넣지 못했습니다.",
+  "attachments.tray.noticeDismiss": "확인"
+}

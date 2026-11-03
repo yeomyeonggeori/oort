@@ -560,9 +560,11 @@ export default function InboxScreen({
       {notice}
 
       {mailboxActive ? (
-        mailbox.isLoading && mailbox.entries.length === 0 ? (
+        // 로딩·오류는 **이 칩에 보일 줄**이 없을 때만 말한다. 전체 항목 수(`entries`)로 가르면 서버 경로가
+        // 합쳐 둔 승인이 다른 칩(DM·스레드)의 로딩·오류를 가린다 — 그 칩은 승인을 담지 않는다(#5116).
+        mailbox.isLoading && mailboxShown.length === 0 ? (
           <LoadingState label="인박스를 불러오고 있어요." testID="inbox-loading" />
-        ) : mailbox.error && mailbox.entries.length === 0 ? (
+        ) : mailbox.error && mailboxShown.length === 0 ? (
           <ErrorState
             headline="인박스를 불러오지 못했어요."
             onRetry={mailbox.refetch}

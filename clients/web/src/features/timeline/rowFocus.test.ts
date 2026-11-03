@@ -226,6 +226,26 @@ describe("normalizeRow", () => {
     expect(primary.tabIndex).toBe(0);
   });
 
+  it("⋯(primary)가 없는 도구 막대(#5192: 메뉴가 빌 행)에서도 첫 행 단추로 핸드오프한다: 던지지도, 행에 남지도 않는다", () => {
+    // 반응·답글만 가능한 행은 ⋯ 단추를 그리지 않는다. 핸드오프가 `primary`만 찾으면 초점이 행에 남아 도구 막대에 닿는 길이 없다.
+    const row = document.createElement("div");
+    row.dataset.actionable = "true";
+    row.tabIndex = 0;
+    const react = action();
+    const reply = action();
+    row.append(react, reply);
+    document.body.append(row);
+    stubFocusVisible(row, true);
+    row.focus();
+    expect(isKeyboardRowFocus(row)).toBe(true);
+
+    expect(() => handoffRowFocusToPreferred(row)).not.toThrow();
+
+    expect(document.activeElement).toBe(react);
+    expect(react.tabIndex).toBe(0);
+    expect(reply.tabIndex).toBe(-1);
+  });
+
   it("비-focus-visible 포커스 진입 시 핸드오프 미발동", () => {
     const row = document.createElement("div");
     row.dataset.actionable = "true";

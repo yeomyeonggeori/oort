@@ -12,6 +12,13 @@ import type { PdfOpenFailure } from "@/features/attachments/content";
 import { useAttachmentPreview } from "@/features/attachments/content";
 import { ImageLightbox } from "@/features/attachments/ImageLightbox";
 import { lightboxAttachments } from "@/features/attachments/imageLightboxModel";
+import {
+  IMAGE_FIT_KNOWN,
+  IMAGE_FIT_UNKNOWN,
+  inlineImageBox,
+  isCompactImage,
+  type NaturalSize,
+} from "@/features/attachments/inlineImageModel";
 import { useRevealOnHover } from "@/features/attachments/useRevealOnHover";
 import {
   ATTACH_COPY,
@@ -60,12 +67,39 @@ import {
 // `Content-Disposition: attachment` 를 붙인 이유 — 올라온 SVG 안의 스크립트가 이
 // 앱과 같은 출처에서 도는 것 — 를 화면이 뒤집지 않는다.
 //
-// ## 자리
+// ## 자리와 크기 (#5189, 규칙 정본 README §2.10 · 계산 `inlineImageModel.ts`)
 //
 // 서버는 이미지 치수를 주지 않는다. 받는 중에는 높이 `preview-frame`(180) 상자가
-// 서고, 도착하면 그림의 비율대로 선다. 세로로 긴 그림은 상한(320)까지 자라고
-// 가로로 긴 그림은 더 낮아진다. 격자 타일은 정사각 고정이라 이동이 없다.
+// 서고, 디코드되면(`onLoad`) 자연 크기로 규칙이 상자를 정한다: 보통 그림은 360×320
+// 안에서 비율을 지키고, **가로로 긴 그림은 높이 180 을 지키며 폭을 열이 허락하는 만큼
+// 늘린다**(그래서 가로 캡처의 글자가 미리보기 없이 읽힌다). 열이 상자보다 좁으면
+// `max-w-full h-auto` 가 비율대로 줄인다. 원본보다는 키우지 않는다. 모서리는
+// `image-corner`: 반경이 10 을 넘지 않고 **렌더된 변의 1/4** 도 넘지 않아, 낮은 그림의
+// 양끝이 알약이 되지 않는다. 자연 크기는 한 번 알면 기억한다(행이 언마운트됐다 돌아와도
+// 처음부터 제 크기로 선다). 격자 타일은 정사각 고정이라 이동이 없다.
+//
+// 타임라인은 늘 **원본** 바이트(`content.ts`)를 그린다. 컴포저 트레이의 128px 초안
+// 썸네일(`draftThumbnail.ts`)은 여기에 오지 않는다: 보낸 사람의 echo 행도, 받는 사람의
+// 행도 같은 `AttachmentList` 가 같은 캐시(`previews`)의 같은 바이트를 그린다.
 // =============================================================================
+
+/**
+ * 한 번 읽은 자연 크기. 같은 이유로 모듈 전역이다: react-virtuoso 가 화면 밖 행을
+ * 언마운트하므로 컴포넌트 상태에만 두면 스크롤을 올렸다 내릴 때마다 상자가 `unknown`
+ * 에서 다시 자란다. 크기가 몇 바이트 안 되므로 상한은 넉넉히 둔다.
+ */
+const NATURAL_SIZE_LIMIT = 200;
+const naturalSizes = new Map<string, NaturalSize>();
+
+function rememberNaturalSize(id: string, size: NaturalSize): void {
+  naturalSizes.delete(id);
+  naturalSizes.set(id, size);
+  while (naturalSizes.size > NATURAL_SIZE_LIMIT) {
+    const oldest = naturalSizes.keys().next();
+    if (oldest.done) break;
+    naturalSizes.delete(oldest.value);
+  }
+}
 
 /** 단일 이미지가 오는 동안의 자리. 셔머 없는 중립 면이다(SKILL §5). */
 const PREVIEW_FRAME_CLASS =
@@ -74,6 +108,12 @@ const PREVIEW_FRAME_CLASS =
 /** 이미지 위에 뜨는 행동 줄. 면 위에 얹으므로 사진 위에서도 읽힌다. */
 const OVERLAY_CLASS =
   "absolute right-2 top-2 flex items-center gap-1 rounded-md bg-surface shadow-sm";
+
+/**
+ * 낮은 그림(`isCompactImage`: 가로 캡처 띠)의 행동 줄. 위에서 8 띄우면 줄(32)이 그림 아래로
+ * 삐져나가 다음 줄 글자를 가리므로, 그림의 세로 가운데에 놓는다.
+ */
+const OVERLAY_COMPACT_CLASS = "right-1 top-1/2 -translate-y-1/2";
 
 function ImageTile({
   workspaceId,
@@ -106,11 +146,29 @@ function ImageTile({
   const single = layout === "single";
   const tileClass =
     layout === "grid-3" ? "size-inline-image-tile-sm" : "size-inline-image-tile";
+  // 한 장일 때만 규칙 상자를 쓴다. 격자 타일은 정사각 고정이라 자연 크기가 필요 없다.
+  const [natural, setNatural] = useState<NaturalSize | null>(
+    () => naturalSizes.get(attachment.id) ?? null
+  );
+  const box = single ? inlineImageBox(natural) : null;
+  const compact = isCompactImage(box);
+  const learnNaturalSize = (node: HTMLImageElement) => {
+    const { naturalWidth: width, naturalHeight: height } = node;
+    if (width <= 0 || height <= 0) return;
+    rememberNaturalSize(attachment.id, { width, height });
+    setNatural((current) =>
+      current !== null && current.width === width && current.height === height
+        ? current
+        : { width, height }
+    );
+  };
 
   return (
     <figure
       data-testid="attachment-image"
       data-preview={preview.status}
+      data-wide={box?.wide ? "" : undefined}
+      data-compact={compact ? "" : undefined}
       data-revealed={revealed ? "" : undefined}
       className={cn("relative m-0", single ? "w-fit max-w-full" : tileClass)}
       {...handlers}
@@ -124,7 +182,7 @@ function ImageTile({
         className={
           preview.status === "ready"
             ? cn(
-                "block max-w-full overflow-hidden rounded-md press focus-visible:focus-ring",
+                "block max-w-full overflow-hidden image-corner press focus-visible:focus-ring",
                 !single && "size-full"
               )
             : cn(PREVIEW_FRAME_CLASS, !single && "size-full")
@@ -135,10 +193,18 @@ function ImageTile({
             ref={node => registerSource(attachment.id, node)}
             src={preview.dataUrl}
             alt={label}
+            // 자연 크기를 아는 한 장: 규칙 상자를 HTML 치수로 준다(인라인 스타일이 아니라
+            // 속성이다). `h-auto max-w-full` 이 열이 좁을 때(스레드 패널) 비율을 지킨 채
+            // 줄이고, 상자 높이가 줄면 `image-corner` 의 퍼센트가 반경을 함께 줄인다.
+            {...(box === null ? {} : { width: box.width, height: box.height })}
+            onLoad={single ? (event) => learnNaturalSize(event.currentTarget) : undefined}
             className={
               single
-                ? "block max-h-inline-image-h max-w-inline-image-w rounded-md object-contain"
-                : "block size-full rounded-md object-cover"
+                ? cn(
+                    "block image-corner object-contain",
+                    ...(box === null ? IMAGE_FIT_UNKNOWN : IMAGE_FIT_KNOWN)
+                  )
+                : "block size-full image-corner object-cover"
             }
           />
         ) : (
@@ -150,7 +216,10 @@ function ImageTile({
         )}
       </button>
       {revealed && (
-        <div className={OVERLAY_CLASS} data-testid="attachment-image-actions">
+        <div
+          className={cn(OVERLAY_CLASS, compact && OVERLAY_COMPACT_CLASS)}
+          data-testid="attachment-image-actions"
+        >
           <AttachmentDownloadButton
             workspaceId={workspaceId}
             channelId={channelId}

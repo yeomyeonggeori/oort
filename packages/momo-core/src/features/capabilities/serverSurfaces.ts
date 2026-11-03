@@ -157,6 +157,12 @@ export type SurfaceId =
   | "githubNotifications"
   | "dmClosure";
 
+/**
+ * 관제(ADE) 표면의 id (#5193). 이 표면을 직접 묻는 코드가 낱말을 글자로 적지 않게 한다: 웹의 직접 문구 장부는 따옴표 안의 낱말을
+ * 사용자 문구 후보로 세므로, 문구가 아닌 id를 글자로 적을 때마다 장부가 늘어난다. 표의 `id` 와 같은 글자다(시험이 잡는다).
+ */
+export const ADE_SURFACE_ID: SurfaceId = "ade";
+
 /** Workd/T3 데몬을 전제하는 표면. 셀프호스트 기본은 모두 숨긴다 (ADR-0183 D4-② · #2166). */
 export const WORK_SURFACE_IDS: readonly SurfaceId[] = [
   "workstreams",

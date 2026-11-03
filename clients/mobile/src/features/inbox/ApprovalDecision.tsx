@@ -13,7 +13,7 @@ import React, {useCallback, useContext, useImperativeHandle, useRef, useState} f
 import {QueryClientContext} from '@tanstack/react-query';
 import {refreshProfileAfterApproval} from '@momo/core/features/approvals/profileChange';
 import {replacePersistedMember} from '../../storage/secureSession';
-import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
+import {AccessibilityInfo, Pressable, StyleSheet, View} from 'react-native';
 import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
@@ -109,7 +109,8 @@ export function ApprovalDecision({
   approveDisabled?: boolean;
   /**
    * 버튼 모양. `pill` 은 대화 안 에이전트 카드의 행동 줄(DS2-4, 시안 A `.a-pill`:
-   * 주 = 잉크, 보조 = surface2, 반경 알약)이다. 인박스·잠금화면은 `box` 그대로다.
+   * 주 = 잉크, 보조 = surface2, 반경 알약)이다. 인박스·잠금화면은 `box`다 — 반경과 보조
+   * 단추의 모양만 다르고, 승인 채움은 세 모양 모두 잉크다(#5134).
    */
   shape?: 'box' | 'pill' | 'request';
   subject?: string;
@@ -278,6 +279,26 @@ export function ApprovalDecision({
   // 탭 **전에** 그 사실을 말한다. 목적지도 붙이지 않는다: 아무 데서도 실행되지 않는다.
   const headline = deadlinePassed ? DEADLINE_PASSED_LEAD : lead;
 
+  /** 승인(자기 결정)이 서버에 나가 있다. 아래 승인 단추의 얼굴과 반대편(거부) 단추의 흐림이 읽는다. */
+  const approving = sending === 'approve';
+
+  /**
+   * 승인 단추의 얼굴 (#5134).
+   *
+   * 상자(`box`)는 셸 주 단추(atoms `PrimaryButton`, #5100)와 **같은 세 얼굴**이다. 한 앱에서
+   * 승인 단추가 둘로 갈리지 않게, 알약·요청이 이미 입은 잉크를 상자도 입는다:
+   *
+   *   잉크    쉼·진행 — 잉크(`primary`) 채움 + `onPrimary` 라벨. 진행(자기 결정이 나가는 중,
+   *           `approving`)도 잉크를 **그대로 둔다**: 「보내는 중」은 지금 읽혀야 하는 낱말이다
+   *           (#3829 M4). `!canApprove` 가 같이 와도 진행이 이긴다.
+   *   잠김    못 누르고 자기 결정이 나가는 중도 아닐 때 — 승인할 수 없거나(`!canApprove`) 반대편
+   *           (거부)이 나가는 중. 옅은 칸(`surfaceMuted`) + **`textMuted` 라벨**이고, 흐리지
+   *           않는다(옅은 칸 위 라벨은 0.6 흐림 안에서 4.5:1 밑으로 내려간다).
+   *   조용함  알약·요청만 — 막힌 승인을 조용한 형태로 강등한다(앞 판 그대로, 이 이슈 밖).
+   */
+  const approveLocked = !pill && !approving && (busy || !canApprove);
+  const approveInk = pill ? canApprove : !approveLocked;
+
   return (
     <View style={[styles.bar, pill && styles.pillBar]} testID={`${testIDPrefix}-actions`}>
       {headline !== null ? <Sentence style={styles.lead}>{headline}</Sentence> : null}
@@ -305,13 +326,13 @@ export function ApprovalDecision({
             request && styles.requestQuiet,
             // 잠긴 모양은 **반대편**만 입는다. 자기 결정이 나가는 중인 버튼은 흐리지
             // 않는다 — 「보내는 중」은 지금 읽혀야 하는 낱말이다(#3829 M4).
-            sending === 'approve' && styles.buttonInert,
+            approving && styles.buttonInert,
             pressed && !busy && styles.pressed,
           ]}
           testID={`${testIDPrefix}-reject`}>
-          <Text style={styles.buttonQuietLabel}>
+          <Sentence style={styles.buttonQuietLabel}>
             {sending === 'reject' ? '보내는 중' : '거부'}
-          </Text>
+          </Sentence>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -328,28 +349,38 @@ export function ApprovalDecision({
           style={({pressed}) => [
             styles.button,
             // 이제 이 탭이 결정이다 — 주 액션은 채움으로 선다(웹 `variant="default"`).
-            // 막힌 승인은 조용한 형태로 강등한다: 지금은 이것이 기본 액션이 아니다.
-            canApprove ? styles.buttonCommit : styles.buttonQuiet,
+            // 어떤 얼굴을 입는지는 위 `approveInk`·`approveLocked` 가 정한다.
+            approveInk
+              ? styles.buttonCommit
+              : approveLocked
+                ? styles.buttonLocked
+                : styles.buttonQuiet,
             pill && styles.pillButton,
             pill && (canApprove ? styles.pillCommit : styles.pillQuiet),
-            (sending === 'reject' || !canApprove) && styles.buttonInert,
+            // 흐림 0.6 은 알약·요청의 잠김만 입는다. 상자의 잠김은 옅은 칸 + `textMuted` 라벨이
+            // 말하고, 그 위에 0.6 을 겹치면 라벨이 4.5:1 밑으로 내려간다.
+            pill && (sending === 'reject' || !canApprove) && styles.buttonInert,
             // 눌림은 **채움의 눌린 값**이다. 옅은 눌림 회색(`surfacePressed`)으로
             // 갈아 끼우면 채움의 흰 글자가 옅은 바탕에 앉는다(#3829 M4 — 라이트
-            // 1:1 근처). 상자는 `accentPressed`(atoms `PrimaryButton` 과 같은 값),
-            // 알약은 잉크 채움을 지키고 살짝 흐린다(웹 `hover:opacity-90` 의 짝).
+            // 1:1 근처). 그래서 잉크 채움을 지키고 살짝 흐린다(웹 `hover:opacity-90` 의
+            // 짝): 상자는 atoms `PrimaryButton` 과 같은 0.86, 알약은 0.85.
             pressed &&
               !busy &&
               canApprove &&
               (pill ? styles.pillCommitPressed : styles.buttonCommitPressed),
           ]}
           testID={`${testIDPrefix}-approve`}>
-          <Text
+          <Sentence
             style={[
-              canApprove ? styles.buttonCommitLabel : styles.buttonQuietLabel,
+              approveInk
+                ? styles.buttonCommitLabel
+                : approveLocked
+                  ? styles.buttonLockedLabel
+                  : styles.buttonQuietLabel,
               pill && canApprove && styles.pillCommitLabel,
             ]}>
             {sending === 'approve' ? '보내는 중' : '승인'}
-          </Text>
+          </Sentence>
         </Pressable>
       </View>
       {errorCopy !== null ? (
@@ -383,8 +414,13 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     paddingHorizontal: space.md,
   },
   buttonQuiet: {borderWidth: 1, borderColor: color.border},
-  buttonCommit: {backgroundColor: color.accent},
-  buttonCommitPressed: {backgroundColor: color.accentPressed},
+  // 승인 = 잉크(#5134). `accent` 는 신호라 이 단추를 칠하지 않는다 — 커스텀 강조색을 골라도
+  // 승인 단추는 한 색이다(알약의 `pillCommit`·셸 `PrimaryButton` 과 같은 역할).
+  buttonCommit: {backgroundColor: color.primary},
+  // 잉크 채움은 눌려도 잉크다 — 흐림만 낮춘다(atoms `PrimaryButton` 의 `buttonPressed` 와 같은 값).
+  buttonCommitPressed: {opacity: 0.86},
+  // 잠긴 상자의 승인: 채움을 걷고 옅은 칸으로 두되 라벨은 `buttonLockedLabel` 이 읽히게 한다.
+  buttonLocked: {backgroundColor: color.surfaceMuted},
   buttonInert: {opacity: 0.6},
   /** 시안 `.a-pill{border-radius:19px}` — 높이는 엄지 바닥 44 를 지킨다. */
   pillButton: {borderRadius: radius.pill},
@@ -398,7 +434,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   pillCommitPressed: {opacity: 0.85},
   pillCommitLabel: {color: color.onPrimary},
   buttonQuietLabel: {fontSize: font.label, fontWeight: '600', color: color.text},
-  buttonCommitLabel: {fontSize: font.label, fontWeight: '600', color: color.onAccent},
+  buttonCommitLabel: {fontSize: font.label, fontWeight: '600', color: color.onPrimary},
+  buttonLockedLabel: {fontSize: font.label, fontWeight: '600', color: color.textMuted},
   error: {fontSize: font.meta, color: color.danger, lineHeight: 18},
   hint: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},
   pressed: {backgroundColor: color.surfacePressed},

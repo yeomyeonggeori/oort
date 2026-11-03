@@ -60,13 +60,43 @@ export const EXPIRED_CARD_COPY =
 export const REPROPOSE_LABEL = "다시 요청";
 
 /**
+ * 닫힌 카드가 「다시 요청」을 건네는 이유 (#4986). 요청 고리 상태표(agent-request-loop §2.2)에서
+ * 다음 행동이 「다시 요청」인 상태는 만료·거부·실패 셋이다. 초안 문장이 이유마다 다르다.
+ */
+export type ReproposeReason = "expired" | "declined" | "failed";
+
+/**
+ * 거부·실패로 닫힌 묶음 카드가 건네는 「다시 요청」의 이유. 그 밖의 상태는 null이다(만료는 제 푸터가 따로
+ * 맡고, 끝·취소·진행 중에는 다음 행동이 없다). 거부는 거부한 본인에게는 건네지 않는다: 다음 행동은 요청한
+ * 쪽의 몫이고, 방금 스스로 닫은 사람에게는 되돌릴 것이 없다. `state` 는 `RequestBundleState` 다.
+ */
+export function closedCardReproposeReason(
+  state: string,
+  viewerDecided: boolean
+): Exclude<ReproposeReason, "expired"> | null {
+  if (state === "failed") return "failed";
+  return state === "declined" && !viewerDecided ? "declined" : null;
+}
+
+/**
  * 「다시 제안해 달라고 하기」가 입력창에 넣는 초안.
  *
  * 멘션은 `@handle` 한 토큰이다(서버가 멘션을 판정한다 — 클라이언트는 본문에서
  * 이름을 해석하지 않는다). 뒤에 공백을 둬서 사람이 이어 쓸 수 있게 한다.
+ * 이유를 생략하면 만료다(이 함수의 처음 쓰임).
  */
-export function reproposeDraft(handle: string): string {
-  return `@${handle} 아까 올린 승인 요청이 만료됐어요. 다시 제안해 주세요. `;
+export function reproposeDraft(
+  handle: string,
+  reason: ReproposeReason = "expired"
+): string {
+  switch (reason) {
+    case "declined":
+      return `@${handle} 아까 올린 요청이 거부됐어요. 내용을 바꿔서 다시 제안해 주세요. `;
+    case "failed":
+      return `@${handle} 아까 요청한 일을 끝내지 못했어요. 다시 해 주세요. `;
+    default:
+      return `@${handle} 아까 올린 승인 요청이 만료됐어요. 다시 제안해 주세요. `;
+  }
 }
 
 /**

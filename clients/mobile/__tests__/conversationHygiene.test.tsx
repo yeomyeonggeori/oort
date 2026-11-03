@@ -1,5 +1,5 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
-import {ROW_FACE} from '../src/features/conversation/rowFace';
+import {blendOver, landedFace, ROW_FACE} from '../src/features/conversation/rowFace';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {
   PendingMessage,
@@ -711,7 +711,7 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
     const style = flatten(
       landedRow(true).getByTestId('message-row').props.style,
     );
-    expect(style.backgroundColor).toBe(color.warnSurface);
+    expect(style.backgroundColor).toBe(landedFace(color));
   });
 
   it('도착하지 않은 행은 물들지 않는다', () => {
@@ -725,7 +725,7 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
     const view = landedRow(true);
     const outer = flatten(view.getByTestId('message-row').props.style);
     const inner = flatten(view.getByTestId('message-press').props.style);
-    expect(outer.backgroundColor).toBe(color.warnSurface);
+    expect(outer.backgroundColor).toBe(landedFace(color));
     expect(inner.backgroundColor).toBeUndefined();
   });
 
@@ -739,12 +739,21 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
     // 불렀다. 이제 accent 는 웹과 같은 호박이라 두 값은 이웃이고(OKLab 거리 0.047),
     // 새더라도 눈에는 잘 안 띈다 — 지키는 것이 색이 아니라 **뜻**이라는 사실이
     // 그만큼 더 중요해졌으므로 이름을 뜻으로 되돌린다. 단정은 그대로다.
-    expect(color.warnSurface).not.toBe(color.accentSurface);
-    expect(color.warnSurface).not.toBe(color.accent);
+    //
+    // 면이 알파 hex 로 바뀐 뒤(#4949)에도 같은 판정이다: 칠해진 색의 앞 여섯 자리가 경고색이고 accent 가 아니다.
+    const face = landedFace(color);
+    expect(face.slice(0, 7)).toBe(color.warn);
+    expect(face.slice(0, 7)).not.toBe(color.accent);
+    expect(face).not.toBe(color.accentSurface);
   });
 
   it('띠가 아니라 물듦이다 — 고도(`surface`)로 오해되지 않을 만큼만', () => {
-    const tint = contrast(color.warnSurface, color.bg);
+    // 면은 알파 hex 라 바닥 위에 합성된 색으로 잰다(이 파일의 `contrast` 는 알파를 읽지 않는다).
+    const face = landedFace(color);
+    const tint = contrast(
+      blendOver(face.slice(0, 7), color.bg, parseInt(face.slice(7), 16) / 255),
+      color.bg,
+    );
     // 배경과 구별은 되고(고도 한 단보다 크다 — 이 순위가 #1164 에서 팔레트가
     // 웹으로 옮겨간 뒤에도 살아 있도록 여섯 상태 채움이 배경 대비 같은 걸음을 들고
     // 따라갔다),
@@ -780,7 +789,7 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
       return screen
         .getAllByTestId('message-row')
         .filter(
-          node => flatten(node.props.style).backgroundColor === color.warnSurface,
+          node => flatten(node.props.style).backgroundColor === landedFace(color),
         );
     }
 

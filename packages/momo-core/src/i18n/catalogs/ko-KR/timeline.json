@@ -1,6 +1,11 @@
 {
   "timeline.unfurl.label": "링크 미리보기: {title}, {domain}",
   "timeline.unfurl.video": "동영상",
+  "timeline.lightbox.copy": "이미지 복사",
+  "timeline.lightbox.copied": "복사했어요",
+  "timeline.lightbox.copyFailed": "이미지를 복사하지 못했어요. 파일을 내려받아 쓰세요.",
+  "timeline.lightbox.zoomIn": "확대",
+  "timeline.lightbox.zoomOut": "축소",
   "timeline.thread.replyCount": "답글 {count, number}개",
   "timeline.thread.unreadChip": "새 답글 {count, number}",
   "timeline.thread.open": "스레드 열기, 답글 {count, number}개",

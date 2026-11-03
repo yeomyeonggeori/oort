@@ -49,11 +49,13 @@ import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
 import { ApprovalsLiveSync } from "@/features/inbox/ApprovalsLiveSync";
 import { DockBadge } from "@/features/notifications/DockBadge";
+import { TrayStatus } from "@/features/notifications/TrayStatus";
 import { TabTitleCount } from "@/features/notifications/TabTitleCount";
 import { WorkHostNotices } from "@/features/notifications/WorkHostNotices";
 import { OnlineRollCall } from "@/features/presence/OnlineRollCall";
 import { LegacyAgentPortCleanup } from "@/features/welcome/harnessLogin/LegacyAgentPortCleanup";
 import { ReminderDueWatcher } from "@/features/reminders/ReminderDueWatcher";
+import { ReleaseNotesHost } from "@/features/releaseNotes/ReleaseNotesHost";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
 import { AgentWorkPanel } from "@/features/agents/AgentWorkPanel";
 import { closeWorkPanel, useWorkPanelTarget } from "@/features/agents/workLogStore";
@@ -516,12 +518,16 @@ export function AppShell({
           {/* 새 승인 카드가 올라오면 처리할 일 목록을 바로 다시 읽는다(#3738). */}
           {!stress && <ApprovalsLiveSync />}
           {!stress && <DockBadge />}
+          {/* 메뉴 막대 아이콘(#5193): 독 배지와 같은 수에 실행 중인 작업을 얹어 셸에 보내고, 메뉴에서 고른 것을 받아 간다. 아무것도 그리지 않는다. */}
+          {!stress && <TrayStatus />}
           {!stress && <TabTitleCount />}
           {!stress && <WorkHostNotices />}
           {/* 출석부에 세어진다(ADR-0160 ②, #4692). 아무것도 그리지 않고 받는 것도 없다. */}
           {!stress && <OnlineRollCall />}
           {!stress && <LegacyAgentPortCleanup />}
           {!stress && <ReminderDueWatcher />}
+          {/* 업데이트 뒤 처음 열 때 「업데이트 소식」을 한 번 보인다(#4937). 데스크탑 셸만 앱 버전을 안다. */}
+          {!stress && <ReleaseNotesHost />}
           {/* Renders nothing; watches every agent's progress channel so the
            * sidebar badge and the composer line describe the same turn
            * (MOMO-613). Exactly one writer to the turn store is ever mounted. */}

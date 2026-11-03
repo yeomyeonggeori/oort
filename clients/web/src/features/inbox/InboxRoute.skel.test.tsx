@@ -74,6 +74,7 @@ const state = {
   source: "composed" as "composed" | "server" | "probing",
   serverUnreadCount: null as number | null,
   hasMore: false,
+  ledgerAnswered: false,
 };
 const fetchMore = vi.fn();
 const markAllRead = vi.fn((_filter: string) =>
@@ -96,6 +97,7 @@ vi.mock("./useMailbox", () => ({
     isLoading: state.isLoading,
     error: state.error,
     tasksAbsent: false,
+    ledgerAnswered: state.ledgerAnswered,
     capped: false,
     updatedAtMs: NOW,
     refetch: () => undefined,
@@ -161,7 +163,7 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-async function mount(): Promise<HTMLElement> {
+async function mount(path = "/inbox"): Promise<HTMLElement> {
   const host = document.createElement("div");
   document.body.append(host);
   mountedHost = host;
@@ -171,7 +173,7 @@ async function mount(): Promise<HTMLElement> {
     { value: sessionValue() },
     createElement(
       MemoryRouter,
-      { initialEntries: ["/inbox"] },
+      { initialEntries: [path] },
       createElement(InboxRoute)
     )
   );
@@ -197,6 +199,7 @@ beforeEach(() => {
   state.source = "composed";
   state.serverUnreadCount = null;
   state.hasMore = false;
+  state.ledgerAnswered = false;
   fetchMore.mockClear();
   markAllRead.mockClear();
   approvalItems.value = [ITEM];
@@ -430,5 +433,154 @@ describe("InboxRoute mailbox: 서버 투영 경로", () => {
       await Promise.resolve();
     });
     expect(markAllRead).toHaveBeenCalledWith("all");
+  });
+});
+
+// 「처리할 일」 탭의 내용은 승인 원장 하나다(#5092 D2·D3). 서버 투영에 다른 종류의 줄이 있는 순간 전체
+// 항목 수로 로딩·오류를 가르면 그 탭이 원장의 실패와 로딩을 가리고 「지금 처리할 일이 없어요」라고
+// 말한다. 게이트의 투영 스텁은 비어 있어서 이 경우를 못 잡는다 — 여기서 투영에 줄을 둔 채 잰다.
+describe("InboxRoute mailbox: 처리할 일 탭은 원장의 실패와 로딩을 가리지 않는다 (#5092)", () => {
+  beforeEach(() => {
+    state.source = "server";
+    state.serverUnreadCount = 1;
+    state.entries = [
+      entry({
+        key: "inbox:1",
+        itemId: "i-1",
+        kind: "mention",
+        typeLabel: "멘션 · #workbench",
+      }),
+    ];
+  });
+
+  it("원장이 실패하면 투영에 줄이 있어도 「없어요」 대신 오류와 다시 시도를 말한다", async () => {
+    state.error = true;
+    const host = await mount("/inbox?filter=task");
+    expect(host.querySelector('[data-testid="inbox-error"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="inbox-empty"]')).toBeNull();
+    expect(host.querySelector('[data-testid="inbox-error"] button')?.textContent).toBe("다시 시도");
+    if (mountedRoot) act(() => mountedRoot?.unmount());
+    mountedHost?.remove();
+
+    // 대조: 같은 실패라도 보여 줄 줄이 있는 탭은 있는 만큼 그린다(부분 실패는 오류가 아니다).
+    const all = await mount("/inbox?filter=all");
+    expect(all.querySelector('[data-testid="inbox-error"]')).toBeNull();
+    expect(all.querySelectorAll('[data-testid="mailbox-row"]')).toHaveLength(1);
+  });
+
+  it("원장이 첫 응답을 기다리는 동안은 투영에 줄이 있어도 「없어요」 대신 로딩 막대를 말한다", async () => {
+    state.isLoading = true;
+    const host = await mount("/inbox?filter=task");
+    const skel = host.querySelector('[data-testid="inbox-route"] [data-testid="skeleton"]');
+    expect(skel?.getAttribute("data-ready")).toBe("false");
+    expect(host.querySelector('[data-testid="inbox-empty"]')).toBeNull();
+  });
+});
+
+// 원장이 대기에서 뺀 승인은 고른 줄로 남지 않는다(#5116). 이 클라이언트가 방금 결정했든 다른 기기에서
+// 결정됐든 같은 길이다: 원장이 답했는데 목록에 없는 승인은 더 이상 결정을 기다리지 않는다. 컨트롤이 서는
+// 패널은 닫히고, 줄은 선택(`aria-current`)에서 풀리고, 초점은 디자인 시스템 규칙대로 이웃 줄로 간다.
+describe("InboxRoute mailbox: 원장이 뺀 승인은 선택된 채 남지 않는다 (#5116)", () => {
+  const rows = (host: HTMLElement) =>
+    Array.from(host.querySelectorAll<HTMLElement>('[data-testid="mailbox-row"]'));
+  const keys = (host: HTMLElement) => rows(host).map((r) => r.getAttribute("data-entry-key"));
+  const task = (id: string) =>
+    entry({
+      key: `approval:${id}`,
+      kind: "task",
+      typeLabel: "처리할 일 · 승인 요청",
+      actor: "김인턴",
+      actorIsAgent: true,
+      preview: `허가 요청 ${id}`,
+      task: { ...ITEM, key: `approval:${id}`, approvalId: `ap-${id}` },
+    });
+
+  async function rerender(): Promise<void> {
+    await act(async () => {
+      mountedRoot?.render(
+        createElement(
+          SessionProvider,
+          { value: sessionValue() },
+          createElement(MemoryRouter, { initialEntries: ["/inbox"] }, createElement(InboxRoute))
+        )
+      );
+      await Promise.resolve();
+    });
+  }
+  async function open(host: HTMLElement, key: string): Promise<void> {
+    const row = rows(host).find((r) => r.getAttribute("data-entry-key") === key);
+    await act(async () => {
+      row?.click();
+      await Promise.resolve();
+    });
+    row?.focus();
+  }
+  /** 원장이 다시 답했다: 그 답에 이 승인들이 없다. */
+  async function ledgerDrops(...gone: string[]): Promise<void> {
+    state.entries = state.entries.filter((e) => !gone.includes(e.key));
+    await rerender();
+  }
+
+  beforeEach(() => {
+    state.source = "server";
+    state.ledgerAnswered = true;
+    state.entries = [task("a"), task("b"), entry({ key: "dm:a", kind: "dm" })];
+  });
+
+  it("고른 승인이 원장에서 빠지면 패널이 닫히고 줄은 선택에서 풀리며 초점은 다음 줄로 간다", async () => {
+    const host = await mount();
+    await open(host, "approval:a");
+    expect(host.querySelector('[data-testid="inbox-detail"]')?.getAttribute("data-key")).toBe("approval:a");
+    expect(rows(host)[0]?.getAttribute("aria-current")).toBe("true");
+
+    await ledgerDrops("approval:a");
+
+    expect(host.querySelector('[data-testid="inbox-detail"]')).toBeNull();
+    expect(keys(host)).toEqual(["approval:b", "dm:a"]);
+    expect(rows(host).filter((r) => r.getAttribute("aria-current") === "true")).toHaveLength(0);
+    // 초점은 줄에 앉을 뿐 줄을 대신 열지 않는다: 다음 승인의 결정 컨트롤이 방금 누른 자리에 서면 안 된다.
+    expect((document.activeElement as HTMLElement | null)?.getAttribute("data-entry-key")).toBe("approval:b");
+    expect(host.querySelector('[data-testid="inbox-detail"]')).toBeNull();
+    expect(markRead).not.toHaveBeenCalled();
+  });
+
+  it("다음 줄이 없으면 앞 줄로, 줄이 하나도 없으면 목록 자체로 초점이 간다", async () => {
+    state.entries = [task("a"), task("b")];
+    const host = await mount();
+    await open(host, "approval:b");
+    await ledgerDrops("approval:b");
+    expect((document.activeElement as HTMLElement | null)?.getAttribute("data-entry-key")).toBe("approval:a");
+
+    await open(host, "approval:a");
+    await ledgerDrops("approval:a");
+    expect(host.querySelector('[data-testid="inbox-empty"]')).not.toBeNull();
+    expect(document.activeElement).toBe(host.querySelector('[data-testid="inbox-list-pane"]'));
+  });
+
+  it("초점이 이미 다른 곳에 있으면 뺏지 않는다", async () => {
+    const host = await mount();
+    await open(host, "approval:a");
+    const tab = host.querySelector<HTMLElement>('[data-testid="inbox-tab-dm"]');
+    tab?.focus();
+    await ledgerDrops("approval:a");
+    expect(document.activeElement).toBe(tab);
+  });
+
+  it("원장이 아직 답하지 않았으면 목록에 없어도 줄을 놓지 않는다(없음이 답이 아니다)", async () => {
+    const host = await mount();
+    await open(host, "approval:a");
+    state.ledgerAnswered = false;
+    await ledgerDrops("approval:a");
+    expect(host.querySelector('[data-testid="inbox-detail"]')?.getAttribute("data-key")).toBe("approval:a");
+    expect(keys(host)).toContain("approval:a");
+  });
+
+  it("승인이 아닌 줄은 원장이 답해도 그대로 남는다(읽은 멘션을 손 밑에서 치우지 않는다)", async () => {
+    state.entries = [task("a"), entry({ key: "mention:m1", kind: "mention", typeLabel: "멘션 · #workbench" })];
+    const host = await mount();
+    await open(host, "mention:m1");
+    await ledgerDrops("mention:m1");
+    expect(host.querySelector('[data-testid="inbox-detail"]')?.getAttribute("data-key")).toBe("mention:m1");
+    expect(keys(host)).toContain("mention:m1");
   });
 });

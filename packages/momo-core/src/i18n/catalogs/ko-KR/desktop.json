@@ -17,5 +17,12 @@
   "desktop.menu.hide": "oort 가리기",
   "desktop.menu.hideOthers": "기타 가리기",
   "desktop.menu.quit": "oort 종료",
+  "desktop.tray.running": "실행 중",
+  "desktop.tray.none": "실행 중 없음",
+  "desktop.tray.newMessage": "새 메시지",
+  "desktop.tray.open": "oort 열기",
+  "desktop.tray.stateWorking": "작업 중",
+  "desktop.tray.stateBlocked": "대기",
+  "desktop.tray.more": "외 {count, number}개",
   "desktop.notify.threadSummary": "스레드 답글 {count, number}건"
 }

@@ -62,6 +62,7 @@ function context(): Omit<NotifyContext, "kindEnabled" | "paused"> {
     isMuted: () => false,
     isAnnounced: () => false,
     actorFor: () => "곽성재",
+    inviteLinkSentence: () => "사전의 고정 문장",
     nowMs: NOW,
   };
 }
@@ -172,6 +173,36 @@ describe("notifyThisDevice", () => {
     expect(
       notifyThisDevice(dmEvent(), dmContext({ windowFocused: true, isTargetVisible: () => true }))
     ).toEqual({ show: false, skip: "focused" });
+  });
+
+  // ---- #5025: 도우미 초대 링크 메시지 ---------------------------------------------
+  // 서버 본문은 「문장 + 링크」다. 링크가 **첫 줄에 오는** 모양으로도 배너는 preview만 말한다.
+  it("도우미 초대 링크 DM은 본문이 아니라 서버 preview를 배너 문장으로 쓴다 (#5025)", () => {
+    const storage = new MemoryStorage();
+    reloadDesktopNotificationKindsForTest(storage);
+    setDesktopNotificationKind("dm", true, storage);
+    const LINK = "https://oort.test/join?code=Ab3-_xQ7zK9";
+    const e = dmEvent();
+    const event = {
+      ...e,
+      payload: {
+        ...e.payload,
+        body: `${LINK}\n초대 링크를 올렸어요`,
+        props: { kind: "team_ai_invite_link", preview: "초대 링크를 올렸어요" },
+      },
+    } as MessageNewEvent;
+    const decision = notifyThisDevice(event, dmContext());
+    if (!decision.show) throw new Error("expected a banner");
+    expect(decision.notification.body).toBe("초대 링크를 올렸어요");
+    expect(JSON.stringify(decision)).not.toContain("join?code");
+    // preview가 비면 이 기기 언어의 사전 문장(호출자가 준 것)이다. 어느 쪽으로도 링크는 없다.
+    const empty = notifyThisDevice(
+      { ...event, payload: { ...event.payload, props: { kind: "team_ai_invite_link", preview: "" } } } as MessageNewEvent,
+      dmContext()
+    );
+    if (!empty.show) throw new Error("expected a banner");
+    expect(empty.notification.body).toBe("사전의 고정 문장");
+    expect(JSON.stringify(empty)).not.toContain("join?code");
   });
 
   it("창이 앞이어도 그 DM이 화면에 없으면 알린다", () => {

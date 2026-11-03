@@ -99,6 +99,7 @@ export function MailboxList({
             <button
               type="button"
               data-mailbox-row=""
+              data-entry-key={entry.key}
               data-testid="mailbox-row"
               data-kind={entry.kind}
               data-unread={entry.unread ? "true" : "false"}

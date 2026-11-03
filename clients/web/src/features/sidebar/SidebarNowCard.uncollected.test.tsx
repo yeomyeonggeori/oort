@@ -296,10 +296,14 @@ describe("사이드바 배선", () => {
   const SIDEBAR = readFileSync(resolve(__dirname, "Sidebar.tsx"), "utf8");
 
   it("카드 에이전트의 생존 판정을 읽어 카드에 넘긴다", () => {
-    expect(SIDEBAR).toMatch(/nowCardWaitingAgentId\(turnSignals, nowMs\)/);
+    // 카드와 생존 판정이 **같은** 덮은 목록(승인 원장 덮어쓰기, #5125)을 읽는다: 서버 생존 판정을 카드와 다른 에이전트에게서 읽지 않게.
+    expect(SIDEBAR).toMatch(
+      /const nowCardSignals = withApprovalWaits\(turnSignals, approvalWaits, nowMs\)/
+    );
+    expect(SIDEBAR).toMatch(/nowCardWaitingAgentId\(nowCardSignals, nowMs\)/);
     expect(SIDEBAR).toMatch(/useAgentLiveness\(nowCardAgentId\)/);
     expect(SIDEBAR).toMatch(
-      /<SidebarNowCard[\s\S]*?liveness=\{[^}]*nowCardLiveness\.liveness[^}]*\}[\s\S]*?\/>/
+      /<SidebarNowCard[\s\S]*?signals=\{nowCardSignals\}[\s\S]*?liveness=\{[^}]*nowCardLiveness\.liveness[^}]*\}[\s\S]*?\/>/
     );
   });
 });

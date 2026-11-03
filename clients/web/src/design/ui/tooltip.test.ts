@@ -10,7 +10,8 @@ import { TOOLTIP_DELAY_MS } from "@/design/motion";
 import { Tooltip } from "./tooltip";
 
 /**
- * 공용 툴팁의 동작 (#4324): 가리키면 500ms 뒤, 키보드 초점은 즉시, 눌림·나감·Esc는 즉시 닫힘.
+ * 공용 툴팁의 동작 (#4324): 가리키면 지연(`TOOLTIP_DELAY_MS`) 뒤, 키보드 초점은 즉시, 눌림·나감·Esc는 즉시 닫힘.
+ * 지연의 값과 옮겨 다닐 때의 0은 `tooltipDelay.test.ts`가 잰다(#5192).
  * 시간은 가짜 타이머로 재고, 경계(499 / 500)에서 단정한다.
  */
 
@@ -70,7 +71,7 @@ function focusVisible(el: HTMLElement, visible: boolean) {
 
 describe("공용 툴팁", () => {
   it("가리키면 지연(TOOLTIP_DELAY_MS) 뒤에야 뜬다: 한 틱 전엔 없고 정확히 그때 선다", () => {
-    expect(TOOLTIP_DELAY_MS).toBe(500);
+    expect(TOOLTIP_DELAY_MS).toBeLessThanOrEqual(150);
     vi.useFakeTimers();
     const { button, tip } = mount();
     pointer(button, "pointerover");
