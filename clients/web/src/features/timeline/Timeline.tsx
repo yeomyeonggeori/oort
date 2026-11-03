@@ -60,6 +60,8 @@ import {
 } from "@momo/core/features/timeline/deletedFold";
 import { isStreamRunEnded } from "@momo/core/features/timeline/streamStop";
 import { groupRepliesByRoot, liveThreadRollup } from "@momo/core/features/timeline/threadSummary";
+import { mainFlowMessages, replyHomeLine } from "@momo/core/features/timeline/threadHome";
+import { useExpressions } from "@/features/expressions/context";
 import { useEndedRuns } from "@/features/agents/endedRuns";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
@@ -404,8 +406,12 @@ export function Timeline({
   // 의존성에 넣으면 스트림이 매 렌더 새로 만들어지고, 그 동일성은 이 목록의
   // 앵커 보정이 기대는 것이다.
   const myMemberIdForFold = actions?.myMemberId;
-  // 서버가 소속 root를 준 답글만 본류에서 빼요. 옛 서버의 root 없는 카드는 그대로예요.
-  const mainMessages = useMemo(() => messages.filter((message) => !message.rootId), [messages]);
+  // 본류에는 root 없는 메시지와 「대화에도 보낸」 답글만 서요(ADR-0148 증보 결정 4 — 코어 `isMainFlowRow` 한 곳, 폰과 같은 규칙).
+  // 서버가 소속 root를 준 답글 중 켜지 않은 것만 빠져요. 옛 서버는 `alsoInChannel`을 안 보내서 화면이 오늘과 같고, root 없는 카드는 그대로예요.
+  const mainMessages = useMemo(() => mainFlowMessages(messages), [messages]);
+  // 본류에 선 답글 줄의 원문 한 줄: 이미 든 행에서 root를 푼다(요청 없음). 이모티콘만 보낸 root를 알아보려고 명부를 건넨다.
+  const { cache: expressionCache } = useExpressions();
+  const expressionItems = expressionCache.items;
 
   // 루트 아래 요약 줄(#5008): 서버가 페이지에서 준 요약은 읽은 때의 스냅샷이라, 그 뒤 실시간으로 온 답글의 수·얼굴·안 읽은 수는
   // 이 목록이 이미 든 답글(`messages`에는 답글 프레임도 들어 있다 — 본류에서만 `mainMessages`가 뺀다)로 그 위에 얹는다.
@@ -951,6 +957,7 @@ export function Timeline({
               deletedRepeat={item.deletedRepeat}
               deletedFoldedIds={item.deletedFoldedIds}
               rollup={rollupFor(item.message, viewingKey !== null && item.message.id.toLowerCase() === viewingKey)}
+              replyHome={replyHomeLine(item.message, quoteLookup, expressionItems)}
               onOpenThread={onOpenThread}
               onQuoteMessage={onQuoteMessage}
               onJumpToMessage={onJumpToMessage}

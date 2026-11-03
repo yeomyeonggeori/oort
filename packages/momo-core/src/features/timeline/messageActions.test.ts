@@ -246,6 +246,17 @@ describe("lastEditableMessage", () => {
     expect(lastEditableMessage(rows, ME)?.seq).toBe(1);
   });
 
+  // #4888 - 「대화에도 보낸」 답글은 본류에 서므로 ↑ 의 대상이다. 판정이 그리는 규칙과 같은 한 함수(`isMainFlowRow`)여야 한다.
+  it("includes my reply that was also sent to the conversation: it is drawn in the main flow", () => {
+    const rows = [msg(1), msg(2, { rootId: ROOT, alsoInChannel: true })];
+    expect(lastEditableMessage(rows, ME)?.seq).toBe(2);
+  });
+
+  it("still skips a thread-only reply of mine when a later also-sent reply is someone else's", () => {
+    const rows = [msg(1), msg(2, { rootId: ROOT, alsoInChannel: true, authorMemberId: OTHER }), msg(3, { rootId: ROOT })];
+    expect(lastEditableMessage(rows, ME)?.seq).toBe(1);
+  });
+
   it("returns nothing for an unknown viewer or when none of mine can be edited", () => {
     expect(lastEditableMessage([msg(1)], undefined)).toBeUndefined();
     expect(lastEditableMessage([msg(1, { authorMemberId: OTHER })], ME)).toBeUndefined();
