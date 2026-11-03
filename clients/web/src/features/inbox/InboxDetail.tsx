@@ -21,6 +21,8 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureBox, loadCauseOf } from "@/features/common/LoadFailureBox";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { MessageBody } from "@/features/timeline/MessageBody";
 import { SystemLine } from "@/features/timeline/SystemLine";
@@ -530,10 +532,10 @@ export function InboxDetail({
             )}
             <Skeleton ready={!context.isLoading} rows={3} className="p-2">
               {context.isError ? (
-                <InlineBanner
-                  message="대화를 불러오지 못했어요."
-                  actionLabel="다시 시도"
-                  onAction={() => void context.refetch()}
+                <LoadFailureBox
+                  titleKey={CONNECTION_KEYS.loadConversationTitle}
+                  cause={loadCauseOf(context.error)}
+                  onRetry={() => void context.refetch()}
                   testId="inbox-context-error"
                 />
               ) : messages.length === 0 ? (

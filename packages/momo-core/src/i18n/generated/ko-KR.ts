@@ -378,6 +378,36 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못해 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요."
     }
   ],
+  "connection.load.activityTitle": [
+    {
+      "type": 0,
+      "value": "활동을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentHistoryTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 작업 이력을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentProfileTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 프로필을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentRosterTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.agentRunTitle": [
+    {
+      "type": 0,
+      "value": "작업 상세를 불러오지 못했어요"
+    }
+  ],
   "connection.load.channelListTitle": [
     {
       "type": 0,
@@ -390,6 +420,66 @@ export const catalog: MessageCatalog = {
       "value": "대화를 불러오지 못했어요"
     }
   ],
+  "connection.load.deviceKeysTitle": [
+    {
+      "type": 0,
+      "value": "기기 키 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.dmApprovalTitle": [
+    {
+      "type": 0,
+      "value": "1:1 대화 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.enabledToolsTitle": [
+    {
+      "type": 0,
+      "value": "도구 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.hermesStatusTitle": [
+    {
+      "type": 0,
+      "value": "같은 서버의 Hermes 상태를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.hostListTitle": [
+    {
+      "type": 0,
+      "value": "코드 실행 호스트 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.inboxMoreTitle": [
+    {
+      "type": 0,
+      "value": "다음 항목을 불러오지 못했어요. 이미 받은 항목은 그대로예요"
+    }
+  ],
+  "connection.load.inboxTitle": [
+    {
+      "type": 0,
+      "value": "인박스를 불러오지 못했어요"
+    }
+  ],
+  "connection.load.linkedDevicesTitle": [
+    {
+      "type": 0,
+      "value": "기기 목록을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.linkPreviewSettingTitle": [
+    {
+      "type": 0,
+      "value": "링크 확인 설정을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.memberProfileTitle": [
+    {
+      "type": 0,
+      "value": "멤버 프로필을 불러오지 못했어요"
+    }
+  ],
   "connection.load.membersTitle": [
     {
       "type": 0,
@@ -400,6 +490,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "새 글을 불러오지 못했어요"
+    }
+  ],
+  "connection.load.notificationRulesTitle": [
+    {
+      "type": 0,
+      "value": "알림 규칙을 불러오지 못했어요"
     }
   ],
   "connection.load.reasonOffline": [
@@ -418,6 +514,26 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "문제가 생겼어요. 다시 시도해 주세요."
+    }
+  ],
+  "connection.load.sentence": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "connection.load.teamExpressionsTitle": [
+    {
+      "type": 0,
+      "value": "팀 그림을 불러오지 못했어요"
     }
   ],
   "connection.load.threadTitle": [

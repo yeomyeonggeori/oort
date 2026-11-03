@@ -22,6 +22,8 @@ import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureBox, loadCauseOf } from "@/features/common/LoadFailureBox";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useOffline } from "@/features/common/useOffline";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
@@ -211,10 +213,10 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
     body = <Skeleton ready={false} rows={6} className="p-4" />;
   } else if (roster.error !== null && candidates.length === 0) {
     body = (
-      <InlineBanner
-        message="멤버 명부를 불러오지 못했습니다."
-        actionLabel="다시 시도"
-        onAction={() => void roster.refetch()}
+      <LoadFailureBox
+        titleKey={CONNECTION_KEYS.loadMembersTitle}
+        cause={loadCauseOf(roster.error)}
+        onRetry={() => void roster.refetch()}
         testId="new-dm-roster-error"
       />
     );

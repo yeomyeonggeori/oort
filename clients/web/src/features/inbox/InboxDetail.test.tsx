@@ -5,10 +5,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Message } from "@momo/core/lib/api";
+import { ApiError, type Message } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import type { MailboxEntry } from "@momo/core/features/inbox/mailbox";
 import type { FeedItem } from "@momo/core/features/inbox/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { MARKER_DIVIDER_PAD_CLASS, SYSTEM_LINE_STRADDLE_CLEAR_CLASS } from "@/features/timeline/spacing";
 import { InboxDetail } from "./InboxDetail";
 
@@ -91,23 +95,23 @@ function session(): SessionContextValue {
   } as SessionContextValue;
 }
 
-async function mount(e: MailboxEntry, offline = false): Promise<HTMLElement> {
+/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
+async function mount(e: MailboxEntry, offline = false, korean = false): Promise<HTMLElement> {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const page = createElement(
+    QueryClientProvider, { client },
+    createElement(SessionProvider, { value: session() },
+      createElement(MemoryRouter, null,
+        createElement(InboxDetail, {
+          entry: e, directory, offline, onToggleRead: () => undefined,
+          onDecided: () => undefined, readBusy: false,
+        })))
+  );
   await act(async () => {
-    root?.render(
-      createElement(
-        QueryClientProvider, { client },
-        createElement(SessionProvider, { value: session() },
-          createElement(MemoryRouter, null,
-            createElement(InboxDetail, {
-              entry: e, directory, offline, onToggleRead: () => undefined,
-              onDecided: () => undefined, readBusy: false,
-            })))
-      )
-    );
+    root?.render(korean ? createElement(LocaleProvider, { locale: ko, children: page }) : page);
   });
   for (let i = 0; i < 6; i += 1) {
     await act(async () => {
@@ -117,7 +121,8 @@ async function mount(e: MailboxEntry, offline = false): Promise<HTMLElement> {
   return host;
 }
 
-beforeAll(() => { env.IS_REACT_ACT_ENVIRONMENT = true; });
+let ko: AppLocale;
+beforeAll(async () => { ko = await koreanLocale(); env.IS_REACT_ACT_ENVIRONMENT = true; });
 beforeEach(() => {
   api.fetchMessages.mockResolvedValue({ messages: [msg(6, "둘째"), msg(5, "첫째")] });
   api.fetchThreadReplies.mockResolvedValue({ messages: [msg(9, "답글 하나")] });
@@ -234,6 +239,37 @@ describe("InboxDetail", () => {
     api.fetchMessages.mockRejectedValue(new Error("boom"));
     const h = await mount(entry({}));
     expect(h.querySelector('[data-testid="inbox-context-error"]')).not.toBeNull();
+  });
+
+  // #5242: 옛 「대화를 불러오지 못했어요.」 배너는 원인 상자다. 이유가 원인을 따르고 다시 시도가 맥락을 다시 읽는다.
+  it("맥락을 못 불러오면 원인 상자가 서고, 이유가 원인을 따라가며, 다시 시도가 다시 읽는다", async () => {
+    const cases: [Error, string, string][] = [
+      [new NetworkError("unreachable", 15_000), "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [new ApiError(500, "boom", "internal"), "", "문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [error, cause, reason] of cases) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+      api.fetchMessages.mockReset();
+      api.fetchMessages.mockRejectedValue(error);
+      const h = await mount(entry({}), false, true);
+      const box = h.querySelector<HTMLElement>('[data-testid="inbox-context-error"]');
+      expect(box, cause).not.toBeNull();
+      expect(box?.getAttribute("role")).toBe("alert");
+      expect(box?.getAttribute("data-cause") ?? "").toBe(cause);
+      expect(box?.textContent).toContain("대화를 불러오지 못했어요");
+      expect(box?.querySelector('[data-testid="load-failure-reason"]')?.textContent).toBe(reason);
+      const reads = api.fetchMessages.mock.calls.length;
+      await act(async () => {
+        box?.querySelector("button")?.click();
+        await new Promise((r) => setTimeout(r, 10));
+      });
+      expect(api.fetchMessages.mock.calls.length).toBeGreaterThan(reads);
+      act(() => root?.unmount());
+      host?.remove();
+      root = null;
+      host = null;
+      vi.restoreAllMocks();
+    }
   });
 
   it("전송이 실패하면 입력은 남고 이유가 보인다", async () => {

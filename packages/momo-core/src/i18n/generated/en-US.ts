@@ -420,6 +420,36 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server, so you can't send right now. Your draft is still here, and you can send it once we're connected again."
     }
   ],
+  "connection.load.activityTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load activity"
+    }
+  ],
+  "connection.load.agentHistoryTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the agent's work history"
+    }
+  ],
+  "connection.load.agentProfileTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the agent profile"
+    }
+  ],
+  "connection.load.agentRosterTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the agent list"
+    }
+  ],
+  "connection.load.agentRunTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the task details"
+    }
+  ],
   "connection.load.channelListTitle": [
     {
       "type": 0,
@@ -432,6 +462,66 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the conversation"
     }
   ],
+  "connection.load.deviceKeysTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the device keys"
+    }
+  ],
+  "connection.load.dmApprovalTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the 1:1 conversation list"
+    }
+  ],
+  "connection.load.enabledToolsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the tool list"
+    }
+  ],
+  "connection.load.hermesStatusTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the status of Hermes on this server"
+    }
+  ],
+  "connection.load.hostListTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the code execution hosts"
+    }
+  ],
+  "connection.load.inboxMoreTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the next items. The ones you already have are still here"
+    }
+  ],
+  "connection.load.inboxTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the inbox"
+    }
+  ],
+  "connection.load.linkedDevicesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the device list"
+    }
+  ],
+  "connection.load.linkPreviewSettingTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the link check setting"
+    }
+  ],
+  "connection.load.memberProfileTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the member profile"
+    }
+  ],
   "connection.load.membersTitle": [
     {
       "type": 0,
@@ -442,6 +532,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't load new messages"
+    }
+  ],
+  "connection.load.notificationRulesTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the notification rules"
     }
   ],
   "connection.load.reasonOffline": [
@@ -460,6 +556,26 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Something went wrong. Try again."
+    }
+  ],
+  "connection.load.sentence": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": ". "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
+  "connection.load.teamExpressionsTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the team emoji"
     }
   ],
   "connection.load.threadTitle": [
