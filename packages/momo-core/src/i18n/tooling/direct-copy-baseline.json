@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "9041551d51b755581c23f3ea466a52af0d366462",
+  "baselineHead": "fc0d62c9e0165ea4e13d7ba212e0dcf54414d4f9",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -206,7 +206,7 @@
     "clients/mobile/src/features/profile/PauseBanner.tsx": 11,
     "clients/mobile/src/features/profile/PauseUntilCustom.tsx": 28,
     "clients/mobile/src/features/profile/PauseUntilPage.tsx": 20,
-    "clients/mobile/src/features/profile/SettingsPage.tsx": 127,
+    "clients/mobile/src/features/profile/SettingsPage.tsx": 124,
     "clients/mobile/src/features/profile/StatusSheet.tsx": 27,
     "clients/mobile/src/features/profile/appVersion.ts": 3,
     "clients/mobile/src/features/profile/avatarPhoto.ts": 16,

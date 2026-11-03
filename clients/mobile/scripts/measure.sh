@@ -7,7 +7,7 @@
 #   2. anchor movement when older messages are prepended
 #   3. the gap between the composer's bottom edge and the keyboard's top edge
 #   4. the `Origin` header React Native's WebSocket sends
-#   5. Work Console/detail in both schemes and an accessibility text size
+#   5. Work jobs (the old Work Console)/detail in both schemes and an accessibility text size
 #   6. the composer's growth cap under Dynamic Type (#1443)
 #
 # Simulator, deliberately. Spike #837 established that this is the one property
@@ -19,6 +19,15 @@
 # The hardware keyboard is disconnected first: with the Mac's keyboard attached
 # the software keyboard never appears and step 3 measures nothing.
 set -euo pipefail
+
+# >>> surface-preflight
+# 시뮬레이터·Metro·출력 폴더를 건드리기 **전에** 묻는다(#5172): 이 스크립트가 찍는 모든 표면(`capture_surface <이름> …`)을 하네스가
+# 아는가. `-momoMeasure <이름>` 은 아무 이름이나 받고, 하네스가 모르는 이름은 「알 수 없는 표면」 안내 화면을 그리는데 그것도 멀쩡한
+# 사진으로 남는다(#2864 가 지운 `WORK-CONSOLE` 이 이 스크립트에서 그렇게 찍혔고, 검증 줄은 `APPROVED` 를 그렇게 받았다). 모르는 이름이
+# 있으면 여기서 멈춘다. 이름은 스크립트 자신의 `capture_surface` 줄에서 읽는다(공백 없는 이름이라 따옴표 없이 펼친다).
+# 아래 `cd` 보다 **앞**에 둔다: 이 스크립트는 어느 폴더에서 불러도 되고, 상대 경로로 불린 `$0` 은 `cd` 뒤에는 가리키는 곳이 달라진다.
+node "$(cd "$(dirname "$0")" && pwd)/../measure/known-surface.cjs" $(grep -E '^capture_surface +[A-Za-z0-9+_-]+ ' "$0" | awk '{print $2}' | sort -u)
+# <<< surface-preflight
 
 cd "$(dirname "$0")/.."
 
@@ -128,6 +137,9 @@ xcrun simctl io booted screenshot "$OUT_DIR/states.png"
 capture_surface() {
   local mode="$1"
   local file="$2"
+  # 모르는 이름이면 앱을 띄우기 전에 멈춘다(#5172) — 안 그러면 「알 수 없는 표면」 안내 화면이 사진 한 장으로 남는다. 위의 시작 점검이
+  # 스크립트 안의 이름을 미리 거르고, 이 줄은 이름을 계산해서 넘기는 호출도 같은 문을 지나게 한다.
+  node measure/known-surface.cjs "$mode" > /dev/null || exit 1
   xcrun simctl terminate booted "$BUNDLE_ID" 2>/dev/null || true
   xcrun simctl launch booted "$BUNDLE_ID" --args \
     -momoMeasure "$mode" -RCT_jsLocation "127.0.0.1:$METRO_PORT"
@@ -135,9 +147,12 @@ capture_surface() {
   xcrun simctl io booted screenshot "$OUT_DIR/$file"
 }
 
-capture_surface WORK-CONSOLE work-console-dark.png
+# The Work Console screen is now `WorkJobsScreen` (「작업」, ADR-0202 D6): #2864 deleted
+# `WorkConsoleScreen`, so the harness has not known `WORK-CONSOLE` since, and this script kept
+# capturing the 「알 수 없는 표면」 page under that name (#5172). `WORK-JOBS` is its successor.
+capture_surface WORK-JOBS work-jobs-dark.png
 capture_surface WORK-DETAIL work-detail-dark.png
-capture_surface LIGHT-WORK-CONSOLE work-console-light.png
+capture_surface LIGHT-WORK-JOBS work-jobs-light.png
 capture_surface LIGHT-WORK-DETAIL work-detail-light.png
 
 # #1422 컴포저 플레이스홀더. 폰에는 웹의 `composer-placeholder` 대응물이 없고
@@ -161,7 +176,7 @@ xcrun simctl ui booted content_size accessibility-large
 capture_surface COMPOSER-PLACEHOLDER composer-placeholder-a11y-large.png
 capture_surface LIGHT-COMPOSER-PLACEHOLDER composer-placeholder-a11y-large-light.png
 xcrun simctl ui booted content_size accessibility-extra-extra-large
-capture_surface WORK-CONSOLE work-console-accessibility-text.png
+capture_surface WORK-JOBS work-jobs-accessibility-text.png
 capture_surface WORK-DETAIL work-detail-accessibility-text.png
 # #1422 design-review H2. 기본 크기에서 폰이 플레이스홀더를 **안 자른다**는 것이
 # 웹과 폰이 다른 처리를 하는 근거인데, 그 근거가 이 크기에서도 참인지는 아무도
@@ -223,7 +238,7 @@ echo "---- Origin stub ----"
 cat "$OUT_DIR/origin-stub.log"
 echo
 echo "screenshot: $OUT_DIR/measure.png"
-echo "work console screenshots: $OUT_DIR/work-console-{dark,light}.png"
+echo "work jobs screenshots: $OUT_DIR/work-jobs-{dark,light}.png"
 echo "work detail screenshots: $OUT_DIR/work-detail-{dark,light}.png"
-echo "accessibility text screenshots: $OUT_DIR/work-{console,detail}-accessibility-text.png"
+echo "accessibility text screenshots: $OUT_DIR/work-{jobs,detail}-accessibility-text.png"
 echo "the numbers are also on the Metro log, one line prefixed MOMO_MEASURE"
