@@ -23,6 +23,8 @@ import { useReleaseNotesMessages } from "./useReleaseNotesMessages";
 // (그 소식이 이 앱에 적용되는 가장 새 것이다).
 //
 // 내용은 팀이 QA와 써 보기에 쓴다: 항목마다 「바뀐 점」과 「이렇게 써 보세요」, 보이는 화면(폰·데스크탑) 표지.
+// 핵심 항목 아래에는 「그 밖에 바뀐 점」(#5054)이 주제별 한 줄로 선다: 소식이 이 칸을 비워 두면 머리글도 서지 않는다.
+// 이 화면에만 있다(첫 실행 자동 창에는 없다). 글은 모두 사전의 키라서 언어마다 따로 고를 것이 없다.
 // 목록에서 내용으로 들어가면 포커스가 내용의 제목으로 가고(낭독이 새 제목을 읽는다), 돌아오면 눌렀던 줄의 단추로
 // 돌아온다. 이 화면에는 자기 움직임이 없다.
 // =============================================================================
@@ -36,9 +38,10 @@ const SURFACE_KEY = {
 const itemTestId = (id: string) => "release-notes-item-" + id;
 const rowTestId = (version: string) => "release-notes-row-" + version;
 const openTestId = (version: string) => "release-notes-open-" + version;
+const otherTestId = (id: string) => "release-notes-other-" + id;
 
 export function ReleaseNotesSection({ notes: given = RELEASE_NOTES }: { notes?: readonly ReleaseNote[] }) {
-  const { messages, noteLocale } = useReleaseNotesMessages();
+  const { messages } = useReleaseNotesMessages();
   // 넘겨받은 순서에 기대지 않는다: 새 소식이 맨 위가 되게 스스로 줄 세운다.
   const notes = useMemo(() => listReleaseNotes(given), [given]);
   const appVersion = useAppVersion();
@@ -88,7 +91,7 @@ export function ReleaseNotesSection({ notes: given = RELEASE_NOTES }: { notes?: 
           <p className="break-keep text-meta text-ink-muted">
             <span data-numeric>{messages.formatMessage("releaseNotes.version.releasedOn", { date: note.releasedOn })}</span>
           </p>
-          <p className="break-keep text-body text-ink-muted">{note.summary[noteLocale]}</p>
+          <p className="break-keep text-body text-ink-muted">{messages.formatMessage(note.summary)}</p>
         </div>
         <SettingsSection>
           {note.items.map((item) => (
@@ -98,7 +101,7 @@ export function ReleaseNotesSection({ notes: given = RELEASE_NOTES }: { notes?: 
               testId={itemTestId(item.id)}
               label={
                 <span className="flex flex-wrap items-center gap-2">
-                  <span>{item.copy[noteLocale].title}</span>
+                  <span>{messages.formatMessage(item.title)}</span>
                   <span
                     role="group"
                     aria-label={messages.formatMessage("releaseNotes.surface.label")}
@@ -118,18 +121,41 @@ export function ReleaseNotesSection({ notes: given = RELEASE_NOTES }: { notes?: 
                   <dt className="text-meta font-semibold text-ink-muted">
                     {messages.formatMessage("releaseNotes.detail.changed")}
                   </dt>
-                  <dd className="break-keep text-body text-ink">{item.copy[noteLocale].changed}</dd>
+                  <dd className="break-keep text-body text-ink">{messages.formatMessage(item.changed)}</dd>
                 </div>
                 <div className="flex min-w-0 flex-col gap-px">
                   <dt className="text-meta font-semibold text-ink-muted">
                     {messages.formatMessage("releaseNotes.detail.tryIt")}
                   </dt>
-                  <dd className="break-keep text-body text-ink">{item.copy[noteLocale].tryIt}</dd>
+                  <dd className="break-keep text-body text-ink">{messages.formatMessage(item.tryIt)}</dd>
                 </div>
               </dl>
             </SettingsRow>
           ))}
         </SettingsSection>
+        {note.others.length > 0 ? (
+          <SettingsSection
+            title={messages.formatMessage("releaseNotes.detail.others")}
+            testId="release-notes-others"
+          >
+            {note.others.map((group) => (
+              <SettingsRow
+                key={group.id}
+                stack
+                testId={otherTestId(group.id)}
+                label={messages.formatMessage(group.title)}
+              >
+                <ul className="flex w-full min-w-0 list-disc flex-col gap-1 pl-4 marker:text-ink-muted">
+                  {group.lines.map((line) => (
+                    <li key={line} className="break-keep text-body text-ink">
+                      {messages.formatMessage(line)}
+                    </li>
+                  ))}
+                </ul>
+              </SettingsRow>
+            ))}
+          </SettingsSection>
+        ) : null}
       </div>
     );
   }
@@ -157,7 +183,7 @@ export function ReleaseNotesSection({ notes: given = RELEASE_NOTES }: { notes?: 
                 }
                 description={
                   <>
-                    <span className="block">{item.summary[noteLocale]}</span>
+                    <span className="block">{messages.formatMessage(item.summary)}</span>
                     <span className="block" data-numeric>
                       {messages.formatMessage("releaseNotes.version.releasedOn", { date: item.releasedOn })}
                     </span>

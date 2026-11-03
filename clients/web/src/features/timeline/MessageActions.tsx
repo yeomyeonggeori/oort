@@ -28,7 +28,9 @@ import {
   closestToolbarScrollContainer,
   HOVER_TOOLBAR_REACTION_SEED,
   HOVER_TOOLBAR_SLOT_COUNT,
-  toolbarClipsScrollerTop,
+  neighborTextRects,
+  shouldFlipToolbarBelow,
+  toolbarNeighbors,
 } from "./hoverToolbarModel";
 import {
   Dialog,
@@ -349,8 +351,10 @@ const toolbarIconClass = "size-4";
  * Placement straddles the row's top edge (`hover-toolbar-straddle`) and keeps
  * the same 16px right gutter as the body (`right-4`). When that would clip the
  * nearest scroll-container top, it mirrors to the row's bottom edge
- * (`hover-toolbar-straddle-below`, #1743 H-4). Own-row body text must not
- * intersect the toolbar box (B11 R2 Blocker / #1743 B-3).
+ * (`hover-toolbar-straddle-below`, #1743 H-4). It mirrors the same way when the
+ * top edge would cover the previous neighbour's text and the bottom edge would
+ * cover none of the next neighbour's (#5179, `shouldFlipToolbarBelow`). Own-row
+ * body text must not intersect the toolbar box (B11 R2 Blocker / #1743 B-3).
  */
 export function MessageHoverToolbar({
   available,
@@ -384,20 +388,24 @@ export function MessageHoverToolbar({
   // the next unmount+mount picks up the new order (#1743 H-2). aria-pressed
   // still follows live `mineEmojis`.
   const [slots] = useState(liveSlots);
+  // 설 쪽은 마운트 때 한 번 잰다(열린 메뉴가 막대를 붙들고 있는 동안 자리가 옮겨 다니지 않는다). 스크롤러를 못 찾으면 — 레이아웃을 못
+  // 재는 jsdom 시험이 그렇다 — 이웃 글자에는 손도 대지 않는다. 규칙은 `hoverToolbarModel.shouldFlipToolbarBelow`(#5179).
   useLayoutEffect(() => {
     if (straddleBelow) return;
     const bar = barRef.current;
     if (!bar) return;
     const scroller = closestToolbarScrollContainer(bar);
     if (!scroller) return;
-    if (
-      toolbarClipsScrollerTop(
-        bar.getBoundingClientRect(),
-        scroller.getBoundingClientRect()
-      )
-    ) {
-      setStraddleBelow(true);
-    }
+    const row = bar.closest('[data-testid="timeline-message"]');
+    const neighbors = row ? toolbarNeighbors(row, scroller) : null;
+    const flip = shouldFlipToolbarBelow({
+      bar: bar.getBoundingClientRect(),
+      row: row ? row.getBoundingClientRect() : null,
+      scroller: scroller.getBoundingClientRect(),
+      prevText: () => neighborTextRects(neighbors?.prev ?? null),
+      nextText: () => neighborTextRects(neighbors?.next ?? null),
+    });
+    if (flip) setStraddleBelow(true);
   }, [straddleBelow]);
   // 도구 막대의 단추는 모델의 표가 정한다(`MESSAGE_ACTION_GROUP_PLACEMENT`): 표와 화면이 따로 놀지 않는다.
   const toolbarItems = messageToolbarItems(available, copyState);
