@@ -17,7 +17,7 @@ import {
   type ComposerKeyIntent,
 } from "@momo/core/features/chat/composerKeys";
 import { InlineBanner } from "@/features/common/States";
-import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
+import { isClosedBodyRejection, replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
 import { THREAD_COMPOSER_PLACEHOLDER } from "@momo/core/features/chat/composerCopy";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
@@ -25,6 +25,7 @@ import { mentionRoutingTarget, calledAgents } from "@momo/core/features/routing/
 import { composerAgentNotice } from "@momo/core/features/ai/aiMention";
 import { Button } from "@/design/ui/button";
 import { useIsMobileShell } from "@/app/shellNav";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import {
   AttachButton,
@@ -131,6 +132,11 @@ export function ThreadComposer({
   const [draft, setDraft] = useState(() => readThreadDraft(workspaceId, rootId));
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 「대화에도 보내기」(#4888, ADR-0148 증보): 켠 답글은 대화(본류)에도 보인다. **기본은 꺼짐이고 마지막 선택을 기억하지 않는다**(Slack
+  // 기본) — 저장소에 쓰지 않고, 보내기에 성공하면 꺼지고, 스레드를 옮기면 꺼진다. 실패하면 글이 남아 이 체크도 남는다(다시 보내도 같은 선택).
+  const formatMessage = useFormatMessage();
+  const [alsoInChannel, setAlsoInChannel] = useState(false);
+  useEffect(() => setAlsoInChannel(false), [rootId]);
   // 키 모양을 보고 전송을 막은 횟수 (#2942 GC-1). 채널 컴포저와 같은 문이다.
   const [secretBlocks, setSecretBlocks] = useState(0);
   const secretBlocked = secretBlocks > 0;
@@ -277,6 +283,8 @@ export function ThreadComposer({
       clearThreadDraft(workspaceId, rootId);
       draftRef.current = "";
       setDraft("");
+      // 예약은 「대화에도 보내기」를 싣지 않는다(ADR-0148 증보: 후속). 글이 예약으로 떠났으니 체크도 풀어서 다음 답글로 새지 않게 한다.
+      setAlsoInChannel(false);
       autocomplete.close();
       format.dismiss();
     },
@@ -314,10 +322,13 @@ export function ThreadComposer({
       // ✕로 끈 채 보낸다(켠 때만 키가 간다). 값은 이 렌더의 것이고, 실패하면 글이 남아 ✕도 남으므로 다시
       // 보내도 같은 선택이다. 성공하면 글이 비어 저절로 풀린다.
       ...(linkPreview.suppressed ? { suppressUnfurl: true } : {}),
+      // 켠 때만 키가 간다(코어가 false 를 떨군다). 옛 서버는 모르는 키를 400 으로 거절하므로 끈 답글은 이 칸 이전과 같은 요청이다.
+      ...(alsoInChannel ? { alsoInChannel: true } : {}),
     })
       .then((message) => {
         expressionStore?.recordSuccess(body, message.id);
         clearThreadDraft(workspaceId, rootId);
+        setAlsoInChannel(false);
         setDraft("");
         autocomplete.close();
         format.dismiss();
@@ -325,7 +336,14 @@ export function ThreadComposer({
         onSent();
         ref.current?.focus();
       })
-      .catch((cause: unknown) => setError(replyFailureMessage(cause)))
+      .catch((cause: unknown) =>
+        // 서버가 이 값을 모르면(옛 서버, 닫힌 본문 규칙의 400) 조용히 스레드로만 보내지 않고 이유를 말한다(ADR-0148 호환 표).
+        setError(
+          alsoInChannel && isClosedBodyRejection(cause)
+            ? formatMessage("reply.alsoInChannel.unsupported")
+            : replyFailureMessage(cause)
+        )
+      )
       .finally(() => setSending(false));
   };
 
@@ -537,6 +555,21 @@ export function ThreadComposer({
               // outline까지 남기면 그릇 안에 두 번째 상자가 생긴다.
               className="tap-target block min-h-control w-full resize-none rounded-sm bg-transparent px-3 py-2 text-body text-ink outline-none focus-visible:outline-none"
             />
+            {/* 「대화에도 보내기」: 입력 칸 바로 아래, 도구 줄 위. Tab 은 글 칸 다음에 여기로 오고 Space 로 켠다. 이름은 보이는 글이 진다. */}
+            <label
+              className="tap-target mx-3 mb-1 flex w-fit cursor-pointer items-center gap-2 rounded-sm text-meta text-ink-muted active:bg-surface-pressed has-[:focus-visible]:focus-ring"
+              data-testid="thread-composer-also-in-channel"
+            >
+              <input
+                type="checkbox"
+                checked={alsoInChannel}
+                disabled={sending}
+                onChange={(event) => setAlsoInChannel(event.target.checked)}
+                className="size-4 shrink-0 rounded-sm accent-accent focus-visible:focus-ring"
+                data-testid="thread-composer-also-in-channel-input"
+              />
+              {formatMessage("reply.alsoInChannel.label")}
+            </label>
             <div
               className="flex items-center justify-between gap-2 pb-2 pl-1 pr-2"
               data-testid="thread-composer-actions"

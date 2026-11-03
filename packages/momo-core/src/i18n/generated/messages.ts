@@ -441,6 +441,8 @@ export const messageKeys = [
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
+  "reply.alsoInChannel.label",
+  "reply.alsoInChannel.unsupported",
   "reply.card.cancel",
   "reply.card.excerptEmpty",
   "reply.card.excerptExpression",
@@ -450,6 +452,11 @@ export const messageKeys = [
   "reply.card.headerSelf",
   "reply.composer.placeholder",
   "reply.composer.send",
+  "reply.home.excerptDeleted",
+  "reply.home.header",
+  "reply.home.headerSelf",
+  "reply.home.headerUnknown",
+  "reply.home.open",
   "settings.aiLimits.ceilingSearches",
   "settings.aiLimits.ceilingTokens",
   "settings.aiLimits.cleared",
@@ -1257,6 +1264,8 @@ export const argumentSpecs = {
   "releaseNotes.version.releasedOn": {
     "date": "string"
   },
+  "reply.alsoInChannel.label": {},
+  "reply.alsoInChannel.unsupported": {},
   "reply.card.cancel": {},
   "reply.card.excerptEmpty": {},
   "reply.card.excerptExpression": {},
@@ -1268,6 +1277,13 @@ export const argumentSpecs = {
   "reply.card.headerSelf": {},
   "reply.composer.placeholder": {},
   "reply.composer.send": {},
+  "reply.home.excerptDeleted": {},
+  "reply.home.header": {
+    "name": "string"
+  },
+  "reply.home.headerSelf": {},
+  "reply.home.headerUnknown": {},
+  "reply.home.open": {},
   "settings.aiLimits.ceilingSearches": {
     "limit": "number"
   },
@@ -2118,6 +2134,8 @@ export interface MessageArgs {
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
+  "reply.alsoInChannel.label": Record<string, never>;
+  "reply.alsoInChannel.unsupported": Record<string, never>;
   "reply.card.cancel": Record<string, never>;
   "reply.card.excerptEmpty": Record<string, never>;
   "reply.card.excerptExpression": Record<string, never>;
@@ -2127,6 +2145,11 @@ export interface MessageArgs {
   "reply.card.headerSelf": Record<string, never>;
   "reply.composer.placeholder": Record<string, never>;
   "reply.composer.send": Record<string, never>;
+  "reply.home.excerptDeleted": Record<string, never>;
+  "reply.home.header": { name: string };
+  "reply.home.headerSelf": Record<string, never>;
+  "reply.home.headerUnknown": Record<string, never>;
+  "reply.home.open": Record<string, never>;
   "settings.aiLimits.ceilingSearches": { limit: number };
   "settings.aiLimits.ceilingTokens": { limit: number };
   "settings.aiLimits.cleared": Record<string, never>;

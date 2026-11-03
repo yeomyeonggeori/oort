@@ -7,6 +7,7 @@ import type {
 } from "../../lib/api";
 import { threadRollup, uuidEq } from "../../lib/api";
 import type { DmGroupFacts } from "../workspace/directory";
+import { isMainFlowRow } from "./threadHome";
 
 // =============================================================================
 // Timeline ordering model (pure). `seq` is the ONLY ordering authority, never
@@ -445,8 +446,9 @@ export function canEditMessage(
  * - **`canEditMessage` 를 그대로 쓴다.** 고칠 수 있는 것의 정의가 둘이 되면 메뉴에는 없는 글을 ↑ 가 열거나 그 반대가 된다.
  * - **글이 있어야 한다.** 첨부만 보낸 메시지는 `canEditMessage` 가 열어 주지만(캡션을 나중에 달 수 있다) 편집기가 빈 상자로
  *   열린다. ↑ 는 「방금 쓴 글의 오타」를 위한 키라 그런 줄은 건너뛰고 그 앞의 글 있는 메시지를 고친다. 공백뿐인 글도 글이 아니다.
- * - **채널의 본류만 본다.** 스레드 답글은 채널 줄에 서지 않고(`rootId` 가 있는 행은 본류에서 걸러진다) 편집기는 보이는 행
- *   안에서 열려야 하므로, 채널 입력칸의 ↑ 가 안 보이는 답글을 열면 안 된다.
+ * - **채널의 본류에 그려진 행만 본다.** 스레드로만 간 답글은 채널 줄에 서지 않고(`isMainFlowRow`) 편집기는 보이는 행
+ *   안에서 열려야 하므로, 채널 입력칸의 ↑ 가 안 보이는 답글을 열면 안 된다. 「대화에도 보낸」 내 답글(#4888)은 본류에
+ *   서므로 그 줄의 오타도 ↑ 한 번이면 고친다 — 판정은 화면이 그리는 규칙과 **같은 한 함수**다.
  *
  * `messages` 는 seq 오름차순이다(`TimelineState.messages`). 끝에서부터 첫 일치가 가장 최근이다.
  */
@@ -456,7 +458,7 @@ export function lastEditableMessage(
 ): Message | undefined {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message.rootId) continue;
+    if (!isMainFlowRow(message)) continue;
     if (!canEditMessage(message, myMemberId)) continue;
     if (!message.body || message.body.trim().length === 0) continue;
     return message;
@@ -846,6 +848,17 @@ export interface PendingMessage {
    * 이미 저장된 메시지의 재시도에서 이 필드를 다시 판단하지 않는다). 켠 때만 있다.
    */
   suppressUnfurl?: boolean;
+  /**
+   * ADR-0148 증보 2026-10-31(#4887, 화면 #4888) — 스레드 답글을 「대화에도 보내기」로 보냈다. `suppressUnfurl` 과 같은 이유로
+   * 행을 타고 다닌다: 첫 요청이 서버에 닿지 못했다면 재시도가 같은 멱등키로 **같은 요청**을 다시 보내야 한다(서버는 이미 저장된
+   * 메시지의 재시도에서 이 값을 다시 판단하지 않는다 — 첫 값이 이긴다). 켠 때만 있다. `rootId` 가 있는 행에서만 뜻이 있다.
+   */
+  alsoInChannel?: boolean;
+  /**
+   * 이 전송이 달리는 스레드의 루트 — 스레드 답글의 에코에만 있다. 대화 화면이 실패한 답글·「대화에도 보낸」 답글의 에코에
+   * 「↳ ○○님 스레드에 답글」 줄을 그리려면 에코가 자기 루트를 알아야 한다(#4888). `replyToId` 처럼 행이 들고 다닌다.
+   */
+  rootId?: string;
 }
 
 /** True when `message` is the server's echo of `pending`. */
@@ -881,7 +894,7 @@ export function confirmsPending(
  * send order. One confirmed message settles at most one pending row.
  */
 export function unsettledPending(
-  messages: Message[],
+  messages: readonly Message[],
   pending: PendingMessage[]
 ): PendingMessage[] {
   if (pending.length === 0) return pending;
@@ -908,6 +921,15 @@ export function removePending(
   clientMsgId: string
 ): PendingMessage[] {
   return list.filter((p) => p.clientMsgId !== clientMsgId);
+}
+
+/**
+ * 대화(채널) 목록이 이 에코를 그리는가 (#4888). 스레드 답글의 에코는 기본적으로 열린 스레드의 것이라 대화 목록에 없다(같은 메시지가 두
+ * 자리에 서면 이중이다). 예외는 둘이다: 「대화에도 보내기」로 보낸 답글(확정되면 본류의 행이 되므로 에코도 처음부터 선다), 그리고
+ * **보내지 못한** 답글(밀어서 보낸 답글은 스레드를 열지 않으므로 실패를 대화 화면에서 알려야 한다 — 같은 다시 보내기·지우기).
+ */
+export function isChannelListEcho(row: PendingMessage): boolean {
+  return row.rootId === undefined || row.alsoInChannel === true || row.status === "failed";
 }
 
 /** The send attempt failed. The row stays put and offers a retry (R-1 §3). */
@@ -1010,6 +1032,15 @@ export interface BuildItemsOptions {
   recoveryMarkers?: RecoveryMarker[];
   /** Local echoes of messages this client sent, still awaiting their seq. */
   pending?: PendingMessage[];
+  /**
+   * 에코가 정착했는지 **대조할** 확정 메시지들. 주지 않으면 그리는 `messages` 다.
+   *
+   * 폰 본류는 스레드로만 간 답글을 **그리지 않으므로**(`phoneMainFlowMessages`) 그리는 목록과 대조할 목록이 갈린다: 보내지 못해
+   * 에코로 남은 스레드 답글의 확정본이 나중에 실시간으로 오면, 그 확정본은 본류에서 걸러져 있어도 에코를 정착시켜야 한다.
+   * 안 그러면 이미 도착한 답글이 「전송 실패」로 남는다. 한 번만 대조한다 — 걸러 낸 목록으로 다시 대조하면 같은 확정본이 같은
+   * 글을 두 번 보낸 에코 둘을 모두 삼킨다.
+   */
+  settleAgainst?: readonly Message[];
 }
 
 /**
@@ -1117,7 +1148,7 @@ export function buildTimelineItems(
   // already in `messages` is dropped here, which is where "중복 0" is enforced
   // regardless of whether the POST response or the realtime frame won the race.
   let previousRow: GroupingRow | undefined = previous;
-  for (const row of unsettledPending(messages, pending)) {
+  for (const row of unsettledPending(options.settleAgainst ?? messages, pending)) {
     // The echo that opens a new local day carries the day line itself (#4749).
     // The confirmed twin gets one from the loop above (`day-<key>`, the same key
     // for the same day), so without this the line appeared only when the POST
