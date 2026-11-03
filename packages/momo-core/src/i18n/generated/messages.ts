@@ -460,11 +460,18 @@ export const messageKeys = [
   "teamAi.stage.setupLine",
   "teamAi.stage.setupUnverifiedDetail",
   "teamAi.stage.verifyingLine",
+  "timeline.agentRail.open",
+  "timeline.agentRail.openActivity",
+  "timeline.agentRail.openRecord",
+  "timeline.agentRail.sheetClose",
+  "timeline.agentRail.sheetTitle",
   "timeline.lightbox.copied",
   "timeline.lightbox.copy",
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.runException.open",
+  "timeline.runException.settings",
   "timeline.send.discard",
   "timeline.send.failed",
   "timeline.send.resend",
@@ -480,6 +487,7 @@ export const messageKeys = [
   "timeline.thread.openUnread",
   "timeline.thread.replyCount",
   "timeline.thread.unreadChip",
+  "timeline.triggerChip.jumpHint",
   "timeline.unfurl.label",
   "timeline.unfurl.previewDismiss",
   "timeline.unfurl.previewDismissed",
@@ -1142,11 +1150,24 @@ export const argumentSpecs = {
   "teamAi.stage.setupLine": {},
   "teamAi.stage.setupUnverifiedDetail": {},
   "teamAi.stage.verifyingLine": {},
+  "timeline.agentRail.open": {
+    "label": "string"
+  },
+  "timeline.agentRail.openActivity": {},
+  "timeline.agentRail.openRecord": {
+    "name": "string"
+  },
+  "timeline.agentRail.sheetClose": {},
+  "timeline.agentRail.sheetTitle": {},
   "timeline.lightbox.copied": {},
   "timeline.lightbox.copy": {},
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.runException.open": {
+    "text": "string"
+  },
+  "timeline.runException.settings": {},
   "timeline.send.discard": {},
   "timeline.send.failed": {},
   "timeline.send.resend": {},
@@ -1171,6 +1192,7 @@ export const argumentSpecs = {
   "timeline.thread.unreadChip": {
     "count": "number"
   },
+  "timeline.triggerChip.jumpHint": {},
   "timeline.unfurl.label": {
     "domain": "string",
     "title": "string"
@@ -1815,11 +1837,18 @@ export interface MessageArgs {
   "teamAi.stage.setupLine": Record<string, never>;
   "teamAi.stage.setupUnverifiedDetail": Record<string, never>;
   "teamAi.stage.verifyingLine": Record<string, never>;
+  "timeline.agentRail.open": { label: string };
+  "timeline.agentRail.openActivity": Record<string, never>;
+  "timeline.agentRail.openRecord": { name: string };
+  "timeline.agentRail.sheetClose": Record<string, never>;
+  "timeline.agentRail.sheetTitle": Record<string, never>;
   "timeline.lightbox.copied": Record<string, never>;
   "timeline.lightbox.copy": Record<string, never>;
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.runException.open": { text: string };
+  "timeline.runException.settings": Record<string, never>;
   "timeline.send.discard": Record<string, never>;
   "timeline.send.failed": Record<string, never>;
   "timeline.send.resend": Record<string, never>;
@@ -1835,6 +1864,7 @@ export interface MessageArgs {
   "timeline.thread.openUnread": { count: number; unread: number };
   "timeline.thread.replyCount": { count: number };
   "timeline.thread.unreadChip": { count: number };
+  "timeline.triggerChip.jumpHint": Record<string, never>;
   "timeline.unfurl.label": { domain: string; title: string };
   "timeline.unfurl.previewDismiss": Record<string, never>;
   "timeline.unfurl.previewDismissed": Record<string, never>;

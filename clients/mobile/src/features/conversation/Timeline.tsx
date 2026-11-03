@@ -89,7 +89,7 @@ import {isStreamRunEnded} from '@momo/core/features/timeline/streamStop';
 import {useEndedRuns} from '../agents/endedRuns';
 import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
-import {triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
+import {runAnswerMap, triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
 import type {RunWithBundleSnapshot} from '@momo/core/features/timeline/requestBundle';
 import {presentableRows} from '@momo/core/features/timeline/toolCallSettle';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
@@ -2939,14 +2939,18 @@ function TimelineInner({
   const channelRuns = useChannelRuns(timelineChannelId);
   const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
   const requests = useMemo(() => requestLoopIndex(messages, channelRuns), [messages, channelRuns]);
+  // 「답함 ✓」이 누르면 가는 답 메시지(#4620 B): 끝난 run마다 그 답을 **한 번** 색인해 칩에 넘긴다(정산된 턴 기록 > 트리거를 인용한 첫 글).
+  // 로드된 메시지에서만 찾으므로 알려진 답은 항상 이 목록 안에 있다 — 모르면 칩은 「답함」을 말하되 눌리지 않는다.
+  const runAnswers = useMemo(() => runAnswerMap(channelRuns, messages), [channelRuns, messages]);
   const requestChips = useMemo(() => {
     const chips = new Map<string, TriggerChip>();
+    const context = {...requests, answerFor: (run: AgentRunProgress) => runAnswers.get(run.id.toLowerCase())};
     for (const [messageId, runs] of runsByMessage) {
-      const chip = triggerChip(runs, id => memberNameParts(directory, id, '에이전트'), nowMs, requests);
+      const chip = triggerChip(runs, id => memberNameParts(directory, id, '에이전트'), nowMs, context);
       if (chip) chips.set(messageId, chip);
     }
     return chips;
-  }, [runsByMessage, directory, nowMs, requests]);
+  }, [runsByMessage, directory, nowMs, requests, runAnswers]);
   const thoughtProgress = useMemo(() => {
     const byMessage = new Map<string, AgentRunProgress>();
     for (const [messageId, runs] of runsByMessage) {
