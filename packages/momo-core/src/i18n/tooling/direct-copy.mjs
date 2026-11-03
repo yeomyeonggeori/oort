@@ -33,6 +33,8 @@ export function extractDirectCopy(file, source, knownKeys = []) {
           || (ts.isNewExpression(p) && /Error$/.test(callee))) return true;
         // ICU keys and user-supplied values are handled by the dictionary/type contract.
         if (/(?:^|\.)formatMessage$/.test(callee)) return true;
+        // `useBlockedReason("changeIt")`의 인자는 사전 틀 이름(타입이 존재를 지킨다)이지 문구가 아니다(#5260).
+        if (/(?:^|\.)useBlockedReason$/.test(callee)) return true;
       }
     }
     return false;
