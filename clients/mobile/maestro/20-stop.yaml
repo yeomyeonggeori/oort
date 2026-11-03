@@ -51,6 +51,16 @@ name: 20-stop
       id: "composer-working"
     timeout: 60000
 
+# #4620: the stop control moved from the old activity line into the sheet the rail
+# opens (the rail is one fixed-height line now — nothing with a button lives in it).
+# One extra tap opens that sheet; the control and its test ids are unchanged.
+- tapOn:
+    id: "composer-working"
+- extendedWaitUntil:
+    visible:
+      id: "composer-working-sheet"
+    timeout: 30000
+
 # Arm. The control is two-tap on purpose, so the first tap must NOT cancel
 # anything — asserted by the fact that the confirm sentence is what appears next
 # and the turn is still running under it.
