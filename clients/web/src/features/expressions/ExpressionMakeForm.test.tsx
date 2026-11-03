@@ -461,7 +461,10 @@ describe("단계별 실패와 다시 시도", () => {
   it("고칠 수 없는 원인은 그대로 말해요: 보관소 없음, 막힌 배포, 큰 파일", async () => {
     const { ApiError } = await vi.importActual<typeof import("@momo/core/lib/api")>("@momo/core/lib/api");
     const lines: [() => void, string][] = [
-      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(503, "no archive")), "파일 보관소가 연결되어 있지 않아 사진을 올릴 수 없어요. 서버 관리자에게 알려 주세요."],
+      // 보관소 이야기는 우리 서버가 코드를 붙여 직접 낸 503에만 남는다(#5221). 코드 없는 502·503은 닿지 못함이라 기다리면 된다.
+      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(503, "no archive", "archive_not_configured")), "파일 보관소가 연결되어 있지 않아 사진을 올릴 수 없어요. 서버 관리자에게 알려 주세요."],
+      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(503, "unavailable")), "사진을 올리지 못했어요. 연결을 확인하고 다시 시도해 주세요."],
+      [() => api.createAttachmentUpload.mockRejectedValueOnce(new ApiError(502, "bad gateway")), "사진을 올리지 못했어요. 연결을 확인하고 다시 시도해 주세요."],
       [() => api.putAttachmentBytes.mockImplementationOnce(() => ({ done: Promise.resolve({ ok: false, failure: "blocked" }), abort: vi.fn() })), "이 서버의 보안 설정이 파일 보관소 주소를 막았어요. 서버 관리자에게 알려 주세요."],
       [() => api.putAttachmentBytes.mockImplementationOnce(() => ({ done: Promise.resolve({ ok: false, failure: "status", status: 413 }), abort: vi.fn() })), "사진이 너무 커서 올리지 못했어요. 더 작은 사진을 골라 주세요."],
     ];

@@ -51,11 +51,15 @@ export const messageKeys = [
   "connection.load.channelListTitle",
   "connection.load.conversationTitle",
   "connection.load.membersTitle",
+  "connection.load.newerTitle",
   "connection.load.reasonOffline",
   "connection.load.reasonServer",
   "connection.load.reasonUnknown",
   "connection.load.threadTitle",
   "connection.send.failed",
+  "connection.send.reasonOffline",
+  "connection.send.reasonRejected",
+  "connection.send.reasonServer",
   "connection.send.resend",
   "connection.send.resendAll",
   "connection.session.expired",
@@ -290,6 +294,14 @@ export const messageKeys = [
   "expressions.sheet.tabTeam",
   "expressions.sheet.title",
   "expressions.sheet.unavailable",
+  "mobile.attachmentSave.failed",
+  "mobile.attachmentSave.photosDenied",
+  "mobile.attachmentSave.savedToFiles",
+  "mobile.attachmentSave.savedToPhotos",
+  "mobile.attachmentSave.saveHintPhotos",
+  "mobile.attachmentSave.saving",
+  "mobile.attachmentSave.toFiles",
+  "mobile.attachmentSave.toPhotos",
   "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
@@ -436,7 +448,10 @@ export const messageKeys = [
   "settings.appearance.linkPreviewOffHint",
   "settings.appearance.linkPreviewRich",
   "settings.appearance.linkPreviewRichHint",
+  "settings.connection.noServer",
   "settings.invite.guestInvitesPaused",
+  "settings.notifications.alwaysDetail",
+  "settings.notifications.checking",
   "settings.notifications.threadReplyDescription",
   "settings.notifications.threadReplyName",
   "settings.profile.languageCurrent",
@@ -734,11 +749,15 @@ export const argumentSpecs = {
   "connection.load.channelListTitle": {},
   "connection.load.conversationTitle": {},
   "connection.load.membersTitle": {},
+  "connection.load.newerTitle": {},
   "connection.load.reasonOffline": {},
   "connection.load.reasonServer": {},
   "connection.load.reasonUnknown": {},
   "connection.load.threadTitle": {},
   "connection.send.failed": {},
+  "connection.send.reasonOffline": {},
+  "connection.send.reasonRejected": {},
+  "connection.send.reasonServer": {},
   "connection.send.resend": {},
   "connection.send.resendAll": {
     "count": "number"
@@ -1008,6 +1027,14 @@ export const argumentSpecs = {
   "expressions.sheet.tabTeam": {},
   "expressions.sheet.title": {},
   "expressions.sheet.unavailable": {},
+  "mobile.attachmentSave.failed": {},
+  "mobile.attachmentSave.photosDenied": {},
+  "mobile.attachmentSave.savedToFiles": {},
+  "mobile.attachmentSave.savedToPhotos": {},
+  "mobile.attachmentSave.saveHintPhotos": {},
+  "mobile.attachmentSave.saving": {},
+  "mobile.attachmentSave.toFiles": {},
+  "mobile.attachmentSave.toPhotos": {},
   "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
@@ -1199,7 +1226,10 @@ export const argumentSpecs = {
   "settings.appearance.linkPreviewOffHint": {},
   "settings.appearance.linkPreviewRich": {},
   "settings.appearance.linkPreviewRichHint": {},
+  "settings.connection.noServer": {},
   "settings.invite.guestInvitesPaused": {},
+  "settings.notifications.alwaysDetail": {},
+  "settings.notifications.checking": {},
   "settings.notifications.threadReplyDescription": {},
   "settings.notifications.threadReplyName": {},
   "settings.profile.languageCurrent": {
@@ -1559,11 +1589,15 @@ export interface MessageArgs {
   "connection.load.channelListTitle": Record<string, never>;
   "connection.load.conversationTitle": Record<string, never>;
   "connection.load.membersTitle": Record<string, never>;
+  "connection.load.newerTitle": Record<string, never>;
   "connection.load.reasonOffline": Record<string, never>;
   "connection.load.reasonServer": Record<string, never>;
   "connection.load.reasonUnknown": Record<string, never>;
   "connection.load.threadTitle": Record<string, never>;
   "connection.send.failed": Record<string, never>;
+  "connection.send.reasonOffline": Record<string, never>;
+  "connection.send.reasonRejected": Record<string, never>;
+  "connection.send.reasonServer": Record<string, never>;
   "connection.send.resend": Record<string, never>;
   "connection.send.resendAll": { count: number };
   "connection.session.expired": Record<string, never>;
@@ -1798,6 +1832,14 @@ export interface MessageArgs {
   "expressions.sheet.tabTeam": Record<string, never>;
   "expressions.sheet.title": Record<string, never>;
   "expressions.sheet.unavailable": Record<string, never>;
+  "mobile.attachmentSave.failed": Record<string, never>;
+  "mobile.attachmentSave.photosDenied": Record<string, never>;
+  "mobile.attachmentSave.savedToFiles": Record<string, never>;
+  "mobile.attachmentSave.savedToPhotos": Record<string, never>;
+  "mobile.attachmentSave.saveHintPhotos": Record<string, never>;
+  "mobile.attachmentSave.saving": Record<string, never>;
+  "mobile.attachmentSave.toFiles": Record<string, never>;
+  "mobile.attachmentSave.toPhotos": Record<string, never>;
   "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
@@ -1944,7 +1986,10 @@ export interface MessageArgs {
   "settings.appearance.linkPreviewOffHint": Record<string, never>;
   "settings.appearance.linkPreviewRich": Record<string, never>;
   "settings.appearance.linkPreviewRichHint": Record<string, never>;
+  "settings.connection.noServer": Record<string, never>;
   "settings.invite.guestInvitesPaused": Record<string, never>;
+  "settings.notifications.alwaysDetail": Record<string, never>;
+  "settings.notifications.checking": Record<string, never>;
   "settings.notifications.threadReplyDescription": Record<string, never>;
   "settings.notifications.threadReplyName": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };

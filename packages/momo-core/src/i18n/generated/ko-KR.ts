@@ -117,7 +117,7 @@ export const catalog: MessageCatalog = {
   "attachments.video.saveHint": [
     {
       "type": 0,
-      "value": "공유 시트가 열려요. 「비디오 저장」을 고르세요"
+      "value": "영상을 사진 보관함에 저장해요"
     }
   ],
   "attachments.video.seekLabel": [
@@ -396,6 +396,12 @@ export const catalog: MessageCatalog = {
       "value": "멤버 목록을 불러오지 못했어요"
     }
   ],
+  "connection.load.newerTitle": [
+    {
+      "type": 0,
+      "value": "새 글을 불러오지 못했어요"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,
@@ -424,6 +430,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "보내지 못했어요"
+    }
+  ],
+  "connection.send.reasonOffline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 보내지 못했어요"
+    }
+  ],
+  "connection.send.reasonRejected": [
+    {
+      "type": 0,
+      "value": "서버가 받지 못했어요"
+    }
+  ],
+  "connection.send.reasonServer": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 보내지 못했어요"
     }
   ],
   "connection.send.resend": [
@@ -1958,6 +1982,54 @@ export const catalog: MessageCatalog = {
       "value": "이 표현을 지금 쓸 수 없어요. 다시 골라 주세요."
     }
   ],
+  "mobile.attachmentSave.failed": [
+    {
+      "type": 0,
+      "value": "저장하지 못했어요 · 다시 시도"
+    }
+  ],
+  "mobile.attachmentSave.photosDenied": [
+    {
+      "type": 0,
+      "value": "사진 접근이 꺼져 있어요 · 설정 열기"
+    }
+  ],
+  "mobile.attachmentSave.savedToFiles": [
+    {
+      "type": 0,
+      "value": "파일에 저장했어요"
+    }
+  ],
+  "mobile.attachmentSave.savedToPhotos": [
+    {
+      "type": 0,
+      "value": "사진에 저장했어요"
+    }
+  ],
+  "mobile.attachmentSave.saveHintPhotos": [
+    {
+      "type": 0,
+      "value": "사진 보관함에 저장해요"
+    }
+  ],
+  "mobile.attachmentSave.saving": [
+    {
+      "type": 0,
+      "value": "저장하는 중이에요"
+    }
+  ],
+  "mobile.attachmentSave.toFiles": [
+    {
+      "type": 0,
+      "value": "파일에 저장"
+    }
+  ],
+  "mobile.attachmentSave.toPhotos": [
+    {
+      "type": 0,
+      "value": "사진에 저장"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,
@@ -1991,7 +2063,7 @@ export const catalog: MessageCatalog = {
   "mobile.ios.photoLibraryAddUsage": [
     {
       "type": 0,
-      "value": "oort는 사진을 보관함에 저장하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요."
+      "value": "저장을 누른 사진과 영상을 내 사진 보관함에 추가해요. 이 허용으로 보관함을 읽지는 않아요."
     }
   ],
   "mobile.ios.photoLibraryUsage": [
@@ -3004,10 +3076,28 @@ export const catalog: MessageCatalog = {
       "value": "글을 위에, 큰 그림을 아래에 둬요. 제목과 설명은 두 줄까지 보여줘요. 큰 그림이 없는 링크는 작게와 같아요."
     }
   ],
+  "settings.connection.noServer": [
+    {
+      "type": 0,
+      "value": "이 기기에 저장된 서버 주소가 없어요."
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,
       "value": "게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있어요."
+    }
+  ],
+  "settings.notifications.alwaysDetail": [
+    {
+      "type": 0,
+      "value": "승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없어요. 한꺼번에 멈추려면 알림 일시 중지를 써요."
+    }
+  ],
+  "settings.notifications.checking": [
+    {
+      "type": 0,
+      "value": "알림 설정을 확인하는 중이에요."
     }
   ],
   "settings.notifications.threadReplyDescription": [

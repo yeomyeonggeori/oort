@@ -2164,6 +2164,26 @@ const releaseNotesEn = () =>
     },
   });
 
+/**
+ * 승인 카드 하나의 고정 fixture. `approval-card`(결정 전·후 셋)와 `approved`(승인된 뒤, #5172)가 **같은 메시지**로 서서 두 표면이
+ * 서로 다른 카드를 보여 주는 일이 없게 한 곳에서 짓는다. `over` 는 카드 props 를 덮는다(서버가 나중에 고쳐 둔 상태 등).
+ */
+function approvalCardMessage(over: Record<string, unknown> = {}): Message {
+  return {
+    ...MESSAGE,
+    id: '00000000-0000-7000-8000-0000000000b1',
+    type: 'approval_request',
+    body: '툴 호출 승인',
+    authorMemberId: AGENT,
+    props: {
+      approval_id: 'ap-1',
+      title: 'github.search_issues 실행 허가',
+      approval_status: 'pending',
+      ...over,
+    },
+  } as unknown as Message;
+}
+
 export function Surface({name}: {name: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 이슈 #1112 — 고정 여부만 다른 두 시트. 낱말이 상태를 따라 뒤집히는 것을 한
@@ -2664,18 +2684,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       );
     // ---- U4-4 M1 (#1084): 승인 카드가 막다른 길이 아니게 됐다 -----------------
     case 'approval-card': {
-      const approvalMessage = {
-        ...MESSAGE,
-        id: '00000000-0000-7000-8000-0000000000b1',
-        type: 'approval_request',
-        body: '툴 호출 승인',
-        authorMemberId: AGENT,
-        props: {
-          approval_id: 'ap-1',
-          title: 'github.search_issues 실행 허가',
-          approval_status: 'pending',
-        },
-      } as unknown as Message;
+      const approvalMessage = approvalCardMessage();
       const gates = new Map([
         [
           'ap-1',
@@ -2714,6 +2723,36 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- #5172: 승인된 뒤의 카드 -----------------------------------------------
+    //
+    // `approval-card` 는 셋째 카드만 승인된 모양이라 「승인됨」 장면만 증거로 쓰려는 캡처(`-momoMeasure APPROVED`)에는 맞는 표면이
+    // 없었다 — 이름을 모르는 하네스는 아래 `default:` 의 오류 안내 화면을 찍었고, 그 사진이 승인된 카드의 증거로 받아들여졌다.
+    // 같은 카드(`approvalCardMessage`)가 승인된 뒤를 두 길로 말한다:
+    //   ① 방금 승인을 누른 직후 — 이 화면의 영수증(`approvalReceipts`)이 카드를 덮는다.
+    //   ② 대화를 다시 열었을 때 — 서버가 카드의 `approval_status` 를 `approved` 로 고쳐 두었고 이 화면에는 영수증이 없다.
+    // 둘 다 배송되는 `MessageRow` 가 그린다.
+    case 'approved':
+      return (
+        <Frame label="승인됨 — 방금 승인한 카드(영수증) / 다시 열었을 때(서버가 알려 준 상태) (#5172)">
+          <MessageRow
+            message={approvalCardMessage()}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+            approvalReceipts={
+              new Map([['ap-1', {note: '승인을 기록했어요.', status: 'approved'}]])
+            }
+          />
+          <MessageRow
+            message={approvalCardMessage({approval_status: 'approved'})}
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+        </Frame>
+      );
     // ---- U4-4 M2 (#1083): 시간과 경계 ----------------------------------------
     case 'group': {
       // 한 사람이 연달아 쓴 그룹. 이 goal 의 논점 둘이 여기서만 보인다:
@@ -5265,7 +5304,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         <Frame label={`알 수 없는 표면: ${name}`}>
           <Text style={styles.label}>
             sheet · delete · editor · editor-error · row · row-lead ·
-            approval-card · approval-notes · avatar · composer-offline ·
+            approval-card · approved · approval-notes · avatar · composer-offline ·
             composer-placeholder · composer-growth ·
             group · dividers · ade-summary · ade-summary-empty · ade-panel ·
             team-board · work-detail · agent-sessions ·

@@ -14,6 +14,7 @@
   "settings.appearance.linkPreviewRichHint": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small.",
   "settings.appearance.linkPreviewOffHint": "Keeps only the link in the message and draws no card.",
   "settings.invite.guestInvitesPaused": "Guest invites are paused until channel-specific invites are available.",
+  "settings.connection.noServer": "No server address is saved on this device.",
   "settings.aiLimits.title": "Usage limits",
   "settings.aiLimits.description": "Limits on what the helper uses. There is no limit by default, because your team pays for its own key and decides. You can turn on a daily or monthly limit.",
   "settings.aiLimits.tokensLabel": "Daily token limit",
@@ -67,6 +68,8 @@
   "settings.aiLimits.notAdmin": "Only owners and admins can see this.",
   "settings.aiLimits.unsupported": "This server doesn't support usage limits yet.",
   "settings.aiLimits.loading": "Loading usage limits.",
+  "settings.notifications.alwaysDetail": "Approval requests, mentions of you, and DMs can't be turned off by type. To silence everything at once, use Pause notifications.",
+  "settings.notifications.checking": "Checking your notification settings.",
   "settings.notifications.threadReplyName": "New replies in followed threads",
   "settings.notifications.threadReplyDescription": "New replies from others in threads you follow."
 }

@@ -53,7 +53,7 @@ import {
   MENU_CLOSE_WATCHDOG_MS,
   VIEWER_CHROME_SHOW_MS,
 } from '../../design/motion';
-import { font, line, radius, space, type Palette } from '../../design/tokens';
+import { font, line, radius, slopTo, space, type Palette } from '../../design/tokens';
 import { useStyles } from '../../design/theme';
 import { useFormatMessage } from '../../i18n/useFormatMessage';
 import { ReplySwipeGuardContext } from '../conversation/ReplySwipeContainer';
@@ -69,6 +69,7 @@ import { useAttachmentPoster } from './videoContent';
 import { LAYOUT } from './videoDesign';
 import type {MeasureHeroSource} from './heroSource';
 import { ShareSheetTouchShield } from '../../lib/ShareSheetTouchShield';
+import { useSaveAttachment, saveNoticeKey } from './useSaveAttachment';
 import { useShareAttachment } from './useShareAttachment';
 import { useViewerDismiss, type ViewerProgressRef } from './useViewerDismiss';
 import {
@@ -79,6 +80,7 @@ import {
   type DragPoint,
 } from './viewerDismiss';
 import {
+  NOTICE_HEIGHT,
   VIEWER,
   VIEWER_GLASS_TONE,
   VIEWER_STAGE,
@@ -117,9 +119,13 @@ import {
 // 이 전체 화면은 앱의 「페이지」다 — 대화 위에 한 겹 쌓이고 한 겹만 벗기며 돌아가므로 나가는 문이 X 가 아니라 **‹ 뒤로(왼쪽)** 다
 // (`docs/design-system/phone-sheets.md` §3 「페이지 머리의 나가는 문은 둘 중 하나다」).
 //
-// [저장]과 [공유]는 **같은 일을 한다**: 내려받아 iOS 공유 시트를 연다(`useShareAttachment`). 사진 보관함에 직접 쓰는 길은
-// `projectShape.test.ts` 가 막고 Info.plist 가 「저장하지 않아요」라고 선언한다 — 그것을 바꾸는 것은 이 일의 결정이 아니다.
-// 시트의 「이미지 저장」이 저장이다. [저장]의 보조기술 힌트가 그 사실을 말한다.
+// [저장]과 [공유]는 **다른 일을 한다** (#5209, ADR-0168 증보 3, owner 2026-11-03):
+//   [저장]  사진·영상을 **사진 보관함에 바로 추가**한다(`useSaveAttachment` — 추가 전용 권한, 처음 한 번만 묻는다. 영상 쪽(#5208)도 같은 훅이다:
+//           지금 쪽(`current`)이 영상이면 그 영상을 통째로 받아 보관함에 더한다). 끝나면 아래 상태 알약이 「사진에 저장했어요」라고 말하고
+//           (곧 걷힌다), 사진 접근이 꺼져 있으면 「설정 열기」 알약이 서서 남는다.
+//   [공유]  내려받아 iOS 공유 시트를 연다(`useShareAttachment`) — 앞 판 그대로다.
+// 앞 판은 둘이 같은 일(공유 시트)이었고 사진 보관함에 직접 쓰는 길을 `projectShape.test.ts` 가 막았다. 이제 그 길은 하나로 열려 있고
+// 삭제·앨범 같은 나머지 쓰기는 계속 막힌다.
 //
 // ## 조작은 리퀴드 글래스를 쓰지 않는다 — 블러 + 어두운 틴트다
 //
@@ -539,6 +545,8 @@ function ViewerFrame({
     channelId,
     current as MessageAttachment,
   );
+  const saving = useSaveAttachment(workspaceId, channelId, current as MessageAttachment);
+  const { save: startSave } = saving;
   const toggleChrome = useCallback(() => setHidden(value => !value), []);
 
   // 뷰어 안의 터치는 아래 행의 「밀어서 답글」(#4869)의 것이 아니다. 이 뷰어는 메시지 행의 React 자손이라(Modal 도 React 트리로는 행 안이다)
@@ -786,15 +794,19 @@ function ViewerFrame({
     }
   }, [download.status]);
 
-  const busy = download.status === 'downloading';
+  const busy = download.status === 'downloading' || saving.state.status === 'working';
   const save = useCallback(() => {
     setPressedBy('save');
-    share();
-  }, [share]);
+    startSave();
+  }, [startSave]);
   const sendOut = useCallback(() => {
     setPressedBy('share');
     share();
   }, [share]);
+
+  // 저장 알약의 글. [공유]를 마지막으로 눌렀으면 저장의 알약은 서지 않는다(남은 영수증·실패가 공유의 알약을 가리지 않게).
+  const saveKey = pressedBy === 'save' ? saveNoticeKey(saving.state) : null;
+  const saveNotice = saveKey === null ? null : formatMessage(saveKey);
 
   const hasSender = senderName !== undefined && senderName.trim() !== '';
   const hasTime = sentAtMs !== undefined && Number.isFinite(sentAtMs);
@@ -1001,7 +1013,39 @@ function ViewerFrame({
               durationHintSeconds={activeVideo.durationHintSeconds}
             />
           ) : null}
-          {download.status !== 'idle' ? (
+          {/* 상태 알약 — 마지막으로 누른 단추의 일을 말한다. 저장의 영수증만 걷히고, 실패·거부는 다음 저장이 지울 때까지 선다. */}
+          {saveNotice !== null ? (
+            saving.state.status === 'denied' ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={saveNotice}
+                hitSlop={{ top: slopTo(NOTICE_HEIGHT), bottom: slopTo(NOTICE_HEIGHT) }}
+                onPress={saving.openSettings}
+                style={styles.noticeHit}
+                testID="attachment-viewer-save-settings"
+              >
+                <Text
+                  maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                  style={styles.notice}
+                  testID="attachment-viewer-status"
+                >
+                  {saveNotice}
+                </Text>
+              </Pressable>
+            ) : (
+              <Text
+                pointerEvents="none"
+                maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+                style={[
+                  styles.notice,
+                  saving.state.status === 'failed' && styles.noticeFailed,
+                ]}
+                testID="attachment-viewer-status"
+              >
+                {saveNotice}
+              </Text>
+            )
+          ) : pressedBy === 'share' && download.status !== 'idle' ? (
             <Text
               pointerEvents="none"
               maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
@@ -1069,8 +1113,14 @@ function ViewerFrame({
           <View pointerEvents="box-none" style={styles.actionRow}>
             <GlassButton
               label="저장"
-              // 사진 보관함에 직접 쓰지 않는다 — 공유 시트의 「이미지 저장」이 저장이다(파일 머리).
-              hint={currentIsVideo ? formatMessage('attachments.video.saveHint') : '공유 시트가 열려요. 「이미지 저장」을 고르세요'}
+              // 사진·영상은 사진 보관함에 바로 추가한다(파일 머리). 길이 파일 앱이면(보관함이 못 받는 형식이 뷰어에 들어온 경우) 그 말로.
+              hint={formatMessage(
+                saving.route !== 'photos'
+                  ? 'mobile.attachmentSave.toFiles'
+                  : currentIsVideo
+                  ? 'attachments.video.saveHint'
+                  : 'mobile.attachmentSave.saveHintPhotos',
+              )}
               onPress={save}
               disabled={busy}
               testID="attachment-viewer-save"
@@ -1261,6 +1311,8 @@ const buildStyles = (_color: Palette) =>
       textAlign: 'center',
     },
     noticeFailed: { color: VIEWER_STAGE.danger },
+    // 거부 알약은 눌린다(설정 열기) — 알약 자체는 글줄 높이라 44 는 `hitSlop` 이 채운다(`NOTICE_HEIGHT`).
+    noticeHit: { alignSelf: 'center' },
     actionRow: {
       flexDirection: 'row',
       alignItems: 'center',
