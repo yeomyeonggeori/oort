@@ -1815,6 +1815,54 @@ export const catalog: MessageCatalog = {
       "value": "This one is not available right now. Please choose another."
     }
   ],
+  "mobile.attachmentSave.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't save · Try again"
+    }
+  ],
+  "mobile.attachmentSave.photosDenied": [
+    {
+      "type": 0,
+      "value": "Photos access is off · Open Settings"
+    }
+  ],
+  "mobile.attachmentSave.savedToFiles": [
+    {
+      "type": 0,
+      "value": "Saved to Files"
+    }
+  ],
+  "mobile.attachmentSave.savedToPhotos": [
+    {
+      "type": 0,
+      "value": "Saved to Photos"
+    }
+  ],
+  "mobile.attachmentSave.saveHintPhotos": [
+    {
+      "type": 0,
+      "value": "Saves to your photo library"
+    }
+  ],
+  "mobile.attachmentSave.saving": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "mobile.attachmentSave.toFiles": [
+    {
+      "type": 0,
+      "value": "Save to Files"
+    }
+  ],
+  "mobile.attachmentSave.toPhotos": [
+    {
+      "type": 0,
+      "value": "Save to Photos"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,
@@ -1848,7 +1896,7 @@ export const catalog: MessageCatalog = {
   "mobile.ios.photoLibraryAddUsage": [
     {
       "type": 0,
-      "value": "oort does not save photos to your library. All features work without this permission."
+      "value": "Adds the photos and videos you choose to save to your photo library. This permission does not let oort read your library."
     }
   ],
   "mobile.ios.photoLibraryUsage": [

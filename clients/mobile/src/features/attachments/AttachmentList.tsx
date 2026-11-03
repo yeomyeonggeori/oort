@@ -22,6 +22,7 @@ import {
   font,
   line,
   radius,
+  slopTo,
   space,
   TOUCH_TARGET,
   type Palette,
@@ -40,6 +41,8 @@ import {
 import { AttachmentViewer } from './AttachmentViewer';
 import {useHeroSources} from './heroSource';
 import type {StageRect} from '@momo/core/lib/stageTransition';
+import { useFormatMessage } from '../../i18n/useFormatMessage';
+import { saveNoticeKey, useSaveAttachment, type SaveAttachment } from './useSaveAttachment';
 import { useShareAttachment, type DownloadState } from './useShareAttachment';
 
 // =============================================================================
@@ -50,7 +53,8 @@ import { useShareAttachment, type DownloadState } from './useShareAttachment';
 //     높이 320 안에서 비율을 지키고, 여러 장은 정사각 격자(2~4장 2열, 5장부터 3열).
 //     파일명·타입·크기 줄이 없다. 탭하면 전체 화면 보기(좌우로 넘기고, 공유한다).
 //   · SVG·큰 이미지·나머지 파일(PDF 포함): 컴팩트 카드. 탭하면 앱 캐시로 스트리밍한
-//     파일을 iOS 공유시트에 넘긴다(공유시트가 미리보기와 저장을 함께 준다).
+//     파일을 iOS 공유시트에 넘긴다(「공유」 — 앞 판 그대로). 오른쪽 ↓ 는 **「저장」** 이다(#5209):
+//     사진·영상은 사진 보관함에 바로 추가하고, 그 밖의 파일은 파일 앱에서 위치를 골라 거기에 복사한다.
 //
 // 이름은 `attachmentDisplayName` 만 거친다: 무작위 토큰 같은 이름은 「이미지」
 // 「PDF 문서」 「파일」로 갈음한다. 웹의 같은 이슈(#3820)와 같은 규칙이다.
@@ -229,10 +233,44 @@ function ImageTile({
 
 function DownloadStatus({
   state,
+  saving,
+  lastBy,
 }: {
   state: DownloadState;
+  saving: SaveAttachment;
+  /** 마지막으로 누른 것 — 카드(공유)와 ↓(저장)의 상태가 한 줄을 나눠 쓴다. */
+  lastBy: 'save' | 'share';
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
+  const key = lastBy === 'save' ? saveNoticeKey(saving.state) : null;
+  if (key !== null) {
+    const text = formatMessage(key);
+    // 거부는 눌린다(설정 열기). 나머지는 읽기만 한다 — 실패는 ↓ 를 다시 누르면 다시 시도한다.
+    if (saving.state.status === 'denied') {
+      return (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={text}
+          hitSlop={{ top: slopTo(line.meta), bottom: slopTo(line.meta) }}
+          onPress={saving.openSettings}
+          testID="attachment-save-settings"
+        >
+          <Text style={styles.downloadIdle} testID="attachment-save-status">
+            {text}
+          </Text>
+        </Pressable>
+      );
+    }
+    return (
+      <Text
+        style={saving.state.status === 'failed' ? styles.downloadFailed : styles.downloadBusy}
+        testID="attachment-save-status"
+      >
+        {text}
+      </Text>
+    );
+  }
   if (state.status === 'downloading') {
     const percent =
       state.progress === null ? null : Math.round(state.progress * 100);
@@ -271,20 +309,44 @@ function FileCard({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const formatMessage = useFormatMessage();
   const label = attachmentDisplayName(attachment);
   const [download, share] = useShareAttachment(
     workspaceId,
     channelId,
     attachment,
   );
+  const saving = useSaveAttachment(workspaceId, channelId, attachment);
+  const { save: startSave } = saving;
+  const [lastBy, setLastBy] = useState<'save' | 'share'>('share');
+  const savingNow = saving.state.status === 'working';
+  const busy = download.status === 'downloading' || savingNow;
+  const saveLabel = formatMessage(
+    saving.route === 'photos'
+      ? 'mobile.attachmentSave.toPhotos'
+      : 'mobile.attachmentSave.toFiles',
+  );
 
   const onPress = useCallback(
     (event?: GestureResponderEvent) => {
       event?.stopPropagation();
       if (gesture?.consumeTap()) return;
+      if (savingNow) return;
+      setLastBy('share');
       share();
     },
-    [gesture, share],
+    [gesture, savingNow, share],
+  );
+  // ↓ 는 「저장」이다(#5209). 카드 탭(공유)과 같은 규율: 길게 누르기는 메시지 메뉴의 것이고, 그 뒤에 따라오는 탭은 행동을 시작하지 않는다.
+  const onSave = useCallback(
+    (event?: GestureResponderEvent) => {
+      event?.stopPropagation();
+      if (gesture?.consumeTap()) return;
+      if (busy) return;
+      setLastBy('save');
+      startSave();
+    },
+    [busy, gesture, startSave],
   );
 
   return (
@@ -297,7 +359,12 @@ function FileCard({
           ? ATTACH_COPY.downloading
           : `${ATTACH_COPY.download}, 공유하기`
       }`}
-      accessibilityState={{ busy: download.status === 'downloading' }}
+      // 안쪽 ↓ 단추는 VoiceOver 에 따로 서지 않는다(카드가 하나의 요소다) — 저장은 로터의 동작으로 간다.
+      accessibilityActions={[{ name: 'save', label: saveLabel }]}
+      onAccessibilityAction={event => {
+        if (event.nativeEvent.actionName === 'save') onSave();
+      }}
+      accessibilityState={{ busy }}
       {...gesture?.pressTiming}
       onLongPress={gesture?.onLongPress}
       onPress={onPress}
@@ -324,17 +391,32 @@ function FileCard({
           <Text style={styles.fileMeta} testID="attachment-meta">
             {attachmentMetaLine(attachment)}
           </Text>
-          <DownloadStatus state={download} />
+          <DownloadStatus state={download} saving={saving} lastBy={lastBy} />
         </View>
-        <View style={styles.downloadMark}>
+        <Pressable
+          accessibilityLabel={saveLabel}
+          accessibilityRole="button"
+          accessibilityState={{ busy: savingNow, disabled: busy }}
+          disabled={busy}
+          hitSlop={{ left: slopTo(space.xl), right: slopTo(space.xl) }}
+          {...gesture?.pressTiming}
+          onLongPress={gesture?.onLongPress}
+          onPress={onSave}
+          style={styles.downloadMark}
+          testID="attachment-card-save"
+        >
           <Text style={styles.downloadMarkText}>
-            {download.status === 'downloading'
+            {savingNow
+              ? '…'
+              : saving.state.status === 'saved'
+              ? '✓'
+              : download.status === 'downloading'
               ? '…'
               : download.status === 'failed'
               ? '↻'
               : '↓'}
           </Text>
-        </View>
+        </Pressable>
       </View>
     </Pressable>
   );
@@ -525,8 +607,8 @@ const buildStyles = (color: Palette) =>
       lineHeight: line.meta,
       color: color.danger,
     },
-    // 카드 전체가 누르는 자리라 이 표지는 따로 눌리지 않는다 — 44 상자가 아니라
-    // 글리프 폭이면 된다(시안 250 폭 안에서 이름에 자리를 준다).
+    // ↓ 는 「저장」 단추다(#5209): 카드 전체(공유)와 따로 눌린다. 높이는 44 이고 폭은 글리프 폭이다 — 가로 44 는 `hitSlop` 이 채운다
+    // (시안 250 폭 안에서 이름에 자리를 준다).
     downloadMark: {
       width: space.xl,
       height: TOUCH_TARGET,

@@ -182,6 +182,9 @@ jest.mock('expo-file-system', () => {
     downloadBytes: 0,
     // 호출 순서대로 하나씩 꺼내 던지는 실패(없으면 `failure` 규칙).
     failures: [],
+    // `Directory.pickDirectoryAsync` 의 답과 부른 횟수(#5209).
+    pick: {directory: 'file:///picked', cancel: false, failure: null},
+    pickCalls: 0,
   };
   const uriOf = value =>
     typeof value === 'string' ? value : value && typeof value.uri === 'string' ? value.uri : '';
@@ -195,6 +198,19 @@ jest.mock('expo-file-system', () => {
   class Directory {
     constructor(...parts) {
       this.uri = join(parts);
+    }
+    // 폴더 선택 창(#5209). 진짜는 시스템 창을 열고 고른 폴더를 준다 — 목은 `state.pick` 이 정한 답을 준다:
+    // `directory`(고른 폴더 주소), `cancel`(고르지 않고 닫음 → 진짜와 같은 코드의 예외), `failure`(그 밖의 실패).
+    static async pickDirectoryAsync() {
+      state.pickCalls += 1;
+      if (state.pick.failure) throw state.pick.failure;
+      if (state.pick.cancel) {
+        throw Object.assign(new Error('File picking was cancelled by the user'), {
+          code: 'ERR_FILE_PICKING_CANCELLED',
+        });
+      }
+      directories.add(state.pick.directory);
+      return new Directory(state.pick.directory);
     }
     get exists() {
       return directories.has(this.uri);
@@ -300,6 +316,8 @@ jest.mock('expo-file-system', () => {
       state.sizes.clear();
       state.downloadBytes = 0;
       state.failures = [];
+      state.pick = {directory: 'file:///picked', cancel: false, failure: null};
+      state.pickCalls = 0;
     },
   };
 });
@@ -366,6 +384,22 @@ jest.mock('expo-media-library/legacy', () => {
       granted: true,
       canAskAgain: true,
     },
+    // 추가 전용 권한(`writeOnly = true`, #5209) — 읽기 권한과 **따로** 산다. `answer` 와 같은 뜻의 `addAnswer` 가 사람의 답이다.
+    addPermission: {
+      status: 'undetermined',
+      accessPrivileges: 'none',
+      granted: false,
+      canAskAgain: true,
+    },
+    addAnswer: {
+      status: 'granted',
+      accessPrivileges: 'all',
+      granted: true,
+      canAskAgain: true,
+    },
+    // `saveToLibraryAsync` 에 넘어온 주소들(성공한 것만)과 그것이 던질 실패.
+    saved: [],
+    saveFailure: null,
     assets: [],
     info: new Map(),
     failure: null,
@@ -387,15 +421,40 @@ jest.mock('expo-media-library/legacy', () => {
         granted: true,
         canAskAgain: true,
       };
+      state.addPermission = fresh();
+      state.addAnswer = {
+        status: 'granted',
+        accessPrivileges: 'all',
+        granted: true,
+        canAskAgain: true,
+      };
+      state.saved = [];
+      state.saveFailure = null;
       state.assets = [];
       state.info = new Map();
       state.failure = null;
       state.listeners = new Set();
     },
-    getPermissionsAsync: jest.fn(async () => state.permission),
-    requestPermissionsAsync: jest.fn(async () => {
+    // 진짜 모듈처럼 `writeOnly` 인자로 두 권한 중 하나를 읽고 묻는다(기본은 읽기·쓰기).
+    getPermissionsAsync: jest.fn(async (writeOnly = false) =>
+      writeOnly ? state.addPermission : state.permission,
+    ),
+    requestPermissionsAsync: jest.fn(async (writeOnly = false) => {
+      if (writeOnly) {
+        state.addPermission = state.addAnswer;
+        return state.addPermission;
+      }
       state.permission = state.answer;
       return state.permission;
+    }),
+    // 진짜 `saveToLibraryAsync` 는 확장자가 없으면 던지고, 추가 권한(또는 읽기·쓰기 권한)이 없으면 저장하지 못한다.
+    saveToLibraryAsync: jest.fn(async uri => {
+      if (state.saveFailure) throw state.saveFailure;
+      if (!/\.[A-Za-z0-9]+$/.test(uri)) throw new Error('EmptyFileExtensionException');
+      if (state.addPermission.status !== 'granted' && state.permission.status !== 'granted') {
+        throw new Error('PermissionDenied');
+      }
+      state.saved.push(uri);
     }),
     presentPermissionsPickerAsync: jest.fn(async () => undefined),
     getAssetsAsync: jest.fn(async options => {
