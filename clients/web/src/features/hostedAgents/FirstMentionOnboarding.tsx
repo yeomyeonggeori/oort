@@ -37,7 +37,7 @@ import {
 //
 // 위저드 단계 기계와 원클릭 초대 줄은 바꾸지 않는다. 이 표면은 그 흐름이
 // 끝난 채널 위에 이어 붙는다. 네 상태(빈/로딩/오류/오프라인)와 에이전트
-// 뱃지가 계약이다. 오프라인 문장은 셸 ConnectionBanner 가 말하고, 여기
+// 뱃지가 계약이다. 오프라인 문장은 셸의 연결 카드(접히면 위쪽 띠)가 말하고, 여기
 // 컨트롤은 잠금+aria 사유만 둔다. 응답 시간 상한은 게이트가 아니다.
 //
 // Reading this as: onboarding for internal team users on web+Tauri, density 6/10, motion 2/10.

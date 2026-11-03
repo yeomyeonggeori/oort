@@ -114,22 +114,22 @@ afterEach(() => {
 });
 
 describe("① 소켓 틈이 화면에 닿는 시간: 1초 미만 침묵, 10초 경계", () => {
-  it("끊긴 직후 999ms까지는 아무것도 없고, 1초부터 「연결 중」(단추 없음), 10초부터 「끊김」(단추 있음)", () => {
+  it("끊긴 직후 1초 직전까지는 아무것도 없고, 1초부터 「연결 중」(단추 없음), 10초부터 「끊김」(단추 있음)", () => {
     mountHealthy();
     setStatus("disconnected");
     expect(card()).toBeNull();
     advance(999);
     expect(card()).toBeNull();
 
-    advance(1); // 1_000ms
+    advance(1); // 정확히 1초
     expect(card()!.dataset.tone).toBe("connecting");
     expect(card()!.dataset.phase).toBe("connecting");
     expect(action()).toBeNull();
 
-    advance(8_999); // 9_999ms
+    advance(8_999); // 정확히 10초 직전
     expect(card()!.dataset.tone).toBe("connecting");
 
-    advance(1); // 10_000ms
+    advance(1); // 정확히 10초
     expect(card()!.dataset.tone).toBe("down");
     expect(card()!.dataset.cause).toBe("realtimeDown");
     expect(action()).not.toBeNull();

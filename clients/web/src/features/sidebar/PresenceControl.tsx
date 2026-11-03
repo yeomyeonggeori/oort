@@ -42,7 +42,7 @@ import { useSelfPresenceWrite } from "./useSelfPresenceWrite";
 // merely intended: the connection indicator is now a BAR that appears only when
 // the rail is unhealthy, while this is a round badge on the avatar — the
 // universally read presence spot. Two circles on one row, one of them
-// permanently green, was the collision (see connStatusIndicator.ts).
+// permanently green, was the collision (the connection signal is now the sidebar connection card, #5220).
 //
 // The badge is bound to REAL state, never decorative (SKILL §8): its color and
 // accessible name always derive from the effective value `f(declared, connected)`

@@ -26,6 +26,7 @@ import { resetRouteQueries } from "@/app/retryScope";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ConnectionBanner } from "@/features/common/ConnectionBanner";
 import { ConnectionProvider } from "@/features/common/connectionModel";
+import { showsConnectionBanner } from "@momo/core/features/connection/screenState";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { AppTitlebar } from "@/app/AppTitlebar";
 import { DownloadButton } from "@/features/downloads/DownloadButton";
@@ -440,7 +441,13 @@ export function AppShell({
               {/* 실시간이 죽었다는 사실은 채널만의 사실이 아니다 (goal B8 B2):
                * 인박스도 활동도 갱신이 멈추고, 조용한 하루와 구별되지 않는다.
                * 그래서 이 줄은 라우트 위, 셸 안에 한 벌만 있다. */}
-              {!isSettingsSurface && <ConnectionBanner />}
+              {/* 연결을 말하는 자리는 한 곳이다(#5220): 목록 열이 보이면 사이드바 아래 연결 카드가, 서랍이거나
+               * 목록 열이 접혔으면 이 띠가 같은 문장·같은 단추로 말한다. 가르는 규칙은 코어의 한 함수고,
+               * 사이드바가 같은 입력으로 반대쪽 답을 읽는다. */}
+              {!isSettingsSurface &&
+                showsConnectionBanner({ asDrawer: isMobile, listCollapsed: listColumnCollapsed }) && (
+                  <ConnectionBanner />
+                )}
               {/* ADE 관제 요약 한 줄 (ADR-0154 D2, 이슈 1135). 연결 배너와 같은
                * 자리에 있고 이유도 같다: 재료의 절반이 워크스페이스 전역이라
                * 채널 헤더에 두면 지금 보고 있는 방 밖의 작업이 화면에서 사라진다.

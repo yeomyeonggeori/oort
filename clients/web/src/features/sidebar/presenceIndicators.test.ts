@@ -11,15 +11,12 @@ import { describe, expect, it } from "vitest";
 // 붙이자 한 줄에 8px 원이 둘 서서 away/dnd일 때 서로 모순되는 신호를 냈다
 // (호박 배지 + 초록 점). 사람 눈이 스크린샷에서 잡을 때까지 아무것도 붉지 않았다.
 //
-// 그래서 여기서는 `avatarSize.test.ts`와 같은 다리 검사를 한다 — 소스의 클래스와
-// 컴파일된 스케일을 함께 읽어, 「연결 = 바, 프레즌스 = 원」이라는 모양의 분리와
-// 「건강하면 침묵」을 되돌리는 diff를 붉게 만든다.
+// 그래서 여기서는 `avatarSize.test.ts`와 같은 다리 검사를 한다 — 소스의 클래스를 읽어 「프레즌스 = 원」이라는
+// 모양을 되돌리는 diff를 붉게 만든다. (연결 표시는 12x4 막대였다가 #5220에서 사이드바 아래 연결 카드로
+// 옮겼다. 「건강하면 침묵」은 카드가 정상일 때 서지 않는 것으로 `connectionModel.test.tsx`가, 막대가 없다는
+// 것은 아래 한 건이 잰다.)
 // =============================================================================
 
-const tokensCss = readFileSync(
-  new URL("../../design/tokens.css", import.meta.url),
-  "utf8"
-);
 const sidebar = readFileSync(new URL("./Sidebar.tsx", import.meta.url), "utf8");
 const presenceControl = readFileSync(
   new URL("./PresenceControl.tsx", import.meta.url),
@@ -30,40 +27,15 @@ const profileCard = readFileSync(
   "utf8"
 );
 
-/** 고정 스케일의 한 단계(px). 표에 없는 단계는 클래스만 있고 CSS 규칙이 없다. */
-function spacingStep(step: string): number {
-  const match = tokensCss.match(
-    new RegExp(`--spacing-${step}:\\s*(\\d+(?:\\.\\d+)?)px`)
-  );
-  if (match === null) {
-    throw new Error(`tokens.css 에 --spacing-${step} 이 없다 (U4-4R W-1)`);
-  }
-  return Number(match[1]);
-}
-
-describe("연결 표시(①)는 건강하면 침묵한다 (H1)", () => {
-  it("connected 에서는 요소 자체를 세우지 않는다", () => {
-    // 상시 초록 점은 정보가 0이고 SKILL §8이 금지하는 장식이다. 조건 없이
-    // 렌더하도록 되돌리면 이 줄이 붉어진다.
-    expect(sidebar).toContain("showsConnectionBar(connStatus) && (");
-  });
-
-  it("색은 상태에서만 나온다: 하드코딩된 토큰 클래스가 없다", () => {
-    expect(sidebar).toContain("connectionBarClass(connStatus)");
-    // `bg-ok`가 이 행에 문자열로 돌아오면 그것이 곧 상시 초록 점이다.
-    expect(sidebar).not.toContain('"size-2 shrink-0 rounded-sm"');
+describe("연결 막대는 카드로 옮겼다 (#5220)", () => {
+  it("사이드바에 12x4 막대가 더는 없고, 카드는 코어의 한 규칙으로만 선다", () => {
+    expect(sidebar).not.toContain('data-testid="conn-status"');
+    expect(sidebar).not.toContain('"h-1 w-3 shrink-0 rounded-full"');
+    expect(sidebar).toContain("showsConnectionCard({ asDrawer, listCollapsed: channelPaneCollapsed })");
   });
 });
 
-describe("두 표시는 모양이 다르다 (H1)", () => {
-  it("연결은 12x4 바다 — 레일 마커의 바 문법", () => {
-    expect(sidebar).toContain('"h-1 w-3 shrink-0 rounded-full"');
-    // 그 두 단계가 실제로 컴파일되는 단계여야 한다. 없으면 클래스만 있고 규칙이
-    // 없어 0px로 렌더된다(이 레포가 이미 한 번 겪은 결함).
-    expect(spacingStep("1")).toBe(4);
-    expect(spacingStep("3")).toBe(12);
-  });
-
+describe("프레즌스 표시의 모양 (H1)", () => {
   it("프레즌스는 원이다 — 그리고 연결 표시는 더 이상 원이 아니다", () => {
     expect(presenceControl).toContain("absolute bottom-0 right-0 rounded-full border");
     expect(presenceControl).toContain('size === "md" ? "size-3" : "size-2"');
