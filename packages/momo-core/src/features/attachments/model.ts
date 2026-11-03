@@ -44,9 +44,11 @@
 // 판정은 여전히 서버의 것이고, 이쪽은 그 판정을 앞당겨 말할 뿐이다.
 // =============================================================================
 
-import type { MessageAttachment } from "../../lib/api";
+import type { AttachmentMedia, MessageAttachment } from "../../lib/api";
+import { attachmentMediaFromWire } from "../../lib/attachmentMedia";
+import type { ConnectionCause } from "../connection/model";
 
-export type { MessageAttachment };
+export type { AttachmentMedia, MessageAttachment };
 
 /** 서버가 받는 최대 크기 (`momo-messaging::attachment::MAX_ATTACHMENT_BYTES`). */
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024;
@@ -121,7 +123,15 @@ export interface AttachmentDraft {
   attachmentId?: string;
   /** `failed`에서만 있다. */
   issue?: UploadIssue;
+  /**
+   * `failed`에서만, 그리고 실패가 **닿지 못함**(오프라인·서버에 닿지 못함)일 때만 있다(#5221). 화면은 이 원인의 문장
+   * (`copyForCause(cause).uploadFailed`)을 쓰고, 없으면 `issue`의 기존 문장을 쓴다.
+   */
+  failureCause?: ConnectionCause;
 }
+
+/** 실패한 칩의 이유 문장을 화면이 사전에서 가져와 갈아 끼우는 길. `undefined`면 `issue`의 기존 문장이다. */
+export type UploadReasonFor = (draft: AttachmentDraft) => string | undefined;
 
 export type DraftStatus =
   | "ready"
@@ -285,7 +295,7 @@ export function isRetryableIssue(issue: UploadIssue): boolean {
  * 이 값은 바뀌지 않는다 — 보조기술이 초당 몇 번씩 같은 줄을 다시 읽지 않는 이유가
  * 여기 있다(리뷰 H-3).
  */
-export function draftStatusWord(draft: AttachmentDraft): string {
+export function draftStatusWord(draft: AttachmentDraft, reasonFor?: UploadReasonFor): string {
   switch (draft.status) {
     case "ready":
       return ATTACH_COPY.queued;
@@ -298,7 +308,7 @@ export function draftStatusWord(draft: AttachmentDraft): string {
     case "failed": {
       const issue = draft.issue ?? "unavailable";
       const next = uploadIssueNext(issue);
-      const reason = uploadIssueCopy(issue);
+      const reason = reasonFor?.(draft) ?? uploadIssueCopy(issue);
       return `${reason}${next === null ? "" : `. ${next}`}`;
     }
   }
@@ -316,7 +326,7 @@ export function draftStatusWord(draft: AttachmentDraft): string {
  * 두 번 바뀌었다 — 파일명이 잘렸다 풀렸다 한다. 아래 줄에 두면 이름 열은 칩이
  * 사는 내내 같은 폭이다.
  */
-export function draftStatusLine(draft: AttachmentDraft): {
+export function draftStatusLine(draft: AttachmentDraft, reasonFor?: UploadReasonFor): {
   text: string;
   danger: boolean;
   /** 잰 값이 있을 때만. 없으면 화면도 낭독도 수를 말하지 않는다. */
@@ -325,7 +335,7 @@ export function draftStatusLine(draft: AttachmentDraft): {
   // 폰 picker가 provider 메타데이터도 native 재측정도 얻지 못한 경우만 생략한다.
   // 실제 0-byte 파일은 `sizeKnown=true`라서 정직하게 「0 B」를 말한다 (#1703 Nit-2).
   const size = draft.sizeKnown ? formatBytes(draft.sizeBytes) : null;
-  const word = draftStatusWord(draft);
+  const word = draftStatusWord(draft, reasonFor);
   const percent =
     draft.status === "uploading" && draft.progress > 0
       ? Math.round(draft.progress * 100)
@@ -360,7 +370,8 @@ function statusKey(draft: AttachmentDraft): string {
  */
 export function draftAnnouncement(
   previous: AttachmentDraft[],
-  next: AttachmentDraft[]
+  next: AttachmentDraft[],
+  reasonFor?: UploadReasonFor
 ): string | null {
   const before = new Map(previous.map((draft) => [draft.localId, statusKey(draft)]));
   const changed = next.filter(
@@ -369,13 +380,13 @@ export function draftAnnouncement(
   if (changed.length === 0) return null;
   if (changed.length === 1) {
     const draft = changed[0];
-    return `${attachmentDisplayName(draft)} ${draftStatusLine(draft).text}`;
+    return `${attachmentDisplayName(draft)} ${draftStatusLine(draft, reasonFor).text}`;
   }
   // 낱말별로 묶어 개수로 말한다. 「N개 상태가 바뀌었습니다」 같은 요약은 짧지만
   // 아무것도 말하지 않는다 — 무엇이 몇 개인지가 이 줄의 전부다.
   const counts = new Map<string, number>();
   for (const draft of changed) {
-    const word = draftStatusWord(draft);
+    const word = draftStatusWord(draft, reasonFor);
     counts.set(word, (counts.get(word) ?? 0) + 1);
   }
   const groups = [...counts.entries()]
@@ -512,13 +523,20 @@ export function completeUpload(
 export function failUpload(
   list: AttachmentDraft[],
   localId: string,
-  issue: UploadIssue
+  issue: UploadIssue,
+  cause?: ConnectionCause | null
 ): AttachmentDraft[] {
-  return mapDraft(list, localId, (draft) => ({
-    ...draft,
-    status: "failed",
-    issue,
-  }));
+  return mapDraft(list, localId, (draft) => {
+    // 이전 실패의 원인이 새 실패에 묻어 가지 않게 먼저 걷는다.
+    const { failureCause: _previous, ...rest } = draft;
+    void _previous;
+    return {
+      ...rest,
+      status: "failed",
+      issue,
+      ...(cause == null ? {} : { failureCause: cause }),
+    };
+  });
 }
 
 /**
@@ -700,9 +718,90 @@ export function formatMimeLabel(mime: string): string {
   return "파일";
 }
 
-/** 카드 두 번째 줄. macOS `MomoMessageAttachmentCard.metadata`와 같은 조립이다. */
+/**
+ * 카드 두 번째 줄. macOS `MomoMessageAttachmentCard.metadata`와 같은 조립이다.
+ * 보내는 기기가 길이를 잰 영상이면 종류와 크기 사이에 길이가 든다(「동영상 · 0:42 · 58.4 MB」, #5208).
+ */
 export function attachmentMetaLine(attachment: MessageAttachment): string {
-  return `${formatMimeLabel(attachment.mime)} · ${formatBytes(attachment.sizeBytes)}`;
+  const kind = formatMimeLabel(attachment.mime);
+  const media = attachmentMediaOf(attachment);
+  return media === null
+    ? `${kind} · ${formatBytes(attachment.sizeBytes)}`
+    : `${kind} · ${formatVideoDuration(media.durationMs)} · ${formatBytes(attachment.sizeBytes)}`;
+}
+
+// ---- 영상 (#5208) -------------------------------------------------------------
+//
+// 서버는 영상 요약(`media`)과 포스터(`GET …/poster`)를 이미 준다(ADR-0151 증보 5 D5). 폰이 먼저 소비하지만 모델은 웹도
+// 같이 쓸 수 있게 여기 둔다. `showsInlinePreview` 는 **건드리지 않는다**: 그 판정은 래스터 이미지의 것이고 웹 타임라인이
+// 같이 읽는다 — 영상은 이미지 미리보기가 아니라 자기 카드를 갖는다.
+
+/** 선언된 타입의 본 이름(소문자, 매개변수 제외). */
+function baseMime(mime: unknown): string {
+  return typeof mime === "string" ? (mime.trim().toLowerCase().split(";")[0] ?? "").trim() : "";
+}
+
+/** iOS(AVFoundation)가 읽는 영상 타입. 서버가 재생 주소를 내주는 닫힌 목록에서 WebM 을 뺀 것이다. */
+const IN_APP_PLAYABLE_VIDEO_MIMES: ReadonlySet<string> = new Set([
+  "video/mp4",
+  "video/quicktime",
+  "video/x-m4v",
+]);
+
+/**
+ * 이 첨부의 영상 요약. 와이어의 값은 REST 페이지에서 **다시 걸러지지 않으므로**(응답이 그대로 통과한다) 읽는 자리에서
+ * 같은 판정(`attachmentMediaFromWire`)을 한 번 더 한다. 없거나 어긋나면 `null`.
+ */
+export function attachmentMediaOf(
+  attachment: Pick<MessageAttachment, "media"> | null | undefined,
+): AttachmentMedia | null {
+  return attachmentMediaFromWire(attachment?.media) ?? null;
+}
+
+/** 영상 첨부인가: 선언 타입이 `video/*` 이다. 요약이 없어도(재지 않는 클라가 올린 영상) 영상이다. */
+export function isVideoAttachment(attachment: Pick<MessageAttachment, "mime">): boolean {
+  return baseMime(attachment?.mime).startsWith("video/");
+}
+
+/** 앱 안에서 바로 재생하는가. 아니면(WebM 등) 파일 카드의 공유 길이 남는다. */
+export function isInAppPlayableVideo(attachment: Pick<MessageAttachment, "mime">): boolean {
+  return IN_APP_PLAYABLE_VIDEO_MIMES.has(baseMime(attachment?.mime));
+}
+
+/**
+ * 영상 길이 표기: 한 시간 아래 「0:42」, 이상 「1:01:01」. 소수 초는 **버린다** — 반올림하면 카드가 실제보다 긴 영상을 말한다.
+ * 길이가 아닌 값(음수·NaN·무한)은 「0:00」.
+ */
+export function formatVideoDuration(durationMs: number): string {
+  const total = Number.isFinite(durationMs) && durationMs > 0 ? Math.floor(durationMs / 1000) : 0;
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  const ss = String(seconds).padStart(2, "0");
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${ss}` : `${minutes}:${ss}`;
+}
+
+/** 카드 비율의 한계: 가장 세로로 긴 9:16, 가장 가로로 긴 16:9. 그 밖은 잘라 채운다(`cover`). */
+const VIDEO_CARD_MIN_ASPECT = 9 / 16;
+const VIDEO_CARD_MAX_ASPECT = 16 / 9;
+
+/**
+ * 영상 카드의 크기: 상한 안에서 비율을 지키되 비율은 9:16~16:9 로 가둔다(극단적인 비율이 가는 띠를 만들지 않게). 재지 않은
+ * 영상은 16:9 자리다. 카드가 포스터보다 먼저 서므로 포스터가 도착해도 행이 자라지 않는다.
+ */
+export function videoCardSize(
+  media: AttachmentMedia | null,
+  max: { width: number; height: number },
+): { width: number; height: number } {
+  const raw = media === null ? VIDEO_CARD_MAX_ASPECT : media.width / media.height;
+  const aspect = Math.min(Math.max(raw, VIDEO_CARD_MIN_ASPECT), VIDEO_CARD_MAX_ASPECT);
+  let width = max.width;
+  let height = width / aspect;
+  if (height > max.height) {
+    height = max.height;
+    width = height * aspect;
+  }
+  return { width: Math.round(width), height: Math.round(height) };
 }
 
 /**

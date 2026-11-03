@@ -120,6 +120,10 @@ import {
   InlineBanner,
   Skeleton,
 } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import { causeOfFailure } from "@momo/core/features/connection/failure";
+import { deviceOnlineNow } from "@/lib/deviceOnline";
 import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
@@ -1593,6 +1597,9 @@ export function ChatShell() {
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
               onDiscardPending={stressCount > 0 ? undefined : timeline.discard}
+              loadCause={timeline.loadCause}
+              failureKinds={timeline.failureKinds}
+              onResendAllPending={stressCount > 0 ? undefined : timeline.resendAll}
               channelKind={channel?.kind}
               viewingThreadId={thread !== null && !workPanelOpen && windowForeground ? thread.id : null}
               channelName={label}
@@ -1631,10 +1638,10 @@ export function ChatShell() {
           ) : (
             <Skeleton ready={!channelsQuery.isLoading} rows={6} className="p-4">
               {channelsQuery.isLoading ? null : channelsQuery.error ? (
-                <InlineBanner
-                  message="채널을 불러오지 못했습니다."
-                  actionLabel="다시 시도"
-                  onAction={() => void channelsQuery.refetch()}
+                <LoadFailureBox
+                  titleKey={CONNECTION_KEYS.loadChannelListTitle}
+                  cause={causeOfFailure(channelsQuery.error, deviceOnlineNow())}
+                  onRetry={() => void channelsQuery.refetch()}
                   testId="chat-channels-error"
                 />
               ) : canCreate ? (

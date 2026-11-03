@@ -16,6 +16,7 @@ import {
   Animated,
   Dimensions,
   Image,
+  Linking,
   Pressable,
   ScrollView,
   Share,
@@ -1446,28 +1447,122 @@ describe('⑥ 썸네일 줄과 「N장 중 n번」', () => {
   });
 });
 
-describe('⑦ 저장·공유 — 같은 공유 시트를 연다', () => {
+describe('⑦ 저장은 사진 보관함에 추가하고, 공유는 공유 시트를 연다 (#5209)', () => {
   const save = () => screen.getByTestId('attachment-viewer-save');
   const share = () => screen.getByTestId('attachment-viewer-share');
+  const status = () => screen.queryByTestId('attachment-viewer-status')?.props.children;
 
-  it('저장도 공유도 내려받아 iOS 공유 시트에 사진 파일을 넘긴다', async () => {
-    const sheet = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as never);
-    await mount();
-    fireEvent.press(save());
-    await waitFor(() => expect(sheet).toHaveBeenCalledTimes(1));
-    expect(sheet.mock.calls[0]?.[0]).toMatchObject({ title: 'a.png', url: expect.any(String) });
-    // 시트가 닫힌 뒤(성공) 단추가 다시 눌린다.
-    await waitFor(() => expect(share().props.accessibilityState?.disabled).toBeFalsy());
-    fireEvent.press(share());
-    await waitFor(() => expect(sheet).toHaveBeenCalledTimes(2));
-    expect(sheet.mock.calls[1]?.[0]).toMatchObject({ title: 'a.png', url: expect.any(String) });
+  const mediaLibrary = jest.requireMock('expo-media-library/legacy') as {
+    __state: {
+      addPermission: { status: string };
+      addAnswer: { status: string; accessPrivileges: string; granted: boolean; canAskAgain: boolean };
+      saved: string[];
+      saveFailure: Error | null;
+    };
+    __reset: () => void;
+    getPermissionsAsync: jest.Mock;
+    requestPermissionsAsync: jest.Mock;
+    saveToLibraryAsync: jest.Mock;
+  };
+  const fileSystem = jest.requireMock('expo-file-system') as { __reset: () => void };
+  /** 이 기기가 이미 사진 추가를 허용했다(프롬프트 없이 저장된다). */
+  const granted = () => {
+    mediaLibrary.__state.addPermission = { status: 'granted' };
+  };
+
+  beforeEach(() => {
+    mediaLibrary.__reset();
+    fileSystem.__reset();
+    jest.clearAllMocks();
   });
 
-  it('저장은 보조기술에 「공유 시트가 열려요 — 이미지 저장을 고르세요」라고 말한다 — 사진 보관함에 직접 쓰지 않는다', async () => {
+  it('저장은 내려받아 사진 보관함에 더하고 공유 시트를 열지 않는다 — 끝나면 「사진에 저장했어요」', async () => {
+    granted();
+    const sheet = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as never);
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    await mount();
+    fireEvent.press(save());
+    await waitFor(() => expect(status()).toBe('사진에 저장했어요'));
+    expect(mediaLibrary.saveToLibraryAsync).toHaveBeenCalledTimes(1);
+    // 보관함으로 간 것은 **내려받은 사진 파일**이다(확장자가 있다 — `saveToLibraryAsync` 가 요구한다).
+    expect(mediaLibrary.__state.saved).toEqual([expect.stringMatching(/^file:.*a\.png$/)]);
+    expect(sheet).not.toHaveBeenCalled();
+    expect(announce).toHaveBeenCalledWith('사진에 저장했어요');
+    // 영수증은 눌림을 막지 않는다 — 단추는 곧 다시 눌린다.
+    expect(save().props.accessibilityState?.disabled).toBeFalsy();
+  });
+
+  it('권한은 처음 저장을 눌렀을 때 한 번만 묻는다 — 추가 전용(writeOnly)으로', async () => {
+    await mount();
+    // 뷰어를 연 것만으로는 읽지도 묻지도 않는다.
+    expect(mediaLibrary.getPermissionsAsync).not.toHaveBeenCalled();
+    expect(mediaLibrary.requestPermissionsAsync).not.toHaveBeenCalled();
+    fireEvent.press(save());
+    await waitFor(() => expect(status()).toBe('사진에 저장했어요'));
+    expect(mediaLibrary.requestPermissionsAsync.mock.calls).toEqual([[true]]);
+    // 두 번째는 묻지 않는다(허용돼 있다).
+    mediaLibrary.requestPermissionsAsync.mockClear();
+    await waitFor(() => expect(save().props.accessibilityState?.disabled).toBeFalsy());
+    fireEvent.press(save());
+    await waitFor(() => expect(mediaLibrary.saveToLibraryAsync).toHaveBeenCalledTimes(2));
+    expect(mediaLibrary.requestPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('거부하면 아무것도 내려받지 않고 「설정 열기」 알약이 서서 남는다', async () => {
+    mediaLibrary.__state.addAnswer = { status: 'denied', accessPrivileges: 'none', granted: false, canAskAgain: false };
+    const open = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    await mount();
+    fireEvent.press(save());
+    await waitFor(() => expect(status()).toBe('사진 접근이 꺼져 있어요 · 설정 열기'));
+    expect(announce).toHaveBeenCalledWith('사진 접근이 꺼져 있어요 · 설정 열기');
+    expect(mediaLibrary.saveToLibraryAsync).not.toHaveBeenCalled();
+    // 알약은 눌린다 — 기기 설정 앱의 oort 화면으로.
+    const pill = screen.getByTestId('attachment-viewer-save-settings');
+    expect(pill.props.accessibilityRole).toBe('button');
+    fireEvent.press(pill);
+    expect(open).toHaveBeenCalledTimes(1);
+    // 저장 단추는 잠기지 않는다(설정에서 켜고 돌아와 다시 누를 수 있다).
+    expect(save().props.accessibilityState?.disabled).toBeFalsy();
+  });
+
+  it('실패하면 안내가 서고(보조기술에도 알린다) 다시 누르면 저장된다', async () => {
+    granted();
+    mediaLibrary.__state.saveFailure = new Error('boom');
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    await mount();
+    fireEvent.press(save());
+    await waitFor(() => expect(status()).toBe('저장하지 못했어요 · 다시 시도'));
+    expect(announce).toHaveBeenCalledWith('저장하지 못했어요 · 다시 시도');
+    expect(flatten(screen.getByTestId('attachment-viewer-status').props.style).color).toBe(VIEWER_STAGE.danger);
+    mediaLibrary.__state.saveFailure = null;
+    fireEvent.press(save());
+    await waitFor(() => expect(status()).toBe('사진에 저장했어요'));
+    expect(mediaLibrary.__state.saved).toHaveLength(1);
+  });
+
+  it('공유는 지금처럼 내려받아 공유 시트를 열고 사진 보관함에 닿지 않는다', async () => {
+    const sheet = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as never);
+    await mount();
+    fireEvent.press(share());
+    await waitFor(() => expect(sheet).toHaveBeenCalledTimes(1));
+    expect(sheet.mock.calls[0]?.[0]).toMatchObject({ title: 'a.png', url: expect.any(String) });
+    await waitFor(() => expect(share().props.accessibilityState?.disabled).toBeFalsy());
+    // 공유는 보관함에 쓰지도 권한을 읽지도 묻지도 않는다.
+    expect(mediaLibrary.saveToLibraryAsync).not.toHaveBeenCalled();
+    expect(mediaLibrary.getPermissionsAsync).not.toHaveBeenCalled();
+    expect(mediaLibrary.requestPermissionsAsync).not.toHaveBeenCalled();
+    // 공유가 앞 판처럼 「내려받는 중」을 말하고 실패하면 「내려받기 실패 · 다시 시도」를 말한다.
+    sheet.mockRejectedValueOnce(new Error('boom'));
+    fireEvent.press(share());
+    await waitFor(() => expect(status()).toBe('내려받기 실패 · 다시 시도'));
+  });
+
+  it('저장은 보조기술에 사진 보관함에 저장한다고 말한다 — 공유 시트가 아니다', async () => {
     await mount();
     expect(save().props.accessibilityLabel).toBe('저장');
-    expect(save().props.accessibilityHint).toContain('공유 시트');
-    expect(save().props.accessibilityHint).toContain('이미지 저장');
+    expect(save().props.accessibilityHint).toBe('사진 보관함에 저장해요');
+    expect(save().props.accessibilityHint).not.toContain('공유 시트');
     expect(share().props.accessibilityLabel).toBe('공유');
     expect(share().props.accessibilityHint).toBeUndefined();
     // 글리프는 둘이 다르다(저장 = 내려받기, 공유 = 네모+위 화살표).
@@ -1475,12 +1570,13 @@ describe('⑦ 저장·공유 — 같은 공유 시트를 연다', () => {
     expect(within(share()).UNSAFE_getByType(Image).props.source).toBe(VIEWER_ICONS.share);
   });
 
-  it('내려받는 동안 두 단추가 잠기고 누른 쪽만 돈다', async () => {
+  it('저장하는 동안 두 단추가 잠기고 누른 쪽만 돈다', async () => {
+    granted();
     let finish: () => void = () => {};
-    jest.spyOn(Share, 'share').mockImplementation(
+    mediaLibrary.saveToLibraryAsync.mockImplementationOnce(
       () =>
-        new Promise(resolve => {
-          finish = () => resolve({ action: 'sharedAction' } as never);
+        new Promise<void>(resolve => {
+          finish = resolve;
         }),
     );
     await mount();
@@ -1489,28 +1585,22 @@ describe('⑦ 저장·공유 — 같은 공유 시트를 연다', () => {
     expect(share().props.accessibilityState?.disabled).toBe(true);
     expect(within(save()).UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(1);
     expect(within(share()).UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
-    expect(screen.getByTestId('attachment-viewer-status').props.children).toBe('내려받는 중');
+    expect(status()).toBe('저장하는 중이에요');
     await act(async () => {
       finish();
     });
     await waitFor(() => expect(save().props.accessibilityState?.disabled).toBeFalsy());
-    expect(screen.queryByTestId('attachment-viewer-status')).toBeNull();
+    expect(status()).toBe('사진에 저장했어요');
   });
 
-  it('실패하면 안내가 서고(보조기술에도 알린다) 다시 누를 수 있다', async () => {
-    const sheet = jest.spyOn(Share, 'share').mockRejectedValueOnce(new Error('boom'));
-    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+  it('마지막으로 공유를 누르면 저장의 영수증·거부 알약이 공유의 알약을 가리지 않는다', async () => {
+    mediaLibrary.__state.addAnswer = { status: 'denied', accessPrivileges: 'none', granted: false, canAskAgain: false };
+    jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as never);
     await mount();
+    fireEvent.press(save());
+    await waitFor(() => expect(screen.getByTestId('attachment-viewer-save-settings')).toBeTruthy());
     fireEvent.press(share());
-    await waitFor(() =>
-      expect(screen.getByTestId('attachment-viewer-status').props.children).toBe('내려받기 실패 · 다시 시도'),
-    );
-    expect(announce).toHaveBeenCalledWith('내려받기 실패. 다시 시도');
-    // 다시 누르면 다시 시도한다 — 단추는 잠기지 않았다.
-    sheet.mockResolvedValueOnce({ action: 'sharedAction' } as never);
-    fireEvent.press(share());
-    await waitFor(() => expect(sheet).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.queryByTestId('attachment-viewer-status')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('attachment-viewer-save-settings')).toBeNull());
   });
 
   it('격자(모아보기)·삭제·편집 같은 죽은 단추는 없다 — 있는 단추는 뒤로·썸네일·저장·공유뿐이다', async () => {

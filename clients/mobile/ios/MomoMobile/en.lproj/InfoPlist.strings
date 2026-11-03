@@ -4,4 +4,4 @@
 "NSLocalNetworkUsageDescription" = "Use the local network to connect to an oort server on the same network.";
 "NSMicrophoneUsageDescription" = "oort does not record audio. All features work without microphone access.";
 "NSPhotoLibraryUsageDescription" = "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded.";
-"NSPhotoLibraryAddUsageDescription" = "oort does not save photos to your library. All features work without this permission.";
+"NSPhotoLibraryAddUsageDescription" = "Adds the photos and videos you choose to save to your photo library. This permission does not let oort read your library.";

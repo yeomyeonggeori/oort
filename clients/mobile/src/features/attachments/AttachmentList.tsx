@@ -1,9 +1,13 @@
 import {
   ATTACH_COPY,
   attachmentDisplayName,
+  attachmentMediaOf,
   attachmentMetaLine,
+  formatVideoDuration,
   imageGridColumns,
   isImageMime,
+  isInAppPlayableVideo,
+  isVideoAttachment,
   showsInlinePreview,
   splitFileName,
   type MessageAttachment,
@@ -22,12 +26,19 @@ import {
   font,
   line,
   radius,
+  slopTo,
   space,
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
 import { usePalette, useStyles } from '../../design/theme';
-import { CONV_ICONS, CONV_ICON_SIZE } from '../../design/icons';
+import {
+  CONV_ICONS,
+  CONV_ICON_SIZE,
+  VIDEO_ICON_SIZE,
+  VIDEO_ICONS,
+} from '../../design/icons';
+import { useFormatMessage } from '../../i18n/useFormatMessage';
 import { CONV } from '../conversation/convDesign';
 import type { LongPressTiming } from '../conversation/useLongPress';
 import { useSession } from '../../session/useSession';
@@ -38,8 +49,10 @@ import {
   type MeasuredSize,
 } from './content';
 import { AttachmentViewer } from './AttachmentViewer';
+import { VideoPosterCard } from './VideoPosterCard';
 import {useHeroSources} from './heroSource';
 import type {StageRect} from '@momo/core/lib/stageTransition';
+import { saveNoticeKey, useSaveAttachment, type SaveAttachment } from './useSaveAttachment';
 import { useShareAttachment, type DownloadState } from './useShareAttachment';
 
 // =============================================================================
@@ -50,7 +63,13 @@ import { useShareAttachment, type DownloadState } from './useShareAttachment';
 //     높이 320 안에서 비율을 지키고, 여러 장은 정사각 격자(2~4장 2열, 5장부터 3열).
 //     파일명·타입·크기 줄이 없다. 탭하면 전체 화면 보기(좌우로 넘기고, 공유한다).
 //   · SVG·큰 이미지·나머지 파일(PDF 포함): 컴팩트 카드. 탭하면 앱 캐시로 스트리밍한
-//     파일을 iOS 공유시트에 넘긴다(공유시트가 미리보기와 저장을 함께 준다).
+//     파일을 iOS 공유시트에 넘긴다(「공유」 — 앞 판 그대로). 오른쪽 ↓ 는 **「저장」** 이다(#5209):
+//     사진·영상은 사진 보관함에 바로 추가하고, 그 밖의 파일은 파일 앱에서 위치를 골라 거기에 복사한다.
+//   · 영상(mp4·mov·m4v, #5208): 앱 안에서 바로 재생한다. 보낸 기기가 포스터를 만들었으면 **포스터 카드**(`VideoPosterCard.tsx` —
+//     사진처럼 테두리 없는 그림, 한가운데 재생 표지, 오른쪽 아래 길이), 아니면 파일 카드의 모양에 **영상기 아이콘 · 길이 · ▶**.
+//     탭하면 사진과 같은 전체 화면 보기에서 구간 읽기로 재생이 시작된다(사진과 섞인 묶음은 한 줄로 넘긴다). 앱이 못 읽는 영상(WebM)만
+//     위 파일 카드로 남는다(아이콘은 영상기다 — 문서 아이콘이 아니다): 탭은 공유시트, ↓ 는 파일 앱(보관함이 WebM 을 못 받는다). 재생되는 영상의
+//     「저장」은 전체 화면 보기의 [저장]이 맡는다(#5209) — 그 카드에는 ↓ 가 없고 ▶ 가 선다.
 //
 // 이름은 `attachmentDisplayName` 만 거친다: 무작위 토큰 같은 이름은 「이미지」
 // 「PDF 문서」 「파일」로 갈음한다. 웹의 같은 이슈(#3820)와 같은 규칙이다.
@@ -229,10 +248,53 @@ function ImageTile({
 
 function DownloadStatus({
   state,
+  saving,
+  lastBy,
 }: {
   state: DownloadState;
+  saving: SaveAttachment;
+  /** 마지막으로 누른 것 — 카드(공유)와 ↓(저장)의 상태가 한 줄을 나눠 쓴다. */
+  lastBy: 'save' | 'share';
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
+  const savedLast = lastBy === 'save';
+  const key = savedLast ? saveNoticeKey(saving.state) : null;
+  if (key !== null) {
+    const text = formatMessage(key);
+    // 거부는 눌린다(설정 열기). 나머지는 읽기만 한다 — 실패는 ↓ 를 다시 누르면 다시 시도한다.
+    if (saving.state.status === 'denied') {
+      return (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={text}
+          hitSlop={{ top: slopTo(line.meta), bottom: slopTo(line.meta) }}
+          onPress={saving.openSettings}
+          testID="attachment-save-settings"
+        >
+          <Text style={styles.downloadIdle} testID="attachment-save-status">
+            {text}
+          </Text>
+        </Pressable>
+      );
+    }
+    return (
+      <Text
+        style={saving.state.status === 'failed' ? styles.downloadFailed : styles.downloadBusy}
+        testID="attachment-save-status"
+      >
+        {text}
+      </Text>
+    );
+  }
+  // 마지막으로 ↓ 를 눌렀으면 이 줄은 저장의 것이다. 앞서 공유가 남긴 실패(`state`)는 저장의 영수증이 걷힌 뒤에 되살아나지 않는다.
+  if (savedLast) {
+    return (
+      <Text style={styles.downloadIdle} testID="attachment-download-idle">
+        {ATTACH_COPY.download}
+      </Text>
+    );
+  }
   if (state.status === 'downloading') {
     const percent =
       state.progress === null ? null : Math.round(state.progress * 100);
@@ -263,41 +325,89 @@ function FileCard({
   channelId,
   attachment,
   gesture,
+  onPlay,
 }: {
   workspaceId: string;
   channelId: string;
   attachment: MessageAttachment;
   gesture?: AttachmentGesture;
+  /** 앱 안에서 재생하는 영상일 때만 온다 — 누르면 공유시트 대신 전체 화면 재생이 열린다(#5208). */
+  onPlay?: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const formatMessage = useFormatMessage();
   const label = attachmentDisplayName(attachment);
   const [download, share] = useShareAttachment(
     workspaceId,
     channelId,
     attachment,
   );
+  const saving = useSaveAttachment(workspaceId, channelId, attachment);
+  const { save: startSave } = saving;
+  const [lastBy, setLastBy] = useState<'save' | 'share'>('share');
+  const savingNow = saving.state.status === 'working';
+  const busy = download.status === 'downloading' || savingNow;
+  const saveLabel = formatMessage(
+    saving.route === 'photos'
+      ? 'mobile.attachmentSave.toPhotos'
+      : 'mobile.attachmentSave.toFiles',
+  );
+  const isVideo = isVideoAttachment(attachment);
 
   const onPress = useCallback(
     (event?: GestureResponderEvent) => {
       event?.stopPropagation();
       if (gesture?.consumeTap()) return;
+      if (onPlay !== undefined) {
+        onPlay();
+        return;
+      }
+      if (savingNow) return;
+      setLastBy('share');
       share();
     },
-    [gesture, share],
+    [gesture, onPlay, savingNow, share],
   );
+  // ↓ 는 「저장」이다(#5209). 카드 탭(공유)과 같은 규율: 길게 누르기는 메시지 메뉴의 것이고, 그 뒤에 따라오는 탭은 행동을 시작하지 않는다.
+  // 앱 안에서 재생하는 영상 카드에는 ↓ 가 없다(▶ 가 선다) — 그 영상의 저장은 전체 화면 보기의 [저장]이다.
+  const onSave = useCallback(
+    (event?: GestureResponderEvent) => {
+      event?.stopPropagation();
+      if (gesture?.consumeTap()) return;
+      if (busy) return;
+      setLastBy('save');
+      startSave();
+    },
+    [busy, gesture, startSave],
+  );
+  const duration = attachmentMediaOf(attachment);
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${label}, ${attachmentMetaLine(attachment)}, ${
-        download.status === 'failed'
-          ? `${ATTACH_COPY.downloadFailed}, ${ATTACH_COPY.retry}`
-          : download.status === 'downloading'
-          ? ATTACH_COPY.downloading
-          : `${ATTACH_COPY.download}, 공유하기`
-      }`}
-      accessibilityState={{ busy: download.status === 'downloading' }}
+      accessibilityLabel={
+        onPlay !== undefined
+          ? duration === null
+            ? formatMessage('attachments.video.cardLabelNoDuration', { name: label })
+            : formatMessage('attachments.video.cardLabel', {
+                name: label,
+                duration: formatVideoDuration(duration.durationMs),
+              })
+          : `${label}, ${attachmentMetaLine(attachment)}, ${
+              download.status === 'failed'
+                ? `${ATTACH_COPY.downloadFailed}, ${ATTACH_COPY.retry}`
+                : download.status === 'downloading'
+                ? ATTACH_COPY.downloading
+                : `${ATTACH_COPY.download}, 공유하기`
+            }`
+      }
+      // 안쪽 ↓ 단추는 VoiceOver 에 따로 서지 않는다(카드가 하나의 요소다) — 저장은 로터의 동작으로 간다. 재생 카드에는 ↓ 가 없어 동작도 없다.
+      accessibilityActions={onPlay === undefined ? [{ name: 'save', label: saveLabel }] : undefined}
+      onAccessibilityAction={event => {
+        if (event.nativeEvent.actionName === 'save') onSave();
+      }}
+      accessibilityState={{ busy }}
       {...gesture?.pressTiming}
       onLongPress={gesture?.onLongPress}
       onPress={onPress}
@@ -311,6 +421,13 @@ function FileCard({
       <View style={styles.fileIcon} testID="attachment-card-icon">
         {isImageMime(attachment.mime) ? (
           <Text style={styles.fileIconText}>▧</Text>
+        ) : isVideo ? (
+          // 영상은 문서 아이콘이 아니다(#5208). 포스터가 없는 영상도 영상기로 읽힌다.
+          <Image
+            source={VIDEO_ICONS.video}
+            style={[styles.videoGlyph, { tintColor: palette.textMuted }]}
+            testID="attachment-card-video-icon"
+          />
         ) : (
           <Image
             source={CONV_ICONS.file}
@@ -324,17 +441,44 @@ function FileCard({
           <Text style={styles.fileMeta} testID="attachment-meta">
             {attachmentMetaLine(attachment)}
           </Text>
-          <DownloadStatus state={download} />
+          {onPlay === undefined ? (
+            <DownloadStatus state={download} saving={saving} lastBy={lastBy} />
+          ) : null}
         </View>
-        <View style={styles.downloadMark}>
-          <Text style={styles.downloadMarkText}>
-            {download.status === 'downloading'
-              ? '…'
-              : download.status === 'failed'
-              ? '↻'
-              : '↓'}
-          </Text>
-        </View>
+        {onPlay !== undefined ? (
+          <View style={styles.downloadMark}>
+            <Image
+              source={VIDEO_ICONS.play}
+              style={[styles.playGlyph, { tintColor: palette.textMuted }]}
+              testID="attachment-card-play"
+            />
+          </View>
+        ) : (
+          <Pressable
+            accessibilityLabel={saveLabel}
+            accessibilityRole="button"
+            accessibilityState={{ busy: savingNow, disabled: busy }}
+            disabled={busy}
+            hitSlop={{ left: slopTo(space.xl), right: slopTo(space.xl) }}
+            {...gesture?.pressTiming}
+            onLongPress={gesture?.onLongPress}
+            onPress={onSave}
+            style={styles.downloadMark}
+            testID="attachment-card-save"
+          >
+            <Text style={styles.downloadMarkText}>
+              {savingNow
+                ? '…'
+                : saving.state.status === 'saved'
+                ? '✓'
+                : download.status === 'downloading'
+                ? '…'
+                : download.status === 'failed'
+                ? '↻'
+                : '↓'}
+            </Text>
+          </Pressable>
+        )}
       </View>
     </Pressable>
   );
@@ -364,9 +508,14 @@ export function AttachmentList({
   const sources = useHeroSources();
   if (attachments.length === 0) return null;
   const images = attachments.filter(showsInlinePreview);
+  // 앱 안에서 재생하는 영상(mp4·mov)은 자기 카드를 갖는다. WebM 같은 나머지 영상은 파일 카드와 공유시트로 남는다(#5208).
+  const videos = attachments.filter(isInAppPlayableVideo);
   const files = attachments.filter(
-    attachment => !showsInlinePreview(attachment),
+    attachment =>
+      !showsInlinePreview(attachment) && !isInAppPlayableVideo(attachment),
   );
+  // 전체 화면 보기가 넘기는 순서는 화면에 선 순서다: 사진 격자 → 영상 카드. 사진과 영상이 섞인 묶음도 한 줄로 넘긴다.
+  const viewables = [...images, ...videos];
   const columns = imageGridColumns(images.length);
   const layout =
     columns === 1 ? 'single' : columns === 2 ? 'grid-2' : 'grid-3';
@@ -395,6 +544,29 @@ export function AttachmentList({
           ))}
         </View>
       ) : null}
+      {videos.map((attachment, position) => {
+        const open = () =>
+          setViewing({ index: images.length + position, origin: null, pending: false });
+        return attachmentMediaOf(attachment)?.hasPoster === true ? (
+          <VideoPosterCard
+            key={attachment.id}
+            workspaceId={workspaceId}
+            channelId={channelId}
+            attachment={attachment}
+            gesture={gesture}
+            onOpen={open}
+          />
+        ) : (
+          <FileCard
+            key={attachment.id}
+            workspaceId={workspaceId}
+            channelId={channelId}
+            attachment={attachment}
+            gesture={gesture}
+            onPlay={open}
+          />
+        );
+      })}
       {files.map(attachment => (
         <FileCard
           key={attachment.id}
@@ -408,11 +580,11 @@ export function AttachmentList({
         <AttachmentViewer
           workspaceId={workspaceId}
           channelId={channelId}
-          images={images}
+          images={viewables}
           startIndex={viewing.index}
           origin={viewing.origin}
           originPending={viewing.pending}
-          measureSource={sources.has(images[viewing.index]?.id ?? '') ? sources.measure : undefined}
+          measureSource={sources.has(viewables[viewing.index]?.id ?? '') ? sources.measure : undefined}
           senderName={senderName}
           sentAtMs={sentAtMs}
           onClose={() => setViewing(null)}
@@ -480,6 +652,8 @@ const buildStyles = (color: Palette) =>
       backgroundColor: color.surfaceMuted,
     },
     fileGlyph: { width: CONV_ICON_SIZE.file, height: CONV_ICON_SIZE.file },
+    videoGlyph: { width: VIDEO_ICON_SIZE.video, height: VIDEO_ICON_SIZE.video },
+    playGlyph: { width: VIDEO_ICON_SIZE.play, height: VIDEO_ICON_SIZE.play },
     fileIconText: { fontSize: font.title, color: color.textMuted },
     metaRow: {
       flex: 1,
@@ -525,8 +699,8 @@ const buildStyles = (color: Palette) =>
       lineHeight: line.meta,
       color: color.danger,
     },
-    // 카드 전체가 누르는 자리라 이 표지는 따로 눌리지 않는다 — 44 상자가 아니라
-    // 글리프 폭이면 된다(시안 250 폭 안에서 이름에 자리를 준다).
+    // ↓ 는 「저장」 단추다(#5209): 카드 전체(공유)와 따로 눌린다. 높이는 44 이고 폭은 글리프 폭이다 — 가로 44 는 `hitSlop` 이 채운다
+    // (시안 250 폭 안에서 이름에 자리를 준다).
     downloadMark: {
       width: space.xl,
       height: TOUCH_TARGET,

@@ -63,6 +63,167 @@ export const catalog: MessageCatalog = {
       "value": "name"
     }
   ],
+  "attachments.video.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", video, "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": ", play"
+    }
+  ],
+  "attachments.video.cardLabelNoDuration": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", video, play"
+    }
+  ],
+  "attachments.video.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't play this video"
+    }
+  ],
+  "attachments.video.gone": [
+    {
+      "type": 0,
+      "value": "This video isn't available anymore"
+    }
+  ],
+  "attachments.video.loading": [
+    {
+      "type": 0,
+      "value": "Loading video"
+    }
+  ],
+  "attachments.video.mute": [
+    {
+      "type": 0,
+      "value": "Mute"
+    }
+  ],
+  "attachments.video.pause": [
+    {
+      "type": 0,
+      "value": "Pause"
+    }
+  ],
+  "attachments.video.play": [
+    {
+      "type": 0,
+      "value": "Play"
+    }
+  ],
+  "attachments.video.replay": [
+    {
+      "type": 0,
+      "value": "Replay from the start"
+    }
+  ],
+  "attachments.video.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "attachments.video.saveHint": [
+    {
+      "type": 0,
+      "value": "Saves the video to your photo library"
+    }
+  ],
+  "attachments.video.seekLabel": [
+    {
+      "type": 0,
+      "value": "Playback position"
+    }
+  ],
+  "attachments.video.seekValue": [
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "attachments.video.thumbHint": [
+    {
+      "type": 0,
+      "value": "Go to this video"
+    }
+  ],
+  "attachments.video.thumbLabel": [
+    {
+      "type": 0,
+      "value": "Video "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    }
+  ],
+  "attachments.video.unmute": [
+    {
+      "type": 0,
+      "value": "Unmute"
+    }
+  ],
+  "attachments.viewer.mixedCaption": [
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    }
+  ],
+  "attachments.viewer.mixedCaptionLabel": [
+    {
+      "type": 0,
+      "value": "Item "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -277,6 +438,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the member list"
     }
   ],
+  "connection.load.newerTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load new messages"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,
@@ -305,6 +472,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't send"
+    }
+  ],
+  "connection.send.reasonOffline": [
+    {
+      "type": 0,
+      "value": "Couldn't send because you're offline"
+    }
+  ],
+  "connection.send.reasonRejected": [
+    {
+      "type": 0,
+      "value": "The server didn't accept it"
+    }
+  ],
+  "connection.send.reasonServer": [
+    {
+      "type": 0,
+      "value": "Couldn't send because we can't reach the server"
     }
   ],
   "connection.send.resend": [
@@ -1961,6 +2146,54 @@ export const catalog: MessageCatalog = {
       "value": "This one is not available right now. Please choose another."
     }
   ],
+  "mobile.attachmentSave.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't save · Try again"
+    }
+  ],
+  "mobile.attachmentSave.photosDenied": [
+    {
+      "type": 0,
+      "value": "Photos access is off · Open Settings"
+    }
+  ],
+  "mobile.attachmentSave.savedToFiles": [
+    {
+      "type": 0,
+      "value": "Saved to Files"
+    }
+  ],
+  "mobile.attachmentSave.savedToPhotos": [
+    {
+      "type": 0,
+      "value": "Saved to Photos"
+    }
+  ],
+  "mobile.attachmentSave.saveHintPhotos": [
+    {
+      "type": 0,
+      "value": "Saves to your photo library"
+    }
+  ],
+  "mobile.attachmentSave.saving": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "mobile.attachmentSave.toFiles": [
+    {
+      "type": 0,
+      "value": "Save to Files"
+    }
+  ],
+  "mobile.attachmentSave.toPhotos": [
+    {
+      "type": 0,
+      "value": "Save to Photos"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,
@@ -1994,7 +2227,7 @@ export const catalog: MessageCatalog = {
   "mobile.ios.photoLibraryAddUsage": [
     {
       "type": 0,
-      "value": "oort does not save photos to your library. All features work without this permission."
+      "value": "Adds the photos and videos you choose to save to your photo library. This permission does not let oort read your library."
     }
   ],
   "mobile.ios.photoLibraryUsage": [
@@ -3061,10 +3294,28 @@ export const catalog: MessageCatalog = {
       "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
     }
   ],
+  "settings.connection.noServer": [
+    {
+      "type": 0,
+      "value": "No server address is saved on this device."
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,
       "value": "Guest invites are paused until channel-specific invites are available."
+    }
+  ],
+  "settings.notifications.alwaysDetail": [
+    {
+      "type": 0,
+      "value": "Approval requests, mentions of you, and DMs can't be turned off by type. To silence everything at once, use Pause notifications."
+    }
+  ],
+  "settings.notifications.checking": [
+    {
+      "type": 0,
+      "value": "Checking your notification settings."
     }
   ],
   "settings.notifications.threadReplyDescription": [
