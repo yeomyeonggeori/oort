@@ -2104,7 +2104,7 @@ export const catalog: MessageCatalog = {
   "timeline.workPlan.switching": [
     {
       "type": 0,
-      "value": "고른 세션의 계획을 불러오는 중이에요. 아래는 마지막으로 읽은 계획이에요."
+      "value": "고른 세션의 계획을 불러오는 중이에요. 위 목록은 마지막으로 읽은 계획이에요."
     }
   ],
   "timeline.workPlan.title": [

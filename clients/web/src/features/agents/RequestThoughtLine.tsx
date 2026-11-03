@@ -96,8 +96,8 @@ export function RequestThoughtLine({ run, directory }: { run: AgentRunProgress; 
           {chip === null ? (
             <span className="min-w-0 truncate" data-numeric>{name} · {label}</span>
           ) : (
-            <span className="flex min-w-0 items-baseline" data-numeric>
-              <span className="min-w-0 truncate">{name} · {chip.body}</span>
+            <span className="flex min-w-0 items-baseline">
+              <span className="min-w-0 truncate" data-numeric>{name} · {chip.body}</span>
               {chip.tail !== null && <span className="shrink-0 whitespace-pre" data-testid="request-thought-tail">{" · "}{chip.tail}</span>}
             </span>
           )}

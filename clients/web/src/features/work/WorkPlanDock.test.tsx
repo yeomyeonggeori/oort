@@ -210,7 +210,7 @@ describe("독의 마크업", () => {
     act(() => q("work-plan-dock")?.click());
     expect(q("work-plan-steps")?.getAttribute("aria-busy")).toBe("true");
     expect(qa("work-plan-note").map((note) => note.textContent)).toEqual([
-      "고른 세션의 계획을 불러오는 중이에요. 아래는 마지막으로 읽은 계획이에요.",
+      "고른 세션의 계획을 불러오는 중이에요. 위 목록은 마지막으로 읽은 계획이에요.",
     ]);
     act(() => root?.unmount());
     root = null;
@@ -576,7 +576,7 @@ describe("세션을 바꿀 때 (#5166)", () => {
     expect((q("work-plan-session-select") as HTMLSelectElement).value).toBe(SESSION_B);
     expect(q("work-plan-steps")?.getAttribute("aria-busy")).toBe("true");
     expect(qa("work-plan-note").map((note) => note.textContent)).toEqual([
-      "고른 세션의 계획을 불러오는 중이에요. 아래는 마지막으로 읽은 계획이에요.",
+      "고른 세션의 계획을 불러오는 중이에요. 위 목록은 마지막으로 읽은 계획이에요.",
       "지금은 돌고 있지 않아요. 마지막으로 알린 계획이에요.",
     ].slice(0, 1));
 

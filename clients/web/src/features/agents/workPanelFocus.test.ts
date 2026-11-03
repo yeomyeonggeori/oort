@@ -83,6 +83,16 @@ describe("작업 패널을 닫으면 캐럿이 연 요소로 돌아간다 (#5165
     expect(route.hasAttribute("inert")).toBe(false);
   });
 
+  it("focus()가 조용히 거절되면(inert·숨김) 돌려줬다고 믿지 않고 다음 이웃으로 간다", () => {
+    const route = shell();
+    const { row, button } = chipSlot(RUN, "m-1");
+    route.append(row);
+    // 브라우저가 inert 안의 요소에게 하는 일: 호출은 던지지 않고 아무것도 옮기지 않는다.
+    button.focus = () => undefined;
+    expect(returnFocusAfterWorkPanelClose(button, rememberPanelOpener(button, RUN))).toBe(RETURNED.route);
+    expect(document.activeElement).toBe(route);
+  });
+
   it("관제 서랍이 라우트를 덮고 있으면 inert는 그 서랍의 몫이라 걷지 않는다", () => {
     const route = shell();
     const { row, button } = chipSlot(RUN, "m-1");

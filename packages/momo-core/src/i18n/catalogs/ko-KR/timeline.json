@@ -81,7 +81,7 @@
   "timeline.workPlan.stepPending": "대기",
   "timeline.workPlan.notLive": "지금은 돌고 있지 않아요. 마지막으로 알린 계획이에요.",
   "timeline.workPlan.maybeStale": "기록이 길어서 마지막 계획이 아닐 수 있어요.",
-  "timeline.workPlan.switching": "고른 세션의 계획을 불러오는 중이에요. 아래는 마지막으로 읽은 계획이에요.",
+  "timeline.workPlan.switching": "고른 세션의 계획을 불러오는 중이에요. 위 목록은 마지막으로 읽은 계획이에요.",
   "timeline.workPlan.sessionLabel": "작업 세션",
   "timeline.workPlan.openAll": "모두 보기",
   "timeline.workReport.unsupported": "에이전트가 알린 활동은 서버 업데이트 뒤에 보여요.",

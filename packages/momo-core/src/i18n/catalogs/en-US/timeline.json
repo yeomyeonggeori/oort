@@ -80,7 +80,7 @@
   "timeline.workPlan.stepCurrent": "Current step",
   "timeline.workPlan.stepPending": "Waiting",
   "timeline.workPlan.notLive": "This session is not running now. This is the last plan it reported.",
-  "timeline.workPlan.switching": "Loading the plan for the selected session. The list below is the last plan read.",
+  "timeline.workPlan.switching": "Loading the plan for the selected session. The list above is the last plan read.",
   "timeline.workPlan.maybeStale": "The record is long, so this may not be the latest plan.",
   "timeline.workPlan.sessionLabel": "Work session",
   "timeline.workPlan.openAll": "See all",

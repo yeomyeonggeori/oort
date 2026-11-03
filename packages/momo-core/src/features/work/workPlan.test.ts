@@ -178,7 +178,7 @@ describe("문장은 사전을 거친다", () => {
     ]);
     // 방금 다른 세션을 골라 그 계획을 읽는 중이면 그 사실을 먼저 말한다(#5166). 읽는 중이 아니면 말하지 않는다.
     expect(workPlanCopy(live, { maybeStale: false, switching: true }, copyKo).notes).toEqual([
-      "고른 세션의 계획을 불러오는 중이에요. 아래는 마지막으로 읽은 계획이에요.",
+      "고른 세션의 계획을 불러오는 중이에요. 위 목록은 마지막으로 읽은 계획이에요.",
     ]);
     expect(workPlanCopy(live, { maybeStale: false, switching: false }, copyKo).notes).toEqual([]);
 

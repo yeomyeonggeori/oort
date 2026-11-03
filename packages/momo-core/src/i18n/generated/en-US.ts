@@ -2305,7 +2305,7 @@ export const catalog: MessageCatalog = {
   "timeline.workPlan.switching": [
     {
       "type": 0,
-      "value": "Loading the plan for the selected session. The list below is the last plan read."
+      "value": "Loading the plan for the selected session. The list above is the last plan read."
     }
   ],
   "timeline.workPlan.title": [
