@@ -1,8 +1,5 @@
 import type {Member, WorkSession} from '@momo/core/lib/api';
-import {
-  centrifugoChannelName,
-  type WorkSessionACPFrame,
-} from '@momo/core/lib/realtimeEvents';
+import type {WorkSessionACPFrame} from '@momo/core/lib/realtimeEvents';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
@@ -12,8 +9,6 @@ import {
   screen,
   waitFor,
 } from '@testing-library/react-native';
-import fs from 'node:fs';
-import path from 'node:path';
 import React from 'react';
 
 import '../src/boot/polyfills';
@@ -23,7 +18,6 @@ import {
   RealtimeContext,
   type RealtimeContextValue,
 } from '../src/realtime/RealtimeProvider';
-import {createChannelRail} from '../src/realtime/channelRail';
 import WorkSessionDetailScreen from '../src/screens/WorkSessionDetailScreen';
 import {SessionProvider} from '../src/session/useSession';
 import {
@@ -32,11 +26,7 @@ import {
 } from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {haptics} from '../src/lib/haptics';
-import {
-  __resetWorkStreamTimings,
-  computeStreamTiming,
-  workStreamTimings,
-} from '../src/features/work/workStreamTiming';
+import {__resetWorkStreamTimings} from '../src/features/work/workStreamTiming';
 
 jest.mock('../src/lib/haptics', () => ({
   ...jest.requireActual('../src/lib/haptics'),
@@ -190,9 +180,6 @@ function installFetch(): jest.Mock {
   globalThis.fetch = mock as unknown as typeof fetch;
   return mock;
 }
-
-const count = (mock: jest.Mock, needle: string) =>
-  mock.mock.calls.filter(([url]) => String(url).includes(needle)).length;
 
 type Handlers = Parameters<
   NonNullable<RealtimeContextValue['rail']>['subscribeWorkSession']
