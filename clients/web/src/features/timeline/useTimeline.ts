@@ -30,6 +30,7 @@ import {
   addPending,
   applyEditedMessage,
   applyTombstone,
+  discardPending,
   emptyTimeline,
   failPending,
   reconcileMessages,
@@ -142,6 +143,11 @@ export interface UseTimelineResult {
   send: (body: string, options?: TimelineSendOptions) => Promise<void>;
   /** Re-run a failed echo with the SAME idempotency key. */
   resend: (clientMsgId: string) => Promise<void>;
+  /**
+   * 보내지 못한 메시지를 이 기기에서만 지운다(#5210). 판정은 코어 `discardPending` 이고
+   * 서버로 가는 길이 없다. 지운 행을 돌려주고, 지우지 않았으면(보내는 중·이미 없음) null.
+   */
+  discard: (clientMsgId: string) => PendingMessage | null;
   loadOlder: () => Promise<void>;
   reload: () => void;
   loadingOlder: boolean;
@@ -597,6 +603,18 @@ export function useTimeline(
     [post, updatePending]
   );
 
+  const discard = useCallback(
+    (clientMsgId: string): PendingMessage | null => {
+      const result = discardPending(pendingRef.current, clientMsgId);
+      if (result.discarded === null) return null;
+      // 개인 에이전트 호출의 계획은 이 전송의 것이었다. 행이 사라지면 아무도 다시 읽지 않는다.
+      callSpecsRef.current.delete(clientMsgId);
+      updatePending(() => result.list);
+      return result.discarded;
+    },
+    [updatePending]
+  );
+
   const backfillAfter = useCallback(
     async (channel: string, stillCurrent: () => boolean) => {
       let after = newestSeqRef.current ?? 0;
@@ -1044,6 +1062,7 @@ export function useTimeline(
     pending,
     send,
     resend,
+    discard,
     loadOlder,
     reload,
     loadingOlder,

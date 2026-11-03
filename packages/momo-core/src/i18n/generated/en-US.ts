@@ -2993,6 +2993,30 @@ export const catalog: MessageCatalog = {
       "value": "Zoom out"
     }
   ],
+  "timeline.send.discard": [
+    {
+      "type": 0,
+      "value": "Delete"
+    }
+  ],
+  "timeline.send.failed": [
+    {
+      "type": 0,
+      "value": "Not sent"
+    }
+  ],
+  "timeline.send.resend": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "timeline.send.sending": [
+    {
+      "type": 0,
+      "value": "Sending"
+    }
+  ],
   "timeline.thread.followDismiss": [
     {
       "type": 0,

@@ -2880,6 +2880,30 @@ export const catalog: MessageCatalog = {
       "value": "축소"
     }
   ],
+  "timeline.send.discard": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "timeline.send.failed": [
+    {
+      "type": 0,
+      "value": "전송 실패"
+    }
+  ],
+  "timeline.send.resend": [
+    {
+      "type": 0,
+      "value": "다시 보내기"
+    }
+  ],
+  "timeline.send.sending": [
+    {
+      "type": 0,
+      "value": "전송 중"
+    }
+  ],
   "timeline.thread.followDismiss": [
     {
       "type": 0,

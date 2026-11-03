@@ -820,7 +820,7 @@
     "clients/web/src/features/timeline/MessageBody.tsx": 33,
     "clients/web/src/features/timeline/MessageEditor.tsx": 6,
     "clients/web/src/features/timeline/MessageRow.tsx": 56,
-    "clients/web/src/features/timeline/PendingRow.tsx": 8,
+    "clients/web/src/features/timeline/PendingRow.tsx": 4,
     "clients/web/src/features/timeline/PinListMenu.tsx": 10,
     "clients/web/src/features/timeline/QuoteBlock.tsx": 20,
     "clients/web/src/features/timeline/ReactionChips.tsx": 7,
