@@ -20,6 +20,7 @@ export function idleTimelineMock(
     pending: [],
     send: async () => undefined,
     resend: async () => undefined,
+    discard: () => null,
     loadOlder: async () => undefined,
     reload: () => undefined,
     loadingOlder: false,

@@ -44,6 +44,7 @@ import {
   addPending,
   applyEditedMessage,
   applyTombstone,
+  discardPending,
   emptyTimeline,
   failPending,
   reconcileMessages,
@@ -220,6 +221,11 @@ export interface UseTimelineResult {
   ingest: (message: Message) => void;
   /** Re-run a failed echo with the SAME idempotency key. */
   resend: (clientMsgId: string) => Promise<void>;
+  /**
+   * 보내지 못한 메시지를 이 기기에서만 지운다(#5210). 판정은 코어 `discardPending` 이고 서버로 가는 길이
+   * 없다. 지운 행을 돌려주고, 지우지 않았으면(보내는 중·이미 없음) null.
+   */
+  discard: (clientMsgId: string) => PendingMessage | null;
   /**
    * Toggle my reaction, optimistically. **Throws** on failure, after having put
    * the chip back where it was — the caller turns the error into the sentence.
@@ -539,6 +545,20 @@ export function useTimeline(
       await post(row);
     },
     [post, updatePending],
+  );
+
+  const discard = useCallback(
+    (clientMsgId: string): PendingMessage | null => {
+      const result = discardPending(pendingRef.current, clientMsgId);
+      if (result.discarded === null) return null;
+      updatePending(() => result.list);
+      // 스레드 답글이었다면 뿌리 표의 이 칸도 이 행의 것이었다. 행이 사라지면 아무도 다시 읽지 않는다.
+      const roots = {...pendingRootRef.current};
+      delete roots[clientMsgId];
+      pendingRootRef.current = roots;
+      return result.discarded;
+    },
+    [updatePending],
   );
 
   // ---- message actions (goal RN-C5) -----------------------------------------
@@ -1097,6 +1117,7 @@ export function useTimeline(
     send,
     ingest,
     resend,
+    discard,
     toggleReaction,
     editBody,
     removeMessage,
