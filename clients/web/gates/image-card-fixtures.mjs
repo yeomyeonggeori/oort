@@ -8,6 +8,10 @@
 // 글은 현실적인 한국어+영어 팀 대화체다(스킬 §7). 어떤 실사용자 캡처도 옮겨 담지
 // 않는다.
 
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 /**
  * @typedef {object} Fixture
  * @property {string} key       이름(로그·캡처 파일명)
@@ -176,5 +180,25 @@ export async function renderFixtures(browser) {
   return out;
 }
 
-/** 컴포저 트레이 썸네일(128px)과 구별하는 데 쓴다: `draftThumbnail.ts` 의 캔버스 변. */
-export const DRAFT_THUMBNAIL_PX = 128;
+/**
+ * 컴포저 트레이 초안 썸네일의 캔버스 변. 타임라인 그림이 이것과 다른 바이트라는 것을 재는 기준선이다.
+ *
+ * 정본은 소스(`draftThumbnail.ts`의 `THUMB_EDGE_PX * 2`)를 읽는다. 여기에 숫자를 적어 두면 카드가 바뀔 때마다
+ * 조용히 낡는다: #5200이 카드를 64px에서 96px로 키우며 캔버스가 128 → 192가 됐는데, 이 줄이 128로 남아 게이트가
+ * 「기준선이 흔들렸다」로 붉었다(#5204). 소스의 모양이 달라지면 값을 짐작하지 않고 요란하게 멈춘다.
+ */
+function draftThumbnailPx() {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(
+    resolve(here, "../src/features/attachments/draftThumbnail.ts"),
+    "utf8"
+  );
+  const edge = source.match(/export const THUMB_EDGE_PX = (\d+);/);
+  const render = source.match(/export const THUMB_RENDER_PX = THUMB_EDGE_PX \* (\d+);/);
+  if (edge === null || render === null) {
+    throw new Error("draftThumbnail.ts의 THUMB_EDGE_PX·THUMB_RENDER_PX 모양을 읽지 못했다");
+  }
+  return Number(edge[1]) * Number(render[1]);
+}
+
+export const DRAFT_THUMBNAIL_PX = draftThumbnailPx();

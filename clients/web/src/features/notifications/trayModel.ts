@@ -1,5 +1,7 @@
 import type { LocaleService } from "@momo/core/i18n";
+import { composedUnreadCount } from "@momo/core/features/readState/model";
 import type { AdeItem, AdeState } from "@momo/core/features/work/adeControl";
+import type { ReadState } from "@momo/core/lib/api";
 import type { TrayStatusWire } from "@/lib/tauri";
 
 // =============================================================================
@@ -10,6 +12,10 @@ import type { TrayStatusWire } from "@/lib/tauri";
 // `momo:tray-action` 이벤트 하나이고, 그 읽기(`readTrayAction`)와 작업 카드의 갈 곳(`adeItemLanding`)은 코어에 있다.
 // 이벤트의 줄 id는 이 쪽이 마지막으로 보낸 줄들(`TrayRows.byId`)과 맞춰 본 것만 믿는다 — 페이로드를 그대로 이동
 // 경로로 쓰지 않는다(`bannerClicks.ts`의 `claimBanner`와 같은 규칙).
+//
+// 「모두 읽음 처리」(#5195)의 뜻은 여기 한 곳이다(`readAllTargets`): 안 읽은 멘션이 있는 채널과 안 읽은 DM의 읽음 위치를
+// 최신으로 올린다. 메뉴 항목의 켜짐(`readAll`)과 눌렀을 때 읽는 채널 목록이 같은 함수의 답이라, 항목이 켜져 있으면 눌렀을 때
+// 반드시 무언가 읽힌다. 승인·응답 필요 칸은 읽음이 아니라 결정으로만 닫히므로 건드리지 않고, 남아 있는 수를 한 줄로 말한다.
 // =============================================================================
 
 /**
@@ -74,12 +80,20 @@ export function createRowIds(): RowIds {
   };
 }
 
+/** 「모두 읽음 처리」가 닫지 못하는 것: 읽음이 아니라 결정으로만 닫히는 일의 수(`useNeedsMe`의 승인·칸). */
+export interface StillWaiting {
+  approvals: number;
+  panes: number;
+}
+
 /** 메뉴의 낱말. 사람의 언어로 이미 만든 것이다(`trayCopy`). */
 export interface TrayCopy {
   labels: TrayStatusWire["labels"];
   stateWorking: string;
   stateBlocked: string;
   more: (count: number) => string;
+  /** 「모두 읽음 처리」 밑의 한 줄: 남은 일의 종류에 맞는 문장. 남은 것이 없으면 `null`(줄이 아예 없다). */
+  remaining: (left: StillWaiting) => string | null;
 }
 
 /** 카탈로그의 메뉴 낱말. 끝내기는 앱 메뉴의 ⌘Q 항목과 같은 낱말이다(같은 길이므로). */
@@ -89,13 +103,60 @@ export function trayCopy(t: LocaleService["formatMessage"]): TrayCopy {
       running: t("desktop.tray.running"),
       none: t("desktop.tray.none"),
       newMessage: t("desktop.tray.newMessage"),
+      readAll: t("desktop.tray.readAll"),
       open: t("desktop.tray.open"),
       quit: t("desktop.menu.quit"),
     },
     stateWorking: t("desktop.tray.stateWorking"),
     stateBlocked: t("desktop.tray.stateBlocked"),
     more: (count) => t("desktop.tray.more", { count }),
+    remaining: ({ approvals, panes }) => {
+      if (approvals > 0 && panes > 0) return t("desktop.tray.remainBoth", { approvals, panes });
+      if (approvals > 0) return t("desktop.tray.remainApprovals", { count: approvals });
+      if (panes > 0) return t("desktop.tray.remainPanes", { count: panes });
+      return null;
+    },
   };
+}
+
+/** 「모두 읽음 처리」가 읽음 위치를 올릴 채널 하나: `seq`는 지금까지 아는 가장 최신(서버가 `latestSeq`로 죈다). */
+export interface ReadAllTarget {
+  channelId: string;
+  seq: number;
+}
+
+/**
+ * 「모두 읽음 처리」가 읽음으로 만들 채널들(#5195, owner 결정: 「안 읽은 멘션·DM만」).
+ *
+ *  - 안 읽은 멘션이 있는 채널(`mentionCount > 0`): 독 배지의 멘션 수가 이 읽음 위치에서 나온다.
+ *  - 안 읽은 DM(`composedUnreadCount > 0`, 사이드바와 같은 판정이라 「여기부터 안 읽음」 표시도 든다).
+ *    독 배지의 「안 읽은 DM도 합산」 옵션과 무관하다: 이 항목의 뜻은 옵션이 아니라 「멘션·DM을 읽었다」이다.
+ *
+ * **읽음 위치를 올리는 이유.** 인박스 서버의 `read-all`(`POST …/inbox/read-all`)은 인박스 항목의 `read_at`만 채우고 채널
+ * 읽음 위치와 `mention_count`를 건드리지 않는다(ADR-0199 D3: 항목→커서 방향 없음). 그것만 부르면 인박스는 비는데 독 배지와
+ * 메뉴 막대의 점은 그대로여서 「눌렀는데 그대로」가 된다. 읽음 위치를 올리면 같은 트랜잭션에서 `mention_count`가 다시 계산되고
+ * 트리거가 그 채널의 인박스 항목을 읽음으로 채운다(커서→항목, 마이그레이션 126) — 점·배지·인박스가 한 규칙으로 바뀐다.
+ * 값은 그 채널 **전체**가 읽힌다는 것이다(멘션 뒤의 다른 메시지도): 읽음 위치는 채널 단위다.
+ *
+ * 한 채널은 한 번만 든다(멘션이 있는 DM).
+ */
+export function readAllTargets(input: {
+  readStates: readonly ReadState[];
+  /** DM 채널의 id(소문자). */
+  dmChannelIds: ReadonlySet<string>;
+}): ReadAllTarget[] {
+  const targets: ReadAllTarget[] = [];
+  const seen = new Set<string>();
+  for (const row of input.readStates) {
+    const key = row.channelId.toLowerCase();
+    if (seen.has(key)) continue;
+    const mentioned = row.mentionCount > 0;
+    const unreadDm = input.dmChannelIds.has(key) && composedUnreadCount(row) > 0;
+    if (!mentioned && !unreadDm) continue;
+    seen.add(key);
+    targets.push({ channelId: row.channelId, seq: row.latestSeq });
+  }
+  return targets;
 }
 
 /** 메뉴에 오르는 상태: 실행 중과 대기. 유휴(호스트가 터미널을 열어 둘 뿐)는 진행 중인 작업이 아니다(`adeCounts.total`과 같은 뜻). */
@@ -117,6 +178,10 @@ export interface TrayRows {
 export function buildTrayStatus(input: {
   unread: number;
   compose: boolean;
+  /** 「모두 읽음 처리」가 할 일이 있다(`readAllTargets`가 비지 않았다). */
+  readAll: boolean;
+  /** 「모두 읽음 처리」를 눌러도 남는 일. */
+  left: StillWaiting;
   items: readonly AdeItem[];
   copy: TrayCopy;
   rowIds: RowIds;
@@ -143,9 +208,11 @@ export function buildTrayStatus(input: {
     status: {
       unread: input.unread,
       compose: input.compose,
+      readAll: input.readAll,
       labels: input.copy.labels,
       running,
       more: hidden > 0 ? input.copy.more(hidden) : null,
+      remaining: input.copy.remaining(input.left),
     },
     byId,
   };

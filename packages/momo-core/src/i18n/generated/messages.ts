@@ -3,6 +3,24 @@ export const messageKeys = [
   "attachments.tray.noticeDismiss",
   "attachments.tray.overflow",
   "attachments.tray.removeNamed",
+  "attachments.video.cardLabel",
+  "attachments.video.cardLabelNoDuration",
+  "attachments.video.failed",
+  "attachments.video.gone",
+  "attachments.video.loading",
+  "attachments.video.mute",
+  "attachments.video.pause",
+  "attachments.video.play",
+  "attachments.video.replay",
+  "attachments.video.retry",
+  "attachments.video.saveHint",
+  "attachments.video.seekLabel",
+  "attachments.video.seekValue",
+  "attachments.video.thumbHint",
+  "attachments.video.thumbLabel",
+  "attachments.video.unmute",
+  "attachments.viewer.mixedCaption",
+  "attachments.viewer.mixedCaptionLabel",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -63,10 +81,15 @@ export const messageKeys = [
   "desktop.menu.view",
   "desktop.menu.window",
   "desktop.notify.threadSummary",
+  "desktop.tray.closeNotice",
   "desktop.tray.more",
   "desktop.tray.newMessage",
   "desktop.tray.none",
   "desktop.tray.open",
+  "desktop.tray.readAll",
+  "desktop.tray.remainApprovals",
+  "desktop.tray.remainBoth",
+  "desktop.tray.remainPanes",
   "desktop.tray.running",
   "desktop.tray.stateBlocked",
   "desktop.tray.stateWorking",
@@ -299,6 +322,7 @@ export const messageKeys = [
   "releaseNotes.action.details",
   "releaseNotes.detail.back",
   "releaseNotes.detail.changed",
+  "releaseNotes.detail.others",
   "releaseNotes.detail.tryIt",
   "releaseNotes.page.back",
   "releaseNotes.page.description",
@@ -311,6 +335,36 @@ export const messageKeys = [
   "releaseNotes.surface.desktop",
   "releaseNotes.surface.label",
   "releaseNotes.surface.phone",
+  "releaseNotes.topic.agents",
+  "releaseNotes.topic.attachments",
+  "releaseNotes.topic.conversations",
+  "releaseNotes.topic.notifications",
+  "releaseNotes.topic.settings",
+  "releaseNotes.v0141.agentsChanged",
+  "releaseNotes.v0141.agentsTitle",
+  "releaseNotes.v0141.agentsTryIt",
+  "releaseNotes.v0141.channelNotificationsChanged",
+  "releaseNotes.v0141.channelNotificationsTitle",
+  "releaseNotes.v0141.channelNotificationsTryIt",
+  "releaseNotes.v0141.composerHeightChanged",
+  "releaseNotes.v0141.composerHeightTitle",
+  "releaseNotes.v0141.composerHeightTryIt",
+  "releaseNotes.v0141.emojiChanged",
+  "releaseNotes.v0141.emojiTitle",
+  "releaseNotes.v0141.emojiTryIt",
+  "releaseNotes.v0141.phoneConversationChanged",
+  "releaseNotes.v0141.phoneConversationTitle",
+  "releaseNotes.v0141.phoneConversationTryIt",
+  "releaseNotes.v0141.photoViewerChanged",
+  "releaseNotes.v0141.photoViewerTitle",
+  "releaseNotes.v0141.photoViewerTryIt",
+  "releaseNotes.v0141.settingsChanged",
+  "releaseNotes.v0141.settingsTitle",
+  "releaseNotes.v0141.settingsTryIt",
+  "releaseNotes.v0141.summary",
+  "releaseNotes.v0141.typingChanged",
+  "releaseNotes.v0141.typingTitle",
+  "releaseNotes.v0141.typingTryIt",
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
@@ -610,6 +664,40 @@ export const argumentSpecs = {
   "attachments.tray.removeNamed": {
     "name": "string"
   },
+  "attachments.video.cardLabel": {
+    "duration": "string",
+    "name": "string"
+  },
+  "attachments.video.cardLabelNoDuration": {
+    "name": "string"
+  },
+  "attachments.video.failed": {},
+  "attachments.video.gone": {},
+  "attachments.video.loading": {},
+  "attachments.video.mute": {},
+  "attachments.video.pause": {},
+  "attachments.video.play": {},
+  "attachments.video.replay": {},
+  "attachments.video.retry": {},
+  "attachments.video.saveHint": {},
+  "attachments.video.seekLabel": {},
+  "attachments.video.seekValue": {
+    "position": "string",
+    "total": "string"
+  },
+  "attachments.video.thumbHint": {},
+  "attachments.video.thumbLabel": {
+    "position": "number"
+  },
+  "attachments.video.unmute": {},
+  "attachments.viewer.mixedCaption": {
+    "position": "number",
+    "total": "number"
+  },
+  "attachments.viewer.mixedCaptionLabel": {
+    "position": "number",
+    "total": "number"
+  },
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -680,12 +768,24 @@ export const argumentSpecs = {
   "desktop.notify.threadSummary": {
     "count": "number"
   },
+  "desktop.tray.closeNotice": {},
   "desktop.tray.more": {
     "count": "number"
   },
   "desktop.tray.newMessage": {},
   "desktop.tray.none": {},
   "desktop.tray.open": {},
+  "desktop.tray.readAll": {},
+  "desktop.tray.remainApprovals": {
+    "count": "number"
+  },
+  "desktop.tray.remainBoth": {
+    "approvals": "number",
+    "panes": "number"
+  },
+  "desktop.tray.remainPanes": {
+    "count": "number"
+  },
   "desktop.tray.running": {},
   "desktop.tray.stateBlocked": {},
   "desktop.tray.stateWorking": {},
@@ -940,6 +1040,7 @@ export const argumentSpecs = {
   "releaseNotes.action.details": {},
   "releaseNotes.detail.back": {},
   "releaseNotes.detail.changed": {},
+  "releaseNotes.detail.others": {},
   "releaseNotes.detail.tryIt": {},
   "releaseNotes.page.back": {},
   "releaseNotes.page.description": {},
@@ -954,6 +1055,36 @@ export const argumentSpecs = {
   "releaseNotes.surface.desktop": {},
   "releaseNotes.surface.label": {},
   "releaseNotes.surface.phone": {},
+  "releaseNotes.topic.agents": {},
+  "releaseNotes.topic.attachments": {},
+  "releaseNotes.topic.conversations": {},
+  "releaseNotes.topic.notifications": {},
+  "releaseNotes.topic.settings": {},
+  "releaseNotes.v0141.agentsChanged": {},
+  "releaseNotes.v0141.agentsTitle": {},
+  "releaseNotes.v0141.agentsTryIt": {},
+  "releaseNotes.v0141.channelNotificationsChanged": {},
+  "releaseNotes.v0141.channelNotificationsTitle": {},
+  "releaseNotes.v0141.channelNotificationsTryIt": {},
+  "releaseNotes.v0141.composerHeightChanged": {},
+  "releaseNotes.v0141.composerHeightTitle": {},
+  "releaseNotes.v0141.composerHeightTryIt": {},
+  "releaseNotes.v0141.emojiChanged": {},
+  "releaseNotes.v0141.emojiTitle": {},
+  "releaseNotes.v0141.emojiTryIt": {},
+  "releaseNotes.v0141.phoneConversationChanged": {},
+  "releaseNotes.v0141.phoneConversationTitle": {},
+  "releaseNotes.v0141.phoneConversationTryIt": {},
+  "releaseNotes.v0141.photoViewerChanged": {},
+  "releaseNotes.v0141.photoViewerTitle": {},
+  "releaseNotes.v0141.photoViewerTryIt": {},
+  "releaseNotes.v0141.settingsChanged": {},
+  "releaseNotes.v0141.settingsTitle": {},
+  "releaseNotes.v0141.settingsTryIt": {},
+  "releaseNotes.v0141.summary": {},
+  "releaseNotes.v0141.typingChanged": {},
+  "releaseNotes.v0141.typingTitle": {},
+  "releaseNotes.v0141.typingTryIt": {},
   "releaseNotes.version.current": {},
   "releaseNotes.version.label": {
     "version": "string"
@@ -1380,6 +1511,24 @@ export interface MessageArgs {
   "attachments.tray.noticeDismiss": Record<string, never>;
   "attachments.tray.overflow": { count: number; max: number };
   "attachments.tray.removeNamed": { name: string };
+  "attachments.video.cardLabel": { duration: string; name: string };
+  "attachments.video.cardLabelNoDuration": { name: string };
+  "attachments.video.failed": Record<string, never>;
+  "attachments.video.gone": Record<string, never>;
+  "attachments.video.loading": Record<string, never>;
+  "attachments.video.mute": Record<string, never>;
+  "attachments.video.pause": Record<string, never>;
+  "attachments.video.play": Record<string, never>;
+  "attachments.video.replay": Record<string, never>;
+  "attachments.video.retry": Record<string, never>;
+  "attachments.video.saveHint": Record<string, never>;
+  "attachments.video.seekLabel": Record<string, never>;
+  "attachments.video.seekValue": { position: string; total: string };
+  "attachments.video.thumbHint": Record<string, never>;
+  "attachments.video.thumbLabel": { position: number };
+  "attachments.video.unmute": Record<string, never>;
+  "attachments.viewer.mixedCaption": { position: number; total: number };
+  "attachments.viewer.mixedCaptionLabel": { position: number; total: number };
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
@@ -1440,10 +1589,15 @@ export interface MessageArgs {
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
   "desktop.notify.threadSummary": { count: number };
+  "desktop.tray.closeNotice": Record<string, never>;
   "desktop.tray.more": { count: number };
   "desktop.tray.newMessage": Record<string, never>;
   "desktop.tray.none": Record<string, never>;
   "desktop.tray.open": Record<string, never>;
+  "desktop.tray.readAll": Record<string, never>;
+  "desktop.tray.remainApprovals": { count: number };
+  "desktop.tray.remainBoth": { approvals: number; panes: number };
+  "desktop.tray.remainPanes": { count: number };
   "desktop.tray.running": Record<string, never>;
   "desktop.tray.stateBlocked": Record<string, never>;
   "desktop.tray.stateWorking": Record<string, never>;
@@ -1676,6 +1830,7 @@ export interface MessageArgs {
   "releaseNotes.action.details": Record<string, never>;
   "releaseNotes.detail.back": Record<string, never>;
   "releaseNotes.detail.changed": Record<string, never>;
+  "releaseNotes.detail.others": Record<string, never>;
   "releaseNotes.detail.tryIt": Record<string, never>;
   "releaseNotes.page.back": Record<string, never>;
   "releaseNotes.page.description": Record<string, never>;
@@ -1688,6 +1843,36 @@ export interface MessageArgs {
   "releaseNotes.surface.desktop": Record<string, never>;
   "releaseNotes.surface.label": Record<string, never>;
   "releaseNotes.surface.phone": Record<string, never>;
+  "releaseNotes.topic.agents": Record<string, never>;
+  "releaseNotes.topic.attachments": Record<string, never>;
+  "releaseNotes.topic.conversations": Record<string, never>;
+  "releaseNotes.topic.notifications": Record<string, never>;
+  "releaseNotes.topic.settings": Record<string, never>;
+  "releaseNotes.v0141.agentsChanged": Record<string, never>;
+  "releaseNotes.v0141.agentsTitle": Record<string, never>;
+  "releaseNotes.v0141.agentsTryIt": Record<string, never>;
+  "releaseNotes.v0141.channelNotificationsChanged": Record<string, never>;
+  "releaseNotes.v0141.channelNotificationsTitle": Record<string, never>;
+  "releaseNotes.v0141.channelNotificationsTryIt": Record<string, never>;
+  "releaseNotes.v0141.composerHeightChanged": Record<string, never>;
+  "releaseNotes.v0141.composerHeightTitle": Record<string, never>;
+  "releaseNotes.v0141.composerHeightTryIt": Record<string, never>;
+  "releaseNotes.v0141.emojiChanged": Record<string, never>;
+  "releaseNotes.v0141.emojiTitle": Record<string, never>;
+  "releaseNotes.v0141.emojiTryIt": Record<string, never>;
+  "releaseNotes.v0141.phoneConversationChanged": Record<string, never>;
+  "releaseNotes.v0141.phoneConversationTitle": Record<string, never>;
+  "releaseNotes.v0141.phoneConversationTryIt": Record<string, never>;
+  "releaseNotes.v0141.photoViewerChanged": Record<string, never>;
+  "releaseNotes.v0141.photoViewerTitle": Record<string, never>;
+  "releaseNotes.v0141.photoViewerTryIt": Record<string, never>;
+  "releaseNotes.v0141.settingsChanged": Record<string, never>;
+  "releaseNotes.v0141.settingsTitle": Record<string, never>;
+  "releaseNotes.v0141.settingsTryIt": Record<string, never>;
+  "releaseNotes.v0141.summary": Record<string, never>;
+  "releaseNotes.v0141.typingChanged": Record<string, never>;
+  "releaseNotes.v0141.typingTitle": Record<string, never>;
+  "releaseNotes.v0141.typingTryIt": Record<string, never>;
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };

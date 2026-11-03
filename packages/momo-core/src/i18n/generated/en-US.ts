@@ -63,6 +63,167 @@ export const catalog: MessageCatalog = {
       "value": "name"
     }
   ],
+  "attachments.video.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", video, "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": ", play"
+    }
+  ],
+  "attachments.video.cardLabelNoDuration": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", video, play"
+    }
+  ],
+  "attachments.video.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't play this video"
+    }
+  ],
+  "attachments.video.gone": [
+    {
+      "type": 0,
+      "value": "This video isn't available anymore"
+    }
+  ],
+  "attachments.video.loading": [
+    {
+      "type": 0,
+      "value": "Loading video"
+    }
+  ],
+  "attachments.video.mute": [
+    {
+      "type": 0,
+      "value": "Mute"
+    }
+  ],
+  "attachments.video.pause": [
+    {
+      "type": 0,
+      "value": "Pause"
+    }
+  ],
+  "attachments.video.play": [
+    {
+      "type": 0,
+      "value": "Play"
+    }
+  ],
+  "attachments.video.replay": [
+    {
+      "type": 0,
+      "value": "Replay from the start"
+    }
+  ],
+  "attachments.video.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "attachments.video.saveHint": [
+    {
+      "type": 0,
+      "value": "Opens the share sheet. Choose “Save Video”."
+    }
+  ],
+  "attachments.video.seekLabel": [
+    {
+      "type": 0,
+      "value": "Playback position"
+    }
+  ],
+  "attachments.video.seekValue": [
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "attachments.video.thumbHint": [
+    {
+      "type": 0,
+      "value": "Go to this video"
+    }
+  ],
+  "attachments.video.thumbLabel": [
+    {
+      "type": 0,
+      "value": "Video "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    }
+  ],
+  "attachments.video.unmute": [
+    {
+      "type": 0,
+      "value": "Unmute"
+    }
+  ],
+  "attachments.viewer.mixedCaption": [
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    }
+  ],
+  "attachments.viewer.mixedCaptionLabel": [
+    {
+      "type": 0,
+      "value": "Item "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -517,6 +678,12 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "desktop.tray.closeNotice": [
+    {
+      "type": 0,
+      "value": "Closing the window keeps oort in the menu bar, so you still get notifications"
+    }
+  ],
   "desktop.tray.more": [
     {
       "type": 2,
@@ -544,6 +711,146 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Open oort"
+    }
+  ],
+  "desktop.tray.readAll": [
+    {
+      "type": 0,
+      "value": "Mark all as read"
+    }
+  ],
+  "desktop.tray.remainApprovals": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approval is still waiting for you"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approvals are still waiting for you"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "desktop.tray.remainBoth": [
+    {
+      "type": 6,
+      "value": "approvals",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approval"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approvals"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "panes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pane"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " panes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " are still waiting for you"
+    }
+  ],
+  "desktop.tray.remainPanes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pane is still waiting for you"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " panes are still waiting for you"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "desktop.tray.running": [
@@ -2007,6 +2314,12 @@ export const catalog: MessageCatalog = {
       "value": "What changed"
     }
   ],
+  "releaseNotes.detail.others": [
+    {
+      "type": 0,
+      "value": "Other changes"
+    }
+  ],
   "releaseNotes.detail.tryIt": [
     {
       "type": 0,
@@ -2103,6 +2416,186 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Phone"
+    }
+  ],
+  "releaseNotes.topic.agents": [
+    {
+      "type": 0,
+      "value": "Agents"
+    }
+  ],
+  "releaseNotes.topic.attachments": [
+    {
+      "type": 0,
+      "value": "Attachments"
+    }
+  ],
+  "releaseNotes.topic.conversations": [
+    {
+      "type": 0,
+      "value": "Conversations"
+    }
+  ],
+  "releaseNotes.topic.notifications": [
+    {
+      "type": 0,
+      "value": "Notifications"
+    }
+  ],
+  "releaseNotes.topic.settings": [
+    {
+      "type": 0,
+      "value": "Settings"
+    }
+  ],
+  "releaseNotes.v0141.agentsChanged": [
+    {
+      "type": 0,
+      "value": "Agent lists and profiles show this month's cost, and admins get a monthly report. In a DM between people, calling an agent first asks everyone for consent, and the agent joins once all agree."
+    }
+  ],
+  "releaseNotes.v0141.agentsTitle": [
+    {
+      "type": 0,
+      "value": "Agent costs and calling an agent in a DM"
+    }
+  ],
+  "releaseNotes.v0141.agentsTryIt": [
+    {
+      "type": 0,
+      "value": "Open the agent list and a profile. As an admin, open Settings › Usage on the desktop or Settings › Monthly report on the phone. In a DM, mention an agent and look for the consent card."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsChanged": [
+    {
+      "type": 0,
+      "value": "A channel's notification line shows its state with a bell icon and words. It flips the moment you tap, and if saving fails only that channel goes back."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTitle": [
+    {
+      "type": 0,
+      "value": "Channel notification state"
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, tap the notification line on the conversation info page, in the ⋮ menu or in a channel row menu. On the desktop, use the channel header ⋮ menu or the sidebar row menu."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightChanged": [
+    {
+      "type": 0,
+      "value": "The composer grows to four lines on the phone and five on the desktop, then scrolls inside. A long pasted text fits its height and the last line is no longer clipped."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTitle": [
+    {
+      "type": 0,
+      "value": "Composer height"
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTryIt": [
+    {
+      "type": 0,
+      "value": "Type several lines, then paste a long text."
+    }
+  ],
+  "releaseNotes.v0141.emojiChanged": [
+    {
+      "type": 0,
+      "value": "On the phone, reactions and status take every standard emoji. The Our team slot of the emoji picker holds team emoji, stickers and GIFs, and you can register new ones."
+    }
+  ],
+  "releaseNotes.v0141.emojiTitle": [
+    {
+      "type": 0,
+      "value": "Emoji and team emoji"
+    }
+  ],
+  "releaseNotes.v0141.emojiTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, tap + in the quick reaction row and search by name. On both, open the Our team slot of the emoji picker."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationChanged": [
+    {
+      "type": 0,
+      "value": "The band at the top of a conversation is gone: back, the name and ⋮ float as three glass buttons. Coming back to the app or unlocking the phone reconnects sooner, pulling down at the top of a conversation re-checks the connection, and a light tap comes with a long press or a reaction."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTitle": [
+    {
+      "type": 0,
+      "value": "Phone conversation header and reconnecting"
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTryIt": [
+    {
+      "type": 0,
+      "value": "Open a conversation and scroll to the top, then leave the app for a moment and come back. If the disconnected band shows, tap Reconnect now."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerChanged": [
+    {
+      "type": 0,
+      "value": "A photo grows out of the picture you tapped and closes back into it. Back, Esc or a drag down closes it, and with Reduce Motion on it opens and closes at once."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTitle": [
+    {
+      "type": 0,
+      "value": "Opening and closing photos"
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTryIt": [
+    {
+      "type": 0,
+      "value": "Open a photo in a conversation and close it in a few different ways."
+    }
+  ],
+  "releaseNotes.v0141.settingsChanged": [
+    {
+      "type": 0,
+      "value": "Settings › Profile › Language lets you follow the device language or pick 한국어 or English. It applies at once, though not every screen is translated yet. On the phone, Settings › Theme › Theme style opens a full-screen picker."
+    }
+  ],
+  "releaseNotes.v0141.settingsTitle": [
+    {
+      "type": 0,
+      "value": "Language setting and phone theme picker"
+    }
+  ],
+  "releaseNotes.v0141.settingsTryIt": [
+    {
+      "type": 0,
+      "value": "Change the language and check that the settings screen changes. On the phone, also pick a theme style."
+    }
+  ],
+  "releaseNotes.v0141.summary": [
+    {
+      "type": 0,
+      "value": "Conversations look better, and a language setting, team emoji and agent costs are new."
+    }
+  ],
+  "releaseNotes.v0141.typingChanged": [
+    {
+      "type": 0,
+      "value": "Under the composer, the name of who is typing is bold and three dots move. With Reduce Motion on, the dots stay still."
+    }
+  ],
+  "releaseNotes.v0141.typingTitle": [
+    {
+      "type": 0,
+      "value": "Typing indicator"
+    }
+  ],
+  "releaseNotes.v0141.typingTryIt": [
+    {
+      "type": 0,
+      "value": "Watch the line under the composer while a person or an agent is writing a reply."
     }
   ],
   "releaseNotes.version.current": [

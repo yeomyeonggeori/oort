@@ -120,11 +120,8 @@ import {
   setSidebarSectionCollapsed,
   useSidebarSectionsCollapsed,
 } from "./sidebarSectionPreference";
-import {
-  connectionBarClass,
-  connectionCopy,
-  showsConnectionBar,
-} from "./connStatusIndicator";
+import { ConnectionCard } from "./ConnectionCard";
+import { showsConnectionCard } from "@momo/core/features/connection/screenState";
 import { Button } from "@/design/ui/button";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
 import { cn } from "@/design/lib/cn";
@@ -865,23 +862,6 @@ export function Sidebar({
           marks={railMarks}
           footer={
             <div className="safe-area-bottom flex flex-col items-center gap-2">
-              {/* Bound to real connStatus, never decorative (SKILL §8): the colour and
-                  the accessible name both derive from the status, and while connected
-                  the element is not rendered at all. 12x4 bar = the workspace rail's
-                  marker grammar, deliberately not the avatar badge's circle. */}
-              {showsConnectionBar(connStatus) && (
-                <span
-                  data-testid="conn-status"
-                  data-status={connStatus}
-                  role="img"
-                  aria-label={connectionCopy(connStatus)}
-                  title={connectionCopy(connStatus)}
-                  className={cn(
-                    "h-1 w-3 shrink-0 rounded-full",
-                    connectionBarClass(connStatus)
-                  )}
-                />
-              )}
               {/* 접힘(⌘B)에서만 프로필이 레일에 아바타로 선다. 펼친 동안은 목록 끝의 한 줄이다(#3574). */}
               {railCollapsed && profileCard(true)}
             </div>
@@ -1500,6 +1480,11 @@ export function Sidebar({
                 selfMember={selfMember}
               />
             )}
+            {/* 연결이 끊겼거나 다시 붙는 중이면 프로필 줄 바로 위 한 장(#5220, #5201 결정 ①, Buzz 방식). 정상이면
+                카드 자체가 없고, 말하는 자리는 한 곳이라 서랍이거나 목록 열이 접혔을 때는 서지 않는다 — 그때는
+                셸의 위쪽 띠가 같은 문장으로 말한다(`showsConnectionCard`·`showsConnectionBanner`는 서로의 여집합이다).
+                뜨고 지는 것이 프로필 줄을 움직이지 않는 이유는 알림 멈춤 줄과 같다(위, #4107). */}
+            {showsConnectionCard({ asDrawer, listCollapsed: channelPaneCollapsed }) && <ConnectionCard />}
             <div
               className="flex items-center gap-1 pt-2"
               data-testid="sidebar-profile-foot"

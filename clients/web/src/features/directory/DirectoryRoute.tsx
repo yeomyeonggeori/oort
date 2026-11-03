@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import type { RosterMember } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
+import { useOffline } from "@/features/common/useOffline";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { Input } from "@/design/ui/input";
 import { Button } from "@/design/ui/button";
@@ -66,7 +67,7 @@ function DirectorySkeleton({ rows = 6 }: { rows?: number }) {
 }
 
 export function DirectoryRoute() {
-  const { session, workspaceId, connStatus } = useSession();
+  const { session, workspaceId } = useSession();
   const rosterQuery = useDirectory(workspaceId);
   const openMemberProfile = useOpenMemberProfile();
   const [query, setQuery] = useState("");
@@ -103,7 +104,7 @@ export function DirectoryRoute() {
   };
   const count = countLabel(groups, roster);
 
-  const offline = connStatus === "disconnected";
+  const offline = useOffline();
   // The query as the person typed it, only stripped of the spaces around it.
   // Matching folds case (model.normalizeQuery); quoting the folded string back
   // would hand "KIM" the answer "kim" and quietly correct a search that was

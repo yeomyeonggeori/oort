@@ -145,6 +145,10 @@ impl DeepLinkState {
         let Some(link) = parse_join(url) else {
             return;
         };
+        // An invite link means the person wants to see the app. Since #5196 the red button only puts the
+        // window away, so with the app running nothing else would show it.
+        #[cfg(desktop)]
+        crate::main_window::bring_forward(app);
         if self.webview_ready.load(Ordering::SeqCst) {
             let _ = app.emit(DEEP_LINK_EVENT, &link);
         } else if let Ok(mut pending) = self.pending.lock() {
@@ -255,5 +259,23 @@ mod tests {
             parse("oort://join?SERVER=https%3A%2F%2Fa.example&server=https%3A%2F%2Fb.example")
                 .expect("link parses");
         assert_eq!(link.server, "https://a.example");
+    }
+
+    /// An accepted link brings the window back (it may be put away, #5196); a link that is not ours
+    /// does nothing, not even that.
+    #[cfg(desktop)]
+    #[test]
+    fn an_accepted_link_brings_the_window_back_and_a_foreign_one_does_not() {
+        let app = tauri::test::mock_app();
+        let state = DeepLinkState::default();
+        let before = crate::main_window::forwarded();
+        state.deliver(app.handle(), &Url::parse("oort://invite?code=abc").unwrap());
+        state.deliver(app.handle(), &Url::parse("https://join?code=abc").unwrap());
+        assert_eq!(crate::main_window::forwarded(), before, "a foreign link");
+        state.deliver(
+            app.handle(),
+            &Url::parse("oort://join?server=https%3A%2F%2Fa.example&code=abc").unwrap(),
+        );
+        assert_eq!(crate::main_window::forwarded(), before + 1);
     }
 }
