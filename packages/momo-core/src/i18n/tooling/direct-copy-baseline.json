@@ -856,7 +856,7 @@
     "clients/web/src/features/timeline/useAutoGrow.ts": 4,
     "clients/web/src/features/timeline/useLongPress.ts": 7,
     "clients/web/src/features/timeline/useRequestThreadLanding.ts": 5,
-    "clients/web/src/features/timeline/useTimeline.ts": 27,
+    "clients/web/src/features/timeline/useTimeline.ts": 26,
     "clients/web/src/features/timeline/useUnfurlImage.ts": 7,
     "clients/web/src/features/updates/UpdateButton.tsx": 45,
     "clients/web/src/features/updates/UpdateNotice.tsx": 4,

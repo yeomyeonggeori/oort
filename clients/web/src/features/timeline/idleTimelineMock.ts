@@ -21,6 +21,8 @@ export function idleTimelineMock(
     send: async () => undefined,
     resend: async () => undefined,
     discard: () => null,
+    resendAll: async () => undefined,
+    failureKinds: new Map(),
     loadOlder: async () => undefined,
     reload: () => undefined,
     loadingOlder: false,

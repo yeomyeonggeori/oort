@@ -1541,6 +1541,8 @@ export function ChatShell() {
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
               onDiscardPending={stressCount > 0 ? undefined : timeline.discard}
+              failureKinds={timeline.failureKinds}
+              onResendAllPending={stressCount > 0 ? undefined : timeline.resendAll}
               channelKind={channel?.kind}
               viewingThreadId={thread !== null && !workPanelOpen && windowForeground ? thread.id : null}
               channelName={label}

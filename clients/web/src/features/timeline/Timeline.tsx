@@ -76,6 +76,7 @@ import {
 } from "./MessageRow";
 import { TimelineLiveRegionProvider } from "./timelineLiveRegion";
 import { PendingRow } from "./PendingRow";
+import { isFailedRow, type SendFailureKind } from "@momo/core/features/connection/sendFailure";
 import { SystemLine } from "./SystemLine";
 import { isSystemLineMessage, startGroupAfterSystemLine } from "./systemLineRows";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
@@ -259,6 +260,8 @@ export function Timeline({
   onResend,
   onResendPending,
   onDiscardPending,
+  failureKinds,
+  onResendAllPending,
   onAddMember,
   canConnectAgent = false,
   onConnectAgent,
@@ -341,6 +344,10 @@ export function Timeline({
   onResendPending?: (clientMsgId: string) => Promise<void> | void;
   /** 보내지 못한 echo 행을 이 기기에서 지운다(#5210). 없으면 행이 X 를 그리지 않는다. */
   onDiscardPending?: (clientMsgId: string) => void;
+  /** 실패한 행마다 원인 한 줄의 종류(#5221). 항목이 없으면 원인 없이 「전송 실패」만 말한다. */
+  failureKinds?: ReadonlyMap<string, SendFailureKind>;
+  /** 실패한 행이 둘 이상일 때 마지막 실패 행 아래 「모두 다시 보내기」가 부른다(#5221). 없으면 단추를 그리지 않는다. */
+  onResendAllPending?: () => Promise<void> | void;
   /**
    * 이 채널에 워크스페이스 멤버를 넣는다. 빈 채널의 보조 행동 (#1536). 이름이
    * 초대가 아니라 추가인 이유는 코어 라벨 상수의 머리말 (#1573): 이 손잡이가
@@ -476,6 +483,11 @@ export function Timeline({
     ]
   );
 
+  // 「모두 다시 보내기」는 실패한 행이 둘 이상일 때 **마지막** 실패 행 아래에 한 번만 선다(#5221).
+  const failedPendingIds = useMemo(
+    () => (pending ?? []).filter(isFailedRow).map((p) => p.clientMsgId),
+    [pending]
+  );
   const items = useMemo(() => {
     const folded = foldDeletedRuns(
       buildTimelineItems(presentableRows(mainMessages), {
@@ -916,6 +928,14 @@ export function Timeline({
                 quoteLookup={quoteLookup}
                 onResend={onResendPending}
                 onDiscard={onDiscardPending}
+                failureKind={failureKinds?.get(item.pending.clientMsgId) ?? null}
+                resendAllCount={
+                  failedPendingIds.length >= 2 &&
+                  failedPendingIds[failedPendingIds.length - 1] === item.pending.clientMsgId
+                    ? failedPendingIds.length
+                    : undefined
+                }
+                onResendAll={onResendAllPending}
               />
             );
           }
