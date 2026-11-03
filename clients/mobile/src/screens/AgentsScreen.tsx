@@ -12,6 +12,7 @@ import {
   Sentence,
   TapRow,
 } from '../design/atoms';
+import {ShellConnectionStrip} from '../features/connection/ShellConnectionStrip';
 import {PULL_FILL, usePullRefresh} from '../design/refresh';
 import {font, line, radius, slopTo, space, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
@@ -224,6 +225,11 @@ export default function AgentsScreen({
           </Pressable>
         }
       />
+
+      {/* 셸 띠(#5222): 기기 오프라인·서버에 닿지 못함이면 홈·받은함과 같은 문장·같은 단추로 여기서도 말한다. 바로 아래 `AgentTurnStaleNotice`
+          는 이 화면의 줄이다: 소켓이 붙어 있지 않으면 어떤 원인이든 「에이전트 진행이 낡았을 수 있다」는 **결과**를 말한다. 띠는 원인(오프라인·서버)을,
+          이 줄은 결과를 말한다. 실시간만 끊긴 원인은 이 줄만 말한다(셸 띠는 말하지 않는다). */}
+      <ShellConnectionStrip />
 
       {/* 끊긴 것을 화면에서 말한다 (2R H2). 배지가 회색으로 내려앉는 것만으로는
           부족하다 — 무색은 「열린 턴이 없음」의 모양이기도 해서, 끊긴 화면과

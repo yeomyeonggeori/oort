@@ -15,7 +15,6 @@
   "mobile.attachmentSave.savedToFiles": "Saved to Files",
   "mobile.attachmentSave.failed": "Couldn't save · Try again",
   "mobile.attachmentSave.photosDenied": "Photos access is off · Open Settings",
-  "mobile.connection.reconnectNow": "Reconnect now",
   "mobile.linkPreview.title": "Link previews",
   "mobile.linkPreview.compactHint": "Shows a small picture on the left, with the address and title on the right.",
   "mobile.linkPreview.richHint": "Shows a large picture on top, with the title and description below. Links without a large picture look like Small.",

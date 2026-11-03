@@ -342,6 +342,12 @@ export const catalog: MessageCatalog = {
       "value": "relativeTime"
     }
   ],
+  "connection.card.neverSynced": [
+    {
+      "type": 0,
+      "value": "You haven't loaded this list yet."
+    }
+  ],
   "connection.card.offlineDetail": [
     {
       "type": 0,
@@ -2192,12 +2198,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Save to Photos"
-    }
-  ],
-  "mobile.connection.reconnectNow": [
-    {
-      "type": 0,
-      "value": "Reconnect now"
     }
   ],
   "mobile.ios.cameraUsage": [

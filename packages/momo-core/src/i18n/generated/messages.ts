@@ -35,6 +35,7 @@ export const messageKeys = [
   "connection.boot.unreachable",
   "connection.card.connecting",
   "connection.card.lastSynced",
+  "connection.card.neverSynced",
   "connection.card.offlineDetail",
   "connection.card.offlineTitle",
   "connection.card.realtimeDownDetail",
@@ -302,7 +303,6 @@ export const messageKeys = [
   "mobile.attachmentSave.saving",
   "mobile.attachmentSave.toFiles",
   "mobile.attachmentSave.toPhotos",
-  "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
   "mobile.ios.localNetworkUsage",
@@ -802,6 +802,7 @@ export const argumentSpecs = {
   "connection.card.lastSynced": {
     "relativeTime": "string"
   },
+  "connection.card.neverSynced": {},
   "connection.card.offlineDetail": {},
   "connection.card.offlineTitle": {},
   "connection.card.realtimeDownDetail": {},
@@ -1104,7 +1105,6 @@ export const argumentSpecs = {
   "mobile.attachmentSave.saving": {},
   "mobile.attachmentSave.toFiles": {},
   "mobile.attachmentSave.toPhotos": {},
-  "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
   "mobile.ios.localNetworkUsage": {},
@@ -1728,6 +1728,7 @@ export interface MessageArgs {
   "connection.boot.unreachable": Record<string, never>;
   "connection.card.connecting": Record<string, never>;
   "connection.card.lastSynced": { relativeTime: string };
+  "connection.card.neverSynced": Record<string, never>;
   "connection.card.offlineDetail": Record<string, never>;
   "connection.card.offlineTitle": Record<string, never>;
   "connection.card.realtimeDownDetail": Record<string, never>;
@@ -1995,7 +1996,6 @@ export interface MessageArgs {
   "mobile.attachmentSave.saving": Record<string, never>;
   "mobile.attachmentSave.toFiles": Record<string, never>;
   "mobile.attachmentSave.toPhotos": Record<string, never>;
-  "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
   "mobile.ios.localNetworkUsage": Record<string, never>;

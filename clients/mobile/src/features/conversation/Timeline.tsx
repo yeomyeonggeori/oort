@@ -82,6 +82,9 @@ import {
   WorkingRow,
   type MessageRowActions,
 } from './MessageRow';
+import {ResendAllBar} from './ResendAllBar';
+import type {SendFailureKind} from '@momo/core/features/connection/sendFailure';
+import {resendAllOffer} from './resendAllOffer';
 import {SystemLine} from './SystemLine';
 import {isSystemLineMessage, startGroupAfterSystemLine} from './systemLineRows';
 import {resolveQuote} from '@momo/core/features/timeline/quote';
@@ -924,7 +927,9 @@ function TimelineInner({
   onRetry,
   onResend,
   onResendPending,
+  onResendAll,
   onDiscardPending,
+  failureKinds,
   actions,
   emptyOverride,
   selfSendToken,
@@ -1035,8 +1040,12 @@ function TimelineInner({
   onRetry?: () => void;
   onResend?: (message: Message) => void;
   onResendPending?: (clientMsgId: string) => void;
+  /** 실패한 글 전부를 같은 멱등 키로 한 번씩 다시 보낸다(#5222). 없으면 「모두 다시 보내기」가 서지 않는다. */
+  onResendAll?: () => void;
   /** 보내지 못한 메아리를 이 기기에서 지운다(#5210). 없으면 행이 X 를 그리지 않는다. */
   onDiscardPending?: (clientMsgId: string) => void;
+  /** 못 보낸 행마다 원인 한 줄의 종류(#5222). 키가 없는 행은 「전송 실패」만 말한다. */
+  failureKinds?: ReadonlyMap<string, SendFailureKind>;
   /**
    * What each row may do. Absent on read-only mounts — the measurement harness
    * renders this component with no session behind it, and a row that offered
@@ -2992,6 +3001,13 @@ function TimelineInner({
   // 에코가 확정본으로 바뀌어도 run 첫 읽기 전에 예약한 칸은 그대로 남아요.
   const reservedRequests = useRef(new Set<string>());
 
+  // 「모두 다시 보내기」(#5222): 실패한 글이 둘 이상이면 첫 실패 줄 위에 한 번만 선다. 단추가 줄에 붙은 것이 아니라 줄 **위**의 형제라
+  // 줄의 모양(#5210 아이콘 둘)과 서로 건드리지 않는다.
+  const resendAll = useMemo(
+    () => (onResendAll === undefined ? null : resendAllOffer(pending)),
+    [onResendAll, pending],
+  );
+
   const renderItem = useCallback(
     ({item}: {item: FoldedTimelineItem}) => {
       renderItemCalls += 1;
@@ -3029,10 +3045,20 @@ function TimelineInner({
             }
             onResend={onResendPending}
             onDiscard={onDiscardPending}
+            failureKind={failureKinds?.get(item.pending.clientMsgId) ?? null}
             arrivalSurface={arrivalSurface}
           />
         );
-        return requestThoughts && channelKind === 'dm' ? <View>{pendingRow}<RequestThinkingLine directory={directory} nowMs={nowMs} /></View> : pendingRow;
+        const withThoughts =
+          requestThoughts && channelKind === 'dm' ? <View>{pendingRow}<RequestThinkingLine directory={directory} nowMs={nowMs} /></View> : pendingRow;
+        return resendAll !== null && onResendAll !== undefined && item.pending.clientMsgId === resendAll.anchorId ? (
+          <View>
+            <ResendAllBar count={resendAll.count} onPress={onResendAll} />
+            {withThoughts}
+          </View>
+        ) : (
+          withThoughts
+        );
       }
       // 앵커 행이면 측정 상자로 감싼다. 시스템 줄도 앵커가 될 수 있어서(첫 안 읽음·점프 대상) 두 길이 같은 래퍼를 쓴다.
       const anchored = (seq: number, row: React.JSX.Element): React.JSX.Element => {
@@ -3145,7 +3171,10 @@ function TimelineInner({
       nowMs,
       onResend,
       onResendPending,
+      onResendAll,
+      resendAll,
       onDiscardPending,
+      failureKinds,
       actions,
       anchorSeq,
       anchorRef,

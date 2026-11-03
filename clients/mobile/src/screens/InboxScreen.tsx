@@ -3,6 +3,7 @@ import {
   serverSurface,
   type SurfaceId,
 } from '@momo/core/features/capabilities/serverSurfaces';
+import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
 import {
   entryAriaLabel,
   filterMailbox,
@@ -43,10 +44,12 @@ import {
 import {PULL_FILL, usePullRefresh} from '../design/refresh';
 import {ds2Radius, font, line, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
+import {useFormatMessage} from '../i18n/useFormatMessage';
 import {
   ApprovalDecision,
   decisionReceiptCopy,
 } from '../features/inbox/ApprovalDecision';
+import {ShellConnectionStrip} from '../features/connection/ShellConnectionStrip';
 import {APPROVAL_OFFLINE_COPY, useOnline} from '../features/inbox/useOnline';
 import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
 import {useMailbox, useMarkInboxItemRead} from '../features/inbox/useMailbox';
@@ -264,6 +267,7 @@ export default function InboxScreen({
   // 배선은 `useOnline` 이 든다 — 승인 컨트롤이 서는 화면이 둘이 됐고, 같은
   // 컨트롤이 화면마다 다른 오프라인 결을 가지면 그것은 어휘 분열이다.
   const online = useOnline();
+  const formatMessage = useFormatMessage();
 
   // 필터 칩의 수는 탭 알약과 **같은 합**의 두 몫이다(#3342): 결정 대기 + 멘션 = 알약.
   // 칩이 자기 수를 따로 세면 알약은 3, 칩 둘은 2와 2를 말하게 된다.
@@ -533,15 +537,22 @@ export default function InboxScreen({
         />
       ))}
 
+      {/* 셸 띠(#5222): 기기 오프라인·서버에 닿지 못함이면 홈·에이전트와 같은 문장·같은 단추로 여기서도 말한다. */}
+      <ShellConnectionStrip />
+
+      {/* 기기가 오프라인이면 띠가 「오프라인이에요」를 말하고, 이 줄은 **무엇이 얼마나 낡았는지**만 말한다(감사 문서 §6.2 P3).
+          같은 원인을 두 줄이 되풀이하지 않는다. */}
       {!online ? (
         <NoticeBlock
           headline={
             (mailboxActive ? mailbox.updatedAtMs : feed.updatedAtMs) > 0
-              ? `오프라인, 마지막 동기화 ${relativeLabel(
-                  mailboxActive ? mailbox.updatedAtMs : feed.updatedAtMs,
-                  Date.now(),
-                )}. 아래는 그때의 상태예요.`
-              : '오프라인이에요. 아직 이 목록을 한 번도 받지 못했어요.'
+              ? formatMessage(CONNECTION_KEYS.lastSynced, {
+                  relativeTime: relativeLabel(
+                    mailboxActive ? mailbox.updatedAtMs : feed.updatedAtMs,
+                    Date.now(),
+                  ),
+                })
+              : formatMessage(CONNECTION_KEYS.neverSynced)
           }
           testID="inbox-offline"
         />

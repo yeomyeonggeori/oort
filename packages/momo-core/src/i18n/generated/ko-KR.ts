@@ -300,6 +300,12 @@ export const catalog: MessageCatalog = {
       "value": "relativeTime"
     }
   ],
+  "connection.card.neverSynced": [
+    {
+      "type": 0,
+      "value": "아직 이 목록을 한 번도 받지 못했어요."
+    }
+  ],
   "connection.card.offlineDetail": [
     {
       "type": 0,
@@ -2028,12 +2034,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "사진에 저장"
-    }
-  ],
-  "mobile.connection.reconnectNow": [
-    {
-      "type": 0,
-      "value": "지금 다시 연결"
     }
   ],
   "mobile.ios.cameraUsage": [
