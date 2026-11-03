@@ -99,6 +99,40 @@ describe('남기고 되살린다', () => {
   });
 });
 
+describe('스레드 답글의 행 (#5262)', () => {
+  const reply = (id: string, over: Partial<PendingMessage> = {}): PendingMessage =>
+    row(id, {rootId: 'root-1', alsoInChannel: true, ...over});
+
+  it('뿌리와 「대화에도 보내기」가 그대로 돌아오고, 같은 채널의 글과 한 지도에 섞여 있어도 서로를 해치지 않는다', () => {
+    rememberFailedSend(WS, row('m1'), 'server', NOW);
+    rememberFailedSend(WS, reply('m2'), 'offline', NOW + 1);
+    const back = readFailedSends(WS, CH, ME, NOW + 10);
+    expect(back.map(r => r.row.clientMsgId)).toEqual(['m1', 'm2']);
+    expect(back[0].row.rootId).toBeUndefined();
+    expect(back[1].row).toEqual({...reply('m2'), status: 'failed'});
+    expect(back[1].kind).toBe('offline');
+  });
+
+  it('대화의 글과 같은 규칙이다: 30일에 버리고, 50개 정원에 함께 세고, 로그아웃이 함께 지운다', () => {
+    rememberFailedSend(WS, reply('old'), null, NOW);
+    expect(readFailedSends(WS, CH, ME, NOW + 29 * DAY)).toHaveLength(1);
+    expect(readFailedSends(WS, CH, ME, NOW + 30 * DAY)).toEqual([]);
+
+    for (let i = 1; i <= 52; i += 1) {
+      rememberFailedSend(WS, i % 2 === 0 ? reply(`m${i}`) : row(`m${i}`), null, NOW + i);
+    }
+    const kept = readFailedSends(WS, CH, ME, NOW + 100).map(r => r.row.clientMsgId);
+    expect(kept).toHaveLength(50);
+    expect(kept).not.toContain('m1');
+    expect(kept).not.toContain('m2');
+    expect(kept).toContain('m52');
+
+    clearAllFailedSends();
+    expect(readFailedSends(WS, CH, ME, NOW + 100)).toEqual([]);
+    expect(store.map.has(NON_SECRET_KEYS.failedSends)).toBe(false);
+  });
+});
+
 describe('수명과 정원', () => {
   it('30일이 지난 글은 읽는 순간 버린다 - 29일은 산다', () => {
     expect(DRAFT_TTL_MS).toBe(30 * DAY);
