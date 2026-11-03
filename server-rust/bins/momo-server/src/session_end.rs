@@ -21,7 +21,8 @@
 //! `password_reset` claim, ADR-0215 D4) — the one thing besides a session that can set their
 //! password. A link that outlived the sessions it was meant to recover would let whoever holds
 //! it take the account after the owner already recovered it some other way. Except for the
-//! member's own password change ([`ends_pending_reset_links`]).
+//! member's own password change, and for a refresh-token reuse should one ever end a whole
+//! member ([`ends_pending_reset_links`]).
 //!
 //! **Held** means `failed` + `sessions_ended`, not cancelled: a schedule planted by a stolen
 //! session must not go out on its own after the account is recovered, and a legitimate one is not
@@ -102,7 +103,8 @@ pub(crate) async fn end_session_lineage_in_tx(
 }
 
 /// Whether ending every session of a member for `cause` also ends their pending reset link
-/// (ADR-0215 D4). Everything does **except the member's own password change**.
+/// (ADR-0215 D4). Everything does **except the member's own password change and a
+/// refresh-token reuse**.
 ///
 /// A change is the act of "someone who knows the current password", which cannot tell the
 /// owner from a thief. If a change ended the link, a thief who knows the password could change
@@ -113,17 +115,19 @@ pub(crate) async fn end_session_lineage_in_tx(
 ///
 /// An exhaustive `match` with no `_` arm: a new cause does not compile until someone decides
 /// which side of this line it is on. The two lineage-level causes never reach the member-wide
-/// end; they are listed so they are decided too, on the side of the rule (a member-wide end ends
-/// the link).
+/// end today; they are listed so they are decided too. A device unlink is on the side of the
+/// rule (a member-wide end ends the link). A refresh-token reuse is on the other side, for the
+/// reason a password change is: whoever holds a copy of the token can raise it.
 fn ends_pending_reset_links(cause: RevocationCause) -> bool {
     match cause {
         RevocationCause::PasswordChanged => false,
+        // A copied refresh token can raise a reuse; it must not be able to cut a recovery link.
+        RevocationCause::RefreshReuse => false,
         RevocationCause::PasswordReset
         | RevocationCause::Suspended
         | RevocationCause::Removed
         | RevocationCause::Left
-        | RevocationCause::DeviceUnlinked
-        | RevocationCause::RefreshReuse => true,
+        | RevocationCause::DeviceUnlinked => true,
     }
 }
 
@@ -160,17 +164,24 @@ mod tests {
     use super::*;
 
     /// ADR-0215 D4: every member-wide end ends the pending reset link, except the member's own
-    /// password change.
+    /// password change and a refresh-token reuse.
     #[test]
-    fn only_the_members_own_change_leaves_a_pending_reset_link_alone() {
-        assert!(!ends_pending_reset_links(RevocationCause::PasswordChanged));
+    fn only_the_members_own_change_and_a_token_reuse_leave_a_pending_reset_link_alone() {
+        for cause in [
+            RevocationCause::PasswordChanged,
+            RevocationCause::RefreshReuse,
+        ] {
+            assert!(
+                !ends_pending_reset_links(cause),
+                "{cause:?} must leave a pending reset link alone"
+            );
+        }
         for cause in [
             RevocationCause::PasswordReset,
             RevocationCause::Suspended,
             RevocationCause::Removed,
             RevocationCause::Left,
             RevocationCause::DeviceUnlinked,
-            RevocationCause::RefreshReuse,
         ] {
             assert!(
                 ends_pending_reset_links(cause),
