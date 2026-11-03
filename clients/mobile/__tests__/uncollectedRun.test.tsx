@@ -6,11 +6,10 @@ import {
   type Channel,
 } from '@momo/core/lib/api';
 import {signalFromProgress} from '@momo/core/features/agents/runPhase';
-import type {AgentLivenessLookup} from '@momo/core/features/agents/turnCopy';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {cleanup, render, renderHook, screen, waitFor} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, renderHook, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
 import {Text} from 'react-native';
 
@@ -24,7 +23,7 @@ import {
   nudgeRunProgress,
 } from '../src/features/agents/agentRunProgressStore';
 import {useAgentLivenessLookup} from '../src/features/agents/useAgentLiveness';
-import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
+import {TurnsActivityRail} from '../src/features/agents/ActivityRail';
 import {
   buildWorkingCard,
   cardCancelRunId,
@@ -396,57 +395,46 @@ describe('서버가 woken_not_collected로 끝내면 카드가 사라진다 (#42
   });
 });
 
-describe('대화 아래 활동 줄', () => {
-  const lookup =
-    (answers: Record<string, AgentLiveness | null>): AgentLivenessLookup =>
-    memberId =>
-      answers[memberId.toLowerCase()];
-
-  function bar(
+describe('입력창 레일 (#4620)', () => {
+  function rail(
     turns: AgentWorkingSignal[],
-    answers?: Record<string, AgentLiveness | null>,
-    renderStop?: React.ComponentProps<typeof AgentActivityBar>['renderStop'],
+    renderStop?: React.ComponentProps<typeof TurnsActivityRail>['renderStop'],
   ) {
     return render(
-      <AgentActivityBar
+      <TurnsActivityRail
         turns={turns}
         directory={DIRECTORY}
         nowMs={Date.now()}
         live
-        livenessFor={answers === undefined ? undefined : lookup(answers)}
         renderStop={renderStop}
       />,
     );
   }
 
-  it('아무도 가져가지 않은 요청: 「아직 받지 않았어요」, 경고 문구가 앞, 이유가 끝에', () => {
-    bar([signalOf({queuePosition: 1})], {[AGENT]: liveness('woken_not_collected')});
-    const row = screen.getByTestId('composer-working');
-    expect(row).toHaveTextContent(/달무리봇: 아직 받지 않았어요/);
-    expect(row).not.toHaveTextContent(/대기 1번째/);
-    expect(screen.getByTestId('activity-detail')).toHaveTextContent(
-      '깨웠지만 아직 안 가져감 · 17시간째 기다려요 · 연결이 꺼져 있을 수 있어요',
-    );
-    // 이 문장은 낭독 이름에도 같다(숫자 없이).
-    expect(screen.getByLabelText('달무리봇: 아직 받지 않았어요')).toBeTruthy();
+  it('아무도 가져가지 않은 채 유예(5분)를 넘은 사람 요청은 레일에서 빠진다 — 그 말은 메시지 아래 예외 줄이 한다', () => {
+    rail([signalOf({queuePosition: 1})]);
+    // 칸은 예약돼 있고 줄은 없다. 「아직 받지 않았어요」를 레일과 예외 줄이 다르게 말하는 순간이 없다.
+    expect(screen.getByTestId('composer-rail')).toBeTruthy();
+    expect(screen.queryByTestId('composer-working')).toBeNull();
   });
 
-  it('생존 판정을 안 주면(생략) 낱말은 바뀌어도 경고 문구·이유는 없다', () => {
-    bar([signalOf({queuePosition: 1})]);
-    expect(screen.getByTestId('composer-working')).toHaveTextContent(/달무리봇: 아직 받지 않았어요/);
-    expect(screen.getByTestId('activity-detail')).toHaveTextContent('17시간째 기다려요');
-    expect(screen.getByTestId('activity-detail')).not.toHaveTextContent('깨웠지만');
+  it('유예 안의 요청은 「받음」이고 분 단위 근거는 시트에서만 선다', () => {
+    rail([signalOf({queuePosition: 1, createdAtMs: Date.now() - 2 * 60_000})]);
+    expect(screen.getByTestId('composer-working-text')).toHaveTextContent(/달무리봇 · 받음/);
+    expect(screen.getByTestId('composer-working-text')).not.toHaveTextContent(/\d/);
+    fireEvent.press(screen.getByTestId('composer-working'));
+    expect(screen.getByTestId(`composer-working-row-${AGENT}`)).toHaveTextContent(/2분째 기다려요/);
   });
 
   it('멈추는 컨트롤은 요청이 아직 아무에게도 가지 않았으면 「취소」, 가져간 뒤는 「중단」 한 벌을 받는다', () => {
     const seen: Record<string, string> = {};
-    const renderStop: React.ComponentProps<typeof AgentActivityBar>['renderStop'] = turn => {
+    const renderStop: React.ComponentProps<typeof TurnsActivityRail>['renderStop'] = turn => {
       seen[turn.memberId] = turn.wording.action;
       return <Text testID={`wording-${turn.memberId}`}>{turn.wording.action}</Text>;
     };
-    bar(
+    rail(
       [
-        signalOf({queuePosition: 1}),
+        signalOf({queuePosition: 1, createdAtMs: Date.now() - 60_000}),
         signalOf({
           id: '0199aa11-2222-7000-8000-0000000000b2',
           agentMemberId: AGENT_B,
@@ -455,18 +443,19 @@ describe('대화 아래 활동 줄', () => {
           claimedAtMs: Date.now() - 20_000,
         }),
       ],
-      undefined,
       renderStop,
     );
+    fireEvent.press(screen.getByTestId('composer-working'));
     expect(seen[AGENT]).toBe('취소');
     expect(seen[AGENT_B]).toBe('중단');
     expect(screen.getByTestId(`wording-${AGENT}`)).toHaveTextContent('취소');
   });
 
-  it('시스템 작업 줄은 기존 말이다 (카드만 숨기고 줄은 그대로)', () => {
-    bar([signalOf({queuePosition: 1, system: true})], {[AGENT]: liveness('woken_not_collected')});
-    expect(screen.getByTestId('composer-working')).toHaveTextContent(/달무리봇: 대기 1번째/);
-    expect(screen.getByTestId('activity-detail')).toHaveTextContent('17시간째 기다려요');
+  it('시스템 작업은 사람이 부른 요청이 아니라서 오래 기다려도 레일에 남는다 (카드만 숨기고 줄은 그대로)', () => {
+    rail([signalOf({queuePosition: 1, system: true})]);
+    expect(screen.getByTestId('composer-working-text')).toHaveTextContent(/달무리봇 · 받음/);
+    fireEvent.press(screen.getByTestId('composer-working'));
+    expect(screen.getByTestId(`composer-working-row-${AGENT}`)).toHaveTextContent(/17시간째 기다려요/);
   });
 });
 
