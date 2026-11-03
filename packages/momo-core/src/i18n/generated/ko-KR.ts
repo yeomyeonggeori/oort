@@ -3052,10 +3052,28 @@ export const catalog: MessageCatalog = {
       "value": "글을 위에, 큰 그림을 아래에 둬요. 제목과 설명은 두 줄까지 보여줘요. 큰 그림이 없는 링크는 작게와 같아요."
     }
   ],
+  "settings.connection.noServer": [
+    {
+      "type": 0,
+      "value": "이 기기에 저장된 서버 주소가 없어요."
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,
       "value": "게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있어요."
+    }
+  ],
+  "settings.notifications.alwaysDetail": [
+    {
+      "type": 0,
+      "value": "승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없어요. 한꺼번에 멈추려면 알림 일시 중지를 써요."
+    }
+  ],
+  "settings.notifications.checking": [
+    {
+      "type": 0,
+      "value": "알림 설정을 확인하는 중이에요."
     }
   ],
   "settings.notifications.threadReplyDescription": [

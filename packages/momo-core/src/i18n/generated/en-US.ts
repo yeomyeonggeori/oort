@@ -3270,10 +3270,28 @@ export const catalog: MessageCatalog = {
       "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
     }
   ],
+  "settings.connection.noServer": [
+    {
+      "type": 0,
+      "value": "No server address is saved on this device."
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,
       "value": "Guest invites are paused until channel-specific invites are available."
+    }
+  ],
+  "settings.notifications.alwaysDetail": [
+    {
+      "type": 0,
+      "value": "Approval requests, mentions of you, and DMs can't be turned off by type. To silence everything at once, use Pause notifications."
+    }
+  ],
+  "settings.notifications.checking": [
+    {
+      "type": 0,
+      "value": "Checking your notification settings."
     }
   ],
   "settings.notifications.threadReplyDescription": [

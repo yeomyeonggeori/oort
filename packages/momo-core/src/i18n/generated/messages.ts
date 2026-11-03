@@ -444,7 +444,10 @@ export const messageKeys = [
   "settings.appearance.linkPreviewOffHint",
   "settings.appearance.linkPreviewRich",
   "settings.appearance.linkPreviewRichHint",
+  "settings.connection.noServer",
   "settings.invite.guestInvitesPaused",
+  "settings.notifications.alwaysDetail",
+  "settings.notifications.checking",
   "settings.notifications.threadReplyDescription",
   "settings.notifications.threadReplyName",
   "settings.profile.languageCurrent",
@@ -1207,7 +1210,10 @@ export const argumentSpecs = {
   "settings.appearance.linkPreviewOffHint": {},
   "settings.appearance.linkPreviewRich": {},
   "settings.appearance.linkPreviewRichHint": {},
+  "settings.connection.noServer": {},
   "settings.invite.guestInvitesPaused": {},
+  "settings.notifications.alwaysDetail": {},
+  "settings.notifications.checking": {},
   "settings.notifications.threadReplyDescription": {},
   "settings.notifications.threadReplyName": {},
   "settings.profile.languageCurrent": {
@@ -1946,7 +1952,10 @@ export interface MessageArgs {
   "settings.appearance.linkPreviewOffHint": Record<string, never>;
   "settings.appearance.linkPreviewRich": Record<string, never>;
   "settings.appearance.linkPreviewRichHint": Record<string, never>;
+  "settings.connection.noServer": Record<string, never>;
   "settings.invite.guestInvitesPaused": Record<string, never>;
+  "settings.notifications.alwaysDetail": Record<string, never>;
+  "settings.notifications.checking": Record<string, never>;
   "settings.notifications.threadReplyDescription": Record<string, never>;
   "settings.notifications.threadReplyName": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
