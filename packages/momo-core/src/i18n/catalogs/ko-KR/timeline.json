@@ -33,7 +33,7 @@
   "timeline.workRecord.noteComputer": "내 컴퓨터에서 도는 작업이 보낸 내용이에요.",
   "timeline.workRecord.summary": "도구 호출 {calls, number}",
   "timeline.workRecord.summaryFailed": "도구 호출 {calls, number} · 실패 {failed, number}",
-  "timeline.workRecord.capped": "처음 {shown, number}번만 줄로 보여요. 위 합계는 모두 센 값이에요.",
+  "timeline.workRecord.capped": "처음 {shown, number}줄만 보여요. 위 합계는 모두 센 값이에요.",
   "timeline.workRecord.unsupported": "oort 호출 기록은 서버 업데이트 뒤에 보여요.",
   "timeline.workRecord.emptyOpen": "아직 oort가 잰 도구 호출이 없어요.",
   "timeline.workRecord.emptyEnded": "이 일에서 oort가 잰 도구 호출은 없었어요.",

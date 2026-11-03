@@ -3764,7 +3764,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "번만 줄로 보여요. 위 합계는 모두 센 값이에요."
+      "value": "줄만 보여요. 위 합계는 모두 센 값이에요."
     }
   ],
   "timeline.workRecord.durationMinutes": [

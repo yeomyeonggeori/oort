@@ -110,7 +110,7 @@
 //   useMailbox가 원장의 말을 승인이 섞인 탭에만 거는 판정(`tasksInTab`)을 지우면
 //   "ledger error scope (멘션)" · "loading scope (멘션)".
 
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -119,6 +119,11 @@ import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.APPROVALS_GATE_PORT || 5188);
+// 화면 캡처용 선택 입력(기본 실행은 이 셋을 쓰지 않는다): `APPROVALS_GATE_SHOTS=<dir>` 이면 결정 영수증 장면(#5174 L5)을
+// 찍고, `APPROVALS_GATE_SCHEME=dark` · `APPROVALS_GATE_VIEWPORT=1440x900` 이 색 구성과 폭을 정한다.
+const shotsDir = process.env.APPROVALS_GATE_SHOTS ? resolve(process.env.APPROVALS_GATE_SHOTS) : null;
+const gateScheme = process.env.APPROVALS_GATE_SCHEME === "dark" ? "dark" : process.env.APPROVALS_GATE_SCHEME === "light" ? "light" : undefined;
+const [gateWidth, gateHeight] = (process.env.APPROVALS_GATE_VIEWPORT || "900x600").split("x").map(Number);
 const origin = `http://127.0.0.1:${port}`;
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
@@ -726,8 +731,9 @@ async function openApproval(page, { hasText } = {}) {
 async function newPage(browser, scenario, delayMs, { open = true, hasText } = {}) {
   const context = await browser.newContext({
     // 900x600: 이 레포에는 결정 컨트롤이 뷰포트 밖으로 밀린 전과가 두 번 있다.
-    viewport: { width: 900, height: 600 },
+    viewport: { width: gateWidth, height: gateHeight },
     reducedMotion: "reduce",
+    ...(gateScheme ? { colorScheme: gateScheme } : {}),
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -946,6 +952,11 @@ async function exerciseList(browser, delayMs) {
  * 노드인지 본다.
  */
 async function assertReceiptDrawnOnce(page, when, where) {
+  if (shotsDir) {
+    mkdirSync(shotsDir, { recursive: true });
+    const slug = when.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    await page.screenshot({ path: resolve(shotsDir, `l5-${where}-${slug}-${gateScheme ?? "default"}-${gateWidth}.png`) });
+  }
   const note = page.getByTestId("inbox-decision-note");
   const wrapper = note.locator("xpath=..");
   const box = await wrapper.boundingBox();
