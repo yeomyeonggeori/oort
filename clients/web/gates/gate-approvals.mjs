@@ -862,6 +862,7 @@ async function exerciseList(browser, delayMs) {
 
   // #5092 D1: 컨트롤을 거두는 것은 서버의 영수증이지 목록의 재조회가 아니다 — 원장이 다시 답하기 **전에** 먼저 잰다.
   await assertDecidedRowSettled(page, "right after the decision", "승인을 기록했어요");
+  await assertReceiptDrawnOnce(page, "right after the decision", "pane");
 
   // 2R M6: 결정 뒤에 초점이 body로 떨어지면 키보드 사용자는 방금 일한 자리를 잃고 문서 맨 위에서 다시 Tab을
   // 시작한다. 눌린 버튼은 결과 줄로 바뀌며 사라지므로 초점은 패널이 받는다(#5092; 옛 판의 「목록 `ul`로 착지」는
@@ -924,6 +925,7 @@ async function exerciseList(browser, delayMs) {
   ) {
     throw new Error("released note: 패널이 닫힌 뒤 결정 결과를 말하는 상태 줄이 사라졌다");
   }
+  await assertReceiptDrawnOnce(page, "after the ledger answered again", "banner");
   // 이웃 줄에 앉은 초점이 다른 결정을 부르지 않았다: 결정은 사람이 누른 한 건뿐이다.
   if (state.decisions.length !== 1) {
     throw new Error(
@@ -932,6 +934,50 @@ async function exerciseList(browser, delayMs) {
   }
 
   await context.close();
+}
+
+/**
+ * 결정 영수증 문장이 눈에 보이는 자리는 하나다 (#5174, 화면 검수 3회차 L5).
+ *
+ * 결정 직후에는 상세 패널이 컨트롤 자리에서 결과를 말하고(#5092), 그 문장을 한 번 읽어 주는 `role=status` 노드(배너)는
+ * 눈에서만 물러난다(`data-said-in-pane`의 `sr-only`). 원장이 답해 패널이 닫히면(#5116) **같은 노드**가 눈에 보이게 올라와
+ * 결과를 남긴다. 클래스 이름이 아니라 **실제로 그려진 상자**를 잰다: 변형 이름이 틀리거나 CSS가 안 만들어지면 배너 상자가
+ * 전폭으로 남아 여기서 붉어진다. 노드가 갈아 끼워지면 낭독이 두 번 되므로 처음 본 노드에 표식을 달아 두고 나중에 같은
+ * 노드인지 본다.
+ */
+async function assertReceiptDrawnOnce(page, when, where) {
+  const note = page.getByTestId("inbox-decision-note");
+  const wrapper = note.locator("xpath=..");
+  const box = await wrapper.boundingBox();
+  const hidden = box !== null && box.width <= 2 && box.height <= 2;
+  const paneLine = page.getByTestId("inbox-approval-settled");
+  const paneBox = (await paneLine.count()) === 1 ? await paneLine.boundingBox() : null;
+  const paneDrawn = paneBox !== null && paneBox.width > 2 && paneBox.height > 2;
+  if (where === "pane") {
+    if (!hidden || !paneDrawn) {
+      throw new Error(
+        `receipt once (${when}): 패널이 결과를 말하는 동안 배너는 눈에서 물러나야 한다 (배너 상자 ${JSON.stringify(box)}, 패널 줄 ${JSON.stringify(paneBox)})`
+      );
+    }
+    if ((await note.locator("button").count()) !== 0) {
+      throw new Error(`receipt once (${when}): 눈에 보이지 않는 배너에 닫기 단추가 서 있다(초점이 보이지 않는 단추에 앉는다)`);
+    }
+    await note.evaluate((el) => {
+      el.__gateSeenReceipt = true;
+    });
+  } else {
+    if (hidden || box === null || box.width <= 100 || paneDrawn) {
+      throw new Error(
+        `receipt once (${when}): 패널이 닫힌 뒤에는 배너가 눈에 보이는 유일한 자리여야 한다 (배너 상자 ${JSON.stringify(box)}, 패널 줄 ${JSON.stringify(paneBox)})`
+      );
+    }
+    if (!(await note.evaluate((el) => el.__gateSeenReceipt === true))) {
+      throw new Error(`receipt once (${when}): 배너 노드가 갈아 끼워졌다(낭독이 두 번 된다)`);
+    }
+    if ((await note.locator("button").count()) !== 1) {
+      throw new Error(`receipt once (${when}): 눈에 보이는 배너에 닫기 단추가 하나 있어야 한다`);
+    }
+  }
 }
 
 /**
@@ -1018,6 +1064,7 @@ async function exerciseReject(browser, delayMs) {
     throw new Error(`reject receipt: 거부 영수증이 정본이 아니다 (${text})`);
   }
   await assertDecidedRowSettled(page, "after the rejection", "거부를 기록했어요");
+  await assertReceiptDrawnOnce(page, "after the rejection", "pane");
   // 계약 실측: 거부는 같은 트랜잭션에서 실행을 취소하지만 그 UPDATE는
   // `WHERE status='awaiting_approval'` 가드에 걸리면 조용히 빠진다. 무조건 참인
   // 것은 "재개되지 않는다"뿐이다.
@@ -1035,6 +1082,7 @@ async function exerciseReject(browser, delayMs) {
     remainingRows: 1,
     remainingKeyEnd: remaining,
   });
+  await assertReceiptDrawnOnce(page, "after the rejection was answered", "banner");
 
   // 2R L1: 이 영수증은 **그 목록에 대한 답**이다. 탭을 옮기면 가리키던 행은
   // 화면에 없는데 줄만 남아, 멘션 목록 위에 "거부를 기록했습니다"가 떠 있게 된다.
