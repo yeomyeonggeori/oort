@@ -1246,6 +1246,8 @@ impl World {
                         "{base}/v1/workspaces/{workspace}/members/{id}/password-reset"
                     ))
                     .bearer_auth(&owner.jwt)
+                    // ADR-0215 D6: the issuing operator proves their own password.
+                    .json(&json!({"currentPassword": PASSWORD}))
                     .send()
                     .await
                     .expect("issue the reset token");

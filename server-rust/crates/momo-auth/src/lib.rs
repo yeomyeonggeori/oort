@@ -214,7 +214,8 @@ pub use jwt::{
 };
 pub use owner_claim::{
     change_own_password_in_tx, claim_refusal_in_tx, consume_claim_in_tx,
-    issue_password_reset_in_tx, mint_owner_claim_token, normalized_claim_token,
+    consume_pending_password_resets_in_tx, issue_password_reset_in_tx,
+    member_password_matches_in_tx, mint_owner_claim_token, normalized_claim_token,
     resolve_claim_workspace, ClaimInputError, ClaimMutation, ClaimOutcome, ClaimSpecInvalid,
     IssuedPasswordReset, PasswordChangeMutation, PasswordResetIssueError,
     CLAIM_KIND_OWNER_BOOTSTRAP, CLAIM_KIND_PASSWORD_RESET, OWNER_CLAIM_TOKEN_LEN,

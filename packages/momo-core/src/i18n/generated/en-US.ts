@@ -3788,6 +3788,12 @@ export const catalog: MessageCatalog = {
       "value": "Checking the key."
     }
   ],
+  "timeline.approvalExpiry.soon": [
+    {
+      "type": 0,
+      "value": "If you do not decide, the agent has to propose it again."
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,
