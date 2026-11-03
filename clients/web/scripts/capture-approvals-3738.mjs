@@ -319,7 +319,11 @@ async function scenes(browser, origin, scheme) {
     const warn = page.getByTestId("approval-note-expiry-soon");
     await warn.waitFor({ timeout: 5_000 });
     const t = (await warn.textContent()) ?? "";
-    check(`${tag} expiry-soon: 경고 줄 (분이 숫자로)`, /^[78]분 안에 만료돼요/.test(t), t);
+    // #5174 L7: 경고 줄은 결과만 말하고, 남은 시간은 조용한 줄이 한 번만 말한다(카드 글의 시간 말이 정확히 하나).
+    check(`${tag} expiry-soon: 경고 줄은 시간 없이 결과만`, t === "결정하지 않으면 에이전트가 다시 제안해야 해요.", t);
+    const cardText = (await page.getByTestId("agent-card").first().textContent()) ?? "";
+    const timeWords = cardText.match(/\d+\s*분 안에 만료돼요|\d+\s*(?:분|시간|일) 남음/g) ?? [];
+    check(`${tag} expiry-soon: 카드의 시간 말은 하나`, timeWords.length === 1 && timeWords[0] === "10분 안에 만료돼요", JSON.stringify(timeWords));
     check(`${tag} expiry-soon: 승인 컨트롤은 그대로`, (await page.getByTestId("approval-approve").count()) === 1);
     await page.screenshot({ path: shotPath("expiry-soon") });
     await context.close();

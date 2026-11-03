@@ -24,6 +24,7 @@
   "timeline.send.failed": "전송 실패",
   "timeline.send.resend": "다시 보내기",
   "timeline.send.discard": "지우기",
+  "timeline.approvalExpiry.soon": "결정하지 않으면 에이전트가 다시 제안해야 해요.",
   "timeline.workRecord.sourceOort": "oort 기록",
   "timeline.workRecord.sourceAgent": "에이전트 보고",
   "timeline.workRecord.sourceComputer": "내 컴퓨터",

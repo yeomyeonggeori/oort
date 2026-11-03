@@ -3315,6 +3315,12 @@ export const catalog: MessageCatalog = {
       "value": "키를 확인하는 중이에요."
     }
   ],
+  "timeline.approvalExpiry.soon": [
+    {
+      "type": 0,
+      "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,
