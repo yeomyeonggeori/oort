@@ -20,6 +20,7 @@ import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
+import { useApprovalBlockedLine } from "@/features/common/blockedLines";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { MessageBody } from "@/features/timeline/MessageBody";
@@ -366,6 +367,8 @@ export function InboxDetail({
   const settledReceipt = useSettledApproval(entry.task?.approvalId);
   const settledLine =
     settledReceipt === null ? null : settledStatusLine(settledReceipt.status);
+  // 막았을 때 결정 단추 자리의 한 줄: 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5239). 타임라인 카드와 같은 문장이다.
+  const blockedLine = useApprovalBlockedLine();
   const control =
     entry.task === undefined
       ? null
@@ -495,8 +498,7 @@ export function InboxDetail({
                 className="text-meta text-ink-muted"
                 data-testid="inbox-approval-offline"
               >
-                연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 여기서
-                승인하거나 거부할 수 있어요.
+                {blockedLine}
               </p>
             )}
           </div>

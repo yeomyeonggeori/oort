@@ -593,7 +593,7 @@
     "clients/web/src/features/huddles/useHuddle.ts": 18,
     "clients/web/src/features/inbox/ApprovalsLiveSync.tsx": 2,
     "clients/web/src/features/inbox/FeedRow.tsx": 13,
-    "clients/web/src/features/inbox/InboxDetail.tsx": 59,
+    "clients/web/src/features/inbox/InboxDetail.tsx": 58,
     "clients/web/src/features/inbox/InboxHotkeys.tsx": 2,
     "clients/web/src/features/inbox/InboxRoute.tsx": 100,
     "clients/web/src/features/inbox/LocalPaneInbox.tsx": 5,
