@@ -4338,6 +4338,18 @@ export const catalog: MessageCatalog = {
       "value": "Working agents"
     }
   ],
+  "timeline.approval.reproposeBusy": [
+    {
+      "type": 0,
+      "value": "There's already text in the message box, so it wasn't added. Clear it and tap again."
+    }
+  ],
+  "timeline.approval.reproposeSeeded": [
+    {
+      "type": 0,
+      "value": "Added to the message box. Send it and the agent will propose it again."
+    }
+  ],
   "timeline.approvalExpiry.soon": [
     {
       "type": 0,

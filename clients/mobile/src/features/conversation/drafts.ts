@@ -186,6 +186,61 @@ export function saveDraft(
   }
 }
 
+// -----------------------------------------------------------------------------
+// 밖에서 심는 글 (#5171)
+//
+// 승인 카드의 「다시 요청」은 입력창에 초안을 **넣을 뿐 보내지 않는다**(웹 `seedComposerText` 와 같은 규칙: 멘션 한 줄이라도
+// 사람의 이름으로 나가는 메시지이고, 보내기 전에 한 줄을 덧붙일 수 있어야 한다). 입력창은 첫 렌더와 `draftKey` 가 바뀔 때만
+// 저장소를 읽으므로, 이미 마운트된 입력창에는 저장만 해서는 닿지 않는다 — 저장과 알림을 한 함수에서 낸다.
+//
+// 어느 입력창에 넣는가는 부른 쪽의 몫이다: 카드가 선 **그 화면의** 입력창이어야 한다(스레드 화면이면 스레드의 `threadDraftKey`,
+// 채널·DM 이면 `channelDraftKey`). 눈에 안 보이는 입력창에 글을 넣는 동작은 결과가 화면 밖에 떨어지는 행동이다.
+// -----------------------------------------------------------------------------
+
+/** 마운트된 입력창이 심기를 받는다. 비어 있어서 받았으면 `true`, 쓰던 글이 있어서 거절했으면 `false`. */
+type SeedListener = (text: string) => boolean;
+
+const seedListeners = new Map<string, Set<SeedListener>>();
+
+/** 이 자리의 입력창이 밖에서 심는 글을 듣는다. 반환값은 멈추는 함수다. */
+export function subscribeDraftSeed(
+  key: string,
+  listener: SeedListener,
+): () => void {
+  let listeners = seedListeners.get(key);
+  if (listeners === undefined) {
+    listeners = new Set();
+    seedListeners.set(key, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    const current = seedListeners.get(key);
+    if (current === undefined) return;
+    current.delete(listener);
+    if (current.size === 0) seedListeners.delete(key);
+  };
+}
+
+/**
+ * 빈 입력창에만 심는다. 쓰다 만 글이 있으면 덮지 않고 `false`다(사람의 글이 먼저다). 이 자리에 마운트된 입력창이 있으면 그
+ * 입력창의 글이 사실이고(저장소는 키 모양이 든 글을 적지 않는다), 없으면 저장된 초안이 사실이다. 받았으면 저장한다 — 입력창이
+ * 꺼져 있어도 다음에 열 때 그 자리에 있다.
+ */
+export function seedDraft(
+  key: string,
+  text: string,
+  nowMs: number = Date.now(),
+): boolean {
+  if (text.trim() === '') return false;
+  const mounted = [...(seedListeners.get(key) ?? [])];
+  const accepted =
+    mounted.length > 0
+      ? mounted.map(listener => listener(text)).some(Boolean)
+      : readDraft(key, nowMs).trim() === '';
+  if (accepted) saveDraft(key, text, nowMs);
+  return accepted;
+}
+
 /** 보냈다. 이 자리의 초안은 이제 없다. */
 export function clearDraft(key: string, nowMs: number = Date.now()): void {
   try {
