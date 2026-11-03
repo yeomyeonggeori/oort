@@ -124,6 +124,8 @@ export function useRestoredSession(): SessionLifecycle {
     let cancelled = false;
     let settled = false;
     setStatus("restoring");
+    // 「복원 중」을 풀고 로그인 화면으로 넘기는 한 줄: 시간 예산과 아래 정리가 함께 쓴다.
+    const leaveRestoring = () => setStatus("anonymous");
 
     // DESK-1: the screen is not allowed to wait for this. `restoreSession()` is
     // one `/v1/auth/refresh` rotation bounded only by REQUEST_TIMEOUT_MS
@@ -134,7 +136,7 @@ export function useRestoredSession(): SessionLifecycle {
     // in rather than making them retype a password they never needed to.
     const release = setTimeout(() => {
       if (cancelled || settled) return;
-      setStatus("anonymous");
+      leaveRestoring();
       // 저장된 로그인은 그대로인데 시간 예산이 지났다: 로그인 화면이 그 사실을 말한다(#5221). 늦게 닿으면 아래에서 걷힌다.
       markBootUnreachableNotice();
     }, BOOT_RESTORE_BUDGET_MS);
@@ -161,6 +163,11 @@ export function useRestoredSession(): SessionLifecycle {
     return () => {
       cancelled = true;
       clearTimeout(release);
+      // 끝나지 못한 시도가 버려지면 화면도 함께 풀린다(#5244). 죽은 토큰이라 `restoreSession()`이 저장된 로그인을 지우면 `resumable`이 꺼지고,
+      // 이 정리가 `.then`도 시간 예산 타이머도 걷는다. 실서버의 401은 코어가 지우기 직전에 세우는 `markAuthExpired()`와 아래 만료 효과가
+      // 먼저 화면을 넘기지만, 신호 없이 지우고 null을 주는 복원(`restoreSession()` 문서 그대로)은 이 한 줄이 없으면 아무도 풀지 않는
+      // 「복원 중」이 된다. 끝난 시도(`settled`)의 상태는 `.then`·`.catch`가 이미 정했으니 건드리지 않는다.
+      if (!settled) leaveRestoring();
     };
   }, [resumable, restoreHeld]);
 
