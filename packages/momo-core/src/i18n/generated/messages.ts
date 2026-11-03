@@ -59,9 +59,7 @@ export const messageKeys = [
   "connection.load.conversationTitle",
   "connection.load.deviceKeysTitle",
   "connection.load.dmApprovalTitle",
-  "connection.load.enabledToolsTitle",
   "connection.load.hermesStatusTitle",
-  "connection.load.hostListTitle",
   "connection.load.inboxMoreTitle",
   "connection.load.inboxTitle",
   "connection.load.linkedDevicesTitle",
@@ -74,7 +72,6 @@ export const messageKeys = [
   "connection.load.reasonServer",
   "connection.load.reasonUnknown",
   "connection.load.sentence",
-  "connection.load.teamExpressionsTitle",
   "connection.load.threadTitle",
   "connection.send.failed",
   "connection.send.reasonOffline",
@@ -849,9 +846,7 @@ export const argumentSpecs = {
   "connection.load.conversationTitle": {},
   "connection.load.deviceKeysTitle": {},
   "connection.load.dmApprovalTitle": {},
-  "connection.load.enabledToolsTitle": {},
   "connection.load.hermesStatusTitle": {},
-  "connection.load.hostListTitle": {},
   "connection.load.inboxMoreTitle": {},
   "connection.load.inboxTitle": {},
   "connection.load.linkedDevicesTitle": {},
@@ -867,7 +862,6 @@ export const argumentSpecs = {
     "reason": "string",
     "title": "string"
   },
-  "connection.load.teamExpressionsTitle": {},
   "connection.load.threadTitle": {},
   "connection.send.failed": {},
   "connection.send.reasonOffline": {},
@@ -1801,9 +1795,7 @@ export interface MessageArgs {
   "connection.load.conversationTitle": Record<string, never>;
   "connection.load.deviceKeysTitle": Record<string, never>;
   "connection.load.dmApprovalTitle": Record<string, never>;
-  "connection.load.enabledToolsTitle": Record<string, never>;
   "connection.load.hermesStatusTitle": Record<string, never>;
-  "connection.load.hostListTitle": Record<string, never>;
   "connection.load.inboxMoreTitle": Record<string, never>;
   "connection.load.inboxTitle": Record<string, never>;
   "connection.load.linkedDevicesTitle": Record<string, never>;
@@ -1816,7 +1808,6 @@ export interface MessageArgs {
   "connection.load.reasonServer": Record<string, never>;
   "connection.load.reasonUnknown": Record<string, never>;
   "connection.load.sentence": { reason: string; title: string };
-  "connection.load.teamExpressionsTitle": Record<string, never>;
   "connection.load.threadTitle": Record<string, never>;
   "connection.send.failed": Record<string, never>;
   "connection.send.reasonOffline": Record<string, never>;

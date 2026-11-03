@@ -444,22 +444,10 @@ export const catalog: MessageCatalog = {
       "value": "1:1 대화 목록을 불러오지 못했어요"
     }
   ],
-  "connection.load.enabledToolsTitle": [
-    {
-      "type": 0,
-      "value": "도구 목록을 불러오지 못했어요"
-    }
-  ],
   "connection.load.hermesStatusTitle": [
     {
       "type": 0,
       "value": "같은 서버의 Hermes 상태를 불러오지 못했어요"
-    }
-  ],
-  "connection.load.hostListTitle": [
-    {
-      "type": 0,
-      "value": "코드 실행 호스트 목록을 불러오지 못했어요"
     }
   ],
   "connection.load.inboxMoreTitle": [
@@ -540,12 +528,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "reason"
-    }
-  ],
-  "connection.load.teamExpressionsTitle": [
-    {
-      "type": 0,
-      "value": "팀 그림을 불러오지 못했어요"
     }
   ],
   "connection.load.threadTitle": [

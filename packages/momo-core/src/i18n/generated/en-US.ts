@@ -486,22 +486,10 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the 1:1 conversation list"
     }
   ],
-  "connection.load.enabledToolsTitle": [
-    {
-      "type": 0,
-      "value": "Couldn't load the tool list"
-    }
-  ],
   "connection.load.hermesStatusTitle": [
     {
       "type": 0,
       "value": "Couldn't load the status of Hermes on this server"
-    }
-  ],
-  "connection.load.hostListTitle": [
-    {
-      "type": 0,
-      "value": "Couldn't load the code execution hosts"
     }
   ],
   "connection.load.inboxMoreTitle": [
@@ -582,12 +570,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 1,
       "value": "reason"
-    }
-  ],
-  "connection.load.teamExpressionsTitle": [
-    {
-      "type": 0,
-      "value": "Couldn't load the team emoji"
     }
   ],
   "connection.load.threadTitle": [
