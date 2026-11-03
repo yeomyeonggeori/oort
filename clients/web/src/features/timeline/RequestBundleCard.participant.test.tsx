@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, within } from "@testing-library/react";
 import "@/lib/coreHost";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
 import type { Message } from "@momo/core/lib/api";
@@ -24,7 +27,8 @@ const AGENT = "019f9a01-0000-7000-8000-000000000401";
 const TARGET_LINE = "박연구원 님의 허락을 기다려요";
 const PEER_LINE = "이도현 님의 허락을 기다려요";
 const UNNAMED_LINE = "다른 참여자의 허락을 기다려요";
-const OFFLINE_LINE = "연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요.";
+// The decider's blocked line says the cause (#5239): the device is offline here, so the sentence starts with that.
+const OFFLINE_LINE = "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요.";
 
 function member(id: string, kind: "human" | "agent", displayName: string) {
   return { id, workspaceId: WORKSPACE_ID, kind, status: "active", role: "member", displayName, handle: displayName, channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0 };
@@ -61,15 +65,19 @@ function draw(viewer: string, options: { message?: Message; directory?: typeof D
   const card = agentCardModel(options.message ?? consentCard(TARGET, "a1"));
   if (card === null) throw new Error("no card for these props");
   return render(
-    <SessionProvider value={sessionFor(viewer, options.connStatus)}>
-      <AgentCard card={card} directory={options.directory ?? DIRECTORY} viewerMemberId={viewer} />
-    </SessionProvider>
+    <LocaleProvider locale={ko}>
+      <SessionProvider value={sessionFor(viewer, options.connStatus)}>
+        <AgentCard card={card} directory={options.directory ?? DIRECTORY} viewerMemberId={viewer} />
+      </SessionProvider>
+    </LocaleProvider>
   );
 }
 
 const WAITING = /허락을 기다려요/gu;
 const waitingLines = (host: HTMLElement) => host.textContent?.match(WAITING) ?? [];
 
+let ko: AppLocale;
+beforeAll(async () => { ko = await koreanLocale(); });
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   localStorage.clear(); sessionStorage.clear(); resetSettledApprovalsForTest();
