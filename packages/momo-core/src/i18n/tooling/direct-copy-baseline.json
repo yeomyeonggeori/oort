@@ -165,7 +165,7 @@
     "clients/mobile/src/features/expressions/ExpressionProvider.tsx": 4,
     "clients/mobile/src/features/expressions/ExpressionText.tsx": 1,
     "clients/mobile/src/features/expressions/TeamExpressionPicker.tsx": 57,
-    "clients/mobile/src/features/expressions/expressionViews.ts": 10,
+    "clients/mobile/src/features/expressions/expressionViews.ts": 5,
     "clients/mobile/src/features/expressions/makeFlow.ts": 15,
     "clients/mobile/src/features/expressions/makePreviewModel.ts": 2,
     "clients/mobile/src/features/expressions/photoPicker.ts": 12,

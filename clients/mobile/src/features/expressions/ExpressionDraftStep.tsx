@@ -2,14 +2,20 @@ import {
   expressionChoice,
   expressionDraftCard,
 } from '@momo/core/features/expressions/cards';
-import type {
-  ExpressionChoice,
-  ExpressionDraft,
+import {
+  LEGACY_EXPRESSION_KIND,
+  recommendedKindForDraft,
+} from '@momo/core/features/expressions/kind';
+import {
+  EXPRESSION_KINDS,
+  type ExpressionChoice,
+  type ExpressionDraft,
+  type ExpressionKind,
 } from '@momo/core/features/expressions/types';
 import React, {useEffect, useRef, useState} from 'react';
 import {Image, StyleSheet, Text, View} from 'react-native';
 import {OutlineButton, PrimaryButton, Sentence} from '../../design/atoms';
-import {GroupCard, ListRow} from '../../design/sheetParts';
+import {ChoiceRow, GroupCard, GroupLabel, ListRow} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {
   ds2Radius,
@@ -22,7 +28,10 @@ import {useReduceMotion} from '../../lib/useReduceMotion';
 import {LiveLine} from './ExpressionChapter';
 import {useExpressions} from './ExpressionProvider';
 import {pickAlbumPhoto, photoIssueOf} from './photoPicker';
-import {useExpressionMessages} from './useExpressionMessages';
+import {
+  useExpressionMessages,
+  type PlainMessageKey,
+} from './useExpressionMessages';
 
 // =============================================================================
 // 가져오기의 둘째 걸음: 받아 온 그림(초안)을 보고 팀 보관함에 등록한다 (#4891).
@@ -32,9 +41,30 @@ import {useExpressionMessages} from './useExpressionMessages';
 //   · 받지 못한 그림(`manual_upload_required`)의 사유 문장은 코어(`expressionDraftCard().line`)가 말한 그대로다.
 //     폰이 사유를 다시 지어 말하지 않는다.
 //   · 받지 못했으면 같은 초안에 직접 올릴 수 있다(`PUT …/expression-drafts/{id}/file`).
+//   · 종류(`emoji` 작은 팀 이모지 · `sticker` 큰 이모티콘)는 **등록하는 순간 사람이 정한다**(ADR-0218 증보 4 §10 J3, #5112).
+//     코어 `recommendedKindForDraft`(서버가 곧 등록할 큰 그림에 쓰는 규칙과 같다)로 미리 골라 보이고, 사람이 바꾸면 그 값이
+//     `Choice.kind` 로 간다. 고른 값은 **그 그림의 핀**(개정·`large` 해시)에 묶여서 다른 그림으로 바뀌면 옛 선택이 따라가지 않고
+//     추천이 다시 선다. 문장·순서(종류 · 이모지 · 스티커 · 설명 · 「골라 뒀어요」)는 웹 `ExpressionDraftCard` 와 같은 사전 키다.
+//
+// 이 단계는 가져오기·사진 길이 함께 쓰는 폰의 유일한 「등록 승인」 자리다. 폰에는 에이전트 후보(`expression.create`)를 받는 전용
+// 승인 카드가 아직 없다(웹은 `AgentCard` 가 `ExpressionApprovalCard` → `ExpressionDraftCard` 로 같은 부품을 쓴다) — 그 카드가
+// 생기면 이 단계를 그대로 끼워 같은 고르기를 얻는다.
 // =============================================================================
 
 const PREVIEW_POINTS = 160;
+
+/** 종류 줄의 시험·Maestro 이름(`expression-draft-kind-emoji`·`-sticker`). */
+const kindRowID = (value: ExpressionKind) => `expression-draft-kind-${value}`;
+
+/** 종류 이름·설명의 사전 키 — 낱말은 이 파일에 없다(직접 문구 장부). 이름은 코어의 목록(`EXPRESSION_KINDS`)에서 온다. */
+const KIND_LABEL = {
+  emoji: 'expressions.kind.emoji',
+  sticker: 'expressions.kind.sticker',
+} as const satisfies Record<ExpressionKind, PlainMessageKey>;
+const KIND_HINT = {
+  emoji: 'expressions.kind.hintEmoji',
+  sticker: 'expressions.kind.hintSticker',
+} as const satisfies Record<ExpressionKind, PlainMessageKey>;
 
 export function ExpressionDraftStep({
   draft,
@@ -70,6 +100,11 @@ export function ExpressionDraftStep({
   const reduceMotion = useReduceMotion();
   const [now, setNow] = useState(Date.now());
   const [viewed, setViewed] = useState<string | null>(null);
+  // 사람이 고른 종류는 **그 그림의 핀**에 묶인다(웹 초안 카드와 같다): 그림이 바뀌면 핀이 바뀌어 옛 선택이 따라가지 않는다.
+  const [chosen, setChosen] = useState<{
+    pin: string;
+    kind: ExpressionKind;
+  } | null>(null);
   const [rights, setRights] = useState(false);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,8 +113,13 @@ export function ExpressionDraftStep({
   );
   const lock = useRef(false);
   const card = expressionDraftCard(draft, now);
-  const choice = expressionChoice(draft, now);
-  const pin = choice ? `${choice.draftId}:${choice.revision}:${choice.sha256}` : null;
+  const base = expressionChoice(draft, now);
+  const pin = base ? `${base.draftId}:${base.revision}:${base.sha256}` : null;
+  // 사람이 고르기 전에는 서버가 같은 규칙으로 정할 추천을 미리 골라 보인다. 보낸 값이 곧 저장되는 값이다.
+  const explicit = chosen !== null && chosen.pin === pin ? chosen.kind : null;
+  const kind =
+    explicit ?? recommendedKindForDraft(draft) ?? LEGACY_EXPRESSION_KIND;
+  const choice = base ? {...base, kind} : null;
   const blocked = working || offline;
 
   useEffect(() => {
@@ -215,6 +255,35 @@ export function ExpressionDraftStep({
       ) : null}
       {card.canApprove ? (
         <>
+          <View
+            accessibilityRole="radiogroup"
+            accessibilityLabel={formatMessage('expressions.kind.legend')}
+            style={styles.kind}
+            testID="expression-draft-kind">
+            <GroupLabel>{formatMessage('expressions.kind.legend')}</GroupLabel>
+            <GroupCard>
+              {EXPRESSION_KINDS.map(value => (
+                <ChoiceRow
+                  key={value}
+                  title={formatMessage(KIND_LABEL[value])}
+                  selected={kind === value}
+                  disabled={blocked}
+                  onPress={() => {
+                    if (pin) setChosen({pin, kind: value});
+                  }}
+                  testID={kindRowID(value)}
+                />
+              ))}
+            </GroupCard>
+            <Sentence style={styles.meta} testID="expression-draft-kind-hint">
+              {formatMessage(KIND_HINT[kind])}
+            </Sentence>
+            {explicit === null ? (
+              <Sentence style={styles.meta} testID="expression-draft-kind-auto">
+                {formatMessage('expressions.kind.autoNote')}
+              </Sentence>
+            ) : null}
+          </View>
           <GroupCard>
             <ListRow
               title={formatMessage('expressions.draft.rights')}
@@ -273,6 +342,8 @@ function hostOf(link: string): string | null {
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     root: {gap: space.md},
+    // 라벨·카드·설명이 한 묶음이다 — 가져오기 장의 「얼굴」 묶음(`section`)과 같은 간격.
+    kind: {gap: space.xs},
     titleRow: {
       flexDirection: 'row',
       alignItems: 'baseline',
