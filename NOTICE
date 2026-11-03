@@ -41,8 +41,8 @@ legal/generated/MOBILE_INTL_NOTICES.txt (ADR-0213, #4833). That addition bundle
 and packages/momo-core/NOTICE must accompany phone redistribution. Other direct phone dependencies an ADR
 introduced are named in legal/THIRD_PARTY_NOTICES.md ("Phone client
 direct additions"), currently expo-blur (MIT, ADR-0189), expo-image-manipulator (MIT, ADR-0189
-증보 2), expo-media-library (MIT, ADR-0168 증보 1), expo-haptics and expo-glass-effect
-(MIT, #3580) and the Lucide
+증보 2), expo-media-library (MIT, ADR-0168 증보 1), expo-video (MIT, ADR-0168 증보 2),
+expo-haptics and expo-glass-effect (MIT, #3580) and the Lucide
 icon paths (ISC) rasterized into clients/mobile/src/design/icons.
 Direct desktop dependencies an ADR introduced are named there too
 ("Desktop client direct additions"), currently portable-pty (MIT,
