@@ -143,6 +143,10 @@ import {NO_UNFURLS} from './useMessageUnfurls';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {SendFailureActions} from './SendFailureActions';
+import {
+  sendFailureReasonKey,
+  type SendFailureKind,
+} from '@momo/core/features/connection/sendFailure';
 import {ReplyHomeLine} from './ReplyHomeLine';
 import {replyHomeCopy} from '@momo/core/features/timeline/replyHomeCopy';
 import {replyHomeLineOf} from '@momo/core/features/timeline/threadHome';
@@ -4210,6 +4214,7 @@ export function PendingRow({
   replyHome,
   onResend,
   onDiscard,
+  failureKind = null,
   arrivalSurface = ARRIVAL_SURFACE_CHANNEL,
 }: {
   pending: PendingMessage;
@@ -4238,6 +4243,11 @@ export function PendingRow({
   onResend?: (clientMsgId: string) => void;
   /** 보내지 못한 이 행을 이 기기에서 지운다(#5210). 없으면 X 를 그리지 않는다. */
   onDiscard?: (clientMsgId: string) => void;
+  /**
+   * 못 보낸 이유의 종류(#5222, 코어 `sendFailureKind`): 오프라인 · 서버에 닿지 못함 · 서버가 거절. 그 종류의 완결된 문장을 말한다. 종류를 모르면
+   * (`null`) 지금까지처럼 「전송 실패」만 말한다. 상태 코드·서버 원문은 어디에도 없다.
+   */
+  failureKind?: SendFailureKind | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
@@ -4389,7 +4399,11 @@ export function PendingRow({
         ) : null}
         {failed ? (
           <View style={styles.failedRow}>
-            <Text style={styles.failedText}>{formatMessage('timeline.send.failed')}</Text>
+            <Text style={styles.failedText} testID="pending-failed-reason">
+              {failureKind === null
+                ? formatMessage('timeline.send.failed')
+                : formatMessage(sendFailureReasonKey(failureKind))}
+            </Text>
             <SendFailureActions
               onResend={onResend ? () => onResend(pending.clientMsgId) : undefined}
               onDiscard={onDiscard ? () => onDiscard(pending.clientMsgId) : undefined}

@@ -748,7 +748,10 @@ describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () 
     // ③ 헤더 부제가 활동 줄과 같은 말을 한다. 「연결 중…」이면 같은 화면에서 두
     //    문장이 서로를 부정한다 (M3).
     expect(screen.getByTestId('conversation-title').parent).toBeTruthy();
-    expect(screen.getByText('연결이 끊겼습니다')).toBeTruthy();
+    // 띠는 「끊김」 단계다(행동이 있다). 어떤 원인 문장인지는 이 시험의 주제가 아니다: 이 픽스처 서버는 일부 요청을 응답 없이 실패시켜 코어 모델이
+    // 「실시간 연결이 끊겼어요」 대신 「연결에 문제가 있어요」(알 수 없음)로 읽을 수 있다(#5222). 원인별 문장은 `connectionBannerReconnect` 가 잰다.
+    const banner = screen.getByTestId('connection-banner');
+    expect(within(banner).getByTestId('connection-banner-action')).toBeTruthy();
     expect(screen.queryByText('연결 중…')).toBeNull();
   });
 });

@@ -16,7 +16,11 @@ import {
   type RealtimePolicyState,
   type RealtimeSignal,
 } from './backgroundPolicy';
-import {createConnectionDisplay, DISPLAY_GRACE_MS} from './connectionDisplay';
+import {
+  createConnectionDisplay,
+  DISPLAY_GRACE_MS,
+  type DisplayEvent,
+} from './connectionDisplay';
 import {recordRealtimeDiagnostic} from './diagnostics';
 
 // =============================================================================
@@ -98,12 +102,12 @@ export interface RealtimeTransportOptions {
    */
   onStatus?: (status: RealtimeStatus) => void;
   /**
-   * What the BAND may say (#4949): `connected` is silence. Same as `onStatus` except that a
-   * gap is silent for its first second (`CONNECTING_BAND_DELAY_MS`) — a reconnect that is
-   * over by then never puts a sentence on the screen. `onStatus` is not delayed: readers
-   * that ask whether the socket is live still hear `connecting` at once.
+   * 소켓이 **밖에서 받은** 사건 — 날것의 상태(`raw`), 다시 열기(`resume`), 끝남(`terminal`)을 일어난 그대로 알린다
+   * (#5222, #5201 S-D). 사람에게 말하는 판정(첫 1초 침묵·「연결 중」·「끊김」의 원인·복구 표시)은 코어 연결 상태 모델이
+   * 하고, 폰의 `ConnectionProvider` 가 이 사건을 그 모델에 먹인다. 10초 마감이 만든 `grace-expired` 는 이 파일 안의 시계가
+   * 낸 결과라 알리지 않는다(모델은 자기 시계로 판정한다).
    */
-  onBand?: (band: RealtimeStatus) => void;
+  onSocketEvent?: (event: DisplayEvent) => void;
   /**
    * Called after every policy transition, with the state that resulted (goal
    * RN-T2).
@@ -139,7 +143,7 @@ export function createRealtimeTransport(
   const {
     url,
     onStatus,
-    onBand,
+    onSocketEvent,
     onPolicy,
     now = Date.now,
     getToken: fetchToken = () => fetchFreshRealtimeToken(now()),
@@ -156,8 +160,12 @@ export function createRealtimeTransport(
   const display = createConnectionDisplay(
     status => onStatus?.(status),
     DISPLAY_GRACE_MS,
-    band => onBand?.(band),
   );
+  /** 읽는 쪽의 `shown` 시계에 먹이고, 같은 사건을 연결 상태 모델에도 알린다. */
+  const pushSocketEvent = (event: DisplayEvent): void => {
+    display.push(event);
+    onSocketEvent?.(event);
+  };
 
   // Every token centrifuge-js presents comes through here — the first connect,
   // a 109 retry and the scheduled refresh alike.
@@ -216,7 +224,7 @@ export function createRealtimeTransport(
     next.on('connected', () => {
       connectedAt = now();
       recordRealtimeDiagnostic({at: Date.now(), kind: 'connected'});
-      display.push({kind: 'raw', status: 'connected'});
+      pushSocketEvent({kind: 'raw', status: 'connected'});
       clearRetryTimer();
       dispatch({kind: 'connected'});
     });
@@ -257,7 +265,7 @@ export function createRealtimeTransport(
       code: ctx?.code,
       lifetimeMs,
     });
-    display.push({kind: 'raw', status});
+    pushSocketEvent({kind: 'raw', status});
   }
 
   /** Reopen on the SAME client: even `connected` can be a half-open socket
@@ -275,7 +283,7 @@ export function createRealtimeTransport(
     // An explicit recovery supersedes a token-ending retry that is still waiting.
     clearRetryTimer();
     const current = ensureClient();
-    display.push({kind: 'resume'});
+    pushSocketEvent({kind: 'resume'});
     // Do not duplicate an opening token request/handshake. Its token source
     // refreshes access first, and discards responses held across suspension.
     if (String(current.state) === 'connecting' && attemptInFlight(current)) return;
@@ -374,7 +382,7 @@ export function createRealtimeTransport(
           break;
         case 'terminal-hold':
           // Nothing will reopen it, so there is no gap to wait ten seconds out.
-          display.push({kind: 'terminal'});
+          pushSocketEvent({kind: 'terminal'});
           break;
         default:
           break;

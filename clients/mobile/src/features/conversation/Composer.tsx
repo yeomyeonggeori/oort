@@ -1134,6 +1134,7 @@ export function Composer({
   viewerHumanId,
   dmHint,
   offline,
+  offlineNote,
   draftKey,
   onSend,
   onTyping,
@@ -1205,6 +1206,12 @@ export function Composer({
    * 글이 그 자리에 그대로 있어야 한다.
    */
   offline?: boolean;
+  /**
+   * `offline` 일 때 컴포저 위 한 줄(과 보내기·첨부 단추의 낭독 힌트)이 말하는 문장. 막은 **원인**(기기 오프라인 · 서버에 닿지 못함)이
+   * 문장을 가르므로(#5222, 연결 상태 모델의 `composerNote`) 화면이 사전에서 읽어 준다. 없으면 예전 한 문장
+   * (`COMPOSER_OFFLINE_COPY`)이다 — 연결 상태 모델이 없는 하네스·시험은 그대로 이 문장을 읽는다.
+   */
+  offlineNote?: string;
   /**
    * 이 컴포저의 초안이 앉는 자리 (`drafts.ts`). 없으면 초안을 쓰지도 읽지도
    * 않는다 — 이름 없는 자리에 남긴 글은 나중에 누구의 것인지 답할 수 없다.
@@ -2520,7 +2527,7 @@ export function Composer({
 
       {offline ? (
         <Text style={styles.offline} testID="composer-offline">
-          {COMPOSER_OFFLINE_COPY}
+          {offlineNote ?? COMPOSER_OFFLINE_COPY}
         </Text>
       ) : null}
 
@@ -2624,7 +2631,7 @@ export function Composer({
             accessibilityLabel={ATTACH_COPY.attach}
             accessibilityHint={
               offline
-                ? COMPOSER_OFFLINE_COPY
+                ? offlineNote ?? COMPOSER_OFFLINE_COPY
                 : attachmentSurface.drafts.length >=
                     MAX_ATTACHMENTS_PER_MESSAGE
                   ? `첨부는 ${MAX_ATTACHMENTS_PER_MESSAGE}개까지 고를 수 있어요`
@@ -2829,7 +2836,9 @@ export function Composer({
           // 안 들린다. 위의 문장은 별개의 요소라 순서대로 훑어야 닿는데, 버튼에
           // 먼저 도착하는 길(로터·직접 탐색)이 있다. 이유는 버튼이 함께 든다.
           accessibilityHint={
-            offline ? COMPOSER_OFFLINE_COPY : attachmentBlockCopy ?? undefined
+            offline
+              ? offlineNote ?? COMPOSER_OFFLINE_COPY
+              : attachmentBlockCopy ?? undefined
           }
           accessibilityState={{disabled: !canSend}}
           disabled={!canSend}
