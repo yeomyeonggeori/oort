@@ -1,6 +1,7 @@
 import { Check, ChevronLeft, ChevronRight, Copy, Minus, Plus, X } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { cn } from "@/design/lib/cn";
+import { applyKeyboardModality } from "@/design/focusModality";
 import {useStageHero, type StageSource} from "./useStageHero";
 import { Button } from "@/design/ui/button";
 import { useInlineConfirm } from "@/design/ui/inlineConfirm";
@@ -306,6 +307,7 @@ export function ImageLightbox({
   images,
   selectedId,
   opener,
+  openedByKeyboard = false,
   source,
   offline,
   senderName,
@@ -319,6 +321,12 @@ export function ImageLightbox({
   images: MessageAttachment[];
   selectedId: string | null;
   opener: DialogFocusTarget | null;
+  /**
+   * 열기 단추를 키보드(Enter·Space)로 눌렀는가. 그러면 첫 초점(닫기)에 초점 링이 선다(#5275 H1). Enter·Space는 앱의 입력 방식 표지
+   * (`focusModality.ts`)를 올리지 않아서, 마우스로 열었다 Esc로 닫고 같은 사진에서 Enter로 다시 여는 길처럼 표지가 아직 `pointer`인
+   * 채로 열리면 링이 걷힌 채 첫 초점이 선다. 마우스로 열면 `false`라 링이 서지 않는다.
+   */
+  openedByKeyboard?: boolean;
   source?: StageSource;
   offline: boolean;
   /** 위 왼쪽 글자 블록의 첫 줄(보낸 사람). 모르면 파일 이름이 대신 선다. */
@@ -368,8 +376,19 @@ export function ImageLightbox({
       else if (selected === null) noHeroContent();
     }
   }, [stageState.phase, enterHero, noHeroContent, photoNode, selected]);
+  // 첫 초점의 입구는 Radix FocusScope가 열릴 때 한 번 부르는 자리(아래 `onOpenAutoFocus`) 하나다(#5275 B1). 그 전에 이 효과가 먼저
+  // 닫기를 잡으면 안 된다: 움직임 줄이기에서는 `interactive`가 대화상자가 서는 같은 틱에 참이 되어, 이 효과가 FocusScope가 자기
+  // `container`를 알기 전에 돌고 그 `focusin`은 아직 `container`가 없는 리스너가 삼킨다. 그러면 Radix가 「마지막으로 안에 있던
+  // 초점」을 기억하지 못해서(비어 있다), 초점이 밖으로 나가도 되돌릴 곳을 모른다. Chromium은 탭 순서가 안에서 돌아 드러나지 않았고,
+  // WebKit은 단추를 건너뛰는 탭 순서라 Shift+Tab 한 번에 무대 뒤 입력창으로 샜다. `scopeReady`는 FocusScope가 준비됐다는 알림이고,
+  // 이 효과는 그 뒤에만 움직인다: 펼침이 끝나 크롬이 보일 때(`interactive`) 닫기로 옮긴다.
+  const scopeReady = useRef(false);
   useEffect(() => {
-    if (open && interactive) closeRef.current?.focus({preventScroll: true});
+    if (!open) {
+      scopeReady.current = false;
+      return;
+    }
+    if (interactive && scopeReady.current) closeRef.current?.focus({preventScroll: true});
   }, [open, interactive]);
   const photoRef = useCallback((node: HTMLImageElement | null) => {
     zoomPhotoRef(node);
@@ -409,7 +428,15 @@ export function ImageLightbox({
         className="lightbox-panel left-0 top-0 h-full max-w-none translate-x-0 gap-0 overflow-hidden rounded-none border-0 bg-transparent"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          closeRef.current?.focus();
+          // 키보드로 열었으면 링이 서게 입력 방식 표지를 올린다(H1): 표지가 `pointer`인 채면 `:focus-visible`이어도 링이 걷힌다.
+          if (openedByKeyboard) applyKeyboardModality(document);
+          scopeReady.current = true;
+          // 크롬이 이미 보이면 닫기가, 펼치는 중이라 숨어 있으면(visibility: hidden은 초점을 받지 못한다) 대화상자 자신이 초점을 받는다.
+          // Radix가 탭할 곳이 없을 때 하는 것과 같다. 열린 뒤 초점이 열기 단추(무대 뒤)에 남아 Tab이 밖으로 새는 틈이 없어지고,
+          // 크롬이 서면 위 효과가 닫기로 옮긴다.
+          const close = closeRef.current;
+          close?.focus({preventScroll: true});
+          if (document.activeElement !== close) hero.panel.current?.focus({preventScroll: true});
         }}
         onEscapeKeyDown={(event) => {
           event.preventDefault();
