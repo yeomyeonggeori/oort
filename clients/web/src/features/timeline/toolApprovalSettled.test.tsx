@@ -8,7 +8,7 @@ import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
 import { presentableRows } from "@momo/core/features/timeline/toolCallSettle";
 import { agentRunProgressFromWire, type AgentRunProgress, type Message } from "@momo/core/lib/api";
-import { resetRunProgress, startRunProgress } from "@/features/agents/agentRunProgressStore";
+import { nudgeRunProgress, resetRunProgress, startRunProgress } from "@/features/agents/agentRunProgressStore";
 import { AgentCard } from "./AgentCard";
 
 // =============================================================================
@@ -161,20 +161,26 @@ const RUN_ID = "00000000-0000-7000-8000-0000000000b2";
  * 진행 읽기가 실어 주는 run 한 줄. 기본은 이 승인(`ap-1`)에 이어진 run 이다: 서버는 결정 뒤에도 run 이 물은 가장 최근 승인을 `bundle` 에 싣는다
  * (`run_bundle.rs`). `status`·`phase` 는 같은 말이다.
  */
-function ended(phase: "succeeded" | "failed" | "cancelled", over: Record<string, unknown> = {}): AgentRunProgress {
+function runAt(phase: "running" | "succeeded" | "failed" | "cancelled", over: Record<string, unknown> = {}): AgentRunProgress {
   return agentRunProgressFromWire({
-    id: RUN_ID, channelId: CHANNEL_ID, agentMemberId: AGENT, status: phase, phase, leaseState: "none", stepCount: 3,
+    id: RUN_ID, channelId: CHANNEL_ID, agentMemberId: AGENT, status: phase, phase, leaseState: phase === "running" ? "live" : "none", stepCount: 3,
     createdAtMs: T0, updatedAtMs: T0,
     bundle: { approvalId: "ap-1", status: "approved", decisionMode: "inline", canDecide: false, actionType: "tool_call" },
     ...over,
   });
 }
-/** 카드를 그리기 **전에** 저장소가 run 을 들고 있게 한다(타임라인의 카드는 마운트될 때 이미 저장소를 읽는다). */
-async function mountWithRun(messages: Message[], run: AgentRunProgress): Promise<HTMLElement> {
-  stopProgress = startRunProgress({ workspaceId: WORKSPACE_ID, channelIds: [CHANNEL_ID], realtime: null, fetchProgress: async () => [run] });
+/**
+ * 카드를 그리기 **전에** 저장소가 run 을 들고 있게 한다(타임라인의 카드는 마운트될 때 이미 저장소를 읽는다). `runs` 는 진행 읽기가 답할
+ * 때마다 불린다: 시험이 돌려줄 목록을 바꾸고 `rereadRuns` 를 부르면 이미 선 카드 위에서 run 이 끝나는 전환을 흉내 낸다.
+ */
+async function mountWithRuns(messages: Message[], runs: () => AgentRunProgress[]): Promise<HTMLElement> {
+  stopProgress = startRunProgress({ workspaceId: WORKSPACE_ID, channelIds: [CHANNEL_ID], realtime: null, fetchProgress: async () => runs() });
   await act(async () => { await Promise.resolve(); });
   return mount(messages);
 }
+const mountWithRun = (messages: Message[], run: AgentRunProgress) => mountWithRuns(messages, () => [run]);
+/** 서버가 새 진행을 답한 것처럼 저장소를 지금 다시 읽는다(채널의 프레임이 오면 하는 일). */
+const rereadRuns = () => act(async () => { nudgeRunProgress(CHANNEL_ID); await Promise.resolve(); await Promise.resolve(); });
 /** 같은 채널의 두 번째 도구 승인: 다른 호출(`c2`)·다른 승인(`ap-2`). seq 는 첫 쌍보다 뒤다. */
 const startedTwo = () => row("tool_call", "call-2", 4, { name: "work.session.end", arguments: {}, call_id: "c2" }, "Tool call: work.session.end");
 const cardTwo = () =>
@@ -184,8 +190,12 @@ const cardTwo = () =>
   }, "승인 요청");
 
 describe("승인한 도구 호출은 결과 줄이 없어도 이어진 run 의 끝으로 웹 카드가 닫힌다 (#5254)", () => {
-  it("결과 줄 없음 + run 실패: 「실행 중」에 남지 않고 「실패」로 닫혀 같은 카드가 「다시 요청」을 건넨다", async () => {
-    const el = await mountWithRun([started(), card("approved")], ended("failed"));
+  it("결과 줄 없음 + run 실패: run 이 도는 동안은 「실행 중」이고, 같은 카드 위에서 run 이 실패하면 「실패」로 닫혀 「다시 요청」을 건넨다", async () => {
+    let runs = [runAt("running")];
+    const el = await mountWithRuns([started(), card("approved")], () => runs);
+    expect(words(el)).toEqual(["실행 중"]); // 열린 run 이 이어졌다는 것만으로는 카드를 닫지 않는다
+    runs = [runAt("failed")];
+    await rereadRuns();
     expect(words(el)).toEqual(["실패"]);
     expect([approvalCards(el), toolCards(el)]).toEqual([1, 0]);
     expect(el.textContent ?? "").not.toContain("이어서 하는 중");
@@ -193,27 +203,27 @@ describe("승인한 도구 호출은 결과 줄이 없어도 이어진 run 의 �
   });
 
   it("결과 줄 없음 + run 중단(사람이 멈춤): 「취소」로 닫힌다", async () => {
-    const el = await mountWithRun([started(), card("approved")], ended("cancelled", { endReason: "human_cancelled" }));
+    const el = await mountWithRun([started(), card("approved")], runAt("cancelled", { endReason: "human_cancelled" }));
     expect(words(el)).toEqual(["취소"]);
     expect(el.textContent ?? "").not.toContain("이어서 하는 중");
   });
 
   it("결과 줄 없음 + run 완료: 「끝」으로 닫히고, run 은 **자기 승인 카드만** 닫는다 (같은 채널의 다른 승인은 「실행 중」 그대로)", async () => {
-    const el = await mountWithRun([started(), card("approved"), startedTwo(), cardTwo()], ended("succeeded"));
+    const el = await mountWithRun([started(), card("approved"), startedTwo(), cardTwo()], runAt("succeeded"));
     expect(words(el)).toEqual(["끝", "실행 중"]);
     expect([approvalCards(el), toolCards(el)]).toEqual([2, 0]);
     expect(el.textContent ?? "").toContain("이어서 하는 중"); // 둘째 카드의 문장만 남는다
   });
 
   it("결과 줄이 있으면 결과 줄이 이긴다: 결과 성공 + run 실패 → 「끝」", async () => {
-    const el = await mountWithRun([started(), card("approved"), finished()], ended("failed"));
+    const el = await mountWithRun([started(), card("approved"), finished()], runAt("failed"));
     expect(words(el)).toEqual(["끝"]);
     expect([approvalCards(el), toolCards(el)]).toEqual([1, 0]);
     expect(repropose(el)).toBeNull();
   });
 
   it("결과 줄이 있으면 결과 줄이 이긴다: 도구 오류 + run 완료(모델이 오류를 설명하고 끝남) → 「실패」", async () => {
-    const el = await mountWithRun([started(), card("approved"), finished("c1", { is_error: true, output: "권한이 없어요" })], ended("succeeded"));
+    const el = await mountWithRun([started(), card("approved"), finished("c1", { is_error: true, output: "권한이 없어요" })], runAt("succeeded"));
     expect(words(el)).toEqual(["실패"]);
     expect(repropose(el)?.textContent).toBe("다시 요청");
   });
