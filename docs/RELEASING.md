@@ -42,7 +42,7 @@ hermes `startCommand`)가 이 릴리스에서 바뀌었다면 이미지 발행�
 
 첫 공개 발행의 빌드 커밋은 `main=45a154d2` 다 (패킷 §G1).
 
-승격 때 통합자가 앱 안 「업데이트 소식」 파일을 쓴다: 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(ko·en, 항목 8개 이하)로 `packages/momo-core/src/features/releaseNotes/notes/v<버전>.ts` 한 파일에 적고 `notes/index.ts`에 더한다(#4937). 그 소식을 처음 담는 폰 빌드 번호와 데스크탑 버전(`phoneBuild`·`desktopFrom`, 다음 채널 빌드가 담으면 `0.1.0-next.N`도)도 그 파일에 적는다. 붙는 규칙은 `releaseNotes/model.ts` 머리말이고, 팀 채널 「업데이트 소식」 게시(#4793)는 같은 글을 쓴다. `CHANGELOG.md`는 개발 기록으로 그대로 둔다.
+승격 때 통합자가 앱 안 「업데이트 소식」 파일을 쓴다: 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(핵심 항목 8개 이하, 나머지는 「그 밖에 바뀐 점」 주제별 한 줄)로 적는다(#4937, #5054). 글(ko·en)은 문구 사전 `releaseNotes.json`에 쓰고, `packages/momo-core/src/features/releaseNotes/notes/v<버전>.ts` 한 파일에는 번호·빌드·사전 키 목록을 적어 `notes/index.ts`에 더한다(순서는 `notes/README.md`). 그 소식을 처음 담는 폰 빌드 번호와 데스크탑 버전(`phoneBuild`·`desktopFrom`, 다음 채널 빌드가 담으면 `0.1.0-next.N`도)도 그 파일에 적는다. 붙는 규칙은 `releaseNotes/model.ts` 머리말이고, 팀 채널 「업데이트 소식」 게시(#4793)는 같은 글을 쓴다. `CHANGELOG.md`는 개발 기록으로 그대로 둔다.
 
 ---
 
@@ -71,8 +71,10 @@ scripts/collect_changes.py --since <지난 승격의 main 커밋> --output <결�
 
 1. **빌드 번호·버전을 먼저 정한 뒤** 앱 안 「업데이트 소식」 파일을 쓴다(#4937). 다음 폰 빌드 번호는
    [`docs/runbooks/ios-testflight.md`](runbooks/ios-testflight.md) §2의 규칙으로, 데스크탑 버전은 채널마다(release `0.1.N`,
-   next `0.1.0-next.N`) 정한다. 그 뒤 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(ko·en, 항목 8개 이하)로
-   `packages/momo-core/src/features/releaseNotes/notes/v<버전>.ts` 한 파일에 적고 `notes/index.ts`에 더한다.
+   next `0.1.0-next.N`) 정한다. 그 뒤 이번 릴리스에서 사용자에게 보이는 변화를 쉬운 말(핵심 항목 8개 이하, 나머지는 「그 밖에
+   바뀐 점」 주제별 한 줄)로 쓴다: 글(ko·en)은 문구 사전 `releaseNotes.json`에, 번호·빌드·사전 키 목록은
+   `packages/momo-core/src/features/releaseNotes/notes/v<버전>.ts` 한 파일에 적고 `notes/index.ts`에 더한다. 순서와 키 이름은
+   `packages/momo-core/src/features/releaseNotes/notes/README.md`다.
    `phoneBuild`·`desktopFrom`은 그 소식을 **처음 담는 빌드에 컴파일되어 들어가므로**, 빌드를 만든 뒤에 고치면 그 빌드는
    이미 옛 값을 갖는다. 폰은 `phoneBuild`가 자기 번호 **이하**인 소식 중 가장 새 것을 보므로, 그 빌드가 실제로 받을
    번호보다 큰 값을 적으면 그 빌드는 소식을 못 본다. 붙는 규칙의 정본은 `releaseNotes/model.ts` 머리말이다.

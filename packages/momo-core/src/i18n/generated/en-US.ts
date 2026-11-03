@@ -135,6 +135,248 @@ export const catalog: MessageCatalog = {
       "value": "Remember my email"
     }
   ],
+  "connection.action.reconnectNow": [
+    {
+      "type": 0,
+      "value": "Reconnect now"
+    }
+  ],
+  "connection.action.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "connection.approval.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't decide right now. Once you're connected again, you can approve or deny here."
+    }
+  ],
+  "connection.approval.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't decide right now. Once we're connected again, you can approve or deny here."
+    }
+  ],
+  "connection.boot.unreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Your saved sign-in is still here, and we'll keep trying once you're connected."
+    }
+  ],
+  "connection.card.connecting": [
+    {
+      "type": 0,
+      "value": "Connecting…"
+    }
+  ],
+  "connection.card.lastSynced": [
+    {
+      "type": 0,
+      "value": "Last synced "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    }
+  ],
+  "connection.card.offlineDetail": [
+    {
+      "type": 0,
+      "value": "You can only see what's already loaded. We'll reconnect automatically."
+    }
+  ],
+  "connection.card.offlineTitle": [
+    {
+      "type": 0,
+      "value": "You're offline"
+    }
+  ],
+  "connection.card.realtimeDownDetail": [
+    {
+      "type": 0,
+      "value": "New messages may show up late."
+    }
+  ],
+  "connection.card.realtimeDownTitle": [
+    {
+      "type": 0,
+      "value": "Live connection lost"
+    }
+  ],
+  "connection.card.recovered": [
+    {
+      "type": 0,
+      "value": "Reconnected"
+    }
+  ],
+  "connection.card.serverUnreachableDetail": [
+    {
+      "type": 0,
+      "value": "We'll try again in a moment."
+    }
+  ],
+  "connection.card.serverUnreachableTitle": [
+    {
+      "type": 0,
+      "value": "Can't reach the server"
+    }
+  ],
+  "connection.card.serverUpdatingDetail": [
+    {
+      "type": 0,
+      "value": "It will reconnect soon."
+    }
+  ],
+  "connection.card.serverUpdatingTitle": [
+    {
+      "type": 0,
+      "value": "The server is updating"
+    }
+  ],
+  "connection.card.unknownDetail": [
+    {
+      "type": 0,
+      "value": "Try again. If it keeps happening, copy the connection log and send it to us."
+    }
+  ],
+  "connection.card.unknownTitle": [
+    {
+      "type": 0,
+      "value": "There's a problem with the connection"
+    }
+  ],
+  "connection.composer.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't send right now. Your draft is still here, and you can send it once you're connected again."
+    }
+  ],
+  "connection.composer.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't send right now. Your draft is still here, and you can send it once we're connected again."
+    }
+  ],
+  "connection.load.channelListTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list"
+    }
+  ],
+  "connection.load.conversationTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the conversation"
+    }
+  ],
+  "connection.load.membersTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the member list"
+    }
+  ],
+  "connection.load.reasonOffline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can try again once you're connected."
+    }
+  ],
+  "connection.load.reasonServer": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Try again in a moment."
+    }
+  ],
+  "connection.load.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "Something went wrong. Try again."
+    }
+  ],
+  "connection.load.threadTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the thread"
+    }
+  ],
+  "connection.send.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't send"
+    }
+  ],
+  "connection.send.resend": [
+    {
+      "type": 0,
+      "value": "Resend"
+    }
+  ],
+  "connection.send.resendAll": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Resend "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Resend all "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "connection.session.expired": [
+    {
+      "type": 0,
+      "value": "Your session has expired. Please sign in again."
+    }
+  ],
+  "connection.upload.failedNoArchive": [
+    {
+      "type": 0,
+      "value": "This server has no file storage connected"
+    }
+  ],
+  "connection.upload.failedOffline": [
+    {
+      "type": 0,
+      "value": "Couldn't upload because you're offline"
+    }
+  ],
+  "connection.upload.failedServer": [
+    {
+      "type": 0,
+      "value": "Couldn't upload because the server isn't responding"
+    }
+  ],
   "desktop.menu.close": [
     {
       "type": 0,
@@ -1911,6 +2153,12 @@ export const catalog: MessageCatalog = {
       "value": "What changed"
     }
   ],
+  "releaseNotes.detail.others": [
+    {
+      "type": 0,
+      "value": "Other changes"
+    }
+  ],
   "releaseNotes.detail.tryIt": [
     {
       "type": 0,
@@ -2007,6 +2255,186 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Phone"
+    }
+  ],
+  "releaseNotes.topic.agents": [
+    {
+      "type": 0,
+      "value": "Agents"
+    }
+  ],
+  "releaseNotes.topic.attachments": [
+    {
+      "type": 0,
+      "value": "Attachments"
+    }
+  ],
+  "releaseNotes.topic.conversations": [
+    {
+      "type": 0,
+      "value": "Conversations"
+    }
+  ],
+  "releaseNotes.topic.notifications": [
+    {
+      "type": 0,
+      "value": "Notifications"
+    }
+  ],
+  "releaseNotes.topic.settings": [
+    {
+      "type": 0,
+      "value": "Settings"
+    }
+  ],
+  "releaseNotes.v0141.agentsChanged": [
+    {
+      "type": 0,
+      "value": "Agent lists and profiles show this month's cost, and admins get a monthly report. In a DM between people, calling an agent first asks everyone for consent, and the agent joins once all agree."
+    }
+  ],
+  "releaseNotes.v0141.agentsTitle": [
+    {
+      "type": 0,
+      "value": "Agent costs and calling an agent in a DM"
+    }
+  ],
+  "releaseNotes.v0141.agentsTryIt": [
+    {
+      "type": 0,
+      "value": "Open the agent list and a profile. As an admin, open Settings › Usage on the desktop or Settings › Monthly report on the phone. In a DM, mention an agent and look for the consent card."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsChanged": [
+    {
+      "type": 0,
+      "value": "A channel's notification line shows its state with a bell icon and words. It flips the moment you tap, and if saving fails only that channel goes back."
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTitle": [
+    {
+      "type": 0,
+      "value": "Channel notification state"
+    }
+  ],
+  "releaseNotes.v0141.channelNotificationsTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, tap the notification line on the conversation info page, in the ⋮ menu or in a channel row menu. On the desktop, use the channel header ⋮ menu or the sidebar row menu."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightChanged": [
+    {
+      "type": 0,
+      "value": "The composer grows to four lines on the phone and five on the desktop, then scrolls inside. A long pasted text fits its height and the last line is no longer clipped."
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTitle": [
+    {
+      "type": 0,
+      "value": "Composer height"
+    }
+  ],
+  "releaseNotes.v0141.composerHeightTryIt": [
+    {
+      "type": 0,
+      "value": "Type several lines, then paste a long text."
+    }
+  ],
+  "releaseNotes.v0141.emojiChanged": [
+    {
+      "type": 0,
+      "value": "On the phone, reactions and status take every standard emoji. The Our team slot of the emoji picker holds team emoji, stickers and GIFs, and you can register new ones."
+    }
+  ],
+  "releaseNotes.v0141.emojiTitle": [
+    {
+      "type": 0,
+      "value": "Emoji and team emoji"
+    }
+  ],
+  "releaseNotes.v0141.emojiTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, tap + in the quick reaction row and search by name. On both, open the Our team slot of the emoji picker."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationChanged": [
+    {
+      "type": 0,
+      "value": "The band at the top of a conversation is gone: back, the name and ⋮ float as three glass buttons. Coming back to the app or unlocking the phone reconnects sooner, pulling down at the top of a conversation re-checks the connection, and a light tap comes with a long press or a reaction."
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTitle": [
+    {
+      "type": 0,
+      "value": "Phone conversation header and reconnecting"
+    }
+  ],
+  "releaseNotes.v0141.phoneConversationTryIt": [
+    {
+      "type": 0,
+      "value": "Open a conversation and scroll to the top, then leave the app for a moment and come back. If the disconnected band shows, tap Reconnect now."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerChanged": [
+    {
+      "type": 0,
+      "value": "A photo grows out of the picture you tapped and closes back into it. Back, Esc or a drag down closes it, and with Reduce Motion on it opens and closes at once."
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTitle": [
+    {
+      "type": 0,
+      "value": "Opening and closing photos"
+    }
+  ],
+  "releaseNotes.v0141.photoViewerTryIt": [
+    {
+      "type": 0,
+      "value": "Open a photo in a conversation and close it in a few different ways."
+    }
+  ],
+  "releaseNotes.v0141.settingsChanged": [
+    {
+      "type": 0,
+      "value": "Settings › Profile › Language lets you follow the device language or pick 한국어 or English. It applies at once, though not every screen is translated yet. On the phone, Settings › Theme › Theme style opens a full-screen picker."
+    }
+  ],
+  "releaseNotes.v0141.settingsTitle": [
+    {
+      "type": 0,
+      "value": "Language setting and phone theme picker"
+    }
+  ],
+  "releaseNotes.v0141.settingsTryIt": [
+    {
+      "type": 0,
+      "value": "Change the language and check that the settings screen changes. On the phone, also pick a theme style."
+    }
+  ],
+  "releaseNotes.v0141.summary": [
+    {
+      "type": 0,
+      "value": "Conversations look better, and a language setting, team emoji and agent costs are new."
+    }
+  ],
+  "releaseNotes.v0141.typingChanged": [
+    {
+      "type": 0,
+      "value": "Under the composer, the name of who is typing is bold and three dots move. With Reduce Motion on, the dots stay still."
+    }
+  ],
+  "releaseNotes.v0141.typingTitle": [
+    {
+      "type": 0,
+      "value": "Typing indicator"
+    }
+  ],
+  "releaseNotes.v0141.typingTryIt": [
+    {
+      "type": 0,
+      "value": "Watch the line under the composer while a person or an agent is writing a reply."
     }
   ],
   "releaseNotes.version.current": [
@@ -3137,6 +3565,30 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Zoom out"
+    }
+  ],
+  "timeline.send.discard": [
+    {
+      "type": 0,
+      "value": "Delete"
+    }
+  ],
+  "timeline.send.failed": [
+    {
+      "type": 0,
+      "value": "Not sent"
+    }
+  ],
+  "timeline.send.resend": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "timeline.send.sending": [
+    {
+      "type": 0,
+      "value": "Sending"
     }
   ],
   "timeline.thread.followDismiss": [

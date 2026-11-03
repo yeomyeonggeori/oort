@@ -1,11 +1,20 @@
+import type { MessageArgs, MessageKey } from "../../i18n/generated/messages";
+
 // =============================================================================
-// 앱 안 「업데이트 소식」 모델 (#4937, owner 10-31).
+// 앱 안 「업데이트 소식」 모델 (#4937, owner 10-31 · 글을 사전으로 옮김 #5054, owner 11-03).
 //
-// 업데이트마다 사용자에게 보이는 변화를 쉬운 말로 적은 **버전별 파일**(`notes/v*.ts`, ko·en 한 파일)을 앱에
-// 묶어 넣는다. 서버에서 받아 오지 않는다. 이 파일은 그 파일들의 **모양**과, 두 가지 규칙을 코어 한 곳에 둔다.
+// 업데이트마다 사용자에게 보이는 변화를 쉬운 말로 적은 **버전별 파일**(`notes/v*.ts`)을 앱에 묶어 넣는다. 서버에서 받아
+// 오지 않는다. 이 파일은 그 파일들의 **모양**과, 두 가지 규칙을 코어 한 곳에 둔다.
 //
 //   1. 어느 소식이 어느 앱 버전에 붙는가 (`noteForPhoneBuild` · `noteForDesktopVersion`)
 //   2. 업데이트 뒤 처음 열 때 보여 줄 것인가 (`shouldAnnounceNote`)
+//
+// ## 글은 사전에 산다 (#5054)
+//
+// 버전 파일에는 글이 없다. 번호·빌드·**사전 키 목록**만 있고, 글은 `i18n/catalogs/{ko-KR,en-US}/releaseNotes.json`의
+// `releaseNotes.v<버전>.…` 키에 있다. 그래서 소식이 다른 모든 문구와 같은 길을 탄다: 언어를 더하는 흐름(ADR-0213 P2),
+// 한국어·영어 빈칸 검사(`i18n:check`), 사전에 없는 언어의 영어 대체. 화면은 `messages.formatMessage(키)`로 읽고, 소식
+// 쪽에 언어 갈래는 없다. 키 이름과 소식을 더하는 순서는 `notes/README.md`가 정본이다.
 //
 // ## 소식 하나는 서로 다른 두 번호에 붙는다
 //
@@ -29,8 +38,6 @@
 // 첫 소식을 놓친다(저장된 값이 아직 없는 것이 그들의 공통 상태다).
 // =============================================================================
 
-export type ReleaseNoteLocale = "ko-KR" | "en-US";
-
 /** 소식이 말하는 화면. 웹 브라우저 탭은 데스크탑과 같은 화면이라 따로 두지 않는다. */
 export type ReleaseNoteSurface = "phone" | "desktop";
 
@@ -46,25 +53,39 @@ export const DESKTOP_SURFACE = "desktop" as const satisfies ReleaseNoteSurface;
 /** 설정 안에서 소식을 읽는 곳의 이름: 웹 설정의 `?section=` 값이고, 폰 설정의 안쪽 장 이름이다. */
 export const RELEASE_NOTES_SETTINGS_PAGE = "releaseNotes" as const;
 
-export interface ReleaseNoteItemCopy {
-  /** 한 줄 제목. 자동으로 뜨는 작은 창에는 이것만 나온다. */
-  title: string;
-  /** 바뀐 점. 사용자에게 보이는 것만, 쉬운 말로. */
-  changed: string;
-  /** 「이렇게 써 보세요」: 어디를 열고 무엇을 눌러 볼지. */
-  tryIt: string;
-}
+/**
+ * 소식 글의 사전 키. 값 없이 그대로 읽는 문구(`{count}` 같은 인자가 없는 것)만이고, 사전에 없는 키는 컴파일이 막는다:
+ * 키 오타가 조용히 안전 문구(「Content is unavailable」)로 나가지 않는다.
+ */
+export type ReleaseNoteKey = {
+  [K in MessageKey]: MessageArgs[K] extends Record<string, never> ? K : never;
+}[MessageKey];
 
 export interface ReleaseNoteItem {
-  /** 소식 안에서 유일한 이름. 화면의 key·testID가 쓴다. */
+  /** 소식 안에서 유일한 이름. 영문 낱말로 시작하는 영숫자(`channelNotifications`). 화면의 key·testID가 쓰고, 키 이름의 한 토막이다. */
   id: string;
   /** 이 변화가 보이는 화면. 비어 있지 않다. */
   surfaces: readonly ReleaseNoteSurface[];
-  copy: Readonly<Record<ReleaseNoteLocale, ReleaseNoteItemCopy>>;
+  /** 한 줄 제목. 자동으로 뜨는 작은 창에는 이것만 나온다. */
+  title: ReleaseNoteKey;
+  /** 바뀐 점. 사용자에게 보이는 것만, 쉬운 말로. */
+  changed: ReleaseNoteKey;
+  /** 「이렇게 써 보세요」: 어디를 열고 무엇을 눌러 볼지. */
+  tryIt: ReleaseNoteKey;
+}
+
+/** 「그 밖에 바뀐 점」의 한 주제 묶음: 주제 이름과 그 주제의 한 줄들. */
+export interface ReleaseNoteOtherGroup {
+  /** 소식 안에서 유일한 이름. 화면의 key·testID가 쓰고, 키 이름의 한 토막이다. */
+  id: string;
+  /** 주제 이름. 이 소식의 키이거나 공용 주제 이름(`releaseNotes.topic.*`)이다. */
+  title: ReleaseNoteKey;
+  /** 이 주제의 한 줄들, 1개 이상. 한 줄은 한 줄이다(줄바꿈 없이 짧게). 앞에 있는 것이 먼저 나온다. */
+  lines: readonly ReleaseNoteKey[];
 }
 
 export interface ReleaseNote {
-  /** 릴리스 버전(`0.1.41`). 소식의 이름이고, 기기에는 이 값을 「마지막으로 본 소식」으로 적는다. */
+  /** 릴리스 버전(`0.1.41`). 소식의 이름이고, 기기에는 이 값을 「마지막으로 본 소식」으로 적는다. 사전 키 칸의 이름도 이것에서 나온다(`releaseNotes.v0141.`). */
   version: string;
   /** 공개일 `YYYY-MM-DD`. 화면은 이 글자를 그대로 보인다(시간대로 하루가 밀리지 않게). */
   releasedOn: string;
@@ -73,18 +94,18 @@ export interface ReleaseNote {
   /** 이 릴리스를 처음 담은 데스크탑 앱 버전, 채널(`release` · `next`)마다 하나. 같은 채널에서 그 버전 이상이면 이 소식이다. */
   desktopFrom: readonly string[];
   /** 한 문장 요약. 자동으로 뜨는 작은 창과 버전 목록이 보인다. */
-  summary: Readonly<Record<ReleaseNoteLocale, string>>;
+  summary: ReleaseNoteKey;
   /** 핵심 변화, 1~8개. 앞에 있는 것이 더 중요하다. */
   items: readonly ReleaseNoteItem[];
+  /**
+   * 「그 밖에 바뀐 점」: 핵심 8개에 못 든 변화를 주제별 한 줄로. **비워 둘 수 있다**(`[]`: 화면에 이 칸이 아예 서지 않는다).
+   * 주제의 순서는 이 배열의 순서다. 설정의 버전 상세에만 나오고, 첫 실행 자동 창에는 나오지 않는다.
+   */
+  others: readonly ReleaseNoteOtherGroup[];
 }
 
 /** 한 소식에 담을 수 있는 핵심 항목 수의 위쪽 끝(이슈 #4937 「5~8개 핵심」). */
 export const MAX_RELEASE_NOTE_ITEMS = 8;
-
-/** 앱의 문구 언어가 소식의 어느 쪽 글을 쓰는가. 사전이 없는 언어는 영어 문장으로 간다(ADR-0213). */
-export function pickReleaseNoteLocale(messageLocale: string | null | undefined): ReleaseNoteLocale {
-  return typeof messageLocale === "string" && messageLocale.toLowerCase().startsWith("ko") ? "ko-KR" : "en-US";
-}
 
 // ---- 버전 비교 ----------------------------------------------------------------------------------
 

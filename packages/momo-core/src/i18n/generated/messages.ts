@@ -10,6 +10,40 @@ export const messageKeys = [
   "connect.language.hint",
   "connect.rememberEmail.hint",
   "connect.rememberEmail.label",
+  "connection.action.reconnectNow",
+  "connection.action.retry",
+  "connection.approval.offline",
+  "connection.approval.serverUnreachable",
+  "connection.boot.unreachable",
+  "connection.card.connecting",
+  "connection.card.lastSynced",
+  "connection.card.offlineDetail",
+  "connection.card.offlineTitle",
+  "connection.card.realtimeDownDetail",
+  "connection.card.realtimeDownTitle",
+  "connection.card.recovered",
+  "connection.card.serverUnreachableDetail",
+  "connection.card.serverUnreachableTitle",
+  "connection.card.serverUpdatingDetail",
+  "connection.card.serverUpdatingTitle",
+  "connection.card.unknownDetail",
+  "connection.card.unknownTitle",
+  "connection.composer.offline",
+  "connection.composer.serverUnreachable",
+  "connection.load.channelListTitle",
+  "connection.load.conversationTitle",
+  "connection.load.membersTitle",
+  "connection.load.reasonOffline",
+  "connection.load.reasonServer",
+  "connection.load.reasonUnknown",
+  "connection.load.threadTitle",
+  "connection.send.failed",
+  "connection.send.resend",
+  "connection.send.resendAll",
+  "connection.session.expired",
+  "connection.upload.failedNoArchive",
+  "connection.upload.failedOffline",
+  "connection.upload.failedServer",
   "desktop.menu.close",
   "desktop.menu.copy",
   "desktop.menu.cut",
@@ -270,6 +304,7 @@ export const messageKeys = [
   "releaseNotes.action.details",
   "releaseNotes.detail.back",
   "releaseNotes.detail.changed",
+  "releaseNotes.detail.others",
   "releaseNotes.detail.tryIt",
   "releaseNotes.page.back",
   "releaseNotes.page.description",
@@ -282,6 +317,36 @@ export const messageKeys = [
   "releaseNotes.surface.desktop",
   "releaseNotes.surface.label",
   "releaseNotes.surface.phone",
+  "releaseNotes.topic.agents",
+  "releaseNotes.topic.attachments",
+  "releaseNotes.topic.conversations",
+  "releaseNotes.topic.notifications",
+  "releaseNotes.topic.settings",
+  "releaseNotes.v0141.agentsChanged",
+  "releaseNotes.v0141.agentsTitle",
+  "releaseNotes.v0141.agentsTryIt",
+  "releaseNotes.v0141.channelNotificationsChanged",
+  "releaseNotes.v0141.channelNotificationsTitle",
+  "releaseNotes.v0141.channelNotificationsTryIt",
+  "releaseNotes.v0141.composerHeightChanged",
+  "releaseNotes.v0141.composerHeightTitle",
+  "releaseNotes.v0141.composerHeightTryIt",
+  "releaseNotes.v0141.emojiChanged",
+  "releaseNotes.v0141.emojiTitle",
+  "releaseNotes.v0141.emojiTryIt",
+  "releaseNotes.v0141.phoneConversationChanged",
+  "releaseNotes.v0141.phoneConversationTitle",
+  "releaseNotes.v0141.phoneConversationTryIt",
+  "releaseNotes.v0141.photoViewerChanged",
+  "releaseNotes.v0141.photoViewerTitle",
+  "releaseNotes.v0141.photoViewerTryIt",
+  "releaseNotes.v0141.settingsChanged",
+  "releaseNotes.v0141.settingsTitle",
+  "releaseNotes.v0141.settingsTryIt",
+  "releaseNotes.v0141.summary",
+  "releaseNotes.v0141.typingChanged",
+  "releaseNotes.v0141.typingTitle",
+  "releaseNotes.v0141.typingTryIt",
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
@@ -436,6 +501,10 @@ export const messageKeys = [
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.send.discard",
+  "timeline.send.failed",
+  "timeline.send.resend",
+  "timeline.send.sending",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
   "timeline.thread.followHint",
@@ -580,6 +649,44 @@ export const argumentSpecs = {
   "connect.language.hint": {},
   "connect.rememberEmail.hint": {},
   "connect.rememberEmail.label": {},
+  "connection.action.reconnectNow": {},
+  "connection.action.retry": {},
+  "connection.approval.offline": {},
+  "connection.approval.serverUnreachable": {},
+  "connection.boot.unreachable": {},
+  "connection.card.connecting": {},
+  "connection.card.lastSynced": {
+    "relativeTime": "string"
+  },
+  "connection.card.offlineDetail": {},
+  "connection.card.offlineTitle": {},
+  "connection.card.realtimeDownDetail": {},
+  "connection.card.realtimeDownTitle": {},
+  "connection.card.recovered": {},
+  "connection.card.serverUnreachableDetail": {},
+  "connection.card.serverUnreachableTitle": {},
+  "connection.card.serverUpdatingDetail": {},
+  "connection.card.serverUpdatingTitle": {},
+  "connection.card.unknownDetail": {},
+  "connection.card.unknownTitle": {},
+  "connection.composer.offline": {},
+  "connection.composer.serverUnreachable": {},
+  "connection.load.channelListTitle": {},
+  "connection.load.conversationTitle": {},
+  "connection.load.membersTitle": {},
+  "connection.load.reasonOffline": {},
+  "connection.load.reasonServer": {},
+  "connection.load.reasonUnknown": {},
+  "connection.load.threadTitle": {},
+  "connection.send.failed": {},
+  "connection.send.resend": {},
+  "connection.send.resendAll": {
+    "count": "number"
+  },
+  "connection.session.expired": {},
+  "connection.upload.failedNoArchive": {},
+  "connection.upload.failedOffline": {},
+  "connection.upload.failedServer": {},
   "desktop.menu.close": {},
   "desktop.menu.copy": {},
   "desktop.menu.cut": {},
@@ -873,6 +980,7 @@ export const argumentSpecs = {
   "releaseNotes.action.details": {},
   "releaseNotes.detail.back": {},
   "releaseNotes.detail.changed": {},
+  "releaseNotes.detail.others": {},
   "releaseNotes.detail.tryIt": {},
   "releaseNotes.page.back": {},
   "releaseNotes.page.description": {},
@@ -887,6 +995,36 @@ export const argumentSpecs = {
   "releaseNotes.surface.desktop": {},
   "releaseNotes.surface.label": {},
   "releaseNotes.surface.phone": {},
+  "releaseNotes.topic.agents": {},
+  "releaseNotes.topic.attachments": {},
+  "releaseNotes.topic.conversations": {},
+  "releaseNotes.topic.notifications": {},
+  "releaseNotes.topic.settings": {},
+  "releaseNotes.v0141.agentsChanged": {},
+  "releaseNotes.v0141.agentsTitle": {},
+  "releaseNotes.v0141.agentsTryIt": {},
+  "releaseNotes.v0141.channelNotificationsChanged": {},
+  "releaseNotes.v0141.channelNotificationsTitle": {},
+  "releaseNotes.v0141.channelNotificationsTryIt": {},
+  "releaseNotes.v0141.composerHeightChanged": {},
+  "releaseNotes.v0141.composerHeightTitle": {},
+  "releaseNotes.v0141.composerHeightTryIt": {},
+  "releaseNotes.v0141.emojiChanged": {},
+  "releaseNotes.v0141.emojiTitle": {},
+  "releaseNotes.v0141.emojiTryIt": {},
+  "releaseNotes.v0141.phoneConversationChanged": {},
+  "releaseNotes.v0141.phoneConversationTitle": {},
+  "releaseNotes.v0141.phoneConversationTryIt": {},
+  "releaseNotes.v0141.photoViewerChanged": {},
+  "releaseNotes.v0141.photoViewerTitle": {},
+  "releaseNotes.v0141.photoViewerTryIt": {},
+  "releaseNotes.v0141.settingsChanged": {},
+  "releaseNotes.v0141.settingsTitle": {},
+  "releaseNotes.v0141.settingsTryIt": {},
+  "releaseNotes.v0141.summary": {},
+  "releaseNotes.v0141.typingChanged": {},
+  "releaseNotes.v0141.typingTitle": {},
+  "releaseNotes.v0141.typingTryIt": {},
   "releaseNotes.version.current": {},
   "releaseNotes.version.label": {
     "version": "string"
@@ -1088,6 +1226,10 @@ export const argumentSpecs = {
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.send.discard": {},
+  "timeline.send.failed": {},
+  "timeline.send.resend": {},
+  "timeline.send.sending": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
   "timeline.thread.followHint": {},
@@ -1302,6 +1444,40 @@ export interface MessageArgs {
   "connect.language.hint": Record<string, never>;
   "connect.rememberEmail.hint": Record<string, never>;
   "connect.rememberEmail.label": Record<string, never>;
+  "connection.action.reconnectNow": Record<string, never>;
+  "connection.action.retry": Record<string, never>;
+  "connection.approval.offline": Record<string, never>;
+  "connection.approval.serverUnreachable": Record<string, never>;
+  "connection.boot.unreachable": Record<string, never>;
+  "connection.card.connecting": Record<string, never>;
+  "connection.card.lastSynced": { relativeTime: string };
+  "connection.card.offlineDetail": Record<string, never>;
+  "connection.card.offlineTitle": Record<string, never>;
+  "connection.card.realtimeDownDetail": Record<string, never>;
+  "connection.card.realtimeDownTitle": Record<string, never>;
+  "connection.card.recovered": Record<string, never>;
+  "connection.card.serverUnreachableDetail": Record<string, never>;
+  "connection.card.serverUnreachableTitle": Record<string, never>;
+  "connection.card.serverUpdatingDetail": Record<string, never>;
+  "connection.card.serverUpdatingTitle": Record<string, never>;
+  "connection.card.unknownDetail": Record<string, never>;
+  "connection.card.unknownTitle": Record<string, never>;
+  "connection.composer.offline": Record<string, never>;
+  "connection.composer.serverUnreachable": Record<string, never>;
+  "connection.load.channelListTitle": Record<string, never>;
+  "connection.load.conversationTitle": Record<string, never>;
+  "connection.load.membersTitle": Record<string, never>;
+  "connection.load.reasonOffline": Record<string, never>;
+  "connection.load.reasonServer": Record<string, never>;
+  "connection.load.reasonUnknown": Record<string, never>;
+  "connection.load.threadTitle": Record<string, never>;
+  "connection.send.failed": Record<string, never>;
+  "connection.send.resend": Record<string, never>;
+  "connection.send.resendAll": { count: number };
+  "connection.session.expired": Record<string, never>;
+  "connection.upload.failedNoArchive": Record<string, never>;
+  "connection.upload.failedOffline": Record<string, never>;
+  "connection.upload.failedServer": Record<string, never>;
   "desktop.menu.close": Record<string, never>;
   "desktop.menu.copy": Record<string, never>;
   "desktop.menu.cut": Record<string, never>;
@@ -1562,6 +1738,7 @@ export interface MessageArgs {
   "releaseNotes.action.details": Record<string, never>;
   "releaseNotes.detail.back": Record<string, never>;
   "releaseNotes.detail.changed": Record<string, never>;
+  "releaseNotes.detail.others": Record<string, never>;
   "releaseNotes.detail.tryIt": Record<string, never>;
   "releaseNotes.page.back": Record<string, never>;
   "releaseNotes.page.description": Record<string, never>;
@@ -1574,6 +1751,36 @@ export interface MessageArgs {
   "releaseNotes.surface.desktop": Record<string, never>;
   "releaseNotes.surface.label": Record<string, never>;
   "releaseNotes.surface.phone": Record<string, never>;
+  "releaseNotes.topic.agents": Record<string, never>;
+  "releaseNotes.topic.attachments": Record<string, never>;
+  "releaseNotes.topic.conversations": Record<string, never>;
+  "releaseNotes.topic.notifications": Record<string, never>;
+  "releaseNotes.topic.settings": Record<string, never>;
+  "releaseNotes.v0141.agentsChanged": Record<string, never>;
+  "releaseNotes.v0141.agentsTitle": Record<string, never>;
+  "releaseNotes.v0141.agentsTryIt": Record<string, never>;
+  "releaseNotes.v0141.channelNotificationsChanged": Record<string, never>;
+  "releaseNotes.v0141.channelNotificationsTitle": Record<string, never>;
+  "releaseNotes.v0141.channelNotificationsTryIt": Record<string, never>;
+  "releaseNotes.v0141.composerHeightChanged": Record<string, never>;
+  "releaseNotes.v0141.composerHeightTitle": Record<string, never>;
+  "releaseNotes.v0141.composerHeightTryIt": Record<string, never>;
+  "releaseNotes.v0141.emojiChanged": Record<string, never>;
+  "releaseNotes.v0141.emojiTitle": Record<string, never>;
+  "releaseNotes.v0141.emojiTryIt": Record<string, never>;
+  "releaseNotes.v0141.phoneConversationChanged": Record<string, never>;
+  "releaseNotes.v0141.phoneConversationTitle": Record<string, never>;
+  "releaseNotes.v0141.phoneConversationTryIt": Record<string, never>;
+  "releaseNotes.v0141.photoViewerChanged": Record<string, never>;
+  "releaseNotes.v0141.photoViewerTitle": Record<string, never>;
+  "releaseNotes.v0141.photoViewerTryIt": Record<string, never>;
+  "releaseNotes.v0141.settingsChanged": Record<string, never>;
+  "releaseNotes.v0141.settingsTitle": Record<string, never>;
+  "releaseNotes.v0141.settingsTryIt": Record<string, never>;
+  "releaseNotes.v0141.summary": Record<string, never>;
+  "releaseNotes.v0141.typingChanged": Record<string, never>;
+  "releaseNotes.v0141.typingTitle": Record<string, never>;
+  "releaseNotes.v0141.typingTryIt": Record<string, never>;
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
@@ -1728,6 +1935,10 @@ export interface MessageArgs {
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.send.discard": Record<string, never>;
+  "timeline.send.failed": Record<string, never>;
+  "timeline.send.resend": Record<string, never>;
+  "timeline.send.sending": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
   "timeline.thread.followHint": Record<string, never>;

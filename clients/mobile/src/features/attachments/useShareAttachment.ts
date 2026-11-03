@@ -3,7 +3,7 @@ import {
   type MessageAttachment,
 } from '@momo/core/features/attachments/model';
 import { useCallback, useState } from 'react';
-import { Share } from 'react-native';
+import { presentShareSheet } from '../../lib/shareSheet';
 import { downloadAttachmentFile } from './content';
 
 export type DownloadState =
@@ -30,7 +30,8 @@ export function useShareAttachment(
       setDownload({ status: 'downloading', progress }),
     )
       .then(file =>
-        Share.share({
+        // `Share.share` 를 곧바로 부르지 않는다: 이 시트는 뒤 화면을 막지 않아서 시트를 닫는 탭이 뒤의 줄·단추에 샌다(#5207, `shareSheet.ts` 머리말).
+        presentShareSheet({
           title: attachmentDisplayName(attachment),
           url: file.uri,
         }),
