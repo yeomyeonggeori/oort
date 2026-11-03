@@ -153,7 +153,12 @@ async fn start_server(pool: PgPool) -> String {
         TEST_JWT_SECRET.to_string(),
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
     )
-    .with_rate_limit(RateLimitConfig::default());
+    // The operator's reissue budget (ADR-0215 D6, 5 a window) is not what these scenes measure:
+    // a world issues a link per scene.
+    .with_rate_limit(RateLimitConfig {
+        password_reset_issue_per_admin_limit: 10_000,
+        ..RateLimitConfig::default()
+    });
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -407,6 +412,7 @@ async fn issue_reset_token(w: &World) -> String {
             w.base, w.workspace, w.member
         ))
         .bearer_auth(&w.owner_bearer)
+        .json(&json!({ "currentPassword": OWNER_PASSWORD }))
         .send()
         .await
         .expect("issue a password reset");
@@ -1723,6 +1729,7 @@ fn spawn_reissue(w: &World) -> JoinHandle<Reply> {
                 "{base}/v1/workspaces/{workspace}/members/{member}/password-reset"
             ))
             .bearer_auth(bearer)
+            .json(&json!({ "currentPassword": OWNER_PASSWORD }))
             .send()
             .await
             .expect("send the reissue"),
@@ -1916,6 +1923,7 @@ async fn a_reissue_by_someone_who_is_not_an_operator_does_not_queue_for_the_lock
                     Uuid::new_v4()
                 ))
                 .bearer_auth(member_bearer)
+                .json(&json!({ "currentPassword": MEMBER_PASSWORD }))
                 .send()
                 .await
                 .expect("send the reissue"),

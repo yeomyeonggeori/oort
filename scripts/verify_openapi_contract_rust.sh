@@ -606,7 +606,7 @@ redact_json() {
   walk(
     if type == "object" then
       with_entries(
-        if (.key | test("(?i)^(accessToken|refreshToken|token|password|secret|signature|claimPath)$"))
+        if (.key | test("(?i)^(accessToken|refreshToken|token|password|secret|signature|claimPath|claimUrl)$"))
         then .value = "[REDACTED]"
         else . end
       )
@@ -1996,10 +1996,12 @@ sample change-own-password patch \
   "/v1/workspaces/$WS/members/me/password" 403 \
   '{"currentPassword":"not-the-gate-password","newPassword":"unused-new-password"}' \
   "$ACCESS"
+# ADR-0215 D6 (#4596): the issuing operator proves their OWN password, so the body carries the
+# gate user's real one — read from the registered 0600 secret file, never from argv.
 sample issue-password-reset post \
   "/v1/workspaces/{workspaceId}/members/{memberId}/password-reset" \
   "/v1/workspaces/$WS/members/$GATE_PEER_ID/password-reset" 201 \
-  "" "$ACCESS"
+  "$(jq -cn --rawfile p "$LOGIN_PASSWORD_FILE" '{currentPassword:$p}')" "$ACCESS"
 RESET_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -r '.token // empty')"
 append_secret_with_derivatives "$RESET_TOKEN"
 [ -n "$RESET_TOKEN" ] || {
@@ -2007,8 +2009,16 @@ append_secret_with_derivatives "$RESET_TOKEN"
   redacted_body >&2
   exit 1
 }
-# sample() redacts the `token` key by name, but claimPath embeds the raw
-# token. Rewrite the evidence file now that the needle exists.
+# The link is named twice more besides `token`: `claimPath` (unchanged) and the absolute `claimUrl`
+# with whether its address can be trusted to open for the reader (ADR-0215 D6). jq reads the token
+# from the same body, so it never rides in argv.
+guard_jq '. as $r
+  | (.claimUrl | type == "string" and endswith("/claim/" + $r.token))
+  and (.claimUrlSecure | type == "boolean")
+  and (.claimPath == ("/claim/" + $r.token))' \
+  "password-reset 201 carries claimUrl and claimUrlSecure beside the unchanged claimPath"
+# sample() redacts the `token` key by name (and `claimPath`, `claimUrl`), but a string that merely
+# embeds the raw token is only caught once the needle exists. Rewrite the evidence file now.
 RESET_SAMPLE="$(jq -rs --arg name issue-password-reset \
   'map(select(.name==$name)) | last | .body_file // empty' "$MANIFEST")"
 [ -n "$RESET_SAMPLE" ] && [ -f "$RESET_SAMPLE" ] && [ ! -L "$RESET_SAMPLE" ] || {

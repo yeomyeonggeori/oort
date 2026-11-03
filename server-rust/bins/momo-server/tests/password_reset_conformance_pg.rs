@@ -9,10 +9,14 @@
 //!
 //! `#[ignore]` — needs a real Postgres. Run via `scripts/verify_owner_claim.sh`.
 
+use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use base64::Engine as _;
 
 use momo_auth::{
     consume_claim_in_tx, mint_owner_claim_token, ClaimMutation, OWNER_CLAIM_TOKEN_LEN,
@@ -21,9 +25,11 @@ use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::{with_tenant_tx, PgPool};
-use momo_server::config::RateLimitConfig;
+use momo_server::config::{RateLimitConfig, T3Settings};
 use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
+use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::util::SubscriberInitExt;
 use uuid::Uuid;
 
 #[path = "common/password_cases.rs"]
@@ -282,12 +288,15 @@ async fn issue_password_reset(
     workspace: Uuid,
     access: &str,
     target: Uuid,
+    operator_password: &str,
 ) -> (u16, Value) {
     let response = http
         .post(format!(
             "{base}/v1/workspaces/{workspace}/members/{target}/password-reset"
         ))
         .bearer_auth(access)
+        // ADR-0215 D6: the issuing operator proves their own password.
+        .json(&json!({ "currentPassword": operator_password }))
         .send()
         .await
         .expect("issue password-reset");
@@ -329,7 +338,15 @@ async fn hierarchy_cell(actor_role: &str, target_role: &str) -> (u16, Value) {
     } else {
         matrix_person(&tenant, target_role).id
     };
-    issue_password_reset(&http, &base, tenant.workspace, &access, target_id).await
+    issue_password_reset(
+        &http,
+        &base,
+        tenant.workspace,
+        &access,
+        target_id,
+        &actor.password,
+    )
+    .await
 }
 
 async fn seed_tenant(su: &PgPool, slug_hint: &str) -> Tenant {
@@ -556,6 +573,7 @@ async fn reset_issue_consume_reuse_reissue_and_cross_workspace() {
             tenant.workspace, tenant.member.id
         ))
         .bearer_auth(access)
+        .json(&json!({ "currentPassword": &tenant.owner.password }))
         .send()
         .await
         .expect("issue");
@@ -569,6 +587,17 @@ async fn reset_issue_consume_reuse_reissue_and_cross_workspace() {
             .as_str()
             .is_some_and(|path| path == format!("/claim/{token}")),
         "claimPath must be the existing ClaimPage route: {issued_body}"
+    );
+    // ADR-0215 D6 (acceptance 5c): `claimPath` stays, and an absolute `claimUrl` joins it.
+    assert!(
+        issued_body["claimUrl"]
+            .as_str()
+            .is_some_and(|url| url.ends_with(&format!("/claim/{token}"))),
+        "the 201 names the link as a URL too: {issued_body}"
+    );
+    assert!(
+        issued_body["claimUrlSecure"].is_boolean(),
+        "and says whether the address can be trusted to open for the reader: {issued_body}"
     );
 
     let first_hash: Vec<u8> = sqlx::query_scalar(
@@ -590,6 +619,7 @@ async fn reset_issue_consume_reuse_reissue_and_cross_workspace() {
             tenant.workspace, tenant.member.id
         ))
         .bearer_auth(access)
+        .json(&json!({ "currentPassword": &tenant.owner.password }))
         .send()
         .await
         .expect("reissue");
@@ -680,6 +710,7 @@ async fn reset_issue_consume_reuse_reissue_and_cross_workspace() {
             tenant.workspace, tenant.owner.id
         ))
         .bearer_auth(member_access)
+        .json(&json!({ "currentPassword": RESET_PASSWORD }))
         .send()
         .await
         .expect("member issue");
@@ -715,6 +746,11 @@ async fn an_expired_reset_token_is_gone() {
     let http = reqwest::Client::new();
     let (status, body) = post_claim(&http, &base, &token, RESET_PASSWORD).await;
     assert_eq!(status, 410, "expired reset must be 410: {body}");
+    assert_eq!(
+        body["claimKind"],
+        json!("password_reset"),
+        "the 410 names the kind of link that ran out (ADR-0215 D6): {body}"
+    );
     assert_eq!(
         login(
             &http,
@@ -1126,6 +1162,7 @@ async fn a_reset_claim_password_is_held_to_the_new_password_rule() {
         tenant.workspace,
         owner["accessToken"].as_str().expect("owner access"),
         tenant.member.id,
+        &tenant.owner.password,
     )
     .await;
     assert_eq!(status, 201, "{issued}");
@@ -1397,3 +1434,1470 @@ hierarchy_cell_test!(hierarchy_guest_cannot_reset_admin, "guest", "admin", 403);
 hierarchy_cell_test!(hierarchy_guest_cannot_reset_member, "guest", "member", 403);
 hierarchy_cell_test!(hierarchy_guest_cannot_reset_guest, "guest", "guest", 403);
 hierarchy_cell_test!(hierarchy_guest_cannot_reset_self, "guest", "self", 403);
+
+// ===========================================================================
+// #4596 — the operator's reissue (ADR-0215 D6) and the end of a pending link (D4)
+// ===========================================================================
+
+const WRONG_OPERATOR_PASSWORD: &str = "not-the-operators-password";
+
+/// A rate-limit config with the reissue budget at `limit`. The member-change throttle is off
+/// too: the scenes below change a member's password a few times inside a minute.
+fn reissue_rate(limit: u32) -> RateLimitConfig {
+    RateLimitConfig {
+        password_reset_issue_per_admin_limit: limit,
+        password_change_per_member_limit: 0,
+        password_change_per_ip_limit: 0,
+        ..RateLimitConfig::default()
+    }
+}
+
+async fn start_server_with(pool: PgPool, rate: RateLimitConfig, t3: Option<T3Settings>) -> String {
+    let mut state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_rate_limit(rate);
+    if let Some(settings) = t3 {
+        state = state.with_t3(settings);
+    }
+    let app = build_app(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind momo-server");
+    let address: SocketAddr = listener.local_addr().expect("server address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{address}")
+}
+
+async fn access_of(http: &reqwest::Client, base: &str, workspace: Uuid, who: &Person) -> String {
+    let (status, body) = login(http, base, workspace, &who.email, &who.password).await;
+    assert_eq!(status, 200, "{} must sign in: {body}", who.email);
+    body["accessToken"].as_str().expect("access").to_string()
+}
+
+fn reset_url(base: &str, workspace: Uuid, target: Uuid) -> String {
+    format!("{base}/v1/workspaces/{workspace}/members/{target}/password-reset")
+}
+
+/// The operator's request with their own password in the body.
+async fn issue_as(
+    http: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    access: &str,
+    target: Uuid,
+    password: &str,
+) -> reqwest::Response {
+    http.post(reset_url(base, workspace, target))
+        .bearer_auth(access)
+        .json(&json!({ "currentPassword": password }))
+        .send()
+        .await
+        .expect("issue as the operator")
+}
+
+/// A link issued properly: the raw token.
+async fn issue_link(
+    http: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    operator: &(String, &str),
+    target: Uuid,
+) -> String {
+    let response = issue_as(http, base, workspace, &operator.0, target, operator.1).await;
+    assert_eq!(response.status().as_u16(), 201, "the link is issued");
+    let body: Value = response.json().await.expect("issue body");
+    body["token"].as_str().expect("token").to_string()
+}
+
+async fn live_reset_hashes(su: &PgPool, workspace: Uuid, member: Uuid) -> Vec<Vec<u8>> {
+    sqlx::query_scalar(
+        "SELECT token_hash FROM credential_claim \
+          WHERE workspace_id = $1 AND member_id = $2 \
+            AND kind = 'password_reset' AND consumed_at IS NULL",
+    )
+    .bind(workspace)
+    .bind(member)
+    .fetch_all(su)
+    .await
+    .expect("live reset hashes")
+}
+
+async fn audit_details(su: &PgPool, workspace: Uuid, action: &str) -> Vec<Value> {
+    sqlx::query_scalar("SELECT detail FROM audit_log WHERE workspace_id = $1 AND action = $2")
+        .bind(workspace)
+        .bind(action)
+        .fetch_all(su)
+        .await
+        .expect("audit rows")
+}
+
+/// ADR-0215 D6, acceptance 4b / 4b′ / 4d: the issue asks for the **operator's own** password.
+/// Nothing usable sent is one 400 (not the extractor's 415 / 422); a wrong one is a 403 that
+/// changes nothing — the previous live link is the same row, no issue audit row is written, and
+/// exactly one refusal row records it (never a value the caller sent); a plain member is turned
+/// away by the ladder, not by the password, and leaves no refusal row. And it is the operator's
+/// own and nobody else's: a real password that belongs to someone else in the workspace, and an
+/// operator with no stored password, are wrong passwords too.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_issue_asks_for_the_operators_own_password_and_a_refusal_changes_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_tenant(&su, "reissue-confirm").await;
+    let base = start_server_with(app_pool, reissue_rate(10_000), None).await;
+    let http = reqwest::Client::new();
+    let owner = access_of(&http, &base, tenant.workspace, &tenant.owner).await;
+    let url = reset_url(&base, tenant.workspace, tenant.member.id);
+
+    // A proper issue first: the live link every refusal below must leave alone.
+    let operator = (owner.clone(), tenant.owner.password.as_str());
+    let live_token = issue_link(&http, &base, tenant.workspace, &operator, tenant.member.id).await;
+    let hashes_before = live_reset_hashes(&su, tenant.workspace, tenant.member.id).await;
+    assert_eq!(hashes_before.len(), 1);
+    assert_eq!(
+        audit_details(&su, tenant.workspace, "member.password_reset.issued")
+            .await
+            .len(),
+        1
+    );
+
+    // 4b — nothing usable sent: one 400 with one code, however it was not sent.
+    let broken_cases = [
+        ("no body", http.post(&url)),
+        ("empty object", http.post(&url).json(&json!({}))),
+        (
+            "empty string",
+            http.post(&url).json(&json!({ "currentPassword": "" })),
+        ),
+        (
+            "wrong type",
+            http.post(&url).json(&json!({ "currentPassword": 5 })),
+        ),
+        (
+            "null",
+            http.post(&url).json(&json!({ "currentPassword": null })),
+        ),
+        (
+            "not json",
+            http.post(&url)
+                .header("content-type", "text/plain")
+                .body("hunter2"),
+        ),
+        (
+            "broken json",
+            http.post(&url)
+                .header("content-type", "application/json")
+                .body("{"),
+        ),
+    ];
+    for (label, request) in broken_cases {
+        let response = request.bearer_auth(&owner).send().await.expect(label);
+        assert_eq!(response.status().as_u16(), 400, "{label}");
+        let body: Value = response.json().await.expect("error body");
+        assert_eq!(
+            body["error"]["code"],
+            json!("current_password_required"),
+            "{label}: {body}"
+        );
+    }
+    let too_long = "x".repeat(1025);
+    assert_eq!(
+        issue_as(
+            &http,
+            &base,
+            tenant.workspace,
+            &owner,
+            tenant.member.id,
+            &too_long
+        )
+        .await
+        .status()
+        .as_u16(),
+        400,
+        "the password the operator proves is bounded like any current password"
+    );
+    assert_eq!(
+        audit_details(&su, tenant.workspace, "member.password_reset.refused")
+            .await
+            .len(),
+        0,
+        "a request that sent no password is not a wrong password: no refusal row"
+    );
+
+    // 4b′ — a wrong password: 403, and nothing else moved.
+    let wrong = issue_as(
+        &http,
+        &base,
+        tenant.workspace,
+        &owner,
+        tenant.member.id,
+        WRONG_OPERATOR_PASSWORD,
+    )
+    .await;
+    assert_eq!(wrong.status().as_u16(), 403);
+    let wrong_body: Value = wrong.json().await.expect("refusal body");
+    assert_eq!(
+        wrong_body["error"]["code"],
+        json!("current_password_incorrect"),
+        "{wrong_body}"
+    );
+    assert_eq!(
+        live_reset_hashes(&su, tenant.workspace, tenant.member.id).await,
+        hashes_before,
+        "the previous live link is the same row it was"
+    );
+    assert_eq!(
+        audit_details(&su, tenant.workspace, "member.password_reset.issued")
+            .await
+            .len(),
+        1,
+        "a refused request writes no issue audit row"
+    );
+    let refused = audit_details(&su, tenant.workspace, "member.password_reset.refused").await;
+    assert_eq!(refused.len(), 1, "one refusal row records it");
+    assert_eq!(
+        refused[0],
+        json!({
+            "schema": "momo.member.password_reset.refused.v1",
+            "via": "admin",
+            "reason": "current_password_incorrect"
+        }),
+        "a refusal row is `via` and `reason`, nothing a caller sent"
+    );
+    // Same window, another wrong password: refused again, still one row (ADR-0215 D9).
+    let again = issue_as(
+        &http,
+        &base,
+        tenant.workspace,
+        &owner,
+        tenant.member.id,
+        "another-wrong-password",
+    )
+    .await;
+    assert_eq!(again.status().as_u16(), 403);
+    assert_eq!(
+        audit_details(&su, tenant.workspace, "member.password_reset.refused")
+            .await
+            .len(),
+        1,
+        "one refusal row per operator and window, however many wrong passwords"
+    );
+
+    // A plain member: the ladder's 403, with their own right password and with none — and no
+    // refusal row, which is for a wrong *operator* password.
+    let member = access_of(&http, &base, tenant.workspace, &tenant.member).await;
+    for password in [Some(tenant.member.password.as_str()), None] {
+        let request = http.post(&url).bearer_auth(&member);
+        let response = match password {
+            Some(password) => request.json(&json!({ "currentPassword": password })),
+            None => request,
+        }
+        .send()
+        .await
+        .expect("member attempt");
+        assert_eq!(
+            response.status().as_u16(),
+            403,
+            "a plain member is turned away whatever the body says"
+        );
+    }
+    assert_eq!(
+        audit_details(&su, tenant.workspace, "member.password_reset.refused")
+            .await
+            .len(),
+        1,
+        "the ladder's 403 is not a wrong password"
+    );
+
+    // The password that opens the issue is the issuing operator's own: a real password that
+    // belongs to someone else in the workspace (the target's, another admin's, another owner's)
+    // is as wrong as an invented one, whichever operator types it.
+    let admin = seed_human(&su, tenant.workspace, "admin", "admin", ADMIN_PASSWORD).await;
+    let admin_other = seed_human(&su, tenant.workspace, "admin-b", "admin", ADMIN_B_PASSWORD).await;
+    let owner_other = seed_human(&su, tenant.workspace, "owner-b", "owner", OWNER_B_PASSWORD).await;
+    let admin_access = access_of(&http, &base, tenant.workspace, &admin).await;
+    for (who, access, password) in [
+        (
+            "an owner with the target's password",
+            &owner,
+            tenant.member.password.as_str(),
+        ),
+        (
+            "an owner with an admin's password",
+            &owner,
+            admin.password.as_str(),
+        ),
+        (
+            "an owner with another owner's password",
+            &owner,
+            owner_other.password.as_str(),
+        ),
+        (
+            "an admin with an owner's password",
+            &admin_access,
+            tenant.owner.password.as_str(),
+        ),
+        (
+            "an admin with another admin's password",
+            &admin_access,
+            admin_other.password.as_str(),
+        ),
+        (
+            "an admin with the target's password",
+            &admin_access,
+            tenant.member.password.as_str(),
+        ),
+    ] {
+        let response = issue_as(
+            &http,
+            &base,
+            tenant.workspace,
+            access,
+            tenant.member.id,
+            password,
+        )
+        .await;
+        let status = response.status().as_u16();
+        let body: Value = response.json().await.unwrap_or(json!({}));
+        assert_eq!(
+            status, 403,
+            "the issue opens with the issuing operator's own password only, not {who}: {body}"
+        );
+        assert_eq!(
+            body["error"]["code"],
+            json!("current_password_incorrect"),
+            "{who}: {body}"
+        );
+    }
+    assert_eq!(
+        live_reset_hashes(&su, tenant.workspace, tenant.member.id).await,
+        hashes_before,
+        "another person's password minted nothing: the live link is the row it was"
+    );
+
+    // An operator with no usable stored password (none, empty, not a hash) proves nothing:
+    // whatever is typed, the stored value itself included, is a wrong password.
+    for (stored_as, stored) in [
+        ("no password", None::<&str>),
+        ("an empty password", Some("")),
+        ("a value that is not a hash", Some("plain-text-not-a-hash")),
+    ] {
+        sqlx::query("UPDATE human SET password_hash = $2 WHERE member_id = $1")
+            .bind(admin.id)
+            .bind(stored)
+            .execute(&su)
+            .await
+            .expect("take the operator's stored password away");
+        for typed in ["anything-at-all", "plain-text-not-a-hash", ADMIN_PASSWORD] {
+            let response = issue_as(
+                &http,
+                &base,
+                tenant.workspace,
+                &admin_access,
+                tenant.member.id,
+                typed,
+            )
+            .await;
+            let status = response.status().as_u16();
+            let body: Value = response.json().await.unwrap_or(json!({}));
+            assert_eq!(
+                status, 403,
+                "an operator stored with {stored_as} issues with nothing, not with {typed:?}: {body}"
+            );
+            assert_eq!(
+                body["error"]["code"],
+                json!("current_password_incorrect"),
+                "{stored_as} / {typed:?}: {body}"
+            );
+        }
+    }
+    assert_eq!(
+        live_reset_hashes(&su, tenant.workspace, tenant.member.id).await,
+        hashes_before,
+        "an operator with no stored password minted nothing: the live link is the row it was"
+    );
+    assert_eq!(
+        audit_details(&su, tenant.workspace, "member.password_reset.issued")
+            .await
+            .len(),
+        1,
+        "only the one proper issue wrote an issue row"
+    );
+    assert_eq!(
+        audit_details(&su, tenant.workspace, "member.password_reset.refused")
+            .await
+            .len(),
+        2,
+        "one refusal row per operator and window: the owner's and the admin's"
+    );
+
+    // None of that touched the previous live link: it still opens.
+    let (status, body) = post_claim(&http, &base, &live_token, RESET_PASSWORD).await;
+    assert_eq!(status, 200, "the link a refused issue left alone: {body}");
+}
+
+/// ADR-0215 D6 / D2 (acceptance 1f, 4d): the password the operator *proves* is not held to the
+/// rule for a password they *choose* — an operator whose password predates the rule can still issue.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_operator_whose_password_predates_the_new_rule_can_still_issue() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_tenant(&su, "reissue-short").await;
+    let short = seed_human(&su, tenant.workspace, "admin9", "admin", "short-pw9").await;
+    assert_eq!(
+        short.password.chars().count(),
+        9,
+        "below the 10-character rule"
+    );
+    let base = start_server_with(app_pool, reissue_rate(10_000), None).await;
+    let http = reqwest::Client::new();
+    let access = access_of(&http, &base, tenant.workspace, &short).await;
+    let response = issue_as(
+        &http,
+        &base,
+        tenant.workspace,
+        &access,
+        tenant.member.id,
+        &short.password,
+    )
+    .await;
+    assert_eq!(
+        response.status().as_u16(),
+        201,
+        "a 9-character current password issues: {}",
+        response.text().await.unwrap_or_default()
+    );
+}
+
+/// ADR-0215 D6, acceptance 4c: the password is judged **before** the target is looked at, so a
+/// wrong password cannot tell a real member from a missing one — the same 403, word for word —
+/// while a proven operator does learn that a member is missing (404). Another workspace's
+/// operator reaches nothing of this workspace.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_wrong_operator_password_cannot_tell_a_real_member_from_a_missing_one() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_tenant(&su, "reissue-oracle").await;
+    let other = seed_tenant(&su, "reissue-oracle-b").await;
+    let base = start_server_with(app_pool, reissue_rate(10_000), None).await;
+    let http = reqwest::Client::new();
+    let owner = access_of(&http, &base, tenant.workspace, &tenant.owner).await;
+    let missing = Uuid::new_v4();
+
+    let real_wrong = issue_as(
+        &http,
+        &base,
+        tenant.workspace,
+        &owner,
+        tenant.member.id,
+        WRONG_OPERATOR_PASSWORD,
+    )
+    .await;
+    let missing_wrong = issue_as(
+        &http,
+        &base,
+        tenant.workspace,
+        &owner,
+        missing,
+        WRONG_OPERATOR_PASSWORD,
+    )
+    .await;
+    assert_eq!(real_wrong.status().as_u16(), 403);
+    assert_eq!(missing_wrong.status().as_u16(), 403);
+    let (real_body, missing_body): (Value, Value) = (
+        real_wrong.json().await.expect("real"),
+        missing_wrong.json().await.expect("missing"),
+    );
+    assert_eq!(
+        real_body, missing_body,
+        "a wrong password answers the same for a real member and a missing one"
+    );
+
+    // Control: once the password is proven the lookup does happen, and a missing member is a 404.
+    let proven_missing = issue_as(
+        &http,
+        &base,
+        tenant.workspace,
+        &owner,
+        missing,
+        &tenant.owner.password,
+    )
+    .await;
+    assert_eq!(proven_missing.status().as_u16(), 404);
+
+    // Another workspace's operator: the path says this workspace -> scope mismatch; their own
+    // workspace with this workspace's member -> nothing there, and a wrong password there is the
+    // same 403 as everywhere.
+    let foreign = access_of(&http, &base, other.workspace, &other.owner).await;
+    assert_eq!(
+        issue_as(
+            &http,
+            &base,
+            tenant.workspace,
+            &foreign,
+            tenant.member.id,
+            &other.owner.password
+        )
+        .await
+        .status()
+        .as_u16(),
+        403,
+        "a bearer of another workspace is refused at the workspace scope"
+    );
+    assert_eq!(
+        issue_as(
+            &http,
+            &base,
+            other.workspace,
+            &foreign,
+            tenant.member.id,
+            &other.owner.password
+        )
+        .await
+        .status()
+        .as_u16(),
+        404,
+        "this workspace's member does not exist in the other workspace"
+    );
+    assert_eq!(
+        live_reset_hashes(&su, tenant.workspace, tenant.member.id)
+            .await
+            .len(),
+        0,
+        "nothing above minted a link"
+    );
+}
+
+/// ADR-0215 D6, acceptance 4f: the budget is the operator's own — the sixth request in a window is
+/// a 429 **even with the right password**, wrong passwords count against it as well, and another
+/// operator's budget is untouched.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_operators_budget_is_per_operator_and_counts_a_right_password_too() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_matrix_tenant(&su, "reissue-budget").await;
+    let base = start_server(app_pool).await; // the production default: 5 a window
+    let http = reqwest::Client::new();
+    let owner = access_of(&http, &base, tenant.workspace, &tenant.owner).await;
+    let other_owner = access_of(&http, &base, tenant.workspace, &tenant.owner_other).await;
+    let admin = access_of(&http, &base, tenant.workspace, &tenant.admin).await;
+
+    for attempt in 1..=5 {
+        let response = issue_as(
+            &http,
+            &base,
+            tenant.workspace,
+            &owner,
+            tenant.member.id,
+            &tenant.owner.password,
+        )
+        .await;
+        assert_eq!(
+            response.status().as_u16(),
+            201,
+            "request {attempt} is inside the budget"
+        );
+    }
+    let sixth = issue_as(
+        &http,
+        &base,
+        tenant.workspace,
+        &owner,
+        tenant.member.id,
+        &tenant.owner.password,
+    )
+    .await;
+    assert_eq!(
+        sixth.status().as_u16(),
+        429,
+        "the sixth request is over budget even with the right password"
+    );
+    let retry_after: u64 = sixth
+        .headers()
+        .get("retry-after")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok())
+        .expect("a 429 says when to come back");
+    assert!(retry_after > 0 && retry_after <= 60, "{retry_after}");
+    assert_eq!(
+        issue_as(
+            &http,
+            &base,
+            tenant.workspace,
+            &owner,
+            tenant.member.id,
+            WRONG_OPERATOR_PASSWORD
+        )
+        .await
+        .status()
+        .as_u16(),
+        429,
+        "once the budget is spent, the budget answers — not the password"
+    );
+
+    // Another operator's budget is their own.
+    assert_eq!(
+        issue_as(
+            &http,
+            &base,
+            tenant.workspace,
+            &other_owner,
+            tenant.member.id,
+            &tenant.owner_other.password
+        )
+        .await
+        .status()
+        .as_u16(),
+        201,
+        "the other owner's budget is untouched"
+    );
+
+    // Wrong passwords are guesses and count: five of them use the admin's window up.
+    for attempt in 1..=5 {
+        assert_eq!(
+            issue_as(
+                &http,
+                &base,
+                tenant.workspace,
+                &admin,
+                tenant.member.id,
+                WRONG_OPERATOR_PASSWORD
+            )
+            .await
+            .status()
+            .as_u16(),
+            403,
+            "guess {attempt} is inside the budget and wrong"
+        );
+    }
+    assert_eq!(
+        issue_as(
+            &http,
+            &base,
+            tenant.workspace,
+            &admin,
+            tenant.member.id,
+            &tenant.admin.password
+        )
+        .await
+        .status()
+        .as_u16(),
+        429,
+        "five wrong guesses spent the window: the right password waits too"
+    );
+}
+
+/// ADR-0215 D6, acceptance 5b / 5b′ / 5c: `claimUrl` is the **configured public address** when
+/// there is one — whatever `Host` the request carries — else the request's own origin; and that
+/// origin is only "secure" when it is https and not loopback / a private address. `claimPath` stays.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_link_address_is_the_configured_public_one_before_the_hosts_and_says_when_it_is_local()
+{
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let tenant = seed_tenant(&su, "reissue-origin").await;
+    let http = reqwest::Client::new();
+
+    let issue_at = |base: String, headers: Vec<(&'static str, &'static str)>| {
+        let (http, workspace, member) = (http.clone(), tenant.workspace, tenant.member.id);
+        let (email, password) = (tenant.owner.email.clone(), tenant.owner.password.clone());
+        async move {
+            let (_, login_body) = login(&http, &base, workspace, &email, &password).await;
+            let access = login_body["accessToken"]
+                .as_str()
+                .expect("access")
+                .to_string();
+            let mut request = http
+                .post(reset_url(&base, workspace, member))
+                .bearer_auth(access)
+                .json(&json!({ "currentPassword": password }));
+            for (name, value) in headers {
+                request = request.header(name, value);
+            }
+            let response = request.send().await.expect("issue");
+            assert_eq!(response.status().as_u16(), 201);
+            let body: Value = response.json().await.expect("issue body");
+            body
+        }
+    };
+
+    // Configured: the public address wins over any Host the request carries.
+    let configured = start_server_with(
+        momo_app_pool().await,
+        reissue_rate(10_000),
+        Some(T3Settings {
+            public_base_url: Some("https://oort.example.test".to_string()),
+            ..T3Settings::default()
+        }),
+    )
+    .await;
+    let body = issue_at(configured, vec![("host", "evil.example")]).await;
+    let token = body["token"].as_str().expect("token");
+    assert_eq!(
+        body["claimUrl"],
+        json!(format!("https://oort.example.test/claim/{token}")),
+        "the configured address, not the request's Host: {body}"
+    );
+    assert_eq!(body["claimUrlSecure"], json!(true), "{body}");
+    assert_eq!(
+        body["claimPath"],
+        json!(format!("/claim/{token}")),
+        "{body}"
+    );
+
+    // Not configured: the request's own origin, and the answer says when it is local.
+    let plain = start_server_with(momo_app_pool().await, reissue_rate(10_000), None).await;
+    let own_host = plain.trim_start_matches("http://").to_string();
+    for (headers, expected_origin, secure) in [
+        (vec![], format!("http://{own_host}"), false),
+        (
+            vec![
+                ("host", "oort.example.test"),
+                ("x-forwarded-proto", "https"),
+            ],
+            "https://oort.example.test".to_string(),
+            true,
+        ),
+        (
+            vec![("host", "oort.example.test"), ("x-forwarded-proto", "http")],
+            "http://oort.example.test".to_string(),
+            false,
+        ),
+        (
+            vec![("host", "192.168.1.5"), ("x-forwarded-proto", "https")],
+            "https://192.168.1.5".to_string(),
+            false,
+        ),
+        (
+            vec![("host", "localhost:3000"), ("x-forwarded-proto", "https")],
+            "https://localhost:3000".to_string(),
+            false,
+        ),
+    ] {
+        let body = issue_at(plain.clone(), headers.clone()).await;
+        let token = body["token"].as_str().expect("token");
+        assert_eq!(
+            body["claimUrl"],
+            json!(format!("{expected_origin}/claim/{token}")),
+            "{headers:?}: {body}"
+        );
+        assert_eq!(body["claimUrlSecure"], json!(secure), "{headers:?}: {body}");
+    }
+}
+
+fn assert_names_no_claim_kind(case: &str, body: &Value) {
+    assert!(
+        body.get("claimKind").is_none() && !body.to_string().contains("claimKind"),
+        "{case}: this answer must not name the kind of link: {body}"
+    );
+}
+
+/// ADR-0215 D6, acceptance 5a: `claimKind` is named on the 200, the 409 and the 410 — for both
+/// kinds — and on **nothing else**: the 404 (unknown token, or a member who is not active), the
+/// 400s and the 429 give a caller who does not hold a spendable token nothing about the token.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn claim_kind_is_named_on_200_409_and_410_and_on_nothing_else() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let tenant = seed_tenant(&su, "claim-kind").await;
+    let base = start_server_with(momo_app_pool().await, reissue_rate(10_000), None).await;
+    let http = reqwest::Client::new();
+    let owner = (
+        access_of(&http, &base, tenant.workspace, &tenant.owner).await,
+        tenant.owner.password.as_str(),
+    );
+
+    // ---- password_reset ------------------------------------------------------------------
+    let link = issue_link(&http, &base, tenant.workspace, &owner, tenant.member.id).await;
+    let (status, body) = post_claim(&http, &base, &link, RESET_PASSWORD).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["claimKind"], json!("password_reset"), "200: {body}");
+    assert!(
+        body["accessToken"].is_string() && body["member"].is_object(),
+        "the 200 is still the login response, with the kind added: {body}"
+    );
+    let (status, body) = post_claim(&http, &base, &link, RESET_PASSWORD).await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["claimKind"], json!("password_reset"), "409: {body}");
+
+    let expired_for = seed_human(&su, tenant.workspace, "expired", "member", MEMBER_PASSWORD).await;
+    let expired = mint_owner_claim_token().expect("entropy");
+    sqlx::query(
+        "INSERT INTO credential_claim \
+            (workspace_id, member_id, token_hash, expires_at, created_at, kind) \
+         VALUES ($1, $2, digest($3::text, 'sha256'), \
+                 now() - interval '1 second', now() - interval '2 seconds', 'password_reset')",
+    )
+    .bind(tenant.workspace)
+    .bind(expired_for.id)
+    .bind(&expired)
+    .execute(&su)
+    .await
+    .expect("seed expired reset");
+    let (status, body) = post_claim(&http, &base, &expired, RESET_PASSWORD).await;
+    assert_eq!(status, 410, "{body}");
+    assert_eq!(body["claimKind"], json!("password_reset"), "410: {body}");
+
+    // ---- owner_bootstrap -----------------------------------------------------------------
+    let (_, _, _, fresh) = seed_owner_bootstrap(&su, "now() + interval '24 hours'", "now()").await;
+    let (status, body) = post_claim(&http, &base, &fresh, RESET_PASSWORD).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(body["claimKind"], json!("owner_bootstrap"), "200: {body}");
+    let (status, body) = post_claim(&http, &base, &fresh, RESET_PASSWORD).await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["claimKind"], json!("owner_bootstrap"), "409: {body}");
+    let (_, _, _, stale) = seed_owner_bootstrap(
+        &su,
+        "now() - interval '1 second'",
+        "now() - interval '2 seconds'",
+    )
+    .await;
+    let (status, body) = post_claim(&http, &base, &stale, RESET_PASSWORD).await;
+    assert_eq!(status, 410, "{body}");
+    assert_eq!(body["claimKind"], json!("owner_bootstrap"), "410: {body}");
+    let (_, has_password, _, held) =
+        seed_owner_bootstrap(&su, "now() + interval '24 hours'", "now()").await;
+    sqlx::query("UPDATE human SET password_hash = momo_password_hash($2) WHERE member_id = $1")
+        .bind(has_password)
+        .bind("already-has-a-password")
+        .execute(&su)
+        .await
+        .expect("give the owner a password");
+    let (status, body) = post_claim(&http, &base, &held, RESET_PASSWORD).await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(
+        body["error"]["message"],
+        json!("owner already has a password"),
+        "{body}"
+    );
+    assert_eq!(body["claimKind"], json!("owner_bootstrap"), "409: {body}");
+
+    // ---- nothing else names it -----------------------------------------------------------
+    let unknown = mint_owner_claim_token().expect("entropy");
+    let (status, body) = post_claim(&http, &base, &unknown, RESET_PASSWORD).await;
+    assert_eq!(status, 404, "{body}");
+    assert_names_no_claim_kind("unknown token", &body);
+
+    let inactive_for =
+        seed_human(&su, tenant.workspace, "inactive", "member", MEMBER_PASSWORD).await;
+    let inactive = issue_link(&http, &base, tenant.workspace, &owner, inactive_for.id).await;
+    // Suspended behind the server's back, so the link is still unspent and its member is not active.
+    sqlx::query("UPDATE member SET status = 'suspended' WHERE id = $1")
+        .bind(inactive_for.id)
+        .execute(&su)
+        .await
+        .expect("suspend");
+    let (status, body) = post_claim(&http, &base, &inactive, RESET_PASSWORD).await;
+    assert_eq!(status, 404, "{body}");
+    assert_names_no_claim_kind("a member who is not active", &body);
+
+    let (status, body) = post_claim(&http, &base, "abc", RESET_PASSWORD).await;
+    assert_eq!(status, 400, "{body}");
+    assert_names_no_claim_kind("a malformed token", &body);
+    let spare_for = seed_human(&su, tenant.workspace, "spare", "member", MEMBER_PASSWORD).await;
+    let spare = issue_link(&http, &base, tenant.workspace, &owner, spare_for.id).await;
+    let (status, body) = post_claim(&http, &base, &spare, "short").await;
+    assert_eq!(status, 400, "{body}");
+    assert_names_no_claim_kind("a refused password", &body);
+
+    let throttled = start_server_with(
+        momo_app_pool().await,
+        RateLimitConfig {
+            claim_per_ip_limit: 1,
+            ..RateLimitConfig::default()
+        },
+        None,
+    )
+    .await;
+    let mut last = (0, json!({}));
+    for _ in 0..2 {
+        let response = http
+            .post(format!("{throttled}/v1/claim"))
+            .header("x-forwarded-for", "198.51.100.77")
+            .json(&json!({ "token": spare, "password": RESET_PASSWORD }))
+            .send()
+            .await
+            .expect("claim");
+        last = (
+            response.status().as_u16(),
+            response.json().await.unwrap_or(json!({})),
+        );
+    }
+    assert_eq!(last.0, 429, "{}", last.1);
+    assert_names_no_claim_kind("the per-address limit", &last.1);
+}
+
+/// ADR-0215 D4, acceptance 2d / 2e / 2f: a member-wide end of sessions ends the member's pending
+/// reset link in the same commit — a suspension, a removal, leaving the workspace — but the
+/// member's **own password change does not** (a thief who knows the password must not be able to
+/// cut every link an operator issues), and an `owner_bootstrap` claim is left alone by all of it.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_pending_reset_link_ends_with_the_members_sessions_but_not_with_their_own_change() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let tenant = seed_tenant(&su, "link-ends").await;
+    let base = start_server_with(momo_app_pool().await, reissue_rate(10_000), None).await;
+    let http = reqwest::Client::new();
+    let owner = (
+        access_of(&http, &base, tenant.workspace, &tenant.owner).await,
+        tenant.owner.password.as_str(),
+    );
+    let ws = tenant.workspace;
+
+    // 2d — suspension, removal, leaving: the old link answers 409, and the row is spent.
+    let suspended = seed_human(&su, ws, "to-suspend", "member", MEMBER_PASSWORD).await;
+    let removed = seed_human(&su, ws, "to-remove", "member", MEMBER_PASSWORD).await;
+    let leaving = seed_human(&su, ws, "to-leave", "member", MEMBER_PASSWORD).await;
+    let suspended_link = issue_link(&http, &base, ws, &owner, suspended.id).await;
+    let removed_link = issue_link(&http, &base, ws, &owner, removed.id).await;
+    let leaving_link = issue_link(&http, &base, ws, &owner, leaving.id).await;
+    for member in [suspended.id, removed.id, leaving.id] {
+        assert_eq!(live_reset_hashes(&su, ws, member).await.len(), 1);
+    }
+
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{ws}/members/{}/suspend",
+            suspended.id
+        ))
+        .bearer_auth(&owner.0)
+        .send()
+        .await
+        .expect("suspend");
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "{:?}",
+        response.text().await
+    );
+    let response = http
+        .delete(format!("{base}/v1/workspaces/{ws}/members/{}", removed.id))
+        .bearer_auth(&owner.0)
+        .send()
+        .await
+        .expect("remove");
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "{:?}",
+        response.text().await
+    );
+    let leaving_access = access_of(&http, &base, ws, &leaving).await;
+    let response = http
+        .delete(format!("{base}/v1/workspaces/{ws}/members/me"))
+        .bearer_auth(&leaving_access)
+        .send()
+        .await
+        .expect("leave");
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "{:?}",
+        response.text().await
+    );
+
+    for (scene, member, link) in [
+        ("suspended", suspended.id, &suspended_link),
+        ("removed", removed.id, &removed_link),
+        ("left", leaving.id, &leaving_link),
+    ] {
+        assert_eq!(
+            live_reset_hashes(&su, ws, member).await.len(),
+            0,
+            "{scene}: the pending link is spent with the sessions"
+        );
+        let (status, body) = post_claim(&http, &base, link, RESET_PASSWORD).await;
+        assert_eq!(
+            status, 409,
+            "{scene}: the old link answers 'already used': {body}"
+        );
+    }
+
+    // 2e — the member's own change leaves the link alone, however often it happens.
+    let changer = seed_human(&su, ws, "to-change", "member", MEMBER_PASSWORD).await;
+    let changer_link = issue_link(&http, &base, ws, &owner, changer.id).await;
+    let mut access = access_of(&http, &base, ws, &changer).await;
+    let (mut current, mut next) = (MEMBER_PASSWORD, CHANGED_PASSWORD);
+    for round in 0..2 {
+        let (status, body) = change_password(&http, &base, ws, &access, current, next).await;
+        assert_eq!(status, 200, "change {round}: {body}");
+        access = body["accessToken"]
+            .as_str()
+            .expect("new access")
+            .to_string();
+        std::mem::swap(&mut current, &mut next);
+    }
+    assert_eq!(
+        live_reset_hashes(&su, ws, changer.id).await.len(),
+        1,
+        "two changes of the member's own later, the operator's link is still live"
+    );
+    let (status, body) = post_claim(&http, &base, &changer_link, RESET_PASSWORD).await;
+    assert_eq!(
+        status, 200,
+        "the link a change did not end still works: {body}"
+    );
+
+    // 2f — an owner_bootstrap claim is not a reset link: nothing above ends it.
+    let guarded = seed_human(&su, ws, "has-bootstrap", "member", MEMBER_PASSWORD).await;
+    let bootstrap = mint_owner_claim_token().expect("entropy");
+    sqlx::query(
+        "INSERT INTO credential_claim \
+            (workspace_id, member_id, token_hash, expires_at, created_at, kind) \
+         VALUES ($1, $2, digest($3::text, 'sha256'), now() + interval '24 hours', now(), \
+                 'owner_bootstrap')",
+    )
+    .bind(ws)
+    .bind(guarded.id)
+    .bind(&bootstrap)
+    .execute(&su)
+    .await
+    .expect("seed a pending owner_bootstrap claim");
+    let _ = issue_link(&http, &base, ws, &owner, guarded.id).await;
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{ws}/members/{}/suspend",
+            guarded.id
+        ))
+        .bearer_auth(&owner.0)
+        .send()
+        .await
+        .expect("suspend the member that also has a bootstrap claim");
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "{:?}",
+        response.text().await
+    );
+    assert_eq!(
+        live_reset_hashes(&su, ws, guarded.id).await.len(),
+        0,
+        "the reset link ended"
+    );
+    let bootstrap_live: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM credential_claim \
+          WHERE workspace_id = $1 AND member_id = $2 \
+            AND kind = 'owner_bootstrap' AND consumed_at IS NULL",
+    )
+    .bind(ws)
+    .bind(guarded.id)
+    .fetch_one(&su)
+    .await
+    .expect("bootstrap claims");
+    assert_eq!(bootstrap_live, 1, "the owner_bootstrap claim is untouched");
+}
+
+/// ADR-0215 D4, acceptance 2g-1 at the level it can still be proven: every caller of the
+/// member-wide end already holds the membership lock, so the old claim-vs-suspension cycle can no
+/// longer be built over HTTP — but the end must still **never wait** for a claim row somebody
+/// else holds (a path that does not take the membership lock, a spend in flight). Hold the link's
+/// row from another connection and suspend the member: the suspension finishes at once, the held
+/// link is skipped, not ended and not waited for.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_claim_row_somebody_else_holds_is_skipped_not_waited_for() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let tenant = seed_tenant(&su, "link-skip").await;
+    let base = start_server_with(momo_app_pool().await, reissue_rate(10_000), None).await;
+    let http = reqwest::Client::new();
+    let owner = (
+        access_of(&http, &base, tenant.workspace, &tenant.owner).await,
+        tenant.owner.password.as_str(),
+    );
+    let _link = issue_link(&http, &base, tenant.workspace, &owner, tenant.member.id).await;
+
+    let mut holder = su.begin().await.expect("begin");
+    sqlx::query(
+        "SELECT id FROM credential_claim \
+          WHERE workspace_id = $1 AND member_id = $2 \
+            AND kind = 'password_reset' AND consumed_at IS NULL FOR UPDATE",
+    )
+    .bind(tenant.workspace)
+    .bind(tenant.member.id)
+    .fetch_one(&mut *holder)
+    .await
+    .expect("hold the link's row");
+
+    let suspension = {
+        let (http, access) = (http.clone(), owner.0.clone());
+        let url = format!(
+            "{base}/v1/workspaces/{}/members/{}/suspend",
+            tenant.workspace, tenant.member.id
+        );
+        tokio::spawn(async move {
+            http.post(url)
+                .bearer_auth(access)
+                .send()
+                .await
+                .expect("suspend")
+                .status()
+                .as_u16()
+        })
+    };
+    let finished = tokio::time::timeout(Duration::from_secs(5), suspension).await;
+    let status = match finished {
+        Ok(joined) => joined.expect("the suspension task"),
+        Err(_) => {
+            holder.rollback().await.expect("release the row");
+            panic!("the sweep waited for a claim row somebody else holds: it must SKIP LOCKED");
+        }
+    };
+    assert_eq!(
+        status, 200,
+        "the suspension went through while the row was held"
+    );
+    assert_eq!(
+        live_reset_hashes(&su, tenant.workspace, tenant.member.id)
+            .await
+            .len(),
+        1,
+        "the held link was skipped: not ended, not waited for"
+    );
+    holder.rollback().await.expect("release the row");
+}
+
+#[derive(Clone)]
+struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl Write for LogBuffer {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.0.lock().expect("log buffer").extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> MakeWriter<'a> for LogBuffer {
+    type Writer = LogBuffer;
+    fn make_writer(&'a self) -> Self::Writer {
+        self.clone()
+    }
+}
+
+/// RFC 3986 percent-encoding (unreserved characters stay literal).
+fn percent_encoded(raw: &str) -> String {
+    raw.bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+                (byte as char).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect()
+}
+
+/// Every spelling of `secret` a leak could take: as is, base64 (both alphabets) and percent-encoded.
+fn spellings(secret: &str) -> Vec<String> {
+    let mut all = vec![
+        secret.to_string(),
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(secret),
+        base64::engine::general_purpose::STANDARD.encode(secret),
+        percent_encoded(secret),
+    ];
+    all.sort();
+    all.dedup();
+    all
+}
+
+/// The names of the secrets that appear in `haystack` in any spelling.
+fn leaked<'a>(haystack: &str, secrets: &[(&'a str, &str)]) -> Vec<&'a str> {
+    secrets
+        .iter()
+        .filter(|(_, secret)| spellings(secret).iter().any(|form| haystack.contains(form)))
+        .map(|(name, _)| *name)
+        .collect()
+}
+
+/// ADR-0215 D9, acceptance 10: what the operator typed, the link and the password it sets never
+/// leave the server except in the one answer that hands them over. The whole path runs — a missing
+/// password, a wrong one, the issue, a refused new password, the claim, a replay — and the captured
+/// logs, every `audit_log` row of the workspace and every refusal body carry **none** of the
+/// operator's password (right or wrong), the token, the link, or the password the claim set, in any
+/// spelling. The detector is shown to see a leak: the token planted in the real capture, and every
+/// secret in every spelling planted in a short stand-in, is found.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn what_the_operator_typed_and_the_link_never_leave_the_server_but_in_the_answer_that_hands_them_over(
+) {
+    ensure_schema_and_roles();
+    let logs = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let _guard = tracing_subscriber::fmt()
+        .with_writer(LogBuffer(logs.clone()))
+        .with_max_level(tracing::Level::DEBUG)
+        .set_default();
+
+    let su = superuser_pool().await;
+    let tenant = seed_tenant(&su, "reissue-leak").await;
+    // Passwords that percent-encode and base64 differently from how they are typed.
+    let operator_password = "op pass/with+symbols=ü";
+    let wrong_password = "wrong pass/with+symbols=ü";
+    let wrong_password_again = "wrong again/with+symbols=ü";
+    let claimed_password = "new pass/with+symbols=ü!1";
+    let operator = seed_human(
+        &su,
+        tenant.workspace,
+        "leak-admin",
+        "admin",
+        operator_password,
+    )
+    .await;
+    let base = start_server_with(momo_app_pool().await, reissue_rate(10_000), None).await;
+    let http = reqwest::Client::new();
+    let access = access_of(&http, &base, tenant.workspace, &operator).await;
+
+    // Answers that must not echo anything: collected, and searched with the logs.
+    let mut refusals = String::new();
+    let response = http
+        .post(reset_url(&base, tenant.workspace, tenant.member.id))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("no password");
+    refusals.push_str(&response.text().await.unwrap_or_default());
+    let response = issue_as(
+        &http,
+        &base,
+        tenant.workspace,
+        &access,
+        tenant.member.id,
+        wrong_password,
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 403);
+    refusals.push_str(&response.text().await.unwrap_or_default());
+    // The window's one audit row is taken: this one is refused all the same, with no row of its own.
+    let response = issue_as(
+        &http,
+        &base,
+        tenant.workspace,
+        &access,
+        tenant.member.id,
+        wrong_password_again,
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 403);
+    refusals.push_str(&response.text().await.unwrap_or_default());
+
+    let response = issue_as(
+        &http,
+        &base,
+        tenant.workspace,
+        &access,
+        tenant.member.id,
+        operator_password,
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 201);
+    let issued: Value = response.json().await.expect("issue body");
+    let token = issued["token"].as_str().expect("token").to_string();
+    let claim_url = issued["claimUrl"].as_str().expect("claimUrl").to_string();
+
+    let (status, body) = post_claim(&http, &base, &token, "short").await;
+    assert_eq!(status, 400);
+    refusals.push_str(&body.to_string());
+    let (status, _) = post_claim(&http, &base, &token, claimed_password).await;
+    assert_eq!(status, 200);
+    let (status, body) = post_claim(&http, &base, &token, claimed_password).await;
+    assert_eq!(status, 409);
+    refusals.push_str(&body.to_string());
+
+    let audit: String = sqlx::query_scalar(
+        "SELECT coalesce(string_agg(row_to_json(a)::text, E'\\n'), '') \
+           FROM audit_log a WHERE a.workspace_id = $1",
+    )
+    .bind(tenant.workspace)
+    .fetch_one(&su)
+    .await
+    .expect("audit dump");
+    assert!(
+        audit.contains("member.password_reset.issued")
+            && audit.contains("member.password_reset.refused"),
+        "the dump is of the rows this path wrote"
+    );
+    assert_eq!(
+        audit
+            .matches("\"action\":\"member.password_reset.refused\"")
+            .count(),
+        1,
+        "two wrong passwords in one window leave one audit row"
+    );
+    let log_text = String::from_utf8_lossy(&logs.lock().expect("logs").clone()).to_string();
+    assert!(!log_text.is_empty(), "the capture saw the server run");
+
+    // ADR-0215 D9: a refusal with no audit row is not silent. The request that sent no password and
+    // the second wrong password of the window each leave one WARN line: the operator's id and a
+    // reason code, and — by the leak check below — nothing the request held.
+    let operator_id = operator.id.to_string();
+    let warn_lines = |message: &str| -> Vec<String> {
+        log_text
+            .lines()
+            .filter(|line| line.contains("WARN") && line.contains(message))
+            .map(str::to_string)
+            .collect()
+    };
+    let no_password = warn_lines("without a usable current password");
+    assert_eq!(no_password.len(), 1, "{no_password:?}");
+    assert!(
+        no_password[0].contains(&operator_id)
+            && no_password[0].contains("current_password_required"),
+        "{}",
+        no_password[0]
+    );
+    let again = warn_lines("refused again in this window");
+    assert_eq!(again.len(), 1, "{again:?}");
+    assert!(
+        again[0].contains(&operator_id) && again[0].contains("current_password_incorrect"),
+        "{}",
+        again[0]
+    );
+
+    let secrets: [(&str, &str); 6] = [
+        ("operator password", operator_password),
+        ("wrong password", wrong_password),
+        ("second wrong password", wrong_password_again),
+        ("claim token", token.as_str()),
+        ("claim link", claim_url.as_str()),
+        ("claimed password", claimed_password),
+    ];
+    let haystack = format!("{log_text}\n{audit}\n{refusals}");
+    assert_eq!(
+        leaked(&haystack, &secrets),
+        Vec::<&str>::new(),
+        "something the operator typed, or the link, left the server outside the answer that hands it over"
+    );
+
+    // The detector can see. In the real capture: the token, planted, is found. And every secret, in
+    // every spelling, is found when planted in a short stand-in (the capture is megabytes at debug
+    // level, and the loop is twenty-odd scans).
+    assert!(
+        leaked(&format!("{haystack}\nplanted {token}"), &secrets).contains(&"claim token"),
+        "a token planted in the real capture must be found"
+    );
+    for (name, secret) in secrets {
+        for form in spellings(secret) {
+            let planted = format!("an unrelated line\nplanted {form}");
+            assert!(
+                leaked(&planted, &secrets).contains(&name),
+                "a planted {name} written as {form:?} must be found"
+            );
+        }
+    }
+}
+
+/// The membership lock held exclusively and nothing else: a change in flight that has taken its
+/// first statement and not yet finished (the same shape `session_issue_conformance_pg` uses).
+async fn hold_membership_lock(
+    su: &PgPool,
+    workspace: Uuid,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut tx = su.begin().await.expect("begin the change");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 128))")
+        .bind(workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("take the membership lock");
+    tx
+}
+
+/// ADR-0215 D6 + 증보 2 K5, the placement of the operator's password check: a request that is
+/// going to be refused — a wrong password, no password, a plain member — is answered while a
+/// change holds the membership lock, because it never asks for the lock; one that is going to
+/// succeed queues for it. (The control is what makes the first half mean something: it shows the
+/// lock really is held, and that the right password is the request that waits.)
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_refused_reissue_does_not_queue_behind_the_membership_lock() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let tenant = seed_tenant(&su, "reissue-lock").await;
+    let base = start_server_with(momo_app_pool().await, reissue_rate(10_000), None).await;
+    let http = reqwest::Client::new();
+    let owner = access_of(&http, &base, tenant.workspace, &tenant.owner).await;
+    let member = access_of(&http, &base, tenant.workspace, &tenant.member).await;
+    let url = reset_url(&base, tenant.workspace, tenant.member.id);
+
+    let change = hold_membership_lock(&su, tenant.workspace).await;
+
+    let within = Duration::from_millis(1500);
+    let wrong = tokio::time::timeout(
+        within,
+        issue_as(
+            &http,
+            &base,
+            tenant.workspace,
+            &owner,
+            tenant.member.id,
+            WRONG_OPERATOR_PASSWORD,
+        ),
+    )
+    .await
+    .expect("a wrong password was answered without waiting for the lock");
+    assert_eq!(wrong.status().as_u16(), 403);
+    let nothing = tokio::time::timeout(within, http.post(&url).bearer_auth(&owner).send())
+        .await
+        .expect("a request with no password was answered without waiting for the lock")
+        .expect("send");
+    assert_eq!(nothing.status().as_u16(), 400);
+    let plain_member = tokio::time::timeout(
+        within,
+        issue_as(
+            &http,
+            &base,
+            tenant.workspace,
+            &member,
+            tenant.member.id,
+            &tenant.member.password,
+        ),
+    )
+    .await
+    .expect("a plain member was answered without waiting for the lock");
+    assert_eq!(plain_member.status().as_u16(), 403);
+
+    // Control: the request that will succeed is the one that waits for the lock.
+    let (control_http, control_url, control_access, control_password) = (
+        http.clone(),
+        url.clone(),
+        owner.clone(),
+        tenant.owner.password.clone(),
+    );
+    let mut proper = tokio::spawn(async move {
+        control_http
+            .post(control_url)
+            .bearer_auth(control_access)
+            .json(&json!({ "currentPassword": control_password }))
+            .send()
+            .await
+            .expect("proper issue")
+            .status()
+            .as_u16()
+    });
+    assert!(
+        tokio::time::timeout(within, &mut proper).await.is_err(),
+        "the right password queues for the membership lock — the lock really is held"
+    );
+    change.rollback().await.expect("release the lock");
+    assert_eq!(
+        proper.await.expect("the proper issue"),
+        201,
+        "released, the queued request is issued"
+    );
+}

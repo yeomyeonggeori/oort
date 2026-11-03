@@ -1762,6 +1762,7 @@ async fn a_password_reset_claim_ends_every_registration_of_the_member() {
             w.base, w.workspace, w.person_id
         ))
         .bearer_auth(&w.sender.access)
+        .json(&json!({ "currentPassword": TEST_PASSWORD }))
         .send()
         .await
         .expect("issue password reset");
