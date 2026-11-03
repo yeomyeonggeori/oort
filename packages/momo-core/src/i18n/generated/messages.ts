@@ -38,6 +38,9 @@ export const messageKeys = [
   "connection.load.reasonUnknown",
   "connection.load.threadTitle",
   "connection.send.failed",
+  "connection.send.reasonOffline",
+  "connection.send.reasonRejected",
+  "connection.send.reasonServer",
   "connection.send.resend",
   "connection.send.resendAll",
   "connection.session.expired",
@@ -643,6 +646,9 @@ export const argumentSpecs = {
   "connection.load.reasonUnknown": {},
   "connection.load.threadTitle": {},
   "connection.send.failed": {},
+  "connection.send.reasonOffline": {},
+  "connection.send.reasonRejected": {},
+  "connection.send.reasonServer": {},
   "connection.send.resend": {},
   "connection.send.resendAll": {
     "count": "number"
@@ -1393,6 +1399,9 @@ export interface MessageArgs {
   "connection.load.reasonUnknown": Record<string, never>;
   "connection.load.threadTitle": Record<string, never>;
   "connection.send.failed": Record<string, never>;
+  "connection.send.reasonOffline": Record<string, never>;
+  "connection.send.reasonRejected": Record<string, never>;
+  "connection.send.reasonServer": Record<string, never>;
   "connection.send.resend": Record<string, never>;
   "connection.send.resendAll": { count: number };
   "connection.session.expired": Record<string, never>;

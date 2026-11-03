@@ -59,6 +59,10 @@ export const CONNECTION_KEYS = {
   resend: "connection.send.resend",
   /** 값 `count`(개수)를 받는다. 복수형은 언어별 틀이다. */
   resendAll: "connection.send.resendAll",
+  /** 보내지 못한 글 곁의 원인 한 줄. 종류는 `sendFailure.ts`의 `SendFailureKind`. */
+  sendReasonOffline: "connection.send.reasonOffline",
+  sendReasonServer: "connection.send.reasonServer",
+  sendReasonRejected: "connection.send.reasonRejected",
   // 올리기 실패
   uploadFailedOffline: "connection.upload.failedOffline",
   uploadFailedServer: "connection.upload.failedServer",

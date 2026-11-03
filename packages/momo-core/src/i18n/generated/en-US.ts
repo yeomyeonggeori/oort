@@ -307,6 +307,24 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't send"
     }
   ],
+  "connection.send.reasonOffline": [
+    {
+      "type": 0,
+      "value": "Couldn't send because you're offline"
+    }
+  ],
+  "connection.send.reasonRejected": [
+    {
+      "type": 0,
+      "value": "The server didn't accept it"
+    }
+  ],
+  "connection.send.reasonServer": [
+    {
+      "type": 0,
+      "value": "Couldn't send because we can't reach the server"
+    }
+  ],
   "connection.send.resend": [
     {
       "type": 0,

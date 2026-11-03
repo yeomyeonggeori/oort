@@ -261,6 +261,24 @@ export const catalog: MessageCatalog = {
       "value": "보내지 못했어요"
     }
   ],
+  "connection.send.reasonOffline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 보내지 못했어요"
+    }
+  ],
+  "connection.send.reasonRejected": [
+    {
+      "type": 0,
+      "value": "서버가 받지 못했어요"
+    }
+  ],
+  "connection.send.reasonServer": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 보내지 못했어요"
+    }
+  ],
   "connection.send.resend": [
     {
       "type": 0,
