@@ -38,6 +38,171 @@ export const catalog: MessageCatalog = {
       "value": " 첨부 빼기"
     }
   ],
+  "attachments.video.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 동영상, "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": ", 재생"
+    }
+  ],
+  "attachments.video.cardLabelNoDuration": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", 동영상, 재생"
+    }
+  ],
+  "attachments.video.failed": [
+    {
+      "type": 0,
+      "value": "영상을 재생하지 못했어요"
+    }
+  ],
+  "attachments.video.gone": [
+    {
+      "type": 0,
+      "value": "이 영상은 더 이상 볼 수 없어요"
+    }
+  ],
+  "attachments.video.loading": [
+    {
+      "type": 0,
+      "value": "영상을 불러오는 중"
+    }
+  ],
+  "attachments.video.mute": [
+    {
+      "type": 0,
+      "value": "소리 끄기"
+    }
+  ],
+  "attachments.video.pause": [
+    {
+      "type": 0,
+      "value": "일시정지"
+    }
+  ],
+  "attachments.video.play": [
+    {
+      "type": 0,
+      "value": "재생"
+    }
+  ],
+  "attachments.video.replay": [
+    {
+      "type": 0,
+      "value": "처음부터 다시 재생"
+    }
+  ],
+  "attachments.video.retry": [
+    {
+      "type": 0,
+      "value": "다시 시도"
+    }
+  ],
+  "attachments.video.saveHint": [
+    {
+      "type": 0,
+      "value": "공유 시트가 열려요. 「비디오 저장」을 고르세요"
+    }
+  ],
+  "attachments.video.seekLabel": [
+    {
+      "type": 0,
+      "value": "재생 위치"
+    }
+  ],
+  "attachments.video.seekValue": [
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "attachments.video.thumbHint": [
+    {
+      "type": 0,
+      "value": "이 영상으로 이동"
+    }
+  ],
+  "attachments.video.thumbLabel": [
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번째 영상"
+    }
+  ],
+  "attachments.video.unmute": [
+    {
+      "type": 0,
+      "value": "소리 켜기"
+    }
+  ],
+  "attachments.viewer.mixedCaption": [
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번"
+    }
+  ],
+  "attachments.viewer.mixedCaptionLabel": [
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "개 중 "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "번째"
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -2839,10 +3004,28 @@ export const catalog: MessageCatalog = {
       "value": "글을 위에, 큰 그림을 아래에 둬요. 제목과 설명은 두 줄까지 보여줘요. 큰 그림이 없는 링크는 작게와 같아요."
     }
   ],
+  "settings.connection.noServer": [
+    {
+      "type": 0,
+      "value": "이 기기에 저장된 서버 주소가 없어요."
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,
       "value": "게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있어요."
+    }
+  ],
+  "settings.notifications.alwaysDetail": [
+    {
+      "type": 0,
+      "value": "승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없어요. 한꺼번에 멈추려면 알림 일시 중지를 써요."
+    }
+  ],
+  "settings.notifications.checking": [
+    {
+      "type": 0,
+      "value": "알림 설정을 확인하는 중이에요."
     }
   ],
   "settings.notifications.threadReplyDescription": [

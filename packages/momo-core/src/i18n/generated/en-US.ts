@@ -63,6 +63,167 @@ export const catalog: MessageCatalog = {
       "value": "name"
     }
   ],
+  "attachments.video.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", video, "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": ", play"
+    }
+  ],
+  "attachments.video.cardLabelNoDuration": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", video, play"
+    }
+  ],
+  "attachments.video.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't play this video"
+    }
+  ],
+  "attachments.video.gone": [
+    {
+      "type": 0,
+      "value": "This video isn't available anymore"
+    }
+  ],
+  "attachments.video.loading": [
+    {
+      "type": 0,
+      "value": "Loading video"
+    }
+  ],
+  "attachments.video.mute": [
+    {
+      "type": 0,
+      "value": "Mute"
+    }
+  ],
+  "attachments.video.pause": [
+    {
+      "type": 0,
+      "value": "Pause"
+    }
+  ],
+  "attachments.video.play": [
+    {
+      "type": 0,
+      "value": "Play"
+    }
+  ],
+  "attachments.video.replay": [
+    {
+      "type": 0,
+      "value": "Replay from the start"
+    }
+  ],
+  "attachments.video.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "attachments.video.saveHint": [
+    {
+      "type": 0,
+      "value": "Opens the share sheet. Choose “Save Video”."
+    }
+  ],
+  "attachments.video.seekLabel": [
+    {
+      "type": 0,
+      "value": "Playback position"
+    }
+  ],
+  "attachments.video.seekValue": [
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "attachments.video.thumbHint": [
+    {
+      "type": 0,
+      "value": "Go to this video"
+    }
+  ],
+  "attachments.video.thumbLabel": [
+    {
+      "type": 0,
+      "value": "Video "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    }
+  ],
+  "attachments.video.unmute": [
+    {
+      "type": 0,
+      "value": "Unmute"
+    }
+  ],
+  "attachments.viewer.mixedCaption": [
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    }
+  ],
+  "attachments.viewer.mixedCaptionLabel": [
+    {
+      "type": 0,
+      "value": "Item "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -3061,10 +3222,28 @@ export const catalog: MessageCatalog = {
       "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
     }
   ],
+  "settings.connection.noServer": [
+    {
+      "type": 0,
+      "value": "No server address is saved on this device."
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,
       "value": "Guest invites are paused until channel-specific invites are available."
+    }
+  ],
+  "settings.notifications.alwaysDetail": [
+    {
+      "type": 0,
+      "value": "Approval requests, mentions of you, and DMs can't be turned off by type. To silence everything at once, use Pause notifications."
+    }
+  ],
+  "settings.notifications.checking": [
+    {
+      "type": 0,
+      "value": "Checking your notification settings."
     }
   ],
   "settings.notifications.threadReplyDescription": [

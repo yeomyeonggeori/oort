@@ -1,0 +1,233 @@
+appId: app.momo.ios
+name: "5208-video-viewer-live"
+# No `env:` block — see the note at the top of 00-login.yaml.
+#
+#   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID
+---
+# 5208-video-viewer-live — 영상 첨부를 앱 안에서 바로 재생한다 (#5208, 카카오톡처럼).
+#
+# 이 흐름은 혼자 돌지 않는다: 레인(`npm run lane:phone -- --flow 5208-video-viewer-live`)이 먼저
+#   · 로컬 보관소(ADR-0169)가 달린 스택을 세우고,
+#   · 진짜 첨부 길(업로드 → complete → `PUT …/media` → 전송)로 영상 셋을 #general 에 올리고(`scripts/lane-video-fixture.mjs`),
+#   · 앱과 서버 사이에 요청을 기록하는 중계(`scripts/lane-request-recorder.cjs`)를 세운다.
+# 흐름이 초록이어도 레인은 그 기록을 다시 본다 — **첫 읽기가 구간 읽기(`Range`)의 206 이었고, 네이티브 플레이어가 베어러를 실어 보냈는가**.
+# 화면은 영상이 어떻게 왔는지를 보여 주지 못한다(전부 받은 뒤에 시작해도 같은 화면이다).
+#
+# 올라간 셋(#general, 이 순서)과 이 흐름이 보는 것:
+#   ① landscape.mp4   가로 영상 + 포스터, 12초          → 포스터 카드. 눌러 연 영상은 바로 재생한다: 멈춤·재생·탐색·소리·끝·다시 재생.
+#   ② photo.png + portrait.mp4  사진 + 세로 영상 + 포스터 → 섞인 묶음. 영상으로 열어 사진으로 넘기고 다시 영상으로 — 넘겨 닿은 영상은
+#                                                          멈춰 서서 기다린다(자동 재생은 눌러 연 영상 하나뿐이다).
+#   ③ no-poster.mp4   길이만 있고 포스터가 없는 영상      → 영상기 아이콘 카드(문서 아이콘이 아니다). 눌러 연다.
+#
+# 뷰어 안의 오른쪽→왼쪽 쓸기(다음 장으로)가 아래 행의 「밀어서 답글」로 새지 않는지도 여기서 본다: 새면 자판이 올라온다(`inputView`).
+#
+# 카드는 접근성 이름으로 짚는다(「이름, 동영상, 길이, 재생」): 포스터 카드와 영상기 카드는 서로 다른 모양이지만 같은 말로 읽히고, 이름이
+# 달라서 어느 영상을 눌렀는지 틀리지 않는다.
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+# 처음 들어간 채널은 입력창 위에 길게 누르기 안내가 서서 탭을 먹는다(10-mention-working 과 같다).
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+# ---- ① 포스터 카드 → 바로 재생 -----------------------------------------------------------
+- scrollUntilVisible:
+    element:
+      text: "landscape.mp4, 동영상, 0:12, 재생"
+    direction: UP
+    timeout: 60000
+# 카드가 서 있는 사진: 포스터(받았으면)와 길이 알약, 한가운데 재생 표지.
+- extendedWaitUntil:
+    visible:
+      id: "attachment-video-duration"
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: 5208-card-poster
+- tapOn:
+    text: "landscape.mp4, 동영상, 0:12, 재생"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-controls"
+    timeout: 20000
+# 눌러 연 영상은 바로 재생된다: 단추가 「일시정지」로 바뀌고, 시간이 흐른다(0:00 에 서 있지 않다).
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-toggle"
+      text: "일시정지"
+    timeout: 45000
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-time"
+      text: "0:0[2-9]|0:1[0-2]"
+    timeout: 30000
+- takeScreenshot: 5208-viewer-playing
+# 멈춤 ↔ 재생.
+- tapOn:
+    id: "attachment-viewer-video-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-toggle"
+      text: "재생"
+    timeout: 10000
+- assertVisible:
+    id: "attachment-viewer-video-play"
+- takeScreenshot: 5208-viewer-paused
+# 탐색: 멈춘 채로 진행 막대의 한가운데를 누르면 12초의 절반(6초) 둘레로 간다. 멈춰 있으니 시간이 더 흐르지 않는다 — 이 값은 탐색의 결과다.
+- tapOn:
+    id: "attachment-viewer-video-seek"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-time"
+      text: "0:0[5-6]"
+    timeout: 10000
+# 소리 끄기 ↔ 켜기.
+- tapOn:
+    id: "attachment-viewer-video-mute"
+- assertVisible:
+    id: "attachment-viewer-video-mute"
+    text: "소리 켜기"
+- tapOn:
+    id: "attachment-viewer-video-mute"
+- assertVisible:
+    id: "attachment-viewer-video-mute"
+    text: "소리 끄기"
+# 다시 재생해 끝까지 간다: 끝나면 단추가 「처음부터 다시 재생」이 되고, 누르면 처음부터 다시 간다.
+- tapOn:
+    id: "attachment-viewer-video-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-toggle"
+      text: "처음부터 다시 재생"
+    timeout: 60000
+- takeScreenshot: 5208-viewer-ended
+- tapOn:
+    id: "attachment-viewer-video-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-toggle"
+      text: "일시정지"
+    timeout: 20000
+# 닫기: 뒤로가 **닫았는가**를 단정한다.
+- tapOn:
+    id: "attachment-viewer-back"
+- waitForAnimationToEnd
+- assertNotVisible:
+    id: "attachment-viewer"
+
+# ---- ② 사진과 섞인 묶음 -------------------------------------------------------------------
+- scrollUntilVisible:
+    element:
+      text: "portrait.mp4, 동영상, 0:06, 재생"
+    direction: DOWN
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: 5208-chat-mixed
+- tapOn:
+    text: "portrait.mp4, 동영상, 0:06, 재생"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-controls"
+    timeout: 20000
+# 묶음은 사진 → 영상 순으로 넘어가고, 영상으로 열었으니 두 번째다. 사진과 영상이 섞이면 「장」이 아니라 「개」로 센다.
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "2개 중 2번.*"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-toggle"
+      text: "일시정지"
+    timeout: 45000
+# 사진으로 넘기면 영상은 서 있지 않고(조작 줄이 사라진다) 사진이 선다.
+- swipe:
+    start: 15%, 50%
+    end: 85%, 50%
+    duration: 300
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "2개 중 1번.*"
+- assertNotVisible:
+    id: "attachment-viewer-video-controls"
+- assertVisible:
+    id: "attachment-viewer-image"
+- takeScreenshot: 5208-viewer-mixed-photo
+# 영상으로 되돌아오면 멈춰 서서 기다린다 — 넘기다 소리가 터지지 않는다. 한가운데 재생 단추를 눌러야 시작한다.
+- swipe:
+    start: 85%, 50%
+    end: 15%, 50%
+    duration: 300
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "2개 중 2번.*"
+# 뷰어 안의 쓸기가 아래 행의 「밀어서 답글」로 새면 뒤 대화에 답글 입력칸이 열리고 자판이 올라와 아래 조작을 덮는다(#5208 시뮬레이터 실측).
+# 시스템 자판은 접근성 트리에 `inputView` 로 선다 — 자판이 없어야 한다.
+- assertNotVisible:
+    id: "inputView"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-play"
+    timeout: 30000
+- assertVisible:
+    id: "attachment-viewer-video-toggle"
+    text: "재생"
+- takeScreenshot: 5208-viewer-mixed-video-waiting
+- tapOn:
+    id: "attachment-viewer-video-play"
+# 가운데 단추가 재생을 시작했다는 증거는 「끝까지 갔다」다. 이 영상은 6초라, Maestro 의 탭이 화면이 가라앉기를 기다리는 사이에 끝나 버려서
+# 「일시정지」 표시는 늦게 보면 놓친다(①의 12초짜리는 놓치지 않는다). 끝나면 단추가 「처음부터 다시 재생」이 되고 시간은 길이와 같다.
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-toggle"
+      text: "처음부터 다시 재생"
+    timeout: 45000
+- assertVisible:
+    id: "attachment-viewer-video-time"
+    text: "0:06"
+- tapOn:
+    id: "attachment-viewer-back"
+- waitForAnimationToEnd
+- assertNotVisible:
+    id: "attachment-viewer"
+
+# ---- ③ 포스터 없는 영상 = 영상기 아이콘 카드 ---------------------------------------------------
+- scrollUntilVisible:
+    element:
+      text: "no-poster.mp4, 동영상, 0:12, 재생"
+    direction: DOWN
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: 5208-card-no-poster
+- tapOn:
+    text: "no-poster.mp4, 동영상, 0:12, 재생"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-controls"
+    timeout: 20000
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-video-toggle"
+      text: "일시정지"
+    timeout: 45000
+# 아래로 쓸어 닫기도 사진 뷰어와 같다: 재생 중이어도 닫히고 대화로 돌아온다(뒤로 단추는 ①②가 이미 눌렀다).
+- swipe:
+    start: 50%, 30%
+    end: 50%, 75%
+    duration: 500
+- waitForAnimationToEnd
+- assertNotVisible:
+    id: "attachment-viewer"
+- takeScreenshot: 5208-after-close

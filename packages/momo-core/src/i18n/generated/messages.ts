@@ -3,6 +3,24 @@ export const messageKeys = [
   "attachments.tray.noticeDismiss",
   "attachments.tray.overflow",
   "attachments.tray.removeNamed",
+  "attachments.video.cardLabel",
+  "attachments.video.cardLabelNoDuration",
+  "attachments.video.failed",
+  "attachments.video.gone",
+  "attachments.video.loading",
+  "attachments.video.mute",
+  "attachments.video.pause",
+  "attachments.video.play",
+  "attachments.video.replay",
+  "attachments.video.retry",
+  "attachments.video.saveHint",
+  "attachments.video.seekLabel",
+  "attachments.video.seekValue",
+  "attachments.video.thumbHint",
+  "attachments.video.thumbLabel",
+  "attachments.video.unmute",
+  "attachments.viewer.mixedCaption",
+  "attachments.viewer.mixedCaptionLabel",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -418,7 +436,10 @@ export const messageKeys = [
   "settings.appearance.linkPreviewOffHint",
   "settings.appearance.linkPreviewRich",
   "settings.appearance.linkPreviewRichHint",
+  "settings.connection.noServer",
   "settings.invite.guestInvitesPaused",
+  "settings.notifications.alwaysDetail",
+  "settings.notifications.checking",
   "settings.notifications.threadReplyDescription",
   "settings.notifications.threadReplyName",
   "settings.profile.languageCurrent",
@@ -638,6 +659,40 @@ export const argumentSpecs = {
   },
   "attachments.tray.removeNamed": {
     "name": "string"
+  },
+  "attachments.video.cardLabel": {
+    "duration": "string",
+    "name": "string"
+  },
+  "attachments.video.cardLabelNoDuration": {
+    "name": "string"
+  },
+  "attachments.video.failed": {},
+  "attachments.video.gone": {},
+  "attachments.video.loading": {},
+  "attachments.video.mute": {},
+  "attachments.video.pause": {},
+  "attachments.video.play": {},
+  "attachments.video.replay": {},
+  "attachments.video.retry": {},
+  "attachments.video.saveHint": {},
+  "attachments.video.seekLabel": {},
+  "attachments.video.seekValue": {
+    "position": "string",
+    "total": "string"
+  },
+  "attachments.video.thumbHint": {},
+  "attachments.video.thumbLabel": {
+    "position": "number"
+  },
+  "attachments.video.unmute": {},
+  "attachments.viewer.mixedCaption": {
+    "position": "number",
+    "total": "number"
+  },
+  "attachments.viewer.mixedCaptionLabel": {
+    "position": "number",
+    "total": "number"
   },
   "common.feedback.unavailable": {},
   "common.invitation.received": {
@@ -1140,7 +1195,10 @@ export const argumentSpecs = {
   "settings.appearance.linkPreviewOffHint": {},
   "settings.appearance.linkPreviewRich": {},
   "settings.appearance.linkPreviewRichHint": {},
+  "settings.connection.noServer": {},
   "settings.invite.guestInvitesPaused": {},
+  "settings.notifications.alwaysDetail": {},
+  "settings.notifications.checking": {},
   "settings.notifications.threadReplyDescription": {},
   "settings.notifications.threadReplyName": {},
   "settings.profile.languageCurrent": {
@@ -1439,6 +1497,24 @@ export interface MessageArgs {
   "attachments.tray.noticeDismiss": Record<string, never>;
   "attachments.tray.overflow": { count: number; max: number };
   "attachments.tray.removeNamed": { name: string };
+  "attachments.video.cardLabel": { duration: string; name: string };
+  "attachments.video.cardLabelNoDuration": { name: string };
+  "attachments.video.failed": Record<string, never>;
+  "attachments.video.gone": Record<string, never>;
+  "attachments.video.loading": Record<string, never>;
+  "attachments.video.mute": Record<string, never>;
+  "attachments.video.pause": Record<string, never>;
+  "attachments.video.play": Record<string, never>;
+  "attachments.video.replay": Record<string, never>;
+  "attachments.video.retry": Record<string, never>;
+  "attachments.video.saveHint": Record<string, never>;
+  "attachments.video.seekLabel": Record<string, never>;
+  "attachments.video.seekValue": { position: string; total: string };
+  "attachments.video.thumbHint": Record<string, never>;
+  "attachments.video.thumbLabel": { position: number };
+  "attachments.video.unmute": Record<string, never>;
+  "attachments.viewer.mixedCaption": { position: number; total: number };
+  "attachments.viewer.mixedCaptionLabel": { position: number; total: number };
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
@@ -1854,7 +1930,10 @@ export interface MessageArgs {
   "settings.appearance.linkPreviewOffHint": Record<string, never>;
   "settings.appearance.linkPreviewRich": Record<string, never>;
   "settings.appearance.linkPreviewRichHint": Record<string, never>;
+  "settings.connection.noServer": Record<string, never>;
   "settings.invite.guestInvitesPaused": Record<string, never>;
+  "settings.notifications.alwaysDetail": Record<string, never>;
+  "settings.notifications.checking": Record<string, never>;
   "settings.notifications.threadReplyDescription": Record<string, never>;
   "settings.notifications.threadReplyName": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
