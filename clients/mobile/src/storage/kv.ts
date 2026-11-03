@@ -49,6 +49,13 @@ export const NON_SECRET_KEYS = {
   /** The API base this device chose. Not a secret; it is printed on screen. */
   serverBase: 'momo.mobile.server.v1',
   /**
+   * 「이메일 기억하기」(#4669): 서버 주소별로 로그인 때 쓴 이메일과 사람이 고른 켬·끔(`@momo/core` `rememberedLogin`).
+   * 이메일은 화면에 찍히는 값이라 비밀이 아니고, **비밀번호와 토큰은 이 키에 닿지 않는다** — 코어가 이메일 모양만
+   * 받는다. 로그아웃이 지우지 않는다(같은 서버에 다시 들어오면 채워지는 것이 이 기능이다). 끄면 코어가 이 키의
+   * 이메일을 그 자리에서 비운다.
+   */
+  rememberedLogin: 'momo.mobile.login.remembered.v1',
+  /**
    * Member identity + the login-returned websocket address (ADR-0110). Not a
    * secret, but the refresh response does not repeat them, so a restored
    * session has to read them from somewhere that survives a restart.
@@ -157,8 +164,19 @@ export const NON_SECRET_KEYS = {
    * 편의일 뿐이고, 잃으면 기본값 「내 것」으로 열린다.
    */
   workFilter: 'momo.mobile.work.filter.v1',
-  /** Device preference: rich (default), basic or off. No account data. */
-  hapticMode: 'momo.mobile.haptics.v1',
+  /**
+   * 햅틱 단계(`lib/haptics.ts`): 없으면 풍부. **앱은 이 키에 쓰지 않는다** — 설정의 「햅틱」 선택은 owner 10-31(#4936)에
+   * 없앴고 앱 햅틱은 늘 「풍부」다. 이 키는 시험이 기본·끔 경로를 따로 재는 이음새일 뿐이다. 예전 판이 고른 「기본」·「끔」은
+   * `momo.mobile.haptics.v1` 에 남아 있을 수 있으나 **읽지 않는다**(키를 v2로 올려서 되살아나지 않게 했다). 계정 정보 없음.
+   */
+  hapticMode: 'momo.mobile.haptics.v2',
+  /**
+   * 마지막으로 닫은 「업데이트 소식」의 **소식 버전** 하나(`0.1.41`, #4937). 앱 버전·빌드 번호가 아니다: 폰은 빌드 번호로 소식을
+   * 고르지만(`@momo/core/features/releaseNotes/model`) 기기에는 소식의 이름을 적는다. 지금 소식이 이 값보다 새로울 때만
+   * 업데이트 뒤 처음 열 때 한 번 보인다. 이 폰의 취향이라 로그아웃·계정 전환에도 남는다(테마와 같은 종류). 잃으면 같은
+   * 소식을 한 번 더 볼 뿐이다. 계정 정보 없음.
+   */
+  releaseNotesSeen: 'momo.mobile.release-notes.seen.v1',
   /**
    * 「링크 미리보기」 — 이 폰이 대화의 링크 카드를 어떻게 그리는가 (#4883). 값은 `rich`(크게) ·
    * `compact`(작게) · `off`(끄기) 세 낱말 중 하나이고, 웹의 `momo.web.link-preview.v1` 과 **같은 값 이름**이다.

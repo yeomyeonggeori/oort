@@ -125,6 +125,7 @@ import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
 import {SheetDragSurface} from './sheetDrag';
 import {SheetKitSurface} from './sheetKit';
+import {ExpressionPhotoSurface} from './expressionPhoto';
 import {ProfileSheetSurface} from './profileSheet';
 import {ConversationMenuSurface} from './conversationMenu';
 import {ConversationHeaderSurface} from './conversationHeader';
@@ -149,6 +150,10 @@ import {__setPermissionReader} from '../src/push/permissionStatus';
 import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
 import {pushDeviceId} from '../src/push/registration';
 import {AppUpdateSheet} from '../src/features/appUpdate/AppUpdateBanner';
+import {RELEASE_NOTES} from '@momo/core/features/releaseNotes/notes';
+import {ReleaseNotesSheet} from '../src/features/releaseNotes/ReleaseNotesSheet';
+import {createMobileLocaleController} from '../src/i18n/controller';
+import {MobileLocaleProvider} from '../src/i18n/LocaleProvider';
 import {seedIosFeedCacheForCapture} from '../src/features/appUpdate/feed';
 import {PageSheet} from '../src/design/PageSheet';
 import {LinkSheetBody} from '../src/features/deviceKey/DeviceKeyLinkSheet';
@@ -2139,6 +2144,26 @@ function JumpPillsRoomsStage({
   );
 }
 
+// #4937: 하네스에는 언어 provider 가 없고, provider 없이 사전을 읽는 화면은 한국어 서비스로 선다(`useMobileMessages` 와 같은 대체 —
+// 소식 훅도 같다, #5047). 소식 판은 그래도 언어를 정해 세워 앱 화면과 같은 말로 그린다: `-en` 판이 영어 UI 를 보이려면
+// provider 가 있어야 한다. 공장은 모듈 값이다: 렌더마다 새 공장이면 provider 가 사전을 다시 읽는다.
+const releaseNotesKo = () =>
+  createMobileLocaleController({
+    port: {
+      readPreference: () => 'ko-KR',
+      writePreference: () => {},
+      readDevice: () => ({languages: ['ko-KR'], timeZone: 'Asia/Seoul'}),
+    },
+  });
+const releaseNotesEn = () =>
+  createMobileLocaleController({
+    port: {
+      readPreference: () => 'en-US',
+      writePreference: () => {},
+      readDevice: () => ({languages: ['en-US'], timeZone: 'Asia/Seoul'}),
+    },
+  });
+
 export function Surface({name}: {name: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 이슈 #1112 — 고정 여부만 다른 두 시트. 낱말이 상태를 따라 뒤집히는 것을 한
@@ -2215,6 +2240,12 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4319: 다른 사람 프로필 시트(`measure/profileSheet.tsx`, 배송되는 시트 + 고정 데이터·합성 사진, 가상 인물).
   if (name === 'profilesheet' || name.startsWith('profilesheet-')) {
     return <ProfileSheetSurface which={name.slice('profilesheet'.length).replace(/^-/, '')} />;
+  }
+  // #4984: 폰 「AI와 만들기」 사진 길(`measure/expressionPhoto.tsx`, 배송되는 양식 + 코어 가짜 서버 장면, 합성 그림·가상 이름).
+  if (name === 'expressionphoto' || name.startsWith('expressionphoto-')) {
+    return (
+      <ExpressionPhotoSurface which={name.slice('expressionphoto'.length).replace(/^-/, '')} />
+    );
   }
   // #4319: 대화 머리 ⋮ 시트(`measure/conversationMenu.tsx`, 배송되는 시트 + 고정 데이터, 가상 인물).
   if (name === 'convmenu' || name.startsWith('convmenu-')) {
@@ -3144,8 +3175,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'landed': {
       // #1076: 「방금 여기로 왔다」. 물든 행 하나와 물들지 않은 이웃들이 함께
       // 있어야 이 값이 **띠가 아니라 물듦**이라는 주장이 사진에서 확인된다
-      // (1.13:1 — 계산은 `MessageRow` 의 `rowLanded` 주석과
-      // `__tests__/conversationHygiene.test.tsx` 에 있다).
+      // (바닥 대비 1.10~1.29:1 — 경고색 10% 이하의 면이고 테두리가 없다. 계산은 `MessageRow` 의 `rowLanded` 주석과
+      // `__tests__/messageBubble.test.tsx` 에 있다, #4949).
       const at = (min: number) => NOW - (14 - min) * 60_000;
       const rows = [
         ['앞 줄 — 물들지 않는다.', 0, false],
@@ -3184,7 +3215,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     //   decided  결정 뒤   — 「승인됨」 칩과 영수증, 틴트 없음.
     // 성재가 본 모순은 「승인됨」 옆에서 앰버가 남은 것이었다. 두 번째 사진에서 그 모순이
     // 사라졌는지가 논점이라 두 장을 같은 배치로 찍는다. 물러나는 **시간**(이동이 끝난 뒤
-    // 2초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight.test.tsx`
+    // 1.5초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight.test.tsx`
     // 가 가짜 시계로 잰다. 여기 `landed` 는 목록이 건네는 값을 그대로 건넨 것이다.
     //
     // 바닥은 `ConversationFloor` — 실제 대화 화면의 바닥이다. 틴트는 바닥 위의 **상대적인**
@@ -4536,7 +4567,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // 코드에는 있고 사진에는 없었다. `initialArmed` 가 그 도달 불가를 닫는다.
     //
     // 세 줄을 한 장에 세운다. 논점이 **위계**라서 한 줄만 찍으면 사진에 안 나온다:
-    //   ① 승인 확정 — 주 액션 채움(`accent`)
+    //   ① 승인 — 주 액션 채움(잉크 `primary`. #5134 전에는 신호색 `accent` 였다)
     //   ② 거부 확정 — 파괴 채움(`dangerFill`). 이 goal 이 고친 자리다.
     //   ③ 턴 중단 확정 — 같은 파괴 채움을 쓰는 두 번째 컨트롤
     // 라이트 판은 `-momoMeasure LIGHT-DESTRUCTIVE-CONFIRM`.
@@ -4810,6 +4841,43 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             onClose={() => {}}
           />
         </View>
+      );
+    // #4937: 업데이트 뒤 처음 열 때 올라오는 「업데이트 소식」 시트(실제 v0.1.41 소식). 시뮬레이터 빌드 번호는 1 이라 앱이 스스로는
+    // 이 시트를 올리지 않는다(어느 소식도 붙지 않는다): 이 판이 시트를 직접 세운다. 「자세히 보기」는 `-page` 판이 보인다.
+    case 'shell-release-notes-sheet':
+    case 'shell-release-notes-sheet-en':
+      return (
+        <MobileLocaleProvider
+          createController={name === 'shell-release-notes-sheet' ? releaseNotesKo : releaseNotesEn}>
+          <View style={styles.fill}>
+            <Shell />
+            <ReleaseNotesSheet
+              note={RELEASE_NOTES[0]}
+              onClose={() => {}}
+              onOpenDetails={() => {}}
+            />
+          </View>
+        </MobileLocaleProvider>
+      );
+    // #4937: 설정의 「업데이트 소식」 장(버전 목록). 버전을 누르면 내용 장이 밀려 들어온다(`release-notes-row-0.1.41`).
+    case 'shell-release-notes-page':
+    case 'shell-release-notes-page-en':
+      return (
+        <MobileLocaleProvider
+          createController={name === 'shell-release-notes-page' ? releaseNotesKo : releaseNotesEn}>
+          <View style={styles.fill}>
+            <Shell />
+            <SettingsOverlay
+              initialPage="releaseNotes"
+              workspaceId={HARNESS_MEMBER.workspaceId}
+              member={SETTINGS_ME}
+              directory={settingsDirectory(SHELL_ROSTER)}
+              connected
+              onSignOut={() => {}}
+              onClose={() => {}}
+            />
+          </View>
+        </MobileLocaleProvider>
       );
     // #4384: 프로필 사진 장. 진짜 셸 위의 진짜 프로필 시트가 사진 장으로 열린다(`initialPage="avatar"`).
     // `-photo` 는 내 사진이 있는 사람(지우기 줄이 선다), `-offline` 은 연결이 끊긴 때(세 줄 잠김),
@@ -6603,6 +6671,7 @@ function SettingsBottomSurface({devTools = false}: {devTools?: boolean}): React.
           directory={settingsDirectory(SHELL_ROSTER)}
           connected
           onOpenTheme={() => {}}
+          onOpenReleaseNotes={() => {}}
           onOpenStatus={() => {}}
           onOpenDeviceKey={() => {}}
           onOpenDevTools={devTools ? () => {} : undefined}

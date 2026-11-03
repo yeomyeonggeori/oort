@@ -25,6 +25,10 @@ import {
   ReduceMotionRefContext,
 } from '../src/features/conversation/LandedTintFade';
 import {MessageRow} from '../src/features/conversation/MessageRow';
+import {
+  landedFace,
+  LANDED_TINT_MAX_ALPHA,
+} from '../src/features/conversation/rowFace';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {LANDED_TINT_FADE_MS} from '../src/design/motion';
 import {SessionProvider} from '../src/session/useSession';
@@ -39,7 +43,11 @@ import {member} from './testkit';
 // 남긴 탓에, 스크롤하지 않으면 영원히 남았다.
 //
 // 규칙은 셋이고 먼저 오는 것이 이긴다(`landedHighlight.ts` 머리말):
-//   ① 승인이 결정되면 곧바로  ② 이동이 **끝난 뒤** 2초  ③ 손가락
+//   ① 승인이 결정되면 곧바로  ② 이동이 **끝난 뒤** 1.5초  ③ 손가락
+//
+// owner 2026-10-31(#4949): 알림으로 들어올 때 테두리가 진하고 너무 오래 남는다는 지적으로 시한을 2초에서
+// 1.5초로 줄이고 면을 경고색 10% 이하의 알파 면으로, 테두리는 없앴다. 승인 카드도 같은 규칙이다
+// (「결정할 때까지 남는」 강조로 되돌리지 않는다 — 아래 (3)의 둘째 시험).
 //
 // ## 이 파일의 단정이 실제로 실패할 수 있는가
 //
@@ -50,7 +58,7 @@ import {member} from './testkit';
 //
 // 가짜 시계(modern)다. 점프의 이동은 `setInterval` + `Date.now()`, 회복은
 // `requestAnimationFrame` 이라 둘 다 같은 시계로 간다. 이동이 끝나는 시각은 마지막
-// 움직임 + `JUMP_SETTLE_MS`(250ms)이고, 시한은 그 뒤 `LANDED_HOLD_MS`(2,000ms)다.
+// 움직임 + `JUMP_SETTLE_MS`(250ms)이고, 시한은 그 뒤 `LANDED_HOLD_MS`(1,500ms)다.
 // =============================================================================
 
 const SELF = '11111111-1111-4111-8111-111111111111';
@@ -184,7 +192,7 @@ function tintedRows(): number {
     .getAllByTestId('message-row')
     .filter(
       node =>
-        StyleSheet.flatten(node.props.style)?.backgroundColor === color.warnSurface,
+        StyleSheet.flatten(node.props.style)?.backgroundColor === landedFace(color),
     ).length;
 }
 
@@ -386,15 +394,15 @@ describe.each([[false], [true]])('jumpPills=%s', jumpPills => {
         await advance(100);
         reportScroll(100 * step);
       }
-      // 시한(2초)을 **점프를 건 시각부터** 쟀다면 여기(2.3초)서는 이미 꺼졌다.
+      // 시한(1.5초)을 **점프를 건 시각부터** 쟀다면 여기(2.3초)서는 이미 꺼졌다.
       await advance(1100);
       expect(landedIds()).toEqual([APPROVAL_ID]);
 
-      // 이동이 멎은 것은 1.45 초 즈음이고, 시한은 거기서부터 2 초다.
+      // 이동이 멎은 것은 1.45 초 즈음이고, 시한은 거기서부터 1.5 초다.
       await advance(1300);
       expect(landedIds()).toEqual([]);
       // 깨뜨리면: 점프 효과에서 `holdMs` 를 `LANDED_HOLD_MS` 로 곧바로 세우면(이동 끝을
-      // 기다리지 않으면) 2.3 초 지점의 단정이 빨갛다.
+      // 기다리지 않으면) 2.3 초 지점의 단정이 빨갛다(1.5초 시한이 1.5초에 꺼진다).
     });
 
     it('아직 안 잰 행이라 `onScrollToIndexFailed` 회복이 도는 동안에도 시계가 없다', async () => {
@@ -460,7 +468,7 @@ describe.each([[false], [true]])('jumpPills=%s', jumpPills => {
       await advance(400); // 움직임이 없으니 이동이 끝났다.
       expect(landedIds()).toEqual([APPROVAL_ID]);
 
-      await advance(1700); // 이동이 끝난 지 1.9초 안팎 — 시한(2초) 직전
+      await advance(1200); // 이동이 끝난 지 1.35초 안팎 — 시한(1.5초) 직전
       expect(landedIds()).toEqual([APPROVAL_ID]);
       await advance(500);
       expect(landedIds()).toEqual([]);
@@ -492,14 +500,42 @@ describe.each([[false], [true]])('jumpPills=%s', jumpPills => {
   // (3) 보임 뒤 시한 경과 → 해제
   // ---------------------------------------------------------------------------
 
-  describe('(3) 이동이 끝난 뒤 약 2초가 지나면 거둔다', () => {
+  describe('(3) 이동이 끝난 뒤 약 1.5초가 지나면 거둔다', () => {
+    it('시한은 1.5초다 — 머무는 시간이 다시 늘면 이 줄이 빨갛다 (#4949)', () => {
+      expect(LANDED_HOLD_MS).toBe(1_500);
+      // 깨뜨리면: `LANDED_HOLD_MS` 를 2000 으로 되돌리면 이 줄이 빨갛다.
+    });
+
+    it('서 있는 면은 경고색 10% 이하의 알파 면이고 테두리가 없다 — 옅게 (#4949)', async () => {
+      const {rerender} = mount({jumpPills});
+      rerender({jumpTarget: {messageId: 'msg-3', seq: 3, token: 1}});
+      await advance(400);
+      expect(tintedRows()).toBe(1);
+      const row = screen
+        .getAllByTestId('message-row')
+        .find(
+          node =>
+            StyleSheet.flatten(node.props.style)?.backgroundColor === landedFace(color),
+        )!;
+      const style = StyleSheet.flatten(row.props.style);
+      const fill = String(style.backgroundColor);
+      // 칠해진 색 그대로 읽는다: 경고색(「여기를 보라」)이고 강조색이 아니다, 알파는 상한 이하다.
+      expect(fill.slice(0, 7)).toBe(color.warn);
+      expect(fill.slice(0, 7)).not.toBe(color.accent);
+      expect(parseInt(fill.slice(7), 16) / 255).toBeLessThanOrEqual(LANDED_TINT_MAX_ALPHA);
+      expect(style.borderWidth).toBeUndefined();
+      expect(screen.queryByTestId('message-row-landed-edge')).toBeNull();
+      // 깨뜨리면: `landedFace` 를 `warnSurface` 로 되돌리거나(알파 바이트 없음 → 파싱 값이 NaN 이라 빨갛다) 알파를
+      //          0x40 으로 올리면 알파 줄이 빨갛고, `rowLandedEdge` 덧그림을 되살리면 마지막 줄이 빨갛다.
+    });
+
     it('어느 행이든 — 승인 카드가 아니어도', async () => {
       const { rerender } = mount({jumpPills});
       rerender({jumpTarget: {messageId: 'msg-3', seq: 3, token: 1}});
       await advance(400);
       expect(landedIds()).toEqual(['msg-3']);
 
-      await advance(LANDED_HOLD_MS - 600); // 시한 직전(이동이 끝난 지 1.8초)
+      await advance(LANDED_HOLD_MS - 600); // 시한 안(이동이 끝난 지 약 1.05초, 시한 1.5초)
       expect(landedIds()).toEqual(['msg-3']);
       expect(tintedRows()).toBe(1);
 
@@ -523,14 +559,14 @@ describe.each([[false], [true]])('jumpPills=%s', jumpPills => {
     it('같은 행으로 다시 점프하면 시계가 새로 선다', async () => {
       const {rerender} = mount(base);
       rerender({jumpTarget: JUMP});
-      await advance(1900); // 앞 시계는 이동이 끝난(0.25초) 뒤 1.65초째 — 0.35초 뒤에 꺼질 참이다.
+      await advance(1400); // 앞 시계는 이동이 끝난(0.25초) 뒤 1.15초째 — 0.35초 뒤에 꺼질 참이다.
       expect(landedIds()).toEqual([APPROVAL_ID]);
 
       rerender({jumpTarget: {...JUMP, token: 2}});
-      await advance(1000); // 앞 시계의 시한(2.25초)을 한참 지났다. 새 이동은 0.25초에 끝났고 새 시계는 0.75초째다.
+      await advance(1000); // 앞 시계의 시한(1.75초)을 한참 지났다. 새 이동은 0.25초에 끝났고 새 시계는 0.75초째다.
       expect(landedIds()).toEqual([APPROVAL_ID]);
 
-      await advance(1500); // 새 시계의 시한(2초)을 넘겼다
+      await advance(1500); // 새 시계의 시한(1.5초)을 넘겼다
       expect(landedIds()).toEqual([]);
     });
   });
@@ -602,7 +638,7 @@ describe('(5) 「동작 줄이기」', () => {
     expect(landedIds()).toEqual([]);
   }
 
-  it('켜져 있으면 덮개 없이 즉시 거둔다 — 시한은 그대로 2초', async () => {
+  it('켜져 있으면 덮개 없이 즉시 거둔다 — 시한은 그대로 1.5초', async () => {
     const timing = jest.spyOn(Animated, 'timing');
     await landThenExpire(true);
 
@@ -622,7 +658,7 @@ describe('(5) 「동작 줄이기」', () => {
     const overlay = fadeOverlay();
     expect(overlay).not.toBeNull();
     expect(StyleSheet.flatten(overlay!.props.style).backgroundColor).toBe(
-      color.warnSurface,
+      landedFace(color),
     );
     // 불투명도를 0 으로, 정해진 시간 동안, 네이티브 드라이버로(JS 스레드가 바빠도 돈다).
     expect(fadeRuns(timing)).toBe(1);
@@ -677,7 +713,7 @@ describe('LandedTintFade — 행 하나의 전환', () => {
     expect(
       StyleSheet.flatten(screen.getByTestId('message-row').props.style)
         .backgroundColor,
-    ).toBe(color.warnSurface);
+    ).toBe(landedFace(color));
   });
 
   it('참에서 거짓이 되는 순간에만 덮개가 선다', async () => {
@@ -730,12 +766,9 @@ describe('LandedTintFade — 행 하나의 전환', () => {
     const standing = StyleSheet.flatten(
       screen.getByTestId('message-row').props.style,
     );
-    expect(standing.backgroundColor).toBe(color.warnSurface);
-    // 서 있는 착지의 테두리 덧그림(#4300) — 덮개는 같은 테두리를 들고 녹는다.
-    const standingEdge = StyleSheet.flatten(
-      screen.getByTestId('message-row-landed-edge').props.style,
-    );
-    expect(standingEdge.borderColor).toBe(color.warnBorder);
+    expect(standing.backgroundColor).toBe(landedFace(color));
+    // 테두리는 없다(#4949) — 서 있는 면에도 덧그림이 없고, 덮개도 테두리 없이 같은 색으로 녹는다.
+    expect(screen.queryByTestId('message-row-landed-edge')).toBeNull();
 
     view.rerender(row(false, false));
 
@@ -755,8 +788,6 @@ describe('LandedTintFade — 행 하나의 전환', () => {
       // 그릇이 화면 끝에서 띄운 둥근 상자라(`rowFace.ts`) 덮개도 **같은 모서리**다 — 사각형 덮개가
       // 둥근 서 있는 면 위에 올라 물러나는 순간 모서리가 튀면 안 된다(#4300 세 겹 사보타주).
       borderRadius: standing.borderRadius,
-      borderWidth: standingEdge.borderWidth,
-      borderColor: standingEdge.borderColor,
       backgroundColor: standing.backgroundColor,
       opacity: 1,
     });
@@ -798,7 +829,7 @@ describe('LandedTintFade — 행 하나의 전환', () => {
     expect(
       StyleSheet.flatten(screen.getByTestId('message-row').props.style)
         .backgroundColor,
-    ).toBe(color.warnSurface);
+    ).toBe(landedFace(color));
   });
 
   it('동작 줄이기면 덮개가 한 번도 서지 않는다', () => {

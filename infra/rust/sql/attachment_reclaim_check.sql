@@ -139,7 +139,8 @@ SELECT section, key, n, bytes
                     'huddle_transcription_track_workspace_id_source_attachment__fkey',
                     'huddle_transcription_track_workspace_id_transcript_attachm_fkey',
                     'scheduled_message_attachment_attachment_id_fkey',
-                    'self_media_token_attachment_id_fkey')
+                    'self_media_token_attachment_id_fkey',
+                    'attachment_media_attachment_fkey')
                   THEN ' (known)'
                   ELSE ' (UNKNOWN: a new reference kind, read the ADR-0151 증보 2 reference table before turning the delete on)'
                 END,

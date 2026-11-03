@@ -12,6 +12,8 @@
 let atX = Number.NaN;
 let atY = Number.NaN;
 let installed = false;
+// 「포인터가 다음에 움직일 때」를 기다리는 호출들(#5191). 새 이벤트 리스너를 더 달지 않고 아래 하나가 부른다.
+const nextMoveWatchers = new Set<() => void>();
 
 /** 문서 전체의 `mousemove` 를 듣기 시작한다(한 번만). 포털 메뉴 위의 포인터도 같은 문서의 이벤트라 놓치지 않는다. */
 export function ensurePointerTrail(): void {
@@ -22,9 +24,29 @@ export function ensurePointerTrail(): void {
     (event) => {
       atX = event.clientX;
       atY = event.clientY;
+      if (nextMoveWatchers.size === 0) return;
+      // 한 번씩만 부른다. 복사해서 비운 뒤 부르므로, 부르는 중에 다시 건 호출은 그다음 이동을 기다린다.
+      const due = [...nextMoveWatchers];
+      nextMoveWatchers.clear();
+      for (const watcher of due) watcher();
     },
     { capture: true, passive: true }
   );
+}
+
+/**
+ * 포인터가 **다음에** 움직일 때 한 번 부른다(#5191). 풀어 주는 함수를 돌려준다.
+ *
+ * 브라우저의 `:hover` 와 `mouseleave` 는 포인터 밑 요소가 가만히 있는 포인터 밑에서 사라지면(눌렀던 메뉴 항목이 닫히고, 편집기가
+ * 저장으로 사라지고) 낡은 채 남는다 — WebKit 은 다음 포인터 이동의 hit-test 때까지 옛 값을 쥐고, 그 요소를 거쳐 가던 `mouseleave` 는
+ * 이 요소의 조상에 닿지 않는다. 「다음 이동」은 그 값이 바로잡히는 가장 이른 때라서, 그때 한 번 다시 읽으려는 호출이 이것을 쓴다.
+ */
+export function onNextPointerMove(callback: () => void): () => void {
+  ensurePointerTrail();
+  nextMoveWatchers.add(callback);
+  return () => {
+    nextMoveWatchers.delete(callback);
+  };
 }
 
 /** 마지막으로 알려진 포인터의 뷰포트 좌표. 아직 한 번도 못 봤으면 `null`. */
@@ -36,4 +58,5 @@ export function lastPointerAt(): { x: number; y: number } | null {
 export function resetPointerTrailForTest(): void {
   atX = Number.NaN;
   atY = Number.NaN;
+  nextMoveWatchers.clear();
 }

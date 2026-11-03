@@ -71,6 +71,10 @@ interface World {
   afterMessages: Record<string, unknown[]>;
   failMessages?: boolean;
   failApprovals?: boolean;
+  /** 승인 원장의 답을 이 약속이 풀릴 때까지 붙든다(원장만 늦는 장면). */
+  holdApprovals?: Promise<void>;
+  /** 서버 투영의 목록(첫 쪽·더 보기) 답을 붙든다. 판별용 `limit=1` 요청은 붙들지 않는다. */
+  holdInboxList?: Promise<void>;
   /** 에이전트 실행 이력 경로의 응답 상태. 404 면 이 서버엔 그 경로가 없다(미제공). */
   agentRunsStatus?: number;
   /** 없으면 구 서버: `GET /inbox`가 404다. */
@@ -117,11 +121,13 @@ function installFetch(world: World) {
         return json(200, {id: parsed.pathname.split('/').slice(-2)[0], readAt: '2026-10-11T04:10:00.000001Z', unreadCount: 1});
       }
       const probe = parsed.searchParams.get('limit') === '1';
+      if (!probe && world.holdInboxList) await world.holdInboxList;
       return json(200, probe
         ? {items: [], nextCursor: null, unreadCount: 0}
         : (world.inbox.pages[parsed.searchParams.get('cursor') ?? ''] ?? {items: [], nextCursor: null, unreadCount: 0}));
     }
     if (target.includes('/approvals')) {
+      if (world.holdApprovals) await world.holdApprovals;
       if (world.failApprovals) return json(500, {error: {code: 'internal', message: 'x'}});
       return json(200, {approvals: parsed.searchParams.get('status') === 'pending' ? world.approvals : []});
     }
@@ -321,6 +327,69 @@ describe('인박스 서버 투영 (#3684)', () => {
     await openInbox();
     await waitFor(() => expect(screen.getByTestId('inbox-error')).toBeTruthy(), {timeout: 10_000});
     expect(mock.mock.calls.some(c => String(c[0]).includes('/messages'))).toBe(false);
+  });
+});
+
+// 처리할 일(승인)은 투영에 저장되지 않아 승인 원장은 투영과 **따로** 오고 따로 실패하고 따로 늦는다. 웹은 #5092가
+// 고쳤고 폰의 서버 경로는 원장의 실패·로딩을 아예 세지 않았다(#5116): 투영만 비어 있으면 「조용한 게 정상이에요」가
+// 대기 중인 승인을 모르는 채 나갔다. 그 말은 승인이 섞인 칩(전체·안 읽음)에만 걸린다.
+describe('인박스 서버 투영: 승인 원장은 투영과 따로 실패하고 따로 늦다 (#5116)', () => {
+  const emptyProjection = (): World => {
+    const world = serverWorld();
+    world.inbox = {pages: {'': {items: [], nextCursor: null, unreadCount: 0}}};
+    world.approvals = [];
+    return world;
+  };
+  const held = () => {
+    let release: () => void = () => undefined;
+    const promise = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    return {promise, release};
+  };
+
+  it('원장만 실패하면 승인이 섞인 「전체」는 오류를 말하고, 승인과 무관한 DM 칩은 말하지 않는다', async () => {
+    const world = emptyProjection();
+    world.failApprovals = true;
+    installFetch(world);
+    await openInbox();
+    await waitFor(() => expect(screen.getByTestId('inbox-error')).toBeTruthy(), {timeout: 10_000});
+    expect(screen.queryByTestId('inbox-empty')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('inbox-tab-dm'));
+    await waitFor(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy(), {timeout: 10_000});
+    expect(screen.queryByTestId('inbox-error')).toBeNull();
+  });
+
+  it('원장이 첫 응답을 기다리는 동안 「전체」는 비어 있다고 말하지 않고 로딩을 말하며, DM 칩은 기다리지 않는다', async () => {
+    const world = emptyProjection();
+    const hold = held();
+    world.holdApprovals = hold.promise;
+    installFetch(world);
+    await openInbox();
+    await waitFor(() => expect(screen.getByTestId('inbox-loading')).toBeTruthy(), {timeout: 10_000});
+    expect(screen.queryByTestId('inbox-empty')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('inbox-tab-dm'));
+    await waitFor(() => expect(screen.getByTestId('inbox-empty')).toBeTruthy(), {timeout: 10_000});
+    expect(screen.queryByTestId('inbox-loading')).toBeNull();
+    hold.release();
+  });
+
+  it('다른 칩의 로딩을 승인이 가리지 않는다: 승인이 합쳐져 있어도 DM 칩은 투영을 기다리는 동안 로딩을 말한다', async () => {
+    const world = serverWorld(); // 승인 하나(ap-1)가 대기 중이다.
+    const hold = held();
+    world.holdInboxList = hold.promise;
+    installFetch(world);
+    await openInbox();
+    // 「전체」에는 승인이 담겨 줄이 선다.
+    await waitFor(() => expect(rowKeys()).toContain('approval:ap-1'), {timeout: 10_000});
+
+    // DM 칩의 내용은 투영 하나다. 합쳐진 승인이 있다고 「주고받은 DM이 없어요」를 먼저 말하면 안 된다.
+    fireEvent.press(screen.getByTestId('inbox-tab-dm'));
+    await waitFor(() => expect(screen.getByTestId('inbox-loading')).toBeTruthy(), {timeout: 10_000});
+    expect(screen.queryByTestId('inbox-empty')).toBeNull();
+    hold.release();
   });
 });
 

@@ -9,10 +9,12 @@ import {
   ERROR_MESSAGE_FALLBACK,
   errorMessage,
   formatDay,
+  GUEST_INVITES_PAUSED_CODE,
   INVITE_ROLES,
   buildRoleLabelsPayload,
   draftFromRoleLabels,
   inviteCardText,
+  inviteRoleName,
   inviteRoles,
   inviteStatus,
   isWorkspaceOperator,
@@ -220,25 +222,37 @@ describe("catalogs match the server enums", () => {
     ]);
   });
 
-  it("offers exactly the three invite roles InviteRoutes allows", () => {
-    expect([...INVITE_ROLES.map((r) => r.id)].sort()).toEqual([
-      "admin",
-      "guest",
-      "member",
-    ]);
+  it("offers exactly the invite roles the server still accepts: guest invites are paused", () => {
+    // ADR-0128 D1 / ADR-0219 GS-0: the server answers a guest invite with a 400, so the
+    // screen does not offer it. Offering a role the server turns away is a form that
+    // cannot save.
+    expect([...INVITE_ROLES.map((r) => r.id)].sort()).toEqual(["admin", "member"]);
     expect(choiceLabel(INVITE_ROLES, "member")).toBe("멤버");
     expect(choiceLabel(INVITE_ROLES, "unknown")).toBe("unknown");
+    expect(GUEST_INVITES_PAUSED_CODE).toBe("guest_invites_paused");
   });
 
   it("overrides invite labels without changing role ids or details", () => {
     const roles = inviteRoles({ admin: "리드", member: "  ", guest: "손님" });
-    expect(roles.map((r) => r.id)).toEqual(["member", "admin", "guest"]);
+    expect(roles.map((r) => r.id)).toEqual(["member", "admin"]);
     expect(choiceLabel(roles, "member")).toBe("멤버");
     expect(choiceLabel(roles, "admin")).toBe("리드");
-    expect(choiceLabel(roles, "guest")).toBe("손님");
     expect(roles.find((r) => r.id === "admin")?.detail).toBe(
       INVITE_ROLES.find((r) => r.id === "admin")?.detail
     );
+  });
+
+  it("names every role in the list, the guest rows made before the pause included", () => {
+    // The list is not the picker: an invite made before the pause is still a guest row.
+    expect(inviteRoleName("guest")).toBe("게스트");
+    expect(inviteRoleName("guest", { guest: "손님" })).toBe("손님");
+    expect(inviteRoleName("guest", { guest: "  " })).toBe("게스트");
+    expect(inviteRoleName("member")).toBe("멤버");
+    expect(inviteRoleName("admin", { admin: "리드" })).toBe("리드");
+    expect(inviteRoleName("owner")).toBe("소유자");
+    expect(inviteRoleName("something-new")).toBe("something-new");
+    // `Object.prototype` names are not roles.
+    expect(inviteRoleName("constructor")).toBe("constructor");
   });
 
   it("leaves INVITE_ROLES unchanged when there are no overrides", () => {
@@ -631,6 +645,20 @@ describe("invite list status", () => {
     expect(inviteStatus({ ...base, expiresAtMs: Date.now() - 1000 }).label).toBe(
       "만료됨"
     );
+  });
+
+  it("reads a live guest invite as 멈춤 and every dead state as itself", () => {
+    // Guest invites are paused (ADR-0128 D1 / ADR-0219 GS-0): a live guest code cannot
+    // be spent, so "사용 가능" would be a lie.
+    const guest = { ...base, role: "guest" };
+    expect(inviteStatus(guest)).toEqual({ tone: "muted", label: "멈춤" });
+    // A dead code is over whatever its role: the dead states come first.
+    expect(inviteStatus({ ...guest, revokedAtMs: Date.now() }).label).toBe("해지됨");
+    expect(inviteStatus({ ...guest, usedCount: 1 }).label).toBe("모두 사용됨");
+    expect(inviteStatus({ ...guest, expiresAtMs: Date.now() - 1000 }).label).toBe("만료됨");
+    // The other roles are untouched by the pause.
+    expect(inviteStatus({ ...base, role: "member" }).label).toBe("사용 가능");
+    expect(inviteStatus({ ...base, role: "admin" }).label).toBe("사용 가능");
   });
 
   it("formats an expiry as a local calendar day", () => {

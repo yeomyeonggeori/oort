@@ -26,6 +26,21 @@
   inline-size: var(--spacing-pane);
   max-inline-size: 40vw;
 }
+/* 「지금 보는 결정」은 선택 축이다: 채움(`--accent-soft`)과 `aria-current`가 말한다. 예전에는 `ring-2 ring-inset
+   ring-signal`을 입혀서 집의 포커스 링(`focus-ring`: 2px 신호색 안쪽 윤곽)과 같은 모양이 늘 서 있었고, 키보드 초점이
+   와도 1px만 바뀌었다(#4986). 이제 채움은 선택, 링은 초점이라 둘이 겹치지 않는다. 유리 바탕을 이기려고 `.glass`와
+   함께 적는다: 선택자 특이도(0,3,0)가 유리(`.glass` 0,1,0)와 동작 줄이기 규칙의 불투명 바탕(`[data-decision-stage]
+   .glass` 0,2,0)보다 높아서 두 바탕을 모두 이긴다. */
+.decision-stage-thumbnail.glass[aria-current="true"] {
+  background-color: var(--accent-soft);
+}
+/* 처음·마지막 결정에서 더 갈 곳이 없는 화살표. `aria-disabled`만 있고 모양이 없어서 늘 눌릴 것처럼 보였다(#4986).
+   초점은 받지만(aria-disabled의 문법) 눌러도 아무 일이 없으니 네이티브 `disabled`(단추 바탕의
+   `disabled:pointer-events-none disabled:opacity-50`)와 같은 모양을 입는다. */
+.decision-stage-step[aria-disabled="true"] {
+  opacity: 0.5;
+  pointer-events: none;
+}
 /* Motion reduction removes blur as well as the spring. The solid stage token
    is already shared with photo stages; no new palette or overlay colour. */
 @media (prefers-reduced-motion: reduce) {

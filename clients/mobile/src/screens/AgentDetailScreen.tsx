@@ -185,10 +185,15 @@ export default function AgentDetailScreen({
         {/* ---- 지금 살아 있는가 (ADR-0200 D4) ------------------------------ */}
         {/* 「활성」·「깨어 있음」 같은 설정 상태와 다른 사실이다: 서버가 수령·읽기·run
             이벤트·ping으로 지금 파생한 것이고, hosted가 아닌 에이전트에는 서지 않는다. */}
-        <AgentLivenessLabel
-          agentId={agent.memberId}
-          testID="agent-detail-liveness"
-        />
+        {/* 가터는 끼우는 자리가 준다(#4982): 라벨은 목록 행 안에서도 쓰이고(`AgentsScreen`) 거기서는 행이 이미 여백을 지므로
+            부품이 가터를 가지면 행 안에서 이중 인셋이 된다. 상세의 스크롤(`body`)은 아래 여백뿐이라 여기서 준다. 라벨이 없으면
+            (서버가 모르는 에이전트) 빈 그릇은 높이가 0 이다. */}
+        <View style={styles.liveness}>
+          <AgentLivenessLabel
+            agentId={agent.memberId}
+            testID="agent-detail-liveness"
+          />
+        </View>
         <AgentUsageStatus agentId={agent.memberId} />
         {/* ---- 프로필 ---------------------------------------------------- */}
         <SectionLabel label="프로필" />
@@ -456,6 +461,7 @@ function Field({
 const buildStyles = (color: Palette) => StyleSheet.create({
   body: {paddingBottom: space.xl},
   bannerWrap: {paddingHorizontal: SAFE_GUTTER, paddingBottom: space.sm},
+  liveness: {paddingHorizontal: SAFE_GUTTER},
   card: {
     marginHorizontal: SAFE_GUTTER,
     padding: space.md,

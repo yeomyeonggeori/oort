@@ -487,7 +487,7 @@ async fn invite_lifecycle_red_and_green_paths() {
     );
 
     // -- GREEN: member-self redeem ----------------------------------------
-    let (redeem_code, _) = issue_invite(&http, &base, &owner, fixture.workspace, "guest", 2).await;
+    let (redeem_code, _) = issue_invite(&http, &base, &owner, fixture.workspace, "member", 2).await;
     let redeemed = send(
         http.post(format!(
             "{base}/v1/workspaces/{}/invites/redeem",
@@ -633,4 +633,371 @@ async fn invite_lifecycle_red_and_green_paths() {
     })
     .await
     .expect("owner tenant read");
+}
+
+// -- guest invites are paused (ADR-0128 D1, ADR-0219 GS-0) -------------------
+//
+// Until channel-scoped invites exist, no door mints, copies or spends an invite
+// with the guest role. A code with that role can no longer be made through the
+// API, so these tests plant one directly as the superuser (the column still
+// allows the role) and drive every door against it.
+
+/// A live code with the guest role, planted the way a row from before the pause
+/// would look. Returns the raw code and the invite id.
+async fn plant_guest_invite(su: &PgPool, workspace: Uuid, created_by: Uuid) -> (String, Uuid) {
+    let code = format!("guest-pause-{}", Uuid::new_v4());
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO invite_code \
+           (workspace_id, code_hash, code_preview, role, max_uses, expires_at, created_by) \
+         VALUES ($1, momo_invite_code_hash($2), right($2, 6), 'guest', 3, \
+                 now() + interval '1 day', $3) \
+         RETURNING id",
+    )
+    .bind(workspace)
+    .bind(&code)
+    .bind(created_by)
+    .fetch_one(su)
+    .await
+    .expect("plant a guest invite");
+    (code, id)
+}
+
+async fn invite_rows(su: &PgPool, workspace: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*)::bigint FROM invite_code WHERE workspace_id = $1")
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .expect("count invite rows")
+}
+
+/// `(used_count, revoked)` of one invite row.
+async fn invite_use_state(su: &PgPool, invite: Uuid) -> (i32, bool) {
+    sqlx::query_as("SELECT used_count, revoked_at IS NOT NULL FROM invite_code WHERE id = $1")
+        .bind(invite)
+        .fetch_one(su)
+        .await
+        .expect("read invite state")
+}
+
+async fn redemption_rows(su: &PgPool, invite: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM invite_code_redemption WHERE invite_code_id = $1",
+    )
+    .bind(invite)
+    .fetch_one(su)
+    .await
+    .expect("count redemptions")
+}
+
+async fn audit_rows(su: &PgPool, workspace: Uuid, action: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM audit_log WHERE workspace_id = $1 AND action = $2",
+    )
+    .bind(workspace)
+    .bind(action)
+    .fetch_one(su)
+    .await
+    .expect("count audit rows")
+}
+
+const PAUSED_CODE: &str = "guest_invites_paused";
+const PAUSED_MESSAGE: &str = "guest invites are paused until channel-scoped invites are available";
+
+fn assert_paused(attempt: &Attempt, door: &str) {
+    assert_eq!(attempt.status, 400, "{door}: {}", attempt.body);
+    assert_eq!(
+        attempt.body["error"]["code"], PAUSED_CODE,
+        "{door}: {}",
+        attempt.body
+    );
+    assert_eq!(error_message(&attempt.body), PAUSED_MESSAGE, "{door}");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn guest_invites_are_paused_at_create_regenerate_and_redeem() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "pause").await;
+    let base = start_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let owner = login(
+        &http,
+        &base,
+        fixture.workspace,
+        &fixture.owner.email,
+        OWNER_PASSWORD,
+    )
+    .await;
+    let member = login(
+        &http,
+        &base,
+        fixture.workspace,
+        &fixture.member.email,
+        MEMBER_PASSWORD,
+    )
+    .await;
+    let (guest_code, guest_id) = plant_guest_invite(&su, fixture.workspace, fixture.owner.id).await;
+    let rows_before = invite_rows(&su, fixture.workspace).await;
+    let created_audits = audit_rows(&su, fixture.workspace, "invite.created").await;
+    let regenerated_audits = audit_rows(&su, fixture.workspace, "invite.regenerated").await;
+
+    // -- create: the request names the role, in any spelling ---------------
+    for role in ["guest", " Guest ", "GUEST"] {
+        let created = send(
+            http.post(format!(
+                "{base}/v1/workspaces/{}/invites",
+                fixture.workspace
+            ))
+            .bearer_auth(&owner)
+            .json(&json!({ "role": role, "maxUses": 2 })),
+        )
+        .await;
+        assert_paused(&created, &format!("create as {role:?}"));
+    }
+    assert_eq!(
+        invite_rows(&su, fixture.workspace).await,
+        rows_before,
+        "a refused create must not leave a row"
+    );
+    assert_eq!(
+        audit_rows(&su, fixture.workspace, "invite.created").await,
+        created_audits,
+        "a refused create must not leave an audit row"
+    );
+
+    // -- regenerate copies the role of the code it replaces ----------------
+    let regenerated = send(
+        http.post(format!(
+            "{base}/v1/workspaces/{}/invites/{guest_id}/regenerate",
+            fixture.workspace
+        ))
+        .bearer_auth(&owner),
+    )
+    .await;
+    assert_paused(&regenerated, "regenerate");
+    assert_eq!(
+        invite_rows(&su, fixture.workspace).await,
+        rows_before,
+        "a refused regenerate must not mint a replacement"
+    );
+    assert_eq!(
+        invite_use_state(&su, guest_id).await,
+        (0, false),
+        "a refused regenerate leaves the old code as it was"
+    );
+    assert_eq!(
+        audit_rows(&su, fixture.workspace, "invite.regenerated").await,
+        regenerated_audits
+    );
+
+    // -- member-self redeem ------------------------------------------------
+    let redeemed = send(
+        http.post(format!(
+            "{base}/v1/workspaces/{}/invites/redeem",
+            fixture.workspace
+        ))
+        .bearer_auth(&member)
+        .json(&json!({ "code": guest_code })),
+    )
+    .await;
+    assert_paused(&redeemed, "member-self redeem");
+    assert_eq!(
+        invite_use_state(&su, guest_id).await,
+        (0, false),
+        "a refused redeem must not spend the code"
+    );
+    assert_eq!(redemption_rows(&su, guest_id).await, 0);
+
+    // -- the public join answers the same, to the byte ---------------------
+    let joined = post_join(
+        &http,
+        &base,
+        &guest_code,
+        &format!("paused-{}@invite-life.test", Uuid::new_v4()),
+    )
+    .await;
+    assert_paused(&joined, "public join");
+    assert_eq!(
+        joined.body, redeemed.body,
+        "all the doors give one answer: {} / {}",
+        joined.body, redeemed.body
+    );
+    assert_eq!(regenerated.body, redeemed.body);
+    assert_eq!(invite_use_state(&su, guest_id).await, (0, false));
+
+    // -- the way out stays open: an admin can still revoke the old code ----
+    let revoked = send(
+        http.post(format!(
+            "{base}/v1/workspaces/{}/invites/{guest_id}/revoke",
+            fixture.workspace
+        ))
+        .bearer_auth(&owner)
+        .json(&json!({ "reason": "paused" })),
+    )
+    .await;
+    assert_eq!(revoked.status, 200, "{}", revoked.body);
+    assert_eq!(invite_use_state(&su, guest_id).await, (0, true));
+    // A dead code keeps the answer a dead code has always had.
+    let dead = post_join(
+        &http,
+        &base,
+        &guest_code,
+        &format!("dead-{}@invite-life.test", Uuid::new_v4()),
+    )
+    .await;
+    assert_eq!(dead.status, 410, "{}", dead.body);
+    assert_eq!(error_message(&dead.body), "invite code is revoked");
+
+    // -- member and admin invites are exactly what they were --------------
+    for role in ["member", "admin"] {
+        let (code, id) = issue_invite(&http, &base, &owner, fixture.workspace, role, 2).await;
+        let regenerated = send(
+            http.post(format!(
+                "{base}/v1/workspaces/{}/invites/{id}/regenerate",
+                fixture.workspace
+            ))
+            .bearer_auth(&owner),
+        )
+        .await;
+        assert_eq!(
+            regenerated.status, 201,
+            "regenerate a {role} code: {}",
+            regenerated.body
+        );
+        assert_eq!(regenerated.body["invite"]["role"], role);
+        // The replaced code is dead; spending it as the member is the generic 400.
+        let spent = send(
+            http.post(format!(
+                "{base}/v1/workspaces/{}/invites/redeem",
+                fixture.workspace
+            ))
+            .bearer_auth(&member)
+            .json(&json!({ "code": code })),
+        )
+        .await;
+        assert_eq!(spent.status, 400, "{}", spent.body);
+        assert!(spent.body["error"].get("code").is_none(), "{}", spent.body);
+    }
+    let (member_code, _) = issue_invite(&http, &base, &owner, fixture.workspace, "member", 2).await;
+    let live = send(
+        http.post(format!(
+            "{base}/v1/workspaces/{}/invites/redeem",
+            fixture.workspace
+        ))
+        .bearer_auth(&member)
+        .json(&json!({ "code": member_code })),
+    )
+    .await;
+    assert_eq!(live.status, 200, "{}", live.body);
+}
+
+/// The function that writes the row refuses the role itself, for a caller that
+/// never ran the request check — and still writes for the other roles.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_mint_function_refuses_a_paused_role_on_its_own() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "pause-mint").await;
+    let workspace = fixture.workspace;
+    let owner_id = fixture.owner.id;
+    let before = invite_rows(&su, workspace).await;
+
+    let refused = momo_db::with_tenant_tx(&app_pool, workspace, move |conn| {
+        Box::pin(async move {
+            Ok(
+                momo_settings::create_invite(conn, workspace, "guest", 1, None, owner_id)
+                    .await
+                    .is_err(),
+            )
+        })
+    })
+    .await
+    .expect("tenant tx");
+    assert!(refused, "create_invite must not mint a paused role");
+    assert_eq!(invite_rows(&su, workspace).await, before);
+
+    let minted = momo_db::with_tenant_tx(&app_pool, workspace, move |conn| {
+        Box::pin(async move {
+            Ok(
+                momo_settings::create_invite(conn, workspace, "member", 1, None, owner_id)
+                    .await
+                    .is_ok(),
+            )
+        })
+    })
+    .await
+    .expect("tenant tx");
+    assert!(minted, "the same call still mints a member invite");
+    assert_eq!(invite_rows(&su, workspace).await, before + 1);
+}
+
+/// Changing an existing member's role to guest is not an invite and is not paused: it
+/// is how an admin lowers a person's workspace authority, and it adds no channel.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_role_change_to_guest_is_not_an_invite_and_stays_open() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "pause-role").await;
+    // The member already sits in the workspace's one channel.
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         SELECT workspace_id, id, $2, 'member' FROM channel WHERE workspace_id = $1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.member.id)
+    .execute(&su)
+    .await
+    .expect("seat the member in the channel");
+    let channel_rows = |su: PgPool| async move {
+        sqlx::query_as::<_, (i64, i64)>(
+            "SELECT count(*)::bigint, count(*) FILTER (WHERE role = 'member')::bigint \
+               FROM membership WHERE member_id = $1",
+        )
+        .bind(fixture.member.id)
+        .fetch_one(&su)
+        .await
+        .expect("count channel rows")
+    };
+    let before = channel_rows(su.clone()).await;
+    assert_eq!(before, (1, 1));
+
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let owner = login(
+        &http,
+        &base,
+        fixture.workspace,
+        &fixture.owner.email,
+        OWNER_PASSWORD,
+    )
+    .await;
+    let changed = send(
+        http.patch(format!(
+            "{base}/v1/workspaces/{}/members/{}/role",
+            fixture.workspace, fixture.member.id
+        ))
+        .bearer_auth(&owner)
+        .json(&json!({ "role": "guest" })),
+    )
+    .await;
+    assert_eq!(changed.status, 200, "{}", changed.body);
+    assert_eq!(changed.body["role"], "guest", "{}", changed.body);
+    let role: String =
+        sqlx::query_scalar("SELECT role::text FROM workspace_membership WHERE member_id = $1")
+            .bind(fixture.member.id)
+            .fetch_one(&su)
+            .await
+            .expect("workspace role");
+    assert_eq!(role, "guest");
+    assert_eq!(
+        channel_rows(su.clone()).await,
+        before,
+        "the change adds no channel and rewrites none"
+    );
 }

@@ -11,7 +11,7 @@ import {Animated, StyleSheet} from 'react-native';
 import {EASE_OUT, LANDED_TINT_FADE_MS} from '../../design/motion';
 import {useStyles} from '../../design/theme';
 import type {Palette} from '../../design/tokens';
-import {ROW_FACE} from './rowFace';
+import {landedFace, ROW_FACE} from './rowFace';
 
 // =============================================================================
 // 착지 틴트가 물러나는 한 번의 전환 (#3921).
@@ -37,8 +37,9 @@ import {ROW_FACE} from './rowFace';
 //
 // ## 「동작 줄이기」
 //
-// 머무는 시간(`LANDED_HOLD_MS`)은 그대로이고 **전환만** 즉시다 — 설정이 막는 것은 움직임
-// 이지 사람이 틴트를 볼 시간이 아니다. 설정은 목록(`Timeline`)이 이미 들고 있는 ref 를
+// 머무는 시간(`LANDED_HOLD_MS`, 약 1.5초)은 그대로이고 **전환만** 즉시다 — 설정이 막는 것은
+// 움직임이지 사람이 틴트를 볼 시간이 아니다. 머문 뒤 0.24초(`LANDED_TINT_FADE_MS`)에 걸쳐 녹고,
+// 동작 줄이기면 덮개 없이 바로 걷힌다. 설정은 목록(`Timeline`)이 이미 들고 있는 ref 를
 // 컨텍스트로 받는다. 행마다 `useReduceMotionRef` 를 부르면 마운트된 행 수만큼
 // `AccessibilityInfo.isReduceMotionEnabled()` 네이티브 호출이 목록이 뜨는 순간에 몰린다.
 // 컨텍스트가 없는 표면(검색 미리보기·측정 하네스)은 움직임을 줄이지 않은 것으로 읽는다 —
@@ -128,8 +129,7 @@ const buildStyles = (color: Palette) =>
       bottom: 0,
       left: 0,
       borderRadius: ROW_FACE.radius,
-      borderWidth: ROW_FACE.edge,
-      borderColor: color.warnBorder,
-      backgroundColor: color.warnSurface,
+      // 서 있는 면(`styles.rowLanded`)과 같은 색 — 테두리는 없다(owner 2026-10-31, #4949).
+      backgroundColor: landedFace(color),
     },
   });

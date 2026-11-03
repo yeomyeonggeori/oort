@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BOOT_RESTORE_BUDGET_MS,
+  LOCALE_CATALOG_BUDGET_MS,
   SESSION_HYDRATE_BUDGET_MS,
   releaseAfter,
 } from "./boot";
@@ -44,7 +45,15 @@ describe("boot budgets", () => {
     // all — the request deadline would fire first and the wait would be back.
     expect(BOOT_RESTORE_BUDGET_MS).toBeLessThan(15_000);
     expect(SESSION_HYDRATE_BUDGET_MS).toBeLessThan(15_000);
+    expect(LOCALE_CATALOG_BUDGET_MS).toBeLessThan(15_000);
     expect(BOOT_RESTORE_BUDGET_MS).toBeGreaterThan(0);
     expect(SESSION_HYDRATE_BUDGET_MS).toBeGreaterThan(0);
+    expect(LOCALE_CATALOG_BUDGET_MS).toBeGreaterThan(0);
+  });
+
+  it("never lets the dictionary chunk wait longer than the app's own 'show something' budget", () => {
+    // #4915: the dictionary gate shares the first paint with the session gate, so it
+    // may not be allowed to hold the screen longer than the connect screen is.
+    expect(LOCALE_CATALOG_BUDGET_MS).toBeLessThanOrEqual(BOOT_RESTORE_BUDGET_MS);
   });
 });

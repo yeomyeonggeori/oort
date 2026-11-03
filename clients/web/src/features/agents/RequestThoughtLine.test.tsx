@@ -79,6 +79,29 @@ describe("요청의 생각 줄", () => {
     expect(screen.getByTestId("request-thought-line").textContent).not.toContain("에이전트 보고");
   });
 
+  it("끝난 요청의 요약 칩은 눌림이 채움뿐이고, 꼬리표 「에이전트 보고」는 몸과 따로 서서 줄임표에 먹히지 않는다 (#5174 L6)", () => {
+    render(tree(run("succeeded")));
+    const chip = screen.getByTestId("request-thought-line");
+    // 좁은 칸에서는 이 칩이 열의 거의 전폭이다: `.press`의 축소 없이 채움만(README §2.6 「전폭은 폭이다」).
+    expect(chip.className).toContain("press-instant-fill");
+    expect(chip.className.split(/\s+/)).not.toContain("press");
+    const tail = screen.getByTestId("request-thought-tail");
+    expect(tail.textContent).toBe(" · 에이전트 보고");
+    expect(tail.className).toContain("shrink-0");
+    // 줄임표를 받는 것은 몸이고 꼬리표는 그 밖이다.
+    const body = tail.previousElementSibling as HTMLElement;
+    expect(body.className).toContain("truncate");
+    expect(body.contains(tail)).toBe(false);
+    expect(body.textContent).toBe("달무리봇 · 2분 · 단계 6 · 명령 12");
+    // 접근성 이름은 이은 글 그대로다.
+    expect(chip.getAttribute("aria-label")).toBe("달무리봇, 2분 · 단계 6 · 명령 12 · 에이전트 보고. 작업 패널 열기");
+    // 에이전트 보고 숫자가 없으면 꼬리표 자체가 없다.
+    cleanup();
+    ledger.report = null;
+    render(tree(run("succeeded")));
+    expect(screen.queryByTestId("request-thought-tail")).toBeNull();
+  });
+
   it("펼친 뒤의 델타만 읽고 재접속·종결·다시 열기·재마운트 뒤에는 없으며 단계 메모는 남는다", () => {
     const view = render(tree());
     expect(subscribeAgent).not.toHaveBeenCalled();

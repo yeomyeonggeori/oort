@@ -36,6 +36,15 @@ import {
  *    줄이고, 안 들어갈 때만 이름이 두 줄을 쓰고 주제가 제 줄을 갖는다. 이름은
  *    `line-clamp-2` 로 두 줄에 가둔다 — 방 이름 길이에 목록 높이를 맡기지 않는다.
  */
+/**
+ * ## 가로 자리 (#5094, #5048 D6)
+ *
+ * `left-3`은 **폰 폭**의 폼 여백(`p-3`, 12)에 맞춘 값이다. 넓은 창(≥600)의 컴포저는 폼 여백이 24(`composer-dock > form`)고
+ * 카드는 그 안쪽에 서므로, 12에 그대로 두면 목록이 카드의 왼쪽 가장자리보다 12 바깥으로 튀어나왔다. 넓은 창의 값은 여기서
+ * 겹쳐 쓰지 않고 `tokens.css` `composer-dock`의 ≥600 블록이 정한다: 세 뿌리가 단 `data-composer-popover`를 보고 폼 여백과
+ * 같은 24로 옮긴다(폼 여백과 목록 가장자리가 같은 블록에서 같이 움직인다). 스레드 컴포저는 독 밖이라 `className`의
+ * `left-0`이 이 기본값을 덮고, 그 덮어쓰기는 `cn`이 `left-*` 충돌로 푼다.
+ */
 const PANEL_CLASS =
   "absolute bottom-full left-3 mb-2 overflow-hidden rounded-md border border-line bg-surface-raised p-1 shadow-lg";
 
@@ -87,6 +96,7 @@ export function ComposerAutocompleteList({
       <div
         data-testid={`${testId}-status`}
         data-status={status}
+        data-composer-popover="list"
         // 이 상자는 listbox 가 아니다. 고를 것이 없으므로 `aria-controls` 도
         // `aria-activedescendant` 도 이것을 가리키지 않고, 입력창의
         // `aria-expanded` 는 여전히 후보가 있을 때만 참이다. 로딩 중의 Enter 가
@@ -142,6 +152,7 @@ export function ComposerAutocompleteList({
       role="listbox"
       aria-label={spec.listLabel}
       data-testid={testId}
+      data-composer-popover="list"
       className={cn(PANEL_CLASS, wide ? "w-pane max-w-full" : "w-pane-sm", className)}
     >
       {candidates.map((candidate, index) => {
@@ -282,6 +293,7 @@ function CommandList({
   return (
     <div
       data-testid={`${testId}-panel`}
+      data-composer-popover="menu"
       // 넓은 창에서는 시안의 440이고, 그보다 좁은 컴포저에서는 좌우 여백 안을
       // 채운다(폰·스레드가 열린 좁은 판). 폭이 목록을 넘어 화면 밖으로 새지 않는다.
       className={cn(

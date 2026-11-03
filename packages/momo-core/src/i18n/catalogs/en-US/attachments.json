@@ -1,0 +1,5 @@
+{
+  "attachments.tray.removeNamed": "Remove attachment {name}",
+  "attachments.tray.overflow": "{count, plural, one {# file doesn't} other {# files don't}} fit: a message holds up to {max, number}.",
+  "attachments.tray.noticeDismiss": "Got it"
+}

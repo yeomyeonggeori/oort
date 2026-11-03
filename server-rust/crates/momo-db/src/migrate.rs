@@ -780,12 +780,18 @@ mod tests {
     /// `approval_time_sensitive`) and the time-zone helper `notification_local_time` (a wrong zone
     /// name is NULL, not an error; executable by `momo_app` only). No new table, so no new RLS
     /// policy; the helper's grant is reasserted in both role bootstraps.
+    ///
+    /// 173 is #4673's video meta and poster (ADR-0151 증보 5 D5, C5): `attachment_media`, one row per
+    /// video attachment (length, size, an optional poster image), tenant ENABLE + FORCE +
+    /// `ws_isolation`, a composite FK into `attachment (workspace_id, id)` with CASCADE, and the
+    /// minimum grants (`attachment-media-lockdown`, the same text in the migration and both role
+    /// bootstraps; the team AI's read role may read every column but the poster bytes).
     #[test]
-    fn discovers_contiguous_migrations_001_to_172() {
+    fn discovers_contiguous_migrations_001_to_173() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=172).collect();
+        let expected: Vec<i64> = (1..=173).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -793,7 +799,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=172 under {}",
+            "expected contiguous 001..=173 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -801,7 +807,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("172_notification_prefs_v2"));
+            .starts_with("173_attachment_media"));
     }
 
     #[test]

@@ -1221,6 +1221,95 @@ describe('#2513 — 영속 결과 카드 (부록 B)', () => {
 });
 
 // =============================================================================
+// #5025 (#4965 후속) — 도우미 문(ADR-0201 증보 v3 B4-2). 도우미가 올린 `invite.create` 카드를 승인하면 서버는 링크를
+// 결정 응답이 아니라 **대화의 도우미 메시지**로 준다: 응답의 `result` 에는 `secretOnce` 가 없고, 결과 카드는
+// `secret_shown_once: false` 와 「링크 받는 곳」 행을 갖는다. 링크 상자(1회 값)가 설 일이 없는 카드가 바르게
+// 그려지는지를 렌더 트리에서 잰다 — 상자도, 상자의 리드 문장도, 복사 로터도, 「1회 표시됐어요」 고지도 서지 않는다.
+// 웹 `actionCards.test.tsx` 의 같은 이름 시험과 같은 입력이다(웹과 같은 의미를 측정으로).
+// =============================================================================
+describe('#5025 — 도우미 문: 링크 상자가 없는 승인과 결과', () => {
+  const REQUEST_ROW =
+    '승인하면 도우미가 이 대화에 링크를 올려요. 대화에 있는 사람은 모두 볼 수 있어요';
+  const RESULT_ROW = '도우미가 이 대화에 링크를 올렸어요';
+  /** 결정 응답(200): 부록 C 에서 `secretOnce` 만 뺀 것. 링크는 이 응답에 없다(대화의 도우미 메시지에 있다). */
+  const HELPER_C = {
+    ...APPENDIX_C,
+    result: {actionId: 'invite.create', ref: {type: 'invite', id: INVITE_ID}},
+  };
+  function helperRequest(): Record<string, unknown> {
+    const props = appendixA();
+    const action = props.action as {rows: {label: string; value: string}[]};
+    return {
+      ...props,
+      action: {...action, rows: [...action.rows, {label: '링크 받는 곳', value: REQUEST_ROW}]},
+    };
+  }
+
+  it('승인 응답에 1회 값이 없으면 링크 상자도 리드 문장도 복사 로터도 서지 않고 영수증만 선다', async () => {
+    const log = installDecision(() => jsonResponse(200, HELPER_C));
+    const settled: DecisionOutcome[] = [];
+    const view = renderRow({
+      message: approvalMessage(helperRequest()),
+      onSettled: (_id, outcome) => settled.push(outcome),
+    });
+    // 결정 전: 행이 링크가 어디로 가는지 먼저 말한다.
+    expect(screen.getAllByTestId('approval-action-row')).toHaveLength(4);
+    expect(renderedText()).toContain(REQUEST_ROW);
+
+    await armAndCommit('approve');
+    await waitFor(() => expect(settled).toHaveLength(1));
+    expect(log.calls).toEqual([{approve: true, key: expect.any(String)}]);
+    expect(settled[0]).toMatchObject({kind: 'committed', status: 'approved'});
+    // 호출자가 영수증에 얹을 값이 없다.
+    expect(linkOnceFrom(settled[0])).toBeUndefined();
+
+    // 호출자(대화 화면)가 하듯 값 없는 영수증으로 다시 그린다.
+    view.unmount();
+    renderRow({
+      message: approvalMessage(helperRequest()),
+      gates: new Map(),
+      receipts: new Map([[APPROVAL_ID, {note: '승인을 기록했어요.', status: 'approved'}]]),
+    });
+    expect(screen.getByTestId('card-approval-receipt')).toBeTruthy();
+    expect(screen.queryByTestId(`${PREFIX}-approve`)).toBeNull();
+    expect(screen.queryByTestId('card-approval-link-once')).toBeNull();
+    expect(screen.queryByTestId('card-approval-link-once-lead')).toBeNull();
+    expect(screen.queryByTestId('card-approval-link-once-value')).toBeNull();
+    expect(renderedText()).not.toContain(LINK_ONCE_LEAD);
+    expect(renderedText()).not.toContain('join?code');
+    const rotor = (screen.getByTestId('message-row').props.accessibilityActions ??
+      []) as {name: string}[];
+    expect(rotor.map(action => action.name)).not.toContain('momoCopyLinkOnce');
+  });
+
+  it('영속 결과 카드는 「링크 받는 곳」 행을 그리고 1회 고지는 없다 (secret_shown_once: false)', () => {
+    renderRow({
+      message: resultMessage(
+        appendixB({
+          secret_shown_once: false,
+          rows: [
+            {label: '역할', value: 'member'},
+            {label: '만료', value: '2026-09-29'},
+            {label: '링크 받는 곳', value: RESULT_ROW},
+          ],
+        }),
+      ),
+      gates: new Map(),
+    });
+    const rows = screen.getAllByTestId('action-result-row');
+    expect(rows).toHaveLength(3);
+    expect(within(rows[2]).getByText('링크 받는 곳')).toBeTruthy();
+    expect(within(rows[2]).getByText(RESULT_ROW)).toBeTruthy();
+    expect(screen.getByTestId('action-result-note').props.children).toBe('실행을 마쳤어요.');
+    // 「링크는 승인한 사람에게 1회 표시됐어요」는 거짓이 된다: 승인한 사람에게 보인 적이 없다.
+    expect(screen.queryByTestId('action-result-secret-once')).toBeNull();
+    expect(renderedText()).not.toContain(ACTION_RESULT_SECRET_ONCE_NOTE);
+    expect(screen.queryByTestId('card-approval-link-once')).toBeNull();
+    expect(renderedText()).not.toContain('code=');
+  });
+});
+
+// =============================================================================
 // 모델 소비 단일점 — 사보타주 ③ 이 여기서 빨개진다
 // =============================================================================
 describe('모델 소비 단일점 — 폰은 코어가 읽어 준 모델만 그린다', () => {
