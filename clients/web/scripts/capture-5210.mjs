@@ -351,6 +351,15 @@ async function waitFailed(page, count = 1) {
   await wait(250);
 }
 
+/**
+ * 클릭 뒤에 나간 변경(비 GET) 요청의 목록. 「메시지 호출」은 `/messages` 를 건드리거나 DELETE 인 것이다.
+ * WebKit 은 클릭이 창 초점 이벤트를 일으켜 현재 보는 방 하트비트(`PUT …/viewing`)를 보낸다 — 메시지와 무관해서 목록에만 남긴다.
+ */
+function requestsSince(state, index) {
+  return state.mutating.slice(index).map((r) => `${r.method} ${r.path.replace(workspaceId, "<ws>").replace(channelA, "<ch>")}`);
+}
+const messageCalls = (list) => list.filter((line) => /\/messages(\/|$)/.test(line) || line.startsWith("DELETE "));
+
 async function pendingCount(page) {
   return page.evaluate(() => window.__spike?.pending ?? -1);
 }
@@ -416,6 +425,10 @@ function checkShape(m, width) {
 
 /** 키보드: 새로고침 → X 순서로 초점이 가고 둘 다 보이는 초점 고리가 선다. */
 async function checkKeyboard(page) {
+  if (ENGINE === "webkit") {
+    console.log("  [SKIP] keyboard: macOS WebKit 의 Tab 은 단추를 건너뛴다(기본 설정, 앱 전체가 같다). 초점 순서는 Chromium 레인이 잰다");
+    return;
+  }
   await page.getByTestId("pending-resend").focus();
   await page.keyboard.press("Shift+Tab");
   await page.keyboard.press("Tab");
@@ -513,7 +526,8 @@ async function sceneTextFailure(browser, combo, scheme, width, height, extra) {
     await wait(900);
     check("discard: X 를 누르면 실패 행이 사라진다", (await pendingRows(page).count()) === 0);
     check("discard: 대기 목록도 비었다(__spike.pending 0)", (await pendingCount(page)) === 0, String(await pendingCount(page)));
-    check("discard: 서버 호출 없음(전송·삭제 요청 0건)", state.posts.length === postsBefore && state.mutating.length === mutatingBefore, `posts ${postsBefore}→${state.posts.length}, mutating ${mutatingBefore}→${state.mutating.length}`);
+    const sinceClick = requestsSince(state, mutatingBefore);
+    check("discard: 서버 호출 없음(메시지 전송·삭제 요청 0건)", state.posts.length === postsBefore && messageCalls(sinceClick).length === 0, `posts ${postsBefore}→${state.posts.length}, 클릭 뒤 변경 요청 ${JSON.stringify(sinceClick)}`);
     const stillThere = await page.locator('[data-testid="timeline-message"]', { hasText: "금요일 배포 공지 초안 올렸어요" }).count();
     check("discard: 확정 메시지로 되살아나지 않는다", stillThere === 0, String(stillThere));
   } finally {
@@ -567,7 +581,8 @@ async function sceneAttachmentFailure(browser, combo, scheme, width, height) {
     await page.waitForFunction(() => document.querySelectorAll('[data-testid="timeline-pending"]').length === 0, undefined, { timeout: 5000 }).catch(() => undefined);
     await wait(900);
     check("attachment: X 가 글과 파일 카드를 한 번에 지운다", (await pendingRows(page).count()) === 0);
-    check("attachment: 지우기에 서버 호출이 없다", state.mutating.length === mutatingBefore, `${mutatingBefore}→${state.mutating.length}`);
+    const sinceAttachmentClick = requestsSince(state, mutatingBefore);
+    check("attachment: 지우기에 서버 호출이 없다(메시지 전송·삭제 요청 0건)", messageCalls(sinceAttachmentClick).length === 0, `클릭 뒤 변경 요청 ${JSON.stringify(sinceAttachmentClick)}`);
   } finally {
     await context.close();
   }
