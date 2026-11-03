@@ -63,7 +63,8 @@ function stageText(stage: string | undefined): string {
 
 const APPROVAL_DECISION_TEXT: Record<string, string> = {
   approved: "승인됐어요",
-  rejected: "거절됐어요",
+  // 승인의 반대 낱말은 말 사전의 「거부」다(agent-request-loop.md §7, #5174 L2): 기록 줄도 건강 줄과 같은 낱말을 쓴다.
+  rejected: "거부됐어요",
   expired: "승인이 만료됐어요",
   cancelled: "승인 요청이 취소됐어요",
 };

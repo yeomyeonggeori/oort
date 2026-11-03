@@ -106,10 +106,20 @@ type Format = MessageService["formatMessage"];
  * 건강 줄의 문장: 「조용해요 · 마지막 보고 8분 전 · 같은 단계에 12분째 · 실패한 활동 1」. 말할 신호가 없으면
  * null이다(줄이 서지 않는다: 「문제 없음」을 지어내지 않는다).
  */
-export function workHealthLine(health: WorkHealth, formatMessage: Format): string | null {
+export function workHealthLine(
+  health: WorkHealth,
+  formatMessage: Format,
+  options: { lastReportShownElsewhere?: boolean } = {}
+): string | null {
   const clauses: string[] = [];
   if (health.quietMinutes !== null) {
-    clauses.push(formatMessage("timeline.workHealth.quiet", { minutes: health.quietMinutes }));
+    // 같은 화면의 머리·run 목록이 이미 「마지막 보고 n분 전」을 말하면 이 줄은 그 시간을 되풀이하지 않는다: 같은 사실을
+    // 두 번 말하면 두 숫자가 어긋날 때(서버 진행 읽기 ↔ 원장의 더 새 행) 한 화면이 두 말을 한다(#5174 L1).
+    clauses.push(
+      options.lastReportShownElsewhere === true
+        ? formatMessage("timeline.workHealth.quietShort")
+        : formatMessage("timeline.workHealth.quiet", { minutes: health.quietMinutes })
+    );
   }
   if (health.dwellMinutes !== null) {
     clauses.push(formatMessage("timeline.workHealth.dwell", { minutes: health.dwellMinutes }));

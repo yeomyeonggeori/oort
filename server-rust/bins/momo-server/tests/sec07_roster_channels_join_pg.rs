@@ -1071,7 +1071,7 @@ async fn invite_create_and_regenerate_contract_and_admin_signup_chain() {
     assert_eq!(owner_invite.status, 400, "{}", owner_invite.body);
     assert_eq!(
         error_message(&owner_invite.body),
-        "invite role must be admin, member, or guest"
+        "invite role must be admin or member"
     );
     assert_eq!(
         invite_count(&su, workspace).await,
@@ -1088,13 +1088,13 @@ async fn invite_create_and_regenerate_contract_and_admin_signup_chain() {
     assert_eq!(owner_rows, 0);
 
     // -- J6 / J7 / J8: regenerate a non-default invite ---------------------
-    // guest / 7 uses, so "preserved" cannot be the column default.
+    // admin / 7 uses, so "preserved" cannot be the column default.
     let source = create_invite(
         &http,
         &base,
         &owner_token,
         workspace,
-        json!({"role": "guest", "maxUses": 7}),
+        json!({"role": "admin", "maxUses": 7}),
     )
     .await;
     assert_eq!(source.status, 201, "{}", source.body);
@@ -1110,7 +1110,7 @@ async fn invite_create_and_regenerate_contract_and_admin_signup_chain() {
     let new_invite = &regenerated.body["invite"];
     let new_id = Uuid::parse_str(new_invite["id"].as_str().unwrap()).unwrap();
     assert_ne!(new_id, source_id);
-    assert_eq!(new_invite["role"], "guest", "{new_invite}");
+    assert_eq!(new_invite["role"], "admin", "{new_invite}");
     assert_eq!(new_invite["maxUses"], 7, "{new_invite}");
     assert!(new_invite.get("revokedAtMs").is_none(), "{new_invite}");
 
@@ -1120,7 +1120,7 @@ async fn invite_create_and_regenerate_contract_and_admin_signup_chain() {
     assert_eq!(old_row.revocation_reason.as_deref(), Some("regenerated"));
     let new_row = invite_row(&su, new_id).await;
     assert!(!new_row.revoked, "the replacement is live");
-    assert_eq!(new_row.role, "guest");
+    assert_eq!(new_row.role, "admin");
     assert_eq!(new_row.max_uses, 7);
     assert_eq!(new_row.created_by, owner.id);
     let (_, _, regen_detail) = one_audit(&su, workspace, "invite.regenerated", source_id).await;
@@ -1129,7 +1129,7 @@ async fn invite_create_and_regenerate_contract_and_admin_signup_chain() {
         json!(new_id.to_string()),
         "{regen_detail}"
     );
-    assert_eq!(regen_detail["role"], "guest", "{regen_detail}");
+    assert_eq!(regen_detail["role"], "admin", "{regen_detail}");
     assert_eq!(regen_detail["max_uses"], 7, "{regen_detail}");
 
     // -- J10: an admin invite makes an admin -------------------------------

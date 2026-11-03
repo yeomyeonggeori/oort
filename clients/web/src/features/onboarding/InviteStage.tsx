@@ -7,6 +7,7 @@ import { cn } from "@/design/lib/cn";
 import { IssuedInviteCard } from "@/features/settings/IssuedInviteCard";
 import { useIssueInvite } from "@/features/settings/useIssueInvite";
 import { inviteIssueErrorCopy } from "@/features/settings/inviteIssueError";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   OWNER_INVITE_MAX_USES,
   OWNER_INVITE_ROLE,
@@ -68,6 +69,7 @@ export function InviteStage({
   headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const offline = useBrowserOffline();
+  const formatMessage = useFormatMessage();
   const { issued, issuedRef, create } = useIssueInvite(workspaceId);
   const issueError = create.isError ? inviteIssueErrorCopy(create.error) : null;
 
@@ -115,7 +117,7 @@ export function InviteStage({
         <div title={issueError.detail}>
           <InlineBanner
             tone="error"
-            message={issueError.message}
+            message={issueError.key ? formatMessage(issueError.key) : issueError.message}
             messageId={S2_ISSUE_ERROR_ID}
             actionLabel="다시 시도"
             onAction={handleIssue}

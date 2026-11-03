@@ -3050,6 +3050,67 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </Frame>
       );
     }
+    // ---- #5210: 보내지 못한 메시지의 아이콘 둘 -----------------------------------
+    //
+    // 새로고침(다시 보내기) · 빨간 X(지우기). owner 에게 보여 줄 장면이라 확정 행 → 글이 실패한 행 → 첨부가 실패한
+    // 행을 한 화면에 세운다. 캡처: `-momoMeasure SEND-FAILED`(다크) · `-momoMeasure LIGHT-SEND-FAILED`(라이트).
+    case 'send-failed': {
+      const failed = (
+        clientMsgId: string,
+        body: string,
+        extra: Record<string, unknown> = {},
+      ) => ({
+        clientMsgId,
+        channelId: 'ch',
+        authorMemberId: SELF,
+        body,
+        status: 'failed',
+        sinceSeq: null,
+        createdAtMs: NOW,
+        ...extra,
+      });
+      return (
+        <Frame label="보내지 못한 메시지 — 새로고침(다시 보내기) · 빨간 X(지우기)">
+          <MessageRow
+            message={
+              {
+                ...MESSAGE,
+                id: 'confirmed',
+                seq: 60,
+                thread: undefined,
+                authorMemberId: OTHER,
+                body: '금요일 배포 공지 초안이에요. 이대로 올려도 될까요?',
+              } as Message
+            }
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <PendingRow
+            pending={failed('c-1', '좋아요, 제목만 조금 짧게 바꿔서 올릴게요.') as never}
+            startsGroup
+            directory={DIRECTORY}
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+          <PendingRow
+            pending={
+              failed('c-2', '견적서와 회의록 같이 보내요', {
+                attachments: [
+                  {id: 'att-1', name: '견적서-2026-11.pdf', mime: 'application/pdf', sizeBytes: 186_368},
+                  {id: 'att-2', name: '회의록-1102.pdf', mime: 'application/pdf', sizeBytes: 65_536},
+                ],
+              }) as never
+            }
+            startsGroup
+            directory={DIRECTORY}
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+        </Frame>
+      );
+    }
     // ---- U4-5M (#1097): 폰 위생 · 착지 틴트 · 기준선 ------------------------
     //
     // 셋 다 **한 장에 한 논점**이다. 위생 결함은 옆에 비교 대상이 없으면 사진에서
@@ -3100,6 +3161,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             startsGroup={false}
             directory={DIRECTORY}
             onResend={() => {}}
+            onDiscard={() => {}}
           />
         </Frame>
       );

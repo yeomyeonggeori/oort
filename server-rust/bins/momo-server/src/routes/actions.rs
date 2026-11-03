@@ -1020,19 +1020,22 @@ mod tests {
         // **The narrowing is real, not decorative**: each of these is a value the
         // invite REST surface's own validator accepts and the proposal refuses.
         // Without this the "narrower than REST" claim would be a comment.
-        assert_eq!(normalized_invite_role(Some("guest")), Ok("guest"));
         assert_eq!(validated_max_uses(Some(10_000)), Ok(10_000));
         assert!(validated_expires_at_ms(Some(NOW_MS + 365 * 86_400_000), NOW_MS).is_ok());
-        for wider in [
-            json!({"role": "guest"}),
-            json!({"maxUses": 10_000}),
-            json!({"expiresInDays": 365}),
-        ] {
+        for wider in [json!({"maxUses": 10_000}), json!({"expiresInDays": 365})] {
             assert!(
                 validated_action_args(invite(), &wider, NOW_MS).is_err(),
                 "{wider} is legal over REST and must still be refused as a proposal"
             );
         }
+        // `guest` is not one of those: guest invites are paused (ADR-0128 D1,
+        // ADR-0219 GS-0), so the domain validator the REST route shares refuses it
+        // too. The proposal is refused twice over — by the registry's role list
+        // (the first loop) and by the domain — and neither stands alone.
+        assert_eq!(
+            normalized_invite_role(Some("guest")),
+            Err(InviteSpecInvalid::GuestInvitesPaused)
+        );
 
         // The boundaries themselves are legal.
         for allowed in [

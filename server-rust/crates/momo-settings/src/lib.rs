@@ -103,11 +103,13 @@ pub use github_app::{
     GITHUB_DEFAULT_PERMISSIONS,
 };
 pub use invite::{
-    clamp_invite_list_limit, create_invite, list_invite_redemptions, list_invites,
-    normalized_invite_role, normalized_revoke_reason, read_invite, redeem_invite_for_member,
-    regenerate_invite, revoke_invite, validated_expires_at_ms, validated_max_uses, CreatedInvite,
-    InviteCode, InviteMutationInvalid, InviteRedeemInvalid, InviteRedemption, InviteSpecInvalid,
-    RedeemedInvite, RevokedInvite, INVITE_CREATED_AUDIT_ACTION, INVITE_CREATED_AUDIT_SCHEMA,
+    clamp_invite_list_limit, create_invite, invite_role_paused, list_invite_redemptions,
+    list_invites, normalized_invite_role, normalized_revoke_reason, read_invite,
+    redeem_invite_for_member, regenerate_invite, revoke_invite, validated_expires_at_ms,
+    validated_max_uses, CreatedInvite, InviteCode, InviteMutationInvalid, InviteRedeemInvalid,
+    InviteRedemption, InviteSpecInvalid, RedeemedInvite, RevokedInvite, GUEST_INVITES_ENABLED,
+    GUEST_INVITES_PAUSED_CODE, GUEST_INVITES_PAUSED_MESSAGE, INVITE_CREATED_AUDIT_ACTION,
+    INVITE_CREATED_AUDIT_SCHEMA,
 };
 pub use join::{
     fallback_handle, is_handle_banned_in_tx, is_handle_unique_violation, is_identity_banned_in_tx,

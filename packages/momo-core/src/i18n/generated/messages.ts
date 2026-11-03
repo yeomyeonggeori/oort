@@ -10,6 +10,40 @@ export const messageKeys = [
   "connect.language.hint",
   "connect.rememberEmail.hint",
   "connect.rememberEmail.label",
+  "connection.action.reconnectNow",
+  "connection.action.retry",
+  "connection.approval.offline",
+  "connection.approval.serverUnreachable",
+  "connection.boot.unreachable",
+  "connection.card.connecting",
+  "connection.card.lastSynced",
+  "connection.card.offlineDetail",
+  "connection.card.offlineTitle",
+  "connection.card.realtimeDownDetail",
+  "connection.card.realtimeDownTitle",
+  "connection.card.recovered",
+  "connection.card.serverUnreachableDetail",
+  "connection.card.serverUnreachableTitle",
+  "connection.card.serverUpdatingDetail",
+  "connection.card.serverUpdatingTitle",
+  "connection.card.unknownDetail",
+  "connection.card.unknownTitle",
+  "connection.composer.offline",
+  "connection.composer.serverUnreachable",
+  "connection.load.channelListTitle",
+  "connection.load.conversationTitle",
+  "connection.load.membersTitle",
+  "connection.load.reasonOffline",
+  "connection.load.reasonServer",
+  "connection.load.reasonUnknown",
+  "connection.load.threadTitle",
+  "connection.send.failed",
+  "connection.send.resend",
+  "connection.send.resendAll",
+  "connection.session.expired",
+  "connection.upload.failedNoArchive",
+  "connection.upload.failedOffline",
+  "connection.upload.failedServer",
   "desktop.menu.close",
   "desktop.menu.copy",
   "desktop.menu.cut",
@@ -348,6 +382,7 @@ export const messageKeys = [
   "settings.appearance.linkPreviewOffHint",
   "settings.appearance.linkPreviewRich",
   "settings.appearance.linkPreviewRichHint",
+  "settings.invite.guestInvitesPaused",
   "settings.notifications.threadReplyDescription",
   "settings.notifications.threadReplyName",
   "settings.profile.languageCurrent",
@@ -430,6 +465,10 @@ export const messageKeys = [
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.send.discard",
+  "timeline.send.failed",
+  "timeline.send.resend",
+  "timeline.send.sending",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
   "timeline.thread.followHint",
@@ -449,6 +488,7 @@ export const messageKeys = [
   "timeline.workHealth.dwell",
   "timeline.workHealth.failedActivities",
   "timeline.workHealth.quiet",
+  "timeline.workHealth.quietShort",
   "timeline.workHealth.rejectedApprovals",
   "timeline.workHealth.retries",
   "timeline.workPlan.button",
@@ -460,6 +500,7 @@ export const messageKeys = [
   "timeline.workPlan.stepCurrent",
   "timeline.workPlan.stepDone",
   "timeline.workPlan.stepPending",
+  "timeline.workPlan.switching",
   "timeline.workPlan.title",
   "timeline.workPlan.titleDone",
   "timeline.workRecord.bundleRead",
@@ -467,8 +508,8 @@ export const messageKeys = [
   "timeline.workRecord.bundleSearch",
   "timeline.workRecord.capped",
   "timeline.workRecord.durationMinutes",
-  "timeline.workRecord.durationMs",
   "timeline.workRecord.durationSeconds",
+  "timeline.workRecord.durationUnderTenth",
   "timeline.workRecord.emptyEnded",
   "timeline.workRecord.emptyOpen",
   "timeline.workRecord.failureAlreadyClaimed",
@@ -572,6 +613,44 @@ export const argumentSpecs = {
   "connect.language.hint": {},
   "connect.rememberEmail.hint": {},
   "connect.rememberEmail.label": {},
+  "connection.action.reconnectNow": {},
+  "connection.action.retry": {},
+  "connection.approval.offline": {},
+  "connection.approval.serverUnreachable": {},
+  "connection.boot.unreachable": {},
+  "connection.card.connecting": {},
+  "connection.card.lastSynced": {
+    "relativeTime": "string"
+  },
+  "connection.card.offlineDetail": {},
+  "connection.card.offlineTitle": {},
+  "connection.card.realtimeDownDetail": {},
+  "connection.card.realtimeDownTitle": {},
+  "connection.card.recovered": {},
+  "connection.card.serverUnreachableDetail": {},
+  "connection.card.serverUnreachableTitle": {},
+  "connection.card.serverUpdatingDetail": {},
+  "connection.card.serverUpdatingTitle": {},
+  "connection.card.unknownDetail": {},
+  "connection.card.unknownTitle": {},
+  "connection.composer.offline": {},
+  "connection.composer.serverUnreachable": {},
+  "connection.load.channelListTitle": {},
+  "connection.load.conversationTitle": {},
+  "connection.load.membersTitle": {},
+  "connection.load.reasonOffline": {},
+  "connection.load.reasonServer": {},
+  "connection.load.reasonUnknown": {},
+  "connection.load.threadTitle": {},
+  "connection.send.failed": {},
+  "connection.send.resend": {},
+  "connection.send.resendAll": {
+    "count": "number"
+  },
+  "connection.session.expired": {},
+  "connection.upload.failedNoArchive": {},
+  "connection.upload.failedOffline": {},
+  "connection.upload.failedServer": {},
   "desktop.menu.close": {},
   "desktop.menu.copy": {},
   "desktop.menu.cut": {},
@@ -981,6 +1060,7 @@ export const argumentSpecs = {
   "settings.appearance.linkPreviewOffHint": {},
   "settings.appearance.linkPreviewRich": {},
   "settings.appearance.linkPreviewRichHint": {},
+  "settings.invite.guestInvitesPaused": {},
   "settings.notifications.threadReplyDescription": {},
   "settings.notifications.threadReplyName": {},
   "settings.profile.languageCurrent": {
@@ -1067,6 +1147,10 @@ export const argumentSpecs = {
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.send.discard": {},
+  "timeline.send.failed": {},
+  "timeline.send.resend": {},
+  "timeline.send.sending": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
   "timeline.thread.followHint": {},
@@ -1104,6 +1188,7 @@ export const argumentSpecs = {
   "timeline.workHealth.quiet": {
     "minutes": "number"
   },
+  "timeline.workHealth.quietShort": {},
   "timeline.workHealth.rejectedApprovals": {
     "count": "number"
   },
@@ -1124,6 +1209,7 @@ export const argumentSpecs = {
   "timeline.workPlan.stepCurrent": {},
   "timeline.workPlan.stepDone": {},
   "timeline.workPlan.stepPending": {},
+  "timeline.workPlan.switching": {},
   "timeline.workPlan.title": {
     "done": "number",
     "total": "number"
@@ -1146,12 +1232,10 @@ export const argumentSpecs = {
     "minutes": "number",
     "seconds": "number"
   },
-  "timeline.workRecord.durationMs": {
-    "ms": "number"
-  },
   "timeline.workRecord.durationSeconds": {
     "seconds": "number"
   },
+  "timeline.workRecord.durationUnderTenth": {},
   "timeline.workRecord.emptyEnded": {},
   "timeline.workRecord.emptyOpen": {},
   "timeline.workRecord.failureAlreadyClaimed": {},
@@ -1281,6 +1365,40 @@ export interface MessageArgs {
   "connect.language.hint": Record<string, never>;
   "connect.rememberEmail.hint": Record<string, never>;
   "connect.rememberEmail.label": Record<string, never>;
+  "connection.action.reconnectNow": Record<string, never>;
+  "connection.action.retry": Record<string, never>;
+  "connection.approval.offline": Record<string, never>;
+  "connection.approval.serverUnreachable": Record<string, never>;
+  "connection.boot.unreachable": Record<string, never>;
+  "connection.card.connecting": Record<string, never>;
+  "connection.card.lastSynced": { relativeTime: string };
+  "connection.card.offlineDetail": Record<string, never>;
+  "connection.card.offlineTitle": Record<string, never>;
+  "connection.card.realtimeDownDetail": Record<string, never>;
+  "connection.card.realtimeDownTitle": Record<string, never>;
+  "connection.card.recovered": Record<string, never>;
+  "connection.card.serverUnreachableDetail": Record<string, never>;
+  "connection.card.serverUnreachableTitle": Record<string, never>;
+  "connection.card.serverUpdatingDetail": Record<string, never>;
+  "connection.card.serverUpdatingTitle": Record<string, never>;
+  "connection.card.unknownDetail": Record<string, never>;
+  "connection.card.unknownTitle": Record<string, never>;
+  "connection.composer.offline": Record<string, never>;
+  "connection.composer.serverUnreachable": Record<string, never>;
+  "connection.load.channelListTitle": Record<string, never>;
+  "connection.load.conversationTitle": Record<string, never>;
+  "connection.load.membersTitle": Record<string, never>;
+  "connection.load.reasonOffline": Record<string, never>;
+  "connection.load.reasonServer": Record<string, never>;
+  "connection.load.reasonUnknown": Record<string, never>;
+  "connection.load.threadTitle": Record<string, never>;
+  "connection.send.failed": Record<string, never>;
+  "connection.send.resend": Record<string, never>;
+  "connection.send.resendAll": { count: number };
+  "connection.session.expired": Record<string, never>;
+  "connection.upload.failedNoArchive": Record<string, never>;
+  "connection.upload.failedOffline": Record<string, never>;
+  "connection.upload.failedServer": Record<string, never>;
   "desktop.menu.close": Record<string, never>;
   "desktop.menu.copy": Record<string, never>;
   "desktop.menu.cut": Record<string, never>;
@@ -1619,6 +1737,7 @@ export interface MessageArgs {
   "settings.appearance.linkPreviewOffHint": Record<string, never>;
   "settings.appearance.linkPreviewRich": Record<string, never>;
   "settings.appearance.linkPreviewRichHint": Record<string, never>;
+  "settings.invite.guestInvitesPaused": Record<string, never>;
   "settings.notifications.threadReplyDescription": Record<string, never>;
   "settings.notifications.threadReplyName": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
@@ -1701,6 +1820,10 @@ export interface MessageArgs {
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.send.discard": Record<string, never>;
+  "timeline.send.failed": Record<string, never>;
+  "timeline.send.resend": Record<string, never>;
+  "timeline.send.sending": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
   "timeline.thread.followHint": Record<string, never>;
@@ -1720,6 +1843,7 @@ export interface MessageArgs {
   "timeline.workHealth.dwell": { minutes: number };
   "timeline.workHealth.failedActivities": { count: number };
   "timeline.workHealth.quiet": { minutes: number };
+  "timeline.workHealth.quietShort": Record<string, never>;
   "timeline.workHealth.rejectedApprovals": { count: number };
   "timeline.workHealth.retries": { count: number };
   "timeline.workPlan.button": { done: number; total: number };
@@ -1731,6 +1855,7 @@ export interface MessageArgs {
   "timeline.workPlan.stepCurrent": Record<string, never>;
   "timeline.workPlan.stepDone": Record<string, never>;
   "timeline.workPlan.stepPending": Record<string, never>;
+  "timeline.workPlan.switching": Record<string, never>;
   "timeline.workPlan.title": { done: number; total: number };
   "timeline.workPlan.titleDone": Record<string, never>;
   "timeline.workRecord.bundleRead": { read: number };
@@ -1738,8 +1863,8 @@ export interface MessageArgs {
   "timeline.workRecord.bundleSearch": { search: number };
   "timeline.workRecord.capped": { shown: number };
   "timeline.workRecord.durationMinutes": { minutes: number; seconds: number };
-  "timeline.workRecord.durationMs": { ms: number };
   "timeline.workRecord.durationSeconds": { seconds: number };
+  "timeline.workRecord.durationUnderTenth": Record<string, never>;
   "timeline.workRecord.emptyEnded": Record<string, never>;
   "timeline.workRecord.emptyOpen": Record<string, never>;
   "timeline.workRecord.failureAlreadyClaimed": Record<string, never>;

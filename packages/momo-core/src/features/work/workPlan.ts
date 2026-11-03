@@ -175,7 +175,7 @@ type Format = MessageService["formatMessage"];
 export interface WorkPlanCopy {
   /** 머리 단추의 접근성 이름이자 툴팁(둘이 같은 글이다). */
   button: string;
-  /** 팝오버 머리: 「계획 · 4단계 중 2단계」. 다 끝나면 「계획 · 모두 마쳤어요」. */
+  /** 팝오버 머리: 「계획 · 4단계 중 2단계 완료」. 다 끝나면 「계획 · 모두 마쳤어요」. */
   title: string;
   /** 단계 목록 밑의 정직한 한정 문장(0~2개). */
   notes: readonly string[];
@@ -189,11 +189,13 @@ export interface WorkPlanCopy {
  */
 export function workPlanCopy(
   progress: WorkPlanProgress,
-  options: { maybeStale: boolean },
+  options: { maybeStale: boolean; switching?: boolean },
   formatMessage: Format
 ): WorkPlanCopy {
   const counts = { total: progress.total, done: progress.done };
   const notes: string[] = [];
+  // 방금 다른 세션을 골랐고 그 계획을 읽는 중이다(#5166): 아래 목록은 마지막으로 읽은 값이다. 다른 한정 문장보다 먼저 말한다.
+  if (options.switching === true) notes.push(formatMessage("timeline.workPlan.switching"));
   if (!progress.live && !progress.allDone) notes.push(formatMessage("timeline.workPlan.notLive"));
   if (options.maybeStale) notes.push(formatMessage("timeline.workPlan.maybeStale"));
   return {
