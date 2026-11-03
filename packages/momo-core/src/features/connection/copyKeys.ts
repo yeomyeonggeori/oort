@@ -38,6 +38,8 @@ export const CONNECTION_KEYS = {
   recovered: "connection.card.recovered",
   /** 값 `relativeTime`(로케일 서비스의 `formatRelativeTime` 결과)을 받는다. */
   lastSynced: "connection.card.lastSynced",
+  /** 받은함 · 목록이 한 번도 불러와지지 않은 채 오프라인일 때(「마지막 동기화」를 말할 시각이 없다). */
+  neverSynced: "connection.card.neverSynced",
   // 행동
   reconnectNow: "connection.action.reconnectNow",
   retry: "connection.action.retry",

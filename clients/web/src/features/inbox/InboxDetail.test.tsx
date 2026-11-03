@@ -10,8 +10,10 @@ import { NetworkError } from "@momo/core/lib/http";
 import type { MailboxEntry } from "@momo/core/features/inbox/mailbox";
 import type { FeedItem } from "@momo/core/features/inbox/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { ConnectionContext } from "@/features/common/connectionContext";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
 import type { AppLocale } from "@/i18n/localeStore";
+import { connectionScene, type ConnectionScene } from "@/testing/connectionViews";
 import { koreanLocale } from "@/testing/koLocale";
 import { MARKER_DIVIDER_PAD_CLASS, SYSTEM_LINE_STRADDLE_CLEAR_CLASS } from "@/features/timeline/spacing";
 import { InboxDetail } from "./InboxDetail";
@@ -95,23 +97,29 @@ function session(): SessionContextValue {
   } as SessionContextValue;
 }
 
-/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
-async function mount(e: MailboxEntry, offline = false, korean = false): Promise<HTMLElement> {
+async function mount(e: MailboxEntry, offline = false, scene?: ConnectionScene): Promise<HTMLElement> {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const page = createElement(
-    QueryClientProvider, { client },
-    createElement(SessionProvider, { value: session() },
-      createElement(MemoryRouter, null,
-        createElement(InboxDetail, {
-          entry: e, directory, offline, onToggleRead: () => undefined,
-          onDecided: () => undefined, readBusy: false,
-        })))
-  );
+  const detail = createElement(InboxDetail, {
+    entry: e, directory, offline, onToggleRead: () => undefined,
+    onDecided: () => undefined, readBusy: false,
+  });
   await act(async () => {
-    root?.render(korean ? createElement(LocaleProvider, { locale: ko, children: page }) : page);
+    root?.render(
+      createElement(LocaleProvider, {
+        locale: ko,
+        children: createElement(
+          QueryClientProvider, { client },
+          createElement(SessionProvider, { value: session() },
+            createElement(MemoryRouter, null,
+              scene === undefined
+                ? detail
+                : createElement(ConnectionContext.Provider, { value: connectionScene(scene) }, detail)))
+        ),
+      })
+    );
   });
   for (let i = 0; i < 6; i += 1) {
     await act(async () => {
@@ -229,6 +237,16 @@ describe("InboxDetail", () => {
     expect(h.querySelector('[data-testid="inbox-approval-offline"]')).not.toBeNull();
   });
 
+  // #5239: 승인 줄이 막은 원인을 말한다. 문장은 손으로 적는다(사전 값을 되풀이하면 코드와 시험이 함께 틀려도 초록이다).
+  it.each([
+    ["deviceOffline", "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."],
+    ["serverUnreachable", "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."],
+  ] as const)("처리할 일 + %s이면 승인 줄이 그 원인을 말한다", async (scene, line) => {
+    const h = await mount(entry({ key: "approval:a1", kind: "task", task, seq: undefined }), true, scene);
+    const note = h.querySelector('[data-testid="inbox-approval-offline"]');
+    expect(note?.textContent?.replace(/\s+/g, " ").trim()).toBe(line);
+  });
+
   it("오프라인에서는 답장 입력 대신 이유를 말한다", async () => {
     const h = await mount(entry({}), true);
     expect(h.querySelector('[data-testid="inbox-reply-input"]')).toBeNull();
@@ -251,7 +269,7 @@ describe("InboxDetail", () => {
       vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
       api.fetchMessages.mockReset();
       api.fetchMessages.mockRejectedValue(error);
-      const h = await mount(entry({}), false, true);
+      const h = await mount(entry({}));
       const box = h.querySelector<HTMLElement>('[data-testid="inbox-context-error"]');
       expect(box, cause).not.toBeNull();
       expect(box?.getAttribute("role")).toBe("alert");

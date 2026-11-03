@@ -12,6 +12,7 @@
   "connection.card.unknownDetail": "다시 시도해 주세요. 계속되면 연결 기록을 복사해 알려 주세요.",
   "connection.card.recovered": "다시 연결됐어요",
   "connection.card.lastSynced": "마지막 동기화 {relativeTime}",
+  "connection.card.neverSynced": "아직 이 목록을 한 번도 받지 못했어요.",
   "connection.action.reconnectNow": "지금 다시 연결",
   "connection.action.retry": "다시 시도",
   "connection.composer.offline": "오프라인이라 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요.",

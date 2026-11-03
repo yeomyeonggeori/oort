@@ -12,6 +12,7 @@
   "connection.card.unknownDetail": "Try again. If it keeps happening, copy the connection log and send it to us.",
   "connection.card.recovered": "Reconnected",
   "connection.card.lastSynced": "Last synced {relativeTime}",
+  "connection.card.neverSynced": "You haven't loaded this list yet.",
   "connection.action.reconnectNow": "Reconnect now",
   "connection.action.retry": "Try again",
   "connection.composer.offline": "You're offline, so you can't send right now. Your draft is still here, and you can send it once you're connected again.",

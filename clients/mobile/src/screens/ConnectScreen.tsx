@@ -95,7 +95,8 @@ import {
 import {formRevealOffset, type RevealSpan} from '../lib/formReveal';
 import {useReduceMotionRef} from '../lib/useReduceMotion';
 import {isOnlineFromNetInfo} from '../query/queryClient';
-import {SESSION_EXPIRED_NOTICE} from '../session/authGate';
+import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {useFormatMessage} from '../i18n/useFormatMessage';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {createMobileRememberedLogin} from '../storage/rememberedLogin';
 import {
@@ -229,6 +230,7 @@ export default function ConnectScreen({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const formatMessage = useFormatMessage();
   const keyboardAppearance = useKeyboardAppearance();
   const prefill = useJoinPrefill();
   const deviceLinkArrival = useDeviceLinkArrival();
@@ -965,7 +967,10 @@ export default function ConnectScreen({
             ) : null}
 
             {sessionExpired ? (
-              <NoticeBlock headline={SESSION_EXPIRED_NOTICE} testID="session-expired" />
+              <NoticeBlock
+                headline={formatMessage(CONNECTION_KEYS.sessionExpired)}
+                testID="session-expired"
+              />
             ) : null}
 
             {!online ? (
