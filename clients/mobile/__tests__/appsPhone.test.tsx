@@ -98,6 +98,7 @@ const NOTION_ITEM = {
 };
 
 function detailWire(item: typeof GITHUB_ITEM, tools: unknown[], tiers: Record<string, string>) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- 상세 응답 픽스처에서 recommended 를 일부러 뺀다(rest 형제 구조분해; TS 오버라이드엔 ignoreRestSiblings 가 없다).
   const {recommended: _r, ...rest} = item;
   return {
     plugin: {
