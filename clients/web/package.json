@@ -37,7 +37,7 @@
     "gate:quote": "npm run build && node gates/gate-quote.mjs",
     "gate:pin": "npm run build && node gates/gate-pin.mjs",
     "gate:channel-header": "npm run build && node gates/gate-channel-header.mjs",
-    "gate:channel-header-fit": "npm run build && node gates/gate-channel-header-fit.mjs",
+    "gate:channel-header-fit": "vite build --mode huddle-gate && node gates/gate-channel-header-fit.mjs",
     "gate:theme": "npm run build && node gates/gate-theme.mjs",
     "gate:theme-bundle": "npm run build && node gates/gate-theme-bundle.mjs",
     "gate:typing": "npm run build && node gates/gate-typing.mjs",

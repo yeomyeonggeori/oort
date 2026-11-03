@@ -5,6 +5,8 @@ import { Avatar } from "./MessageRow";
 import { AttachmentList } from "./AttachmentList";
 import { MessageBody } from "./MessageBody";
 import { QuoteBlock } from "./QuoteBlock";
+import { SendFailureActions } from "./SendFailureActions";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import type { PendingMessage } from "@momo/core/features/timeline/model";
 import { resolveQuote } from "@momo/core/features/timeline/quote";
 import type { Message } from "@momo/core/lib/api";
@@ -25,9 +27,10 @@ import {
 // twitch into place when the server echo replaces it.
 //
 // Delivery status is stated in words, not with a decorative dot or a spinner:
-// "전송 중" while the write path is running, "전송 실패" plus a retry when it
-// is not. That retry re-sends with the SAME idempotency key, which is what the
-// server's exactly-once write path is for (model.ts retryPending).
+// "전송 중" while the write path is running, "전송 실패" plus two icons when it
+// is not (#5210): refresh re-sends with the SAME idempotency key, which is what
+// the server's exactly-once write path is for (model.ts retryPending); the red X
+// discards the local row (model.ts discardPending, never a server call).
 // =============================================================================
 
 export function PendingRow({
@@ -36,6 +39,7 @@ export function PendingRow({
   directory,
   quoteLookup,
   onResend,
+  onDiscard,
 }: {
   pending: PendingMessage;
   startsGroup: boolean;
@@ -43,7 +47,10 @@ export function PendingRow({
   /** 이 echo가 인용한 원본을 화면에 있는 행에서 찾는다 (ADR-0148). */
   quoteLookup?: (messageId: string) => Message | undefined;
   onResend?: (clientMsgId: string) => Promise<void> | void;
+  /** 보내지 못한 이 행을 이 기기에서 지운다(#5210). 없으면 X 를 그리지 않는다. */
+  onDiscard?: (clientMsgId: string) => void;
 }) {
+  const formatMessage = useFormatMessage();
   const [resending, setResending] = useState(false);
   const author = memberFor(directory, pending.authorMemberId);
   const name = author?.displayName ?? "나";
@@ -118,27 +125,24 @@ export function PendingRow({
             className="flex flex-wrap items-center gap-2 text-meta text-danger"
             data-testid="pending-failed"
           >
-            전송 실패
-            {onResend && (
-              <button
-                type="button"
-                disabled={resending}
-                data-testid="pending-resend"
-                onClick={() => {
+            {formatMessage("timeline.send.failed")}
+            <SendFailureActions
+              resending={resending}
+              onResend={
+                onResend &&
+                (() => {
                   setResending(true);
                   void Promise.resolve(onResend(pending.clientMsgId)).finally(
                     () => setResending(false)
                   );
-                }}
-                className="rounded-sm underline underline-offset-2 hover:text-ink focus-visible:focus-ring disabled:opacity-50"
-              >
-                {resending ? "보내는 중…" : "다시 보내기"}
-              </button>
-            )}
+                })
+              }
+              onDiscard={onDiscard && (() => onDiscard(pending.clientMsgId))}
+            />
           </span>
         ) : (
           <span className="text-meta text-ink-muted" data-testid="pending-sending">
-            전송 중
+            {formatMessage("timeline.send.sending")}
           </span>
         )}
       </div>

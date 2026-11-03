@@ -58,7 +58,7 @@ export function ReleaseNotesSheet({
   onOpenDetails: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const {messages, noteLocale} = useReleaseNotesMessages();
+  const {messages} = useReleaseNotesMessages();
   const items = itemsForSurface(note, PHONE_SURFACE);
   const shown = items.slice(0, SHOWN_TITLES);
   const hidden = items.length - shown.length;
@@ -87,12 +87,14 @@ export function ReleaseNotesSheet({
               {' · '}
               {note.releasedOn}
             </Text>
-            <Sentence style={styles.summary}>{note.summary[noteLocale]}</Sentence>
+            <Sentence style={styles.summary}>
+              {messages.formatMessage(note.summary)}
+            </Sentence>
             {shown.length > 0 ? (
               <View style={styles.titles} testID="release-notes-sheet-titles">
                 {shown.map(item => (
                   <Sentence key={item.id} style={styles.itemTitle}>
-                    {item.copy[noteLocale].title}
+                    {messages.formatMessage(item.title)}
                   </Sentence>
                 ))}
                 {hidden > 0 ? (
