@@ -71,6 +71,21 @@ pub struct ClaimRequest {
     pub password: String,
 }
 
+/// `POST /v1/workspaces/{ws}/members/{memberId}/password-reset` body (ADR-0215 D6).
+///
+/// The handler reads the body **by hand** (`Bytes`, then this) instead of letting axum's
+/// `Json` do it: a missing body, a body that is not JSON, a missing field and a field of the
+/// wrong type are all one answer — 400 `current_password_required` — where the extractor's
+/// own refusals would be 415 and 422 (acceptance 4b). So nothing here is required; the
+/// handler judges.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IssuePasswordResetRequest {
+    /// The **issuing operator's own** current password — not the target's.
+    #[serde(default)]
+    pub current_password: Option<String>,
+}
+
 /// `PATCH /v1/workspaces/{ws}/members/me/password` (#1767).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -115,6 +130,13 @@ pub struct PasswordResetClaimResponse {
     pub kind: &'static str,
     pub expires_at_ms: i64,
     pub claim_path: String,
+    /// `claimPath` made absolute against the origin the **recipient** can reach
+    /// (ADR-0215 D6): the configured public address when there is one, else the one
+    /// the request came in on.
+    pub claim_url: String,
+    /// `false` when that origin was derived from the request and is plain `http`, or
+    /// loopback / a private address — a link only this machine's network can open.
+    pub claim_url_secure: bool,
 }
 
 /// `POST /v1/auth/login` request (Swift `LoginRequest`). `platformAdminSecret`
@@ -139,6 +161,18 @@ pub struct LoginResponse {
     pub member: MemberDto,
     /// ADR-0110: the only authority for the realtime WebSocket address.
     pub realtime_web_socket_url: String,
+}
+
+/// `POST /v1/claim` 200: the session pair, and which kind of link was spent
+/// (ADR-0215 D6). A type of its own so `LoginResponse`, which login, refresh and join
+/// share, does not grow a field that only this route knows.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimResponse {
+    #[serde(flatten)]
+    pub login: LoginResponse,
+    /// `owner_bootstrap` or `password_reset`.
+    pub claim_kind: String,
 }
 
 /// `POST /v1/auth/refresh` request (Swift `RefreshRequest`, `DTOs.swift:49-51`).

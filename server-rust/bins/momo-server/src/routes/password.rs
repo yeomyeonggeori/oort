@@ -23,6 +23,28 @@
 //! waiting for the lock while the member is suspended), which refuses the change before
 //! anything is written.
 //!
+//! ## The reissue asks the operator for their own password first (#4596, ADR-0215 D6)
+//!
+//! `POST …/members/{member}/password-reset` takes `{ "currentPassword" }` — the **issuing
+//! operator's** password, not the target's — because a stolen operator session alone must not be
+//! enough to mint a link into any member's account. The order is fixed, and each step is a
+//! reason the next one is safe:
+//!
+//! 1. the operator's reissue **budget** is spent (every request, a right password too);
+//! 2. the caller must be an owner or admin — judged without the membership lock;
+//! 3. the body must carry a password (400 `current_password_required`; a missing body, a body
+//!    that is not JSON and a missing field are the same 400, not the extractor's 415/422);
+//! 4. the password must be the operator's own (403 `current_password_incorrect`) — **still
+//!    without the lock**: a request that is going to be refused must not queue every sign-in of
+//!    the workspace behind a hash comparison (ADR-0215 증보 2 K5). Nothing about the *target* has
+//!    been read yet, so a wrong password cannot tell a real member from a missing one;
+//! 5. only then the membership lock, and the ladder, the previous link's end and the new link,
+//!    exactly as before ([`issue_password_reset_in_tx`] judges the hierarchy under the lock).
+//!
+//! A refusal at step 4 leaves the previous live link as it was, writes **no** issue audit row,
+//! and leaves one `member.password_reset.refused` row per operator and window (D9) — the shape
+//! of a refusal is `via` and `reason`, never a value the caller sent.
+//!
 //! Lock order: membership lock → `human` row → member-wide sweep lock → `token` rows.
 //! The membership lock is always first. The operator's reissue (`issue_password_reset`)
 //! takes it first too, exclusively: it locks a member row and then that member's open link,
@@ -35,25 +57,30 @@
 use std::time::Duration;
 
 use crate::session_end::end_member_sessions_in_tx;
+use axum::body::Bytes;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode, Uri};
+use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::IssuedToken;
 use momo_auth::{
     active_workspace_role, change_own_password_in_tx, issue_password_reset_in_tx,
-    mint_owner_claim_token, normalized_current_password, normalized_new_password,
-    IssuedPasswordReset, PasswordChangeMutation, PasswordResetIssueError, Principal,
-    CLAIM_KIND_PASSWORD_RESET,
+    member_password_matches_in_tx, mint_owner_claim_token, normalized_current_password,
+    normalized_new_password, IssuedPasswordReset, PasswordChangeMutation, PasswordResetIssueError,
+    Principal, CLAIM_KIND_PASSWORD_RESET,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::{get_member, Member, RevocationCause};
 use momo_settings::lock_membership_mutation;
 use uuid::Uuid;
 
-use crate::dto::{ChangePasswordRequest, LoginResponse, MemberDto, PasswordResetClaimResponse};
+use crate::dto::{
+    ChangePasswordRequest, IssuePasswordResetRequest, LoginResponse, MemberDto,
+    PasswordResetClaimResponse,
+};
 use crate::error::ApiError;
-use crate::rate_limit::client_ip;
+use crate::rate_limit::{admit_password_reset_issue, client_ip, RefusalAuditSlot};
+use crate::realtime_advert::{derive_same_origin_http_base, host_is_loopback_or_lan};
 use crate::routes::auth_routes::{base_scopes, mint_and_record_session_in_tx};
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, path_uuid, require_human, settle_db, workspace_scope,
@@ -118,36 +145,229 @@ async fn require_admin(
     })
 }
 
+/// What the operator's password check decided (steps 2-4 of the module docs). The only thing it
+/// reads is the operator's own standing and password; nothing is locked and nothing is written.
+enum OperatorCheck {
+    /// An owner or admin who proved their own password.
+    Proven,
+    /// An owner or admin whose password was not the one sent (or who has none).
+    WrongPassword,
+}
+
+/// The link's address and whether the person who gets it can be expected to open it.
+struct ClaimLinkOrigin {
+    origin: String,
+    secure: bool,
+}
+
+/// The origin a reset link that **another person** will open should point at (ADR-0215 D6,
+/// precedent: the invite link an approval hands out, ADR-0186 부록 C).
+///
+/// 1. `MOMO_PUBLIC_BASE_URL` when the operator set it to an absolute https origin — it is read
+///    before the request's own `Host`, for the reason the invite link already gives: the link
+///    reaches its reader out of band, so the address the operator happens to be connected on
+///    (a LAN address, loopback) is not an address the reader can reach, and the `Host` header
+///    is the one thing about this request a caller chooses. A configured origin is https by
+///    construction, so it is `secure`.
+/// 2. Otherwise the request's own origin by the ADR-0167 rule (`Host` and
+///    `X-Forwarded-Proto`). That is `secure` only when it is https **and** not loopback or a
+///    private address: an `http://` or LAN-only origin yields a link only this network can open,
+///    and the response says so (`claimUrlSecure: false`) instead of promising an "https".
+fn claim_link_origin(
+    state: &AppState,
+    headers: &HeaderMap,
+    connection_scheme: Option<&str>,
+) -> Result<ClaimLinkOrigin, ApiError> {
+    if let Some(configured) = state.t3.ready_public_base_url() {
+        return Ok(ClaimLinkOrigin {
+            origin: configured,
+            secure: true,
+        });
+    }
+    let forwarded_proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok());
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok());
+    let origin = derive_same_origin_http_base(forwarded_proto, host, connection_scheme)
+        .map_err(|error| ApiError::internal("password_reset.origin", error))?;
+    let secure =
+        origin.starts_with("https://") && host.is_some_and(|host| !host_is_loopback_or_lan(host));
+    Ok(ClaimLinkOrigin { origin, secure })
+}
+
+/// The password the operator sent, or the 400. Present and bounded, nothing more
+/// ([`spec_current_password`]): the operator's own password may predate the new length rule.
+/// Read by hand so a missing body, a body that is not JSON, a missing field and a field of the
+/// wrong type are one answer (see [`IssuePasswordResetRequest`]).
+fn presented_operator_password(body: &Bytes) -> Result<String, ApiError> {
+    let required = || {
+        ApiError::coded(
+            StatusCode::BAD_REQUEST,
+            "current_password_required",
+            "currentPassword is required",
+        )
+    };
+    let sent = serde_json::from_slice::<IssuePasswordResetRequest>(body)
+        .ok()
+        .and_then(|request| request.current_password)
+        .ok_or_else(required)?;
+    if sent.is_empty() {
+        return Err(required());
+    }
+    spec_current_password(&sent)
+}
+
+/// One `member.password_reset.refused` row for a wrong operator password, at most one per
+/// operator and window (ADR-0215 D9). Its own small transaction: the check that refused the
+/// request wrote nothing, and the refusal must leave its trace even though the request fails.
+///
+/// The detail is `via` and `reason`, both fixed words — never the password sent, never the
+/// target the request named. A refusal past the window's one row is not silent: it is one WARN
+/// line (the operator's id and the reason code, nothing the request sent). A failure to write is
+/// logged and swallowed: the 403 stands, and the slot goes back (it is not marked written) so the
+/// next refusal of the window tries again.
+///
+/// The write runs on a task of its own, awaited by the request that asked for it, for the reason
+/// `rate_limit::audit_denial_detached` gives: a server drops the future of a request whose client
+/// went away, and a drop between the `COMMIT` and its answer would hand the slot back for a row
+/// that was written, so the window's next refusal would write a second one.
+async fn record_wrong_operator_password(
+    state: &AppState,
+    workspace_id: Uuid,
+    operator_id: Uuid,
+    via_token: Option<Uuid>,
+) {
+    let Some(slot) = RefusalAuditSlot::take(&state.rate_limit, operator_id) else {
+        tracing::warn!(
+            member_id = %operator_id,
+            reason = "current_password_incorrect",
+            "operator password-reset issue refused again in this window; the window's audit row is already written"
+        );
+        return;
+    };
+    let pool = state.pool.clone();
+    let task = tokio::spawn(async move {
+        let written = agent_tenant_tx(&pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "member.password_reset.refused")
+                        .by(operator_id)
+                        .target("member", operator_id)
+                        .via_token(via_token)
+                        .with_schema(
+                            "momo.member.password_reset.refused.v1",
+                            serde_json::json!({
+                                "via": "admin",
+                                "reason": "current_password_incorrect"
+                            }),
+                        ),
+                )
+                .await
+                .map(|_| ())
+            })
+        })
+        .await;
+        match written {
+            Ok(()) => slot.written(),
+            Err(error) => {
+                tracing::error!(
+                    error = %error,
+                    "the refused-reissue audit row failed; the 403 stands and the next refusal retries"
+                );
+            }
+        }
+    });
+    if let Err(error) = task.await {
+        tracing::error!(error = %error, "the refused-reissue audit task did not finish");
+    }
+}
+
 pub async fn issue_password_reset(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path((workspace, member)): Path<(String, String)>,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
 ) -> Result<Response, ApiError> {
     require_human(&principal, "human operator required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let actor_id = principal.member_id;
+    // 1. The operator's budget, spent before anything else about the request is looked at.
+    admit_password_reset_issue(&state.rate_limit, actor_id)?;
     let target_id = path_uuid(&member, "invalid member id")?;
     let via_token = audit_via_token_id(&principal);
     let token = mint_owner_claim_token()
         .map_err(|error| ApiError::internal("password_reset.entropy", error))?;
+    // Read now, judged below in the order the module docs give (a non-operator is told 403
+    // whatever the body says; an address that cannot be built is told after the password).
+    let presented = presented_operator_password(&body);
+    let link_origin = claim_link_origin(&state, &headers, uri.scheme_str());
 
+    // 2-4. Standing, body, password: one read-only transaction, no lock, no write. A request that
+    // is going to be refused here must not queue behind the membership lock (ADR-0215 증보 2 K5),
+    // and the target has not been looked at, so a wrong password learns nothing about it.
+    let checked: DbRejectable<OperatorCheck> = agent_tenant_tx(&state.pool, workspace_id, {
+        move |conn| {
+            Box::pin(async move {
+                if let Err(rejection) = require_admin(conn, workspace_id, actor_id).await? {
+                    return Ok(Err(rejection));
+                }
+                let password = match presented {
+                    Ok(password) => password,
+                    Err(rejection) => {
+                        // Not an audit row (nothing was guessed), but not silent either (ADR-0215
+                        // D9): the operator's id and the reason code, and nothing the body held.
+                        tracing::warn!(
+                            member_id = %actor_id,
+                            reason = rejection.code.unwrap_or("current_password_invalid"),
+                            "operator password-reset issue request without a usable current password"
+                        );
+                        return Ok(Err(rejection));
+                    }
+                };
+                let proven =
+                    member_password_matches_in_tx(conn, workspace_id, actor_id, &password).await?;
+                Ok(Ok(if proven {
+                    OperatorCheck::Proven
+                } else {
+                    OperatorCheck::WrongPassword
+                }))
+            })
+        }
+    })
+    .await;
+    match settle_db("password_reset.confirm", checked)? {
+        OperatorCheck::Proven => {}
+        OperatorCheck::WrongPassword => {
+            record_wrong_operator_password(&state, workspace_id, actor_id, via_token).await;
+            return Err(ApiError::coded(
+                StatusCode::FORBIDDEN,
+                "current_password_incorrect",
+                "current password is incorrect",
+            ));
+        }
+    }
+    // Nothing is minted for a link nobody can be given an address for.
+    let link_origin = link_origin?;
+
+    // 5. The membership lock, the ladder, the previous link's end and the new link.
     let outcome: DbRejectable<IssuedPasswordReset> = agent_tenant_tx(&state.pool, workspace_id, {
         let token = token.clone();
         move |conn| {
             Box::pin(async move {
-                // Someone who is not an operator is refused here, before the lock: a request that
-                // cannot succeed must not be able to queue every sign-in of the workspace behind
-                // it. This is only the cheap refusal; whether *this* operator may reset *this*
-                // member is judged by `issue_password_reset_in_tx` under the lock.
-                if let Err(rejection) = require_admin(conn, workspace_id, actor_id).await? {
-                    return Ok(Err(rejection));
-                }
                 // The membership lock, exclusive, before any member row is locked, like every
                 // other transaction that does: a reissue locks the target's member row and then
                 // the target's open link, and the claim that spends that link holds the link and
                 // then needs the member row (its audit row references it). Two transactions that
                 // take those rows in opposite orders wait for each other until the database ends
-                // one of them; behind this lock they cannot meet.
+                // one of them; behind this lock they cannot meet. The operator's standing was
+                // judged above without it (a request that cannot succeed must not queue for it);
+                // whether *this* operator may reset *this* member is judged by
+                // `issue_password_reset_in_tx` under the lock.
                 lock_membership_mutation(conn, workspace_id).await?;
                 match issue_password_reset_in_tx(conn, workspace_id, actor_id, target_id, &token)
                     .await?
@@ -189,13 +409,16 @@ pub async fn issue_password_reset(
     .await;
 
     let issued = settle_db("password_reset.issue", outcome)?;
+    let claim_path = format!("/claim/{token}");
     Ok((
         StatusCode::CREATED,
         Json(PasswordResetClaimResponse {
             token: issued.token,
             kind: CLAIM_KIND_PASSWORD_RESET,
             expires_at_ms: issued.expires_at_ms,
-            claim_path: format!("/claim/{token}"),
+            claim_url: format!("{}{claim_path}", link_origin.origin),
+            claim_url_secure: link_origin.secure,
+            claim_path,
         }),
     )
         .into_response())
