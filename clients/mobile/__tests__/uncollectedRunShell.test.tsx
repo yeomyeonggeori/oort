@@ -1,4 +1,5 @@
 import type {Member} from '@momo/core/lib/api';
+import {RAIL_WORD} from '@momo/core/features/agents/activityRail';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -22,6 +23,7 @@ import {
   resetAgentWorking,
 } from '../src/features/agents/workingSignal';
 import {space} from '../src/design/tokens';
+import {railSlotHeight} from '../src/features/agents/railClock';
 import AppShell from '../src/shell/AppShell';
 import {HOME} from '../src/screens/SidebarScreen';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -459,28 +461,74 @@ describe('홈 카드의 취소: 한 겹의 확인, 같은 호출, 같은 규칙'
   });
 });
 
-describe('대화 아래 활동 줄 (대화 화면의 배선)', () => {
+describe('대화 입력창 레일 (대화 화면의 배선, #4620)', () => {
   async function openGeneral(routes: Routes = {}): Promise<FetchLog> {
     const log = await mountHome(routes);
     fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
     await waitFor(() => expect(screen.getByTestId('conversation-title')).toBeTruthy());
     return log;
   }
+  /** 막 대기에 든 요청(유예 5분 안): 레일이 「받음」으로 말하고 시트에 「취소」가 선다. */
+  const justSent = (over: Partial<AgentWorkingSignal> = {}) => waiting(over, 60_000);
+  async function openSheet(): Promise<void> {
+    fireEvent.press(await waitFor(() => screen.getByTestId('composer-working')));
+    await waitFor(() => expect(screen.getByTestId('composer-working-sheet')).toBeTruthy());
+  }
 
-  it.each([[1, 1], [1.49, 1], [1.5, undefined], [3.1, undefined]] as const)(
-    'H1 대화 아래 활동 줄(글자 배율 %s): 「이름: 상태 낱말」은 줄 수 %s — 큰 글씨에서는 줄을 바꿔 「아직 받지 않았어요」를 끝까지 말한다',
-    async (scale, lines) => {
+  it.each([[1], [1.49], [1.5], [3.1]])(
+    '큰 글씨(배율 %s)에서도 레일 글은 한 줄이고 칸은 예약된 높이다 — 줄이 서도 칸의 높이가 달라지지 않는다',
+    async scale => {
       setFontScale(scale);
-      await openGeneral({liveness: {[BOT_ID]: 'woken_not_collected'}});
-      act(() => markAgentWorking(waiting()));
-      await waitFor(() => expect(screen.getByTestId('activity-lead')).toBeTruthy());
-      expect(screen.getByTestId('activity-lead').props.numberOfLines).toBe(lines);
+      await openGeneral();
+      act(() => markAgentWorking(justSent()));
+      await waitFor(() => expect(screen.getByTestId('composer-working-text')).toBeTruthy());
+      expect(screen.getByTestId('composer-working-text').props.numberOfLines).toBe(1);
+      expect(screen.getByTestId('composer-working-text')).toHaveTextContent(`달무리봇 · ${RAIL_WORD.received}`);
+      // 칸의 높이는 글자 배율을 따르되 상한이 있다(`railSlotHeight`) — 단계가 바뀌어도(받음 → 가져감) 같다.
+      const height = StyleSheet.flatten(screen.getByTestId('composer-rail').props.style).height;
+      expect(height).toBe(railSlotHeight(scale));
+      act(() =>
+        markAgentWorking(
+          justSent({server: {phase: 'claimed', leaseState: 'live', claimedAtMs: Date.now(), queuedAtMs: Date.now() - 60_000}}),
+        ),
+      );
+      await waitFor(() => expect(screen.getByTestId('composer-working-text')).toHaveTextContent(new RegExp(RAIL_WORD.claimed)));
+      expect(StyleSheet.flatten(screen.getByTestId('composer-rail').props.style).height).toBe(height);
     },
   );
 
-  it('H1 대화 아래 활동 줄의 컨트롤도 글자 배율 상한(1.6)을 지킨다 — 「취소 확 / 정」으로 꺾이지 않고, 확인 문장은 끝까지 자란다', async () => {
+  it('열린 턴이 있어도 대화 화면은 초 단위 시계를 마운트하지 않는다 — 레일은 마감에 한 번만 다시 그린다 (#4613의 뿌리)', async () => {
+    // 화면을 세우기 **전에** 건다: 마운트 때 거는 시계도 보여야 한다(나중에 걸면 이미 걸린 간격은 안 보인다).
+    const interval = jest.spyOn(global, 'setInterval');
     await openGeneral();
+    act(() => markAgentWorking(justSent()));
+    await waitFor(() => expect(screen.getByTestId('composer-working-text')).toBeTruthy());
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 1_300));
+    });
+    // 질의 라이브러리의 분 단위 재조회와 테스트 도구의 대기 시계는 이 화면의 것이 아니다.
+    const fast = interval.mock.calls.filter(
+      ([callback, delay]) =>
+        (delay as number) <= 1_000 &&
+        (callback as {name?: string}).name !== 'checkRealTimersCallback',
+    );
+    expect(fast).toEqual([]);
+    interval.mockRestore();
+  });
+
+  it('아무도 가져가지 않은 채 유예(5분)를 넘은 요청은 레일에서 빠진다 — 그 말은 메시지 아래 예외 줄이 한다', async () => {
+    await openGeneral();
+    act(() => markAgentWorking(justSent()));
+    await waitFor(() => expect(screen.getByTestId('composer-working')).toBeTruthy());
+    // 같은 run이 마감(5분)을 넘은 순간: 레일에서 빠진다(같은 run을 두 자리가 다르게 말하지 않는다).
     act(() => markAgentWorking(waiting()));
+    await waitFor(() => expect(screen.queryByTestId('composer-working')).toBeNull());
+  });
+
+  it('H1 시트의 컨트롤도 글자 배율 상한(1.6)을 지킨다 — 「취소 확 / 정」으로 꺾이지 않고, 확인 문장은 끝까지 자란다', async () => {
+    await openGeneral();
+    act(() => markAgentWorking(justSent()));
+    await openSheet();
     const arm = await waitFor(() => screen.getByTestId(`turn-stop-${BOT_ID}-arm`));
     expect(within(arm).getByText('취소').props.maxFontSizeMultiplier).toBe(1.6);
     fireEvent.press(arm);
@@ -495,52 +543,42 @@ describe('대화 아래 활동 줄 (대화 화면의 배선)', () => {
     ).toBeUndefined();
   });
 
-  it('아무도 가져가지 않은 요청: 낱말·경고 문구·이유가 서고, 멈추는 컨트롤은 「취소」 한 벌이다', async () => {
-    await openGeneral({liveness: {[BOT_ID]: 'woken_not_collected'}});
-    act(() => markAgentWorking(waiting()));
-    await waitFor(() =>
-      expect(screen.getByTestId('composer-working')).toHaveTextContent(
-        /달무리봇: 아직 받지 않았어요/,
-      ),
-    );
-    // 대화 화면이 생존 판정을 읽어 줄에 넘긴다(읽는 데 한 박자 걸린다).
-    await waitFor(() =>
-      expect(screen.getByTestId('activity-detail')).toHaveTextContent(
-        '깨웠지만 아직 안 가져감 · 17시간째 기다려요 · 연결이 꺼져 있을 수 있어요',
-      ),
-    );
-    expect(screen.getByTestId('composer-working')).not.toHaveTextContent(/대기 1번째/);
-    // 근거 글이 세 토막(생존 문구 · 경과 · 이유)까지 길어지므로 어절에서 끊는다 — 좁은 폭에서 글자 단위로 꺾여
-    // 한 음절이 홀로 남지 않게(design-review #4285 r1 M7).
-    expect(screen.getByTestId('activity-detail').props.lineBreakStrategyIOS).toBe('hangul-word');
+  it('아직 아무도 가져가지 않은 요청(유예 안): 레일은 「받음」, 시트의 멈추는 컨트롤은 「취소」 한 벌이다', async () => {
+    await openGeneral();
+    act(() => markAgentWorking(justSent()));
+    await openSheet();
+    expect(screen.getByTestId(`composer-working-row-${BOT_ID}`)).toHaveTextContent(new RegExp(RAIL_WORD.received));
     const arm = await waitFor(() => screen.getByTestId(`turn-stop-${BOT_ID}-arm`));
     expect(arm).toHaveTextContent('취소');
     expect(arm.props.accessibilityLabel).toBe('요청 취소, 확인 필요');
   });
 
-  it('가져간 run은 줄도 컨트롤도 기존 말이다 — 「중단」', async () => {
-    await openGeneral({liveness: {[BOT_ID]: 'woken_not_collected'}});
+  it('가져간 run은 레일도 컨트롤도 기존 말이다 — 「가져감」·「중단」', async () => {
+    await openGeneral();
     act(() =>
       markAgentWorking(
-        waiting({
+        justSent({
           server: {
             phase: 'claimed',
             leaseState: 'live',
             claimedAtMs: Date.now() - 20_000,
-            queuedAtMs: Date.now() - 17 * HOUR,
+            queuedAtMs: Date.now() - 60_000,
           },
         }),
       ),
     );
+    await openSheet();
     const arm = await waitFor(() => screen.getByTestId(`turn-stop-${BOT_ID}-arm`));
     expect(arm).toHaveTextContent('중단');
     expect(arm.props.accessibilityLabel).toBe('실행 중단, 확인 필요');
-    expect(screen.getByTestId('composer-working')).not.toHaveTextContent(/아직 받지 않았어요/);
+    expect(screen.getByTestId('composer-working-text')).toHaveTextContent(new RegExp(RAIL_WORD.claimed));
+    expect(screen.getByTestId('composer-working-text')).not.toHaveTextContent(/아직 받지 않았어요/);
   });
 
-  it('활동 줄에서 취소를 확정하면 같은 취소 호출이 나간다', async () => {
+  it('시트에서 취소를 확정하면 같은 취소 호출이 나간다', async () => {
     const log = await openGeneral();
-    act(() => markAgentWorking(waiting()));
+    act(() => markAgentWorking(justSent()));
+    await openSheet();
     const arm = await waitFor(() => screen.getByTestId(`turn-stop-${BOT_ID}-arm`));
     fireEvent.press(arm);
     await waitFor(() => expect(screen.getByTestId(`turn-stop-${BOT_ID}-commit`)).toBeTruthy());
@@ -554,12 +592,13 @@ describe('대화 아래 활동 줄 (대화 화면의 배선)', () => {
     );
   });
 
-  it('N3 대화 아래 활동 줄에서도 취소 결과를 말로 알린다 — 낭독은 컨트롤 한 곳에서 하므로 홈 카드와 같다 (design-review r2)', async () => {
+  it('N3 시트에서도 취소 결과를 말로 알린다 — 낭독은 컨트롤 한 곳에서 하므로 홈 카드와 같다 (design-review r2)', async () => {
     const announce = jest
       .spyOn(AccessibilityInfo, 'announceForAccessibility')
       .mockImplementation(() => {});
     const log = await openGeneral();
-    act(() => markAgentWorking(waiting()));
+    act(() => markAgentWorking(justSent()));
+    await openSheet();
     const arm = await waitFor(() => screen.getByTestId(`turn-stop-${BOT_ID}-arm`));
     fireEvent.press(arm);
     await waitFor(() => expect(screen.getByTestId(`turn-stop-${BOT_ID}-commit`)).toBeTruthy());

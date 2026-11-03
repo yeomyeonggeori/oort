@@ -3,6 +3,7 @@ import { ApiError, uuidEq, type Channel, type RosterMember } from "../../lib/api
 import { NetworkError } from "../../lib/http";
 import {
   canChangeWorkspaceRole,
+  canIssuePasswordReset,
   changeWorkspaceRoleErrorMessage,
   countLabel,
   dmAvailability,
@@ -152,6 +153,68 @@ describe("canChangeWorkspaceRole", () => {
       false
     );
     expect(canChangeWorkspaceRole("owner", DEMO.id, HERMES)).toBe(false);
+  });
+});
+
+// ADR-0215 D6 (#4603): the UX mirror of the server's 16-cell ladder
+// (`workspace_authorization.rs` `password_reset_ladder_matches_adr_0128_d2`).
+// Viewer and target ids differ in every cell; self is its own describe.
+describe("canIssuePasswordReset", () => {
+  const VIEWER_ID = "00000000-0000-7000-8000-0000000000a1";
+  const TARGET_ID = "00000000-0000-7000-8000-0000000000b2";
+  const target = (role: RosterMember["role"], over: Partial<RosterMember> = {}) =>
+    member({ id: TARGET_ID, role, ...over });
+
+  // viewer × target, written as the server writes it.
+  const LADDER: ReadonlyArray<
+    readonly ["owner" | "admin" | "member" | "guest", "owner" | "admin" | "member" | "guest", boolean]
+  > = [
+    ["owner", "owner", true],
+    ["owner", "admin", true],
+    ["owner", "member", true],
+    ["owner", "guest", true],
+    ["admin", "owner", false],
+    ["admin", "admin", false],
+    ["admin", "member", true],
+    ["admin", "guest", true],
+    ["member", "owner", false],
+    ["member", "admin", false],
+    ["member", "member", false],
+    ["member", "guest", false],
+    ["guest", "owner", false],
+    ["guest", "admin", false],
+    ["guest", "member", false],
+    ["guest", "guest", false],
+  ];
+
+  it.each(LADDER)("viewer %s looking at a %s member: %s", (viewer, role, expected) => {
+    expect(canIssuePasswordReset(viewer, VIEWER_ID, target(role))).toBe(expected);
+  });
+
+  it("never offers the link for oneself, in any letter case", () => {
+    expect(canIssuePasswordReset("owner", VIEWER_ID, member({ id: VIEWER_ID, role: "admin" }))).toBe(false);
+    expect(canIssuePasswordReset("admin", VIEWER_ID, member({ id: VIEWER_ID.toUpperCase(), role: "member" }))).toBe(false);
+  });
+
+  it("offers it for people only, never for an agent", () => {
+    expect(canIssuePasswordReset("owner", VIEWER_ID, target("member", { kind: "agent" }))).toBe(false);
+    expect(canIssuePasswordReset("admin", VIEWER_ID, target("member", { kind: "agent" }))).toBe(false);
+  });
+
+  it("offers it for an active member only (invited, suspended and deleted answer 409)", () => {
+    for (const status of ["invited", "suspended", "deleted"] as const) {
+      expect(canIssuePasswordReset("owner", VIEWER_ID, target("member", { status }))).toBe(false);
+    }
+    expect(canIssuePasswordReset("owner", VIEWER_ID, target("member", { status: "active" }))).toBe(true);
+  });
+
+  it("does not turn an unknown viewer role into an operator", () => {
+    expect(canIssuePasswordReset(undefined, VIEWER_ID, target("member"))).toBe(false);
+  });
+
+  it("opens an unknown target role to an owner only, never to an admin", () => {
+    expect(canIssuePasswordReset("owner", VIEWER_ID, target(undefined))).toBe(true);
+    expect(canIssuePasswordReset("admin", VIEWER_ID, target(undefined))).toBe(false);
   });
 });
 

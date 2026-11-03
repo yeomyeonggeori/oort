@@ -29,6 +29,7 @@ import { myAccountsBrowserTab } from "./aiMyAccountsModel";
 import {
   choiceLabel,
   errorMessage,
+  serverWireMessage,
   isOperatorDenied,
   maskedBearer,
   PROVIDER_MODES,
@@ -769,7 +770,7 @@ function TeamBoard({ offline, workspaceId }: { offline: boolean; workspaceId: st
               <LoopbackRefusalBanner
                 error={check.error}
                 url={link.baseUrl}
-                serverSentence={errorMessage(check.error)}
+                serverSentence={serverWireMessage(check.error)}
               />
             ) : (
               <p className="text-meta text-danger" role="alert">

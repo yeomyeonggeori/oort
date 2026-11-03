@@ -153,7 +153,8 @@ describe("「oort 기록」 칸의 네 상태", () => {
     expect(q(lines[3] as Element, "work-timeline-status")).toBeNull();
     // 합계는 서버가 센 값(행 상한을 넘은 호출까지)이고, 상한 문장은 줄로 선 수를 말한다.
     expect(text(q(el, "agent-work-panel-oort-summary"))).toBe("도구 호출 131 · 실패 1");
-    expect(text(q(el, "agent-work-panel-oort-capped"))).toContain("처음 6번만 줄로 보여요");
+    // 같은 패널의 합계가 「도구 호출 131」처럼 수 뒤에 꼬리를 붙이지 않으므로 상한 문장도 셈말 「번」이 아니라 줄 단위로 말한다(#5174 L1).
+    expect(text(q(el, "agent-work-panel-oort-capped"))).toContain("처음 6줄만 보여요");
     expect(q(el, "agent-work-panel-oort-unsupported")).toBeNull();
   });
 

@@ -438,6 +438,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the member list"
     }
   ],
+  "connection.load.newerTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load new messages"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,
@@ -466,6 +472,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't send"
+    }
+  ],
+  "connection.send.reasonOffline": [
+    {
+      "type": 0,
+      "value": "Couldn't send because you're offline"
+    }
+  ],
+  "connection.send.reasonRejected": [
+    {
+      "type": 0,
+      "value": "The server didn't accept it"
+    }
+  ],
+  "connection.send.reasonServer": [
+    {
+      "type": 0,
+      "value": "Couldn't send because we can't reach the server"
     }
   ],
   "connection.send.resend": [
@@ -2338,6 +2362,440 @@ export const catalog: MessageCatalog = {
       "value": "Posted an invite link"
     }
   ],
+  "recovery.claim.hostBody": [
+    {
+      "type": 0,
+      "value": "Your new password is sent to the server below. Continue only if the address is the one your admin gave you."
+    }
+  ],
+  "recovery.claim.hostConfirm": [
+    {
+      "type": 0,
+      "value": "Yes, continue"
+    }
+  ],
+  "recovery.claim.hostReject": [
+    {
+      "type": 0,
+      "value": "No, go back"
+    }
+  ],
+  "recovery.claim.hostTitle": [
+    {
+      "type": 0,
+      "value": "Is this the right server?"
+    }
+  ],
+  "recovery.claim.invalidChar": [
+    {
+      "type": 0,
+      "value": "The password contains a character that cannot be used."
+    }
+  ],
+  "recovery.claim.passwordHint": [
+    {
+      "type": 0,
+      "value": "At least "
+    },
+    {
+      "type": 2,
+      "value": "min",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters and at most "
+    },
+    {
+      "type": 2,
+      "value": "maxBytes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " bytes. A Korean syllable takes 3 bytes, so Korean-only fits "
+    },
+    {
+      "type": 2,
+      "value": "maxHangul",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters."
+    }
+  ],
+  "recovery.claim.resetExpired": [
+    {
+      "type": 0,
+      "value": "This link expired after 24 hours. Ask an admin for a new link."
+    }
+  ],
+  "recovery.claim.resetUsed": [
+    {
+      "type": 0,
+      "value": "This link was already used or replaced by a newer one. If you already set your password, sign in. Otherwise ask an admin for a new link."
+    }
+  ],
+  "recovery.claim.title": [
+    {
+      "type": 0,
+      "value": "Choose a new password."
+    }
+  ],
+  "recovery.help.adminBody": [
+    {
+      "type": 0,
+      "value": "A workspace admin confirms it is you, then sends a one-time reset link. Copy the message below and pass it on."
+    }
+  ],
+  "recovery.help.adminTitle": [
+    {
+      "type": 0,
+      "value": "Ask an admin for a link"
+    }
+  ],
+  "recovery.help.back": [
+    {
+      "type": 0,
+      "value": "Back to sign in"
+    }
+  ],
+  "recovery.help.guideDetail": [
+    {
+      "type": 0,
+      "value": "An admin can send you a link to set a new one."
+    }
+  ],
+  "recovery.help.guideLine": [
+    {
+      "type": 0,
+      "value": "Forgetting a password is fine."
+    }
+  ],
+  "recovery.help.link": [
+    {
+      "type": 0,
+      "value": "Forgot your password?"
+    }
+  ],
+  "recovery.help.receivedEmpty": [
+    {
+      "type": 0,
+      "value": "Paste the link you received."
+    }
+  ],
+  "recovery.help.receivedHint": [
+    {
+      "type": 0,
+      "value": "The link works once, within 24 hours. When you set a new password, your other devices on this account are signed out."
+    }
+  ],
+  "recovery.help.receivedInvalid": [
+    {
+      "type": 0,
+      "value": "This does not read as a reset link. Paste the link the admin sent, exactly as it came."
+    }
+  ],
+  "recovery.help.receivedLabel": [
+    {
+      "type": 0,
+      "value": "Reset link"
+    }
+  ],
+  "recovery.help.receivedPlaceholder": [
+    {
+      "type": 0,
+      "value": "https://team.example.com/claim/…"
+    }
+  ],
+  "recovery.help.receivedSubmit": [
+    {
+      "type": 0,
+      "value": "Open link"
+    }
+  ],
+  "recovery.help.receivedTitle": [
+    {
+      "type": 0,
+      "value": "I received a link"
+    }
+  ],
+  "recovery.help.requestCopied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "recovery.help.requestCopy": [
+    {
+      "type": 0,
+      "value": "Copy message"
+    }
+  ],
+  "recovery.help.requestLabel": [
+    {
+      "type": 0,
+      "value": "Request message"
+    }
+  ],
+  "recovery.help.requestNoEmail": [
+    {
+      "type": 0,
+      "value": "I forgot my oort password and need a reset link. Server: "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "recovery.help.requestWithEmail": [
+    {
+      "type": 0,
+      "value": "I forgot my oort password and need a reset link. Server: "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", email: "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    }
+  ],
+  "recovery.issue.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "recovery.issue.confirmLead": [
+    {
+      "type": 0,
+      "value": "This link lets "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " choose a new password. Check these points first."
+    }
+  ],
+  "recovery.issue.confirmTitle": [
+    {
+      "type": 0,
+      "value": "Create a reset link"
+    }
+  ],
+  "recovery.issue.entryAction": [
+    {
+      "type": 0,
+      "value": "Create reset link"
+    }
+  ],
+  "recovery.issue.entryHint": [
+    {
+      "type": 0,
+      "value": "Hand a one-time link to a member who forgot their password."
+    }
+  ],
+  "recovery.issue.errorBadTarget": [
+    {
+      "type": 0,
+      "value": "A reset link can only be created for a person."
+    }
+  ],
+  "recovery.issue.errorForbidden": [
+    {
+      "type": 0,
+      "value": "You cannot create a reset link for this member. Your role does not allow it."
+    }
+  ],
+  "recovery.issue.errorGeneric": [
+    {
+      "type": 0,
+      "value": "Could not create the link. Try again in a moment."
+    }
+  ],
+  "recovery.issue.errorInactive": [
+    {
+      "type": 0,
+      "value": "This member is not active right now, so a link cannot be created."
+    }
+  ],
+  "recovery.issue.errorNetwork": [
+    {
+      "type": 0,
+      "value": "Could not reach the server. Check your connection and try again."
+    }
+  ],
+  "recovery.issue.errorNotFound": [
+    {
+      "type": 0,
+      "value": "This member was not found in the roster. Refresh the roster and try again."
+    }
+  ],
+  "recovery.issue.errorRateLimited": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in a moment."
+    }
+  ],
+  "recovery.issue.errorRateLimitedAfter": [
+    {
+      "type": 0,
+      "value": "Too many requests. Try again in "
+    },
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " seconds."
+    }
+  ],
+  "recovery.issue.errorRequired": [
+    {
+      "type": 0,
+      "value": "Enter your password."
+    }
+  ],
+  "recovery.issue.errorWrongPassword": [
+    {
+      "type": 0,
+      "value": "That password is not correct. Try again."
+    }
+  ],
+  "recovery.issue.factTerm": [
+    {
+      "type": 0,
+      "value": "Password"
+    }
+  ],
+  "recovery.issue.issuedClose": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "recovery.issue.issuedCopied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "recovery.issue.issuedCopy": [
+    {
+      "type": 0,
+      "value": "Copy link"
+    }
+  ],
+  "recovery.issue.issuedDeliver": [
+    {
+      "type": 0,
+      "value": "Send it by messenger or hand it over in person."
+    }
+  ],
+  "recovery.issue.issuedExpires": [
+    {
+      "type": 0,
+      "value": "Works once, until "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "recovery.issue.issuedLead": [
+    {
+      "type": 0,
+      "value": "You can see this link only here, only now. It cannot be shown again once you close this, so pass it on now."
+    }
+  ],
+  "recovery.issue.issuedLinkLabel": [
+    {
+      "type": 0,
+      "value": "Reset link"
+    }
+  ],
+  "recovery.issue.issuedLocalOnly": [
+    {
+      "type": 0,
+      "value": "This address may open only on this computer or its network."
+    }
+  ],
+  "recovery.issue.issuedTitle": [
+    {
+      "type": 0,
+      "value": "Reset link created"
+    }
+  ],
+  "recovery.issue.lineLogout": [
+    {
+      "type": 0,
+      "value": "When the person sets a password, every device they are signed in on is signed out."
+    }
+  ],
+  "recovery.issue.lineOnce": [
+    {
+      "type": 0,
+      "value": "The link works once, within 24 hours."
+    }
+  ],
+  "recovery.issue.lineOrder": [
+    {
+      "type": 0,
+      "value": "If this member needs to be signed out everywhere, do that first and create the link afterwards. Doing it after the link exists disables the link too."
+    }
+  ],
+  "recovery.issue.lineReplace": [
+    {
+      "type": 0,
+      "value": "Any link you made before stops working."
+    }
+  ],
+  "recovery.issue.lineVerify": [
+    {
+      "type": 0,
+      "value": "Confirming who it is falls to you. Send the link only to someone you verified in person or by phone, not through a chat the account may be compromised in."
+    }
+  ],
+  "recovery.issue.passwordHint": [
+    {
+      "type": 0,
+      "value": "Enter your own password as the admin creating the link."
+    }
+  ],
+  "recovery.issue.passwordLabel": [
+    {
+      "type": 0,
+      "value": "Your password"
+    }
+  ],
+  "recovery.issue.submit": [
+    {
+      "type": 0,
+      "value": "Create link"
+    }
+  ],
+  "recovery.issue.submitBusy": [
+    {
+      "type": 0,
+      "value": "Creating the link"
+    }
+  ],
   "releaseNotes.action.close": [
     {
       "type": 0,
@@ -3270,10 +3728,28 @@ export const catalog: MessageCatalog = {
       "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
     }
   ],
+  "settings.connection.noServer": [
+    {
+      "type": 0,
+      "value": "No server address is saved on this device."
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,
       "value": "Guest invites are paused until channel-specific invites are available."
+    }
+  ],
+  "settings.notifications.alwaysDetail": [
+    {
+      "type": 0,
+      "value": "Approval requests, mentions of you, and DMs can't be turned off by type. To silence everything at once, use Pause notifications."
+    }
+  ],
+  "settings.notifications.checking": [
+    {
+      "type": 0,
+      "value": "Checking your notification settings."
     }
   ],
   "settings.notifications.threadReplyDescription": [
@@ -3746,6 +4222,54 @@ export const catalog: MessageCatalog = {
       "value": "Checking the key."
     }
   ],
+  "timeline.agentRail.open": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " Show working agents"
+    }
+  ],
+  "timeline.agentRail.openActivity": [
+    {
+      "type": 0,
+      "value": "View activity"
+    }
+  ],
+  "timeline.agentRail.openRecord": [
+    {
+      "type": 0,
+      "value": "Open "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s work record"
+    }
+  ],
+  "timeline.agentRail.sheetClose": [
+    {
+      "type": 0,
+      "value": "Close working agents"
+    }
+  ],
+  "timeline.agentRail.sheetTitle": [
+    {
+      "type": 0,
+      "value": "Working agents"
+    }
+  ],
+  "timeline.approvalExpiry.soon": [
+    {
+      "type": 0,
+      "value": "If you do not decide, the agent has to propose it again."
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,
@@ -3774,6 +4298,22 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Zoom out"
+    }
+  ],
+  "timeline.runException.open": [
+    {
+      "type": 1,
+      "value": "text"
+    },
+    {
+      "type": 0,
+      "value": ". Open work record"
+    }
+  ],
+  "timeline.runException.settings": [
+    {
+      "type": 0,
+      "value": "Open agent settings"
     }
   ],
   "timeline.send.discard": [
@@ -4010,6 +4550,12 @@ export const catalog: MessageCatalog = {
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "timeline.triggerChip.jumpHint": [
+    {
+      "type": 0,
+      "value": "Go to the reply"
     }
   ],
   "timeline.unfurl.label": [

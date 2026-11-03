@@ -11,6 +11,7 @@
 // =============================================================================
 
 import { ApiError, type MembershipRole } from "../../lib/api";
+import { causeOfFailure } from "../connection/failure";
 import {
   DEFAULT_ROLE_LABELS,
   ROLE_KEYS,
@@ -542,7 +543,29 @@ export function isSlugConflict(error: unknown): boolean {
  */
 export const ERROR_MESSAGE_FALLBACK = "요청을 끝내지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
 
+/** 서버에 닿지 못했을 때(응답 없음·502·504·코드 없는 503). 사전 `connection.load.reasonServer`와 같은 문장이다(시험이 잠근다). */
+export const ERROR_MESSAGE_UNREACHABLE = "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요.";
+
+/** 로그인이 만료됐을 때(401). 사전 `connection.session.expired`와 같은 문장이다(시험이 잠근다). */
+export const ERROR_MESSAGE_EXPIRED = "로그인이 만료됐어요. 다시 로그인해 주세요.";
+
+/**
+ * 실패를 사람 문장으로(#5221, #5201 S-C 5번). **서버가 준 문장·오류 객체의 문장은 어떤 경우에도 돌려주지 않는다**:
+ * 서버 원문은 사용자가 할 수 있는 일이 없는 영어 문장이거나 내부 사정이고(ADR-0213 §4·§7), Buzz가 사이드바에 서버
+ * 응답 코드를 붉은 글로 그대로 낸 것과 같은 위험이다. 닫힌 분류로만 말한다: 서버에 닿지 못함 · 로그인 만료 · 그 밖
+ * (안전한 한 문장). 서버 문장을 일부러 같이 보여 주는 자리는 `serverWireMessage`를 명시해서 부른다.
+ */
 export function errorMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 401) return ERROR_MESSAGE_EXPIRED;
+  if (causeOfFailure(error, null) !== null) return ERROR_MESSAGE_UNREACHABLE;
+  return ERROR_MESSAGE_FALLBACK;
+}
+
+/**
+ * 서버가 준 문장 그대로(없으면 안전한 한 문장). **서버 원문을 일부러 같이 보여 주는 자리에서만** 쓴다(AI 연결의 loopback
+ * 거절 안내가 서버의 사유 줄을 안내 아래에 붙인다, #2204). 그 밖의 모든 실패 표시는 `errorMessage`다.
+ */
+export function serverWireMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   if (error instanceof Error && error.message) return error.message;
   return ERROR_MESSAGE_FALLBACK;

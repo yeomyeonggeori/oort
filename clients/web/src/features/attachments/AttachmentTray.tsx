@@ -32,7 +32,9 @@ import {
   sendBlockCopy,
   splitFileName,
   type AttachmentDraft,
+  type UploadReasonFor,
 } from "@momo/core/features/attachments/model";
+import { uploadReasonKey } from "@momo/core/features/connection/uploadFailure";
 import { useDraftThumbnail } from "./draftThumbnail";
 import {
   cardKind,
@@ -213,7 +215,8 @@ function DraftCard({
   onRemove: (localId: string) => void;
   onRetry: (localId: string) => void;
 }) {
-  const line = draftStatusLine(draft);
+  const reasonFor = useUploadReasonFor();
+  const line = draftStatusLine(draft, reasonFor);
   const thumbnail = useDraftThumbnail(draft);
   const label = attachmentDisplayName(draft);
   const shape = cardShape(draft, thumbnail.status);
@@ -328,9 +331,9 @@ function DraftCard({
               <span
                 className="line-clamp-2 min-w-0 flex-1 break-keep text-meta text-danger"
                 data-testid="attachment-chip-status"
-                title={draftStatusWord(draft)}
+                title={draftStatusWord(draft, reasonFor)}
               >
-                {draftStatusWord(draft)}
+                {draftStatusWord(draft, reasonFor)}
               </span>
               {retryable && (
                 // 글자 단추는 이 카드에 들지 않는다. 아이콘 단추이고 이름은 낭독이 읽는다.
@@ -427,12 +430,28 @@ export function AttachButton({
 function useAttachmentAnnouncement(drafts: AttachmentDraft[]): string {
   const previous = useRef<AttachmentDraft[]>([]);
   const [sentence, setSentence] = useState("");
+  const reasonFor = useUploadReasonFor();
   useEffect(() => {
-    const next = draftAnnouncement(previous.current, drafts);
+    const next = draftAnnouncement(previous.current, drafts, reasonFor);
     previous.current = drafts;
     if (next !== null) setSentence(next);
-  }, [drafts]);
+  }, [drafts, reasonFor]);
   return sentence;
+}
+
+/**
+ * 실패한 칩의 이유를 **원인의 분류 문장**으로 갈아 끼운다(#5221): 오프라인·서버에 닿지 못함이면 사전의 그 문장을, 아니면
+ * `undefined`(칩의 기존 문장). 상태 코드는 문장에 없다. 눈에 보이는 줄과 낭독이 같은 길을 쓴다.
+ */
+function useUploadReasonFor(): UploadReasonFor {
+  const formatMessage = useFormatMessage();
+  return useCallback(
+    (draft: AttachmentDraft) => {
+      const key = uploadReasonKey(draft.failureCause);
+      return key === null ? undefined : formatMessage(key);
+    },
+    [formatMessage]
+  );
 }
 
 /**

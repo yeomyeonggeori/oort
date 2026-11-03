@@ -1820,7 +1820,11 @@ paths:
         (ADR-0215 증보 2, #4636). A token that can never be spent (unknown,
         used, expired, an `owner_bootstrap` token for an account that has a
         password, a member who is not active) is refused before that lock is
-        taken, with the same answers.
+        taken, with the same answers. The 200, the 409 and the 410 name which
+        kind of link it was (`claimKind`, ADR-0215 D6, #4596) so a screen can
+        word a reset differently from the first owner's setup; the 404, the
+        400 and the 429 never do — a caller who does not hold a spendable
+        token learns nothing about it.
       security: []
       requestBody:
         required: true
@@ -1830,11 +1834,11 @@ paths:
               $ref: "#/components/schemas/ClaimRequest"
       responses:
         "200":
-          description: Password set; session issued.
+          description: Password set; session issued. `claimKind` says which kind of link was spent.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/LoginResponse"
+                $ref: "#/components/schemas/ClaimResponse"
         "400":
           description: >
             Invalid token or password shape. A password that breaks the
@@ -1853,17 +1857,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Token already used, or owner already has a password.
+          description: >
+            Token already used (spent, or ended by a reissue, a suspension, a
+            removal or the member leaving), or owner already has a password.
+            Carries `claimKind` beside `error`.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/ClaimRefusedResponse"
         "410":
-          description: Claim token expired.
+          description: Claim token expired. Carries `claimKind` beside `error`.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                $ref: "#/components/schemas/ClaimRefusedResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -2616,14 +2623,42 @@ paths:
         Mints a 32-byte token (same shape as owner_bootstrap), stores sha256
         only, TTL 24h, single use. Reissue consumes any previous live reset
         token for that member. The raw token is in this 201 body once — the
-        operator delivers `/claim/<token>` out of band. There is no mailer. The
-        issue takes the workspace's membership lock (exclusive) first, like a
-        claim and a membership change, so it is ordered with them (ADR-0215
-        증보 2, #4636).
+        operator delivers the link (`claimUrl`, or `claimPath` against an address of
+        their own) out of band. There is no mailer. The issue takes the
+        workspace's membership lock (exclusive) first, like a claim and a
+        membership change, so it is ordered with them (ADR-0215 증보 2, #4636).
+
+
+        **The issuing operator proves their own password (ADR-0215 D6, #4596 —
+        a breaking change for callers that sent no body).** The body carries
+        `currentPassword`, the operator's own current password (not the
+        target's), so a stolen operator session alone cannot mint a link into
+        another member's account. The order is fixed: the operator's issue budget
+        is spent (429, every request counts, a right password too —
+        `RATE_LIMIT_PASSWORD_RESET_ISSUE_PER_ADMIN`, default 5 per window, no off
+        switch), the caller must be an owner or admin (403), the body must carry
+        a password (400 `current_password_required`), the password must be the
+        operator's own (403 `current_password_incorrect`), and only then is the
+        target looked at. A wrong password therefore answers the same for a
+        member who exists and one who does not, leaves the previous live link as
+        it was, writes no issue audit row, and leaves one
+        `member.password_reset.refused` row per operator and window.
+
+
+        A link that is still pending ends in the same commit as the member's
+        sessions when the member is suspended, removed or leaves (the claim then
+        answers 409) — but **not** when the member changes their own password
+        (ADR-0215 D4): a reissue is the way to replace a link that leaked.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - {name: memberId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IssuePasswordResetRequest"
       responses:
         "201":
           description: Reset token issued. Raw token is shown only here.
@@ -2632,7 +2667,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/PasswordResetClaimResponse"
         "400":
-          description: Target is not a human member, or member id is invalid.
+          description: >
+            `error.code` `current_password_required` when the body carries no
+            usable `currentPassword` (no body, not JSON, a missing field and a
+            field of the wrong type are all this one answer, not 415 or 422); the
+            code-less 400 when the password is longer than the bound for a
+            current password, the target is not a human member, or the member id
+            is invalid.
           content:
             application/json:
               schema:
@@ -2640,7 +2681,15 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: >
+            The caller is not an owner or admin, the hierarchy forbids it
+            (ADR-0128 D2: self, an admin for an owner or an admin), or — with
+            `error.code` `current_password_incorrect` — the password sent is not
+            the issuing operator's own (or the operator has none).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "404":
           description: Workspace member not found.
           content:
@@ -2653,6 +2702,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/workspaces/{workspaceId}/dev-access:
     get:
@@ -17871,6 +17922,12 @@ components:
                 `PATCH …/members/me/password`): 400 `password_too_short` (fewer
                 than 10 characters), `password_too_long` (more than 72 bytes of
                 UTF-8) and `password_invalid_char` (a NUL character, U+0000);
+                ADR-0215 D6 (#4596, the operator's reissue, `POST
+                …/members/{memberId}/password-reset`): 400
+                `current_password_required` (the body carries no usable
+                `currentPassword`) and 403 `current_password_incorrect` (it is not
+                the issuing operator's own password — the same code the
+                developer-token re-check below uses);
                 ADR-0216 (#4660, developer tokens): 403 `dev_route_not_allowed` (a
                 developer token on a route off its closed table, or on a
                 `{workspaceId}` that is not its own; it is also what the four
@@ -18242,10 +18299,23 @@ components:
         member:
           $ref: "#/components/schemas/Member"
 
+    IssuePasswordResetRequest:
+      type: object
+      required: [currentPassword]
+      properties:
+        currentPassword:
+          type: string
+          minLength: 1
+          description: >
+            The **issuing operator's own** current password (ADR-0215 D6, #4596),
+            not the target's. Proved, not chosen: it is held only to "present and
+            at most 1024 characters", so an operator whose password predates the
+            10-character rule can still issue. Required; the server reads the body
+            itself, so a missing body or field answers 400 `current_password_required`.
     PasswordResetClaimResponse:
       type: object
       additionalProperties: false
-      required: [token, kind, expiresAtMs, claimPath]
+      required: [token, kind, expiresAtMs, claimPath, claimUrl, claimUrlSecure]
       properties:
         token:
           type: string
@@ -18260,6 +18330,74 @@ components:
           type: string
           description: >
             /claim/<token> — the existing ClaimPage route.
+        claimUrl:
+          type: string
+          description: >
+            `claimPath` made absolute against the address the **recipient** can
+            reach (ADR-0215 D6): the operator-configured public address
+            (`MOMO_PUBLIC_BASE_URL`, https only) when there is one — whatever
+            `Host` the request carried — else the origin the request came in on.
+            The link is delivered out of band, so the address the operator is
+            connected on (a LAN address, loopback) is not assumed to reach the
+            recipient. Carries the raw token, like `token` and `claimPath`.
+        claimUrlSecure:
+          type: boolean
+          description: >
+            `false` when `claimUrl` was derived from the request and is plain
+            `http`, or is loopback or a private address — a link only this
+            machine's network can open. A client should say so instead of
+            presenting it as an https link. `true` for a configured public
+            address, and for a derived https address that is not local.
+    ClaimResponse:
+      type: object
+      description: >
+        `POST /v1/claim` 200: the same four fields as `LoginResponse` (the claimant
+        is signed in) and which kind of link was spent (ADR-0215 D6). Spelled out
+        rather than composed with `allOf`: the contract gate's shape check refuses a
+        multi-branch `allOf` on purpose, and `LoginResponse` is shared by login,
+        refresh and join, which have no `claimKind`.
+      required: [accessToken, refreshToken, member, realtimeWebSocketUrl, claimKind]
+      properties:
+        accessToken:
+          type: string
+          description: Bearer access JWT, 15 minute TTL.
+        refreshToken:
+          type: string
+          description: Single-use rotating refresh JWT, 30 day TTL.
+        member:
+          $ref: "#/components/schemas/Member"
+        realtimeWebSocketUrl:
+          type: string
+          description: >
+            The ONLY authority for the realtime WebSocket address (ADR-0110).
+            Never derive it from the API origin.
+        claimKind:
+          type: string
+          enum: [owner_bootstrap, password_reset]
+          description: The kind of the link that was spent.
+    ClaimRefusedResponse:
+      type: object
+      description: >
+        `POST /v1/claim` 409 and 410: the error envelope of `ErrorResponse`, with the
+        kind of the link that was refused beside `error` (ADR-0215 D6). Only a caller
+        who holds the 256-bit token reaches these, so the kind is no oracle; the 404,
+        400 and 429 never carry it. Spelled out rather than composed with `allOf` (see
+        `ClaimResponse`).
+      required: [error, claimKind]
+      properties:
+        error:
+          type: object
+          required: [message]
+          properties:
+            message:
+              type: string
+            code:
+              type: string
+              description: As `ErrorResponse.error.code`; omitted when the refusal has none.
+        claimKind:
+          type: string
+          enum: [owner_bootstrap, password_reset]
+          description: The kind of the link that was refused.
 
     # ---- Developer tokens (ADR-0216, #4660) ----------------------------------
     # Object schemas here are closed like the rest of this file. The secret leaves

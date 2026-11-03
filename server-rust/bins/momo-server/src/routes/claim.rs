@@ -74,7 +74,7 @@ use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::RevocationCause;
 use momo_settings::lock_membership_mutation;
 
-use crate::dto::{ClaimRequest, LoginResponse, MemberDto};
+use crate::dto::{ClaimRequest, ClaimResponse, LoginResponse, MemberDto};
 use crate::error::{db_error, ApiError};
 use crate::routes::auth_routes::{base_scopes, mint_and_record_session_in_tx};
 use crate::AppState;
@@ -97,18 +97,27 @@ fn spec_error(error: ClaimSpecInvalid) -> ApiError {
     ApiError::bad_request(error.to_string())
 }
 
+/// A refusal as HTTP. The 409s and the 410 name the **kind** of the link
+/// (`claimKind`, ADR-0215 D6) so a screen can say "ask the operator for a new link"
+/// for a reset and something else for the first owner's setup. The 404 (no such token,
+/// or its member is not active), the 400 and the 429 name nothing: a caller who does
+/// not hold a spendable token must learn nothing about it.
 fn mutation_error(mutation: ClaimMutation) -> ApiError {
     match mutation {
         ClaimMutation::Applied(_) => {
             ApiError::internal("claim.unexpected_applied", "applied mapped as error")
         }
         ClaimMutation::NotFound => ApiError::not_found("claim token is invalid"),
-        ClaimMutation::Expired => ApiError::new(StatusCode::GONE, "claim token has expired"),
-        ClaimMutation::AlreadyUsed => {
+        ClaimMutation::Expired { claim_kind } => {
+            ApiError::new(StatusCode::GONE, "claim token has expired").with_claim_kind(claim_kind)
+        }
+        ClaimMutation::AlreadyUsed { claim_kind } => {
             ApiError::new(StatusCode::CONFLICT, "claim token has already been used")
+                .with_claim_kind(claim_kind)
         }
         ClaimMutation::PasswordPresent => {
             ApiError::new(StatusCode::CONFLICT, "owner already has a password")
+                .with_claim_kind(momo_auth::CLAIM_KIND_OWNER_BOOTSTRAP)
         }
     }
 }
@@ -118,7 +127,7 @@ pub async fn claim(
     uri: Uri,
     headers: HeaderMap,
     Json(request): Json<ClaimRequest>,
-) -> Result<Json<LoginResponse>, ApiError> {
+) -> Result<Json<ClaimResponse>, ApiError> {
     let token = normalized_claim_token(&request.token).map_err(spec_error)?;
     // The caller is choosing this password — for the first owner's bootstrap and
     // for an operator-issued reset alike (ADR-0215 D2). A refusal is a 400 before
@@ -237,16 +246,20 @@ pub async fn claim(
         } => (outcome, access, refresh),
     };
 
-    Ok(Json(LoginResponse {
-        access_token: access.token,
-        refresh_token: refresh.token,
-        member: MemberDto {
-            id: outcome.member_id.to_string(),
-            workspace_id: outcome.workspace_id.to_string(),
-            kind: outcome.kind,
-            display_name: outcome.display_name,
-            handle: outcome.handle,
+    Ok(Json(ClaimResponse {
+        login: LoginResponse {
+            access_token: access.token,
+            refresh_token: refresh.token,
+            member: MemberDto {
+                id: outcome.member_id.to_string(),
+                workspace_id: outcome.workspace_id.to_string(),
+                kind: outcome.kind,
+                display_name: outcome.display_name,
+                handle: outcome.handle,
+            },
+            realtime_web_socket_url: state
+                .advertised_realtime_ws_url(&headers, uri.scheme_str())?,
         },
-        realtime_web_socket_url: state.advertised_realtime_ws_url(&headers, uri.scheme_str())?,
+        claim_kind: outcome.claim_kind,
     }))
 }

@@ -7,6 +7,7 @@
 //   OUT_DIR=<dir> SHOTS=1 LABEL=after node scripts/capture-5165.mjs   # 캡처도 찍기(기본은 재기만)
 //   ENGINE=webkit node scripts/capture-5165.mjs                      # 같은 흐름을 WebKit(WKWebView 의 엔진)으로
 //   ONLY=390-light node scripts/capture-5165.mjs                      # 한 칸만(손으로 고칠 때). 쉼표로 여럿: 390-light,1280-dark
+//   SIZES=720x900,1440x900 node scripts/capture-5165.mjs              # 폭 목록(기본 390x844,1280x900). #5174 가 720·1440 을 더 본다
 //
 // 390 · 1280 × 밝음 · 어두움. 재는 것(단정은 구현 이름이 아니라 **화면에서 일어나는 일**을 잰다):
 //   A  끝난 요청 요약 칩 → 작업 패널 → 닫기 단추 / Esc → 캐럿이 **그 칩**으로 돌아온다(#5165). 390 에서는 패널이 라우트를 덮고
@@ -34,6 +35,7 @@ const SHOTS = process.env.SHOTS === "1";
 const LABEL = process.env.LABEL || "after";
 const ENGINE = process.env.ENGINE === "webkit" ? webkit : chromium;
 const ONLY = (process.env.ONLY || "").split(",").filter(Boolean);
+const SIZES = (process.env.SIZES || "390x844,1280x900").split(",").filter(Boolean).map((size) => size.split("x").map(Number));
 const MIN = 60_000;
 
 const workspaceId = "00000000-0000-7000-8000-000000000001";
@@ -431,7 +433,7 @@ async function main() {
   });
   try {
     for (const scheme of ["light", "dark"]) {
-      for (const [width, height] of [[390, 844], [1280, 900]]) {
+      for (const [width, height] of SIZES) {
         if (ONLY.length > 0 && !ONLY.includes(`${width}-${scheme}`)) continue;
         await runChipScenes(preview.origin, scheme, width, height);
         await planDockScenes(preview.origin, scheme, width, height);
