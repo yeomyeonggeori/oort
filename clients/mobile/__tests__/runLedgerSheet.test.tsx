@@ -188,7 +188,12 @@ describe('폰 기록 시트 (#3824)', () => {
     );
     render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={() => {}} />));
     await waitFor(() => expect(screen.getByTestId('run-ledger-rows')).toBeTruthy());
-    expect(mockFetchEvents).toHaveBeenCalledWith(WS, RUN, {includeDoorbell: true});
+    // 웹 작업 패널과 같은 질문이다(깨우는 신호 + oort가 잰 도구 호출 + 에이전트가 알린 활동·계획): 같은 키의 캐시를 나눠 쓴다.
+    expect(mockFetchEvents).toHaveBeenCalledWith(WS, RUN, {
+      includeDoorbell: true,
+      includeTools: true,
+      includeActivity: true,
+    });
     expect(screen.getByText(/깨우는 신호를 보냈어요/)).toBeTruthy();
     expect(screen.getByText(/· 2번/)).toBeTruthy();
     expect(screen.getByText('이 앱이 아직 모르는 기록이에요')).toBeTruthy();
@@ -577,7 +582,10 @@ describe('폰 기록 시트 — 공용 부품 (#4458)', () => {
     mockFetchEvents.mockResolvedValue(ledgerOf(3));
     render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={() => {}} />));
     await waitFor(() => expect(screen.getByTestId('run-ledger-rows')).toBeTruthy());
-    expect(screen.UNSAFE_getAllByType(GroupCard)).toHaveLength(2);
+    // 「기록」은 묶음 카드 하나다. 이 응답은 구 서버의 것이라(`toolTally`·`activityTally` 없음) 아래 두 칸은 「서버 업데이트 뒤에 보여요」
+    // 상태 카드 한 장씩이다 — 그 칸들의 시험은 `workTimelineSheet.test`가 맡는다. 요약 카드 하나 + 기록 + 상태 카드 둘 = 넷.
+    expect(within(screen.getByTestId('run-ledger-record')).UNSAFE_getAllByType(GroupCard)).toHaveLength(1);
+    expect(screen.UNSAFE_getAllByType(GroupCard)).toHaveLength(4);
     // 기록 셋 → 구분선 둘. 요약 카드는 자식이 하나라 구분선이 없다.
     expect(screen.getAllByTestId('group-divider')).toHaveLength(2);
     expect(screen.getAllByTestId(/^run-ledger-row-/)).toHaveLength(3);
