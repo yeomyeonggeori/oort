@@ -84,10 +84,5 @@ export function authGate(facts: SessionFacts): AuthGate {
   return {kind: 'signedOut', expired: false};
 }
 
-/** What the sign-in screen says when it was reached by a session ending. */
-export const SESSION_EXPIRED_NOTICE =
-  '로그인이 만료되었습니다. 다시 연결해 주세요.';
-
-/** What the restoring screen says while the server cannot be reached. */
-export const RESTORE_UNREACHABLE_NOTICE =
-  '서버에 닿지 못했습니다. 네트워크가 연결되면 이어서 시도합니다.';
+// 로그인 만료 안내와 서버에 닿지 못했을 때의 문장은 사전(`connection.session.expired` · `connection.boot.unreachable`, ko·en)이 갖는다(#5222).
+// 화면이 `formatMessage` 로 읽는다 - 이 파일은 판정만 한다.

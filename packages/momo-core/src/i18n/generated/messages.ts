@@ -35,6 +35,7 @@ export const messageKeys = [
   "connection.boot.unreachable",
   "connection.card.connecting",
   "connection.card.lastSynced",
+  "connection.card.neverSynced",
   "connection.card.offlineDetail",
   "connection.card.offlineTitle",
   "connection.card.realtimeDownDetail",
@@ -201,7 +202,11 @@ export const messageKeys = [
   "expressions.make.stepSend",
   "expressions.make.stepUpload",
   "expressions.make.submit",
+  "expressions.panel.viewEmoticon",
   "expressions.panel.viewEmpty",
+  "expressions.panel.viewGif",
+  "expressions.panel.viewsLegend",
+  "expressions.panel.viewTeam",
   "expressions.photo.agentInstead",
   "expressions.photo.anotherPhoto",
   "expressions.photo.branchLabel",
@@ -302,7 +307,6 @@ export const messageKeys = [
   "mobile.attachmentSave.saving",
   "mobile.attachmentSave.toFiles",
   "mobile.attachmentSave.toPhotos",
-  "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
   "mobile.ios.localNetworkUsage",
@@ -441,6 +445,8 @@ export const messageKeys = [
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
+  "reply.alsoInChannel.label",
+  "reply.alsoInChannel.unsupported",
   "reply.card.cancel",
   "reply.card.excerptEmpty",
   "reply.card.excerptExpression",
@@ -450,6 +456,11 @@ export const messageKeys = [
   "reply.card.headerSelf",
   "reply.composer.placeholder",
   "reply.composer.send",
+  "reply.home.excerptDeleted",
+  "reply.home.header",
+  "reply.home.headerSelf",
+  "reply.home.headerUnknown",
+  "reply.home.open",
   "settings.aiLimits.ceilingSearches",
   "settings.aiLimits.ceilingTokens",
   "settings.aiLimits.cleared",
@@ -795,6 +806,7 @@ export const argumentSpecs = {
   "connection.card.lastSynced": {
     "relativeTime": "string"
   },
+  "connection.card.neverSynced": {},
   "connection.card.offlineDetail": {},
   "connection.card.offlineTitle": {},
   "connection.card.realtimeDownDetail": {},
@@ -994,7 +1006,11 @@ export const argumentSpecs = {
   "expressions.make.stepSend": {},
   "expressions.make.stepUpload": {},
   "expressions.make.submit": {},
+  "expressions.panel.viewEmoticon": {},
   "expressions.panel.viewEmpty": {},
+  "expressions.panel.viewGif": {},
+  "expressions.panel.viewsLegend": {},
+  "expressions.panel.viewTeam": {},
   "expressions.photo.agentInstead": {},
   "expressions.photo.anotherPhoto": {},
   "expressions.photo.branchLabel": {},
@@ -1097,7 +1113,6 @@ export const argumentSpecs = {
   "mobile.attachmentSave.saving": {},
   "mobile.attachmentSave.toFiles": {},
   "mobile.attachmentSave.toPhotos": {},
-  "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
   "mobile.ios.localNetworkUsage": {},
@@ -1257,6 +1272,8 @@ export const argumentSpecs = {
   "releaseNotes.version.releasedOn": {
     "date": "string"
   },
+  "reply.alsoInChannel.label": {},
+  "reply.alsoInChannel.unsupported": {},
   "reply.card.cancel": {},
   "reply.card.excerptEmpty": {},
   "reply.card.excerptExpression": {},
@@ -1268,6 +1285,13 @@ export const argumentSpecs = {
   "reply.card.headerSelf": {},
   "reply.composer.placeholder": {},
   "reply.composer.send": {},
+  "reply.home.excerptDeleted": {},
+  "reply.home.header": {
+    "name": "string"
+  },
+  "reply.home.headerSelf": {},
+  "reply.home.headerUnknown": {},
+  "reply.home.open": {},
   "settings.aiLimits.ceilingSearches": {
     "limit": "number"
   },
@@ -1712,6 +1736,7 @@ export interface MessageArgs {
   "connection.boot.unreachable": Record<string, never>;
   "connection.card.connecting": Record<string, never>;
   "connection.card.lastSynced": { relativeTime: string };
+  "connection.card.neverSynced": Record<string, never>;
   "connection.card.offlineDetail": Record<string, never>;
   "connection.card.offlineTitle": Record<string, never>;
   "connection.card.realtimeDownDetail": Record<string, never>;
@@ -1878,7 +1903,11 @@ export interface MessageArgs {
   "expressions.make.stepSend": Record<string, never>;
   "expressions.make.stepUpload": Record<string, never>;
   "expressions.make.submit": Record<string, never>;
+  "expressions.panel.viewEmoticon": Record<string, never>;
   "expressions.panel.viewEmpty": Record<string, never>;
+  "expressions.panel.viewGif": Record<string, never>;
+  "expressions.panel.viewsLegend": Record<string, never>;
+  "expressions.panel.viewTeam": Record<string, never>;
   "expressions.photo.agentInstead": Record<string, never>;
   "expressions.photo.anotherPhoto": Record<string, never>;
   "expressions.photo.branchLabel": Record<string, never>;
@@ -1979,7 +2008,6 @@ export interface MessageArgs {
   "mobile.attachmentSave.saving": Record<string, never>;
   "mobile.attachmentSave.toFiles": Record<string, never>;
   "mobile.attachmentSave.toPhotos": Record<string, never>;
-  "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
   "mobile.ios.localNetworkUsage": Record<string, never>;
@@ -2118,6 +2146,8 @@ export interface MessageArgs {
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
+  "reply.alsoInChannel.label": Record<string, never>;
+  "reply.alsoInChannel.unsupported": Record<string, never>;
   "reply.card.cancel": Record<string, never>;
   "reply.card.excerptEmpty": Record<string, never>;
   "reply.card.excerptExpression": Record<string, never>;
@@ -2127,6 +2157,11 @@ export interface MessageArgs {
   "reply.card.headerSelf": Record<string, never>;
   "reply.composer.placeholder": Record<string, never>;
   "reply.composer.send": Record<string, never>;
+  "reply.home.excerptDeleted": Record<string, never>;
+  "reply.home.header": { name: string };
+  "reply.home.headerSelf": Record<string, never>;
+  "reply.home.headerUnknown": Record<string, never>;
+  "reply.home.open": Record<string, never>;
   "settings.aiLimits.ceilingSearches": { limit: number };
   "settings.aiLimits.ceilingTokens": { limit: number };
   "settings.aiLimits.cleared": Record<string, never>;

@@ -10,7 +10,8 @@ import {useRetainReduceMotion} from './src/lib/useReduceMotion';
 import {BrandAppearance, ThemeProvider, usePalette, useStyles, useTheme} from './src/design/theme';
 import {createQueryClient, installReactQueryBridges} from './src/query/queryClient';
 import ConnectScreen from './src/screens/ConnectScreen';
-import {RESTORE_UNREACHABLE_NOTICE} from './src/session/authGate';
+import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {useFormatMessage} from './src/i18n/useFormatMessage';
 import {useAuthGate} from './src/session/useSession';
 import AppShell from './src/shell/AppShell';
 import {initSessionStore} from './src/storage/secureSession';
@@ -99,6 +100,7 @@ function AppChrome(): React.JSX.Element {
 
 function Gate(): React.JSX.Element {
   const {gate, retry} = useAuthGate();
+  const formatMessage = useFormatMessage();
   if (gate.kind === 'restoring') {
     // A stored session whose rotation could not reach the server is still a
     // session. Saying so — and offering the retry — is the honest screen; a
@@ -106,7 +108,7 @@ function Gate(): React.JSX.Element {
     // train went into a tunnel.
     return gate.unreachable ? (
       <Booting
-        label={RESTORE_UNREACHABLE_NOTICE}
+        label={formatMessage(CONNECTION_KEYS.bootUnreachable)}
         onRetry={retry}
         testID="session-unreachable"
       />

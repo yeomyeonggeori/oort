@@ -18,9 +18,13 @@ name: 4783-connection-resync
 # defect) and rest at the bottom. Go to the home screen and come back within a
 # second or two. EXPECTED: no 「연결 중…」 band at all for a reconnect shorter
 # than one second, the list does not sweep from the top to the bottom, the
-# last row stays where it was. Device-only: with airplane mode on, the band
-# must appear about one second after the return and become 「연결이 끊겼습니다」
-# at ten seconds; turning it off removes the band without moving the list.
+# last row stays where it was. Device-only (#5222 sentences): with airplane mode
+# on the device is offline, so the band says 「오프라인이에요」 at once (no silent
+# second) and home/inbox/agents carry the same sentence in a strip. With the
+# device online but the socket down, the band appears about one second after the
+# return as 「연결 중…」 and becomes 「실시간 연결이 끊겼어요」 at ten seconds.
+# Turning airplane mode off removes the band (a 「다시 연결됐어요」 check shows for
+# two seconds) without moving the list.
 - runFlow:
     when:
       true: ${SCENE == 'info'}

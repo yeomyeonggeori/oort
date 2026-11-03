@@ -300,6 +300,12 @@ export const catalog: MessageCatalog = {
       "value": "relativeTime"
     }
   ],
+  "connection.card.neverSynced": [
+    {
+      "type": 0,
+      "value": "아직 이 목록을 한 번도 받지 못했어요."
+    }
+  ],
   "connection.card.offlineDetail": [
     {
       "type": 0,
@@ -1034,19 +1040,19 @@ export const catalog: MessageCatalog = {
   "expressions.kind.emoji": [
     {
       "type": 0,
-      "value": "이모지"
+      "value": "팀 이모지"
     }
   ],
   "expressions.kind.hintEmoji": [
     {
       "type": 0,
-      "value": "작은 그림이에요. 글 사이와 반응에 써요."
+      "value": "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 팀 이모지예요."
     }
   ],
   "expressions.kind.hintSticker": [
     {
       "type": 0,
-      "value": "큰 그림이에요. 크게 보내고, 움직이면 팀 GIF에 보여요."
+      "value": "큰 그림이에요. 크게 보내고, 움직이면 GIF에서 볼 수 있어요."
     }
   ],
   "expressions.kind.legend": [
@@ -1058,7 +1064,7 @@ export const catalog: MessageCatalog = {
   "expressions.kind.sticker": [
     {
       "type": 0,
-      "value": "스티커"
+      "value": "이모티콘"
     }
   ],
   "expressions.make.agent": [
@@ -1416,10 +1422,34 @@ export const catalog: MessageCatalog = {
       "value": "요청 보내기"
     }
   ],
+  "expressions.panel.viewEmoticon": [
+    {
+      "type": 0,
+      "value": "이모티콘"
+    }
+  ],
   "expressions.panel.viewEmpty": [
     {
       "type": 0,
       "value": "이 보기에는 아직 그림이 없어요"
+    }
+  ],
+  "expressions.panel.viewGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.panel.viewsLegend": [
+    {
+      "type": 0,
+      "value": "팀 표현 보기"
+    }
+  ],
+  "expressions.panel.viewTeam": [
+    {
+      "type": 0,
+      "value": "팀 이모지"
     }
   ],
   "expressions.photo.agentInstead": [
@@ -2028,12 +2058,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "사진에 저장"
-    }
-  ],
-  "mobile.connection.reconnectNow": [
-    {
-      "type": 0,
-      "value": "지금 다시 연결"
     }
   ],
   "mobile.ios.cameraUsage": [
@@ -2937,6 +2961,18 @@ export const catalog: MessageCatalog = {
       "value": " 공개"
     }
   ],
+  "reply.alsoInChannel.label": [
+    {
+      "type": 0,
+      "value": "대화에도 보내기"
+    }
+  ],
+  "reply.alsoInChannel.unsupported": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 「대화에도 보내기」를 지원하지 않아요. 체크를 끄고 다시 보내 주세요."
+    }
+  ],
   "reply.card.cancel": [
     {
       "type": 0,
@@ -2993,6 +3029,40 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "답글 보내기"
+    }
+  ],
+  "reply.home.excerptDeleted": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지"
+    }
+  ],
+  "reply.home.header": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님 스레드에 답글"
+    }
+  ],
+  "reply.home.headerSelf": [
+    {
+      "type": 0,
+      "value": "내 글 스레드에 답글"
+    }
+  ],
+  "reply.home.headerUnknown": [
+    {
+      "type": 0,
+      "value": "스레드에 답글"
+    }
+  ],
+  "reply.home.open": [
+    {
+      "type": 0,
+      "value": "이 답글이 달린 스레드 열기"
     }
   ],
   "settings.aiLimits.ceilingSearches": [

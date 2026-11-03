@@ -183,7 +183,7 @@ describe('스레드 안에서는 그리지 않는다', () => {
       />,
     );
     expect(screen.getAllByTestId('reply-marker')).toHaveLength(1);
-    expect(screen.getByText('↳ 김인턴님에게 답글')).toBeTruthy();
+    expect(screen.getByText('↳ 김인턴님 스레드에 답글')).toBeTruthy();
   });
 });
 

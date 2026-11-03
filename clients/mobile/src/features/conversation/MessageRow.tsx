@@ -143,6 +143,13 @@ import {NO_UNFURLS} from './useMessageUnfurls';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {SendFailureActions} from './SendFailureActions';
+import {
+  sendFailureReasonKey,
+  type SendFailureKind,
+} from '@momo/core/features/connection/sendFailure';
+import {ReplyHomeLine} from './ReplyHomeLine';
+import {replyHomeCopy} from '@momo/core/features/timeline/replyHomeCopy';
+import {replyHomeLineOf} from '@momo/core/features/timeline/threadHome';
 import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
 import {ApprovalAvatarPreview} from './ApprovalAvatarPreview';
@@ -396,7 +403,7 @@ const CHIP_HIT_SLOP = {
  *
  * 14pt 씩 넓히면 답글 표식은 위로 작성자 줄에, 스레드 롤업은 위로 본문에 닿는다.
  * 그런데 그 자리들의 탭은 **같은 곳으로 간다**: 행 탭은 `threadTarget` 을 열고,
- * 두 표식이 여는 것도 같은 스레드다(위 `ReplyMarker` 머리말·아래 롤업 참조).
+ * 두 표식이 여는 것도 같은 스레드다(`ReplyHomeLine` 머리말·아래 롤업 참조).
  * 그리고 아래로 겹치는 반응 칩은 JSX 에서 **뒤에** 그려지므로 RN 의 히트 테스트가
  * 칩을 먼저 집는다 — 형제는 쓰인 순서대로 칠해지고 역순으로 눌린다.
  */
@@ -808,86 +815,6 @@ function Chips({
         </Pressable>
       ))}
     </View>
-  );
-}
-
-/**
- * 「↳ ○○님에게 답글」 — the line that makes a reply readable as one.
- *
- * ## Why the row needs it at all
- *
- * A reply is a message in this channel with `rootId` set, and the server does
- * not filter replies out of channel history — so it lands in the timeline as an
- * ordinary row. Nothing about it said 답글, which is exactly the report: 답글을
- * 달았는데 답글 모양으로 별도로 보이지 않는다.
- *
- * ## Why it is a glyph and a name rather than a quoted parent
- *
- * The quote is the tempting version and it is wrong FOR THIS DEVICE: a thread
- * reply is about BELONGING (`root_id`), and belonging is answered by naming the
- * room and opening it. Drawing the parent's text here would double the height of
- * every reply and re-render text the reader can already scroll to. One
- * meta-sized line names the destination and opens it, which is the whole job —
- * and it keeps the density this product has.
- *
- * **This is not the argument against quoting** (ADR-0148 settled that: 인용 is a
- * different device and DOES draw the original). `reply_to_id` is AIM rather than
- * belonging, it stays in the main channel, and it exists precisely for the case
- * where the context has to come along. That block is `Quote.tsx`, it sits right
- * below this line, and the two are deliberately built to look nothing alike —
- * a line vs a block, an arrow vs a rule, 답글 vs 인용, another screen vs this one.
- * A row can carry both at once (ADR-0148 규칙 1: quoting one reply inside the
- * thread it belongs to), which is why they had to be told apart at a glance.
- *
- * ## Pressable only when there is a room to enter
- *
- * The same rule the thread rollup already follows here: with the root loaded and
- * a thread surface to open, this is a button onto that thread; with the root
- * above the oldest page this client has fetched, it is a sentence. A door to a
- * room that does not exist is worse than a sentence saying the room is there.
- *
- * This is not 「답글 달기」 and does not weaken the one-level rule: replying to a
- * reply is still refused by `canReplyToMessage`, so the action sheet on this row
- * offers no 답글. Opening the thread it already belongs to is navigation.
- */
-function ReplyMarker({
-  parent,
-  directory,
-  onOpen,
-}: {
-  parent: Message | null;
-  directory: Directory;
-  onOpen?: () => void;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const label =
-    parent === null
-      ? // 모르면 모른다고 말한다: the root is not loaded, so the row says that it
-        // is a reply and stops short of naming a message it cannot see.
-        '↳ 답글'
-      : `↳ ${
-          memberNameParts(directory, parent.authorMemberId, missingMemberLabel(directory)).name
-        }님에게 답글`;
-  if (!onOpen) {
-    return (
-      <Text style={styles.replyMark} numberOfLines={1} testID="reply-marker">
-        {label}
-      </Text>
-    );
-  }
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel="이 답글이 달린 스레드 열기"
-      hitSlop={META_HIT_SLOP}
-      onPress={onOpen}
-      unstable_pressDelay={PRESS_VISUAL_DELAY_MS}
-      style={({pressed}) => [pressed && styles.pressed]}
-      testID="reply-marker">
-      <Text style={styles.replyMarkLink} numberOfLines={1}>
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -2343,7 +2270,7 @@ export interface MessageRowProps {
    * The message this one QUOTES (ADR-0148 `reply_to_id`), already resolved.
    *
    * A different device from `replyParent` and never a substitute for it — see
-   * `ReplyMarker`'s header. `null`/`undefined` means this row quotes nothing.
+   * `ReplyHomeLine`'s header. `null`/`undefined` means this row quotes nothing.
    *
    * **The value rides the page.** The server LEFT JOINs the quoted row onto
    * every history page (`momo-messaging/src/message.rs:1062`), so the caller
@@ -2736,6 +2663,15 @@ function MessageRowInner({
   // 묘비에는 카드가 없다: 지워진 본문에 달린 미리보기를 보이는 것은 지워진 것이 무엇인지 말을 어긋나게 한다.
   // ===========================================================================
   const formatMessage = useFormatMessage();
+  // 한 접근성 원소가 읽는 답글 머리(「○○님 스레드에 답글」) — 줄(`ReplyHomeLine`)과 **같은 코어 문장**이고 화살표는 읽지 않는다(#4888).
+  const replyToSpoken =
+    isMarkedReply && !deleted && message.rootId !== undefined
+      ? replyHomeCopy(replyHomeLineOf(message.rootId, replyParent ?? undefined), {
+          directory,
+          myMemberId: actions?.myMemberId,
+          formatMessage,
+        }).header
+      : null;
   const linkPreview = useLinkPreviewPreference();
   const cardModels = useMemo(
     () => (deleted ? NO_CARD_MODELS : cardModelsFor(unfurls, linkPreview)),
@@ -3230,18 +3166,7 @@ function MessageRowInner({
         tail,
         deleted,
         tombstoneText,
-        replyTo:
-          isMarkedReply && !deleted
-            ? replyParent === null
-              ? '답글'
-              : `${
-                  memberNameParts(
-                    directory,
-                    replyParent.authorMemberId,
-                    missingMemberLabel(directory),
-                  ).name
-                }님에게 답글`
-            : null,
+        replyTo: replyToSpoken,
         quoted:
           quote && !deleted
             ? quoteAccessibilityPhrase(quote, directory, quoteAttachmentCount)
@@ -3352,10 +3277,12 @@ function MessageRowInner({
             본문 **위**에 온다 — 맥락은 내용보다 먼저 읽혀야 이 줄이 무엇에 대한
             답인지 알고 본문을 읽는다. 삭제된 행에는 붙이지 않는다: 묘비는
             메시지에 대한 서술이지 메시지가 아니다. */}
-        {isMarkedReply && !deleted ? (
-          <ReplyMarker
-            parent={replyParent ?? null}
+        {isMarkedReply && !deleted && message.rootId !== undefined ? (
+          <ReplyHomeLine
+            rootId={message.rootId}
+            root={replyParent ?? null}
             directory={directory}
+            myMemberId={actions?.myMemberId}
             onOpen={
               replyParent && actions?.onOpenThread
                 ? () => {
@@ -4273,8 +4200,10 @@ export function PendingRow({
   directory,
   quote,
   quoteAttachmentCount,
+  replyHome,
   onResend,
   onDiscard,
+  failureKind = null,
   arrivalSurface = ARRIVAL_SURFACE_CHANNEL,
 }: {
   pending: PendingMessage;
@@ -4295,9 +4224,19 @@ export function PendingRow({
    */
   quote?: QuoteBlockModel | null;
   quoteAttachmentCount?: number;
+  /**
+   * 이 전송이 스레드 답글이면 그 스레드(#4888): 대화에 서는 답글의 에코 — 「대화에도 보내기」로 보낸 것, 또는 보내지 못해 실패를 여기서 알려야
+   * 하는 것 — 가 확정본과 같은 「↳ ○○님 스레드에 답글」 줄을 먼저 그린다. 없으면(`undefined`) 채널 글이다. 루트를 못 불러왔으면 `root` 가 `null`이다.
+   */
+  replyHome?: {rootId: string; root: Message | null};
   onResend?: (clientMsgId: string) => void;
   /** 보내지 못한 이 행을 이 기기에서 지운다(#5210). 없으면 X 를 그리지 않는다. */
   onDiscard?: (clientMsgId: string) => void;
+  /**
+   * 못 보낸 이유의 종류(#5222, 코어 `sendFailureKind`): 오프라인 · 서버에 닿지 못함 · 서버가 거절. 그 종류의 완결된 문장을 말한다. 종류를 모르면
+   * (`null`) 지금까지처럼 「전송 실패」만 말한다. 상태 코드·서버 원문은 어디에도 없다.
+   */
+  failureKind?: SendFailureKind | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const formatMessage = useFormatMessage();
@@ -4397,6 +4336,14 @@ export function PendingRow({
             pendingMark={slowMark}
           />
         ) : null}
+        {replyHome ? (
+          <ReplyHomeLine
+            rootId={replyHome.rootId}
+            root={replyHome.root}
+            directory={directory}
+            myMemberId={pending.authorMemberId}
+          />
+        ) : null}
         {quote ? (
           <QuoteBlock
             block={quote}
@@ -4441,7 +4388,11 @@ export function PendingRow({
         ) : null}
         {failed ? (
           <View style={styles.failedRow}>
-            <Text style={styles.failedText}>{formatMessage('timeline.send.failed')}</Text>
+            <Text style={styles.failedText} testID="pending-failed-reason">
+              {failureKind === null
+                ? formatMessage('timeline.send.failed')
+                : formatMessage(sendFailureReasonKey(failureKind))}
+            </Text>
             <SendFailureActions
               onResend={onResend ? () => onResend(pending.clientMsgId) : undefined}
               onDiscard={onDiscard ? () => onDiscard(pending.clientMsgId) : undefined}
@@ -4673,15 +4624,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // `ThreadSummary.tsx`의 `count`(`line.meta`)가 진다.
   // Meta size, like the tail: this is a statement ABOUT the message, and it must
   // not compete with the message for the eye.
-  replyMark: {fontSize: font.meta, lineHeight: line.meta, color: color.textFaint},
-  replyMarkLink: {
-    fontSize: font.meta,
-    lineHeight: line.meta,
-    color: color.textMuted,
-    // 「↳ 답글」(루트를 못 불러온 경우)이 이 라벨의 가장 짧은 판이다. 가로도
-    // 슬롭과 더해 44 가 되도록 바닥을 깐다 — 세로만 보증하던 것이 M-14 였다.
-    minWidth: TOUCH_TARGET - 2 * META_SLOP,
-  },
   rowFailure: {
     flexDirection: 'row',
     alignItems: 'center',

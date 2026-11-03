@@ -88,6 +88,7 @@ import {
 import type {QuoteDraft} from '@momo/core/features/timeline/quote';
 import {QuoteDraftBar} from './Quote';
 import {ReplyDraftCard} from './ReplyDraftCard';
+import {AlsoInChannelCheck} from './AlsoInChannelCheck';
 import {useReplyCopy} from './replyCopy';
 import type {ReplyTarget} from './replyTarget';
 import {ComposerLinkPreview} from './ComposerLinkPreview';
@@ -1098,6 +1099,11 @@ export interface ComposerSendOptions {
    * 켠 때만 있다: 켜지 않은 전송은 이 필드 이전과 같은 호출(`onSend(body)`)이다.
    */
   suppressUnfurl?: boolean;
+  /**
+   * #4888 — 「대화에도 보내기」를 켜고 보낸다(ADR-0148 증보 2026-10-31). 스레드 답글(스레드 화면, 밀어서 답글)에서만 뜻이 있고, 켠 때만
+   * 있다: 켜지 않은 전송은 이 필드 이전과 같은 호출(`onSend(body)`)이다.
+   */
+  alsoInChannel?: boolean;
 }
 
 /**
@@ -1128,6 +1134,7 @@ export function Composer({
   viewerHumanId,
   dmHint,
   offline,
+  offlineNote,
   draftKey,
   onSend,
   onTyping,
@@ -1135,6 +1142,7 @@ export function Composer({
   onCancelQuote,
   replyTarget,
   onCancelReply,
+  offerAlsoInChannel,
   attachmentTarget,
   placeholder: placeholderProp,
   sendLabel: sendLabelProp = '보내기',
@@ -1199,6 +1207,12 @@ export function Composer({
    */
   offline?: boolean;
   /**
+   * `offline` 일 때 컴포저 위 한 줄(과 보내기·첨부 단추의 낭독 힌트)이 말하는 문장. 막은 **원인**(기기 오프라인 · 서버에 닿지 못함)이
+   * 문장을 가르므로(#5222, 연결 상태 모델의 `composerNote`) 화면이 사전에서 읽어 준다. 없으면 예전 한 문장
+   * (`COMPOSER_OFFLINE_COPY`)이다 — 연결 상태 모델이 없는 하네스·시험은 그대로 이 문장을 읽는다.
+   */
+  offlineNote?: string;
+  /**
    * 이 컴포저의 초안이 앉는 자리 (`drafts.ts`). 없으면 초안을 쓰지도 읽지도
    * 않는다 — 이름 없는 자리에 남긴 글은 나중에 누구의 것인지 답할 수 없다.
    */
@@ -1233,6 +1247,11 @@ export function Composer({
   /** 답글 대상만 뗀다 — **쓴 글은 남는다**(글은 이 컴포저가 들고 있다). 대상이 있는데 이것이 없으면 나가는 길이 없다. */
   onCancelReply?: () => void;
   /**
+   * 「대화에도 보내기」 체크를 늘 세운다(스레드 화면 입력칸, #4888). 채널 입력칸은 주지 않고, 밀어서 건 답글 머리말(`replyTarget`)이 있는 동안에만
+   * 체크가 선다. 기본은 꺼짐이고 마지막 선택을 기억하지 않는다 — 보내면 꺼지고, 답글 대상이나 입력칸(`draftKey`)이 바뀌면 꺼진다.
+   */
+  offerAlsoInChannel?: boolean;
+  /**
    * The text field itself. Exposed so a caller can put the caret here — the
    * empty-state "첫 메시지 쓰기" affordance wants it, and `measure/` uses it to
    * raise the real software keyboard without a tap (a simulator cannot be
@@ -1264,6 +1283,12 @@ export function Composer({
   // 「AI와 만들기」 요청을 보낸 뒤 그 DM 으로 가는 길(#4962) — 대화 화면이 컨텍스트로 준다. 없으면 시트는 「확인」으로 끝난다.
   const openMadeConversation = useMakeLanding();
   const replying = !!replyTarget && onCancelReply !== undefined;
+  // 「대화에도 보내기」(#4888): 서는 자리는 스레드 입력칸과 답글 머리말이 걸린 동안이다. 상태는 여기서 들고, 기억하지 않는다.
+  const offersAlsoInChannel = offerAlsoInChannel === true || replying;
+  const [alsoInChannel, setAlsoInChannel] = useState(false);
+  const alsoInChannelScope = `${replyTarget?.messageId ?? ''}|${draftKey ?? ''}`;
+  useEffect(() => setAlsoInChannel(false), [alsoInChannelScope]);
+  const alsoInChannelOn = offersAlsoInChannel && alsoInChannel;
   const placeholder = replying ? replyCopy.placeholder() : placeholderProp;
   const sendLabel = replying ? replyCopy.send() : sendLabelProp;
   const keyboardAppearance = useKeyboardAppearance();
@@ -1783,7 +1808,13 @@ export function Composer({
     }
     // ✕로 끈 채 보낸다(켠 때만 — 켜지 않은 전송은 예전과 같은 호출이다). 값은 이 렌더의 것이고(글을 비우기 전에 읽는다),
     // 보낸 뒤에는 글이 비어 ✕가 저절로 풀린다. `submit` 이 메모라 아래 의존성에 이 값이 들어 있어야 ✕가 닿는다.
-    const flags = linkPreview.suppressed ? {suppressUnfurl: true} : null;
+    const picked = {
+      ...(linkPreview.suppressed ? {suppressUnfurl: true} : {}),
+      // 켠 때만 키가 간다. 보냈으므로 체크는 꺼진다(마지막 선택을 기억하지 않는다).
+      ...(alsoInChannelOn ? {alsoInChannel: true} : {}),
+    };
+    const flags = Object.keys(picked).length === 0 ? null : picked;
+    setAlsoInChannel(false);
     if (attachmentKey === null) {
       if (flags === null) onSend(body);
       else onSend(body, flags);
@@ -1810,6 +1841,7 @@ export function Composer({
     slashRows,
     acceptSlash,
     linkPreview.suppressed,
+    alsoInChannelOn,
   ]);
 
   // 보낼 수 있는가 — 두 조건이고 둘은 다른 종류다. 하나는 「보낼 것이 있는가」,
@@ -2477,7 +2509,7 @@ export function Composer({
 
       {offline ? (
         <Text style={styles.offline} testID="composer-offline">
-          {COMPOSER_OFFLINE_COPY}
+          {offlineNote ?? COMPOSER_OFFLINE_COPY}
         </Text>
       ) : null}
 
@@ -2560,6 +2592,13 @@ export function Composer({
           onCancel={onCancelReply}
         />
       ) : null}
+      {offersAlsoInChannel ? (
+        <AlsoInChannelCheck
+          checked={alsoInChannel}
+          onChange={setAlsoInChannel}
+          textLeft={fieldInset(INPUT_TEXT_LEFT)}
+        />
+      ) : null}
       <View
         style={styles.bar}
         testID="composer-bar"
@@ -2574,7 +2613,7 @@ export function Composer({
             accessibilityLabel={ATTACH_COPY.attach}
             accessibilityHint={
               offline
-                ? COMPOSER_OFFLINE_COPY
+                ? offlineNote ?? COMPOSER_OFFLINE_COPY
                 : attachmentSurface.drafts.length >=
                     MAX_ATTACHMENTS_PER_MESSAGE
                   ? `첨부는 ${MAX_ATTACHMENTS_PER_MESSAGE}개까지 고를 수 있어요`
@@ -2779,7 +2818,9 @@ export function Composer({
           // 안 들린다. 위의 문장은 별개의 요소라 순서대로 훑어야 닿는데, 버튼에
           // 먼저 도착하는 길(로터·직접 탐색)이 있다. 이유는 버튼이 함께 든다.
           accessibilityHint={
-            offline ? COMPOSER_OFFLINE_COPY : attachmentBlockCopy ?? undefined
+            offline
+              ? offlineNote ?? COMPOSER_OFFLINE_COPY
+              : attachmentBlockCopy ?? undefined
           }
           accessibilityState={{disabled: !canSend}}
           disabled={!canSend}

@@ -20,6 +20,7 @@ import {
 import {authGate, type AuthGate} from './authGate';
 import {forgetDeviceKeyOnSignOut} from '../deviceKey/enrollment';
 import {clearAllDrafts} from '../features/conversation/drafts';
+import {clearAllFailedSends} from '../features/conversation/failedSends';
 import {clearAllAttachmentDrafts} from '../features/attachments/draftStore';
 import {forgetBackgroundOnSignOut} from '../design/background/store';
 import {clearEntryDrafts} from '../lib/entryDrafts';
@@ -284,6 +285,8 @@ export function SessionProvider({
     // 지워도 원장에 남지만 안 보낸 글은 이 기기에만 있다. 웹이 같은 자리에서 같은
     // 일을 한다(`clients/web/src/app/session.tsx`).
     clearAllDrafts();
+    // 보내지 못한 글도 같은 이유로 지운다(#5222): 안 보낸 글은 보낸 메시지보다 사적이고 이 기기에만 있다. 다음 사람의 같은 채널에서 되살아나지 않게.
+    clearAllFailedSends();
     // 알림이 걷어 간 시트의 글(`lib/entryDrafts.ts`)도 같은 이유로 지운다 (#5058). 메모리에만 있어 프로세스와 함께 사라지지만,
     // 같은 실행에서 같은 워크스페이스로 다른 사람이 이어 들어오면 앞 사람의 새 채널 이름·내 맥 질문이 그 사람의 시트에 나타난다.
     clearEntryDrafts();
