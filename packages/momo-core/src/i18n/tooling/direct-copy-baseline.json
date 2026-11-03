@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "7e9d305d549211cde22e3fb85852744c3694f26b",
+  "baselineHead": "75c937936708c32af8a5820e727018b00f9aec6c",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -173,7 +173,7 @@
     "clients/mobile/src/features/expressions/ExpressionProvider.tsx": 4,
     "clients/mobile/src/features/expressions/ExpressionText.tsx": 1,
     "clients/mobile/src/features/expressions/TeamExpressionPicker.tsx": 57,
-    "clients/mobile/src/features/expressions/expressionViews.ts": 10,
+    "clients/mobile/src/features/expressions/expressionViews.ts": 5,
     "clients/mobile/src/features/expressions/makeFlow.ts": 15,
     "clients/mobile/src/features/expressions/makePreviewModel.ts": 2,
     "clients/mobile/src/features/expressions/photoPicker.ts": 12,
@@ -543,7 +543,7 @@
     "clients/web/src/features/expressions/ExpressionStore.ts": 9,
     "clients/web/src/features/expressions/ExpressionText.tsx": 2,
     "clients/web/src/features/expressions/ExpressionsProvider.tsx": 5,
-    "clients/web/src/features/expressions/TeamExpressionsPanel.tsx": 106,
+    "clients/web/src/features/expressions/TeamExpressionsPanel.tsx": 103,
     "clients/web/src/features/expressions/cards.ts": 4,
     "clients/web/src/features/expressions/context.ts": 2,
     "clients/web/src/features/expressions/makeFixtures.ts": 6,
