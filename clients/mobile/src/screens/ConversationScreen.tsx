@@ -84,7 +84,6 @@ import {isRailReserved, nextRailDeadlineMs, useFireAt} from '../features/agents/
 import {activityRail} from '@momo/core/features/agents/activityRail';
 import {
   agentTurnsInChannel,
-  hasChannelTurn,
   useAgentWorkingSignals,
 } from '../features/agents/workingSignal';
 import {
@@ -533,11 +532,15 @@ export default function ConversationScreen({
   // ---- 이 채널에서 지금 열려 있는 턴 (goal RN-T2) ---------------------------
   // **초 단위로 다시 그리지 않는다**(#4620). 예전에는 열린 턴이 있는 동안 1초 시계를 이 화면에 마운트했다(`useTickingNow`) — 「3초째」
   // 글자를 보이려는 것이었고, 그 글자가 줄 수를 뒤집어 입력창 위의 대화를 흔들었다(#4613). 레일의 글자에는 시간이 없다. 시간이
-  // 사실을 바꾸는 순간은 둘뿐이라(`nextRailDeadlineMs`: 라이브 신호의 90초 만료 · 아무도 가져가지 않은 요청의 유예 마감) 그 순간에
-  // **한 번만** 다시 그린다. 그 밖의 변화는 스토어의 사실이 바뀌는 것이고 그때는 스토어가 이미 렌더를 일으킨다.
+  // 사실을 바꾸는 순간은 셋뿐이라(`nextRailDeadlineMs`: 라이브 신호의 90초 만료 · 아무도 가져가지 않은 요청의 유예 마감 · 대기 승인의 기한)
+  // 그 순간에 **한 번만** 다시 그린다. 그 밖의 변화는 스토어의 사실이 바뀌는 것이고 그때는 스토어가 이미 렌더를 일으킨다.
   //
-  // 만료 판정에는 **렌더의 `Date.now()`** 를 먹인다: 얼어붙은 시각은 만료를 영영 못 찾는다(`useTickingNow` 머리말의 교훈 그대로).
-  // 마감 시계가 도는 조건은 예전 1초 시계와 같다 — 이 채널에 턴이 있고 레일이 살아 있을 때(끊긴 동안의 화면은 시계를 더하지 않는다).
+  // 판정 시각(`evalNowMs`)은 **하나**다: 만료·유예·승인 기한을 가르는 모든 판정(`turns` · 레일)과 마감 계산이 같은 시각을 읽는다. 마감 계산이 더
+  // 늦은 시각을 읽으면 방금 지난 마감이 「없음」으로 계산돼 타이머가 걸리지 않고, 낡은 판정이 다음 사건까지 남는다. 얼어붙은 시각은 만료를 영영
+  // 못 찾으므로(`useTickingNow` 머리말) 사실이 바뀔 때마다(`signals`·승인 표·마감 신호) 새로 읽는다.
+  //
+  // 마감 시계는 **소켓이 끊겨도 건다**: 마감은 서버가 알려 준 사실(요청 시각·기한)과 신호의 나이에서 오는 것이지 소켓의 상태가 아니다. 끊긴 레일은
+  // 신호가 낡아 가는 때이고(90초), 아래 메시지의 예외 줄은 소켓과 무관하게 유예 마감에 선다 — 레일만 멈춰 있으면 같은 run을 두 자리가 다르게 말한다.
   const signals = useAgentWorkingSignals();
   const railLive = railStatus === 'connected';
   const [clockTick, setClockTick] = useState(0);
@@ -550,24 +553,24 @@ export default function ConversationScreen({
     waits: approvalWaitList,
     provided: approvalsProvided,
   } = usePendingApprovals(channelId);
-  const turns = useMemo(() => {
-    const now = Date.now();
-    return applyApprovalWaits(
-      agentTurnsInChannel(signals, channelId, now),
-      channelId,
-      approvalWaitList,
-      now,
-    );
-    // `clockTick`: 마감이 지났다는 신호다 — 값은 읽지 않고 새로 계산하게만 한다.
+  const evalNowMs = useMemo(
+    () => Date.now(),
+    // `clockTick`: 마감이 지났다는 신호다 — 값은 읽지 않고 새로 읽게만 한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [signals, channelId, approvalWaitList, clockTick]);
-  const fireClock = useCallback(() => setClockTick(tick => tick + 1), []);
-  useFireAt(
-    railLive && hasChannelTurn(signals, channelId)
-      ? nextRailDeadlineMs(turns, Date.now())
-      : null,
-    fireClock,
+    [signals, channelId, approvalWaitList, clockTick],
   );
+  const turns = useMemo(
+    () =>
+      applyApprovalWaits(
+        agentTurnsInChannel(signals, channelId, evalNowMs),
+        channelId,
+        approvalWaitList,
+        evalNowMs,
+      ),
+    [signals, channelId, approvalWaitList, evalNowMs],
+  );
+  const fireClock = useCallback(() => setClockTick(tick => tick + 1), []);
+  useFireAt(nextRailDeadlineMs(turns, evalNowMs, undefined, approvalWaitList), fireClock);
 
   // ---- 답이 나타날 자리 (#999) ---------------------------------------------
   //
@@ -2113,11 +2116,9 @@ export default function ConversationScreen({
       activityRail(
         railTurns,
         memberId => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
-        Date.now(),
+        evalNowMs,
       ),
-    // `clockTick`: 유예·만료 마감이 지났다는 신호다 — 값은 읽지 않고 새로 계산하게만 한다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [railTurns, directory, clockTick],
+    [railTurns, directory, evalNowMs],
   );
   const railReserved = isRailReserved({dmAgent, directory, channelId});
 

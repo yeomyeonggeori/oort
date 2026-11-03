@@ -26,10 +26,10 @@ import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
 import {GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
-import {font, line, slopTo, space, type Palette} from '../../design/tokens';
+import {font, line, space, type Palette} from '../../design/tokens';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {Avatar} from '../conversation/Avatar';
-import {railSlotHeight} from './railClock';
+import {RAIL_HIT_SLOP, railSlotHeight} from './railClock';
 import {RespondingDots} from './RespondingDots';
 import {RunLedgerSheet} from './RunLedgerSheet';
 
@@ -105,8 +105,8 @@ export function ActivityRailSlot({
           // 이름을 명시한다: 자식에 맡기면 줄이 잘렸을 때 잘린 글이 접근성 이름이 된다.
           accessibilityLabel={formatMessage('timeline.agentRail.open', {label: spoken})}
           onPress={onPress}
-          // 줄은 칸(16)을 채우고 손가락 높이 44는 슬롭으로 채운다. 아래 슬롭은 「작성 중」 줄(`pointerEvents="none"`) 위에 닿는다.
-          hitSlop={{top: slopTo(height), bottom: slopTo(height)}}
+          // 슬롭은 아래·옆으로만이다(`RAIL_HIT_SLOP`): 위로 넓히면 목록 마지막 행의 아랫부분 탭을 도크가 가로챈다.
+          hitSlop={RAIL_HIT_SLOP}
           style={({pressed}) => [styles.line, pressed && styles.pressed]}
           testID="composer-working">
           {live ? (

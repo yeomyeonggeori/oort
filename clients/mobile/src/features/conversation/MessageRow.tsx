@@ -279,7 +279,7 @@ import {useLongPress} from './useLongPress';
 import {turnRecordRunId} from '@momo/core/features/timeline/cascadeModel';
 import {MemoryProposalCards} from '../memory/MemoryProposalCard';
 import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
-import {MessageRunStatus} from '../agents/MessageRunStatus';
+import {MessageRunStatus, mayHaveException} from '../agents/MessageRunStatus';
 import type {TriggerChip} from '@momo/core/features/agents/triggerChip';
 import {useOpenDecisionStage} from '../decisionStage/openDecisionStage';
 import {RequestStatusChip} from '../agents/RequestStatusChip';
@@ -3218,7 +3218,9 @@ function MessageRowInner({
       // thread anchor and the resend button from each becoming their own stop —
       // the same count the web client cut from 6 to 1. Touch is unaffected:
       // grouping changes the accessibility tree, not the responder tree.
-      accessible={!(requestChip || requestThinking || (presentation.card?.kind === 'approval' && hasRequestBundle(presentation.card)))}
+      // 칩이 **실제로 서는** 행(머리 줄이 있는 행)과 예외 줄이 설 수 있는 행(줄 안에 설정·취소 단추가 선다)은 한 덩이로 합치지 않는다 — 합치면 그 단추가
+      // 보조기술에서 사라진다. 이어지는 행의 칩은 그려지지 않으므로(#4620) 칩만으로는 합침을 풀지 않는다.
+      accessible={!((startsGroup && requestChip) || (runStatus !== undefined && runStatus.some(mayHaveException)) || requestThinking || (presentation.card?.kind === 'approval' && hasRequestBundle(presentation.card)))}
       accessibilityLabel={[
         rowAccessibilityLabel({
         message: {...message, body: spokenExpression(message.body ?? '')},

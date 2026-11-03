@@ -21,11 +21,12 @@ import {
   channelHasAgent,
   isRailReserved,
   nextRailDeadlineMs,
+  RAIL_HIT_SLOP,
   railSlotHeight,
   useFireAt,
 } from '../src/features/agents/railClock';
 import {CONV} from '../src/features/conversation/convDesign';
-import {TypingBar} from '../src/features/conversation/TypingBar';
+import {TYPING_RESERVE, TypingBar} from '../src/features/conversation/TypingBar';
 import {line} from '../src/design/tokens';
 import {drainRender} from './testkit';
 
@@ -136,7 +137,7 @@ describe('입력창 레일 칸 (#4620 A)', () => {
       agentMember(MORAE, '쉬는봇', ['other-channel']),
     ]);
     expect(isRailReserved({dmAgent: null, directory: human, channelId: CHANNEL})).toBe(false);
-    expect(isRailReserved({dmAgent: {id: DAL}, directory: human, channelId: CHANNEL})).toBe(true);
+    expect(isRailReserved({dmAgent: {kind: 'agent'}, directory: human, channelId: CHANNEL})).toBe(true);
     expect(channelHasAgent(DIRECTORY, CHANNEL.toUpperCase())).toBe(true);
     const inactive = makeDirectory([{...agentMember(DAL, '꺼진봇'), status: 'suspended'} as RosterMember]);
     expect(channelHasAgent(inactive, CHANNEL)).toBe(false);
@@ -188,11 +189,25 @@ describe('입력창 레일 글 (#4620 A)', () => {
     expect(screen.getByTestId('composer-typing', {includeHiddenElements: true}).props.pointerEvents).toBe('none');
   });
 
-  it('누르는 면: 줄은 칸을 채우고 손가락 높이 44는 슬롭으로 채운다', () => {
+  it('누르는 면: 슬롭은 위로 넓히지 않는다 — 도크가 목록의 뒤 형제라 위로 넓히면 마지막 행의 아랫부분 탭을 레일이 가로챈다', () => {
     render(slot(railOf([working()])));
-    const hit = screen.getByTestId('composer-working').props.hitSlop as {top: number; bottom: number};
-    const height = railSlotHeight(Dimensions.get('window').fontScale);
-    expect(height + hit.top + hit.bottom).toBeGreaterThanOrEqual(44);
+    const hit = screen.getByTestId('composer-working').props.hitSlop as {
+      top: number;
+      bottom: number;
+      left: number;
+      right: number;
+    };
+    expect(hit).toEqual(RAIL_HIT_SLOP);
+    // 위: 0. 목록 마지막 행으로 한 점도 넘지 않는다.
+    expect(hit.top).toBe(0);
+    // 아래: 「작성 중」 예약 줄까지만(그 아래는 컴포저 루트가 먼저 받아 닿지 않는다) — 컴포저 알약에는 닿지 않는다.
+    expect(hit.bottom).toBe(TYPING_RESERVE);
+    expect(hit.bottom).toBeLessThanOrEqual(CONV.listPillGap - CONV.conversationTail - CONV.composerTopAir);
+    // 옆: 줄의 글 폭이 짧아 넓힌다.
+    expect(hit.left).toBeGreaterThan(0);
+    expect(hit.right).toBeGreaterThan(0);
+    // 알려진 한계의 숫자: 세로 누르는 면은 44보다 작다(글자 배율 1에서 칸 16 + 12).
+    expect(railSlotHeight(1) + hit.top + hit.bottom).toBe(28);
   });
 });
 
@@ -237,6 +252,15 @@ describe('초 단위 갱신이 없다 (#4620 A, #4613의 뿌리)', () => {
     expect(nextRailDeadlineMs([live, untaken], NOW)).toBe(NOW + IDLE_CUTOFF_MS + 1);
     // 서버가 답한 일하는 턴은 우리 시계로 만료하지 않는다(ADR-0200 D1) — 마감이 없다.
     expect(nextRailDeadlineMs([working()], NOW)).toBeNull();
+    // 대기 승인의 기한도 마감이다: 코어는 `expiresAtMs > now`인 승인만 기다림으로 세므로 기한에 승인 낱말이 걷힌다.
+    expect(nextRailDeadlineMs([working()], NOW, undefined, [{expiresAtMs: NOW + 7_000}])).toBe(NOW + 7_000);
+    expect(
+      nextRailDeadlineMs([live], NOW, undefined, [{expiresAtMs: NOW + 7_000}, {expiresAtMs: NOW + 3_000}, {}]),
+    ).toBe(NOW + 3_000);
+    // 이미 지난 기한·기한 없는 승인·유한하지 않은 값은 마감이 아니다.
+    expect(
+      nextRailDeadlineMs([working()], NOW, undefined, [{expiresAtMs: NOW - 1}, {expiresAtMs: NOW}, {}, {expiresAtMs: Number.NaN}]),
+    ).toBeNull();
     // 이미 지난 마감은 다시 부르지 않는다(경계 포함).
     expect(nextRailDeadlineMs([untaken], NOW + 5 * 60_000)).toBeNull();
     expect(nextRailDeadlineMs([live], NOW + IDLE_CUTOFF_MS + 1)).toBeNull();

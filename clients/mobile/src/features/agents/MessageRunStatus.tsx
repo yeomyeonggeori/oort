@@ -137,8 +137,9 @@ export function MessageRunStatus({
 /**
  * 줄을 세울 수 있는 run인가. 그 밖의 phase(가져감·작업 중·승인·성공)는 훅도 읽기도 없이 건너뛴다. `cancelled`는 줄을 세우지 않지만
  * **영수증이 남으려면** 대기에서 취소로 넘어가는 동안 같은 행이 마운트된 채여야 해서 포함한다(예외가 없으면 아무것도 그리지 않는다).
+ * 행(`MessageRow`)도 이것을 읽는다: 줄 안에 누르는 단추(설정·취소)가 서므로 줄이 설 수 있는 행은 한 덩이 접근성 원소로 합치지 않는다.
  */
-function mayHaveException(run: AgentRunProgress): boolean {
+export function mayHaveException(run: AgentRunProgress): boolean {
   return (
     run.phase === 'queued' ||
     run.phase === 'failed' ||
@@ -162,16 +163,16 @@ interface RowProps {
  * 아직 아무도 가져가지 않은 run의 줄: 깨우는 신호의 원장과 서버의 생존 판정을 읽어 이유를 더한다. 읽기가 필요한 것은 이 phase뿐이라
  * 나머지 phase의 줄은 세션도 질의도 모른다(`RunExceptionView`).
  */
-function QueuedExceptionRow(props: RowProps): React.JSX.Element | null {
+function QueuedExceptionRow(row: RowProps): React.JSX.Element | null {
   const {workspaceId} = useSession();
-  const key = props.progress.id.toLowerCase();
-  const wants = wantsDoorbellFact(props.progress);
+  const key = row.progress.id.toLowerCase();
+  const wants = wantsDoorbellFact(row.progress);
   const ledger = useQuery({...runLedgerQueryOptions(workspaceId, key), enabled: wants});
   useRunLedgerFrames(wants ? key : null, ledger.refetch);
   const doorbell = useMemo(() => doorbellFactOf(ledger.data?.events), [ledger.data]);
   // 서버의 생존 판정은 아직 아무도 가져가지 않은 요청에만 이유를 더한다(「연결이 꺼져 있을 수 있어요」).
-  const liveness = useAgentLiveness(props.progress.agentMemberId);
-  return <RunExceptionView {...props} doorbell={doorbell} liveness={liveness.liveness} />;
+  const liveness = useAgentLiveness(row.progress.agentMemberId);
+  return <RunExceptionView {...row} doorbell={doorbell} liveness={liveness.liveness} />;
 }
 
 function RunExceptionView({

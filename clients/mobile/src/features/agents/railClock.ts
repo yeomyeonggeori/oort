@@ -1,15 +1,19 @@
 import {
   IDLE_CUTOFF_MS,
   type AgentWorkingSignal,
+  type ApprovalWait,
 } from '@momo/core/features/agents/workingSignal';
 import {
   isUntakenHumanRun,
   uncollectedDeadlineMs,
 } from '@momo/core/features/agents/runWaiting';
+import type {RosterMember} from '@momo/core/lib/api';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import {useEffect} from 'react';
 import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
+import {space} from '../../design/tokens';
 import {CONV} from '../conversation/convDesign';
+import {TYPING_RESERVE} from '../conversation/TypingBar';
 
 // =============================================================================
 // 입력창 레일의 시계와 칸 (#4620, #4577 권장 A). 판정·낱말은 코어(`activityRail`)이고, 이 파일은 폰이 그것을 **언제
@@ -25,15 +29,20 @@ import {CONV} from '../conversation/convDesign';
 // =============================================================================
 
 /**
- * 시간이 레일의 사실을 바꾸는 **가장 이른 순간**(ms). 없으면 null.
+ * 시간이 레일의 사실을 바꾸는 **가장 이른 순간**(ms). 없으면 null. 세 가지다:
  *
- * 만료(`isStaleSignal`)는 서버가 답한 턴에는 걸리지 않는다(서버가 끝낸다, ADR-0200 D1). 경계는 코어와 같다:
- * 만료는 `now - last > 90초`라 마지막 활동 + 90초 + 1ms에, 유예는 `now >= 마감`이라 마감에 바뀐다.
+ *   - 라이브 신호의 만료: 서버가 답한 턴에는 걸리지 않는다(서버가 끝낸다, ADR-0200 D1). 경계는 코어와 같다 — `now - last > 90초`라 마지막 활동 + 90초 + 1ms.
+ *   - 아무도 가져가지 않은 요청의 유예 마감(`uncollectedDeadlineMs`): `now >= 마감`이라 마감에.
+ *   - 대기 승인의 기한(`waits`): 코어 `applyApprovalWaits`는 `expiresAtMs > now`인 승인만 기다림으로 세므로 기한에 승인 낱말이 걷힌다. 예전 5초 격자 시계는
+ *     이 전환을 5초 안에 잡았다 — 시계를 걷은 지금은 이 마감이 그 몫이다.
+ *
+ * 타이머가 경계에서 1ms 일찍 불려도 다음 계산이 같은 마감을 다시 건다(스스로 바로잡는다).
  */
 export function nextRailDeadlineMs(
   turns: readonly AgentWorkingSignal[],
   nowMs: number,
   graceMs?: number,
+  waits: readonly Pick<ApprovalWait, 'expiresAtMs'>[] = [],
 ): number | null {
   let next: number | null = null;
   const consider = (at: number): void => {
@@ -45,6 +54,9 @@ export function nextRailDeadlineMs(
     } else if (isUntakenHumanRun(turn.server)) {
       consider(uncollectedDeadlineMs(turn.server.queuedAtMs, undefined, graceMs));
     }
+  }
+  for (const wait of waits) {
+    if (wait.expiresAtMs !== undefined && Number.isFinite(wait.expiresAtMs)) consider(wait.expiresAtMs);
   }
   return next;
 }
@@ -87,7 +99,7 @@ export function channelHasAgent(directory: Directory, channelId: string): boolea
  * 활동 중인 에이전트 멤버가 이 채널에 있을 때. 사람만 있는 대화는 칸도 없고 마지막 행 → 알약 간격은 그대로 20이다.
  */
 export function isRailReserved(options: {
-  dmAgent: unknown | null;
+  dmAgent: Pick<RosterMember, 'kind'> | null;
   directory: Directory;
   channelId: string;
 }): boolean {
@@ -102,3 +114,19 @@ export function isRailReserved(options: {
 export function railSlotHeight(fontScale: number): number {
   return CONV.agentRailSlot * Math.min(fontScale, BAR_CONTROL_MAX_SCALE);
 }
+
+/**
+ * 레일 줄의 손가락 슬롭. **위로는 넓히지 않는다**: RN(Fabric)은 자식의 `hitSlop`을 부모의 겹침 영역에 합치고(`YogaLayoutableShadowNode`의
+ * contentBounds) 도크는 목록보다 **뒤 형제**라서, 겹친 구간의 탭을 도크가 먼저 받는다 — 위로 넓히면 목록 마지막 행의 아랫부분을 눌러도 시트가 열린다
+ * (웹이 같은 가로챔 때문에 24에서 멈춘 이유, design-review r1 H3). 아래로는 「작성 중」 예약 줄(`TYPING_RESERVE`, `pointerEvents="none"`이라 터치가
+ * 지나간다)까지만: 그 아래는 컴포저 루트(뒤 형제)가 먼저 받아 슬롭이 닿지 않는다. 좌우는 줄의 글 폭이 짧아(이름 하나) 넓힌다 — 옆에 누를 것이 없다.
+ *
+ * 합친 세로 누르는 면 = 칸 + `TYPING_RESERVE`(글자 배율 1에서 28)로 손가락 높이 44(`TOUCH_TARGET`)보다 작다. **알려진 한계**다(웹 24와 같은 종류).
+ * 더 키우려면 도크 위 세로 자리를 늘려야 하고, 그것은 owner가 줄인 간격(#4264)을 되돌리는 결정이다.
+ */
+export const RAIL_HIT_SLOP = {
+  top: 0,
+  bottom: TYPING_RESERVE,
+  left: space.md,
+  right: space.md,
+} as const;

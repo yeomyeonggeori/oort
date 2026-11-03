@@ -825,6 +825,37 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
     // 화면이 자기 자신 위에 쌓인다.
     expect(bar).not.toHaveTextContent(/파일을 지울까요/);
   });
+  it('소켓이 끊긴 채로도 아무도 가져가지 않은 요청이 유예(5분)를 넘으면 레일에서 빠진다 — 마감은 소켓이 아니라 서버가 알려 준 사실에서 온다 (#4620)', async () => {
+    await openGeneral();
+    // 마감까지 1.5초 남은 대기 run(서버 사실이 있는 신호: 우리 시계로 만료되지 않는다).
+    act(() =>
+      markAgentWorking({
+        memberId: KIM_AGENT,
+        channelId: GENERAL,
+        state: 'queued',
+        source: 'run',
+        runId: RUN,
+        headlines: [],
+        lastActivityAtMs: Date.now(),
+        server: {
+          phase: 'queued',
+          leaseState: 'none',
+          queuePosition: 1,
+          aheadTotal: 0,
+          queuedAtMs: Date.now() - 5 * 60_000 + 1_500,
+        },
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('composer-working-text')).toHaveTextContent(new RegExp(RAIL_WORD.received)),
+    );
+    await cutSocket();
+    await waitFor(() => expect(screen.getByTestId('composer-working-stale')).toBeTruthy());
+    // 아래 메시지의 예외 줄(소켓과 무관하게 마감에 선다)과 같은 순간에 레일도 이 run을 뺀다.
+    await waitFor(() => expect(screen.queryByTestId('composer-working')).toBeNull(), {timeout: 4_000});
+    expect(screen.getByTestId('composer-rail')).toBeTruthy();
+  });
+
   // ---- 승인 원장이 레일보다 이긴다 (#5066, 검증 줄 1회차 H2) -----------------------------------
   //
   // 서버는 승인에 걸린 run 을 DB 에서는 승인 대기로 세우지만(`park_run_for_approval_in_tx`) 레일 프레임으로는 알리지 않는다
@@ -885,6 +916,20 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
       });
       expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(RAIL_WORD.working));
       expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
+    });
+
+    it('기한이 지나는 순간 승인 낱말이 걷힌다 — 다른 사건이 없어도(예전 5초 격자 시계의 몫을 마감 시계가 이어받는다, #4620)', async () => {
+      await workingByFrames();
+      seedLedger([pending({expiresAtMs: Date.now() + 1_200})]);
+      await waitFor(() =>
+        expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(RAIL_WORD.approval)),
+      );
+      // 기한이 지나면 프레임이 말하던 「작업 중」으로 돌아온다. 이 사이에 소켓 프레임도 원장 갱신도 없다.
+      await waitFor(
+        () => expect(screen.getByTestId('composer-working')).toHaveTextContent(new RegExp(RAIL_WORD.working)),
+        {timeout: 3_000},
+      );
+      expect(screen.getByTestId('composer-working')).not.toHaveTextContent(new RegExp(RAIL_WORD.approval));
     });
 
     it('다른 에이전트의 승인·다른 채널의 승인·대기가 아닌 승인은 이 에이전트의 턴을 바꾸지 않는다', async () => {
