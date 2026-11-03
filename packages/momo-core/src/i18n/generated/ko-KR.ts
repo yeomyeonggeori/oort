@@ -3570,6 +3570,44 @@ export const catalog: MessageCatalog = {
       "value": "키를 확인하는 중이에요."
     }
   ],
+  "timeline.agentRail.open": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " 일하는 에이전트 보기"
+    }
+  ],
+  "timeline.agentRail.openActivity": [
+    {
+      "type": 0,
+      "value": "활동 보기"
+    }
+  ],
+  "timeline.agentRail.openRecord": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 작업 기록 열기"
+    }
+  ],
+  "timeline.agentRail.sheetClose": [
+    {
+      "type": 0,
+      "value": "일하는 에이전트 닫기"
+    }
+  ],
+  "timeline.agentRail.sheetTitle": [
+    {
+      "type": 0,
+      "value": "일하는 에이전트"
+    }
+  ],
   "timeline.approvalExpiry.soon": [
     {
       "type": 0,
@@ -3604,6 +3642,22 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "축소"
+    }
+  ],
+  "timeline.runException.open": [
+    {
+      "type": 1,
+      "value": "text"
+    },
+    {
+      "type": 0,
+      "value": ". 작업 기록 열기"
+    }
+  ],
+  "timeline.runException.settings": [
+    {
+      "type": 0,
+      "value": "에이전트 설정 열기"
     }
   ],
   "timeline.send.discard": [
@@ -3735,6 +3789,12 @@ export const catalog: MessageCatalog = {
       "type": 2,
       "value": "count",
       "style": null
+    }
+  ],
+  "timeline.triggerChip.jumpHint": [
+    {
+      "type": 0,
+      "value": "답 메시지로 이동"
     }
   ],
   "timeline.unfurl.label": [
