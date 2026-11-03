@@ -12,6 +12,7 @@ import {
 import { AvatarWithPresence } from "@/features/presence/HumanPresence";
 import { useHumanPresenceDot } from "@/features/presence/useHumanPresenceDot";
 import { useSession } from "@/app/session";
+import { useOffline } from "@/features/common/useOffline";
 import { useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Button } from "@/design/ui/button";
 import { ListboxSelect } from "@/design/ui/listbox-select";
@@ -146,7 +147,7 @@ function ReadyProfile({
   directory: Directory;
   close: () => void;
 }) {
-  const { session, connStatus, workspaceId } = useSession();
+  const { session, workspaceId } = useSession();
   const labels = useRoleLabels(workspaceId);
   const { pendingMemberId, error, openDm } = useOpenDm();
   const roleChange = useChangeWorkspaceRole();
@@ -169,7 +170,7 @@ function ReadyProfile({
   const presence = useHumanPresenceDot(member);
   const declared = presence?.label ?? null;
   const availability = dmAvailability(member, session.member.id);
-  const offline = connStatus === "disconnected";
+  const offline = useOffline();
   const opening = pendingMemberId === member.id;
 
   async function startDm() {
@@ -332,7 +333,8 @@ function MemberProfilePanel({
   target: MemberProfileTarget;
   close: () => void;
 }) {
-  const { workspaceId, connStatus } = useSession();
+  const { workspaceId } = useSession();
+  const offline = useOffline();
   const query = useDirectory(workspaceId);
   const member = memberFor(query.directory, target.memberId);
   const hasNoCachedRoster = query.directory.members.length === 0;
@@ -341,7 +343,7 @@ function MemberProfilePanel({
     pending: query.isPending,
     failed: query.error !== null,
     hasCachedRoster: !hasNoCachedRoster,
-    offline: connStatus === "disconnected",
+    offline,
   });
   const title = member ? `${member.displayName} 프로필` : "멤버 프로필";
 
@@ -371,7 +373,7 @@ function MemberProfilePanel({
         />
       ) : (
         <>
-          {connStatus === "disconnected" && (
+          {offline && (
             <InlineBanner
               tone="neutral"
               message="연결 끊김, 이 멤버의 마지막 프로필을 찾지 못했습니다."
