@@ -534,6 +534,7 @@ export const messageKeys = [
   "timeline.agentRail.openRecord",
   "timeline.agentRail.sheetClose",
   "timeline.agentRail.sheetTitle",
+  "timeline.approvalExpiry.soon",
   "timeline.lightbox.copied",
   "timeline.lightbox.copy",
   "timeline.lightbox.copyFailed",
@@ -1320,6 +1321,7 @@ export const argumentSpecs = {
   },
   "timeline.agentRail.sheetClose": {},
   "timeline.agentRail.sheetTitle": {},
+  "timeline.approvalExpiry.soon": {},
   "timeline.lightbox.copied": {},
   "timeline.lightbox.copy": {},
   "timeline.lightbox.copyFailed": {},
@@ -2072,6 +2074,7 @@ export interface MessageArgs {
   "timeline.agentRail.openRecord": { name: string };
   "timeline.agentRail.sheetClose": Record<string, never>;
   "timeline.agentRail.sheetTitle": Record<string, never>;
+  "timeline.approvalExpiry.soon": Record<string, never>;
   "timeline.lightbox.copied": Record<string, never>;
   "timeline.lightbox.copy": Record<string, never>;
   "timeline.lightbox.copyFailed": Record<string, never>;

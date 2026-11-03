@@ -17,6 +17,9 @@ import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
 import type { Message } from "@momo/core/lib/api";
 import { readDraft } from "@/features/chat/draftStore";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import { koreanLocaleForTest } from "@/i18n/koreanLocaleForTest";
+import type { AppLocale } from "@/i18n/localeStore";
 import { AgentCard } from "./AgentCard";
 
 // =============================================================================
@@ -118,9 +121,11 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+let korean: AppLocale;
 
-beforeAll(() => {
+beforeAll(async () => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  korean = await koreanLocaleForTest();
 });
 beforeEach(() => {
   vi.useFakeTimers({ now: T0, toFake: ["Date", "setTimeout", "clearTimeout"] });
@@ -152,11 +157,14 @@ function mount(props: Record<string, unknown>): HTMLElement {
   root = createRoot(host);
   act(() => {
     root?.render(
-      createElement(
-        SessionProvider,
-        { value: sessionValue() },
-        createElement(AgentCard, { card, directory: DIRECTORY })
-      )
+      createElement(LocaleProvider, {
+        locale: korean,
+        children: createElement(
+          SessionProvider,
+          { value: sessionValue() },
+          createElement(AgentCard, { card, directory: DIRECTORY })
+        ),
+      })
     );
   });
   return host;
@@ -176,10 +184,34 @@ describe("승인 카드 기한 (#3738)", () => {
 
     const warned = mount(actionProps("channel.create", CHANNEL_CREATE_ROWS, "admin", T0 + 9 * MIN + 59_000));
     expect(q(warned, "approval-note-expiry-soon")?.textContent).toBe(
-      "10분 안에 만료돼요. 결정하지 않으면 에이전트가 다시 제안해야 해요."
+      "결정하지 않으면 에이전트가 다시 제안해야 해요."
     );
     // 경고는 결정을 막지 않는다 — 컨트롤은 그대로 서 있다.
     expect(q(warned, "approval-approve")).not.toBeNull();
+  });
+
+  // 화면 검수 3회차 L7: 승인 카드 한 장이 남은 시간을 두 줄에서 다르게 말했다(경고 줄 「1분 안에」 · 조용한 줄 「10분 안에」).
+  // 시간은 조용한 줄(`remainingTime`) 한 곳이 말한다. 경고 줄은 놓쳤을 때의 결과만 말한다. 고정 문장 비교가 아니라
+  // **카드 글에서 시간 말이 몇 번 나오는가**를 센다: 시간을 말하는 줄이 하나 더 생기면 숫자가 같아도 붉어진다.
+  const TIME_STATEMENT = /\d+\s*분 안에 만료돼요|\d+\s*(?:분|시간|일) 남음/g;
+  const timeStatements = (el: HTMLElement) => el.textContent?.match(TIME_STATEMENT) ?? [];
+
+  it.each([
+    ["30초", 30_000],
+    ["1분", MIN],
+    ["5분", 5 * MIN],
+    ["9분 59초", 9 * MIN + 59_000],
+    ["10분", 10 * MIN],
+  ])("마지막 10분 안(%s 남음)에도 카드는 남은 시간을 한 줄에서만 말한다 (L7)", (_label, left) => {
+    const el = mount(actionProps("channel.create", CHANNEL_CREATE_ROWS, "admin", T0 + left));
+    // 양성 대조: 경고 줄이 실제로 서 있고 조용한 줄도 서 있다. 둘 중 하나가 없으면 이 시험은 아무것도 재지 않는다.
+    const warning = q(el, "approval-note-expiry-soon");
+    expect(warning).not.toBeNull();
+    expect(q(el, "request-bundle-details")?.textContent).toContain("자세히");
+    // 시간 말이 정확히 하나이고 그것이 조용한 줄의 정본 문장이다(푸시·폰·결정 무대와 같은 문장).
+    expect(timeStatements(el)).toEqual(["10분 안에 만료돼요"]);
+    // 경고 줄은 시간 없이 결과만 말한다.
+    expect(warning?.textContent).toBe("결정하지 않으면 에이전트가 다시 제안해야 해요.");
   });
 
   it("시간이 흘러 경계를 지나면 사람이 새로고침하지 않아도 경고가 서고 이어서 만료된다", () => {
@@ -191,11 +223,14 @@ describe("승인 카드 기한 (#3738)", () => {
     });
     expect(q(el, "approval-note-expiry-soon")).not.toBeNull();
 
-    // 분이 줄 때 숫자 하나만 움직인다.
+    // 경고 중에도 줄어드는 숫자는 없다: 시간 말은 조용한 줄의 정본 문장 하나뿐이다(#5174 L7).
     act(() => {
       vi.advanceTimersByTime(5 * MIN);
     });
-    expect(q(el, "approval-note-expiry-soon")?.textContent).toContain("5분 안에");
+    expect(q(el, "approval-note-expiry-soon")?.textContent).toBe(
+      "결정하지 않으면 에이전트가 다시 제안해야 해요."
+    );
+    expect(timeStatements(el)).toEqual(["10분 안에 만료돼요"]);
 
     act(() => {
       vi.advanceTimersByTime(5 * MIN);

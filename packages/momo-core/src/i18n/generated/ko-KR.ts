@@ -3608,6 +3608,12 @@ export const catalog: MessageCatalog = {
       "value": "일하는 에이전트"
     }
   ],
+  "timeline.approvalExpiry.soon": [
+    {
+      "type": 0,
+      "value": "결정하지 않으면 에이전트가 다시 제안해야 해요."
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,
@@ -4073,7 +4079,7 @@ export const catalog: MessageCatalog = {
     },
     {
       "type": 0,
-      "value": "번만 줄로 보여요. 위 합계는 모두 센 값이에요."
+      "value": "줄만 보여요. 위 합계는 모두 센 값이에요."
     }
   ],
   "timeline.workRecord.durationMinutes": [
