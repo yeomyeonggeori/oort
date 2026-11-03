@@ -199,8 +199,11 @@ async function installPage(page) {
       close() { this.readyState = 3; this.onclose?.(new CloseEvent("close", { code: 1000 })); }
     }
     window.WebSocket = CaptureSocket;
-    // 데스크탑 셸 흉내(`__TAURI_INTERNALS__`)는 두지 않는다: 이 레인은 실패한 요청이 브라우저의 fetch 로 나가야 응답 없음
-    // (NetworkError)과 서버 거절(ApiError)을 가를 수 있다. 데스크탑 번들은 웹 번들과 같다.
+    // 데스크탑 셸 흉내(`__TAURI_INTERNALS__`)는 이 레인에 필요 없어 두지 않는다(5210 레인과 다른 점). 데스크탑 번들은 웹 번들과 같고,
+    // 이 레인은 일반 웹으로 돈다. 실제 Tauri 앱·WebKit(데스크탑 셸 엔진)은 이 레인이 재지 않는다(미검증).
+    //
+    // 주의(장면 순서): 서버가 **거절한 응답**(400)도 「서버가 답했다」 신호라서, 앞서 네트워크로 못 보낸 행이 있으면 자동 재전송을
+    // 깨운다. 그래서 장면은 거절된 글을 먼저 만들고 네트워크 실패 글을 뒤에 만든다(`settleFailed`가 재시도가 가라앉기를 기다린다).
   });
 }
 
