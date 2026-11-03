@@ -425,6 +425,21 @@ describe('위 필 「안읽음으로」', () => {
     expect(topPill()).toBeNull();
   });
 
+  it('대화에 서지 않는 스레드 답글은 아래 필의 새 메시지 수에 들지 않는다 (#4888)', async () => {
+    // 새 서버(요약에 참여자 키)에서 남이 스레드로만 단 답글은 대화에 그려지지 않는다 — 안 보이는 행을 세면 「새 메시지 1개」가 헛 신호다.
+    const root = {...HISTORY[0], thread: {reply_count: 1, last_reply_seq: 9, last_reply_at: 1, participant_ids: [OTHER], participant_count: 1}};
+    const base = [root, ...HISTORY.slice(1)];
+    const {rerender} = mount({messages: base});
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    expect(pillSentence('jump-latest')).toBe('최신 메시지로 이동');
+    rerender({messages: [...base, {...message(9), rootId: root.id}]});
+    expect(pillSentence('jump-latest')).toBe('최신 메시지로 이동');
+    // 같은 자리에 대화에도 보낸 답글이면 대화에 서므로 센다.
+    rerender({messages: [...base, {...message(9), rootId: root.id, alsoInChannel: true}]});
+    expect(pillSentence('jump-latest')).toBe('새 메시지 1개 보기');
+  });
+
   it('N 이 움직여도(새 메시지 도착) 래치된 위 필은 다시 서지 않는다 — 위 N 은 동결이다', async () => {
     const {rerender} = mount();
     await settleAtBottom();

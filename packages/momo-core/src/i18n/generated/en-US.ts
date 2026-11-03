@@ -3130,6 +3130,18 @@ export const catalog: MessageCatalog = {
       "value": "date"
     }
   ],
+  "reply.alsoInChannel.label": [
+    {
+      "type": 0,
+      "value": "Also send to the conversation"
+    }
+  ],
+  "reply.alsoInChannel.unsupported": [
+    {
+      "type": 0,
+      "value": "This server does not support “Also send to the conversation” yet. Turn it off and send again."
+    }
+  ],
   "reply.card.cancel": [
     {
       "type": 0,
@@ -3186,6 +3198,44 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Send reply"
+    }
+  ],
+  "reply.home.excerptDeleted": [
+    {
+      "type": 0,
+      "value": "Deleted message"
+    }
+  ],
+  "reply.home.header": [
+    {
+      "type": 0,
+      "value": "Replied in "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s thread"
+    }
+  ],
+  "reply.home.headerSelf": [
+    {
+      "type": 0,
+      "value": "Replied in my thread"
+    }
+  ],
+  "reply.home.headerUnknown": [
+    {
+      "type": 0,
+      "value": "Replied in a thread"
+    }
+  ],
+  "reply.home.open": [
+    {
+      "type": 0,
+      "value": "Open the thread this reply is in"
     }
   ],
   "settings.aiLimits.ceilingSearches": [
