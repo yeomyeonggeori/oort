@@ -29,7 +29,8 @@ import { useRecheckWhenElapsed } from "./useRecheckWhenElapsed";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
-import { LoadFailureNote, loadCauseOf } from "@/features/common/LoadFailureBox";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 
 // Design Read: settings for internal team users on web+Tauri, density 6/10,

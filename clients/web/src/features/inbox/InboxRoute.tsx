@@ -10,7 +10,8 @@ import {
   Skeleton,
 } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
-import { LoadFailureBox, loadCauseOf, loadFailureSentence } from "@/features/common/LoadFailureBox";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf, loadFailureSentence } from "@/features/common/loadFailure";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { Button } from "@/design/ui/button";

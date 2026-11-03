@@ -51,7 +51,8 @@ import {
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
-import { LoadFailureBox, LoadFailureLine, loadCauseOf } from "@/features/common/LoadFailureBox";
+import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { UpdateButton } from "@/features/updates/UpdateButton";
 import { SidebarRow, SidebarSection } from "./SidebarRow";

@@ -139,14 +139,25 @@ describe("에이전트 허브: 불러오기 실패 (#5242)", () => {
     await waitFor(() => expect(vi.mocked(fetchRoster).mock.calls.length).toBeGreaterThan(reads));
   });
 
-  it("프로필을 못 읽으면 원인 상자가 서고(이름·사진 카드는 그대로), 다시 시도가 프로필을 다시 읽는다", async () => {
-    vi.mocked(fetchAgentProfile).mockRejectedValue(new ApiError(500, "boom", "internal"));
-    mount();
-    await waitFor(() => expect(byId("agent-hub-profile-error")).not.toBeNull());
-    const box = expectBox(byId("agent-hub-profile-error"), "에이전트 프로필을 불러오지 못했어요", "", REASON_UNKNOWN);
-    const reads = vi.mocked(fetchAgentProfile).mock.calls.length;
-    act(() => fireEvent.click(box.querySelector("button") as HTMLElement));
-    await waitFor(() => expect(vi.mocked(fetchAgentProfile).mock.calls.length).toBeGreaterThan(reads));
+  it("프로필을 못 읽으면 원인 상자가 서고(이름·사진 카드는 그대로) 이유가 원인을 따라가며, 다시 시도가 프로필을 다시 읽는다", async () => {
+    const cases: [Error, string, string][] = [
+      [new NetworkError("unreachable", 15_000), "serverUnreachable", REASON_SERVER],
+      [new ApiError(500, "boom", "internal"), "", REASON_UNKNOWN],
+    ];
+    for (const [error, cause, reason] of cases) {
+      vi.mocked(fetchAgentProfile).mockReset().mockRejectedValue(error);
+      mount();
+      await waitFor(() => expect(byId("agent-hub-profile-error")).not.toBeNull());
+      const box = expectBox(byId("agent-hub-profile-error"), "에이전트 프로필을 불러오지 못했어요", cause, reason);
+      const reads = vi.mocked(fetchAgentProfile).mock.calls.length;
+      act(() => fireEvent.click(box.querySelector("button") as HTMLElement));
+      await waitFor(() => expect(vi.mocked(fetchAgentProfile).mock.calls.length).toBeGreaterThan(reads));
+      act(() => root?.unmount());
+      host?.remove();
+      document.body.innerHTML = "";
+      root = null;
+      host = null;
+    }
   });
 
   it("작업 이력을 못 읽으면 원인 상자가 서고, 다시 시도가 이력을 다시 읽는다", async () => {
@@ -165,14 +176,14 @@ describe("에이전트 허브: 불러오기 실패 (#5242)", () => {
     vi.mocked(fetchAgentRunSummaries).mockResolvedValue({
       runs: [{ id: RUN, channelId: A1, triggerSummary: "주간 보고 정리", status: "succeeded", createdAtMs: 1_800_000_000_000, updatedAtMs: 1_800_000_000_000 }],
     });
-    vi.mocked(fetchAgentRunDetail).mockRejectedValue(new ApiError(500, "boom", "internal"));
+    vi.mocked(fetchAgentRunDetail).mockRejectedValue(new NetworkError("unreachable", 15_000));
     mount();
     await waitFor(() => expect(byId("agent-hub-tab-history")).not.toBeNull());
     act(() => fireEvent.click(byId("agent-hub-tab-history") as HTMLElement));
     await waitFor(() => expect(byId("agent-history-row")).not.toBeNull());
     act(() => fireEvent.click(byId("agent-history-row") as HTMLElement));
     await waitFor(() => expect(byId("agent-run-detail-error")).not.toBeNull());
-    const box = expectBox(byId("agent-run-detail-error"), "작업 상세를 불러오지 못했어요", "", REASON_UNKNOWN);
+    const box = expectBox(byId("agent-run-detail-error"), "작업 상세를 불러오지 못했어요", "serverUnreachable", REASON_SERVER);
     const reads = vi.mocked(fetchAgentRunDetail).mock.calls.length;
     act(() => fireEvent.click(box.querySelector("button") as HTMLElement));
     await waitFor(() => expect(vi.mocked(fetchAgentRunDetail).mock.calls.length).toBeGreaterThan(reads));

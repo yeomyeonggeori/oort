@@ -9,7 +9,8 @@ import {
   DialogTitle,
 } from "@/design/ui/dialog";
 import { InlineBanner } from "@/features/common/States";
-import { LoadFailureBox, loadCauseOf } from "@/features/common/LoadFailureBox";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";

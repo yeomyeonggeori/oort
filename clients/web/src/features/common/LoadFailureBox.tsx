@@ -1,9 +1,8 @@
 import { Button } from "@/design/ui/button";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
-import { deviceOnlineNow } from "@/lib/deviceOnline";
 import { CONNECTION_KEYS, type ConnectionPlainKey } from "@momo/core/features/connection/copyKeys";
-import { causeOfFailure } from "@momo/core/features/connection/failure";
 import { copyForCause, type ConnectionCause } from "@momo/core/features/connection/model";
+import { loadFailureSentence } from "./loadFailure";
 import { InlineBanner } from "./States";
 
 // =============================================================================
@@ -59,25 +58,6 @@ export function LoadFailureBox({
 // 완결된 문장으로 말하고, 상태 코드·서버 원문은 어디에도 없다. 실패한 그 자리의 오류 객체가 없으면(`isError`만 아는 자리) 원인은 `null`이고
 // 이유는 「문제가 생겼어요」다.
 // -----------------------------------------------------------------------------
-
-/** 이 자리의 오류 객체 하나가 말하는 원인. 렌더 때 기기 온라인 여부를 읽는다(S-C 상자 자리들과 같다). */
-export function loadCauseOf(error: unknown): ConnectionCause | null {
-  return causeOfFailure(error, deviceOnlineNow());
-}
-
-type FormatMessage = ReturnType<typeof useFormatMessage>;
-
-/** 제목 + 이유를 한 문장 묶음으로(`"{title}. {reason}"`의 언어별 틀). 문자열만 받는 자리(설명·aria)에도 쓴다. */
-export function loadFailureSentence(
-  formatMessage: FormatMessage,
-  titleKey: ConnectionPlainKey,
-  cause: ConnectionCause | null
-): string {
-  return formatMessage(CONNECTION_KEYS.loadSentence, {
-    title: formatMessage(titleKey),
-    reason: formatMessage(copyForCause(cause).loadReason),
-  });
-}
 
 /**
  * 상자가 맞지 않는 좁은 자리의 **원인 한 줄**: 옛 `InlineBanner`가 서던 그 자리에 그대로 서고(같은 배너·같은 여백 규칙),

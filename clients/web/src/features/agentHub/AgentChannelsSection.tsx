@@ -5,7 +5,8 @@ import { Button } from "@/design/ui/button";
 import { ListboxSelect } from "@/design/ui/listbox-select";
 import { useSession } from "@/app/session";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
-import { LoadFailureNote, loadCauseOf } from "@/features/common/LoadFailureBox";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useChannels } from "@/features/workspace/useWorkspace";
 import {

@@ -19,7 +19,8 @@ import {
   LINKED_DEVICES_QUERY_KEY,
   linkedDevicesQuery,
 } from "./linkedDevicesQuery";
-import { LoadFailureNote, loadCauseOf } from "@/features/common/LoadFailureBox";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
 import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 
 // Reading this as: settings for internal team users on web+Tauri,

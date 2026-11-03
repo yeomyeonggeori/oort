@@ -4,12 +4,16 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { RosterMember } from "@momo/core/lib/api";
+import { ApiError, type RosterMember } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import {
   getHostedDmApprovals,
   setHostedDmApproval,
 } from "@momo/core/features/hostedAgents/api";
 import { makeDirectory } from "@/features/workspace/useWorkspace";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { DmApprovalSection } from "./DmApprovalSection";
 
 // =============================================================================
@@ -63,7 +67,9 @@ function wire(canEdit: boolean, memberState = "unapproved") {
 let root: Root;
 let host: HTMLDivElement;
 
-beforeAll(() => {
+let ko: AppLocale;
+beforeAll(async () => {
+  ko = await koreanLocale();
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 
@@ -80,23 +86,23 @@ afterEach(() => {
   host.remove();
 });
 
-async function render() {
+/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
+async function render(korean = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const page = createElement(
+    QueryClientProvider,
+    { client },
+    createElement(DmApprovalSection, {
+      workspaceId: WS,
+      connectionId: CONNECTION,
+      agentLabel: "Claude Code",
+      directory,
+      offline: false,
+      writesLocked: false,
+    })
+  );
   await act(async () => {
-    root.render(
-      createElement(
-        QueryClientProvider,
-        { client },
-        createElement(DmApprovalSection, {
-          workspaceId: WS,
-          connectionId: CONNECTION,
-          agentLabel: "Claude Code",
-          directory,
-          offline: false,
-          writesLocked: false,
-        })
-      )
-    );
+    root.render(korean ? createElement(LocaleProvider, { locale: ko, children: page }) : page);
   });
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -108,6 +114,34 @@ function rows() {
 }
 
 describe("DmApprovalSection", () => {
+  // #5242: 옛 「1:1 대화 목록을 불러오지 못했어요. 연결을 확인한 뒤 다시 시도해 주세요.」는 원인을 말하는 한 줄이다.
+  it("목록을 못 읽으면 제목 뒤에 원인이 붙은 한 줄이 서고, 다시 시도가 목록을 다시 읽는다", async () => {
+    const cases: [Error, string][] = [
+      [new NetworkError("unreachable", 15_000), "1:1 대화 목록을 불러오지 못했어요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [new ApiError(500, "boom", "internal"), "1:1 대화 목록을 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [error, sentence] of cases) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+      vi.mocked(getHostedDmApprovals).mockReset();
+      vi.mocked(getHostedDmApprovals).mockRejectedValue(error);
+      await render(true);
+      const note = host.querySelector<HTMLElement>('[data-testid="hosted-dm-approval-error"]');
+      expect(note, sentence).not.toBeNull();
+      expect(note?.getAttribute("role")).toBe("alert");
+      expect(note?.textContent).toContain(sentence);
+      expect(note?.textContent).not.toMatch(/\d{3}/);
+      const reads = vi.mocked(getHostedDmApprovals).mock.calls.length;
+      await act(async () => {
+        note?.querySelector("button")?.click();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      expect(vi.mocked(getHostedDmApprovals).mock.calls.length).toBeGreaterThan(reads);
+      act(() => root.unmount());
+      root = createRoot(host);
+      vi.restoreAllMocks();
+    }
+  });
+
   it("draws the owner's DM as always open with no control, and lets the owner open another", async () => {
     vi.mocked(getHostedDmApprovals)
       .mockResolvedValueOnce(wire(true))

@@ -10,7 +10,8 @@ import type { ConnectionCause } from "@momo/core/features/connection/model";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
 import type { AppLocale } from "@/i18n/localeStore";
 import { koreanLocale } from "@/testing/koLocale";
-import { LoadFailureNote, loadCauseOf } from "./LoadFailureBox";
+import { LoadFailureNote } from "./LoadFailureBox";
+import { loadCauseOf } from "./loadFailure";
 
 // =============================================================================
 // #5242: 남은 「불러오지 못했습니다」 자리들이 함께 쓰는 부품.
@@ -69,9 +70,17 @@ describe("loadCauseOf", () => {
     expect(loadCauseOf(new ApiError(404, "gone"))).toBeNull();
   });
 
-  it("알 수 없는 오류나 오류 없음은 원인이 없다(이유는 「문제가 생겼어요」)", () => {
+  it("연결 쪽이 아닌 오류 객체는 기기가 꺼져 있어도 원인이 없다(이유는 「문제가 생겼어요」)", () => {
     deviceOnline(false);
     expect(loadCauseOf(new Error("x"))).toBeNull();
+    expect(loadCauseOf(new ApiError(500, "boom", "internal"))).toBeNull();
+  });
+
+  it("오류 객체를 모르는 자리는 기기가 아는 사실 하나만 안다: 꺼져 있으면 오프라인, 아니면 원인 없음", () => {
+    deviceOnline(false);
+    expect(loadCauseOf(null)).toBe("deviceOffline");
+    expect(loadCauseOf(undefined)).toBe("deviceOffline");
+    deviceOnline(true);
     expect(loadCauseOf(null)).toBeNull();
     expect(loadCauseOf(undefined)).toBeNull();
   });
