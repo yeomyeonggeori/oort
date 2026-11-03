@@ -4,8 +4,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { createElement, type ReactNode } from "react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createLocaleService, loadMessageCatalog, resolveLocaleContext } from "@momo/core/i18n";
+import { createLocaleService, createMessageService, loadMessageCatalog, resolveLocaleContext } from "@momo/core/i18n";
 import type { ReleaseNote } from "@momo/core/features/releaseNotes/model";
+import { RELEASE_NOTES } from "@momo/core/features/releaseNotes/notes";
+import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
 import { LocaleContext } from "@/i18n/localeContext";
 import type { AppLocale } from "@/i18n/localeStore";
 
@@ -22,29 +24,28 @@ import {
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+// 소식의 글은 사전에 있다(#5054): 가짜 소식도 사전에 있는 진짜 키를 쓰고, 기대하는 글은 같은 사전을 읽는 서비스에서 구한다.
+const REAL = RELEASE_NOTES[0].items;
+const koText = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog });
+
 function note(version: string, desktopFrom: string[], phoneOnlyTitle = false): ReleaseNote {
-  const item = (id: string, surfaces: ReleaseNote["items"][number]["surfaces"]) => ({
-    id,
-    surfaces,
-    copy: {
-      "ko-KR": { title: `제목 ${id}`, changed: `바뀐 점 ${id}`, tryIt: `써 보기 ${id}` },
-      "en-US": { title: `Title ${id}`, changed: `Changed ${id}`, tryIt: `Try ${id}` },
-    },
-  });
+  const item = (index: number, surfaces: ReleaseNote["items"][number]["surfaces"]) => ({ ...REAL[index], surfaces });
   return {
+    ...RELEASE_NOTES[0],
     version,
     releasedOn: "2026-10-31",
     phoneBuild: 3000 + Number(version.split(".")[2]),
     desktopFrom,
-    summary: { "ko-KR": `요약 ${version}`, "en-US": `Summary ${version}` },
     items: [
-      item("a", phoneOnlyTitle ? ["phone"] : ["desktop"]),
-      item("b", ["phone", "desktop"]),
-      item("c", ["phone"]),
-      item("d", ["desktop"]),
-      item("e", ["desktop"]),
-      item("f", ["desktop"]),
+      item(0, phoneOnlyTitle ? ["phone"] : ["desktop"]),
+      item(1, ["phone", "desktop"]),
+      item(2, ["phone"]),
+      item(3, ["desktop"]),
+      item(4, ["desktop"]),
+      item(5, ["desktop"]),
     ],
+    // 「그 밖에 바뀐 점」은 설정의 버전 상세에만 선다: 첫 실행 자동 창에는 나오지 않는다.
+    others: [{ id: "conversations", title: "releaseNotes.topic.conversations", lines: [REAL[6].tryIt] }],
   };
 }
 const V41 = note("0.1.41", ["0.1.41"]);
@@ -94,10 +95,19 @@ describe("업데이트 소식: 처음 열 때 한 번", () => {
     expect(dialog.getAttribute("role")).toBe("dialog");
     expect(screen.getByRole("dialog", { name: "업데이트 소식" })).toBe(dialog);
     expect(dialog.textContent).toContain("버전 0.1.41");
-    expect(dialog.textContent).toContain("요약 0.1.41");
+    expect(dialog.textContent).toContain(koText.formatMessage(RELEASE_NOTES[0].summary));
     // 이 화면(데스크탑)에서 보이는 변화만 제목으로: 폰 전용 항목(c)은 없고, 네 줄까지 보이고 나머지는 접힌다.
     const titles = [...screen.getByTestId("release-notes-dialog-titles").querySelectorAll("li")].map((li) => li.textContent);
-    expect(titles).toEqual(["제목 a", "제목 b", "제목 d", "제목 e", "그 밖에 1가지"]);
+    expect(titles).toEqual([
+      koText.formatMessage(REAL[0].title),
+      koText.formatMessage(REAL[1].title),
+      koText.formatMessage(REAL[3].title),
+      koText.formatMessage(REAL[4].title),
+      "그 밖에 1가지",
+    ]);
+    // 「그 밖에 바뀐 점」은 자동 창에 없다(설정의 버전 상세에만 선다).
+    expect(dialog.textContent).not.toContain("그 밖에 바뀐 점");
+    expect(dialog.textContent).not.toContain(koText.formatMessage(REAL[6].tryIt));
     // 포커스는 단추가 아니라 대화상자 자신이다: 입력 도중에 뜬 창이 다음 Enter를 먹지 않는다.
     expect(document.activeElement).toBe(dialog);
     expect(lastSeenReleaseNote()).toBeNull();

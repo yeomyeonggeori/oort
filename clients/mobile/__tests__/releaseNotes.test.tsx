@@ -1,6 +1,11 @@
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import type {ReleaseNote} from '@momo/core/features/releaseNotes/model';
+import type {
+  ReleaseNote,
+  ReleaseNoteOtherGroup,
+} from '@momo/core/features/releaseNotes/model';
 import {RELEASE_NOTES} from '@momo/core/features/releaseNotes/notes';
+import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
+import {createMessageService} from '@momo/core/i18n/service';
 import type {Member, RosterMember} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -77,33 +82,60 @@ const ROSTER = [
 
 const mmkvStore = (jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}).__store;
 
-function note(version: string, phoneBuild: number): ReleaseNote {
-  const item = (id: string, surfaces: ReleaseNote['items'][number]['surfaces']) => ({
-    id,
-    surfaces,
-    copy: {
-      'ko-KR': {title: '제목 ' + id, changed: '바뀐 점 ' + id, tryIt: '써 보기 ' + id},
-      'en-US': {title: 'Title ' + id, changed: 'Changed ' + id, tryIt: 'Try ' + id},
-    },
-  });
+// 소식의 글은 사전에 있다(#5054): 가짜 소식도 사전에 있는 **진짜 키**를 쓴다(없는 키는 안전 문구로 나간다). 기대하는 글은 같은
+// 사전을 읽는 서비스에서 구해, 글이 바뀌어도 시험이 깨지지 않고 화면이 실제 사전 값을 그리는지만 잰다.
+const REAL = RELEASE_NOTES[0];
+const koText = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
+const enText = createMessageService({messageLocale: 'en-US'});
+const realItem = (id: string) => {
+  const found = REAL.items.find(candidate => candidate.id === id);
+  if (!found) throw new Error('v0.1.41 항목이 없다: ' + id);
+  return found;
+};
+
+/** 「그 밖에 바뀐 점」 재료: 공용 주제 이름과, 한 줄로 읽히는 진짜 키들. */
+const OTHERS: readonly ReleaseNoteOtherGroup[] = [
+  {
+    id: 'conversations',
+    title: 'releaseNotes.topic.conversations',
+    lines: [realItem('typing').tryIt, realItem('phoneConversation').tryIt],
+  },
+  {
+    id: 'settings',
+    title: 'releaseNotes.topic.settings',
+    lines: [realItem('settings').tryIt],
+  },
+];
+
+function note(
+  version: string,
+  phoneBuild: number,
+  others: readonly ReleaseNoteOtherGroup[] = [],
+): ReleaseNote {
+  const item = (
+    id: string,
+    surfaces: ReleaseNote['items'][number]['surfaces'],
+  ) => ({...realItem(id), surfaces});
   return {
+    ...REAL,
     version,
     releasedOn: version === '0.1.42' ? '2026-11-05' : '2026-10-31',
     phoneBuild,
     desktopFrom: [version],
-    summary: {'ko-KR': '요약 ' + version, 'en-US': 'Summary ' + version},
+    // a=typing, b=channelNotifications, c=photoViewer(데스크탑 전용), d=composerHeight, e=phoneConversation, f=settings
     items: [
-      item('a', ['phone', 'desktop']),
-      item('b', ['phone']),
-      item('c', ['desktop']),
-      item('d', ['phone']),
-      item('e', ['phone', 'desktop']),
-      item('f', ['phone']),
+      item('typing', ['phone', 'desktop']),
+      item('channelNotifications', ['phone']),
+      item('photoViewer', ['desktop']),
+      item('composerHeight', ['phone']),
+      item('phoneConversation', ['phone', 'desktop']),
+      item('settings', ['phone']),
     ],
+    others,
   };
 }
 const V41 = note('0.1.41', 3058);
-const V42 = note('0.1.42', 3070);
+const V42 = note('0.1.42', 3070, OTHERS);
 
 const koreanController = () =>
   createMobileLocaleController({
@@ -122,10 +154,26 @@ const englishController = () =>
     },
   });
 
-function withLocale(children: React.ReactNode, english = false) {
+// 사전이 아직 없는 언어(ADR-0213 P2 전): 앱은 영어 사전으로 내려간다. 소식 쪽에 따로 고를 언어는 없다.
+const japaneseController = () =>
+  createMobileLocaleController({
+    port: {
+      readPreference: () => 'ja-JP',
+      writePreference: () => {},
+      readDevice: () => ({languages: ['ja-JP'], timeZone: 'Asia/Tokyo'}),
+    },
+  });
+
+function withLocale(children: React.ReactNode, english: boolean | 'ja' = false) {
+  const createController =
+    english === 'ja'
+      ? japaneseController
+      : english
+        ? englishController
+        : koreanController;
   return (
     <ThemeProvider>
-      <MobileLocaleProvider createController={english ? englishController : koreanController}>
+      <MobileLocaleProvider createController={createController}>
         {children}
       </MobileLocaleProvider>
     </ThemeProvider>
@@ -167,11 +215,14 @@ describe('업데이트 소식 시트: 처음 열 때 한 번', () => {
     const sheet = await screen.findByTestId('release-notes-sheet');
     expect(within(sheet).getByText('업데이트 소식')).toBeTruthy();
     expect(screen.getByTestId('release-notes-sheet-version')).toHaveTextContent('버전 0.1.41 · 2026-10-31');
-    expect(within(sheet).getByText('요약 0.1.41')).toBeTruthy();
+    expect(within(sheet).getByText(koText.formatMessage(REAL.summary))).toBeTruthy();
     // 이 화면(폰)에서 보이는 변화만 제목으로: 데스크탑 전용(c)은 없고, 네 줄까지 보이고 나머지는 접힌다.
     const titles = within(screen.getByTestId('release-notes-sheet-titles'));
-    for (const id of ['a', 'b', 'd', 'e']) expect(titles.getByText('제목 ' + id)).toBeTruthy();
-    expect(titles.queryByText('제목 c')).toBeNull();
+    for (const id of ['typing', 'channelNotifications', 'composerHeight', 'phoneConversation']) {
+      expect(titles.getByText(koText.formatMessage(realItem(id).title))).toBeTruthy();
+    }
+    expect(titles.queryByText(koText.formatMessage(realItem('photoViewer').title))).toBeNull();
+    expect(titles.queryByText(koText.formatMessage(realItem('settings').title))).toBeNull();
     expect(titles.getByText('그 밖에 1가지')).toBeTruthy();
     expect(lastSeenReleaseNote()).toBeNull();
 
@@ -195,6 +246,11 @@ describe('업데이트 소식 시트: 처음 열 때 한 번', () => {
     resetReleaseNotesSeenForTest();
     render(withLocale(host('3070')));
     expect(await screen.findByTestId('release-notes-sheet-version')).toHaveTextContent('버전 0.1.42 · 2026-11-05');
+    // 「그 밖에 바뀐 점」은 설정의 버전 상세에만 선다: 올라오는 시트에는 머리글도 한 줄도 없다.
+    const sheet = within(screen.getByTestId('release-notes-sheet'));
+    expect(sheet.queryByText('그 밖에 바뀐 점')).toBeNull();
+    expect(sheet.queryByText(koText.formatMessage(realItem('settings').tryIt))).toBeNull();
+    expect(sheet.queryByText('대화')).toBeNull();
   });
 
   it('한가해질 때까지 기다리고, 빌드를 읽지 못하면 아무것도 하지 않으며, 더 새 소식을 본 기기의 값은 낮아지지 않는다', async () => {
@@ -269,14 +325,15 @@ describe('설정 › 업데이트 소식 장', () => {
     const detail = await screen.findByTestId('release-notes-detail');
     expect(within(detail).getByTestId('release-notes-detail-title')).toHaveTextContent('버전 0.1.42');
     expect(within(detail).getByText('2026-11-05 공개')).toBeTruthy();
-    const item = within(screen.getByTestId('release-notes-item-a'));
-    expect(item.getByText('제목 a')).toBeTruthy();
-    expect(item.getByText('바뀐 점 a')).toBeTruthy();
-    expect(item.getByText('써 보기 a')).toBeTruthy();
-    const surfaces = screen.getByTestId('release-notes-item-a-surfaces');
+    const typing = realItem('typing');
+    const item = within(screen.getByTestId('release-notes-item-typing'));
+    expect(item.getByText(koText.formatMessage(typing.title))).toBeTruthy();
+    expect(item.getByText(koText.formatMessage(typing.changed))).toBeTruthy();
+    expect(item.getByText(koText.formatMessage(typing.tryIt))).toBeTruthy();
+    const surfaces = screen.getByTestId('release-notes-item-typing-surfaces');
     expect(surfaces).toHaveTextContent('폰 · 데스크탑');
     expect(surfaces.props.accessibilityLabel).toBe('보이는 화면: 폰, 데스크탑');
-    expect(screen.getByTestId('release-notes-item-b-surfaces')).toHaveTextContent('폰');
+    expect(screen.getByTestId('release-notes-item-channelNotifications-surfaces')).toHaveTextContent('폰');
     for (const label of ['바뀐 점', '이렇게 써 보세요']) {
       expect(item.getByText(label).props.accessibilityRole).toBe('header');
     }
@@ -310,13 +367,74 @@ describe('설정 › 업데이트 소식 장', () => {
     const row = screen.getByTestId('release-notes-row-0.1.41');
     expect(within(row).getByText('Version 0.1.41')).toBeTruthy();
     expect(within(row).getByText('Your version')).toBeTruthy();
-    expect(within(row).getByText(RELEASE_NOTES[0].summary['en-US'])).toBeTruthy();
+    expect(within(row).getByText(enText.formatMessage(REAL.summary))).toBeTruthy();
     fireEvent.press(row);
-    const first = RELEASE_NOTES[0].items[0];
+    const first = REAL.items[0];
     const card = within(await screen.findByTestId('release-notes-item-' + first.id));
-    expect(card.getByText(first.copy['en-US'].title)).toBeTruthy();
+    expect(card.getByText(enText.formatMessage(first.title))).toBeTruthy();
     expect(card.getByText('What changed')).toBeTruthy();
     expect(card.getByText('Try it like this')).toBeTruthy();
+  });
+
+  it('버전 상세에는 핵심 카드 뒤에 「그 밖에 바뀐 점」이 주제별 한 줄로 서고, 목록에는 없다', async () => {
+    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3070" notes={[V41, V42]} />));
+    await screen.findByTestId('settings-release-notes-page');
+    // 목록에는 없다.
+    expect(screen.queryByTestId('release-notes-others')).toBeNull();
+    fireEvent.press(screen.getByTestId('release-notes-row-0.1.42'));
+    const detail = within(await screen.findByTestId('release-notes-detail'));
+
+    const others = within(detail.getByTestId('release-notes-others'));
+    expect(others.getByText('그 밖에 바뀐 점').props.accessibilityRole).toBe('header');
+    // 핵심 카드들 뒤에 선다(문서 순서).
+    const html = JSON.stringify(screen.toJSON());
+    expect(html.indexOf('release-notes-item-settings')).toBeGreaterThan(-1);
+    expect(html.indexOf('release-notes-item-settings')).toBeLessThan(html.indexOf('release-notes-others'));
+    // 주제는 소식이 적은 순서이고, 주제 이름 아래에 한 줄씩이다.
+    const order = ['conversations', 'settings'].map(id => html.indexOf('release-notes-other-' + id + '"'));
+    expect(order[0]).toBeGreaterThan(-1);
+    expect(order[0]).toBeLessThan(order[1]);
+    const conversations = within(screen.getByTestId('release-notes-other-conversations'));
+    expect(conversations.getByText('대화')).toBeTruthy();
+    const lines = [realItem('typing').tryIt, realItem('phoneConversation').tryIt].map(key => koText.formatMessage(key));
+    for (const line of lines) expect(conversations.getByText(line)).toBeTruthy();
+    // 한 줄들은 소식이 적은 순서다. 같은 글이 위 핵심 카드에도 있어서(진짜 키를 쓰는 재료) 문서 전체가 아니라 이 주제의 카드
+    // 안에서 잰다: 카드의 글자는 이 주제의 줄들뿐이라 뒤집히면 이어 붙인 글이 달라진다.
+    expect(screen.getByTestId('release-notes-other-conversations-card')).toHaveTextContent(lines.join(''));
+    const settings = within(screen.getByTestId('release-notes-other-settings'));
+    expect(settings.getByText('설정')).toBeTruthy();
+    expect(settings.getByText(koText.formatMessage(realItem('settings').tryIt))).toBeTruthy();
+  });
+
+  it('그 밖에 바뀐 점이 비어 있는 소식에는 머리글도 칸도 서지 않는다', async () => {
+    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3070" notes={[V41, V42]} />));
+    fireEvent.press(await screen.findByTestId('release-notes-row-0.1.41'));
+    await screen.findByTestId('release-notes-detail');
+    expect(screen.queryByTestId('release-notes-others')).toBeNull();
+    expect(screen.queryByText('그 밖에 바뀐 점')).toBeNull();
+  });
+
+  it('영어 UI에서는 그 밖에 바뀐 점의 머리글·주제 이름도 영어다', async () => {
+    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3070" notes={[V42]} />, true));
+    fireEvent.press(await screen.findByTestId('release-notes-row-0.1.42'));
+    const others = within(await screen.findByTestId('release-notes-others'));
+    expect(others.getByText('Other changes')).toBeTruthy();
+    expect(within(screen.getByTestId('release-notes-other-conversations')).getByText('Conversations')).toBeTruthy();
+  });
+
+  it('사전이 아직 없는 언어(일본어)는 사전의 영어 대체를 그대로 탄다: 소식 글도 한국어가 아니라 영어다 (ADR-0213)', async () => {
+    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3058" />, 'ja'));
+    await screen.findByTestId('settings-release-notes-page');
+    const row = within(screen.getByTestId('release-notes-row-0.1.41'));
+    expect(row.getByText('Version 0.1.41')).toBeTruthy();
+    expect(row.getByText(enText.formatMessage(REAL.summary))).toBeTruthy();
+    expect(row.queryByText(koText.formatMessage(REAL.summary))).toBeNull();
+    fireEvent.press(screen.getByTestId('release-notes-row-0.1.41'));
+    const first = REAL.items[0];
+    const card = within(await screen.findByTestId('release-notes-item-' + first.id));
+    expect(card.getByText(enText.formatMessage(first.title))).toBeTruthy();
+    expect(card.getByText(enText.formatMessage(first.changed))).toBeTruthy();
+    expect(card.queryByText(koText.formatMessage(first.title))).toBeNull();
   });
 });
 
