@@ -10,6 +10,40 @@ export const messageKeys = [
   "connect.language.hint",
   "connect.rememberEmail.hint",
   "connect.rememberEmail.label",
+  "connection.action.reconnectNow",
+  "connection.action.retry",
+  "connection.approval.offline",
+  "connection.approval.serverUnreachable",
+  "connection.boot.unreachable",
+  "connection.card.connecting",
+  "connection.card.lastSynced",
+  "connection.card.offlineDetail",
+  "connection.card.offlineTitle",
+  "connection.card.realtimeDownDetail",
+  "connection.card.realtimeDownTitle",
+  "connection.card.recovered",
+  "connection.card.serverUnreachableDetail",
+  "connection.card.serverUnreachableTitle",
+  "connection.card.serverUpdatingDetail",
+  "connection.card.serverUpdatingTitle",
+  "connection.card.unknownDetail",
+  "connection.card.unknownTitle",
+  "connection.composer.offline",
+  "connection.composer.serverUnreachable",
+  "connection.load.channelListTitle",
+  "connection.load.conversationTitle",
+  "connection.load.membersTitle",
+  "connection.load.reasonOffline",
+  "connection.load.reasonServer",
+  "connection.load.reasonUnknown",
+  "connection.load.threadTitle",
+  "connection.send.failed",
+  "connection.send.resend",
+  "connection.send.resendAll",
+  "connection.session.expired",
+  "connection.upload.failedNoArchive",
+  "connection.upload.failedOffline",
+  "connection.upload.failedServer",
   "desktop.menu.close",
   "desktop.menu.copy",
   "desktop.menu.cut",
@@ -573,6 +607,44 @@ export const argumentSpecs = {
   "connect.language.hint": {},
   "connect.rememberEmail.hint": {},
   "connect.rememberEmail.label": {},
+  "connection.action.reconnectNow": {},
+  "connection.action.retry": {},
+  "connection.approval.offline": {},
+  "connection.approval.serverUnreachable": {},
+  "connection.boot.unreachable": {},
+  "connection.card.connecting": {},
+  "connection.card.lastSynced": {
+    "relativeTime": "string"
+  },
+  "connection.card.offlineDetail": {},
+  "connection.card.offlineTitle": {},
+  "connection.card.realtimeDownDetail": {},
+  "connection.card.realtimeDownTitle": {},
+  "connection.card.recovered": {},
+  "connection.card.serverUnreachableDetail": {},
+  "connection.card.serverUnreachableTitle": {},
+  "connection.card.serverUpdatingDetail": {},
+  "connection.card.serverUpdatingTitle": {},
+  "connection.card.unknownDetail": {},
+  "connection.card.unknownTitle": {},
+  "connection.composer.offline": {},
+  "connection.composer.serverUnreachable": {},
+  "connection.load.channelListTitle": {},
+  "connection.load.conversationTitle": {},
+  "connection.load.membersTitle": {},
+  "connection.load.reasonOffline": {},
+  "connection.load.reasonServer": {},
+  "connection.load.reasonUnknown": {},
+  "connection.load.threadTitle": {},
+  "connection.send.failed": {},
+  "connection.send.resend": {},
+  "connection.send.resendAll": {
+    "count": "number"
+  },
+  "connection.session.expired": {},
+  "connection.upload.failedNoArchive": {},
+  "connection.upload.failedOffline": {},
+  "connection.upload.failedServer": {},
   "desktop.menu.close": {},
   "desktop.menu.copy": {},
   "desktop.menu.cut": {},
@@ -1283,6 +1355,40 @@ export interface MessageArgs {
   "connect.language.hint": Record<string, never>;
   "connect.rememberEmail.hint": Record<string, never>;
   "connect.rememberEmail.label": Record<string, never>;
+  "connection.action.reconnectNow": Record<string, never>;
+  "connection.action.retry": Record<string, never>;
+  "connection.approval.offline": Record<string, never>;
+  "connection.approval.serverUnreachable": Record<string, never>;
+  "connection.boot.unreachable": Record<string, never>;
+  "connection.card.connecting": Record<string, never>;
+  "connection.card.lastSynced": { relativeTime: string };
+  "connection.card.offlineDetail": Record<string, never>;
+  "connection.card.offlineTitle": Record<string, never>;
+  "connection.card.realtimeDownDetail": Record<string, never>;
+  "connection.card.realtimeDownTitle": Record<string, never>;
+  "connection.card.recovered": Record<string, never>;
+  "connection.card.serverUnreachableDetail": Record<string, never>;
+  "connection.card.serverUnreachableTitle": Record<string, never>;
+  "connection.card.serverUpdatingDetail": Record<string, never>;
+  "connection.card.serverUpdatingTitle": Record<string, never>;
+  "connection.card.unknownDetail": Record<string, never>;
+  "connection.card.unknownTitle": Record<string, never>;
+  "connection.composer.offline": Record<string, never>;
+  "connection.composer.serverUnreachable": Record<string, never>;
+  "connection.load.channelListTitle": Record<string, never>;
+  "connection.load.conversationTitle": Record<string, never>;
+  "connection.load.membersTitle": Record<string, never>;
+  "connection.load.reasonOffline": Record<string, never>;
+  "connection.load.reasonServer": Record<string, never>;
+  "connection.load.reasonUnknown": Record<string, never>;
+  "connection.load.threadTitle": Record<string, never>;
+  "connection.send.failed": Record<string, never>;
+  "connection.send.resend": Record<string, never>;
+  "connection.send.resendAll": { count: number };
+  "connection.session.expired": Record<string, never>;
+  "connection.upload.failedNoArchive": Record<string, never>;
+  "connection.upload.failedOffline": Record<string, never>;
+  "connection.upload.failedServer": Record<string, never>;
   "desktop.menu.close": Record<string, never>;
   "desktop.menu.copy": Record<string, never>;
   "desktop.menu.cut": Record<string, never>;
