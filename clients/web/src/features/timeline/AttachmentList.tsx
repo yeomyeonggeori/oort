@@ -1,6 +1,7 @@
 import { Expand, FileText, ImageIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "@/app/session";
+import { useOffline } from "@/features/common/useOffline";
 import { cn } from "@/design/lib/cn";
 import { AttachmentDownloadButton } from "@/features/attachments/AttachmentDownloadButton";
 import { AttachmentOpenPdfButton } from "@/features/attachments/AttachmentOpenPdfButton";
@@ -439,7 +440,8 @@ export function AttachmentList({
 }) {
   // 워크스페이스는 셸이 이미 알고 있다. 타임라인 전체에 프롭으로 흘려보내는 대신
   // 여기서 읽는다 — `Composer` 가 같은 값을 같은 방법으로 읽는다.
-  const { workspaceId, connStatus } = useSession();
+  const { workspaceId } = useSession();
+  const offline = useOffline();
   const [lightbox, setLightbox] = useState<{
     attachmentId: string;
   } | null>(null);
@@ -491,7 +493,7 @@ export function AttachmentList({
         selectedId={lightbox?.attachmentId ?? null}
         opener={lightboxOpener.current}
         source={id => sources.current.get(id) ?? null}
-        offline={connStatus === "disconnected"}
+        offline={offline}
         senderName={senderName ?? null}
         sentAtMs={sentAtMs ?? null}
         onSelect={(attachmentId) =>
