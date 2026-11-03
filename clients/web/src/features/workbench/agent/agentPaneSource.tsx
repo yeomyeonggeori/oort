@@ -4,6 +4,7 @@ import { Bot } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { Skeleton } from "@/features/common/States";
 import { useSession } from "@/app/session";
+import { useOffline } from "@/features/common/useOffline";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { useSurfaceProvided } from "@/features/capabilities/useSurfaceProvided";
 import {
@@ -241,6 +242,7 @@ function SignedAgentPane({
  */
 export function useAgentPaneSource(): AgentPaneSource {
   const { workspaceId, session: auth, connStatus } = useSession();
+  const offline = useOffline();
   const store = agentPaneStore();
   const bindings = useAgentPaneBindings(store);
   const workOn = useSurfaceProvided("work");
@@ -352,7 +354,7 @@ export function useAgentPaneSource(): AgentPaneSource {
               instruct.recheck,
               signer ? { signer, session: entry.session } : null
             )}
-            offline={connStatus === "disconnected"}
+            offline={offline}
             instructFrom={instruct.from}
           />
         </>

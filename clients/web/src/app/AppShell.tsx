@@ -25,6 +25,7 @@ import { queryClient } from "@/app/queryClient";
 import { resetRouteQueries } from "@/app/retryScope";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ConnectionBanner } from "@/features/common/ConnectionBanner";
+import { ConnectionProvider } from "@/features/common/connectionModel";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { AppTitlebar } from "@/app/AppTitlebar";
 import { DownloadButton } from "@/features/downloads/DownloadButton";
@@ -353,6 +354,9 @@ export function AppShell({
         replaceSessionMember,
       }}
     >
+      {/* 연결 상태 모델은 앱에 하나다(#5220). 위의 connStatus(`?agentwork=` 덮어쓰기까지 거친 값)를 읽으므로
+       * 세션 공급자 **안**에 서고, 쓰기 게이트(`useOffline`)와 연결 카드·띠가 모두 이 한 벌을 읽는다. */}
+      <ConnectionProvider>
       <TeamExpressionsProvider>
       {/* app-shell is the named two-pane grid from tokens.css (sidebar --w-sidebar,
        * viewport height), so the shell needs no arbitrary grid-cols value. The
@@ -557,6 +561,7 @@ export function AppShell({
       </CreateChannelProvider>
       </ShellNavProvider>
       </TeamExpressionsProvider>
+      </ConnectionProvider>
     </SessionProvider>
   );
 }
