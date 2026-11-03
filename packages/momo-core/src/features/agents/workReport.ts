@@ -260,15 +260,16 @@ export function runReportDurationText(durationMs: number, formatMessage: Format)
 }
 
 /**
- * 「13분 · 단계 6 · 명령 12 · 에이전트 보고」. 에이전트 보고 숫자(단계·종류)가 하나라도 있을 때만 끝에
- * 꼬리표 「에이전트 보고」가 붙는다: 걸린 시간은 서버 시계의 사실이고, 그 뒤의 숫자는 에이전트가 한 말이다. 숫자가
- * 없으면 시간만 남는다(꼬리표가 말할 대상이 없다).
+ * 「13분 · 단계 6 · 명령 12 · 에이전트 보고」를 **몸과 꼬리표로 나눠** 준다. 꼬리표 「에이전트 보고」는 앞의 숫자가 누구의
+ * 말인지를 말하는 출처라서, 좁은 칸에서 몸이 잘려도 꼬리표는 남아야 한다(#5174 L6): 화면이 둘을 따로 그린다.
+ * 꼬리표는 에이전트 보고 숫자(단계·종류)가 하나라도 있을 때만 있다: 걸린 시간은 서버 시계의 사실이고, 그 뒤의 숫자는
+ * 에이전트가 한 말이다. 숫자가 없으면 시간만 남는다(꼬리표가 말할 대상이 없다).
  */
-export function runReportChipText(
+export function runReportChipParts(
   durationMs: number,
   summary: RunReportSummary,
   formatMessage: Format
-): string {
+): { body: string; tail: string | null } {
   const parts = [runReportDurationText(durationMs, formatMessage)];
   if (summary.stages > 0) {
     parts.push(formatMessage("timeline.workSummary.stages", { count: summary.stages }));
@@ -276,10 +277,21 @@ export function runReportChipText(
   for (const entry of summary.kinds) {
     parts.push(formatMessage(SUMMARY_KIND_WORD[entry.toolKind], { count: entry.count }));
   }
-  if (summary.stages > 0 || summary.kinds.length > 0) {
-    parts.push(formatMessage("timeline.workSummary.agentReported"));
-  }
-  return parts.join(" · ");
+  const reported = summary.stages > 0 || summary.kinds.length > 0;
+  return {
+    body: parts.join(" · "),
+    tail: reported ? formatMessage("timeline.workSummary.agentReported") : null,
+  };
+}
+
+/** 「13분 · 단계 6 · 명령 12 · 에이전트 보고」. 몸과 꼬리표를 한 줄로 이은 글(접근성 이름·폰이 읽는다). */
+export function runReportChipText(
+  durationMs: number,
+  summary: RunReportSummary,
+  formatMessage: Format
+): string {
+  const { body, tail } = runReportChipParts(durationMs, summary, formatMessage);
+  return tail === null ? body : `${body} · ${tail}`;
 }
 
 /** 칸 아래의 합계 한 줄: 「끝난 활동 합계 · 명령 12 · 읽기 30」. 끝난 활동이 없으면 null. */

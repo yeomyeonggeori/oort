@@ -5,7 +5,7 @@ import { isOpenRunPhase, REQUEST_WORD, serverFactsOf } from "@momo/core/features
 import { requestBundleState, runBundleSnapshot } from "@momo/core/features/timeline/requestBundle";
 import { IDLE_CUTOFF_MS } from "@momo/core/features/agents/workingSignal";
 import { RUN_LEDGER_KEPT_SENTENCE } from "@momo/core/features/agents/runLedger";
-import { runReportChipText, type RunReportSummary } from "@momo/core/features/agents/workReport";
+import { runReportChipParts, runReportChipText, type RunReportSummary } from "@momo/core/features/agents/workReport";
 import { useSession } from "@/app/session";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { Popover, PopoverContent, PopoverTrigger } from "@/design/ui/popover";
@@ -76,6 +76,8 @@ export function RequestThoughtLine({ run, directory }: { run: AgentRunProgress; 
   // 요약의 숫자는 에이전트가 말한 것만이에요(단계·활동 합계). oort가 잰 호출 수는 출처가 달라 섞지 않아요(#4654).
   const summary = duration === undefined ? REQUEST_WORD[state] : runReportChipText(duration, ledger.report ?? NO_REPORT, formatMessage);
   const label = open ? `${REQUEST_WORD[state]}${stage ? ` · ${stage}` : ""}` : summary;
+  // 보이는 글은 몸과 꼬리표로 나눠 그린다: 좁은 칸에서 몸이 줄임표를 받아도 「에이전트 보고」(숫자가 누구의 말인지)는 남는다.
+  const chip = duration === undefined ? null : runReportChipParts(duration, ledger.report ?? NO_REPORT, formatMessage);
   if (!open) {
     return (
       <div className="flex h-6 min-w-0 shrink-0 items-center" data-testid="request-thought-slot" data-run-id={run.id}>
@@ -84,12 +86,21 @@ export function RequestThoughtLine({ run, directory }: { run: AgentRunProgress; 
           type="button"
           aria-label={formatMessage("timeline.workSummary.openPanel", { name, summary: label })}
           onClick={(event) => openWorkPanel({ runId: run.id, memberId: run.agentMemberId, channelId: run.channelId, origin: "message" }, event.currentTarget)}
-          className="flex h-full min-w-0 max-w-full items-center gap-2 rounded-sm text-left text-meta text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+          // 좁은 칸에서는 이 칩이 열의 거의 전폭이다(390px에서 98%). 전폭은 폭이다(README §2.6): 눌림은 채움만이고
+          // `.press`의 축소(scale 0.98)는 없다. 칩 폭은 글에 달려 있어 폭마다 클래스를 가르지 않고 어디서나 채움이다.
+          className="flex h-full min-w-0 max-w-full items-center gap-2 rounded-sm text-left text-meta text-ink-muted press-instant-fill hover:bg-surface-hover focus-visible:focus-ring"
           data-testid="request-thought-line"
         >
           <RespondingAvatar directory={directory} memberId={run.agentMemberId} />
           {state === "done" && <Check className="size-4 shrink-0 text-ok" aria-hidden="true" />}
-          <span className="min-w-0 truncate" data-numeric>{name} · {label}</span>
+          {chip === null ? (
+            <span className="min-w-0 truncate" data-numeric>{name} · {label}</span>
+          ) : (
+            <span className="flex min-w-0 items-baseline" data-numeric>
+              <span className="min-w-0 truncate">{name} · {chip.body}</span>
+              {chip.tail !== null && <span className="shrink-0 whitespace-pre" data-testid="request-thought-tail">{" · "}{chip.tail}</span>}
+            </span>
+          )}
           <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
         </button>
       </div>
