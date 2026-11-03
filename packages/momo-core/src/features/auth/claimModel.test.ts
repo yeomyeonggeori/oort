@@ -126,6 +126,15 @@ describe("claimFailureCopy by claimKind", () => {
     expect(claimFailureCopy(new ApiError(409, "used")).messageKey).toBeUndefined();
   });
 
+  it("ties a password-rule 400 to the password field, and nothing else", () => {
+    expect(claimFailureCopy(new ApiError(400, "short", "password_too_short")).field).toBe("password");
+    expect(claimFailureCopy(new ApiError(400, "empty")).field).toBe("password");
+    // A rate limit keeps the form but says nothing about the password.
+    expect(claimFailureCopy(new ApiError(429, "slow")).field).toBeUndefined();
+    expect(claimFailureCopy(new NetworkError("unreachable", 15_000)).field).toBeUndefined();
+    expect(claimFailureCopy(new ApiError(410, "expired")).field).toBeUndefined();
+  });
+
   it("names a dictionary sentence for a password with a NUL character, and only for that code", () => {
     const copy = claimFailureCopy(new ApiError(400, "NUL", "password_invalid_char"));
     expect(copy.messageKey).toBe("recovery.claim.invalidChar");

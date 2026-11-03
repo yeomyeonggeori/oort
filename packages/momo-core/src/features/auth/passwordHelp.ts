@@ -7,6 +7,32 @@
 // 이름·멤버 이름은 이 모듈의 입력에 아예 없다(받지 않는 것이 담기지 않는 것을 보증한다).
 // =============================================================================
 
+import { expressionForState } from "../onboarding/guide";
+import type { LocaleService } from "../../i18n/context";
+
+/** 안내 화면에서 코메토의 표정: 서두르지 않고 기다리는 자세다(오류가 아니다). */
+export const PASSWORD_HELP_EXPRESSION = expressionForState("awaiting");
+
+/**
+ * 웹 `classifyEntry`(`entryInput.ts`)가 돌려주는 `kind` 중 안내 화면이 가르는 둘의 이름. 화면이 낱말을
+ * 직접 비교하지 않고 이 이름표를 읽는다. 어긋나면 웹의 `PasswordHelp.connect.test`가 빨개진다(그 시험이
+ * 실제 판정의 `kind`와 이 값을 맞댄다).
+ */
+export const ENTRY_KIND_CLAIM = "claim";
+export const ENTRY_KIND_EMPTY = "empty";
+
+/**
+ * 만료 시각을 문장에 넣을 꼴로: 「11월 4일 오후 2:30」. 날짜는 월·일만(24시간 안이라 해가 갈리지
+ * 않는다), 시각은 이 기기의 언어·시간대 규칙을 따른다.
+ */
+export function resetExpiryWhen(
+  locale: Pick<LocaleService, "formatDate" | "formatTime">,
+  expiresAtMs: number
+): string {
+  const day = locale.formatDate(expiresAtMs, { month: "long", day: "numeric" });
+  return `${day} ${locale.formatTime(expiresAtMs)}`;
+}
+
 /** 요청 문구의 이메일 칸 길이 상한(RFC 5321 주소 최대 길이). 붙여 넣은 긴 글이 문구를 키우지 않게 한다. */
 const EMAIL_MAX_CHARS = 254;
 

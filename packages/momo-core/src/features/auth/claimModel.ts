@@ -6,8 +6,14 @@ import { passwordRuleCopy } from "./passwordRuleCopy";
 /** `error.code` of a new password that holds a NUL character (ADR-0215 D2). */
 export const PASSWORD_INVALID_CHAR_CODE = "password_invalid_char";
 
-/** The dictionary sentences a claim refusal can name instead of its legacy `message`. */
-export type ClaimMessageKey = Extract<MessageKey, `recovery.claim.${string}`>;
+/**
+ * The dictionary sentences a claim refusal can name instead of its legacy `message`. Only the ones that
+ * take no argument: a refusal is read as one sentence with nothing to fill in.
+ */
+export type ClaimMessageKey = Extract<
+  MessageKey,
+  "recovery.claim.resetExpired" | "recovery.claim.resetUsed" | "recovery.claim.invalidChar"
+>;
 
 export interface ClaimFailure {
   message: string;
@@ -17,6 +23,12 @@ export interface ClaimFailure {
    * a reader that does not, and is the same one the refusal had before the kind was known.
    */
   messageKey?: ClaimMessageKey;
+  /**
+   * The refusal is about the new-password field (a 400 that names a password rule). The screen marks that
+   * field invalid and ties the sentence to it, and drops the sentence once the person edits the field.
+   * A 429 or a dead network keeps the form but says nothing about the password, so it has no `field`.
+   */
+  field?: "password";
   /** Used or already-passworded: the next step is the sign-in form. */
   suggestSignIn: boolean;
   retryable: boolean;
@@ -40,6 +52,15 @@ function transportFailure(cause: unknown): ClaimFailure | null {
     retryable: true,
     keepForm: true,
   };
+}
+
+/**
+ * The refusal is about the new-password field (a 400 that names a password rule). The screen marks that
+ * field invalid, ties the sentence to it and drops the sentence once the person edits the field. A
+ * predicate rather than a field name the screen compares: the name is this file's, not the screen's.
+ */
+export function claimRefusesPassword(failure: ClaimFailure | null): boolean {
+  return failure?.field === "password";
 }
 
 /**
@@ -104,6 +125,7 @@ export function claimFailureCopy(cause: unknown): ClaimFailure {
         ...(failure.code === PASSWORD_INVALID_CHAR_CODE
           ? { messageKey: "recovery.claim.invalidChar" as const }
           : {}),
+        field: "password",
         suggestSignIn: false,
         retryable: false,
         keepForm: true,

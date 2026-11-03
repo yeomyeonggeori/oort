@@ -56,7 +56,7 @@
   "recovery.claim.hostBody": "Your new password is sent to the server below. Continue only if the address is the one your admin gave you.",
   "recovery.claim.hostConfirm": "Yes, continue",
   "recovery.claim.hostReject": "No, go back",
-  "recovery.claim.passwordHint": "At least {min} characters and at most {maxBytes} bytes. A Korean syllable takes 3 bytes, so Korean-only fits {maxHangul} characters.",
+  "recovery.claim.passwordHint": "At least {min, number} characters and at most {maxBytes, number} bytes. A Korean syllable takes 3 bytes, so Korean-only fits {maxHangul, number} characters.",
   "recovery.claim.resetExpired": "This link expired after 24 hours. Ask an admin for a new link.",
   "recovery.claim.resetUsed": "This link was already used or replaced by a newer one. If you already set your password, sign in. Otherwise ask an admin for a new link.",
   "recovery.claim.invalidChar": "The password contains a character that cannot be used."

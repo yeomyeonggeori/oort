@@ -1777,24 +1777,27 @@ export const catalog: MessageCatalog = {
       "value": "At least "
     },
     {
-      "type": 1,
-      "value": "min"
+      "type": 2,
+      "value": "min",
+      "style": null
     },
     {
       "type": 0,
       "value": " characters and at most "
     },
     {
-      "type": 1,
-      "value": "maxBytes"
+      "type": 2,
+      "value": "maxBytes",
+      "style": null
     },
     {
       "type": 0,
       "value": " bytes. A Korean syllable takes 3 bytes, so Korean-only fits "
     },
     {
-      "type": 1,
-      "value": "maxHangul"
+      "type": 2,
+      "value": "maxHangul",
+      "style": null
     },
     {
       "type": 0,

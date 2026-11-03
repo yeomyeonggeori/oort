@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { createMessageService, loadMessageCatalog } from "../../i18n";
-import { passwordHelpRequestText, serverHost } from "./passwordHelp";
+import {
+  ENTRY_KIND_CLAIM,
+  ENTRY_KIND_EMPTY,
+  PASSWORD_HELP_EXPRESSION,
+  passwordHelpRequestText,
+  resetExpiryWhen,
+  serverHost,
+} from "./passwordHelp";
 
 // ADR-0215 D5 (#4601): the request message carries the typed email and the server host, and nothing else.
 
@@ -56,5 +63,32 @@ describe("passwordHelpRequestText", () => {
         ko.formatMessage
       )
     ).toBe("oort 비밀번호를 잊어서 재설정 링크가 필요해요. 서버: team.example.com, 이메일: ada@team.example.com");
+  });
+});
+
+describe("resetExpiryWhen", () => {
+  it("joins the month-and-day with the time the locale formats, without a year", () => {
+    const seen: unknown[] = [];
+    const when = resetExpiryWhen(
+      {
+        formatDate: (_value, options) => {
+          seen.push(options);
+          return "11월 4일";
+        },
+        formatTime: () => "오후 2:30",
+      },
+      1_800_000_000_000
+    );
+    expect(when).toBe("11월 4일 오후 2:30");
+    // A reset link lives 24 hours: the year never changes inside that, so it is not said.
+    expect(seen).toEqual([{ month: "long", day: "numeric" }]);
+  });
+});
+
+describe("what the help screen reads by name", () => {
+  it("keeps the two entry kinds and a waiting face, not an error one", () => {
+    expect(ENTRY_KIND_CLAIM).toBe("claim");
+    expect(ENTRY_KIND_EMPTY).toBe("empty");
+    expect(PASSWORD_HELP_EXPRESSION).toBe("idle");
   });
 });

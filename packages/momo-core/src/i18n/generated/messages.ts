@@ -919,9 +919,9 @@ export const argumentSpecs = {
   "recovery.claim.hostTitle": {},
   "recovery.claim.invalidChar": {},
   "recovery.claim.passwordHint": {
-    "maxBytes": "string",
-    "maxHangul": "string",
-    "min": "string"
+    "maxBytes": "number",
+    "maxHangul": "number",
+    "min": "number"
   },
   "recovery.claim.resetExpired": {},
   "recovery.claim.resetUsed": {},
@@ -1678,7 +1678,7 @@ export interface MessageArgs {
   "recovery.claim.hostReject": Record<string, never>;
   "recovery.claim.hostTitle": Record<string, never>;
   "recovery.claim.invalidChar": Record<string, never>;
-  "recovery.claim.passwordHint": { maxBytes: string; maxHangul: string; min: string };
+  "recovery.claim.passwordHint": { maxBytes: number; maxHangul: number; min: number };
   "recovery.claim.resetExpired": Record<string, never>;
   "recovery.claim.resetUsed": Record<string, never>;
   "recovery.claim.title": Record<string, never>;

@@ -1714,24 +1714,27 @@ export const catalog: MessageCatalog = {
   ],
   "recovery.claim.passwordHint": [
     {
-      "type": 1,
-      "value": "min"
+      "type": 2,
+      "value": "min",
+      "style": null
     },
     {
       "type": 0,
       "value": "자 이상, "
     },
     {
-      "type": 1,
-      "value": "maxBytes"
+      "type": 2,
+      "value": "maxBytes",
+      "style": null
     },
     {
       "type": 0,
       "value": "바이트 이하로 정해요. 한글은 한 자에 3바이트라 한글만이면 "
     },
     {
-      "type": 1,
-      "value": "maxHangul"
+      "type": 2,
+      "value": "maxHangul",
+      "style": null
     },
     {
       "type": 0,
