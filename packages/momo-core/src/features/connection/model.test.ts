@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { argumentSpecs, loadMessageCatalog, messageKeys } from "../../i18n";
 import type { RestOutcome } from "../../lib/http";
 import { createMessageCopy } from "../../testkit/i18n";
-import * as webBanner from "../common/connectionAlert";
 import { CONNECTION_KEYS as K } from "./copyKeys";
 import {
   copyForCause,
@@ -212,29 +211,19 @@ describe("원인 우선순위", () => {
 });
 
 describe("문턱의 정본", () => {
-  // 지키는 것: 웹 띠와 폰 표시 계층이 읽던 값이 코어 한 곳으로 옮겨 왔을 뿐 바뀌지 않았다. 웹 15초는
-  // 결정 ④로 사라질 값이지만 화면 연결은 S-B 몫이라 S-A는 그대로 둔다.
-  it("다섯 값이 읽던 값 그대로이고, 웹 띠는 같은 값을 다시 내보낸다", () => {
-    expect({
-      CONNECTING_BAND_DELAY_MS: thresholds.CONNECTING_BAND_DELAY_MS,
-      DISPLAY_GRACE_MS: thresholds.DISPLAY_GRACE_MS,
-      HEALED_MS: thresholds.HEALED_MS,
-      RETRY_WINDOW_MS: thresholds.RETRY_WINDOW_MS,
-      SUSTAINED_DOWN_MS: thresholds.SUSTAINED_DOWN_MS,
-      SERVER_UNREACHABLE_STREAK: thresholds.SERVER_UNREACHABLE_STREAK,
-      AUTO_RESEND_MAX_ATTEMPTS: thresholds.AUTO_RESEND_MAX_ATTEMPTS,
-      AUTO_RESEND_WINDOW_MS: thresholds.AUTO_RESEND_WINDOW_MS,
-    }).toEqual({
+  // 지키는 것: 웹·폰 화면이 읽는 값이 코어 한 곳에 있고 바뀌지 않았다. 웹 띠의 옛 15초(`SUSTAINED_DOWN_MS`)와
+  // 누른 뒤 6초(`RETRY_WINDOW_MS`)는 #5220이 띠를 모델로 옮기며 지웠으므로, 다시 생기면 이 표가 붉다.
+  it("읽는 값이 글자 그대로이고, 지운 값은 없다", () => {
+    expect({ ...thresholds }).toEqual({
       CONNECTING_BAND_DELAY_MS: 1_000,
       DISPLAY_GRACE_MS: 10_000,
       HEALED_MS: 5_000,
-      RETRY_WINDOW_MS: 6_000,
-      SUSTAINED_DOWN_MS: 15_000,
       SERVER_UNREACHABLE_STREAK: 3,
       AUTO_RESEND_MAX_ATTEMPTS: 3,
       AUTO_RESEND_WINDOW_MS: 300_000,
+      RESUME_AFTER_HIDDEN_MS: 30_000,
+      RECOVERED_FLASH_MS: 2_000,
     });
-    expect([webBanner.SUSTAINED_DOWN_MS, webBanner.HEALED_MS, webBanner.RETRY_WINDOW_MS]).toEqual([15_000, 5_000, 6_000]);
   });
 });
 

@@ -1463,7 +1463,7 @@ export function ChatShell() {
           renderChannelHeader(null)
         )}
 
-        {/* 연결 배너는 셸로 올라갔다 (goal B8 B2, AppShell.ConnectionBanner):
+        {/* 연결 표시는 셸로 올라갔다 (goal B8 B2; #5220 이후 연결 카드·위쪽 띠, AppShell):
             같은 사실을 채널에서만 말하면 인박스·활동·설정에서는 갱신이 멈춘 줄
             모른 채 조용한 화면을 읽게 된다. `offline`은 여전히 여기 남는다 —
             허들 컨트롤처럼 지금 쓸 수 있는지를 물어야 하는 것들이 읽는다. */}

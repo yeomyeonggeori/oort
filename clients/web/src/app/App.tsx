@@ -7,6 +7,7 @@ import { isGithubHandoffPath } from "@/features/github/handoff";
 import { githubReturnFromSearch } from "@momo/core/features/github/model";
 import { queryClient } from "@/app/queryClient";
 import { SessionProvider, useRestoredSession } from "@/app/session";
+import { ConnectionProvider } from "@/features/common/connectionModel";
 import {
   createRealtime,
   resolveSpikeRealtimeUrl,
@@ -157,7 +158,10 @@ function FirstRunSession({
         replaceSessionMember,
       }}
     >
-      <HashRouter>{children}</HashRouter>
+      {/* 첫 실행 화면의 쓰기 게이트(`useOffline`)도 같은 연결 상태 모델을 읽는다(#5220). 셸과 같은 입력을 넣는 한 벌이다. */}
+      <ConnectionProvider>
+        <HashRouter>{children}</HashRouter>
+      </ConnectionProvider>
     </SessionProvider>
   );
 }

@@ -556,6 +556,85 @@ fn the_page_cannot_call_tauris_own_tray_api() {
         .is_some());
 }
 
+/// What a close means is decided in ONE place (#5196). `main_window.rs` is the only module that answers a
+/// `CloseRequested`, and the only one that may call `prevent_close` apart from the single branch it hands
+/// to `rotation_hold.rs` ("a close that ends the app while a rotation is open"). A second handler — the
+/// state `rotation_hold.rs` used to have of its own — would answer the same request twice, one hiding the
+/// window while the other lets it die. `lib.rs` hands both entrances to that file: the window event and the
+/// Dock icon's Reopen.
+#[test]
+fn only_main_window_decides_what_a_close_means() {
+    let sources = crate_sources();
+    assert!(sources.iter().any(|(n, _)| n == "main_window.rs"));
+    for (name, src) in &sources {
+        let code = code_only(src);
+        match name.as_str() {
+            "main_window.rs" | "shell_contract.rs" => {}
+            "rotation_hold.rs" => {
+                assert!(
+                    !code.contains("CloseRequested"),
+                    "rotation_hold.rs answers a close request again"
+                );
+                assert_eq!(
+                    code.matches("prevent_close").count(),
+                    1,
+                    "rotation_hold.rs: exactly the one branch main_window hands it"
+                );
+            }
+            other => {
+                assert!(
+                    !code.contains("CloseRequested") && !code.contains("prevent_close"),
+                    "{other} handles a close request; what a close means is main_window.rs's alone"
+                );
+            }
+        }
+    }
+    let lib = code_only(LIB_RS);
+    assert!(
+        lib.contains(".on_window_event(main_window::on_window_event)"),
+        "lib.rs does not hand window events to main_window"
+    );
+    assert!(
+        !lib.contains("rotation_hold::on_close_requested"),
+        "lib.rs still answers a close through rotation_hold"
+    );
+    assert!(
+        lib.contains("main_window::on_reopen(_app, has_visible_windows);"),
+        "lib.rs does not hand the Dock icon's Reopen to main_window"
+    );
+}
+
+/// The close decision's answer to "can the app stay without its window" is written where the menu model it
+/// follows is stored: `apply`, in `tray.rs`. `apply` needs a real status item, so no test can run it; this
+/// pins the one line that feeds `TrayState::keeps_app_running` — a build that loses it still passes every
+/// other test and has a red button that always ends the app (the feature silently dead), and one that
+/// writes it from anything but the page's `compose` keeps an app with nobody signed in running.
+#[test]
+fn the_tray_tells_the_close_decision_whether_someone_is_signed_in() {
+    const TRAY_RS: &str = include_str!("tray.rs");
+    let code = code_only(TRAY_RS);
+    let apply = &code[code
+        .find("fn apply(app: &AppHandle")
+        .expect("tray.rs `apply`")..];
+    let apply = &apply[..apply.find("#[cfg(test)]").unwrap_or(apply.len())];
+    assert_eq!(
+        apply
+            .matches("state.staying.store(model.compose, Ordering::SeqCst);")
+            .count(),
+        1,
+        "`apply` does not write the staying answer from the model's `compose`"
+    );
+    // Written after the model is known to have been drawn, and before the model is moved into `last`.
+    let store = apply.find("state.staying.store(").unwrap();
+    let last = apply
+        .find("applied.last = Some(model);")
+        .expect("`apply` stores the model");
+    assert!(
+        store < last,
+        "the staying answer is written after the model was moved"
+    );
+}
+
 /// The glass invariants (the doc comment of `window_vibrancy.rs`): the window is created
 /// opaque, and the private-API switch is a pair. tauri-build refuses a pair that disagrees,
 /// but only when the build runs; this fails earlier and says why.

@@ -42,9 +42,18 @@ async function load(options: { tauri: boolean; invoke?: Invoke }) {
 const status = {
   unread: 3,
   compose: true,
-  labels: { running: "Running", none: "Nothing running", newMessage: "New message", open: "Open oort", quit: "Quit oort" },
+  readAll: true,
+  labels: {
+    running: "Running",
+    none: "Nothing running",
+    newMessage: "New message",
+    readAll: "Mark all as read",
+    open: "Open oort",
+    quit: "Quit oort",
+  },
   running: [{ id: "0", title: "김인턴", state: "Waiting" }],
   more: null,
+  remaining: null,
 };
 
 describe("setTrayStatus", () => {
