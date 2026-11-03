@@ -331,7 +331,9 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
     expect(code).toMatch(/key=["']thread-panel["']/);
     expect(code).not.toMatch(/\bsetLeaving\b/);
     expect(code).not.toMatch(/\bonExitComplete=/);
-    expect(codeOnly(FILES.chatShell)).toMatch(/root=\{thread\}/);
+    // 패널의 루트는 채널 타임라인의 그 줄을 따르지만(#5191), 닫힘은 그대로 null 이다: 퇴장 연출은 이 null 에 달려 있다.
+    expect(codeOnly(FILES.chatShell)).toMatch(/root=\{threadRoot\}/);
+    expect(codeOnly(FILES.chatShell)).toMatch(/thread\s*===\s*null\s*\?\s*null/);
     expect(codeOnly(FILES.chatShell)).not.toMatch(/thread\s*&&\s*channelId/);
   });
 

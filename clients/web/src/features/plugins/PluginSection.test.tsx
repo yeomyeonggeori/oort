@@ -797,6 +797,62 @@ describe("허용 동의: 동의 없이는 grant POST가 나가지 않는다 (U-2
   });
 });
 
+// =============================================================================
+// #5094 (#5048 D5): 결정 표면의 위험도·승인 칩은 「연결된 도구」 줄보다 **먼저** 선다.
+//
+// 출하 GitHub `github:read`는 도구가 26개라 이름 줄이 열 몇 줄로 접힌다. 칩이 그 뒤에 서 있을 때 760x480 창에서
+// 칩이 스크롤 상자 아래(폴드 밖)로 밀렸다(gate:shell이 같은 사실을 픽셀로 잰다). jsdom은 레이아웃을 못 재므로 여기서는
+// 그 원인(문서 순서)을 잰다: 칩 줄이 같은 권한 행의 도구 줄을 **앞선다**. 도구 줄은 이름이 쉼표로 이어져 있어 개수를
+// 세어 두 권한(읽기 26 · 쓰기 10)이 출하 시드 그대로임을 못박는다 — 짧은 목록으로는 순서가 뒤집혀도 폴드가 안 움직인다.
+// =============================================================================
+describe("동의 창: 위험도·승인 칩은 연결된 도구 줄보다 먼저 선다 (#5094)", () => {
+  beforeEach(() => h.probe.mockResolvedValue([405, 405]));
+
+  async function openConsent(buttonId: "plugin-scope-grant" | "plugin-scope-revoke") {
+    h.role = "member";
+    const el = await mount();
+    await openDetail(el, GITHUB);
+    await until(() => q(el, buttonId));
+    await click(el, buttonId);
+    await until(() => dq("plugin-scope-consent"));
+  }
+
+  function rowOrder(scope: string) {
+    const row = dq(`plugin-scope-row-${scope}`);
+    expect(row, `${scope} 권한 행`).not.toBeNull();
+    const badges = dq(`plugin-scope-badges-${scope}`);
+    // 도구 줄의 testid 는 행마다 같다(리터럴): 그 권한 행 안에서 찾는다.
+    const tools = row?.querySelector('[data-testid="plugin-scope-tools"]') ?? null;
+    expect(badges, `${scope} 칩 줄`).not.toBeNull();
+    expect(tools, `${scope} 도구 줄`).not.toBeNull();
+    return {
+      badgesFirst:
+        ((badges as Node).compareDocumentPosition(tools as Node) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+      toolNames: (tools?.textContent ?? "").replace("연결된 도구:", "").split(",").length,
+      badgeText: badges?.textContent ?? "",
+    };
+  }
+
+  it("회수 창(github:read, 도구 26개)과 허용 창(github:write, 도구 10개) 모두 칩 줄이 도구 줄을 앞선다", async () => {
+    await openConsent("plugin-scope-revoke");
+    const read = rowOrder("github:read");
+    expect(read.toolNames).toBe(26);
+    expect(read.badgesFirst).toBe(true);
+    expect(read.badgeText).toContain("승인:");
+    expect(read.badgeText).toContain("위험도:");
+    await clickDoc("plugin-scope-cancel");
+    await flush();
+    expect(dq("plugin-scope-consent")).toBeNull();
+
+    await click(document.body, "plugin-scope-grant");
+    await until(() => dq("plugin-scope-consent"));
+    const write = rowOrder("github:write");
+    expect(write.toolNames).toBe(10);
+    expect(write.badgesFirst).toBe(true);
+    expect(write.badgeText).toContain("위험도: 쓰기");
+  });
+});
+
 describe("연결 상태 1·2칸이 목록과 상세에서 같다 (U-2)", () => {
   beforeEach(() => h.probe.mockResolvedValue([405, 405]));
 

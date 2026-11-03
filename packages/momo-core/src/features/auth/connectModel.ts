@@ -1,5 +1,6 @@
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import { GUEST_INVITES_PAUSED_CODE } from "../settings/model";
 import { passwordRuleCopy } from "./passwordRuleCopy";
 
 // =============================================================================
@@ -12,15 +13,44 @@ export type ConnectMode = "signIn" | "join";
 
 export type ConnectField = "server" | "email" | "password" | "code";
 
+/**
+ * 로그인 칸 둘이 암호 관리자(iOS 암호 자동 채움)에게 하는 말 (#4669). 값은 RN `textContentType`의
+ * 낱말과 같다. 이메일 칸은 `username`이어야 짝 암호를 같이 채우고(`emailAddress`는 연락처 메일을
+ * 제안한다), 비밀번호 칸은 로그인에서는 저장된 암호를 찾는 `password`, 새 암호를 정하는 가입에서는
+ * 강한 암호를 제안하는 `newPassword`다. 문구가 아니라 시스템에 건네는 표지라서 코어에 둔다.
+ */
+export const EMAIL_AUTOFILL_HINT = "username";
+
+export function passwordAutofillHint(mode: ConnectMode): "password" | "newPassword" {
+  return mode === "join" ? "newPassword" : "password";
+}
+
 /** HTTP statuses whose copy is about the invite code, not the password. */
 const INVITE_CODE_STATUSES = new Set([403, 404, 409, 410]);
+
+/**
+ * The server turns a guest code away with a 400 that names itself (guest invites
+ * are paused, ADR-0128 D1 / ADR-0219 GS-0). It is a verdict on the code, not on
+ * the form, so it is told apart by its `error.code` and not by the bare 400,
+ * which also carries field-shape refusals.
+ */
+function isGuestInvitePaused(cause: unknown): boolean {
+  return (
+    cause instanceof ApiError &&
+    cause.status === 400 &&
+    cause.code === GUEST_INVITES_PAUSED_CODE
+  );
+}
 
 /**
  * Join failures that belong on S1 with the code field, not on S2 (which has
  * no code field). Password / transport / 5xx stay on the account step.
  */
 export function joinFailureBelongsOnGateway(cause: unknown): boolean {
-  return cause instanceof ApiError && INVITE_CODE_STATUSES.has(cause.status);
+  return (
+    (cause instanceof ApiError && INVITE_CODE_STATUSES.has(cause.status)) ||
+    isGuestInvitePaused(cause)
+  );
 }
 
 /**
@@ -111,6 +141,14 @@ function joinFailureCopyBody(cause: unknown): ConnectFailure {
   if (failure.status === 400) {
     const rule = passwordRuleCopy(failure.code);
     if (rule) return { message: rule, suggestSignIn: false, retryable: false };
+    // A guest code: there is no new link to ask for, so the sentence does not say so.
+    if (isGuestInvitePaused(failure)) {
+      return {
+        message: `게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있습니다. ${ASK_ADMIN_SIGN_IN}`,
+        suggestSignIn: false,
+        retryable: false,
+      };
+    }
   }
   const detail = failure.message.toLowerCase();
   switch (failure.status) {

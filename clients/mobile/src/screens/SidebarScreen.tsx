@@ -58,7 +58,11 @@ import {
 } from '../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
 import {useAgentLiveness} from '../features/agents/useAgentLiveness';
-import {useAgentWorkingSignals} from '../features/agents/workingSignal';
+import {
+  useAgentWorkingSignals,
+  withApprovalWaits,
+} from '../features/agents/workingSignal';
+import {useWorkspaceApprovalWaits} from '../features/conversation/usePendingApprovals';
 import {StatusDot} from '../features/presence/StatusDot';
 import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
 import {
@@ -76,6 +80,7 @@ import {
   type SidebarRow,
   type SidebarSection,
 } from '../features/sidebar/rows';
+import {CHIP_TONE, type ChipTone, type RowChip} from '../features/sidebar/rowEmphasis';
 import {useGoneUnreadVerdicts} from '../features/sidebar/useGoneUnreadVerdicts';
 import {dmClosedEntries, dmClosureMode, dmVerdicts} from '../features/sidebar/dmVerdicts';
 import {DmClosedSheet} from '../features/sidebar/DmClosedSheet';
@@ -460,7 +465,8 @@ export default function SidebarScreen({
   // 시계는 두지 않는다 — 카드는 경과 숫자를 그리지 않고, 스토어가 발행·해제마다
   // 다시 그리게 하며, 90초가 지난 턴은 레일의 15초 청소가 지운다(에이전트 목록과
   // 같은 거래, `AgentsScreen` 의 주석). 렌더 때의 벽시계가 TTL 을 한 번 더 건다.
-  const signals = useAgentWorkingSignals();
+  const railSignals = useAgentWorkingSignals();
+  const approvalWaitList = useWorkspaceApprovalWaits();
   const railLive = realtime.status === 'connected';
   const allChannels = useMemo(
     () => [...channelsQuery.groups.channels, ...channelsQuery.groups.dms],
@@ -470,6 +476,10 @@ export default function SidebarScreen({
   // 줄 맨 앞에 싣는다(#4285). 누구를 읽을지는 카드를 만들기 전에 알아야 한다. 읽지 않는 때(다른
   // 상태의 카드)는 쿼리가 서지 않는다.
   const cardNowMs = Date.now();
+  // 승인 원장이 레일보다 이긴다(#3738, 대화 화면의 자리표시·레일과 같은 덮어쓰기 — #5066·#5085). 서버는 승인에 걸린 run 을 레일
+  // 프레임으로 알리지 않아서(중간 프레임은 늘 `running`) 레일만 보면 사람을 기다리는 에이전트도 「작업 중」이다. 아래 두 호출이 **같은**
+  // 덮은 목록을 읽어야 한다: 근거 줄의 생존 판정을 카드와 다른 에이전트에게서 읽지 않게.
+  const signals = withApprovalWaits(railSignals, approvalWaitList, cardNowMs);
   const leadTurn = leadWorkingTurn(signals, cardNowMs);
   const waitingAgentId =
     leadTurn !== undefined && isUntakenHumanRun(leadTurn.server)
@@ -1038,7 +1048,8 @@ function SectionHead({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
-  const icon: HomeIconName = section.key === 'channels' ? 'hash' : 'dms';
+  // 머리의 아이콘은 줄의 아이콘(`#`·자물쇠, #4953)과 달라야 「채널 묶음」으로 읽힌다 (#4979). 한 줄이라 바꾸기 쉽다.
+  const icon: HomeIconName = section.key === 'channels' ? 'layers' : 'dms';
   return (
     <View style={styles.secHead} testID={`home-section-${section.key}`}>
       <Image
@@ -1203,13 +1214,14 @@ function Row({
       if (actionTarget !== null) onOpenActions(actionTarget);
     },
   });
-  const unread = row.unreadCount > 0 || row.mentionCount > 0;
+  // 이름·아이콘의 회색과 굵기, 오른쪽 칩은 `rows.ts` 가 줄마다 계산해 둔 한 값이다(`rowEmphasis.ts`).
+  const {emphasis} = row;
   let lead: React.ReactNode;
   if (row.kind === 'channel') {
     lead = (
       <Image
         source={row.isPrivate ? HOME_ICONS.lock : HOME_ICONS.hash}
-        style={[styles.icon22, {tintColor: unread ? palette.text : palette.icon}]}
+        style={[styles.icon22, {tintColor: emphasis.dim ? palette.textMuted : palette.text}]}
         testID={row.isPrivate ? 'home-row-lock' : 'home-row-hash'}
       />
     );
@@ -1258,7 +1270,7 @@ function Row({
         if (key !== null && actionTarget !== null) onRunAction(actionTarget, key);
       }}
       onPress={onPress}
-      delayLongPress={longPress.delayLongPress}
+      {...longPress.pressTiming}
       onLongPress={longPress.onLongPress}
       {...longPress.handlers}
       style={({pressed}) => [
@@ -1272,8 +1284,8 @@ function Row({
         <Text
           style={[
             styles.rowTitle,
-            unread && styles.rowTitleUnread,
-            row.muted && !unread && styles.rowTitleMuted,
+            emphasis.bold && styles.rowTitleUnread,
+            emphasis.dim && styles.rowTitleMuted,
           ]}
           numberOfLines={1}
           ellipsizeMode="tail">
@@ -1287,22 +1299,49 @@ function Row({
       </View>
       {busy ? (
         <ActivityIndicator color={palette.textMuted} testID="home-row-busy" />
-      ) : row.mentionCount > 0 ? (
-        // 멘션이 있으면 잉크 `@N` 하나가 선다(시안 `.a-badge.at`). 안 읽은 수는
-        // 굵은 이름과 낭독 라벨이 함께 진다 — 배지 둘을 나란히 세우지 않는다.
-        <View style={[styles.badge, styles.badgeAt]} testID="home-badge-mention">
-          <Text style={[styles.badgeText, styles.badgeAtText]} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-            @{row.mentionCount > 99 ? '99+' : row.mentionCount}
-          </Text>
-        </View>
-      ) : row.unreadCount > 0 ? (
-        <View style={styles.badge} testID="home-badge-unread">
-          <Text style={styles.badgeText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-            {row.unreadCount > 99 ? '99+' : row.unreadCount}
-          </Text>
-        </View>
+      ) : emphasis.chip !== null ? (
+        <RowChipView chip={emphasis.chip} />
       ) : null}
     </Pressable>
+  );
+}
+
+/** 칩마다의 testID. 키가 이름 붙은 숫자(`CHIP_TONE`)라 이 표에는 문자열 비교가 없다. */
+const CHIP_TEST_ID: Readonly<Record<ChipTone, string>> = {
+  [CHIP_TONE.mention]: 'home-badge-mention',
+  [CHIP_TONE.count]: 'home-badge-unread',
+  [CHIP_TONE.muted]: 'home-badge-muted',
+};
+
+/**
+ * 줄 오른쪽의 개수 칩(시안 `.a-badge`). 셋 중 하나다: 멘션은 잉크 `@N`(시안 `.a-badge.at`), 안 읽음은 신호색 `N`, 음소거는
+ * 중성으로 흐린 칩(`surfaceMuted` 위 `textMuted`) — 신호색·잉크를 입지 않는다. 칩 둘을 나란히 세우지 않는다: 멘션이 있으면
+ * 하나(`@N`)이고 안 읽은 수는 굵은 이름과 낭독 라벨이 함께 진다.
+ *
+ * 큰 글씨에서 잘리지 않는 이유(구조): 높이·너비는 `minHeight`·`minWidth` 뿐이라 글자가 크면 칩이 **자란다**, 줄어들지 않는
+ * flex 자식이라 모자란 폭은 이름(`flexShrink: 1`, 한 줄 말줄임)이 먼저 내준다, 글자는 이름 아닌 컨트롤 글자의 상한
+ * (`BAR_CONTROL_MAX_SCALE`)을 따른다.
+ */
+function RowChipView({chip}: {chip: RowChip}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const box =
+    chip.tone === CHIP_TONE.mention
+      ? styles.badgeAt
+      : chip.tone === CHIP_TONE.muted
+        ? styles.badgeMuted
+        : null;
+  const ink =
+    chip.tone === CHIP_TONE.mention
+      ? styles.badgeAtText
+      : chip.tone === CHIP_TONE.muted
+        ? styles.badgeMutedText
+        : null;
+  return (
+    <View style={[styles.badge, box]} testID={CHIP_TEST_ID[chip.tone]}>
+      <Text style={[styles.badgeText, ink]} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+        {chip.glyphs}
+      </Text>
+    </View>
   );
 }
 
@@ -1806,8 +1845,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     backgroundColor: color.accent,
   },
   badgeAt: {backgroundColor: color.primary},
+  // 음소거한 줄의 칩: 신호색도 잉크도 아닌 중성 채움 위의 흐린 글자. 새 토큰 없이 기존 둘의 조합이라 대비(AA 4.5)는 `home.test.tsx` 의 음소거 시험이 두 스킴에서 잰다.
+  badgeMuted: {backgroundColor: color.surfaceMuted},
   badgeText: {fontSize: font.meta, fontWeight: '700', color: color.onAccent},
   badgeAtText: {color: color.onPrimary},
+  badgeMutedText: {color: color.textMuted},
 
   // ---- 카드 ------------------------------------------------------------------
   cardPress: {marginBottom: HOME.cardBelow, borderRadius: HOME.cardRadius},

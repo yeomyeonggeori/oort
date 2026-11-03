@@ -2,6 +2,67 @@
 import type { MessageCatalog } from "../types";
 
 export const catalog: MessageCatalog = {
+  "attachments.tray.noticeDismiss": [
+    {
+      "type": 0,
+      "value": "Got it"
+    }
+  ],
+  "attachments.tray.overflow": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " file doesn't"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " files don't"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " fit: a message holds up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "attachments.tray.removeNamed": [
+    {
+      "type": 0,
+      "value": "Remove attachment "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -48,6 +109,30 @@ export const catalog: MessageCatalog = {
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "connect.language.close": [
+    {
+      "type": 0,
+      "value": "Close language list"
+    }
+  ],
+  "connect.language.hint": [
+    {
+      "type": 0,
+      "value": "Opens the language list."
+    }
+  ],
+  "connect.rememberEmail.hint": [
+    {
+      "type": 0,
+      "value": "Saved on this device only. Turning it off erases it right away."
+    }
+  ],
+  "connect.rememberEmail.label": [
+    {
+      "type": 0,
+      "value": "Remember my email"
     }
   ],
   "desktop.menu.close": [
@@ -190,6 +275,347 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "desktop.tray.more": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " more"
+    }
+  ],
+  "desktop.tray.newMessage": [
+    {
+      "type": 0,
+      "value": "New message"
+    }
+  ],
+  "desktop.tray.none": [
+    {
+      "type": 0,
+      "value": "Nothing running"
+    }
+  ],
+  "desktop.tray.open": [
+    {
+      "type": 0,
+      "value": "Open oort"
+    }
+  ],
+  "desktop.tray.running": [
+    {
+      "type": 0,
+      "value": "Running"
+    }
+  ],
+  "desktop.tray.stateBlocked": [
+    {
+      "type": 0,
+      "value": "Waiting"
+    }
+  ],
+  "desktop.tray.stateWorking": [
+    {
+      "type": 0,
+      "value": "Working"
+    }
+  ],
+  "expressions.add.adminsOnly": [
+    {
+      "type": 0,
+      "value": "Only admins can add new pictures on this team."
+    }
+  ],
+  "expressions.add.backLabel": [
+    {
+      "type": 0,
+      "value": "Back to the team emoji list"
+    }
+  ],
+  "expressions.add.import": [
+    {
+      "type": 0,
+      "value": "Import"
+    }
+  ],
+  "expressions.add.importDetail": [
+    {
+      "type": 0,
+      "value": "Register your own picture or link as a team emoji"
+    }
+  ],
+  "expressions.add.make": [
+    {
+      "type": 0,
+      "value": "Make with AI"
+    }
+  ],
+  "expressions.add.makeDetail": [
+    {
+      "type": 0,
+      "value": "Your team's image model turns one photo into an emoji"
+    }
+  ],
+  "expressions.add.offlineHint": [
+    {
+      "type": 0,
+      "value": "Available when you are back online"
+    }
+  ],
+  "expressions.add.trigger": [
+    {
+      "type": 0,
+      "value": "Add"
+    }
+  ],
+  "expressions.add.triggerHint": [
+    {
+      "type": 0,
+      "value": "Import a picture or make one with AI"
+    }
+  ],
+  "expressions.draft.another": [
+    {
+      "type": 0,
+      "value": "Choose another picture"
+    }
+  ],
+  "expressions.draft.approve": [
+    {
+      "type": 0,
+      "value": "Register in team library"
+    }
+  ],
+  "expressions.draft.approveFailed": [
+    {
+      "type": 0,
+      "value": "Could not register it. Check the name, your permission and the preview, then try again."
+    }
+  ],
+  "expressions.draft.approving": [
+    {
+      "type": 0,
+      "value": "Registering"
+    }
+  ],
+  "expressions.draft.previewLabel": [
+    {
+      "type": 0,
+      "value": "Preview before registering "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.draft.replaceFailed": [
+    {
+      "type": 0,
+      "value": "Could not upload the picture. Check the file and upload it again."
+    }
+  ],
+  "expressions.draft.replacing": [
+    {
+      "type": 0,
+      "value": "Uploading"
+    }
+  ],
+  "expressions.draft.rights": [
+    {
+      "type": 0,
+      "value": "I have the right to register this picture in the team library. If it shows a person, only the named person approves."
+    }
+  ],
+  "expressions.draft.source": [
+    {
+      "type": 0,
+      "value": "Source: "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "expressions.draft.waiting": [
+    {
+      "type": 0,
+      "value": "Loading the picture. Register after you have seen the new preview."
+    }
+  ],
+  "expressions.import.displayName": [
+    {
+      "type": 0,
+      "value": "Display name"
+    }
+  ],
+  "expressions.import.displayNamePlaceholder": [
+    {
+      "type": 0,
+      "value": "Happy dance"
+    }
+  ],
+  "expressions.import.face": [
+    {
+      "type": 0,
+      "value": "Human faces"
+    }
+  ],
+  "expressions.import.faceNone": [
+    {
+      "type": 0,
+      "value": "No human faces"
+    }
+  ],
+  "expressions.import.faceOther": [
+    {
+      "type": 0,
+      "value": "Someone else or several people"
+    }
+  ],
+  "expressions.import.faceOtherIssue": [
+    {
+      "type": 0,
+      "value": "Only a picture of your own single face can be approved. Please do not upload pictures of other people or groups."
+    }
+  ],
+  "expressions.import.faceSelf": [
+    {
+      "type": 0,
+      "value": "Only my own face"
+    }
+  ],
+  "expressions.import.fileIssue": [
+    {
+      "type": 0,
+      "value": "Choose a PNG, JPG, WebP or GIF of 5 MB or less."
+    }
+  ],
+  "expressions.import.fixedNote": [
+    {
+      "type": 0,
+      "value": "The name and picture cannot be changed after registering. Ask other people to upload their own face themselves."
+    }
+  ],
+  "expressions.import.metadataIssue": [
+    {
+      "type": 0,
+      "value": "Use 2 to 30 lowercase letters, digits, underscores or hyphens for the name, up to 40 characters for the display name and up to 8 tags."
+    }
+  ],
+  "expressions.import.name": [
+    {
+      "type": 0,
+      "value": "Fixed name"
+    }
+  ],
+  "expressions.import.namePlaceholder": [
+    {
+      "type": 0,
+      "value": "happy_dance"
+    }
+  ],
+  "expressions.import.nameTaken": [
+    {
+      "type": 0,
+      "value": "That name overlaps a standard emoji. Please use another name."
+    }
+  ],
+  "expressions.import.offline": [
+    {
+      "type": 0,
+      "value": "Try again when you are back online."
+    }
+  ],
+  "expressions.import.photo": [
+    {
+      "type": 0,
+      "value": "Picture to upload"
+    }
+  ],
+  "expressions.import.photoChange": [
+    {
+      "type": 0,
+      "value": "Choose another picture"
+    }
+  ],
+  "expressions.import.photoDenied": [
+    {
+      "type": 0,
+      "value": "Photo access is turned off. Allow photo access in device settings and try again."
+    }
+  ],
+  "expressions.import.photoPick": [
+    {
+      "type": 0,
+      "value": "Choose from album"
+    }
+  ],
+  "expressions.import.photoPicked": [
+    {
+      "type": 0,
+      "value": "Chosen picture "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "expressions.import.photoUnavailable": [
+    {
+      "type": 0,
+      "value": "Could not open the album. Please try again."
+    }
+  ],
+  "expressions.import.prepare": [
+    {
+      "type": 0,
+      "value": "Create preview"
+    }
+  ],
+  "expressions.import.prepareFailed": [
+    {
+      "type": 0,
+      "value": "Could not create the preview. Check the name, the file and your connection, then try again."
+    }
+  ],
+  "expressions.import.preparing": [
+    {
+      "type": 0,
+      "value": "Creating preview"
+    }
+  ],
+  "expressions.import.tags": [
+    {
+      "type": 0,
+      "value": "Tags (comma separated)"
+    }
+  ],
+  "expressions.import.tagsPlaceholder": [
+    {
+      "type": 0,
+      "value": "party, dance"
+    }
+  ],
+  "expressions.import.url": [
+    {
+      "type": 0,
+      "value": "Source link (optional)"
+    }
+  ],
+  "expressions.import.urlIssue": [
+    {
+      "type": 0,
+      "value": "Enter a public HTTPS source link."
+    }
+  ],
+  "expressions.import.urlPlaceholder": [
+    {
+      "type": 0,
+      "value": "https://giphy.com/gifs/…"
+    }
+  ],
   "expressions.kind.autoNote": [
     {
       "type": 0,
@@ -226,6 +652,361 @@ export const catalog: MessageCatalog = {
       "value": "Sticker"
     }
   ],
+  "expressions.make.agent": [
+    {
+      "type": 0,
+      "value": "Agent to make it"
+    }
+  ],
+  "expressions.make.agentHint": [
+    {
+      "type": 0,
+      "value": "An agent without a picture tool will say it cannot make one."
+    }
+  ],
+  "expressions.make.agentLoading": [
+    {
+      "type": 0,
+      "value": "Loading the agent list."
+    }
+  ],
+  "expressions.make.agentMissing": [
+    {
+      "type": 0,
+      "value": "Choose an agent to make it."
+    }
+  ],
+  "expressions.make.agentPaused": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " (asleep)"
+    }
+  ],
+  "expressions.make.chipLabel": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "description"
+    }
+  ],
+  "expressions.make.done": [
+    {
+      "type": 0,
+      "value": "OK"
+    }
+  ],
+  "expressions.make.failDm": [
+    {
+      "type": 0,
+      "value": "Could not open the conversation with the agent. Check your connection and try again."
+    }
+  ],
+  "expressions.make.failDmForbidden": [
+    {
+      "type": 0,
+      "value": "You do not have permission to open a conversation with an agent in this workspace. Please ask an admin."
+    }
+  ],
+  "expressions.make.failDmMissing": [
+    {
+      "type": 0,
+      "value": "That agent could not be found. Reload the list and choose again."
+    }
+  ],
+  "expressions.make.failSend": [
+    {
+      "type": 0,
+      "value": "Could not send the request. Check your connection and try again."
+    }
+  ],
+  "expressions.make.failUpload": [
+    {
+      "type": 0,
+      "value": "Could not upload the photo. Check your connection and try again."
+    }
+  ],
+  "expressions.make.failUploadForbidden": [
+    {
+      "type": 0,
+      "value": "Files cannot be uploaded to this conversation. Please ask an admin."
+    }
+  ],
+  "expressions.make.failUploadNoArchive": [
+    {
+      "type": 0,
+      "value": "File storage is not connected, so the photo cannot be uploaded. Please tell the server admin."
+    }
+  ],
+  "expressions.make.failUploadTooLarge": [
+    {
+      "type": 0,
+      "value": "The photo is too large to upload. Choose a smaller photo."
+    }
+  ],
+  "expressions.make.intro": [
+    {
+      "type": 0,
+      "value": "An agent makes a team emoji from the photo you pick, and the result arrives in the conversation as an approval card."
+    }
+  ],
+  "expressions.make.motion": [
+    {
+      "type": 0,
+      "value": "Motion"
+    }
+  ],
+  "expressions.make.motionDuplicate": [
+    {
+      "type": 0,
+      "value": "You cannot choose the same motion twice."
+    }
+  ],
+  "expressions.make.motionHint": [
+    {
+      "type": 0,
+      "value": "You can choose up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": ". The preview is only similar to the real motion, and you check the actual result on the approval card."
+    }
+  ],
+  "expressions.make.motionMissing": [
+    {
+      "type": 0,
+      "value": "Choose at least one motion or choose No motion."
+    }
+  ],
+  "expressions.make.motionStillMixed": [
+    {
+      "type": 0,
+      "value": "No motion cannot be combined with other motions. Clear the first choice first."
+    }
+  ],
+  "expressions.make.motionTooMany": [
+    {
+      "type": 0,
+      "value": "You can choose up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " motions."
+    }
+  ],
+  "expressions.make.motionUnknown": [
+    {
+      "type": 0,
+      "value": "That motion is not known. Choose again."
+    }
+  ],
+  "expressions.make.noAgents": [
+    {
+      "type": 0,
+      "value": "No agents yet"
+    }
+  ],
+  "expressions.make.noAgentsDetail": [
+    {
+      "type": 0,
+      "value": "You need an agent to make with AI. For now you can import from a photo or a link."
+    }
+  ],
+  "expressions.make.note": [
+    {
+      "type": 0,
+      "value": "Request note (optional)"
+    }
+  ],
+  "expressions.make.noteCount": [
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "/"
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    }
+  ],
+  "expressions.make.notePlaceholder": [
+    {
+      "type": 0,
+      "value": "e.g. Make it a smiling face"
+    }
+  ],
+  "expressions.make.noteTooLong": [
+    {
+      "type": 0,
+      "value": "The request note can be up to "
+    },
+    {
+      "type": 2,
+      "value": "max",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " characters."
+    }
+  ],
+  "expressions.make.offline": [
+    {
+      "type": 0,
+      "value": "You are offline. You can send the request when you are back online."
+    }
+  ],
+  "expressions.make.photo": [
+    {
+      "type": 0,
+      "value": "Original photo"
+    }
+  ],
+  "expressions.make.photoChange": [
+    {
+      "type": 0,
+      "value": "Choose another photo"
+    }
+  ],
+  "expressions.make.photoDenied": [
+    {
+      "type": 0,
+      "value": "Photo access is turned off. Allow photo access in device settings and try again."
+    }
+  ],
+  "expressions.make.photoDimensions": [
+    {
+      "type": 0,
+      "value": "The photo is too wide or tall. Reduce it to 4096 pixels or less and 16 million pixels or less."
+    }
+  ],
+  "expressions.make.photoEmpty": [
+    {
+      "type": 0,
+      "value": "This file is empty. Choose another photo."
+    }
+  ],
+  "expressions.make.photoMissing": [
+    {
+      "type": 0,
+      "value": "Choose an original photo."
+    }
+  ],
+  "expressions.make.photoPick": [
+    {
+      "type": 0,
+      "value": "Choose from album"
+    }
+  ],
+  "expressions.make.photoPreview": [
+    {
+      "type": 0,
+      "value": "Preview of the chosen original photo"
+    }
+  ],
+  "expressions.make.photoRule": [
+    {
+      "type": 0,
+      "value": "You can use a still PNG, JPG, WebP or GIF of 5 MB or less."
+    }
+  ],
+  "expressions.make.photoSize": [
+    {
+      "type": 0,
+      "value": "The photo is too large. Choose one of 5 MB or less."
+    }
+  ],
+  "expressions.make.photoType": [
+    {
+      "type": 0,
+      "value": "Choose a PNG, JPG, WebP or GIF photo."
+    }
+  ],
+  "expressions.make.photoUnavailable": [
+    {
+      "type": 0,
+      "value": "Could not open the album. Please try again."
+    }
+  ],
+  "expressions.make.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "expressions.make.rosterFailed": [
+    {
+      "type": 0,
+      "value": "Could not load the agent list. Please try again."
+    }
+  ],
+  "expressions.make.sending": [
+    {
+      "type": 0,
+      "value": "Sending the request"
+    }
+  ],
+  "expressions.make.sent": [
+    {
+      "type": 0,
+      "value": "Request sent. The agent reply and approval card appear in the conversation."
+    }
+  ],
+  "expressions.make.sizeInvalid": [
+    {
+      "type": 0,
+      "value": "Check the size."
+    }
+  ],
+  "expressions.make.stepDm": [
+    {
+      "type": 0,
+      "value": "Opening the conversation with the agent"
+    }
+  ],
+  "expressions.make.stepSend": [
+    {
+      "type": 0,
+      "value": "Sending the request"
+    }
+  ],
+  "expressions.make.stepUpload": [
+    {
+      "type": 0,
+      "value": "Uploading the photo"
+    }
+  ],
+  "expressions.make.submit": [
+    {
+      "type": 0,
+      "value": "Send request"
+    }
+  ],
   "expressions.panel.viewEmpty": [
     {
       "type": 0,
@@ -254,6 +1035,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Drawing your picture (up to 2 minutes)"
+    }
+  ],
+  "expressions.photo.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel"
+    }
+  ],
+  "expressions.photo.cancelHint": [
+    {
+      "type": 0,
+      "value": "This only stops waiting. The server may still finish a picture it already started."
+    }
+  ],
+  "expressions.photo.cancelled": [
+    {
+      "type": 0,
+      "value": "Canceled. The server may still finish a picture it already started."
     }
   ],
   "expressions.photo.caricatureHint": [
@@ -327,7 +1126,7 @@ export const catalog: MessageCatalog = {
   "expressions.photo.cutoutUnchanged": [
     {
       "type": 0,
-      "value": "The background could not be removed. The preview below is what will be saved."
+      "value": "The background could not be removed. The preview below is what will be registered."
     }
   ],
   "expressions.photo.displayNameLabel": [
@@ -504,6 +1303,12 @@ export const catalog: MessageCatalog = {
       "value": "Go to AI settings"
     }
   ],
+  "expressions.photo.noModelManagePhone": [
+    {
+      "type": 0,
+      "value": "Connect the image model in AI settings on the Mac or web app."
+    }
+  ],
   "expressions.photo.originLabel": [
     {
       "type": 0,
@@ -513,7 +1318,7 @@ export const catalog: MessageCatalog = {
   "expressions.photo.photoHint": [
     {
       "type": 0,
-      "value": "Use a still PNG, JPEG, WebP or GIF up to 5 MiB."
+      "value": "Use a still PNG, JPG, WebP or GIF up to 5 MB."
     }
   ],
   "expressions.photo.photoLabel": [
@@ -537,13 +1342,13 @@ export const catalog: MessageCatalog = {
   "expressions.photo.photoSize": [
     {
       "type": 0,
-      "value": "The photo is too large. Choose one up to 5 MiB."
+      "value": "The photo is too large. Choose one up to 5 MB."
     }
   ],
   "expressions.photo.photoType": [
     {
       "type": 0,
-      "value": "Choose a PNG, JPEG, WebP or GIF photo."
+      "value": "Choose a PNG, JPG, WebP or GIF photo."
     }
   ],
   "expressions.photo.providerGemini": [
@@ -580,6 +1385,192 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "photo, face"
+    }
+  ],
+  "expressions.sheet.a11y": [
+    {
+      "type": 0,
+      "value": "Choose an emoticon, emoji or GIF"
+    }
+  ],
+  "expressions.sheet.close": [
+    {
+      "type": 0,
+      "value": "Close emoticons, emoji and GIFs"
+    }
+  ],
+  "expressions.sheet.emptyEmoticon": [
+    {
+      "type": 0,
+      "value": "No team emoticons yet. Use “Add” above to make or import one."
+    }
+  ],
+  "expressions.sheet.emptyGif": [
+    {
+      "type": 0,
+      "value": "No moving pictures yet. Use “Add” on the Emoticons tab to import or make one."
+    }
+  ],
+  "expressions.sheet.emptyLegacy": [
+    {
+      "type": 0,
+      "value": "No team emoji yet."
+    }
+  ],
+  "expressions.sheet.emptyTeam": [
+    {
+      "type": 0,
+      "value": "No team emoji yet. Use “Add” above to import one."
+    }
+  ],
+  "expressions.sheet.error": [
+    {
+      "type": 0,
+      "value": "Could not load the team library. Please try again."
+    }
+  ],
+  "expressions.sheet.hintInsert": [
+    {
+      "type": 0,
+      "value": "Add to the message box"
+    }
+  ],
+  "expressions.sheet.hintPreview": [
+    {
+      "type": 0,
+      "value": "Preview at full size"
+    }
+  ],
+  "expressions.sheet.hintReact": [
+    {
+      "type": 0,
+      "value": "React"
+    }
+  ],
+  "expressions.sheet.loading": [
+    {
+      "type": 0,
+      "value": "Loading the team library…"
+    }
+  ],
+  "expressions.sheet.noMatch": [
+    {
+      "type": 0,
+      "value": "Nothing matches. Try another name or tag."
+    }
+  ],
+  "expressions.sheet.offline": [
+    {
+      "type": 0,
+      "value": "You are offline. Connect to see the team library."
+    }
+  ],
+  "expressions.sheet.open": [
+    {
+      "type": 0,
+      "value": "Choose an emoticon, emoji or GIF"
+    }
+  ],
+  "expressions.sheet.pickAgain": [
+    {
+      "type": 0,
+      "value": "Choose another"
+    }
+  ],
+  "expressions.sheet.placeholderEmoji": [
+    {
+      "type": 0,
+      "value": "Search by name or :code:"
+    }
+  ],
+  "expressions.sheet.placeholderTeam": [
+    {
+      "type": 0,
+      "value": "Search by name or tag"
+    }
+  ],
+  "expressions.sheet.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "expressions.sheet.searchEmoji": [
+    {
+      "type": 0,
+      "value": "Search emoji"
+    }
+  ],
+  "expressions.sheet.searchEmoticon": [
+    {
+      "type": 0,
+      "value": "Search emoticons"
+    }
+  ],
+  "expressions.sheet.searchGif": [
+    {
+      "type": 0,
+      "value": "Search GIFs"
+    }
+  ],
+  "expressions.sheet.searchTeam": [
+    {
+      "type": 0,
+      "value": "Search team emoji"
+    }
+  ],
+  "expressions.sheet.send": [
+    {
+      "type": 0,
+      "value": "Send"
+    }
+  ],
+  "expressions.sheet.sending": [
+    {
+      "type": 0,
+      "value": "Checking…"
+    }
+  ],
+  "expressions.sheet.tabEmoji": [
+    {
+      "type": 0,
+      "value": "Emoji"
+    }
+  ],
+  "expressions.sheet.tabEmoticon": [
+    {
+      "type": 0,
+      "value": "Emoticons"
+    }
+  ],
+  "expressions.sheet.tabGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.sheet.tabs": [
+    {
+      "type": 0,
+      "value": "Kinds"
+    }
+  ],
+  "expressions.sheet.tabTeam": [
+    {
+      "type": 0,
+      "value": "Team emoji"
+    }
+  ],
+  "expressions.sheet.title": [
+    {
+      "type": 0,
+      "value": "Emoticons, emoji & GIFs"
+    }
+  ],
+  "expressions.sheet.unavailable": [
+    {
+      "type": 0,
+      "value": "This one is not available right now. Please choose another."
     }
   ],
   "mobile.connection.reconnectNow": [
@@ -738,16 +1729,222 @@ export const catalog: MessageCatalog = {
       "value": "Back to settings"
     }
   ],
-  "mobile.locale.permissionNotice": [
-    {
-      "type": 0,
-      "value": "Permission prompts follow the iOS language setting. Changing the app language may not change these prompts immediately."
-    }
-  ],
   "mobile.locale.saving": [
     {
       "type": 0,
       "value": "Applying language…"
+    }
+  ],
+  "notifications.inviteLink.fallback": [
+    {
+      "type": 0,
+      "value": "Posted an invite link"
+    }
+  ],
+  "releaseNotes.action.close": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "releaseNotes.action.details": [
+    {
+      "type": 0,
+      "value": "See details"
+    }
+  ],
+  "releaseNotes.detail.back": [
+    {
+      "type": 0,
+      "value": "Back to What's new"
+    }
+  ],
+  "releaseNotes.detail.changed": [
+    {
+      "type": 0,
+      "value": "What changed"
+    }
+  ],
+  "releaseNotes.detail.tryIt": [
+    {
+      "type": 0,
+      "value": "Try it like this"
+    }
+  ],
+  "releaseNotes.page.back": [
+    {
+      "type": 0,
+      "value": "Back to settings"
+    }
+  ],
+  "releaseNotes.page.description": [
+    {
+      "type": 0,
+      "value": "What changed in each version and how to try it."
+    }
+  ],
+  "releaseNotes.page.empty": [
+    {
+      "type": 0,
+      "value": "There are no updates to show yet."
+    }
+  ],
+  "releaseNotes.page.openHint": [
+    {
+      "type": 0,
+      "value": "See what changed in each version."
+    }
+  ],
+  "releaseNotes.page.title": [
+    {
+      "type": 0,
+      "value": "What's new"
+    }
+  ],
+  "releaseNotes.popup.close": [
+    {
+      "type": 0,
+      "value": "Close What's new"
+    }
+  ],
+  "releaseNotes.popup.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " more change"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " more changes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "releaseNotes.popup.title": [
+    {
+      "type": 0,
+      "value": "What's new"
+    }
+  ],
+  "releaseNotes.surface.desktop": [
+    {
+      "type": 0,
+      "value": "Desktop"
+    }
+  ],
+  "releaseNotes.surface.label": [
+    {
+      "type": 0,
+      "value": "Shown on"
+    }
+  ],
+  "releaseNotes.surface.phone": [
+    {
+      "type": 0,
+      "value": "Phone"
+    }
+  ],
+  "releaseNotes.version.current": [
+    {
+      "type": 0,
+      "value": "Your version"
+    }
+  ],
+  "releaseNotes.version.label": [
+    {
+      "type": 0,
+      "value": "Version "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    }
+  ],
+  "releaseNotes.version.releasedOn": [
+    {
+      "type": 0,
+      "value": "Released "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
+  "reply.card.cancel": [
+    {
+      "type": 0,
+      "value": "Cancel reply"
+    }
+  ],
+  "reply.card.excerptEmpty": [
+    {
+      "type": 0,
+      "value": "No message content"
+    }
+  ],
+  "reply.card.excerptExpression": [
+    {
+      "type": 0,
+      "value": "Emoticon"
+    }
+  ],
+  "reply.card.excerptFile": [
+    {
+      "type": 0,
+      "value": "File"
+    }
+  ],
+  "reply.card.excerptPhoto": [
+    {
+      "type": 0,
+      "value": "Photo"
+    }
+  ],
+  "reply.card.headerOther": [
+    {
+      "type": 0,
+      "value": "Reply to "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "reply.card.headerSelf": [
+    {
+      "type": 0,
+      "value": "Reply to my message"
+    }
+  ],
+  "reply.composer.placeholder": [
+    {
+      "type": 0,
+      "value": "Write a reply"
+    }
+  ],
+  "reply.composer.send": [
+    {
+      "type": 0,
+      "value": "Send reply"
     }
   ],
   "settings.aiLimits.ceilingSearches": [
@@ -1290,6 +2487,12 @@ export const catalog: MessageCatalog = {
       "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
     }
   ],
+  "settings.invite.guestInvitesPaused": [
+    {
+      "type": 0,
+      "value": "Guest invites are paused until channel-specific invites are available."
+    }
+  ],
   "settings.notifications.threadReplyDescription": [
     {
       "type": 0,
@@ -1300,12 +2503,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "New replies in followed threads"
-    }
-  ],
-  "settings.profile.languageBeta": [
-    {
-      "type": 0,
-      "value": "Beta"
     }
   ],
   "settings.profile.languageCurrent": [
@@ -1339,7 +2536,13 @@ export const catalog: MessageCatalog = {
   "settings.profile.languagePartialNotice": [
     {
       "type": 0,
-      "value": "Screens that are not yet translated appear in Korean."
+      "value": "Some screens are still in Korean."
+    }
+  ],
+  "settings.profile.languageReload": [
+    {
+      "type": 0,
+      "value": "Reload"
     }
   ],
   "settings.profile.languageRetry": [
@@ -1760,6 +2963,36 @@ export const catalog: MessageCatalog = {
       "value": "Checking the key."
     }
   ],
+  "timeline.lightbox.copied": [
+    {
+      "type": 0,
+      "value": "Copied"
+    }
+  ],
+  "timeline.lightbox.copy": [
+    {
+      "type": 0,
+      "value": "Copy image"
+    }
+  ],
+  "timeline.lightbox.copyFailed": [
+    {
+      "type": 0,
+      "value": "Couldn't copy the image. Download the file instead."
+    }
+  ],
+  "timeline.lightbox.zoomIn": [
+    {
+      "type": 0,
+      "value": "Zoom in"
+    }
+  ],
+  "timeline.lightbox.zoomOut": [
+    {
+      "type": 0,
+      "value": "Zoom out"
+    }
+  ],
   "timeline.thread.followDismiss": [
     {
       "type": 0,
@@ -2055,6 +3288,12 @@ export const catalog: MessageCatalog = {
       "value": " min ago"
     }
   ],
+  "timeline.workHealth.quietShort": [
+    {
+      "type": 0,
+      "value": "Quiet"
+    }
+  ],
   "timeline.workHealth.rejectedApprovals": [
     {
       "type": 0,
@@ -2158,6 +3397,12 @@ export const catalog: MessageCatalog = {
       "value": "Waiting"
     }
   ],
+  "timeline.workPlan.switching": [
+    {
+      "type": 0,
+      "value": "Loading the plan for the selected session. The list above is the last plan read."
+    }
+  ],
   "timeline.workPlan.title": [
     {
       "type": 0,
@@ -2176,6 +3421,10 @@ export const catalog: MessageCatalog = {
       "type": 2,
       "value": "total",
       "style": null
+    },
+    {
+      "type": 0,
+      "value": " done"
     }
   ],
   "timeline.workPlan.titleDone": [
@@ -2261,17 +3510,6 @@ export const catalog: MessageCatalog = {
       "value": "s"
     }
   ],
-  "timeline.workRecord.durationMs": [
-    {
-      "type": 2,
-      "value": "ms",
-      "style": null
-    },
-    {
-      "type": 0,
-      "value": "ms"
-    }
-  ],
   "timeline.workRecord.durationSeconds": [
     {
       "type": 2,
@@ -2281,6 +3519,12 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "s"
+    }
+  ],
+  "timeline.workRecord.durationUnderTenth": [
+    {
+      "type": 0,
+      "value": "Under 0.1s"
     }
   ],
   "timeline.workRecord.emptyEnded": [
@@ -2399,34 +3643,9 @@ export const catalog: MessageCatalog = {
   ],
   "timeline.workRecord.repeat": [
     {
-      "type": 6,
+      "type": 2,
       "value": "count",
-      "options": {
-        "one": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " time"
-            }
-          ]
-        },
-        "other": {
-          "value": [
-            {
-              "type": 7
-            },
-            {
-              "type": 0,
-              "value": " times"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      "style": null
     }
   ],
   "timeline.workRecord.sourceAgent": [

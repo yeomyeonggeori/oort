@@ -15,10 +15,13 @@ import "@/lib/coreHost";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
-import type { Message } from "@momo/core/lib/api";
+import { agentRunProgressFromWire, type Message } from "@momo/core/lib/api";
+import { resetRunProgress, startRunProgress } from "@/features/agents/agentRunProgressStore";
 import { AgentCard } from "./AgentCard";
 import { resetSettledApprovalsForTest } from "./settledApprovals";
 import { isInternalHref, isReachableHref } from "./ActionResultCard";
+import { LINK_ONCE_LEAD } from "./ApprovalActions";
+import { APPROVED_RECEIPT } from "@/features/inbox/approvalsPanel";
 import { reachableSettingsSections } from "@/features/settings/settingsNav";
 import { actionDestination } from "@momo/core/features/commands/serverActions";
 import {
@@ -305,6 +308,41 @@ describe("행동 승인 카드 (ADR-0186 부록 A)", () => {
     expect(byTestId(host, "approval-action-role")).toHaveLength(0);
     // 결정 컨트롤은 그대로 선다.
     expect(byTestId(host, "approval-approve")).toHaveLength(1);
+  });
+});
+
+// #4960. 서버가 run 진행 bundle로 「이 사람은 지금 못 한다」(보는 사람 기준 `canDecide:false`)고 말하면, 카드 props가
+// 아무 말이 없어도(`can_decide` 없음) 웹 타임라인 카드의 인라인 결정 컨트롤이 서지 않는다. 「한다」는 단추를 더 세우지
+// 않는다(이 표의 둘째 줄은 서버가 한다고 해도 **기존 카드와 같게** 선다는 대조군이다).
+describe("run 진행 bundle의 결정 자격이 웹 타임라인 카드에 닿는다 (#4960)", () => {
+  const CHANNEL = "00000000-0000-7000-8000-000000000201";
+  const progress = (canDecide: boolean) =>
+    agentRunProgressFromWire({
+      id: "0199aa11-2222-7000-8000-0000000000b2", channelId: CHANNEL, agentMemberId: HERMES,
+      status: "awaiting_approval", phase: "awaiting_approval", leaseState: "live", stepCount: 1,
+      createdAtMs: 1_753_400_000_000, updatedAtMs: 1_753_400_000_000,
+      bundle: { approvalId: APPROVAL_ID, status: "pending", decisionMode: "inline", canDecide, actionType: "tool_call" },
+    });
+
+  it.each([
+    ["서버가 못 한다고 하면 결정 컨트롤을 거둔다", false, 0],
+    ["서버가 한다고 하면 기존 카드처럼 결정 컨트롤이 선다", true, 1],
+  ] as const)("%s", async (_name, serverCanDecide, buttons) => {
+    const stop = startRunProgress({
+      workspaceId: WORKSPACE_ID, channelIds: [CHANNEL], realtime: null,
+      fetchProgress: async () => [progress(serverCanDecide)],
+    });
+    try {
+      await act(async () => { await Promise.resolve(); });
+      const host = mountCard({
+        approval_id: APPROVAL_ID, action_type: "shell", tool_name: "shell", title: "빌드 캐시 정리", status: "pending",
+      });
+      expect(byTestId(host, "approval-approve")).toHaveLength(buttons);
+      expect(byTestId(host, "approval-reject")).toHaveLength(buttons);
+    } finally {
+      stop();
+      resetRunProgress();
+    }
   });
 });
 
@@ -733,6 +771,75 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
 // 행을 내렸다 올려 카드가 새로 마운트되면 그 state가 사라져 버튼이 되살아났다(운영 실측).
 // 아래 시험은 **같은 낡은 pending 스냅샷으로 재마운트**해 그 순간을 그대로 만든다.
 // =============================================================================
+// =============================================================================
+// #5025 (#4965 후속) — 도우미 문(ADR-0201 증보 v3 B4-2). 도우미가 올린 `invite.create` 카드를 승인하면 서버는
+// 링크를 결정 응답이 아니라 **대화의 도우미 메시지**로 준다: 응답의 `result` 에는 `secretOnce` 가 없고, 결과 카드는
+// `secret_shown_once: false` 와 「링크 받는 곳」 행을 갖는다. 링크 상자(1회 값)가 설 일이 없는 카드가 바르게
+// 그려지는지를 렌더 DOM 에서 잰다 — 상자도, 상자의 리드 문장도, 「1회 표시됐어요」 고지도 서지 않는다.
+// 픽스처의 모양은 #4965 서버 시험(`team_ai_invite_conformance_pg`)이 DB 에서 단정한 그대로다.
+// =============================================================================
+
+describe("도우미 문: 링크 상자가 없는 승인과 결과 (#5025)", () => {
+  const REQUEST_ROW =
+    "승인하면 도우미가 이 대화에 링크를 올려요. 대화에 있는 사람은 모두 볼 수 있어요";
+  const RESULT_ROW = "도우미가 이 대화에 링크를 올렸어요";
+
+  /** 결정 응답: 부록 C 에서 `secretOnce` 만 뺀 것. 링크는 이 응답에 없다. */
+  function helperDecisionBody() {
+    const { secretOnce: _gone, ...result } = APPENDIX_C_BODY.result;
+    return { ...APPENDIX_C_BODY, result };
+  }
+
+  function helperRequestProps(): Record<string, unknown> {
+    const props = approvalProps();
+    const action = props.action as { rows: { label: string; value: string }[] };
+    action.rows.push({ label: "링크 받는 곳", value: REQUEST_ROW });
+    return props;
+  }
+
+  it("승인해도 버튼 자리에 링크 상자가 서지 않고 영수증 한 줄만 선다", async () => {
+    const host = mountCard(helperRequestProps());
+    // 결정 전: 행이 링크가 어디로 가는지 먼저 말한다.
+    openDetails(host);
+    expect(host.textContent ?? "").toContain(REQUEST_ROW);
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+
+    await decide(host, jsonResponse(helperDecisionBody()));
+    expect(byTestId(host, "approval-link-once")).toHaveLength(0);
+    expect(byTestId(host, "approval-link-once-value")).toHaveLength(0);
+    expect(byTestId(host, "approval-link-once-copy")).toHaveLength(0);
+    expect(host.textContent ?? "").not.toContain(LINK_ONCE_LEAD);
+    // 결정 컨트롤은 영수증에 자리를 내줬다(상자 없이도 카드는 결정 상태다).
+    expect(byTestId(host, "approval-approve")).toHaveLength(0);
+    expect(byTestId(host, "approval-reject")).toHaveLength(0);
+    expect(host.textContent ?? "").toContain(APPROVED_RECEIPT);
+    // 링크는 이 DOM 어디에도 없다(대화의 도우미 메시지에만 있다).
+    expect(document.body.textContent ?? "").not.toContain("join?code");
+  });
+
+  it("영속 결과 카드는 1회 고지 없이 「링크 받는 곳」 행을 그린다 (secret_shown_once: false)", () => {
+    const host = mountCard(
+      appendixBProps({
+        secret_shown_once: false,
+        rows: [
+          { label: "역할", value: "member" },
+          { label: "만료", value: "2026-09-29" },
+          { label: "링크 받는 곳", value: RESULT_ROW },
+        ],
+      }),
+      { type: "tool_result", body: "초대 링크를 만들었어요(member · 1회 · 7일)" }
+    );
+    expect(byTestId(host, "action-result-row")).toHaveLength(3);
+    expect(host.textContent ?? "").toContain(RESULT_ROW);
+    expect(byTestId(host, "action-result-note")[0]?.textContent).toBe("실행을 마쳤어요.");
+    // 「링크는 승인한 사람에게 1회 표시됐어요」는 거짓이 된다: 승인한 사람에게 보인 적이 없다.
+    expect(byTestId(host, "action-result-secret-once")).toHaveLength(0);
+    expect(host.textContent ?? "").not.toContain("1회 표시됐어요");
+    expect(byTestId(host, "approval-link-once")).toHaveLength(0);
+    expect(host.textContent ?? "").not.toContain("code=");
+  });
+});
+
 describe("승인 직후 재마운트해도 카드는 결정 상태다 (#3771)", () => {
   it("승인 → 같은 낡은 pending 스냅샷으로 재마운트 → 버튼이 없고 영수증 줄이 있다", async () => {
     const props = approvalProps();
@@ -1059,7 +1166,9 @@ describe("요청 묶음 카드", () => {
     expect(host.querySelector('a[href="#/settings?section=invites"]')).toBeNull();
   });
   it("머리·값 둘·단추 쌍·조용한 줄만 서고 자세히를 닫으면 라벨 행이 DOM에도 없다", () => {
-    const host = mountCard({ ...approvalProps(), intent: "팀원 초대 링크를 만들려고 해요", expires_at_ms: Date.now() + 3_600_000 });
+    // 기한은 단위 경계(정각 1시간)에서 떨어뜨려 둔다: 남은 시간은 단위 안에서 내리므로(#4986) 정각에 두면 시계가 한 틱만
+    // 가도 「59분 남음」이 되어 시험이 시각에 기대게 된다.
+    const host = mountCard({ ...approvalProps(), intent: "팀원 초대 링크를 만들려고 해요", expires_at_ms: Date.now() + 3.5 * 3_600_000 });
     expect(byTestId(host, "request-bundle-headline")[0]?.textContent).toBe("팀원 초대 링크를 만들려고 해요");
     expect(byTestId(host, "request-bundle-values")[0]?.querySelectorAll('[role="group"]')).toHaveLength(2);
     expect(byTestId(host, "approval-approve")).toHaveLength(1);

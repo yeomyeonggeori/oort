@@ -12,8 +12,10 @@ import {
   resetAgentWorking,
   resolveAgentWorkingSignals,
   sweepAgentWorking,
+  withApprovalWaits,
   ZOMBIE_CLEAR_MS,
   type AgentWorkingSignal,
+  type ApprovalWait,
 } from "./agentWorkingSignal";
 
 const CHANNEL = "00000000-0000-7000-8000-000000000202";
@@ -226,5 +228,71 @@ describe("elapsedLabel", () => {
 
   it("never runs backwards when the clocks disagree", () => {
     expect(elapsedLabel(NOW + 5_000, NOW)).toBe("0s");
+  });
+});
+
+// =============================================================================
+// 승인 원장을 열린 턴 **전체**(채널 너머)에 덮는 배선 (#5125). 규칙(누가 기다리나·기한이 지났나)은 코어 `applyApprovalWaits.test.ts` 가 재고, 여기서는
+// 그 규칙을 **채널마다 부르는** 얇은 함수만 잰다. 화면 시험(`Sidebar.nowCardApproval`·`AdeSummaryLine.approval`)은 채널 하나에서만 서므로
+// 채널을 넘는 것과 만료 신호의 순서는 여기서만 지켜진다. 폰 `approvalWaitSignals.test.ts` 의 같은 함수 시험과 같은 두 이야기다.
+// =============================================================================
+
+const THIRD_CHANNEL = "00000000-0000-7000-8000-000000000203";
+
+const wait = (
+  channelId: string,
+  requestedBy: string,
+  over: Partial<ApprovalWait> = {}
+): ApprovalWait => ({ channelId, requestedBy, expiresAtMs: NOW + 3_600_000, ...over });
+
+const keyOf = (channelId: string, memberId: string) =>
+  `${channelId.toLowerCase()}|${memberId.toLowerCase()}`;
+
+describe("withApprovalWaits: 규칙은 코어의 것이고 여기서는 채널마다 부른다", () => {
+  it("대기 승인이 있는 채널마다 덮는다: 한 채널이 아니라 채널 너머, 대기 없는 채널·다른 에이전트는 그대로", () => {
+    markAgentWorking(signal({ channelId: CHANNEL, memberId: HERMES }));
+    markAgentWorking(signal({ channelId: OTHER_CHANNEL, memberId: HERMES }));
+    markAgentWorking(signal({ channelId: OTHER_CHANNEL, memberId: KIM }));
+    markAgentWorking(signal({ channelId: THIRD_CHANNEL, memberId: HERMES }));
+    const all = agentWorkingSnapshot();
+
+    const out = withApprovalWaits(
+      all,
+      [wait(CHANNEL, HERMES), wait(OTHER_CHANNEL, HERMES)],
+      NOW
+    );
+
+    const state = (channelId: string, memberId: string) =>
+      out.get(keyOf(channelId, memberId))?.state;
+    expect(state(CHANNEL, HERMES)).toBe("awaiting_approval");
+    expect(state(OTHER_CHANNEL, HERMES)).toBe("awaiting_approval");
+    expect(state(OTHER_CHANNEL, KIM)).toBe("working");
+    expect(state(THIRD_CHANNEL, HERMES)).toBe("working");
+    expect(out.size).toBe(4);
+    // 입력은 바뀌지 않는다: 스토어가 이 사본을 읽는 표면과 같은 객체를 나눠 쓴다.
+    expect(all.get(keyOf(CHANNEL, HERMES))?.state).toBe("working");
+  });
+
+  it("만료된 신호는 덮기 전에 걸러져서 살아 있는 승인이 새 턴을 세운다 — 덮지 않은 항목은 지우지 않고, 대기가 없으면 입력을 그대로 돌려준다", () => {
+    const staleAt = NOW - IDLE_CUTOFF_MS - 1;
+    markAgentWorking(signal({ memberId: HERMES, lastActivityAtMs: staleAt }));
+    markAgentWorking(signal({ memberId: KIM, lastActivityAtMs: staleAt }));
+    const all = agentWorkingSnapshot();
+    expect(withApprovalWaits(all, [], NOW)).toBe(all);
+
+    const out = withApprovalWaits(all, [wait(CHANNEL, HERMES)], NOW);
+
+    // 옛 신호를 그 자리에서 바꿔 두면 읽는 쪽의 만료 거름(`agentTurnsInChannel`)이 그 턴을 지우고 살아 있는 승인은 어디에도 안 보인다. 먼저
+    // 거르면 승인을 근거로 선 새 턴이 남고, 시작 시각은 지어내지 않는다.
+    const [shown, ...rest] = agentTurnsInChannel(out, CHANNEL, NOW);
+    expect(rest).toEqual([]);
+    expect(shown).toMatchObject({
+      memberId: HERMES,
+      state: "awaiting_approval",
+      lastActivityAtMs: NOW,
+    });
+    expect(shown.startedAtMs).toBeUndefined();
+    // 덮지 않은 항목은 사본에도 남는다: 시계 없이 항목 유무만 보는 읽는 쪽(`hasChannelTurn`)이 원본 스토어와 다른 답을 하지 않는다.
+    expect(out.get(keyOf(CHANNEL, KIM))).toBe(all.get(keyOf(CHANNEL, KIM)));
   });
 });

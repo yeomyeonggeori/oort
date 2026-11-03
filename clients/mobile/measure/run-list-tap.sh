@@ -4,7 +4,7 @@
 #
 #   measure/run-list-tap.sh <udid> <CASE> <Metro 포트> [rec.mp4] [light] [shots 폴더 사진이름접두]
 #
-#   CASE  body reopen-edge empty send link chip author avatar replymark rollup drag hold long autocorrect hangul   (115 의 단정)
+#   CASE  body reopen-edge empty send link chip author avatar replymark rollup drag drag-short drag-up hold long autocorrect hangul   (115 의 단정)
 #         shot-typed  shot-long                                                                  (117 의 사진: 한 줄 초안 · 여러 줄 초안)
 #   light 를 주면 라이트 스킴(`LIGHT-` 표면)이다. `shots 폴더`와 `사진이름접두`를 주면 117 이 찍은 사진을 그 폴더에 `<접두>-….png` 로 복사한다.
 #   `LIST_POINT=50%,15% measure/run-list-tap.sh …` — 목록을 누르는 자리(기본 `50%,25%`, 사진 CASE 만). 접근성 큰 글씨에서는 목록이 위쪽 뼘밖에 안 남는다.
@@ -21,7 +21,7 @@ case "$CASE" in
   link|author|avatar|replymark) SURFACE="TAP-UP+LINK+TYPED+PROBE" ;;
   chip)                         SURFACE="TAP-UP+CHIP+TYPED+PROBE" ;;
   rollup)                       SURFACE="TAP-UP+ROLL+TYPED+PROBE" ;;
-  drag|long)                    SURFACE="TAP-UP+TYPED+PROBE" ;;
+  drag|drag-short|drag-up|long) SURFACE="TAP-UP+TYPED+PROBE" ;;
   shot-typed)                   SURFACE="TAP-UP+TYPED" ;;
   shot-long)                    SURFACE="TAP-UP+LONG" ;;
   *) echo "[run-list-tap] 모르는 CASE: $CASE" >&2; exit 2 ;;

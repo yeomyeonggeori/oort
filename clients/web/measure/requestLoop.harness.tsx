@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { AgentRunProgress, Message } from "@momo/core/lib/api";
+import { agentRunProgressFromWire, type AgentRunProgress, type Message } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
 import { triggerChip } from "@momo/core/features/agents/triggerChip";
@@ -44,9 +44,10 @@ function Harness() {
   const [summaryMode, setSummaryMode] = useState("inline");
   Object.assign(window, { requestLoopHarness: { setPhase, setCardStatus, setSummaryMode } });
   const current = requestLoopRun(phase ?? "queued");
-  const summaryRun = { ...requestLoopRun("awaiting_approval"), bundle: {
-    approval_id: "approval", status: cardStatus, decision_mode: summaryMode, can_decide: true, intent: "소개를 바꿔도 될까요?",
-  } };
+  // 서버가 보내는 모양(camelCase)을 실제 파서에 통과시켜요. 모르는 상태·모드는 파서가 안전한 쪽으로 읽어요.
+  const summaryRun = agentRunProgressFromWire({ ...requestLoopRun("awaiting_approval"), bundle: {
+    approvalId: "approval", status: cardStatus, decisionMode: summaryMode, canDecide: true, actionType: "workspace_action", intent: "소개를 바꿔도 될까요?",
+  } });
   const chip = triggerChip([current], () => ({ name: "달무리봇" }), Date.now());
   const message = {
     id: "card", channelId: CH, authorMemberId: AGENT, type: "approval_request", seq: 10, state: "sent", createdAtMs: Date.now(), hlcTs: Date.now(), hlcCount: 0,

@@ -13,7 +13,8 @@
     "build:sim": "bash scripts/build-sim.sh",
     "gate:session": "node gate/run.mjs",
     "lane:phone": "bash scripts/lane-phone.sh",
-    "install:maestro": "bash scripts/install_maestro.sh"
+    "install:maestro": "bash scripts/install_maestro.sh",
+    "check:maestro-syntax": "bash scripts/check-maestro-syntax.sh"
   },
   "dependencies": {
     "@formatjs/intl": "6.1.4",

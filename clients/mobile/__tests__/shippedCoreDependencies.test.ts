@@ -16,7 +16,10 @@ const APP_ROOT = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(APP_ROOT, '../..');
 const CORE_ROOT = path.join(REPO_ROOT, 'packages/momo-core');
 const CORE_SRC = path.join(CORE_ROOT, 'src');
-const APP_NODE_MODULES = path.join(APP_ROOT, 'node_modules');
+// Real path, because the resolver below reports real paths (its `lookup` follows links, as Metro's
+// file map does) and the merge-tree gate (scripts/verify_merge_tree.sh) lends this folder's
+// node_modules out as a symlink: a path built from APP_ROOT would never equal one it found there.
+const APP_NODE_MODULES = fs.realpathSync(path.join(APP_ROOT, 'node_modules'));
 
 const readJson = (file: string) => JSON.parse(fs.readFileSync(file, 'utf8'));
 

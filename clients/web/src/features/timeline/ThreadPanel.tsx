@@ -28,7 +28,7 @@ import { Tooltip } from "@/design/ui/tooltip";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import { useDocumentForeground } from "@/features/chat/useChannelViewingBeat";
 import { THREAD_REPLIES_LEAD_CLASS } from "./spacing";
-import { shouldFoldBundleLine } from "@momo/core/features/timeline/requestBundle";
+import { presentableRows } from "@momo/core/features/timeline/toolCallSettle";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runStatusForMessage } from "./runStatus";
@@ -276,7 +276,7 @@ function ThreadPanelFrame({
 
   const replyIds = useRef(new Set<string>());
   replyIds.current = new Set(allReplies.map((message) => message.id.toLowerCase()));
-  const replies = allReplies.filter((message) => !shouldFoldBundleLine(message, allReplies));
+  const replies = presentableRows(allReplies);
   // 생각 줄(#4761)의 24px 자리는 **이 스레드에 run이 하나라도 있을 때만** 선다. run이 없는 평범한 스레드에서도 자리가 늘
   // 서면 내 루트 아래에 빈 줄이 생긴다(#4878, owner 10-31 「루트 아래 빈 공간이 크다」). 요청 스레드·에이전트가 답한
   // 스레드는 run이 있으므로 예전과 같다. 스레드에서 처음 에이전트를 부르는 답글은 run이 생기는 순간 줄이 서고 그때
@@ -314,10 +314,21 @@ function ThreadPanelFrame({
   }, [requestLanding, root.id, allReplies]);
   const targetMissing = requestLanding?.rootId.toLowerCase() === root.id.toLowerCase() && !query.isLoading && !query.isFetching && !query.error && !allReplies.some((message) => message.id.toLowerCase() === requestLanding.messageId.toLowerCase());
 
-  /** Per-row actions, with this row's chips and pin state folded in. */
+  /**
+   * Per-row actions, with this row's chips and pin state folded in.
+   *
+   * 고치기만 한 겹 감싼다(#5191): `actions.onEditMessage` 는 **채널 타임라인**의 상태를 고치고, 스레드 답글은 거기 없다(본류가
+   * 거르는 행이다). 그래서 저장한 사람의 이 패널은 응답을 받고도 옛 글을 그대로 그렸고, 다른 기기·다른 사람에게서 오는
+   * `message.edited` 에코(위 구독이 목록을 다시 읽는다)가 도착해야 바뀌었다 — 에코가 늦거나 끊기면 「저장이 안 됐다」로 읽혔다.
+   * 저장이 끝나면 에코를 기다리지 않고 이 목록을 다시 읽는다. 목록은 첨부·롤업·풀린 인용을 싣는 읽기라 편집 투영의 구멍도 없다.
+   */
   const rowActions = (message: Message): MessageRowActions | undefined =>
     actions && {
       ...actions,
+      onEditMessage: async (target, body) => {
+        await actions.onEditMessage(target, body);
+        refreshReplies();
+      },
       chips: chipsFor(reactions ?? {}, message.id, actions.myMemberId),
       pinned: isPinned(pins ?? {}, message.id),
     };

@@ -4,6 +4,7 @@ import { catalog as ko } from "../../i18n/generated/ko-KR";
 import { createMessageCopy } from "../../testkit/i18n";
 import {
   agentActivityRows,
+  runReportChipParts,
   runReportChipText,
   runReportDurationText,
   runReportSummary,
@@ -247,5 +248,14 @@ describe("끝난 요청의 요약 칩", () => {
     // 분 단위뿐이다: 초가 말해지지 않고, 한 시간부터는 시간·분이다.
     expect(runReportDurationText(125 * MIN + 30_000, fmt)).toBe("2시간 5분");
     expect(runReportChipText(13 * MIN, summary, fmt)).not.toMatch(/\d+초/);
+  });
+
+  it("칩 글은 몸과 꼬리표로 나뉘고, 이은 글은 예전 한 줄과 같다 (꼬리표 「에이전트 보고」가 좁은 칸에서 남도록, #5174 L6)", () => {
+    const report = { stages: 6, kinds: [{ toolKind: "run" as const, count: 12 }] };
+    expect(runReportChipParts(13 * MIN, report, fmt)).toEqual({ body: "13분 · 단계 6 · 명령 12", tail: "에이전트 보고" });
+    expect(runReportChipText(13 * MIN, report, fmt)).toBe("13분 · 단계 6 · 명령 12 · 에이전트 보고");
+    // 에이전트 보고 숫자가 없으면 꼬리표도 없다: 시간만 남는다.
+    expect(runReportChipParts(5 * MIN, { stages: 0, kinds: [] }, fmt)).toEqual({ body: "5분", tail: null });
+    expect(runReportChipText(5 * MIN, { stages: 0, kinds: [] }, fmt)).toBe("5분");
   });
 });

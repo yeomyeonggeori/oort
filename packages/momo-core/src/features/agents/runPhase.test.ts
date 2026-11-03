@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRunProgress } from "../../lib/api";
-import { agentRunProgressFromWire } from "../../lib/api";
+import { agentRunProgressFromWire, agentRunProgressPageFromWire } from "../../lib/api";
 import { asAgentRunEventFrame } from "../../lib/realtimeEvents";
 import { WireShapeError } from "../../lib/wire";
 import { activityLines, agentTurnBadgeCopy } from "./turnCopy";
@@ -266,6 +266,101 @@ describe("서버 응답 파서", () => {
     expect(() => agentRunProgressFromWire({ ...wire, leaseState: "dead" })).toThrow(WireShapeError);
     expect(() => agentRunProgressFromWire({ ...wire, queuePosition: -1 })).toThrow(WireShapeError);
     expect(() => agentRunProgressFromWire(null)).toThrow(WireShapeError);
+  });
+});
+
+// 서버 DTO(`AgentRunBundleDto`, ADR-0186 v6 R-f #4763)가 내보내는 키 그대로: camelCase, `line`·`intent`는
+// 있을 때만. 이 서버 계약을 파서가 읽어 `AgentRunProgress.bundle`로 싣는다.
+describe("run 진행 bundle 파서 (#4763 서버 계약)", () => {
+  const base = {
+    id: RUN,
+    channelId: CH,
+    agentMemberId: AGENT,
+    status: "awaiting_approval",
+    phase: "awaiting_approval",
+    leaseState: "live",
+    stepCount: 1,
+    createdAtMs: NOW,
+    updatedAtMs: NOW,
+  };
+  const bundleWire = {
+    approvalId: "0199AA11-2222-7000-8000-0000000000C9",
+    status: "pending",
+    decisionMode: "inline",
+    canDecide: true,
+    line: "소개를 바꿔도 될까요?",
+    intent: "소개를 바꿔도 될까요?",
+    actionType: "workspace_action",
+  };
+  const parse = (bundle: unknown) => agentRunProgressFromWire({ ...base, bundle });
+
+  it("서버 bundle을 있는 그대로 읽는다: 승인 id는 소문자로 접고 나머지 값은 서버 판정 그대로다", () => {
+    expect(parse(bundleWire).bundle).toEqual({
+      approvalId: "0199aa11-2222-7000-8000-0000000000c9",
+      status: "pending",
+      decisionMode: "inline",
+      canDecide: true,
+      actionType: "workspace_action",
+      line: "소개를 바꿔도 될까요?",
+      intent: "소개를 바꿔도 될까요?",
+    });
+  });
+
+  it("옛 서버 응답(bundle 없음)은 bundle 키 자체가 없고 나머지는 예전 그대로 읽는다", () => {
+    const parsed = agentRunProgressFromWire(base);
+    expect("bundle" in parsed).toBe(false);
+    expect(parsed.phase).toBe("awaiting_approval");
+    // null도 「없음」이다(서버가 키를 null로 보내도 던지지 않는다).
+    expect("bundle" in agentRunProgressFromWire({ ...base, bundle: null })).toBe(false);
+  });
+
+  it.each(["pending", "approved", "rejected", "expired", "cancelled"] as const)(
+    "닫힌 다섯 상태 %s를 읽고, 결정 자격은 대기일 때만 남는다",
+    (status) => {
+      // 서버가 canDecide:true를 어긋나게 보내도(대기가 아닌데) 단추를 세우지 못하게 한 번 더 닫는다.
+      const bundle = parse({ ...bundleWire, status }).bundle;
+      expect(bundle?.status).toBe(status);
+      expect(bundle?.canDecide).toBe(status === "pending");
+    }
+  );
+
+  it("canDecide:false는 false로 남는다(서버가 보는 사람에게 못 한다고 말한 것)", () => {
+    expect(parse({ ...bundleWire, canDecide: false }).bundle?.canDecide).toBe(false);
+  });
+
+  it("모르는 상태는 bundle 없음으로 읽고 던지지 않는다: 결정 자격도 함께 사라진다", () => {
+    const run = parse({ ...bundleWire, status: "escalated", canDecide: true });
+    expect(run.bundle).toBeUndefined();
+    expect(run.phase).toBe("awaiting_approval");
+  });
+
+  it("뜻을 바꾸는 칸이 모자라거나 모양이 틀린 bundle은 없는 것으로 읽는다: 같은 쪽의 다른 run은 살아 있다", () => {
+    const { approvalId: _a, ...noApproval } = bundleWire;
+    const { actionType: _t, ...noAction } = bundleWire;
+    for (const bad of [noApproval, noAction, { ...bundleWire, approvalId: "" }, "pending", ["pending"], 7]) {
+      expect(parse(bad).bundle, JSON.stringify(bad)).toBeUndefined();
+    }
+    const runs = agentRunProgressPageFromWire({
+      runs: [
+        { ...base, id: "run-a", bundle: "깨짐" },
+        { ...base, id: "run-b", bundle: bundleWire },
+      ],
+    });
+    expect(runs.map((run) => run.bundle?.status)).toEqual([undefined, "pending"]);
+  });
+
+  it("권한만 줄이는 칸은 제한 쪽으로 읽는다: 모르거나 없는 decisionMode는 open, 없는 canDecide는 false", () => {
+    const { decisionMode: _m, canDecide: _c, ...bare } = bundleWire;
+    expect(parse(bare).bundle).toMatchObject({ decisionMode: "open", canDecide: false });
+    expect(parse({ ...bundleWire, decisionMode: "sheet" }).bundle?.decisionMode).toBe("open");
+    expect(parse({ ...bundleWire, canDecide: "yes" }).bundle?.canDecide).toBe(false);
+  });
+
+  it("끝난 승인의 line은 읽고 intent는 서버가 줄 때만 있다(앞뒤 공백은 접는다)", () => {
+    const { intent: _i, ...settled } = { ...bundleWire, status: "approved", line: "  승인됐어요  " };
+    const bundle = parse(settled).bundle;
+    expect(bundle?.line).toBe("승인됐어요");
+    expect(bundle && "intent" in bundle).toBe(false);
   });
 });
 

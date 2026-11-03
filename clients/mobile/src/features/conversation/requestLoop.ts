@@ -5,6 +5,7 @@ import {
 } from '@momo/core/features/timeline/agentCardModel';
 import {
   requestBundleModel,
+  runBundleCanDecide,
   runBundleSnapshot,
 } from '@momo/core/features/timeline/requestBundle';
 import {
@@ -61,7 +62,13 @@ export function phoneRequestBundle(
       run,
       viewerMemberId,
       viewerKind: viewer?.kind,
-      canDecide: gate !== null && receipt === undefined && !offline,
+      // 현장의 문(대기 목록·영수증·연결)에 더해, 서버가 이 승인에 대해 보는 사람에게 「못 한다」고
+      // 했으면(run 진행 bundle의 `canDecide`) 단추를 거둬요. 「한다」는 단추를 더 세우지 않아요.
+      canDecide:
+        gate !== null &&
+        receipt === undefined &&
+        !offline &&
+        runBundleCanDecide(run, card.approvalId) !== false,
       nameFor: id => memberFor(directory, id)?.displayName,
       isWorkspaceAdmin: viewer?.role === 'owner' || viewer?.role === 'admin',
     },

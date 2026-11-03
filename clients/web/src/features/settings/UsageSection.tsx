@@ -184,7 +184,7 @@ export function UsageSection({ workspaceId }: { workspaceId: string }) {
             aria-busy={query.isFetching}
             data-testid="usage-refresh"
           >
-            {query.isFetching ? "불러오는 중" : "새로 고치기"}
+            {query.isFetching ? "불러오는 중" : "다시 불러오기"}
           </Button>
         }
       >

@@ -821,6 +821,14 @@ pub enum MemberWrite {
     ScheduledWrite,
     /// `POST …/channels/{ch}/attachments/uploads`.
     UploadStart,
+    /// `PUT …/channels/{ch}/attachments/{id}/media` (ADR-0151 증보 5 D5, #4673 review M-1): a video's
+    /// length, size and poster. One accepted request writes up to 256 KiB into Postgres (a replace
+    /// writes it again) and reads the object's first bytes from the archive, and an upload start
+    /// does one Drive call: the two are the same kind of write and get the same size of budget, in a
+    /// key space of their own, so a person who is uploading videos cannot be refused a media write
+    /// by the uploads they have started, or the other way round. Refused requests count too — the
+    /// gate runs before the body is read.
+    MediaWrite,
     /// `GET …/unfurls/{id}/image` and `GET …/unfurls/{id}/icon`: reads, but reads that can make
     /// this server GET a site the caller's card names. Spent in the handler, **not** by a route
     /// layer, and only by a request that really would fetch (no cached picture, no recent failure
@@ -852,6 +860,7 @@ impl MemberWrite {
             MemberWrite::MessageSend => "message_send",
             MemberWrite::ScheduledWrite => "scheduled_write",
             MemberWrite::UploadStart => "upload_start",
+            MemberWrite::MediaWrite => "media_write",
             MemberWrite::UnfurlProxy => "unfurl_proxy",
             MemberWrite::PhotoDraft => "photo_draft",
             MemberWrite::UnfurlPreview => "unfurl_preview",
@@ -865,6 +874,7 @@ impl MemberWrite {
             MemberWrite::MessageSend => "write:send",
             MemberWrite::ScheduledWrite => "write:schedule",
             MemberWrite::UploadStart => "write:upload",
+            MemberWrite::MediaWrite => "write:media",
             MemberWrite::UnfurlProxy => "write:unfurl",
             MemberWrite::PhotoDraft => "write:photo",
             MemberWrite::UnfurlPreview => "write:unfurl_preview",
@@ -894,6 +904,7 @@ pub fn member_write_limit(
         }
         (MemberWrite::ScheduledWrite, _) => config.scheduled_write_per_member_limit,
         (MemberWrite::UploadStart, _) => config.upload_start_per_member_limit,
+        (MemberWrite::MediaWrite, _) => config.media_write_per_member_limit,
         (MemberWrite::UnfurlProxy, _) => config.unfurl_proxy_per_member_limit,
         (MemberWrite::PhotoDraft, _) => config.photo_draft_per_member_limit,
         (MemberWrite::UnfurlPreview, _) => config.unfurl_preview_per_member_limit,
@@ -1541,6 +1552,7 @@ mod tests {
             unfurl_proxy_per_member_limit: 55,
             photo_draft_per_member_limit: 66,
             unfurl_preview_per_member_limit: 77,
+            media_write_per_member_limit: 88,
             ..RateLimitConfig::default()
         }
     }
@@ -1582,6 +1594,11 @@ mod tests {
                 77,
                 "the preview budget is its own number, not the proxy's"
             );
+            assert_eq!(
+                limit(MemberWrite::MediaWrite, kind),
+                88,
+                "a media write has one limit whoever asks, and it is not the upload start's"
+            );
         }
     }
 
@@ -1597,13 +1614,14 @@ mod tests {
             (MemberWrite::UnfurlProxy, "unfurl_proxy"),
             (MemberWrite::PhotoDraft, "photo_draft"),
             (MemberWrite::UnfurlPreview, "unfurl_preview"),
+            (MemberWrite::MediaWrite, "media_write"),
         ];
         let mut keys = std::collections::HashSet::new();
         for (surface, label) in surfaces {
             assert_eq!(surface.label(), label);
             assert!(keys.insert(member_write_key(surface, member)));
         }
-        assert_eq!(keys.len(), 6);
+        assert_eq!(keys.len(), 7);
         assert_ne!(
             member_write_key(MemberWrite::MessageSend, member),
             member_write_key(MemberWrite::MessageSend, Uuid::from_u128(8)),
