@@ -393,6 +393,23 @@ pub struct RateLimitConfig {
     /// refused. An operator who shortens the window to a second turns "5 a minute"
     /// into "5 a second", for this budget and for the rest.
     pub password_guess_per_account_limit: u32,
+    /// `RATE_LIMIT_PASSWORD_RESET_ISSUE_PER_ADMIN` (default 5 per window). **No off
+    /// switch**: 0 and a value that is not a number both keep the default, because the
+    /// operator's reissue asks for the operator's own password and that is a guess at it
+    /// (ADR-0215 D6 — a knob on a guessable surface does not get an "off").
+    ///
+    /// Requests to `POST …/members/{member}/password-reset` per **operator** (the member
+    /// making the request), every request counted — a right password too, and a request
+    /// that is refused for any other reason. The budget is spent *before* anything else
+    /// about the request is looked at. The key is the member and nothing else: not a sign-in
+    /// lineage (a stolen session can start new lineages without limit, so a lineage key
+    /// would not limit guessing at all), not the target, not the caller's address. The price
+    /// is that whoever holds a stolen operator session can use up that operator's reissues
+    /// for the window; the other owners and admins can still issue. Guessing defences that
+    /// span login, the member's own change and this one are the account-axis throttle (E-5).
+    ///
+    /// The window is `RATE_LIMIT_WINDOW_SECONDS`, which every limiter in this file shares.
+    pub password_reset_issue_per_admin_limit: u32,
     /// `RATE_LIMIT_DRIVE_UPLOAD_PER_IP` (default 120). 0 disables. The public
     /// upload PUT (`/__momo_stub/drive/uploads/{token}`, #2628), which answers
     /// anyone who knows the path shape. Its own key, so upload traffic and the
@@ -528,6 +545,7 @@ impl Default for RateLimitConfig {
             password_change_per_member_limit: 10,
             password_change_per_ip_limit: 30,
             password_guess_per_account_limit: 5,
+            password_reset_issue_per_admin_limit: 5,
             drive_upload_per_ip_limit: 120,
             self_media_per_workspace_limit: 30,
             message_send_per_member_limit: 120,
@@ -574,6 +592,13 @@ impl RateLimitConfig {
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .filter(|limit| *limit > 0)
                 .unwrap_or(defaults.password_guess_per_account_limit),
+            // No off switch (see the field): 0 is filtered out and falls to the default.
+            password_reset_issue_per_admin_limit: lookup(
+                "RATE_LIMIT_PASSWORD_RESET_ISSUE_PER_ADMIN",
+            )
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .filter(|limit| *limit > 0)
+            .unwrap_or(defaults.password_reset_issue_per_admin_limit),
             drive_upload_per_ip_limit: lookup("RATE_LIMIT_DRIVE_UPLOAD_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.drive_upload_per_ip_limit),
@@ -3943,6 +3968,7 @@ mod tests {
         assert_eq!(defaults.password_change_per_member_limit, 10);
         assert_eq!(defaults.password_change_per_ip_limit, 30);
         assert_eq!(defaults.password_guess_per_account_limit, 5);
+        assert_eq!(defaults.password_reset_issue_per_admin_limit, 5);
         assert!(
             defaults.per_ip_limit > 0,
             "a default of 0 would ship the public join route unguarded"
@@ -3959,6 +3985,53 @@ mod tests {
             defaults.password_guess_per_account_limit > 0,
             "a default of 0 would ship the join door's password check unbudgeted"
         );
+        assert!(
+            defaults.password_reset_issue_per_admin_limit > 0,
+            "a default of 0 would ship the operator's reissue password check unbudgeted"
+        );
+    }
+
+    /// The operator's reissue budget (ADR-0215 D6): its own env name, moves only its own
+    /// field, and has no off switch.
+    #[test]
+    fn the_reset_issue_knob_is_named_moves_only_itself_and_cannot_be_switched_off() {
+        let lookup = |name: &'static str, value: &'static str| {
+            move |key: &str| (key == name).then(|| value.to_string())
+        };
+        let defaults = RateLimitConfig::default();
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup(
+                "RATE_LIMIT_PASSWORD_RESET_ISSUE_PER_ADMIN",
+                " 7 "
+            )),
+            RateLimitConfig {
+                password_reset_issue_per_admin_limit: 7,
+                ..defaults
+            },
+            "the documented name moves exactly its own field, whitespace trimmed"
+        );
+        for refused in ["0", "many", "-1", ""] {
+            assert_eq!(
+                RateLimitConfig::from_lookup(lookup(
+                    "RATE_LIMIT_PASSWORD_RESET_ISSUE_PER_ADMIN",
+                    refused
+                )),
+                defaults,
+                "{refused:?} must keep the default: a guessable surface has no off value"
+            );
+        }
+        // the neighbouring password knobs do not leak into this one
+        for neighbour in [
+            "RATE_LIMIT_PASSWORD_CHANGE_PER_MEMBER",
+            "RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT",
+        ] {
+            assert_eq!(
+                RateLimitConfig::from_lookup(lookup(neighbour, "2"))
+                    .password_reset_issue_per_admin_limit,
+                defaults.password_reset_issue_per_admin_limit,
+                "{neighbour} must not move the reissue budget"
+            );
+        }
     }
 
     /// The per-account password-guess knob (#4625): its own env name, moves only its

@@ -32,6 +32,7 @@
   "timeline.send.failed": "Not sent",
   "timeline.send.resend": "Try again",
   "timeline.send.discard": "Delete",
+  "timeline.approvalExpiry.soon": "If you do not decide, the agent has to propose it again.",
   "timeline.workRecord.sourceOort": "oort record",
   "timeline.workRecord.sourceAgent": "Agent report",
   "timeline.workRecord.sourceComputer": "My computer",

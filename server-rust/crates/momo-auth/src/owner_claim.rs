@@ -38,9 +38,21 @@ pub struct ClaimOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClaimMutation {
     Applied(ClaimOutcome),
+    /// No such token, or its member is not active. Carries **no** kind: a caller who
+    /// does not hold a spendable token must learn nothing about the token (ADR-0215 D6).
     NotFound,
-    Expired,
-    AlreadyUsed,
+    /// The link has run out. `claim_kind` is the kind of the row, so the route can
+    /// name it (ADR-0215 D6): only someone who holds the 256-bit token reaches this.
+    Expired {
+        claim_kind: String,
+    },
+    /// The link was spent (or ended by a reissue, a suspension, a removal). Same
+    /// `claim_kind` rule as [`ClaimMutation::Expired`].
+    AlreadyUsed {
+        claim_kind: String,
+    },
+    /// An owner-bootstrap token for an account that has a password by now. The kind is
+    /// `owner_bootstrap` by construction.
     PasswordPresent,
 }
 
@@ -166,10 +178,10 @@ pub async fn claim_refusal_in_tx(
     };
     let claim_kind: String = row.try_get("claim_kind")?;
     if row.try_get::<bool, _>("consumed")? {
-        return Ok(Some(ClaimMutation::AlreadyUsed));
+        return Ok(Some(ClaimMutation::AlreadyUsed { claim_kind }));
     }
     if row.try_get::<bool, _>("expired")? {
-        return Ok(Some(ClaimMutation::Expired));
+        return Ok(Some(ClaimMutation::Expired { claim_kind }));
     }
     if claim_kind == CLAIM_KIND_OWNER_BOOTSTRAP && row.try_get::<bool, _>("password_present")? {
         return Ok(Some(ClaimMutation::PasswordPresent));
@@ -212,10 +224,10 @@ pub async fn consume_claim_in_tx(
     let password_present: bool = row.try_get("password_present")?;
     let claim_kind: String = row.try_get("claim_kind")?;
     if consumed {
-        return Ok(ClaimMutation::AlreadyUsed);
+        return Ok(ClaimMutation::AlreadyUsed { claim_kind });
     }
     if expired {
-        return Ok(ClaimMutation::Expired);
+        return Ok(ClaimMutation::Expired { claim_kind });
     }
     if claim_kind == CLAIM_KIND_OWNER_BOOTSTRAP && password_present {
         return Ok(ClaimMutation::PasswordPresent);
@@ -380,6 +392,81 @@ pub async fn issue_password_reset_in_tx(
         token: token.to_string(),
         expires_at_ms: row.try_get("expires_at_ms")?,
     }))
+}
+
+/// Whether `password` is this member's current password. A read only: no lock, no write.
+///
+/// The predicate is the one the login and [`change_own_password_in_tx`] use
+/// (`momo_password_verify`), so every door that asks "is this their password" gets one
+/// answer. A member with no stored password (none, empty, or a value that is not a hash)
+/// matches nothing.
+///
+/// It exists for the operator's reissue (ADR-0215 D6), which asks the **operator** for
+/// their own password before it mints a link. That check runs *before* the workspace's
+/// membership lock is taken: a request that is going to be refused must not be able to
+/// queue every sign-in of the workspace behind a hash comparison.
+pub async fn member_password_matches_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    password: &str,
+) -> Result<bool, sqlx::Error> {
+    let verdict: Option<Option<bool>> = sqlx::query_scalar(
+        "SELECT momo_password_verify($3, h.password_hash) \
+           FROM human h \
+          WHERE h.member_id = $1 \
+            AND h.workspace_id = $2 \
+            AND h.password_hash IS NOT NULL \
+            AND h.password_hash <> ''",
+    )
+    .bind(member_id)
+    .bind(workspace_id)
+    .bind(password)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(verdict.flatten() == Some(true))
+}
+
+/// End the member's pending operator-issued reset links: every unspent `password_reset`
+/// claim is spent in this transaction (ADR-0215 D4). `owner_bootstrap` claims are not
+/// touched (the `kind` filter). Returns how many links it ended.
+///
+/// **`FOR UPDATE SKIP LOCKED`, and why it is not a style choice.** The lock order the other
+/// paths keep is claim row, then `human` row, then the member-wide sweep lock. This runs
+/// *after* a sweep, so waiting for a claim row here would be the opposite order, and a
+/// claim that is being spent (it holds its row and wants the member) could wait for us
+/// while we wait for it. A row somebody else holds is a link that is being spent right now,
+/// so skipping it is safe: that spend either commits (its holder sets the password, and
+/// whoever ended the sessions did not outlive it) or rolls back (the link survives, which
+/// is the one narrow gap D4 names). Never waiting is what makes the pair deadlock-free.
+///
+/// The CTE is `MATERIALIZED` so the rows are chosen and locked once, up front, and the
+/// planner cannot fold the locking read into the UPDATE's join.
+pub async fn consume_pending_password_resets_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<u64, sqlx::Error> {
+    let ended = sqlx::query(
+        "WITH pending AS MATERIALIZED ( \
+            SELECT id FROM credential_claim \
+             WHERE workspace_id = $1 \
+               AND member_id = $2 \
+               AND kind = 'password_reset' \
+               AND consumed_at IS NULL \
+               FOR UPDATE SKIP LOCKED \
+         ) \
+         UPDATE credential_claim c \
+            SET consumed_at = now() \
+           FROM pending p \
+          WHERE c.id = p.id",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    Ok(ended)
 }
 
 /// Change the caller's password after re-checking the current one. Revokes

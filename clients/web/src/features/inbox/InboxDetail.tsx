@@ -291,7 +291,8 @@ export function InboxDetail({
   /** 좁은 화면에서 목록으로 돌아간다. 넓은 화면에서는 주지 않는다. */
   onBack?: () => void;
   onToggleRead: (entry: MailboxEntry) => void;
-  onDecided: (outcome: DecisionOutcome) => void;
+  /** 결정 응답이 닿았다. `approvalId`는 이 패널이 결정한 승인이다(라우트의 안내가 어느 승인의 것인지 안다, #5174 L5). */
+  onDecided: (outcome: DecisionOutcome, approvalId: string) => void;
   readBusy: boolean;
 }) {
   const { session, workspaceId } = useSession();
@@ -476,7 +477,7 @@ export function InboxDetail({
                 approvalId={control.approvalId}
                 onSettled={(outcome) => {
                   panelRef.current?.focus();
-                  onDecided(outcome);
+                  onDecided(outcome, control.approvalId);
                 }}
                 execution={entry.task.execution}
               />
