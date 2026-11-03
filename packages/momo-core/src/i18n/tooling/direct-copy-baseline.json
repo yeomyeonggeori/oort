@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "322867700eedbdfe17885a1197077e9035a797b5",
+  "baselineHead": "5298a456a7762685753655f0a259517407a12554",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -86,6 +86,7 @@
     "clients/mobile/src/features/attachments/viewerDismiss.ts": 4,
     "clients/mobile/src/features/attachments/viewerZoom.ts": 1,
     "clients/mobile/src/features/conversation/AiConnectSuggestion.tsx": 21,
+    "clients/mobile/src/features/conversation/AlsoInChannelCheck.tsx": 4,
     "clients/mobile/src/features/conversation/ApprovalAvatarPreview.tsx": 18,
     "clients/mobile/src/features/conversation/ApprovalMessagePreview.tsx": 4,
     "clients/mobile/src/features/conversation/Avatar.tsx": 13,
@@ -102,7 +103,7 @@
     "clients/mobile/src/features/conversation/MessageActionSheet.tsx": 21,
     "clients/mobile/src/features/conversation/MessageBody.tsx": 45,
     "clients/mobile/src/features/conversation/MessageEditorSheet.tsx": 8,
-    "clients/mobile/src/features/conversation/MessageRow.tsx": 275,
+    "clients/mobile/src/features/conversation/MessageRow.tsx": 270,
     "clients/mobile/src/features/conversation/PinListPanel.tsx": 9,
     "clients/mobile/src/features/conversation/Quote.tsx": 34,
     "clients/mobile/src/features/conversation/ReplyDraftCard.tsx": 4,
@@ -444,7 +445,7 @@
     "clients/web/src/features/attachments/useImageLightboxZoom.ts": 18,
     "clients/web/src/features/attachments/useRevealOnHover.ts": 2,
     "clients/web/src/features/attachments/useStageHero.ts": 36,
-    "clients/web/src/features/auth/ClaimPage.tsx": 22,
+    "clients/web/src/features/auth/ClaimPage.tsx": 19,
     "clients/web/src/features/auth/ConnectPage.tsx": 98,
     "clients/web/src/features/auth/OnboardingSlideTransition.tsx": 3,
     "clients/web/src/features/auth/OortCloudMarks.tsx": 2,

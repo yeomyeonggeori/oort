@@ -129,9 +129,15 @@ function NoPullSlot(): null {
 }
 const NO_PULL_SLOT = <NoPullSlot />;
 const NO_RUNS: readonly AgentRunProgress[] = [];
+
+/** 본류면 코어 판정(스레드로만 간 답글은 빠지고, 서버가 이 값을 모르면 오늘처럼 전부), 스레드 화면이면 든 행 전부 (#4888). */
+function drawnRows(rows: Message[], mainFlow: boolean): Message[] {
+  return mainFlow ? phoneMainFlowMessages(rows) : rows;
+}
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import {buildThreadContext, parentOf, rollupFor} from './threadContext';
+import {phoneMainFlowMessages} from '@momo/core/features/timeline/threadHome';
 // 접기는 이제 **코어 정본**이다 (U4-6, #1102). 이 파일이 부르던 폰 로컬 판은
 // 자기 머리말에 「정본 자리는 코어다」라고 적어 두고 폰에 있는 이유가 설계가
 // 아니라 동시 작업임을 밝혀 두었다(#1100 이탈 1). 그 배치가 끝나면서 규칙·문구·
@@ -923,6 +929,7 @@ function TimelineInner({
   emptyOverride,
   selfSendToken,
   markReplies = true,
+  mainFlow = true,
   showRollup = true,
   requestThoughts = false,
   requestRootId,
@@ -1053,6 +1060,12 @@ function TimelineInner({
    * where it is already true of every row on screen.
    */
   markReplies?: boolean;
+  /**
+   * 이 목록이 **채널 본류**인가(기본 참, #4888). 본류는 스레드로만 간 답글을 그리지 않는다 — 요약 줄(#4878)만 남고, 「대화에도 보내기」로 보낸
+   * 답글만 선다(코어 `phoneMainFlowMessages`, 서버가 이 값을 모르는 옛 서버에서는 오늘처럼 답글 전부). 스레드 화면은 `false`다: 거기 든
+   * 행은 루트와 그 답글 전부이고 하나도 가리면 안 된다. `showRollup`·`markReplies`와 다른 축이다(그 둘은 줄을 그릴지고, 이것은 행을 그릴지다).
+   */
+  mainFlow?: boolean;
   /**
    * 루트 행이 「답글 N개 · 마지막 …」을 그리는가 (goal RN-U2).
    *
@@ -1317,7 +1330,7 @@ function TimelineInner({
   const built = useMemo(
     () =>
       // 중단 시스템 줄(`SystemLine`) 바로 다음 행은 작성자가 같아도 새 묶음이다(#5067) — 이유는 `startGroupAfterSystemLine`.
-      startGroupAfterSystemLine(buildTimelineItems(presentableRows(messages).filter(message => {
+      startGroupAfterSystemLine(buildTimelineItems(drawnRows(presentableRows(messages), mainFlow).filter(message => {
         if (showRollup && channelKind !== 'dm' && message.rootId !== undefined &&
           messages.some(root => root.id.toLowerCase() === message.rootId?.toLowerCase())) {
           const card = agentCardModel(message);
@@ -1329,8 +1342,10 @@ function TimelineInner({
         unreadCount,
         recoveryMarkers,
         pending,
+        // 그리지 않는 답글(스레드로만 간 것)의 확정본도 에코를 정착시킨다 — 보내지 못해 남은 에코의 확정본이 나중에 도착하는 경우.
+        settleAgainst: messages,
       })),
-    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, showRollup, channelKind],
+    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, showRollup, channelKind, mainFlow],
   );
   // 확정본이 등장 도중에 와도 오름이 도는 메아리를 그 자리에 둔다(#4455, design-review r1 H1). 폴드가 메아리를 걷고
   // 확정본(`m-<seq>`)으로 바꾼 자리를, 같은 키(`p-<clientMsgId>`)의 메아리로 되돌려 세운다 — 같은 컴포넌트가 이어져
@@ -1754,8 +1769,9 @@ function TimelineInner({
     () =>
       baselineSeq === null
         ? 0
-        : countNewerThan(messages, baselineSeq, myMemberId),
-    [messages, baselineSeq, myMemberId],
+        // 대화에 그려지는 행만 센다(#4888): 스레드로만 간 답글은 대화에 서지 않으므로 「새 메시지 N」을 올리면 안 된다.
+        : countNewerThan(drawnRows(messages, mainFlow), baselineSeq, myMemberId),
+    [messages, baselineSeq, myMemberId, mainFlow],
   );
   const showJumpLatest = jumpPills && !atBottom;
   if (pillsRef) {
@@ -3001,6 +3017,15 @@ function TimelineInner({
               item.pending.replyToId
                 ? quoteLookup(item.pending.replyToId)?.attachments?.length ?? 0
                 : 0
+            }
+            // 대화 목록의 에코만 어느 스레드의 것인지 말한다. 스레드 화면(`markReplies` 꺼짐)의 행은 전부 그 스레드의 답글이라 줄이 소음이다.
+            replyHome={
+              !markReplies || item.pending.rootId === undefined
+                ? undefined
+                : {
+                    rootId: item.pending.rootId,
+                    root: threads.byId.get(item.pending.rootId.toLowerCase()) ?? null,
+                  }
             }
             onResend={onResendPending}
             onDiscard={onDiscardPending}
