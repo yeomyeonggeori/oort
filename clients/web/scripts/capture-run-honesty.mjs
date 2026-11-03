@@ -821,10 +821,13 @@ async function d1(browser, origin, scheme) {
     { ordinal: 1, kind: "queued", createdAtMs: now - 12 * MIN - 20_000 },
     { ordinal: 2, kind: "doorbell_rung", code: "leading_ok", createdAtMs: now - 12 * MIN - 19_000 },
     { ordinal: 3, kind: "doorbell_rung", code: "trailing_ok", createdAtMs: now - 12 * MIN - 14_000 },
-    { ordinal: 4, kind: "tool_call", code: "ok", createdAtMs: now - 12 * MIN - 13_000 },
-    { ordinal: 5, kind: "claimed", createdAtMs: now - 12 * MIN - 8_000 },
-    { ordinal: 6, kind: "started", createdAtMs: now - 12 * MIN },
-    { ordinal: 7, kind: "stage", stage: "grokbot-lab 이름 점검", createdAtMs: now - MIN },
+    // 이 앱이 모르는 종류(서버가 앞서 실은 새 낱말). 예전에는 `tool_call`이 이 자리의 모르는 종류였지만 이제 아는 종류다(#4654).
+    { ordinal: 4, kind: "audio_note", createdAtMs: now - 12 * MIN - 13_000 },
+    // oort가 직접 잰 도구 호출(#4654). 「기록」 칸이 아니라 「oort 기록」 칸이 맡는다(#5114). 이름은 닫힌 모양(`oort_…`)이다.
+    { ordinal: 5, kind: "tool_call", tool: "oort_message_post", code: "ok", durationMs: 420, createdAtMs: now - 12 * MIN - 10_000 },
+    { ordinal: 6, kind: "claimed", createdAtMs: now - 12 * MIN - 8_000 },
+    { ordinal: 7, kind: "started", createdAtMs: now - 12 * MIN },
+    { ordinal: 8, kind: "stage", stage: "grokbot-lab 이름 점검", createdAtMs: now - MIN },
   ];
   await serverMoves(page, scene, [
     progress(now, { ...base, createdAtMs: now - 12 * MIN - 20_000, phase: "running", status: "running", leaseState: "live", claimedAtMs: now - 12 * MIN - 8_000, startedAtMs: now - 12 * MIN, lastEventAtMs: now - MIN - 5_000, latestStage: "grokbot-lab 이름 점검", stepCount: 1 }),
@@ -847,13 +850,25 @@ async function d1(browser, origin, scheme) {
   check(`${tag} panel: 걸린 시간 「대기 12초 → 작업 12분째」`, durations === "대기 12초 → 작업 12분째", durations);
   const ledgerText = ((await page.getByTestId("agent-work-panel-ledger").textContent()) ?? "");
   check(`${tag} panel: 깨우는 신호가 접혀 「· 2번」`, ledgerText.includes("깨우는 신호를 보냈어요 · 2번"), ledgerText);
-  check(`${tag} panel: 모르는 종류가 와도 기록이 선다`, ledgerText.includes("이 앱이 아직 모르는 기록이에요") && ledgerText.includes("grokbot-lab 이름 점검"), ledgerText);
+  // 모르는 종류가 와도 「기록」 칸은 버려지지 않는다: 모르는 줄이 정확히 한 줄 서고, 그 곁의 아는 줄(에이전트 단계)도 그대로다.
+  check(`${tag} panel: 모르는 종류가 와도 기록이 선다(모르는 줄 한 줄)`, ledgerText.split("이 앱이 아직 모르는 기록이에요").length - 1 === 1, ledgerText);
+  check(`${tag} panel: 모르는 줄 곁에서도 아는 줄(에이전트 단계)이 그대로 선다`, ledgerText.includes("grokbot-lab 이름 점검"), ledgerText);
+  // #5114: 도구 호출은 출처가 달라 「기록」이 아니라 「oort 기록」 칸에 선다. 「기록」 칸은 그 줄을 세지 않는다.
+  //   원장 7줄(+깨움 접힘 1) 중 도구 호출을 뺀 여섯 줄: 요청·깨움(접힘)·모르는 줄·가져감·시작·단계.
+  const ledgerRowCount = await page.getByTestId("agent-work-panel-ledger-row").count();
+  check(`${tag} panel: 도구 호출은 「기록」 칸에 서지 않는다(줄 ${ledgerRowCount}, 기대 6)`, ledgerRowCount === 6, String(ledgerRowCount));
+  const oortRecord = page.getByTestId("agent-work-panel-oort-record");
+  await oortRecord.waitFor({ timeout: 5_000 }).catch(() => {});
+  const oortRows = oortRecord.locator('[data-testid="work-timeline-row"][data-source="oort"][data-kind="tool"]');
+  check(`${tag} panel: 「oort 기록」 칸에 도구 호출 한 줄(성공)이 선다`, (await oortRows.count()) === 1 && (await oortRows.first().getAttribute("data-status")) === "done", `rows=${await oortRows.count()}`);
+  const toolLabel = (await oortRows.count()) === 1 ? (((await oortRows.first().getByTestId("work-timeline-label").textContent()) ?? "").trim()) : "";
+  check(`${tag} panel: 도구 이름이 사람이 읽는 낱말로 나온다(식별자 「oort_…」가 아니다)`, toolLabel !== "" && !toolLabel.includes("oort_"), toolLabel);
   await page.screenshot({ path: shot("4-panel-ledger") });
 
   // ⑥ 결과: 답함 · 3분 12초 걸림(패널). 이 run의 답 메시지를 모르면 칩은 눌리지 않는다.
   scene.ledgers[RUN_A] = [
     ...scene.ledgers[RUN_A],
-    { ordinal: 8, kind: "succeeded", createdAtMs: now - 12 * MIN - 20_000 + 192_000 },
+    { ordinal: 9, kind: "succeeded", createdAtMs: now - 12 * MIN - 20_000 + 192_000 },
   ];
   await serverMoves(page, scene, [
     progress(now, { ...base, createdAtMs: now - 12 * MIN - 20_000, phase: "succeeded", status: "succeeded", leaseState: "none", claimedAtMs: now - 12 * MIN - 8_000, startedAtMs: now - 12 * MIN, finishedAtMs: now - 12 * MIN - 20_000 + 192_000 }),
