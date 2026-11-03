@@ -18,13 +18,13 @@
 //                  들어가는 작은 그림만 예외다: 없는 픽셀은 만들 수 없어 원본 크기에서 멈춘다.
 //   4. 같은 원본   보낸 사람 화면의 echo 행과 확정 행, 받는 사람 화면이 **같은 원본
 //                  바이트**(`data:` 주소 동일, 자연 폭 = 원본 폭)를 쓴다. 컴포저 트레이의
-//                  128px 초안 썸네일은 타임라인에 오지 않는다.
+//                  초안 썸네일(캔버스 변은 소스의 `THUMB_EDGE_PX × 2`)은 타임라인에 오지 않는다.
 //
 // 이름 붙은 red proof (제품 소스가 아니라 이 판의 DOM·스타일만 건드린다):
 //   IMAGE_CARD_PROVE_RED=pill     "그림 반경이 알약(9999px)으로 돌아간다"
 //   IMAGE_CARD_PROVE_RED=narrow   "넓은 그림이 다시 폭 360 에 갇힌다"
 //   IMAGE_CARD_PROVE_RED=upscale  "작은 그림이 원본보다 크게 그려진다"
-//   IMAGE_CARD_PROVE_RED=thumb    "받는 쪽 그림이 128px 썸네일로 바뀐다"
+//   IMAGE_CARD_PROVE_RED=thumb    "받는 쪽 그림이 초안 썸네일 크기 그림으로 바뀐다"
 //
 // 환경:
 //   IMAGE_CARD_GATE_PORT    preview 포트(기본 5489). 다른 워크트리의 preview 와 겹치면
@@ -857,7 +857,7 @@ async function exerciseSenderReceiver(browser, world, pngs) {
   // 초안 썸네일은 작다: 이 그림이 타임라인에 오면 안 된다.
   check(
     draft.naturalWidth === DRAFT_THUMBNAIL_PX,
-    "보낸 사람: 트레이 썸네일이 예상한 128px 가 아니다(기준선이 흔들렸다)",
+    `보낸 사람: 트레이 썸네일이 예상한 ${DRAFT_THUMBNAIL_PX}px 가 아니다(기준선이 흔들렸다)`,
     `${draft.naturalWidth}`
   );
   await sender.waitForFunction(
@@ -895,7 +895,7 @@ async function exerciseSenderReceiver(browser, world, pngs) {
   await login(receiver);
   await openChannel(receiver);
   if (proveRed === "thumb") {
-    // red proof: 받는 쪽 그림을 128px 썸네일 바이트로 바꿔 끼운다(제품 소스는 그대로).
+    // red proof: 받는 쪽 그림을 초안 썸네일 크기의 그림으로 바꿔 끼운다(제품 소스는 그대로).
     await receiver.evaluate(
       ({ id, size }) => {
         const img = document.querySelector(
@@ -922,7 +922,7 @@ async function exerciseSenderReceiver(browser, world, pngs) {
     );
     check(
       m.naturalWidth > DRAFT_THUMBNAIL_PX,
-      `같은 원본: ${name} 그림이 128px 초안 썸네일이다`,
+      `같은 원본: ${name} 그림이 ${DRAFT_THUMBNAIL_PX}px 초안 썸네일이다`,
       `${m.naturalWidth}`
     );
     check(m.srcHead.startsWith("data:image/png"), `같은 원본: ${name} 그림이 data:image/png 가 아니다`, m.srcHead);
