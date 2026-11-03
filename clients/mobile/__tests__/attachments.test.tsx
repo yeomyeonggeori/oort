@@ -471,6 +471,62 @@ describe('파일 카드의 ↓ 는 「저장」이다 — 카드 탭(공유)과 
     await waitFor(() => expect(line()).toBe('사진에 저장했어요'));
   });
 
+  it('실패 줄의 「다시 시도」를 누르면 저장을 다시 한다 — 카드가 쥔 탭(공유 시트)이 열리지 않는다 (#5273, 검수 4회차 M1)', async () => {
+    mediaLibrary.__state.addPermission = { status: 'granted' };
+    mediaLibrary.__state.saveFailure = new Error('boom');
+    render(<AttachmentList channelId="ch" attachments={[BIG_PHOTO]} />);
+    fireEvent.press(save());
+    await waitFor(() => expect(line()).toBe('저장하지 못했어요 · 다시 시도'));
+    expect(mediaLibrary.saveToLibraryAsync).toHaveBeenCalledTimes(1);
+    const role = screen.queryByTestId('attachment-save-retry')?.props.accessibilityRole;
+    mediaLibrary.__state.saveFailure = null;
+
+    // 줄의 글자를 누른다. 예전에는 이 탭이 카드의 것이라 저장을 다시 하려던 사람 앞에 공유 시트가 열렸다.
+    fireEvent.press(screen.getByTestId('attachment-save-status'));
+    await waitFor(() => expect(line()).toBe('사진에 저장했어요'));
+    expect(mediaLibrary.saveToLibraryAsync).toHaveBeenCalledTimes(2);
+    expect(Share.share).not.toHaveBeenCalled();
+    expect(role).toBe('button');
+  });
+
+  it('실패 줄은 ↓ 와 같은 길게 누르기 배선을 쥔다 — 롱프레스는 메시지 메뉴이고 따라오는 탭은 저장을 시작하지 않는다 (#5273)', async () => {
+    mediaLibrary.__state.addPermission = { status: 'granted' };
+    mediaLibrary.__state.saveFailure = new Error('boom');
+    render(
+      <MessageRow
+        message={message({ attachments: [BIG_PHOTO] })}
+        startsGroup
+        directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
+        actions={actions()}
+      />,
+    );
+    fireEvent.press(save());
+    await waitFor(() => expect(line()).toBe('저장하지 못했어요 · 다시 시도'));
+    mediaLibrary.__state.saveFailure = null;
+    mediaLibrary.saveToLibraryAsync.mockClear();
+
+    // 안쪽 `Pressable` 은 닿음을 통째로 쥔다 — 길게 누르기를 넘기지 않으면 이 줄은 행에서 롱프레스가 먹지 않는 구멍이 된다. RNTL 의 이벤트는
+    // 조상으로 번져 구멍을 못 보므로, ↓ 와 같은 한 쌍(칠하기 지연 + 길게 누르기)과 같은 핸들러를 쥐었는지를 속성으로 잰다.
+    const pressable = (testID: string) => screen.UNSAFE_getAllByProps({ testID })[0];
+    const arrow = pressable('attachment-card-save');
+    const retry = pressable('attachment-save-retry');
+    expect(typeof retry?.props.onLongPress).toBe('function');
+    expect(retry?.props.onLongPress).toBe(arrow?.props.onLongPress);
+    expect(retry?.props.delayLongPress).toBe(arrow?.props.delayLongPress);
+    expect(retry?.props.unstable_pressDelay).toBe(arrow?.props.unstable_pressDelay);
+
+    const text = screen.getByTestId('attachment-save-status');
+    fireEvent(screen.getByTestId('message-row'), 'touchStart', {
+      nativeEvent: { pageX: 10, pageY: 10 },
+    });
+    fireEvent(text, 'longPress');
+    expect(screen.getByTestId('message-action-sheet')).toBeTruthy();
+    await act(async () => fireEvent.press(text));
+    expect(mediaLibrary.saveToLibraryAsync).not.toHaveBeenCalled();
+  });
+
   it('저장의 영수증이 걷히면 줄은 원래 말로 돌아온다 — 앞서 공유가 남긴 실패가 되살아나지 않는다', async () => {
     jest.useFakeTimers();
     try {

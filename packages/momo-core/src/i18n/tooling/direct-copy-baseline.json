@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "f33e8efd429a328d951faa8c4be0f8ab7dc1cf16",
+  "baselineHead": "cfb78ae5b526251d8681b84d90c22c65e39a9f0d",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -63,7 +63,7 @@
     "clients/mobile/src/features/attachments/AttachMenu.tsx": 44,
     "clients/mobile/src/features/attachments/AttachmentList.tsx": 45,
     "clients/mobile/src/features/attachments/AttachmentTray.tsx": 33,
-    "clients/mobile/src/features/attachments/AttachmentViewer.tsx": 98,
+    "clients/mobile/src/features/attachments/AttachmentViewer.tsx": 97,
     "clients/mobile/src/features/attachments/PhotoGridCard.tsx": 62,
     "clients/mobile/src/features/attachments/PhotoMorphFrame.tsx": 24,
     "clients/mobile/src/features/attachments/StageHero.tsx": 2,
