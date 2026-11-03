@@ -1,4 +1,6 @@
+import type { RosterMember } from "../../lib/api";
 import { APPROVAL_EXPIRED_SENTENCE, REQUEST_WORD } from "../agents/runPhase";
+import { memberFor, type Directory } from "../workspace/directory";
 
 // =============================================================================
 // 승인의 기한 — 「곧 만료」와 「이미 만료」를 클라이언트가 어떻게 아는가 (#3738)
@@ -76,6 +78,39 @@ export function closedCardReproposeReason(
 ): Exclude<ReproposeReason, "expired"> | null {
   if (state === "failed") return "failed";
   return state === "declined" && !viewerDecided ? "declined" : null;
+}
+
+/**
+ * 닫힌 묶음 카드가 「다시 요청」을 건네는 이유의 **한 표** (#5171). 웹은 만료를 제 푸터가, 거부·실패를 닫힌 카드의 다음 행동
+ * (`closedCardReproposeReason`)이 맡고, 폰은 이 함수 하나로 같은 표를 읽는다: 만료는 보는 사람과 상관없이, 거부는 거부한 본인을
+ * 빼고, 실패는 늘 건네고, 그 밖의 상태(끝·취소·실행 중·생각 중·결정 대기)에는 없다. `state` 는 `RequestBundleState` 다.
+ */
+export function cardReproposeReason(
+  state: string,
+  viewerDecided: boolean
+): ReproposeReason | null {
+  return state === "expired"
+    ? "expired"
+    : closedCardReproposeReason(state, viewerDecided);
+}
+
+/**
+ * 「다시 요청」이 서는 곳 (#3738, #5171): 카드를 올린 이가 에이전트로 풀리고 카드가 선 채널을 알 때만 있다. 올린 이가 에이전트로
+ * 풀리지 않으면(디렉터리에 없음) 단추를 세우지 않는다. 누르면 아무 일도 없는 컨트롤은 고장 난 버튼으로 읽힌다. 웹과 폰이 같은 함수를
+ * 읽는다(원래 웹 `AgentCard` 안에 있던 판정을 옮겼다).
+ */
+export function reproposeTarget(
+  card: { requestedByMemberId?: string; channelId?: string },
+  directory: Directory
+): { agent: RosterMember; channelId: string } | null {
+  const requester =
+    card.requestedByMemberId !== undefined
+      ? memberFor(directory, card.requestedByMemberId)
+      : null;
+  const channelId = card.channelId;
+  return requester?.kind === "agent" && channelId !== undefined
+    ? { agent: requester, channelId }
+    : null;
 }
 
 /**

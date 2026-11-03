@@ -3315,6 +3315,18 @@ export const catalog: MessageCatalog = {
       "value": "키를 확인하는 중이에요."
     }
   ],
+  "timeline.approval.reproposeBusy": [
+    {
+      "type": 0,
+      "value": "입력창에 쓰던 글이 있어서 넣지 못했어요. 비우고 다시 눌러 주세요."
+    }
+  ],
+  "timeline.approval.reproposeSeeded": [
+    {
+      "type": 0,
+      "value": "입력창에 넣어 뒀어요. 보내면 에이전트가 다시 제안해요."
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,

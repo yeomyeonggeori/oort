@@ -9,6 +9,7 @@ import {
   expiryPhase,
   expirySoonCopy,
   reproposeDraft,
+  reproposeTarget,
   closedCardReproposeReason,
   type ReproposeReason,
 } from "@momo/core/features/approvals/expiry";
@@ -339,22 +340,6 @@ function ApprovalNoteLine({
       {note.text}
     </p>
   );
-}
-
-/**
- * 「다시 요청」이 서는 곳: 카드를 올린 이가 에이전트로 풀리고 카드가 선 채널을 알 때만 있다. 올린 이가
- * 에이전트로 풀리지 않으면(디렉터리에 없음) 단추를 세우지 않는다. 누르면 아무 일도 없는 컨트롤은 고장 난
- * 버튼으로 읽힌다.
- */
-function reproposeTarget(card: AgentApprovalCard, directory: Directory) {
-  const requester =
-    card.requestedByMemberId !== undefined
-      ? memberFor(directory, card.requestedByMemberId)
-      : null;
-  const channelId = card.channelId;
-  return requester?.kind === "agent" && channelId !== undefined
-    ? { agent: requester, channelId }
-    : null;
 }
 
 /**

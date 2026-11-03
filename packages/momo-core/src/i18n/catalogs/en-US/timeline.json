@@ -114,6 +114,8 @@
   "timeline.workHealth.rejectedApprovals": "Rejected approvals {count, number}",
   "timeline.workHealth.retries": "oort call retries {count, number}",
   "timeline.workStream.limit": "This section shows only the streamed text and tool calls that arrived after you opened this panel, and it does not keep them.",
+  "timeline.approval.reproposeSeeded": "Added to the message box. Send it and the agent will propose it again.",
+  "timeline.approval.reproposeBusy": "There's already text in the message box, so it wasn't added. Clear it and tap again.",
   "timeline.workRequest.labelAny": "Hand a task to my Mac",
   "timeline.workRequest.labelClaude": "Hand it to Claude Code on my Mac",
   "timeline.workRequest.labelCodex": "Hand it to Codex on my Mac",
