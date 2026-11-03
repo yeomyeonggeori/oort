@@ -36,6 +36,13 @@ import {
   resetLiquidGlassSupportForTests,
 } from '../src/design/glass';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
+import NetInfo from '@react-native-community/netinfo';
+import {fetchWithDeadline} from '@momo/core/lib/http';
+import {
+  ConnectionProvider,
+  NO_FEED,
+  type SocketFeed,
+} from '../src/features/connection/ConnectionProvider';
 
 const mockDecide = jest.fn();
 const mockPulse = jest.fn();
@@ -1162,4 +1169,49 @@ test('알림이 새 입구로 들어오면 무대가 걷혀요 — 영웅 모션
     dismissTemporarySurfaces();
   });
   expect(defaults.onClose).toHaveBeenCalledTimes(1);
+});
+
+// -----------------------------------------------------------------------------
+// 막은 원인을 말한다 (#5262, #5201 결정 ③). 결정 무대의 「연결이 없어요」는 서버에 닿지 못한 날에도 같은 말을 했다 - 기기는 연결돼 있는데.
+// 연결 상태 모델이 있으면 모델이 고른 원인 문장이 서고(웹 승인 카드와 같은 사전 키), 모델이 없는 곳(위 시험들)은 예전 문장이다.
+describe('결정 무대가 막은 원인을 말한다 (#5262)', () => {
+  const netInfo = NetInfo as unknown as {__emit: (state: unknown) => void};
+  const feedRef: {current: SocketFeed} = {current: NO_FEED};
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  async function mountWithModel() {
+    const props = {...defaults, entries: [entry('첫째')], offline: true};
+    const view = render(
+      <ConnectionProvider feedRef={feedRef}>
+        {wrap(<DecisionStage {...props} />)}
+      </ConnectionProvider>,
+    );
+    await act(async () => {});
+    return view;
+  }
+
+  test('기기 오프라인이면 「오프라인이라」로 말한다', async () => {
+    const view = await mountWithModel();
+    await act(async () => netInfo.__emit({isConnected: false, isInternetReachable: false}));
+    expect(view.getByTestId('decision-stage-offline')).toHaveTextContent(
+      '오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요.',
+    );
+    expect(view.queryByText(/연결이 없어요/)).toBeNull();
+  });
+
+  test('서버에 닿지 못하면 기기가 온라인이어도 「서버에 닿지 못해」로 말한다', async () => {
+    const view = await mountWithModel();
+    globalThis.fetch = jest.fn().mockRejectedValue(new TypeError('Network request failed')) as unknown as typeof fetch;
+    for (const path of ['/channels', '/roster', '/read-state']) {
+      await act(async () => {
+        await fetchWithDeadline(`https://api.example.com/v1${path}`).catch(() => undefined);
+      });
+    }
+    expect(view.getByTestId('decision-stage-offline')).toHaveTextContent(
+      '서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요.',
+    );
+  });
 });
