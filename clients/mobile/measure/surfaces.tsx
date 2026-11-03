@@ -58,6 +58,7 @@ import {
   UnreadDivider,
   WorkingRow,
 } from '../src/features/conversation/MessageRow';
+import {ResendAllBar} from '../src/features/conversation/ResendAllBar';
 import {MissedDigestCardView} from '../src/features/memory/MissedDigestCard';
 import {MemoryDigestSheet} from '../src/features/memory/MemoryDigestSheet';
 import {MemoryPauseSection} from '../src/features/memory/MemoryPauseSection';
@@ -206,9 +207,11 @@ import {ThreadPanelSurface} from './threadPanel';
 import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
 import {UncollectedSurface, isUncollectedSurface, seedUncollected} from './uncollected';
+import {WorkTimelineSurface, isWorkTimelineSurface, seedWorkTimeline} from './workTimeline';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
+import {ConnectionStripSurface} from './connectionStrip';
 import {PhotoCardSurface} from './photoCard';
 import {AttachMenuSurface} from './attachMenu';
 import {AvatarApprovalSurface} from './avatarApproval';
@@ -2334,6 +2337,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('oort-loader')) {
     return <OortLoaderSurface which={name.slice('oort-loader'.length).replace(/^-/, '')} />;
   }
+  // #5222: 폰 셸 띠(홈·받은함·에이전트 위)와 대화 화면 띠. 실제 연결 공급자·실제 띠가 스크립트된 기기·소켓·REST 사건 위에서 선다.
+  if (name.startsWith('conn-strip')) {
+    return <ConnectionStripSurface which={name.slice('conn-strip'.length).replace(/^-/, '')} />;
+  }
   if (name.startsWith('signed-work-')) {
     return <SignedWorkSurface which={name.slice('signed-work-'.length)} />;
   }
@@ -2379,6 +2386,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4285: 아무도 가져가지 않은 요청 — 홈 「작업 중」 카드와 대화 아래 활동 줄(「아직 받지 않았어요」·「취소」).
   if (isUncollectedSurface(name)) {
     return <UncollectedSurface name={name} />;
+  }
+
+  // #4658: 작업 타임라인 시트(에이전트 보고·oort 기록·계획·건강 신호)와 끝난 요청의 요약 칩.
+  if (isWorkTimelineSurface(name)) {
+    return <WorkTimelineSurface name={name} />;
   }
 
   switch (name) {
@@ -3142,6 +3154,64 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             }
             startsGroup
             directory={DIRECTORY}
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+        </Frame>
+      );
+    }
+    // #5222: 보내지 못한 글이 여럿일 때. 첫 실패 줄 위에 「N개 모두 다시 보내기」 한 번, 줄마다 이유 한 줄(오프라인 · 서버에 닿지 못함 ·
+    // 서버가 거절)과 새로고침·X. 실제 `ResendAllBar`·`PendingRow` 를 `Timeline` 이 그리는 순서로 세운다. 캡처: `-momoMeasure SEND-FAILED-ALL`.
+    case 'send-failed-all': {
+      const failed = (clientMsgId: string, body: string, at: number) => ({
+        clientMsgId,
+        channelId: 'ch',
+        authorMemberId: SELF,
+        body,
+        status: 'failed',
+        sinceSeq: null,
+        createdAtMs: NOW + at,
+      });
+      return (
+        <Frame label="보내지 못한 글이 여럿 - N개 모두 다시 보내기 · 줄마다 이유">
+          <MessageRow
+            message={
+              {
+                ...MESSAGE,
+                id: 'confirmed',
+                seq: 60,
+                thread: undefined,
+                authorMemberId: OTHER,
+                body: '금요일 배포 공지 초안이에요. 이대로 올려도 될까요?',
+              } as Message
+            }
+            startsGroup
+            directory={DIRECTORY}
+            chips={[]}
+            nowMs={NOW}
+          />
+          <ResendAllBar count={3} onPress={() => {}} />
+          <PendingRow
+            pending={failed('c-1', '좋아요, 제목만 조금 짧게 바꿔서 올릴게요.', 1) as never}
+            startsGroup
+            directory={DIRECTORY}
+            failureKind="offline"
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+          <PendingRow
+            pending={failed('c-2', '공지 전에 한 번 더 읽어 볼게요.', 2) as never}
+            startsGroup={false}
+            directory={DIRECTORY}
+            failureKind="server"
+            onResend={() => {}}
+            onDiscard={() => {}}
+          />
+          <PendingRow
+            pending={failed('c-3', '배포는 오후 3시로 잡았어요.', 3) as never}
+            startsGroup={false}
+            directory={DIRECTORY}
+            failureKind="rejected"
             onResend={() => {}}
             onDiscard={() => {}}
           />
@@ -6097,7 +6167,12 @@ function RunLedgerSurface(): React.JSX.Element {
       ],
     }).events,
   );
-  return <RunLedgerSheet progress={run} directory={DIRECTORY} onClose={() => {}} />;
+  // 시트는 실시간 연결 상태를 읽는다(끊기면 한정 문장·점 없음, #4658): 하네스의 기본(`connecting`)이 아니라 연결된 화면을 찍는다.
+  return (
+    <RealtimeContext.Provider value={CONNECTED_RAIL}>
+      <RunLedgerSheet progress={run} directory={DIRECTORY} onClose={() => {}} />
+    </RealtimeContext.Provider>
+  );
 }
 
 const harnessClient = new QueryClient({
@@ -7996,6 +8071,13 @@ if (
   isUncollectedSurface(LAUNCHED.name)
 ) {
   seedUncollected(harnessClient, LAUNCHED.name);
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  isWorkTimelineSurface(LAUNCHED.name)
+) {
+  seedWorkTimeline(harnessClient, LAUNCHED.name);
 }
 if (
   LAUNCHED !== null &&

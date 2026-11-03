@@ -62,8 +62,12 @@ export function spanText(ms: number): string {
  * (「1초 미만째 기다려요」, 같은 결함의 앞선 수리 #1468). 부르는 쪽이 그 자리를
  * 「방금」 같은 문장으로 바꾼다. 서버 시계가 조금 앞서 음수가 와도 여기로 온다.
  */
-export function ongoingSpan(ms: number): string | undefined {
-  return ms < SECOND ? undefined : spanText(ms);
+export function ongoingSpan(ms: number, minutesOnly = false): string | undefined {
+  if (ms < SECOND) return undefined;
+  // 분 단위만 말하는 표면(초 시계가 없는 폰 시트, #4658): 1분이 안 된 구간은 숫자를 말하지 않는다. 시계 없이 그린 「40초」는
+  // 다음에 다시 그릴 때까지 그대로 서서 거짓이 되기 때문이다. 부르는 쪽이 같은 자리의 「방금」·「중」 문장으로 바꾼다.
+  if (minutesOnly && ms < MINUTE) return undefined;
+  return spanText(ms);
 }
 
 type DurationFacts = Pick<
@@ -135,7 +139,8 @@ export interface RunDurationSegment {
  */
 export function runDurationSegments(
   facts: DurationFacts,
-  nowMs: number
+  nowMs: number,
+  minutesOnly = false
 ): RunDurationSegment[] {
   const d = runDurations(facts, nowMs);
   const segments: RunDurationSegment[] = [];
@@ -144,7 +149,7 @@ export function runDurationSegments(
     d.waitMs === undefined
       ? DURATION_UNKNOWN
       : stillWaiting
-        ? ongoingOrdinal(d.waitMs)
+        ? ongoingOrdinal(d.waitMs, minutesOnly)
         : durationText(d.waitMs);
   segments.push({ key: "wait", label: "대기", text: waitText });
   if (stillWaiting) return segments;
@@ -158,7 +163,7 @@ export function runDurationSegments(
       d.workMs === undefined
         ? DURATION_UNKNOWN
         : d.open
-          ? ongoingOrdinal(d.workMs)
+          ? ongoingOrdinal(d.workMs, minutesOnly)
           : durationText(d.workMs);
     segments.push({ key: "work", label: "작업", text: workText });
   }
@@ -173,14 +178,18 @@ export function runDurationSegments(
 }
 
 /** 「12초째」, 1초가 안 되면 「중」(「대기 중」「작업 중」). */
-function ongoingOrdinal(ms: number): string {
-  const span = ongoingSpan(ms);
+function ongoingOrdinal(ms: number, minutesOnly = false): string {
+  const span = ongoingSpan(ms, minutesOnly);
   return span === undefined ? "중" : `${span}째`;
 }
 
-/** 조각들을 한 줄로: 「대기 12초 → 작업 3분 → 총 3분 12초」. */
-export function runDurationBreakdown(facts: DurationFacts, nowMs: number): string {
-  return runDurationSegments(facts, nowMs)
+/** 조각들을 한 줄로: 「대기 12초 → 작업 3분 → 총 3분 12초」. `minutesOnly`는 `ongoingSpan`의 것이다. */
+export function runDurationBreakdown(
+  facts: DurationFacts,
+  nowMs: number,
+  minutesOnly = false
+): string {
+  return runDurationSegments(facts, nowMs, minutesOnly)
     .map((segment) => `${segment.label} ${segment.text}`)
     .join(" → ");
 }
@@ -200,10 +209,13 @@ export function runTookText(facts: DurationFacts): string {
  */
 export function runWorkingText(
   facts: Pick<ServerRunFacts, "startedAtMs" | "lastEventAtMs">,
-  nowMs: number
+  nowMs: number,
+  minutesOnly = false
 ): string {
   const workingSpan =
-    facts.startedAtMs === undefined ? undefined : ongoingSpan(nowMs - facts.startedAtMs);
+    facts.startedAtMs === undefined
+      ? undefined
+      : ongoingSpan(nowMs - facts.startedAtMs, minutesOnly);
   const working =
     facts.startedAtMs === undefined
       ? `작업 시간 ${DURATION_UNKNOWN}`
@@ -211,7 +223,9 @@ export function runWorkingText(
         ? "방금 시작"
         : `${workingSpan}째`;
   const reportSpan =
-    facts.lastEventAtMs === undefined ? undefined : ongoingSpan(nowMs - facts.lastEventAtMs);
+    facts.lastEventAtMs === undefined
+      ? undefined
+      : ongoingSpan(nowMs - facts.lastEventAtMs, minutesOnly);
   const report =
     facts.lastEventAtMs === undefined
       ? `마지막 보고 ${DURATION_UNKNOWN}`

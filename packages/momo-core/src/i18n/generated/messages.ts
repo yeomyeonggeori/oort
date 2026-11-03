@@ -185,6 +185,7 @@ export const messageKeys = [
   "connection.boot.unreachable",
   "connection.card.connecting",
   "connection.card.lastSynced",
+  "connection.card.neverSynced",
   "connection.card.offlineDetail",
   "connection.card.offlineTitle",
   "connection.card.realtimeDownDetail",
@@ -351,7 +352,11 @@ export const messageKeys = [
   "expressions.make.stepSend",
   "expressions.make.stepUpload",
   "expressions.make.submit",
+  "expressions.panel.viewEmoticon",
   "expressions.panel.viewEmpty",
+  "expressions.panel.viewGif",
+  "expressions.panel.viewsLegend",
+  "expressions.panel.viewTeam",
   "expressions.photo.agentInstead",
   "expressions.photo.anotherPhoto",
   "expressions.photo.branchLabel",
@@ -452,7 +457,6 @@ export const messageKeys = [
   "mobile.attachmentSave.saving",
   "mobile.attachmentSave.toFiles",
   "mobile.attachmentSave.toPhotos",
-  "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
   "mobile.ios.localNetworkUsage",
@@ -1106,6 +1110,7 @@ export const argumentSpecs = {
   "connection.card.lastSynced": {
     "relativeTime": "string"
   },
+  "connection.card.neverSynced": {},
   "connection.card.offlineDetail": {},
   "connection.card.offlineTitle": {},
   "connection.card.realtimeDownDetail": {},
@@ -1305,7 +1310,11 @@ export const argumentSpecs = {
   "expressions.make.stepSend": {},
   "expressions.make.stepUpload": {},
   "expressions.make.submit": {},
+  "expressions.panel.viewEmoticon": {},
   "expressions.panel.viewEmpty": {},
+  "expressions.panel.viewGif": {},
+  "expressions.panel.viewsLegend": {},
+  "expressions.panel.viewTeam": {},
   "expressions.photo.agentInstead": {},
   "expressions.photo.anotherPhoto": {},
   "expressions.photo.branchLabel": {},
@@ -1408,7 +1417,6 @@ export const argumentSpecs = {
   "mobile.attachmentSave.saving": {},
   "mobile.attachmentSave.toFiles": {},
   "mobile.attachmentSave.toPhotos": {},
-  "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
   "mobile.ios.localNetworkUsage": {},
@@ -2182,6 +2190,7 @@ export interface MessageArgs {
   "connection.boot.unreachable": Record<string, never>;
   "connection.card.connecting": Record<string, never>;
   "connection.card.lastSynced": { relativeTime: string };
+  "connection.card.neverSynced": Record<string, never>;
   "connection.card.offlineDetail": Record<string, never>;
   "connection.card.offlineTitle": Record<string, never>;
   "connection.card.realtimeDownDetail": Record<string, never>;
@@ -2348,7 +2357,11 @@ export interface MessageArgs {
   "expressions.make.stepSend": Record<string, never>;
   "expressions.make.stepUpload": Record<string, never>;
   "expressions.make.submit": Record<string, never>;
+  "expressions.panel.viewEmoticon": Record<string, never>;
   "expressions.panel.viewEmpty": Record<string, never>;
+  "expressions.panel.viewGif": Record<string, never>;
+  "expressions.panel.viewsLegend": Record<string, never>;
+  "expressions.panel.viewTeam": Record<string, never>;
   "expressions.photo.agentInstead": Record<string, never>;
   "expressions.photo.anotherPhoto": Record<string, never>;
   "expressions.photo.branchLabel": Record<string, never>;
@@ -2449,7 +2462,6 @@ export interface MessageArgs {
   "mobile.attachmentSave.saving": Record<string, never>;
   "mobile.attachmentSave.toFiles": Record<string, never>;
   "mobile.attachmentSave.toPhotos": Record<string, never>;
-  "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
   "mobile.ios.localNetworkUsage": Record<string, never>;

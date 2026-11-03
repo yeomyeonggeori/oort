@@ -1258,6 +1258,12 @@ export const catalog: MessageCatalog = {
       "value": "relativeTime"
     }
   ],
+  "connection.card.neverSynced": [
+    {
+      "type": 0,
+      "value": "You haven't loaded this list yet."
+    }
+  ],
   "connection.card.offlineDetail": [
     {
       "type": 0,
@@ -2114,19 +2120,19 @@ export const catalog: MessageCatalog = {
   "expressions.kind.emoji": [
     {
       "type": 0,
-      "value": "Emoji"
+      "value": "Team emoji"
     }
   ],
   "expressions.kind.hintEmoji": [
     {
       "type": 0,
-      "value": "A small picture. Use it between words and in reactions."
+      "value": "A small picture. Use it between words and in reactions. It stays a team emoji even when it moves."
     }
   ],
   "expressions.kind.hintSticker": [
     {
       "type": 0,
-      "value": "A large picture. It is sent big, and a moving one shows under Team GIF."
+      "value": "A large picture. It is sent big, and a moving one shows under GIF."
     }
   ],
   "expressions.kind.legend": [
@@ -2138,7 +2144,7 @@ export const catalog: MessageCatalog = {
   "expressions.kind.sticker": [
     {
       "type": 0,
-      "value": "Sticker"
+      "value": "Emoticon"
     }
   ],
   "expressions.make.agent": [
@@ -2496,10 +2502,34 @@ export const catalog: MessageCatalog = {
       "value": "Send request"
     }
   ],
+  "expressions.panel.viewEmoticon": [
+    {
+      "type": 0,
+      "value": "Emoticon"
+    }
+  ],
   "expressions.panel.viewEmpty": [
     {
       "type": 0,
       "value": "Nothing in this view yet"
+    }
+  ],
+  "expressions.panel.viewGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.panel.viewsLegend": [
+    {
+      "type": 0,
+      "value": "Team expression views"
+    }
+  ],
+  "expressions.panel.viewTeam": [
+    {
+      "type": 0,
+      "value": "Team emoji"
     }
   ],
   "expressions.photo.agentInstead": [
@@ -3108,12 +3138,6 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Save to Photos"
-    }
-  ],
-  "mobile.connection.reconnectNow": [
-    {
-      "type": 0,
-      "value": "Reconnect now"
     }
   ],
   "mobile.ios.cameraUsage": [

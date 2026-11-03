@@ -42,6 +42,7 @@ describe('new direct UI copy guard sabotage', () => {
   it('does not count blocked-reason frame names as copy, but still counts the sentence beside them', () => {
     const frame = extractDirectCopy('src/Screen.tsx', 'const reason = useBlockedReason("changeIt");', []);
     expect(frame.count).toBe(0);
+    expect(extractDirectCopy('src/Screen.tsx', 'const line = useBlockedStale("lastSyncedList", when);', []).count).toBe(0);
     const literal = extractDirectCopy('src/Screen.tsx', 'const reason = describe("연결이 끊겨 지금은 바꿀 수 없어요.");', []);
     expect(literal.count).toBe(1);
   });

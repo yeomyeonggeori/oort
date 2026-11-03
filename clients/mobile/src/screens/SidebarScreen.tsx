@@ -57,6 +57,7 @@ import {
   type Palette,
 } from '../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
+import {ShellConnectionStrip} from '../features/connection/ShellConnectionStrip';
 import {useAgentLiveness} from '../features/agents/useAgentLiveness';
 import {
   useAgentWorkingSignals,
@@ -749,6 +750,10 @@ export default function SidebarScreen({
           testID="notification-tap-notice"
         />
       ) : null}
+
+      {/* 셸 띠(#5222): 기기 오프라인·서버에 닿지 못함이면 홈에서도 말한다. 아래의 읽기 실패 고지는 대개 이 띠가 말하는 원인의 결과라
+          그 위에 선다. 실시간만 끊긴 것은 홈이 말하지 않는다(대화 화면 띠가 말한다). */}
+      <ShellConnectionStrip />
 
       {/* Unread is server truth, so when the projection fails the badges simply
           are not there. Saying so is cheaper than letting someone conclude they

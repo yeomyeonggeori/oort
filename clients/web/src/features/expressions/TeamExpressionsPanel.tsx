@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type MutableRefObject } from "react";
 import { ArrowLeft, MoreHorizontal, Plus } from "lucide-react";
 import { fetchRoster } from "@momo/core/lib/api";
+import type { MessageKey } from "@momo/core/i18n";
 import { searchExpressions } from "@momo/core/features/expressions/search";
 import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
 import { expressionToken } from "@momo/core/features/expressions/message";
@@ -27,6 +28,14 @@ type PanelMode = "list" | "import" | "make";
 // 잠금의 흐림은 잠금과 한 식이 켠다(#1486 문법). 클래스 글자는 상수로 둬서 JSX 식 안의 문자열로 세지 않는다.
 const DIM = "opacity-50";
 
+// 세 보기의 이름은 사전의 것이다: 폰 시트의 탭 이름(owner 10-31, #4942)과 같은 체계이고 카드의 종류 이름과 같은 말이다(팀 이모지 · 이모티콘 · GIF,
+// #5112 3단계). 값이 곧 코어의 칸 이름이다. 웹 패널에는 표준 유니코드 이모지 보기가 없어서 「팀 이모지」라 써도 다른 보기와 겹치지 않는다.
+const VIEW_OPTIONS = [
+  { value: "team", name: "expressions.panel.viewTeam" },
+  { value: "emoticon", name: "expressions.panel.viewEmoticon" },
+  { value: "gif", name: "expressions.panel.viewGif" },
+] as const satisfies readonly { value: ExpressionShelf; name: MessageKey }[];
+
 export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim }: { onPick: (token: string) => void; purpose: "reaction" | "insert"; /** 요청을 보낸 뒤 고르개를 닫는다. 없으면 열어 둔 채로 둔다. */ onClose?: () => void;
   /**
    * 확인 단계가 서 있는 동안 Esc의 임자가 되는 자리. 고르개(Radix 팝오버)가 Esc를 문서 캡처 단계에서 먼저 가져가므로, 고르개가
@@ -36,9 +45,9 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim }: 
   const { store, cache, usage, status, offline } = useExpressions();
   const formatMessage = useFormatMessage();
   const [query, setQuery] = useState("");
-  // ADR-0218 §10 J2: 세 보기가 보관함을 겹치지 않게 나눈다(코어 `expressionsForTab`). 이모지 = 작은 팀 이모지(움직여도),
-  // 스티커 = 움직이지 않는 큰 그림, 팀 GIF = 움직이는 큰 그림. 한 등록은 정확히 한 보기에 있다. 보기의 값이 곧 코어의 칸 이름이다.
-  // 사람이 고르기 전에는 등록이 있는 첫 칸을 연다: 옛 등록은 모두 스티커라 이모지 칸만 열면 있는 그림이 안 보인다(J5).
+  // ADR-0218 §10 J2: 세 보기가 보관함을 겹치지 않게 나눈다(코어 `expressionsForTab`). 팀 이모지 = 작은 팀 이모지(움직여도),
+  // 이모티콘 = 움직이지 않는 큰 그림, GIF = 움직이는 큰 그림. 한 등록은 정확히 한 보기에 있다. 보기의 값이 곧 코어의 칸 이름이다.
+  // 사람이 고르기 전에는 등록이 있는 첫 칸을 연다: 옛 등록은 모두 이모티콘(`sticker`)이라 팀 이모지 칸만 열면 있는 그림이 안 보인다(J5).
   const [picked, setPicked] = useState<ExpressionShelf | null>(null);
   const view = picked ?? firstFilledShelf(cache.items);
   const [mode, setMode] = useState<PanelMode>("list");
@@ -131,7 +140,7 @@ export function TeamExpressionsPanel({ onPick, purpose, onClose, escapeClaim }: 
           disabled가 되어 초점이 body로 떨어지는 일이 없다(#4986). 연결이 없을 때만 보내는 단추도 잠긴다. */}
       <div className="flex justify-end gap-2"><Button ref={cancelRef} type="button" variant="secondary" aria-disabled={busy || undefined} className={cn(busy && DIM)} onClick={closeConfirm}>취소</Button><Button type="button" variant="destructive" aria-busy={busy || undefined} aria-disabled={offline || undefined} className={cn(offline && DIM)} onClick={() => void confirm()}>{busy ? "처리 중" : target.action === "delete" ? "삭제하기" : "신고하고 숨기기"}</Button></div>
     </div> : mode === "import" ? <ExpressionUploadForm onDone={backToList} /> : mode === "make" ? <ExpressionMakeEntry onImport={() => setMode("import")} onDone={backToList} onClose={onClose} /> : <>
-      <SegmentedControl legend="팀 표현 보기" value={view} onValueChange={setPicked} options={[{ value: "team", label: "이모지" }, { value: "emoticon", label: "스티커" }, { value: "gif", label: "팀 GIF" }]} />
+      <SegmentedControl legend={formatMessage("expressions.panel.viewsLegend")} value={view} onValueChange={setPicked} options={VIEW_OPTIONS.map(({ value, name }) => ({ value, label: formatMessage(name) }))} />
       <Input ref={searchRef} type="search" aria-label="우리 팀 표현 검색" placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       <p className="text-meta text-ink-muted">한 보관함의 그림을 반응이나 메시지에 쓸 수 있어요.</p>
       {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" ? <InlineBanner message="팀 그림을 불러오지 못했어요. 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => void store.refresh()} separator={false} /> : items.length === 0 ? <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : cache.items.length > 0 ? formatMessage("expressions.panel.viewEmpty") : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} /> :
