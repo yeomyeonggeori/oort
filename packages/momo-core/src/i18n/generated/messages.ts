@@ -533,6 +533,7 @@ export const messageKeys = [
   "teamAi.stage.setupLine",
   "teamAi.stage.setupUnverifiedDetail",
   "teamAi.stage.verifyingLine",
+  "timeline.approvalExpiry.soon",
   "timeline.lightbox.copied",
   "timeline.lightbox.copy",
   "timeline.lightbox.copyFailed",
@@ -1311,6 +1312,7 @@ export const argumentSpecs = {
   "teamAi.stage.setupLine": {},
   "teamAi.stage.setupUnverifiedDetail": {},
   "teamAi.stage.verifyingLine": {},
+  "timeline.approvalExpiry.soon": {},
   "timeline.lightbox.copied": {},
   "timeline.lightbox.copy": {},
   "timeline.lightbox.copyFailed": {},
@@ -2057,6 +2059,7 @@ export interface MessageArgs {
   "teamAi.stage.setupLine": Record<string, never>;
   "teamAi.stage.setupUnverifiedDetail": Record<string, never>;
   "teamAi.stage.verifyingLine": Record<string, never>;
+  "timeline.approvalExpiry.soon": Record<string, never>;
   "timeline.lightbox.copied": Record<string, never>;
   "timeline.lightbox.copy": Record<string, never>;
   "timeline.lightbox.copyFailed": Record<string, never>;
