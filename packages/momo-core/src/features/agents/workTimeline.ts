@@ -441,10 +441,13 @@ export function workTimelineSourceNote(source: WorkTimelineSource, formatMessage
   }
 }
 
-/** 걸린 시간: 1초 밑은 ms, 1분 밑은 초(소수 한 자리), 그 위는 분·초. 서버 상한은 600초다. */
+/**
+ * 걸린 시간: 한 틀은 초·분이다. 0.1초 밑은 「0.1초 미만」, 1분 밑은 초(소수 한 자리), 그 위는 분·초. 서버 상한은 600초다.
+ * 한 화면에 「12ms」와 「1.2초」가 함께 서면 같은 종류의 시간이 두 틀이 된다(#5174 L1): ms 단위는 쓰지 않는다.
+ */
 export function workToolDurationText(ms: number, formatMessage: Format): string {
   const safe = Math.max(0, Math.round(ms));
-  if (safe < 1000) return formatMessage("timeline.workRecord.durationMs", { ms: safe });
+  if (safe < 100) return formatMessage("timeline.workRecord.durationUnderTenth");
   // 59.95초부터는 반올림이 「60초」가 되므로 분·초로 넘긴다.
   if (safe < 59_950) {
     return formatMessage("timeline.workRecord.durationSeconds", {

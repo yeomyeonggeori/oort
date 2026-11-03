@@ -464,6 +464,16 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 **기계.** `clients/web/scripts/capture-5200.mjs`가 번들 Chromium(또는 `--engine webkit`)에서 상자를 잰다(줄이 입력창 안인가·한 줄이고 높이가 같은가·×의 크기·위치·그림 가운데를 덮는가·입력창이 줄만큼만 자라는가·키보드 빼기와 초점·링이 면 **위에** 그려지는가(픽셀)·썸네일이 카드의 2배인가·터치에서 ×가 보이는가). 단위 시험은 `trayModel.test.ts`(판정)·`attachmentTray.test.tsx`(상호작용).
 
+### 2.10 좁은 웹 창에서 사이드바 열은 본문 칸에 바닥을 내준다 (#5093, #5048 D4)
+
+사이드바가 240에서 324(레일 56 + 목록 열 268)가 된 뒤, 펼친 셸의 컴포저 입력 상자는 `창 폭 − 390`이다. 바닥(240)을 지키지 못한 폭은 **600~629px뿐**이었다(600px에서 210). 630~719px는 수리 전에도 바닥 위였다(650 → 260 · 719 → 329). 규칙은 이 문서가 이미 쓰는 문법이다: **주 표면이 바닥을 갖고 모자란 폭은 부차 표면이 낸다**(`route-region` · `chat-region` · `thread-pane`). 그 부차 표면에 사이드바 열이 빠져 있었을 뿐이고, 문턱은 더하지 않았다.
+
+- `app-shell`의 600px 이상 계층이 `--w-sidebar`를 `min(레일 56 + 목록 열 268, 100vw − 306px)`로 덮는다. 630px 이상에서는 324 그대로이고, 600px에서 294(목록 열 238, `--spacing-pane-sm` 192 위)다. 306 = 컴포저 입력 바닥 240 + 판 오른쪽 인셋 8 + 입력 상자 밖 58(폼 좌우 24×2 + 카드 안쪽 4×2 + 카드 테두리 1×2). 루트의 `--w-sidebar`(324)는 그대로다.
+- 600px 문턱(`MOBILE_SHELL_QUERY`)은 옮기지 않았다. 열이 240이던 때의 값이지만, 옮기면 `@media (width < 600px)` 블록 전부와 JS가 함께 움직이고 새 문턱(630)은 미디어 쿼리가 `var()`를 읽지 못해 파생값이 조용히 틀린다(`thread-pane` 주석). 「내 작업」 세션 목록의 자동 접기(`sessionListFits`)도 쓰지 않았다: 사람이 다시 펴면(`pinnedOpen`) 같은 210이 돌아온다.
+- 데스크탑 셸(`minWidth` 720)과 630px 이상의 웹은 값이 그대로이고, 접힘(레일 56)은 만지지 않았다.
+
+기계: `shellNarrowFloor.browser.test.ts`(WebKit·Chromium 계산 기하와 접힘 `transitionend`), `desktopShell.ds2.test.ts`(양보 선언의 자리), `gate:work-panel`의 `narrow-shell-*`(렌더된 앱, red proof `WORK_PANEL_GATE_PROVE_RED_SIDEBAR`).
+
 ---
 
 ## 3. 위계 규칙 — 파괴 > 주 > 보조
@@ -518,6 +528,8 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 색 위계(§3.1)가 나란한 컨트롤의 채도라면, 겹침 층은 **앞에 선 표면이 뒤를 만지지 못하게** 하는 위계다. 값과 클래스 이름은 §2.6 D6 표. 떠 있는 표면 위에 허용되는 층은 없다.
 
+**겹쳐 뜬 표면이 필요한 확인은 표면 안의 단계로 선다** (#4986, 디자인 검수 M11). 고르개(표면 층 300) 안에서 삭제·신고 확인 대화상자를 따로 띄우면 그 스크림(층 200)이 고르개 아래에 깔려서, 앱은 흐려졌는데 고르개만 밝게 남고 확인 창과 고르개가 서로를 가렸다. 새 층 이름을 더하지 않고(위 시험이 「표면 위에 층 없음」을 지킨다) 그 확인을 고르개 안의 단계로 두었다: 목록이 내려가고 같은 자리에 제목·설명·「취소」·보내는 단추가 서며, 초점은 안전한 쪽(「취소」)으로 들어가 닫히면 그 항목의 「관리」로 돌아간다. Esc는 단계만 취소한다(`TeamExpressionsPanel` 의 `escapeClaim`).
+
 이름을 쓰지 않은 `z-*` 잔량은 **자기 상자가 스태킹 컨텍스트를 만들어** 루트에서 경쟁하지 않아야 한다(`isolate`). 잔량이 루트에서 경쟁하면 그것은 「로컬」이 아니라 앱 전역 층이고, 이름표 축이 닫히지 않는다. 같은 규칙이 **한 층 안에서 겨루는 두 떠 있는 것**에도 적용된다: 언펄 카드는 `isolate` 라 그 카드의 X 는 카드 안에서만 뜨고, 자기 행 위로 내려앉은 호버 툴바(`hover-toolbar-straddle-below`)가 카드를 이긴다 — 한 층 안의 순서를 DOM 에 맡기지 않는다(#2485 R1 M-3).
 
 같은 층에 선 두 **서랍**(사이드바·관제)은 순서를 나눌 필요가 없다. 둘은 함께 설 수 없기 때문이다: 사이드바 서랍을 여는 유일한 컨트롤이 라우트 헤더에 있고, 관제 서랍은 그 라우트 상자를 덮으면서 `inert` 로 만든다. 캡처 하네스가 그 장면을 들고(강제 클릭도 열지 못한다), 결합이 풀려 둘이 함께 서는 날에는 같은 장면이 순서를 요구하며 빨개진다(#2485 R1 M-1).
@@ -569,6 +581,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | **그림자** | `designSystem.test.ts` — `--elevation-rest/float` 이름 + 클래스 두 단 | `designSystem.test.ts` — `shadowColor`는 팔레트에서만 | **대조 불가 축**(§2.6) |
 | **겹침 층** | `overlayLayers.test.ts` — `--layer-*` 순서·바닥(`z-50` 위)·`data-overlay-layer` 여섯 파일 + 잔량 허용목록. `appPaneIsolation.browser.test.ts`(#4587) — 판(`app-pane`)이 `isolate`일 때의 순서를 WebKit·Chromium의 **그려진 픽셀**로 잰다(포털 스크림 > 판 안의 덮는 판, 서랍 > 덮는 판, 덮는 판 > 머리, 띠의 알약 > 머리, 그리고 판 격리로 **바뀐** 두 관계: 띠의 알약 > 덮는 판, 사이드바 스크림 > 덮는 판). 히트 테스트와 **루트 스윕**(이름 밖 수치 z = 0)은 `scripts/capture-overlay-layers.mjs` | ❌ | — |
 | **창 띠·머리 컨트롤** (§2.9) | `desktopShell.band.browser.test.ts`(WebKit·Chromium 계산 기하: 띠 40 · 토글 중심 20 · 판 위쪽 셸 40/웹 8 · 머리 선 0 · `--head-edge` · 단추 선 `--line` · 툴팁 알약 · 전체 화면 인셋 · 판 바깥 = 사이드바 색 픽셀(팔레트 3 × 스킴 2 × 장면 4) · 노을띠 「내 작업」 윗줄 픽셀) + `AppTitlebar.shell.test.tsx`(셸 끌기 판정, 다운로드 단추를 채운 오른쪽 자리) + `features/downloads/*.test.*`(진행·기록·단추 상태·웹에서 숨김·셸과 번들의 약속) + `ChatShell.header.test.ts`·`channelHeaderControls.tooltip.test.tsx`(머리 단추는 전부 툴팁, `title` 없음) | 비해당(폰은 창 띠가 없다) | — |
+| **좁은 웹 창의 본문 바닥** (§2.10) | `shellNarrowFloor.browser.test.ts`(WebKit·Chromium 계산 기하: 사이드바 = min(324, 창 − 306) · 접힘 56 · 컴포저 입력 바닥 240 · 접힘 `transitionend`, 폭 7 × 상태 2) + `desktopShell.ds2.test.ts`(양보 선언이 셸의 넓은 창 계층에 있다) + `gate:work-panel`의 `narrow-shell-*`(렌더된 앱: 폭 7 × 사이드바 펼침·접힘 × 스레드 닫힘·열림, red proof `WORK_PANEL_GATE_PROVE_RED_SIDEBAR`; **게이트 미배선** §5.4 — 사람이 `npm run gate:work-panel`을 돌린다) | ❌ (폰은 서랍이라 열이 서지 않는다) | — |
 | **대화 안 에이전트 작업 표시** ([agent-work-display.md](agent-work-display.md)) | 코어 `runExceptionChipParity.test`(카드·줄·칩·레일이 **같은 시각에 같은 판정·같은 낱말**, 시간 초과·신호 소실은 칩도 줄과 같은 낱말·경고 톤, 박자 3종 × phase 9 × 종료 코드 9 × 시각 11) + `ActivityRail.browser.test`(레일 칸의 바닥 행 y 이동 0, 끊긴 레일의 한정 문장이 안 잘리고 에이전트 글은 접힘·이름만·전문 중 하나라 낱말 중간에서 끊기지 않음(14폭), `popover-fit`의 폭 계산, 줄의 누르는 면 = 칸 24, WebKit·Chromium × 두 스킴) + `composerRailReservation.browser.test`(**진짜 `Composer` 마크업**: 에이전트 대화 간격 24 불변 · 사람만 있는 대화 8(폰 13) 불변) + `TriggerChip.browser.test`(칩 폭·높이 고정, 낱말·아이콘 두 모양, 좁은 줄 383/384 경계, 「답함」 누르는 면 +4px) + `MessageRow.triggerChip.browser.test`(**진짜 `MessageRow` 마크업**: 이름 2~40자 × 열 폭 6종 줄바꿈 0 · 이름 열 글자 이상 · 거터 칩의 행 높이 불변·hover 양보·터치) + `runStatus.test`(칩 대상) + `MessageRunStatus.test`(행동은 요청자·owner/admin에게만, 취소 영수증) + `iconSystem.test`(칩 글리프는 전부 lucide) | 폰은 같은 코어 모델을 #4620이 읽는다(그때까지 폰 표면은 옛 문장 행) | 낱말·판정은 코어 한 곳(`runWaiting`·`runException`·`triggerChip`) |
 | **모션** | `motion.test.ts`(사다리·상수·눌림·reduced-motion) + 프리플라이트 `raw_motion`·`motion_lib_scope`. 데스크톱 사이드바 접기(셸 상태 변화) = `--motion-standard` 240 · 390 오버레이 드로어·스크림(`--elevation-float` 표면) = `--motion-fast` 180 대칭 | ❌ (M1a) | 값 파생은 M1a |
 | **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 5, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |

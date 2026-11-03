@@ -6,6 +6,44 @@ export const messageKeys = [
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
+  "connect.language.close",
+  "connect.language.hint",
+  "connect.rememberEmail.hint",
+  "connect.rememberEmail.label",
+  "connection.action.reconnectNow",
+  "connection.action.retry",
+  "connection.approval.offline",
+  "connection.approval.serverUnreachable",
+  "connection.boot.unreachable",
+  "connection.card.connecting",
+  "connection.card.lastSynced",
+  "connection.card.offlineDetail",
+  "connection.card.offlineTitle",
+  "connection.card.realtimeDownDetail",
+  "connection.card.realtimeDownTitle",
+  "connection.card.recovered",
+  "connection.card.serverUnreachableDetail",
+  "connection.card.serverUnreachableTitle",
+  "connection.card.serverUpdatingDetail",
+  "connection.card.serverUpdatingTitle",
+  "connection.card.unknownDetail",
+  "connection.card.unknownTitle",
+  "connection.composer.offline",
+  "connection.composer.serverUnreachable",
+  "connection.load.channelListTitle",
+  "connection.load.conversationTitle",
+  "connection.load.membersTitle",
+  "connection.load.reasonOffline",
+  "connection.load.reasonServer",
+  "connection.load.reasonUnknown",
+  "connection.load.threadTitle",
+  "connection.send.failed",
+  "connection.send.resend",
+  "connection.send.resendAll",
+  "connection.session.expired",
+  "connection.upload.failedNoArchive",
+  "connection.upload.failedOffline",
+  "connection.upload.failedServer",
   "desktop.menu.close",
   "desktop.menu.copy",
   "desktop.menu.cut",
@@ -32,17 +70,118 @@ export const messageKeys = [
   "desktop.tray.running",
   "desktop.tray.stateBlocked",
   "desktop.tray.stateWorking",
+  "expressions.add.adminsOnly",
+  "expressions.add.backLabel",
+  "expressions.add.import",
+  "expressions.add.importDetail",
+  "expressions.add.make",
+  "expressions.add.makeDetail",
+  "expressions.add.offlineHint",
+  "expressions.add.trigger",
+  "expressions.add.triggerHint",
+  "expressions.draft.another",
+  "expressions.draft.approve",
+  "expressions.draft.approveFailed",
+  "expressions.draft.approving",
+  "expressions.draft.previewLabel",
+  "expressions.draft.replaceFailed",
+  "expressions.draft.replacing",
+  "expressions.draft.rights",
+  "expressions.draft.source",
+  "expressions.draft.waiting",
+  "expressions.import.displayName",
+  "expressions.import.displayNamePlaceholder",
+  "expressions.import.face",
+  "expressions.import.faceNone",
+  "expressions.import.faceOther",
+  "expressions.import.faceOtherIssue",
+  "expressions.import.faceSelf",
+  "expressions.import.fileIssue",
+  "expressions.import.fixedNote",
+  "expressions.import.metadataIssue",
+  "expressions.import.name",
+  "expressions.import.namePlaceholder",
+  "expressions.import.nameTaken",
+  "expressions.import.offline",
+  "expressions.import.photo",
+  "expressions.import.photoChange",
+  "expressions.import.photoDenied",
+  "expressions.import.photoPick",
+  "expressions.import.photoPicked",
+  "expressions.import.photoUnavailable",
+  "expressions.import.prepare",
+  "expressions.import.prepareFailed",
+  "expressions.import.preparing",
+  "expressions.import.tags",
+  "expressions.import.tagsPlaceholder",
+  "expressions.import.url",
+  "expressions.import.urlIssue",
+  "expressions.import.urlPlaceholder",
   "expressions.kind.autoNote",
   "expressions.kind.emoji",
   "expressions.kind.hintEmoji",
   "expressions.kind.hintSticker",
   "expressions.kind.legend",
   "expressions.kind.sticker",
+  "expressions.make.agent",
+  "expressions.make.agentHint",
+  "expressions.make.agentLoading",
+  "expressions.make.agentMissing",
+  "expressions.make.agentPaused",
+  "expressions.make.chipLabel",
+  "expressions.make.done",
+  "expressions.make.failDm",
+  "expressions.make.failDmForbidden",
+  "expressions.make.failDmMissing",
+  "expressions.make.failSend",
+  "expressions.make.failUpload",
+  "expressions.make.failUploadForbidden",
+  "expressions.make.failUploadNoArchive",
+  "expressions.make.failUploadTooLarge",
+  "expressions.make.intro",
+  "expressions.make.motion",
+  "expressions.make.motionDuplicate",
+  "expressions.make.motionHint",
+  "expressions.make.motionMissing",
+  "expressions.make.motionStillMixed",
+  "expressions.make.motionTooMany",
+  "expressions.make.motionUnknown",
+  "expressions.make.noAgents",
+  "expressions.make.noAgentsDetail",
+  "expressions.make.note",
+  "expressions.make.noteCount",
+  "expressions.make.notePlaceholder",
+  "expressions.make.noteTooLong",
+  "expressions.make.offline",
+  "expressions.make.photo",
+  "expressions.make.photoChange",
+  "expressions.make.photoDenied",
+  "expressions.make.photoDimensions",
+  "expressions.make.photoEmpty",
+  "expressions.make.photoMissing",
+  "expressions.make.photoPick",
+  "expressions.make.photoPreview",
+  "expressions.make.photoRule",
+  "expressions.make.photoSize",
+  "expressions.make.photoType",
+  "expressions.make.photoUnavailable",
+  "expressions.make.retry",
+  "expressions.make.rosterFailed",
+  "expressions.make.sending",
+  "expressions.make.sent",
+  "expressions.make.sizeInvalid",
+  "expressions.make.stepDm",
+  "expressions.make.stepSend",
+  "expressions.make.stepUpload",
+  "expressions.make.submit",
   "expressions.panel.viewEmpty",
   "expressions.photo.agentInstead",
   "expressions.photo.anotherPhoto",
   "expressions.photo.branchLabel",
   "expressions.photo.busy",
+  "expressions.photo.cancel",
+  "expressions.photo.cancelHint",
+  "expressions.photo.cancelled",
   "expressions.photo.caricatureHint",
   "expressions.photo.caricatureLabel",
   "expressions.photo.checkFailed",
@@ -83,6 +222,7 @@ export const messageKeys = [
   "expressions.photo.noModelHeadline",
   "expressions.photo.noModelImport",
   "expressions.photo.noModelManage",
+  "expressions.photo.noModelManagePhone",
   "expressions.photo.originLabel",
   "expressions.photo.photoHint",
   "expressions.photo.photoLabel",
@@ -96,6 +236,37 @@ export const messageKeys = [
   "expressions.photo.submit",
   "expressions.photo.tagsLabel",
   "expressions.photo.tagsPlaceholder",
+  "expressions.sheet.a11y",
+  "expressions.sheet.close",
+  "expressions.sheet.emptyEmoticon",
+  "expressions.sheet.emptyGif",
+  "expressions.sheet.emptyLegacy",
+  "expressions.sheet.emptyTeam",
+  "expressions.sheet.error",
+  "expressions.sheet.hintInsert",
+  "expressions.sheet.hintPreview",
+  "expressions.sheet.hintReact",
+  "expressions.sheet.loading",
+  "expressions.sheet.noMatch",
+  "expressions.sheet.offline",
+  "expressions.sheet.open",
+  "expressions.sheet.pickAgain",
+  "expressions.sheet.placeholderEmoji",
+  "expressions.sheet.placeholderTeam",
+  "expressions.sheet.retry",
+  "expressions.sheet.searchEmoji",
+  "expressions.sheet.searchEmoticon",
+  "expressions.sheet.searchGif",
+  "expressions.sheet.searchTeam",
+  "expressions.sheet.send",
+  "expressions.sheet.sending",
+  "expressions.sheet.tabEmoji",
+  "expressions.sheet.tabEmoticon",
+  "expressions.sheet.tabGif",
+  "expressions.sheet.tabs",
+  "expressions.sheet.tabTeam",
+  "expressions.sheet.title",
+  "expressions.sheet.unavailable",
   "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
@@ -122,8 +293,36 @@ export const messageKeys = [
   "mobile.linkPreview.scopeNote",
   "mobile.linkPreview.title",
   "mobile.locale.backToSettings",
-  "mobile.locale.permissionNotice",
   "mobile.locale.saving",
+  "notifications.inviteLink.fallback",
+  "releaseNotes.action.close",
+  "releaseNotes.action.details",
+  "releaseNotes.detail.back",
+  "releaseNotes.detail.changed",
+  "releaseNotes.detail.tryIt",
+  "releaseNotes.page.back",
+  "releaseNotes.page.description",
+  "releaseNotes.page.empty",
+  "releaseNotes.page.openHint",
+  "releaseNotes.page.title",
+  "releaseNotes.popup.close",
+  "releaseNotes.popup.more",
+  "releaseNotes.popup.title",
+  "releaseNotes.surface.desktop",
+  "releaseNotes.surface.label",
+  "releaseNotes.surface.phone",
+  "releaseNotes.version.current",
+  "releaseNotes.version.label",
+  "releaseNotes.version.releasedOn",
+  "reply.card.cancel",
+  "reply.card.excerptEmpty",
+  "reply.card.excerptExpression",
+  "reply.card.excerptFile",
+  "reply.card.excerptPhoto",
+  "reply.card.headerOther",
+  "reply.card.headerSelf",
+  "reply.composer.placeholder",
+  "reply.composer.send",
   "settings.aiLimits.ceilingSearches",
   "settings.aiLimits.ceilingTokens",
   "settings.aiLimits.cleared",
@@ -183,14 +382,15 @@ export const messageKeys = [
   "settings.appearance.linkPreviewOffHint",
   "settings.appearance.linkPreviewRich",
   "settings.appearance.linkPreviewRichHint",
+  "settings.invite.guestInvitesPaused",
   "settings.notifications.threadReplyDescription",
   "settings.notifications.threadReplyName",
-  "settings.profile.languageBeta",
   "settings.profile.languageCurrent",
   "settings.profile.languageHint",
   "settings.profile.languageLabel",
   "settings.profile.languageLoadError",
   "settings.profile.languagePartialNotice",
+  "settings.profile.languageReload",
   "settings.profile.languageRetry",
   "settings.profile.languageSystem",
   "teamAi.helper.aliasesLine",
@@ -265,6 +465,10 @@ export const messageKeys = [
   "timeline.lightbox.copyFailed",
   "timeline.lightbox.zoomIn",
   "timeline.lightbox.zoomOut",
+  "timeline.send.discard",
+  "timeline.send.failed",
+  "timeline.send.resend",
+  "timeline.send.sending",
   "timeline.thread.followDismiss",
   "timeline.thread.followFailed",
   "timeline.thread.followHint",
@@ -284,6 +488,7 @@ export const messageKeys = [
   "timeline.workHealth.dwell",
   "timeline.workHealth.failedActivities",
   "timeline.workHealth.quiet",
+  "timeline.workHealth.quietShort",
   "timeline.workHealth.rejectedApprovals",
   "timeline.workHealth.retries",
   "timeline.workPlan.button",
@@ -295,6 +500,7 @@ export const messageKeys = [
   "timeline.workPlan.stepCurrent",
   "timeline.workPlan.stepDone",
   "timeline.workPlan.stepPending",
+  "timeline.workPlan.switching",
   "timeline.workPlan.title",
   "timeline.workPlan.titleDone",
   "timeline.workRecord.bundleRead",
@@ -302,8 +508,8 @@ export const messageKeys = [
   "timeline.workRecord.bundleSearch",
   "timeline.workRecord.capped",
   "timeline.workRecord.durationMinutes",
-  "timeline.workRecord.durationMs",
   "timeline.workRecord.durationSeconds",
+  "timeline.workRecord.durationUnderTenth",
   "timeline.workRecord.emptyEnded",
   "timeline.workRecord.emptyOpen",
   "timeline.workRecord.failureAlreadyClaimed",
@@ -403,6 +609,48 @@ export const argumentSpecs = {
   "common.members.count": {
     "count": "number"
   },
+  "connect.language.close": {},
+  "connect.language.hint": {},
+  "connect.rememberEmail.hint": {},
+  "connect.rememberEmail.label": {},
+  "connection.action.reconnectNow": {},
+  "connection.action.retry": {},
+  "connection.approval.offline": {},
+  "connection.approval.serverUnreachable": {},
+  "connection.boot.unreachable": {},
+  "connection.card.connecting": {},
+  "connection.card.lastSynced": {
+    "relativeTime": "string"
+  },
+  "connection.card.offlineDetail": {},
+  "connection.card.offlineTitle": {},
+  "connection.card.realtimeDownDetail": {},
+  "connection.card.realtimeDownTitle": {},
+  "connection.card.recovered": {},
+  "connection.card.serverUnreachableDetail": {},
+  "connection.card.serverUnreachableTitle": {},
+  "connection.card.serverUpdatingDetail": {},
+  "connection.card.serverUpdatingTitle": {},
+  "connection.card.unknownDetail": {},
+  "connection.card.unknownTitle": {},
+  "connection.composer.offline": {},
+  "connection.composer.serverUnreachable": {},
+  "connection.load.channelListTitle": {},
+  "connection.load.conversationTitle": {},
+  "connection.load.membersTitle": {},
+  "connection.load.reasonOffline": {},
+  "connection.load.reasonServer": {},
+  "connection.load.reasonUnknown": {},
+  "connection.load.threadTitle": {},
+  "connection.send.failed": {},
+  "connection.send.resend": {},
+  "connection.send.resendAll": {
+    "count": "number"
+  },
+  "connection.session.expired": {},
+  "connection.upload.failedNoArchive": {},
+  "connection.upload.failedOffline": {},
+  "connection.upload.failedServer": {},
   "desktop.menu.close": {},
   "desktop.menu.copy": {},
   "desktop.menu.cut": {},
@@ -433,17 +681,138 @@ export const argumentSpecs = {
   "desktop.tray.running": {},
   "desktop.tray.stateBlocked": {},
   "desktop.tray.stateWorking": {},
+  "expressions.add.adminsOnly": {},
+  "expressions.add.backLabel": {},
+  "expressions.add.import": {},
+  "expressions.add.importDetail": {},
+  "expressions.add.make": {},
+  "expressions.add.makeDetail": {},
+  "expressions.add.offlineHint": {},
+  "expressions.add.trigger": {},
+  "expressions.add.triggerHint": {},
+  "expressions.draft.another": {},
+  "expressions.draft.approve": {},
+  "expressions.draft.approveFailed": {},
+  "expressions.draft.approving": {},
+  "expressions.draft.previewLabel": {
+    "name": "string"
+  },
+  "expressions.draft.replaceFailed": {},
+  "expressions.draft.replacing": {},
+  "expressions.draft.rights": {},
+  "expressions.draft.source": {
+    "host": "string"
+  },
+  "expressions.draft.waiting": {},
+  "expressions.import.displayName": {},
+  "expressions.import.displayNamePlaceholder": {},
+  "expressions.import.face": {},
+  "expressions.import.faceNone": {},
+  "expressions.import.faceOther": {},
+  "expressions.import.faceOtherIssue": {},
+  "expressions.import.faceSelf": {},
+  "expressions.import.fileIssue": {},
+  "expressions.import.fixedNote": {},
+  "expressions.import.metadataIssue": {},
+  "expressions.import.name": {},
+  "expressions.import.namePlaceholder": {},
+  "expressions.import.nameTaken": {},
+  "expressions.import.offline": {},
+  "expressions.import.photo": {},
+  "expressions.import.photoChange": {},
+  "expressions.import.photoDenied": {},
+  "expressions.import.photoPick": {},
+  "expressions.import.photoPicked": {
+    "name": "string"
+  },
+  "expressions.import.photoUnavailable": {},
+  "expressions.import.prepare": {},
+  "expressions.import.prepareFailed": {},
+  "expressions.import.preparing": {},
+  "expressions.import.tags": {},
+  "expressions.import.tagsPlaceholder": {},
+  "expressions.import.url": {},
+  "expressions.import.urlIssue": {},
+  "expressions.import.urlPlaceholder": {},
   "expressions.kind.autoNote": {},
   "expressions.kind.emoji": {},
   "expressions.kind.hintEmoji": {},
   "expressions.kind.hintSticker": {},
   "expressions.kind.legend": {},
   "expressions.kind.sticker": {},
+  "expressions.make.agent": {},
+  "expressions.make.agentHint": {},
+  "expressions.make.agentLoading": {},
+  "expressions.make.agentMissing": {},
+  "expressions.make.agentPaused": {
+    "name": "string"
+  },
+  "expressions.make.chipLabel": {
+    "description": "string",
+    "label": "string"
+  },
+  "expressions.make.done": {},
+  "expressions.make.failDm": {},
+  "expressions.make.failDmForbidden": {},
+  "expressions.make.failDmMissing": {},
+  "expressions.make.failSend": {},
+  "expressions.make.failUpload": {},
+  "expressions.make.failUploadForbidden": {},
+  "expressions.make.failUploadNoArchive": {},
+  "expressions.make.failUploadTooLarge": {},
+  "expressions.make.intro": {},
+  "expressions.make.motion": {},
+  "expressions.make.motionDuplicate": {},
+  "expressions.make.motionHint": {
+    "max": "number"
+  },
+  "expressions.make.motionMissing": {},
+  "expressions.make.motionStillMixed": {},
+  "expressions.make.motionTooMany": {
+    "max": "number"
+  },
+  "expressions.make.motionUnknown": {},
+  "expressions.make.noAgents": {},
+  "expressions.make.noAgentsDetail": {},
+  "expressions.make.note": {},
+  "expressions.make.noteCount": {
+    "count": "number",
+    "max": "number"
+  },
+  "expressions.make.notePlaceholder": {},
+  "expressions.make.noteTooLong": {
+    "max": "number"
+  },
+  "expressions.make.offline": {},
+  "expressions.make.photo": {},
+  "expressions.make.photoChange": {},
+  "expressions.make.photoDenied": {},
+  "expressions.make.photoDimensions": {},
+  "expressions.make.photoEmpty": {},
+  "expressions.make.photoMissing": {},
+  "expressions.make.photoPick": {},
+  "expressions.make.photoPreview": {},
+  "expressions.make.photoRule": {},
+  "expressions.make.photoSize": {},
+  "expressions.make.photoType": {},
+  "expressions.make.photoUnavailable": {},
+  "expressions.make.retry": {},
+  "expressions.make.rosterFailed": {},
+  "expressions.make.sending": {},
+  "expressions.make.sent": {},
+  "expressions.make.sizeInvalid": {},
+  "expressions.make.stepDm": {},
+  "expressions.make.stepSend": {},
+  "expressions.make.stepUpload": {},
+  "expressions.make.submit": {},
   "expressions.panel.viewEmpty": {},
   "expressions.photo.agentInstead": {},
   "expressions.photo.anotherPhoto": {},
   "expressions.photo.branchLabel": {},
   "expressions.photo.busy": {},
+  "expressions.photo.cancel": {},
+  "expressions.photo.cancelHint": {},
+  "expressions.photo.cancelled": {},
   "expressions.photo.caricatureHint": {},
   "expressions.photo.caricatureLabel": {},
   "expressions.photo.checkFailed": {},
@@ -486,6 +855,7 @@ export const argumentSpecs = {
   "expressions.photo.noModelHeadline": {},
   "expressions.photo.noModelImport": {},
   "expressions.photo.noModelManage": {},
+  "expressions.photo.noModelManagePhone": {},
   "expressions.photo.originLabel": {},
   "expressions.photo.photoHint": {},
   "expressions.photo.photoLabel": {},
@@ -499,6 +869,37 @@ export const argumentSpecs = {
   "expressions.photo.submit": {},
   "expressions.photo.tagsLabel": {},
   "expressions.photo.tagsPlaceholder": {},
+  "expressions.sheet.a11y": {},
+  "expressions.sheet.close": {},
+  "expressions.sheet.emptyEmoticon": {},
+  "expressions.sheet.emptyGif": {},
+  "expressions.sheet.emptyLegacy": {},
+  "expressions.sheet.emptyTeam": {},
+  "expressions.sheet.error": {},
+  "expressions.sheet.hintInsert": {},
+  "expressions.sheet.hintPreview": {},
+  "expressions.sheet.hintReact": {},
+  "expressions.sheet.loading": {},
+  "expressions.sheet.noMatch": {},
+  "expressions.sheet.offline": {},
+  "expressions.sheet.open": {},
+  "expressions.sheet.pickAgain": {},
+  "expressions.sheet.placeholderEmoji": {},
+  "expressions.sheet.placeholderTeam": {},
+  "expressions.sheet.retry": {},
+  "expressions.sheet.searchEmoji": {},
+  "expressions.sheet.searchEmoticon": {},
+  "expressions.sheet.searchGif": {},
+  "expressions.sheet.searchTeam": {},
+  "expressions.sheet.send": {},
+  "expressions.sheet.sending": {},
+  "expressions.sheet.tabEmoji": {},
+  "expressions.sheet.tabEmoticon": {},
+  "expressions.sheet.tabGif": {},
+  "expressions.sheet.tabs": {},
+  "expressions.sheet.tabTeam": {},
+  "expressions.sheet.title": {},
+  "expressions.sheet.unavailable": {},
   "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
@@ -525,8 +926,44 @@ export const argumentSpecs = {
   "mobile.linkPreview.scopeNote": {},
   "mobile.linkPreview.title": {},
   "mobile.locale.backToSettings": {},
-  "mobile.locale.permissionNotice": {},
   "mobile.locale.saving": {},
+  "notifications.inviteLink.fallback": {},
+  "releaseNotes.action.close": {},
+  "releaseNotes.action.details": {},
+  "releaseNotes.detail.back": {},
+  "releaseNotes.detail.changed": {},
+  "releaseNotes.detail.tryIt": {},
+  "releaseNotes.page.back": {},
+  "releaseNotes.page.description": {},
+  "releaseNotes.page.empty": {},
+  "releaseNotes.page.openHint": {},
+  "releaseNotes.page.title": {},
+  "releaseNotes.popup.close": {},
+  "releaseNotes.popup.more": {
+    "count": "number"
+  },
+  "releaseNotes.popup.title": {},
+  "releaseNotes.surface.desktop": {},
+  "releaseNotes.surface.label": {},
+  "releaseNotes.surface.phone": {},
+  "releaseNotes.version.current": {},
+  "releaseNotes.version.label": {
+    "version": "string"
+  },
+  "releaseNotes.version.releasedOn": {
+    "date": "string"
+  },
+  "reply.card.cancel": {},
+  "reply.card.excerptEmpty": {},
+  "reply.card.excerptExpression": {},
+  "reply.card.excerptFile": {},
+  "reply.card.excerptPhoto": {},
+  "reply.card.headerOther": {
+    "name": "string"
+  },
+  "reply.card.headerSelf": {},
+  "reply.composer.placeholder": {},
+  "reply.composer.send": {},
   "settings.aiLimits.ceilingSearches": {
     "limit": "number"
   },
@@ -623,9 +1060,9 @@ export const argumentSpecs = {
   "settings.appearance.linkPreviewOffHint": {},
   "settings.appearance.linkPreviewRich": {},
   "settings.appearance.linkPreviewRichHint": {},
+  "settings.invite.guestInvitesPaused": {},
   "settings.notifications.threadReplyDescription": {},
   "settings.notifications.threadReplyName": {},
-  "settings.profile.languageBeta": {},
   "settings.profile.languageCurrent": {
     "languageName": "string"
   },
@@ -633,6 +1070,7 @@ export const argumentSpecs = {
   "settings.profile.languageLabel": {},
   "settings.profile.languageLoadError": {},
   "settings.profile.languagePartialNotice": {},
+  "settings.profile.languageReload": {},
   "settings.profile.languageRetry": {},
   "settings.profile.languageSystem": {},
   "teamAi.helper.aliasesLine": {
@@ -709,6 +1147,10 @@ export const argumentSpecs = {
   "timeline.lightbox.copyFailed": {},
   "timeline.lightbox.zoomIn": {},
   "timeline.lightbox.zoomOut": {},
+  "timeline.send.discard": {},
+  "timeline.send.failed": {},
+  "timeline.send.resend": {},
+  "timeline.send.sending": {},
   "timeline.thread.followDismiss": {},
   "timeline.thread.followFailed": {},
   "timeline.thread.followHint": {},
@@ -746,6 +1188,7 @@ export const argumentSpecs = {
   "timeline.workHealth.quiet": {
     "minutes": "number"
   },
+  "timeline.workHealth.quietShort": {},
   "timeline.workHealth.rejectedApprovals": {
     "count": "number"
   },
@@ -766,6 +1209,7 @@ export const argumentSpecs = {
   "timeline.workPlan.stepCurrent": {},
   "timeline.workPlan.stepDone": {},
   "timeline.workPlan.stepPending": {},
+  "timeline.workPlan.switching": {},
   "timeline.workPlan.title": {
     "done": "number",
     "total": "number"
@@ -788,12 +1232,10 @@ export const argumentSpecs = {
     "minutes": "number",
     "seconds": "number"
   },
-  "timeline.workRecord.durationMs": {
-    "ms": "number"
-  },
   "timeline.workRecord.durationSeconds": {
     "seconds": "number"
   },
+  "timeline.workRecord.durationUnderTenth": {},
   "timeline.workRecord.emptyEnded": {},
   "timeline.workRecord.emptyOpen": {},
   "timeline.workRecord.failureAlreadyClaimed": {},
@@ -919,6 +1361,44 @@ export interface MessageArgs {
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
+  "connect.language.close": Record<string, never>;
+  "connect.language.hint": Record<string, never>;
+  "connect.rememberEmail.hint": Record<string, never>;
+  "connect.rememberEmail.label": Record<string, never>;
+  "connection.action.reconnectNow": Record<string, never>;
+  "connection.action.retry": Record<string, never>;
+  "connection.approval.offline": Record<string, never>;
+  "connection.approval.serverUnreachable": Record<string, never>;
+  "connection.boot.unreachable": Record<string, never>;
+  "connection.card.connecting": Record<string, never>;
+  "connection.card.lastSynced": { relativeTime: string };
+  "connection.card.offlineDetail": Record<string, never>;
+  "connection.card.offlineTitle": Record<string, never>;
+  "connection.card.realtimeDownDetail": Record<string, never>;
+  "connection.card.realtimeDownTitle": Record<string, never>;
+  "connection.card.recovered": Record<string, never>;
+  "connection.card.serverUnreachableDetail": Record<string, never>;
+  "connection.card.serverUnreachableTitle": Record<string, never>;
+  "connection.card.serverUpdatingDetail": Record<string, never>;
+  "connection.card.serverUpdatingTitle": Record<string, never>;
+  "connection.card.unknownDetail": Record<string, never>;
+  "connection.card.unknownTitle": Record<string, never>;
+  "connection.composer.offline": Record<string, never>;
+  "connection.composer.serverUnreachable": Record<string, never>;
+  "connection.load.channelListTitle": Record<string, never>;
+  "connection.load.conversationTitle": Record<string, never>;
+  "connection.load.membersTitle": Record<string, never>;
+  "connection.load.reasonOffline": Record<string, never>;
+  "connection.load.reasonServer": Record<string, never>;
+  "connection.load.reasonUnknown": Record<string, never>;
+  "connection.load.threadTitle": Record<string, never>;
+  "connection.send.failed": Record<string, never>;
+  "connection.send.resend": Record<string, never>;
+  "connection.send.resendAll": { count: number };
+  "connection.session.expired": Record<string, never>;
+  "connection.upload.failedNoArchive": Record<string, never>;
+  "connection.upload.failedOffline": Record<string, never>;
+  "connection.upload.failedServer": Record<string, never>;
   "desktop.menu.close": Record<string, never>;
   "desktop.menu.copy": Record<string, never>;
   "desktop.menu.cut": Record<string, never>;
@@ -945,17 +1425,118 @@ export interface MessageArgs {
   "desktop.tray.running": Record<string, never>;
   "desktop.tray.stateBlocked": Record<string, never>;
   "desktop.tray.stateWorking": Record<string, never>;
+  "expressions.add.adminsOnly": Record<string, never>;
+  "expressions.add.backLabel": Record<string, never>;
+  "expressions.add.import": Record<string, never>;
+  "expressions.add.importDetail": Record<string, never>;
+  "expressions.add.make": Record<string, never>;
+  "expressions.add.makeDetail": Record<string, never>;
+  "expressions.add.offlineHint": Record<string, never>;
+  "expressions.add.trigger": Record<string, never>;
+  "expressions.add.triggerHint": Record<string, never>;
+  "expressions.draft.another": Record<string, never>;
+  "expressions.draft.approve": Record<string, never>;
+  "expressions.draft.approveFailed": Record<string, never>;
+  "expressions.draft.approving": Record<string, never>;
+  "expressions.draft.previewLabel": { name: string };
+  "expressions.draft.replaceFailed": Record<string, never>;
+  "expressions.draft.replacing": Record<string, never>;
+  "expressions.draft.rights": Record<string, never>;
+  "expressions.draft.source": { host: string };
+  "expressions.draft.waiting": Record<string, never>;
+  "expressions.import.displayName": Record<string, never>;
+  "expressions.import.displayNamePlaceholder": Record<string, never>;
+  "expressions.import.face": Record<string, never>;
+  "expressions.import.faceNone": Record<string, never>;
+  "expressions.import.faceOther": Record<string, never>;
+  "expressions.import.faceOtherIssue": Record<string, never>;
+  "expressions.import.faceSelf": Record<string, never>;
+  "expressions.import.fileIssue": Record<string, never>;
+  "expressions.import.fixedNote": Record<string, never>;
+  "expressions.import.metadataIssue": Record<string, never>;
+  "expressions.import.name": Record<string, never>;
+  "expressions.import.namePlaceholder": Record<string, never>;
+  "expressions.import.nameTaken": Record<string, never>;
+  "expressions.import.offline": Record<string, never>;
+  "expressions.import.photo": Record<string, never>;
+  "expressions.import.photoChange": Record<string, never>;
+  "expressions.import.photoDenied": Record<string, never>;
+  "expressions.import.photoPick": Record<string, never>;
+  "expressions.import.photoPicked": { name: string };
+  "expressions.import.photoUnavailable": Record<string, never>;
+  "expressions.import.prepare": Record<string, never>;
+  "expressions.import.prepareFailed": Record<string, never>;
+  "expressions.import.preparing": Record<string, never>;
+  "expressions.import.tags": Record<string, never>;
+  "expressions.import.tagsPlaceholder": Record<string, never>;
+  "expressions.import.url": Record<string, never>;
+  "expressions.import.urlIssue": Record<string, never>;
+  "expressions.import.urlPlaceholder": Record<string, never>;
   "expressions.kind.autoNote": Record<string, never>;
   "expressions.kind.emoji": Record<string, never>;
   "expressions.kind.hintEmoji": Record<string, never>;
   "expressions.kind.hintSticker": Record<string, never>;
   "expressions.kind.legend": Record<string, never>;
   "expressions.kind.sticker": Record<string, never>;
+  "expressions.make.agent": Record<string, never>;
+  "expressions.make.agentHint": Record<string, never>;
+  "expressions.make.agentLoading": Record<string, never>;
+  "expressions.make.agentMissing": Record<string, never>;
+  "expressions.make.agentPaused": { name: string };
+  "expressions.make.chipLabel": { description: string; label: string };
+  "expressions.make.done": Record<string, never>;
+  "expressions.make.failDm": Record<string, never>;
+  "expressions.make.failDmForbidden": Record<string, never>;
+  "expressions.make.failDmMissing": Record<string, never>;
+  "expressions.make.failSend": Record<string, never>;
+  "expressions.make.failUpload": Record<string, never>;
+  "expressions.make.failUploadForbidden": Record<string, never>;
+  "expressions.make.failUploadNoArchive": Record<string, never>;
+  "expressions.make.failUploadTooLarge": Record<string, never>;
+  "expressions.make.intro": Record<string, never>;
+  "expressions.make.motion": Record<string, never>;
+  "expressions.make.motionDuplicate": Record<string, never>;
+  "expressions.make.motionHint": { max: number };
+  "expressions.make.motionMissing": Record<string, never>;
+  "expressions.make.motionStillMixed": Record<string, never>;
+  "expressions.make.motionTooMany": { max: number };
+  "expressions.make.motionUnknown": Record<string, never>;
+  "expressions.make.noAgents": Record<string, never>;
+  "expressions.make.noAgentsDetail": Record<string, never>;
+  "expressions.make.note": Record<string, never>;
+  "expressions.make.noteCount": { count: number; max: number };
+  "expressions.make.notePlaceholder": Record<string, never>;
+  "expressions.make.noteTooLong": { max: number };
+  "expressions.make.offline": Record<string, never>;
+  "expressions.make.photo": Record<string, never>;
+  "expressions.make.photoChange": Record<string, never>;
+  "expressions.make.photoDenied": Record<string, never>;
+  "expressions.make.photoDimensions": Record<string, never>;
+  "expressions.make.photoEmpty": Record<string, never>;
+  "expressions.make.photoMissing": Record<string, never>;
+  "expressions.make.photoPick": Record<string, never>;
+  "expressions.make.photoPreview": Record<string, never>;
+  "expressions.make.photoRule": Record<string, never>;
+  "expressions.make.photoSize": Record<string, never>;
+  "expressions.make.photoType": Record<string, never>;
+  "expressions.make.photoUnavailable": Record<string, never>;
+  "expressions.make.retry": Record<string, never>;
+  "expressions.make.rosterFailed": Record<string, never>;
+  "expressions.make.sending": Record<string, never>;
+  "expressions.make.sent": Record<string, never>;
+  "expressions.make.sizeInvalid": Record<string, never>;
+  "expressions.make.stepDm": Record<string, never>;
+  "expressions.make.stepSend": Record<string, never>;
+  "expressions.make.stepUpload": Record<string, never>;
+  "expressions.make.submit": Record<string, never>;
   "expressions.panel.viewEmpty": Record<string, never>;
   "expressions.photo.agentInstead": Record<string, never>;
   "expressions.photo.anotherPhoto": Record<string, never>;
   "expressions.photo.branchLabel": Record<string, never>;
   "expressions.photo.busy": Record<string, never>;
+  "expressions.photo.cancel": Record<string, never>;
+  "expressions.photo.cancelHint": Record<string, never>;
+  "expressions.photo.cancelled": Record<string, never>;
   "expressions.photo.caricatureHint": Record<string, never>;
   "expressions.photo.caricatureLabel": Record<string, never>;
   "expressions.photo.checkFailed": Record<string, never>;
@@ -996,6 +1577,7 @@ export interface MessageArgs {
   "expressions.photo.noModelHeadline": Record<string, never>;
   "expressions.photo.noModelImport": Record<string, never>;
   "expressions.photo.noModelManage": Record<string, never>;
+  "expressions.photo.noModelManagePhone": Record<string, never>;
   "expressions.photo.originLabel": Record<string, never>;
   "expressions.photo.photoHint": Record<string, never>;
   "expressions.photo.photoLabel": Record<string, never>;
@@ -1009,6 +1591,37 @@ export interface MessageArgs {
   "expressions.photo.submit": Record<string, never>;
   "expressions.photo.tagsLabel": Record<string, never>;
   "expressions.photo.tagsPlaceholder": Record<string, never>;
+  "expressions.sheet.a11y": Record<string, never>;
+  "expressions.sheet.close": Record<string, never>;
+  "expressions.sheet.emptyEmoticon": Record<string, never>;
+  "expressions.sheet.emptyGif": Record<string, never>;
+  "expressions.sheet.emptyLegacy": Record<string, never>;
+  "expressions.sheet.emptyTeam": Record<string, never>;
+  "expressions.sheet.error": Record<string, never>;
+  "expressions.sheet.hintInsert": Record<string, never>;
+  "expressions.sheet.hintPreview": Record<string, never>;
+  "expressions.sheet.hintReact": Record<string, never>;
+  "expressions.sheet.loading": Record<string, never>;
+  "expressions.sheet.noMatch": Record<string, never>;
+  "expressions.sheet.offline": Record<string, never>;
+  "expressions.sheet.open": Record<string, never>;
+  "expressions.sheet.pickAgain": Record<string, never>;
+  "expressions.sheet.placeholderEmoji": Record<string, never>;
+  "expressions.sheet.placeholderTeam": Record<string, never>;
+  "expressions.sheet.retry": Record<string, never>;
+  "expressions.sheet.searchEmoji": Record<string, never>;
+  "expressions.sheet.searchEmoticon": Record<string, never>;
+  "expressions.sheet.searchGif": Record<string, never>;
+  "expressions.sheet.searchTeam": Record<string, never>;
+  "expressions.sheet.send": Record<string, never>;
+  "expressions.sheet.sending": Record<string, never>;
+  "expressions.sheet.tabEmoji": Record<string, never>;
+  "expressions.sheet.tabEmoticon": Record<string, never>;
+  "expressions.sheet.tabGif": Record<string, never>;
+  "expressions.sheet.tabs": Record<string, never>;
+  "expressions.sheet.tabTeam": Record<string, never>;
+  "expressions.sheet.title": Record<string, never>;
+  "expressions.sheet.unavailable": Record<string, never>;
   "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
@@ -1035,8 +1648,36 @@ export interface MessageArgs {
   "mobile.linkPreview.scopeNote": Record<string, never>;
   "mobile.linkPreview.title": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
-  "mobile.locale.permissionNotice": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "notifications.inviteLink.fallback": Record<string, never>;
+  "releaseNotes.action.close": Record<string, never>;
+  "releaseNotes.action.details": Record<string, never>;
+  "releaseNotes.detail.back": Record<string, never>;
+  "releaseNotes.detail.changed": Record<string, never>;
+  "releaseNotes.detail.tryIt": Record<string, never>;
+  "releaseNotes.page.back": Record<string, never>;
+  "releaseNotes.page.description": Record<string, never>;
+  "releaseNotes.page.empty": Record<string, never>;
+  "releaseNotes.page.openHint": Record<string, never>;
+  "releaseNotes.page.title": Record<string, never>;
+  "releaseNotes.popup.close": Record<string, never>;
+  "releaseNotes.popup.more": { count: number };
+  "releaseNotes.popup.title": Record<string, never>;
+  "releaseNotes.surface.desktop": Record<string, never>;
+  "releaseNotes.surface.label": Record<string, never>;
+  "releaseNotes.surface.phone": Record<string, never>;
+  "releaseNotes.version.current": Record<string, never>;
+  "releaseNotes.version.label": { version: string };
+  "releaseNotes.version.releasedOn": { date: string };
+  "reply.card.cancel": Record<string, never>;
+  "reply.card.excerptEmpty": Record<string, never>;
+  "reply.card.excerptExpression": Record<string, never>;
+  "reply.card.excerptFile": Record<string, never>;
+  "reply.card.excerptPhoto": Record<string, never>;
+  "reply.card.headerOther": { name: string };
+  "reply.card.headerSelf": Record<string, never>;
+  "reply.composer.placeholder": Record<string, never>;
+  "reply.composer.send": Record<string, never>;
   "settings.aiLimits.ceilingSearches": { limit: number };
   "settings.aiLimits.ceilingTokens": { limit: number };
   "settings.aiLimits.cleared": Record<string, never>;
@@ -1096,14 +1737,15 @@ export interface MessageArgs {
   "settings.appearance.linkPreviewOffHint": Record<string, never>;
   "settings.appearance.linkPreviewRich": Record<string, never>;
   "settings.appearance.linkPreviewRichHint": Record<string, never>;
+  "settings.invite.guestInvitesPaused": Record<string, never>;
   "settings.notifications.threadReplyDescription": Record<string, never>;
   "settings.notifications.threadReplyName": Record<string, never>;
-  "settings.profile.languageBeta": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
   "settings.profile.languageHint": Record<string, never>;
   "settings.profile.languageLabel": Record<string, never>;
   "settings.profile.languageLoadError": Record<string, never>;
   "settings.profile.languagePartialNotice": Record<string, never>;
+  "settings.profile.languageReload": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
   "teamAi.helper.aliasesLine": { names: string };
@@ -1178,6 +1820,10 @@ export interface MessageArgs {
   "timeline.lightbox.copyFailed": Record<string, never>;
   "timeline.lightbox.zoomIn": Record<string, never>;
   "timeline.lightbox.zoomOut": Record<string, never>;
+  "timeline.send.discard": Record<string, never>;
+  "timeline.send.failed": Record<string, never>;
+  "timeline.send.resend": Record<string, never>;
+  "timeline.send.sending": Record<string, never>;
   "timeline.thread.followDismiss": Record<string, never>;
   "timeline.thread.followFailed": Record<string, never>;
   "timeline.thread.followHint": Record<string, never>;
@@ -1197,6 +1843,7 @@ export interface MessageArgs {
   "timeline.workHealth.dwell": { minutes: number };
   "timeline.workHealth.failedActivities": { count: number };
   "timeline.workHealth.quiet": { minutes: number };
+  "timeline.workHealth.quietShort": Record<string, never>;
   "timeline.workHealth.rejectedApprovals": { count: number };
   "timeline.workHealth.retries": { count: number };
   "timeline.workPlan.button": { done: number; total: number };
@@ -1208,6 +1855,7 @@ export interface MessageArgs {
   "timeline.workPlan.stepCurrent": Record<string, never>;
   "timeline.workPlan.stepDone": Record<string, never>;
   "timeline.workPlan.stepPending": Record<string, never>;
+  "timeline.workPlan.switching": Record<string, never>;
   "timeline.workPlan.title": { done: number; total: number };
   "timeline.workPlan.titleDone": Record<string, never>;
   "timeline.workRecord.bundleRead": { read: number };
@@ -1215,8 +1863,8 @@ export interface MessageArgs {
   "timeline.workRecord.bundleSearch": { search: number };
   "timeline.workRecord.capped": { shown: number };
   "timeline.workRecord.durationMinutes": { minutes: number; seconds: number };
-  "timeline.workRecord.durationMs": { ms: number };
   "timeline.workRecord.durationSeconds": { seconds: number };
+  "timeline.workRecord.durationUnderTenth": Record<string, never>;
   "timeline.workRecord.emptyEnded": Record<string, never>;
   "timeline.workRecord.emptyOpen": Record<string, never>;
   "timeline.workRecord.failureAlreadyClaimed": Record<string, never>;

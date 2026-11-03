@@ -77,9 +77,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { landingClass } from "./landing-class.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// 착지 행 클래스: 정본은 제품 소스(`inbox/anchor.ts`)다. 값을 베끼지 않는다(gates/landing-class.mjs, #5048).
+const LANDING_CLASS = landingClass(webRoot);
 
 /**
  * 고정 액션의 두 낱말. 코어 소스에서 읽는다 (gate-quote가 `QUOTE_ACTION_LABEL`에
@@ -897,13 +900,13 @@ async function exercise(browser) {
     .locator(`[data-testid="pin-list-item"][data-message-id="${PLAIN_MSG}"]`)
     .click();
   await page.waitForFunction(
-    (id) => {
+    ([id, landingClass]) => {
       const article = document.querySelector(
         `[data-testid="timeline-message"][data-message-id="${id}"]`
       );
-      return article?.classList.contains("bg-accent-soft") === true;
+      return article?.classList.contains(landingClass) === true;
     },
-    PLAIN_MSG,
+    [PLAIN_MSG, LANDING_CLASS],
     { timeout: 5_000 }
   );
   if (await page.getByTestId("chat-anchor-missed").isVisible()) {

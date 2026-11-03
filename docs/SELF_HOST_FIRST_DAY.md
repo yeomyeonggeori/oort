@@ -408,7 +408,7 @@ Re-entry after S2, and the path that can pick role / uses / TTL.
 
 | Field | Default | Choices · hint | Coordinate |
 |---|---|---|---|
-| **역할** | 멤버 | **멤버** 「채널을 읽고 씁니다。」 · **관리자** 「초대와 워크스페이스 설정을 다룹니다。」 · **게스트** 「초대받은 채널만 봅니다。」 | `InviteSection.tsx:198-205` · `model.ts:255-258` |
+| **역할** | 멤버 | **멤버** 「채널을 읽고 씁니다。」 · **관리자** 「초대와 워크스페이스 설정을 다룹니다。」 | `InviteSection.tsx:198-205` · `model.ts:255-258` |
 | **사용 횟수** | `1` | 「이 링크로 참여할 수 있는 사람 수입니다。」 1…10000 | `InviteSection.tsx:207-226` |
 | **유효 기간** | 7일 | 1일 · 7일 · 30일. Detail per choice: 「{YYYY-MM-DD}까지 쓸 수 있습니다。」 | `InviteSection.tsx:228-239` · `model.ts:277` |
 

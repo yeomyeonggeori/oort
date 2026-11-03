@@ -725,7 +725,7 @@ jobs:
         run: npm --prefix clients/web run test
 
   node_mobile:
-    name: TS mobile — 타입체크 + 단위 시험
+    name: TS mobile — 타입체크 + 단위 시험 + Maestro 문법
     needs: changes
     if: needs.changes.outputs.node == 'true'
     runs-on: ubuntu-latest
@@ -755,6 +755,72 @@ jobs:
 
       - name: test — clients/mobile (jest)
         run: npm --prefix clients/mobile run test
+
+      # ── Maestro 흐름 문법 검사 (#5081) ─────────────────────────────────────
+      # 폰 흐름의 문법 오류 — 머리 `---` 누락(#4869), 숫자 칸의 자리표시자(#5081) — 는
+      # 시뮬레이터가 그 단계에 닿을 때까지 드러나지 않아 검증 줄에서 몇 시간 뒤에야 잡혔다.
+      # `maestro check-syntax` 는 기기·앱·서버 없이 Maestro 자신의 파서로 파일 하나를 읽는다.
+      # 폴더 전체(`clients/mobile/maestro/**`, 하위 흐름 포함)를 이 잡에서 건다.
+      #
+      # 단계를 `node` 레인 안에 둔 이유: clients/mobile/ 변경이 이미 이 레인을 고르므로
+      # 경로 선택이 공짜이고, 새 잡이 없어 `gate` 의 needs·선택/결과 교차검증이 그대로다.
+      # 검사 본체는 `clients/mobile/scripts/check-maestro-syntax.sh` 한 곳이다(로컬:
+      # `npm --prefix clients/mobile run check:maestro-syntax`). 그 스크립트는 시작할 때
+      # 음성 대조(머리 없는 흐름·숫자 칸의 자리표시자는 반드시 거부)를 먼저 돌려서, 눈먼
+      # 검사기가 초록을 내지 못하게 하고, 파일 0개도 통과로 세지 않는다. 이 단계는 Maestro
+      # 만 고정해서 깐다(아래 gitleaks 처럼 릴리스 파일 + sha256 검증, 서드파티 액션 없음).
+      # sha256 은 GitHub 가 릴리스 자산에 알려 주는 digest 와 내려받은 파일 계산값이 같은
+      # 것을 확인한 값이다. 버전을 올릴 때는 두 값을 함께 바꾸고 그 스크립트를 다시 돌린다.
+      # Java 는 러너 기본 `java` 를 쓴다 — Maestro 2.8.0 은 17 이상이면 되고(런처가 17 미만이면
+      # 스스로 거부한다) 개발 머신의 JDK 27 에서도 통과했다.
+      #
+      # 비용(실측): 이 두 단계를 파일에서 그대로 뽑아 Linux · Temurin 17 · 4 vCPU 컨테이너에서
+      # 돌렸을 때 설치 57초(배포본 314,743,119바이트 내려받기 + 풀기; 그 VM 의 NAT 를 거쳐 느린
+      # 편) + 84개 검사 51초(병렬 4, 음성 대조 포함; JVM 옵션 없이는 77~84초) = 108초. 개발
+      # 머신(M 시리즈, JDK 27)은 내려받기 13초 + 풀기 1.5초 + 검사 32~58초다. node_mobile(≈3.5분)이
+      # 약 1.8분 길어져 node_web(≈5분)보다 몇십 초 더 걸릴 수 있다 — PR 대기가 그만큼 늘 수 있다.
+      # 실제 GitHub 러너의 값은 이 PR 에서 처음 잴 수 있다. 행 방지 상한 15분은 그대로다.
+      - name: Maestro CLI 설치(버전·sha256 고정)
+        env:
+          MAESTRO_VERSION: 2.8.0
+          MAESTRO_SHA256: b3e561161904fb391875ca5834d5b22cf0b01c052dd1b408ad83e30d8f8951b3
+        run: |
+          set -euo pipefail
+          for tool in curl unzip java sha256sum; do
+            command -v "$tool" >/dev/null || {
+              echo "$tool is not installed; cannot install pinned Maestro" >&2
+              exit 1
+            }
+          done
+          [ -n "${RUNNER_TEMP:-}" ] || {
+            echo "RUNNER_TEMP is unset" >&2
+            exit 1
+          }
+          [ -n "${GITHUB_PATH:-}" ] || {
+            echo "GITHUB_PATH is unset; cannot export maestro" >&2
+            exit 1
+          }
+          tmp="$RUNNER_TEMP/maestro-install"
+          mkdir -p "$tmp"
+          url="https://github.com/mobile-dev-inc/maestro/releases/download/cli-${MAESTRO_VERSION}/maestro.zip"
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 5 "$url" -o "$tmp/maestro.zip"
+          echo "${MAESTRO_SHA256}  $tmp/maestro.zip" | sha256sum -c -
+          unzip -q "$tmp/maestro.zip" -d "$tmp"
+          test -x "$tmp/maestro/bin/maestro" || {
+            echo "maestro launcher missing or not executable after unzip" >&2
+            exit 1
+          }
+          echo "$tmp/maestro/bin" >> "$GITHUB_PATH"
+          export PATH="$tmp/maestro/bin:$PATH"
+          java -version
+          got="$(MAESTRO_CLI_NO_ANALYTICS=1 MAESTRO_DISABLE_UPDATE_CHECK=true maestro --version 2>/dev/null | tail -n 1)"
+          test "$got" = "$MAESTRO_VERSION" || {
+            echo "maestro version drift: got '$got' want '$MAESTRO_VERSION'" >&2
+            exit 1
+          }
+
+      - name: check-syntax — clients/mobile/maestro (전 흐름 + 음성 대조)
+        run: bash clients/mobile/scripts/check-maestro-syntax.sh
 
   # Branch protection requires this one stable context. Optional path lanes may
   # be skipped, but a failure/cancellation in any selected lane keeps it red.

@@ -22,6 +22,17 @@ name: dismiss-dev-logbox
 # stray tap is a no-op rather than a message sent at the wrong moment. Do not
 # call this after typing.
 #
+# The same coordinate is a different thing on other screens (402x874 captures,
+# iPhone 17 Pro), and that decides where this may be called:
+#   · conversation, empty composer — the disabled send button: a no-op (above).
+#   · signed-out welcome — blank space to the right of 「주소로 로그인」, whose link
+#     ends near x=72%: a no-op. 00-login.yaml and ensure-signed-in.yaml call it
+#     here on purpose, because that link sits on the strip's band and the strip
+#     swallows the tap (#5045).
+#   · channel list and the other tabs — the 「＋」 button: it opens the + menu.
+#     Never call this from there; reach a conversation first (40-agents-tab.yaml
+#     and 45-work-console.yaml detour through #general for exactly this).
+#
 # This is a Debug-build-only problem. A release build has no LogBox at all, and
 # `build:sim` is Debug on purpose (it is the build that can reach the keychain —
 # see the header of scripts/build-sim.sh).

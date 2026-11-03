@@ -9,14 +9,15 @@ import {
   listInvites,
 } from "@momo/core/features/settings/api";
 import {
-  choiceLabel,
   errorMessage,
   formatDay,
   INVITE_EXPIRY_DAYS,
+  inviteRoleName,
   inviteRoles,
   inviteStatus,
   isOperatorDenied,
 } from "@momo/core/features/settings/model";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { inviteIssueErrorCopy } from "./inviteIssueError";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import { INVITE_CREATE_LABEL } from "./inviteLabels";
@@ -86,6 +87,7 @@ export function InviteSection({
   const [days, setDays] = useState("7");
   const [formError, setFormError] = useState<string | null>(null);
   const { issued, issuedRef, create, clearIssued } = useIssueInvite(workspaceId);
+  const formatMessage = useFormatMessage();
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -181,7 +183,7 @@ export function InviteSection({
                   </span>
                   <StatusChip tone={status.tone}>{status.label}</StatusChip>
                   <span className="text-meta text-ink-muted">
-                    {choiceLabel(roles, invite.role)}
+                    {inviteRoleName(invite.role, workspace.data?.roleLabels)}
                   </span>
                   <span className="text-meta text-ink-muted" data-numeric>
                     {invite.usedCount}/{invite.maxUses}명 사용
@@ -270,7 +272,7 @@ export function InviteSection({
               )}
               {createError && (
                 <p className="text-meta text-danger" role="alert" title={createError.detail}>
-                  {createError.message}
+                  {createError.key ? formatMessage(createError.key) : createError.message}
                 </p>
               )}
             </div>

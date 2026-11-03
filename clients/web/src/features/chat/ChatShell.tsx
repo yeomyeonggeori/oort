@@ -1592,6 +1592,7 @@ export function ChatShell() {
               onOpenWorkSession={openWorkSession}
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
+              onDiscardPending={stressCount > 0 ? undefined : timeline.discard}
               channelKind={channel?.kind}
               viewingThreadId={thread !== null && !workPanelOpen && windowForeground ? thread.id : null}
               channelName={label}

@@ -64,7 +64,7 @@ import { useEndedRuns } from "@/features/agents/endedRuns";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
 import { runAnswerMap } from "@momo/core/features/agents/triggerChip";
-import { shouldFoldBundleLine } from "@momo/core/features/timeline/requestBundle";
+import { presentableRows } from "@momo/core/features/timeline/toolCallSettle";
 import { runStatusForMessage } from "./runStatus";
 
 import {
@@ -258,6 +258,7 @@ export function Timeline({
   onOpenWorkSession,
   onResend,
   onResendPending,
+  onDiscardPending,
   onAddMember,
   canConnectAgent = false,
   onConnectAgent,
@@ -338,6 +339,8 @@ export function Timeline({
   onOpenWorkSession?: OpenWorkSession;
   onResend?: (message: Message) => Promise<void> | void;
   onResendPending?: (clientMsgId: string) => Promise<void> | void;
+  /** 보내지 못한 echo 행을 이 기기에서 지운다(#5210). 없으면 행이 X 를 그리지 않는다. */
+  onDiscardPending?: (clientMsgId: string) => void;
   /**
    * 이 채널에 워크스페이스 멤버를 넣는다. 빈 채널의 보조 행동 (#1536). 이름이
    * 초대가 아니라 추가인 이유는 코어 라벨 상수의 머리말 (#1573): 이 손잡이가
@@ -475,7 +478,7 @@ export function Timeline({
 
   const items = useMemo(() => {
     const folded = foldDeletedRuns(
-      buildTimelineItems(mainMessages.filter((message) => !shouldFoldBundleLine(message, mainMessages)), {
+      buildTimelineItems(presentableRows(mainMessages), {
         lastReadSeq,
         unreadCount,
         recoveryMarkers,
@@ -912,6 +915,7 @@ export function Timeline({
                 directory={directory}
                 quoteLookup={quoteLookup}
                 onResend={onResendPending}
+                onDiscard={onDiscardPending}
               />
             );
           }

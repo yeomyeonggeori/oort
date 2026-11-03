@@ -62,10 +62,7 @@ import { useApprovalCardPath } from "@/features/inbox/useInbox";
 import { AgentLivenessBar } from "./AgentLivenessLabel";
 import { EmptyInvite, Skeleton } from "@/features/common/States";
 import { useAdeDrawerOpen } from "@/features/ade/adeDrawerStore";
-import {
-  restoreDialogOpenerFocus,
-  type DialogFocusTarget,
-} from "@/design/ui/dialog";
+import type { DialogFocusTarget } from "@/design/ui/dialog";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
 import { MemberAvatar } from "@/features/common/MemberAvatar";
@@ -92,7 +89,13 @@ import {
   takeWorkPanelOpener,
   useWorkLog,
   useWorkPanelTarget,
+  workPanelSnapshot,
 } from "./workLogStore";
+import {
+  rememberPanelOpener,
+  returnFocusAfterWorkPanelClose,
+  type PanelOpenerMemo,
+} from "./workPanelFocus";
 
 // =============================================================================
 // 「작업 패널」 (goal WEB-WP1, 결정 정본 docs/planning/2026-08-04-work-panel-design.md).
@@ -169,6 +172,8 @@ export function AgentWorkPanel() {
 
   const asideRef = useRef<HTMLElement>(null);
   const openerRef = useRef<DialogFocusTarget | null>(null);
+  // 연 요소가 사라져도 같은 자리를 다시 찾는 열쇠(#5165). 열 때 적고 닫을 때 읽는다.
+  const openerMemoRef = useRef<PanelOpenerMemo | null>(null);
   // 연 횟수(`session`)와 `origin`을 키에 넣는다. 같은 run을 컴포저에서 열었다가
   // 허브에서 다시 열면 그것은 새로 연 것이고(openWorkPanel이 그렇게 판정한다),
   // 키가 그대로면 이 효과가 다시 돌지 않아 이미 사라진 컴포저 버튼을 가리킨 채로
@@ -184,19 +189,28 @@ export function AgentWorkPanel() {
   useEffect(() => {
     if (openKey === null) {
       openerRef.current = null;
+      openerMemoRef.current = null;
       return;
     }
     const handed = takeWorkPanelOpener();
     const active = document.activeElement;
     openerRef.current =
       handed ?? (active instanceof HTMLElement ? active : null);
+    openerMemoRef.current = rememberPanelOpener(
+      openerRef.current instanceof Element ? openerRef.current : null,
+      workPanelSnapshot()?.runId ?? null
+    );
     asideRef.current?.focus();
   }, [openKey]);
 
+  // 900px 아래에서는 패널이 라우트를 덮고 셸이 그 라우트를 inert로 둔다. React가 그 속성을 걷는 것은 이 커밋이
+  // 끝난 뒤라서, 그 전에 부르는 focus()는 거절당해 캐럿이 body로 갔다(#5165). 덮인 표면의 inert를 먼저 걷고 나서
+  // 돌려주는 순서와, 연 요소가 사라졌을 때의 이웃은 `workPanelFocus`에 있다.
   const close = useCallback(() => {
     const opener = openerRef.current;
+    const memo = openerMemoRef.current;
     closeWorkPanel();
-    restoreDialogOpenerFocus(opener);
+    returnFocusAfterWorkPanelClose(opener, memo);
   }, []);
 
   // Escape는 aside 안에 캐럿이 있을 때만 듣는 것으로는 부족하다. 600px 아래에서
@@ -479,7 +493,9 @@ function PanelBody({
       ? null
       : workHealthLine(
           workHealth({ facts: server, events: ledger.events, nowMs, live: railLive }),
-          formatMessage
+          formatMessage,
+          // 머리(한 run) 또는 run 목록(여러 run)이 이미 「마지막 보고 n분 전」을 말한다: 건강 줄은 그 시간을 되풀이하지 않는다.
+          { lastReportShownElsewhere: true }
         );
 
   return (

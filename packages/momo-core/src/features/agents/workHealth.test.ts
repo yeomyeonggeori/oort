@@ -66,8 +66,24 @@ describe("건강 신호: 시간", () => {
   });
 });
 
+describe("건강 줄: 머리가 이미 말한 시간은 되풀이하지 않는다 (#5174 L1)", () => {
+  it("조용함 조각은 머리·목록이 「마지막 보고 n분 전」을 말하는 화면에서 시간 없이 낱말만 말한다", () => {
+    const health = workHealth(input({ nowMs: T + 8 * MIN, facts: { phase: "running", lastEventAtMs: T } }));
+    expect(health.quietMinutes).toBe(8);
+    // 기본(폰 시트처럼 머리에 그 시간이 없는 표면)은 시간을 말한다.
+    expect(workHealthLine(health, fmt)).toBe("조용해요 · 마지막 보고 8분 전");
+    // 웹 작업 패널: 머리 줄이 「12분째 · 마지막 보고 8분 전」을 이미 말한다.
+    expect(workHealthLine(health, fmt, { lastReportShownElsewhere: true })).toBe("조용해요");
+    // 다른 조각은 그대로 나란히 선다.
+    const withDwell = workHealth(
+      input({ nowMs: T + 12 * MIN, rows: [{ ordinal: 1, kind: "stage", stage: "읽는 중", createdAtMs: T }] })
+    );
+    expect(workHealthLine(withDwell, fmt, { lastReportShownElsewhere: true })).toBe("조용해요 · 같은 단계에 12분째");
+  });
+});
+
 describe("건강 신호: 개수", () => {
-  it("실패한 활동·거절된 승인·재시도는 서버가 적어 둔 행에서 세고, 말할 것이 없으면 줄이 없다", () => {
+  it("실패한 활동·거부된 승인·재시도는 서버가 적어 둔 행에서 세고, 말할 것이 없으면 줄이 없다", () => {
     const rows = [
       { ordinal: 1, kind: "activity", createdAtMs: T + 1000, activity: { id: "a1", kind: "run", status: "failed", n: 3, startedAtMs: T + 1000 } },
       { ordinal: 2, kind: "activity", createdAtMs: T + 2000, activity: { id: "a2", kind: "run", status: "completed", n: 1, startedAtMs: T + 2000 } },
@@ -85,7 +101,9 @@ describe("건강 신호: 개수", () => {
     const health = workHealth(input({ rows }));
     // 실패한 활동은 활동 하나가 한 번이다(n=3이어도 1).
     expect(health).toMatchObject({ failedActivities: 1, rejectedApprovals: 1, retries: 2 });
-    expect(workHealthLine(health, fmt)).toBe("실패한 활동 1 · 거절된 승인 1 · oort 호출 재시도 2번");
+    // 같은 종류의 수는 한 틀이다(#5174 L1·L2): 개수 뒤에 「번」 꼬리가 붙지 않고, 승인의 반대 낱말은 말 사전의 「거부」다.
+    expect(workHealthLine(health, fmt)).toBe("실패한 활동 1 · 거부된 승인 1 · oort 호출 재시도 2");
+    expect(workHealthLine(health, fmt)).not.toMatch(/거절|\d번/);
     // 신호가 없으면 줄이 서지 않는다(「문제 없음」을 지어내지 않는다).
     const quiet = workHealth(input({ rows: [{ ordinal: 1, kind: "queued", createdAtMs: T }] }));
     expect(quiet).toEqual({ quietMinutes: null, dwellMinutes: null, failedActivities: 0, rejectedApprovals: 0, retries: 0 });

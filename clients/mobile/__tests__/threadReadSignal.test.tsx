@@ -72,7 +72,7 @@ function timeline(messages: Message[], applyThreadRead: jest.Mock): UseTimelineR
     recoveryMarkers: [],
     pending: [],
     send: async () => {},
-    resend: async () => {},
+    resend: async () => {}, discard: () => null,
     toggleReaction: async () => {},
     editBody: async () => {},
     removeMessage: async () => {},

@@ -30,6 +30,7 @@ import {
   sweepAgentWorking,
   ZOMBIE_CLEAR_MS,
 } from '../src/features/agents/workingSignal';
+import {pendingApprovalsKey} from '../src/features/conversation/usePendingApprovals';
 import {color} from '../src/design/tokens';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -601,6 +602,67 @@ describe('에이전트 탭 — 열린 턴을 말한다', () => {
     // 배지는 줄어들지 않는다 — 줄어들 수 있으면 「작업 중」이 「작…」이 된다.
     expect(badge.props.style?.flexShrink).toBeUndefined();
   });
+
+  // ---- 승인 원장이 레일보다 이긴다 (#5085, #5066 후속) ----------------------------------------------
+  //
+  // 서버는 승인에 걸린 run 을 DB 에서는 승인 대기로 세우지만 레일 프레임으로는 알리지 않는다(중간 프레임은 늘 `running`). 그래서 레일만
+  // 읽는 이 목록은 사람을 기다리는 에이전트를 「작업 중」이라고 말했고, 같은 승인이 대화 화면에서는 「승인을 기다립니다」였다(#5066 은
+  // 대화 화면에만 원장 덮어쓰기를 더했다). 원장은 인박스·대화 화면과 같은 쿼리 캐시(`pendingApprovalsKey`)라서 시험은 거기에 승인을 둔다.
+  describe('승인 원장이 레일보다 이긴다 (#5085)', () => {
+    const approval = (over: Record<string, unknown> = {}) => ({
+      id: 'ap-1',
+      workspaceId: WS,
+      runId: RUN,
+      channelId: GENERAL,
+      requestedBy: KIM_AGENT,
+      actionType: 'tool_call',
+      status: 'pending',
+      expiresAtMs: Date.now() + 3_600_000,
+      ...over,
+    });
+    const seedLedger = (approvals: unknown[]) =>
+      act(() => {
+        queryClient!.setQueryData(pendingApprovalsKey(WS), approvals);
+      });
+    // 원장이 바뀐 뒤 화면이 바뀌지 **않는** 것을 단정할 때는 한 박자 기다린 뒤에 잰다(#839).
+    const settle = () =>
+      act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      });
+
+    it('행은 원장을 따른다: 대기가 아닌 승인은 그대로, 기다리는 승인이 서면 「승인 필요」, 결정돼 빠지면 다시 「작업 중」', async () => {
+      await openAgentsTab();
+      const row = () => screen.getByTestId(`agent-row-${KIM_AGENT}`);
+      const otherRow = () => screen.getByTestId(`agent-row-${HERMES}`);
+      await deliver(statusFrame(), 20);
+      await deliver(statusFrame({phase: 'streaming', run_status: 'running'}), 45);
+      await waitFor(() => expect(row()).toHaveTextContent(/작업 중/));
+
+      // 이 에이전트를 기다림으로 세우지 못하는 승인 셋: 다른 에이전트의 승인 · 이미 결정된 승인 · 기한이 지난 승인(서버가 정리하기
+      // 전의 몇 초). 다른 에이전트의 승인은 **그 에이전트의** 기다림이라 그 행은 레일이 아무 턴도 모르는데도 「승인 필요」다.
+      const notWaiting = [
+        approval({id: 'ap-2', requestedBy: HERMES}),
+        approval({id: 'ap-3', status: 'approved'}),
+        approval({id: 'ap-4', expiresAtMs: Date.now() - 60_000}),
+      ];
+      seedLedger(notWaiting);
+      await waitFor(() => expect(otherRow()).toHaveTextContent(/승인 필요/));
+      await settle();
+      expect(row()).toHaveTextContent(/작업 중/);
+      expect(row()).not.toHaveTextContent(/승인 필요/);
+
+      // 이 에이전트가 올린 승인이 사람을 기다린다 → 같은 행이 「승인 필요」를 말한다.
+      seedLedger([...notWaiting, approval()]);
+      await waitFor(() => expect(row()).toHaveTextContent(/승인 필요/));
+      expect(row()).not.toHaveTextContent(/작업 중/);
+
+      // 다른 곳에서 결정돼 원장에서 빠지면 레일이 말하는 그대로 돌아오고, 승인이 세웠던 행도 함께 조용해진다.
+      seedLedger([]);
+      await waitFor(() => expect(row()).toHaveTextContent(/작업 중/));
+      expect(row()).not.toHaveTextContent(/승인 필요/);
+      expect(otherRow()).not.toHaveTextContent(/승인 필요/);
+    });
+  });
 });
 
 describe('연결이 끊기면 화면이 그렇다고 말한다 (2R H2·M4)', () => {
@@ -763,5 +825,81 @@ describe('대화 화면 — 입력창 바로 위에서 턴을 말한다', () => 
     // 기다리는 대상은 이미 타임라인의 메시지다. 상태 줄이 그것을 다시 인쇄하면
     // 화면이 자기 자신 위에 쌓인다.
     expect(bar).not.toHaveTextContent(/파일을 지울까요/);
+  });
+  // ---- 승인 원장이 레일보다 이긴다 (#5066, 검증 줄 1회차 H2) -----------------------------------
+  //
+  // 서버는 승인에 걸린 run 을 DB 에서는 승인 대기로 세우지만(`park_run_for_approval_in_tx`) 레일 프레임으로는 알리지 않는다
+  // (중간 프레임은 늘 `phase: streaming|thinking, run_status: running`). 그래서 레일만 보면 그 에이전트는 계속 「일하는
+  // 중」이고, 한 화면에서 승인 카드는 「승인 필요」, 자리표시는 「작업 중…」, 레일은 「답하는 중」이라고 말했다(캡처
+  // `phone-live-batch1/30-approval-light-035.jpg`). 웹은 승인 원장을 레일 위에 덮는다(`applyApprovalWaits`). 폰도 같은 덮어쓰기를
+  // 한다. 원장 = 인박스와 같은 쿼리 캐시(`pendingApprovalsKey`)라 시험은 거기에 승인을 둔다.
+  describe('승인 원장이 레일보다 이긴다 (#5066)', () => {
+    const farFuture = () => Date.now() + 3_600_000;
+    function pending(over: Record<string, unknown> = {}) {
+      return {
+        id: 'ap-1',
+        workspaceId: WS,
+        runId: RUN,
+        channelId: GENERAL,
+        requestedBy: KIM_AGENT,
+        actionType: 'tool_call',
+        status: 'pending',
+        expiresAtMs: farFuture(),
+        ...over,
+      };
+    }
+    async function workingByFrames() {
+      await openGeneral();
+      await deliver(statusFrame(), 20);
+      await deliver(statusFrame({phase: 'streaming', run_status: 'running'}), 40);
+      await waitFor(() =>
+        expect(screen.getByTestId('composer-working')).toHaveTextContent(/답하는 중/),
+      );
+      // 바탕: 프레임만 있으면 줄은 「답하는 중」이고 답이 나타날 자리에 「작업 중…」 자리표시가 선다.
+      expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
+    }
+    const seedLedger = (approvals: unknown[]) =>
+      act(() => {
+        queryClient!.setQueryData(pendingApprovalsKey(WS), approvals);
+      });
+
+    it('이 에이전트가 이 채널에 올린 대기 승인이 있으면 줄은 승인을 기다린다고 말하고 자리표시는 서지 않는다', async () => {
+      await workingByFrames();
+      seedLedger([pending()]);
+      await waitFor(() =>
+        expect(screen.getByTestId('composer-working')).toHaveTextContent(/승인을 기다립니다/),
+      );
+      const bar = screen.getByTestId('composer-working');
+      expect(bar).not.toHaveTextContent(/답하는 중/);
+      expect(
+        within(bar).queryByTestId('responding-dots', {includeHiddenElements: true}),
+      ).toBeNull();
+      expect(screen.queryByTestId(`working-row-${KIM_AGENT}`)).toBeNull();
+    });
+
+    it('기한이 지난 승인은 기다림이 아니다: 서버가 정리하기 전의 몇 초도 사람을 기다린다고 말하지 않는다', async () => {
+      await workingByFrames();
+      seedLedger([pending({expiresAtMs: Date.now() - 60_000})]);
+      // 원장이 바뀐 뒤에도 줄은 프레임이 말하는 그대로다.
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      });
+      expect(screen.getByTestId('composer-working')).toHaveTextContent(/답하는 중/);
+      expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
+    });
+
+    it('다른 에이전트의 승인·다른 채널의 승인·대기가 아닌 승인은 이 에이전트의 턴을 바꾸지 않는다', async () => {
+      await workingByFrames();
+      seedLedger([
+        pending({id: 'ap-2', requestedBy: HERMES}),
+        pending({id: 'ap-3', channelId: SECRET}),
+        pending({id: 'ap-4', status: 'approved'}),
+      ]);
+      await act(async () => {
+        await new Promise(resolve => setTimeout(resolve, 50));
+      });
+      expect(screen.getByTestId('composer-working')).toHaveTextContent(/답하는 중/);
+      expect(screen.getByTestId(`working-row-${KIM_AGENT}`)).toBeTruthy();
+    });
   });
 });

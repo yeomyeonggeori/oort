@@ -28,6 +28,10 @@
 //      실제로 디코드된 그림)을 갖고, 타임라인 이미지는 라이트박스로 열려 Esc 로
 //      닫히며 포커스가 여는 버튼으로 돌아오고, PDF 카드는 머리가 `%PDF-` 인
 //      바이트만 `application/pdf` 로 재타입해 opener 없는 새 창에 건다.
+//   5c. 사진 hero      타임라인 이미지를 누르면 제자리 사진에서 커지고 닫으면 돌아간다(#4775).
+//      (#4775·#4841)  `gates/flows/photo-hero.mjs` 가 라이트·다크 × 앱의 큰 글자로 재는 것: hero 가 실제로
+//                        움직이고, 전환 중·뒤에 대화가 한 칸도 움직이지 않고, 확대한 채 Esc 한 번이 맞춤으로
+//                        돌아간 뒤 닫히고 포커스가 여는 버튼으로 돌아오며, 움직임 줄이기에는 hero 가 없다.
 //   6. **첨부 없는 경로가 그대로다** — 파일을 한 번도 안 붙인 메시지의 DOM에는
 //      첨부 노드가 하나도 없고, 컴포저의 전송 조건도 이전과 같다.
 //
@@ -48,6 +52,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { focusReturnsTo } from "./focus.mjs";
+import { exercisePhotoHero } from "./flows/photo-hero.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -739,6 +745,20 @@ function fail(message) {
   throw new Error(message);
 }
 
+/**
+ * 트레이의 초안을 비운다. 「모두 지우기」(`attachment-clear`)는 칩이 CLEAR_ALL_MIN_DRAFTS(4) 이상일 때만 서고
+ * 그보다 적으면 칩마다 지운다(AttachmentTray) — 그래서 있으면 누르고, 없으면 칩을 하나씩 지운다(#5048).
+ */
+async function clearDrafts(page) {
+  const clearAll = page.getByTestId("attachment-clear");
+  if ((await clearAll.count()) > 0) {
+    await clearAll.click();
+    return;
+  }
+  const remove = page.getByTestId("attachment-chip-remove");
+  while ((await remove.count()) > 0) await remove.first().click();
+}
+
 function expect(condition, message) {
   if (!condition) fail(message);
 }
@@ -1100,9 +1120,54 @@ async function exerciseTimeline(browser) {
     !/^[A-Z0-9+.-]+ ·/.test(meta),
     `카드의 타입이 사람이 읽는 낱말이 아니다 (읽은 값: ${meta})`
   );
+  // 내려받기·미리보기는 카드 위에 마우스가 있거나 키보드 초점이 있을 때만 선다(Buzz식 hover 노출,
+  // attachmentBuzz 시험). 쉬는 카드에는 없어야 하고, 올리면 하나가 서야 한다(#5048).
+  expect(
+    (await card.getByTestId("attachment-download").count()) === 0,
+    "쉬는 카드에 내려받기가 미리 서 있다"
+  );
+  await card.hover();
   expect(
     (await card.getByTestId("attachment-download").count()) === 1,
     "카드에 내려받기가 없다"
+  );
+  // 마우스가 떠나면 다시 접힌다: 호버가 행동을 붙들어 두지 않는다.
+  await page_.mouse.move(0, 0);
+  expect(
+    (await card.getByTestId("attachment-download").count()) === 0,
+    "마우스가 떠났는데 내려받기가 카드에 남아 있다"
+  );
+  // 마우스로 눌러 준 초점은 키보드 초점이 아니다(`:focus-visible` 아님, `useRevealOnHover`). 누르고 떠나면 초점이 카드에
+  // 남아도 행동은 접힌다 — 이것이 켜지면 클릭 한 번이 행동을 영영 붙들어 둔다. 시험이 정말 「초점은 있고 키보드는 아님」을
+  // 만들었는지부터 잰다(못 만들면 아래 0 은 아무것도 지키지 못한다).
+  await card.click({ position: { x: 20, y: 8 } });
+  await page_.mouse.move(0, 0);
+  expect(
+    await card.evaluate((node) => document.activeElement === node && !node.matches(":focus-visible")),
+    "시험이 카드에 마우스 초점(키보드 아님)을 만들지 못했다"
+  );
+  expect(
+    (await card.getByTestId("attachment-download").count()) === 0,
+    "마우스로 준 초점이 내려받기를 붙들어 둔다"
+  );
+  // 키보드로 오면 호버 없이도 선다. 진짜 Tab 한 번으로 입력 방식을 키보드로 만든 뒤 `focus()` 한다(마우스로 간 초점은 안 서는 것이
+  // 위에서 확인됐으니 같은 카드를 다시 키보드 초점으로 가져간다).
+  await page_.evaluate(() => document.activeElement?.blur());
+  await page_.keyboard.press("Tab");
+  await card.focus();
+  expect(
+    await card.evaluate((node) => document.activeElement === node && node.matches(":focus-visible")),
+    "시험이 카드에 키보드 초점(:focus-visible)을 만들지 못했다"
+  );
+  expect(
+    (await card.getByTestId("attachment-download").count()) === 1,
+    "키보드 초점을 받은 카드에 내려받기가 서지 않는다"
+  );
+  // 초점이 떠나면(마우스도 없다) 다시 접힌다.
+  await page_.getByTestId("composer-input").focus();
+  expect(
+    (await card.getByTestId("attachment-download").count()) === 0,
+    "초점이 떠났는데 내려받기가 카드에 남아 있다"
   );
 
   const imageRow = page_.locator(
@@ -1210,7 +1275,8 @@ async function exercisePreview(browser) {
   await page_.getByTestId("image-lightbox-ready").waitFor({ timeout: 15_000 });
   await page_.keyboard.press("Escape");
   await page_.getByTestId("image-lightbox").waitFor({ state: "detached", timeout: 5_000 });
-  const focusBack = await opener.evaluate((node) => node === document.activeElement);
+  // 닫힘 전환이 끝난 뒤 프레임에 돌아오는 포커스를 기다려 잰다(gates/focus.mjs, #5048).
+  const focusBack = await focusReturnsTo(opener);
   expect(focusBack, "라이트박스를 닫은 뒤 포커스가 여는 버튼으로 돌아오지 않았다");
 
   // ③ PDF: 새 창이 열리고, 그 문서는 opener 가 없는 application/pdf blob 이다.
@@ -1218,6 +1284,8 @@ async function exercisePreview(browser) {
     `[data-testid="timeline-message"][data-message-id="${PDF_MSG.toLowerCase()}"]`
   );
   const openPdf = pdfRow.getByTestId("attachment-open-pdf");
+  // 열기·내려받기는 카드 위에 마우스가 있을 때만 선다(attachmentBuzz 시험, #5048).
+  await pdfRow.getByTestId("attachment-card").hover();
   expect((await openPdf.count()) === 1, "PDF 카드에 열기가 없다");
   expect(
     (await pdfRow.getByTestId("attachment-download").count()) === 1,
@@ -1275,6 +1343,97 @@ async function exercisePreview(browser) {
   await context.close();
   console.log("[6b] 트레이 썸네일은 data: 로 서고, 라이트박스는 Esc·포커스 복귀를 지키고,");
   console.log("     PDF 는 opener 없는 application/pdf 창으로 열린다 (#2701)");
+}
+
+// ---- #4775·#4841. 사진 열기·닫기 hero 전환 --------------------------------
+//
+// `gates/flows/photo-hero.mjs` 는 「인증된 대화 화면」과 「그 사진의 여는 버튼」만 받는 흐름인데 어느 게이트에도 이어져
+// 있지 않았다(#4841). 이 판이 그 둘을 댄다: 같은 목 서버·같은 대화에서 라이트·다크 각각 한 번, 앱의 큰 글자
+// (`data-font-size="larger"`) 상태로. 컨텍스트는 `no-preference` 로 연다 — 타임라인·미리보기 구역의 `reduce` 는 전환 없이
+// 즉시 열려야 그쪽 측정이 서기 때문에 일부러이고, hero 는 움직임이 켜진 화면에서만 잴 수 있다(흐름이 안에서 reduce 로도 바꿔 잰다).
+// 흐름이 던지는 AssertionError·시간 초과는 어느 줄에서 어느 배색으로 깨졌는지 이 게이트의 말로 다시 던진다.
+
+async function exerciseHero(browser) {
+  const shotsDir = resolve(webRoot, "artifacts/attachment");
+  for (const scheme of ["light", "dark"]) {
+    const archive = createArchive();
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      colorScheme: scheme,
+      reducedMotion: "no-preference",
+    });
+    const page_ = await context.newPage();
+    // 흐름 안의 기다림이 기본 마감(30초) 끝까지 매달려 있지 않게 한다. 로컬 부하가 높을 때도 15초면 넉넉하다.
+    page_.setDefaultTimeout(15_000);
+    await installRealtimeSocket(page_);
+    await installRoutes(context, archive);
+    await login(page_);
+    // 앱의 큰 글자(설정 > 글자 크기). 부트가 저장값을 찍은 뒤에 켠다(`gate-channel-header-fit` 과 같은 길).
+    await page_.evaluate(() =>
+      document.documentElement.setAttribute("data-font-size", "larger")
+    );
+    await openChannel(page_);
+
+    const imageRow = page_.locator(
+      `[data-testid="timeline-message"][data-message-id="${IMAGE_MSG.toLowerCase()}"]`
+    );
+    await imageRow.waitFor({ timeout: 10_000 });
+    // 사진이 디코드돼 자리가 정해진 뒤에야 hero 가 출발 자리를 안다. 디코드 직후의 레이아웃(onLoad → 자연 크기)이 끝나길
+    // 두 프레임 더 기다린다 — 흐름의 「대화가 움직이지 않았다」 측정은 그 뒤부터다.
+    await page_.waitForFunction(
+      (id) => {
+        const img = document.querySelector(
+          `[data-testid="timeline-message"][data-message-id="${id}"] [data-testid="attachment-image"] img`
+        );
+        return img !== null && img.complete && img.naturalWidth > 0;
+      },
+      IMAGE_MSG.toLowerCase(),
+      { timeout: 15_000 }
+    );
+    await page_.evaluate(
+      () =>
+        new Promise((done) =>
+          requestAnimationFrame(() => requestAnimationFrame(done))
+        )
+    );
+    expect(
+      (await page_.evaluate(() => document.documentElement.getAttribute("data-font-size"))) === "larger",
+      "큰 글자 상태가 흐름이 돌기 전에 풀렸다"
+    );
+
+    const opener = imageRow.locator('[data-testid="attachment-image"] button').first();
+    // 전환 중간 프레임은 캡처 모드에서만 남긴다(artifacts/ 는 git 이 무시한다).
+    let midFrame;
+    if (process.env.ATTACH_GATE_SHOTS === "1") {
+      mkdirSync(shotsDir, { recursive: true });
+      midFrame = resolve(shotsDir, `hero-mid-${scheme}.png`);
+    }
+    try {
+      await exercisePhotoHero(page_, opener, { midFrame });
+    } catch (error) {
+      // 흐름의 시간 초과는 어느 기다림인지 말해 주지 않는다(전부 `waitForFunction`). 깨진 순간의 화면 상태를 함께 적는다:
+      // hero 가 안 떴으면 「라이트박스 없음·.stage-hero 0」, 포커스가 안 돌아왔으면 「라이트박스 없음·초점 body」.
+      const at = await page_
+        .evaluate(() => {
+          const active = document.activeElement;
+          const id = active?.getAttribute("data-testid");
+          return {
+            lightbox:
+              document.querySelector('[data-testid="image-lightbox"]')?.getAttribute("data-stage-phase") ?? "없음",
+            hero: document.querySelectorAll(".stage-hero").length,
+            focus: `${active?.tagName.toLowerCase() ?? "?"}${id ? `[${id}]` : ""}`,
+          };
+        })
+        .catch(() => null);
+      fail(
+        `사진 hero 흐름이 ${scheme} 에서 깨졌다: ${error instanceof Error ? error.message : String(error)}` +
+          (at === null ? "" : ` (그때 라이트박스 ${at.lightbox} · .stage-hero ${at.hero}개 · 초점 ${at.focus})`)
+      );
+    }
+    await context.close();
+  }
+  console.log("[5c] 사진 hero: 라이트·다크 × 큰 글자에서 hero 가 움직이고, 대화는 움직이지 않고,");
+  console.log("     확대한 채 Esc 한 번이 맞춤으로 돌아간 뒤 닫히며 포커스가 돌아오고, 움직임 줄이기엔 hero 가 없다 (#4775)");
 }
 
 // ---- B-3. 막대는 실제로 움직이고, 100%를 먼저 말하지 않는다 ------------------
@@ -1754,7 +1913,7 @@ async function captureShots(browser) {
         ]);
       await page_.getByTestId("attachment-chip-thumb").waitFor({ timeout: 15_000 });
       await shot(page_, `tray-thumb-${scheme}`);
-      await page_.getByTestId("attachment-clear").click();
+      await clearDrafts(page_);
 
       await page_.waitForFunction(
         (id) =>
@@ -1791,6 +1950,8 @@ async function captureShots(browser) {
       const pdfRow = page_.locator(
         `[data-testid="timeline-message"][data-message-id="${PDF_MSG.toLowerCase()}"]`
       );
+      // 열기는 카드 위에 마우스가 있거나 키보드 초점이 있을 때만 선다(Buzz식 호버 노출). 캡처 판만 이 줄이 따라가지 못하고 있었다.
+      await pdfRow.getByTestId("attachment-card").hover();
       await pdfRow.getByTestId("attachment-open-pdf").click();
       await page_.waitForFunction(
         () =>
@@ -1843,7 +2004,7 @@ async function main() {
   try {
     const browser = await chromium.launch();
     try {
-      // ATTACH_GATE_ONLY=composer,progress,narrow,overflow,failure,timeline,preview 로 구역을 고른다
+      // ATTACH_GATE_ONLY=composer,progress,narrow,overflow,failure,timeline,preview,hero 로 구역을 고른다
       // (#5200: 타임라인 구역이 따로 낡아 있어 컴포저 쪽만 돌릴 길이 필요했다). 비우면 전부다.
       const only = (process.env.ATTACH_GATE_ONLY ?? "").split(",").filter(Boolean);
       const run = (name, section) => (only.length === 0 || only.includes(name) ? section(browser) : undefined);
@@ -1854,6 +2015,7 @@ async function main() {
       await run("failure", exerciseFailure);
       await run("timeline", exerciseTimeline);
       await run("preview", exercisePreview);
+      await run("hero", exerciseHero);
       if (process.env.ATTACH_GATE_SHOTS === "1") await captureShots(browser);
     } finally {
       await browser.close();

@@ -88,6 +88,7 @@ import {
   useTickingNow,
 } from '../features/agents/workingSignal';
 import {
+  applyApprovalWaits,
   parseTurnPlaceholderKey,
   turnPlaceholderKey,
 } from '@momo/core/features/agents/workingSignal';
@@ -136,6 +137,11 @@ import {
 import type {MessageRowActions} from '../features/conversation/MessageRow';
 import type {WorkRequestOpen} from '@momo/core/features/timeline/commandSuggest';
 import {ThreadPanel} from '../features/conversation/ThreadPanel';
+import {
+  MakeLandingContext,
+  useLandOnMadeDm,
+} from '../features/conversation/makeLanding';
+import {useReplyDraft} from '../features/conversation/useReplyDraft';
 import {threadsAreFollowable} from '@momo/core/features/timeline/threadFollow';
 import {PinListPanel} from '../features/conversation/PinListPanel';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
@@ -168,6 +174,7 @@ import {
   planNotificationLanding,
   type NotificationLanding,
 } from '../push/tapArrival';
+import {bandIsSilent} from '../realtime/connectionDisplay';
 import {useRealtime} from '../realtime/RealtimeProvider';
 import {
   useAgentLiveness,
@@ -395,7 +402,9 @@ export default function ConversationScreen({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
-  const {rail, status: railStatus, reconnect} = useRealtime();
+  // `bandStatus` 는 띠가 말해도 되는 상태다 — 끊긴 첫 1초는 말이 없다(#4949). 소켓이 살아 있는가를 묻는
+  // 자리(`railLive`·전송 잠금)는 그대로 `status` 를 읽는다.
+  const {rail, status: railStatus, bandStatus = railStatus, reconnect} = useRealtime();
   // 연결 띠는 머리 아래에 뜨고 목록의 viewport·첫 여백을 바꾸지 않는다.
   // 날짜·안 읽음 필만 띠의 실제 높이만큼 더 내려간다(#4292).
   const [bannerInset, setBannerInset] = useState(0);
@@ -552,14 +561,28 @@ export default function ConversationScreen({
   // 반대로 최대 5초 일찍 거두는데, 그것은 이 제품이 늘 고르는 방향이다 — 모르면
   // 모른다고 말하지, 아는 척 붙들고 있지 않는다.
   const staleBucket = Math.ceil(turnNowMs / TURN_STALENESS_GRID_MS);
+  // 승인 원장이 레일보다 이긴다(#3738, 웹 `ComposerActivityRail` 과 같은 덮어쓰기). 서버는 승인에 걸린 run 을 DB 에서는
+  // 승인 대기로 세우지만 레일 프레임으로는 알리지 않아서(중간 프레임은 늘 `running`) 레일만 보면 그 에이전트는 계속 「일하는
+  // 중」이다. 사람을 기다리는 카드가 이 채널에 있으면 그 에이전트의 턴은 승인 대기이고, 자리표시(`turnPlaceholderKey`)와
+  // 레일(`isRespondingLine`)이 둘 다 이 목록을 읽어서 「작업 중…」·「답하는 중」을 세우지 않는다(#5066, 검증 줄 H2).
+  const {
+    gates: approvalGates,
+    waits: approvalWaitList,
+    provided: approvalsProvided,
+  } = usePendingApprovals(channelId);
   const turns = useMemo(
     () =>
-      agentTurnsInChannel(
-        signals,
+      applyApprovalWaits(
+        agentTurnsInChannel(
+          signals,
+          channelId,
+          staleBucket * TURN_STALENESS_GRID_MS,
+        ),
         channelId,
+        approvalWaitList,
         staleBucket * TURN_STALENESS_GRID_MS,
       ),
-    [signals, channelId, staleBucket],
+    [signals, channelId, staleBucket, approvalWaitList],
   );
 
   // 아직 아무도 가져가지 않은 사람 요청의 에이전트들. 활동 줄이 그 근거 줄 맨 앞에 서버의 생존
@@ -1155,6 +1178,25 @@ export default function ConversationScreen({
     void refetchChannels(); void refetchDirectory();
   }, [membershipRevision, refetchChannels, refetchDirectory]);
 
+  // ---- 걸어 둔 답글 대상 (#4869) ---------------------------------------------
+  //
+  // 오른쪽→왼쪽 밀기와 행동 시트의 「답글 달기」가 **같은 길**(`startReply`)로 대상을 건다. 보내면 스레드(`rootId`)에 달리고
+  // 이 화면에 머문다 — 스레드 화면(`openThread`)은 열리지 않는다. 인용과는 함께 걸 수 없어(스레드 쓰기 길에 `replyToId` 가
+  // 없다) 대상이 걸리면 인용을 떼고(아래 `onReplyStarted`), 인용이 걸리면 대상을 뗀다(`onQuoteMessage`).
+  const onReplyStarted = useCallback(() => {
+    setQuote(null);
+    // 답글을 건 사람의 다음 동작도 100% 글쓰기다 — 인용과 같다.
+    composerInputRef.current?.focus();
+  }, []);
+  const {replyTarget, startReply, cancelReply, sendReply: sendReplyDraft} =
+    useReplyDraft({
+      channelId,
+      messages,
+      myMemberId: member.id,
+      sendThreadReply: timeline.sendReply,
+      onStarted: onReplyStarted,
+    });
+
   // 걸어 둔 원본이 지워졌다. 서버는 받아 주지만(같은 채널이면 묘비도 유효한
   // 대상이다) 그렇게 보낸 글은 태어날 때부터 「삭제된 메시지」를 가리킨다. 조용히
   // 떼는 것이 맞다 — 걸어 둔 사람은 그 삭제를 이미 화면에서 봤다.
@@ -1167,10 +1209,12 @@ export default function ConversationScreen({
 
   const onQuoteMessage = useCallback((message: Message) => {
     setQuote(quoteDraftFor(message));
+    // 한 입력칸에는 한 가지 머리말이다: 인용을 걸면 걸려 있던 답글 대상은 떨어진다(#4869).
+    cancelReply();
     // 인용을 건 사람의 다음 동작은 100% 글쓰기다. 캐럿을 옮겨 주지 않으면 줄은
     // 떴는데 손은 아직 타임라인에 있다.
     composerInputRef.current?.focus();
-  }, []);
+  }, [cancelReply]);
   const onCancelQuote = useCallback(() => setQuote(null), []);
 
   // ---- 인용이 가리키는 줄로 이동 --------------------------------------------
@@ -1454,8 +1498,7 @@ export default function ConversationScreen({
   // 영수증은 **같은 순간에 서로 반대로** 움직인다 — 영수증을 행의 상태로 두면
   // 방금 누른 사람이 영수증 대신 예전 안내 문장을 보게 된다.
   // ===========================================================================
-  const {gates: approvalGates, provided: approvalsProvided} =
-    usePendingApprovals(channelId);
+  // (구독은 위 「이 채널에서 지금 열려 있는 턴」 곁에서 한다: 같은 목록이 자리표시와 레일에도 쓰인다. #5066)
   // **레일 상태(`railStatus`)가 아니다.** 레일은 웹소켓이고 결정은 REST 로
   // 나간다 — 레일이 재연결 중이어도 그 POST 는 멀쩡히 성공한다. 승인에는
   // 기한이 있으므로, 할 수 있는 결정을 막는 쪽이 더 비싸다.
@@ -1548,8 +1591,12 @@ export default function ConversationScreen({
   const quoteRef = useRef<QuoteDraft | null>(null);
   quoteRef.current = quote;
   const onSend = useCallback(
-    (body: string, options?: ComposerSendOptions) => {
+    (body: string, options?: ComposerSendOptions, resend = false) => {
       setSelfSendToken(token => token + 1);
+      // 답글 머리말이 걸려 있으면 그 스레드(`rootId`)에 달고 **이 화면에 머문다**(#4869). 전화 호출 길과 인용은 스레드 쓰기에
+      // 실리지 않으므로 이 길이 먼저고, 호출 길을 지나지 않는다(`@별칭`도 스레드의 평범한 답글이다). **다시 보내기는 이 길을
+      // 지나지 않는다**: 실패한 채널 글을 다시 보내는 손가락이 지금 걸려 있는 답글 대상을 가로채 남의 스레드로 보내면 안 된다.
+      if (!resend && sendReplyDraft(body, options)) return;
       // 인용은 **보낸 순간** 떨어진다. 남겨 두면 다음 줄까지 같은 원본을 가리키게
       // 되는데, 그것을 원한 사람은 거의 없고 알아채는 사람은 더 적다. 컴포저가
       // 자기 글을 먼저 비우는 것과 같은 규율이다.
@@ -1571,7 +1618,7 @@ export default function ConversationScreen({
       }
       void send(body, replyToId, options?.attachments, undefined, flags);
     },
-    [send, tryPersonalCall],
+    [send, tryPersonalCall, sendReplyDraft],
   );
 
   // ---- 리스트에 내려가는 핸들러는 전부 고정된 동일성이어야 한다 (goal RN-P2a) --
@@ -1592,6 +1639,7 @@ export default function ConversationScreen({
     removeUnfurls,
     loadOlder,
     resend,
+    discard,
     reload,
   } = timeline;
   const openThread = useCallback((message: Message) => {
@@ -1607,6 +1655,7 @@ export default function ConversationScreen({
         message.attachments === undefined
           ? undefined
           : {attachments: message.attachments},
+        true,
       ),
     [onSend],
   );
@@ -1614,11 +1663,25 @@ export default function ConversationScreen({
     (clientMsgId: string) => void resend(clientMsgId),
     [resend],
   );
+  // 같은 이유로 고정된 동일성이다(위 머리말). 지운 행을 돌려받는 호출자는 아직 없다(「지우고 고쳐 쓰기」는 후속).
+  const onDiscardPending = useCallback(
+    (clientMsgId: string) => void discard(clientMsgId),
+    [discard],
+  );
   const closeThread = useCallback(() => {
     setThread(null);
     setThreadLanding(null);
     setNotificationNotice(current => (current?.inThread ? null : current));
   }, []);
+  // 「AI와 만들기」 요청을 보낸 뒤 그 에이전트 DM 으로 (#4962). 입력창·스레드 입력창·행 시트의 고르개가 컨텍스트로 받는다 —
+  // 이 값은 `actions` 에 싣지 않는다(행 리렌더 없이 호스트 네 곳에 닿는 길은 컨텍스트다, `makeLanding.ts` 머리말).
+  const landOnMadeDm = useLandOnMadeDm({
+    workspaceId,
+    selfMemberId: member.id,
+    directory,
+    onOpenConversation,
+    closeThread,
+  });
   // 같은 이유로 고정된다. 이 화면은 턴이 열려 있는 동안 초당 한 번 다시 그려지고,
   // 인라인이면 그때마다 `StopTurnControl`(자체 상태 셋을 든 컴포넌트)이 새 엘리먼트가
   // 된다 — 사람이 「중단」을 겨누고 있는 바로 그 컨트롤을.
@@ -1661,6 +1724,7 @@ export default function ConversationScreen({
       // 작성자가 링크 미리보기를 모두에게서 지운다(#4883). 시트가 작성자에게만 행을 세운다.
       onRemoveUnfurls: removeUnfurls,
       onOpenThread: openThread,
+      onReplyInline: startReply,
       onQuote: onQuoteMessage,
       onJumpToQuoted,
       onLongPressUsed: hint.markUsed,
@@ -1685,6 +1749,7 @@ export default function ConversationScreen({
       removeMessage,
       removeUnfurls,
       openThread,
+      startReply,
       onQuoteMessage,
       onJumpToQuoted,
       hint.markUsed,
@@ -2062,6 +2127,7 @@ export default function ConversationScreen({
 
   return (
     <ChannelAudienceContext.Provider value={channelAudience}>
+    <MakeLandingContext.Provider value={landOnMadeDm}>
     <DecisionStageScope key={`${workspaceId}:${channelId}`} messages={messages} runs={requestRuns} directory={directory} viewerMemberId={member.id}
       gates={approvalGates} receipts={approvalReceipts} nowMs={nowMs} offline={!networkOnline} onSettled={onApprovalSettled}>
     <Screen style={styles.screen}>
@@ -2092,7 +2158,7 @@ export default function ConversationScreen({
         onOpenMenu={openMenu}
         // 정보 페이지는 종류를 알 때만 연다 — 채널 목록이 오기 전에는 무엇의 정보인지 모른다(알약은 단추가 아니라 이름만 선다).
         onOpenInfo={channel !== null ? openInfo : undefined}
-        railStatus={railStatus}
+        railStatus={bandStatus}
         onReconnect={reconnect ? reconnectNow : undefined}
         onBannerInset={setBannerInset}
       >
@@ -2134,7 +2200,8 @@ export default function ConversationScreen({
               myMemberId={member.id}
               loadingOlder={timeline.loadingOlder}
               reachedStart={timeline.reachedStart}
-              realtimeConnected={railLive}
+              // 「연결 복구 중」은 사람이 보는 띠가 선 동안이다 — 끊긴 첫 1초(띠가 조용한 동안)에는 당김 문이 바뀌지 않는다(#4949).
+              realtimeConnected={bandIsSilent(bandStatus)}
               nowMs={nowMs}
               actions={actions}
               selfSendToken={selfSendToken}
@@ -2143,6 +2210,7 @@ export default function ConversationScreen({
               onRetry={reload}
               onResend={onResend}
               onResendPending={onResendPending}
+              onDiscardPending={onDiscardPending}
               jumpTarget={jumpTarget ?? undefined}
               onJumpMissed={onJumpMissed}
               onJumpLanded={clearJumpNotice}
@@ -2248,6 +2316,8 @@ export default function ConversationScreen({
               attachmentTarget={{workspaceId, channelId}}
               quote={quote}
               onCancelQuote={onCancelQuote}
+              replyTarget={replyTarget}
+              onCancelReply={cancelReply}
               inputRef={composerInputRef}
               onTyping={onTyping}
               onSend={onSend}
@@ -2427,6 +2497,7 @@ export default function ConversationScreen({
       ) : null}
     </Screen>
     </DecisionStageScope>
+    </MakeLandingContext.Provider>
     </ChannelAudienceContext.Provider>
   );
 }

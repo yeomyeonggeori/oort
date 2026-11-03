@@ -1,7 +1,6 @@
 {
   "mobile.locale.backToSettings": "설정으로 돌아가기",
   "mobile.locale.saving": "언어를 적용하는 중이에요.",
-  "mobile.locale.permissionNotice": "권한 요청 창은 iOS 언어 설정을 따라요. 앱 언어를 바꿔도 바로 바뀌지 않을 수 있어요.",
   "mobile.ios.cameraUsage": "사진을 찍어 대화에 첨부하거나 QR 코드로 이 기기를 워크스페이스에 연결할 때 카메라를 써요.",
   "mobile.ios.faceIdUsage": "에이전트에게 보내는 지시를 이 기기에서 확인할 때 Face ID를 써요.",
   "mobile.ios.localNetworkUsage": "같은 네트워크에 있는 oort 서버에 연결할 때 로컬 네트워크를 써요.",

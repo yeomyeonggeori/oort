@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { uuidEq } from "@momo/core/lib/api";
 import {
@@ -64,6 +64,18 @@ export interface ChannelWorkPlan {
    * 세션 기록이 읽기 상한보다 길어 가장 새 계획을 못 읽었을 수 있고, 이 화면이 새 계획을 실시간으로도 받지
    * 못했다. 낡은 합계를 확정처럼 두지 않으려고 화면이 한 줄로 말한다.
    */
+  maybeStale: boolean;
+  /**
+   * 방금 다른 세션을 골라 그 세션의 계획을 아직 읽는 중이다(#5166). `progress`·`maybeStale`은 **같은 대화에서 마지막으로
+   * 읽은 값**이다: 독이 사라지면 열려 있던 팝오버가 함께 닫히므로, 읽는 동안 자리를 지킨다. 화면이 이 사실을 말한다.
+   */
+  switching: boolean;
+}
+
+/** 마지막으로 읽어 낸 계획. 대화(워크스페이스+채널)마다 따로 붙든다: 다른 대화의 계획을 물려주지 않는다. */
+interface HeldPlan {
+  conversationKey: string;
+  progress: WorkPlanProgress;
   maybeStale: boolean;
 }
 
@@ -159,12 +171,26 @@ export function useChannelWorkPlan(
     [selected, events.data, events.events, events.truncated]
   );
 
-  if (!active || selected === null || progress === null) return null;
-  return {
-    progress,
-    options,
-    selectedId: selected.id,
-    select,
-    maybeStale: events.truncated && liveForSelected.length === 0,
-  };
+  // 세션을 바꾸면 쿼리 키가 바뀌어 새 세션의 스레드 `data`가 잠깐 없다. 그 한 순간에 `null`을 돌려주면 독이 사라지고,
+  // 팝오버(독 안의 상태)가 함께 닫힌다(#5166). 공용 쿼리(세션 상세와 같은 키)를 건드리지 않고 이 훅이 마지막 값을 붙든다.
+  const heldPlan = useRef<HeldPlan | null>(null);
+  if (!active || selected === null) return null;
+  const conversationKey = `${workspaceId}|${channelId}`;
+  if (progress !== null) {
+    const maybeStale = events.truncated && liveForSelected.length === 0;
+    heldPlan.current = { conversationKey, progress, maybeStale };
+    return { progress, options, selectedId: selected.id, select, maybeStale, switching: false };
+  }
+  // 읽는 중일 때만 붙든다. 읽기가 실패했거나 계획이 비었으면 독은 서지 않는다(읽지 못한 것을 지어내지 않는다).
+  if (events.data === undefined && !events.isError && heldPlan.current?.conversationKey === conversationKey) {
+    return {
+      progress: heldPlan.current.progress,
+      options,
+      selectedId: selected.id,
+      select,
+      maybeStale: heldPlan.current.maybeStale,
+      switching: true,
+    };
+  }
+  return null;
 }

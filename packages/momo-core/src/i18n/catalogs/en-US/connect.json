@@ -1,0 +1,6 @@
+{
+  "connect.language.close": "Close language list",
+  "connect.language.hint": "Opens the language list.",
+  "connect.rememberEmail.hint": "Saved on this device only. Turning it off erases it right away.",
+  "connect.rememberEmail.label": "Remember my email"
+}
