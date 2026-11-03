@@ -12,7 +12,7 @@ import {
   type MessageCatalog,
 } from "@momo/core/i18n";
 import type { ReleaseNote, ReleaseNoteOtherGroup } from "@momo/core/features/releaseNotes/model";
-import { RELEASE_NOTES } from "@momo/core/features/releaseNotes/notes";
+import { RELEASE_NOTE_0_1_41 } from "@momo/core/features/releaseNotes/notes/v0_1_41";
 import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
 import { LocaleContext } from "@/i18n/localeContext";
 import type { AppLocale } from "@/i18n/localeStore";
@@ -26,7 +26,8 @@ import { ReleaseNotesSection } from "./ReleaseNotesSection";
 
 // 소식의 글은 사전에 있다(#5054): 가짜 소식도 사전에 있는 **진짜 키**를 쓴다(없는 키는 안전 문구로 나간다). 기대하는 글은 같은
 // 사전을 읽는 서비스에서 구해, 글이 바뀌어도 시험이 깨지지 않고 화면이 실제 사전 값을 그리는지만 잰다.
-const REAL = RELEASE_NOTES[0];
+// 고정값은 v0.1.41 **파일**에 못 박는다: 등록부의 맨 앞(`RELEASE_NOTES[0]`)은 승격 때 새 소식이 더해지면 바뀐다.
+const REAL = RELEASE_NOTE_0_1_41;
 const typing = REAL.items.find((item) => item.id === "typing")!;
 const phoneConversation = REAL.items.find((item) => item.id === "phoneConversation")!;
 const settings = REAL.items.find((item) => item.id === "settings")!;
@@ -175,7 +176,7 @@ describe("설정 › 업데이트 소식", () => {
   });
 
   it("영어 UI에서는 같은 소식의 영어 글과 영어 문구가 선다 (실제 v0.1.41 소식)", async () => {
-    await mountSection("en-US");
+    await mountSection("en-US", [REAL]);
     const row = screen.getByTestId("release-notes-row-0.1.41");
     expect(row.textContent).toContain("Version 0.1.41");
     expect(row.textContent).toContain(enText.formatMessage(REAL.summary));
@@ -199,7 +200,7 @@ describe("설정 › 업데이트 소식", () => {
   });
 
   it("사전이 일부만 번역된 언어(일본어)는 번역된 키만 그 언어이고 나머지는 영어 글이다 (ADR-0213 영어 대체)", async () => {
-    await mountSection("ja-JP");
+    await mountSection("ja-JP", [REAL]);
     const row = screen.getByTestId("release-notes-row-0.1.41");
     expect(row.textContent).toContain("要約だけ訳した");
     // 번역이 없는 문구는 영어이지 한국어가 아니다.

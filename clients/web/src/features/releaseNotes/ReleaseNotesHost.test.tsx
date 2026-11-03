@@ -6,7 +6,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLocaleService, createMessageService, loadMessageCatalog, resolveLocaleContext } from "@momo/core/i18n";
 import type { ReleaseNote } from "@momo/core/features/releaseNotes/model";
-import { RELEASE_NOTES } from "@momo/core/features/releaseNotes/notes";
+import { RELEASE_NOTE_0_1_41 } from "@momo/core/features/releaseNotes/notes/v0_1_41";
 import { catalog as koCatalog } from "@momo/core/i18n/generated/ko-KR";
 import { LocaleContext } from "@/i18n/localeContext";
 import type { AppLocale } from "@/i18n/localeStore";
@@ -25,13 +25,15 @@ import {
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // 소식의 글은 사전에 있다(#5054): 가짜 소식도 사전에 있는 진짜 키를 쓰고, 기대하는 글은 같은 사전을 읽는 서비스에서 구한다.
-const REAL = RELEASE_NOTES[0].items;
+// 고정값은 v0.1.41 **파일**에 못 박는다: 등록부의 맨 앞(`RELEASE_NOTES[0]`)은 승격 때 새 소식이 더해지면 바뀐다.
+const PINNED = RELEASE_NOTE_0_1_41;
+const REAL = PINNED.items;
 const koText = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog });
 
 function note(version: string, desktopFrom: string[], phoneOnlyTitle = false): ReleaseNote {
   const item = (index: number, surfaces: ReleaseNote["items"][number]["surfaces"]) => ({ ...REAL[index], surfaces });
   return {
-    ...RELEASE_NOTES[0],
+    ...PINNED,
     version,
     releasedOn: "2026-10-31",
     phoneBuild: 3000 + Number(version.split(".")[2]),
@@ -95,7 +97,7 @@ describe("업데이트 소식: 처음 열 때 한 번", () => {
     expect(dialog.getAttribute("role")).toBe("dialog");
     expect(screen.getByRole("dialog", { name: "업데이트 소식" })).toBe(dialog);
     expect(dialog.textContent).toContain("버전 0.1.41");
-    expect(dialog.textContent).toContain(koText.formatMessage(RELEASE_NOTES[0].summary));
+    expect(dialog.textContent).toContain(koText.formatMessage(PINNED.summary));
     // 이 화면(데스크탑)에서 보이는 변화만 제목으로: 폰 전용 항목(c)은 없고, 네 줄까지 보이고 나머지는 접힌다.
     const titles = [...screen.getByTestId("release-notes-dialog-titles").querySelectorAll("li")].map((li) => li.textContent);
     expect(titles).toEqual([

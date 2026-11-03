@@ -3,7 +3,7 @@ import type {
   ReleaseNote,
   ReleaseNoteOtherGroup,
 } from '@momo/core/features/releaseNotes/model';
-import {RELEASE_NOTES} from '@momo/core/features/releaseNotes/notes';
+import {RELEASE_NOTE_0_1_41} from '@momo/core/features/releaseNotes/notes/v0_1_41';
 import {catalog as koCatalog} from '@momo/core/i18n/generated/ko-KR';
 import {createMessageService} from '@momo/core/i18n/service';
 import type {Member, RosterMember} from '@momo/core/lib/api';
@@ -84,7 +84,8 @@ const mmkvStore = (jest.requireMock('react-native-mmkv') as {__store: Map<string
 
 // 소식의 글은 사전에 있다(#5054): 가짜 소식도 사전에 있는 **진짜 키**를 쓴다(없는 키는 안전 문구로 나간다). 기대하는 글은 같은
 // 사전을 읽는 서비스에서 구해, 글이 바뀌어도 시험이 깨지지 않고 화면이 실제 사전 값을 그리는지만 잰다.
-const REAL = RELEASE_NOTES[0];
+// 고정값은 v0.1.41 **파일**에 못 박는다: 등록부의 맨 앞(`RELEASE_NOTES[0]`)은 승격 때 새 소식이 더해지면 바뀐다.
+const REAL = RELEASE_NOTE_0_1_41;
 const koText = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
 const enText = createMessageService({messageLocale: 'en-US'});
 const realItem = (id: string) => {
@@ -361,7 +362,7 @@ describe('설정 › 업데이트 소식 장', () => {
   });
 
   it('영어 UI에서는 같은 소식의 영어 글과 영어 문구가 선다 (실제 v0.1.41 소식)', async () => {
-    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3058" />, true));
+    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3058" notes={[REAL]} />, true));
     await screen.findByTestId('settings-release-notes-page');
     expect(screen.getByText('What\'s new')).toBeTruthy();
     const row = screen.getByTestId('release-notes-row-0.1.41');
@@ -423,7 +424,7 @@ describe('설정 › 업데이트 소식 장', () => {
   });
 
   it('사전이 아직 없는 언어(일본어)는 사전의 영어 대체를 그대로 탄다: 소식 글도 한국어가 아니라 영어다 (ADR-0213)', async () => {
-    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3058" />, 'ja'));
+    render(withLocale(<ReleaseNotesSettingsPage onBack={() => {}} build="3058" notes={[REAL]} />, 'ja'));
     await screen.findByTestId('settings-release-notes-page');
     const row = within(screen.getByTestId('release-notes-row-0.1.41'));
     expect(row.getByText('Version 0.1.41')).toBeTruthy();

@@ -19,6 +19,7 @@ import {
   type ReleaseNoteKey,
 } from "./model";
 import { RELEASE_NOTES } from "./notes";
+import { RELEASE_NOTE_0_1_41 } from "./notes/v0_1_41";
 
 /**
  * 규칙 시험용 소식. 글은 사전에 있는 아무 키나 쓴다: 번호·순서·화면 규칙을 재는 시험이라 글은 주제가 아니다.
@@ -135,6 +136,12 @@ describe("버전 비교와 목록", () => {
 // 언어를 더하는 길(ADR-0213 P2)과 빈칸 검사(`i18n:check`), 영어 대체가 소식에도 그대로 선다. 아래 규칙은
 // 「키를 잘못 적은 소식」이 조용히 틀린 글을 보이는 길을 막는다: 키 오타는 컴파일이 막고, 그 밖의 어긋남은 여기서 잡는다.
 
+/**
+ * 이 구역의 고정값은 v0.1.41 **파일**에 못 박는다. 등록부의 맨 앞(`RELEASE_NOTES[0]`)은 승격 때 새 소식이 더해지면 바뀌므로,
+ * 그것을 「v0.1.41」로 읽는 시험은 새 소식을 더하는 날 깨진다. 등록부 전체를 도는 시험(아래 「등록부」)만 등록부를 읽는다.
+ */
+const PINNED = RELEASE_NOTE_0_1_41;
+
 const ko = createMessageService({ messageLocale: "ko-KR", catalog: koCatalog });
 const en = createMessageService({ messageLocale: "en-US", catalog: enCatalog });
 const KEY_SET: ReadonlySet<string> = new Set(messageKeys);
@@ -241,9 +248,10 @@ describe("소식의 글은 사전 키다", () => {
   });
 
   it("v0.1.41의 키는 모두 사전에 있고 한국어·영어 둘 다 글이 있다", () => {
-    const note = RELEASE_NOTES[0];
+    const note = PINNED;
     const keys = usedKeys(note).map((used) => used.key);
-    expect(keys).toHaveLength(1 + 3 * note.items.length);
+    const others = note.others.reduce((count, group) => count + 1 + group.lines.length, 0);
+    expect(keys).toHaveLength(1 + 3 * note.items.length + others);
     for (const key of keys) {
       expect(Object.hasOwn(koCatalog, key), `ko ${key}`).toBe(true);
       expect(Object.hasOwn(enCatalog, key), `en ${key}`).toBe(true);
@@ -253,7 +261,7 @@ describe("소식의 글은 사전 키다", () => {
   });
 
   it("다른 언어는 사전의 영어 대체를 그대로 탄다: 사전이 비면 영어, 일부만 번역되면 키마다 영어로 내려간다", () => {
-    const note = RELEASE_NOTES[0];
+    const note = PINNED;
     const none = createMessageService({ messageLocale: "ja-JP", catalog: {} });
     for (const { key } of usedKeys(note)) {
       expect(none.formatMessage(key as ReleaseNoteKey), key).toBe(en.formatMessage(key as ReleaseNoteKey));
@@ -313,7 +321,7 @@ describe("등록부: 통합자가 더하는 소식의 모양 규칙", () => {
   });
 
   it("규칙은 실제로 실패한다: 어긋난 소식은 어긋난 자리를 정확히 말한다", () => {
-    const real = RELEASE_NOTES[0];
+    const real = PINNED;
     const [first, second] = real.items;
     const longest = real.items.find((item) => item.id === "phoneConversation") ?? first;
     expect(noteViolations(real)).toEqual([]);
