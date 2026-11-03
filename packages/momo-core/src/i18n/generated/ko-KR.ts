@@ -2198,6 +2198,428 @@ export const catalog: MessageCatalog = {
       "value": "초대 링크를 올렸어요"
     }
   ],
+  "recovery.claim.hostBody": [
+    {
+      "type": 0,
+      "value": "새 비밀번호를 아래 서버로 보내요. 관리자에게 받은 주소가 맞을 때만 계속하세요."
+    }
+  ],
+  "recovery.claim.hostConfirm": [
+    {
+      "type": 0,
+      "value": "맞아요, 계속하기"
+    }
+  ],
+  "recovery.claim.hostReject": [
+    {
+      "type": 0,
+      "value": "아니에요, 돌아가기"
+    }
+  ],
+  "recovery.claim.hostTitle": [
+    {
+      "type": 0,
+      "value": "이 서버가 맞나요?"
+    }
+  ],
+  "recovery.claim.invalidChar": [
+    {
+      "type": 0,
+      "value": "비밀번호에 사용할 수 없는 문자가 들어 있습니다."
+    }
+  ],
+  "recovery.claim.passwordHint": [
+    {
+      "type": 2,
+      "value": "min",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자 이상, "
+    },
+    {
+      "type": 2,
+      "value": "maxBytes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "바이트 이하로 정해요. 한글은 한 자에 3바이트라 한글만이면 "
+    },
+    {
+      "type": 2,
+      "value": "maxHangul",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "자까지예요."
+    }
+  ],
+  "recovery.claim.resetExpired": [
+    {
+      "type": 0,
+      "value": "이 링크는 24시간이 지나 만료되었습니다. 관리자에게 새 링크를 요청하세요."
+    }
+  ],
+  "recovery.claim.resetUsed": [
+    {
+      "type": 0,
+      "value": "이 링크는 이미 사용되었거나 새 링크로 바뀌었습니다. 비밀번호를 이미 정했다면 로그인하세요. 아니라면 관리자에게 새 링크를 요청하세요."
+    }
+  ],
+  "recovery.claim.title": [
+    {
+      "type": 0,
+      "value": "새 비밀번호를 정해요."
+    }
+  ],
+  "recovery.help.adminBody": [
+    {
+      "type": 0,
+      "value": "워크스페이스 관리자가 본인임을 확인한 뒤 1회용 재설정 링크를 보내 줘요. 아래 문구를 복사해서 전하세요."
+    }
+  ],
+  "recovery.help.adminTitle": [
+    {
+      "type": 0,
+      "value": "관리자에게 링크를 요청하세요"
+    }
+  ],
+  "recovery.help.back": [
+    {
+      "type": 0,
+      "value": "로그인으로 돌아가기"
+    }
+  ],
+  "recovery.help.guideDetail": [
+    {
+      "type": 0,
+      "value": "관리자가 새로 정할 수 있는 링크를 보내 줘요."
+    }
+  ],
+  "recovery.help.guideLine": [
+    {
+      "type": 0,
+      "value": "비밀번호를 잊어도 괜찮아요."
+    }
+  ],
+  "recovery.help.link": [
+    {
+      "type": 0,
+      "value": "비밀번호를 잊으셨나요?"
+    }
+  ],
+  "recovery.help.receivedEmpty": [
+    {
+      "type": 0,
+      "value": "받은 링크를 붙여 넣으세요."
+    }
+  ],
+  "recovery.help.receivedHint": [
+    {
+      "type": 0,
+      "value": "링크는 24시간 안에 한 번만 쓸 수 있어요. 새 비밀번호를 정하면 이 계정의 다른 기기는 모두 로그아웃돼요."
+    }
+  ],
+  "recovery.help.receivedInvalid": [
+    {
+      "type": 0,
+      "value": "재설정 링크로 읽을 수 없습니다. 관리자가 보낸 링크를 그대로 붙여 넣으세요."
+    }
+  ],
+  "recovery.help.receivedLabel": [
+    {
+      "type": 0,
+      "value": "재설정 링크"
+    }
+  ],
+  "recovery.help.receivedPlaceholder": [
+    {
+      "type": 0,
+      "value": "https://team.example.com/claim/…"
+    }
+  ],
+  "recovery.help.receivedSubmit": [
+    {
+      "type": 0,
+      "value": "링크 열기"
+    }
+  ],
+  "recovery.help.receivedTitle": [
+    {
+      "type": 0,
+      "value": "링크를 받았어요"
+    }
+  ],
+  "recovery.help.requestCopied": [
+    {
+      "type": 0,
+      "value": "복사됨"
+    }
+  ],
+  "recovery.help.requestCopy": [
+    {
+      "type": 0,
+      "value": "문구 복사"
+    }
+  ],
+  "recovery.help.requestLabel": [
+    {
+      "type": 0,
+      "value": "요청 문구"
+    }
+  ],
+  "recovery.help.requestNoEmail": [
+    {
+      "type": 0,
+      "value": "oort 비밀번호를 잊어서 재설정 링크가 필요해요. 서버: "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    }
+  ],
+  "recovery.help.requestWithEmail": [
+    {
+      "type": 0,
+      "value": "oort 비밀번호를 잊어서 재설정 링크가 필요해요. 서버: "
+    },
+    {
+      "type": 1,
+      "value": "host"
+    },
+    {
+      "type": 0,
+      "value": ", 이메일: "
+    },
+    {
+      "type": 1,
+      "value": "email"
+    }
+  ],
+  "recovery.issue.cancel": [
+    {
+      "type": 0,
+      "value": "취소"
+    }
+  ],
+  "recovery.issue.confirmLead": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " 님이 새 비밀번호를 정할 수 있는 링크예요. 만들기 전에 확인하세요."
+    }
+  ],
+  "recovery.issue.confirmTitle": [
+    {
+      "type": 0,
+      "value": "재설정 링크 만들기"
+    }
+  ],
+  "recovery.issue.entryAction": [
+    {
+      "type": 0,
+      "value": "재설정 링크 만들기"
+    }
+  ],
+  "recovery.issue.entryHint": [
+    {
+      "type": 0,
+      "value": "비밀번호를 잊은 멤버에게 1회용 링크를 전해요."
+    }
+  ],
+  "recovery.issue.errorBadTarget": [
+    {
+      "type": 0,
+      "value": "재설정 링크는 사람 멤버에게만 만들 수 있어요."
+    }
+  ],
+  "recovery.issue.errorForbidden": [
+    {
+      "type": 0,
+      "value": "이 멤버의 재설정 링크는 만들 수 없어요. 내 역할로는 권한이 없어요."
+    }
+  ],
+  "recovery.issue.errorGeneric": [
+    {
+      "type": 0,
+      "value": "링크를 만들지 못했어요. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "recovery.issue.errorInactive": [
+    {
+      "type": 0,
+      "value": "이 멤버는 지금 활성 상태가 아니라서 링크를 만들 수 없어요."
+    }
+  ],
+  "recovery.issue.errorNetwork": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못했어요. 연결을 확인하고 다시 시도하세요."
+    }
+  ],
+  "recovery.issue.errorNotFound": [
+    {
+      "type": 0,
+      "value": "이 멤버를 명부에서 찾지 못했어요. 명부를 새로 고친 뒤 다시 시도하세요."
+    }
+  ],
+  "recovery.issue.errorRateLimited": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. 잠시 뒤에 다시 시도하세요."
+    }
+  ],
+  "recovery.issue.errorRateLimitedAfter": [
+    {
+      "type": 0,
+      "value": "요청이 너무 잦아요. "
+    },
+    {
+      "type": 2,
+      "value": "seconds",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "초 뒤에 다시 시도하세요."
+    }
+  ],
+  "recovery.issue.errorRequired": [
+    {
+      "type": 0,
+      "value": "내 비밀번호를 입력하세요."
+    }
+  ],
+  "recovery.issue.errorWrongPassword": [
+    {
+      "type": 0,
+      "value": "내 비밀번호가 맞지 않아요. 다시 입력하세요."
+    }
+  ],
+  "recovery.issue.factTerm": [
+    {
+      "type": 0,
+      "value": "비밀번호"
+    }
+  ],
+  "recovery.issue.issuedClose": [
+    {
+      "type": 0,
+      "value": "닫기"
+    }
+  ],
+  "recovery.issue.issuedCopied": [
+    {
+      "type": 0,
+      "value": "복사됨"
+    }
+  ],
+  "recovery.issue.issuedCopy": [
+    {
+      "type": 0,
+      "value": "링크 복사"
+    }
+  ],
+  "recovery.issue.issuedDeliver": [
+    {
+      "type": 0,
+      "value": "메신저로 보내거나 직접 전해 주세요."
+    }
+  ],
+  "recovery.issue.issuedExpires": [
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "까지 한 번만 쓸 수 있어요."
+    }
+  ],
+  "recovery.issue.issuedLead": [
+    {
+      "type": 0,
+      "value": "이 링크는 지금 이 화면에서만 볼 수 있어요. 닫으면 다시 볼 수 없으니 지금 전하세요."
+    }
+  ],
+  "recovery.issue.issuedLinkLabel": [
+    {
+      "type": 0,
+      "value": "재설정 링크"
+    }
+  ],
+  "recovery.issue.issuedLocalOnly": [
+    {
+      "type": 0,
+      "value": "이 주소는 이 컴퓨터(같은 네트워크)에서만 열릴 수 있어요."
+    }
+  ],
+  "recovery.issue.issuedTitle": [
+    {
+      "type": 0,
+      "value": "재설정 링크를 만들었어요"
+    }
+  ],
+  "recovery.issue.lineLogout": [
+    {
+      "type": 0,
+      "value": "받는 사람이 비밀번호를 정하면 그 사람의 모든 기기가 로그아웃돼요."
+    }
+  ],
+  "recovery.issue.lineOnce": [
+    {
+      "type": 0,
+      "value": "링크는 24시간 안에 한 번만 쓸 수 있어요."
+    }
+  ],
+  "recovery.issue.lineOrder": [
+    {
+      "type": 0,
+      "value": "이 멤버의 로그인을 끝낼 일이 있다면 먼저 끝내고 링크를 만드세요. 링크를 만든 뒤에 끝내면 링크도 함께 못 쓰게 돼요."
+    }
+  ],
+  "recovery.issue.lineReplace": [
+    {
+      "type": 0,
+      "value": "이전에 만든 링크는 못 쓰게 돼요."
+    }
+  ],
+  "recovery.issue.lineVerify": [
+    {
+      "type": 0,
+      "value": "본인 확인은 관리자가 해요. 직접 만나거나 통화로 확인한 사람에게만 보내고, 계정이 도용됐을 수 있는 같은 채팅으로는 보내지 마세요."
+    }
+  ],
+  "recovery.issue.passwordHint": [
+    {
+      "type": 0,
+      "value": "링크를 만드는 관리자 본인의 비밀번호예요."
+    }
+  ],
+  "recovery.issue.passwordLabel": [
+    {
+      "type": 0,
+      "value": "내 비밀번호"
+    }
+  ],
+  "recovery.issue.submit": [
+    {
+      "type": 0,
+      "value": "링크 만들기"
+    }
+  ],
+  "recovery.issue.submitBusy": [
+    {
+      "type": 0,
+      "value": "링크를 만드는 중"
+    }
+  ],
   "releaseNotes.action.close": [
     {
       "type": 0,

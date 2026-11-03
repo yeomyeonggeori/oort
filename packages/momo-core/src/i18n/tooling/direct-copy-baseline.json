@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "322867700eedbdfe17885a1197077e9035a797b5",
+  "baselineHead": "662c7192d19d900454dc05b5b9ca25ffc5485d97",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -444,7 +444,7 @@
     "clients/web/src/features/attachments/useImageLightboxZoom.ts": 18,
     "clients/web/src/features/attachments/useRevealOnHover.ts": 2,
     "clients/web/src/features/attachments/useStageHero.ts": 36,
-    "clients/web/src/features/auth/ClaimPage.tsx": 22,
+    "clients/web/src/features/auth/ClaimPage.tsx": 19,
     "clients/web/src/features/auth/ConnectPage.tsx": 98,
     "clients/web/src/features/auth/OnboardingSlideTransition.tsx": 3,
     "clients/web/src/features/auth/OortCloudMarks.tsx": 2,
