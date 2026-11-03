@@ -281,6 +281,8 @@ export function ThreadComposer({
       clearThreadDraft(workspaceId, rootId);
       draftRef.current = "";
       setDraft("");
+      // 예약은 「대화에도 보내기」를 싣지 않는다(ADR-0148 증보: 후속). 글이 예약으로 떠났으니 체크도 풀어서 다음 답글로 새지 않게 한다.
+      setAlsoInChannel(false);
       autocomplete.close();
       format.dismiss();
     },

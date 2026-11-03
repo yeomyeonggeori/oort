@@ -57,6 +57,8 @@ export function ReplyHomeLine({
     <button
       type="button"
       onClick={onOpen}
+      // 이름은 「머리, 원문」 한 문장이다(화살표는 낭독에서 빠진다 — 화면의 글자를 모두 포함해 「보이는 글이 이름에 든다」). 열린다는 말은 설명이 진다.
+      aria-label={copy.spoken}
       title={copy.openLabel}
       data-testid="reply-home"
       className="press tap-target -mx-1 flex min-w-0 max-w-full flex-col items-start rounded-md px-1 text-left text-meta text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"

@@ -230,7 +230,8 @@ describe("본류에 서는 행 (#4888)", () => {
     expect(button?.tagName).toBe("BUTTON");
     act(() => button?.click());
     expect(opened.map((message) => message.id)).toEqual([ROOT]);
-    // 이름은 보이는 글이고(화살표는 낭독에서 빠진다), 열린다는 말은 title 이 진다.
+    // 이름은 「머리, 원문」 한 문장이고(화살표는 낭독에서 빠진다), 열린다는 말은 title 이 진다.
+    expect(button?.getAttribute("aria-label")).toBe("가영님 스레드에 답글, 배포는 금요일에 합니다.");
     expect(button?.title).toBe("이 답글이 달린 스레드 열기");
     expect(button?.querySelector('[aria-hidden="true"]')?.textContent).toBe("↳ ");
   });
