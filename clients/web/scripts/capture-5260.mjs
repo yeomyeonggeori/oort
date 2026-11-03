@@ -51,12 +51,24 @@ async function waitFor(read, label, timeout = 20_000) {
   }
 }
 
-/** 앱 안에서 주소를 옮긴다(새로 고침 없이: 세션과 연결 모델의 입력이 그대로 이어진다). */
+/** 화면을 사람이 하듯 옮긴다(사이드바 목적지·프로필 메뉴): 주소만 바꾸면 라우터가 알지 못한다. 세션과 연결 모델의 입력이 그대로 이어진다. */
 async function go(page, path) {
-  await page.evaluate((to) => {
-    window.history.pushState({}, "", to);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  }, path);
+  if (path === "/inbox") {
+    await page.getByTestId("nav-inbox").click();
+  } else if (path === "/settings") {
+    await page.getByTestId("profile-card").click();
+    await page.getByTestId("nav-settings").click();
+  } else if (path === "/") {
+    await openGeneral(page);
+  } else {
+    throw new Error(`옮길 줄 모르는 화면: ${path}`);
+  }
+}
+
+/** 설정은 사이드바를 걷는 화면이다: 뒤로 가서 사이드바가 돌아오기를 기다린다. */
+async function backFromSettings(page) {
+  await page.goBack();
+  await page.getByTestId("nav-inbox").waitFor({ state: "visible", timeout: 10_000 });
 }
 
 async function shoot(page, scheme, name, shots, crop) {
@@ -97,6 +109,7 @@ async function visit(page, scheme, scene, head, shots) {
     await shoot(page, scheme, `${scene}-2-workspace`, shots);
   }
 
+  await backFromSettings(page);
   await go(page, "/inbox");
   const inbox = page.getByTestId("inbox-offline");
   await inbox.waitFor({ state: "visible", timeout: 10_000 });
@@ -123,6 +136,15 @@ async function captureScheme(browser, scheme, shots) {
     await openGeneral(page);
     await waitFor(async () => (await pageSocketStatus(page)) === "connected", "소켓 연결");
     await sleep(6_000);
+
+    // 화면 덩어리를 미리 받아 둔다: 기기 오프라인에서는 아직 안 받은 화면의 덩어리를 가져올 수 없어 화면이 서지 못한다.
+    await go(page, "/settings");
+    await sleep(2_000);
+    await backFromSettings(page);
+    await go(page, "/inbox");
+    await sleep(2_000);
+    await openGeneral(page);
+    await waitFor(async () => (await pageSocketStatus(page)) === "connected", "소켓 연결");
 
     // 1. 기기 오프라인(즉시)
     await context.setOffline(true);
