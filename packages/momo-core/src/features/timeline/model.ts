@@ -923,6 +923,15 @@ export function removePending(
   return list.filter((p) => p.clientMsgId !== clientMsgId);
 }
 
+/**
+ * 대화(채널) 목록이 이 에코를 그리는가 (#4888). 스레드 답글의 에코는 기본적으로 열린 스레드의 것이라 대화 목록에 없다(같은 메시지가 두
+ * 자리에 서면 이중이다). 예외는 둘이다: 「대화에도 보내기」로 보낸 답글(확정되면 본류의 행이 되므로 에코도 처음부터 선다), 그리고
+ * **보내지 못한** 답글(밀어서 보낸 답글은 스레드를 열지 않으므로 실패를 대화 화면에서 알려야 한다 — 같은 다시 보내기·지우기).
+ */
+export function isChannelListEcho(row: PendingMessage): boolean {
+  return row.rootId === undefined || row.alsoInChannel === true || row.status === "failed";
+}
+
 /** The send attempt failed. The row stays put and offers a retry (R-1 §3). */
 export function failPending(
   list: PendingMessage[],

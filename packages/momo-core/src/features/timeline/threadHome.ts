@@ -146,17 +146,14 @@ export type ReplyHomeLine =
     };
 
 /**
- * 이 행의 답글 줄, 또는 `null`(답글이 아닌 행). **여기서 요청은 일어나지 않는다** — 호출자가 이미 든 행에서 루트를 푼다.
- * 그릴지는 호출자가 정한다(본류만 그린다 — 스레드 화면의 모든 행은 답글이라 줄이 소음이다).
+ * 루트(또는 「못 불러옴」 = `undefined`)에서 바로 만드는 답글 줄. 폰 행은 이미 루트 객체를 들고 있어(`replyParent`) 조회 없이 이 함수를
+ * 쓴다. **여기서 요청은 일어나지 않는다.**
  */
-export function replyHomeLine(
-  message: Pick<Message, "rootId">,
-  lookup: (messageId: string) => Message | undefined,
+export function replyHomeLineOf(
+  rootId: string,
+  root: Message | undefined,
   expressions: readonly Expression[] = []
-): ReplyHomeLine | null {
-  const rootId = message.rootId;
-  if (!rootId) return null;
-  const root = lookup(rootId);
+): ReplyHomeLine {
   if (root === undefined) return { kind: "unloaded", rootId };
   if (root.state === "deleted") {
     return { kind: "deleted", rootId: root.id, rootAuthorMemberId: root.authorMemberId };
@@ -167,6 +164,20 @@ export function replyHomeLine(
     rootAuthorMemberId: root.authorMemberId,
     excerpt: messageExcerpt(root, expressions),
   };
+}
+
+/**
+ * 이 행의 답글 줄, 또는 `null`(답글이 아닌 행). 호출자가 이미 든 행에서 루트를 푼다. 그릴지는 호출자가 정한다(본류만 그린다 —
+ * 스레드 화면의 모든 행은 답글이라 줄이 소음이다).
+ */
+export function replyHomeLine(
+  message: Pick<Message, "rootId">,
+  lookup: (messageId: string) => Message | undefined,
+  expressions: readonly Expression[] = []
+): ReplyHomeLine | null {
+  const rootId = message.rootId;
+  if (!rootId) return null;
+  return replyHomeLineOf(rootId, lookup(rootId), expressions);
 }
 
 /**

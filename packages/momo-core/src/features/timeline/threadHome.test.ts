@@ -4,7 +4,7 @@ import { catalog as koCatalog } from "../../i18n/generated/ko-KR";
 import { createMessageService } from "../../i18n/service";
 import type { Message, RosterMember } from "../../lib/api";
 import { makeDirectory } from "../workspace/directory";
-import { buildTimelineItems, type PendingMessage } from "./model";
+import { buildTimelineItems, isChannelListEcho, type PendingMessage } from "./model";
 import { replyHomeCopy } from "./replyHomeCopy";
 import {
   isMainFlowRow,
@@ -202,5 +202,32 @@ describe("buildTimelineItems.settleAgainst — 걸러 낸 확정본도 에코를
     const all = [root(), reply(2, { body: "네", alsoInChannel: true })];
     const pending = [echo("k1", "네", { alsoInChannel: true }), echo("k2", "네", { alsoInChannel: true })];
     expect(pendingKeys(buildTimelineItems(mainFlowMessages(all), { pending, settleAgainst: all }))).toEqual(["k2"]);
+  });
+});
+
+// 대화(채널) 목록이 에코를 그리는 규칙 — 스레드 답글의 에코는 스레드의 것이고, 예외는 「대화에도 보낸」 것과 보내지 못한 것이다.
+describe("isChannelListEcho", () => {
+  const row = (over: Partial<PendingMessage> = {}): PendingMessage => ({
+    clientMsgId: "k",
+    channelId: "c",
+    authorMemberId: ME,
+    body: "x",
+    createdAtMs: 1,
+    sinceSeq: 1,
+    status: "sending",
+    ...over,
+  });
+  it("채널 글의 에코는 늘 선다", () => {
+    expect(isChannelListEcho(row())).toBe(true);
+    expect(isChannelListEcho(row({ status: "failed" }))).toBe(true);
+  });
+  it("스레드로만 가는 답글을 보내는 중에는 대화 목록에 없다(스레드의 것)", () => {
+    expect(isChannelListEcho(row({ rootId: ROOT }))).toBe(false);
+  });
+  it("스레드 답글이 보내지 못했으면 대화 목록에 선다 — 밀어서 보낸 답글은 스레드를 열지 않는다", () => {
+    expect(isChannelListEcho(row({ rootId: ROOT, status: "failed" }))).toBe(true);
+  });
+  it("「대화에도 보내기」 답글은 보내는 중에도 선다 — 확정되면 본류의 행이 된다", () => {
+    expect(isChannelListEcho(row({ rootId: ROOT, alsoInChannel: true }))).toBe(true);
   });
 });
