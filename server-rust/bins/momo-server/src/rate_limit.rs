@@ -1295,6 +1295,131 @@ impl PasswordGuessBudget for AccountGuessBudget {
     }
 }
 
+// ---------------------------------------------------------------------------
+// #4596 — the operator's reissue budget and the refusal's audit slot (ADR-0215 D6, D9)
+// ---------------------------------------------------------------------------
+//
+// `POST …/members/{member}/password-reset` asks the operator for their own current
+// password, so every request to it is a guess at that password. The budget is spent
+// **first**, before the standing or the body or the password is looked at, and a right
+// password costs one like a wrong one: the limiter is atomic, so counting at admission is
+// the only way N parallel guesses cannot all pass a "not yet exhausted" look.
+//
+// **Whose budget.** The operator's: the member making the request, and nothing else. Not a
+// sign-in lineage — a stolen session can start new lineages without limit, so a lineage key
+// would not limit guessing — not the target and not the caller's address. The cost is named in
+// [`RateLimitConfig::password_reset_issue_per_admin_limit`]: whoever holds a stolen operator
+// session can use that operator's reissues up for the window, and the other owners and admins
+// can still issue.
+//
+// **No off switch.** 0 (or garbage) is the default in the config and again here, so a
+// `RateLimitConfig` built by hand with 0 cannot silently unbudget a guessable surface.
+//
+// State is the shared in-process limiter: reset by a restart, not shared between replicas —
+// the contract of every limiter in this file.
+
+/// The key one operator's reissue requests are counted under. A function, not an inline
+/// `format!`, so the budget and its tests spend the same key.
+pub(crate) fn password_reset_issue_key(operator_id: Uuid) -> String {
+    format!("pwreset-issue:member:{operator_id}")
+}
+
+/// Spend one request of `operator_id`'s reissue budget, now. `Err` is the 429.
+pub(crate) fn admit_password_reset_issue(
+    state: &RateLimitState,
+    operator_id: Uuid,
+) -> Result<(), ApiError> {
+    admit_password_reset_issue_at(state, operator_id, Instant::now())
+}
+
+fn admit_password_reset_issue_at(
+    state: &RateLimitState,
+    operator_id: Uuid,
+    now: Instant,
+) -> Result<(), ApiError> {
+    let limit = match state.config.password_reset_issue_per_admin_limit {
+        0 => RateLimitConfig::default().password_reset_issue_per_admin_limit,
+        limit => limit,
+    };
+    let window_seconds = state.config.window_seconds;
+    let verdict = state.limiter.check_at(
+        &password_reset_issue_key(operator_id),
+        limit,
+        Duration::from_secs(window_seconds),
+        now,
+    );
+    if verdict.allowed {
+        return Ok(());
+    }
+    if verdict.should_log {
+        // One line per burst, and nothing but the operator's id (not a secret) and the
+        // reason: no workspace address, no target, nothing the request sent.
+        tracing::warn!(
+            member_id = %operator_id,
+            limit,
+            window_seconds,
+            "operator password-reset issue requests are over budget"
+        );
+    }
+    let mut refused = ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded");
+    refused.retry_after_seconds = Some(verdict.retry_after_seconds);
+    Err(refused)
+}
+
+/// The one `member.password_reset.refused` row a window of wrong operator passwords may
+/// leave per operator (ADR-0215 D9). The same shape as [`audit_denial_once`]'s slot: an
+/// `audit:` key admitting one request per window, taken **before** the row is written and
+/// handed back unless the row was committed ([`RefusalAuditSlot::written`]), so a write that
+/// failed, or a request dropped mid-write, does not use the window's only row up.
+///
+/// A flood of wrong passwords is bounded twice: by the reissue budget (5 a window) and by
+/// this slot (one row a window). The member, not the sign-in lineage, is what a slot is for.
+///
+/// It owns the state by `Arc` rather than borrowing it, so the task that writes the row
+/// (see `routes::password::record_wrong_operator_password`) can carry the slot with it: a
+/// task that panics gives the slot back while it unwinds, like [`SlotClaim`].
+pub(crate) struct RefusalAuditSlot {
+    state: Arc<RateLimitState>,
+    slot: String,
+    at: Instant,
+    written: bool,
+}
+
+impl RefusalAuditSlot {
+    /// Take this operator's slot for the current window, or `None` when the window's row
+    /// has already been spoken for.
+    pub(crate) fn take(state: &Arc<RateLimitState>, operator_id: Uuid) -> Option<Self> {
+        Self::take_at(state, operator_id, Instant::now())
+    }
+
+    fn take_at(state: &Arc<RateLimitState>, operator_id: Uuid, now: Instant) -> Option<Self> {
+        let slot = format!("audit:{}", password_reset_issue_key(operator_id));
+        let window = Duration::from_secs(state.config.window_seconds);
+        if !state.limiter.check_at(&slot, 1, window, now).allowed {
+            return None;
+        }
+        Some(RefusalAuditSlot {
+            state: Arc::clone(state),
+            slot,
+            at: now,
+            written: false,
+        })
+    }
+
+    /// The row committed: the slot stays taken for the rest of the window.
+    pub(crate) fn written(mut self) {
+        self.written = true;
+    }
+}
+
+impl Drop for RefusalAuditSlot {
+    fn drop(&mut self) {
+        if !self.written {
+            self.state.limiter.forget_at(&self.slot, self.at);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2283,6 +2408,106 @@ mod tests {
                 )
                 .allowed,
             "on a shared map a 60 s sweep forgets an hour-long bucket — why the budget is a type"
+        );
+    }
+
+    // -- #4596 the operator's reissue budget and the refusal's audit slot ---------------------
+
+    fn reissue_state(limit: u32) -> RateLimitState {
+        RateLimitState {
+            config: RateLimitConfig {
+                password_reset_issue_per_admin_limit: limit,
+                ..RateLimitConfig::default()
+            },
+            limiter: SlidingWindowRateLimiter::new(),
+            member_writes: SlidingWindowRateLimiter::new(),
+        }
+    }
+
+    fn shared_reissue_state(limit: u32) -> Arc<RateLimitState> {
+        Arc::new(reissue_state(limit))
+    }
+
+    /// The limit admits exactly that many requests per operator and window — the next one is
+    /// the 429, with a truthful `Retry-After` — and one operator's spent budget refuses nobody
+    /// else (the key is the member, ADR-0215 D6).
+    #[test]
+    fn an_operator_may_ask_for_exactly_their_limit_and_nobody_elses_budget_moves() {
+        let state = reissue_state(2);
+        let (operator, other) = (Uuid::new_v4(), Uuid::new_v4());
+        let start = Instant::now();
+        assert!(admit_password_reset_issue_at(&state, operator, start).is_ok());
+        assert!(admit_password_reset_issue_at(&state, operator, start).is_ok());
+        let refused = admit_password_reset_issue_at(&state, operator, start)
+            .expect_err("the third request in the window is over budget");
+        assert_eq!(refused.status, StatusCode::TOO_MANY_REQUESTS);
+        assert!(
+            refused
+                .retry_after_seconds
+                .is_some_and(|seconds| seconds > 0),
+            "a 429 that says when to come back, never 0"
+        );
+        assert!(
+            admit_password_reset_issue_at(&state, other, start).is_ok(),
+            "another operator has a budget of their own"
+        );
+        assert!(
+            admit_password_reset_issue_at(&state, operator, start + Duration::from_secs(61))
+                .is_ok(),
+            "the window slid, so the operator has room again"
+        );
+        assert_eq!(
+            password_reset_issue_key(operator),
+            format!("pwreset-issue:member:{operator}"),
+            "the key is the member and nothing else — never a lineage"
+        );
+    }
+
+    /// A budget of 0 in a hand-built config is not "off": it is the default.
+    #[test]
+    fn a_zero_reissue_budget_is_the_default_not_an_off_switch() {
+        let state = reissue_state(0);
+        let operator = Uuid::new_v4();
+        let start = Instant::now();
+        let admitted = (0..100)
+            .take_while(|_| admit_password_reset_issue_at(&state, operator, start).is_ok())
+            .count();
+        assert_eq!(
+            admitted,
+            RateLimitConfig::default().password_reset_issue_per_admin_limit as usize,
+            "a 0 must not let the requests through unbudgeted"
+        );
+    }
+
+    /// One audit row per operator and window, handed back unless it was written — so a write
+    /// that failed (or a dropped request) does not use the window's only row up, and one
+    /// operator's slot does not close another's.
+    #[test]
+    fn the_refusal_audit_slot_is_one_per_operator_and_window_and_comes_back_unless_written() {
+        let state = shared_reissue_state(5);
+        let (operator, other) = (Uuid::new_v4(), Uuid::new_v4());
+        let start = Instant::now();
+
+        let first = RefusalAuditSlot::take_at(&state, operator, start).expect("the window's slot");
+        assert!(
+            RefusalAuditSlot::take_at(&state, operator, start).is_none(),
+            "one row a window, however many wrong passwords"
+        );
+        assert!(
+            RefusalAuditSlot::take_at(&state, other, start).is_some(),
+            "another operator's slot is their own"
+        );
+        drop(first);
+        let retry = RefusalAuditSlot::take_at(&state, operator, start)
+            .expect("a slot whose row was never written is handed back");
+        retry.written();
+        assert!(
+            RefusalAuditSlot::take_at(&state, operator, start).is_none(),
+            "a slot whose row committed stays taken for the window"
+        );
+        assert!(
+            RefusalAuditSlot::take_at(&state, operator, start + Duration::from_secs(61)).is_some(),
+            "the next window has a row again"
         );
     }
 }
