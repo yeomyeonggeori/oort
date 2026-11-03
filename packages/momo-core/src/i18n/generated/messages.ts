@@ -290,6 +290,14 @@ export const messageKeys = [
   "expressions.sheet.tabTeam",
   "expressions.sheet.title",
   "expressions.sheet.unavailable",
+  "mobile.attachmentSave.failed",
+  "mobile.attachmentSave.photosDenied",
+  "mobile.attachmentSave.savedToFiles",
+  "mobile.attachmentSave.savedToPhotos",
+  "mobile.attachmentSave.saveHintPhotos",
+  "mobile.attachmentSave.saving",
+  "mobile.attachmentSave.toFiles",
+  "mobile.attachmentSave.toPhotos",
   "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
@@ -1003,6 +1011,14 @@ export const argumentSpecs = {
   "expressions.sheet.tabTeam": {},
   "expressions.sheet.title": {},
   "expressions.sheet.unavailable": {},
+  "mobile.attachmentSave.failed": {},
+  "mobile.attachmentSave.photosDenied": {},
+  "mobile.attachmentSave.savedToFiles": {},
+  "mobile.attachmentSave.savedToPhotos": {},
+  "mobile.attachmentSave.saveHintPhotos": {},
+  "mobile.attachmentSave.saving": {},
+  "mobile.attachmentSave.toFiles": {},
+  "mobile.attachmentSave.toPhotos": {},
   "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
@@ -1782,6 +1798,14 @@ export interface MessageArgs {
   "expressions.sheet.tabTeam": Record<string, never>;
   "expressions.sheet.title": Record<string, never>;
   "expressions.sheet.unavailable": Record<string, never>;
+  "mobile.attachmentSave.failed": Record<string, never>;
+  "mobile.attachmentSave.photosDenied": Record<string, never>;
+  "mobile.attachmentSave.savedToFiles": Record<string, never>;
+  "mobile.attachmentSave.savedToPhotos": Record<string, never>;
+  "mobile.attachmentSave.saveHintPhotos": Record<string, never>;
+  "mobile.attachmentSave.saving": Record<string, never>;
+  "mobile.attachmentSave.toFiles": Record<string, never>;
+  "mobile.attachmentSave.toPhotos": Record<string, never>;
   "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;

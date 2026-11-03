@@ -117,7 +117,7 @@ export const catalog: MessageCatalog = {
   "attachments.video.saveHint": [
     {
       "type": 0,
-      "value": "공유 시트가 열려요. 「비디오 저장」을 고르세요"
+      "value": "영상을 사진 보관함에 저장해요"
     }
   ],
   "attachments.video.seekLabel": [
@@ -1958,6 +1958,54 @@ export const catalog: MessageCatalog = {
       "value": "이 표현을 지금 쓸 수 없어요. 다시 골라 주세요."
     }
   ],
+  "mobile.attachmentSave.failed": [
+    {
+      "type": 0,
+      "value": "저장하지 못했어요 · 다시 시도"
+    }
+  ],
+  "mobile.attachmentSave.photosDenied": [
+    {
+      "type": 0,
+      "value": "사진 접근이 꺼져 있어요 · 설정 열기"
+    }
+  ],
+  "mobile.attachmentSave.savedToFiles": [
+    {
+      "type": 0,
+      "value": "파일에 저장했어요"
+    }
+  ],
+  "mobile.attachmentSave.savedToPhotos": [
+    {
+      "type": 0,
+      "value": "사진에 저장했어요"
+    }
+  ],
+  "mobile.attachmentSave.saveHintPhotos": [
+    {
+      "type": 0,
+      "value": "사진 보관함에 저장해요"
+    }
+  ],
+  "mobile.attachmentSave.saving": [
+    {
+      "type": 0,
+      "value": "저장하는 중이에요"
+    }
+  ],
+  "mobile.attachmentSave.toFiles": [
+    {
+      "type": 0,
+      "value": "파일에 저장"
+    }
+  ],
+  "mobile.attachmentSave.toPhotos": [
+    {
+      "type": 0,
+      "value": "사진에 저장"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,
@@ -1991,7 +2039,7 @@ export const catalog: MessageCatalog = {
   "mobile.ios.photoLibraryAddUsage": [
     {
       "type": 0,
-      "value": "oort는 사진을 보관함에 저장하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요."
+      "value": "저장을 누른 사진과 영상을 내 사진 보관함에 추가해요. 이 허용으로 보관함을 읽지는 않아요."
     }
   ],
   "mobile.ios.photoLibraryUsage": [

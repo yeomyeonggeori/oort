@@ -905,7 +905,7 @@ describe('what the upload declares stays true of the code (#2568)', () => {
   });
 });
 
-describe('what the photo library declaration says stays true of the code (#4181, ADR-0168 증보 1)', () => {
+describe('what the photo library declaration says stays true of the code (#4181 · #5209, ADR-0168 증보 1·3)', () => {
   const plist = readFileSync(
     join(APP_ROOT, 'ios/MomoMobile/Info.plist'),
     'utf8',
@@ -923,19 +923,42 @@ describe('what the photo library declaration says stays true of the code (#4181,
     'src/features/attachments/photosNative.ts',
   );
 
-  it('keeps the Add sentence true: nothing writes to the photo library', () => {
-    // The Add purpose string tells the person oort does not save photos. Those
-    // are the expo-media-library write/album/delete functions plus the two
-    // PhotoKit save entry points a native bridge would call.
+  it('writes to the photo library through exactly one add-only call, in exactly one file (#5209)', () => {
+    // 「저장」은 사진 보관함에 **추가**한다(owner 2026-11-03). 허용된 쓰기는 `saveToLibraryAsync` 하나이고 `photosNative.ts` 에서만 부른다 —
+    // 그 함수는 추가 전용 권한(PHAccessLevel.addOnly)으로 돈다. 나머지 쓰기·삭제·앨범 API 와 PhotoKit 직접 호출은 어느 파일에도 없다:
+    // 앱이 보관함에서 지우거나 앨범을 만들거나 즐겨찾기를 바꾸는 날은 Add 문구가 또 거짓이 되는 날이다. `createAssetAsync` 도 막는다 —
+    // 그 함수는 읽기·쓰기 권한으로 점검하고 만든 자산을 읽어 돌려주는데, 우리는 보관함을 읽지 않는다고 약속했다.
     const banned =
-      /\b(?:saveToLibraryAsync|createAssetAsync|addAssetsToAlbumAsync|removeAssetsFromAlbumAsync|deleteAssetsAsync|createAlbumAsync|deleteAlbumsAsync|setAssetFavoriteAsync|UIImageWriteToSavedPhotosAlbum|PHAssetChangeRequest|PHAssetCreationRequest)\b/;
+      /\b(?:createAssetAsync|addAssetsToAlbumAsync|removeAssetsFromAlbumAsync|deleteAssetsAsync|createAlbumAsync|deleteAlbumsAsync|setAssetFavoriteAsync|UIImageWriteToSavedPhotosAlbum|PHAssetChangeRequest|PHAssetCreationRequest)\b/;
     const offenders = shipped()
       .filter(({ code }) => banned.test(code))
       .map(({ file }) => file);
     expect(offenders).toEqual([]);
-    expect(plistString('NSPhotoLibraryAddUsageDescription')).toMatch(
-      /저장하지 않아요/,
-    );
+    const writers = shipped()
+      .filter(({ code }) => /\bsaveToLibraryAsync\b/.test(code))
+      .map(({ file }) => file);
+    expect(writers).toEqual([PHOTOS_NATIVE]);
+  });
+
+  it('keeps the Add sentence true: it says saving adds, and it promises no reading the code would break (#5209)', () => {
+    const add = plistString('NSPhotoLibraryAddUsageDescription') ?? '';
+    // 앞 판의 「저장하지 않아요」는 이제 거짓이다.
+    expect(add).not.toMatch(/저장하지 않아요/);
+    expect(add).toMatch(/저장/);
+    expect(add).toMatch(/추가해요/);
+    // 해요체이고 용도를 말한다.
+    expect(add).toMatch(/요\.?$/);
+    expect(add).not.toMatch(/(?:습니다|ㅂ니다)\.?$/);
+    // 「이 허용으로 보관함을 읽지는 않아요」 — 사실이려면 저장이 **추가 전용**으로만 권한을 물어야 한다. `nativeLibrarySave` 안의 권한 호출은
+    // 추가 전용(`true`) 읽기·요청과, 끝에 읽기 수준으로 되돌리는 프롬프트 없는 읽기(`()`)뿐이다.
+    expect(add).toMatch(/읽지는 않아요/);
+    const native = codeOf(PHOTOS_NATIVE);
+    const save = native.slice(native.indexOf('export const nativeLibrarySave'));
+    expect(save.match(/\brequestPermissionsAsync\([^)]*\)/g)).toEqual(['requestPermissionsAsync(true)']);
+    expect(save.match(/\bgetPermissionsAsync\([^)]*\)/g)).toEqual(['getPermissionsAsync(true)']);
+    // 되돌리는 읽기는 `inAddScope` 안의 한 줄이다(모듈이 마지막으로 물은 수준을 기억한다).
+    const scope = native.slice(native.indexOf('async function inAddScope'), native.indexOf('export const nativeLibrarySave'));
+    expect(scope.match(/\bgetPermissionsAsync\([^)]*\)/g)).toEqual(['getPermissionsAsync()']);
   });
 
   it('reads the photo library through exactly one file, and only the legacy entry', () => {
@@ -979,8 +1002,10 @@ describe('what the photo library declaration says stays true of the code (#4181,
 
   it('never requests photo access before a person taps 「허용」', () => {
     // The permission calls live in photosNative.ts and are reached only from the
-    // card hook's `request` (미결정 + 「허용」) and `getPermission` (a read). Nothing
-    // else in the shipped code may call them — a call from app start, the
+    // card hook's `request` (미결정 + 「허용」) and `getPermission` (a read) — and,
+    // since #5209, from the add-only save port, which `runSave` calls only after a
+    // person pressed 저장 (`attachmentSave.test.tsx` counts zero calls on mount).
+    // Nothing else in the shipped code may call them — a call from app start, the
     // composer or the menu would be the preflight the ADR forbids.
     const callers = shipped()
       .filter(
