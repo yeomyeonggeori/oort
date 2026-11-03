@@ -309,6 +309,28 @@ describe("예약 흐름: 스레드 답글 (ADR-0208 D1, UI 명세 0.5)", () => {
     expect(document.activeElement).toBe(inputEl());
   });
 
+  it("「대화에도 보내기」를 켠 채 예약하면 예약은 그 값을 싣지 않고, 체크는 글과 함께 풀려 다음 답글로 새지 않는다 (#4888)", async () => {
+    const inflight = manualCreate();
+    await mount();
+    await type("체크를 켜고 거는 예약");
+    const check = need("thread-composer-also-in-channel-input") as HTMLInputElement;
+    await act(async () => {
+      check.click();
+    });
+    expect(check.checked).toBe(true);
+    await openMenu();
+    await press(need("thread-composer-schedule-preset-tomorrow"));
+    const [, input] = scheduledApi.createScheduledMessage.mock.calls[0]!;
+    expect(input).toMatchObject({ rootId: ROOT, body: "체크를 켜고 거는 예약" });
+    expect("alsoInChannel" in input).toBe(false);
+    await act(async () => {
+      inflight.resolve(scheduledRow());
+    });
+    await settle();
+    expect(inputEl().value).toBe("");
+    expect(check.checked).toBe(false);
+  });
+
   it("배너는 이 스레드의 예약만 센다(같은 채널의 다른 스레드·스레드가 아닌 글은 세지 않는다)", async () => {
     scheduledApi.listAllScheduledMessages.mockResolvedValue([
       scheduledRow(),

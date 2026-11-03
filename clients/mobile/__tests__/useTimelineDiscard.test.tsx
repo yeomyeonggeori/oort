@@ -133,20 +133,21 @@ describe('useTimeline.discard — 보내지 못한 메시지를 이 기기에서
     expect(jest.mocked(sendMessage).mock.calls[2][2]).toBe(keep);
   });
 
-  it('스레드 답글의 실패 행을 지우면 그 스레드의 줄이 사라지고, 채널 목록으로 새어 나가지 않는다', async () => {
+  it('스레드 답글의 실패 행은 대화 화면에도 서고(#4888), 지우면 스레드의 줄과 함께 사라진다', async () => {
     const view = hook();
     await act(async () => {
       await view.result.current.sendReply('root', '스레드 답글');
     });
     expect(view.result.current.repliesPending('root')).toHaveLength(1);
-    expect(view.result.current.pending).toHaveLength(0);
     const id = view.result.current.repliesPending('root')[0].clientMsgId;
+    // 밀어서 보낸 답글은 스레드를 열지 않으므로 실패를 대화 화면에서 알려야 한다 — 같은 행이 두 자리에 선다(둘 중 하나만 보인다).
+    expect(view.result.current.pending.map(row => row.clientMsgId)).toEqual([id]);
+    expect(view.result.current.pending[0]).toMatchObject({status: 'failed', rootId: 'root'});
 
     act(() => {
       view.result.current.discard(id);
     });
     expect(view.result.current.repliesPending('root')).toEqual([]);
-    // 뿌리 표만 지워지고 행이 남았다면 이 답글이 채널 목록에 나타난다 — 둘 다 사라져야 한다.
     expect(view.result.current.pending).toEqual([]);
 
     await act(async () => {
