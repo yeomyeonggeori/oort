@@ -27,6 +27,7 @@ import {
 import {
   closestToolbarScrollContainer,
   HOVER_TOOLBAR_REACTION_SEED,
+  HOVER_TOOLBAR_NUDGE_VAR,
   HOVER_TOOLBAR_SLIDE_VAR,
   HOVER_TOOLBAR_SLOT_COUNT,
   neighborTextRects,
@@ -356,8 +357,9 @@ const toolbarIconClass = "size-4";
  * top edge would cover the previous neighbour's text and the bottom edge would
  * cover none of the next neighbour's (#5179, `shouldFlipToolbarBelow`). When both
  * edges are blocked it slides down into the first text-free window of the row
- * (#5179, `slideToolbarDown`). Own-row body text must not intersect the toolbar
- * box (B11 R2 Blocker / #1743 B-3).
+ * (#5179, `slideToolbarDown`). A line end that grazes the toolbar's left edge by
+ * 1-2px is dodged by nudging the bar right (#5179). Own-row body text must not
+ * intersect the toolbar box (B11 R2 Blocker / #1743 B-3).
  */
 export function MessageHoverToolbar({
   available,
@@ -410,6 +412,8 @@ export function MessageHoverToolbar({
       selfText: () => neighborTextRects(row),
       nextText: () => neighborTextRects(neighbors?.next ?? null),
     });
+    // 비껴 서기(가로 1~2px)는 위·아래 어느 자리에서도 같다. 변수는 막대 요소에 걸려 자리 이름이 바뀌어도(`straddleBelow`) 남는다.
+    if (placement.nudge > 0) bar.style.setProperty(HOVER_TOOLBAR_NUDGE_VAR, String(placement.nudge));
     if (placement.below) setStraddleBelow(true);
     else if (placement.slide > 0) {
       bar.style.setProperty(HOVER_TOOLBAR_SLIDE_VAR, String(Number(placement.slide.toFixed(2))));

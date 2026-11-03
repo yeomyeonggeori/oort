@@ -127,6 +127,8 @@ const barOf = (host: HTMLElement) => host.querySelector('[data-testid="message-h
 const straddleOf = (host: HTMLElement) => barOf(host).getAttribute("data-straddle");
 /** 막대가 건 밀림(px, 위 자리에서 아래로). 걸지 않았으면 빈 문자열이다. */
 const slideOf = (host: HTMLElement) => barOf(host).style.getPropertyValue("--hover-toolbar-slide");
+/** 막대가 건 가로 비끼기(px, 오른쪽으로). 걸지 않았으면 빈 문자열이다. */
+const nudgeOf = (host: HTMLElement) => barOf(host).style.getPropertyValue("--hover-toolbar-nudge");
 
 const REACHING = "56,214,337,355"; // 앞 행 마지막 줄: 막대 왼쪽 끝(151)을 넘어 막대 밑에 선다
 const SHORT = "56,121,337,355"; // 막대에 닿지 않는 짧은 줄
@@ -134,6 +136,8 @@ const NEXT_HEAD = "56,95,415,433"; // 뒤 행 머리 줄(이름): 아래 자리(
 const NEXT_LONG = "56,360,410,428"; // 뒤 행의 긴 첫 줄: 아래 자리 밑에 선다
 const OWN_SHORT = "56,116,374,392"; // 포인터 행의 짧은 글: 막대 가로 범위(151~374) 밖
 const OWN_LONG = "56,254,374,392"; // 포인터 행의 한 줄 긴 글: 막대 밑까지 온다
+const REACHING_BY_ONE = "56,152,337,355"; // 앞 행 끝줄 오른끝이 막대 왼쪽 끝(151)을 1px 넘는다
+const REACHING_BY_NINE = "56,160,337,355"; // 9px 넘는다: 비껴서 풀 일이 아니다
 
 describe("MessageHoverToolbar 뒤집기 배선 (#5179)", () => {
   it("앞 이웃 마지막 줄이 막대 밑에 서고 아래 자리는 뒤 이웃 글자를 안 덮으면 행 아래 경계로 뒤집는다", () => {
@@ -158,6 +162,33 @@ describe("MessageHoverToolbar 뒤집기 배선 (#5179)", () => {
     const host = mount({ prev: SHORT, next: NEXT_LONG }, OWN_SHORT);
     expect(straddleOf(host)).toBe("top");
     expect(slideOf(host)).toBe("");
+  });
+});
+
+describe("MessageHoverToolbar 가로 비끼기 배선 (#5179)", () => {
+  it("앞 글줄 끝이 막대 왼쪽 끝을 1px 넘는 경계는 1px 비껴 위 그대로 선다(밀지 않는다)", () => {
+    const host = mount({ prev: REACHING_BY_ONE, next: NEXT_LONG }, OWN_SHORT);
+    expect(straddleOf(host)).toBe("top");
+    expect(nudgeOf(host)).toBe("1");
+    expect(slideOf(host)).toBe("");
+  });
+
+  it("비껴 뒤집으면 비끼기 변수가 막대에 남는다(자리 이름이 below 로 바뀌어도)", () => {
+    // 뒤 이웃 머리 줄 시각(x 90~152)이 아래 자리 왼쪽 끝(151)을 1px 넘는다 → 1px 비껴야 아래 자리가 빈다.
+    const host = mount({ prev: REACHING, next: "90,152,415,433" }, OWN_SHORT);
+    expect(straddleOf(host)).toBe("below");
+    expect(nudgeOf(host)).toBe("1");
+  });
+
+  it("9px 넘게 닿으면 비끼지 않는다(밀기도 창이 없으면 위 그대로, 변수 없음)", () => {
+    const host = mount({ prev: REACHING_BY_NINE, next: NEXT_LONG }, OWN_LONG);
+    expect(straddleOf(host)).toBe("top");
+    expect(nudgeOf(host)).toBe("");
+    expect(slideOf(host)).toBe("");
+  });
+
+  it("닿지 않으면 비끼지 않는다(변수 없음)", () => {
+    expect(nudgeOf(mount({ prev: SHORT, next: NEXT_HEAD }))).toBe("");
   });
 });
 

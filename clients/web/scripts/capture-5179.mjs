@@ -16,9 +16,13 @@
 // 자리 규칙(`hoverToolbarModel.placeToolbar`): ① 위 자리가 앞 이웃 글자를 안 덮으면 위 그대로 ② 덮으면 아래 경계로 뒤집되 뒤 이웃을 새로 덮거나 스크롤러
 // 밖으로 잘리지 않을 때만(1차 수리 #5236, A·B·E·G) ③ 위·아래 모두 막히면 **행 안쪽으로 밀어 앉힌다**(밀림 `--hover-toolbar-slide`, 위 자리에서 아래로 px):
 // 앞 글줄 바로 밑 ~ 뒤 글줄·스크롤러 바닥 사이의 글자 없는 창(툴바 키 42 이상)에 선다. ④ 창이 없으면 위 그대로(남은 경우 R).
+// ①~③ 앞에서 글줄 끝이 막대 왼쪽 끝을 1~2px 넘는 경계는 막대를 오른쪽으로 비껴(1px, 2px) 먼저 ①②를, 그다음 ③을 다시 해 본다(움직임이 작은 쪽이 먼저).
 //
-// 재는 것(390·720·1440 × 밝음·어두움, 포인터가 선 행 열 가지). 글 길이는 「짧은 글 ≤5자 / 긴 글 ≥8자」 둘뿐이고 머리 줄 이름은 2글자라 390·720 에서
-// 같은 구조가 선다(3글자 이름 + 시각의 오른끝이 720 에서 툴바 왼끝 ±1px 경계라 결정적이지 않다 — README §6):
+// 글 길이는 「짧은 글 ≤5자 / 긴 글 ≥8자」 둘뿐이라 390·720 에서 같은 구조가 서고, 머리 줄 이름은 3글자(검수 하네스와 같다)다. 3글자 이름 + 시각(글머리에서 78px)의 오른끝은
+// 390 열(툴바 왼끝까지 95px)에서는 안 닿고 720 창(77px)에서는 **1px 넘는다** — 그 경계를 막대의 **가로 비끼기**(오른쪽으로 1~2px, `--hover-toolbar-nudge`)가 푼다.
+// 그래서 720 의 A·D·H·I 는 비껴 서고(비낌 ≥ 1px) 그 밖의 폭은 비끼지 않는다.
+//
+// 재는 것(390·720·1440 × 밝음·어두움, 포인터가 선 행 열 가지):
 //   A  긴 앞 행 · 포인터 행 · **다음 행이 머리 행**(이름·시각 줄)      좁은 열: 아래 경계로 뒤집혀 0 / 1440: 위 그대로 0
 //   B  긴 앞 행 · 포인터 행 · 다음 행이 **짧은 이어짐**                좁은 열: 아래 경계로 뒤집혀 0 / 1440: 위 그대로 0
 //   C  긴 앞 행 · **짧은** 포인터 행 · 다음 행도 **긴 이어짐**(양쪽이 막힘)  뒤집으면 뒤 행 글자를 덮으므로 **행 안쪽으로 밀려** 앞 글줄 밑에 앉아 0
@@ -81,10 +85,11 @@ const person = (id, kind, displayName, handle, extra = {}) => ({
 });
 const roster = [
   person(ME, "human", "이도현", "dohyun", { role: "owner" }),
-  // 머리 줄(이름 + 시각)의 오른끝이 720 열의 툴바 왼쪽 끝(글머리에서 77)에 닿지 않게 이름은 2글자다. 3글자 이름은 시각 끝이 그 끝에서 ±1px 경계에 선다(README §6).
-  person(SEO, "human", "서연", "seoyeon"),
-  person(MINSU, "human", "민수", "minsu"),
-  person(HAYUN, "human", "하윤", "hayun"),
+  // 이름은 3글자다(검수 하네스의 「한서연」「오도현」과 같다). 머리 줄(이름 39 + 틈 8 + 시각 31 = 글머리에서 78)의 오른끝은 390 열에서는 툴바 왼쪽 끝(글머리에서 95)에
+  // 닿지 않지만 720 창(글머리에서 77)에서는 1px 넘는다 — 가로 비끼기(`--hover-toolbar-nudge`)가 푸는 경계다.
+  person(SEO, "human", "박서연", "seoyeon"),
+  person(MINSU, "human", "최민수", "minsu"),
+  person(HAYUN, "human", "정하윤", "hayun"),
   person(A1, "agent", "달무리봇", "dalmuri-bot", { ownerHumanId: ME }),
 ];
 const channels = [
@@ -380,7 +385,9 @@ const barRect = (page) =>
     const r = bar.getBoundingClientRect();
     // 밀림(slide)은 위 자리에서 아래로 민 px — 모델이 CSSOM 으로 거는 변수다(없으면 0). 수리 전 번들에는 변수가 없어 늘 0이다.
     const slide = Number.parseFloat(bar.style.getPropertyValue("--hover-toolbar-slide")) || 0;
-    return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom), w: Math.round(r.width), straddle: bar.getAttribute("data-straddle"), slide };
+    // 비끼기(nudge)는 오른쪽으로 비껴 선 px(1~2) — 같은 방식으로 거는 변수다.
+    const nudge = Number.parseFloat(bar.style.getPropertyValue("--hover-toolbar-nudge")) || 0;
+    return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom), w: Math.round(r.width), straddle: bar.getAttribute("data-straddle"), slide, nudge };
   });
 
 const scrollerRect = (page) =>
@@ -409,8 +416,8 @@ const CASES = [
   { id: "E 긴 앞 행이 스크롤러 맨 위(뒤집힘)", key: "A", pin: true, narrow: "below", wide: "below", slideNarrow: false, zeroNarrow: null, prevReaches: null },
   { id: "F 마지막 행(아래로 내릴 여유 없음)", key: "F", pin: false, bottom: true, narrow: "top", wide: "top", slideNarrow: true, zeroNarrow: true, prevReaches: [true, false] },
   { id: "G 1440 긴 한 줄 앞 행(툴바 왼쪽 끝을 넘음)", key: "G", pin: false, wideOnly: true, narrow: null, wide: "below", slideNarrow: false, zeroNarrow: null, prevReaches: [null, true] },
-  { id: "H 머리 행 포인터 · 긴 본문 · 앞·뒤도 긴 글", key: "H", pin: false, narrow: "top", wide: "top", slideNarrow: true, zeroNarrow: true, prevReaches: [true, false] },
-  { id: "I 마지막 행이 머리 행 · 긴 본문(두 줄)", key: "I", pin: false, bottom: true, channel: "GEN", narrow: "top", wide: "top", slideNarrow: true, zeroNarrow: true, prevReaches: [true, false] },
+  { id: "H 머리 행 포인터 · 긴 본문 · 앞·뒤도 긴 글", key: "H", pin: false, headEdge: true, narrow: "top", wide: "top", slideNarrow: true, zeroNarrow: true, prevReaches: [true, false] },
+  { id: "I 마지막 행이 머리 행 · 긴 본문(두 줄)", key: "I", pin: false, bottom: true, channel: "GEN", headEdge: true, narrow: "top", wide: "top", slideNarrow: true, zeroNarrow: true, prevReaches: [true, false] },
   // 남은 경우(자리 없음): 이어짐 행이 포인터이고 본문이 길어 툴바 x 범위까지 오며, 앞·뒤 행도 그렇다 — 위·아래·행 안쪽 어디에도 글자 없는 41px 창이 없다.
   { id: "R 이어짐 행 포인터 · 긴 본문 · 앞·뒤도 긴 글(남은 경우)", key: "R", pin: false, residual: true, narrow: "top", wide: "top", slideNarrow: false, zeroNarrow: false, prevReaches: [true, false] },
 ];
@@ -444,7 +451,7 @@ async function runCase(page, tag, width, c) {
   const ownFirst = own ? first(own.frags) : null;
   const ownLast = own ? last(own.frags) : null;
   note(
-    `툴바 x ${bar?.l}~${bar?.r} y ${bar?.t}~${bar?.b}(${bar?.straddle}, 밀림 ${bar?.slide}) · 앞 행 마지막 줄 ${prevLast ? `x ${prevLast.l}~${prevLast.r} y ${prevLast.t}~${prevLast.b}` : "-"}` +
+    `툴바 x ${bar?.l}~${bar?.r} y ${bar?.t}~${bar?.b}(${bar?.straddle}, 밀림 ${bar?.slide}, 비낌 ${bar?.nudge}) · 앞 행 마지막 줄 ${prevLast ? `x ${prevLast.l}~${prevLast.r} y ${prevLast.t}~${prevLast.b}` : "-"}` +
       ` · 뒤 행 첫 줄 ${nextFirst ? `x ${nextFirst.l}~${nextFirst.r} y ${nextFirst.t}~${nextFirst.b}` : "-"}(${next?.head ? "머리 행" : "이어짐"})`
   );
   note(
@@ -460,6 +467,23 @@ async function runCase(page, tag, width, c) {
     // 어느 자리에 서든 막대는 포인터 행에 붙어 있다(행과 세로로 6px 이상 겹친다 — 위·아래 자리는 정확히 행 안 깊이 6, 밀린 자리는 그 이상). 떨어져 나간 막대는 누구 것인지 알 수 없다.
     const attached = Math.min(bar.b, own.row.b) - Math.max(bar.t, own.row.t);
     check(`${name}: 툴바가 포인터 행에 붙어 있다(행과 세로로 6px 이상 겹친다)`, attached >= 5, `겹침 ${attached}px · 툴바 ${bar.t}~${bar.b} · 행 ${own.row.t}~${own.row.b}`);
+  }
+  // 비끼기(가로)는 글줄 끝이 막대 왼쪽 끝을 1~2px 넘는 경계에서만 쓴다: 0~2px 이내이고, 글이 막대에 훨씬 못 닿는 390 열·1440 에서는 쓰지 않는다.
+  check(
+    `${name}: 가로 비끼기가 ${width === 720 ? "0~2px 이내다" : "없다(0)"}`,
+    bar && (width === 720 ? bar.nudge >= 0 && bar.nudge <= 2 : bar.nudge === 0),
+    JSON.stringify(bar)
+  );
+  if (c.headEdge && own && bar) {
+    // 머리 행이 포인터인 칸의 양성 대조: 머리 줄(첫 줄: 이름 + 시각)의 오른끝이 막대 왼쪽 끝을 넘는 폭(720 창)과 안 넘는 폭(390 열)을 먼저 재서, 비끼기가 정말 필요한 경계인지 가른다.
+    // 머리 줄 = 첫 줄(이름)과 세로로 겹치는 조각들(시각은 글자가 작아 윗단이 이름과 몇 px 다르다). 툴바 왼끝은 비끼기를 빼고(자리를 잡기 전 왼끝) 잰다.
+    const headLine = own.frags.filter((f) => f.t < (ownFirst?.b ?? 0));
+    const headRight = Math.max(...headLine.map((f) => f.r));
+    const restLeft = bar.l - bar.nudge;
+    const reaches = headRight > restLeft;
+    const want = width === 720;
+    check(`${name}: 머리 줄(이름 + 시각) 오른끝이 툴바 왼쪽 끝을 ${want ? "1~2px 넘는다(경계)" : "넘지 않는다(대조)"}`, reaches === want && (!want || headRight - restLeft <= 2), `머리 줄 오른끝 ${headRight} · 툴바 왼끝(비끼기 전) ${restLeft}`);
+    if (want) check(`${name}: 경계라서 툴바가 오른쪽으로 비껴 섰다(비낌 ≥ 1px)`, bar.nudge >= 1, JSON.stringify(bar));
   }
   const expectStraddle = c.pin ? c.narrow : isNarrow ? c.narrow : c.wide;
   check(`${name}: 툴바가 기대한 자리(${expectStraddle})에 섰다`, bar?.straddle === expectStraddle, JSON.stringify(bar));

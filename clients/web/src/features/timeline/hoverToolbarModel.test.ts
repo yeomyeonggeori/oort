@@ -5,6 +5,7 @@ import { PICKER_EMOJI } from "@/features/emoji/EmojiPickerDialog";
 import { HOVER_TOOLBAR_NEIGHBOR_SELECTOR } from "../../../scripts/lib/hoverToolbarOverlap.mjs";
 import {
   belowStraddleRect,
+  HOVER_TOOLBAR_NUDGE_VAR,
   HOVER_TOOLBAR_REACTION_SEED,
   HOVER_TOOLBAR_SLIDE_VAR,
   HOVER_TOOLBAR_SLOT_COUNT,
@@ -265,6 +266,13 @@ describe("slideToolbarDown (#5179 남은 경우 C·F·H)", () => {
     // 아래 자리는 밀지 않는다: 밀림은 위 자리에서 아래로만 민다.
     expect(css).not.toMatch(/@utility hover-toolbar-straddle-below \{[^}]*--hover-toolbar-slide/);
   });
+
+  it("가로 비끼기 변수는 위·아래 두 straddle 이 모두 읽는다", () => {
+    expect(HOVER_TOOLBAR_NUDGE_VAR).toBe("--hover-toolbar-nudge");
+    const css = readFileSync(fileURLToPath(new URL("../../design/tokens.css", import.meta.url)), "utf8");
+    expect(css).toMatch(/@utility hover-toolbar-straddle \{[^}]*var\(--hover-toolbar-nudge, 0\) \* 1px/);
+    expect(css).toMatch(/@utility hover-toolbar-straddle-below \{[^}]*var\(--hover-toolbar-nudge, 0\) \* 1px/);
+  });
 });
 
 describe("placeToolbar (#5179): 위 → 아래로 뒤집기 → 행 안쪽으로 밀기", () => {
@@ -282,24 +290,24 @@ describe("placeToolbar (#5179): 위 → 아래로 뒤집기 → 행 안쪽으로
   };
 
   it("A·B 회귀: 앞 글줄을 덮고 아래 자리가 비면 아래로 뒤집는다(밀지 않는다)", () => {
-    expect(placeToolbar({ bar, row, scroller, prevText: () => [reaching], selfText: never, nextText: () => [nextHead] })).toEqual({ below: true, slide: 0 });
+    expect(placeToolbar({ bar, row, scroller, prevText: () => [reaching], selfText: never, nextText: () => [nextHead] })).toEqual({ below: true, slide: 0, nudge: 0 });
   });
 
   it("E 회귀: 위가 스크롤러 위에 막히면 이웃을 재기 전에 뒤집는다", () => {
     const clipped = { top: 340, bottom: 800, height: 460 };
-    expect(placeToolbar({ bar, row, scroller: clipped, prevText: never, selfText: never, nextText: never })).toEqual({ below: true, slide: 0 });
+    expect(placeToolbar({ bar, row, scroller: clipped, prevText: never, selfText: never, nextText: never })).toEqual({ below: true, slide: 0, nudge: 0 });
   });
 
   it("D 회귀: 앞 글줄이 막대에 안 닿으면 위 그대로이고 포인터 행·뒤 이웃은 재지도 않는다", () => {
-    expect(placeToolbar({ bar, row, scroller, prevText: () => [short], selfText: never, nextText: never })).toEqual({ below: false, slide: 0 });
+    expect(placeToolbar({ bar, row, scroller, prevText: () => [short], selfText: never, nextText: never })).toEqual({ below: false, slide: 0, nudge: 0 });
   });
 
   it("행을 못 찾으면(타임라인 밖) 이웃 글자는 보지 않고 위 그대로다", () => {
-    expect(placeToolbar({ bar, row: null, scroller, prevText: never, selfText: never, nextText: never })).toEqual({ below: false, slide: 0 });
+    expect(placeToolbar({ bar, row: null, scroller, prevText: never, selfText: never, nextText: never })).toEqual({ below: false, slide: 0, nudge: 0 });
   });
 
   it("C: 앞 글줄을 덮는데 아래 자리가 뒤 글줄을 덮으면 위 그대로 두지 않고 행 안쪽으로 민다", () => {
-    expect(placeToolbar({ bar, row, scroller, prevText: () => [reaching], selfText: () => [ownShort], nextText: () => [nextLong] })).toEqual({ below: false, slide: 28 });
+    expect(placeToolbar({ bar, row, scroller, prevText: () => [reaching], selfText: () => [ownShort], nextText: () => [nextLong] })).toEqual({ below: false, slide: 28, nudge: 0 });
   });
 
   it("F: 아래 자리가 스크롤러 밖으로 잘리는 마지막 행도 행 안쪽으로 민다", () => {
@@ -307,16 +315,60 @@ describe("placeToolbar (#5179): 위 → 아래로 뒤집기 → 행 안쪽으로
     const lastRow = { top: 673, bottom: 709 };
     const lastScroller = { top: 57, bottom: 709, height: 652 };
     const prev = { left: 56, right: 279, top: 645, bottom: 663 };
-    expect(placeToolbar({ bar: lastBar, row: lastRow, scroller: lastScroller, prevText: () => [prev], selfText: () => [], nextText: () => [] })).toEqual({ below: false, slide: 28 });
+    expect(placeToolbar({ bar: lastBar, row: lastRow, scroller: lastScroller, prevText: () => [prev], selfText: () => [], nextText: () => [] })).toEqual({ below: false, slide: 28, nudge: 0 });
   });
 
   it("R: 포인터 행 글도 막대 밑까지 오면 창이 없다 — 위 그대로(겹침이 남는다)", () => {
-    expect(placeToolbar({ bar, row, scroller, prevText: () => [reaching], selfText: () => [ownLong], nextText: () => [nextLong] })).toEqual({ below: false, slide: 0 });
+    expect(placeToolbar({ bar, row, scroller, prevText: () => [reaching], selfText: () => [ownLong], nextText: () => [nextLong] })).toEqual({ below: false, slide: 0, nudge: 0 });
   });
 
   it("뒤 글줄이 가까워 창이 막대 키(42)보다 좁으면 밀지 않는다(앞 글줄 밑단 355 ~ 뒤 글줄 윗단 390 = 35)", () => {
     const nearNext = { left: 56, right: 360, top: 390, bottom: 408 };
-    expect(placeToolbar({ bar, row, scroller, prevText: () => [reaching], selfText: () => [ownShort], nextText: () => [nearNext] })).toEqual({ below: false, slide: 0 });
+    expect(placeToolbar({ bar, row, scroller, prevText: () => [reaching], selfText: () => [ownShort], nextText: () => [nearNext] })).toEqual({ below: false, slide: 0, nudge: 0 });
+  });
+
+  // 720 창(사이드바가 선 데스크탑 폭) 실측의 숫자 그대로: 막대 x 465~688, 3글자 이름의 머리 줄은 이름 x 388~427 · 시각 x 435~466 — 시각 오른끝이 막대 왼쪽 끝(465)을 1px 넘는다.
+  describe("가로 비끼기 (720 창 + 3글자 이름 경계)", () => {
+    const bar720 = { left: 465, right: 688, top: 340, bottom: 382 };
+    const row720 = { top: 376, bottom: 412 };
+    const scroller720 = { top: 68, bottom: 720, height: 652 };
+    const head = (top: number) => [
+      { left: 388, right: 427, top, bottom: top + 18 }, // 이름
+      { left: 435, right: 466, top, bottom: top + 18 }, // 시각: 막대 왼쪽 끝 465 를 1px 넘는다
+    ];
+
+    it("A: 다음 행 머리 줄의 시각이 아래 자리를 1px 막으면 1px 비껴 아래로 뒤집는다", () => {
+      const prev = [{ left: 388, right: 572, top: 348, bottom: 366 }];
+      expect(placeToolbar({ bar: bar720, row: row720, scroller: scroller720, prevText: () => prev, selfText: never, nextText: () => head(426) })).toEqual({ below: true, slide: 0, nudge: 1 });
+    });
+
+    it("D: 앞 머리 줄의 시각이 위 자리를 1px 덮어도 1px 비껴 위 그대로 선다(밀지 않는다 — 움직임이 작은 쪽이 먼저)", () => {
+      expect(placeToolbar({ bar: bar720, row: row720, scroller: scroller720, prevText: () => head(345), selfText: never, nextText: () => head(426) })).toEqual({ below: false, slide: 0, nudge: 1 });
+    });
+
+    it("H: 포인터 행 자신의 머리 줄 시각이 창을 1px 막으면 1px 비껴 앞 글줄 밑으로 민다", () => {
+      const headBar = { left: 465, right: 688, top: 313, bottom: 355 };
+      const headRow = { top: 349, bottom: 438 };
+      const own = [...head(363), { left: 388, right: 680, top: 387, bottom: 405 }, { left: 388, right: 680, top: 411, bottom: 429 }];
+      const prev = [{ left: 388, right: 627, top: 322, bottom: 340 }];
+      const next = [{ left: 388, right: 679, top: 447, bottom: 465 }];
+      expect(placeToolbar({ bar: headBar, row: headRow, scroller: scroller720, prevText: () => prev, selfText: () => own, nextText: () => next })).toEqual({ below: false, slide: 29, nudge: 1 });
+    });
+
+    it("2px보다 깊이 닿는 글은 비껴서 풀 일이 아니다 — 위 그대로(남은 경우)", () => {
+      const deep = [{ left: 388, right: 470, top: 363, bottom: 381 }]; // 막대 왼쪽 끝을 5px 넘는 머리 줄
+      const headBar = { left: 465, right: 688, top: 313, bottom: 355 };
+      const own = [...deep, { left: 388, right: 680, top: 387, bottom: 405 }, { left: 388, right: 680, top: 411, bottom: 429 }];
+      const prev = [{ left: 388, right: 627, top: 322, bottom: 340 }];
+      const next = [{ left: 388, right: 679, top: 447, bottom: 465 }];
+      expect(placeToolbar({ bar: headBar, row: { top: 349, bottom: 438 }, scroller: scroller720, prevText: () => prev, selfText: () => own, nextText: () => next })).toEqual({ below: false, slide: 0, nudge: 0 });
+    });
+
+    it("비끼지 않아도 되는 자리는 비끼지 않는다(390 열: 머리 줄 오른끝 134 < 막대 왼쪽 끝 151)", () => {
+      const prev = [{ left: 56, right: 214, top: 337, bottom: 355 }];
+      const next = [{ left: 56, right: 82, top: 415, bottom: 433 }, { left: 90, right: 121, top: 415, bottom: 433 }];
+      expect(placeToolbar({ bar, row, scroller, prevText: () => prev, selfText: never, nextText: () => next })).toEqual({ below: true, slide: 0, nudge: 0 });
+    });
   });
 
   it("앞 이웃·뒤 이웃은 각각 한 번만 잰다(뒤집기 판정과 밀기 판정이 같은 값을 나눠 쓴다)", () => {
