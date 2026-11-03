@@ -1,10 +1,12 @@
 {
   "unread": 3,
   "compose": true,
+  "readAll": true,
   "labels": {
     "running": "Running",
     "none": "Nothing running",
     "newMessage": "New message",
+    "readAll": "Mark all as read",
     "open": "Open oort",
     "quit": "Quit oort"
   },
@@ -12,5 +14,6 @@
     { "id": "0", "title": "김인턴", "state": "Waiting" },
     { "id": "1", "title": "codex", "state": "Working" }
   ],
-  "more": null
+  "more": null,
+  "remaining": "2 approvals are still waiting"
 }

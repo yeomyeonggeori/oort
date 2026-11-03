@@ -1,19 +1,24 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { dismissTemporarySurfaces } from "@momo/core/features/notifications/entryDismiss";
 import { ADE_SURFACE_ID } from "@momo/core/features/capabilities/serverSurfaces";
 import { readTrayAction, TRAY_ACTION } from "@momo/core/features/notifications/trayAction";
 import { adeItemLanding } from "@momo/core/features/work/adeLanding";
 import { globalShortcutsHeld } from "@/app/globalShortcutHold";
+import { useSession } from "@/app/session";
 import { workSessionPath } from "@/features/inbox/anchor";
+import { useMailboxReadActions } from "@/features/inbox/useMailbox";
+import { useNeedsMe } from "@/features/inbox/useNeedsMe";
 import { useAdeControl } from "@/features/ade/useAdeControl";
 import { useSurfaceProvidedWhileOpen } from "@/features/capabilities/useSurfaceProvided";
 import { openWorkPanel } from "@/features/agents/workLogStore";
 import { useOpenNewDm } from "@/features/directory/useNewDm";
+import { useChannels, useReadStates } from "@/features/workspace/useWorkspace";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { isDesktop, onTrayAction, setTrayStatus, type TrayStatusWire } from "@/lib/tauri";
+import { createCloseNotice } from "./closeNotice";
 import { useDockBadgeCount } from "./useDockBadgeCount";
-import { buildTrayStatus, createRowIds, trayCopy } from "./trayModel";
+import { buildTrayStatus, createRowIds, readAllTargets, trayCopy } from "./trayModel";
 
 /**
  * 메뉴 막대 아이콘의 상태를 셸에 보내고, 메뉴에서 고른 것을 받아 간다 (#5193). 아무것도 렌더하지 않는다.
@@ -27,11 +32,20 @@ import { buildTrayStatus, createRowIds, trayCopy } from "./trayModel";
  *    줄은 관제 서랍의 카드와 같은 곳으로 간다. 이벤트의 id는 마지막으로 보낸 줄들과 맞춰 본 것만 믿는다.
  *    알림 배너처럼 메뉴 막대도 **새 입구**라서 이동 직전에 겹친 임시 표면을 걷고(`dismissTemporarySurfaces`), 한 번만
  *    보이는 값을 쥔 화면이 있으면(`globalShortcutsHeld`) 전역 단축키처럼 물러선다 — 창은 이미 앞으로 와 있다.
- *  - **내려갈 때** 앱 셸이 내려가면(로그아웃) 수를 0, 줄을 비우고 「새 메시지」를 끈다. 아이콘은 앱이 끝날 때까지 남는다.
+ *    둘이 더 있다. **「모두 읽음 처리」**(#5195)는 안 읽은 멘션이 있는 채널과 안 읽은 DM의 읽음 위치를 올린다
+ *    (`readAllTargets`; 승인·응답 필요 칸은 결정으로만 닫히므로 두고, 남은 수를 메뉴의 한 줄로 말한다). 이동도 겹친 표면도
+ *    없는 일이라 걷지도, 물러서지도 않는다 — 창이 앞으로 오지도 않는다(셸이 그렇게 한다). **「창 치움」**(#5196)은 선택이
+ *    아니라 빨간 단추가 창을 메뉴 막대로 치웠다는 알림이다: 처음 한 번만 그 사실을 OS 알림으로 말한다(`closeNotice.ts`).
+ *  - **내려갈 때** 앱 셸이 내려가면(로그아웃) 수를 0, 줄을 비우고 「새 메시지」·「모두 읽음 처리」를 끄고 남은 일 줄을 지운다.
+ *    아이콘은 앱이 끝날 때까지 남는다. 셸은 이 상태(`compose: false`)에서 빨간 단추를 다시 앱 종료로 되돌린다.
  */
 export function TrayStatus() {
   const desktop = isDesktop();
   const unread = useDockBadgeCount();
+  const { workspaceId } = useSession();
+  const needs = useNeedsMe();
+  const channels = useChannels(workspaceId);
+  const readStates = useReadStates(workspaceId);
   // 관제 줄과 서랍은 `SurfaceGate surface="ade"` 뒤에 있다(온라인 호스트가 있을 때만). 이 컴포넌트는 셸에 늘 마운트돼 있어 그
   // 문이 없으므로 같은 판정(유예 포함)으로 세션 읽기를 직접 건다: 호스트가 없는 워크스페이스에서 원장을 20초마다 묻지 않는다.
   // 열린 턴은 실시간 스토어에서 오므로 이 판정과 무관하게 흐른다.
@@ -40,6 +54,17 @@ export function TrayStatus() {
   const formatMessage = useFormatMessage();
   const navigate = useNavigate();
   const openNewDm = useOpenNewDm();
+  const { markChannelsRead } = useMailboxReadActions();
+
+  // 「모두 읽음 처리」가 읽을 채널들. 메뉴 항목의 켜짐과 눌렀을 때 읽는 목록이 같은 답이다.
+  const targets = useMemo(
+    () =>
+      readAllTargets({
+        readStates: readStates.data ?? [],
+        dmChannelIds: new Set(channels.groups.dms.map((dm) => dm.id.toLowerCase())),
+      }),
+    [readStates.data, channels.groups.dms]
+  );
 
   // 카드마다 짧은 줄 id를 정해 주는 장부. 컴포넌트가 사는 동안 같은 카드는 같은 id를 갖는다(지연 초기화: 다시 그릴 때마다 만들지 않는다).
   const [rowIds] = useState(createRowIds);
@@ -49,6 +74,8 @@ export function TrayStatus() {
   const { status, byId } = buildTrayStatus({
     unread,
     compose: true,
+    readAll: targets.length > 0,
+    left: { approvals: needs.approvals, panes: needs.panes },
     items,
     copy: trayCopy(formatMessage),
     rowIds,
@@ -71,9 +98,11 @@ export function TrayStatus() {
       void setTrayStatus({
         unread: 0,
         compose: false,
+        readAll: false,
         labels: labelsRef.current,
         running: [],
         more: null,
+        remaining: null,
       });
     },
     [desktop]
@@ -81,15 +110,32 @@ export function TrayStatus() {
 
   // 가장 최근의 이동 함수를 ref로 읽는다: 구독은 한 번만 만든다(`navigate`는 경로마다 새 함수라서 그 변화에 다시 구독하면
   // 그 사이에 온 선택을 놓친다 — `DesktopNotifications`의 같은 이유).
-  const landRef = useRef({ navigate, openNewDm });
-  landRef.current = { navigate, openNewDm };
+  const landRef = useRef({ navigate, openNewDm, markChannelsRead });
+  landRef.current = { navigate, openNewDm, markChannelsRead };
+  // 눌린 순간의 목록을 읽는다(구독은 한 번만 만든다).
+  const targetsRef = useRef(targets);
+  targetsRef.current = targets;
+  const closeNoticeText = formatMessage("desktop.tray.closeNotice");
+  const closeNoticeTextRef = useRef(closeNoticeText);
+  closeNoticeTextRef.current = closeNoticeText;
+  const [announceHidden] = useState(() => createCloseNotice());
   useEffect(() => {
     if (!desktop) return;
     let cancelled = false;
     let stop: (() => void) | null = null;
     void onTrayAction((payload) => {
       const action = readTrayAction(payload);
-      if (action === null || globalShortcutsHeld()) return;
+      if (action === null) return;
+      // 이 둘은 화면을 옮기지도 겹친 표면을 걷지도 않아서 「한 번만 보이는 값」을 쥔 화면 앞에서 물러설 까닭이 없다.
+      if (action.action === TRAY_ACTION.windowHidden) {
+        void announceHidden(closeNoticeTextRef.current);
+        return;
+      }
+      if (action.action === TRAY_ACTION.readAll) {
+        void landRef.current.markChannelsRead(targetsRef.current);
+        return;
+      }
+      if (globalShortcutsHeld()) return;
       if (action.action === TRAY_ACTION.newMessage) {
         dismissTemporarySurfaces();
         landRef.current.openNewDm(null);
@@ -112,7 +158,7 @@ export function TrayStatus() {
       cancelled = true;
       stop?.();
     };
-  }, [desktop]);
+  }, [desktop, announceHidden]);
 
   return null;
 }

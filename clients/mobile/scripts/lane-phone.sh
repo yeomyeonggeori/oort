@@ -91,6 +91,12 @@
 #                          reported FAIL (default: 1800 — Maestro 2.8 sometimes
 #                          hangs in its own teardown after every step passed)
 #   LANE_PHONE_RUST_IMAGE  reuse a prebuilt image instead of building one
+#   LANE_PHONE_LOCAL_DRIVE 1 = attachments get a local-volume archive (ADR-0169), so the
+#                          stack can hold bytes. Off by default (the other flows send none);
+#                          `5208-video-viewer-live` turns it on by itself (#5208).
+#   LANE_PHONE_RECORDER_PORT  the recording relay `5208-video-viewer-live` puts between the
+#                          app and the api (default: api port + 2, the slot the compose never
+#                          publishes — postgres)
 #   LANE_PHONE_OUT_DIR     artifact dir (default: under $TMPDIR)
 # =============================================================================
 set -euo pipefail
@@ -155,6 +161,15 @@ done
 if [ -n "$ONLY_FLOW" ]; then
   FLOWS=("$ONLY_FLOW")
 fi
+
+# #5208 — the video flow needs somewhere to keep attachment bytes. The lane's compose leaves the Drive
+# archive unconfigured (every attachment route answers 503 "Drive archive is not configured"), so the
+# flow that uploads a real video asks for the self-host default: ADR-0169's local volume. Only that flow
+# does — the others send no attachment and keep the stack as small as it was.
+LOCAL_DRIVE="${LANE_PHONE_LOCAL_DRIVE:-0}"
+for flow_name in "${FLOWS[@]}"; do
+  [ "$flow_name" = "5208-video-viewer-live" ] && LOCAL_DRIVE=1
+done
 
 # --------------------------------------------------------------------------
 # `--no-build` is refused HERE, before anything is started (#1035)
@@ -348,6 +363,16 @@ MOCK_HERMES_MAESTRO_SLOW_SECONDS=$SLOW_SECONDS
 
 DB_VOLUME_NAME=$LANE_DB_VOLUME
 ENV
+if [ "$LOCAL_DRIVE" = "1" ]; then
+  # The upload address the server advertises must be one this host (the fixture script) and the
+  # simulator (the player) can both reach: the api's own published loopback port.
+  cat >>"$ENV_FILE" <<ENV
+
+MOMO_DRIVE_ARCHIVE_BACKEND=local
+MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive
+MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://127.0.0.1:$API_PORT
+ENV
+fi
 
 # Where the two bind-mounted files are staged for the Docker daemon (see
 # stage_mounts below). Per compose project, so two lanes never share a directory.
@@ -357,6 +382,7 @@ STAGE_OVERRIDE="$STAGE_DIR/mounts.override.yml"
 
 COMPOSE_ARGS=(--env-file "$ENV_FILE" -p "$PROJECT" -f "$COMPOSE_BASE")
 [ "$BUILD_IMAGE" -eq 1 ] && COMPOSE_ARGS+=(-f "$COMPOSE_BUILD")
+[ "$LOCAL_DRIVE" = "1" ] && COMPOSE_ARGS+=(-f "$REPO_ROOT/infra/rust/local.override.yml")
 COMPOSE_ARGS+=(-f "$COMPOSE_LANE" -f "$STAGE_OVERRIDE")
 
 compose() { docker compose "${COMPOSE_ARGS[@]}" "$@"; }
@@ -417,6 +443,8 @@ unstage_mounts() {
 }
 
 METRO_PID=""
+# The request-recording relay of the video flow (#5208); empty when that flow is not run.
+RECORDER_PID=""
 LOCK_HELD=0
 LOCK_DIR=""
 # The currently-running flow and its watchdog, so a Ctrl-C or a kill takes them
@@ -486,6 +514,7 @@ cleanup() {
   if [ -n "$METRO_PID" ]; then
     kill -TERM "-$METRO_PID" 2>/dev/null || kill -TERM "$METRO_PID" 2>/dev/null || true
   fi
+  [ -n "$RECORDER_PID" ] && kill -TERM "$RECORDER_PID" 2>/dev/null || true
   if [ "$KEEP" = "1" ]; then
     say "--keep: leaving compose project '$PROJECT' up (tear down with:"
     say "        docker compose --env-file $ENV_FILE -p $PROJECT \\"
@@ -972,6 +1001,64 @@ fi
 RESULTS=()
 FAILED=0
 
+# ---------------------------------------------------------------------------
+# the video flow's inputs (#5208)
+# ---------------------------------------------------------------------------
+# `5208-video-viewer-live` plays real video from the stack, and the claim it exists for — "playback
+# starts by reading ranges, with the bearer the native player was handed" — happens between the
+# simulator's AVPlayer and the api, where nothing writes a log (the api has no HTTP trace layer).
+# So three things are set up here, only when that flow is asked for:
+#   1. test clips and posters are uploaded through the REAL attachment routes (upload → complete →
+#      `PUT …/media` → send), by `lane-video-fixture.mjs` (ffmpeg makes the clips; nothing binary is committed);
+#   2. a recording relay (`lane-request-recorder.cjs`) takes the app's place in front of the api and writes
+#      one line per attachment-bytes request — never a token's value, only whether a bearer rode along;
+#   3. after the flow, the record is checked (`verify`): the first read of each played clip was a ranged
+#      206, and the bearer reached the native player. A flow that went green on screen without those is FAIL.
+VIDEO_FLOW="5208-video-viewer-live"
+FLOW_SERVER_URL="$BASE_URL"
+VIDEO_IDS=""
+VIDEO_REQUESTS="$OUT_DIR/requests.jsonl"
+for flow_name in "${FLOWS[@]}"; do
+  if [ "$flow_name" = "$VIDEO_FLOW" ]; then
+    need ffmpeg
+    RECORDER_PORT="${LANE_PHONE_RECORDER_PORT:-$((API_PORT + 2))}"
+    if port_in_use "$RECORDER_PORT"; then
+      echo "[lane] host port $RECORDER_PORT (the request recorder's) is busy and is not this lane's." >&2
+      echo "[lane] Override with LANE_PHONE_RECORDER_PORT." >&2
+      exit 1
+    fi
+    say "seeding video attachments for $VIDEO_FLOW (real upload routes; log: $OUT_DIR/video-fixture.log)"
+    if ! VIDEO_IDS="$(node "$APP_ROOT/scripts/lane-video-fixture.mjs" \
+          --base-url "$BASE_URL" --email "$LANE_EMAIL" --password "$LANE_PASSWORD" \
+          --workspace "$DEMO_WORKSPACE_ID" --channel "$GENERAL_CHANNEL_ID" \
+          --out "$OUT_DIR/video-fixture" 2>"$OUT_DIR/video-fixture.log" | tail -n 1)"; then
+      tail -20 "$OUT_DIR/video-fixture.log" >&2
+      echo "[lane] the video fixture failed — full log: $OUT_DIR/video-fixture.log" >&2
+      exit 1
+    fi
+    case "$VIDEO_IDS" in '{'*'}') ;; *)
+      tail -20 "$OUT_DIR/video-fixture.log" >&2
+      echo "[lane] the video fixture did not answer its attachment ids (got: ${VIDEO_IDS:-nothing})" >&2
+      exit 1 ;;
+    esac
+    say "starting the request recorder on :$RECORDER_PORT -> api :$API_PORT (record: $VIDEO_REQUESTS)"
+    node "$APP_ROOT/scripts/lane-request-recorder.cjs" serve \
+      --listen "$RECORDER_PORT" --target "127.0.0.1:$API_PORT" --out "$VIDEO_REQUESTS" \
+      >"$OUT_DIR/recorder.log" 2>&1 &
+    RECORDER_PID=$!
+    recorder_deadline=$(( $(date -u +%s) + 15 ))
+    until grep -q '^listening ' "$OUT_DIR/recorder.log" 2>/dev/null; do
+      if [ "$(date -u +%s)" -ge "$recorder_deadline" ] || ! kill -0 "$RECORDER_PID" 2>/dev/null; then
+        cat "$OUT_DIR/recorder.log" >&2
+        echo "[lane] the request recorder did not start" >&2
+        exit 1
+      fi
+      sleep 0.2
+    done
+    FLOW_SERVER_URL="http://127.0.0.1:$RECORDER_PORT"
+  fi
+done
+
 for flow in "${FLOWS[@]}"; do
   flow_file="$APP_ROOT/maestro/$flow.yaml"
   [ -f "$flow_file" ] || { echo "[lane] no such flow: $flow_file" >&2; exit 2; }
@@ -998,7 +1085,7 @@ for flow in "${FLOWS[@]}"; do
   # PEER_TEXT is the mock's fixed reply text (assert_provider_is_the_mock greps the
   # same string), not something a real provider could be made to say.
   maestro --udid "$UDID" test --test-output-dir "$flow_out" "$flow_file" \
-      -e SERVER_URL="$BASE_URL" \
+      -e SERVER_URL="$FLOW_SERVER_URL" \
       -e EMAIL="$LANE_EMAIL" \
       -e PASSWORD="$LANE_PASSWORD" \
       -e GENERAL_CHANNEL_ID="$GENERAL_CHANNEL_ID" \
@@ -1032,6 +1119,27 @@ for flow in "${FLOWS[@]}"; do
       flow_rc=90
     else
       say "  approved tool executed for real (work session ended)"
+    fi
+  fi
+
+  # #5208 — same idea as 30-approval above: the screen cannot show HOW the bytes came. The recorder's
+  # record can, so a flow that played on screen but did not start with a ranged 206 (or whose native
+  # player never carried the bearer) is downgraded to FAIL.
+  if [ "$flow" = "$VIDEO_FLOW" ] && [ "$flow_rc" = "0" ]; then
+    ids_of() { printf '%s' "$VIDEO_IDS" | python3 -c 'import json,sys
+d = json.load(sys.stdin)
+print(",".join(d[k] for k in sys.argv[1:]))' "$@"; }
+    if node "$APP_ROOT/scripts/lane-request-recorder.cjs" verify \
+         --records "$VIDEO_REQUESTS" \
+         --played "$(ids_of poster mixedVideo noPoster)" \
+         --posters "$(ids_of poster mixedVideo)" \
+         --no-poster "$(ids_of noPoster)" >"$OUT_DIR/request-proof.log" 2>&1; then
+      say "  video bytes came by ranged reads with the bearer (record: $VIDEO_REQUESTS)"
+      sed 's/^/[lane]     /' "$OUT_DIR/request-proof.log"
+    else
+      say "  $flow passed on screen but the request record does not show ranged playback:"
+      sed 's/^/[lane]     /' "$OUT_DIR/request-proof.log"
+      flow_rc=91
     fi
   fi
 

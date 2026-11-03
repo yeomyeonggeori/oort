@@ -199,6 +199,34 @@ export type ViewerIconName = keyof typeof VIEWER_ICONS;
 /** 둥근 유리 단추 안 글리프 22 — 뒤로(`CONV_ICON_SIZE.left`)와 같은 크기라 세 단추의 글리프가 한 무게로 읽힌다. */
 export const VIEWER_ICON_SIZE = 22;
 
+// ---- 영상 아이콘 여섯 (#5208) -------------------------------------------------
+// Lucide `play`·`pause`·`volume-2`·`volume-x`·`video`(ISC, 웹이 `lucide-react` 0.454.0 으로 쓰는 같은 집합 — 경로 그대로),
+// 같은 레시피(선 1.8, viewBox 24). 새 모양을 그리지 않고 **기존 묶음에서 옮겨 담았다**. `play`·`pause`는 재생 단추의 관례대로
+// 안을 채웠다(`fill`만 더했다 — 경로는 그대로다). 크기는 쓰는 자리의 1·2·3배다: 유리 단추 글리프 22, 카드 한가운데 재생 표지 28,
+// 파일 카드 타일 안 영상기 18. 다시 만드는 법: `rsvg-convert -w <pt|2pt|3pt> -h <pt|2pt|3pt>`.
+
+export const VIDEO_ICONS = {
+  play: require('./play22.png') as ImageSourcePropType,
+  pause: require('./pause22.png') as ImageSourcePropType,
+  volume: require('./volume22.png') as ImageSourcePropType,
+  volumeOff: require('./volumeoff22.png') as ImageSourcePropType,
+  /** 카드 한가운데의 재생 표지. */
+  playMark: require('./play28.png') as ImageSourcePropType,
+  /** 파일 카드 타일 안의 영상기 — 포스터가 없는 영상이 문서 아이콘으로 서지 않게 한다. */
+  video: require('./video18.png') as ImageSourcePropType,
+} as const;
+
+export type VideoIconName = keyof typeof VIDEO_ICONS;
+
+export const VIDEO_ICON_SIZE: Readonly<Record<VideoIconName, number>> = {
+  play: 22,
+  pause: 22,
+  volume: 22,
+  volumeOff: 22,
+  playMark: 28,
+  video: 18,
+};
+
 // ---- 링크 카드의 지구 (#4883) -------------------------------------------------
 // Lucide `globe`(ISC, 웹이 `lucide-react` 로 쓰는 같은 집합 — 경로 그대로), 같은 레시피(선 1.8, viewBox 24,
 // 24pt 의 1·2·3배). 서버가 사이트 아이콘을 주지 못한 카드의 **기본 아이콘**이다(코어 `unfurlCardModel`:

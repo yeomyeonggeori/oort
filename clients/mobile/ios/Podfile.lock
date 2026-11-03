@@ -99,6 +99,8 @@ PODS:
     - ExpoModulesJSI
   - ExpoNotifications (57.0.8):
     - ExpoModulesCore
+  - ExpoVideo (57.0.5):
+    - ExpoModulesCore
   - FBLazyVector (0.86.2)
   - hermes-engine (250829098.0.16):
     - hermes-engine/Pre-built (= 250829098.0.16)
@@ -2166,6 +2168,7 @@ DEPENDENCIES:
   - ExpoModulesJSI (from `../node_modules/expo-modules-jsi/apple`)
   - ExpoModulesWorklets (from `../node_modules/expo-modules-core`)
   - ExpoNotifications (from `../node_modules/expo-notifications/ios`)
+  - ExpoVideo (from `../node_modules/expo-video/ios`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
   - hermes-engine (from `../node_modules/react-native/sdks/hermes-engine/hermes-engine.podspec`)
   - MomoBackgroundTaskNative (from `../modules/momo-background-task-native/ios`)
@@ -2311,6 +2314,8 @@ EXTERNAL SOURCES:
     :path: "../node_modules/expo-modules-core"
   ExpoNotifications:
     :path: "../node_modules/expo-notifications/ios"
+  ExpoVideo:
+    :path: "../node_modules/expo-video/ios"
   FBLazyVector:
     :path: "../node_modules/react-native/Libraries/FBLazyVector"
   hermes-engine:
@@ -2510,6 +2515,7 @@ SPEC CHECKSUMS:
   ExpoModulesJSI: b20fefa4cdd9097e7e6b715466d1900b8c5d4711
   ExpoModulesWorklets: 6b240031daa3de4df791588fc78236637ff602f6
   ExpoNotifications: 0f253ad90f108c1c4045b541294164865c6aadc8
+  ExpoVideo: 31d5dc617d913808aeba05c3ab900712637b0e47
   FBLazyVector: 3c3be9a019176b5699455f7f66c5444b78a411c6
   hermes-engine: 017aba474510092d38cc82328f1102186301db3e
   libwebp: af5937a13536ef73f3784d69cc342b98961acf33

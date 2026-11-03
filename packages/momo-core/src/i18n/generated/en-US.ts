@@ -63,6 +63,167 @@ export const catalog: MessageCatalog = {
       "value": "name"
     }
   ],
+  "attachments.video.cardLabel": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", video, "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": ", play"
+    }
+  ],
+  "attachments.video.cardLabelNoDuration": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": ", video, play"
+    }
+  ],
+  "attachments.video.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't play this video"
+    }
+  ],
+  "attachments.video.gone": [
+    {
+      "type": 0,
+      "value": "This video isn't available anymore"
+    }
+  ],
+  "attachments.video.loading": [
+    {
+      "type": 0,
+      "value": "Loading video"
+    }
+  ],
+  "attachments.video.mute": [
+    {
+      "type": 0,
+      "value": "Mute"
+    }
+  ],
+  "attachments.video.pause": [
+    {
+      "type": 0,
+      "value": "Pause"
+    }
+  ],
+  "attachments.video.play": [
+    {
+      "type": 0,
+      "value": "Play"
+    }
+  ],
+  "attachments.video.replay": [
+    {
+      "type": 0,
+      "value": "Replay from the start"
+    }
+  ],
+  "attachments.video.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "attachments.video.saveHint": [
+    {
+      "type": 0,
+      "value": "Opens the share sheet. Choose “Save Video”."
+    }
+  ],
+  "attachments.video.seekLabel": [
+    {
+      "type": 0,
+      "value": "Playback position"
+    }
+  ],
+  "attachments.video.seekValue": [
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 1,
+      "value": "total"
+    }
+  ],
+  "attachments.video.thumbHint": [
+    {
+      "type": 0,
+      "value": "Go to this video"
+    }
+  ],
+  "attachments.video.thumbLabel": [
+    {
+      "type": 0,
+      "value": "Video "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    }
+  ],
+  "attachments.video.unmute": [
+    {
+      "type": 0,
+      "value": "Unmute"
+    }
+  ],
+  "attachments.viewer.mixedCaption": [
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    }
+  ],
+  "attachments.viewer.mixedCaptionLabel": [
+    {
+      "type": 0,
+      "value": "Item "
+    },
+    {
+      "type": 2,
+      "value": "position",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": " of "
+    },
+    {
+      "type": 2,
+      "value": "total",
+      "style": null
+    }
+  ],
   "common.feedback.unavailable": [
     {
       "type": 0,
@@ -517,6 +678,12 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "desktop.tray.closeNotice": [
+    {
+      "type": 0,
+      "value": "Closing the window keeps oort in the menu bar, so you still get notifications"
+    }
+  ],
   "desktop.tray.more": [
     {
       "type": 2,
@@ -544,6 +711,146 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Open oort"
+    }
+  ],
+  "desktop.tray.readAll": [
+    {
+      "type": 0,
+      "value": "Mark all as read"
+    }
+  ],
+  "desktop.tray.remainApprovals": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approval is still waiting for you"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approvals are still waiting for you"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "desktop.tray.remainBoth": [
+    {
+      "type": 6,
+      "value": "approvals",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approval"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approvals"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "panes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pane"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " panes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " are still waiting for you"
+    }
+  ],
+  "desktop.tray.remainPanes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pane is still waiting for you"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " panes are still waiting for you"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "desktop.tray.running": [

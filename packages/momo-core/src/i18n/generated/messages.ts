@@ -3,6 +3,24 @@ export const messageKeys = [
   "attachments.tray.noticeDismiss",
   "attachments.tray.overflow",
   "attachments.tray.removeNamed",
+  "attachments.video.cardLabel",
+  "attachments.video.cardLabelNoDuration",
+  "attachments.video.failed",
+  "attachments.video.gone",
+  "attachments.video.loading",
+  "attachments.video.mute",
+  "attachments.video.pause",
+  "attachments.video.play",
+  "attachments.video.replay",
+  "attachments.video.retry",
+  "attachments.video.saveHint",
+  "attachments.video.seekLabel",
+  "attachments.video.seekValue",
+  "attachments.video.thumbHint",
+  "attachments.video.thumbLabel",
+  "attachments.video.unmute",
+  "attachments.viewer.mixedCaption",
+  "attachments.viewer.mixedCaptionLabel",
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
@@ -63,10 +81,15 @@ export const messageKeys = [
   "desktop.menu.view",
   "desktop.menu.window",
   "desktop.notify.threadSummary",
+  "desktop.tray.closeNotice",
   "desktop.tray.more",
   "desktop.tray.newMessage",
   "desktop.tray.none",
   "desktop.tray.open",
+  "desktop.tray.readAll",
+  "desktop.tray.remainApprovals",
+  "desktop.tray.remainBoth",
+  "desktop.tray.remainPanes",
   "desktop.tray.running",
   "desktop.tray.stateBlocked",
   "desktop.tray.stateWorking",
@@ -636,6 +659,40 @@ export const argumentSpecs = {
   "attachments.tray.removeNamed": {
     "name": "string"
   },
+  "attachments.video.cardLabel": {
+    "duration": "string",
+    "name": "string"
+  },
+  "attachments.video.cardLabelNoDuration": {
+    "name": "string"
+  },
+  "attachments.video.failed": {},
+  "attachments.video.gone": {},
+  "attachments.video.loading": {},
+  "attachments.video.mute": {},
+  "attachments.video.pause": {},
+  "attachments.video.play": {},
+  "attachments.video.replay": {},
+  "attachments.video.retry": {},
+  "attachments.video.saveHint": {},
+  "attachments.video.seekLabel": {},
+  "attachments.video.seekValue": {
+    "position": "string",
+    "total": "string"
+  },
+  "attachments.video.thumbHint": {},
+  "attachments.video.thumbLabel": {
+    "position": "number"
+  },
+  "attachments.video.unmute": {},
+  "attachments.viewer.mixedCaption": {
+    "position": "number",
+    "total": "number"
+  },
+  "attachments.viewer.mixedCaptionLabel": {
+    "position": "number",
+    "total": "number"
+  },
   "common.feedback.unavailable": {},
   "common.invitation.received": {
     "actorName": "string"
@@ -706,12 +763,24 @@ export const argumentSpecs = {
   "desktop.notify.threadSummary": {
     "count": "number"
   },
+  "desktop.tray.closeNotice": {},
   "desktop.tray.more": {
     "count": "number"
   },
   "desktop.tray.newMessage": {},
   "desktop.tray.none": {},
   "desktop.tray.open": {},
+  "desktop.tray.readAll": {},
+  "desktop.tray.remainApprovals": {
+    "count": "number"
+  },
+  "desktop.tray.remainBoth": {
+    "approvals": "number",
+    "panes": "number"
+  },
+  "desktop.tray.remainPanes": {
+    "count": "number"
+  },
   "desktop.tray.running": {},
   "desktop.tray.stateBlocked": {},
   "desktop.tray.stateWorking": {},
@@ -1426,6 +1495,24 @@ export interface MessageArgs {
   "attachments.tray.noticeDismiss": Record<string, never>;
   "attachments.tray.overflow": { count: number; max: number };
   "attachments.tray.removeNamed": { name: string };
+  "attachments.video.cardLabel": { duration: string; name: string };
+  "attachments.video.cardLabelNoDuration": { name: string };
+  "attachments.video.failed": Record<string, never>;
+  "attachments.video.gone": Record<string, never>;
+  "attachments.video.loading": Record<string, never>;
+  "attachments.video.mute": Record<string, never>;
+  "attachments.video.pause": Record<string, never>;
+  "attachments.video.play": Record<string, never>;
+  "attachments.video.replay": Record<string, never>;
+  "attachments.video.retry": Record<string, never>;
+  "attachments.video.saveHint": Record<string, never>;
+  "attachments.video.seekLabel": Record<string, never>;
+  "attachments.video.seekValue": { position: string; total: string };
+  "attachments.video.thumbHint": Record<string, never>;
+  "attachments.video.thumbLabel": { position: number };
+  "attachments.video.unmute": Record<string, never>;
+  "attachments.viewer.mixedCaption": { position: number; total: number };
+  "attachments.viewer.mixedCaptionLabel": { position: number; total: number };
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
@@ -1486,10 +1573,15 @@ export interface MessageArgs {
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
   "desktop.notify.threadSummary": { count: number };
+  "desktop.tray.closeNotice": Record<string, never>;
   "desktop.tray.more": { count: number };
   "desktop.tray.newMessage": Record<string, never>;
   "desktop.tray.none": Record<string, never>;
   "desktop.tray.open": Record<string, never>;
+  "desktop.tray.readAll": Record<string, never>;
+  "desktop.tray.remainApprovals": { count: number };
+  "desktop.tray.remainBoth": { approvals: number; panes: number };
+  "desktop.tray.remainPanes": { count: number };
   "desktop.tray.running": Record<string, never>;
   "desktop.tray.stateBlocked": Record<string, never>;
   "desktop.tray.stateWorking": Record<string, never>;

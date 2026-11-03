@@ -65,9 +65,9 @@ const ROW_CLASS =
 const DAY = new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric" });
 
 export function MemoryBrowserRoute() {
-  const { workspaceId, connStatus } = useSession();
+  const { workspaceId } = useSession();
   const { isMobile } = useShellNav();
-  const offline = useOffline() || connStatus === "disconnected";
+  const offline = useOffline();
   const [params, setParams] = useSearchParams();
   const channelId = params.get("channel") ?? "";
   const kindParam = params.get("kind");

@@ -11,6 +11,7 @@ import { fetchWorkspace } from "@momo/core/features/settings/api";
 import { AVAILABILITY_REFRESH_MS } from "@momo/core/features/presence/model";
 import type { RoleLabels } from "@momo/core/features/directory/model";
 import { idKey, makeDirectory, type Directory } from "@momo/core/features/workspace/directory";
+import { isDesktop } from "@/lib/tauri";
 
 // =============================================================================
 // Workspace reads that the sidebar, timeline and quick switcher all share.
@@ -90,6 +91,12 @@ export function useReadStates(workspaceId: string) {
     // Unread is server truth; refresh it on a slow cadence rather than
     // recomputing anything locally.
     refetchInterval: 30_000,
+    // The desktop app lives on with its window put away (#5196): the Dock badge and the menu-bar dot are
+    // built from these rows (`useDockBadgeCount`), and nothing but this poll refreshes them. A hidden page
+    // pauses an interval by default (`refetchOnWindowFocus` is off app-wide, so nothing catches up on
+    // return either), which would freeze the badge exactly while the window is away. Browsers keep the
+    // default: a background tab owes nobody a badge.
+    refetchIntervalInBackground: isDesktop(),
   });
   const byChannel = useMemo(
     () => new Map((query.data ?? []).map((r) => [idKey(r.channelId), r])),
