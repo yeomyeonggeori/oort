@@ -1040,19 +1040,19 @@ export const catalog: MessageCatalog = {
   "expressions.kind.emoji": [
     {
       "type": 0,
-      "value": "이모지"
+      "value": "팀 이모지"
     }
   ],
   "expressions.kind.hintEmoji": [
     {
       "type": 0,
-      "value": "작은 그림이에요. 글 사이와 반응에 써요."
+      "value": "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 팀 이모지예요."
     }
   ],
   "expressions.kind.hintSticker": [
     {
       "type": 0,
-      "value": "큰 그림이에요. 크게 보내고, 움직이면 팀 GIF에 보여요."
+      "value": "큰 그림이에요. 크게 보내고, 움직이면 GIF에서 볼 수 있어요."
     }
   ],
   "expressions.kind.legend": [
@@ -1064,7 +1064,7 @@ export const catalog: MessageCatalog = {
   "expressions.kind.sticker": [
     {
       "type": 0,
-      "value": "스티커"
+      "value": "이모티콘"
     }
   ],
   "expressions.make.agent": [
@@ -1422,10 +1422,34 @@ export const catalog: MessageCatalog = {
       "value": "요청 보내기"
     }
   ],
+  "expressions.panel.viewEmoticon": [
+    {
+      "type": 0,
+      "value": "이모티콘"
+    }
+  ],
   "expressions.panel.viewEmpty": [
     {
       "type": 0,
       "value": "이 보기에는 아직 그림이 없어요"
+    }
+  ],
+  "expressions.panel.viewGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.panel.viewsLegend": [
+    {
+      "type": 0,
+      "value": "팀 표현 보기"
+    }
+  ],
+  "expressions.panel.viewTeam": [
+    {
+      "type": 0,
+      "value": "팀 이모지"
     }
   ],
   "expressions.photo.agentInstead": [
