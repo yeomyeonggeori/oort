@@ -110,7 +110,8 @@ function safeFileName(name: string): string {
   return cleaned === '' ? 'attachment' : cleaned.slice(0, 120);
 }
 
-function contentUrl(
+/** 첨부 바이트의 주소. 영상 재생(`videoContent.ts`)이 같은 주소를 쓴다(#5208). */
+export function contentUrl(
   workspaceId: string,
   channelId: string,
   attachmentId: string,
@@ -133,7 +134,8 @@ function destinationFor(attachment: MessageAttachment): File {
   );
 }
 
-function authHeaders(): Record<string, string> {
+/** 지금 세션의 bearer 머리. 바이트를 받는 모든 길(내려받기·영상 포스터·영상 소스)이 이 한 곳에서 읽는다. */
+export function authHeaders(): Record<string, string> {
   const token = coreSession().getAccessToken();
   return token === null ? {} : { Authorization: `Bearer ${token}` };
 }
@@ -149,14 +151,12 @@ function isUnauthorized(error: unknown): boolean {
 }
 
 async function streamToFile(
-  workspaceId: string,
-  channelId: string,
-  attachment: MessageAttachment,
+  url: string,
   destination: File,
   onProgress?: (progress: number | null) => void,
 ): Promise<File> {
   const downloaded = await File.downloadFileAsync(
-    contentUrl(workspaceId, channelId, attachment.id),
+    url,
     destination,
     {
       headers: authHeaders(),
@@ -170,6 +170,40 @@ async function streamToFile(
   );
   onProgress?.(1);
   return downloaded;
+}
+
+/**
+ * 한 주소의 바이트를 앱 캐시 파일로 받는다. 401 은 코어의 단 한 번의 회전(`rotateAfterUnauthorized`) 뒤 한 번 더 시도하고, 실패하면
+ * 반쯤 쓰인 파일을 지우며, 끝내 401 이면 세션 만료를 선언한다. 사진 미리보기·공유시트·영상 포스터(`videoContent.ts`)가 같은 길이다 —
+ * 같은 규칙을 두 번 적지 않는다(#5208 에서 `downloadAttachmentFile` 안의 본문을 그대로 옮겼다).
+ */
+export async function fetchToFile(
+  url: string,
+  destination: File,
+  onProgress?: (progress: number | null) => void,
+): Promise<File> {
+  try {
+    try {
+      return await streamToFile(url, destination, onProgress);
+    } catch (error: unknown) {
+      if (
+        !isUnauthorized(error) ||
+        coreSession().getRefreshToken() === null
+      ) {
+        throw error;
+      }
+      // 회전이 어떻게 끝났는지 읽는 규칙은 코어의 것이다(#3997): 거절이면 `false` 라서
+      // 원래의 401 이 바깥 catch 로 가 선언되고, 서버에 닿지 못했으면 코어가 연결
+      // 오류를 던진다. 그 문구는 401 로 읽히지 않으므로 바깥 catch 가 선언하지 않고,
+      // 이 다운로드만 실패한다(다음 요청이 다시 갱신한다).
+      if (!(await rotateAfterUnauthorized())) throw error;
+      return await streamToFile(url, destination, onProgress);
+    }
+  } catch (error: unknown) {
+    if (destination.exists) destination.delete();
+    if (isUnauthorized(error)) coreSession().markAuthExpired();
+    throw error;
+  }
 }
 
 /**
@@ -193,42 +227,11 @@ export async function downloadAttachmentFile(
   if (active !== undefined) return active;
 
   const destination = destinationFor(attachment);
-  const request = (async () => {
-    try {
-      try {
-        return await streamToFile(
-          workspaceId,
-          channelId,
-          attachment,
-          destination,
-          onProgress,
-        );
-      } catch (error: unknown) {
-        if (
-          !isUnauthorized(error) ||
-          coreSession().getRefreshToken() === null
-        ) {
-          throw error;
-        }
-        // 회전이 어떻게 끝났는지 읽는 규칙은 코어의 것이다(#3997): 거절이면 `false` 라서
-        // 원래의 401 이 바깥 catch 로 가 선언되고, 서버에 닿지 못했으면 코어가 연결
-        // 오류를 던진다. 그 문구는 401 로 읽히지 않으므로 바깥 catch 가 선언하지 않고,
-        // 이 다운로드만 실패한다(다음 요청이 다시 갱신한다).
-        if (!(await rotateAfterUnauthorized())) throw error;
-        return await streamToFile(
-          workspaceId,
-          channelId,
-          attachment,
-          destination,
-          onProgress,
-        );
-      }
-    } catch (error: unknown) {
-      if (destination.exists) destination.delete();
-      if (isUnauthorized(error)) coreSession().markAuthExpired();
-      throw error;
-    }
-  })()
+  const request = fetchToFile(
+    contentUrl(workspaceId, channelId, attachment.id),
+    destination,
+    onProgress,
+  )
     .then(file => {
       cached.set(key, file);
       while (cached.size > PREVIEW_CACHE_LIMIT) {
