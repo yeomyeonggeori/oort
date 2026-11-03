@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { act, fireEvent, render, screen, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentApprovalCard } from "@momo/core/features/timeline/agentCardModel";
@@ -7,6 +10,10 @@ import { STAGE_HERO_WINDOW_MS } from "@/design/motion";
 import { resetSettledApprovalsForTest, settledApprovalFor } from "@/features/timeline/settledApprovals";
 import { DecisionStageHost } from "./DecisionStage";
 import { closeDecisionStage, decisionStageSnapshot, openDecisionStage, type DecisionStageRequest } from "./openDecisionStage";
+
+// 이 설정은 CSS 가져오기를 빈 값으로 바꾼다(`?raw`도 빈 문자열). 무대 CSS 규칙을 계산에 올리려면 파일을 읽는다.
+// jsdom 의 URL 은 node:fs 가 받지 않으므로 경로 문자열로 푼다.
+const stageCss = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "DecisionStage.css"), "utf8");
 
 const session = vi.hoisted(() => ({ workspaceId: "workspace-stage", connStatus: "connected" }));
 const transport = vi.hoisted(() => ({ decide: vi.fn() }));
@@ -104,7 +111,7 @@ describe("decision stage", () => {
     open();
     expect(stage()?.dataset.stagePhase).toBe("open");
     expect(screen.getByText("2건 중 1번")).toBeTruthy();
-    expect(screen.getByText("23시간 남음 · 자세히")).toBeTruthy();
+    expect(screen.getByText("23시간 남음")).toBeTruthy();
     expect(screen.getByText("왜")).toBeTruthy();
     expect(screen.getAllByText("안내를 대화 위에 두려고 해요")).toHaveLength(2);
     expect(screen.getByText("생각 줄 · 자세히").closest("details")?.open).toBe(false);
@@ -186,6 +193,94 @@ describe("decision stage", () => {
     pointer("pointercancel", node, 0, 120, 401);
     await clickDecision();
     expect(transport.decide).toHaveBeenCalledOnce();
+  });
+
+  it("says only the remaining time on the stage: the 「자세히」 of the timeline card is a toggle and the stage has no such toggle there (#4986)", () => {
+    open();
+    expect(screen.getByTestId("decision-stage-remaining").textContent).toBe("23시간 남음");
+    // 누를 수 있는 「자세히」는 무대에 하나다: 「생각 줄 · 자세히」 펼침. 그 밖에 「자세히」로 끝나는 글자가 없다.
+    const stageEl = stage()!;
+    const withDetail = [...stageEl.querySelectorAll("*")].filter((node) => node.children.length === 0 && /자세히/.test(node.textContent ?? ""));
+    expect(withDetail.map((node) => node.tagName + ":" + node.textContent)).toEqual(["SUMMARY:생각 줄 · 자세히"]);
+    // 기한을 모르는 카드는 줄 자체가 없다.
+    act(() => closeDecisionStage(decisionStageSnapshot()!.ticket));
+    open({ cards: [{ id: "무기한", card: approval("무기한", { expiresAtMs: undefined }) }] });
+    expect(screen.queryByTestId("decision-stage-remaining")).toBeNull();
+  });
+
+  it("names the dialog for screen readers without drawing a pill that reads as a button (#4986)", () => {
+    open();
+    const title = screen.getByText("결정 보기");
+    expect(title.classList.contains("sr-only")).toBe(true);
+    expect(title.classList.contains("glass")).toBe(false);
+    expect(title.classList.contains("rounded-full")).toBe(false);
+    expect(screen.getByRole("dialog", { name: "결정 보기" })).toBeTruthy();
+    // 유리 알약은 눌리는 단추의 문법이다: 헤더의 알약은 닫기 하나뿐이다.
+    const header = stage()!.querySelector("header")!;
+    expect([...header.querySelectorAll(".glass")].map((node) => node.getAttribute("aria-label"))).toEqual(["결정 무대 닫기"]);
+  });
+
+  it("marks the current thumbnail with a fill, not with the ring the focus ring also uses (#4986)", () => {
+    const style = document.createElement("style");
+    style.textContent = stageCss;
+    document.head.append(style);
+    try {
+      open();
+      const thumbs = screen.getByRole("group", { name: "결정 썸네일" }).querySelectorAll<HTMLElement>(".decision-stage-thumbnail");
+      expect(thumbs).toHaveLength(2);
+      const [now, other] = [thumbs[0]!, thumbs[1]!];
+      expect(now.getAttribute("aria-current")).toBe("true");
+      expect(other.getAttribute("aria-current")).toBeNull();
+      // 집의 포커스 링은 신호색 안쪽 윤곽 2px이다: 같은 모양을 「지금」 표시로 쓰지 않는다.
+      expect(now.className).not.toMatch(/\bring-/);
+      // 선택은 채움이다. jsdom은 `.glass`(토큰 CSS)를 모르므로 이 규칙만 계산에 든다.
+      expect(getComputedStyle(now).backgroundColor).toBe("var(--accent-soft)");
+      expect(getComputedStyle(other).backgroundColor).not.toBe("var(--accent-soft)");
+      // 선택이 옮겨 가면 채움도 따라간다.
+      fireEvent.keyDown(stage()!, { key: "ArrowRight" });
+      const after = screen.getByRole("group", { name: "결정 썸네일" }).querySelectorAll<HTMLElement>(".decision-stage-thumbnail");
+      expect(getComputedStyle(after[0]!).backgroundColor).not.toBe("var(--accent-soft)");
+      expect(getComputedStyle(after[1]!).backgroundColor).toBe("var(--accent-soft)");
+    } finally { style.remove(); }
+  });
+
+  it("dims an arrow that has nowhere to go, and only that arrow (#4986)", () => {
+    const style = document.createElement("style");
+    style.textContent = stageCss;
+    document.head.append(style);
+    try {
+      open();
+      const previous = screen.getByRole("button", { name: "이전 결정" });
+      const next = screen.getByRole("button", { name: "다음 결정" });
+      // 첫 장: 이전은 끝, 다음은 갈 곳이 있다.
+      expect(previous.getAttribute("aria-disabled")).toBe("true");
+      expect(getComputedStyle(previous).opacity).toBe("0.5");
+      expect(getComputedStyle(previous).pointerEvents).toBe("none");
+      expect(next.getAttribute("aria-disabled")).toBeNull();
+      expect(getComputedStyle(next).opacity).toBe("");
+      // 마지막 장: 반대로 바뀐다.
+      fireEvent.click(next);
+      expect(next.getAttribute("aria-disabled")).toBe("true");
+      expect(getComputedStyle(next).opacity).toBe("0.5");
+      expect(previous.getAttribute("aria-disabled")).toBeNull();
+      expect(getComputedStyle(previous).opacity).toBe("");
+      // 비활성 모양이어도 초점은 받는다(aria-disabled 문법): 키보드 사용자가 길을 잃지 않는다.
+      next.focus();
+      expect(document.activeElement).toBe(next);
+    } finally { style.remove(); }
+  });
+
+  it("does not stand arrows and 「0건」 where there is nothing to step through (#4986)", () => {
+    const controller = open({ cards: [], loading: true });
+    expect(screen.queryByRole("navigation", { name: "결정 넘겨 보기" })).toBeNull();
+    expect(screen.queryByText("0건")).toBeNull();
+    act(() => controller.update({ loading: false }));
+    expect(screen.queryByRole("navigation", { name: "결정 넘겨 보기" })).toBeNull();
+    act(() => controller.update({ error: "목록을 읽지 못했어요. 다시 불러 주세요." }));
+    expect(screen.queryByRole("button", { name: "이전 결정" })).toBeNull();
+    act(() => controller.update({ cards: request().cards, error: null }));
+    expect(screen.getByRole("navigation", { name: "결정 넘겨 보기" })).toBeTruthy();
+    expect(screen.getByText("2건 중 1번")).toBeTruthy();
   });
 
   it("has loading, empty, error, retry and cached offline states", () => {

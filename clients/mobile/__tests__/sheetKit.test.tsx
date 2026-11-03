@@ -853,6 +853,46 @@ describe('입력 알약', () => {
       paletteFor('light').textMuted,
     );
   });
+
+  // 잠긴 알약 (#5132, #5099 후속). 보내는 중·저장 중에 `editable={false}` 가 되는 알약(새 채널 이름·에이전트 정액)이 평소 모양 그대로여서
+  // 눌러도 자판이 안 오르는 칸이 고칠 수 있는 칸처럼 보였다. 알약이 스스로 **같은 화면의 잠긴 행**과 같은 흐림을 입고 잠겼다고 말한다
+  // (`Field`·`TextArea` 가 #5099 에서 받은 규칙). 기준값을 숫자로 적지 않고 같은 순간의 잠긴 행(`ListRow disabled`)과 등식으로 잰다 —
+  // 한쪽만 바뀌면 빨개진다. 호출하는 시트의 실제 잠김은 `shellChrome`(새 채널)·`agentUsage`(정액)가 잰다.
+  it.each<ColorScheme>(['light', 'dark'])(
+    '`editable={false}` 만 잠긴 행과 같은 흐림이고 잠겼다고 말한다 — 생략·`true` 는 살아 있다 (%s)',
+    async scheme => {
+      await mount(
+        <>
+          <InputPill accessibilityLabel="생략" testID="omitted" />
+          <InputPill accessibilityLabel="켜짐" editable testID="on" />
+          <InputPill
+            accessibilityLabel="잠김"
+            editable={false}
+            // 부르는 쪽이 이미 준 접근성 상태는 지우지 않고 잠김만 더한다.
+            accessibilityState={{busy: true}}
+            testID="off"
+          />
+          <ListRow title="행" accessory="chevron" disabled onPress={() => {}} testID="row" />
+        </>,
+        false,
+        scheme,
+      );
+      // 기준: 같은 화면의 잠긴 행. 둘 다 1 이라서 맞는 빈 비교가 되지 않게 실제로 흐린지부터 본다.
+      const row = flat('row').opacity;
+      expect(row).toBeLessThan(1);
+      expect(flat('off-pill').opacity).toBe(row);
+      // `editable` 은 생략하면 켜진 것이다 — 생략과 `true` 는 흐리지 않다(`!editable` 로 읽으면 평소 칸이 전부 흐려진다).
+      expect(flat('omitted-pill').opacity).toBeUndefined();
+      expect(flat('on-pill').opacity).toBeUndefined();
+      // 보조기술: 잠긴 칸만 `disabled`, 부르는 쪽의 상태는 그대로다.
+      expect(screen.getByTestId('off').props.accessibilityState).toEqual({
+        busy: true,
+        disabled: true,
+      });
+      expect(screen.getByTestId('omitted').props.accessibilityState).toBeUndefined();
+      expect(screen.getByTestId('on').props.accessibilityState).toBeUndefined();
+    },
+  );
 });
 
 describe('큰 행동 타일', () => {

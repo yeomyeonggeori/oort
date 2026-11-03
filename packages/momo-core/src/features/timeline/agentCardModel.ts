@@ -221,6 +221,10 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   "action_type",
   "tool_name",
   "tool",
+  // 서버가 `tool_call` 행에 도구 이름을 싣는 키다(`tools.rs` `ToolCall::message_props`: `{name, arguments,
+  // call_id}`, #4995). 도구 카드가 제목으로 **그리는** 값이라 여기 없으면 정직 카운트가 자기가 그린 것을
+  // 숨김으로 센다(위 `execution` 과 같은 이유). `DETAIL_FIELDS` 에는 넣지 않는다: 이름은 이미 카드의 얼굴이다.
+  "name",
   "label",
   "tier",
   "is_reversible",
@@ -438,14 +442,19 @@ export function formatCount(value: number): string {
   return sign + digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }
 
+/** Below this a nonzero cost prints as a floor ("$0.001 미만"), not as a rounded amount. */
+export const MICRO_USD_FLOOR = 1_000;
+
 /**
  * Micro USD to a printable amount. A nonzero cost never rounds down to $0.000:
  * saying a real charge was free is the exact kind of quiet lie the numbers
  * discipline exists to prevent (design-taste-web §3).
+ *
+ * This is the ONE money notation of every client (#4982): the agent usage lines (`usageLine`) print through it too.
  */
 export function formatMicroUsd(microUsd: number): string {
   if (microUsd === 0) return "$0";
-  if (microUsd > 0 && microUsd < 1_000) return "$0.001 미만";
+  if (microUsd > 0 && microUsd < MICRO_USD_FLOOR) return "$0.001 미만";
   const usd = microUsd / 1_000_000;
   const decimals = Math.abs(usd) < 1 ? 3 : 2;
   const fixed = Math.abs(usd).toFixed(decimals);
@@ -808,6 +817,35 @@ function approvalCard(
   return card;
 }
 
+/**
+ * 도구 이름. 승인 결과 줄은 `tool_name`/`tool` 로, 서버의 `tool_call` 행은 `name` 으로 싣는다(`ToolCall::
+ * message_props` 는 `{name, arguments, call_id}` 가 전부다). 앞의 둘이 있으면 그것이 먼저다. 카드 제목과, 같은
+ * `call_id` 의 호출 행에서 이름을 빌려 오는 자리(`toolCallSettle`)가 같은 읽기를 쓴다 — 이름을 읽는 길이 둘이면
+ * 빌려 준 이름이 제목에 안 서는 날이 온다.
+ */
+export function toolNameOf(props: Record<string, unknown> | undefined): string | undefined {
+  return (
+    readString(props, "tool_name") ??
+    readString(props, "tool") ??
+    readString(props, "name")
+  );
+}
+
+/**
+ * 서버가 `tool_call` 행의 본문에 쓰는 영어 폴백(`tools.rs` `ToolCall::message_body`: 「Tool call: <이름>」).
+ * 카드를 모르는 화면이 빈 말풍선 대신 한 줄이라도 읽게 하려는 본문이지, 호출이 낸 **결과**가 아니다(#5009).
+ * 이 모양만 거른다 — 사람이 읽을 문장으로 쓴 본문은 그대로 결과다.
+ */
+const TOOL_CALL_FALLBACK_BODY = /^Tool call: /;
+
+function toolOutcome(message: Message): string | null {
+  const body = message.body ?? null;
+  if (body === null) return null;
+  return message.type === "tool_call" && TOOL_CALL_FALLBACK_BODY.test(body)
+    ? null
+    : body;
+}
+
 function toolCard(message: Message, props: Props): AgentToolCard {
   // 만료 스윕의 줄은 `is_error: true` 와 영어 본문으로 오므로 먼저 가른다. 그대로 두면 아무도 부르지
   // 않은 카드가 조용히 만료된 자리에 「실패」 칩과 영어 문장이 선다(L4, ADR-0132).
@@ -836,7 +874,8 @@ function toolCard(message: Message, props: Props): AgentToolCard {
       approvalDeclined: true, detail: { rows: [], withheld: 0 },
     };
   }
-  const toolName = readString(props, "tool_name") ?? readString(props, "tool");
+  // `name` 을 읽지 않으면 제목이 이름 없는 「도구 실행」이 된다(#4995, 디자인 검수 M9).
+  const toolName = toolNameOf(props);
   const isError = readBoolean(props, "is_error") === true;
   const status =
     turnStatusFor(props?.["status"]) ??
@@ -844,7 +883,9 @@ function toolCard(message: Message, props: Props): AgentToolCard {
   const frame: ActionFrame = {
     verb: toolName ? `${toolName} 실행` : "도구 실행",
     object: readString(props, "label") ?? null,
-    outcome: message.body ?? null,
+    // 호출 행의 서버 폴백 본문은 결과가 아니다(#5009). 결과 문장이 없으면 `null` 이고, 그때 말하는 것은 상태
+    // 낱말(칩·`meta`)뿐이다.
+    outcome: toolOutcome(message),
   };
   // Read the same `error` prop the turn record reads. A failed tool run whose
   // body is the artifact it was trying to write (a patch) has nowhere else to

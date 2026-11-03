@@ -18,6 +18,8 @@ import { useOffline } from "@/features/common/useOffline";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { IS_TAURI } from "@/lib/env";
 import { UpdateSection } from "@/features/updates/UpdateSection";
+import { ReleaseNotesSection } from "@/features/releaseNotes/ReleaseNotesSection";
+import { useMessages } from "@/i18n/useMessages";
 import { DevAccessSection } from "./DevAccessSection";
 import { DevicesSection } from "./DevicesSection";
 import { AppearanceSection } from "./AppearanceSection";
@@ -31,10 +33,12 @@ import { WorkspaceSection } from "./WorkspaceSection";
 import { MemorySettingsSection } from "@/features/memory/MemorySettingsSection";
 import { leaveSettings } from "./settingsReturn";
 import { aiHubSection } from "@momo/core/features/ai/aiHubModel";
+import { RELEASE_NOTES_SETTINGS_PAGE } from "@momo/core/features/releaseNotes/model";
 import {
   DEFAULT_SETTINGS_SECTION,
   reachableSettingsSections,
   resolveSettingsSection,
+  settingsSectionLabel,
   type SettingsSectionId,
   type SettingsSectionMeta,
 } from "./settingsNav";
@@ -205,6 +209,7 @@ export function SettingsRoute() {
   // 저장 가능 여부를 판단하는 다른 폼들이 이미 쓰고 있는 공용 답을 쓴다
   // (PR 1203 design review H3: "오프라인 상태가 실물로 도달 불가").
   const offline = useOffline();
+  const messages = useMessages();
 
   // AIH-8: 앱·웹훅·이벤트 구독·에이전트 자격은 AI 허브 › 외부 연결로 옮겼다. 옛 딥링크
   // (?section=…, 서버 안내·팔레트가 아직 이 주소를 건넨다)는 그 줄 상세로 바꿔 보낸다.
@@ -260,7 +265,7 @@ export function SettingsRoute() {
       >
         <SettingsPageHeader
           ref={headingRef}
-          title={current.label}
+          title={settingsSectionLabel(current, messages)}
           scope={current.scope}
           scopeVisible={current.scopeVisible}
         />
@@ -356,6 +361,8 @@ function SectionPage({
       );
     case "updates":
       return <UpdateSection />;
+    case RELEASE_NOTES_SETTINGS_PAGE:
+      return <ReleaseNotesSection />;
     case "devTools":
       return (
         <DevAccessSection

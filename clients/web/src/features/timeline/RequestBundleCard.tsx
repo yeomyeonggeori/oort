@@ -36,7 +36,7 @@ export function RequestBundleCard({ bundle, children, raw, footer, note, onOpenS
   return (
     <>
       <div className="flex items-start gap-2 px-3 py-2">
-        <span className="min-w-0 flex-1 text-body font-medium text-ink line-clamp-2" data-testid="request-bundle-headline">{bundle.headline}</span>
+        <span className="min-w-0 flex-1 break-keep text-body font-medium text-ink line-clamp-2" data-testid="request-bundle-headline">{bundle.headline}</span>
         <RequestBundleMark bundle={bundle} />
       </div>
       {bundle.valueChips.length > 0 && (

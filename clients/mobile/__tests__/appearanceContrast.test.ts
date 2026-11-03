@@ -43,6 +43,8 @@ const TEXT_PAIRS: ReadonlyArray<readonly [keyof Palette, keyof Palette]> = [
   ['textMuted', 'sheet'],
   ['textMuted', 'canvasTop'],
   ['textMuted', 'canvasBottom'],
+  // 못 누르는 주 단추의 라벨(`PrimaryButton`·`OnboardingButton` 의 잠김, #5100) — 옅은 칸 위에서 읽혀야 한다.
+  ['textMuted', 'surfaceMuted'],
   ['onPrimary', 'primary'],
   ['accentText', 'bg'],
   ['accentText', 'surface'],

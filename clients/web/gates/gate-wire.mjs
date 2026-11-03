@@ -80,17 +80,21 @@ async function installFaults(context) {
   return { setPluginFault: (next) => { pluginFault = next; } };
 }
 
-async function assertShell(page, surface) {
+async function assertShell(page, surface, { settings: inSettings = true } = {}) {
   await page.waitForTimeout(350);
   const state = await page.evaluate(() => ({
     rootChildren: document.getElementById("root")?.children.length ?? 0,
     sidebar: Boolean(document.querySelector("nav[aria-label='워크스페이스 탐색']")),
     settings: Boolean(document.querySelector('[data-testid="settings-route"]')),
+    settingsNav: Boolean(document.querySelector('[data-testid="settings-nav"]')),
     // Only the boundary's own fallback counts. Inline field/section errors also
     // use role=alert and are exactly the graceful degradation we want to keep.
     caught: Boolean(document.querySelector('[data-testid="render-error-boundary"]')),
   }));
-  if (state.rootChildren === 0 || !state.sidebar || !state.settings) {
+  // 설정 안에서는 앱 사이드바가 DOM에서 빠지고 설정 목차가 그 자리의 내비게이션이다(SettingsShell) — 어느 쪽이든
+  // 「화면을 옮겨 다닐 길이 살아 있다」가 이 단정의 뜻이다(#5048).
+  const navAlive = inSettings ? state.settings && state.settingsNav : state.sidebar;
+  if (state.rootChildren === 0 || !navAlive) {
     throw new Error(`${surface}: shell blanked: ${JSON.stringify(state)}`);
   }
   // Without this the gate proves only that the error boundary works: a render
@@ -204,13 +208,30 @@ async function main() {
       await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
       await page.getByTestId("nav-settings").click();
       await page.waitForSelector('[data-testid="settings-route"]');
-      for (const [section, label] of [["ai", "AI 연결"], ["code", "코드 실행 호스트"], ["members", "멤버와 초대"], ["plugins", "앱"], ["account", "계정"]]) {
-        await page.getByRole("button", { name: label, exact: true }).click();
-        await assertShell(page, `settings ${section}`);
-        // 판이 무엇을 말하는지는 그 판에 있을 때만 잴 수 있다. 루프 뒤에서 재면
-        // 마지막 섹션(계정)을 보게 된다(측정됨).
-        if (section === "plugins") await assertPluginSurfaceSpeaks(page, "catalog-null");
+      // 설정 목차의 모든 화면(허브로 가는 링크 행 제외)을 차례로 연다. 옛 고정 목록(AI 연결·앱·계정)은 설정 재편(#3578)과
+      // AI 허브 이전(#4141)으로 사라지거나 옮겨 갔다 — 목차를 눈앞에서 읽어, 새 섹션이 생겨도 이 레인에서 빠지지 않게 한다.
+      // 호스트가 깨진 응답을 주는 이 픽스처에서는 「실행 호스트」 행이 접힌다(표면 판정, #2780). 접힌 행을 눌러 보는 일은
+      // 없고, 그 접힘 자체가 깨진 호스트 응답이 셸을 살려 둔다는 증거다.
+      const sectionIds = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('[data-testid^="settings-nav-"]'))
+          .filter((node) => node.getAttribute("data-link") === null)
+          .map((node) => node.getAttribute("data-testid").slice("settings-nav-".length))
+      );
+      if (sectionIds.length < 8 || !sectionIds.includes("members")) {
+        throw new Error(`settings nav read ${JSON.stringify(sectionIds)} — the walk below would prove nothing`);
       }
+      for (const section of sectionIds) {
+        await page.getByTestId(`settings-nav-${section}`).click();
+        await assertShell(page, `settings ${section}`);
+      }
+      // 플러그인 카탈로그는 설정이 아니라 AI 허브 「외부 연결 › 앱」이다(AiExternalPane `apps` 상세, #4141): 설정 목차에는
+      // 허브로 가는 링크 행만 있다. 판이 무엇을 말하는지는 그 판에 있을 때만 잴 수 있다 — 루프 뒤 마지막 섹션을 재면
+      // 엉뚱한 곳을 본다(측정됨).
+      await page.evaluate(() => {
+        window.location.hash = "#/ai/external/apps";
+      });
+      await assertShell(page, "ai hub external apps", { settings: false });
+      await assertPluginSurfaceSpeaks(page, "catalog-null");
       // A malformed catalog must stay an inline error. Once it recovers, the
       // selected manifest gets its own bad body, which must not turn into a
       // route-level render error either.
@@ -219,9 +240,8 @@ async function main() {
       // 검증 유무와 무관하게 통과한다(측정됨). 판이 통째로 비는 것과 오류를
       // 보고하는 것을 갈라야 이 게이트가 값을 갖는다.
       faults.setPluginFault("detail-null");
-      await page.getByRole("button", { name: "앱", exact: true }).click();
-      await page.getByRole("button", { name: "다시 시도", exact: true }).click();
-      await assertShell(page, "settings plugins detail");
+      await page.getByTestId("plugins-error").getByRole("button", { name: "다시 시도", exact: true }).click();
+      await assertShell(page, "ai hub external apps detail", { settings: false });
       await assertPluginSurfaceSpeaks(page, "detail-null");
       await assertNavigationKeepsRouteState(context);
       await context.close();

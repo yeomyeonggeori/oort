@@ -1,14 +1,16 @@
 import React from 'react';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {StyleSheet} from 'react-native';
-import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import {
   AGENT_USAGE_COPY as COPY, fetchAgentUsage, saveSubscriptionFee,
   type AgentUsageResponse,
 } from '@momo/core/features/settings/agentUsage';
+import {formatMicroUsd} from '@momo/core/features/timeline/agentCardModel';
 import {AgentMonthlyReport, AgentUsageStatus} from '../src/features/agents/AgentUsage';
 import {SAFE_GUTTER} from '../src/design/tokens';
 import {leftEdge} from './fixtures/leftInset';
+import {sweepHangulWord} from './fixtures/hangulWord';
 
 jest.mock('@momo/core/features/settings/agentUsage', () => ({
   ...jest.requireActual('@momo/core/features/settings/agentUsage'),
@@ -63,6 +65,28 @@ it('lets admins set a shared fee, keeps a refused draft, and clears with null', 
   fireEvent.press(screen.getByRole('button', {name: '구독 정액 저장'}));
   await waitFor(() => expect(saveSubscriptionFee).toHaveBeenLastCalledWith('w', 'a', null));
   await screen.findByText(COPY.saved);
+});
+// #5132(#5099 후속): 저장하는 동안 정액 칸은 `editable={!saving}` 으로 잠기는데 알약이 평소 모양 그대로였다. 호출하는 쪽은 그대로
+// (`SubscriptionEditor` 무변경)이고 `InputPill` 이 잠김을 그린다 - 값은 부품 시험(`sheetKit` 「입력 알약」)이 잠긴 행과의 등식으로 재고,
+// 여기서는 **실제 저장하는 동안**에 그 길이 닿는지와 저장이 끝나면(여기서는 거절) 칸이 도로 살아나는지를 잰다.
+it('dims the fee input and says it is disabled only while saving - it comes back alive when the save fails', async () => {
+  jest.mocked(fetchAgentUsage).mockResolvedValue(data(true)); mount();
+  const input = await screen.findByLabelText(COPY.subscription);
+  const dimmed = () => flat(screen.getByTestId('subscription-a-pill')).opacity;
+  // 대조: 저장 전의 같은 칸은 흐리지 않고 잠겼다고 말하지 않는다(아래가 알약의 평소 모양에서 온 값이 아니라는 증거).
+  expect(dimmed()).toBeUndefined();
+  expect(input.props.accessibilityState).toBeUndefined();
+  let refuse: (error: Error) => void = () => {};
+  jest.mocked(saveSubscriptionFee).mockReturnValueOnce(new Promise((_, reject) => {refuse = reject;}));
+  fireEvent.changeText(input, '20');
+  fireEvent.press(screen.getByRole('button', {name: '구독 정액 저장'}));
+  await waitFor(() => expect(dimmed()).toBeLessThan(1));
+  expect(input.props.accessibilityState).toMatchObject({disabled: true});
+  await act(async () => {refuse(new Error('403'));});
+  await screen.findByText(COPY.saveError);
+  expect(dimmed()).toBeUndefined();
+  expect(input.props.accessibilityState).toBeUndefined();
+  expect(input.props.value).toBe('20');
 });
 
 // #4912: 설정 안쪽 장(`SubPage`)의 스크롤은 가로 여백을 주지 않는다. 장마다 제 가터(`SAFE_GUTTER`)를 지는데
@@ -136,4 +160,54 @@ it('keeps the fee editor inside the report on the report gutter alone - the edit
   expect(leftEdge(screen.getByTestId('subscription-a-pill'))).toBe(SAFE_GUTTER);
   expect(leftEdge(screen.getByRole('button', {name: '구독 정액 저장'}))).toBe(SAFE_GUTTER);
   expect(leftEdge(screen.getByText('비워서 저장하면 정액을 지워요.'))).toBe(SAFE_GUTTER);
+});
+
+// ---- 같은 비용은 한 가지로 적힌다 (#4982) -------------------------------------------------------------
+// 스레드 카드·결정 무대는 `formatMicroUsd`(「$1.50」)로 적는데, 사용량 줄은 코어의 둘째 서식(Intl 통화, 「US$1.234567」)으로 적어서
+// 폰 안에서 같은 금액이 두 모양이었다. 줄을 만드는 곳은 코어(`usageLine`)라 폰 쪽에서 바꿀 수 없고, 원인이 둘째 서식이다.
+it('prints every cost on the usage screens with the one notation the thread cards use', async () => {
+  const response = data(true);
+  response.agents[0] = {...response.agents[0], costMicroUsd: 1_234_567, estimatedRuns: 0, source: 'measured',
+    subscriptionFee: {monthlyMicroUsd: 20_000_000, label: null}};
+  response.totals.workspace = {...metrics, costMicroUsd: 12_340_000, estimatedRuns: 0, source: 'measured'};
+  jest.mocked(fetchAgentUsage).mockResolvedValue(response);
+  const report = mount();
+  const loaded = await screen.findByTestId('agent-monthly-report');
+  expect(formatMicroUsd(1_234_567)).toBe('$1.23'); // 이 시험이 헛돌지 않게: 기대값이 실제 서식이다
+  const partial = {exact: false};
+  expect(loaded).toHaveTextContent(`비용 ${formatMicroUsd(12_340_000)}`, partial); // 워크스페이스 합계
+  expect(loaded).toHaveTextContent(`비용 ${formatMicroUsd(1_234_567)}`, partial); // 에이전트 줄
+  expect(loaded).toHaveTextContent(`구독 ${formatMicroUsd(20_000_000)}/월`, partial);
+  expect(loaded).not.toHaveTextContent(/US\$/);
+  report.unmount();
+  // 프로필 줄도 같은 서식이다.
+  jest.mocked(fetchAgentUsage).mockResolvedValue(response);
+  mount(true);
+  await waitFor(() => expect(screen.getByTestId('agent-usage-status')).toHaveTextContent(`비용 ${formatMicroUsd(1_234_567)}`, partial));
+  expect(screen.getByTestId('agent-usage-status')).not.toHaveTextContent(/US\$/);
+});
+
+// ---- 한국어 낱말 끊김 (#4982) -------------------------------------------------------------------------
+it('has every Hangul text of the cost screens on hangul-word: report, rows, fee editor, buttons, states', async () => {
+  jest.mocked(fetchAgentUsage).mockResolvedValue(data(true));
+  const report = mount();
+  const loaded = sweepHangulWord(await screen.findByTestId('agent-monthly-report'));
+  expect(loaded.checked).toBeGreaterThan(8); // 안내·합계·에이전트 이름·줄·정액 머리·단추·안내
+  expect(loaded.missing).toEqual([]);
+  report.unmount();
+  // 프로필 줄(불러온 뒤).
+  jest.mocked(fetchAgentUsage).mockResolvedValue(data());
+  const profile = mount(true);
+  await waitFor(() => expect(screen.getByTestId('agent-usage-status')).toHaveTextContent(/자기 보고/));
+  const line = sweepHangulWord(screen.getByTestId('agent-usage-status'));
+  expect(line.checked).toBeGreaterThan(0);
+  expect(line.missing).toEqual([]);
+  profile.unmount();
+  // 오류: 문장 + 「다시 불러오기」 단추.
+  jest.mocked(fetchAgentUsage).mockRejectedValue(new Error('unavailable'));
+  mount();
+  await screen.findByText(COPY.error);
+  const failed = sweepHangulWord(screen.getByTestId('agent-monthly-report-state'));
+  expect(failed.checked).toBeGreaterThan(1);
+  expect(failed.missing).toEqual([]);
 });

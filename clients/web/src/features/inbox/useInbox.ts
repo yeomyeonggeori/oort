@@ -227,7 +227,16 @@ export function useInvalidateApprovals(): () => void {
   }, [client, workspaceId]);
 }
 
-export function useNeedsAction(enabled: boolean): Feed {
+/**
+ * 결정 대기(승인 원장)의 피드. `isLoading`은 채널·디렉터리(`context`)가 아직 오는 중인 것까지 센다 —
+ * 줄의 이름이 id 조각으로 그려지는 순간을 막으려는 값이다. 원장이 **자기** 첫 응답을 기다리는지만
+ * 알아야 하는 자리(인박스 목록이 「비어 있어요」를 말해도 되는가)는 `ledgerLoading`을 읽는다(#5116).
+ */
+export interface NeedsActionFeed extends Feed {
+  ledgerLoading: boolean;
+}
+
+export function useNeedsAction(enabled: boolean): NeedsActionFeed {
   const context = useFeedContext();
   const progress = useSyncExternalStore(subscribeRunProgress, runProgressSnapshot, runProgressSnapshot);
   const query = useApprovalPage("pending", enabled);
@@ -250,6 +259,7 @@ export function useNeedsAction(enabled: boolean): Feed {
   return {
     items,
     isLoading: query.isLoading || context.isLoading,
+    ledgerLoading: query.isLoading,
     error: query.isError,
     absent: serverSaysAbsent(query.error),
     updatedAtMs: query.dataUpdatedAt,
