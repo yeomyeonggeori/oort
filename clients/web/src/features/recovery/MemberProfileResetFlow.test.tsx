@@ -303,8 +303,15 @@ describe("재설정 링크 만들기: 누구에게 보이나 (D6 사다리의 �
 });
 
 describe("재설정 링크 만들기: 오프라인", () => {
-  it("연결이 끊겨 있으면 단추가 잠기고 사유를 가리킨다(요청이 나갈 수 없는데 누르게 두지 않는다)", async () => {
-    mountProfile(OWNER, MEMBER_ID, "disconnected");
+  // 쓰기 게이트는 연결 상태 모델 하나다(#5220 `useOffline`): 기기 오프라인·서버에 닿지 못함일 때만 막고,
+  // 실시간(소켓)만 끊긴 것으로는 막지 않는다(#5201 결정 ③).
+  afterEach(() => {
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, value: true });
+  });
+
+  it("기기가 오프라인이면 단추가 잠기고 사유를 가리킨다(요청이 나갈 수 없는데 누르게 두지 않는다)", async () => {
+    Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
+    mountProfile(OWNER, MEMBER_ID);
     await waitForDialog();
     const open = byId<HTMLButtonElement>("member-profile-reset-open")!;
     expect(open.disabled).toBe(true);
@@ -313,6 +320,15 @@ describe("재설정 링크 만들기: 오프라인", () => {
     open.click();
     expect(byId("member-profile-reset-stage")).toBeNull();
     expect(issueMemberPasswordReset).not.toHaveBeenCalled();
+  });
+
+  it("실시간만 끊겼으면 단추는 열려 있다(재설정 링크는 REST라 소켓 끊김으로 막지 않는다)", async () => {
+    mountProfile(OWNER, MEMBER_ID, "disconnected");
+    await waitForDialog();
+    const open = byId<HTMLButtonElement>("member-profile-reset-open")!;
+    expect(open.disabled).toBe(false);
+    expect(open.getAttribute("aria-describedby")).toBeNull();
+    expect(document.getElementById("member-profile-offline-reason")).toBeNull();
   });
 });
 
