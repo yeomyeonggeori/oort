@@ -3137,22 +3137,34 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0142.agentsLine10": [
     {
       "type": 0,
-      "value": "After you decide in the inbox, the receipt line no longer shows twice, and an approval card states its time left once."
+      "value": "On the phone, a line above the composer in agent conversations shows who is working, and tapping it opens a sheet."
     }
   ],
   "releaseNotes.v0142.agentsLine11": [
     {
       "type": 0,
-      "value": "On the phone, a finished request gets a chip with its time and step count, and tapping it opens the work record."
+      "value": "On the phone, requests show an agent status chip, plus a line saying what to do if it was not picked up or failed."
     }
   ],
   "releaseNotes.v0142.agentsLine12": [
     {
       "type": 0,
-      "value": "Admins pick the team AI key, helper name and abilities in onboarding and settings, and can switch abilities by chat."
+      "value": "After you decide in the inbox, the receipt line no longer shows twice, and an approval card states its time left once."
     }
   ],
   "releaseNotes.v0142.agentsLine13": [
+    {
+      "type": 0,
+      "value": "On the phone, a finished request gets a chip with its time and step count, and tapping it opens the work record."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine14": [
+    {
+      "type": 0,
+      "value": "Admins pick the team AI key, helper name and abilities in onboarding and settings, and can switch abilities by chat."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine15": [
     {
       "type": 0,
       "value": "Team AI usage is unlimited by default, and admins can turn on a daily or monthly limit in Usage limits in settings."
@@ -3173,37 +3185,37 @@ export const catalog: MessageCatalog = {
   "releaseNotes.v0142.agentsLine4": [
     {
       "type": 0,
-      "value": "On the phone, the Home working card and the Agents tab mark an agent that is waiting for approval."
+      "value": "After you approve a tool call, its approval card goes on to show the result, and no separate result row appears."
     }
   ],
   "releaseNotes.v0142.agentsLine5": [
     {
       "type": 0,
-      "value": "In the inbox, a decided approval becomes a one-line receipt, and its buttons vanish once another device has decided."
+      "value": "Phone approval cards get a button to request again, which puts a draft message in the composer."
     }
   ],
   "releaseNotes.v0142.agentsLine6": [
     {
       "type": 0,
-      "value": "For code work the helper offers a Hand a task to my Mac card, and it reads text, PDF and image attachments."
+      "value": "On the phone, the Home working card and the Agents tab mark an agent that is waiting for approval."
     }
   ],
   "releaseNotes.v0142.agentsLine7": [
     {
       "type": 0,
-      "value": "On a team server, agents can now read photos you send in a conversation."
+      "value": "In the inbox, a decided approval becomes a one-line receipt, and its buttons vanish once another device has decided."
     }
   ],
   "releaseNotes.v0142.agentsLine8": [
     {
       "type": 0,
-      "value": "On the phone, a line above the composer in agent conversations shows who is working, and tapping it opens a sheet."
+      "value": "For code work the helper offers a Hand a task to my Mac card, and it reads text, PDF and image attachments."
     }
   ],
   "releaseNotes.v0142.agentsLine9": [
     {
       "type": 0,
-      "value": "On the phone, requests show an agent status chip, plus a line saying what to do if it was not picked up or failed."
+      "value": "On a team server, agents can now read photos you send in a conversation."
     }
   ],
   "releaseNotes.v0142.attachmentsLine1": [

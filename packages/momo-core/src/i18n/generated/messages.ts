@@ -447,6 +447,8 @@ export const messageKeys = [
   "releaseNotes.v0142.agentsLine11",
   "releaseNotes.v0142.agentsLine12",
   "releaseNotes.v0142.agentsLine13",
+  "releaseNotes.v0142.agentsLine14",
+  "releaseNotes.v0142.agentsLine15",
   "releaseNotes.v0142.agentsLine2",
   "releaseNotes.v0142.agentsLine3",
   "releaseNotes.v0142.agentsLine4",
@@ -1346,6 +1348,8 @@ export const argumentSpecs = {
   "releaseNotes.v0142.agentsLine11": {},
   "releaseNotes.v0142.agentsLine12": {},
   "releaseNotes.v0142.agentsLine13": {},
+  "releaseNotes.v0142.agentsLine14": {},
+  "releaseNotes.v0142.agentsLine15": {},
   "releaseNotes.v0142.agentsLine2": {},
   "releaseNotes.v0142.agentsLine3": {},
   "releaseNotes.v0142.agentsLine4": {},
@@ -2300,6 +2304,8 @@ export interface MessageArgs {
   "releaseNotes.v0142.agentsLine11": Record<string, never>;
   "releaseNotes.v0142.agentsLine12": Record<string, never>;
   "releaseNotes.v0142.agentsLine13": Record<string, never>;
+  "releaseNotes.v0142.agentsLine14": Record<string, never>;
+  "releaseNotes.v0142.agentsLine15": Record<string, never>;
   "releaseNotes.v0142.agentsLine2": Record<string, never>;
   "releaseNotes.v0142.agentsLine3": Record<string, never>;
   "releaseNotes.v0142.agentsLine4": Record<string, never>;
