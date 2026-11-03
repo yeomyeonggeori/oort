@@ -658,6 +658,15 @@ describe('설정 페이지', () => {
     expect(openSettings).toHaveBeenCalledTimes(1);
   });
 
+  // #5170 L2: 저장된 서버가 없을 때의 한 줄도 앱의 다른 문장처럼 해요체다(사전 키 `settings.connection.noServer`).
+  it('저장된 서버 주소가 없으면 해요체 한 줄로 그렇게 말한다 (#5170 L2)', async () => {
+    setServerBase(null);
+    await openPage();
+    const row = screen.getByTestId('profile-server-row');
+    expect(within(row).getByText('이 기기에 저장된 서버 주소가 없어요.')).toBeTruthy();
+    expect(row).not.toHaveTextContent(/습니다/);
+  });
+
   it('연결한 서버 주소와 앱 버전·빌드가 보인다', async () => {
     await openPage();
     expect(screen.getByTestId('profile-server-row')).toHaveTextContent(

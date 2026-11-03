@@ -17,6 +17,7 @@ import {ExpressionPhotoSurface} from '../measure/expressionPhoto';
 import {resolveAppearance} from '../src/design/appearanceState';
 import {PrimaryButton} from '../src/design/atoms';
 import {DEFAULT_THEME_ID, DS2_COMBOS} from '../src/design/ds2Tokens';
+import {circleLook} from '../src/design/sheetModel';
 import {FixedScheme, type ColorScheme} from '../src/design/theme';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 
@@ -36,15 +37,28 @@ import {pinReduceMotion} from './fixtures/reduceMotion';
 // 강조색이 이 단추를 못 칠한다는 증거가 여기서 나온다), 마지막은 검수가 캡처한 **바로 그 장면**
 // (`measure/expressionPhoto.tsx` — 열 소비처 중 세 자리)을 jest 가 그려서 같은 숫자를 잰다.
 //
-// 이 파일이 재지 못하는 것: 실제 화면의 픽셀(채움이 시트 위에서 보이는 정도 등) — 캡처와 design-review 의 몫이다.
-// 잠긴 채움 `surfaceMuted` 는 시트 위에서 1.0:1 에 가깝다(`docs/design-system/README.md` §3.3: 보조 채움은 채움 대비를
-// 재지 않고 글자 라벨이 컨트롤을 식별시킨다) — 그래서 이 파일은 **라벨**의 대비를 잰다.
+// #5170 L1 (검증 줄 3회차 화면 L1): 잠긴 칸을 `surfaceMuted` 로 두면 밝은 시트 위에서 칸이 시트와 같은 색이 된다(새벽하늘 1.009:1,
+// 흑연·노을은 1.000:1 — 같은 값이다). 이 부품을 쓰는 곳 열 중 일곱이 시트 위라 잠긴 주 행동이 단추가 아니라 문장처럼 섰다. 답은 형제
+// 알약(#5065·#5099)에 이미 있었다: 시트 위에 서는 알약은 시트 위 문법(`circleLook` 채움·가장자리 + `elevationRest` 그림자,
+// `docs/design-system/phone-sheets.md` §4)으로 선다. ②는 잠긴 칸이 그 문법이라는 것을, ⑤는 그 칸이 **시트·바닥과 실제로 갈리는 숫자**
+// (채움 대비)와 모양(가장자리·그림자·크기 불변)을 잰다.
+//
+// 이 파일이 재지 못하는 것: 실제 화면의 픽셀(그림자가 시트 위에서 읽히는 정도 등) — 캡처와 design-review 의 몫이다. 그림자는
+// 대비 숫자로 안 잡히므로 채움 대비 바닥(`SHEET_FLOOR`)은 **그림자 없이도 옛 값을 잡는** 최소치로만 둔다.
 // =============================================================================
 
 type Style = Record<string, unknown>;
 
 /** 본문 글자 AA. 잠긴 컨트롤은 WCAG 1.4.3 의 예외지만 이 앱은 「못 누르는 버튼도 라벨은 읽혀야 한다」를 정했다. */
 const MIN = 4.5;
+
+/**
+ * 잠긴 칸의 채움이 시트·바닥과 갈리는 최소 대비(#5170 L1). 옛 값(`surfaceMuted`)은 라이트 세 테마에서 1.000~1.009 였다 — 칸이 없는 것과 같다.
+ * 새 값(`circleLook` 채움)의 가장 낮은 곳은 흑연 라이트의 시트 위 1.083 이라, 바닥은 그 아래·옛 값 위인 1.05 로 둔다. 이 숫자는 「충분히
+ * 크다」는 주장이 아니다 — 칸을 떠 보이게 하는 것은 그림자(`elevationRest`)와 다크의 가장자리 한 줄이고, 이 바닥은 **칸이 바탕과 같은 색으로
+ * 돌아가는 일**만 막는다.
+ */
+const SHEET_FLOOR = 1.05;
 
 const SIGNALS: ReadonlyArray<readonly [string, SignalChoice]> = [
   ['기본', null],
@@ -161,13 +175,14 @@ describe('PrimaryButton — 주 행동은 잉크, 잠겨도 라벨이 읽힌다 
     expect([...accents].filter(([, seen]) => seen.size < 2).map(([group]) => group)).toEqual([]);
   });
 
-  it('② 잠기면 옅은 칸 위에서도 라벨이 읽힌다 — `surfaceMuted` 채움 + `textMuted` 글자', () => {
+  it('② 잠기면 시트 위 문법의 칸 위에서도 라벨이 읽힌다 — `circleLook` 채움 + `textMuted` 글자', () => {
     const wrong: string[] = [];
     for (const combo of COMBOS) {
       const {palette} = combo;
+      const look = circleLook(palette);
       const {rest, pressed, label, state} = drawn(combo, {disabled: true});
-      if (rest.backgroundColor !== palette.surfaceMuted) {
-        wrong.push(`${combo.key}: 채움 ${String(rest.backgroundColor)} ≠ surfaceMuted ${palette.surfaceMuted}`);
+      if (rest.backgroundColor !== look.fill) {
+        wrong.push(`${combo.key}: 채움 ${String(rest.backgroundColor)} ≠ circleLook.fill ${look.fill}`);
       }
       if (label.color !== palette.textMuted) {
         wrong.push(`${combo.key}: 글자 ${String(label.color)} ≠ textMuted ${palette.textMuted}`);
@@ -178,6 +193,45 @@ describe('PrimaryButton — 주 행동은 잉크, 잠겨도 라벨이 읽힌다 
       // 눌러도 소용없는 단추는 눌림 모양도 입지 않는다.
       if (pressed.opacity !== rest.opacity || pressed.backgroundColor !== rest.backgroundColor) {
         wrong.push(`${combo.key}: 잠긴 단추가 눌림 모양을 입는다`);
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it('⑤ 잠긴 칸이 시트와 바닥 위에서 실제로 보인다 — 채움이 바탕과 갈리고, 가장자리·그림자는 형제 알약과 같고, 잠가도 크기가 안 변한다 (#5170 L1)', () => {
+    const wrong: string[] = [];
+    for (const combo of COMBOS) {
+      const {palette} = combo;
+      const look = circleLook(palette);
+      const locked = drawn(combo, {disabled: true}).rest;
+      const open = drawn(combo, {}).rest;
+      const fill = String(locked.backgroundColor);
+      for (const [name, ground] of [
+        ['시트', palette.sheet],
+        ['바닥', palette.bg],
+      ] as const) {
+        const ratio = contrast(fill, ground);
+        if (!(ratio >= SHEET_FLOOR)) {
+          wrong.push(`${combo.key} · ${name} 위: 채움 대비 ${ratio.toFixed(3)} < ${SHEET_FLOOR}`);
+        }
+      }
+      // 형제 알약(`ExpressionAddMenu`·`ExpressionChapter`)과 같은 문법: 가장자리 한 줄 + rest 그림자.
+      if (locked.borderColor !== look.ring) {
+        wrong.push(`${combo.key}: 가장자리 ${String(locked.borderColor)} ≠ circleLook.ring ${look.ring}`);
+      }
+      if (locked.boxShadow !== palette.elevationRest) {
+        wrong.push(`${combo.key}: 그림자 ${String(locked.boxShadow)} ≠ elevationRest`);
+      }
+      // 잉크 채움(쉼)은 스스로 보인다 — 그림자를 입지 않고, 가장자리는 채움과 같은 잉크라 보이지 않는다.
+      if (open.boxShadow !== undefined) wrong.push(`${combo.key}: 쉼 단추가 그림자를 입는다 ${String(open.boxShadow)}`);
+      if (open.borderColor !== palette.primary || open.backgroundColor !== palette.primary) {
+        wrong.push(
+          `${combo.key}: 쉼 단추의 가장자리 ${String(open.borderColor)} · 채움 ${String(open.backgroundColor)} ≠ 둘 다 primary ${palette.primary}`,
+        );
+      }
+      // 잠글 때 단추가 움직이지 않는다: 가장자리 두께가 두 상태에서 같다(없다가 생기면 높이가 0.66pt 뛴다).
+      if (locked.borderWidth !== open.borderWidth || typeof locked.borderWidth !== 'number') {
+        wrong.push(`${combo.key}: 가장자리 두께 잠김 ${String(locked.borderWidth)} ≠ 쉼 ${String(open.borderWidth)}`);
       }
     }
     expect(wrong).toEqual([]);
@@ -303,10 +357,15 @@ describe('검수가 캡처한 장면을 그려서 같은 값을 잰다 (#5100)',
         if ((state?.disabled === true) !== locked) {
           wrong.push(`${tag}: 장면이 바뀌었다 — 잠김 ${String(state?.disabled)} (기대 ${locked})`);
         }
-        const fill = locked ? palette.surfaceMuted : palette.primary;
+        const fill = locked ? circleLook(palette).fill : palette.primary;
         const ink = locked ? palette.textMuted : palette.onPrimary;
         if (rest.backgroundColor !== fill) {
           wrong.push(`${tag}: 채움 ${String(rest.backgroundColor)} ≠ ${fill}`);
+        }
+        if (locked) {
+          // 검수가 본 바로 그 장면에서 잠긴 칸이 바탕(시트) 위에서 갈리는지 — 옛 값은 시트와 1.000~1.009 였다(#5170 L1).
+          const onSheet = contrast(String(rest.backgroundColor), palette.sheet);
+          if (!(onSheet >= SHEET_FLOOR)) wrong.push(`${tag}: 시트 위 채움 대비 ${onSheet.toFixed(3)} < ${SHEET_FLOOR}`);
         }
         if (label.color !== ink) wrong.push(`${tag}: 글자 ${String(label.color)} ≠ ${ink}`);
         const ratio = contrast(String(label.color), String(rest.backgroundColor));

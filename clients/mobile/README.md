@@ -320,6 +320,16 @@ fixed reply), so that flow has a peer's row to swipe. After a stack is replaced 
 app still holds the old stack's login; with `--flow` the first flow signs in again
 before it starts (slower, still works) — `--flow 00-login` first gives a clean start.
 
+**A capture script asks the harness whether it knows the name first (#5172).** `-momoMeasure <NAME>`
+accepts any name, and a name the harness does not know renders the 「알 수 없는 표면」 page — which a
+screenshot records like any other. `measure.sh` kept capturing `WORK-CONSOLE` (deleted by #2864) that
+way, and the verification line took two `APPROVED` photos of that page as evidence of an approved card.
+`node measure/known-surface.cjs <NAME>…` exits 2 on an unknown name. It reads the top-level dispatch of
+`Surface()` in `measure/surfaces.tsx` (there is no second list to keep), `measure.sh` runs it for every
+`capture_surface` name before it touches the simulator, and any other capture script should run it
+before `xcrun simctl launch`. It cannot see inside a prefix family (`sheetkit-…`): the family judges its
+own `which`. `__tests__/measureSurfaces.test.tsx` checks the tool against what the harness really draws.
+
 **「작업 중」 is only observable because the mock is asked to be slow.** A default
 mock turn is about two tenths of a second end to end, so the indicator would be
 gone before Maestro could look and the flow would assert nothing while passing.
