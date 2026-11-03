@@ -109,6 +109,23 @@ describe("웹 제품 소스: 원인을 가리지 않는 연결 끊김 문장이 
     for (const allowed of ALLOWED) expect(allowed.why.length, allowed.file).toBeGreaterThan(10);
   });
 
+  it("사전의 모든 틀이 제품 소스 어딘가에서 쓰인다(죽은 틀이 없다)", () => {
+    const catalog = JSON.parse(
+      readFileSync(join(SRC, "../../../packages/momo-core/src/i18n/catalogs/ko-KR/blocked.json"), "utf8")
+    ) as Record<string, string>;
+    const frames = [...new Set(Object.keys(catalog).map((key) => key.split(".")[1] as string))];
+    const product = sourceFiles(SRC)
+      .filter((path) => {
+        const file = relative(SRC, path).split("\\").join("/");
+        return /\.[cm]?[jt]sx?$/.test(file) && !SKIP.test(file);
+      })
+      .map((path) => readFileSync(path, "utf8"))
+      .join("\n");
+    const dead = frames.filter((frame) => !product.includes(`"${frame}"`));
+    expect(frames.length).toBeGreaterThan(50);
+    expect(dead).toEqual([]);
+  });
+
   it("스캐너가 실제로 소스를 읽고 있다(0건 통과가 아니다)", () => {
     expect(sourceFiles(SRC).length).toBeGreaterThan(500);
     expect(hits.length).toBeGreaterThanOrEqual(ALLOWED.length);
