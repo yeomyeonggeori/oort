@@ -39,7 +39,7 @@ import { prefersReducedMotion } from "@/app/sidebarPane";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import type { DmGroupFacts } from "@momo/core/features/workspace/directory";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
-import { InlineBanner, Skeleton } from "@/features/common/States";
+import { Skeleton } from "@/features/common/States";
 import {
   buildTimelineItems,
   type PendingMessage,
@@ -78,6 +78,10 @@ import {
 } from "./MessageRow";
 import { TimelineLiveRegionProvider } from "./timelineLiveRegion";
 import { PendingRow } from "./PendingRow";
+import { isFailedRow, type SendFailureKind } from "@momo/core/features/connection/sendFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import type { ConnectionCause } from "@momo/core/features/connection/model";
+import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBox";
 import { SystemLine } from "./SystemLine";
 import { isSystemLineMessage, startGroupAfterSystemLine } from "./systemLineRows";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
@@ -261,6 +265,9 @@ export function Timeline({
   onResend,
   onResendPending,
   onDiscardPending,
+  failureKinds,
+  onResendAllPending,
+  loadCause = null,
   onAddMember,
   canConnectAgent = false,
   onConnectAgent,
@@ -343,6 +350,12 @@ export function Timeline({
   onResendPending?: (clientMsgId: string) => Promise<void> | void;
   /** 보내지 못한 echo 행을 이 기기에서 지운다(#5210). 없으면 행이 X 를 그리지 않는다. */
   onDiscardPending?: (clientMsgId: string) => void;
+  /** 실패한 행마다 원인 한 줄의 종류(#5221). 항목이 없으면 원인 없이 「전송 실패」만 말한다. */
+  failureKinds?: ReadonlyMap<string, SendFailureKind>;
+  /** 실패한 행이 둘 이상일 때 마지막 실패 행 아래 「모두 다시 보내기」가 부른다(#5221). 없으면 단추를 그리지 않는다. */
+  onResendAllPending?: () => Promise<void> | void;
+  /** `status` 가 `error` 일 때 그 실패가 말하는 원인(#5221). 연결 쪽 원인이 아니면 `null`. */
+  loadCause?: ConnectionCause | null;
   /**
    * 이 채널에 워크스페이스 멤버를 넣는다. 빈 채널의 보조 행동 (#1536). 이름이
    * 초대가 아니라 추가인 이유는 코어 라벨 상수의 머리말 (#1573): 이 손잡이가
@@ -482,6 +495,11 @@ export function Timeline({
     ]
   );
 
+  // 「모두 다시 보내기」는 실패한 행이 둘 이상일 때 **마지막** 실패 행 아래에 한 번만 선다(#5221).
+  const failedPendingIds = useMemo(
+    () => (pending ?? []).filter(isFailedRow).map((p) => p.clientMsgId),
+    [pending]
+  );
   const items = useMemo(() => {
     const folded = foldDeletedRuns(
       buildTimelineItems(presentableRows(mainMessages), {
@@ -807,12 +825,15 @@ export function Timeline({
     setScrollerEl(node instanceof HTMLElement ? node : null);
   }, []);
 
-  if (status === "error") {
+  // 불러오기가 실패했다(#5221). 받아 둔 글이 **없으면** 제목 + 이유 한 줄 + 다시 시도 상자, **있으면** 상자로 덮지 않고
+  // 목록은 그대로 두고 위에 한 줄만 건다(읽을 것이 있는데 화면을 비우면 정보를 버리는 일이다). 이유는 실패가 말하는
+  // 원인의 닫힌 분류 문장이고 상태 코드·서버 원문은 없다.
+  if (status === "error" && empty) {
     return (
-      <InlineBanner
-        message="이 구간을 불러오지 못했습니다."
-        actionLabel="다시 시도"
-        onAction={() => onRetry?.()}
+      <LoadFailureBox
+        titleKey={CONNECTION_KEYS.loadConversationTitle}
+        cause={loadCause}
+        onRetry={() => onRetry?.()}
         testId="timeline-error"
       />
     );
@@ -829,6 +850,14 @@ export function Timeline({
     // `relative`는 아래 항법 컨트롤이 붙을 자리다. 컨트롤이 타임라인 **안**에
     // 사는 이유: 그 줄이 가리키는 곳도, 눌렀을 때 움직이는 것도 이 스크롤러다.
     <div className="relative h-full">
+      {status === "error" && (
+        <LoadFailureLine
+          titleKey={CONNECTION_KEYS.loadNewerTitle}
+          onRetry={() => onRetry?.()}
+          testId="timeline-error-line"
+          className="layer-content-float absolute inset-x-0 top-0 bg-pane"
+        />
+      )}
       <TimelineLiveRegionProvider>
       <TimelineTailContext.Provider value={tail}>
       <Virtuoso
@@ -922,6 +951,14 @@ export function Timeline({
                 quoteLookup={quoteLookup}
                 onResend={onResendPending}
                 onDiscard={onDiscardPending}
+                failureKind={failureKinds?.get(item.pending.clientMsgId) ?? null}
+                resendAllCount={
+                  failedPendingIds.length >= 2 &&
+                  failedPendingIds[failedPendingIds.length - 1] === item.pending.clientMsgId
+                    ? failedPendingIds.length
+                    : undefined
+                }
+                onResendAll={onResendAllPending}
               />
             );
           }

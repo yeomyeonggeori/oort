@@ -27,6 +27,11 @@ import {
   subscribeSessionRestoreHold,
 } from "@/features/auth/onboardingSessionHold";
 import { clearAllDrafts } from "@/features/chat/draftStore";
+import {
+  clearSessionNotices,
+  markBootUnreachableNotice,
+  markSessionExpiredNotice,
+} from "@/lib/sessionNotice";
 import { clearEntryDrafts } from "@/lib/entryDrafts";
 import { clearDownloadHistory } from "@/features/downloads/downloadsStore";
 import { clearAllFirstMentionRecords } from "@/features/hostedAgents/firstMentionStore";
@@ -128,7 +133,10 @@ export function useRestoredSession(): SessionLifecycle {
     // rotation is NOT cancelled, so one that lands late still signs the person
     // in rather than making them retype a password they never needed to.
     const release = setTimeout(() => {
-      if (!cancelled && !settled) setStatus("anonymous");
+      if (cancelled || settled) return;
+      setStatus("anonymous");
+      // 저장된 로그인은 그대로인데 시간 예산이 지났다: 로그인 화면이 그 사실을 말한다(#5221). 늦게 닿으면 아래에서 걷힌다.
+      markBootUnreachableNotice();
     }, BOOT_RESTORE_BUDGET_MS);
 
     restoreSession()
@@ -137,6 +145,9 @@ export function useRestoredSession(): SessionLifecycle {
         if (cancelled) return;
         setSession(restored);
         setStatus(restored ? "signed-in" : "anonymous");
+        // 응답이 없어 복원하지 못했다면 자격은 그대로 남아 있다(위 `restoreSession`). 죽은 토큰이면 이미 지워졌다.
+        if (restored || !hasPersistedSession()) clearSessionNotices();
+        else markBootUnreachableNotice();
       })
       .catch(() => {
         // restoreSession already wiped local state on a dead token; anything
@@ -159,6 +170,8 @@ export function useRestoredSession(): SessionLifecycle {
   const expired = useSyncExternalStore(subscribeSession, getAuthExpired);
   useEffect(() => {
     if (!expired) return;
+    // 비우면 `authExpired`도 같이 꺼지므로 로그인 화면이 말할 사실은 **비우기 전에** 남긴다(#5221).
+    markSessionExpiredNotice();
     clearSession();
     clearApprovalAvatarPreviews(); // 본인 전용 사진: 계정 경계를 넘어 남지 않게.
     clearDownloadHistory(); // 받은 파일의 이름도 다음 사람에게 남지 않게(디스크의 파일은 그대로).
@@ -186,6 +199,7 @@ export function useRestoredSession(): SessionLifecycle {
     // not `/v1/auth/refresh`, so this hidden rotation escaped to a real backend,
     // came back 401, and bounced the app to the login card mid-run.
     attempted.current = true;
+    clearSessionNotices();
     clearApprovalAvatarPreviews();
     setSession(next);
     setStatus("signed-in");
@@ -203,6 +217,7 @@ export function useRestoredSession(): SessionLifecycle {
     // and unconditional, so the user is out of the session before the network
     // call resolves, and a failed revoke cannot pin them inside the app.
     clearDurableForCurrentAccount(); // 세션이 지워지기 전에: 계정 꼬리가 필요하다(#3696).
+    clearSessionNotices(); // 직접 나간 사람에게 만료·서버 안내는 맞지 않는다.
     void logout();
     // 초안도 함께 지운다 (U4-f). 로그아웃은 「이 기기에서 내 흔적을 지운다」이고,
     // 쓰다 만 글은 보낸 메시지보다 사적이다 — 세션 기록과 같은 저장소에 사는 이상

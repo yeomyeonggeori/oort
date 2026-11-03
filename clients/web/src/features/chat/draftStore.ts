@@ -1,5 +1,8 @@
 import { useSyncExternalStore } from "react";
 import { containsSecretKey } from "@momo/core/features/chat/secretKey";
+import { parseFailedSend, serializeFailedSend } from "@momo/core/features/connection/failedSendRecord";
+import type { SendFailureKind } from "@momo/core/features/connection/sendFailure";
+import type { PendingMessage } from "@momo/core/features/timeline/model";
 
 // =============================================================================
 // 쓰다 만 글은 채널을 옮겨도 남는다 (U4-f · 진단 H-10).
@@ -357,10 +360,11 @@ export function clearThreadDraft(workspaceId: string, rootId: string): void {
   writeRaw(threadDraftKey(workspaceId, rootId), null);
 }
 
-/** 로그아웃. 이 기기에 남은 초안을 전부 지운다. */
+/** 로그아웃. 이 기기에 남은 초안과 보내지 못한 글을 전부 지운다. */
 export function clearAllDrafts(): void {
   for (const key of draftKeys()) writeRaw(key, null);
   for (const key of threadDraftKeys()) writeRaw(key, null);
+  for (const key of failedSendKeys()) writeRaw(key, null);
   emitDraftsChanged();
 }
 
@@ -424,6 +428,106 @@ export function listWorkspaceDrafts(
 ): DraftRecord[] {
   const needle = workspaceId.toLowerCase();
   return listDrafts(nowMs).filter((draft) => draft.workspaceId === needle);
+}
+
+// =============================================================================
+// 보내지 못한 글 (#5221, #5201 S-C 결정 ⑤).
+//
+// 보내다 실패한 글은 지금까지 메모리에만 있어서 채널을 옮기거나 새로고침하면 사라졌다. 쓰다 만 글과 같은 이유로
+// (되돌릴 길이 없는 유일한 종류의 손실) 이 기기에 남겼다가 그 채널을 다시 열면 **실패 행으로** 돌려놓는다.
+//
+// 본문만 초안(`writeDraft`)으로 돌려놓지 않고 **행 전체**를 남기는 까닭: 「실패」는 서버가 못 받았다는 증명이
+// 아니다(응답만 유실됐을 수 있다). 행을 그대로 두면 멱등 키가 살아남아 다시 보내도 서버가 중복을 막고, 서버가
+// 이미 받은 글이면 채널을 열 때 확정 메시지와 만나 스스로 정리된다(`unsettledPending`). 본문만 초안으로 돌리면 새
+// 키로 나가 같은 글이 두 번 보일 수 있다. 첨부·인용·모델 고르기도 행이 들고 있어 잃지 않는다.
+//
+// 저장 규칙은 초안과 같다(위 머리말): `localStorage`, 비밀 키 모양이 든 글은 두지 않고, 30일이 지나면 읽을 때 버리고,
+// 최대 `MAX_FAILED_SENDS`개를 넘으면 오래된 것부터 버리고, 로그아웃(`clearAllDrafts`)이 함께 지운다. 한 행이
+// 한 열쇠라 쓰기가 서로의 것을 덮지 않는다. 개인 에이전트를 부른 전송(호출 계획이 함수를 든다)은 남기지 않는다.
+// =============================================================================
+
+const FAILED_SEND_PREFIX = "momo.failed-send.v1:";
+/** 동시에 들고 있는 보내지 못한 글의 최대 개수. */
+export const MAX_FAILED_SENDS = 50;
+
+function failedSendKey(workspaceId: string, channelId: string, clientMsgId: string): string {
+  return `${FAILED_SEND_PREFIX}${workspaceId.toLowerCase()}:${channelId.toLowerCase()}:${clientMsgId.toLowerCase()}`;
+}
+
+function failedSendKeys(): string[] {
+  try {
+    // 저장소가 없는 환경(ReferenceError)이나 막힌 환경은 아래 catch 가 같이 받는다.
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key !== null && key.startsWith(FAILED_SEND_PREFIX)) keys.push(key);
+    }
+    return keys;
+  } catch {
+    return [];
+  }
+}
+
+/** 보내지 못한 글을 이 기기에 남긴다(이미 있으면 갱신). 키 모양이 든 글은 남기지 않고 있던 것도 지운다. */
+export function rememberFailedSend(
+  workspaceId: string,
+  row: PendingMessage,
+  kind: SendFailureKind | null,
+  nowMs: number = Date.now()
+): void {
+  const key = failedSendKey(workspaceId, row.channelId, row.clientMsgId);
+  if (containsSecretKey(row.body)) {
+    writeRaw(key, null);
+    return;
+  }
+  writeRaw(key, serializeFailedSend(row, kind, nowMs));
+  pruneFailedSends(nowMs);
+}
+
+/** 이 글은 끝났다(보냈다·지웠다·서버가 이미 받았다). 이 기기에서도 지운다. */
+export function forgetFailedSend(workspaceId: string, channelId: string, clientMsgId: string): void {
+  writeRaw(failedSendKey(workspaceId, channelId, clientMsgId), null);
+}
+
+/**
+ * 이 채널에 남아 있는 보내지 못한 글, 보낸 순서대로. 시한이 지난 항목은 읽는 김에 지운다. 다른 사람이 쓴 글(작성자가
+ * 다른 멤버)은 돌려주지 않는다: 같은 기기를 나눠 쓰는 두 계정이 서로의 글을 보지 않게 한다.
+ */
+export function readFailedSends(
+  workspaceId: string,
+  channelId: string,
+  authorMemberId: string,
+  nowMs: number = Date.now()
+): { row: PendingMessage; kind: SendFailureKind | null }[] {
+  const prefix = failedSendKey(workspaceId, channelId, "");
+  const out: { row: PendingMessage; kind: SendFailureKind | null }[] = [];
+  for (const key of failedSendKeys()) {
+    if (!key.startsWith(prefix)) continue;
+    const stored = parseFailedSend(readRaw(key));
+    if (stored === null || nowMs - stored.atMs > DRAFT_TTL_MS) {
+      writeRaw(key, null);
+      continue;
+    }
+    if (stored.row.authorMemberId.toLowerCase() !== authorMemberId.toLowerCase()) continue;
+    out.push({ row: stored.row, kind: stored.kind });
+  }
+  out.sort((a, b) => a.row.createdAtMs - b.row.createdAtMs);
+  return out;
+}
+
+function pruneFailedSends(nowMs: number): void {
+  const entries: { key: string; atMs: number }[] = [];
+  for (const key of failedSendKeys()) {
+    const stored = parseFailedSend(readRaw(key));
+    if (stored === null || nowMs - stored.atMs > DRAFT_TTL_MS) {
+      writeRaw(key, null);
+      continue;
+    }
+    entries.push({ key, atMs: stored.atMs });
+  }
+  if (entries.length <= MAX_FAILED_SENDS) return;
+  entries.sort((a, b) => a.atMs - b.atMs);
+  for (const entry of entries.slice(0, entries.length - MAX_FAILED_SENDS)) writeRaw(entry.key, null);
 }
 
 if (typeof window !== "undefined") {
