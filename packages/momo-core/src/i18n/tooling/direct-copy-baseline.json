@@ -300,7 +300,7 @@
     "clients/mobile/src/screens/AgentsScreen.tsx": 11,
     "clients/mobile/src/screens/AppDetailScreen.tsx": 26,
     "clients/mobile/src/screens/AppsScreen.tsx": 20,
-    "clients/mobile/src/screens/ConnectScreen.tsx": 129,
+    "clients/mobile/src/screens/ConnectScreen.tsx": 128,
     "clients/mobile/src/screens/ConversationScreen.tsx": 53,
     "clients/mobile/src/screens/HostedConnectionDetailScreen.tsx": 23,
     "clients/mobile/src/screens/HostedConnectionsScreen.tsx": 17,

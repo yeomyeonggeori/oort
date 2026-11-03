@@ -32,6 +32,8 @@ export const messageKeys = [
   "connection.action.retry",
   "connection.approval.offline",
   "connection.approval.serverUnreachable",
+  "connection.boot.offlineDetail",
+  "connection.boot.offlineQrDetail",
   "connection.boot.unreachable",
   "connection.card.connecting",
   "connection.card.lastSynced",
@@ -803,6 +805,8 @@ export const argumentSpecs = {
   "connection.action.retry": {},
   "connection.approval.offline": {},
   "connection.approval.serverUnreachable": {},
+  "connection.boot.offlineDetail": {},
+  "connection.boot.offlineQrDetail": {},
   "connection.boot.unreachable": {},
   "connection.card.connecting": {},
   "connection.card.lastSynced": {
@@ -1737,6 +1741,8 @@ export interface MessageArgs {
   "connection.action.retry": Record<string, never>;
   "connection.approval.offline": Record<string, never>;
   "connection.approval.serverUnreachable": Record<string, never>;
+  "connection.boot.offlineDetail": Record<string, never>;
+  "connection.boot.offlineQrDetail": Record<string, never>;
   "connection.boot.unreachable": Record<string, never>;
   "connection.card.connecting": Record<string, never>;
   "connection.card.lastSynced": { relativeTime: string };
