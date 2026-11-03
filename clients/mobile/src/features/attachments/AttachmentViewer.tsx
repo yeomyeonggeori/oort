@@ -65,7 +65,7 @@ import { GlassButton } from './GlassButton';
 import {StageHero} from './StageHero';
 import { VideoControls } from './VideoControls';
 import { VideoViewerPage, type ActiveVideoHandle } from './VideoViewerPage';
-import { useAttachmentPoster } from './videoContent';
+import { PLAYBACK, useAttachmentPoster } from './videoContent';
 import { LAYOUT } from './videoDesign';
 import type {MeasureHeroSource} from './heroSource';
 import { ShareSheetTouchShield } from '../../lib/ShareSheetTouchShield';
@@ -537,6 +537,15 @@ function ViewerFrame({
   // 그 영상 하나뿐이고 옆으로 넘기면 꺼진다(`VideoViewerPage.tsx`).
   const currentIsVideo = current !== undefined && isInAppPlayableVideo(current);
   const [activeVideo, setActiveVideo] = useState<ActiveVideoHandle | null>(null);
+  // 지금 쪽의 손잡이. 쪽이 바뀌는 한 번의 그림에서 옛 플레이어를 읽지 않게 지금 쪽의 것일 때만 쥔다.
+  const videoHandle =
+    currentIsVideo && activeVideo !== null && activeVideo.attachmentId === current?.id ? activeVideo : null;
+  // 재생 실패·영상 사라짐(#5273, 화면 검수 4회차 B1): 틀(뒤로 · 썸네일 줄 · 위치)만 남고 영상 쪽이 오류 문장과 (실패면) 「다시 시도」 하나를 말한다.
+  //   · 재생 줄(▶ · 막대 · 소리)을 세우지 않는다 — 실패한 항목 위의 플레이어는 재생하지 않아서 ▶ 가 눌려도 아무 일이 없는 죽은 단추였다.
+  //   · [저장]·[공유]도 세우지 않는다 — 다음 행동이 「다시 시도」 하나로 읽혀야 하고(사라짐이면 행동이 없다), 두 단추는 재생과 같은 서버 길을 다시 부르는
+  //     것이라 대개 같은 이유로 같은 오류 알약만 돌려준다. 사진 쪽으로 넘기거나 「다시 시도」가 잘 열리면 두 단추가 다시 선다.
+  const videoBroken =
+    videoHandle !== null && (videoHandle.phase === PLAYBACK.FAILED || videoHandle.phase === PLAYBACK.GONE);
   const autoPlayId = useRef<string | null>(images[startIndex]?.id ?? null);
   const mixed = images.some(isInAppPlayableVideo);
   const formatMessage = useFormatMessage();
@@ -1005,12 +1014,12 @@ function ViewerFrame({
             style={styles.scrimBottomFade}
             testID="attachment-viewer-scrim-bottom-fade"
           />
-          {currentIsVideo && activeVideo !== null && activeVideo.attachmentId === current?.id ? (
+          {videoHandle !== null && !videoBroken ? (
             <VideoControls
-              key={activeVideo.attachmentId}
-              player={activeVideo.player}
-              controller={activeVideo.controller}
-              durationHintSeconds={activeVideo.durationHintSeconds}
+              key={videoHandle.attachmentId}
+              player={videoHandle.player}
+              controller={videoHandle.controller}
+              durationHintSeconds={videoHandle.durationHintSeconds}
             />
           ) : null}
           {/* 상태 알약 — 마지막으로 누른 단추의 일을 말한다. 저장의 영수증만 걷히고, 실패·거부는 다음 저장이 지울 때까지 선다. */}
@@ -1110,43 +1119,46 @@ function ViewerFrame({
               </View>
             </>
           ) : null}
-          <View pointerEvents="box-none" style={styles.actionRow}>
-            <GlassButton
-              label="저장"
-              // 사진·영상은 사진 보관함에 바로 추가한다(파일 머리). 길이 파일 앱이면(보관함이 못 받는 형식이 뷰어에 들어온 경우) 그 말로.
-              hint={formatMessage(
-                saving.route !== 'photos'
-                  ? 'mobile.attachmentSave.toFiles'
-                  : currentIsVideo
-                  ? 'attachments.video.saveHint'
-                  : 'mobile.attachmentSave.saveHintPhotos',
-              )}
-              onPress={save}
-              disabled={busy}
-              testID="attachment-viewer-save"
-            >
-              {busy && pressedBy === 'save' ? (
-                <ActivityIndicator color={VIEWER_STAGE.ink} />
-              ) : (
-                <Image
-                  source={VIEWER_ICONS.download}
-                  style={styles.actionGlyph}
-                />
-              )}
-            </GlassButton>
-            <GlassButton
-              label="공유"
-              onPress={sendOut}
-              disabled={busy}
-              testID="attachment-viewer-share"
-            >
-              {busy && pressedBy === 'share' ? (
-                <ActivityIndicator color={VIEWER_STAGE.ink} />
-              ) : (
-                <Image source={VIEWER_ICONS.share} style={styles.actionGlyph} />
-              )}
-            </GlassButton>
-          </View>
+          {/* 재생 실패·영상 사라짐에는 [저장]·[공유]가 없다 — 다음 행동은 「다시 시도」 하나다(위 `videoBroken`). */}
+          {videoBroken ? null : (
+            <View pointerEvents="box-none" style={styles.actionRow}>
+              <GlassButton
+                label="저장"
+                // 사진·영상은 사진 보관함에 바로 추가한다(파일 머리). 길이 파일 앱이면(보관함이 못 받는 형식이 뷰어에 들어온 경우) 그 말로.
+                hint={formatMessage(
+                  saving.route !== 'photos'
+                    ? 'mobile.attachmentSave.toFiles'
+                    : currentIsVideo
+                    ? 'attachments.video.saveHint'
+                    : 'mobile.attachmentSave.saveHintPhotos',
+                )}
+                onPress={save}
+                disabled={busy}
+                testID="attachment-viewer-save"
+              >
+                {busy && pressedBy === 'save' ? (
+                  <ActivityIndicator color={VIEWER_STAGE.ink} />
+                ) : (
+                  <Image
+                    source={VIEWER_ICONS.download}
+                    style={styles.actionGlyph}
+                  />
+                )}
+              </GlassButton>
+              <GlassButton
+                label="공유"
+                onPress={sendOut}
+                disabled={busy}
+                testID="attachment-viewer-share"
+              >
+                {busy && pressedBy === 'share' ? (
+                  <ActivityIndicator color={VIEWER_STAGE.ink} />
+                ) : (
+                  <Image source={VIEWER_ICONS.share} style={styles.actionGlyph} />
+                )}
+              </GlassButton>
+            </View>
+          )}
         </Animated.View>
       </LiquidGlassAllowed.Provider> : null}
     </View>

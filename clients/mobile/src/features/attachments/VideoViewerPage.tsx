@@ -20,7 +20,7 @@ import { useStyles } from '../../design/theme';
 import { font, line, radius, space, TOUCH_TARGET, type Palette } from '../../design/tokens';
 import { useFormatMessage } from '../../i18n/useFormatMessage';
 import { useVideoPlayback, type VideoController } from './useVideoPlayback';
-import { PLAYBACK, useAttachmentPoster } from './videoContent';
+import { PLAYBACK, useAttachmentPoster, type PlaybackPhase } from './videoContent';
 import { LAYOUT, VIDEO_PLAYER } from './videoDesign';
 import { VIEWER_GLASS_TONE, VIEWER_STAGE } from './viewerDesign';
 
@@ -38,6 +38,14 @@ import { VIEWER_GLASS_TONE, VIEWER_STAGE } from './viewerDesign';
 //
 // 자동 재생은 **카드를 눌러 연 그 영상**만이다(`autoPlay`). 옆으로 넘겨 닿은 영상은 멈춰 서서 사람이 누르기를 기다린다 —
 // 사진을 넘기다 소리가 터지지 않는다.
+//
+// ## 재생 실패·영상 사라짐 (#5273, 화면 검수 4회차 B1)
+// 실패(`FAILED`)·사라짐(`GONE`)의 화면은 **오류 문장과 (실패면) 「다시 시도」 하나**다. 그 밖의 것은 서지 않는다.
+//   · 네이티브 영상 뷰와 포스터를 세우지 않는다. 실패한 항목 위의 영상 뷰는 자기 「재생 불가」 표지를 그려서 앱의 오류 문장과 「다시 시도」 사이에
+//     앱이 그리지 않은 기호가 겹쳤다. 포스터는 사라진 영상이 「있다」고 말하고, 흰 오류 문장은 밝은 포스터 위에서 읽히지 않는다. 「다시 시도」로 다시
+//     열면 두 면이 처음 열 때처럼 다시 선다(플레이어는 영상 뷰보다 오래 산다 — 훅이 쥔다).
+//   · 아래 재생 줄과 [저장]·[공유]는 프레임이 걷는다. 그러려고 활성 쪽이 프레임에 내미는 손잡이에 재생이 어디까지 왔는지(`phase`)를 싣는다
+//     (`AttachmentViewer.tsx` 의 「재생 실패·영상 사라짐」).
 // =============================================================================
 
 /** 활성 영상 쪽이 프레임에 내미는 것. 프레임의 아래 조작 줄이 읽는다. */
@@ -48,6 +56,8 @@ export interface ActiveVideoHandle {
   controller: VideoController;
   /** 보낸 기기가 잰 길이(초) — 플레이어가 길이를 알려 주기 전의 막대 눈금. */
   durationHintSeconds: number;
+  /** 재생이 어디까지 왔는가. 프레임은 실패·사라짐에서 재생 줄과 [저장]·[공유]를 세우지 않는다. */
+  phase: PlaybackPhase;
 }
 
 function PosterLayer({
@@ -99,31 +109,36 @@ function ActiveVideo({
   });
   const { player, controller, phase, playing, firstFrame, markFirstFrame } = playback;
 
+  // 단계가 바뀌면 손잡이를 다시 낸다. 거둠(`null`)과 다시 냄이 한 번의 갱신으로 묶여서 프레임의 조작 줄이 사라졌다 돌아오지 않는다.
   useEffect(() => {
-    onActiveVideo({ attachmentId: attachment.id, player, controller, durationHintSeconds });
+    onActiveVideo({ attachmentId: attachment.id, player, controller, durationHintSeconds, phase });
     return () => onActiveVideo(null);
-  }, [attachment.id, player, controller, durationHintSeconds, onActiveVideo]);
+  }, [attachment.id, player, controller, durationHintSeconds, phase, onActiveVideo]);
 
   const loading = phase === PLAYBACK.OPENING || (phase === PLAYBACK.READY && playing && !firstFrame);
   const failed = phase === PLAYBACK.FAILED;
   const gone = phase === PLAYBACK.GONE;
+  // 실패·사라짐에는 영상 면도 포스터도 없다(파일 머리 「재생 실패·영상 사라짐」) — 오류 문장이 검정 무대 위에 홀로 선다.
+  const broken = failed || gone;
 
   return (
     <>
-      {firstFrame ? null : <PosterLayer uri={posterUri} testID="attachment-viewer-video-poster" />}
-      <View pointerEvents="none" style={styles.fill}>
-        <VideoView
-          player={player}
-          nativeControls={false}
-          contentFit="contain"
-          allowsPictureInPicture={false}
-          // 멈춘 장면에 iOS 가 「텍스트 가져오기」 단추를 얹지 않게 한다 — 영상 위의 정체 모를 시스템 단추이고 조작은 우리 것 하나뿐이다.
-          allowsVideoFrameAnalysis={false}
-          onFirstFrameRender={markFirstFrame}
-          style={styles.fill}
-          testID="attachment-viewer-video"
-        />
-      </View>
+      {firstFrame || broken ? null : <PosterLayer uri={posterUri} testID="attachment-viewer-video-poster" />}
+      {broken ? null : (
+        <View pointerEvents="none" style={styles.fill}>
+          <VideoView
+            player={player}
+            nativeControls={false}
+            contentFit="contain"
+            allowsPictureInPicture={false}
+            // 멈춘 장면에 iOS 가 「텍스트 가져오기」 단추를 얹지 않게 한다 — 영상 위의 정체 모를 시스템 단추이고 조작은 우리 것 하나뿐이다.
+            allowsVideoFrameAnalysis={false}
+            onFirstFrameRender={markFirstFrame}
+            style={styles.fill}
+            testID="attachment-viewer-video"
+          />
+        </View>
+      )}
       {loading ? (
         <View pointerEvents="none" style={styles.center}>
           <ActivityIndicator
@@ -133,7 +148,7 @@ function ActiveVideo({
           />
         </View>
       ) : null}
-      {failed || gone ? (
+      {broken ? (
         <View pointerEvents="box-none" style={styles.center}>
           <Text
             style={styles.status}
