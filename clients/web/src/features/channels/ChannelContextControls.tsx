@@ -16,6 +16,7 @@ import { Avatar } from "@/features/timeline/MessageRow";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import { cn } from "@/design/lib/cn";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 export type ChannelMemberListStatus = "loading" | "ready" | "failed";
 
@@ -233,7 +234,7 @@ export function ChannelMemberPanel({
         {offline && (
           <InlineBanner
             tone="neutral"
-            message="연결이 끊겼습니다. 마지막으로 받은 멤버 목록을 표시합니다."
+            message={<BlockedReason frame="memberListStale" />}
             testId="channel-member-offline"
           />
         )}

@@ -19,6 +19,7 @@ import {
 import { Skeleton } from "@/features/common/States";
 import { hostedListQuery } from "@/features/hostedAgents/hostedCredentialScope";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 팀 키 「연결 끊기」 확인 창 (#2880 AA-7, 시안 §3 오른쪽).
@@ -174,7 +175,7 @@ function UnlinkBody({
       )}
       {offline && (
         <p id={OFFLINE_REASON_ID} className="shrink-0 break-keep text-meta text-ink-muted" data-testid="ai-link-unlink-offline">
-          연결이 끊겨 지금은 끊을 수 없어요. 다시 연결되면 이어서 할 수 있어요.
+          <BlockedReason frame="unlinkTeamAi" />
         </p>
       )}
       {loading && !offline && (

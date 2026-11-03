@@ -8,7 +8,6 @@ import type { WorkSessionEvent } from "@momo/core/features/work/workSessionModel
 import {
   PERMISSION_HOST_WAIT_MS,
   PERMISSION_LAPSED_LINE,
-  PERMISSION_OFFLINE_LINE,
   agentPaneModel,
   type AgentPaneModel,
 } from "@momo/core/features/workbench/agentPane";
@@ -352,7 +351,7 @@ describe("decision outcomes (#3013)", () => {
     expect(q('[data-testid="agent-permission-confirm"]')).toBeNull();
     expect((q('[data-testid="agent-permission-allow"]') as HTMLButtonElement).disabled).toBe(true);
     expect((q('[data-testid="agent-permission-reject"]') as HTMLButtonElement).disabled).toBe(true);
-    expect(q('[data-testid="agent-permission-unavailable"]')!.textContent).toBe(PERMISSION_OFFLINE_LINE);
+    expect(q('[data-testid="agent-permission-unavailable"]')!.textContent).toBe("You're offline, so you can't decide right now. You can press it once you're connected again.");
     expect(decide).not.toHaveBeenCalled();
   });
 
@@ -509,7 +508,7 @@ describe("browser instructs from the app (#3029)", () => {
   it("offline or cramped reasons win over the app line (one reason at a time)", () => {
     render(model(events()), { decide: async () => undefined, reply: null }, "곽성재", true, "app");
     expect(q('[data-testid="agent-permission-in-app"]')).toBeNull();
-    expect(q('[data-testid="agent-permission-unavailable"]')!.textContent).toBe(PERMISSION_OFFLINE_LINE);
+    expect(q('[data-testid="agent-permission-unavailable"]')!.textContent).toBe("You're offline, so you can't decide right now. You can press it once you're connected again.");
   });
 
   it.each([

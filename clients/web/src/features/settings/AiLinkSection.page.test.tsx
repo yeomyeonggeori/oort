@@ -587,7 +587,7 @@ describe("네 상태 (#2877 시안 §6)", () => {
   it("오프라인: 페이지 배너 하나, 팀 줄은 마지막 값을 「확인할 수 없음」으로", async () => {
     mount(true);
     const row = await until("ai-link-row");
-    expect(q("ai-offline-banner")?.textContent).toContain("서버와 연결이 끊겼어요.");
+    expect(q("ai-offline-banner")?.textContent).toContain("You're offline.");
     expect(row.textContent).toContain("확인할 수 없음");
     expect(row.textContent).toContain("마지막으로 받은 값");
     act(() => (q("ai-link-row-more") as HTMLButtonElement).click());
@@ -696,7 +696,7 @@ describe("팀 AI 키 AA-7 (#2880 시안 §3·§4 2b)", () => {
     const confirm = dq("ai-link-unlink-confirm") as HTMLButtonElement;
     expect(confirm.getAttribute("aria-disabled")).toBe("true");
     const reason = dq("ai-link-unlink-offline");
-    expect(reason?.textContent).toContain("연결이 끊겨");
+    expect(reason?.textContent).toContain("You're offline, so you can't disconnect right now.");
     expect(confirm.getAttribute("aria-describedby")).toBe(reason?.id);
     act(() => confirm.click());
     expect(deleteProviderLink).not.toHaveBeenCalled();

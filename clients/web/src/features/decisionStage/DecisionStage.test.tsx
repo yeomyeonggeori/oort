@@ -3,11 +3,16 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { act, fireEvent, render, screen, cleanup } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentApprovalCard } from "@momo/core/features/timeline/agentCardModel";
 import type { DecisionOutcome } from "@momo/core/features/timeline/approvalDecision";
 import { STAGE_HERO_WINDOW_MS } from "@/design/motion";
 import { resetSettledApprovalsForTest, settledApprovalFor } from "@/features/timeline/settledApprovals";
+import { ConnectionContext } from "@/features/common/connectionContext";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { connectionScene, type ConnectionScene } from "@/testing/connectionViews";
+import { koreanLocale } from "@/testing/koLocale";
 import { DecisionStageHost } from "./DecisionStage";
 import { closeDecisionStage, decisionStageSnapshot, openDecisionStage, type DecisionStageRequest } from "./openDecisionStage";
 
@@ -78,6 +83,11 @@ async function finishHero() {
 function setBrowserOnline(online: boolean) {
   Object.defineProperty(window.navigator, "onLine", { configurable: true, value: online });
 }
+
+let ko: AppLocale;
+beforeAll(async () => {
+  ko = await koreanLocale();
+});
 
 beforeEach(() => {
   setBrowserOnline(true);
@@ -439,5 +449,42 @@ describe("decision stage", () => {
     await finishHero();
     expect(document.querySelector(".stage-hero-layer")).toBeNull();
     secondSource.remove();
+  });
+});
+
+// #5260: 결정 무대의 막힘 배너는 **막은 원인**을 말한다. 진짜 무대를 코어 모델이 돌린 모습 위에 그린다.
+//   기기 오프라인 → 「오프라인이에요. …」 / 서버에 닿지 못함 → 「서버에 닿지 못했어요. …」(오프라인이라 하지 않는다)
+//   알 수 없음·실시간만 끊김 → 모델이 막지 않는다: 배너 없이 승인이 열려 있다 (#5201 결정 ③)
+// 문장은 손으로 적는다(사전의 값을 되풀이하면 코드와 시험이 함께 틀려도 초록이다).
+describe("decision stage: 막힘 배너의 원인 (#5260)", () => {
+  function openUnder(scene: ConnectionScene) {
+    render(
+      <LocaleProvider locale={ko}>
+        <ConnectionContext.Provider value={connectionScene(scene)}>
+          <DecisionStageHost />
+        </ConnectionContext.Provider>
+      </LocaleProvider>,
+    );
+    act(() => { openDecisionStage(request()); });
+  }
+  const banner = () => screen.queryByTestId("decision-stage-offline")?.textContent ?? null;
+
+  it("기기 오프라인: 오프라인이에요", () => {
+    openUnder("deviceOffline");
+    expect(banner()).toBe("오프라인이에요. 내용을 살펴보고 다시 연결되면 결정해 주세요.");
+    expect(screen.queryByRole("button", { name: "승인" })).toBeNull();
+  });
+
+  it("서버에 닿지 못함: 서버에 닿지 못했다고 말하고 오프라인이라 하지 않는다", () => {
+    openUnder("serverUnreachable");
+    expect(banner()).toBe("서버에 닿지 못했어요. 내용을 살펴보고 다시 연결되면 결정해 주세요.");
+    expect(banner()).not.toContain("오프라인");
+    expect(screen.queryByRole("button", { name: "승인" })).toBeNull();
+  });
+
+  it.each(["unknown", "realtimeDown"] as const)("%s: 모델이 막지 않는다 — 배너 없이 승인이 열려 있다", (scene) => {
+    openUnder(scene);
+    expect(banner()).toBeNull();
+    expect(screen.getByRole("button", { name: "승인" })).toBeTruthy();
   });
 });

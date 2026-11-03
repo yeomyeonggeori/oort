@@ -305,13 +305,13 @@ describe("팀 줄 상태 (design-review #3042)", () => {
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState({ offline: true }) });
     const select = q("ai-default-teamAgent-select") as HTMLSelectElement;
     expect(select.disabled).toBe(true);
-    expect(q("ai-default-teamAgent-note")?.textContent).toBe("연결이 끊겨 지금은 바꿀 수 없어요.");
+    expect(q("ai-default-teamAgent-note")?.textContent).toBe("You're offline, so you can't change this right now.");
     expect(select.getAttribute("aria-describedby")).toContain("ai-default-teamAgent-note");
     act(() => root?.unmount());
     host?.remove();
     // 확인 전에도: 잠긴 확인 버튼을 누르라고 하지 않는다.
     render(AiDefaultsTable, { teamKey: TEAM, operator: true, browserTab: false, team: teamState({ offline: true, links: [] }) });
-    expect(q("ai-default-teamAgent-note")?.textContent).toBe("연결이 끊겨 지금은 바꿀 수 없어요.");
+    expect(q("ai-default-teamAgent-note")?.textContent).toBe("You're offline, so you can't change this right now.");
     expect(q("ai-default-teamAgent-model")).toBeNull();
   });
 

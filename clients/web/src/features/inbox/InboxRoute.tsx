@@ -43,6 +43,7 @@ import {
   webMailboxPanelId,
   webMailboxTabId,
 } from "./mailboxTab";
+import { BlockedListLine } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 인박스 (#3663). 메일함·알림함처럼 **나와 관련된 것의 목록**과 오른쪽의 **맥락 패널**.
@@ -443,12 +444,13 @@ export function InboxRoute() {
         <InlineBanner
           tone="neutral"
           message={
-            (filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs) > 0
-              ? `오프라인, 마지막 동기화 ${relativeLabel(
-                  filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs,
-                  Date.now()
-                )}. 아래는 그때의 상태예요.`
-              : "오프라인이에요. 아직 이 목록을 한 번도 받지 못했어요."
+            <BlockedListLine
+              relativeTime={
+                (filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs) > 0
+                  ? relativeLabel(filter === "reminders" ? reminders.dataUpdatedAt : mailbox.updatedAtMs, Date.now())
+                  : null
+              }
+            />
           }
           testId="inbox-offline"
         />

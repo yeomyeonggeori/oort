@@ -54,6 +54,7 @@ import { rosterQueryKey } from "@/features/workspace/useWorkspace";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { KomettoGuide } from "./guide/KomettoGuide";
 import { ONBOARDING_ACTION_CLASS, ONBOARDING_FIELD_CLASS } from "./guide/OnboardingFrame";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: onboarding 팀 AI 단계 (ADR-0201 증보 v3 B3·B10, #4945) for internal team
 // users on web+Tauri, density 5/10, motion 2/10.
@@ -248,7 +249,7 @@ export function TeamAiStage({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message={formatMessage("teamAi.stage.offline")}
+          message={<BlockedReason frame="turnOnHelper" />}
           messageId={offlineNoteId}
           testId="onboarding-team-ai-offline"
         />
