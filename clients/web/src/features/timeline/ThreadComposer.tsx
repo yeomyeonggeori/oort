@@ -553,7 +553,7 @@ export function ThreadComposer({
             />
             {/* 「대화에도 보내기」: 입력 칸 바로 아래, 도구 줄 위. Tab 은 글 칸 다음에 여기로 오고 Space 로 켠다. 이름은 보이는 글이 진다. */}
             <label
-              className="tap-target mx-3 mb-1 flex w-fit cursor-pointer items-center gap-2 rounded-sm text-meta text-ink-muted has-[:focus-visible]:focus-ring"
+              className="tap-target mx-3 mb-1 flex w-fit cursor-pointer items-center gap-2 rounded-sm text-meta text-ink-muted active:bg-surface-pressed has-[:focus-visible]:focus-ring"
               data-testid="thread-composer-also-in-channel"
             >
               <input

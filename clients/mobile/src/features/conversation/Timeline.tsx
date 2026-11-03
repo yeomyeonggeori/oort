@@ -1767,8 +1767,9 @@ function TimelineInner({
     () =>
       baselineSeq === null
         ? 0
-        : countNewerThan(messages, baselineSeq, myMemberId),
-    [messages, baselineSeq, myMemberId],
+        // 대화에 그려지는 행만 센다(#4888): 스레드로만 간 답글은 대화에 서지 않으므로 「새 메시지 N」을 올리면 안 된다.
+        : countNewerThan(drawnRows(messages, mainFlow), baselineSeq, myMemberId),
+    [messages, baselineSeq, myMemberId, mainFlow],
   );
   const showJumpLatest = jumpPills && !atBottom;
   if (pillsRef) {
