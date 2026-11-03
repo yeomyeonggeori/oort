@@ -8,7 +8,7 @@
 //
 // 왜 재는가: `useRestoredSession` 은 복원이 자격을 지우는 순간 효과 정리가 `cancelled` 를 세워 자기 `.then` 과 시간 예산
 // 타이머(2.5초)를 함께 걷는다. 그 뒤 화면을 로그인으로 넘기는 일은 코어가 지우기 직전에 세우는 만료 신호(`markAuthExpired`)와
-// 훅의 방어 효과가 맡는다. 둘 다 잃으면 스켈레톤이 영영 남는다 — 예산도 이미 걷혔으므로 아무것도 풀어 주지 않는다.
+// 그 정리가 끝나지 못한 시도를 풀어 주는 한 줄(`leaveRestoring`)이 맡는다. 둘 다 잃으면 스켈레톤이 영영 남는다 — 예산도 이미 걷혔으므로 아무것도 풀어 주지 않는다.
 // jsdom 시험(src/app/sessionDeadToken.test.tsx)은 훅과 코어의 연결을 재고, 이 레인은 진짜 번들·진짜 브라우저·진짜 localStorage
 // 에서 같은 일을 한 번 더 잰다.
 //
@@ -18,10 +18,10 @@
 // 빌드 뒤에 실행:
 //   npm run gate:dead-token
 //
-// 사보타주 증명(기대: FAIL): 훅의 방어 효과와 코어의 `markAuthExpired()` 를 함께 지운 번들을 따로 빌드해 이 레인에 먹인다.
+// 사보타주 증명(기대: FAIL): 정리의 해제 한 줄과 코어의 `markAuthExpired()` 를 함께 지운 번들을 따로 빌드해 이 레인에 먹인다.
 //   DEAD_TOKEN_GATE_OUTDIR=/절대/경로/dist-sabotage node gates/gate-dead-token.mjs  (빌드 없이 그 번들만 서빙한다)
-// 코어가 만료 신호를 세우는 번들에서는 방어 효과 하나만 지운 번들도 이 레인에서 초록이다 — 방어 효과 하나의 몫은 jsdom 시험
-// (훅 단독 모의)이 재고, 이 레인은 둘이 함께 사라지는 회귀와 연결(안내 배너·localStorage 비움)을 잰다.
+// 코어가 만료 신호를 세우는 번들에서는 해제 한 줄만 지운 번들도 이 레인에서 초록이다 — 그 한 줄의 몫은 jsdom 시험(훅 단독 모의)이 재고,
+// 이 레인은 둘이 함께 사라지는 회귀와 연결(안내 배너·localStorage 비움)을 잰다. 코어 신호만 지운 번들은 안내 단정에서 FAIL 한다.
 //
 // LIMIT: Chromium + Vite preview. 데스크탑(Tauri, WKWebView)의 키체인 경로는 여기서 재지 않는다 — 그 분기의 복원은 같은 훅을
 // 쓰고, 키체인 IPC 는 src/app/boot.test.ts 와 src/lib/session.tabs.test.ts 가 mock 으로 잰다(실기기는 runtime-unverified).

@@ -20,11 +20,12 @@ import { useRestoredSession, type SessionLifecycle } from "@/app/session";
 //   ② 그 신호 없이 복원이 자격을 지우고 null 을 주면(`restoreSession()` 문서가 약속하는 모양 그대로이고 `sessionNotice.test.tsx` 의
 //      죽은 토큰 모의와 같은 모양이다. 그 시험은 안내만 단정하고 상태는 단정하지 않는다) 머문다. 자격이 지워지며 `resumable` 이
 //      꺼지면 같은 정리가 `.then` 도 시간 예산 타이머(2.5초)도 걷으니, 아무것도 화면을 풀어 주지 않는 「복원 중」이다.
-//   → 훅에 「복원 중인데 복원할 로그인이 없다」 방어를 두었다. 이 파일이 두 길(①·②)과 방어가 끼지 말아야 할 두 자리를 지킨다.
+//   → 복원 효과의 정리가 끝나지 못한 시도를 버릴 때 화면도 함께 풀게 했다(`leaveRestoring`, app/session.tsx). 이 파일이 두 길(①·②)과,
+//      정리가 건드리면 안 되는 자리(저장된 로그인이 남은 채 늦는 시도·이미 끝난 시도)를 지킨다.
 //
 // 왜 act 를 쓰지 않는가: act 범위 안에서는 React 갱신이 범위 끝까지 쥐어져, ① 에서 `.then` 이 정리보다 **먼저** 돈다
 // (측정한 순서: `.then`(cancelled=false) → 정리). 브라우저와 반대 순서라 ① 의 만료 효과는 한 번도 서지 않는다. 그래서 act 환경을
-// 끄고 순서를 있는 그대로 돌린다. 가짜인 것은 시계(시간 예산 2.5초·회전 잠금 40ms·요청 마감)와 서버(`/v1`)뿐이다.
+// 끄고 순서를 있는 그대로 돌린다. 가짜인 것은 시계(시간 예산 2.5초·회전 잠금 40밀리초·요청 마감)와 서버(`/v1`)뿐이다.
 // =============================================================================
 
 const restore = vi.hoisted(() => ({
@@ -182,7 +183,7 @@ describe("세션 훅: 죽은 토큰으로 열기 (#5244)", { timeout: 20_000 }, 
   it("실제 복원이 401 을 받으면 자격이 지워지고 시간 예산 전에 로그인 화면이 선다", async () => {
     applyLogin(LOGIN); // 저장된 로그인이 있어야 「복원 중」으로 시작한다
     await mountApp();
-    await advance(100); // 회전 잠금(40ms) 뒤 refresh 가 날아간다
+    await advance(100); // 회전 잠금(40밀리초) 뒤 refresh 가 날아간다
     expect(refreshCalls()).toHaveLength(1);
     expect(JSON.parse(refreshCalls()[0].body)).toEqual({ refreshToken: LOGIN.refreshToken });
     expect(restoring()).toBe(true); // 출발점: 답을 기다리는 동안은 스켈레톤이다
@@ -207,7 +208,7 @@ describe("세션 훅: 죽은 토큰으로 열기 (#5244)", { timeout: 20_000 }, 
     expect(refreshCalls()).toHaveLength(1);
   });
 
-  // 지키는 것: 훅의 방어. 복원이 만료 신호 없이 자격을 지우고 null 을 줘도 「복원 중」에 머물지 않는다.
+  // 지키는 것: 끝나지 못한 시도가 버려지면 화면이 풀린다. 복원이 만료 신호 없이 자격을 지우고 null 을 줘도 「복원 중」에 머물지 않는다.
   it("복원이 만료 신호 없이 자격을 지우고 null 을 줘도 로그인 화면이 선다", async () => {
     applyLogin(LOGIN);
     let answer: () => void = () => undefined;
@@ -234,7 +235,7 @@ describe("세션 훅: 죽은 토큰으로 열기 (#5244)", { timeout: 20_000 }, 
     expect(onLoginScreen()).toBe(true);
   });
 
-  // 지키는 것: 방어는 「복원할 로그인이 없을 때」만 낀다. 저장된 로그인이 남은 채 답이 늦으면 예산이 풀어 줄 때까지 복원 중이다.
+  // 지키는 것: 저장된 로그인이 남은 채 답이 늦으면 정리가 돌지 않으니 예산(2.5초)이 풀어 줄 때까지 복원 중이다. 예산의 해제도 같은 한 줄(`leaveRestoring`)이다.
   it("저장된 로그인이 남아 있으면 답이 늦는 동안 복원 중이고, 예산이 지나면 로그인 화면과 안내가 선다", async () => {
     applyLogin(LOGIN);
     restore.impl = () => new Promise<LoginResponse | null>(() => undefined);
@@ -252,17 +253,22 @@ describe("세션 훅: 죽은 토큰으로 열기 (#5244)", { timeout: 20_000 }, 
     expect(hasPersistedSession()).toBe(true);
   });
 
-  // 지키는 것: 방어는 「복원 중」일 때만 낀다. 저장소가 빈 채로 로그인 상태가 된 경우를 로그인 전으로 되돌리지 않는다(그 경계를 `status` 조건이 긋는다).
-  it("복원 중이 아니면 방어가 끼지 않는다: 저장소가 빈 채 로그인한 상태는 그대로 남는다", async () => {
+  // 지키는 것: 정리가 푸는 것은 끝나지 못한 시도뿐이다. 복원이 끝나 로그인된 뒤에 저장된 로그인이 신호 없이 사라져도(`resumable`이 꺼져 정리가 돈다) 로그인 상태는 그대로다.
+  it("복원이 끝나 로그인된 뒤에는 저장된 로그인이 사라져도 정리가 화면을 되돌리지 않는다", async () => {
     const seen: { lifecycle: SessionLifecycle | null } = { lifecycle: null };
     function Probe() {
       const lifecycle = useRestoredSession();
       seen.lifecycle = lifecycle;
       return createElement("span", { "data-testid": "probe-status" }, lifecycle.status);
     }
+    applyLogin(LOGIN);
+    restore.impl = async () => LOGIN; // 복원됨
     mount(createElement(Probe));
-    expect(q("probe-status")?.textContent).toBe("anonymous"); // 저장된 로그인이 없으니 복원 중으로 시작하지 않는다
-    flushSync(() => seen.lifecycle?.signIn(LOGIN)); // `applyLogin` 없이: 저장소에는 아무것도 없다
+    await until(() => q("probe-status")?.textContent === "signed-in");
+    expect(q("probe-status")?.textContent).toBe("signed-in");
+    expect(seen.lifecycle?.session).toEqual(LOGIN);
+
+    clearSession(); // 신호(`markAuthExpired`) 없이 저장소가 빈다: `resumable`이 꺼지고 복원 효과의 정리가 돈다
     expect(hasPersistedSession()).toBe(false);
     await advance(100);
     expect(q("probe-status")?.textContent).toBe("signed-in");
