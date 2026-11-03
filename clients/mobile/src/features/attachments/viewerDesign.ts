@@ -1,7 +1,7 @@
 import { absoluteDayLabel } from '@momo/core/features/timeline/divider';
 import { clockLabel } from '@momo/core/features/work/workSessionFormat';
 import type { GlassTone } from '../../design/glass';
-import { photoStage, space, TOUCH_TARGET } from '../../design/tokens';
+import { line, photoStage, space, TOUCH_TARGET } from '../../design/tokens';
 
 // =============================================================================
 // 사진 뷰어의 무대와 치수 (#4297) — 카카오톡 아이폰 사진 미리보기를 본으로 삼은 모양.
@@ -60,6 +60,9 @@ export const VIEWER = {
   noticePadX: space.md,
   noticePadY: space.xs,
 } as const;
+
+/** 상태 알약의 높이 — 글줄 높이에 위아래 안쪽 여백을 더한 값. 눌리는 알약(사진 접근 거부 → 설정 열기)의 `hitSlop` 이 이 값에서 44 를 채운다. */
+export const NOTICE_HEIGHT = line.label + 2 * VIEWER.noticePadY;
 
 /**
  * 스크림의 **자락**(덩어리 밖으로 풀리는 부분)의 검정 불투명도. `fraction` 은 덩어리 끝 0 → 사라지는 곳 1(`photoStage.scrim.fade` 의 위치와

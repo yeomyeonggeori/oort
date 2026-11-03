@@ -1404,12 +1404,14 @@ export function WorkingCard({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const reduceMotion = useReduceMotion();
-  // 승인 대기는 「사람을 보라」라서 신호색이다. 끊긴 레일 위의 낱말은 확인된 사실이
-  // 아니므로 색을 벗는다(에이전트 목록 `AgentTurnBadge live=false` 와 같은 규칙).
+  // 승인 대기는 사람 몫 상태라서 경고색(`warn`)이다 — 에이전트 탭 배지(`AgentTurnBadge`)·대화의 승인 카드 칩·웹 사이드바
+  // 카드·정본(`agent-work-display.md`·`agent-request-loop.md` §2.2)이 같은 한 톤으로 말한다. 신호색(`accentText`)은 안 읽음 수·
+  // 경계·커서의 색이라, 이 낱말에 칠하면 바로 아래 안 읽음 배지와 같은 계열이 되어 「새 글」 쪽으로 읽힌다(#5170 M1).
+  // 끊긴 레일 위의 낱말은 확인된 사실이 아니므로 색을 벗는다(에이전트 목록 `AgentTurnBadge live=false` 와 같은 규칙).
   const tone = !card.live
     ? palette.textMuted
     : card.state === 'awaiting_approval'
-      ? palette.accentText
+      ? palette.warn
       : card.state === 'queued'
         ? palette.textMuted
         : palette.agent;

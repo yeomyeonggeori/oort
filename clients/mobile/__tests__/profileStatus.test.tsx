@@ -423,7 +423,9 @@ describe('알림 일시 중지 (#2848)', () => {
     expect(
       within(sheet).queryByTestId('profile-pause-switch', {includeHiddenElements: true}),
     ).toBeNull();
-    expect(row).toHaveTextContent(/확인하는 중/);
+    // #5170 L2: 읽는 동안의 안내도 해요체다(합쇼체 「…확인하는 중입니다.」는 같은 카드의 다른 줄과 말씨가 갈렸다).
+    expect(within(row).getByText('알림 설정을 확인하는 중이에요.')).toBeTruthy();
+    expect(row).not.toHaveTextContent(/습니다/);
     fireEvent.press(row);
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(rulesPuts()).toHaveLength(0);
@@ -935,6 +937,9 @@ describe('푸시 종류 — 작업 끝남 (#3342)', () => {
     expect(
       within(sheet).queryByTestId('profile-work-complete-switch', {includeHiddenElements: true}),
     ).toBeNull();
+    // #5170 L2: 이 줄의 읽는 동안 안내도 같은 카드의 다른 줄과 같은 해요체 문장이다.
+    expect(within(row).getByText('알림 설정을 확인하는 중이에요.')).toBeTruthy();
+    expect(row).not.toHaveTextContent(/습니다/);
     fireEvent.press(row);
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(kindsPuts()).toHaveLength(0);
@@ -1149,7 +1154,9 @@ describe('기능 손실 0 — 옛 프로필 시트가 하던 일이 설정 페�
 
   // #5065 L1: 홈·인박스·＋ 메뉴·온보딩(`NOTIFY_MENTION_LABEL` 「나를 부른 멘션·답·DM」)은 「DM」이라고 부르는데 설정 알림 카드만
   // 「다이렉트 메시지」였다(design-review L1). 렌더된 줄의 글에서 잰다.
-  it('「항상 오는 알림」 줄은 다른 표면과 같은 낱말 「DM」으로 말한다 (#5065)', async () => {
+  // #5170 L2: 용어만 고치고 말씨가 합쇼체로 남았다 — 같은 페이지의 안내(「…화면을 열어요.」)와 앱의 문장은 해요체다. 문장은 사전 키
+  // (`settings.notifications.alwaysDetail`)가 말한다.
+  it('「항상 오는 알림」 줄은 다른 표면과 같은 낱말 「DM」으로, 해요체로 말한다 (#5065 · #5170 L2)', async () => {
     const page = await openSheet();
     await waitFor(() =>
       expect(within(page).getByTestId('profile-always-row')).toBeTruthy(),
@@ -1157,10 +1164,12 @@ describe('기능 손실 0 — 옛 프로필 시트가 하던 일이 설정 페�
     const row = within(page).getByTestId('profile-always-row');
     expect(
       within(row).getByText(
-        '승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없습니다. 한꺼번에 멈추려면 알림 일시 중지를 쓰세요.',
+        '승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없어요. 한꺼번에 멈추려면 알림 일시 중지를 써요.',
       ),
     ).toBeTruthy();
     expect(within(row).queryByText(/다이렉트 메시지/)).toBeNull();
+    // 합쇼체 어미(「…습니다」·「…쓰세요」)가 한 줄도 남지 않았다.
+    expect(row).not.toHaveTextContent(/습니다|쓰세요/);
   });
 
   it('조건부 줄 — 일시 중지가 켜져 있고 보이는 상태 글이 있는 사람(온라인)', async () => {

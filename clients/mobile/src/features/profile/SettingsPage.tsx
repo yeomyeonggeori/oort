@@ -106,6 +106,7 @@ import {
 } from './DevToolsPage';
 import {useDevToolsEntry} from './devTools';
 import {LanguageSettingRow, LanguageSettingsPage} from '../../i18n/LanguageSettings';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {RELEASE_NOTES_SETTINGS_PAGE} from '@momo/core/features/releaseNotes/model';
 import {
   ReleaseNotesSettingRow,
@@ -540,6 +541,9 @@ export function SettingsContent({
   covered?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 알림 카드·연결 카드의 안내 문장은 사전에서 읽는다(#5170 L2). 이름이 `formatMessage` 인 것은 일부러다 —
+  // 직접 문구 장부는 그 이름의 호출 안 키를 문구가 아닌 것으로 읽는다(`useFormatMessage` 머리말).
+  const formatMessage = useFormatMessage();
   const faceRing = useFaceRing();
   const {choice, themeId} = useTheme();
   const push = usePushSwitch(workspaceId, member.id);
@@ -607,7 +611,7 @@ export function SettingsContent({
   const pauseDetail = pause.loadFailed
     ? NOTIFICATION_PAUSE_LOAD_FAILED
     : !pause.ready
-      ? '알림 설정을 확인하는 중입니다.'
+      ? formatMessage('settings.notifications.checking')
       : pause.paused
         ? PAUSE_ACTIVE_NOTE
         : NOTIFICATION_PAUSE_DESCRIPTION;
@@ -935,7 +939,7 @@ export function SettingsContent({
                   ? NOTIFICATION_PAUSE_LOAD_FAILED
                   : kinds.ready
                     ? PUSH_WORK_COMPLETE_DESCRIPTION
-                    : '알림 설정을 확인하는 중입니다.'
+                    : formatMessage('settings.notifications.checking')
               }
               checked={kinds.workComplete}
               a11yDisabled={!kinds.ready || kinds.pending}
@@ -968,7 +972,7 @@ export function SettingsContent({
           {kinds.absent ? null : (
             <ListRow
               title="항상 오는 알림"
-              detail="승인 요청, 나를 부른 멘션, DM은 종류별로 끌 수 없습니다. 한꺼번에 멈추려면 알림 일시 중지를 쓰세요."
+              detail={formatMessage('settings.notifications.alwaysDetail')}
               testID="profile-always-row"
             />
           )}
@@ -997,7 +1001,7 @@ export function SettingsContent({
       <GroupCard label="연결" testID="settings-connect-card">
         <ListRow
           title="서버"
-          detail={server ?? '이 기기에 저장된 서버 주소가 없습니다.'}
+          detail={server ?? formatMessage('settings.connection.noServer')}
           testID="profile-server-row"
         />
         <ListRow
