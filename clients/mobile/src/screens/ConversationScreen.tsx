@@ -28,6 +28,7 @@ import {
   memberFor,
   memberNameParts,
 } from '@momo/core/features/workspace/directory';
+import {UNKNOWN_AGENT_NAME} from '@momo/core/features/agents/turnCopy';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
 import {normalizeChannelTopic} from '@momo/core/features/channels/model';
@@ -44,7 +45,6 @@ import type {
   CancelOutcome,
   CancelWording,
 } from '@momo/core/features/agents/runCancel';
-import {isUntakenHumanRun} from '@momo/core/features/agents/runWaiting';
 import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -79,13 +79,12 @@ import {
   type ProfilePhoto,
 } from '../features/directory/MemberProfileSheet';
 import {useMemberStatusDot} from '../features/presence/useMemberStatusDot';
-import {AgentActivityBar} from '../features/agents/turnSurfaces';
+import {ConversationActivityRail} from '../features/agents/ActivityRail';
+import {isRailReserved, nextRailDeadlineMs, useFireAt} from '../features/agents/railClock';
+import {activityRail} from '@momo/core/features/agents/activityRail';
 import {
   agentTurnsInChannel,
-  hasChannelTurn,
-  TURN_STALENESS_GRID_MS,
   useAgentWorkingSignals,
-  useTickingNow,
 } from '../features/agents/workingSignal';
 import {
   applyApprovalWaits,
@@ -176,10 +175,7 @@ import {
 } from '../push/tapArrival';
 import {bandIsSilent} from '../realtime/connectionDisplay';
 import {useRealtime} from '../realtime/RealtimeProvider';
-import {
-  useAgentLiveness,
-  useAgentLivenessLookup,
-} from '../features/agents/useAgentLiveness';
+import {useAgentLiveness} from '../features/agents/useAgentLiveness';
 import {ChannelAudienceContext} from '../features/conversation/appsTail';
 import {useSession} from '../session/useSession';
 import {useDmDeliveryHint} from '../features/conversation/useDmDeliveryHint';
@@ -534,33 +530,20 @@ export default function ConversationScreen({
   const dmHint = useDmDeliveryHint({workspaceId, channelId, directory, dmAgent});
 
   // ---- 이 채널에서 지금 열려 있는 턴 (goal RN-T2) ---------------------------
-  // The 1Hz clock is mounted for THIS channel's turns, not the workspace's.
-  // `hasChannelTurn` is clock-free precisely so that decision can be made before
-  // there is a clock; gating on the store's size alone would re-render this
-  // screen once a second because an agent is busy in a channel nobody here is
-  // looking at, which on a phone is battery bought with nothing on screen.
+  // **초 단위로 다시 그리지 않는다**(#4620). 예전에는 열린 턴이 있는 동안 1초 시계를 이 화면에 마운트했다(`useTickingNow`) — 「3초째」
+  // 글자를 보이려는 것이었고, 그 글자가 줄 수를 뒤집어 입력창 위의 대화를 흔들었다(#4613). 레일의 글자에는 시간이 없다. 시간이
+  // 사실을 바꾸는 순간은 셋뿐이라(`nextRailDeadlineMs`: 라이브 신호의 90초 만료 · 아무도 가져가지 않은 요청의 유예 마감 · 대기 승인의 기한)
+  // 그 순간에 **한 번만** 다시 그린다. 그 밖의 변화는 스토어의 사실이 바뀌는 것이고 그때는 스토어가 이미 렌더를 일으킨다.
   //
-  // `useTickingNow` returns the RENDER's own clock whatever the argument says.
-  // The argument only buys the 1Hz re-render, and that is what makes the same
-  // `nowMs` safe to hand to the staleness filter below: a frozen now can never
-  // find a signal stale, and a dead rail is exactly when one most needs to
-  // expire.
+  // 판정 시각(`evalNowMs`)은 **하나**다: 만료·유예·승인 기한을 가르는 모든 판정(`turns` · 레일)과 마감 계산이 같은 시각을 읽는다. 마감 계산이 더
+  // 늦은 시각을 읽으면 방금 지난 마감이 「없음」으로 계산돼 타이머가 걸리지 않고, 낡은 판정이 다음 사건까지 남는다. 얼어붙은 시각은 만료를 영영
+  // 못 찾으므로(`useTickingNow` 머리말) 사실이 바뀔 때마다(`signals`·승인 표·마감 신호) 새로 읽는다.
+  //
+  // 마감 시계는 **소켓이 끊겨도 건다**: 마감은 서버가 알려 준 사실(요청 시각·기한)과 신호의 나이에서 오는 것이지 소켓의 상태가 아니다. 끊긴 레일은
+  // 신호가 낡아 가는 때이고(90초), 아래 메시지의 예외 줄은 소켓과 무관하게 유예 마감에 선다 — 레일만 멈춰 있으면 같은 run을 두 자리가 다르게 말한다.
   const signals = useAgentWorkingSignals();
   const railLive = railStatus === 'connected';
-  const turnNowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
-  // 초 단위로 흔들리는 `turnNowMs` 를 그대로 넣으면 이 배열은 매초 새 배열이 되고,
-  // `AgentActivityBar` 안의 두 `useMemo`(`[turns, directory]`·`[turns]`)는 영영
-  // 적중하지 못한다 — 초당 한 번 줄 문구를 처음부터 다시 만든다는 뜻이다.
-  //
-  // 그래서 만료 판정에만 필요한 만큼으로 시계를 **양자화**한다. TTL 은 90초이므로
-  // 5초 격자면 만료가 최대 5초 늦을 뿐이고(그 사이 스토어의 15초 sweep 이 이미
-  // 돌고 있다), 배열 동일성은 5초에 한 번만 바뀐다. 경과 숫자는 이 값을 쓰지
-  // 않는다 — 그것은 아래로 그대로 내려가는 `turnNowMs` 의 몫이다.
-  // 내림이 아니라 **올림**이다. 내림은 격자만큼 과거의 시각을 먹이므로 만료가
-  // 그만큼 늦어지고, 늦은 만료는 「작업 중」을 사실보다 오래 말하는 쪽이다. 올림은
-  // 반대로 최대 5초 일찍 거두는데, 그것은 이 제품이 늘 고르는 방향이다 — 모르면
-  // 모른다고 말하지, 아는 척 붙들고 있지 않는다.
-  const staleBucket = Math.ceil(turnNowMs / TURN_STALENESS_GRID_MS);
+  const [clockTick, setClockTick] = useState(0);
   // 승인 원장이 레일보다 이긴다(#3738, 웹 `ComposerActivityRail` 과 같은 덮어쓰기). 서버는 승인에 걸린 run 을 DB 에서는
   // 승인 대기로 세우지만 레일 프레임으로는 알리지 않아서(중간 프레임은 늘 `running`) 레일만 보면 그 에이전트는 계속 「일하는
   // 중」이다. 사람을 기다리는 카드가 이 채널에 있으면 그 에이전트의 턴은 승인 대기이고, 자리표시(`turnPlaceholderKey`)와
@@ -570,32 +553,24 @@ export default function ConversationScreen({
     waits: approvalWaitList,
     provided: approvalsProvided,
   } = usePendingApprovals(channelId);
+  const evalNowMs = useMemo(
+    () => Date.now(),
+    // `clockTick`: 마감이 지났다는 신호다 — 값은 읽지 않고 새로 읽게만 한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [signals, channelId, approvalWaitList, clockTick],
+  );
   const turns = useMemo(
     () =>
       applyApprovalWaits(
-        agentTurnsInChannel(
-          signals,
-          channelId,
-          staleBucket * TURN_STALENESS_GRID_MS,
-        ),
+        agentTurnsInChannel(signals, channelId, evalNowMs),
         channelId,
         approvalWaitList,
-        staleBucket * TURN_STALENESS_GRID_MS,
+        evalNowMs,
       ),
-    [signals, channelId, staleBucket, approvalWaitList],
+    [signals, channelId, approvalWaitList, evalNowMs],
   );
-
-  // 아직 아무도 가져가지 않은 사람 요청의 에이전트들. 활동 줄이 그 근거 줄 맨 앞에 서버의 생존
-  // 경고(D4)를 싣고, 5분을 넘으면 「아직 받지 않았어요」로 말한다(#4285). 같은 쿼리 키라 DM 머리의
-  // 상태 점(`peerLiveness`)과 요청을 나눠 쓴다.
-  const waitingAgentIds = useMemo(
-    () =>
-      turns
-        .filter(turn => isUntakenHumanRun(turn.server))
-        .map(turn => turn.memberId),
-    [turns],
-  );
-  const livenessFor = useAgentLivenessLookup(waitingAgentIds);
+  const fireClock = useCallback(() => setClockTick(tick => tick + 1), []);
+  useFireAt(nextRailDeadlineMs(turns, evalNowMs, undefined, approvalWaitList), fireClock);
 
   // ---- 답이 나타날 자리 (#999) ---------------------------------------------
   //
@@ -1358,6 +1333,15 @@ export default function ConversationScreen({
    * 라이브 프레임과 달리). 그래서 못 찾았을 때 「더 위에 있다」를 추측이 아니라
    * 사실로 말할 수 있다.
    */
+  /**
+   * 「답함 ✓」 칩 → 그 답 메시지 (#4620 B). 같은 기계를 탄다. 주어는 `search`다(「찾던 메시지」): 답은 인용도 고정도 기억 근거도 아니고,
+   * 칩이 로드된 목록 안에서만 답을 찾으므로 못 찾는 갈래는 사실상 없다 — 새 문장을 만들지 않았다.
+   */
+  const onJumpToMessage = useCallback(
+    (messageId: string, seq: number) => requestJump('search', messageId, seq),
+    [requestJump],
+  );
+
   const onJumpToPinned = useCallback(
     (messageId: string, seq: number) => {
       // 고정을 누른 사람은 인용을 누른 적이 없다 (#1196). #1193 이 주어 갈래를 열고
@@ -1730,6 +1714,7 @@ export default function ConversationScreen({
       onReplyInline: startReply,
       onQuote: onQuoteMessage,
       onJumpToQuoted,
+      onJumpToMessage,
       onLongPressUsed: hint.markUsed,
       onOpenProfile: showMemberProfile,
       workspaceId,
@@ -1758,6 +1743,7 @@ export default function ConversationScreen({
       startReply,
       onQuoteMessage,
       onJumpToQuoted,
+      onJumpToMessage,
       hint.markUsed,
       showMemberProfile,
     ],
@@ -2130,6 +2116,17 @@ export default function ConversationScreen({
     }
     return turns.filter(turn => turn.runId === undefined || !runIds.has(turn.runId.toLowerCase()));
   }, [dmAgent, turns, requestRuns, timeline.state.messages]);
+  // 입력창 레일(#4620): 코어 `activityRail`이 한 줄을 정한다(낱말·합치기·유예). 칸은 에이전트가 있는 대화에서만 미리 잡는다.
+  const workRail = useMemo(
+    () =>
+      activityRail(
+        railTurns,
+        memberId => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
+        evalNowMs,
+      ),
+    [railTurns, directory, evalNowMs],
+  );
+  const railReserved = isRailReserved({dmAgent, directory, channelId});
 
   return (
     <ChannelAudienceContext.Provider value={channelAudience}>
@@ -2254,13 +2251,16 @@ export default function ConversationScreen({
                 over the composer rather than in the header for the same reason
                 the web bar does — the header is where the channel's identity
                 lives, and a turn is not an identity. */}
-            <AgentActivityBar
+            <ConversationActivityRail
+              rail={workRail}
               turns={railTurns}
-              directory={directory}
-              nowMs={turnNowMs}
+              runs={requestRuns}
               live={railLive}
+              reserved={railReserved}
+              directory={directory}
               renderStop={renderStop}
-              livenessFor={livenessFor}
+              stopOutcome={stopOutcome}
+              onOpenActivity={isSurfaceProvided('ade') ? openAde : undefined}
             />
             {/* ===================================================
                 「작업 중」 **바로 아래** (design-review M-5).

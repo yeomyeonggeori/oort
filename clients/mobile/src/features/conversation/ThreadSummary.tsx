@@ -82,11 +82,17 @@ export function ThreadSummaryContent({
   view,
   directory,
   suffix,
+  workChip,
 }: {
   view: ThreadSummaryView;
   directory: Directory;
   /** 「답글 N개」 뒤에 붙는 글(요청 카드 행의 진행 문장). 시간 문구가 아니다. */
   suffix?: string;
+  /**
+   * 이 스레드에서 지금 에이전트가 일하는 중이라는 작은 칩(#4620 E, 웹 `ThreadWorkChip`과 같은 칩). 줄 맨 끝에 서고 누르는 것이 아니다.
+   * 일이 **진행 중**(가져감·작업 중)일 때만 호출하는 쪽이 넘긴다 — 끝난 일의 「답함」·실패는 머리 줄의 칩과 예외 줄이 말한다.
+   */
+  workChip?: React.ReactNode;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {summary, copy} = view;
@@ -114,6 +120,7 @@ export function ThreadSummaryContent({
           <Text style={styles.chipText}>{copy.unreadChip}</Text>
         </View>
       ) : null}
+      {workChip ?? null}
     </View>
   );
 }

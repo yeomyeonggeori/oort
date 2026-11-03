@@ -1,4 +1,7 @@
-import type {AgentRunProgress} from '@momo/core/lib/api';
+import type {AgentRunProgress, RosterMember} from '@momo/core/lib/api';
+import {runPhaseLabel} from '@momo/core/features/agents/runPhase';
+import {RUN_STATUS_WOKEN_FAILED} from '@momo/core/features/agents/runStatusLine';
+import {UNCOLLECTED_WORD} from '@momo/core/features/agents/runWaiting';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
@@ -33,6 +36,7 @@ const SEC = 1000;
 const MIN = 60 * SEC;
 
 const mockFetchEvents = jest.fn();
+const mockCancel = jest.fn();
 
 jest.mock('../src/session/useSession', () => ({
   ...jest.requireActual('../src/session/useSession'),
@@ -45,6 +49,7 @@ jest.mock('@momo/core/lib/api', () => ({
   ...jest.requireActual('@momo/core/lib/api'),
   fetchAgentRunEvents: (ws: string, run: string, options?: unknown) =>
     mockFetchEvents(ws, run, options),
+  cancelAgentRun: (ws: string, run: string) => mockCancel(ws, run),
 }));
 
 const directory = makeDirectory([
@@ -70,6 +75,7 @@ afterEach(() => {
   client?.clear();
   client = null;
   mockFetchEvents.mockReset();
+  mockCancel.mockReset();
 });
 
 function progress(extra: Partial<AgentRunProgress> = {}): AgentRunProgress {
@@ -248,8 +254,35 @@ describe('폰 기록 시트 (#3824)', () => {
   });
 });
 
-describe('폰 메시지 아래 상태 줄 (#3824, #4020: 사람이 알아야 하는 상태만)', () => {
-  const mount = (run: AgentRunProgress) =>
+describe('폰 메시지 아래 예외 줄 (#4620 D: 사람이 움직여야 할 수 있는 상태만, 초 단위 시계 없음)', () => {
+  const REQUESTER = '00000000-0000-7000-8000-000000000101';
+  const BYSTANDER = '00000000-0000-7000-8000-000000000102';
+  const ADMIN = '00000000-0000-7000-8000-000000000103';
+  const person = (id: string, role: string) =>
+    ({
+      id,
+      workspaceId: WS,
+      kind: 'human',
+      status: 'active',
+      displayName: id.slice(-3),
+      handle: id.slice(-3),
+      role,
+      channelCount: 1,
+      channelIds: [CH],
+      capabilities: [],
+      createdAtMs: 0,
+      updatedAtMs: 0,
+    }) as unknown as RosterMember;
+  const people = makeDirectory([
+    ...(directory.byId.size > 0 ? [...directory.byId.values()] : []),
+    person(REQUESTER, 'member'),
+    person(BYSTANDER, 'member'),
+    person(ADMIN, 'admin'),
+  ]);
+  const mount = (
+    run: AgentRunProgress,
+    extra: Partial<React.ComponentProps<typeof MessageRunStatus>> = {},
+  ) =>
     render(
       wrap(
         <MessageRunStatus
@@ -257,7 +290,11 @@ describe('폰 메시지 아래 상태 줄 (#3824, #4020: 사람이 알아야 하
           channelId={CH}
           createdAtMs={Date.now() - 3 * SEC}
           runs={[run]}
-          directory={directory}
+          directory={people}
+          requesterId={REQUESTER}
+          viewerId={REQUESTER}
+          onOpenProfile={() => {}}
+          {...extra}
         />,
       ),
     );
@@ -271,6 +308,11 @@ describe('폰 메시지 아래 상태 줄 (#3824, #4020: 사람이 알아야 하
       createdAtMs: Date.now() - 3 * SEC,
       ...extra,
     });
+  const row = () => screen.queryByTestId(`message-run-status-row-${RUN}`);
+  const waitedFor = (ms: number): Partial<AgentRunProgress> => ({
+    createdAtMs: Date.now() - ms,
+    updatedAtMs: Date.now() - ms,
+  });
 
   it('평소의 진행·완료는 줄을 세우지 않는다: 깨우는 신호가 닿은 대기·가져감·작업 중·완료·취소', async () => {
     const now = Date.now();
@@ -292,12 +334,12 @@ describe('폰 메시지 아래 상태 줄 (#3824, #4020: 사람이 알아야 하
       await act(async () => {
         await Promise.resolve();
       });
-      expect(screen.queryByTestId(`message-run-status-row-${RUN}`)).toBeNull();
+      expect(row()).toBeNull();
       view.unmount();
     }
   });
 
-  it('깨우는 신호가 닿지 않으면 줄이 서고, 누르면 기록 시트가 열린다', async () => {
+  it('깨우는 신호가 닿지 않으면 줄이 서고(유예를 기다리지 않는다), 누르면 기록 시트가 열린다', async () => {
     const now = Date.now();
     mockFetchEvents.mockResolvedValue({
       runId: RUN,
@@ -307,25 +349,34 @@ describe('폰 메시지 아래 상태 줄 (#3824, #4020: 사람이 알아야 하
       ],
     });
     mount(base({}));
-    // 원장을 읽기 전에는 줄이 없다: 닿았는지 모르는 채로 「받았어요」만 그리지 않는다.
-    expect(screen.queryByTestId(`message-run-status-row-${RUN}`)).toBeNull();
+    // 원장을 읽기 전에는 줄이 없다: 닿았는지 모르는 채로 아무 말도 하지 않는다.
+    expect(row()).toBeNull();
     await waitFor(() =>
-      expect(screen.getByTestId('message-run-status-step-woken')).toBeTruthy(),
+      expect(screen.getByTestId('message-run-status-headline')).toHaveTextContent(RUN_STATUS_WOKEN_FAILED),
     );
-    // 「12분째」가 「12분 / 째」로 갈리지 않게(#3824 리뷰, RUN-STATUS 캡처).
-    expect(screen.getByTestId('message-run-status-text').props.lineBreakStrategyIOS).toBe(
-      'hangul-word',
-    );
-    fireEvent.press(screen.getByTestId(`message-run-status-row-${RUN}`));
+    // 「깨우는 신호가 닿지 않음」이 「깨우는 신호 / 가 …」로 갈리지 않게(#3824 리뷰).
+    expect(screen.getByTestId('message-run-status-text').props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 초 단위·분 단위 숫자가 없다(경과를 말하지 않는다).
+    expect(screen.getByTestId('message-run-status-text')).not.toHaveTextContent(/\d/);
+    fireEvent.press(screen.getByTestId(`message-run-status-open-${RUN}`));
     await waitFor(() => expect(screen.getByTestId('run-ledger-sheet')).toBeTruthy());
   });
 
-  it('실패·시간 초과·승인 대기·가져간 뒤 소식 끊김은 줄이 선다', async () => {
+  it('줄은 네 가지다: 실패 · 신호 소실 · 아직 받지 않았어요(열림) · 서버가 그래서 끝낸 것(같은 낱말). 승인 대기·소식 끊긴 가져감은 줄이 아니다', async () => {
     const now = Date.now();
     mockFetchEvents.mockResolvedValue({runId: RUN, events: []});
+    const cases: [Partial<AgentRunProgress>, string][] = [
+      [{status: 'failed', phase: 'failed', claimedAtMs: now - 9 * SEC, finishedAtMs: now - SEC}, runPhaseLabel({phase: 'failed', leaseState: 'none', queuedAtMs: 0})],
+      [{status: 'timed_out', phase: 'timed_out', endReason: 'lease_abandoned', finishedAtMs: now - SEC}, runPhaseLabel({phase: 'timed_out', leaseState: 'none', queuedAtMs: 0, endReason: 'lease_abandoned'})],
+      [{...waitedFor(6 * MIN)}, UNCOLLECTED_WORD],
+      [{status: 'timed_out', phase: 'timed_out', endReason: 'unclaimed_expired', finishedAtMs: now - SEC}, UNCOLLECTED_WORD],
+    ];
+    for (const [extra, word] of cases) {
+      const view = mount(base(extra));
+      await waitFor(() => expect(screen.getByTestId('message-run-status-headline')).toHaveTextContent(word));
+      view.unmount();
+    }
     for (const extra of [
-      {status: 'failed', phase: 'failed', claimedAtMs: now - 9 * SEC, finishedAtMs: now - SEC},
-      {status: 'timed_out', phase: 'timed_out', endReason: 'lease_abandoned', finishedAtMs: now - SEC},
       {status: 'awaiting_approval', phase: 'awaiting_approval', leaseState: 'live', claimedAtMs: now - 9 * SEC, startedAtMs: now - 8 * SEC},
       {status: 'claimed', phase: 'claimed', leaseState: 'stale', claimedAtMs: now - 6 * MIN},
     ] as Partial<AgentRunProgress>[]) {
@@ -333,9 +384,98 @@ describe('폰 메시지 아래 상태 줄 (#3824, #4020: 사람이 알아야 하
       await act(async () => {
         await Promise.resolve();
       });
-      expect(screen.getByTestId(`message-run-status-row-${RUN}`)).toBeTruthy();
+      expect(row()).toBeNull();
       view.unmount();
     }
+  });
+
+  it('시계가 없다: 간격 시계(setInterval)를 쓰지 않고, 유예 마감에 한 번만 다시 그려 「아직 받지 않았어요」가 선다', async () => {
+    mockFetchEvents.mockResolvedValue({runId: RUN, events: [{ordinal: 1, kind: 'queued', createdAtMs: Date.now()}]});
+    const interval = jest.spyOn(global, 'setInterval');
+    // 마감(5분)까지 0.4초 남은 대기: 처음에는 줄이 없고, 마감에 줄이 선다.
+    mount(base(waitedFor(5 * MIN - 400)));
+    expect(row()).toBeNull();
+    await waitFor(() => expect(row()).toBeTruthy(), {timeout: 2500});
+    expect(screen.getByTestId('message-run-status-headline')).toHaveTextContent(UNCOLLECTED_WORD);
+    // 줄은 초 단위 시계를 마운트하지 않는다. (질의 라이브러리의 1분 재조회와 테스트 도구의 50ms 대기 시계는 이 줄의 것이 아니다.)
+    const fast = interval.mock.calls.filter(
+      ([callback, delay]) =>
+        (delay as number) <= 1_000 &&
+        (callback as {name?: string}).name !== 'checkRealTimersCallback',
+    );
+    expect(fast).toEqual([]);
+    interval.mockRestore();
+  });
+
+  it('행동 단추는 요청자와 owner/admin에게만 선다 — 구경꾼에게는 문장만이고, 끝난 run에는 행동이 없다', async () => {
+    mockFetchEvents.mockResolvedValue({runId: RUN, events: []});
+    const waiting = base(waitedFor(6 * MIN));
+    const settings = `message-run-status-settings-${RUN}`;
+    const cancel = `run-exception-stop-${RUN}-arm`;
+    const mine = mount(waiting);
+    await waitFor(() => expect(screen.getByTestId(settings)).toBeTruthy());
+    expect(screen.getByTestId(cancel)).toBeTruthy();
+    mine.unmount();
+    const admin = mount(waiting, {viewerId: ADMIN});
+    await waitFor(() => expect(screen.getByTestId(settings)).toBeTruthy());
+    expect(screen.getByTestId(cancel)).toBeTruthy();
+    admin.unmount();
+    const bystander = mount(waiting, {viewerId: BYSTANDER});
+    await waitFor(() => expect(screen.getByTestId('message-run-status-headline')).toBeTruthy());
+    expect(screen.queryByTestId(settings)).toBeNull();
+    expect(screen.queryByTestId(cancel)).toBeNull();
+    bystander.unmount();
+    // 설정을 열 곳이 없으면 죽은 단추를 세우지 않는다.
+    const noProfile = mount(waiting, {onOpenProfile: undefined});
+    await waitFor(() => expect(screen.getByTestId(cancel)).toBeTruthy());
+    expect(screen.queryByTestId(settings)).toBeNull();
+    noProfile.unmount();
+    // 끝난 run(실패)에는 되돌릴 행동이 없다.
+    mount(base({status: 'failed', phase: 'failed', claimedAtMs: Date.now() - 9 * SEC, finishedAtMs: Date.now() - SEC}));
+    await waitFor(() => expect(screen.getByTestId('message-run-status-headline')).toBeTruthy());
+    expect(screen.queryByTestId(cancel)).toBeNull();
+    expect(screen.queryByTestId(settings)).toBeNull();
+  });
+
+  it('설정 열기는 그 에이전트의 프로필을 연다', async () => {
+    mockFetchEvents.mockResolvedValue({runId: RUN, events: []});
+    const open = jest.fn();
+    mount(base(waitedFor(6 * MIN)), {onOpenProfile: open});
+    await waitFor(() => expect(screen.getByTestId(`message-run-status-settings-${RUN}`)).toBeTruthy());
+    fireEvent.press(screen.getByTestId(`message-run-status-settings-${RUN}`));
+    expect(open).toHaveBeenCalledWith(AGENT);
+  });
+
+  it('취소 영수증은 줄이 사라져도 남는다 — 취소를 확정하면 run이 취소로 넘어가 예외가 걷히지만 결과 문장은 같은 자리에 남는다', async () => {
+    mockFetchEvents.mockResolvedValue({runId: RUN, events: []});
+    mockCancel.mockResolvedValue({runId: RUN, status: 'cancelled', linkedWorkSessionIds: []});
+    const waiting = base(waitedFor(6 * MIN));
+    const view = mount(waiting);
+    await waitFor(() => expect(screen.getByTestId(`run-exception-stop-${RUN}-arm`)).toBeTruthy());
+    fireEvent.press(screen.getByTestId(`run-exception-stop-${RUN}-arm`));
+    await waitFor(() => expect(screen.getByTestId(`run-exception-stop-${RUN}-commit`)).toBeTruthy());
+    const real = Date.now;
+    jest.spyOn(Date, 'now').mockImplementation(() => real() + 2_000);
+    fireEvent.press(screen.getByTestId(`run-exception-stop-${RUN}-commit`));
+    (Date.now as unknown as jest.Mock).mockRestore();
+    await waitFor(() => expect(screen.getByTestId('run-exception-stop-outcome-cancelled')).toBeTruthy());
+    expect(mockCancel).toHaveBeenCalledWith(WS, RUN);
+    // 서버가 취소로 넘기면 예외가 걷힌다 — 영수증은 남는다.
+    view.rerender(
+      wrap(
+        <MessageRunStatus
+          messageId={MSG}
+          channelId={CH}
+          createdAtMs={Date.now() - 3 * SEC}
+          runs={[{...waiting, status: 'cancelled', phase: 'cancelled', endReason: 'human_cancelled'}]}
+          directory={people}
+          requesterId={REQUESTER}
+          viewerId={REQUESTER}
+        />,
+      ),
+    );
+    expect(screen.queryByTestId('message-run-status-headline')).toBeNull();
+    expect(screen.getByTestId('run-exception-stop-outcome-cancelled')).toBeTruthy();
   });
 
   it('run이 없으면 아무것도 그리지 않는다(옛 서버)', () => {

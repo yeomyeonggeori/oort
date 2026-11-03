@@ -45,15 +45,13 @@ export function expiryPhase(
   return remaining <= EXPIRY_WARN_MS ? "soon" : "none";
 }
 
-/** 올림한 남은 분. 59초 남았으면 「1분」이다 — 0분이라고 말하지 않는다. */
-export function minutesLeft(expiresAtMs: number, nowMs: number): number {
-  return Math.max(1, Math.ceil((expiresAtMs - nowMs) / 60_000));
-}
-
-/** 경고 줄. 숫자 하나만 움직이고 문장은 그대로다. */
-export function expirySoonCopy(expiresAtMs: number, nowMs: number): string {
-  return `${minutesLeft(expiresAtMs, nowMs)}분 안에 만료돼요. 결정하지 않으면 에이전트가 다시 제안해야 해요.`;
-}
+// ## 경고 줄은 시간을 말하지 않는다 (#5174 화면 검수 3회차 L7)
+//
+// 승인 카드가 남은 시간을 말하는 자리는 **조용한 줄 하나**다(`remainingTime`, 한 시간 안이면 분 단위, 10분 안이면
+// 「10분 안에 만료돼요」: 푸시·폰·결정 무대가 같은 문장을 쓴다). 이 파일이 경고 줄에 「N분 안에 만료돼요」를 따로
+// 짓던 때는 한 카드가 두 줄에서 다른 시간을 말했다(「1분 안에」 · 「10분 안에」). 경고 줄은 놓쳤을 때의 결과만
+// 말한다: 문장은 사전 `timeline.approvalExpiry.soon` 한 곳에 있고, 시간 말이 거기 다시 들어가면 카드 렌더 시험
+// (`approvalExpiry.test.tsx`)이 시간 말의 개수가 둘이 되어 붉어진다.
 
 /** 만료 뒤 카드가 컨트롤 대신 말하는 줄. */
 export const EXPIRED_CARD_COPY =

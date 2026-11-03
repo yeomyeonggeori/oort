@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { makeDirectory } from "../workspace/directory";
 import type { RosterMember } from "../../lib/api";
+import { catalog as en } from "../../i18n/generated/en-US";
+import { catalog as ko } from "../../i18n/generated/ko-KR";
+import { createMessageCopy } from "../../testkit/i18n";
 import {
   EXPIRY_WARN_MS,
   cardReproposeReason,
   expiryPhase,
-  expirySoonCopy,
-  minutesLeft,
   reproposeDraft,
   reproposeTarget,
   closedCardReproposeReason,
@@ -38,13 +39,15 @@ describe("승인 기한 국면 (#3738)", () => {
     expect(EXPIRY_WARN_MS).toBe(10 * MIN);
   });
 
-  it("남은 분은 올림이고 0분이라고 말하지 않는다", () => {
-    expect(minutesLeft(EXPIRES, EXPIRES - 59_000)).toBe(1);
-    expect(minutesLeft(EXPIRES, EXPIRES - 61_000)).toBe(2);
-    expect(minutesLeft(EXPIRES, EXPIRES - 10 * MIN)).toBe(10);
-    expect(expirySoonCopy(EXPIRES, EXPIRES - 61_000)).toBe(
-      "2분 안에 만료돼요. 결정하지 않으면 에이전트가 다시 제안해야 해요."
-    );
+  // 화면 검수 3회차 L7: 경고 줄은 놓쳤을 때의 결과만 말하고 시간은 조용한 줄(`remainingTime`)이 한 번 말한다. 경고 문장에
+  // 시간 말(숫자 · 분 · 시간 · minute)이 다시 들어가면 한 카드가 두 줄에서 다른 시간을 말하던 결함이 돌아온다.
+  it.each([
+    ["ko-KR", ko],
+    ["en-US", en],
+  ] as const)("경고 줄 문장(%s)에는 시간 말이 없다 (L7)", (messageLocale, catalog) => {
+    const soon = createMessageCopy({ messageLocale, catalog })("timeline.approvalExpiry.soon");
+    expect(soon.length).toBeGreaterThan(10);
+    expect(soon).not.toMatch(/\d|분|시간|초|minute|second|hour|soon|min\b/i);
   });
 
   it("다시 제안 초안은 에이전트 핸들을 멘션한다", () => {

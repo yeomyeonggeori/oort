@@ -279,7 +279,7 @@ import {useLongPress} from './useLongPress';
 import {turnRecordRunId} from '@momo/core/features/timeline/cascadeModel';
 import {MemoryProposalCards} from '../memory/MemoryProposalCard';
 import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
-import {MessageRunStatus} from '../agents/MessageRunStatus';
+import {MessageRunStatus, mayHaveException} from '../agents/MessageRunStatus';
 import type {TriggerChip} from '@momo/core/features/agents/triggerChip';
 import {useOpenDecisionStage} from '../decisionStage/openDecisionStage';
 import {RequestStatusChip} from '../agents/RequestStatusChip';
@@ -697,7 +697,13 @@ function Author({
   const content = (
     <>
       <Text
-        style={[styles.authorName, isAgent && styles.authorNameAgent]}
+        style={[
+          styles.authorName,
+          isAgent && styles.authorNameAgent,
+          // 칩이 서는 머리 줄은 줄바꿈이 없다(웹 planner 결정 6): 긴 이름이 줄어들고 칩·시각은 줄지 않는다 — 칩이 혼자 다음 줄로 내려가
+          // 머리 줄 높이가 바뀌는 일이 없다.
+          requestChip ? styles.authorNameShrink : null,
+        ]}
         numberOfLines={1}>
         {parts.name}
       </Text>
@@ -734,7 +740,11 @@ function Author({
   // **이름은 누르는 것이 아니다**(#4666, owner 10-27 「프로필 이미지쪽을 눌러야만 열리게」). 작성자 줄은 행 전체
   // 폭이라 답글(행 탭 = 스레드)을 달려던 손이 이름을 짚어 프로필이 뜨는 오탭이 났다. 프로필 문은 얼굴
   // (`profile-avatar-target`)과 멘션뿐이고, 이 줄을 누르면 행 탭이 받는다(스레드·키보드 닫기·길게 누르기 시트).
-  return <View style={styles.authorRow}>{content}</View>;
+  return (
+    <View style={[styles.authorRow, requestChip ? styles.authorRowChip : null]}>
+      {content}
+    </View>
+  );
 }
 
 /**
@@ -2256,6 +2266,8 @@ export interface MessageRowActions {
    * the target off it, because the row does not know what the page holds.
    */
   onJumpToQuoted?: (message: Message) => void;
+  /** 「답함 ✓」 칩을 누르면 그 답 메시지로 간다(#4620 B). 답 메시지는 로드된 목록 안에 있다(칩이 거기서만 찾는다). */
+  onJumpToMessage?: (messageId: string, seq: number) => void;
   /** The gesture was used at least once, so the hint can retire itself. */
   onLongPressUsed?: () => void;
   /** 작성자 신원을 연다. 사람은 프로필 시트, 에이전트는 기존 상세 표면으로 간다. */
@@ -2666,6 +2678,15 @@ function MessageRowInner({
     rollupOverride === undefined ? threadRollup(message) : rollupOverride;
   // 요약 줄의 값과 문구(얼굴·「답글 N개」·「새 답글 M」)는 코어가 정한다 (#4878). 훅이라 롤업이 없어도 부른다.
   const threadView = useThreadSummaryView(rollup);
+  // 스레드 요약 줄의 「작업 중」 칩(#4620 E): 루트 메시지가 일으킨 일이 지금 **진행 중**(가져감·작업 중)일 때만, 요청 묶음 카드가 아닐 때만 선다.
+  // 같은 모델·같은 칩이고 누르는 것이 아니며 폭은 예약하지 않는다(줄 맨 끝). 루트가 아닌 답글이 일으킨 run은 루트를 알 길이 없어 닿지 못한다.
+  const threadWorkChip =
+    threadView !== null &&
+    !requestCardTarget &&
+    requestChip &&
+    (requestChip.kind === 'working' || requestChip.kind === 'claimed') ? (
+      <RequestStatusChip chip={requestChip} reserve={false} testID="thread-work-chip" />
+    ) : undefined;
   const body = message.body ?? '';
   // 살릴 본문이 실제로 있는가 (#1465 → #1478). 자격(`presentation.keepsBody`)과
   // 다른 물음이고, 웹의 같은 이름과 **같은 함수**다 — 이 행이 답을 세 곳에서 쓰기
@@ -3207,7 +3228,9 @@ function MessageRowInner({
       // thread anchor and the resend button from each becoming their own stop —
       // the same count the web client cut from 6 to 1. Touch is unaffected:
       // grouping changes the accessibility tree, not the responder tree.
-      accessible={!(requestChip || requestThinking || (presentation.card?.kind === 'approval' && hasRequestBundle(presentation.card)))}
+      // 칩이 **실제로 서는** 행(머리 줄이 있는 행)과 예외 줄이 설 수 있는 행(줄 안에 설정·취소 단추가 선다)은 한 덩이로 합치지 않는다 — 합치면 그 단추가
+      // 보조기술에서 사라진다. 이어지는 행의 칩은 그려지지 않으므로(#4620) 칩만으로는 합침을 풀지 않는다.
+      accessible={!((startsGroup && requestChip) || (runStatus !== undefined && runStatus.some(mayHaveException)) || requestThinking || (presentation.card?.kind === 'approval' && hasRequestBundle(presentation.card)))}
       accessibilityLabel={[
         rowAccessibilityLabel({
         message: {...message, body: spokenExpression(message.body ?? '')},
@@ -3321,14 +3344,17 @@ function MessageRowInner({
             )}
           </View>
         ) : null}
-        {startsGroup || requestChip ? (
+        {/* 칩은 머리 줄이 **이미 있는** 행에만 선다(#4620 B): 이어지는 행에 칩 때문에 머리 줄을 새로 세우면 run 이 생기는 순간 행이 자라 맨 아래 행이
+            움직인다. 이어지는 행의 상태는 입력창 레일과 예외 줄이 말한다(웹도 터치 기기에서는 같다). */}
+        {startsGroup ? (
           <Author
             directory={directory}
             memberId={message.authorMemberId}
             time={timeLabel(message.createdAtMs)}
             requestChip={requestChip ? <RequestStatusChip chip={requestChip}
               sentence={requestSentence}
-              onOpen={requestCardTarget && requestChip.kind === 'approval' && openDecisionStage ? source => { const card = rowPresentation(requestCardTarget).card; if (card?.kind === 'approval' && card.approvalId) openDecisionStage(card.approvalId, source); } : requestCardTarget && actions?.onOpenMessage ? () => actions.onOpenMessage?.(requestCardTarget.channelId, requestCardTarget.id) : actions?.onOpenThread ? () => actions.onOpenThread?.(message) : undefined} /> : null}
+              // 「답함 ✓」(#4620 B): 답 메시지를 알 때만 눌리고(누르면 그 답으로 간다), 모르면 같은 칩이 눌리지 않는다 — 죽은 단추를 세우지 않는다.
+              onOpen={!requestCardTarget && requestChip.kind === 'answered' ? (requestChip.answer !== undefined && actions?.onJumpToMessage ? () => actions.onJumpToMessage?.(requestChip.answer!.id, requestChip.answer!.seq) : undefined) : requestCardTarget && requestChip.kind === 'approval' && openDecisionStage ? source => { const card = rowPresentation(requestCardTarget).card; if (card?.kind === 'approval' && card.approvalId) openDecisionStage(card.approvalId, source); } : requestCardTarget && actions?.onOpenMessage ? () => actions.onOpenMessage?.(requestCardTarget.channelId, requestCardTarget.id) : actions?.onOpenThread ? () => actions.onOpenThread?.(message) : undefined} /> : null}
           />
         ) : null}
 
@@ -3582,13 +3608,14 @@ function MessageRowInner({
                     view={threadView}
                     directory={directory}
                     suffix={requestCardTarget ? ` · ${requestSentence ?? requestChip?.word ?? ''}` : undefined}
+                    workChip={threadWorkChip}
                   />
                 </Pressable>
               ) : (
                 // A label, not a button: a door to a room that does not exist is
                 // worse than a sentence saying the room is there.
                 <View testID="thread-rollup">
-                  <ThreadSummaryContent view={threadView} directory={directory} />
+                  <ThreadSummaryContent view={threadView} directory={directory} workChip={threadWorkChip} />
                 </View>
               )
             ) : null}
@@ -3614,13 +3641,18 @@ function MessageRowInner({
         {/* 내가 보낸 메시지가 에이전트를 불렀으면 그 일의 상태 한 줄 (#3824). 칩보다
             안쪽이다: 칩은 남들의 반응이고, 이 줄은 이 메시지가 일으킨 일이다. */}
         {requestThinking ? <RequestThinkingLine progress={requestRun ?? runStatus?.[0]} directory={directory} nowMs={nowMs} /> :
-        runStatus !== undefined && (!requestChip || ['failed', 'timed_out', 'uncollected'].includes(requestChip.kind)) ? (
+        // 예외 줄(#4620 D): 서는지는 코어 `runException`이 정한다(없으면 아무것도 그리지 않는다). 칩이 「받음」인데 깨우는 신호가
+        // 닿지 않은 run 도 줄이 서므로 칩의 종류로 미리 거르지 않는다.
+        runStatus !== undefined ? (
           <MessageRunStatus
             messageId={message.id}
             channelId={message.channelId}
             createdAtMs={message.createdAtMs}
             runs={runStatus}
             directory={directory}
+            requesterId={message.authorMemberId}
+            viewerId={actions?.myMemberId}
+            onOpenProfile={actions?.onOpenProfile}
           />
         ) : null}
 
@@ -4602,6 +4634,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     columnGap: CONV.whoGap,
     flexWrap: 'wrap',
   },
+  /** 칩이 서는 머리 줄: 줄바꿈 없음(칩 폭·높이는 고정이고 이름이 줄어든다, #4620 B). */
+  authorRowChip: {flexWrap: 'nowrap', alignItems: 'center'},
+  authorNameShrink: {flexShrink: 1},
   // 줄 상자를 **선언한다**: 행 시각이 이 줄 옆에 서므로(`rowTimeGroupHead`),
   // 이 값이 암묵적인 서체 자연값이면 그 정렬은 아무도 적어 둘 수 없는 값에
   // 기대게 된다 (u44 리뷰 M-2).
