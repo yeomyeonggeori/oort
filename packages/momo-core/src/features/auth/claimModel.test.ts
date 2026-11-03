@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiError } from "../../lib/api";
+import { ApiError, ClaimApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import { claimFailureCopy } from "./claimModel";
 
@@ -72,12 +72,10 @@ describe("claimFailureCopy", () => {
     expect(claimFailureCopy(new ApiError(400, "password is required")).message).toContain(
       generic
     );
-    // A code this screen does not know must not borrow another rule's sentence.
-    expect(
-      claimFailureCopy(
-        new ApiError(400, "password must not contain a NUL character", "password_invalid_char")
-      ).message
-    ).toContain(generic);
+    // A code this screen does not know must not borrow another rule's sentence, nor name a dictionary one.
+    const unknown = claimFailureCopy(new ApiError(400, "a rule from the future", "password_future_rule"));
+    expect(unknown.message).toContain(generic);
+    expect(unknown.messageKey).toBeUndefined();
     // A rule code on a different status is not a password refusal.
     expect(
       claimFailureCopy(new ApiError(429, "rate limit exceeded", "password_too_short")).message
@@ -91,3 +89,49 @@ describe("claimFailureCopy", () => {
     expect(copy.message).toContain("잠시");
   });
 });
+
+// ADR-0215 D6 (#4601): a 409 or 410 that names the kind says who to ask for a new link.
+describe("claimFailureCopy by claimKind", () => {
+  const refused = (status: number, kind: "owner_bootstrap" | "password_reset") =>
+    new ClaimApiError(new ApiError(status, "refused"), kind);
+
+  it("sends an expired reset link to an admin, in the dictionary", () => {
+    const copy = claimFailureCopy(refused(410, "password_reset"));
+    expect(copy.messageKey).toBe("recovery.claim.resetExpired");
+    expect(copy.keepForm).toBe(false);
+    expect(copy.retryable).toBe(false);
+    expect(copy.suggestSignIn).toBe(false);
+  });
+
+  it("tells a used or replaced reset link to sign in or ask for a new one, in the dictionary", () => {
+    const copy = claimFailureCopy(refused(409, "password_reset"));
+    expect(copy.messageKey).toBe("recovery.claim.resetUsed");
+    expect(copy.suggestSignIn).toBe(true);
+    expect(copy.keepForm).toBe(false);
+  });
+
+  it("keeps the first-owner sentences for a first-owner link", () => {
+    const expired = claimFailureCopy(refused(410, "owner_bootstrap"));
+    expect(expired.messageKey).toBeUndefined();
+    expect(expired.message).toContain("설치를 실행한 쪽에 새 링크를 요청하세요");
+    const used = claimFailureCopy(refused(409, "owner_bootstrap"));
+    expect(used.messageKey).toBeUndefined();
+    expect(used.message).toBe("이 링크는 이미 사용되었습니다. 로그인하세요.");
+  });
+
+  it("keeps the first-owner sentences when no kind was named (an older server)", () => {
+    const expired = claimFailureCopy(new ApiError(410, "claim token has expired"));
+    expect(expired.messageKey).toBeUndefined();
+    expect(expired.message).toContain("설치를 실행한 쪽에 새 링크를 요청하세요");
+    expect(claimFailureCopy(new ApiError(409, "used")).messageKey).toBeUndefined();
+  });
+
+  it("names a dictionary sentence for a password with a NUL character, and only for that code", () => {
+    const copy = claimFailureCopy(new ApiError(400, "NUL", "password_invalid_char"));
+    expect(copy.messageKey).toBe("recovery.claim.invalidChar");
+    expect(copy.keepForm).toBe(true);
+    // A 404 never names a kind, so it never asks anyone for a reset link.
+    expect(claimFailureCopy(new ApiError(404, "invalid")).messageKey).toBeUndefined();
+  });
+});
+

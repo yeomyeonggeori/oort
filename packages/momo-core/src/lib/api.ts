@@ -29,7 +29,7 @@ import {
   REQUEST_TIMEOUT_MS,
   type HttpResponse,
 } from "./http";
-import { apiBase, coreSession, type RefreshDeviceProof } from "../runtime/host";
+import { absoluteApiBase, apiBase, coreSession, type RefreshDeviceProof } from "../runtime/host";
 import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
 import { tokenExpiresAtMs } from "./tokenLifetime";
@@ -1564,14 +1564,54 @@ export async function joinWithInvite(
 }
 
 /**
- * Consume a first-owner claim token and land signed in. Public route, mounted
- * outside AuthMiddleware: the token IS the only credential. Success returns a
- * LoginResponse, so applying it here is the spec'd claim-login path.
+ * Which kind of link `POST /v1/claim` spent (ADR-0215 D6, #4603). The server adds it to the 200, 409 and
+ * 410 bodies and to nothing else: a 404, 400 or 429 answers the same for every token, so a stranger cannot
+ * tell the kinds apart (the token is 256 bits, so the kind is not an oracle for the one who holds it).
+ * Absent means an older server or an answer that never carries it; a caller must not guess a kind.
+ */
+export type ClaimKind = "owner_bootstrap" | "password_reset";
+
+export function parseClaimKind(value: unknown): ClaimKind | undefined {
+  return value === "owner_bootstrap" || value === "password_reset" ? value : undefined;
+}
+
+/** A claim refusal (409 used, 410 expired) that says which kind of link it was. */
+export class ClaimApiError extends ApiError {
+  readonly claimKind: ClaimKind;
+  constructor(base: ApiError, claimKind: ClaimKind) {
+    super(base.status, base.message, base.code, base.retryAfterSeconds);
+    this.name = "ClaimApiError";
+    this.claimKind = claimKind;
+  }
+}
+
+/**
+ * The refusal, plus the kind when the server named one. Only 409 and 410 are read: the server puts
+ * `claimKind` beside `error` there, and this reader also accepts it inside `error` (E-4 #4596 had not
+ * landed when this was written, so the exact place is one thing to align after it does). Any other
+ * status stays a plain `ApiError`, so a body that grows the field on a 404 is not believed.
+ */
+function claimErrorFromResponse(res: HttpResponse): ApiError {
+  const base = parseError(res);
+  if (res.status !== 409 && res.status !== 410) return base;
+  const body = res.jsonOrNull<{ claimKind?: unknown; error?: { claimKind?: unknown } }>();
+  const kind = parseClaimKind(body?.claimKind) ?? parseClaimKind(body?.error?.claimKind);
+  return kind === undefined ? base : new ClaimApiError(base, kind);
+}
+
+/** A claim's session, plus the kind of link it spent when the server said (see `ClaimKind`). */
+export type ClaimedSession = LoginResponse & { claimKind?: ClaimKind };
+
+/**
+ * Consume a claim token (first owner, or a member's password reset) and land signed in. Public route,
+ * mounted outside AuthMiddleware: the token IS the only credential. Success returns a LoginResponse, so
+ * applying it here is the spec'd claim-login path. `claimKind` rides on the result only for the caller
+ * to route on; it never reaches the session store.
  */
 export async function claimOwnerPassword(
   token: string,
   password: string
-): Promise<LoginResponse> {
+): Promise<ClaimedSession> {
   const res = await rawRequest(
     "/v1/claim",
     {
@@ -1580,10 +1620,12 @@ export async function claimOwnerPassword(
     },
     null
   );
-  if (!res.ok) throw parseError(res);
-  const claimResponse = loginResponseFromWire(res.json<unknown>());
+  if (!res.ok) throw claimErrorFromResponse(res);
+  const body = res.json<unknown>();
+  const claimResponse = loginResponseFromWire(body);
   adoptSignIn(claimResponse);
-  return claimResponse;
+  const claimKind = parseClaimKind(str(responseRecord(body), "claimKind"));
+  return claimKind === undefined ? claimResponse : { ...claimResponse, claimKind };
 }
 
 // ---- device-link redeem (POST /v1/auth/device-link/redeem, ADR-0180 D3) -----
@@ -3901,6 +3943,83 @@ export async function changeWorkspaceMemberRole(
       )}/members/${encodeURIComponent(memberId)}/role`,
       { method: "PATCH", body: JSON.stringify({ role }) }
     )
+  );
+}
+
+// ---- 관리자 재설정 링크 발급 (ADR-0215 D6, #4603) ----------------------------
+// POST /v1/workspaces/{ws}/members/{member}/password-reset  { currentPassword }
+//
+// 발급하는 **관리자 본인**의 현재 비밀번호가 필수다(E-4 #4596의 파괴적 변경): 없거나 비면 400
+// `current_password_required`, 틀리면 403 `current_password_incorrect`. 그 전의 서버는 본문을 읽지
+// 않고 201을 주므로 같은 요청이 양쪽에 간다. 비밀번호는 입력 그대로(다듬지 않음) 보내고 이 모듈
+// 어디에도 남기지 않는다.
+
+/**
+ * 발급 결과. 링크 원문은 `claimUrl` 하나로만 나가고 `token`을 따로 나르지 않는다: 이 값이 화면에
+ * 한 번 서고 닫으면 사라진다(서버도 원문을 보관하지 않는다).
+ */
+export interface PasswordResetIssue {
+  /** 받는 사람에게 전할 절대 링크. */
+  claimUrl: string;
+  /**
+   * 서버가 말한 「이 링크가 다른 곳에서도 열리는 주소인가」(E-4 `claimUrlSecure`). `false`면 요청 헤더로
+   * 도출한 `http://`·loopback·사설 주소라 이 컴퓨터(같은 네트워크)에서만 열릴 수 있다. 말하지 않은
+   * 서버는 `undefined`다 — 모름은 안전이 아니다.
+   */
+  claimUrlSecure: boolean | undefined;
+  expiresAtMs: number;
+}
+
+function absoluteHttpUrl(value: string | undefined): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 서버가 준 `claimUrl`이 이긴다(설정된 공개 주소가 요청 `Host`보다 먼저다, ADR-0215 D6). 없거나
+ * 절대 http(s) 주소가 아니면(E-4 전의 서버) `claimPath`를 이 클라이언트가 아는 서버 주소의 **출처**에
+ * 붙인다: claim 화면은 출처 루트의 `/claim/<token>`이라 경로 접두가 있는 API 주소(`/momo`)가 아니라
+ * 출처에 붙는다.
+ */
+export function passwordResetIssueFromWire(
+  value: unknown,
+  knownServerBase: string
+): PasswordResetIssue {
+  const source = responseRecord(value);
+  const expiresAtMs = num(source, "expiresAtMs");
+  const claimPath = str(source, "claimPath");
+  if (expiresAtMs === undefined || claimPath === undefined) throw new WireShapeError();
+  let claimUrl = absoluteHttpUrl(str(source, "claimUrl"));
+  if (claimUrl === undefined) {
+    // 이 클라이언트가 직접 링크를 짓는 갈래라서 모양을 확인한다: `/claim/<token>` 한 가지뿐이다.
+    if (!claimPath.startsWith("/claim/")) throw new WireShapeError();
+    try {
+      claimUrl = new URL(claimPath, knownServerBase).toString();
+    } catch {
+      throw new WireShapeError();
+    }
+  }
+  return { claimUrl, claimUrlSecure: bool(source, "claimUrlSecure"), expiresAtMs };
+}
+
+export async function issueMemberPasswordReset(
+  workspaceId: string,
+  memberId: string,
+  currentPassword: string
+): Promise<PasswordResetIssue> {
+  return passwordResetIssueFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/members/${encodeURIComponent(memberId)}/password-reset`,
+      { method: "POST", body: JSON.stringify({ currentPassword }) }
+    ),
+    absoluteApiBase()
   );
 }
 
