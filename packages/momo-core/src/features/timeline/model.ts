@@ -936,6 +936,54 @@ export function retryPending(
   );
 }
 
+/** Why `discardPending` removed nothing. */
+export type DiscardPendingRefusal =
+  /** A request carrying this idempotency key is in flight and may still commit. */
+  | "sending"
+  /** No local row: the server's echo already settled it, it was discarded, or it never existed. */
+  | "gone";
+
+export interface DiscardPendingResult {
+  /** The list after the call. The SAME array when nothing was removed, so a hook can skip its setState. */
+  list: PendingMessage[];
+  /** The row that was removed, or null. A caller that restores the text into the composer reads it here. */
+  discarded: PendingMessage | null;
+  refused?: DiscardPendingRefusal;
+}
+
+/**
+ * 보내지 못한 메시지를 **이 기기에서만** 지운다 (#5210, owner 2026-11-03).
+ *
+ * 판정은 이 한 곳이고 웹·폰 훅은 이 결과를 그대로 따른다. 지우는 것은 서버에 행이 없는
+ * 로컬 대기분(`failed`) 하나뿐이다.
+ *
+ *   - `failed`  지운다. 마지막 시도가 끝났고(응답이 에러로 돌아왔다) 이 키로 날아가는
+ *               요청이 없다. 서버는 건드리지 않는다: 이 함수에 서버로 가는 길이 없다.
+ *   - `sending` 지우지 않는다. 같은 멱등키의 요청이 날아가는 중이라 서버가 이미 받았을 수
+ *               있다. 지우면 사람은 지웠다고 믿는데 그 메시지가 확정 행으로 도착한다.
+ *               (다시 보내기는 `retryPending` 이 즉시 `sending` 으로 바꾸므로, 누른 뒤에는
+ *               지우기가 막히고 다시 보내기와 지우기가 같은 키로 겨루지 못한다.)
+ *   - 행 없음   아무것도 하지 않는다. 서버의 echo 가 이미 이 행을 정착시켰다면(`unsettledPending`)
+ *               확정 행은 메시지 배열의 것이라 여기서 닿을 수 없고, 지운 뒤의 다시 보내기
+ *               (`retryPending`)는 행이 없으니 아무것도 되살리지 못한다.
+ *
+ * 「실패」는 서버가 못 받았다는 증명이 아니다(응답이 유실됐을 수 있다). 그래서 지운 뒤에도
+ * 그 메시지가 확정 행으로 뒤늦게 도착할 수 있다 — 그때는 평범한 메시지이고 평범한
+ * 메시지 지우기가 맡는다. 첨부는 이미 올라간 파일이 메시지에 묶이지 않은 채 남는다(입력창
+ * 트레이의 빼기와 같다).
+ */
+export function discardPending(
+  list: PendingMessage[],
+  clientMsgId: string
+): DiscardPendingResult {
+  const row = list.find((p) => p.clientMsgId === clientMsgId);
+  if (row === undefined) return { list, discarded: null, refused: "gone" };
+  if (row.status !== "failed") {
+    return { list, discarded: null, refused: "sending" };
+  }
+  return { list: removePending(list, clientMsgId), discarded: row };
+}
+
 export type TimelineItem =
   | { kind: "day"; key: string; atMs: number }
   | { kind: "unread"; key: string; count: number }

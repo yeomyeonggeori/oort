@@ -68,6 +68,7 @@ import { VideoViewerPage, type ActiveVideoHandle } from './VideoViewerPage';
 import { useAttachmentPoster } from './videoContent';
 import { LAYOUT } from './videoDesign';
 import type {MeasureHeroSource} from './heroSource';
+import { ShareSheetTouchShield } from '../../lib/ShareSheetTouchShield';
 import { useShareAttachment } from './useShareAttachment';
 import { useViewerDismiss, type ViewerProgressRef } from './useViewerDismiss';
 import {
@@ -482,6 +483,8 @@ export function AttachmentViewer({
           testID="attachment-viewer-shield"
         >
           <ViewerFrame onClose={onClose} {...frame} closeRequest={closeRequest} presented={presented} />
+          {/* 이 Modal 은 자기 네이티브 창이라 셸의 공유 시트 막이가 덮지 못한다 — 시트를 닫는 탭이 사진에 새어 조작을 숨기지 않게 여기에도 한 번 선다(#5207). */}
+          <ShareSheetTouchShield />
         </View>
       </SafeAreaProvider>
     </Modal>
