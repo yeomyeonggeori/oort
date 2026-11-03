@@ -189,7 +189,7 @@ describe('M-5 — 같은 질문에 답하는 두 줄이 붙어 있다', () => {
     // 그 사이에 중단 영수증과 롱프레스 힌트가 끼면, 나란히 두는 것만으로 얻으려던
     // 대조(작성 중 ↔ 작업 중)가 끊긴다.
     const code = codeOnly(SCREEN);
-    const activity = code.indexOf('<AgentActivityBar');
+    const activity = code.indexOf('<ConversationActivityRail');
     const typing = code.indexOf('<TypingBar');
     const receipt = code.indexOf('stopOutcome ? (');
     const hint = code.indexOf('<LongPressHint');

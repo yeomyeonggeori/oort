@@ -99,6 +99,33 @@ export function canChangeWorkspaceRole(
 }
 
 /**
+ * 멤버 프로필의 「재설정 링크 만들기」를 보일지 (ADR-0215 D6, #4603). 서버 사다리의 **UX 거울**이고
+ * 권위는 서버다: 같은 문장을 `workspace_authorization.rs`의 `can_issue_password_reset_for`
+ * (`password_reset_ladder_matches_adr_0128_d2` 표)와 `owner_claim.rs`가 판정한다. 틀리면 서버가
+ * 403·409로 거절하므로, 이 함수는 「늘 거절될 단추를 안 그리는 것」만 맡는다.
+ *
+ * - 보는 사람은 소유자나 관리자다.
+ * - 대상은 **사람**이고 **활성**이다(서버: 사람·활성 멤버만, 정지·초대 대기·삭제는 409).
+ * - 자기 자신은 아니다(서버: 자기 자신은 403 — 본인은 설정에서 비밀번호를 바꾼다).
+ * - 소유자는 자기 외 누구나(다른 소유자 포함), 관리자는 멤버·게스트만.
+ *
+ * 역할을 모르는 대상(명부 투영이 `role`을 못 실은 옛 서버)은 소유자에게만 열린다: 관리자는
+ * 대상이 멤버·게스트라고 **알 때만** 연다. 모름이 열림이 되지 않게 한다.
+ */
+export function canIssuePasswordReset(
+  viewerRole: MembershipRole | undefined,
+  viewerMemberId: string,
+  target: Pick<RosterMember, "id" | "kind" | "status" | "role">
+): boolean {
+  if (viewerRole !== "owner" && viewerRole !== "admin") return false;
+  if (target.kind !== "human") return false;
+  if (target.status !== "active") return false;
+  if (uuidEq(viewerMemberId, target.id)) return false;
+  if (viewerRole === "owner") return true;
+  return target.role === "member" || target.role === "guest";
+}
+
+/**
  * Identity GET `roleLabels`: object whose keys ⊂ {owner,admin,member,guest}.
  * Missing, null, or a non-object is `{}`. Unknown keys and empty values are
  * dropped so a stale or partial projection cannot invent a label.
