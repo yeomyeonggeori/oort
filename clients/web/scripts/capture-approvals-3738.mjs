@@ -238,7 +238,9 @@ function cardSpec(key, expiresInMin) {
 
 async function open(browser, origin, scheme, scene, hash) {
   const context = await browser.newContext({
+    // 문구는 한국어 사전으로 읽는다: 기기 언어를 ko-KR 로 고정한다(헤드리스 기본은 en-US). 경고 줄 문장이 사전 키다(#5174 L7).
     viewport: { width: 1440, height: 900 }, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block",
+    locale: "ko-KR", timezoneId: "Asia/Seoul",
   });
   await installRoutes(context, scene);
   const page = await context.newPage();
@@ -268,12 +270,17 @@ async function raise(page) {
   await page.waitForTimeout(400);
 }
 
+// `ONLY=expiry-soon` 처럼 장면 이름(cards · inbox · expiry-soon · expired)을 주면 그것만 돈다. ① ② ④ 는 묶음 카드 문법 이전의
+// test id(`approval-action-role` 등)에 기대고 있어 지금은 붉다(#5174 와 무관한 낡음). ③ 은 #5174 L7 이 쓴다.
+const ONLY = (process.env.ONLY || "").split(",").filter(Boolean);
+const runs = (name) => ONLY.length === 0 || ONLY.includes(name);
+
 async function scenes(browser, origin, scheme) {
   const tag = `1440-${scheme}`;
   const shotPath = (name) => resolve(OUT_DIR, `${name}-${tag}.png`);
 
   // ① 새 행동 카드 다섯
-  for (const key of Object.keys(CARDS)) {
+  if (runs("cards")) for (const key of Object.keys(CARDS)) {
     const spec = cardSpec(key, 52);
     const { context, page } = await open(browser, origin, scheme, { cards: [spec] }, `/c/${CH}`);
     await page.getByTestId("agent-card").first().waitFor({ timeout: 15_000 });
@@ -314,7 +321,7 @@ async function scenes(browser, origin, scheme) {
   }
 
   // ② 처리할 일
-  {
+  if (runs("inbox")) {
     const specs = [cardSpec("channel-create", 52), cardSpec("agent-rename", 41), cardSpec("settings-update", 28)];
     const { context, page } = await open(browser, origin, scheme, { cards: specs }, "/inbox");
     await page.getByTestId("inbox-route").waitFor();
@@ -335,7 +342,7 @@ async function scenes(browser, origin, scheme) {
   }
 
   // ③ 만료 10분 전 경고
-  {
+  if (runs("expiry-soon")) {
     const spec = cardSpec("channel-create", 8);
     const { context, page } = await open(browser, origin, scheme, { cards: [spec] }, `/c/${CH}`);
     await page.getByTestId("agent-card").first().waitFor({ timeout: 15_000 });
@@ -343,14 +350,18 @@ async function scenes(browser, origin, scheme) {
     const warn = page.getByTestId("approval-note-expiry-soon");
     await warn.waitFor({ timeout: 5_000 });
     const t = (await warn.textContent()) ?? "";
-    check(`${tag} expiry-soon: 경고 줄 (분이 숫자로)`, /^[78]분 안에 만료돼요/.test(t), t);
+    // #5174 L7: 경고 줄은 결과만 말하고, 남은 시간은 조용한 줄이 한 번만 말한다(카드 글의 시간 말이 정확히 하나).
+    check(`${tag} expiry-soon: 경고 줄은 시간 없이 결과만`, t === "결정하지 않으면 에이전트가 다시 제안해야 해요.", t);
+    const cardText = (await page.getByTestId("agent-card").first().textContent()) ?? "";
+    const timeWords = cardText.match(/\d+\s*분 안에 만료돼요|\d+\s*(?:분|시간|일) 남음/g) ?? [];
+    check(`${tag} expiry-soon: 카드의 시간 말은 하나`, timeWords.length === 1 && timeWords[0] === "10분 안에 만료돼요", JSON.stringify(timeWords));
     check(`${tag} expiry-soon: 승인 컨트롤은 그대로`, (await page.getByTestId("approval-approve").count()) === 1);
     await page.screenshot({ path: shotPath("expiry-soon") });
     await context.close();
   }
 
   // ④ 만료 뒤
-  {
+  if (runs("expired")) {
     const spec = cardSpec("channel-create", -3);
     const { context, page } = await open(browser, origin, scheme, { cards: [spec] }, `/c/${CH}`);
     await page.getByTestId("agent-card").first().waitFor({ timeout: 15_000 });

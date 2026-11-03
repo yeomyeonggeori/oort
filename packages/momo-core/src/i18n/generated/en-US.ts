@@ -3788,6 +3788,54 @@ export const catalog: MessageCatalog = {
       "value": "Checking the key."
     }
   ],
+  "timeline.agentRail.open": [
+    {
+      "type": 1,
+      "value": "label"
+    },
+    {
+      "type": 0,
+      "value": " Show working agents"
+    }
+  ],
+  "timeline.agentRail.openActivity": [
+    {
+      "type": 0,
+      "value": "View activity"
+    }
+  ],
+  "timeline.agentRail.openRecord": [
+    {
+      "type": 0,
+      "value": "Open "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "'s work record"
+    }
+  ],
+  "timeline.agentRail.sheetClose": [
+    {
+      "type": 0,
+      "value": "Close working agents"
+    }
+  ],
+  "timeline.agentRail.sheetTitle": [
+    {
+      "type": 0,
+      "value": "Working agents"
+    }
+  ],
+  "timeline.approvalExpiry.soon": [
+    {
+      "type": 0,
+      "value": "If you do not decide, the agent has to propose it again."
+    }
+  ],
   "timeline.lightbox.copied": [
     {
       "type": 0,
@@ -3816,6 +3864,22 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Zoom out"
+    }
+  ],
+  "timeline.runException.open": [
+    {
+      "type": 1,
+      "value": "text"
+    },
+    {
+      "type": 0,
+      "value": ". Open work record"
+    }
+  ],
+  "timeline.runException.settings": [
+    {
+      "type": 0,
+      "value": "Open agent settings"
     }
   ],
   "timeline.send.discard": [
@@ -4052,6 +4116,12 @@ export const catalog: MessageCatalog = {
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "timeline.triggerChip.jumpHint": [
+    {
+      "type": 0,
+      "value": "Go to the reply"
     }
   ],
   "timeline.unfurl.label": [
