@@ -7,7 +7,6 @@ import {
   EXPIRED_CARD_COPY,
   REPROPOSE_LABEL,
   expiryPhase,
-  expirySoonCopy,
   reproposeDraft,
   closedCardReproposeReason,
   type ReproposeReason,
@@ -23,6 +22,7 @@ import {
 import { uuidEq } from "@momo/core/lib/api";
 import { attachParticle } from "@momo/core/lib/koreanParticle";
 import { useExpiryNow } from "./useExpiryNow";
+import { useFormatMessage } from "@/i18n/useFormatMessage";
 import {
   Check,
   ClipboardCheck,
@@ -476,6 +476,7 @@ function ApprovalBody({
   viewerMemberId?: string;
 }) {
   const { session, workspaceId } = useSession();
+  const formatMessage = useFormatMessage();
   const [local, setLocal] = useState<{
     status: ApprovalStatus;
     decidedAtMs?: number;
@@ -671,7 +672,8 @@ function ApprovalBody({
                 note={{
                   kind: "expiry-soon",
                   tone: "blocked",
-                  text: expirySoonCopy(card.expiresAtMs, nowMs),
+                  // 경고 줄은 결과만 말한다. 남은 시간은 같은 카드의 조용한 줄이 한 번 말한다(#5174 L7, `expiry.ts`).
+                  text: formatMessage("timeline.approvalExpiry.soon"),
                 }}
               />
             )}

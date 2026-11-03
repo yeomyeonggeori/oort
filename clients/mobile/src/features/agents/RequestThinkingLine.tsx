@@ -54,7 +54,10 @@ import {
   useRunLedgerFrames,
 } from './runLedgerQuery';
 
-/** 한 줄과 표적을 함께 예약해요. #4620 레일 착륙 때 같은 높이로 연결할 자리예요. */
+/**
+ * 한 줄과 표적을 함께 예약해요. #4620 입력창 레일(`ActivityRail`)과 표적은 같은 44예요. 높이는 연결하지 않았어요: 레일은 도크의 흐름 안에서
+ * 칸이 줄 상자 하나(`CONV.agentRailSlot`)이고 44는 손가락 슬롭이 채우는 반면, 이 줄은 목록 안의 행이라 칸이 곧 표적(44)이에요.
+ */
 export const REQUEST_THINKING_HEIGHT = TOUCH_TARGET;
 const STREAM_LIMIT =
   '흐르는 글과 도구 호출은 저장하지 않아요. 이 칸을 연 뒤에 도착한 것만 보여요.';

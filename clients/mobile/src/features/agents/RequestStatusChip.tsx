@@ -1,4 +1,4 @@
-import type {TriggerChip} from '@momo/core/features/agents/triggerChip';
+import {TRIGGER_CHIP_FACES, type TriggerChip} from '@momo/core/features/agents/triggerChip';
 import {
   REQUEST_BUNDLE_FACE,
   type RequestBundleState,
@@ -17,9 +17,10 @@ import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
 import {CONV_ICONS} from '../../design/icons';
 import {font, line, slopTo, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 
 // Lucide(ISC), 셸과 같은 24 viewBox·1.8 선의 1/2/3배 래스터예요.
-const ICONS: Record<string, ImageSourcePropType> = {
+export const ICONS: Record<string, ImageSourcePropType> = {
   CircleDot: require('../../design/icons/request-loop/circle-dot.png'),
   ShieldQuestion: require('../../design/icons/request-loop/shield-question.png'),
   Ban: require('../../design/icons/request-loop/ban.png'),
@@ -28,6 +29,9 @@ const ICONS: Record<string, ImageSourcePropType> = {
   Check: CONV_ICONS.check,
   Clock: CONV_ICONS.clock,
 };
+
+/** 칩이 입을 수 있는 가장 긴 낱말의 글자 수(코어 목록에서 읽는다). */
+const CHIP_LONGEST_WORD = Math.max(...TRIGGER_CHIP_FACES.map(face => face.word.length));
 
 export function RequestStateFace({
   state,
@@ -52,12 +56,21 @@ export function RequestStatusChip({
   chip,
   sentence,
   onOpen,
+  reserve = true,
+  testID = 'request-status-chip',
 }: {
   chip: TriggerChip;
   sentence?: string;
   onOpen?: (source: React.RefObject<View | null>) => void;
+  /**
+   * 폭을 가장 긴 낱말에 맞춰 **미리 잡는가**. 머리 줄의 칩은 이름·시각 곁에 서므로 예약하고(기본), 줄의 맨 끝에 서는 칩(스레드 요약 줄의
+   * 「작업 중」)은 서고 져도 이웃 글자가 움직이지 않으므로 예약하지 않는다(웹 `reserve={false}`). 높이는 어느 쪽이든 고정이다.
+   */
+  reserve?: boolean;
+  testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const {fontScale} = useWindowDimensions();
   const source = useRef<View | null>(null);
   const scale = Math.min(fontScale, BAR_CONTROL_MAX_SCALE);
@@ -66,8 +79,9 @@ export function RequestStatusChip({
     styles.chip,
     {
       height,
-      width:
-        font.meta * scale * '아직 받지 않았어요'.length + line.meta + space.sm,
+      // 칩의 폭은 **어떤 낱말이 서 있든** 코어가 말하는 가장 긴 낱말(`TRIGGER_CHIP_FACES`)의 폭이다 — 낱말이 바뀌어도(받음 → 가져감 →
+      // 작업 중 → 답함) 머리 줄의 이름·시각 자리가 움직이지 않는다. 낱말이 번역으로 길어져도 코어 목록이 따라간다.
+      ...(reserve ? {width: font.meta * scale * CHIP_LONGEST_WORD + line.meta + space.sm} : {}),
     },
   ];
   const icon =
@@ -103,11 +117,12 @@ export function RequestStatusChip({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityHint={chip.kind === 'answered' && chip.answer !== undefined ? formatMessage('timeline.triggerChip.jumpHint') : undefined}
       ref={source}
       onPress={() => onOpen(source)}
       hitSlop={{top: slopTo(height), bottom: slopTo(height)}}
       style={style}
-      testID="request-status-chip"
+      testID={testID}
     >
       {content}
     </Pressable>
@@ -116,7 +131,7 @@ export function RequestStatusChip({
       accessible
       accessibilityLabel={label}
       style={style}
-      testID="request-status-chip"
+      testID={testID}
     >
       {content}
     </View>

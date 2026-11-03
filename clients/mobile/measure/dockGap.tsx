@@ -13,7 +13,7 @@ import {
   attachmentSurfaceKey,
   setPickerIssue,
 } from '../src/features/attachments/draftStore';
-import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
+import {TurnsActivityRail} from '../src/features/agents/ActivityRail';
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
@@ -281,7 +281,7 @@ export function DockGapSurface({which}: {which: string}): React.JSX.Element {
           <View ref={dockRef} collapsable={false}>
             {thread ? null : (
               <>
-                <AgentActivityBar
+                <TurnsActivityRail
                   turns={has('activity') ? [TURN] : []}
                   directory={DIRECTORY}
                   nowMs={NOW}
