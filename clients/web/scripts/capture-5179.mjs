@@ -456,6 +456,11 @@ async function runCase(page, tag, width, c) {
   if (sc && bar) {
     check(`${name}: 툴바 상자가 스크롤러 안에 있다(위·아래로 잘리지 않는다)`, bar.t >= sc.t - 1 && bar.b <= sc.b + 1, `bar ${bar.t}~${bar.b} / 스크롤러 ${sc.t}~${sc.b}`);
   }
+  if (bar && own) {
+    // 어느 자리에 서든 막대는 포인터 행에 붙어 있다(행과 세로로 6px 이상 겹친다 — 위·아래 자리는 정확히 행 안 깊이 6, 밀린 자리는 그 이상). 떨어져 나간 막대는 누구 것인지 알 수 없다.
+    const attached = Math.min(bar.b, own.row.b) - Math.max(bar.t, own.row.t);
+    check(`${name}: 툴바가 포인터 행에 붙어 있다(행과 세로로 6px 이상 겹친다)`, attached >= 5, `겹침 ${attached}px · 툴바 ${bar.t}~${bar.b} · 행 ${own.row.t}~${own.row.b}`);
+  }
   const expectStraddle = c.pin ? c.narrow : isNarrow ? c.narrow : c.wide;
   check(`${name}: 툴바가 기대한 자리(${expectStraddle})에 섰다`, bar?.straddle === expectStraddle, JSON.stringify(bar));
   // 밀림: 위 자리에서 아래로 밀려 행 안쪽에 앉는 것은 위·아래 경계 모두 글자에 막힌 칸(C·F·H·I)뿐이다. 나머지는 밀림 0(1차 수리의 자리 그대로).
@@ -466,6 +471,11 @@ async function runCase(page, tag, width, c) {
     JSON.stringify(bar)
   );
 
+  if (expectSlide) {
+    // 밀려 앉은 막대는 앞 글줄에 닿지 않고 띄워 앉는다(모델이 창이 넉넉하면 2px, 좁으면 위·아래를 같게 나눈다). 글자 상자와 맞닿는 자리는 글자를 덮는 것과 한 끗 차이다.
+    const gap = bar && prevLast ? bar.t - prevLast.b : null;
+    check(`${name}: 밀려 앉은 툴바가 앞 행 마지막 줄 밑에서 띄워 앉는다(틈 ≥ 1px)`, gap !== null && gap >= 1, `틈 ${gap} · 툴바 윗단 ${bar?.t} · 앞 행 끝줄 밑단 ${prevLast?.b}`);
+  }
   if (c.prevReaches) {
     // 양성 대조: 앞 행 마지막 줄이 툴바 왼쪽 끝을 넘는 칸에서만 이 시험이 뜻이 있다. 위 자리의 툴바 왼쪽 끝은 위·아래 자리가 같다(가로는 안 바뀐다).
     const want = c.prevReaches[isNarrow ? 0 : 1];
