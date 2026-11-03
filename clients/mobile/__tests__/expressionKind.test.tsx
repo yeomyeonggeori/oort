@@ -73,6 +73,28 @@ jest.mock('../src/lib/haptics', () => ({
 
 const ko = createMessageService({messageLocale: 'ko-KR', catalog: koCatalog});
 const en = createMessageService({messageLocale: 'en-US', catalog: enCatalog});
+
+// 종류 이름·설명의 낱말은 ADR-0218 증보 4 §10 이 정한 것이다(planner 결정, #5112 2단계): `emoji` = 팀 이모지(작은 것), `sticker` =
+// 이모티콘(큰 것). 폰 시트의 탭 이름(이모티콘 · 이모지 · 팀 이모지 · GIF)과 같은 말이고, 「이모지」만 쓰면 표준 유니코드 이모지 탭과
+// 겹친다. 기대값은 사전에서 읽지 않고 **글자로 못 박는다**: 사전에서 읽으면 사전이 옛 낱말로 돌아가도 시험이 함께 따라가서 빨개지지 않는다.
+// 순서는 코어 `EXPRESSION_KINDS`(emoji → sticker)다.
+const KIND_WORDS = {
+  ko: {
+    labels: ['팀 이모지', '이모티콘'],
+    hintEmoji: '작은 그림이에요. 글 사이와 반응에 써요. 움직여도 팀 이모지예요.',
+    hintSticker: '큰 그림이에요. 크게 보내고, 움직이면 GIF에서 볼 수 있어요.',
+  },
+  en: {
+    labels: ['Team emoji', 'Emoticon'],
+    hintEmoji:
+      'A small picture. Use it between words and in reactions. It stays a team emoji even when it moves.',
+    hintSticker:
+      'A large picture. It is sent big, and a moving one shows under GIF.',
+  },
+} as const;
+/** 쓰지 않기로 한 옛 이름: 종류 이름 「이모지」·「스티커」(화면의 다른 「팀 이모지」와 겹치거나 탭 이름과 다르다)와 없는 곳 「팀 GIF」. */
+const RETIRED_KO = /스티커|팀 GIF/;
+const RETIRED_EN = /Sticker|Team GIF/;
 const root = `/v1/workspaces/${FIXTURE_WORKSPACE_ID}`;
 const base = `${root}/expressions`;
 const PNG = FIXTURE_MEDIA.png.image;
@@ -370,15 +392,11 @@ describe('초안 단계는 종류를 등록하는 순간 정한다 (ADR-0218 §1
   it('사람이 고른 값이 대신 가고, 더는 「골라 뒀어요」라고 하지 않고, 설명이 고른 종류를 따라 바뀐다', async () => {
     const {onApprove} = await mountStep(movingDraft());
     expect(picked()).toEqual(['sticker']);
-    expect(text('expression-draft-kind-hint')).toBe(
-      ko.formatMessage('expressions.kind.hintSticker'),
-    );
+    expect(text('expression-draft-kind-hint')).toBe(KIND_WORDS.ko.hintSticker);
     await press('expression-draft-kind-emoji');
     expect(picked()).toEqual(['emoji']);
     expect(screen.queryByTestId('expression-draft-kind-auto')).toBeNull();
-    expect(text('expression-draft-kind-hint')).toBe(
-      ko.formatMessage('expressions.kind.hintEmoji'),
-    );
+    expect(text('expression-draft-kind-hint')).toBe(KIND_WORDS.ko.hintEmoji);
     // 추천과 같은 쪽을 사람이 직접 고르면 그것도 「고른 것」이다 — 안내는 돌아오지 않는다.
     await press('expression-draft-kind-sticker');
     expect(picked()).toEqual(['sticker']);
@@ -441,10 +459,13 @@ describe('초안 단계는 종류를 등록하는 순간 정한다 (ADR-0218 §1
       EXPRESSION_KINDS.map(kind => `expression-draft-kind-${kind}`),
     );
     expect(rows.map(row => row.props.accessibilityLabel)).toEqual([
-      ko.formatMessage('expressions.kind.emoji'),
-      ko.formatMessage('expressions.kind.sticker'),
+      ...KIND_WORDS.ko.labels,
     ]);
-    // 웹 초안 카드와 같은 차례(이모지 → 스티커)다. 코어 목록이 바뀌면 이 줄이 빨개져 웹·폰이 함께 보게 된다.
+    // 눈에 보이는 글자도 같다(낭독 이름만 맞고 화면 글자가 다른 경우를 막는다).
+    expect(
+      rows.map(row => within(row).getByText(/\S/).props.children),
+    ).toEqual([...KIND_WORDS.ko.labels]);
+    // 웹 초안 카드와 같은 차례(팀 이모지 → 이모티콘)다. 코어 목록이 바뀌면 이 줄이 빨개져 웹·폰이 함께 보게 된다.
     expect([...EXPRESSION_KINDS]).toEqual(['emoji', 'sticker']);
   });
 
@@ -503,13 +524,8 @@ describe('초안 단계는 종류를 등록하는 순간 정한다 (ADR-0218 §1
           screen.getByTestId(`expression-draft-kind-${kind}`).props
             .accessibilityLabel,
       ),
-    ).toEqual([
-      en.formatMessage('expressions.kind.emoji'),
-      en.formatMessage('expressions.kind.sticker'),
-    ]);
-    expect(text('expression-draft-kind-hint')).toBe(
-      en.formatMessage('expressions.kind.hintSticker'),
-    );
+    ).toEqual([...KIND_WORDS.en.labels]);
+    expect(text('expression-draft-kind-hint')).toBe(KIND_WORDS.en.hintSticker);
     expect(text('expression-draft-kind-auto')).toBe(
       en.formatMessage('expressions.kind.autoNote'),
     );
@@ -517,7 +533,63 @@ describe('초안 단계는 종류를 등록하는 순간 정한다 (ADR-0218 §1
     expect(text('expression-draft-kind-auto')).not.toBe(
       ko.formatMessage('expressions.kind.autoNote'),
     );
+    // 쓰지 않기로 한 옛 이름이 이 단계의 어느 글자·낭독 이름에도 없다.
+    expect(JSON.stringify(screen.toJSON())).not.toMatch(RETIRED_EN);
     controller.dispose();
+  });
+
+  it('종류 이름은 폰 시트의 탭 이름과 같은 말이다 — 한국어는 글자 그대로, 영어는 단수 · 문장 첫 글자만 대문자', () => {
+    // 같은 말을 두 곳에 따로 적었으니, 한쪽만 바뀌면 빨개진다(탭을 고치면 종류 이름도 같이 고치게 한다).
+    expect(ko.formatMessage('expressions.kind.emoji')).toBe(
+      ko.formatMessage('expressions.sheet.tabTeam'),
+    );
+    expect(ko.formatMessage('expressions.kind.sticker')).toBe(
+      ko.formatMessage('expressions.sheet.tabEmoticon'),
+    );
+    expect(en.formatMessage('expressions.kind.emoji')).toBe(
+      en.formatMessage('expressions.sheet.tabTeam'),
+    );
+    // 탭 「Emoticons」는 목록의 이름(복수)이고 종류 「Emoticon」은 한 그림의 분류(단수)다. 응답 카드의 발췌 낱말도 단수 「Emoticon」이다.
+    expect(en.formatMessage('expressions.kind.sticker')).toBe(
+      en.formatMessage('expressions.sheet.tabEmoticon').replace(/s$/, ''),
+    );
+    expect(en.formatMessage('expressions.kind.sticker')).toBe(
+      en.formatMessage('reply.card.excerptExpression'),
+    );
+    // sentence case: 첫 글자만 대문자, 뒤의 낱말은 소문자(「Team Emoji」가 아니다).
+    for (const label of KIND_WORDS.en.labels) {
+      expect(label).toMatch(/^[A-Z][a-z]+( [a-z]+)*$/);
+    }
+    // 이름과 설명이 옛 이름으로 돌아가지 않았다(글자 그대로 못 박은 상수와 사전이 같다).
+    expect([
+      ko.formatMessage('expressions.kind.emoji'),
+      ko.formatMessage('expressions.kind.sticker'),
+    ]).toEqual([...KIND_WORDS.ko.labels]);
+    expect([
+      en.formatMessage('expressions.kind.emoji'),
+      en.formatMessage('expressions.kind.sticker'),
+    ]).toEqual([...KIND_WORDS.en.labels]);
+    expect(ko.formatMessage('expressions.kind.hintEmoji')).toBe(
+      KIND_WORDS.ko.hintEmoji,
+    );
+    expect(ko.formatMessage('expressions.kind.hintSticker')).toBe(
+      KIND_WORDS.ko.hintSticker,
+    );
+    expect(en.formatMessage('expressions.kind.hintEmoji')).toBe(
+      KIND_WORDS.en.hintEmoji,
+    );
+    expect(en.formatMessage('expressions.kind.hintSticker')).toBe(
+      KIND_WORDS.en.hintSticker,
+    );
+  });
+
+  it('한국어 화면 전체에 옛 이름(스티커·팀 GIF)이 없고, 설명이 움직이는 그림을 두 종류 모두에서 말한다', async () => {
+    await mountStep(movingDraft());
+    expect(JSON.stringify(screen.toJSON())).not.toMatch(RETIRED_KO);
+    // 움직이는 그림은 세 번째 종류가 아니다: 팀 이모지는 움직여도 팀 이모지이고, 이모티콘이 움직이면 GIF 에서 본다.
+    expect(text('expression-draft-kind-hint')).toMatch(/움직이면 GIF/);
+    await press('expression-draft-kind-emoji');
+    expect(text('expression-draft-kind-hint')).toMatch(/움직여도 팀 이모지/);
   });
 });
 
@@ -526,7 +598,7 @@ describe('가져오기로 등록하면 고른 종류의 탭에만 선다 (진짜
   // 코어 fixture 서버의 초안은 늘 움직이는 GIF 라서 추천은 `sticker`(→ GIF 탭)다. 사람이 `emoji` 를 고르면 움직이는 그림도
   // 팀 이모지 탭에만 선다(J2: 움직임이 가르는 것은 sticker 뿐).
   it.each([
-    ['이모지를 고르면(추천과 다르게)', 'emoji', 'emoji', ['team']],
+    ['팀 이모지를 고르면(추천과 다르게)', 'emoji', 'emoji', ['team']],
     ['고르지 않으면(추천 그대로)', null, 'sticker', ['gif']],
   ] as const)(
     '%s → 등록 요청의 kind 가 정해지고, 그림은 한 탭에만 선다',

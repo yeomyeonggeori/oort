@@ -3,7 +3,7 @@ name: 5112-expression-kind
 # No `env:` block — see the note at the top of 00-login.yaml.
 #   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID
 ---
-# 5112-expression-kind — 팀 표현의 종류 값 (ADR-0218 증보 4 §10, #5112): 작은 정지 그림 → 「이모지」로 등록 → 「팀 이모지」 탭에만 보인다.
+# 5112-expression-kind — 팀 표현의 종류 값 (ADR-0218 증보 4 §10, #5112): 작은 정지 그림 → 「팀 이모지」로 등록 → 「팀 이모지」 탭에만 보인다.
 #
 # 스택 검증용이다(워커는 돌리지 않았다 — `runtime-unverified`, `maestro check-syntax` 만 통과시켰다). **서버에 쓴다**: 팀 보관함에 표현
 # 하나를 등록한다. 그래서 (1) 로그인할 수 있는 멤버가 든 **격리 스택**에서만 돌리고(70-composer-newline.yaml 의 머리말과 같다), (2) 이름은
@@ -13,13 +13,13 @@ name: 5112-expression-kind
 # 폰 jest(`__tests__/expressionKind.test.tsx`)가 코어 fixture 서버로 재는 것(탭이 겹치지 않음·추천을 미리 고름·고른 값이 `Choice.kind` 로
 # 감)을 이 흐름은 **진짜 서버·진짜 사진 창(PHPicker)·진짜 시트**로 한 번 더 본다:
 #   · 사진 창이 뜨고 고른 그림이 가져오기 장에 돌아오는가
-#   · 초안 단계에 「종류」 묶음이 서고, 작은 정지 그림이라 「이모지」가 미리 골라져 있는가(서버가 같은 규칙으로 정한다)
+#   · 초안 단계에 「종류」 묶음이 서고, 작은 정지 그림이라 「팀 이모지」가 미리 골라져 있는가(서버가 같은 규칙으로 정한다)
 #   · 등록하면 시트 목록에서 **팀 이모지 탭에만** 보이고, 이모티콘·GIF 탭에는 없는가
 #
 # 사진 창은 **사진첩에 이 그림 하나만** 있다고 보고 첫 칸을 누른다. 복제한 시뮬레이터에 다른 사진이 있으면 첫 칸이 다른 그림일 수 있다 —
-# 그래도 「이모지」를 직접 골라 등록하므로 마지막 단정(팀 이모지 탭에만)은 그대로 성립하고, 미리 고른 값을 보는 단정만 달라진다(아래 표시).
+# 그래도 「팀 이모지」를 직접 골라 등록하므로 마지막 단정(팀 이모지 탭에만)은 그대로 성립하고, 미리 고른 값을 보는 단정만 달라진다(아래 표시).
 #
-# 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼): 초안 단계의 「종류」 묶음(라벨 · 이모지/스티커 두 줄 · 설명 · 「그림의 크기와 움직임에
+# 확인할 화면(16 Pro·SE, 라이트·다크, 글자 크기 기본·큼): 초안 단계의 「종류」 묶음(라벨 · 팀 이모지/이모티콘 두 줄 · 설명 · 「그림의 크기와 움직임에
 # 맞춰 골라 뒀어요」) · 등록 뒤 팀 이모지 탭. 캡처와 design-review 는 planner 몫이다.
 - launchApp:
     appId: app.momo.ios
@@ -74,7 +74,7 @@ name: 5112-expression-kind
 - tapOn:
     id: "expression-import-submit"
 
-# 초안 단계: 「종류」 묶음이 서고(이모지·스티커 두 줄), 설명과 「골라 뒀어요」가 같이 선다.
+# 초안 단계: 「종류」 묶음이 서고(팀 이모지·이모티콘 두 줄), 설명과 「골라 뒀어요」가 같이 선다.
 - extendedWaitUntil:
     visible:
       id: "expression-draft-kind"
@@ -87,12 +87,12 @@ name: 5112-expression-kind
     id: "expression-draft-kind-hint"
 - assertVisible:
     id: "expression-draft-kind-auto"
-# 사진첩에 이 그림 하나뿐이면 작은 정지 그림의 추천 = 「이모지」가 미리 골라져 있다(고른 줄은 selected).
+# 사진첩에 이 그림 하나뿐이면 작은 정지 그림의 추천 = 「팀 이모지」가 미리 골라져 있다(고른 줄은 selected).
 - assertVisible:
     id: "expression-draft-kind-emoji"
     selected: true
 
-# 사람이 「이모지」를 고른다 → 「골라 뒀어요」가 걷힌다(사람이 정한 값이 됐다).
+# 사람이 「팀 이모지」를 고른다 → 「골라 뒀어요」가 걷힌다(사람이 정한 값이 됐다).
 - tapOn:
     id: "expression-draft-kind-emoji"
 - assertNotVisible:
@@ -122,7 +122,7 @@ name: 5112-expression-kind
       id: "expression-pick-${output.probeName}"
     timeout: 30000
 
-# 다른 두 탭에는 없다 — 한 등록은 정확히 한 탭에만 선다(이모티콘 = 정지한 스티커, GIF = 움직이는 스티커).
+# 다른 두 탭에는 없다 — 한 등록은 정확히 한 탭에만 선다(이모티콘 탭 = 정지한 큰 그림, GIF 탭 = 움직이는 큰 그림).
 - tapOn:
     id: "expression-sheet-tab-emoticon"
 - assertNotVisible:

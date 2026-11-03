@@ -1174,19 +1174,19 @@ export const catalog: MessageCatalog = {
   "expressions.kind.emoji": [
     {
       "type": 0,
-      "value": "Emoji"
+      "value": "Team emoji"
     }
   ],
   "expressions.kind.hintEmoji": [
     {
       "type": 0,
-      "value": "A small picture. Use it between words and in reactions."
+      "value": "A small picture. Use it between words and in reactions. It stays a team emoji even when it moves."
     }
   ],
   "expressions.kind.hintSticker": [
     {
       "type": 0,
-      "value": "A large picture. It is sent big, and a moving one shows under Team GIF."
+      "value": "A large picture. It is sent big, and a moving one shows under GIF."
     }
   ],
   "expressions.kind.legend": [
@@ -1198,7 +1198,7 @@ export const catalog: MessageCatalog = {
   "expressions.kind.sticker": [
     {
       "type": 0,
-      "value": "Sticker"
+      "value": "Emoticon"
     }
   ],
   "expressions.make.agent": [

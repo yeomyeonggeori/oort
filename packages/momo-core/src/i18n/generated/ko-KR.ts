@@ -1010,19 +1010,19 @@ export const catalog: MessageCatalog = {
   "expressions.kind.emoji": [
     {
       "type": 0,
-      "value": "이모지"
+      "value": "팀 이모지"
     }
   ],
   "expressions.kind.hintEmoji": [
     {
       "type": 0,
-      "value": "작은 그림이에요. 글 사이와 반응에 써요."
+      "value": "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 팀 이모지예요."
     }
   ],
   "expressions.kind.hintSticker": [
     {
       "type": 0,
-      "value": "큰 그림이에요. 크게 보내고, 움직이면 팀 GIF에 보여요."
+      "value": "큰 그림이에요. 크게 보내고, 움직이면 GIF에서 볼 수 있어요."
     }
   ],
   "expressions.kind.legend": [
@@ -1034,7 +1034,7 @@ export const catalog: MessageCatalog = {
   "expressions.kind.sticker": [
     {
       "type": 0,
-      "value": "스티커"
+      "value": "이모티콘"
     }
   ],
   "expressions.make.agent": [

@@ -6,6 +6,9 @@ import { FIXTURE_EXPRESSIONS, FIXTURE_LIST, FIXTURE_MEDIA_SET, FIXTURE_MEMBER_ID
 import { FIXTURE_MEDIA } from "@momo/core/features/expressions/fixtureMedia";
 import { EXPRESSION_EMOJI_MAX_EDGE, recommendExpressionKind } from "@momo/core/features/expressions/kind";
 import type { Expression, ExpressionDraft, ExpressionKind, ExpressionList, ExpressionMedia } from "@momo/core/features/expressions/types";
+import { createLocaleService, loadMessageCatalog, resolveLocaleContext } from "@momo/core/i18n";
+import { LocaleContext } from "@/i18n/localeContext";
+import type { AppLocale } from "@/i18n/localeStore";
 import { ExpressionStore } from "./ExpressionStore";
 import type { ExpressionTransport } from "./transport";
 import { ExpressionsContext } from "./context";
@@ -101,6 +104,47 @@ describe("the draft card chooses the kind at registration", () => {
     const view = render(wrapper(fixtureStore(), <ExpressionDraftCard draft={live(fixtureManualDraft())} onReplace={() => {}} onApprove={vi.fn()} />));
     expect(view.queryByTestId("expression-draft-kind")).toBeNull();
     expect(view.queryByTestId("expression-draft-kind-hint")).toBeNull();
+  });
+});
+
+// 종류 이름·설명의 낱말은 ADR-0218 증보 4 §10 이 정한 것이다(planner 결정, #5112 2단계): `emoji` = 팀 이모지(작은 것), `sticker` = 이모티콘(큰 것).
+// 폰 시트의 탭 이름(이모티콘 · 이모지 · 팀 이모지 · GIF)과 같은 말이다. 기대값은 사전에서 읽지 않고 **글자로 못 박는다**: 사전에서 읽으면 사전이
+// 옛 낱말로 돌아가도 시험이 함께 따라가서 빨개지지 않는다. 같은 키를 폰 초안 단계가 쓰므로 폰 시험(`expressionKind.test.tsx`)이 같은 글자를 못 박는다.
+const KIND_WORDS = {
+  "ko-KR": {
+    labels: ["팀 이모지", "이모티콘"],
+    hintEmoji: "작은 그림이에요. 글 사이와 반응에 써요. 움직여도 팀 이모지예요.",
+    hintSticker: "큰 그림이에요. 크게 보내고, 움직이면 GIF에서 볼 수 있어요.",
+    retired: /스티커|팀 GIF/,
+  },
+  "en-US": {
+    labels: ["Team emoji", "Emoticon"],
+    hintEmoji: "A small picture. Use it between words and in reactions. It stays a team emoji even when it moves.",
+    hintSticker: "A large picture. It is sent big, and a moving one shows under GIF.",
+    retired: /Sticker|Team GIF/,
+  },
+} as const;
+async function appLocale(language: keyof typeof KIND_WORDS): Promise<AppLocale> {
+  const context = resolveLocaleContext(language, { languages: [language], timeZone: "Asia/Seoul" });
+  const service = createLocaleService({ ...context, catalog: language === "ko-KR" ? await loadMessageCatalog("ko-KR") : undefined });
+  return { service, getSnapshot: () => service.context, subscribe: () => () => undefined } as unknown as AppLocale;
+}
+
+describe("the kind picker speaks the ADR-0218 §10 words", () => {
+  it.each([["ko-KR"], ["en-US"]] as const)("%s: the two options carry the decided names in the core order, the hint follows the choice, and no retired name is on the card", async (language) => {
+    const words = KIND_WORDS[language];
+    const value = await appLocale(language);
+    const view = render(<LocaleContext.Provider value={value}>{wrapper(fixtureStore(), <ExpressionDraftCard draft={movingDraft()} onReplace={() => {}} onApprove={vi.fn()} />)}</LocaleContext.Provider>);
+    // The options as a person meets them: in document order, each labelled with the decided name (not only the test id).
+    const radios = view.getAllByRole("radio") as HTMLInputElement[];
+    expect(radios.map((radio) => radio.getAttribute("data-testid"))).toEqual(["expression-draft-kind-emoji", "expression-draft-kind-sticker"]);
+    words.labels.forEach((label, index) => expect(view.getByLabelText(label), label).toBe(radios[index]));
+    // A moving picture is recommended as an emoticon; its hint says where a moving one is found. Choosing the other kind changes the hint.
+    expect(view.getByTestId("expression-draft-kind-hint").textContent).toBe(words.hintSticker);
+    fireEvent.click(radios[0]);
+    expect(view.getByTestId("expression-draft-kind-hint").textContent).toBe(words.hintEmoji);
+    // The words the planner retired are nowhere on the card: neither as text nor as an accessible name.
+    expect(view.container.innerHTML).not.toMatch(words.retired);
   });
 });
 

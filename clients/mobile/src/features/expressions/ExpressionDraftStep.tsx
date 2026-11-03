@@ -44,7 +44,7 @@ import {
 //   · 종류(`emoji` 작은 팀 이모지 · `sticker` 큰 이모티콘)는 **등록하는 순간 사람이 정한다**(ADR-0218 증보 4 §10 J3, #5112).
 //     코어 `recommendedKindForDraft`(서버가 곧 등록할 큰 그림에 쓰는 규칙과 같다)로 미리 골라 보이고, 사람이 바꾸면 그 값이
 //     `Choice.kind` 로 간다. 고른 값은 **그 그림의 핀**(개정·`large` 해시)에 묶여서 다른 그림으로 바뀌면 옛 선택이 따라가지 않고
-//     추천이 다시 선다. 문장·순서(종류 · 이모지 · 스티커 · 설명 · 「골라 뒀어요」)는 웹 `ExpressionDraftCard` 와 같은 사전 키다.
+//     추천이 다시 선다. 문장·순서(종류 · 팀 이모지 · 이모티콘 · 설명 · 「골라 뒀어요」)는 웹 `ExpressionDraftCard` 와 같은 사전 키다.
 //
 // 이 단계는 가져오기·사진 길이 함께 쓰는 폰의 유일한 「등록 승인」 자리다. 폰에는 에이전트 후보(`expression.create`)를 받는 전용
 // 승인 카드가 아직 없다(웹은 `AgentCard` 가 `ExpressionApprovalCard` → `ExpressionDraftCard` 로 같은 부품을 쓴다) — 그 카드가
