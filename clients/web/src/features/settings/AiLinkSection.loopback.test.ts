@@ -268,4 +268,25 @@ describe("AI 연결 loopback 안내 (#2204)", () => {
       })
     );
   });
+
+  // #5221: `errorMessage` 는 서버 원문을 더는 돌려주지 않는다. 이 안내만은 서버의 사유 줄을 일부러 안내 아래에 붙이므로
+  // 명시적인 `serverWireMessage` 를 쓴다: 요청 자체가 거절돼 던져진 경우(확인 요청이 loopback 을 거절했다)에도 그 줄이 남는다.
+  it("확인 요청이 loopback 으로 거절돼 던져져도 서버의 사유 줄을 안내 아래에 붙인다", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue(LOOPBACK_LINK);
+    vi.mocked(fetchProviderChain).mockRejectedValue(new ApiError(404, "not found"));
+    vi.mocked(testProviderLink).mockRejectedValue(new ApiError(400, LOOPBACK_REFUSAL_WIRE));
+    const host = mountSection();
+    await waitFor(() => host.querySelector('[data-testid="ai-link-row-more"]') !== null, "row");
+    act(() => {
+      (host.querySelector('[data-testid="ai-link-row-more"]') as HTMLButtonElement).click();
+    });
+    await waitFor(() => host.querySelector('[data-testid="ai-link-check"]') !== null, "check");
+    act(() => {
+      (host.querySelector('[data-testid="ai-link-check"]') as HTMLButtonElement).click();
+    });
+    await waitFor(() => host.querySelector('[data-testid="ai-link-loopback-hint"]') !== null, "loopback banner");
+    const banner = host.querySelector('[data-testid="ai-link-loopback-hint"]') as HTMLElement;
+    expect(banner.textContent).toContain(LOOPBACK_PROVIDER_HINT);
+    expect(banner.textContent).toContain(LOOPBACK_REFUSAL_WIRE);
+  });
 });

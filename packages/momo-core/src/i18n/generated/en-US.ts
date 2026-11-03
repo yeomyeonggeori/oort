@@ -438,6 +438,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the member list"
     }
   ],
+  "connection.load.newerTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load new messages"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,
@@ -466,6 +472,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Couldn't send"
+    }
+  ],
+  "connection.send.reasonOffline": [
+    {
+      "type": 0,
+      "value": "Couldn't send because you're offline"
+    }
+  ],
+  "connection.send.reasonRejected": [
+    {
+      "type": 0,
+      "value": "The server didn't accept it"
+    }
+  ],
+  "connection.send.reasonServer": [
+    {
+      "type": 0,
+      "value": "Couldn't send because we can't reach the server"
     }
   ],
   "connection.send.resend": [

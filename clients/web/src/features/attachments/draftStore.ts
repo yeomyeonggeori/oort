@@ -6,7 +6,6 @@ import {
   completeUpload,
   draftFor,
   failUpload,
-  issueForStatus,
   progressUpload,
   removeDraft as removeDraftFrom,
   requeueUpload,
@@ -16,11 +15,12 @@ import {
   type AttachmentDraft,
   type MessageAttachment,
 } from "@momo/core/features/attachments/model";
+import { completeAttachmentUpload, createAttachmentUpload } from "@momo/core/lib/api";
 import {
-  ApiError,
-  completeAttachmentUpload,
-  createAttachmentUpload,
-} from "@momo/core/lib/api";
+  verdictForRequestFailure,
+  verdictForTransferFailure,
+} from "@momo/core/features/connection/uploadFailure";
+import { deviceOnlineNow } from "@/lib/deviceOnline";
 import { putAttachmentBytes, type UploadHandle } from "./uploadTransport";
 
 // =============================================================================
@@ -169,13 +169,8 @@ async function uploadOne(
       size: draft.sizeBytes,
     });
   } catch (error) {
-    update(key, (list) =>
-      failUpload(
-        list,
-        draft.localId,
-        error instanceof ApiError ? issueForStatus(error.status) : "unavailable"
-      )
-    );
+    const verdict = verdictForRequestFailure(error, deviceOnlineNow());
+    update(key, (list) => failUpload(list, draft.localId, verdict.issue, verdict.cause));
     return;
   }
 
@@ -195,17 +190,8 @@ async function uploadOne(
       update(key, (list) => rewindUpload(list, draft.localId));
       return;
     }
-    update(key, (list) =>
-      failUpload(
-        list,
-        draft.localId,
-        result.failure === "blocked"
-          ? "blocked"
-          : result.failure === "status" && result.status !== undefined
-            ? issueForStatus(result.status)
-            : "unavailable"
-      )
-    );
+    const verdict = verdictForTransferFailure(result.failure, result.status, deviceOnlineNow());
+    update(key, (list) => failUpload(list, draft.localId, verdict.issue, verdict.cause));
     return;
   }
 
@@ -218,13 +204,8 @@ async function uploadOne(
     );
     update(key, (list) => completeUpload(list, draft.localId, row.id));
   } catch (error) {
-    update(key, (list) =>
-      failUpload(
-        list,
-        draft.localId,
-        error instanceof ApiError ? issueForStatus(error.status) : "unavailable"
-      )
-    );
+    const verdict = verdictForRequestFailure(error, deviceOnlineNow());
+    update(key, (list) => failUpload(list, draft.localId, verdict.issue, verdict.cause));
   }
 }
 

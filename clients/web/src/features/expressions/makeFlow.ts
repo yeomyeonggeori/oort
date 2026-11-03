@@ -6,7 +6,7 @@ import {
   sendMessage,
   type Channel,
 } from "@momo/core/lib/api";
-import { issueForStatus } from "@momo/core/features/attachments/model";
+import { verdictForRequestFailure, verdictForTransferFailure } from "@momo/core/features/connection/uploadFailure";
 import { putAttachmentBytes, type UploadHandle, type UploadResult } from "@/features/attachments/uploadTransport";
 
 // =============================================================================
@@ -151,7 +151,13 @@ export function makeFailureLine(step: MakeStep, cause: unknown): string {
   }
   if (step === "upload") {
     if (cause instanceof UploadFailed && cause.failure === "blocked") return "이 서버의 보안 설정이 파일 보관소 주소를 막았어요. 서버 관리자에게 알려 주세요.";
-    switch (status === undefined ? null : issueForStatus(status)) {
+    // 502·504·코드 없는 503은 「보관소 없음」이 아니라 닿지 못함이다(#5221): 아래 기본 문장(연결을 확인하고 다시 시도)이 맞는다.
+    // 우리 서버가 코드를 붙여 직접 낸 503만 보관소 이야기로 남는다.
+    const { issue } =
+      cause instanceof UploadFailed
+        ? verdictForTransferFailure(cause.failure, cause.status, null)
+        : verdictForRequestFailure(cause, null);
+    switch (issue) {
       case "too-large":
         return "사진이 너무 커서 올리지 못했어요. 더 작은 사진을 골라 주세요.";
       case "forbidden":
