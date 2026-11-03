@@ -15,6 +15,9 @@
  *   photo-b      가로 4:3   남색
  *   photo-c      가로 4:3   겨자
  *   photo-tall   세로 9:19.5 밝은 모래색 — 화면을 거의 채워 유리 조작이 사진 위에 겹친다(흰 글자·글리프의 최악)
+ *   photo-wide   가로 2072×110 (약 18.8:1) — 가로로 엄청 긴 화면 캡처. 100px 칸마다 구분선과 칸 번호(0~20)가 있다(#5224 — 얇은 선일 때는 안 읽히고,
+ *                높이 맞춤으로 키우면 번호가 읽힌다)
+ *   photo-narrow 세로 110×2072 — 세로로 엄청 긴 캡처. 같은 칸 번호가 세로로 놓인다
  *
  * 그 밖의 id 는 404 다 — 실패 상태를 찍을 때 쓴다.
  *
@@ -32,7 +35,31 @@ const PICTURES = {
   'photo-b': {width: 1200, height: 900, rgb: [108, 123, 217]},
   'photo-c': {width: 1200, height: 900, rgb: [201, 180, 88]},
   'photo-tall': {width: 900, height: 1950, rgb: [226, 206, 168]},
+  'photo-wide': {width: 2072, height: 110, rgb: [217, 123, 79], ticks: 'x', ink: [30, 26, 70]},
+  'photo-narrow': {width: 110, height: 2072, rgb: [108, 123, 217], ticks: 'y', ink: [250, 250, 250]},
 };
+
+// 긴 그림의 칸 번호(#5224): 3×5 점 글꼴을 8배로 그린다(숫자 하나가 24×40px, 한 칸 100px 안에 두 자리까지 든다).
+const DIGITS = {
+  0: [7, 5, 5, 5, 7], 1: [2, 6, 2, 2, 7], 2: [7, 1, 7, 4, 7], 3: [7, 1, 7, 1, 7], 4: [5, 5, 7, 1, 1],
+  5: [7, 4, 7, 1, 7], 6: [7, 4, 7, 5, 7], 7: [7, 1, 1, 1, 1], 8: [7, 5, 7, 5, 7], 9: [7, 5, 7, 1, 7],
+};
+const DOT = 8;
+
+/** (x, y) 가 칸 번호의 글자 점에 드는가. 가로로 긴 그림은 칸이 x 로, 세로로 긴 그림은 y 로 이어진다. */
+function onDigit(ticks, x, y) {
+  const along = ticks === 'x' ? x : y;
+  const cell = Math.floor(along / 100);
+  const label = String(cell);
+  const lx = ticks === 'x' ? x - cell * 100 - 12 : x - 10;
+  const ly = ticks === 'x' ? y - 35 : y - cell * 100 - 30;
+  if (lx < 0 || ly < 0 || ly >= 5 * DOT) return false;
+  const digit = Math.floor(lx / (4 * DOT));
+  if (digit >= label.length) return false;
+  const column = Math.floor((lx % (4 * DOT)) / DOT);
+  if (column > 2) return false;
+  return ((DIGITS[label[digit]][Math.floor(ly / DOT)] >> (2 - column)) & 1) === 1;
+}
 
 const CRC_TABLE = new Uint32Array(256).map((_, n) => {
   let c = n;
@@ -58,7 +85,7 @@ function chunk(type, data) {
 const clamp = value => Math.max(0, Math.min(255, Math.round(value)));
 
 /** 8비트 RGB 그라데이션 PNG 한 장(위 머리말의 하늘·땅·해). */
-function picturePng({width, height, rgb}) {
+function picturePng({width, height, rgb, ticks, ink}) {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
@@ -79,6 +106,19 @@ function picturePng({width, height, rgb}) {
       raw[at] = clamp(rgb[0] * k);
       raw[at + 1] = clamp(rgb[1] * k);
       raw[at + 2] = clamp(rgb[2] * k);
+      // 긴 그림의 칸 구분선과 번호(#5224): 얼마나 키웠는지·어디를 보고 있는지 캡처에서 읽힌다.
+      if (ticks !== undefined) {
+        const along = ticks === 'x' ? x : y;
+        if (along % 100 < 3) {
+          raw[at] = clamp(raw[at] * 0.3);
+          raw[at + 1] = clamp(raw[at + 1] * 0.3);
+          raw[at + 2] = clamp(raw[at + 2] * 0.3);
+        } else if (onDigit(ticks, x, y)) {
+          raw[at] = ink[0];
+          raw[at + 1] = ink[1];
+          raw[at + 2] = ink[2];
+        }
+      }
     }
   }
   return Buffer.concat([
@@ -105,6 +145,17 @@ createServer((request, response) => {
     }
     execFile('cliclick', [`dc:${x},${y}`], {timeout: 2000}, error => {
       response.writeHead(error ? 500 : 200).end(error ? 'Native double tap failed (cliclick/accessibility)' : 'ok');
+    });
+    return;
+  }
+
+  // #5224 measure-only: the harness posts where each finger landed so an automated pinch can be checked against the picture.
+  if (url.pathname === '/log' && request.method === 'POST') {
+    let body = '';
+    request.on('data', chunk => { body += chunk; });
+    request.on('end', () => {
+      process.stdout.write(`LOG ${body}\n`);
+      response.writeHead(204).end();
     });
     return;
   }
