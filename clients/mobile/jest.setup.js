@@ -885,6 +885,101 @@ jest.mock('expo-glass-effect', () => {
   return {GlassView};
 });
 
+// ---- expo-video ----------------------------------------------------------------
+// #5208. 영상 재생은 네이티브 AVPlayer 라 Jest 에 재생할 것이 없다. 이 대역이 하는 일은 **어디로 무엇이 갔는가**를 기록하는 것이다:
+// `replaceAsync` 에 간 소스(주소·헤더·`useCaching`), `play`/`pause`/`replay` 호출, 재생 위치(`currentTime` 쓰기), 해제 여부.
+// 플레이어의 사건(`statusChange`·`timeUpdate`·`playToEnd` …)은 시험이 `__emit` 으로 직접 일으킨다 — 실제 AVPlayer 의 타이밍을 흉내
+// 내지 않는다(그건 시뮬레이터 레인이 잰다). `useVideoPlayer` 는 진짜처럼 마운트마다 플레이어 하나를 만들고 언마운트에 해제한다.
+jest.mock('expo-video', () => {
+  const React = require('react');
+  const {View} = require('react-native');
+  const players = [];
+  class FakeVideoPlayer {
+    constructor(source) {
+      this.sources = [source];
+      this.calls = [];
+      this.listeners = new Map();
+      this.released = false;
+      this.playing = false;
+      this.muted = false;
+      this.currentTime = 0;
+      this.duration = 0;
+      this.status = 'idle';
+      this.seeks = [];
+      players.push(this);
+    }
+    get source() {
+      return this.sources[this.sources.length - 1];
+    }
+    addListener(name, listener) {
+      const set = this.listeners.get(name) ?? new Set();
+      set.add(listener);
+      this.listeners.set(name, set);
+      return {remove: () => set.delete(listener)};
+    }
+    __emit(name, payload) {
+      for (const listener of [...(this.listeners.get(name) ?? [])]) listener(payload);
+    }
+    play() {
+      this.calls.push('play');
+      this.playing = true;
+      this.__emit('playingChange', {isPlaying: true, oldIsPlaying: false});
+    }
+    pause() {
+      this.calls.push('pause');
+      this.playing = false;
+      this.__emit('playingChange', {isPlaying: false, oldIsPlaying: true});
+    }
+    replay() {
+      this.calls.push('replay');
+      this.currentTime = 0;
+      this.play();
+    }
+    async replaceAsync(source) {
+      this.calls.push('replaceAsync');
+      this.sources.push(source);
+      this.status = 'readyToPlay';
+    }
+    seekBy(seconds) {
+      this.currentTime += seconds;
+    }
+  }
+  // `currentTime` 쓰기를 기록한다(위치 복원이 정말 일어났는지 시험이 본다).
+  Object.defineProperty(FakeVideoPlayer.prototype, 'currentTime', {
+    get() {
+      return this._currentTime ?? 0;
+    },
+    set(value) {
+      this._currentTime = value;
+      if (this.seeks) this.seeks.push(value);
+    },
+  });
+  const useVideoPlayer = (source, setup) => {
+    const ref = React.useRef(null);
+    if (ref.current === null) {
+      ref.current = new FakeVideoPlayer(source);
+      setup?.(ref.current);
+    }
+    React.useEffect(() => {
+      const player = ref.current;
+      return () => {
+        player.released = true;
+      };
+    }, []);
+    return ref.current;
+  };
+  const VideoView = props => React.createElement(View, props);
+  return {
+    useVideoPlayer,
+    VideoView,
+    createVideoPlayer: source => new FakeVideoPlayer(source),
+    __players: players,
+    __reset: () => {
+      players.length = 0;
+    },
+  };
+});
+
 // ---- 새 버전 배너 (#3905) ----------------------------------------------------
 // 홈·프로필을 마운트하는 모든 시험이 GitHub Pages 로 요청을 보내지 않게, 훅의 기본값은
 // 「제안 없음」이다. 배너 자체를 보는 시험은 `jest.mock` 으로 이 값을 바꾸고, 피드를 읽는

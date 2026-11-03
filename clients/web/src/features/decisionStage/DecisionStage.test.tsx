@@ -75,7 +75,12 @@ async function finishHero() {
   await act(async () => { motions.splice(0).forEach((motion) => motion.finish()); });
 }
 
+function setBrowserOnline(online: boolean) {
+  Object.defineProperty(window.navigator, "onLine", { configurable: true, value: online });
+}
+
 beforeEach(() => {
+  setBrowserOnline(true);
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-10-30T06:00:00Z"));
   session.workspaceId = "workspace-stage";
@@ -292,12 +297,23 @@ describe("decision stage", () => {
     act(() => controller.update({ error: "목록을 읽지 못했어요. 다시 불러 주세요." }));
     fireEvent.click(screen.getByRole("button", { name: "다시 불러오기" }));
     expect(retry).toHaveBeenCalledOnce();
-    session.connStatus = "disconnected";
-    act(() => controller.update({ cards: request().cards, error: null }));
+    // 오프라인은 브라우저가 안다. 소켓만 끊긴 것(`session.connStatus`)은 결정을 막지 않는다(#5201 결정 ③).
+    setBrowserOnline(false);
+    act(() => {
+      window.dispatchEvent(new Event("offline"));
+      controller.update({ cards: request().cards, error: null });
+    });
     expect(screen.getByTestId("decision-stage-offline")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "첫째 채널 안내 고정" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "승인" })).toBeNull();
     expect(transport.decide).not.toHaveBeenCalled();
+  });
+
+  it("a dropped realtime rail alone leaves the decision open (결정 ③)", () => {
+    session.connStatus = "disconnected";
+    open();
+    expect(screen.queryByTestId("decision-stage-offline")).toBeNull();
+    expect(screen.getByRole("button", { name: "승인" })).toBeTruthy();
   });
 
   it("keeps failed decisions retryable with the same idempotency key and no false checkmark", async () => {

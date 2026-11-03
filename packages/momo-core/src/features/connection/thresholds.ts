@@ -7,8 +7,9 @@
 // 이 값을 가리킬 뿐 자기 숫자를 두지 않는다.
 //
 // 모델(`model.ts`)이 읽는 것은 `CONNECTING_BAND_DELAY_MS`·`DISPLAY_GRACE_MS`·`HEALED_MS`·
-// `SERVER_UNREACHABLE_STREAK`이다. `RETRY_WINDOW_MS`와 `SUSTAINED_DOWN_MS`는 웹 띠 화면이 아직
-// 읽는 값이라 이름과 값을 그대로 옮겨 왔다(아래 각 줄).
+// `SERVER_UNREACHABLE_STREAK`이고, 화면 공급자가 읽는 것은 `RESUME_AFTER_HIDDEN_MS`·`RECOVERED_FLASH_MS`다.
+// 웹 띠의 옛 15초(`SUSTAINED_DOWN_MS`)와 「누른 뒤 6초」(`RETRY_WINDOW_MS`)는 #5220이 띠를 이 모델로
+// 옮기며 지웠다: 누르면 모델이 「연결 중」으로 이어 새 10초를 세므로 별도 시계가 필요 없다.
 // =============================================================================
 
 /**
@@ -24,7 +25,7 @@ export const CONNECTING_BAND_DELAY_MS = 1_000;
 /**
  * 소켓 틈이 이 시간을 넘으면 「연결 중」이 「끊김」이 된다. #4783. 틈이 시작된 때부터 센다(재시도가
  * 시계를 다시 시작하지 않는다). 폰 `DISPLAY_GRACE_MS`의 값 그대로이고, 웹도 이 규칙으로 간다(#5201
- * 결정 ④, S-B가 화면에 연결). 기기 오프라인은 이 문턱을 기다리지 않는다.
+ * 결정 ④, 웹 화면 연결은 #5220). 기기 오프라인은 이 문턱을 기다리지 않는다.
  */
 export const DISPLAY_GRACE_MS = 10_000;
 
@@ -38,20 +39,6 @@ export const DISPLAY_GRACE_MS = 10_000;
 export const HEALED_MS = 5_000;
 
 /**
- * 손으로 누른 「지금 다시 연결」이 통하지 않았다고 말하기까지 기다리는 시간. 웹 띠 `RETRY_WINDOW_MS`의
- * 값 그대로다. 모델은 읽지 않는다(띠가 쓰는 화면 타이머).
- */
-export const RETRY_WINDOW_MS = 6_000;
-
-/**
- * 웹 위쪽 띠가 소켓 틈을 기다리는 옛 15초(띠가 내용을 밀어서 고른 값).
- *
- * @deprecated 결정 ④로 웹도 `DISPLAY_GRACE_MS`(10초)를 쓴다. S-B(웹·데스크탑 신호)가 띠를 연결 카드로
- * 옮기면서 이 줄을 지운다. S-A는 화면 동작을 바꾸지 않으려고 값을 그대로 둔다.
- */
-export const SUSTAINED_DOWN_MS = 15_000;
-
-/**
  * 「서버에 닿지 못함」을 선언하는 문턱: 마지막 응답 뒤로 **서로 다른 요청** 이만큼이 연달아 닿지 못했을
  * 때(`restSignal.ts`). 한 건으로 판정하지 않는 까닭: 정상 운영에서도 503을 내는 길이 있다(허들 미구성
  * 인스턴스의 `…/huddles/active`, 이슈 #4783 진단 48시간 11건).
@@ -63,3 +50,13 @@ export const AUTO_RESEND_MAX_ATTEMPTS = 3;
 
 /** 자동 재전송은 첫 실패로부터 이 시간 안에서만 한다(5분). */
 export const AUTO_RESEND_WINDOW_MS = 300_000;
+
+/**
+ * 창이 이만큼(30초) 이상 숨었다가 돌아오면 화면이 소켓을 다시 연다(#5220, #5201). 절전·최소화 동안 죽은
+ * 소켓은 핑 시간 초과(폰 코드 주석은 35초)까지 「연결됨」으로 보일 수 있어서, 돌아온 순간에 확인을 기다리지
+ * 않고 새로 연다. 30초보다 짧은 자리 비움은 소켓이 스스로 알아챈다(건드리면 멀쩡한 소켓만 흔든다).
+ */
+export const RESUME_AFTER_HIDDEN_MS = 30_000;
+
+/** 「끊김」이 보였던 뒤 다시 붙으면 「다시 연결됐어요」를 이만큼(2초) 보인다(#5201, 감사 문서 §4 원칙 7). */
+export const RECOVERED_FLASH_MS = 2_000;

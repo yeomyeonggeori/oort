@@ -174,8 +174,8 @@ for (const file of files.filter((f) => f.endsWith(".ts"))) {
   };
 
   // Names this file declares itself. `quotaModel.ts` really does have a domain
-  // concept called a "window" (the rolling quota window) and `connectionAlert`
-  // really does call its subject an `alert`; flagging those would train people
+  // concept called a "window" (the rolling quota window), and a feature may
+  // really call its subject an `alert`; flagging those would train people
   // to ignore this gate, which is the only way it can fail. File-scoped rather
   // than block-scoped on purpose — the precise, block-scoped version of this
   // check is `no-restricted-globals` in eslint.config.js, and the two are meant

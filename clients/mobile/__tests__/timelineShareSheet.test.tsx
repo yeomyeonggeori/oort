@@ -86,7 +86,8 @@ function message(seq: number, extra: Partial<Message> = {}): Message {
 }
 
 // 첫 화면 창 안(앞쪽 열 줄)에 영상 첨부 카드가 있다.
-const VIDEO = {id: 'att-video', name: 'v1.mp4', mime: 'video/mp4', sizeBytes: 61_235_000};
+// 앱 안 재생(mp4·mov, #5208) 밖의 영상 — 파일 카드에서 공유 시트로 가는 길을 잰다.
+const VIDEO = {id: 'att-video', name: 'v1.webm', mime: 'video/webm', sizeBytes: 61_235_000};
 const HISTORY = Array.from({length: 12}, (_, i) => message(i + 1, i === 2 ? {attachments: [VIDEO]} : {}));
 const CONTENT_HEIGHT = 4000;
 const VIEWPORT = {height: 800, width: 390};
