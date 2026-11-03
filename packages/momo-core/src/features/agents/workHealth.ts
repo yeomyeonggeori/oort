@@ -69,20 +69,32 @@ function retryCount(events: readonly AgentRunLedgerEvent[]): number {
   return retries;
 }
 
-export function workHealth(input: WorkHealthInput): WorkHealth {
-  const { facts, events, nowMs, live } = input;
-  const running = facts.phase === "running";
+/**
+ * 시간 신호의 닻: 마지막 보고 시각과 가장 새 단계의 시각. 시계가 없는 표면(폰 기록 시트, #4658)이 「시간만으로 사실이 바뀌는
+ * 순간」(조용함 5분·머문 시간 10분)을 이 닻에서 계산해 그 순간에 한 번만 다시 그린다 — 닻을 두 곳에서 따로 세지 않는다.
+ */
+export function healthAnchors(
+  facts: Pick<ServerRunFacts, "lastEventAtMs">,
+  events: readonly AgentRunLedgerEvent[]
+): { lastReportAtMs: number | undefined; stageAtMs: number | undefined } {
   // 마지막 보고: 서버 진행 읽기의 값과 원장의 가장 새 행 중 늦은 쪽(원장이 더 새로울 수 있다). 깨움 줄은 서버가
   // `last_event_at`에서도 뺀다(ADR-0200 F9).
   const stamps = events.filter((event) => event.kind !== "doorbell_rung").map((event) => event.createdAtMs);
   if (facts.lastEventAtMs !== undefined) stamps.push(facts.lastEventAtMs);
-  const lastReportAt = stamps.length === 0 ? undefined : Math.max(...stamps);
-  const stageAt = events
+  const lastReportAtMs = stamps.length === 0 ? undefined : Math.max(...stamps);
+  const stageAtMs = events
     .filter((event) => event.kind === "stage")
     .reduce<number | undefined>(
       (best, event) => (best === undefined || event.createdAtMs > best ? event.createdAtMs : best),
       undefined
     );
+  return { lastReportAtMs, stageAtMs };
+}
+
+export function workHealth(input: WorkHealthInput): WorkHealth {
+  const { facts, events, nowMs, live } = input;
+  const running = facts.phase === "running";
+  const { lastReportAtMs: lastReportAt, stageAtMs: stageAt } = healthAnchors(facts, events);
   return {
     quietMinutes:
       live && running && lastReportAt !== undefined && nowMs - lastReportAt >= WORK_QUIET_AFTER_MS

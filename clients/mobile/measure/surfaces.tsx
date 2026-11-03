@@ -207,6 +207,7 @@ import {ThreadPanelSurface} from './threadPanel';
 import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
 import {UncollectedSurface, isUncollectedSurface, seedUncollected} from './uncollected';
+import {WorkTimelineSurface, isWorkTimelineSurface, seedWorkTimeline} from './workTimeline';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
@@ -2385,6 +2386,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4285: 아무도 가져가지 않은 요청 — 홈 「작업 중」 카드와 대화 아래 활동 줄(「아직 받지 않았어요」·「취소」).
   if (isUncollectedSurface(name)) {
     return <UncollectedSurface name={name} />;
+  }
+
+  // #4658: 작업 타임라인 시트(에이전트 보고·oort 기록·계획·건강 신호)와 끝난 요청의 요약 칩.
+  if (isWorkTimelineSurface(name)) {
+    return <WorkTimelineSurface name={name} />;
   }
 
   switch (name) {
@@ -6161,7 +6167,12 @@ function RunLedgerSurface(): React.JSX.Element {
       ],
     }).events,
   );
-  return <RunLedgerSheet progress={run} directory={DIRECTORY} onClose={() => {}} />;
+  // 시트는 실시간 연결 상태를 읽는다(끊기면 한정 문장·점 없음, #4658): 하네스의 기본(`connecting`)이 아니라 연결된 화면을 찍는다.
+  return (
+    <RealtimeContext.Provider value={CONNECTED_RAIL}>
+      <RunLedgerSheet progress={run} directory={DIRECTORY} onClose={() => {}} />
+    </RealtimeContext.Provider>
+  );
 }
 
 const harnessClient = new QueryClient({
@@ -8060,6 +8071,13 @@ if (
   isUncollectedSurface(LAUNCHED.name)
 ) {
   seedUncollected(harnessClient, LAUNCHED.name);
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  isWorkTimelineSurface(LAUNCHED.name)
+) {
+  seedWorkTimeline(harnessClient, LAUNCHED.name);
 }
 if (
   LAUNCHED !== null &&
