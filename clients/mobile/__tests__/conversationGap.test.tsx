@@ -13,13 +13,14 @@ import {
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
-import {Keyboard, StyleSheet, Text, View} from 'react-native';
+import {Dimensions, Keyboard, StyleSheet, Text, View} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {space} from '../src/design/tokens';
-import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
+import {ActivityRailSlot} from '../src/features/agents/ActivityRail';
+import {railSlotHeight} from '../src/features/agents/railClock';
 import {AiConnectCard} from '../src/features/aiConnect/AiConnectCard';
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
@@ -109,8 +110,11 @@ const ROSTER = [
   }),
 ];
 
+/** 에이전트(김인턴)가 없는 대화 — 사람만 있는 방. 레일 칸이 없고 간격은 20 그대로여야 한다. */
+const ROOM = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
 const CHANNELS = [
   {id: GENERAL, workspaceId: WS, kind: 'public', name: 'general', muted: false},
+  {id: ROOM, workspaceId: WS, kind: 'public', name: 'design', muted: false},
 ];
 
 function restMessage(seq: number) {
@@ -189,7 +193,7 @@ let queryClient: QueryClient | null = null;
  * `insetBottom` 은 홈 인디케이터가 있는 기기(34)를 흉내 낸다. 제스트의 안전 영역은 기본 0 이라, 0 에서만 재면
  * 「목록 아래에 안전 영역을 다시 더한」 결함은 더한 값이 0 이어서 못 잡는다(이슈의 첫 추정이 바로 그것이었다).
  */
-async function openConversation(insetBottom = 0) {
+async function openConversation(insetBottom = 0, channelId = GENERAL) {
   const safeArea = require('react-native-safe-area-context');
   jest.spyOn(safeArea, 'useSafeAreaInsets').mockReturnValue({
     top: insetBottom > 0 ? 47 : 20,
@@ -209,7 +213,7 @@ async function openConversation(insetBottom = 0) {
     </QueryClientProvider>,
   );
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
-  fireEvent.press(screen.getByTestId(`sidebar-row-channel:${GENERAL}`));
+  fireEvent.press(screen.getByTestId(`sidebar-row-channel:${channelId}`));
   await waitFor(() => expect(screen.getByTestId('timeline-list')).toBeTruthy());
   await waitFor(() =>
     expect(screen.getAllByTestId('message-row').length).toBeGreaterThan(0),
@@ -284,6 +288,8 @@ function gapPieces() {
     listAfter: below(styleOf('conversation-list')),
     /** 도크 판이 자기 위에 더하는 것. 없어야 한다. */
     dockBefore: above(styleOf('composer-dock')),
+    /** 입력창 레일 칸(#4620) — 에이전트가 있는 대화에서만 예약된 칸. 사람만 있는 대화에는 없다(0). */
+    rail: screen.queryByTestId('composer-rail', {includeHiddenElements: true}) === null ? 0 : num(styleOf('composer-rail', true).height),
     /** 「작성 중」 줄 — 쉬는 상태에서도 서 있는 예약 줄. */
     typing: typingFlowHeight(styleOf('composer-typing', true)),
     /** 컴포저가 자기 위에 늘 비워 두는 여백. */
@@ -303,11 +309,13 @@ const keyboardFrame = (height: number) => ({
 });
 
 describe('마지막 행 아래 → 알약 위 — 대화 화면 (#4264)', () => {
-  it.each([0, 34])('쉬는 상태에서 CONV.listPillGap(Buzz 실측 ≈ 20pt)이다 — 화면이 실제로 세우는 조각들의 합 (하단 인셋 %i)', async inset => {
-    await openConversation(inset);
+  it.each([0, 34])('사람만 있는 대화: 쉬는 상태에서 CONV.listPillGap(Buzz 실측 ≈ 20pt)이다 — 화면이 실제로 세우는 조각들의 합 (하단 인셋 %i)', async inset => {
+    await openConversation(inset, ROOM);
     const g = gapPieces();
     // 합이 목표다. 조각 하나가 바뀌면(꼬리 8 을 되돌림 · 예약 줄에 아래 여백 4 를 되돌림 · 컴포저 위 여백을
     // 바꿈 · 목록 판/도크 판에 여백(안전 영역 같은 것)을 얹음) 이 줄이 빨개진다.
+    // 사람만 있는 대화다(#4620): 레일 칸이 없으므로 합은 20 그대로이다.
+    expect(g.rail).toBe(0);
     expect(g.sum).toBe(CONV.listPillGap);
     // 이름이 있는 조각의 값도 따로 단정한다 — 합만 맞고 조각이 서로 상쇄한 채 맞는 것을 막는다.
     expect(g.tail).toBe(CONV.conversationTail);
@@ -318,10 +326,30 @@ describe('마지막 행 아래 → 알약 위 — 대화 화면 (#4264)', () => 
     expect(g.pillBefore).toBe(0);
   });
 
+  it.each([0, 34])('에이전트가 있는 대화: 레일 칸(예약)만큼 더해 CONV.listPillGap + 칸이다 — 칸 밖의 조각은 그대로다 (#4620, 하단 인셋 %i)', async inset => {
+    await openConversation(inset, GENERAL);
+    const g = gapPieces();
+    const slot = railSlotHeight(Dimensions.get('window').fontScale);
+    expect(g.rail).toBe(slot);
+    expect(g.sum).toBe(CONV.listPillGap + slot);
+    // 칸이 더한 것 외의 조각은 사람 대화와 같다(상쇄 없이 이름 붙은 값으로 단정).
+    expect(g.tail).toBe(CONV.conversationTail);
+    expect(g.typing).toBe(TYPING_RESERVE);
+    expect(g.composerTop).toBe(CONV.composerTopAir);
+  });
+
+  it('레일 칸은 도크 흐름의 맨 위 한 줄이다 — 에이전트 대화에서 「작성 중」 위에 선다 (#4620)', async () => {
+    await openConversation(0, GENERAL);
+    const inFlow = hostChildren(screen.getByTestId('composer-dock')).filter(
+      node => flat(node.props.style).position !== 'absolute',
+    );
+    expect(inFlow.map(node => node.props.testID)).toEqual(['composer-rail', 'composer-typing', 'composer-root']);
+  });
+
   it.each([0, 34])('키보드가 올라와도 내려가도 같은 값이다 — 조각들이 키보드를 모른다 (열림·닫힘 같은 간격, 하단 인셋 %i)', async inset => {
     await openConversation(inset);
     const closed = gapPieces();
-    expect(closed.sum).toBe(CONV.listPillGap);
+    expect(closed.sum).toBe(CONV.listPillGap + closed.rail);
     act(() => {
       emitter().emit('keyboardWillShow', keyboardFrame(336));
     });
@@ -350,8 +378,8 @@ describe('마지막 행 아래 → 알약 위 — 대화 화면 (#4264)', () => 
     expect(tail - coachAir).toBe(0);
   });
 
-  it('도크의 쉬는 상태에서 흐름 안의 줄은 「작성 중」 예약 줄과 컴포저뿐이다 — 새 상시 줄이 생기면 합을 다시 정해야 한다', async () => {
-    await openConversation();
+  it('도크의 쉬는 상태에서 흐름 안의 줄은 (에이전트 대화의 레일 칸 ·) 「작성 중」 예약 줄과 컴포저뿐이다 — 새 상시 줄이 생기면 합을 다시 정해야 한다', async () => {
+    await openConversation(0, ROOM);
     const children = hostChildren(screen.getByTestId('composer-dock'));
     // 첫 1회 코치마크(`long-press-hint`)처럼 도크 위에 **뜨는** 것은 절대 배치라 흐름의 높이를 안 먹는다 —
     // 이 단정은 흐름 안의 줄만 센다. 뜨는 것이 흐름에 들어오면(`position` 이 사라지면) 여기가 빨개진다.
@@ -382,30 +410,14 @@ describe('마지막 행 아래 → 알약 위 — 대화 화면 (#4264)', () => 
     expect(TYPING_OVERHANG).toBeLessThan(CONV.composerTopAir);
   });
 
-  it('작업 중 줄은 목록 꼬리가 사라진 만큼 자기 위 여백을 진다 — 마지막 행에 붙지 않는다', () => {
-    render(
-      <AgentActivityBar
-        turns={[
-          {
-            memberId: KIM_AGENT,
-            channelId: GENERAL,
-            state: 'working',
-            source: 'run',
-            runId: 'A1111111-1111-4111-8111-A11111111111',
-            startedAtMs: BASE_MS,
-            headlines: [],
-            lastActivityAtMs: BASE_MS,
-          },
-        ]}
-        directory={DIRECTORY}
-        nowMs={BASE_MS + 3000}
-        live
-      />,
-    );
-    // 꼬리 8 이 지키던 자리다. 대화 화면은 꼬리를 0 으로 줬으므로(`CONV.conversationTail`) 이 줄이 8 을 진다.
-    expect(num(styleOf('composer-working').paddingTop)).toBe(
-      space.sm - CONV.conversationTail,
-    );
+  it('레일 칸은 흐름 안의 고정 높이 상자다 — 위 여백·안쪽 여백 없이 높이 하나가 간격을 지고, 절대 배치가 아니다 (#4620)', () => {
+    render(<ActivityRailSlot rail={null} live reserved directory={DIRECTORY} />);
+    const style = styleOf('composer-rail');
+    expect(num(style.height)).toBe(railSlotHeight(Dimensions.get('window').fontScale));
+    expect(style.position).not.toBe('absolute');
+    // 칸이 마지막 행에서 떨어지는 값은 이 높이 하나다(`CONV.agentRailSlot` × 글자 배율). 따로 얹은 여백이 있으면 합이 둘로 갈라진다.
+    expect(above(style)).toBe(0);
+    expect(below(style)).toBe(0);
   });
 });
 

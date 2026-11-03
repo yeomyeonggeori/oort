@@ -24,6 +24,7 @@ import {
   approvalsPanelState,
   decidableCount,
   decisionNote,
+  receiptSaidInPane,
   settledStatusLine,
   APPROVED_RECEIPT,
   REJECTED_RECEIPT,
@@ -452,5 +453,25 @@ describe("영수증 문장", () => {
     for (const copy of [APPROVED_RECEIPT, REJECTED_RECEIPT]) {
       expect(copy).not.toMatch(/이어지지|취소되었습니다|실행합니다/);
     }
+  });
+});
+
+// 화면 검수 3회차 L5: 영수증 문장이 눈에 보이는 자리는 하나다. 이 함수가 배너가 물러나는 때를 한 곳에서 정한다.
+describe("receiptSaidInPane (L5)", () => {
+  const note = { tone: "neutral", text: APPROVED_RECEIPT, approvalId: "a1" } as const;
+
+  it("같은 승인에 대해 상세 패널이 같은 문장을 말하는 동안만 true다", () => {
+    expect(receiptSaidInPane(note, { approvalId: "a1", line: APPROVED_RECEIPT })).toBe(true);
+  });
+
+  it.each([
+    ["안내가 없다", null, { approvalId: "a1", line: APPROVED_RECEIPT }],
+    ["안내가 어느 승인에도 묶이지 않는다", { tone: "neutral", text: APPROVED_RECEIPT }, { approvalId: "a1", line: APPROVED_RECEIPT }],
+    ["패널이 다른 승인을 보여 준다", note, { approvalId: "a2", line: APPROVED_RECEIPT }],
+    ["패널이 닫혀 있다", note, { approvalId: undefined, line: null }],
+    ["패널에 결과 줄이 없다", note, { approvalId: "a1", line: null }],
+    ["문장이 다르다(이미 결정되어 있었다는 안내)", { ...note, text: "이미 거부로 기록되어 있었어요." }, { approvalId: "a1", line: REJECTED_RECEIPT }],
+  ] as const)("%s: false다(배너가 눈에 보인다)", (_why, n, pane) => {
+    expect(receiptSaidInPane(n, pane)).toBe(false);
   });
 });
