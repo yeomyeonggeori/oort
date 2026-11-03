@@ -58,9 +58,9 @@ import { COMPOSER_MAX_ROWS, useAutoGrow } from "./useAutoGrow";
 import { containsSecretKey } from "@momo/core/features/chat/secretKey";
 import { SecretKeyBlockNotice } from "@/features/chat/SecretKeyBlockNotice";
 import { hasLocalCardHost } from "@/features/chat/localCards";
-import { COMPOSER_OFFLINE_COPY } from "@momo/core/features/chat/composerCopy";
 import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
 import { useOffline } from "@/features/common/useOffline";
+import { useComposerBlockedLine } from "@/features/common/blockedLines";
 import { ScheduleDialog } from "@/features/scheduled/ScheduleDialog";
 import { ScheduleSendMenu } from "@/features/scheduled/ScheduleSendMenu";
 import { ScheduledBanner } from "@/features/scheduled/ScheduledBanner";
@@ -145,6 +145,8 @@ export function ThreadComposer({
   // 이 입력창에는 오프라인 판정이 없었다(채널 입력창만 읽었다). 예약을 달면서 같은 훅을 연결한다: 보내기와 ▾가
   // 같은 판정으로 함께 흐려지고, 채널 입력창과 같은 오프라인 줄이 안내 블록에 선다(예약 UI 명세 0.4·1.9).
   const offline = useOffline();
+  // 막았을 때 위 한 줄과 보내기 단추의 설명이 말하는 문장(#5239): 막은 원인에 따라 연결 상태 모델이 고른다(채널 입력창과 같은 훅).
+  const blockedLine = useComposerBlockedLine();
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const justComposedRef = useRef(false);
   const isMobile = useIsMobileShell();
@@ -388,7 +390,7 @@ export function ThreadComposer({
             className="px-3 pb-2 text-meta text-warn"
             data-testid="thread-composer-offline"
           >
-            {COMPOSER_OFFLINE_COPY}
+            {blockedLine}
           </p>
         )}
         {error && (
@@ -617,7 +619,7 @@ export function ThreadComposer({
                   onClick={submit}
                   aria-busy={schedule.busy || undefined}
                   aria-label="답글 보내기"
-                  title={offline ? COMPOSER_OFFLINE_COPY : (attachBlockCopy ?? "답글 보내기")}
+                  title={offline ? blockedLine : (attachBlockCopy ?? "답글 보내기")}
                   data-testid="thread-composer-send"
                   className={cn(
                     "tap-target flex size-icon-button shrink-0 items-center justify-center bg-primary text-on-primary press hover:opacity-90 focus-visible:focus-ring focus-ring-on-primary",

@@ -34,6 +34,7 @@ import {
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { useOffline } from "@/features/common/useOffline";
+import { useApprovalBlockedLine } from "@/features/common/blockedLines";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import {
@@ -510,6 +511,7 @@ function ApprovalBody({
   // 끊겼다는 이유로 컨트롤을 감추면 할 수 있는 결정을 못 하고 만료될 수 있다.
   // 폰의 `useOnline.ts` 가 같은 판단을 NetInfo로 한다.
   const offline = useOffline();
+  const blockedLine = useApprovalBlockedLine();
 
   const resolvedStatus = resolveApprovalStatus(receipt?.status ?? null, card.status);
   // 기한 (#3738). 카드 메시지는 스냅샷이라 서버가 승인을 만료시켜도 이 카드의
@@ -586,6 +588,7 @@ function ApprovalBody({
     // 아는 것이 스냅샷뿐이므로, 스냅샷이 대기이면 여기서는 대기다.
     pendingHere: !settled,
     offline,
+    offlineText: blockedLine,
     approvalsProvided,
     unsupportedText: `${serverSurface("approvals").absentReason} ${
       serverSurface("approvals").fallback

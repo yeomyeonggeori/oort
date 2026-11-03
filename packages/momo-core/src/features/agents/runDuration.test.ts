@@ -155,6 +155,48 @@ describe("runDurations: 대기 → 작업 → 총, 모르는 시각은 메우지
   });
 });
 
+describe("분 단위만 말하기 (초 시계가 없는 표면, #4658)", () => {
+  const queued = facts({});
+  const running = facts({
+    phase: "running",
+    status: "running",
+    leaseState: "live",
+    claimedAtMs: T + 12 * SEC,
+    startedAtMs: T + 20 * SEC,
+    lastEventAtMs: T + 3 * MIN,
+  });
+
+  it("1분이 안 된 구간은 초 숫자 없이 「방금」·「중」으로 말한다 — 시계 없이 그린 「40초째」는 거짓으로 남는다", () => {
+    // 기본(웹)은 그대로 초를 말한다.
+    expect(runPhaseDetail(queued, T + 40 * SEC)).toBe("40초째 기다려요");
+    expect(runPhaseDetail(queued, T + 40 * SEC, { minutesOnly: true })).toBe("방금 들어왔어요");
+    expect(runDurationBreakdown(queued, T + 40 * SEC, true)).toBe("대기 중");
+    expect(runWorkingText(running, T + 3 * MIN + 40 * SEC)).toBe("3분째 · 마지막 보고 40초 전");
+    expect(runWorkingText(running, T + 3 * MIN + 40 * SEC, true)).toBe("3분째 · 마지막 보고 방금");
+    // 시트가 부르는 길(`runPhaseDetail`)도 같은 말이다.
+    expect(runPhaseDetail(running, T + 3 * MIN + 40 * SEC)).toBe("3분째 · 마지막 보고 40초 전");
+    expect(runPhaseDetail(running, T + 3 * MIN + 40 * SEC, { minutesOnly: true })).toBe("3분째 · 마지막 보고 방금");
+    expect(runDurationBreakdown(running, T + 40 * SEC)).toBe("대기 12초 → 작업 20초째");
+    expect(runDurationBreakdown(running, T + 40 * SEC, true)).toBe("대기 12초 → 작업 중");
+  });
+
+  it("1분부터는 기본과 같은 말이다(분 숫자는 같다). 끝난 run의 길이는 이 옵션과 무관하다", () => {
+    const at = T + 7 * MIN + 30 * SEC;
+    expect(runPhaseDetail(queued, at, { minutesOnly: true })).toBe(runPhaseDetail(queued, at));
+    expect(runWorkingText(running, at, true)).toBe(runWorkingText(running, at));
+    expect(runDurationBreakdown(running, at, true)).toBe(runDurationBreakdown(running, at));
+    const done = facts({
+      phase: "succeeded",
+      status: "succeeded",
+      claimedAtMs: T + 12 * SEC,
+      startedAtMs: T + 14 * SEC,
+      finishedAtMs: T + 192 * SEC,
+    });
+    expect(runDurationBreakdown(done, T + 99 * MIN, true)).toBe("대기 12초 → 작업 2분 58초 → 총 3분 12초");
+    expect(runPhaseDetail(done, T + 99 * MIN, { minutesOnly: true })).toBe("3분 12초 걸림");
+  });
+});
+
 describe("runPhaseDetail이 같은 말을 쓴다 (표면 공용)", () => {
   it("작업 중: 「12분째 · 마지막 보고 1분 전」", () => {
     const f = facts({

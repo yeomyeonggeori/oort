@@ -49,6 +49,7 @@
     "gate:attachment": "npm run build && node gates/gate-attachment.mjs",
     "gate:image-card": "npm run build && node gates/gate-image-card.mjs",
     "gate:refresh-tabs": "npm run build && node gates/gate-refresh-tabs.mjs",
+    "gate:dead-token": "npm run build && node gates/gate-dead-token.mjs",
     "capture:attachment": "npm run build && ATTACH_GATE_SHOTS=1 node gates/gate-attachment.mjs",
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
