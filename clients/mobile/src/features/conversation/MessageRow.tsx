@@ -142,6 +142,7 @@ import {messageRowKey} from './rowViewability';
 import {NO_UNFURLS} from './useMessageUnfurls';
 import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {MessageEditorSheet} from './MessageEditorSheet';
+import {SendFailureActions} from './SendFailureActions';
 import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
 import {ApprovalAvatarPreview} from './ApprovalAvatarPreview';
@@ -4226,7 +4227,8 @@ export function WorkingRow({
  *   - 정상 전송: 서버 사본과 같은 해부·같은 색. 글자 한 줄도 더하지 않는다.
  *   - 오래 걸리는 전송(`SEND_SLOW_MS` 이상): 작은 시계 하나만. 흐름에 자리를 차지하지 않는다 —
  *     머리 행은 시각 바로 오른쪽(이름 줄 끝)에, 이어지는 행은 아바타 칸에 절대 배치로 앉는다.
- *   - 실패: 예전 그대로(흐린 본문 + 「전송 실패」 + 「다시 보내기」).
+ *   - 실패: 흐린 본문 + 짧은 「전송 실패」 + 아이콘 둘(#5210): 새로고침(다시 보내기, 같은 멱등키 재전송)과
+ *     빨간 X(지우기, 이 기기의 대기분만 — 코어 `discardPending`, 서버 호출 없음). 웹 `PendingRow` 와 같은 문법이다.
  *   - 글 없이 사진·파일만 보낸 메시지(#4294)는 서버 사본이 본문 칸을 접으므로(`hasRenderableBody`)
  *     메아리도 접는다. 빈 말풍선이 서 있다가 교체 때 사라지면 그것이 곧 높이 변화다.
  *   - **머리 행은 기기 시계의 보낸 시각을 그린다**(planner 결정 — #1083 「지어내지 않는다」를 메아리
@@ -4240,6 +4242,7 @@ export function PendingRow({
   quote,
   quoteAttachmentCount,
   onResend,
+  onDiscard,
   arrivalSurface = ARRIVAL_SURFACE_CHANNEL,
 }: {
   pending: PendingMessage;
@@ -4261,8 +4264,11 @@ export function PendingRow({
   quote?: QuoteBlockModel | null;
   quoteAttachmentCount?: number;
   onResend?: (clientMsgId: string) => void;
+  /** 보내지 못한 이 행을 이 기기에서 지운다(#5210). 없으면 X 를 그리지 않는다. */
+  onDiscard?: (clientMsgId: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
   const failed = pending.status === 'failed';
 
   // 오래 걸리는 전송만 시계 하나로 알린다(#4455). 시작 시각은 보낸 시각이다(`sendSlow.ts`).
@@ -4403,17 +4409,11 @@ export function PendingRow({
         ) : null}
         {failed ? (
           <View style={styles.failedRow}>
-            <Text style={styles.failedText}>전송 실패</Text>
-            {onResend ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="다시 보내기"
-                onPress={() => onResend(pending.clientMsgId)}
-                style={({pressed}) => [styles.resend, pressed && styles.pressed]}
-                testID="pending-resend">
-                <Text style={styles.resendLabel}>다시 보내기</Text>
-              </Pressable>
-            ) : null}
+            <Text style={styles.failedText}>{formatMessage('timeline.send.failed')}</Text>
+            <SendFailureActions
+              onResend={onResend ? () => onResend(pending.clientMsgId) : undefined}
+              onDiscard={onDiscard ? () => onDiscard(pending.clientMsgId) : undefined}
+            />
           </View>
         ) : null}
         {/* 이어지는 행에는 시각이 없다 — 시계는 아바타 칸에 절대 배치로 앉는다(레이아웃 비용 0). */}

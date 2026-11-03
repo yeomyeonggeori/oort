@@ -60,21 +60,80 @@ pub struct CreatedInvite {
     pub code: String,
 }
 
+/// The one switch for guest invites (ADR-0128 D1, ADR-0219 GS-0).
+///
+/// `false` until an invite can name the channels a guest may see. While it is
+/// off, no door mints, copies or spends an invite with the `guest` role, and
+/// every door that refuses one asks [`invite_role_paused`], which reads this
+/// constant and nothing else.
+///
+/// It is a constant on purpose: no environment variable, setting or API turns it
+/// on. It changes with the work that adds channel-scoped invites (ADR-0219 GS-8),
+/// and `guest_invites_stay_paused_until_channel_scoped_invites_exist` is the test
+/// that notices if it moves any earlier.
+pub const GUEST_INVITES_ENABLED: bool = false;
+
+/// `error.code` of the refusal every door answers with while
+/// [`GUEST_INVITES_ENABLED`] is off. A client branches on it; the sentence may be
+/// reworded, the code may not.
+pub const GUEST_INVITES_PAUSED_CODE: &str = "guest_invites_paused";
+
+/// The sentence behind [`GUEST_INVITES_PAUSED_CODE`], one string for all doors so
+/// they cannot answer the same refusal in different words.
+pub const GUEST_INVITES_PAUSED_MESSAGE: &str =
+    "guest invites are paused until channel-scoped invites are available";
+
+/// Is an invite carrying `role` refused right now — whether it is being minted,
+/// copied from another invite, or spent? The single question every door asks.
+///
+/// `role` is a canonical lower-case spelling (what `normalized_invite_role`
+/// returns, or what `role::text` reads back from the column).
+pub fn invite_role_paused(role: &str) -> bool {
+    !GUEST_INVITES_ENABLED && role == "guest"
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum InviteSpecInvalid {
-    #[error("invite role must be admin, member, or guest")]
+    #[error("invite role must be admin or member")]
     Role,
+    /// `400` with [`GUEST_INVITES_PAUSED_CODE`]: the request names the `guest` role
+    /// while [`GUEST_INVITES_ENABLED`] is off.
+    #[error("{}", GUEST_INVITES_PAUSED_MESSAGE)]
+    GuestInvitesPaused,
     #[error("maxUses must be between 1 and 10000")]
     MaxUses,
     #[error("expiresAtMs must be in the future")]
     ExpiresAtMs,
 }
 
+impl InviteSpecInvalid {
+    /// The stable machine code (`error.code` on the wire) of the refusals a client
+    /// branches on, `None` for the ones told by status and sentence alone. Listed
+    /// variant by variant — no catch-all — so a refusal added later has to decide
+    /// whether it names itself.
+    pub fn code(self) -> Option<&'static str> {
+        match self {
+            InviteSpecInvalid::GuestInvitesPaused => Some(GUEST_INVITES_PAUSED_CODE),
+            InviteSpecInvalid::Role
+            | InviteSpecInvalid::MaxUses
+            | InviteSpecInvalid::ExpiresAtMs => None,
+        }
+    }
+}
+
 /// Swift `normalizedRole` (:465-473). `owner` is absent by design and migration
 /// 003 refuses it at the column too (`invite_code_role_ck`): an invite link is a
-/// self-service path, and no self-service path may mint an owner.
+/// self-service path, and no self-service path may mint an owner. `guest` is
+/// understood but refused while [`GUEST_INVITES_ENABLED`] is off, with its own
+/// answer so a caller can tell "paused" from "not a role".
+///
+/// Every door that mints from a request — the REST route and the action resolver
+/// both — normalises through here, so this is where a paused role stops.
 pub fn normalized_invite_role(role: Option<&str>) -> Result<&'static str, InviteSpecInvalid> {
     let value = role.unwrap_or("member").trim().to_ascii_lowercase();
+    if invite_role_paused(&value) {
+        return Err(InviteSpecInvalid::GuestInvitesPaused);
+    }
     match value.as_str() {
         "admin" => Ok("admin"),
         "member" => Ok("member"),
@@ -207,6 +266,12 @@ fn invite_from_row(row: InviteRow) -> InviteCode {
 /// `expires_at_ms` of `None` falls through to the column default via `COALESCE`,
 /// exactly as Swift does, so "no expiry supplied" and "seven days" stay one
 /// decision made in one place (the migration).
+///
+/// A paused role ([`invite_role_paused`]) never reaches the statement. Callers
+/// get their role from [`normalized_invite_role`], which answers it as a `400`
+/// first; this is the backstop for a caller that skipped that step, and it fails
+/// closed and loudly (a protocol error, so a `500` that is logged) rather than
+/// minting.
 pub async fn create_invite(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -215,6 +280,11 @@ pub async fn create_invite(
     expires_at_ms: Option<i64>,
     created_by: Uuid,
 ) -> Result<CreatedInvite, DbError> {
+    if invite_role_paused(role) {
+        return Err(DbError::from(sqlx::Error::Protocol(
+            GUEST_INVITES_PAUSED_MESSAGE.to_string(),
+        )));
+    }
     let row: CreatedInviteRow = sqlx::query_as(&format!(
         "WITH generated AS ( \
            SELECT momo_generate_invite_code() AS raw_code \
@@ -322,6 +392,11 @@ pub enum InviteMutationInvalid {
     NotFoundOrRevoked,
     #[error("invite code is already consumed")]
     AlreadyConsumed,
+    /// `400` with [`GUEST_INVITES_PAUSED_CODE`]: [`regenerate_invite`] copies the
+    /// role of the code it replaces, so a paused role is refused here too. Only
+    /// regenerate answers it; the old code is left exactly as it was.
+    #[error("{}", GUEST_INVITES_PAUSED_MESSAGE)]
+    GuestInvitesPaused,
 }
 
 /// Member-self redeem refusals (Swift `redeem` :425-429 / :360).
@@ -333,6 +408,10 @@ pub enum InviteRedeemInvalid {
     NotMember,
     #[error("member is banned from this workspace")]
     Banned,
+    /// `400` with [`GUEST_INVITES_PAUSED_CODE`]: a usable code whose role is paused
+    /// is refused before it is spent.
+    #[error("{}", GUEST_INVITES_PAUSED_MESSAGE)]
+    GuestInvitesPaused,
 }
 
 /// Outcome of [`revoke_invite`]. `newly_revoked` is Swift's `newly_revoked`
@@ -440,11 +519,28 @@ pub async fn revoke_invite(
 ///
 /// Role, `max_uses`, and `metadata` are copied. Expiry resets to seven days,
 /// matching Swift (`now() + interval '7 days'`), not the leftover TTL.
+///
+/// Because the role is copied, a regenerate is a mint: a paused role
+/// ([`invite_role_paused`]) is refused before anything is written, and the old
+/// code is neither revoked nor replaced.
 pub async fn regenerate_invite(
     conn: &mut PgConnection,
     invite_id: Uuid,
     created_by: Uuid,
 ) -> Result<Result<CreatedInvite, InviteMutationInvalid>, DbError> {
+    let source_role: Option<String> = sqlx::query_scalar(
+        "SELECT role::text \
+           FROM invite_code \
+          WHERE id = $1 \
+            AND revoked_at IS NULL",
+    )
+    .bind(invite_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if source_role.as_deref().is_some_and(invite_role_paused) {
+        return Ok(Err(InviteMutationInvalid::GuestInvitesPaused));
+    }
+
     let row: Option<CreatedInviteRow> = sqlx::query_as(&format!(
         "WITH locked AS ( \
            SELECT * \
@@ -535,6 +631,24 @@ pub async fn redeem_invite_for_member(
         return Ok(Err(InviteRedeemInvalid::Banned));
     }
 
+    // A usable code whose role is paused is refused here, on the code alone and
+    // before the statement that spends it. A code that is already dead keeps the
+    // generic answer below, as it does on the public join.
+    let usable_role: Option<String> = sqlx::query_scalar(
+        "SELECT i.role::text \
+           FROM invite_code i \
+          WHERE i.code_hash = momo_invite_code_hash($1) \
+            AND i.revoked_at IS NULL \
+            AND i.expires_at > now() \
+            AND i.used_count < i.max_uses",
+    )
+    .bind(code)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if usable_role.as_deref().is_some_and(invite_role_paused) {
+        return Ok(Err(InviteRedeemInvalid::GuestInvitesPaused));
+    }
+
     let row: Option<RedeemedInviteRow> = sqlx::query_as(&format!(
         "WITH matched AS ( \
            SELECT i.id \
@@ -623,10 +737,6 @@ mod tests {
             "admin"
         );
         assert_eq!(
-            normalized_invite_role(Some("guest")).expect("guest"),
-            "guest"
-        );
-        assert_eq!(
             normalized_invite_role(Some("owner")),
             Err(InviteSpecInvalid::Role)
         );
@@ -634,6 +744,68 @@ mod tests {
             normalized_invite_role(Some("platform_admin")),
             Err(InviteSpecInvalid::Role)
         );
+        assert_eq!(
+            InviteSpecInvalid::Role.to_string(),
+            "invite role must be admin or member",
+            "the list of roles a request may name leaves out the paused one"
+        );
+    }
+
+    /// The switch itself. It is off until channel-scoped invites exist
+    /// (ADR-0128 D1, ADR-0219 GS-0); whoever turns it on has to change this
+    /// assertion in the same commit, which is the point of having it.
+    #[test]
+    fn guest_invites_stay_paused_until_channel_scoped_invites_exist() {
+        // `black_box` keeps the compiler from folding the constant away, so the
+        // assertion reads the value the guards read rather than a literal.
+        assert!(!std::hint::black_box(GUEST_INVITES_ENABLED));
+        assert!(invite_role_paused("guest"));
+        assert!(!invite_role_paused("member"));
+        assert!(!invite_role_paused("admin"));
+    }
+
+    /// The request-side door: a guest request is refused with its own answer, in
+    /// any spelling the normaliser accepts for the other roles, and it is a
+    /// different answer from "not a role".
+    #[test]
+    fn a_guest_request_is_refused_with_its_own_answer() {
+        for spelling in ["guest", " Guest ", "GUEST"] {
+            assert_eq!(
+                normalized_invite_role(Some(spelling)),
+                Err(InviteSpecInvalid::GuestInvitesPaused),
+                "{spelling:?}"
+            );
+        }
+        assert_eq!(
+            InviteSpecInvalid::GuestInvitesPaused.code(),
+            Some("guest_invites_paused")
+        );
+        assert_eq!(InviteSpecInvalid::Role.code(), None);
+        assert_eq!(InviteSpecInvalid::MaxUses.code(), None);
+        assert_eq!(InviteSpecInvalid::ExpiresAtMs.code(), None);
+        // The other two roles are untouched by the pause.
+        assert_eq!(normalized_invite_role(Some("member")), Ok("member"));
+        assert_eq!(normalized_invite_role(Some("admin")), Ok("admin"));
+    }
+
+    /// Four doors, one refusal: the same code and the same sentence, so a client
+    /// that learned it on one door reads it on the others.
+    #[test]
+    fn every_door_refuses_a_paused_role_in_the_same_words() {
+        let sentences = [
+            InviteSpecInvalid::GuestInvitesPaused.to_string(),
+            InviteMutationInvalid::GuestInvitesPaused.to_string(),
+            InviteRedeemInvalid::GuestInvitesPaused.to_string(),
+            crate::join::JoinRejection::GuestInvitesPaused.to_string(),
+        ];
+        for sentence in &sentences {
+            assert_eq!(sentence, GUEST_INVITES_PAUSED_MESSAGE);
+        }
+        assert_eq!(
+            crate::join::JoinRejection::GuestInvitesPaused.code(),
+            Some(GUEST_INVITES_PAUSED_CODE)
+        );
+        assert_eq!(GUEST_INVITES_PAUSED_CODE, "guest_invites_paused");
     }
 
     #[test]

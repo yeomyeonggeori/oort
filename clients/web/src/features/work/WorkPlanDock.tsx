@@ -31,9 +31,10 @@ import { useChannelWorkPlan } from "./useChannelWorkPlan";
 //   null이다). 자리표시자도 「계획 없음」 문장도 없다. 변경·PR 아이콘과 오른쪽 탭 패널은 owner가 이번 묶음에서
 //   잘라냈다(2026-10-26): 「모두 보기」는 **기존 작업 세션 패널**의 세션 상세로 간다(거기에 계획 칸이 이미 있다).
 //   새 상세 화면을 만들지 않는다.
-// - 단추 안의 숫자는 **남은 단계 수**다(레퍼런스의 남은 수 배지). 다 끝나면 숫자 대신 체크다. 배지는 새 대비
-//   쌍을 만들지 않으려고 중립 그릇(`bg-muted-soft`)이고, 신호색(`--signal`)은 이 표면에 쓰지 않는다.
-// - 팝오버 머리의 「N단계 중 M단계」는 끝난 단계 수(M)다. 「지금 단계」는 서버가 running이라고 말하는 세션에서만
+// - 단추 안의 숫자는 **남은 단계 수**다(레퍼런스의 남은 수). 다 끝나면 숫자 대신 체크다. 숫자는 옆 단추(멤버 수,
+//   `ChannelContextControls`)와 **같은 문법**의 맨 숫자다: 한 머리 줄에서 수를 두 모양(채운 원 배지 ↔ 맨 숫자)으로
+//   그리지 않는다(#5174 L4). 새 대비 쌍도 만들지 않고 신호색(`--signal`)도 이 표면에 쓰지 않는다.
+// - 팝오버 머리의 「N단계 중 M단계 완료」는 끝난 단계 수(M)다(「완료」가 빠지면 「M번째 단계를 하는 중」으로 읽힌다, #5174 L3). 「지금 단계」는 서버가 running이라고 말하는 세션에서만
 //   선다: 멈춘 세션은 한 줄(「지금은 돌고 있지 않아요」)로 정직하게 말한다.
 // - 움직임이 없다(새 모션 0). 지금 단계의 점선 원은 **정적 표지**다: 점선 스피너를 돌리지 않는다.
 // - 클래스는 정적 문자열이고 달라지는 색은 `data-*` 변형이 고른다(직접 문구 장부가 JSX 식 안의 문자열을 문구
@@ -50,6 +51,8 @@ export interface WorkPlanDockViewProps {
   onSelect: (id: string) => void;
   /** 「모두 보기」: 기존 작업 세션 화면을 연다. */
   onOpenAll: () => void;
+  /** 방금 고른 세션의 계획을 읽는 중이다: 목록은 같은 대화에서 마지막으로 읽은 값이다(#5166). */
+  switching?: boolean;
 }
 
 /** 독의 그림. 순수하다: 같은 입력이면 같은 마크업이다(시험이 이 마크업을 그대로 올린다). */
@@ -60,13 +63,14 @@ export function WorkPlanDockView({
   maybeStale,
   onSelect,
   onOpenAll,
+  switching = false,
 }: WorkPlanDockViewProps) {
   const formatMessage = useFormatMessage();
   const [open, setOpen] = useState(false);
   // 「모두 보기」가 다른 표면을 연 뒤에는 캐럿이 그쪽에 있어야 한다: 팝오버가 닫히며 단추로 돌려주지 않는다.
   const handedOff = useRef(false);
   const titleId = useId();
-  const copy = workPlanCopy(progress, { maybeStale }, formatMessage);
+  const copy = workPlanCopy(progress, { maybeStale, switching }, formatMessage);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       {/* 툴팁은 트리거 **바깥**이고 방향은 아래다(머리 단추 규칙, #4591). 이름과 툴팁이 같은 글이다. */}
@@ -84,11 +88,7 @@ export function WorkPlanDockView({
             ) : (
               <>
                 <ListChecks className="size-4" aria-hidden="true" />
-                <span
-                  className="rounded-full bg-muted-soft px-1 text-timestamp text-ink"
-                  data-numeric
-                  data-testid="work-plan-remaining"
-                >
+                <span data-numeric data-testid="work-plan-remaining">
                   {progress.remaining}
                 </span>
               </>
@@ -135,9 +135,12 @@ export function WorkPlanDockView({
             </Select>
           </label>
         )}
+        {/* 스크롤하는 목록은 초점을 받아야 방향키·PageDown으로 읽는다(계획은 50개까지 온다, #5166). 이름은 머리 제목이다. */}
         <ol
           aria-labelledby={titleId}
-          className="flex max-h-pane flex-col overflow-y-auto"
+          aria-busy={switching || undefined}
+          tabIndex={0}
+          className="flex max-h-pane flex-col overflow-y-auto focus-visible:focus-ring"
           data-testid="work-plan-steps"
         >
           {progress.steps.map((step, index) => (
@@ -222,6 +225,7 @@ function ConnectedWorkPlanDock({
       options={plan.options}
       selectedId={plan.selectedId}
       maybeStale={plan.maybeStale}
+      switching={plan.switching}
       onSelect={plan.select}
       onOpenAll={() => {
         // 같은 오른쪽 자리를 쓰는 에이전트 작업 패널이 열려 있으면 작업 세션 패널이 서지 못한다.

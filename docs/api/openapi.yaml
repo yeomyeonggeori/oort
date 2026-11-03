@@ -1332,6 +1332,15 @@ paths:
         wait for the proof. This door cannot hide which addresses have
         accounts: an unused address creates one.
 
+        Guest invites are paused until invites can name the channels a guest
+        may see (ADR-0128 D1, ADR-0219 GS-0). A usable code whose role is
+        `guest` is refused on the code alone, with 400 and `error.code`
+        `guest_invites_paused`: before the ban check and before the account
+        gate, so an address with an account and one without get the same
+        answer, no password is compared and no guess is spent, and nothing is
+        written. A guest code that is already expired, revoked or exhausted
+        keeps the answer such a code has always had (410 / 409).
+
         The join stands in line with every membership change for the workspace's
         membership lock (shared) and does not wait for it: when a change holds the
         lock, or is queued for it, the join answers 503 with `Retry-After` before it
@@ -1364,7 +1373,8 @@ paths:
             that breaks the ADR-0215 D2 rule answers `error.code`
             `password_too_short`, `password_too_long` or `password_invalid_char`
             (a NUL character); an empty or absent one is the code-less
-            "password is required".
+            "password is required". A usable code whose role is `guest`
+            answers `error.code` `guest_invites_paused`.
           content:
             application/json:
               schema:
@@ -1571,6 +1581,11 @@ paths:
         The raw code is returned exactly once in this 201 body. The durable
         record is `sha256(raw)`. Examples and samples must never carry a live
         code.
+
+        Guest invites are paused until invites can name the channels a guest
+        may see (ADR-0128 D1, ADR-0219 GS-0): a request whose `role` is
+        `guest` is refused with 400 and `error.code` `guest_invites_paused`,
+        and nothing is written. `member` and `admin` are unchanged.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -1586,7 +1601,9 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/CreateInviteResponse"}
         "400":
-          description: Role, maxUses, or expiresAtMs rejected.
+          description: >
+            Role, maxUses, or expiresAtMs rejected. A `guest` role answers
+            `error.code` `guest_invites_paused`.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -1621,7 +1638,10 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/RedeemInviteResponse"}
         "400":
-          description: Code is invalid, expired, exhausted, revoked, or already redeemed.
+          description: >
+            Code is invalid, expired, exhausted, revoked, or already redeemed;
+            or, for a usable code whose role is `guest`, `error.code`
+            `guest_invites_paused` (the code is not spent).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -1750,6 +1770,11 @@ paths:
         Copies role, maxUses, and metadata. Expiry resets to seven days. The
         previous code is immediately invalid. The new raw code is returned
         once; examples and samples must never carry a live code.
+
+        The replacement carries the same role, so regenerating a `guest` code
+        is refused like creating one (guest invites are paused, ADR-0128 D1 and
+        ADR-0219 GS-0): 400 `guest_invites_paused`, and the old code is left as
+        it was (not revoked). An admin can still revoke it.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -1760,6 +1785,11 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/CreateInviteResponse"}
+        "400":
+          description: The code's role is `guest`; `error.code` is `guest_invites_paused`.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
           description: Caller is not a workspace owner/admin.
@@ -17854,7 +17884,12 @@ components:
                 …/dev-access/credentials`: a wrong password, or an account that
                 has none); 409 `dev_credential_limit` (20 live card tokens
                 already); 400 `dev_field_not_allowed` (a developer-token send with
-                a key outside its allow-list, or a `type` other than `text`). The
+                a key outside its allow-list, or a `type` other than `text`);
+                ADR-0128 D1 and ADR-0219 GS-0 (#5199, guest invites paused until
+                invites can name channels): 400 `guest_invites_paused` (the
+                `guest` role asked for by `POST …/invites`, or carried by a usable
+                code given to `POST …/invites/{inviteId}/regenerate`, `POST
+                …/invites/redeem` or `POST /v1/join`). The
                 approval receipt status `dev_cannot_decide` is a receipt's `status`,
                 not an `error.code`.
 

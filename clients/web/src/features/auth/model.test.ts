@@ -316,6 +316,33 @@ describe("failure copy", () => {
     ).toBeUndefined();
   });
 
+  // Guest invites are paused (ADR-0128 D1 / ADR-0219 GS-0): the server refuses a guest
+  // code with a 400 that names itself. It is a verdict on the code, so it is shown
+  // beside the code field; it must not be mistaken for a field-shape 400 (which stays
+  // on the account step), and it must not tell the person to ask for a new link,
+  // because no new guest link can be made.
+  it("shows a paused guest code beside the code field, without asking for a new link", () => {
+    const paused = new ApiError(
+      400,
+      "guest invites are paused until channel-scoped invites are available",
+      "guest_invites_paused"
+    );
+    expect(joinFailureBelongsOnGateway(paused)).toBe(true);
+    const failure = joinFailureCopy(paused);
+    expect(failure.onGateway).toBe(true);
+    expect(failure.suggestSignIn).toBe(false);
+    expect(failure.retryable).toBe(false);
+    expect(failure.message).toContain("게스트 초대");
+    expect(failure.message).toContain("멈춰");
+    expect(failure.message).not.toContain("새 초대 링크");
+    // The bare 400 and a 400 with some other code stay where they were.
+    expect(joinFailureBelongsOnGateway(new ApiError(400, "invite code is invalid"))).toBe(false);
+    expect(
+      joinFailureBelongsOnGateway(new ApiError(400, "nope", "some_other_code"))
+    ).toBe(false);
+    expect(joinFailureCopy(new ApiError(400, "invite code is invalid")).onGateway).toBeUndefined();
+  });
+
   // ADR-0215 D2 (#4593): the join password is held to the same new-password rule
   // as the claim screen's, and the server names the rule it broke. Before this a
   // 400 fell to the generic line and sent the person to ask an admin for a new

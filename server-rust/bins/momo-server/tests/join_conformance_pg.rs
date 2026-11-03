@@ -3494,3 +3494,279 @@ async fn a_membership_change_that_meets_a_join_waits_for_it_and_has_the_last_wor
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// 8. a paused role is judged on the code alone (ADR-0128 D1, ADR-0219 GS-0)
+// ---------------------------------------------------------------------------
+//
+// Guest invites are paused until channel-scoped invites exist. A code with that role
+// can no longer be made through the API, so the tests plant one directly as the
+// superuser (the column still allows the role), the way a row from before the pause
+// looks.
+
+/// A live code with the guest role. Returns the raw code and the invite id.
+async fn plant_guest_invite(
+    su: &PgPool,
+    workspace: Uuid,
+    created_by: Uuid,
+    max_uses: i32,
+) -> (String, Uuid) {
+    let code = format!("paused-guest-{}", Uuid::new_v4());
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO invite_code \
+           (workspace_id, code_hash, code_preview, role, max_uses, expires_at, created_by) \
+         VALUES ($1, momo_invite_code_hash($2), right($2, 6), 'guest', $3, \
+                 now() + interval '1 day', $4) \
+         RETURNING id",
+    )
+    .bind(workspace)
+    .bind(&code)
+    .bind(max_uses)
+    .bind(created_by)
+    .fetch_one(su)
+    .await
+    .expect("plant a guest invite");
+    (code, id)
+}
+
+fn paused_body() -> Value {
+    json!({"error": {
+        "message": "guest invites are paused until channel-scoped invites are available",
+        "code": "guest_invites_paused",
+    }})
+}
+
+async fn human_rows_for(su: &PgPool, email: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*)::bigint FROM human WHERE email = $1")
+        .bind(email)
+        .fetch_one(su)
+        .await
+        .expect("count humans")
+}
+
+/// A usable guest code is refused on the code alone. The refusal comes before the ban
+/// check and before the existing-account gate (#4625), so an address with no account,
+/// one with an account — whatever password comes with it — one in every other state and
+/// a banned one are all given the same answer; no password guess is spent against any
+/// of them; and nothing is written. A guest code that is already dead keeps the answer
+/// a dead code has.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_paused_role_is_judged_on_the_code_alone() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-paused").await;
+    let base = start_server(
+        app_pool,
+        RateLimitConfig {
+            password_guess_per_account_limit: 3,
+            // The per-IP gate is its own test; here it must not be what answers.
+            per_ip_limit: 0,
+            ..RateLimitConfig::default()
+        },
+    )
+    .await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+    let (guest_code, guest_invite) =
+        plant_guest_invite(&su, fixture.workspace, fixture.owner, 5).await;
+
+    // -- control: an address with no account -------------------------------
+    let fresh = format!("paused-new-{}@join.test", Uuid::new_v4());
+    let control = post_join(&http, &base, join_payload(&guest_code, &fresh)).await;
+    assert_eq!(control.status, 400, "{}", control.body);
+    assert_eq!(control.body, paused_body());
+    assert_eq!(
+        human_rows_for(&su, &fresh).await,
+        0,
+        "a refused join creates no account"
+    );
+
+    // -- the same answer for an address that has an account ----------------
+    let active = seed_account(
+        &su,
+        fixture.workspace,
+        "paused-active",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let before = footprint(&su, fixture.workspace, active.id, guest_invite).await;
+    // More wrong guesses than the account's budget (three), and the right password
+    // once: none of them may be a 401, a 429 or a 200.
+    for typed in [
+        WRONG_PASSWORD,
+        WRONG_PASSWORD,
+        WRONG_PASSWORD,
+        WRONG_PASSWORD,
+        MEMBER_PASSWORD,
+    ] {
+        let asked = post_join(
+            &http,
+            &base,
+            join_payload_with_password(&guest_code, &active.email, typed),
+        )
+        .await;
+        assert_eq!(
+            (asked.status, &asked.body),
+            (control.status, &control.body),
+            "an address with an account must be told what an address without one is told"
+        );
+    }
+    assert_eq!(
+        footprint(&su, fixture.workspace, active.id, guest_invite).await,
+        before,
+        "a refused join leaves the account, its sessions, the redemptions, the audit \
+         trail and the invite's use count as they were"
+    );
+
+    // -- …and for every other state an account can be in -------------------
+    for status in ["suspended", "invited", "deleted"] {
+        let account = seed_account(
+            &su,
+            fixture.workspace,
+            &format!("paused-{status}"),
+            "member",
+            Stored::Password(MEMBER_PASSWORD),
+        )
+        .await;
+        sqlx::query("UPDATE member SET status = $2::member_status WHERE id = $1")
+            .bind(account.id)
+            .bind(status)
+            .execute(&su)
+            .await
+            .expect("set the status");
+        let asked = post_join(
+            &http,
+            &base,
+            join_payload_with_password(&guest_code, &account.email, WRONG_PASSWORD),
+        )
+        .await;
+        assert_eq!(
+            (asked.status, &asked.body),
+            (control.status, &control.body),
+            "{status} account"
+        );
+    }
+
+    // -- …and for a banned address, with or without an account -------------
+    let banned_account = seed_account(
+        &su,
+        fixture.workspace,
+        "paused-banned",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let banned_new = format!("paused-banned-new-{}@join.test", Uuid::new_v4());
+    for email in [&banned_account.email, &banned_new] {
+        sqlx::query(
+            "INSERT INTO workspace_ban (workspace_id, email_norm, created_by, reason) \
+             VALUES ($1, $2, $3, 'paused-role conformance')",
+        )
+        .bind(fixture.workspace)
+        .bind(email)
+        .bind(fixture.owner)
+        .execute(&su)
+        .await
+        .expect("ban");
+        let asked = post_join(
+            &http,
+            &base,
+            join_payload_with_password(&guest_code, email, WRONG_PASSWORD),
+        )
+        .await;
+        assert_eq!(
+            (asked.status, &asked.body),
+            (control.status, &control.body),
+            "a banned address is refused for the code, not for the ban"
+        );
+    }
+    assert_eq!(human_rows_for(&su, &banned_new).await, 0);
+
+    // -- nothing was spent anywhere ----------------------------------------
+    let used: i32 = sqlx::query_scalar("SELECT used_count FROM invite_code WHERE id = $1")
+        .bind(guest_invite)
+        .fetch_one(&su)
+        .await
+        .expect("used_count");
+    assert_eq!(used, 0, "a refused join does not spend the code");
+    let redemptions: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM invite_code_redemption WHERE invite_code_id = $1",
+    )
+    .bind(guest_invite)
+    .fetch_one(&su)
+    .await
+    .expect("count redemptions");
+    assert_eq!(redemptions, 0);
+
+    // -- no password guess was spent: the account's budget (three) is whole -
+    let (member_code, _) =
+        issue_invite(&http, &base, &token, fixture.workspace, "member", 20).await;
+    for guess in 1..=3 {
+        let asked = post_join(
+            &http,
+            &base,
+            join_payload_with_password(&member_code, &active.email, WRONG_PASSWORD),
+        )
+        .await;
+        assert_eq!(
+            asked.status, 401,
+            "guess {guess} on an ordinary code is inside a budget the guest code did not touch: {}",
+            asked.body
+        );
+    }
+    let spent = post_join(
+        &http,
+        &base,
+        join_payload_with_password(&member_code, &active.email, WRONG_PASSWORD),
+    )
+    .await;
+    assert_eq!(
+        spent.status, 429,
+        "the fourth is over the budget, which proves it counts: {}",
+        spent.body
+    );
+
+    // -- a dead guest code keeps the answer a dead code has ----------------
+    for (kind, set, expected, message) in [
+        (
+            "revoked",
+            "revoked_at = now(), revoked_by = created_by",
+            410,
+            "invite code is revoked",
+        ),
+        (
+            "expired",
+            "created_at = now() - interval '2 hours', expires_at = now() - interval '1 hour'",
+            410,
+            "invite code is expired",
+        ),
+        (
+            "spent",
+            "used_count = max_uses",
+            409,
+            "invite code is exhausted",
+        ),
+    ] {
+        let (code, id) = plant_guest_invite(&su, fixture.workspace, fixture.owner, 2).await;
+        sqlx::query(&format!("UPDATE invite_code SET {set} WHERE id = $1"))
+            .bind(id)
+            .execute(&su)
+            .await
+            .expect("kill the planted code");
+        let asked = post_join(
+            &http,
+            &base,
+            join_payload(&code, &format!("dead-{kind}-{}@join.test", Uuid::new_v4())),
+        )
+        .await;
+        assert_eq!(asked.status, expected, "{kind}: {}", asked.body);
+        assert_eq!(
+            asked.body["error"]["message"], message,
+            "{kind}: the code's own state is judged before its role"
+        );
+        assert!(asked.body["error"].get("code").is_none(), "{kind}");
+    }
+}

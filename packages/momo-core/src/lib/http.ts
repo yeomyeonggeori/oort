@@ -135,6 +135,118 @@ export function parseRetryAfterSeconds(value: string | null | undefined): number
   return Number.isSafeInteger(seconds) ? seconds : undefined;
 }
 
+// ---- REST outcome observation (#5219, #5201 S-A; additive) -------------------
+//
+// "Can the server be reached?" is not something a socket can answer: the realtime
+// rail can be up while REST is down (an api container restarting) and the other
+// way round. Every REST exchange already funnels through `fetchWithDeadline`, so
+// this is the one place that sees all of them. It only REPORTS what happened to a
+// subscriber (features/connection/restSignal.ts folds the reports into a verdict);
+// it decides nothing, and a request behaves exactly as before whether anyone is
+// listening or not. A subscriber that throws is ignored: observing a request must
+// never change what the request resolves to.
+
+interface RestOutcomeBase {
+  /** Epoch ms when the exchange ended. */
+  readonly at: number;
+  /** Upper-case HTTP method. */
+  readonly method: string;
+  /** The URL without its query and fragment: which request this was. */
+  readonly target: string;
+}
+
+/** The server answered. `code` is the error envelope's `error.code`, only when the body carried one (5xx only). */
+export interface RestResponseOutcome extends RestOutcomeBase {
+  readonly kind: "response";
+  readonly status: number;
+  readonly code?: string;
+}
+
+/** Nothing answered: the deadline blew or the connection failed (a `NetworkError` was thrown). */
+export interface RestNetworkOutcome extends RestOutcomeBase {
+  readonly kind: "network";
+  readonly failure: NetworkFailure;
+}
+
+export type RestOutcome = RestResponseOutcome | RestNetworkOutcome;
+
+const restObservers = new Set<(outcome: RestOutcome) => void>();
+
+/**
+ * Hear how every REST exchange ends. Returns the unsubscribe. A request the caller
+ * itself cancelled is not an outcome and is never reported (a cancelled query is
+ * not a broken network).
+ */
+export function subscribeRestOutcome(observer: (outcome: RestOutcome) => void): () => void {
+  restObservers.add(observer);
+  return () => {
+    restObservers.delete(observer);
+  };
+}
+
+/**
+ * Tell every subscriber how an exchange ended. `build` makes the report lazily and
+ * the whole path cannot throw: with nobody listening nothing is built, and a report
+ * that cannot be built or a subscriber that throws leaves the request exactly as
+ * it was (a throw here would land in `fetchWithDeadline`'s own `catch` and turn an
+ * answered request into a `NetworkError`).
+ */
+function reportRestOutcome(build: () => RestOutcome): void {
+  if (restObservers.size === 0) return;
+  let outcome: RestOutcome;
+  try {
+    outcome = build();
+  } catch {
+    return; // The report could not be made; the request itself is unaffected.
+  }
+  for (const observer of [...restObservers]) {
+    try {
+      observer(outcome);
+    } catch {
+      // A broken subscriber must not turn an answered request into a failed one.
+    }
+  }
+}
+
+function restTarget(url: string): string {
+  return url.replace(/[?#][\s\S]*$/, "");
+}
+
+function restMethod(init: RequestInit): string {
+  return (init.method ?? "GET").toUpperCase();
+}
+
+/** `error.code` of the envelope, the same reading `api.ts` `parseError` uses; undefined when absent or empty. */
+function restErrorCode(response: HttpResponse): string | undefined {
+  const code = response.jsonOrNull<{ error?: { code?: unknown } }>()?.error?.code;
+  return typeof code === "string" && code !== "" ? code : undefined;
+}
+
+function reportResponse(url: string, init: RequestInit, response: HttpResponse): void {
+  reportRestOutcome(() => {
+    // Only a 5xx can be "the server did not really answer"; skip parsing every other body.
+    const code = response.status >= 500 ? restErrorCode(response) : undefined;
+    return {
+      kind: "response",
+      at: Date.now(),
+      method: restMethod(init),
+      target: restTarget(url),
+      status: response.status,
+      ...(code === undefined ? {} : { code }),
+    };
+  });
+}
+
+function reportNetworkFailure(url: string, init: RequestInit, failure: NetworkFailure): void {
+  reportRestOutcome(() => ({
+    kind: "network",
+    at: Date.now(),
+    method: restMethod(init),
+    target: restTarget(url),
+    failure,
+  }));
+}
+
 /**
  * One request, one deadline, body included.
  *
@@ -168,16 +280,22 @@ export async function fetchWithDeadline(
     // Still under the same signal: a body that stalls after the headers is the
     // same infinite wait, and it aborts on the same deadline.
     const text = await res.text();
-    return httpResponse(
+    const response = httpResponse(
       res.status,
       res.ok,
       text,
       res.headers?.get?.("Date") ?? null,
       res.headers?.get?.("Retry-After") ?? null
     );
+    reportResponse(url, init, response);
+    return response;
   } catch (error) {
-    if (timedOut) throw new NetworkError("timeout", timeoutMs, error);
+    if (timedOut) {
+      reportNetworkFailure(url, init, "timeout");
+      throw new NetworkError("timeout", timeoutMs, error);
+    }
     if (callerSignal?.aborted) throw error; // the caller cancelled; not a failure
+    reportNetworkFailure(url, init, "unreachable");
     throw new NetworkError("unreachable", timeoutMs, error);
   } finally {
     clearTimeout(timer);

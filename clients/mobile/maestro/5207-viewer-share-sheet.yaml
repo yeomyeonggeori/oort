@@ -1,0 +1,71 @@
+appId: app.momo.ios
+name: "5207-viewer-share-sheet"
+---
+# 5207-viewer-share-sheet — 사진 뷰어의 [공유]로 연 iOS 공유 시트를 닫으려고 시트 위쪽을 누르면 그 탭이 뷰어의 사진에 새어 조작(‹ 뒤로·[저장]·[공유])이 숨던 결함 (#5207, 같은 부류).
+#
+# 뷰어는 RN `Modal` — 자기 네이티브 창이라 셸의 공유 시트 막이(`AppShell`)가 덮지 못한다. 뷰어의 Modal 안에도 막이(`ShareSheetTouchShield`)가 한 번 서야 한다
+# (`src/features/attachments/AttachmentViewer.tsx`). 사진을 한 번 누르면 조작이 같이 숨는 것(#4297)이 새는 탭의 증거다.
+#
+# 표면 `-momoMeasure PHOTO-VIEWER-SOLO`(`measure/photoViewer.tsx`) + 사진 스텁(`measure/photo-stub.mjs`, 포트 18993 — 다른 워크트리와 겹치면 `PHOTO_STUB_PORT` 와 `-momoPhotoStub host:port`):
+#
+#   node clients/mobile/measure/photo-stub.mjs &
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure PHOTO-VIEWER-SOLO -RCT_jsLocation 127.0.0.1:$METRO
+#   maestro --udid <udid> test clients/mobile/maestro/5207-viewer-share-sheet.yaml
+#
+# 시트는 화면 아래 약 43%를 덮는다(iPhone 17 Pro, iOS 26.5). 위쪽 25% 는 뷰어의 사진이다. 시뮬레이터 실측: 막이가 없으면 시트를 닫는 탭 뒤 `attachment-viewer-back` 이 사라졌고,
+# 시트를 아래로 쓸어 닫으면(탭이 새지 않는다) 그대로였다. 막이를 세운 뒤에는 두 방법 모두 그대로다.
+- extendedWaitUntil:
+    visible:
+      id: "attachment-item"
+    timeout: 60000
+# 디버그 빌드의 LogBox 띠가 컴포저 위를 덮고 탭을 먹는다(`subflows/dismiss-dev-logbox.yaml`).
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- extendedWaitUntil:
+    visible:
+      id: "attachment-preview-image"
+    timeout: 30000
+- tapOn:
+    id: "attachment-item"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer"
+    timeout: 10000
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-back"
+
+# ---- A. 시트 위쪽(뷰어의 사진)을 눌러 닫는다 — 탭이 사진에 새지 않아 조작이 그대로다 ------------------------------------------------
+- tapOn:
+    id: "attachment-viewer-share"
+- extendedWaitUntil:
+    visible: "복사"
+    timeout: 30000
+- waitForAnimationToEnd
+- tapOn:
+    point: "50%,25%"
+- extendedWaitUntil:
+    notVisible: "복사"
+    timeout: 10000
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-back"
+- assertVisible:
+    id: "attachment-viewer-share"
+
+# ---- B. 같은 시트를 아래로 쓸어 닫는다 — 이쪽은 원래 새지 않는다(대조) ----------------------------------------------------------------
+- tapOn:
+    id: "attachment-viewer-share"
+- extendedWaitUntil:
+    visible: "복사"
+    timeout: 30000
+- waitForAnimationToEnd
+- swipe:
+    start: 50%,62%
+    end: 50%,98%
+    duration: 400
+- extendedWaitUntil:
+    notVisible: "복사"
+    timeout: 10000
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-back"

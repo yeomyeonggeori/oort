@@ -24,6 +24,7 @@ import {OnlineRollCall} from '../features/presence/OnlineRollCall';
 import {usePhoneNeedsMe} from '../features/inbox/useNeedsMe';
 import {useDirectory} from '../features/workspace/queries';
 import {EdgeSwipeBack} from '../nav/EdgeSwipeBack';
+import {ShareSheetTouchShield} from '../lib/ShareSheetTouchShield';
 import {
   INITIAL_NAV,
   navReducer,
@@ -120,6 +121,8 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
       <PushProvider>
         <RealtimeProvider>
           <ExpressionProvider><Shell /></ExpressionProvider>
+          {/* iOS 공유 시트가 떠 있는 동안(과 막 걷힌 직후) 뒤 화면으로 새는 터치를 삼킨다 — 시트를 닫는 탭이 시트 뒤의 줄·단추를 누르지 않게(#5207). 평소엔 아무것도 그리지 않는다. */}
+          <ShareSheetTouchShield />
           {/* M3 알림 미리 안내(#2820). 권한이 아직 안 물어졌을 때만 셸 위에 선다. */}
           <NotificationPrimerGate />
           {/* QR 연결 직후 기기 키 등록과 맥 승인 대기(#3026). M3 뒤에 선다. */}

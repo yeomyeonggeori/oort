@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NetworkError, fetchWithDeadline, parseRetryAfterSeconds } from "./http";
+import {
+  NetworkError,
+  fetchWithDeadline,
+  parseRetryAfterSeconds,
+  subscribeRestOutcome,
+  type RestOutcome,
+} from "./http";
 
 // The bug this file exists for (MOMO-609 / parity gate G-1): a connect attempt
 // against a name the webview could not resolve left `fetch` pending, so the
@@ -234,5 +240,90 @@ describe("Retry-After", () => {
     const res = await fetchWithDeadline("http://server.test/v1/ping");
     expect(res.status).toBe(429);
     expect(res.retryAfterSeconds).toBeUndefined();
+  });
+});
+
+// #5219 (additive): `fetchWithDeadline` reports how each exchange ended so the connection model can tell
+// "the server cannot be reached" from "the socket dropped". Reporting must never change a request.
+describe("REST outcome observation", () => {
+  const heard: RestOutcome[] = [];
+  const stops: Array<() => void> = [];
+  afterEach(() => {
+    heard.length = 0;
+    while (stops.length > 0) stops.pop()?.();
+  });
+  const listen = () => stops.push(subscribeRestOutcome((outcome) => heard.push(outcome)));
+
+  it("reports an answer (with the 5xx error.code and no query), a timeout and an unreachable host, and not the caller's own cancel", async () => {
+    listen();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true })));
+    await fetchWithDeadline("http://server.test/v1/ping?page=2#frag", { method: "post" });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: { code: "drive_unavailable", message: "no drive" } }, 503))
+    );
+    await fetchWithDeadline("http://server.test/v1/files");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>502</html>", { status: 502 })));
+    await fetchWithDeadline("http://server.test/v1/html");
+    vi.stubGlobal("fetch", neverAnswers());
+    await fetchWithDeadline("http://server.test/v1/slow", {}, 20).catch(() => null);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("Failed to fetch");
+      })
+    );
+    await fetchWithDeadline("http://server.test/v1/down").catch(() => null);
+    vi.stubGlobal("fetch", neverAnswers());
+    const caller = new AbortController();
+    const cancelled = fetchWithDeadline("http://server.test/v1/cancelled", { signal: caller.signal }, 5_000);
+    caller.abort();
+    await cancelled.catch(() => null);
+
+    expect(heard.map(({ kind, method, target }) => ({ kind, method, target }))).toEqual([
+      { kind: "response", method: "POST", target: "http://server.test/v1/ping" },
+      { kind: "response", method: "GET", target: "http://server.test/v1/files" },
+      { kind: "response", method: "GET", target: "http://server.test/v1/html" },
+      { kind: "network", method: "GET", target: "http://server.test/v1/slow" },
+      { kind: "network", method: "GET", target: "http://server.test/v1/down" },
+    ]);
+    expect(heard[0]).toMatchObject({ status: 200 });
+    expect(heard[0]).not.toHaveProperty("code");
+    expect(heard[1]).toMatchObject({ status: 503, code: "drive_unavailable" });
+    expect(heard[2]).toMatchObject({ status: 502 });
+    expect(heard[2]).not.toHaveProperty("code");
+    expect(heard[3]).toMatchObject({ failure: "timeout" });
+    expect(heard[4]).toMatchObject({ failure: "unreachable" });
+  });
+
+  it("changes nothing about the request: a throwing subscriber, no subscriber and an unsubscribed one all see the same answer", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ seq: 7 })));
+    stops.push(
+      subscribeRestOutcome(() => {
+        throw new Error("a broken subscriber");
+      })
+    );
+    const withBroken = await fetchWithDeadline("http://server.test/v1/ping");
+    expect(withBroken.json<{ seq: number }>()).toEqual({ seq: 7 });
+
+    const unsubscribe = subscribeRestOutcome((outcome) => heard.push(outcome));
+    unsubscribe();
+    await fetchWithDeadline("http://server.test/v1/ping");
+    expect(heard).toEqual([]);
+
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ error: { code: "x" } }, 409)));
+    const refused = await fetchWithDeadline("http://server.test/v1/conflict");
+    expect(refused.status).toBe(409);
+  });
+
+  it("changes nothing even when the report itself cannot be made (an address that is not a string)", async () => {
+    // A subscriber is listening, so the report is built; building it throws on this address. Without the
+    // guard that throw lands in fetchWithDeadline's own catch and the answered request becomes a NetworkError.
+    listen();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ seq: 9 })));
+    const odd = new URL("http://server.test/v1/odd") as unknown as string;
+    const answered = await fetchWithDeadline(odd);
+    expect(answered.json<{ seq: number }>()).toEqual({ seq: 9 });
+    expect(heard).toEqual([]);
   });
 });

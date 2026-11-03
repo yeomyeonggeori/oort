@@ -1,4 +1,5 @@
 import type { RealtimeStatus } from "../../lib/realtimeEvents";
+import { HEALED_MS, RETRY_WINDOW_MS, SUSTAINED_DOWN_MS } from "../connection/thresholds";
 
 // =============================================================================
 // What the shell says when the realtime rail is not up (goal B8 B2).
@@ -33,26 +34,13 @@ export interface ConnectionAlert {
   canRetry: boolean;
 }
 
-/** How long a rail has to stay down before the banner is worth the space. */
-export const SUSTAINED_DOWN_MS = 15_000;
-
-/**
- * How long a reconnect has to HOLD before the down-clock is forgiven.
- *
- * Without it a flapping rail (up two seconds, down twelve, repeat) resets the
- * dwell on every cycle and never reaches the threshold, which is the one
- * session that most needs the banner. Five seconds is long enough that a real
- * recovery clears it on the first try and short enough that a genuine second
- * outage minutes later still starts from zero.
- */
-export const HEALED_MS = 5_000;
-
-/**
- * How long the banner waits for a hand-pressed reconnect before saying it did
- * not work. A dial that lands unmounts the banner, so this timer only ever
- * fires for one that did not.
- */
-export const RETRY_WINDOW_MS = 6_000;
+// The clocks behind this banner now live in one place, `features/connection/thresholds.ts`
+// (#5219): how long a down rail waits before the banner is worth the space
+// (`SUSTAINED_DOWN_MS`), how long a reconnect has to HOLD before the down-clock is
+// forgiven (`HEALED_MS`), and how long the banner waits for a hand-pressed reconnect
+// before saying it did not work (`RETRY_WINDOW_MS`). The names and values are the
+// banner's own and unchanged; this file only points at them.
+export { HEALED_MS, RETRY_WINDOW_MS, SUSTAINED_DOWN_MS };
 
 export interface ConnectionAlertInput {
   /** `navigator.onLine === false`. */
