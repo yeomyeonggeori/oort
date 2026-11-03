@@ -221,6 +221,16 @@ pub fn emit_click<R: Runtime>(app: &AppHandle<R>, click: &NotificationClick) -> 
     app.emit(NOTIFICATION_CLICK_EVENT, click)
 }
 
+/// A banner this shell waits on was clicked: bring the window back first — since #5196 the red button only
+/// puts it away, and a click on a mention's banner that opens nothing would be a banner that lies — then
+/// tell the page where to go.
+pub fn deliver_click<R: Runtime>(app: &AppHandle<R>, click: &NotificationClick) {
+    crate::main_window::bring_forward(app);
+    if let Err(error) = emit_click(app, click) {
+        eprintln!("[oort] notification click not delivered: {error}");
+    }
+}
+
 /// The bundle a banner is attributed to. The same choice the plugin makes for a plain banner:
 /// a dev run has no bundle of its own, so macOS is told it is Terminal.
 pub fn application_identity(is_dev: bool, identifier: &str) -> &str {
@@ -274,11 +284,7 @@ pub fn show_with_click<R: Runtime>(
         &WAITS,
         click,
         move || wait_for_click(&title, &body),
-        move |click| {
-            if let Err(error) = emit_click(&emitter, &click) {
-                eprintln!("[oort] notification click not delivered: {error}");
-            }
-        },
+        move |click| deliver_click(&emitter, &click),
         move || {
             let _ =
                 crate::notification::show_plain(&fallback_app, fallback_title, Some(fallback_body));
@@ -311,6 +317,35 @@ mod tests {
             Ok(())
         };
         (spawn, rx)
+    }
+
+    /// A clicked banner brings the window back (it may be put away, #5196) and tells the page once,
+    /// with the id and route the page gave.
+    #[test]
+    fn a_clicked_banner_brings_the_window_back_and_reaches_the_page_once() {
+        use tauri::Listener;
+
+        let app = tauri::test::mock_app();
+        let (tx, rx) = mpsc::channel();
+        app.listen_any(NOTIFICATION_CLICK_EVENT, move |event| {
+            tx.send(event.payload().to_owned()).unwrap();
+        });
+        let before = crate::main_window::forwarded();
+        deliver_click(app.handle(), &click());
+        assert_eq!(crate::main_window::forwarded(), before + 1);
+        let got: serde_json::Value =
+            serde_json::from_str(&rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap())
+                .unwrap();
+        assert_eq!(
+            got,
+            serde_json::json!({
+                "id": "n-abc123-1",
+                "target": "/c/00000000-0000-7000-8000-00000000020a?msg=ab"
+            })
+        );
+        assert!(rx
+            .recv_timeout(std::time::Duration::from_millis(50))
+            .is_err());
     }
 
     // ---- shape of the request ------------------------------------------------

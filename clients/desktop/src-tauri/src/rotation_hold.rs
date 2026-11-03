@@ -25,13 +25,22 @@
 // The webview still brackets its rotation (the core's retry loop around the
 // attempts), which stays harmless.
 //
-// Scope, stated plainly: this covers closing the window (the red button,
-// Cmd+W), which on this single-window app is also how it quits via the window.
-// It does NOT cover Cmd+Q / the app menu's Quit: that is AppKit `terminate:`,
+// Scope, stated plainly (#5196 changed it): the hold only guards a close that ENDS the app. Since the
+// red button / Cmd+W puts the window away and keeps the app while the menu-bar icon is up and someone
+// is signed in (`main_window.rs`, the one place that decides what a close means), the webview is alive
+// through that close and its rotation finishes by itself — nothing to hold. A close with nothing to stay
+// for (the login screen, no icon yet, another OS than macOS) ends the app, and that one still waits:
+// `hide_then_destroy_after_rotation`.
+// It does NOT cover Cmd+Q / the app menu's Quit / the tray's 「oort 종료」: that is AppKit `terminate:`,
 // which tao 0.35 answers from `applicationWillTerminate` straight into
 // `RunEvent::Exit` (tao-0.35.3/src/platform_impl/macos/app_delegate.rs:131),
 // with no `ExitRequested` to veto — and blocking there would deadlock, because
 // the webview's IPC to `keychain_store_refresh_token` needs the main thread.
+// That used to be the rare way out (people closed the window); with the app staying it is the usual one,
+// so a Quit that lands inside a rotation (the access token lives 15 minutes, `momo-auth` `issue.rs`:
+// a request is in the air for a fraction of a second about every quarter hour) is the exposure this
+// file can no longer cover. Guarding it needs a quit of our own instead of AppKit's, which is a
+// decision for its own issue.
 
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::Duration;
@@ -178,33 +187,29 @@ pub fn session_rotation_end(hold: tauri::State<'_, RotationHold>) {
     hold.end();
 }
 
-/// `on_window_event` for `CloseRequested` on the main window.
-pub fn on_close_requested<R: tauri::Runtime>(
+/// A close that ends the app while a rotation is open (`CloseDecision::Wait`, chosen by
+/// `main_window::decide_close`): the window is put away at once — to the person the app has closed —
+/// and destroyed when the rotation ends or `CLOSE_WAIT_CAP` passes. That was the whole of this module's
+/// `CloseRequested` handler before #5196; deciding *whether* a close ends the app is `main_window.rs`'s.
+pub fn hide_then_destroy_after_rotation<R: tauri::Runtime>(
     window: &tauri::Window<R>,
     api: &tauri::CloseRequestApi,
 ) {
     use tauri::Manager;
-    let Some(hold) = window.try_state::<RotationHold>() else {
-        return;
-    };
-    match hold.defer_close() {
-        CloseDecision::CloseNow => {}
-        CloseDecision::AlreadyWaiting => api.prevent_close(),
-        CloseDecision::Wait => {
-            api.prevent_close();
-            let _ = window.hide();
-            let window = window.clone();
-            std::thread::spawn(move || {
-                if let Some(hold) = window.try_state::<RotationHold>() {
-                    if !hold.wait_idle(CLOSE_WAIT_CAP) {
-                        eprintln!("[oort] closing with a refresh rotation still open after {CLOSE_WAIT_CAP:?}");
-                    }
-                }
-                // `destroy`, not `close`: no second CloseRequested to answer.
-                let _ = window.destroy();
-            });
+    api.prevent_close();
+    let _ = window.hide();
+    let window = window.clone();
+    std::thread::spawn(move || {
+        if let Some(hold) = window.try_state::<RotationHold>() {
+            if !hold.wait_idle(CLOSE_WAIT_CAP) {
+                eprintln!(
+                    "[oort] closing with a refresh rotation still open after {CLOSE_WAIT_CAP:?}"
+                );
+            }
         }
-    }
+        // `destroy`, not `close`: no second CloseRequested to answer.
+        let _ = window.destroy();
+    });
 }
 
 #[cfg(test)]

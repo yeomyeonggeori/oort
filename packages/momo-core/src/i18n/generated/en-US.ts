@@ -678,6 +678,12 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "desktop.tray.closeNotice": [
+    {
+      "type": 0,
+      "value": "Closing the window keeps oort in the menu bar, so you still get notifications"
+    }
+  ],
   "desktop.tray.more": [
     {
       "type": 2,
@@ -705,6 +711,146 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "Open oort"
+    }
+  ],
+  "desktop.tray.readAll": [
+    {
+      "type": 0,
+      "value": "Mark all as read"
+    }
+  ],
+  "desktop.tray.remainApprovals": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approval is still waiting for you"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approvals are still waiting for you"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "desktop.tray.remainBoth": [
+    {
+      "type": 6,
+      "value": "approvals",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approval"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " approvals"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " and "
+    },
+    {
+      "type": 6,
+      "value": "panes",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pane"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " panes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    },
+    {
+      "type": 0,
+      "value": " are still waiting for you"
+    }
+  ],
+  "desktop.tray.remainPanes": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " pane is still waiting for you"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " panes are still waiting for you"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "desktop.tray.running": [

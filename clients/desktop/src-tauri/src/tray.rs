@@ -34,6 +34,18 @@
 // (`rotation_hold.rs` says what that path does and does not wait for), instead of a second exit
 // path of our own.
 //
+// Since #5196 the menu is also what keeps the app reachable once the red button has put the window
+// away (`main_window.rs`): 「oort 열기」 brings it back, 「oort 종료」 ends the app. That is why this
+// state also answers one question for the close decision — `TrayState::keeps_app_running`: the icon is
+// up AND the page's app shell is up (someone is signed in). With no one signed in there is nothing to
+// keep running for, and the red button ends the app as it always did.
+//
+// 「모두 읽음 처리」 (#5195) is a pick the PAGE carries out (it holds the read state and the session);
+// it is done where the person is, so unlike every other pick it does not bring the window forward. The
+// line under it says what it leaves: approvals and answers still waiting close only by a decision, so
+// the dot may stay after the pick, and that line (already in the person's language, like every word
+// here) is the reason.
+//
 // `runtime-unverified`: the status item itself, the template rendering on light and dark bars, the
 // menu on screen and the quit click need a real Mac. The tests below measure everything that does
 // not: the menu model, the input limits, the menu ids, the event payload and the two bitmaps.
@@ -42,7 +54,10 @@
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, Runtime};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Emitter, Runtime};
+
+use crate::main_window;
 
 /// Emitted when the person picks a menu entry that needs the page. Kept under the old `momo:`
 /// prefix like every other event channel, so the page's listener name never has to change.
@@ -68,6 +83,7 @@ const MAX_ID_BYTES: usize = 64;
 
 const ID_OPEN: &str = "tray.open";
 const ID_NEW_MESSAGE: &str = "tray.new-message";
+const ID_READ_ALL: &str = "tray.read-all";
 const ID_RUN_PREFIX: &str = "tray.run.";
 
 // ---- what the page sends -----------------------------------------------------------------------
@@ -82,6 +98,8 @@ pub struct TrayLabels {
     /// The line shown instead of the jobs when none is running.
     pub none: String,
     pub new_message: String,
+    /// 「모두 읽음 처리」 (#5195).
+    pub read_all: String,
     pub open: String,
     pub quit: String,
 }
@@ -107,11 +125,18 @@ pub struct TrayStatus {
     pub unread: u32,
     /// Whether 「새 메시지」 can do anything right now (the app shell is up).
     pub compose: bool,
+    /// Whether 「모두 읽음 처리」 has anything to do: an unread mention or DM exists (#5195). The page
+    /// derives this from the very list its pick will mark, so the item is enabled exactly when picking
+    /// it does something.
+    pub read_all: bool,
     pub labels: TrayLabels,
     /// At most [`MAX_RUN_ROWS`], most urgent first.
     pub running: Vec<TrayRunRow>,
     /// The line that says how many more jobs run than the rows show; `None` when all are listed.
     pub more: Option<String>,
+    /// What 「모두 읽음 처리」 leaves: the approvals and answers that close only by a decision (#5195).
+    /// A dimmed line under that item; `None` when nothing is left.
+    pub remaining: Option<String>,
 }
 
 // ---- what the shell draws ----------------------------------------------------------------------
@@ -139,6 +164,9 @@ pub enum Entry {
 pub struct MenuModel {
     /// The icon with the dot.
     pub unread: bool,
+    /// The page's app shell is up (someone is signed in): 「새 메시지」 and 「모두 읽음 처리」 can act, and
+    /// closing the window may leave the app running (`TrayState::keeps_app_running`).
+    pub compose: bool,
     pub entries: Vec<Entry>,
 }
 
@@ -196,6 +224,7 @@ pub fn build_model(status: &TrayStatus) -> Result<MenuModel, &'static str> {
         &labels.running,
         &labels.none,
         &labels.new_message,
+        &labels.read_all,
         &labels.open,
         &labels.quit,
     ] {
@@ -203,8 +232,8 @@ pub fn build_model(status: &TrayStatus) -> Result<MenuModel, &'static str> {
             return Err("invalid-tray-label");
         }
     }
-    if let Some(more) = &status.more {
-        if !label_ok(more) {
+    for line in [&status.more, &status.remaining].into_iter().flatten() {
+        if !label_ok(line) {
             return Err("invalid-tray-label");
         }
     }
@@ -252,6 +281,17 @@ pub fn build_model(status: &TrayStatus) -> Result<MenuModel, &'static str> {
             text: labels.new_message.clone(),
             enabled: status.compose,
         },
+        Entry::Item {
+            id: ID_READ_ALL.to_owned(),
+            text: labels.read_all.clone(),
+            enabled: status.compose && status.read_all,
+        },
+    ]);
+    // Right under the item it explains.
+    if let Some(remaining) = &status.remaining {
+        entries.push(Entry::Note(remaining.clone()));
+    }
+    entries.extend([
         Entry::Separator,
         Entry::Item {
             id: ID_OPEN.to_owned(),
@@ -263,14 +303,15 @@ pub fn build_model(status: &TrayStatus) -> Result<MenuModel, &'static str> {
     ]);
     Ok(MenuModel {
         unread: status.unread > 0,
+        compose: status.compose,
         entries,
     })
 }
 
 // ---- the way back ------------------------------------------------------------------------------
 
-/// What the page is told when a menu entry that needs it is picked. `「oort 열기」` is not here: the
-/// shell brings the window forward by itself and the page has nothing to do.
+/// What the page is told by the menu-bar side. `「oort 열기」` is not here: the shell brings the window
+/// forward by itself and the page has nothing to do.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "action", rename_all = "kebab-case")]
 pub enum TrayAction {
@@ -278,6 +319,12 @@ pub enum TrayAction {
     NewMessage,
     /// A running job was picked; `id` is the row id the page sent.
     Run { id: String },
+    /// 「모두 읽음 처리」 (#5195): the page marks the unread mentions and DMs read. The window stays
+    /// where it is.
+    ReadAll,
+    /// Not a pick: the red button put the window away into the menu bar (`main_window.rs`, #5196). The
+    /// page says once that the app is still here.
+    WindowHidden,
 }
 
 /// What a picked menu id means.
@@ -285,8 +332,17 @@ pub enum TrayAction {
 pub enum Click {
     /// Bring the window forward; no event.
     Open,
-    /// Bring the window forward and tell the page.
+    /// Tell the page, and bring the window forward unless the action is done where the person is.
     Action(TrayAction),
+}
+
+impl Click {
+    /// Every pick is a way back into the app, so it brings the window forward — except 「모두 읽음 처리」
+    /// (#5195): clearing the dot from the menu bar must not pop a window up in front of whatever the
+    /// person is doing, least of all one they just put away.
+    pub fn brings_window_forward(&self) -> bool {
+        !matches!(self, Click::Action(TrayAction::ReadAll))
+    }
 }
 
 /// A menu id this module made, read back. Anything else is `None` and is ignored.
@@ -294,6 +350,7 @@ pub fn parse_menu_id(id: &str) -> Option<Click> {
     match id {
         ID_OPEN => Some(Click::Open),
         ID_NEW_MESSAGE => Some(Click::Action(TrayAction::NewMessage)),
+        ID_READ_ALL => Some(Click::Action(TrayAction::ReadAll)),
         _ => {
             let row = id.strip_prefix(ID_RUN_PREFIX)?;
             row_id_ok(row).then(|| Click::Action(TrayAction::Run { id: row.to_owned() }))
@@ -301,24 +358,16 @@ pub fn parse_menu_id(id: &str) -> Option<Click> {
     }
 }
 
-/// The main window to the front: shown, un-minimized, focused, and the app un-hidden (Cmd+H).
-fn focus_main_window<R: Runtime>(app: &AppHandle<R>) {
-    #[cfg(target_os = "macos")]
-    let _ = app.show();
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-    }
-}
-
-/// A pick in the tray menu. Every pick brings the window forward (the menu is a way back into the
-/// app); the ones that need the page also tell it, as a global emit like the other events.
+/// A pick in the tray menu. Every pick but 「모두 읽음 처리」 brings the window forward (the menu is a
+/// way back into the app, and the window may be put away since #5196); the ones that need the page also
+/// tell it, as a global emit like the other events.
 pub fn handle_menu_event<R: Runtime>(app: &AppHandle<R>, id: &str) {
     let Some(click) = parse_menu_id(id) else {
         return;
     };
-    focus_main_window(app);
+    if click.brings_window_forward() {
+        main_window::bring_forward(app);
+    }
     if let Click::Action(action) = click {
         if let Err(error) = app.emit(TRAY_ACTION_EVENT, &action) {
             eprintln!("[oort] tray action not delivered: {error}");
@@ -362,6 +411,24 @@ pub fn change_for(last: Option<&MenuModel>, next: &MenuModel) -> Change {
 pub struct TrayState {
     #[cfg(target_os = "macos")]
     applied: std::sync::Mutex<Applied>,
+    /// The app can live without its window: the icon is up and the page's app shell is up. Written where
+    /// the model it follows is stored (`apply`), read by the close decision (`main_window.rs`).
+    staying: AtomicBool,
+}
+
+impl TrayState {
+    /// Whether closing the window may leave the app running: the menu-bar icon exists (the only way back
+    /// besides the Dock) and someone is signed in (otherwise nothing is left to run for). Always `false`
+    /// off macOS, where no icon is drawn.
+    pub fn keeps_app_running(&self) -> bool {
+        self.staying.load(Ordering::SeqCst)
+    }
+
+    /// Tests set the answer by hand: the real one needs a status item.
+    #[cfg(test)]
+    pub fn set_staying_for_test(&self, staying: bool) {
+        self.staying.store(staying, Ordering::SeqCst);
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -501,6 +568,7 @@ fn apply(app: &AppHandle, state: &TrayState, model: MenuModel) -> Result<(), Str
             applied.tray = Some(tray);
         }
     }
+    state.staying.store(model.compose, Ordering::SeqCst);
     applied.last = Some(model);
     Ok(())
 }
@@ -515,6 +583,7 @@ mod tests {
             running: "Running".into(),
             none: "Nothing running".into(),
             new_message: "New message".into(),
+            read_all: "Mark all as read".into(),
             open: "Open oort".into(),
             quit: "Quit oort".into(),
         }
@@ -532,9 +601,11 @@ mod tests {
         TrayStatus {
             unread,
             compose: true,
+            read_all: true,
             labels: labels(),
             running,
             more: None,
+            remaining: None,
         }
     }
 
@@ -562,6 +633,7 @@ mod tests {
                 "Nothing running",
                 "---",
                 "New message",
+                "Mark all as read",
                 "---",
                 "Open oort",
                 "---",
@@ -666,6 +738,86 @@ mod tests {
         }
     }
 
+    // ---- 「모두 읽음 처리」 (#5195) ----
+
+    fn item_enabled(model: &MenuModel, wanted: &str) -> bool {
+        model
+            .entries
+            .iter()
+            .find_map(|e| match e {
+                Entry::Item { id, enabled, .. } if id == wanted => Some(*enabled),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{wanted} is not in the menu"))
+    }
+
+    #[test]
+    fn mark_all_read_is_enabled_only_when_there_is_something_to_mark_and_the_shell_is_up() {
+        for (compose, read_all, enabled) in [
+            (true, true, true),
+            (true, false, false),
+            (false, true, false),
+            (false, false, false),
+        ] {
+            let mut s = status(0, vec![]);
+            s.compose = compose;
+            s.read_all = read_all;
+            let model = build_model(&s).unwrap();
+            assert_eq!(
+                item_enabled(&model, "tray.read-all"),
+                enabled,
+                "compose={compose} read_all={read_all}"
+            );
+            // 「새 메시지」 does not care about what is unread.
+            assert_eq!(item_enabled(&model, "tray.new-message"), compose);
+        }
+    }
+
+    #[test]
+    fn what_mark_all_read_leaves_is_one_dimmed_line_right_under_it_and_nothing_when_nothing_is_left(
+    ) {
+        let mut s = status(0, vec![]);
+        s.remaining = Some("2 approvals are still waiting".into());
+        let model = build_model(&s).unwrap();
+        let at = model
+            .entries
+            .iter()
+            .position(|e| matches!(e, Entry::Item { id, .. } if id == "tray.read-all"))
+            .unwrap();
+        assert_eq!(
+            model.entries[at + 1],
+            Entry::Note("2 approvals are still waiting".into()),
+            "a dimmed note, not a pickable line, directly after the item"
+        );
+        assert_eq!(model.entries[at + 2], Entry::Separator);
+        // Nothing left: no line at all (not an empty one).
+        let none = build_model(&status(0, vec![])).unwrap();
+        let at = none
+            .entries
+            .iter()
+            .position(|e| matches!(e, Entry::Item { id, .. } if id == "tray.read-all"))
+            .unwrap();
+        assert_eq!(none.entries[at + 1], Entry::Separator);
+        assert_eq!(
+            none.entries.len() + 1,
+            model.entries.len(),
+            "the line is the only difference"
+        );
+    }
+
+    // ---- whether the app can stay without its window (#5196) ----
+
+    #[test]
+    fn a_menu_model_remembers_whether_someone_is_signed_in_and_a_fresh_state_keeps_nothing() {
+        for compose in [true, false] {
+            let mut s = status(0, vec![]);
+            s.compose = compose;
+            assert_eq!(build_model(&s).unwrap().compose, compose);
+        }
+        // Before the first status there is no icon and nobody is signed in: the red button ends the app.
+        assert!(!TrayState::default().keeps_app_running());
+    }
+
     // ---- long and odd titles ----
 
     #[test]
@@ -737,13 +889,15 @@ mod tests {
     #[test]
     fn a_menu_word_that_is_blank_long_or_unsafe_is_refused() {
         type Set = fn(&mut TrayStatus, String);
-        let setters: [(&str, Set); 6] = [
+        let setters: [(&str, Set); 8] = [
             ("running", |s, v| s.labels.running = v),
             ("none", |s, v| s.labels.none = v),
             ("newMessage", |s, v| s.labels.new_message = v),
+            ("readAll", |s, v| s.labels.read_all = v),
             ("open", |s, v| s.labels.open = v),
             ("quit", |s, v| s.labels.quit = v),
             ("more", |s, v| s.more = Some(v)),
+            ("remaining", |s, v| s.remaining = Some(v)),
         ];
         for (name, set) in setters {
             for bad in [
@@ -876,6 +1030,11 @@ mod tests {
         assert_eq!(parsed.running[0].title, "김인턴");
         assert_eq!(parsed.running[1].state, "Working");
         assert!(parsed.more.is_none());
+        assert!(parsed.read_all);
+        assert_eq!(
+            parsed.remaining.as_deref(),
+            Some("2 approvals are still waiting")
+        );
         let model = build_model(&parsed).unwrap();
         assert!(model.unread);
         assert_eq!(
@@ -886,6 +1045,8 @@ mod tests {
                 "codex · Working",
                 "---",
                 "New message",
+                "Mark all as read",
+                "2 approvals are still waiting",
                 "---",
                 "Open oort",
                 "---",
@@ -929,6 +1090,7 @@ mod tests {
                 match id.as_str() {
                     "tray.open" => assert_eq!(click, Click::Open),
                     "tray.new-message" => assert_eq!(click, Click::Action(TrayAction::NewMessage)),
+                    "tray.read-all" => assert_eq!(click, Click::Action(TrayAction::ReadAll)),
                     other => assert_eq!(
                         click,
                         Click::Action(TrayAction::Run {
@@ -938,7 +1100,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(seen, 4, "two rows, new message, open");
+        assert_eq!(seen, 5, "two rows, new message, mark all read, open");
     }
 
     #[test]
@@ -981,6 +1143,40 @@ mod tests {
             serde_json::to_value(TrayAction::Run { id: "r1".into() }).unwrap(),
             serde_json::json!({ "action": "run", "id": "r1" })
         );
+        assert_eq!(
+            serde_json::to_value(TrayAction::ReadAll).unwrap(),
+            serde_json::json!({ "action": "read-all" })
+        );
+        assert_eq!(
+            serde_json::to_value(TrayAction::WindowHidden).unwrap(),
+            serde_json::json!({ "action": "window-hidden" })
+        );
+    }
+
+    /// Every pick is a way back into the app and brings the window forward, except 「모두 읽음 처리」:
+    /// the Rust side of it is decided here, the page's side is a mock-bus test below.
+    #[test]
+    fn every_pick_brings_the_window_forward_except_mark_all_read() {
+        for (id, forward) in [
+            ("tray.open", true),
+            ("tray.new-message", true),
+            ("tray.run.job-7", true),
+            ("tray.read-all", false),
+        ] {
+            let click = parse_menu_id(id).unwrap();
+            assert_eq!(click.brings_window_forward(), forward, "{id}");
+        }
+        let app = tauri::test::mock_app();
+        for (id, forward) in [
+            ("tray.open", 1),
+            ("tray.new-message", 1),
+            ("tray.read-all", 0),
+            ("something.else", 0),
+        ] {
+            let before = main_window::forwarded();
+            handle_menu_event(app.handle(), id);
+            assert_eq!(main_window::forwarded() - before, forward, "{id}");
+        }
     }
 
     /// Through Tauri's real event bus (the mock runtime), listened to the way the page does
@@ -999,6 +1195,7 @@ mod tests {
         handle_menu_event(app.handle(), "tray.new-message");
         handle_menu_event(app.handle(), "tray.run.job-7");
         handle_menu_event(app.handle(), "tray.open");
+        handle_menu_event(app.handle(), "tray.read-all");
         handle_menu_event(app.handle(), "tray.run.has space");
         handle_menu_event(app.handle(), "something.else");
 
@@ -1007,11 +1204,14 @@ mod tests {
             serde_json::from_str(&rx.recv_timeout(wait).unwrap()).unwrap();
         let second: serde_json::Value =
             serde_json::from_str(&rx.recv_timeout(wait).unwrap()).unwrap();
+        let third: serde_json::Value =
+            serde_json::from_str(&rx.recv_timeout(wait).unwrap()).unwrap();
         assert_eq!(first, serde_json::json!({ "action": "new-message" }));
         assert_eq!(
             second,
             serde_json::json!({ "action": "run", "id": "job-7" })
         );
+        assert_eq!(third, serde_json::json!({ "action": "read-all" }));
         assert!(rx
             .recv_timeout(std::time::Duration::from_millis(50))
             .is_err());
