@@ -114,7 +114,7 @@ import {
   Composer,
   type ComposerSendOptions,
 } from '../features/conversation/Composer';
-import {channelDraftKey} from '../features/conversation/drafts';
+import {channelDraftKey, seedDraft} from '../features/conversation/drafts';
 import {CONV} from '../features/conversation/convDesign';
 import {TYPING_OVERHANG, TypingBar} from '../features/conversation/TypingBar';
 import {
@@ -1525,12 +1525,15 @@ export default function ConversationScreen({
       // 문장과 **상태**를 함께 든다. 상태가 없으면 칩은 스냅샷을 그대로 둔다 —
       // 원장이 알아볼 수 없는 상태를 답했을 때 우리가 지어내지 않는다.
       setApprovalReceipts(previous =>
-        new Map(previous).set(
-          approvalId,
-          secretOnce === undefined
-            ? {note, status: outcome.status}
-            : {note, status: outcome.status, secretOnce},
-        ),
+        new Map(previous).set(approvalId, {
+          note,
+          status: outcome.status,
+          // 누가 결정했는지(#5171): 「다시 요청」이 방금 거부한 사람에게 서지 않게 한다.
+          ...(outcome.decidedByMemberId === undefined
+            ? {}
+            : {decidedByMemberId: outcome.decidedByMemberId}),
+          ...(secretOnce === undefined ? {} : {secretOnce}),
+        }),
       );
       // 결과도 말해 준다. 무장은 알리고 결과는 알리지 않으면, 화면을 보지 않는
       // 사람에게 되돌릴 수 없는 행동이 소리 없이 끝난 것이 된다(인박스 2R H3).
@@ -1732,11 +1735,14 @@ export default function ConversationScreen({
       onOpenMemoryEvidence: openMemoryEvidence,
       // 다른 방으로 건너갈 셸이 없으면 열 곳이 없다 — 그때 「전문 보기」는 서지 않는다(#4705).
       ...(onOpenConversation !== undefined ? {onOpenMessage: openApprovalMessage} : {}),
+      // 닫힌 승인 카드의 「다시 요청」이 **이 화면의** 입력창에 초안을 넣는다(#5171). 쓰던 글이 있으면 덮지 않고 거절한다.
+      onRepropose: (draft: string) => seedDraft(channelDraftKey(channelId), draft),
       // 시트를 열 셸이 없으면 도우미의 「작업 요청 열기」 카드에 누를 단추가 서지 않는다(#4972).
       ...(onAskMac !== undefined ? {onOpenWorkRequest: onAskMac} : {}),
     }),
     [
       workspaceId,
+      channelId,
       openMemoryEvidence,
       onAskMac,
       onOpenConversation,
