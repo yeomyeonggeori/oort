@@ -36,11 +36,10 @@ export function inviteIssueErrorCopy(error: unknown): InviteIssueErrorCopy {
   if (error instanceof NetworkError) {
     return { message: errorMessage(error), detail: undefined };
   }
-  const raw = errorMessage(error);
-  if (HTTP_STATUS.test(raw)) {
-    const detail =
-      error instanceof ApiError ? `HTTP ${error.status}` : raw;
-    return { message: INVITE_ISSUE_ERROR, detail };
+  // 서버가 준 문장은 화면에 쓰지 않는다(#5221: `errorMessage`도 더는 돌려주지 않는다). 이 화면의 안내(무엇이 안 됐고 어디서 다시
+  // 하는지)가 문장이고, 서버가 답한 상태는 진단용 보조(`detail`)로만 남는다. 응답이 없던 실패는 위에서 이미 분류 문장이다.
+  if (error instanceof ApiError) {
+    return { message: INVITE_ISSUE_ERROR, detail: HTTP_STATUS.test(error.message) ? error.message : `HTTP ${error.status}` };
   }
-  return { message: raw, detail: undefined };
+  return { message: errorMessage(error), detail: undefined };
 }

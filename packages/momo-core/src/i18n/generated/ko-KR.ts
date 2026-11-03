@@ -396,6 +396,12 @@ export const catalog: MessageCatalog = {
       "value": "멤버 목록을 불러오지 못했어요"
     }
   ],
+  "connection.load.newerTitle": [
+    {
+      "type": 0,
+      "value": "새 글을 불러오지 못했어요"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,
@@ -424,6 +430,24 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "보내지 못했어요"
+    }
+  ],
+  "connection.send.reasonOffline": [
+    {
+      "type": 0,
+      "value": "오프라인이라 보내지 못했어요"
+    }
+  ],
+  "connection.send.reasonRejected": [
+    {
+      "type": 0,
+      "value": "서버가 받지 못했어요"
+    }
+  ],
+  "connection.send.reasonServer": [
+    {
+      "type": 0,
+      "value": "서버에 닿지 못해 보내지 못했어요"
     }
   ],
   "connection.send.resend": [
