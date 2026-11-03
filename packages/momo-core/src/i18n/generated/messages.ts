@@ -63,10 +63,15 @@ export const messageKeys = [
   "desktop.menu.view",
   "desktop.menu.window",
   "desktop.notify.threadSummary",
+  "desktop.tray.closeNotice",
   "desktop.tray.more",
   "desktop.tray.newMessage",
   "desktop.tray.none",
   "desktop.tray.open",
+  "desktop.tray.readAll",
+  "desktop.tray.remainApprovals",
+  "desktop.tray.remainBoth",
+  "desktop.tray.remainPanes",
   "desktop.tray.running",
   "desktop.tray.stateBlocked",
   "desktop.tray.stateWorking",
@@ -703,12 +708,24 @@ export const argumentSpecs = {
   "desktop.notify.threadSummary": {
     "count": "number"
   },
+  "desktop.tray.closeNotice": {},
   "desktop.tray.more": {
     "count": "number"
   },
   "desktop.tray.newMessage": {},
   "desktop.tray.none": {},
   "desktop.tray.open": {},
+  "desktop.tray.readAll": {},
+  "desktop.tray.remainApprovals": {
+    "count": "number"
+  },
+  "desktop.tray.remainBoth": {
+    "approvals": "number",
+    "panes": "number"
+  },
+  "desktop.tray.remainPanes": {
+    "count": "number"
+  },
   "desktop.tray.running": {},
   "desktop.tray.stateBlocked": {},
   "desktop.tray.stateWorking": {},
@@ -1480,10 +1497,15 @@ export interface MessageArgs {
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
   "desktop.notify.threadSummary": { count: number };
+  "desktop.tray.closeNotice": Record<string, never>;
   "desktop.tray.more": { count: number };
   "desktop.tray.newMessage": Record<string, never>;
   "desktop.tray.none": Record<string, never>;
   "desktop.tray.open": Record<string, never>;
+  "desktop.tray.readAll": Record<string, never>;
+  "desktop.tray.remainApprovals": { count: number };
+  "desktop.tray.remainBoth": { approvals: number; panes: number };
+  "desktop.tray.remainPanes": { count: number };
   "desktop.tray.running": Record<string, never>;
   "desktop.tray.stateBlocked": Record<string, never>;
   "desktop.tray.stateWorking": Record<string, never>;

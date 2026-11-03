@@ -1274,19 +1274,32 @@ export async function requestNotificationPermission(): Promise<DesktopNotificati
   return next;
 }
 
-/** Permission is granted (asking at most once per run); the two show paths gate on the same answer. */
-async function permissionGranted(): Promise<boolean> {
-  return (await ensureNotificationPermission()) === "granted";
+/**
+ * Permission is granted (asking at most once per run); the two show paths gate on the same answer.
+ * `ask: false` only reads it: a banner that must not be the reason for an OS permission dialog.
+ */
+async function permissionGranted(ask = true): Promise<boolean> {
+  const permission = ask ? await ensureNotificationPermission() : await notificationPermission();
+  return permission === "granted";
 }
 
 /**
  * Show one native notification. Returns false when it was not shown — in a
  * browser, or because permission is not granted. A refused notification is a
  * normal state, so it is a return value rather than a thrown error.
+ *
+ * `options.ask` (default true): whether a permission that was never decided may be asked for now. The
+ * once-only 「창을 닫아도 메뉴 막대에 남아요」 notice (#5196) passes `false`: it is told right after the
+ * window went away, the worst moment for a permission dialog, and it is meaningless to someone who has
+ * notifications off.
  */
-export async function showNotification(title: string, body?: string): Promise<boolean> {
+export async function showNotification(
+  title: string,
+  body?: string,
+  options: { ask?: boolean } = {}
+): Promise<boolean> {
   if (!IS_TAURI) return false;
-  if (!(await permissionGranted())) return false;
+  if (!(await permissionGranted(options.ask ?? true))) return false;
   try {
     return await invoke<boolean>("notification_show", { title, body });
   } catch (error) {
@@ -1383,9 +1396,13 @@ export async function setDockBadge(count: number): Promise<boolean> {
 export interface TrayStatusWire {
   unread: number;
   compose: boolean;
-  labels: { running: string; none: string; newMessage: string; open: string; quit: string };
+  /** 「모두 읽음 처리」가 할 일이 있다(안 읽은 멘션·DM이 있다, #5195). 켜짐 여부만 말한다. */
+  readAll: boolean;
+  labels: { running: string; none: string; newMessage: string; readAll: string; open: string; quit: string };
   running: { id: string; title: string; state: string }[];
   more: string | null;
+  /** 「모두 읽음 처리」를 눌러도 남는 일(승인·응답 필요 칸)을 말하는 한 줄. 남는 게 없으면 null. */
+  remaining: string | null;
 }
 
 /**

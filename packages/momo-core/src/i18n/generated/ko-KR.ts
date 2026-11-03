@@ -425,6 +425,12 @@ export const catalog: MessageCatalog = {
       "value": "건"
     }
   ],
+  "desktop.tray.closeNotice": [
+    {
+      "type": 0,
+      "value": "창을 닫아도 메뉴 막대에서 계속 알림을 받아요"
+    }
+  ],
   "desktop.tray.more": [
     {
       "type": 0,
@@ -456,6 +462,66 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "oort 열기"
+    }
+  ],
+  "desktop.tray.readAll": [
+    {
+      "type": 0,
+      "value": "모두 읽음 처리"
+    }
+  ],
+  "desktop.tray.remainApprovals": [
+    {
+      "type": 0,
+      "value": "승인 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건은 남아 있어요"
+    }
+  ],
+  "desktop.tray.remainBoth": [
+    {
+      "type": 0,
+      "value": "승인 "
+    },
+    {
+      "type": 2,
+      "value": "approvals",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "건, 응답 필요 "
+    },
+    {
+      "type": 2,
+      "value": "panes",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "칸은 남아 있어요"
+    }
+  ],
+  "desktop.tray.remainPanes": [
+    {
+      "type": 0,
+      "value": "응답 필요 "
+    },
+    {
+      "type": 2,
+      "value": "count",
+      "style": null
+    },
+    {
+      "type": 0,
+      "value": "칸은 남아 있어요"
     }
   ],
   "desktop.tray.running": [
