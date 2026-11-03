@@ -28,7 +28,6 @@ import {
 import type { RecipientKind } from "@momo/core/lib/koreanParticle";
 import {
   COMPOSER_KEYS_HINT,
-  COMPOSER_OFFLINE_COPY,
   HINT_SEPARATOR,
   composerFieldLabel,
 } from "@momo/core/features/chat/composerCopy";
@@ -66,6 +65,7 @@ import { rememberSendLearned, useSendHintNeeded } from "@/features/chat/sendHint
 import { COMPOSER_MAX_ROWS, useAutoGrow } from "@/features/timeline/useAutoGrow";
 import { useDmDeliveryHint } from "@/features/chat/useDmDeliveryHint";
 import { useOffline } from "@/features/common/useOffline";
+import { useComposerBlockedLine } from "@/features/common/blockedLines";
 import {
   AttachButton,
   AttachmentTray,
@@ -163,22 +163,6 @@ import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 
 const MIN_ROWS = 1;
 const MAX_ROWS = COMPOSER_MAX_ROWS;
-
-/**
- * 연결이 끊겨 있을 때 전송 자리에서 하는 말. **이름만 여기 있고 값은 코어에
- * 있다** (U4-6 리뷰 H-1).
- *
- * 이 파일이 들고 있던 문장은 "…쓰던 글은 그대로 남습니다."였고, 같은 주에 폰이
- * 자기 파일에 같은 이름으로 한 절이 더 있는 문장을 지었다. 리뷰가 그 갈라짐을
- * 실측했고, 값은 `APPROVAL_OFFLINE_COPY` 가 이미 걸어 둔 길로 올라갔다 —
- * 고른 문장과 고른 이유는 `@momo/core/features/chat/composerCopy` 가 적는다.
- * 요약하면 **이 앱의 오프라인 문장에는 모양이 있고**(지금 못 하는 것 → 다시
- * 연결되면 여기서 할 수 있는 것) 이 파일의 문장에는 그 뒷절이 없었다.
- *
- * 이름을 남기는 이유: 이 줄은 세 자리에서 쓰인다(버튼 `title` · 아래 한 줄 ·
- * 게이트가 찾는 `data-testid`). 값을 세 번 적는 대신 이름 하나를 쓴다.
- */
-export { COMPOSER_OFFLINE_COPY };
 
 /**
  * 컴포저 힌트 판. 데스크톱에서는 U-8 공유 액션 슬롯이고, 폰 DM에서는 기존처럼
@@ -395,6 +379,10 @@ export function Composer({
   // (`useOffline`, #5220)가 한다: 기기 오프라인이거나 서버에 닿지 못함이 확정일 때만
   // 막고, 실시간(소켓)만 끊긴 것은 막지 않는다. 승인 경로가 같은 판단을 한다.
   const offline = useOffline();
+  // 막았을 때 위 한 줄과 보내기 단추의 설명이 말하는 문장(U4-6 리뷰 H-1, #5239). 문장은 이 파일에 없다: 막은 원인(기기 오프라인 ·
+  // 서버에 닿지 못함)에 따라 연결 상태 모델이 사전 키를 고르고(`connection.composer.*`), 이 파일은 읽기만 한다. 한 줄과 단추 `title`이
+  // 같은 값을 쓴다.
+  const blockedLine = useComposerBlockedLine();
   // 링크를 넣고 멈추면 입력칸 위에 카드가 뜬다(#5005). 오프라인에서는 묻지 않고, 풀리면 이어서 묻는다.
   const linkPreview = useComposerLinkPreview({
     workspaceId,
@@ -912,7 +900,7 @@ export function Composer({
           className="px-6 pb-2 text-meta text-warn"
           data-testid="composer-offline"
         >
-          {COMPOSER_OFFLINE_COPY}
+          {blockedLine}
         </p>
       )}
 
@@ -1207,7 +1195,7 @@ export function Composer({
                 aria-label="메시지 보내기"
                 title={
                   offline
-                    ? COMPOSER_OFFLINE_COPY
+                    ? blockedLine
                     : (attachBlockCopy ??
                       (isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"))
                 }

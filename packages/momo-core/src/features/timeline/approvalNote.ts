@@ -289,6 +289,12 @@ export interface ApprovalCardNoteInput {
   pendingHere: boolean;
   /** 이 기기가 지금 결정을 보낼 수 있는가. */
   offline: boolean;
+  /**
+   * `offline` 일 때 줄이 말할 문장. 막은 **원인**(기기 오프라인 · 서버에 닿지 못함)이 문장을 가르므로 연결 상태 모델이 고른
+   * 사전 키를 클라이언트가 읽어 넘긴다(#5239). 코어는 사전을 모르므로 받기만 한다. 없거나 비면 원인을 가리지 않는
+   * `APPROVAL_OFFLINE_COPY` 이다.
+   */
+  offlineText?: string | null;
   /** 이 서버에 승인 원장 표면이 있는가. 없으면 버튼은 결코 성공하지 못한다. */
   approvalsProvided?: boolean;
   /** 표면 부재를 설명하는 문장. 화면이 들고 있다(웹 `serverSurface`). */
@@ -301,6 +307,11 @@ export interface ApprovalCardNoteInput {
  * 폰이 `features/inbox/useOnline.ts` 에서 landing 시킨 문장 **그대로**다. 두 클라가
  * 같은 상수를 들어야 같은 상황에 같은 말을 한다 — 그 파일 주석이 적은 이유가
  * 그것이고, 이제 그 「두 화면」이 두 클라가 됐다.
+ *
+ * **원인을 가리지 않는 문장**이다. 웹은 막은 원인을 알면(연결 상태 모델의 `approvalNote`, 사전의
+ * `connection.approval.*`) 그 원인의 문장을 `offlineText` 로 넘긴다. 이 문장은 원인을 모를 때(로그인 만료 등)와
+ * 원인 문장을 아직 넘기지 않는 클라이언트의 몫이다. 서버에 닿지 못한 것을 「오프라인」이라고 말하지 않으려는 것이
+ * 그 이유다.
  */
 export const APPROVAL_OFFLINE_COPY =
   "연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요.";
@@ -372,7 +383,12 @@ export function approvalCardNote(
     };
   }
   if (input.offline) {
-    return { kind: "offline", tone: "blocked", text: APPROVAL_OFFLINE_COPY };
+    const cause = input.offlineText?.trim();
+    return {
+      kind: "offline",
+      tone: "blocked",
+      text: cause ? cause : APPROVAL_OFFLINE_COPY,
+    };
   }
   return null;
 }

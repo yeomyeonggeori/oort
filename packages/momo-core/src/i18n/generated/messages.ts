@@ -330,6 +330,67 @@ export const messageKeys = [
   "mobile.locale.backToSettings",
   "mobile.locale.saving",
   "notifications.inviteLink.fallback",
+  "recovery.claim.hostBody",
+  "recovery.claim.hostConfirm",
+  "recovery.claim.hostReject",
+  "recovery.claim.hostTitle",
+  "recovery.claim.invalidChar",
+  "recovery.claim.passwordHint",
+  "recovery.claim.resetExpired",
+  "recovery.claim.resetUsed",
+  "recovery.claim.title",
+  "recovery.help.adminBody",
+  "recovery.help.adminTitle",
+  "recovery.help.back",
+  "recovery.help.guideDetail",
+  "recovery.help.guideLine",
+  "recovery.help.link",
+  "recovery.help.receivedEmpty",
+  "recovery.help.receivedHint",
+  "recovery.help.receivedInvalid",
+  "recovery.help.receivedLabel",
+  "recovery.help.receivedPlaceholder",
+  "recovery.help.receivedSubmit",
+  "recovery.help.receivedTitle",
+  "recovery.help.requestCopied",
+  "recovery.help.requestCopy",
+  "recovery.help.requestLabel",
+  "recovery.help.requestNoEmail",
+  "recovery.help.requestWithEmail",
+  "recovery.issue.cancel",
+  "recovery.issue.confirmLead",
+  "recovery.issue.confirmTitle",
+  "recovery.issue.entryAction",
+  "recovery.issue.entryHint",
+  "recovery.issue.errorBadTarget",
+  "recovery.issue.errorForbidden",
+  "recovery.issue.errorGeneric",
+  "recovery.issue.errorInactive",
+  "recovery.issue.errorNetwork",
+  "recovery.issue.errorNotFound",
+  "recovery.issue.errorRateLimited",
+  "recovery.issue.errorRateLimitedAfter",
+  "recovery.issue.errorRequired",
+  "recovery.issue.errorWrongPassword",
+  "recovery.issue.factTerm",
+  "recovery.issue.issuedClose",
+  "recovery.issue.issuedCopied",
+  "recovery.issue.issuedCopy",
+  "recovery.issue.issuedDeliver",
+  "recovery.issue.issuedExpires",
+  "recovery.issue.issuedLead",
+  "recovery.issue.issuedLinkLabel",
+  "recovery.issue.issuedLocalOnly",
+  "recovery.issue.issuedTitle",
+  "recovery.issue.lineLogout",
+  "recovery.issue.lineOnce",
+  "recovery.issue.lineOrder",
+  "recovery.issue.lineReplace",
+  "recovery.issue.lineVerify",
+  "recovery.issue.passwordHint",
+  "recovery.issue.passwordLabel",
+  "recovery.issue.submit",
+  "recovery.issue.submitBusy",
   "releaseNotes.action.close",
   "releaseNotes.action.details",
   "releaseNotes.detail.back",
@@ -380,6 +441,8 @@ export const messageKeys = [
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
+  "reply.alsoInChannel.label",
+  "reply.alsoInChannel.unsupported",
   "reply.card.cancel",
   "reply.card.excerptEmpty",
   "reply.card.excerptExpression",
@@ -389,6 +452,11 @@ export const messageKeys = [
   "reply.card.headerSelf",
   "reply.composer.placeholder",
   "reply.composer.send",
+  "reply.home.excerptDeleted",
+  "reply.home.header",
+  "reply.home.headerSelf",
+  "reply.home.headerUnknown",
+  "reply.home.open",
   "settings.aiLimits.ceilingSearches",
   "settings.aiLimits.ceilingTokens",
   "settings.aiLimits.cleared",
@@ -1066,6 +1134,82 @@ export const argumentSpecs = {
   "mobile.locale.backToSettings": {},
   "mobile.locale.saving": {},
   "notifications.inviteLink.fallback": {},
+  "recovery.claim.hostBody": {},
+  "recovery.claim.hostConfirm": {},
+  "recovery.claim.hostReject": {},
+  "recovery.claim.hostTitle": {},
+  "recovery.claim.invalidChar": {},
+  "recovery.claim.passwordHint": {
+    "maxBytes": "number",
+    "maxHangul": "number",
+    "min": "number"
+  },
+  "recovery.claim.resetExpired": {},
+  "recovery.claim.resetUsed": {},
+  "recovery.claim.title": {},
+  "recovery.help.adminBody": {},
+  "recovery.help.adminTitle": {},
+  "recovery.help.back": {},
+  "recovery.help.guideDetail": {},
+  "recovery.help.guideLine": {},
+  "recovery.help.link": {},
+  "recovery.help.receivedEmpty": {},
+  "recovery.help.receivedHint": {},
+  "recovery.help.receivedInvalid": {},
+  "recovery.help.receivedLabel": {},
+  "recovery.help.receivedPlaceholder": {},
+  "recovery.help.receivedSubmit": {},
+  "recovery.help.receivedTitle": {},
+  "recovery.help.requestCopied": {},
+  "recovery.help.requestCopy": {},
+  "recovery.help.requestLabel": {},
+  "recovery.help.requestNoEmail": {
+    "host": "string"
+  },
+  "recovery.help.requestWithEmail": {
+    "email": "string",
+    "host": "string"
+  },
+  "recovery.issue.cancel": {},
+  "recovery.issue.confirmLead": {
+    "name": "string"
+  },
+  "recovery.issue.confirmTitle": {},
+  "recovery.issue.entryAction": {},
+  "recovery.issue.entryHint": {},
+  "recovery.issue.errorBadTarget": {},
+  "recovery.issue.errorForbidden": {},
+  "recovery.issue.errorGeneric": {},
+  "recovery.issue.errorInactive": {},
+  "recovery.issue.errorNetwork": {},
+  "recovery.issue.errorNotFound": {},
+  "recovery.issue.errorRateLimited": {},
+  "recovery.issue.errorRateLimitedAfter": {
+    "seconds": "number"
+  },
+  "recovery.issue.errorRequired": {},
+  "recovery.issue.errorWrongPassword": {},
+  "recovery.issue.factTerm": {},
+  "recovery.issue.issuedClose": {},
+  "recovery.issue.issuedCopied": {},
+  "recovery.issue.issuedCopy": {},
+  "recovery.issue.issuedDeliver": {},
+  "recovery.issue.issuedExpires": {
+    "when": "string"
+  },
+  "recovery.issue.issuedLead": {},
+  "recovery.issue.issuedLinkLabel": {},
+  "recovery.issue.issuedLocalOnly": {},
+  "recovery.issue.issuedTitle": {},
+  "recovery.issue.lineLogout": {},
+  "recovery.issue.lineOnce": {},
+  "recovery.issue.lineOrder": {},
+  "recovery.issue.lineReplace": {},
+  "recovery.issue.lineVerify": {},
+  "recovery.issue.passwordHint": {},
+  "recovery.issue.passwordLabel": {},
+  "recovery.issue.submit": {},
+  "recovery.issue.submitBusy": {},
   "releaseNotes.action.close": {},
   "releaseNotes.action.details": {},
   "releaseNotes.detail.back": {},
@@ -1122,6 +1266,8 @@ export const argumentSpecs = {
   "releaseNotes.version.releasedOn": {
     "date": "string"
   },
+  "reply.alsoInChannel.label": {},
+  "reply.alsoInChannel.unsupported": {},
   "reply.card.cancel": {},
   "reply.card.excerptEmpty": {},
   "reply.card.excerptExpression": {},
@@ -1133,6 +1279,13 @@ export const argumentSpecs = {
   "reply.card.headerSelf": {},
   "reply.composer.placeholder": {},
   "reply.composer.send": {},
+  "reply.home.excerptDeleted": {},
+  "reply.home.header": {
+    "name": "string"
+  },
+  "reply.home.headerSelf": {},
+  "reply.home.headerUnknown": {},
+  "reply.home.open": {},
   "settings.aiLimits.ceilingSearches": {
     "limit": "number"
   },
@@ -1874,6 +2027,67 @@ export interface MessageArgs {
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
   "notifications.inviteLink.fallback": Record<string, never>;
+  "recovery.claim.hostBody": Record<string, never>;
+  "recovery.claim.hostConfirm": Record<string, never>;
+  "recovery.claim.hostReject": Record<string, never>;
+  "recovery.claim.hostTitle": Record<string, never>;
+  "recovery.claim.invalidChar": Record<string, never>;
+  "recovery.claim.passwordHint": { maxBytes: number; maxHangul: number; min: number };
+  "recovery.claim.resetExpired": Record<string, never>;
+  "recovery.claim.resetUsed": Record<string, never>;
+  "recovery.claim.title": Record<string, never>;
+  "recovery.help.adminBody": Record<string, never>;
+  "recovery.help.adminTitle": Record<string, never>;
+  "recovery.help.back": Record<string, never>;
+  "recovery.help.guideDetail": Record<string, never>;
+  "recovery.help.guideLine": Record<string, never>;
+  "recovery.help.link": Record<string, never>;
+  "recovery.help.receivedEmpty": Record<string, never>;
+  "recovery.help.receivedHint": Record<string, never>;
+  "recovery.help.receivedInvalid": Record<string, never>;
+  "recovery.help.receivedLabel": Record<string, never>;
+  "recovery.help.receivedPlaceholder": Record<string, never>;
+  "recovery.help.receivedSubmit": Record<string, never>;
+  "recovery.help.receivedTitle": Record<string, never>;
+  "recovery.help.requestCopied": Record<string, never>;
+  "recovery.help.requestCopy": Record<string, never>;
+  "recovery.help.requestLabel": Record<string, never>;
+  "recovery.help.requestNoEmail": { host: string };
+  "recovery.help.requestWithEmail": { email: string; host: string };
+  "recovery.issue.cancel": Record<string, never>;
+  "recovery.issue.confirmLead": { name: string };
+  "recovery.issue.confirmTitle": Record<string, never>;
+  "recovery.issue.entryAction": Record<string, never>;
+  "recovery.issue.entryHint": Record<string, never>;
+  "recovery.issue.errorBadTarget": Record<string, never>;
+  "recovery.issue.errorForbidden": Record<string, never>;
+  "recovery.issue.errorGeneric": Record<string, never>;
+  "recovery.issue.errorInactive": Record<string, never>;
+  "recovery.issue.errorNetwork": Record<string, never>;
+  "recovery.issue.errorNotFound": Record<string, never>;
+  "recovery.issue.errorRateLimited": Record<string, never>;
+  "recovery.issue.errorRateLimitedAfter": { seconds: number };
+  "recovery.issue.errorRequired": Record<string, never>;
+  "recovery.issue.errorWrongPassword": Record<string, never>;
+  "recovery.issue.factTerm": Record<string, never>;
+  "recovery.issue.issuedClose": Record<string, never>;
+  "recovery.issue.issuedCopied": Record<string, never>;
+  "recovery.issue.issuedCopy": Record<string, never>;
+  "recovery.issue.issuedDeliver": Record<string, never>;
+  "recovery.issue.issuedExpires": { when: string };
+  "recovery.issue.issuedLead": Record<string, never>;
+  "recovery.issue.issuedLinkLabel": Record<string, never>;
+  "recovery.issue.issuedLocalOnly": Record<string, never>;
+  "recovery.issue.issuedTitle": Record<string, never>;
+  "recovery.issue.lineLogout": Record<string, never>;
+  "recovery.issue.lineOnce": Record<string, never>;
+  "recovery.issue.lineOrder": Record<string, never>;
+  "recovery.issue.lineReplace": Record<string, never>;
+  "recovery.issue.lineVerify": Record<string, never>;
+  "recovery.issue.passwordHint": Record<string, never>;
+  "recovery.issue.passwordLabel": Record<string, never>;
+  "recovery.issue.submit": Record<string, never>;
+  "recovery.issue.submitBusy": Record<string, never>;
   "releaseNotes.action.close": Record<string, never>;
   "releaseNotes.action.details": Record<string, never>;
   "releaseNotes.detail.back": Record<string, never>;
@@ -1924,6 +2138,8 @@ export interface MessageArgs {
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };
+  "reply.alsoInChannel.label": Record<string, never>;
+  "reply.alsoInChannel.unsupported": Record<string, never>;
   "reply.card.cancel": Record<string, never>;
   "reply.card.excerptEmpty": Record<string, never>;
   "reply.card.excerptExpression": Record<string, never>;
@@ -1933,6 +2149,11 @@ export interface MessageArgs {
   "reply.card.headerSelf": Record<string, never>;
   "reply.composer.placeholder": Record<string, never>;
   "reply.composer.send": Record<string, never>;
+  "reply.home.excerptDeleted": Record<string, never>;
+  "reply.home.header": { name: string };
+  "reply.home.headerSelf": Record<string, never>;
+  "reply.home.headerUnknown": Record<string, never>;
+  "reply.home.open": Record<string, never>;
   "settings.aiLimits.ceilingSearches": { limit: number };
   "settings.aiLimits.ceilingTokens": { limit: number };
   "settings.aiLimits.cleared": Record<string, never>;

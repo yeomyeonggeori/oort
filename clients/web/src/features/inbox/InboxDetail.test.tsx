@@ -9,6 +9,11 @@ import type { Message } from "@momo/core/lib/api";
 import type { MailboxEntry } from "@momo/core/features/inbox/mailbox";
 import type { FeedItem } from "@momo/core/features/inbox/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { ConnectionContext } from "@/features/common/connectionContext";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { connectionScene, type ConnectionScene } from "@/testing/connectionViews";
+import { koreanLocale } from "@/testing/koLocale";
 import { MARKER_DIVIDER_PAD_CLASS, SYSTEM_LINE_STRADDLE_CLEAR_CLASS } from "@/features/timeline/spacing";
 import { InboxDetail } from "./InboxDetail";
 
@@ -91,22 +96,28 @@ function session(): SessionContextValue {
   } as SessionContextValue;
 }
 
-async function mount(e: MailboxEntry, offline = false): Promise<HTMLElement> {
+async function mount(e: MailboxEntry, offline = false, scene?: ConnectionScene): Promise<HTMLElement> {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const detail = createElement(InboxDetail, {
+    entry: e, directory, offline, onToggleRead: () => undefined,
+    onDecided: () => undefined, readBusy: false,
+  });
   await act(async () => {
     root?.render(
-      createElement(
-        QueryClientProvider, { client },
-        createElement(SessionProvider, { value: session() },
-          createElement(MemoryRouter, null,
-            createElement(InboxDetail, {
-              entry: e, directory, offline, onToggleRead: () => undefined,
-              onDecided: () => undefined, readBusy: false,
-            })))
-      )
+      createElement(LocaleProvider, {
+        locale: ko,
+        children: createElement(
+          QueryClientProvider, { client },
+          createElement(SessionProvider, { value: session() },
+            createElement(MemoryRouter, null,
+              scene === undefined
+                ? detail
+                : createElement(ConnectionContext.Provider, { value: connectionScene(scene) }, detail)))
+        ),
+      })
     );
   });
   for (let i = 0; i < 6; i += 1) {
@@ -117,7 +128,8 @@ async function mount(e: MailboxEntry, offline = false): Promise<HTMLElement> {
   return host;
 }
 
-beforeAll(() => { env.IS_REACT_ACT_ENVIRONMENT = true; });
+let ko: AppLocale;
+beforeAll(async () => { ko = await koreanLocale(); env.IS_REACT_ACT_ENVIRONMENT = true; });
 beforeEach(() => {
   api.fetchMessages.mockResolvedValue({ messages: [msg(6, "둘째"), msg(5, "첫째")] });
   api.fetchThreadReplies.mockResolvedValue({ messages: [msg(9, "답글 하나")] });
@@ -222,6 +234,16 @@ describe("InboxDetail", () => {
     const h = await mount(entry({ key: "approval:a1", kind: "task", task, seq: undefined }), true);
     expect(h.querySelector('[data-testid="approval-actions"]')).toBeNull();
     expect(h.querySelector('[data-testid="inbox-approval-offline"]')).not.toBeNull();
+  });
+
+  // #5239: 승인 줄이 막은 원인을 말한다. 문장은 손으로 적는다(사전 값을 되풀이하면 코드와 시험이 함께 틀려도 초록이다).
+  it.each([
+    ["deviceOffline", "오프라인이라 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."],
+    ["serverUnreachable", "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요."],
+  ] as const)("처리할 일 + %s이면 승인 줄이 그 원인을 말한다", async (scene, line) => {
+    const h = await mount(entry({ key: "approval:a1", kind: "task", task, seq: undefined }), true, scene);
+    const note = h.querySelector('[data-testid="inbox-approval-offline"]');
+    expect(note?.textContent?.replace(/\s+/g, " ").trim()).toBe(line);
   });
 
   it("오프라인에서는 답장 입력 대신 이유를 말한다", async () => {

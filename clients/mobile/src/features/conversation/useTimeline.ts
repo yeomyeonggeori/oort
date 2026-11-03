@@ -47,6 +47,7 @@ import {
   discardPending,
   emptyTimeline,
   failPending,
+  isChannelListEcho,
   reconcileMessages,
   removePending,
   retryPending,
@@ -130,9 +131,8 @@ import {hapticScope} from '../../lib/haptics';
 // settle rule and the reaction map — three things that must not be able to
 // disagree with what the channel is showing one screen away.
 //
-// Echoes carry their root in a side map (`pendingRootRef`) rather than in
-// `PendingMessage`, so the core's pending model is untouched and one settle
-// effect still covers both surfaces.
+// Echoes carry their root (`PendingMessage.rootId`) and 「대화에도 보내기」 choice with them, so one settle effect still
+// covers both surfaces and the channel list can draw a reply's echo with its 「↳ ○○님 스레드에 답글」 line (#4888).
 // =============================================================================
 
 const HEAD_LIMIT = 50;
@@ -158,6 +158,8 @@ export interface ThreadRepliesLoad {
 export interface TimelineSendFlags {
   /** 입력칸의 ✕로 이 메시지의 링크 미리보기를 끄고 보낸다(ADR-0170 증보 2026-11-01). */
   suppressUnfurl?: boolean;
+  /** 스레드 답글을 「대화에도 보내기」로 보낸다(ADR-0148 증보 2026-10-31, #4888). 답글(`sendReply`)에서만 뜻이 있다. */
+  alsoInChannel?: boolean;
 }
 
 export interface UseTimelineResult {
@@ -196,8 +198,8 @@ export interface UseTimelineResult {
    * The one send path: optimistic echo now, server seq when it lands.
    *
    * `replyToId` is ADR-0148 인용 — a column on the same write, never a second
-   * path. It rides the pending row (core `PendingMessage.replyToId`) rather than
-   * a side map like `pendingRootRef`, because the echo has to draw its own quote
+   * path. It rides the pending row (core `PendingMessage.replyToId`), as `rootId`
+   * does, because the echo has to draw its own quote
    * block: without it the optimistic row shows no quote and then grows one the
    * instant its seq lands, moving the text under the reader's eye.
    */
@@ -433,10 +435,9 @@ export function useTimeline(
     remove: removeUnfurls,
   } = useMessageUnfurls(workspaceId, currentChannel);
 
-  // Which echoes are thread replies: `clientMsgId -> rootId`. A side map rather
-  // than a field on `PendingMessage`, so the core's pending model stays as it
-  // is and both surfaces keep sharing one array and one settle effect.
-  const pendingRootRef = useRef<Record<string, string>>({});
+  // Which echoes are thread replies: the echo carries its own `rootId` (and `alsoInChannel`), the way `replyToId`
+  // rides the row — the channel list needs both to draw a failed or also-sent reply with its 「↳ ○○님 스레드에 답글」
+  // line (#4888), and both surfaces still share one array and one settle effect.
 
   const post = useCallback(
     async (row: PendingMessage) => {
@@ -445,14 +446,16 @@ export function useTimeline(
         sendEpochRef.current === epoch && channelRef.current === row.channelId,
       );
       try {
-        const rootId = pendingRootRef.current[row.clientMsgId];
+        const rootId = row.rootId;
         const attachmentIds = row.attachments?.map(attachment => attachment.id);
         // 입력칸 ✕로 끈 채 보낸 메시지의 재시도도 **같은 요청**이다(#5016). 서버는 이미 저장된 메시지의 재시도에서 이
         // 필드를 다시 판단하지 않으므로, 여기서 떨구는 순간 사람이 끈 카드가 되살아난다. 켠 때만 키가 간다.
         const suppress = row.suppressUnfurl === true ? {suppressUnfurl: true as const} : {};
         const attached =
           attachmentIds === undefined || attachmentIds.length === 0 ? {} : {attachmentIds};
-        const replyOptions = {...attached, ...suppress};
+        // 「대화에도 보내기」도 행을 타고 다닌다: 첫 요청이 서버에 닿지 못했다면 재시도가 같은 멱등키로 **같은 요청**이어야 한다.
+        const also = row.alsoInChannel === true ? {alsoInChannel: true as const} : {};
+        const replyOptions = {...attached, ...suppress, ...also};
         const confirmed = await (rootId === undefined
           ? sendMessage(workspaceId, row.channelId, row.clientMsgId, row.body, {
               ...(row.replyToId === undefined
@@ -552,10 +555,6 @@ export function useTimeline(
       const result = discardPending(pendingRef.current, clientMsgId);
       if (result.discarded === null) return null;
       updatePending(() => result.list);
-      // 스레드 답글이었다면 뿌리 표의 이 칸도 이 행의 것이었다. 행이 사라지면 아무도 다시 읽지 않는다.
-      const roots = {...pendingRootRef.current};
-      delete roots[clientMsgId];
-      pendingRootRef.current = roots;
       return result.discarded;
     },
     [updatePending],
@@ -738,7 +737,6 @@ export function useTimeline(
         return;
       }
       const clientMsgId = crypto.randomUUID();
-      pendingRootRef.current = {...pendingRootRef.current, [clientMsgId]: rootId};
       const row: PendingMessage = {
         clientMsgId,
         channelId: channel,
@@ -747,10 +745,12 @@ export function useTimeline(
         createdAtMs: Date.now(),
         sinceSeq: newestSeqRef.current,
         status: 'sending',
+        rootId,
         ...(attachments === undefined || attachments.length === 0
           ? {}
           : {attachments}),
         ...(flags?.suppressUnfurl === true ? {suppressUnfurl: true} : {}),
+        ...(flags?.alsoInChannel === true ? {alsoInChannel: true} : {}),
       };
       updatePending(list => addPending(list, row));
       await post(row);
@@ -759,18 +759,16 @@ export function useTimeline(
   );
 
   const repliesPending = useCallback(
-    (rootId: string) =>
-      pending.filter(row => pendingRootRef.current[row.clientMsgId] === rootId),
+    (rootId: string) => pending.filter(row => row.rootId === rootId),
     [pending],
   );
 
-  // The channel list must not show a reply's echo: the reply belongs to the
-  // thread that is open over it, and a row appearing in both places is the same
-  // message told twice.
-  const channelPending = useMemo(
-    () => pending.filter(row => pendingRootRef.current[row.clientMsgId] === undefined),
-    [pending],
-  );
+  // The channel list shows a reply's echo only where the reply is (or will be) a main-flow row, or where its failure
+  // has nowhere else to be seen (#4888). A thread-only reply in flight belongs to the thread that is open over it — a
+  // row in both places would be the same message told twice — but a reply sent from the swipe never opens a thread,
+  // so when it FAILS the person must hear it here, with the same retry (same `client_msg_id`) and ✕ (#5210).
+  // An also-sent reply's echo stands in the channel from the start, so the confirmed row does not pop in.
+  const channelPending = useMemo(() => pending.filter(isChannelListEcho), [pending]);
 
   const backfillAfter = useCallback(
     async (
@@ -845,7 +843,6 @@ export function useTimeline(
     knownIdsRef.current = new Set();
     replayWatchRef.current = null;
     markerCounterRef.current = 0;
-    pendingRootRef.current = {};
     updatePending(() => []);
     setState(emptyTimeline());
     setStatus('loading');
