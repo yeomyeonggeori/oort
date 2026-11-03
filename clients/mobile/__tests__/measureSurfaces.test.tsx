@@ -246,31 +246,67 @@ describe('measure.sh — 모르는 표면 이름이면 시뮬레이터를 건드
   it('시작 점검: 스크립트가 찍는 이름을 하네스가 전부 알면 통과하고, 모르는 이름이 하나 섞이면 멈춘다', () => {
     const preflight = block('surface-preflight');
     expect(preflight).not.toBeNull();
-    const pass = bash(`set -euo pipefail\n${preflight}\necho PREFLIGHT-DONE`, MEASURE_SH);
+    const code = `set -euo pipefail\n${preflight}\necho PREFLIGHT-DONE`;
+    const pass = bash(code, MEASURE_SH);
     expect([pass.status, pass.stdout.includes('PREFLIGHT-DONE')]).toEqual([0, true]);
 
     // 같은 구획을 **모르는 이름이 한 줄 더 있는 사본**에 돌린다: 점검이 스크립트 자신의 `capture_surface` 줄을 읽는다는 증거다.
+    // 사본은 진짜와 같은 모양의 작은 트리(`scripts/measure.sh` + `measure/` 심볼릭 링크)에 둔다 — 점검은 스크립트 곁의 `../measure/` 를 부른다.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'measure-sh-'));
-    const copy = path.join(dir, 'measure.sh');
+    const copy = path.join(dir, 'scripts', 'measure.sh');
+    const link = path.join(dir, 'measure');
+    fs.mkdirSync(path.join(dir, 'scripts'));
+    fs.symlinkSync(path.join(MOBILE, 'measure'), link);
     try {
       fs.writeFileSync(copy, `${script}\ncapture_surface NO-SUCH-SURFACE nowhere.png\n`);
-      const fail = bash(`set -euo pipefail\n${preflight}\necho PREFLIGHT-DONE`, copy);
+      const fail = bash(code, copy);
       expect(fail.status).not.toBe(0);
       expect(fail.stdout.includes('PREFLIGHT-DONE')).toBe(false);
       expect(fail.stderr).toContain('알 수 없는 표면: NO-SUCH-SURFACE');
+      // 사본에 그 줄이 없으면(= 위 실패의 원인이 사본의 한 줄뿐이면) 같은 사본이 통과한다.
+      fs.writeFileSync(copy, script);
+      const again = bash(code, copy);
+      expect([again.status, again.stdout.includes('PREFLIGHT-DONE')]).toEqual([0, true]);
     } finally {
       fs.unlinkSync(copy);
+      fs.unlinkSync(link);
+      fs.rmdirSync(path.join(dir, 'scripts'));
       fs.rmdirSync(dir);
     }
   });
 
-  it('시작 점검이 시뮬레이터·Metro 를 건드리는 첫 명령보다 앞에 선다', () => {
+  it('시작 점검은 어느 폴더에서 어떤 경로로 불러도 돈다 — 상대 경로로 불린 스크립트도 자기 줄을 읽는다', () => {
+    const preflight = block('surface-preflight');
+    expect(preflight).not.toBeNull();
+    const code = `set -euo pipefail\n${preflight}\necho PREFLIGHT-DONE`;
+    const repoRoot = path.resolve(MOBILE, '../..');
+    const callers: ReadonlyArray<readonly [string, string]> = [
+      [repoRoot, 'clients/mobile/scripts/measure.sh'],
+      [path.join(MOBILE, 'scripts'), './measure.sh'],
+      [MOBILE, 'scripts/measure.sh'],
+    ];
+    for (const [cwd, argv0] of callers) {
+      const run = spawnSync('bash', ['-c', code, argv0], {cwd, encoding: 'utf8'});
+      expect([cwd, argv0, run.status, run.stdout.includes('PREFLIGHT-DONE')]).toEqual([cwd, argv0, 0, true]);
+    }
+  });
+
+  it('시작 점검이 시뮬레이터·Metro 를 건드리는 첫 명령과 스크립트의 `cd` 보다 앞에 선다', () => {
     const at = script.indexOf('# >>> surface-preflight');
     expect(at).toBeGreaterThan(0);
-    const touching = ['xcrun ', 'node measure/origin-stub.mjs', 'defaults write', 'osascript', 'react-native/cli.js'];
+    // `cd` 앞인 까닭: 상대 경로로 불린 `$0` 은 `cd` 뒤에는 다른 곳을 가리켜 점검이 자기 줄을 못 읽는다.
+    const touching = [
+      'cd "$(dirname "$0")/.."',
+      'xcrun ',
+      'node measure/origin-stub.mjs',
+      'defaults write',
+      'osascript',
+      'react-native/cli.js',
+      'mkdir -p',
+    ];
     for (const command of touching) {
       const first = script.indexOf(command);
-      expect([command, first === -1 || first > at]).toEqual([command, true]);
+      expect([command, first > at]).toEqual([command, true]); // 못 찾은 명령(-1)도 붉다: 이 목록이 스크립트를 따라간다.
     }
   });
 

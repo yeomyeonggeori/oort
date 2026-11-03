@@ -20,15 +20,16 @@
 # the software keyboard never appears and step 3 measures nothing.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
-
 # >>> surface-preflight
 # 시뮬레이터·Metro·출력 폴더를 건드리기 **전에** 묻는다(#5172): 이 스크립트가 찍는 모든 표면(`capture_surface <이름> …`)을 하네스가
 # 아는가. `-momoMeasure <이름>` 은 아무 이름이나 받고, 하네스가 모르는 이름은 「알 수 없는 표면」 안내 화면을 그리는데 그것도 멀쩡한
 # 사진으로 남는다(#2864 가 지운 `WORK-CONSOLE` 이 이 스크립트에서 그렇게 찍혔고, 검증 줄은 `APPROVED` 를 그렇게 받았다). 모르는 이름이
 # 있으면 여기서 멈춘다. 이름은 스크립트 자신의 `capture_surface` 줄에서 읽는다(공백 없는 이름이라 따옴표 없이 펼친다).
-node measure/known-surface.cjs $(grep -E '^capture_surface +[A-Za-z0-9+_-]+ ' "$0" | awk '{print $2}' | sort -u)
+# 아래 `cd` 보다 **앞**에 둔다: 이 스크립트는 어느 폴더에서 불러도 되고, 상대 경로로 불린 `$0` 은 `cd` 뒤에는 가리키는 곳이 달라진다.
+node "$(cd "$(dirname "$0")" && pwd)/../measure/known-surface.cjs" $(grep -E '^capture_surface +[A-Za-z0-9+_-]+ ' "$0" | awk '{print $2}' | sort -u)
 # <<< surface-preflight
+
+cd "$(dirname "$0")/.."
 
 BUNDLE_ID="app.momo.ios"
 OUT_DIR="${1:-measure/out}"
