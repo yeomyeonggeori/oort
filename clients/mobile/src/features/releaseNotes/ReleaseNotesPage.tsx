@@ -37,6 +37,8 @@ import {useReleaseNotesMessages} from './useReleaseNotesMessages';
 // 목록은 새 소식이 맨 위이고, 이 빌드에 붙는 소식(`noteForPhoneBuild`)의 오른쪽 값이 「지금 쓰는 버전」이다(나머지는 공개일).
 // 이 빌드의 자기 소식이 아직 없으면 그 앞의 가장 새 소식에 선다(그 소식이 이 앱에 적용되는 가장 새 것이다).
 // 내용은 팀이 QA 와 써 보기에 쓴다: 항목마다 보이는 화면(폰·데스크탑) 표지, 「바뀐 점」, 「이렇게 써 보세요」.
+// 핵심 카드 뒤에는 「그 밖에 바뀐 점」(#5054)이 주제별 한 줄로 선다: 소식이 이 칸을 비워 두면 머리글도 서지 않는다. 이 장에만
+// 있다(올라오는 시트에는 없다). 글은 모두 사전의 키라서 언어마다 따로 고를 것이 없다.
 // =============================================================================
 
 const SURFACE_KEY = {
@@ -48,6 +50,7 @@ const SURFACE_KEY = {
 const rowTestId = (version: string) => 'release-notes-row-' + version;
 const itemTestId = (id: string) => 'release-notes-item-' + id;
 const surfacesTestId = (id: string) => itemTestId(id) + '-surfaces';
+const otherTestId = (id: string) => 'release-notes-other-' + id;
 // JSX 식 안의 글자 있는 문자열은 직접 문구 장부가 문구로 센다 — 머리의 ‹ 단추 속성은 식 밖에서 만든다.
 const LIST_BACK_TEST_ID = 'settings-back';
 const DETAIL_BACK_TEST_ID = 'release-notes-back';
@@ -89,7 +92,7 @@ export function ReleaseNotesSettingsPage({
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const closeLayer = useLayerClose();
-  const {messages, noteLocale} = useReleaseNotesMessages();
+  const {messages} = useReleaseNotesMessages();
   const notes = useMemo(() => listReleaseNotes(given), [given]);
   const current = noteForPhoneBuild(notes, build);
   const [selected, setSelected] = useState<string | null>(null);
@@ -132,7 +135,7 @@ export function ReleaseNotesSettingsPage({
                   title={messages.formatMessage('releaseNotes.version.label', {
                     version: note.version,
                   })}
-                  detail={note.summary[noteLocale]}
+                  detail={messages.formatMessage(note.summary)}
                   value={
                     current !== null && current.version === note.version
                       ? messages.formatMessage('releaseNotes.version.current')
@@ -172,7 +175,7 @@ function ReleaseNoteDetailPage({
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const closeLayer = useLayerClose();
-  const {messages, noteLocale} = useReleaseNotesMessages();
+  const {messages} = useReleaseNotesMessages();
   const goBack = closeLayer ?? onBack;
   const versionLabel = messages.formatMessage('releaseNotes.version.label', {
     version: note.version,
@@ -208,12 +211,14 @@ function ReleaseNoteDetailPage({
                 date: note.releasedOn,
               })}
             </Text>
-            <Sentence style={styles.summary}>{note.summary[noteLocale]}</Sentence>
+            <Sentence style={styles.summary}>
+              {messages.formatMessage(note.summary)}
+            </Sentence>
           </View>
           {note.items.map(item => (
             <GroupCard
               key={item.id}
-              label={item.copy[noteLocale].title}
+              label={messages.formatMessage(item.title)}
               testID={itemTestId(item.id)}>
               <View style={styles.itemBody}>
                 <Text
@@ -230,7 +235,7 @@ function ReleaseNoteDetailPage({
                     {messages.formatMessage('releaseNotes.detail.changed')}
                   </Text>
                   <Sentence style={styles.blockText}>
-                    {item.copy[noteLocale].changed}
+                    {messages.formatMessage(item.changed)}
                   </Sentence>
                 </View>
                 <View style={styles.block}>
@@ -238,12 +243,35 @@ function ReleaseNoteDetailPage({
                     {messages.formatMessage('releaseNotes.detail.tryIt')}
                   </Text>
                   <Sentence style={styles.blockText}>
-                    {item.copy[noteLocale].tryIt}
+                    {messages.formatMessage(item.tryIt)}
                   </Sentence>
                 </View>
               </View>
             </GroupCard>
           ))}
+          {note.others.length > 0 ? (
+            <View style={styles.others} testID="release-notes-others">
+              <Text accessibilityRole="header" style={styles.othersHeading}>
+                {messages.formatMessage('releaseNotes.detail.others')}
+              </Text>
+              <View style={styles.othersGroups}>
+                {note.others.map(group => (
+                  <GroupCard
+                    key={group.id}
+                    label={messages.formatMessage(group.title)}
+                    testID={otherTestId(group.id)}>
+                    <View style={styles.lines}>
+                      {group.lines.map(lineKey => (
+                        <Sentence key={lineKey} style={styles.blockText}>
+                          {messages.formatMessage(lineKey)}
+                        </Sentence>
+                      ))}
+                    </View>
+                  </GroupCard>
+                ))}
+              </View>
+            </View>
+          ) : null}
         </ScrollView>
       </Screen>
     </View>
@@ -265,6 +293,20 @@ const buildStyles = (color: Palette) =>
       paddingVertical: space.md,
     },
     surfaces: {fontSize: font.label, lineHeight: line.label, color: color.textMuted},
+    // 「그 밖에 바뀐 점」: 머리글은 첫 카드에 붙어 서고, 카드(주제)끼리는 핵심 카드와 같은 간격이다.
+    others: {gap: space.sm},
+    othersHeading: {
+      fontSize: font.heading,
+      lineHeight: line.heading,
+      fontWeight: '600',
+      color: color.text,
+    },
+    othersGroups: {gap: space.lg},
+    lines: {
+      gap: space.sm,
+      paddingHorizontal: SHEET.cardInset,
+      paddingVertical: space.md,
+    },
     block: {gap: space.xs},
     blockLabel: {fontSize: font.label, lineHeight: line.label, fontWeight: '600', color: color.textMuted},
     blockText: {fontSize: font.body, lineHeight: line.body, color: color.text},
