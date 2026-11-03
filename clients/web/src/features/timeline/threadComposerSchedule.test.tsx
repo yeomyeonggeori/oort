@@ -6,10 +6,12 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider, onlineManager } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Channel } from "@momo/core/lib/api";
-import { COMPOSER_OFFLINE_COPY } from "@momo/core/features/chat/composerCopy";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import type { ScheduledMessage } from "@momo/core/features/scheduled/types";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 
 // =============================================================================
 // ADR-0208 부록 B(#4215): 스레드 입력창의 「예약해서 보내기」.
@@ -71,13 +73,18 @@ function scheduledRow(over: Partial<ScheduledMessage> = {}): ScheduledMessage {
   };
 }
 
+// 기기 오프라인일 때 입력창 위 줄(#5239). 사전의 값을 되풀이하지 않고 손으로 적는다.
+const OFFLINE = "오프라인이라 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요.";
+
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let mountedRoot: Root | null = null;
 let host: HTMLElement | null = null;
 let here = "";
 let sent = 0;
+let ko: AppLocale;
 
-beforeAll(() => {
+beforeAll(async () => {
+  ko = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 beforeEach(() => {
@@ -135,27 +142,30 @@ async function mount() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   await act(async () => {
     mountedRoot?.render(
-      createElement(
-        QueryClientProvider,
-        { client },
-        createElement(
-          MemoryRouter,
-          { initialEntries: [`/c/${CH}`] },
+      createElement(LocaleProvider, {
+        locale: ko,
+        children: createElement(
+          QueryClientProvider,
+          { client },
           createElement(
-            SessionProvider,
-            { value: session() },
-            createElement(ThreadComposer, {
-              workspaceId: WS,
-              channelId: CH,
-              rootId: ROOT,
-              directory: makeDirectory([]),
-              channels: CHANNELS,
-              onSent: () => undefined,
-            }),
-            createElement(Probe)
+            MemoryRouter,
+            { initialEntries: [`/c/${CH}`] },
+            createElement(
+              SessionProvider,
+              { value: session() },
+              createElement(ThreadComposer, {
+                workspaceId: WS,
+                channelId: CH,
+                rootId: ROOT,
+                directory: makeDirectory([]),
+                channels: CHANNELS,
+                onSent: () => undefined,
+              }),
+              createElement(Probe)
+            )
           )
-        )
-      )
+        ),
+      })
     );
   });
   await settle();
@@ -261,11 +271,11 @@ describe("입구와 막힌 이유 (UI 명세 0.4: 스레드 입력창)", () => {
     await act(async () => {
       window.dispatchEvent(new Event("offline"));
     });
-    expect(textOf("thread-composer-offline")).toBe(COMPOSER_OFFLINE_COPY);
+    expect(textOf("thread-composer-offline")).toBe(OFFLINE);
     expect((need("thread-composer-send") as HTMLButtonElement).disabled).toBe(true);
-    expect(need("thread-composer-send").getAttribute("title")).toBe(COMPOSER_OFFLINE_COPY);
+    expect(need("thread-composer-send").getAttribute("title")).toBe(OFFLINE);
     expect(triggerEl().getAttribute("aria-disabled")).toBe("true");
-    expect(triggerEl().getAttribute("title")).toBe(COMPOSER_OFFLINE_COPY);
+    expect(triggerEl().getAttribute("title")).toBe(OFFLINE);
     await act(async () => {
       window.dispatchEvent(new Event("online"));
     });
@@ -307,6 +317,28 @@ describe("예약 흐름: 스레드 답글 (ADR-0208 D1, UI 명세 0.5)", () => {
     expect(textOf("thread-composer-scheduled-banner")).toContain("이 스레드에 예약된 메시지 1개");
     expect(sent).toBe(0);
     expect(document.activeElement).toBe(inputEl());
+  });
+
+  it("「대화에도 보내기」를 켠 채 예약하면 예약은 그 값을 싣지 않고, 체크는 글과 함께 풀려 다음 답글로 새지 않는다 (#4888)", async () => {
+    const inflight = manualCreate();
+    await mount();
+    await type("체크를 켜고 거는 예약");
+    const check = need("thread-composer-also-in-channel-input") as HTMLInputElement;
+    await act(async () => {
+      check.click();
+    });
+    expect(check.checked).toBe(true);
+    await openMenu();
+    await press(need("thread-composer-schedule-preset-tomorrow"));
+    const [, input] = scheduledApi.createScheduledMessage.mock.calls[0]!;
+    expect(input).toMatchObject({ rootId: ROOT, body: "체크를 켜고 거는 예약" });
+    expect("alsoInChannel" in input).toBe(false);
+    await act(async () => {
+      inflight.resolve(scheduledRow());
+    });
+    await settle();
+    expect(inputEl().value).toBe("");
+    expect(check.checked).toBe(false);
   });
 
   it("배너는 이 스레드의 예약만 센다(같은 채널의 다른 스레드·스레드가 아닌 글은 세지 않는다)", async () => {

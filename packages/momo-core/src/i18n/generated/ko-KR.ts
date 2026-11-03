@@ -2961,6 +2961,18 @@ export const catalog: MessageCatalog = {
       "value": " 공개"
     }
   ],
+  "reply.alsoInChannel.label": [
+    {
+      "type": 0,
+      "value": "대화에도 보내기"
+    }
+  ],
+  "reply.alsoInChannel.unsupported": [
+    {
+      "type": 0,
+      "value": "이 서버는 아직 「대화에도 보내기」를 지원하지 않아요. 체크를 끄고 다시 보내 주세요."
+    }
+  ],
   "reply.card.cancel": [
     {
       "type": 0,
@@ -3017,6 +3029,40 @@ export const catalog: MessageCatalog = {
     {
       "type": 0,
       "value": "답글 보내기"
+    }
+  ],
+  "reply.home.excerptDeleted": [
+    {
+      "type": 0,
+      "value": "삭제된 메시지"
+    }
+  ],
+  "reply.home.header": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "님 스레드에 답글"
+    }
+  ],
+  "reply.home.headerSelf": [
+    {
+      "type": 0,
+      "value": "내 글 스레드에 답글"
+    }
+  ],
+  "reply.home.headerUnknown": [
+    {
+      "type": 0,
+      "value": "스레드에 답글"
+    }
+  ],
+  "reply.home.open": [
+    {
+      "type": 0,
+      "value": "이 답글이 달린 스레드 열기"
     }
   ],
   "settings.aiLimits.ceilingSearches": [

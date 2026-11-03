@@ -84,7 +84,10 @@ const REPLY = message({
 });
 
 interface Senders {
-  sendThreadReply: jest.Mock<Promise<void>, [string, string, MessageAttachment[] | undefined]>;
+  sendThreadReply: jest.Mock<
+    Promise<void>,
+    [string, string, MessageAttachment[] | undefined, {alsoInChannel?: boolean}?]
+  >;
   plainSend: jest.Mock;
   onOpenThread: jest.Mock;
   onStarted: jest.Mock;
@@ -404,5 +407,68 @@ describe('머리말의 글자 열 (#5067)', () => {
     expect(distinct.size).toBeGreaterThan(6);
     expect(Math.max(...lines) - Math.min(...lines)).toBeCloseTo(CONV.composerCircle, 0);
     expect(lines[0]).toBeCloseTo(lines[lines.length - 1], 5);
+  });
+});
+
+describe('「대화에도 보내기」 체크 (#4888)', () => {
+  const check = () => screen.getByTestId('also-in-channel-check');
+  const checked = () => check().props.accessibilityState.checked;
+
+  it('답글 머리말이 걸린 동안에만 서고 기본은 꺼짐이다 — 평범한 채널 입력칸에는 없다', () => {
+    render(<Harness messages={[ROOT, REPLY]} fake={senders()} />);
+    expect(screen.queryByTestId('also-in-channel-check')).toBeNull();
+    swipeRow(0);
+    expect(checked()).toBe(false);
+    expect(check().props.accessibilityRole).toBe('checkbox');
+    expect(check().props.accessibilityLabel).toBe('대화에도 보내기');
+  });
+
+  it('켜고 보내면 네 번째 인자에 alsoInChannel 이 실리고, 보낸 뒤 다음 답글은 꺼진 채 시작한다(기억하지 않는다)', () => {
+    const fake = senders();
+    render(<Harness messages={[ROOT, REPLY]} fake={fake} />);
+    swipeRow(0);
+    fireEvent.press(check());
+    expect(checked()).toBe(true);
+    fireEvent.changeText(screen.getByTestId('composer-input'), '대화에도 보여 주세요');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(fake.sendThreadReply).toHaveBeenCalledWith(ROOT_ID, '대화에도 보여 주세요', undefined, {alsoInChannel: true});
+    // 머리말이 떨어지며 체크 줄도 사라지고, 다시 밀면 꺼진 채다.
+    expect(screen.queryByTestId('also-in-channel-check')).toBeNull();
+    swipeRow(0);
+    expect(checked()).toBe(false);
+    fireEvent.changeText(screen.getByTestId('composer-input'), '이번에는 스레드로만');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(fake.sendThreadReply).toHaveBeenLastCalledWith(ROOT_ID, '이번에는 스레드로만', undefined);
+  });
+
+  it('다른 행을 밀어 대상이 바뀌면 꺼진다', () => {
+    render(<Harness messages={[ROOT, REPLY]} fake={senders()} />);
+    swipeRow(0);
+    fireEvent.press(check());
+    expect(checked()).toBe(true);
+    swipeRow(1);
+    expect(checked()).toBe(false);
+  });
+
+  it('✕로 대상을 떼면 체크도 사라진다', () => {
+    render(<Harness messages={[ROOT]} fake={senders()} />);
+    swipeRow(0);
+    fireEvent.press(check());
+    fireEvent.press(screen.getByTestId('reply-draft-cancel'));
+    expect(screen.queryByTestId('also-in-channel-check')).toBeNull();
+  });
+
+  it('스레드 입력칸(offerAlsoInChannel): 늘 서고, 켜고 보내면 옵션에 실리며, 보낸 뒤 꺼진다', () => {
+    const onSend = jest.fn();
+    render(<Composer offerAlsoInChannel recipient="place" channelLabel="스레드" directory={DIRECTORY} onSend={onSend} />);
+    expect(checked()).toBe(false);
+    fireEvent.press(check());
+    fireEvent.changeText(screen.getByTestId('composer-input'), '스레드에서 보내요');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).toHaveBeenCalledWith('스레드에서 보내요', {alsoInChannel: true});
+    expect(checked()).toBe(false);
+    fireEvent.changeText(screen.getByTestId('composer-input'), '꺼진 채로');
+    fireEvent.press(screen.getByTestId('composer-send'));
+    expect(onSend).toHaveBeenLastCalledWith('꺼진 채로');
   });
 });

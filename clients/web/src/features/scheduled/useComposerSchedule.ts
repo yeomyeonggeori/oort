@@ -1,5 +1,4 @@
 import { useCallback, useRef, useState } from "react";
-import { COMPOSER_OFFLINE_COPY } from "@momo/core/features/chat/composerCopy";
 import type { AttachmentDraft } from "@momo/core/features/attachments/model";
 import { SCHEDULED_COPY, type PlaceWord } from "@momo/core/features/scheduled/copy";
 import { scheduledErrorLine, type ScheduledErrorLine } from "@momo/core/features/scheduled/errors";
@@ -23,6 +22,7 @@ import type { ScheduleDialogProps } from "./ScheduleDialog";
 import type { ScheduleSendMenuProps } from "./ScheduleSendMenu";
 import { useScheduled, useScheduledPlaces } from "./useScheduled";
 import { useTransientStatus } from "@/features/common/useTransientStatus";
+import { useComposerBlockedLine } from "@/features/common/blockedLines";
 
 // =============================================================================
 // 입력창의 「예약해서 보내기」 흐름 한 벌 (ADR-0208 D16, UI 명세 0.3·0.4·0.5, #4215).
@@ -110,6 +110,8 @@ export function useComposerSchedule(options: ComposerScheduleOptions): ComposerS
   const data = useScheduled();
   const places = useScheduledPlaces();
   const { status, announce } = useTransientStatus();
+  // 오프라인으로 막힌 ▾의 설명은 입력창 위 줄과 같은 문장이다(막은 원인을 말한다, #5239).
+  const blockedLine = useComposerBlockedLine();
   const [busy, setBusy] = useState(false);
   const [presets, setPresets] = useState<readonly ScheduledPreset[]>([]);
   const [dialog, setDialog] = useState<DialogState>(CLOSED_DIALOG);
@@ -238,7 +240,7 @@ export function useComposerSchedule(options: ComposerScheduleOptions): ComposerS
     },
     returnFocus: () => latest.current.focusInput(),
     blockedTitle:
-      scheduleBlockTitle(gate.lines) ?? (gate.block === "offline" ? COMPOSER_OFFLINE_COPY : null),
+      scheduleBlockTitle(gate.lines) ?? (gate.block === "offline" ? blockedLine : null),
     testIdPrefix: options.surface === "thread" ? "thread-composer" : "composer",
   };
 
