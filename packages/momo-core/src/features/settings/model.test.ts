@@ -1,13 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
+import { NetworkError } from "../../lib/http";
+import koConnection from "../../i18n/catalogs/ko-KR/connection.json";
 import {
   autoTargetLabel,
   buildInviteMailto,
   buildJoinLink,
   choiceLabel,
   eligibleAutoTargets,
+  ERROR_MESSAGE_EXPIRED,
   ERROR_MESSAGE_FALLBACK,
+  ERROR_MESSAGE_UNREACHABLE,
   errorMessage,
+  serverWireMessage,
   formatDay,
   GUEST_INVITES_PAUSED_CODE,
   INVITE_ROLES,
@@ -621,11 +626,36 @@ describe("error mapping", () => {
     expect(isSlugConflict(new ApiError(400, "bad slug"))).toBe(false);
   });
 
-  it("prefers the server message and never invents one", () => {
-    expect(errorMessage(new ApiError(400, "engine must be one of opencode, goose, codex-local"))).toBe(
-      "engine must be one of opencode, goose, codex-local"
-    );
-    expect(errorMessage("string throw")).toContain("다시 시도");
+  // #5221: 서버 원문·오류 객체의 문장은 어떤 경우에도 화면에 나가지 않는다(감사 문서 §3: Buzz는 응답 코드·원문을 붉은 글로 그대로
+  // 냈다). 닫힌 분류로만 말한다. 서버 문장을 일부러 같이 보여 주는 자리는 `serverWireMessage` 를 명시해서 부른다.
+  it("never returns the server's or the error object's own sentence, only a closed classification", () => {
+    const wire = "engine must be one of opencode, goose, codex-local";
+    expect(errorMessage(new ApiError(400, wire))).toBe(ERROR_MESSAGE_FALLBACK);
+    expect(errorMessage(new ApiError(403, "forbidden: operator only"))).toBe(ERROR_MESSAGE_FALLBACK);
+    expect(errorMessage(new ApiError(500, "pq: duplicate key value"))).toBe(ERROR_MESSAGE_FALLBACK);
+    expect(errorMessage(new ApiError(503, "no archive", "archive_not_configured"))).toBe(ERROR_MESSAGE_FALLBACK);
+    expect(errorMessage(new Error("TypeError: x is undefined"))).toBe(ERROR_MESSAGE_FALLBACK);
+    expect(errorMessage("string throw")).toBe(ERROR_MESSAGE_FALLBACK);
+  });
+
+  it("says unreachable for no answer and gateway errors, and expired for a 401", () => {
+    expect(errorMessage(new NetworkError("unreachable", 15_000))).toBe(ERROR_MESSAGE_UNREACHABLE);
+    expect(errorMessage(new NetworkError("timeout", 15_000))).toBe(ERROR_MESSAGE_UNREACHABLE);
+    for (const status of [502, 503, 504]) {
+      expect(errorMessage(new ApiError(status, "gateway"))).toBe(ERROR_MESSAGE_UNREACHABLE);
+    }
+    expect(errorMessage(new ApiError(401, "token expired"))).toBe(ERROR_MESSAGE_EXPIRED);
+  });
+
+  it("keeps the two classified sentences equal to the dictionary's ko sentences (one source of words)", () => {
+    expect(ERROR_MESSAGE_UNREACHABLE).toBe(koConnection["connection.load.reasonServer"]);
+    expect(ERROR_MESSAGE_EXPIRED).toBe(koConnection["connection.session.expired"]);
+  });
+
+  it("serverWireMessage is the explicit opt-in that still returns the server's sentence", () => {
+    expect(serverWireMessage(new ApiError(400, "engine must be one of opencode"))).toBe("engine must be one of opencode");
+    expect(serverWireMessage(new Error("boom"))).toBe("boom");
+    expect(serverWireMessage("string throw")).toBe(ERROR_MESSAGE_FALLBACK);
   });
 
   it("폴백은 해요체다 — 카드의 해요체 앞말 뒤에 붙는다 (#2988)", () => {
