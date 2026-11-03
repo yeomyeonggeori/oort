@@ -54,6 +54,9 @@ const ACTION_REUSE: &str = "auth.dev_token.refresh_reuse_detected";
 const DAY_SECONDS: i64 = 24 * 60 * 60;
 
 const HOLDER_PASSWORD: &str = "dalmuri-holder-password";
+/// The owner issues the reset links below, and the issue asks for the issuing operator's own password
+/// (ADR-0215 D6).
+const OWNER_PASSWORD: &str = "dalmuri-owner-password";
 const CHANGED_PASSWORD: &str = "dalmuri-changed-password";
 const RESET_PASSWORD: &str = "dalmuri-reset-password";
 
@@ -96,6 +99,16 @@ async fn world() -> World {
     .execute(&su)
     .await
     .expect("give the holder a password");
+    sqlx::query(
+        "UPDATE human SET password_hash = momo_password_hash($3) \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(workspace)
+    .bind(owner)
+    .bind(OWNER_PASSWORD)
+    .execute(&su)
+    .await
+    .expect("give the owner a password");
     seed_channel(&su, workspace, "public", &[owner, holder, bystander]).await;
     // `rotate_dev_refresh` only reads `state.pool`; the HTTP server above has its own state.
     let state = AppState::new(
@@ -690,6 +703,7 @@ impl World {
                         "{base}/v1/workspaces/{workspace}/members/{holder}/password-reset"
                     ))
                     .bearer_auth(&self.owner_jwt)
+                    .json(&json!({ "currentPassword": OWNER_PASSWORD }))
                     .send()
                     .await
                     .expect("issue the reset token");
