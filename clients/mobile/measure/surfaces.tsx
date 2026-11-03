@@ -216,6 +216,7 @@ import {AvatarApprovalSurface} from './avatarApproval';
 import {PinApprovalSurface} from './pinApproval';
 import {ThemeLiveSurface} from './themeLive';
 import {PhotoViewerSurface} from './photoViewer';
+import {ShareAttachSurface} from './shareAttachment';
 
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
@@ -2327,6 +2328,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     return (
       <NotifyPrimerSurface which={name.slice('notify-primer'.length).replace(/^-/, '')} />
     );
+  }
+
+  // #5207: 첨부 내려받기 공유 시트(시트가 열리고 닫힐 때 목록 자리·닫는 탭이 아래로 새는가). 실제 대화에 파일 카드, 여는 것은 Maestro 의 실제 탭.
+  if (name.startsWith('share-attach')) {
+    return <ShareAttachSurface which={name.slice('share-attach'.length).replace(/^-/, '')} />;
   }
 
   // #4180: 첨부 메뉴(+ 원에서 펼쳐지는 카드). 실제 머리·타임라인·컴포저, 여는 것은 Maestro 의 실제 탭.
