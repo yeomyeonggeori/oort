@@ -249,9 +249,18 @@ async function open(browser, origin, scheme, scene, hash) {
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("nav-team").waitFor({ timeout: 20_000 });
+  // 로그인 뒤 셸이 섰다는 신호: 사이드바 채널 줄(옛 `nav-team` test id 는 앱에서 사라졌다).
+  await page.getByTestId("channel-item").first().waitFor({ state: "attached", timeout: 20_000 });
   await page.evaluate((h) => { location.hash = h; }, hash);
   return { context, page };
+}
+
+/** 묶음 카드의 「자세히」를 연다(#4986). 서버 행·결정 권한은 접힌 안에만 있고, 닫힌 안은 DOM 에도 없다. */
+async function openDetails(page) {
+  const details = page.getByTestId("agent-card").first().getByTestId("request-bundle-details");
+  await details.locator("summary").click();
+  // 본문 목록이 먼저이고, 원본 보기(`agent-payload`) 안에도 목록이 하나 더 있어 첫 것만 기다린다.
+  await details.locator("dl").first().waitFor({ timeout: 5_000 });
 }
 
 async function raise(page) {
@@ -269,8 +278,20 @@ async function scenes(browser, origin, scheme) {
     const { context, page } = await open(browser, origin, scheme, { cards: [spec] }, `/c/${CH}`);
     await page.getByTestId("agent-card").first().waitFor({ timeout: 15_000 });
     await raise(page);
-    const rows = await page.locator('[data-testid="approval-action-row"]').count();
-    check(`${tag} card-${key}: 서버 행 ${CARDS[key].rows.length}개가 그대로 선다`, rows === CARDS[key].rows.length, String(rows));
+    // 한 줄로 접힌 카드가 기본이다(#4986). 행·권한 문장은 「자세히」를 열어야 읽고, 사진에도 열린 카드가 찍힌다.
+    await openDetails(page);
+    await raise(page);
+    const shown = await page.locator('[data-testid="approval-action-row"]').evaluateAll((els) =>
+      els.map((el) => ({
+        label: el.querySelector("dt")?.textContent ?? "",
+        // 접근 범위 강조 줄은 서버 값 밑에 덧붙는 한 줄이라 값에서 뺀다.
+        value: [...(el.querySelector("dd")?.childNodes ?? [])]
+          .filter((n) => !(n instanceof Element && n.matches('[data-testid="approval-access-widening"]')))
+          .map((n) => n.textContent ?? "")
+          .join(""),
+      }))
+    );
+    check(`${tag} card-${key}: 서버 행 ${CARDS[key].rows.length}개가 보낸 순서·글 그대로 선다`, JSON.stringify(shown) === JSON.stringify(CARDS[key].rows), JSON.stringify(shown));
     const roleText = (await page.getByTestId("approval-action-role").textContent()) ?? "";
     const expectRole = {
       admin: "관리자만 승인할 수 있어요.",
@@ -284,7 +305,8 @@ async function scenes(browser, origin, scheme) {
     // 사이드바 채널 알약: 승인 원장이 레일보다 이긴다.
     const pill = page.locator('[data-testid="channel-item"][data-channel-id="' + CH + '"] [data-testid="agent-turn-badge"]');
     await pill.waitFor({ timeout: 10_000 });
-    check(`${tag} card-${key}: 채널 알약이 「승인 대기」`, ((await pill.textContent()) ?? "").includes("승인 대기") && (await pill.getAttribute("data-state")) === "awaiting_approval");
+    // 알약 낱말은 요청 고리 사전의 「승인 필요」다(#4760 이 「승인 대기」를 대신했다). 상태값은 그대로 awaiting_approval.
+    check(`${tag} card-${key}: 채널 알약이 「승인 필요」`, ((await pill.textContent()) ?? "").includes("승인 필요") && (await pill.getAttribute("data-state")) === "awaiting_approval");
     await page.screenshot({ path: shotPath(`card-${key}`) });
     await context.close();
   }
