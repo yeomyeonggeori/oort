@@ -15,7 +15,7 @@
   "attachments.video.retry": "Try again",
   "attachments.video.thumbLabel": "Video {position, number}",
   "attachments.video.thumbHint": "Go to this video",
-  "attachments.video.saveHint": "Opens the share sheet. Choose “Save Video”.",
+  "attachments.video.saveHint": "Saves the video to your photo library",
   "attachments.viewer.mixedCaption": "{position, number} of {total, number}",
   "attachments.viewer.mixedCaptionLabel": "Item {position, number} of {total, number}",
   "attachments.tray.overflow": "{count, plural, one {# file doesn't} other {# files don't}} fit: a message holds up to {max, number}.",

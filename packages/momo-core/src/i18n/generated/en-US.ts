@@ -142,7 +142,7 @@ export const catalog: MessageCatalog = {
   "attachments.video.saveHint": [
     {
       "type": 0,
-      "value": "Opens the share sheet. Choose “Save Video”."
+      "value": "Saves the video to your photo library"
     }
   ],
   "attachments.video.seekLabel": [
@@ -2146,6 +2146,54 @@ export const catalog: MessageCatalog = {
       "value": "This one is not available right now. Please choose another."
     }
   ],
+  "mobile.attachmentSave.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't save · Try again"
+    }
+  ],
+  "mobile.attachmentSave.photosDenied": [
+    {
+      "type": 0,
+      "value": "Photos access is off · Open Settings"
+    }
+  ],
+  "mobile.attachmentSave.savedToFiles": [
+    {
+      "type": 0,
+      "value": "Saved to Files"
+    }
+  ],
+  "mobile.attachmentSave.savedToPhotos": [
+    {
+      "type": 0,
+      "value": "Saved to Photos"
+    }
+  ],
+  "mobile.attachmentSave.saveHintPhotos": [
+    {
+      "type": 0,
+      "value": "Saves to your photo library"
+    }
+  ],
+  "mobile.attachmentSave.saving": [
+    {
+      "type": 0,
+      "value": "Saving"
+    }
+  ],
+  "mobile.attachmentSave.toFiles": [
+    {
+      "type": 0,
+      "value": "Save to Files"
+    }
+  ],
+  "mobile.attachmentSave.toPhotos": [
+    {
+      "type": 0,
+      "value": "Save to Photos"
+    }
+  ],
   "mobile.connection.reconnectNow": [
     {
       "type": 0,
@@ -2179,7 +2227,7 @@ export const catalog: MessageCatalog = {
   "mobile.ios.photoLibraryAddUsage": [
     {
       "type": 0,
-      "value": "oort does not save photos to your library. All features work without this permission."
+      "value": "Adds the photos and videos you choose to save to your photo library. This permission does not let oort read your library."
     }
   ],
   "mobile.ios.photoLibraryUsage": [
@@ -3246,10 +3294,28 @@ export const catalog: MessageCatalog = {
       "value": "Puts the text on top and a large picture below, with up to two lines of title and description. Links without a large picture look like Small."
     }
   ],
+  "settings.connection.noServer": [
+    {
+      "type": 0,
+      "value": "No server address is saved on this device."
+    }
+  ],
   "settings.invite.guestInvitesPaused": [
     {
       "type": 0,
       "value": "Guest invites are paused until channel-specific invites are available."
+    }
+  ],
+  "settings.notifications.alwaysDetail": [
+    {
+      "type": 0,
+      "value": "Approval requests, mentions of you, and DMs can't be turned off by type. To silence everything at once, use Pause notifications."
+    }
+  ],
+  "settings.notifications.checking": [
+    {
+      "type": 0,
+      "value": "Checking your notification settings."
     }
   ],
   "settings.notifications.threadReplyDescription": [

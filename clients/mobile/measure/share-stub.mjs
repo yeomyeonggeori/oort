@@ -12,6 +12,10 @@
  *   video-big     58.4 MB (보고된 영상의 크기 — 내려받기 진행 줄이 여러 번 바뀐다)
  * 그 밖의 id 는 404 다 — 실패 상태를 찍을 때 쓴다.
  *
+ * **진짜 영상이 필요할 때(#5209)**: `SHARE_STUB_REAL_VIDEO=<mp4 경로>` 를 주면 `video-small` 이 그 파일의 바이트로 답한다. 영상 모양 바이트는 공유 시트는 통과해도
+ * 사진 보관함은 통과하지 못한다(`UIVideoAtPathIsCompatibleWithSavedPhotosAlbum` 이 디코드 가능한 영상만 받는다) — 「저장」을 재려면 진짜 H.264 mp4 여야 한다
+ * (`ffmpeg -f lavfi -i testsrc=duration=2:size=320x240:rate=15 -pix_fmt yuv420p -c:v libx264 clip.mp4`).
+ *
  * 천천히 보내서(조각 사이에 `SHARE_STUB_CHUNK_DELAY_MS`) `onProgress` 가 여러 번 불리게 한다. 0 이면 한 번에 보낸다.
  *
  * `POST /log` 는 하네스(`measure/shareAttachment.tsx`)가 보내는 기록 한 줄을 받는다: 표준 출력과 `SHARE_STUB_LOG` 파일(있으면)에 덧붙인다.
@@ -19,7 +23,7 @@
  *
  * Run:  node measure/share-stub.mjs            (포트 18995, `SHARE_STUB_PORT` 로 바꾼다)
  */
-import {appendFileSync} from 'node:fs';
+import {appendFileSync, readFileSync} from 'node:fs';
 import {createServer} from 'node:http';
 
 const PORT = Number(process.env.SHARE_STUB_PORT ?? 18995);
@@ -27,8 +31,10 @@ const CHUNK_DELAY_MS = Number(process.env.SHARE_STUB_CHUNK_DELAY_MS ?? 25);
 const CHUNK_BYTES = 256 * 1024;
 const LOG_FILE = process.env.SHARE_STUB_LOG ?? '';
 
+const REAL_VIDEO = process.env.SHARE_STUB_REAL_VIDEO ? readFileSync(process.env.SHARE_STUB_REAL_VIDEO) : null;
+
 const FILES = {
-  'video-small': 6 * 1024 * 1024,
+  'video-small': REAL_VIDEO ? REAL_VIDEO.length : 6 * 1024 * 1024,
   'video-big': Math.round(58.4 * 1024 * 1024),
 };
 
@@ -66,7 +72,7 @@ createServer(async (request, response) => {
   }
   process.stdout.write(`200 ${url.pathname} (${size} bytes)\n`);
   response.writeHead(200, {'Content-Type': 'video/mp4', 'Content-Length': size});
-  const bytes = fileBytes(size);
+  const bytes = REAL_VIDEO && decodeURIComponent(id ?? '') === 'video-small' ? REAL_VIDEO : fileBytes(size);
   for (let at = 0; at < size; at += CHUNK_BYTES) {
     if (response.destroyed) return;
     response.write(bytes.subarray(at, Math.min(size, at + CHUNK_BYTES)));
