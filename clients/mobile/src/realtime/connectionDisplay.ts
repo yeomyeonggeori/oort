@@ -1,4 +1,8 @@
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
+import {
+  CONNECTING_BAND_DELAY_MS,
+  DISPLAY_GRACE_MS,
+} from '@momo/core/features/connection/thresholds';
 
 // 상태 낱말은 여기 한 곳에서만 적는다(문구 장부는 영어 낱말 리터럴도 센다 — 같은 낱말을 파일 곳곳에 되풀이하면 장부가 는다).
 const CONNECTED: RealtimeStatus = 'connected';
@@ -46,20 +50,11 @@ const DISCONNECTED: RealtimeStatus = 'disconnected';
 // happening — it is shown as an outage at once, and the person can ask for a
 // reconnect from the banner.
 
-/** The outage deadline: how long a gap reads `connecting` before it is called an outage. */
-export const DISPLAY_GRACE_MS = 10_000;
-
-/**
- * How long a gap must last before the band may say 「연결 중…」 (#4949).
- *
- * 1 s because: the owner asked for "0.5 s or 1 s" and a handshake normally takes
- * 0.3–1 s (token request + websocket + subscribe), so 0.5 s would still flash on
- * every slow return while 1 s leaves a return that is merely slow silent; and it
- * is a tenth of the outage deadline, so the band is up for the rest of the gap
- * and the person is never left with a socket that is visibly trying and no
- * sentence for it.
- */
-export const CONNECTING_BAND_DELAY_MS = 1_000;
+// 두 시계의 값은 코어 한 곳(`features/connection/thresholds.ts`, #5219)에 있다. 웹과 폰이 같은 숫자를
+// 읽도록 모았고, 이 파일은 같은 이름으로 다시 내보내기만 한다(값·동작은 그대로).
+//   DISPLAY_GRACE_MS           outage 시계: 한 틈이 `connecting`으로 읽히다가 outage로 불리는 때(10초)
+//   CONNECTING_BAND_DELAY_MS   quiet 시계: 틈이 이만큼 이어져야 띠가 「연결 중…」이라 말한다(1초, #4949)
+export {CONNECTING_BAND_DELAY_MS, DISPLAY_GRACE_MS};
 
 export interface DisplayState {
   /** What readers see: `connecting` until the outage deadline, then `disconnected`. */
