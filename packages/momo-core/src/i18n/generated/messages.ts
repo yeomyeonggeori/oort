@@ -442,6 +442,80 @@ export const messageKeys = [
   "releaseNotes.v0141.typingChanged",
   "releaseNotes.v0141.typingTitle",
   "releaseNotes.v0141.typingTryIt",
+  "releaseNotes.v0142.agentsLine1",
+  "releaseNotes.v0142.agentsLine10",
+  "releaseNotes.v0142.agentsLine11",
+  "releaseNotes.v0142.agentsLine12",
+  "releaseNotes.v0142.agentsLine13",
+  "releaseNotes.v0142.agentsLine2",
+  "releaseNotes.v0142.agentsLine3",
+  "releaseNotes.v0142.agentsLine4",
+  "releaseNotes.v0142.agentsLine5",
+  "releaseNotes.v0142.agentsLine6",
+  "releaseNotes.v0142.agentsLine7",
+  "releaseNotes.v0142.agentsLine8",
+  "releaseNotes.v0142.agentsLine9",
+  "releaseNotes.v0142.attachmentsLine1",
+  "releaseNotes.v0142.attachmentsLine2",
+  "releaseNotes.v0142.attachmentsLine3",
+  "releaseNotes.v0142.connectionChanged",
+  "releaseNotes.v0142.connectionTitle",
+  "releaseNotes.v0142.connectionTryIt",
+  "releaseNotes.v0142.conversationsLine1",
+  "releaseNotes.v0142.conversationsLine2",
+  "releaseNotes.v0142.conversationsLine3",
+  "releaseNotes.v0142.conversationsLine4",
+  "releaseNotes.v0142.desktopLine1",
+  "releaseNotes.v0142.desktopLine2",
+  "releaseNotes.v0142.desktopLine3",
+  "releaseNotes.v0142.desktopTopic",
+  "releaseNotes.v0142.editAndViewChanged",
+  "releaseNotes.v0142.editAndViewTitle",
+  "releaseNotes.v0142.editAndViewTryIt",
+  "releaseNotes.v0142.expressionsChanged",
+  "releaseNotes.v0142.expressionsTitle",
+  "releaseNotes.v0142.expressionsTryIt",
+  "releaseNotes.v0142.linkPreviewChanged",
+  "releaseNotes.v0142.linkPreviewTitle",
+  "releaseNotes.v0142.linkPreviewTryIt",
+  "releaseNotes.v0142.menuBarChanged",
+  "releaseNotes.v0142.menuBarTitle",
+  "releaseNotes.v0142.menuBarTryIt",
+  "releaseNotes.v0142.networkLine1",
+  "releaseNotes.v0142.networkLine2",
+  "releaseNotes.v0142.networkLine3",
+  "releaseNotes.v0142.networkLine4",
+  "releaseNotes.v0142.networkLine5",
+  "releaseNotes.v0142.networkLine6",
+  "releaseNotes.v0142.networkTopic",
+  "releaseNotes.v0142.notificationsLine1",
+  "releaseNotes.v0142.notificationsLine2",
+  "releaseNotes.v0142.notificationsLine3",
+  "releaseNotes.v0142.notificationsLine4",
+  "releaseNotes.v0142.passwordResetChanged",
+  "releaseNotes.v0142.passwordResetTitle",
+  "releaseNotes.v0142.passwordResetTryIt",
+  "releaseNotes.v0142.phoneLine1",
+  "releaseNotes.v0142.phoneLine2",
+  "releaseNotes.v0142.phoneLine3",
+  "releaseNotes.v0142.phoneLine4",
+  "releaseNotes.v0142.phoneMediaChanged",
+  "releaseNotes.v0142.phoneMediaTitle",
+  "releaseNotes.v0142.phoneMediaTryIt",
+  "releaseNotes.v0142.phoneTopic",
+  "releaseNotes.v0142.settingsLine1",
+  "releaseNotes.v0142.settingsLine2",
+  "releaseNotes.v0142.settingsLine3",
+  "releaseNotes.v0142.settingsLine4",
+  "releaseNotes.v0142.settingsLine5",
+  "releaseNotes.v0142.summary",
+  "releaseNotes.v0142.teamExpressionsLine1",
+  "releaseNotes.v0142.teamExpressionsLine2",
+  "releaseNotes.v0142.teamExpressionsLine3",
+  "releaseNotes.v0142.teamExpressionsTopic",
+  "releaseNotes.v0142.threadsChanged",
+  "releaseNotes.v0142.threadsTitle",
+  "releaseNotes.v0142.threadsTryIt",
   "releaseNotes.version.current",
   "releaseNotes.version.label",
   "releaseNotes.version.releasedOn",
@@ -1265,6 +1339,80 @@ export const argumentSpecs = {
   "releaseNotes.v0141.typingChanged": {},
   "releaseNotes.v0141.typingTitle": {},
   "releaseNotes.v0141.typingTryIt": {},
+  "releaseNotes.v0142.agentsLine1": {},
+  "releaseNotes.v0142.agentsLine10": {},
+  "releaseNotes.v0142.agentsLine11": {},
+  "releaseNotes.v0142.agentsLine12": {},
+  "releaseNotes.v0142.agentsLine13": {},
+  "releaseNotes.v0142.agentsLine2": {},
+  "releaseNotes.v0142.agentsLine3": {},
+  "releaseNotes.v0142.agentsLine4": {},
+  "releaseNotes.v0142.agentsLine5": {},
+  "releaseNotes.v0142.agentsLine6": {},
+  "releaseNotes.v0142.agentsLine7": {},
+  "releaseNotes.v0142.agentsLine8": {},
+  "releaseNotes.v0142.agentsLine9": {},
+  "releaseNotes.v0142.attachmentsLine1": {},
+  "releaseNotes.v0142.attachmentsLine2": {},
+  "releaseNotes.v0142.attachmentsLine3": {},
+  "releaseNotes.v0142.connectionChanged": {},
+  "releaseNotes.v0142.connectionTitle": {},
+  "releaseNotes.v0142.connectionTryIt": {},
+  "releaseNotes.v0142.conversationsLine1": {},
+  "releaseNotes.v0142.conversationsLine2": {},
+  "releaseNotes.v0142.conversationsLine3": {},
+  "releaseNotes.v0142.conversationsLine4": {},
+  "releaseNotes.v0142.desktopLine1": {},
+  "releaseNotes.v0142.desktopLine2": {},
+  "releaseNotes.v0142.desktopLine3": {},
+  "releaseNotes.v0142.desktopTopic": {},
+  "releaseNotes.v0142.editAndViewChanged": {},
+  "releaseNotes.v0142.editAndViewTitle": {},
+  "releaseNotes.v0142.editAndViewTryIt": {},
+  "releaseNotes.v0142.expressionsChanged": {},
+  "releaseNotes.v0142.expressionsTitle": {},
+  "releaseNotes.v0142.expressionsTryIt": {},
+  "releaseNotes.v0142.linkPreviewChanged": {},
+  "releaseNotes.v0142.linkPreviewTitle": {},
+  "releaseNotes.v0142.linkPreviewTryIt": {},
+  "releaseNotes.v0142.menuBarChanged": {},
+  "releaseNotes.v0142.menuBarTitle": {},
+  "releaseNotes.v0142.menuBarTryIt": {},
+  "releaseNotes.v0142.networkLine1": {},
+  "releaseNotes.v0142.networkLine2": {},
+  "releaseNotes.v0142.networkLine3": {},
+  "releaseNotes.v0142.networkLine4": {},
+  "releaseNotes.v0142.networkLine5": {},
+  "releaseNotes.v0142.networkLine6": {},
+  "releaseNotes.v0142.networkTopic": {},
+  "releaseNotes.v0142.notificationsLine1": {},
+  "releaseNotes.v0142.notificationsLine2": {},
+  "releaseNotes.v0142.notificationsLine3": {},
+  "releaseNotes.v0142.notificationsLine4": {},
+  "releaseNotes.v0142.passwordResetChanged": {},
+  "releaseNotes.v0142.passwordResetTitle": {},
+  "releaseNotes.v0142.passwordResetTryIt": {},
+  "releaseNotes.v0142.phoneLine1": {},
+  "releaseNotes.v0142.phoneLine2": {},
+  "releaseNotes.v0142.phoneLine3": {},
+  "releaseNotes.v0142.phoneLine4": {},
+  "releaseNotes.v0142.phoneMediaChanged": {},
+  "releaseNotes.v0142.phoneMediaTitle": {},
+  "releaseNotes.v0142.phoneMediaTryIt": {},
+  "releaseNotes.v0142.phoneTopic": {},
+  "releaseNotes.v0142.settingsLine1": {},
+  "releaseNotes.v0142.settingsLine2": {},
+  "releaseNotes.v0142.settingsLine3": {},
+  "releaseNotes.v0142.settingsLine4": {},
+  "releaseNotes.v0142.settingsLine5": {},
+  "releaseNotes.v0142.summary": {},
+  "releaseNotes.v0142.teamExpressionsLine1": {},
+  "releaseNotes.v0142.teamExpressionsLine2": {},
+  "releaseNotes.v0142.teamExpressionsLine3": {},
+  "releaseNotes.v0142.teamExpressionsTopic": {},
+  "releaseNotes.v0142.threadsChanged": {},
+  "releaseNotes.v0142.threadsTitle": {},
+  "releaseNotes.v0142.threadsTryIt": {},
   "releaseNotes.version.current": {},
   "releaseNotes.version.label": {
     "version": "string"
@@ -2143,6 +2291,80 @@ export interface MessageArgs {
   "releaseNotes.v0141.typingChanged": Record<string, never>;
   "releaseNotes.v0141.typingTitle": Record<string, never>;
   "releaseNotes.v0141.typingTryIt": Record<string, never>;
+  "releaseNotes.v0142.agentsLine1": Record<string, never>;
+  "releaseNotes.v0142.agentsLine10": Record<string, never>;
+  "releaseNotes.v0142.agentsLine11": Record<string, never>;
+  "releaseNotes.v0142.agentsLine12": Record<string, never>;
+  "releaseNotes.v0142.agentsLine13": Record<string, never>;
+  "releaseNotes.v0142.agentsLine2": Record<string, never>;
+  "releaseNotes.v0142.agentsLine3": Record<string, never>;
+  "releaseNotes.v0142.agentsLine4": Record<string, never>;
+  "releaseNotes.v0142.agentsLine5": Record<string, never>;
+  "releaseNotes.v0142.agentsLine6": Record<string, never>;
+  "releaseNotes.v0142.agentsLine7": Record<string, never>;
+  "releaseNotes.v0142.agentsLine8": Record<string, never>;
+  "releaseNotes.v0142.agentsLine9": Record<string, never>;
+  "releaseNotes.v0142.attachmentsLine1": Record<string, never>;
+  "releaseNotes.v0142.attachmentsLine2": Record<string, never>;
+  "releaseNotes.v0142.attachmentsLine3": Record<string, never>;
+  "releaseNotes.v0142.connectionChanged": Record<string, never>;
+  "releaseNotes.v0142.connectionTitle": Record<string, never>;
+  "releaseNotes.v0142.connectionTryIt": Record<string, never>;
+  "releaseNotes.v0142.conversationsLine1": Record<string, never>;
+  "releaseNotes.v0142.conversationsLine2": Record<string, never>;
+  "releaseNotes.v0142.conversationsLine3": Record<string, never>;
+  "releaseNotes.v0142.conversationsLine4": Record<string, never>;
+  "releaseNotes.v0142.desktopLine1": Record<string, never>;
+  "releaseNotes.v0142.desktopLine2": Record<string, never>;
+  "releaseNotes.v0142.desktopLine3": Record<string, never>;
+  "releaseNotes.v0142.desktopTopic": Record<string, never>;
+  "releaseNotes.v0142.editAndViewChanged": Record<string, never>;
+  "releaseNotes.v0142.editAndViewTitle": Record<string, never>;
+  "releaseNotes.v0142.editAndViewTryIt": Record<string, never>;
+  "releaseNotes.v0142.expressionsChanged": Record<string, never>;
+  "releaseNotes.v0142.expressionsTitle": Record<string, never>;
+  "releaseNotes.v0142.expressionsTryIt": Record<string, never>;
+  "releaseNotes.v0142.linkPreviewChanged": Record<string, never>;
+  "releaseNotes.v0142.linkPreviewTitle": Record<string, never>;
+  "releaseNotes.v0142.linkPreviewTryIt": Record<string, never>;
+  "releaseNotes.v0142.menuBarChanged": Record<string, never>;
+  "releaseNotes.v0142.menuBarTitle": Record<string, never>;
+  "releaseNotes.v0142.menuBarTryIt": Record<string, never>;
+  "releaseNotes.v0142.networkLine1": Record<string, never>;
+  "releaseNotes.v0142.networkLine2": Record<string, never>;
+  "releaseNotes.v0142.networkLine3": Record<string, never>;
+  "releaseNotes.v0142.networkLine4": Record<string, never>;
+  "releaseNotes.v0142.networkLine5": Record<string, never>;
+  "releaseNotes.v0142.networkLine6": Record<string, never>;
+  "releaseNotes.v0142.networkTopic": Record<string, never>;
+  "releaseNotes.v0142.notificationsLine1": Record<string, never>;
+  "releaseNotes.v0142.notificationsLine2": Record<string, never>;
+  "releaseNotes.v0142.notificationsLine3": Record<string, never>;
+  "releaseNotes.v0142.notificationsLine4": Record<string, never>;
+  "releaseNotes.v0142.passwordResetChanged": Record<string, never>;
+  "releaseNotes.v0142.passwordResetTitle": Record<string, never>;
+  "releaseNotes.v0142.passwordResetTryIt": Record<string, never>;
+  "releaseNotes.v0142.phoneLine1": Record<string, never>;
+  "releaseNotes.v0142.phoneLine2": Record<string, never>;
+  "releaseNotes.v0142.phoneLine3": Record<string, never>;
+  "releaseNotes.v0142.phoneLine4": Record<string, never>;
+  "releaseNotes.v0142.phoneMediaChanged": Record<string, never>;
+  "releaseNotes.v0142.phoneMediaTitle": Record<string, never>;
+  "releaseNotes.v0142.phoneMediaTryIt": Record<string, never>;
+  "releaseNotes.v0142.phoneTopic": Record<string, never>;
+  "releaseNotes.v0142.settingsLine1": Record<string, never>;
+  "releaseNotes.v0142.settingsLine2": Record<string, never>;
+  "releaseNotes.v0142.settingsLine3": Record<string, never>;
+  "releaseNotes.v0142.settingsLine4": Record<string, never>;
+  "releaseNotes.v0142.settingsLine5": Record<string, never>;
+  "releaseNotes.v0142.summary": Record<string, never>;
+  "releaseNotes.v0142.teamExpressionsLine1": Record<string, never>;
+  "releaseNotes.v0142.teamExpressionsLine2": Record<string, never>;
+  "releaseNotes.v0142.teamExpressionsLine3": Record<string, never>;
+  "releaseNotes.v0142.teamExpressionsTopic": Record<string, never>;
+  "releaseNotes.v0142.threadsChanged": Record<string, never>;
+  "releaseNotes.v0142.threadsTitle": Record<string, never>;
+  "releaseNotes.v0142.threadsTryIt": Record<string, never>;
   "releaseNotes.version.current": Record<string, never>;
   "releaseNotes.version.label": { version: string };
   "releaseNotes.version.releasedOn": { date: string };

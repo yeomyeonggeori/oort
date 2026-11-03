@@ -3128,6 +3128,450 @@ export const catalog: MessageCatalog = {
       "value": "Watch the line under the composer while a person or an agent is writing a reply."
     }
   ],
+  "releaseNotes.v0142.agentsLine1": [
+    {
+      "type": 0,
+      "value": "On desktop, a plan button in the conversation header shows how many steps are left when an agent reports a plan."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine10": [
+    {
+      "type": 0,
+      "value": "After you decide in the inbox, the receipt line no longer shows twice, and an approval card states its time left once."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine11": [
+    {
+      "type": 0,
+      "value": "On the phone, a finished request gets a chip with its time and step count, and tapping it opens the work record."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine12": [
+    {
+      "type": 0,
+      "value": "Admins pick the team AI key, helper name and abilities in onboarding and settings, and can switch abilities by chat."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine13": [
+    {
+      "type": 0,
+      "value": "Team AI usage is unlimited by default, and admins can turn on a daily or monthly limit in Usage limits in settings."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine2": [
+    {
+      "type": 0,
+      "value": "The desktop work panel and phone work record sheet split what the agent reported from what oort measured."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine3": [
+    {
+      "type": 0,
+      "value": "A tool call has one approval card, and a rejected, expired or canceled approval closes its call card as stopped."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine4": [
+    {
+      "type": 0,
+      "value": "On the phone, the Home working card and the Agents tab mark an agent that is waiting for approval."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine5": [
+    {
+      "type": 0,
+      "value": "In the inbox, a decided approval becomes a one-line receipt, and its buttons vanish once another device has decided."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine6": [
+    {
+      "type": 0,
+      "value": "For code work the helper offers a Hand a task to my Mac card, and it reads text, PDF and image attachments."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine7": [
+    {
+      "type": 0,
+      "value": "On a team server, agents can now read photos you send in a conversation."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine8": [
+    {
+      "type": 0,
+      "value": "On the phone, a line above the composer in agent conversations shows who is working, and tapping it opens a sheet."
+    }
+  ],
+  "releaseNotes.v0142.agentsLine9": [
+    {
+      "type": 0,
+      "value": "On the phone, requests show an agent status chip, plus a line saying what to do if it was not picked up or failed."
+    }
+  ],
+  "releaseNotes.v0142.attachmentsLine1": [
+    {
+      "type": 0,
+      "value": "Wide screenshots use more of the conversation column, so their text is readable before you open them."
+    }
+  ],
+  "releaseNotes.v0142.attachmentsLine2": [
+    {
+      "type": 0,
+      "value": "On the phone, the tap that closes the share sheet no longer opens the thread underneath."
+    }
+  ],
+  "releaseNotes.v0142.attachmentsLine3": [
+    {
+      "type": 0,
+      "value": "Pinch anywhere in the phone photo viewer; very long pictures can fill the screen, and a double tap shows full size."
+    }
+  ],
+  "releaseNotes.v0142.connectionChanged": [
+    {
+      "type": 0,
+      "value": "The connecting notice appears only after a full second, and when the connection fails it says whether you are offline or the server cannot be reached. Unsent messages and attachments get icons to send again or delete, and messages that failed on a network error go out again on their own once you reconnect."
+    }
+  ],
+  "releaseNotes.v0142.connectionTitle": [
+    {
+      "type": 0,
+      "value": "Connection status and unsent messages"
+    }
+  ],
+  "releaseNotes.v0142.connectionTryIt": [
+    {
+      "type": 0,
+      "value": "When your connection is shaky, watch when the connection notice appears. If a message did not go through, use the icons beside it to send it again or delete it."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine1": [
+    {
+      "type": 0,
+      "value": "Reaction chips are now pills, and the ones you added have an accent outline."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine2": [
+    {
+      "type": 0,
+      "value": "A stopped run shows as a quiet centered system line, worded the same everywhere."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine3": [
+    {
+      "type": 0,
+      "value": "A message carries up to three link cards, and older Korean sites no longer show garbled text."
+    }
+  ],
+  "releaseNotes.v0142.conversationsLine4": [
+    {
+      "type": 0,
+      "value": "Check “Also send to the conversation” on a thread reply and it shows there too, with a link back to the thread."
+    }
+  ],
+  "releaseNotes.v0142.desktopLine1": [
+    {
+      "type": 0,
+      "value": "Even with a long channel name, the header buttons stay inside the pane and the title shortens to one line."
+    }
+  ],
+  "releaseNotes.v0142.desktopLine2": [
+    {
+      "type": 0,
+      "value": "In a narrow window with the sidebar open, the channel composer keeps its minimum width."
+    }
+  ],
+  "releaseNotes.v0142.desktopLine3": [
+    {
+      "type": 0,
+      "value": "Tooltips appear sooner, and on the Mac right-clicking message text opens the message menu."
+    }
+  ],
+  "releaseNotes.v0142.desktopTopic": [
+    {
+      "type": 0,
+      "value": "Desktop"
+    }
+  ],
+  "releaseNotes.v0142.editAndViewChanged": [
+    {
+      "type": 0,
+      "value": "Press ↑ in an empty composer to edit your last message, and the message ⋮ menu is shorter with Edit at the top for your own messages. Attachments sit in a one-row card strip inside the composer, up to 20, and the image viewer gains zoom out, fit and zoom in controls plus a Copy image button."
+    }
+  ],
+  "releaseNotes.v0142.editAndViewTitle": [
+    {
+      "type": 0,
+      "value": "Editing messages and viewing images"
+    }
+  ],
+  "releaseNotes.v0142.editAndViewTryIt": [
+    {
+      "type": 0,
+      "value": "Press ↑ in an empty composer, then attach a few files and open an image at full size."
+    }
+  ],
+  "releaseNotes.v0142.expressionsChanged": [
+    {
+      "type": 0,
+      "value": "A new expression button left of Send on the phone opens one sheet to search emoticons, emoji, team emoji and GIFs. Use Add to import from an album or a link, or Make with AI to have your team's image model turn one photo into a background-removed or caricature emoticon."
+    }
+  ],
+  "releaseNotes.v0142.expressionsTitle": [
+    {
+      "type": 0,
+      "value": "Expression button and photo emoticons"
+    }
+  ],
+  "releaseNotes.v0142.expressionsTryIt": [
+    {
+      "type": 0,
+      "value": "On the phone, tap the expression button next to the composer. Open Make with AI from the Team emoji tab on the phone or the Our team slot of the emoji picker on desktop; with no image model on your team, you'll see how to connect one."
+    }
+  ],
+  "releaseNotes.v0142.linkPreviewChanged": [
+    {
+      "type": 0,
+      "value": "Link cards now default to Small, show a site icon and a video mark, and appear on the phone too. Paste a link and a card shows above the composer before you send, and ✕ sends just this message without a preview."
+    }
+  ],
+  "releaseNotes.v0142.linkPreviewTitle": [
+    {
+      "type": 0,
+      "value": "Link previews"
+    }
+  ],
+  "releaseNotes.v0142.linkPreviewTryIt": [
+    {
+      "type": 0,
+      "value": "Paste a link into a conversation. Choose Small, Large or Off in Settings › Display › Link previews on the phone, or in Settings › Appearance › Conversation display on web and desktop."
+    }
+  ],
+  "releaseNotes.v0142.menuBarChanged": [
+    {
+      "type": 0,
+      "value": "An oort icon now sits in the Mac menu bar, with a dot when something is unread. While you're signed in, closing the window keeps the app running in the menu bar so notifications keep coming."
+    }
+  ],
+  "releaseNotes.v0142.menuBarTitle": [
+    {
+      "type": 0,
+      "value": "Mac menu bar and closing the window"
+    }
+  ],
+  "releaseNotes.v0142.menuBarTryIt": [
+    {
+      "type": 0,
+      "value": "Click the menu bar icon to see running tasks. To quit, use Quit oort or ⌘Q, and reopen the window with Open oort or from the Dock."
+    }
+  ],
+  "releaseNotes.v0142.networkLine1": [
+    {
+      "type": 0,
+      "value": "On the phone, a band above Home, Inbox and Agents tells you when the device is offline or the server cannot be reached."
+    }
+  ],
+  "releaseNotes.v0142.networkLine2": [
+    {
+      "type": 0,
+      "value": "Web and desktop show a connection card under the sidebar, and sending stays open if only the live connection drops."
+    }
+  ],
+  "releaseNotes.v0142.networkLine3": [
+    {
+      "type": 0,
+      "value": "Web and desktop reconnect when a window that was hidden for over 30 seconds comes back."
+    }
+  ],
+  "releaseNotes.v0142.networkLine4": [
+    {
+      "type": 0,
+      "value": "Unsent messages stay on this device through a channel switch or reload, and two or more get a Resend all button."
+    }
+  ],
+  "releaseNotes.v0142.networkLine5": [
+    {
+      "type": 0,
+      "value": "A failed load or upload now says why, and the sign-in screen explains an expired session or an unreachable server."
+    }
+  ],
+  "releaseNotes.v0142.networkLine6": [
+    {
+      "type": 0,
+      "value": "On web and desktop, a blocked composer or approval row now says whether you are offline or the server is unreachable."
+    }
+  ],
+  "releaseNotes.v0142.networkTopic": [
+    {
+      "type": 0,
+      "value": "Connection"
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine1": [
+    {
+      "type": 0,
+      "value": "Opening a notification clears stacked sheets and dialogs and goes straight to that message, keeping your draft."
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine2": [
+    {
+      "type": 0,
+      "value": "Threads you reply in or are mentioned in are followed on their own, and notification settings can turn their alerts off."
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine3": [
+    {
+      "type": 0,
+      "value": "An approval alert is one question, and a one-line receipt stays after you decide."
+    }
+  ],
+  "releaseNotes.v0142.notificationsLine4": [
+    {
+      "type": 0,
+      "value": "On the Mac, clicking a notification banner now opens the right message."
+    }
+  ],
+  "releaseNotes.v0142.passwordResetChanged": [
+    {
+      "type": 0,
+      "value": "Admins create a link with “Create reset link” in a member profile, usable once within 24 hours, and every other device of that member signs out once they choose a new password. On the sign-in screen, “Forgot your password?” tells you to ask an admin for a link and copies a request message for you."
+    }
+  ],
+  "releaseNotes.v0142.passwordResetTitle": [
+    {
+      "type": 0,
+      "value": "When you forget your password"
+    }
+  ],
+  "releaseNotes.v0142.passwordResetTryIt": [
+    {
+      "type": 0,
+      "value": "As an admin, open “Create reset link” in a member profile. On the sign-in screen, select “Forgot your password?” to read the steps."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine1": [
+    {
+      "type": 0,
+      "value": "In the channel list, rows without new posts turn gray and rows with new posts get a count chip."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine2": [
+    {
+      "type": 0,
+      "value": "Touching a row just to scroll no longer flashes its pressed color."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine3": [
+    {
+      "type": 0,
+      "value": "While typing, dragging the conversation down lowers the keyboard and rests the composer to one line."
+    }
+  ],
+  "releaseNotes.v0142.phoneLine4": [
+    {
+      "type": 0,
+      "value": "Returning to the app no longer sweeps the list downward, and arrival highlights are lighter and shorter."
+    }
+  ],
+  "releaseNotes.v0142.phoneMediaChanged": [
+    {
+      "type": 0,
+      "value": "On the phone, tap a video attachment to play it right in the app. Saving is now separate from sharing: photos and videos go straight to your photo library, and for other files you pick a place in the Files app."
+    }
+  ],
+  "releaseNotes.v0142.phoneMediaTitle": [
+    {
+      "type": 0,
+      "value": "Phone video playback and saving attachments"
+    }
+  ],
+  "releaseNotes.v0142.phoneMediaTryIt": [
+    {
+      "type": 0,
+      "value": "Tap a video card to play it. Then use Save in the photo viewer, or the ↓ on a file card, to save to Photos or Files."
+    }
+  ],
+  "releaseNotes.v0142.phoneTopic": [
+    {
+      "type": 0,
+      "value": "Phone"
+    }
+  ],
+  "releaseNotes.v0142.settingsLine1": [
+    {
+      "type": 0,
+      "value": "What's new now lives in Settings: it opens once after an update, and each version's notes can be reread there."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine2": [
+    {
+      "type": 0,
+      "value": "The Beta tag on Language is gone, and phone haptics are fixed to Rich with no setting to choose."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine3": [
+    {
+      "type": 0,
+      "value": "The sign-in screen remembers your email for each server, and the first screen has a language chip at the top right."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine4": [
+    {
+      "type": 0,
+      "value": "Guest invites are paused until channel-specific invites are ready, so Guest is not offered when inviting."
+    }
+  ],
+  "releaseNotes.v0142.settingsLine5": [
+    {
+      "type": 0,
+      "value": "If your saved sign-in was cleared, web and desktop no longer stay on the loading screen and go to sign-in instead."
+    }
+  ],
+  "releaseNotes.v0142.summary": [
+    {
+      "type": 0,
+      "value": "Link previews and threads are redesigned, and the phone gets an expression button while the Mac gets a menu bar icon."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsLine1": [
+    {
+      "type": 0,
+      "value": "When you register a team expression, you pick a kind, Team emoji or Emoticon, or accept the suggestion."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsLine2": [
+    {
+      "type": 0,
+      "value": "Expression views no longer overlap, and the three web panel views are named Team emoji, Emoticon and GIF."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsLine3": [
+    {
+      "type": 0,
+      "value": "A photo emoticon whose background could not be removed is no longer described as background removed."
+    }
+  ],
+  "releaseNotes.v0142.teamExpressionsTopic": [
+    {
+      "type": 0,
+      "value": "Team expressions"
+    }
+  ],
+  "releaseNotes.v0142.threadsChanged": [
+    {
+      "type": 0,
+      "value": "The thread summary under a message now shows overlapping faces, the reply count and a new-replies chip, and following a thread brings alerts for new replies. On the phone, swipe a message from right to left to reply in its thread."
+    }
+  ],
+  "releaseNotes.v0142.threadsTitle": [
+    {
+      "type": 0,
+      "value": "Thread summary and following"
+    }
+  ],
+  "releaseNotes.v0142.threadsTryIt": [
+    {
+      "type": 0,
+      "value": "Open a thread from the summary line under a message and choose Follow thread in its header. On the phone, try swiping a message too."
+    }
+  ],
   "releaseNotes.version.current": [
     {
       "type": 0,
