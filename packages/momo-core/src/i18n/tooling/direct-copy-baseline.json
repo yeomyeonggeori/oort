@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "24d3e22a037fc367c4e72319cb77cff44f12ea7f",
+  "baselineHead": "f3b58ed260729e6b45b48d5c9099496ac59db17e",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -578,7 +578,7 @@
     "clients/web/src/features/hostedAgents/hostedCredentialScope.ts": 5,
     "clients/web/src/features/hostedAgents/hostedWizardLaunch.ts": 9,
     "clients/web/src/features/hostedAgents/oauthConsentPath.ts": 1,
-    "clients/web/src/features/huddles/HuddleHeaderControl.tsx": 27,
+    "clients/web/src/features/huddles/HuddleHeaderControl.tsx": 26,
     "clients/web/src/features/huddles/HuddleMicMenu.tsx": 16,
     "clients/web/src/features/huddles/huddleRuntime.ts": 14,
     "clients/web/src/features/huddles/huddleTurnRewrite.ts": 2,

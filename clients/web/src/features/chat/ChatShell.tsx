@@ -94,6 +94,10 @@ import {
 } from "@momo/core/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
+import {
+  huddleControlShown,
+  huddleNamesTarget,
+} from "@momo/core/features/huddles/huddleModel";
 import { threadsAreFollowable } from "@momo/core/features/timeline/threadFollow";
 import { useSurfaceProvidedWhileOpen } from "@/features/capabilities/useSurfaceProvided";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
@@ -107,6 +111,7 @@ import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl"
 import {
   HuddleHeaderBanner,
   HuddleHeaderControl,
+  HuddleHeaderNames,
   HuddleHeaderState,
 } from "@/features/huddles/HuddleHeaderControl";
 import type { HuddleController } from "@/features/huddles/useHuddle";
@@ -1117,6 +1122,66 @@ export function ChatShell() {
   const offline = stressCount === 0 && isOffline;
   const hasChannel = stressCount > 0 || channelId !== null;
 
+  // 멤버 수 · 허들 · ⋮ (컨트롤 묶음의 끝). **⋮는 혼자 한 줄에 서지 않는다** (#5206): 컨트롤 묶음이 줄을 바꿀 때(판이 좁은 600대)
+  // 맨 끝의 ⋮가 혼자 셋째 줄에 서지 않게, ⋮를 바로 앞 컨트롤과 줄바꿈 한 덩어리(`flex-nowrap`)로 묶는다. 앞 컨트롤은 허들 컨트롤이고,
+  // 허들 컨트롤이 아무것도 안 그리면(허들 없는 서버, 오프라인) 멤버 수다. 단추 순서(멤버 수 → 허들 → ⋮)와 크기는 그대로다.
+  // 멤버 수까지 한 덩어리로 묶으면 참가 중의 덩어리(멤버 수 + 칩 + 마이크 + 나가기 + ⋮)가 판 268의 줄(226)보다 넓어 덩어리 안에서
+  // 다시 ⋮가 외톨이가 된다(실측). 그래서 묶는 것은 둘뿐이다.
+  const renderControlsEnd = (huddle: HuddleController | null) => {
+    const members =
+      stressCount === 0 && channel && channel.kind !== "dm" ? (
+        <ChannelMemberPanel
+          channelName={channel.name ?? label}
+          members={channelMembers}
+          status={channelMemberListStatus}
+          offline={offline}
+          onRetry={() => void directoryQuery.refetch()}
+          onAddMember={() =>
+            openAddMember({ id: channel.id, name: channel.name ?? label })
+          }
+        />
+      ) : null;
+    const huddleControl = huddle ? (
+      <HuddleHeaderControl huddle={huddle} offline={offline} />
+    ) : null;
+    const menu =
+      stressCount === 0 && channel && channel.kind !== "dm" ? (
+        <ChannelHeaderMenu
+          workspaceId={workspaceId}
+          channel={channel}
+          title={labelParts?.text ?? label}
+          selfMemberId={session.member.id}
+          selfRole={memberFor(directory, session.member.id)?.role}
+        />
+      ) : null;
+    return huddle && huddleControlShown(huddle, offline) ? (
+      <>
+        {members}
+        <div className="flex shrink-0 items-center gap-1">
+          {huddleControl}
+          {menu}
+        </div>
+      </>
+    ) : members === null && menu === null ? null : (
+      <div className="flex shrink-0 items-center gap-1">
+        {members}
+        {menu}
+      </div>
+    );
+  };
+
+  // 머리에 서는 토픽 한 줄(채널만: DM·스트레스 픽스처는 없다). 꼬리 칸을 둘지와 토픽 글이 같은 값을 읽는다.
+  const headerTopic =
+    stressCount === 0 && channel && channel.kind !== "dm"
+      ? (channel.topic?.trim() ?? "")
+      : "";
+  // 제목 칸 꼬리에 설 것이 있나: 토픽(채널) 또는 허들 참가자 이름 글.
+  const headerTailShown = (huddle: HuddleController | null) =>
+    headerTopic !== "" ||
+    (stressCount === 0 &&
+      huddle !== null &&
+      huddleNamesTarget(huddle, offline) !== null);
+
   const renderChannelHeader = (huddle: HuddleController | null) => (
     <>
       {/* 1줄 헤더 (#1865). 넓은 창에서는 떠 있는 판의 머리(DS2-6, 시안 A
@@ -1164,9 +1229,11 @@ export function ChatShell() {
               {labelParts?.text ?? label}
             </h1>
           ) : stressCount === 0 && channel?.kind === "dm" && peer ? (
+            // DM 제목의 마우스 올림 글(`title`)은 핸들까지 담은 전체 이름(`label`)이다(#5206): 좁은 폭에서 구분용
+            // 핸들이 통째로 숨어도 같은 이름의 두 DM을 마우스로 구별할 수 있다. 낭독 이름(단추의 `aria-label`)도 `label`이다.
             <h1
               className="channel-head-title flex min-w-0 items-center"
-              title={labelParts?.text ?? label}
+              title={label}
             >
               <button
                 type="button"
@@ -1196,12 +1263,18 @@ export function ChatShell() {
                 : labelParts?.text ?? label}
             </h1>
           )}
+          {/* 같은 이름 DM의 구분용 핸들 (#5206): 통째로 보이거나 통째로 숨는다(「@」 조각 금지). 칸(`channel-head-handle`)이
+              핸들의 글 폭까지만 자라고, 그 폭이 안 나오면 핸들은 보이지 않는 둘째 줄로 간다(tokens.css: 칸 맨 앞의 폭 0짜리 빈 조각이
+              첫 줄을 차지해, 핸들이 줄에서 첫 칸이 되어 칸보다 넓어도 억지로 남는 것을 막는다). 숨은 핸들도 글(낭독)과 제목의
+              `title`에는 남는다. */}
           {stressCount === 0 && labelParts?.handle && (
-            <span
-              className="min-w-0 truncate text-meta text-ink-muted"
-              data-testid="channel-handle"
-            >
-              {labelParts.handle}
+            <span className="channel-head-handle" data-testid="channel-handle-slot">
+              <span
+                className="shrink-0 whitespace-nowrap text-meta text-ink-muted"
+                data-testid="channel-handle"
+              >
+                {labelParts.handle}
+              </span>
             </span>
           )}
           {/* 에이전트와의 DM 머리: 지금 살아 있는가(ADR-0200 D4). */}
@@ -1216,26 +1289,31 @@ export function ChatShell() {
           <span className="sr-only" data-testid="message-count">
             메시지 {messages.length}개
           </span>
-          {/* 토픽 한 줄 (시안 A `.a-mhd .tp`). 읽기 전용 글자이고 컨트롤이 아니다:
-              토픽을 읽고 고치는 문은 여전히 ⋮ 메뉴 하나다(BZ-2). 넓은 창에서만
-              선다 — 폰 헤더 한 줄은 제목이 먼저다(`wide-only`).
-
-              제목 뒤의 **남는 자리만** 받는다(기본 폭 0, `flex-1`): 제목이 먼저 서고, 제목이 칸을 다 쓰면 토픽은 0이 되어
-              먼저 사라진다. 이 칸은 기본 폭이 0이라 긴 토픽이 컨트롤 묶음을 밀어내지 못한다(#4230 이전에는 오른쪽 무리
-              안에 둬야 했다: 왼쪽 무리가 글 폭을 잡고 있어서, 실측 gate:channel-header). `ms-1`은 칸 틈 8과 합쳐 예전
-              제목-토픽 틈 12를 지킨다. */}
-          {stressCount === 0 &&
-            channel &&
-            channel.kind !== "dm" &&
-            channel.topic?.trim() && (
-              <span
-                className="channel-head-topic wide-only ms-1 flex-1"
-                data-testid="channel-header-topic"
-                title={channel.topic.trim()}
-              >
-                {channel.topic.trim()}
-              </span>
-            )}
+          {/* 제목 칸의 꼬리(`channel-head-tail`): 토픽 한 줄과 허들 참가자 이름 글이 서는 곳이다 (#5184).
+              **제목(과 핸들)이 다 선 뒤 남는 폭만** 받는다(기준 0, `flex: 1 1 0`): 제목이 칸을 다 쓰면 꼬리는 0이 되어 먼저
+              사라진다. 이 칸은 기준이 0이라 긴 토픽·긴 참가자 요약이 컨트롤 묶음을 밀어내지 못한다(#4230 이전에는 오른쪽 무리
+              안에 둬야 했다: 왼쪽 무리가 글 폭을 잡고 있어서, 실측 gate:channel-header). 꼬리가 비어 있으면 칸 자체를 두지
+              않는다(빈 칸도 칸 틈 8을 제목에서 가져간다). */}
+          {headerTailShown(huddle) && (
+            <div className="channel-head-tail">
+              {/* 토픽 한 줄 (시안 A `.a-mhd .tp`). 읽기 전용 글자이고 컨트롤이 아니다:
+                  토픽을 읽고 고치는 문은 여전히 ⋮ 메뉴 하나다(BZ-2). 넓은 창에서만
+                  선다 — 폰 헤더 한 줄은 제목이 먼저다(`wide-only`). `ms-1`은 칸 틈 8과 합쳐 예전 제목-토픽 틈 12를
+                  지킨다. 참가자 이름 글이 있으면 그 글이 먼저 폭을 받고 토픽이 나머지다. */}
+              {headerTopic && (
+                <span
+                  className="channel-head-topic wide-only ms-1 flex-1"
+                  data-testid="channel-header-topic"
+                  title={headerTopic}
+                >
+                  {headerTopic}
+                </span>
+              )}
+              {huddle && stressCount === 0 && (
+                <HuddleHeaderNames huddle={huddle} offline={offline} />
+              )}
+            </div>
+          )}
           </div>
         </div>
         {/* 컨트롤 묶음: 제 폭을 먼저 갖는다. 제목 바닥 옆에 못 서면 줄이 바뀌어 제목 아래로 내려오고, 그 줄에서도
@@ -1313,33 +1391,7 @@ export function ChatShell() {
               />
             )}
             {stressCount === 0 && channel?.kind === "dm" && <DmAgentsMenu workspaceId={workspaceId} channel={channel} directory={directory} onChanged={() => Promise.all([channelsQuery.refetch(), directoryQuery.refetch()])} />}
-            {stressCount === 0 && channel && channel.kind !== "dm" && (
-              <ChannelMemberPanel
-                channelName={channel.name ?? label}
-                members={channelMembers}
-                status={channelMemberListStatus}
-                offline={offline}
-                onRetry={() => void directoryQuery.refetch()}
-                onAddMember={() =>
-                  openAddMember({ id: channel.id, name: channel.name ?? label })
-                }
-              />
-            )}
-            {huddle && (
-              <HuddleHeaderControl
-                huddle={huddle}
-                offline={offline}
-              />
-            )}
-            {stressCount === 0 && channel && channel.kind !== "dm" && (
-              <ChannelHeaderMenu
-                workspaceId={workspaceId}
-                channel={channel}
-                title={labelParts?.text ?? label}
-                selfMemberId={session.member.id}
-                selfRole={memberFor(directory, session.member.id)?.role}
-              />
-            )}
+            {renderControlsEnd(huddle)}
           </div>
         </div>
       </header>
