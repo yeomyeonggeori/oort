@@ -177,7 +177,8 @@ describe('막이 — 터치를 받는 뷰이고 서 있는 동안만 선다', ()
 });
 
 describe('첨부 카드 → 공유 시트 배선', () => {
-  const FILE: MessageAttachment = {id: 'att-video', name: 'v1.mp4', mime: 'video/mp4', sizeBytes: 61_235_000};
+  // 앱 안 재생(mp4·mov, #5208) 밖의 영상은 파일 카드 → 내려받기 → 공유 시트로 남는다. 이 묶음은 그 길의 막이를 잰다.
+  const FILE: MessageAttachment = {id: 'att-video', name: 'v1.webm', mime: 'video/webm', sizeBytes: 61_235_000};
 
   function renderCard() {
     return render(
@@ -204,7 +205,7 @@ describe('첨부 카드 → 공유 시트 배선', () => {
     expect(shares).toHaveLength(0);
 
     await act(async () => {
-      finishDownload({uri: 'file:///cache/oort-attachments/att-video-v1.mp4'});
+      finishDownload({uri: 'file:///cache/oort-attachments/att-video-v1.webm'});
     });
     await waitFor(() => expect(shares).toHaveLength(1));
     expect(shares[0].heldAtCall).toBe(true); // 시트가 올라오기 전에 섰다.

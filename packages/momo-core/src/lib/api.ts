@@ -3385,12 +3385,33 @@ export function sendThreadReply(
 // 필요하고 코어는 그것을 들일 수 없다. 그 절반은
 // `clients/web/src/features/attachments/uploadTransport.ts`에 있다.
 
+/**
+ * openapi `AttachmentMedia` — 영상 첨부의 요약 (ADR-0151 증보 5 D5, #4673).
+ *
+ * **보내는 기기가 잰 선언**이다. 서버는 영상을 열어 보지 않고 범위만 본다(`durationMs` 1~86,400,000 정수,
+ * `width`·`height` 1~16,384 정수). 그래서 이 값으로 칸을 그리는 쪽이 한 번 더 거르고 칸을 가둔다
+ * (`attachmentMedia.ts` 의 `attachmentMediaFromWire`, `videoCardSize`). 포스터의 바이트는 어느 투영에도 실리지 않는다 —
+ * `hasPoster` 가 `GET …/attachments/{id}/poster` 에 줄 것이 있는지 알릴 뿐이다.
+ */
+export interface AttachmentMedia {
+  kind: "video";
+  durationMs: number;
+  width: number;
+  height: number;
+  hasPoster: boolean;
+}
+
 /** openapi `MessageAttachment` — 메시지에 묶인 첨부 한 건. */
 export interface MessageAttachment {
   id: string;
   name: string;
   mime: string;
   sizeBytes: number;
+  /**
+   * 영상 요약. 보내는 기기가 길이·치수를 재서 보냈을 때만 있다(사진·문서와 재지 않는 클라의 영상에는 **키가 없다**).
+   * 없다는 것은 「영상이 아님」이 아니라 「요약을 모름」일 수 있으니, 영상인지는 `mime` 으로 가른다(`isVideoAttachment`).
+   */
+  media?: AttachmentMedia;
 }
 
 /** openapi `AttachmentUploadResponse`. `uploadUrl`은 불투명한 capability다. */
@@ -3525,6 +3546,29 @@ export async function fetchAttachmentContent(
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
   return onProgress === undefined ? res.blob() : readBlobWithProgress(res, onProgress);
+}
+
+/**
+ * `HEAD …/attachments/{id}/content` — 바이트를 받지 않고 **지금 이 세션이 그 파일을 읽을 수 있는가**를 묻고 상태 숫자만 돌려준다
+ * (#5208, ADR-0151 증보 5 D3: `HEAD` 는 파일을 열지 않는다).
+ *
+ * 폰의 영상 플레이어는 소스(주소 + `Authorization` 머리)를 **에셋을 만들 때 고정**한다. 만료된 토큰으로 소스를 만들면 첫 구간 읽기가
+ * 401 이라 재생이 시작도 못 한다. 그래서 소스를 만들기 직전에 이 물음으로 토큰이 살아 있는지 확인한다 — 401 이면 코어의 단 한 번의
+ * 회전(`authedResponse`) 뒤 새 토큰으로 다시 묻고, 회전이 거절되거나 갱신 토큰이 없으면 세션 만료를 **여기서 한 번** 선언한 채 401 을
+ * 돌려준다. 서버에 닿지 못하면 `NetworkError` 로 던진다(만료로 읽지 않는다).
+ *
+ * 상태를 해석하지 않는다: 403·404 는 「더는 볼 수 없는 파일」, 2xx 는 읽을 수 있음 — 그 판단은 부르는 화면의 몫이다.
+ */
+export async function probeAttachmentContent(
+  workspaceId: string,
+  channelId: string,
+  attachmentId: string
+): Promise<number> {
+  const res = await authedResponse(
+    `${attachmentPath(workspaceId, channelId)}/${encodeURIComponent(attachmentId)}/content`,
+    { method: "HEAD" }
+  );
+  return res.status;
 }
 
 /**

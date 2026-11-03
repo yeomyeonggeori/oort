@@ -1,10 +1,12 @@
 import {
   ATTACH_COPY,
   attachmentDisplayName,
+  isInAppPlayableVideo,
   type MessageAttachment,
 } from '@momo/core/features/attachments/model';
 import React, {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useReducer,
@@ -34,11 +36,13 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { BAR_CONTROL_MAX_SCALE } from '../../design/atoms';
-import { GlassSurface, LiquidGlassAllowed } from '../../design/glass';
+import { LiquidGlassAllowed } from '../../design/glass';
 import {
   ATTACH_MENU_ICONS,
   CONV_ICON_SIZE,
   CONV_ICONS,
+  VIDEO_ICON_SIZE,
+  VIDEO_ICONS,
   VIEWER_ICON_SIZE,
   VIEWER_ICONS,
 } from '../../design/icons';
@@ -51,11 +55,18 @@ import {
 } from '../../design/motion';
 import { font, line, radius, space, type Palette } from '../../design/tokens';
 import { useStyles } from '../../design/theme';
+import { useFormatMessage } from '../../i18n/useFormatMessage';
+import { ReplySwipeGuardContext } from '../conversation/ReplySwipeContainer';
 import { useDismissOnEntry } from '../../lib/useDismissOnEntry';
 import { useReduceMotion } from '../../lib/useReduceMotion';
 import { useAttachmentPreview, measuredAttachmentSize, rememberAttachmentSize } from './content';
 import {initialStage, stageTransition, fitStageRect, stageExitRect, type StageRect} from '@momo/core/lib/stageTransition';
+import { GlassButton } from './GlassButton';
 import {StageHero} from './StageHero';
+import { VideoControls } from './VideoControls';
+import { VideoViewerPage, type ActiveVideoHandle } from './VideoViewerPage';
+import { useAttachmentPoster } from './videoContent';
+import { LAYOUT } from './videoDesign';
 import type {MeasureHeroSource} from './heroSource';
 import { ShareSheetTouchShield } from '../../lib/ShareSheetTouchShield';
 import { useShareAttachment } from './useShareAttachment';
@@ -350,82 +361,41 @@ function ViewerThumb({
   onPress: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const formatMessage = useFormatMessage();
+  // 영상의 바이트를 미리보기로 받지 않는다(#5208): 썸네일은 포스터다. 사진만 `useAttachmentPreview` 를 켠다.
+  const isVideo = isInAppPlayableVideo(attachment);
   const preview = useAttachmentPreview(
     workspaceId,
     channelId,
     attachment,
-    true,
+    !isVideo,
   );
+  const posterUri = useAttachmentPoster(workspaceId, channelId, attachment, isVideo);
+  const uri = isVideo ? posterUri : preview.status === 'ready' ? preview.uri : null;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`${position}번째 사진`}
-      accessibilityHint="이 사진으로 이동"
+      accessibilityLabel={isVideo ? formatMessage('attachments.video.thumbLabel', { position }) : `${position}번째 사진`}
+      accessibilityHint={isVideo ? formatMessage('attachments.video.thumbHint') : '이 사진으로 이동'}
       accessibilityState={{ selected }}
       onPress={onPress}
       style={[styles.thumb, selected ? styles.thumbSelected : styles.thumbIdle]}
       testID="attachment-viewer-thumb"
     >
-      {preview.status === 'ready' ? (
+      {uri !== null ? (
         <Image
-          source={{ uri: preview.uri }}
+          source={{ uri }}
           resizeMode="cover"
           style={styles.thumbImage}
           testID="attachment-viewer-thumb-image"
         />
       ) : null}
+      {isVideo ? (
+        <View pointerEvents="none" style={styles.thumbBadge} testID="attachment-viewer-thumb-video">
+          <Image source={VIDEO_ICONS.video} style={styles.thumbBadgeGlyph} />
+        </View>
+      ) : null}
     </Pressable>
-  );
-}
-
-/**
- * 둥근 유리 단추. 누르는 면(`Pressable`)이 지름 44 를 다 채우고, 유리·가는 테두리는 그 뒤·위에 그려진다. 유리의 톤은 테마와
- * 무관하게 어둡다(`VIEWER_GLASS_TONE`) — 밝은 사진 위에서도 흰 글리프가 선다.
- */
-function GlassButton({
-  label,
-  hint,
-  onPress,
-  disabled,
-  testID,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  onPress: () => void;
-  disabled?: boolean;
-  testID: string;
-  children: React.ReactNode;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <GlassSurface
-      radius={VIEWER.control / 2}
-      tone={VIEWER_GLASS_TONE}
-      style={styles.glassCircle}
-      testID={`${testID}-glass`}
-    >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        accessibilityHint={hint}
-        accessibilityState={disabled ? { disabled: true } : undefined}
-        disabled={disabled}
-        onPress={onPress}
-        style={({ pressed }) => [
-          styles.glassHit,
-          pressed && styles.glassPressed,
-        ]}
-        testID={testID}
-      >
-        {children}
-      </Pressable>
-      {/* 가는 테두리 — 유리 위·누르는 면 위에 그려 눌림 채움이 테두리를 덮지 않는다. 닿지 않는다. */}
-      <View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, styles.glassRing]}
-      />
-    </GlassSurface>
   );
 }
 
@@ -557,12 +527,29 @@ function ViewerFrame({
   const scrollRef = useRef<ScrollView>(null);
   const stripRef = useRef<ScrollView>(null);
   const current = images[index] ?? images[0];
+  // 영상 쪽(#5208): 지금 쪽이 앱 안에서 재생하는 영상인가, 그리고 그 쪽의 플레이어가 내민 손잡이. 자동 재생은 카드를 눌러 연
+  // 그 영상 하나뿐이고 옆으로 넘기면 꺼진다(`VideoViewerPage.tsx`).
+  const currentIsVideo = current !== undefined && isInAppPlayableVideo(current);
+  const [activeVideo, setActiveVideo] = useState<ActiveVideoHandle | null>(null);
+  const autoPlayId = useRef<string | null>(images[startIndex]?.id ?? null);
+  const mixed = images.some(isInAppPlayableVideo);
+  const formatMessage = useFormatMessage();
   const [download, share] = useShareAttachment(
     workspaceId,
     channelId,
     current as MessageAttachment,
   );
   const toggleChrome = useCallback(() => setHidden(value => !value), []);
+
+  // 뷰어 안의 터치는 아래 행의 「밀어서 답글」(#4869)의 것이 아니다. 이 뷰어는 메시지 행의 React 자손이라(Modal 도 React 트리로는 행 안이다)
+  // 행의 밀기 컨테이너가 **capture 길**에서 오른쪽→왼쪽 쓸기를 먼저 가져간다 — 뷰어 안에서 다음 장으로 넘기는 바로 그 쓸기다. 가져가면
+  // 사진·영상을 넘기는 동시에 뒤 대화에 답글 입력칸이 열리고 자판이 올라와 아래 조작(영상 조작 줄)을 덮고, 그 자판을 내리는 첫 탭이 재생 단추를
+  // 삼킨다(#5208 시뮬레이터 실측). 길게 눌러 시트를 연 손가락에 세우는 것과 같은 표지(`ReplySwipeGuardContext`)를 뷰어의 모든 터치 시작에 세운다 —
+  // 컨테이너가 새 터치 시작에서 표지를 거두고(capture, 뿌리 먼저) 이 `onTouchStart` 가 그 **뒤에** 다시 세우므로 이 터치는 밀리지 않는다.
+  const replySwipeGuard = useContext(ReplySwipeGuardContext);
+  const holdReplySwipe = useCallback(() => {
+    if (replySwipeGuard !== null) replySwipeGuard.current = true;
+  }, [replySwipeGuard]);
 
   // ---- 확대 (#4769) -----------------------------------------------------------------------
   // 현재 쪽이 확대돼 있는가. 확대 중에는 가로 넘기기와 쓸어 닫기가 꺼진다. 쪽이 `zoomScale` 로 알려 온다(다른 쪽의 알림은 무시한다).
@@ -574,13 +561,16 @@ function ViewerFrame({
     if (position === indexRef.current) setZoomed(next);
   }, []);
 
-  const preview = useAttachmentPreview(workspaceId, channelId, current as MessageAttachment, true);
-  const natural = usePhotoSize(current?.id ?? '', preview.status === 'ready' ? preview.uri : null);
+  // 영상의 바이트를 사진 미리보기로 받지 않는다 — 켜면 영상 한 편(최대 수백 MB)을 통째로 캐시에 내려받는다(#5208).
+  const preview = useAttachmentPreview(workspaceId, channelId, current as MessageAttachment, !currentIsVideo);
+  const photoUri = preview.status === 'ready' ? preview.uri : null;
+  const natural = usePhotoSize(current?.id ?? '', currentIsVideo ? null : photoUri);
   const fitted = fitStageRect(natural, {width, height});
   const requestClose = useCallback(() => {
     if (pendingTap.current) { clearTimeout(pendingTap.current.timer); pendingTap.current = null; }
-    dispatch({type: 'close', zoomed, reduceMotion: reduceMotion || (!origin && !measureSource)});
-  }, [zoomed, reduceMotion, origin, measureSource]);
+    // 영상은 맞는 사진 모양이 없어 hero 로 돌아갈 곳이 없다 — 바로 닫는다.
+    dispatch({type: 'close', zoomed, reduceMotion: reduceMotion || currentIsVideo || (!origin && !measureSource)});
+  }, [zoomed, reduceMotion, origin, measureSource, currentIsVideo]);
   closeRequest.current = requestClose;
   useEffect(() => {
     if (origin && heroRect.current === null) heroRect.current = origin;
@@ -693,6 +683,7 @@ function ViewerFrame({
 
   // 다른 장으로 넘어가면(썸네일·넘기기) 앞 장의 확대가 풀린다. 이 장은 원래 크기에서 시작한다.
   useEffect(() => {
+    if (images[index]?.id !== autoPlayId.current) autoPlayId.current = null;
     setZoomed(false);
     zoomPages.current.forEach((page, position) => {
       if (position !== index) page?.reset(!reduceMotion);
@@ -832,6 +823,7 @@ function ViewerFrame({
       onAccessibilityEscape={requestClose}
       style={styles.viewer}
       testID={exiting ? "attachment-viewer-exit" : "attachment-viewer"}
+      onTouchStart={holdReplySwipe}
       // 사진 밖에 닿은 손가락만 쥔다(부분 집합). 사진 위는 쪽이 쥔다 — 위 「응답을 쥐는 자리」.
       {...frameHandlers}
     >
@@ -865,26 +857,43 @@ function ViewerFrame({
             setIndex(Math.round(event.nativeEvent.contentOffset.x / width))
           }
         >
-          {images.map((image, position) => (
-            <ViewerPage
-              key={image.id}
-              workspaceId={workspaceId}
-              channelId={channelId}
-              attachment={image}
-              position={position}
-              width={width}
-              height={height}
-              responder={pageHandlers}
-              blankResponder={frameHandlers}
-              zoomPages={zoomPages}
-              onZoomedChange={onZoomedChange}
-            />
-          ))}
+          {images.map((image, position) =>
+            isInAppPlayableVideo(image) ? (
+              <VideoViewerPage
+                key={image.id}
+                workspaceId={workspaceId}
+                channelId={channelId}
+                attachment={image}
+                width={width}
+                height={height}
+                responder={pageHandlers}
+                blankResponder={frameHandlers}
+                // 플레이어는 지금 보는 영상에만 선다. 닫으면 Modal 이 내려가며 플레이어가 풀려 소리가 멎는다.
+                active={position === index}
+                autoPlay={image.id === autoPlayId.current}
+                onActiveVideo={setActiveVideo}
+              />
+            ) : (
+              <ViewerPage
+                key={image.id}
+                workspaceId={workspaceId}
+                channelId={channelId}
+                attachment={image}
+                position={position}
+                width={width}
+                height={height}
+                responder={pageHandlers}
+                blankResponder={frameHandlers}
+                zoomPages={zoomPages}
+                onZoomedChange={onZoomedChange}
+              />
+            ),
+          )}
         </ScrollView>
       </Animated.View>
       {heroActive ? <StageHero
         key={transition.ticket}
-        uri={preview.status === 'ready' ? preview.uri : null}
+        uri={photoUri}
         from={closingFrame?.from ?? origin ?? fitted}
         to={closingFrame?.to ?? fitted}
         closing={transition.phase === 'closing'}
@@ -984,6 +993,14 @@ function ViewerFrame({
             style={styles.scrimBottomFade}
             testID="attachment-viewer-scrim-bottom-fade"
           />
+          {currentIsVideo && activeVideo !== null && activeVideo.attachmentId === current?.id ? (
+            <VideoControls
+              key={activeVideo.attachmentId}
+              player={activeVideo.player}
+              controller={activeVideo.controller}
+              durationHintSeconds={activeVideo.durationHintSeconds}
+            />
+          ) : null}
           {download.status !== 'idle' ? (
             <Text
               pointerEvents="none"
@@ -1027,18 +1044,24 @@ function ViewerFrame({
               </ScrollView>
               <View pointerEvents="none" style={styles.captionRow}>
                 <Image
-                  source={ATTACH_MENU_ICONS.photo}
+                  source={currentIsVideo ? VIDEO_ICONS.video : ATTACH_MENU_ICONS.photo}
                   style={styles.captionGlyph}
                 />
                 {/* 이름은 글자 자체에 둔다(행을 `accessible` 로 묶으면 안의 testID 가 접근성 트리에서 사라진다 — Maestro 가 이 글자를
                     id 로 짚는다). 보이는 글은 「3장 중 2번」, 읽히는 글은 「3장 중 2번째 사진」이다. */}
                 <Text
-                  accessibilityLabel={viewerCaptionLabel(index + 1, total)}
+                  accessibilityLabel={
+                    mixed
+                      ? formatMessage('attachments.viewer.mixedCaptionLabel', { position: index + 1, total })
+                      : viewerCaptionLabel(index + 1, total)
+                  }
                   maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
                   style={styles.caption}
                   testID="attachment-viewer-position"
                 >
-                  {viewerCaption(index + 1, total)}
+                  {mixed
+                    ? formatMessage('attachments.viewer.mixedCaption', { position: index + 1, total })
+                    : viewerCaption(index + 1, total)}
                 </Text>
               </View>
             </>
@@ -1047,7 +1070,7 @@ function ViewerFrame({
             <GlassButton
               label="저장"
               // 사진 보관함에 직접 쓰지 않는다 — 공유 시트의 「이미지 저장」이 저장이다(파일 머리).
-              hint="공유 시트가 열려요. 「이미지 저장」을 고르세요"
+              hint={currentIsVideo ? formatMessage('attachments.video.saveHint') : '공유 시트가 열려요. 「이미지 저장」을 고르세요'}
               onPress={save}
               disabled={busy}
               testID="attachment-viewer-save"
@@ -1194,6 +1217,17 @@ const buildStyles = (_color: Palette) =>
     // 같은 두께의 투명 테두리 — 고를 때 사진이 자리를 옮기지 않는다.
     thumbIdle: { borderColor: 'transparent', opacity: VIEWER.thumbDim },
     thumbImage: { width: '100%', height: '100%' },
+    // 영상 썸네일의 표지(#5208): 포스터를 가리지 않게 왼쪽 아래 모서리에 영상기만 얹는다.
+    thumbBadge: {
+      ...LAYOUT.floating,
+      left: space.xs,
+      bottom: space.xs,
+    },
+    thumbBadgeGlyph: {
+      width: VIDEO_ICON_SIZE.video,
+      height: VIDEO_ICON_SIZE.video,
+      tintColor: VIEWER_STAGE.ink,
+    },
     captionRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -1233,23 +1267,6 @@ const buildStyles = (_color: Palette) =>
       justifyContent: 'space-between',
     },
 
-    // ---- 둥근 유리 단추 -------------------------------------------------------------
-    glassCircle: { width: VIEWER.control, height: VIEWER.control },
-    glassHit: {
-      width: VIEWER.control,
-      height: VIEWER.control,
-      minWidth: VIEWER.control,
-      minHeight: VIEWER.control,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: radius.pill,
-    },
-    glassPressed: { backgroundColor: VIEWER_STAGE.pressedFill },
-    glassRing: {
-      borderRadius: radius.pill,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: VIEWER_STAGE.glassBorder,
-    },
     backGlyph: {
       width: CONV_ICON_SIZE.left,
       height: CONV_ICON_SIZE.left,
