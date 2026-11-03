@@ -201,7 +201,11 @@ export const messageKeys = [
   "expressions.make.stepSend",
   "expressions.make.stepUpload",
   "expressions.make.submit",
+  "expressions.panel.viewEmoticon",
   "expressions.panel.viewEmpty",
+  "expressions.panel.viewGif",
+  "expressions.panel.viewsLegend",
+  "expressions.panel.viewTeam",
   "expressions.photo.agentInstead",
   "expressions.photo.anotherPhoto",
   "expressions.photo.branchLabel",
@@ -1003,7 +1007,11 @@ export const argumentSpecs = {
   "expressions.make.stepSend": {},
   "expressions.make.stepUpload": {},
   "expressions.make.submit": {},
+  "expressions.panel.viewEmoticon": {},
   "expressions.panel.viewEmpty": {},
+  "expressions.panel.viewGif": {},
+  "expressions.panel.viewsLegend": {},
+  "expressions.panel.viewTeam": {},
   "expressions.photo.agentInstead": {},
   "expressions.photo.anotherPhoto": {},
   "expressions.photo.branchLabel": {},
@@ -1898,7 +1906,11 @@ export interface MessageArgs {
   "expressions.make.stepSend": Record<string, never>;
   "expressions.make.stepUpload": Record<string, never>;
   "expressions.make.submit": Record<string, never>;
+  "expressions.panel.viewEmoticon": Record<string, never>;
   "expressions.panel.viewEmpty": Record<string, never>;
+  "expressions.panel.viewGif": Record<string, never>;
+  "expressions.panel.viewsLegend": Record<string, never>;
+  "expressions.panel.viewTeam": Record<string, never>;
   "expressions.photo.agentInstead": Record<string, never>;
   "expressions.photo.anotherPhoto": Record<string, never>;
   "expressions.photo.branchLabel": Record<string, never>;
