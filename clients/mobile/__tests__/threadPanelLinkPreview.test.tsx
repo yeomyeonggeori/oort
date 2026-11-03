@@ -75,7 +75,7 @@ function timeline(sendReply: jest.Mock): UseTimelineResult {
     recoveryMarkers: [],
     pending: [],
     send: async () => {},
-    resend: async () => {},
+    resend: async () => {}, discard: () => null,
     toggleReaction: async () => {},
     editBody: async () => {},
     removeMessage: async () => {},
