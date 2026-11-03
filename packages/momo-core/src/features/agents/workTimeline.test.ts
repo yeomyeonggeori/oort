@@ -317,7 +317,7 @@ describe("문장 (모든 사용자 문구는 사전을 거친다)", () => {
         }),
         copyKo
       )
-    ).toMatchObject({ statusWord: "실패", failure: "다른 변경과 겹쳤어요", duration: "40ms", repeat: null });
+    ).toMatchObject({ statusWord: "실패", failure: "다른 변경과 겹쳤어요", duration: "0.1초 미만", repeat: null });
     expect(
       workTimelineRowCopy(
         row({ id: "g", source: "oort", label: "oort_job_renew", status: "failed", failureCode: "brand_new_code" }),
@@ -326,8 +326,8 @@ describe("문장 (모든 사용자 문구는 사전을 거친다)", () => {
     ).toMatchObject({ statusWord: "실패", failure: null });
     expect(
       workTimelineRowCopy(row({ id: "h", source: "oort", label: "oort_job_renew", count: 12 }), copyKo)
-    ).toMatchObject({ repeat: "12번", statusWord: null, failure: null });
-    // 묶음은 이름이 이미 수를 말해서 「N번」을 또 붙이지 않는다.
+    ).toMatchObject({ repeat: "12", statusWord: null, failure: null });
+    // 묶음은 이름이 이미 수를 말해서 반복 수를 또 붙이지 않는다.
     expect(
       workTimelineRowCopy(
         { ...row({ id: "b", source: "agent", toolKind: "read", count: 12 }), parts: [{ toolKind: "read", n: 12 }] },
@@ -344,13 +344,22 @@ describe("문장 (모든 사용자 문구는 사전을 거친다)", () => {
     expect(workTimelineSourceLabel("agent", copyEn)).toBe("Agent report");
 
     expect(workToolSummaryText(null, copyKo)).toBeNull();
-    expect(workToolSummaryText({ calls: 31, failed: 0 }, copyKo)).toBe("도구 호출 31번");
-    expect(workToolSummaryText({ calls: 31, failed: 2 }, copyKo)).toBe("도구 호출 31번 · 실패 2번");
+    expect(workToolSummaryText({ calls: 31, failed: 0 }, copyKo)).toBe("도구 호출 31");
+    expect(workToolSummaryText({ calls: 31, failed: 2 }, copyKo)).toBe("도구 호출 31 · 실패 2");
     expect(workToolSummaryText({ calls: 1, failed: 0 }, copyEn)).toBe("1 tool call");
     expect(workToolSummaryText({ calls: 31, failed: 2 }, copyEn)).toBe("31 tool calls · 2 failed");
 
-    expect(workToolDurationText(35, copyKo)).toBe("35ms");
-    expect(workToolDurationText(999, copyKo)).toBe("999ms");
+    // 시간은 초·분 한 틀이다: 「ms」와 「초」가 한 화면에 섞이지 않는다(#5174 L1).
+    expect(workToolDurationText(35, copyKo)).toBe("0.1초 미만");
+    expect(workToolDurationText(99, copyKo)).toBe("0.1초 미만");
+    expect(workToolDurationText(100, copyKo)).toBe("0.1초");
+    expect(workToolDurationText(450, copyKo)).toBe("0.5초");
+    expect(workToolDurationText(999, copyKo)).toBe("1초");
+    for (const ms of [0, 35, 99, 100, 450, 999, 1234, 59_960, 65_000]) {
+      expect(workToolDurationText(ms, copyKo)).not.toMatch(/ms/);
+      expect(workToolDurationText(ms, copyEn)).not.toMatch(/\d+ms/);
+    }
+    expect(workToolDurationText(35, copyEn)).toBe("Under 0.1s");
     expect(workToolDurationText(1234, copyKo)).toBe("1.2초");
     expect(workToolDurationText(59_960, copyKo)).toBe("1분 0초");
     expect(workToolDurationText(65_000, copyKo)).toBe("1분 5초");

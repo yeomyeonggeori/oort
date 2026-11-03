@@ -15,6 +15,15 @@ import { useEffect, type RefObject } from "react";
 // (`work-panel-pane`)를 가져가므로, 노드가 아니라 규칙을 나눠 쓴다.
 // =============================================================================
 
+/**
+ * 덮고 있던 표면이 닫히는 순간에 **손으로** 먼저 걷는다. React 는 이 커밋이 끝나야 속성을 걷으므로, 닫는 쪽이
+ * 캐럿을 덮여 있던 표면 안의 컨트롤로 돌려주려면(`focus()` 는 inert 안의 요소를 조용히 거절한다) 그 전에 걷어야 한다.
+ * 뒤따르는 효과가 같은 상태로 다시 맞추므로 걷을 것이 없으면 아무 일도 아니다 (#5165).
+ */
+export function releaseInert(node: Element | null): void {
+  node?.removeAttribute("inert");
+}
+
 /** 이미 갖고 있는 ref 에 건다. */
 export function useInertRefWhile<T extends HTMLElement>(
   ref: RefObject<T>,
@@ -24,6 +33,6 @@ export function useInertRefWhile<T extends HTMLElement>(
     const node = ref.current;
     if (!node) return;
     if (active) node.setAttribute("inert", "");
-    else node.removeAttribute("inert");
+    else releaseInert(node);
   }, [ref, active]);
 }
