@@ -8,12 +8,16 @@ import {
 import { WireShapeError } from "../../lib/wire";
 import { asHuddleLifecycleFrame } from "../../lib/realtimeEvents";
 import {
+  huddleControlShown,
   huddleErrorCopy,
   huddleErrorKind,
+  huddleNamesTarget,
   huddleParticipantSummary,
   initialHuddleProjection,
   isHuddleUnsupportedStatus,
   reduceHuddleProjection,
+  type HuddleHeaderFacts,
+  type HuddleLoadStatus,
 } from "./huddleModel";
 
 const ACTIVE: Huddle = {
@@ -230,5 +234,64 @@ describe("huddle user states", () => {
         ],
       })
     ).toBe("구민수, Nadia Rahman 외 1명");
+  });
+});
+
+// =============================================================================
+// 채널 머리의 허들 표면: 컨트롤이 서는 때와 참가자 이름 글이 서는 때 (#5206 · #5184).
+// 웹 머리가 ⋮를 허들 컨트롤과 묶을지(`huddleControlShown`), 이름 글을 꼬리 칸에 세울지(`huddleNamesTarget`)를 이 두 함수로
+// 정한다. 렌더와의 일치(컨트롤이 실제로 그리는 때와 같은가)는 웹 `HuddleHeaderNames.test.tsx`가 잰다.
+// =============================================================================
+
+const STATUSES: HuddleLoadStatus[] = ["loading", "ready", "unconfigured", "error"];
+
+function facts(over: Partial<HuddleHeaderFacts>): HuddleHeaderFacts {
+  return { joined: false, status: "ready", active: ACTIVE, ...over };
+}
+
+describe("huddle header surface", () => {
+  it("draws the control whenever audio is joined, whatever the projection or the connection says", () => {
+    for (const status of STATUSES) {
+      for (const offline of [false, true]) {
+        expect(huddleControlShown(facts({ joined: true, status }), offline)).toBe(true);
+      }
+    }
+  });
+
+  it("draws nothing offline or on a server without huddles, and draws every other state", () => {
+    for (const status of STATUSES) {
+      expect(huddleControlShown(facts({ status }), true)).toBe(false);
+      expect(huddleControlShown(facts({ status }), false)).toBe(status !== "unconfigured");
+    }
+  });
+
+  it("stands the participant names only on a live, ready projection or while joined", () => {
+    // 참가 중: 투영·연결과 무관하게 서 있는 허들(없으면 null).
+    for (const status of STATUSES) {
+      for (const offline of [false, true]) {
+        expect(huddleNamesTarget(facts({ joined: true, status }), offline)).toBe(ACTIVE);
+        expect(huddleNamesTarget(facts({ joined: true, status, active: null }), offline)).toBeNull();
+      }
+    }
+    // 참가 전: 온라인이고 준비된 투영에서만.
+    expect(huddleNamesTarget(facts({}), false)).toBe(ACTIVE);
+    expect(huddleNamesTarget(facts({}), true)).toBeNull();
+    for (const status of ["loading", "unconfigured", "error"] as const) {
+      expect(huddleNamesTarget(facts({ status }), false)).toBeNull();
+    }
+    expect(huddleNamesTarget(facts({ active: null }), false)).toBeNull();
+  });
+
+  it("never stands the names without the control that carries the live chip", () => {
+    for (const joined of [false, true]) {
+      for (const status of STATUSES) {
+        for (const offline of [false, true]) {
+          const state = facts({ joined, status });
+          if (huddleNamesTarget(state, offline) !== null) {
+            expect(huddleControlShown(state, offline)).toBe(true);
+          }
+        }
+      }
+    }
   });
 });
