@@ -58,6 +58,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { landingClass } from "./landing-class.mjs";
 import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -130,31 +131,11 @@ function emptyActionLabels() {
   };
 }
 
-/**
- * 앵커 착지 행에 붙는 클래스. 정본은 `inbox/anchor.ts` 의 `HIGHLIGHT_CLASS` 다.
- *
- * 이 게이트는 그 이름을 `bg-accent-soft` 로 손수 적고 있었고, #4324 2단계가 착지 면을
- * `landed-surface` 로 바꿨을 때 게이트는 따라가지 않아 8b가 base 에서 이미 빨갰다
- * (착지는 멀쩡한데 낡은 이름을 찾았다). 값을 베껴 적으면 두 벌이 조용히 갈라진다는
- * 위 세 함수의 이유가 그대로 이 이름에도 맞는다 — 같은 방법으로 읽는다.
- */
-function landingClass() {
-  const source = readFileSync(
-    resolve(webRoot, "src/features/inbox/anchor.ts"),
-    "utf8"
-  );
-  const match = source.match(/const HIGHLIGHT_CLASS = "([^"]+)";/);
-  if (match === null) {
-    throw new Error("inbox/anchor.ts 의 HIGHLIGHT_CLASS 를 읽지 못했다");
-  }
-  return match[1];
-}
-
 const TOUCH_TARGET = touchTargetPx();
 const AVATAR_SIZE = avatarSizePx();
 const COMPOSER_OFFLINE_COPY = composerOfflineCopy();
 const EMPTY_ACTIONS = emptyActionLabels();
-const LANDING_CLASS = landingClass();
+const LANDING_CLASS = landingClass(webRoot);
 
 const port = Number(process.env.COMPOSER_GATE_PORT || 5198);
 const origin = `http://127.0.0.1:${port}`;

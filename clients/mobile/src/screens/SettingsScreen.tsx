@@ -1,6 +1,6 @@
 import React from 'react';
 
-import {SettingsPage} from '../features/profile/SettingsPage';
+import {SettingsPage, type SettingsPageName} from '../features/profile/SettingsPage';
 import {useDirectory} from '../features/workspace/queries';
 import {useLayerClose} from '../nav/EdgeSwipeBack';
 import {useRealtime} from '../realtime/RealtimeProvider';
@@ -17,8 +17,11 @@ import {useSession} from '../session/useSession';
 
 export default function SettingsScreen({
   onBack,
+  initialPage,
 }: {
   onBack: () => void;
+  /** 처음 열 장. 셸이 「업데이트 소식」 시트의 「자세히 보기」로 열 때만 준다(#4937). 없으면 설정 첫 장. */
+  initialPage?: SettingsPageName;
 }): React.JSX.Element {
   const {member, workspaceId, signOut} = useSession();
   const realtime = useRealtime();
@@ -33,6 +36,7 @@ export default function SettingsScreen({
       connected={realtime.status === 'connected'}
       onSignOut={signOut}
       onClose={closeLayer ?? onBack}
+      initialPage={initialPage}
     />
   );
 }

@@ -239,7 +239,7 @@ describe('리스트 구성 — 정방향과 프리펜드 보정', () => {
     ).toEqual({flexGrow: 1, justifyContent: 'flex-end'});
   });
 
-  it('끌면 키보드가 내려간다 — 그리고 탭은 행이 판정한다', () => {
+  it('끌어 아래로 48pt 면 키보드가 내려간다(#4665) — 그리고 탭은 행이 판정한다', () => {
     // `interactive` 였다. 그 모드는 드래그가 **키보드에 닿아야** 내리는데, 리프트
     // 이후로 리스트의 아래끝은 컴포저에서 멈추고 컴포저는 키보드 위에서 멈춘다 —
     // 손가락이 그 모드가 말하는 곳에 영영 도착하지 못한다.
@@ -250,14 +250,16 @@ describe('리스트 구성 — 정방향과 프리펜드 보정', () => {
     // 제스처를 살려 두고, 탭 규칙은 `MessageRow` 가 적는다.
     renderTimeline();
     const list = screen.getByTestId('timeline-list');
-    expect(list.props.keyboardDismissMode).toBe('on-drag');
+    // #4665: 끌기 즉시(`on-drag`)가 아니라 손가락이 아래로 48pt 누적될 때(`dragRest.ts`)다 —
+    // `on-drag` 로 두면 UIKit 이 문턱보다 먼저 첫 1px 에 자판을 걷는다.
+    expect(list.props.keyboardDismissMode).toBe('none');
     expect(list.props.keyboardShouldPersistTaps).toBe('handled');
-    // 그리고 **끌 수 있어야** 그 모드가 존재한다. `on-drag` 는 UIScrollView 의
-    // `scrollViewWillBeginDragging` 에 걸리는데, 짧은 대화는 스크롤할 것이 없다 —
-    // 바운스가 꺼져 있으면 드래그 자체가 시작되지 않아 이 배치의 수정이 가장
-    // 필요한 화면에서만 조용히 죽는다. RN 은 세로 리스트에 이 값을 켜서 주고
-    // (`ScrollView.js`: `alwaysBounceVertical = !horizontal`), 이 줄은 누군가
-    // 그것을 끄면 알아채기 위한 것이다.
+    // 그리고 **끌 수 있어야** 그 판정이 존재한다. 새 판정도 UIScrollView 의
+    // `scrollViewWillBeginDragging`(`onScrollBeginDrag`)에 걸리는데, 짧은 대화는
+    // 스크롤할 것이 없다 — 바운스가 꺼져 있으면 드래그 자체가 시작되지 않아 이
+    // 배치의 수정이 가장 필요한 화면에서만 조용히 죽는다. RN 은 세로 리스트에 이
+    // 값을 켜서 주고(`ScrollView.js`: `alwaysBounceVertical = !horizontal`), 이 줄은
+    // 누군가 그것을 끄면 알아채기 위한 것이다.
     expect(list.props.alwaysBounceVertical).not.toBe(false);
   });
 

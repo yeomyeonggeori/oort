@@ -87,6 +87,8 @@ export function EmojiPickerDialog({
   const searchRef = useRef<HTMLInputElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
+  // 우리 팀 패널의 확인 단계(삭제·신고)가 서 있는 동안 Esc는 그 단계의 것이다. 패널이 취소 함수를 여기에 올려 둔다(#4986).
+  const escapeClaim = useRef<(() => void) | null>(null);
   const [entries, setEntries] = useState<CatalogEmoji[] | null>(null);
   const [error, setError] = useState(false);
   const [loadNonce, setLoadNonce] = useState(0);
@@ -138,6 +140,11 @@ export function EmojiPickerDialog({
     // React portal bubbling reaches ThreadPanel's aside onKeyDown. Stop it
     // here so one Escape dismisses only this overlay (or the skin list).
     event.stopPropagation();
+    if (escapeClaim.current) {
+      event.preventDefault();
+      escapeClaim.current();
+      return;
+    }
     if (!skinOpen) return;
     event.preventDefault();
     setSkinOpen(false);
@@ -149,7 +156,7 @@ export function EmojiPickerDialog({
       <Button type="button" variant={team ? "ghost" : "secondary"} size="sm" aria-pressed={!team} onClick={() => { setSkinOpen(false); setTeam(false); }}>기본 이모지</Button>
       <Button type="button" variant={team ? "secondary" : "ghost"} size="sm" aria-pressed={team} onClick={() => { setSkinOpen(false); setTeam(true); }}>우리 팀</Button>
     </div>}
-    {team && purpose !== "status" ? <TeamExpressionsPanel purpose={purpose} onPick={(token) => { onPick(token); onOpenChange(false); }} onClose={() => onOpenChange(false)} /> : <EmojiPickerPanel
+    {team && purpose !== "status" ? <TeamExpressionsPanel purpose={purpose} escapeClaim={escapeClaim} onPick={(token) => { onPick(token); onOpenChange(false); }} onClose={() => onOpenChange(false)} /> : <EmojiPickerPanel
       itemPrefix={copy.itemPrefix}
       entries={entries}
       loading={open && !error && entries === null}

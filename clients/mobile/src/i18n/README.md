@@ -40,10 +40,12 @@ ko/en 네이티브 기능을 확인한 뒤 Locale → PluralRules → RelativeTi
   AppState `active`에도 기기 정보를 다시 읽는다. 명시 선택은 유지하면서 지역·시간대를
   갱신한다. 사전이 없는 OS 언어는 그 지역을 보존한 영어로 표시한다.
 - 설정 › 프로필 › 언어는 기존 ListRow/ChoiceRow/페이지 스택을 쓴다. 기기 언어가
-  첫 행이고, 출시한 ko/en만 자칭 표기와 베타로 보인다. 공용 부분 지원 안내를 유지한다.
-  선택은 다른 계정 트리를 다시 마운트하지 않는다. 큰 글자를 제한하는 행 높이·줄 수를
-  추가하지 않았고 자칭 행은 자기 언어로 VoiceOver를 지정한다. 언어 행의 낭독 라벨은 화면에 보이는 베타 표시를
-포함한다(`한국어, 베타`·`English, 베타`, 영어 UI에서는 `…, Beta`).
+  첫 행이고, 출시한 ko/en은 자칭 표기만 보인다. **베타 표시는 없고**(owner 10-31, #4936) 선택지 아래 설명
+  네 줄(현재 언어·적용 범위·부분 지원·권한 창)도 걷었다. 영어 UI일 때만 부분 지원 한 줄
+  (`settings.profile.languagePartialNotice`, 「Some screens are still in Korean.」)이 서고 한국어 UI에는 설명이 없다.
+  그 기준은 고른 값이 아니라 **지금 UI 언어**(`effectiveLocale === 'en-US'`)라서 기기 언어가 영어이거나 사전이 없는
+  언어로 영어 fallback 중일 때도 선다. 선택은 다른 계정 트리를 다시 마운트하지 않는다. 큰 글자를 제한하는 행 높이·줄 수를
+  추가하지 않았고 자칭 행은 자기 언어로 VoiceOver를 지정한다. 언어 행의 낭독 라벨은 자칭 표기뿐이다(`한국어`·`English`).
 - 빈 저장값은 system 선택, 시작 준비(Intl 검사·저장값 복원)는 앱 진입 전 로더, 쓰는 중은 행 잠금/진행 표시,
   저장 오류는 기존 언어를 유지한 인라인 재시도다. 저장값을 읽지 못해도(`preference-read-failed`)
   코어처럼 기기 언어(system)로 계속하고 코드만 보고한다(앱 전체를 안전 화면에 막지 않는다).
@@ -53,6 +55,27 @@ ko/en 네이티브 기능을 확인한 뒤 Locale → PluralRules → RelativeTi
   Metro 개발 서버(`lazy=true`)의 지연 번들이 루트 밖 파일을 못 풀어 개발 빌드가 언어 초기화에서 멈췄다(#4910,
   `__tests__/mobileCatalogStatic.test.ts`가 막는다). 키보드 입력은 없다. 뒤로/가장자리 밀기와
   VoiceOver escape·동작 줄이기는 기존 페이지 부품을 따른다.
+
+## 첫 화면 언어 칩 — #4670
+
+로그인 전 첫 화면(M0 환영·M-b 로그인·M-a 초대)의 위 막대 오른쪽에 작은 칩(`LanguageChip.tsx`)이 서요. 칩 → 언어 시트
+(`PageSheet` 내용 맞춤 단) → 즉시 반영이고, 고른 값은 **설정 › 프로필 › 언어와 같아요**.
+
+- 시트 안의 목록은 설정 페이지와 **같은 부품**(`LanguageSettings.tsx`의 `LanguageChoices`)이에요. 같은 컨트롤러의 같은
+  `setPreference()`, 같은 MMKV 칸(`oort.mobile.locale.v1`), 같은 목록(코어 `languageChoices(CATALOG_LOCALES)`), 같은
+  저장 중·실패와 다시 시도·영어 UI의 한 줄이에요. 저장이 **성공했을 때만** 시트가 내려가요.
+- 칩은 막대 왼쪽의 「뒤로」와 같은 말씨의 가벼운 단추(`OnboardingGhostButton`)로, 지금 쓰는 말의 자칭 표기(「한국어」·
+  「English」) 뒤에 ⌄ 가 붙어요(`accessory="expand"`, #5101): 첫 화면(M0)에는 짝이 되는 「뒤로」도 없어서 낱말 하나만 서면
+  지금 언어를 알리는 라벨로 읽혀요. ⌄ 는 `ListRow accessory="expand"` 와 같은 글리프(「여기서 고른다」)이고 색은 글자와
+  같아요. 새 아이콘도 새 모양도 만들지 않았어요. 낭독 이름은 「현재 언어: 한국어」(설정과 같은 문장)이고 ⌄ 는 낭독에서 빠져요.
+- `OnboardingTopBar`에 `right` 칸이 생겼어요. 주면 양쪽이 같은 폭을 나눠 가져 칩의 폭이 진행 점을 밀지 않아요. M0는 위 막대가
+  새로 서서 히어로가 막대 높이(44)만큼 줄어든 자리 안에서 가운데에 서요(캡처로 확인할 곳).
+- 앱의 언어 서비스가 없는 격리 하네스에서는 칩을 그리지 않아요(제품 앱은 늘 provider 안이에요).
+- **알려진 한계**: 첫 화면의 기존 문구는 아직 직접 쓴 한국어예요(문구 추출은 P1). 영어를 골라도 지금 즉시 바뀌는 것은 칩·
+  「이메일 기억하기」 줄 같은 사전 문구뿐이고, 나머지는 P1에서 따라와요.
+
+시험: `__tests__/languageChip.test.tsx`(칩 → 시트 → 영어, 설정 페이지가 같은 줄을 고른 것으로 말하는지·같은 목록인지, 저장 실패 시
+시트가 열린 채인지, 칩의 ⌄ 가 `ListRow` 펼침 글리프와 같은 것인지, 목록 카드의 줄 사이 구분선이 둘인지).
 
 ## 출하 설정과 플랫폼 문구
 
@@ -75,7 +98,7 @@ Locale polyfill의 내장 canonicalization/likely-subtag 표는 upstream 그대�
 기존 Info.plist 권한 이유 여섯 개를 `mobile.ios.*`에서 ko/en InfoPlist.strings로
 생성한다. 개발 언어 en, Xcode knownRegions en/ko/Base, PBXVariantGroup 및 앱 Resources를
 맞췄다. OS 권한창은 iOS가 고른 언어이며 앱 내 변경의 즉시 반영을 보장하지 않는다.
-이 한계도 `mobile.locale.permissionNotice`로 설정에 보인다.
+이 한계를 설정에 문장으로 보이던 `mobile.locale.permissionNotice`는 owner 10-31(#4936)에 걷었다(사전 키도 지웠다).
 
 ```sh
 npm --prefix packages/momo-core run i18n:generate
@@ -206,7 +229,7 @@ null 의존 0, tooling/TypeScript 포함 0이다. core README 명령도 추가 �
 - `npm --prefix clients/mobile test -- --watchman=false` 전체 1회: **260 suite 통과(skip 1) · 6,786 PASS ·
   skip 5 · 실패 0**. retryRegistry는 track/uxui 판 그대로(중첩 Jest에 `--watchman=false` 없이)도 통과한다.
 - `__tests__/mobileLocale.test.tsx` **38 PASS**. MMKV 복원·로그아웃 보존, 앱 복귀, 실제 RN settingsUpdated 관찰,
-  지원 밖/오프라인, 원자적 전체 컨텍스트 전환과 마운트 보존(낭독 라벨에 베타 포함, 영어 UI는 `…, Beta`),
+  지원 밖/오프라인, 원자적 전체 컨텍스트 전환과 마운트 보존(낭독 라벨은 자칭 표기뿐, 베타 없음 — #4936),
   저장 실패 재시도, 초기화 실패의 영어 안전 문구/진단, 조건 로드와 공식 ko/en 데이터, Apple Hermes 모양
   엔진의 공식 polyfill 초기화, 등록됐으나 던지는 `formatToParts` 닫힘. Intl 측정은 값으로 고정한다:
   「등록됐지만 틀린」 Locale 2종(baseName·maximize)·PluralRules 2종(영어 1·한국어)·RelativeTimeFormat은
@@ -227,7 +250,7 @@ null 의존 0, tooling/TypeScript 포함 0이다. core README 명령도 추가 �
   「문구가 있기만 하면」으로 약화 ⑤ 재측정에서 RTF 제거 ⑥ 재측정에서 Locale 제거 ⑦ PluralRules 검사를
   `supportedLocalesOf`만으로 축소 ⑧ 네이티브 DateTimeFormat/NumberFormat/Collator 검사 제거 ⑨ `bootFailed` 제거
   ⑩ Locale 검사를 `typeof`만으로 축소 ⑪ `getCanonicalLocales` 검사 제거 ⑫ 재측정에서 PluralRules 제거
-  ⑬ 저장값 읽기 실패가 다시 시작을 막음 ⑭ 언어 행 라벨에서 베타 제거 ⑮ 폰이 `@formatjs/intl` 선언을 지움
+  ⑬ 저장값 읽기 실패가 다시 시작을 막음 ⑭ 부분 지원 한 줄이 한국어 UI에도 섬(#4936, 베타 라벨 변이를 대체) ⑮ 폰이 `@formatjs/intl` 선언을 지움
   ⑯ 정확 핀 대신 범위 ⑰ 루트 `node_modules`를 watch함 ⑱ 코어 bare import가 Metro 기본 탐색(루트가 이김)
   ⑲ 계층 탐색 허용(루트로 폴백) ⑳ jest가 코어 의존을 위로 탐색(루트가 이김). 소스 변이는 임시 사본을 jest가
   덮어쓰고, package.json·metro.config.js는 seam이 없어 제자리에서 고쳤다가 `finally`로 되돌린 뒤 해시를 비교한다.

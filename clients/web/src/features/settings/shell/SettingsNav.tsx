@@ -9,6 +9,7 @@ import {
   Download,
   Keyboard,
   MonitorSmartphone,
+  Newspaper,
   Palette,
   Server,
   Sparkles,
@@ -18,8 +19,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/design/lib/cn";
+import { useMessages } from "@/i18n/useMessages";
 import {
   SETTINGS_GROUPS,
+  settingsSectionLabel,
   type SettingsSectionId,
   type SettingsSectionMeta,
 } from "../settingsNav";
@@ -43,6 +46,7 @@ const ICONS: Record<SettingsSectionId, LucideIcon> = {
   usage: ChartColumn,
   code: Server,
   updates: Download,
+  releaseNotes: Newspaper,
   devTools: Terminal,
   aiHub: Sparkles,
 };
@@ -65,6 +69,7 @@ export function SettingsNav({
   onKeyDown: (event: KeyboardEvent) => void;
   registerRef: (id: SettingsSectionId, el: HTMLButtonElement | null) => void;
 }) {
+  const messages = useMessages();
   return (
     <nav
       aria-label="설정 섹션"
@@ -111,7 +116,7 @@ export function SettingsNav({
                       <span data-row-icon>
                         <Icon aria-hidden />
                       </span>
-                      {item.label}
+                      {settingsSectionLabel(item, messages)}
                       {item.link ? (
                         <span data-row-icon className="ms-auto">
                           <ArrowUpRight aria-hidden />

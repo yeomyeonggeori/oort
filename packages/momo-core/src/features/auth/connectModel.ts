@@ -12,6 +12,18 @@ export type ConnectMode = "signIn" | "join";
 
 export type ConnectField = "server" | "email" | "password" | "code";
 
+/**
+ * 로그인 칸 둘이 암호 관리자(iOS 암호 자동 채움)에게 하는 말 (#4669). 값은 RN `textContentType`의
+ * 낱말과 같다. 이메일 칸은 `username`이어야 짝 암호를 같이 채우고(`emailAddress`는 연락처 메일을
+ * 제안한다), 비밀번호 칸은 로그인에서는 저장된 암호를 찾는 `password`, 새 암호를 정하는 가입에서는
+ * 강한 암호를 제안하는 `newPassword`다. 문구가 아니라 시스템에 건네는 표지라서 코어에 둔다.
+ */
+export const EMAIL_AUTOFILL_HINT = "username";
+
+export function passwordAutofillHint(mode: ConnectMode): "password" | "newPassword" {
+  return mode === "join" ? "newPassword" : "password";
+}
+
 /** HTTP statuses whose copy is about the invite code, not the password. */
 const INVITE_CODE_STATUSES = new Set([403, 404, 409, 410]);
 

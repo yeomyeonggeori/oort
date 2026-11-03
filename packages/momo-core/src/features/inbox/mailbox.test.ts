@@ -9,6 +9,8 @@ import {
   filterMailbox,
   isUnreadSeq,
   mailboxCounts,
+  mailboxFilterHasTasks,
+  MAILBOX_FILTERS,
   mentionEntry,
   parseMailboxFilter,
   taskEntry,
@@ -226,6 +228,16 @@ describe("composeMailbox / 필터 / 세기", () => {
     const list = composeMailbox({ dms: [read], mentions: [], threads: [], tasks: [task], dmChannelIds: new Set() });
     expect(filterMailbox(list, "unread").map((e) => e.kind)).toEqual(["task"]);
     expect(mailboxCounts(list)).toMatchObject({ all: 1, unread: 1, dm: 0, task: 1 });
+  });
+  it("이 탭에 승인이 들어가는가: 실제 처리할 일 줄이 필터를 통과하는 탭과 같다 (#5116)", () => {
+    // 판정을 탭 이름 표로 다시 적지 않는다: 진짜 `taskEntry`가 각 필터를 통과하는지가 정답이다.
+    const passing = MAILBOX_FILTERS.filter((filter) => filterMailbox([task], filter).length === 1);
+    expect(passing).toEqual(["all", "unread", "task"]);
+    for (const filter of MAILBOX_FILTERS) {
+      expect(mailboxFilterHasTasks(filter), filter).toBe(passing.includes(filter));
+    }
+    // 필터 밖의 값(웹의 「나중에」)은 어느 줄도 담지 않는다.
+    expect(mailboxFilterHasTasks("reminders")).toBe(false);
   });
   it("모르는 필터 값은 전체로", () => {
     expect(parseMailboxFilter("nope")).toBe("all");

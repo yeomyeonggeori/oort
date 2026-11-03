@@ -55,7 +55,7 @@ export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false,
   const blocked = busy || working || offline;
   async function upload(file: File) {
     if (!store || blocked || lock.current) return;
-    if (!validExpressionFile(file)) { setError("5 MiB 이하의 PNG, JPEG, WebP 또는 GIF를 골라 주세요."); return; }
+    if (!validExpressionFile(file)) { setError("5MB 이하의 PNG, JPG, WebP 또는 GIF를 골라 주세요."); return; }
     lock.current = true; setWorking(true); setError(null); setViewed(null); setRights(false);
     try { onReplace(await store.draft({ method: "PUT", path: `${store.base}/expression-drafts/${draft.draftId}/file`, file })); }
     catch { setError("그림을 올리지 못했어요. 파일을 확인하고 다시 올려 주세요."); }
@@ -83,7 +83,7 @@ export function ExpressionDraftCard({ draft, onReplace, onApprove, busy = false,
       </div>
       <p className="text-meta text-ink-muted" data-testid="expression-draft-kind-hint">{formatMessage(KIND_HINT[kind])}</p>
       {explicit === null && <p className="text-meta text-ink-muted" data-testid="expression-draft-kind-auto">{formatMessage("expressions.kind.autoNote")}</p>}
-      <label className="flex items-start gap-2 text-meta active:bg-surface-pressed"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} className="mt-1 focus-visible:focus-ring" />이 그림을 팀에 저장할 권한이 있어요. 사람 얼굴이 있다면 지정된 당사자만 승인해요.</label>
+      <label className="flex items-start gap-2 text-meta active:bg-surface-pressed"><input type="checkbox" checked={rights} onChange={(event) => setRights(event.target.checked)} className="mt-1 focus-visible:focus-ring" />이 그림을 팀에 등록할 권한이 있어요. 사람 얼굴이 있다면 지정된 당사자만 승인해요.</label>
       <Button type="button" disabled={blocked || !rights || !pin || viewed !== pin} onClick={() => void approve()} className="self-end">{working ? "등록 중" : "팀 보관함에 등록"}</Button>
       {viewed !== pin && <p className="text-meta text-ink-muted">그림을 불러오는 중이에요. 새 미리보기를 본 뒤 등록해 주세요.</p>}
     </>}

@@ -18,6 +18,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {
@@ -29,7 +30,7 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
-import {Sentence} from '../../design/atoms';
+import {Sentence, STACK_PILL_SCALE} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {
   ApprovalDecision,
@@ -77,6 +78,9 @@ export function RequestBundleCard({
   onOpenDecision?: (approvalId: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 큰 글씨(결정 무대와 같은 문턱)에서는 머리 문장을 자르지 않는다(#4982): 두 줄에서 말줄임하면 어느 요청인지를 말하는 유일한
+  // 문장이 AX3 에서 「…」로 끝난다. 기본 크기는 카드 높이를 지키려고 두 줄에서 접는다.
+  const {fontScale} = useWindowDimensions();
   const stage = useOpenDecisionStage();
   const stageSource = useRef<View | null>(null);
   const openDecision = onOpenDecision ?? (stage ? (id: string) => stage(id, stageSource) : undefined);
@@ -197,7 +201,7 @@ export function RequestBundleCard({
     >
       <Pressable style={styles.head} accessibilityRole="button" accessibilityLabel="결정 보기" disabled={!openDecision || !card.approvalId} onPress={() => { if (card.approvalId) openDecision?.(card.approvalId); }}>
         <Sentence
-          numberOfLines={2}
+          numberOfLines={fontScale >= STACK_PILL_SCALE ? undefined : 2}
           style={styles.headline}
           testID="request-bundle-headline"
         >
