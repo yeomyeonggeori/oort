@@ -135,6 +135,248 @@ export const catalog: MessageCatalog = {
       "value": "Remember my email"
     }
   ],
+  "connection.action.reconnectNow": [
+    {
+      "type": 0,
+      "value": "Reconnect now"
+    }
+  ],
+  "connection.action.retry": [
+    {
+      "type": 0,
+      "value": "Try again"
+    }
+  ],
+  "connection.approval.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't decide right now. Once you're connected again, you can approve or deny here."
+    }
+  ],
+  "connection.approval.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't decide right now. Once we're connected again, you can approve or deny here."
+    }
+  ],
+  "connection.boot.unreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Your saved sign-in is still here, and we'll keep trying once you're connected."
+    }
+  ],
+  "connection.card.connecting": [
+    {
+      "type": 0,
+      "value": "Connecting…"
+    }
+  ],
+  "connection.card.lastSynced": [
+    {
+      "type": 0,
+      "value": "Last synced "
+    },
+    {
+      "type": 1,
+      "value": "relativeTime"
+    }
+  ],
+  "connection.card.offlineDetail": [
+    {
+      "type": 0,
+      "value": "You can only see what's already loaded. We'll reconnect automatically."
+    }
+  ],
+  "connection.card.offlineTitle": [
+    {
+      "type": 0,
+      "value": "You're offline"
+    }
+  ],
+  "connection.card.realtimeDownDetail": [
+    {
+      "type": 0,
+      "value": "New messages may show up late."
+    }
+  ],
+  "connection.card.realtimeDownTitle": [
+    {
+      "type": 0,
+      "value": "Live connection lost"
+    }
+  ],
+  "connection.card.recovered": [
+    {
+      "type": 0,
+      "value": "Reconnected"
+    }
+  ],
+  "connection.card.serverUnreachableDetail": [
+    {
+      "type": 0,
+      "value": "We'll try again in a moment."
+    }
+  ],
+  "connection.card.serverUnreachableTitle": [
+    {
+      "type": 0,
+      "value": "Can't reach the server"
+    }
+  ],
+  "connection.card.serverUpdatingDetail": [
+    {
+      "type": 0,
+      "value": "It will reconnect soon."
+    }
+  ],
+  "connection.card.serverUpdatingTitle": [
+    {
+      "type": 0,
+      "value": "The server is updating"
+    }
+  ],
+  "connection.card.unknownDetail": [
+    {
+      "type": 0,
+      "value": "Try again. If it keeps happening, copy the connection log and send it to us."
+    }
+  ],
+  "connection.card.unknownTitle": [
+    {
+      "type": 0,
+      "value": "There's a problem with the connection"
+    }
+  ],
+  "connection.composer.offline": [
+    {
+      "type": 0,
+      "value": "You're offline, so you can't send right now. Your draft is still here, and you can send it once you're connected again."
+    }
+  ],
+  "connection.composer.serverUnreachable": [
+    {
+      "type": 0,
+      "value": "We can't reach the server, so you can't send right now. Your draft is still here, and you can send it once we're connected again."
+    }
+  ],
+  "connection.load.channelListTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the channel list"
+    }
+  ],
+  "connection.load.conversationTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the conversation"
+    }
+  ],
+  "connection.load.membersTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the member list"
+    }
+  ],
+  "connection.load.reasonOffline": [
+    {
+      "type": 0,
+      "value": "You're offline. You can try again once you're connected."
+    }
+  ],
+  "connection.load.reasonServer": [
+    {
+      "type": 0,
+      "value": "We can't reach the server. Try again in a moment."
+    }
+  ],
+  "connection.load.reasonUnknown": [
+    {
+      "type": 0,
+      "value": "Something went wrong. Try again."
+    }
+  ],
+  "connection.load.threadTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the thread"
+    }
+  ],
+  "connection.send.failed": [
+    {
+      "type": 0,
+      "value": "Couldn't send"
+    }
+  ],
+  "connection.send.resend": [
+    {
+      "type": 0,
+      "value": "Resend"
+    }
+  ],
+  "connection.send.resendAll": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Resend "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Resend all "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " messages"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "connection.session.expired": [
+    {
+      "type": 0,
+      "value": "Your session has expired. Please sign in again."
+    }
+  ],
+  "connection.upload.failedNoArchive": [
+    {
+      "type": 0,
+      "value": "This server has no file storage connected"
+    }
+  ],
+  "connection.upload.failedOffline": [
+    {
+      "type": 0,
+      "value": "Couldn't upload because you're offline"
+    }
+  ],
+  "connection.upload.failedServer": [
+    {
+      "type": 0,
+      "value": "Couldn't upload because the server isn't responding"
+    }
+  ],
   "desktop.menu.close": [
     {
       "type": 0,
