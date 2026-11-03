@@ -169,6 +169,21 @@ describe("approvalCardNote", () => {
     });
   });
 
+  // #5239: 막은 원인(기기 오프라인 · 서버에 닿지 못함)은 클라이언트가 연결 상태 모델에서 읽어 문장으로 넘긴다.
+  // 코어는 사전을 모르므로 문장을 받기만 하고, 없거나 비면 원인을 가리지 않는 이 상수로 물러난다.
+  it("막은 원인의 문장을 받으면 그 문장이 선다. 없거나 비면 중립 문장이다", () => {
+    const cause = "서버에 닿지 못해 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요.";
+    expect(approvalCardNote(input({ offline: true, offlineText: cause }))).toEqual({
+      kind: "offline",
+      tone: "blocked",
+      text: cause,
+    });
+    expect(approvalCardNote(input({ offline: true, offlineText: null }))?.text).toBe(APPROVAL_OFFLINE_COPY);
+    expect(approvalCardNote(input({ offline: true, offlineText: "  " }))?.text).toBe(APPROVAL_OFFLINE_COPY);
+    // 막지 않았으면 문장이 있어도 줄은 서지 않는다.
+    expect(approvalCardNote(input({ offline: false, offlineText: cause }))).toBeNull();
+  });
+
   /**
    * 원장이 없는 서버에서는 다른 자리로 가도, 온라인이 되어도 아무 일도 일어나지
    * 않는다. 그래서 그 둘보다 이 판정이 앞이다 — 나머지 두 문장이 그 서버에서는

@@ -87,25 +87,27 @@ function avatarSizePx() {
 }
 
 /**
- * 오프라인 문장의 정본도 코어다 (U4-6 리뷰 H-1).
+ * 오프라인 문장의 정본은 사전이다 (U4-6 리뷰 H-1, #5239).
  *
- * 이 게이트는 문장 조각("쓰던 글은 그대로 남습니다")을 손으로 적고 있었고, 그
- * 조각은 **웹만 쓰던 판**의 것이었다. 리뷰가 두 클라의 갈라짐을 실측해 값이
- * 코어로 올라간 순간, 손으로 적힌 조각은 화면을 지키는 것이 아니라 화면이
- * 고쳐지는 것을 막는 쪽이 된다. 아바타 지름과 같은 방법으로 읽는다.
+ * 이 게이트는 문장 조각("쓰던 글은 그대로 남습니다")을 손으로 적고 있었고, 그 조각은 **웹만 쓰던 판**의
+ * 것이었다. 값이 코어로 올라간 뒤에는 코어 상수를 읽었고, 이제 입력창의 막힘 줄은 막은 **원인**에 따라 연결
+ * 상태 모델이 고른 사전 문장이다. 이 게이트가 거는 것은 기기 오프라인(`context.setOffline(true)`)이라
+ * `connection.composer.offline`이고, 한국어 컨텍스트에서 읽는다. 손으로 적으면 이 게이트는 화면을 지키는 것이
+ * 아니라 화면의 문장이 고쳐지는 것을 막는 쪽이 된다. 아바타 지름과 같은 방법으로 읽는다.
  */
 function composerOfflineCopy() {
   const source = readFileSync(
-    resolve(webRoot, "../../packages/momo-core/src/features/chat/composerCopy.ts"),
+    resolve(
+      webRoot,
+      "../../packages/momo-core/src/i18n/catalogs/ko-KR/connection.json"
+    ),
     "utf8"
   );
-  const match = source.match(
-    /export const COMPOSER_OFFLINE_COPY\s*=\s*"([^"]+)"/
-  );
-  if (match === null) {
-    throw new Error("코어의 COMPOSER_OFFLINE_COPY를 읽지 못했다");
+  const text = JSON.parse(source)["connection.composer.offline"];
+  if (typeof text !== "string" || text === "") {
+    throw new Error("한국어 사전의 connection.composer.offline을 읽지 못했다");
   }
-  return match[1];
+  return text;
 }
 
 /**
@@ -133,7 +135,7 @@ function emptyActionLabels() {
 
 const TOUCH_TARGET = touchTargetPx();
 const AVATAR_SIZE = avatarSizePx();
-const COMPOSER_OFFLINE_COPY = composerOfflineCopy();
+const COMPOSER_OFFLINE_LINE = composerOfflineCopy();
 const EMPTY_ACTIONS = emptyActionLabels();
 const LANDING_CLASS = landingClass(webRoot);
 
@@ -721,6 +723,8 @@ async function exerciseComposer(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
+    // 입력창의 막힘 줄은 사전 문장이고 기기 언어를 따른다. 이 앱의 첫 언어(ko-KR)로 읽는다(#5239).
+    locale: "ko-KR",
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -921,11 +925,11 @@ async function exerciseComposer(browser) {
     );
   }
   const offlineCopy = ((await offlineLine.textContent()) ?? "").trim();
-  if (offlineCopy !== COMPOSER_OFFLINE_COPY) {
+  if (offlineCopy !== COMPOSER_OFFLINE_LINE) {
     throw new Error(
-      `오프라인 문장이 코어의 문장이 아니다 ("${offlineCopy}"): 기다리라고만 하고 ` +
-        "기다리는 동안 쓴 글을 잃게 하면 그 문장은 거짓이 되고, 폰과 다른 말을 " +
-        `하면 같은 앱의 말이 아니다 — 정본은 "${COMPOSER_OFFLINE_COPY}"`
+      `오프라인 문장이 사전의 문장이 아니다 ("${offlineCopy}"): 기다리라고만 하고 ` +
+        "기다리는 동안 쓴 글을 잃게 하면 그 문장은 거짓이 되고, 막은 원인과 다른 말을 " +
+        `하면 사용자가 엉뚱한 곳을 의심한다 — 정본은 "${COMPOSER_OFFLINE_LINE}"`
     );
   }
   await context.setOffline(false);
