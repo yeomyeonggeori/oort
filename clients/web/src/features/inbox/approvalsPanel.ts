@@ -136,6 +136,31 @@ export interface DecisionNote {
    */
   tone: "neutral" | "unavailable" | "error";
   text: string;
+  /** 이 안내가 말하는 승인: 결정 응답이 닿은 순간 상세 패널이 보여 주던 승인이다(#5174 L5). 없으면 어느 승인에도 묶이지 않는다. */
+  approvalId?: string;
+}
+
+/**
+ * 결정 영수증 문장이 눈에 보이는 자리는 하나다 (#5174, 화면 검수 3회차 L5).
+ *
+ * 같은 사실을 두 곳이 따로 지었다: 위 배너는 결정 응답(이벤트)에서 `decisionNote`로, 컨트롤 자리의 줄은 영수증
+ * 저장소(상태)에서 `settledStatusLine`으로. 둘이 같은 상수를 읽어 글자가 같았고, 결정 직후에는 둘 다 섰다.
+ * 이 함수가 자리를 **한 곳에서** 정한다: 상세 패널이 **같은 승인에 대해 같은 문장**을 이미 말하고 있으면 `true`고,
+ * 그때 배너는 눈에서만 물러난다. 배너 노드는 없어지지 않는다: `role=status` 노드가 결과를 한 번 읽어 주고, 패널이
+ * 닫히면(원장이 답해 #5116이 선택을 놓으면) 같은 노드가 눈에 보이게 올라와 결과를 남긴다(#5092). 다른 승인이거나
+ * 문장이 다르면(이미 결정되어 있었다는 안내 등) 겹치지 않으므로 `false`다.
+ */
+export function receiptSaidInPane(
+  note: DecisionNote | null,
+  pane: { approvalId: string | undefined; line: string | null }
+): boolean {
+  return (
+    note !== null &&
+    note.approvalId !== undefined &&
+    note.approvalId === pane.approvalId &&
+    pane.line !== null &&
+    pane.line === note.text
+  );
 }
 
 /**

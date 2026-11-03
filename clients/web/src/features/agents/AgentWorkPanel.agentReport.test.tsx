@@ -283,6 +283,25 @@ describe("작업 패널의 「에이전트 보고」 칸", () => {
     expect(text(q(mount(), "agent-work-panel-agent-empty"))).toBe("이 일에서 에이전트가 알린 활동은 없었어요.");
   });
 
+  // 화면 검수 3회차 L2: 승인의 반대 낱말은 말 사전의 「거부」다(「거절」은 쓰지 않는다). 코어 문장 시험이 아니라 패널이 실제로 그린 글을 잰다.
+  it("건강 줄은 거부된 승인을 사전 낱말 「거부」로 말하고, 같은 줄의 수는 한 틀이다 (#5174 L2)", () => {
+    const now = Date.now();
+    hoisted.facts = facts({ lastEventAtMs: now - 30_000 });
+    hoisted.ledger = view({
+      events: [
+        { ordinal: 1, kind: "stage", stage: "표 정리", createdAtMs: now - 30_000 },
+        { ordinal: 2, kind: "approval_decided", code: "rejected", createdAtMs: now - 20_000 },
+        { ordinal: 3, kind: "activity", createdAtMs: now - 10_000, activity: { id: "a1", kind: "edit", status: "failed", n: 1, startedAtMs: now - 15_000 } },
+      ],
+      activityTally: [{ kind: "edit", completed: 0, failed: 1 }],
+    });
+    const line = text(q(mount(), "agent-work-panel-health"));
+    expect(line).toBe("실패한 활동 1 · 거부된 승인 1");
+    expect(line).not.toMatch(/거절/);
+    // 같은 줄의 수는 모두 이름 뒤 맨 숫자다: 「1번」처럼 꼬리가 붙은 수가 섞이지 않는다.
+    expect(line).not.toMatch(/\d번/);
+  });
+
   it("건강 줄은 서버 사실로 서고 신호가 없으면 없으며, 「보낸 글과 도구 호출」 칸의 문장은 그 칸이 보이는 것만 말한다", () => {
     const now = Date.now();
     hoisted.facts = facts({ lastEventAtMs: now - 8 * MIN });
