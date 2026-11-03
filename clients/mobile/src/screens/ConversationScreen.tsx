@@ -100,6 +100,9 @@ import {
   type ApprovalReceipt,
 } from '../features/conversation/approvalGate';
 import {useOnline} from '../features/inbox/useOnline';
+import {useConnectionBand} from '../features/connection/useConnectionBand';
+import {useConnectionGates} from '../features/connection/useConnectionGates';
+import {useFormatMessage} from '../i18n/useFormatMessage';
 import {DecisionStageScope} from '../features/decisionStage/DecisionStageScope';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {
@@ -173,7 +176,6 @@ import {
   planNotificationLanding,
   type NotificationLanding,
 } from '../push/tapArrival';
-import {bandIsSilent} from '../realtime/connectionDisplay';
 import {useRealtime} from '../realtime/RealtimeProvider';
 import {useAgentLiveness} from '../features/agents/useAgentLiveness';
 import {ChannelAudienceContext} from '../features/conversation/appsTail';
@@ -398,9 +400,10 @@ export default function ConversationScreen({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
-  // `bandStatus` 는 띠가 말해도 되는 상태다 — 끊긴 첫 1초는 말이 없다(#4949). 소켓이 살아 있는가를 묻는
-  // 자리(`railLive`·전송 잠금)는 그대로 `status` 를 읽는다.
-  const {rail, status: railStatus, bandStatus = railStatus, reconnect} = useRealtime();
+  // 소켓이 살아 있는가를 묻는 자리(`railLive`)는 `status` 를 읽는다. 사람에게 **말하는** 것(첫 1초 침묵 #4949 · 「연결 중」 ·
+  // 끊김의 원인 · 「다시 연결됐어요」)은 코어 연결 상태 모델이 정하고 아래 `band` 로 온다(#5222).
+  const {rail, status: railStatus, reconnect} = useRealtime();
+  const {band, recovering} = useConnectionBand();
   // 연결 띠는 머리 아래에 뜨고 목록의 viewport·첫 여백을 바꾸지 않는다.
   // 날짜·안 읽음 필만 띠의 실제 높이만큼 더 내려간다(#4292).
   const [bannerInset, setBannerInset] = useState(0);
@@ -1492,7 +1495,14 @@ export default function ConversationScreen({
   // 컴포저는 그동안 레일을 읽고 있었다. 한 화면이 같은 사실에 두 신호를 들면
   // 그 둘은 반드시 갈라진다 — 이 파일이 「연결 중…」 하나로 두 상태를 덮던 옛
   // 결함(M3)에서 이미 배운 것이다.
+  // 기기 온라인(NetInfo): AI 연결 카드·프로필 시트 같은 읽기·REST 화면이 읽는다.
   const networkOnline = useOnline();
+  // 보내기·올리기·승인을 막는 질문은 코어 연결 상태 모델이 답한다(#5222, 결정 ③): 기기 오프라인이거나 서버에 닿지 못함이 확정일 때만
+  // 막고, 실시간(소켓)만 끊기면 열어 둔다. 모델이 없으면 NetInfo 만으로 같은 질문에 답한다.
+  const gates = useConnectionGates();
+  const formatMessage = useFormatMessage();
+  const composerNote =
+    gates.composerNote === null ? undefined : formatMessage(gates.composerNote);
   const invalidateApprovals = useInvalidateApprovals();
   const [approvalReceipts, setApprovalReceipts] =
     useState<ReadonlyMap<string, ApprovalReceipt>>(NO_RECEIPTS);
@@ -1626,6 +1636,8 @@ export default function ConversationScreen({
     removeUnfurls,
     loadOlder,
     resend,
+    resendAll,
+    failureKinds,
     discard,
     reload,
   } = timeline;
@@ -1650,6 +1662,8 @@ export default function ConversationScreen({
     (clientMsgId: string) => void resend(clientMsgId),
     [resend],
   );
+  // 「N개 모두 다시 보내기」(#5222): 실패한 글 전부를 보낸 순서대로 같은 멱등 키로 한 번씩.
+  const onResendAll = useCallback(() => void resendAll(), [resendAll]);
   // 같은 이유로 고정된 동일성이다(위 머리말). 지운 행을 돌려받는 호출자는 아직 없다(「지우고 고쳐 쓰기」는 후속).
   const onDiscardPending = useCallback(
     (clientMsgId: string) => void discard(clientMsgId),
@@ -2132,7 +2146,7 @@ export default function ConversationScreen({
     <ChannelAudienceContext.Provider value={channelAudience}>
     <MakeLandingContext.Provider value={landOnMadeDm}>
     <DecisionStageScope key={`${workspaceId}:${channelId}`} messages={messages} runs={requestRuns} directory={directory} viewerMemberId={member.id}
-      gates={approvalGates} receipts={approvalReceipts} nowMs={nowMs} offline={!networkOnline} onSettled={onApprovalSettled}>
+      gates={approvalGates} receipts={approvalReceipts} nowMs={nowMs} offline={!gates.canDecide} onSettled={onApprovalSettled}>
     <Screen style={styles.screen}>
       {/* 사용자 배경(ADR-0189 증보 2) — 꺼져 있으면 아무것도 그리지 않는다. */}
       <AppBackground />
@@ -2161,7 +2175,7 @@ export default function ConversationScreen({
         onOpenMenu={openMenu}
         // 정보 페이지는 종류를 알 때만 연다 — 채널 목록이 오기 전에는 무엇의 정보인지 모른다(알약은 단추가 아니라 이름만 선다).
         onOpenInfo={channel !== null ? openInfo : undefined}
-        railStatus={bandStatus}
+        band={band}
         onReconnect={reconnect ? reconnectNow : undefined}
         onBannerInset={setBannerInset}
       >
@@ -2177,7 +2191,7 @@ export default function ConversationScreen({
             <Timeline
               approvalGates={approvalGates}
               approvalReceipts={approvalReceipts}
-              approvalOffline={!networkOnline}
+              approvalOffline={!gates.canDecide}
               // 원장 표면이 없는 서버에서는 「다시 연결되면 여기서」가 거짓말이
               // 된다 — 코어가 그 갈래를 오프라인보다 앞에 두는 이유이고, 이
               // 사실은 이 훅만 안다.
@@ -2204,7 +2218,7 @@ export default function ConversationScreen({
               loadingOlder={timeline.loadingOlder}
               reachedStart={timeline.reachedStart}
               // 「연결 복구 중」은 사람이 보는 띠가 선 동안이다 — 끊긴 첫 1초(띠가 조용한 동안)에는 당김 문이 바뀌지 않는다(#4949).
-              realtimeConnected={bandIsSilent(bandStatus)}
+              realtimeConnected={!recovering}
               nowMs={nowMs}
               actions={actions}
               selfSendToken={selfSendToken}
@@ -2213,7 +2227,9 @@ export default function ConversationScreen({
               onRetry={reload}
               onResend={onResend}
               onResendPending={onResendPending}
+              onResendAll={onResendAll}
               onDiscardPending={onDiscardPending}
+              failureKinds={failureKinds}
               jumpTarget={jumpTarget ?? undefined}
               onJumpMissed={onJumpMissed}
               onJumpLanded={clearJumpNotice}
@@ -2317,7 +2333,8 @@ export default function ConversationScreen({
               // 옛 배선(`railStatus === 'disconnected'`)이 답한다고 주장했을
               // 뿐이다. 근거는 `useOnline.ts` 머리말, 판정은 `Composer` 의
               // `offline` prop 주석에 있다.
-              offline={!networkOnline}
+              offline={!gates.canSend}
+              offlineNote={composerNote}
               draftKey={channelDraftKey(channelId)}
               attachmentTarget={{workspaceId, channelId}}
               quote={quote}
