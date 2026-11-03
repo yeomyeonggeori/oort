@@ -46,7 +46,8 @@
 #
 # 스코프: 여전히 **전체 게이트가 아니다.** DB가 필요한 러스트 conformance
 # 테스트(`*_pg.rs`, 전부 `#[ignore]`)·런타임 검증기·Docker 스택·e2e·웹 e2e
-# 게이트는 `docs/LOCAL_PR_GATE.md`의 로컬 게이트 몫으로 남는다.
+# 게이트는 `docs/LOCAL_PR_GATE.md`의 로컬 게이트 몫으로 남는다. 웹 게이트 중 하나는
+# 예외다: `gate:channel-header-fit`은 머리를 건드린 PR에서 `header_fit` 잡이 돌린다(#5185).
 # 남은 휴면 워크플로(release-desktop)는 무접촉이다.
 # (W-S1 #1215: `ci-build`·`release-ios`·`release-macos` 셋은 Swift 클라 3트리와
 #  함께 삭제됐다 — 전부 `workflow_dispatch` 전용이었고 자동 실행 0이었다.)
