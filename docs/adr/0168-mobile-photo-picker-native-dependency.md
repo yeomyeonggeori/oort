@@ -1,6 +1,6 @@
 # ADR-0168: 모바일 사진·파일 picker 네이티브 의존성 — Expo 모듈 낱개 연장
 
-- Status: **Accepted** (2026-08-23 성재 승인 — "다 승인할게" 위임 집행, 기록=Fable/momo-main. 기안 같은 날 — M-2 발사 선행 조건 충족. 증보 1 2026-10-21: 앱 안 최근 사진 그리드와 사진 보관함 읽기 권한(`expo-media-library`), 성재 결재 원문은 증보 절에 인용)
+- Status: **Accepted** (2026-08-23 성재 승인 — "다 승인할게" 위임 집행, 기록=Fable/momo-main. 기안 같은 날 — M-2 발사 선행 조건 충족. 증보 1 2026-10-21: 앱 안 최근 사진 그리드와 사진 보관함 읽기 권한(`expo-media-library`), 성재 결재 원문은 증보 절에 인용. 증보 2 2026-11-03: 영상 첨부를 앱 안에서 재생하는 `expo-video`와 재생 인증 — **Proposed**, planner 수락 대기)
 - 관련: ADR-0137 D1(스택=bare RN+**Expo 모듈 낱개**·EAS 미도입 — 본 ADR은 그 정책의 첫 "새 네이티브 권한 표면" 적용), ADR-0120(푸시 NSE — 서명 표면 비접촉 확인 대상), UXUI 완성도 파도 계획 `docs/planning/research/2026-08-23-uxui-completeness-wave-plan.md` §2 M-2
 - 실측 근거: 2026-08-23 재연 QA — D8 셀프호스트에서 첨부 업로드가 `no-archive`(파일 보관소 미연결)로 막히는 것 실측(`claudedocs/uxui-qa-d8-20260823/`). picker는 클라 표면이고 보관소는 서버 배포 구성이므로 **분리 결정**임을 여기 명시한다.
 
@@ -97,3 +97,42 @@
 - 일부 허용 상태는 시뮬레이터에서 만들 수 없다(`xcrun simctl privacy`는 허용·거부·초기화뿐). 그 상태의 화면은 **포트 주입**으로 그렸고(보관함은 진짜, 권한 읽기만 `limited`), 실제 OS 흐름은 `runtime-unverified`다. 같은 주입으로 불러오는 중·빈·오류·상한 안내·변환 중·iCloud 내려받는 중·변환 실패 장면도 그렸다(포트의 한 함수만 바꾼다). iCloud 는 문구·위계만 보이고 실제 내려받기는 아래 미확인이다.
 - 실기기 미확인(`runtime-unverified`): iCloud 내려받기, Live Photo(`getAssetInfoAsync`가 짝 영상 임시 파일을 함께 쓴다), 큰 HEIC의 JPEG 변환 시간·메모리, `getAssetInfoAsync`가 돌려준 보관함 안 파일을 앱이 읽을 수 있는 시간(그래서 곧바로 복사한다), PHPicker `automatic` 모드의 HEIC 처리와 이 경로의 형식 일치, 변신 스프링의 실기기 프레임률(JS 구동 `Animated.spring` 이다. 시뮬레이터 영상에서는 변신 한 번 약 430~500ms 동안 27~31프레임이 저장됐다 — 바뀐 프레임만 저장하는 영상이라 ≈60fps 의 하한이다), VoiceOver 실기기 낭독 순서(메뉴 → 카드 초점 이동과 `announceForAccessibility` 알림은 jest 가 호출 인자까지만 확인한다).
 - 변환된 복사본은 앱 캐시에 남는다. 업로드가 끝나도 지우지 않는다(기존 picker 결과도 같다). OS가 비운다.
+
+## 증보 2 — 영상 첨부를 앱 안에서 재생: `expo-video` 추가와 재생 인증 (2026-11-03)
+
+- Status: **Proposed** (2026-11-03, #5208 worker 기안 → planner 수락 대기. [ADR-0100](0100-decision-governance.md)의 위임으로 planner가 결정한다. 등급 1: 새 네이티브 의존성 하나이고 보안 경계는 넓히지 않는다 — 폰이 이미 쓰는 bearer를 같은 `content` 경로에 싣는다.)
+- 발단(2026-11-03, #5208): owner 폰 검수에서, 영상 첨부를 받으면 앱 안에서 바로 볼 수 있을 것이라 기대했는데 지금은 문서 아이콘 카드이고 누르면 시스템 공유 시트만 열린다는 지적이 있었다. 서버는 구간 읽기(`Range` 206, #4671)와 영상 길이·포스터(#4673)를 이미 준다. [ADR-0151](0151-attachments-v0-drive-contract-port.md) 증보 5의 F1 행이 폰 영상 재생은 이 ADR의 증보가 필요하다고 적어 두었다(「`expo-video`·저장 문구·마이크」).
+- 본문·증보 1과의 관계: 둘 다 그대로 유효하다. 이 증보는 세 번째 Expo 모듈을 더한다. 본문 Context 2의 「새 네이티브 의존성은 결정 기록 대상」이 근거다.
+
+### D1. 의존성
+- `clients/mobile`에 `expo-video`를 `~57.0.5`로 더한다(Expo 57.0.9의 `bundledNativeModules.json`은 `~57.0.2`를 가리키고, `npx expo install expo-video`가 57.0.5로 풀었다). 라이선스 MIT, 전이 의존 없음(peer `expo`·`react`·`react-native`). CocoaPods `ExpoVideo`(Swift 5.9, iOS 16.4, 정적 프레임워크) 한 포드가 늘고 시스템 프레임워크 AVFoundation·AVKit을 링크한다. `node scripts/check_npm_licenses.mjs --root clients/mobile`이 PASS다(1,105개 모두 허용 목록 안). NOTICE와 `legal/THIRD_PARTY_NOTICES.md`(「Phone client direct additions」)에 반영했다.
+- **새 개발 빌드가 필요하다**(네이티브 모듈 추가: `pod install` + `clients/mobile/scripts/build-sim.sh`, 증거 빌드·TestFlight 재빌드 1회). `expo install`이 `app.json`에 더하는 config plugin 줄은 **되돌렸다** — 이 앱은 prebuild를 쓰지 않는다(ADR-0137 D1).
+- Info.plist에 새 키가 없다. 재생은 마이크·사진 권한을 쓰지 않는다(기존 문구는 그대로이고 `projectShape.test.ts`가 지킨다). 백그라운드 오디오 모드도 선언하지 않는다.
+
+### D2. 재생 인증 — 결정 (a): 지금 세션의 bearer를 플레이어 소스 `headers`에 싣는다
+- **고른 이유.** 서버의 스트림 주소(ADR-0151 증보 5 D4, C3b #5120)는 아직 없다. 네이티브 플레이어가 `GET …/attachments/{id}/content`를 부르는 길은 둘이다. (a) `VideoSource.headers`에 bearer를 싣는다 — 플레이어가 **구간 읽기로 바로 시작**한다(수용기준 「전부 받기 전에」). (b) 받은 로컬 파일을 재생한다 — 전부 받은 뒤에야 시작하므로 수용기준을 어긴다(공유·저장은 이미 이 길을 쓴다).
+- **이탈 기록.** 증보 5 D4는 폰도 스트림 주소를 쓰는 쪽을 [권장]했다(access 토큰이 15분이고 네이티브 플레이어는 헤더를 에셋을 만들 때 고정한다 — 미검증). C3b가 없어서 (a)로 가고 그 위험을 아래 넷으로 막는다.
+  1. **소스를 만들기 직전 인가 확인.** 코어 `probeAttachmentContent`(`HEAD …/content`, 본문을 받지 않는다)가 이 세션이 그 파일을 읽을 수 있는지 묻는다. 401이면 코어의 단 한 번의 회전(`authedResponse`) 뒤 새 토큰으로 소스를 만든다. 회전이 거절되거나 갱신 토큰이 없으면 코어가 세션 만료를 한 번 선언한다. 403·404·410은 「더는 볼 수 없는 영상」, 닿지 못함은 「다시 시도」로 답한다.
+  2. **재생 중 오류 뒤 한 번 복구.** 재생 중 토큰이 만료되면 다음 구간 요청이 401이고 플레이어는 오류 상태가 된다(AVPlayer의 오류에서 401만 가려낼 수 없어 「어떤 재생 오류든 한 번」이다). 같은 길로 다시 열어 새 토큰의 소스로 바꾸고 재생 위치와 재생 여부를 되돌린다. 복구한 뒤 1초 넘게 나아가야 다음 복구가 허락되고, 같은 자리에서 또 실패하면 실패로 서서 사람이 「다시 시도」를 누른다.
+  3. **토큰은 `headers`에만 있다.** 주소(`uri`)에도 로그에도 없다. 앱이 토큰을 적는 곳은 소스 객체의 `headers` 하나다.
+  4. **플레이어는 아무것도 남기지 않는다.** `useCaching: false`를 명시하고(기본값에 기대지 않는다), 서버는 `Cache-Control: private, no-store`를 준다. 그래서 로그아웃 때 비울 영상 캐시가 없다. 포스터(최대 256 KiB)만 사진 미리보기와 같은 앱 캐시 디렉터리(`oort-attachments`)에 받는다.
+- **되돌릴 조건.** #5120이 착륙하면 폰도 스트림 주소(TTL 80%에 갱신)로 옮기고 `HEAD` 확인과 오류 복구를 걷는다. 그때까지 이 길은 임시다.
+- **검증한 것과 못 한 것.** 시뮬레이터 레인(`5208-video-viewer-live`)에서 AVPlayer가 `Authorization`을 실어 구간 읽기로 시작함을 **요청 기록**으로 확인했다(서버는 요청을 로그로 남기지 않아 앱과 서버 사이의 기록하는 중계 `lane-request-recorder.cjs`가 눈이다): 첫 읽기는 `Range: bytes=0-1` → 206 + `Content-Range`, 이어서 `bytes=0-끝`·`bytes=N-끝`이 모두 206이고 모든 요청에 bearer가 실렸다. **실기기, 그리고 access 토큰의 15분 만료를 넘기는 긴 재생은 `runtime-unverified`다**(jest는 복구 로직만 잰다).
+
+### D3. 이 앱이 영상 플레이어에서 쓰지 않는 것
+- **AirPlay(외부 재생)** — 수신기가 이 주소를 **자기가** 받으러 가는데 우리의 `Authorization` 머리가 없어서 401이고, 주소가 기기 밖으로 나간다. `allowsExternalPlayback = false`.
+- **화면 속 화면·백그라운드 재생·잠금 화면 카드** — `allowsPictureInPicture={false}`, `staysActiveInBackground = false`, `showNowPlayingNotification = false`(백그라운드 오디오 모드를 선언하지 않았다).
+- **시스템 조작·멈춘 장면의 「텍스트 가져오기」 단추** — `nativeControls={false}`, `allowsVideoFrameAnalysis={false}`. 조작은 사진 뷰어와 같은 문법의 우리 것 하나뿐이다.
+- **앱이 못 읽는 영상(WebM)** — 앱 안 재생 대상이 아니다. 파일 카드의 공유 시트로 남는다(영상기 아이콘 · 문서 아이콘이 아니다).
+
+### 같이 고친 것: 뷰어 안의 쓸기가 아래 행의 「밀어서 답글」로 새던 결함
+- 사진·영상 뷰어(Modal)는 메시지 행의 React 자손이라, 행의 밀기 컨테이너(`ReplySwipeContainer`, #4869)가 **capture 길**에서 뷰어 안의 오른쪽→왼쪽 쓸기를 먼저 가져갔다. 다음 장으로 넘기는 바로 그 쓸기다. 가져가면 사진·영상을 넘기는 동시에 뒤 대화에 답글 입력칸이 열리고 자판이 올라와 아래 조작(영상 조작 줄)을 덮었고, 그 자판을 내리는 첫 탭이 재생 단추를 삼켰다(시뮬레이터 실측, 닫은 뒤 입력창에 「내 글에 답글」이 남았다). 사진 뷰어도 같았다.
+- 처방은 한 줄이다: 뷰어 루트의 `onTouchStart`가 길게 눌러 시트를 연 손가락에 세우던 표지(`ReplySwipeGuardContext`)를 뷰어의 모든 터치 시작에 세운다(컨테이너가 새 터치 시작에서 표지를 거둔 **뒤에** 불린다). 응답자 협상은 건드리지 않는다. 더 근본적인 길(뷰어를 행의 React 트리 밖에 마운트)은 별도 일이다.
+
+### 영향
+- Info.plist·권한 변화 없음. 앱 심사 표면에는 새 프레임워크 링크(AVKit)만 는다. 새 개발 빌드·TestFlight 재빌드 1회.
+- 새 직접 의존 1개(`expo-video`). 새 애니메이션·제스처 의존성은 없다.
+
+### 한계와 미검증
+- 시뮬레이터(iPhone 17 Pro 402×874, iOS 26.5, 한국어)에서 확인한 것: 포스터 카드·영상기 아이콘 카드, 눌러 열어 재생(구간 읽기 206), 멈춤·재생·탐색·소리·끝·다시 재생, 사진과 섞인 묶음 넘기기, 라이트·다크. 실기기 미확인(`runtime-unverified`): 긴 영상의 메모리·발열, 셀룰러에서의 시작 시간, 300 MiB급 파일, 15분 만료를 넘기는 재생과 복구, AirPlay를 끈 것이 실제 수신기에서 막히는지, 하드웨어 음소거 스위치와 소리 정책.
+- 포스터 캐시(`oort-attachments`)는 사진 미리보기와 같이 로그아웃에도 비우지 않는다(기존 동작이고 최대 256 KiB씩이다).
