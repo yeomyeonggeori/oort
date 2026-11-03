@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import vectors from "../../../../../docs/api/expression-kind.vectors.json";
 import { FIXTURE_EXPRESSIONS, FIXTURE_LIST, FIXTURE_MEDIA_SET, FIXTURE_MEMBER_ID, FIXTURE_READY_DRAFT, FIXTURE_WORKSPACE_ID, fixtureManualDraft } from "@momo/core/features/expressions/fixtures";
 import { FIXTURE_MEDIA } from "@momo/core/features/expressions/fixtureMedia";
@@ -171,8 +171,9 @@ describe("the team panel's three views do not overlap", () => {
     await act(async () => {});
     const seen: Record<string, string[]> = {};
     seen.emoji = names(view).sort();
-    fireEvent.click(view.getByLabelText("스티커")); seen.sticker = names(view).sort();
-    fireEvent.click(view.getByLabelText("팀 GIF")); seen.gif = names(view).sort();
+    // The view names are the dictionary's (English in this fixture locale): Team emoji · Emoticon · GIF.
+    fireEvent.click(view.getByLabelText("Emoticon")); seen.sticker = names(view).sort();
+    fireEvent.click(view.getByLabelText("GIF")); seen.gif = names(view).sort();
     expect(seen).toEqual({
       emoji: ["emoji_moving", "emoji_still"],
       sticker: ["older_still", "sticker_still"],
@@ -188,12 +189,12 @@ describe("the team panel's three views do not overlap", () => {
     await act(async () => {});
     // Every earlier registration is a sticker, so the team-emoji view is empty and the sticker view is the first with pictures.
     expect(names(view)).toEqual(["older_still"]);
-    expect((view.getByLabelText("스티커") as HTMLInputElement).checked).toBe(true);
+    expect((view.getByLabelText("Emoticon") as HTMLInputElement).checked).toBe(true);
     expect(view.container.textContent).not.toContain("Nothing in this view yet");
     // Once the person picks a view, that view stays, even an empty one.
-    fireEvent.click(view.getByLabelText("이모지"));
+    fireEvent.click(view.getByLabelText("Team emoji"));
     expect(names(view)).toEqual([]);
-    expect((view.getByLabelText("이모지") as HTMLInputElement).checked).toBe(true);
+    expect((view.getByLabelText("Team emoji") as HTMLInputElement).checked).toBe(true);
     expect(view.container.textContent).toContain("Nothing in this view yet");
   });
   it("says a view is empty, not that the team has no pictures, when only another view has some", async () => {
@@ -201,7 +202,7 @@ describe("the team panel's three views do not overlap", () => {
     const view = render(wrapper(store, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />));
     await act(async () => {});
     expect(names(view)).toEqual(["only_emoji"]);
-    fireEvent.click(view.getByLabelText("스티커"));
+    fireEvent.click(view.getByLabelText("Emoticon"));
     expect(names(view)).toEqual([]);
     expect(view.container.textContent).toContain("Nothing in this view yet");
     expect(view.container.textContent).not.toContain("아직 팀 그림이 없어요");
@@ -210,5 +211,39 @@ describe("the team panel's three views do not overlap", () => {
     const bare = render(wrapper(none, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />));
     await act(async () => {});
     expect(bare.container.textContent).toContain("아직 팀 그림이 없어요");
+  });
+
+  // 패널의 세 보기 이름은 폰 시트의 탭 이름(owner 10-31, #4942)과 같은 체계이고, 카드의 두 종류 이름과 같은 말이다(planner 결정, #5112 3단계).
+  // 보기의 값이 곧 코어의 칸 이름(`team`·`emoticon`·`gif`)이라 값마다 이름 하나다. 기대값은 사전에서 읽지 않고 글자로 못 박는다.
+  const VIEW_WORDS = {
+    "ko-KR": { names: ["팀 이모지", "이모티콘", "GIF"], legend: "팀 표현 보기", retired: /스티커|팀 GIF/, oldName: "이모지" },
+    "en-US": { names: ["Team emoji", "Emoticon", "GIF"], legend: "Team expression views", retired: /Sticker|Team GIF/, oldName: "Emoji" },
+  } as const;
+  it.each([["ko-KR"], ["en-US"]] as const)("%s: the three views are named like the card's two kinds and the phone's tabs, and the group is named in the same language", async (language) => {
+    const words = VIEW_WORDS[language];
+    const locale = await appLocale(language);
+    const store = storeOf(CATALOGUE); await store.refresh();
+    const panel = render(<LocaleContext.Provider value={locale}>{wrapper(store, <TeamExpressionsPanel purpose="insert" onPick={() => {}} />)}</LocaleContext.Provider>);
+    await act(async () => {});
+    const inPanel = within(panel.container);
+    const radios = inPanel.getAllByRole("radio") as HTMLInputElement[];
+    // One name per core shelf, in the panel's order, and each name labels exactly that view's input.
+    expect(radios.map((radio) => radio.value)).toEqual(["team", "emoticon", "gif"]);
+    words.names.forEach((name, index) => expect(inPanel.getByLabelText(name), name).toBe(radios[index]));
+    expect(radios.map((radio) => radio.closest("label")?.textContent)).toEqual([...words.names]);
+    // The group has a name in the same language (it was a Korean literal in every language before).
+    expect(inPanel.getByRole("group", { name: words.legend })).toBe(radios[0].closest("fieldset"));
+    // The names the planner retired are gone: neither as a label nor anywhere in the markup.
+    expect(inPanel.queryByLabelText(words.oldName)).toBeNull();
+    expect(panel.container.innerHTML).not.toMatch(words.retired);
+    // The same words as the card's two kinds: team emoji = emoji, emoticon = sticker (the card is mounted in the same language).
+    const card = render(<LocaleContext.Provider value={locale}>{wrapper(fixtureStore(), <ExpressionDraftCard draft={movingDraft()} onReplace={() => {}} onApprove={vi.fn()} />)}</LocaleContext.Provider>);
+    const kindNames = within(card.container).getAllByRole("radio").map((radio) => radio.closest("label")?.textContent);
+    expect(kindNames).toEqual(words.names.slice(0, 2));
+    // And the same system as the phone sheet's tabs: Korean is identical; English tabs are the plural list names (Emoticons), the views the singular.
+    const t = locale.service.formatMessage;
+    expect(words.names[0]).toBe(t("expressions.sheet.tabTeam"));
+    expect(words.names[1]).toBe(t("expressions.sheet.tabEmoticon").replace(/s$/, ""));
+    expect(words.names[2]).toBe(t("expressions.sheet.tabGif"));
   });
 });

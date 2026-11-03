@@ -1580,10 +1580,34 @@ export const catalog: MessageCatalog = {
       "value": "Send request"
     }
   ],
+  "expressions.panel.viewEmoticon": [
+    {
+      "type": 0,
+      "value": "Emoticon"
+    }
+  ],
   "expressions.panel.viewEmpty": [
     {
       "type": 0,
       "value": "Nothing in this view yet"
+    }
+  ],
+  "expressions.panel.viewGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.panel.viewsLegend": [
+    {
+      "type": 0,
+      "value": "Team expression views"
+    }
+  ],
+  "expressions.panel.viewTeam": [
+    {
+      "type": 0,
+      "value": "Team emoji"
     }
   ],
   "expressions.photo.agentInstead": [

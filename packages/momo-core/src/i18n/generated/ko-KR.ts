@@ -1416,10 +1416,34 @@ export const catalog: MessageCatalog = {
       "value": "요청 보내기"
     }
   ],
+  "expressions.panel.viewEmoticon": [
+    {
+      "type": 0,
+      "value": "이모티콘"
+    }
+  ],
   "expressions.panel.viewEmpty": [
     {
       "type": 0,
       "value": "이 보기에는 아직 그림이 없어요"
+    }
+  ],
+  "expressions.panel.viewGif": [
+    {
+      "type": 0,
+      "value": "GIF"
+    }
+  ],
+  "expressions.panel.viewsLegend": [
+    {
+      "type": 0,
+      "value": "팀 표현 보기"
+    }
+  ],
+  "expressions.panel.viewTeam": [
+    {
+      "type": 0,
+      "value": "팀 이모지"
     }
   ],
   "expressions.photo.agentInstead": [
