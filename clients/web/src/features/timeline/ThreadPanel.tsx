@@ -12,6 +12,10 @@ import {
 import type { Directory } from "@/features/workspace/useWorkspace";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBox";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
+import { causeOfFailure } from "@momo/core/features/connection/failure";
+import { deviceOnlineNow } from "@/lib/deviceOnline";
 import { startsAuthorGroup } from "@momo/core/features/timeline/model";
 import { createThreadReadSender } from "@momo/core/features/timeline/threadRead";
 import { readSignalSeq } from "@momo/core/features/timeline/threadSummary";
@@ -448,14 +452,22 @@ function ThreadPanelFrame({
         <div className={THREAD_REPLIES_LEAD_CLASS} data-testid="thread-replies">
           {(landingMissed || targetMissing) && <InlineBanner message="알림의 카드를 찾지 못했어요. 답글을 다시 불러와 주세요." actionLabel="다시 불러오기" onAction={() => void query.refetch()} testId="thread-landing-missing" />}
           <Skeleton ready={!query.isLoading} rows={3} className="p-4">
-            {query.error && (
-              <InlineBanner
-                message="답글을 불러오지 못했습니다."
-                actionLabel="다시 시도"
-                onAction={() => void query.refetch()}
-                testId="thread-error"
-              />
-            )}
+            {query.error &&
+              (replies.length === 0 ? (
+                <LoadFailureBox
+                  titleKey={CONNECTION_KEYS.loadThreadTitle}
+                  cause={causeOfFailure(query.error, deviceOnlineNow())}
+                  onRetry={() => void query.refetch()}
+                  testId="thread-error"
+                />
+              ) : (
+                // 받아 둔 답글이 있으면 상자로 덮지 않고 한 줄만 건다(#5221).
+                <LoadFailureLine
+                  titleKey={CONNECTION_KEYS.loadThreadTitle}
+                  onRetry={() => void query.refetch()}
+                  testId="thread-error"
+                />
+              ))}
             {!query.isLoading && !query.error && replies.length === 0 && (
               <EmptyInvite
                 headline="첫 답글을 남겨 이 대화를 이어가세요."

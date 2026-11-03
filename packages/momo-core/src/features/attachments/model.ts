@@ -45,6 +45,7 @@
 // =============================================================================
 
 import type { MessageAttachment } from "../../lib/api";
+import type { ConnectionCause } from "../connection/model";
 
 export type { MessageAttachment };
 
@@ -121,7 +122,15 @@ export interface AttachmentDraft {
   attachmentId?: string;
   /** `failed`에서만 있다. */
   issue?: UploadIssue;
+  /**
+   * `failed`에서만, 그리고 실패가 **닿지 못함**(오프라인·서버에 닿지 못함)일 때만 있다(#5221). 화면은 이 원인의 문장
+   * (`copyForCause(cause).uploadFailed`)을 쓰고, 없으면 `issue`의 기존 문장을 쓴다.
+   */
+  failureCause?: ConnectionCause;
 }
+
+/** 실패한 칩의 이유 문장을 화면이 사전에서 가져와 갈아 끼우는 길. `undefined`면 `issue`의 기존 문장이다. */
+export type UploadReasonFor = (draft: AttachmentDraft) => string | undefined;
 
 export type DraftStatus =
   | "ready"
@@ -285,7 +294,7 @@ export function isRetryableIssue(issue: UploadIssue): boolean {
  * 이 값은 바뀌지 않는다 — 보조기술이 초당 몇 번씩 같은 줄을 다시 읽지 않는 이유가
  * 여기 있다(리뷰 H-3).
  */
-export function draftStatusWord(draft: AttachmentDraft): string {
+export function draftStatusWord(draft: AttachmentDraft, reasonFor?: UploadReasonFor): string {
   switch (draft.status) {
     case "ready":
       return ATTACH_COPY.queued;
@@ -298,7 +307,7 @@ export function draftStatusWord(draft: AttachmentDraft): string {
     case "failed": {
       const issue = draft.issue ?? "unavailable";
       const next = uploadIssueNext(issue);
-      const reason = uploadIssueCopy(issue);
+      const reason = reasonFor?.(draft) ?? uploadIssueCopy(issue);
       return `${reason}${next === null ? "" : `. ${next}`}`;
     }
   }
@@ -316,7 +325,7 @@ export function draftStatusWord(draft: AttachmentDraft): string {
  * 두 번 바뀌었다 — 파일명이 잘렸다 풀렸다 한다. 아래 줄에 두면 이름 열은 칩이
  * 사는 내내 같은 폭이다.
  */
-export function draftStatusLine(draft: AttachmentDraft): {
+export function draftStatusLine(draft: AttachmentDraft, reasonFor?: UploadReasonFor): {
   text: string;
   danger: boolean;
   /** 잰 값이 있을 때만. 없으면 화면도 낭독도 수를 말하지 않는다. */
@@ -325,7 +334,7 @@ export function draftStatusLine(draft: AttachmentDraft): {
   // 폰 picker가 provider 메타데이터도 native 재측정도 얻지 못한 경우만 생략한다.
   // 실제 0-byte 파일은 `sizeKnown=true`라서 정직하게 「0 B」를 말한다 (#1703 Nit-2).
   const size = draft.sizeKnown ? formatBytes(draft.sizeBytes) : null;
-  const word = draftStatusWord(draft);
+  const word = draftStatusWord(draft, reasonFor);
   const percent =
     draft.status === "uploading" && draft.progress > 0
       ? Math.round(draft.progress * 100)
@@ -360,7 +369,8 @@ function statusKey(draft: AttachmentDraft): string {
  */
 export function draftAnnouncement(
   previous: AttachmentDraft[],
-  next: AttachmentDraft[]
+  next: AttachmentDraft[],
+  reasonFor?: UploadReasonFor
 ): string | null {
   const before = new Map(previous.map((draft) => [draft.localId, statusKey(draft)]));
   const changed = next.filter(
@@ -369,13 +379,13 @@ export function draftAnnouncement(
   if (changed.length === 0) return null;
   if (changed.length === 1) {
     const draft = changed[0];
-    return `${attachmentDisplayName(draft)} ${draftStatusLine(draft).text}`;
+    return `${attachmentDisplayName(draft)} ${draftStatusLine(draft, reasonFor).text}`;
   }
   // 낱말별로 묶어 개수로 말한다. 「N개 상태가 바뀌었습니다」 같은 요약은 짧지만
   // 아무것도 말하지 않는다 — 무엇이 몇 개인지가 이 줄의 전부다.
   const counts = new Map<string, number>();
   for (const draft of changed) {
-    const word = draftStatusWord(draft);
+    const word = draftStatusWord(draft, reasonFor);
     counts.set(word, (counts.get(word) ?? 0) + 1);
   }
   const groups = [...counts.entries()]
@@ -512,13 +522,20 @@ export function completeUpload(
 export function failUpload(
   list: AttachmentDraft[],
   localId: string,
-  issue: UploadIssue
+  issue: UploadIssue,
+  cause?: ConnectionCause | null
 ): AttachmentDraft[] {
-  return mapDraft(list, localId, (draft) => ({
-    ...draft,
-    status: "failed",
-    issue,
-  }));
+  return mapDraft(list, localId, (draft) => {
+    // 이전 실패의 원인이 새 실패에 묻어 가지 않게 먼저 걷는다.
+    const { failureCause: _previous, ...rest } = draft;
+    void _previous;
+    return {
+      ...rest,
+      status: "failed",
+      issue,
+      ...(cause == null ? {} : { failureCause: cause }),
+    };
+  });
 }
 
 /**

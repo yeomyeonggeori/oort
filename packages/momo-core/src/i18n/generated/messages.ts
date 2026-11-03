@@ -33,6 +33,7 @@ export const messageKeys = [
   "connection.load.channelListTitle",
   "connection.load.conversationTitle",
   "connection.load.membersTitle",
+  "connection.load.newerTitle",
   "connection.load.reasonOffline",
   "connection.load.reasonServer",
   "connection.load.reasonUnknown",
@@ -641,6 +642,7 @@ export const argumentSpecs = {
   "connection.load.channelListTitle": {},
   "connection.load.conversationTitle": {},
   "connection.load.membersTitle": {},
+  "connection.load.newerTitle": {},
   "connection.load.reasonOffline": {},
   "connection.load.reasonServer": {},
   "connection.load.reasonUnknown": {},
@@ -1394,6 +1396,7 @@ export interface MessageArgs {
   "connection.load.channelListTitle": Record<string, never>;
   "connection.load.conversationTitle": Record<string, never>;
   "connection.load.membersTitle": Record<string, never>;
+  "connection.load.newerTitle": Record<string, never>;
   "connection.load.reasonOffline": Record<string, never>;
   "connection.load.reasonServer": Record<string, never>;
   "connection.load.reasonUnknown": Record<string, never>;

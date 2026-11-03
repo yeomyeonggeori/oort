@@ -51,6 +51,8 @@ export const CONNECTION_KEYS = {
   loadChannelListTitle: "connection.load.channelListTitle",
   loadThreadTitle: "connection.load.threadTitle",
   loadMembersTitle: "connection.load.membersTitle",
+  /** 받아 둔 글이 있을 때 목록 위 한 줄(상자로 덮지 않는다). */
+  loadNewerTitle: "connection.load.newerTitle",
   loadReasonOffline: "connection.load.reasonOffline",
   loadReasonServer: "connection.load.reasonServer",
   loadReasonUnknown: "connection.load.reasonUnknown",

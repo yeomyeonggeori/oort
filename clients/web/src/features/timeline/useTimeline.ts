@@ -27,6 +27,9 @@ import {
   type RealtimeHandle,
 } from "@/lib/realtime";
 import { subscribeRestOutcome } from "@momo/core/lib/http";
+import { causeOfFailure } from "@momo/core/features/connection/failure";
+import type { ConnectionCause } from "@momo/core/features/connection/model";
+import { deviceOnlineNow } from "@/lib/deviceOnline";
 import {
   BROWSER_ONLINE_EVENT,
   PAGE_LEAVE_EVENT,
@@ -117,10 +120,6 @@ export const MAX_SIMULTANEOUS_ARRIVALS = 3;
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
 
-/** 기기가 아는 온라인 여부. 모르면 `null`(모르면 오프라인이라 하지 않는다). 실패의 원인을 가르는 데 쓴다. */
-function deviceOnlineNow(): boolean | null {
-  return globalThis.navigator?.onLine ?? null;
-}
 
 export interface ResumeInfo {
   /** How the last (re)subscribe resolved. */
@@ -151,6 +150,11 @@ export interface TimelineSendOptions
 export interface UseTimelineResult {
   state: TimelineState;
   status: "loading" | "ready" | "error";
+  /**
+   * 머리 읽기가 실패했을 때 그 실패가 말하는 원인(#5221). 연결 쪽 원인이 아니면(서버가 직접 거절했거나 알 수 없음) `null`.
+   * `status`가 `error`가 아니면 항상 `null`이다.
+   */
+  loadCause: ConnectionCause | null;
   resume: ResumeInfo;
   /** Reconnect markers, rendered inline as "재연결됨, 여기까지 복구" — one per recovery that brought in someone else's new messages (#4328). */
   recoveryMarkers: RecoveryMarker[];
@@ -253,6 +257,7 @@ export function useTimeline(
 ): UseTimelineResult {
   const [state, setState] = useState<TimelineState>(emptyTimeline);
   const [status, setStatus] = useState<UseTimelineResult["status"]>("loading");
+  const [loadCause, setLoadCause] = useState<ConnectionCause | null>(null);
   const [resume, setResume] = useState<ResumeInfo>({
     lastRecovered: null,
     lastBackfillCount: 0,
@@ -334,6 +339,9 @@ export function useTimeline(
   const newestSeqRef = useRef<number | null>(null);
   // 레일 없이 기록만 읽은 채널. 레일이 뒤늦게 와서 효과가 다시 돌 때 화면의 기록을 지우지 않는다.
   const restOnlyChannelRef = useRef<string | null>(null);
+  // 받아 둔 글이 있으면(= 머리 읽기가 실패했어도 레일이 글을 줬다) 다시 읽기가 그 글을 비우지 않는다. 비우면 「받아 둔 글은
+  // 유지」가 다시 시도를 누르는 순간 깨진다.
+  const keepOnReloadRef = useRef(false);
   const firstSubscribeRef = useRef(true);
   const markerCounterRef = useRef(0);
   // 이 채널 방문에서 타임라인에 든 줄 id(접은 열쇠, `messageIdKey`). 줄을 들이는 길은 `applyBatch` 하나라
@@ -836,8 +844,11 @@ export function useTimeline(
     // #3676: 기록(REST 머리)은 실시간 레일과 무관하게 읽을 수 있다. 레일이 아직 없거나 끝내 안 와도
     // 타임라인이 스켈레톤에 머물지 않고 ready/error 로 끝나야 한다. 레일이 나중에 오면 이 효과가
     // 다시 돌며 구독을 붙이는데, 그때 이미 화면에 있는 기록을 스켈레톤으로 되돌리지 않는다.
-    const keepLoaded = restOnlyChannelRef.current === channelId;
+    // 다시 읽기(`reload`)가 받아 둔 글이 있는 채로 불렸다면 그 글을 비우지 않고 머리만 다시 읽는다(#5221).
+    const keepLoaded = restOnlyChannelRef.current === channelId || keepOnReloadRef.current;
+    keepOnReloadRef.current = false;
     restOnlyChannelRef.current = realtime ? null : channelId;
+    setLoadCause(null);
     firstSubscribeRef.current = true;
     newestSeqRef.current = null;
     markerCounterRef.current = 0;
@@ -888,8 +899,10 @@ export function useTimeline(
         setReachedStart(page.nextBefore === undefined);
         setStatus("ready");
       })
-      .catch(() => {
-        if (!cancelled) setStatus("error");
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLoadCause(causeOfFailure(error, deviceOnlineNow()));
+        setStatus("error");
       });
 
     // 1b) The channel's reaction map, in parallel and deliberately not fatal.
@@ -1117,7 +1130,10 @@ export function useTimeline(
     hydrateUnfurls,
   ]);
 
-  const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
+  const reload = useCallback(() => {
+    keepOnReloadRef.current = newestSeqRef.current !== null;
+    setReloadNonce((n) => n + 1);
+  }, []);
 
   // ---- message actions (B11) ------------------------------------------------
 
@@ -1240,6 +1256,7 @@ export function useTimeline(
   return {
     state,
     status,
+    loadCause,
     resume,
     recoveryMarkers,
     pending,

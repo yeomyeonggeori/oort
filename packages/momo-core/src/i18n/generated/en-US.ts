@@ -277,6 +277,12 @@ export const catalog: MessageCatalog = {
       "value": "Couldn't load the member list"
     }
   ],
+  "connection.load.newerTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load new messages"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,

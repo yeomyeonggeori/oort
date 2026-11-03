@@ -231,6 +231,12 @@ export const catalog: MessageCatalog = {
       "value": "멤버 목록을 불러오지 못했어요"
     }
   ],
+  "connection.load.newerTitle": [
+    {
+      "type": 0,
+      "value": "새 글을 불러오지 못했어요"
+    }
+  ],
   "connection.load.reasonOffline": [
     {
       "type": 0,

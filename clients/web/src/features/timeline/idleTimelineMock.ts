@@ -15,6 +15,7 @@ export function idleTimelineMock(
   return {
     state: over.state ?? emptyTimeline(),
     status: "ready" as const,
+    loadCause: null,
     resume: { lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 },
     recoveryMarkers: [],
     pending: [],

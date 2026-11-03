@@ -22,6 +22,7 @@
   "connection.load.channelListTitle": "Couldn't load the channel list",
   "connection.load.threadTitle": "Couldn't load the thread",
   "connection.load.membersTitle": "Couldn't load the member list",
+  "connection.load.newerTitle": "Couldn't load new messages",
   "connection.load.reasonOffline": "You're offline. You can try again once you're connected.",
   "connection.load.reasonServer": "We can't reach the server. Try again in a moment.",
   "connection.load.reasonUnknown": "Something went wrong. Try again.",
