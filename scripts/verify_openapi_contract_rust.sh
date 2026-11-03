@@ -4030,13 +4030,20 @@ sample invite-revoke post "/v1/workspaces/{workspaceId}/invites/{inviteId}/revok
 guard_jq '.revokedAtMs != null and .revocationReason == "openapi rust gate"' \
   "POST revoke stamps revokedAtMs"
 
-api post "/v1/workspaces/$WS/invites" '{"role":"guest","maxUses":1}' "$ACCESS"
+api post "/v1/workspaces/$WS/invites" '{"role":"admin","maxUses":1}' "$ACCESS"
 [ "$RESPONSE_STATUS" = "201" ] || gate_fail invite-delete-fixture "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
 register_invite_code || exit 1
 INVITE_DELETE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.invite.id')"
 sample invite-delete delete "/v1/workspaces/{workspaceId}/invites/{inviteId}" \
   "/v1/workspaces/$WS/invites/$INVITE_DELETE_ID" 200 "" "$ACCESS"
 guard_jq '.revokedAtMs != null' "DELETE revoke stamps revokedAtMs"
+
+# 게스트 초대는 멈춰 있다 (ADR-0128 D1, ADR-0219 GS-0): 만들기는 400이고 자기 코드를 말한다.
+# 거절이므로 응답에 원문 코드가 없다.
+api post "/v1/workspaces/$WS/invites" '{"role":"guest","maxUses":1}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "400" ] || gate_fail invite-guest-paused "expected HTTP 400, got $RESPONSE_STATUS" "$(redacted_body)"
+guard_jq '.error.code == "guest_invites_paused" and (has("code") | not)' \
+  "guest invites are paused: 400 with its own error.code and no one-time code"
 
 api post "/v1/workspaces/$WS/invites" '{"role":"member","maxUses":2}' "$ACCESS"
 [ "$RESPONSE_STATUS" = "201" ] || gate_fail invite-redeem-fixture "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"

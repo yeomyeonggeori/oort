@@ -2374,6 +2374,12 @@ export const catalog: MessageCatalog = {
       "value": "글을 위에, 큰 그림을 아래에 둬요. 제목과 설명은 두 줄까지 보여줘요. 큰 그림이 없는 링크는 작게와 같아요."
     }
   ],
+  "settings.invite.guestInvitesPaused": [
+    {
+      "type": 0,
+      "value": "게스트 초대는 채널별 초대가 준비될 때까지 잠시 멈춰 있어요."
+    }
+  ],
   "settings.notifications.threadReplyDescription": [
     {
       "type": 0,
