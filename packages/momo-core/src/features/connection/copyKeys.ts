@@ -74,5 +74,12 @@ export const CONNECTION_KEYS = {
   uploadFailedNoArchive: "connection.upload.failedNoArchive",
   // 앱 전체
   sessionExpired: "connection.session.expired",
+  /**
+   * 로그인 전 화면(`ConnectScreen`)의 오프라인 안내 상자 설명(#5262). 제목은 `offlineTitle`을 쓴다. 카드의 `offlineDetail`은 「받아 둔 내용만 보여요」라
+   * 받아 둔 것이 없는 로그인 전 화면에는 맞지 않는다.
+   */
+  bootOfflineDetail: "connection.boot.offlineDetail",
+  /** 환영 화면에서 오프라인일 때 QR을 찍을 수 없는 까닭 한 줄(#5262). */
+  bootOfflineQrDetail: "connection.boot.offlineQrDetail",
   bootUnreachable: "connection.boot.unreachable",
 } as const satisfies Record<string, ConnectionKey>;
