@@ -191,6 +191,13 @@ export interface ApprovalReceipt {
   note: string;
   status?: ApprovalStatus;
   /**
+   * 서버가 이 결정을 해 준 것으로 기록한 멤버(`DecisionOutcome.decidedByMemberId`) (#5171). 카드의 「다시 요청」이 **내가 방금
+   * 거부한 카드**에는 서지 않게 하는 근거다: 카드 스냅샷의 `decided_by` 는 서버가 패치 프레임을 보낼 때까지 없어서, 영수증이
+   * 이 값을 들지 않으면 거부를 누른 바로 그 사람에게 잠깐 「다시 요청」이 선다(웹은 `SettledReceipt.decidedByMemberId` 로 읽는다).
+   * 다른 기기가 먼저 결정한 `superseded` 도 영수증이라서 영수증이 있다는 사실만으로는 내가 결정했다고 말할 수 없다.
+   */
+  decidedByMemberId?: string;
+  /**
    * 결정 응답이 한 번 실어 준 1회 값 (ADR-0186 D4 · D8 · 부록 C).
    *
    * **이 필드를 든 영수증 표가 그 값이 사는 유일한 자리다.** 그 표는 대화 화면의

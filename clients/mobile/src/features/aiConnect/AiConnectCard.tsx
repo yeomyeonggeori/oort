@@ -53,7 +53,6 @@ import {
 } from 'react-native';
 
 import {
-  BAR_CONTROL_MAX_SCALE,
   FOLDED_MAX_SCALE,
   HEAD_MAX_SCALE,
   Sentence,
