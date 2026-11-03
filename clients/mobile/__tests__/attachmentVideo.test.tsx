@@ -491,6 +491,43 @@ describe('⑤ 사진과 섞인 묶음', () => {
     expect(screen.queryByTestId('attachment-viewer-video-controls')).toBeNull();
   });
 
+  it('사진 타일에서 열어(hero 출발점이 있다) 영상 쪽으로 넘겨 닫으면 hero 없이 바로 닫히고 플레이어가 풀린다', async () => {
+    // 열 때 사진 타일을 잰 뷰어는 `origin`·`measureSource` 가 있다. 영상 쪽에는 돌아갈 사진 모양이 없어서 닫기가 hero 를 건너뛴다 —
+    // 건너뛰지 못하면 영상 위에서 닫는 탭이 「닫는 중」 상태로 서서 뷰어에 갇힌다.
+    const onClose = jest.fn();
+    function Host() {
+      const [open, setOpen] = React.useState(true);
+      return open ? (
+        <AttachmentViewer
+          workspaceId="ws"
+          channelId="ch"
+          images={MIXED}
+          startIndex={0}
+          origin={{ x: 30, y: 120, width: 136, height: 136 }}
+          measureSource={async () => ({ x: 30, y: 120, width: 136, height: 136 })}
+          onClose={() => {
+            onClose();
+            setOpen(false);
+          }}
+        />
+      ) : null;
+    }
+    render(<Host />);
+    fireEvent(screen.getByTestId('attachment-viewer-modal'), 'show');
+    // 여는 hero 가 끝나야 넘길 수 있다(워치독이 끝낸다).
+    await waitFor(() => expect(screen.getByTestId('attachment-viewer-position')).toBeTruthy(), { timeout: 8000 });
+    await swipeTo(1);
+    await waitFor(() => expect(videoMock.__players).toHaveLength(1));
+    const opened = player();
+
+    fireEvent.press(screen.getByTestId('attachment-viewer-back'));
+    // **기다리지 않고** 닫혀 있어야 한다: hero 로 닫으면 사진 타일을 재고 날아가는 동안(워치독 500ms) 아직 열려 있다.
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('attachment-viewer')).toBeNull();
+    expect(screen.queryByTestId('attachment-viewer-exit')).toBeNull();
+    expect(opened.released).toBe(true);
+  });
+
   it('사진만의 묶음은 그대로다: 「3장 중 n번」이고 플레이어를 만들지 않는다', async () => {
     await mountViewer([photo('p1'), photo('p2'), photo('p3')], 0);
     expect(caption()).toBe('3장 중 1번');
