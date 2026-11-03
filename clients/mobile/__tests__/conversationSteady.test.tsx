@@ -15,6 +15,8 @@ import {
   waitFor,
   within,
 } from '@testing-library/react-native';
+import NetInfo from '@react-native-community/netinfo';
+import {fetchWithDeadline} from '@momo/core/lib/http';
 import React from 'react';
 import {AppState, FlatList, StyleSheet} from 'react-native';
 
@@ -36,7 +38,9 @@ import {
 import {
   CONNECTING_BAND_DELAY_MS,
   DISPLAY_GRACE_MS,
-} from '../src/realtime/connectionDisplay';
+  HEALED_MS,
+  RECOVERED_FLASH_MS,
+} from '@momo/core/features/connection/thresholds';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -608,6 +612,8 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     await openDm();
     // 연결돼 있으면 띠가 없다.
     expect(screen.queryByTestId('connection-banner')).toBeNull();
+    // 오래 건강하던 소켓이 끊기는 장면이다: 붙은 지 `HEALED_MS` 를 넘겨야 코어 모델이 틈을 새로 시작한다(깜빡이는 소켓의 규칙, #5222).
+    await settle(HEALED_MS);
 
     const client = socket();
     await act(async () => {
@@ -631,15 +637,15 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     await settle(2_000);
 
     const banner = within(header).getByTestId('connection-banner');
-    // 끊김 띠는 문장 뒤에 행동의 이름(「지금 다시 연결」)이 눈에 보이게 따라 선다(#4982).
-    expect(banner).toHaveTextContent('연결이 끊겼습니다지금 다시 연결');
+    // 끊김 띠는 문장 뒤에 행동의 이름(「지금 다시 연결」)이 눈에 보이게 따라 선다(#4982). 원인은 「실시간」이라고 말한다(#5222).
+    expect(banner).toHaveTextContent('실시간 연결이 끊겼어요지금 다시 연결');
 
     // (a) 띠를 진 층은 **흐름 밖**이다. 흐름 안에 있으면 띠가 설 때마다 머리가 자라 목록의 보이는 높이가 줄었다 돌아온다.
     const layer = within(header).getByTestId('connection-banner-layer');
     expect(layer).toBe(connectingLayer);
     expect(flat(layer.props.style)).toMatchObject({position: 'absolute', top: 124});
     // (b) 알약은 그 층 안에 있다 — 흐름에 끼는 형제로 따로 서 있지 않다.
-    expect(within(layer).getByTestId('connection-banner')).toHaveTextContent(/^연결이 끊겼습니다/);
+    expect(within(layer).getByTestId('connection-banner')).toHaveTextContent(/^실시간 연결이 끊겼어요/);
     // (c) 머리 뿌리는 뒤 형제(목록) 위에 그려진다 — 아니면 매달린 띠가 목록 밑으로 숨는다.
     expect(Number(flat(header.props.style).zIndex ?? 0)).toBeGreaterThan(0);
     // (d) 띠 바깥은 여전히 손을 받지 않는다 — 알약 밑의 메시지가 눌려야 한다. 끊김일 때만 알약 **자신**이 단추라(#4895,
@@ -648,23 +654,30 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     // (e) 낭독 속성은 안쪽 알약에 있고 바깥 층에는 없다 — 이름은 행동(「지금 다시 연결」), 지금 상태는 값이다.
     expect(banner.props.accessibilityRole).toBe('button');
     expect(banner.props.accessibilityLabel).toBe('지금 다시 연결');
-    expect(banner.props.accessibilityValue).toEqual({text: '연결이 끊겼습니다'});
+    expect(banner.props.accessibilityValue).toEqual({
+      text: '실시간 연결이 끊겼어요. 새 글이 늦게 보일 수 있어요.',
+    });
     expect(banner.props.accessibilityLiveRegion).toBe('polite');
     expect(layer.props.accessibilityRole).toBeUndefined();
     expect(layer.props.accessibilityLiveRegion).toBeUndefined();
 
-    // 이어지면 띠가 걷힌다.
+    // 이어지면 「끊김」이 사라지고, 끊김이 보였던 경우에만 2초 동안 확인 표시가 남았다가 걷힌다(#5222, 감사 문서 §4 원칙 7).
     await act(async () => {
       client.state = 'connected';
       client.__emit('connected', {});
     });
     await settle(25);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('다시 연결됐어요');
+    expect(screen.getByTestId('connection-banner').props.accessibilityRole).toBe('text');
+    await settle(RECOVERED_FLASH_MS);
     expect(screen.queryByTestId('connection-banner')).toBeNull();
     expect(screen.queryByTestId('connection-banner-layer')).toBeNull();
   });
 
   it('1초 안에 이어지는 재연결은 띠를 세우지 않고, 1초를 넘기면 그때부터 선다 (#4949)', async () => {
     await openDm();
+    // 오래 건강하던 소켓의 장면이다(붙은 지 `HEALED_MS` 를 넘겨야 틈이 완전히 풀린다, #5222).
+    await settle(HEALED_MS);
     const client = socket();
     const drop = async () => {
       await act(async () => {
@@ -687,6 +700,8 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     await heal();
     await settle(CONNECTING_BAND_DELAY_MS + 500);
     expect(screen.queryByTestId('connection-banner')).toBeNull();
+    // 다시 오래 건강해진 뒤의 끊김이다 — 5초 안의 재끊김은 아래 「깜빡이는 소켓」 장면이 따로 잰다.
+    await settle(HEALED_MS);
 
     // 1.5초: 999ms 까지는 조용하고 1초가 되는 순간 「연결 중…」이 선다. 이어지면 곧 걷힌다.
     await drop();
@@ -703,6 +718,115 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     //                 1초 문턱을 2초로 늘리면 `settle(1)` 뒤 단정이 빨갛다.
   });
 
+  it('깜빡이는 소켓: 다시 붙은 지 5초 안에 또 끊기면 틈을 이어 센다 — 침묵 1초를 다시 주지 않고, 10초 문턱을 영영 못 넘는 일이 없다 (#5222, HEALED_MS)', async () => {
+    // 옛 폰 규칙: 다시 붙는 즉시 틈이 풀려 다음 끊김이 새 1초 침묵 + 새 10초를 받았다. 코어 모델의 규칙: 붙어 있어야 `HEALED_MS`(5초)
+    // 지나야 풀린다 — 2초 붙고 끊기는 소켓이 매번 시계를 0으로 돌려 「끊김」을 영영 말하지 못하는 일을 막는다(웹 띠의 규칙 승계).
+    await openDm();
+    await settle(HEALED_MS);
+    const client = socket();
+    const drop = async () => {
+      await act(async () => {
+        client.state = 'connecting';
+        client.__emit('connecting', {code: 1, reason: 'transport closed'});
+      });
+    };
+    const heal = async () => {
+      await act(async () => {
+        client.state = 'connected';
+        client.__emit('connected', {});
+      });
+    };
+
+    await drop();
+    await settle(CONNECTING_BAND_DELAY_MS + 500);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결 중…');
+    await heal();
+    await settle(25);
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
+
+    // 2초 만에 또 끊긴다: 틈은 아직 풀리지 않았으니(2초 < 5초) 처음 끊긴 때부터 센다 → 조용한 1초 없이 곧바로 「연결 중…」.
+    await settle(2_000);
+    await drop();
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결 중…');
+
+    // 그리고 그 틈은 처음 끊긴 때부터 10초에 「끊김」이 된다: 두 번째 끊김의 10초가 아니라 첫 끊김의 10초다.
+    const sinceFirstDrop = CONNECTING_BAND_DELAY_MS + 500 + 25 + 2_000;
+    await settle(DISPLAY_GRACE_MS - sinceFirstDrop - 1);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결 중…');
+    await settle(2);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent(/^실시간 연결이 끊겼어요/);
+
+    // 반대로 5초를 채워 건강했다면 다음 끊김은 새 틈이다: 다시 조용한 1초부터.
+    await heal();
+    await settle(HEALED_MS + 25);
+    await drop();
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
+    await settle(CONNECTING_BAND_DELAY_MS);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결 중…');
+  });
+
+  it('실시간만 끊겨도 컴포저는 열려 있다 (#5222 결정 ③): 띠는 「실시간 연결이 끊겼어요」지만 오프라인 줄도 잠금도 없다. 기기가 꺼지면 원인 문장이 선다', async () => {
+    await openDm();
+    await settle(HEALED_MS);
+    const client = socket();
+    await act(async () => {
+      client.state = 'connecting';
+      client.__emit('connecting', {code: 1, reason: 'transport closed'});
+    });
+    await settle(DISPLAY_GRACE_MS + 1_000);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent(/^실시간 연결이 끊겼어요/);
+    // 전송은 REST 이고 소켓은 수신용이다: 소켓이 10초 넘게 끊겨도 보내기는 막지 않는다.
+    expect(screen.queryByTestId('composer-offline')).toBeNull();
+    expect(screen.getByTestId('composer-send').props.accessibilityState).toEqual({disabled: true}); // 빈 입력이라서만 잠겨 있다
+    fireEvent.changeText(screen.getByTestId('composer-input'), '소켓만 끊겼어요');
+    expect(screen.getByTestId('composer-send').props.accessibilityState).toEqual({disabled: false});
+
+    // 기기가 꺼지면 막고, 원인(오프라인)의 해요체 문장이 선다. 쓰던 글은 그대로다.
+    act(() => {
+      (NetInfo as unknown as {__emit: (state: unknown) => void}).__emit({isConnected: false, isInternetReachable: false});
+    });
+    expect(screen.getByTestId('composer-offline')).toHaveTextContent(
+      '오프라인이라 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요.',
+    );
+    expect(screen.getByTestId('composer-send').props.accessibilityState).toEqual({disabled: true});
+    expect(screen.getByTestId('composer-input').props.value).toBe('소켓만 끊겼어요');
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent(/^오프라인이에요/);
+    act(() => {
+      (NetInfo as unknown as {__emit: (state: unknown) => void}).__emit({isConnected: true, isInternetReachable: true});
+    });
+    expect(screen.queryByTestId('composer-offline')).toBeNull();
+  });
+
+  it('서버에 닿지 못하면(서로 다른 요청 셋이 연달아 응답 없이 실패) 컴포저는 원인(서버) 문장으로 잠기고, 응답 한 건에 다시 열린다 (#5222)', async () => {
+    await openDm();
+    await settle(HEALED_MS);
+    fireEvent.changeText(screen.getByTestId('composer-input'), '서버가 내려갔어요');
+    expect(screen.queryByTestId('composer-offline')).toBeNull();
+    // 글을 치면 앱이 「입력 중」 허가를 서버에 묻는다. 그 응답이 아래 실패 사이에 끼면 서버가 답한 것이라 연속이 끊긴다 - 먼저 끝낸다.
+    await settle(1_000);
+
+    const live = globalThis.fetch;
+    globalThis.fetch = jest.fn().mockRejectedValue(new TypeError('Network request failed')) as unknown as typeof fetch;
+    await act(async () => {
+      for (const path of ['/probe-a', '/probe-b', '/probe-c']) {
+        await fetchWithDeadline(`https://api.example.com/v1${path}`).catch(() => undefined);
+      }
+    });
+    expect(screen.getByTestId('composer-offline')).toHaveTextContent(
+      '서버에 닿지 못해 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요.',
+    );
+    expect(screen.getByTestId('composer-send').props.accessibilityState).toEqual({disabled: true});
+    expect(screen.getByTestId('composer-input').props.value).toBe('서버가 내려갔어요');
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent(/^서버에 닿지 못했어요/);
+
+    // 서버가 한 번 답하면 풀린다.
+    globalThis.fetch = live;
+    await act(async () => {
+      await fetchWithDeadline('https://api.example.com/v1/probe-d').catch(() => undefined);
+    });
+    expect(screen.queryByTestId('composer-offline')).toBeNull();
+  });
+
   it('끊김 띠를 누르면 전송의 resume 과 같은 길로 같은 클라이언트가 새 토큰으로 다시 붙는다 (#4895)', async () => {
     await openDm();
     const client = socket();
@@ -711,7 +835,7 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
       client.__emit('connecting', {code: 1, reason: 'transport closed'});
     });
     await settle(DISPLAY_GRACE_MS + 1_000);
-    expect(screen.getByTestId('connection-banner')).toHaveTextContent(/^연결이 끊겼습니다/);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent(/^실시간 연결이 끊겼어요/);
     const clientsBefore = centrifugeMock.__clients.length;
     const disconnects = client.disconnectCount;
     const connects = client.connectCount;
@@ -724,7 +848,10 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     expect(client.disconnectCount).toBe(disconnects + 1);
     expect(client.setTokenCalls?.slice(-1)).toEqual(['']);
     expect(client.connectCount).toBe(connects + 1);
+    // 눌러 다시 붙은 뒤에도 「끊김」이 보였으므로 2초 동안 「다시 연결됐어요」가 남았다가 걷힌다(#5222).
     await settle(25);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('다시 연결됐어요');
+    await settle(RECOVERED_FLASH_MS);
     expect(screen.queryByTestId('connection-banner')).toBeNull();
   });
 
@@ -791,6 +918,10 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
       client.__emit('connected', {});
     });
     await settle(25);
+    // 돌아온 직후 2초는 같은 자리·같은 높이의 확인 표시다(#5222) - 필 틀은 그동안 그대로 있다가 띠가 걷히면 제자리로 돌아온다.
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('다시 연결됐어요');
+    expect(topPills().top).toBe(157.7);
+    await settle(RECOVERED_FLASH_MS);
     expect(screen.queryByTestId('connection-banner')).toBeNull();
     expect(topPills().top).toBe(121);
 

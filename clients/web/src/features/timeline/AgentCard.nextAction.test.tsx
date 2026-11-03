@@ -95,6 +95,28 @@ describe("실패·거부로 닫힌 카드의 다음 행동 (#4986)", () => {
     expect(view.getByTestId("approval-repropose").textContent).toBe("다시 요청");
   });
 
+  // #5171 2단계. 「웹과 같은 조건」의 표는 코어 한 곳(`cardReproposeReason`)이고 폰이 같은 함수를 읽는다. 영수증 줄이 함께 있을 때의 모양이
+  // 그 표의 한 줄이다: 만료 카드는 푸터를 영수증 줄이 차지해서 만료 푸터(이유 문장 + 「다시 요청」)가 서지 않고, 실패·거부 카드는 영수증 줄과
+  // 함께 「다시 요청」이 선다.
+  it("만료 카드에 이 세션의 영수증 줄이 함께 있으면 만료 푸터도 「다시 요청」도 서지 않는다 — 폰도 같은 조건", () => {
+    // 기한 뒤에 승인을 눌렀다가 서버가 「이미 만료」로 답한 사람: 카드 스냅샷은 아직 대기이고 영수증이 만료를 말한다.
+    rememberSettledApproval(APPROVAL_ID, { status: "expired", decidedAtMs: 1, decidedByMemberId: ME, note: "기한이 지나 만료로 기록됐어요." });
+    const view = draw(closedCard("pending"));
+    expect(view.getByTestId("request-bundle-state").textContent).toBe("만료");
+    expect(view.container.textContent ?? "").toContain("기한이 지나 만료로 기록됐어요.");
+    expect(view.queryByTestId("approval-repropose")).toBeNull();
+    expect(view.queryByTestId("approval-expired")).toBeNull();
+    expect(view.queryByTestId("approval-closed-next")).toBeNull();
+  });
+
+  it("거부 카드는 다른 곳에서 남이 먼저 거부한 것을 영수증으로 따라잡아도 영수증 줄과 함께 「다시 요청」이 선다", () => {
+    rememberSettledApproval(APPROVAL_ID, { status: "rejected", decidedAtMs: 1, decidedByMemberId: OTHER, note: "다른 곳에서 먼저 결정됐어요." });
+    const view = draw(closedCard("pending"));
+    expect(view.getByTestId("request-bundle-state").textContent).toBe("거부");
+    expect(view.container.textContent ?? "").toContain("다른 곳에서 먼저 결정됐어요.");
+    expect(view.getByTestId("approval-repropose").textContent).toBe("다시 요청");
+  });
+
   it("올린 이가 에이전트로 풀리지 않으면 빈 띠도 단추도 세우지 않는다", () => {
     const view = draw(closedCard("failed"), NO_AGENT);
     expect(view.queryByTestId("approval-repropose")).toBeNull();

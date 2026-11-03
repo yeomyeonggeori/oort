@@ -35,6 +35,7 @@ export const messageKeys = [
   "connection.boot.unreachable",
   "connection.card.connecting",
   "connection.card.lastSynced",
+  "connection.card.neverSynced",
   "connection.card.offlineDetail",
   "connection.card.offlineTitle",
   "connection.card.realtimeDownDetail",
@@ -201,7 +202,11 @@ export const messageKeys = [
   "expressions.make.stepSend",
   "expressions.make.stepUpload",
   "expressions.make.submit",
+  "expressions.panel.viewEmoticon",
   "expressions.panel.viewEmpty",
+  "expressions.panel.viewGif",
+  "expressions.panel.viewsLegend",
+  "expressions.panel.viewTeam",
   "expressions.photo.agentInstead",
   "expressions.photo.anotherPhoto",
   "expressions.photo.branchLabel",
@@ -302,7 +307,6 @@ export const messageKeys = [
   "mobile.attachmentSave.saving",
   "mobile.attachmentSave.toFiles",
   "mobile.attachmentSave.toPhotos",
-  "mobile.connection.reconnectNow",
   "mobile.ios.cameraUsage",
   "mobile.ios.faceIdUsage",
   "mobile.ios.localNetworkUsage",
@@ -602,6 +606,8 @@ export const messageKeys = [
   "timeline.agentRail.openRecord",
   "timeline.agentRail.sheetClose",
   "timeline.agentRail.sheetTitle",
+  "timeline.approval.reproposeBusy",
+  "timeline.approval.reproposeSeeded",
   "timeline.approvalExpiry.soon",
   "timeline.lightbox.copied",
   "timeline.lightbox.copy",
@@ -802,6 +808,7 @@ export const argumentSpecs = {
   "connection.card.lastSynced": {
     "relativeTime": "string"
   },
+  "connection.card.neverSynced": {},
   "connection.card.offlineDetail": {},
   "connection.card.offlineTitle": {},
   "connection.card.realtimeDownDetail": {},
@@ -1001,7 +1008,11 @@ export const argumentSpecs = {
   "expressions.make.stepSend": {},
   "expressions.make.stepUpload": {},
   "expressions.make.submit": {},
+  "expressions.panel.viewEmoticon": {},
   "expressions.panel.viewEmpty": {},
+  "expressions.panel.viewGif": {},
+  "expressions.panel.viewsLegend": {},
+  "expressions.panel.viewTeam": {},
   "expressions.photo.agentInstead": {},
   "expressions.photo.anotherPhoto": {},
   "expressions.photo.branchLabel": {},
@@ -1104,7 +1115,6 @@ export const argumentSpecs = {
   "mobile.attachmentSave.saving": {},
   "mobile.attachmentSave.toFiles": {},
   "mobile.attachmentSave.toPhotos": {},
-  "mobile.connection.reconnectNow": {},
   "mobile.ios.cameraUsage": {},
   "mobile.ios.faceIdUsage": {},
   "mobile.ios.localNetworkUsage": {},
@@ -1474,6 +1484,8 @@ export const argumentSpecs = {
   },
   "timeline.agentRail.sheetClose": {},
   "timeline.agentRail.sheetTitle": {},
+  "timeline.approval.reproposeBusy": {},
+  "timeline.approval.reproposeSeeded": {},
   "timeline.approvalExpiry.soon": {},
   "timeline.lightbox.copied": {},
   "timeline.lightbox.copy": {},
@@ -1728,6 +1740,7 @@ export interface MessageArgs {
   "connection.boot.unreachable": Record<string, never>;
   "connection.card.connecting": Record<string, never>;
   "connection.card.lastSynced": { relativeTime: string };
+  "connection.card.neverSynced": Record<string, never>;
   "connection.card.offlineDetail": Record<string, never>;
   "connection.card.offlineTitle": Record<string, never>;
   "connection.card.realtimeDownDetail": Record<string, never>;
@@ -1894,7 +1907,11 @@ export interface MessageArgs {
   "expressions.make.stepSend": Record<string, never>;
   "expressions.make.stepUpload": Record<string, never>;
   "expressions.make.submit": Record<string, never>;
+  "expressions.panel.viewEmoticon": Record<string, never>;
   "expressions.panel.viewEmpty": Record<string, never>;
+  "expressions.panel.viewGif": Record<string, never>;
+  "expressions.panel.viewsLegend": Record<string, never>;
+  "expressions.panel.viewTeam": Record<string, never>;
   "expressions.photo.agentInstead": Record<string, never>;
   "expressions.photo.anotherPhoto": Record<string, never>;
   "expressions.photo.branchLabel": Record<string, never>;
@@ -1995,7 +2012,6 @@ export interface MessageArgs {
   "mobile.attachmentSave.saving": Record<string, never>;
   "mobile.attachmentSave.toFiles": Record<string, never>;
   "mobile.attachmentSave.toPhotos": Record<string, never>;
-  "mobile.connection.reconnectNow": Record<string, never>;
   "mobile.ios.cameraUsage": Record<string, never>;
   "mobile.ios.faceIdUsage": Record<string, never>;
   "mobile.ios.localNetworkUsage": Record<string, never>;
@@ -2295,6 +2311,8 @@ export interface MessageArgs {
   "timeline.agentRail.openRecord": { name: string };
   "timeline.agentRail.sheetClose": Record<string, never>;
   "timeline.agentRail.sheetTitle": Record<string, never>;
+  "timeline.approval.reproposeBusy": Record<string, never>;
+  "timeline.approval.reproposeSeeded": Record<string, never>;
   "timeline.approvalExpiry.soon": Record<string, never>;
   "timeline.lightbox.copied": Record<string, never>;
   "timeline.lightbox.copy": Record<string, never>;

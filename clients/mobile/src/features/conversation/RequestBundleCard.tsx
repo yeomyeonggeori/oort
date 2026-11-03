@@ -1,5 +1,11 @@
-import type {AgentRunProgress} from '@momo/core/lib/api';
+import {uuidEq, type AgentRunProgress} from '@momo/core/lib/api';
 import type {AgentApprovalCard} from '@momo/core/features/timeline/agentCardModel';
+import {
+  cardReproposeReason,
+  REPROPOSE_LABEL,
+  reproposeDraft,
+  reproposeTarget,
+} from '@momo/core/features/approvals/expiry';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import {
   memberFor,
@@ -30,7 +36,8 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
-import {Sentence, STACK_PILL_SCALE} from '../../design/atoms';
+import {OutlineButton, Sentence, STACK_PILL_SCALE} from '../../design/atoms';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {useStyles} from '../../design/theme';
 import {
   ApprovalDecision,
@@ -63,6 +70,7 @@ export function RequestBundleCard({
   onSettled,
   onOpenMessage,
   onOpenDecision,
+  onRepropose,
 }: {
   card: AgentApprovalCard;
   directory: Directory;
@@ -76,6 +84,11 @@ export function RequestBundleCard({
   onSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
   onOpenMessage?: (channelId: string, messageId: string) => void;
   onOpenDecision?: (approvalId: string) => void;
+  /**
+   * 닫힌 카드(만료·거부·실패)의 「다시 요청」이 이 화면의 입력창에 초안을 넣는다 (#5171). 넣었으면 `true`, 쓰던 글이 있어 거절했으면
+   * `false`. 없으면 단추가 서지 않는다: 눌러도 아무 일 없는 버튼을 두지 않는다.
+   */
+  onRepropose?: (draft: string) => boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   // 큰 글씨(결정 무대와 같은 문턱)에서는 머리 문장을 자르지 않는다(#4982): 두 줄에서 말줄임하면 어느 요청인지를 말하는 유일한
@@ -85,6 +98,8 @@ export function RequestBundleCard({
   const stageSource = useRef<View | null>(null);
   const openDecision = onOpenDecision ?? (stage ? (id: string) => stage(id, stageSource) : undefined);
   const [expanded, setExpanded] = useState(false);
+  const [reproposeNote, setReproposeNote] = useState<string | null>(null);
+  const formatMessage = useFormatMessage();
   const decision = useRef<ApprovalDecisionHandle | null>(null);
   useImperativeHandle(
     decisionRef,
@@ -119,6 +134,33 @@ export function RequestBundleCard({
     ? model.details.rows
     : model.details.rows.filter(row => !card.detail.rows.includes(row));
   const headline = approvalHeadTitle({...card, title: model.headline});
+  // 닫힌 카드의 다음 행동 「다시 요청」(#5171). 서는 조건은 웹 `AgentCard` 와 같은 코어 함수 둘이 정한다: 상태·거부한 사람·영수증 줄(`cardReproposeReason`:
+  // 만료 카드가 이미 영수증 줄을 말하면 서지 않는다), 올린 이가 에이전트인가(`reproposeTarget`). 거부한 사람은 영수증이 먼저 안다(카드의
+  // `decided_by` 는 서버 프레임이 올 때까지 없다).
+  const decidedById = receipt?.decidedByMemberId ?? card.decidedByMemberId;
+  const iDecided =
+    decidedById !== undefined && uuidEq(decidedById, viewerMemberId);
+  const reproposeReason = card.isResumeOffer
+    ? null
+    : cardReproposeReason(model.state, iDecided, receipt?.note);
+  const reproposeTo =
+    reproposeReason !== null && onRepropose !== undefined
+      ? reproposeTarget(card, directory)
+      : null;
+  const repropose = () => {
+    if (reproposeReason === null || reproposeTo === null) return;
+    const seeded = onRepropose?.(
+      reproposeDraft(reproposeTo.agent.handle, reproposeReason),
+    );
+    // 입력창에 넣었는지 거절당했는지를 눈으로 보이고, VoiceOver 에는 소리로 알린다(iOS 에는 live region 이 없다).
+    const note = formatMessage(
+      seeded === true
+        ? 'timeline.approval.reproposeSeeded'
+        : 'timeline.approval.reproposeBusy',
+    );
+    setReproposeNote(note);
+    AccessibilityInfo.announceForAccessibility(note);
+  };
   const openStage =
     model.canDecide &&
     model.decisionMode === 'open' &&
@@ -139,6 +181,9 @@ export function RequestBundleCard({
         ]
       : []),
     ...(openDecision ? [{name: 'openDecision', label: openStage ? '열어서 결정' : '결정 보기'}] : []),
+    // 액션의 이름은 낱말 상수(`REPROPOSE_LABEL`)를 라벨과 겸해서 쓴다: 직접 문구 장부는 맨 영어 낱말('repropose')도 문구로 세고,
+    // 이름은 VoiceOver 가 읽지 않는 식별자라 한국어여도 해가 없다.
+    ...(reproposeTo !== null ? [{name: REPROPOSE_LABEL, label: REPROPOSE_LABEL}] : []),
     {name: 'details', label: expanded ? '자세히 접기' : '자세히'},
     ...(resultTarget ? [{name: 'result', label: resultLabel}] : []),
     ...(receipt?.secretOnce
@@ -180,6 +225,9 @@ export function RequestBundleCard({
             break;
           case 'openDecision':
             if (card.approvalId) openDecision?.(card.approvalId);
+            break;
+          case REPROPOSE_LABEL:
+            repropose();
             break;
           case 'details':
             setExpanded(value => !value);
@@ -318,6 +366,20 @@ export function RequestBundleCard({
           <Text style={styles.meta}>{resultLabel}</Text>
         </Pressable>
       ) : null}
+      {reproposeTo !== null ? (
+        <View style={styles.closedNext} testID="request-bundle-closed-next">
+          <OutlineButton
+            label={REPROPOSE_LABEL}
+            onPress={repropose}
+            testID="request-bundle-repropose"
+          />
+          {reproposeNote !== null ? (
+            <Sentence style={styles.meta} testID="request-bundle-repropose-note">
+              {reproposeNote}
+            </Sentence>
+          ) : null}
+        </View>
+      ) : null}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="자세히"
@@ -393,6 +455,8 @@ const buildStyles = (color: Palette) =>
       paddingHorizontal: space.sm,
     },
     details: {gap: space.sm},
+    // 웹의 `self-start` 작은 윤곽 단추처럼 왼쪽에 붙고, 누른 뒤의 한 줄(넣었어요/못 넣었어요)이 그 아래에 선다.
+    closedNext: {alignItems: 'flex-start', gap: space.xs},
     open: {
       minHeight: TOUCH_TARGET,
       borderRadius: radius.pill,

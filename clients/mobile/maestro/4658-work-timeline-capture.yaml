@@ -1,0 +1,26 @@
+appId: app.momo.ios
+name: 4658-work-timeline-capture
+---
+# 4658-work-timeline-capture - 폰 작업 타임라인 시트: 위 · 가운데 · 아래를 차례로 찍는다 (#4658).
+#
+# 표면은 `-momoMeasure WORK-TIMELINE-<WHICH>`(라이트: `LIGHT-WORK-TIMELINE-<WHICH>`)이고 시트가 스스로 열려 있다(`measure/workTimeline.tsx`,
+# 가상 인물 이도현·달무리봇). WHICH 는 running · quiet · ended · offline · old 다. `chip` 은 요약 칩 한 줄이 서고 2.5초 뒤 시트가 열리는
+# 표면이라 이 흐름이 아니라 녹화(`xcrun simctl io <UDID> recordVideo`)로 찍는다.
+#
+#   xcrun simctl launch <UDID> app.momo.ios --args -momoMeasure WORK-TIMELINE-RUNNING -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <UDID> test -e SHOT=timeline-running-dark clients/mobile/maestro/4658-work-timeline-capture.yaml
+#
+# 시트의 내용은 한 화면보다 길어서(요약 카드 → 기록 → 에이전트 보고 → oort 기록) 세 장으로 나눠 찍는다. 장마다 보는 것:
+#   1-top     요약 카드(머리 칩·걸린 시간·건강 줄)와 「기록」. 연결이 끊겼으면 맨 위의 한정 문장.
+#   2-mid     「에이전트 보고」: 계획 블록 → 활동 줄(묶음 · 끝난 편집 · 실패 · 진행 중과 점 하나) → 합계.
+#   3-bottom  「oort 기록」: 합계 한 줄 + 접힌 호출 줄.
+- extendedWaitUntil:
+    visible:
+      id: "run-ledger-scroll"
+    timeout: 60000
+- takeScreenshot: ${SHOT}-1-top
+- scroll
+- takeScreenshot: ${SHOT}-2-mid
+- scroll
+- scroll
+- takeScreenshot: ${SHOT}-3-bottom

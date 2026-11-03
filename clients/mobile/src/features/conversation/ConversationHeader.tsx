@@ -1,4 +1,11 @@
+import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {viewWithoutRest} from '@momo/core/features/connection/screenState';
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
+import {
+  CONNECTION_MARK,
+  presentConnection,
+  type ConnectionPresentation,
+} from '@momo/core/features/connection/presentation';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useState} from 'react';
 import {
@@ -23,9 +30,8 @@ import {
 import {usePalette, useStyles} from '../../design/theme';
 import {ds2Radius, font, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import type {StatusDotTone} from '@momo/core/features/presence/statusDot';
-import {useMobileLocale} from '../../i18n/LocaleProvider';
+import {useFormatMessage} from '../../i18n/useFormatMessage';
 import {StatusDot} from '../presence/StatusDot';
-import {useOnline} from '../inbox/useOnline';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
 import {headerSlotWidth, pillShowsSecondary, pillStatusWord} from './headerPill';
@@ -43,26 +49,6 @@ export interface HuddleSlot {
   /** 허들 아이콘 래스터. 굽는 날 `CONV_ICONS` 에 이름이 는다. */
   icon: ConvIconName;
 }
-
-/**
- * 연결 띠의 문장. 연결됐으면 아무 말도 하지 않는다 — 정상은 문장을 쓰지 않는다.
- * 옛 `railSubtitle` 이 하던 판정 그대로다(2R M3: 한 번 연결된 뒤의 connecting 은
- * `RealtimeProvider` 가 이미 disconnected 로 내려보낸다).
- *
- * 받는 값은 소켓 상태가 아니라 **띠가 말해도 되는 상태**(`useRealtime().bandStatus`)다. 끊긴 지 1초가
- * 안 됐으면 `connected`(= 말없음)로 내려와, 1초 안에 이어지는 재연결은 띠를 세우지 않는다(#4949).
- */
-export function connectionBannerText(status: RealtimeStatus): string | null {
-  if (status === 'connected') return null;
-  return status === 'connecting' ? '연결 중…' : '연결이 끊겼습니다';
-}
-
-/**
- * 끊김 띠를 눌렀을 때의 이름(#4895). 사전(`mobile.connection.reconnectNow`, ko·en)이 정본이고, 이 낱말은
- * 사전 없이 올라오는 격리 하네스를 위한 폴백이다 — 같은 낱말을 두 곳에 적는 것은 알지만, 머리의 나머지 문장이
- * 아직 리터럴이라 이관(ADR-0213 P1)이 끝나기 전까지는 이 파일이 폴백을 들고 있는다.
- */
-export const RECONNECT_NOW_LABEL = '지금 다시 연결';
 
 /** 머리 오른쪽의 「따라가기」 원(스레드 화면, #4890). 스레드 화면만 준다. */
 export interface FollowSlot {
@@ -88,6 +74,7 @@ export function ConversationHeader({
   onOpenInfo,
   huddle,
   follow,
+  band,
   railStatus,
   onReconnect,
   onBannerInset,
@@ -123,10 +110,23 @@ export function ConversationHeader({
   huddle?: HuddleSlot;
   /** 스레드 화면의 「따라가기」 원(#4890). 없으면 서지 않는다 — 열 것이 없는 원은 누르면 아무 일도 안 하는 버튼이다. */
   follow?: FollowSlot;
-  railStatus: RealtimeStatus;
+  /**
+   * 연결 띠가 말할 것(#5222, 코어 연결 상태 모델의 `presentConnection`). `null` 이면 띠가 없다 — 정상은 문장을 쓰지 않고, 끊긴 첫 1초도
+   * 침묵이다(#4949). 문장·마크·행동은 모델이 정하고 이 머리는 그리기만 한다: 「연결 중…」(단추 없음), 끊김의 원인별 문장(오프라인 ·
+   * 서버에 닿지 못함 · 실시간만 끊김 · 알 수 없음), 다시 붙은 뒤 2초의 「다시 연결됐어요」. 대화 화면이 연결 상태 공급자에서 읽어 준다.
+   * 주지 않으면(`undefined`) 아래 `railStatus` 로 답한다.
+   */
+  band?: ConnectionPresentation | null;
+  /**
+   * **공급자가 없는 자리**(격리 하네스·시험·자기 띠를 갖지 않는 스레드 머리)를 위한 소켓 상태 하나. `band` 를 주지 않았을 때만 읽고,
+   * 같은 모델을 소켓 상태와 기기 온라인만으로 한 번 돌린 모습을 그린다(`viewWithoutRest`, 웹의 공급자 없는 자리와 같은 규칙):
+   * `connected` 는 침묵, 그 밖은 곧바로 「실시간 연결이 끊겼어요」다(기다림 없음 — 틈이 언제 시작했는지 모르는 자리다). 둘 다 없으면 띠가
+   * 없다.
+   */
+  railStatus?: RealtimeStatus;
   /**
    * 끊김 띠를 누르면 부른다(「지금 다시 연결」, #4895) — 화면은 이것을 전송의 `resume` 과 같은 길(`useRealtime().reconnect`)로
-   * 잇는다. **「연결이 끊겼습니다」일 때만** 단추가 선다: 「연결 중…」은 이미 시도하는 중이라 누를 것이 없다. 없으면 띠는
+   * 잇는다. 모델이 행동을 줄 때만(`band.canReconnect`) 단추가 선다: 「연결 중…」·「오프라인이에요」는 누를 것이 없다. 없으면 띠는
    * 단추가 아니라 문장만 선다(열 것이 없는 단추는 만들지 않는다 — ⋮·허들 자리와 같은 규칙).
    */
   onReconnect?: () => void;
@@ -143,23 +143,45 @@ export function ConversationHeader({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const insets = useSafeAreaInsets();
-  const banner = connectionBannerText(railStatus);
-  const reconnectable = railStatus === 'disconnected' && onReconnect !== undefined;
-  const reconnectLabel =
-    useMobileLocale()?.locale.formatMessage('mobile.connection.reconnectNow') ?? RECONNECT_NOW_LABEL;
-  // 기기가 오프라인이면(NetInfo) 레일 재시도가 닿을 수 없다. 웹 배너의 browser-offline 과 같은 규칙으로
-  // 같은 마크가 멈춘다(#3961 design-review M-2). 문장은 그대로다.
-  const online = useOnline();
-  // 띠의 안쪽(로더 + 문장)은 문장이든 단추든 같다. 두 문장(「연결 중…」·「연결이 끊겼습니다」) 모두 레일이 다시 연결을
-  // 시도하는 동안이라 같은 로더가 돈다(#3961). 문장은 그대로고 로더는 곁들일 뿐이다. 기기가 오프라인이면 멈춘다.
-  const bannerBody = banner ? (
-    <>
-      <OortLoader size={BANNER_LOADER_SIZE} still={!online} testID="connection-loader" />
-      <Text style={styles.bannerText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-        {banner}
-      </Text>
-    </>
-  ) : null;
+  const formatMessage = useFormatMessage();
+  const shown =
+    band !== undefined
+      ? band
+      : railStatus === undefined
+        ? null
+        : presentConnection(viewWithoutRest(railStatus, true, Date.now()), false);
+  const bannerTitle = shown === null ? null : formatMessage(shown.title);
+  const bannerDetail =
+    shown === null || shown.detail === null ? null : formatMessage(shown.detail);
+  const reconnectable = shown !== null && shown.canReconnect && onReconnect !== undefined;
+  const reconnectLabel = formatMessage(CONNECTION_KEYS.reconnectNow);
+  // 띠 안쪽의 곁 표시: 다시 붙는 중이면 오르트 로더가 돌고, 진행 중인 것이 없으면(기기 오프라인) 같은 마크가 멈춘다(#3961 design-review
+  // M-2), 방금 돌아왔으면 확인 표시다. 같은 자리·같은 크기라 마크가 바뀌어도 알약의 높이는 변하지 않는다.
+  const bannerBody =
+    shown === null ? null : (
+      <>
+        {shown.mark === CONNECTION_MARK.check ? (
+          <View style={styles.bannerMark} testID="connection-check">
+            <Image
+              accessibilityElementsHidden
+              source={CONV_ICONS.check}
+              style={[styles.bannerCheck, {tintColor: palette.accentText}]}
+            />
+          </View>
+        ) : (
+          <OortLoader
+            size={BANNER_LOADER_SIZE}
+            still={shown.mark === CONNECTION_MARK.still}
+            testID="connection-loader"
+          />
+        )}
+        <Text style={styles.bannerText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+          {bannerTitle}
+        </Text>
+      </>
+    );
+  // 낭독: 단추의 이름은 행동이고, 지금 상태(제목과 그 뒤 설명)는 값으로 따라 읽힌다.
+  const bannerSpoken = bannerDetail === null ? bannerTitle : `${bannerTitle}. ${bannerDetail}`;
   const {width: windowWidth, fontScale} = useWindowDimensions();
   const [headerHeight, setHeaderHeight] = useState<number | null>(null);
   const onHeaderLayout = useCallback((event: LayoutChangeEvent) => {
@@ -171,9 +193,10 @@ export function ConversationHeader({
     [onBannerInset],
   );
   // 띠가 걷히면 비운다 — 위쪽 필이 사라진 띠 밑 자리에 남지 않게.
+  const bannerUp = shown !== null;
   useEffect(() => {
-    if (banner === null) onBannerInset?.(0);
-  }, [banner, onBannerInset]);
+    if (!bannerUp) onBannerInset?.(0);
+  }, [bannerUp, onBannerInset]);
 
   // ---- 가운데 알약 -----------------------------------------------------------
   const isDm = kind === 'dm' && Boolean(peerId);
@@ -333,7 +356,7 @@ export function ConversationHeader({
         </View>
       </View>
       {children}
-      {banner ? (
+      {shown !== null ? (
         // 머리 밑 가장자리에 매달려 목록 위에 뜬다. 문장이 아닌 띠 바깥은 손을 받지 않는다 — 알약 밑의 메시지가
         // 눌려야 한다. 끊김일 때만 알약 **자신**이 단추다(#4895): 층은 `box-none` 이라 손을 받는 것은 알약뿐이다.
         <View
@@ -345,8 +368,8 @@ export function ConversationHeader({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={reconnectLabel}
-              // 이름은 행동(「지금 다시 연결」)이고, 지금 상태(「연결이 끊겼습니다」)는 값으로 따라 읽힌다.
-              accessibilityValue={{text: banner}}
+              // 이름은 행동(「지금 다시 연결」)이고, 지금 상태(「연결이 끊겼어요」 …)는 값으로 따라 읽힌다.
+              accessibilityValue={{text: bannerSpoken ?? ''}}
               accessibilityLiveRegion="polite"
               onPress={onReconnect}
               hitSlop={BANNER_SLOP}
@@ -511,4 +534,12 @@ const buildStyles = (color: Palette) =>
     },
     bannerActionText: {fontSize: font.meta, color: color.accentText, fontWeight: '600'},
     bannerText: {fontSize: font.meta, color: color.text, fontWeight: '600', flexShrink: 1},
+    // 확인 표시 자리: 로더와 같은 한 변이라 마크가 바뀌어도 알약의 높이가 변하지 않는다.
+    bannerMark: {
+      width: BANNER_LOADER_SIZE,
+      height: BANNER_LOADER_SIZE,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    bannerCheck: {width: CONV_ICON_SIZE.check, height: CONV_ICON_SIZE.check},
   });
