@@ -1,15 +1,14 @@
-import type {AgentLiveness, Channel, Member, Message, RosterMember} from '@momo/core/lib/api';
+import type {AgentLiveness, AgentRunProgress, Channel, Member, Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
-import type {AgentLivenessLookup} from '@momo/core/features/agents/turnCopy';
 import type {QueryClient} from '@tanstack/react-query';
 import React from 'react';
 import {StyleSheet, View} from 'react-native';
 import {Screen} from '../src/design/atoms';
-import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
+import {TurnsActivityRail} from '../src/features/agents/ActivityRail';
 import {StopTurnControl} from '../src/features/agents/StopTurnControl';
 import {markAgentWorking, resetAgentWorking} from '../src/features/agents/workingSignal';
-import {MessageRow} from '../src/features/conversation/MessageRow';
+import {MessageRow, type MessageRowActions} from '../src/features/conversation/MessageRow';
 import {RealtimeContext} from '../src/realtime/RealtimeProvider';
 import SidebarScreen from '../src/screens/SidebarScreen';
 import {SessionProvider} from '../src/session/useSession';
@@ -243,8 +242,22 @@ function mine(body: string, minutesAgo: number): Message {
 
 function UncollectedDm(): React.JSX.Element {
   const now = Date.now();
-  const lookup: AgentLivenessLookup = id =>
-    id.toLowerCase() === BOT_ID.toLowerCase() ? liveness('woken_not_collected') : undefined;
+  // 5분을 넘게 가져가는 이 없는 요청(#4620): 입력창 레일에서는 빠지고(칸은 예약된 채 비어 있다), 부른 메시지 아래 **예외 줄**이 말한다
+  // (「아직 받지 않았어요」 · 설정 열기 · 취소). 같은 run을 두 자리가 다르게 말하지 않는다.
+  const run = {
+    id: RUN,
+    channelId: 'dm-bot',
+    agentMemberId: BOT_ID,
+    triggerMessageId: '00000000-0000-7000-8000-0000000e4b01',
+    triggerSummary: '이번 주 일정 정리해 줄래요',
+    status: 'queued',
+    phase: 'queued',
+    leaseState: 'none',
+    stepCount: 0,
+    ahead: [],
+    createdAtMs: now - 17 * HOUR,
+    updatedAtMs: now - 17 * HOUR,
+  } as unknown as AgentRunProgress;
   return (
     <RealtimeContext.Provider value={CONNECTED}>
       <SessionProvider member={VIEWER}>
@@ -256,14 +269,15 @@ function UncollectedDm(): React.JSX.Element {
               directory={DIRECTORY}
               chips={[]}
               nowMs={now}
+              runStatus={[run]}
+              actions={{myMemberId: VIEWER_ID, onOpenProfile: () => {}} as unknown as MessageRowActions}
             />
-            <AgentActivityBar
-              // 17시간 + 30초: `now` 를 먼저 잡고 신호를 나중에 만들면 경과가 17시간에 1ms 모자라 「16시간째」로 찍힌다.
+            <TurnsActivityRail
               turns={[queuedTurn(17 * HOUR + 30_000, {channelId: 'dm-bot'})]}
               directory={DIRECTORY}
               nowMs={now}
               live
-              livenessFor={lookup}
+              reserved
               renderStop={turn => (
                 <StopTurnControl
                   runId={turn.runId}

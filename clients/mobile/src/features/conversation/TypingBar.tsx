@@ -129,6 +129,8 @@ export function TypingBar({
       accessibilityElementsHidden={empty}
       importantForAccessibility={empty ? 'no-hide-descendants' : 'auto'}
       accessibilityLabel={empty ? undefined : label ?? segments.map(part => part.text).join('')}
+      // 누르는 것이 없는 줄이다. 위 레일(`ActivityRailSlot`)의 손가락 슬롭이 이 줄 위로 내려오므로 이 줄이 터치를 가로채지 않게 한다(#4620).
+      pointerEvents="none"
       style={styles.line}
       testID={testID}>
       {!empty ? (

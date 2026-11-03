@@ -6,7 +6,7 @@ import {
 } from '@momo/core/features/agents/workingSignal';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {act, cleanup, render, screen, waitFor} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
 import {StyleSheet} from 'react-native';
 
@@ -16,7 +16,7 @@ import '../src/boot/coreHost';
 import {AgentLivenessLabel} from '../src/features/agents/AgentLivenessLabel';
 import {darkPalette, lightPalette} from '../src/design/tokens';
 import {WorkingCard} from '../src/screens/SidebarScreen';
-import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
+import {TurnsActivityRail} from '../src/features/agents/ActivityRail';
 import {buildWorkingCard, workingStep} from '../src/features/home/workingCard';
 
 // =============================================================================
@@ -226,36 +226,39 @@ describe('홈 카드 본문', () => {
   });
 });
 
-describe('대화 위 활동 줄', () => {
-  it('대기 run은 「대기 2번째」와 근거 줄을 말하고 「작업 중」이라 하지 않는다', () => {
-    // 5분이 안 된 요청이다: 5분을 넘으면 「아직 받지 않았어요」로 바뀐다(#4285, `uncollectedRun.test.tsx`).
+describe('입력창 레일 (#4620)', () => {
+  it('대기 run은 「받음」이라 하고 「작업 중」이라 하지 않는다 — 분 단위 근거는 시트에서만, 줄에는 숫자가 없다', () => {
+    // 5분이 안 된 요청이다: 5분을 넘으면 레일에서 빠지고 메시지 아래 예외 줄이 「아직 받지 않았어요」를 말한다(#4285, #4620).
     const now = Date.now();
     render(
-      <AgentActivityBar
+      <TurnsActivityRail
         turns={[signalOf({queuePosition: 2, aheadTotal: 1, createdAtMs: now - 3 * MIN})]}
         directory={DIRECTORY}
         nowMs={now}
         live
       />,
     );
-    const bar = screen.getByTestId('composer-working');
-    expect(bar).toHaveTextContent(/그록봇.*대기 2번째/);
-    expect(bar).not.toHaveTextContent(/작업 중/);
-    expect(screen.getByTestId('activity-detail')).toHaveTextContent(
-      '3분째 기다려요 · 에이전트 앞에 1건',
+    const line = screen.getByTestId('composer-working-text');
+    expect(line).toHaveTextContent(/그록봇 · 받음/);
+    expect(line).not.toHaveTextContent(/작업 중/);
+    expect(line).not.toHaveTextContent(/\d/);
+    fireEvent.press(screen.getByTestId('composer-working'));
+    expect(screen.getByTestId(`composer-working-row-${AGENT}`)).toHaveTextContent(
+      /3분째 기다려요/,
     );
   });
 
-  it('승인 필요에는 근거 줄이 없다', () => {
+  it('승인 필요에는 분 단위 근거도 없다', () => {
     render(
-      <AgentActivityBar
+      <TurnsActivityRail
         turns={[signalOf({phase: 'awaiting_approval', status: 'awaiting_approval'})]}
         directory={DIRECTORY}
         nowMs={Date.now()}
         live
       />,
     );
-    expect(screen.queryByTestId('activity-detail')).toBeNull();
+    fireEvent.press(screen.getByTestId('composer-working'));
+    expect(screen.getByTestId(`composer-working-row-${AGENT}`)).not.toHaveTextContent(/분째/);
   });
 });
 

@@ -1,4 +1,5 @@
 import type {Member} from '@momo/core/lib/api';
+import {RAIL_WORD} from '@momo/core/features/agents/activityRail';
 import {centrifugoChannelName} from '@momo/core/lib/realtimeEvents';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -435,7 +436,7 @@ describe('대화 화면이 다시 그려질 때 메시지 행이 치르는 값',
     expect(screen.queryByTestId(`working-row-${KIM_AGENT}`)).toBeNull();
     // 그리고 같은 화면이 **동시에** 옳은 말을 한다 — 사라지기만 하면 턴이 끝난
     // 것처럼 읽힌다. 활동 줄이 무슨 일이 일어났는지 이어서 말해야 한다.
-    expect(screen.getByText(/승인을 기다립니다/)).toBeTruthy();
+    expect(screen.getByTestId('composer-working-text')).toHaveTextContent(new RegExp(RAIL_WORD.approval));
     expect(screen.queryByText(/작업 중/)).toBeNull();
   });
 
@@ -449,10 +450,10 @@ describe('대화 화면이 다시 그려질 때 메시지 행이 치르는 값',
     // 멈춰 서서 사람의 결정을 기다리는 턴이다. 답이 나타날 자리를 내주면 화면이
     // "곧 답이 온다"고 말하는 동안 에이전트는 바로 그 사람을 기다리게 된다.
     expect(screen.queryByTestId(`working-row-${KIM_AGENT}`)).toBeNull();
-    // 그리고 그 낱말 자체가 화면에 없어야 한다 — 활동 줄은 「승인을 기다립니다」로
+    // 그리고 그 낱말 자체가 화면에 없어야 한다 — 입력창 레일은 「승인 필요」(코어 `RAIL_WORD.approval`)로
     // 말한다. mock 된 문자열이 아니라 코어의 문구를 향한 단정이다.
     expect(screen.queryByText(/작업 중/)).toBeNull();
-    expect(screen.getByText(/승인을 기다립니다/)).toBeTruthy();
+    expect(screen.getByTestId('composer-working-text')).toHaveTextContent(new RegExp(RAIL_WORD.approval));
   });
 
   it('메시지가 하나 도착하면 그 한 행만 그려진다 — 나머지는 0', async () => {

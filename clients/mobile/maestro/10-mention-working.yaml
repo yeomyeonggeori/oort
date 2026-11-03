@@ -80,11 +80,12 @@ name: 10-mention-working
       id: "composer-working"
     timeout: 60000
 # Regex, not the bare phrase: Maestro matches a text selector against the WHOLE
-# label, and this line reads "김인턴이 작업 중" plus a live elapsed clock. A bare
-# "작업 중" matches nothing and reads like the indicator is missing.
+# label, and the rail line reads "김인턴 · 작업 중" (#4620: no clock — the rail never
+# prints elapsed time, so the text is the same on the first and the fortieth second).
+# A bare "작업 중" matches nothing and reads like the indicator is missing.
 - assertVisible: ".*작업 중.*"
 - assertVisible:
-    id: "composer-working-row-${AGENT_MEMBER_ID}"
+    id: "composer-working-text"
 
 # …and then the turn actually lands. Asserting the reply text (not just "the
 # working line went away") separates "the agent answered" from "the indicator
