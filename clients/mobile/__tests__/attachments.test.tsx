@@ -388,7 +388,9 @@ describe('파일 카드의 ↓ 는 「저장」이다 — 카드 탭(공유)과 
   const fs = fileSystem as unknown as PickMock;
   const save = () => screen.getByTestId('attachment-card-save');
   const line = () => screen.queryByTestId('attachment-save-status')?.props.children;
-  const VIDEO = attachment({ id: 'v1', name: '영상.mp4', mime: 'video/mp4', sizeBytes: 6_000_000 });
+  // 8 MB 를 넘는 래스터 이미지는 인라인 그림이 아니라 파일 카드로 서지만 **사진 갈래**다(보관함이 받는다). 영상(mp4·mov)은 #5208 이후 재생 카드이고
+  // ↓ 가 없다 — 영상의 저장은 뷰어 [저장]이다(`attachmentVideoSave.test.tsx`).
+  const BIG_PHOTO = attachment({ id: 'b1', name: '큰사진.jpg', mime: 'image/jpeg', sizeBytes: 9 * 1024 * 1024 });
   const SVG = attachment({ id: 's1', name: '로고.svg', mime: 'image/svg+xml', sizeBytes: 1024 });
 
   it('PDF: ↓ 는 파일 앱에서 위치를 고르게 하고 첨부 이름으로 복사한다 — 공유 시트는 열리지 않는다', async () => {
@@ -426,13 +428,13 @@ describe('파일 카드의 ↓ 는 「저장」이다 — 카드 탭(공유)과 
     expect(screen.getByTestId('attachment-download-idle')).toBeTruthy();
   });
 
-  it('영상: ↓ 는 사진 보관함에 더한다 — 처음 한 번 추가 전용으로 묻고, 파일 앱 창은 열지 않는다', async () => {
-    render(<AttachmentList channelId="ch" attachments={[VIDEO]} />);
+  it('큰 사진(파일 카드): ↓ 는 사진 보관함에 더한다 — 처음 한 번 추가 전용으로 묻고, 파일 앱 창은 열지 않는다', async () => {
+    render(<AttachmentList channelId="ch" attachments={[BIG_PHOTO]} />);
     expect(save().props.accessibilityLabel).toBe('사진에 저장');
     fireEvent.press(save());
     await waitFor(() => expect(line()).toBe('사진에 저장했어요'));
     expect(mediaLibrary.requestPermissionsAsync.mock.calls).toEqual([[true]]);
-    expect(mediaLibrary.__state.saved).toEqual([expect.stringMatching(/^file:.*v1-영상\.mp4$/)]);
+    expect(mediaLibrary.__state.saved).toEqual([expect.stringMatching(/^file:.*b1-큰사진\.jpg$/)]);
     expect(fs.__state.pickCalls).toBe(0);
     expect(Share.share).not.toHaveBeenCalled();
   });
@@ -449,7 +451,7 @@ describe('파일 카드의 ↓ 는 「저장」이다 — 카드 탭(공유)과 
   it('거부: 내려받지 않고 「설정 열기」 줄이 서서 남고, 누르면 설정 앱으로 간다', async () => {
     mediaLibrary.__state.addAnswer = { status: 'denied', accessPrivileges: 'none', granted: false, canAskAgain: false };
     const open = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
-    render(<AttachmentList channelId="ch" attachments={[VIDEO]} />);
+    render(<AttachmentList channelId="ch" attachments={[BIG_PHOTO]} />);
     fireEvent.press(save());
     await waitFor(() => expect(line()).toBe('사진 접근이 꺼져 있어요 · 설정 열기'));
     expect(fs.__state.downloads).toHaveLength(0);
@@ -461,7 +463,7 @@ describe('파일 카드의 ↓ 는 「저장」이다 — 카드 탭(공유)과 
   it('실패: 줄이 말하고 ↓ 를 다시 누르면 다시 시도한다', async () => {
     mediaLibrary.__state.addPermission = { status: 'granted' };
     mediaLibrary.__state.saveFailure = new Error('boom');
-    render(<AttachmentList channelId="ch" attachments={[VIDEO]} />);
+    render(<AttachmentList channelId="ch" attachments={[BIG_PHOTO]} />);
     fireEvent.press(save());
     await waitFor(() => expect(line()).toBe('저장하지 못했어요 · 다시 시도'));
     mediaLibrary.__state.saveFailure = null;
