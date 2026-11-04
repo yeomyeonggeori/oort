@@ -387,7 +387,7 @@ export function ThreadComposer({
         {offline && (
           <p
             role="status"
-            className="px-3 pb-2 text-meta text-warn"
+            className="px-3 pb-2 text-meta text-warn break-keep"
             data-testid="thread-composer-offline"
           >
             {blockedLine}

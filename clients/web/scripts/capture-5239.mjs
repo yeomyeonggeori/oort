@@ -3,6 +3,7 @@
 // (gates/connection-harness.mjs, #5220과 같은 하네스).
 //
 //   npm run build && OUT_DIR=/path node scripts/capture-5239.mjs
+//   DIST_DIR=<다른 dist> OUT_DIR=/path node scripts/capture-5239.mjs   # 고치기 전 번들로 RED 를 다시 볼 때(#5294)
 //
 // 1440 라이트·다크로 같은 화면(대화 + 내가 결정할 승인 카드 + 쓰던 글이 든 입력창)을 원인마다 찍는다. 찍으면서
 // 두 줄이 무엇을 말하는지도 단정한다(캡처가 곧 실행 증거다):
@@ -36,6 +37,7 @@ import {
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR ? resolve(process.env.OUT_DIR) : resolve(WEB_ROOT, "artifacts/design");
 const PORT = Number(process.env.CAPTURE_PORT || 5239);
+const DIST_DIR = process.env.DIST_DIR || "";
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const SCHEMES = (process.env.CAPTURE_SCHEMES || "light,dark").split(",");
 const DRAFT = "내일 배포 전에 확인할 목록을 정리해서 올릴게요.";
@@ -53,6 +55,8 @@ const card = (page) => page.getByTestId("connection-card");
 const composerLine = (page) => page.getByTestId("composer-offline");
 const approvalLine = (page) => page.getByTestId("approval-note-offline");
 const normalized = async (locator) => ((await locator.textContent()) ?? "").replace(/\s+/g, " ").trim();
+/** 엔진이 **계산한** `word-break` — 한국어 문장이 어절에서 꺾이려면 `keep-all` 이다(`break-keep` 이 빠지면 `normal`, #5294). */
+const wordBreakOf = (locator) => locator.evaluate((el) => getComputedStyle(el).wordBreak);
 
 async function waitFor(read, label, timeout = 20_000) {
   const started = Date.now();
@@ -88,6 +92,7 @@ function expect(condition, message) {
 async function expectBlocked(page, composerKey, approvalKey, label, { requireCard = true } = {}) {
   expect((await composerLine(page).count()) === 1, `${label}: 입력창 위 줄이 없다`);
   expect((await normalized(composerLine(page))) === line(composerKey), `${label}: 입력창 줄이 ${composerKey}가 아니다`);
+  expect((await wordBreakOf(composerLine(page))) === "keep-all", `${label}: 입력창 줄이 어절에서 꺾이지 않는다(word-break)`);
   expect(await page.getByTestId("composer-send").isDisabled(), `${label}: 보내기가 열려 있다`);
   const cardOnScreen = (await page.getByTestId("agent-card").count()) > 0;
   if (!cardOnScreen && !requireCard) {
@@ -96,6 +101,7 @@ async function expectBlocked(page, composerKey, approvalKey, label, { requireCar
   }
   expect((await approvalLine(page).count()) === 1, `${label}: 승인 줄이 없다`);
   expect((await normalized(approvalLine(page))) === line(approvalKey), `${label}: 승인 줄이 ${approvalKey}가 아니다`);
+  expect((await wordBreakOf(approvalLine(page))) === "keep-all", `${label}: 승인 줄이 어절에서 꺾이지 않는다(word-break)`);
   expect((await page.getByTestId("approval-approve").count()) === 0, `${label}: 승인 단추가 남아 있다`);
 }
 
@@ -219,7 +225,12 @@ async function captureScheme(browser, scheme, shots) {
 
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
-  const server = await startGuardedPreview({ webRoot: WEB_ROOT, port: PORT, portEnvVar: "CAPTURE_PORT" });
+  const server = await startGuardedPreview({
+    webRoot: WEB_ROOT,
+    port: PORT,
+    portEnvVar: "CAPTURE_PORT",
+    ...(DIST_DIR ? { extraArgs: ["--outDir", resolve(DIST_DIR)] } : {}),
+  });
   const shots = [];
   try {
     const browser = await chromium.launch();

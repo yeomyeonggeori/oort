@@ -246,6 +246,15 @@ describe("InboxDetail", () => {
     expect(note?.textContent?.replace(/\s+/g, " ").trim()).toBe(line);
   });
 
+  // #5294(화면 검수 5a M1): 받은함의 승인 줄도 입력창·승인 카드와 같은 원인 문장이라 어절에서 꺾는다(「연/결되면」으로 끊기지 않는다). 꺾이는
+  // 자리는 폭에 달려 jsdom 이 못 재므로 클래스로 지키고, 엔진이 계산한 `word-break` 는 capture-4888·5239 가 입력창·승인 카드에서 잰다.
+  it("처리할 일 + 오프라인이면 승인 줄이 어절에서 꺾인다(break-keep)", async () => {
+    const h = await mount(entry({ key: "approval:a1", kind: "task", task, seq: undefined }), true);
+    const note = h.querySelector('[data-testid="inbox-approval-offline"]');
+    expect(note).not.toBeNull();
+    expect(note?.classList.contains("break-keep")).toBe(true);
+  });
+
   it("오프라인에서는 답장 입력 대신 이유를 말한다", async () => {
     const h = await mount(entry({}), true);
     expect(h.querySelector('[data-testid="inbox-reply-input"]')).toBeNull();
