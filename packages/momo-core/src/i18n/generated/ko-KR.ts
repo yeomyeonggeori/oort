@@ -3748,19 +3748,10 @@ export const catalog: MessageCatalog = {
       "value": "업데이트 소식 닫기"
     }
   ],
-  "releaseNotes.popup.more": [
+  "releaseNotes.popup.showMore": [
     {
       "type": 0,
-      "value": "그 밖에 "
-    },
-    {
-      "type": 2,
-      "value": "count",
-      "style": null
-    },
-    {
-      "type": 0,
-      "value": "가지"
+      "value": "더보기"
     }
   ],
   "releaseNotes.popup.title": [

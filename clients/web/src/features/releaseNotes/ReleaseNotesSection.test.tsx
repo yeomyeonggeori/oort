@@ -160,6 +160,13 @@ describe("설정 › 업데이트 소식", () => {
       "release-notes-other-conversations",
       "release-notes-other-settings",
     ]);
+    // 줄은 불릿 목록 항목이다(#5298): 마커가 서는 진짜 `ul`·`li`. 마커 모양은 CSS라 jsdom은 그리지 못한다(캡처 때 계산된
+    // `list-style-type`으로 잰다).
+    for (const group of groups) {
+      const list = group.querySelector("ul");
+      expect(list, group.getAttribute("data-testid") ?? "").not.toBeNull();
+      expect(list?.className).toMatch(/\blist-disc\b/);
+    }
     const lines = (group: Element) => [...group.querySelectorAll("li")].map((line) => line.textContent);
     expect(groups[0].textContent).toContain("대화");
     expect(lines(groups[0])).toEqual([koText.formatMessage(typing.tryIt), koText.formatMessage(phoneConversation.tryIt)]);
