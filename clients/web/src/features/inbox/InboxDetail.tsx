@@ -500,7 +500,7 @@ export function InboxDetail({
             )}
             {control?.kind === "offline" && (
               <p
-                className="text-meta text-ink-muted"
+                className="text-meta text-ink-muted break-keep"
                 data-testid="inbox-approval-offline"
               >
                 {blockedLine}
