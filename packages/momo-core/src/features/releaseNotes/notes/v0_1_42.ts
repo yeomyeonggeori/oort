@@ -39,7 +39,8 @@ export const RELEASE_NOTE_0_1_42: ReleaseNote = {
   version: "0.1.42",
   releasedOn: "2026-11-04",
   phoneBuild: 3059,
-  desktopFrom: ["0.1.42"], // 다음 채널 번호(`0.1.0-next.N`)는 승격 때 통합자가 더한다
+  // release 채널은 0.1.42, 다음 채널은 승격 커밋에서 만드는 팀 설치 빌드 0.1.0-next.11(#5227)이 처음 담는다.
+  desktopFrom: ["0.1.42", "0.1.0-next.11"],
   summary: "releaseNotes.v0142.summary",
   items: [
     {
