@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "baselineHead": "7a53b8acd4d04108c36a52fc525dbc54d22d015b",
+  "baselineHead": "42661a82d5d37a1bfb265299a765e193030ce899",
   "files": {
     "clients/mobile/App.tsx": 11,
     "clients/mobile/index.js": 2,
@@ -232,7 +232,7 @@
     "clients/mobile/src/features/sidebar/channelRowActions.ts": 3,
     "clients/mobile/src/features/sidebar/dmClosedCache.ts": 3,
     "clients/mobile/src/features/sidebar/dmVerdicts.ts": 17,
-    "clients/mobile/src/features/sidebar/rows.ts": 24,
+    "clients/mobile/src/features/sidebar/rows.ts": 23,
     "clients/mobile/src/features/sidebar/useChannelRowActions.ts": 15,
     "clients/mobile/src/features/sidebar/useDmReopen.ts": 2,
     "clients/mobile/src/features/work/SignedWorkControls.tsx": 90,
