@@ -20,6 +20,7 @@ import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { useWorkHosts } from "./workHostsQuery";
 import { CardBody, WorkspaceTierPolicySection } from "./workTierPolicy";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 설정 > 실행 호스트 (#3578 S4; R-1 §5 + AX-6a / MOMO-617). 워크스페이스에 등록된
@@ -169,7 +170,7 @@ function RegistryBlock({
                socket is down is a button that cannot succeed, which is the same
                defect as an operator form whose save always 403s. */
             <InlineBanner
-              message="연결이 끊겨 등록된 호스트 목록을 불러올 수 없어요. 다시 연결되면 목록을 불러와요."
+              message={<BlockedReason frame="loadHosts" />}
               separator={false}
               className="px-0"
               testId="work-hosts-error"

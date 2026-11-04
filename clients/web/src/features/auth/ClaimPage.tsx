@@ -46,6 +46,7 @@ import {
   holdSessionRestore,
   releaseSessionRestore,
 } from "./onboardingSessionHold";
+import { useBlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: onboarding claim-password form for self-host operators on
 // web+Tauri, density 5/10, motion 2/10.
@@ -69,7 +70,6 @@ const PASSWORD_DESCRIBED_BY_REFUSED = `${PASSWORD_HINT_ID} ${CLAIM_ERROR_TEXT_ID
 
 const CLAIM_BLOCKED_LINE = "이 링크로는 비밀번호를 정할 수 없어요.";
 const CLAIM_TROUBLE_LINE = "비밀번호를 아직 정하지 못했어요.";
-const CLAIM_OFFLINE_LINE = "연결이 끊겨서 잠깐 기다려요.";
 
 function FieldLabel({
   children,
@@ -114,6 +114,8 @@ export function ClaimPage({
   // 주소창이 없는 셸에서는 사용자가 서버를 확인하기 전에 비밀번호 칸이 닫혀 있다(수용 9b).
   const [hostConfirmed, setHostConfirmed] = useState(!isTauri);
   const offline = useBrowserOffline();
+  // 막은 원인을 말하는 문장(#5260). 이 화면의 게이트는 브라우저 오프라인이라 원인은 기기 오프라인이다.
+  const offlineLine = useBlockedReason("waitAMoment");
   const landingRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -226,7 +228,7 @@ export function ClaimPage({
     : failure !== null
       ? CLAIM_TROUBLE_LINE
       : offline
-        ? CLAIM_OFFLINE_LINE
+        ? offlineLine
         : messages.formatMessage("recovery.claim.title");
   const failureText =
     failure === null

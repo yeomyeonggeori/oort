@@ -62,6 +62,7 @@ import {
   webhookListQuery,
   webhookListQueryKey,
 } from "./webhookCredentialScope";
+import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 웹훅 (#1202): 외부 서비스가 이 워크스페이스의 채널로 알림을 보내도록 수신
@@ -456,7 +457,7 @@ export function WebhookSection({
             className="break-keep text-meta text-ink-muted"
             data-testid="webhook-rows-offline"
           >
-            {OFFLINE_ROW_REASON}
+            <BlockedReason frame={OFFLINE_ROW_REASON} />
           </p>
         )}
         {rows.length > 0 && !offline && busy && (
@@ -567,7 +568,7 @@ export function WebhookSection({
                     className="break-keep text-meta text-ink-muted"
                     data-testid="webhook-create-offline"
                   >
-                    {OFFLINE_CREATE_REASON}
+                    <BlockedReason frame={OFFLINE_CREATE_REASON} />
                   </span>
                 )}
                 {!offline && noChannels && (
@@ -602,8 +603,7 @@ export function WebhookSection({
 // --- 목록의 두 사유 (#1542 동형 · #1559) --------------------------------------
 
 /** 뒷절의 동사 둘은 이 줄이 실제로 내놓는 두 행동 그대로다 — 회전과 폐기. */
-const OFFLINE_ROW_REASON =
-  "연결이 끊겨 지금은 회전하거나 폐기할 수 없어요.";
+const OFFLINE_ROW_REASON: BlockedFrame = "rotateOrRevoke";
 
 /**
  * 낱말이 「회전」이나 「폐기」가 아니라 「누른 것」인 이유는 형제 표면
@@ -629,8 +629,7 @@ const BUSY_ROW_REASON =
  * 다시 연결된 뒤 이 사람이 한 번 더 눌러야 하고, 문장은 그 사실을 말한다
  * (`InviteSection.OFFLINE_CREATE_REASON` 이 같은 판정을 적는다).
  */
-const OFFLINE_CREATE_REASON =
-  "연결이 끊겨 지금은 주소를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요.";
+const OFFLINE_CREATE_REASON: BlockedFrame = "createWebhookUrl";
 
 /**
  * 받을 채널이 없다는 사실은 위 `SelectField` 의 유일한 선택지가 이미 말하지만,

@@ -32,6 +32,7 @@ import {
 import { ConfirmButton } from "./SettingsFields";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
+import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // Reading this as: settings for internal team users on web+Tauri,
 // density 6/10, motion 2/10.
@@ -51,8 +52,7 @@ import { CardBody } from "./workTierPolicy";
 // =============================================================================
 
 const ROSTER_LOADING_LABEL = "불러오는 중";
-const OFFLINE_REVOKE_REASON =
-  "연결이 끊겨 지금은 연결을 지울 수 없어요. 다시 연결되면 지울 수 있어요.";
+const OFFLINE_REVOKE_REASON: BlockedFrame = "deleteDevAccess";
 
 const SCOPE_OPTIONS = [
   { value: "mine", label: DEV_LIST_SCOPE_LABELS.mine },
@@ -277,7 +277,7 @@ export function DevAccessList({
                 className="break-keep text-meta text-ink-muted"
                 data-testid="dev-credentials-offline"
               >
-                {OFFLINE_REVOKE_REASON}
+                <BlockedReason frame={OFFLINE_REVOKE_REASON} />
               </p>
             )}
             {goneNotice !== null && (

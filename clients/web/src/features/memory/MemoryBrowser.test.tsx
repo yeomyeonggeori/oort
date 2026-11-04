@@ -279,7 +279,7 @@ describe("기억 브라우저: 오프라인", () => {
     // 캐시된 목록은 계속 보인다.
     expect(rows(host)).toHaveLength(1);
     expect(byTestId(host, "memory-detail-edit")).toBeNull();
-    expect(byTestId(host, "memory-detail-reason")?.textContent).toContain("연결이 끊겨 있어서");
+    expect(byTestId(host, "memory-detail-reason")?.textContent).toContain("You're offline, so you can't change this right now.");
     vi.restoreAllMocks();
   });
 });

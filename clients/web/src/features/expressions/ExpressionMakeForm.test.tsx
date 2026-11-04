@@ -381,7 +381,7 @@ describe("보내는 순서", () => {
     await act(async () => { store.setOffline(true); });
     const button = view.getByTestId(SUBMIT) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-    expect(view.getByText("연결이 끊겼어요. 연결되면 요청을 보낼 수 있어요.").id).toBe(button.getAttribute("aria-describedby"));
+    expect(view.getByText("You're offline. You can send the request once you're connected again.").id).toBe(button.getAttribute("aria-describedby"));
     fireEvent.submit(view.getByTestId("expression-make-form"));
     expect(api.openDirectMessage).not.toHaveBeenCalled();
     await act(async () => { store.setOffline(false); });

@@ -33,6 +33,7 @@ import {
   NewDmOpenStateContext,
 } from "./useNewDm";
 import { useOpenDm } from "./useOpenDm";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 새 다이렉트 메시지 (#3662, Buzz의 「To:」 선택 모달을 우리 문법으로).
@@ -283,7 +284,7 @@ function NewDmPanel({ onOpenChange }: { onOpenChange: (open: boolean) => void })
       {offline ? (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 이미 대화 중인 사람에게는 이동할 수 있습니다."
+          message={<BlockedReason frame="openExistingDm" />}
           testId="new-dm-offline"
         />
       ) : null}

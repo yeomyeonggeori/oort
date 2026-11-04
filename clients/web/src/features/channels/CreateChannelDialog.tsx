@@ -33,6 +33,7 @@ import {
   CreateChannelOpenStateContext,
   useCreateChannel,
 } from "./useCreateChannel";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 채널 만들기 다이얼로그 (AX-1a / MOMO-614). The web sibling of
@@ -269,7 +270,7 @@ function CreateChannelPanel({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼어요. 채널 만들기는 다시 연결된 뒤에 할 수 있어요."
+          message={<BlockedReason frame="createChannelLater" />}
           testId="create-channel-offline"
         />
       )}
