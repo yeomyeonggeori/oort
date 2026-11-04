@@ -49,6 +49,7 @@ export const messageKeys = [
   "connection.card.unknownTitle",
   "connection.composer.offline",
   "connection.composer.serverUnreachable",
+  "connection.load.agentRosterTitle",
   "connection.load.channelListTitle",
   "connection.load.conversationTitle",
   "connection.load.membersTitle",
@@ -822,6 +823,7 @@ export const argumentSpecs = {
   "connection.card.unknownTitle": {},
   "connection.composer.offline": {},
   "connection.composer.serverUnreachable": {},
+  "connection.load.agentRosterTitle": {},
   "connection.load.channelListTitle": {},
   "connection.load.conversationTitle": {},
   "connection.load.membersTitle": {},
@@ -1754,6 +1756,7 @@ export interface MessageArgs {
   "connection.card.unknownTitle": Record<string, never>;
   "connection.composer.offline": Record<string, never>;
   "connection.composer.serverUnreachable": Record<string, never>;
+  "connection.load.agentRosterTitle": Record<string, never>;
   "connection.load.channelListTitle": Record<string, never>;
   "connection.load.conversationTitle": Record<string, never>;
   "connection.load.membersTitle": Record<string, never>;

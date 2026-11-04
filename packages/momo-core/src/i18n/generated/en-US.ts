@@ -426,6 +426,12 @@ export const catalog: MessageCatalog = {
       "value": "We can't reach the server, so you can't send right now. Your draft is still here, and you can send it once we're connected again."
     }
   ],
+  "connection.load.agentRosterTitle": [
+    {
+      "type": 0,
+      "value": "Couldn't load the agent list"
+    }
+  ],
   "connection.load.channelListTitle": [
     {
       "type": 0,

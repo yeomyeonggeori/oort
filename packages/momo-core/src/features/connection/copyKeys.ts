@@ -55,6 +55,7 @@ export const CONNECTION_KEYS = {
   loadMembersTitle: "connection.load.membersTitle",
   /** 받아 둔 글이 있을 때 목록 위 한 줄(상자로 덮지 않는다). */
   loadNewerTitle: "connection.load.newerTitle",
+  loadAgentRosterTitle: "connection.load.agentRosterTitle",
   loadReasonOffline: "connection.load.reasonOffline",
   loadReasonServer: "connection.load.reasonServer",
   loadReasonUnknown: "connection.load.reasonUnknown",

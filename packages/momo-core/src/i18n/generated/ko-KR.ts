@@ -384,6 +384,12 @@ export const catalog: MessageCatalog = {
       "value": "서버에 닿지 못해 지금은 보낼 수 없어요. 쓰던 글은 그대로 있고, 다시 연결되면 여기서 보낼 수 있어요."
     }
   ],
+  "connection.load.agentRosterTitle": [
+    {
+      "type": 0,
+      "value": "에이전트 목록을 불러오지 못했어요"
+    }
+  ],
   "connection.load.channelListTitle": [
     {
       "type": 0,
