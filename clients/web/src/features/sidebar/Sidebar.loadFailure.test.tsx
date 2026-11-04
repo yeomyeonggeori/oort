@@ -217,6 +217,10 @@ describe("Sidebar: 채널 목록 불러오기 실패", () => {
       expect(box?.textContent).not.toMatch(/\d{3}/);
       expect(host.textContent).not.toContain("채널을 불러오지 못했습니다");
       expect(host.querySelector('[data-testid="channels-error-line"]')).toBeNull();
+      // 사이드바 시트 위: 「다시 시도」는 보조 채움이 아니라 시트 위 문법이다(#5306, 시트와 같은 색이라 사라지던 알약).
+      const retryClasses = (box?.querySelector("button")?.className ?? "").split(/\s+/);
+      expect(retryClasses).toEqual(expect.arrayContaining(["bg-surface", "shadow-sm"]));
+      expect(retryClasses).not.toContain("bg-surface-muted");
       await act(async () => {
         box?.querySelector("button")?.click();
       });
@@ -239,6 +243,10 @@ describe("Sidebar: 채널 목록 불러오기 실패", () => {
     const line = host.querySelector<HTMLElement>('[data-testid="channels-error-line"]');
     expect(line?.textContent).toContain("채널 목록을 불러오지 못했어요");
     expect(host.textContent).toContain("엔진");
+    // 한 줄의 알약도 같은 시트 위에 선다(#5306).
+    const retryClasses = (line?.querySelector("button")?.className ?? "").split(/\s+/);
+    expect(retryClasses).toEqual(expect.arrayContaining(["bg-surface", "shadow-sm"]));
+    expect(retryClasses).not.toContain("bg-surface-muted");
     await act(async () => {
       line?.querySelector("button")?.click();
     });

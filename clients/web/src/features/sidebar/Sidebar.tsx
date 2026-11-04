@@ -1189,19 +1189,26 @@ export function Sidebar({
                 <Skeleton ready={!channelsQuery.isLoading} rows={4}>
                   {/* 읽기 실패(#5242, #5221 후속): 받아 둔 채널이 하나도 없으면 원인
                       상자, 있으면 목록은 그대로 두고 위에 한 줄만. 읽을 것이 있는데
-                      240px 서랍의 위쪽을 상자가 밀어내면 정보를 버리는 일이다. */}
+                      240px 서랍의 위쪽을 상자가 밀어내면 정보를 버리는 일이다.
+
+                      둘 다 사이드바 시트 위에 서므로 「다시 시도」 알약이 시트 위 문법을
+                      받는다(#5306): 보조 채움은 시트와 같은 색(밝은 스킴 1.009:1)이라
+                      알약이 사라지고 글자만 남았다. 아래 빈 상태 「채널 만들기」가 쓰는
+                      한 벌(`band-surface bg-surface shadow-sm`)이다. */}
                   {channelsQuery.error &&
                     (channels.length + dms.length === 0 ? (
                       <LoadFailureBox
                         titleKey={CONNECTION_KEYS.loadChannelListTitle}
                         cause={loadCauseOf(channelsQuery.error)}
                         onRetry={() => void channelsQuery.refetch()}
+                        retryClassName="band-surface bg-surface shadow-sm"
                         testId="channels-error"
                       />
                     ) : (
                       <LoadFailureLine
                         titleKey={CONNECTION_KEYS.loadChannelListTitle}
                         onRetry={() => void channelsQuery.refetch()}
+                        retryClassName="band-surface bg-surface shadow-sm"
                         testId="channels-error-line"
                       />
                     ))}

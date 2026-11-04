@@ -10,13 +10,14 @@ import type { ConnectionCause } from "@momo/core/features/connection/model";
 import { LocaleProvider } from "@/i18n/LocaleProvider";
 import type { AppLocale } from "@/i18n/localeStore";
 import { koreanLocale } from "@/testing/koLocale";
-import { LoadFailureNote } from "./LoadFailureBox";
+import { LoadFailureBox, LoadFailureLine, LoadFailureNote } from "./LoadFailureBox";
 import { loadCauseOf } from "./loadFailure";
 
 // =============================================================================
 // #5242: 남은 「불러오지 못했습니다」 자리들이 함께 쓰는 부품.
 //   - `loadCauseOf`: 이 자리의 오류 객체 하나 + 지금 기기가 아는 온라인 여부 → 연결 원인(S-C `causeOfFailure`와 같은 규칙).
 //   - `LoadFailureNote`: 상자가 맞지 않는 좁은 자리의 한 줄. 제목 + 이유 한 벌, 다시 시도는 있을 때만.
+//   - `LoadFailureBox`·`LoadFailureLine`의 `retryClassName`(#5306): 시트·회색 띠 위(사이드바)의 「다시 시도」 알약이 호출부가 넘긴 시트 위 문법을 받는 길.
 // 자리마다의 배선(어느 오류 객체를 넘기는가)은 자리 시험이 잰다. 여기는 부품만.
 // =============================================================================
 
@@ -174,5 +175,85 @@ describe("LoadFailureNote", () => {
     const text = root.querySelector('[data-testid="note"]')?.textContent ?? "";
     expect(text).toContain("Couldn't load the member profile. You're offline. You can try again once you're connected.");
     expect(text).not.toMatch(/[가-힣]/);
+  });
+});
+
+// =============================================================================
+// #5306: 시트 위 「다시 시도」 알약. 보조 채움(`outline` = `--surface-muted`)은 시트와 같은 색(밝은 스킴 1.009:1)이라 사라진다.
+// 시트 위에 서는 호출부(사이드바)는 `retryClassName`으로 시트 위 문법(`band-surface bg-surface shadow-sm`, 사이드바 빈 상태 「채널 만들기」와 같은 한 벌)을
+// 넘기고, 안 넘기면(본문 판 위) 보조 채움 그대로다. 여기서 재는 것은 그 길이다: 넘긴 클래스가 알약에 실리고 `outline`의 채움을 이기는가(`cn`의
+// `bg-*` 그룹 병합), 안 넘기면 아무것도 안 바뀌는가. 그려진 대비는 캡처 레인(`scripts/capture-5242.mjs`)이 픽셀로 잰다. 사이드바가 그 한 벌을 실제로
+// 넘기는지는 `Sidebar.loadFailure.test.tsx`가 잰다.
+// =============================================================================
+
+const SHEET_PILL = "band-surface bg-surface shadow-sm";
+const classesOf = (element: Element | null | undefined): string[] => (element?.className ?? "").toString().split(/\s+/).filter(Boolean);
+
+describe("LoadFailureBox: 시트 위 알약", () => {
+  const box = (retryClassName: string | undefined) =>
+    mount(
+      createElement(LoadFailureBox, {
+        titleKey: CONNECTION_KEYS.loadChannelListTitle,
+        cause: "serverUnreachable",
+        onRetry: () => undefined,
+        ...(retryClassName === undefined ? {} : { retryClassName }),
+        testId: "box",
+      }),
+      true
+    );
+
+  it("시트 위 문법을 넘기면 「다시 시도」가 흰 면 + rest 그림자로 서고 보조 채움을 이긴다", () => {
+    const classes = classesOf(box(SHEET_PILL).querySelector('[data-testid="box"] button'));
+    expect(classes).toEqual(expect.arrayContaining(["bg-surface", "shadow-sm", "band-surface"]));
+    expect(classes).not.toContain("bg-surface-muted");
+  });
+
+  it("아무것도 안 넘기면(본문 판 위) 보조 채움 그대로이고 그림자·흰 면이 없다", () => {
+    const classes = classesOf(box(undefined).querySelector('[data-testid="box"] button'));
+    expect(classes).toContain("bg-surface-muted");
+    expect(classes).not.toContain("shadow-sm");
+    expect(classes).not.toContain("bg-surface");
+  });
+
+  it("알약의 모양이 바뀌어도 누르면 onRetry를 한 번 부른다", () => {
+    const onRetry = vi.fn();
+    const root = mount(
+      createElement(LoadFailureBox, {
+        titleKey: CONNECTION_KEYS.loadChannelListTitle,
+        cause: null,
+        onRetry,
+        retryClassName: SHEET_PILL,
+        testId: "box",
+      }),
+      true
+    );
+    act(() => root.querySelector<HTMLButtonElement>("button")?.click());
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("LoadFailureLine: 시트 위 알약", () => {
+  const line = (retryClassName: string | undefined) =>
+    mount(
+      createElement(LoadFailureLine, {
+        titleKey: CONNECTION_KEYS.loadChannelListTitle,
+        onRetry: () => undefined,
+        ...(retryClassName === undefined ? {} : { retryClassName }),
+        testId: "line",
+      }),
+      true
+    );
+
+  it("시트 위 문법을 넘기면 「다시 시도」가 흰 면 + rest 그림자로 서고 보조 채움을 이긴다", () => {
+    const classes = classesOf(line(SHEET_PILL).querySelector('[data-testid="line"] button'));
+    expect(classes).toEqual(expect.arrayContaining(["bg-surface", "shadow-sm", "band-surface"]));
+    expect(classes).not.toContain("bg-surface-muted");
+  });
+
+  it("아무것도 안 넘기면(본문 판 위) 보조 채움 그대로이고 그림자·흰 면이 없다", () => {
+    const classes = classesOf(line(undefined).querySelector('[data-testid="line"] button'));
+    expect(classes).toContain("bg-surface-muted");
+    expect(classes).not.toContain("shadow-sm");
+    expect(classes).not.toContain("bg-surface");
   });
 });
