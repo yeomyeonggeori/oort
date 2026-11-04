@@ -63,6 +63,6 @@ export function headroomLineHeight(lineHeight: number): number {
  */
 export function withLineHeadroom(style: StyleProp<TextStyle>): StyleProp<TextStyle> {
   const lineHeight = StyleSheet.flatten(style)?.lineHeight;
-  if (typeof lineHeight !== 'number' || !onPixelGrid(lineHeight)) return style;
+  if (lineHeight === undefined || !onPixelGrid(lineHeight)) return style;
   return [style, {lineHeight: lineHeight - LINE_HEADROOM}];
 }
