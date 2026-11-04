@@ -17,9 +17,6 @@ import type { AppLocale } from "@/i18n/localeStore";
 import { connectionScene, type ConnectionScene } from "@/testing/connectionViews";
 import { koreanLocale } from "@/testing/koLocale";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
-import { LocaleProvider } from "@/i18n/LocaleProvider";
-import type { AppLocale } from "@/i18n/localeStore";
-import { koreanLocale } from "@/testing/koLocale";
 import {
   NEW_WORKSPACE_ENTRY_GUIDE,
   NEW_WORKSPACE_ID_ONCE_NOTICE,
