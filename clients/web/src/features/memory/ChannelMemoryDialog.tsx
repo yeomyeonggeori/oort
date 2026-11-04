@@ -21,6 +21,7 @@ import {
   serverSurface,
 } from "@momo/core/features/capabilities/serverSurfaces";
 import { useChannelMemoryMutation, useMemorySettings } from "./useMemory";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 채널 기억 설정 (ADR-0196 D9 「채널 제외」 · 「일시정지」, #3165). Opened from the
@@ -115,7 +116,7 @@ export function ChannelMemoryDialog({
             )}
             {offline && (
               <p className="text-meta text-ink-muted" data-testid="channel-memory-offline">
-                연결이 끊겨 있어서 지금은 바꿀 수 없어요.
+                <BlockedReason frame="changeIt" />
               </p>
             )}
             {lastWriteFailed && write.isError && (

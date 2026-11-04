@@ -1145,7 +1145,7 @@ describe("M-1 잠금 사유는 잠긴 컨트롤만 가리킨다", () => {
     expect(reasonId).toBe(`agent-credentials-offline-${CONNECTION_ID}`);
     const note = document.getElementById(reasonId ?? "");
     expect(note).not.toBeNull();
-    expect(note?.textContent).toContain("연결이 끊겨");
+    expect(note?.textContent).toContain("You're offline, so you can't issue or change connection values right now.");
     expect(note?.closest("li")).toBe(regen.closest("li"));
     expect(
       regen.nextElementSibling === note ||

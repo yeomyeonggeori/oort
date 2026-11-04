@@ -40,6 +40,7 @@ import { teamAiSettingKey } from "@/features/settings/TeamAiSetting";
 import { TeamAiRolesList } from "@/features/settings/TeamAiRolesList";
 import { rosterQueryKey, useDirectory } from "@/features/workspace/useWorkspace";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 설정 › AI › 팀 AI 키 화면의 「도우미」 카드 (ADR-0201 증보 v3 B3·B10, #4945).
@@ -256,7 +257,7 @@ export function TeamAiHelperCard({ workspaceId }: { workspaceId: string }) {
         />
         {offline && (
           <p className="break-keep text-meta text-ink-muted" data-testid="team-ai-helper-offline">
-            {formatMessage("teamAi.helper.rolesOffline")}
+            <BlockedReason frame="changeIt" />
           </p>
         )}
         {toggle.isError && (

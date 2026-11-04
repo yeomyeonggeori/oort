@@ -28,6 +28,7 @@ import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { hostedListQuery } from "./hostedCredentialScope";
 import type { HostedWizardLaunch } from "./hostedWizardLaunch";
 import { HostedAgentWizard } from "./HostedAgentWizard";
+import { useBlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: settings (AI 허브 외부 연결) for internal team users on
 // web+Tauri, density 6/10, motion 1/10.
@@ -199,7 +200,9 @@ export function PersonalAssistantsList({ className }: { className?: string }) {
     setWizardOpen(true);
   };
 
-  const lockedReason = offline ? "연결이 끊겨 지금은 할 수 없어요. 다시 연결되면 눌러 보세요." : null;
+  // 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260).
+  const blockedReason = useBlockedReason("doThisLater");
+  const lockedReason = offline ? blockedReason : null;
 
   return (
     <section

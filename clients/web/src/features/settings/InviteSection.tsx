@@ -26,6 +26,7 @@ import { ChoiceRadios, Field, OperatorNotice, StatusChip } from "./SettingsField
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
 import { useIssueInvite } from "./useIssueInvite";
+import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 멤버와 초대 (R-1 §5, 온보딩 감사 W-O1/W-O5): issue an invite code and hand
@@ -61,8 +62,7 @@ const DAY_MS = 86_400_000;
  * 이제 같은 잠금에 같은 사실을 말한다 — 스캔이 그 금지를 전 파일에 건다.
  */
 const OFFLINE_NOTE_ID = "invite-create-offline-note";
-const OFFLINE_CREATE_REASON =
-  "연결이 끊겨 지금은 초대 링크를 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요.";
+const OFFLINE_CREATE_REASON: BlockedFrame = "createInviteLink";
 
 export function InviteSection({
   workspaceId,
@@ -289,7 +289,7 @@ export function InviteSection({
                 className="min-w-0 flex-1 break-keep text-meta text-ink-muted"
                 data-testid="invite-create-offline"
               >
-                {OFFLINE_CREATE_REASON}
+                <BlockedReason frame={OFFLINE_CREATE_REASON} />
               </span>
             )}
             {/* 진행과 잠금은 다른 축이다 (#1486 회전 · #1541 · #1559). 이 자리는

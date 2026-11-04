@@ -26,6 +26,7 @@ import { ConfirmButton, Field, StatusChip } from "./SettingsFields";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 이 맥 (ADR-0188 D2 · R1, #2778): the desktop's own door to becoming a work
@@ -353,7 +354,7 @@ function RegisterForm({
           </Button>
           {offline && (
             <span id={reasonId} className="text-meta text-ink-muted">
-              연결이 끊겨 지금은 등록할 수 없어요.
+              <BlockedReason frame="register" />
             </span>
           )}
         </div>
@@ -495,7 +496,7 @@ function Registered({
         />
         {offline && (
           <p id={offlineReasonId} className="break-keep text-meta text-ink-muted">
-            연결이 끊겨 지금은 등록을 해제할 수 없어요.
+            <BlockedReason frame="unregister" />
           </p>
         )}
       </div>

@@ -139,7 +139,6 @@ import {
   FIRST_AGENT_ERROR_REASON_ID,
   FIRST_AGENT_HEADING_ID,
   FIRST_AGENT_LIST_ERROR,
-  FIRST_AGENT_OFFLINE_REASON,
   FIRST_AGENT_OFFLINE_REASON_ID,
   FIRST_AGENT_RECHECKING,
   FIRST_AGENT_REENTRY_HREF,
@@ -165,6 +164,7 @@ import {
   writeFirstAgentMarker,
   dismissFirstAgentDeferred,
 } from "./firstAgentStore";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: onboarding (D4 AI 연결, #2814) for internal team users on
 // web+Tauri, density 6/10, motion 2/10 (line-slide between steps, kometto
@@ -1162,7 +1162,7 @@ export function FirstAgentStage({
         {showOffline && (
           <InlineBanner
             tone="neutral"
-            message={FIRST_AGENT_OFFLINE_REASON}
+            message={<BlockedReason frame="keepListIssueLater" />}
             messageId={FIRST_AGENT_OFFLINE_REASON_ID}
             testId="first-agent-offline"
           />

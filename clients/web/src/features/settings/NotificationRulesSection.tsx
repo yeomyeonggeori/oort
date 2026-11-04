@@ -29,6 +29,7 @@ import { useRecheckWhenElapsed } from "./useRecheckWhenElapsed";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
+import { BlockedReason, type BlockedFrame } from "@/features/common/BlockedReason";
 
 // Design Read: settings for internal team users on web+Tauri, density 6/10,
 // motion 2/10.
@@ -65,7 +66,7 @@ import { CardBody } from "./workTierPolicy";
 const CHANNEL_NOTE =
   "채널 하나만 조용히 하려면 그 채널 이름을 눌러 알림 끄기를 고르세요. 이 화면은 워크스페이스 전체에 걸리는 규칙만 다뤄요.";
 
-const OFFLINE_REASON = "연결이 끊겨 지금은 규칙을 바꿀 수 없어요.";
+const OFFLINE_REASON: BlockedFrame = "changeRules";
 
 // 서버는 「활성 사람 멤버」만 이 규칙을 읽고 쓰게 한다(notification_rules.rs). 403은 운영자 권한이
 // 아니라 에이전트 계정이거나 멤버가 아니라는 뜻이라 「서버 운영자에게 문의」가 아니라 그 사실을 말한다.
@@ -266,7 +267,7 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
                   className="break-keep text-meta text-ink-muted"
                   data-testid="notification-rules-offline"
                 >
-                  {OFFLINE_REASON}
+                  <BlockedReason frame={OFFLINE_REASON} />
                 </p>
               </CardBody>
             )}

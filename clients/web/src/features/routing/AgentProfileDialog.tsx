@@ -44,6 +44,7 @@ import {
   OpenAgentProfileContext,
   useAgentProfile,
 } from "./useAgentProfile";
+import { BlockedReason, useBlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 에이전트 프로필 다이얼로그 (ADR-0134 D3 / MOMO-626, MOMO-537 합류).
@@ -241,8 +242,10 @@ function AgentProfilePanel({
   // 모델 상자를 열어 주고, [변경 저장]에서 404를 받았다. 읽을 수 있다는 사실이
   // 저장할 수 있다는 뜻은 아니므로 이제 쓰기 축은 쓰기 축에게 물어본다.
   const profileWritable = editing.support === "ready";
+  // 막은 원인(기기 오프라인 · 서버에 닿지 못함)을 말한다(#5260).
+  const offlineWriteReason = useBlockedReason("changeIt");
   const writeBlockedReason = offline
-    ? "연결이 끊긴 동안에는 바꿀 수 없습니다."
+    ? offlineWriteReason
     : profileWritable
       ? null
       : editing.support === "checking"
@@ -418,7 +421,7 @@ function AgentProfilePanel({
       {offline && (
         <InlineBanner
           tone="neutral"
-          message="연결이 끊겼습니다. 변경은 다시 연결된 뒤에 저장할 수 있습니다."
+          message={<BlockedReason frame="saveChangesLater" />}
           testId="agent-profile-offline"
         />
       )}

@@ -15,6 +15,7 @@ import { Switch } from "@/design/ui/switch";
 import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 설정 › 워크스페이스 › 「에이전트의 먼저 제안」 (ADR-0186 증보 v5 U-b-3 K1, #4705).
@@ -108,7 +109,7 @@ export function AgentInitiativeSetting({
       {offline && (
         <CardBody>
           <p id={offlineId} className="text-meta text-ink-muted">
-            연결이 끊겨 지금은 이 설정을 바꿀 수 없어요.
+            <BlockedReason frame="changeSetting" />
           </p>
         </CardBody>
       )}

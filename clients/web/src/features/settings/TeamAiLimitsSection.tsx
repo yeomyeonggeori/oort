@@ -30,6 +30,7 @@ import { Switch } from "@/design/ui/switch";
 import { InlineBanner } from "@/features/common/States";
 import { useFormatMessage } from "@/i18n/useFormatMessage";
 import { useLocaleService } from "@/i18n/useLocaleService";
+import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
 // 설정 › AI › 팀 AI 키 › 「사용 한도」 (#5026, #4944의 화면 몫, ADR-0201 증보 v3 B9).
@@ -326,7 +327,7 @@ export function TeamAiLimitsSection({
       ) : null}
       {offline ? (
         <p className="break-keep px-2 pt-2 text-meta text-ink-muted" data-testid="team-ai-limits-offline">
-          {formatMessage("settings.aiLimits.offline")}
+          <BlockedReason frame="changeLimits" />
         </p>
       ) : null}
       <ul className="flex min-w-0 flex-col" aria-labelledby={titleId}>
