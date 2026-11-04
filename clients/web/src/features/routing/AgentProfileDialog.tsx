@@ -9,6 +9,9 @@ import {
   DialogTitle,
 } from "@/design/ui/dialog";
 import { InlineBanner } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
@@ -351,10 +354,10 @@ function AgentProfilePanel({
         footer={footer}
         blockClose={false}
       >
-        <InlineBanner
-          message="에이전트 프로필을 불러오지 못했습니다."
-          actionLabel="다시 시도"
-          onAction={handle.refetch}
+        <LoadFailureBox
+          titleKey={CONNECTION_KEYS.loadAgentProfileTitle}
+          cause={loadCauseOf(handle.error)}
+          onRetry={handle.refetch}
           testId="agent-profile-error"
         />
       </Frame>

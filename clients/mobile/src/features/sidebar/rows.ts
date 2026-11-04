@@ -18,14 +18,9 @@ import type {ChannelGroups} from '../workspace/queries';
 import type {DmVerdict} from './dmVerdicts';
 import {rowEmphasis, type RowEmphasis} from './rowEmphasis';
 
-/**
- * 대화 목록을 못 불러왔을 때 목록 자리의 `ErrorState` 가 드는 머리줄.
- *
- * 상수인 이유는 이 문장을 두 곳이 말하기 때문이다 (#2584 리뷰 M-1): 화면의 상자와,
- * 알림 탭이 그 실패에 막혔을 때의 낭독. 둘이 따로 적으면 같은 사실이 두 이름으로
- * 들린다 — 그 리뷰가 잡은 결함이 바로 「대화 목록」과 「채널」 두 명사였다.
- */
-export const CHANNEL_LIST_FAILED = '채널을 불러오지 못했습니다.';
+// 대화 목록을 못 불러왔을 때의 머리줄은 사전 키 `connection.load.channelListTitle`(`CONNECTION_KEYS.loadChannelListTitle`)이다(#5285). 이 문장을 두 곳이
+// 말한다(#2584 리뷰 M-1): 목록 자리의 오류 상자와, 알림 탭이 그 실패에 막혔을 때의 낭독. 둘이 같은 키를 읽어 같은 사실이 두 이름으로 들리지 않는다.
+// (손으로 적은 합쇼체 상수 `CHANNEL_LIST_FAILED` 는 이 키로 바뀌며 지웠다.)
 
 // =============================================================================
 // What the 대화 list shows, as a pure function.

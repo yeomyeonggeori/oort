@@ -6,10 +6,14 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Channel, RosterMember } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { dismissTemporarySurfaces } from "@momo/core/features/notifications/entryDismiss";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { __resetEntryDrafts } from "@/lib/entryDrafts";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { NewDmProvider } from "./NewDmDialog";
 import { useOpenNewDm } from "./useNewDm";
 
@@ -60,16 +64,18 @@ const dmWithDohyun: Channel = {
 } as Channel;
 
 const channelsState = { dms: [dmWithDohyun] as Channel[] };
+/** 명부 질의 한 개. `error`를 주면 명부는 비어 있다(받아 둔 멤버가 없는 실패). */
+const directoryState = { error: null as Error | null, refetch: vi.fn() };
 vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/features/workspace/useWorkspace")>();
   return {
     ...actual,
     useChannels: () => ({ groups: { channels: [], dms: channelsState.dms } }),
     useDirectory: () => ({
-      directory: makeDirectory(roster),
+      directory: makeDirectory(directoryState.error ? [] : roster),
       isPending: false,
-      error: null,
-      refetch: () => undefined,
+      error: directoryState.error,
+      refetch: directoryState.refetch,
     }),
   };
 });
@@ -77,6 +83,7 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
 let root: Root | null = null;
 let host: HTMLElement | null = null;
+let ko: AppLocale;
 
 const session: SessionContextValue = {
   session: {
@@ -105,19 +112,22 @@ async function mount(): Promise<HTMLElement> {
   document.body.append(host);
   root = createRoot(host);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const tree: ReactElement = createElement(
-    QueryClientProvider,
-    { client },
-    createElement(
-      SessionProvider,
-      { value: session },
+  const tree: ReactElement = createElement(LocaleProvider, {
+    locale: ko,
+    children: createElement(
+      QueryClientProvider,
+      { client },
       createElement(
-        MemoryRouter,
-        { initialEntries: ["/"] },
-        createElement(NewDmProvider, null, createElement(Opener), createElement(Where))
+        SessionProvider,
+        { value: session },
+        createElement(
+          MemoryRouter,
+          { initialEntries: ["/"] },
+          createElement(NewDmProvider, null, createElement(Opener), createElement(Where))
+        )
       )
-    )
-  );
+    ),
+  });
   await act(async () => {
     root?.render(tree);
     await Promise.resolve();
@@ -135,10 +145,13 @@ async function openDialog(h: HTMLElement) {
   });
 }
 
-beforeAll(() => {
+beforeAll(async () => {
+  ko = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
 });
 beforeEach(() => {
+  directoryState.error = null;
+  directoryState.refetch.mockReset();
   __resetEntryDrafts();
   channelsState.dms = [dmWithDohyun];
   openDirectMessage.mockReset();
@@ -322,5 +335,47 @@ describe("알림 클릭이 닫은 모달은 쓰던 검색어를 돌려준다 (#5
     await openDialog(h);
     expect(searchValue()).toBe("");
     expect(rows()).toHaveLength(3);
+  });
+});
+
+// #5242: 멤버 목록을 불러오지 못했을 때. 옛 「멤버 명부를 불러오지 못했습니다.」 배너는 원인 상자다.
+describe("새 다이렉트 메시지 모달: 멤버 목록 불러오기 실패 (#5242)", () => {
+  // 지키는 것: 받아 둔 멤버가 없으면 상자(제목 + 이유 + 다시 시도). 이유는 원인을 따라가고 다시 시도가 명부를 다시 읽는다.
+  it("실패하면 원인 상자가 서고, 이유가 원인을 따라가며, 다시 시도가 명부를 다시 읽는다", async () => {
+    const cases: [boolean, string, string][] = [
+      [false, "deviceOffline", "오프라인이에요. 연결되면 다시 불러올 수 있어요."],
+      [true, "serverUnreachable", "서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+    ];
+    for (const [online, cause, reason] of cases) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(online);
+      directoryState.error = new NetworkError("unreachable", 15_000);
+      directoryState.refetch.mockClear();
+      const h = await mount();
+      await openDialog(h);
+      const box = document.querySelector<HTMLElement>('[data-testid="new-dm-roster-error"]');
+      expect(box, cause).not.toBeNull();
+      expect(box?.getAttribute("role")).toBe("alert");
+      expect(box?.getAttribute("data-cause")).toBe(cause);
+      expect(box?.textContent).toContain("멤버 목록을 불러오지 못했어요");
+      expect(box?.querySelector('[data-testid="load-failure-reason"]')?.textContent).toBe(reason);
+      expect(document.body.textContent).not.toContain("멤버 명부를 불러오지 못했습니다");
+      await act(async () => {
+        box?.querySelector("button")?.click();
+      });
+      expect(directoryState.refetch).toHaveBeenCalledTimes(1);
+      act(() => root?.unmount());
+      host?.remove();
+      document.body.innerHTML = "";
+      root = null;
+      host = null;
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("실패하지 않았으면 상자가 없고 목록이 선다", async () => {
+    const h = await mount();
+    await openDialog(h);
+    expect(document.querySelector('[data-testid="new-dm-roster-error"]')).toBeNull();
+    expect(rows().length).toBeGreaterThan(0);
   });
 });

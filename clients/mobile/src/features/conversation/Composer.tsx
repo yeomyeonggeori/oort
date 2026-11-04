@@ -67,6 +67,7 @@ import {
   type TextInputSelectionChangeEventData,
   type TextLayoutEventData,
 } from 'react-native';
+import {Sentence} from '../../design/atoms';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
 import {GlassSurface, useGlassMaterial} from '../../design/glass';
@@ -2526,9 +2527,10 @@ export function Composer({
       ) : null}
 
       {offline ? (
-        <Text style={styles.offline} testID="composer-offline">
+        // 완성된 문장이라 `Sentence` 다 — 어절 가운데서 꺾이지 않는다(5a M1, #5288).
+        <Sentence style={styles.offline} testID="composer-offline">
           {offlineNote ?? COMPOSER_OFFLINE_COPY}
-        </Text>
+        </Sentence>
       ) : null}
 
       {attachmentKey === null ? null : (

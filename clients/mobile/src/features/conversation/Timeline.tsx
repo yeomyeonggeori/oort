@@ -2817,6 +2817,21 @@ function TimelineInner({
   const dragRestHoldUntilRef = useRef(0);
   // 읽는 사람이 목록을 쥐고 있다 — 손가락이 목록을 끌고 있거나, 끌기로 입력창이 쉬기 시작한 지 얼마 안 됐다. 이 동안은 입력창이 줄어드는 프레임에도 바닥으로 끌어가지 않는다(아래 두 자리).
   const readerHoldsList = useCallback(() => fingerOnListRef.current || Date.now() < dragRestHoldUntilRef.current, []);
+  /**
+   * 목록을 **네이티브** `scrollToEnd` 로 끝에 붙인다. 그 순간의 창과 콘텐츠 길이로 끝을 셈하므로 마지막 셀이 재졌는지와 무관하다 — `VirtualizedList.scrollToEnd` 는 끝을
+   * 셀 기록으로 **어림**하고, 안 잰 마지막 셀(방금 키가 바뀐 행)은 평균 높이로 센다(머리·위 여백은 어림에 없다) (#5284). 네이티브 응답자에 `scrollToEnd` 가 없으면(시험·하네스)
+   * 거짓을 돌려준다 — 부르는 쪽이 정한다.
+   */
+  const scrollToNativeEnd = useCallback((): boolean => {
+    // `getScrollResponder()` 는 ScrollView 인스턴스를 준다(타입은 `Element` 라 좁혀서 읽는다). 그 `scrollToEnd` 는 네이티브 명령이다.
+    const scroller = listRef.current?.getScrollResponder() as unknown as
+      | {scrollToEnd?: (options?: {animated?: boolean}) => void}
+      | null
+      | undefined;
+    if (!scroller?.scrollToEnd) return false;
+    scroller.scrollToEnd({animated: false});
+    return true;
+  }, [listRef]);
   useEffect(() => {
     if (dockFollow === null) return undefined;
     return dockFollow.register(() => {
@@ -2825,14 +2840,9 @@ function TimelineInner({
       // 그때 네이티브 `scrollToEnd` 를 부르면 손가락 밑에서 목록이 끝으로 튀고 입력창이 줄어드는 프레임마다 다시 튄다. 손가락이 먼저다(`followGlide` 와 같은 원칙). 손을 뗀 직후의
       // 접힘 꼬리(몇 프레임)도 같다 — 그 몇 프레임이 방금 위로 읽으러 간 목록을 끝으로 되돌린다(`DRAG_REST_FOLLOW_HOLD_MS`).
       if (readerHoldsList()) return;
-      // `getScrollResponder()` 는 ScrollView 인스턴스를 준다(타입은 `Element` 라 좁혀서 읽는다). 그 `scrollToEnd` 는 네이티브 명령이다.
-      const scroller = listRef.current?.getScrollResponder() as unknown as
-        | {scrollToEnd?: (options?: {animated?: boolean}) => void}
-        | null
-        | undefined;
-      scroller?.scrollToEnd?.({animated: false});
+      scrollToNativeEnd();
     });
-  }, [dockFollow, listRef, readerHoldsList]);
+  }, [dockFollow, readerHoldsList, scrollToNativeEnd]);
 
   // 목록이 입력창에게 쉬라고 한다. 자판은 여기서 직접 내리고(`Keyboard.dismiss` — 입력창이 안 쥔 자판은 없다), 글이 남은 입력창을 접는 것은 다리(`dockFollow.rest`)가 맡는다.
   // 탭(#4614)과 끌기(#4665)가 **같은 함수**를 부른다 — 「쉬기」가 둘로 갈라지지 않는다.
@@ -2869,16 +2879,29 @@ function TimelineInner({
   // `ConversationLayout` moved from an animated `paddingBottom` to a transform,
   // so a raised keyboard SLIDES this list instead of shrinking it and the tail
   // keeps its distance to the composer with nothing to correct. What is left
-  // here is the case that still resizes a list — rotation, and a banner
-  // appearing above it — which is why it stays.
+  // here is the case that still resizes a list — rotation, a banner
+  // appearing above it, and (#5222) the one-line cause note that stands over the
+  // composer while a send cannot go out and goes away when the connection is back
+  // (+37pt of window) — which is why it stays.
+  //
+  // ## 창이 커지는 순간의 끝은 어림이 아니라 네이티브가 센다 (#5284)
+  //
+  // 연결이 돌아오면 저절로 다시 보낸 글의 실패 행(`p-…`)이 서버 사본(`m-…`)으로 바뀌고, 같은 때 원인 문장이 걷혀 창이 커진다. 키가 바뀐 마지막 셀은 레이아웃 보고가 오기
+  // 전까지 `VirtualizedList` 에게 안 잰 셀이고, 목록의 `scrollToEnd` 는 그런 셀을 평균 높이로 어림한다 — 어림에는 머리(16)·위 여백이 없다. 창 보고가 셀 보고보다 먼저 오면
+  // 그 어림으로 앉고, 두 행의 높이가 같아 콘텐츠 보고는 다시 오지 않으니 고칠 기회가 없다: 검증 5a 에서 마지막 행이 끝에서 17pt 못 미친 채(따라가는 중은 켜진 채라 필도
+  // 없이) 55초 뒤에도 그대로였고, 강제 순서 시험에서는 140pt 못 미쳐 따라가기가 꺼지고 필이 섰다. 그래서 목록이 앉은 뒤(진입이 끝난 뒤)의 창 변화는 도크 처리기(#4518)와
+  // 같은 **네이티브 `scrollToEnd`** 로 간다 — 그 순간의 창과 콘텐츠 길이로 끝을 센다. 진입·끝 쫓기 중에는 그 기계가 스스로 끝을 묻고 있으므로 그대로 두고, 네이티브 응답자가
+  // 없으면(시험·하네스) 예전처럼 목록의 어림으로 물러난다.
   const onLayout = useCallback(
     (event: LayoutChangeEvent) => {
       noteGeometry({viewportHeight: event.nativeEvent.layout.height});
       resolvePendingVerdict();
       // 읽는 사람이 목록을 쥔 동안은 끌어가지 않는다(#4665) — 아래로 끌다가 입력창이 쉬어 창이 늘어나는 프레임에 `scrollToEnd` 가 손가락 밑 목록을 끝으로 되돌리면 안 된다(위 도크 처리기와 같은 이유).
-      if (followingRef.current && !readerHoldsList()) listRef.current?.scrollToEnd({animated: false});
+      if (!followingRef.current || readerHoldsList()) return;
+      if (didInitialScrollRef.current && !convergingRef.current && scrollToNativeEnd()) return;
+      listRef.current?.scrollToEnd({animated: false});
     },
-    [listRef, noteGeometry, readerHoldsList, resolvePendingVerdict],
+    [listRef, noteGeometry, readerHoldsList, resolvePendingVerdict, scrollToNativeEnd],
   );
 
   // ---- 두 필이 데려가는 곳 (#1892) ------------------------------------------

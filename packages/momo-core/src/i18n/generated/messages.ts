@@ -201,13 +201,29 @@ export const messageKeys = [
   "connection.card.unknownTitle",
   "connection.composer.offline",
   "connection.composer.serverUnreachable",
+  "connection.load.activityTitle",
+  "connection.load.agentChannelsTitle",
+  "connection.load.agentHistoryTitle",
+  "connection.load.agentProfileTitle",
+  "connection.load.agentRosterTitle",
+  "connection.load.agentRunTitle",
   "connection.load.channelListTitle",
   "connection.load.conversationTitle",
+  "connection.load.deviceKeysTitle",
+  "connection.load.dmApprovalTitle",
+  "connection.load.hermesStatusTitle",
+  "connection.load.inboxMoreTitle",
+  "connection.load.inboxTitle",
+  "connection.load.linkedDevicesTitle",
+  "connection.load.linkPreviewSettingTitle",
+  "connection.load.memberProfileTitle",
   "connection.load.membersTitle",
   "connection.load.newerTitle",
+  "connection.load.notificationRulesTitle",
   "connection.load.reasonOffline",
   "connection.load.reasonServer",
   "connection.load.reasonUnknown",
+  "connection.load.sentence",
   "connection.load.threadTitle",
   "connection.send.failed",
   "connection.send.reasonOffline",
@@ -559,7 +575,7 @@ export const messageKeys = [
   "releaseNotes.page.openHint",
   "releaseNotes.page.title",
   "releaseNotes.popup.close",
-  "releaseNotes.popup.more",
+  "releaseNotes.popup.showMore",
   "releaseNotes.popup.title",
   "releaseNotes.surface.desktop",
   "releaseNotes.surface.label",
@@ -1130,13 +1146,32 @@ export const argumentSpecs = {
   "connection.card.unknownTitle": {},
   "connection.composer.offline": {},
   "connection.composer.serverUnreachable": {},
+  "connection.load.activityTitle": {},
+  "connection.load.agentChannelsTitle": {},
+  "connection.load.agentHistoryTitle": {},
+  "connection.load.agentProfileTitle": {},
+  "connection.load.agentRosterTitle": {},
+  "connection.load.agentRunTitle": {},
   "connection.load.channelListTitle": {},
   "connection.load.conversationTitle": {},
+  "connection.load.deviceKeysTitle": {},
+  "connection.load.dmApprovalTitle": {},
+  "connection.load.hermesStatusTitle": {},
+  "connection.load.inboxMoreTitle": {},
+  "connection.load.inboxTitle": {},
+  "connection.load.linkedDevicesTitle": {},
+  "connection.load.linkPreviewSettingTitle": {},
+  "connection.load.memberProfileTitle": {},
   "connection.load.membersTitle": {},
   "connection.load.newerTitle": {},
+  "connection.load.notificationRulesTitle": {},
   "connection.load.reasonOffline": {},
   "connection.load.reasonServer": {},
   "connection.load.reasonUnknown": {},
+  "connection.load.sentence": {
+    "reason": "string",
+    "title": "string"
+  },
   "connection.load.threadTitle": {},
   "connection.send.failed": {},
   "connection.send.reasonOffline": {},
@@ -1538,9 +1573,7 @@ export const argumentSpecs = {
   "releaseNotes.page.openHint": {},
   "releaseNotes.page.title": {},
   "releaseNotes.popup.close": {},
-  "releaseNotes.popup.more": {
-    "count": "number"
-  },
+  "releaseNotes.popup.showMore": {},
   "releaseNotes.popup.title": {},
   "releaseNotes.surface.desktop": {},
   "releaseNotes.surface.label": {},
@@ -2214,13 +2247,29 @@ export interface MessageArgs {
   "connection.card.unknownTitle": Record<string, never>;
   "connection.composer.offline": Record<string, never>;
   "connection.composer.serverUnreachable": Record<string, never>;
+  "connection.load.activityTitle": Record<string, never>;
+  "connection.load.agentChannelsTitle": Record<string, never>;
+  "connection.load.agentHistoryTitle": Record<string, never>;
+  "connection.load.agentProfileTitle": Record<string, never>;
+  "connection.load.agentRosterTitle": Record<string, never>;
+  "connection.load.agentRunTitle": Record<string, never>;
   "connection.load.channelListTitle": Record<string, never>;
   "connection.load.conversationTitle": Record<string, never>;
+  "connection.load.deviceKeysTitle": Record<string, never>;
+  "connection.load.dmApprovalTitle": Record<string, never>;
+  "connection.load.hermesStatusTitle": Record<string, never>;
+  "connection.load.inboxMoreTitle": Record<string, never>;
+  "connection.load.inboxTitle": Record<string, never>;
+  "connection.load.linkedDevicesTitle": Record<string, never>;
+  "connection.load.linkPreviewSettingTitle": Record<string, never>;
+  "connection.load.memberProfileTitle": Record<string, never>;
   "connection.load.membersTitle": Record<string, never>;
   "connection.load.newerTitle": Record<string, never>;
+  "connection.load.notificationRulesTitle": Record<string, never>;
   "connection.load.reasonOffline": Record<string, never>;
   "connection.load.reasonServer": Record<string, never>;
   "connection.load.reasonUnknown": Record<string, never>;
+  "connection.load.sentence": { reason: string; title: string };
   "connection.load.threadTitle": Record<string, never>;
   "connection.send.failed": Record<string, never>;
   "connection.send.reasonOffline": Record<string, never>;
@@ -2572,7 +2621,7 @@ export interface MessageArgs {
   "releaseNotes.page.openHint": Record<string, never>;
   "releaseNotes.page.title": Record<string, never>;
   "releaseNotes.popup.close": Record<string, never>;
-  "releaseNotes.popup.more": { count: number };
+  "releaseNotes.popup.showMore": Record<string, never>;
   "releaseNotes.popup.title": Record<string, never>;
   "releaseNotes.surface.desktop": Record<string, never>;
   "releaseNotes.surface.label": Record<string, never>;

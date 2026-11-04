@@ -17,6 +17,7 @@ import {circleLook} from './sheetModel';
 import {SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePalette, useStyles} from './theme';
 import {PULL_FILL} from './pullRefresh';
+import {withLineHeadroom} from './lineHeadroom';
 import type {PullScrollProps} from './refresh';
 
 // =============================================================================
@@ -479,11 +480,11 @@ export function NoticeBlock({
             한국어 문장이고(인용·고정·검색·세션 앵커의 네 고지 + 서버 능력 고지),
             그중 하나만 예외로 두면 같은 상자가 문장마다 다르게 끊긴다. */}
         <View style={styles.noticeText}>
-          <Text style={styles.noticeHeadline} lineBreakStrategyIOS="hangul-word">
+          <Text style={withLineHeadroom(styles.noticeHeadline)} lineBreakStrategyIOS="hangul-word">
             {headline}
           </Text>
           {detail ? (
-            <Text style={styles.noticeDetail} lineBreakStrategyIOS="hangul-word">
+            <Text style={withLineHeadroom(styles.noticeDetail)} lineBreakStrategyIOS="hangul-word">
               {detail}
             </Text>
           ) : null}
@@ -515,11 +516,17 @@ export function NoticeBlock({
  * **라벨**(「다음 결정 보기」·「기본 제공」·단추 이름)에도 쓴다 — 결정 무대·테마·에이전트 비용(#4982)은 한글이 든 글자 전부가
  * 이 부품이고, 하네스(`__tests__/fixtures/hangulWord.ts`)가 빠진 글자를 센다. 숫자·이모지·아이콘 글리프에는 쓰지 않는다.
  * `style`·`numberOfLines`·`testID` 등 `Text` 의 모든 props 를 그대로 받는다.
+ *
+ * **줄 높이에 여유를 준다**(`withLineHeadroom`, #5288): 여러 줄로 접힌 글이 첫 줄만 그려지고 잘리는 결함은 `hangul-word` 탓이 아니라(여섯 줄바꿈
+ * 전략이 같은 절대 y 에서 똑같이 났다) 글 상자 높이가 float 반올림으로 줄 수의 요구보다 1e-4pt 낮게 내려오는 것이다. 한글이 없는 글에서
+ * `hangul-word` 를 빼는 것은 고침이 아니다 — 그 글도 같은 자리에서 잘렸다. 같은 여유가 **`hangul-word` 를 실제로 켠다**: 컨테이너 높이가 줄 수의
+ * 요구와 정확히 같으면(정수 줄 높이 글 전부) 줄바꿈 전략이 꺼져 한 글자 고아 줄이 났다(근거·실측은 `lineHeadroom.ts`).
  */
 export function Sentence(
   props: React.ComponentProps<typeof Text>,
 ): React.JSX.Element {
-  return <Text lineBreakStrategyIOS="hangul-word" {...props} />;
+  const {style, ...rest} = props;
+  return <Text lineBreakStrategyIOS="hangul-word" {...rest} style={withLineHeadroom(style)} />;
 }
 
 /** An inline failure attached to a form, rather than a whole-surface state. */

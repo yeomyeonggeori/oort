@@ -42,6 +42,9 @@ import { linkedDevicesQuery } from "./linkedDevicesQuery";
 import { ConfirmButton, Field, StatusChip } from "./SettingsFields";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { BlockedReason, useBlockedReason } from "@/features/common/BlockedReason";
 
 // Reading this as: settings for internal team users on web+Tauri,
@@ -156,10 +159,10 @@ export function DeviceKeysBlock({
         />
       )}
       {server.isError && (
-        <InlineBanner
-          message={serverError(server.error, "기기 키 목록을 불러오지 못했어요. 다시 시도해 주세요.")}
-          actionLabel="다시 시도"
-          onAction={() => void server.refetch()}
+        <LoadFailureNote
+          titleKey={CONNECTION_KEYS.loadDeviceKeysTitle}
+          cause={loadCauseOf(server.error)}
+          onRetry={() => void server.refetch()}
           className="px-0"
           separator={false}
           testId="device-keys-server-error"

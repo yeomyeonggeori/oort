@@ -6,8 +6,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import { CANNOT_REVOKE_CURRENT } from "@momo/core/features/auth/linkedDevices";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
+import { LocaleProvider } from "@/i18n/LocaleProvider";
+import type { AppLocale } from "@/i18n/localeStore";
+import { koreanLocale } from "@/testing/koLocale";
 import { DevicesSection } from "./DevicesSection";
 import { DEVICE_LINK_LIVE_KEY, writeDeviceLinkLive } from "./deviceLinkLive";
 import {
@@ -75,7 +79,9 @@ function twoDevices() {
   };
 }
 
-beforeAll(() => {
+let ko: AppLocale;
+beforeAll(async () => {
+  ko = await koreanLocale();
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   HTMLElement.prototype.scrollIntoView = vi.fn();
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -135,7 +141,8 @@ afterEach(() => {
   resetEscapeLayers();
 });
 
-function mount(offline = false): HTMLElement {
+/** `korean`은 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
+function mount(offline = false, korean = false): HTMLElement {
   if (mountedRoot) {
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
@@ -157,7 +164,7 @@ function mount(offline = false): HTMLElement {
     { client },
     createElement(DevicesSection, { offline })
   );
-  act(() => mountedRoot?.render(tree));
+  act(() => mountedRoot?.render(korean ? createElement(LocaleProvider, { locale: ko, children: tree }) : tree));
   return host;
 }
 
@@ -275,7 +282,7 @@ describe("설정 › 기기 목록", () => {
 
   it("목록 401은 설정 오류 상태 하나다", async () => {
     listLinkedDevices.mockRejectedValue(new ApiError(401, "unauthorized"));
-    const host = mount();
+    const host = mount(false, true);
     await waitFor(
       () => host.querySelector('[data-testid="linked-devices-error"]') !== null,
       "error"
@@ -294,6 +301,33 @@ describe("설정 › 기기 목록", () => {
     );
     expect(host.querySelector('[data-testid="linked-devices-empty"]')).toBeNull();
     expect(LIST_SOURCE).not.toContain("세션이 만료");
+  });
+
+  // #5242: 옛 「기기 목록을 불러오지 못했어요. 다시 시도해 주세요.」는 원인을 말하는 한 줄이다. 403(사람 계정만)은 그 문장 그대로다.
+  it("목록 실패는 제목 뒤에 원인이 붙은 한 줄과 다시 시도를 주고, 403은 사람 계정 안내 그대로다", async () => {
+    const cases: [Error, string][] = [
+      [new NetworkError("unreachable", 15_000), "기기 목록을 불러오지 못했어요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [new ApiError(500, "boom", "internal"), "기기 목록을 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요."],
+      [new ApiError(403, "no"), "사람 계정만 연결된 기기를 볼 수 있어요."],
+    ];
+    for (const [error, sentence] of cases) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+      listLinkedDevices.mockReset();
+      listLinkedDevices.mockRejectedValue(error);
+      const host = mount(false, true);
+      await waitFor(() => host.querySelector('[data-testid="linked-devices-error"]') !== null, "error");
+      const note = host.querySelector<HTMLElement>('[data-testid="linked-devices-error"]')!;
+      expect(note.getAttribute("role")).toBe("alert");
+      expect(note.textContent).toContain(sentence);
+      expect(note.textContent).not.toMatch(/\d{3}/);
+      const reads = listLinkedDevices.mock.calls.length;
+      await act(async () => {
+        note.querySelector("button")?.click();
+      });
+      await flush();
+      expect(listLinkedDevices.mock.calls.length).toBeGreaterThan(reads);
+      vi.restoreAllMocks();
+    }
   });
 
   it("빈 목록은 한 줄이다", async () => {

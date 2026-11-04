@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type RosterMember } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import type { RoleLabels } from "@momo/core/features/directory/model";
 import { DEFAULT_ROLE_LABELS } from "@momo/core/features/directory/model";
 import { roleLabelsSaveMessage } from "@momo/core/features/settings/model";
@@ -199,6 +200,8 @@ function mountSection(options: {
   liveUnfurl?: boolean;
   /** true면 워크스페이스 본체를 캐시에 두지 않아 읽는 중 상태를 본다. */
   loading?: boolean;
+  /** 사전 문장을 단정하는 시험만 켠다(공급자가 없으면 번들된 영어로 물러난다). */
+  korean?: boolean;
   /** 막은 원인(#5260): 코어 모델이 돌린 모습 위에 한국어 사전으로 그린다. `offline`은 모델의 게이트에서 읽는다. */
   scene?: ConnectionScene;
 }): HTMLElement {
@@ -247,7 +250,7 @@ function mountSection(options: {
           })
     )
   );
-  act(() => mountedRoot?.render(tree));
+  act(() => mountedRoot?.render(options.korean ? createElement(LocaleProvider, { locale: ko, children: tree }) : tree));
   return host;
 }
 
@@ -666,6 +669,37 @@ describe("링크 확인(서버) 스위치 (S5b)", () => {
     });
     expect(unfurlSwitch(host)).toBeNull();
     expect(host.querySelector('[data-testid="workspace-unfurls-error"]')).toBeNull();
+  });
+
+  // #5242: 옛 「링크 확인 설정을 불러오지 못했어요.」 배너는 원인을 말하는 한 줄이다. 이유가 원인을 따라가고 다시 시도가 다시 읽는다.
+  it("GET이 실패하면 제목 뒤에 원인이 붙고, 다시 시도가 설정을 다시 읽는다", async () => {
+    const cases: [Error, string][] = [
+      [new NetworkError("unreachable", 15_000), "링크 확인 설정을 불러오지 못했어요. 서버에 닿지 못했어요. 잠시 뒤 다시 시도해 주세요."],
+      [new ApiError(500, "boom", "internal"), "링크 확인 설정을 불러오지 못했어요. 문제가 생겼어요. 다시 시도해 주세요."],
+    ];
+    for (const [error, sentence] of cases) {
+      vi.spyOn(globalThis.navigator, "onLine", "get").mockReturnValue(true);
+      fetchWorkspaceUnfurlSettings.mockReset();
+      fetchWorkspaceUnfurlSettings.mockRejectedValue(error);
+      const host = mountSection({ role: "owner", liveUnfurl: true, korean: true });
+      await vi.waitFor(() => {
+        expect(host.querySelector('[data-testid="workspace-unfurls-error"]')).not.toBeNull();
+      });
+      const note = host.querySelector<HTMLElement>('[data-testid="workspace-unfurls-error"]');
+      expect(note?.getAttribute("role")).toBe("alert");
+      expect(note?.textContent).toContain(sentence);
+      expect(note?.textContent).not.toMatch(/\d{3}/);
+      const reads = fetchWorkspaceUnfurlSettings.mock.calls.length;
+      await act(async () => {
+        note?.querySelector("button")?.click();
+      });
+      await vi.waitFor(() => expect(fetchWorkspaceUnfurlSettings.mock.calls.length).toBeGreaterThan(reads));
+      act(() => mountedRoot?.unmount());
+      mountedHost?.remove();
+      mountedRoot = null;
+      mountedHost = null;
+      vi.restoreAllMocks();
+    }
   });
 
   it("GET이 500이면 403과 달리 다시 시도 단추가 있다", async () => {
