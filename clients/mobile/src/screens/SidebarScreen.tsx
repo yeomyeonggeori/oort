@@ -34,7 +34,6 @@ import {
 import {
   BAR_CONTROL_MAX_SCALE,
   EmptyState,
-  ErrorState,
   Sentence,
   FailureBanner,
   LoadingState,
@@ -57,6 +56,9 @@ import {
   type Palette,
 } from '../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
+import {CONNECTION_KEYS} from '@momo/core/features/connection/copyKeys';
+import {LoadFailureBox, LoadFailureLine} from '../features/connection/LoadFailureBox';
+import {useReadFailureOf} from '../features/connection/readFailure';
 import {ShellConnectionStrip} from '../features/connection/ShellConnectionStrip';
 import {useAgentLiveness} from '../features/agents/useAgentLiveness';
 import {
@@ -77,7 +79,6 @@ import {WorkingCardStop} from '../features/home/WorkingCardStop';
 import {workspaceHeading, type WorkspaceLogo} from '../features/home/workspaceLogo';
 import {
   buildSidebarSections,
-  CHANNEL_LIST_FAILED,
   type SidebarRow,
   type SidebarSection,
 } from '../features/sidebar/rows';
@@ -716,6 +717,24 @@ export default function SidebarScreen({
   const listFailed = channelsQuery.isError || directoryQuery.isError;
   const listError = channelsQuery.error ?? directoryQuery.error;
 
+  // ---- 읽기가 실패했을 때: 받아 둔 목록은 지우지 않는다 (#5285, 검증 5a ⑤) --------------------------------
+  // react-query 는 다시 읽기가 실패해도 마지막 `data` 를 남긴다. 예전에는 `isError` 만 보고 목록 자리를 오류 상자로 갈아 끼워, 띠(「서버에 닿지 못했어요」)는
+  // 「받아 둔 내용만 보여요」라는데 받아 둔 목록이 비었다. 이제 **채널과 명부가 둘 다 받아 둔 것**이면 실패해도 목록 그대로다 - 명부가 빠지면 DM 이 이름 없이 내려앉는
+  // 위의 이유가 그대로라 한쪽이라도 없으면 받아 둔 것이 아니다.
+  //   · 받아 둔 것이 있다: 목록 그대로. 띠가 같은 원인을 말하면 더할 말이 없고, 띠가 침묵이면(서버가 직접 답한 오류) 목록 위 한 줄(제목 + 다시 시도).
+  //   · 받아 둔 것이 없다: 상자(제목 + 다시 시도, 이유는 띠가 침묵일 때만). 기기가 꺼져 읽기가 **멈춘** 채라면 오류 객체가 없어도 그렇다 - 「참여한 채널이 없습니다」는 거짓이다.
+  // `listFailed` 는 아래 읽음 표시 고지의 가림 조건으로도 쓰여서 그대로 두고, 상자·한 줄의 판정은 따로 둔다.
+  const listCached = channelsQuery.data !== undefined && directoryQuery.data !== undefined;
+  const listPaused = !listCached && (channelsQuery.isPaused || directoryQuery.isPaused);
+  const showListFailure = !listCached && (listFailed || listPaused);
+  const readFailureOf = useReadFailureOf();
+  const listFailure = readFailureOf(listError);
+  const readStatesSpoken = readFailureOf(readStates.error).spoken;
+  const retryList = () => {
+    void channelsQuery.refetch();
+    void directoryQuery.refetch();
+  };
+
   const filterField = filterVisible ? (
     <View style={styles.filterWrap}>
       <TextInput
@@ -755,10 +774,19 @@ export default function SidebarScreen({
           그 위에 선다. 실시간만 끊긴 것은 홈이 말하지 않는다(대화 화면 띠가 말한다). */}
       <ShellConnectionStrip />
 
+      {/* 받아 둔 목록이 있는데 다시 읽기가 실패했다(#5285): 목록은 그대로 두고, 띠가 같은 원인을 말하지 않을 때만 위에서 한 줄 말한다. */}
+      {listFailed && listCached && !listFailure.spoken ? (
+        <LoadFailureLine
+          titleKey={CONNECTION_KEYS.loadChannelListTitle}
+          onRetry={retryList}
+          testID="channels-error-line"
+        />
+      ) : null}
+
       {/* Unread is server truth, so when the projection fails the badges simply
           are not there. Saying so is cheaper than letting someone conclude they
           have read everything. */}
-      {readStates.isError && !listFailed ? (
+      {readStates.isError && !listFailed && !readStatesSpoken ? (
         // 나간 멤버 DM 이 도로 보일 때는 새 문장이라 제목과 설명이 같은 말투(해요체)다. 그 밖에는 이 화면의 기존 문장 그대로다.
         <NoticeBlock
           headline={
@@ -822,19 +850,16 @@ export default function SidebarScreen({
       </View>
 
       {/* 고지는 목록 상태와 무관하게 선다 — 알림 탭이 막힌 이유는 목록이 실패했을 때
-          가장 필요하다(#2584 M-1, `CHANNEL_LIST_FAILED` 가 두 곳에서 말한다). */}
+          가장 필요하다(#2584 M-1, 목록 자리의 오류 상자 제목 `connection.load.channelListTitle` 이 두 곳에서 말한다). */}
       <View style={styles.noticeWrap}>{notices}</View>
 
       {loading ? (
         <LoadingState label="채널 목록을 불러오는 중입니다." testID="channels-loading" />
-      ) : listFailed ? (
-        <ErrorState
-          headline={CHANNEL_LIST_FAILED}
-          detail={queryFailureDetail(listError)}
-          onRetry={() => {
-            void channelsQuery.refetch();
-            void directoryQuery.refetch();
-          }}
+      ) : showListFailure ? (
+        <LoadFailureBox
+          titleKey={CONNECTION_KEYS.loadChannelListTitle}
+          failure={listFailure}
+          onRetry={retryList}
           testID="channels-error"
         />
       ) : nothingToShow && !searching ? (
