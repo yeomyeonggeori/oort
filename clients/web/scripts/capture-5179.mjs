@@ -10,23 +10,36 @@
 //
 // 툴바는 행 위 경계를 걸치는 플로팅 그릇이라 그 행의 위 이웃 바닥 36px 를 덮는다(README §6 행 액션 5번). 그 띠 안에는 앞 행의
 // **마지막 줄**이 늘 서므로 겹침은 세로가 아니라 가로로 정해진다: 앞 행의 마지막 줄이 툴바 왼쪽 끝(오른쪽에서 12 + 223)보다 오른쪽까지
-// 오면 덮인다. 390 열에서는 한국어 7~8자가 넘는 마지막 줄이 그렇다. 1440 은 같은 글이 툴바에 닿지 않는다.
+// 오면 덮인다. 글머리에서 툴바 왼쪽 끝까지는 390 열이 95px, 720 창(사이드바가 선 데스크탑 폭, 대화 열은 388)이 77px 라 한국어 6~8자가 넘는
+// 줄이 그렇다. 1440 은 같은 글이 툴바에 닿지 않는다.
 //
-// 재는 것(390·1440 × 밝음·어두움, 포인터가 선 행 다섯 가지):
-//   A  긴 앞 행 · 포인터 행 · **다음 행이 머리 행**(이름·시각 줄)      390: 아래 경계로 뒤집혀 0 / 1440: 위 그대로 0
-//   B  긴 앞 행 · 포인터 행 · 다음 행이 **짧은 이어짐**                390: 아래 경계로 뒤집혀 0 / 1440: 위 그대로 0
-//   C  긴 앞 행 · 포인터 행 · 다음 행도 **긴 이어짐**(양쪽이 막힘)      뒤집으면 뒤 행 글자를 새로 덮으므로 **위 그대로**(새 겹침을 안 만든다)
-//   D  짧은 앞 행(대조)                                               위 그대로 0 — 덮을 것이 없으면 뒤집지 않는다
+// 자리 규칙(`hoverToolbarModel.placeToolbar`): ① 위 자리가 앞 이웃 글자를 안 덮으면 위 그대로 ② 덮으면 아래 경계로 뒤집되 뒤 이웃을 새로 덮거나 스크롤러
+// 밖으로 잘리지 않을 때만(1차 수리 #5236, A·B·E·G) ③ 위·아래 모두 막히면 **행 안쪽으로 밀어 앉힌다**(밀림 `--hover-toolbar-slide`, 위 자리에서 아래로 px):
+// 앞 글줄 바로 밑 ~ 뒤 글줄·스크롤러 바닥 사이의 글자 없는 창(툴바 키 42 이상)에 선다. ④ 창이 없으면 위 그대로(남은 경우 R).
+// ①~③ 앞에서 글줄 끝이 막대 왼쪽 끝을 1~2px 넘는 경계는 막대를 오른쪽으로 비껴(1px, 2px) 먼저 ①②를, 그다음 ③을 다시 해 본다(움직임이 작은 쪽이 먼저).
+//
+// 글 길이는 「짧은 글 ≤5자 / 긴 글 ≥8자」 둘뿐이라 390·720 에서 같은 구조가 서고, 머리 줄 이름은 3글자(검수 하네스의 「한서연」「오도현」과 같은 길이 — 이름의 글자 수가 머리 줄 폭을 정한다)다. 3글자 이름 + 시각(글머리에서 78px)의 오른끝은
+// 390 열(툴바 왼끝까지 95px)에서는 안 닿고 720 창(77px)에서는 **1px 넘는다** — 그 경계를 막대의 **가로 비끼기**(오른쪽으로 1~2px, `--hover-toolbar-nudge`)가 푼다.
+// 그래서 720 의 A·D·H·I 는 비껴 서고(비낌 ≥ 1px) 그 밖의 폭은 비끼지 않는다.
+//
+// 재는 것(390·720·1440 × 밝음·어두움, 포인터가 선 행 열 가지):
+//   A  긴 앞 행 · 포인터 행 · **다음 행이 머리 행**(이름·시각 줄)      좁은 열: 아래 경계로 뒤집혀 0 / 1440: 위 그대로 0
+//   B  긴 앞 행 · 포인터 행 · 다음 행이 **짧은 이어짐**                좁은 열: 아래 경계로 뒤집혀 0 / 1440: 위 그대로 0
+//   C  긴 앞 행 · **짧은** 포인터 행 · 다음 행도 **긴 이어짐**(양쪽이 막힘)  뒤집으면 뒤 행 글자를 덮으므로 **행 안쪽으로 밀려** 앞 글줄 밑에 앉아 0
+//   D  짧은 앞 행(대조)                                               위 그대로 0 — 덮을 것이 없으면 뒤집지도 밀지도 않는다
 //   E  A 의 포인터 행이 스크롤러 맨 위에 걸림                          기존 규칙(위가 잘리면 아래로) 그대로 below
-//   F  **마지막 행**(스크롤러 맨 아래, 아래로 내릴 여유 없음)           아래 자리는 스크롤러 밖으로 잘리므로 **위 그대로**(막대는 스크롤러 안)
+//   F  **마지막 행**(스크롤러 맨 아래, 아래로 내릴 여유 없음)           아래 자리는 스크롤러 밖이라 **행 안쪽으로 밀려** 0(막대는 스크롤러 안)
 //   G  **1440 만**: 앞 행이 한 줄로 길어 끝이 툴바 왼쪽 끝(x≈1185)을 넘음   아래 경계로 뒤집혀 0 (수리 전: 1440 에서도 앞 행 끝줄을 덮는다)
+//   H  **머리 행**이 포인터(긴 본문 두 줄) · 앞 행 긴 글 · 뒤 행 긴 이어짐   머리 줄(이름·시각) 높이의 빈 창으로 밀려 앉아 0
+//   I  **마지막 행이 머리 행**(두 번째 대화) · 긴 본문 · 앞 행 긴 글        검수가 #5212 720 폭에서 본 장면 — 밀려 앉아 0
+//   R  **남은 경우**: 이어짐 포인터 행(한 줄 긴 글) · 앞·뒤 행도 한 줄 긴 글   세 줄이 36px 간격이라 42px 빈 창이 없다 → 위 그대로, 겹침을 프로브로만 적는다
 //
 // 1440 의 A~D 는 앞 행 글이 툴바에 **닿지 않는 대조 칸**이다(마지막 줄 오른끝 x≤937 < 툴바 왼끝 1185). 규칙에는 폭 문턱이 없어서 넓은 열도
 // 글이 툴바에 닿으면(한 줄 약 80자 이상) 뒤집는다 — 그 칸이 G 다. README §6 의 「교차 0」과 이슈의 「1440 그대로」 중 어느 쪽을 따를지는 planner 가 정한다.
 //
 // 단정은 레인 공용 자(`./lib/hoverToolbarOverlap.mjs`, `capture-screens.mjs`·`capture-5173.mjs` 와 한 벌)를 그대로 부른다. 그 위에:
-//   - **양성 대조**: 칸마다 앞 행의 마지막 줄이 실제로 툴바 왼쪽 끝을 넘는지(A·B·C 의 390), 넘지 않는지(D·1440)를 먼저 재서, 겹침 0 이
-//     「애초에 닿지 않아서」 초록인 칸을 걸러낸다. 자가 이웃으로 **앞 행을 실제로 봤는지**(`looked`)도 단정한다.
+//   - **양성 대조**: 칸마다 앞 행의 마지막 줄이 실제로 툴바 왼쪽 끝을 넘는지(좁은 열의 A·B·C·F·H·I·R), 넘지 않는지(D·1440)를 먼저 재서, 겹침 0 이
+//     「애초에 닿지 않아서」 초록인 칸을 걸러낸다. R 은 세 줄이 모두 툴바 밑까지 오는지도 잰다(자리 없음이 진짜인지). 자가 이웃으로 **앞 행을 실제로 봤는지**(`looked`)도 단정한다.
 //   - **자 민감도**: 툴바를 앞 행 마지막 줄 위에 일부러 얹으면 자가 그 글자를 센다(chars > 0, neighbor = prev, kind = row).
 //
 // 백엔드는 없다: `/v1/**`는 고정 응답이고 소켓은 구독만 받는다. 인물은 전부 가상이다(레포는 공개).
@@ -72,6 +85,8 @@ const person = (id, kind, displayName, handle, extra = {}) => ({
 });
 const roster = [
   person(ME, "human", "이도현", "dohyun", { role: "owner" }),
+  // 이름은 3글자다(검수 하네스의 「한서연」「오도현」과 같은 길이다). 머리 줄(이름 39 + 틈 8 + 시각 31 = 글머리에서 78)의 오른끝은 390 열에서는 툴바 왼쪽 끝(글머리에서 95)에
+  // 닿지 않지만 720 창(글머리에서 77)에서는 1px 넘는다 — 가로 비끼기(`--hover-toolbar-nudge`)가 푸는 경계다.
   person(SEO, "human", "박서연", "seoyeon"),
   person(MINSU, "human", "최민수", "minsu"),
   person(HAYUN, "human", "정하윤", "hayun"),
@@ -100,12 +115,26 @@ const auth = {
  *   F  정하윤 긴 글 → 정하윤 짧은 글(포인터, 대화의 **마지막** 행)
  */
 const TEXT = {
-  // 390 에서 둘째 줄이 길고(글머리 x56 에서 한국어 7~8자를 넘어 툴바 왼쪽 끝 x151 너머까지 온다), 1440 에서는 한 줄로 끝난다.
+  // 두 폭(390: 글머리 x56 → 툴바 왼끝 x151 = 95px / 720: 글머리 x388 → 툴바 왼끝 x465 = 77px)에서 같은 구조가 서도록 글 길이를 둘로만 쓴다:
+  // 「짧은 글」은 5자 이하(60px 안팎, 툴바에 안 닿는다), 「긴 글」은 8자 이상(120px 넘게, 툴바 밑까지 온다).
+  // 390 에서 둘째 줄이 길고(툴바 왼쪽 끝 너머까지 온다), 1440 에서는 한 줄로 끝난다.
   longA: "표지와 목차의 여백이 서로 달라서 한눈에 읽히지 않아요. 한 번만 더 맞춰 주세요.",
   longB: "표지 문구는 세 가지로 줄였고 목차는 글자 크기를 한 단계 키워 봤어요. 확인 부탁드려요.",
   longC: "시안 열두 장을 모두 훑어봤는데 여백이 들쭉날쭉한 곳이 몇 군데 있어서 따로 정리해 올릴게요.",
   longCNext: "그리고 표지 문구는 두 번째 안이 가장 낫다고 생각해요. 그 이유도 같이 적어 둘게요.",
   longF: "내일 오전까지 표지 시안 두 개와 목차 시안 한 개를 정리해서 올려 둘게요. 편하게 봐 주세요.",
+  // H: 머리 행(다른 사람이 말한 첫 행)이 포인터인 칸 — 본문이 길어 두 줄이고, 앞·뒤 행도 긴 글이다. 머리 줄(이름·시각)은 툴바 왼쪽에 서고 본문 첫 줄은 그 아래에 선다.
+  longHPrev: "오늘 오후에 표지 시안 세 개를 한꺼번에 검토할 수 있을까요? 시간이 되는 분은 알려 주세요.",
+  longH: "저는 두 번째 시안이 가장 균형이 좋아 보여요. 다만 목차의 글자 크기는 조금 더 키우는 편이 낫겠어요.",
+  longHNext: "그럼 오후 세 시에 같이 보는 걸로 해요. 그 전에 각자 시안 메모를 채널에 남겨 두면 좋겠어요.",
+  // R(남은 경우): 이어짐 행이 포인터이고 한 줄짜리 글이 길어 툴바 밑까지 오며, 앞·뒤 행도 한 줄짜리 긴 글이다. 세 줄이 36px 간격으로 늘어서
+  // 위·아래·행 안쪽 어디에도 42px 높이의 빈 창이 없다 — 열이 좁으면(8자 이상) 흔한 모양이다.
+  longRPrev: "회의록은 어제 공유 폴더에 올렸어요.",
+  longR: "발표 자료는 목차부터 확정할게요.",
+  longRNext: "질문 시간은 마지막에 잡을게요.",
+  // I(두 번째 대화): 대화의 마지막 행이 머리 행이고 본문이 두 줄로 긴 칸 — 검수(#5212 720 폭)가 본 장면.
+  longIPrev: "녹화랑 캡처 파일은 오전에 올려 두었고 영상은 용량이 커서 업로드가 오래 걸릴 수 있어요.",
+  longI: "좋아요, 영상은 용량이 커서 업로드가 좀 걸릴 수 있어요. 끝나면 이 대화에 한 줄 남겨 둘게요.",
   // 1440 에서 한 줄(약 10.4px/자 × 91자 ≈ 946px)이고 끝이 툴바 왼쪽 끝(x≈1185)을 넘는 긴 글. 390 에서는 여러 줄이라 이 칸은 1440 만 잰다.
   longG: "이번 주 시안은 표지와 목차의 여백부터 맞추고 글자 크기와 줄 간격은 그다음에 한꺼번에 정리하는 순서로 가면 좋겠다고 생각해요. 의견 있으시면 편하게 남겨 주세요.",
 };
@@ -145,27 +174,56 @@ function buildRows() {
   add(MINSU, TEXT.longG, 56, "G_prev");
   add(MINSU, "네, 확인했어요", 55, "G");
   add(MINSU, "넵", 54, "G_next");
+  // H: 머리 행 포인터(긴 본문 두 줄) · 앞 행 긴 글 · 뒤 행 긴 이어짐
+  add(SEO, TEXT.longHPrev, 53, "H_prev");
+  add(MINSU, TEXT.longH, 52, "H");
+  add(MINSU, TEXT.longHNext, 51, "H_next");
+  // R: 이어짐 포인터 행(긴 본문) · 앞·뒤 행도 긴 글
+  add(HAYUN, TEXT.longRPrev, 50, "R_prev");
+  add(HAYUN, TEXT.longR, 49, "R");
+  add(HAYUN, TEXT.longRNext, 48, "R_next");
   for (let i = 0; i < 8; i += 1) {
     add(i % 2 ? SEO : MINSU, `시안 ${i + 13}번도 확인했어요.`, 40 - i * 3);
   }
   add(ME, "마지막 확인은 제가 할게요", 8);
   // F: 대화의 마지막 두 행
   add(HAYUN, TEXT.longF, 6, "F_prev");
-  add(HAYUN, "넵, 확인했어요", 5, "F");
+  add(HAYUN, "네, 맞아요", 5, "F");
   return rows;
 }
-function messages() {
-  const rows = buildRows();
-  let seq = 10;
+/**
+ * 두 번째 대화(일반): 마지막 행이 **머리 행**이고 본문이 길어 두 줄인 장면(I). 검수(#5212 의 720 폭 캡처)가 본 것이다 — 오도현이 새 사람으로
+ * 말한 마지막 행에 포인터를 올리면 위 자리 툴바가 앞 행 글을 덮고, 아래는 스크롤러 끝이라 내려갈 수 없다.
+ */
+function buildGenRows() {
+  const rows = [];
+  let n = 1;
+  const add = (author, body, minAgo, name) => {
+    rows.push({ n: 500 + n, author, body, minAgo });
+    if (name) SEQ[name] = 199 + n; // 이 대화의 seq 는 200 부터(다른 대화의 seq 와 겹치지 않게)
+    n += 1;
+  };
+  for (let i = 0; i < 12; i += 1) {
+    add(i % 2 ? SEO : MINSU, `일정 ${i + 1}번 확인했어요.`, 120 - i * 4);
+  }
+  add(SEO, TEXT.longIPrev, 30, "I_prev");
+  add(MINSU, TEXT.longI, 29, "I");
+  return rows;
+}
+const toMessages = (rows, channelId, firstSeq) => {
+  let seq = firstSeq;
   return rows.map((x) => {
     const createdAtMs = NOW - x.minAgo * MIN;
     return {
-      id: mid(x.n), channelId: CH, seq: seq++, hlcTs: createdAtMs, hlcCount: 0, authorMemberId: x.author,
+      id: mid(x.n), channelId, seq: seq++, hlcTs: createdAtMs, hlcCount: 0, authorMemberId: x.author,
       type: "text", body: x.body, state: "sent", createdAtMs,
     };
   });
-}
+};
+const messages = () => toMessages(buildRows(), CH, 10);
+const genMessages = () => toMessages(buildGenRows(), GEN, 200);
 buildRows(); // SEQ 를 채운다(레인 본문이 읽는다)
+buildGenRows();
 
 async function installMocks(context) {
   await context.route("**/v1/**", async (route) => {
@@ -187,6 +245,7 @@ async function installMocks(context) {
     if (path.endsWith("/reminders")) return json(route, { reminders: [] });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "달무리 스튜디오" } });
     if (path.includes(`/channels/${CH}/messages`)) return json(route, { messages: messages() });
+    if (path.includes(`/channels/${GEN}/messages`)) return json(route, { messages: genMessages() });
     if (path.includes("/messages")) return json(route, { messages: [] });
     return json(route, {});
   });
@@ -324,7 +383,11 @@ const barRect = (page) =>
     const bar = document.querySelector('[data-testid="message-hover-toolbar"]');
     if (!bar) return null;
     const r = bar.getBoundingClientRect();
-    return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom), w: Math.round(r.width), straddle: bar.getAttribute("data-straddle") };
+    // 밀림(slide)은 위 자리에서 아래로 민 px — 모델이 CSSOM 으로 거는 변수다(없으면 0). 수리 전 번들에는 변수가 없어 늘 0이다.
+    const slide = Number.parseFloat(bar.style.getPropertyValue("--hover-toolbar-slide")) || 0;
+    // 비끼기(nudge)는 오른쪽으로 비껴 선 px(1~2) — 같은 방식으로 거는 변수다.
+    const nudge = Number.parseFloat(bar.style.getPropertyValue("--hover-toolbar-nudge")) || 0;
+    return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom), w: Math.round(r.width), straddle: bar.getAttribute("data-straddle"), slide, nudge };
   });
 
 const scrollerRect = (page) =>
@@ -339,18 +402,24 @@ const last = (frags) => frags.reduce((acc, f) => (!acc || f.b > acc.b || (f.b ==
 const first = (frags) => frags.reduce((acc, f) => (!acc || f.t < acc.t || (f.t === acc.t && f.l < acc.l) ? f : acc), null);
 
 /**
- * 포인터가 선 행 다섯 가지. `narrow`/`wide` = 그 폭에서 툴바가 서야 하는 쪽(`data-straddle`).
- * `zero` = 그 폭에서 겹침 0 을 단정하는가(C 의 390 은 뒤집으면 뒤 행을 새로 덮으므로 0 을 약속하지 않는다).
- * `prevReaches` = 앞 행 마지막 줄이 툴바 왼쪽 끝을 넘는가(양성 대조의 기대값, 390 / 1440).
+ * 포인터가 선 행들. `narrow`/`wide` = 그 폭에서 툴바가 서야 하는 쪽(`data-straddle`: 위 경계 걸침 top / 아래 경계 걸침 below).
+ * `slideNarrow` = 좁은 열에서 툴바가 **위 자리에서 아래로 밀려 행 안쪽에** 앉아야 하는가(밀림 > 0, `--hover-toolbar-slide`). 넓은 열은 늘 0이다.
+ * `zeroNarrow` = 좁은 열에서 겹침 0 을 단정하는가(false = 프로브만: 남은 경우 R).
+ * `prevReaches` = 앞 행 마지막 줄이 툴바 왼쪽 끝을 넘는가(양성 대조의 기대값, 좁은 열 / 1440).
+ * `channel` = 이 칸이 서는 대화(기본은 디자인-리뷰, "GEN" 은 일반 — 마지막 행이 머리 행인 장면 I).
  */
 const CASES = [
-  { id: "A 긴 앞 행 · 다음 행이 머리 행", key: "A", pin: false, narrow: "below", wide: "top", zeroNarrow: true, prevReaches: [true, false] },
-  { id: "B 긴 앞 행 · 다음 행이 짧은 이어짐", key: "B", pin: false, narrow: "below", wide: "top", zeroNarrow: true, prevReaches: [true, false] },
-  { id: "C 긴 앞 행 · 다음 행도 긴 이어짐(양쪽이 막힘)", key: "C", pin: false, narrow: "top", wide: "top", zeroNarrow: false, prevReaches: [true, false] },
-  { id: "D 짧은 앞 행(대조)", key: "D", pin: false, narrow: "top", wide: "top", zeroNarrow: true, prevReaches: [false, false] },
-  { id: "E 긴 앞 행이 스크롤러 맨 위(뒤집힘)", key: "A", pin: true, narrow: "below", wide: "below", zeroNarrow: null, prevReaches: null },
-  { id: "F 마지막 행(아래로 내릴 여유 없음)", key: "F", pin: false, bottom: true, narrow: "top", wide: "top", zeroNarrow: false, prevReaches: [true, false] },
-  { id: "G 1440 긴 한 줄 앞 행(툴바 왼쪽 끝을 넘음)", key: "G", pin: false, wideOnly: true, narrow: null, wide: "below", zeroNarrow: null, prevReaches: [null, true] },
+  { id: "A 긴 앞 행 · 다음 행이 머리 행", key: "A", pin: false, narrow: "below", wide: "top", slideNarrow: false, zeroNarrow: true, prevReaches: [true, false] },
+  { id: "B 긴 앞 행 · 다음 행이 짧은 이어짐", key: "B", pin: false, narrow: "below", wide: "top", slideNarrow: false, zeroNarrow: true, prevReaches: [true, false] },
+  { id: "C 긴 앞 행 · 다음 행도 긴 이어짐(양쪽이 막힘)", key: "C", pin: false, narrow: "top", wide: "top", slideNarrow: true, zeroNarrow: true, prevReaches: [true, false] },
+  { id: "D 짧은 앞 행(대조)", key: "D", pin: false, narrow: "top", wide: "top", slideNarrow: false, zeroNarrow: true, prevReaches: [false, false] },
+  { id: "E 긴 앞 행이 스크롤러 맨 위(뒤집힘)", key: "A", pin: true, narrow: "below", wide: "below", slideNarrow: false, zeroNarrow: null, prevReaches: null },
+  { id: "F 마지막 행(아래로 내릴 여유 없음)", key: "F", pin: false, bottom: true, narrow: "top", wide: "top", slideNarrow: true, zeroNarrow: true, prevReaches: [true, false] },
+  { id: "G 1440 긴 한 줄 앞 행(툴바 왼쪽 끝을 넘음)", key: "G", pin: false, wideOnly: true, narrow: null, wide: "below", slideNarrow: false, zeroNarrow: null, prevReaches: [null, true] },
+  { id: "H 머리 행 포인터 · 긴 본문 · 앞·뒤도 긴 글", key: "H", pin: false, headEdge: true, narrow: "top", wide: "top", slideNarrow: true, zeroNarrow: true, prevReaches: [true, false] },
+  { id: "I 마지막 행이 머리 행 · 긴 본문(두 줄)", key: "I", pin: false, bottom: true, channel: "GEN", headEdge: true, narrow: "top", wide: "top", slideNarrow: true, zeroNarrow: true, prevReaches: [true, false] },
+  // 남은 경우(자리 없음): 이어짐 행이 포인터이고 본문이 길어 툴바 x 범위까지 오며, 앞·뒤 행도 그렇다 — 위·아래·행 안쪽 어디에도 글자 없는 41px 창이 없다.
+  { id: "R 이어짐 행 포인터 · 긴 본문 · 앞·뒤도 긴 글(남은 경우)", key: "R", pin: false, residual: true, narrow: "top", wide: "top", slideNarrow: false, zeroNarrow: false, prevReaches: [true, false] },
 ];
 
 async function runCase(page, tag, width, c) {
@@ -374,27 +443,78 @@ async function runCase(page, tag, width, c) {
 
   const bar = await barRect(page);
   const sc = await scrollerRect(page);
+  const own = await fragmentsOf(page, seq);
   const prev = await fragmentsOf(page, SEQ[`${c.key}_prev`] ?? seq - 1);
   const next = await fragmentsOf(page, SEQ[`${c.key}_next`] ?? seq + 1);
   const prevLast = prev ? last(prev.frags) : null;
   const nextFirst = next ? first(next.frags) : null;
+  const ownFirst = own ? first(own.frags) : null;
+  const ownLast = own ? last(own.frags) : null;
   note(
-    `툴바 x ${bar?.l}~${bar?.r} y ${bar?.t}~${bar?.b}(${bar?.straddle}) · 앞 행 마지막 줄 ${prevLast ? `x ${prevLast.l}~${prevLast.r} y ${prevLast.t}~${prevLast.b}` : "-"}` +
+    `툴바 x ${bar?.l}~${bar?.r} y ${bar?.t}~${bar?.b}(${bar?.straddle}, 밀림 ${bar?.slide}, 비낌 ${bar?.nudge}) · 앞 행 마지막 줄 ${prevLast ? `x ${prevLast.l}~${prevLast.r} y ${prevLast.t}~${prevLast.b}` : "-"}` +
       ` · 뒤 행 첫 줄 ${nextFirst ? `x ${nextFirst.l}~${nextFirst.r} y ${nextFirst.t}~${nextFirst.b}` : "-"}(${next?.head ? "머리 행" : "이어짐"})`
+  );
+  note(
+    `포인터 행 y ${own?.row.t}~${own?.row.b}(${own?.head ? "머리 행" : "이어짐"}) 본문 첫 줄 ${ownFirst ? `x ${ownFirst.l}~${ownFirst.r} y ${ownFirst.t}~${ownFirst.b}` : "-"}` +
+      ` 끝줄 ${ownLast ? `x ${ownLast.l}~${ownLast.r} y ${ownLast.t}~${ownLast.b}` : "-"} · 스크롤러 y ${sc?.t}~${sc?.b}`
   );
 
   check(`${name}: 툴바 폭이 ${TOOLBAR_WIDTH} 그대로다(모양 유지)`, bar && Math.abs(bar.w - TOOLBAR_WIDTH) <= 1, JSON.stringify(bar));
   if (sc && bar) {
     check(`${name}: 툴바 상자가 스크롤러 안에 있다(위·아래로 잘리지 않는다)`, bar.t >= sc.t - 1 && bar.b <= sc.b + 1, `bar ${bar.t}~${bar.b} / 스크롤러 ${sc.t}~${sc.b}`);
   }
+  if (bar && own) {
+    // 어느 자리에 서든 막대는 포인터 행에 붙어 있다(행과 세로로 6px 이상 겹친다 — 위·아래 자리는 정확히 행 안 깊이 6, 밀린 자리는 그 이상). 떨어져 나간 막대는 누구 것인지 알 수 없다.
+    const attached = Math.min(bar.b, own.row.b) - Math.max(bar.t, own.row.t);
+    check(`${name}: 툴바가 포인터 행에 붙어 있다(행과 세로로 6px 이상 겹친다)`, attached >= 5, `겹침 ${attached}px · 툴바 ${bar.t}~${bar.b} · 행 ${own.row.t}~${own.row.b}`);
+  }
+  // 비끼기(가로)는 글줄 끝이 막대 왼쪽 끝을 1~2px 넘는 경계에서만 쓴다: 0~2px 이내이고, 글이 막대에 훨씬 못 닿는 390 열·1440 에서는 쓰지 않는다.
+  check(
+    `${name}: 가로 비끼기가 ${width === 720 ? "0~2px 이내다" : "없다(0)"}`,
+    bar && (width === 720 ? bar.nudge >= 0 && bar.nudge <= 2 : bar.nudge === 0),
+    JSON.stringify(bar)
+  );
+  if (c.headEdge && own && bar) {
+    // 머리 행이 포인터인 칸의 양성 대조: 머리 줄(첫 줄: 이름 + 시각)의 오른끝이 막대 왼쪽 끝을 넘는 폭(720 창)과 안 넘는 폭(390 열)을 먼저 재서, 비끼기가 정말 필요한 경계인지 가른다.
+    // 머리 줄 = 첫 줄(이름)과 세로로 겹치는 조각들(시각은 글자가 작아 윗단이 이름과 몇 px 다르다). 툴바 왼끝은 비끼기를 빼고(자리를 잡기 전 왼끝) 잰다.
+    const headLine = own.frags.filter((f) => f.t < (ownFirst?.b ?? 0));
+    const headRight = Math.max(...headLine.map((f) => f.r));
+    const restLeft = bar.l - bar.nudge;
+    const reaches = headRight > restLeft;
+    const want = width === 720;
+    check(`${name}: 머리 줄(이름 + 시각) 오른끝이 툴바 왼쪽 끝을 ${want ? "1~2px 넘는다(경계)" : "넘지 않는다(대조)"}`, reaches === want && (!want || headRight - restLeft <= 2), `머리 줄 오른끝 ${headRight} · 툴바 왼끝(비끼기 전) ${restLeft}`);
+    if (want) check(`${name}: 경계라서 툴바가 오른쪽으로 비껴 섰다(비낌 ≥ 1px)`, bar.nudge >= 1, JSON.stringify(bar));
+  }
   const expectStraddle = c.pin ? c.narrow : isNarrow ? c.narrow : c.wide;
   check(`${name}: 툴바가 기대한 자리(${expectStraddle})에 섰다`, bar?.straddle === expectStraddle, JSON.stringify(bar));
+  // 밀림: 위 자리에서 아래로 밀려 행 안쪽에 앉는 것은 위·아래 경계 모두 글자에 막힌 칸(C·F·H·I)뿐이다. 나머지는 밀림 0(1차 수리의 자리 그대로).
+  const expectSlide = !c.pin && isNarrow && Boolean(c.slideNarrow);
+  check(
+    `${name}: 툴바가 ${expectSlide ? "행 안쪽으로 밀려 앉았다(밀림 > 0)" : "위·아래 경계 그대로다(밀림 0)"}`,
+    bar && (expectSlide ? bar.slide > 0 : bar.slide === 0),
+    JSON.stringify(bar)
+  );
 
+  if (expectSlide) {
+    // 밀려 앉은 막대는 앞 글줄에 닿지 않고 띄워 앉는다(모델이 창이 넉넉하면 2px, 좁으면 위·아래를 같게 나눈다). 글자 상자와 맞닿는 자리는 글자를 덮는 것과 한 끗 차이다.
+    const gap = bar && prevLast ? bar.t - prevLast.b : null;
+    check(`${name}: 밀려 앉은 툴바가 앞 행 마지막 줄 밑에서 띄워 앉는다(틈 ≥ 1px)`, gap !== null && gap >= 1, `틈 ${gap} · 툴바 윗단 ${bar?.t} · 앞 행 끝줄 밑단 ${prevLast?.b}`);
+  }
   if (c.prevReaches) {
     // 양성 대조: 앞 행 마지막 줄이 툴바 왼쪽 끝을 넘는 칸에서만 이 시험이 뜻이 있다. 위 자리의 툴바 왼쪽 끝은 위·아래 자리가 같다(가로는 안 바뀐다).
     const want = c.prevReaches[isNarrow ? 0 : 1];
     const reaches = Boolean(prevLast && bar && prevLast.r > bar.l);
     check(`${name}: 앞 행 마지막 줄이 툴바 왼쪽 끝을 ${want ? "넘는다(겹칠 수 있는 칸)" : "넘지 않는다(대조)"}`, reaches === want, `줄 오른끝 ${prevLast?.r} · 툴바 왼끝 ${bar?.l}`);
+  }
+  if (c.residual && isNarrow) {
+    // 양성 대조: 남은 경우가 정말 「자리 없음」인지 — 앞 행 끝줄·포인터 행 본문·뒤 행 첫 줄이 모두 툴바 왼쪽 끝을 넘는다.
+    const reach = (frag) => Boolean(frag && bar && frag.r > bar.l);
+    const ownAllReach = Boolean(own && own.frags.length > 0 && own.frags.every(reach));
+    check(
+      `${name}: 앞 행 끝줄·포인터 행의 모든 줄·뒤 행 첫 줄이 툴바 x 범위까지 온다(자리 없음의 조건)`,
+      reach(prevLast) && ownAllReach && reach(nextFirst),
+      `앞 ${prevLast?.r} · 포인터 ${own?.frags.map((f) => f.r).join("/")} · 뒤 ${nextFirst?.r} · 툴바 왼끝 ${bar?.l}`
+    );
   }
   const info = await measureHoverToolbarOverlap(page);
   const looked = info[0]?.looked ?? [];
@@ -411,7 +531,7 @@ async function runCase(page, tag, width, c) {
   if (zero === true) {
     check(`${name}: 툴바 ∩ 이웃(행·시스템 줄) 글자 = 0`, verdict === "", verdict);
   } else {
-    // 약속하지 않는 칸(양쪽이 막힌 C, 스크롤러 맨 위 E): 있는 그대로 적는다. 막힌 곳을 초록으로 칠하지 않는다.
+    // 약속하지 않는 칸(자리 없는 R, 스크롤러 맨 위 E): 있는 그대로 적는다. 막힌 곳을 초록으로 칠하지 않는다.
     note(`프로브(단정 아님): ${verdict === "" ? "겹침 없음" : verdict}`);
   }
 
@@ -479,8 +599,17 @@ async function runViewport(origin, scheme, width, height) {
   const { browser, context, page } = await open(origin, scheme, { width, height });
   try {
     console.log(`--- ${tag}`);
-    for (const c of CASES) await runCase(page, tag, width, c);
+    for (const c of CASES.filter((x) => !x.channel)) await runCase(page, tag, width, c);
     await runSensitivity(page, tag);
+    // 두 번째 대화(일반): 마지막 행이 머리 행인 장면. 대화를 바꾼 뒤 목록이 새로 서기를 기다린다.
+    const second = CASES.filter((x) => x.channel === "GEN");
+    if (second.length > 0) {
+      await page.evaluate((h) => { location.hash = h; }, `/c/${GEN}`);
+      await page.getByTestId("composer").waitFor({ timeout: 20_000 });
+      await page.mouse.move(2, 2);
+      await page.waitForTimeout(1200);
+      for (const c of second) await runCase(page, tag, width, c);
+    }
   } finally {
     await context.close();
     await browser.close();
@@ -497,6 +626,7 @@ async function main() {
   try {
     for (const scheme of SCHEMES) {
       await runViewport(preview.origin, scheme, 390, 844);
+      await runViewport(preview.origin, scheme, 720, 860);
       await runViewport(preview.origin, scheme, 1440, 900);
     }
   } finally {

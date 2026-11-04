@@ -9,7 +9,9 @@
 // mounts it. The bar straddles the row's top edge, or the bottom edge when
 // that would clip the scroller (#1743 H-4), and must not intersect this
 // row's body text (B11 R2 Blocker). It also flips when the top edge would cover
-// the previous neighbour's text and the bottom edge would not (#5179).
+// the previous neighbour's text and the bottom edge would not (#5179), and when
+// neither edge is free it slides down into the first text-free window of the row (#5179).
+// A line end that grazes the toolbar's left edge by 1-2px is dodged by nudging the bar right (#5179).
 // =============================================================================
 
 /** Curated seed. Must stay inside `PICKER_EMOJI`. Frequency then promotes. */
@@ -167,6 +169,122 @@ export function shouldFlipToolbarBelow(input: {
   if (input.nextText().some((text) => rectsIntersect(below, text))) return false;
   if (scroller && scroller.height > 0 && below.bottom > scroller.bottom) return false;
   return true;
+}
+
+// =============================================================================
+// 위·아래 경계가 모두 글자에 막힐 때: 행 안쪽으로 밀어 앉히기 (#5179, 남은 경우 C·F)
+//
+// 위 자리는 앞 이웃 글자를 덮고 아래 자리도 뒤 이웃 글자를 덮거나 스크롤러 밖으로 잘려 뒤집지 못하는 자리가 있다(앞·뒤 이웃이 모두 긴 글일 때,
+// 대화의 마지막 행). 위 자리에서 아래 자리까지 사이에는 막대가 **행에 붙은 채** 설 수 있는 자리가 연속으로 있고, 그 안에서 글자가 없는 창 — 앞 글줄 바로 밑 ~
+// 뒤 글줄·스크롤러 바닥 사이, 막대 키 이상 — 을 찾으면 막대를 그 창으로 아래로 민다. 포인터 행 글이 막대 밑까지 안 오는 짧은 행은 행 높이만큼이 비고, 머리 행은
+// 머리 줄(이름·시각)의 오른쪽이 빈다. 위 자리에 가장 가까운(= 가장 위의) 창에 앉아 막대가 평소 자리에서 가장 덜 떨어진다. 창이 없으면 위 그대로다(남은 경우:
+// 포인터 행·앞·뒤 행의 글이 모두 막대 밑까지 오는 이어짐 행 — 글줄이 36px 간격이라 42px 창이 없다).
+// =============================================================================
+
+/** 막대를 아래로 민 px 를 막대의 CSS 변수로 건넨다(CSSOM, `tooltipFit.ts` 와 같은 방식). `tokens.css` 의 `hover-toolbar-straddle` 이 읽는다. */
+export const HOVER_TOOLBAR_SLIDE_VAR = "--hover-toolbar-slide";
+
+/**
+ * 막대를 오른쪽으로 비껴 세운 px 의 CSS 변수. 두 straddle 유틸리티가 모두 읽는다.
+ *
+ * 머리 줄(이름 + 시각)이나 글줄의 오른끝이 막대 왼쪽 끝을 **1~2px** 넘는 경계가 있다: 720 창(글머리에서 막대 왼쪽 끝까지 77px)에서 3글자 이름 + 시각이 정확히 그렇다
+ * (78px). 그 1px 때문에 위·아래·행 안쪽 어느 자리도 「글자 없음」이 못 되어 앞 행 끝줄 전체를 덮던 장면이 있었다. 막대는 글 오른끝(= 행 안쪽 여백 12 안쪽)에 맞춰 서 있어
+ * 오른쪽으로 1~2px 비키면 새로 닿는 글이 없고(글은 막대 오른끝을 넘지 않는다) 닿던 글줄만 비켜난다. 막대는 여전히 행 오른쪽 안쪽 여백(12) 안에 머문다.
+ */
+export const HOVER_TOOLBAR_NUDGE_VAR = "--hover-toolbar-nudge";
+
+/** 비껴 설 수 있는 거리들(px). 작은 것부터 시도한다. 글 상자는 소수 px 로 나오므로 「1px 침범」은 1.25px 일 수 있다(720 창의 3글자 이름 머리 줄: 시각 오른끝 466.25 · 막대 왼끝 465 → 2px 비껴야 비킨다). 최대 2px 는 `capture-screens.mjs`가 지키는 오른쪽 거터 12 ± 2 안이다. 이보다 깊이 닿는 글은 비껴서 풀 일이 아니다. */
+const NUDGE_STEPS = [1, 2] as const;
+
+/** 창이 넉넉하면 앞 글줄과 막대 사이에 두는 틈(px). 창이 좁으면 위·아래 틈을 같게 나눈다. */
+const SLIDE_GAP = 2;
+
+/**
+ * 위 자리(`bar`)에서 아래로 몇 px 밀면 막대가 어떤 글자도 덮지 않고 행에 붙어 앉는가. 없으면 `null`, 밀 필요가 없으면 0.
+ * `text` 는 막대 주변 글줄 조각 전부(앞 이웃·포인터 행·뒤 이웃)이고, 막대 가로 범위에 걸치는 조각만 막는다. 막대는 행에 붙은 채여야 하므로 위 자리와 아래 자리
+ * 사이만 보고, 스크롤러 바닥 밖으로 잘리는 자리는 뺀다.
+ */
+export function slideToolbarDown(input: {
+  bar: ToolbarRect;
+  row: Pick<DOMRect, "top" | "bottom">;
+  scroller: Pick<DOMRect, "bottom" | "height"> | null;
+  text: readonly ToolbarRect[];
+}): number | null {
+  const { bar, row, scroller } = input;
+  const height = bar.bottom - bar.top;
+  let lowest = belowStraddleRect(bar, row).top;
+  if (scroller && scroller.height > 0) lowest = Math.min(lowest, scroller.bottom - height);
+  if (lowest <= bar.top) return null;
+  // 막대 윗단이 (글 윗단 − 키, 글 밑단) 안에 들면 그 글을 덮는다. 경계에 닿는 것은 덮는 것이 아니다(`rectsIntersect` 와 같다).
+  const walls = input.text
+    .filter((text) => text.left < bar.right && text.right > bar.left && text.bottom > text.top)
+    .map((text) => [text.top - height, text.bottom] as const)
+    .sort((a, b) => a[0] - b[0]);
+  let top = bar.top;
+  let limit = lowest;
+  let moved = false;
+  for (const [from, to] of walls) {
+    if (top <= from) {
+      limit = Math.min(limit, from);
+      break; // 이 벽 위쪽의 빈 창에 서 있다
+    }
+    if (top < to) {
+      top = to; // 벽 안에 들었다: 그 글줄 바로 밑으로 내려온다
+      moved = true;
+    }
+  }
+  if (top > limit) return null;
+  if (!moved) return 0; // 위 자리가 이미 비어 있다
+  return top + Math.min(SLIDE_GAP, (limit - top) / 2) - bar.top;
+}
+
+function once<T>(read: () => readonly T[]): () => readonly T[] {
+  let cached: readonly T[] | undefined;
+  return () => (cached ??= read());
+}
+
+function shiftedRight(bar: ToolbarRect, by: number): ToolbarRect {
+  return { left: bar.left + by, right: bar.right + by, top: bar.top, bottom: bar.bottom };
+}
+
+/**
+ * 마운트 때 한 번 재서 막대의 자리를 정한다. `below` = 행 아래 경계로 뒤집기(`shouldFlipToolbarBelow`), `slide` = 위 자리에서 아래로 민 px(0 = 안 밂),
+ * `nudge` = 오른쪽으로 비껴 선 px(0 = 안 비낌).
+ * ① 위 자리가 앞 이웃 글자를 안 덮으면 위 그대로 ② 덮고 아래 자리가 비면 뒤집는다(1차 수리) ③ 위·아래 모두 막히면 행 안쪽의 빈 창으로 민다
+ * ④ 창이 없으면 위 그대로다. 글줄 끝이 막대 왼쪽 끝에 1~2px 닿는 경계는 막대를 오른쪽으로 비껴(1px, 2px) 먼저 ①②를, 그다음 ③을 다시 해 본다 — 움직임이
+ * 작은 쪽(비끼기 < 밀기)이 먼저다. 이웃 글자는 **필요할 때만** 재도록 함수로 받는다.
+ */
+export function placeToolbar(input: {
+  bar: ToolbarRect;
+  row: Pick<DOMRect, "top" | "bottom"> | null;
+  scroller: Pick<DOMRect, "top" | "bottom" | "height"> | null;
+  prevText: () => readonly ToolbarRect[];
+  selfText: () => readonly ToolbarRect[];
+  nextText: () => readonly ToolbarRect[];
+}): { below: boolean; slide: number; nudge: number } {
+  const prevText = once(input.prevText);
+  const nextText = once(input.nextText);
+  const { row, scroller } = input;
+  const offsets = [0, ...NUDGE_STEPS];
+  // 뒤집기·위 그대로: 위 자리가 앞 이웃 글자를 덮지 않거나, 덮어도 뒤집을 수 있을 때.
+  for (const nudge of offsets) {
+    const bar = shiftedRight(input.bar, nudge);
+    if (shouldFlipToolbarBelow({ ...input, bar, prevText, nextText })) return { below: true, slide: 0, nudge };
+    if (!row || !prevText().some((text) => rectsIntersect(bar, text))) return { below: false, slide: 0, nudge };
+  }
+  // 위·아래가 모두 막혔다: 행 안쪽으로 민다.
+  if (row) {
+    for (const nudge of offsets) {
+      const slide = slideToolbarDown({
+        bar: shiftedRight(input.bar, nudge),
+        row,
+        scroller,
+        text: [...prevText(), ...input.selfText(), ...nextText()],
+      });
+      if (slide !== null) return { below: false, slide, nudge };
+    }
+  }
+  return { below: false, slide: 0, nudge: 0 };
 }
 
 /** 같은 목록(`root`) 안에서 문서 순서로 센 앞·뒤 한 칸(행·시스템 줄). */
