@@ -33,6 +33,9 @@ import {
   type HostedDmApprovalRow,
   type HostedDmApprovals,
 } from "@momo/core/features/hostedAgents/dmApproval";
+import { LoadFailureNote } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { BlockedReason } from "@/features/common/BlockedReason";
 
 // =============================================================================
@@ -182,11 +185,11 @@ export function DmApprovalSection({
       )}
 
       {list.isError && (
-        <InlineBanner
+        <LoadFailureNote
+          titleKey={CONNECTION_KEYS.loadDmApprovalTitle}
+          cause={loadCauseOf(list.error)}
+          onRetry={() => void list.refetch()}
           separator={false}
-          message="1:1 대화 목록을 불러오지 못했어요. 연결을 확인한 뒤 다시 시도해 주세요."
-          actionLabel="다시 시도"
-          onAction={() => void list.refetch()}
           testId="hosted-dm-approval-error"
         />
       )}

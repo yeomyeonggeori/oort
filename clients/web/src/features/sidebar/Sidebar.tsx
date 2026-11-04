@@ -51,6 +51,9 @@ import {
   useOpenCreateChannel,
 } from "@/features/channels/useCreateChannel";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureBox, LoadFailureLine } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { UpdateButton } from "@/features/updates/UpdateButton";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
@@ -1008,7 +1011,7 @@ export function Sidebar({
                     이 문장이 없던 동안 화면은 「섹션이 아직 없다」와 똑같이 생겼고,
                     그 위의 편집 하나가 서버의 배치를 통째로 지웠다. 편집 문은 위에서
                     이미 닫혔으므로 여기 남는 일은 **무슨 일인지 말하고 되돌아갈 길을
-                    주는 것**이고, 「채널을 불러오지 못했습니다」와 같은 배너·같은
+                    주는 것**이고, 「채널 목록을 불러오지 못했어요」 줄·상자(#5242)와 같은 배너·같은
                     액션 문법이다.
                   · 저장 실패: 되돌린 뒤라 화면은 이미 서버가 준 배치이고, 이 문장이
                     없으면 방금 만든 섹션이 조용히 사라진 것으로만 보인다.
@@ -1184,14 +1187,24 @@ export function Sidebar({
                 }
               >
                 <Skeleton ready={!channelsQuery.isLoading} rows={4}>
-                  {channelsQuery.error && (
-                    <InlineBanner
-                      message="채널을 불러오지 못했습니다."
-                      actionLabel="다시 시도"
-                      onAction={() => void channelsQuery.refetch()}
-                      testId="channels-error"
-                    />
-                  )}
+                  {/* 읽기 실패(#5242, #5221 후속): 받아 둔 채널이 하나도 없으면 원인
+                      상자, 있으면 목록은 그대로 두고 위에 한 줄만. 읽을 것이 있는데
+                      240px 서랍의 위쪽을 상자가 밀어내면 정보를 버리는 일이다. */}
+                  {channelsQuery.error &&
+                    (channels.length + dms.length === 0 ? (
+                      <LoadFailureBox
+                        titleKey={CONNECTION_KEYS.loadChannelListTitle}
+                        cause={loadCauseOf(channelsQuery.error)}
+                        onRetry={() => void channelsQuery.refetch()}
+                        testId="channels-error"
+                      />
+                    ) : (
+                      <LoadFailureLine
+                        titleKey={CONNECTION_KEYS.loadChannelListTitle}
+                        onRetry={() => void channelsQuery.refetch()}
+                        testId="channels-error-line"
+                      />
+                    ))}
                   {/* 빈 상태는 한 줄 + 액션 하나다 (SKILL §5). R-1에서는 그 액션을
                       본문 하나로 몰고 여기에는 "+ 또는 ⌘K로 만듭니다."라고만 썼는데,
                       좁은 창이나 스크롤된 상태에서는 그 본문 버튼이 화면 밖일 수

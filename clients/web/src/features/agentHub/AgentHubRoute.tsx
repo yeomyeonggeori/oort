@@ -28,6 +28,9 @@ import {
   DialogTitle,
 } from "@/design/ui/dialog";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
+import { LoadFailureBox } from "@/features/common/LoadFailureBox";
+import { loadCauseOf } from "@/features/common/loadFailure";
+import { CONNECTION_KEYS } from "@momo/core/features/connection/copyKeys";
 import { useOffline } from "@/features/common/useOffline";
 import {
   useAgentWorkingSignals,
@@ -457,10 +460,10 @@ export function AgentHubRoute() {
               className="p-4"
             />
           ) : directoryQuery.isError && agents.length === 0 ? (
-            <InlineBanner
-              message="에이전트 명부를 불러오지 못했어요."
-              actionLabel="다시 시도"
-              onAction={() => void directoryQuery.refetch()}
+            <LoadFailureBox
+              titleKey={CONNECTION_KEYS.loadAgentRosterTitle}
+              cause={loadCauseOf(directoryQuery.error)}
+              onRetry={() => void directoryQuery.refetch()}
               testId="agent-hub-roster-error"
             />
           ) : agents.length === 0 ? (
@@ -771,10 +774,10 @@ function AgentProfileSection({
     return (
       <div className="flex flex-col gap-6 p-4">
         {identityCard}
-        <InlineBanner
-          message="에이전트 프로필을 불러오지 못했어요."
-          actionLabel="다시 시도"
-          onAction={handle.refetch}
+        <LoadFailureBox
+          titleKey={CONNECTION_KEYS.loadAgentProfileTitle}
+          cause={loadCauseOf(handle.error)}
+          onRetry={handle.refetch}
           testId="agent-hub-profile-error"
         />
       </div>
@@ -1230,10 +1233,10 @@ function AgentHistorySection({
           className="p-4"
         />
       ) : query.isError ? (
-        <InlineBanner
-          message="에이전트 작업 이력을 불러오지 못했어요."
-          actionLabel="다시 시도"
-          onAction={() => void query.refetch()}
+        <LoadFailureBox
+          titleKey={CONNECTION_KEYS.loadAgentHistoryTitle}
+          cause={loadCauseOf(query.error)}
+          onRetry={() => void query.refetch()}
           testId="agent-history-error"
         />
       ) : runs.length === 0 ? (
@@ -1377,10 +1380,10 @@ function AgentRunDetailDialog({
             className="p-4"
           />
         ) : query.isError ? (
-          <InlineBanner
-            message="작업 상세를 불러오지 못했어요."
-            actionLabel="다시 시도"
-            onAction={() => void query.refetch()}
+          <LoadFailureBox
+            titleKey={CONNECTION_KEYS.loadAgentRunTitle}
+            cause={loadCauseOf(query.error)}
+            onRetry={() => void query.refetch()}
             testId="agent-run-detail-error"
           />
         ) : (
